@@ -619,6 +619,25 @@ typedef struct bTransformCacheConstraint {
   char reader_object_path[1024];
 } bTransformCacheConstraint;
 
+/* Attribute Constraint */
+typedef struct bAttributeConstraint {
+  struct Object *target;
+  int sampleIndex;
+  char _pad0[4];
+  char offsetMatrix;
+  char bstartMat;
+  char utargetMat;
+  char mixLoc;
+  char mixRot;
+  char mixScl;
+  char mixMode;
+  char _pad1;
+  short dataType;
+  short domainType;
+  char _pad2[4];
+  char attributeName[256];
+} bAttributeConstraint;
+
 /* ------------------------------------------ */
 
 /* bConstraint->type
@@ -664,6 +683,7 @@ typedef enum eBConstraint_Types {
   CONSTRAINT_TYPE_OBJECTSOLVER = 28,
   CONSTRAINT_TYPE_TRANSFORM_CACHE = 29,
   CONSTRAINT_TYPE_ARMATURE = 30,
+  CONSTRAINT_TYPE_ATTRIBUTE = 31,
 
   /* This should be the last entry in this list. */
   NUM_CONSTRAINT_TYPES,
@@ -1179,3 +1199,35 @@ typedef enum eStretchTo_Flags {
   STRETCHTOCON_USE_BULGE_MIN = (1 << 0),
   STRETCHTOCON_USE_BULGE_MAX = (1 << 1),
 } eStretchTo_Flags;
+
+/** Atrtibute Domain Mode */
+typedef enum eAttribute_DomainMode {
+  /* Vert domain */
+  CON_ATTRIBUTE_DOMAIN_VERT = 0,
+  /* Edge domain */
+  CON_ATTRIBUTE_DOMAIN_EDGE = 1,
+  /* Face domain */
+  CON_ATTRIBUTE_DOMAIN_FACE = 2,
+} eAttribute_DomainMode;
+/* Atrtibute Data Type*/
+typedef enum eAttribute_Data_Type {
+  /* Vector */
+  CON_ATTRIBUTE_VECTOR = 0,
+  /*Quaternion*/
+  CON_ATTRIBUTE_QUATERNION = 1,
+  /*Matrix*/
+  CON_ATTRIBUTE_4X4MATRIX = 2,
+} eAttribute_Data_Type;
+/** Atrtibute Component Mix Mode */
+typedef enum eAttribute_MixMode {
+  /* Replace rotation channel values. */
+  CON_ATTRIBUTE_MIX_REPLACE = 0,
+  /* Multiply the copied transformation on the left, handling loc/rot/scale separately. */
+  CON_ATTRIBUTE_MIX_BEFORE_SPLIT = 1,
+  /* Multiply the copied transformation on the right, handling loc/rot/scale separately. */
+  CON_ATTRIBUTE_MIX_AFTER_SPLIT = 2,
+  /* Multiply the copied transformation on the left, using simple matrix multiplication. */
+  CON_ATTRIBUTE_MIX_BEFORE_FULL = 3,
+  /* Multiply the copied transformation on the right, using simple matrix multiplication. */
+  CON_ATTRIBUTE_MIX_AFTER_FULL = 4,
+} eAttribute_MixMode;

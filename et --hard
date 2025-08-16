@@ -1,0 +1,429 @@
+[33mcommit 574c99556ed4373ee67bf2c2b409813b3b6175a6[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mnpr-prototype[m[33m, [m[1;31morigin/npr-prototype[m[33m)[m
+Author: bbyi <2181292830@qq.com>
+Date:   Sat Aug 16 16:50:21 2025 +0800
+
+    更改启动图
+
+[33mcommit 5a0e57d342deb476f08c949c8d9afcde6c63857f[m[33m ([m[1;31mupstream/npr-prototype[m[33m)[m
+Merge: 49798c98484 d8845b3bb57
+Author: Miguel Pozo <pragma37@gmail.com>
+Date:   Wed Apr 16 15:32:21 2025 +0200
+
+    Merge branch 'blender-v4.4-release' into npr-prototype
+
+[33mcommit d8845b3bb57226f2b6864e2dc6daf94add63ecee[m[33m ([m[1;33mtag: [m[1;33mv4.4.1[m[33m)[m
+Author: Thomas Dinges <thomas@blender.org>
+Date:   Mon Apr 14 16:20:15 2025 +0200
+
+    Release: Update to 4.4.1
+
+[33mcommit 6d4a40072fa96f64e47de20d42fa87574a24b843[m
+Author: Thomas Dinges <thomas@blender.org>
+Date:   Mon Apr 14 16:18:44 2025 +0200
+
+    Release: Update installer graphic for 4.4
+    
+    Also switch to .png format for better compression.
+    
+    Pull Request: https://projects.blender.org/blender/blender/pulls/137471
+
+[33mcommit 40587d278149ca91c07f37ff5fe871eb46f5e102[m
+Author: Alaska <Alaskayou01@gmail.com>
+Date:   Mon Apr 14 12:59:12 2025 +0200
+
+    Fix #137420: RDNA1 renders the Principled BSDF incorrectly in some scenes
+    
+    This commits fixes a issue where RDNA1 GPUs with the HIP backend in
+    Cycles would render some scenes incorrectly.
+    
+    This is done by setting the optimization level for RDNA1 GPUs to `O1`
+    for RDNA1 GPUs when compiling HIP kernels on Windows.
+    
+    Pull Request: https://projects.blender.org/blender/blender/pulls/137421
+
+[33mcommit b54b6792301e7ee5a86fec8d2daed3286a42ccb8[m
+Author: Christoph Neuhauser <christoph.neuhauser@intel.com>
+Date:   Wed Apr 2 15:51:24 2025 +0200
+
+    Fix #132196: UI: Camera gizmo cannot be shifted on Intel GPUs
+    
+    GPU_DEPTH_NONE leads to issues with Intel GPU drivers on Windows
+    where camera gizmos cannot be shifted. glGetQueryObjectuiv for
+    GL_SAMPLES_PASSED seems to return zero in all cases.
+    
+    This might be due to undefined behavior of OpenGL when the depth
+    test is disabled and rendering to a depth render target-only
+    framebuffer. Using GPU_DEPTH_ALWAYS fixes the issue.
+    
+    Pull Request: https://projects.blender.org/blender/blender/pulls/136607
+
+[33mcommit f5c0c81b7ee6f127f44543179f17fd475f115842[m
+Author: Pratik Borhade <pratikborhade302@gmail.com>
+Date:   Mon Apr 14 10:20:49 2025 +0200
+
+    Fix #137385: Grease Pencil: Thickness modifier doesn't work with vgroup filter
+    
+    Use `get_influence_vertex_weights` for thickness modifier. This returns
+    array of values 0 when group is empty (see `lookup_or_default`).
+    Function also controls the invert state for vertex group.
+    
+    Pull Request: https://projects.blender.org/blender/blender/pulls/137455
+
+[33mcommit eb03c5a2f1599590ec67846279193124f8b158c3[m
+Author: Campbell Barton <campbell@blender.org>
+Date:   Mon Apr 14 11:34:42 2025 +0200
+
+    Fix #137314: Excluded directories ignored when opening from the splash
+    
+    Regression in [0] which incorrectly swapped the check for the
+    `use_scripts` property being set with the value it was set to.
+    
+    Resolve this error as well as the "Recover Last" operator
+    which never worked.
+    
+    [0]: 8c688a052c79e006b586598d2ac55a550cea3550
+    
+    Pack ported from: dbf6902a19b6979f8be7b314fec33db17801ed73
+    
+    Pull Request: https://projects.blender.org/blender/blender/pulls/137464
+
+[33mcommit 8cacf61568910c77fa949579015aa061768dbb11[m
+Author: Campbell Barton <campbell@blender.org>
+Date:   Mon Apr 14 11:34:27 2025 +0200
+
+    Fix: integer overflows calculating the number of pixels
+    
+    Note that moving to the templated versions of array allocation functions
+    in [0] caused integer overflow regressions because multiplying by the
+    `sizeof(type)` caused the following values to be cast to a size_t.
+    
+    [0]: e85ebb24fe012f839a9ec24f4831f7d6e459f180
+    
+    Back ported from: 3b2c0b6cd58eb36261436103b7275d965bb2d89d
+    
+    Pull Request: https://projects.blender.org/blender/blender/pulls/137457
+
+[33mcommit fe8e7618f4962b292c7e5680b331681bcebb3cbc[m
+Author: Campbell Barton <campbell@blender.org>
+Date:   Sun Apr 13 22:08:14 2025 +1000
+
+    Fix: crash drawing poly-line gesture
+    
+    Regression in [0], buffer overflow reading a short array as floats.
+    
+    Support short array and fix glitch where the mouse cursor wasn't
+    included in the poly-line.
+    
+    [0]: 9d4d1aea98e1b30278a337f440f9962afe35bf2a
+
+[33mcommit 23c7ca6e390beb82fc86da8be5f217bc21ff2126[m
+Author: Campbell Barton <campbell@blender.org>
+Date:   Fri Apr 11 22:29:17 2025 +1000
+
+    Fix: failure to save an existing Cineon file
+    
+    Saving a Cineon fail a second time would fail because it would
+    default to 8 bits per sample, where only 10 bits is supported.
+
+[33mcommit 44a91fd52893e37fe0240222eb2c8bcbf3580d6d[m
+Author: Campbell Barton <campbell@blender.org>
+Date:   Fri Apr 11 12:29:14 2025 +0000
+
+    Fix: crash saving large Cineon images
+    
+    When the offset exceeded INT_MAX, the offset would wrap to a
+    negative number then attempt to read/write outside the buffer bounds.
+
+[33mcommit 04db7df4ef5477aadc5a8ad1aa6bac7aaaed53a6[m
+Author: Nicola <nicdessi@gmail.com>
+Date:   Fri Apr 11 21:08:50 2025 +0200
+
+    Fix: Plane brush symmetry passes do not use the stabilized normal
+    
+    The issue is the following:
+    - The stabilized normal for the main pass is calculated in
+    `calc_brush_plane`
+    - The normal is (wrongly) recalculated in `update_sculpt_normal`. This
+    is a common problem that other brushes have. The specific issue with the
+    Plane brush is that the recomputed normal is not stabilized.
+    - For symmetry passes, this non-stabilized normal is then assigned to
+    the brush in `calc_brush_plane`
+    
+    This PR fixes the issue by explicitly returning false in
+    `sculpt_brush_needs_normal` when the Plane brush is used. A more proper
+    refactor would be needed, but this can easily be ported to 4.4.
+    
+    Pull Request: https://projects.blender.org/blender/blender/pulls/137271
+
+[33mcommit a131bdf0e4e6f418ecc21698f63e66807d2a7c9b[m
+Author: Falk David <falk@blender.org>
+Date:   Fri Apr 11 10:53:58 2025 +0200
+
+    Fix #136243: Grease Pencil: Automerge doesn't propagate vertex groups
+    
+    The `vertex_group_names` of the `CurvesGeometry` was not being
+    propagated leading to vertex group data getting lost.
+    
+    Pull Request: https://projects.blender.org/blender/blender/pulls/137296
+
+[33mcommit 358d4b8e02096f83851eb841353df4205992ff05[m
+Author: Campbell Barton <campbell@blender.org>
+Date:   Mon Apr 14 10:12:00 2025 +0200
+
+    Fix: integer overflows calculating the number of pixels in imbuf
+    
+    Use size_t for imbuf size calculation to prevent integer overflow.
+    
+    Back ported from: 6d6c695619b5199d2306eede273b9c50ebd10a28
+    
+    Pull Request: https://projects.blender.org/blender/blender/pulls/137443
+
+[33mcommit ac5b00a453b1b07477400f718b80c2e938d299e7[m
+Author: Campbell Barton <campbell@blender.org>
+Date:   Mon Apr 14 10:11:33 2025 +0200
+
+    Fix: crash loading & saving large Iris images
+    
+    Integer overflow in IMB_convert_rgba_to_abgr assigned a negative value
+    to size_t resulting in a large value which wrote past the buffer bounds.
+    
+    Back ported from: d256b7f6882f1d3d6162392c81e2b3c0e62cd1a9
+    
+    Pull Request: https://projects.blender.org/blender/blender/pulls/137447
+
+[33mcommit 7ce866e3c09b6be269f8aec371b72c33c5746673[m
+Author: Campbell Barton <campbell@blender.org>
+Date:   Mon Apr 14 10:10:56 2025 +0200
+
+    Fix: crash saving large WebP images
+    
+    WebP images can be at most 16383x16383,
+    however saving sizes which overflowed an integer would crash.
+    
+    - Early exit with an error when the image is too large.
+    - Replace integer offsets with size_t.
+    
+    Back ported from: 37148d67116471d75fb335e0a4a0914b74b1f5ac
+    
+    Pull Request: https://projects.blender.org/blender/blender/pulls/137442
+
+[33mcommit 66e8f1af5771efa2002bc0f4322a172e5c269730[m
+Author: Thomas Dinges <thomas@blender.org>
+Date:   Fri Apr 11 09:21:30 2025 +0200
+
+    Cleanup: Make format
+
+[33mcommit 684417e748ba04426ba7c77547d10f8b4b02a620[m
+Author: Brecht Van Lommel <brecht@blender.org>
+Date:   Thu Apr 10 13:06:27 2025 +0200
+
+    Fix #137197: Grease pencil duplicating materials on custom brushes
+    
+    Always compare absolute file paths.
+    
+    Pull Request: https://projects.blender.org/blender/blender/pulls/137229
+
+[33mcommit 55ad62d9ac71977c9b22441955e8695ece066f3e[m
+Author: Falk David <falk@blender.org>
+Date:   Thu Apr 10 12:21:52 2025 +0200
+
+    Fix #137227: Grease Pencil: Crash when getting multi frame falloff
+    
+    One of the calls to get the frame falloff was missing a
+    check for `use_multi_frame_falloff`.
+    
+    This puts the conditions for when the multi frame falloff
+    needs to be calculated in the `get_frame_falloff` function.
+    That fixes the crash and makes a code a bit easier to read
+    (without ternary operator).
+    
+    Pull Request: https://projects.blender.org/blender/blender/pulls/137259
+
+[33mcommit 6a96191c1abb9795050495c25fced5b36e30cbe1[m
+Author: Julian Eisel <julian@blender.org>
+Date:   Thu Mar 20 13:02:24 2025 +0100
+
+    Fix #113215: Missed asset storage update when node tool is removed
+    
+    Make sure refreshing an asset library properly clears all storage for
+    this library, both in the global asset list storage and the storage of
+    each asset browser.
+    
+    The `ed::asset::list::clear()` function handled clearing of asset
+    browsers too since recently, however the refresh operator wouldn't use
+    that when clearing directly from an asset browser. Instead, always clear
+    all asset library storage/chaches.
+
+[33mcommit d6ac8100802aa77b69d9b08ec8459a43df0ac545[m
+Author: Campbell Barton <campbell@blender.org>
+Date:   Fri Apr 11 08:33:54 2025 +0200
+
+    Fix: error reading RLE compressed Iris images (4.4x backport)
+    
+    Regression in [0] which used a 4x size bounds check
+    to prevent a buffer read overflow reading the RLE table.
+    
+    [0]: 829916f4e57a2d1580ff3b625f6bb909b9144a20
+    
+    Back ported from: 2cbb07d7adc2c4bcdabe5b3ecf651baff2d52ceb
+    
+    Pull Request: https://projects.blender.org/blender/blender/pulls/137322
+
+[33mcommit 12211693b62eec7e93bb5a830cec9cc3531ac004[m
+Author: Campbell Barton <campbell@blender.org>
+Date:   Fri Apr 11 08:33:39 2025 +0200
+
+    Fix: error writing & loading corrupt IRIS files (4.4x backport)
+    
+    - Files cannot exceed 65535 width or height,
+      attempting to write 65536 would write a zero sized image.
+    - Ensure that zero sized imbufs are never loaded.
+    
+    Back-port to 4.4x:
+    
+    - 24f8819c78de0d29479beb2e23c8d73ea39ef602
+    - 7a23d7aba403751fdd7e8faad6f1ceeb0a6f8b38
+    
+    Pull Request: https://projects.blender.org/blender/blender/pulls/137318
+
+[33mcommit a2891aa04f836b8a699c5afad8d81f9a52a47a5a[m
+Author: Julian Eisel <julianeisel@noreply.localhost>
+Date:   Thu Apr 10 11:31:46 2025 +0200
+
+    Fix #136254: Assets not available in search after saving file
+    
+    We'd rather aggressively clear asset lists on file save since 9a9e2e19a9 (and
+    some related commits), seems like we can be a bit more precise here. Only
+    reload assets from the current file when saving the file, which is quite fast
+    to do and doesn't happen asynchronously (so UIs showing assets will only show
+    up once the assets are ready).
+    
+    Actually we might not have to clear on file save at all, but needs more
+    testing.
+    
+    Also fixes disappearing of asset previews on file save.
+    
+    Pull Request: https://projects.blender.org/blender/blender/pulls/137117
+
+[33mcommit 27a0868c55d5484adadb362197e217068f737904[m
+Author: Jacques Lucke <jacques@blender.org>
+Date:   Tue Mar 25 12:14:36 2025 +0100
+
+    Fix #136175: material set from Geometry Nodes not showing in edit mode
+    
+    The special case for `edit_mesh` is still necessary to avoid introducing
+    the issue from #133698.
+
+[33mcommit 898c84048059adae8cc3c177378dff91a012c553[m
+Author: Campbell Barton <campbell@blender.org>
+Date:   Thu Apr 10 11:41:49 2025 +1000
+
+    Fix: new render slots could contain truncated UTF8 byte sequences
+    
+    Creating render slots from Python could truncate multi-byte sequences
+    which would then raise an exception when accessed.
+
+[33mcommit f839847d3b4849425c3b06a52aae4361d384fea4[m
+Author: Campbell Barton <campbell@blender.org>
+Date:   Wed Apr 9 11:21:55 2025 +0000
+
+    Fix #136563: Crash clicking on a light after it has been deleted
+    
+    Failure to refresh the highlighted gizmo meant that clicking
+    on a highlighted gizmo would attempt to activate it even though
+    it's poll function failed - which crashed in this case.
+    
+    Resolve the common-case by ensuring a call to refresh the gizmo-map
+    causes the event system to re-evaluate the highlighted gizmo,
+    even if the cursor doesn't move.
+    
+    Since it's still possible the call to "refresh" the gizmo is missed,
+    gizmo_tweak_invoke now checks the gizmo-groups poll succeeds with an
+    assert and early return if it doesn't. This would have prevented the
+    crash although the highlighted-gizmo still won't be reset - causing
+    the cursor to display as if it's over a gizmo until it's moved.
+
+[33mcommit 8c8390e95d44833e870ac93584dd9783e62be147[m
+Author: Falk David <falk@blender.org>
+Date:   Wed Apr 9 13:38:21 2025 +0200
+
+    Fix #137152: Grease Pencil: Layer flag is overridden during conversion
+    
+    Broken by 4c9c9af2d6300de91e1af5d4259a27ef02f7dcd0.
+    
+    When Grease Pencil objects get converted (<= 4.2 to >= 4.3)
+    the code copies the legacy color over to the new one.
+    The issue is that the new color is a `float[3]` not a
+    `float[4]`! Thus the `flag` after the `color` was getting
+    overridden.
+    
+    This fixes the issue by replacing the `copy_v4_v4` with a
+    `copy_v3_v3`.
+    
+    Pull Request: https://projects.blender.org/blender/blender/pulls/137161
+
+[33mcommit 71e9e32e5f81977e9813589512a59aa4aedf0c0e[m
+Author: Jacques Lucke <jacques@blender.org>
+Date:   Tue Apr 8 16:11:52 2025 +0200
+
+    Fix #137114: crash due to bad mesh ownership handling
+    
+    When releasing a mesh from a `GeometrySet` one has to take manual control over
+    owner-management. In some cases, the geometry set was not the owner of the mesh,
+    but was just referencing it. This is generally fine in a limited set of
+    circumstances and can avoid copies. However, when taking ownership of the mesh
+    in the geometry set, one has to be sure that the geometry set actually has
+    ownership.
+    
+    This is similar to what is done in e.g. `modifier_modify_mesh_and_geometry_set`.
+    
+    Pull Request: https://projects.blender.org/blender/blender/pulls/137150
+
+[33mcommit ea6d65db5a6467a6b0f0a10395881ce6a195439e[m
+Author: Sybren A. Stüvel <sybren@blender.org>
+Date:   Tue Apr 8 11:10:46 2025 +0200
+
+    Fix #137041: Bugs with Slotted Actions and the Available Keying Set
+    
+    Make the 'Available' keying set look at the F-Curves for the assigned
+    slot, instead of the backward-compatible API (which only sees the F-Curves
+    for the first slot).
+    
+    Pull Request: https://projects.blender.org/blender/blender/pulls/137131
+
+[33mcommit 8debf5990e8aa008484b0a09aeb457da24504b90[m
+Author: Julian Eisel <julianeisel@noreply.localhost>
+Date:   Mon Apr 7 19:59:27 2025 +0200
+
+    Fix #136645: Regression: Preview generation fails for multiple IDs
+    
+    Fixes: #136842, #136645
+    
+    Caused by 76d6d169ba
+    When multiple objects are selected to mark as assets, preview generation
+    job of previous ID in the for loop is cleared by `ED_preview_kill_jobs`
+    inside `generate_preview`. To fix this, check if `id->preview` exists then
+    clear the preview job if exists inside the new function
+    `ED_preview_kill_jobs_for_id`.
+    Solution proposed by @JulianEisel. I came up with idea to use `wm_job_find`
+    
+    Pull Request: https://projects.blender.org/blender/blender/pulls/136918
+    
+    Co-authored-by: Pratik Borhade <pratikborhade302@gmail.com>
+    Pull Request: https://projects.blender.org/blender/blender/pulls/137110
+
+[33mcommit 9826a7254e25c211d9aee162532aac3dbd20218f[m
+Author: Falk David <falk@blender.org>
+Date:   Mon Apr 7 18:22:41 2025 +0200
+
+    Fix #137043: Grease Pencil multi frame falloff not working correctly
+    
+    The multi-frame falloff calculation had multiple issues.
+    It was also not the same as in 4.2 LTS.
+    
+    This fixes the issues and should result in the exact same
+    falloffs as it did in 4.2 LTS.
+    
+    Also resolves #137055.
+    
+    Pull Request: https://projects.blender.org/blender/blender/pulls/137091

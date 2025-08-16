@@ -5574,6 +5574,168 @@ static bConstraintTypeInfo CTI_TRANSFORM_CACHE = {
     /*get_target_matrix*/ nullptr,
     /*evaluate_constraint*/ transformcache_evaluate,
 };
+/* ---------- Attribute Transform Constraint ----------- */
+static void attribute_id_looper(bConstraint *con, ConstraintIDFunc func, void *userdata)
+{
+  bAttributeConstraint *data = static_cast<bAttributeConstraint *>(con->data);
+  /* target only */
+  func(con, (ID **)&data->target, false, userdata);
+}
+static void attribute_new_data(void *cdata)
+{
+  bAttributeConstraint *data = (bAttributeConstraint *)cdata;
+  STRNCPY(data->attributeName, "position");
+  data->mixLoc = true;
+  data->mixRot = true;
+  data->mixScl = true;
+}
+static int attribute_get_tars(bConstraint *con, ListBase *list)
+{
+  if (con && list) {
+    bAttributeConstraint *data = static_cast<bAttributeConstraint *>(con->data);
+    bConstraintTarget *ct;
+    SINGLETARGETNS_GET_TARS(con, data->target, ct, list);
+    return 1;
+  }
+  return 0;
+}
+static void attribute_flush_tars(bConstraint *con, ListBase *list, bool no_copy)
+{
+  if (con && list) {
+    bAttributeConstraint *data = static_cast<bAttributeConstraint *>(con->data);
+    bConstraintTarget *ct = static_cast<bConstraintTarget *>(list->first);
+    SINGLETARGETNS_FLUSH_TARS(con, data->target, ct, list, no_copy);
+  }
+}
+static bool attribute_get_tarmat(Depsgraph * /*depsgraph*/,
+                                 bConstraint *con,
+                                 bConstraintOb * /*cob*/,
+                                 bConstraintTarget *ct,
+                                 float /*ctime*/)
+{
+  bAttributeConstraint *acon = (bAttributeConstraint *)con->data;
+  if (!VALID_CONS_TARGET(ct) || ct->tar->type != OB_MESH) {
+    return false;
+  }
+  unit_m4(ct->matrix);
+  Mesh *target_eval = BKE_object_get_evaluated_mesh(ct->tar);
+  CustomData domain;
+  int d_count = 0;
+  int index = -1;
+  switch (acon->domainType) {
+    case CON_ATTRIBUTE_DOMAIN_VERT:
+      domain = target_eval->vert_data;
+      d_count = target_eval->verts_num;
+      break;
+    case CON_ATTRIBUTE_DOMAIN_EDGE:
+      domain = target_eval->edge_data;
+      d_count = target_eval->edges_num;
+      break;
+    case CON_ATTRIBUTE_DOMAIN_FACE:
+      domain = target_eval->face_data;
+      d_count = target_eval->faces_num;
+      break;
+    default:
+      return false;
+  };
+  index = std::clamp(acon->sampleIndex, 0, d_count - 1);
+  switch (acon->dataType) {
+    case CON_ATTRIBUTE_4X4MATRIX: {
+      const float (*matrices)[4][4] = (const float (*)[4][4])CustomData_get_layer_named(
+          &domain, CD_PROP_FLOAT4X4, acon->attributeName);
+      if (!matrices) {
+        return false;
+      }
+      copy_m4_m4(ct->matrix, matrices[index]);
+      break;
+    }
+    case CON_ATTRIBUTE_VECTOR: {
+      const float (*vectors)[3] = (const float (*)[3])CustomData_get_layer_named(
+          &domain, CD_PROP_FLOAT3, acon->attributeName);
+      if (!vectors) {
+        return false;
+      }
+      copy_v3_v3(ct->matrix[3], vectors[index]);
+      break;
+    }
+    case CON_ATTRIBUTE_QUATERNION: {
+      const float (*quaternions)[4] = (const float (*)[4])CustomData_get_layer_named(
+          &domain, CD_PROP_QUATERNION, acon->attributeName);
+      if (!quaternions) {
+        return false;
+      }
+      quat_to_mat4(ct->matrix, quaternions[index]);
+      break;
+    }
+    default:
+      return false;
+  }
+  return true;
+}
+static void attribute_evaluate(bConstraint *con, bConstraintOb *cob, ListBase *targets)
+{
+  bConstraintTarget *ct = static_cast<bConstraintTarget *>(targets->first);
+  bAttributeConstraint *data = static_cast<bAttributeConstraint *>(con->data);
+  /* only evaluate if there is a target */
+  if (VALID_CONS_TARGET(ct)) {
+    float target_mat[4][4];
+    copy_m4_m4(target_mat, ct->matrix);
+    if (!data->mixLoc) {
+      zero_v3(target_mat[3]);
+    }
+    if (!data->mixRot) {
+      float loc[3];
+      float rot[3][3];
+      float scl[3];
+      mat4_to_loc_rot_size(loc, rot, scl, target_mat);
+      unit_m3(rot);
+      loc_rot_size_to_mat4(target_mat, loc, rot, scl);
+    }
+    if (!data->mixScl) {
+      normalize_m4(target_mat);
+    }
+    /* Finally, combine the matrices. */
+    switch (data->mixMode) {
+      case CON_ATTRIBUTE_MIX_REPLACE:
+        copy_m4_m4(cob->matrix, target_mat);
+        break;
+      /* Simple matrix multiplication. */
+      case CON_ATTRIBUTE_MIX_BEFORE_FULL:
+        mul_m4_m4m4(cob->matrix, target_mat, cob->matrix);
+        break;
+      case CON_ATTRIBUTE_MIX_AFTER_FULL:
+        mul_m4_m4m4(cob->matrix, cob->matrix, target_mat);
+        break;
+      /* Fully separate handling of channels. */
+      case CON_ATTRIBUTE_MIX_BEFORE_SPLIT:
+        mul_m4_m4m4_split_channels(cob->matrix, target_mat, cob->matrix);
+        break;
+      case CON_ATTRIBUTE_MIX_AFTER_SPLIT:
+        mul_m4_m4m4_split_channels(cob->matrix, cob->matrix, target_mat);
+        break;
+      default:
+        BLI_assert_msg(0, "Unknown Copy Transforms mix mode");
+    }
+    if (data->utargetMat) {
+      mul_m4_m4m4(cob->matrix, ct->tar->object_to_world().ptr(), cob->matrix);
+      mul_m4_m4m4(ct->matrix, ct->matrix, ct->tar->object_to_world().ptr());
+    }
+  }
+}
+static bConstraintTypeInfo CTI_ATTRIBUTE = {
+    /*type*/ CONSTRAINT_TYPE_ATTRIBUTE,
+    /*size*/ sizeof(bAttributeConstraint),
+    /*name*/ N_("Attribute Transform"),
+    /*struct_name*/ "bAttributeConstraint",
+    /*free_data*/ nullptr,
+    /*id_looper*/ attribute_id_looper,
+    /*copy_data*/ nullptr,
+    /*new_data*/ attribute_new_data,
+    /*get_constraint_targets*/ attribute_get_tars,
+    /*flush_constraint_targets*/ attribute_flush_tars,
+    /*get_target_matrix*/ attribute_get_tarmat,
+    /*evaluate_constraint*/ attribute_evaluate,
+};
 
 /* ************************* Constraints Type-Info *************************** */
 /* All of the constraints api functions use bConstraintTypeInfo structs to carry out
@@ -5618,6 +5780,7 @@ static void constraints_init_typeinfo()
   constraintsTypeInfo[28] = &CTI_OBJECTSOLVER;    /* Object Solver Constraint */
   constraintsTypeInfo[29] = &CTI_TRANSFORM_CACHE; /* Transform Cache Constraint */
   constraintsTypeInfo[30] = &CTI_ARMATURE;        /* Armature Constraint */
+  constraintsTypeInfo[31] = &CTI_ATTRIBUTE;       /* Attribute Transform Constraint */
 }
 
 const bConstraintTypeInfo *BKE_constraint_typeinfo_from_type(int type)

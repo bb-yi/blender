@@ -11,7 +11,7 @@ class ObjectConstraintPanel:
 
     @classmethod
     def poll(cls, context):
-        return (context.object)
+        return context.object
 
 
 class BoneConstraintPanel:
@@ -19,7 +19,7 @@ class BoneConstraintPanel:
 
     @classmethod
     def poll(cls, context):
-        return (context.pose_bone)
+        return context.pose_bone
 
 
 class OBJECT_PT_constraints(ObjectConstraintPanel, Panel):
@@ -89,8 +89,11 @@ class ConstraintButtonsPanel:
                             col.prop_search(con, "space_subtarget", con.space_object.data, "bones", text="Bone")
                         case 'MESH', 'LATTICE':
                             col.prop_search(
-                                con, "space_subtarget", con.space_object,
-                                "vertex_groups", text="Vertex Group",
+                                con,
+                                "space_subtarget",
+                                con.space_object,
+                                "vertex_groups",
+                                text="Vertex Group",
                             )
 
     @staticmethod
@@ -672,14 +675,18 @@ class ConstraintButtonsPanel:
                     match space_object.type:
                         case 'ARMATURE':
                             col.prop_search(
-                                con, "space_subtarget",
-                                con.space_object.data, "bones",
+                                con,
+                                "space_subtarget",
+                                con.space_object.data,
+                                "bones",
                                 text="Bone",
                             )
                         case 'MESH', 'LATTICE':
                             col.prop_search(
-                                con, "space_subtarget",
-                                con.space_object, "vertex_groups",
+                                con,
+                                "space_subtarget",
+                                con.space_object,
+                                "vertex_groups",
                                 text="Vertex Group",
                             )
 
@@ -981,6 +988,27 @@ class ConstraintButtonsPanel:
 
         self.draw_influence(layout, con)
 
+    def draw_attribute(self, context):
+        layout = self.layout
+        con = self.get_constraint(context)
+        layout.use_property_split = True
+        layout.use_property_decorate = True
+        self.target_template(layout, con, False)
+        layout.prop(con, "utarget_mat", text="Offset with Target Transform")
+        layout.prop(con, "attribute_name", text="Attribute Name")
+        layout.prop(con, "data_type", text="Data Type")
+        layout.prop(con, "domain_type", text="Domain")
+        layout.prop(con, "sample_index", text="Sample Index")
+        layout.separator()
+        layout.prop(con, "mix_mode", text="Mix Mode", text_ctxt=i18n_contexts.constraint)
+        if con.data_type == '4X4MATRIX':
+            row = layout.row(heading="Enabled")
+            row.prop(con, "mix_loc", text="Location", toggle=True)
+            row.prop(con, "mix_rot", text="Rotation", toggle=True)
+            row.prop(con, "mix_scl", text="Scale", toggle=True)
+            row.label(icon='BLANK1')
+        self.draw_influence(layout, con)
+
 
 # Parent class for constraint sub-panels.
 class ConstraintButtonsSubPanel:
@@ -1155,8 +1183,10 @@ class ConstraintButtonsSubPanel:
         if con.action and con.action.is_action_layered:
             col.context_pointer_set("animated_id", con.id_data)
             col.template_search(
-                con, "action_slot",
-                con, "action_suitable_slots",
+                con,
+                "action_slot",
+                con,
+                "action_suitable_slots",
                 new="",  # No use in making a new slot here.
                 unlink="anim.slot_unassign_from_constraint",
                 text="Slot",
@@ -1169,24 +1199,16 @@ class ConstraintButtonsSubPanel:
         col.prop(con, "frame_end", text="End")
 
     def draw_transform_cache_velocity(self, context):
-        self.draw_transform_cache_subpanel(
-            context, self.layout.template_cache_file_velocity
-        )
+        self.draw_transform_cache_subpanel(context, self.layout.template_cache_file_velocity)
 
     def draw_transform_cache_procedural(self, context):
-        self.draw_transform_cache_subpanel(
-            context, self.layout.template_cache_file_procedural
-        )
+        self.draw_transform_cache_subpanel(context, self.layout.template_cache_file_procedural)
 
     def draw_transform_cache_time(self, context):
-        self.draw_transform_cache_subpanel(
-            context, self.layout.template_cache_file_time_settings
-        )
+        self.draw_transform_cache_subpanel(context, self.layout.template_cache_file_time_settings)
 
     def draw_transform_cache_layers(self, context):
-        self.draw_transform_cache_subpanel(
-            context, self.layout.template_cache_file_layers
-        )
+        self.draw_transform_cache_subpanel(context, self.layout.template_cache_file_layers)
 
     def draw_transform_cache_subpanel(self, context, template_func):
         con = self.get_constraint(context)
@@ -1197,6 +1219,7 @@ class ConstraintButtonsSubPanel:
         layout.use_property_split = True
         layout.use_property_decorate = True
         template_func(con, "cache_file")
+
 
 # Child Of Constraint
 
@@ -1210,6 +1233,7 @@ class BONE_PT_bChildOfConstraint(BoneConstraintPanel, ConstraintButtonsPanel, Pa
     def draw(self, context):
         self.draw_childof(context)
 
+
 # Track To Constraint
 
 
@@ -1221,6 +1245,7 @@ class OBJECT_PT_bTrackToConstraint(ObjectConstraintPanel, ConstraintButtonsPanel
 class BONE_PT_bTrackToConstraint(BoneConstraintPanel, ConstraintButtonsPanel, Panel):
     def draw(self, context):
         self.draw_trackto(context)
+
 
 # Follow Path Constraint
 
@@ -1237,6 +1262,7 @@ class BONE_PT_bFollowPathConstraint(BoneConstraintPanel, ConstraintButtonsPanel,
 
 # Rotation Limit Constraint
 
+
 class OBJECT_PT_bRotLimitConstraint(ObjectConstraintPanel, ConstraintButtonsPanel, Panel):
     def draw(self, context):
         self.draw_rot_limit(context)
@@ -1248,6 +1274,7 @@ class BONE_PT_bRotLimitConstraint(BoneConstraintPanel, ConstraintButtonsPanel, P
 
 
 # Location Limit Constraint
+
 
 class OBJECT_PT_bLocLimitConstraint(ObjectConstraintPanel, ConstraintButtonsPanel, Panel):
     def draw(self, context):
@@ -1261,6 +1288,7 @@ class BONE_PT_bLocLimitConstraint(BoneConstraintPanel, ConstraintButtonsPanel, P
 
 # Size Limit Constraint
 
+
 class OBJECT_PT_bSizeLimitConstraint(ObjectConstraintPanel, ConstraintButtonsPanel, Panel):
     def draw(self, context):
         self.draw_size_limit(context)
@@ -1272,6 +1300,7 @@ class BONE_PT_bSizeLimitConstraint(BoneConstraintPanel, ConstraintButtonsPanel, 
 
 
 # Rotate Like Constraint
+
 
 class OBJECT_PT_bRotateLikeConstraint(ObjectConstraintPanel, ConstraintButtonsPanel, Panel):
     def draw(self, context):
@@ -1285,6 +1314,7 @@ class BONE_PT_bRotateLikeConstraint(BoneConstraintPanel, ConstraintButtonsPanel,
 
 # Locate Like Constraint
 
+
 class OBJECT_PT_bLocateLikeConstraint(ObjectConstraintPanel, ConstraintButtonsPanel, Panel):
     def draw(self, context):
         self.draw_locate_like(context)
@@ -1296,6 +1326,7 @@ class BONE_PT_bLocateLikeConstraint(BoneConstraintPanel, ConstraintButtonsPanel,
 
 
 # Size Like Constraint
+
 
 class OBJECT_PT_bSizeLikeConstraint(ObjectConstraintPanel, ConstraintButtonsPanel, Panel):
     def draw(self, context):
@@ -1309,6 +1340,7 @@ class BONE_PT_bSizeLikeConstraint(BoneConstraintPanel, ConstraintButtonsPanel, P
 
 # Same Volume Constraint
 
+
 class OBJECT_PT_bSameVolumeConstraint(ObjectConstraintPanel, ConstraintButtonsPanel, Panel):
     def draw(self, context):
         self.draw_same_volume(context)
@@ -1321,6 +1353,7 @@ class BONE_PT_bSameVolumeConstraint(BoneConstraintPanel, ConstraintButtonsPanel,
 
 # Trans Like Constraint
 
+
 class OBJECT_PT_bTransLikeConstraint(ObjectConstraintPanel, ConstraintButtonsPanel, Panel):
     def draw(self, context):
         self.draw_trans_like(context)
@@ -1332,6 +1365,7 @@ class BONE_PT_bTransLikeConstraint(BoneConstraintPanel, ConstraintButtonsPanel, 
 
 
 # Action Constraint
+
 
 class OBJECT_PT_bActionConstraint(ObjectConstraintPanel, ConstraintButtonsPanel, Panel):
     def draw(self, context):
@@ -1377,6 +1411,7 @@ class BONE_PT_bActionConstraint_action(BoneConstraintPanel, ConstraintButtonsSub
 
 # Lock Track Constraint
 
+
 class OBJECT_PT_bLockTrackConstraint(ObjectConstraintPanel, ConstraintButtonsPanel, Panel):
     def draw(self, context):
         self.draw_lock_track(context)
@@ -1388,6 +1423,7 @@ class BONE_PT_bLockTrackConstraint(BoneConstraintPanel, ConstraintButtonsPanel, 
 
 
 # Distance Limit Constraint
+
 
 class OBJECT_PT_bDistLimitConstraint(ObjectConstraintPanel, ConstraintButtonsPanel, Panel):
     def draw(self, context):
@@ -1401,6 +1437,7 @@ class BONE_PT_bDistLimitConstraint(BoneConstraintPanel, ConstraintButtonsPanel, 
 
 # Stretch To Constraint
 
+
 class OBJECT_PT_bStretchToConstraint(ObjectConstraintPanel, ConstraintButtonsPanel, Panel):
     def draw(self, context):
         self.draw_stretch_to(context)
@@ -1412,6 +1449,7 @@ class BONE_PT_bStretchToConstraint(BoneConstraintPanel, ConstraintButtonsPanel, 
 
 
 # Min Max Constraint
+
 
 class OBJECT_PT_bMinMaxConstraint(ObjectConstraintPanel, ConstraintButtonsPanel, Panel):
     def draw(self, context):
@@ -1425,6 +1463,7 @@ class BONE_PT_bMinMaxConstraint(BoneConstraintPanel, ConstraintButtonsPanel, Pan
 
 # Clamp To Constraint
 
+
 class OBJECT_PT_bClampToConstraint(ObjectConstraintPanel, ConstraintButtonsPanel, Panel):
     def draw(self, context):
         self.draw_clamp_to(context)
@@ -1436,6 +1475,7 @@ class BONE_PT_bClampToConstraint(BoneConstraintPanel, ConstraintButtonsPanel, Pa
 
 
 # Transform Constraint
+
 
 class OBJECT_PT_bTransformConstraint(ObjectConstraintPanel, ConstraintButtonsPanel, Panel):
     def draw(self, context):
@@ -1481,6 +1521,7 @@ class BONE_PT_bTransformConstraint_to(BoneConstraintPanel, ConstraintButtonsSubP
 
 # Shrink-wrap Constraint.
 
+
 class OBJECT_PT_bShrinkwrapConstraint(ObjectConstraintPanel, ConstraintButtonsPanel, Panel):
     def draw(self, context):
         self.draw_shrinkwrap(context)
@@ -1493,6 +1534,7 @@ class BONE_PT_bShrinkwrapConstraint(BoneConstraintPanel, ConstraintButtonsPanel,
 
 # Damp Track Constraint
 
+
 class OBJECT_PT_bDampTrackConstraint(ObjectConstraintPanel, ConstraintButtonsPanel, Panel):
     def draw(self, context):
         self.draw_damp_track(context)
@@ -1504,6 +1546,7 @@ class BONE_PT_bDampTrackConstraint(BoneConstraintPanel, ConstraintButtonsPanel, 
 
 
 # Spline IK Constraint
+
 
 class BONE_PT_bSplineIKConstraint(BoneConstraintPanel, ConstraintButtonsPanel, Panel):
     def draw(self, context):
@@ -1528,6 +1571,7 @@ class BONE_PT_bSplineIKConstraint_chain_scaling(BoneConstraintPanel, ConstraintB
 
 # Pivot Constraint
 
+
 class OBJECT_PT_bPivotConstraint(ObjectConstraintPanel, ConstraintButtonsPanel, Panel):
     def draw(self, context):
         self.draw_pivot(context)
@@ -1539,6 +1583,7 @@ class BONE_PT_bPivotConstraint(BoneConstraintPanel, ConstraintButtonsPanel, Pane
 
 
 # Follow Track Constraint
+
 
 class OBJECT_PT_bFollowTrackConstraint(ObjectConstraintPanel, ConstraintButtonsPanel, Panel):
     def draw(self, context):
@@ -1552,6 +1597,7 @@ class BONE_PT_bFollowTrackConstraint(BoneConstraintPanel, ConstraintButtonsPanel
 
 # Camera Solver Constraint
 
+
 class OBJECT_PT_bCameraSolverConstraint(ObjectConstraintPanel, ConstraintButtonsPanel, Panel):
     def draw(self, context):
         self.draw_camera_solver(context)
@@ -1564,6 +1610,7 @@ class BONE_PT_bCameraSolverConstraint(BoneConstraintPanel, ConstraintButtonsPane
 
 # Object Solver Constraint
 
+
 class OBJECT_PT_bObjectSolverConstraint(ObjectConstraintPanel, ConstraintButtonsPanel, Panel):
     def draw(self, context):
         self.draw_object_solver(context)
@@ -1575,6 +1622,7 @@ class BONE_PT_bObjectSolverConstraint(BoneConstraintPanel, ConstraintButtonsPane
 
 
 # Transform Cache Constraint
+
 
 class OBJECT_PT_bTransformCacheConstraint(ObjectConstraintPanel, ConstraintButtonsPanel, Panel):
     def draw(self, context):
@@ -1652,6 +1700,7 @@ class BONE_PT_bTransformCacheConstraint_time(BoneConstraintPanel, ConstraintButt
 
 # Python Constraint
 
+
 class OBJECT_PT_bPythonConstraint(ObjectConstraintPanel, ConstraintButtonsPanel, Panel):
     def draw(self, context):
         self.draw_python_constraint(context)
@@ -1663,6 +1712,7 @@ class BONE_PT_bPythonConstraint(BoneConstraintPanel, ConstraintButtonsPanel, Pan
 
 
 # Armature Constraint
+
 
 class OBJECT_PT_bArmatureConstraint(ObjectConstraintPanel, ConstraintButtonsPanel, Panel):
     def draw(self, context):
@@ -1692,6 +1742,7 @@ class BONE_PT_bArmatureConstraint_bones(BoneConstraintPanel, ConstraintButtonsSu
 
 # Inverse Kinematic Constraint
 
+
 class OBJECT_PT_bKinematicConstraint(ObjectConstraintPanel, ConstraintButtonsPanel, Panel):
     def draw(self, context):
         self.draw_kinematic(context)
@@ -1700,6 +1751,17 @@ class OBJECT_PT_bKinematicConstraint(ObjectConstraintPanel, ConstraintButtonsPan
 class BONE_PT_bKinematicConstraint(BoneConstraintPanel, ConstraintButtonsPanel, Panel):
     def draw(self, context):
         self.draw_kinematic(context)
+
+
+# Attribute Constraint.
+class OBJECT_PT_bAttributeConstraint(ObjectConstraintPanel, ConstraintButtonsPanel, Panel):
+    def draw(self, context):
+        self.draw_attribute(context)
+
+
+class BONE_PT_bAttributeConstraint(BoneConstraintPanel, ConstraintButtonsPanel, Panel):
+    def draw(self, context):
+        self.draw_attribute(context)
 
 
 classes = (
@@ -1743,6 +1805,7 @@ classes = (
     OBJECT_PT_bPythonConstraint,
     OBJECT_PT_bArmatureConstraint,
     OBJECT_PT_bArmatureConstraint_bones,
+    OBJECT_PT_bAttributeConstraint,
     # Bone panels
     BONE_PT_bChildOfConstraint,
     BONE_PT_bTrackToConstraint,
@@ -1784,9 +1847,11 @@ classes = (
     BONE_PT_bPythonConstraint,
     BONE_PT_bArmatureConstraint,
     BONE_PT_bArmatureConstraint_bones,
+    BONE_PT_bAttributeConstraint,
 )
 
 if __name__ == "__main__":  # only for live edit.
     from bpy.utils import register_class
+
     for cls in classes:
         register_class(cls)
