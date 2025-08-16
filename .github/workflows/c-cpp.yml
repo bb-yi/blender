@@ -25,7 +25,7 @@ jobs:
       - name: Install dependencies
         run: |
           choco install cmake ninja python -y
-          SET PATH=%PATH%;C:\Program Files\CMake\bin
+          $env:PATH = "$env:PATH;C:\Program Files\CMake\bin"
 
       # 3️⃣ 配置 ccache 缓存
       - name: Setup ccache cache
