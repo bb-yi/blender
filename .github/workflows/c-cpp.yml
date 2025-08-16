@@ -1,0 +1,61 @@
+name: Blender Build (NPR Prototype)
+
+# 手动触发
+on:
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build type (Lite or Full)'
+        required: true
+        default: 'Lite'
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      # 1️⃣ 拉取源码
+      - name: Checkout source
+        uses: actions/checkout@v3
+        with:
+          repository: bb-yi/blender
+          ref: npr-prototype
+
+      # 2️⃣ 安装依赖
+      - name: Install dependencies
+        run: |
+          choco install cmake ninja python -y
+          SET PATH=%PATH%;C:\Program Files\CMake\bin
+
+      # 3️⃣ 配置 ccache 缓存
+      - name: Setup ccache cache
+        uses: actions/cache@v3
+        with:
+          path: C:\ccache
+          key: ${{ runner.os }}-blender-ccache-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-blender-ccache-
+
+      # 4️⃣ 创建 Ninja 构建目录并配置
+      - name: Configure Blender build
+        run: |
+          mkdir build_ninja
+          cd build_ninja
+          if [ "${{ github.event.inputs.build_type }}" == "Lite" ]; then \
+            cmake -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DBUILD_LITE=ON -DUSE_CCACHE=ON ..; \
+          else \
+            cmake -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DUSE_CCACHE=ON ..; \
+          fi
+
+      # 5️⃣ 编译 Blender
+      - name: Build Blender
+        run: |
+          cd build_ninja
+          ninja -j${{ runner.os }} blender
+
+      # 6️⃣ 上传构建产物
+      - name: Upload Blender binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: blender-build
+          path: build_ninja\bin\Release\blender.exe
