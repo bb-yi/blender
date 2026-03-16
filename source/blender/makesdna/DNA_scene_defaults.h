@@ -233,6 +233,9 @@
  \
     .overscan = 3.0f, \
  \
+    .active_render_texture_index = -1, \
+    .next_render_texture_uid = 1, \
+ \
     .flag = SCE_EEVEE_TAA_REPROJECTION, \
   }
 

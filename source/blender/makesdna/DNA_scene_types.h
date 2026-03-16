@@ -1897,6 +1897,30 @@ typedef struct RaytraceEEVEE {
   int denoise_stages;
 } RaytraceEEVEE;
 
+typedef struct SceneRenderTexture {
+  struct SceneRenderTexture *next, *prev;
+  char name[64];
+  struct Object *camera;
+  int uid;
+  int resolution_x;
+  int resolution_y;
+  char enabled;
+  char update_mode;
+  char format;
+  char _pad[9];
+} SceneRenderTexture;
+
+typedef enum SceneEEVEERenderTextureUpdateMode {
+  SCE_EEVEE_RENDER_TEXTURE_UPDATE_EVERY_SAMPLE = 0,
+  SCE_EEVEE_RENDER_TEXTURE_UPDATE_EVERY_FRAME = 1,
+  SCE_EEVEE_RENDER_TEXTURE_UPDATE_MANUAL = 2,
+} SceneEEVEERenderTextureUpdateMode;
+
+typedef enum SceneEEVEERenderTextureFormat {
+  SCE_EEVEE_RENDER_TEXTURE_FORMAT_RGBA16F = 0,
+  SCE_EEVEE_RENDER_TEXTURE_FORMAT_RGBA32F = 1,
+} SceneEEVEERenderTextureFormat;
+
 typedef struct SceneEEVEE {
   int flag;
   int gi_diffuse_bounces;
@@ -1962,6 +1986,10 @@ typedef struct SceneEEVEE {
 
   float overscan;
   float light_threshold;
+
+  ListBase render_textures;
+  int active_render_texture_index;
+  int next_render_texture_uid;
 } SceneEEVEE;
 
 typedef struct SceneGpencil {

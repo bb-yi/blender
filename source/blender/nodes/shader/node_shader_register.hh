@@ -76,6 +76,7 @@ void register_node_type_sh_output_material();
 void register_node_type_sh_output_world();
 void register_node_type_sh_particle_info();
 void register_node_type_sh_point_info();
+void register_node_type_sh_render_texture();
 void register_node_type_sh_repeat();
 void register_node_type_sh_rgb();
 void register_node_type_sh_rgbtobw();

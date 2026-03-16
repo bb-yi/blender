@@ -16,6 +16,7 @@
 
 #include "BLT_translation.hh"
 
+#include "DNA_scene_types.h"
 #include "DNA_node_types.h"
 #include "DNA_object_types.h"
 #include "DNA_texture_types.h"
@@ -3350,6 +3351,36 @@ static const EnumPropertyItem *rna_ShaderNodeMix_data_type_itemf(bContext * /*C*
   return itemf_function_check(rna_enum_mix_data_type_items, rotation_supported_mix);
 }
 
+static const EnumPropertyItem *rna_ShaderNodeRenderTexture_itemf(bContext *C,
+                                                                 PointerRNA * /*ptr*/,
+                                                                 PropertyRNA * /*prop*/,
+                                                                 bool *r_free)
+{
+  EnumPropertyItem *items = nullptr;
+  int totitem = 0;
+
+  EnumPropertyItem item = {-1, "NONE", 0, "None", "Do not sample a render texture"};
+  RNA_enum_item_add(&items, &totitem, &item);
+
+  Scene *scene = (C != nullptr) ? CTX_data_scene(C) : nullptr;
+  if (scene != nullptr) {
+    LISTBASE_FOREACH (SceneRenderTexture *, render_texture, &scene->eevee.render_textures) {
+      char identifier[64];
+      SNPRINTF(identifier, "RENDER_TEXTURE_%d", render_texture->uid);
+
+      item.value = render_texture->uid;
+      item.identifier = identifier;
+      item.name = render_texture->name;
+      item.description = render_texture->name;
+      RNA_enum_item_add(&items, &totitem, &item);
+    }
+  }
+
+  RNA_enum_item_end(&items, &totitem);
+  *r_free = true;
+  return items;
+}
+
 static const EnumPropertyItem *rna_Node_image_layer_itemf(bContext * /*C*/,
                                                           PointerRNA *ptr,
                                                           PropertyRNA * /*prop*/,
@@ -5363,6 +5394,23 @@ static void def_sh_image_sample(BlenderRNA * /*brna*/, StructRNA *srna)
   RNA_def_property_enum_items(prop, offset_type_items);
   RNA_def_property_ui_text(prop, "Type", "Type of the sampling offset.");
   RNA_def_property_update(prop, 0, "rna_Node_update");
+}
+
+static void def_sh_render_texture(BlenderRNA * /*brna*/, StructRNA *srna)
+{
+  static const EnumPropertyItem render_texture_items[] = {
+      {-1, "NONE", 0, "None", "Do not sample a render texture"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+
+  PropertyRNA *prop;
+
+  prop = RNA_def_property(srna, "render_texture", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "custom1");
+  RNA_def_property_enum_items(prop, render_texture_items);
+  RNA_def_property_enum_funcs(prop, nullptr, nullptr, "rna_ShaderNodeRenderTexture_itemf");
+  RNA_def_property_ui_text(prop, "Render Texture", "Scene render texture to sample");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
 }
 
 static void def_sh_output(BlenderRNA * /*brna*/, StructRNA *srna)
@@ -12473,6 +12521,7 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("ShaderNode", "ShaderNodeTexMagic", def_sh_tex_magic);
   define("ShaderNode", "ShaderNodeTexNoise", def_sh_tex_noise);
   define("ShaderNode", "ShaderNodeTexPointDensity", def_sh_tex_pointdensity);
+  define("ShaderNode", "ShaderNodeRenderTexture", def_sh_render_texture);
   define("ShaderNode", "ShaderNodeTexSky", def_sh_tex_sky);
   define("ShaderNode", "ShaderNodeTexVoronoi", def_sh_tex_voronoi);
   define("ShaderNode", "ShaderNodeTexWave", def_sh_tex_wave);

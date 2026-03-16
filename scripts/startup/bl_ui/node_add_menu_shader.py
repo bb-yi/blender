@@ -313,7 +313,7 @@ class NODE_MT_category_shader_texture(Menu):
     bl_idname = "NODE_MT_category_shader_texture"
     bl_label = "Texture"
 
-    def draw(self, _context):
+    def draw(self, context):
         layout = self.layout
 
         node_add_menu.add_node_type(layout, "ShaderNodeTexBrick")
@@ -326,6 +326,11 @@ class NODE_MT_category_shader_texture(Menu):
         node_add_menu.add_node_type(layout, "ShaderNodeTexMagic")
         node_add_menu.add_node_type(layout, "ShaderNodeTexNoise")
         node_add_menu.add_node_type(layout, "ShaderNodeTexPointDensity")
+        node_add_menu.add_node_type(
+            layout,
+            "ShaderNodeRenderTexture",
+            poll=object_eevee_shader_nodes_poll(context),
+        )
         node_add_menu.add_node_type(layout, "ShaderNodeTexSky")
         node_add_menu.add_node_type(layout, "ShaderNodeTexVoronoi")
         node_add_menu.add_node_type(layout, "ShaderNodeTexWave")

@@ -421,6 +421,7 @@ static void scene_free_data(ID *id)
   scene_free_markers(scene, do_id_user);
   BLI_freelistN(&scene->transform_spaces);
   BLI_freelistN(&scene->r.views);
+  BLI_freelistN(&scene->eevee.render_textures);
 
   BKE_toolsettings_free(scene->toolsettings);
   scene->toolsettings = nullptr;
@@ -1771,6 +1772,7 @@ void BKE_scene_copy_data_eevee(Scene *sce_dst, const Scene *sce_src)
 {
   /* Copy eevee data between scenes. */
   sce_dst->eevee = sce_src->eevee;
+  BLI_duplicatelist(&sce_dst->eevee.render_textures, &sce_src->eevee.render_textures);
 }
 
 Scene *BKE_scene_duplicate(Main *bmain, Scene *sce, eSceneCopyMethod type)
