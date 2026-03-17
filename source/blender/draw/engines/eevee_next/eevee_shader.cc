@@ -289,6 +289,14 @@ const char *ShaderModule::static_shader_create_info_name_get(eShaderType shader_
       return "eevee_ray_tile_compact";
     case RENDERPASS_CLEAR:
       return "eevee_renderpass_clear";
+    case RENDER_TEXTURE_EXTRACT_R16F:
+      return "eevee_render_texture_extract_r16f";
+    case RENDER_TEXTURE_EXTRACT_R32F:
+      return "eevee_render_texture_extract_r32f";
+    case RENDER_TEXTURE_EXTRACT_RGBA16F:
+      return "eevee_render_texture_extract_rgba16f";
+    case RENDER_TEXTURE_EXTRACT_RGBA32F:
+      return "eevee_render_texture_extract_rgba32f";
     case LIGHTPROBE_IRRADIANCE_BOUNDS:
       return "eevee_lightprobe_volume_bounds";
     case LIGHTPROBE_IRRADIANCE_OFFSET:

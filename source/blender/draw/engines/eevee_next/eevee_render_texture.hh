@@ -19,6 +19,7 @@
 namespace blender::eevee {
 
 class Instance;
+class RenderBuffers;
 
 class RenderTextureModule {
  private:
@@ -26,6 +27,8 @@ class RenderTextureModule {
     int uid = -1;
     ::Object *camera = nullptr;
     int2 extent = int2(1);
+    int source = 0;
+    int format = 0;
     bool active = false;
     SwapChain<Texture, 2> color_tx;
   };
@@ -38,9 +41,9 @@ class RenderTextureModule {
   Framebuffer prepass_fb_ = {"RenderTexture.Prepass"};
   Framebuffer combined_fb_ = {"RenderTexture.Combined"};
   Framebuffer gbuffer_fb_ = {"RenderTexture.GBuffer"};
-
   RayTraceBuffer rt_buffer_opaque_;
   RayTraceBuffer rt_buffer_refract_;
+  PassSimple extract_ps_ = {"RenderTexture.Extract"};
 
  public:
   RenderTextureModule(Instance &inst) : inst_(inst) {}
@@ -65,6 +68,7 @@ class RenderTextureModule {
   static RenderTextureData slot_default_data();
   void slot_reset(int slot_index);
   void slot_ensure_textures(int slot_index);
+  void slot_extract(int slot_index, RenderBuffers &rbufs);
   void slot_capture(int slot_index);
 };
 

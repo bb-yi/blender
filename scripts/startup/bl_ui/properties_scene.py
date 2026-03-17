@@ -79,6 +79,7 @@ def draw_eevee_render_textures(layout, context):
     col = box.column()
     col.prop(render_texture, "name")
     col.prop(render_texture, "enabled")
+    col.prop(render_texture, "source")
     col.prop(render_texture, "camera")
 
     row = col.row(align=True)

@@ -19,6 +19,35 @@
 
 namespace blender::eevee {
 
+static int render_texture_source_normalize(const int source)
+{
+  if (source == SCE_EEVEE_RENDER_TEXTURE_SOURCE_GRAYSCALE) {
+    return SCE_EEVEE_RENDER_TEXTURE_SOURCE_COLOR;
+  }
+  return source;
+}
+
+static eGPUTextureFormat render_texture_gpu_format(const int format)
+{
+  switch (format) {
+    case SCE_EEVEE_RENDER_TEXTURE_FORMAT_RGBA32F:
+      return GPU_RGBA32F;
+    case SCE_EEVEE_RENDER_TEXTURE_FORMAT_R16F:
+      return GPU_R16F;
+    case SCE_EEVEE_RENDER_TEXTURE_FORMAT_R32F:
+      return GPU_R32F;
+    case SCE_EEVEE_RENDER_TEXTURE_FORMAT_RGBA16F:
+    default:
+      return GPU_RGBA16F;
+  }
+}
+
+static int render_texture_info_flags(const int source, const int format)
+{
+  return RENDER_TEXTURE_SLOT_VALID | (source << int(RENDER_TEXTURE_SLOT_SOURCE_SHIFT)) |
+         (format << int(RENDER_TEXTURE_SLOT_FORMAT_SHIFT));
+}
+
 RenderTextureData RenderTextureModule::slot_default_data()
 {
   RenderTextureData data = {};
@@ -33,6 +62,8 @@ void RenderTextureModule::slot_reset(const int slot_index)
   slots_[slot_index].uid = -1;
   slots_[slot_index].camera = nullptr;
   slots_[slot_index].extent = int2(1);
+  slots_[slot_index].source = SCE_EEVEE_RENDER_TEXTURE_SOURCE_COLOR;
+  slots_[slot_index].format = SCE_EEVEE_RENDER_TEXTURE_FORMAT_RGBA16F;
   slots_[slot_index].active = false;
   data_[slot_index] = slot_default_data();
 }
@@ -41,11 +72,12 @@ void RenderTextureModule::slot_ensure_textures(const int slot_index)
 {
   RuntimeSlot &slot = slots_[slot_index];
   const float4 clear_color(0.0f);
+  const eGPUTextureFormat texture_format = render_texture_gpu_format(slot.format);
 
   const bool recreated_current = slot.color_tx.current().ensure_2d(
-      GPU_RGBA16F, slot.extent, GPU_TEXTURE_USAGE_GENERAL);
+      texture_format, slot.extent, GPU_TEXTURE_USAGE_GENERAL);
   const bool recreated_previous = slot.color_tx.previous().ensure_2d(
-      GPU_RGBA16F, slot.extent, GPU_TEXTURE_USAGE_GENERAL);
+      texture_format, slot.extent, GPU_TEXTURE_USAGE_GENERAL);
 
   if (recreated_current) {
     slot.color_tx.current().clear(clear_color);
@@ -84,13 +116,48 @@ void RenderTextureModule::begin_sync()
     slot.camera = DEG_get_evaluated_object(inst_.depsgraph, render_texture->camera);
     slot.extent = int2(max_ii(render_texture->resolution_x, 1),
                        max_ii(render_texture->resolution_y, 1));
+    slot.source = render_texture_source_normalize(render_texture->source);
+    slot.format = render_texture->format;
     slot.active = true;
 
-    data_[slot_index].info = int4(slot.uid, slot.extent.x, slot.extent.y, RENDER_TEXTURE_SLOT_VALID);
+    data_[slot_index].info = int4(
+        slot.uid, slot.extent.x, slot.extent.y, render_texture_info_flags(slot.source, slot.format));
     slot_index++;
   }
 
   data_.push_update();
+}
+
+void RenderTextureModule::slot_extract(const int slot_index, RenderBuffers &rbufs)
+{
+  RuntimeSlot &slot = slots_[slot_index];
+
+  extract_ps_.init();
+  switch (slot.format) {
+    case SCE_EEVEE_RENDER_TEXTURE_FORMAT_R16F:
+      extract_ps_.shader_set(inst_.shaders.static_shader_get(RENDER_TEXTURE_EXTRACT_R16F));
+      break;
+    case SCE_EEVEE_RENDER_TEXTURE_FORMAT_R32F:
+      extract_ps_.shader_set(inst_.shaders.static_shader_get(RENDER_TEXTURE_EXTRACT_R32F));
+      break;
+    case SCE_EEVEE_RENDER_TEXTURE_FORMAT_RGBA32F:
+      extract_ps_.shader_set(inst_.shaders.static_shader_get(RENDER_TEXTURE_EXTRACT_RGBA32F));
+      break;
+    case SCE_EEVEE_RENDER_TEXTURE_FORMAT_RGBA16F:
+    default:
+      extract_ps_.shader_set(inst_.shaders.static_shader_get(RENDER_TEXTURE_EXTRACT_RGBA16F));
+      break;
+  }
+  extract_ps_.bind_texture("depth_tx", &rbufs.depth_tx);
+  extract_ps_.bind_texture("combined_tx", &rbufs.combined_tx);
+  extract_ps_.bind_texture("gbuf_header_tx", &inst_.gbuffer.header_tx);
+  extract_ps_.bind_texture("gbuf_normal_tx", &inst_.gbuffer.normal_tx);
+  extract_ps_.bind_image("output_img", &slot.color_tx.current());
+  extract_ps_.push_constant("output_extent", slot.extent);
+  extract_ps_.push_constant("output_type", slot.source);
+  extract_ps_.dispatch(math::divide_ceil(slot.extent, int2(FILM_GROUP_SIZE)));
+  extract_ps_.barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_SHADER_IMAGE_ACCESS);
+  inst_.manager->submit(extract_ps_);
 }
 
 void RenderTextureModule::slot_capture(const int slot_index)
@@ -112,8 +179,11 @@ void RenderTextureModule::slot_capture(const int slot_index)
 
   data_[slot_index].prev_viewproj = data_[slot_index].viewproj;
   data_[slot_index].viewproj = rt_camera.persmat;
-  data_[slot_index].info = int4(
-      slot.uid, slot.extent.x, slot.extent.y, RENDER_TEXTURE_SLOT_VALID | RENDER_TEXTURE_SLOT_CAPTURING);
+  data_[slot_index].info = int4(slot.uid,
+                                slot.extent.x,
+                                slot.extent.y,
+                                render_texture_info_flags(slot.source, slot.format) |
+                                    RENDER_TEXTURE_SLOT_CAPTURING);
   data_.push_update();
 
   inst_.render_extent_override_set(slot.extent);
@@ -169,14 +239,14 @@ void RenderTextureModule::slot_capture(const int slot_index)
                                   slot.extent,
                                   rt_buffer_opaque_,
                                   rt_buffer_refract_);
-  inst_.gbuffer.release();
 
   inst_.volume.draw_compute(main_view, slot.extent);
   inst_.ambient_occlusion.render_pass(render_view);
   inst_.pipelines.forward.render(render_view, prepass_fb_, combined_fb_, slot.extent);
 
-  GPU_texture_copy(slot.color_tx.current(), rbufs.combined_tx);
+  slot_extract(slot_index, rbufs);
 
+  inst_.gbuffer.release();
   rbufs.release();
 
   data_[slot_index].info.w &= ~RENDER_TEXTURE_SLOT_CAPTURING;

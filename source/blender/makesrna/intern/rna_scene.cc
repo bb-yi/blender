@@ -2118,6 +2118,27 @@ static std::optional<std::string> rna_SceneRenderTexture_path(const PointerRNA* 
   return fmt::format("eevee.render_textures[\"{}\"]", render_texture_name_esc);
 }
 
+static int rna_SceneRenderTexture_source_normalize(const int value)
+{
+  if (value == SCE_EEVEE_RENDER_TEXTURE_SOURCE_GRAYSCALE)
+  {
+    return SCE_EEVEE_RENDER_TEXTURE_SOURCE_COLOR;
+  }
+  return value;
+}
+
+static int rna_SceneRenderTexture_source_get(PointerRNA* ptr)
+{
+  const SceneRenderTexture* render_texture = (const SceneRenderTexture*)ptr->data;
+  return rna_SceneRenderTexture_source_normalize(render_texture->source);
+}
+
+static void rna_SceneRenderTexture_source_set(PointerRNA* ptr, int value)
+{
+  SceneRenderTexture* render_texture = (SceneRenderTexture*)ptr->data;
+  render_texture->source = rna_SceneRenderTexture_source_normalize(value);
+}
+
 static void rna_SceneRenderTexture_name_set(PointerRNA* ptr, const char* value)
 {
   Scene* scene = (Scene*)ptr->owner_id;
@@ -2145,6 +2166,7 @@ static SceneRenderTexture* rna_SceneEEVEE_render_texture_add(ID* id, SceneEEVEE*
   eevee->next_render_texture_uid = render_texture->uid + 1;
   render_texture->resolution_x = 1024;
   render_texture->resolution_y = 1024;
+  render_texture->source = SCE_EEVEE_RENDER_TEXTURE_SOURCE_COLOR;
   render_texture->update_mode = SCE_EEVEE_RENDER_TEXTURE_UPDATE_EVERY_FRAME;
   render_texture->format = SCE_EEVEE_RENDER_TEXTURE_FORMAT_RGBA16F;
   STRNCPY(render_texture->name, DATA_("Render Texture"));
@@ -6516,6 +6538,25 @@ static void rna_def_scene_render_texture(BlenderRNA* brna)
   StructRNA* srna;
   PropertyRNA* prop;
 
+  static const EnumPropertyItem render_texture_source_items[] = {
+      {SCE_EEVEE_RENDER_TEXTURE_SOURCE_COLOR,
+       "COLOR",
+       0,
+       "Color",
+       "Capture the final Eevee color buffer"},
+      {SCE_EEVEE_RENDER_TEXTURE_SOURCE_DEPTH,
+       "DEPTH",
+       0,
+       "Depth",
+       "Capture the scene depth as a grayscale texture"},
+      {SCE_EEVEE_RENDER_TEXTURE_SOURCE_NORMAL,
+       "NORMAL",
+       0,
+       "Normal",
+       "Capture the GBuffer surface normal encoded as RGB"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+
   static const EnumPropertyItem render_texture_update_mode_items[] = {
       {SCE_EEVEE_RENDER_TEXTURE_UPDATE_EVERY_SAMPLE,
        "EVERY_SAMPLE",
@@ -6546,6 +6587,16 @@ static void rna_def_scene_render_texture(BlenderRNA* brna)
        0,
        "RGBA32F",
        "Store the render texture using 32-bit float RGBA"},
+      {SCE_EEVEE_RENDER_TEXTURE_FORMAT_R16F,
+       "R16F",
+       0,
+       "R16F",
+       "Store only a single 16-bit float channel; intended for grayscale or depth output"},
+      {SCE_EEVEE_RENDER_TEXTURE_FORMAT_R32F,
+       "R32F",
+       0,
+       "R32F",
+       "Store only a single 32-bit float channel; intended for grayscale or depth output"},
       {0, nullptr, 0, nullptr, nullptr},
   };
 
@@ -6569,6 +6620,14 @@ static void rna_def_scene_render_texture(BlenderRNA* brna)
   prop = RNA_def_property(srna, "enabled", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(prop, nullptr, "enabled", 1);
   RNA_def_property_ui_text(prop, "Enabled", "Render this render texture");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_render_texture_update");
+
+  prop = RNA_def_property(srna, "source", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "source");
+  RNA_def_property_enum_items(prop, render_texture_source_items);
+  RNA_def_property_enum_funcs(
+    prop, "rna_SceneRenderTexture_source_get", "rna_SceneRenderTexture_source_set", nullptr);
+  RNA_def_property_ui_text(prop, "Source", "What data this render texture captures");
   RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_render_texture_update");
 
   prop = RNA_def_property(srna, "camera", PROP_POINTER, PROP_NONE);

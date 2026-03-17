@@ -1905,10 +1905,18 @@ typedef struct SceneRenderTexture {
   int resolution_x;
   int resolution_y;
   char enabled;
+  char source;
   char update_mode;
   char format;
-  char _pad[9];
+  char _pad[8];
 } SceneRenderTexture;
+
+typedef enum SceneEEVEERenderTextureSource {
+  SCE_EEVEE_RENDER_TEXTURE_SOURCE_COLOR = 0,
+  SCE_EEVEE_RENDER_TEXTURE_SOURCE_GRAYSCALE = 1,
+  SCE_EEVEE_RENDER_TEXTURE_SOURCE_DEPTH = 2,
+  SCE_EEVEE_RENDER_TEXTURE_SOURCE_NORMAL = 3,
+} SceneEEVEERenderTextureSource;
 
 typedef enum SceneEEVEERenderTextureUpdateMode {
   SCE_EEVEE_RENDER_TEXTURE_UPDATE_EVERY_SAMPLE = 0,
@@ -1919,6 +1927,8 @@ typedef enum SceneEEVEERenderTextureUpdateMode {
 typedef enum SceneEEVEERenderTextureFormat {
   SCE_EEVEE_RENDER_TEXTURE_FORMAT_RGBA16F = 0,
   SCE_EEVEE_RENDER_TEXTURE_FORMAT_RGBA32F = 1,
+  SCE_EEVEE_RENDER_TEXTURE_FORMAT_R16F = 2,
+  SCE_EEVEE_RENDER_TEXTURE_FORMAT_R32F = 3,
 } SceneEEVEERenderTextureFormat;
 
 typedef struct SceneEEVEE {

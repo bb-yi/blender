@@ -134,6 +134,7 @@
 #include "eevee_material_info.hh"
 #include "eevee_motion_blur_info.hh"
 #include "eevee_npr_info.hh"
+#include "eevee_render_texture_info.hh"
 #include "eevee_shadow_info.hh"
 #include "eevee_subsurface_info.hh"
 #include "eevee_tracing_info.hh"
