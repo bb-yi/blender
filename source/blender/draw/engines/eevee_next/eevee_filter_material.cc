@@ -51,10 +51,13 @@ void FilterMaterialModule::begin_sync()
   pass_.framebuffer_set(&framebuffer_);
   pass_.material_set(*inst_.manager, gpumat_);
   pass_.bind_texture("scene_color_tx", &scene_color_tx_);
+  pass_.bind_texture("rp_color_tx", &inst_.render_buffers.rp_color_tx);
+  pass_.bind_texture("rp_value_tx", &inst_.render_buffers.rp_value_tx);
   pass_.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);
   pass_.bind_resources(inst_.uniform_data);
   pass_.bind_resources(inst_.sampling);
   pass_.bind_resources(inst_.render_textures);
+  pass_.barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_SHADER_IMAGE_ACCESS);
   pass_.draw_procedural(GPU_PRIM_TRIS, 1, 3);
 }
 
@@ -68,6 +71,7 @@ GPUTexture *FilterMaterialModule::render(View &view, GPUTexture *input_tx, int2 
   output_tx_.ensure_2d(GPU_texture_format(input_tx), extent, GPU_TEXTURE_USAGE_GENERAL);
   framebuffer_.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(output_tx_));
 
+  GPU_memory_barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS | GPU_BARRIER_TEXTURE_FETCH);
   inst_.manager->submit(pass_, view);
   GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH);
   return output_tx_;

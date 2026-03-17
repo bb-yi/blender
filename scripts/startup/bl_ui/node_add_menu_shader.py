@@ -49,6 +49,17 @@ def object_eevee_shader_nodes_poll(context):
             eevee_shader_nodes_poll(context))
 
 
+def filter_eevee_shader_nodes_poll(context):
+    snode = context.space_data
+    return (eevee_shader_nodes_poll(context) and
+            snode.tree_type == 'ShaderNodeTree' and
+            snode.shader_type == 'FILTER')
+
+
+def filter_or_npr_eevee_shader_nodes_poll(context):
+    return filter_eevee_shader_nodes_poll(context) or npr_shader_nodes_poll(context)
+
+
 def npr_shader_nodes_poll(context):
     snode = context.space_data
     return (eevee_shader_nodes_poll and
@@ -86,7 +97,7 @@ class NODE_MT_category_shader_input(Menu):
         node_add_menu.add_node_type(
             layout,
             "ShaderNodeSceneColor",
-            poll=object_eevee_shader_nodes_poll(context),
+            poll=filter_eevee_shader_nodes_poll(context),
         )
         node_add_menu.add_node_type(layout, "ShaderNodeUVAlongStroke", poll=line_style_shader_nodes_poll(context))
         node_add_menu.add_node_type(layout, "ShaderNodeUVMap")
@@ -95,7 +106,11 @@ class NODE_MT_category_shader_input(Menu):
         node_add_menu.add_node_type(layout, "ShaderNodeWireframe")
         node_add_menu.add_node_type(layout, "ShaderNodeNPR_Input", poll=npr_shader_nodes_poll(context))
         node_add_menu.add_node_type(layout, "ShaderNodeNPR_Refraction", poll=npr_shader_nodes_poll(context))
-        node_add_menu.add_node_type(layout, "ShaderNodeInputAOV", poll=npr_shader_nodes_poll(context))
+        node_add_menu.add_node_type(
+            layout,
+            "ShaderNodeInputAOV",
+            poll=filter_or_npr_eevee_shader_nodes_poll(context),
+        )
 
         node_add_menu.draw_assets_for_catalog(layout, self.bl_label)
 
@@ -124,7 +139,7 @@ class NODE_MT_category_shader_output(Menu):
         node_add_menu.add_node_type(
             layout,
             "ShaderNodeOutputFilter",
-            poll=object_eevee_shader_nodes_poll(context),
+            poll=filter_eevee_shader_nodes_poll(context),
         )
         node_add_menu.add_node_type(
             layout,
@@ -314,7 +329,11 @@ class NODE_MT_category_shader_converter(Menu):
         node_add_menu.add_node_type(layout, "ShaderNodeShaderToRGB", poll=object_eevee_shader_nodes_poll(context))
         node_add_menu.add_node_type(layout, "ShaderNodeVectorMath")
         node_add_menu.add_node_type(layout, "ShaderNodeWavelength")
-        node_add_menu.add_node_type(layout, "ShaderNodeNPR_ImageSample", poll=npr_shader_nodes_poll(context))
+        node_add_menu.add_node_type(
+            layout,
+            "ShaderNodeNPR_ImageSample",
+            poll=filter_or_npr_eevee_shader_nodes_poll(context),
+        )
 
         node_add_menu.draw_assets_for_catalog(layout, self.bl_label)
 

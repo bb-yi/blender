@@ -4,7 +4,7 @@
 
 void npr_image_sample_view(TextureHandle image, vec3 offset, out vec4 color)
 {
-#if defined(NPR_SHADER) && defined(GPU_FRAGMENT_SHADER)
+#if (defined(NPR_SHADER) || defined(MAT_FILTER)) && defined(GPU_FRAGMENT_SHADER)
   color = TextureHandle_eval(image, offset.xy, false);
 #else
   color = vec4(0.0);
@@ -13,7 +13,7 @@ void npr_image_sample_view(TextureHandle image, vec3 offset, out vec4 color)
 
 void npr_image_sample_texel(TextureHandle image, vec3 offset, out vec4 color)
 {
-#if defined(NPR_SHADER) && defined(GPU_FRAGMENT_SHADER)
+#if (defined(NPR_SHADER) || defined(MAT_FILTER)) && defined(GPU_FRAGMENT_SHADER)
   color = TextureHandle_eval(image, offset.xy, true);
 #else
   color = vec4(0.0);
@@ -70,7 +70,7 @@ void npr_refraction(out TextureHandle combined_color, out TextureHandle position
 
 void node_input_aov(float hash, out TextureHandle color, out TextureHandle value)
 {
-#if defined(NPR_SHADER) && defined(GPU_FRAGMENT_SHADER)
+#if (defined(NPR_SHADER) || defined(MAT_FILTER)) && defined(GPU_FRAGMENT_SHADER)
   input_aov_impl(floatBitsToUint(hash), color, value);
 #else
   color = TEXTURE_HANDLE_DEFAULT;

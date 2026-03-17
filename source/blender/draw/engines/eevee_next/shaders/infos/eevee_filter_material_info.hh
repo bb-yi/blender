@@ -13,6 +13,8 @@
 GPU_SHADER_CREATE_INFO(eevee_filter_material)
 DEFINE("MAT_FILTER")
 SAMPLER(FILTER_SCENE_COLOR_TEX_SLOT, FLOAT_2D, scene_color_tx)
+SAMPLER(FILTER_AOV_COLOR_TEX_SLOT, FLOAT_2D_ARRAY, rp_color_tx)
+SAMPLER(FILTER_AOV_VALUE_TEX_SLOT, FLOAT_2D_ARRAY, rp_value_tx)
 FRAGMENT_OUT(0, VEC4, out_color)
 FRAGMENT_SOURCE("eevee_filter_material_frag.glsl")
 ADDITIONAL_INFO(eevee_global_ubo)

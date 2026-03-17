@@ -48,7 +48,7 @@ void register_node_type_sh_output_filter()
   ntype.enum_name_legacy = "OUTPUT_FILTER";
   ntype.nclass = NODE_CLASS_OUTPUT;
   ntype.declare = file_ns::node_declare;
-  ntype.add_ui_poll = object_eevee_shader_nodes_poll;
+  ntype.add_ui_poll = filter_eevee_shader_nodes_poll;
   ntype.gpu_fn = file_ns::node_shader_gpu_output_filter;
   ntype.no_muting = true;
 

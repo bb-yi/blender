@@ -42,7 +42,7 @@ void clear_aovs()
 
 int aov_color_index(uint hash)
 {
-#if defined(MAT_RENDER_PASS_SUPPORT) && defined(GPU_FRAGMENT_SHADER)
+#if defined(GPU_FRAGMENT_SHADER)
   for (int i = 0; i < AOV_MAX && i < uniform_buf.render_pass.aovs.color_len; i++) {
     if (uniform_buf.render_pass.aovs.hash_color[i].x == hash) {
       return i;
@@ -54,7 +54,7 @@ int aov_color_index(uint hash)
 
 int aov_value_index(uint hash)
 {
-#if defined(MAT_RENDER_PASS_SUPPORT) && defined(GPU_FRAGMENT_SHADER)
+#if defined(GPU_FRAGMENT_SHADER)
   for (int i = 0; i < AOV_MAX && i < uniform_buf.render_pass.aovs.value_len; i++) {
     if (uniform_buf.render_pass.aovs.hash_value[i].x == hash) {
       return i;

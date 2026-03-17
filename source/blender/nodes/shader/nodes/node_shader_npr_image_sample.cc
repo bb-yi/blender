@@ -55,7 +55,7 @@ void register_node_type_sh_npr_image_sample()
   ntype.nclass = NODE_CLASS_INPUT;
   ntype.declare = file_ns::node_declare;
   ntype.draw_buttons = file_ns::node_shader_buts;
-  ntype.add_ui_poll = npr_shader_nodes_poll;
+  ntype.add_ui_poll = filter_or_npr_eevee_shader_nodes_poll;
   ntype.gpu_fn = file_ns::node_shader_fn;
 
   blender::bke::node_register_type(&ntype);

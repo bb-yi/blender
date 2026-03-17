@@ -50,7 +50,7 @@ struct TextureHandle {
 };
 
 #define TEXTURE_HANDLE_DEFAULT TextureHandle(0, 0)
-#ifndef NPR_SHADER
+#if !defined(NPR_SHADER) && !defined(MAT_FILTER)
 #  define TextureHandle_eval(t, o, ot) vec4(0.0)
 #endif
 

@@ -45,7 +45,7 @@ void register_node_type_sh_scene_color()
   ntype.enum_name_legacy = "SCENE_COLOR";
   ntype.nclass = NODE_CLASS_INPUT;
   ntype.declare = file_ns::node_declare;
-  ntype.add_ui_poll = object_eevee_shader_nodes_poll;
+  ntype.add_ui_poll = filter_eevee_shader_nodes_poll;
   ntype.gpu_fn = file_ns::node_shader_gpu_scene_color;
 
   blender::bke::node_register_type(&ntype);

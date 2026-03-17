@@ -35,6 +35,11 @@ class FilterMaterialModule {
   void begin_sync();
   void end_sync() {}
 
+  bool uses_aov() const
+  {
+    return gpumat_ != nullptr && GPU_material_flag_get(gpumat_, GPU_MATFLAG_AOV);
+  }
+
   GPUTexture *render(View &view, GPUTexture *input_tx, int2 extent);
 };
 
