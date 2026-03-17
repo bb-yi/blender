@@ -42,6 +42,7 @@
 #include "eevee_npr.hh"
 #include "eevee_pipeline.hh"
 #include "eevee_raytrace.hh"
+#include "eevee_render_texture.hh"
 #include "eevee_renderbuffers.hh"
 #include "eevee_sampling.hh"
 #include "eevee_shader.hh"
@@ -86,6 +87,7 @@ class Instance {
   bool overlays_enabled_ = false;
   bool shaders_are_ready_ = true;
   bool skip_render_ = false;
+  int2 render_extent_override_ = int2(-1);
 
   bool npr_enabled_ = true;
 
@@ -110,6 +112,7 @@ class Instance {
   GBuffer gbuffer;
   HiZBuffer hiz_buffer;
   Sampling sampling;
+  RenderTextureModule render_textures;
   Camera camera;
   Film film;
   RenderBuffers render_buffers;
@@ -169,6 +172,7 @@ class Instance {
         cryptomatte(*this),
         hiz_buffer(*this, uniform_data.data.hiz),
         sampling(*this, uniform_data.data.clamp),
+        render_textures(*this),
         camera(*this, uniform_data.data.camera),
         film(*this, uniform_data.data.film),
         render_buffers(*this, uniform_data.data.render_pass),
@@ -227,6 +231,23 @@ class Instance {
 
   void draw_viewport();
   void draw_viewport_image_render();
+
+  int2 render_extent_get() const
+  {
+    return (render_extent_override_.x > 0 && render_extent_override_.y > 0) ?
+               render_extent_override_ :
+               film.render_extent_get();
+  }
+
+  void render_extent_override_set(const int2 &extent)
+  {
+    render_extent_override_ = extent;
+  }
+
+  void render_extent_override_clear()
+  {
+    render_extent_override_ = int2(-1);
+  }
 
   /* Light bake. */
 

@@ -75,7 +75,7 @@ void SubsurfaceModule::render(GPUTexture *direct_diffuse_light_tx,
 
   precompute_samples_location();
 
-  int2 render_extent = inst_.film.render_extent_get();
+  int2 render_extent = inst_.render_extent_get();
   setup_dispatch_size_ = int3(math::divide_ceil(render_extent, int2(SUBSURFACE_GROUP_SIZE)), 1);
 
   const int convolve_tile_count = setup_dispatch_size_.x * setup_dispatch_size_.y;

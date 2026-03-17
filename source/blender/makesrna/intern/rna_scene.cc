@@ -20,6 +20,7 @@
 #include "MOV_enums.hh"
 
 #include "BLI_math_rotation.h"
+#include "BLI_listbase.h"
 #include "BLI_string_utf8_symbols.h"
 
 #include "BLT_translation.hh"
@@ -2084,6 +2085,8 @@ static int rna_SceneEEVEE_render_texture_active_index_max(const SceneEEVEE* eeve
   return max_ii(-1, BLI_listbase_count(&eevee->render_textures) - 1);
 }
 
+static constexpr int RNA_SCENE_EEVEE_RENDER_TEXTURE_SLOT_MAX = 4;
+
 static void rna_SceneEEVEE_active_render_texture_index_range(
   PointerRNA* ptr, int* min, int* max, int* /*softmin*/, int* /*softmax*/)
 {
@@ -2130,6 +2133,11 @@ static void rna_SceneRenderTexture_name_set(PointerRNA* ptr, const char* value)
 
 static SceneRenderTexture* rna_SceneEEVEE_render_texture_add(ID* id, SceneEEVEE* eevee)
 {
+  /* Keep this in sync with Eevee runtime slot count in eevee_defines.hh. */
+  if (BLI_listbase_count(&eevee->render_textures) >= RNA_SCENE_EEVEE_RENDER_TEXTURE_SLOT_MAX) {
+    return nullptr;
+  }
+
   Scene* scene = (Scene*)id;
   SceneRenderTexture* render_texture = MEM_cnew<SceneRenderTexture>(__func__);
 
@@ -6566,6 +6574,7 @@ static void rna_def_scene_render_texture(BlenderRNA* brna)
   prop = RNA_def_property(srna, "camera", PROP_POINTER, PROP_NONE);
   RNA_def_property_pointer_sdna(prop, nullptr, "camera");
   RNA_def_property_struct_type(prop, "Object");
+  RNA_def_property_flag(prop, PROP_EDITABLE);
   RNA_def_property_pointer_funcs(prop, nullptr, nullptr, nullptr, "rna_Camera_object_poll");
   RNA_def_property_ui_text(prop, "Camera", "Camera used to render this render texture");
   RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_render_texture_update");

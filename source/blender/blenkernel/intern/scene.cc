@@ -856,6 +856,9 @@ static void scene_foreach_id(ID *id, LibraryForeachIDData *data)
   BKE_LIB_FOREACHID_PROCESS_IDSUPER(data, scene->clip, IDWALK_CB_USER);
   BKE_LIB_FOREACHID_PROCESS_IDSUPER(data, scene->gpd, IDWALK_CB_USER);
   BKE_LIB_FOREACHID_PROCESS_IDSUPER(data, scene->r.bake.cage_object, IDWALK_CB_NOP);
+  LISTBASE_FOREACH (SceneRenderTexture *, render_texture, &scene->eevee.render_textures) {
+    BKE_LIB_FOREACHID_PROCESS_IDSUPER(data, render_texture->camera, IDWALK_CB_NOP);
+  }
   if (scene->nodetree) {
     /* nodetree **are owned by IDs**, treat them as mere sub-data and not real ID! */
     BKE_LIB_FOREACHID_PROCESS_FUNCTION_CALL(
@@ -1111,6 +1114,9 @@ static void scene_blend_write(BlendWriter *writer, ID *id, const void *id_addres
       IDP_BlendWrite(writer, marker->prop);
     }
   }
+
+  /* Write scene-level Eevee render textures so memfile undo restores them consistently. */
+  BLO_write_struct_list(writer, SceneRenderTexture, &sce->eevee.render_textures);
 
   /* writing dynamic list of TransformOrientations to the blend file */
   LISTBASE_FOREACH (TransformOrientation *, ts, &sce->transform_spaces) {
@@ -1419,6 +1425,7 @@ static void scene_blend_read_data(BlendDataReader *reader, ID *id)
     IDP_BlendDataRead(reader, &marker->prop);
   }
 
+  BLO_read_struct_list(reader, SceneRenderTexture, &sce->eevee.render_textures);
   BLO_read_struct_list(reader, TransformOrientation, &(sce->transform_spaces));
   BLO_read_struct_list(reader, SceneRenderLayer, &(sce->r.layers));
   BLO_read_struct_list(reader, SceneRenderView, &(sce->r.views));

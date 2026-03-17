@@ -18,6 +18,7 @@ import bpy
 from bpy.types import Operator
 from bpy.props import (
     EnumProperty,
+    IntProperty,
     StringProperty,
 )
 
@@ -37,6 +38,7 @@ def draw_ui_list(
         insertion_operators=True,
         move_operators=True,
         menu_class_name="",
+        max_length=0,
         **kwargs,
 ):
     """
@@ -61,6 +63,8 @@ def draw_ui_list(
     :type move_operators: str
     :arg menu_class_name: Identifier of a Menu that should be drawn as a drop-down.
     :type menu_class_name: str
+    :arg max_length: Maximum number of entries allowed in the list. 0 means unlimited.
+    :type max_length: int
 
     :returns: The right side column.
     :rtype: :class:`UILayout`
@@ -87,7 +91,7 @@ def draw_ui_list(
         **kwargs,
     )
 
-    col = row.column()
+    col = row.column(align=True)
 
     if insertion_operators:
         _draw_add_remove_buttons(
@@ -95,8 +99,9 @@ def draw_ui_list(
             list_path=list_path,
             active_index_path=active_index_path,
             list_length=len(list_to_draw),
+            max_length=max_length,
         )
-        layout.separator()
+        col.separator()
 
     if menu_class_name:
         col.menu(menu_class_name, icon='DOWNARROW_HLT', text="")
@@ -120,11 +125,15 @@ def _draw_add_remove_buttons(
     list_path,
     active_index_path,
     list_length,
+    max_length,
 ):
     """Draw the +/- buttons to add and remove list entries."""
-    props = layout.operator(UILIST_OT_entry_add.bl_idname, text="", icon='ADD')
+    row = layout.row()
+    row.enabled = max_length <= 0 or list_length < max_length
+    props = row.operator(UILIST_OT_entry_add.bl_idname, text="", icon='ADD')
     props.list_path = list_path
     props.active_index_path = active_index_path
+    props.max_length = max_length
 
     row = layout.row()
     row.enabled = list_length > 0
@@ -141,14 +150,14 @@ def _draw_move_buttons(
     list_length,
 ):
     """Draw the up/down arrows to move elements in the list."""
-    col = layout.column()
+    col = layout.column(align=True)
     col.enabled = list_length > 1
-    props = layout.operator(UILIST_OT_entry_move.bl_idname, text="", icon='TRIA_UP')
+    props = col.operator(UILIST_OT_entry_move.bl_idname, text="", icon='TRIA_UP')
     props.direction = 'UP'
     props.list_path = list_path
     props.active_index_path = active_index_path
 
-    props = layout.operator(UILIST_OT_entry_move.bl_idname, text="", icon='TRIA_DOWN')
+    props = col.operator(UILIST_OT_entry_move.bl_idname, text="", icon='TRIA_DOWN')
     props.direction = 'DOWN'
     props.list_path = list_path
     props.active_index_path = active_index_path
@@ -207,9 +216,14 @@ class UILIST_OT_entry_add(GenericUIListOperator, Operator):
     bl_idname = "uilist.entry_add"
     bl_label = "Add Entry"
 
+    max_length: IntProperty(default=0)
+
     def execute(self, context):
         my_list = self.get_list(context)
         active_index = self.get_active_index(context)
+
+        if self.max_length > 0 and len(my_list) >= self.max_length:
+            return {'CANCELLED'}
 
         to_index = min(len(my_list), active_index + 1)
 

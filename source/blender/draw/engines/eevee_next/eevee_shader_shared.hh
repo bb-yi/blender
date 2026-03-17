@@ -354,6 +354,18 @@ struct CameraData {
 };
 BLI_STATIC_ASSERT_ALIGN(CameraData, 16)
 
+enum eRenderTextureFlags : uint32_t {
+  RENDER_TEXTURE_SLOT_VALID = 1u << 0u,
+  RENDER_TEXTURE_SLOT_CAPTURING = 1u << 1u,
+};
+
+struct RenderTextureData {
+  float4x4 viewproj;
+  float4x4 prev_viewproj;
+  int4 info;
+};
+BLI_STATIC_ASSERT_ALIGN(RenderTextureData, 16)
+
 /** \} */
 
 /* -------------------------------------------------------------------- */
@@ -2215,6 +2227,7 @@ using DepthOfFieldDataBuf = draw::UniformBuffer<DepthOfFieldData>;
 using DepthOfFieldScatterListBuf = draw::StorageArrayBuffer<ScatterRect, 16, true>;
 using DrawIndirectBuf = draw::StorageBuffer<DrawCommand, true>;
 using DispatchIndirectBuf = draw::StorageBuffer<DispatchCommand>;
+using RenderTextureDataBuf = draw::UniformArrayBuffer<RenderTextureData, RENDER_TEXTURE_SLOT_MAX>;
 using UniformDataBuf = draw::UniformBuffer<UniformData>;
 using VolumeProbeDataBuf = draw::UniformArrayBuffer<VolumeProbeData, IRRADIANCE_GRID_MAX>;
 using IrradianceBrickBuf = draw::StorageVectorBuffer<IrradianceBrickPacked, 16>;

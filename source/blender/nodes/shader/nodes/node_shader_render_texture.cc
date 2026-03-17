@@ -32,15 +32,32 @@ static void node_shader_init_render_texture(bNodeTree * /*ntree*/, bNode *node)
 }
 
 static int node_shader_gpu_render_texture(GPUMaterial *mat,
-                                          bNode * /*node*/,
+                                          bNode *node,
                                           bNodeExecData * /*execdata*/,
-                                          GPUNodeStack * /*in*/,
+                                          GPUNodeStack *in,
                                           GPUNodeStack *out)
 {
+  const float use_explicit_vector = (in[0].link != nullptr) ? 1.0f : 0.0f;
+  const float render_texture_uid = float(node->custom1);
+
+  if (node->custom1 < 0) {
+    return GPU_stack_link(mat,
+                          node,
+                          "node_render_texture_none",
+                          in,
+                          out,
+                          GPU_constant(&use_explicit_vector),
+                          GPU_constant(&render_texture_uid));
+  }
+
   GPU_material_flag_set(mat, GPU_MATFLAG_RENDER_TEXTURE);
-  GPU_link(mat, "set_rgba_zero", &out[0].link);
-  GPU_link(mat, "set_value_zero", &out[1].link);
-  return true;
+  return GPU_stack_link(mat,
+                        node,
+                        "node_render_texture",
+                        in,
+                        out,
+                        GPU_constant(&use_explicit_vector),
+                        GPU_constant(&render_texture_uid));
 }
 
 }  // namespace blender::nodes::node_shader_render_texture_cc

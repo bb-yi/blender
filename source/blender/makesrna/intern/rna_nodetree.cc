@@ -5408,6 +5408,7 @@ static void def_sh_render_texture(BlenderRNA * /*brna*/, StructRNA *srna)
   prop = RNA_def_property(srna, "render_texture", PROP_ENUM, PROP_NONE);
   RNA_def_property_enum_sdna(prop, nullptr, "custom1");
   RNA_def_property_enum_items(prop, render_texture_items);
+  RNA_def_property_enum_default(prop, -1);
   RNA_def_property_enum_funcs(prop, nullptr, nullptr, "rna_ShaderNodeRenderTexture_itemf");
   RNA_def_property_ui_text(prop, "Render Texture", "Scene render texture to sample");
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");

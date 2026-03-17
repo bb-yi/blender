@@ -51,6 +51,7 @@ void BackgroundPipeline::sync(GPUMaterial *gpumat,
   /* Required by validation layers. */
   world_ps_.bind_resources(inst_.cryptomatte);
   world_ps_.bind_resources(inst_.uniform_data);
+  world_ps_.bind_resources(inst_.render_textures);
   world_ps_.bind_resources(inst_.sampling);
   world_ps_.bind_resources(inst_.sphere_probes);
   world_ps_.bind_resources(inst_.volume_probes);
@@ -124,6 +125,7 @@ void WorldPipeline::sync(GPUMaterial *gpumat)
   /* Required by validation layers. */
   pass.bind_resources(inst_.cryptomatte);
   pass.bind_resources(inst_.uniform_data);
+  pass.bind_resources(inst_.render_textures);
   pass.bind_resources(inst_.sampling);
   pass.bind_resources(inst_.sphere_probes);
   pass.bind_resources(inst_.volume_probes);
@@ -236,6 +238,7 @@ void ShadowPipeline::sync()
       pass.bind_ssbo(SHADOW_PAGE_INFO_SLOT, &inst_.shadows.pages_infos_data_);
     }
     pass.bind_resources(inst_.uniform_data);
+    pass.bind_resources(inst_.render_textures);
     pass.bind_resources(inst_.sampling);
     surface_double_sided_ps_ = &pass.sub("Shadow.Surface.Double-Sided");
     surface_single_sided_ps_ = &pass.sub("Shadow.Surface.Single-Sided");
@@ -300,6 +303,7 @@ void ForwardPipeline::sync()
       prepass_ps_.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);
       prepass_ps_.bind_resources(inst_.uniform_data);
       prepass_ps_.bind_resources(inst_.velocity);
+      prepass_ps_.bind_resources(inst_.render_textures);
       prepass_ps_.bind_resources(inst_.sampling);
     }
 
@@ -325,6 +329,7 @@ void ForwardPipeline::sync()
       opaque_ps_.bind_resources(inst_.lights);
       opaque_ps_.bind_resources(inst_.shadows);
       opaque_ps_.bind_resources(inst_.volume.result);
+      opaque_ps_.bind_resources(inst_.render_textures);
       opaque_ps_.bind_resources(inst_.sampling);
       opaque_ps_.bind_resources(inst_.hiz_buffer.front);
       opaque_ps_.bind_resources(inst_.volume_probes);
@@ -353,6 +358,7 @@ void ForwardPipeline::sync()
     sub.bind_resources(inst_.lights);
     sub.bind_resources(inst_.shadows);
     sub.bind_resources(inst_.volume.result);
+    sub.bind_resources(inst_.render_textures);
     sub.bind_resources(inst_.sampling);
     sub.bind_resources(inst_.hiz_buffer.front);
     sub.bind_resources(inst_.volume_probes);
@@ -491,6 +497,7 @@ void DeferredLayerBase::gbuffer_pass_sync(Instance &inst)
   gbuffer_ps_.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst.pipelines.utility_tx);
 
   gbuffer_ps_.bind_resources(inst.uniform_data);
+  gbuffer_ps_.bind_resources(inst.render_textures);
   gbuffer_ps_.bind_resources(inst.sampling);
   gbuffer_ps_.bind_resources(inst.hiz_buffer.front);
   gbuffer_ps_.bind_resources(inst.cryptomatte);
@@ -572,6 +579,7 @@ void DeferredLayer::begin_sync()
 
     prepass_ps_.bind_resources(inst_.uniform_data);
     prepass_ps_.bind_resources(inst_.velocity);
+    prepass_ps_.bind_resources(inst_.render_textures);
     prepass_ps_.bind_resources(inst_.sampling);
 
     DRWState state_depth_only = DRW_STATE_WRITE_DEPTH | DRW_STATE_DEPTH_LESS;
@@ -1362,6 +1370,7 @@ void DeferredProbePipeline::begin_sync()
 
     pass.bind_resources(inst_.uniform_data);
     pass.bind_resources(inst_.velocity);
+    pass.bind_resources(inst_.render_textures);
     pass.bind_resources(inst_.sampling);
   }
 
@@ -1524,6 +1533,7 @@ void PlanarProbePipeline::begin_sync()
     prepass_ps_.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);
     prepass_ps_.bind_ubo(CLIP_PLANE_BUF, inst_.planar_probes.world_clip_buf_);
     prepass_ps_.bind_resources(inst_.uniform_data);
+    prepass_ps_.bind_resources(inst_.render_textures);
     prepass_ps_.bind_resources(inst_.sampling);
 
     DRWState state_depth_only = DRW_STATE_WRITE_DEPTH | DRW_STATE_DEPTH_LESS;
@@ -1704,6 +1714,7 @@ void CapturePipeline::sync()
   /* TODO(fclem): Remove. Bind to get the camera data,
    * but there should be no view dependent behavior during capture. */
   surface_ps_.bind_resources(inst_.uniform_data);
+  surface_ps_.bind_resources(inst_.render_textures);
 }
 
 PassMain::Sub *CapturePipeline::surface_material_add(::Material *blender_mat, GPUMaterial *gpumat)

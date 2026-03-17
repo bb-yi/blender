@@ -171,6 +171,8 @@ class LightModule {
   void sync_light(const Object *ob, ObjectHandle &handle);
   void end_sync();
 
+  void sync_render_extent(const int2 render_extent);
+
   /**
    * Update acceleration structure for the given view.
    */
@@ -187,6 +189,7 @@ class LightModule {
   }
 
  private:
+  void culling_extent_sync(const int2 render_extent);
   void culling_pass_sync();
   void update_pass_sync();
   void debug_pass_sync();

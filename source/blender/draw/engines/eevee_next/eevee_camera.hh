@@ -13,7 +13,15 @@
 
 #include "eevee_shader_shared.hh"
 
+struct Object;
+struct Scene;
+
 namespace blender::eevee {
+
+bool camera_data_from_object(const Scene *scene,
+                             const Object *camera_ob,
+                             int2 extent,
+                             CameraData &r_data);
 
 class Instance;
 
@@ -117,6 +125,7 @@ class Camera {
 
   void init();
   void sync();
+  void override(const CameraData &data, bool is_camera_object);
 
   /**
    * Getters

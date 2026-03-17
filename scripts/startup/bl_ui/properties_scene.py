@@ -39,6 +39,9 @@ class SceneButtonsPanel:
     bl_context = "scene"
 
 
+RENDER_TEXTURE_SLOT_MAX = 4
+
+
 def draw_eevee_render_textures(layout, context):
     if context.engine != 'BLENDER_EEVEE_NEXT':
         return
@@ -50,13 +53,21 @@ def draw_eevee_render_textures(layout, context):
     box.use_property_decorate = False
     box.label(text="Render Textures")
 
+    list_col = box.column()
+    list_col.use_property_split = False
+    list_col.use_property_decorate = False
+
     draw_ui_list(
-        box,
+        list_col,
         context,
         unique_id="scene_eevee_render_textures",
         list_path="scene.eevee.render_textures",
         active_index_path="scene.eevee.active_render_texture_index",
+        max_length=RENDER_TEXTURE_SLOT_MAX,
     )
+
+    if len(props.render_textures) >= RENDER_TEXTURE_SLOT_MAX:
+        list_col.label(text="Maximum of 4 render textures reached.", icon='INFO')
 
     active_index = props.active_render_texture_index
     if active_index < 0 or active_index >= len(props.render_textures):
