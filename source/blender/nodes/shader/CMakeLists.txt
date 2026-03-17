@@ -76,6 +76,7 @@ set(SRC
   nodes/node_shader_render_texture.cc
   nodes/node_shader_object_info.cc
   nodes/node_shader_output_aov.cc
+  nodes/node_shader_output_filter.cc
   nodes/node_shader_output_light.cc
   nodes/node_shader_output_linestyle.cc
   nodes/node_shader_output_material.cc
@@ -85,6 +86,7 @@ set(SRC
   nodes/node_shader_repeat.cc
   nodes/node_shader_rgb.cc
   nodes/node_shader_rgb_to_bw.cc
+  nodes/node_shader_scene_color.cc
   nodes/node_shader_script.cc
   nodes/node_shader_sepcomb_color.cc
   nodes/node_shader_sepcomb_hsv.cc

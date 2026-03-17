@@ -125,6 +125,7 @@
 #include "eevee_deferred_info.hh"
 #include "eevee_depth_of_field_info.hh"
 #include "eevee_film_info.hh"
+#include "eevee_filter_material_info.hh"
 #include "eevee_hiz_info.hh"
 #include "eevee_light_culling_info.hh"
 #include "eevee_lightprobe_sphere_info.hh"

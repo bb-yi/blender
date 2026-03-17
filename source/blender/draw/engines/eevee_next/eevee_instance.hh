@@ -28,6 +28,7 @@
 #include "eevee_camera.hh"
 #include "eevee_cryptomatte.hh"
 #include "eevee_depth_of_field.hh"
+#include "eevee_filter_material.hh"
 #include "eevee_film.hh"
 #include "eevee_gbuffer.hh"
 #include "eevee_hizbuffer.hh"
@@ -113,6 +114,7 @@ class Instance {
   HiZBuffer hiz_buffer;
   Sampling sampling;
   RenderTextureModule render_textures;
+  FilterMaterialModule filter_materials;
   Camera camera;
   Film film;
   RenderBuffers render_buffers;
@@ -173,6 +175,7 @@ class Instance {
         hiz_buffer(*this, uniform_data.data.hiz),
         sampling(*this, uniform_data.data.clamp),
         render_textures(*this),
+        filter_materials(*this),
         camera(*this, uniform_data.data.camera),
         film(*this, uniform_data.data.film),
         render_buffers(*this, uniform_data.data.render_pass),

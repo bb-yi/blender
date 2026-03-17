@@ -232,6 +232,7 @@
     .light_threshold = 0.01f, \
  \
     .overscan = 3.0f, \
+    .use_filter_material = false, \
  \
     .active_render_texture_index = -1, \
     .next_render_texture_uid = 1, \

@@ -11,6 +11,7 @@
 
 #include "DNA_curve_types.h"
 #include "DNA_layer_types.h"
+#include "DNA_material_types.h"
 #include "DNA_scene_types.h"
 #include "DNA_userdef_types.h"
 #include "DNA_view3d_types.h"
@@ -2078,6 +2079,44 @@ static void rna_SceneEEVEE_render_texture_update(Main* /*bmain*/,
 {
   Scene* scene = (Scene*)ptr->owner_id;
   rna_SceneEEVEE_render_texture_tag_update(scene);
+}
+
+static void rna_SceneEEVEE_filter_material_update(Main* /*bmain*/,
+  Scene* /*scene*/,
+  PointerRNA* ptr)
+{
+  Scene* scene = (Scene*)ptr->owner_id;
+  DEG_id_tag_update(&scene->id, ID_RECALC_SYNC_TO_EVAL);
+  WM_main_add_notifier(NC_SCENE | ND_RENDER_OPTIONS, scene);
+}
+
+static PointerRNA rna_SceneEEVEE_filter_material_get(PointerRNA* ptr)
+{
+  SceneEEVEE* eevee = static_cast<SceneEEVEE*>(ptr->data);
+  return RNA_id_pointer_create(reinterpret_cast<ID*>(eevee->filter_material));
+}
+
+static void rna_SceneEEVEE_filter_material_set(PointerRNA* ptr,
+  PointerRNA value,
+  ReportList* /*reports*/)
+{
+  SceneEEVEE* eevee = static_cast<SceneEEVEE*>(ptr->data);
+
+  if (eevee->filter_material) {
+    id_us_min(&eevee->filter_material->id);
+  }
+
+  eevee->filter_material = static_cast<Material*>(value.data);
+
+  if (eevee->filter_material) {
+    id_us_plus(&eevee->filter_material->id);
+  }
+}
+
+static bool rna_SceneEEVEE_filter_material_poll(PointerRNA* /*ptr*/, PointerRNA value)
+{
+  Material* material = static_cast<Material*>(value.data);
+  return material != nullptr && material->eevee_domain == MA_EEVEE_DOMAIN_FILTER;
 }
 
 static int rna_SceneEEVEE_render_texture_active_index_max(const SceneEEVEE* eevee)
@@ -8569,8 +8608,27 @@ static void rna_def_scene_eevee(BlenderRNA* brna)
   };
 
   srna = RNA_def_struct(brna, "SceneEEVEE", nullptr);
+  RNA_def_struct_nested(brna, srna, "Scene");
   RNA_def_struct_path_func(srna, "rna_SceneEEVEE_path");
   RNA_def_struct_ui_text(srna, "Scene Display", "Scene display settings for 3D viewport");
+
+  prop = RNA_def_property(srna, "use_filter_material", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "use_filter_material", 1);
+  RNA_def_property_ui_text(
+    prop, "Use Filter Material", "Apply the scene's Eevee filter material as a fullscreen pass");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_filter_material_update");
+
+  prop = RNA_def_property(srna, "filter_material", PROP_POINTER, PROP_NONE);
+  RNA_def_property_pointer_sdna(prop, nullptr, "filter_material");
+  RNA_def_property_struct_type(prop, "Material");
+  RNA_def_property_flag(prop, PROP_EDITABLE);
+  RNA_def_property_pointer_funcs(prop,
+    "rna_SceneEEVEE_filter_material_get",
+    "rna_SceneEEVEE_filter_material_set",
+    nullptr,
+    "rna_SceneEEVEE_filter_material_poll");
+  RNA_def_property_ui_text(prop, "Filter Material", "Material used as the active Eevee fullscreen filter");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_filter_material_update");
 
   prop = RNA_def_property(srna, "render_textures", PROP_COLLECTION, PROP_NONE);
   RNA_def_property_collection_sdna(prop, nullptr, "render_textures", nullptr);

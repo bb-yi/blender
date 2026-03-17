@@ -12493,6 +12493,7 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("ShaderNode", "ShaderNodeNormalMap", def_sh_normal_map);
   define("ShaderNode", "ShaderNodeObjectInfo");
   define("ShaderNode", "ShaderNodeOutputAOV", def_sh_output_aov);
+  define("ShaderNode", "ShaderNodeOutputFilter", def_sh_output);
   define("ShaderNode", "ShaderNodeOutputLight", def_sh_output);
   define("ShaderNode", "ShaderNodeOutputLineStyle", def_sh_output_linestyle);
   define("ShaderNode", "ShaderNodeOutputMaterial", def_sh_output);
@@ -12503,6 +12504,7 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("ShaderNode", "ShaderNodeRGBCurve", def_rgb_curve);
   define("ShaderNode", "ShaderNodeRGBToBW");
   define("ShaderNode", "ShaderNodeScript", def_sh_script);
+  define("ShaderNode", "ShaderNodeSceneColor");
   define("ShaderNode", "ShaderNodeSeparateColor", def_sh_combsep_color);
   define("ShaderNode", "ShaderNodeSeparateHSV");
   define("ShaderNode", "ShaderNodeSeparateRGB");

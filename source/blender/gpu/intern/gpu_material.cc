@@ -131,6 +131,7 @@ struct GPUMaterial {
   bool has_surface_output;
   bool has_volume_output;
   bool has_displacement_output;
+  bool has_filter_output;
 
   uint32_t refcount;
 
@@ -397,6 +398,14 @@ void GPU_material_output_npr(GPUMaterial *material, GPUNodeLink *link)
   }
 }
 
+void GPU_material_output_filter(GPUMaterial *material, GPUNodeLink *link)
+{
+  if (link != nullptr && !material->graph.outlink_filter) {
+    material->graph.outlink_filter = link;
+    material->has_filter_output = true;
+  }
+}
+
 void GPU_material_add_output_link_aov(GPUMaterial *material, GPUNodeLink *link, int hash)
 {
   GPUNodeGraphOutputLink *aov_link = static_cast<GPUNodeGraphOutputLink *>(
@@ -496,17 +505,34 @@ void GPU_material_set_default(GPUMaterial *material, GPUMaterial *default_materi
 
 bool GPU_material_has_surface_output(GPUMaterial *mat)
 {
+  if (mat == nullptr) {
+    return false;
+  }
   return mat->has_surface_output;
 }
 
 bool GPU_material_has_volume_output(GPUMaterial *mat)
 {
+  if (mat == nullptr) {
+    return false;
+  }
   return mat->has_volume_output;
 }
 
 bool GPU_material_has_displacement_output(GPUMaterial *mat)
 {
+  if (mat == nullptr) {
+    return false;
+  }
   return mat->has_displacement_output;
+}
+
+bool GPU_material_has_filter_output(GPUMaterial *mat)
+{
+  if (mat == nullptr) {
+    return false;
+  }
+  return mat->has_filter_output;
 }
 
 void GPU_material_flag_set(GPUMaterial *mat, eGPUMaterialFlag flag)

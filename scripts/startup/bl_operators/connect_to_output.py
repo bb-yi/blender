@@ -57,6 +57,8 @@ class NODE_OT_connect_to_output(Operator, NodeEditorBase):
                 self.shader_output_idname = 'ShaderNodeOutputMaterial'
         elif shader_type == 'WORLD':
             self.shader_output_idname = 'ShaderNodeOutputWorld'
+        elif shader_type == 'FILTER':
+            self.shader_output_idname = 'ShaderNodeOutputFilter'
         elif shader_type == 'NPR':
             self.shader_output_idname = 'ShaderNodeNPR_Output'
 

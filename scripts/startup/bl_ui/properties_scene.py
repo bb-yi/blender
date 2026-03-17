@@ -4,6 +4,7 @@
 
 import bpy
 from bpy.types import (
+    Operator,
     Panel,
     UIList,
 )
@@ -90,6 +91,66 @@ def draw_eevee_render_textures(layout, context):
     col.prop(render_texture, "format")
 
 
+def draw_eevee_filter_material(layout, context):
+    if context.engine != 'BLENDER_EEVEE_NEXT':
+        return
+
+    props = context.scene.eevee
+
+    box = layout.box()
+    box.use_property_split = True
+    box.use_property_decorate = False
+    box.label(text="Filter Material")
+
+    col = box.column()
+    col.prop(props, "use_filter_material", text="Enabled")
+
+    sub = col.column()
+    sub.active = props.use_filter_material
+    row = sub.row(align=True)
+    row.template_ID(props, "filter_material", new="scene.eevee_filter_material_new")
+
+    if not props.use_filter_material:
+        return
+
+    filter_material = props.filter_material
+    if filter_material is None:
+        box.label(text="Select a filter-domain material.", icon='INFO')
+    elif filter_material.eevee_domain != 'FILTER':
+        box.label(text="Selected material is not in Filter domain.", icon='ERROR')
+
+
+class SCENE_OT_eevee_filter_material_new(Operator):
+    bl_idname = "scene.eevee_filter_material_new"
+    bl_label = "New Filter Material"
+    bl_description = "Create a new Eevee filter-domain material and assign it to the scene"
+
+    def execute(self, context):
+        scene = context.scene
+        props = scene.eevee
+
+        mat = bpy.data.materials.new(name="Filter Material")
+        mat.use_nodes = True
+        mat.eevee_domain = 'FILTER'
+
+        nt = mat.node_tree
+        nt.nodes.clear()
+
+        scene_color = nt.nodes.new("ShaderNodeSceneColor")
+        scene_color.location = (-220, 20)
+
+        filter_output = nt.nodes.new("ShaderNodeOutputFilter")
+        filter_output.location = (40, 20)
+
+        nt.links.new(scene_color.outputs["Color"], filter_output.inputs["Color"])
+
+        props.filter_material = mat
+        props.use_filter_material = True
+
+        self.report({'INFO'}, f"Created filter material '{mat.name}'")
+        return {'FINISHED'}
+
+
 class SCENE_PT_scene(SceneButtonsPanel, Panel):
     bl_label = "Scene"
 
@@ -104,6 +165,7 @@ class SCENE_PT_scene(SceneButtonsPanel, Panel):
         layout.prop(scene, "background_set")
         layout.prop(scene, "active_clip", text="Active Clip")
         draw_eevee_render_textures(layout, context)
+        draw_eevee_filter_material(layout, context)
 
 
 class SCENE_PT_unit(SceneButtonsPanel, Panel):
@@ -521,6 +583,7 @@ class SCENE_PT_custom_props(SceneButtonsPanel, PropertyPanel, Panel):
 
 classes = (
     SCENE_UL_keying_set_paths,
+    SCENE_OT_eevee_filter_material_new,
     SCENE_PT_scene,
     SCENE_PT_unit,
     SCENE_PT_physics,

@@ -76,6 +76,8 @@ enum eGPUMaterialFlag {
   GPU_MATFLAG_TRANSLUCENT = (1 << 10),
   GPU_MATFLAG_NPR = (1 << 11),
   GPU_MATFLAG_RENDER_TEXTURE = (1 << 12),
+  GPU_MATFLAG_FILTER_MATERIAL = (1 << 13),
+  GPU_MATFLAG_SCENE_COLOR = (1 << 14),
 
   GPU_MATFLAG_VOLUME_SCATTER = (1 << 16),
   GPU_MATFLAG_VOLUME_ABSORPTION = (1 << 17),
@@ -133,6 +135,7 @@ struct GPUCodegenOutput {
   std::string volume;
   std::string thickness;
   std::string npr;
+  std::string filter;
   std::string composite;
   std::string material_functions;
 
@@ -216,6 +219,7 @@ void GPU_material_output_displacement(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_output_thickness(GPUMaterial *material, GPUNodeLink *link);
 
 void GPU_material_output_npr(GPUMaterial *material, GPUNodeLink *link);
+void GPU_material_output_filter(GPUMaterial *material, GPUNodeLink *link);
 
 void GPU_material_add_output_link_aov(GPUMaterial *material, GPUNodeLink *link, int hash);
 
@@ -333,6 +337,7 @@ void GPU_material_uniform_buffer_create(GPUMaterial *material, ListBase *inputs)
 bool GPU_material_has_surface_output(GPUMaterial *mat);
 bool GPU_material_has_volume_output(GPUMaterial *mat);
 bool GPU_material_has_displacement_output(GPUMaterial *mat);
+bool GPU_material_has_filter_output(GPUMaterial *mat);
 
 void GPU_material_flag_set(GPUMaterial *mat, eGPUMaterialFlag flag);
 bool GPU_material_flag_get(const GPUMaterial *mat, eGPUMaterialFlag flag);

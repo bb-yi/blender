@@ -60,9 +60,10 @@ enum eGPUNodeTag {
   GPU_NODE_TAG_FUNCTION = (1 << 5),
   GPU_NODE_TAG_COMPOSITOR = (1 << 6),
   GPU_NODE_TAG_NPR = (1 << 7),
+  GPU_NODE_TAG_FILTER = (1 << 8),
 };
 
-ENUM_OPERATORS(eGPUNodeTag, GPU_NODE_TAG_COMPOSITOR)
+ENUM_OPERATORS(eGPUNodeTag, GPU_NODE_TAG_FILTER)
 
 struct GPUNode {
   GPUNode *next, *prev;
@@ -177,6 +178,8 @@ struct GPUNodeGraph {
   GPUNodeLink *outlink_thickness;
   /* NPR Output. */
   GPUNodeLink *outlink_npr;
+  /* Filter Output. */
+  GPUNodeLink *outlink_filter;
   /* List of GPUNodeGraphOutputLink */
   ListBase outlink_aovs;
   /* List of GPUNodeGraphFunctionLink */

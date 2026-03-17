@@ -99,6 +99,7 @@ set(SRC
   engines/eevee_next/eevee_cryptomatte.cc
   engines/eevee_next/eevee_depth_of_field.cc
   engines/eevee_next/eevee_engine.cc
+  engines/eevee_next/eevee_filter_material.cc
   engines/eevee_next/eevee_film.cc
   engines/eevee_next/eevee_hizbuffer.cc
   engines/eevee_next/eevee_instance.cc
@@ -201,6 +202,7 @@ set(SRC
   engines/eevee_next/eevee_cryptomatte.hh
   engines/eevee_next/eevee_depth_of_field.hh
   engines/eevee_next/eevee_engine.h
+  engines/eevee_next/eevee_filter_material.hh
   engines/eevee_next/eevee_film.hh
   engines/eevee_next/eevee_gbuffer.hh
   engines/eevee_next/eevee_hizbuffer.hh
@@ -376,6 +378,7 @@ set(GLSL_SRC
   engines/eevee_next/shaders/eevee_film_frag.glsl
   engines/eevee_next/shaders/eevee_film_lib.glsl
   engines/eevee_next/shaders/eevee_film_pass_convert_comp.glsl
+  engines/eevee_next/shaders/eevee_filter_material_frag.glsl
   engines/eevee_next/shaders/eevee_filter_lib.glsl
   engines/eevee_next/shaders/eevee_forward_lib.glsl
   engines/eevee_next/shaders/eevee_gbuffer_lib.glsl

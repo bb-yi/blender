@@ -122,6 +122,9 @@ void SyncModule::sync_mesh(Object *ob, ObjectHandle &ob_handle, const ObjectRef 
 
     Material &material = material_array.materials[i];
     GPUMaterial *gpu_material = material_array.gpu_materials[i];
+    if (gpu_material == nullptr || (!material.has_surface && !material.has_volume)) {
+      continue;
+    }
 
     if (material.has_volume) {
       volume_call(material.volume_occupancy, inst_.scene, ob, geom, res_handle);
@@ -206,6 +209,10 @@ bool SyncModule::sync_sculpt(Object *ob, ObjectHandle &ob_handle, const ObjectRe
     }
 
     Material &material = material_array.materials[batches[i].material_slot];
+    GPUMaterial *gpu_material = material_array.gpu_materials[i];
+    if (gpu_material == nullptr || (!material.has_surface && !material.has_volume)) {
+      continue;
+    }
 
     if (material.has_volume) {
       volume_call(material.volume_occupancy, inst_.scene, ob, geom, res_handle);
@@ -235,7 +242,6 @@ bool SyncModule::sync_sculpt(Object *ob, ObjectHandle &ob_handle, const ObjectRe
     is_alpha_blend = is_alpha_blend || material.is_alpha_blend_transparent;
     has_transparent_shadows = has_transparent_shadows || material.has_transparent_shadows;
 
-    GPUMaterial *gpu_material = material_array.gpu_materials[i];
     ::Material *mat = GPU_material_get_material(gpu_material);
     inst_.cryptomatte.sync_material(mat);
 

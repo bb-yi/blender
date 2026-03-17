@@ -106,6 +106,7 @@ void Instance::init(const int2 &output_res,
 
   sampling.init(scene);
   render_textures.init();
+  filter_materials.init();
   camera.init();
   film.init(output_res, output_rect);
   render_buffers.init();
@@ -152,6 +153,7 @@ void Instance::init_light_bake(Depsgraph *depsgraph, draw::Manager *manager)
 
   sampling.init(scene);
   render_textures.init();
+  filter_materials.init();
   camera.init();
   /* Film isn't used but init to avoid side effects in other module. */
   rcti empty_rect{0, 0, 0, 0};
@@ -219,6 +221,7 @@ void Instance::begin_sync()
   shadows.begin_sync();
   volume.begin_sync();
   render_textures.begin_sync();
+  filter_materials.begin_sync();
   pipelines.begin_sync();
   cryptomatte.begin_sync();
   sphere_probes.begin_sync();
@@ -346,6 +349,7 @@ void Instance::end_sync()
   planar_probes.end_sync();
   npr.end_sync();
   render_textures.end_sync();
+  filter_materials.end_sync();
 
   uniform_data.push_update();
 

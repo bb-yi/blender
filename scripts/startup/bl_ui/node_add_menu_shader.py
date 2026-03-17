@@ -83,6 +83,11 @@ class NODE_MT_category_shader_input(Menu):
         node_add_menu.add_node_type(layout, "ShaderNodeRGB")
         node_add_menu.add_node_type(layout, "ShaderNodeTangent")
         node_add_menu.add_node_type(layout, "ShaderNodeTexCoord")
+        node_add_menu.add_node_type(
+            layout,
+            "ShaderNodeSceneColor",
+            poll=object_eevee_shader_nodes_poll(context),
+        )
         node_add_menu.add_node_type(layout, "ShaderNodeUVAlongStroke", poll=line_style_shader_nodes_poll(context))
         node_add_menu.add_node_type(layout, "ShaderNodeUVMap")
         node_add_menu.add_node_type(layout, "ShaderNodeValue")
@@ -115,6 +120,11 @@ class NODE_MT_category_shader_output(Menu):
         node_add_menu.add_node_type(
             layout,
             "ShaderNodeOutputAOV",
+        )
+        node_add_menu.add_node_type(
+            layout,
+            "ShaderNodeOutputFilter",
+            poll=object_eevee_shader_nodes_poll(context),
         )
         node_add_menu.add_node_type(
             layout,

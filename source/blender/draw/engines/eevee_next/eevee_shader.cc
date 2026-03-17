@@ -9,6 +9,8 @@
  * and static shader usage.
  */
 
+#include <cstdio>
+
 #include "GPU_capabilities.hh"
 
 #include "BKE_material.hh"
@@ -443,6 +445,9 @@ class SamplerSlots {
     else if (pipeline_type == MAT_PIPE_FORWARD) {
       last_reserved_ = MATERIAL_TEXTURE_RESERVED_SLOT_LAST_FORWARD;
     }
+    else if (pipeline_type == MAT_PIPE_FILTER) {
+      last_reserved_ = MATERIAL_TEXTURE_RESERVED_SLOT_LAST_FILTER;
+    }
     else if (pipeline_type == MAT_PIPE_DEFERRED_NPR) {
       last_reserved_ = MATERIAL_TEXTURE_RESERVED_SLOT_LAST_NPR;
     }
@@ -779,6 +784,11 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     frag_gen << (!codegen.npr.empty() ? codegen.npr : "return vec4(0.0);\n");
     frag_gen << "}\n\n";
 
+    frag_gen << "vec4 nodetree_filter()\n";
+    frag_gen << "{\n";
+    frag_gen << (!codegen.filter.empty() ? codegen.filter : "return vec4(0.0);\n");
+    frag_gen << "}\n\n";
+
     /* TODO(fclem): Find a way to pass material parameters inside the material UBO. */
     info.define("thickness_mode", thickness_type == MAT_THICKNESS_SLAB ? "-1.0" : "1.0");
 
@@ -848,6 +858,9 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       switch (pipeline_type) {
         case MAT_PIPE_VOLUME_MATERIAL:
           info.additional_info("eevee_surf_volume");
+          break;
+        case MAT_PIPE_FILTER:
+          info.additional_info("eevee_filter_material");
           break;
         default:
           info.additional_info("eevee_surf_world");

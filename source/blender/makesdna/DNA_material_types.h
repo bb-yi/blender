@@ -171,7 +171,8 @@ typedef struct Material {
   short flag;
   /** Rendering modes for EEVEE. */
   char surface_render_method;
-  char _pad1[1];
+  /** Material domain for EEVEE. */
+  char eevee_domain;
 
   /* Colors from Blender Internal that we are still using. */
   float r, g, b, a;
@@ -344,6 +345,12 @@ enum {
 enum {
   MA_SURFACE_METHOD_DEFERRED = 0,
   MA_SURFACE_METHOD_FORWARD = 1,
+};
+
+/** #Material::eevee_domain */
+enum {
+  MA_EEVEE_DOMAIN_SURFACE = 0,
+  MA_EEVEE_DOMAIN_FILTER = 1,
 };
 
 /** #Material::volume_intersection_method */

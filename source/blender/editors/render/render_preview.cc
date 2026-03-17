@@ -1087,6 +1087,7 @@ static bool shader_preview_break(void *spv)
 }
 
 static void shader_preview_updatejob(void * /*spv*/) {}
+static void shader_preview_fill_placeholder(ShaderPreview *sp, uchar color);
 
 /* Renders texture directly to render buffer. */
 static void shader_preview_texture(ShaderPreview *sp, Tex *tex, Scene *sce, Render *re)
@@ -1167,6 +1168,16 @@ static void shader_preview_render(ShaderPreview *sp, ID *id, int split, int firs
   }
   else {
     sizex = sp->sizex;
+  }
+
+  if (idtype == ID_MA) {
+    Material *material = (Material *)id;
+    if (material->eevee_domain == MA_EEVEE_DOMAIN_FILTER) {
+      /* Filter-domain materials are fullscreen post-process shaders, so the classic preview
+       * sphere render path is not meaningful and can hit surface-only assumptions. */
+      shader_preview_fill_placeholder(sp, 0x66);
+      return;
+    }
   }
 
   /* we have to set preview variables first */
@@ -1419,6 +1430,16 @@ static void set_alpha(char *cp, int sizex, int sizey, char alpha)
   for (a = 0; a < size; a++, cp += 4) {
     cp[3] = alpha;
   }
+}
+
+static void shader_preview_fill_placeholder(ShaderPreview *sp, const uchar color)
+{
+  if (sp->pr_rect == nullptr) {
+    return;
+  }
+
+  memset(sp->pr_rect, color, sp->sizex * sp->sizey * sizeof(uint));
+  set_alpha((char *)sp->pr_rect, sp->sizex, sp->sizey, 255);
 }
 
 static void icon_preview_startjob(void *customdata, bool *stop, bool *do_update)

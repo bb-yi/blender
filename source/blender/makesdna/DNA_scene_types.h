@@ -1997,9 +1997,12 @@ typedef struct SceneEEVEE {
   float overscan;
   float light_threshold;
 
+  struct Material *filter_material;
   ListBase render_textures;
   int active_render_texture_index;
   int next_render_texture_uid;
+  char use_filter_material;
+  char _pad2[7];
 } SceneEEVEE;
 
 typedef struct SceneGpencil {
@@ -2168,6 +2171,7 @@ typedef struct Scene {
   struct SceneGpencil grease_pencil_settings;
   struct SceneHydra hydra;
 
+  void *_pad10;
   SceneRuntimeHandle *runtime;
   void *_pad9;
 } Scene;

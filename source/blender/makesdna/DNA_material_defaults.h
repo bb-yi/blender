@@ -27,6 +27,7 @@
     .spec = 0.5, \
  \
     .roughness = 0.4f, \
+    .eevee_domain = MA_EEVEE_DOMAIN_SURFACE, \
  \
     .pr_type = MA_SPHERE, \
  \

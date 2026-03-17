@@ -335,6 +335,7 @@ class EEVEE_NEXT_MATERIAL_PT_settings(MaterialButtonsPanel, Panel):
 
         mat = context.material
 
+        layout.prop(mat, "eevee_domain", text="Domain")
         layout.prop(mat, "pass_index")
 
 

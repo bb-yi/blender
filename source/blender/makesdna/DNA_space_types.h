@@ -1668,6 +1668,7 @@ typedef enum eSpaceNode_ShaderFrom {
   SNODE_SHADER_WORLD = 1,
   SNODE_SHADER_LINESTYLE = 2,
   SNODE_SHADER_NPR = 3,
+  SNODE_SHADER_FILTER = 4,
 } eSpaceNode_ShaderFrom;
 
 /** #SpaceNode.geometry_nodes_type */

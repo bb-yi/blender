@@ -109,6 +109,20 @@ class NODE_HT_header(Header):
                 row.enabled = not snode.pin
                 row.template_ID(scene, "world", new="world.new")
 
+            if snode.shader_type == 'FILTER':
+                NODE_MT_editor_menus.draw_collapsible(context, layout)
+                props = scene.eevee
+
+                if snode_id:
+                    row = layout.row()
+                    row.prop(snode_id, "use_nodes")
+
+                layout.separator_spacer()
+
+                row = layout.row(align=True)
+                row.enabled = not snode.pin
+                row.template_ID(props, "filter_material", new="scene.eevee_filter_material_new")
+
             if snode.shader_type == 'LINESTYLE':
                 view_layer = context.view_layer
                 lineset = view_layer.freestyle_settings.linesets.active

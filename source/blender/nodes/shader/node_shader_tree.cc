@@ -114,6 +114,14 @@ static void shader_get_from_context(const bContext *C,
       *r_ntree = scene->world->nodetree;
     }
   }
+  else if (snode->shaderfrom == SNODE_SHADER_FILTER) {
+    Material *ma = scene->eevee.filter_material;
+    if (ma) {
+      *r_from = nullptr;
+      *r_id = &ma->id;
+      *r_ntree = ma->nodetree;
+    }
+  }
   else {
     BLI_assert_unreachable();
   }
@@ -1388,6 +1396,29 @@ static bNode *ntreeShaderNPROutputNode(bNodeTree *localtree)
   return output;
 }
 
+static bNode *ntreeShaderFilterOutputNode(bNodeTree *localtree)
+{
+  bNode *output = nullptr;
+  LISTBASE_FOREACH (bNode *, node, &localtree->nodes) {
+    if (node->type_legacy != SH_NODE_OUTPUT_FILTER) {
+      continue;
+    }
+    if (output == nullptr) {
+      output = node;
+    }
+    else if ((node->flag & NODE_DO_OUTPUT) && !(output->flag & NODE_DO_OUTPUT)) {
+      output = node;
+    }
+  }
+  return output;
+}
+
+static bool gpu_material_uses_filter_domain(GPUMaterial *mat)
+{
+  const Material *material = GPU_material_get_material(mat);
+  return material != nullptr && material->eevee_domain == MA_EEVEE_DOMAIN_FILTER;
+}
+
 bNodeTree *ntreeGPUNPRNodes(bNodeTree *material_tree, GPUMaterial *mat)
 {
   bNodeTree *npr_tree = npr_tree_get(material_tree);
@@ -1424,24 +1455,33 @@ bNodeTree *ntreeGPUNPRNodes(bNodeTree *material_tree, GPUMaterial *mat)
 void ntreeGPUMaterialNodes(bNodeTree *localtree, GPUMaterial *mat)
 {
   bNodeTreeExec *exec;
+  const bool is_filter_material = gpu_material_uses_filter_domain(mat);
 
   ntree_shader_groups_remove_muted_links(localtree);
   ntree_shader_groups_expand_inputs(localtree);
   ntree_shader_groups_flatten(localtree);
 
-  bNode *output = ntreeShaderOutputNode(localtree, SHD_OUTPUT_EEVEE);
+  bNode *output = is_filter_material ? ntreeShaderFilterOutputNode(localtree) :
+                                       ntreeShaderOutputNode(localtree, SHD_OUTPUT_EEVEE);
   /* Tree is valid if it contains no undefined implicit socket type cast. */
-  bool valid_tree = ntree_shader_implicit_closure_cast(localtree);
+  bool valid_tree = is_filter_material ? true : ntree_shader_implicit_closure_cast(localtree);
 
   if (valid_tree) {
     ntree_shader_pruned_unused(localtree, output);
-    if (output != nullptr) {
+    if (!is_filter_material && output != nullptr) {
       ntree_shader_shader_to_rgba_branches(localtree);
       ntree_shader_weight_tree_invert(localtree, output);
     }
   }
 
   exec = ntreeShaderBeginExecTree(localtree);
+  if (is_filter_material) {
+    if (output != nullptr) {
+      ntreeExecGPUNodes(exec, mat, output);
+    }
+    ntreeShaderEndExecTree(exec);
+    return;
+  }
   /* Execute nodes ordered by the number of ShaderToRGB nodes found in their path,
    * so all closures can be properly evaluated. */
   int16_t max_depth = 0;

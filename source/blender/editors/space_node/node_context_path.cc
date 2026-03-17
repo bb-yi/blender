@@ -10,6 +10,7 @@
 #include "BLI_vector.hh"
 
 #include "DNA_node_types.h"
+#include "DNA_scene_types.h"
 
 #include "BKE_context.hh"
 #include "BKE_material.hh"
@@ -74,6 +75,14 @@ static void get_context_path_node_shader(const bContext &C,
       /* Skip the base node tree here, because the world contains a node tree already. */
       context_path_add_node_tree_and_node_groups(snode, path, true);
     }
+    else if (snode.shaderfrom == SNODE_SHADER_FILTER && snode.id != nullptr &&
+             GS(snode.id->name) == ID_MA)
+    {
+      Scene *scene = CTX_data_scene(&C);
+      ui::context_path_add_generic(path, RNA_Scene, scene);
+      ui::context_path_add_generic(path, RNA_Material, reinterpret_cast<Material *>(snode.id));
+      context_path_add_node_tree_and_node_groups(snode, path, true);
+    }
     else {
       context_path_add_node_tree_and_node_groups(snode, path);
     }
@@ -97,6 +106,13 @@ static void get_context_path_node_shader(const bContext &C,
       ui::context_path_add_generic(path, RNA_Scene, scene);
       if (scene != nullptr) {
         ui::context_path_add_generic(path, RNA_World, scene->world);
+      }
+    }
+    else if (snode.shaderfrom == SNODE_SHADER_FILTER) {
+      Scene *scene = CTX_data_scene(&C);
+      ui::context_path_add_generic(path, RNA_Scene, scene);
+      if (scene != nullptr) {
+        ui::context_path_add_generic(path, RNA_Material, scene->eevee.filter_material);
       }
     }
 #ifdef WITH_FREESTYLE

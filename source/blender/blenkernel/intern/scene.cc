@@ -856,6 +856,7 @@ static void scene_foreach_id(ID *id, LibraryForeachIDData *data)
   BKE_LIB_FOREACHID_PROCESS_IDSUPER(data, scene->clip, IDWALK_CB_USER);
   BKE_LIB_FOREACHID_PROCESS_IDSUPER(data, scene->gpd, IDWALK_CB_USER);
   BKE_LIB_FOREACHID_PROCESS_IDSUPER(data, scene->r.bake.cage_object, IDWALK_CB_NOP);
+  BKE_LIB_FOREACHID_PROCESS_IDSUPER(data, scene->eevee.filter_material, IDWALK_CB_USER);
   LISTBASE_FOREACH (SceneRenderTexture *, render_texture, &scene->eevee.render_textures) {
     BKE_LIB_FOREACHID_PROCESS_IDSUPER(data, render_texture->camera, IDWALK_CB_NOP);
   }
