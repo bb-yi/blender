@@ -8,6 +8,7 @@
  */
 
 #include "BLI_vector.hh"
+#include "BLI_listbase.h"
 
 #include "DNA_node_types.h"
 #include "DNA_scene_types.h"
@@ -112,7 +113,10 @@ static void get_context_path_node_shader(const bContext &C,
       Scene *scene = CTX_data_scene(&C);
       ui::context_path_add_generic(path, RNA_Scene, scene);
       if (scene != nullptr) {
-        ui::context_path_add_generic(path, RNA_Material, scene->eevee.filter_material);
+        auto *filter_entry = static_cast<SceneFilterMaterial *>(
+            BLI_findlink(&scene->eevee.filter_materials, scene->eevee.active_filter_material_index));
+        ui::context_path_add_generic(
+            path, RNA_Material, (filter_entry != nullptr) ? filter_entry->material : nullptr);
       }
     }
 #ifdef WITH_FREESTYLE

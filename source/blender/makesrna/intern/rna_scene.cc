@@ -2090,33 +2090,164 @@ static void rna_SceneEEVEE_filter_material_update(Main* /*bmain*/,
   WM_main_add_notifier(NC_SCENE | ND_RENDER_OPTIONS, scene);
 }
 
-static PointerRNA rna_SceneEEVEE_filter_material_get(PointerRNA* ptr)
+static void rna_SceneEEVEE_filter_material_tag_update(Scene* scene)
 {
-  SceneEEVEE* eevee = static_cast<SceneEEVEE*>(ptr->data);
-  return RNA_id_pointer_create(reinterpret_cast<ID*>(eevee->filter_material));
+  DEG_id_tag_update(&scene->id, ID_RECALC_SYNC_TO_EVAL);
+  WM_main_add_notifier(NC_SCENE | ND_RENDER_OPTIONS, scene);
 }
 
-static void rna_SceneEEVEE_filter_material_set(PointerRNA* ptr,
-  PointerRNA value,
-  ReportList* /*reports*/)
+static int rna_SceneEEVEE_filter_material_active_index_max(const SceneEEVEE* eevee)
 {
-  SceneEEVEE* eevee = static_cast<SceneEEVEE*>(ptr->data);
+  return max_ii(-1, BLI_listbase_count(&eevee->filter_materials) - 1);
+}
 
-  if (eevee->filter_material) {
-    id_us_min(&eevee->filter_material->id);
+static void rna_SceneEEVEE_active_filter_material_index_range(
+  PointerRNA* ptr, int* min, int* max, int* /*softmin*/, int* /*softmax*/)
+{
+  SceneEEVEE* eevee = (SceneEEVEE*)ptr->data;
+
+  *min = -1;
+  *max = rna_SceneEEVEE_filter_material_active_index_max(eevee);
+}
+
+static int rna_SceneEEVEE_active_filter_material_index_get(PointerRNA* ptr)
+{
+  SceneEEVEE* eevee = (SceneEEVEE*)ptr->data;
+  return std::clamp(
+    eevee->active_filter_material_index, -1, rna_SceneEEVEE_filter_material_active_index_max(eevee));
+}
+
+static void rna_SceneEEVEE_active_filter_material_index_set(PointerRNA* ptr, int value)
+{
+  SceneEEVEE* eevee = (SceneEEVEE*)ptr->data;
+  eevee->active_filter_material_index = std::clamp(
+    value, -1, rna_SceneEEVEE_filter_material_active_index_max(eevee));
+}
+
+static std::optional<std::string> rna_SceneFilterMaterial_path(const PointerRNA* ptr)
+{
+  const SceneFilterMaterial* filter_material = (SceneFilterMaterial*)ptr->data;
+  char filter_material_name_esc[sizeof(filter_material->name) * 2];
+  BLI_str_escape(filter_material_name_esc, filter_material->name, sizeof(filter_material_name_esc));
+  return fmt::format("eevee.filter_materials[\"{}\"]", filter_material_name_esc);
+}
+
+static void rna_SceneFilterMaterial_name_set(PointerRNA* ptr, const char* value)
+{
+  Scene* scene = (Scene*)ptr->owner_id;
+  SceneFilterMaterial* filter_material = (SceneFilterMaterial*)ptr->data;
+  STRNCPY_UTF8(filter_material->name, value);
+  BLI_uniquename(&scene->eevee.filter_materials,
+    filter_material,
+    DATA_("Filter Material"),
+    '.',
+    offsetof(SceneFilterMaterial, name),
+    sizeof(filter_material->name));
+}
+
+static PointerRNA rna_SceneFilterMaterial_material_get(PointerRNA* ptr)
+{
+  SceneFilterMaterial* filter_material = static_cast<SceneFilterMaterial*>(ptr->data);
+  return RNA_id_pointer_create(reinterpret_cast<ID*>(filter_material->material));
+}
+
+static void rna_SceneFilterMaterial_material_set(
+  PointerRNA* ptr, PointerRNA value, ReportList* /*reports*/)
+{
+  SceneFilterMaterial* filter_material = static_cast<SceneFilterMaterial*>(ptr->data);
+
+  if (filter_material->material) {
+    id_us_min(&filter_material->material->id);
   }
 
-  eevee->filter_material = static_cast<Material*>(value.data);
+  filter_material->material = static_cast<Material*>(value.data);
 
-  if (eevee->filter_material) {
-    id_us_plus(&eevee->filter_material->id);
+  if (filter_material->material) {
+    id_us_plus(&filter_material->material->id);
   }
 }
 
-static bool rna_SceneEEVEE_filter_material_poll(PointerRNA* /*ptr*/, PointerRNA value)
+static bool rna_SceneFilterMaterial_material_poll(PointerRNA* /*ptr*/, PointerRNA value)
 {
   Material* material = static_cast<Material*>(value.data);
   return material != nullptr && material->eevee_domain == MA_EEVEE_DOMAIN_FILTER;
+}
+
+static SceneFilterMaterial* rna_SceneEEVEE_filter_material_add(ID* id, SceneEEVEE* eevee)
+{
+  Scene* scene = (Scene*)id;
+  SceneFilterMaterial* filter_material = MEM_cnew<SceneFilterMaterial>(__func__);
+
+  filter_material->uid = max_ii(eevee->next_filter_material_uid, 1);
+  eevee->next_filter_material_uid = filter_material->uid + 1;
+  filter_material->enabled = true;
+  STRNCPY(filter_material->name, DATA_("Filter Material"));
+  BLI_uniquename(&eevee->filter_materials,
+    filter_material,
+    DATA_("Filter Material"),
+    '.',
+    offsetof(SceneFilterMaterial, name),
+    sizeof(filter_material->name));
+  BLI_addtail(&eevee->filter_materials, filter_material);
+  eevee->active_filter_material_index = BLI_findindex(&eevee->filter_materials, filter_material);
+
+  rna_SceneEEVEE_filter_material_tag_update(scene);
+  return filter_material;
+}
+
+static void rna_SceneEEVEE_filter_material_remove(
+  ID* id, SceneEEVEE* eevee, ReportList* reports, int index)
+{
+  Scene* scene = (Scene*)id;
+  SceneFilterMaterial* filter_material = static_cast<SceneFilterMaterial*>(
+    BLI_findlink(&eevee->filter_materials, index));
+
+  if (filter_material == nullptr) {
+    BKE_reportf(reports, RPT_ERROR, "Filter Material index '%d' not found", index);
+    return;
+  }
+
+  if (filter_material->material) {
+    id_us_min(&filter_material->material->id);
+  }
+  BLI_remlink(&eevee->filter_materials, filter_material);
+  MEM_freeN(filter_material);
+  eevee->active_filter_material_index = std::clamp(eevee->active_filter_material_index,
+    -1,
+    rna_SceneEEVEE_filter_material_active_index_max(eevee));
+
+  rna_SceneEEVEE_filter_material_tag_update(scene);
+}
+
+static void rna_SceneEEVEE_filter_material_move(
+  ID* id, SceneEEVEE* eevee, ReportList* reports, int from, int to)
+{
+  if (from == to) {
+    return;
+  }
+
+  if (!BLI_listbase_move_index(&eevee->filter_materials, from, to)) {
+    BKE_reportf(
+      reports, RPT_ERROR, "Could not move filter material from index '%d' to '%d'", from, to);
+    return;
+  }
+
+  if (eevee->active_filter_material_index == from) {
+    eevee->active_filter_material_index = to;
+  }
+  else if (from < to && eevee->active_filter_material_index > from &&
+           eevee->active_filter_material_index <= to)
+  {
+    eevee->active_filter_material_index--;
+  }
+  else if (to < from && eevee->active_filter_material_index >= to &&
+           eevee->active_filter_material_index < from)
+  {
+    eevee->active_filter_material_index++;
+  }
+
+  Scene* scene = (Scene*)id;
+  rna_SceneEEVEE_filter_material_tag_update(scene);
 }
 
 static int rna_SceneEEVEE_render_texture_active_index_max(const SceneEEVEE* eevee)
@@ -6572,6 +6703,79 @@ static void rna_def_scene_eevee_render_textures(BlenderRNA* brna, PropertyRNA* c
   RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
 }
 
+static void rna_def_scene_eevee_filter_materials(BlenderRNA* brna, PropertyRNA* cprop)
+{
+  StructRNA* srna;
+  FunctionRNA* func;
+  PropertyRNA* parm;
+
+  RNA_def_property_srna(cprop, "SceneFilterMaterials");
+  srna = RNA_def_struct(brna, "SceneFilterMaterials", nullptr);
+  RNA_def_struct_sdna(srna, "SceneEEVEE");
+  RNA_def_struct_ui_text(srna, "Scene Filter Materials", "Collection of Eevee filter materials");
+
+  func = RNA_def_function(srna, "add", "rna_SceneEEVEE_filter_material_add");
+  RNA_def_function_ui_description(func, "Add a filter material entry");
+  RNA_def_function_flag(func, FUNC_USE_SELF_ID);
+  parm = RNA_def_pointer(
+    func, "filter_material", "SceneFilterMaterial", "", "Newly created filter material entry");
+  RNA_def_function_return(func, parm);
+
+  func = RNA_def_function(srna, "remove", "rna_SceneEEVEE_filter_material_remove");
+  RNA_def_function_ui_description(func, "Remove a filter material entry");
+  RNA_def_function_flag(func, FUNC_USE_SELF_ID | FUNC_USE_REPORTS);
+  parm = RNA_def_int(func, "index", -1, INT_MIN, INT_MAX, "Index", "Index to remove", -1, INT_MAX);
+  RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
+
+  func = RNA_def_function(srna, "move", "rna_SceneEEVEE_filter_material_move");
+  RNA_def_function_ui_description(func, "Move a filter material entry");
+  RNA_def_function_flag(func, FUNC_USE_SELF_ID | FUNC_USE_REPORTS);
+  parm = RNA_def_int(
+    func, "from_index", -1, INT_MIN, INT_MAX, "From Index", "Index to move", -1, INT_MAX);
+  RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
+  parm = RNA_def_int(func, "to_index", -1, INT_MIN, INT_MAX, "To Index", "Target index", -1, INT_MAX);
+  RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
+}
+
+static void rna_def_scene_filter_material(BlenderRNA* brna)
+{
+  StructRNA* srna;
+  PropertyRNA* prop;
+
+  srna = RNA_def_struct(brna, "SceneFilterMaterial", nullptr);
+  RNA_def_struct_sdna(srna, "SceneFilterMaterial");
+  RNA_def_struct_path_func(srna, "rna_SceneFilterMaterial_path");
+  RNA_def_struct_ui_text(srna, "Scene Filter Material", "Scene-level Eevee filter material entry");
+
+  prop = RNA_def_property(srna, "name", PROP_STRING, PROP_NONE);
+  RNA_def_property_string_funcs(prop, nullptr, nullptr, "rna_SceneFilterMaterial_name_set");
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_ui_text(prop, "Name", "Display name of this filter material entry");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_filter_material_update");
+  RNA_def_struct_name_property(srna, prop);
+
+  prop = RNA_def_property(srna, "uid", PROP_INT, PROP_NONE);
+  RNA_def_property_int_sdna(prop, nullptr, "uid");
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_ui_text(prop, "UID", "Stable identifier for this filter entry");
+
+  prop = RNA_def_property(srna, "enabled", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "enabled", 1);
+  RNA_def_property_ui_text(prop, "Enabled", "Apply this filter material entry");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_filter_material_update");
+
+  prop = RNA_def_property(srna, "material", PROP_POINTER, PROP_NONE);
+  RNA_def_property_struct_type(prop, "Material");
+  RNA_def_property_flag(prop, PROP_EDITABLE);
+  RNA_def_property_pointer_funcs(prop,
+    "rna_SceneFilterMaterial_material_get",
+    "rna_SceneFilterMaterial_material_set",
+    nullptr,
+    "rna_SceneFilterMaterial_material_poll");
+  RNA_def_property_ui_text(prop, "Material", "Material used by this filter entry");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_filter_material_update");
+}
+
 static void rna_def_scene_render_texture(BlenderRNA* brna)
 {
   StructRNA* srna;
@@ -8612,22 +8816,18 @@ static void rna_def_scene_eevee(BlenderRNA* brna)
   RNA_def_struct_path_func(srna, "rna_SceneEEVEE_path");
   RNA_def_struct_ui_text(srna, "Scene Display", "Scene display settings for 3D viewport");
 
-  prop = RNA_def_property(srna, "use_filter_material", PROP_BOOLEAN, PROP_NONE);
-  RNA_def_property_boolean_sdna(prop, nullptr, "use_filter_material", 1);
-  RNA_def_property_ui_text(
-    prop, "Use Filter Material", "Apply the scene's Eevee filter material as a fullscreen pass");
-  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_filter_material_update");
+  prop = RNA_def_property(srna, "filter_materials", PROP_COLLECTION, PROP_NONE);
+  RNA_def_property_collection_sdna(prop, nullptr, "filter_materials", nullptr);
+  RNA_def_property_struct_type(prop, "SceneFilterMaterial");
+  RNA_def_property_ui_text(prop, "Filter Materials", "Scene-level Eevee fullscreen filters");
+  rna_def_scene_eevee_filter_materials(brna, prop);
 
-  prop = RNA_def_property(srna, "filter_material", PROP_POINTER, PROP_NONE);
-  RNA_def_property_pointer_sdna(prop, nullptr, "filter_material");
-  RNA_def_property_struct_type(prop, "Material");
-  RNA_def_property_flag(prop, PROP_EDITABLE);
-  RNA_def_property_pointer_funcs(prop,
-    "rna_SceneEEVEE_filter_material_get",
-    "rna_SceneEEVEE_filter_material_set",
-    nullptr,
-    "rna_SceneEEVEE_filter_material_poll");
-  RNA_def_property_ui_text(prop, "Filter Material", "Material used as the active Eevee fullscreen filter");
+  prop = RNA_def_property(srna, "active_filter_material_index", PROP_INT, PROP_NONE);
+  RNA_def_property_int_funcs(prop,
+    "rna_SceneEEVEE_active_filter_material_index_get",
+    "rna_SceneEEVEE_active_filter_material_index_set",
+    "rna_SceneEEVEE_active_filter_material_index_range");
+  RNA_def_property_ui_text(prop, "Active Filter Material Index", "Index of the active filter material entry");
   RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_filter_material_update");
 
   prop = RNA_def_property(srna, "render_textures", PROP_COLLECTION, PROP_NONE);
@@ -9696,6 +9896,7 @@ void RNA_def_scene(BlenderRNA* brna)
   rna_def_display_safe_areas(brna);
   rna_def_scene_display(brna);
   rna_def_raytrace_eevee(brna);
+  rna_def_scene_filter_material(brna);
   rna_def_scene_render_texture(brna);
   rna_def_scene_eevee(brna);
   rna_def_scene_hydra(brna);

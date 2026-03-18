@@ -63,6 +63,7 @@ const EnumPropertyItem rna_enum_ramp_blend_items[] = {
 #  include "DNA_node_types.h"
 #  include "DNA_object_types.h"
 #  include "DNA_screen_types.h"
+#  include "DNA_scene_types.h"
 #  include "DNA_space_types.h"
 
 #  include "BKE_attribute.hh"
@@ -153,13 +154,19 @@ static void rna_Material_eevee_domain_update(Main *bmain, Scene * /*scene*/, Poi
   }
 
   LISTBASE_FOREACH (Scene *, scene, &bmain->scenes) {
-    if (scene->eevee.filter_material != ma) {
-      continue;
+    bool changed = false;
+    LISTBASE_FOREACH (SceneFilterMaterial *, filter_entry, &scene->eevee.filter_materials) {
+      if (filter_entry->material != ma) {
+        continue;
+      }
+      id_us_min(&ma->id);
+      filter_entry->material = nullptr;
+      changed = true;
     }
-
-    scene->eevee.filter_material = nullptr;
-    DEG_id_tag_update(&scene->id, ID_RECALC_SYNC_TO_EVAL);
-    WM_main_add_notifier(NC_SCENE | ND_RENDER_OPTIONS, scene);
+    if (changed) {
+      DEG_id_tag_update(&scene->id, ID_RECALC_SYNC_TO_EVAL);
+      WM_main_add_notifier(NC_SCENE | ND_RENDER_OPTIONS, scene);
+    }
   }
 }
 

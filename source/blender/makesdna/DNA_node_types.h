@@ -2574,6 +2574,12 @@ enum {
   SHD_IMG_SAMPLE_OFFSET_PIXEL = 1,
 };
 
+enum {
+  SHD_SCENE_SOURCE_COLOR = 0,
+  SHD_SCENE_SOURCE_DEPTH = 1,
+  SHD_SCENE_SOURCE_NORMAL = 2,
+};
+
 /** Mapping node vector types. */
 enum {
   NODE_MAPPING_TYPE_POINT = 0,

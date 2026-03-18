@@ -43,6 +43,13 @@ class SceneButtonsPanel:
 RENDER_TEXTURE_SLOT_MAX = 4
 
 
+def eevee_active_filter_material_entry(props):
+    active_index = props.active_filter_material_index
+    if active_index < 0 or active_index >= len(props.filter_materials):
+        return None
+    return props.filter_materials[active_index]
+
+
 def draw_eevee_render_textures(layout, context):
     if context.engine != 'BLENDER_EEVEE_NEXT':
         return
@@ -102,18 +109,31 @@ def draw_eevee_filter_material(layout, context):
     box.use_property_decorate = False
     box.label(text="Filter Material")
 
-    col = box.column()
-    col.prop(props, "use_filter_material", text="Enabled")
+    list_col = box.column()
+    list_col.use_property_split = False
+    list_col.use_property_decorate = False
 
-    sub = col.column()
-    sub.active = props.use_filter_material
-    row = sub.row(align=True)
-    row.template_ID(props, "filter_material", new="scene.eevee_filter_material_new")
+    draw_ui_list(
+        list_col,
+        context,
+        unique_id="scene_eevee_filter_materials",
+        list_path="scene.eevee.filter_materials",
+        active_index_path="scene.eevee.active_filter_material_index",
+    )
 
-    if not props.use_filter_material:
+    filter_entry = eevee_active_filter_material_entry(props)
+    if filter_entry is None:
+        box.label(text="Add a filter material entry to configure it.", icon='INFO')
         return
 
-    filter_material = props.filter_material
+    col = box.column()
+    col.prop(filter_entry, "name")
+    col.prop(filter_entry, "enabled")
+
+    row = col.row(align=True)
+    row.template_ID(filter_entry, "material", new="scene.eevee_filter_material_new")
+
+    filter_material = filter_entry.material
     if filter_material is None:
         box.label(text="Select a filter-domain material.", icon='INFO')
     elif filter_material.eevee_domain != 'FILTER':
@@ -128,6 +148,9 @@ class SCENE_OT_eevee_filter_material_new(Operator):
     def execute(self, context):
         scene = context.scene
         props = scene.eevee
+        filter_entry = eevee_active_filter_material_entry(props)
+        if filter_entry is None:
+            filter_entry = props.filter_materials.add()
 
         mat = bpy.data.materials.new(name="Filter Material")
         mat.use_nodes = True
@@ -143,9 +166,11 @@ class SCENE_OT_eevee_filter_material_new(Operator):
         filter_output.location = (40, 20)
 
         nt.links.new(scene_color.outputs["Color"], filter_output.inputs["Color"])
+        nt.links.new(scene_color.outputs["Alpha"], filter_output.inputs["Alpha"])
 
-        props.filter_material = mat
-        props.use_filter_material = True
+        filter_entry.material = mat
+        filter_entry.enabled = True
+        filter_entry.name = mat.name
 
         self.report({'INFO'}, f"Created filter material '{mat.name}'")
         return {'FINISHED'}

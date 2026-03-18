@@ -11,6 +11,7 @@
 
 #include "DNA_material_types.h"
 #include "DNA_node_types.h"
+#include "DNA_scene_types.h"
 
 #include "GPU_material.hh"
 
@@ -65,7 +66,14 @@ static void propagate_node_tree_changes(Main &bmain,
     DEG_id_tag_update(&material.id, ID_RECALC_SHADING | ID_RECALC_SYNC_TO_EVAL);
 
     LISTBASE_FOREACH (Scene *, scene, &bmain.scenes) {
-      if (scene->eevee.filter_material != &material) {
+      bool uses_filter_material = false;
+      LISTBASE_FOREACH (SceneFilterMaterial *, filter_entry, &scene->eevee.filter_materials) {
+        if (filter_entry->material == &material) {
+          uses_filter_material = true;
+          break;
+        }
+      }
+      if (!uses_filter_material) {
         continue;
       }
       DEG_id_tag_update(&scene->id, ID_RECALC_SYNC_TO_EVAL);

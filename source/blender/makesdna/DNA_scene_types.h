@@ -1911,6 +1911,15 @@ typedef struct SceneRenderTexture {
   char _pad[8];
 } SceneRenderTexture;
 
+typedef struct SceneFilterMaterial {
+  struct SceneFilterMaterial *next, *prev;
+  char name[64];
+  int uid;
+  char enabled;
+  char _pad[3];
+  struct Material *material;
+} SceneFilterMaterial;
+
 typedef enum SceneEEVEERenderTextureSource {
   SCE_EEVEE_RENDER_TEXTURE_SOURCE_COLOR = 0,
   SCE_EEVEE_RENDER_TEXTURE_SOURCE_GRAYSCALE = 1,
@@ -1997,12 +2006,13 @@ typedef struct SceneEEVEE {
   float overscan;
   float light_threshold;
 
-  struct Material *filter_material;
+  ListBase filter_materials;
   ListBase render_textures;
+  int active_filter_material_index;
   int active_render_texture_index;
+  int next_filter_material_uid;
   int next_render_texture_uid;
-  char use_filter_material;
-  char _pad2[7];
+  char _pad2[8];
 } SceneEEVEE;
 
 typedef struct SceneGpencil {
@@ -2172,6 +2182,7 @@ typedef struct Scene {
   struct SceneHydra hydra;
 
   void *_pad10;
+  void *_pad11;
   SceneRuntimeHandle *runtime;
   void *_pad9;
 } Scene;

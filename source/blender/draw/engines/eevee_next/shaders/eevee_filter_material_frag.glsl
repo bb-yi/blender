@@ -80,9 +80,6 @@ void main()
   g_data.P = -g_data.N;
   attrib_load();
 
-  vec2 uv = clamp(gl_FragCoord.xy / vec2(textureSize(scene_color_tx, 0)), vec2(0.0), vec2(1.0));
-  vec4 scene_color = texture(scene_color_tx, uv);
-  vec4 filtered_color = nodetree_filter();
-
-  out_color = vec4(mix(scene_color.rgb, filtered_color.rgb, filtered_color.a), scene_color.a);
+  vec4 filter_result = nodetree_filter();
+  out_color = vec4(filter_result.rgb, saturate(1.0 - filter_result.a));
 }

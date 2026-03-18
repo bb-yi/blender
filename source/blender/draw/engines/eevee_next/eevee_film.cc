@@ -304,6 +304,10 @@ void Film::init(const int2 &extent, const rcti *output_rect)
       enabled_passes_ = enabled_passes(inst_.view_layer);
     }
 
+    if (inst_.filter_materials.uses_scene_normal()) {
+      enabled_passes_ |= EEVEE_RENDER_PASS_NORMAL;
+    }
+
     /* Filter obsolete passes. */
     enabled_passes_ &= ~(EEVEE_RENDER_PASS_UNUSED_8 | EEVEE_RENDER_PASS_UNUSED_14);
 
