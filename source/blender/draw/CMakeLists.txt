@@ -553,6 +553,7 @@ set(GLSL_SRC
   engines/eevee/shaders/eevee_subsurface_setup_comp.glsl
   engines/eevee/shaders/eevee_surf_capture_frag.glsl
   engines/eevee/shaders/eevee_surf_deferred_frag.glsl
+  engines/eevee/shaders/eevee_surf_deferred_npr_frag.glsl
   engines/eevee/shaders/eevee_surf_depth_frag.glsl
   engines/eevee/shaders/eevee_surf_forward_frag.glsl
   engines/eevee/shaders/eevee_surf_hybrid_frag.glsl

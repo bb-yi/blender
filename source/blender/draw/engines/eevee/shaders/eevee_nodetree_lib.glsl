@@ -27,6 +27,22 @@ SHADER_LIBRARY_CREATE_INFO(eevee_hiz_data)
 #include "gpu_shader_math_vector_reduce_lib.glsl"
 #include "gpu_shader_utildefines_lib.glsl"
 
+#ifdef NPR_SHADER
+void npr_input_impl(out TextureHandle combined_color,
+                    out TextureHandle diffuse_color,
+                    out TextureHandle diffuse_direct,
+                    out TextureHandle diffuse_indirect,
+                    out TextureHandle specular_color,
+                    out TextureHandle specular_direct,
+                    out TextureHandle specular_indirect,
+                    out TextureHandle position,
+                    out TextureHandle normal);
+void npr_refraction_impl(out TextureHandle combined_color, out TextureHandle position);
+void input_aov_impl(uint hash, out TextureHandle color, out TextureHandle value);
+float4 TextureHandle_eval(TextureHandle tex, float2 offset, bool texel_offset);
+float4 TextureHandle_eval(TextureHandle tex);
+#endif
+
 #define closure_base_copy(cl, in_cl) \
   cl.weight = in_cl.weight; \
   cl.color = in_cl.color; \
@@ -364,6 +380,7 @@ Closure nodetree_volume();
 float3 nodetree_displacement();
 float nodetree_thickness();
 float4 closure_to_rgba(Closure cl);
+float4 nodetree_npr();
 #endif
 
 /**
@@ -553,6 +570,10 @@ float2 bsdf_lut(float cos_theta, float roughness, float ior, bool do_multiscatte
 
 #ifdef GPU_VERTEX_SHADER
 #  define closure_to_rgba(a) float4(0.0f)
+#endif
+
+#ifdef EEVEE_MATERIAL_STUBS
+#  define nodetree_npr() float4(0.0f)
 #endif
 
 /* -------------------------------------------------------------------- */

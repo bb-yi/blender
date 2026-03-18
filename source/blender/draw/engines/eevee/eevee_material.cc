@@ -232,11 +232,17 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
     }
     case GPU_MAT_QUEUED:
       queued_shaders_count++;
+      if (pipeline_type == MAT_PIPE_DEFERRED_NPR) {
+        return MaterialPass();
+      }
       matpass.gpumat = inst_.shaders.material_shader_get(
           default_mat, default_mat->nodetree, pipeline_type, geometry_type, false, nullptr);
       break;
     case GPU_MAT_FAILED:
     default:
+      if (pipeline_type == MAT_PIPE_DEFERRED_NPR) {
+        return MaterialPass();
+      }
       matpass.gpumat = inst_.shaders.material_shader_get(
           error_mat_, error_mat_->nodetree, pipeline_type, geometry_type, false, nullptr);
       break;
@@ -283,6 +289,14 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
       /* Create a sub for this material as `shader_sub` is for sharing shader between materials. */
       matpass.sub_pass = &shader_sub->sub(GPU_material_get_name(matpass.gpumat));
       matpass.sub_pass->material_set(*inst_.manager, matpass.gpumat, true);
+      if (pipeline_type == MAT_PIPE_DEFERRED_NPR) {
+        matpass.sub_pass->bind_resources(inst_.gbuffer);
+        matpass.sub_pass->bind_resources(inst_.uniform_data);
+        matpass.sub_pass->bind_resources(inst_.sampling);
+        matpass.sub_pass->bind_resources(inst_.hiz_buffer.front);
+        matpass.sub_pass->bind_resources(inst_.lights);
+        matpass.sub_pass->bind_resources(inst_.shadows);
+      }
     }
     else {
       matpass.sub_pass = nullptr;
@@ -355,6 +369,7 @@ Material &MaterialModule::material_sync(Object *ob,
       /* TODO(fclem): Still need the shading pass for correct attribute extraction. Would be better
        * to avoid this shader compilation in another context. */
       mat.shading = material_pass_get(ob, blender_mat, surface_pipe, geometry_type);
+      mat.npr = MaterialPass();
       mat.overlap_masking = MaterialPass();
       mat.lightprobe_sphere_prepass = MaterialPass();
       mat.lightprobe_sphere_shading = MaterialPass();
@@ -375,10 +390,16 @@ Material &MaterialModule::material_sync(Object *ob,
       }
 
       mat.shading = material_pass_get(ob, blender_mat, surface_pipe, geometry_type);
+      const bool has_npr_tree = !hide_on_camera && (surface_pipe == MAT_PIPE_DEFERRED) &&
+                                (npr_tree_get_from_mat(blender_mat) != nullptr);
+      mat.npr = has_npr_tree ? material_pass_get(
+                                   ob, blender_mat, MAT_PIPE_DEFERRED_NPR, geometry_type) :
+                               MaterialPass();
       if (hide_on_camera) {
         /* Only null the sub_pass.
          * `mat.shading.gpumat` is always needed for using the GPU_material API. */
         mat.shading.sub_pass = nullptr;
+        mat.npr.sub_pass = nullptr;
       }
 
       mat.overlap_masking = MaterialPass();
@@ -390,10 +411,18 @@ Material &MaterialModule::material_sync(Object *ob,
             ob, blender_mat, MAT_PIPE_PREPASS_DEFERRED, geometry_type, MAT_PROBE_REFLECTION);
         mat.lightprobe_sphere_shading = material_pass_get(
             ob, blender_mat, MAT_PIPE_DEFERRED, geometry_type, MAT_PROBE_REFLECTION);
+        mat.lightprobe_sphere_npr = has_npr_tree ?
+                                        material_pass_get(ob,
+                                                          blender_mat,
+                                                          MAT_PIPE_DEFERRED_NPR,
+                                                          geometry_type,
+                                                          MAT_PROBE_REFLECTION) :
+                                        MaterialPass();
       }
       else {
         mat.lightprobe_sphere_prepass = MaterialPass();
         mat.lightprobe_sphere_shading = MaterialPass();
+        mat.lightprobe_sphere_npr = MaterialPass();
       }
 
       if (inst_.needs_planar_probe_passes() && !(ob->visibility_flag & OB_HIDE_PROBE_PLANAR)) {
@@ -401,10 +430,15 @@ Material &MaterialModule::material_sync(Object *ob,
             ob, blender_mat, MAT_PIPE_PREPASS_PLANAR, geometry_type, MAT_PROBE_PLANAR);
         mat.planar_probe_shading = material_pass_get(
             ob, blender_mat, MAT_PIPE_DEFERRED, geometry_type, MAT_PROBE_PLANAR);
+        mat.planar_probe_npr = has_npr_tree ?
+                                   material_pass_get(
+                                       ob, blender_mat, MAT_PIPE_DEFERRED_NPR, geometry_type, MAT_PROBE_PLANAR) :
+                                   MaterialPass();
       }
       else {
         mat.planar_probe_prepass = MaterialPass();
         mat.planar_probe_shading = MaterialPass();
+        mat.planar_probe_npr = MaterialPass();
       }
 
       mat.has_surface = GPU_material_has_surface_output(mat.shading.gpumat);
@@ -482,6 +516,7 @@ MaterialArray &MaterialModule::material_array_get(Object *ob, bool has_motion)
 {
   material_array_.materials.clear();
   material_array_.gpu_materials.clear();
+  material_array_.gpu_materials_npr.clear();
 
   const int materials_len = BKE_object_material_used_with_fallback_eval(*ob);
 
@@ -493,6 +528,7 @@ MaterialArray &MaterialModule::material_array_get(Object *ob, bool has_motion)
      * (i.e: because of its container growing) */
     material_array_.materials.append(mat);
     material_array_.gpu_materials.append(mat.shading.gpumat);
+    material_array_.gpu_materials_npr.append(mat.npr.gpumat);
   }
   return material_array_;
 }

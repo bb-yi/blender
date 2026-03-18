@@ -130,6 +130,12 @@ bool object_eevee_shader_nodes_poll(const bContext *C)
          STREQ(engine_type->idname, "BLENDER_EEVEE");
 }
 
+bool npr_shader_nodes_poll(const bContext *C)
+{
+  const SpaceNode *snode = CTX_wm_space_node(C);
+  return snode->shaderfrom == SNODE_SHADER_NPR;
+}
+
 /* ****** */
 
 static void nodestack_get_vec(float *in, short type_in, bNodeStack *ns)
@@ -218,6 +224,9 @@ void node_gpu_stack_from_data(GPUNodeStack *gs, bNodeSocket *socket, bNodeStack 
     else if (socket->type == SOCK_SHADER) {
       gs->type = GPU_CLOSURE;
     }
+    else if (socket->type == SOCK_IMAGE) {
+      gs->type = GPU_TEX_HANDLE;
+    }
     else {
       gs->type = GPU_NONE;
     }
@@ -258,7 +267,14 @@ static void data_from_gpu_stack_list(ListBaseT<bNodeSocket> *sockets,
 {
   int i = 0;
   for (bNodeSocket &socket : *sockets) {
-    if (ELEM(socket.type, SOCK_FLOAT, SOCK_INT, SOCK_BOOLEAN, SOCK_VECTOR, SOCK_RGBA, SOCK_SHADER))
+    if (ELEM(socket.type,
+             SOCK_FLOAT,
+             SOCK_INT,
+             SOCK_BOOLEAN,
+             SOCK_VECTOR,
+             SOCK_RGBA,
+             SOCK_SHADER,
+             SOCK_IMAGE))
     {
       node_data_from_gpu_stack(ns[i], &gs[i]);
       i++;

@@ -47,6 +47,13 @@ def object_eevee_shader_nodes_poll(context):
             eevee_shader_nodes_poll(context))
 
 
+def npr_shader_nodes_poll(context):
+    snode = context.space_data
+    return (eevee_shader_nodes_poll(context) and
+            snode.tree_type == 'ShaderNodeTree' and
+            snode.shader_type == 'NPR')
+
+
 class NODE_MT_shader_node_input_base(node_add_menu.NodeMenu):
     bl_label = "Input"
 
@@ -132,6 +139,24 @@ class NODE_MT_shader_node_input_base(node_add_menu.NodeMenu):
             ["Color", "Density", "Flame", "Temperature"],
         )
         self.node_operator(layout, "ShaderNodeWireframe")
+        self.node_operator(
+            layout,
+            "ShaderNodeNPR_Input",
+            label="NPR Input",
+            poll=npr_shader_nodes_poll(context),
+        )
+        self.node_operator(
+            layout,
+            "ShaderNodeNPR_Refraction",
+            label="NPR Refraction",
+            poll=npr_shader_nodes_poll(context),
+        )
+        self.node_operator(
+            layout,
+            "ShaderNodeInputAOV",
+            label="AOV Input",
+            poll=npr_shader_nodes_poll(context),
+        )
 
         self.draw_assets_for_catalog(layout, self.bl_label)
 
@@ -160,6 +185,12 @@ class NODE_MT_shader_node_output_base(node_add_menu.NodeMenu):
             layout,
             "ShaderNodeOutputMaterial",
             poll=object_shader_nodes_poll(context),
+        )
+        self.node_operator(
+            layout,
+            "ShaderNodeNPR_Output",
+            label="NPR Output",
+            poll=npr_shader_nodes_poll(context),
         )
         self.node_operator(
             layout,
@@ -339,6 +370,11 @@ class NODE_MT_shader_node_texture_base(node_add_menu.NodeMenu):
         self.node_operator(layout, "ShaderNodeTexGradient")
         self.node_operator(layout, "ShaderNodeTexIES")
         self.node_operator(layout, "ShaderNodeTexImage")
+        self.node_operator(
+            layout,
+            "ShaderNodeRenderTexture",
+            poll=object_eevee_shader_nodes_poll(_context),
+        )
         self.node_operator(layout, "ShaderNodeTexMagic")
         self.node_operator(layout, "ShaderNodeTexNoise")
         self.node_operator(layout, "ShaderNodeTexSky")
@@ -418,6 +454,12 @@ class NODE_MT_shader_node_utilities_base(node_add_menu.NodeMenu):
         self.draw_menu(layout, "Utilities/Vector")
         layout.separator()
         self.repeat_zone(layout, label="Repeat")
+        self.node_operator(
+            layout,
+            "ShaderNodeNPR_ImageSample",
+            label="Image Sample",
+            poll=npr_shader_nodes_poll(context),
+        )
         layout.separator()
         self.closure_zone(layout, label="Closure")
         self.node_operator(layout, "NodeEvaluateClosure")

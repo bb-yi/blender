@@ -76,6 +76,7 @@ class SphereProbeModule {
    * NOTE: TextureFromPool doesn't support cube-maps.
    */
   Texture cubemap_tx_ = {"Probe.Cubemap"};
+  gpu::Texture *cubemap_face_views_[6] = {nullptr};
   /** Index of the probe being updated. */
   int probe_index_ = 0;
   /** Updated Probe coordinates in the atlas. */
@@ -120,6 +121,12 @@ class SphereProbeModule {
 
  public:
   SphereProbeModule(Instance &instance) : instance_(instance) {};
+  ~SphereProbeModule()
+  {
+    for (gpu::Texture *view : cubemap_face_views_) {
+      GPU_TEXTURE_FREE_SAFE(view);
+    }
+  }
 
   void init();
   void begin_sync();

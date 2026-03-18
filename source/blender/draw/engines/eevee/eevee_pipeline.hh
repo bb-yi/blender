@@ -244,6 +244,10 @@ struct DeferredLayerBase {
   PassMain::Sub *gbuffer_single_sided_ps_ = nullptr;
   PassMain::Sub *gbuffer_double_sided_ps_ = nullptr;
 
+  PassMain npr_ps_ = {"NPR"};
+  PassMain::Sub *npr_single_sided_ps_ = nullptr;
+  PassMain::Sub *npr_double_sided_ps_ = nullptr;
+
   gpu::Texture *radiance_behind_tx_ = nullptr;
 
   /* Closures bits from the materials in this pass. */
@@ -305,6 +309,7 @@ struct DeferredLayerBase {
   }
 
   void gbuffer_pass_sync(Instance &inst);
+  template<typename F> void npr_pass_sync(Instance &inst, F callback);
 };
 
 class DeferredPipeline;
@@ -340,6 +345,7 @@ class DeferredLayer : DeferredLayerBase {
   Texture dummy_black = {"dummy_black"};
   /* Reference to ray-tracing results. */
   gpu::Texture *radiance_feedback_tx_ = nullptr;
+  gpu::Texture *npr_radiance_input_tx_ = nullptr;
 
   /**
    * Tile texture containing several bool per tile indicating presence of feature.
@@ -373,6 +379,7 @@ class DeferredLayer : DeferredLayerBase {
 
   PassMain::Sub *prepass_add(blender::Material *blender_mat, GPUMaterial *gpumat, bool has_motion);
   PassMain::Sub *material_add(blender::Material *blender_mat, GPUMaterial *gpumat);
+  PassMain::Sub *npr_add(blender::Material *blender_mat, GPUMaterial *gpumat);
 
   bool is_empty() const
   {
@@ -422,6 +429,7 @@ class DeferredPipeline {
 
   PassMain::Sub *prepass_add(blender::Material *blender_mat, GPUMaterial *gpumat, bool has_motion);
   PassMain::Sub *material_add(blender::Material *blender_mat, GPUMaterial *gpumat);
+  PassMain::Sub *npr_add(blender::Material *blender_mat, GPUMaterial *gpumat);
 
   void render(View &main_view,
               View &render_view,
@@ -592,6 +600,7 @@ class DeferredProbePipeline {
 
   /* Used when there is no feedback radiance buffer. */
   Texture dummy_black = {"dummy_black"};
+  gpu::Texture *npr_radiance_input_tx_ = nullptr;
 
  public:
   DeferredProbePipeline(Instance &inst) : inst_(inst)
@@ -606,12 +615,14 @@ class DeferredProbePipeline {
 
   PassMain::Sub *prepass_add(blender::Material *blender_mat, GPUMaterial *gpumat);
   PassMain::Sub *material_add(blender::Material *blender_mat, GPUMaterial *gpumat);
+  PassMain::Sub *npr_add(blender::Material *blender_mat, GPUMaterial *gpumat);
 
   void render(View &view,
               Framebuffer &prepass_fb,
               Framebuffer &combined_fb,
               Framebuffer &gbuffer_fb,
-              int2 extent);
+              int2 extent,
+              gpu::Texture *combined_tx);
 
   /* Return the maximum amount of gbuffer layer needed. */
   int header_layer_count() const
@@ -646,6 +657,7 @@ class PlanarProbePipeline : DeferredLayerBase {
 
   /* Used when there is no indirect radiance buffer. */
   Texture dummy_black_ = {"dummy_black"};
+  gpu::Texture *npr_radiance_input_tx_ = nullptr;
 
  public:
   PlanarProbePipeline(Instance &inst) : inst_(inst)
@@ -660,13 +672,15 @@ class PlanarProbePipeline : DeferredLayerBase {
 
   PassMain::Sub *prepass_add(blender::Material *blender_mat, GPUMaterial *gpumat);
   PassMain::Sub *material_add(blender::Material *blender_mat, GPUMaterial *gpumat);
+  PassMain::Sub *npr_add(blender::Material *blender_mat, GPUMaterial *gpumat);
 
   void render(View &view,
               gpu::Texture *depth_layer_tx,
               Framebuffer &prepass_fb,
               Framebuffer &gbuffer,
               Framebuffer &combined_fb,
-              int2 extent);
+              int2 extent,
+              gpu::Texture *combined_tx);
 };
 
 /** \} */
@@ -846,6 +860,8 @@ class PipelineModule {
           return probe.prepass_add(blender_mat, gpumat);
         case MAT_PIPE_DEFERRED:
           return probe.material_add(blender_mat, gpumat);
+        case MAT_PIPE_DEFERRED_NPR:
+          return probe.npr_add(blender_mat, gpumat);
         default:
           BLI_assert_unreachable();
           break;
@@ -857,6 +873,8 @@ class PipelineModule {
           return planar.prepass_add(blender_mat, gpumat);
         case MAT_PIPE_DEFERRED:
           return planar.material_add(blender_mat, gpumat);
+        case MAT_PIPE_DEFERRED_NPR:
+          return planar.npr_add(blender_mat, gpumat);
         default:
           BLI_assert_unreachable();
           break;
@@ -879,6 +897,8 @@ class PipelineModule {
 
       case MAT_PIPE_DEFERRED:
         return deferred.material_add(blender_mat, gpumat);
+      case MAT_PIPE_DEFERRED_NPR:
+        return deferred.npr_add(blender_mat, gpumat);
       case MAT_PIPE_FORWARD:
         return forward.material_opaque_add(ob, blender_mat, gpumat);
       case MAT_PIPE_SHADOW:

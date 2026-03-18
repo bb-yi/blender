@@ -181,6 +181,8 @@ struct GPUSource {
         return GPU_TEX3D;
       case metadata::Type::Closure:
         return GPU_CLOSURE;
+      case metadata::Type::TextureHandle:
+        return GPU_TEX_HANDLE;
     }
     BLI_assert_unreachable();
     return GPU_NONE;

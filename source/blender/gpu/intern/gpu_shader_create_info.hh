@@ -441,6 +441,8 @@ static inline std::ostream &operator<<(std::ostream &stream, const GPUType type)
   switch (type) {
     case GPU_CLOSURE:
       return stream << "Closure";
+    case GPU_TEX_HANDLE:
+      return stream << "TextureHandle";
     default:
       return stream << to_type(type);
   }

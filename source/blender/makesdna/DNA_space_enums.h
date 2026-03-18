@@ -880,6 +880,7 @@ enum eSpaceNode_ShaderFrom {
   SNODE_SHADER_OBJECT = 0,
   SNODE_SHADER_WORLD = 1,
   SNODE_SHADER_LINESTYLE = 2,
+  SNODE_SHADER_NPR = 3,
 };
 
 /** #SpaceNode.nodes_type */

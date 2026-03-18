@@ -17,7 +17,7 @@ static void node_declare(NodeDeclarationBuilder &b)
 }
 
 static int node_shader_gpu_output_material(GPUMaterial *mat,
-                                           bNode * /*node*/,
+                                           bNode *node,
                                            bNodeExecData * /*execdata*/,
                                            GPUNodeStack *in,
                                            GPUNodeStack * /*out*/)
@@ -39,6 +39,9 @@ static int node_shader_gpu_output_material(GPUMaterial *mat,
   if (in[3].link) {
     GPU_link(mat, "node_output_material_thickness", in[3].link, &outlink_thickness);
     GPU_material_output_thickness(mat, outlink_thickness);
+  }
+  if (node->id != nullptr) {
+    GPU_material_flag_set(mat, GPU_MATFLAG_NPR);
   }
   return true;
 }

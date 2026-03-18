@@ -318,13 +318,16 @@ struct Material {
   bool has_volume;
   MaterialPass shadow;
   MaterialPass shading;
+  MaterialPass npr;
   MaterialPass prepass;
   MaterialPass overlap_masking;
   MaterialPass capture;
   MaterialPass lightprobe_sphere_prepass;
   MaterialPass lightprobe_sphere_shading;
+  MaterialPass lightprobe_sphere_npr;
   MaterialPass planar_probe_prepass;
   MaterialPass planar_probe_shading;
+  MaterialPass planar_probe_npr;
   MaterialPass volume_occupancy;
   MaterialPass volume_material;
 };
@@ -332,6 +335,7 @@ struct Material {
 struct MaterialArray {
   Vector<Material> materials;
   Vector<GPUMaterial *> gpu_materials;
+  Vector<GPUMaterial *> gpu_materials_npr;
 };
 
 class MaterialModule {

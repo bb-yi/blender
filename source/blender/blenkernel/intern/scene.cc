@@ -413,6 +413,7 @@ static void scene_free_data(ID *id)
 
   BKE_previewimg_id_free(&scene->id);
   BKE_curvemapping_free_data(&scene->r.mblur_shutter_curve);
+  BLI_freelistN(&scene->eevee.render_textures);
 
   for (ViewLayer &view_layer : scene->view_layers.items_mutable()) {
     BLI_remlink(&scene->view_layers, &view_layer);
@@ -862,6 +863,13 @@ static void scene_foreach_id(ID *id, LibraryForeachIDData *data)
   BKE_LIB_FOREACHID_PROCESS_IDSUPER(data, scene->gpd, IDWALK_CB_USER);
   BKE_LIB_FOREACHID_PROCESS_IDSUPER(data, scene->r.bake.cage_object, IDWALK_CB_NOP);
   BKE_LIB_FOREACHID_PROCESS_IDSUPER(data, scene->compositing_node_group, IDWALK_CB_USER);
+  for (SceneRenderTexture *render_texture = static_cast<SceneRenderTexture *>(
+           scene->eevee.render_textures.first);
+       render_texture != nullptr;
+       render_texture = render_texture->next)
+  {
+    BKE_LIB_FOREACHID_PROCESS_IDSUPER(data, render_texture->camera, IDWALK_CB_NOP);
+  }
 
   if (scene->nodetree) {
     /* nodetree **are owned by IDs**, treat them as mere sub-data and not real ID! */
@@ -1247,6 +1255,14 @@ static void scene_blend_write(BlendWriter *writer, ID *id, const void *id_addres
   /* writing dynamic list of TimeMarkers to the blend file */
   BKE_time_markers_blend_write(writer, sce->markers);
 
+  for (SceneRenderTexture *render_texture = static_cast<SceneRenderTexture *>(
+           sce->eevee.render_textures.first);
+       render_texture != nullptr;
+       render_texture = render_texture->next)
+  {
+    writer->write_struct(render_texture);
+  }
+
   /* writing dynamic list of TransformOrientations to the blend file */
   for (TransformOrientation &ts : sce->transform_spaces) {
     writer->write_struct(&ts);
@@ -1479,6 +1495,7 @@ static void scene_blend_read_data(BlendDataReader *reader, ID *id)
 
   BKE_time_markers_blend_read(reader, sce->markers);
 
+  BLO_read_struct_list(reader, SceneRenderTexture, &sce->eevee.render_textures);
   BLO_read_struct_list(reader, TransformOrientation, &(sce->transform_spaces));
   BLO_read_struct_list(reader, SceneRenderLayer, &(sce->r.layers));
   BLO_read_struct_list(reader, SceneRenderView, &(sce->r.views));
@@ -1861,6 +1878,7 @@ void BKE_scene_copy_data_eevee(Scene *sce_dst, const Scene *sce_src)
 {
   /* Copy eevee data between scenes. */
   sce_dst->eevee = dna::shallow_copy(sce_src->eevee);
+  BLI_duplicatelist(&sce_dst->eevee.render_textures, &sce_src->eevee.render_textures);
 }
 
 Scene *BKE_scene_duplicate(Main *bmain,

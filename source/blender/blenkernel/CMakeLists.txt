@@ -223,6 +223,7 @@ set(SRC
   intern/multires_unsubdivide.cc
   intern/multires_versioning.cc
   intern/nla.cc
+  intern/npr.cc
   intern/node.cc
   intern/node_enum_definition.cc
   intern/node_runtime.cc
@@ -465,6 +466,7 @@ set(SRC
   BKE_movieclip.hh
   BKE_multires.hh
   BKE_nla.hh
+  BKE_npr.hh
   BKE_node.hh
   BKE_node_enum.hh
   BKE_node_legacy_types.hh

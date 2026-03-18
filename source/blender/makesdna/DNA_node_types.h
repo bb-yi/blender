@@ -798,6 +798,11 @@ enum NodeShaderMixMode {
   NODE_MIX_MODE_NON_UNIFORM = 1,
 };
 
+enum NodeShaderImageSampleOffsetType {
+  SHD_IMG_SAMPLE_OFFSET_VIEW = 0,
+  SHD_IMG_SAMPLE_OFFSET_PIXEL = 1,
+};
+
 enum NodeCompareMode {
   NODE_COMPARE_MODE_ELEMENT = 0,
   NODE_COMPARE_MODE_LENGTH = 1,

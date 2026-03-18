@@ -724,6 +724,10 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
             info.name_ += "_deferred";
           }
           break;
+        case MAT_PIPE_DEFERRED_NPR:
+          pipeline_info_name = "eevee_surf_npr";
+          info.name_ += "_deferred_npr";
+          break;
         case MAT_PIPE_FORWARD:
           pipeline_info_name = "eevee_surf_forward";
           info.name_ += "_forward";
@@ -825,7 +829,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   bool use_ao_node = false;
 
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_AO) &&
-      ELEM(pipeline_type, MAT_PIPE_FORWARD, MAT_PIPE_DEFERRED) &&
+      ELEM(pipeline_type, MAT_PIPE_FORWARD, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR) &&
       geometry_type_has_surface(geometry_type))
   {
     info.define("MAT_AMBIENT_OCCLUSION");
@@ -843,7 +847,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   }
 
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_RAYCAST) &&
-      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD))
+      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD))
   {
     info.additional_info("eevee_raycast");
   }
@@ -857,7 +861,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     }
   }
 
-  /* Only deferred material allow use of cryptomatte and render passes. */
+  /* Deferred materials write render passes here. NPR binds the in/out variant in its base info. */
   if (pipeline_type == MAT_PIPE_DEFERRED) {
     info.additional_info("eevee_render_pass_out");
     info.additional_info("eevee_cryptomatte_out");
@@ -919,7 +923,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       break;
   }
 
-  if (pipeline_type == MAT_PIPE_DEFERRED) {
+  if (ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR)) {
     switch (closure_bin_count) {
       /* These need to be separated since the strings need to be static. */
       case 0:
@@ -1218,6 +1222,12 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     frag_gen << "  closure_weights_reset(closure_rand);\n";
     frag_gen << codegen.surface.serialized_or_default("return Closure(0);\n");
     dependencies.extend(codegen.surface.dependencies);
+    frag_gen << "}\n\n";
+
+    frag_gen << "float4 nodetree_npr()\n";
+    frag_gen << "{\n";
+    frag_gen << codegen.npr.serialized_or_default("return float4(0.0f);\n");
+    dependencies.extend(codegen.npr.dependencies);
     frag_gen << "}\n\n";
 
     /* TODO(fclem): Find a way to pass material parameters inside the material UBO. */
@@ -1591,6 +1601,22 @@ void ShaderModule::material_create_info_pipelines_amend(eMaterialGeometry geomet
           .color_format(gpu::TextureTargetFormat::UNORM_10_10_10_2)
           .color_format(gpu::TextureTargetFormat::UNORM_10_10_10_2);
 
+      break;
+    }
+    case MAT_PIPE_DEFERRED_NPR: {
+      r_info.pipeline_state()
+          .primitive(prim_type)
+          .state(GPU_WRITE_COLOR,
+                 GPU_BLEND_NONE,
+                 GPU_CULL_NONE,
+                 GPU_DEPTH_EQUAL,
+                 GPU_STENCIL_NONE,
+                 GPU_STENCIL_OP_NONE,
+                 GPU_VERTEX_LAST)
+          .viewports(1)
+          .depth_format(gpu::TextureTargetFormat::SFLOAT_32_DEPTH_UINT_8)
+          .stencil_format(gpu::TextureTargetFormat::SFLOAT_32_DEPTH_UINT_8)
+          .color_format(gpu::TextureTargetFormat::SFLOAT_16_16_16_16);
       break;
     }
 

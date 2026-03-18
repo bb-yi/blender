@@ -170,7 +170,20 @@ void SphereProbeModule::end_sync()
 void SphereProbeModule::ensure_cubemap_render_target(int resolution)
 {
   eGPUTextureUsage usage = GPU_TEXTURE_USAGE_ATTACHMENT | GPU_TEXTURE_USAGE_SHADER_READ;
-  cubemap_tx_.ensure_cube(gpu::TextureFormat::SFLOAT_16_16_16_16, resolution, usage);
+  if (cubemap_tx_.ensure_cube(gpu::TextureFormat::SFLOAT_16_16_16_16, resolution, usage)) {
+    for (int i : IndexRange(6)) {
+      GPU_TEXTURE_FREE_SAFE(cubemap_face_views_[i]);
+      cubemap_face_views_[i] = GPU_texture_create_view("Probe.Cubemap.View",
+                                                       cubemap_tx_,
+                                                       gpu::TextureFormat::SFLOAT_16_16_16_16,
+                                                       0,
+                                                       1,
+                                                       i,
+                                                       0,
+                                                       true,
+                                                       false);
+    }
+  }
   /* TODO(fclem): deallocate it. */
 }
 

@@ -75,7 +75,7 @@ static void shader_get_from_context(const bContext *C,
   BKE_view_layer_synced_ensure(scene, view_layer);
   Object *ob = BKE_view_layer_active_object_get(view_layer);
 
-  if (snode->shaderfrom == SNODE_SHADER_OBJECT) {
+  if (ELEM(snode->shaderfrom, SNODE_SHADER_OBJECT, SNODE_SHADER_NPR)) {
     if (ob) {
       *r_from = &ob->id;
       if (ob->type == OB_LAMP) {
@@ -87,6 +87,11 @@ static void shader_get_from_context(const bContext *C,
         if (ma) {
           *r_id = &ma->id;
           *r_ntree = ma->nodetree;
+          if (snode->shaderfrom == SNODE_SHADER_NPR) {
+            bNodeTree *nprtree = npr_tree_get_from_mat(ma);
+            *r_id = (nprtree != nullptr) ? &nprtree->id : nullptr;
+            *r_ntree = nprtree;
+          }
         }
       }
     }
@@ -970,6 +975,59 @@ static void ntree_shader_pruned_unused(bNodeTree *ntree, bNode *output_node)
   if (changed) {
     BKE_ntree_update_without_main(*ntree);
   }
+}
+
+bNodeTree *npr_tree_get(bNodeTree *ntree)
+{
+  if (ntree == nullptr) {
+    return nullptr;
+  }
+  bNode *output = ntreeShaderOutputNode(ntree, SHD_OUTPUT_EEVEE);
+  if (output == nullptr || output->id == nullptr || GS(output->id->name) != ID_NT) {
+    return nullptr;
+  }
+  return reinterpret_cast<bNodeTree *>(output->id);
+}
+
+bNodeTree *npr_tree_get_from_mat(Material *material)
+{
+  if (material == nullptr) {
+    return nullptr;
+  }
+  return npr_tree_get(material->nodetree);
+}
+
+static bNode *ntreeShaderNPROutputNode(bNodeTree *localtree)
+{
+  for (bNode &node : localtree->nodes) {
+    if (node.type_legacy == SH_NODE_NPR_OUTPUT) {
+      return &node;
+    }
+  }
+  return nullptr;
+}
+
+bNodeTree *ntreeGPUNPRNodes(bNodeTree *material_tree, GPUMaterial *mat)
+{
+  bNodeTree *npr_tree = npr_tree_get(material_tree);
+  if (npr_tree == nullptr) {
+    return nullptr;
+  }
+
+  bNodeTree *localtree = bke::node_tree_localize(npr_tree, nullptr);
+  bNodeTreeExec *exec = ntreeShaderBeginExecTree(localtree);
+
+  if (bNode *npr_output = ntreeShaderNPROutputNode(localtree)) {
+    ntreeExecGPUNodes(exec, mat, npr_output);
+  }
+  for (bNode &node : localtree->nodes) {
+    if (node.type_legacy == SH_NODE_OUTPUT_AOV) {
+      ntreeExecGPUNodes(exec, mat, &node);
+    }
+  }
+
+  ntreeShaderEndExecTree(exec);
+  return localtree;
 }
 
 void ntreeGPUMaterialNodes(bNodeTree *localtree, GPUMaterial *mat)

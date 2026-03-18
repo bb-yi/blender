@@ -3283,6 +3283,48 @@ static const EnumPropertyItem *rna_ShaderNodeMix_data_type_itemf(bContext * /*C*
   return itemf_function_check(rna_enum_mix_data_type_items, rotation_supported_mix);
 }
 
+static const EnumPropertyItem *rna_ShaderNodeRenderTexture_itemf(bContext *C,
+                                                                 PointerRNA * /*ptr*/,
+                                                                 PropertyRNA * /*prop*/,
+                                                                 bool *r_free)
+{
+  static char identifier_storage[4][64];
+
+  EnumPropertyItem *items = nullptr;
+  int totitem = 0;
+  int identifier_index = 0;
+
+  EnumPropertyItem item = {-1, "NONE", 0, "None", "Do not sample a render texture"};
+  RNA_enum_item_add(&items, &totitem, &item);
+
+  Scene *scene = (C != nullptr) ? CTX_data_scene(C) : nullptr;
+  if (scene != nullptr) {
+    for (SceneRenderTexture *render_texture = static_cast<SceneRenderTexture *>(
+             scene->eevee.render_textures.first);
+         render_texture != nullptr;
+         render_texture = render_texture->next)
+    {
+      if (identifier_index >= int(ARRAY_SIZE(identifier_storage))) {
+        break;
+      }
+
+      SNPRINTF(identifier_storage[identifier_index],
+               "RENDER_TEXTURE_%d",
+               render_texture->uid);
+      item.value = render_texture->uid;
+      item.identifier = identifier_storage[identifier_index];
+      item.name = render_texture->name;
+      item.description = render_texture->name;
+      RNA_enum_item_add(&items, &totitem, &item);
+      identifier_index++;
+    }
+  }
+
+  RNA_enum_item_end(&items, &totitem);
+  *r_free = true;
+  return items;
+}
+
 static const EnumPropertyItem *rna_Node_image_layer_itemf(bContext * /*C*/,
                                                           PointerRNA *ptr,
                                                           PropertyRNA * /*prop*/,
@@ -4917,6 +4959,16 @@ static void def_sh_output(BlenderRNA * /*brna*/, StructRNA *srna)
   RNA_def_property_ui_text(
       prop, "Target", "Which renderer and viewport shading types to use the shaders for");
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  prop = RNA_def_property(srna, "nprtree", PROP_POINTER, PROP_NONE);
+  RNA_def_property_pointer_sdna(prop, nullptr, "id");
+  RNA_def_property_struct_type(prop, "NodeTree");
+  RNA_def_property_pointer_funcs(
+      prop, nullptr, "rna_NodeGroup_node_tree_set", nullptr, "rna_NodeGroup_node_tree_poll");
+  RNA_def_property_flag(prop, PROP_EDITABLE);
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_ui_text(prop, "NPR Tree", "Secondary NPR node tree attached to this material output");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
 }
 
 static void def_sh_output_linestyle(BlenderRNA *brna, StructRNA *srna)
@@ -6217,6 +6269,20 @@ static void def_sh_output_aov(BlenderRNA * /*brna*/, StructRNA *srna)
   RNA_def_struct_sdna_from(srna, "bNode", nullptr);
 }
 
+static void def_sh_input_aov(BlenderRNA * /*brna*/, StructRNA *srna)
+{
+  PropertyRNA *prop;
+
+  RNA_def_struct_sdna_from(srna, "NodeShaderOutputAOV", "storage");
+
+  prop = RNA_def_property(srna, "aov_name", PROP_STRING, PROP_NONE);
+  RNA_def_property_string_sdna(prop, nullptr, "name");
+  RNA_def_property_ui_text(prop, "Name", "Name of the AOV that this input reads from");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  RNA_def_struct_sdna_from(srna, "bNode", nullptr);
+}
+
 static void def_sh_combsep_color(BlenderRNA * /*brna*/, StructRNA *srna)
 {
   PropertyRNA *prop;
@@ -6527,6 +6593,41 @@ static void def_cmp_convert_color_space(BlenderRNA * /*brna*/, StructRNA *srna)
                               "rna_NodeConvertColorSpace_to_color_space_set",
                               "rna_NodeConvertColorSpace_color_space_itemf");
   RNA_def_property_ui_text(prop, "To", "Color space of the output image");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+}
+
+static void def_sh_image_sample(BlenderRNA * /*brna*/, StructRNA *srna)
+{
+  static const EnumPropertyItem offset_type_items[] = {
+      {SHD_IMG_SAMPLE_OFFSET_VIEW, "VIEW", 0, "View", "Offset in View Space coordinates"},
+      {SHD_IMG_SAMPLE_OFFSET_PIXEL, "PIXEL", 0, "Pixel", "Offset in Pixel coordinates"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+
+  PropertyRNA *prop;
+
+  prop = RNA_def_property(srna, "offset_type", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "custom1");
+  RNA_def_property_enum_items(prop, offset_type_items);
+  RNA_def_property_ui_text(prop, "Type", "Type of the sampling offset");
+  RNA_def_property_update(prop, 0, "rna_Node_update");
+}
+
+static void def_sh_render_texture(BlenderRNA * /*brna*/, StructRNA *srna)
+{
+  static const EnumPropertyItem render_texture_items[] = {
+      {-1, "NONE", 0, "None", "Do not sample a render texture"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+
+  PropertyRNA *prop;
+
+  prop = RNA_def_property(srna, "render_texture", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "custom1");
+  RNA_def_property_enum_items(prop, render_texture_items);
+  RNA_def_property_enum_default(prop, -1);
+  RNA_def_property_enum_funcs(prop, nullptr, nullptr, "rna_ShaderNodeRenderTexture_itemf");
+  RNA_def_property_ui_text(prop, "Render Texture", "Scene render texture to sample");
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
 }
 
@@ -9862,6 +9963,12 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("ShaderNode", "ShaderNodeNewGeometry");
   define("ShaderNode", "ShaderNodeNormal");
   define("ShaderNode", "ShaderNodeNormalMap", def_sh_normal_map);
+  define("ShaderNode", "ShaderNodeNPR_ImageSample", def_sh_image_sample);
+  define("ShaderNode", "ShaderNodeNPR_Input");
+  define("ShaderNode", "ShaderNodeNPR_Output", def_group_output);
+  define("ShaderNode", "ShaderNodeNPR_Refraction");
+  define("ShaderNode", "ShaderNodeRenderTexture", def_sh_render_texture);
+  define("ShaderNode", "ShaderNodeInputAOV", def_sh_input_aov);
   define("ShaderNode", "ShaderNodeObjectInfo");
   define("ShaderNode", "ShaderNodeOutputAOV", def_sh_output_aov);
   define("ShaderNode", "ShaderNodeOutputLight", def_sh_output);

@@ -8,6 +8,7 @@ from bpy.types import (
     UIList,
 )
 
+from bl_ui.generic_ui_list import draw_ui_list
 from rna_prop_ui import PropertyPanel
 from bl_ui.space_properties import PropertiesAnimationMixin
 
@@ -32,6 +33,56 @@ class SceneButtonsPanel:
     bl_space_type = 'PROPERTIES'
     bl_region_type = 'WINDOW'
     bl_context = "scene"
+
+
+RENDER_TEXTURE_SLOT_MAX = 4
+
+
+def draw_eevee_render_textures(layout, context):
+    if context.engine != 'BLENDER_EEVEE':
+        return
+
+    props = context.scene.eevee
+
+    box = layout.box()
+    box.use_property_split = True
+    box.use_property_decorate = False
+    box.label(text="Render Textures")
+
+    list_col = box.column()
+    list_col.use_property_split = False
+    list_col.use_property_decorate = False
+
+    draw_ui_list(
+        list_col,
+        context,
+        unique_id="scene_eevee_render_textures",
+        list_path="scene.eevee.render_textures",
+        active_index_path="scene.eevee.active_render_texture_index",
+    )
+
+    if len(props.render_textures) >= RENDER_TEXTURE_SLOT_MAX:
+        list_col.label(text="Maximum of 4 render textures reached.", icon='INFO')
+
+    active_index = props.active_render_texture_index
+    if active_index < 0 or active_index >= len(props.render_textures):
+        box.label(text="Add a render texture entry to configure it.", icon='INFO')
+        return
+
+    render_texture = props.render_textures[active_index]
+
+    col = box.column()
+    col.prop(render_texture, "name")
+    col.prop(render_texture, "enabled")
+    col.prop(render_texture, "source")
+    col.prop(render_texture, "camera")
+
+    row = col.row(align=True)
+    row.prop(render_texture, "resolution_x", text="Resolution X")
+    row.prop(render_texture, "resolution_y", text="Y")
+
+    col.prop(render_texture, "update_mode")
+    col.prop(render_texture, "format")
 
 
 class SCENE_PT_context_scene(SceneButtonsPanel, Panel):
@@ -59,6 +110,7 @@ class SCENE_PT_scene(SceneButtonsPanel, Panel):
         layout.prop(scene, "camera")
         layout.prop(scene, "background_set")
         layout.prop(scene, "active_clip", text="Active Clip")
+        draw_eevee_render_textures(layout, context)
 
 
 class SCENE_PT_unit(SceneButtonsPanel, Panel):

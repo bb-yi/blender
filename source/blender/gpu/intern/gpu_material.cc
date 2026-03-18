@@ -162,6 +162,7 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
   result.material = mat;
 
   /* Localize tree to create links for reroute and mute. */
+  bNodeTree *npr_localtree = nullptr;
   bNodeTree *localtree = bke::node_tree_add_tree(
       nullptr, (StringRef(ntree->id.name) + " Inlined").c_str(), ntree->idname);
   nodes::InlineShaderNodeTreeParams inline_params;
@@ -174,6 +175,9 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
   }
 
   ntreeGPUMaterialNodes(localtree, mat);
+  if (GPU_material_flag_get(mat, GPU_MATFLAG_NPR)) {
+    npr_localtree = ntreeGPUNPRNodes(ntree, mat);
+  }
 
   gpu_material_ramp_texture_build(mat);
   gpu_material_sky_texture_build(mat);
@@ -206,6 +210,9 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
   /* Only free after GPU_pass_shader_get where gpu::UniformBuf read data from the local
    * tree. */
   BKE_id_free(nullptr, &localtree->id);
+  if (npr_localtree != nullptr) {
+    BKE_id_free(nullptr, &npr_localtree->id);
+  }
 
   /* Note that even if building the shader fails in some way, we want to keep
    * it to avoid trying to compile again and again, and simply do not use
@@ -550,6 +557,13 @@ void GPU_material_output_thickness(GPUMaterial *material, GPUNodeLink *link)
 {
   if (!material->graph.outlink_thickness) {
     material->graph.outlink_thickness = link;
+  }
+}
+
+void GPU_material_output_npr(GPUMaterial *material, GPUNodeLink *link)
+{
+  if (!material->graph.outlink_npr) {
+    material->graph.outlink_npr = link;
   }
 }
 

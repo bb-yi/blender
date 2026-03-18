@@ -415,6 +415,12 @@ static void node_buts_output_shader(ui::Layout &layout, bContext * /*C*/, Pointe
   layout.prop(ptr, "target", DEFAULT_FLAGS, "", ICON_NONE);
 }
 
+static void node_buts_output_shader_with_npr(ui::Layout &layout, bContext *C, PointerRNA *ptr)
+{
+  layout.prop(ptr, "target", DEFAULT_FLAGS, "", ICON_NONE);
+  template_id(&layout, C, ptr, "nprtree", "render.npr_new", nullptr, nullptr);
+}
+
 static void node_shader_buts_scatter(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
 {
   layout.prop(ptr, "phase", DEFAULT_FLAGS, "", ICON_NONE);
@@ -465,6 +471,8 @@ static void node_shader_set_butfunc(bke::bNodeType *ntype)
       ntype->draw_buttons = node_shader_buts_glossy;
       break;
     case SH_NODE_OUTPUT_MATERIAL:
+      ntype->draw_buttons = node_buts_output_shader_with_npr;
+      break;
     case SH_NODE_OUTPUT_LIGHT:
     case SH_NODE_OUTPUT_WORLD:
       ntype->draw_buttons = node_buts_output_shader;

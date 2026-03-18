@@ -79,6 +79,7 @@ enum eGPUMaterialFlag {
   GPU_MATFLAG_COAT = (1 << 9),
   GPU_MATFLAG_TRANSLUCENT = (1 << 10),
   GPU_MATFLAG_RAYCAST = (1 << 11),
+  GPU_MATFLAG_NPR = (1 << 12),
 
   GPU_MATFLAG_VOLUME_SCATTER = (1 << 16),
   GPU_MATFLAG_VOLUME_ABSORPTION = (1 << 17),
@@ -223,6 +224,7 @@ enum GPUType {
 
   /* GLSL Struct types */
   GPU_CLOSURE = 1007,
+  GPU_TEX_HANDLE = 1008,
 
   /* Opengl Attributes */
   GPU_ATTR = 3001,
@@ -354,6 +356,7 @@ struct GPUCodegenOutput {
   GPUGraphOutput surface;
   GPUGraphOutput volume;
   GPUGraphOutput thickness;
+  GPUGraphOutput npr;
   GPUGraphOutput composite;
   Vector<GPUGraphOutput> material_functions;
 
@@ -429,6 +432,7 @@ void GPU_material_output_surface(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_output_volume(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_output_displacement(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_output_thickness(GPUMaterial *material, GPUNodeLink *link);
+void GPU_material_output_npr(GPUMaterial *material, GPUNodeLink *link);
 
 void GPU_material_add_output_link_aov(GPUMaterial *material, GPUNodeLink *link, int hash);
 

@@ -313,7 +313,7 @@ void GPUCodegen::node_serialize(Set<StringRefNull> &used_libraries,
 
     if (from != to) {
       /* Special case that needs luminance coefficients as argument. */
-      if (from == GPU_VEC4 && to == GPU_FLOAT) {
+      if ((from == GPU_VEC4 || from == GPU_TEX_HANDLE) && to == GPU_FLOAT) {
         float coefficients[3];
         IMB_colormanagement_get_luminance_coefficients(coefficients);
         eval_ss << ", " << Span<float>(coefficients, 3);
@@ -337,7 +337,9 @@ void GPUCodegen::node_serialize(Set<StringRefNull> &used_libraries,
         eval_ss << type() << " " << &input << "; " << input.function_call << &input << ");\n";
         break;
       case GPU_SOURCE_STRUCT:
-        eval_ss << input.type << " " << &input << " = CLOSURE_DEFAULT;\n";
+        eval_ss << input.type << " " << &input << " = "
+                << (input.type == GPU_CLOSURE ? "CLOSURE_DEFAULT" : "TEXTURE_HANDLE_DEFAULT")
+                << ";\n";
         break;
       case GPU_SOURCE_CONSTANT:
         if (!input.is_duplicate) {
@@ -565,6 +567,7 @@ void GPUCodegen::generate_graphs()
   output.displacement = graph_serialize(
       GPU_NODE_TAG_DISPLACEMENT, graph.outlink_displacement, nullptr);
   output.thickness = graph_serialize(GPU_NODE_TAG_THICKNESS, graph.outlink_thickness, nullptr);
+  output.npr = graph_serialize(GPU_NODE_TAG_NPR, graph.outlink_npr, nullptr);
   if (!BLI_listbase_is_empty(&graph.outlink_compositor)) {
     output.composite = graph_serialize(GPU_NODE_TAG_COMPOSITOR);
   }

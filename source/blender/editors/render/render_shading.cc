@@ -56,6 +56,7 @@
 #include "BKE_node.hh"
 #include "BKE_node_runtime.hh"
 #include "BKE_node_tree_update.hh"
+#include "BKE_npr.hh"
 #include "BKE_object.hh"
 #include "BKE_report.hh"
 #include "BKE_scene.hh"
@@ -66,6 +67,7 @@
 
 #include "NOD_composite.hh"
 #include "NOD_defaults.hh"
+#include "NOD_shader.h"
 
 #include "DEG_depsgraph.hh"
 #include "DEG_depsgraph_build.hh"
@@ -1018,6 +1020,93 @@ void WORLD_OT_new(wmOperatorType *ot)
   ot->exec = new_world_exec;
 
   /* flags */
+  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO | OPTYPE_INTERNAL;
+}
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name New NPR Tree Operator
+ * \{ */
+
+static wmOperatorStatus new_npr_tree_exec(bContext *C, wmOperator *op)
+{
+  Main *bmain = CTX_data_main(C);
+  PointerRNA ptr;
+  PropertyRNA *prop = nullptr;
+
+  ui::context_active_but_prop_get_templateID(C, &ptr, &prop);
+
+  bNodeTree *tree = nullptr;
+
+  if (prop != nullptr) {
+    tree = BKE_npr_tree_add(bmain, DATA_("NPR Tree"));
+
+    if (ptr.owner_id != nullptr) {
+      BKE_id_move_to_same_lib(*bmain, tree->id, *ptr.owner_id);
+    }
+
+    PointerRNA idptr = RNA_id_pointer_create(&tree->id);
+    RNA_property_pointer_set(&ptr, prop, idptr, nullptr);
+    RNA_property_update(C, &ptr, prop);
+  }
+  else {
+    Object *object = CTX_data_active_object(C);
+    if (object == nullptr) {
+      BKE_report(op->reports, RPT_ERROR, "No active object to attach an NPR tree to");
+      return OPERATOR_CANCELLED;
+    }
+
+    Material *material = BKE_object_material_get(object, object->actcol);
+    if (material == nullptr) {
+      BKE_report(op->reports, RPT_ERROR, "Active object has no active material");
+      return OPERATOR_CANCELLED;
+    }
+
+    if (material->nodetree == nullptr) {
+      nodes::node_tree_shader_default(C, bmain, &material->id);
+    }
+    if (material->nodetree == nullptr) {
+      BKE_report(op->reports, RPT_ERROR, "Material has no shader node tree");
+      return OPERATOR_CANCELLED;
+    }
+
+    bNode *output = ntreeShaderOutputNode(material->nodetree, SHD_OUTPUT_EEVEE);
+    if (output == nullptr) {
+      BKE_report(op->reports, RPT_ERROR, "Material has no active Eevee material output");
+      return OPERATOR_CANCELLED;
+    }
+
+    if (output->id != nullptr && GS(output->id->name) == ID_NT) {
+      tree = reinterpret_cast<bNodeTree *>(output->id);
+    }
+    else {
+      tree = BKE_npr_tree_add(bmain, DATA_("NPR Tree"));
+      BKE_id_move_to_same_lib(*bmain, tree->id, material->id);
+
+      if (output->id != nullptr) {
+        id_us_min(output->id);
+      }
+      output->id = &tree->id;
+      id_us_plus(output->id);
+
+      BKE_ntree_update_tag_node_property(material->nodetree, output);
+      BKE_ntree_update_after_single_tree_change(*bmain, *material->nodetree);
+    }
+  }
+
+  WM_event_add_notifier(C, NC_NODE | ND_NODES, tree);
+  return OPERATOR_FINISHED;
+}
+
+void RENDER_OT_npr_new(wmOperatorType *ot)
+{
+  ot->name = "New NPR Tree";
+  ot->idname = "RENDER_OT_npr_new";
+  ot->description = "Add a new NPR shader tree to the active material output";
+
+  ot->exec = new_npr_tree_exec;
+
   ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO | OPTYPE_INTERNAL;
 }
 

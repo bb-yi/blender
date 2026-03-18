@@ -53,6 +53,7 @@ set(SRC
   nodes/node_shader_holdout.cc
   nodes/node_shader_hueSatVal.cc
   nodes/node_shader_ies_light.cc
+  nodes/node_shader_input_aov.cc
   nodes/node_shader_invert.cc
   nodes/node_shader_layer_weight.cc
   nodes/node_shader_light_falloff.cc
@@ -65,6 +66,11 @@ set(SRC
   nodes/node_shader_mix_shader.cc
   nodes/node_shader_normal.cc
   nodes/node_shader_normal_map.cc
+  nodes/node_shader_npr_image_sample.cc
+  nodes/node_shader_npr_input.cc
+  nodes/node_shader_npr_output.cc
+  nodes/node_shader_npr_refraction.cc
+  nodes/node_shader_render_texture.cc
   nodes/node_shader_object_info.cc
   nodes/node_shader_output_aov.cc
   nodes/node_shader_output_light.cc

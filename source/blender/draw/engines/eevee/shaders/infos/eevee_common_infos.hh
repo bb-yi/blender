@@ -72,6 +72,13 @@ IMAGE_FREQ(RBUFS_COLOR_SLOT, SFLOAT_16_16_16_16, write, image2DArray, rp_color_i
 IMAGE_FREQ(RBUFS_VALUE_SLOT, SFLOAT_16, write, image2DArray, rp_value_img, PASS)
 GPU_SHADER_CREATE_END()
 
+GPU_SHADER_CREATE_INFO(eevee_render_pass_inout)
+DEFINE("MAT_RENDER_PASS_SUPPORT")
+ADDITIONAL_INFO(eevee_global_ubo)
+IMAGE(RBUFS_COLOR_SLOT, SFLOAT_16_16_16_16, read_write, image2DArray, rp_color_img)
+IMAGE(RBUFS_VALUE_SLOT, SFLOAT_16, read_write, image2DArray, rp_value_img)
+GPU_SHADER_CREATE_END()
+
 GPU_SHADER_CREATE_INFO(eevee_cryptomatte_out)
 STORAGE_BUF(CRYPTOMATTE_BUF_SLOT, read, float2, cryptomatte_object_buf[])
 IMAGE_FREQ(RBUFS_CRYPTOMATTE_SLOT, SFLOAT_32_32_32_32, write, image2D, rp_cryptomatte_img, PASS)

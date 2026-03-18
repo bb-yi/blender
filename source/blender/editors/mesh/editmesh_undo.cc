@@ -950,7 +950,9 @@ static void *undomesh_from_editmesh(UndoMesh *um,
 
   /* Uncomment for troubleshooting. */
   if (false) {
+#ifndef NDEBUG
     BM_mesh_is_valid(em->bm);
+#endif
 
     /* Ensure UV's are in a valid state. */
     if (em->bm->uv_select_sync_valid) {

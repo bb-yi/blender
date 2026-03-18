@@ -14,6 +14,7 @@ namespace blender::eevee {
 
 enum eMaterialPipeline {
   MAT_PIPE_DEFERRED = 0,
+  MAT_PIPE_DEFERRED_NPR,
   MAT_PIPE_FORWARD,
   /* These all map to the depth shader. */
   MAT_PIPE_PREPASS_DEFERRED,

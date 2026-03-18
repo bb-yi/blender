@@ -663,9 +663,11 @@ set(GLSL_SRC
   shaders/material/gpu_shader_material_noise.glsl
   shaders/material/gpu_shader_material_normal.glsl
   shaders/material/gpu_shader_material_normal_map.glsl
+  shaders/material/gpu_shader_material_npr.glsl
   shaders/material/gpu_shader_material_object_info.glsl
   shaders/material/gpu_shader_material_output_aov.glsl
   shaders/material/gpu_shader_material_output_material.glsl
+  shaders/material/gpu_shader_material_render_texture.glsl
   shaders/material/gpu_shader_material_output_world.glsl
   shaders/material/gpu_shader_material_particle_info.glsl
   shaders/material/gpu_shader_material_point_info.glsl
