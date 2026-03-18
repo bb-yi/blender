@@ -692,6 +692,12 @@ template<typename F> void DeferredLayerBase::npr_pass_sync(Instance &inst, F cal
   npr_ps_.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst.pipelines.utility_tx);
   npr_ps_.bind_image(RBUFS_COLOR_SLOT, &inst.render_buffers.rp_color_tx);
   npr_ps_.bind_image(RBUFS_VALUE_SLOT, &inst.render_buffers.rp_value_tx);
+  npr_ps_.bind_resources(inst.gbuffer);
+  npr_ps_.bind_resources(inst.uniform_data);
+  npr_ps_.bind_resources(inst.sampling);
+  npr_ps_.bind_resources(inst.hiz_buffer.front);
+  npr_ps_.bind_resources(inst.lights);
+  npr_ps_.bind_resources(inst.shadows);
 
   callback();
 

@@ -5,7 +5,9 @@
 set(INC
   .
   ..
+  include
   ../intern
+  ../../blenloader
   ../../editors/include
   ../../makesrna
   ../../../../intern/sky/include
@@ -47,6 +49,7 @@ set(SRC
   nodes/node_shader_eevee_specular.cc
   nodes/node_shader_emission.cc
   nodes/node_shader_fresnel.cc
+  nodes/node_shader_foreach_light.cc
   nodes/node_shader_gamma.cc
   nodes/node_shader_geometry.cc
   nodes/node_shader_hair_info.cc

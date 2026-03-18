@@ -201,6 +201,31 @@ float4 TextureHandle_eval_impl(TextureHandle tex, float2 offset, bool texel_offs
     return float4(0.0f);
   }
 
+  if (all(equal(offset, float2(0.0f)))) {
+    switch (tex.type) {
+      case TEX_HANDLE_COMBINED_COLOR:
+        return swap_alpha(g_combined_color);
+      case TEX_HANDLE_DIFFUSE_COLOR:
+        return swap_alpha(g_diffuse_color);
+      case TEX_HANDLE_DIFFUSE_DIRECT:
+        return swap_alpha(g_diffuse_direct);
+      case TEX_HANDLE_DIFFUSE_INDIRECT:
+        return swap_alpha(g_diffuse_indirect);
+      case TEX_HANDLE_SPECULAR_COLOR:
+        return swap_alpha(g_specular_color);
+      case TEX_HANDLE_SPECULAR_DIRECT:
+        return swap_alpha(g_specular_direct);
+      case TEX_HANDLE_SPECULAR_INDIRECT:
+        return swap_alpha(g_specular_indirect);
+      case TEX_HANDLE_POSITION:
+        return float4(g_data.P, 0.0f);
+      case TEX_HANDLE_NORMAL:
+        return float4(g_data.N, 0.0f);
+      default:
+        break;
+    }
+  }
+
   int2 texel = int2(gl_FragCoord.xy);
   int2 extent = textureSize(radiance_tx, 0);
   if (texel_offset) {
@@ -219,7 +244,8 @@ float4 TextureHandle_eval_impl(TextureHandle tex, float2 offset, bool texel_offs
 
   switch (tex.type) {
     case TEX_HANDLE_RP_COLOR:
-      return imageLoad(rp_color_img, int3(texel, tex.index));
+      /* AOV color passes are data buffers; keep them opaque when exposed through NPR output. */
+      return float4(imageLoad(rp_color_img, int3(texel, tex.index)).rgb, 0.0f);
     case TEX_HANDLE_RP_VALUE:
       return float4(imageLoad(rp_value_img, int3(texel, tex.index)).rrr, 0.0f);
     case TEX_HANDLE_COMBINED_COLOR:
@@ -278,9 +304,112 @@ float4 TextureHandle_eval(TextureHandle tex)
   return TextureHandle_eval(tex, float2(0.0f), true);
 }
 
+#ifndef FOREACH_LIGHT_BEGIN
+bool npr_is_zero(float3 value)
+{
+  return all(lessThanEqual(abs(value), float3(1e-8f)));
+}
+
+bool foreach_light_setup(uint l_idx,
+                         bool is_directional,
+                         float3 N,
+                         out float4 out_color,
+                         out float3 out_vector,
+                         out float out_distance,
+                         out float out_attenuation,
+                         out float out_shadow_mask)
+{
+  LightData light = light_buf[l_idx];
+  if (npr_is_zero(light.color)) {
+    return false;
+  }
+
+  ObjectInfos object_infos = drw_infos[drw_resource_id()];
+  uchar receiver_light_set = receiver_light_set_get(object_infos);
+  if (!light_linking_affects_receiver(light.light_set_membership, receiver_light_set)) {
+    return false;
+  }
+
+  LightVector lv = light_vector_get(light, is_directional, g_data.P);
+  float attenuation = light_attenuation_volume(light, is_directional, lv);
+  if (attenuation < LIGHT_ATTENUATION_THRESHOLD) {
+    return false;
+  }
+
+  float3 V = drw_world_incident_vector(g_data.P);
+  float4 ltc_mat = float4(1.0f, 0.0f, 0.0f, 1.0f);
+  float ltc = light_ltc(utility_tx, light, lv.L, V, lv, ltc_mat);
+  attenuation *= ltc * light_power_get(light, LIGHT_DIFFUSE);
+  if (attenuation < LIGHT_ATTENUATION_THRESHOLD) {
+    return false;
+  }
+
+  float shadow_mask = 1.0f;
+  if (light.tilemap_index != LIGHT_NO_SHADOW) {
+    int ray_count = uniform_buf.shadow.ray_count;
+    int ray_step_count = uniform_buf.shadow.step_count;
+    shadow_mask = shadow_eval(light,
+                              is_directional,
+                              false,
+                              false,
+                              0.0f,
+                              g_data.P,
+                              g_data.Ng,
+                              N,
+                              0.0f,
+                              0.0f,
+                              ray_count,
+                              ray_step_count);
+    shadow_mask *= dot(N, lv.L) > 0.0f ? 1.0f : 0.0f;
+  }
+
+  out_color = float4(light.color, 1.0f);
+  out_vector = lv.L;
+  out_distance = lv.dist;
+  out_attenuation = attenuation;
+  out_shadow_mask = shadow_mask;
+  return true;
+}
+
+#  define FOREACH_LIGHT_BEGIN( \
+      N, out_color, out_vector, out_distance, out_attenuation, out_shadow_mask) \
+    LIGHT_FOREACH_ALL_BEGIN(light_cull_buf, \
+                            light_zbin_buf, \
+                            light_tile_buf, \
+                            gl_FragCoord.xy, \
+                            drw_point_world_to_view(g_data.P).z, \
+                            l_idx, \
+                            is_local) \
+    if (!foreach_light_setup(l_idx, \
+                             !is_local, \
+                             N, \
+                             out_color, \
+                             out_vector, \
+                             out_distance, \
+                             out_attenuation, \
+                             out_shadow_mask)) \
+    { \
+      continue; \
+    }
+
+#  define FOREACH_LIGHT_END() LIGHT_FOREACH_ALL_END()
+#endif
+
 void main()
 {
   init_globals();
+  int2 texel = int2(gl_FragCoord.xy);
+  DeferredCombineNPR dc = deferred_combine_npr(texel);
+
+  g_combined_color = texelFetch(radiance_tx, texel, 0);
+  g_combined_color.a = saturate(1.0f - g_combined_color.a);
+  g_diffuse_color = float4(dc.diffuse_color, 1.0f);
+  g_diffuse_direct = float4(dc.diffuse_direct, 1.0f);
+  g_diffuse_indirect = float4(dc.diffuse_indirect, 1.0f);
+  g_specular_color = float4(dc.specular_color, 1.0f);
+  g_specular_direct = float4(dc.specular_direct, 1.0f);
+  g_specular_indirect = float4(dc.specular_indirect, 1.0f);
+
   out_radiance = swap_alpha(nodetree_npr());
   nodetree_surface(0.0f);
 }

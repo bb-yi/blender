@@ -1,0 +1,100 @@
+/* SPDX-FileCopyrightText: 2026 Blender Authors
+ *
+ * SPDX-License-Identifier: GPL-2.0-or-later */
+
+#pragma once
+
+#include "DNA_node_types.h"
+
+#include "NOD_socket_items.hh"
+
+#include "BKE_node.hh"
+
+struct BlendDataReader;
+struct BlendWriter;
+struct StructRNA;
+
+namespace blender::nodes {
+
+template<typename NodeOutputT, typename NodeItemT> struct ShZoneItemsAccessorBase
+    : public socket_items::SocketItemsAccessorDefaults {
+  using ItemT = NodeItemT;
+  static constexpr bool has_type = true;
+  static constexpr bool has_name = true;
+
+  static socket_items::SocketItemsRef<ItemT> get_items_from_node(bNode &node)
+  {
+    auto *storage = static_cast<NodeOutputT *>(node.storage);
+    return {&storage->items, &storage->items_num, &storage->active_index};
+  }
+
+  static void copy_item(const ItemT &src, ItemT &dst)
+  {
+    dst = src;
+    dst.name = BLI_strdup_null(dst.name);
+  }
+
+  static void destruct_item(ItemT *item)
+  {
+    MEM_SAFE_DELETE(item->name);
+  }
+
+  static eNodeSocketDatatype get_socket_type(const ItemT &item)
+  {
+    return eNodeSocketDatatype(item.socket_type);
+  }
+
+  static char **get_name(ItemT &item)
+  {
+    return &item.name;
+  }
+
+  static bool supports_socket_type(const eNodeSocketDatatype socket_type, const int ntree_type)
+  {
+    if (!ELEM(socket_type, SOCK_FLOAT, SOCK_VECTOR, SOCK_RGBA)) {
+      return false;
+    }
+    return bke::node_tree_type_supports_socket_type_static(ntree_type, socket_type);
+  }
+
+  static void init_with_socket_type_and_name(bNode &node,
+                                             ItemT &item,
+                                             const eNodeSocketDatatype socket_type,
+                                             const char *name)
+  {
+    auto *storage = static_cast<NodeOutputT *>(node.storage);
+    item.socket_type = socket_type;
+    item.identifier = storage->next_identifier++;
+    socket_items::set_item_name_and_make_unique<ShZoneItemsAccessorBase<NodeOutputT, ItemT>>(
+        node, item, name);
+  }
+
+  static std::string socket_identifier_for_item(const ItemT &item)
+  {
+    return "Item_" + std::to_string(item.identifier);
+  }
+};
+
+struct ShForeachLightItemsAccessor
+    : public ShZoneItemsAccessorBase<NodeShaderForeachLightOutput, NodeShaderForeachLightItem> {
+  static StructRNA **item_srna;
+  static int node_type;
+  static constexpr StringRefNull node_idname = "ShaderNodeForeachLightOutput";
+  struct operator_idnames {
+    static constexpr StringRefNull add_item = "NODE_OT_sh_foreach_light_zone_item_add";
+    static constexpr StringRefNull remove_item = "NODE_OT_sh_foreach_light_zone_item_remove";
+    static constexpr StringRefNull move_item = "NODE_OT_sh_foreach_light_zone_item_move";
+  };
+  struct ui_idnames {
+    static constexpr StringRefNull list = "DATA_UL_sh_foreach_light_zone_state";
+  };
+  struct rna_names {
+    static constexpr StringRefNull items = "foreach_light_items";
+    static constexpr StringRefNull active_index = "active_index";
+  };
+
+  static void blend_write_item(BlendWriter *writer, const ItemT &item);
+  static void blend_read_data_item(BlendDataReader *reader, ItemT &item);
+};
+
+}  // namespace blender::nodes

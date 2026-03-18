@@ -28,6 +28,14 @@ SHADER_LIBRARY_CREATE_INFO(eevee_hiz_data)
 #include "gpu_shader_utildefines_lib.glsl"
 
 #ifdef NPR_SHADER
+float4 g_combined_color;
+float4 g_diffuse_color;
+float4 g_diffuse_direct;
+float4 g_diffuse_indirect;
+float4 g_specular_color;
+float4 g_specular_direct;
+float4 g_specular_indirect;
+
 void npr_input_impl(out TextureHandle combined_color,
                     out TextureHandle diffuse_color,
                     out TextureHandle diffuse_direct,
@@ -773,3 +781,14 @@ float4 attr_load_uniform(float4 attr, const uint attr_hash)
 }
 
 /** \} */
+
+#define REPEAT_BEGIN(count, var) \
+  for (var = 0.0f; round(var) < round(count); var += 1.0f) {
+
+#define REPEAT_END() }
+
+#if (!defined(NPR_SHADER) || !defined(GPU_FRAGMENT_SHADER)) && !defined(FOREACH_LIGHT_BEGIN)
+#  define FOREACH_LIGHT_BEGIN( \
+      N, out_color, out_vector, out_distance, out_attenuation, out_shadow_mask)
+#  define FOREACH_LIGHT_END()
+#endif

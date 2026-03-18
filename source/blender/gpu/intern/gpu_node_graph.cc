@@ -64,6 +64,7 @@ static GPUNode *gpu_node_create(const char *name)
   node->name = name;
   node->zone_index = -1;
   node->is_zone_end = false;
+  node->skip_call = false;
 
   return node;
 }

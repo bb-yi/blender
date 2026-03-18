@@ -3500,6 +3500,41 @@ struct NodeGeometryRepeatOutput {
 #endif
 };
 
+struct NodeShaderForeachLightItem {
+  char *name = nullptr;
+  /** #eNodeSocketDatatype. */
+  short socket_type = 0;
+  char _pad[2] = {};
+  /**
+   * Generated unique identifier for sockets which stays the same even when the item order or
+   * names change.
+   */
+  int identifier = 0;
+};
+
+struct NodeShaderForeachLightInput {
+  DNA_DEFINE_CXX_METHODS(NodeShaderForeachLightInput)
+
+  /** bNode.identifier of the corresponding output node. */
+  int32_t output_node_id = 0;
+};
+
+struct NodeShaderForeachLightOutput {
+  DNA_DEFINE_CXX_METHODS(NodeShaderForeachLightOutput)
+
+  NodeShaderForeachLightItem *items = nullptr;
+  int items_num = 0;
+  int active_index = 0;
+  /** Identifier to give to the next foreach-light item. */
+  int next_identifier = 0;
+  int _pad = {};
+
+#ifdef __cplusplus
+  Span<NodeShaderForeachLightItem> items_span() const;
+  MutableSpan<NodeShaderForeachLightItem> items_span();
+#endif
+};
+
 struct NodeGeometryForeachGeometryElementInput {
   DNA_DEFINE_CXX_METHODS(NodeGeometryForeachGeometryElementInput)
 

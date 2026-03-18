@@ -659,6 +659,7 @@ static const EnumPropertyItem node_cryptomatte_layer_name_items[] = {
 #  include "NOD_geometry_nodes_lazy_function.hh"
 #  include "NOD_rna_define.hh"
 #  include "NOD_shader.h"
+#  include "../../nodes/shader/include/NOD_sh_zones.hh"
 #  include "NOD_socket.hh"
 #  include "NOD_socket_items.hh"
 #  include "NOD_texture.h"
@@ -695,6 +696,7 @@ using nodes::IndexSwitchItemsAccessor;
 using nodes::MenuSwitchItemsAccessor;
 using nodes::RepeatItemsAccessor;
 using nodes::SeparateBundleItemsAccessor;
+using nodes::ShForeachLightItemsAccessor;
 using nodes::SimulationItemsAccessor;
 
 extern FunctionRNA *rna_NodeTree_poll_func;
@@ -7313,6 +7315,13 @@ static void def_closure_input(BlenderRNA *brna, StructRNA *srna)
   def_common_zone_input(brna, srna);
 }
 
+static void def_sh_foreach_light_input(BlenderRNA *brna, StructRNA *srna)
+{
+  RNA_def_struct_sdna_from(srna, "NodeShaderForeachLightInput", "storage");
+
+  def_common_zone_input(brna, srna);
+}
+
 static void rna_def_geo_simulation_state_item(BlenderRNA *brna)
 {
   PropertyRNA *prop;
@@ -7799,6 +7808,61 @@ static void def_closure_output(BlenderRNA *brna, StructRNA *srna)
   RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
   RNA_def_property_flag(prop, PROP_NO_DEG_UPDATE);
   RNA_def_property_update(prop, NC_NODE, "rna_Node_update");
+}
+
+static void rna_def_sh_foreach_light_item(BlenderRNA *brna)
+{
+  StructRNA *srna = RNA_def_struct(brna, "ShaderForeachLightItem", nullptr);
+  RNA_def_struct_ui_text(srna, "For Each Light Item", "");
+  RNA_def_struct_sdna(srna, "NodeShaderForeachLightItem");
+
+  rna_def_node_item_array_socket_item_common(srna, "ShForeachLightItemsAccessor", true);
+}
+
+static void rna_def_sh_foreach_light_output_items(BlenderRNA *brna)
+{
+  StructRNA *srna = RNA_def_struct(brna, "NodeShaderForeachLightOutputItems", nullptr);
+  RNA_def_struct_ui_text(srna, "For Each Light Items", "");
+  RNA_def_struct_sdna(srna, "bNode");
+
+  rna_def_node_item_array_new_with_socket_and_name(
+      srna, "ShaderForeachLightItem", "ShForeachLightItemsAccessor");
+  rna_def_node_item_array_common_functions(
+      srna, "ShaderForeachLightItem", "ShForeachLightItemsAccessor");
+}
+
+static void def_sh_foreach_light_output(BlenderRNA *brna, StructRNA *srna)
+{
+  PropertyRNA *prop;
+
+  rna_def_sh_foreach_light_item(brna);
+  rna_def_sh_foreach_light_output_items(brna);
+
+  RNA_def_struct_sdna_from(srna, "NodeShaderForeachLightOutput", "storage");
+
+  prop = RNA_def_property(srna, "foreach_light_items", PROP_COLLECTION, PROP_NONE);
+  RNA_def_property_collection_sdna(prop, nullptr, "items", "items_num");
+  RNA_def_property_struct_type(prop, "ShaderForeachLightItem");
+  RNA_def_property_ui_text(prop, "Items", "");
+  RNA_def_property_srna(prop, "NodeShaderForeachLightOutputItems");
+
+  prop = RNA_def_property(srna, "active_index", PROP_INT, PROP_UNSIGNED);
+  RNA_def_property_int_sdna(prop, nullptr, "active_index");
+  RNA_def_property_ui_text(prop, "Active Item Index", "Index of the active item");
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_flag(prop, PROP_NO_DEG_UPDATE);
+  RNA_def_property_update(prop, NC_NODE, nullptr);
+
+  prop = RNA_def_property(srna, "active_item", PROP_POINTER, PROP_NONE);
+  RNA_def_property_struct_type(prop, "ShaderForeachLightItem");
+  RNA_def_property_pointer_funcs(prop,
+                                 "rna_Node_ItemArray_active_get<ShForeachLightItemsAccessor>",
+                                 "rna_Node_ItemArray_active_set<ShForeachLightItemsAccessor>",
+                                 nullptr,
+                                 nullptr);
+  RNA_def_property_flag(prop, PROP_EDITABLE | PROP_NO_DEG_UPDATE);
+  RNA_def_property_ui_text(prop, "Active Item", "Active for-each-light item");
+  RNA_def_property_update(prop, NC_NODE, nullptr);
 }
 
 static void rna_def_geo_capture_attribute_item(BlenderRNA *brna)
@@ -9964,6 +10028,8 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("ShaderNode", "ShaderNodeNormal");
   define("ShaderNode", "ShaderNodeNormalMap", def_sh_normal_map);
   define("ShaderNode", "ShaderNodeNPR_ImageSample", def_sh_image_sample);
+  define("ShaderNode", "ShaderNodeForeachLightInput", def_sh_foreach_light_input);
+  define("ShaderNode", "ShaderNodeForeachLightOutput", def_sh_foreach_light_output);
   define("ShaderNode", "ShaderNodeNPR_Input");
   define("ShaderNode", "ShaderNodeNPR_Output", def_group_output);
   define("ShaderNode", "ShaderNodeNPR_Refraction");

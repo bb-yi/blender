@@ -6,6 +6,7 @@ __all__ = (
     "add_closure_zone",
     "add_color_mix_node",
     "add_foreach_geometry_element_zone",
+    "add_foreach_light_zone",
     "add_node_type",
     "add_node_type_with_outputs",
     "add_node_type_with_searchable_enum",
@@ -106,6 +107,19 @@ def add_closure_zone(layout, label):
         text=label,
         text_ctxt=i18n_contexts.default,
     )
+    props.use_transform = True
+    return props
+
+
+def add_foreach_light_zone(layout, label):
+    props = layout.operator(
+        "node.add_zone",
+        text=label,
+        text_ctxt=i18n_contexts.default,
+    )
+    props.input_node_type = "ShaderNodeForeachLightInput"
+    props.output_node_type = "ShaderNodeForeachLightOutput"
+    props.add_default_geometry_link = False
     props.use_transform = True
     return props
 
@@ -400,6 +414,18 @@ class NodeMenu(Menu):
         props = layout.operator(cls.zone_operator_id, text=iface_(label), translate=False)
         props.input_node_type = "NodeClosureInput"
         props.output_node_type = "NodeClosureOutput"
+        props.add_default_geometry_link = False
+
+        if hasattr(props, "use_transform"):
+            props.use_transform = cls.use_transform
+
+        return props
+
+    @classmethod
+    def foreach_light_zone(cls, layout, label):
+        props = layout.operator(cls.zone_operator_id, text=iface_(label), translate=False)
+        props.input_node_type = "ShaderNodeForeachLightInput"
+        props.output_node_type = "ShaderNodeForeachLightOutput"
         props.add_default_geometry_link = False
 
         if hasattr(props, "use_transform"):

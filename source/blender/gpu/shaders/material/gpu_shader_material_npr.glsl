@@ -2,6 +2,131 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+#ifdef GPU_SHADER
+
+#  if defined(NPR_SHADER) && defined(GPU_FRAGMENT_SHADER)
+
+bool npr_is_zero(float3 value)
+{
+  return all(lessThanEqual(abs(value), float3(1e-8f)));
+}
+
+bool foreach_light_setup(uint l_idx,
+                         bool is_directional,
+                         float3 N,
+                         out float4 out_color,
+                         out float3 out_vector,
+                         out float out_distance,
+                         out float out_attenuation,
+                         out float out_shadow_mask)
+{
+  LightData light = light_buf[l_idx];
+  if (npr_is_zero(light.color)) {
+    return false;
+  }
+
+  ObjectInfos object_infos = drw_infos[drw_resource_id()];
+  uchar receiver_light_set = receiver_light_set_get(object_infos);
+  if (!light_linking_affects_receiver(light.light_set_membership, receiver_light_set)) {
+    return false;
+  }
+
+  LightVector lv = light_vector_get(light, is_directional, g_data.P);
+  float attenuation = light_attenuation_volume(light, is_directional, lv);
+  if (attenuation < LIGHT_ATTENUATION_THRESHOLD) {
+    return false;
+  }
+
+  float3 V = drw_world_incident_vector(g_data.P);
+  float4 ltc_mat = float4(1.0f, 0.0f, 0.0f, 1.0f);
+  float ltc = light_ltc(utility_tx, light, lv.L, V, lv, ltc_mat);
+  attenuation *= ltc * light_power_get(light, LIGHT_DIFFUSE);
+  if (attenuation < LIGHT_ATTENUATION_THRESHOLD) {
+    return false;
+  }
+
+  float shadow_mask = 1.0f;
+  if (light.tilemap_index != LIGHT_NO_SHADOW) {
+    int ray_count = uniform_buf.shadow.ray_count;
+    int ray_step_count = uniform_buf.shadow.step_count;
+    shadow_mask = shadow_eval(light,
+                              is_directional,
+                              false,
+                              false,
+                              0.0f,
+                              g_data.P,
+                              g_data.Ng,
+                              N,
+                              0.0f,
+                              0.0f,
+                              ray_count,
+                              ray_step_count);
+    shadow_mask *= dot(N, lv.L) > 0.0f ? 1.0f : 0.0f;
+  }
+
+  out_color = float4(light.color, 1.0f);
+  out_vector = lv.L;
+  out_distance = lv.dist;
+  out_attenuation = attenuation;
+  out_shadow_mask = shadow_mask;
+  return true;
+}
+
+#    define FOREACH_LIGHT_BEGIN( \
+        N, out_color, out_vector, out_distance, out_attenuation, out_shadow_mask) \
+      LIGHT_FOREACH_ALL_BEGIN(light_cull_buf, \
+                              light_zbin_buf, \
+                              light_tile_buf, \
+                              gl_FragCoord.xy, \
+                              drw_point_world_to_view(g_data.P).z, \
+                              l_idx, \
+                              is_local) \
+      if (!foreach_light_setup(l_idx, \
+                               !is_local, \
+                               N, \
+                               out_color, \
+                               out_vector, \
+                               out_distance, \
+                               out_attenuation, \
+                               out_shadow_mask)) \
+      { \
+        continue; \
+      }
+
+#    define FOREACH_LIGHT_END() LIGHT_FOREACH_ALL_END()
+
+#  else
+
+#    if !defined(FOREACH_LIGHT_BEGIN)
+#      define FOREACH_LIGHT_BEGIN( \
+          N, out_color, out_vector, out_distance, out_attenuation, out_shadow_mask) \
+        if (false) {
+#    endif
+
+#    if !defined(FOREACH_LIGHT_END)
+#      define FOREACH_LIGHT_END() }
+#    endif
+
+#  endif
+
+#else
+
+/**
+ * Dummy functions for gpu_shader_dependency.
+ * Functions need parameters to be reflected, but zones use custom IO handling.
+ */
+[[node]]
+void FOREACH_LIGHT_BEGIN(float dummy)
+{
+}
+
+[[node]]
+void FOREACH_LIGHT_END(float dummy)
+{
+}
+
+#endif
+
 [[node]]
 void npr_image_sample_view(TextureHandle image, float3 offset, float4 &color)
 {
@@ -60,6 +185,28 @@ void npr_input(TextureHandle &combined_color,
 void npr_output(float4 color, float4 &out_color)
 {
   out_color = color;
+}
+
+[[node]]
+void npr_output_float(float color, float4 &out_color)
+{
+  out_color = float4(float3(color), 1.0f);
+}
+
+[[node]]
+void npr_output_vec3(float3 color, float4 &out_color)
+{
+  out_color = float4(color, 1.0f);
+}
+
+[[node]]
+void npr_output_texture_handle(TextureHandle color, float4 &out_color)
+{
+#if defined(NPR_SHADER) && defined(GPU_FRAGMENT_SHADER)
+  out_color = TextureHandle_eval(color, float2(0.0f), false);
+#else
+  out_color = float4(0.0f);
+#endif
 }
 
 [[node]]

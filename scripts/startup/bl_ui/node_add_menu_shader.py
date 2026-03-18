@@ -454,6 +454,8 @@ class NODE_MT_shader_node_utilities_base(node_add_menu.NodeMenu):
         self.draw_menu(layout, "Utilities/Vector")
         layout.separator()
         self.repeat_zone(layout, label="Repeat")
+        if npr_shader_nodes_poll(context):
+            self.foreach_light_zone(layout, label="For Each Light")
         self.node_operator(
             layout,
             "ShaderNodeNPR_ImageSample",
