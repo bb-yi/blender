@@ -18,7 +18,8 @@ float2 scene_color_resolve_uv(float3 vector, float use_explicit_vector)
 
 float scene_depth_resolve_linear(float2 uv)
 {
-  float depth = texture(depth_tx, uv).r;
+  /* Eevee stores the hardware depth buffer in reverse-Z space. */
+  float depth = 1.0f - texture(depth_tx, uv).r;
   return -drw_depth_screen_to_view(depth);
 }
 
