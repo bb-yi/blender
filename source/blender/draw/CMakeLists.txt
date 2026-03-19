@@ -96,6 +96,7 @@ set(SRC
   engines/eevee/eevee_cryptomatte.cc
   engines/eevee/eevee_depth_of_field.cc
   engines/eevee/eevee_engine.cc
+  engines/eevee/eevee_filter_material.cc
   engines/eevee/eevee_film.cc
   engines/eevee/eevee_hizbuffer.cc
   engines/eevee/eevee_instance.cc
@@ -112,6 +113,7 @@ set(SRC
   engines/eevee/eevee_pipeline.cc
   engines/eevee/eevee_precompute.cc
   engines/eevee/eevee_raytrace.cc
+  engines/eevee/eevee_render_texture.cc
   engines/eevee/eevee_renderbuffers.cc
   engines/eevee/eevee_sampling.cc
   engines/eevee/eevee_shader.cc
@@ -191,6 +193,7 @@ set(SRC
   engines/eevee/eevee_cryptomatte.hh
   engines/eevee/eevee_depth_of_field.hh
   engines/eevee/eevee_engine.h
+  engines/eevee/eevee_filter_material.hh
   engines/eevee/eevee_film.hh
   engines/eevee/eevee_gbuffer.hh
   engines/eevee/eevee_hizbuffer.hh
@@ -208,6 +211,7 @@ set(SRC
   engines/eevee/eevee_pipeline.hh
   engines/eevee/eevee_precompute.hh
   engines/eevee/eevee_raytrace.hh
+  engines/eevee/eevee_render_texture.hh
   engines/eevee/eevee_renderbuffers.hh
   engines/eevee/eevee_sampling.hh
   engines/eevee/eevee_shader.hh
@@ -324,6 +328,7 @@ set(GLSL_SRC
   engines/eevee/shaders/infos/eevee_common_infos.hh
   engines/eevee/shaders/infos/eevee_deferred_infos.hh
   engines/eevee/shaders/infos/eevee_depth_of_field_infos.hh
+  engines/eevee/shaders/infos/eevee_filter_material_infos.hh
   engines/eevee/shaders/infos/eevee_film_infos.hh
   engines/eevee/shaders/infos/eevee_forward_infos.hh
   engines/eevee/shaders/infos/eevee_fullscreen_infos.hh
@@ -339,6 +344,7 @@ set(GLSL_SRC
   engines/eevee/shaders/infos/eevee_material_infos.hh
   engines/eevee/shaders/infos/eevee_motion_blur_infos.hh
   engines/eevee/shaders/infos/eevee_nodetree_infos.hh
+  engines/eevee/shaders/infos/eevee_render_texture_infos.hh
   engines/eevee/shaders/infos/eevee_raycast_infos.hh
   engines/eevee/shaders/infos/eevee_sampling_infos.hh
   engines/eevee/shaders/infos/eevee_shadow_infos.hh
@@ -445,6 +451,7 @@ set(GLSL_SRC
   engines/eevee/shaders/eevee_film_frag.glsl
   engines/eevee/shaders/eevee_film_lib.glsl
   engines/eevee/shaders/eevee_film_pass_convert_comp.glsl
+  engines/eevee/shaders/eevee_filter_material_frag.glsl
   engines/eevee/shaders/eevee_filter_lib.glsl
   engines/eevee/shaders/eevee_forward_lib.glsl
   engines/eevee/shaders/eevee_fullscreen_vert.glsl
@@ -511,6 +518,7 @@ set(GLSL_SRC
   engines/eevee/shaders/eevee_ray_trace_screen_comp.glsl
   engines/eevee/shaders/eevee_ray_trace_screen_lib.glsl
   engines/eevee/shaders/eevee_ray_types_lib.glsl
+  engines/eevee/shaders/eevee_render_texture_extract_comp.glsl
   engines/eevee/shaders/eevee_reverse_z_lib.glsl
   engines/eevee/shaders/eevee_lightprobe_sphere_convolve_comp.glsl
   engines/eevee/shaders/eevee_lightprobe_sphere_eval_lib.glsl
@@ -595,6 +603,7 @@ set(GLSL_SRC
   engines/eevee/eevee_motion_blur_shared.hh
   engines/eevee/eevee_precompute_shared.hh
   engines/eevee/eevee_raytrace_shared.hh
+  engines/eevee/eevee_render_texture_shared.hh
   engines/eevee/eevee_renderbuffers_shared.hh
   engines/eevee/eevee_sampling_shared.hh
   engines/eevee/eevee_shadow_shared.hh

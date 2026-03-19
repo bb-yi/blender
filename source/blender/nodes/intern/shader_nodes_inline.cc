@@ -5,6 +5,8 @@
 #include <fmt/format.h>
 #include <variant>
 
+#include "DNA_material_types.h"
+
 #include "BKE_compute_context_cache.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_node_tree_zones.hh"
@@ -324,9 +326,16 @@ class ShaderNodesInliner {
 
     switch (tree_type) {
       case ID_MA:
-        add_output_type("ShaderNodeOutputMaterial");
-        add_output_type("ShaderNodeOutputLight");
-        add_output_type("ShaderNodeOutputAOV");
+        if (const Material *material = reinterpret_cast<const Material *>(src_tree_.owner_id);
+            material != nullptr && material->eevee_domain == MA_EEVEE_DOMAIN_FILTER)
+        {
+          add_output_type("ShaderNodeOutputFilter");
+        }
+        else {
+          add_output_type("ShaderNodeOutputMaterial");
+          add_output_type("ShaderNodeOutputLight");
+          add_output_type("ShaderNodeOutputAOV");
+        }
         break;
       case ID_WO:
         add_output_type("ShaderNodeOutputWorld");

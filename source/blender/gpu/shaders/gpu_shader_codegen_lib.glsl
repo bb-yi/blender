@@ -40,6 +40,21 @@ struct TextureHandle {
 
 #define TEXTURE_HANDLE_DEFAULT TextureHandle(0u, 0)
 
+#if defined(NPR_SHADER) || defined(MAT_FILTER)
+float4 TextureHandle_eval(TextureHandle tex, float2 offset, bool texel_offset);
+float4 TextureHandle_eval(TextureHandle tex);
+#else
+float4 TextureHandle_eval(TextureHandle tex, float2 offset, bool texel_offset)
+{
+  return float4(0.0f);
+}
+
+float4 TextureHandle_eval(TextureHandle tex)
+{
+  return TextureHandle_eval(tex, float2(0.0f), false);
+}
+#endif
+
 /* Assumes GPU_VEC4 is color data, special case that needs luminance coefficients from OCIO. */
 #define float_from_float4(v, luminance_coefficients) dot(v.rgb, luminance_coefficients)
 #define float_from_float3(v) ((v.r + v.g + v.b) * (1.0f / 3.0f))

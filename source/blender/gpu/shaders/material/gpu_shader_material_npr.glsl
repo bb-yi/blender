@@ -130,7 +130,7 @@ void FOREACH_LIGHT_END(float dummy)
 [[node]]
 void npr_image_sample_view(TextureHandle image, float3 offset, float4 &color)
 {
-#if defined(NPR_SHADER) && defined(GPU_FRAGMENT_SHADER)
+#if (defined(NPR_SHADER) || defined(MAT_FILTER)) && defined(GPU_FRAGMENT_SHADER)
   color = TextureHandle_eval(image, offset.xy, false);
 #else
   color = float4(0.0f);
@@ -140,7 +140,7 @@ void npr_image_sample_view(TextureHandle image, float3 offset, float4 &color)
 [[node]]
 void npr_image_sample_texel(TextureHandle image, float3 offset, float4 &color)
 {
-#if defined(NPR_SHADER) && defined(GPU_FRAGMENT_SHADER)
+#if (defined(NPR_SHADER) || defined(MAT_FILTER)) && defined(GPU_FRAGMENT_SHADER)
   color = TextureHandle_eval(image, offset.xy, true);
 #else
   color = float4(0.0f);
@@ -223,7 +223,7 @@ void npr_refraction(TextureHandle &combined_color, TextureHandle &position)
 [[node]]
 void node_input_aov(float hash, TextureHandle &color, TextureHandle &value)
 {
-#if defined(NPR_SHADER) && defined(GPU_FRAGMENT_SHADER)
+#if (defined(NPR_SHADER) || defined(MAT_FILTER)) && defined(GPU_FRAGMENT_SHADER)
   input_aov_impl(floatBitsToUint(hash), color, value);
 #else
   color = TEXTURE_HANDLE_DEFAULT;

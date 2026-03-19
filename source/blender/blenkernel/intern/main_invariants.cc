@@ -3,11 +3,19 @@
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
 #include "BKE_main_invariants.hh"
+#include "BKE_main.hh"
+#include "BKE_material.hh"
 #include "BKE_node_tree_update.hh"
+
+#include "BLI_listbase.h"
 
 #include "DEG_depsgraph.hh"
 
+#include "DNA_material_types.h"
 #include "DNA_node_types.h"
+#include "DNA_scene_types.h"
+
+#include "GPU_material.hh"
 
 #include "WM_api.hh"
 #include "WM_types.hh"
@@ -50,9 +58,42 @@ static void send_notifiers_after_node_tree_change(ID *id, bNodeTree *ntree)
 static void propagate_node_tree_changes(Main &bmain, const std::optional<Span<ID *>> modified_ids)
 {
   NodeTreeUpdateExtraParams params;
-  params.tree_changed_fn = [](bNodeTree &ntree, ID &owner_id) {
+  params.tree_changed_fn = [&bmain](bNodeTree &ntree, ID &owner_id) {
     send_notifiers_after_node_tree_change(&owner_id, &ntree);
     DEG_id_tag_update(&ntree.id, ID_RECALC_SYNC_TO_EVAL);
+
+    if (ntree.type != NTREE_SHADER || GS(owner_id.name) != ID_MA) {
+      return;
+    }
+
+    Material &material = reinterpret_cast<Material &>(owner_id);
+    if (material.eevee_domain != MA_EEVEE_DOMAIN_FILTER) {
+      return;
+    }
+
+    GPU_material_free(&material.gpumaterial);
+    DEG_id_tag_update(&material.id, ID_RECALC_SHADING | ID_RECALC_SYNC_TO_EVAL);
+
+    for (Scene *scene = static_cast<Scene *>(bmain.scenes.first); scene != nullptr;
+         scene = scene->id.next ? reinterpret_cast<Scene *>(scene->id.next) : nullptr)
+    {
+      bool uses_filter_material = false;
+      for (SceneFilterMaterial *filter_entry = static_cast<SceneFilterMaterial *>(
+               scene->eevee.filter_materials.first);
+           filter_entry != nullptr;
+           filter_entry = filter_entry->next)
+      {
+        if (filter_entry->material == &material) {
+          uses_filter_material = true;
+          break;
+        }
+      }
+      if (!uses_filter_material) {
+        continue;
+      }
+      DEG_id_tag_update(&scene->id, ID_RECALC_SYNC_TO_EVAL);
+      WM_main_add_notifier(NC_SCENE | ND_RENDER_OPTIONS, scene);
+    }
   };
   params.tree_output_changed_fn = [](bNodeTree &ntree, ID & /*owner_id*/) {
     DEG_id_tag_update(&ntree.id, ID_RECALC_NTREE_OUTPUT);

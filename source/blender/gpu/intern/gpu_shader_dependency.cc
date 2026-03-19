@@ -41,6 +41,7 @@ extern "C" {
 #define SHADER_SOURCE(filename_underscore, filename, filepath) \
   extern char datatoc_##filename_underscore[];
 #include "glsl_compositor_source_list.h"
+/* Keep the registered source tables recompiling when draw-side generated source lists change. */
 #include "glsl_draw_source_list.h"
 #include "glsl_gpu_source_list.h"
 #include "glsl_ocio_source_list.h"

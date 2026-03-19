@@ -27,6 +27,12 @@ SHADER_LIBRARY_CREATE_INFO(eevee_hiz_data)
 #include "gpu_shader_math_vector_reduce_lib.glsl"
 #include "gpu_shader_utildefines_lib.glsl"
 
+#if defined(NPR_SHADER) || defined(MAT_FILTER)
+void input_aov_impl(uint hash, out TextureHandle color, out TextureHandle value);
+float4 TextureHandle_eval(TextureHandle tex, float2 offset, bool texel_offset);
+float4 TextureHandle_eval(TextureHandle tex);
+#endif
+
 #ifdef NPR_SHADER
 float4 g_combined_color;
 float4 g_diffuse_color;
@@ -46,9 +52,6 @@ void npr_input_impl(out TextureHandle combined_color,
                     out TextureHandle position,
                     out TextureHandle normal);
 void npr_refraction_impl(out TextureHandle combined_color, out TextureHandle position);
-void input_aov_impl(uint hash, out TextureHandle color, out TextureHandle value);
-float4 TextureHandle_eval(TextureHandle tex, float2 offset, bool texel_offset);
-float4 TextureHandle_eval(TextureHandle tex);
 #endif
 
 #define closure_base_copy(cl, in_cl) \

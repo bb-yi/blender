@@ -170,6 +170,7 @@ void ShadingView::render()
   inst_.planar_probes.viewport_draw(render_view_, combined_fb_);
 
   gpu::Texture *combined_final_tx = render_postfx(rbufs.combined_tx);
+  combined_final_tx = inst_.filter_materials.render(render_view_, combined_final_tx, extent_);
   inst_.film.accumulate(jitter_view_, combined_final_tx);
 
   rbufs.release();

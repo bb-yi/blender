@@ -905,6 +905,9 @@ class PipelineModule {
         return shadow.surface_material_add(blender_mat, gpumat);
       case MAT_PIPE_CAPTURE:
         return capture.surface_material_add(blender_mat, gpumat);
+      case MAT_PIPE_FILTER:
+        BLI_assert_msg(0, "Filter shaders are evaluated by the filter material module.");
+        return nullptr;
 
       case MAT_PIPE_VOLUME_OCCUPANCY:
       case MAT_PIPE_VOLUME_MATERIAL:

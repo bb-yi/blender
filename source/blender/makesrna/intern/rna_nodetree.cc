@@ -6633,6 +6633,37 @@ static void def_sh_render_texture(BlenderRNA * /*brna*/, StructRNA *srna)
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
 }
 
+static void def_sh_scene_color(BlenderRNA * /*brna*/, StructRNA *srna)
+{
+  static const EnumPropertyItem scene_source_items[] = {
+      {SHD_SCENE_SOURCE_COLOR,
+       "COLOR",
+       0,
+       "Color",
+       "Sample the resolved Eevee scene color"},
+      {SHD_SCENE_SOURCE_DEPTH,
+       "DEPTH",
+       0,
+       "Depth",
+       "Sample scene depth as linear distance from the camera"},
+      {SHD_SCENE_SOURCE_NORMAL,
+       "NORMAL",
+       0,
+       "Normal",
+       "Sample the Eevee scene normal render pass"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+
+  PropertyRNA *prop;
+
+  prop = RNA_def_property(srna, "source", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "custom1");
+  RNA_def_property_enum_items(prop, scene_source_items);
+  RNA_def_property_enum_default(prop, SHD_SCENE_SOURCE_COLOR);
+  RNA_def_property_ui_text(prop, "Source", "Which scene buffer to sample");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+}
+
 static void def_cmp_convert_to_display(BlenderRNA * /*brna*/, StructRNA *srna)
 {
   PropertyRNA *prop;
@@ -10034,9 +10065,11 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("ShaderNode", "ShaderNodeNPR_Output", def_group_output);
   define("ShaderNode", "ShaderNodeNPR_Refraction");
   define("ShaderNode", "ShaderNodeRenderTexture", def_sh_render_texture);
+  define("ShaderNode", "ShaderNodeSceneColor", def_sh_scene_color);
   define("ShaderNode", "ShaderNodeInputAOV", def_sh_input_aov);
   define("ShaderNode", "ShaderNodeObjectInfo");
   define("ShaderNode", "ShaderNodeOutputAOV", def_sh_output_aov);
+  define("ShaderNode", "ShaderNodeOutputFilter", def_sh_output);
   define("ShaderNode", "ShaderNodeOutputLight", def_sh_output);
   define("ShaderNode", "ShaderNodeOutputLineStyle", def_sh_output_linestyle);
   define("ShaderNode", "ShaderNodeOutputMaterial", def_sh_output);

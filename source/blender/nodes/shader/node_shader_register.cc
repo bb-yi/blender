@@ -69,7 +69,9 @@ void register_shader_nodes()
   register_node_type_sh_npr_input();
   register_node_type_sh_npr_output();
   register_node_type_sh_npr_refraction();
+  register_node_type_sh_output_filter();
   register_node_type_sh_render_texture();
+  register_node_type_sh_scene_color();
   register_node_type_sh_object_info();
   register_node_type_sh_output_aov();
   register_node_type_sh_output_light();

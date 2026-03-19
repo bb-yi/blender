@@ -10,6 +10,7 @@
 #  include "draw_view_infos.hh"
 #  include "eevee_light_shared.hh"
 #  include "eevee_lightprobe_shared.hh"
+#  include "eevee_render_texture_shared.hh"
 #  include "eevee_sampling_shared.hh"
 #  include "eevee_shadow_shared.hh"
 #  include "eevee_uniform_infos.hh"
@@ -47,6 +48,19 @@ GPU_SHADER_CREATE_END()
 
 GPU_SHADER_CREATE_INFO(eevee_utility_texture)
 SAMPLER(RBUFS_UTILITY_TEX_SLOT, sampler2DArray, utility_tx)
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(eevee_render_texture_data)
+TYPEDEF_SOURCE("eevee_render_texture_shared.hh")
+STORAGE_BUF(RENDER_TEXTURE_BUF_SLOT, read, RenderTextureData, render_texture_buf[])
+SAMPLER(RENDER_TEXTURE_COLOR_TX_SLOT_0, sampler2D, render_texture_color_tx_0)
+SAMPLER(RENDER_TEXTURE_COLOR_TX_SLOT_1, sampler2D, render_texture_color_tx_1)
+SAMPLER(RENDER_TEXTURE_COLOR_TX_SLOT_2, sampler2D, render_texture_color_tx_2)
+SAMPLER(RENDER_TEXTURE_COLOR_TX_SLOT_3, sampler2D, render_texture_color_tx_3)
+SAMPLER(RENDER_TEXTURE_HISTORY_TX_SLOT_0, sampler2D, render_texture_color_history_tx_0)
+SAMPLER(RENDER_TEXTURE_HISTORY_TX_SLOT_1, sampler2D, render_texture_color_history_tx_1)
+SAMPLER(RENDER_TEXTURE_HISTORY_TX_SLOT_2, sampler2D, render_texture_color_history_tx_2)
+SAMPLER(RENDER_TEXTURE_HISTORY_TX_SLOT_3, sampler2D, render_texture_color_history_tx_3)
 GPU_SHADER_CREATE_END()
 
 GPU_SHADER_CREATE_INFO(eevee_volume_properties_data)

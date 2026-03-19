@@ -67,6 +67,7 @@ void BackgroundPipeline::sync(GPUMaterial *gpumat,
   world_ps_.bind_resources(inst_.cryptomatte);
   world_ps_.bind_resources(inst_.uniform_data);
   world_ps_.bind_resources(inst_.sampling);
+  world_ps_.bind_resources(inst_.render_textures);
   world_ps_.bind_resources(inst_.sphere_probes);
   world_ps_.bind_resources(inst_.volume_probes);
   world_ps_.draw_procedural(GPU_PRIM_TRIS, 1, 3);
@@ -126,6 +127,7 @@ void WorldPipeline::sync(GPUMaterial *gpumat)
   pass.bind_resources(inst_.cryptomatte);
   pass.bind_resources(inst_.uniform_data);
   pass.bind_resources(inst_.sampling);
+  pass.bind_resources(inst_.render_textures);
   pass.bind_resources(inst_.sphere_probes);
   pass.bind_resources(inst_.volume_probes);
   pass.draw_procedural(GPU_PRIM_TRIS, 1, 3);
@@ -161,6 +163,7 @@ void WorldVolumePipeline::sync(GPUMaterial *gpumat)
   world_ps_.bind_resources(inst_.uniform_data);
   world_ps_.bind_resources(inst_.volume.properties);
   world_ps_.bind_resources(inst_.sampling);
+  world_ps_.bind_resources(inst_.render_textures);
 
   world_ps_.material_set(*inst_.manager, gpumat);
   /* Bind correct dummy texture for attributes defaults. */
@@ -234,6 +237,7 @@ void ShadowPipeline::sync()
     }
     pass.bind_resources(inst_.uniform_data);
     pass.bind_resources(inst_.sampling);
+    pass.bind_resources(inst_.render_textures);
     surface_double_sided_ps_ = &pass.sub("Shadow.Surface.Double-Sided");
     surface_single_sided_ps_ = &pass.sub("Shadow.Surface.Single-Sided");
     surface_single_sided_ps_->state_set(state | DRW_STATE_CULL_BACK);
@@ -342,6 +346,7 @@ void ForwardPipeline::sync()
       prepass_ps_.bind_resources(inst_.uniform_data);
       prepass_ps_.bind_resources(inst_.velocity);
       prepass_ps_.bind_resources(inst_.sampling);
+      prepass_ps_.bind_resources(inst_.render_textures);
     }
 
     prepass_ps_.setup_subpasses(DRW_STATE_WRITE_DEPTH | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
@@ -362,6 +367,7 @@ void ForwardPipeline::sync()
       opaque_ps_.bind_resources(inst_.shadows);
       opaque_ps_.bind_resources(inst_.volume.result);
       opaque_ps_.bind_resources(inst_.sampling);
+      opaque_ps_.bind_resources(inst_.render_textures);
       opaque_ps_.bind_resources(inst_.hiz_buffer.front);
       opaque_ps_.bind_resources(inst_.volume_probes);
       opaque_ps_.bind_resources(inst_.sphere_probes);
@@ -394,6 +400,7 @@ void ForwardPipeline::sync()
     sub.bind_resources(inst_.shadows);
     sub.bind_resources(inst_.volume.result);
     sub.bind_resources(inst_.sampling);
+    sub.bind_resources(inst_.render_textures);
     sub.bind_resources(inst_.hiz_buffer.front);
     sub.bind_resources(inst_.volume_probes);
     sub.bind_resources(inst_.sphere_probes);
@@ -645,6 +652,7 @@ void DeferredLayerBase::gbuffer_pass_sync(Instance &inst)
   gbuffer_ps_.bind_resources(inst.sampling);
   gbuffer_ps_.bind_resources(inst.hiz_buffer.front);
   gbuffer_ps_.bind_resources(inst.hiz_buffer.front);
+  gbuffer_ps_.bind_resources(inst.render_textures);
   gbuffer_ps_.bind_resources(inst.cryptomatte);
 
   gbuffer_ps_.bind_texture(HIZ_PREVIOUS_LAYER_TEX_SLOT, &inst.hiz_buffer.back.ref_tx_);
@@ -692,10 +700,16 @@ template<typename F> void DeferredLayerBase::npr_pass_sync(Instance &inst, F cal
   npr_ps_.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst.pipelines.utility_tx);
   npr_ps_.bind_image(RBUFS_COLOR_SLOT, &inst.render_buffers.rp_color_tx);
   npr_ps_.bind_image(RBUFS_VALUE_SLOT, &inst.render_buffers.rp_value_tx);
-  npr_ps_.bind_resources(inst.gbuffer);
+  /* Bind manually to fixed slots before the sub-pass shader is selected.
+   * `bind_resources(inst.gbuffer)` resolves sampler bindings from the active shader interface,
+   * which is not available yet during probe NPR pass setup and can crash in viewport sync. */
+  npr_ps_.bind_texture(GBUF_NORMAL_TEX_SLOT, &inst.gbuffer.normal_tx);
+  npr_ps_.bind_texture(GBUF_HEADER_TEX_SLOT, &inst.gbuffer.header_tx);
+  npr_ps_.bind_texture(GBUF_CLOSURE_TEX_SLOT, &inst.gbuffer.closure_tx);
   npr_ps_.bind_resources(inst.uniform_data);
   npr_ps_.bind_resources(inst.sampling);
   npr_ps_.bind_resources(inst.hiz_buffer.front);
+  npr_ps_.bind_resources(inst.render_textures);
   npr_ps_.bind_resources(inst.lights);
   npr_ps_.bind_resources(inst.shadows);
 
@@ -726,6 +740,7 @@ void DeferredLayer::begin_sync()
     prepass_ps_.bind_resources(inst_.uniform_data);
     prepass_ps_.bind_resources(inst_.velocity);
     prepass_ps_.bind_resources(inst_.sampling);
+    prepass_ps_.bind_resources(inst_.render_textures);
 
     /* Clear stencil buffer so that prepass can tag it. Then draw a full-screen triangle that will
      * clear AOVs for all the pixels touched by this layer. */
@@ -867,6 +882,7 @@ void DeferredLayer::end_sync(bool is_first_pass,
         sub.bind_resources(inst_.hiz_buffer.front);
         sub.bind_resources(inst_.uniform_data);
         sub.bind_resources(inst_.sampling);
+        sub.bind_resources(inst_.render_textures);
         sub.bind_texture("gbuf_header_tx", &inst_.gbuffer.header_tx);
         sub.bind_image("gbuf_normal_img", &inst_.gbuffer.normal_tx);
         sub.state_set(DRW_STATE_WRITE_STENCIL | DRW_STATE_STENCIL_EQUAL);
@@ -918,6 +934,7 @@ void DeferredLayer::end_sync(bool is_first_pass,
           sub.bind_resources(inst_.lights);
           sub.bind_resources(inst_.shadows);
           sub.bind_resources(inst_.sampling);
+          sub.bind_resources(inst_.render_textures);
           sub.bind_resources(inst_.hiz_buffer.front);
           sub.bind_resources(inst_.sphere_probes);
           sub.bind_resources(inst_.volume_probes);
@@ -1299,6 +1316,7 @@ void VolumeLayer::sync()
     pass.bind_resources(inst_.uniform_data);
     pass.bind_resources(inst_.volume.occupancy);
     pass.bind_resources(inst_.sampling);
+    pass.bind_resources(inst_.render_textures);
     occupancy_ps_ = &pass;
   }
   {
@@ -1311,6 +1329,7 @@ void VolumeLayer::sync()
     pass.bind_resources(inst_.uniform_data);
     pass.bind_resources(inst_.volume.properties);
     pass.bind_resources(inst_.sampling);
+    pass.bind_resources(inst_.render_textures);
     material_ps_ = &pass;
   }
 }
@@ -1655,6 +1674,7 @@ void PlanarProbePipeline::begin_sync()
     prepass_ps_.bind_ubo(CLIP_PLANE_BUF, inst_.planar_probes.world_clip_buf_);
     prepass_ps_.bind_resources(inst_.uniform_data);
     prepass_ps_.bind_resources(inst_.sampling);
+    prepass_ps_.bind_resources(inst_.render_textures);
     prepass_ps_.setup_subpasses(DRW_STATE_WRITE_DEPTH | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
                                 inst_.film.depth.test_state);
   }
@@ -1687,6 +1707,7 @@ void PlanarProbePipeline::end_sync()
     pass.bind_resources(inst_.lights);
     pass.bind_resources(inst_.shadows);
     pass.bind_resources(inst_.sampling);
+    pass.bind_resources(inst_.render_textures);
     pass.bind_resources(inst_.hiz_buffer.front);
     pass.bind_resources(inst_.sphere_probes);
     pass.bind_resources(inst_.volume_probes);
@@ -1814,6 +1835,7 @@ void CapturePipeline::sync()
   /* TODO(fclem): Remove. Bind to get the camera data,
    * but there should be no view dependent behavior during capture. */
   surface_ps_.bind_resources(inst_.uniform_data);
+  surface_ps_.bind_resources(inst_.render_textures);
 }
 
 PassMain::Sub *CapturePipeline::surface_material_add(blender::Material *blender_mat,

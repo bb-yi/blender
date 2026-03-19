@@ -126,6 +126,10 @@ ShaderGroups ShaderModule::static_shaders_load(const ShaderGroups request_bits,
   }
   {
     const eShaderType shader_list[] = {RENDERPASS_CLEAR,
+                                       RENDER_TEXTURE_EXTRACT_RGBA16F,
+                                       RENDER_TEXTURE_EXTRACT_RGBA32F,
+                                       RENDER_TEXTURE_EXTRACT_R16F,
+                                       RENDER_TEXTURE_EXTRACT_R32F,
                                        FILM_COPY,
                                        FILM_COMP,
                                        FILM_CRYPTOMATTE_POST,
@@ -472,6 +476,14 @@ const char *ShaderModule::static_shader_create_info_name_get(eShaderType shader_
       return "eevee_ray_tile_compact";
     case RENDERPASS_CLEAR:
       return "eevee_renderpass_clear";
+    case RENDER_TEXTURE_EXTRACT_RGBA16F:
+      return "eevee_render_texture_extract_rgba16f";
+    case RENDER_TEXTURE_EXTRACT_RGBA32F:
+      return "eevee_render_texture_extract_rgba32f";
+    case RENDER_TEXTURE_EXTRACT_R16F:
+      return "eevee_render_texture_extract_r16f";
+    case RENDER_TEXTURE_EXTRACT_R32F:
+      return "eevee_render_texture_extract_r32f";
     case LIGHTPROBE_IRRADIANCE_BOUNDS:
       return "eevee_lightprobe_volume_bounds";
     case LIGHTPROBE_IRRADIANCE_OFFSET:
@@ -662,6 +674,10 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
         case MAT_PIPE_VOLUME_MATERIAL:
           pipeline_info_name = "eevee_surf_volume";
           info.name_ += "_world_volume";
+          break;
+        case MAT_PIPE_FILTER:
+          pipeline_info_name = "eevee_filter_material";
+          info.name_ += "_world_filter";
           break;
         default:
           pipeline_info_name = "eevee_surf_world";
@@ -1230,6 +1246,12 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     dependencies.extend(codegen.npr.dependencies);
     frag_gen << "}\n\n";
 
+    frag_gen << "float4 nodetree_filter()\n";
+    frag_gen << "{\n";
+    frag_gen << codegen.filter.serialized_or_default("return float4(0.0f);\n");
+    dependencies.extend(codegen.filter.dependencies);
+    frag_gen << "}\n\n";
+
     /* TODO(fclem): Find a way to pass material parameters inside the material UBO. */
     info.define("thickness_mode", thickness_type == MAT_THICKNESS_SLAB ? "-1.0" : "1.0");
 
@@ -1468,6 +1490,22 @@ void ShaderModule::material_create_info_pipelines_amend(eMaterialGeometry geomet
             .viewports(1)
             .depth_format(gpu::TextureTargetFormat::SFLOAT_32_DEPTH_UINT_8)
             .stencil_format(gpu::TextureTargetFormat::SFLOAT_32_DEPTH_UINT_8);
+
+        break;
+      }
+      case MAT_PIPE_FILTER: {
+        /* Filter fullscreen pipeline. */
+        r_info.pipeline_state()
+            .primitive(GPU_PRIM_TRIS)
+            .state(GPU_WRITE_COLOR,
+                   GPU_BLEND_NONE,
+                   GPU_CULL_NONE,
+                   GPU_DEPTH_NONE,
+                   GPU_STENCIL_NONE,
+                   GPU_STENCIL_OP_NONE,
+                   GPU_VERTEX_LAST)
+            .viewports(1)
+            .color_format(gpu::TextureTargetFormat::SFLOAT_16_16_16_16);
 
         break;
       }

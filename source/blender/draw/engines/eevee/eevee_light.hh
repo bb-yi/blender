@@ -186,6 +186,7 @@ class LightModule {
   void begin_sync();
   void sync_light(const Object *ob, ObjectHandle &handle);
   void end_sync();
+  void sync_render_extent(const int2 render_extent);
 
   /**
    * Update acceleration structure for the given view.
@@ -206,6 +207,7 @@ class LightModule {
   void culling_pass_sync();
   void update_pass_sync();
   void debug_pass_sync();
+  void culling_extent_sync(const int2 render_extent);
 
   void add_world_sun_light(const ObjectKey &key, bool use_diffuse, bool use_glossy);
 };

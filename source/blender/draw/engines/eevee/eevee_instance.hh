@@ -31,6 +31,7 @@
 #include "eevee_cryptomatte.hh"
 #include "eevee_debug_shared.hh"
 #include "eevee_depth_of_field.hh"
+#include "eevee_filter_material.hh"
 #include "eevee_film.hh"
 #include "eevee_gbuffer.hh"
 #include "eevee_hizbuffer.hh"
@@ -44,6 +45,7 @@
 #include "eevee_motion_blur.hh"
 #include "eevee_pipeline.hh"
 #include "eevee_raytrace.hh"
+#include "eevee_render_texture.hh"
 #include "eevee_renderbuffers.hh"
 #include "eevee_sampling.hh"
 #include "eevee_shader.hh"
@@ -90,6 +92,7 @@ class Instance : public DrawEngine {
   uint64_t depsgraph_last_update_ = 0;
   bool overlays_enabled_ = false;
   bool skip_render_ = false;
+  int2 render_extent_override_ = int2(-1);
 
   /** Info string displayed at the top of the render / viewport, or the console when baking. */
   std::string info_ = "";
@@ -112,6 +115,8 @@ class Instance : public DrawEngine {
   GBuffer gbuffer;
   HiZBuffer hiz_buffer;
   Sampling sampling;
+  RenderTextureModule render_textures;
+  FilterMaterialModule filter_materials;
   Camera camera;
   Film film;
   RenderBuffers render_buffers;
@@ -194,6 +199,8 @@ class Instance : public DrawEngine {
         cryptomatte(*this),
         hiz_buffer(*this, uniform_data.data.hiz),
         sampling(*this, uniform_data.data.clamp),
+        render_textures(*this),
+        filter_materials(*this),
         camera(*this, uniform_data.data.camera),
         film(*this, uniform_data.data.film),
         render_buffers(*this, uniform_data.data.render_pass),
@@ -256,6 +263,23 @@ class Instance : public DrawEngine {
   void render_sync();
   void render_frame(RenderEngine *engine, RenderLayer *render_layer, const char *view_name);
   void store_metadata(RenderResult *render_result);
+
+  int2 render_extent_get() const
+  {
+    return (render_extent_override_.x > 0 && render_extent_override_.y > 0) ?
+               render_extent_override_ :
+               film.render_extent_get();
+  }
+
+  void render_extent_override_set(const int2 &extent)
+  {
+    render_extent_override_ = extent;
+  }
+
+  void render_extent_override_clear()
+  {
+    render_extent_override_ = int2(-1);
+  }
 
   /* Viewport. */
 

@@ -413,6 +413,7 @@ static void scene_free_data(ID *id)
 
   BKE_previewimg_id_free(&scene->id);
   BKE_curvemapping_free_data(&scene->r.mblur_shutter_curve);
+  BLI_freelistN(&scene->eevee.filter_materials);
   BLI_freelistN(&scene->eevee.render_textures);
 
   for (ViewLayer &view_layer : scene->view_layers.items_mutable()) {
@@ -870,6 +871,13 @@ static void scene_foreach_id(ID *id, LibraryForeachIDData *data)
   {
     BKE_LIB_FOREACHID_PROCESS_IDSUPER(data, render_texture->camera, IDWALK_CB_NOP);
   }
+  for (SceneFilterMaterial *filter_material = static_cast<SceneFilterMaterial *>(
+           scene->eevee.filter_materials.first);
+       filter_material != nullptr;
+       filter_material = filter_material->next)
+  {
+    BKE_LIB_FOREACHID_PROCESS_IDSUPER(data, filter_material->material, IDWALK_CB_USER);
+  }
 
   if (scene->nodetree) {
     /* nodetree **are owned by IDs**, treat them as mere sub-data and not real ID! */
@@ -1255,6 +1263,14 @@ static void scene_blend_write(BlendWriter *writer, ID *id, const void *id_addres
   /* writing dynamic list of TimeMarkers to the blend file */
   BKE_time_markers_blend_write(writer, sce->markers);
 
+  for (SceneFilterMaterial *filter_material = static_cast<SceneFilterMaterial *>(
+           sce->eevee.filter_materials.first);
+       filter_material != nullptr;
+       filter_material = filter_material->next)
+  {
+    writer->write_struct(filter_material);
+  }
+
   for (SceneRenderTexture *render_texture = static_cast<SceneRenderTexture *>(
            sce->eevee.render_textures.first);
        render_texture != nullptr;
@@ -1495,6 +1511,7 @@ static void scene_blend_read_data(BlendDataReader *reader, ID *id)
 
   BKE_time_markers_blend_read(reader, sce->markers);
 
+  BLO_read_struct_list(reader, SceneFilterMaterial, &sce->eevee.filter_materials);
   BLO_read_struct_list(reader, SceneRenderTexture, &sce->eevee.render_textures);
   BLO_read_struct_list(reader, TransformOrientation, &(sce->transform_spaces));
   BLO_read_struct_list(reader, SceneRenderLayer, &(sce->r.layers));
@@ -1878,6 +1895,7 @@ void BKE_scene_copy_data_eevee(Scene *sce_dst, const Scene *sce_src)
 {
   /* Copy eevee data between scenes. */
   sce_dst->eevee = dna::shallow_copy(sce_src->eevee);
+  BLI_duplicatelist(&sce_dst->eevee.filter_materials, &sce_src->eevee.filter_materials);
   BLI_duplicatelist(&sce_dst->eevee.render_textures, &sce_src->eevee.render_textures);
 }
 

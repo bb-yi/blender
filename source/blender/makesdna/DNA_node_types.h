@@ -803,6 +803,12 @@ enum NodeShaderImageSampleOffsetType {
   SHD_IMG_SAMPLE_OFFSET_PIXEL = 1,
 };
 
+enum NodeShaderSceneSource {
+  SHD_SCENE_SOURCE_COLOR = 0,
+  SHD_SCENE_SOURCE_DEPTH = 1,
+  SHD_SCENE_SOURCE_NORMAL = 2,
+};
+
 enum NodeCompareMode {
   NODE_COMPARE_MODE_ELEMENT = 0,
   NODE_COMPARE_MODE_LENGTH = 1,

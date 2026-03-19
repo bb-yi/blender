@@ -8246,6 +8246,11 @@ static void rna_def_space_node(BlenderRNA *brna)
   static const EnumPropertyItem shader_type_items[] = {
       {SNODE_SHADER_OBJECT, "OBJECT", ICON_OBJECT_DATA, "Object", "Edit shader nodes from Object"},
       {SNODE_SHADER_WORLD, "WORLD", ICON_WORLD_DATA, "World", "Edit shader nodes from World"},
+      {SNODE_SHADER_FILTER,
+       "FILTER",
+       ICON_MATERIAL,
+       "Filter",
+       "Edit shader nodes from the scene filter material"},
 #  ifdef WITH_FREESTYLE
       {SNODE_SHADER_LINESTYLE,
        "LINESTYLE",

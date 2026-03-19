@@ -52,6 +52,7 @@ static int node_shader_gpu_render_texture(GPUMaterial *mat,
                           GPU_constant(&render_texture_uid));
   }
 
+  GPU_material_flag_set(mat, GPU_MATFLAG_RENDER_TEXTURE);
   return GPU_stack_link(mat,
                         node,
                         "node_render_texture",

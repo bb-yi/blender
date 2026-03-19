@@ -11,6 +11,7 @@
 
 #include "DNA_material_types.h"
 #include "DNA_mesh_types.h"
+#include "DNA_scene_types.h"
 
 #include "BLI_math_rotation.h"
 
@@ -151,6 +152,41 @@ static void rna_Material_draw_update(Main * /*bmain*/, Scene * /*scene*/, Pointe
 
   DEG_id_tag_update(&ma->id, ID_RECALC_SHADING);
   WM_main_add_notifier(NC_MATERIAL | ND_SHADING_DRAW, ma);
+}
+
+static void rna_Material_eevee_domain_update(Main *bmain, Scene * /*scene*/, PointerRNA *ptr)
+{
+  Material *ma = id_cast<Material *>(ptr->owner_id);
+
+  DEG_id_tag_update(&ma->id, ID_RECALC_SHADING);
+  WM_main_add_notifier(NC_MATERIAL | ND_SHADING_DRAW, ma);
+  WM_main_add_notifier(NC_SCENE | ND_RENDER_OPTIONS, nullptr);
+
+  if (bmain == nullptr || ma->eevee_domain == MA_EEVEE_DOMAIN_FILTER) {
+    return;
+  }
+
+  for (Scene *scene = static_cast<Scene *>(bmain->scenes.first); scene != nullptr;
+       scene = static_cast<Scene *>(scene->id.next))
+  {
+    bool changed = false;
+    for (SceneFilterMaterial *filter_entry = static_cast<SceneFilterMaterial *>(
+             scene->eevee.filter_materials.first);
+         filter_entry != nullptr;
+         filter_entry = static_cast<SceneFilterMaterial *>(filter_entry->next))
+    {
+      if (filter_entry->material != ma) {
+        continue;
+      }
+      id_us_min(&ma->id);
+      filter_entry->material = nullptr;
+      changed = true;
+    }
+    if (changed) {
+      DEG_id_tag_update(&scene->id, ID_RECALC_SYNC_TO_EVAL);
+      WM_main_add_notifier(NC_SCENE | ND_RENDER_OPTIONS, scene);
+    }
+  }
 }
 
 static void rna_Material_texpaint_begin(CollectionPropertyIterator *iter, PointerRNA *ptr)
@@ -936,6 +972,20 @@ void RNA_def_material(BlenderRNA *brna)
       {0, nullptr, 0, nullptr, nullptr},
   };
 
+  static const EnumPropertyItem prop_eevee_domain_items[] = {
+      {MA_EEVEE_DOMAIN_SURFACE,
+       "SURFACE",
+       0,
+       "Surface",
+       "Render the material on scene geometry as a regular Eevee surface material"},
+      {MA_EEVEE_DOMAIN_FILTER,
+       "FILTER",
+       0,
+       "Filter",
+       "Use the material as an Eevee fullscreen filter material"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+
   static const EnumPropertyItem prop_displacement_method_items[] = {
       {MA_DISPLACEMENT_BUMP,
        "BUMP",
@@ -970,6 +1020,12 @@ void RNA_def_material(BlenderRNA *brna)
   /* Setter function for forward compatibility. */
   RNA_def_property_enum_funcs(prop, nullptr, "rna_Material_render_method_set", nullptr);
   RNA_def_property_update(prop, 0, "rna_Material_draw_update");
+
+  prop = RNA_def_property(srna, "eevee_domain", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "eevee_domain");
+  RNA_def_property_enum_items(prop, prop_eevee_domain_items);
+  RNA_def_property_ui_text(prop, "Eevee Domain", "How Eevee should interpret this material");
+  RNA_def_property_update(prop, 0, "rna_Material_eevee_domain_update");
 
   prop = RNA_def_property(srna, "displacement_method", PROP_ENUM, PROP_NONE);
   RNA_def_property_enum_items(prop, prop_displacement_method_items);

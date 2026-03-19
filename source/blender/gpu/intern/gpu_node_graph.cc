@@ -971,6 +971,7 @@ void gpu_node_graph_free_nodes(GPUNodeGraph *graph)
   graph->outlink_displacement = nullptr;
   graph->outlink_thickness = nullptr;
   graph->outlink_npr = nullptr;
+  graph->outlink_filter = nullptr;
 }
 
 void gpu_node_graph_free(GPUNodeGraph *graph)
@@ -1040,6 +1041,7 @@ void gpu_node_graph_prune_unused(GPUNodeGraph *graph)
   gpu_nodes_tag(graph, graph->outlink_displacement, GPU_NODE_TAG_DISPLACEMENT);
   gpu_nodes_tag(graph, graph->outlink_thickness, GPU_NODE_TAG_THICKNESS);
   gpu_nodes_tag(graph, graph->outlink_npr, GPU_NODE_TAG_NPR);
+  gpu_nodes_tag(graph, graph->outlink_filter, GPU_NODE_TAG_FILTER);
 
   for (GPUNodeGraphOutputLink &aovlink : graph->outlink_aovs) {
     gpu_nodes_tag(graph, aovlink.outlink, GPU_NODE_TAG_AOV);

@@ -63,6 +63,7 @@ enum GPUNodeTag {
   GPU_NODE_TAG_FUNCTION = (1 << 5),
   GPU_NODE_TAG_COMPOSITOR = (1 << 6),
   GPU_NODE_TAG_NPR = (1 << 7),
+  GPU_NODE_TAG_FILTER = (1 << 8),
 };
 
 ENUM_OPERATORS(GPUNodeTag)
@@ -181,6 +182,7 @@ struct GPUNodeGraph {
   GPUNodeLink *outlink_displacement;
   GPUNodeLink *outlink_thickness;
   GPUNodeLink *outlink_npr;
+  GPUNodeLink *outlink_filter;
   /* List of GPUNodeGraphOutputLink */
   ListBaseT<GPUNodeGraphOutputLink> outlink_aovs;
   /* List of GPUNodeGraphFunctionLink */

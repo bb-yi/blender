@@ -498,39 +498,43 @@ void LightModule::end_sync()
   culling_zdist_buf_.resize(lights_allocated);
   culling_light_buf_.resize(lights_allocated);
 
-  {
-    int2 render_extent = inst_.film.render_extent_get();
-    int2 probe_extent = int2(inst_.sphere_probes.probe_render_extent());
-    int2 max_extent = math::max(render_extent, probe_extent);
-    /* Compute tile size and total word count. */
-    uint word_per_tile = divide_ceil_u(max_ii(lights_len_, 1), 32);
-    int2 tiles_extent;
-    /* Default to 32 as this is likely to be the maximum
-     * tile size used by hardware or compute shading. */
-    uint tile_size = 16;
-    bool tile_size_valid = false;
-    do {
-      tile_size *= 2;
-      tiles_extent = math::divide_ceil(max_extent, int2(tile_size));
-      uint tile_count = tiles_extent.x * tiles_extent.y;
-      if (tile_count > max_tile_count_threshold) {
-        continue;
-      }
-      total_word_count_ = tile_count * word_per_tile;
-      tile_size_valid = true;
+  culling_extent_sync(inst_.render_extent_get());
+}
 
-    } while (total_word_count_ > max_word_count_threshold || !tile_size_valid);
-    /* Keep aligned with storage buffer requirements. */
-    total_word_count_ = ceil_to_multiple_u(total_word_count_, 32);
+void LightModule::sync_render_extent(const int2 render_extent)
+{
+  culling_extent_sync(render_extent);
+}
 
-    culling_data_buf_.tile_word_len = word_per_tile;
-    culling_data_buf_.tile_size = tile_size;
-    culling_data_buf_.tile_x_len = tiles_extent.x;
-    culling_data_buf_.tile_y_len = tiles_extent.y;
-    culling_data_buf_.items_count = lights_len_;
-    culling_data_buf_.local_lights_len = local_lights_len_;
-    culling_data_buf_.sun_lights_len = sun_lights_len_;
-  }
+void LightModule::culling_extent_sync(const int2 render_extent)
+{
+  int2 probe_extent = int2(inst_.sphere_probes.probe_render_extent());
+  int2 max_extent = math::max(render_extent, probe_extent);
+  uint word_per_tile = divide_ceil_u(max_ii(lights_len_, 1), 32);
+  int2 tiles_extent;
+  uint tile_size = 16;
+  bool tile_size_valid = false;
+  do {
+    tile_size *= 2;
+    tiles_extent = math::divide_ceil(max_extent, int2(tile_size));
+    uint tile_count = tiles_extent.x * tiles_extent.y;
+    if (tile_count > max_tile_count_threshold) {
+      continue;
+    }
+    total_word_count_ = tile_count * word_per_tile;
+    tile_size_valid = true;
+
+  } while (total_word_count_ > max_word_count_threshold || !tile_size_valid);
+  total_word_count_ = ceil_to_multiple_u(total_word_count_, 32);
+
+  culling_data_buf_.tile_word_len = word_per_tile;
+  culling_data_buf_.tile_size = tile_size;
+  culling_data_buf_.tile_x_len = tiles_extent.x;
+  culling_data_buf_.tile_y_len = tiles_extent.y;
+  culling_data_buf_.items_count = lights_len_;
+  culling_data_buf_.local_lights_len = local_lights_len_;
+  culling_data_buf_.sun_lights_len = sun_lights_len_;
+
   culling_tile_buf_.resize(total_word_count_);
 
   culling_pass_sync();

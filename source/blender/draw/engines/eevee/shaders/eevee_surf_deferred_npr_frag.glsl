@@ -195,6 +195,8 @@ float4 swap_alpha(float4 v)
   return v;
 }
 
+#define TEXTURE_HANDLE_EVAL_DEFINED
+
 float4 TextureHandle_eval_impl(TextureHandle tex, float2 offset, bool texel_offset)
 {
   if (tex.type == TEX_HANDLE_NULL) {

@@ -17,6 +17,11 @@
 
 namespace blender::eevee {
 
+bool camera_data_from_object(const Scene *scene,
+                             const Object *camera_ob,
+                             int2 extent,
+                             CameraData &r_data);
+
 class Instance;
 
 inline float4x4 cubeface_mat(int face)
@@ -119,6 +124,7 @@ class Camera {
 
   void init();
   void sync();
+  void override(const CameraData &data, bool is_camera_object);
 
   /**
    * Getters

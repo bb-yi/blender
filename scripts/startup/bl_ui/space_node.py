@@ -37,6 +37,13 @@ from bl_ui.properties_data_light import (
 )
 
 
+def eevee_active_filter_material_entry(props):
+    active_index = props.active_filter_material_index
+    if active_index < 0 or active_index >= len(props.filter_materials):
+        return None
+    return props.filter_materials[active_index]
+
+
 class NODE_HT_header(Header):
     bl_space_type = 'NODE_EDITOR'
 
@@ -105,6 +112,20 @@ class NODE_HT_header(Header):
                 row = layout.row()
                 row.enabled = not snode.pin
                 row.template_ID(scene, "world", new="world.new")
+
+            if snode.shader_type == 'FILTER':
+                NODE_MT_editor_menus.draw_collapsible(context, layout)
+                props = scene.eevee
+                filter_entry = eevee_active_filter_material_entry(props)
+
+                layout.separator_spacer()
+
+                row = layout.row(align=True)
+                row.enabled = not snode.pin
+                if filter_entry is None:
+                    row.operator("scene.eevee_filter_material_new", text="New Filter Material")
+                else:
+                    row.template_ID(filter_entry, "material", new="scene.eevee_filter_material_new")
 
             if snode.shader_type == 'LINESTYLE':
                 view_layer = context.view_layer

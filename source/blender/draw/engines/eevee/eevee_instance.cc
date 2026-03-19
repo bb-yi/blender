@@ -194,8 +194,10 @@ void Instance::init(const int2 &output_res,
 
   sampling.init(scene);
   camera.init();
+  filter_materials.init();
   film.init(output_res, output_rect);
   render_buffers.init();
+  render_textures.init();
   ambient_occlusion.init();
   velocity.init();
   raytracing.init();
@@ -271,10 +273,12 @@ void Instance::init_light_bake(Depsgraph *depsgraph, draw::Manager *manager)
 
   sampling.init(scene);
   camera.init();
+  filter_materials.init();
   /* Film isn't used but init to avoid side effects in other module. */
   rcti empty_rect{0, 0, 0, 0};
   film.init(int2(1), &empty_rect);
   render_buffers.init();
+  render_textures.init();
   ambient_occlusion.init();
   velocity.init();
   raytracing.init();
@@ -347,6 +351,8 @@ void Instance::begin_sync()
   hiz_buffer.sync();
   main_view.sync();
   film.sync();
+  render_textures.begin_sync();
+  filter_materials.begin_sync();
   ambient_occlusion.sync();
   volume_probes.sync();
   lookdev.sync();
@@ -462,6 +468,8 @@ void Instance::end_sync()
   film.end_sync();
   cryptomatte.end_sync();
   pipelines.end_sync();
+  render_textures.end_sync();
+  filter_materials.end_sync();
   light_probes.end_sync();
   sphere_probes.end_sync();
   planar_probes.end_sync();
@@ -552,6 +560,7 @@ void Instance::render_sample()
     capture_view.render_world();
     lookdev.rotate_world();
     capture_view.render_probes();
+    render_textures.render();
 
     main_view.render();
 

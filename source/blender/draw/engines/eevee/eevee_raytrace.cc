@@ -425,7 +425,7 @@ RayTraceResult RayTraceModule::render(RayTraceBuffer &rt_buffer,
   const int horizon_resolution_scale = max_ii(
       1, power_of_2_max_i(inst_.scene->eevee.fast_gi_resolution));
 
-  const int2 extent = inst_.film.render_extent_get();
+  const int2 extent = inst_.render_extent_get();
   const int2 tracing_res = math::divide_ceil(extent, int2(resolution_scale));
   const int2 tracing_res_horizon = math::divide_ceil(extent, int2(horizon_resolution_scale));
   const int2 group_size(RAYTRACE_GROUP_SIZE);
@@ -571,7 +571,7 @@ RayTraceResultTexture RayTraceModule::trace(
 
   const int resolution_scale = max_ii(1, power_of_2_max_i(options.resolution_scale));
 
-  const int2 extent = inst_.film.render_extent_get();
+  const int2 extent = inst_.render_extent_get();
   const int2 tracing_res = math::divide_ceil(extent, int2(resolution_scale));
 
   renderbuf_depth_view_ = inst_.render_buffers.depth_tx;
@@ -722,7 +722,7 @@ RayTraceResultTexture RayTraceModule::trace(
 
 RayTraceResult RayTraceModule::alloc_only(RayTraceBuffer &rt_buffer)
 {
-  const int2 extent = inst_.film.render_extent_get();
+  const int2 extent = inst_.render_extent_get();
   eGPUTextureUsage usage_rw = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE;
 
   RayTraceResult result;

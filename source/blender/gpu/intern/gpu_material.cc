@@ -98,6 +98,7 @@ struct GPUMaterial {
   bool has_surface_output = false;
   bool has_volume_output = false;
   bool has_displacement_output = false;
+  bool has_filter_output = false;
 
   std::string name;
 
@@ -371,6 +372,11 @@ bool GPU_material_has_displacement_output(GPUMaterial *mat)
   return mat->has_displacement_output;
 }
 
+bool GPU_material_has_filter_output(GPUMaterial *mat)
+{
+  return mat->has_filter_output;
+}
+
 bool GPU_material_flag_get(const GPUMaterial *mat, eGPUMaterialFlag flag)
 {
   return (mat->flag & flag) != 0;
@@ -564,6 +570,14 @@ void GPU_material_output_npr(GPUMaterial *material, GPUNodeLink *link)
 {
   if (!material->graph.outlink_npr) {
     material->graph.outlink_npr = link;
+  }
+}
+
+void GPU_material_output_filter(GPUMaterial *material, GPUNodeLink *link)
+{
+  if (link != nullptr && !material->graph.outlink_filter) {
+    material->graph.outlink_filter = link;
+    material->has_filter_output = true;
   }
 }
 

@@ -47,6 +47,17 @@ def object_eevee_shader_nodes_poll(context):
             eevee_shader_nodes_poll(context))
 
 
+def filter_eevee_shader_nodes_poll(context):
+    snode = context.space_data
+    return (eevee_shader_nodes_poll(context) and
+            snode.tree_type == 'ShaderNodeTree' and
+            snode.shader_type == 'FILTER')
+
+
+def filter_or_npr_eevee_shader_nodes_poll(context):
+    return filter_eevee_shader_nodes_poll(context) or npr_shader_nodes_poll(context)
+
+
 def npr_shader_nodes_poll(context):
     snode = context.space_data
     return (eevee_shader_nodes_poll(context) and
@@ -131,6 +142,7 @@ class NODE_MT_shader_node_input_base(node_add_menu.NodeMenu):
             context, layout, "ShaderNodeTexCoord",
             ["Generated", "Normal", "UV", "Object", "Camera", "Window", "Reflection"],
         )
+        self.node_operator(layout, "ShaderNodeSceneColor", poll=filter_eevee_shader_nodes_poll(context))
         self.node_operator(layout, "ShaderNodeUVAlongStroke", poll=line_style_shader_nodes_poll(context))
         self.node_operator(layout, "ShaderNodeUVMap")
         self.node_operator(layout, "ShaderNodeValue")
@@ -155,7 +167,7 @@ class NODE_MT_shader_node_input_base(node_add_menu.NodeMenu):
             layout,
             "ShaderNodeInputAOV",
             label="AOV Input",
-            poll=npr_shader_nodes_poll(context),
+            poll=filter_or_npr_eevee_shader_nodes_poll(context),
         )
 
         self.draw_assets_for_catalog(layout, self.bl_label)
@@ -185,6 +197,11 @@ class NODE_MT_shader_node_output_base(node_add_menu.NodeMenu):
             layout,
             "ShaderNodeOutputMaterial",
             poll=object_shader_nodes_poll(context),
+        )
+        self.node_operator(
+            layout,
+            "ShaderNodeOutputFilter",
+            poll=filter_eevee_shader_nodes_poll(context),
         )
         self.node_operator(
             layout,

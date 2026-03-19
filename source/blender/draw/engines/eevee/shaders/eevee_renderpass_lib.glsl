@@ -41,6 +41,44 @@ void clear_aovs()
 #endif
 }
 
+int aov_color_index(uint hash)
+{
+#if defined(GPU_FRAGMENT_SHADER)
+  uint total_len = uniform_buf.render_pass.aovs.color_len + uniform_buf.render_pass.aovs.value_len;
+  for (uint hash_index = 0u; hash_index < AOV_MAX && hash_index < total_len; hash_index += 4u) {
+    bool4 cmp_mask = equal(uniform_buf.render_pass.aovs.hash[hash_index >> 2u], uint4(hash));
+    if (any(cmp_mask)) {
+      hash_index += (cmp_mask[0] ? 0u : (cmp_mask[1] ? 1u : (cmp_mask[2] ? 2u : 3u)));
+      bool is_value = hash_index >= uint(uniform_buf.render_pass.aovs.color_len);
+      if (!is_value) {
+        return int(hash_index);
+      }
+      break;
+    }
+  }
+#endif
+  return -1;
+}
+
+int aov_value_index(uint hash)
+{
+#if defined(GPU_FRAGMENT_SHADER)
+  uint total_len = uniform_buf.render_pass.aovs.color_len + uniform_buf.render_pass.aovs.value_len;
+  for (uint hash_index = 0u; hash_index < AOV_MAX && hash_index < total_len; hash_index += 4u) {
+    bool4 cmp_mask = equal(uniform_buf.render_pass.aovs.hash[hash_index >> 2u], uint4(hash));
+    if (any(cmp_mask)) {
+      hash_index += (cmp_mask[0] ? 0u : (cmp_mask[1] ? 1u : (cmp_mask[2] ? 2u : 3u)));
+      bool is_value = hash_index >= uint(uniform_buf.render_pass.aovs.color_len);
+      if (is_value) {
+        return int(hash_index - uint(uniform_buf.render_pass.aovs.color_len));
+      }
+      break;
+    }
+  }
+#endif
+  return -1;
+}
+
 void output_aov(float4 color, float value, uint hash, float holdout, eObjectInfoFlag ob_flag)
 {
 #if defined(MAT_RENDER_PASS_SUPPORT) && defined(GPU_FRAGMENT_SHADER)

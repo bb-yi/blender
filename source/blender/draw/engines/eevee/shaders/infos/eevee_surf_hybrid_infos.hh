@@ -29,10 +29,12 @@
 
 GPU_SHADER_CREATE_INFO(eevee_surf_deferred_hybrid)
 FRAGMENT_SOURCE("eevee_surf_hybrid_frag.glsl")
+TYPEDEF_SOURCE("eevee_render_texture_shared.hh")
 ADDITIONAL_INFO(eevee_surf_deferred_base)
 ADDITIONAL_INFO(eevee_light_data)
 ADDITIONAL_INFO(eevee_lightprobe_data)
 ADDITIONAL_INFO(eevee_shadow_data)
+ADDITIONAL_INFO(eevee_render_texture_data)
 /* Optionally added depending on the material. */
 // ADDITIONAL_INFO(eevee_hiz_prev_data)
 // ADDITIONAL_INFO(eevee_previous_layer_radiance)

@@ -163,6 +163,12 @@ enum {
   MA_SURFACE_METHOD_FORWARD = 1,
 };
 
+/** #Material::eevee_domain */
+enum {
+  MA_EEVEE_DOMAIN_SURFACE = 0,
+  MA_EEVEE_DOMAIN_FILTER = 1,
+};
+
 /** #Material::volume_intersection_method */
 enum {
   MA_VOLUME_ISECT_FAST = 0,
@@ -347,7 +353,7 @@ struct Material {
   short flag = 0;
   /** Rendering modes for EEVEE. */
   char surface_render_method = 0;
-  char _pad1[1] = {};
+  char eevee_domain = 0;
 
   /* Colors from Blender Internal that we are still using. */
   float r = 0.8, g = 0.8, b = 0.8, a = 1.0f;

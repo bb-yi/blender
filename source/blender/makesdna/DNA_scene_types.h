@@ -2610,6 +2610,15 @@ struct SceneRenderTexture {
   char _pad[8];
 };
 
+struct SceneFilterMaterial {
+  SceneFilterMaterial *next, *prev;
+  char name[64];
+  int uid;
+  char enabled;
+  char _pad[3];
+  struct Material *material;
+};
+
 struct SceneEEVEE {
   DNA_DEFINE_CXX_METHODS(SceneEEVEE)
 
@@ -2682,8 +2691,11 @@ struct SceneEEVEE {
   float overscan = 3.0f;
   float light_threshold = 0.01f;
 
+  ListBase filter_materials = {};
   ListBase render_textures = {};
+  int active_filter_material_index = -1;
   int active_render_texture_index = -1;
+  int next_filter_material_uid = 1;
   int next_render_texture_uid = 1;
 };
 

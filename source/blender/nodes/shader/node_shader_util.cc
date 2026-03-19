@@ -126,14 +126,28 @@ bool object_eevee_shader_nodes_poll(const bContext *C)
     return false;
   }
   const RenderEngineType *engine_type = CTX_data_engine_type(C);
-  return STREQ(engine_type->idname, "BLENDER_EEVEE") ||
-         STREQ(engine_type->idname, "BLENDER_EEVEE");
+  return STREQ(engine_type->idname, "BLENDER_EEVEE");
+}
+
+bool filter_eevee_shader_nodes_poll(const bContext *C)
+{
+  const SpaceNode *snode = CTX_wm_space_node(C);
+  if (snode->shaderfrom != SNODE_SHADER_FILTER) {
+    return false;
+  }
+  const RenderEngineType *engine_type = CTX_data_engine_type(C);
+  return STREQ(engine_type->idname, "BLENDER_EEVEE");
 }
 
 bool npr_shader_nodes_poll(const bContext *C)
 {
   const SpaceNode *snode = CTX_wm_space_node(C);
   return snode->shaderfrom == SNODE_SHADER_NPR;
+}
+
+bool filter_or_npr_eevee_shader_nodes_poll(const bContext *C)
+{
+  return filter_eevee_shader_nodes_poll(C) || npr_shader_nodes_poll(C);
 }
 
 /* ****** */

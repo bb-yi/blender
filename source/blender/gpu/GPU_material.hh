@@ -96,6 +96,9 @@ enum eGPUMaterialFlag {
 
   /* Set if the material uses the "Is Diffuse / Glossy Ray" output of the light path node. */
   GPU_MATFLAG_IS_DIFFUSE_OR_GLOSSY_RAY_FLAG = (1 << 24),
+  GPU_MATFLAG_RENDER_TEXTURE = (1 << 25),
+  GPU_MATFLAG_FILTER_MATERIAL = (1 << 26),
+  GPU_MATFLAG_SCENE_COLOR = (1 << 27),
 
   /* Tells the render engine the material was just compiled or updated. */
   GPU_MATFLAG_UPDATED = (1 << 29),
@@ -183,6 +186,7 @@ void GPU_material_uniform_buffer_create(GPUMaterial *material, ListBaseT<LinkDat
 bool GPU_material_has_surface_output(GPUMaterial *mat);
 bool GPU_material_has_volume_output(GPUMaterial *mat);
 bool GPU_material_has_displacement_output(GPUMaterial *mat);
+bool GPU_material_has_filter_output(GPUMaterial *mat);
 
 bool GPU_material_flag_get(const GPUMaterial *mat, eGPUMaterialFlag flag);
 
@@ -357,6 +361,7 @@ struct GPUCodegenOutput {
   GPUGraphOutput volume;
   GPUGraphOutput thickness;
   GPUGraphOutput npr;
+  GPUGraphOutput filter;
   GPUGraphOutput composite;
   Vector<GPUGraphOutput> material_functions;
 
@@ -433,6 +438,7 @@ void GPU_material_output_volume(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_output_displacement(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_output_thickness(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_output_npr(GPUMaterial *material, GPUNodeLink *link);
+void GPU_material_output_filter(GPUMaterial *material, GPUNodeLink *link);
 
 void GPU_material_add_output_link_aov(GPUMaterial *material, GPUNodeLink *link, int hash);
 

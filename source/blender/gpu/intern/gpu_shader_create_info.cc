@@ -594,7 +594,8 @@ void gpu_shader_create_info_init()
 #define GPU_SHADER_INTERFACE_END() ;
 #define GPU_SHADER_CREATE_END() ;
 
-/* Declare, register and construct the infos. */
+/* Declare, register and construct the infos.
+ * Keep this include block recompiling when draw-side generated shader info lists change. */
 #include "glsl_compositor_infos_list.hh"
 #include "glsl_draw_infos_list.hh"
 #include "glsl_gpu_infos_list.hh"

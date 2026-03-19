@@ -200,6 +200,11 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
                                                eMaterialGeometry geometry_type,
                                                eMaterialProbe probe_capture)
 {
+  if (blender_mat->eevee_domain == MA_EEVEE_DOMAIN_FILTER) {
+    /* Filter materials are evaluated as a dedicated fullscreen post pass. */
+    return MaterialPass();
+  }
+
   bNodeTree *ntree = (blender_mat->nodetree != nullptr) ? blender_mat->nodetree :
                                                           default_surface->nodetree;
 
@@ -344,6 +349,7 @@ Material &MaterialModule::material_sync(Object *ob,
 
   const bool use_forward_pipeline = (blender_mat->surface_render_method ==
                                      MA_SURFACE_METHOD_FORWARD);
+  const bool is_filter_material = blender_mat->eevee_domain == MA_EEVEE_DOMAIN_FILTER;
   eMaterialPipeline surface_pipe, prepass_pipe;
   if (use_forward_pipeline) {
     surface_pipe = MAT_PIPE_FORWARD;
@@ -358,6 +364,10 @@ Material &MaterialModule::material_sync(Object *ob,
 
   Material &mat = material_map_.lookup_or_add_cb(material_key, [&]() {
     Material mat;
+    if (is_filter_material) {
+      /* Filter-domain materials are scene fullscreen passes, not object surface materials. */
+      return mat;
+    }
     if (inst_.is_baking()) {
       if (ob->visibility_flag & OB_HIDE_PROBE_VOLUME) {
         mat.capture = MaterialPass();

@@ -24,6 +24,65 @@
 
 namespace blender::eevee {
 
+static void camera_data_update_screen_diagonal(CameraData &data)
+{
+  float left, right, bottom, top, near, far;
+  projmat_dimensions(data.winmat.ptr(), &left, &right, &bottom, &top, &near, &far);
+
+  const bool is_perspective_camera = data.type == CAMERA_PERSP;
+  float2 p0 = float2(left, bottom) / (is_perspective_camera ? -near : 1.0f);
+  float2 p1 = float2(right, top) / (is_perspective_camera ? -far : 1.0f);
+  data.screen_diagonal_length = math::distance(p0, p1);
+}
+
+bool camera_data_from_object(const Scene *scene,
+                             const Object *camera_ob,
+                             int2 extent,
+                             CameraData &r_data)
+{
+  if (camera_ob == nullptr || camera_ob->type != OB_CAMERA) {
+    return false;
+  }
+
+  const blender::Camera *cam = reinterpret_cast<const blender::Camera *>(camera_ob->data);
+  CameraParams params;
+  BKE_camera_params_init(&params);
+  BKE_camera_params_from_object(&params, camera_ob);
+  BKE_camera_params_compute_viewplane(
+      &params, extent.x, extent.y, scene ? scene->r.xasp : 1.0f, scene ? scene->r.yasp : 1.0f);
+  BKE_camera_params_compute_matrix(&params);
+
+  r_data = {};
+  switch (cam->type) {
+    case CAM_ORTHO:
+      r_data.type = CAMERA_ORTHO;
+      break;
+    case CAM_PERSP:
+    default:
+      r_data.type = CAMERA_PERSP;
+      break;
+  }
+
+  r_data.viewinv = camera_ob->object_to_world();
+  r_data.viewmat = math::invert(r_data.viewinv);
+  r_data.winmat = float4x4(params.winmat);
+  r_data.wininv = math::invert(r_data.winmat);
+  r_data.persmat = r_data.winmat * r_data.viewmat;
+  r_data.persinv = math::invert(r_data.persmat);
+  r_data.uv_scale = float2(1.0f);
+  r_data.uv_bias = float2(0.0f);
+  r_data.equirect_bias = float2(0.0f);
+  r_data.equirect_scale = float2(0.0f);
+  r_data.equirect_scale_inv = float2(0.0f);
+  r_data.fisheye_fov = -1.0f;
+  r_data.fisheye_lens = -1.0f;
+  r_data.clip_near = cam->clip_start;
+  r_data.clip_far = cam->clip_end;
+  camera_data_update_screen_diagonal(r_data);
+  r_data.initialized = true;
+  return true;
+}
+
 /* -------------------------------------------------------------------- */
 /** \name Camera
  * \{ */
@@ -223,6 +282,13 @@ void Camera::sync()
 
   data_.initialized = true;
 
+  update_bounds();
+}
+
+void Camera::override(const CameraData &data, bool is_camera_object)
+{
+  data_ = data;
+  is_camera_object_ = is_camera_object;
   update_bounds();
 }
 
