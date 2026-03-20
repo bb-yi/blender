@@ -2154,7 +2154,7 @@ static PointerRNA rna_SceneFilterMaterial_material_get(PointerRNA *ptr)
 
 static void rna_SceneFilterMaterial_material_set(PointerRNA *ptr,
                                                  PointerRNA value,
-                                                 ReportList * /*reports*/)
+                                                 ReportList *reports)
 {
   SceneFilterMaterial *filter_material = static_cast<SceneFilterMaterial *>(ptr->data);
 
@@ -2162,7 +2162,17 @@ static void rna_SceneFilterMaterial_material_set(PointerRNA *ptr,
     id_us_min(&filter_material->material->id);
   }
 
-  filter_material->material = static_cast<Material *>(value.data);
+  Material *material = static_cast<Material *>(value.data);
+  if (material && material->eevee_domain != MA_EEVEE_DOMAIN_FILTER) {
+    filter_material->material = nullptr;
+    BKE_reportf(reports,
+                RPT_ERROR,
+                "Material '%s' is not an Eevee filter-domain material",
+                material->id.name + 2);
+    return;
+  }
+
+  filter_material->material = material;
 
   if (filter_material->material) {
     id_us_plus(&filter_material->material->id);

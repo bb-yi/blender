@@ -4,11 +4,15 @@
 
 #ifdef GPU_SHADER
 
-#  define REPEAT_BEGIN(count, var) \
-    for (int var##_i = 0; var##_i < count; var##_i++) { \
-      var = float(var##_i);
+#  ifndef REPEAT_BEGIN
+#    define REPEAT_BEGIN(count, var) \
+      for (int var##_i = 0; var##_i < count; var##_i++) { \
+        var = float(var##_i);
+#  endif
 
-#  define REPEAT_END() }
+#  ifndef REPEAT_END
+#    define REPEAT_END() }
+#  endif
 
 #else
 

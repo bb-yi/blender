@@ -4,6 +4,9 @@
 
 #include "infos/eevee_render_texture_infos.hh"
 
+#include "draw_view_lib.glsl"
+#include "eevee_reverse_z_lib.glsl"
+
 /* Keep in sync with #SceneEEVEERenderTextureSource. */
 #define RENDER_TEXTURE_SOURCE_COLOR 0
 #define RENDER_TEXTURE_SOURCE_GRAYSCALE 1
@@ -29,7 +32,7 @@ void main()
   }
 
   float4 combined = texelFetch(combined_tx, texel, 0);
-  float depth = texelFetch(depth_tx, texel, 0).r;
+  float depth = reverse_z::read(texelFetch(depth_tx, texel, 0).r);
   bool has_surface = depth < 1.0f;
   bool has_gbuffer = texelFetch(gbuf_header_tx, int3(texel, 0), 0).r != 0u;
 
@@ -42,7 +45,7 @@ void main()
       break;
     }
     case RENDER_TEXTURE_SOURCE_DEPTH: {
-      float depth_value = has_surface ? depth : 0.0f;
+      float depth_value = has_surface ? -drw_depth_screen_to_view(depth) : 0.0f;
       out_color = float4(float3(depth_value), has_surface ? 1.0f : 0.0f);
       break;
     }

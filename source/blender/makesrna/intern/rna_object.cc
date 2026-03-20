@@ -11,6 +11,7 @@
 #include "DNA_action_types.h"
 #include "DNA_layer_types.h"
 #include "DNA_lightprobe_types.h"
+#include "DNA_material_types.h"
 #include "DNA_meta_types.h"
 #include "DNA_object_types.h"
 
@@ -1104,17 +1105,61 @@ static PointerRNA rna_Object_active_material_get(PointerRNA *ptr)
   return RNA_id_pointer_create(reinterpret_cast<ID *>(ma));
 }
 
+static bool rna_Object_material_slot_compatible(const Object *ob, const Material *ma)
+{
+  if (ma == nullptr) {
+    return true;
+  }
+
+  if (ELEM(ob->type, OB_GREASE_PENCIL)) {
+    /* GP materials only. */
+    return ma->gp_style != nullptr;
+  }
+
+  /* Non-GP object types use regular materials only. */
+  if (ma->gp_style != nullptr) {
+    return false;
+  }
+
+  /* Filter-domain materials are scene post-process materials and are not valid object slots. */
+  if (ma->eevee_domain == MA_EEVEE_DOMAIN_FILTER) {
+    return false;
+  }
+
+  return true;
+}
+
 static void rna_Object_active_material_set(PointerRNA *ptr,
                                            PointerRNA value,
-                                           ReportList * /*reports*/)
+                                           ReportList *reports)
 {
   Object *ob = reinterpret_cast<Object *>(ptr->owner_id);
+  Material *material = static_cast<Material *>(value.data);
 
-  DEG_id_tag_update(static_cast<ID *>(value.data), 0);
+  if (!rna_Object_material_slot_compatible(ob, material)) {
+    if (material && material->eevee_domain == MA_EEVEE_DOMAIN_FILTER) {
+      BKE_reportf(reports,
+                  RPT_ERROR,
+                  "Filter-domain material '%s' cannot be assigned to object material slots",
+                  material->id.name + 2);
+    }
+    else if (ELEM(ob->type, OB_GREASE_PENCIL)) {
+      BKE_report(reports, RPT_ERROR, "Grease Pencil objects only accept Grease Pencil materials");
+    }
+    else {
+      BKE_report(reports,
+                 RPT_ERROR,
+                 "Grease Pencil materials cannot be assigned to this object type");
+    }
+    return;
+  }
+
+  if (material != nullptr) {
+    DEG_id_tag_update(reinterpret_cast<ID *>(material), 0);
+  }
   BLI_assert(BKE_id_is_in_global_main(&ob->id));
-  BLI_assert(BKE_id_is_in_global_main(static_cast<ID *>(value.data)));
-  BKE_object_material_assign(
-      G_MAIN, ob, static_cast<Material *>(value.data), ob->actcol, BKE_MAT_ASSIGN_EXISTING);
+  BLI_assert(material == nullptr || BKE_id_is_in_global_main(reinterpret_cast<ID *>(material)));
+  BKE_object_material_assign(G_MAIN, ob, material, ob->actcol, BKE_MAT_ASSIGN_EXISTING);
 }
 
 static int rna_Object_active_material_editable(const PointerRNA *ptr, const char ** /*r_info*/)
@@ -1335,30 +1380,40 @@ static PointerRNA rna_MaterialSlot_material_get(PointerRNA *ptr)
 
 static void rna_MaterialSlot_material_set(PointerRNA *ptr,
                                           PointerRNA value,
-                                          ReportList * /*reports*/)
+                                          ReportList *reports)
 {
   Object *ob = reinterpret_cast<Object *>(ptr->owner_id);
   int index = rna_MaterialSlot_index(ptr);
+  Material *material = static_cast<Material *>(value.data);
+
+  if (!rna_Object_material_slot_compatible(ob, material)) {
+    if (material && material->eevee_domain == MA_EEVEE_DOMAIN_FILTER) {
+      BKE_reportf(reports,
+                  RPT_ERROR,
+                  "Filter-domain material '%s' cannot be assigned to object material slots",
+                  material->id.name + 2);
+    }
+    else if (ELEM(ob->type, OB_GREASE_PENCIL)) {
+      BKE_report(reports, RPT_ERROR, "Grease Pencil objects only accept Grease Pencil materials");
+    }
+    else {
+      BKE_report(reports,
+                 RPT_ERROR,
+                 "Grease Pencil materials cannot be assigned to this object type");
+    }
+    return;
+  }
 
   BLI_assert(BKE_id_is_in_global_main(&ob->id));
-  BLI_assert(BKE_id_is_in_global_main(static_cast<ID *>(value.data)));
-  BKE_object_material_assign(
-      G_MAIN, ob, static_cast<Material *>(value.data), index + 1, BKE_MAT_ASSIGN_EXISTING);
+  BLI_assert(material == nullptr || BKE_id_is_in_global_main(reinterpret_cast<ID *>(material)));
+  BKE_object_material_assign(G_MAIN, ob, material, index + 1, BKE_MAT_ASSIGN_EXISTING);
 }
 
 static bool rna_MaterialSlot_material_poll(PointerRNA *ptr, PointerRNA value)
 {
   Object *ob = reinterpret_cast<Object *>(ptr->owner_id);
   Material *ma = static_cast<Material *>(value.data);
-
-  if (ELEM(ob->type, OB_GREASE_PENCIL)) {
-    /* GP Materials only */
-    return (ma->gp_style != nullptr);
-  }
-  else {
-    /* Everything except GP materials */
-    return (ma->gp_style == nullptr);
-  }
+  return rna_Object_material_slot_compatible(ob, ma);
 }
 
 static int rna_MaterialSlot_link_get(PointerRNA *ptr)

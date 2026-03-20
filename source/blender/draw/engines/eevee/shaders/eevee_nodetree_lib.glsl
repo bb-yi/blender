@@ -785,10 +785,14 @@ float4 attr_load_uniform(float4 attr, const uint attr_hash)
 
 /** \} */
 
-#define REPEAT_BEGIN(count, var) \
-  for (var = 0.0f; round(var) < round(count); var += 1.0f) {
+#ifndef REPEAT_BEGIN
+#  define REPEAT_BEGIN(count, var) \
+    for (var = 0.0f; round(var) < round(count); var += 1.0f) {
+#endif
 
-#define REPEAT_END() }
+#ifndef REPEAT_END
+#  define REPEAT_END() }
+#endif
 
 #if (!defined(NPR_SHADER) || !defined(GPU_FRAGMENT_SHADER)) && !defined(FOREACH_LIGHT_BEGIN)
 #  define FOREACH_LIGHT_BEGIN( \

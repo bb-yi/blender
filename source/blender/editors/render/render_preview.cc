@@ -2166,6 +2166,14 @@ bool ED_preview_id_is_supported(const ID *id, const char **r_disabled_hint)
       case ID_SCE:
         return {scene_preview_is_supported(id_cast<const Scene *>(id)),
                 RPT_("Scenes without a camera do not support previews")};
+      case ID_MA: {
+        const Material *material = id_cast<const Material *>(id);
+        if (material != nullptr && material->eevee_domain == MA_EEVEE_DOMAIN_FILTER) {
+          return {false, RPT_("Filter-domain materials do not support automatic previews")};
+        }
+        return {BKE_previewimg_id_get_p(id) != nullptr,
+                RPT_("Data-block type does not support automatic previews")};
+      }
       case ID_BR:
         return {false, RPT_("Brushes do not support automatic previews")};
       default:
@@ -2192,6 +2200,10 @@ void ED_preview_icon_render(
     }
 
     PreviewLoadJob::load_jobless(prv_img, icon_size);
+    return;
+  }
+
+  if (id != nullptr && !ED_preview_id_is_supported(id)) {
     return;
   }
 

@@ -363,7 +363,7 @@ Material &MaterialModule::material_sync(Object *ob,
   MaterialKey material_key(blender_mat, geometry_type, surface_pipe, ob->visibility_flag);
 
   Material &mat = material_map_.lookup_or_add_cb(material_key, [&]() {
-    Material mat;
+    Material mat = {};
     if (is_filter_material) {
       /* Filter-domain materials are scene fullscreen passes, not object surface materials. */
       return mat;

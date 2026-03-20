@@ -5,6 +5,7 @@
 #ifdef GPU_SHADER
 #  pragma once
 #  include "gpu_shader_compat.hh"
+#  include "draw_view_infos.hh"
 #  include "eevee_defines.hh"
 #endif
 
@@ -12,6 +13,7 @@
 
 GPU_SHADER_CREATE_INFO(eevee_render_texture_extract_base)
 LOCAL_GROUP_SIZE(FILM_GROUP_SIZE, FILM_GROUP_SIZE)
+ADDITIONAL_INFO(draw_view)
 SAMPLER(0, sampler2D, depth_tx)
 SAMPLER(1, sampler2D, combined_tx)
 SAMPLER(2, usampler2DArray, gbuf_header_tx)

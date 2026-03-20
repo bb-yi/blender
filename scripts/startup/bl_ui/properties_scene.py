@@ -39,6 +39,57 @@ class SceneButtonsPanel:
 RENDER_TEXTURE_SLOT_MAX = 4
 
 
+def _enum_item_name(data, property_id, enum_id):
+    try:
+        prop = data.bl_rna.properties[property_id]
+        item = prop.enum_items.get(enum_id)
+        if item is not None:
+            return item.name
+    except Exception:
+        pass
+    return str(enum_id)
+
+
+class SCENE_UL_eevee_render_textures(UIList):
+    def draw_item(self, _context, layout, _data, item, _icon, _active_data, _active_propname, _index):
+        render_texture = item
+        if self.layout_type in {'DEFAULT', 'COMPACT'}:
+            row = layout.row(align=True)
+            row.prop(
+                render_texture,
+                "enabled",
+                text="",
+                emboss=False,
+                icon='HIDE_OFF' if render_texture.enabled else 'HIDE_ON',
+            )
+
+            row.label(text=render_texture.name or "Render Texture", icon='TEXTURE')
+            row.prop(render_texture, "source", text="")
+            row.prop(render_texture, "camera", text="", icon='CAMERA_DATA')
+        elif self.layout_type == 'GRID':
+            layout.alignment = 'CENTER'
+            layout.label(text="", icon='TEXTURE')
+
+
+class SCENE_UL_eevee_filter_materials(UIList):
+    def draw_item(self, _context, layout, _data, item, _icon, _active_data, _active_propname, _index):
+        filter_entry = item
+        if self.layout_type in {'DEFAULT', 'COMPACT'}:
+            row = layout.row(align=True)
+            row.prop(
+                filter_entry,
+                "enabled",
+                text="",
+                emboss=False,
+                icon='HIDE_OFF' if filter_entry.enabled else 'HIDE_ON',
+            )
+            material_name = filter_entry.material.name if filter_entry.material else "None"
+            row.label(text=material_name, icon='MATERIAL')
+        elif self.layout_type == 'GRID':
+            layout.alignment = 'CENTER'
+            layout.label(text="", icon='MATERIAL')
+
+
 def eevee_active_filter_material_entry(props):
     active_index = props.active_filter_material_index
     if active_index < 0 or active_index >= len(props.filter_materials):
@@ -52,18 +103,14 @@ def draw_eevee_render_textures(layout, context):
 
     props = context.scene.eevee
 
-    box = layout.box()
-    box.use_property_split = True
-    box.use_property_decorate = False
-    box.label(text="Render Textures")
-
-    list_col = box.column()
+    list_col = layout.column()
     list_col.use_property_split = False
     list_col.use_property_decorate = False
 
     draw_ui_list(
         list_col,
         context,
+        class_name="SCENE_UL_eevee_render_textures",
         unique_id="scene_eevee_render_textures",
         list_path="scene.eevee.render_textures",
         active_index_path="scene.eevee.active_render_texture_index",
@@ -75,12 +122,14 @@ def draw_eevee_render_textures(layout, context):
 
     active_index = props.active_render_texture_index
     if active_index < 0 or active_index >= len(props.render_textures):
-        box.label(text="Add a render texture entry to configure it.", icon='INFO')
+        layout.label(text="Add a render texture entry to configure it.", icon='INFO')
         return
 
     render_texture = props.render_textures[active_index]
 
-    col = box.column()
+    col = layout.column()
+    col.use_property_split = True
+    col.use_property_decorate = False
     col.prop(render_texture, "name")
     col.prop(render_texture, "enabled")
     col.prop(render_texture, "source")
@@ -100,18 +149,14 @@ def draw_eevee_filter_material(layout, context):
 
     props = context.scene.eevee
 
-    box = layout.box()
-    box.use_property_split = True
-    box.use_property_decorate = False
-    box.label(text="Filter Material")
-
-    list_col = box.column()
+    list_col = layout.column()
     list_col.use_property_split = False
     list_col.use_property_decorate = False
 
     draw_ui_list(
         list_col,
         context,
+        class_name="SCENE_UL_eevee_filter_materials",
         unique_id="scene_eevee_filter_materials",
         list_path="scene.eevee.filter_materials",
         active_index_path="scene.eevee.active_filter_material_index",
@@ -119,21 +164,24 @@ def draw_eevee_filter_material(layout, context):
 
     filter_entry = eevee_active_filter_material_entry(props)
     if filter_entry is None:
-        box.label(text="Add a filter material entry to configure it.", icon='INFO')
+        layout.label(text="Add a filter material entry to configure it.", icon='INFO')
         return
 
-    col = box.column()
-    col.prop(filter_entry, "name")
+    col = layout.column()
+    col.use_property_split = True
+    col.use_property_decorate = False
     col.prop(filter_entry, "enabled")
 
     row = col.row(align=True)
     row.template_ID(filter_entry, "material", new="scene.eevee_filter_material_new")
 
     filter_material = filter_entry.material
+    name_display = filter_material.name if filter_material is not None else "None"
+    col.label(text=f"Name: {name_display}")
     if filter_material is None:
-        box.label(text="Select a filter-domain material.", icon='INFO')
+        layout.label(text="Select a filter-domain material.", icon='INFO')
     elif filter_material.eevee_domain != 'FILTER':
-        box.label(text="Selected material is not in Filter domain.", icon='ERROR')
+        layout.label(text="Selected material is not in Filter domain.", icon='ERROR')
 
 
 class SCENE_OT_eevee_filter_material_new(Operator):
@@ -197,8 +245,32 @@ class SCENE_PT_scene(SceneButtonsPanel, Panel):
         layout.prop(scene, "camera")
         layout.prop(scene, "background_set")
         layout.prop(scene, "active_clip", text="Active Clip")
-        draw_eevee_render_textures(layout, context)
-        draw_eevee_filter_material(layout, context)
+
+
+class SCENE_PT_eevee_render_textures(SceneButtonsPanel, Panel):
+    bl_label = "Render Textures"
+    bl_options = {'DEFAULT_CLOSED'}
+    COMPAT_ENGINES = {'BLENDER_EEVEE'}
+
+    @classmethod
+    def poll(cls, context):
+        return context.engine in cls.COMPAT_ENGINES
+
+    def draw(self, context):
+        draw_eevee_render_textures(self.layout, context)
+
+
+class SCENE_PT_eevee_filter_materials(SceneButtonsPanel, Panel):
+    bl_label = "Filter Materials"
+    bl_options = {'DEFAULT_CLOSED'}
+    COMPAT_ENGINES = {'BLENDER_EEVEE'}
+
+    @classmethod
+    def poll(cls, context):
+        return context.engine in cls.COMPAT_ENGINES
+
+    def draw(self, context):
+        draw_eevee_filter_material(self.layout, context)
 
 
 class SCENE_PT_unit(SceneButtonsPanel, Panel):
@@ -611,9 +683,13 @@ class SCENE_PT_custom_props(SceneButtonsPanel, PropertyPanel, Panel):
 
 classes = (
     SCENE_UL_keying_set_paths,
+    SCENE_UL_eevee_render_textures,
+    SCENE_UL_eevee_filter_materials,
     SCENE_OT_eevee_filter_material_new,
     SCENE_PT_context_scene,
     SCENE_PT_scene,
+    SCENE_PT_eevee_render_textures,
+    SCENE_PT_eevee_filter_materials,
     SCENE_PT_unit,
     SCENE_PT_physics,
     SCENE_PT_simulation,

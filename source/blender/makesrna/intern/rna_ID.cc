@@ -1179,9 +1179,12 @@ bool rna_IDMaterials_assign_int(PointerRNA *ptr, int key, const PointerRNA *assi
   ID *id = ptr->owner_id;
   short *totcol = BKE_id_material_len_p(id);
   Material *mat_id = id_cast<Material *>(assign_ptr->owner_id);
+  if (mat_id && mat_id->eevee_domain == MA_EEVEE_DOMAIN_FILTER) {
+    return false;
+  }
   if (totcol && (key >= 0 && key < *totcol)) {
     BLI_assert(BKE_id_is_in_global_main(id));
-    BLI_assert(BKE_id_is_in_global_main(&mat_id->id));
+    BLI_assert(mat_id == nullptr || BKE_id_is_in_global_main(&mat_id->id));
     BKE_id_material_assign(G_MAIN, id, mat_id, key + 1);
     return true;
   }
@@ -1192,6 +1195,10 @@ bool rna_IDMaterials_assign_int(PointerRNA *ptr, int key, const PointerRNA *assi
 
 static void rna_IDMaterials_append_id(ID *id, Main *bmain, Material *ma)
 {
+  if (ma && ma->eevee_domain == MA_EEVEE_DOMAIN_FILTER) {
+    return;
+  }
+
   BKE_id_material_append(bmain, id, ma);
 
   WM_main_add_notifier(NC_OBJECT | ND_DRAW, id);
