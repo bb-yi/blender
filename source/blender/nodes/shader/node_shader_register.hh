@@ -69,6 +69,7 @@ void register_node_type_sh_npr_output();
 void register_node_type_sh_npr_refraction();
 void register_node_type_sh_output_filter();
 void register_node_type_sh_render_texture();
+void register_node_type_sh_render_info();
 void register_node_type_sh_scene_color();
 void register_node_type_sh_object_info();
 void register_node_type_sh_output_aov();

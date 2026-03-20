@@ -6633,6 +6633,11 @@ static void def_sh_render_texture(BlenderRNA * /*brna*/, StructRNA *srna)
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
 }
 
+static void def_sh_render_info(BlenderRNA * /*brna*/, StructRNA *srna)
+{
+  RNA_def_struct_ui_text(srna, "Render Info Node", "Retrieve Eevee render region dimensions");
+}
+
 static void def_sh_scene_color(BlenderRNA * /*brna*/, StructRNA *srna)
 {
   static const EnumPropertyItem scene_source_items[] = {
@@ -10065,6 +10070,7 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("ShaderNode", "ShaderNodeNPR_Output", def_group_output);
   define("ShaderNode", "ShaderNodeNPR_Refraction");
   define("ShaderNode", "ShaderNodeRenderTexture", def_sh_render_texture);
+  define("ShaderNode", "ShaderNodeRenderInfo", def_sh_render_info);
   define("ShaderNode", "ShaderNodeSceneColor", def_sh_scene_color);
   define("ShaderNode", "ShaderNodeInputAOV", def_sh_input_aov);
   define("ShaderNode", "ShaderNodeObjectInfo");

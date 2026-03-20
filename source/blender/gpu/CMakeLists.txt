@@ -664,6 +664,7 @@ set(GLSL_SRC
   shaders/material/gpu_shader_material_normal.glsl
   shaders/material/gpu_shader_material_normal_map.glsl
   shaders/material/gpu_shader_material_npr.glsl
+  shaders/material/gpu_shader_material_render_info.glsl
   shaders/material/gpu_shader_material_scene_color.glsl
   shaders/material/gpu_shader_material_object_info.glsl
   shaders/material/gpu_shader_material_output_aov.glsl

@@ -128,6 +128,11 @@ class NODE_MT_shader_node_input_base(node_add_menu.NodeMenu):
             context, layout, "ShaderNodeObjectInfo",
             ["Location", "Color", "Alpha", "Object Index", "Material Index", "Random"],
         )
+        if eevee_shader_nodes_poll(context):
+            self.node_operator_with_outputs(
+                context, layout, "ShaderNodeRenderInfo",
+                ["Width", "Height"],
+            )
         self.node_operator_with_outputs(
             context, layout, "ShaderNodeParticleInfo",
             ["Index", "Random", "Age", "Lifetime", "Location", "Size", "Velocity", "Angular Velocity"],

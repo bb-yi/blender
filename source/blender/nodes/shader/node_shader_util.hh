@@ -57,6 +57,7 @@ bool line_style_shader_nodes_poll(const bContext *C);
 bool world_shader_nodes_poll(const bContext *C);
 bool object_shader_nodes_poll(const bContext *C);
 bool object_cycles_shader_nodes_poll(const bContext *C);
+bool eevee_shader_nodes_poll(const bContext *C);
 bool object_eevee_shader_nodes_poll(const bContext *C);
 bool filter_eevee_shader_nodes_poll(const bContext *C);
 bool npr_shader_nodes_poll(const bContext *C);
