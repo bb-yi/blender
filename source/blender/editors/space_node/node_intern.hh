@@ -359,6 +359,7 @@ void NODE_OT_select_lasso(wmOperatorType *ot);
 void NODE_OT_select_grouped(wmOperatorType *ot);
 void NODE_OT_select_same_type_step(wmOperatorType *ot);
 void NODE_OT_find_node(wmOperatorType *ot);
+void NODE_OT_jump_to_shader_portal_in(wmOperatorType *ot);
 
 /* `node_view.cc` */
 

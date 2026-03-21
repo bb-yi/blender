@@ -35,6 +35,7 @@ void node_operatortypes()
   WM_operatortype_append(NODE_OT_select_same_type_step);
 
   WM_operatortype_append(NODE_OT_find_node);
+  WM_operatortype_append(NODE_OT_jump_to_shader_portal_in);
 
   WM_operatortype_append(NODE_OT_view_all);
   WM_operatortype_append(NODE_OT_view_selected);

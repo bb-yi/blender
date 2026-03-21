@@ -7,6 +7,7 @@
  */
 
 #include <array>
+#include <climits>
 #include <cstdlib>
 #include <fmt/format.h>
 
@@ -39,6 +40,7 @@
 #include "BKE_node_legacy_types.hh"
 #include "BKE_node_runtime.hh"
 #include "BKE_node_tree_update.hh"
+#include "BKE_report.hh"
 #include "BKE_screen.hh"
 #include "BKE_viewer_path.hh"
 #include "BKE_workspace.hh"
@@ -526,6 +528,109 @@ void node_select_single(bContext &C, bNode &node)
   }
 
   WM_event_add_notifier(&C, NC_NODE | NA_SELECTED, nullptr);
+}
+
+static bool node_active_view_poll(bContext *C)
+{
+  if (!ED_operator_node_active(C)) {
+    return false;
+  }
+  const ARegion *region = CTX_wm_region(C);
+  return region && region->regiontype == RGN_TYPE_WINDOW;
+}
+
+enum class PortalInputLookupStatus {
+  Found,
+  Missing,
+  Duplicate,
+};
+
+struct PortalInputLookupResult {
+  PortalInputLookupStatus status;
+  bNode *node;
+};
+
+static PortalInputLookupResult find_matching_shader_portal_input(bNodeTree &tree,
+                                                                 const char *portal_name)
+{
+  BLI_assert(portal_name != nullptr);
+
+  bNode *matching_node = nullptr;
+  for (bNode *node : tree.all_nodes()) {
+    if (node->type_legacy != SH_NODE_PORTAL_IN || node->storage == nullptr) {
+      continue;
+    }
+
+    const NodeShaderPortal &storage = *static_cast<const NodeShaderPortal *>(node->storage);
+    if (!STREQ(storage.name, portal_name)) {
+      continue;
+    }
+
+    if (matching_node != nullptr) {
+      return {PortalInputLookupStatus::Duplicate, nullptr};
+    }
+    matching_node = node;
+  }
+
+  if (matching_node == nullptr) {
+    return {PortalInputLookupStatus::Missing, nullptr};
+  }
+  return {PortalInputLookupStatus::Found, matching_node};
+}
+
+static wmOperatorStatus node_jump_to_shader_portal_in_exec(bContext *C, wmOperator *op)
+{
+  SpaceNode *snode = CTX_wm_space_node(C);
+  ARegion *region = CTX_wm_region(C);
+  bNodeTree *tree = snode->edittree;
+
+  if (tree == nullptr || region == nullptr) {
+    return OPERATOR_CANCELLED;
+  }
+
+  tree->ensure_topology_cache();
+
+  const int portal_out_node_id = RNA_int_get(op->ptr, "portal_out_node_id");
+  bNode *portal_out = portal_out_node_id >= 0 ? tree->node_by_id(portal_out_node_id) :
+                                                bke::node_get_active(*tree);
+  if (portal_out == nullptr || portal_out->type_legacy != SH_NODE_PORTAL_OUT ||
+      portal_out->storage == nullptr)
+  {
+    BKE_report(op->reports, RPT_WARNING, "Portal Out node could not be resolved");
+    return OPERATOR_CANCELLED;
+  }
+
+  const NodeShaderPortal &portal_out_storage = *static_cast<const NodeShaderPortal *>(
+      portal_out->storage);
+  if (portal_out_storage.name[0] == '\0') {
+    BKE_report(op->reports, RPT_WARNING, "Portal Out has no portal name");
+    return OPERATOR_CANCELLED;
+  }
+
+  const PortalInputLookupResult lookup = find_matching_shader_portal_input(
+      *tree, portal_out_storage.name);
+  switch (lookup.status) {
+    case PortalInputLookupStatus::Duplicate:
+      BKE_reportf(op->reports,
+                  RPT_WARNING,
+                  "Multiple Portal In nodes named \"%s\" exist in this node tree",
+                  portal_out_storage.name);
+      return OPERATOR_CANCELLED;
+    case PortalInputLookupStatus::Missing:
+      BKE_reportf(op->reports,
+                  RPT_WARNING,
+                  "No Portal In node named \"%s\" was found in this node tree",
+                  portal_out_storage.name);
+      return OPERATOR_CANCELLED;
+    case PortalInputLookupStatus::Found:
+      break;
+  }
+
+  node_select_single(*C, *lookup.node);
+  const int smooth_viewtx = WM_operator_smooth_viewtx_get(op);
+  space_node_view_flag(*C, *snode, *region, NODE_SELECT, smooth_viewtx);
+
+  return OPERATOR_FINISHED;
 }
 
 static const bNodeSocket *find_socket_at_mouse_y(const Span<const bNodeSocket *> sockets,
@@ -1671,6 +1776,35 @@ void NODE_OT_find_node(wmOperatorType *ot)
 
   /* flags */
   ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+}
+
+void NODE_OT_jump_to_shader_portal_in(wmOperatorType *ot)
+{
+  PropertyRNA *prop;
+
+  /* identifiers */
+  ot->name = "Jump to Portal In";
+  ot->description = "Select and focus the matching Portal In node in the current shader tree";
+  ot->idname = "NODE_OT_jump_to_shader_portal_in";
+
+  /* API callbacks. */
+  ot->exec = node_jump_to_shader_portal_in_exec;
+  ot->poll = node_active_view_poll;
+
+  /* flags */
+  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+
+  /* properties */
+  prop = RNA_def_int(ot->srna,
+                     "portal_out_node_id",
+                     -1,
+                     -1,
+                     INT_MAX,
+                     "Portal Out Node",
+                     "Identifier of the Portal Out node",
+                     -1,
+                     INT_MAX);
+  RNA_def_property_flag(prop, PROP_SKIP_SAVE);
 }
 
 /** \} */

@@ -9,6 +9,8 @@
 #include "BLI_listbase.h"
 #include "BLI_string.h"
 
+#include "RNA_access.hh"
+
 #include "UI_interface_layout.hh"
 
 #include "node_shader_util.hh"
@@ -71,7 +73,12 @@ static void node_declare(NodeDeclarationBuilder &b)
 
 static void node_layout(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
 {
-  layout.prop(ptr, "portal_name", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+  ui::Layout *row = &layout.row(true);
+  row->prop(ptr, "portal_name", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+  if (const bNode *node = static_cast<const bNode *>(ptr->data)) {
+    PointerRNA op_ptr = row->op("node.jump_to_shader_portal_in", "", ICON_VIEWZOOM);
+    RNA_int_set(&op_ptr, "portal_out_node_id", node->identifier);
+  }
   layout.prop(ptr, "data_type", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
 }
 
