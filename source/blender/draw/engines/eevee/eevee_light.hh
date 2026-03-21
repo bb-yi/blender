@@ -127,7 +127,6 @@ class LightModule {
   static constexpr uint max_tile_count_threshold = 8192;
 
   Instance &inst_;
-
   /** Map of light objects data. Converted to flat array each frame. */
   Map<ObjectKey, Light> light_map_;
   /**
@@ -180,7 +179,7 @@ class LightModule {
   PassSimple debug_draw_ps_ = {"LightCulling.Debug"};
 
  public:
-  LightModule(Instance &inst) : inst_(inst) {};
+  LightModule(Instance &inst);
   ~LightModule();
 
   void begin_sync();
@@ -201,9 +200,11 @@ class LightModule {
     pass.bind_ssbo(LIGHT_BUF_SLOT, &culling_light_buf_);
     pass.bind_ssbo(LIGHT_ZBIN_BUF_SLOT, &culling_zbin_buf_);
     pass.bind_ssbo(LIGHT_TILE_BUF_SLOT, &culling_tile_buf_);
+    pass.bind_ubo(WORLD_SUNLIGHT_BUF_SLOT, world_sunlight_ubo());
   }
 
  private:
+  gpu::UniformBuf *world_sunlight_ubo() const;
   void culling_pass_sync();
   void update_pass_sync();
   void debug_pass_sync();

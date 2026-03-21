@@ -895,6 +895,18 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     info.additional_info("eevee_previous_layer_radiance");
   }
 
+  if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) &&
+      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD))
+  {
+    info.additional_info("eevee_light_data");
+    info.additional_info("eevee_shadow_data");
+  }
+  if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) &&
+      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD))
+  {
+    info.additional_info("eevee_lightprobe_data");
+  }
+
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_DIFFUSE)) {
     info.define("MAT_DIFFUSE");
   }
@@ -1214,6 +1226,16 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     Vector<StringRefNull> dependencies;
     if (use_ao_node) {
       dependencies.append("eevee_ambient_occlusion_lib.glsl");
+    }
+    if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) &&
+        ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD))
+    {
+      dependencies.append("eevee_light_eval_lib.glsl");
+    }
+    if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) &&
+        ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD))
+    {
+      dependencies.append("eevee_lightprobe_eval_lib.glsl");
     }
     dependencies.append("eevee_geom_types_lib.glsl");
     dependencies.append("eevee_nodetree_lib.glsl");

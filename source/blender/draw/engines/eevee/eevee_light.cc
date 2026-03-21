@@ -350,6 +350,15 @@ void Light::debug_draw()
 /** \name LightModule
  * \{ */
 
+LightModule::LightModule(Instance &inst) : inst_(inst)
+{
+}
+
+gpu::UniformBuf *LightModule::world_sunlight_ubo() const
+{
+  return inst_.world.sunlight;
+}
+
 LightModule::~LightModule()
 {
   /* WATCH: Destructor order. Expect shadow module to be destructed later. */

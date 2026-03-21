@@ -75,6 +75,7 @@ void register_shader_nodes()
   register_node_type_sh_portal_out();
   register_node_type_sh_render_texture();
   register_node_type_sh_render_info();
+  register_node_type_sh_shader_info();
   register_node_type_sh_screenspace_info();
   register_node_type_sh_scene_color();
   register_node_type_sh_object_info();
