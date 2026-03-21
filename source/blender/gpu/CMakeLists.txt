@@ -639,6 +639,7 @@ set(GLSL_SRC
   shaders/material/gpu_shader_material_displacement.glsl
   shaders/material/gpu_shader_material_derivative.glsl
   shaders/material/gpu_shader_material_curvature.glsl
+  shaders/material/gpu_shader_material_light_info.glsl
   shaders/material/gpu_shader_material_eevee_specular.glsl
   shaders/material/gpu_shader_material_emission.glsl
   shaders/material/gpu_shader_material_fractal_noise.glsl

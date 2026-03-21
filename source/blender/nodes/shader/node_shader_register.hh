@@ -54,6 +54,7 @@ void register_node_type_sh_hue_sat();
 void register_node_type_sh_input_aov();
 void register_node_type_sh_invert();
 void register_node_type_sh_layer_weight();
+void register_node_type_sh_light_info();
 void register_node_type_sh_light_falloff();
 void register_node_type_sh_light_path();
 void register_node_type_sh_map_range();

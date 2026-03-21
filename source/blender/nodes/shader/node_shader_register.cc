@@ -56,6 +56,7 @@ void register_shader_nodes()
   register_node_type_sh_input_aov();
   register_node_type_sh_invert();
   register_node_type_sh_layer_weight();
+  register_node_type_sh_light_info();
   register_node_type_sh_light_falloff();
   register_node_type_sh_light_path();
   register_node_type_sh_map_range();

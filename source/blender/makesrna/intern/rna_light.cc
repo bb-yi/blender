@@ -25,16 +25,26 @@
 
 #  include "MEM_guardedalloc.h"
 
+#  include "BLI_set.hh"
 #  include "BLI_math_matrix_types.hh"
 
 #  include "BKE_context.hh"
 #  include "BKE_light.h"
 #  include "BKE_main.hh"
+#  include "BKE_main_invariants.hh"
+#  include "BKE_node.hh"
+#  include "BKE_node_tree_update.hh"
 #  include "BKE_texture.h"
+
+#  include "DNA_material_types.h"
+#  include "DNA_object_types.h"
+#  include "DNA_world_types.h"
 
 #  include "DEG_depsgraph.hh"
 
 #  include "NOD_defaults.hh"
+
+#  include "GPU_material.hh"
 
 #  include "WM_api.hh"
 #  include "WM_types.hh"
@@ -42,6 +52,81 @@
 #  include "ED_node.hh"
 
 namespace blender {
+
+static void rna_Light_tag_dependent_node_trees(Main *bmain, Light *la)
+{
+  Set<ID *> light_object_ids;
+  Set<ID *> changed_ntree_ids;
+  Set<ID *> changed_owner_ids;
+
+  for (Object &object : bmain->objects) {
+    if (object.data == &la->id) {
+      light_object_ids.add(&object.id);
+    }
+  }
+
+  if (light_object_ids.is_empty()) {
+    return;
+  }
+
+  FOREACH_NODETREE_BEGIN (bmain, ntree, owner_id) {
+    bool tree_uses_light_info = false;
+    for (bNode *node : ntree->all_nodes()) {
+      if (light_object_ids.contains(node->id)) {
+        BKE_ntree_update_tag_node_property(ntree, node);
+        tree_uses_light_info = true;
+      }
+    }
+
+    if (tree_uses_light_info) {
+      changed_ntree_ids.add(&ntree->id);
+      if (owner_id != nullptr) {
+        changed_owner_ids.add(owner_id);
+      }
+    }
+  }
+  FOREACH_NODETREE_END;
+
+  if (changed_ntree_ids.is_empty()) {
+    return;
+  }
+
+  for (ID *owner_id : changed_owner_ids) {
+    switch (GS(owner_id->name)) {
+      case ID_MA: {
+        Material *material = id_cast<Material *>(owner_id);
+        GPU_material_free(&material->gpumaterial);
+        DEG_id_tag_update(&material->id, ID_RECALC_SHADING | ID_RECALC_SYNC_TO_EVAL);
+        break;
+      }
+      case ID_WO: {
+        World *world = id_cast<World *>(owner_id);
+        GPU_material_free(&world->gpumaterial);
+        DEG_id_tag_update(&world->id, ID_RECALC_SHADING | ID_RECALC_SYNC_TO_EVAL);
+        break;
+      }
+      default:
+        DEG_id_tag_update(owner_id, ID_RECALC_SYNC_TO_EVAL);
+        break;
+    }
+  }
+
+  Vector<ID *> modified_ntree_ids;
+  modified_ntree_ids.reserve(changed_ntree_ids.size());
+  for (ID *ntree_id : changed_ntree_ids) {
+    modified_ntree_ids.append(ntree_id);
+  }
+  BKE_main_ensure_invariants(*bmain, modified_ntree_ids.as_span());
+}
+
+static void rna_Light_update_and_tag_dependent_node_trees(Main *bmain,
+                                                          Light *la,
+                                                          const uint notifier)
+{
+  DEG_id_tag_update(&la->id, 0);
+  rna_Light_tag_dependent_node_trees(bmain, la);
+  WM_main_add_notifier(notifier, la);
+}
 
 static StructRNA *rna_Light_refine(PointerRNA *ptr)
 {
@@ -61,20 +146,16 @@ static StructRNA *rna_Light_refine(PointerRNA *ptr)
   }
 }
 
-static void rna_Light_update(Main * /*bmain*/, Scene * /*scene*/, PointerRNA *ptr)
+static void rna_Light_update(Main *bmain, Scene * /*scene*/, PointerRNA *ptr)
 {
   Light *la = id_cast<Light *>(ptr->owner_id);
-
-  DEG_id_tag_update(&la->id, 0);
-  WM_main_add_notifier(NC_LAMP | ND_LIGHTING, la);
+  rna_Light_update_and_tag_dependent_node_trees(bmain, la, NC_LAMP | ND_LIGHTING);
 }
 
-static void rna_Light_draw_update(Main * /*bmain*/, Scene * /*scene*/, PointerRNA *ptr)
+static void rna_Light_draw_update(Main *bmain, Scene * /*scene*/, PointerRNA *ptr)
 {
   Light *la = id_cast<Light *>(ptr->owner_id);
-
-  DEG_id_tag_update(&la->id, 0);
-  WM_main_add_notifier(NC_LAMP | ND_LIGHTING_DRAW, la);
+  rna_Light_update_and_tag_dependent_node_trees(bmain, la, NC_LAMP | ND_LIGHTING_DRAW);
 }
 
 static bool rna_Light_use_nodes_get(PointerRNA * /*ptr*/)

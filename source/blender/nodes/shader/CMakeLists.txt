@@ -60,6 +60,7 @@ set(SRC
   nodes/node_shader_input_aov.cc
   nodes/node_shader_invert.cc
   nodes/node_shader_layer_weight.cc
+  nodes/node_shader_light_info.cc
   nodes/node_shader_light_falloff.cc
   nodes/node_shader_light_path.cc
   nodes/node_shader_map_range.cc

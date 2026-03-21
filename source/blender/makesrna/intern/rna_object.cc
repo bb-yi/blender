@@ -283,6 +283,7 @@ const EnumPropertyItem rna_enum_object_axis_items[] = {
 
 #  include "BLI_bounds.hh"
 #  include "BLI_listbase.h"
+#  include "BLI_set.hh"
 #  include "BLI_string.h"
 
 #  include "DNA_ID.h"
@@ -293,6 +294,7 @@ const EnumPropertyItem rna_enum_object_axis_items[] = {
 #  include "DNA_lattice_types.h"
 #  include "DNA_material_types.h"
 #  include "DNA_node_types.h"
+#  include "DNA_world_types.h"
 
 #  include "BLI_math_matrix.h"
 #  include "BLI_math_vector.h"
@@ -314,10 +316,13 @@ const EnumPropertyItem rna_enum_object_axis_items[] = {
 #  include "BKE_lib_id.hh"
 #  include "BKE_library.hh"
 #  include "BKE_light_linking.h"
+#  include "BKE_main_invariants.hh"
 #  include "BKE_material.hh"
 #  include "BKE_mesh.hh"
 #  include "BKE_mesh_wrapper.hh"
 #  include "BKE_modifier.hh"
+#  include "BKE_node.hh"
+#  include "BKE_node_tree_update.hh"
 #  include "BKE_object.hh"
 #  include "BKE_object_deform.h"
 #  include "BKE_particle.h"
@@ -334,11 +339,75 @@ const EnumPropertyItem rna_enum_object_axis_items[] = {
 
 #  include "DEG_depsgraph_query.hh"
 
+#  include "GPU_material.hh"
+
 namespace blender {
 
-static void rna_Object_internal_update(Main * /*bmain*/, Scene * /*scene*/, PointerRNA *ptr)
+static void rna_Object_tag_dependent_node_trees(Main *bmain, Object *object)
 {
-  DEG_id_tag_update(ptr->owner_id, ID_RECALC_TRANSFORM);
+  Set<ID *> changed_ntree_ids;
+  Set<ID *> changed_owner_ids;
+
+  FOREACH_NODETREE_BEGIN (bmain, ntree, owner_id) {
+    bool tree_uses_object_id = false;
+    for (bNode *node : ntree->all_nodes()) {
+      if (node->id == &object->id) {
+        BKE_ntree_update_tag_node_property(ntree, node);
+        tree_uses_object_id = true;
+      }
+    }
+
+    if (tree_uses_object_id) {
+      changed_ntree_ids.add(&ntree->id);
+      if (owner_id != nullptr) {
+        changed_owner_ids.add(owner_id);
+      }
+    }
+  }
+  FOREACH_NODETREE_END;
+
+  if (changed_ntree_ids.is_empty()) {
+    return;
+  }
+
+  for (ID *owner_id : changed_owner_ids) {
+    switch (GS(owner_id->name)) {
+      case ID_MA: {
+        Material *material = id_cast<Material *>(owner_id);
+        GPU_material_free(&material->gpumaterial);
+        DEG_id_tag_update(&material->id, ID_RECALC_SHADING | ID_RECALC_SYNC_TO_EVAL);
+        break;
+      }
+      case ID_WO: {
+        World *world = id_cast<World *>(owner_id);
+        GPU_material_free(&world->gpumaterial);
+        DEG_id_tag_update(&world->id, ID_RECALC_SHADING | ID_RECALC_SYNC_TO_EVAL);
+        break;
+      }
+      default:
+        DEG_id_tag_update(owner_id, ID_RECALC_SYNC_TO_EVAL);
+        break;
+    }
+  }
+
+  Vector<ID *> modified_ntree_ids;
+  modified_ntree_ids.reserve(changed_ntree_ids.size());
+  for (ID *ntree_id : changed_ntree_ids) {
+    modified_ntree_ids.append(ntree_id);
+  }
+  BKE_main_ensure_invariants(*bmain, modified_ntree_ids.as_span());
+}
+
+static void rna_Object_tag_transform_and_dependent_node_trees(Main *bmain, Object *object)
+{
+  DEG_id_tag_update(&object->id, ID_RECALC_TRANSFORM);
+  rna_Object_tag_dependent_node_trees(bmain, object);
+}
+
+static void rna_Object_internal_update(Main *bmain, Scene * /*scene*/, PointerRNA *ptr)
+{
+  rna_Object_tag_transform_and_dependent_node_trees(
+      bmain, reinterpret_cast<Object *>(ptr->owner_id));
 }
 
 static void rna_Object_internal_update_draw(Main * /*bmain*/, Scene * /*scene*/, PointerRNA *ptr)
@@ -490,7 +559,8 @@ static void rna_Object_active_shape_update(Main *bmain, Scene * /*scene*/, Point
 
 static void rna_Object_dependency_update(Main *bmain, Scene * /*scene*/, PointerRNA *ptr)
 {
-  DEG_id_tag_update(ptr->owner_id, ID_RECALC_TRANSFORM);
+  rna_Object_tag_transform_and_dependent_node_trees(
+      bmain, reinterpret_cast<Object *>(ptr->owner_id));
   DEG_relations_tag_update(bmain);
   WM_main_add_notifier(NC_OBJECT | ND_PARENT, ptr->owner_id);
 }
