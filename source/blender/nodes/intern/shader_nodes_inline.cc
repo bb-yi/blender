@@ -9,6 +9,8 @@
 
 #include "BKE_compute_context_cache.hh"
 #include "BKE_lib_id.hh"
+#include "BKE_node_legacy_types.hh"
+#include "BKE_node_runtime.hh"
 #include "BKE_node_tree_zones.hh"
 #include "BKE_type_conversions.hh"
 
@@ -525,6 +527,10 @@ class ShaderNodesInliner {
       }
       return;
     }
+    if (node->type_legacy == SH_NODE_PORTAL_OUT) {
+      this->handle_output_socket__portal_out(socket);
+      return;
+    }
     if (node->is_group()) {
       this->handle_output_socket__group(socket);
       return;
@@ -667,6 +673,18 @@ class ShaderNodesInliner {
       return;
     }
     this->store_socket_value_fallback(socket);
+  }
+
+  void handle_output_socket__portal_out(const SocketInContext &socket)
+  {
+    const NodeInContext node = socket.owner_node();
+    const bNodeSocket *origin_socket = bke::node_tree_runtime::find_shader_portal_origin_socket(
+        node->owner_tree(), *node.node);
+    if (origin_socket == nullptr) {
+      this->store_socket_value_fallback(socket);
+      return;
+    }
+    this->forward_value_or_schedule(socket, {socket.context, origin_socket});
   }
 
   bool should_preserve_repeat_zone_node(const bNode &repeat_zone_node) const

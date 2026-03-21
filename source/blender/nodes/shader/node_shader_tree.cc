@@ -1078,6 +1078,7 @@ void ntreeGPUMaterialNodes(bNodeTree *localtree, GPUMaterial *mat)
   const bool is_filter_material = gpu_material_uses_filter_domain(mat);
 
   ntree_shader_unlink_script_nodes(localtree);
+  bke::node_tree_runtime::materialize_shader_portals(*localtree);
   bNode *output = is_filter_material ? ntreeShaderFilterOutputNode(localtree) :
                                        ntreeShaderOutputNode(localtree, SHD_OUTPUT_EEVEE);
 

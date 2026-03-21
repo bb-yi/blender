@@ -1390,6 +1390,33 @@ static void add_nodes_inlined(Scene *scene,
     }
   }
 
+  for (blender::bNode *b_node : b_ntree.all_nodes()) {
+    if (!b_node->is_type("ShaderNodePortalOut")) {
+      continue;
+    }
+    blender::bNodeSocket *portal_output = nullptr;
+    for (blender::bNodeSocket *b_output : b_node->output_sockets()) {
+      if (b_output->is_available()) {
+        portal_output = b_output;
+        break;
+      }
+    }
+    if (portal_output == nullptr) {
+      continue;
+    }
+    const blender::bNodeSocket *source_socket =
+        blender::bke::node_tree_runtime::find_shader_portal_origin_socket(b_ntree, *b_node);
+    if (source_socket == nullptr) {
+      continue;
+    }
+    const PtrOutputMap::iterator source_output_it = output_map.find(
+        const_cast<blender::bNodeSocket *>(source_socket));
+    if (source_output_it == output_map.end()) {
+      continue;
+    }
+    output_map[portal_output] = source_output_it->second;
+  }
+
   /* connect nodes */
   for (blender::bNodeLink *b_link : b_ntree.all_links()) {
     /* Ignore invalid links to avoid unwanted cycles created in graph.
@@ -1440,6 +1467,7 @@ static void add_nodes(Scene *scene,
   inline_params.allow_preserving_repeat_zones = false;
   inline_params.target_engine_ = blender::SHD_OUTPUT_CYCLES;
   blender::nodes::inline_shader_node_tree(b_ntree, *localtree, inline_params);
+  blender::bke::node_tree_runtime::materialize_shader_portals(*localtree);
 
   add_nodes_inlined(
       scene, b_engine, b_data, b_scene, graph, *localtree, proxy_input_map, proxy_output_map);

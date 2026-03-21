@@ -68,6 +68,8 @@ void register_node_type_sh_npr_input();
 void register_node_type_sh_npr_output();
 void register_node_type_sh_npr_refraction();
 void register_node_type_sh_output_filter();
+void register_node_type_sh_portal_in();
+void register_node_type_sh_portal_out();
 void register_node_type_sh_render_texture();
 void register_node_type_sh_render_info();
 void register_node_type_sh_scene_color();

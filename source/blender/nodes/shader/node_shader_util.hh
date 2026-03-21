@@ -36,6 +36,7 @@ namespace blender {
 
 struct bContext;
 struct bNodeExecContext;
+struct bNodeStack;
 struct bNodeTreeExec;
 struct GPUNodeLink;
 struct GPUNodeStack;
@@ -78,6 +79,10 @@ void node_shader_gpu_tex_mapping(GPUMaterial *mat,
                                  bNode *node,
                                  GPUNodeStack *in,
                                  GPUNodeStack *out);
+const bNodeSocket *node_shader_portal_out_source_socket(const bNode &portal_out);
+void node_shader_gpu_stack_from_portal_out(const bNode &portal_out,
+                                           bNodeStack *stack,
+                                           GPUNodeStack *out);
 
 bNodeTreeExec *ntreeShaderBeginExecTree_internal(bNodeExecContext *context,
                                                  bNodeTree *ntree,

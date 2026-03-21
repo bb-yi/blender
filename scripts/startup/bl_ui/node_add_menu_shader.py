@@ -151,6 +151,8 @@ class NODE_MT_shader_node_input_base(node_add_menu.NodeMenu):
         self.node_operator(layout, "ShaderNodeUVAlongStroke", poll=line_style_shader_nodes_poll(context))
         self.node_operator(layout, "ShaderNodeUVMap")
         self.node_operator(layout, "ShaderNodeValue")
+        self.node_operator(layout, "ShaderNodePortalIn")
+        self.node_operator(layout, "ShaderNodePortalOut")
         self.node_operator_with_outputs(
             context, layout, "ShaderNodeVolumeInfo",
             ["Color", "Density", "Flame", "Temperature"],

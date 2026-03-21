@@ -251,6 +251,8 @@ class bNodeTreeRuntime : NonCopyable, NonMovable {
   Vector<bNodeSocket *> input_sockets;
   Vector<bNodeSocket *> output_sockets;
   MultiValueMap<const bNodeType *, bNode *> nodes_by_type;
+  Map<StringRefNull, const bNode *> shader_portal_inputs_by_name;
+  Map<int32_t, const bNodeSocket *> shader_portal_source_socket_by_out_node_id;
   Vector<bNode *> toposort_left_to_right;
   Vector<bNode *> toposort_right_to_left;
   Vector<bNode *> group_nodes;
@@ -421,6 +423,17 @@ namespace node_tree_runtime {
  * Is executed when the node tree changed in the depsgraph.
  */
 void preprocess_geometry_node_tree_for_evaluation(bNodeTree &tree_cow);
+const bNode *find_shader_portal_input_node(const bNodeTree &tree, StringRefNull portal_name);
+const bNodeSocket *find_shader_portal_source_socket(const bNodeTree &tree,
+                                                    const bNode &portal_out_node);
+const bNodeSocket *find_shader_portal_origin_socket(const bNodeTree &tree,
+                                                    const bNode &portal_out_node);
+/**
+ * Replace Portal Out links with real direct links to their resolved origin sockets.
+ * This is intended for temporary backend compilation trees only.
+ */
+void materialize_shader_portals(bNodeTree &tree);
+void update_shader_portal_validation(bNodeTree &tree);
 
 class AllowUsingOutdatedInfo : NonCopyable, NonMovable {
  private:

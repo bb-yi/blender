@@ -2882,6 +2882,13 @@ struct NodeShaderOutputAOV {
   char name[/*MAX_NAME*/ 64] = "";
 };
 
+struct NodeShaderPortal {
+  DNA_DEFINE_CXX_METHODS(NodeShaderPortal)
+
+  char name[/*MAX_NAME*/ 64] = "";
+  int data_type = SOCK_FLOAT;
+};
+
 struct NodeSunBeams {
   DNA_DEFINE_CXX_METHODS(NodeSunBeams)
 
