@@ -6279,6 +6279,27 @@ static const EnumPropertyItem shader_portal_data_type_items[] = {
     {0, nullptr, 0, nullptr, nullptr},
 };
 
+static const EnumPropertyItem shader_derivative_data_type_items[] = {
+    {SOCK_FLOAT, "FLOAT", ICON_NODE_SOCKET_FLOAT, "Float", "Differentiate a floating-point value"},
+    {SOCK_VECTOR, "VECTOR", ICON_NODE_SOCKET_VECTOR, "Vector", "Differentiate a vector value"},
+    {SOCK_RGBA, "RGBA", ICON_NODE_SOCKET_RGBA, "Color", "Differentiate a color value"},
+    {0, nullptr, 0, nullptr, nullptr},
+};
+
+static const EnumPropertyItem shader_derivative_operation_items[] = {
+    {NODE_SHADER_DERIVATIVE_DDX,
+     "DDX",
+     0,
+     "DDX",
+     "Differentiate the input with respect to screen-space X"},
+    {NODE_SHADER_DERIVATIVE_DDY,
+     "DDY",
+     0,
+     "DDY",
+     "Differentiate the input with respect to screen-space Y"},
+    {0, nullptr, 0, nullptr, nullptr},
+};
+
 static void def_sh_input_aov(BlenderRNA * /*brna*/, StructRNA *srna)
 {
   PropertyRNA *prop;
@@ -6328,6 +6349,27 @@ static void def_sh_portal_out(BlenderRNA * /*brna*/, StructRNA *srna)
   RNA_def_property_enum_sdna(prop, nullptr, "data_type");
   RNA_def_property_enum_items(prop, shader_portal_data_type_items);
   RNA_def_property_ui_text(prop, "Type", "Data type expected from the portal input");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_socket_update");
+
+  RNA_def_struct_sdna_from(srna, "bNode", nullptr);
+}
+
+static void def_sh_screen_derivative(BlenderRNA * /*brna*/, StructRNA *srna)
+{
+  PropertyRNA *prop;
+
+  RNA_def_struct_sdna_from(srna, "NodeShaderDerivative", "storage");
+
+  prop = RNA_def_property(srna, "operation", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "operation");
+  RNA_def_property_enum_items(prop, shader_derivative_operation_items);
+  RNA_def_property_ui_text(prop, "Operation", "Screen-space derivative direction");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  prop = RNA_def_property(srna, "data_type", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "data_type");
+  RNA_def_property_enum_items(prop, shader_derivative_data_type_items);
+  RNA_def_property_ui_text(prop, "Type", "Input and output data type");
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_socket_update");
 
   RNA_def_struct_sdna_from(srna, "bNode", nullptr);
@@ -10090,6 +10132,7 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("ShaderNode", "ShaderNodeCombineColor", def_sh_combsep_color);
   define("ShaderNode", "ShaderNodeCombineXYZ");
   define("ShaderNode", "ShaderNodeDisplacement", def_sh_displacement);
+  define("ShaderNode", "ShaderNodeScreenDerivative", def_sh_screen_derivative);
   define("ShaderNode", "ShaderNodeEeveeSpecular");
   define("ShaderNode", "ShaderNodeEmission");
   define("ShaderNode", "ShaderNodeFloatCurve", def_float_curve);

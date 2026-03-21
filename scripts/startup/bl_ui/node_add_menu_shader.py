@@ -446,6 +446,10 @@ class NODE_MT_shader_node_math_base(node_add_menu.NodeMenu):
         layout = self.layout
 
         self.node_operator(layout, "ShaderNodeClamp")
+        if eevee_shader_nodes_poll(context):
+            self.node_operator_with_searchable_enum(
+                context, layout, "ShaderNodeScreenDerivative", "operation"
+            )
         self.node_operator(layout, "ShaderNodeFloatCurve")
         self.node_operator(layout, "ShaderNodeMapRange")
         self.node_operator_with_searchable_enum(context, layout, "ShaderNodeMath", "operation")

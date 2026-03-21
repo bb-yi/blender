@@ -91,6 +91,7 @@ set(SRC
   nodes/node_shader_raycast.cc
   nodes/node_shader_rgb.cc
   nodes/node_shader_rgb_to_bw.cc
+  nodes/node_shader_screen_derivative.cc
   nodes/node_shader_script.cc
   nodes/node_shader_sepcomb_color.cc
   nodes/node_shader_sepcomb_xyz.cc

@@ -2889,6 +2889,18 @@ struct NodeShaderPortal {
   int data_type = SOCK_FLOAT;
 };
 
+enum NodeShaderDerivativeOperation {
+  NODE_SHADER_DERIVATIVE_DDX = 0,
+  NODE_SHADER_DERIVATIVE_DDY = 1,
+};
+
+struct NodeShaderDerivative {
+  DNA_DEFINE_CXX_METHODS(NodeShaderDerivative)
+
+  int operation = NODE_SHADER_DERIVATIVE_DDX;
+  int data_type = SOCK_FLOAT;
+};
+
 struct NodeSunBeams {
   DNA_DEFINE_CXX_METHODS(NodeSunBeams)
 
