@@ -45,6 +45,7 @@ set(SRC
   nodes/node_shader_color_ramp.cc
   nodes/node_shader_common.cc
   nodes/node_shader_curves.cc
+  nodes/node_shader_curvature.cc
   nodes/node_shader_displacement.cc
   nodes/node_shader_eevee_specular.cc
   nodes/node_shader_emission.cc
@@ -78,6 +79,7 @@ set(SRC
   nodes/node_shader_portal_out.cc
   nodes/node_shader_render_texture.cc
   nodes/node_shader_render_info.cc
+  nodes/node_shader_screenspace_info.cc
   nodes/node_shader_scene_color.cc
   nodes/node_shader_object_info.cc
   nodes/node_shader_output_aov.cc

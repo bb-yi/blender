@@ -888,7 +888,8 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   }
 
   if (ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD) &&
-      GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_TO_RGBA))
+      (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_TO_RGBA) ||
+       GPU_material_flag_get(gpumat, GPU_MATFLAG_SCREENSPACE_INFO)))
   {
     info.additional_info("eevee_hiz_prev_data");
     info.additional_info("eevee_previous_layer_radiance");

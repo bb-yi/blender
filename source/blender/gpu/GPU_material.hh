@@ -99,6 +99,7 @@ enum eGPUMaterialFlag {
   GPU_MATFLAG_RENDER_TEXTURE = (1 << 25),
   GPU_MATFLAG_FILTER_MATERIAL = (1 << 26),
   GPU_MATFLAG_SCENE_COLOR = (1 << 27),
+  GPU_MATFLAG_SCREENSPACE_INFO = (1 << 28),
 
   /* Tells the render engine the material was just compiled or updated. */
   GPU_MATFLAG_UPDATED = (1 << 29),

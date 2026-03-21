@@ -133,6 +133,16 @@ class NODE_MT_shader_node_input_base(node_add_menu.NodeMenu):
                 context, layout, "ShaderNodeRenderInfo",
                 ["Width", "Height"],
             )
+        self.node_operator(
+            layout,
+            "ShaderNodeCurvature",
+            poll=object_eevee_shader_nodes_poll(context),
+        )
+        self.node_operator(
+            layout,
+            "ShaderNodeScreenspaceInfo",
+            poll=object_eevee_shader_nodes_poll(context),
+        )
         self.node_operator_with_outputs(
             context, layout, "ShaderNodeParticleInfo",
             ["Index", "Random", "Age", "Lifetime", "Location", "Size", "Velocity", "Angular Velocity"],

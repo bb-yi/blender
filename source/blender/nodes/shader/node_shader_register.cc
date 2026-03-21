@@ -42,6 +42,7 @@ void register_shader_nodes()
   register_node_type_sh_curve_float();
   register_node_type_sh_curve_rgb();
   register_node_type_sh_curve_vec();
+  register_node_type_sh_curvature();
   register_node_type_sh_displacement();
   register_node_type_sh_eevee_specular();
   register_node_type_sh_emission();
@@ -74,6 +75,7 @@ void register_shader_nodes()
   register_node_type_sh_portal_out();
   register_node_type_sh_render_texture();
   register_node_type_sh_render_info();
+  register_node_type_sh_screenspace_info();
   register_node_type_sh_scene_color();
   register_node_type_sh_object_info();
   register_node_type_sh_output_aov();
