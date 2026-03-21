@@ -6311,6 +6311,11 @@ static const EnumPropertyItem shader_derivative_operation_items[] = {
      0,
      "DDY",
      "Differentiate the input with respect to screen-space Y"},
+    {NODE_SHADER_DERIVATIVE_DDXY,
+     "DDXY",
+     0,
+     "DDXY",
+     "Sum the screen-space X and Y derivatives of the input"},
     {0, nullptr, 0, nullptr, nullptr},
 };
 

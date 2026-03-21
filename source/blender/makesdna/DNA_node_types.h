@@ -2892,6 +2892,7 @@ struct NodeShaderPortal {
 enum NodeShaderDerivativeOperation {
   NODE_SHADER_DERIVATIVE_DDX = 0,
   NODE_SHADER_DERIVATIVE_DDY = 1,
+  NODE_SHADER_DERIVATIVE_DDXY = 2,
 };
 
 struct NodeShaderDerivative {

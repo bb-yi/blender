@@ -64,8 +64,18 @@ static int gpu_shader_screen_derivative(GPUMaterial *mat,
                                         GPUNodeStack *out)
 {
   const NodeShaderDerivative &storage = node_storage(*node);
-  const char *function_name = (storage.operation == NODE_SHADER_DERIVATIVE_DDY) ? "node_ddy" :
-                                                                                   "node_ddx";
+  const char *function_name = "node_ddx";
+  switch (storage.operation) {
+    case NODE_SHADER_DERIVATIVE_DDY:
+      function_name = "node_ddy";
+      break;
+    case NODE_SHADER_DERIVATIVE_DDXY:
+      function_name = "node_ddxy";
+      break;
+    case NODE_SHADER_DERIVATIVE_DDX:
+    default:
+      break;
+  }
   return GPU_stack_link(mat, node, function_name, in, out);
 }
 
@@ -79,7 +89,7 @@ void register_node_type_sh_screen_derivative()
 
   sh_node_type_base(&ntype, "ShaderNodeScreenDerivative", SH_NODE_SCREEN_DERIVATIVE);
   ntype.ui_name = "Screen Derivative";
-  ntype.ui_description = "Partial derivative of the input with respect to screen-space X or Y";
+  ntype.ui_description = "Partial derivative of the input with respect to screen-space X, Y, or both";
   ntype.enum_name_legacy = "SCREEN_DERIVATIVE";
   ntype.nclass = NODE_CLASS_CONVERTER;
   ntype.declare = file_ns::node_declare;
