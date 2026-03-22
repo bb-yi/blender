@@ -10,6 +10,5 @@ node = material.node_tree.nodes.new("ShaderNodeRenderInfo")
 
 assert node.bl_label == "Render Info"
 assert [socket.name for socket in node.inputs] == []
-assert [socket.name for socket in node.outputs] == ["Width", "Height", "Frag Coord"]
+assert [socket.name for socket in node.outputs] == ["Frag Coord", "Width", "Height"]
 assert node.outputs["Frag Coord"].type == "VECTOR"
-
