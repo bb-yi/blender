@@ -47,6 +47,13 @@ def object_eevee_shader_nodes_poll(context):
             eevee_shader_nodes_poll(context))
 
 
+def object_or_npr_eevee_shader_nodes_poll(context):
+    snode = context.space_data
+    return (eevee_shader_nodes_poll(context) and
+            snode.tree_type == 'ShaderNodeTree' and
+            snode.shader_type in {'OBJECT', 'NPR'})
+
+
 def filter_eevee_shader_nodes_poll(context):
     snode = context.space_data
     return (eevee_shader_nodes_poll(context) and
@@ -136,7 +143,7 @@ class NODE_MT_shader_node_input_base(node_add_menu.NodeMenu):
         self.node_operator(
             layout,
             "ShaderNodeCurvature",
-            poll=object_eevee_shader_nodes_poll(context),
+            poll=object_or_npr_eevee_shader_nodes_poll(context),
         )
         self.node_operator(
             layout,
@@ -161,7 +168,11 @@ class NODE_MT_shader_node_input_base(node_add_menu.NodeMenu):
             context, layout, "ShaderNodePointInfo",
             ["Position", "Radius", "Random"],
         )
-        self.node_operator(layout, "ShaderNodeRaycast")
+        self.node_operator(
+            layout,
+            "ShaderNodeRaycast",
+            poll=object_or_npr_eevee_shader_nodes_poll(context),
+        )
         self.node_operator(layout, "ShaderNodeTangent")
         self.node_operator_with_outputs(
             context, layout, "ShaderNodeTexCoord",
@@ -171,8 +182,6 @@ class NODE_MT_shader_node_input_base(node_add_menu.NodeMenu):
         self.node_operator(layout, "ShaderNodeUVAlongStroke", poll=line_style_shader_nodes_poll(context))
         self.node_operator(layout, "ShaderNodeUVMap")
         self.node_operator(layout, "ShaderNodeValue")
-        self.node_operator(layout, "ShaderNodePortalIn")
-        self.node_operator(layout, "ShaderNodePortalOut")
         self.node_operator_with_outputs(
             context, layout, "ShaderNodeVolumeInfo",
             ["Color", "Density", "Flame", "Temperature"],
@@ -525,6 +534,22 @@ class NODE_MT_shader_node_utilities_base(node_add_menu.NodeMenu):
         self.draw_assets_for_catalog(layout, self.bl_label)
 
 
+class NODE_MT_shader_node_layout_base(node_add_menu.NodeMenu):
+    bl_label = "Layout"
+    menu_path = "Layout"
+
+    def draw(self, _context):
+        layout = self.layout
+
+        self.node_operator(layout, "NodeFrame", search_weight=-1)
+        self.node_operator(layout, "NodeReroute")
+        layout.separator()
+        self.node_operator(layout, "ShaderNodePortalIn")
+        self.node_operator(layout, "ShaderNodePortalOut")
+
+        self.draw_assets_for_catalog(layout, self.menu_path)
+
+
 class NODE_MT_shader_node_all_base(node_add_menu.NodeMenu):
     bl_label = ""
     menu_path = "Root"
@@ -564,6 +589,7 @@ add_menus = {
     "NODE_MT_category_shader_vector": NODE_MT_shader_node_vector_base,
     "NODE_MT_category_shader_math": NODE_MT_shader_node_math_base,
     "NODE_MT_category_shader_utilities": NODE_MT_shader_node_utilities_base,
+    "NODE_MT_category_shader_layout": NODE_MT_shader_node_layout_base,
     "NODE_MT_shader_node_add_all": NODE_MT_shader_node_all_base,
 }
 add_menus = node_add_menu.generate_menus(
@@ -584,6 +610,7 @@ swap_menus = {
     "NODE_MT_shader_node_vector_swap": NODE_MT_shader_node_vector_base,
     "NODE_MT_shader_node_math_swap": NODE_MT_shader_node_math_base,
     "NODE_MT_shader_node_utilities_swap": NODE_MT_shader_node_utilities_base,
+    "NODE_MT_shader_node_layout_swap": NODE_MT_shader_node_layout_base,
     "NODE_MT_shader_node_swap_all": NODE_MT_shader_node_all_base,
 }
 swap_menus = node_add_menu.generate_menus(

@@ -6110,6 +6110,15 @@ static void def_sh_raycast(BlenderRNA * /*brna*/, StructRNA *srna)
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
 }
 
+static void def_sh_curvature(BlenderRNA * /*brna*/, StructRNA *srna)
+{
+  PropertyRNA *prop = RNA_def_property(srna, "local", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "custom1", 0);
+  RNA_def_property_ui_text(
+      prop, "Local", "Only consider the object itself when sampling curvature");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+}
+
 static void def_sh_displacement(BlenderRNA * /*brna*/, StructRNA *srna)
 {
   static const EnumPropertyItem prop_space_items[] = {
@@ -10184,7 +10193,7 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("ShaderNode", "ShaderNodePortalOut", def_sh_portal_out);
   define("ShaderNode", "ShaderNodeRenderTexture", def_sh_render_texture);
   define("ShaderNode", "ShaderNodeRenderInfo", def_sh_render_info);
-  define("ShaderNode", "ShaderNodeCurvature");
+  define("ShaderNode", "ShaderNodeCurvature", def_sh_curvature);
   define("ShaderNode", "ShaderNodeShaderInfo");
   define("ShaderNode", "ShaderNodeLightInfo", def_sh_light_info);
   define("ShaderNode", "ShaderNodeScreenspaceInfo");

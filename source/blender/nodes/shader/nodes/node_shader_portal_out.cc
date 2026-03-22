@@ -121,7 +121,7 @@ void register_node_type_sh_portal_out()
   ntype.ui_description =
       "Read a named typed value from a portal input in the same shader tree";
   ntype.enum_name_legacy = "PORTAL_OUT";
-  ntype.nclass = NODE_CLASS_INPUT;
+  ntype.nclass = NODE_CLASS_LAYOUT;
   ntype.declare = file_ns::node_declare;
   ntype.draw_buttons = file_ns::node_layout;
   ntype.initfunc = file_ns::node_init;

@@ -118,7 +118,7 @@ void register_node_type_sh_portal_in()
   ntype.ui_description =
       "Store a named typed value that can be reused by portal outputs in the same shader tree";
   ntype.enum_name_legacy = "PORTAL_IN";
-  ntype.nclass = NODE_CLASS_INPUT;
+  ntype.nclass = NODE_CLASS_LAYOUT;
   ntype.declare = file_ns::node_declare;
   ntype.draw_buttons = file_ns::node_layout;
   ntype.initfunc = file_ns::node_init;

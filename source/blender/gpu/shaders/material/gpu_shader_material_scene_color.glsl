@@ -6,8 +6,12 @@ float2 scene_color_resolve_uv(float3 vector, float use_explicit_vector)
 {
   float2 uv = float2(0.0f);
 #ifdef GPU_FRAGMENT_SHADER
-  uv = (use_explicit_vector > 0.5f) ? vector.xy :
-                                      (gl_FragCoord.xy / float2(textureSize(scene_color_tx, 0)));
+  if (use_explicit_vector > 0.5f) {
+    uv = (vector.xy - uniform_buf.camera.uv_bias) / uniform_buf.camera.uv_scale;
+  }
+  else {
+    uv = gl_FragCoord.xy / float2(textureSize(scene_color_tx, 0));
+  }
 #else
   if (use_explicit_vector > 0.5f) {
     uv = vector.xy;

@@ -706,6 +706,8 @@ template<typename F> void DeferredLayerBase::npr_pass_sync(Instance &inst, F cal
   npr_ps_.bind_texture(GBUF_NORMAL_TEX_SLOT, &inst.gbuffer.normal_tx);
   npr_ps_.bind_texture(GBUF_HEADER_TEX_SLOT, &inst.gbuffer.header_tx);
   npr_ps_.bind_texture(GBUF_CLOSURE_TEX_SLOT, &inst.gbuffer.closure_tx);
+  npr_ps_.bind_texture(OBJECT_ID_TEX_SLOT, &inst.render_buffers.object_id_tx);
+  npr_ps_.bind_texture(PREPASS_NORMAL_TEX_SLOT, &inst.render_buffers.prepass_normal_tx);
   npr_ps_.bind_resources(inst.uniform_data);
   npr_ps_.bind_resources(inst.sampling);
   npr_ps_.bind_resources(inst.hiz_buffer.front);

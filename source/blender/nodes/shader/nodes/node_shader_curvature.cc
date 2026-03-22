@@ -8,6 +8,9 @@
 
 #include "node_shader_util.hh"
 
+#include "UI_interface_layout.hh"
+#include "UI_resources.hh"
+
 namespace blender {
 
 namespace nodes::node_shader_curvature_cc {
@@ -23,6 +26,16 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.add_output<decl::Float>("Scene Rim");
 }
 
+static void node_shader_init_curvature(bNodeTree * /*ntree*/, bNode *node)
+{
+  node->custom1 = 0; /* Local */
+}
+
+static void node_shader_buts_curvature(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
+{
+  layout.prop(ptr, "local", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+}
+
 static int node_shader_gpu_curvature(GPUMaterial *mat,
                                      bNode *node,
                                      bNodeExecData * /*execdata*/,
@@ -30,6 +43,10 @@ static int node_shader_gpu_curvature(GPUMaterial *mat,
                                      GPUNodeStack *out)
 {
   GPU_material_flag_set(mat, GPU_MATFLAG_DIFFUSE);
+  if (node->custom1) {
+    GPU_material_flag_set(mat, GPU_MATFLAG_RAYCAST);
+    return GPU_stack_link(mat, node, "node_screenspace_curvature_local", in, out);
+  }
   return GPU_stack_link(mat, node, "node_screenspace_curvature", in, out);
 }
 
@@ -46,8 +63,10 @@ void register_node_type_sh_curvature()
   ntype.ui_description = "Sample Goo-style screen-space curvature and rim information";
   ntype.enum_name_legacy = "CURVATURE";
   ntype.nclass = NODE_CLASS_INPUT;
+  ntype.initfunc = file_ns::node_shader_init_curvature;
+  ntype.draw_buttons = file_ns::node_shader_buts_curvature;
   ntype.declare = file_ns::node_declare;
-  ntype.add_ui_poll = object_eevee_shader_nodes_poll;
+  ntype.add_ui_poll = object_or_npr_eevee_shader_nodes_poll;
   ntype.gpu_fn = file_ns::node_shader_gpu_curvature;
 
   bke::node_register_type(ntype);
