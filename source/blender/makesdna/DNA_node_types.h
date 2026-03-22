@@ -809,6 +809,11 @@ enum NodeShaderSceneSource {
   SHD_SCENE_SOURCE_NORMAL = 2,
 };
 
+enum NodeShaderInfoShadowMode {
+  SHD_SHADER_INFO_SHADOW_STABLE = 0,
+  SHD_SHADER_INFO_SHADOW_TEMPORAL = 1,
+};
+
 enum NodeCompareMode {
   NODE_COMPARE_MODE_ELEMENT = 0,
   NODE_COMPARE_MODE_LENGTH = 1,

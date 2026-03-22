@@ -6757,6 +6757,40 @@ static void def_sh_render_info(BlenderRNA * /*brna*/, StructRNA *srna)
       srna, "Render Info Node", "Retrieve Eevee render region dimensions and normalized fragment coordinates");
 }
 
+static void def_sh_shader_info(BlenderRNA * /*brna*/, StructRNA *srna)
+{
+  static const EnumPropertyItem shadow_mode_items[] = {
+      {SHD_SHADER_INFO_SHADOW_STABLE,
+       "STABLE",
+       0,
+       "Stable",
+       "Use deterministic shadow sampling for stable grayscale masks in a single frame"},
+      {SHD_SHADER_INFO_SHADOW_TEMPORAL,
+       "TEMPORAL",
+       0,
+       "Temporal",
+       "Use Eevee's original shadow evaluation, which can rely on temporal accumulation"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+
+  PropertyRNA *prop;
+
+  prop = RNA_def_property(srna, "shadow_mode", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "custom1");
+  RNA_def_property_enum_items(prop, shadow_mode_items);
+  RNA_def_property_enum_default(prop, SHD_SHADER_INFO_SHADOW_STABLE);
+  RNA_def_property_ui_text(prop, "Shadow Mode", "How the Shadow output is evaluated");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  prop = RNA_def_property(srna, "stable_shadow_samples", PROP_INT, PROP_NONE);
+  RNA_def_property_int_sdna(prop, nullptr, "custom2");
+  RNA_def_property_range(prop, 1, 32);
+  RNA_def_property_ui_range(prop, 1, 32, 1, 3);
+  RNA_def_property_ui_text(
+      prop, "Stable Samples", "Number of fixed shadow rays used by the Stable shadow mode");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+}
+
 static void def_sh_scene_color(BlenderRNA * /*brna*/, StructRNA *srna)
 {
   static const EnumPropertyItem scene_source_items[] = {
@@ -10194,7 +10228,7 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("ShaderNode", "ShaderNodeRenderTexture", def_sh_render_texture);
   define("ShaderNode", "ShaderNodeRenderInfo", def_sh_render_info);
   define("ShaderNode", "ShaderNodeCurvature", def_sh_curvature);
-  define("ShaderNode", "ShaderNodeShaderInfo");
+  define("ShaderNode", "ShaderNodeShaderInfo", def_sh_shader_info);
   define("ShaderNode", "ShaderNodeLightInfo", def_sh_light_info);
   define("ShaderNode", "ShaderNodeScreenspaceInfo");
   define("ShaderNode", "ShaderNodeSceneColor", def_sh_scene_color);

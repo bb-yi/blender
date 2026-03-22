@@ -6,6 +6,9 @@
 
 #  if defined(NPR_SHADER) && defined(GPU_FRAGMENT_SHADER)
 
+#    define NPR_STABLE_SHADOW_RAY_COUNT 8
+#    define NPR_STABLE_SHADOW_MIN_STEP_COUNT 6
+
 bool npr_is_zero(float3 value)
 {
   return all(lessThanEqual(abs(value), float3(1e-8f)));
@@ -47,20 +50,19 @@ bool foreach_light_setup(uint l_idx,
 
   float shadow_mask = 1.0f;
   if (light.tilemap_index != LIGHT_NO_SHADOW) {
-    int ray_count = uniform_buf.shadow.ray_count;
-    int ray_step_count = uniform_buf.shadow.step_count;
-    shadow_mask = shadow_eval(light,
-                              is_directional,
-                              false,
-                              false,
-                              0.0f,
-                              g_data.P,
-                              g_data.Ng,
-                              N,
-                              0.0f,
-                              0.0f,
-                              ray_count,
-                              ray_step_count);
+    int ray_step_count = max(uniform_buf.shadow.step_count, NPR_STABLE_SHADOW_MIN_STEP_COUNT);
+    shadow_mask = shadow_eval_stable(light,
+                                     is_directional,
+                                     false,
+                                     false,
+                                     0.0f,
+                                     g_data.P,
+                                     g_data.Ng,
+                                     N,
+                                     0.0f,
+                                     0.0f,
+                                     NPR_STABLE_SHADOW_RAY_COUNT,
+                                     ray_step_count);
     shadow_mask *= dot(N, lv.L) > 0.0f ? 1.0f : 0.0f;
   }
 

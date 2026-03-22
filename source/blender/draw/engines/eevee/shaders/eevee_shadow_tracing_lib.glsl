@@ -420,6 +420,93 @@ float shadow_terminator_offset(float3 N,
   return offset_amount * shadow_terminator_normal_offset;
 }
 
+#define SHADOW_NODE_STABLE_MAX_RAY 32
+
+float2 shadow_stable_hammersley_2d(int sample_index, int sample_count, float2 rotation)
+{
+  return fract(hammersley_2d(sample_index, sample_count) + rotation);
+}
+
+/**
+ * Deterministic shadow evaluation for node outputs that need stable grayscale penumbra values in
+ * a single frame, without relying on Eevee's temporal accumulation.
+ */
+float shadow_eval_stable(LightData light,
+                         const bool is_directional,
+                         const bool is_transmission,
+                         bool is_translucent_with_thickness,
+                         float thickness,
+                         float3 P,
+                         float3 Ng,
+                         float3 N,
+                         float terminator_normal_offset,
+                         float terminator_geometry_offset,
+                         int ray_count,
+                         int ray_step_count)
+{
+  int stable_ray_count = clamp(ray_count, 1, SHADOW_NODE_STABLE_MAX_RAY);
+  int stable_step_count = clamp(ray_step_count, 1, SHADOW_MAX_STEP);
+
+  float distance_to_shadow;
+  float3 L;
+  if (is_directional) {
+    L = light_z_axis(light);
+  }
+  else {
+    L = light_position_get(light) + light.local().local.shadow_position - P;
+    L = normalize_and_get_length(L, distance_to_shadow);
+  }
+
+  bool is_facing_light = (dot(Ng, L) > 0.0f);
+  float3 N_bias = (is_transmission && !is_facing_light) ? reflect(Ng, L) : Ng;
+  float texel_radius = shadow_texel_radius_at_position(light, is_directional, P);
+
+  float3 P_base = P;
+  if (is_transmission && !is_facing_light) {
+    P_base += abs(is_directional ? thickness : min(thickness, distance_to_shadow - 0.01f)) * L;
+  }
+
+  P_base = offset_ray(P_base, N_bias);
+  P_base += N_bias * shadow_normal_offset(Ng, L, texel_radius);
+  P_base += N * shadow_terminator_offset(
+                    N, L, terminator_normal_offset, terminator_geometry_offset);
+
+  float3 lNg = light_world_to_local_direction(light, Ng);
+  lNg = (is_transmission) ? -lNg : lNg;
+  lNg = (is_transmission && is_translucent_with_thickness) ? float3(0.0f) : lNg;
+
+  float surface_hit = 0.0f;
+  for (int ray_index = 0; ray_index < SHADOW_NODE_STABLE_MAX_RAY; ray_index++) {
+    if (ray_index >= stable_ray_count) {
+      break;
+    }
+
+    float2 ray_tap = shadow_stable_hammersley_2d(
+        ray_index, stable_ray_count, float2(0.0f, 0.0f));
+    float2 pcf_tap = shadow_stable_hammersley_2d(
+        ray_index, stable_ray_count, float2(0.5f, 0.25f));
+    float3 P_sample = P_base +
+                      (light.filter_radius * texel_radius) * shadow_pcf_offset(L, Ng, pcf_tap);
+    float3 lP = is_directional ? light_world_to_local_direction(light, P_sample) :
+                                 light_world_to_local_point(light, P_sample);
+
+    bool has_hit;
+    if (is_directional) {
+      ShadowRayDirectional clip_ray = shadow_ray_generate_directional(
+          light, ray_tap, lP, lNg, texel_radius);
+      has_hit = shadow_map_trace(clip_ray, stable_step_count, 0.5f);
+    }
+    else {
+      ShadowRayPunctual clip_ray = shadow_ray_generate_punctual(light, ray_tap, lP, lNg);
+      has_hit = shadow_map_trace(clip_ray, stable_step_count, 0.5f);
+    }
+
+    surface_hit += float(has_hit);
+  }
+
+  return saturate(1.0f - surface_hit / float(stable_ray_count));
+}
+
 /**
  * Evaluate shadowing by casting rays toward the light direction.
  * Returns light visibility.

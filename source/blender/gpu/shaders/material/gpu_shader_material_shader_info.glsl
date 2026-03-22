@@ -7,6 +7,9 @@ bool shader_info_is_zero(float3 value)
   return all(lessThanEqual(abs(value), float3(1e-8f)));
 }
 
+#define SHADER_INFO_STABLE_SHADOW_MAX_RAY_COUNT 32
+#define SHADER_INFO_STABLE_SHADOW_MIN_STEP_COUNT 6
+
 float shader_info_max_component(float3 value)
 {
   return max(value.x, max(value.y, value.z));
@@ -33,26 +36,45 @@ float shader_info_shadow_visibility(LightData light,
                                     float3 geometry_normal,
                                     float3 shading_normal,
                                     float normal_offset,
-                                    float geometry_offset)
+                                    float geometry_offset,
+                                    float shadow_mode,
+                                    float stable_shadow_samples)
 {
   if (light.tilemap_index == LIGHT_NO_SHADOW) {
     return 1.0f;
   }
 
-  int ray_count = uniform_buf.shadow.ray_count;
-  int ray_step_count = uniform_buf.shadow.step_count;
-  return shadow_eval(light,
-                     is_directional,
-                     false,
-                     false,
-                     0.0f,
-                     position,
-                     geometry_normal,
-                     shading_normal,
-                     normal_offset,
-                     geometry_offset,
-                     ray_count,
-                     ray_step_count);
+  if (shadow_mode > 0.5f) {
+    return shadow_eval(light,
+                       is_directional,
+                       false,
+                       false,
+                       0.0f,
+                       position,
+                       geometry_normal,
+                       shading_normal,
+                       normal_offset,
+                       geometry_offset,
+                       uniform_buf.shadow.ray_count,
+                       uniform_buf.shadow.step_count);
+  }
+
+  int ray_step_count = max(uniform_buf.shadow.step_count, SHADER_INFO_STABLE_SHADOW_MIN_STEP_COUNT);
+  int stable_ray_count = clamp(int(stable_shadow_samples + 0.5f),
+                               1,
+                               SHADER_INFO_STABLE_SHADOW_MAX_RAY_COUNT);
+  return shadow_eval_stable(light,
+                            is_directional,
+                            false,
+                            false,
+                            0.0f,
+                            position,
+                            geometry_normal,
+                            shading_normal,
+                            normal_offset,
+                            geometry_offset,
+                            stable_ray_count,
+                            ray_step_count);
 }
 
 bool shader_info_is_world_sun_light(uint light_index, LightData light, bool is_local)
@@ -80,6 +102,8 @@ bool shader_info_is_world_sun_light(uint light_index, LightData light, bool is_l
 [[node]]
 void node_shader_info(float3 position,
                       float3 normal_in,
+                      float shadow_mode,
+                      float stable_shadow_samples,
                       out float4 diffuse_shading,
                       out float shadow,
                       out float4 ambient_lighting,
@@ -152,7 +176,9 @@ void node_shader_info(float3 position,
                                                        geometry_normal,
                                                        shading_normal,
                                                        normal_offset,
-                                                       geometry_offset);
+                                                       geometry_offset,
+                                                       shadow_mode,
+                                                       stable_shadow_samples);
       float shadow_visibility = visibility * surface_attenuation;
       visibility_sum += shadow_visibility * light_weight;
       shadow_weight_sum += light_weight;
