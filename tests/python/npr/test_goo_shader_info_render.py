@@ -60,12 +60,55 @@ def make_shader_info_material(name, output_name):
     return material
 
 
+def make_shader_info_material_with_normal(name, output_name, normal_xyz):
+    material = bpy.data.materials.new(name)
+    material.use_nodes = True
+
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+    nodes.clear()
+
+    output = nodes.new("ShaderNodeOutputMaterial")
+    output.location = (620.0, 0.0)
+
+    emission = nodes.new("ShaderNodeEmission")
+    emission.location = (420.0, 0.0)
+    emission.inputs["Strength"].default_value = 1.0
+
+    shader_info = nodes.new("ShaderNodeShaderInfo")
+    shader_info.location = (200.0, 0.0)
+
+    normal_value = nodes.new("ShaderNodeCombineXYZ")
+    normal_value.location = (0.0, -120.0)
+    normal_value.inputs["X"].default_value = normal_xyz[0]
+    normal_value.inputs["Y"].default_value = normal_xyz[1]
+    normal_value.inputs["Z"].default_value = normal_xyz[2]
+
+    links.new(normal_value.outputs["Vector"], shader_info.inputs["Normal"])
+    links.new(shader_info.outputs[output_name], emission.inputs["Color"])
+    links.new(emission.outputs["Emission"], output.inputs["Surface"])
+    return material
+
+
 def make_plane(material):
     bpy.ops.mesh.primitive_plane_add(size=8.0, location=(0.0, 0.0, 0.0))
     plane = bpy.context.active_object
     plane.name = "ShaderInfoPlane"
     plane.data.materials.append(material)
     return plane
+
+
+def make_sphere(material):
+    bpy.ops.mesh.primitive_uv_sphere_add(
+        radius=1.5,
+        location=(0.0, 0.0, 0.0),
+        segments=128,
+        ring_count=64,
+    )
+    sphere = bpy.context.active_object
+    sphere.name = "ShaderInfoSphere"
+    sphere.data.materials.append(material)
+    return sphere
 
 
 def make_blocker():
@@ -83,6 +126,27 @@ def make_light():
     light_data.use_shadow = True
     light = bpy.data.objects.new("ShaderInfoPoint", light_data)
     light.location = (-4.0, 0.0, 4.0)
+    bpy.context.scene.collection.objects.link(light)
+    return light
+
+
+def make_centered_point_light():
+    light_data = bpy.data.lights.new("ShaderInfoPointCentered", type="POINT")
+    light_data.energy = 5000.0
+    light_data.shadow_soft_size = 0.05
+    light_data.use_shadow = True
+    light = bpy.data.objects.new("ShaderInfoPointCentered", light_data)
+    light.location = (-4.0, 0.0, 4.0)
+    bpy.context.scene.collection.objects.link(light)
+    return light
+
+
+def make_sun_light():
+    light_data = bpy.data.lights.new("ShaderInfoSun", type="SUN")
+    light_data.energy = 5.0
+    light_data.use_shadow = True
+    light = bpy.data.objects.new("ShaderInfoSun", light_data)
+    light.rotation_euler = (0.0, 0.78539816339, 0.0)
     bpy.context.scene.collection.objects.link(light)
     return light
 
@@ -177,6 +241,26 @@ def assert_diffuse_response():
     assert lit[0] > 0.2, f"Diffuse shading should not stay black under direct light, got {lit}"
 
 
+def assert_unshadowed_response(output_name, min_value=0.2, tolerance=0.05):
+    build_scene(output_name, with_light=True, with_blocker=True)
+    blocked_pixels, blocked_width, blocked_height = render_image()
+    blocked = sample_world_point(blocked_pixels, blocked_width, blocked_height, 1.4, 0.0)
+
+    build_scene(output_name, with_light=True, with_blocker=False)
+    clear_pixels, clear_width, clear_height = render_image()
+    unblocked = sample_world_point(clear_pixels, clear_width, clear_height, 1.4, 0.0)
+
+    assert unblocked[0] > min_value, (
+        f"{output_name} should produce visible lighting without the blocker, got {unblocked}"
+    )
+    assert blocked[0] > min_value, (
+        f"{output_name} should remain lit even in the blocker region, got {blocked}"
+    )
+    assert abs(blocked[0] - unblocked[0]) < tolerance, (
+        f"{output_name} should ignore shadowing, got blocked={blocked} unblocked={unblocked}"
+    )
+
+
 def assert_shadow_response(output_name):
     build_scene(output_name, with_light=True, with_blocker=True)
     pixels, width, height = render_image()
@@ -213,9 +297,95 @@ def assert_world_sun_black(output_name):
     )
 
 
+def assert_half_lambert_lifts_negative_ndotl():
+    clear_scene()
+    configure_scene()
+    make_camera()
+    make_plane(
+        make_shader_info_material_with_normal(
+            "HalfLambertNegativeNdotLMaterial",
+            "Half-Lambert Factor",
+            (1.0, 0.0, 0.0),
+        )
+    )
+    make_centered_point_light()
+    half_pixels, half_width, half_height = render_image()
+    half_value = sample_world_point(half_pixels, half_width, half_height, 0.0, 0.0)
+
+    clear_scene()
+    configure_scene()
+    make_camera()
+    make_plane(
+        make_shader_info_material_with_normal(
+            "DiffuseNegativeNdotLMaterial",
+            "Diffuse Shading",
+            (1.0, 0.0, 0.0),
+        )
+    )
+    make_centered_point_light()
+    diffuse_pixels, diffuse_width, diffuse_height = render_image()
+    diffuse_value = sample_world_point(diffuse_pixels, diffuse_width, diffuse_height, 0.0, 0.0)
+
+    assert half_value[0] > 0.1, (
+        f"Half-Lambert should stay above black for negative NdotL, got {half_value}"
+    )
+    assert diffuse_value[0] < 0.05, (
+        f"Diffuse Shading should stay near black for negative NdotL, got {diffuse_value}"
+    )
+
+
+def assert_half_lambert_gradient_on_sphere():
+    clear_scene()
+    configure_scene()
+    make_camera()
+    make_sphere(make_shader_info_material("HalfLambertSphereMaterial", "Half-Lambert Factor"))
+    make_light()
+
+    pixels, width, height = render_image()
+    bright_side = sample_world_point(pixels, width, height, -1.0, 0.0)
+    center = sample_world_point(pixels, width, height, 0.0, 0.0)
+    dark_side = sample_world_point(pixels, width, height, 1.0, 0.0)
+
+    assert bright_side[0] > center[0] > dark_side[0], (
+        "Half-Lambert should form a smooth light-to-dark gradient across the sphere, "
+        f"got bright={bright_side} center={center} dark={dark_side}"
+    )
+    assert dark_side[0] > 0.1, (
+        f"Half-Lambert dark side should stay above black unless fully opposite, got {dark_side}"
+    )
+
+
+def assert_diffuse_sun_gradient_on_sphere():
+    clear_scene()
+    configure_scene()
+    make_camera()
+    make_sphere(make_shader_info_material("DiffuseSunSphereMaterial", "Diffuse Shading"))
+    make_sun_light()
+
+    pixels, width, height = render_image()
+    dark_side = sample_world_point(pixels, width, height, -1.0, 0.0)
+    lower_mid = sample_world_point(pixels, width, height, -0.5, 0.0)
+    center = sample_world_point(pixels, width, height, 0.0, 0.0)
+    upper_mid = sample_world_point(pixels, width, height, 0.5, 0.0)
+    bright_side = sample_world_point(pixels, width, height, 1.0, 0.0)
+
+    assert 0.0 <= dark_side[0] < lower_mid[0] < center[0] < upper_mid[0] < bright_side[0], (
+        "Diffuse Shading under a single Sun light should stay as a smooth Goo-style gradient, "
+        f"got dark={dark_side} lower_mid={lower_mid} center={center} "
+        f"upper_mid={upper_mid} bright={bright_side}"
+    )
+
+
 assert hasattr(bpy.types, "ShaderNodeShaderInfo"), "ShaderNodeShaderInfo is not registered"
 
 assert_diffuse_response()
+assert_diffuse_sun_gradient_on_sphere()
+assert_unshadowed_response("Diffuse Shading", min_value=0.2, tolerance=0.05)
+assert_no_light_black("Diffuse Shading")
+assert_world_sun_black("Diffuse Shading")
+assert_unshadowed_response("Half-Lambert Factor", min_value=0.2, tolerance=0.05)
+assert_half_lambert_lifts_negative_ndotl()
+assert_half_lambert_gradient_on_sphere()
 assert_shadow_response("Shadow")
 assert_no_light_black("Shadow")
 assert_no_light_black("Half-Lambert Factor")

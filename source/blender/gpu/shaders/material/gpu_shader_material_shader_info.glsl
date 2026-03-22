@@ -95,7 +95,7 @@ void node_shader_info(float3 position,
   float normal_offset = object_infos.shadow_terminator_normal_offset;
   float geometry_offset = object_infos.shadow_terminator_geometry_offset;
 
-  float3 direct_light = float3(0.0f);
+  float3 diffuse_shading_sum = float3(0.0f);
   float visibility_sum = 0.0f;
   float shadow_weight_sum = 0.0f;
   float half_lambert_sum = 0.0f;
@@ -121,39 +121,46 @@ void node_shader_info(float3 position,
 
     LightVector lv = light_vector_get(light, is_directional, position);
     bool is_world_sun = shader_info_is_world_sun_light(l_idx, light, is_local);
-
     float surface_attenuation = light_attenuation_surface(light, is_directional, lv);
-    if (surface_attenuation < LIGHT_ATTENUATION_THRESHOLD) {
+    float diffuse_power = light_power_get(light, LIGHT_DIFFUSE);
+    if (diffuse_power < LIGHT_ATTENUATION_THRESHOLD) {
       continue;
     }
+
+    if (is_world_sun) {
+      continue;
+    }
+
+    float light_weight = diffuse_power * shader_info_max_component(light.color);
+    float ndotl = dot(shading_normal, lv.L);
+    float lambert = saturate(ndotl);
+    float half_lambert = saturate(ndotl * 0.5f + 0.5f);
 
     float4 ltc_mat = float4(1.0f, 0.0f, 0.0f, 1.0f);
-    float diffuse_attenuation = surface_attenuation;
-    diffuse_attenuation *= light_attenuation_facing(
-        light, lv.L, lv.dist, shading_normal, false);
-    diffuse_attenuation *= light_ltc(utility_tx, light, shading_normal, view_vector, lv, ltc_mat);
-    diffuse_attenuation *= light_power_get(light, LIGHT_DIFFUSE);
-    if (diffuse_attenuation < LIGHT_ATTENUATION_THRESHOLD) {
-      continue;
-    }
+    float diffuse_radiance = light_ltc(utility_tx, light, shading_normal, view_vector, lv, ltc_mat);
 
-    float visibility = shader_info_shadow_visibility(
-        light, is_directional, position, geometry_normal, shading_normal, normal_offset, geometry_offset);
-    float light_weight = diffuse_attenuation * shader_info_max_component(light.color);
+    /* Match Goo's Shader Info structure: direct diffuse uses the light's diffuse radiance
+     * without extra shadow masking or display remapping. */
+    diffuse_shading_sum += light.color * diffuse_power * diffuse_radiance;
+    half_lambert_sum += half_lambert * light_weight;
+    half_lambert_weight_sum += light_weight;
 
-    direct_light += light.color * diffuse_attenuation * visibility;
-    if (!is_world_sun) {
-      visibility_sum += visibility * light_weight;
+    if (surface_attenuation > LIGHT_ATTENUATION_THRESHOLD) {
+      float visibility = shader_info_shadow_visibility(light,
+                                                       is_directional,
+                                                       position,
+                                                       geometry_normal,
+                                                       shading_normal,
+                                                       normal_offset,
+                                                       geometry_offset);
+      float shadow_visibility = visibility * surface_attenuation;
+      visibility_sum += shadow_visibility * light_weight;
       shadow_weight_sum += light_weight;
-
-      float half_lambert = saturate(dot(shading_normal, lv.L) * 0.5f + 0.5f);
-      half_lambert_sum += half_lambert * light_weight;
-      half_lambert_weight_sum += light_weight;
     }
   }
   LIGHT_FOREACH_ALL_END();
 
-  diffuse_shading = float4(direct_light, 1.0f);
+  diffuse_shading = float4(diffuse_shading_sum, 1.0f);
   shadow = (shadow_weight_sum > 1e-8f) ? saturate(visibility_sum / shadow_weight_sum) : 0.0f;
 
 #  ifdef SPHERE_PROBE
