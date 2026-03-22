@@ -211,8 +211,9 @@ static void search_link_ops_for_asset_metadata(const bNodeTree &node_tree,
          [&asset, &socket_property, in_out](nodes::LinkSearchOpParams &params) {
            Main &bmain = *CTX_data_main(&params.C);
 
-           bNodeTree *group = reinterpret_cast<bNodeTree *>(
-               asset::asset_local_id_ensure_imported(bmain, asset));
+           /* Match the add-menu behavior and append a fresh editable template copy. */
+           bNodeTree *group = reinterpret_cast<bNodeTree *>(asset::asset_local_id_ensure_imported(
+               bmain, asset, 0, ASSET_IMPORT_APPEND));
            if (!group) {
              return;
            }

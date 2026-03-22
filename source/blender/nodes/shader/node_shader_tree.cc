@@ -44,6 +44,7 @@
 #include "UI_resources.hh"
 
 #include "NOD_shader.h"
+#include "NOD_shader_nodes_inline.hh"
 
 #include "node_common.h"
 #include "node_exec.hh"
@@ -1056,7 +1057,11 @@ bNodeTree *ntreeGPUNPRNodes(bNodeTree *material_tree, GPUMaterial *mat)
     return nullptr;
   }
 
-  bNodeTree *localtree = bke::node_tree_localize(npr_tree, nullptr);
+  bNodeTree *localtree = bke::node_tree_add_tree(nullptr, "NPRShaderTree Inlined", npr_tree->idname);
+  nodes::InlineShaderNodeTreeParams inline_params;
+  inline_params.allow_preserving_repeat_zones = true;
+  nodes::inline_shader_node_tree(*npr_tree, *localtree, inline_params);
+
   bNodeTreeExec *exec = ntreeShaderBeginExecTree(localtree);
 
   if (bNode *npr_output = ntreeShaderNPROutputNode(localtree)) {

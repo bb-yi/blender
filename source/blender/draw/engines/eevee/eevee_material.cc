@@ -421,13 +421,10 @@ Material &MaterialModule::material_sync(Object *ob,
             ob, blender_mat, MAT_PIPE_PREPASS_DEFERRED, geometry_type, MAT_PROBE_REFLECTION);
         mat.lightprobe_sphere_shading = material_pass_get(
             ob, blender_mat, MAT_PIPE_DEFERRED, geometry_type, MAT_PROBE_REFLECTION);
-        mat.lightprobe_sphere_npr = has_npr_tree ?
-                                        material_pass_get(ob,
-                                                          blender_mat,
-                                                          MAT_PIPE_DEFERRED_NPR,
-                                                          geometry_type,
-                                                          MAT_PROBE_REFLECTION) :
-                                        MaterialPass();
+        /* Reflection probes cache indirect lighting, not the camera-facing NPR presentation pass.
+         * Running NPR trees during capture is unreliable because several NPR inputs are only valid
+         * in the main camera shading path, which can skew or over-brighten probe reflections. */
+        mat.lightprobe_sphere_npr = MaterialPass();
       }
       else {
         mat.lightprobe_sphere_prepass = MaterialPass();
@@ -440,10 +437,7 @@ Material &MaterialModule::material_sync(Object *ob,
             ob, blender_mat, MAT_PIPE_PREPASS_PLANAR, geometry_type, MAT_PROBE_PLANAR);
         mat.planar_probe_shading = material_pass_get(
             ob, blender_mat, MAT_PIPE_DEFERRED, geometry_type, MAT_PROBE_PLANAR);
-        mat.planar_probe_npr = has_npr_tree ?
-                                   material_pass_get(
-                                       ob, blender_mat, MAT_PIPE_DEFERRED_NPR, geometry_type, MAT_PROBE_PLANAR) :
-                                   MaterialPass();
+        mat.planar_probe_npr = MaterialPass();
       }
       else {
         mat.planar_probe_prepass = MaterialPass();

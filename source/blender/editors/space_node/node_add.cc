@@ -478,8 +478,10 @@ static bool add_node_group_asset(const bContext &C,
   SpaceNode &snode = *CTX_wm_space_node(&C);
   bNodeTree &edit_tree = *snode.edittree;
 
-  bNodeTree *node_group = reinterpret_cast<bNodeTree *>(
-      asset::asset_local_id_ensure_imported(bmain, asset));
+  /* Node group assets are editable templates. Always append a fresh local copy so old in-file
+   * versions don't get silently reused, which is especially important after NPR asset fixes. */
+  bNodeTree *node_group = reinterpret_cast<bNodeTree *>(asset::asset_local_id_ensure_imported(
+      bmain, asset, 0, ASSET_IMPORT_APPEND));
   if (!node_group) {
     return false;
   }
@@ -567,7 +569,7 @@ static wmOperatorStatus node_swap_group_asset_invoke(bContext *C,
     return OPERATOR_CANCELLED;
   }
   bNodeTree *node_group = reinterpret_cast<bNodeTree *>(
-      asset::asset_local_id_ensure_imported(bmain, *asset));
+      asset::asset_local_id_ensure_imported(bmain, *asset, 0, ASSET_IMPORT_APPEND));
   if (!node_group) {
     return OPERATOR_CANCELLED;
   }

@@ -23,6 +23,26 @@ namespace blender {
 
 /**** GROUP ****/
 
+static void *group_initexec(bNodeExecContext *context, bNode *node, bNodeInstanceKey key)
+{
+  bNodeTree *ngroup = id_cast<bNodeTree *>(node->id);
+  if (!ngroup) {
+    return nullptr;
+  }
+
+  return ntreeShaderBeginExecTree_internal(context, ngroup, key);
+}
+
+static void group_freeexec(void *nodedata)
+{
+  bNodeTreeExec *gexec = static_cast<bNodeTreeExec *>(nodedata);
+  if (!gexec) {
+    return;
+  }
+
+  ntreeShaderEndExecTree_internal(gexec);
+}
+
 static void group_gpu_copy_inputs(bNode *gnode, GPUNodeStack *in, bNodeStack *gstack)
 {
   bNodeTree *ngroup = id_cast<bNodeTree *>(gnode->id);
@@ -67,8 +87,12 @@ static int gpu_group_execute(
 {
   bNodeTreeExec *exec = static_cast<bNodeTreeExec *>(execdata->data);
 
-  if (!node->id) {
+  if (!node->id || !exec) {
     return 0;
+  }
+
+  for (bNode &inode : exec->nodetree->nodes) {
+    inode.runtime->need_exec = 1;
   }
 
   group_gpu_copy_inputs(node, in, exec->stack);
@@ -100,6 +124,8 @@ void register_node_type_sh_group()
   bke::node_type_size(ntype, GROUP_NODE_DEFAULT_WIDTH, GROUP_NODE_MIN_WIDTH, GROUP_NODE_MAX_WIDTH);
   ntype.labelfunc = node_group_label;
   ntype.declare = nodes::node_group_declare;
+  ntype.init_exec_fn = group_initexec;
+  ntype.free_exec_fn = group_freeexec;
   ntype.gpu_fn = gpu_group_execute;
 
   bke::node_register_type(ntype);
@@ -115,6 +141,8 @@ void register_node_type_sh_custom_group(bke::bNodeType *ntype)
     ntype->insert_link = node_insert_link_default;
   }
   ntype->declare = nodes::node_group_declare;
+  ntype->init_exec_fn = group_initexec;
+  ntype->free_exec_fn = group_freeexec;
   ntype->gpu_fn = gpu_group_execute;
 }
 

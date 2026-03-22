@@ -304,6 +304,7 @@ class ShaderNodesInliner {
     };
 
     Vector<SocketInContext> output_sockets;
+    const bool is_npr_tree = !src_tree_.nodes_by_type("ShaderNodeNPR_Output").is_empty();
     auto add_output_type = [&](const char *output_type) {
       for (const TreeInContext &tree : trees) {
         const bke::bNodeTreeZones &zones = *tree->zones();
@@ -322,6 +323,12 @@ class ShaderNodesInliner {
         }
       }
     };
+
+    if (is_npr_tree) {
+      add_output_type("ShaderNodeNPR_Output");
+      add_output_type("ShaderNodeOutputAOV");
+      return output_sockets;
+    }
 
     /* owner_id can be null for DefaultSurfaceNodeTree. */
     ID_Type tree_type = src_tree_.owner_id ? GS(src_tree_.owner_id->name) : ID_MA;
@@ -346,6 +353,10 @@ class ShaderNodesInliner {
       case ID_LA:
         add_output_type("ShaderNodeOutputLight");
         break;
+      case ID_NT:
+        add_output_type("ShaderNodeNPR_Output");
+        add_output_type("ShaderNodeOutputAOV");
+        break;
       default:
         BLI_assert_unreachable();
     }
@@ -357,7 +368,7 @@ class ShaderNodesInliner {
                                                                   const bNodeTree &tree,
                                                                   Vector<TreeInContext> &r_trees)
   {
-    const bke::bNodeTreeZones *zones = src_tree_.zones();
+    const bke::bNodeTreeZones *zones = tree.zones();
     if (!zones) {
       return;
     }
