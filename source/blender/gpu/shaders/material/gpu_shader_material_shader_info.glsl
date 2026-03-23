@@ -109,7 +109,7 @@ void node_shader_info(float3 position,
                       out float4 ambient_lighting,
                       out float half_lambert_factor)
 {
-#if defined(GPU_FRAGMENT_SHADER) && (defined(MAT_DEFERRED) || defined(MAT_FORWARD))
+#if defined(GPU_FRAGMENT_SHADER) && (defined(MAT_DEFERRED) || defined(MAT_FORWARD) || defined(NPR_SHADER))
   float3 shading_normal = shader_info_resolve_normal(normal_in);
   float3 geometry_normal = shader_info_resolve_normal(g_data.Ng);
   float3 view_vector = drw_world_incident_vector(position);

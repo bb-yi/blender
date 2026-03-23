@@ -230,6 +230,8 @@ ShaderGroups ShaderModule::static_shaders_load(const ShaderGroups request_bits,
                                        SHADOW_PAGE_DEFRAG,
                                        SHADOW_PAGE_FREE,
                                        SHADOW_PAGE_MASK,
+                                       SHADOW_MASK_FILTER,
+                                       SHADOW_MASK_FILTER_LAYERED,
                                        SHADOW_PAGE_TILE_CLEAR,
                                        SHADOW_PAGE_TILE_STORE,
                                        SHADOW_TILEMAP_AMEND,
@@ -508,6 +510,10 @@ const char *ShaderModule::static_shader_create_info_name_get(eShaderType shader_
       return "eevee_shadow_clipmap_clear";
     case SHADOW_DEBUG:
       return "eevee_shadow_debug";
+    case SHADOW_MASK_FILTER:
+      return "eevee_shadow_mask_filter";
+    case SHADOW_MASK_FILTER_LAYERED:
+      return "eevee_shadow_mask_filter_layered";
     case SHADOW_PAGE_ALLOCATE:
       return "eevee_shadow_page_allocate";
     case SHADOW_PAGE_CLEAR:
@@ -896,13 +902,13 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   }
 
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) &&
-      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD))
+      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD))
   {
     info.additional_info("eevee_light_data");
     info.additional_info("eevee_shadow_data");
   }
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) &&
-      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD))
+      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD))
   {
     info.additional_info("eevee_lightprobe_data");
   }
@@ -1228,12 +1234,12 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       dependencies.append("eevee_ambient_occlusion_lib.glsl");
     }
     if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) &&
-        ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD))
+        ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD))
     {
       dependencies.append("eevee_light_eval_lib.glsl");
     }
     if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) &&
-        ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD))
+        ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD))
     {
       dependencies.append("eevee_lightprobe_eval_lib.glsl");
     }

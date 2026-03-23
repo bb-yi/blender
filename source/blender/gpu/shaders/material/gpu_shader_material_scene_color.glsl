@@ -35,6 +35,19 @@ float4 scene_normal_resolve(float2 uv)
   return texture(rp_color_tx, float3(uv, float(uniform_buf.render_pass.normal_id)));
 }
 
+float4 scene_shadow_resolve(float2 uv)
+{
+  if (uniform_buf.render_pass.shadow_id < 0) {
+    return float4(1.0f);
+  }
+#ifdef MAT_FILTER
+  float visibility = texture(scene_shadow_tx, uv).r;
+#else
+  float visibility = texture(rp_value_tx, float3(uv, float(uniform_buf.render_pass.shadow_id))).r;
+#endif
+  return float4(visibility, visibility, visibility, 1.0f);
+}
+
 [[node]]
 void node_scene_color(float3 vector,
                       float use_explicit_vector,
@@ -53,9 +66,13 @@ void node_scene_color(float3 vector,
     color = float4(depth, depth, depth, 1.0f);
     alpha = depth;
   }
-  else {
+  else if (source < 2.5f) {
     color = scene_normal_resolve(uv);
     alpha = (uniform_buf.render_pass.normal_id >= 0) ? 1.0f : 0.0f;
+  }
+  else {
+    color = scene_shadow_resolve(uv);
+    alpha = 1.0f;
   }
 }
 

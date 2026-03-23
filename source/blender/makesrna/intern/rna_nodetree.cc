@@ -6764,12 +6764,14 @@ static void def_sh_shader_info(BlenderRNA * /*brna*/, StructRNA *srna)
        "STABLE",
        0,
        "Stable",
-       "Use deterministic shadow sampling for stable grayscale masks in a single frame"},
+       "Use the special deterministic shadow sampling path for stable grayscale masks in a "
+       "single frame"},
       {SHD_SHADER_INFO_SHADOW_TEMPORAL,
        "TEMPORAL",
        0,
-       "Temporal",
-       "Use Eevee's original shadow evaluation, which can rely on temporal accumulation"},
+       "Built-in",
+       "Use Eevee's built-in shadow evaluation. This is the default behavior and best matches "
+       "normal material shading"},
       {0, nullptr, 0, nullptr, nullptr},
   };
 
@@ -6778,7 +6780,7 @@ static void def_sh_shader_info(BlenderRNA * /*brna*/, StructRNA *srna)
   prop = RNA_def_property(srna, "shadow_mode", PROP_ENUM, PROP_NONE);
   RNA_def_property_enum_sdna(prop, nullptr, "custom1");
   RNA_def_property_enum_items(prop, shadow_mode_items);
-  RNA_def_property_enum_default(prop, SHD_SHADER_INFO_SHADOW_STABLE);
+  RNA_def_property_enum_default(prop, SHD_SHADER_INFO_SHADOW_TEMPORAL);
   RNA_def_property_ui_text(prop, "Shadow Mode", "How the Shadow output is evaluated");
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
 
@@ -6786,8 +6788,9 @@ static void def_sh_shader_info(BlenderRNA * /*brna*/, StructRNA *srna)
   RNA_def_property_int_sdna(prop, nullptr, "custom2");
   RNA_def_property_range(prop, 1, 32);
   RNA_def_property_ui_range(prop, 1, 32, 1, 3);
-  RNA_def_property_ui_text(
-      prop, "Stable Samples", "Number of fixed shadow rays used by the Stable shadow mode");
+  RNA_def_property_ui_text(prop,
+                           "Stable Samples",
+                           "Number of fixed shadow rays used by the Stable mode");
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
 }
 
@@ -6809,6 +6812,11 @@ static void def_sh_scene_color(BlenderRNA * /*brna*/, StructRNA *srna)
        0,
        "Normal",
        "Sample the Eevee scene normal render pass"},
+      {SHD_SCENE_SOURCE_SHADOW,
+       "SHADOW",
+       0,
+       "Shadow",
+       "Sample the Eevee scene shadow render pass"},
       {0, nullptr, 0, nullptr, nullptr},
   };
 

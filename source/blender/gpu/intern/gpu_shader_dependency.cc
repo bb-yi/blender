@@ -351,10 +351,20 @@ struct GPUSource {
     using namespace shader;
     /* Auto dependency injection for debug capabilities. */
     if (flag_is_set(builtins, BuiltinBits::USE_PRINTF)) {
-      dependencies.append_non_duplicates(dict.lookup("gpu_shader_print_lib.glsl"));
+      GPUSource *printf_source = dict.lookup_default("gpu_shader_print_lib.glsl", nullptr);
+      if (printf_source == nullptr) {
+        print_error(source, 0, "Auto dependency not found : gpu_shader_print_lib.glsl");
+        return 1;
+      }
+      dependencies.append_non_duplicates(printf_source);
     }
     if (flag_is_set(builtins, BuiltinBits::USE_DEBUG_DRAW)) {
-      dependencies.append_non_duplicates(dict.lookup("draw_debug_draw_lib.glsl"));
+      GPUSource *debug_draw_source = dict.lookup_default("draw_debug_draw_lib.glsl", nullptr);
+      if (debug_draw_source == nullptr) {
+        print_error(source, 0, "Auto dependency not found : draw_debug_draw_lib.glsl");
+        return 1;
+      }
+      dependencies.append_non_duplicates(debug_draw_source);
     }
 
     for (auto dependency_name : dependencies_names) {
@@ -414,6 +424,10 @@ struct GPUSource {
 
     if (!flag_is_set(this->builtins, shader::BuiltinBits::RUNTIME_GENERATED)) {
       for (const auto &dependency : this->dependencies) {
+        if (dependency == nullptr) {
+          std::cerr << "Null dependency in shader source : " << this->filename << std::endl;
+          return;
+        }
         /* WATCH: Recursive. */
         dependency->source_get(result, generated_sources, dict, *this);
       }

@@ -17,7 +17,7 @@ namespace blender {
 
 namespace nodes::node_shader_shader_info_cc {
 
-static constexpr int stable_shadow_sample_default = 32;
+static constexpr int stable_shadow_sample_default = 8;
 static constexpr int stable_shadow_sample_fallback = 8;
 static constexpr int stable_shadow_sample_max = 32;
 
@@ -35,14 +35,15 @@ static void node_declare(NodeDeclarationBuilder &b)
 
 static void node_shader_init_shader_info(bNodeTree * /*ntree*/, bNode *node)
 {
-  node->custom1 = SHD_SHADER_INFO_SHADOW_STABLE;
+  node->custom1 = SHD_SHADER_INFO_SHADOW_TEMPORAL;
   node->custom2 = stable_shadow_sample_default;
 }
 
 static void node_shader_buts(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
 {
   layout.prop(ptr, "shadow_mode", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
-  if (RNA_enum_get(ptr, "shadow_mode") == SHD_SHADER_INFO_SHADOW_STABLE) {
+  const int shadow_mode = RNA_enum_get(ptr, "shadow_mode");
+  if (shadow_mode == SHD_SHADER_INFO_SHADOW_STABLE) {
     layout.prop(ptr, "stable_shadow_samples", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
   }
 }

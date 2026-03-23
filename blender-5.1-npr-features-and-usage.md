@@ -135,6 +135,9 @@
 - `Color`
 - `Depth`
 - `Normal`
+- `Shadow`
+
+`Shadow` 会读取 Eevee 的阴影渲染通道，输出 0-1 灰度阴影值，可直接用于 Toon 分层、阈值、混合等滤镜处理。
 
 #### 输入输出
 
@@ -352,8 +355,8 @@
   - 每个灯光的兰伯特光照之和,再钳制到0-1
 - `Shadow`
   - 可切换阴影模式
-  - `Stable` 输出稳定的0-1灰度阴影遮罩，可直接拿去做toon阶梯、阈值和半影着色
-  - `Temporal` 使用 Eevee 原本的阴影计算
+  - `Built-in` 默认模式，使用 Eevee 原本的阴影计算
+  - `Stable` 特殊模式，输出稳定的0-1灰度阴影遮罩，可直接拿去做toon阶梯、阈值和半影着色
 - `Ambient Lighting`
   - 来自探针 / 环境间接光的环境照明信息
 - `Half-Lambert Factor`
@@ -362,7 +365,7 @@
 #### 额外说明
 
 - 节点面板新增 `Shadow Mode`
-  - `Stable` / `Temporal`
+  - `Built-in` / `Stable`
 - 当 `Shadow Mode = Stable` 时，可用 `Stable Samples` 提高半影灰度层数和质量
 - 当前实现会排除 world sun 对这些输出的干扰，避免 HDRI 或世界环境里的“太阳光”混入直接结果。
 

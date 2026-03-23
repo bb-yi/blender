@@ -61,6 +61,15 @@ def make_shadow_material_with_settings(shadow_mode="STABLE", stable_samples=32):
     return material
 
 
+def assert_default_shadow_mode_uses_builtin():
+    material = bpy.data.materials.new("ShaderInfoDefaultModeMaterial")
+    material.use_nodes = True
+    shader_info = material.node_tree.nodes.new("ShaderNodeShaderInfo")
+    assert shader_info.shadow_mode == "TEMPORAL", (
+        f"Shader Info should default to the built-in shadow mode, got {shader_info.shadow_mode}"
+    )
+
+
 def make_threshold_material():
     material = bpy.data.materials.new("StableShadowThresholdMaterial")
     material.use_nodes = True
@@ -273,6 +282,7 @@ assert (
     "stable_shadow_samples" in bpy.types.ShaderNodeShaderInfo.bl_rna.properties
 ), "stable_shadow_samples property is missing"
 
+assert_default_shadow_mode_uses_builtin()
 assert_shadow_mask_stability()
 assert_threshold_shadow_stability()
 assert_stable_sample_count_improves_gradient()

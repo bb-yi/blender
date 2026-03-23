@@ -169,10 +169,19 @@ void ShadingView::render()
   inst_.sphere_probes.viewport_draw(render_view_, combined_fb_);
   inst_.planar_probes.viewport_draw(render_view_, combined_fb_);
 
+  if (inst_.filter_materials.uses_scene_shadow()) {
+    gpu::Texture *shadow_source_tx = (rbufs.data.shadow_id >= 0) ?
+                                         rbufs.rp_value_tx.gpu_texture() :
+                                         nullptr;
+    inst_.pipelines.shadow_filter.set_source(shadow_source_tx, rbufs.data.shadow_id);
+    inst_.pipelines.shadow_filter.render(render_view_, extent_, rbufs.depth_tx);
+  }
+
   gpu::Texture *combined_final_tx = render_postfx(rbufs.combined_tx);
   combined_final_tx = inst_.filter_materials.render(render_view_, combined_final_tx, extent_);
   inst_.film.accumulate(jitter_view_, combined_final_tx);
 
+  inst_.pipelines.shadow_filter.release();
   rbufs.release();
   postfx_tx_.release();
 

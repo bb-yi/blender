@@ -280,6 +280,86 @@ void ShadowPipeline::render(View &view)
 /** \} */
 
 /* -------------------------------------------------------------------- */
+/** \name Screen Space Shadow Filter
+ *
+ * \{ */
+
+void ScreenSpaceShadowFilter::sync()
+{
+  const float white = 1.0f;
+  dummy_source_tx_.ensure_2d_array(
+      gpu::TextureFormat::SFLOAT_16, int2(1), 1, GPU_TEXTURE_USAGE_SHADER_READ, &white);
+  dummy_white_tx_.ensure_2d(
+      gpu::TextureFormat::SFLOAT_16, int2(1), GPU_TEXTURE_USAGE_SHADER_READ, &white);
+
+  horizontal_ps_.init();
+  horizontal_ps_.state_set(DRW_STATE_WRITE_COLOR);
+  horizontal_ps_.shader_set(inst_.shaders.static_shader_get(SHADOW_MASK_FILTER_LAYERED));
+  horizontal_ps_.bind_texture("shadow_tx", &source_tx_);
+  horizontal_ps_.bind_texture("depth_tx", &depth_tx_);
+  horizontal_ps_.push_constant("shadow_layer", &source_layer_);
+  horizontal_ps_.push_constant("filter_direction", int2(1, 0));
+  horizontal_ps_.draw_procedural(GPU_PRIM_TRIS, 1, 3);
+
+  vertical_ps_.init();
+  vertical_ps_.state_set(DRW_STATE_WRITE_COLOR);
+  vertical_ps_.shader_set(inst_.shaders.static_shader_get(SHADOW_MASK_FILTER));
+  vertical_ps_.bind_texture("shadow_tx", &scratch_tx_);
+  vertical_ps_.bind_texture("depth_tx", &depth_tx_);
+  vertical_ps_.push_constant("filter_direction", int2(0, 1));
+  vertical_ps_.draw_procedural(GPU_PRIM_TRIS, 1, 3);
+
+  this->release();
+}
+
+void ScreenSpaceShadowFilter::set_source(gpu::Texture *source_tx, int source_layer)
+{
+  source_tx_ = (source_tx != nullptr && source_layer >= 0) ? source_tx :
+                                                            dummy_source_tx_.gpu_texture();
+  source_layer_ = max_ii(source_layer, 0);
+  scene_shadow_tx_ = dummy_white_tx_.gpu_texture();
+}
+
+void ScreenSpaceShadowFilter::render(View &view, int2 extent, gpu::Texture *depth_tx)
+{
+  if (source_tx_ == nullptr || source_tx_ == dummy_source_tx_.gpu_texture() || depth_tx == nullptr) {
+    scene_shadow_tx_ = dummy_white_tx_.gpu_texture();
+    return;
+  }
+
+  scratch_tx_.ensure_2d(gpu::TextureFormat::SFLOAT_16, extent, GPU_TEXTURE_USAGE_GENERAL);
+  filtered_tx_.ensure_2d(gpu::TextureFormat::SFLOAT_16, extent, GPU_TEXTURE_USAGE_GENERAL);
+
+  depth_tx_ = depth_tx;
+
+  GPU_memory_barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS | GPU_BARRIER_TEXTURE_FETCH);
+
+  framebuffer_.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(scratch_tx_));
+  horizontal_ps_.framebuffer_set(&framebuffer_);
+  GPU_framebuffer_bind(framebuffer_);
+  inst_.manager->submit(horizontal_ps_, view);
+  GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH);
+
+  framebuffer_.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(filtered_tx_));
+  vertical_ps_.framebuffer_set(&framebuffer_);
+  GPU_framebuffer_bind(framebuffer_);
+  inst_.manager->submit(vertical_ps_, view);
+  GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH);
+
+  scene_shadow_tx_ = filtered_tx_;
+}
+
+void ScreenSpaceShadowFilter::release()
+{
+  source_tx_ = dummy_source_tx_.gpu_texture();
+  depth_tx_ = nullptr;
+  scene_shadow_tx_ = dummy_white_tx_.gpu_texture();
+  source_layer_ = 0;
+}
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
 /** \name Prepass
  *
  * Helper class for handling prepasses in Forward and Deferred pipelines.
@@ -698,6 +778,7 @@ template<typename F> void DeferredLayerBase::npr_pass_sync(Instance &inst, F cal
 {
   npr_ps_.init();
   npr_ps_.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst.pipelines.utility_tx);
+  npr_ps_.bind_texture(SCENE_SHADOW_TEX_SLOT, &inst.pipelines.shadow_filter.texture_ref());
   npr_ps_.bind_image(RBUFS_COLOR_SLOT, &inst.render_buffers.rp_color_tx);
   npr_ps_.bind_image(RBUFS_VALUE_SLOT, &inst.render_buffers.rp_value_tx);
   /* Bind manually to fixed slots before the sub-pass shader is selected.
@@ -714,6 +795,8 @@ template<typename F> void DeferredLayerBase::npr_pass_sync(Instance &inst, F cal
   npr_ps_.bind_resources(inst.render_textures);
   npr_ps_.bind_resources(inst.lights);
   npr_ps_.bind_resources(inst.shadows);
+  npr_ps_.bind_resources(inst.sphere_probes);
+  npr_ps_.bind_resources(inst.volume_probes);
 
   callback();
 
@@ -1132,6 +1215,11 @@ gpu::Texture *DeferredLayer::render(View &main_view,
   inst_.manager->submit(combine_ps_, render_view);
 
   if (!npr_ps_.is_empty()) {
+    gpu::Texture *shadow_source_tx = (rb.data.shadow_id >= 0) ? rb.rp_value_tx.gpu_texture() :
+                                                                 nullptr;
+    inst_.pipelines.shadow_filter.set_source(shadow_source_tx, rb.data.shadow_id);
+    inst_.pipelines.shadow_filter.render(render_view, extent, rb.depth_tx);
+
     TextureFromPool npr_radiance_input = {"NPR Radiance Input"};
     npr_radiance_input.acquire(extent,
                                gpu::TextureFormat::SFLOAT_16_16_16_16,

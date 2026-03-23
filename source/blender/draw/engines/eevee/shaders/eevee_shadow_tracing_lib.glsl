@@ -500,7 +500,6 @@ float shadow_eval_stable(LightData light,
       ShadowRayPunctual clip_ray = shadow_ray_generate_punctual(light, ray_tap, lP, lNg);
       has_hit = shadow_map_trace(clip_ray, stable_step_count, 0.5f);
     }
-
     surface_hit += float(has_hit);
   }
 

@@ -13,16 +13,23 @@
  */
 
 #include "BLI_hash.h"
+#include "BLI_listbase.h"
 #include "BLI_rect.h"
 #include "BLI_set.hh"
 
 #include "BKE_compositor.hh"
+#include "BKE_main.hh"
+#include "BKE_node.hh"
+#include "BKE_node_legacy_types.hh"
 #include "BKE_scene.hh"
+
+#include "DEG_depsgraph_query.hh"
 
 #include "GPU_framebuffer.hh"
 #include "GPU_texture.hh"
 
 #include "DRW_render.hh"
+#include "NOD_shader.h"
 #include "RE_pipeline.h"
 
 #include "draw_view_data.hh"
@@ -329,6 +336,9 @@ void Film::init(const int2 &extent, const rcti *output_rect)
 
     if (inst_.filter_materials.uses_scene_normal()) {
       enabled_passes_ |= EEVEE_RENDER_PASS_NORMAL;
+    }
+    if (inst_.filter_materials.uses_scene_shadow()) {
+      enabled_passes_ |= EEVEE_RENDER_PASS_SHADOW;
     }
 
     /* Filter obsolete passes. */

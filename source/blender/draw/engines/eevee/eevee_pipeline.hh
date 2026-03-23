@@ -139,6 +139,47 @@ class ShadowPipeline {
 /** \} */
 
 /* -------------------------------------------------------------------- */
+/** \name Screen Space Shadow Filter
+ *
+ * Builds a filtered visibility buffer from the raw shadow render pass so NPR can reuse a
+ * stable grayscale shadow mask.
+ * \{ */
+
+class ScreenSpaceShadowFilter {
+ private:
+  Instance &inst_;
+
+  PassSimple horizontal_ps_ = {"Shadow.Filter.Horizontal"};
+  PassSimple vertical_ps_ = {"Shadow.Filter.Vertical"};
+  Framebuffer framebuffer_ = {"Shadow.Filter.Framebuffer"};
+
+  Texture dummy_source_tx_ = {"Shadow.Filter.DummySource"};
+  Texture dummy_white_tx_ = {"Shadow.Filter.DummyWhite"};
+  Texture scratch_tx_ = {"Shadow.Filter.Scratch"};
+  Texture filtered_tx_ = {"Shadow.Filter.Filtered"};
+
+  gpu::Texture *source_tx_ = nullptr;
+  gpu::Texture *depth_tx_ = nullptr;
+  gpu::Texture *scene_shadow_tx_ = nullptr;
+  int source_layer_ = 0;
+
+ public:
+  ScreenSpaceShadowFilter(Instance &inst) : inst_(inst) {}
+
+  void sync();
+  void set_source(gpu::Texture *source_tx, int source_layer);
+  void render(View &view, int2 extent, gpu::Texture *depth_tx);
+  void release();
+
+  gpu::Texture *&texture_ref()
+  {
+    return scene_shadow_tx_;
+  }
+};
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
 /** \name Prepass
  *
  * Helper class for handling prepasses in Forward and Deferred pipelines.
@@ -801,6 +842,7 @@ class PipelineModule {
   DeferredPipeline deferred;
   ForwardPipeline forward;
   ShadowPipeline shadow;
+  ScreenSpaceShadowFilter shadow_filter;
   VolumePipeline volume;
   CapturePipeline capture;
 
@@ -818,6 +860,7 @@ class PipelineModule {
         deferred(inst),
         forward(inst),
         shadow(inst),
+        shadow_filter(inst),
         volume(inst),
         capture(inst),
         data(data) {};
@@ -830,6 +873,7 @@ class PipelineModule {
     deferred.begin_sync();
     forward.sync();
     shadow.sync();
+    shadow_filter.sync();
     volume.sync();
     capture.sync();
 
