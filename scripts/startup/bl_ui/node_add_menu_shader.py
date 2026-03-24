@@ -140,6 +140,7 @@ class NODE_MT_shader_node_input_base(node_add_menu.NodeMenu):
                 context, layout, "ShaderNodeRenderInfo",
                 ["Width", "Height"],
             )
+            self.node_operator(layout, "ShaderNodeSceneTime")
         self.node_operator(
             layout,
             "ShaderNodeCurvature",

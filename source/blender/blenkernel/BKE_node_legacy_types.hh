@@ -155,6 +155,7 @@
 #define SH_NODE_CURVATURE 736
 #define SH_NODE_SHADER_INFO 737
 #define SH_NODE_LIGHT_INFO 738
+#define SH_NODE_SCENE_TIME 739
 
 /** \} */
 

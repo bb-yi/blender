@@ -18,6 +18,7 @@
 #include "DNA_node_types.h"
 #include "DNA_screen_types.h"
 #include "DNA_sequence_types.h"
+#include "DNA_scene_types.h"
 #include "DNA_windowmanager_types.h"
 #include "DNA_workspace_types.h"
 
@@ -916,6 +917,22 @@ void blo_do_versions_510(FileData * /*fd*/, Library * /*lib*/, Main *bmain)
         if (scene.toolsettings->snap_mode_tools == snap_geom_old) {
           scene.toolsettings->snap_mode_tools = SCE_SNAP_TO_GEOM;
         }
+      }
+    }
+  }
+
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 30)) {
+    for (Scene &scene : bmain->scenes) {
+      for (SceneOverlayInput *overlay_input = static_cast<SceneOverlayInput *>(
+               scene.eevee.overlay_inputs.first);
+           overlay_input != nullptr;
+           overlay_input = overlay_input->next)
+      {
+        overlay_input->scale[0] = (overlay_input->scale[0] != 0.0f) ? overlay_input->scale[0] :
+                                                                     1.0f;
+        overlay_input->scale[1] = (overlay_input->scale[1] != 0.0f) ? overlay_input->scale[1] :
+                                                                     1.0f;
+        overlay_input->blend_mode = SCE_EEVEE_OVERLAY_BLEND_NORMAL;
       }
     }
   }

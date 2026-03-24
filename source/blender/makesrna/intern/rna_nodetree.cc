@@ -6757,6 +6757,12 @@ static void def_sh_render_info(BlenderRNA * /*brna*/, StructRNA *srna)
       srna, "Render Info Node", "Retrieve Eevee render region dimensions and normalized fragment coordinates");
 }
 
+static void def_sh_scene_time(BlenderRNA * /*brna*/, StructRNA *srna)
+{
+  RNA_def_struct_ui_text(
+      srna, "Scene Time Node", "Retrieve the current scene time in frames, seconds, or normalized timeline space");
+}
+
 static void def_sh_shader_info(BlenderRNA * /*brna*/, StructRNA *srna)
 {
   static const EnumPropertyItem shadow_mode_items[] = {
@@ -6817,6 +6823,11 @@ static void def_sh_scene_color(BlenderRNA * /*brna*/, StructRNA *srna)
        0,
        "Shadow",
        "Sample the Eevee scene shadow render pass"},
+      {SHD_SCENE_SOURCE_POSITION,
+       "POSITION",
+       0,
+       "Position",
+       "Sample the Eevee scene world position render pass"},
       {0, nullptr, 0, nullptr, nullptr},
   };
 
@@ -10235,6 +10246,7 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("ShaderNode", "ShaderNodePortalOut", def_sh_portal_out);
   define("ShaderNode", "ShaderNodeRenderTexture", def_sh_render_texture);
   define("ShaderNode", "ShaderNodeRenderInfo", def_sh_render_info);
+  define("ShaderNode", "ShaderNodeSceneTime", def_sh_scene_time);
   define("ShaderNode", "ShaderNodeCurvature", def_sh_curvature);
   define("ShaderNode", "ShaderNodeShaderInfo", def_sh_shader_info);
   define("ShaderNode", "ShaderNodeLightInfo", def_sh_light_info);

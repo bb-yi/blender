@@ -43,6 +43,7 @@
 #include "eevee_lookdev.hh"
 #include "eevee_material.hh"
 #include "eevee_motion_blur.hh"
+#include "eevee_overlay_composite.hh"
 #include "eevee_pipeline.hh"
 #include "eevee_raytrace.hh"
 #include "eevee_render_texture.hh"
@@ -110,6 +111,7 @@ class Instance : public DrawEngine {
   RayTraceModule raytracing;
   VelocityModule velocity;
   MotionBlurModule motion_blur;
+  OverlayCompositeModule overlay_composite;
   DepthOfField depth_of_field;
   Cryptomatte cryptomatte;
   GBuffer gbuffer;
@@ -195,6 +197,7 @@ class Instance : public DrawEngine {
         raytracing(*this, uniform_data.data.raytrace),
         velocity(*this),
         motion_blur(*this),
+        overlay_composite(*this),
         depth_of_field(*this),
         cryptomatte(*this),
         hiz_buffer(*this, uniform_data.data.hiz),

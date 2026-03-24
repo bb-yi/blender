@@ -34,7 +34,8 @@ static void filter_material_collect_scene_sources(const bNodeTree &ntree,
                                                   Set<const bNodeTree *> &visited,
                                                   bool &r_uses_scene_depth,
                                                   bool &r_uses_scene_normal,
-                                                  bool &r_uses_scene_shadow)
+                                                  bool &r_uses_scene_shadow,
+                                                  bool &r_uses_scene_position)
 {
   if (visited.contains(&ntree)) {
     return;
@@ -47,7 +48,10 @@ static void filter_material_collect_scene_sources(const bNodeTree &ntree,
       r_uses_scene_depth |= (source == SHD_SCENE_SOURCE_DEPTH);
       r_uses_scene_normal |= (source == SHD_SCENE_SOURCE_NORMAL);
       r_uses_scene_shadow |= (source == SHD_SCENE_SOURCE_SHADOW);
-      if (r_uses_scene_depth && r_uses_scene_normal && r_uses_scene_shadow) {
+      r_uses_scene_position |= (source == SHD_SCENE_SOURCE_POSITION);
+      if (r_uses_scene_depth && r_uses_scene_normal && r_uses_scene_shadow &&
+          r_uses_scene_position)
+      {
         return;
       }
     }
@@ -56,8 +60,11 @@ static void filter_material_collect_scene_sources(const bNodeTree &ntree,
                                             visited,
                                             r_uses_scene_depth,
                                             r_uses_scene_normal,
-                                            r_uses_scene_shadow);
-      if (r_uses_scene_depth && r_uses_scene_normal && r_uses_scene_shadow) {
+                                            r_uses_scene_shadow,
+                                            r_uses_scene_position);
+      if (r_uses_scene_depth && r_uses_scene_normal && r_uses_scene_shadow &&
+          r_uses_scene_position)
+      {
         return;
       }
     }
@@ -69,6 +76,7 @@ void FilterMaterialModule::init()
   uses_scene_depth_ = false;
   uses_scene_normal_ = false;
   uses_scene_shadow_ = false;
+  uses_scene_position_ = false;
 
   Set<const bNodeTree *> visited;
   for (SceneFilterMaterial *filter_entry = static_cast<SceneFilterMaterial *>(
@@ -83,8 +91,11 @@ void FilterMaterialModule::init()
                                           visited,
                                           uses_scene_depth_,
                                           uses_scene_normal_,
-                                          uses_scene_shadow_);
-    if (uses_scene_depth_ && uses_scene_normal_ && uses_scene_shadow_) {
+                                          uses_scene_shadow_,
+                                          uses_scene_position_);
+    if (uses_scene_depth_ && uses_scene_normal_ && uses_scene_shadow_ &&
+        uses_scene_position_)
+    {
       break;
     }
   }

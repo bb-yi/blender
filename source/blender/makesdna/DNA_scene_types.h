@@ -2596,6 +2596,24 @@ enum SceneEEVEERenderTextureFormat {
   SCE_EEVEE_RENDER_TEXTURE_FORMAT_R32F = 3,
 };
 
+enum SceneEEVEEOverlayAlphaMode {
+  SCE_EEVEE_OVERLAY_ALPHA_STRAIGHT = 0,
+  SCE_EEVEE_OVERLAY_ALPHA_PREMULTIPLIED = 1,
+};
+
+enum SceneEEVEEOverlayDepthMode {
+  SCE_EEVEE_OVERLAY_DEPTH_SCENE = 0,
+  SCE_EEVEE_OVERLAY_DEPTH_IMAGE = 1,
+};
+
+enum SceneEEVEEOverlayBlendMode {
+  SCE_EEVEE_OVERLAY_BLEND_NORMAL = 0,
+  SCE_EEVEE_OVERLAY_BLEND_ADD = 1,
+  SCE_EEVEE_OVERLAY_BLEND_MULTIPLY = 2,
+  SCE_EEVEE_OVERLAY_BLEND_SCREEN = 3,
+  SCE_EEVEE_OVERLAY_BLEND_OVERLAY = 4,
+};
+
 struct SceneRenderTexture {
   SceneRenderTexture *next, *prev;
   char name[64];
@@ -2617,6 +2635,22 @@ struct SceneFilterMaterial {
   char enabled;
   char _pad[3];
   struct Material *material;
+};
+
+struct SceneOverlayInput {
+  SceneOverlayInput *next, *prev;
+  char name[64];
+  struct Image *color_image;
+  struct Image *depth_image;
+  int uid;
+  float opacity;
+  float offset[2];
+  float scale[2];
+  char enabled;
+  char alpha_mode;
+  char depth_mode;
+  char blend_mode;
+  char _pad[4];
 };
 
 struct SceneEEVEE {
@@ -2692,10 +2726,13 @@ struct SceneEEVEE {
   float light_threshold = 0.01f;
 
   ListBase filter_materials = {};
+  ListBase overlay_inputs = {};
   ListBase render_textures = {};
   int active_filter_material_index = -1;
+  int active_overlay_input_index = -1;
   int active_render_texture_index = -1;
   int next_filter_material_uid = 1;
+  int next_overlay_input_uid = 1;
   int next_render_texture_uid = 1;
 };
 

@@ -190,7 +190,9 @@ void ShadingView::render()
 
 gpu::Texture *ShadingView::render_postfx(gpu::Texture *input_tx)
 {
-  if (!inst_.depth_of_field.postfx_enabled() && !inst_.motion_blur.postfx_enabled()) {
+  if (!inst_.depth_of_field.postfx_enabled() && !inst_.motion_blur.postfx_enabled() &&
+      !inst_.overlay_composite.enabled())
+  {
     return input_tx;
   }
   postfx_tx_.acquire(extent_, gpu::TextureFormat::SFLOAT_16_16_16_16);
@@ -208,6 +210,7 @@ gpu::Texture *ShadingView::render_postfx(gpu::Texture *input_tx)
 
   /* Swapping is done internally. Actual output is set to the next input. */
   inst_.motion_blur.render(render_view_, &input_tx, &output_tx);
+  inst_.overlay_composite.render(render_view_, &input_tx, &output_tx);
   inst_.depth_of_field.render(render_view_, &input_tx, &output_tx, dof_buffer_);
 
   return input_tx;

@@ -107,11 +107,14 @@ static void compositor_job_init(void *compositor_job_data)
   Scene *scene = compositor_job->scene;
   ViewLayer *view_layer = compositor_job->view_layer;
 
+  if (scene == nullptr || view_layer == nullptr || scene->compositing_node_group == nullptr) {
+    return;
+  }
+
   bke::CompositorRuntime &compositor_runtime = scene->runtime->compositor;
 
   if (!compositor_runtime.preview_depsgraph) {
-    compositor_runtime.preview_depsgraph = DEG_graph_new(
-        bmain, scene, view_layer, DAG_EVAL_RENDER);
+    compositor_runtime.preview_depsgraph = DEG_graph_new(bmain, scene, view_layer, DAG_EVAL_RENDER);
     DEG_debug_name_set(compositor_runtime.preview_depsgraph, "COMPOSITOR");
   }
 
@@ -140,6 +143,13 @@ static void compositor_job_init(void *compositor_job_data)
 static void compositor_job_start(void *compositor_job_data, wmJobWorkerStatus *worker_status)
 {
   CompositorJob *compositor_job = static_cast<CompositorJob *>(compositor_job_data);
+  bke::CompositorRuntime &compositor_runtime = compositor_job->scene->runtime->compositor;
+
+  if (compositor_runtime.preview_depsgraph == nullptr || compositor_job->evaluated_node_tree == nullptr ||
+      compositor_job->render == nullptr)
+  {
+    return;
+  }
 
   RE_test_break_cb(compositor_job->render, &worker_status->stop, [](void *should_stop) -> bool {
     return *static_cast<bool *>(should_stop) || G.is_break;
@@ -148,7 +158,6 @@ static void compositor_job_start(void *compositor_job_data, wmJobWorkerStatus *w
   BKE_callback_exec_id(
       compositor_job->bmain, &compositor_job->scene->id, BKE_CB_EVT_COMPOSITE_PRE);
 
-  bke::CompositorRuntime &compositor_runtime = compositor_job->scene->runtime->compositor;
   Scene *evaluated_scene = DEG_get_evaluated_scene(compositor_runtime.preview_depsgraph);
   if (!(evaluated_scene->r.scemode & R_MULTIVIEW)) {
     RE_compositor_execute(*compositor_job->render,
@@ -191,6 +200,10 @@ static void compositor_job_complete(void *compositor_job_data)
 
   Scene *scene = compositor_job->scene;
   BKE_callback_exec_id(compositor_job->bmain, &scene->id, BKE_CB_EVT_COMPOSITE_POST);
+
+  if (scene->compositing_node_group == nullptr || compositor_job->evaluated_node_tree == nullptr) {
+    return;
+  }
 
   bke::node_preview_merge_tree(
       scene->compositing_node_group, compositor_job->evaluated_node_tree, true);
@@ -325,6 +338,8 @@ void ED_node_compositor_job(const bContext *C)
   compositor_job->bmain = bmain;
   compositor_job->scene = scene;
   compositor_job->view_layer = CTX_data_view_layer(C);
+  compositor_job->evaluated_node_tree = nullptr;
+  compositor_job->render = nullptr;
   compositor_job->needed_outputs = needed_outputs;
 
   WM_jobs_customdata_set(job, compositor_job, compositor_job_free);

@@ -12,9 +12,11 @@
 1. `Eevee` 的场景级扩展工作流
    - `Render Textures`
    - `Filter Materials`
+   - `Overlay Inputs`
 
 2.  `Eevee` 的新着色器节点
     - `Render Info`
+    - `Scene Time`
     - `Screen Derivative`
 
 3. `Goo Engine` 移植节点
@@ -115,6 +117,40 @@
 - `Scene Color` 节点的默认采样坐标为`纹理坐标`节点的`Window`输出
 - 支持`AOV`输入
 
+### 3. Overlay Inputs
+
+#### 功能说明
+
+`Overlay Inputs` 是场景级的 Eevee 屏幕叠加输入栈。它会在场景颜色结果之上，按列表顺序把外部图片叠加到最终结果里。
+
+这套功能当前支持：
+
+- `Color Image`
+- `Opacity`
+- `Alpha Mode`
+- `Offset`
+- `Scale`
+- `Blend Mode`
+
+#### 面板入口
+
+`Scene Properties > Overlay Inputs`
+
+#### 基本使用方法
+
+1. 打开 `Scene Properties > Overlay Inputs`。
+2. 新建一个条目并启用它。
+3. 指定 `Color Image`。
+4. 调整 `Opacity`、`Alpha Mode`、`Offset`、`Scale` 和 `Blend Mode`。
+5. 多个条目会按照列表顺序依次叠加。
+
+#### 说明
+
+- `Offset` 为二维偏移，正值会把 Overlay 向右、向上移动。
+- `Scale` 为二维缩放，`1, 1` 表示原始大小，大于 `1` 会让 Overlay 变大。
+- `Blend Mode` 当前提供 `Normal`、`Add`、`Multiply`、`Screen`、`Overlay`。
+- 在视图切到相机时，Overlay 会自动使用相机视图对应的纹理坐标映射，而不是直接使用渲染窗口坐标。这样可以避免相机视图下看到的 Overlay 位置与最终渲染不一致。
+
 
 ## 二、主要扩展节点
 
@@ -136,8 +172,10 @@
 - `Depth`
 - `Normal`
 - `Shadow`
+- `Position`
 
 `Shadow` 会读取 Eevee 的阴影渲染通道，输出 0-1 灰度阴影值，可直接用于 Toon 分层、阈值、混合等滤镜处理。
+`Position` 会读取 Eevee 的世界空间位置通道，输出全局坐标。
 
 #### 输入输出
 
@@ -163,6 +201,36 @@
 #### 作用
 
 提供当前 Eevee 渲染窗口的坐标和像素尺寸。
+
+### Scene Time
+
+#### 入口
+
+`Add > Input > Scene Time`
+
+在 `Eevee` 下可用。
+
+#### 输入
+
+- `Scale`
+
+#### 输出
+
+- `Frame`
+- `Seconds`
+- `Timeline`
+- `Scaled Frame`
+
+#### 作用
+
+提供当前场景时间相关的数值输出。
+
+#### 说明
+
+- `Frame` 为当前帧数
+- `Seconds` 为当前帧对应的秒数
+- `Timeline` 会把场景开始帧到结束帧映射到 `0-1`
+- `Scaled Frame` 为当前帧除以 `Scale` 之后的结果
 
 ### Screen Derivative
 

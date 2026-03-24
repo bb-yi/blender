@@ -6,6 +6,7 @@
  * \ingroup RNA
  */
 
+#include <cfloat>
 #include <cstdlib>
 
 #include "DNA_curve_types.h"
@@ -2096,6 +2097,20 @@ static void rna_SceneEEVEE_filter_material_tag_update(Scene *scene)
   WM_main_add_notifier(NC_SCENE | ND_RENDER_OPTIONS, scene);
 }
 
+static void rna_SceneEEVEE_overlay_input_tag_update(Scene *scene)
+{
+  DEG_id_tag_update(&scene->id, ID_RECALC_SYNC_TO_EVAL);
+  WM_main_add_notifier(NC_SCENE | ND_RENDER_OPTIONS, scene);
+}
+
+static void rna_SceneEEVEE_overlay_input_update(Main * /*bmain*/,
+                                                Scene * /*scene*/,
+                                                PointerRNA *ptr)
+{
+  Scene *scene = reinterpret_cast<Scene *>(ptr->owner_id);
+  rna_SceneEEVEE_overlay_input_tag_update(scene);
+}
+
 static int rna_SceneEEVEE_filter_material_active_index_max(const SceneEEVEE *eevee)
 {
   return max_ii(-1, BLI_listbase_count(&eevee->filter_materials) - 1);
@@ -2264,6 +2279,139 @@ static void rna_SceneEEVEE_filter_material_move(
 static int rna_SceneEEVEE_render_texture_active_index_max(const SceneEEVEE *eevee)
 {
   return max_ii(-1, BLI_listbase_count(&eevee->render_textures) - 1);
+}
+
+static int rna_SceneEEVEE_overlay_input_active_index_max(const SceneEEVEE *eevee)
+{
+  return max_ii(-1, BLI_listbase_count(&eevee->overlay_inputs) - 1);
+}
+
+static void rna_SceneEEVEE_active_overlay_input_index_range(
+    PointerRNA *ptr, int *min, int *max, int * /*softmin*/, int * /*softmax*/)
+{
+  SceneEEVEE *eevee = static_cast<SceneEEVEE *>(ptr->data);
+  *min = -1;
+  *max = rna_SceneEEVEE_overlay_input_active_index_max(eevee);
+}
+
+static int rna_SceneEEVEE_active_overlay_input_index_get(PointerRNA *ptr)
+{
+  SceneEEVEE *eevee = static_cast<SceneEEVEE *>(ptr->data);
+  return std::clamp(eevee->active_overlay_input_index,
+                    -1,
+                    rna_SceneEEVEE_overlay_input_active_index_max(eevee));
+}
+
+static void rna_SceneEEVEE_active_overlay_input_index_set(PointerRNA *ptr, int value)
+{
+  SceneEEVEE *eevee = static_cast<SceneEEVEE *>(ptr->data);
+  eevee->active_overlay_input_index = std::clamp(
+      value, -1, rna_SceneEEVEE_overlay_input_active_index_max(eevee));
+}
+
+static std::optional<std::string> rna_SceneOverlayInput_path(const PointerRNA *ptr)
+{
+  const SceneOverlayInput *overlay_input = static_cast<SceneOverlayInput *>(ptr->data);
+  char overlay_input_name_esc[sizeof(overlay_input->name) * 2];
+  BLI_str_escape(overlay_input_name_esc, overlay_input->name, sizeof(overlay_input_name_esc));
+  return fmt::format("eevee.overlay_inputs[\"{}\"]", overlay_input_name_esc);
+}
+
+static void rna_SceneOverlayInput_name_set(PointerRNA *ptr, const char *value)
+{
+  Scene *scene = reinterpret_cast<Scene *>(ptr->owner_id);
+  SceneOverlayInput *overlay_input = static_cast<SceneOverlayInput *>(ptr->data);
+  STRNCPY_UTF8(overlay_input->name, value);
+  BLI_uniquename(&scene->eevee.overlay_inputs,
+                 overlay_input,
+                 DATA_("Overlay Input"),
+                 '.',
+                 offsetof(SceneOverlayInput, name),
+                 sizeof(overlay_input->name));
+}
+
+static SceneOverlayInput *rna_SceneEEVEE_overlay_input_add(ID *id, SceneEEVEE *eevee)
+{
+  Scene *scene = reinterpret_cast<Scene *>(id);
+  SceneOverlayInput *overlay_input = MEM_new_zeroed<SceneOverlayInput>(__func__);
+
+  overlay_input->uid = max_ii(eevee->next_overlay_input_uid, 1);
+  eevee->next_overlay_input_uid = overlay_input->uid + 1;
+  overlay_input->enabled = true;
+  overlay_input->opacity = 1.0f;
+  overlay_input->scale[0] = 1.0f;
+  overlay_input->scale[1] = 1.0f;
+  overlay_input->alpha_mode = SCE_EEVEE_OVERLAY_ALPHA_STRAIGHT;
+  overlay_input->depth_mode = SCE_EEVEE_OVERLAY_DEPTH_SCENE;
+  overlay_input->blend_mode = SCE_EEVEE_OVERLAY_BLEND_NORMAL;
+  STRNCPY(overlay_input->name, DATA_("Overlay Input"));
+  BLI_uniquename(&eevee->overlay_inputs,
+                 overlay_input,
+                 DATA_("Overlay Input"),
+                 '.',
+                 offsetof(SceneOverlayInput, name),
+                 sizeof(overlay_input->name));
+  BLI_addtail(&eevee->overlay_inputs, overlay_input);
+  eevee->active_overlay_input_index = BLI_findindex(&eevee->overlay_inputs, overlay_input);
+
+  rna_SceneEEVEE_overlay_input_tag_update(scene);
+  return overlay_input;
+}
+
+static void rna_SceneEEVEE_overlay_input_remove(
+    ID *id, SceneEEVEE *eevee, ReportList *reports, int index)
+{
+  Scene *scene = reinterpret_cast<Scene *>(id);
+  SceneOverlayInput *overlay_input = static_cast<SceneOverlayInput *>(
+      BLI_findlink(&eevee->overlay_inputs, index));
+
+  if (overlay_input == nullptr) {
+    BKE_reportf(reports, RPT_ERROR, "Overlay Input index '%d' not found", index);
+    return;
+  }
+
+  if (overlay_input->color_image) {
+    id_us_min(&overlay_input->color_image->id);
+  }
+  if (overlay_input->depth_image) {
+    id_us_min(&overlay_input->depth_image->id);
+  }
+  BLI_remlink(&eevee->overlay_inputs, overlay_input);
+  MEM_delete(overlay_input);
+  eevee->active_overlay_input_index = std::clamp(
+      eevee->active_overlay_input_index, -1, rna_SceneEEVEE_overlay_input_active_index_max(eevee));
+
+  rna_SceneEEVEE_overlay_input_tag_update(scene);
+}
+
+static void rna_SceneEEVEE_overlay_input_move(
+    ID *id, SceneEEVEE *eevee, ReportList *reports, int from, int to)
+{
+  if (from == to) {
+    return;
+  }
+
+  if (!BLI_listbase_move_index(&eevee->overlay_inputs, from, to)) {
+    BKE_reportf(reports, RPT_ERROR, "Could not move overlay input from index '%d' to '%d'", from, to);
+    return;
+  }
+
+  if (eevee->active_overlay_input_index == from) {
+    eevee->active_overlay_input_index = to;
+  }
+  else if (from < to && eevee->active_overlay_input_index > from &&
+           eevee->active_overlay_input_index <= to)
+  {
+    eevee->active_overlay_input_index--;
+  }
+  else if (to < from && eevee->active_overlay_input_index >= to &&
+           eevee->active_overlay_input_index < from)
+  {
+    eevee->active_overlay_input_index++;
+  }
+
+  Scene *scene = reinterpret_cast<Scene *>(id);
+  rna_SceneEEVEE_overlay_input_tag_update(scene);
 }
 
 static constexpr int RNA_SCENE_EEVEE_RENDER_TEXTURE_SLOT_MAX = 4;
@@ -8494,6 +8642,41 @@ static void rna_def_scene_eevee_filter_materials(BlenderRNA *brna, PropertyRNA *
   RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
 }
 
+static void rna_def_scene_eevee_overlay_inputs(BlenderRNA *brna, PropertyRNA *cprop)
+{
+  StructRNA *srna;
+  FunctionRNA *func;
+  PropertyRNA *parm;
+
+  RNA_def_property_srna(cprop, "SceneOverlayInputs");
+  srna = RNA_def_struct(brna, "SceneOverlayInputs", nullptr);
+  RNA_def_struct_sdna(srna, "SceneEEVEE");
+  RNA_def_struct_ui_text(srna, "Scene Overlay Inputs", "Collection of Eevee overlay inputs");
+
+  func = RNA_def_function(srna, "add", "rna_SceneEEVEE_overlay_input_add");
+  RNA_def_function_ui_description(func, "Add an overlay input entry");
+  RNA_def_function_flag(func, FUNC_USE_SELF_ID);
+  parm = RNA_def_pointer(func, "overlay_input", "SceneOverlayInput", "", "Newly created overlay input");
+  RNA_def_function_return(func, parm);
+
+  func = RNA_def_function(srna, "remove", "rna_SceneEEVEE_overlay_input_remove");
+  RNA_def_function_ui_description(func, "Remove an overlay input entry");
+  RNA_def_function_flag(func, FUNC_USE_SELF_ID | FUNC_USE_REPORTS);
+  parm = RNA_def_int(
+      func, "index", -1, INT_MIN, INT_MAX, "Index", "Index to remove", -1, INT_MAX);
+  RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
+
+  func = RNA_def_function(srna, "move", "rna_SceneEEVEE_overlay_input_move");
+  RNA_def_function_ui_description(func, "Move an overlay input entry");
+  RNA_def_function_flag(func, FUNC_USE_SELF_ID | FUNC_USE_REPORTS);
+  parm = RNA_def_int(
+      func, "from_index", -1, INT_MIN, INT_MAX, "From Index", "Index to move", -1, INT_MAX);
+  RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
+  parm = RNA_def_int(
+      func, "to_index", -1, INT_MIN, INT_MAX, "To Index", "Target index", -1, INT_MAX);
+  RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
+}
+
 static void rna_def_scene_filter_material(BlenderRNA *brna)
 {
   StructRNA *srna;
@@ -8663,6 +8846,117 @@ static void rna_def_scene_render_texture(BlenderRNA *brna)
   RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_render_texture_update");
 }
 
+static void rna_def_scene_overlay_input(BlenderRNA *brna)
+{
+  StructRNA *srna;
+  PropertyRNA *prop;
+
+  static const EnumPropertyItem overlay_alpha_mode_items[] = {
+      {SCE_EEVEE_OVERLAY_ALPHA_STRAIGHT,
+       "STRAIGHT",
+       0,
+       "Straight",
+       "Treat the image as straight alpha"},
+      {SCE_EEVEE_OVERLAY_ALPHA_PREMULTIPLIED,
+       "PREMULTIPLIED",
+       0,
+       "Premultiplied",
+       "Treat the image as premultiplied alpha"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+
+  static const EnumPropertyItem overlay_blend_mode_items[] = {
+      {SCE_EEVEE_OVERLAY_BLEND_NORMAL,
+       "NORMAL",
+       0,
+       "Normal",
+       "Composite the overlay using standard alpha-over blending"},
+      {SCE_EEVEE_OVERLAY_BLEND_ADD,
+       "ADD",
+       0,
+       "Add",
+       "Add the overlay colors on top of the scene"},
+      {SCE_EEVEE_OVERLAY_BLEND_MULTIPLY,
+       "MULTIPLY",
+       0,
+       "Multiply",
+       "Multiply the scene colors by the overlay colors"},
+      {SCE_EEVEE_OVERLAY_BLEND_SCREEN,
+       "SCREEN",
+       0,
+       "Screen",
+       "Brighten the scene using screen blending"},
+      {SCE_EEVEE_OVERLAY_BLEND_OVERLAY,
+       "OVERLAY",
+       0,
+       "Overlay",
+       "Blend with an overlay-style contrast boost"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+
+  srna = RNA_def_struct(brna, "SceneOverlayInput", nullptr);
+  RNA_def_struct_sdna(srna, "SceneOverlayInput");
+  RNA_def_struct_path_func(srna, "rna_SceneOverlayInput_path");
+  RNA_def_struct_ui_text(srna, "Scene Overlay Input", "Scene-level Eevee overlay input entry");
+
+  prop = RNA_def_property(srna, "name", PROP_STRING, PROP_NONE);
+  RNA_def_property_string_funcs(prop, nullptr, nullptr, "rna_SceneOverlayInput_name_set");
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_ui_text(prop, "Name", "Display name of this overlay input entry");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_overlay_input_update");
+  RNA_def_struct_name_property(srna, prop);
+
+  prop = RNA_def_property(srna, "uid", PROP_INT, PROP_NONE);
+  RNA_def_property_int_sdna(prop, nullptr, "uid");
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_ui_text(prop, "UID", "Stable identifier used by the overlay stack");
+
+  prop = RNA_def_property(srna, "enabled", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "enabled", 1);
+  RNA_def_property_ui_text(prop, "Enabled", "Composite this overlay input");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_overlay_input_update");
+
+  prop = RNA_def_property(srna, "opacity", PROP_FLOAT, PROP_FACTOR);
+  RNA_def_property_float_sdna(prop, nullptr, "opacity");
+  RNA_def_property_range(prop, 0.0f, 1.0f);
+  RNA_def_property_ui_text(prop, "Opacity", "Additional opacity multiplier for this overlay");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_overlay_input_update");
+
+  prop = RNA_def_property(srna, "offset", PROP_FLOAT, PROP_TRANSLATION);
+  RNA_def_property_float_sdna(prop, nullptr, "offset");
+  RNA_def_property_array(prop, 2);
+  RNA_def_property_ui_text(
+      prop, "Offset", "Screen-space offset applied after the base overlay mapping");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_overlay_input_update");
+
+  prop = RNA_def_property(srna, "scale", PROP_FLOAT, PROP_XYZ);
+  RNA_def_property_float_sdna(prop, nullptr, "scale");
+  RNA_def_property_array(prop, 2);
+  RNA_def_property_range(prop, 0.001f, FLT_MAX);
+  RNA_def_property_ui_range(prop, 0.01f, 10.0f, 0.1f, 3);
+  RNA_def_property_ui_text(prop, "Scale", "Scale of the overlay image around the frame center");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_overlay_input_update");
+
+  prop = RNA_def_property(srna, "alpha_mode", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "alpha_mode");
+  RNA_def_property_enum_items(prop, overlay_alpha_mode_items);
+  RNA_def_property_ui_text(prop, "Alpha Mode", "How the image alpha should be interpreted");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_overlay_input_update");
+
+  prop = RNA_def_property(srna, "blend_mode", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "blend_mode");
+  RNA_def_property_enum_items(prop, overlay_blend_mode_items);
+  RNA_def_property_ui_text(prop, "Blend Mode", "How the overlay colors are blended with the scene");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_overlay_input_update");
+
+  prop = RNA_def_property(srna, "color_image", PROP_POINTER, PROP_NONE);
+  RNA_def_property_pointer_sdna(prop, nullptr, "color_image");
+  RNA_def_property_struct_type(prop, "Image");
+  RNA_def_property_flag(prop, PROP_EDITABLE | PROP_ID_REFCOUNT);
+  RNA_def_property_ui_text(prop, "Color Image", "RGBA image composited after motion blur and before depth of field");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_overlay_input_update");
+}
+
 static void rna_def_scene_eevee(BlenderRNA *brna)
 {
   StructRNA *srna;
@@ -8742,6 +9036,20 @@ static void rna_def_scene_eevee(BlenderRNA *brna)
                              "rna_SceneEEVEE_active_filter_material_index_range");
   RNA_def_property_ui_text(
       prop, "Active Filter Material Index", "Index of the active filter material");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, nullptr);
+
+  prop = RNA_def_property(srna, "overlay_inputs", PROP_COLLECTION, PROP_NONE);
+  RNA_def_property_collection_sdna(prop, nullptr, "overlay_inputs", nullptr);
+  RNA_def_property_struct_type(prop, "SceneOverlayInput");
+  RNA_def_property_ui_text(prop, "Overlay Inputs", "Scene-level Eevee overlay input stack");
+  rna_def_scene_eevee_overlay_inputs(brna, prop);
+
+  prop = RNA_def_property(srna, "active_overlay_input_index", PROP_INT, PROP_NONE);
+  RNA_def_property_int_funcs(prop,
+                             "rna_SceneEEVEE_active_overlay_input_index_get",
+                             "rna_SceneEEVEE_active_overlay_input_index_set",
+                             "rna_SceneEEVEE_active_overlay_input_index_range");
+  RNA_def_property_ui_text(prop, "Active Overlay Input Index", "Index of the active overlay input");
   RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, nullptr);
 
   prop = RNA_def_property(srna, "render_textures", PROP_COLLECTION, PROP_NONE);
@@ -9874,6 +10182,7 @@ void RNA_def_scene(BlenderRNA *brna)
   rna_def_raytrace_eevee(brna);
   rna_def_scene_filter_material(brna);
   rna_def_scene_render_texture(brna);
+  rna_def_scene_overlay_input(brna);
   rna_def_scene_eevee(brna);
   rna_def_scene_hydra(brna);
   rna_def_view_layer_aov(brna);

@@ -74,6 +74,7 @@ void register_node_type_sh_portal_in();
 void register_node_type_sh_portal_out();
 void register_node_type_sh_render_texture();
 void register_node_type_sh_render_info();
+void register_node_type_sh_scene_time();
 void register_node_type_sh_shader_info();
 void register_node_type_sh_screenspace_info();
 void register_node_type_sh_scene_color();

@@ -82,6 +82,13 @@ struct [[host_shared]] PipelineInfoData {
   bool32_t _pad2;
 };
 
+struct [[host_shared]] SceneTimeData {
+  float frame;
+  float seconds;
+  float timeline;
+  float _pad0;
+};
+
 /* Combines data from several modules to avoid wasting binding slots. */
 struct [[host_shared]] UniformData {
   struct AOData ao;
@@ -91,6 +98,7 @@ struct [[host_shared]] UniformData {
   struct HiZData hiz;
   struct RayTraceData raytrace;
   struct RenderBuffersInfoData render_pass;
+  struct SceneTimeData scene_time;
   struct ShadowSceneData shadow;
   struct SubsurfaceData subsurface;
   struct VolumesInfoData volumes;

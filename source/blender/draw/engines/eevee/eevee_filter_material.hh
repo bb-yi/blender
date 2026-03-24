@@ -45,6 +45,7 @@ class FilterMaterialModule {
   bool uses_scene_depth_ = false;
   bool uses_scene_normal_ = false;
   bool uses_scene_shadow_ = false;
+  bool uses_scene_position_ = false;
 
  public:
   FilterMaterialModule(Instance &inst) : inst_(inst) {}
@@ -65,6 +66,10 @@ class FilterMaterialModule {
   bool uses_scene_shadow() const
   {
     return uses_scene_shadow_;
+  }
+  bool uses_scene_position() const
+  {
+    return uses_scene_position_;
   }
 
   gpu::Texture *render(draw::View &view, gpu::Texture *input_tx, int2 extent);

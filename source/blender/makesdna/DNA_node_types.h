@@ -808,6 +808,7 @@ enum NodeShaderSceneSource {
   SHD_SCENE_SOURCE_DEPTH = 1,
   SHD_SCENE_SOURCE_NORMAL = 2,
   SHD_SCENE_SOURCE_SHADOW = 3,
+  SHD_SCENE_SOURCE_POSITION = 4,
 };
 
 enum NodeShaderInfoShadowMode {

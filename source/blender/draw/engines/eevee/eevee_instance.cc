@@ -195,6 +195,7 @@ void Instance::init(const int2 &output_res,
   sampling.init(scene);
   camera.init();
   filter_materials.init();
+  overlay_composite.init();
   film.init(output_res, output_rect);
   render_buffers.init();
   render_textures.init();
@@ -274,6 +275,7 @@ void Instance::init_light_bake(Depsgraph *depsgraph, draw::Manager *manager)
   sampling.init(scene);
   camera.init();
   filter_materials.init();
+  overlay_composite.init();
   /* Film isn't used but init to avoid side effects in other module. */
   rcti empty_rect{0, 0, 0, 0};
   film.init(int2(1), &empty_rect);
@@ -312,6 +314,21 @@ void Instance::update_eval_members()
   view_layer = DEG_get_evaluated_view_layer(depsgraph);
   camera_eval_object = (camera_orig_object) ? DEG_get_evaluated(depsgraph, camera_orig_object) :
                                               nullptr;
+
+  const float frame = scene ? (float(scene->r.cfra) + scene->r.subframe) : 0.0f;
+  const float frame_start = scene ? float(scene->r.sfra) : 0.0f;
+  const float frame_end = scene ? float(scene->r.efra) : frame_start;
+  const float frame_range = frame_end - frame_start;
+  const float fps = (scene && scene->r.frs_sec_base != 0.0f) ?
+                        (float(scene->r.frs_sec) / scene->r.frs_sec_base) :
+                        24.0f;
+
+  uniform_data.data.scene_time.frame = frame;
+  uniform_data.data.scene_time.seconds = (fps > 1e-8f) ? (frame / fps) : 0.0f;
+  uniform_data.data.scene_time.timeline = (frame_range > 1e-8f) ?
+                                              clamp_f((frame - frame_start) / frame_range, 0.0f, 1.0f) :
+                                              0.0f;
+  uniform_data.data.scene_time._pad0 = 0.0f;
 }
 
 /** \} */
@@ -353,6 +370,7 @@ void Instance::begin_sync()
   film.sync();
   render_textures.begin_sync();
   filter_materials.begin_sync();
+  overlay_composite.begin_sync();
   ambient_occlusion.sync();
   volume_probes.sync();
   lookdev.sync();
@@ -470,6 +488,7 @@ void Instance::end_sync()
   pipelines.end_sync();
   render_textures.end_sync();
   filter_materials.end_sync();
+  overlay_composite.end_sync();
   light_probes.end_sync();
   sphere_probes.end_sync();
   planar_probes.end_sync();

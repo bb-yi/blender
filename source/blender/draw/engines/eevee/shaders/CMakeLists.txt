@@ -62,6 +62,7 @@ set(SRC_GLSL_FRAG
   eevee_light_culling_debug_frag.glsl
   eevee_lookdev_display_frag.glsl
   eevee_occupancy_convert_frag.glsl
+  eevee_overlay_composite_frag.glsl
   eevee_renderpass_clear_frag.glsl
   eevee_shadow_filter_frag.glsl
   eevee_shadow_debug_frag.glsl
