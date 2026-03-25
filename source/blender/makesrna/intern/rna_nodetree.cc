@@ -6772,6 +6772,12 @@ static void def_sh_shader_info(BlenderRNA * /*brna*/, StructRNA *srna)
        "Stable",
        "Use the special deterministic shadow sampling path for stable grayscale masks in a "
        "single frame"},
+      {SHD_SHADER_INFO_SHADOW_SOFT_FILTERED,
+       "SOFT_FILTERED",
+       0,
+       "Soft Filtered",
+       "Use deterministic shadow sampling and filter nearby screen-space samples to turn black "
+       "and white shadow hits into smoother grayscale penumbra"},
       {SHD_SHADER_INFO_SHADOW_TEMPORAL,
        "TEMPORAL",
        0,

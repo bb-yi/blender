@@ -486,6 +486,7 @@
   - 可切换阴影模式
   - `Built-in` 默认模式，使用 Eevee 原本的阴影计算
   - `Stable` 特殊模式，输出稳定的0-1灰度阴影遮罩，可直接拿去做toon阶梯、阈值和半影着色
+  - `Soft Filtered` 在 `Stable` 基础上，对当前表面附近的一像素邻域做额外采样和平均，把黑白抖动阴影变成更平滑的灰度半影
 - `Ambient Lighting`
   - 来自探针 / 环境间接光的环境照明信息
 - `Half-Lambert Factor`
@@ -494,8 +495,9 @@
 #### 额外说明
 
 - 节点面板新增 `Shadow Mode`
-  - `Built-in` / `Stable`
-- 当 `Shadow Mode = Stable` 时，可用 `Stable Samples` 提高半影灰度层数和质量
+  - `Built-in` / `Stable` / `Soft Filtered`
+- 当 `Shadow Mode = Stable` 或 `Soft Filtered` 时，可用 `Stable Samples` 提高阴影质量
+- `Soft Filtered` 更适合把单帧黑白阴影重建成连续灰度，但性能会比 `Stable` 更高
 - 当前实现会排除 world sun 对这些输出的干扰，避免 HDRI 或世界环境里的“太阳光”混入直接结果。
 
 ### Light Info

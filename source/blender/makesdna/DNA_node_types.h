@@ -814,6 +814,7 @@ enum NodeShaderSceneSource {
 enum NodeShaderInfoShadowMode {
   SHD_SHADER_INFO_SHADOW_STABLE = 0,
   SHD_SHADER_INFO_SHADOW_TEMPORAL = 1,
+  SHD_SHADER_INFO_SHADOW_SOFT_FILTERED = 2,
 };
 
 enum NodeCompareMode {

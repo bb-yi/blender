@@ -510,31 +510,39 @@ float shadow_eval_stable(LightData light,
  * Evaluate shadowing by casting rays toward the light direction.
  * Returns light visibility.
  */
-float shadow_eval(LightData light,
-                  const bool is_directional,
-                  const bool is_transmission,
-                  bool is_translucent_with_thickness,
-                  float thickness, /* Only used if is_transmission is true. */
-                  float3 P,
-                  float3 Ng,
-                  float3 N,
-                  float terminator_normal_offset,
-                  float terminator_geometry_offset,
-                  int ray_count,
-                  int ray_step_count)
+void shadow_eval_random_numbers_get(float3 random_offset,
+                                    out float3 random_shadow_3d,
+                                    out float2 random_pcf_2d)
 {
-  /* Case of surfel light eval. */
-  float3 random_shadow_3d = float3(0.5f);
-  float2 random_pcf_2d = float2(0.0f);
+  random_shadow_3d = float3(0.5f);
+  random_pcf_2d = float2(0.0f);
 #if defined(EEVEE_SAMPLING_DATA) && !defined(GLSL_CPP_STUBS)
   if (true) {
     auto &util_tx = sampler_get(eevee_utility_texture, utility_tx);
     float3 blue_noise_3d = utility_tx_fetch(util_tx, UTIL_TEXEL, UTIL_BLUE_NOISE_LAYER).rgb;
-    random_shadow_3d = fract(blue_noise_3d + sampling_rng_3D_get(SAMPLING_SHADOW_U));
-    random_pcf_2d = fract(blue_noise_3d.xy + sampling_rng_2D_get(SAMPLING_SHADOW_X));
+    random_shadow_3d = fract(blue_noise_3d + sampling_rng_3D_get(SAMPLING_SHADOW_U) +
+                             random_offset);
+    random_pcf_2d = fract(blue_noise_3d.xy + sampling_rng_2D_get(SAMPLING_SHADOW_X) +
+                          random_offset.xy);
   }
 #endif
+}
 
+float shadow_eval_seeded(LightData light,
+                         const bool is_directional,
+                         const bool is_transmission,
+                         bool is_translucent_with_thickness,
+                         float thickness, /* Only used if is_transmission is true. */
+                         float3 P,
+                         float3 Ng,
+                         float3 N,
+                         float terminator_normal_offset,
+                         float terminator_geometry_offset,
+                         int ray_count,
+                         int ray_step_count,
+                         float3 random_shadow_3d,
+                         float2 random_pcf_2d)
+{
   float distance_to_shadow;
   /* Direction towards the shadow center (punctual) or direction (direction).
    * Not the same as the light vector if the shadow is jittered. */
@@ -597,6 +605,39 @@ float shadow_eval(LightData light,
   }
   /* Average samples. */
   return saturate(1.0f - surface_hit / float(ray_count));
+}
+
+float shadow_eval(LightData light,
+                  const bool is_directional,
+                  const bool is_transmission,
+                  bool is_translucent_with_thickness,
+                  float thickness, /* Only used if is_transmission is true. */
+                  float3 P,
+                  float3 Ng,
+                  float3 N,
+                  float terminator_normal_offset,
+                  float terminator_geometry_offset,
+                  int ray_count,
+                  int ray_step_count)
+{
+  float3 random_shadow_3d;
+  float2 random_pcf_2d;
+  shadow_eval_random_numbers_get(float3(0.0f), random_shadow_3d, random_pcf_2d);
+
+  return shadow_eval_seeded(light,
+                            is_directional,
+                            is_transmission,
+                            is_translucent_with_thickness,
+                            thickness,
+                            P,
+                            Ng,
+                            N,
+                            terminator_normal_offset,
+                            terminator_geometry_offset,
+                            ray_count,
+                            ray_step_count,
+                            random_shadow_3d,
+                            random_pcf_2d);
 }
 
 /** \} */

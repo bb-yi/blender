@@ -398,6 +398,22 @@ bool foreach_light_setup(uint l_idx,
 #  define FOREACH_LIGHT_END() LIGHT_FOREACH_ALL_END()
 #endif
 
+float4 closure_to_rgba(Closure cl)
+{
+  UNUSED_VARS(cl);
+
+  float4 out_color;
+  out_color.rgb = g_emission;
+  out_color.a = saturate(1.0f - average(g_transmittance));
+
+  /* Reset for the next closure tree, matching the regular deferred path. */
+  float noise = utility_tx_fetch(utility_tx, gl_FragCoord.xy, UTIL_BLUE_NOISE_LAYER).r;
+  float closure_rand = fract(noise + sampling_rng_1D_get(SAMPLING_CLOSURE));
+  closure_weights_reset(closure_rand);
+
+  return out_color;
+}
+
 void main()
 {
   init_globals();

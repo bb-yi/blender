@@ -43,7 +43,7 @@ static void node_shader_buts(ui::Layout &layout, bContext * /*C*/, PointerRNA *p
 {
   layout.prop(ptr, "shadow_mode", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
   const int shadow_mode = RNA_enum_get(ptr, "shadow_mode");
-  if (shadow_mode == SHD_SHADER_INFO_SHADOW_STABLE) {
+  if (ELEM(shadow_mode, SHD_SHADER_INFO_SHADOW_STABLE, SHD_SHADER_INFO_SHADOW_SOFT_FILTERED)) {
     layout.prop(ptr, "stable_shadow_samples", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
   }
 }
