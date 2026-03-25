@@ -68,6 +68,9 @@ static int node_shader_gpu_shader_info(GPUMaterial *mat,
   const float stable_shadow_samples = float(shadow_sample_count);
 
   GPU_material_flag_set(mat, GPU_MATFLAG_DIFFUSE | GPU_MATFLAG_SHADER_INFO);
+  if (node->custom1 == SHD_SHADER_INFO_SHADOW_SOFT_FILTERED) {
+    GPU_material_flag_set(mat, GPU_MATFLAG_RAYCAST);
+  }
   return GPU_stack_link(
       mat, node, "node_shader_info", in, out, GPU_constant(&shadow_mode), GPU_constant(&stable_shadow_samples));
 }
