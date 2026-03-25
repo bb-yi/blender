@@ -12,12 +12,14 @@
 1. `Eevee` 的场景级扩展工作流
    - `Render Textures`
    - `Filter Materials`
-   - `Overlay Inputs`
 
 2.  `Eevee` 的新着色器节点
     - `Render Info`
     - `Scene Time`
     - `Screen Derivative`
+    - `World Environment`
+    - `Light Probe Color`
+    - `Bevel`
 
 3. `Goo Engine` 移植节点
    - `Screenspace Info`
@@ -40,7 +42,7 @@
       - `Shading Models`
       - `Surface Curvature`
 
-6. 界面整理节点
+5. 界面整理节点
    - `Portal In / Portal Out`
 
 
@@ -111,45 +113,16 @@
 3. 选中的材质必须是 `Filter` 域材质。
 4. 打开 Shader Editor，把顶部 `Shader Type` 切换到 `Filter`。
 5. 在滤镜材质里使用 `Scene Color` 读取场景数据，用 `Filter Output` 输出结果。
+6. 通过 `Execution Stage` 选择滤镜执行位置。
 
 #### 重要说明
 
 - `Scene Color` 节点的默认采样坐标为`纹理坐标`节点的`Window`输出
 - 支持`AOV`输入
-
-### 3. Overlay Inputs
-
-#### 功能说明
-
-`Overlay Inputs` 是场景级的 Eevee 屏幕叠加输入栈。它会在场景颜色结果之上，按列表顺序把外部图片叠加到最终结果里。
-
-这套功能当前支持：
-
-- `Color Image`
-- `Opacity`
-- `Alpha Mode`
-- `Offset`
-- `Scale`
-- `Blend Mode`
-
-#### 面板入口
-
-`Scene Properties > Overlay Inputs`
-
-#### 基本使用方法
-
-1. 打开 `Scene Properties > Overlay Inputs`。
-2. 新建一个条目并启用它。
-3. 指定 `Color Image`。
-4. 调整 `Opacity`、`Alpha Mode`、`Offset`、`Scale` 和 `Blend Mode`。
-5. 多个条目会按照列表顺序依次叠加。
-
-#### 说明
-
-- `Offset` 为二维偏移，正值会把 Overlay 向右、向上移动。
-- `Scale` 为二维缩放，`1, 1` 表示原始大小，大于 `1` 会让 Overlay 变大。
-- `Blend Mode` 当前提供 `Normal`、`Add`、`Multiply`、`Screen`、`Overlay`。
-- 在视图切到相机时，Overlay 会自动使用相机视图对应的纹理坐标映射，而不是直接使用渲染窗口坐标。这样可以避免相机视图下看到的 Overlay 位置与最终渲染不一致。
+- `Execution Stage` 目前提供三个位置:
+  - `Before Volume Fog`
+  - `Before Depth of Field`
+  - `Before Composite`
 
 
 ## 二、主要扩展节点
@@ -194,13 +167,19 @@
 在 `Eevee` 下可用。
 
 #### 输出
-- `frag coord`
+- `Frag Coord`
 - `Width`
 - `Height`
 
 #### 作用
 
 提供当前 Eevee 渲染窗口的坐标和像素尺寸。
+
+#### 说明
+
+- `Frag Coord.xy` 为归一化到 `0-1` 的屏幕 UV
+- `Frag Coord.z` 为当前片元深度
+- `Width` / `Height` 为当前渲染区域的像素尺寸
 
 ### Scene Time
 
@@ -328,6 +307,85 @@
 - 材质选项打开`Raytraced Transmission`
 - `View Position`默认输入为:`position`变换到摄像机空间,再反转z轴
 
+### World Environment
+
+#### 入口
+
+`Add > Input > World Environment`
+
+在 `Eevee` 物体材质和 `NPR Tree` 中可用。
+
+#### 输入输出
+
+- 输入：`Direction`
+- 输出：`Color`
+
+#### 作用
+
+直接采样 `Eevee` 的世界环境颜色，不依赖屏幕背后是否还有几何。
+
+#### 说明
+
+- 适合获取被遮挡情况下的 world 环境颜色
+- 不读取屏幕背后物体的颜色
+- 输出更接近 `Eevee` 的环境 / probe 结果，而不是屏幕空间缓冲
+- `Direction` 不连接时，默认使用当前表面的视线方向
+- `Direction` 连接后，可以按指定方向采样世界环境
+
+### Light Probe Color
+
+#### 入口
+
+`Add > Input > Light Probe Color`
+
+在 `Eevee` 物体材质和 `NPR Tree` 中可用。
+
+#### 输入输出
+
+- 输入：`Direction`
+- 输出：`Reflection`、`Irradiance`、`Combined`
+
+#### 作用
+
+直接读取 `Eevee` 当前可用的光照探头结果，分别输出反射探头颜色、环境谐波漫反射颜色，以及两者叠加后的结果。
+
+#### 说明
+
+- `Reflection` 更接近反射探头 / 世界环境方向采样结果
+- `Irradiance` 更接近体积光照探头或环境谐波的漫反射光照结果
+- `Combined` 为 `Reflection + Irradiance`
+- `Direction` 不连接时：
+  - `Reflection` 默认使用当前表面的视线方向
+  - `Irradiance` 默认使用当前表面的着色法线方向
+- `Direction` 连接后，可以按指定方向采样 probe 信息
+
+### Bevel
+
+#### 入口
+
+`Add > Input > Bevel`
+
+在 `Eevee` 下可用。
+
+#### 输入输出
+
+- 输入：`Radius`、`Normal`
+- 输出：`Normal`
+
+#### 面板选项
+
+- `Samples`
+
+#### 作用
+
+在 `Eevee` 中生成近似的倒角法线，用来让硬边看起来更圆润。
+
+#### 说明
+
+- `Cycles` 仍然使用官方原本的真实几何倒角算法
+- `Eevee` 这里使用的是同物体屏幕空间近似
+- 结果依赖当前视角、深度缓冲和可见邻域，不等同于 `Cycles` 的真实 `Bevel`
+
 ### Curvature
 
 #### 入口
@@ -347,6 +405,7 @@
 
 - `Scene Curvature`
 - `Scene Rim`
+- `Bevel Normal`
 
 #### 面板选项
 
@@ -359,6 +418,8 @@
 #### 说明
 
 - `Local` 开启后，会尽量只按当前物体自身的信息计算
+- `Bevel Normal` 会输出一个基于屏幕空间邻域重建的近似倒角法线
+- `Bevel Normal` 适合接到点乘、假倒角、高光偏移等用法里
 - 节点本质上是屏幕空间采样节点，结果会受到当前视角、屏幕分辨率和采样半径影响
 - 直接观察时，通常 `Scene Rim` 会比 `Scene Curvature` 更容易看出效果
 
@@ -602,5 +663,5 @@
 - `Render Textures` 当前最多 `4` 个槽位。
 - `Filter Materials` 只能使用 `Filter` 域材质。
 - `Portal` 只在同一节点树内生效，不支持跨节点树和跨节点组自动穿透。
-- `Screenspace Info`、`Scene Color`、`Screen Derivative`、`Curvature` 这类节点，本质上都依赖 Eevee 的屏幕空间或当前渲染缓冲信息。
+- `Screenspace Info`、`Scene Color`、`Screen Derivative`、`Curvature`、`Bevel` 这类节点，本质上都依赖 Eevee 的屏幕空间或当前渲染缓冲信息。
 - 反射探头只会捕获NPR Tree之前的材质效果

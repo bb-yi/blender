@@ -148,9 +148,22 @@ void FilterMaterialModule::begin_sync()
 
 }
 
-gpu::Texture *FilterMaterialModule::render(draw::View &view, gpu::Texture *input_tx, int2 extent)
+bool FilterMaterialModule::has_stage_entries(SceneEEVEEFilterExecutionStage stage) const
 {
-  if (entries_.is_empty() || input_tx == nullptr) {
+  for (const FilterPassEntry &entry : entries_) {
+    if (entry.scene_filter != nullptr && entry.scene_filter->execution_stage == stage) {
+      return true;
+    }
+  }
+  return false;
+}
+
+gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
+                                                 gpu::Texture *input_tx,
+                                                 int2 extent,
+                                                 SceneEEVEEFilterExecutionStage stage)
+{
+  if (entries_.is_empty() || input_tx == nullptr || !has_stage_entries(stage)) {
     return input_tx;
   }
 
@@ -158,9 +171,16 @@ gpu::Texture *FilterMaterialModule::render(draw::View &view, gpu::Texture *input
   pong_tx_.ensure_2d(GPU_texture_format(input_tx), extent, GPU_TEXTURE_USAGE_GENERAL);
 
   gpu::Texture *source_tx = input_tx;
+  int stage_entry_index = 0;
 
   for (const int entry_index : entries_.index_range()) {
-    Texture &target_tx = ((entry_index & 1) == 0) ? ping_tx_ : pong_tx_;
+    if (entries_[entry_index].scene_filter == nullptr ||
+        entries_[entry_index].scene_filter->execution_stage != stage)
+    {
+      continue;
+    }
+
+    Texture &target_tx = ((stage_entry_index & 1) == 0) ? ping_tx_ : pong_tx_;
     gpu::Texture *scene_color_tx = source_tx;
 
     framebuffer_.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(target_tx));
@@ -186,6 +206,7 @@ gpu::Texture *FilterMaterialModule::render(draw::View &view, gpu::Texture *input
     GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH);
 
     source_tx = target_tx;
+    stage_entry_index++;
   }
 
   return source_tx;

@@ -921,18 +921,31 @@ void blo_do_versions_510(FileData * /*fd*/, Library * /*lib*/, Main *bmain)
     }
   }
 
-  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 30)) {
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 31)) {
     for (Scene &scene : bmain->scenes) {
-      for (SceneOverlayInput *overlay_input = static_cast<SceneOverlayInput *>(
-               scene.eevee.overlay_inputs.first);
-           overlay_input != nullptr;
-           overlay_input = overlay_input->next)
+      for (SceneFilterMaterial *filter_material = static_cast<SceneFilterMaterial *>(
+               scene.eevee.filter_materials.first);
+           filter_material != nullptr;
+           filter_material = filter_material->next)
       {
-        overlay_input->scale[0] = (overlay_input->scale[0] != 0.0f) ? overlay_input->scale[0] :
-                                                                     1.0f;
-        overlay_input->scale[1] = (overlay_input->scale[1] != 0.0f) ? overlay_input->scale[1] :
-                                                                     1.0f;
-        overlay_input->blend_mode = SCE_EEVEE_OVERLAY_BLEND_NORMAL;
+        filter_material->execution_stage = SCE_EEVEE_FILTER_STAGE_BEFORE_COMPOSITE;
+      }
+    }
+  }
+
+  if (MAIN_VERSION_FILE_ATLEAST(bmain, 501, 31) && !MAIN_VERSION_FILE_ATLEAST(bmain, 501, 33)) {
+    for (Scene &scene : bmain->scenes) {
+      for (SceneFilterMaterial *filter_material = static_cast<SceneFilterMaterial *>(
+               scene.eevee.filter_materials.first);
+           filter_material != nullptr;
+           filter_material = filter_material->next)
+      {
+        if (filter_material->execution_stage <= 1) {
+          filter_material->execution_stage = SCE_EEVEE_FILTER_STAGE_BEFORE_DEPTH_OF_FIELD;
+        }
+        else {
+          filter_material->execution_stage = SCE_EEVEE_FILTER_STAGE_BEFORE_COMPOSITE;
+        }
       }
     }
   }

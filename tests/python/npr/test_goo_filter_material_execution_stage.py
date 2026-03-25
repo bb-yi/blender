@@ -24,8 +24,8 @@ def configure_scene():
     scene.world.use_nodes = False
     scene.world.color = (0.0, 0.0, 0.0)
 
-    while len(scene.eevee.overlay_inputs) > 0:
-        scene.eevee.overlay_inputs.remove(0)
+    while len(scene.eevee.filter_materials) > 0:
+        scene.eevee.filter_materials.remove(0)
 
 
 def make_camera():
@@ -39,7 +39,7 @@ def make_camera():
 
 
 def make_surface_material():
-    material = bpy.data.materials.new("OverlayReceiver")
+    material = bpy.data.materials.new("StageSurface")
     material.use_nodes = True
 
     nodes = material.node_tree.nodes
@@ -54,25 +54,42 @@ def make_surface_material():
     return material
 
 
+def make_filter_material():
+    material = bpy.data.materials.new("StageFilter")
+    material.use_nodes = True
+    material.eevee_domain = "FILTER"
+
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+    nodes.clear()
+
+    output = nodes.new("ShaderNodeOutputFilter")
+    output.location = (420.0, 0.0)
+
+    scene_color = nodes.new("ShaderNodeSceneColor")
+    scene_color.location = (0.0, 0.0)
+    scene_color.source = "COLOR"
+
+    invert = nodes.new("ShaderNodeInvert")
+    invert.location = (220.0, 0.0)
+    invert.inputs["Fac"].default_value = 1.0
+
+    links.new(scene_color.outputs["Color"], invert.inputs["Color"])
+    links.new(invert.outputs["Color"], output.inputs["Color"])
+    output.inputs["Alpha"].default_value = 1.0
+    return material
+
+
 def make_plane(material):
     bpy.ops.mesh.primitive_plane_add(size=4.0, location=(0.0, 0.0, 0.0))
     plane = bpy.context.active_object
     plane.data.materials.append(material)
 
 
-def make_overlay_image():
-    image = bpy.data.images.new("OverlayColor", width=4, height=4, alpha=True, float_buffer=True)
-    image.colorspace_settings.name = "Linear Rec.709"
-    image.pixels = [1.0, 0.0, 0.0, 1.0] * (4 * 4)
-    return image
-
-
-def attach_overlay(image):
-    entry = bpy.context.scene.eevee.overlay_inputs.add()
+def attach_filter_material(material):
+    entry = bpy.context.scene.eevee.filter_materials.add()
+    entry.material = material
     entry.enabled = True
-    entry.color_image = image
-    entry.opacity = 1.0
-    entry.alpha_mode = "STRAIGHT"
     return entry
 
 
@@ -110,39 +127,25 @@ def main():
     configure_scene()
     make_camera()
     make_plane(make_surface_material())
+    filter_entry = attach_filter_material(make_filter_material())
 
-    base_pixels = render_image()
-    base_color = sample_center_color(base_pixels)
-    assert base_color[2] > 0.9, f"Expected blue baseline render, got {base_color}"
-
-    overlay_image = make_overlay_image()
-    entry = attach_overlay(overlay_image)
-
-    assert tuple(round(v, 6) for v in entry.scale) == (1.0, 1.0), (
-        f"Expected default overlay scale to be (1, 1), got {tuple(entry.scale)}"
+    assert filter_entry.execution_stage == "BEFORE_COMPOSITE", (
+        f"Expected default filter stage to be BEFORE_COMPOSITE, got {filter_entry.execution_stage}"
     )
 
-    entry.offset = (0.125, -0.25)
-    entry.scale = (1.5, 0.75)
-    entry.blend_mode = "SCREEN"
+    for stage in ("BEFORE_VOLUME_FOG", "BEFORE_DEPTH_OF_FIELD", "BEFORE_COMPOSITE"):
+        filter_entry.execution_stage = stage
+        color = sample_center_color(render_image())
 
-    assert tuple(round(v, 6) for v in entry.offset) == (0.125, -0.25), (
-        f"Expected overlay offset round-trip, got {tuple(entry.offset)}"
-    )
-    assert tuple(round(v, 6) for v in entry.scale) == (1.5, 0.75), (
-        f"Expected overlay scale round-trip, got {tuple(entry.scale)}"
-    )
-    assert entry.blend_mode == "SCREEN", f"Expected overlay blend mode round-trip, got {entry.blend_mode}"
-
-    entry.offset = (0.0, 0.0)
-    entry.scale = (1.0, 1.0)
-    entry.blend_mode = "NORMAL"
-
-    overlay_pixels = render_image()
-    overlay_color = sample_center_color(overlay_pixels)
-
-    assert overlay_color[0] > 0.9, f"Expected overlay render to be red, got {overlay_color}"
-    assert overlay_color[2] < 0.1, f"Expected overlay to replace blue scene color, got {overlay_color}"
+        assert filter_entry.execution_stage == stage, (
+            f"Expected filter stage round-trip to keep {stage}, got {filter_entry.execution_stage}"
+        )
+        assert color[0] > 0.9 and color[1] > 0.9, (
+            f"Expected filter output to invert the blue surface for stage {stage}, got {color}"
+        )
+        assert color[2] < 0.1, (
+            f"Expected filter output to remove the blue channel for stage {stage}, got {color}"
+        )
 
 
 if __name__ == "__main__":

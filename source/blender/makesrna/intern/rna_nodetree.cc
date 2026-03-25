@@ -10247,6 +10247,8 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("ShaderNode", "ShaderNodeRenderTexture", def_sh_render_texture);
   define("ShaderNode", "ShaderNodeRenderInfo", def_sh_render_info);
   define("ShaderNode", "ShaderNodeSceneTime", def_sh_scene_time);
+  define("ShaderNode", "ShaderNodeWorldEnvironment");
+  define("ShaderNode", "ShaderNodeLightProbeColor");
   define("ShaderNode", "ShaderNodeCurvature", def_sh_curvature);
   define("ShaderNode", "ShaderNodeShaderInfo", def_sh_shader_info);
   define("ShaderNode", "ShaderNodeLightInfo", def_sh_light_info);

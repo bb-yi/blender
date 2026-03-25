@@ -13,3 +13,9 @@ void world_position_get(out float3 P)
 {
   P = g_data.P;
 }
+
+[[node]]
+void world_view_direction_get(out float3 V)
+{
+  V = -drw_world_incident_vector(g_data.P);
+}

@@ -63,6 +63,8 @@ ADDITIONAL_INFO(eevee_global_ubo)
 ADDITIONAL_INFO(eevee_utility_texture)
 ADDITIONAL_INFO(eevee_sampling_data)
 ADDITIONAL_INFO(eevee_hiz_data)
+/* Needed by custom material nodes that sample Eevee world / reflection probe data directly. */
+ADDITIONAL_INFO(eevee_lightprobe_data)
 ADDITIONAL_INFO(eevee_render_texture_data)
 ADDITIONAL_INFO(draw_view_culling)
 GPU_SHADER_CREATE_END()

@@ -38,7 +38,10 @@ static int gpu_shader_bevel(GPUMaterial *mat,
     GPU_link(mat, "world_normals_get", &in[1].link);
   }
 
-  return GPU_stack_link(mat, node, "node_bevel", in, out);
+  GPU_material_flag_set(mat, GPU_MATFLAG_RAYCAST);
+
+  const float f_samples = (node->custom1 > 0) ? float(node->custom1) : 1.0f;
+  return GPU_stack_link(mat, node, "node_bevel", in, out, GPU_constant(&f_samples));
 }
 
 NODE_SHADER_MATERIALX_BEGIN
@@ -62,8 +65,8 @@ void register_node_type_sh_bevel()
   sh_node_type_base(&ntype, "ShaderNodeBevel", SH_NODE_BEVEL);
   ntype.ui_name = "Bevel";
   ntype.ui_description =
-      "Generates normals with round corners.\nNote: only supported in Cycles, and may slow down "
-      "renders";
+      "Generates normals with round corners.\nCycles traces true bevel rays; Eevee uses a "
+      "same-object screen-space approximation";
   ntype.enum_name_legacy = "BEVEL";
   ntype.nclass = NODE_CLASS_INPUT;
   ntype.declare = file_ns::node_declare;

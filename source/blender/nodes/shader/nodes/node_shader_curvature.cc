@@ -24,6 +24,7 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.add_input<decl::Vector>("Scale").default_value(float3(1.0f, 1.0f, 0.0f));
   b.add_output<decl::Float>("Scene Curvature");
   b.add_output<decl::Float>("Scene Rim");
+  b.add_output<decl::Vector>("Bevel Normal");
 }
 
 static void node_shader_init_curvature(bNodeTree * /*ntree*/, bNode *node)

@@ -72,7 +72,11 @@ class FilterMaterialModule {
     return uses_scene_position_;
   }
 
-  gpu::Texture *render(draw::View &view, gpu::Texture *input_tx, int2 extent);
+  bool has_stage_entries(SceneEEVEEFilterExecutionStage stage) const;
+  gpu::Texture *render_stage(draw::View &view,
+                             gpu::Texture *input_tx,
+                             int2 extent,
+                             SceneEEVEEFilterExecutionStage stage);
 };
 
 }  // namespace blender::eevee

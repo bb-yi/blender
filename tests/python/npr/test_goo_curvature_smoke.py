@@ -15,4 +15,8 @@ assert [socket.name for socket in node.inputs] == [
     "Thickness",
     "Scale",
 ]
-assert [socket.name for socket in node.outputs] == ["Scene Curvature", "Scene Rim"]
+assert [socket.name for socket in node.outputs] == [
+    "Scene Curvature",
+    "Scene Rim",
+    "Bevel Normal",
+]

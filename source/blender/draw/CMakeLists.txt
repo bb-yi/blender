@@ -110,7 +110,6 @@ set(SRC
   engines/eevee/eevee_lut.cc
   engines/eevee/eevee_material.cc
   engines/eevee/eevee_motion_blur.cc
-  engines/eevee/eevee_overlay_composite.cc
   engines/eevee/eevee_pipeline.cc
   engines/eevee/eevee_precompute.cc
   engines/eevee/eevee_raytrace.cc
@@ -345,7 +344,6 @@ set(GLSL_SRC
   engines/eevee/shaders/infos/eevee_material_infos.hh
   engines/eevee/shaders/infos/eevee_motion_blur_infos.hh
   engines/eevee/shaders/infos/eevee_nodetree_infos.hh
-  engines/eevee/shaders/infos/eevee_overlay_composite_infos.hh
   engines/eevee/shaders/infos/eevee_render_texture_infos.hh
   engines/eevee/shaders/infos/eevee_raycast_infos.hh
   engines/eevee/shaders/infos/eevee_sampling_infos.hh
@@ -495,7 +493,6 @@ set(GLSL_SRC
   engines/eevee/shaders/eevee_lookdev_copy_world_comp.glsl
   engines/eevee/shaders/eevee_lookdev_display_frag.glsl
   engines/eevee/shaders/eevee_lookdev_display_vert.glsl
-  engines/eevee/shaders/eevee_overlay_composite_frag.glsl
   engines/eevee/shaders/eevee_ltc_lib.glsl
   engines/eevee/shaders/eevee_lut_comp.glsl
   engines/eevee/shaders/eevee_motion_blur_dilate_comp.glsl

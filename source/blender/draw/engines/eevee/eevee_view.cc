@@ -153,6 +153,24 @@ void ShadingView::render()
 
   inst_.gbuffer.release();
 
+  if (inst_.filter_materials.has_stage_entries(SCE_EEVEE_FILTER_STAGE_BEFORE_VOLUME_FOG)) {
+    if (inst_.filter_materials.uses_scene_shadow()) {
+      gpu::Texture *shadow_source_tx = (rbufs.data.shadow_id >= 0) ?
+                                           rbufs.rp_value_tx.gpu_texture() :
+                                           nullptr;
+      inst_.pipelines.shadow_filter.set_source(shadow_source_tx, rbufs.data.shadow_id);
+      inst_.pipelines.shadow_filter.render(render_view_, extent_, rbufs.depth_tx);
+    }
+
+    gpu::Texture *filtered_tx = inst_.filter_materials.render_stage(
+        render_view_, rbufs.combined_tx, extent_, SCE_EEVEE_FILTER_STAGE_BEFORE_VOLUME_FOG);
+    if (filtered_tx != nullptr && filtered_tx != rbufs.combined_tx) {
+      GPU_texture_copy(rbufs.combined_tx, filtered_tx);
+      GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE | GPU_BARRIER_TEXTURE_FETCH |
+                         GPU_BARRIER_FRAMEBUFFER);
+    }
+  }
+
   inst_.volume.draw_compute(main_view_, extent_);
 
   inst_.volume.draw_resolve(main_view_);
@@ -178,7 +196,6 @@ void ShadingView::render()
   }
 
   gpu::Texture *combined_final_tx = render_postfx(rbufs.combined_tx);
-  combined_final_tx = inst_.filter_materials.render(render_view_, combined_final_tx, extent_);
   inst_.film.accumulate(jitter_view_, combined_final_tx);
 
   inst_.pipelines.shadow_filter.release();
@@ -190,28 +207,37 @@ void ShadingView::render()
 
 gpu::Texture *ShadingView::render_postfx(gpu::Texture *input_tx)
 {
-  if (!inst_.depth_of_field.postfx_enabled() && !inst_.motion_blur.postfx_enabled() &&
-      !inst_.overlay_composite.enabled())
+  const bool uses_postfx_passes = inst_.depth_of_field.postfx_enabled() ||
+                                  inst_.motion_blur.postfx_enabled();
+  const bool uses_filter_passes =
+      inst_.filter_materials.has_stage_entries(SCE_EEVEE_FILTER_STAGE_BEFORE_DEPTH_OF_FIELD) ||
+      inst_.filter_materials.has_stage_entries(SCE_EEVEE_FILTER_STAGE_BEFORE_COMPOSITE);
+
+  if (!uses_postfx_passes && !uses_filter_passes)
   {
     return input_tx;
   }
-  postfx_tx_.acquire(extent_, gpu::TextureFormat::SFLOAT_16_16_16_16);
+  if (uses_postfx_passes) {
+    postfx_tx_.acquire(extent_, gpu::TextureFormat::SFLOAT_16_16_16_16);
+  }
 
   /* Fix a sync bug on AMD + Mesa when volume + motion blur create artifacts
    * except if there is a clear event between them. */
-  if (inst_.volume.enabled() && inst_.motion_blur.postfx_enabled() &&
+  if (uses_postfx_passes && inst_.volume.enabled() && inst_.motion_blur.postfx_enabled() &&
       !inst_.depth_of_field.postfx_enabled() &&
       GPU_type_matches_ex(GPU_DEVICE_ATI, GPU_OS_UNIX, GPU_DRIVER_OFFICIAL, GPU_BACKEND_OPENGL))
   {
     postfx_tx_.clear(float4(0.0f));
   }
 
-  gpu::Texture *output_tx = postfx_tx_;
+  gpu::Texture *output_tx = uses_postfx_passes ? postfx_tx_.gpu_texture() : nullptr;
 
-  /* Swapping is done internally. Actual output is set to the next input. */
   inst_.motion_blur.render(render_view_, &input_tx, &output_tx);
-  inst_.overlay_composite.render(render_view_, &input_tx, &output_tx);
+  input_tx = inst_.filter_materials.render_stage(
+      render_view_, input_tx, extent_, SCE_EEVEE_FILTER_STAGE_BEFORE_DEPTH_OF_FIELD);
   inst_.depth_of_field.render(render_view_, &input_tx, &output_tx, dof_buffer_);
+  input_tx = inst_.filter_materials.render_stage(
+      render_view_, input_tx, extent_, SCE_EEVEE_FILTER_STAGE_BEFORE_COMPOSITE);
 
   return input_tx;
 }

@@ -90,26 +90,6 @@ class SCENE_UL_eevee_filter_materials(UIList):
             layout.label(text="", icon='MATERIAL')
 
 
-class SCENE_UL_eevee_overlay_inputs(UIList):
-    def draw_item(self, _context, layout, _data, item, _icon, _active_data, _active_propname, _index):
-        overlay_input = item
-        if self.layout_type in {'DEFAULT', 'COMPACT'}:
-            row = layout.row(align=True)
-            row.prop(
-                overlay_input,
-                "enabled",
-                text="",
-                emboss=False,
-                icon='HIDE_OFF' if overlay_input.enabled else 'HIDE_ON',
-            )
-            image_name = overlay_input.color_image.name if overlay_input.color_image else "None"
-            row.label(text=image_name, icon='IMAGE_DATA')
-            row.prop(overlay_input, "opacity", text="")
-        elif self.layout_type == 'GRID':
-            layout.alignment = 'CENTER'
-            layout.label(text="", icon='IMAGE_DATA')
-
-
 def eevee_active_filter_material_entry(props):
     active_index = props.active_filter_material_index
     if active_index < 0 or active_index >= len(props.filter_materials):
@@ -191,6 +171,7 @@ def draw_eevee_filter_material(layout, context):
     col.use_property_split = True
     col.use_property_decorate = False
     col.prop(filter_entry, "enabled")
+    col.prop(filter_entry, "execution_stage")
 
     row = col.row(align=True)
     row.template_ID(filter_entry, "material", new="scene.eevee_filter_material_new")
@@ -202,51 +183,6 @@ def draw_eevee_filter_material(layout, context):
         layout.label(text="Select a filter-domain material.", icon='INFO')
     elif filter_material.eevee_domain != 'FILTER':
         layout.label(text="Selected material is not in Filter domain.", icon='ERROR')
-
-
-def eevee_active_overlay_input_entry(props):
-    active_index = props.active_overlay_input_index
-    if active_index < 0 or active_index >= len(props.overlay_inputs):
-        return None
-    return props.overlay_inputs[active_index]
-
-
-def draw_eevee_overlay_inputs(layout, context):
-    if context.engine != 'BLENDER_EEVEE':
-        return
-
-    props = context.scene.eevee
-
-    list_col = layout.column()
-    list_col.use_property_split = False
-    list_col.use_property_decorate = False
-
-    draw_ui_list(
-        list_col,
-        context,
-        class_name="SCENE_UL_eevee_overlay_inputs",
-        unique_id="scene_eevee_overlay_inputs",
-        list_path="scene.eevee.overlay_inputs",
-        active_index_path="scene.eevee.active_overlay_input_index",
-    )
-
-    overlay_input = eevee_active_overlay_input_entry(props)
-    if overlay_input is None:
-        layout.label(text="Add an overlay input entry to configure it.", icon='INFO')
-        return
-
-    col = layout.column()
-    col.use_property_split = True
-    col.use_property_decorate = False
-    col.prop(overlay_input, "name")
-    col.prop(overlay_input, "enabled")
-    col.template_ID(overlay_input, "color_image", open="image.open")
-    col.prop(overlay_input, "opacity")
-    col.prop(overlay_input, "offset")
-    col.prop(overlay_input, "scale")
-    col.prop(overlay_input, "blend_mode")
-    col.prop(overlay_input, "alpha_mode")
-    col.label(text="Composited after Motion Blur and before Depth of Field.", icon='INFO')
 
 
 class SCENE_OT_eevee_filter_material_new(Operator):
@@ -336,19 +272,6 @@ class SCENE_PT_eevee_filter_materials(SceneButtonsPanel, Panel):
 
     def draw(self, context):
         draw_eevee_filter_material(self.layout, context)
-
-
-class SCENE_PT_eevee_overlay_inputs(SceneButtonsPanel, Panel):
-    bl_label = "Overlay Inputs"
-    bl_options = {'DEFAULT_CLOSED'}
-    COMPAT_ENGINES = {'BLENDER_EEVEE'}
-
-    @classmethod
-    def poll(cls, context):
-        return context.engine in cls.COMPAT_ENGINES
-
-    def draw(self, context):
-        draw_eevee_overlay_inputs(self.layout, context)
 
 
 class SCENE_PT_unit(SceneButtonsPanel, Panel):
@@ -763,13 +686,11 @@ classes = (
     SCENE_UL_keying_set_paths,
     SCENE_UL_eevee_render_textures,
     SCENE_UL_eevee_filter_materials,
-    SCENE_UL_eevee_overlay_inputs,
     SCENE_OT_eevee_filter_material_new,
     SCENE_PT_context_scene,
     SCENE_PT_scene,
     SCENE_PT_eevee_render_textures,
     SCENE_PT_eevee_filter_materials,
-    SCENE_PT_eevee_overlay_inputs,
     SCENE_PT_unit,
     SCENE_PT_physics,
     SCENE_PT_simulation,
