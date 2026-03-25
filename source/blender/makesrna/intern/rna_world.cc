@@ -72,6 +72,18 @@ static void rna_World_draw_update(Main * /*bmain*/, Scene * /*scene*/, PointerRN
   WM_main_add_notifier(NC_OBJECT | ND_DRAW, nullptr);
 }
 
+static void rna_World_environment_exclusion_update(Main *bmain,
+                                                   Scene * /*scene*/,
+                                                   PointerRNA *ptr)
+{
+  World *wo = id_cast<World *>(ptr->owner_id);
+
+  DEG_id_tag_update(&wo->id, ID_RECALC_SHADING);
+  DEG_relations_tag_update(bmain);
+  WM_main_add_notifier(NC_WORLD | ND_WORLD_DRAW, wo);
+  WM_main_add_notifier(NC_OBJECT | ND_DRAW, nullptr);
+}
+
 void rna_World_lightgroup_get(PointerRNA *ptr, char *value)
 {
   LightgroupMembership *lgm = (id_cast<World *>(ptr->owner_id))->lightgroup;
@@ -281,6 +293,18 @@ void RNA_def_world(BlenderRNA *brna)
   RNA_def_property_flag(prop, PROP_EDITABLE);
   RNA_def_property_ui_text(prop, "Lightgroup", "Lightgroup that the world belongs to");
   RNA_def_property_update(prop, 0, "rna_World_draw_update");
+
+  prop = RNA_def_property(srna, "environment_exclusion_collection", PROP_POINTER, PROP_NONE);
+  RNA_def_property_struct_type(prop, "Collection");
+  RNA_def_property_pointer_sdna(prop, nullptr, "environment_exclusion_collection");
+  RNA_def_property_flag(prop, PROP_EDITABLE | PROP_ID_REFCOUNT);
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_ui_text(
+      prop,
+      "Environment Exclude Collection",
+      "Objects in this collection do not receive Eevee environment and light probe lighting");
+  RNA_def_property_update(
+      prop, NC_WORLD | ND_WORLD_DRAW, "rna_World_environment_exclusion_update");
 
   /* Reflection Probe Baking. */
   prop = RNA_def_property(srna, "probe_resolution", PROP_ENUM, PROP_NONE);

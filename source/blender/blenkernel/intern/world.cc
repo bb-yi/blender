@@ -15,6 +15,7 @@
 /* Allow using deprecated functionality for .blend file I/O. */
 #define DNA_DEPRECATED_ALLOW
 
+#include "DNA_collection_types.h"
 #include "DNA_layer_types.h"
 #include "DNA_scene_types.h"
 #include "DNA_world_types.h"
@@ -135,6 +136,9 @@ static void world_foreach_id(ID *id, LibraryForeachIDData *data)
     BKE_LIB_FOREACHID_PROCESS_FUNCTION_CALL(
         data, BKE_library_foreach_ID_embedded(data, (ID **)&world->nodetree));
   }
+
+  BKE_LIB_FOREACHID_PROCESS_IDSUPER(
+      data, world->environment_exclusion_collection, IDWALK_CB_USER);
 }
 
 static void world_foreach_working_space_color(ID *id, const IDTypeForeachColorFunctionCallback &fn)
@@ -189,7 +193,7 @@ static void world_blend_read_data(BlendDataReader *reader, ID *id)
 IDTypeInfo IDType_ID_WO = {
     /*id_code*/ World::id_type,
     /*id_filter*/ FILTER_ID_WO,
-    /*dependencies_id_types*/ FILTER_ID_TE,
+    /*dependencies_id_types*/ FILTER_ID_TE | FILTER_ID_GR,
     /*main_listbase_index*/ INDEX_ID_WO,
     /*struct_size*/ sizeof(World),
     /*name*/ "World",

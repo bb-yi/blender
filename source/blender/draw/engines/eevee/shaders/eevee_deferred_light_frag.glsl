@@ -77,12 +77,14 @@ void main()
 #endif
 
   uchar receiver_light_set = 0;
+  bool world_environment_disabled = false;
   float normal_offset = 0.0f;
   float geometry_offset = 0.0f;
   if (gbuf.header.use_object_id()) {
     uint object_id = gbuffer::read_object_id(texel);
     ObjectInfos object_infos = drw_infos[object_id];
     receiver_light_set = receiver_light_set_get(object_infos);
+    world_environment_disabled = world_environment_disabled_get(object_infos);
     normal_offset = object_infos.shadow_terminator_normal_offset;
     geometry_offset = object_infos.shadow_terminator_geometry_offset;
   }
@@ -131,7 +133,7 @@ void main()
     output_renderpass_value(render_pass_shadow_id, average(shadows));
   }
 
-  if (use_lightprobe_eval) {
+  if (use_lightprobe_eval && !world_environment_disabled) {
     LightProbeSample samp = lightprobe_load(P, Ng, V);
 
     float clamp_indirect = uniform_buf.clamp.surface_indirect;
@@ -154,6 +156,9 @@ void main()
     uint3 bin_indices = gbuf.header.bin_index_per_layer();
     for (uchar i = 0; i < LIGHT_CLOSURE_EVAL_COUNT && i < closure_count; i++) {
       float3 direct_light = closure_light_get(stack, i).light_shadowed;
+      if (use_split_indirect) {
+        write_radiance_indirect(bin_indices[i], texel, float3(0.0f));
+      }
       write_radiance_direct(bin_indices[i], texel, direct_light);
     }
   }

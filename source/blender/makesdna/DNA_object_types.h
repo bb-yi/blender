@@ -426,7 +426,10 @@ struct LightLinkingRuntime {
    * assigned zero. */
   uint8_t blocker_shadow_set = 0;
 
-  uint8_t _pad[6] = {};
+  /* For receiver objects: whether Eevee environment / light-probe lighting is disabled. */
+  uint8_t world_environment_disabled = 0;
+
+  uint8_t _pad[5] = {};
 };
 
 struct LightLinking {

@@ -103,7 +103,8 @@ void main()
 #endif
 
   ObjectInfos object_infos = drw_infos[drw_resource_id()];
-  bool use_light_linking = receiver_light_set_get(object_infos) != 0;
+  bool use_light_linking = receiver_light_set_get(object_infos) != 0 ||
+                           world_environment_disabled_get(object_infos);
   bool use_terminator_offset = object_infos.shadow_terminator_normal_offset > 0.0;
 
   /* ----- Render Passes output ----- */

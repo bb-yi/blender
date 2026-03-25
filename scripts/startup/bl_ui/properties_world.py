@@ -200,6 +200,20 @@ class EEVEE_WORLD_PT_lightprobe(WorldButtonsPanel, Panel):
         layout.prop(world, "probe_resolution", text="Resolution")
 
 
+class EEVEE_WORLD_PT_environment_lighting(WorldButtonsPanel, Panel):
+    bl_label = "Environment Lighting"
+    bl_parent_id = "EEVEE_WORLD_PT_settings"
+    bl_options = {'DEFAULT_CLOSED'}
+    COMPAT_ENGINES = {'BLENDER_EEVEE'}
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+
+        world = context.world
+        layout.prop(world, "environment_exclusion_collection", text="Exclude Collection")
+
+
 class EEVEE_WORLD_PT_sun(WorldButtonsPanel, Panel):
     bl_label = "Sun"
     bl_parent_id = "EEVEE_WORLD_PT_settings"
@@ -269,6 +283,7 @@ classes = (
     EEVEE_WORLD_PT_mist,
     EEVEE_WORLD_PT_settings,
     EEVEE_WORLD_PT_lightprobe,
+    EEVEE_WORLD_PT_environment_lighting,
     EEVEE_WORLD_PT_sun,
     EEVEE_WORLD_PT_sun_shadow,
     WORLD_PT_viewport_display,

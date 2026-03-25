@@ -42,6 +42,7 @@ void forward_lighting_eval(float thickness, float3 &radiance, float3 &transmitta
    * by 1 for this evaluation and skip evaluating the transmission closure twice. */
   ObjectInfos object_infos = drw_infos[drw_resource_id()];
   uchar receiver_light_set = receiver_light_set_get(object_infos);
+  bool world_environment_disabled = world_environment_disabled_get(object_infos);
   float normal_offset = object_infos.shadow_terminator_normal_offset;
   float geometry_offset = object_infos.shadow_terminator_geometry_offset;
   light_eval_reflection(
@@ -92,10 +93,14 @@ void forward_lighting_eval(float thickness, float3 &radiance, float3 &transmitta
   }
 #endif
 
-  LightProbeSample samp = lightprobe_load(g_data.P, g_data.Ng, V);
+  LightProbeSample samp;
+  if (!world_environment_disabled) {
+    samp = lightprobe_load(g_data.P, g_data.Ng, V);
 
-  float clamp_indirect_sh = uniform_buf.clamp.surface_indirect;
-  samp.volume_irradiance = spherical_harmonics_clamp(samp.volume_irradiance, clamp_indirect_sh);
+    float clamp_indirect_sh = uniform_buf.clamp.surface_indirect;
+    samp.volume_irradiance = spherical_harmonics_clamp(samp.volume_irradiance,
+                                                       clamp_indirect_sh);
+  }
 
   /* Combine all radiance. */
   float3 radiance_direct = float3(0.0f);
@@ -104,7 +109,10 @@ void forward_lighting_eval(float thickness, float3 &radiance, float3 &transmitta
     ClosureUndetermined cl = g_closure_get_resolved(i, 1.0f);
     if (cl.weight > CLOSURE_WEIGHT_CUTOFF) {
       float3 direct_light = closure_light_get(stack, i).light_shadowed;
-      float3 indirect_light = lightprobe_eval(samp, cl, g_data.P, V, thickness);
+      float3 indirect_light = float3(0.0f);
+      if (!world_environment_disabled) {
+        indirect_light = lightprobe_eval(samp, cl, g_data.P, V, thickness);
+      }
 
       if ((cl.type == CLOSURE_BSDF_TRANSLUCENT_ID ||
            cl.type == CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID) &&

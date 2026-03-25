@@ -15,9 +15,13 @@
 #include "BLI_listbase.h"
 #include "BLI_map.hh"
 
+#include "BKE_collection.hh"
+#include "BKE_light_linking.h"
+
 #include "DNA_collection_types.h"
 #include "DNA_object_types.h"
 #include "DNA_scene_types.h"
+#include "DNA_world_types.h"
 
 #include "DEG_depsgraph_light_linking.hh"
 #include "DEG_depsgraph_query.hh"
@@ -35,7 +39,7 @@ namespace deg::light_linking {
 void eval_runtime_data(const ::blender::Depsgraph *depsgraph, Object &object_eval)
 {
   const deg::Depsgraph *deg_graph = reinterpret_cast<const deg::Depsgraph *>(depsgraph);
-  deg_graph->light_linking_cache.eval_runtime_data(object_eval);
+  deg_graph->light_linking_cache.eval_runtime_data(depsgraph, object_eval);
 }
 
 }  // namespace deg::light_linking
@@ -432,41 +436,57 @@ void Cache::end_build(const Scene &scene)
   shadow_linking_.end_build(scene, shadow_emitter_data_map_);
 }
 
-void Cache::eval_runtime_data(Object &object_eval) const
+static bool world_environment_disabled(const ::blender::Depsgraph *depsgraph, Object &object_eval)
+{
+  const Scene *scene_eval = DEG_get_evaluated_scene(depsgraph);
+  if (scene_eval == nullptr || scene_eval->world == nullptr) {
+    return false;
+  }
+
+  Collection *collection_eval = scene_eval->world->environment_exclusion_collection;
+  if (collection_eval == nullptr) {
+    return false;
+  }
+
+  return BKE_collection_has_object_recursive_instanced_orig_id(collection_eval, &object_eval);
+}
+
+void Cache::eval_runtime_data(const ::blender::Depsgraph *depsgraph, Object &object_eval) const
 {
   static const LightLinkingRuntime runtime_no_links = {
-      EmitterSetMembership::SET_MEMBERSHIP_ALL, EmitterSetMembership::SET_MEMBERSHIP_ALL, 0, 0};
+      EmitterSetMembership::SET_MEMBERSHIP_ALL,
+      EmitterSetMembership::SET_MEMBERSHIP_ALL,
+      0,
+      0,
+      0};
 
-  if (!has_light_linking()) {
-    /* No light linking used in the scene, still reset to default on objects that have
-     * allocated light linking data structures since we can't free them here. */
+  const bool disable_world_environment = world_environment_disabled(depsgraph, object_eval);
+  if (!has_light_linking() && !disable_world_environment) {
     if (object_eval.light_linking) {
       object_eval.light_linking->runtime = runtime_no_links;
+      BKE_light_linking_free_if_empty(&object_eval);
     }
-
     return;
   }
 
-  /* Receiver and blocker configuration. */
-  LightLinkingRuntime runtime = {};
-  runtime.receiver_light_set = light_linking_.get_light_set_for(object_eval);
-  runtime.blocker_shadow_set = shadow_linking_.get_light_set_for(object_eval);
+  LightLinkingRuntime runtime = runtime_no_links;
+  runtime.world_environment_disabled = disable_world_environment ? 1 : 0;
 
-  /* Emitter configuration. */
-  const EmitterData *light_emitter_data = light_emitter_data_map_.get_data(object_eval);
-  if (light_emitter_data) {
-    runtime.light_set_membership = light_emitter_data->light_membership.get_mask();
-  }
-  else {
-    runtime.light_set_membership = EmitterSetMembership::SET_MEMBERSHIP_ALL;
-  }
+  if (has_light_linking()) {
+    /* Receiver and blocker configuration. */
+    runtime.receiver_light_set = light_linking_.get_light_set_for(object_eval);
+    runtime.blocker_shadow_set = shadow_linking_.get_light_set_for(object_eval);
 
-  const EmitterData *shadow_emitter_data = shadow_emitter_data_map_.get_data(object_eval);
-  if (shadow_emitter_data) {
-    runtime.shadow_set_membership = shadow_emitter_data->shadow_membership.get_mask();
-  }
-  else {
-    runtime.shadow_set_membership = EmitterSetMembership::SET_MEMBERSHIP_ALL;
+    /* Emitter configuration. */
+    const EmitterData *light_emitter_data = light_emitter_data_map_.get_data(object_eval);
+    if (light_emitter_data) {
+      runtime.light_set_membership = light_emitter_data->light_membership.get_mask();
+    }
+
+    const EmitterData *shadow_emitter_data = shadow_emitter_data_map_.get_data(object_eval);
+    if (shadow_emitter_data) {
+      runtime.shadow_set_membership = shadow_emitter_data->shadow_membership.get_mask();
+    }
   }
 
   const bool need_runtime = (memcmp(&runtime, &runtime_no_links, sizeof(runtime)) != 0);

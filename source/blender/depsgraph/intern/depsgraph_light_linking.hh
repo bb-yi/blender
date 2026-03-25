@@ -21,6 +21,7 @@ namespace blender {
 
 struct Collection;
 struct CollectionLightLinking;
+struct Depsgraph;
 struct Object;
 struct Scene;
 
@@ -246,7 +247,7 @@ class Cache {
   void end_build(const Scene &scene);
 
   /* Set runtime light linking data on evaluated object. */
-  void eval_runtime_data(Object &object_eval) const;
+  void eval_runtime_data(const ::blender::Depsgraph *depsgraph, Object &object_eval) const;
 
  private:
   /* Add emitter information specific for light and shadow linking. */

@@ -16,6 +16,7 @@
 namespace blender {
 
 struct AnimData;
+struct Collection;
 struct LightgroupMembership;
 struct bNodeTree;
 
@@ -139,7 +140,8 @@ struct World {
   /** Light-group membership information. */
   struct LightgroupMembership *lightgroup = nullptr;
 
-  void *_pad1 = nullptr;
+  /** Objects in this collection do not receive Eevee environment / light-probe lighting. */
+  struct Collection *environment_exclusion_collection = nullptr;
 
   /** Runtime. */
   ListBaseT<LinkData> gpumaterial = {nullptr, nullptr};

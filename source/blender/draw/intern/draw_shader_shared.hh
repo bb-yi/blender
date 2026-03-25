@@ -193,6 +193,11 @@ inline uint blocker_shadow_set_get(ObjectInfos object_infos)
   return (object_infos.light_and_shadow_set_membership >> 8u) & 0xFFu;
 }
 
+inline bool world_environment_disabled_get(ObjectInfos object_infos)
+{
+  return (object_infos.light_and_shadow_set_membership & 0x10000u) != 0u;
+}
+
 struct [[host_shared]] ObjectBounds {
   /**
    * Uploaded as vertex (0, 4, 3, 1) of the bbox in local space, matching XYZ axis order.
