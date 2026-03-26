@@ -2,6 +2,20 @@
 
 这份文档汇总当前已经发布到 GitHub 的 `Blender 5.1 NPR Port` Release 说明，按发布时间从新到旧整理。
 
+## 待发布草稿
+
+### 当前版本相对 `v5.1.0-npr-port-win64-710a1b4934d6`
+
+#### 新增功能
+- `Shader Info` 节点新增 `Soft Filtered` 阴影模式。
+- World 面板新增 `Environment Lighting > Exclude Collection`。
+  - 可指定一个集合，让其中物体不接收 Eevee 世界环境和 light probe 的环境照明。
+
+#### 修复与改进
+- 修复 `Shader To RGB` 在 `NPR / deferred` 路径下的兼容问题，补齐 `closure_to_rgba` 缺失实现。
+- 修复 GPU shader preprocessor 的若干稳定性问题。
+- 调整部分 Eevee shader create info 配置，减少特定 shader 走预处理器路径时的不稳定问题。
+
 ## 发布列表
 
 | 发布时间 | Tag | 构建哈希 |
@@ -14,7 +28,6 @@
 | 2026-03-19 | `v5.1.0-npr-port-win64-c4b7253e825b` | `c4b7253e825b` |
 
 ## 2026-03-25
-
 
 ### `v5.1.0-npr-port-win64-710a1b4934d6`
 
@@ -41,9 +54,7 @@
 - **平台**：`Windows x64`
 - **构建系统**：`CMake`
 
-
 ## 2026-03-23
-
 
 ### `v5.1.0-npr-port-win64-66ed2fb9cad6`
 
@@ -64,9 +75,7 @@
 - **平台**：`Windows x64`
 - **构建系统**：`CMake`
 
-
 ## 2026-03-22
-
 
 ### `v5.1.0-npr-port-win64-19c826ccb5ee`
 
@@ -88,7 +97,6 @@
 - **平台**：`Windows x64`
 - **构建系统**：`CMake`
 
-
 ### `v5.1.0-npr-port-win64-0b5a1dd68c06`
 
 发布链接：https://github.com/bb-yi/blender/releases/tag/v5.1.0-npr-port-win64-0b5a1dd68c06
@@ -105,9 +113,7 @@
 - **平台**：`Windows x64`
 - **构建系统**：`CMake`
 
-
 ## 2026-03-21
-
 
 ### `v5.1.0-npr-port-win64-e3f8fa33c23f`
 
@@ -133,9 +139,7 @@
 - 平台：`Windows x64`
 - 构建系统：`CMake`
 
-
 ## 2026-03-19
-
 
 ### `v5.1.0-npr-port-win64-c4b7253e825b`
 

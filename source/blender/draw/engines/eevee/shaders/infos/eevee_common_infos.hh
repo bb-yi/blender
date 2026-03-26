@@ -50,6 +50,10 @@ GPU_SHADER_CREATE_INFO(eevee_utility_texture)
 SAMPLER(RBUFS_UTILITY_TEX_SLOT, sampler2DArray, utility_tx)
 GPU_SHADER_CREATE_END()
 
+GPU_SHADER_CREATE_INFO(eevee_no_preprocessor)
+BUILTINS(BuiltinBits::NO_PREPROCESSOR)
+GPU_SHADER_CREATE_END()
+
 GPU_SHADER_CREATE_INFO(eevee_render_texture_data)
 TYPEDEF_SOURCE("eevee_render_texture_shared.hh")
 STORAGE_BUF(RENDER_TEXTURE_BUF_SLOT, read, RenderTextureData, render_texture_buf[])

@@ -539,6 +539,9 @@ struct IntermediateFormWithIDs : IntermediateForm<AtomicLexer, NullParser> {
    */
   TokenType get_type(TokenID tok)
   {
+    if (UNLIKELY(!is_valid(tok))) {
+      return Invalid;
+    }
     return lex_.token_types[int(tok)];
   }
   DirectiveType get_type(DirectiveID dir)
@@ -883,20 +886,20 @@ struct Preprocessor : IntermediateFormWithIDs {
   {
     int start = int(get_start(start_line));
     int end = int(get_true_end(end_line));
-    if (start > end) {
+    if (start > end || start < 0 || end >= lex_.token_types.size()) {
       return;
     }
 
-    TokenID end_tok = make_token(end);
-    for (TokenID tok = make_token(start); tok != end_tok; tok = next(tok)) {
+    for (int tok_index = start; tok_index < end; tok_index++) {
+      TokenID tok = make_token(tok_index);
       if (get_type(tok) == Word) {
         DirectiveID macro_id = defines.lookup_default(get_atom(tok), DirectiveID::invalid());
         if (is_valid(macro_id)) {
           Token token = parser_[int(tok)];
-          auto [replacement, end] = expand_macro(token, macro_id);
-          replace(token, end, replacement);
-          tok = make_token(end.index);
-          if (tok == end_tok) {
+          auto [replacement, end_token] = expand_macro(token, macro_id);
+          replace(token, end_token, replacement);
+          tok_index = end_token.index;
+          if (tok_index >= end) {
             break;
           }
         }

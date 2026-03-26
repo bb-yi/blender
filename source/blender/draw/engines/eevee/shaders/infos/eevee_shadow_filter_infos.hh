@@ -13,7 +13,6 @@
 #include "gpu_shader_create_info.hh"
 
 GPU_SHADER_CREATE_INFO(eevee_shadow_mask_filter_common)
-DO_STATIC_COMPILATION()
 SAMPLER(1, sampler2DDepth, depth_tx)
 PUSH_CONSTANT(int2, filter_direction)
 FRAGMENT_OUT(0, float, out_visibility)
@@ -23,11 +22,13 @@ ADDITIONAL_INFO(eevee_fullscreen)
 GPU_SHADER_CREATE_END()
 
 GPU_SHADER_CREATE_INFO(eevee_shadow_mask_filter)
+DO_STATIC_COMPILATION()
 ADDITIONAL_INFO(eevee_shadow_mask_filter_common)
 SAMPLER(0, sampler2D, shadow_tx)
 GPU_SHADER_CREATE_END()
 
 GPU_SHADER_CREATE_INFO(eevee_shadow_mask_filter_layered)
+DO_STATIC_COMPILATION()
 ADDITIONAL_INFO(eevee_shadow_mask_filter_common)
 DEFINE("SHADOW_FILTER_LAYERED_INPUT")
 SAMPLER(0, sampler2DArray, shadow_tx)

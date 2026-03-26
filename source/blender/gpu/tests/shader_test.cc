@@ -827,6 +827,26 @@ float s = clamp(pow5f(1.0f - clamp(HV, 0.0f, 1.0f)), 0.0f, 1.0f);
   }
   {
     std::string input = R"(
+#define LIGHT_FOREACH_BEGIN_DIRECTIONAL(_culling, _index) \
+  { \
+    { \
+      for (uint _index = _culling.local_lights_len; _index < _culling.items_count; _index++) {
+#define LIGHT_FOREACH_END \
+  } \
+  } \
+  }
+LIGHT_FOREACH_BEGIN_DIRECTIONAL(light_cull_buf, l_idx)
+  light_accum += uint(l_idx);
+LIGHT_FOREACH_END
+)";
+    std::string result = blender::gpu::Shader::run_preprocessor(input);
+    EXPECT_NE(result.find("for (uint l_idx = light_cull_buf.local_lights_len;"),
+              std::string::npos);
+    EXPECT_NE(result.find("l_idx < light_cull_buf.items_count;"), std::string::npos);
+    EXPECT_NE(result.find("light_accum += uint(l_idx);"), std::string::npos);
+  }
+  {
+    std::string input = R"(
 #define POINTS
 H
 #if defined(POINTS)

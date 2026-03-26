@@ -36,6 +36,7 @@
 
 GPU_SHADER_CREATE_INFO(eevee_surf_forward)
 DEFINE("MAT_FORWARD")
+ADDITIONAL_INFO(eevee_no_preprocessor)
 TYPEDEF_SOURCE("eevee_render_texture_shared.hh")
 /* Early fragment test is needed for render passes support for forward surfaces. */
 /* NOTE: This removes the possibility of using gl_FragDepth. */

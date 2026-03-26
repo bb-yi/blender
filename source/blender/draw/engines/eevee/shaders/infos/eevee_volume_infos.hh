@@ -29,6 +29,7 @@
 GPU_SHADER_CREATE_INFO(eevee_volume_scatter)
 LOCAL_GROUP_SIZE(VOLUME_GROUP_SIZE, VOLUME_GROUP_SIZE, VOLUME_GROUP_SIZE)
 TYPEDEF_SOURCE("eevee_defines.hh")
+ADDITIONAL_INFO(eevee_no_preprocessor)
 ADDITIONAL_INFO(eevee_global_ubo)
 ADDITIONAL_INFO(draw_resource_id_varying)
 ADDITIONAL_INFO(draw_view)

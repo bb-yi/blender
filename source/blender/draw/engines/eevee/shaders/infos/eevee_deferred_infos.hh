@@ -26,6 +26,7 @@
 GPU_SHADER_CREATE_INFO(eevee_deferred_thickness_amend)
 DO_STATIC_COMPILATION()
 DEFINE("GBUFFER_LOAD")
+ADDITIONAL_INFO(eevee_no_preprocessor)
 SAMPLER(0, usampler2DArray, gbuf_header_tx)
 IMAGE(0, UNORM_16_16, read_write, image2DArray, gbuf_normal_img)
 /* Early fragment test is needed to discard fragment that do not need this processing. */
@@ -54,6 +55,7 @@ GPU_SHADER_CREATE_END()
 
 GPU_SHADER_CREATE_INFO(eevee_deferred_light)
 FRAGMENT_SOURCE("eevee_deferred_light_frag.glsl")
+ADDITIONAL_INFO(eevee_no_preprocessor)
 /* Early fragment test is needed to avoid processing background fragments. */
 EARLY_FRAGMENT_TEST(true)
 FRAGMENT_OUT(0, float4, out_combined)
@@ -148,6 +150,7 @@ GPU_SHADER_CREATE_INFO(eevee_deferred_capture_eval)
 EARLY_FRAGMENT_TEST(true)
 /* Inputs. */
 FRAGMENT_OUT(0, float4, out_radiance)
+ADDITIONAL_INFO(eevee_no_preprocessor)
 DEFINE_VALUE("LIGHT_CLOSURE_EVAL_COUNT", "1")
 TYPEDEF_SOURCE("eevee_defines.hh")
 ADDITIONAL_INFO(eevee_gbuffer_data)
@@ -169,6 +172,7 @@ GPU_SHADER_CREATE_INFO(eevee_deferred_planar_eval)
 EARLY_FRAGMENT_TEST(true)
 /* Inputs. */
 FRAGMENT_OUT(0, float4, out_radiance)
+ADDITIONAL_INFO(eevee_no_preprocessor)
 DEFINE("SPHERE_PROBE")
 DEFINE_VALUE("LIGHT_CLOSURE_EVAL_COUNT", "2")
 TYPEDEF_SOURCE("eevee_defines.hh")
