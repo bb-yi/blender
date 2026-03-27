@@ -76,6 +76,14 @@ if (-not $remoteExists) {
 # Step 4: Check for changes
 WriteSection "STEP 4: Checking Local Changes"
 
+# First ensure we have a main branch
+Write-Host "Ensuring main branch exists..." -ForegroundColor White
+$branchExists = git branch | Select-String "main"
+if (-not $branchExists) {
+    Write-Host "Creating main branch..." -ForegroundColor White
+    git checkout -b main 2>&1 | Out-Null
+}
+
 $status = git status --porcelain
 if ($status) {
     Write-Host "Found changes to commit:" -ForegroundColor White
@@ -88,7 +96,18 @@ if ($status) {
     git commit -m $CommitMessage
     WriteOk "Changes committed"
 } else {
-    WriteOk "No changes to commit"
+    Write-Host "No changes to commit, but creating initial commit if needed..." -ForegroundColor White
+    # Check if there are any commits
+    $hasCommits = git rev-parse HEAD 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        # No commits yet, create initial commit
+        Write-Host "Creating initial commit..." -ForegroundColor White
+        git add .
+        git commit -m "Initial commit: Blender 5.1 NPR Port Documentation" 2>&1 | Out-Null
+        WriteOk "Initial commit created"
+    } else {
+        WriteOk "Repository already has commits"
+    }
 }
 
 # Step 5: Deploy to GitHub Pages
@@ -108,17 +127,35 @@ try {
 WriteSection "STEP 6: Pushing Main Branch"
 
 Write-Host "Pushing to origin/main..." -ForegroundColor White
+$pushSuccess = $false
+
+# Try main branch first
 try {
-    git push -u origin main 2>&1
-    WriteOk "Main branch pushed"
-} catch {
-    WriteWarn "Trying master branch instead..."
-    try {
-        git push -u origin master 2>&1
-        WriteOk "Master branch pushed"
-    } catch {
-        WriteWarn "Could not push branch (may already exist)"
+    $output = git push -u origin main 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        WriteOk "Main branch pushed"
+        $pushSuccess = $true
     }
+} catch {
+    # Silently continue to try master
+}
+
+# If main failed, try master
+if (-not $pushSuccess) {
+    Write-Host "Trying master branch instead..." -ForegroundColor White
+    try {
+        $output = git push -u origin master 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            WriteOk "Master branch pushed"
+            $pushSuccess = $true
+        }
+    } catch {
+        # Continue anyway
+    }
+}
+
+if (-not $pushSuccess) {
+    WriteWarn "Branch push skipped (may already exist or no network)"
 }
 
 # Success
