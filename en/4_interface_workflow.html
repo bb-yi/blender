@@ -15,6 +15,10 @@
         <link rel="canonical" href="https://bb-yi.github.io/blender/en/4_interface_workflow.html">
       
       
+        <link rel="prev" href="3_npr_tree_workflow.html">
+      
+      
+        <link rel="next" href="../zh/index.html">
       
       
       <link rel="icon" href="../assets/images/favicon.png">
@@ -22,7 +26,7 @@
     
     
       
-        <title>Interface & Settings Guide - Blender 5.1 NPR Port | Documentation</title>
+        <title>Interface Guide - Blender 5.1 NPR Port | Documentation</title>
       
     
     
@@ -110,7 +114,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Interface &amp; Settings Guide
+              Interface Guide
             
           </span>
         </div>
@@ -231,7 +235,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../index.md" class="md-tabs__link">
+      <a href="index.html" class="md-tabs__link">
         
   
   
@@ -248,11 +252,13 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
-        <a href="../1_scene_level_extension.md" class="md-tabs__link">
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="1_scene_level_extension.html" class="md-tabs__link">
           
   
   
@@ -330,7 +336,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../index.md" class="md-nav__link">
+      <a href="index.html" class="md-nav__link">
         
   
   
@@ -349,26 +355,29 @@
       
   
   
+    
   
   
+  
     
     
     
     
-      
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
       
         
+        
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
-        
-          
-          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
             
   
   
@@ -381,7 +390,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_2">
             <span class="md-nav__icon md-icon"></span>
             Documentation
@@ -395,7 +404,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../1_scene_level_extension.md" class="md-nav__link">
+      <a href="1_scene_level_extension.html" class="md-nav__link">
         
   
   
@@ -418,7 +427,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../2_extended_nodes.md" class="md-nav__link">
+      <a href="2_extended_nodes.html" class="md-nav__link">
         
   
   
@@ -441,7 +450,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../3_npr_tree_workflow.md" class="md-nav__link">
+      <a href="3_npr_tree_workflow.html" class="md-nav__link">
         
   
   
@@ -461,10 +470,32 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../4_interface_workflow.md" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    Interface Guide
+    
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="4_interface_workflow.html" class="md-nav__link md-nav__link--active">
         
   
   
@@ -475,6 +506,308 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#material-preview-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      Material Preview Settings
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Material Preview Settings">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#material-selector-preview-toggle" class="md-nav__link">
+    <span class="md-ellipsis">
+      Material Selector Preview Toggle
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#world-environment-exclusion" class="md-nav__link">
+    <span class="md-ellipsis">
+      World Environment Exclusion
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="World Environment Exclusion">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#exclude-objects-from-world-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      Exclude Objects from World Environment
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#lightgroup-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      Lightgroup Configuration
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Lightgroup Configuration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lightgroup-id-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      Lightgroup ID Settings
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#startup-splash-information" class="md-nav__link">
+    <span class="md-ellipsis">
+      Startup Splash Information
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Startup Splash Information">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#version-feature-information" class="md-nav__link">
+    <span class="md-ellipsis">
+      Version &amp; Feature Information
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#quick-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      Quick Reference
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Quick Reference">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#eevee-vs-cycles-feature-support" class="md-nav__link">
+    <span class="md-ellipsis">
+      Eevee vs Cycles Feature Support
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#viewport-shading-modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      Viewport Shading Modes
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#useful-shortcuts" class="md-nav__link">
+    <span class="md-ellipsis">
+      Useful Shortcuts
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#common-problems-solutions" class="md-nav__link">
+    <span class="md-ellipsis">
+      Common Problems &amp; Solutions
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Common Problems &amp; Solutions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#npr-tree-nodes-not-found" class="md-nav__link">
+    <span class="md-ellipsis">
+      "NPR Tree nodes not found"
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scene-color-not-working-in-filter" class="md-nav__link">
+    <span class="md-ellipsis">
+      "Scene Color not working in Filter"
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#render-textures-not-updating" class="md-nav__link">
+    <span class="md-ellipsis">
+      "Render Textures not updating"
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#filter-materials-causing-artifacts" class="md-nav__link">
+    <span class="md-ellipsis">
+      "Filter Materials causing artifacts"
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#material-colors-look-wrong" class="md-nav__link">
+    <span class="md-ellipsis">
+      "Material colors look wrong"
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#editor-shortcuts-not-working" class="md-nav__link">
+    <span class="md-ellipsis">
+      "Editor shortcuts not working"
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#performance-optimization" class="md-nav__link">
+    <span class="md-ellipsis">
+      Performance Optimization
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Performance Optimization">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tips-for-better-performance" class="md-nav__link">
+    <span class="md-ellipsis">
+      Tips for Better Performance
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#profiling-debugging" class="md-nav__link">
+    <span class="md-ellipsis">
+      Profiling &amp; Debugging
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#advanced-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      Advanced Configuration
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Advanced Configuration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#environment-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      Environment Variables
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#debug-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      Debug Output
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#support-resources" class="md-nav__link">
+    <span class="md-ellipsis">
+      Support &amp; Resources
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 

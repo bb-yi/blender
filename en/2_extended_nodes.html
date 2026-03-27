@@ -15,6 +15,10 @@
         <link rel="canonical" href="https://bb-yi.github.io/blender/en/2_extended_nodes.html">
       
       
+        <link rel="prev" href="1_scene_level_extension.html">
+      
+      
+        <link rel="next" href="3_npr_tree_workflow.html">
       
       
       <link rel="icon" href="../assets/images/favicon.png">
@@ -22,7 +26,7 @@
     
     
       
-        <title>Extended Nodes Reference - Blender 5.1 NPR Port | Documentation</title>
+        <title>Extended Nodes - Blender 5.1 NPR Port | Documentation</title>
       
     
     
@@ -110,7 +114,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Extended Nodes Reference
+              Extended Nodes
             
           </span>
         </div>
@@ -231,7 +235,7 @@
   
   
     <li class="md-tabs__item">
-      <a href="../index.md" class="md-tabs__link">
+      <a href="index.html" class="md-tabs__link">
         
   
   
@@ -248,11 +252,13 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
-        <a href="../1_scene_level_extension.md" class="md-tabs__link">
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="1_scene_level_extension.html" class="md-tabs__link">
           
   
   
@@ -330,7 +336,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../index.md" class="md-nav__link">
+      <a href="index.html" class="md-nav__link">
         
   
   
@@ -349,26 +355,29 @@
       
   
   
+    
   
   
+  
     
     
     
     
-      
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
       
         
+        
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
-        
-          
-          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
             
   
   
@@ -381,7 +390,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_2">
             <span class="md-nav__icon md-icon"></span>
             Documentation
@@ -395,7 +404,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../1_scene_level_extension.md" class="md-nav__link">
+      <a href="1_scene_level_extension.html" class="md-nav__link">
         
   
   
@@ -415,10 +424,32 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../2_extended_nodes.md" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    Extended Nodes
+    
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="2_extended_nodes.html" class="md-nav__link md-nav__link--active">
         
   
   
@@ -429,6 +460,215 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#eevee-utility-nodes" class="md-nav__link">
+    <span class="md-ellipsis">
+      Eevee Utility Nodes
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Eevee Utility Nodes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#render-info" class="md-nav__link">
+    <span class="md-ellipsis">
+      Render Info
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scene-time" class="md-nav__link">
+    <span class="md-ellipsis">
+      Scene Time
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#screen-derivative" class="md-nav__link">
+    <span class="md-ellipsis">
+      Screen Derivative
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#portal-in-out" class="md-nav__link">
+    <span class="md-ellipsis">
+      Portal In / Out
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#screenspace-info" class="md-nav__link">
+    <span class="md-ellipsis">
+      Screenspace Info
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#world-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      World Environment
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#world-to-tangent" class="md-nav__link">
+    <span class="md-ellipsis">
+      World To Tangent
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#object-material-nodes" class="md-nav__link">
+    <span class="md-ellipsis">
+      Object Material Nodes
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Object Material Nodes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#bevel" class="md-nav__link">
+    <span class="md-ellipsis">
+      Bevel
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#curvature" class="md-nav__link">
+    <span class="md-ellipsis">
+      Curvature
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#shader-info" class="md-nav__link">
+    <span class="md-ellipsis">
+      Shader Info
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#light-info" class="md-nav__link">
+    <span class="md-ellipsis">
+      Light Info
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#render-texture" class="md-nav__link">
+    <span class="md-ellipsis">
+      Render Texture
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#filter-domain-nodes" class="md-nav__link">
+    <span class="md-ellipsis">
+      Filter Domain Nodes
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Filter Domain Nodes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scene-color" class="md-nav__link">
+    <span class="md-ellipsis">
+      Scene Color
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#filter-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      Filter Output
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#node-organization" class="md-nav__link">
+    <span class="md-ellipsis">
+      Node Organization
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tips-best-practices" class="md-nav__link">
+    <span class="md-ellipsis">
+      Tips &amp; Best Practices
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -441,7 +681,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../3_npr_tree_workflow.md" class="md-nav__link">
+      <a href="3_npr_tree_workflow.html" class="md-nav__link">
         
   
   
@@ -464,7 +704,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../4_interface_workflow.md" class="md-nav__link">
+      <a href="4_interface_workflow.html" class="md-nav__link">
         
   
   
