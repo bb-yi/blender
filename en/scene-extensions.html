@@ -1,22 +1,24 @@
 
 <!doctype html>
-<html lang="zh" class="no-js">
+<html lang="en" class="no-js">
   <head>
     
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Blender 5.1 NPR Port 新增功能与使用说明">
+        <meta name="description" content="Blender 5.1 NPR Port Features & Usage Guide">
       
       
         <meta name="author" content="NPR Port Team">
       
       
-        <link rel="canonical" href="https://bb-yi.github.io/blender/index.html">
+        <link rel="canonical" href="https://bb-yi.github.io/blender/en/scene-extensions.html">
       
       
+        <link rel="prev" href="index.html">
       
-        <link rel="next" href="scene-extensions.html">
+      
+        <link rel="next" href="extended-nodes.html">
       
       
       <link rel="icon" href="assets/images/favicon.png">
@@ -24,7 +26,7 @@
     
     
       
-        <title>Blender 5.1 NPR Port 文档</title>
+        <title>Scene Extensions - Blender 5.1 NPR Port Documentation</title>
       
     
     
@@ -76,8 +78,8 @@
     <div data-md-component="skip">
       
         
-        <a href="#blender-51-npr-port-" class="md-skip">
-          跳转至
+        <a href="#scene-level-eevee-extensions" class="md-skip">
+          Skip to content
         </a>
       
     </div>
@@ -91,8 +93,8 @@
   
 
 <header class="md-header md-header--shadow" data-md-component="header">
-  <nav class="md-header__inner md-grid" aria-label="页眉">
-    <a href="index.html" title="Blender 5.1 NPR Port 文档" class="md-header__button md-logo" aria-label="Blender 5.1 NPR Port 文档" data-md-component="logo">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="index.html" title="Blender 5.1 NPR Port Documentation" class="md-header__button md-logo" aria-label="Blender 5.1 NPR Port Documentation" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -106,13 +108,13 @@
       <div class="md-header__ellipsis">
         <div class="md-header__topic">
           <span class="md-ellipsis">
-            Blender 5.1 NPR Port 文档
+            Blender 5.1 NPR Port Documentation
           </span>
         </div>
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              首页
+              Scene Extensions
             
           </span>
         </div>
@@ -125,9 +127,9 @@
     
     
     
-    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="red"  aria-label="深色模式"  type="radio" name="__palette" id="__palette_0">
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="red"  aria-label="Dark mode"  type="radio" name="__palette" id="__palette_0">
     
-      <label class="md-header__button md-icon" title="深色模式" for="__palette_1" hidden>
+      <label class="md-header__button md-icon" title="Dark mode" for="__palette_1" hidden>
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
       </label>
     
@@ -135,9 +137,9 @@
     
     
     
-    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="red"  aria-label="亮色模式"  type="radio" name="__palette" id="__palette_1">
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="red"  aria-label="Light mode"  type="radio" name="__palette" id="__palette_1">
     
-      <label class="md-header__button md-icon" title="亮色模式" for="__palette_0" hidden>
+      <label class="md-header__button md-icon" title="Light mode" for="__palette_0" hidden>
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
       </label>
     
@@ -152,21 +154,21 @@
       <div class="md-header__option">
   <div class="md-select">
     
-    <button class="md-header__button md-icon" aria-label="选择当前语言">
+    <button class="md-header__button md-icon" aria-label="Select language">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m12.87 15.07-2.54-2.51.03-.03A17.5 17.5 0 0 0 14.07 6H17V4h-7V2H8v2H1v2h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2zm-2.62 7 1.62-4.33L19.12 17z"/></svg>
     </button>
     <div class="md-select__inner">
       <ul class="md-select__list">
         
           <li class="md-select__item">
-            <a href="/blender/" hreflang="zh" class="md-select__link">
-              中文
+            <a href="/blender/en/" hreflang="en" class="md-select__link">
+              English
             </a>
           </li>
         
           <li class="md-select__item">
-            <a href="/blender/en/" hreflang="en" class="md-select__link">
-              English
+            <a href="/blender/" hreflang="zh" class="md-select__link">
+              中文
             </a>
           </li>
         
@@ -186,16 +188,16 @@
   <label class="md-search__overlay" for="__search"></label>
   <div class="md-search__inner" role="search">
     <form class="md-search__form" name="search">
-      <input type="text" class="md-search__input" name="query" aria-label="搜索" placeholder="搜索" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
       <label class="md-search__icon md-icon" for="__search">
         
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
         
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
       </label>
-      <nav class="md-search__options" aria-label="查找">
+      <nav class="md-search__options" aria-label="Search">
         
-        <button type="reset" class="md-search__icon md-icon" title="清空当前内容" aria-label="清空当前内容" tabindex="-1">
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
           
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
         </button>
@@ -208,7 +210,7 @@
       <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
         <div class="md-search-result" data-md-component="search-result">
           <div class="md-search-result__meta">
-            正在初始化搜索引擎
+            Initializing search
           </div>
           <ol class="md-search-result__list" role="presentation"></ol>
         </div>
@@ -242,18 +244,40 @@
 
 
 
-<nav class="md-nav md-nav--primary" aria-label="导航栏" data-md-level="0">
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="index.html" title="Blender 5.1 NPR Port 文档" class="md-nav__button md-logo" aria-label="Blender 5.1 NPR Port 文档" data-md-component="logo">
+    <a href="index.html" title="Blender 5.1 NPR Port Documentation" class="md-nav__button md-logo" aria-label="Blender 5.1 NPR Port Documentation" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
 
     </a>
-    Blender 5.1 NPR Port 文档
+    Blender 5.1 NPR Port Documentation
   </label>
   
   <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="index.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Home
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
     
       
       
@@ -276,7 +300,7 @@
   
   
   <span class="md-ellipsis">
-    首页
+    Scene Extensions
     
   </span>
   
@@ -284,12 +308,12 @@
           <span class="md-nav__icon md-icon"></span>
         </label>
       
-      <a href="index.html" class="md-nav__link md-nav__link--active">
+      <a href="scene-extensions.html" class="md-nav__link md-nav__link--active">
         
   
   
   <span class="md-ellipsis">
-    首页
+    Scene Extensions
     
   </span>
   
@@ -298,7 +322,7 @@
       
         
 
-<nav class="md-nav md-nav--secondary" aria-label="目录">
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
   
   
   
@@ -307,69 +331,51 @@
   
     <label class="md-nav__title" for="__toc">
       <span class="md-nav__icon md-icon"></span>
-      目录
+      Table of contents
     </label>
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#_1" class="md-nav__link">
+  <a href="#render-textures" class="md-nav__link">
     <span class="md-ellipsis">
-      项目介绍
+      Render Textures
     </span>
   </a>
   
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_2" class="md-nav__link">
-    <span class="md-ellipsis">
-      文档范围
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_3" class="md-nav__link">
-    <span class="md-ellipsis">
-      主要功能分类
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="主要功能分类">
+    <nav class="md-nav" aria-label="Render Textures">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#1-scene-eevee" class="md-nav__link">
+  <a href="#feature-description" class="md-nav__link">
     <span class="md-ellipsis">
-      1. Scene 级 Eevee 扩展
+      Feature Description
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#2-20" class="md-nav__link">
+  <a href="#panel-entry-point" class="md-nav__link">
     <span class="md-ellipsis">
-      2. 着色器节点（20+ 个新节点）
+      Panel Entry Point
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#3-npr-tree" class="md-nav__link">
+  <a href="#configurable-parameters" class="md-nav__link">
     <span class="md-ellipsis">
-      3. NPR Tree 工作流
+      Configurable Parameters
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#4" class="md-nav__link">
+  <a href="#basic-usage" class="md-nav__link">
     <span class="md-ellipsis">
-      4. 界面与设置
+      Basic Usage
     </span>
   </a>
   
@@ -381,11 +387,53 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#_4" class="md-nav__link">
+  <a href="#filter-materials" class="md-nav__link">
     <span class="md-ellipsis">
-      快速链接
+      Filter Materials
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Filter Materials">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#feature-description_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      Feature Description
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#panel-entry-point_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      Panel Entry Point
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#basic-usage_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      Basic Usage
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#execution-stages" class="md-nav__link">
+    <span class="md-ellipsis">
+      Execution Stages
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -404,34 +452,12 @@
   
   
     <li class="md-nav__item">
-      <a href="scene-extensions.html" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    Scene 级 Eevee 扩展
-    
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="extended-nodes.html" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
-    扩展着色器节点
+    Extended Nodes
     
   </span>
   
@@ -453,7 +479,7 @@
   
   
   <span class="md-ellipsis">
-    NPR Tree 工作流
+    NPR Workflow
     
   </span>
   
@@ -475,7 +501,7 @@
   
   
   <span class="md-ellipsis">
-    界面与设置
+    Interface & Settings
     
   </span>
   
@@ -498,7 +524,7 @@
                   <div class="md-sidebar__inner">
                     
 
-<nav class="md-nav md-nav--secondary" aria-label="目录">
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
   
   
   
@@ -507,69 +533,51 @@
   
     <label class="md-nav__title" for="__toc">
       <span class="md-nav__icon md-icon"></span>
-      目录
+      Table of contents
     </label>
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#_1" class="md-nav__link">
+  <a href="#render-textures" class="md-nav__link">
     <span class="md-ellipsis">
-      项目介绍
+      Render Textures
     </span>
   </a>
   
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_2" class="md-nav__link">
-    <span class="md-ellipsis">
-      文档范围
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_3" class="md-nav__link">
-    <span class="md-ellipsis">
-      主要功能分类
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="主要功能分类">
+    <nav class="md-nav" aria-label="Render Textures">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#1-scene-eevee" class="md-nav__link">
+  <a href="#feature-description" class="md-nav__link">
     <span class="md-ellipsis">
-      1. Scene 级 Eevee 扩展
+      Feature Description
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#2-20" class="md-nav__link">
+  <a href="#panel-entry-point" class="md-nav__link">
     <span class="md-ellipsis">
-      2. 着色器节点（20+ 个新节点）
+      Panel Entry Point
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#3-npr-tree" class="md-nav__link">
+  <a href="#configurable-parameters" class="md-nav__link">
     <span class="md-ellipsis">
-      3. NPR Tree 工作流
+      Configurable Parameters
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#4" class="md-nav__link">
+  <a href="#basic-usage" class="md-nav__link">
     <span class="md-ellipsis">
-      4. 界面与设置
+      Basic Usage
     </span>
   </a>
   
@@ -581,11 +589,53 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#_4" class="md-nav__link">
+  <a href="#filter-materials" class="md-nav__link">
     <span class="md-ellipsis">
-      快速链接
+      Filter Materials
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Filter Materials">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#feature-description_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      Feature Description
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#panel-entry-point_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      Panel Entry Point
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#basic-usage_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      Basic Usage
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#execution-stages" class="md-nav__link">
+    <span class="md-ellipsis">
+      Execution Stages
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -605,50 +655,102 @@
 
 
 
-<h1 id="blender-51-npr-port-">Blender 5.1 NPR Port - 新增功能与使用说明<a class="headerlink" href="#blender-51-npr-port-" title="Permanent link">&para;</a></h1>
-<h2 id="_1">项目介绍<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
-<p><code>Blender 5.1 NPR Port</code> 是一个NPR特化的Blender分支，在融合了 <code>Goo Engine</code> 和 <code>4.4 NPR-prototype</code> 特色节点之外还额外添加一些实用特色节点。</p>
-<p>大部分功能是 <code>Eevee</code> 专用，不支持 <code>Cycles</code>。</p>
-<h2 id="_2">文档范围<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
-<p>这份文档说明当前 <code>Blender 5.1 NPR Port</code> 相比官方 <code>Blender 5.1</code> 已经加入、并且当前分支内实际存在的 NPR / Eevee 扩展功能，以及它们的基本使用方法。</p>
-<h2 id="_3">主要功能分类<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
-<h3 id="1-scene-eevee">1. Scene 级 Eevee 扩展<a class="headerlink" href="#1-scene-eevee" title="Permanent link">&para;</a></h3>
+<h1 id="scene-level-eevee-extensions">Scene-Level Eevee Extensions<a class="headerlink" href="#scene-level-eevee-extensions" title="Permanent link">&para;</a></h1>
+<h2 id="render-textures">Render Textures<a class="headerlink" href="#render-textures" title="Permanent link">&para;</a></h2>
+<h3 id="feature-description">Feature Description<a class="headerlink" href="#feature-description" title="Permanent link">&para;</a></h3>
+<p><code>Render Textures</code> is a scene-level Eevee additional render texture system.</p>
+<p>It allows the scene to maintain up to <code>4</code> Render Texture slots, each of which can specify a camera and an output type. The scene result from that camera perspective is first rendered into a texture, then sampled in regular object materials through the <code>Render Texture</code> node.</p>
+<h3 id="panel-entry-point">Panel Entry Point<a class="headerlink" href="#panel-entry-point" title="Permanent link">&para;</a></h3>
+<p><code>Scene Properties &gt; Render Textures</code></p>
+<h3 id="configurable-parameters">Configurable Parameters<a class="headerlink" href="#configurable-parameters" title="Permanent link">&para;</a></h3>
+<p>Each Render Texture entry currently supports:</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Name</code></td>
+<td>The identifier name of the texture entry for referencing in nodes</td>
+</tr>
+<tr>
+<td><code>Enabled</code></td>
+<td>Enable/disable rendering of this texture</td>
+</tr>
+<tr>
+<td><code>Source</code></td>
+<td>Choose what to capture: Color / Depth / Normal</td>
+</tr>
+<tr>
+<td><code>Camera</code></td>
+<td>Specify the camera for rendering this texture</td>
+</tr>
+<tr>
+<td><code>Resolution X/Y</code></td>
+<td>Output texture pixel dimensions</td>
+</tr>
+<tr>
+<td><code>Update Mode</code></td>
+<td>Update frequency: Every Sample / Every Frame / Manual</td>
+</tr>
+<tr>
+<td><code>Format</code></td>
+<td>Output precision: RGBA16F / RGBA32F / R16F / R32F</td>
+</tr>
+</tbody>
+</table>
+<h3 id="basic-usage">Basic Usage<a class="headerlink" href="#basic-usage" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Open <code>Scene Properties &gt; Render Textures</code></li>
+<li>Create a new entry</li>
+<li>Select Source, Camera, resolution and format</li>
+<li>Add a <code>Render Texture</code> node in object materials</li>
+<li>Select the corresponding entry in the node panel</li>
+<li>Use the node output in material calculations</li>
+</ol>
+<div class="admonition tip">
+<p class="admonition-title">Tip</p>
+<p>Perfect for creating real-time reflections, screen-space effects, and dynamic textures.</p>
+</div>
+<hr />
+<h2 id="filter-materials">Filter Materials<a class="headerlink" href="#filter-materials" title="Permanent link">&para;</a></h2>
+<h3 id="feature-description_1">Feature Description<a class="headerlink" href="#feature-description_1" title="Permanent link">&para;</a></h3>
+<p>It is a set of scene-level Eevee full-screen filter stack. Each entry is a <code>Filter</code> domain material that processes the current frame in list order.</p>
+<h3 id="panel-entry-point_1">Panel Entry Point<a class="headerlink" href="#panel-entry-point_1" title="Permanent link">&para;</a></h3>
+<p><code>Scene Properties &gt; Filter Materials</code></p>
+<p>Node tree entry point: Shader Node Editor &gt; Shader Type &gt; Filter</p>
+<h3 id="basic-usage_1">Basic Usage<a class="headerlink" href="#basic-usage_1" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Open <code>Scene Properties &gt; Filter Materials</code></li>
+<li>Create a new entry</li>
+<li>The selected material must be a <code>Filter</code> domain material</li>
+<li>Open Shader Editor and switch the top <code>Shader Type</code> to <code>Filter</code></li>
+<li>Use <code>Scene Color</code> to read scene data</li>
+<li>Output the result with <code>Filter Output</code></li>
+<li>Select filter execution position via <code>Execution Stage</code></li>
+</ol>
+<h3 id="execution-stages">Execution Stages<a class="headerlink" href="#execution-stages" title="Permanent link">&para;</a></h3>
 <ul>
-<li><strong>Render Textures</strong> - 场景级额外渲染纹理系统</li>
-<li><strong>Filter Materials</strong> - 全屏滤镜栈</li>
-</ul>
-<h3 id="2-20">2. 着色器节点（20+ 个新节点）<a class="headerlink" href="#2-20" title="Permanent link">&para;</a></h3>
-<ul>
-<li>Render Info、Scene Time、Screen Derivative</li>
-<li>Portal In/Out、Screenspace Info</li>
-<li>World Environment、Bevel、Curvature</li>
-<li>Shader Info、Light Info、Scene Color</li>
-</ul>
-<h3 id="3-npr-tree">3. NPR Tree 工作流<a class="headerlink" href="#3-npr-tree" title="Permanent link">&para;</a></h3>
-<ul>
-<li>NPR Input/Output 节点</li>
-<li>逐光源处理</li>
-<li>内置节点组资产</li>
-</ul>
-<h3 id="4">4. 界面与设置<a class="headerlink" href="#4" title="Permanent link">&para;</a></h3>
-<ul>
-<li>材质预览控制</li>
-<li>世界环境配置</li>
-<li>灯光组管理</li>
+<li><code>Before Volume Fog</code> - Execute before volume fog processing</li>
+<li><code>Before Depth of Field</code> - Execute before depth of field</li>
+<li><code>Before Composite</code> - Execute before compositing</li>
 </ul>
 <div class="admonition warning">
-<p class="admonition-title">Eevee 专用</p>
-<p>所有 NPR Port 功能都需要 <strong>Eevee 渲染引擎</strong>。不支持 Cycles。</p>
+<p class="admonition-title">Note</p>
+<p>Filter Materials can only use Filter domain materials.</p>
 </div>
-<p><strong>准备好探索了吗？</strong> 查看下面的章节了解更多！</p>
-<hr />
-<h2 id="_4">快速链接<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
+<div class="admonition example">
+<p class="admonition-title">Use Cases</p>
 <ul>
-<li><a href="scene-extensions.html">Scene 级扩展</a> - Render Textures &amp; Filter Materials</li>
-<li><a href="extended-nodes.html">扩展节点</a> - 20+ 个新着色器节点</li>
-<li><a href="npr-workflow.html">NPR 工作流</a> - NPR Tree 处理流程</li>
-<li><a href="interface-guide.html">界面指南</a> - 设置与故障排除</li>
+<li>Color grading and tone mapping</li>
+<li>Screen-space effects (e.g., edge detection, toon rendering)</li>
+<li>Motion blur and motion vector effects</li>
+<li>Post-process denoising and sharpening</li>
 </ul>
+</div>
 
 
 
@@ -674,7 +776,7 @@
           <button type="button" class="md-top md-icon" data-md-component="top" hidden>
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
-  回到页面顶部
+  Back to top
 </button>
         
       </main>
@@ -721,14 +823,12 @@
     
     
       
-      <script id="__config" type="application/json">{"base": ".", "features": ["navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.select", "content.code.annotate", "content.tabs.link", "toc.follow"], "search": "assets/javascripts/workers/search.973d3a69.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u590d\u5236", "clipboard.copy": "\u590d\u5236", "search.result.more.one": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.more.other": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 # \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.none": "\u6ca1\u6709\u627e\u5230\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.one": "\u627e\u5230 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.other": "# \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.placeholder": "\u952e\u5165\u4ee5\u5f00\u59cb\u641c\u7d22", "search.result.term.missing": "\u7f3a\u5c11", "select.version": "\u9009\u62e9\u5f53\u524d\u7248\u672c"}, "version": null}</script>
+      <script id="__config" type="application/json">{"base": ".", "features": ["navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.select", "content.code.annotate", "content.tabs.link", "toc.follow"], "search": "assets/javascripts/workers/search.973d3a69.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
       <script src="assets/javascripts/bundle.f55a23d4.min.js"></script>
       
         <script src="javascripts/mathjax.js"></script>
-      
-        <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
       
         <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
       
