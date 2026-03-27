@@ -1728,196 +1728,171 @@
 <h3 id="render-info">Render Info<a class="headerlink" href="#render-info" title="Permanent link">&para;</a></h3>
 <h4 id="_2">入口<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h4>
 <p><code>Add &gt; Input &gt; Render Info</code></p>
-<p><img alt="alt text" src="images/SnowShot_2026-03-28_04-51-10.png" /></p>
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_04-51-10.png" alt="alt text" style="border-radius: 10px;">
+    <br>
+</div>
+
 <h4 id="_3">输出<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h4>
 <ul>
-<li>
-<p><code>Frag Coord</code>：屏幕空间坐标（xy归一化到0-1，z为深度）</p>
-</li>
-<li>
-<p><code>Width</code>：渲染区域宽度</p>
-</li>
-<li>
-<p><code>Height</code>：渲染区域高度</p>
-</li>
+<li><code>Frag Coord</code>：屏幕空间坐标（xy 归一化到 0-1，z 为深度）</li>
+<li><code>Width</code>：渲染区域宽度</li>
+<li><code>Height</code>：渲染区域高度</li>
 </ul>
 <h4 id="_4">作用<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h4>
 <p>提供当前 Eevee 渲染窗口的坐标和像素尺寸。</p>
 <h3 id="scene-time">Scene Time<a class="headerlink" href="#scene-time" title="Permanent link">&para;</a></h3>
 <h4 id="_5">入口<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h4>
 <p><code>Add &gt; Input &gt; Scene Time</code></p>
-<p><img alt="alt text" src="images/SnowShot_2026-03-28_04-52-48.png" /></p>
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_04-52-48.png" alt="alt text" style="border-radius: 10px;">
+    <br>
+</div>
+
 <h4 id="_6">输入<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h4>
 <ul>
 <li><code>Scale</code>：用于缩放帧数的数值</li>
 </ul>
 <h4 id="_7">输出<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h4>
 <ul>
-<li>
-<p><code>Frame</code>：当前帧数</p>
-</li>
-<li>
-<p><code>Seconds</code>：当前帧对应的秒数</p>
-</li>
-<li>
-<p><code>Timeline</code>：0-1映射的场景时间（从开始帧到结束帧）</p>
-</li>
-<li>
-<p><code>Scaled Frame</code>：当前帧除以Scale后的结果</p>
-</li>
+<li><code>Frame</code>：当前帧数</li>
+<li><code>Seconds</code>：当前帧对应的秒数</li>
+<li><code>Timeline</code>：0-1 映射的场景时间（从开始帧到结束帧）</li>
+<li><code>Scaled Frame</code>：当前帧除以 <code>Scale</code> 后的结果</li>
 </ul>
 <h3 id="screen-derivative">Screen Derivative<a class="headerlink" href="#screen-derivative" title="Permanent link">&para;</a></h3>
 <h4 id="_8">入口<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h4>
 <p><code>Add &gt; Utilities &gt; Math &gt; Screen Derivative</code></p>
-<p><img alt="alt text" src="images/SnowShot_2026-03-28_04-53-23.png" /></p>
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_04-53-23.png" alt="alt text" style="border-radius: 10px;">
+    <br>
+</div>
+
 <h4 id="_9">功能<a class="headerlink" href="#_9" title="Permanent link">&para;</a></h4>
 <p>获得屏幕之间相邻像素之间的差异：</p>
 <ul>
-<li>
-<p><code>DDX</code>：X方向的屏幕空间导数</p>
-</li>
-<li>
-<p><code>DDY</code>：Y方向的屏幕空间导数</p>
-</li>
-<li>
-<p><code>DDXY</code>：DDX和DDY的组合（DDX + DDY）</p>
-</li>
+<li><code>DDX</code>：X 方向的屏幕空间导数</li>
+<li><code>DDY</code>：Y 方向的屏幕空间导数</li>
+<li><code>DDXY</code>：<code>DDX</code> 和 <code>DDY</code> 的组合（<code>DDX + DDY</code>）</li>
 </ul>
-<p>其中 <code>DDXY</code> 表示 <code>DDX + DDY</code>。</p>
 <h3 id="portal-in-portal-out">Portal In / Portal Out<a class="headerlink" href="#portal-in-portal-out" title="Permanent link">&para;</a></h3>
 <h4 id="_10">入口<a class="headerlink" href="#_10" title="Permanent link">&para;</a></h4>
 <ul>
-<li>
-<p><code>Add &gt; Layout &gt; Portal In</code></p>
-</li>
-<li>
-<p><code>Add &gt; Layout &gt; Portal Out</code></p>
-</li>
+<li><code>Add &gt; Layout &gt; Portal In</code></li>
+<li><code>Add &gt; Layout &gt; Portal Out</code></li>
 </ul>
-<p><img alt="alt text" src="images/SnowShot_2026-03-28_04-53-44.png" /></p>
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_04-53-44.png" alt="alt text" style="border-radius: 10px;">
+    <br>
+</div>
+
 <h4 id="_11">功能说明<a class="headerlink" href="#_11" title="Permanent link">&para;</a></h4>
 <p>这是一组用来整理节点连线的“传送门”节点。</p>
 <p>工作方式可以理解为：</p>
 <ul>
-<li>
-<p><code>Portal In</code>：在当前节点树里存一个有名字、有类型的值</p>
-</li>
-<li>
-<p><code>Portal Out</code>：在同一节点树内按名字把这个值取出来继续使用</p>
-</li>
+<li><code>Portal In</code>：在当前节点树里存一个有名字、有类型的值</li>
+<li><code>Portal Out</code>：在同一节点树内按名字把这个值取出来继续使用</li>
 </ul>
 <h4 id="_12">其他<a class="headerlink" href="#_12" title="Permanent link">&para;</a></h4>
 <ul>
-<li>
-<p>新建 <code>Portal In</code> 时会自动生成唯一名称。</p>
-</li>
-<li>
-<p><code>Portal Out</code> 上带有放大镜按钮，可快速跳转到对应的 <code>Portal In</code> 位置。</p>
-</li>
+<li>新建 <code>Portal In</code> 时会自动生成唯一名称。</li>
+<li><code>Portal Out</code> 上带有放大镜按钮，可快速跳转到对应的 <code>Portal In</code> 位置。</li>
 </ul>
 <h4 id="_13">限制<a class="headerlink" href="#_13" title="Permanent link">&para;</a></h4>
 <ul>
-<li>
-<p>只在同一个 shader node tree 内识别。</p>
-</li>
-<li>
-<p>不支持跨节点树。</p>
-</li>
-<li>
-<p>不支持跨节点组自动穿透。</p>
-</li>
-<li>
-<p>同名输入应只保留一个来源。</p>
-</li>
+<li>只在同一个 shader node tree 内识别。</li>
+<li>不支持跨节点树。</li>
+<li>不支持跨节点组自动穿透。</li>
+<li>同名输入应只保留一个来源。</li>
 </ul>
 <p><strong>2. Eevee 物体材质节点</strong></p>
 <h3 id="render-texture">Render Texture<a class="headerlink" href="#render-texture" title="Permanent link">&para;</a></h3>
 <h4 id="_14">入口<a class="headerlink" href="#_14" title="Permanent link">&para;</a></h4>
 <p><code>Add &gt; Texture &gt; Render Texture</code></p>
-<p><img alt="alt text" src="images/SnowShot_2026-03-28_04-54-27.png" /></p>
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_04-54-27.png" alt="alt text" style="border-radius: 10px;">
+    <br>
+</div>
+
 <h4 id="_15">作用<a class="headerlink" href="#_15" title="Permanent link">&para;</a></h4>
 <p>读取前面在场景里配置好的 <code>Render Textures</code> 条目。</p>
 <h4 id="_16">输入输出<a class="headerlink" href="#_16" title="Permanent link">&para;</a></h4>
 <ul>
-<li>
-<p>输入：<code>Vector</code></p>
-</li>
-<li>
-<p>输出：<code>Color</code>、<code>Alpha</code></p>
-</li>
+<li>输入：<code>Vector</code></li>
+<li>输出：<code>Color</code>、<code>Alpha</code></li>
 </ul>
 <h3 id="screenspace-info">Screenspace Info<a class="headerlink" href="#screenspace-info" title="Permanent link">&para;</a></h3>
 <h4 id="_17">入口<a class="headerlink" href="#_17" title="Permanent link">&para;</a></h4>
 <p><code>Add &gt; Input &gt; Screenspace Info</code></p>
-<p><img alt="alt text" src="images/SnowShot_2026-03-28_04-56-22.png" /></p>
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_04-56-22.png" alt="alt text" style="border-radius: 10px;">
+    <br>
+</div>
+
 <h4 id="_18">输入输出<a class="headerlink" href="#_18" title="Permanent link">&para;</a></h4>
 <ul>
-<li>
-<p>输入：<code>View Position</code>（摄像机空间位置）</p>
-</li>
-<li>
-<p>输出：<code>Scene Color</code>（场景览看颜色）、<code>Scene Depth</code>（场景深度值）</p>
-</li>
+<li>输入：<code>View Position</code>（摄像机空间位置）</li>
+<li>输出：<code>Scene Color</code>（场景颜色）、<code>Scene Depth</code>（场景深度值）</li>
 </ul>
 <h4 id="_19">作用<a class="headerlink" href="#_19" title="Permanent link">&para;</a></h4>
-<p>获得当前的渲染缓冲颜色或深度的内容</p>
-<p><img alt="alt text" src="images/SnowShot_2026-03-28_04-59-57.png" /></p>
+<p>获得当前的渲染缓冲颜色或深度的内容。</p>
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_04-59-57.png" alt="alt text" style="border-radius: 10px;">
+    <br>
+</div>
+
 <h4 id="_20">使用说明<a class="headerlink" href="#_20" title="Permanent link">&para;</a></h4>
 <ul>
-<li>
-<p>渲染设置中需要打开<code>Raytracing</code></p>
-</li>
-<li>
-<p>材质选项<code>Render Method</code>选择<code>Dithered</code></p>
-</li>
-<li>
-<p>材质选项打开<code>Raytraced Transmission</code></p>
-</li>
-<li>
-<p><code>View Position</code>默认输入为:<code>position</code>变换到摄像机空间,再反转z轴</p>
-</li>
+<li>渲染设置中需要打开 <code>Raytracing</code></li>
+<li>材质选项 <code>Render Method</code> 选择 <code>Dithered</code></li>
+<li>材质选项打开 <code>Raytraced Transmission</code></li>
+<li><code>View Position</code> 默认输入为 <code>position</code> 变换到摄像机空间，再反转 z 轴</li>
 </ul>
-<p><img alt="alt text" src="images/SnowShot_2026-03-28_04-59-28.png" /></p>
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_04-59-28.png" alt="alt text" style="border-radius: 10px;">
+    <br>
+</div>
+
 <h3 id="world-environment">World Environment<a class="headerlink" href="#world-environment" title="Permanent link">&para;</a></h3>
 <h4 id="_21">入口<a class="headerlink" href="#_21" title="Permanent link">&para;</a></h4>
 <p><code>Add &gt; Input &gt; World Environment</code></p>
-<p><img alt="alt text" src="images/SnowShot_2026-03-28_05-01-56.png" /></p>
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_05-01-56.png" alt="alt text" style="border-radius: 10px;">
+    <br>
+</div>
+
 <h4 id="_22">输入输出<a class="headerlink" href="#_22" title="Permanent link">&para;</a></h4>
 <ul>
-<li>
-<p>输入：<code>Direction</code>（采样方向）</p>
-</li>
-<li>
-<p>输出：<code>Color</code>（环境颜色）</p>
-</li>
+<li>输入：<code>Direction</code>（采样方向）</li>
+<li>输出：<code>Color</code>（环境颜色）</li>
 </ul>
 <h4 id="_23">作用<a class="headerlink" href="#_23" title="Permanent link">&para;</a></h4>
 <p>直接采样 <code>Eevee</code> 的世界环境颜色，不依赖屏幕背后是否还有几何。</p>
 <h4 id="_24">说明<a class="headerlink" href="#_24" title="Permanent link">&para;</a></h4>
 <ul>
-<li>读取世界环境光照探头颜色,可在世界环境中调整分辨率</li>
+<li>读取世界环境光照探头颜色，可在世界环境中调整分辨率</li>
 </ul>
-<p><img alt="alt text" src="images/SnowShot_2026-03-28_05-03-27.png" /></p>
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_05-03-27.png" alt="alt text" style="border-radius: 10px;">
+    <br>
+</div>
+
 <ul>
-<li>
-<p><code>Direction</code> 不连接时，默认使用当前表面的视线方向</p>
-</li>
-<li>
-<p><code>Direction</code> 连接后，可以按指定方向采样世界环境</p>
-</li>
+<li><code>Direction</code> 不连接时，默认使用当前表面的视线方向</li>
+<li><code>Direction</code> 连接后，可以按指定方向采样世界环境</li>
 </ul>
 <h3 id="world-to-tangent">World To Tangent<a class="headerlink" href="#world-to-tangent" title="Permanent link">&para;</a></h3>
 <h4 id="_25">入口<a class="headerlink" href="#_25" title="Permanent link">&para;</a></h4>
 <p><code>Add &gt; Utilities &gt; Vector &gt; World To Tangent</code></p>
-<p><img alt="alt text" src="images/SnowShot_2026-03-28_05-04-02.png" /></p>
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_05-04-02.png" alt="alt text" style="border-radius: 10px;">
+    <br>
+</div>
+
 <h4 id="_26">输入输出<a class="headerlink" href="#_26" title="Permanent link">&para;</a></h4>
 <ul>
-<li>
-<p>输入：<code>Vector</code>（世界空间方向）</p>
-</li>
-<li>
-<p>输出：<code>Vector</code>（切线空间方向）</p>
-</li>
+<li>输入：<code>Vector</code>（世界空间方向）</li>
+<li>输出：<code>Vector</code>（切线空间方向）</li>
 </ul>
 <h4 id="_27">作用<a class="headerlink" href="#_27" title="Permanent link">&para;</a></h4>
 <p>把一个世界空间方向向量转换到当前表面的切线空间。</p>
@@ -1928,15 +1903,15 @@
 <h3 id="bevel">Bevel<a class="headerlink" href="#bevel" title="Permanent link">&para;</a></h3>
 <h4 id="_29">入口<a class="headerlink" href="#_29" title="Permanent link">&para;</a></h4>
 <p><code>Add &gt; Input &gt; Bevel</code></p>
-<p><img alt="alt text" src="images/SnowShot_2026-03-28_05-06-05.png" /></p>
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_05-06-05.png" alt="alt text" style="border-radius: 10px;">
+    <br>
+</div>
+
 <h4 id="_30">输入输出<a class="headerlink" href="#_30" title="Permanent link">&para;</a></h4>
 <ul>
-<li>
-<p>输入：<code>Radius</code>（倒角半径）、<code>Normal</code>（表面法线提示）</p>
-</li>
-<li>
-<p>输出：<code>Normal</code>（倒角后的近似法线）</p>
-</li>
+<li>输入：<code>Radius</code>（倒角半径）、<code>Normal</code>（表面法线提示）</li>
+<li>输出：<code>Normal</code>（倒角后的近似法线）</li>
 </ul>
 <h4 id="_31">面板选项<a class="headerlink" href="#_31" title="Permanent link">&para;</a></h4>
 <ul>
@@ -1946,43 +1921,29 @@
 <p>在 <code>Eevee</code> 中生成近似的倒角法线，用来让硬边看起来更圆润。</p>
 <h4 id="_33">说明<a class="headerlink" href="#_33" title="Permanent link">&para;</a></h4>
 <ul>
-<li>
-<p><code>Cycles</code> 仍然使用官方原本的真实几何倒角算法</p>
-</li>
-<li>
-<p><code>Eevee</code> 这里使用的是同物体屏幕空间近似</p>
-</li>
-<li>
-<p>结果依赖当前视角、深度缓冲和可见邻域，不等同于 <code>Cycles</code> 的真实 <code>Bevel</code></p>
-</li>
+<li><code>Cycles</code> 仍然使用官方原本的真实几何倒角算法</li>
+<li><code>Eevee</code> 这里使用的是同物体屏幕空间近似</li>
+<li>结果依赖当前视角、深度缓冲和可见邻域，不等同于 <code>Cycles</code> 的真实 <code>Bevel</code></li>
 </ul>
 <h3 id="curvature">Curvature<a class="headerlink" href="#curvature" title="Permanent link">&para;</a></h3>
 <h4 id="_34">入口<a class="headerlink" href="#_34" title="Permanent link">&para;</a></h4>
 <p><code>Add &gt; Input &gt; Curvature</code></p>
-<p><img alt="alt text" src="images/SnowShot_2026-03-28_05-06-57.png" /></p>
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_05-06-57.png" alt="alt text" style="border-radius: 10px;">
+    <br>
+</div>
+
 <h4 id="_35">输入<a class="headerlink" href="#_35" title="Permanent link">&para;</a></h4>
 <ul>
-<li>
-<p><code>Samples</code></p>
-</li>
-<li>
-<p><code>Sample Radius</code></p>
-</li>
-<li>
-<p><code>Thickness</code></p>
-</li>
-<li>
-<p><code>Scale</code></p>
-</li>
+<li><code>Samples</code></li>
+<li><code>Sample Radius</code></li>
+<li><code>Thickness</code></li>
+<li><code>Scale</code></li>
 </ul>
 <h4 id="_36">输出<a class="headerlink" href="#_36" title="Permanent link">&para;</a></h4>
 <ul>
-<li>
-<p><code>Scene Curvature</code>：根据屏幕空间提取的曲率值</p>
-</li>
-<li>
-<p><code>Scene Rim</code>：边缘光</p>
-</li>
+<li><code>Scene Curvature</code>：根据屏幕空间提取的曲率值</li>
+<li><code>Scene Rim</code>：边缘光</li>
 </ul>
 <h4 id="_37">面板选项<a class="headerlink" href="#_37" title="Permanent link">&para;</a></h4>
 <ul>
