@@ -1,26 +1,26 @@
-site_name: Blender 5.1 NPR Port 文档
-site_description: Blender 5.1 NPR Port 新增功能与使用说明
+site_name: Blender 5.1 NPR Port Documentation
+site_description: Blender 5.1 NPR Port Features & Usage Guide
 site_author: NPR Port Team
-site_url: "https://bb-yi.github.io/blender/"
+site_url: "https://bb-yi.github.io/blender/en/"
 
-docs_dir: docs/zh
+docs_dir: docs/en
 
 theme:
   name: material
-  language: zh
+  language: en
   palette: 
     - scheme: default
       primary: indigo
       accent: red
       toggle:
         icon: material/brightness-7 
-        name: 深色模式
+        name: Dark mode
     - scheme: slate
       primary: indigo
       accent: red
       toggle:
         icon: material/brightness-4
-        name: 亮色模式
+        name: Light mode
   features:
     - navigation.expand
     - navigation.top
@@ -33,11 +33,11 @@ theme:
     - toc.follow
 
 nav:
-    - 首页: index.md
-    - Scene 级 Eevee 扩展: scene-extensions.md
-    - 扩展着色器节点: extended-nodes.md
-    - NPR Tree 工作流: npr-workflow.md
-    - 界面与设置: interface-guide.md
+    - Home: index.md
+    - Scene Extensions: scene-extensions.md
+    - Extended Nodes: extended-nodes.md
+    - NPR Workflow: npr-workflow.md
+    - Interface & Settings: interface-guide.md
 
 markdown_extensions:
     - admonition
@@ -58,21 +58,20 @@ use_directory_urls: false
 
 plugins:
   - search:
-      lang: zh
+      lang: en
 
 extra:
   alternate:
-    - name: 中文
-      lang: zh
-      link: /blender/
     - name: English
       lang: en
       link: /blender/en/
+    - name: 中文
+      lang: zh
+      link: /blender/
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/bb-yi/blender
 
 extra_javascript:
   - javascripts/mathjax.js
-  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
   - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
