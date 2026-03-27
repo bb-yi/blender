@@ -21,30 +21,20 @@ theme:
   features:
     - navigation.expand
     - navigation.top
-    - navigation.tabs
-    - navigation.tabs.sticky
     - search.suggest
     - search.highlight
     - content.code.copy
     - content.code.select
     - content.code.annotate
-    - toc.follow
     - content.tabs.link
+    - toc.follow
 
 nav:
-    - Home: en/index.md
-    - Documentation:
-        - Scene Extensions: en/1_scene_level_extension.md
-        - Extended Nodes: en/2_extended_nodes.md
-        - NPR Tree Workflow: en/3_npr_tree_workflow.md
-        - Interface Guide: en/4_interface_workflow.md
-    - 中文 | Chinese:
-        - 首页: zh/index.md
-        - 文档:
-            - Scene 级 Eevee 扩展: zh/1_scene_level_extension.md
-            - 主要扩展节点: zh/2_extended_nodes.md
-            - NPR Tree 工作流: zh/3_npr_tree_workflow.md
-            - 界面与工作流补充: zh/4_interface_workflow.md
+    - Home: index.md
+    - Scene Extensions: scene-extensions.md
+    - Extended Nodes: extended-nodes.md
+    - NPR Workflow: npr-workflow.md
+    - Interface & Settings: interface-guide.md
 
 markdown_extensions:
     - admonition
@@ -53,6 +43,8 @@ markdown_extensions:
     - pymdownx.superfences
     - pymdownx.inlinehilite
     - pymdownx.snippets
+    - pymdownx.tabbed:
+        alternate_style: true
     - pymdownx.arithmatex:
         generic: true
     - tables

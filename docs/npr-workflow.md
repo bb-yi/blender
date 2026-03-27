@@ -1,0 +1,182 @@
+# NPR Tree Workflow | NPR Tree 工作流
+
+## Overview | 概述
+
+=== "English"
+
+    The NPR Tree is a flexible node-based pipeline for non-photorealistic rendering. It enables custom hatching, toon shading, and artistic effects.
+    
+    ### Key Features
+    - Per-light processing with `For Each Light`
+    - Real-time preview in viewport
+    - Custom node groups for effects (Cavity, Kuwahara, etc.)
+    - Complete control over shading
+
+=== "中文"
+
+    NPR Tree 是一个基于节点的非光真实感渲染灵活管道。它支持自定义的线条渲染、卡通着色和艺术效果。
+    
+    ### 主要特性
+    - 使用 `For Each Light` 进行逐光源处理
+    - 视口中的实时预览
+    - 内置节点组用于效果（阴影、卡通等）
+    - 完整的着色器控制
+
+---
+
+## NPR Input Node
+
+=== "English"
+
+    **Purpose:** Primary input for NPR Tree processing
+    
+    **Outputs (9 total):**
+    - `Base Color` - Material base color
+    - `Metallic` - Metal property
+    - `Roughness` - Surface roughness
+    - `Normal` - Surface normal
+    - `Alpha` - Transparency
+    - `Emission` - Emissive color
+    - `IOR` - Index of refraction
+    - `Light Direction` - Direction to light
+    - `Specular` - Specular intensity
+
+=== "中文"
+
+    **用途：** NPR Tree 处理的主要输入
+    
+    **输出（共9个）：**
+    - `Base Color` - 材质基础颜色
+    - `Metallic` - 金属属性
+    - `Roughness` - 表面粗糙度
+    - `Normal` - 表面法线
+    - `Alpha` - 透明度
+    - `Emission` - 自发光颜色
+    - `IOR` - 折射率
+    - `Light Direction` - 光源方向
+    - `Specular` - 镜面反射强度
+
+---
+
+## For Each Light Node
+
+=== "English"
+
+    **Purpose:** Process rendering for each light in the scene
+    
+    **Outputs:**
+    - `Light Index` - Current light ID (0-based)
+    - `Light Direction` - Direction from surface to light
+    - `Light Distance` - Distance to light
+    - `Light Color` - Light color value
+    - `Light Energy` - Light intensity
+    
+    **Usage Pattern:**
+    ```
+    NPR Input → For Each Light → [Calculate per-light effects]
+                                → Combine results → Output
+    ```
+    
+    **Common Use Cases:**
+    - Toon shading with multiple light tones
+    - Per-light cel shading
+    - Multi-pass lighting effects
+
+=== "中文"
+
+    **用途：** 为场景中的每个光源进行渲染处理
+    
+    **输出：**
+    - `Light Index` - 当前灯光 ID（从0开始）
+    - `Light Direction` - 从表面指向光源的方向
+    - `Light Distance` - 到光源的距离
+    - `Light Color` - 光颜色值
+    - `Light Energy` - 光强度
+    
+    **使用模式：**
+    ```
+    NPR Input → For Each Light → [计算逐光源效果]
+                                → 合并结果 → 输出
+    ```
+    
+    **常见用途：**
+    - 具有多种光调的卡通着色
+    - 逐光源单元着色
+    - 多通道照明效果
+
+---
+
+## Other NPR Nodes
+
+=== "English"
+
+    ### Image Sample
+    - Sample textures within NPR Tree
+    - Inputs: Image, UV coordinates
+    - Outputs: Color, Alpha
+    
+    ### NPR Refraction
+    - Control refraction in NPR pipeline
+    - Parameters: IOR, Roughness
+    
+    ### Built-in Node Groups
+    - **Cavity** - Cavity-based shading
+    - **Kuwahara Filter** - Artistic smoothing
+    - **Curvature Shading** - Edge-based effects
+    - **Shading Models** - Pre-built toon/stylized shaders
+
+=== "中文"
+
+    ### Image Sample（图像采样）
+    - 在 NPR Tree 中采样纹理
+    - 输入：Image（图像）、UV 坐标
+    - 输出：Color（颜色）、Alpha（透明度）
+    
+    ### NPR Refraction（NPR折射）
+    - 在 NPR 管道中控制折射
+    - 参数：IOR、Roughness
+    
+    ### 内置节点组
+    - **Cavity** - 基于阴影的着色
+    - **Kuwahara Filter** - 艺术风格平滑
+    - **Curvature Shading** - 基于边缘的效果
+    - **Shading Models** - 预先构建的卡通/风格化着色器
+
+---
+
+## Quick Workflow Example
+
+=== "English"
+
+    ### Simple Toon Shading Setup
+    
+    1. Create material with `Principled BSDF`
+    2. Add `NPR Tree` node
+    3. In NPR Tree (Ctrl+Tab):
+       - Connect `NPR Input` to `For Each Light`
+       - Sample light properties
+       - Apply toon shading from node group
+       - Combine all light contributions
+    4. Output result to material
+    5. Render in viewport or final render
+    
+    **Tip:** Test with different light configurations for best results.
+
+=== "中文"
+
+    ### 简单的卡通着色设置
+    
+    1. 创建带有 `Principled BSDF` 的材质
+    2. 添加 `NPR Tree` 节点
+    3. 在 NPR Tree 中（Ctrl+Tab）：
+       - 连接 `NPR Input` 到 `For Each Light`
+       - 采样光照属性
+       - 应用节点组中的卡通着色
+       - 合并所有灯光贡献
+    4. 输出结果到材质
+    5. 在视口或最终渲染中渲染
+    
+    **提示：** 用不同的灯光配置测试可获得最佳效果。
+
+!!! warning
+    NPR Tree is Eevee-exclusive. Not available in Cycles.
