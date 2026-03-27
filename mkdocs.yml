@@ -32,12 +32,12 @@ theme:
     - content.tabs.link
 
 nav:
-    - Home: index.md
+    - Home: en/index.md
     - Documentation:
-        - Scene Extensions: 1_scene_level_extension.md
-        - Extended Nodes: 2_extended_nodes.md
-        - NPR Tree Workflow: 3_npr_tree_workflow.md
-        - Interface Guide: 4_interface_workflow.md
+        - Scene Extensions: en/1_scene_level_extension.md
+        - Extended Nodes: en/2_extended_nodes.md
+        - NPR Tree Workflow: en/3_npr_tree_workflow.md
+        - Interface Guide: en/4_interface_workflow.md
     - 中文 | Chinese:
         - 首页: zh/index.md
         - 文档:
