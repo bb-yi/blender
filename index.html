@@ -76,7 +76,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#blender-51-npr-port-" class="md-skip">
+        <a href="#blender-51-npr-port" class="md-skip">
           跳转至
         </a>
       
@@ -332,58 +332,16 @@
         <li class="md-nav__item">
   <a href="#_3" class="md-nav__link">
     <span class="md-ellipsis">
-      主要功能分类
+      节点一览
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="主要功能分类">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#1-scene-eevee" class="md-nav__link">
-    <span class="md-ellipsis">
-      1. Scene 级 Eevee 扩展
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#2-20" class="md-nav__link">
-    <span class="md-ellipsis">
-      2. 着色器节点（20+ 个新节点）
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#3-npr-tree" class="md-nav__link">
-    <span class="md-ellipsis">
-      3. NPR Tree 工作流
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#4" class="md-nav__link">
-    <span class="md-ellipsis">
-      4. 界面与设置
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#_4" class="md-nav__link">
+  <a href="#blender-51" class="md-nav__link">
     <span class="md-ellipsis">
-      快速链接
+      与官方 Blender 5.1 的主要区别
     </span>
   </a>
   
@@ -532,58 +490,16 @@
         <li class="md-nav__item">
   <a href="#_3" class="md-nav__link">
     <span class="md-ellipsis">
-      主要功能分类
+      节点一览
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="主要功能分类">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#1-scene-eevee" class="md-nav__link">
-    <span class="md-ellipsis">
-      1. Scene 级 Eevee 扩展
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#2-20" class="md-nav__link">
-    <span class="md-ellipsis">
-      2. 着色器节点（20+ 个新节点）
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#3-npr-tree" class="md-nav__link">
-    <span class="md-ellipsis">
-      3. NPR Tree 工作流
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#4" class="md-nav__link">
-    <span class="md-ellipsis">
-      4. 界面与设置
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#_4" class="md-nav__link">
+  <a href="#blender-51" class="md-nav__link">
     <span class="md-ellipsis">
-      快速链接
+      与官方 Blender 5.1 的主要区别
     </span>
   </a>
   
@@ -605,50 +521,139 @@
 
 
 
-<h1 id="blender-51-npr-port-">Blender 5.1 NPR Port - 新增功能与使用说明<a class="headerlink" href="#blender-51-npr-port-" title="Permanent link">&para;</a></h1>
+<h1 id="blender-51-npr-port">Blender 5.1 NPR Port 新增功能与使用说明<a class="headerlink" href="#blender-51-npr-port" title="Permanent link">&para;</a></h1>
 <h2 id="_1">项目介绍<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
-<p><code>Blender 5.1 NPR Port</code> 是一个NPR特化的Blender分支，在融合了 <code>Goo Engine</code> 和 <code>4.4 NPR-prototype</code> 特色节点之外还额外添加一些实用特色节点。</p>
+<p><code>Blender 5.1 NPR Port</code>是一个NPR特化的<code>blender</code>分支,在融合了<code>Goo Engine</code>和<code>4.4 NPR-prototype</code>特色节点之外还额外添加一些实用特色节点.</p>
 <p>大部分功能是 <code>Eevee</code> 专用，不支持 <code>Cycles</code>。</p>
 <h2 id="_2">文档范围<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
 <p>这份文档说明当前 <code>Blender 5.1 NPR Port</code> 相比官方 <code>Blender 5.1</code> 已经加入、并且当前分支内实际存在的 NPR / Eevee 扩展功能，以及它们的基本使用方法。</p>
-<h2 id="_3">主要功能分类<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
-<h3 id="1-scene-eevee">1. Scene 级 Eevee 扩展<a class="headerlink" href="#1-scene-eevee" title="Permanent link">&para;</a></h3>
-<ul>
-<li><strong>Render Textures</strong> - 场景级额外渲染纹理系统</li>
-<li><strong>Filter Materials</strong> - 全屏滤镜栈</li>
-</ul>
-<h3 id="2-20">2. 着色器节点（20+ 个新节点）<a class="headerlink" href="#2-20" title="Permanent link">&para;</a></h3>
-<ul>
-<li>Render Info、Scene Time、Screen Derivative</li>
-<li>Portal In/Out、Screenspace Info</li>
-<li>World Environment、Bevel、Curvature</li>
-<li>Shader Info、Light Info、Scene Color</li>
-</ul>
-<h3 id="3-npr-tree">3. NPR Tree 工作流<a class="headerlink" href="#3-npr-tree" title="Permanent link">&para;</a></h3>
-<ul>
-<li>NPR Input/Output 节点</li>
-<li>逐光源处理</li>
-<li>内置节点组资产</li>
-</ul>
-<h3 id="4">4. 界面与设置<a class="headerlink" href="#4" title="Permanent link">&para;</a></h3>
-<ul>
-<li>材质预览控制</li>
-<li>世界环境配置</li>
-<li>灯光组管理</li>
-</ul>
-<div class="admonition warning">
-<p class="admonition-title">Eevee 专用</p>
-<p>所有 NPR Port 功能都需要 <strong>Eevee 渲染引擎</strong>。不支持 Cycles。</p>
+<h2 id="_3">节点一览<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<div align="center">
+  <img src="images/SnowShot_2026-03-28_04-33-09.png" alt="alt text" style="border-radius: 10px;">
+  <br>
+  <sub>着色器节点</sub>
 </div>
-<p><strong>准备好探索了吗？</strong> 查看下面的章节了解更多！</p>
-<hr />
-<h2 id="_4">快速链接<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
+
+<div align="center">
+  <img src="images/SnowShot_2026-03-28_04-23-33.png" alt="alt text" style="border-radius: 10px;">
+  <br>
+  <sub>NPR Tree 节点 (部分着色器节点也可以在NPR Tree中使用)</sub>
+</div>
+
+<div align="center">
+  <img src="images/SnowShot_2026-03-28_04-30-16.png" alt="alt text" style="border-radius: 10px;">
+  <br>
+  <sub>滤镜节点</sub>
+</div>
+
+<h2 id="blender-51">与官方 Blender 5.1 的主要区别<a class="headerlink" href="#blender-51" title="Permanent link">&para;</a></h2>
+<p>当前这个 5.1 NPR 版本，和官方 Blender 5.1 相比，主要多了四类能力：</p>
+<ol>
+<li>
+<p><code>Eevee</code> 的场景级扩展工作流</p>
 <ul>
-<li><a href="scene-extensions.html">Scene 级扩展</a> - Render Textures &amp; Filter Materials</li>
-<li><a href="extended-nodes.html">扩展节点</a> - 20+ 个新着色器节点</li>
-<li><a href="npr-workflow.html">NPR 工作流</a> - NPR Tree 处理流程</li>
-<li><a href="interface-guide.html">界面指南</a> - 设置与故障排除</li>
+<li>
+<p><code>Render Textures</code></p>
+</li>
+<li>
+<p><code>Filter Materials</code></p>
+</li>
 </ul>
+</li>
+<li>
+<p><code>Eevee</code> 的新着色器节点</p>
+<ul>
+<li>
+<p><code>Render Info</code></p>
+</li>
+<li>
+<p><code>Scene Time</code></p>
+</li>
+<li>
+<p><code>Screen Derivative</code></p>
+</li>
+<li>
+<p><code>World Environment</code></p>
+</li>
+<li>
+<p><code>World To Tangent</code></p>
+</li>
+<li>
+<p><code>Bevel</code></p>
+</li>
+</ul>
+</li>
+<li>
+<p><code>Goo Engine</code> 移植节点</p>
+<ul>
+<li>
+<p><code>Screenspace Info</code></p>
+</li>
+<li>
+<p><code>Curvature</code></p>
+</li>
+<li>
+<p><code>Shader Info</code></p>
+</li>
+<li>
+<p><code>Light Info</code></p>
+</li>
+</ul>
+</li>
+<li>
+<p><code>NPR Tree</code> 工作流与配套节点</p>
+<ul>
+<li>
+<p><code>NPR Input</code></p>
+</li>
+<li>
+<p><code>NPR Output</code></p>
+</li>
+<li>
+<p><code>NPR Refraction</code></p>
+</li>
+<li>
+<p><code>Image Sample</code></p>
+</li>
+<li>
+<p><code>For Each Light</code></p>
+</li>
+<li>
+<p>内置的 NPR 节点组资产包</p>
+</li>
+<li>
+<p><code>Cavity</code></p>
+</li>
+<li>
+<p><code>Co-Planar Edge Detection</code></p>
+</li>
+<li>
+<p><code>Curvature</code></p>
+</li>
+<li>
+<p><code>Kuwahara</code></p>
+</li>
+<li>
+<p><code>Shading Models</code></p>
+</li>
+<li>
+<p><code>Surface Curvature</code></p>
+</li>
+</ul>
+</li>
+<li>
+<p>界面整理节点</p>
+<ul>
+<li><code>Portal In / Portal Out</code></li>
+</ul>
+</li>
+<li>
+<p>界面与工作流补充</p>
+<ul>
+<li><code>材质选择器预览开关</code></li>
+</ul>
+</li>
+</ol>
 
 
 
