@@ -1,66 +1,84 @@
-site_name: Blender 5.1 NPR Port 功能指南
-site_description: Blender 5.1 NPR Port 新增功能与使用说明
+site_name: Blender 5.1 NPR Port | Documentation
+site_description: Blender 5.1 NPR Port - Features & Usage Guide
 site_author: NPR Port Team
 
 theme:
   name: material
-  language: zh
+  language: en
   palette: 
     - scheme: default
       primary: indigo
       accent: red
       toggle:
         icon: material/brightness-7 
-        name: 切换到深色模式
+        name: Dark mode
     - scheme: slate
       primary: indigo
       accent: red
       toggle:
         icon: material/brightness-4
-        name: 切换到亮色模式
+        name: Light mode
   features:
-    - navigation.expand    # 左侧导航栏自动展开
-    - navigation.top       # 回到页面顶部
-    - search.suggest       # 搜索建议
-    - search.highlight     # 搜索结果高亮显示
-    - content.code.copy    # 代码块复制按钮
-    - content.code.select  # 代码块行选择
-    - content.code.annotate # 代码块注释
-    - toc.follow          # TOC跟随滚动
-    - content.tabs.link   # 标签链接
+    - navigation.expand
+    - navigation.top
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.select
+    - content.code.annotate
+    - toc.follow
+    - content.tabs.link
 
 nav:
-    - 首页: index.md
-    - Scene 级 Eevee 扩展: 1_scene_level_extension.md
-    - 主要扩展节点: 2_extended_nodes.md
-    - NPR Tree 工作流: 3_npr_tree_workflow.md
-    - 界面与工作流补充: 4_interface_workflow.md
+    - Home: index.md
+    - Documentation:
+        - Scene Extensions: 1_scene_level_extension.md
+        - Extended Nodes: 2_extended_nodes.md
+        - NPR Tree Workflow: 3_npr_tree_workflow.md
+        - Interface Guide: 4_interface_workflow.md
+    - 中文 | Chinese:
+        - 首页: zh/index.md
+        - 文档:
+            - Scene 级 Eevee 扩展: zh/1_scene_level_extension.md
+            - 主要扩展节点: zh/2_extended_nodes.md
+            - NPR Tree 工作流: zh/3_npr_tree_workflow.md
+            - 界面与工作流补充: zh/4_interface_workflow.md
 
 markdown_extensions:
-    - admonition  # 提示块
-    - attr_list  # 属性控制
+    - admonition
+    - attr_list
     - md_in_html
     - pymdownx.superfences
     - pymdownx.inlinehilite
     - pymdownx.snippets
     - pymdownx.arithmatex:
         generic: true
-    - tables     # 表格支持
-    - toc:       # 自动生成TOC
+    - tables
+    - toc:
         permalink: true
 
 use_directory_urls: false
-site_url: ""
+site_url: "https://bb-yi.github.io/blender/"
 
 plugins:
   - search:
+      lang: en
+      pipeline:
+        - stemmer
+        - stop
+
+extra:
+  alternate:
+    - name: English
+      lang: en
+    - name: 中文
       lang: zh
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/bb-yi/blender
 
 extra_javascript:
   - javascripts/mathjax.js
   - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
-
-extra:
-  social:
-    - icon: fontawesome/brands/github
-      link: https://github.com

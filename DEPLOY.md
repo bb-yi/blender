@@ -64,39 +64,41 @@ mkdocs gh-deploy
 
 如果 `mkdocs gh-deploy` 出现问题，可以手动部署：
 
-### 方案 A：推送到 main 分支的 /docs 文件夹
+### 方案 A：推送到 docs 分支
 
 ```powershell
-# 1. 生成静态网站
-mkdocs build
+# 1. 创建并切换到 docs 分支
+git checkout -b docs
 
-# 2. 复制 site 文件夹内容到 docs（GitHub Pages 会识别）
-# (需要手动操作或用脚本)
+# 2. 添加所有文件
+git add .
 
-# 3. 推送到 main 分支
-git push -u origin main
+# 3. 推送到 docs 分支
+git push -u origin docs
 ```
 
-### 方案 B：手动管理 gh-pages 分支
+### 方案 B：完全手动管理 gh-pages 分支
+
+如果要精细控制 GitHub Pages，也可以手动管理 gh-pages 分支：
 
 ```powershell
 # 1. 生成网站
 mkdocs build
 
-# 2. 创建并切换到 gh-pages 分支
+# 2. 创建 gh-pages 分支
 git checkout --orphan gh-pages
 git rm -rf .
 
 # 3. 添加生成的网站文件
 Copy-Item site/* . -Recurse -Force
 
-# 4. 提交并推送
+# 4. 提交
 git add .
 git commit -m "部署网站"
 git push -u origin gh-pages
 
-# 5. 切换回 main 分支
-git checkout main
+# 5. 切换回 docs 分支
+git checkout docs
 ```
 
 ---
@@ -133,7 +135,7 @@ site_name: Blender 5.1 NPR Port 功能指南
 site_url: https://bb-yi.github.io/blender/
 repo_url: https://github.com/bb-yi/blender
 repo_name: bb-yi/blender
-edit_uri: edit/main/docs/
+edit_uri: edit/docs/docs/
 ```
 
 ---
@@ -152,8 +154,8 @@ git commit -m "更新：[描述更改内容]"
 # 自动生成并部署
 mkdocs gh-deploy
 
-# 或推送主分支（如果用主分支 /docs 方式）
-git push origin main
+# 或推送 docs 分支
+git push origin docs
 ```
 
 ---

@@ -76,12 +76,12 @@ if (-not $remoteExists) {
 # Step 4: Check for changes
 WriteSection "STEP 4: Checking Local Changes"
 
-# First ensure we have a main branch
-Write-Host "Ensuring main branch exists..." -ForegroundColor White
-$branchExists = git branch | Select-String "main"
+# First ensure we have a docs branch
+Write-Host "Ensuring docs branch exists..." -ForegroundColor White
+$branchExists = git branch | Select-String "docs"
 if (-not $branchExists) {
-    Write-Host "Creating main branch..." -ForegroundColor White
-    git checkout -b main 2>&1 | Out-Null
+    Write-Host "Creating docs branch..." -ForegroundColor White
+    git checkout -b docs 2>&1 | Out-Null
 }
 
 $status = git status --porcelain
@@ -123,39 +123,19 @@ try {
     exit 1
 }
 
-# Step 6: Push main branch
-WriteSection "STEP 6: Pushing Main Branch"
+# Step 6: Push docs branch
+WriteSection "STEP 6: Pushing Documentation Branch"
 
-Write-Host "Pushing to origin/main..." -ForegroundColor White
-$pushSuccess = $false
-
-# Try main branch first
+Write-Host "Pushing to origin/docs..." -ForegroundColor White
 try {
-    $output = git push -u origin main 2>&1
+    $output = git push -u origin docs 2>&1
     if ($LASTEXITCODE -eq 0) {
-        WriteOk "Main branch pushed"
-        $pushSuccess = $true
+        WriteOk "Docs branch pushed to GitHub"
+    } else {
+        WriteWarn "Failed to push docs branch (may need authentication)"
     }
 } catch {
-    # Silently continue to try master
-}
-
-# If main failed, try master
-if (-not $pushSuccess) {
-    Write-Host "Trying master branch instead..." -ForegroundColor White
-    try {
-        $output = git push -u origin master 2>&1
-        if ($LASTEXITCODE -eq 0) {
-            WriteOk "Master branch pushed"
-            $pushSuccess = $true
-        }
-    } catch {
-        # Continue anyway
-    }
-}
-
-if (-not $pushSuccess) {
-    WriteWarn "Branch push skipped (may already exist or no network)"
+    WriteWarn "Branch push encountered an error"
 }
 
 # Success
