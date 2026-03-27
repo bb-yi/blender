@@ -1,12 +1,12 @@
 
 <!doctype html>
-<html lang="en" class="no-js">
+<html lang="zh" class="no-js">
   <head>
     
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Blender 5.1 NPR Port - Features & Usage Guide">
+        <meta name="description" content="Blender 5.1 NPR Port 新增功能与使用说明">
       
       
         <meta name="author" content="NPR Port Team">
@@ -26,7 +26,7 @@
     
     
       
-        <title>Scene Extensions - Blender 5.1 NPR Port | Documentation</title>
+        <title>Scene 级 Eevee 扩展 - Blender 5.1 NPR Port 功能指南</title>
       
     
     
@@ -51,8 +51,6 @@
         <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
       
     
-    
-      <link rel="stylesheet" href="stylesheets/language-switcher.css">
     
     <script>__md_scope=new URL(".",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
@@ -81,7 +79,7 @@
       
         
         <a href="#scene-level-eevee-extensions-scene-eevee" class="md-skip">
-          Skip to content
+          跳转至
         </a>
       
     </div>
@@ -95,8 +93,8 @@
   
 
 <header class="md-header md-header--shadow" data-md-component="header">
-  <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="index.html" title="Blender 5.1 NPR Port | Documentation" class="md-header__button md-logo" aria-label="Blender 5.1 NPR Port | Documentation" data-md-component="logo">
+  <nav class="md-header__inner md-grid" aria-label="页眉">
+    <a href="index.html" title="Blender 5.1 NPR Port 功能指南" class="md-header__button md-logo" aria-label="Blender 5.1 NPR Port 功能指南" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -110,13 +108,13 @@
       <div class="md-header__ellipsis">
         <div class="md-header__topic">
           <span class="md-ellipsis">
-            Blender 5.1 NPR Port | Documentation
+            Blender 5.1 NPR Port 功能指南
           </span>
         </div>
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Scene Extensions
+              Scene 级 Eevee 扩展
             
           </span>
         </div>
@@ -129,9 +127,9 @@
     
     
     
-    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="red"  aria-label="Dark mode"  type="radio" name="__palette" id="__palette_0">
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="red"  aria-label="切换到深色模式"  type="radio" name="__palette" id="__palette_0">
     
-      <label class="md-header__button md-icon" title="Dark mode" for="__palette_1" hidden>
+      <label class="md-header__button md-icon" title="切换到深色模式" for="__palette_1" hidden>
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
       </label>
     
@@ -139,9 +137,9 @@
     
     
     
-    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="red"  aria-label="Light mode"  type="radio" name="__palette" id="__palette_1">
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="red"  aria-label="切换到亮色模式"  type="radio" name="__palette" id="__palette_1">
     
-      <label class="md-header__button md-icon" title="Light mode" for="__palette_0" hidden>
+      <label class="md-header__button md-icon" title="切换到亮色模式" for="__palette_0" hidden>
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
       </label>
     
@@ -152,32 +150,6 @@
     
       <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
     
-    
-      <div class="md-header__option">
-  <div class="md-select">
-    
-    <button class="md-header__button md-icon" aria-label="Select language">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m12.87 15.07-2.54-2.51.03-.03A17.5 17.5 0 0 0 14.07 6H17V4h-7V2H8v2H1v2h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2zm-2.62 7 1.62-4.33L19.12 17z"/></svg>
-    </button>
-    <div class="md-select__inner">
-      <ul class="md-select__list">
-        
-          <li class="md-select__item">
-            <a href="." hreflang="en" class="md-select__link">
-              English
-            </a>
-          </li>
-        
-          <li class="md-select__item">
-            <a href="." hreflang="zh" class="md-select__link">
-              中文
-            </a>
-          </li>
-        
-      </ul>
-    </div>
-  </div>
-</div>
     
     
       
@@ -190,16 +162,16 @@
   <label class="md-search__overlay" for="__search"></label>
   <div class="md-search__inner" role="search">
     <form class="md-search__form" name="search">
-      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <input type="text" class="md-search__input" name="query" aria-label="搜索" placeholder="搜索" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
       <label class="md-search__icon md-icon" for="__search">
         
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
         
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
       </label>
-      <nav class="md-search__options" aria-label="Search">
+      <nav class="md-search__options" aria-label="查找">
         
-        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+        <button type="reset" class="md-search__icon md-icon" title="清空当前内容" aria-label="清空当前内容" tabindex="-1">
           
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
         </button>
@@ -212,7 +184,7 @@
       <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
         <div class="md-search-result" data-md-component="search-result">
           <div class="md-search-result__meta">
-            Initializing search
+            正在初始化搜索引擎
           </div>
           <ol class="md-search-result__list" role="presentation"></ol>
         </div>
@@ -246,15 +218,15 @@
 
 
 
-<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+<nav class="md-nav md-nav--primary" aria-label="导航栏" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="index.html" title="Blender 5.1 NPR Port | Documentation" class="md-nav__button md-logo" aria-label="Blender 5.1 NPR Port | Documentation" data-md-component="logo">
+    <a href="index.html" title="Blender 5.1 NPR Port 功能指南" class="md-nav__button md-logo" aria-label="Blender 5.1 NPR Port 功能指南" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
 
     </a>
-    Blender 5.1 NPR Port | Documentation
+    Blender 5.1 NPR Port 功能指南
   </label>
   
   <ul class="md-nav__list" data-md-scrollfix>
@@ -271,7 +243,7 @@
   
   
   <span class="md-ellipsis">
-    Home
+    首页
     
   </span>
   
@@ -302,7 +274,7 @@
   
   
   <span class="md-ellipsis">
-    Scene Extensions
+    Scene 级 Eevee 扩展
     
   </span>
   
@@ -315,7 +287,7 @@
   
   
   <span class="md-ellipsis">
-    Scene Extensions
+    Scene 级 Eevee 扩展
     
   </span>
   
@@ -324,7 +296,7 @@
       
         
 
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+<nav class="md-nav md-nav--secondary" aria-label="目录">
   
   
   
@@ -333,7 +305,7 @@
   
     <label class="md-nav__title" for="__toc">
       <span class="md-nav__icon md-icon"></span>
-      Table of contents
+      目录
     </label>
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
@@ -346,42 +318,6 @@
   
     <nav class="md-nav" aria-label="Render Textures">
       <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#description" class="md-nav__link">
-    <span class="md-ellipsis">
-      Description
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#panel-location" class="md-nav__link">
-    <span class="md-ellipsis">
-      Panel Location
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#configurable-parameters" class="md-nav__link">
-    <span class="md-ellipsis">
-      Configurable Parameters
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#basic-usage" class="md-nav__link">
-    <span class="md-ellipsis">
-      Basic Usage
-    </span>
-  </a>
-  
-</li>
         
           <li class="md-nav__item">
   <a href="#_1" class="md-nav__link">
@@ -433,42 +369,6 @@
   
     <nav class="md-nav" aria-label="Filter Materials">
       <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#description_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      Description
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#panel-location_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      Panel Location
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#basic-usage_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      Basic Usage
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#execution-stages" class="md-nav__link">
-    <span class="md-ellipsis">
-      Execution Stages
-    </span>
-  </a>
-  
-</li>
         
           <li class="md-nav__item">
   <a href="#_5" class="md-nav__link">
@@ -531,7 +431,7 @@
   
   
   <span class="md-ellipsis">
-    Extended Nodes
+    扩展着色器节点
     
   </span>
   
@@ -553,7 +453,7 @@
   
   
   <span class="md-ellipsis">
-    NPR Workflow
+    NPR Tree 工作流
     
   </span>
   
@@ -575,7 +475,7 @@
   
   
   <span class="md-ellipsis">
-    Interface & Settings
+    界面与设置
     
   </span>
   
@@ -598,7 +498,7 @@
                   <div class="md-sidebar__inner">
                     
 
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+<nav class="md-nav md-nav--secondary" aria-label="目录">
   
   
   
@@ -607,7 +507,7 @@
   
     <label class="md-nav__title" for="__toc">
       <span class="md-nav__icon md-icon"></span>
-      Table of contents
+      目录
     </label>
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
@@ -620,42 +520,6 @@
   
     <nav class="md-nav" aria-label="Render Textures">
       <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#description" class="md-nav__link">
-    <span class="md-ellipsis">
-      Description
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#panel-location" class="md-nav__link">
-    <span class="md-ellipsis">
-      Panel Location
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#configurable-parameters" class="md-nav__link">
-    <span class="md-ellipsis">
-      Configurable Parameters
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#basic-usage" class="md-nav__link">
-    <span class="md-ellipsis">
-      Basic Usage
-    </span>
-  </a>
-  
-</li>
         
           <li class="md-nav__item">
   <a href="#_1" class="md-nav__link">
@@ -707,42 +571,6 @@
   
     <nav class="md-nav" aria-label="Filter Materials">
       <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#description_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      Description
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#panel-location_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      Panel Location
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#basic-usage_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      Basic Usage
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#execution-stages" class="md-nav__link">
-    <span class="md-ellipsis">
-      Execution Stages
-    </span>
-  </a>
-  
-</li>
         
           <li class="md-nav__item">
   <a href="#_5" class="md-nav__link">
@@ -803,69 +631,6 @@
 
 <h1 id="scene-level-eevee-extensions-scene-eevee">Scene-Level Eevee Extensions | Scene 级 Eevee 扩展<a class="headerlink" href="#scene-level-eevee-extensions-scene-eevee" title="Permanent link">&para;</a></h1>
 <h2 id="render-textures">Render Textures<a class="headerlink" href="#render-textures" title="Permanent link">&para;</a></h2>
-<div class="tabbed-set tabbed-alternate" data-tabs="1:2"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">English</label><label for="__tabbed_1_2">中文</label></div>
-<div class="tabbed-content">
-<div class="tabbed-block">
-<h3 id="description">Description<a class="headerlink" href="#description" title="Permanent link">&para;</a></h3>
-<p><code>Render Textures</code> is a scene-level Eevee additional render texture system.</p>
-<p>It allows a scene to maintain up to <code>4</code> Render Texture slots, where each slot can specify a camera and output type. The scene is rendered from that camera perspective into a texture, which can then be sampled in object materials using the <code>Render Texture</code> node.</p>
-<h3 id="panel-location">Panel Location<a class="headerlink" href="#panel-location" title="Permanent link">&para;</a></h3>
-<p><code>Scene Properties &gt; Render Textures</code></p>
-<h3 id="configurable-parameters">Configurable Parameters<a class="headerlink" href="#configurable-parameters" title="Permanent link">&para;</a></h3>
-<p>Each Render Texture entry supports:</p>
-<table>
-<thead>
-<tr>
-<th>Parameter</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>Name</code></td>
-<td>Identifier name for referencing in nodes</td>
-</tr>
-<tr>
-<td><code>Enabled</code></td>
-<td>Enable/disable rendering for this texture</td>
-</tr>
-<tr>
-<td><code>Source</code></td>
-<td>Capture type: Color / Depth / Normal</td>
-</tr>
-<tr>
-<td><code>Camera</code></td>
-<td>Specify camera for rendering</td>
-</tr>
-<tr>
-<td><code>Resolution X/Y</code></td>
-<td>Output texture dimensions</td>
-</tr>
-<tr>
-<td><code>Update Mode</code></td>
-<td>Every Sample / Frame / Manual</td>
-</tr>
-<tr>
-<td><code>Format</code></td>
-<td>RGBA16F / RGBA32F / R16F / R32F</td>
-</tr>
-</tbody>
-</table>
-<h3 id="basic-usage">Basic Usage<a class="headerlink" href="#basic-usage" title="Permanent link">&para;</a></h3>
-<ol>
-<li>Open <code>Scene Properties &gt; Render Textures</code></li>
-<li>Create a new entry</li>
-<li>Select Source, Camera, resolution, and format</li>
-<li>In object material, add <code>Render Texture</code> node</li>
-<li>Select the entry from the node panel</li>
-<li>Use outputs in material calculations</li>
-</ol>
-<div class="admonition tip">
-<p class="admonition-title">Tip</p>
-<p>Perfect for real-time reflections, screen-space effects, and dynamic textures.</p>
-</div>
-</div>
-<div class="tabbed-block">
 <h3 id="_1">功能说明<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h3>
 <p><code>Render Textures</code> 是场景级的 Eevee 额外渲染纹理系统。</p>
 <p>它允许场景预先维护最多 <code>4</code> 个 Render Texture 槽位，每个槽位都可以指定一个相机和一个输出类型，把该相机视角下的场景结果先渲染成纹理，再在普通物体材质中通过 <code>Render Texture</code> 节点采样。</p>
@@ -924,50 +689,8 @@
 <p class="admonition-title">提示</p>
 <p>非常适合用于制作实时反射、屏幕空间效果和动态纹理。</p>
 </div>
-</div>
-</div>
-</div>
 <hr />
 <h2 id="filter-materials">Filter Materials<a class="headerlink" href="#filter-materials" title="Permanent link">&para;</a></h2>
-<div class="tabbed-set tabbed-alternate" data-tabs="2:2"><input checked="checked" id="__tabbed_2_1" name="__tabbed_2" type="radio" /><input id="__tabbed_2_2" name="__tabbed_2" type="radio" /><div class="tabbed-labels"><label for="__tabbed_2_1">English</label><label for="__tabbed_2_2">中文</label></div>
-<div class="tabbed-content">
-<div class="tabbed-block">
-<h3 id="description_1">Description<a class="headerlink" href="#description_1" title="Permanent link">&para;</a></h3>
-<p>A scene-level Eevee full-screen filter stack. Each entry is a <code>Filter</code> domain material, applied in order to process each frame.</p>
-<h3 id="panel-location_1">Panel Location<a class="headerlink" href="#panel-location_1" title="Permanent link">&para;</a></h3>
-<p><code>Scene Properties &gt; Filter Materials</code></p>
-<p>Node Editor: Shader Editor &gt; Shader Type &gt; Filter</p>
-<h3 id="basic-usage_1">Basic Usage<a class="headerlink" href="#basic-usage_1" title="Permanent link">&para;</a></h3>
-<ol>
-<li>Open <code>Scene Properties &gt; Filter Materials</code></li>
-<li>Create a new entry</li>
-<li>Material must be <code>Filter</code> domain</li>
-<li>Open Shader Editor, switch to <code>Filter</code> shader type</li>
-<li>Use <code>Scene Color</code> to read scene data</li>
-<li>Output with <code>Filter Output</code> node</li>
-<li>Choose <code>Execution Stage</code> for order</li>
-</ol>
-<h3 id="execution-stages">Execution Stages<a class="headerlink" href="#execution-stages" title="Permanent link">&para;</a></h3>
-<ul>
-<li><code>Before Volume Fog</code> - Before volumetric effects</li>
-<li><code>Before Depth of Field</code> - Before depth of field</li>
-<li><code>Before Composite</code> - Before final composition</li>
-</ul>
-<div class="admonition warning">
-<p class="admonition-title">Warning</p>
-<p>Filter Materials can only use Filter domain materials.</p>
-</div>
-<div class="admonition example">
-<p class="admonition-title">Use Cases</p>
-<ul>
-<li>Color grading and tone mapping</li>
-<li>Screen-space effects (edge detection, toon rendering)</li>
-<li>Motion blur and motion vectors</li>
-<li>Post-process denoising and sharpening</li>
-</ul>
-</div>
-</div>
-<div class="tabbed-block">
 <h3 id="_5">功能说明<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h3>
 <p>它是一套场景级的 Eevee 全屏滤镜栈。每个条目都是一个 <code>Filter</code> 域材质，按列表顺序依次对当前帧进行处理。</p>
 <h3 id="_6">面板入口<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h3>
@@ -1002,9 +725,6 @@
 <li>后期降噪和锐化处理</li>
 </ul>
 </div>
-</div>
-</div>
-</div>
 
 
 
@@ -1030,7 +750,7 @@
           <button type="button" class="md-top md-icon" data-md-component="top" hidden>
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
-  Back to top
+  回到页面顶部
 </button>
         
       </main>
@@ -1077,7 +797,7 @@
     
     
       
-      <script id="__config" type="application/json">{"base": ".", "features": ["navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.select", "content.code.annotate", "content.tabs.link", "toc.follow"], "search": "assets/javascripts/workers/search.973d3a69.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"base": ".", "features": ["navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.select", "content.code.annotate", "content.tabs.link", "toc.follow"], "search": "assets/javascripts/workers/search.973d3a69.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u590d\u5236", "clipboard.copy": "\u590d\u5236", "search.result.more.one": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.more.other": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 # \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.none": "\u6ca1\u6709\u627e\u5230\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.one": "\u627e\u5230 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.other": "# \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.placeholder": "\u952e\u5165\u4ee5\u5f00\u59cb\u641c\u7d22", "search.result.term.missing": "\u7f3a\u5c11", "select.version": "\u9009\u62e9\u5f53\u524d\u7248\u672c"}, "version": null}</script>
     
     
       <script src="assets/javascripts/bundle.f55a23d4.min.js"></script>
@@ -1085,8 +805,6 @@
         <script src="javascripts/mathjax.js"></script>
       
         <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
-      
-        <script src="javascripts/language-switcher.js"></script>
       
     
   </body>
