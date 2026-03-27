@@ -8,14 +8,15 @@
 
 `Add > Input > Render Info`
 
-![alt text](images/SnowShot_2026-03-28_04-51-10.png)
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_04-51-10.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
 
 #### 输出
 
-- `Frag Coord`：屏幕空间坐标（xy归一化到0-1，z为深度）
-
+- `Frag Coord`：屏幕空间坐标（xy 归一化到 0-1，z 为深度）
 - `Width`：渲染区域宽度
-
 - `Height`：渲染区域高度
 
 #### 作用
@@ -28,7 +29,10 @@
 
 `Add > Input > Scene Time`
 
-![alt text](images/SnowShot_2026-03-28_04-52-48.png)
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_04-52-48.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
 
 #### 输入
 
@@ -37,12 +41,9 @@
 #### 输出
 
 - `Frame`：当前帧数
-
 - `Seconds`：当前帧对应的秒数
-
-- `Timeline`：0-1映射的场景时间（从开始帧到结束帧）
-
-- `Scaled Frame`：当前帧除以Scale后的结果
+- `Timeline`：0-1 映射的场景时间（从开始帧到结束帧）
+- `Scaled Frame`：当前帧除以 `Scale` 后的结果
 
 ### Screen Derivative
 
@@ -50,29 +51,30 @@
 
 `Add > Utilities > Math > Screen Derivative`
 
-![alt text](images/SnowShot_2026-03-28_04-53-23.png)
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_04-53-23.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
 
 #### 功能
 
 获得屏幕之间相邻像素之间的差异：
 
-- `DDX`：X方向的屏幕空间导数
-
-- `DDY`：Y方向的屏幕空间导数
-
-- `DDXY`：DDX和DDY的组合（DDX + DDY）
-
-其中 `DDXY` 表示 `DDX + DDY`。
+- `DDX`：X 方向的屏幕空间导数
+- `DDY`：Y 方向的屏幕空间导数
+- `DDXY`：`DDX` 和 `DDY` 的组合（`DDX + DDY`）
 
 ### Portal In / Portal Out
 
 #### 入口
 
 - `Add > Layout > Portal In`
-
 - `Add > Layout > Portal Out`
 
-![alt text](images/SnowShot_2026-03-28_04-53-44.png)
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_04-53-44.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
 
 #### 功能说明
 
@@ -81,23 +83,18 @@
 工作方式可以理解为：
 
 - `Portal In`：在当前节点树里存一个有名字、有类型的值
-
 - `Portal Out`：在同一节点树内按名字把这个值取出来继续使用
 
 #### 其他
 
 - 新建 `Portal In` 时会自动生成唯一名称。
-
 - `Portal Out` 上带有放大镜按钮，可快速跳转到对应的 `Portal In` 位置。
 
 #### 限制
 
 - 只在同一个 shader node tree 内识别。
-
 - 不支持跨节点树。
-
 - 不支持跨节点组自动穿透。
-
 - 同名输入应只保留一个来源。
 
 **2. Eevee 物体材质节点**
@@ -108,7 +105,10 @@
 
 `Add > Texture > Render Texture`
 
-![alt text](images/SnowShot_2026-03-28_04-54-27.png)
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_04-54-27.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
 
 #### 作用
 
@@ -117,7 +117,6 @@
 #### 输入输出
 
 - 输入：`Vector`
-
 - 输出：`Color`、`Alpha`
 
 ### Screenspace Info
@@ -126,31 +125,36 @@
 
 `Add > Input > Screenspace Info`
 
-![alt text](images/SnowShot_2026-03-28_04-56-22.png)
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_04-56-22.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
 
 #### 输入输出
 
 - 输入：`View Position`（摄像机空间位置）
-
-- 输出：`Scene Color`（场景览看颜色）、`Scene Depth`（场景深度值）
+- 输出：`Scene Color`（场景颜色）、`Scene Depth`（场景深度值）
 
 #### 作用
 
-获得当前的渲染缓冲颜色或深度的内容
+获得当前的渲染缓冲颜色或深度的内容。
 
-![alt text](images/SnowShot_2026-03-28_04-59-57.png)
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_04-59-57.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
 
 #### 使用说明
 
-- 渲染设置中需要打开`Raytracing`
+- 渲染设置中需要打开 `Raytracing`
+- 材质选项 `Render Method` 选择 `Dithered`
+- 材质选项打开 `Raytraced Transmission`
+- `View Position` 默认输入为 `position` 变换到摄像机空间，再反转 z 轴
 
-- 材质选项`Render Method`选择`Dithered`
-
-- 材质选项打开`Raytraced Transmission`
-
-- `View Position`默认输入为:`position`变换到摄像机空间,再反转z轴
-
-![alt text](images/SnowShot_2026-03-28_04-59-28.png)
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_04-59-28.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
 
 ### World Environment
 
@@ -158,12 +162,14 @@
 
 `Add > Input > World Environment`
 
-![alt text](images/SnowShot_2026-03-28_05-01-56.png)
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_05-01-56.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
 
 #### 输入输出
 
 - 输入：`Direction`（采样方向）
-
 - 输出：`Color`（环境颜色）
 
 #### 作用
@@ -172,12 +178,14 @@
 
 #### 说明
 
-- 读取世界环境光照探头颜色,可在世界环境中调整分辨率
+- 读取世界环境光照探头颜色，可在世界环境中调整分辨率
 
-![alt text](images/SnowShot_2026-03-28_05-03-27.png)
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_05-03-27.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
 
 - `Direction` 不连接时，默认使用当前表面的视线方向
-
 - `Direction` 连接后，可以按指定方向采样世界环境
 
 ### World To Tangent
@@ -186,12 +194,14 @@
 
 `Add > Utilities > Vector > World To Tangent`
 
-![alt text](images/SnowShot_2026-03-28_05-04-02.png)
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_05-04-02.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
 
 #### 输入输出
 
 - 输入：`Vector`（世界空间方向）
-
 - 输出：`Vector`（切线空间方向）
 
 #### 作用
@@ -202,19 +212,20 @@
 
 - 节点面板中可指定 `UV Map`，该 UV 的切线会作为转换基底
 
-
 ### Bevel
 
 #### 入口
 
 `Add > Input > Bevel`
 
-![alt text](images/SnowShot_2026-03-28_05-06-05.png)
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_05-06-05.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
 
 #### 输入输出
 
 - 输入：`Radius`（倒角半径）、`Normal`（表面法线提示）
-
 - 输出：`Normal`（倒角后的近似法线）
 
 #### 面板选项
@@ -228,9 +239,7 @@
 #### 说明
 
 - `Cycles` 仍然使用官方原本的真实几何倒角算法
-
 - `Eevee` 这里使用的是同物体屏幕空间近似
-
 - 结果依赖当前视角、深度缓冲和可见邻域，不等同于 `Cycles` 的真实 `Bevel`
 
 ### Curvature
@@ -239,22 +248,21 @@
 
 `Add > Input > Curvature`
 
-![alt text](images/SnowShot_2026-03-28_05-06-57.png)
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_05-06-57.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
 
 #### 输入
 
 - `Samples`
-
 - `Sample Radius`
-
 - `Thickness`
-
 - `Scale`
 
 #### 输出
 
 - `Scene Curvature`：根据屏幕空间提取的曲率值
-
 - `Scene Rim`：边缘光
 
 #### 面板选项
