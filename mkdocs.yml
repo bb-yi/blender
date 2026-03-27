@@ -65,9 +65,6 @@ site_url: "https://bb-yi.github.io/blender/"
 plugins:
   - search:
       lang: en
-      pipeline:
-        - stemmer
-        - stop
 
 extra:
   alternate:
