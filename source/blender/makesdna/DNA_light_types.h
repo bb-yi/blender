@@ -167,6 +167,8 @@ struct Light {
   /* Deprecated. */
   DNA_DEPRECATED float energy_deprecated = 10.0f;
   float _pad2 = 0.0f;
+  int lightgroup_id = 0;
+  int _pad3 = 0;
 };
 
 }  // namespace blender

@@ -23,6 +23,8 @@
 #include "BLI_listbase.h"
 #include "BLI_math_base.h"
 #include "BLI_path_utils.hh"
+#include "BLI_string.h"
+#include "BLI_string_utf8.h"
 #include "BLI_utildefines.h"
 
 #include "BKE_appdir.hh"
@@ -52,9 +54,30 @@
 
 namespace blender {
 
+#ifdef WITH_BUILDINFO
+extern "C" char build_date[];
+#endif
+
 /* -------------------------------------------------------------------- */
 /** \name Splash Screen
  * \{ */
+
+static const char *wm_block_splash_version_label()
+{
+  static char splash_version_label[128] = "";
+
+#ifdef WITH_BUILDINFO
+  if (build_date[0] != '\0') {
+    BLI_snprintf_utf8(
+        splash_version_label, sizeof(splash_version_label), "%s npr post %s", BKE_blender_version_string(), build_date);
+    return splash_version_label;
+  }
+#endif
+
+  BLI_snprintf_utf8(
+      splash_version_label, sizeof(splash_version_label), "%s npr post", BKE_blender_version_string());
+  return splash_version_label;
+}
 
 static void wm_block_splash_close(bContext *C, void *arg_block, void * /*arg*/)
 {
@@ -314,7 +337,7 @@ static ui::Block *wm_block_splash_create(bContext *C, ARegion *region, void * /*
     button_func_set(but, wm_block_splash_close, block, nullptr);
 
     wm_block_splash_add_label(block,
-                              BKE_blender_version_string(),
+                              wm_block_splash_version_label(),
                               splash_width - 8.0 * UI_SCALE_FAC,
                               splash_height - 13.0 * UI_SCALE_FAC);
   }

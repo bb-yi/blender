@@ -19,6 +19,7 @@
     - `Screen Derivative`
     - `World Environment`
     - `Light Probe Color`
+    - `World To Tangent`
     - `Bevel`
 
 3. `Goo Engine` 移植节点
@@ -44,6 +45,9 @@
 
 5. 界面整理节点
    - `Portal In / Portal Out`
+
+6. 界面与工作流补充
+   - `材质选择器预览开关`
 
 
 ## 一、Scene 级 Eevee 扩展
@@ -359,6 +363,32 @@
   - `Irradiance` 默认使用当前表面的着色法线方向
 - `Direction` 连接后，可以按指定方向采样 probe 信息
 
+### World To Tangent
+
+#### 入口
+
+`Add > Utilities > Vector > World To Tangent`
+
+在 `Eevee` 物体材质和 `NPR Tree` 中可用。
+
+#### 输入输出
+
+- 输入：`Vector`
+- 输出：`Vector`
+
+#### 作用
+
+把一个世界空间方向向量转换到当前表面的切线空间。
+
+#### 说明
+
+- 主要用于把世界空间方向改写成以 `Tangent / Bitangent / Normal` 为基底的局部方向
+- 节点面板中可指定 `UV Map`，该 UV 的切线会作为转换基底
+- 适合拿来做各向异性方向控制、切线空间流向、局部扫描方向等效果
+- 当前版本处理的是“向量 / 方向”变换，不是“位置点”变换
+- 普通网格需要有效的 UV 切线数据；曲线 / 毛发会优先使用已有的曲线切线基底
+- 如果对象没有可用切线基底，结果会退化为 `0`
+
 ### Bevel
 
 #### 入口
@@ -498,6 +528,9 @@
   - `Built-in` / `Stable` / `Soft Filtered`
 - 当 `Shadow Mode = Stable` 或 `Soft Filtered` 时，可用 `Stable Samples` 提高阴影质量
 - `Soft Filtered` 更适合把单帧黑白阴影重建成连续灰度，但性能会比 `Stable` 更高
+- 节点面板新增整数 `Lightgroup`
+  - 只有 `Lightgroup ID` 相同的灯光，才会参与这个 `Shader Info` 节点的直接光照与阴影计算
+  - 默认值为 `0`，表示只接收 `Lightgroup ID = 0` 的灯光
 - 当前实现会排除 world sun 对这些输出的干扰，避免 HDRI 或世界环境里的“太阳光”混入直接结果。
 
 ### Light Info
@@ -659,7 +692,62 @@
 - 由于重复区域节点名称修改了,4.4 npr原型的工程需要自己重新连接重新区域相关的节点
 
 
-## 四、当前限制与注意事项
+## 四、界面与工作流补充
+
+### 1. 材质选择器预览开关
+
+#### 作用
+
+控制材质下拉列表 / 搜索列表中是否渲染材质预览图。
+
+这个开关主要用于在材质很多时，减少展开材质选择器时的预览生成开销。
+
+#### 入口
+
+`Edit > Preferences > Editing > Objects > Materials > Material Selector Previews`
+
+#### 行为说明
+
+- 开启时：材质选择器会按当前逻辑显示材质预览图。
+- 关闭时：材质选择器会退回普通材质图标，不再在下拉列表里触发材质预览渲染。
+- 默认值为开启。
+
+#### 当前范围
+
+- 目前只影响 `template_ID(...)` 这类材质选择器下拉列表中的材质预览显示。
+- 不影响 `Material Properties` 面板中的大预览球。
+- 不影响材质本身的正常渲染结果。
+
+### 2. Eevee 灯光 Lightgroup ID
+
+#### 作用
+
+为 Eevee 灯光指定一个整数灯光组编号，供 `Shader Info` 节点做分组过滤。
+
+#### 入口
+
+`Light Data > Light > Lightgroup ID`
+
+#### 行为说明
+
+- 默认值为 `0`
+- `Shader Info` 节点的 `Lightgroup` 也为 `0` 时，只会计算 `Lightgroup ID = 0` 的灯光
+- 如果某个 `Shader Info` 节点设置为其他整数值，则只有相同编号的灯光会参与该节点计算
+- 这个分组过滤当前只影响 `Shader Info` 节点，不会改动 Eevee 普通材质主通道的默认灯光结果
+
+### 3. 启动图版本标识
+
+#### 作用
+
+在启动图右上角的版本文字后追加当前 NPR 构建标识与构建日期，方便区分自定义构建版本。
+
+#### 当前显示格式
+
+- `版本号 + npr post + 构建日期`
+- 例如：`5.1.0 npr post 2026-03-27`
+
+
+## 五、当前限制与注意事项
 
 - 大部分功能是 `Eevee` 专用，不支持 `Cycles`。
 - `Render Textures` 当前最多 `4` 个槽位。

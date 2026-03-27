@@ -5531,6 +5531,13 @@ static void rna_def_userdef_edit(BlenderRNA *brna)
       "Material Link To",
       "Toggle whether the material is linked to object data or the object block");
 
+  prop = RNA_def_property(srna, "use_material_selector_previews", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "uiflag", USER_MATERIAL_SELECTOR_PREVIEWS);
+  RNA_def_property_ui_text(prop,
+                           "Material Selector Previews",
+                           "Render preview images for materials in selector drop-down lists");
+  RNA_def_property_update(prop, 0, "rna_userdef_update");
+
   prop = RNA_def_property(srna, "object_align", PROP_ENUM, PROP_NONE);
   RNA_def_property_enum_bitflag_sdna(prop, nullptr, "flag");
   RNA_def_property_enum_items(prop, object_align_items);

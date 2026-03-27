@@ -2857,6 +2857,20 @@ struct NodeShaderNormalMap {
   char _pad[6];
 };
 
+struct NodeShaderWorldToTangent {
+  DNA_DEFINE_CXX_METHODS(NodeShaderWorldToTangent)
+
+  char uv_map[/*MAX_CUSTOMDATA_LAYER_NAME_NO_PREFIX*/ 64] = "";
+};
+
+struct NodeShaderShaderInfo {
+  DNA_DEFINE_CXX_METHODS(NodeShaderShaderInfo)
+
+  char lightgroup[64] = "";
+  int lightgroup_id = 0;
+  int _pad = 0;
+};
+
 struct NodeRadialTiling {
   DNA_DEFINE_CXX_METHODS(NodeRadialTiling)
 

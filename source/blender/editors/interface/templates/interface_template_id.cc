@@ -119,7 +119,10 @@ static bool id_search_add(const bContext *C, TemplateID *template_ui, SearchItem
    * followed by ID_NAME-2 characters from id->name
    */
   char name_ui[MAX_ID_FULL_NAME_UI];
-  int iconid = id_icon_get(C, id, template_ui->preview);
+  const bool use_material_preview = (GS(id->name) != ID_MA) ||
+                                    ((U.uiflag & USER_MATERIAL_SELECTOR_PREVIEWS) != 0);
+  int iconid = use_material_preview ? id_icon_get(C, id, template_ui->preview) :
+                                      icon_from_idcode(GS(id->name));
   const bool use_lib_prefix = template_ui->preview || iconid;
   const bool has_sep_char = ID_IS_LINKED(id);
 

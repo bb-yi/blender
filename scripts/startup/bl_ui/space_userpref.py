@@ -442,6 +442,17 @@ class USERPREF_PT_edit_objects_new(EditingPanel, CenterAlignMixIn, Panel):
         flow.prop(edit, "collection_instance_empty_size", text="Instance Empty Size")
 
 
+class USERPREF_PT_edit_objects_materials(EditingPanel, CenterAlignMixIn, Panel):
+    bl_label = "Materials"
+    bl_parent_id = "USERPREF_PT_edit_objects"
+
+    def draw_centered(self, context, layout):
+        prefs = context.preferences
+        edit = prefs.edit
+
+        layout.prop(edit, "use_material_selector_previews")
+
+
 class USERPREF_PT_edit_objects_duplicate_data(EditingPanel, CenterAlignMixIn, Panel):
     bl_label = "Copy on Duplicate"
     bl_parent_id = "USERPREF_PT_edit_objects"
@@ -3037,6 +3048,7 @@ classes = (
 
     USERPREF_PT_edit_objects,
     USERPREF_PT_edit_objects_new,
+    USERPREF_PT_edit_objects_materials,
     USERPREF_PT_edit_objects_duplicate_data,
     USERPREF_PT_edit_cursor,
     USERPREF_PT_edit_annotations,

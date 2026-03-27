@@ -474,6 +474,11 @@ class NODE_MT_shader_node_vector_base(node_add_menu.NodeMenu):
         self.node_operator_with_searchable_enum(context, layout, "ShaderNodeVectorMath", "operation")
         self.node_operator(layout, "ShaderNodeVectorRotate")
         self.node_operator(layout, "ShaderNodeVectorTransform")
+        self.node_operator(
+            layout,
+            "ShaderNodeWorldToTangent",
+            poll=object_eevee_shader_nodes_poll(context) or npr_shader_nodes_poll(context),
+        )
 
         self.draw_assets_for_catalog(layout, self.menu_path)
 

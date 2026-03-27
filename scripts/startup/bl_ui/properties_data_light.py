@@ -118,6 +118,7 @@ class DATA_PT_EEVEE_light(DataButtonsPanel, Panel):
         col.prop(light, "energy")
         col.prop(light, "exposure")
         col.prop(light, "normalize")
+        col.prop(light, "lightgroup_id", text="Lightgroup ID")
 
         layout.separator()
 

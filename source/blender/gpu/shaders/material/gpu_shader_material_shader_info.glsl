@@ -494,6 +494,7 @@ void node_shader_info(float3 position,
                       float3 normal_in,
                       float shadow_mode,
                       float stable_shadow_samples,
+                      float lightgroup_hash_value,
                       out float4 diffuse_shading,
                       out float shadow,
                       out float4 ambient_lighting,
@@ -502,7 +503,9 @@ void node_shader_info(float3 position,
 #if defined(GPU_FRAGMENT_SHADER) && (defined(MAT_DEFERRED) || defined(MAT_FORWARD) || defined(NPR_SHADER))
   float3 shading_normal = shader_info_resolve_normal(normal_in);
   float3 geometry_normal = shader_info_resolve_normal(g_data.Ng);
+  float3 probe_bias_normal = shader_info_resolve_normal(g_data.Ni);
   float3 view_vector = drw_world_incident_vector(position);
+  uint lightgroup_hash = floatBitsToUint(lightgroup_hash_value);
 
   ObjectInfos object_infos = drw_infos[drw_resource_id()];
   uchar receiver_light_set = receiver_light_set_get(object_infos);
@@ -530,6 +533,9 @@ void node_shader_info(float3 position,
       continue;
     }
     if (!light_linking_affects_receiver(light.light_set_membership, receiver_light_set)) {
+      continue;
+    }
+    if (light.lightgroup_hash != lightgroup_hash) {
       continue;
     }
 
@@ -581,7 +587,9 @@ void node_shader_info(float3 position,
   shadow = (shadow_weight_sum > 1e-8f) ? saturate(visibility_sum / shadow_weight_sum) : 0.0f;
 
 #  ifdef SPHERE_PROBE
-  LightProbeSample probe_sample = lightprobe_load(position, geometry_normal, view_vector);
+  /* Use the interpolated surface normal for probe lookup bias so smooth-shaded meshes do not
+   * inherit face-normal stepping from the volume probe receiver path. */
+  LightProbeSample probe_sample = lightprobe_load(position, probe_bias_normal, view_vector);
   probe_sample.volume_irradiance = spherical_harmonics_clamp(probe_sample.volume_irradiance,
                                                              uniform_buf.clamp.surface_indirect);
   float3 ambient = spherical_harmonics_evaluate_lambert(shading_normal,

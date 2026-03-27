@@ -14,6 +14,7 @@
 #include "BLI_linear_allocator.hh"
 #include "BLI_math_rotation.h"
 #include "BLI_string.h"
+#include "BLI_string_utf8.h"
 
 #include "BLT_translation.hh"
 
@@ -4030,6 +4031,71 @@ static void rna_ShaderNodeScript_bytecode_set(PointerRNA *ptr, const char *value
   }
 }
 
+static void rna_ShaderNodeShaderInfo_lightgroup_get(PointerRNA *ptr, char *value)
+{
+  bNode *node = ptr->data_as<bNode>();
+  if (node->storage == nullptr) {
+    value[0] = '\0';
+    return;
+  }
+
+  const NodeShaderShaderInfo *data = static_cast<const NodeShaderShaderInfo *>(node->storage);
+  BLI_strncpy(value, data->lightgroup, sizeof(data->lightgroup));
+}
+
+static int rna_ShaderNodeShaderInfo_lightgroup_length(PointerRNA *ptr)
+{
+  bNode *node = ptr->data_as<bNode>();
+  if (node->storage == nullptr) {
+    return 0;
+  }
+
+  const NodeShaderShaderInfo *data = static_cast<const NodeShaderShaderInfo *>(node->storage);
+  return strlen(data->lightgroup);
+}
+
+static void rna_ShaderNodeShaderInfo_lightgroup_set(PointerRNA *ptr, const char *value)
+{
+  bNode *node = ptr->data_as<bNode>();
+  if (node->storage == nullptr) {
+    node->storage = MEM_new<NodeShaderShaderInfo>(__func__);
+  }
+
+  NodeShaderShaderInfo *data = static_cast<NodeShaderShaderInfo *>(node->storage);
+  BLI_strncpy_utf8(data->lightgroup, value, sizeof(data->lightgroup));
+}
+
+static int rna_ShaderNodeShaderInfo_lightgroup_id_get(PointerRNA *ptr)
+{
+  bNode *node = ptr->data_as<bNode>();
+  if (node->storage == nullptr) {
+    return 0;
+  }
+
+  const NodeShaderShaderInfo *data = static_cast<const NodeShaderShaderInfo *>(node->storage);
+  if (data->lightgroup[0] != '\0') {
+    char *end = nullptr;
+    const long parsed_value = strtol(data->lightgroup, &end, 10);
+    if (end != data->lightgroup && *end == '\0' && parsed_value >= 0 && parsed_value <= INT_MAX) {
+      return int(parsed_value);
+    }
+  }
+
+  return max_ii(data->lightgroup_id, 0);
+}
+
+static void rna_ShaderNodeShaderInfo_lightgroup_id_set(PointerRNA *ptr, int value)
+{
+  bNode *node = ptr->data_as<bNode>();
+  if (node->storage == nullptr) {
+    node->storage = MEM_new<NodeShaderShaderInfo>(__func__);
+  }
+
+  NodeShaderShaderInfo *data = static_cast<NodeShaderShaderInfo *>(node->storage);
+  data->lightgroup_id = max_ii(value, 0);
+  data->lightgroup[0] = '\0';
+}
+
 static void rna_ShaderNodeScript_update(Main *bmain, Scene *scene, PointerRNA *ptr)
 {
   bNodeTree *ntree = reinterpret_cast<bNodeTree *>(ptr->owner_id);
@@ -6763,6 +6829,19 @@ static void def_sh_scene_time(BlenderRNA * /*brna*/, StructRNA *srna)
       srna, "Scene Time Node", "Retrieve the current scene time in frames, seconds, or normalized timeline space");
 }
 
+static void def_sh_world_to_tangent(BlenderRNA * /*brna*/, StructRNA *srna)
+{
+  PropertyRNA *prop;
+
+  RNA_def_struct_sdna_from(srna, "NodeShaderWorldToTangent", "storage");
+
+  prop = RNA_def_property(srna, "uv_map", PROP_STRING, PROP_NONE);
+  RNA_def_property_ui_text(prop, "UV Map", "UV map used to define the tangent basis");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  RNA_def_struct_sdna_from(srna, "bNode", nullptr);
+}
+
 static void def_sh_shader_info(BlenderRNA * /*brna*/, StructRNA *srna)
 {
   static const EnumPropertyItem shadow_mode_items[] = {
@@ -6804,6 +6883,34 @@ static void def_sh_shader_info(BlenderRNA * /*brna*/, StructRNA *srna)
                            "Stable Samples",
                            "Number of fixed shadow rays used by the Stable mode");
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  RNA_def_struct_sdna_from(srna, "NodeShaderShaderInfo", "storage");
+
+  prop = RNA_def_property(srna, "lightgroup_id", PROP_INT, PROP_UNSIGNED);
+  RNA_def_property_int_funcs(prop,
+                             "rna_ShaderNodeShaderInfo_lightgroup_id_get",
+                             "rna_ShaderNodeShaderInfo_lightgroup_id_set",
+                             nullptr);
+  RNA_def_property_range(prop, 0, INT_MAX);
+  RNA_def_property_ui_text(
+      prop,
+      "Lightgroup",
+      "Only lights assigned to the same numeric lightgroup contribute to Shader Info; "
+      "a value of 0 matches only lights in group 0");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  prop = RNA_def_property(srna, "lightgroup", PROP_STRING, PROP_NONE);
+  RNA_def_property_string_funcs(prop,
+                                "rna_ShaderNodeShaderInfo_lightgroup_get",
+                                "rna_ShaderNodeShaderInfo_lightgroup_length",
+                                "rna_ShaderNodeShaderInfo_lightgroup_set");
+  RNA_def_property_ui_text(prop,
+                           "Lightgroup",
+                           "Compatibility string property for legacy files; only lights with the "
+                           "same lightgroup contribute to Shader Info");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  RNA_def_struct_sdna_from(srna, "bNode", nullptr);
 }
 
 static void def_sh_scene_color(BlenderRNA * /*brna*/, StructRNA *srna)
@@ -10255,6 +10362,7 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("ShaderNode", "ShaderNodeSceneTime", def_sh_scene_time);
   define("ShaderNode", "ShaderNodeWorldEnvironment");
   define("ShaderNode", "ShaderNodeLightProbeColor");
+  define("ShaderNode", "ShaderNodeWorldToTangent", def_sh_world_to_tangent);
   define("ShaderNode", "ShaderNodeCurvature", def_sh_curvature);
   define("ShaderNode", "ShaderNodeShaderInfo", def_sh_shader_info);
   define("ShaderNode", "ShaderNodeLightInfo", def_sh_light_info);

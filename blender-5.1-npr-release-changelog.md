@@ -4,17 +4,30 @@
 
 ## 待发布草稿
 
-### 当前版本相对 `v5.1.0-npr-port-win64-710a1b4934d6`
+### 当前版本相对 `v5.1.0-npr-port-win64-15baa38c1e60`
 
 #### 新增功能
-- `Shader Info` 节点新增 `Soft Filtered` 阴影模式。
-- World 面板新增 `Environment Lighting > Exclude Collection`。
-  - 可指定一个集合，让其中物体不接收 Eevee 世界环境和 light probe 的环境照明。
+- 新增 `World To Tangent` 节点。
+  - 位置：`Add > Utilities > Vector > World To Tangent`
+  - 可将世界空间方向向量转换为当前表面的切线空间方向，支持指定 `UV Map` 作为切线基底。
+- `Shader Info` 节点新增整数 `Lightgroup` 属性。
+  - 只有灯光 `Lightgroup ID` 与节点一致时，该灯光才会参与 `Shader Info` 的直接光照与阴影计算。
+- Eevee 灯光数据新增 `Lightgroup ID` 属性。
+  - 位置：`Light Data > Light > Lightgroup ID`
+  - 默认组为 `0`，与 `Shader Info` 的默认分组逻辑保持一致。
+- 首选项新增 `Material Selector Previews` 开关。
+  - 位置：`Preferences > Editing > Objects > Materials`
+  - 可控制材质下拉列表是否渲染材质预览图，关闭后改为普通材质图标以减少列表展开时的预览渲染开销。
 
 #### 修复与改进
-- 修复 `Shader To RGB` 在 `NPR / deferred` 路径下的兼容问题，补齐 `closure_to_rgba` 缺失实现。
-- 修复 GPU shader preprocessor 的若干稳定性问题。
-- 调整部分 Eevee shader create info 配置，减少特定 shader 走预处理器路径时的不稳定问题。
+- 修复 `Shader Info > Ambient Lighting` 在 Volume 光照探头场景下使用面法线取样的问题。
+  - 现在会使用平滑后的表面法线做 probe 取样，减少模型表面出现“平直着色/分面感”的间接光照结果。
+- 调整 `Shader Info` 灯光组界面与兼容逻辑。
+  - 节点端改为整数分组输入，同时保留旧字符串属性用于兼容旧文件。
+- 调整启动图右上角版本标识。
+  - 在版本号后追加 `npr post` 和构建日期，便于区分当前自定义构建。
+- 更新相关功能文档。
+  - 补充 `World To Tangent` 与 `Material Selector Previews` 的使用说明。
 
 ## 发布列表
 

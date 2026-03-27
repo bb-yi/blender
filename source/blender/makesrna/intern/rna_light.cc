@@ -6,6 +6,7 @@
  * \ingroup RNA
  */
 
+#include <climits>
 #include <cstdlib>
 
 #include "BLI_math_rotation.h"
@@ -258,6 +259,15 @@ static void rna_def_light(BlenderRNA *brna)
   RNA_def_property_array(prop, 3);
   RNA_def_property_float_array_default(prop, default_color);
   RNA_def_property_ui_text(prop, "Color", "Light color");
+  RNA_def_property_update(prop, 0, "rna_Light_draw_update");
+
+  prop = RNA_def_property(srna, "lightgroup_id", PROP_INT, PROP_UNSIGNED);
+  RNA_def_property_int_sdna(prop, nullptr, "lightgroup_id");
+  RNA_def_property_range(prop, 0, INT_MAX);
+  RNA_def_property_ui_text(
+      prop,
+      "Lightgroup ID",
+      "Numeric lightgroup used by Shader Info node filtering; lights default to group 0");
   RNA_def_property_update(prop, 0, "rna_Light_draw_update");
 
   prop = RNA_def_property(srna, "temperature", PROP_FLOAT, PROP_COLOR_TEMPERATURE);

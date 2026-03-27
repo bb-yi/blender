@@ -148,10 +148,9 @@ enum eUserpref_UI_Flag {
   USER_ZOOM_HORIZ = (1 << 26), /* for CONTINUE and DOLLY zoom */
   USER_SPLASH_DISABLE = (1 << 27),
   USER_HIDE_RECENT = (1 << 28),
+  USER_MATERIAL_SELECTOR_PREVIEWS = (1 << 29),
 #ifdef DNA_DEPRECATED_ALLOW
-  /* Deprecated: We're just trying if there's much desire for this feature,
-   * or if we can make it go for good. Should be cleared if so - Julian, Oct. 2019. */
-  USER_SHOW_THUMBNAILS = (1 << 29),
+  USER_SHOW_THUMBNAILS = USER_MATERIAL_SELECTOR_PREVIEWS,
 #endif
   USER_SAVE_PROMPT = (1 << 30),
   USER_HIDE_SYSTEM_BOOKMARKS = (1u << 31),
@@ -909,7 +908,8 @@ struct UserDef {
   int uiflag = USER_FILTERFILEEXTS | USER_DRAWVIEWINFO | USER_PLAINMENUS |
                USER_LOCK_CURSOR_ADJUST | USER_DEPTH_CURSOR | USER_AUTOPERSP |
                USER_NODE_AUTO_OFFSET | USER_GLOBALUNDO | USER_SHOW_GIZMO_NAVIGATE |
-               USER_SHOW_VIEWPORTNAME | USER_SHOW_FPS | USER_CONTINUOUS_MOUSE | USER_SAVE_PROMPT;
+               USER_SHOW_VIEWPORTNAME | USER_SHOW_FPS | USER_CONTINUOUS_MOUSE |
+               USER_MATERIAL_SELECTOR_PREVIEWS | USER_SAVE_PROMPT;
   /** #eUserpref_UI_Flag2. */
   char uiflag2 = USER_REGION_OVERLAP;
   char gpu_flag = USER_GPU_FLAG_OVERLAY_SMOOTH_WIRE | USER_GPU_FLAG_SUBDIVISION_EVALUATION;
