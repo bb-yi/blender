@@ -1,80 +1,45 @@
-# Interface & Settings | 界面与设置
+# 四、界面与工作流补充
 
-## Quick Settings Reference
+### 1. 材质选择器预览开关
 
-| 设置 | 位置 | 用途 |
-|------|------|------|
-| **材质预览** | Preferences > Rendering | 实时材质显示 |
-| **Lightgroup ID** | Object Props > Light Groups | 为灯光分组对象 |
-| **World Exclude** | Scene Props > World Environment Exclude | 排除环境对象 |
-| **Render Textures** | Scene Props > Render Textures | 场景级纹理渲染 |
-| **Filter Materials** | Scene Props > Filter Materials | 全局滤镜效果 |
+#### 作用
 
----
+控制材质下拉列表 / 搜索列表中是否渲染材质预览图。
 
-## Viewport Shortcuts | 视口快捷键
+这个开关主要用于在材质很多时，减少展开材质选择器时生成预览图的卡顿。
 
-| 操作 | 快捷键 | 用途 |
-|------|--------|------|
-| 材质预览 | `Z` | 切换预览模式 |
-| NPR Tree 编辑 | `Ctrl + Tab` | 切换到 NPR 编辑器 |
-| 渲染视图 | `Z` | 最终渲染预览 |
-| 显示全部 | `Home` | 居中显示所有 |
-| 聚焦选中 | `NumPad .` | 居中显示选中项 |
+#### 入口
 
----
+`Edit > Preferences > Editing > Objects > Materials > Material Selector Previews`
 
-## Common Issues & Solutions
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_05-28-34.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
 
-### Issue: Scene Color Returns Black
+#### 行为说明
 
-**问题：** Filter 中的 Scene Color 节点返回黑色
+- 开启时：材质选择器会按当前逻辑显示材质预览图。
 
-**解决方案：**
-1. 检查 Filter Material 是否在正确的执行阶段
-2. 验证场景有灯光和可见几何体
-3. 确保 Window 纹理坐标已连接
-4. 尝试切换 Scene Color Source 选项
-5. 检查渲染是否在滤镜评估之前进行
+- 关闭时：材质选择器会退回普通材质图标，不再在下拉列表里触发材质预览渲染。
 
----
+- 默认值为开启。
 
-### Issue: Render Texture Not Updating
+#### 当前范围
 
-**问题：** Render Texture 显示过时或旧数据
+- 目前只影响 `template_ID(...)` 这类材质选择器下拉列表中的材质预览显示。
 
-**解决方案：**
-1. 将更新模式改为 "Every Frame"
-2. 验证源相机存在且已启用
-3. 检查纹理分辨率是否超过显存
-4. 确保渲染在材质采样前进行
-5. 如果内存受限，尝试降低分辨率
+- 不影响 `Material Properties` 面板中的大预览球。
 
----
+- 不影响材质本身的正常渲染结果。
 
-## Feature Support Matrix | 功能支持矩阵
+### 2. 世界环境排除
 
-| 功能 | Eevee | Cycles |
-|------|-------|--------|
-| 场景渲染纹理 | ✅ | ❌ |
-| 滤镜材质 | ✅ | ❌ |
-| NPR Tree | ✅ | ❌ |
-| 屏幕导数 | ✅ | ❌ |
-| 灯光信息 | ✅ | ⚠️ 有限 |
-| 着色器节点 (20+) | ✅ | ⚠️ 有限 |
-| 世界环境 | ✅ | ✅ |
-| 灯光组 | ✅ | ✅ |
+#### 行为说明
 
----
+- 允许选择一个集合,选择的集合不受世界环境影响
 
-## Best Practices | 最佳实践
-
-1. **始终使用 Eevee** 用于 NPR Port 功能
-2. **在最终渲染前** 用材质预览在视口中测试
-3. **使用灯光组** 组织复杂场景
-4. **监控显存** 使用多个渲染纹理时
-5. **高效堆叠滤镜** - 尽可能合并效果
-6. **性能分析** - 使用着色器编辑器计时信息
-
-!!! warning
-NPR Port is optimized for **Eevee only**. Cycles support is limited.
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_05-29-43.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>

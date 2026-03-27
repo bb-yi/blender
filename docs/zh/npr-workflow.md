@@ -1,92 +1,161 @@
-# NPR Tree Workflow | NPR Tree 工作流
+# 三、NPR Tree 工作流
 
-## Overview | 概述
+### 1\. 基本概念
 
-NPR Tree 是一个基于节点的非光真实感渲染灵活管道。它支持自定义的线条渲染、卡通着色和艺术效果。
+`NPR Tree` 是挂在普通物体材质之后进行颜色后处理的节点树,能够以颜色的形式对着色器的输出进行风格化处理.
 
-### 主要特性
-- 使用 `For Each Light` 进行逐光源处理
-- 视口中的实时预览
-- 内置节点组用于效果（阴影、卡通等）
-- 完整的着色器控制
+### 2\. 挂接方式
 
----
+1. 在普通物体材质中保留正常的 `Material Output` 和基础表面着色。
 
-## NPR Input Node
+2. 选中 `Material Output` 节点。
 
-**用途：** NPR Tree 处理的主要输入
+3. 在它的 `NPR Tree` 属性里新建或指定一个节点组。
 
-**输出（共9个）：**
-- `Base Color` - 材质基础颜色
-- `Metallic` - 金属属性
-- `Roughness` - 表面粗糙度
-- `Normal` - 表面法线
-- `Alpha` - 透明度
-- `Emission` - 自发光颜色
-- `IOR` - 折射率
-- `Light Direction` - 光源方向
-- `Specular` - 镜面反射强度
+<div align="center">
+   <img src="images/SnowShot_2026-03-28_05-18-15.png" alt="alt text" style="border-radius: 10px;">
+   <br>
+</div>
 
----
+4. 需要编辑这棵树时，在 Shader Editor 顶部把 `Shader Type` 切到 `NPR`。
 
-## For Each Light Node
+<div align="center">
+   <img src="images/SnowShot_2026-03-28_05-18-33.png" alt="alt text" style="border-radius: 10px;">
+   <br>
+</div>
 
-**用途：** 为场景中的每个光源进行渲染处理
+### 3\. 说明
 
-**输出：**
-- `Light Index` - 当前灯光 ID（从0开始）
-- `Light Direction` - 从表面指向光源的方向
-- `Light Distance` - 到光源的距离
-- `Light Color` - 光颜色值
-- `Light Energy` - 光强度
+- 材质的渲染方式需要设置为`抖动(延迟渲染)`
 
-**使用模式：**
-```
-NPR Input → For Each Light → [计算逐光源效果]
-                                → 合并结果 → 输出
-```
+- 可以使用`Ctrl + Tab`在物体和NPR之间快速切换
 
-**常见用途：**
-- 具有多种光调的卡通着色
-- 逐光源单元着色
-- 多通道照明效果
+### 4\. 主要 NPR 节点
 
----
+除了下面这些专用 NPR 节点以外，`Curvature` 和 `Raycast` 现在也可以直接在 `NPR Tree` 中使用。
 
-## Other NPR Nodes
+### NPR Input
 
-### Image Sample（图像采样）
-- 在 NPR Tree 中采样纹理
-- 输入：Image（图像）、UV 坐标
-- 输出：Color（颜色）、Alpha（透明度）
+<div align="center">
+   <img src="images/SnowShot_2026-03-28_05-22-04.png" alt="alt text" style="border-radius: 10px;">
+   <br>
+</div>
 
-### NPR Refraction（NPR折射）
-- 在 NPR 管道中控制折射
-- 参数：IOR、Roughness
+#### 作用
 
-### 内置节点组
-- **Cavity** - 基于阴影的着色
-- **Kuwahara Filter** - 艺术风格平滑
-- **Curvature Shading** - 基于边缘的效果
-- **Shading Models** - 预先构建的卡通/风格化着色器
+读取 NPR 渲染阶段提供的输入缓冲。
 
----
+#### 输出
 
-## Quick Workflow Example
+- `Combined Color`：合成之后的最终颜色
 
-### 简单的卡通着色设置
+- `Diffuse Color`：漫射颜色
 
-1. 创建带有 `Principled BSDF` 的材质
-2. 添加 `NPR Tree` 节点
-3. 在 NPR Tree 中（Ctrl+Tab）：
-   - 连接 `NPR Input` 到 `For Each Light`
-   - 采样光照属性
-   - 应用节点组中的卡通着色
-   - 合并所有灯光贡献
-4. 输出结果到材质
-5. 在视口或最终渲染中渲染
+- `Diffuse Direct`：漫射直接光
 
-**提示：** 用不同的灯光配置测试可获得最佳效果。
+- `Diffuse Indirect`：漫射间接光(光线追踪,探针)
 
-!!! warning
-NPR Tree is Eevee-exclusive. Not available in Cycles.
+- `Specular Color`：高光颜色
+
+- `Specular Direct`：高光
+
+- `Specular Indirect`：间接反射
+
+- `Position`：世界空间位置
+
+- `Normal`：法线
+
+这些输出本质上更接近图像句柄 / 纹理句柄，适合继续交给 `Image Sample` 做邻域采样，或接到支持这类输入的 NPR 节点上继续处理。
+
+### NPR Refraction
+
+<div align="center">
+   <img src="images/SnowShot_2026-03-28_05-22-16.png" alt="alt text" style="border-radius: 10px;">
+   <br>
+</div>
+
+#### 作用
+
+读取折射相关缓冲,类似`Screenspace Info`
+
+参考`Screenspace Info`节点的使用说明
+
+#### 输出
+
+- `Combined Color`：折射事件的最终颜色
+
+- `Position`：折射位置的世界坐标
+
+### Image Sample
+
+#### 入口
+
+`Add > Utilities > Image Sample`
+
+<div align="center">
+   <img src="images/SnowShot_2026-03-28_05-25-34.png" alt="alt text" style="border-radius: 10px;">
+   <br>
+</div>
+
+#### 输入输出
+
+- 输入：`Image`（图像句柄）、`Offset`（采样偏移）
+
+- 输出：`Color`（采样结果颜色）
+
+#### 作用
+
+对 `NPR Input` / `NPR Refraction` 之类输出的图像句柄做采样。
+
+#### 偏移模式
+
+- `View`：按视空间偏移
+
+- `Pixel`：按像素偏移
+
+### For Each Light
+
+#### 入口
+
+`Add > Utilities > For Each Light`
+
+<div align="center">
+   <img src="images/SnowShot_2026-03-28_05-26-08.png" alt="alt text" style="border-radius: 10px;">
+   <br>
+</div>
+
+#### 说明
+
+它会按当前影响表面的灯光逐个执行内部逻辑,每次循环输出一个灯光的信息
+
+#### 内置可用信息
+
+`For Each Light Input` 当前提供：
+
+- 输入：`Normal`（表面法线）
+
+- 输出：`Color`（灯光颜色）、`Direction`（灯光方向）、`Distance`（灯光距离）、`Attenuation`（灯光衰减）、`Shadow Mask`（阴影遮罩）
+
+### 内置 NPR 节点组资产
+
+当前版本已经把 Blender 4.4 NPR 版本中的一批常用节点组，迁移并整理成了 5.1 可用的资产包。
+
+### 当前内置的主要节点组
+
+- `Cavity`
+
+- `Co-Planar Edge Detection`
+
+- `Curvature`
+
+- `Kuwahara`
+
+- `Shading Models`
+
+- `Surface Curvature`
+
+### 资产说明
+
+- 这些节点组已经按 Blender 5.1 的格式迁移。
+
+- 由于重复区域节点名称修改了,4.4 npr原型的工程需要自己重新连接重新区域相关的节点
