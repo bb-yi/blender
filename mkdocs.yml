@@ -54,6 +54,9 @@ markdown_extensions:
 use_directory_urls: false
 site_url: "https://bb-yi.github.io/blender/"
 
+extra_css:
+  - stylesheets/language-switcher.css
+
 plugins:
   - search:
       lang: en
@@ -71,3 +74,4 @@ extra:
 extra_javascript:
   - javascripts/mathjax.js
   - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+  - javascripts/language-switcher.js
