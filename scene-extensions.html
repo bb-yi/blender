@@ -12,24 +12,28 @@
         <meta name="author" content="NPR Port Team">
       
       
-        <link rel="canonical" href="https://bb-yi.github.io/blender/zh/3_npr_tree_workflow.html">
+        <link rel="canonical" href="https://bb-yi.github.io/blender/scene-extensions.html">
       
       
+        <link rel="prev" href="index.html">
       
       
-      <link rel="icon" href="../assets/images/favicon.png">
+        <link rel="next" href="extended-nodes.html">
+      
+      
+      <link rel="icon" href="assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.6.22">
     
     
       
-        <title>NPR Tree 工作流 - Blender 5.1 NPR Port | Documentation</title>
+        <title>Scene Extensions - Blender 5.1 NPR Port | Documentation</title>
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.84d31ad4.min.css">
+      <link rel="stylesheet" href="assets/stylesheets/main.84d31ad4.min.css">
       
         
-        <link rel="stylesheet" href="../assets/stylesheets/palette.06af60db.min.css">
+        <link rel="stylesheet" href="assets/stylesheets/palette.06af60db.min.css">
       
       
 
@@ -48,7 +52,7 @@
       
     
     
-    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL(".",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -74,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#npr-tree" class="md-skip">
+        <a href="#scene-level-eevee-extensions-scene-eevee" class="md-skip">
           Skip to content
         </a>
       
@@ -90,7 +94,7 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="../index.html" title="Blender 5.1 NPR Port | Documentation" class="md-header__button md-logo" aria-label="Blender 5.1 NPR Port | Documentation" data-md-component="logo">
+    <a href="index.html" title="Blender 5.1 NPR Port | Documentation" class="md-header__button md-logo" aria-label="Blender 5.1 NPR Port | Documentation" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -110,7 +114,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              NPR Tree 工作流
+              Scene Extensions
             
           </span>
         </div>
@@ -157,13 +161,13 @@
       <ul class="md-select__list">
         
           <li class="md-select__item">
-            <a href=".." hreflang="en" class="md-select__link">
+            <a href="." hreflang="en" class="md-select__link">
               English
             </a>
           </li>
         
           <li class="md-select__item">
-            <a href=".." hreflang="zh" class="md-select__link">
+            <a href="." hreflang="zh" class="md-select__link">
               中文
             </a>
           </li>
@@ -242,7 +246,7 @@
 
 <nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="../index.html" title="Blender 5.1 NPR Port | Documentation" class="md-nav__button md-logo" aria-label="Blender 5.1 NPR Port | Documentation" data-md-component="logo">
+    <a href="index.html" title="Blender 5.1 NPR Port | Documentation" class="md-nav__button md-logo" aria-label="Blender 5.1 NPR Port | Documentation" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -260,7 +264,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../index.html" class="md-nav__link">
+      <a href="index.html" class="md-nav__link">
         
   
   
@@ -279,10 +283,32 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../scene-extensions.html" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    Scene Extensions
+    
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="scene-extensions.html" class="md-nav__link md-nav__link--active">
         
   
   
@@ -293,6 +319,200 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#render-textures" class="md-nav__link">
+    <span class="md-ellipsis">
+      Render Textures
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Render Textures">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#description" class="md-nav__link">
+    <span class="md-ellipsis">
+      Description
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#panel-location" class="md-nav__link">
+    <span class="md-ellipsis">
+      Panel Location
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#configurable-parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      Configurable Parameters
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#basic-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      Basic Usage
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      功能说明
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      面板入口
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      可配置内容
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      基本使用方法
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#filter-materials" class="md-nav__link">
+    <span class="md-ellipsis">
+      Filter Materials
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Filter Materials">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#description_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      Description
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#panel-location_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      Panel Location
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#basic-usage_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      Basic Usage
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#execution-stages" class="md-nav__link">
+    <span class="md-ellipsis">
+      Execution Stages
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      功能说明
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      面板入口
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      基本使用方法
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      执行阶段
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -304,7 +524,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../extended-nodes.html" class="md-nav__link">
+      <a href="extended-nodes.html" class="md-nav__link">
         
   
   
@@ -326,7 +546,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../npr-workflow.html" class="md-nav__link">
+      <a href="npr-workflow.html" class="md-nav__link">
         
   
   
@@ -348,7 +568,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../interface-guide.html" class="md-nav__link">
+      <a href="interface-guide.html" class="md-nav__link">
         
   
   
@@ -390,188 +610,53 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#render-textures" class="md-nav__link">
+    <span class="md-ellipsis">
+      Render Textures
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Render Textures">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#description" class="md-nav__link">
+    <span class="md-ellipsis">
+      Description
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#panel-location" class="md-nav__link">
+    <span class="md-ellipsis">
+      Panel Location
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#configurable-parameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      Configurable Parameters
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#basic-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      Basic Usage
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      基本概念
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_2" class="md-nav__link">
-    <span class="md-ellipsis">
-      挂接方式
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_3" class="md-nav__link">
-    <span class="md-ellipsis">
-      重要说明
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#npr-input" class="md-nav__link">
-    <span class="md-ellipsis">
-      NPR Input 节点
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="NPR Input 节点">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#_4" class="md-nav__link">
-    <span class="md-ellipsis">
-      作用
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_5" class="md-nav__link">
-    <span class="md-ellipsis">
-      输出说明
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_6" class="md-nav__link">
-    <span class="md-ellipsis">
-      使用建议
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#npr-refraction" class="md-nav__link">
-    <span class="md-ellipsis">
-      NPR Refraction 节点
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="NPR Refraction 节点">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#_7" class="md-nav__link">
-    <span class="md-ellipsis">
-      作用
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_8" class="md-nav__link">
-    <span class="md-ellipsis">
-      输出说明
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_9" class="md-nav__link">
-    <span class="md-ellipsis">
-      使用方法
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#image-sample" class="md-nav__link">
-    <span class="md-ellipsis">
-      Image Sample 节点
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Image Sample 节点">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#_10" class="md-nav__link">
-    <span class="md-ellipsis">
-      入口
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_11" class="md-nav__link">
-    <span class="md-ellipsis">
-      输入输出
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_12" class="md-nav__link">
-    <span class="md-ellipsis">
-      作用
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_13" class="md-nav__link">
-    <span class="md-ellipsis">
-      偏移模式选项
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#for-each-light" class="md-nav__link">
-    <span class="md-ellipsis">
-      For Each Light 节点
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="For Each Light 节点">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#_14" class="md-nav__link">
-    <span class="md-ellipsis">
-      入口
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_15" class="md-nav__link">
     <span class="md-ellipsis">
       功能说明
     </span>
@@ -580,18 +665,27 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_16" class="md-nav__link">
+  <a href="#_2" class="md-nav__link">
     <span class="md-ellipsis">
-      内置可用信息
+      面板入口
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#_17" class="md-nav__link">
+  <a href="#_3" class="md-nav__link">
     <span class="md-ellipsis">
-      高级用法
+      可配置内容
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      基本使用方法
     </span>
   </a>
   
@@ -603,130 +697,82 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#npr" class="md-nav__link">
+  <a href="#filter-materials" class="md-nav__link">
     <span class="md-ellipsis">
-      内置 NPR 节点组资产
+      Filter Materials
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="内置 NPR 节点组资产">
+    <nav class="md-nav" aria-label="Filter Materials">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#_18" class="md-nav__link">
+  <a href="#description_1" class="md-nav__link">
     <span class="md-ellipsis">
-      概述
+      Description
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#_19" class="md-nav__link">
+  <a href="#panel-location_1" class="md-nav__link">
     <span class="md-ellipsis">
-      主要节点组
+      Panel Location
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#_20" class="md-nav__link">
+  <a href="#basic-usage_1" class="md-nav__link">
     <span class="md-ellipsis">
-      资产使用说明
+      Basic Usage
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#_21" class="md-nav__link">
+  <a href="#execution-stages" class="md-nav__link">
     <span class="md-ellipsis">
-      访问方式
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_22" class="md-nav__link">
-    <span class="md-ellipsis">
-      工作流示例
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="工作流示例">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#toon" class="md-nav__link">
-    <span class="md-ellipsis">
-      基础 Toon 着色
+      Execution Stages
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#_23" class="md-nav__link">
+  <a href="#_5" class="md-nav__link">
     <span class="md-ellipsis">
-      屏幕空间效果
+      功能说明
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#_24" class="md-nav__link">
+  <a href="#_6" class="md-nav__link">
     <span class="md-ellipsis">
-      多灯光组合
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#_25" class="md-nav__link">
-    <span class="md-ellipsis">
-      常见问题
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="常见问题">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#q-npr-tree" class="md-nav__link">
-    <span class="md-ellipsis">
-      Q: NPR Tree 和普通着色器的关系是什么？
+      面板入口
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#q-npr-tree_1" class="md-nav__link">
+  <a href="#_7" class="md-nav__link">
     <span class="md-ellipsis">
-      Q: 能否同时使用多个 NPR Tree？
+      基本使用方法
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#q-npr-tree_2" class="md-nav__link">
+  <a href="#_8" class="md-nav__link">
     <span class="md-ellipsis">
-      Q: NPR Tree 支持哪些着色器节点？
+      执行阶段
     </span>
   </a>
   
@@ -753,222 +799,210 @@
 
 
 
-<h1 id="npr-tree">NPR Tree 工作流<a class="headerlink" href="#npr-tree" title="Permanent link">&para;</a></h1>
-<h2 id="_1">基本概念<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
-<p><code>NPR Tree</code> 是挂在普通物体材质之后进行颜色后处理的节点树，能够以颜色的形式对着色器的输出进行风格化处理。</p>
-<p>这是Blender 5.1 NPR Port的核心工作流，允许在基础着色完成后进行NPR特效处理。</p>
-<h2 id="_2">挂接方式<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<h1 id="scene-level-eevee-extensions-scene-eevee">Scene-Level Eevee Extensions | Scene 级 Eevee 扩展<a class="headerlink" href="#scene-level-eevee-extensions-scene-eevee" title="Permanent link">&para;</a></h1>
+<h2 id="render-textures">Render Textures<a class="headerlink" href="#render-textures" title="Permanent link">&para;</a></h2>
+<div class="tabbed-set tabbed-alternate" data-tabs="1:2"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">English</label><label for="__tabbed_1_2">中文</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<h3 id="description">Description<a class="headerlink" href="#description" title="Permanent link">&para;</a></h3>
+<p><code>Render Textures</code> is a scene-level Eevee additional render texture system.</p>
+<p>It allows a scene to maintain up to <code>4</code> Render Texture slots, where each slot can specify a camera and output type. The scene is rendered from that camera perspective into a texture, which can then be sampled in object materials using the <code>Render Texture</code> node.</p>
+<h3 id="panel-location">Panel Location<a class="headerlink" href="#panel-location" title="Permanent link">&para;</a></h3>
+<p><code>Scene Properties &gt; Render Textures</code></p>
+<h3 id="configurable-parameters">Configurable Parameters<a class="headerlink" href="#configurable-parameters" title="Permanent link">&para;</a></h3>
+<p>Each Render Texture entry supports:</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Name</code></td>
+<td>Identifier name for referencing in nodes</td>
+</tr>
+<tr>
+<td><code>Enabled</code></td>
+<td>Enable/disable rendering for this texture</td>
+</tr>
+<tr>
+<td><code>Source</code></td>
+<td>Capture type: Color / Depth / Normal</td>
+</tr>
+<tr>
+<td><code>Camera</code></td>
+<td>Specify camera for rendering</td>
+</tr>
+<tr>
+<td><code>Resolution X/Y</code></td>
+<td>Output texture dimensions</td>
+</tr>
+<tr>
+<td><code>Update Mode</code></td>
+<td>Every Sample / Frame / Manual</td>
+</tr>
+<tr>
+<td><code>Format</code></td>
+<td>RGBA16F / RGBA32F / R16F / R32F</td>
+</tr>
+</tbody>
+</table>
+<h3 id="basic-usage">Basic Usage<a class="headerlink" href="#basic-usage" title="Permanent link">&para;</a></h3>
 <ol>
-<li>
-<p>在普通物体材质中保留正常的 <code>Material Output</code> 和基础表面着色。</p>
-</li>
-<li>
-<p>选中 <code>Material Output</code> 节点。</p>
-</li>
-<li>
-<p>在它的 <code>NPR Tree</code> 属性里新建或指定一个节点组。</p>
-</li>
+<li>Open <code>Scene Properties &gt; Render Textures</code></li>
+<li>Create a new entry</li>
+<li>Select Source, Camera, resolution, and format</li>
+<li>In object material, add <code>Render Texture</code> node</li>
+<li>Select the entry from the node panel</li>
+<li>Use outputs in material calculations</li>
 </ol>
-<p><img alt="设置NPR Tree属性" src="images/SnowShot_2026-03-28_05-18-15.png" /></p>
+<div class="admonition tip">
+<p class="admonition-title">Tip</p>
+<p>Perfect for real-time reflections, screen-space effects, and dynamic textures.</p>
+</div>
+</div>
+<div class="tabbed-block">
+<h3 id="_1">功能说明<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h3>
+<p><code>Render Textures</code> 是场景级的 Eevee 额外渲染纹理系统。</p>
+<p>它允许场景预先维护最多 <code>4</code> 个 Render Texture 槽位，每个槽位都可以指定一个相机和一个输出类型，把该相机视角下的场景结果先渲染成纹理，再在普通物体材质中通过 <code>Render Texture</code> 节点采样。</p>
+<h3 id="_2">面板入口<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h3>
+<p><code>Scene Properties &gt; Render Textures</code></p>
+<h3 id="_3">可配置内容<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h3>
+<p>每个 Render Texture 条目当前支持：</p>
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Name</code></td>
+<td>纹理条目的标识名称，用于在节点中引用</td>
+</tr>
+<tr>
+<td><code>Enabled</code></td>
+<td>启用/禁用该纹理的渲染</td>
+</tr>
+<tr>
+<td><code>Source</code></td>
+<td>选择要捕获的内容：Color / Depth / Normal</td>
+</tr>
+<tr>
+<td><code>Camera</code></td>
+<td>指定用于渲染该纹理的摄像机</td>
+</tr>
+<tr>
+<td><code>Resolution X/Y</code></td>
+<td>输出纹理的像素尺寸</td>
+</tr>
+<tr>
+<td><code>Update Mode</code></td>
+<td>更新频率：Every Sample / Every Frame / Manual</td>
+</tr>
+<tr>
+<td><code>Format</code></td>
+<td>输出精度：RGBA16F / RGBA32F / R16F / R32F</td>
+</tr>
+</tbody>
+</table>
+<h3 id="_4">基本使用方法<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h3>
 <ol>
-<li>需要编辑这棵树时，在 Shader Editor 顶部把 <code>Shader Type</code> 切到 <code>NPR</code>。</li>
+<li>打开 <code>Scene Properties &gt; Render Textures</code></li>
+<li>新建一个条目</li>
+<li>选择 Source、Camera、分辨率和格式</li>
+<li>在物体材质中添加 <code>Render Texture</code> 节点</li>
+<li>在节点面板中选择对应的条目</li>
+<li>使用节点输出参与材质计算</li>
 </ol>
-<p><img alt="切换到NPR着色器类型" src="images/SnowShot_2026-03-28_05-18-33.png" /></p>
-<h2 id="_3">重要说明<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<div class="admonition tip">
+<p class="admonition-title">提示</p>
+<p>非常适合用于制作实时反射、屏幕空间效果和动态纹理。</p>
+</div>
+</div>
+</div>
+</div>
+<hr />
+<h2 id="filter-materials">Filter Materials<a class="headerlink" href="#filter-materials" title="Permanent link">&para;</a></h2>
+<div class="tabbed-set tabbed-alternate" data-tabs="2:2"><input checked="checked" id="__tabbed_2_1" name="__tabbed_2" type="radio" /><input id="__tabbed_2_2" name="__tabbed_2" type="radio" /><div class="tabbed-labels"><label for="__tabbed_2_1">English</label><label for="__tabbed_2_2">中文</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<h3 id="description_1">Description<a class="headerlink" href="#description_1" title="Permanent link">&para;</a></h3>
+<p>A scene-level Eevee full-screen filter stack. Each entry is a <code>Filter</code> domain material, applied in order to process each frame.</p>
+<h3 id="panel-location_1">Panel Location<a class="headerlink" href="#panel-location_1" title="Permanent link">&para;</a></h3>
+<p><code>Scene Properties &gt; Filter Materials</code></p>
+<p>Node Editor: Shader Editor &gt; Shader Type &gt; Filter</p>
+<h3 id="basic-usage_1">Basic Usage<a class="headerlink" href="#basic-usage_1" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Open <code>Scene Properties &gt; Filter Materials</code></li>
+<li>Create a new entry</li>
+<li>Material must be <code>Filter</code> domain</li>
+<li>Open Shader Editor, switch to <code>Filter</code> shader type</li>
+<li>Use <code>Scene Color</code> to read scene data</li>
+<li>Output with <code>Filter Output</code> node</li>
+<li>Choose <code>Execution Stage</code> for order</li>
+</ol>
+<h3 id="execution-stages">Execution Stages<a class="headerlink" href="#execution-stages" title="Permanent link">&para;</a></h3>
 <ul>
-<li>
-<p>材质的渲染方式需要设置为 <code>抖动(延迟渲染)</code> 模式</p>
-</li>
-<li>
-<p>可以使用 <code>Ctrl + Tab</code> 在物体材质和NPR之间快速切换</p>
-</li>
+<li><code>Before Volume Fog</code> - Before volumetric effects</li>
+<li><code>Before Depth of Field</code> - Before depth of field</li>
+<li><code>Before Composite</code> - Before final composition</li>
 </ul>
 <div class="admonition warning">
-<p class="admonition-title">必需配置</p>
-<p>必须将材质的 Render Method 设为 Dithered（抖动），才能使用 NPR Tree 功能。</p>
+<p class="admonition-title">Warning</p>
+<p>Filter Materials can only use Filter domain materials.</p>
 </div>
-<h2 id="npr-input">NPR Input 节点<a class="headerlink" href="#npr-input" title="Permanent link">&para;</a></h2>
-<p><img alt="NPR Input 节点" src="images/SnowShot_2026-03-28_05-22-04.png" /></p>
-<h3 id="_4">作用<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h3>
-<p>读取 NPR 渲染阶段提供的输入缓冲。</p>
-<h3 id="_5">输出说明<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h3>
-<ul>
-<li>
-<p><code>Combined Color</code>：合成之后的最终颜色</p>
-</li>
-<li>
-<p><code>Diffuse Color</code>：漫射颜色</p>
-</li>
-<li>
-<p><code>Diffuse Direct</code>：漫射直接光（来自灯光）</p>
-</li>
-<li>
-<p><code>Diffuse Indirect</code>：漫射间接光（光线追踪，探针）</p>
-</li>
-<li>
-<p><code>Specular Color</code>：高光颜色</p>
-</li>
-<li>
-<p><code>Specular Direct</code>：高光直接反射</p>
-</li>
-<li>
-<p><code>Specular Indirect</code>：间接反射光</p>
-</li>
-<li>
-<p><code>Position</code>：世界空间位置</p>
-</li>
-<li>
-<p><code>Normal</code>：着色法线</p>
-</li>
-</ul>
-<h3 id="_6">使用建议<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h3>
-<p>这些输出本质上更接近图像句柄/纹理句柄，适合：</p>
-<ul>
-<li>继续交给 <code>Image Sample</code> 做邻域采样</li>
-<li>接到其他支持这类输入的 NPR 节点上继续处理</li>
-</ul>
-<hr />
-<h2 id="npr-refraction">NPR Refraction 节点<a class="headerlink" href="#npr-refraction" title="Permanent link">&para;</a></h2>
-<p><img alt="NPR Refraction 节点" src="images/SnowShot_2026-03-28_05-22-16.png" /></p>
-<h3 id="_7">作用<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h3>
-<p>读取折射相关缓冲，类似于 <code>Screenspace Info</code></p>
-<h3 id="_8">输出说明<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h3>
-<ul>
-<li>
-<p><code>Combined Color</code>：折射事件的最终颜色</p>
-</li>
-<li>
-<p><code>Position</code>：折射位置的世界坐标</p>
-</li>
-</ul>
-<h3 id="_9">使用方法<a class="headerlink" href="#_9" title="Permanent link">&para;</a></h3>
-<p>参考 <code>Screenspace Info</code> 节点的使用说明。</p>
-<hr />
-<h2 id="image-sample">Image Sample 节点<a class="headerlink" href="#image-sample" title="Permanent link">&para;</a></h2>
-<h3 id="_10">入口<a class="headerlink" href="#_10" title="Permanent link">&para;</a></h3>
-<p><code>Add &gt; Utilities &gt; Image Sample</code></p>
-<p><img alt="Image Sample 节点" src="images/SnowShot_2026-03-28_05-25-34.png" /></p>
-<h3 id="_11">输入输出<a class="headerlink" href="#_11" title="Permanent link">&para;</a></h3>
-<ul>
-<li>
-<p>输入：<code>Image</code>（图像句柄）、<code>Offset</code>（采样偏移）</p>
-</li>
-<li>
-<p>输出：<code>Color</code>（采样结果颜色）</p>
-</li>
-</ul>
-<h3 id="_12">作用<a class="headerlink" href="#_12" title="Permanent link">&para;</a></h3>
-<p>对 <code>NPR Input</code> / <code>NPR Refraction</code> 之类输出的图像句柄做采样。</p>
-<h3 id="_13">偏移模式选项<a class="headerlink" href="#_13" title="Permanent link">&para;</a></h3>
-<ul>
-<li>
-<p><code>View</code>：按视空间偏移</p>
-</li>
-<li>
-<p><code>Pixel</code>：按像素偏移</p>
-</li>
-</ul>
-<div class="admonition tip">
-<p class="admonition-title">应用场景</p>
-<p>使用 Image Sample 可以实现邻域采样、模糊效果、边缘检测等屏幕空间后处理。</p>
-</div>
-<hr />
-<h2 id="for-each-light">For Each Light 节点<a class="headerlink" href="#for-each-light" title="Permanent link">&para;</a></h2>
-<h3 id="_14">入口<a class="headerlink" href="#_14" title="Permanent link">&para;</a></h3>
-<p><code>Add &gt; Utilities &gt; For Each Light</code></p>
-<p><img alt="For Each Light 节点" src="images/SnowShot_2026-03-28_05-26-08.png" /></p>
-<h3 id="_15">功能说明<a class="headerlink" href="#_15" title="Permanent link">&para;</a></h3>
-<p>它会按当前影响表面的灯光逐个执行内部逻辑，每次循环输出一个灯光的信息。</p>
-<h3 id="_16">内置可用信息<a class="headerlink" href="#_16" title="Permanent link">&para;</a></h3>
-<p><code>For Each Light Input</code> 当前提供：</p>
-<ul>
-<li>
-<p>输入：<code>Normal</code>（表面法线）</p>
-</li>
-<li>
-<p>输出：</p>
-</li>
-<li><code>Color</code>（灯光颜色）</li>
-<li><code>Direction</code>（灯光方向）</li>
-<li><code>Distance</code>（灯光距离）</li>
-<li><code>Attenuation</code>（灯光衰减）</li>
-<li><code>Shadow Mask</code>（阴影遮罩）</li>
-</ul>
-<h3 id="_17">高级用法<a class="headerlink" href="#_17" title="Permanent link">&para;</a></h3>
-<p>此外还支持在区域输入/输出上增添自定义 socket，用于在逐灯循环内部传递你自己的中间量。</p>
 <div class="admonition example">
-<p class="admonition-title">典型用法</p>
-<p>For Each Light 常用于实现逐兰伯特光照计算、多光源Toon着色、自定义阴影处理等效果。</p>
-</div>
-<hr />
-<h2 id="npr">内置 NPR 节点组资产<a class="headerlink" href="#npr" title="Permanent link">&para;</a></h2>
-<h3 id="_18">概述<a class="headerlink" href="#_18" title="Permanent link">&para;</a></h3>
-<p>当前版本已经把 Blender 4.4 NPR 版本中的一批常用节点组，迁移并整理成了 5.1 可用的资产包。</p>
-<h3 id="_19">主要节点组<a class="headerlink" href="#_19" title="Permanent link">&para;</a></h3>
+<p class="admonition-title">Use Cases</p>
 <ul>
-<li>
-<p><strong>Cavity</strong> - 空腔阴影</p>
-</li>
-<li>
-<p><strong>Co-Planar Edge Detection</strong> - 共面边检测</p>
-</li>
-<li>
-<p><strong>Curvature</strong> - 曲率效果</p>
-</li>
-<li>
-<p><strong>Kuwahara</strong> - Kuwahara滤镜（油画效果）</p>
-</li>
-<li>
-<p><strong>Shading Models</strong> - 着色模型集合</p>
-</li>
-<li>
-<p><strong>Surface Curvature</strong> - 表面曲率</p>
-</li>
+<li>Color grading and tone mapping</li>
+<li>Screen-space effects (edge detection, toon rendering)</li>
+<li>Motion blur and motion vectors</li>
+<li>Post-process denoising and sharpening</li>
 </ul>
-<h3 id="_20">资产使用说明<a class="headerlink" href="#_20" title="Permanent link">&para;</a></h3>
-<ul>
-<li>
-<p>这些节点组已经按 Blender 5.1 的格式迁移</p>
-</li>
-<li>
-<p>由于重复区域节点名称修改了，4.4 npr原型的工程需要自己重新连接重复区域相关的节点</p>
-</li>
-</ul>
-<h3 id="_21">访问方式<a class="headerlink" href="#_21" title="Permanent link">&para;</a></h3>
-<p>在 Shader Editor 中使用 <code>Add &gt; Node Group</code> 访问这些预设资产。</p>
-<div class="admonition note">
-<p class="admonition-title">兼容性说明</p>
-<p>从老版本项目升级时，需要手动重新连接相关节点，因为内部结构有所变化。</p>
 </div>
-<hr />
-<h2 id="_22">工作流示例<a class="headerlink" href="#_22" title="Permanent link">&para;</a></h2>
-<h3 id="toon">基础 Toon 着色<a class="headerlink" href="#toon" title="Permanent link">&para;</a></h3>
+</div>
+<div class="tabbed-block">
+<h3 id="_5">功能说明<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h3>
+<p>它是一套场景级的 Eevee 全屏滤镜栈。每个条目都是一个 <code>Filter</code> 域材质，按列表顺序依次对当前帧进行处理。</p>
+<h3 id="_6">面板入口<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h3>
+<p><code>Scene Properties &gt; Filter Materials</code></p>
+<p>节点树入口: 着色器节点编辑器 &gt; 着色器类型 &gt; Filter</p>
+<h3 id="_7">基本使用方法<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h3>
 <ol>
-<li>使用 <code>NPR Input</code> 获取基础着色结果</li>
-<li>用 <code>For Each Light</code> 处理每个灯光</li>
-<li>使用阈值或斜坡处理实现分层效果</li>
-<li>最后输出到 NPR Output</li>
+<li>打开 <code>Scene Properties &gt; Filter Materials</code></li>
+<li>新建一个条目</li>
+<li>选中的材质必须是 <code>Filter</code> 域材质</li>
+<li>打开 Shader Editor，把顶部 <code>Shader Type</code> 切换到 <code>Filter</code></li>
+<li>使用 <code>Scene Color</code> 读取场景数据</li>
+<li>用 <code>Filter Output</code> 输出结果</li>
+<li>通过 <code>Execution Stage</code> 选择滤镜执行位置</li>
 </ol>
-<h3 id="_23">屏幕空间效果<a class="headerlink" href="#_23" title="Permanent link">&para;</a></h3>
-<ol>
-<li>使用 <code>Image Sample</code> 提取邻域信息</li>
-<li>实现边缘检测或轮廓效果</li>
-<li>和基础着色进行混合</li>
-</ol>
-<h3 id="_24">多灯光组合<a class="headerlink" href="#_24" title="Permanent link">&para;</a></h3>
-<ol>
-<li>用 <code>For Each Light</code> 分别处理不同灯光</li>
-<li>对每个灯光应用不同的处理规则</li>
-<li>累加或混合结果</li>
-</ol>
-<hr />
-<h2 id="_25">常见问题<a class="headerlink" href="#_25" title="Permanent link">&para;</a></h2>
-<h3 id="q-npr-tree">Q: NPR Tree 和普通着色器的关系是什么？<a class="headerlink" href="#q-npr-tree" title="Permanent link">&para;</a></h3>
-<p>A: NPR Tree 是后处理层，它接收普通着色器的输出作为输入，然后进行风格化处理。两者配合使用才能得到完整的NPR效果。</p>
-<h3 id="q-npr-tree_1">Q: 能否同时使用多个 NPR Tree？<a class="headerlink" href="#q-npr-tree_1" title="Permanent link">&para;</a></h3>
-<p>A: 目前每个物体只能附加一个 NPR Tree。如需复杂效果，应在单个 NPR Tree 内组织多个节点操作。</p>
-<h3 id="q-npr-tree_2">Q: NPR Tree 支持哪些着色器节点？<a class="headerlink" href="#q-npr-tree_2" title="Permanent link">&para;</a></h3>
-<p>A: NPR Tree 中可以使用大部分着色器节点，特别是 <code>Curvature</code> 和 <code>Raycast</code> 等新增节点也被支持。</p>
+<h3 id="_8">执行阶段<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>Before Volume Fog</code> - 在体积雾处理前执行</li>
+<li><code>Before Depth of Field</code> - 在景深前执行</li>
+<li><code>Before Composite</code> - 在合成器前执行</li>
+</ul>
+<div class="admonition warning">
+<p class="admonition-title">注意</p>
+<p>Filter Materials 只能使用 Filter 域材质。</p>
+</div>
+<div class="admonition example">
+<p class="admonition-title">使用场景</p>
+<ul>
+<li>色彩分级和色调映射</li>
+<li>屏幕空间效果（如边界检测、卡通渲染）</li>
+<li>动态模糊和运动矢量效果</li>
+<li>后期降噪和锐化处理</li>
+</ul>
+</div>
+</div>
+</div>
+</div>
 
 
 
@@ -1041,12 +1075,12 @@
     
     
       
-      <script id="__config" type="application/json">{"base": "..", "features": ["navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.select", "content.code.annotate", "content.tabs.link", "toc.follow"], "search": "../assets/javascripts/workers/search.973d3a69.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"base": ".", "features": ["navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.select", "content.code.annotate", "content.tabs.link", "toc.follow"], "search": "assets/javascripts/workers/search.973d3a69.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.f55a23d4.min.js"></script>
+      <script src="assets/javascripts/bundle.f55a23d4.min.js"></script>
       
-        <script src="../javascripts/mathjax.js"></script>
+        <script src="javascripts/mathjax.js"></script>
       
         <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
       

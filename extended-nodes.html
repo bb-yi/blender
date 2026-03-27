@@ -12,24 +12,28 @@
         <meta name="author" content="NPR Port Team">
       
       
-        <link rel="canonical" href="https://bb-yi.github.io/blender/en/2_extended_nodes.html">
+        <link rel="canonical" href="https://bb-yi.github.io/blender/extended-nodes.html">
       
       
+        <link rel="prev" href="scene-extensions.html">
       
       
-      <link rel="icon" href="../assets/images/favicon.png">
+        <link rel="next" href="npr-workflow.html">
+      
+      
+      <link rel="icon" href="assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.6.22">
     
     
       
-        <title>Extended Nodes Reference - Blender 5.1 NPR Port | Documentation</title>
+        <title>Extended Nodes - Blender 5.1 NPR Port | Documentation</title>
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.84d31ad4.min.css">
+      <link rel="stylesheet" href="assets/stylesheets/main.84d31ad4.min.css">
       
         
-        <link rel="stylesheet" href="../assets/stylesheets/palette.06af60db.min.css">
+        <link rel="stylesheet" href="assets/stylesheets/palette.06af60db.min.css">
       
       
 
@@ -48,7 +52,7 @@
       
     
     
-    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    <script>__md_scope=new URL(".",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
       
 
@@ -74,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#extended-nodes-reference" class="md-skip">
+        <a href="#extended-shader-nodes" class="md-skip">
           Skip to content
         </a>
       
@@ -90,7 +94,7 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="../index.html" title="Blender 5.1 NPR Port | Documentation" class="md-header__button md-logo" aria-label="Blender 5.1 NPR Port | Documentation" data-md-component="logo">
+    <a href="index.html" title="Blender 5.1 NPR Port | Documentation" class="md-header__button md-logo" aria-label="Blender 5.1 NPR Port | Documentation" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -110,7 +114,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Extended Nodes Reference
+              Extended Nodes
             
           </span>
         </div>
@@ -157,13 +161,13 @@
       <ul class="md-select__list">
         
           <li class="md-select__item">
-            <a href=".." hreflang="en" class="md-select__link">
+            <a href="." hreflang="en" class="md-select__link">
               English
             </a>
           </li>
         
           <li class="md-select__item">
-            <a href=".." hreflang="zh" class="md-select__link">
+            <a href="." hreflang="zh" class="md-select__link">
               中文
             </a>
           </li>
@@ -242,7 +246,7 @@
 
 <nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="../index.html" title="Blender 5.1 NPR Port | Documentation" class="md-nav__button md-logo" aria-label="Blender 5.1 NPR Port | Documentation" data-md-component="logo">
+    <a href="index.html" title="Blender 5.1 NPR Port | Documentation" class="md-nav__button md-logo" aria-label="Blender 5.1 NPR Port | Documentation" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -260,7 +264,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../index.html" class="md-nav__link">
+      <a href="index.html" class="md-nav__link">
         
   
   
@@ -282,7 +286,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../scene-extensions.html" class="md-nav__link">
+      <a href="scene-extensions.html" class="md-nav__link">
         
   
   
@@ -301,10 +305,32 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../extended-nodes.html" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    Extended Nodes
+    
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="extended-nodes.html" class="md-nav__link md-nav__link--active">
         
   
   
@@ -315,6 +341,80 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#render-info-node" class="md-nav__link">
+    <span class="md-ellipsis">
+      Render Info Node
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scene-time-node" class="md-nav__link">
+    <span class="md-ellipsis">
+      Scene Time Node
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#screen-derivative-node" class="md-nav__link">
+    <span class="md-ellipsis">
+      Screen Derivative Node
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#light-info-node" class="md-nav__link">
+    <span class="md-ellipsis">
+      Light Info Node
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scene-color-node" class="md-nav__link">
+    <span class="md-ellipsis">
+      Scene Color Node
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#additional-nodes" class="md-nav__link">
+    <span class="md-ellipsis">
+      Additional Nodes
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -326,7 +426,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../npr-workflow.html" class="md-nav__link">
+      <a href="npr-workflow.html" class="md-nav__link">
         
   
   
@@ -348,7 +448,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../interface-guide.html" class="md-nav__link">
+      <a href="interface-guide.html" class="md-nav__link">
         
   
   
@@ -390,189 +490,54 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#eevee-utility-nodes" class="md-nav__link">
+  <a href="#render-info-node" class="md-nav__link">
     <span class="md-ellipsis">
-      Eevee Utility Nodes
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Eevee Utility Nodes">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#render-info" class="md-nav__link">
-    <span class="md-ellipsis">
-      Render Info
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#scene-time" class="md-nav__link">
-    <span class="md-ellipsis">
-      Scene Time
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#screen-derivative" class="md-nav__link">
-    <span class="md-ellipsis">
-      Screen Derivative
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#portal-in-out" class="md-nav__link">
-    <span class="md-ellipsis">
-      Portal In / Out
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#screenspace-info" class="md-nav__link">
-    <span class="md-ellipsis">
-      Screenspace Info
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#world-environment" class="md-nav__link">
-    <span class="md-ellipsis">
-      World Environment
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#world-to-tangent" class="md-nav__link">
-    <span class="md-ellipsis">
-      World To Tangent
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#object-material-nodes" class="md-nav__link">
-    <span class="md-ellipsis">
-      Object Material Nodes
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Object Material Nodes">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#bevel" class="md-nav__link">
-    <span class="md-ellipsis">
-      Bevel
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#curvature" class="md-nav__link">
-    <span class="md-ellipsis">
-      Curvature
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#shader-info" class="md-nav__link">
-    <span class="md-ellipsis">
-      Shader Info
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#light-info" class="md-nav__link">
-    <span class="md-ellipsis">
-      Light Info
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#render-texture" class="md-nav__link">
-    <span class="md-ellipsis">
-      Render Texture
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#filter-domain-nodes" class="md-nav__link">
-    <span class="md-ellipsis">
-      Filter Domain Nodes
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Filter Domain Nodes">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#scene-color" class="md-nav__link">
-    <span class="md-ellipsis">
-      Scene Color
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#filter-output" class="md-nav__link">
-    <span class="md-ellipsis">
-      Filter Output
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#node-organization" class="md-nav__link">
-    <span class="md-ellipsis">
-      Node Organization
+      Render Info Node
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#tips-best-practices" class="md-nav__link">
+  <a href="#scene-time-node" class="md-nav__link">
     <span class="md-ellipsis">
-      Tips &amp; Best Practices
+      Scene Time Node
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#screen-derivative-node" class="md-nav__link">
+    <span class="md-ellipsis">
+      Screen Derivative Node
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#light-info-node" class="md-nav__link">
+    <span class="md-ellipsis">
+      Light Info Node
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scene-color-node" class="md-nav__link">
+    <span class="md-ellipsis">
+      Scene Color Node
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#additional-nodes" class="md-nav__link">
+    <span class="md-ellipsis">
+      Additional Nodes
     </span>
   </a>
   
@@ -594,132 +559,172 @@
 
 
 
-<h1 id="extended-nodes-reference">Extended Nodes Reference<a class="headerlink" href="#extended-nodes-reference" title="Permanent link">&para;</a></h1>
+<h1 id="extended-shader-nodes">Extended Shader Nodes | 扩展着色器节点<a class="headerlink" href="#extended-shader-nodes" title="Permanent link">&para;</a></h1>
 <p>This page documents 20+ new shader nodes added to Blender 5.1 NPR Port.</p>
-<h2 id="eevee-utility-nodes">Eevee Utility Nodes<a class="headerlink" href="#eevee-utility-nodes" title="Permanent link">&para;</a></h2>
-<h3 id="render-info">Render Info<a class="headerlink" href="#render-info" title="Permanent link">&para;</a></h3>
+<h2 id="render-info-node">Render Info Node<a class="headerlink" href="#render-info-node" title="Permanent link">&para;</a></h2>
+<div class="tabbed-set tabbed-alternate" data-tabs="1:2"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">English</label><label for="__tabbed_1_2">中文</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<p><strong>Purpose:</strong> Access rendered image properties</p>
 <p><strong>Outputs:</strong>
 - <code>Frag Coord</code> - Fragment/pixel coordinates (X, Y, Z, W)
 - <code>Width</code> - Render target width in pixels
 - <code>Height</code> - Render target height in pixels</p>
-<p><strong>Usage:</strong> Access rendered image properties in shaders.</p>
-<h3 id="scene-time">Scene Time<a class="headerlink" href="#scene-time" title="Permanent link">&para;</a></h3>
+<p><strong>Usage:</strong> Use in calculations requiring screen resolution or pixel position.</p>
+</div>
+<div class="tabbed-block">
+<p><strong>用途：</strong> 访问渲染后的图像属性</p>
+<p><strong>输出：</strong>
+- <code>Frag Coord</code> - 片段/像素坐标 (X, Y, Z, W)
+- <code>Width</code> - 渲染目标宽度（像素）
+- <code>Height</code> - 渲染目标高度（像素）</p>
+<p><strong>用法：</strong> 在需要屏幕分辨率或像素位置的计算中使用。</p>
+</div>
+</div>
+</div>
+<hr />
+<h2 id="scene-time-node">Scene Time Node<a class="headerlink" href="#scene-time-node" title="Permanent link">&para;</a></h2>
+<div class="tabbed-set tabbed-alternate" data-tabs="2:2"><input checked="checked" id="__tabbed_2_1" name="__tabbed_2" type="radio" /><input id="__tabbed_2_2" name="__tabbed_2" type="radio" /><div class="tabbed-labels"><label for="__tabbed_2_1">English</label><label for="__tabbed_2_2">中文</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<p><strong>Purpose:</strong> Access time-based values for animations</p>
 <p><strong>Outputs:</strong>
 - <code>Frame</code> - Current frame number
 - <code>Seconds</code> - Elapsed time in seconds
 - <code>Timeline</code> - Timeline position
 - <code>Scaled Frame</code> - Frame with custom scale</p>
 <p><strong>Usage:</strong> Create time-based animations and effects.</p>
-<h3 id="screen-derivative">Screen Derivative<a class="headerlink" href="#screen-derivative" title="Permanent link">&para;</a></h3>
+</div>
+<div class="tabbed-block">
+<p><strong>用途：</strong> 访问基于时间的值用于动画</p>
+<p><strong>输出：</strong>
+- <code>Frame</code> - 当前帧数
+- <code>Seconds</code> - 经过的时间（秒）
+- <code>Timeline</code> - 时间线位置
+- <code>Scaled Frame</code> - 自定义缩放的帧数</p>
+<p><strong>用法：</strong> 创建基于时间的动画和效果。</p>
+</div>
+</div>
+</div>
+<hr />
+<h2 id="screen-derivative-node">Screen Derivative Node<a class="headerlink" href="#screen-derivative-node" title="Permanent link">&para;</a></h2>
+<div class="tabbed-set tabbed-alternate" data-tabs="3:2"><input checked="checked" id="__tabbed_3_1" name="__tabbed_3" type="radio" /><input id="__tabbed_3_2" name="__tabbed_3" type="radio" /><div class="tabbed-labels"><label for="__tabbed_3_1">English</label><label for="__tabbed_3_2">中文</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<p><strong>Purpose:</strong> Detect edges and gradients in screen space</p>
 <p><strong>Inputs:</strong>
 - <code>Value</code> - Input to differentiate</p>
 <p><strong>Outputs:</strong>
 - <code>DDX</code> - Derivative in X direction
 - <code>DDY</code> - Derivative in Y direction
-- <code>DDXY</code> - Both derivatives</p>
-<p><strong>Usage:</strong> Detect edges and gradients in screen space.</p>
-<h3 id="portal-in-out">Portal In / Out<a class="headerlink" href="#portal-in-out" title="Permanent link">&para;</a></h3>
-<p><strong>Purpose:</strong> Portal utility nodes for advanced rendering techniques.</p>
-<h3 id="screenspace-info">Screenspace Info<a class="headerlink" href="#screenspace-info" title="Permanent link">&para;</a></h3>
+- <code>DDXY</code> - Both derivatives combined</p>
+<p><strong>Usage:</strong> Edge detection, gradient mapping, post-processing effects.</p>
+</div>
+<div class="tabbed-block">
+<p><strong>用途：</strong> 检测屏幕空间中的边缘和梯度</p>
+<p><strong>输入：</strong>
+- <code>Value</code> - 要求导的输入</p>
+<p><strong>输出：</strong>
+- <code>DDX</code> - X 方向导数
+- <code>DDY</code> - Y 方向导数
+- <code>DDXY</code> - 两个导数结合</p>
+<p><strong>用法：</strong> 边缘检测、梯度映射、后期处理效果。</p>
+</div>
+</div>
+</div>
+<hr />
+<h2 id="light-info-node">Light Info Node<a class="headerlink" href="#light-info-node" title="Permanent link">&para;</a></h2>
+<div class="tabbed-set tabbed-alternate" data-tabs="4:2"><input checked="checked" id="__tabbed_4_1" name="__tabbed_4" type="radio" /><input id="__tabbed_4_2" name="__tabbed_4" type="radio" /><div class="tabbed-labels"><label for="__tabbed_4_1">English</label><label for="__tabbed_4_2">中文</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<p><strong>Purpose:</strong> Access per-light information</p>
 <p><strong>Inputs:</strong>
-- <code>View Position</code> - Custom view position</p>
-<p><strong>Outputs:</strong>
-- <code>Scene Color</code> - Current scene color
-- <code>Scene Depth</code> - Linear depth value</p>
-<p><strong>Usage:</strong> Access screen-space scene data.</p>
-<h3 id="world-environment">World Environment<a class="headerlink" href="#world-environment" title="Permanent link">&para;</a></h3>
-<p><strong>Purpose:</strong> Access world environment properties in material shaders.</p>
-<h3 id="world-to-tangent">World To Tangent<a class="headerlink" href="#world-to-tangent" title="Permanent link">&para;</a></h3>
-<p><strong>Purpose:</strong> Transform coordinates from world space to tangent space.</p>
-<h2 id="object-material-nodes">Object Material Nodes<a class="headerlink" href="#object-material-nodes" title="Permanent link">&para;</a></h2>
-<h3 id="bevel">Bevel<a class="headerlink" href="#bevel" title="Permanent link">&para;</a></h3>
-<p><strong>Purpose:</strong> Add beveled edges to surfaces.</p>
-<p><strong>Parameters:</strong>
-- <code>Radius</code> - Bevel amount
-- <code>Samples</code> - Quality of bevel</p>
-<h3 id="curvature">Curvature<a class="headerlink" href="#curvature" title="Permanent link">&para;</a></h3>
-<p><strong>Outputs:</strong>
-- <code>Curvature</code> - Surface curvature value</p>
-<p><strong>Usage:</strong> Drive effects based on surface curvature (creases, edges, valleys).</p>
-<h3 id="shader-info">Shader Info<a class="headerlink" href="#shader-info" title="Permanent link">&para;</a></h3>
-<p><strong>Outputs:</strong>
-- <code>View Position</code> - Position relative to camera
-- <code>Normal</code> - Surface normal
-- Other shader parameters...</p>
-<p><strong>Usage:</strong> Access shader-related information.</p>
-<h3 id="light-info">Light Info<a class="headerlink" href="#light-info" title="Permanent link">&para;</a></h3>
-<p><strong>Inputs:</strong>
-- <code>Light Type</code> - Filter by light type:
-  - <code>All</code> - All lights
-  - <code>Sun</code> - Sun/directional lights
-  - <code>Point</code> - Point lights
-  - <code>Spot</code> - Spot lights</p>
+- <code>Light Type</code> - Filter: All / Sun / Point / Spot</p>
 <p><strong>Outputs:</strong>
 - <code>Direction</code> - Light direction
 - <code>Distance</code> - Distance to light
 - <code>Color</code> - Light color
 - <code>Energy</code> - Light intensity</p>
-<p><strong>Usage:</strong> Per-light data access and calculations.</p>
-<h3 id="render-texture">Render Texture<a class="headerlink" href="#render-texture" title="Permanent link">&para;</a></h3>
+<p><strong>Usage:</strong> Per-light calculations, conditional lighting effects.</p>
+</div>
+<div class="tabbed-block">
+<p><strong>用途：</strong> 访问逐光源信息</p>
+<p><strong>输入：</strong>
+- <code>Light Type</code> - 筛选：All / Sun / Point / Spot</p>
+<p><strong>输出：</strong>
+- <code>Direction</code> - 光方向
+- <code>Distance</code> - 到光源的距离
+- <code>Color</code> - 光颜色
+- <code>Energy</code> - 光强度</p>
+<p><strong>用法：</strong> 逐光源计算、条件照明效果。</p>
+</div>
+</div>
+</div>
+<hr />
+<h2 id="scene-color-node">Scene Color Node<a class="headerlink" href="#scene-color-node" title="Permanent link">&para;</a></h2>
+<div class="tabbed-set tabbed-alternate" data-tabs="5:2"><input checked="checked" id="__tabbed_5_1" name="__tabbed_5" type="radio" /><input id="__tabbed_5_2" name="__tabbed_5" type="radio" /><div class="tabbed-labels"><label for="__tabbed_5_1">English</label><label for="__tabbed_5_2">中文</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<p><strong>Purpose:</strong> Read scene data in filter materials</p>
 <p><strong>Inputs:</strong>
-- Select preset Render Texture from scene properties</p>
-<p><strong>Outputs:</strong>
-- <code>Color</code> - RGB color data
-- <code>Alpha</code> - Transparency value</p>
-<p><strong>Usage:</strong> Sample pre-rendered textures from other cameras/passes.</p>
-<h2 id="filter-domain-nodes">Filter Domain Nodes<a class="headerlink" href="#filter-domain-nodes" title="Permanent link">&para;</a></h2>
-<h3 id="scene-color">Scene Color<a class="headerlink" href="#scene-color" title="Permanent link">&para;</a></h3>
-<p><strong>Inputs:</strong>
-- <code>UV</code> / <code>Coordinate</code> - Sampling coordinates (defaults to screen space)</p>
+- <code>UV</code>/<code>Coordinate</code> - Sampling coordinates (default: screen space)</p>
 <p><strong>Outputs:</strong>
 - <code>Color</code> - Scene color at coordinates
 - <code>Depth</code> - Scene depth value
-- <code>Normal</code> - Scene normal data
-- <code>ID Mask</code> / <code>AOV</code> - Additional render passes</p>
+- <code>Normal</code> - Scene normal data</p>
 <p><strong>Parameters:</strong>
-- <code>Source</code> - Select data source:
-  - <code>Color</code> - Final color
-  - <code>Depth</code> - Linear depth
-  - <code>Normal</code> - Surface normals
-  - <code>Emission</code> - Emissive colors
-  - <code>Environment</code> - Environment contribution</p>
-<p><strong>Usage:</strong> Read scene data in filter materials for post-processing effects.</p>
-<h3 id="filter-output">Filter Output<a class="headerlink" href="#filter-output" title="Permanent link">&para;</a></h3>
-<p><strong>Inputs:</strong>
-- <code>Color</code> - Output color
-- <code>Alpha</code> - Output alpha</p>
-<p><strong>Purpose:</strong> Final output node for filter domain materials.</p>
+- <code>Source</code> - Color / Depth / Normal / Emission / Environment</p>
+<p><strong>Usage:</strong> Post-processing effects, reflections, depth-based effects.</p>
+</div>
+<div class="tabbed-block">
+<p><strong>用途：</strong> 在滤镜材质中读取场景数据</p>
+<p><strong>输入：</strong>
+- <code>UV</code>/<code>Coordinate</code> - 采样坐标（默认：屏幕空间）</p>
+<p><strong>输出：</strong>
+- <code>Color</code> - 该坐标处的场景颜色
+- <code>Depth</code> - 场景深度值
+- <code>Normal</code> - 场景法线数据</p>
+<p><strong>参数：</strong>
+- <code>Source</code> - Color / Depth / Normal / Emission / Environment</p>
+<p><strong>用法：</strong> 后期处理效果、反射、基于深度的效果。</p>
+</div>
+</div>
+</div>
 <hr />
-<h2 id="node-organization">Node Organization<a class="headerlink" href="#node-organization" title="Permanent link">&para;</a></h2>
-<p>All nodes are located in the Shader Editor under:
-- <strong>Eevee</strong> category for most utility nodes
-- <strong>Texture</strong> category for Render Texture
-- <strong>Light</strong> category for Light Info
-- <strong>Output</strong> category for Filter Output</p>
-<h2 id="tips-best-practices">Tips &amp; Best Practices<a class="headerlink" href="#tips-best-practices" title="Permanent link">&para;</a></h2>
+<h2 id="additional-nodes">Additional Nodes<a class="headerlink" href="#additional-nodes" title="Permanent link">&para;</a></h2>
+<div class="tabbed-set tabbed-alternate" data-tabs="6:2"><input checked="checked" id="__tabbed_6_1" name="__tabbed_6" type="radio" /><input id="__tabbed_6_2" name="__tabbed_6" type="radio" /><div class="tabbed-labels"><label for="__tabbed_6_1">English</label><label for="__tabbed_6_2">中文</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<p><strong>Other Important Nodes:</strong></p>
+<ul>
+<li><strong>Portal In/Out</strong> - Portal utility nodes</li>
+<li><strong>Screenspace Info</strong> - View-space information</li>
+<li><strong>World Environment</strong> - Access environment</li>
+<li><strong>World To Tangent</strong> - Coordinate transformation</li>
+<li><strong>Bevel</strong> - Edge beveling with parameters</li>
+<li><strong>Curvature</strong> - Output surface curvature</li>
+<li><strong>Shader Info</strong> - Shader parameters access</li>
+<li><strong>Render Texture</strong> - Sample pre-rendered textures</li>
+</ul>
+</div>
+<div class="tabbed-block">
+<p><strong>其他重要节点：</strong></p>
+<ul>
+<li><strong>Portal In/Out</strong> - 门户实用节点</li>
+<li><strong>Screenspace Info</strong> - 视图空间信息</li>
+<li><strong>World Environment</strong> - 访问环境</li>
+<li><strong>World To Tangent</strong> - 坐标变换</li>
+<li><strong>Bevel</strong> - 边缘斜面处理</li>
+<li><strong>Curvature</strong> - 输出表面曲率</li>
+<li><strong>Shader Info</strong> - 着色器参数访问</li>
+<li><strong>Render Texture</strong> - 采样预渲染纹理</li>
+</ul>
+</div>
+</div>
+</div>
 <div class="admonition tip">
-<p class="admonition-title">Performance</p>
-<ul>
-<li>Use Light Info with specific light types to reduce calculations</li>
-<li>Cache expensive computations when possible</li>
-<li>Be mindful of per-pixel costs in expensive effects</li>
-</ul>
-</div>
-<div class="admonition warning">
-<p class="admonition-title">Compatibility</p>
-<ul>
-<li>Most nodes are Eevee-exclusive</li>
-<li>Not compatible with Cycles</li>
-<li>Some nodes only work in specific shader domains</li>
-</ul>
-</div>
-<div class="admonition example">
-<p class="admonition-title">Common Workflows</p>
-<ul>
-<li>Use Screen Derivative for edge detection</li>
-<li>Combine Curvature with color grading for stylized effects</li>
-<li>Use Scene Color for realistic reflections in Filter Materials</li>
-</ul>
+<p class="admonition-title">Tip</p>
+<p>For detailed parameters and usage, refer to Blender's official shader node documentation combined with NPR Port extensions.</p>
 </div>
 
 
@@ -793,12 +798,12 @@
     
     
       
-      <script id="__config" type="application/json">{"base": "..", "features": ["navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.select", "content.code.annotate", "content.tabs.link", "toc.follow"], "search": "../assets/javascripts/workers/search.973d3a69.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"base": ".", "features": ["navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.select", "content.code.annotate", "content.tabs.link", "toc.follow"], "search": "assets/javascripts/workers/search.973d3a69.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
-      <script src="../assets/javascripts/bundle.f55a23d4.min.js"></script>
+      <script src="assets/javascripts/bundle.f55a23d4.min.js"></script>
       
-        <script src="../javascripts/mathjax.js"></script>
+        <script src="javascripts/mathjax.js"></script>
       
         <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
       
