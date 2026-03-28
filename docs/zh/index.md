@@ -12,6 +12,24 @@
 
 ## 节点一览
 
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_07-50-39.png" alt="alt text" style="border-radius: 10px;">
+    <br>
+    <sub>着色器节点</sub>
+</div>
+
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_04-23-33.png" alt="alt text" style="border-radius: 10px;">
+    <br>
+    <sub>NPR Tree 节点 (部分着色器节点也可以在NPR Tree中使用)</sub>
+</div>
+
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_04-30-16.png" alt="alt text" style="border-radius: 10px;">
+    <br>
+    <sub>滤镜节点</sub>
+</div>
+
 <div class="grid cards" markdown>
 
 - :fontawesome-solid-rocket:{ .lg .middle } **Scene 级扩展**
