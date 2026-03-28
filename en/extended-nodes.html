@@ -15,7 +15,7 @@
         <link rel="canonical" href="https://bb-yi.github.io/blender/en/extended-nodes.html">
       
       
-        <link rel="prev" href="scene-extensions.html">
+        <link rel="prev" href="index.html">
       
       
         <link rel="next" href="npr-workflow.html">
@@ -283,28 +283,6 @@
       
   
   
-  
-  
-    <li class="md-nav__item">
-      <a href="scene-extensions.html" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    Scene Extensions
-    
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-    
-      
-      
-  
-  
     
   
   
@@ -358,137 +336,506 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#render-info-node" class="md-nav__link">
+  <a href="#1-general-eevee-utility-nodes" class="md-nav__link">
     <span class="md-ellipsis">
-      Render Info Node
+      1. General Eevee Utility Nodes
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. General Eevee Utility Nodes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#render-info" class="md-nav__link">
+    <span class="md-ellipsis">
+      Render Info
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Render Info">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#entry" class="md-nav__link">
+    <span class="md-ellipsis">
+      Entry
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#scene-time-node" class="md-nav__link">
+        
+          <li class="md-nav__item">
+  <a href="#outputs" class="md-nav__link">
     <span class="md-ellipsis">
-      Scene Time Node
+      Outputs
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#screen-derivative-node" class="md-nav__link">
+        
+          <li class="md-nav__item">
+  <a href="#purpose" class="md-nav__link">
     <span class="md-ellipsis">
-      Screen Derivative Node
+      Purpose
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scene-time" class="md-nav__link">
+    <span class="md-ellipsis">
+      Scene Time
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Scene Time">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#entry_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      Entry
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#input" class="md-nav__link">
+    <span class="md-ellipsis">
+      Input
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#outputs_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      Outputs
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#screen-derivative" class="md-nav__link">
+    <span class="md-ellipsis">
+      Screen Derivative
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Screen Derivative">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#entry_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      Entry
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#feature" class="md-nav__link">
+    <span class="md-ellipsis">
+      Feature
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#portal-in-portal-out" class="md-nav__link">
     <span class="md-ellipsis">
       Portal In / Portal Out
     </span>
   </a>
   
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#render-texture-node" class="md-nav__link">
+    <nav class="md-nav" aria-label="Portal In / Portal Out">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#entry_3" class="md-nav__link">
     <span class="md-ellipsis">
-      Render Texture Node
+      Entry
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#screenspace-info-node" class="md-nav__link">
+        
+          <li class="md-nav__item">
+  <a href="#feature-description" class="md-nav__link">
     <span class="md-ellipsis">
-      Screenspace Info Node
+      Feature Description
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#world-environment-node" class="md-nav__link">
+        
+          <li class="md-nav__item">
+  <a href="#other-notes" class="md-nav__link">
     <span class="md-ellipsis">
-      World Environment Node
+      Other Notes
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#world-to-tangent-node" class="md-nav__link">
+        
+          <li class="md-nav__item">
+  <a href="#limits" class="md-nav__link">
     <span class="md-ellipsis">
-      World To Tangent Node
+      Limits
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#basis-transform-node" class="md-nav__link">
-    <span class="md-ellipsis">
-      Basis Transform Node
-    </span>
-  </a>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#bevel-node" class="md-nav__link">
+  <a href="#2-eevee-object-material-nodes" class="md-nav__link">
     <span class="md-ellipsis">
-      Bevel Node
+      2. Eevee Object Material Nodes
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Eevee Object Material Nodes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#render-texture" class="md-nav__link">
+    <span class="md-ellipsis">
+      Render Texture
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Render Texture">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#entry_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      Entry
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#curvature-node" class="md-nav__link">
+        
+          <li class="md-nav__item">
+  <a href="#purpose_1" class="md-nav__link">
     <span class="md-ellipsis">
-      Curvature Node
+      Purpose
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#shader-info-node" class="md-nav__link">
+        
+          <li class="md-nav__item">
+  <a href="#inputs-outputs" class="md-nav__link">
     <span class="md-ellipsis">
-      Shader Info Node
+      Inputs / Outputs
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#light-info-node" class="md-nav__link">
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#screenspace-info" class="md-nav__link">
     <span class="md-ellipsis">
-      Light Info Node
+      Screenspace Info
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Screenspace Info">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#entry_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      Entry
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#scene-color-node" class="md-nav__link">
+        
+          <li class="md-nav__item">
+  <a href="#inputs-outputs_1" class="md-nav__link">
     <span class="md-ellipsis">
-      Scene Color Node
+      Inputs / Outputs
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#additional-nodes" class="md-nav__link">
+        
+          <li class="md-nav__item">
+  <a href="#purpose_2" class="md-nav__link">
     <span class="md-ellipsis">
-      Additional Nodes
+      Purpose
     </span>
   </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#usage-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      Usage Notes
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#world-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      World Environment
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="World Environment">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#entry_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      Entry
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#inputs-outputs_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      Inputs / Outputs
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#purpose_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      Purpose
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      Notes
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#world-to-tangent" class="md-nav__link">
+    <span class="md-ellipsis">
+      World To Tangent
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="World To Tangent">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#entry_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      Entry
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#inputs-outputs_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      Inputs / Outputs
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#purpose_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      Purpose
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#notes_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      Notes
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#basis-transform" class="md-nav__link">
+    <span class="md-ellipsis">
+      Basis Transform
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Basis Transform">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#entry_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      Entry
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#inputs-outputs_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      Inputs / Outputs
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#purpose_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      Purpose
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#panel-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      Panel Options
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bevel" class="md-nav__link">
+    <span class="md-ellipsis">
+      Bevel
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Bevel">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#entry_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      Entry
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#inputs-outputs_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      Inputs / Outputs
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#panel-option" class="md-nav__link">
+    <span class="md-ellipsis">
+      Panel Option
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#purpose_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      Purpose
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#notes_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      Notes
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -544,6 +891,28 @@
   
 
     
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="scene-extensions.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Scene Extensions
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
   </ul>
 </nav>
                   </div>
@@ -571,137 +940,506 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#render-info-node" class="md-nav__link">
+  <a href="#1-general-eevee-utility-nodes" class="md-nav__link">
     <span class="md-ellipsis">
-      Render Info Node
+      1. General Eevee Utility Nodes
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="1. General Eevee Utility Nodes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#render-info" class="md-nav__link">
+    <span class="md-ellipsis">
+      Render Info
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Render Info">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#entry" class="md-nav__link">
+    <span class="md-ellipsis">
+      Entry
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#scene-time-node" class="md-nav__link">
+        
+          <li class="md-nav__item">
+  <a href="#outputs" class="md-nav__link">
     <span class="md-ellipsis">
-      Scene Time Node
+      Outputs
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#screen-derivative-node" class="md-nav__link">
+        
+          <li class="md-nav__item">
+  <a href="#purpose" class="md-nav__link">
     <span class="md-ellipsis">
-      Screen Derivative Node
+      Purpose
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scene-time" class="md-nav__link">
+    <span class="md-ellipsis">
+      Scene Time
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Scene Time">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#entry_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      Entry
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#input" class="md-nav__link">
+    <span class="md-ellipsis">
+      Input
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#outputs_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      Outputs
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#screen-derivative" class="md-nav__link">
+    <span class="md-ellipsis">
+      Screen Derivative
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Screen Derivative">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#entry_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      Entry
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#feature" class="md-nav__link">
+    <span class="md-ellipsis">
+      Feature
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#portal-in-portal-out" class="md-nav__link">
     <span class="md-ellipsis">
       Portal In / Portal Out
     </span>
   </a>
   
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#render-texture-node" class="md-nav__link">
+    <nav class="md-nav" aria-label="Portal In / Portal Out">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#entry_3" class="md-nav__link">
     <span class="md-ellipsis">
-      Render Texture Node
+      Entry
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#screenspace-info-node" class="md-nav__link">
+        
+          <li class="md-nav__item">
+  <a href="#feature-description" class="md-nav__link">
     <span class="md-ellipsis">
-      Screenspace Info Node
+      Feature Description
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#world-environment-node" class="md-nav__link">
+        
+          <li class="md-nav__item">
+  <a href="#other-notes" class="md-nav__link">
     <span class="md-ellipsis">
-      World Environment Node
+      Other Notes
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#world-to-tangent-node" class="md-nav__link">
+        
+          <li class="md-nav__item">
+  <a href="#limits" class="md-nav__link">
     <span class="md-ellipsis">
-      World To Tangent Node
+      Limits
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#basis-transform-node" class="md-nav__link">
-    <span class="md-ellipsis">
-      Basis Transform Node
-    </span>
-  </a>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#bevel-node" class="md-nav__link">
+  <a href="#2-eevee-object-material-nodes" class="md-nav__link">
     <span class="md-ellipsis">
-      Bevel Node
+      2. Eevee Object Material Nodes
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Eevee Object Material Nodes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#render-texture" class="md-nav__link">
+    <span class="md-ellipsis">
+      Render Texture
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Render Texture">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#entry_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      Entry
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#curvature-node" class="md-nav__link">
+        
+          <li class="md-nav__item">
+  <a href="#purpose_1" class="md-nav__link">
     <span class="md-ellipsis">
-      Curvature Node
+      Purpose
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#shader-info-node" class="md-nav__link">
+        
+          <li class="md-nav__item">
+  <a href="#inputs-outputs" class="md-nav__link">
     <span class="md-ellipsis">
-      Shader Info Node
+      Inputs / Outputs
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#light-info-node" class="md-nav__link">
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#screenspace-info" class="md-nav__link">
     <span class="md-ellipsis">
-      Light Info Node
+      Screenspace Info
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Screenspace Info">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#entry_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      Entry
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#scene-color-node" class="md-nav__link">
+        
+          <li class="md-nav__item">
+  <a href="#inputs-outputs_1" class="md-nav__link">
     <span class="md-ellipsis">
-      Scene Color Node
+      Inputs / Outputs
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#additional-nodes" class="md-nav__link">
+        
+          <li class="md-nav__item">
+  <a href="#purpose_2" class="md-nav__link">
     <span class="md-ellipsis">
-      Additional Nodes
+      Purpose
     </span>
   </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#usage-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      Usage Notes
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#world-environment" class="md-nav__link">
+    <span class="md-ellipsis">
+      World Environment
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="World Environment">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#entry_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      Entry
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#inputs-outputs_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      Inputs / Outputs
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#purpose_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      Purpose
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      Notes
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#world-to-tangent" class="md-nav__link">
+    <span class="md-ellipsis">
+      World To Tangent
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="World To Tangent">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#entry_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      Entry
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#inputs-outputs_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      Inputs / Outputs
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#purpose_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      Purpose
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#notes_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      Notes
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#basis-transform" class="md-nav__link">
+    <span class="md-ellipsis">
+      Basis Transform
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Basis Transform">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#entry_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      Entry
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#inputs-outputs_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      Inputs / Outputs
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#purpose_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      Purpose
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#panel-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      Panel Options
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bevel" class="md-nav__link">
+    <span class="md-ellipsis">
+      Bevel
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Bevel">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#entry_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      Entry
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#inputs-outputs_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      Inputs / Outputs
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#panel-option" class="md-nav__link">
+    <span class="md-ellipsis">
+      Panel Option
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#purpose_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      Purpose
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#notes_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      Notes
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -722,150 +1460,339 @@
 
 
 <h1 id="extended-shader-nodes">Extended Shader Nodes<a class="headerlink" href="#extended-shader-nodes" title="Permanent link">&para;</a></h1>
-<p>This page documents the major shader nodes added to Blender 5.1 NPR Port.</p>
-<h2 id="render-info-node">Render Info Node<a class="headerlink" href="#render-info-node" title="Permanent link">&para;</a></h2>
-<p><strong>Purpose:</strong> Access render target properties.</p>
-<p><strong>Outputs:</strong>
-- <code>Frag Coord</code> - Fragment/pixel coordinates (X, Y, Z, W)
-- <code>Width</code> - Render target width in pixels
-- <code>Height</code> - Render target height in pixels</p>
-<p><strong>Usage:</strong> Use in calculations that require screen resolution or pixel position.</p>
-<hr />
-<h2 id="scene-time-node">Scene Time Node<a class="headerlink" href="#scene-time-node" title="Permanent link">&para;</a></h2>
-<p><strong>Purpose:</strong> Access time-based values for animation.</p>
-<p><strong>Inputs:</strong>
-- <code>Scale</code> - A value used to scale frame numbers</p>
-<p><strong>Outputs:</strong>
-- <code>Frame</code> - Current frame number
-- <code>Seconds</code> - Elapsed time in seconds
-- <code>Timeline</code> - Timeline position mapped to 0-1
-- <code>Scaled Frame</code> - Frame number after scaling</p>
-<p><strong>Usage:</strong> Create time-based animations and effects.</p>
-<hr />
-<h2 id="screen-derivative-node">Screen Derivative Node<a class="headerlink" href="#screen-derivative-node" title="Permanent link">&para;</a></h2>
-<p><strong>Purpose:</strong> Detect edges and gradients in screen space.</p>
-<p><strong>Outputs:</strong>
-- <code>DDX</code> - X direction derivative
-- <code>DDY</code> - Y direction derivative
-- <code>DDXY</code> - Combined DDX + DDY</p>
-<p><strong>Usage:</strong> Edge detection, gradient mapping, and post-process effects.</p>
-<hr />
-<h2 id="portal-in-portal-out">Portal In / Portal Out<a class="headerlink" href="#portal-in-portal-out" title="Permanent link">&para;</a></h2>
-<p><strong>Purpose:</strong> Organize node links with named portal values.</p>
-<p><strong>Usage:</strong>
-- <code>Portal In</code> stores a named value in the current node tree.
-- <code>Portal Out</code> retrieves that value later in the same tree.</p>
-<p><strong>Limits:</strong>
-- Works only within the same shader node tree.
-- Cannot cross node trees or node groups automatically.</p>
-<hr />
-<h2 id="render-texture-node">Render Texture Node<a class="headerlink" href="#render-texture-node" title="Permanent link">&para;</a></h2>
-<p><strong>Purpose:</strong> Sample a render texture configured in scene settings.</p>
-<p><strong>Inputs:</strong>
-- <code>Vector</code></p>
-<p><strong>Outputs:</strong>
-- <code>Color</code>
-- <code>Alpha</code></p>
-<hr />
-<h2 id="screenspace-info-node">Screenspace Info Node<a class="headerlink" href="#screenspace-info-node" title="Permanent link">&para;</a></h2>
-<p><strong>Purpose:</strong> Access color and depth buffers from the current render.</p>
-<p><strong>Inputs:</strong>
-- <code>View Position</code></p>
-<p><strong>Outputs:</strong>
-- <code>Scene Color</code>
-- <code>Scene Depth</code></p>
-<hr />
-<h2 id="world-environment-node">World Environment Node<a class="headerlink" href="#world-environment-node" title="Permanent link">&para;</a></h2>
-<p><strong>Purpose:</strong> Sample Eevee world environment color.</p>
-<p><strong>Inputs:</strong>
-- <code>Direction</code></p>
-<p><strong>Outputs:</strong>
-- <code>Color</code></p>
-<hr />
-<h2 id="world-to-tangent-node">World To Tangent Node<a class="headerlink" href="#world-to-tangent-node" title="Permanent link">&para;</a></h2>
-<p><strong>Purpose:</strong> Convert a world-space direction into tangent space.</p>
-<p><strong>Inputs:</strong>
-- <code>Vector</code></p>
-<p><strong>Outputs:</strong>
-- <code>Vector</code></p>
-<hr />
-<h2 id="basis-transform-node">Basis Transform Node<a class="headerlink" href="#basis-transform-node" title="Permanent link">&para;</a></h2>
-<p><strong>Purpose:</strong> Transform points, vectors, or normals between custom bases.</p>
-<p><strong>Inputs:</strong>
-- <code>Vector</code>
-- <code>Origin</code>
-- <code>X Axis</code>
-- <code>Y Axis</code>
-- <code>Z Axis</code></p>
-<p><strong>Outputs:</strong>
-- <code>Vector</code></p>
-<hr />
-<h2 id="bevel-node">Bevel Node<a class="headerlink" href="#bevel-node" title="Permanent link">&para;</a></h2>
-<p><strong>Purpose:</strong> Generate an approximate beveled normal in Eevee.</p>
-<p><strong>Inputs:</strong>
-- <code>Radius</code>
-- <code>Normal</code></p>
-<p><strong>Outputs:</strong>
-- <code>Normal</code></p>
-<hr />
-<h2 id="curvature-node">Curvature Node<a class="headerlink" href="#curvature-node" title="Permanent link">&para;</a></h2>
-<p><strong>Purpose:</strong> Provide curvature and rim outputs from screen-space data.</p>
-<p><strong>Inputs:</strong>
-- <code>Samples</code>
-- <code>Sample Radius</code>
-- <code>Thickness</code>
-- <code>Scale</code></p>
-<p><strong>Outputs:</strong>
-- <code>Scene Curvature</code>
-- <code>Scene Rim</code></p>
-<hr />
-<h2 id="shader-info-node">Shader Info Node<a class="headerlink" href="#shader-info-node" title="Permanent link">&para;</a></h2>
-<p><strong>Purpose:</strong> Provide shading-related information such as diffuse, shadow, and ambient lighting.</p>
-<p><strong>Inputs:</strong>
-- <code>World Position</code>
-- <code>Normal</code></p>
-<p><strong>Outputs:</strong>
-- <code>Diffuse Shading</code>
-- <code>Shadow</code>
-- <code>Ambient Lighting</code>
-- <code>Half-Lambert Factor</code></p>
-<hr />
-<h2 id="light-info-node">Light Info Node<a class="headerlink" href="#light-info-node" title="Permanent link">&para;</a></h2>
-<p><strong>Purpose:</strong> Access per-light information.</p>
-<p><strong>Outputs:</strong>
-- <code>Color</code>
-- <code>Power</code>
-- <code>Type</code>
-- <code>Position</code>
-- <code>Direction</code>
-- <code>Radius</code>
-- <code>Spot Size</code>
-- <code>Sun Angle</code></p>
-<p><strong>Usage:</strong> Use <code>For Each Light</code> for per-light workflows.</p>
-<hr />
-<h2 id="scene-color-node">Scene Color Node<a class="headerlink" href="#scene-color-node" title="Permanent link">&para;</a></h2>
-<p><strong>Purpose:</strong> Read scene data in filter materials.</p>
-<p><strong>Inputs:</strong>
-- <code>UV</code> / <code>Coordinate</code></p>
-<p><strong>Outputs:</strong>
-- <code>Color</code>
-- <code>Depth</code>
-- <code>Normal</code></p>
-<p><strong>Parameters:</strong>
-- <code>Source</code> - Color / Depth / Normal / Emission / Environment</p>
-<p><strong>Usage:</strong> Post-process effects, reflections, depth-based effects.</p>
-<hr />
-<h2 id="additional-nodes">Additional Nodes<a class="headerlink" href="#additional-nodes" title="Permanent link">&para;</a></h2>
-<ul>
-<li><code>NPR Input</code></li>
-<li><code>NPR Refraction</code></li>
-<li><code>Image Sample</code></li>
-<li><code>For Each Light</code></li>
-</ul>
-<div class="admonition tip">
-<p class="admonition-title">Tip</p>
+<h2 id="1-general-eevee-utility-nodes">1. General Eevee Utility Nodes<a class="headerlink" href="#1-general-eevee-utility-nodes" title="Permanent link">&para;</a></h2>
+<h3 id="render-info">Render Info<a class="headerlink" href="#render-info" title="Permanent link">&para;</a></h3>
+<h4 id="entry">Entry<a class="headerlink" href="#entry" title="Permanent link">&para;</a></h4>
+<p><code>Add &gt; Input &gt; Render Info</code></p>
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_04-51-10.png" alt="Render Info" style="border-radius: 10px;">
+    <br>
 </div>
-<p>For detailed parameters and usage, refer to Blender's official shader node documentation together with the NPR Port extensions.</p>
+
+<h4 id="outputs">Outputs<a class="headerlink" href="#outputs" title="Permanent link">&para;</a></h4>
+<ul>
+<li>
+<p><code>Frag Coord</code>: Screen-space coordinate (<code>xy</code> normalized to 0-1, <code>z</code> is depth)</p>
+</li>
+<li>
+<p><code>Width</code>: Render region width</p>
+</li>
+<li>
+<p><code>Height</code>: Render region height</p>
+</li>
+</ul>
+<h4 id="purpose">Purpose<a class="headerlink" href="#purpose" title="Permanent link">&para;</a></h4>
+<p>Provides the coordinate and pixel size of the current Eevee render window.</p>
+<h3 id="scene-time">Scene Time<a class="headerlink" href="#scene-time" title="Permanent link">&para;</a></h3>
+<h4 id="entry_1">Entry<a class="headerlink" href="#entry_1" title="Permanent link">&para;</a></h4>
+<p><code>Add &gt; Input &gt; Scene Time</code></p>
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_04-52-48.png" alt="Scene Time" style="border-radius: 10px;">
+    <br>
+</div>
+
+<h4 id="input">Input<a class="headerlink" href="#input" title="Permanent link">&para;</a></h4>
+<ul>
+<li><code>Scale</code>: Value used to scale frame numbers</li>
+</ul>
+<h4 id="outputs_1">Outputs<a class="headerlink" href="#outputs_1" title="Permanent link">&para;</a></h4>
+<ul>
+<li>
+<p><code>Frame</code>: Current frame number</p>
+</li>
+<li>
+<p><code>Seconds</code>: Seconds corresponding to the current frame</p>
+</li>
+<li>
+<p><code>Timeline</code>: Scene time remapped to 0-1 from start frame to end frame</p>
+</li>
+<li>
+<p><code>Scaled Frame</code>: Current frame divided by <code>Scale</code></p>
+</li>
+</ul>
+<h3 id="screen-derivative">Screen Derivative<a class="headerlink" href="#screen-derivative" title="Permanent link">&para;</a></h3>
+<h4 id="entry_2">Entry<a class="headerlink" href="#entry_2" title="Permanent link">&para;</a></h4>
+<p><code>Add &gt; Utilities &gt; Math &gt; Screen Derivative</code></p>
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_04-53-23.png" alt="Screen Derivative" style="border-radius: 10px;">
+    <br>
+</div>
+
+<h4 id="feature">Feature<a class="headerlink" href="#feature" title="Permanent link">&para;</a></h4>
+<p>Gets differences between neighboring pixels in screen space:</p>
+<ul>
+<li>
+<p><code>DDX</code>: Screen-space derivative in X direction</p>
+</li>
+<li>
+<p><code>DDY</code>: Screen-space derivative in Y direction</p>
+</li>
+<li>
+<p><code>DDXY</code>: Combination of <code>DDX</code> and <code>DDY</code> (<code>DDX + DDY</code>)</p>
+</li>
+</ul>
+<h3 id="portal-in-portal-out">Portal In / Portal Out<a class="headerlink" href="#portal-in-portal-out" title="Permanent link">&para;</a></h3>
+<h4 id="entry_3">Entry<a class="headerlink" href="#entry_3" title="Permanent link">&para;</a></h4>
+<ul>
+<li>
+<p><code>Add &gt; Layout &gt; Portal In</code></p>
+</li>
+<li>
+<p><code>Add &gt; Layout &gt; Portal Out</code></p>
+</li>
+</ul>
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_04-53-44.png" alt="Portal Nodes" style="border-radius: 10px;">
+    <br>
+</div>
+
+<h4 id="feature-description">Feature Description<a class="headerlink" href="#feature-description" title="Permanent link">&para;</a></h4>
+<p>These are “portal” nodes used to organize node links.</p>
+<p>Their workflow can be understood as:</p>
+<ul>
+<li>
+<p><code>Portal In</code>: Store a named, typed value in the current node tree</p>
+</li>
+<li>
+<p><code>Portal Out</code>: Retrieve that value later by name within the same node tree</p>
+</li>
+</ul>
+<h4 id="other-notes">Other Notes<a class="headerlink" href="#other-notes" title="Permanent link">&para;</a></h4>
+<ul>
+<li>
+<p>Creating a new <code>Portal In</code> automatically generates a unique name.</p>
+</li>
+<li>
+<p><code>Portal Out</code> has a magnifier button that can jump to the matching <code>Portal In</code> location.</p>
+</li>
+</ul>
+<h4 id="limits">Limits<a class="headerlink" href="#limits" title="Permanent link">&para;</a></h4>
+<ul>
+<li>
+<p>Only recognized inside the same shader node tree.</p>
+</li>
+<li>
+<p>Does not support crossing different node trees.</p>
+</li>
+<li>
+<p>Does not automatically pass through node groups.</p>
+</li>
+<li>
+<p>Inputs with the same name should keep only one source.</p>
+</li>
+</ul>
+<h2 id="2-eevee-object-material-nodes">2. Eevee Object Material Nodes<a class="headerlink" href="#2-eevee-object-material-nodes" title="Permanent link">&para;</a></h2>
+<h3 id="render-texture">Render Texture<a class="headerlink" href="#render-texture" title="Permanent link">&para;</a></h3>
+<h4 id="entry_4">Entry<a class="headerlink" href="#entry_4" title="Permanent link">&para;</a></h4>
+<p><code>Add &gt; Texture &gt; Render Texture</code></p>
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_04-54-27.png" alt="Render Texture" style="border-radius: 10px;">
+    <br>
+</div>
+
+<h4 id="purpose_1">Purpose<a class="headerlink" href="#purpose_1" title="Permanent link">&para;</a></h4>
+<p>Reads a <code>Render Textures</code> entry configured earlier in the scene.</p>
+<h4 id="inputs-outputs">Inputs / Outputs<a class="headerlink" href="#inputs-outputs" title="Permanent link">&para;</a></h4>
+<ul>
+<li>Input: <code>Vector</code></li>
+<li>Outputs: <code>Color</code>, <code>Alpha</code></li>
+</ul>
+<h3 id="screenspace-info">Screenspace Info<a class="headerlink" href="#screenspace-info" title="Permanent link">&para;</a></h3>
+<h4 id="entry_5">Entry<a class="headerlink" href="#entry_5" title="Permanent link">&para;</a></h4>
+<p><code>Add &gt; Input &gt; Screenspace Info</code></p>
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_04-56-22.png" alt="Screenspace Info" style="border-radius: 10px;">
+    <br>
+</div>
+
+<h4 id="inputs-outputs_1">Inputs / Outputs<a class="headerlink" href="#inputs-outputs_1" title="Permanent link">&para;</a></h4>
+<ul>
+<li>Input: <code>View Position</code> (camera-space position)</li>
+<li>Outputs: <code>Scene Color</code> (scene color), <code>Scene Depth</code> (scene depth)</li>
+</ul>
+<h4 id="purpose_2">Purpose<a class="headerlink" href="#purpose_2" title="Permanent link">&para;</a></h4>
+<p>Gets the contents of the current render buffer color or depth.</p>
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_04-59-57.png" alt="Screenspace Result" style="border-radius: 10px;">
+    <br>
+</div>
+
+<h4 id="usage-notes">Usage Notes<a class="headerlink" href="#usage-notes" title="Permanent link">&para;</a></h4>
+<ul>
+<li><code>Raytracing</code> must be enabled in render settings</li>
+<li>Set material <code>Render Method</code> to <code>Dithered</code></li>
+<li>Enable <code>Raytraced Transmission</code> in material options</li>
+<li>The default <code>View Position</code> input is <code>position</code> transformed into camera space, then with the z-axis inverted</li>
+</ul>
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_04-59-28.png" alt="Screenspace Setup" style="border-radius: 10px;">
+    <br>
+</div>
+
+<h3 id="world-environment">World Environment<a class="headerlink" href="#world-environment" title="Permanent link">&para;</a></h3>
+<h4 id="entry_6">Entry<a class="headerlink" href="#entry_6" title="Permanent link">&para;</a></h4>
+<p><code>Add &gt; Input &gt; World Environment</code></p>
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_05-01-56.png" alt="World Environment" style="border-radius: 10px;">
+    <br>
+</div>
+
+<h4 id="inputs-outputs_2">Inputs / Outputs<a class="headerlink" href="#inputs-outputs_2" title="Permanent link">&para;</a></h4>
+<ul>
+<li>Input: <code>Direction</code> (sampling direction)</li>
+<li>Output: <code>Color</code> (environment color)</li>
+</ul>
+<h4 id="purpose_3">Purpose<a class="headerlink" href="#purpose_3" title="Permanent link">&para;</a></h4>
+<p>Directly samples the <code>Eevee</code> world environment color, without depending on whether geometry exists behind the screen.</p>
+<h4 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h4>
+<ul>
+<li>Reads the world lighting probe color; probe resolution can be adjusted in the world environment</li>
+</ul>
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_05-03-27.png" alt="World Environment Probe" style="border-radius: 10px;">
+    <br>
+</div>
+
+<ul>
+<li>If <code>Direction</code> is not connected, the current surface view direction is used by default</li>
+<li>If <code>Direction</code> is connected, the world environment can be sampled in the specified direction</li>
+</ul>
+<h3 id="world-to-tangent">World To Tangent<a class="headerlink" href="#world-to-tangent" title="Permanent link">&para;</a></h3>
+<h4 id="entry_7">Entry<a class="headerlink" href="#entry_7" title="Permanent link">&para;</a></h4>
+<p><code>Add &gt; Utilities &gt; Vector &gt; World To Tangent</code></p>
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_05-04-02.png" alt="World To Tangent" style="border-radius: 10px;">
+    <br>
+</div>
+
+<h4 id="inputs-outputs_3">Inputs / Outputs<a class="headerlink" href="#inputs-outputs_3" title="Permanent link">&para;</a></h4>
+<ul>
+<li>Input: <code>Vector</code> (world-space direction)</li>
+<li>Output: <code>Vector</code> (tangent-space direction)</li>
+</ul>
+<h4 id="purpose_4">Purpose<a class="headerlink" href="#purpose_4" title="Permanent link">&para;</a></h4>
+<p>Converts a world-space direction vector into the tangent space of the current surface.</p>
+<h4 id="notes_1">Notes<a class="headerlink" href="#notes_1" title="Permanent link">&para;</a></h4>
+<ul>
+<li>A <code>UV Map</code> can be specified in the node panel, and the tangent of that UV is used as the transform basis.</li>
+</ul>
+<h3 id="basis-transform">Basis Transform<a class="headerlink" href="#basis-transform" title="Permanent link">&para;</a></h3>
+<h4 id="entry_8">Entry<a class="headerlink" href="#entry_8" title="Permanent link">&para;</a></h4>
+<p><code>Add &gt; Utilities &gt; Vector &gt; Basis Transform</code></p>
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_07-51-05.png" alt="Basis Transform" style="border-radius: 10px;">
+    <br>
+</div>
+
+<h4 id="inputs-outputs_4">Inputs / Outputs<a class="headerlink" href="#inputs-outputs_4" title="Permanent link">&para;</a></h4>
+<ul>
+<li>
+<p>Input: <code>Vector</code> (point, direction, or normal to transform)</p>
+</li>
+<li>
+<p>Input: <code>Origin</code> (origin of the custom basis, used only in <code>Point</code> mode)</p>
+</li>
+<li>
+<p>Input: <code>X Axis</code>, <code>Y Axis</code>, <code>Z Axis</code> (custom basis axes)</p>
+</li>
+<li>
+<p>Output: <code>Vector</code> (transformed result)</p>
+</li>
+</ul>
+<h4 id="purpose_5">Purpose<a class="headerlink" href="#purpose_5" title="Permanent link">&para;</a></h4>
+<p>Uses <code>origin + three basis axes</code> inside material nodes to perform custom coordinate-system transforms. This is useful when there is no matrix input type available and you still need to process points, direction vectors, or normals.</p>
+<h4 id="panel-options">Panel Options<a class="headerlink" href="#panel-options" title="Permanent link">&para;</a></h4>
+<ul>
+<li>
+<p><code>Direction</code></p>
+<ul>
+<li>
+<p><code>To Basis</code>: Interpret the input from world/current coordinates into the custom basis</p>
+</li>
+<li>
+<p><code>From Basis</code>: Convert the input from custom basis coordinates back to external coordinates</p>
+</li>
+</ul>
+</li>
+<li>
+<p><code>Type</code></p>
+<ul>
+<li>
+<p><code>Point</code>: Includes <code>Origin</code> translation</p>
+</li>
+<li>
+<p><code>Vector</code>: Only transforms direction and length, without translation</p>
+</li>
+<li>
+<p><code>Normal</code>: Transforms following normal rules and normalizes before output</p>
+</li>
+</ul>
+</li>
+<li>
+<p><code>Basis Input</code></p>
+<ul>
+<li>
+<p><code>XYZ</code>: Use all three input axes directly</p>
+</li>
+<li>
+<p><code>XY</code> / <code>XZ</code> / <code>YZ</code>: Use only two axes; the third axis is generated automatically by cross product</p>
+</li>
+</ul>
+</li>
+<li>
+<p><code>Orthonormalize</code></p>
+<ul>
+<li>
+<p>When enabled, input axes are orthogonalized and normalized. More suitable for tangent space or local orientation bases</p>
+</li>
+<li>
+<p>When disabled, input axis lengths are preserved, which can be used for basis transforms with scaling</p>
+</li>
+</ul>
+</li>
+<li>
+<p><code>Fallback</code></p>
+<ul>
+<li>
+<p><code>Pass Through</code>: Output the original input when the basis degenerates</p>
+</li>
+<li>
+<p><code>Zero</code>: Output <code>0, 0, 0</code> when the basis degenerates</p>
+</li>
+</ul>
+</li>
+</ul>
+<h3 id="bevel">Bevel<a class="headerlink" href="#bevel" title="Permanent link">&para;</a></h3>
+<h4 id="entry_9">Entry<a class="headerlink" href="#entry_9" title="Permanent link">&para;</a></h4>
+<p><code>Add &gt; Input &gt; Bevel</code></p>
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_05-06-05.png" alt="Bevel" style="border-radius: 10px;">
+    <br>
+</div>
+
+<h4 id="inputs-outputs_5">Inputs / Outputs<a class="headerlink" href="#inputs-outputs_5" title="Permanent link">&para;</a></h4>
+<ul>
+<li>Input: <code>Radius</code> (bevel radius), <code>Normal</code> (surface normal hint)</li>
+<li>Output: <code>Normal</code> (approximated beveled normal)</li>
+</ul>
+<h4 id="panel-option">Panel Option<a class="headerlink" href="#panel-option" title="Permanent link">&para;</a></h4>
+<ul>
+<li><code>Samples</code> (higher sample counts improve quality but cost more performance)</li>
+</ul>
+<h4 id="purpose_6">Purpose<a class="headerlink" href="#purpose_6" title="Permanent link">&para;</a></h4>
+<p>Generates an approximate beveled normal in <code>Eevee</code> so hard edges can look smoother.</p>
+<h4 id="notes_2">Notes<a class="headerlink" href="#notes_2" title="Permanent link">&para;</a></h4>
+<ul>
+<li>
+<p><code>Cycles</code> still uses the original true geometric bevel algorithm</p>
+</li>
+<li>
+<p><code>Eevee</code> here uses a same-object screen-space approximation</p>
+</li>
+<li>
+<p>The result depends on current view, depth buffer, and visible neighborhood, and is not equivalent to the true <code>Bevel</code> in <code>Cycles</code></p>
+</li>
+</ul>
 
 
 

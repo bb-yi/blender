@@ -18,6 +18,8 @@
         <link rel="prev" href="npr-workflow.html">
       
       
+        <link rel="next" href="scene-extensions.html">
+      
       
       <link rel="icon" href="assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.6.22">
@@ -76,7 +78,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#interface-workflow" class="md-skip">
+        <a href="#interface-workflow-notes" class="md-skip">
           Skip to content
         </a>
       
@@ -284,28 +286,6 @@
   
   
     <li class="md-nav__item">
-      <a href="scene-extensions.html" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    Scene Extensions
-    
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="extended-nodes.html" class="md-nav__link">
         
   
@@ -437,9 +417,9 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#scope" class="md-nav__link">
+  <a href="#current-scope" class="md-nav__link">
     <span class="md-ellipsis">
-      Scope
+      Current Scope
     </span>
   </a>
   
@@ -478,6 +458,28 @@
   
 </nav>
       
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="scene-extensions.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Scene Extensions
+    
+  </span>
+  
+
+      </a>
     </li>
   
 
@@ -546,9 +548,9 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#scope" class="md-nav__link">
+  <a href="#current-scope" class="md-nav__link">
     <span class="md-ellipsis">
-      Scope
+      Current Scope
     </span>
   </a>
   
@@ -599,40 +601,40 @@
 
 
 
-<h1 id="interface-workflow">Interface &amp; Workflow<a class="headerlink" href="#interface-workflow" title="Permanent link">&para;</a></h1>
+<h1 id="interface-workflow-notes">Interface &amp; Workflow Notes<a class="headerlink" href="#interface-workflow-notes" title="Permanent link">&para;</a></h1>
 <h2 id="1-material-selector-preview-toggle">1. Material Selector Preview Toggle<a class="headerlink" href="#1-material-selector-preview-toggle" title="Permanent link">&para;</a></h2>
 <h3 id="purpose">Purpose<a class="headerlink" href="#purpose" title="Permanent link">&para;</a></h3>
-<p>Control whether material preview thumbnails are rendered in dropdown and search lists.</p>
-<p>This is mainly used to reduce lag when opening the material selector in scenes with many materials.</p>
+<p>Controls whether material preview thumbnails are rendered in the material dropdown / search list.</p>
+<p>This option is mainly used to reduce stutter caused by generating previews when opening the material selector in scenes with many materials.</p>
 <h3 id="entry-point">Entry Point<a class="headerlink" href="#entry-point" title="Permanent link">&para;</a></h3>
 <p><code>Edit &gt; Preferences &gt; Editing &gt; Objects &gt; Materials &gt; Material Selector Previews</code></p>
 <div align="center">
-    <img src="images/SnowShot_2026-03-28_05-28-34.png" alt="alt text" style="border-radius: 10px;">
+    <img src="images/SnowShot_2026-03-28_05-28-34.png" alt="Material Selector Previews" style="border-radius: 10px;">
     <br>
 </div>
 
 <h3 id="behavior">Behavior<a class="headerlink" href="#behavior" title="Permanent link">&para;</a></h3>
 <ul>
 <li>
-<p>When enabled, the material selector shows previews according to the current logic.</p>
+<p>When enabled: the material selector displays material previews using the current logic.</p>
 </li>
 <li>
-<p>When disabled, the selector falls back to plain material icons and no longer triggers preview rendering in the dropdown list.</p>
+<p>When disabled: the material selector falls back to ordinary material icons and no longer triggers preview rendering in the dropdown list.</p>
 </li>
 <li>
-<p>The default value is enabled.</p>
+<p>Default is enabled.</p>
 </li>
 </ul>
-<h3 id="scope">Scope<a class="headerlink" href="#scope" title="Permanent link">&para;</a></h3>
+<h3 id="current-scope">Current Scope<a class="headerlink" href="#current-scope" title="Permanent link">&para;</a></h3>
 <ul>
 <li>
-<p>Only affects material previews inside dropdown lists such as <code>template_ID(...)</code>.</p>
+<p>Currently only affects material preview display in dropdown selectors such as <code>template_ID(...)</code>.</p>
 </li>
 <li>
 <p>Does not affect the large preview sphere in the <code>Material Properties</code> panel.</p>
 </li>
 <li>
-<p>Does not affect the actual material render result.</p>
+<p>Does not affect the final rendering result of the material itself.</p>
 </li>
 </ul>
 <h2 id="2-world-environment-exclude">2. World Environment Exclude<a class="headerlink" href="#2-world-environment-exclude" title="Permanent link">&para;</a></h2>
@@ -641,7 +643,7 @@
 <li>Lets you choose a collection that is not affected by the world environment.</li>
 </ul>
 <div align="center">
-    <img src="images/SnowShot_2026-03-28_05-29-43.png" alt="alt text" style="border-radius: 10px;">
+    <img src="images/SnowShot_2026-03-28_05-29-43.png" alt="World Environment Exclude" style="border-radius: 10px;">
     <br>
 </div>
 

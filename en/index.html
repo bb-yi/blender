@@ -16,7 +16,7 @@
       
       
       
-        <link rel="next" href="scene-extensions.html">
+        <link rel="next" href="extended-nodes.html">
       
       
       <link rel="icon" href="assets/images/favicon.png">
@@ -76,7 +76,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#blender-51-npr-port-new-features-usage-guide" class="md-skip">
+        <a href="#blender-51-npr-port-features-and-usage-guide" class="md-skip">
           Skip to content
         </a>
       
@@ -330,6 +330,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#node-overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      Node Overview
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#main-feature-categories" class="md-nav__link">
     <span class="md-ellipsis">
       Main Feature Categories
@@ -349,9 +358,9 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#2-shader-nodes-20-new-nodes" class="md-nav__link">
+  <a href="#2-shader-nodes" class="md-nav__link">
     <span class="md-ellipsis">
-      2. Shader Nodes (20+ new nodes)
+      2. Shader Nodes
     </span>
   </a>
   
@@ -380,41 +389,10 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#quick-links" class="md-nav__link">
-    <span class="md-ellipsis">
-      Quick Links
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
       
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="scene-extensions.html" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    Scene Extensions
-    
-  </span>
-  
-
-      </a>
     </li>
   
 
@@ -485,6 +463,28 @@
   
 
     
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="scene-extensions.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Scene Extensions
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
   </ul>
 </nav>
                   </div>
@@ -530,6 +530,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#node-overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      Node Overview
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#main-feature-categories" class="md-nav__link">
     <span class="md-ellipsis">
       Main Feature Categories
@@ -549,9 +558,9 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#2-shader-nodes-20-new-nodes" class="md-nav__link">
+  <a href="#2-shader-nodes" class="md-nav__link">
     <span class="md-ellipsis">
-      2. Shader Nodes (20+ new nodes)
+      2. Shader Nodes
     </span>
   </a>
   
@@ -580,15 +589,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#quick-links" class="md-nav__link">
-    <span class="md-ellipsis">
-      Quick Links
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -605,12 +605,59 @@
 
 
 
-<h1 id="blender-51-npr-port-new-features-usage-guide">Blender 5.1 NPR Port - New Features &amp; Usage Guide<a class="headerlink" href="#blender-51-npr-port-new-features-usage-guide" title="Permanent link">&para;</a></h1>
+<h1 id="blender-51-npr-port-features-and-usage-guide">Blender 5.1 NPR Port - Features and Usage Guide<a class="headerlink" href="#blender-51-npr-port-features-and-usage-guide" title="Permanent link">&para;</a></h1>
 <h2 id="project-introduction">Project Introduction<a class="headerlink" href="#project-introduction" title="Permanent link">&para;</a></h2>
-<p><code>Blender 5.1 NPR Port</code> is an NPR-specialized Blender fork that combines features from <code>Goo Engine</code> and <code>4.4 NPR-prototype</code> with additional useful specialty nodes.</p>
-<p>Most features are <code>Eevee</code> exclusive and do not support <code>Cycles</code>.</p>
+<p><code>Blender 5.1 NPR Port</code> is an NPR-focused <code>Blender</code> branch. In addition to integrating characteristic nodes from <code>Goo Engine</code> and the <code>4.4 NPR-prototype</code>, it also adds a number of practical extra nodes.</p>
+<p>Most features are <code>Eevee</code>-only and do not support <code>Cycles</code>.</p>
 <h2 id="documentation-scope">Documentation Scope<a class="headerlink" href="#documentation-scope" title="Permanent link">&para;</a></h2>
-<p>This documentation covers NPR/Eevee extension features that have been added to <code>Blender 5.1 NPR Port</code> compared to official <code>Blender 5.1</code> and currently exist in this branch, as well as their basic usage methods.</p>
+<p>This document describes the NPR / Eevee extension features that have been added to the current <code>Blender 5.1 NPR Port</code> branch compared with official <code>Blender 5.1</code>, together with their basic usage.</p>
+<h2 id="node-overview">Node Overview<a class="headerlink" href="#node-overview" title="Permanent link">&para;</a></h2>
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_07-50-39.png" alt="Shader Nodes" style="border-radius: 10px;">
+    <br>
+    <sub>Shader Nodes</sub>
+</div>
+
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_04-23-33.png" alt="NPR Tree Nodes" style="border-radius: 10px;">
+    <br>
+    <sub>NPR Tree Nodes (some shader nodes can also be used inside NPR Tree)</sub>
+</div>
+
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_04-30-16.png" alt="Filter Nodes" style="border-radius: 10px;">
+    <br>
+    <sub>Filter Nodes</sub>
+</div>
+
+<div class="grid cards">
+<ul>
+<li>
+<p><strong>Scene-Level Extensions</strong></p>
+<hr />
+<p>Start with the scene-level Eevee extensions to understand the core features.</p>
+<p><a href="scene-extensions.html">View Scene-Level Extensions →</a></p>
+</li>
+<li>
+<p><strong>Extended Nodes</strong></p>
+<hr />
+<p>Dive into the functionality of each newly added node.</p>
+<p><a href="extended-nodes.html">View Extended Nodes →</a></p>
+</li>
+<li>
+<p><strong>NPR Workflow</strong></p>
+<hr />
+<p>Learn how the NPR Tree workflow is organized.</p>
+<p><a href="npr-workflow.html">View NPR Tree Workflow →</a></p>
+</li>
+<li>
+<p><strong>Interface &amp; Settings</strong></p>
+<hr />
+<p>Check additional interface options and workflow settings.</p>
+<p><a href="interface-guide.html">View Interface &amp; Settings →</a></p>
+</li>
+</ul>
+</div>
 <h2 id="main-feature-categories">Main Feature Categories<a class="headerlink" href="#main-feature-categories" title="Permanent link">&para;</a></h2>
 <h3 id="1-scene-level-eevee-extensions">1. Scene-Level Eevee Extensions<a class="headerlink" href="#1-scene-level-eevee-extensions" title="Permanent link">&para;</a></h3>
 <ul>
@@ -621,7 +668,7 @@
 <p><code>Filter Materials</code></p>
 </li>
 </ul>
-<h3 id="2-shader-nodes-20-new-nodes">2. Shader Nodes (20+ new nodes)<a class="headerlink" href="#2-shader-nodes-20-new-nodes" title="Permanent link">&para;</a></h3>
+<h3 id="2-shader-nodes">2. Shader Nodes<a class="headerlink" href="#2-shader-nodes" title="Permanent link">&para;</a></h3>
 <ul>
 <li>
 <p><code>Render Info</code></p>
@@ -697,15 +744,6 @@
 <p class="admonition-title">Eevee Only</p>
 <p>All NPR Port features require the <strong>Eevee render engine</strong>. Cycles is not supported.</p>
 </div>
-<p><strong>Ready to explore?</strong> Check out the sections below for more information!</p>
-<hr />
-<h2 id="quick-links">Quick Links<a class="headerlink" href="#quick-links" title="Permanent link">&para;</a></h2>
-<ul>
-<li><a href="scene-extensions.html">Scene-Level Extensions</a> - Render Textures &amp; Filter Materials</li>
-<li><a href="extended-nodes.html">Extended Nodes</a> - 20+ new shader nodes</li>
-<li><a href="npr-workflow.html">NPR Workflow</a> - NPR Tree processing pipeline</li>
-<li><a href="interface-guide.html">Interface Guide</a> - Settings &amp; troubleshooting</li>
-</ul>
 
 
 
