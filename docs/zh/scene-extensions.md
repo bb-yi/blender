@@ -27,6 +27,25 @@
   <br>
 </div>
 
+# 一、Scene 级 Eevee 扩展
+
+## 1. Render Textures
+
+### 功能说明
+
+`Render Textures` 是场景级的 Eevee 额外渲染纹理系统。
+
+它允许场景预先维护最多 `4` 个 Render Texture 槽位，每个槽位都可以指定一个相机和一个输出类型，把该相机视角下的场景结果先渲染成纹理，再在普通物体材质中通过 `Render Texture` 节点采样。
+
+### 面板入口
+
+`Scene Properties > Render Textures`
+
+<div align="center">
+  <img src="images/SnowShot_2026-03-28_04-37-13.png" alt="alt text" style="border-radius: 10px;">
+  <br>
+</div>
+
 ### 可配置内容
 
 每个 Render Texture 条目当前支持：
@@ -53,7 +72,7 @@
 !!! tip "提示"
     非常适合用于制作实时反射、屏幕空间效果和动态纹理。
 
-## Filter Materials
+## 2. Filter Materials
 
 ### 功能说明
 
@@ -63,12 +82,12 @@
 
 `Scene Properties > Filter Materials`
 
+节点树入口：着色器节点编辑器 > 着色器类型 > Filter
+
 <div align="center">
   <img src="images/SnowShot_2026-03-28_04-41-53.png" alt="alt text" style="border-radius: 10px;">
   <br>
 </div>
-
-节点树入口：着色器节点编辑器 > 着色器类型 > Filter
 
 <div align="center">
   <img src="images/SnowShot_2026-03-28_04-42-42.png" alt="alt text" style="border-radius: 10px;">
@@ -78,25 +97,23 @@
 ### 基本使用方法
 
 1. 打开 `Scene Properties > Filter Materials`
-2. 新建一个条目
+2. 新建一个条目，或者直接点 `New Filter Material`
 3. 选中的材质必须是 `Filter` 域材质
 4. 打开 Shader Editor，把顶部 `Shader Type` 切换到 `Filter`
-5. 使用 `Scene Color` 读取场景数据
-6. 用 `Filter Output` 输出结果
-7. 通过 `Execution Stage` 选择滤镜执行位置
+5. 在滤镜材质里使用 `Scene Color` 读取场景数据，用 `Filter Output` 输出结果
+6. 通过 `Execution Stage` 选择滤镜执行位置
 
-### 执行阶段
+### 重要说明
 
-- `Before Volume Fog` - 在体积雾处理前执行
-- `Before Depth of Field` - 在景深前执行
-- `Before Composite` - 在合成器前执行
+- `Scene Color` 节点的默认采样坐标为 `纹理坐标` 节点的 `Window` 输出
 
-!!! warning "注意"
-    Filter Materials 只能使用 Filter 域材质。
+- 支持 `AOV` 输入
 
-!!! example "使用场景"
-    - 色彩分级和色调映射
-    - 屏幕空间效果（如边界检测、卡通渲染）
-    - 动态模糊和运动矢量效果
-    - 后期降噪和锐化处理
+- `Execution Stage` 滤镜插入位置：
+
+  - `Before Volume Fog`：在体积雾处理前执行
+
+  - `Before Depth of Field`：在景深前执行
+
+  - `Before Composite`：在合成器前执行
 

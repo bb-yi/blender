@@ -13,23 +13,57 @@ This documentation covers NPR/Eevee extension features that have been added to `
 ## Main Feature Categories
 
 ### 1. Scene-Level Eevee Extensions
-- **Render Textures** - Scene-level additional render texture system
-- **Filter Materials** - Full-screen filter stack
+
+- `Render Textures`
+
+- `Filter Materials`
 
 ### 2. Shader Nodes (20+ new nodes)
-- Render Info, Scene Time, Screen Derivative
-- Portal In/Out, Screenspace Info
-- World Environment, Bevel, Curvature
-- Shader Info, Light Info, Scene Color
+
+- `Render Info`
+
+- `Scene Time`
+
+- `Screen Derivative`
+
+- `Portal In / Portal Out`
+
+- `Screenspace Info`
+
+- `World Environment`
+
+- `World To Tangent`
+
+- `Basis Transform`
+
+- `Bevel`
+
+- `Curvature`
+
+- `Shader Info`
+
+- `Light Info`
+
+- `Scene Color`
 
 ### 3. NPR Tree Workflow
-- NPR Input/Output nodes
-- Per-light processing
+
+- `NPR Input`
+
+- `NPR Refraction`
+
+- `Image Sample`
+
+- `For Each Light`
+
 - Built-in node group assets
 
 ### 4. Interface & Settings
+
 - Material preview control
+
 - World environment configuration
+
 - Light group management
 
 !!! warning "Eevee Only"

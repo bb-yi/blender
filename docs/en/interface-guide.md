@@ -1,80 +1,45 @@
-# Interface & Settings
+# Interface & Workflow
 
-## Quick Settings Reference
+## 1. Material Selector Preview Toggle
 
-| Setting | Location | Purpose |
-|---------|----------|----------|
-| **Material Preview** | Preferences > Rendering | Real-time material display |
-| **Lightgroup ID** | Object Props > Light Groups | Group objects by light |
-| **World Exclude** | Scene Props > World Environment Exclude | Exclude environment objects |
-| **Render Textures** | Scene Props > Render Textures | Scene-level texture rendering |
-| **Filter Materials** | Scene Props > Filter Materials | Global filter effects |
+### Purpose
 
----
+Control whether material preview thumbnails are rendered in dropdown and search lists.
 
-## Viewport Shortcuts
+This is mainly used to reduce lag when opening the material selector in scenes with many materials.
 
-| Action | Shortcut | Purpose |
-|--------|----------|----------|
-| Material Preview | `Z` | Switch preview mode |
-| NPR Tree Edit | `Ctrl + Tab` | Switch to NPR editor |
-| Render View | `Z` | Final render preview |
-| Frame All | `Home` | Center display all |
-| Focus Selected | `NumPad .` | Center display selected |
+### Entry Point
 
----
+`Edit > Preferences > Editing > Objects > Materials > Material Selector Previews`
 
-## Common Issues & Solutions
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_05-28-34.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
 
-### Issue: Scene Color Returns Black
+### Behavior
 
-**Problem:** Scene Color node in Filter returns black
+- When enabled, the material selector shows previews according to the current logic.
 
-**Solution:**
-1. Check if Filter Material is in the correct execution stage
-2. Verify the scene has lights and visible geometry
-3. Ensure Window texture coordinates are connected
-4. Try switching Scene Color Source option
-5. Check if rendering occurs before filter evaluation
+- When disabled, the selector falls back to plain material icons and no longer triggers preview rendering in the dropdown list.
 
----
+- The default value is enabled.
 
-### Issue: Render Texture Not Updating
+### Scope
 
-**Problem:** Render Texture shows outdated or old data
+- Only affects material previews inside dropdown lists such as `template_ID(...)`.
 
-**Solution:**
-1. Change update mode to "Every Frame"
-2. Verify source camera exists and is enabled
-3. Check if texture resolution exceeds VRAM
-4. Ensure rendering occurs before material sampling
-5. If memory-constrained, try lowering resolution
+- Does not affect the large preview sphere in the `Material Properties` panel.
 
----
+- Does not affect the actual material render result.
 
-## Feature Support Matrix
+## 2. World Environment Exclude
 
-| Feature | Eevee | Cycles |
-|---------|-------|--------|
-| Scene Render Textures | ✅ | ❌ |
-| Filter Materials | ✅ | ❌ |
-| NPR Tree | ✅ | ❌ |
-| Screen Derivative | ✅ | ❌ |
-| Light Info | ✅ | ⚠️ Limited |
-| Shader Nodes (20+) | ✅ | ⚠️ Limited |
-| World Environment | ✅ | ✅ |
-| Light Groups | ✅ | ✅ |
+### Behavior
 
----
+- Lets you choose a collection that is not affected by the world environment.
 
-## Best Practices
-
-1. **Always use Eevee** for NPR Port features
-2. **Test in viewport** with material preview before final render
-3. **Use light groups** to organize complex scenes
-4. **Monitor VRAM** when using multiple render textures
-5. **Stack filters efficiently** - combine effects where possible
-6. **Profile performance** - use shader editor timing information
-
-!!! warning
-NPR Port is optimized for **Eevee only**. Cycles support is limited.
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_05-29-43.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>

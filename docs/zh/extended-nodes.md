@@ -34,6 +34,42 @@
 	<br>
 </div>
 
+# 二、主要扩展节点
+
+**1. Eevee 通用辅助节点**
+
+### Render Info
+
+#### 入口
+
+`Add > Input > Render Info`
+
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_04-51-10.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### 输出
+
+- `Frag Coord`：屏幕空间坐标（xy 归一化到 0-1，z 为深度）
+- `Width`：渲染区域宽度
+- `Height`：渲染区域高度
+
+#### 作用
+
+提供当前 Eevee 渲染窗口的坐标和像素尺寸。
+
+### Scene Time
+
+#### 入口
+
+`Add > Input > Scene Time`
+
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_04-52-48.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
+
 #### 输入
 
 - `Scale`：用于缩放帧数的数值
@@ -210,7 +246,63 @@
 
 #### 说明
 
-- 节点面板中可指定 `UV Map`，该 UV 的切线会作为转换基底
+- 节点面板中可指定 `UV Map`，该 UV 的切线会作为转换基底。
+
+### Basis Transform
+
+#### 入口
+
+`Add > Utilities > Vector > Basis Transform`
+
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_07-51-05.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### 输入输出
+
+- 输入：`Vector`（待变换的点、方向或法线）
+- 输入：`Origin`（自定义基底的原点，仅 `Point` 模式使用）
+- 输入：`X Axis`、`Y Axis`、`Z Axis`（自定义坐标基轴）
+- 输出：`Vector`（变换后的结果）
+
+#### 作用
+
+在材质节点里用 `原点 + 三根基轴` 来完成自定义坐标系变换，适合在没有矩阵输入类型的情况下处理点、方向向量和法线。
+
+#### 面板选项
+
+- `Direction`
+
+  - `To Basis`：把输入从世界/当前坐标解释为自定义基底下的坐标
+
+  - `From Basis`：把输入从自定义基底坐标还原回外部坐标
+
+- `Type`
+
+  - `Point`：会参与 `Origin` 平移
+
+  - `Vector`：只做方向/长度变换，不参与平移
+
+  - `Normal`：按法线规则变换，并在输出前归一化
+
+- `Basis Input`
+
+  - `XYZ`：直接使用三根输入轴
+
+  - `XY` / `XZ` / `YZ`：只使用两根轴，第三根轴由叉积自动补出
+
+- `Orthonormalize`
+
+  - 开启后会把输入轴正交化并归一化，更适合做切线空间、局部朝向这类纯方向基底
+
+  - 关闭后会保留输入轴长度，可用于带缩放的基底变换
+
+- `Fallback`
+
+  - `Pass Through`：当基底退化时直接输出原始输入
+
+  - `Zero`：当基底退化时输出 `0, 0, 0`
 
 ### Bevel
 
@@ -239,111 +331,14 @@
 #### 说明
 
 - `Cycles` 仍然使用官方原本的真实几何倒角算法
+
 - `Eevee` 这里使用的是同物体屏幕空间近似
+
 - 结果依赖当前视角、深度缓冲和可见邻域，不等同于 `Cycles` 的真实 `Bevel`
 
 ### Curvature
 
 #### 入口
-
-`Add > Input > Curvature`
-
-<div align="center">
-	<img src="images/SnowShot_2026-03-28_05-06-57.png" alt="alt text" style="border-radius: 10px;">
-	<br>
-</div>
-
-#### 输入
-
-- `Samples`
-- `Sample Radius`
-- `Thickness`
-- `Scale`
-
-#### 输出
-
-- `Scene Curvature`：根据屏幕空间提取的曲率值
-- `Scene Rim`：边缘光
-
-#### 面板选项
-
-- `Local`: 忽略其他物体深度
-
-#### 说明
-
-移植的Goo Engine中的曲率节点,提供曲率和边缘光输出
-
-
-### Shader Info
-
-#### 入口
-
-`Add > Input > Shader Info`
-
-![alt text](images/SnowShot_2026-03-28_05-09-10.png)
-
-#### 输入
-
-- `World Position`：世界空间位置（黑財默使用当前炫置）
-
-- `Normal`：表面法线（黑財默使用云性法线）
-
-#### 输出
-
-- `Diffuse Shading`：兰伯特光照
-
-- `Shadow`：遮蔽阴影
-
-- `Ambient Lighting`：环境间接光（来自世界环境+光照探针）
-
-- `Half-Lambert Factor`：半兰伯特光照
-
-#### 说明
-
-- `Shadow`
-
-	- 可切换阴影模式
-
-	- `Built-in` 默认模式，使用 Eevee 原本的阴影计算
-
-	- `Soft Filtered` 把黑白抖动阴影变成更平滑的灰度半影
-
-	- 节点面板新增 `Lightgroup`
-
-		- 只有 `Lightgroup ID` 相同的灯光，才会参与这个 `Shader Info` 节点的直接光照与阴影计算
-
-	- 当前实现会排除 world sun 对这些输出的干扰，避免 HDRI 或世界环境里的“太阳光”混入直接结果。
-
-
-### Light Info
-
-#### 入口
-
-`Add > Input > Light Info`
-
-![alt text](images/SnowShot_2026-03-28_05-13-13.png)
-
-#### 功能说明
-
-读取指定灯光信息
-
-#### 固定输出
-
-- `Color`：灯光颜色
-
-- `Power`：灯光强度
-
-- `Type`：灯光类型
-
-	- `-1`：没有指定灯光
-
-	- `0`：Point
-
-	- `1`：Sun
-
-	- `2`：Spot
-
-	- `3`：Area
 
 #### 按灯光类型自动出现的输出
 

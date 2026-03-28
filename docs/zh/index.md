@@ -53,36 +53,55 @@
 ### 1. Scene 级 Eevee 扩展
 
 - `Render Textures`
+
 - `Filter Materials`
 
 ### 2. 着色器节点（20+ 个新节点）
 
 - `Render Info`
+
 - `Scene Time`
+
 - `Screen Derivative`
+
 - `Portal In / Portal Out`
+
 - `Screenspace Info`
+
 - `World Environment`
+
 - `World To Tangent`
+
+- `Basis Transform`
+
 - `Bevel`
+
 - `Curvature`
+
 - `Shader Info`
+
 - `Light Info`
+
 - `Scene Color`
 
 ### 3. NPR Tree 工作流
 
 - `NPR Input`
-- `NPR Output`
+
 - `NPR Refraction`
+
 - `Image Sample`
+
 - `For Each Light`
+
 - 内置节点组资产
 
 ### 4. 界面与设置
 
 - 材质预览控制
+
 - 世界环境配置
+
 - 灯光组管理
 
 !!! warning "Eevee 专用"

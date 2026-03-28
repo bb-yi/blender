@@ -1,15 +1,15 @@
 # Extended Shader Nodes
 
-This page documents 20+ new shader nodes added to Blender 5.1 NPR Port.
+This page documents the major shader nodes added to Blender 5.1 NPR Port.
 
 ## Render Info Node
 
-**Purpose:** Access post-render image properties
+**Purpose:** Access render target properties.
 
 **Outputs:**
 - `Frag Coord` - Fragment/pixel coordinates (X, Y, Z, W)
-- `Width` - Render target width (pixels)
-- `Height` - Render target height (pixels)
+- `Width` - Render target width in pixels
+- `Height` - Render target height in pixels
 
 **Usage:** Use in calculations that require screen resolution or pixel position.
 
@@ -17,13 +17,16 @@ This page documents 20+ new shader nodes added to Blender 5.1 NPR Port.
 
 ## Scene Time Node
 
-**Purpose:** Access time-based values for animation
+**Purpose:** Access time-based values for animation.
+
+**Inputs:**
+- `Scale` - A value used to scale frame numbers
 
 **Outputs:**
 - `Frame` - Current frame number
-- `Seconds` - Elapsed time (seconds)
-- `Timeline` - Timeline position
-- `Scaled Frame` - Custom-scaled frame number
+- `Seconds` - Elapsed time in seconds
+- `Timeline` - Timeline position mapped to 0-1
+- `Scaled Frame` - Frame number after scaling
 
 **Usage:** Create time-based animations and effects.
 
@@ -31,48 +34,171 @@ This page documents 20+ new shader nodes added to Blender 5.1 NPR Port.
 
 ## Screen Derivative Node
 
-**Purpose:** Detect edges and gradients in screen space
-
-**Inputs:**
-- `Value` - Input to differentiate
+**Purpose:** Detect edges and gradients in screen space.
 
 **Outputs:**
 - `DDX` - X direction derivative
 - `DDY` - Y direction derivative
-- `DDXY` - Combined derivatives
+- `DDXY` - Combined DDX + DDY
 
-**Usage:** Edge detection, gradient mapping, post-process effects.
+**Usage:** Edge detection, gradient mapping, and post-process effects.
+
+---
+
+## Portal In / Portal Out
+
+**Purpose:** Organize node links with named portal values.
+
+**Usage:**
+- `Portal In` stores a named value in the current node tree.
+- `Portal Out` retrieves that value later in the same tree.
+
+**Limits:**
+- Works only within the same shader node tree.
+- Cannot cross node trees or node groups automatically.
+
+---
+
+## Render Texture Node
+
+**Purpose:** Sample a render texture configured in scene settings.
+
+**Inputs:**
+- `Vector`
+
+**Outputs:**
+- `Color`
+- `Alpha`
+
+---
+
+## Screenspace Info Node
+
+**Purpose:** Access color and depth buffers from the current render.
+
+**Inputs:**
+- `View Position`
+
+**Outputs:**
+- `Scene Color`
+- `Scene Depth`
+
+---
+
+## World Environment Node
+
+**Purpose:** Sample Eevee world environment color.
+
+**Inputs:**
+- `Direction`
+
+**Outputs:**
+- `Color`
+
+---
+
+## World To Tangent Node
+
+**Purpose:** Convert a world-space direction into tangent space.
+
+**Inputs:**
+- `Vector`
+
+**Outputs:**
+- `Vector`
+
+---
+
+## Basis Transform Node
+
+**Purpose:** Transform points, vectors, or normals between custom bases.
+
+**Inputs:**
+- `Vector`
+- `Origin`
+- `X Axis`
+- `Y Axis`
+- `Z Axis`
+
+**Outputs:**
+- `Vector`
+
+---
+
+## Bevel Node
+
+**Purpose:** Generate an approximate beveled normal in Eevee.
+
+**Inputs:**
+- `Radius`
+- `Normal`
+
+**Outputs:**
+- `Normal`
+
+---
+
+## Curvature Node
+
+**Purpose:** Provide curvature and rim outputs from screen-space data.
+
+**Inputs:**
+- `Samples`
+- `Sample Radius`
+- `Thickness`
+- `Scale`
+
+**Outputs:**
+- `Scene Curvature`
+- `Scene Rim`
+
+---
+
+## Shader Info Node
+
+**Purpose:** Provide shading-related information such as diffuse, shadow, and ambient lighting.
+
+**Inputs:**
+- `World Position`
+- `Normal`
+
+**Outputs:**
+- `Diffuse Shading`
+- `Shadow`
+- `Ambient Lighting`
+- `Half-Lambert Factor`
 
 ---
 
 ## Light Info Node
 
-**Purpose:** Access per-light information
-
-**Inputs:**
-- `Light Type` - Filter: All / Sun / Point / Spot
+**Purpose:** Access per-light information.
 
 **Outputs:**
-- `Direction` - Light direction
-- `Distance` - Distance to light source
-- `Color` - Light color
-- `Energy` - Light intensity
+- `Color`
+- `Power`
+- `Type`
+- `Position`
+- `Direction`
+- `Radius`
+- `Spot Size`
+- `Sun Angle`
 
-**Usage:** Per-light calculations, conditional lighting effects.
+**Usage:** Use `For Each Light` for per-light workflows.
 
 ---
 
 ## Scene Color Node
 
-**Purpose:** Read scene data in filter materials
+**Purpose:** Read scene data in filter materials.
 
 **Inputs:**
-- `UV`/`Coordinate` - Sampling coordinates (default: screen space)
+- `UV` / `Coordinate`
 
 **Outputs:**
-- `Color` - Scene color at that coordinate
-- `Depth` - Scene depth value
-- `Normal` - Scene normal data
+- `Color`
+- `Depth`
+- `Normal`
 
 **Parameters:**
 - `Source` - Color / Depth / Normal / Emission / Environment
@@ -83,16 +209,10 @@ This page documents 20+ new shader nodes added to Blender 5.1 NPR Port.
 
 ## Additional Nodes
 
-**Other important nodes:**
-
-- **Portal In/Out** - Portal utility nodes
-- **Screenspace Info** - View space information
-- **World Environment** - Access environment
-- **World To Tangent** - Coordinate transformation
-- **Bevel** - Edge bevel processing
-- **Curvature** - Output surface curvature
-- **Shader Info** - Shader parameter access
-- **Render Texture** - Sample pre-rendered texture
+- `NPR Input`
+- `NPR Refraction`
+- `Image Sample`
+- `For Each Light`
 
 !!! tip
-For detailed parameters and usage, refer to Blender's official shader node documentation combined with NPR Port extensions.
+For detailed parameters and usage, refer to Blender's official shader node documentation together with the NPR Port extensions.
