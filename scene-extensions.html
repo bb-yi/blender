@@ -516,7 +516,19 @@
   <br>
 </div>
 
-<h3 id="_4">可配置内容<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h3>
+<h1 id="scene-eevee_2">一、Scene 级 Eevee 扩展<a class="headerlink" href="#scene-eevee_2" title="Permanent link">&para;</a></h1>
+<h2 id="1-render-textures_1">1. Render Textures<a class="headerlink" href="#1-render-textures_1" title="Permanent link">&para;</a></h2>
+<h3 id="_4">功能说明<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h3>
+<p><code>Render Textures</code> 是场景级的 Eevee 额外渲染纹理系统。</p>
+<p>它允许场景预先维护最多 <code>4</code> 个 Render Texture 槽位，每个槽位都可以指定一个相机和一个输出类型，把该相机视角下的场景结果先渲染成纹理，再在普通物体材质中通过 <code>Render Texture</code> 节点采样。</p>
+<h3 id="_5">面板入口<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h3>
+<p><code>Scene Properties &gt; Render Textures</code></p>
+<div align="center">
+  <img src="images/SnowShot_2026-03-28_04-37-13.png" alt="alt text" style="border-radius: 10px;">
+  <br>
+</div>
+
+<h3 id="_6">可配置内容<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h3>
 <p>每个 Render Texture 条目当前支持：</p>
 <table>
 <thead>
@@ -556,7 +568,7 @@
 </tr>
 </tbody>
 </table>
-<h3 id="_5">基本使用方法<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h3>
+<h3 id="_7">基本使用方法<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h3>
 <ol>
 <li>打开 <code>Scene Properties &gt; Render Textures</code></li>
 <li>新建一个条目</li>
@@ -569,51 +581,52 @@
 <p class="admonition-title">提示</p>
 <p>非常适合用于制作实时反射、屏幕空间效果和动态纹理。</p>
 </div>
-<h2 id="filter-materials">Filter Materials<a class="headerlink" href="#filter-materials" title="Permanent link">&para;</a></h2>
-<h3 id="_6">功能说明<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h3>
+<h2 id="2-filter-materials">2. Filter Materials<a class="headerlink" href="#2-filter-materials" title="Permanent link">&para;</a></h2>
+<h3 id="_8">功能说明<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h3>
 <p>它是一套场景级的 Eevee 全屏滤镜栈。每个条目都是一个 <code>Filter</code> 域材质，按列表顺序依次对当前帧进行处理。</p>
-<h3 id="_7">面板入口<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h3>
+<h3 id="_9">面板入口<a class="headerlink" href="#_9" title="Permanent link">&para;</a></h3>
 <p><code>Scene Properties &gt; Filter Materials</code></p>
+<p>节点树入口：着色器节点编辑器 &gt; 着色器类型 &gt; Filter</p>
 <div align="center">
   <img src="images/SnowShot_2026-03-28_04-41-53.png" alt="alt text" style="border-radius: 10px;">
   <br>
 </div>
 
-<p>节点树入口：着色器节点编辑器 &gt; 着色器类型 &gt; Filter</p>
 <div align="center">
   <img src="images/SnowShot_2026-03-28_04-42-42.png" alt="alt text" style="border-radius: 10px;">
   <br>
 </div>
 
-<h3 id="_8">基本使用方法<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h3>
+<h3 id="_10">基本使用方法<a class="headerlink" href="#_10" title="Permanent link">&para;</a></h3>
 <ol>
 <li>打开 <code>Scene Properties &gt; Filter Materials</code></li>
-<li>新建一个条目</li>
+<li>新建一个条目，或者直接点 <code>New Filter Material</code></li>
 <li>选中的材质必须是 <code>Filter</code> 域材质</li>
 <li>打开 Shader Editor，把顶部 <code>Shader Type</code> 切换到 <code>Filter</code></li>
-<li>使用 <code>Scene Color</code> 读取场景数据</li>
-<li>用 <code>Filter Output</code> 输出结果</li>
+<li>在滤镜材质里使用 <code>Scene Color</code> 读取场景数据，用 <code>Filter Output</code> 输出结果</li>
 <li>通过 <code>Execution Stage</code> 选择滤镜执行位置</li>
 </ol>
-<h3 id="_9">执行阶段<a class="headerlink" href="#_9" title="Permanent link">&para;</a></h3>
+<h3 id="_11">重要说明<a class="headerlink" href="#_11" title="Permanent link">&para;</a></h3>
 <ul>
-<li><code>Before Volume Fog</code> - 在体积雾处理前执行</li>
-<li><code>Before Depth of Field</code> - 在景深前执行</li>
-<li><code>Before Composite</code> - 在合成器前执行</li>
+<li>
+<p><code>Scene Color</code> 节点的默认采样坐标为 <code>纹理坐标</code> 节点的 <code>Window</code> 输出</p>
+</li>
+<li>
+<p>支持 <code>AOV</code> 输入</p>
+</li>
+<li>
+<p><code>Execution Stage</code> 滤镜插入位置：</p>
+</li>
+<li>
+<p><code>Before Volume Fog</code>：在体积雾处理前执行</p>
+</li>
+<li>
+<p><code>Before Depth of Field</code>：在景深前执行</p>
+</li>
+<li>
+<p><code>Before Composite</code>：在合成器前执行</p>
+</li>
 </ul>
-<div class="admonition warning">
-<p class="admonition-title">注意</p>
-<p>Filter Materials 只能使用 Filter 域材质。</p>
-</div>
-<div class="admonition example">
-<p class="admonition-title">使用场景</p>
-<ul>
-<li>色彩分级和色调映射</li>
-<li>屏幕空间效果（如边界检测、卡通渲染）</li>
-<li>动态模糊和运动矢量效果</li>
-<li>后期降噪和锐化处理</li>
-</ul>
-</div>
 
 
 

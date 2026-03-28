@@ -385,6 +385,87 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#portal-in-portal-out" class="md-nav__link">
+    <span class="md-ellipsis">
+      Portal In / Portal Out
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#render-texture-node" class="md-nav__link">
+    <span class="md-ellipsis">
+      Render Texture Node
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#screenspace-info-node" class="md-nav__link">
+    <span class="md-ellipsis">
+      Screenspace Info Node
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#world-environment-node" class="md-nav__link">
+    <span class="md-ellipsis">
+      World Environment Node
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#world-to-tangent-node" class="md-nav__link">
+    <span class="md-ellipsis">
+      World To Tangent Node
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#basis-transform-node" class="md-nav__link">
+    <span class="md-ellipsis">
+      Basis Transform Node
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bevel-node" class="md-nav__link">
+    <span class="md-ellipsis">
+      Bevel Node
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#curvature-node" class="md-nav__link">
+    <span class="md-ellipsis">
+      Curvature Node
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#shader-info-node" class="md-nav__link">
+    <span class="md-ellipsis">
+      Shader Info Node
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#light-info-node" class="md-nav__link">
     <span class="md-ellipsis">
       Light Info Node
@@ -517,6 +598,87 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#portal-in-portal-out" class="md-nav__link">
+    <span class="md-ellipsis">
+      Portal In / Portal Out
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#render-texture-node" class="md-nav__link">
+    <span class="md-ellipsis">
+      Render Texture Node
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#screenspace-info-node" class="md-nav__link">
+    <span class="md-ellipsis">
+      Screenspace Info Node
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#world-environment-node" class="md-nav__link">
+    <span class="md-ellipsis">
+      World Environment Node
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#world-to-tangent-node" class="md-nav__link">
+    <span class="md-ellipsis">
+      World To Tangent Node
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#basis-transform-node" class="md-nav__link">
+    <span class="md-ellipsis">
+      Basis Transform Node
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#bevel-node" class="md-nav__link">
+    <span class="md-ellipsis">
+      Bevel Node
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#curvature-node" class="md-nav__link">
+    <span class="md-ellipsis">
+      Curvature Node
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#shader-info-node" class="md-nav__link">
+    <span class="md-ellipsis">
+      Shader Info Node
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#light-info-node" class="md-nav__link">
     <span class="md-ellipsis">
       Light Info Node
@@ -560,73 +722,150 @@
 
 
 <h1 id="extended-shader-nodes">Extended Shader Nodes<a class="headerlink" href="#extended-shader-nodes" title="Permanent link">&para;</a></h1>
-<p>This page documents 20+ new shader nodes added to Blender 5.1 NPR Port.</p>
+<p>This page documents the major shader nodes added to Blender 5.1 NPR Port.</p>
 <h2 id="render-info-node">Render Info Node<a class="headerlink" href="#render-info-node" title="Permanent link">&para;</a></h2>
-<p><strong>Purpose:</strong> Access post-render image properties</p>
+<p><strong>Purpose:</strong> Access render target properties.</p>
 <p><strong>Outputs:</strong>
 - <code>Frag Coord</code> - Fragment/pixel coordinates (X, Y, Z, W)
-- <code>Width</code> - Render target width (pixels)
-- <code>Height</code> - Render target height (pixels)</p>
+- <code>Width</code> - Render target width in pixels
+- <code>Height</code> - Render target height in pixels</p>
 <p><strong>Usage:</strong> Use in calculations that require screen resolution or pixel position.</p>
 <hr />
 <h2 id="scene-time-node">Scene Time Node<a class="headerlink" href="#scene-time-node" title="Permanent link">&para;</a></h2>
-<p><strong>Purpose:</strong> Access time-based values for animation</p>
+<p><strong>Purpose:</strong> Access time-based values for animation.</p>
+<p><strong>Inputs:</strong>
+- <code>Scale</code> - A value used to scale frame numbers</p>
 <p><strong>Outputs:</strong>
 - <code>Frame</code> - Current frame number
-- <code>Seconds</code> - Elapsed time (seconds)
-- <code>Timeline</code> - Timeline position
-- <code>Scaled Frame</code> - Custom-scaled frame number</p>
+- <code>Seconds</code> - Elapsed time in seconds
+- <code>Timeline</code> - Timeline position mapped to 0-1
+- <code>Scaled Frame</code> - Frame number after scaling</p>
 <p><strong>Usage:</strong> Create time-based animations and effects.</p>
 <hr />
 <h2 id="screen-derivative-node">Screen Derivative Node<a class="headerlink" href="#screen-derivative-node" title="Permanent link">&para;</a></h2>
-<p><strong>Purpose:</strong> Detect edges and gradients in screen space</p>
-<p><strong>Inputs:</strong>
-- <code>Value</code> - Input to differentiate</p>
+<p><strong>Purpose:</strong> Detect edges and gradients in screen space.</p>
 <p><strong>Outputs:</strong>
 - <code>DDX</code> - X direction derivative
 - <code>DDY</code> - Y direction derivative
-- <code>DDXY</code> - Combined derivatives</p>
-<p><strong>Usage:</strong> Edge detection, gradient mapping, post-process effects.</p>
+- <code>DDXY</code> - Combined DDX + DDY</p>
+<p><strong>Usage:</strong> Edge detection, gradient mapping, and post-process effects.</p>
+<hr />
+<h2 id="portal-in-portal-out">Portal In / Portal Out<a class="headerlink" href="#portal-in-portal-out" title="Permanent link">&para;</a></h2>
+<p><strong>Purpose:</strong> Organize node links with named portal values.</p>
+<p><strong>Usage:</strong>
+- <code>Portal In</code> stores a named value in the current node tree.
+- <code>Portal Out</code> retrieves that value later in the same tree.</p>
+<p><strong>Limits:</strong>
+- Works only within the same shader node tree.
+- Cannot cross node trees or node groups automatically.</p>
+<hr />
+<h2 id="render-texture-node">Render Texture Node<a class="headerlink" href="#render-texture-node" title="Permanent link">&para;</a></h2>
+<p><strong>Purpose:</strong> Sample a render texture configured in scene settings.</p>
+<p><strong>Inputs:</strong>
+- <code>Vector</code></p>
+<p><strong>Outputs:</strong>
+- <code>Color</code>
+- <code>Alpha</code></p>
+<hr />
+<h2 id="screenspace-info-node">Screenspace Info Node<a class="headerlink" href="#screenspace-info-node" title="Permanent link">&para;</a></h2>
+<p><strong>Purpose:</strong> Access color and depth buffers from the current render.</p>
+<p><strong>Inputs:</strong>
+- <code>View Position</code></p>
+<p><strong>Outputs:</strong>
+- <code>Scene Color</code>
+- <code>Scene Depth</code></p>
+<hr />
+<h2 id="world-environment-node">World Environment Node<a class="headerlink" href="#world-environment-node" title="Permanent link">&para;</a></h2>
+<p><strong>Purpose:</strong> Sample Eevee world environment color.</p>
+<p><strong>Inputs:</strong>
+- <code>Direction</code></p>
+<p><strong>Outputs:</strong>
+- <code>Color</code></p>
+<hr />
+<h2 id="world-to-tangent-node">World To Tangent Node<a class="headerlink" href="#world-to-tangent-node" title="Permanent link">&para;</a></h2>
+<p><strong>Purpose:</strong> Convert a world-space direction into tangent space.</p>
+<p><strong>Inputs:</strong>
+- <code>Vector</code></p>
+<p><strong>Outputs:</strong>
+- <code>Vector</code></p>
+<hr />
+<h2 id="basis-transform-node">Basis Transform Node<a class="headerlink" href="#basis-transform-node" title="Permanent link">&para;</a></h2>
+<p><strong>Purpose:</strong> Transform points, vectors, or normals between custom bases.</p>
+<p><strong>Inputs:</strong>
+- <code>Vector</code>
+- <code>Origin</code>
+- <code>X Axis</code>
+- <code>Y Axis</code>
+- <code>Z Axis</code></p>
+<p><strong>Outputs:</strong>
+- <code>Vector</code></p>
+<hr />
+<h2 id="bevel-node">Bevel Node<a class="headerlink" href="#bevel-node" title="Permanent link">&para;</a></h2>
+<p><strong>Purpose:</strong> Generate an approximate beveled normal in Eevee.</p>
+<p><strong>Inputs:</strong>
+- <code>Radius</code>
+- <code>Normal</code></p>
+<p><strong>Outputs:</strong>
+- <code>Normal</code></p>
+<hr />
+<h2 id="curvature-node">Curvature Node<a class="headerlink" href="#curvature-node" title="Permanent link">&para;</a></h2>
+<p><strong>Purpose:</strong> Provide curvature and rim outputs from screen-space data.</p>
+<p><strong>Inputs:</strong>
+- <code>Samples</code>
+- <code>Sample Radius</code>
+- <code>Thickness</code>
+- <code>Scale</code></p>
+<p><strong>Outputs:</strong>
+- <code>Scene Curvature</code>
+- <code>Scene Rim</code></p>
+<hr />
+<h2 id="shader-info-node">Shader Info Node<a class="headerlink" href="#shader-info-node" title="Permanent link">&para;</a></h2>
+<p><strong>Purpose:</strong> Provide shading-related information such as diffuse, shadow, and ambient lighting.</p>
+<p><strong>Inputs:</strong>
+- <code>World Position</code>
+- <code>Normal</code></p>
+<p><strong>Outputs:</strong>
+- <code>Diffuse Shading</code>
+- <code>Shadow</code>
+- <code>Ambient Lighting</code>
+- <code>Half-Lambert Factor</code></p>
 <hr />
 <h2 id="light-info-node">Light Info Node<a class="headerlink" href="#light-info-node" title="Permanent link">&para;</a></h2>
-<p><strong>Purpose:</strong> Access per-light information</p>
-<p><strong>Inputs:</strong>
-- <code>Light Type</code> - Filter: All / Sun / Point / Spot</p>
+<p><strong>Purpose:</strong> Access per-light information.</p>
 <p><strong>Outputs:</strong>
-- <code>Direction</code> - Light direction
-- <code>Distance</code> - Distance to light source
-- <code>Color</code> - Light color
-- <code>Energy</code> - Light intensity</p>
-<p><strong>Usage:</strong> Per-light calculations, conditional lighting effects.</p>
+- <code>Color</code>
+- <code>Power</code>
+- <code>Type</code>
+- <code>Position</code>
+- <code>Direction</code>
+- <code>Radius</code>
+- <code>Spot Size</code>
+- <code>Sun Angle</code></p>
+<p><strong>Usage:</strong> Use <code>For Each Light</code> for per-light workflows.</p>
 <hr />
 <h2 id="scene-color-node">Scene Color Node<a class="headerlink" href="#scene-color-node" title="Permanent link">&para;</a></h2>
-<p><strong>Purpose:</strong> Read scene data in filter materials</p>
+<p><strong>Purpose:</strong> Read scene data in filter materials.</p>
 <p><strong>Inputs:</strong>
-- <code>UV</code>/<code>Coordinate</code> - Sampling coordinates (default: screen space)</p>
+- <code>UV</code> / <code>Coordinate</code></p>
 <p><strong>Outputs:</strong>
-- <code>Color</code> - Scene color at that coordinate
-- <code>Depth</code> - Scene depth value
-- <code>Normal</code> - Scene normal data</p>
+- <code>Color</code>
+- <code>Depth</code>
+- <code>Normal</code></p>
 <p><strong>Parameters:</strong>
 - <code>Source</code> - Color / Depth / Normal / Emission / Environment</p>
 <p><strong>Usage:</strong> Post-process effects, reflections, depth-based effects.</p>
 <hr />
 <h2 id="additional-nodes">Additional Nodes<a class="headerlink" href="#additional-nodes" title="Permanent link">&para;</a></h2>
-<p><strong>Other important nodes:</strong></p>
 <ul>
-<li><strong>Portal In/Out</strong> - Portal utility nodes</li>
-<li><strong>Screenspace Info</strong> - View space information</li>
-<li><strong>World Environment</strong> - Access environment</li>
-<li><strong>World To Tangent</strong> - Coordinate transformation</li>
-<li><strong>Bevel</strong> - Edge bevel processing</li>
-<li><strong>Curvature</strong> - Output surface curvature</li>
-<li><strong>Shader Info</strong> - Shader parameter access</li>
-<li><strong>Render Texture</strong> - Sample pre-rendered texture</li>
+<li><code>NPR Input</code></li>
+<li><code>NPR Refraction</code></li>
+<li><code>Image Sample</code></li>
+<li><code>For Each Light</code></li>
 </ul>
 <div class="admonition tip">
 <p class="admonition-title">Tip</p>
 </div>
-<p>For detailed parameters and usage, refer to Blender's official shader node documentation combined with NPR Port extensions.</p>
+<p>For detailed parameters and usage, refer to Blender's official shader node documentation together with the NPR Port extensions.</p>
 
 
 

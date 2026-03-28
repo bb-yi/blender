@@ -421,72 +421,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#other-npr-nodes" class="md-nav__link">
-    <span class="md-ellipsis">
-      Other NPR Nodes
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Other NPR Nodes">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#image-sample" class="md-nav__link">
-    <span class="md-ellipsis">
-      Image Sample
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#npr-refraction" class="md-nav__link">
-    <span class="md-ellipsis">
-      NPR Refraction
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#built-in-node-groups" class="md-nav__link">
-    <span class="md-ellipsis">
-      Built-in Node Groups
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#quick-workflow-example" class="md-nav__link">
-    <span class="md-ellipsis">
-      Quick Workflow Example
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Quick Workflow Example">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#simple-toon-shading-setup" class="md-nav__link">
-    <span class="md-ellipsis">
-      Simple Toon Shading Setup
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -585,72 +519,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#other-npr-nodes" class="md-nav__link">
-    <span class="md-ellipsis">
-      Other NPR Nodes
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Other NPR Nodes">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#image-sample" class="md-nav__link">
-    <span class="md-ellipsis">
-      Image Sample
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#npr-refraction" class="md-nav__link">
-    <span class="md-ellipsis">
-      NPR Refraction
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#built-in-node-groups" class="md-nav__link">
-    <span class="md-ellipsis">
-      Built-in Node Groups
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#quick-workflow-example" class="md-nav__link">
-    <span class="md-ellipsis">
-      Quick Workflow Example
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Quick Workflow Example">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#simple-toon-shading-setup" class="md-nav__link">
-    <span class="md-ellipsis">
-      Simple Toon Shading Setup
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -693,8 +561,34 @@
 <hr />
 <h2 id="for-each-light-node">For Each Light Node<a class="headerlink" href="#for-each-light-node" title="Permanent link">&para;</a></h2>
 <p><strong>Purpose:</strong> Process rendering for each light source in the scene</p>
+<h1 id="npr-tree-workflow_1">NPR Tree Workflow<a class="headerlink" href="#npr-tree-workflow_1" title="Permanent link">&para;</a></h1>
+<h2 id="overview_1">Overview<a class="headerlink" href="#overview_1" title="Permanent link">&para;</a></h2>
+<p><code>NPR Tree</code> is a node tree attached after a regular material to perform color post-processing, allowing shader output to be stylized in color form.</p>
+<h3 id="key-features_1">Key Features<a class="headerlink" href="#key-features_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Per-light processing using <code>For Each Light</code></li>
+<li>Real-time preview in viewport</li>
+<li>Built-in node groups for effects (shadows, toon, etc.)</li>
+<li>Complete shading control</li>
+</ul>
+<hr />
+<h2 id="npr-input-node_1">NPR Input Node<a class="headerlink" href="#npr-input-node_1" title="Permanent link">&para;</a></h2>
+<p><strong>Purpose:</strong> Main input for NPR Tree processing</p>
+<p><strong>Outputs (9 total):</strong>
+- <code>Base Color</code> - Material base color
+- <code>Metallic</code> - Metallic property
+- <code>Roughness</code> - Surface roughness
+- <code>Normal</code> - Surface normal
+- <code>Alpha</code> - Transparency
+- <code>Emission</code> - Self-emission color
+- <code>IOR</code> - Index of refraction
+- <code>Light Direction</code> - Light source direction
+- <code>Specular</code> - Specular reflection strength</p>
+<hr />
+<h2 id="for-each-light-node_1">For Each Light Node<a class="headerlink" href="#for-each-light-node_1" title="Permanent link">&para;</a></h2>
+<p><strong>Purpose:</strong> Process rendering for each light source in the scene</p>
 <p><strong>Outputs:</strong>
-- <code>Light Index</code> - Current light ID (starting from 0)
+- <code>Light Index</code> - Current light ID starting from 0
 - <code>Light Direction</code> - Direction from surface to light source
 - <code>Light Distance</code> - Distance to light source
 - <code>Light Color</code> - Light color value
@@ -717,31 +611,31 @@
 </ul>
 <h3 id="npr-refraction">NPR Refraction<a class="headerlink" href="#npr-refraction" title="Permanent link">&para;</a></h3>
 <ul>
-<li>Control refraction in NPR pipeline</li>
+<li>Control refraction in the NPR pipeline</li>
 <li>Parameters: IOR, Roughness</li>
 </ul>
 <h3 id="built-in-node-groups">Built-in Node Groups<a class="headerlink" href="#built-in-node-groups" title="Permanent link">&para;</a></h3>
 <ul>
-<li><strong>Cavity</strong> - Shadow-based shading</li>
-<li><strong>Kuwahara Filter</strong> - Artistic style smoothing</li>
-<li><strong>Curvature Shading</strong> - Edge-based effects</li>
-<li><strong>Shading Models</strong> - Pre-built toon/stylized shaders</li>
+<li><code>Cavity</code> - Shadow-based shading</li>
+<li><code>Kuwahara Filter</code> - Artistic smoothing</li>
+<li><code>Curvature Shading</code> - Edge-based effects</li>
+<li><code>Shading Models</code> - Prebuilt toon/stylized shaders</li>
 </ul>
 <hr />
 <h2 id="quick-workflow-example">Quick Workflow Example<a class="headerlink" href="#quick-workflow-example" title="Permanent link">&para;</a></h2>
 <h3 id="simple-toon-shading-setup">Simple Toon Shading Setup<a class="headerlink" href="#simple-toon-shading-setup" title="Permanent link">&para;</a></h3>
 <ol>
 <li>Create a material with <code>Principled BSDF</code></li>
-<li>Add <code>NPR Tree</code> node</li>
-<li>Inside NPR Tree (Ctrl+Tab):</li>
+<li>Add an <code>NPR Tree</code> node</li>
+<li>In the NPR Tree (Ctrl+Tab):</li>
 <li>Connect <code>NPR Input</code> to <code>For Each Light</code></li>
 <li>Sample lighting properties</li>
 <li>Apply toon shading from node groups</li>
 <li>Merge all light contributions</li>
-<li>Output results to material</li>
-<li>Render in viewport or final render</li>
+<li>Output the result to the material</li>
+<li>Render in viewport or final output</li>
 </ol>
-<p><strong>Tip:</strong> Test with different light configurations for best results.</p>
+<p><strong>Tip:</strong> Test with different light setups for best results.</p>
 <div class="admonition warning">
 <p class="admonition-title">Warning</p>
 </div>
