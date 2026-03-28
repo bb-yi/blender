@@ -4,91 +4,117 @@
 
 ### Feature Description
 
-`Render Textures` is a scene-level Eevee additional render texture system.
+`Render Textures` is a scene-level Eevee extra render texture system.
 
-It allows the scene to maintain up to `4` Render Texture slots, each of which can specify a camera and an output type. The scene result from that camera perspective is first rendered into a texture, then sampled in regular object materials through the `Render Texture` node.
+It allows the scene to maintain up to `4` Render Texture slots in advance. Each slot can specify a camera and an output type, render the scene from that camera into a texture first, and then let regular object materials sample it through the `Render Texture` node.
 
 ### Panel Entry Point
 
 `Scene Properties > Render Textures`
 
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_04-37-13.png" alt="Render Textures Panel" style="border-radius: 10px;">
+    <br>
+</div>
+
 ### Configurable Parameters
 
 Each Render Texture entry currently supports:
 
-| Parameter | Description |
-|-----------|-------------|
-| `Name` | Identifier name of the texture entry, used for referencing in nodes |
-| `Enabled` | Enable or disable rendering of this texture |
-| `Source` | Choose what to capture: Color / Depth / Normal |
-| `Camera` | Specify the camera for rendering this texture |
-| `Resolution X/Y` | Output texture pixel dimensions |
-| `Update Mode` | Update frequency: Every Sample / Every Frame / Manual |
-| `Format` | Output precision: RGBA16F / RGBA32F / R16F / R32F |
+- `Name`: Identifier of the texture entry, used for node references
+
+- `Enabled`: Enable or disable rendering of this texture
+
+- `Source`: Select what to capture
+
+    - `Color`: Capture the final Eevee color
+
+    - `Depth`: Capture linear depth
+
+    - `Normal`: Capture normals
+
+- `Camera`: Camera used to render this texture
+
+- `Resolution X / Y`: Output texture size in pixels; higher resolution uses more memory
+
+- `Update Mode`: Controls how often the texture is updated
+
+    - `Every Sample`: Update on every sample
+
+    - `Every Frame`: Update once per frame
+
+    - `Manual`: Update manually
+
+- `Format`: Output data precision
+
+    - `RGBA16F`: 16-bit floating-point color, balanced quality and performance
+
+    - `RGBA32F`: 32-bit high-precision color, requires more VRAM
+
+    - `R16F`: 16-bit floating-point depth value
+
+    - `R32F`: 32-bit high-precision depth value
 
 ### Basic Usage
 
-1. Open `Scene Properties > Render Textures`
-2. Create a new entry
-3. Select Source, Camera, resolution, and format
-4. Add a `Render Texture` node in object materials
-5. Select the corresponding entry in the node panel
-6. Use the node output in material calculations
+1. Open `Scene Properties > Render Textures`.
 
-!!! tip "Tip"
-        Perfect for creating real-time reflections, screen-space effects, and dynamic textures.
+2. Create a `Render Texture` entry.
+
+3. Select `Source`, `Camera`, resolution, update mode, and format.
+
+4. Add `Add > Texture > Render Texture` in a regular object material.
+
+5. Select the matching `Render Texture` entry in the node panel.
+
+6. Use the node's `Color` / `Alpha` output in later material calculations.
 
 ## 2. Filter Materials
 
 ### Feature Description
 
-It is a scene-level Eevee full-screen filter stack. Each entry is a `Filter` domain material that processes the current frame in list order.
+This is a scene-level Eevee full-screen filter stack. Each entry is a `Filter` domain material, and the current frame is processed in list order.
 
 ### Panel Entry Point
 
 `Scene Properties > Filter Materials`
 
-Node tree entry point: Shader Node Editor > Shader Type > Filter
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_04-41-53.png" alt="Filter Materials Panel" style="border-radius: 10px;">
+    <br>
+</div>
+
+Node tree entry: Shader Node Editor > Shader Type > Filter
+
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_04-42-42.png" alt="Filter Shader Type" style="border-radius: 10px;">
+    <br>
+</div>
 
 ### Basic Usage
 
-1. Open `Scene Properties > Filter Materials`
-2. Create a new entry or click `New Filter Material`
-3. The selected material must be a `Filter` domain material
-4. Open the Shader Editor and switch the top `Shader Type` to `Filter`
-5. Use `Scene Color` in the filter material to read scene data, then output through `Filter Output`
-6. Choose the execution location through `Execution Stage`
+1. Open `Scene Properties > Filter Materials`.
+
+2. Create an entry, or click `New Filter Material` directly.
+
+3. The selected material must be a `Filter` domain material.
+
+4. Open Shader Editor and switch the top `Shader Type` to `Filter`.
+
+5. Use `Scene Color` to read scene data in the filter material, and output with `Filter Output`.
+
+6. Use `Execution Stage` to choose where the filter runs.
 
 ### Important Notes
 
-- The default sampling coordinate for `Scene Color` is the `Window` output of the `Texture Coordinate` node
+- The default sampling coordinate of `Scene Color` is the `Window` output of the `Texture Coordinate` node
 
 - `AOV` input is supported
 
-- Execution stages:
+- `Execution Stage` insertion points:
 
-    - `Before Volume Fog`
+    - `Before Volume Fog`: Execute before volume fog processing
 
-    - `Before Depth of Field`
+    - `Before Depth of Field`: Execute before depth of field
 
-    - `Before Composite`
-3. The selected material must be a `Filter` domain material
-4. Open Shader Editor and switch the top `Shader Type` to `Filter`
-5. Use `Scene Color` to read scene data
-6. Output the result with `Filter Output`
-7. Select filter execution position via `Execution Stage`
-
-### Execution Stages
-
-- `Before Volume Fog` - Execute before volume fog processing
-- `Before Depth of Field` - Execute before depth of field
-- `Before Composite` - Execute before compositing
-
-!!! warning "Note"
-    Filter Materials can only use Filter domain materials.
-
-!!! example "Use Cases"
-    - Color grading and tone mapping
-    - Screen-space effects (e.g., edge detection, toon rendering)
-    - Motion blur and motion vector effects
-    - Post-process denoising and sharpening
+    - `Before Composite`: Execute before the compositor

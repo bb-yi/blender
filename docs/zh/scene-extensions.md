@@ -1,4 +1,4 @@
-# 一、Scene 级 Eevee 扩展
+# Scene 级 Eevee 扩展
 
 ### 1\. Render Textures
 

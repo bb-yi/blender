@@ -33,11 +33,11 @@ theme:
     - toc.follow
 
 nav:
-    - Home: index.md
-    - Scene Extensions: scene-extensions.md
-    - Extended Nodes: extended-nodes.md
-    - NPR Workflow: npr-workflow.md
-    - Interface & Settings: interface-guide.md
+  - Home: index.md
+  - Extended Nodes: extended-nodes.md
+  - NPR Workflow: npr-workflow.md
+  - Interface & Settings: interface-guide.md
+  - Scene Extensions: scene-extensions.md
 
 markdown_extensions:
     - admonition

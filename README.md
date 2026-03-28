@@ -29,14 +29,24 @@ pip install mkdocs mkdocs-material
 
 ### 2. 本地预览
 
-在项目根目录执行以下命令启动本地服务器：
+如果你要看和 GitHub Pages 部署后一模一样的路径与语言切换行为，请使用：
 
-```bash
+```powershell
 cd blender-5.1-npr-doc-site
-mkdocs serve
+powershell -ExecutionPolicy Bypass -File .\preview-ghpages.ps1
 ```
 
-然后在浏览器中打开 `http://localhost:8000` 查看网站。
+然后在浏览器中打开 `http://127.0.0.1:8000/blender/`。
+
+这个方式会先构建双语站点，再按 `/blender/` 路径提供本地静态预览，因此和线上部署行为一致。
+
+如果只是临时调试单一语言页面，也可以使用：
+
+```powershell
+mkdocs serve -f mkdocs.yml
+```
+
+但这种方式不会完整模拟 GitHub Pages 的 `/blender/` 路径和双语切换。
 
 ### 3. 生成静态网站
 

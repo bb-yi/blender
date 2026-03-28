@@ -33,11 +33,11 @@ theme:
     - toc.follow
 
 nav:
-    - 首页: index.md
-    - Scene 级 Eevee 扩展: scene-extensions.md
-    - 扩展着色器节点: extended-nodes.md
-    - NPR Tree 工作流: npr-workflow.md
-    - 界面与设置: interface-guide.md
+  - 首页: index.md
+  - 扩展着色器节点: extended-nodes.md
+  - NPR Tree 工作流: npr-workflow.md
+  - 界面与设置: interface-guide.md
+  - Scene 级 Eevee 扩展: scene-extensions.md
 
 markdown_extensions:
     - admonition

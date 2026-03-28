@@ -2,13 +2,14 @@
 
 ## Overview
 
-NPR Tree is a flexible, node-based non-photorealistic rendering pipeline. It supports custom line rendering, toon shading, and artistic effects.
+`NPR Tree` is a node tree attached after a regular object material to perform color post-processing, allowing shader output to be stylized in color form.
 
 ### Key Features
+
 - Per-light processing using `For Each Light`
-- Real-time preview in viewport
-- Built-in node groups for effects (shadows, toon, etc.)
-- Complete shading control
+- Real-time preview in the viewport
+- Built-in node groups for effects such as shadows and toon shading
+- Full shader control
 
 ---
 
@@ -22,56 +23,21 @@ NPR Tree is a flexible, node-based non-photorealistic rendering pipeline. It sup
 - `Roughness` - Surface roughness
 - `Normal` - Surface normal
 - `Alpha` - Transparency
-- `Emission` - Self-emission color
+- `Emission` - Emission color
 - `IOR` - Index of refraction
-- `Light Direction` - Light source direction
-- `Specular` - Specular reflection strength
+- `Light Direction` - Light direction
+- `Specular` - Specular strength
 
 ---
 
 ## For Each Light Node
 
-**Purpose:** Process rendering for each light source in the scene
-# NPR Tree Workflow
-
-## Overview
-
-`NPR Tree` is a node tree attached after a regular material to perform color post-processing, allowing shader output to be stylized in color form.
-
-### Key Features
-
-- Per-light processing using `For Each Light`
-- Real-time preview in viewport
-- Built-in node groups for effects (shadows, toon, etc.)
-- Complete shading control
-
----
-
-## NPR Input Node
-
-**Purpose:** Main input for NPR Tree processing
-
-**Outputs (9 total):**
-- `Base Color` - Material base color
-- `Metallic` - Metallic property
-- `Roughness` - Surface roughness
-- `Normal` - Surface normal
-- `Alpha` - Transparency
-- `Emission` - Self-emission color
-- `IOR` - Index of refraction
-- `Light Direction` - Light source direction
-- `Specular` - Specular reflection strength
-
----
-
-## For Each Light Node
-
-**Purpose:** Process rendering for each light source in the scene
+**Purpose:** Process rendering for each light in the scene
 
 **Outputs:**
-- `Light Index` - Current light ID starting from 0
-- `Light Direction` - Direction from surface to light source
-- `Light Distance` - Distance to light source
+- `Light Index` - Current light ID, starting from 0
+- `Light Direction` - Direction from the surface toward the light
+- `Light Distance` - Distance to the light
 - `Light Color` - Light color value
 - `Light Energy` - Light intensity
 
@@ -84,14 +50,14 @@ NPR Input → For Each Light → [Calculate per-light effects]
 **Common Uses:**
 - Toon shading with multiple light tones
 - Per-light cel shading
-- Multi-pass lighting effects
+- Multi-channel lighting effects
 
 ---
 
 ## Other NPR Nodes
 
 ### Image Sample
-- Sample textures within NPR Tree
+- Sample textures inside NPR Tree
 - Input: Image, UV coordinates
 - Output: Color, Alpha
 
@@ -103,7 +69,7 @@ NPR Input → For Each Light → [Calculate per-light effects]
 - `Cavity` - Shadow-based shading
 - `Kuwahara Filter` - Artistic smoothing
 - `Curvature Shading` - Edge-based effects
-- `Shading Models` - Prebuilt toon/stylized shaders
+- `Shading Models` - Prebuilt toon / stylized shaders
 
 ---
 
@@ -113,15 +79,15 @@ NPR Input → For Each Light → [Calculate per-light effects]
 
 1. Create a material with `Principled BSDF`
 2. Add an `NPR Tree` node
-3. In the NPR Tree (Ctrl+Tab):
+3. In NPR Tree (`Ctrl+Tab`):
    - Connect `NPR Input` to `For Each Light`
    - Sample lighting properties
-   - Apply toon shading from node groups
+   - Apply toon shading from built-in node groups
    - Merge all light contributions
 4. Output the result to the material
-5. Render in viewport or final output
+5. Render in the viewport or final render
 
-**Tip:** Test with different light setups for best results.
+**Tip:** Testing with different light setups usually gives better results.
 
 !!! warning
-NPR Tree is Eevee-exclusive. Not available in Cycles.
+    NPR Tree is Eevee-exclusive. Not available in Cycles.

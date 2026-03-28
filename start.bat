@@ -34,19 +34,20 @@ if errorlevel 1 (
 
 echo.
 echo 选择操作:
-echo 1. 启动本地预览服务 (Ctrl+C 停止)
+echo 1. 启动本地预览服务 (与 GitHub Pages 路径一致)
 echo 2. 生成静态网站
-echo 3. 退出
+echo 3. 使用 MkDocs 单站预览（仅调试单语言）
+echo 4. 退出
 echo.
 
-set /p choice="请选择 (1-3): "
+set /p choice="请选择 (1-4): "
 
 if "%choice%"=="1" (
     echo.
-    echo 启动本地服务器...
-    echo 请在浏览器中打开: http://localhost:8000
+    echo 启动与 GitHub Pages 一致的本地预览...
+    echo 请在浏览器中打开: http://127.0.0.1:8000/blender/
     echo.
-    python -m mkdocs serve
+    powershell -ExecutionPolicy Bypass -File preview-ghpages.ps1
 ) else if "%choice%"=="2" (
     echo.
     echo 生成静态网站...
@@ -58,6 +59,12 @@ if "%choice%"=="1" (
         echo.
     )
 ) else if "%choice%"=="3" (
+    echo.
+    echo 启动 MkDocs 单站预览...
+    echo 中文: http://127.0.0.1:8000
+    echo.
+    python -m mkdocs serve -f mkdocs.yml
+) else if "%choice%"=="4" (
     exit /b 0
 ) else (
     echo 无效的选择

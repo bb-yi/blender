@@ -1,4 +1,4 @@
-# 二、主要扩展节点
+# 主要扩展节点
 
 **1. Eevee 通用辅助节点**
 
@@ -15,13 +15,16 @@
 
 #### 输出
 
-- `Frag Coord`：屏幕空间坐标（xy 归一化到 0-1，z 为深度）
+- `Frag Coord`：屏幕空间坐标（xy归一化到0-1，z为深度）
+
 - `Width`：渲染区域宽度
+
 - `Height`：渲染区域高度
 
 #### 作用
 
 提供当前 Eevee 渲染窗口的坐标和像素尺寸。
+
 
 ### Scene Time
 
@@ -34,357 +37,285 @@
 	<br>
 </div>
 
-# 二、主要扩展节点
+#### 输入
 
-**1. Eevee 通用辅助节点**
-
-### Render Info
-
-#### 入口
-
-`Add > Input > Render Info`
-
-<div align="center">
-	<img src="images/SnowShot_2026-03-28_04-51-10.png" alt="alt text" style="border-radius: 10px;">
-	<br>
-</div>
+- `Scale`：用于缩放帧数的数值
 
 #### 输出
 
-- `Frag Coord`：屏幕空间坐标（xy 归一化到 0-1，z 为深度）
-- `Width`：渲染区域宽度
-- `Height`：渲染区域高度
+- `Frame`：当前帧数
 
-#### 作用
+- `Seconds`：当前帧对应的秒数
 
-提供当前 Eevee 渲染窗口的坐标和像素尺寸。
+- `Timeline`：0-1映射的场景时间（从开始帧到结束帧）
 
-### Scene Time
+- `Scaled Frame`：当前帧除以 `Scale` 后的结果
+
+### Screen Derivative
 
 #### 入口
 
-`Add > Input > Scene Time`
+`Add > Utilities > Math > Screen Derivative`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_04-52-48.png" alt="alt text" style="border-radius: 10px;">
-	# 二、主要扩展节点
+	<img src="images/SnowShot_2026-03-28_04-53-23.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
 
-	**1. Eevee 通用辅助节点**
+#### 功能
 
-	### Render Info
+获得屏幕之间相邻像素之间的差异：
 
-	#### 入口
+- `DDX`：X方向的屏幕空间导数
 
-	`Add > Input > Render Info`
+- `DDY`：Y方向的屏幕空间导数
 
-	<div align="center">
-		<img src="images/SnowShot_2026-03-28_04-51-10.png" alt="alt text" style="border-radius: 10px;">
-		<br>
-	</div>
+- `DDXY`：`DDX` 和 `DDY` 的组合（`DDX + DDY`）
 
-	#### 输出
+其中 `DDXY` 表示 `DDX + DDY`。
 
-	- `Frag Coord`：屏幕空间坐标（xy归一化到0-1，z为深度）
+### Portal In / Portal Out
 
-	- `Width`：渲染区域宽度
+#### 入口
 
-	- `Height`：渲染区域高度
+- `Add > Layout > Portal In`
 
-	#### 作用
+- `Add > Layout > Portal Out`
 
-	提供当前 Eevee 渲染窗口的坐标和像素尺寸。
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_04-53-44.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
 
+#### 功能说明
 
-	### Scene Time
+这是一组用来整理节点连线的“传送门”节点。
 
-	#### 入口
+工作方式可以理解为：
 
-	`Add > Input > Scene Time`
+- `Portal In`：在当前节点树里存一个有名字、有类型的值
 
-	<div align="center">
-		<img src="images/SnowShot_2026-03-28_04-52-48.png" alt="alt text" style="border-radius: 10px;">
-		<br>
-	</div>
+- `Portal Out`：在同一节点树内按名字把这个值取出来继续使用
 
-	#### 输入
+#### 其他
 
-	- `Scale`：用于缩放帧数的数值
+- 新建 `Portal In` 时会自动生成唯一名称。
 
-	#### 输出
+- `Portal Out` 上带有放大镜按钮，可快速跳转到对应的 `Portal In` 位置。
 
-	- `Frame`：当前帧数
+#### 限制
 
-	- `Seconds`：当前帧对应的秒数
+- 只在同一个 shader node tree 内识别。
 
-	- `Timeline`：0-1映射的场景时间（从开始帧到结束帧）
+- 不支持跨节点树。
 
-	- `Scaled Frame`：当前帧除以 `Scale` 后的结果
+- 不支持跨节点组自动穿透。
 
-	### Screen Derivative
+- 同名输入应只保留一个来源。
 
-	#### 入口
+**2. Eevee 物体材质节点**
 
-	`Add > Utilities > Math > Screen Derivative`
+### Render Texture
 
-	<div align="center">
-		<img src="images/SnowShot_2026-03-28_04-53-23.png" alt="alt text" style="border-radius: 10px;">
-		<br>
-	</div>
+#### 入口
 
-	#### 功能
+`Add > Texture > Render Texture`
 
-	获得屏幕之间相邻像素之间的差异：
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_04-54-27.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
 
-	- `DDX`：X方向的屏幕空间导数
+#### 作用
 
-	- `DDY`：Y方向的屏幕空间导数
+读取前面在场景里配置好的 `Render Textures` 条目。
 
-	- `DDXY`：`DDX` 和 `DDY` 的组合（`DDX + DDY`）
+#### 输入输出
 
-	其中 `DDXY` 表示 `DDX + DDY`。
+- 输入：`Vector`
+- 输出：`Color`、`Alpha`
 
-	### Portal In / Portal Out
+### Screenspace Info
 
-	#### 入口
+#### 入口
 
-	- `Add > Layout > Portal In`
+`Add > Input > Screenspace Info`
 
-	- `Add > Layout > Portal Out`
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_04-56-22.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
 
-	<div align="center">
-		<img src="images/SnowShot_2026-03-28_04-53-44.png" alt="alt text" style="border-radius: 10px;">
-		<br>
-	</div>
+#### 输入输出
 
-	#### 功能说明
+- 输入：`View Position`（摄像机空间位置）
+- 输出：`Scene Color`（场景颜色）、`Scene Depth`（场景深度值）
 
-	这是一组用来整理节点连线的“传送门”节点。
+#### 作用
 
-	工作方式可以理解为：
+获得当前的渲染缓冲颜色或深度的内容。
 
-	- `Portal In`：在当前节点树里存一个有名字、有类型的值
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_04-59-57.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
 
-	- `Portal Out`：在同一节点树内按名字把这个值取出来继续使用
+#### 使用说明
 
-	#### 其他
+- 渲染设置中需要打开 `Raytracing`
+- 材质选项 `Render Method` 选择 `Dithered`
+- 材质选项打开 `Raytraced Transmission`
+- `View Position` 默认输入为 `position` 变换到摄像机空间，再反转 z 轴
 
-	- 新建 `Portal In` 时会自动生成唯一名称。
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_04-59-28.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
 
-	- `Portal Out` 上带有放大镜按钮，可快速跳转到对应的 `Portal In` 位置。
+### World Environment
 
-	#### 限制
+#### 入口
 
-	- 只在同一个 shader node tree 内识别。
+`Add > Input > World Environment`
 
-	- 不支持跨节点树。
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_05-01-56.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
 
-	- 不支持跨节点组自动穿透。
+#### 输入输出
 
-	- 同名输入应只保留一个来源。
+- 输入：`Direction`（采样方向）
+- 输出：`Color`（环境颜色）
 
-	**2. Eevee 物体材质节点**
+#### 作用
 
-	### Render Texture
+直接采样 `Eevee` 的世界环境颜色，不依赖屏幕背后是否还有几何。
 
-	#### 入口
+#### 说明
 
-	`Add > Texture > Render Texture`
+- 读取世界环境光照探头颜色，可在世界环境中调整分辨率
 
-	<div align="center">
-		<img src="images/SnowShot_2026-03-28_04-54-27.png" alt="alt text" style="border-radius: 10px;">
-		<br>
-	</div>
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_05-03-27.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
 
-	#### 作用
+- `Direction` 不连接时，默认使用当前表面的视线方向
+- `Direction` 连接后，可以按指定方向采样世界环境
 
-	读取前面在场景里配置好的 `Render Textures` 条目。
+### World To Tangent
 
-	#### 输入输出
+#### 入口
 
-	- 输入：`Vector`
-	- 输出：`Color`、`Alpha`
+`Add > Utilities > Vector > World To Tangent`
 
-	### Screenspace Info
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_05-04-02.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
 
-	#### 入口
+#### 输入输出
 
-	`Add > Input > Screenspace Info`
+- 输入：`Vector`（世界空间方向）
+- 输出：`Vector`（切线空间方向）
 
-	<div align="center">
-		<img src="images/SnowShot_2026-03-28_04-56-22.png" alt="alt text" style="border-radius: 10px;">
-		<br>
-	</div>
+#### 作用
 
-	#### 输入输出
+把一个世界空间方向向量转换到当前表面的切线空间。
 
-	- 输入：`View Position`（摄像机空间位置）
-	- 输出：`Scene Color`（场景颜色）、`Scene Depth`（场景深度值）
+#### 说明
 
-	#### 作用
+- 节点面板中可指定 `UV Map`，该 UV 的切线会作为转换基底。
 
-	获得当前的渲染缓冲颜色或深度的内容。
+### Basis Transform
 
-	<div align="center">
-		<img src="images/SnowShot_2026-03-28_04-59-57.png" alt="alt text" style="border-radius: 10px;">
-		<br>
-	</div>
+#### 入口
 
-	#### 使用说明
+`Add > Utilities > Vector > Basis Transform`
 
-	- 渲染设置中需要打开 `Raytracing`
-	- 材质选项 `Render Method` 选择 `Dithered`
-	- 材质选项打开 `Raytraced Transmission`
-	- `View Position` 默认输入为 `position` 变换到摄像机空间，再反转 z 轴
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_07-51-05.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
 
-	<div align="center">
-		<img src="images/SnowShot_2026-03-28_04-59-28.png" alt="alt text" style="border-radius: 10px;">
-		<br>
-	</div>
+#### 输入输出
 
-	### World Environment
+- 输入：`Vector`（待变换的点、方向或法线）
 
-	#### 入口
+- 输入：`Origin`（自定义基底的原点，仅 `Point` 模式使用）
 
-	`Add > Input > World Environment`
+- 输入：`X Axis`、`Y Axis`、`Z Axis`（自定义坐标基轴）
 
-	<div align="center">
-		<img src="images/SnowShot_2026-03-28_05-01-56.png" alt="alt text" style="border-radius: 10px;">
-		<br>
-	</div>
+- 输出：`Vector`（变换后的结果）
 
-	#### 输入输出
+#### 作用
 
-	- 输入：`Direction`（采样方向）
-	- 输出：`Color`（环境颜色）
+在材质节点里用 `原点 + 三根基轴` 来完成自定义坐标系变换，适合在没有矩阵输入类型的情况下处理点、方向向量和法线。
 
-	#### 作用
+#### 面板选项
 
-	直接采样 `Eevee` 的世界环境颜色，不依赖屏幕背后是否还有几何。
+- `Direction`
 
-	#### 说明
+	- `To Basis`：把输入从世界/当前坐标解释为自定义基底下的坐标
 
-	- 读取世界环境光照探头颜色，可在世界环境中调整分辨率
+	- `From Basis`：把输入从自定义基底坐标还原回外部坐标
 
-	<div align="center">
-		<img src="images/SnowShot_2026-03-28_05-03-27.png" alt="alt text" style="border-radius: 10px;">
-		<br>
-	</div>
+- `Type`
 
-	- `Direction` 不连接时，默认使用当前表面的视线方向
-	- `Direction` 连接后，可以按指定方向采样世界环境
+	- `Point`：会参与 `Origin` 平移
 
-	### World To Tangent
+	- `Vector`：只做方向/长度变换，不参与平移
 
-	#### 入口
+	- `Normal`：按法线规则变换，并在输出前归一化
 
-	`Add > Utilities > Vector > World To Tangent`
+- `Basis Input`
 
-	<div align="center">
-		<img src="images/SnowShot_2026-03-28_05-04-02.png" alt="alt text" style="border-radius: 10px;">
-		<br>
-	</div>
+	- `XYZ`：直接使用三根输入轴
 
-	#### 输入输出
+	- `XY` / `XZ` / `YZ`：只使用两根轴，第三根轴由叉积自动补出
 
-	- 输入：`Vector`（世界空间方向）
-	- 输出：`Vector`（切线空间方向）
+- `Orthonormalize`
 
-	#### 作用
+	- 开启后会把输入轴正交化并归一化，更适合做切线空间、局部朝向这类纯方向基底
 
-	把一个世界空间方向向量转换到当前表面的切线空间。
+	- 关闭后会保留输入轴长度，可用于带缩放的基底变换
 
-	#### 说明
+- `Fallback`
 
-	- 节点面板中可指定 `UV Map`，该 UV 的切线会作为转换基底。
+	- `Pass Through`：当基底退化时直接输出原始输入
 
-	### Basis Transform
+	- `Zero`：当基底退化时输出 `0, 0, 0`
 
-	#### 入口
+### Bevel
 
-	`Add > Utilities > Vector > Basis Transform`
+#### 入口
 
-	<div align="center">
-		<img src="images/SnowShot_2026-03-28_07-51-05.png" alt="alt text" style="border-radius: 10px;">
-		<br>
-	</div>
+`Add > Input > Bevel`
 
-	#### 输入输出
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_05-06-05.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
 
-	- 输入：`Vector`（待变换的点、方向或法线）
+#### 输入输出
 
-	- 输入：`Origin`（自定义基底的原点，仅 `Point` 模式使用）
+- 输入：`Radius`（倒角半径）、`Normal`（表面法线提示）
+- 输出：`Normal`（倒角后的近似法线）
 
-	- 输入：`X Axis`、`Y Axis`、`Z Axis`（自定义坐标基轴）
+#### 面板选项
 
-	- 输出：`Vector`（变换后的结果）
+- `Samples`（采样次数越高质量越好，性能消耗越大）
 
-	#### 作用
+#### 作用
 
-	在材质节点里用 `原点 + 三根基轴` 来完成自定义坐标系变换，适合在没有矩阵输入类型的情况下处理点、方向向量和法线。
+在 `Eevee` 中生成近似的倒角法线，用来让硬边看起来更圆润。
 
-	#### 面板选项
+#### 说明
 
-	- `Direction`
+- `Cycles` 仍然使用官方原本的真实几何倒角算法
 
-	  - `To Basis`：把输入从世界/当前坐标解释为自定义基底下的坐标
+- `Eevee` 这里使用的是同物体屏幕空间近似
 
-	  - `From Basis`：把输入从自定义基底坐标还原回外部坐标
-
-	- `Type`
-
-	  - `Point`：会参与 `Origin` 平移
-
-	  - `Vector`：只做方向/长度变换，不参与平移
-
-	  - `Normal`：按法线规则变换，并在输出前归一化
-
-	- `Basis Input`
-
-	  - `XYZ`：直接使用三根输入轴
-
-	  - `XY` / `XZ` / `YZ`：只使用两根轴，第三根轴由叉积自动补出
-
-	- `Orthonormalize`
-
-	  - 开启后会把输入轴正交化并归一化，更适合做切线空间、局部朝向这类纯方向基底
-
-	  - 关闭后会保留输入轴长度，可用于带缩放的基底变换
-
-	- `Fallback`
-
-	  - `Pass Through`：当基底退化时直接输出原始输入
-
-	  - `Zero`：当基底退化时输出 `0, 0, 0`
-
-	### Bevel
-
-	#### 入口
-
-	`Add > Input > Bevel`
-
-	<div align="center">
-		<img src="images/SnowShot_2026-03-28_05-06-05.png" alt="alt text" style="border-radius: 10px;">
-		<br>
-	</div>
-
-	#### 输入输出
-
-	- 输入：`Radius`（倒角半径）、`Normal`（表面法线提示）
-	- 输出：`Normal`（倒角后的近似法线）
-
-	#### 面板选项
-
-	- `Samples`（采样次数越高质量越好，性能消耗越大）
-
-	#### 作用
-
-	在 `Eevee` 中生成近似的倒角法线，用来让硬边看起来更圆润。
-
-	#### 说明
-
-	- `Cycles` 仍然使用官方原本的真实几何倒角算法
-
-	- `Eevee` 这里使用的是同物体屏幕空间近似
-
-	- 结果依赖当前视角、深度缓冲和可见邻域，不等同于 `Cycles` 的真实 `Bevel`
+- 结果依赖当前视角、深度缓冲和可见邻域，不等同于 `Cycles` 的真实 `Bevel`
 - 输出：`Color`、`Alpha`

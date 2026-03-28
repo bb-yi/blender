@@ -1,14 +1,70 @@
-# Blender 5.1 NPR Port - New Features & Usage Guide
+# Blender 5.1 NPR Port - Features and Usage Guide
 
 ## Project Introduction
 
-`Blender 5.1 NPR Port` is an NPR-specialized Blender fork that combines features from `Goo Engine` and `4.4 NPR-prototype` with additional useful specialty nodes.
+`Blender 5.1 NPR Port` is an NPR-focused `Blender` branch. In addition to integrating characteristic nodes from `Goo Engine` and the `4.4 NPR-prototype`, it also adds a number of practical extra nodes.
 
-Most features are `Eevee` exclusive and do not support `Cycles`.
+Most features are `Eevee`-only and do not support `Cycles`.
 
 ## Documentation Scope
 
-This documentation covers NPR/Eevee extension features that have been added to `Blender 5.1 NPR Port` compared to official `Blender 5.1` and currently exist in this branch, as well as their basic usage methods.
+This document describes the NPR / Eevee extension features that have been added to the current `Blender 5.1 NPR Port` branch compared with official `Blender 5.1`, together with their basic usage.
+
+## Node Overview
+
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_07-50-39.png" alt="Shader Nodes" style="border-radius: 10px;">
+    <br>
+    <sub>Shader Nodes</sub>
+</div>
+
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_04-23-33.png" alt="NPR Tree Nodes" style="border-radius: 10px;">
+    <br>
+    <sub>NPR Tree Nodes (some shader nodes can also be used inside NPR Tree)</sub>
+</div>
+
+<div align="center">
+    <img src="images/SnowShot_2026-03-28_04-30-16.png" alt="Filter Nodes" style="border-radius: 10px;">
+    <br>
+    <sub>Filter Nodes</sub>
+</div>
+
+<div class="grid cards" markdown>
+
+- **Scene-Level Extensions**
+
+    ---
+
+    Start with the scene-level Eevee extensions to understand the core features.
+
+    [View Scene-Level Extensions →](scene-extensions.md)
+
+- **Extended Nodes**
+
+    ---
+
+    Dive into the functionality of each newly added node.
+
+    [View Extended Nodes →](extended-nodes.md)
+
+- **NPR Workflow**
+
+    ---
+
+    Learn how the NPR Tree workflow is organized.
+
+    [View NPR Tree Workflow →](npr-workflow.md)
+
+- **Interface & Settings**
+
+    ---
+
+    Check additional interface options and workflow settings.
+
+    [View Interface & Settings →](interface-guide.md)
+
+</div>
 
 ## Main Feature Categories
 
@@ -18,7 +74,7 @@ This documentation covers NPR/Eevee extension features that have been added to `
 
 - `Filter Materials`
 
-### 2. Shader Nodes (20+ new nodes)
+### 2. Shader Nodes
 
 - `Render Info`
 
@@ -68,14 +124,3 @@ This documentation covers NPR/Eevee extension features that have been added to `
 
 !!! warning "Eevee Only"
     All NPR Port features require the **Eevee render engine**. Cycles is not supported.
-
-**Ready to explore?** Check out the sections below for more information!
-
----
-
-## Quick Links
-
-- [Scene-Level Extensions](scene-extensions.md) - Render Textures & Filter Materials
-- [Extended Nodes](extended-nodes.md) - 20+ new shader nodes
-- [NPR Workflow](npr-workflow.md) - NPR Tree processing pipeline
-- [Interface Guide](interface-guide.md) - Settings & troubleshooting

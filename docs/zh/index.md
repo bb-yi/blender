@@ -32,7 +32,7 @@
 
 <div class="grid cards" markdown>
 
-- :fontawesome-solid-rocket:{ .lg .middle } **Scene 级扩展**
+- **Scene 级扩展**
 
     ---
 
@@ -40,7 +40,7 @@
 
     [查看 Scene 级扩展 →](scene-extensions.md)
 
-- :fontawesome-solid-cube:{ .lg .middle } **扩展节点**
+- **扩展节点**
 
     ---
 
@@ -48,7 +48,7 @@
 
     [查看 扩展节点 →](extended-nodes.md)
 
-- :fontawesome-solid-code-branch:{ .lg .middle } **NPR 工作流**
+- **NPR 工作流**
 
     ---
 
@@ -56,7 +56,7 @@
 
     [查看 NPR Tree 工作流 →](npr-workflow.md)
 
-- :fontawesome-solid-toolbox:{ .lg .middle } **界面与设置**
+- **界面与设置**
 
     ---
 
@@ -74,7 +74,7 @@
 
 - `Filter Materials`
 
-### 2. 着色器节点（20+ 个新节点）
+### 2. 着色器节点
 
 - `Render Info`
 

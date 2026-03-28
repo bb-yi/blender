@@ -1,218 +1,317 @@
 # Extended Shader Nodes
 
-This page documents the major shader nodes added to Blender 5.1 NPR Port.
+## 1. General Eevee Utility Nodes
 
-## Render Info Node
+### Render Info
 
-**Purpose:** Access render target properties.
+#### Entry
 
-**Outputs:**
-- `Frag Coord` - Fragment/pixel coordinates (X, Y, Z, W)
-- `Width` - Render target width in pixels
-- `Height` - Render target height in pixels
+`Add > Input > Render Info`
 
-**Usage:** Use in calculations that require screen resolution or pixel position.
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_04-51-10.png" alt="Render Info" style="border-radius: 10px;">
+	<br>
+</div>
 
----
+#### Outputs
 
-## Scene Time Node
+- `Frag Coord`: Screen-space coordinate (`xy` normalized to 0-1, `z` is depth)
 
-**Purpose:** Access time-based values for animation.
+- `Width`: Render region width
 
-**Inputs:**
-- `Scale` - A value used to scale frame numbers
+- `Height`: Render region height
 
-**Outputs:**
-- `Frame` - Current frame number
-- `Seconds` - Elapsed time in seconds
-- `Timeline` - Timeline position mapped to 0-1
-- `Scaled Frame` - Frame number after scaling
+#### Purpose
 
-**Usage:** Create time-based animations and effects.
+Provides the coordinate and pixel size of the current Eevee render window.
 
----
+### Scene Time
 
-## Screen Derivative Node
+#### Entry
 
-**Purpose:** Detect edges and gradients in screen space.
+`Add > Input > Scene Time`
 
-**Outputs:**
-- `DDX` - X direction derivative
-- `DDY` - Y direction derivative
-- `DDXY` - Combined DDX + DDY
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_04-52-48.png" alt="Scene Time" style="border-radius: 10px;">
+	<br>
+</div>
 
-**Usage:** Edge detection, gradient mapping, and post-process effects.
+#### Input
 
----
+- `Scale`: Value used to scale frame numbers
 
-## Portal In / Portal Out
+#### Outputs
 
-**Purpose:** Organize node links with named portal values.
+- `Frame`: Current frame number
 
-**Usage:**
-- `Portal In` stores a named value in the current node tree.
-- `Portal Out` retrieves that value later in the same tree.
+- `Seconds`: Seconds corresponding to the current frame
 
-**Limits:**
-- Works only within the same shader node tree.
-- Cannot cross node trees or node groups automatically.
+- `Timeline`: Scene time remapped to 0-1 from start frame to end frame
 
----
+- `Scaled Frame`: Current frame divided by `Scale`
 
-## Render Texture Node
+### Screen Derivative
 
-**Purpose:** Sample a render texture configured in scene settings.
+#### Entry
 
-**Inputs:**
-- `Vector`
+`Add > Utilities > Math > Screen Derivative`
 
-**Outputs:**
-- `Color`
-- `Alpha`
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_04-53-23.png" alt="Screen Derivative" style="border-radius: 10px;">
+	<br>
+</div>
 
----
+#### Feature
 
-## Screenspace Info Node
+Gets differences between neighboring pixels in screen space:
 
-**Purpose:** Access color and depth buffers from the current render.
+- `DDX`: Screen-space derivative in X direction
 
-**Inputs:**
-- `View Position`
+- `DDY`: Screen-space derivative in Y direction
 
-**Outputs:**
-- `Scene Color`
-- `Scene Depth`
+- `DDXY`: Combination of `DDX` and `DDY` (`DDX + DDY`)
 
----
+### Portal In / Portal Out
 
-## World Environment Node
+#### Entry
 
-**Purpose:** Sample Eevee world environment color.
+- `Add > Layout > Portal In`
 
-**Inputs:**
+- `Add > Layout > Portal Out`
+
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_04-53-44.png" alt="Portal Nodes" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### Feature Description
+
+These are “portal” nodes used to organize node links.
+
+Their workflow can be understood as:
+
+- `Portal In`: Store a named, typed value in the current node tree
+
+- `Portal Out`: Retrieve that value later by name within the same node tree
+
+#### Other Notes
+
+- Creating a new `Portal In` automatically generates a unique name.
+
+- `Portal Out` has a magnifier button that can jump to the matching `Portal In` location.
+
+#### Limits
+
+- Only recognized inside the same shader node tree.
+
+- Does not support crossing different node trees.
+
+- Does not automatically pass through node groups.
+
+- Inputs with the same name should keep only one source.
+
+## 2. Eevee Object Material Nodes
+
+### Render Texture
+
+#### Entry
+
+`Add > Texture > Render Texture`
+
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_04-54-27.png" alt="Render Texture" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### Purpose
+
+Reads a `Render Textures` entry configured earlier in the scene.
+
+#### Inputs / Outputs
+
+- Input: `Vector`
+- Outputs: `Color`, `Alpha`
+
+### Screenspace Info
+
+#### Entry
+
+`Add > Input > Screenspace Info`
+
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_04-56-22.png" alt="Screenspace Info" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### Inputs / Outputs
+
+- Input: `View Position` (camera-space position)
+- Outputs: `Scene Color` (scene color), `Scene Depth` (scene depth)
+
+#### Purpose
+
+Gets the contents of the current render buffer color or depth.
+
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_04-59-57.png" alt="Screenspace Result" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### Usage Notes
+
+- `Raytracing` must be enabled in render settings
+- Set material `Render Method` to `Dithered`
+- Enable `Raytraced Transmission` in material options
+- The default `View Position` input is `position` transformed into camera space, then with the z-axis inverted
+
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_04-59-28.png" alt="Screenspace Setup" style="border-radius: 10px;">
+	<br>
+</div>
+
+### World Environment
+
+#### Entry
+
+`Add > Input > World Environment`
+
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_05-01-56.png" alt="World Environment" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### Inputs / Outputs
+
+- Input: `Direction` (sampling direction)
+- Output: `Color` (environment color)
+
+#### Purpose
+
+Directly samples the `Eevee` world environment color, without depending on whether geometry exists behind the screen.
+
+#### Notes
+
+- Reads the world lighting probe color; probe resolution can be adjusted in the world environment
+
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_05-03-27.png" alt="World Environment Probe" style="border-radius: 10px;">
+	<br>
+</div>
+
+- If `Direction` is not connected, the current surface view direction is used by default
+- If `Direction` is connected, the world environment can be sampled in the specified direction
+
+### World To Tangent
+
+#### Entry
+
+`Add > Utilities > Vector > World To Tangent`
+
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_05-04-02.png" alt="World To Tangent" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### Inputs / Outputs
+
+- Input: `Vector` (world-space direction)
+- Output: `Vector` (tangent-space direction)
+
+#### Purpose
+
+Converts a world-space direction vector into the tangent space of the current surface.
+
+#### Notes
+
+- A `UV Map` can be specified in the node panel, and the tangent of that UV is used as the transform basis.
+
+### Basis Transform
+
+#### Entry
+
+`Add > Utilities > Vector > Basis Transform`
+
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_07-51-05.png" alt="Basis Transform" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### Inputs / Outputs
+
+- Input: `Vector` (point, direction, or normal to transform)
+
+- Input: `Origin` (origin of the custom basis, used only in `Point` mode)
+
+- Input: `X Axis`, `Y Axis`, `Z Axis` (custom basis axes)
+
+- Output: `Vector` (transformed result)
+
+#### Purpose
+
+Uses `origin + three basis axes` inside material nodes to perform custom coordinate-system transforms. This is useful when there is no matrix input type available and you still need to process points, direction vectors, or normals.
+
+#### Panel Options
+
 - `Direction`
 
-**Outputs:**
-- `Color`
+	- `To Basis`: Interpret the input from world/current coordinates into the custom basis
 
----
+	- `From Basis`: Convert the input from custom basis coordinates back to external coordinates
 
-## World To Tangent Node
-
-**Purpose:** Convert a world-space direction into tangent space.
-
-**Inputs:**
-- `Vector`
-
-**Outputs:**
-- `Vector`
-
----
-
-## Basis Transform Node
-
-**Purpose:** Transform points, vectors, or normals between custom bases.
-
-**Inputs:**
-- `Vector`
-- `Origin`
-- `X Axis`
-- `Y Axis`
-- `Z Axis`
-
-**Outputs:**
-- `Vector`
-
----
-
-## Bevel Node
-
-**Purpose:** Generate an approximate beveled normal in Eevee.
-
-**Inputs:**
-- `Radius`
-- `Normal`
-
-**Outputs:**
-- `Normal`
-
----
-
-## Curvature Node
-
-**Purpose:** Provide curvature and rim outputs from screen-space data.
-
-**Inputs:**
-- `Samples`
-- `Sample Radius`
-- `Thickness`
-- `Scale`
-
-**Outputs:**
-- `Scene Curvature`
-- `Scene Rim`
-
----
-
-## Shader Info Node
-
-**Purpose:** Provide shading-related information such as diffuse, shadow, and ambient lighting.
-
-**Inputs:**
-- `World Position`
-- `Normal`
-
-**Outputs:**
-- `Diffuse Shading`
-- `Shadow`
-- `Ambient Lighting`
-- `Half-Lambert Factor`
-
----
-
-## Light Info Node
-
-**Purpose:** Access per-light information.
-
-**Outputs:**
-- `Color`
-- `Power`
 - `Type`
-- `Position`
-- `Direction`
-- `Radius`
-- `Spot Size`
-- `Sun Angle`
 
-**Usage:** Use `For Each Light` for per-light workflows.
+	- `Point`: Includes `Origin` translation
 
----
+	- `Vector`: Only transforms direction and length, without translation
 
-## Scene Color Node
+	- `Normal`: Transforms following normal rules and normalizes before output
 
-**Purpose:** Read scene data in filter materials.
+- `Basis Input`
 
-**Inputs:**
-- `UV` / `Coordinate`
+	- `XYZ`: Use all three input axes directly
 
-**Outputs:**
-- `Color`
-- `Depth`
-- `Normal`
+	- `XY` / `XZ` / `YZ`: Use only two axes; the third axis is generated automatically by cross product
 
-**Parameters:**
-- `Source` - Color / Depth / Normal / Emission / Environment
+- `Orthonormalize`
 
-**Usage:** Post-process effects, reflections, depth-based effects.
+	- When enabled, input axes are orthogonalized and normalized. More suitable for tangent space or local orientation bases
 
----
+	- When disabled, input axis lengths are preserved, which can be used for basis transforms with scaling
 
-## Additional Nodes
+- `Fallback`
 
-- `NPR Input`
-- `NPR Refraction`
-- `Image Sample`
-- `For Each Light`
+	- `Pass Through`: Output the original input when the basis degenerates
 
-!!! tip
-For detailed parameters and usage, refer to Blender's official shader node documentation together with the NPR Port extensions.
+	- `Zero`: Output `0, 0, 0` when the basis degenerates
+
+### Bevel
+
+#### Entry
+
+`Add > Input > Bevel`
+
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_05-06-05.png" alt="Bevel" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### Inputs / Outputs
+
+- Input: `Radius` (bevel radius), `Normal` (surface normal hint)
+- Output: `Normal` (approximated beveled normal)
+
+#### Panel Option
+
+- `Samples` (higher sample counts improve quality but cost more performance)
+
+#### Purpose
+
+Generates an approximate beveled normal in `Eevee` so hard edges can look smoother.
+
+#### Notes
+
+- `Cycles` still uses the original true geometric bevel algorithm
+
+- `Eevee` here uses a same-object screen-space approximation
+
+- The result depends on current view, depth buffer, and visible neighborhood, and is not equivalent to the true `Bevel` in `Cycles`
