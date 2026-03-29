@@ -139,6 +139,11 @@ void ShadingView::render()
 
   inst_.volume.draw_prepass(main_view_);
 
+  /* NPR refraction reads the already composited background from combined_tx.
+   * Keep the world pass before deferred, like the prototype pipeline, so scene-miss rays can
+   * still resolve to the HDR environment instead of the clear color. */
+  inst_.pipelines.background.render(render_view_, combined_fb_);
+
   /* TODO(Miguel Pozo): Deferred and forward prepass should happen before the GBuffer pass. */
   inst_.pipelines.deferred.render(main_view_,
                                   render_view_,
@@ -149,19 +154,9 @@ void ShadingView::render()
                                   rt_buffer_opaque_,
                                   rt_buffer_refract_);
 
-  inst_.pipelines.background.render(render_view_, combined_fb_);
-
   inst_.gbuffer.release();
 
   if (inst_.filter_materials.has_stage_entries(SCE_EEVEE_FILTER_STAGE_BEFORE_VOLUME_FOG)) {
-    if (inst_.filter_materials.uses_scene_shadow()) {
-      gpu::Texture *shadow_source_tx = (rbufs.data.shadow_id >= 0) ?
-                                           rbufs.rp_value_tx.gpu_texture() :
-                                           nullptr;
-      inst_.pipelines.shadow_filter.set_source(shadow_source_tx, rbufs.data.shadow_id);
-      inst_.pipelines.shadow_filter.render(render_view_, extent_, rbufs.depth_tx);
-    }
-
     gpu::Texture *filtered_tx = inst_.filter_materials.render_stage(
         render_view_, rbufs.combined_tx, extent_, SCE_EEVEE_FILTER_STAGE_BEFORE_VOLUME_FOG);
     if (filtered_tx != nullptr && filtered_tx != rbufs.combined_tx) {
@@ -186,14 +181,6 @@ void ShadingView::render()
   inst_.volume_probes.viewport_draw(render_view_, combined_fb_);
   inst_.sphere_probes.viewport_draw(render_view_, combined_fb_);
   inst_.planar_probes.viewport_draw(render_view_, combined_fb_);
-
-  if (inst_.filter_materials.uses_scene_shadow()) {
-    gpu::Texture *shadow_source_tx = (rbufs.data.shadow_id >= 0) ?
-                                         rbufs.rp_value_tx.gpu_texture() :
-                                         nullptr;
-    inst_.pipelines.shadow_filter.set_source(shadow_source_tx, rbufs.data.shadow_id);
-    inst_.pipelines.shadow_filter.render(render_view_, extent_, rbufs.depth_tx);
-  }
 
   gpu::Texture *combined_final_tx = render_postfx(rbufs.combined_tx);
   inst_.film.accumulate(jitter_view_, combined_final_tx);

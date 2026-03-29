@@ -178,6 +178,7 @@ set(SRC_GLSL_LIB
   eevee_cryptomatte_lib.glsl
   eevee_depth_of_field_accumulator_lib.glsl
   eevee_depth_of_field_lib.glsl
+  eevee_deferred_combine_lib.glsl
   eevee_film_lib.glsl
   eevee_filter_lib.glsl
   # eevee_forward_lib.glsl

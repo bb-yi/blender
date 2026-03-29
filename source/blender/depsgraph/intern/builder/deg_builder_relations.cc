@@ -2258,6 +2258,47 @@ void DepsgraphRelationBuilder::build_world(World *world)
   ComponentKey parameters_key(&world->id, NodeType::PARAMETERS);
   add_relation(parameters_key, world_key, "World's parameters");
 
+  if (world->environment_exclusion_collection != nullptr) {
+    Collection *collection = world->environment_exclusion_collection;
+    build_collection(nullptr, collection);
+
+    const OperationKey collection_parameters_entry_key(
+        &collection->id, NodeType::PARAMETERS, OperationCode::PARAMETERS_ENTRY);
+    const OperationKey collection_parameters_exit_key(
+        &collection->id, NodeType::PARAMETERS, OperationCode::PARAMETERS_EXIT);
+    const OperationKey collection_hierarchy_key(
+        &collection->id, NodeType::HIERARCHY, OperationCode::HIERARCHY);
+    const OperationKey collection_light_linking_key(
+        &collection->id, NodeType::PARAMETERS, OperationCode::LIGHT_LINKING_UPDATE);
+
+    add_relation(collection_parameters_entry_key,
+                 collection_light_linking_key,
+                 "Entry -> Collection Light Linking",
+                 RELATION_CHECK_BEFORE_ADD);
+    add_relation(collection_light_linking_key,
+                 collection_parameters_exit_key,
+                 "Collection Light Linking -> Exit",
+                 RELATION_CHECK_BEFORE_ADD);
+    add_relation(collection_hierarchy_key,
+                 collection_light_linking_key,
+                 "Collection Hierarchy -> Light Linking",
+                 RELATION_CHECK_BEFORE_ADD);
+    add_relation(collection_light_linking_key,
+                 world_key,
+                 "Environment Exclusion Collection -> World",
+                 RELATION_CHECK_BEFORE_ADD);
+  }
+
+  FOREACH_SCENE_OBJECT_BEGIN (scene_, object) {
+    const OperationKey light_linking_key(
+        &object->id, NodeType::SHADING, OperationCode::LIGHT_LINKING_UPDATE);
+    add_relation(world_key,
+                 light_linking_key,
+                 "World -> Object Light Linking",
+                 RELATION_CHECK_BEFORE_ADD);
+  }
+  FOREACH_SCENE_OBJECT_END;
+
   /* world's nodetree */
   if (world->nodetree != nullptr) {
     build_nodetree(world->nodetree);

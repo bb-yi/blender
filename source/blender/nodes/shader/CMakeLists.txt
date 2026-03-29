@@ -84,6 +84,7 @@ set(SRC
   nodes/node_shader_world_environment.cc
   nodes/node_shader_light_probe_color.cc
   nodes/node_shader_world_to_tangent.cc
+  nodes/node_shader_basis_transform.cc
   nodes/node_shader_shader_info.cc
   nodes/node_shader_screenspace_info.cc
   nodes/node_shader_scene_color.cc

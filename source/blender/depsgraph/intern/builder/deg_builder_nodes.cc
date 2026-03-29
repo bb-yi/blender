@@ -1514,6 +1514,9 @@ void DepsgraphNodeBuilder::build_world(World *world)
   /* Animation. */
   build_animdata(&world->id);
   build_parameters(&world->id);
+  if (world->environment_exclusion_collection != nullptr) {
+    build_light_linking_collection(world->environment_exclusion_collection);
+  }
   /* World's nodetree. */
   build_nodetree(world->nodetree);
 }

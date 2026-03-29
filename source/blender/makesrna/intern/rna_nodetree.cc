@@ -6842,15 +6842,121 @@ static void def_sh_world_to_tangent(BlenderRNA * /*brna*/, StructRNA *srna)
   RNA_def_struct_sdna_from(srna, "bNode", nullptr);
 }
 
+static void def_sh_basis_transform(BlenderRNA * /*brna*/, StructRNA *srna)
+{
+  static const EnumPropertyItem direction_items[] = {
+      {SHD_BASIS_TRANSFORM_DIRECTION_TO,
+       "TO_BASIS",
+       0,
+       "To Basis",
+       "Convert the input into the coordinates of the custom basis"},
+      {SHD_BASIS_TRANSFORM_DIRECTION_FROM,
+       "FROM_BASIS",
+       0,
+       "From Basis",
+       "Convert the input from the custom basis back into the surrounding space"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+
+  static const EnumPropertyItem basis_input_items[] = {
+      {SHD_BASIS_TRANSFORM_INPUT_XYZ,
+       "XYZ",
+       0,
+       "XYZ",
+       "Use all three input axes directly"},
+      {SHD_BASIS_TRANSFORM_INPUT_XY,
+       "XY",
+       0,
+       "XY",
+       "Build the basis from X and Y axes, deriving Z from their cross product"},
+      {SHD_BASIS_TRANSFORM_INPUT_XZ,
+       "XZ",
+       0,
+       "XZ",
+       "Build the basis from X and Z axes, deriving Y from their cross product"},
+      {SHD_BASIS_TRANSFORM_INPUT_YZ,
+       "YZ",
+       0,
+       "YZ",
+       "Build the basis from Y and Z axes, deriving X from their cross product"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+
+  static const EnumPropertyItem fallback_items[] = {
+      {SHD_BASIS_TRANSFORM_FALLBACK_PASS_THROUGH,
+       "PASS_THROUGH",
+       0,
+       "Pass Through",
+       "Return the input vector unchanged when the basis is invalid"},
+      {SHD_BASIS_TRANSFORM_FALLBACK_ZERO,
+       "ZERO",
+       0,
+       "Zero",
+       "Return a zero vector when the basis is invalid"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+
+  static const EnumPropertyItem vector_type_items[] = {
+      {SHD_VECT_TRANSFORM_TYPE_POINT,
+       "POINT",
+       0,
+       "Point",
+       "Transform a point and include the Origin input"},
+      {SHD_VECT_TRANSFORM_TYPE_VECTOR,
+       "VECTOR",
+       0,
+       "Vector",
+       "Transform a direction vector without applying the Origin input"},
+      {SHD_VECT_TRANSFORM_TYPE_NORMAL,
+       "NORMAL",
+       0,
+       "Normal",
+       "Transform a normal vector using the normal-specific basis conversion"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+
+  PropertyRNA *prop;
+
+  RNA_def_struct_sdna_from(srna, "NodeShaderBasisTransform", "storage");
+
+  prop = RNA_def_property(srna, "direction", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "direction");
+  RNA_def_property_enum_items(prop, direction_items);
+  RNA_def_property_ui_text(prop, "Direction", "Which way to transform relative to the custom basis");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  prop = RNA_def_property(srna, "vector_type", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "vector_type");
+  RNA_def_property_enum_items(prop, vector_type_items);
+  RNA_def_property_ui_text(prop, "Type", "How the input should be interpreted during the transform");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  prop = RNA_def_property(srna, "basis_input", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "basis_input");
+  RNA_def_property_enum_items(prop, basis_input_items);
+  RNA_def_property_ui_text(prop, "Basis Input", "Which axis inputs are used to construct the basis");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  prop = RNA_def_property(srna, "orthonormalize", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "orthonormalize", 1);
+  RNA_def_property_ui_text(
+      prop,
+      "Orthonormalize",
+      "Normalize and orthogonalize the basis before transforming, ignoring axis scale");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  prop = RNA_def_property(srna, "fallback", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "fallback");
+  RNA_def_property_enum_items(prop, fallback_items);
+  RNA_def_property_ui_text(prop, "Fallback", "Output to use when the basis axes do not form a valid transform");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  RNA_def_struct_sdna_from(srna, "bNode", nullptr);
+}
+
 static void def_sh_shader_info(BlenderRNA * /*brna*/, StructRNA *srna)
 {
   static const EnumPropertyItem shadow_mode_items[] = {
-      {SHD_SHADER_INFO_SHADOW_STABLE,
-       "STABLE",
-       0,
-       "Stable",
-       "Use the special deterministic shadow sampling path for stable grayscale masks in a "
-       "single frame"},
       {SHD_SHADER_INFO_SHADOW_SOFT_FILTERED,
        "SOFT_FILTERED",
        0,
@@ -6880,8 +6986,8 @@ static void def_sh_shader_info(BlenderRNA * /*brna*/, StructRNA *srna)
   RNA_def_property_range(prop, 1, 32);
   RNA_def_property_ui_range(prop, 1, 32, 1, 3);
   RNA_def_property_ui_text(prop,
-                           "Stable Samples",
-                           "Number of fixed shadow rays used by the Stable mode");
+                           "Shadow Samples",
+                           "Number of fixed shadow rays used by the Soft Filtered mode");
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
 
   RNA_def_struct_sdna_from(srna, "NodeShaderShaderInfo", "storage");
@@ -6931,11 +7037,6 @@ static void def_sh_scene_color(BlenderRNA * /*brna*/, StructRNA *srna)
        0,
        "Normal",
        "Sample the Eevee scene normal render pass"},
-      {SHD_SCENE_SOURCE_SHADOW,
-       "SHADOW",
-       0,
-       "Shadow",
-       "Sample the Eevee scene shadow render pass"},
       {SHD_SCENE_SOURCE_POSITION,
        "POSITION",
        0,
@@ -10363,6 +10464,7 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("ShaderNode", "ShaderNodeWorldEnvironment");
   define("ShaderNode", "ShaderNodeLightProbeColor");
   define("ShaderNode", "ShaderNodeWorldToTangent", def_sh_world_to_tangent);
+  define("ShaderNode", "ShaderNodeBasisTransform", def_sh_basis_transform);
   define("ShaderNode", "ShaderNodeCurvature", def_sh_curvature);
   define("ShaderNode", "ShaderNodeShaderInfo", def_sh_shader_info);
   define("ShaderNode", "ShaderNodeLightInfo", def_sh_light_info);

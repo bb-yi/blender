@@ -15,15 +15,13 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_geom_mesh)
 FRAGMENT_SHADER_CREATE_INFO(eevee_surf_npr)
 
 #include "draw_view_lib.glsl"
-#include "eevee_colorspace_lib.glsl"
-#include "eevee_gbuffer_read_lib.glsl"
+#include "eevee_deferred_combine_lib.glsl"
 #include "eevee_light_eval_lib.glsl"
 #include "eevee_lightprobe_eval_lib.glsl"
 #include "eevee_nodetree_frag_lib.glsl"
 #include "eevee_renderpass_lib.glsl"
 #include "eevee_sampling_lib.glsl"
 #include "eevee_surf_lib.glsl"
-#include "gpu_shader_shared_exponent_lib.glsl"
 
 #define TEX_HANDLE_NULL 0u
 #define TEX_HANDLE_RP_COLOR 1u
@@ -39,100 +37,6 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_surf_npr)
 #define TEX_HANDLE_NORMAL 18u
 #define TEX_HANDLE_BACK_COMBINED_COLOR 19u
 #define TEX_HANDLE_BACK_POSITION 20u
-
-struct DeferredCombineNPR {
-  float3 diffuse_color;
-  float3 diffuse_direct;
-  float3 diffuse_indirect;
-  float3 specular_color;
-  float3 specular_direct;
-  float3 specular_indirect;
-  float3 average_normal;
-};
-
-float3 load_radiance_direct(int2 texel, uchar i)
-{
-  uint data = 0u;
-  switch (i) {
-    case 0:
-      data = texelFetch(direct_radiance_1_tx, texel, 0).r;
-      break;
-    case 1:
-      data = texelFetch(direct_radiance_2_tx, texel, 0).r;
-      break;
-    case 2:
-      data = texelFetch(direct_radiance_3_tx, texel, 0).r;
-      break;
-    default:
-      break;
-  }
-  return rgb9e5_decode(data);
-}
-
-float3 load_radiance_indirect(int2 texel, uchar i)
-{
-  switch (i) {
-    case 0:
-      return texelFetch(indirect_radiance_1_tx, texel, 0).rgb;
-    case 1:
-      return texelFetch(indirect_radiance_2_tx, texel, 0).rgb;
-    case 2:
-      return texelFetch(indirect_radiance_3_tx, texel, 0).rgb;
-    default:
-      return float3(0.0f);
-  }
-}
-
-DeferredCombineNPR deferred_combine_npr(int2 texel)
-{
-  const gbuffer::Layers gbuf = gbuffer::read_layers(texel);
-  const uchar closure_count = gbuf.header.closure_len();
-  const uint3 bin_indices = gbuf.header.bin_index_per_layer();
-
-  DeferredCombineNPR dc;
-  dc.diffuse_color = float3(0.0f);
-  dc.diffuse_direct = float3(0.0f);
-  dc.diffuse_indirect = float3(0.0f);
-  dc.specular_color = float3(0.0f);
-  dc.specular_direct = float3(0.0f);
-  dc.specular_indirect = float3(0.0f);
-  dc.average_normal = float3(0.0f);
-
-  for (uchar i = 0; i < GBUFFER_LAYER_MAX && i < closure_count; i++) {
-    ClosureUndetermined cl = gbuf.layer_get(i);
-    if (cl.type == CLOSURE_NONE_ID) {
-      continue;
-    }
-    uchar layer_index = bin_indices[i];
-    float3 closure_direct_light = load_radiance_direct(texel, layer_index);
-    float3 closure_indirect_light = use_split_radiance ? load_radiance_indirect(texel, layer_index) :
-                                                        float3(0.0f);
-
-    dc.average_normal += cl.N * reduce_add(cl.color);
-
-    switch (cl.type) {
-      case CLOSURE_BSDF_TRANSLUCENT_ID:
-      case CLOSURE_BSSRDF_BURLEY_ID:
-      case CLOSURE_BSDF_DIFFUSE_ID:
-        dc.diffuse_color += cl.color;
-        dc.diffuse_direct += closure_direct_light;
-        dc.diffuse_indirect += closure_indirect_light;
-        break;
-      case CLOSURE_BSDF_MICROFACET_GGX_REFLECTION_ID:
-      case CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID:
-        dc.specular_color += cl.color;
-        dc.specular_direct += closure_direct_light;
-        dc.specular_indirect += closure_indirect_light;
-        break;
-      case CLOSURE_NONE_ID:
-        break;
-    }
-  }
-
-  float normal_len = length(dc.average_normal);
-  dc.average_normal = (normal_len < 1e-5f) ? gbuf.surface_N() : (dc.average_normal / normal_len);
-  return dc;
-}
 
 void npr_input_impl(out TextureHandle combined_color,
                     out TextureHandle diffuse_color,
@@ -206,8 +110,10 @@ float4 TextureHandle_eval_impl(TextureHandle tex, float2 offset, bool texel_offs
 
   if (all(equal(offset, float2(0.0f)))) {
     switch (tex.type) {
-      case TEX_HANDLE_COMBINED_COLOR:
+      case TEX_HANDLE_COMBINED_COLOR: {
+        /* Combined Color should reflect the pre-NPR combined buffer, including emission. */
         return swap_alpha(g_combined_color);
+      }
       case TEX_HANDLE_DIFFUSE_COLOR:
         return swap_alpha(g_diffuse_color);
       case TEX_HANDLE_DIFFUSE_DIRECT:
@@ -251,8 +157,6 @@ float4 TextureHandle_eval_impl(TextureHandle tex, float2 offset, bool texel_offs
       return float4(imageLoad(rp_color_img, int3(texel, tex.index)).rgb, 0.0f);
     case TEX_HANDLE_RP_VALUE:
       return float4(imageLoad(rp_value_img, int3(texel, tex.index)).rrr, 0.0f);
-    case TEX_HANDLE_COMBINED_COLOR:
-      return texelFetch(radiance_tx, texel, 0);
     case TEX_HANDLE_BACK_COMBINED_COLOR:
       return texelFetch(radiance_back_tx, texel, 0);
     case TEX_HANDLE_POSITION: {
@@ -266,6 +170,9 @@ float4 TextureHandle_eval_impl(TextureHandle tex, float2 offset, bool texel_offs
     }
     default: {
       if (depth == 1.0f) {
+        if (tex.type == TEX_HANDLE_COMBINED_COLOR) {
+          return texelFetch(radiance_tx, texel, 0);
+        }
         if (tex.type == TEX_HANDLE_NORMAL) {
           float3 position = drw_point_screen_to_world(float3(screen_uv, depth));
           float3 normal = drw_world_incident_vector(position);
@@ -274,8 +181,11 @@ float4 TextureHandle_eval_impl(TextureHandle tex, float2 offset, bool texel_offs
         return float4(0.0f);
       }
 
-      DeferredCombineNPR dc = deferred_combine_npr(texel);
+      DeferredCombine dc = deferred_combine(texel);
+      deferred_combine_clamp(dc);
       switch (tex.type) {
+        case TEX_HANDLE_COMBINED_COLOR:
+          return texelFetch(radiance_tx, texel, 0);
         case TEX_HANDLE_DIFFUSE_COLOR:
           return float4(dc.diffuse_color, 0.0f);
         case TEX_HANDLE_DIFFUSE_DIRECT:
@@ -418,10 +328,11 @@ void main()
 {
   init_globals();
   int2 texel = int2(gl_FragCoord.xy);
-  DeferredCombineNPR dc = deferred_combine_npr(texel);
+  DeferredCombine dc = deferred_combine(texel);
+  deferred_combine_clamp(dc);
 
-  g_combined_color = texelFetch(radiance_tx, texel, 0);
-  g_combined_color.a = saturate(1.0f - g_combined_color.a);
+  /* Preserve the exact pre-NPR combined input so emissive surfaces do not disappear. */
+  g_combined_color = float4(texelFetch(radiance_tx, texel, 0).rgb, 1.0f);
   g_diffuse_color = float4(dc.diffuse_color, 1.0f);
   g_diffuse_direct = float4(dc.diffuse_direct, 1.0f);
   g_diffuse_indirect = float4(dc.diffuse_indirect, 1.0f);

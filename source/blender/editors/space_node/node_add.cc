@@ -77,6 +77,12 @@ namespace blender::ed::space_node {
 /** \name Utilities
  * \{ */
 
+static eAssetImportMethod node_group_asset_import_method(const SpaceNode &snode)
+{
+  return (snode.shaderfrom == SNODE_SHADER_NPR) ? ASSET_IMPORT_APPEND_REUSE :
+                                                  ASSET_IMPORT_APPEND;
+}
+
 static void position_node_based_on_mouse(bNode &node, const float2 &location)
 {
   node.location[0] = location.x - NODE_DY * 1.5f / UI_SCALE_FAC;
@@ -478,10 +484,10 @@ static bool add_node_group_asset(const bContext &C,
   SpaceNode &snode = *CTX_wm_space_node(&C);
   bNodeTree &edit_tree = *snode.edittree;
 
-  /* Node group assets are editable templates. Always append a fresh local copy so old in-file
-   * versions don't get silently reused, which is especially important after NPR asset fixes. */
+  /* NPR tree group assets should reuse the first imported datablock so repeated adds keep
+   * referencing the same editable node group. Other node editors still append a fresh copy. */
   bNodeTree *node_group = reinterpret_cast<bNodeTree *>(asset::asset_local_id_ensure_imported(
-      bmain, asset, 0, ASSET_IMPORT_APPEND));
+      bmain, asset, 0, node_group_asset_import_method(snode)));
   if (!node_group) {
     return false;
   }
@@ -569,7 +575,8 @@ static wmOperatorStatus node_swap_group_asset_invoke(bContext *C,
     return OPERATOR_CANCELLED;
   }
   bNodeTree *node_group = reinterpret_cast<bNodeTree *>(
-      asset::asset_local_id_ensure_imported(bmain, *asset, 0, ASSET_IMPORT_APPEND));
+      asset::asset_local_id_ensure_imported(
+          bmain, *asset, 0, node_group_asset_import_method(snode)));
   if (!node_group) {
     return OPERATOR_CANCELLED;
   }

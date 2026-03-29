@@ -34,7 +34,6 @@ static void filter_material_collect_scene_sources(const bNodeTree &ntree,
                                                   Set<const bNodeTree *> &visited,
                                                   bool &r_uses_scene_depth,
                                                   bool &r_uses_scene_normal,
-                                                  bool &r_uses_scene_shadow,
                                                   bool &r_uses_scene_position)
 {
   if (visited.contains(&ntree)) {
@@ -47,11 +46,8 @@ static void filter_material_collect_scene_sources(const bNodeTree &ntree,
       const int source = node->custom1;
       r_uses_scene_depth |= (source == SHD_SCENE_SOURCE_DEPTH);
       r_uses_scene_normal |= (source == SHD_SCENE_SOURCE_NORMAL);
-      r_uses_scene_shadow |= (source == SHD_SCENE_SOURCE_SHADOW);
       r_uses_scene_position |= (source == SHD_SCENE_SOURCE_POSITION);
-      if (r_uses_scene_depth && r_uses_scene_normal && r_uses_scene_shadow &&
-          r_uses_scene_position)
-      {
+      if (r_uses_scene_depth && r_uses_scene_normal && r_uses_scene_position) {
         return;
       }
     }
@@ -60,11 +56,8 @@ static void filter_material_collect_scene_sources(const bNodeTree &ntree,
                                             visited,
                                             r_uses_scene_depth,
                                             r_uses_scene_normal,
-                                            r_uses_scene_shadow,
                                             r_uses_scene_position);
-      if (r_uses_scene_depth && r_uses_scene_normal && r_uses_scene_shadow &&
-          r_uses_scene_position)
-      {
+      if (r_uses_scene_depth && r_uses_scene_normal && r_uses_scene_position) {
         return;
       }
     }
@@ -75,7 +68,6 @@ void FilterMaterialModule::init()
 {
   uses_scene_depth_ = false;
   uses_scene_normal_ = false;
-  uses_scene_shadow_ = false;
   uses_scene_position_ = false;
 
   Set<const bNodeTree *> visited;
@@ -91,11 +83,8 @@ void FilterMaterialModule::init()
                                           visited,
                                           uses_scene_depth_,
                                           uses_scene_normal_,
-                                          uses_scene_shadow_,
                                           uses_scene_position_);
-    if (uses_scene_depth_ && uses_scene_normal_ && uses_scene_shadow_ &&
-        uses_scene_position_)
-    {
+    if (uses_scene_depth_ && uses_scene_normal_ && uses_scene_position_) {
       break;
     }
   }
@@ -128,6 +117,7 @@ void FilterMaterialModule::begin_sync()
                                                             filter_entry->material->nodetree,
                                                             MAT_PIPE_FILTER,
                                                             MAT_GEOM_WORLD,
+                                                            MAT_PROBE_NONE,
                                                             false,
                                                             nullptr);
     const int status = (gpumat != nullptr) ? GPU_material_status(gpumat) : -1;
@@ -193,7 +183,6 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
     pass.bind_texture("rp_color_tx", &inst_.render_buffers.rp_color_tx);
     pass.bind_texture("rp_value_tx", &inst_.render_buffers.rp_value_tx);
     pass.bind_texture("depth_tx", &inst_.render_buffers.depth_tx);
-    pass.bind_texture("scene_shadow_tx", &inst_.pipelines.shadow_filter.texture_ref());
     pass.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);
     pass.bind_resources(inst_.uniform_data);
     pass.bind_resources(inst_.sampling);

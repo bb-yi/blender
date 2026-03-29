@@ -16,6 +16,34 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_deferred_planar_eval)
 #include "eevee_light_eval_lib.glsl"
 #include "eevee_lightprobe_eval_lib.glsl"
 #include "eevee_lightprobe_volume_eval_lib.glsl"
+#include "gpu_shader_shared_exponent_lib.glsl"
+
+void write_radiance_direct(uchar layer_index, int2 texel, float3 radiance)
+{
+  uint data = rgb9e5_encode(radiance);
+  if (layer_index == 0u) {
+    imageStore(direct_radiance_1_img, texel, uint4(data));
+  }
+  else if (layer_index == 1u) {
+    imageStore(direct_radiance_2_img, texel, uint4(data));
+  }
+  else if (layer_index == 2u) {
+    imageStore(direct_radiance_3_img, texel, uint4(data));
+  }
+}
+
+void write_radiance_indirect(uchar layer_index, int2 texel, float3 radiance)
+{
+  if (layer_index == 0u) {
+    imageStore(indirect_radiance_1_img, texel, float4(radiance, 1.0f));
+  }
+  else if (layer_index == 1u) {
+    imageStore(indirect_radiance_2_img, texel, float4(radiance, 1.0f));
+  }
+  else if (layer_index == 2u) {
+    imageStore(indirect_radiance_3_img, texel, float4(radiance, 1.0f));
+  }
+}
 
 void main()
 {
@@ -26,9 +54,7 @@ void main()
   const gbuffer::Layers gbuf = gbuffer::read_layers(texel);
   const uchar closure_count = gbuf.header.closure_len();
   const float thickness = gbuffer::read_thickness(gbuf.header, texel);
-
-  float3 albedo_front = float3(0.0f);
-  float3 albedo_back = float3(0.0f);
+  const uint3 bin_indices = gbuf.header.bin_index_per_layer();
 
   ClosureUndetermined cl_reflect;
   cl_reflect.type = CLOSURE_BSDF_MICROFACET_GGX_REFLECTION_ID;
@@ -58,10 +84,8 @@ void main()
       }
       case CLOSURE_BSSRDF_BURLEY_ID:
       case CLOSURE_BSDF_DIFFUSE_ID:
-        albedo_front += cl.color;
         break;
       case CLOSURE_BSDF_TRANSLUCENT_ID:
-        albedo_back += (thickness != 0.0f) ? square(cl.color) : cl.color;
         break;
       case CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID: {
         cl_refract.color += (thickness != 0.0f) ? square(cl.color) : cl.color;
@@ -102,6 +126,12 @@ void main()
   cl_transmit.N = gbuf.surface_N();
   cl_transmit.type = CLOSURE_BSDF_TRANSLUCENT_ID;
 
+  ClosureUndetermined cl_none;
+  cl_none.N = gbuf.surface_N();
+  cl_none.type = CLOSURE_NONE_ID;
+  cl_none.color = float3(0.0f);
+  cl_none.data = float4(0.0f);
+
   uchar receiver_light_set = 0;
   float normal_offset = 0.0f;
   float geometry_offset = 0.0f;
@@ -117,6 +147,7 @@ void main()
   ClosureLightStack stack;
   stack.cl[0] = closure_light_new(cl, V);
   stack.cl[1] = closure_light_new(cl_reflect, V);
+  stack.cl[2] = closure_light_new(cl_none, V);
   light_eval_reflection(stack, P, Ng, V, vPz, receiver_light_set, normal_offset, geometry_offset);
 
   float3 radiance_front = stack.cl[0].light_shadowed;
@@ -124,6 +155,7 @@ void main()
 
   stack.cl[0] = closure_light_new(cl_transmit, V, thickness);
   stack.cl[1] = closure_light_new(cl_refract, V, thickness);
+  stack.cl[2] = closure_light_new(cl_none, V, thickness);
   light_eval_transmission(
       stack, P, Ng, V, vPz, thickness, receiver_light_set, normal_offset, geometry_offset);
 
@@ -134,14 +166,52 @@ void main()
   SphericalHarmonicL1 sh = lightprobe_volume_sample(P, V, Ng);
   LightProbeSample samp = lightprobe_load(P, Ng, V);
 
-  radiance_front += spherical_harmonics_evaluate_lambert(Ng, sh);
-  radiance_back += spherical_harmonics_evaluate_lambert(-Ng, sh);
-  radiance_reflect += lightprobe_eval(samp, cl_reflect, P, V, thickness);
-  radiance_refract += lightprobe_eval(samp, cl_refract, P, V, thickness);
+  float3 indirect_front = spherical_harmonics_evaluate_lambert(Ng, sh);
+  float3 indirect_back = spherical_harmonics_evaluate_lambert(-Ng, sh);
+  float3 indirect_reflect = lightprobe_eval(samp, cl_reflect, P, V, thickness);
+  float3 indirect_refract = lightprobe_eval(samp, cl_refract, P, V, thickness);
 
-  out_radiance = float4(0.0f);
-  out_radiance.xyz += radiance_reflect * cl_reflect.color;
-  out_radiance.xyz += radiance_refract * cl_refract.color;
-  out_radiance.xyz += radiance_front * albedo_front;
-  out_radiance.xyz += radiance_back * albedo_back;
+  float3 out_direct = float3(0.0f);
+  float3 out_indirect = float3(0.0f);
+  for (uchar i = 0; i < GBUFFER_LAYER_MAX && i < closure_count; i++) {
+    ClosureUndetermined cl_layer = gbuf.layer_get(i);
+    float3 direct_light = float3(0.0f);
+    float3 indirect_light = float3(0.0f);
+    float3 closure_color = cl_layer.color;
+
+    switch (cl_layer.type) {
+      case CLOSURE_BSSRDF_BURLEY_ID:
+      case CLOSURE_BSDF_DIFFUSE_ID:
+        direct_light = radiance_front;
+        indirect_light = indirect_front;
+        break;
+      case CLOSURE_BSDF_TRANSLUCENT_ID:
+        direct_light = radiance_back;
+        indirect_light = indirect_back;
+        if (thickness != 0.0f) {
+          closure_color *= closure_color;
+        }
+        break;
+      case CLOSURE_BSDF_MICROFACET_GGX_REFLECTION_ID:
+        direct_light = radiance_reflect;
+        indirect_light = indirect_reflect;
+        break;
+      case CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID:
+        direct_light = radiance_refract;
+        indirect_light = indirect_refract;
+        if (thickness != 0.0f) {
+          closure_color *= closure_color;
+        }
+        break;
+      case CLOSURE_NONE_ID:
+        break;
+    }
+
+    write_radiance_direct(bin_indices[i], texel, direct_light);
+    write_radiance_indirect(bin_indices[i], texel, indirect_light);
+    out_direct += direct_light * closure_color;
+    out_indirect += indirect_light * closure_color;
+  }
+
+  out_radiance = float4(out_direct + out_indirect, 0.0f);
 }

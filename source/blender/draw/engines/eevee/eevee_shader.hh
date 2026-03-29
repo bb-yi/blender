@@ -209,6 +209,12 @@ enum ShaderGroups : uint32_t {
 };
 ENUM_OPERATORS(ShaderGroups)
 
+enum eMaterialProbe {
+  MAT_PROBE_NONE = 0,
+  MAT_PROBE_REFLECTION,
+  MAT_PROBE_PLANAR,
+};
+
 /**
  * Shader module. shared between instances.
  */
@@ -288,6 +294,7 @@ class ShaderModule {
                                    bNodeTree *nodetree,
                                    eMaterialPipeline pipeline_type,
                                    eMaterialGeometry geometry_type,
+                                   eMaterialProbe probe_capture,
                                    bool deferred_compilation,
                                    blender::Material *default_mat);
   GPUMaterial *world_shader_get(blender::World *blender_world,

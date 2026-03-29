@@ -65,6 +65,11 @@ void write_header_data(int2 texel, int layer, uint data)
 
 void main()
 {
+#ifndef MAT_REFRACTION
+  /* Clear AOVs first. In case the material renders to them. */
+  clear_aovs();
+#endif
+
   init_globals();
 
   float noise = utility_tx_fetch(utility_tx, gl_FragCoord.xy, UTIL_BLUE_NOISE_LAYER).r;

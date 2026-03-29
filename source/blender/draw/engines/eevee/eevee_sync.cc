@@ -36,6 +36,36 @@ static Vector<GPUMaterial *> non_null_materials(Span<GPUMaterial *> materials)
   return filtered;
 }
 
+static void append_unique_material(Vector<GPUMaterial *> &materials, GPUMaterial *material)
+{
+  if (material == nullptr || materials.contains(material)) {
+    return;
+  }
+  materials.append(material);
+}
+
+static Vector<GPUMaterial *> npr_and_probe_materials(Span<Material> materials)
+{
+  Vector<GPUMaterial *> filtered;
+  filtered.reserve(materials.size() * 3);
+  for (const Material &material : materials) {
+    append_unique_material(filtered, material.npr.gpumat);
+    append_unique_material(filtered, material.planar_probe_npr.gpumat);
+    append_unique_material(filtered, material.lightprobe_sphere_npr.gpumat);
+  }
+  return filtered;
+}
+
+static Vector<GPUMaterial *> npr_and_probe_materials(const Material &material)
+{
+  Vector<GPUMaterial *> filtered;
+  filtered.reserve(3);
+  append_unique_material(filtered, material.npr.gpumat);
+  append_unique_material(filtered, material.planar_probe_npr.gpumat);
+  append_unique_material(filtered, material.lightprobe_sphere_npr.gpumat);
+  return filtered;
+}
+
 /* -------------------------------------------------------------------- */
 /** \name Recalc
  *
@@ -186,7 +216,7 @@ void SyncModule::sync_mesh(Object *ob, ObjectHandle &ob_handle, const ObjectRef 
   }
 
   inst_.manager->extract_object_attributes(res_handle, ob_ref, material_array.gpu_materials);
-  Vector<GPUMaterial *> gpu_materials_npr = non_null_materials(material_array.gpu_materials_npr);
+  Vector<GPUMaterial *> gpu_materials_npr = npr_and_probe_materials(material_array.materials);
   if (!gpu_materials_npr.is_empty()) {
     inst_.manager->extract_object_attributes(res_handle, ob_ref, gpu_materials_npr);
   }
@@ -276,7 +306,7 @@ bool SyncModule::sync_sculpt(Object *ob, ObjectHandle &ob_handle, const ObjectRe
   }
 
   inst_.manager->extract_object_attributes(res_handle, ob_ref, material_array.gpu_materials);
-  Vector<GPUMaterial *> gpu_materials_npr = non_null_materials(material_array.gpu_materials_npr);
+  Vector<GPUMaterial *> gpu_materials_npr = npr_and_probe_materials(material_array.materials);
   if (!gpu_materials_npr.is_empty()) {
     inst_.manager->extract_object_attributes(res_handle, ob_ref, gpu_materials_npr);
   }
@@ -362,6 +392,10 @@ void SyncModule::sync_pointcloud(Object *ob, ObjectHandle &ob_handle, const Obje
   }
 
   inst_.manager->extract_object_attributes(res_handle, ob_ref, material.shading.gpumat);
+  Vector<GPUMaterial *> gpu_materials_npr = npr_and_probe_materials(material);
+  if (!gpu_materials_npr.is_empty()) {
+    inst_.manager->extract_object_attributes(res_handle, ob_ref, gpu_materials_npr);
+  }
 
   inst_.shadows.sync_object(ob,
                             ob_handle,
@@ -523,6 +557,10 @@ void SyncModule::sync_curves(Object *ob,
   }
 
   inst_.manager->extract_object_attributes(res_handle, ob_ref, material.shading.gpumat);
+  Vector<GPUMaterial *> gpu_materials_npr = npr_and_probe_materials(material);
+  if (!gpu_materials_npr.is_empty()) {
+    inst_.manager->extract_object_attributes(res_handle, ob_ref, gpu_materials_npr);
+  }
 
   inst_.shadows.sync_object(ob,
                             ob_handle,

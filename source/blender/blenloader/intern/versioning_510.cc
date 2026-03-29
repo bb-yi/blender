@@ -950,6 +950,22 @@ void blo_do_versions_510(FileData * /*fd*/, Library * /*lib*/, Main *bmain)
     }
   }
 
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 35)) {
+    FOREACH_NODETREE_BEGIN (bmain, ntree, id) {
+      if (ntree->type != NTREE_SHADER) {
+        continue;
+      }
+      for (bNode &node : ntree->nodes) {
+        if (node.type_legacy == SH_NODE_SHADER_INFO &&
+            node.custom1 == SHD_SHADER_INFO_SHADOW_STABLE)
+        {
+          node.custom1 = SHD_SHADER_INFO_SHADOW_SOFT_FILTERED;
+        }
+      }
+    }
+    FOREACH_NODETREE_END;
+  }
+
   /**
    * Always bump subversion in BKE_blender_version.h when adding versioning
    * code here, and wrap it inside a MAIN_VERSION_FILE_ATLEAST check.

@@ -145,12 +145,12 @@ class Sampling {
 
   bool use_clamp_direct() const
   {
-    return clamp_data_.surface_direct != 0.0f;
+    return clamp_data_.surface_direct < 1.0e19f;
   }
 
   bool use_clamp_indirect() const
   {
-    return clamp_data_.surface_indirect != 0.0f;
+    return clamp_data_.surface_indirect < 1.0e19f;
   }
 
   bool use_direct_scale() const

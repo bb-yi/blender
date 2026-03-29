@@ -511,15 +511,33 @@ class ShaderNodesInliner {
     const bke::bNodeTreeZone *to_zone = zones->get_zone_by_socket(*to_socket);
     const bke::bNodeTreeZone *from_zone = zones->get_zone_by_socket(*link.fromsock);
     const ComputeContext *context = to_socket.context;
-    for (const bke::bNodeTreeZone *zone = to_zone; zone != from_zone; zone = zone->parent_zone) {
-      const bNode &zone_output_node = *zone->output_node();
-      if (zone_output_node.is_type("GeometryNodeRepeatOutput")) {
-        if (this->should_preserve_repeat_zone_node(zone_output_node)) {
-          /* Preserved repeat zones are embedded into their outer compute context. */
-          continue;
-        }
+    for (const bke::bNodeTreeZone *zone = to_zone; zone && zone != from_zone;
+         zone = zone->parent_zone)
+    {
+      const bNode *zone_output_node = zone->output_node();
+      if (!zone_output_node) {
+        break;
       }
-      context = parent_zone_contexts_.lookup(context);
+      if (zone_output_node->is_type("GeometryNodeRepeatOutput") &&
+          this->should_preserve_repeat_zone_node(*zone_output_node))
+      {
+        /* Preserved repeat zones are embedded into their outer compute context. */
+        continue;
+      }
+      if (zone_output_node->is_type("ShaderNodeForeachLightOutput") &&
+          this->should_preserve_foreach_light_zone_node(*zone_output_node))
+      {
+        /* Preserved foreach-light zones are embedded into their outer compute context too. */
+        continue;
+      }
+      const ComputeContext **parent_context = parent_zone_contexts_.lookup_ptr(context);
+      if (parent_context == nullptr) {
+        /* Interactive link-dragging can temporarily expose cross-zone links before the tree is
+         * normalized through the zone IO sockets. In that state, keep the current context instead
+         * of crashing on a missing parent mapping. */
+        break;
+      }
+      context = *parent_context;
     }
     return context;
   }
@@ -565,6 +583,18 @@ class ShaderNodesInliner {
       }
       this->handle_output_socket__repeat_input(socket);
       return;
+    }
+    if (node->is_type("ShaderNodeForeachLightOutput")) {
+      if (this->should_preserve_foreach_light_zone_node(*node)) {
+        this->handle_output_socket__preserved_foreach_light_output(socket);
+        return;
+      }
+    }
+    if (node->is_type("ShaderNodeForeachLightInput")) {
+      if (this->should_preserve_foreach_light_zone_node(*node)) {
+        this->handle_output_socket__preserved_foreach_light_input(socket);
+        return;
+      }
     }
     if (node->is_type("NodeClosureOutput")) {
       this->handle_output_socket__closure_output(socket);
@@ -731,6 +761,14 @@ class ShaderNodesInliner {
     return true;
   }
 
+  bool should_preserve_foreach_light_zone_node(const bNode &foreach_light_zone_node) const
+  {
+    BLI_assert(foreach_light_zone_node.is_type("ShaderNodeForeachLightOutput") ||
+               foreach_light_zone_node.is_type("ShaderNodeForeachLightInput"));
+    UNUSED_VARS_NDEBUG(foreach_light_zone_node);
+    return params_.allow_preserving_repeat_zones;
+  }
+
   void handle_output_socket__repeat_output(const SocketInContext &socket)
   {
     const bNode &repeat_output_node = socket->owner_node();
@@ -814,6 +852,46 @@ class ShaderNodesInliner {
     const NodeInContext repeat_output_node{node.context, tree.node_by_id(storage.output_node_id)};
     PreservedZone &preserved_zone = copied_zone_by_zone_output_node_.lookup_or_add_default(
         repeat_output_node);
+    preserved_zone.input_node = &copied_node;
+  }
+
+  void handle_output_socket__preserved_foreach_light_output(const SocketInContext &socket)
+  {
+    const bNodeTree &tree = socket->owner_tree();
+    const NodeInContext foreach_light_output_node = socket.owner_node();
+    const bke::bNodeTreeZones &zones = *tree.zones();
+    const bke::bNodeTreeZone &zone = *zones.get_zone_by_node(foreach_light_output_node->identifier);
+    const bNode &foreach_light_input_node = *zone.input_node();
+
+    const EnsureInputsResult ensured_inputs = this->ensure_node_inputs(socket.owner_node());
+    if (ensured_inputs.has_missing_inputs) {
+      /* The node can only be evaluated if all inputs values are known. */
+      return;
+    }
+    const NodeInContext node = socket.owner_node();
+    bNode &copied_node = this->handle_output_socket__eval_copy_node(node);
+    PreservedZone &preserved_zone = copied_zone_by_zone_output_node_.lookup_or_add_default(
+        foreach_light_output_node);
+    preserved_zone.output_node = &copied_node;
+    /* Ensure that the paired input node is created as well. */
+    this->schedule_socket({node.context, &foreach_light_input_node.output_socket(0)});
+  }
+
+  void handle_output_socket__preserved_foreach_light_input(const SocketInContext &socket)
+  {
+    const EnsureInputsResult ensured_inputs = this->ensure_node_inputs(socket.owner_node());
+    if (ensured_inputs.has_missing_inputs) {
+      /* The node can only be evaluated if all inputs values are known. */
+      return;
+    }
+    const bNodeTree &tree = socket->owner_tree();
+    const NodeInContext node = socket.owner_node();
+    bNode &copied_node = this->handle_output_socket__eval_copy_node(node);
+    const auto &storage = *static_cast<const NodeShaderForeachLightInput *>(node->storage);
+    const NodeInContext foreach_light_output_node{
+        node.context, tree.node_by_id(storage.output_node_id)};
+    PreservedZone &preserved_zone = copied_zone_by_zone_output_node_.lookup_or_add_default(
+        foreach_light_output_node);
     preserved_zone.input_node = &copied_node;
   }
 

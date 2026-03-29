@@ -46,6 +46,14 @@ using nodes::SocketLinkOperation;
 
 namespace ed::space_node {
 
+static eAssetImportMethod node_group_asset_import_method(const bContext &C)
+{
+  const SpaceNode *snode = CTX_wm_space_node(&C);
+  return (snode != nullptr && snode->shaderfrom == SNODE_SHADER_NPR) ?
+             ASSET_IMPORT_APPEND_REUSE :
+             ASSET_IMPORT_APPEND;
+}
+
 struct LinkDragSearchStorage {
   bNode &from_node;
   bNodeSocket &from_socket;
@@ -211,9 +219,10 @@ static void search_link_ops_for_asset_metadata(const bNodeTree &node_tree,
          [&asset, &socket_property, in_out](nodes::LinkSearchOpParams &params) {
            Main &bmain = *CTX_data_main(&params.C);
 
-           /* Match the add-menu behavior and append a fresh editable template copy. */
+           /* Match add-menu behavior: NPR tree assets reuse their local datablock, while other
+            * node editors still append a fresh editable copy. */
            bNodeTree *group = reinterpret_cast<bNodeTree *>(asset::asset_local_id_ensure_imported(
-               bmain, asset, 0, ASSET_IMPORT_APPEND));
+               bmain, asset, 0, node_group_asset_import_method(params.C)));
            if (!group) {
              return;
            }

@@ -63,7 +63,7 @@ void register_node_type_sh_scene_color()
   common_node_type_base(&ntype, "ShaderNodeSceneColor", SH_NODE_SCENE_COLOR);
   ntype.ui_name = "Scene Color";
   ntype.ui_description =
-      "Read Eevee scene color, depth, normal, shadow, or position for filter materials";
+      "Read Eevee scene color, depth, normal, or position for filter materials";
   ntype.enum_name_legacy = "SCENE_COLOR";
   ntype.nclass = NODE_CLASS_INPUT;
   ntype.declare = file_ns::node_declare;

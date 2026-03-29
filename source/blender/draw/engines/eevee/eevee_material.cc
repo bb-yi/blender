@@ -216,7 +216,13 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
 
   MaterialPass matpass = MaterialPass();
   matpass.gpumat = inst_.shaders.material_shader_get(
-      blender_mat, ntree, pipeline_type, geometry_type, use_deferred_compilation, default_mat);
+      blender_mat,
+      ntree,
+      pipeline_type,
+      geometry_type,
+      probe_capture,
+      use_deferred_compilation,
+      default_mat);
 
   queue_texture_loading(matpass.gpumat);
 
@@ -241,7 +247,13 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
         return MaterialPass();
       }
       matpass.gpumat = inst_.shaders.material_shader_get(
-          default_mat, default_mat->nodetree, pipeline_type, geometry_type, false, nullptr);
+          default_mat,
+          default_mat->nodetree,
+          pipeline_type,
+          geometry_type,
+          probe_capture,
+          false,
+          nullptr);
       break;
     case GPU_MAT_FAILED:
     default:
@@ -249,7 +261,13 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
         return MaterialPass();
       }
       matpass.gpumat = inst_.shaders.material_shader_get(
-          error_mat_, error_mat_->nodetree, pipeline_type, geometry_type, false, nullptr);
+          error_mat_,
+          error_mat_->nodetree,
+          pipeline_type,
+          geometry_type,
+          probe_capture,
+          false,
+          nullptr);
       break;
   }
   /* Returned material should be ready to be drawn. */
@@ -282,7 +300,10 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
     matpass.sub_pass = nullptr;
   }
   else {
-    ShaderKey shader_key(matpass.gpumat, blender_mat, probe_capture);
+    ShaderKey shader_key(matpass.gpumat,
+                         blender_mat,
+                         probe_capture,
+                         ob->refraction_layer_index);
 
     PassMain::Sub *shader_sub = shader_map_.lookup_or_add_cb(shader_key, [&]() {
       /* First time encountering this shader. Create a sub that will contain materials using it. */
@@ -301,6 +322,12 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
         matpass.sub_pass->bind_resources(inst_.hiz_buffer.front);
         matpass.sub_pass->bind_resources(inst_.lights);
         matpass.sub_pass->bind_resources(inst_.shadows);
+        if (probe_capture != MAT_PROBE_NONE) {
+          /* Probe NPR passes rebind the material shader on the material sub-pass. Re-apply the
+           * probe-specific push constants here so the final draw call keeps the capture settings. */
+          matpass.sub_pass->push_constant("use_split_radiance", true);
+          matpass.sub_pass->push_constant("use_radiance_input_for_combined", false);
+        }
       }
     }
     else {
@@ -320,7 +347,7 @@ Material &MaterialModule::material_sync(Object *ob,
 
   if (geometry_type == MAT_GEOM_VOLUME) {
     MaterialKey material_key(
-        blender_mat, geometry_type, MAT_PIPE_VOLUME_MATERIAL, ob->visibility_flag);
+        blender_mat, geometry_type, MAT_PIPE_VOLUME_MATERIAL, ob->visibility_flag, 0);
     Material &mat = material_map_.lookup_or_add_cb(material_key, [&]() {
       Material mat = {};
       mat.volume_occupancy = material_pass_get(
@@ -360,7 +387,8 @@ Material &MaterialModule::material_sync(Object *ob,
     prepass_pipe = has_motion ? MAT_PIPE_PREPASS_DEFERRED_VELOCITY : MAT_PIPE_PREPASS_DEFERRED;
   }
 
-  MaterialKey material_key(blender_mat, geometry_type, surface_pipe, ob->visibility_flag);
+  MaterialKey material_key(
+      blender_mat, geometry_type, surface_pipe, ob->visibility_flag, ob->refraction_layer_index);
 
   Material &mat = material_map_.lookup_or_add_cb(material_key, [&]() {
     Material mat = {};
@@ -421,10 +449,13 @@ Material &MaterialModule::material_sync(Object *ob,
             ob, blender_mat, MAT_PIPE_PREPASS_DEFERRED, geometry_type, MAT_PROBE_REFLECTION);
         mat.lightprobe_sphere_shading = material_pass_get(
             ob, blender_mat, MAT_PIPE_DEFERRED, geometry_type, MAT_PROBE_REFLECTION);
-        /* Reflection probes cache indirect lighting, not the camera-facing NPR presentation pass.
-         * Running NPR trees during capture is unreliable because several NPR inputs are only valid
-         * in the main camera shading path, which can skew or over-brighten probe reflections. */
-        mat.lightprobe_sphere_npr = MaterialPass();
+        mat.lightprobe_sphere_npr = has_npr_tree ? material_pass_get(
+                                                     ob,
+                                                     blender_mat,
+                                                     MAT_PIPE_DEFERRED_NPR,
+                                                     geometry_type,
+                                                     MAT_PROBE_REFLECTION) :
+                                                 MaterialPass();
       }
       else {
         mat.lightprobe_sphere_prepass = MaterialPass();
@@ -437,7 +468,13 @@ Material &MaterialModule::material_sync(Object *ob,
             ob, blender_mat, MAT_PIPE_PREPASS_PLANAR, geometry_type, MAT_PROBE_PLANAR);
         mat.planar_probe_shading = material_pass_get(
             ob, blender_mat, MAT_PIPE_DEFERRED, geometry_type, MAT_PROBE_PLANAR);
-        mat.planar_probe_npr = MaterialPass();
+        mat.planar_probe_npr = has_npr_tree ? material_pass_get(
+                                                 ob,
+                                                 blender_mat,
+                                                 MAT_PIPE_DEFERRED_NPR,
+                                                 geometry_type,
+                                                 MAT_PROBE_PLANAR) :
+                                             MaterialPass();
       }
       else {
         mat.planar_probe_prepass = MaterialPass();
@@ -554,7 +591,7 @@ ShaderGroups MaterialModule::default_materials_load(bool block_until_ready)
   auto request_shader =
       [&](blender::Material *mat, eMaterialPipeline pipeline, eMaterialGeometry geom) {
         GPUMaterial *gpu_mat = inst_.shaders.material_shader_get(
-            mat, mat->nodetree, pipeline, geom, !block_until_ready, nullptr);
+            mat, mat->nodetree, pipeline, geom, MAT_PROBE_NONE, !block_until_ready, nullptr);
         shaders_are_ready = shaders_are_ready && GPU_material_status(gpu_mat) == GPU_MAT_SUCCESS;
       };
 

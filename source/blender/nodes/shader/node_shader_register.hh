@@ -78,6 +78,7 @@ void register_node_type_sh_scene_time();
 void register_node_type_sh_world_environment();
 void register_node_type_sh_light_probe_color();
 void register_node_type_sh_world_to_tangent();
+void register_node_type_sh_basis_transform();
 void register_node_type_sh_shader_info();
 void register_node_type_sh_screenspace_info();
 void register_node_type_sh_scene_color();

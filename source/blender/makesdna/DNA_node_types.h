@@ -474,6 +474,23 @@ enum {
   SHD_VECT_TRANSFORM_SPACE_CAMERA = 2,
 };
 
+enum {
+  SHD_BASIS_TRANSFORM_DIRECTION_TO = 0,
+  SHD_BASIS_TRANSFORM_DIRECTION_FROM = 1,
+};
+
+enum {
+  SHD_BASIS_TRANSFORM_INPUT_XYZ = 0,
+  SHD_BASIS_TRANSFORM_INPUT_XY = 1,
+  SHD_BASIS_TRANSFORM_INPUT_XZ = 2,
+  SHD_BASIS_TRANSFORM_INPUT_YZ = 3,
+};
+
+enum {
+  SHD_BASIS_TRANSFORM_FALLBACK_PASS_THROUGH = 0,
+  SHD_BASIS_TRANSFORM_FALLBACK_ZERO = 1,
+};
+
 /** #NodeShaderAttribute.type */
 enum {
   SHD_ATTRIBUTE_GEOMETRY = 0,
@@ -807,7 +824,6 @@ enum NodeShaderSceneSource {
   SHD_SCENE_SOURCE_COLOR = 0,
   SHD_SCENE_SOURCE_DEPTH = 1,
   SHD_SCENE_SOURCE_NORMAL = 2,
-  SHD_SCENE_SOURCE_SHADOW = 3,
   SHD_SCENE_SOURCE_POSITION = 4,
 };
 
@@ -2861,6 +2877,16 @@ struct NodeShaderWorldToTangent {
   DNA_DEFINE_CXX_METHODS(NodeShaderWorldToTangent)
 
   char uv_map[/*MAX_CUSTOMDATA_LAYER_NAME_NO_PREFIX*/ 64] = "";
+};
+
+struct NodeShaderBasisTransform {
+  DNA_DEFINE_CXX_METHODS(NodeShaderBasisTransform)
+
+  int vector_type = SHD_VECT_TRANSFORM_TYPE_VECTOR;
+  int direction = SHD_BASIS_TRANSFORM_DIRECTION_TO;
+  int basis_input = SHD_BASIS_TRANSFORM_INPUT_XYZ;
+  int fallback = SHD_BASIS_TRANSFORM_FALLBACK_PASS_THROUGH;
+  int orthonormalize = 1;
 };
 
 struct NodeShaderShaderInfo {

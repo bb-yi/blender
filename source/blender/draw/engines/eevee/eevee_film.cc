@@ -337,9 +337,6 @@ void Film::init(const int2 &extent, const rcti *output_rect)
     if (inst_.filter_materials.uses_scene_normal()) {
       enabled_passes_ |= EEVEE_RENDER_PASS_NORMAL;
     }
-    if (inst_.filter_materials.uses_scene_shadow()) {
-      enabled_passes_ |= EEVEE_RENDER_PASS_SHADOW;
-    }
     if (inst_.filter_materials.uses_scene_position()) {
       enabled_passes_ |= EEVEE_RENDER_PASS_POSITION;
     }

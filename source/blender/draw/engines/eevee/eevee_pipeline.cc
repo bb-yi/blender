@@ -846,7 +846,7 @@ void DeferredLayer::begin_sync()
     npr_ps_.bind_texture(INDIRECT_RADIANCE_NPR_TX_SLOT_1 + 0, &indirect_result_.closures[0]);
     npr_ps_.bind_texture(INDIRECT_RADIANCE_NPR_TX_SLOT_1 + 1, &indirect_result_.closures[1]);
     npr_ps_.bind_texture(INDIRECT_RADIANCE_NPR_TX_SLOT_1 + 2, &indirect_result_.closures[2]);
-    npr_ps_.bind_texture(BACK_RADIANCE_TX_SLOT, &radiance_behind_tx_);
+    npr_ps_.bind_texture(BACK_RADIANCE_TX_SLOT, &radiance_back_tx_);
     npr_ps_.bind_texture(BACK_HIZ_TX_SLOT, &inst_.hiz_buffer.back.ref_tx_);
   });
 }
@@ -892,22 +892,9 @@ void DeferredLayer::end_sync(bool is_first_pass,
 
   use_feedback_output_ = (use_raytracing_ || is_layer_refracted) &&
                          (!is_last_pass || use_screen_reflection_);
-
-  /* Clear AOVs in case previous layers wrote to them. First pass always get clear buffer because
-   * of #BackgroundPipeline::clear(). */
-  if (inst_.film.aovs_info.color_len > 0 && !is_first_pass) {
-    gpu::Shader *sh = inst_.shaders.static_shader_get(DEFERRED_AOV_CLEAR);
-    PassMain::Sub &sub = prepass_ps_.sub("AOVsClear");
-    sub.shader_set(sh);
-    sub.state_set(DRW_STATE_WRITE_STENCIL | DRW_STATE_STENCIL_EQUAL);
-    sub.bind_image("rp_color_img", &inst_.render_buffers.rp_color_tx);
-    sub.bind_image("rp_value_img", &inst_.render_buffers.rp_value_tx);
-    sub.bind_image("rp_cryptomatte_img", &inst_.render_buffers.cryptomatte_tx);
-    sub.bind_resources(inst_.cryptomatte);
-    sub.bind_resources(inst_.uniform_data);
-    sub.state_stencil(0xFFu, 0x0u, 0xFFu);
-    sub.draw_procedural(GPU_PRIM_TRIS, 1, 3);
-  }
+  /* Keep a resolved radiance feedback for every non-first layer so transmission/refraction can
+   * always sample the already composited layer behind, matching the prototype pipeline. */
+  use_feedback_output_ = use_feedback_output_ || !is_first_pass;
 
   {
     RenderBuffersInfoData &rbuf_data = inst_.render_buffers.data;
@@ -1136,6 +1123,7 @@ PassMain::Sub *DeferredLayer::npr_add(blender::Material *blender_mat, GPUMateria
   GPUPass *gpupass = GPU_material_get_pass(gpumat);
   material_pass->shader_set(GPU_pass_shader_get(gpupass));
   material_pass->push_constant("use_split_radiance", &use_split_radiance_);
+  material_pass->push_constant("use_radiance_input_for_combined", false);
 
   return material_pass;
 }
@@ -1204,6 +1192,7 @@ gpu::Texture *DeferredLayer::render(View &main_view,
       direct_radiance_txs_[0], indirect_result_.closures[0], closure_bits_, render_view);
 
   radiance_feedback_tx_ = rt_buffer.feedback_ensure(!use_feedback_output_, extent);
+  radiance_back_tx_ = radiance_behind_tx ? radiance_behind_tx : radiance_feedback_tx_;
 
   if (use_feedback_output_ && use_clamp_direct_) {
     /* We need to do a copy before the combine pass (otherwise we have a dependency issue) to save
@@ -1222,7 +1211,7 @@ gpu::Texture *DeferredLayer::render(View &main_view,
 
     TextureFromPool npr_radiance_input = {"NPR Radiance Input"};
     npr_radiance_input.acquire(extent,
-                               gpu::TextureFormat::SFLOAT_16_16_16_16,
+                               GPU_texture_format(rb.combined_tx),
                                GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE);
     npr_radiance_input_tx_ = npr_radiance_input;
     GPU_texture_copy(npr_radiance_input_tx_, rb.combined_tx);
@@ -1232,8 +1221,10 @@ gpu::Texture *DeferredLayer::render(View &main_view,
     npr_radiance_input.release();
   }
 
-  if (use_feedback_output_ && !use_clamp_direct_) {
-    /* We skip writing the radiance during the combine pass. Do a simple fast copy. */
+  if (use_feedback_output_) {
+    /* The texture returned to later transmission/refraction passes must contain the final visible
+     * radiance, including any NPR rewrite. The pre-combine copy above is only an intermediate
+     * source used when the combine shader needs read/write-safe feedback access. */
     GPU_texture_copy(radiance_feedback_tx_, rb.combined_tx);
   }
 
@@ -1258,18 +1249,23 @@ gpu::Texture *DeferredLayer::render(View &main_view,
 
 void DeferredPipeline::begin_sync()
 {
+  use_combined_lightprobe_eval = !inst_.raytracing.use_raytracing();
   opaque_layer_.begin_sync();
-  refraction_layer_.begin_sync();
+  refraction_layers_.clear();
 }
 
 void DeferredPipeline::end_sync()
 {
-  Instance &inst = opaque_layer_.inst_;
+  opaque_layer_.end_sync(true, refraction_layers_.empty(), !refraction_layers_.empty());
 
-  opaque_layer_.end_sync(true, refraction_layer_.is_empty(), refraction_layer_.has_transmission());
-  refraction_layer_.end_sync(opaque_layer_.is_empty(), true, false);
+  if (!refraction_layers_.empty()) {
+    const short last_index = refraction_layers_.rbegin()->first;
+    for (auto &[index, layer] : refraction_layers_) {
+      layer->end_sync(opaque_layer_.is_empty(), index == last_index, index != last_index);
+    }
+  }
 
-  inst.pipelines.data.gbuffer_additional_data_layer_id = this->normal_layer_count() - 1;
+  inst_.pipelines.data.gbuffer_additional_data_layer_id = this->normal_layer_count() - 1;
 
   debug_pass_sync();
 }
@@ -1321,26 +1317,31 @@ void DeferredPipeline::debug_draw(draw::View &view, gpu::FrameBuffer *combined_f
 
 PassMain::Sub *DeferredPipeline::prepass_add(blender::Material *blender_mat,
                                              GPUMaterial *gpumat,
-                                             bool has_motion)
+                                             bool has_motion,
+                                             short refraction_layer)
 {
-  if (blender_mat->blend_flag & MA_BL_SS_REFRACTION) {
-    return refraction_layer_.prepass_add(blender_mat, gpumat, has_motion);
+  if (!use_combined_lightprobe_eval && (blender_mat->blend_flag & MA_BL_SS_REFRACTION)) {
+    return get_refraction_layer(refraction_layer).prepass_add(blender_mat, gpumat, has_motion);
   }
   return opaque_layer_.prepass_add(blender_mat, gpumat, has_motion);
 }
 
-PassMain::Sub *DeferredPipeline::material_add(blender::Material *blender_mat, GPUMaterial *gpumat)
+PassMain::Sub *DeferredPipeline::material_add(blender::Material *blender_mat,
+                                              GPUMaterial *gpumat,
+                                              short refraction_layer)
 {
-  if (blender_mat->blend_flag & MA_BL_SS_REFRACTION) {
-    return refraction_layer_.material_add(blender_mat, gpumat);
+  if (!use_combined_lightprobe_eval && (blender_mat->blend_flag & MA_BL_SS_REFRACTION)) {
+    return get_refraction_layer(refraction_layer).material_add(blender_mat, gpumat);
   }
   return opaque_layer_.material_add(blender_mat, gpumat);
 }
 
-PassMain::Sub *DeferredPipeline::npr_add(blender::Material *blender_mat, GPUMaterial *gpumat)
+PassMain::Sub *DeferredPipeline::npr_add(blender::Material *blender_mat,
+                                         GPUMaterial *gpumat,
+                                         short refraction_layer)
 {
-  if (blender_mat->blend_flag & MA_BL_SS_REFRACTION) {
-    return refraction_layer_.npr_add(blender_mat, gpumat);
+  if (!use_combined_lightprobe_eval && (blender_mat->blend_flag & MA_BL_SS_REFRACTION)) {
+    return get_refraction_layer(refraction_layer).npr_add(blender_mat, gpumat);
   }
   return opaque_layer_.npr_add(blender_mat, gpumat);
 }
@@ -1368,15 +1369,28 @@ void DeferredPipeline::render(View &main_view,
   GPU_debug_group_end();
 
   GPU_debug_group_begin("Deferred.Refract");
-  feedback_tx = refraction_layer_.render(main_view,
-                                         render_view,
-                                         prepass_fb,
-                                         combined_fb,
-                                         gbuffer_fb,
-                                         extent,
-                                         rt_buffer_refract_layer,
-                                         feedback_tx);
+  for (auto &[index, layer] : refraction_layers_) {
+    feedback_tx = layer->render(main_view,
+                                render_view,
+                                prepass_fb,
+                                combined_fb,
+                                gbuffer_fb,
+                                extent,
+                                rt_buffer_refract_layer,
+                                feedback_tx);
+  }
   GPU_debug_group_end();
+}
+
+DeferredLayer &DeferredPipeline::get_refraction_layer(short index)
+{
+  auto layer_it = refraction_layers_.find(index);
+  if (layer_it == refraction_layers_.end()) {
+    auto layer = std::make_unique<DeferredLayer>(inst_);
+    layer->begin_sync();
+    layer_it = refraction_layers_.emplace(index, std::move(layer)).first;
+  }
+  return *layer_it->second;
 }
 
 /** \} */
@@ -1627,8 +1641,8 @@ void DeferredProbePipeline::begin_sync()
     PassMain &npr_ps = opaque_layer_.npr_ps_;
     npr_ps.bind_texture(NPR_RADIANCE_TEX_SLOT, &npr_radiance_input_tx_);
     for (int i : IndexRange(3)) {
-      npr_ps.bind_texture(DIRECT_RADIANCE_NPR_TX_SLOT_1 + i, &dummy_black);
-      npr_ps.bind_texture(INDIRECT_RADIANCE_NPR_TX_SLOT_1 + i, &dummy_black);
+      npr_ps.bind_texture(DIRECT_RADIANCE_NPR_TX_SLOT_1 + i, &direct_radiance_txs_[i]);
+      npr_ps.bind_texture(INDIRECT_RADIANCE_NPR_TX_SLOT_1 + i, &indirect_radiance_txs_[i]);
     }
     npr_ps.bind_texture(BACK_RADIANCE_TX_SLOT, &dummy_black);
     npr_ps.bind_texture(BACK_HIZ_TX_SLOT, &dummy_black);
@@ -1653,6 +1667,12 @@ void DeferredProbePipeline::end_sync()
     pass.bind_resources(inst_.sampling);
     pass.bind_resources(inst_.hiz_buffer.front);
     pass.bind_resources(inst_.volume_probes);
+    pass.bind_image("direct_radiance_1_img", &direct_radiance_txs_[0]);
+    pass.bind_image("direct_radiance_2_img", &direct_radiance_txs_[1]);
+    pass.bind_image("direct_radiance_3_img", &direct_radiance_txs_[2]);
+    pass.bind_image("indirect_radiance_1_img", &indirect_radiance_txs_[0]);
+    pass.bind_image("indirect_radiance_2_img", &indirect_radiance_txs_[1]);
+    pass.bind_image("indirect_radiance_3_img", &indirect_radiance_txs_[2]);
     pass.barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_SHADER_IMAGE_ACCESS);
     pass.draw_procedural(GPU_PRIM_TRIS, 1, 3);
   }
@@ -1698,7 +1718,8 @@ PassMain::Sub *DeferredProbePipeline::npr_add(blender::Material *blender_mat, GP
   PassMain::Sub *material_ps = &pass->sub(GPU_material_get_name(gpumat));
   GPUPass *gpupass = GPU_material_get_pass(gpumat);
   material_ps->shader_set(GPU_pass_shader_get(gpupass));
-  material_ps->push_constant("use_split_radiance", false);
+  material_ps->push_constant("use_split_radiance", true);
+  material_ps->push_constant("use_radiance_input_for_combined", false);
 
   return material_ps;
 }
@@ -1713,6 +1734,15 @@ void DeferredProbePipeline::render(View &view,
   GPU_debug_group_begin("Probe.Render");
 
   opaque_layer_.radiance_behind_tx_ = dummy_black;
+
+  const eGPUTextureUsage usage_rw = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE;
+  for (int i = 0; i < ARRAY_SIZE(direct_radiance_txs_); i++) {
+    const int2 target_extent = (opaque_layer_.closure_count_ > i) ? extent : int2(1);
+    direct_radiance_txs_[i].acquire(
+        target_extent, gpu::TextureFormat::DEFERRED_RADIANCE_FORMAT, usage_rw);
+    indirect_radiance_txs_[i].acquire(
+        target_extent, gpu::TextureFormat::RAYTRACE_RADIANCE_FORMAT, usage_rw);
+  }
 
   GPU_framebuffer_bind(prepass_fb);
   inst_.manager->submit(opaque_layer_.prepass_ps_, view);
@@ -1733,6 +1763,7 @@ void DeferredProbePipeline::render(View &view,
 
   GPU_framebuffer_bind(combined_fb);
   inst_.manager->submit(eval_light_ps_, view);
+  GPU_memory_barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS | GPU_BARRIER_TEXTURE_FETCH);
 
   TextureFromPool npr_radiance_input = {"NPR Radiance Input"};
   {
@@ -1745,6 +1776,10 @@ void DeferredProbePipeline::render(View &view,
 
   npr_radiance_input_tx_ = nullptr;
   npr_radiance_input.release();
+  for (int i = 0; i < ARRAY_SIZE(direct_radiance_txs_); i++) {
+    direct_radiance_txs_[i].release();
+    indirect_radiance_txs_[i].release();
+  }
 
   GPU_debug_group_end();
 }
@@ -1773,8 +1808,8 @@ void PlanarProbePipeline::begin_sync()
   this->npr_pass_sync(inst_, [&]() {
     npr_ps_.bind_texture(NPR_RADIANCE_TEX_SLOT, &npr_radiance_input_tx_);
     for (int i : IndexRange(3)) {
-      npr_ps_.bind_texture(DIRECT_RADIANCE_NPR_TX_SLOT_1 + i, &dummy_black_);
-      npr_ps_.bind_texture(INDIRECT_RADIANCE_NPR_TX_SLOT_1 + i, &dummy_black_);
+      npr_ps_.bind_texture(DIRECT_RADIANCE_NPR_TX_SLOT_1 + i, &direct_radiance_txs_[i]);
+      npr_ps_.bind_texture(INDIRECT_RADIANCE_NPR_TX_SLOT_1 + i, &indirect_radiance_txs_[i]);
     }
     npr_ps_.bind_texture(BACK_RADIANCE_TX_SLOT, &dummy_black_);
     npr_ps_.bind_texture(BACK_HIZ_TX_SLOT, &dummy_black_);
@@ -1801,6 +1836,12 @@ void PlanarProbePipeline::end_sync()
     pass.bind_resources(inst_.hiz_buffer.front);
     pass.bind_resources(inst_.sphere_probes);
     pass.bind_resources(inst_.volume_probes);
+    pass.bind_image("direct_radiance_1_img", &direct_radiance_txs_[0]);
+    pass.bind_image("direct_radiance_2_img", &direct_radiance_txs_[1]);
+    pass.bind_image("direct_radiance_3_img", &direct_radiance_txs_[2]);
+    pass.bind_image("indirect_radiance_1_img", &indirect_radiance_txs_[0]);
+    pass.bind_image("indirect_radiance_2_img", &indirect_radiance_txs_[1]);
+    pass.bind_image("indirect_radiance_3_img", &indirect_radiance_txs_[2]);
     pass.barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_SHADER_IMAGE_ACCESS);
     pass.draw_procedural(GPU_PRIM_TRIS, 1, 3);
   }
@@ -1845,7 +1886,8 @@ PassMain::Sub *PlanarProbePipeline::npr_add(blender::Material *blender_mat, GPUM
   PassMain::Sub *material_ps = &pass->sub(GPU_material_get_name(gpumat));
   GPUPass *gpupass = GPU_material_get_pass(gpumat);
   material_ps->shader_set(GPU_pass_shader_get(gpupass));
-  material_ps->push_constant("use_split_radiance", false);
+  material_ps->push_constant("use_split_radiance", true);
+  material_ps->push_constant("use_radiance_input_for_combined", false);
 
   return material_ps;
 }
@@ -1861,6 +1903,15 @@ void PlanarProbePipeline::render(View &view,
   GPU_debug_group_begin("Planar.Capture");
 
   radiance_behind_tx_ = dummy_black_;
+
+  const eGPUTextureUsage usage_rw = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE;
+  for (int i = 0; i < ARRAY_SIZE(direct_radiance_txs_); i++) {
+    const int2 target_extent = (closure_count_ > i) ? extent : int2(1);
+    direct_radiance_txs_[i].acquire(
+        target_extent, gpu::TextureFormat::DEFERRED_RADIANCE_FORMAT, usage_rw);
+    indirect_radiance_txs_[i].acquire(
+        target_extent, gpu::TextureFormat::RAYTRACE_RADIANCE_FORMAT, usage_rw);
+  }
 
   inst_.pipelines.data.ray_type = RAY_TYPE_GLOSSY;
   inst_.uniform_data.push_update();
@@ -1884,6 +1935,12 @@ void PlanarProbePipeline::render(View &view,
 
   GPU_framebuffer_bind(combined_fb);
   inst_.manager->submit(eval_light_ps_, view);
+  GPU_memory_barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS | GPU_BARRIER_TEXTURE_FETCH);
+
+  inst_.pipelines.data.ray_type = RAY_TYPE_CAMERA;
+  inst_.uniform_data.push_update();
+
+  inst_.pipelines.background.render(view, combined_fb);
 
   TextureFromPool npr_radiance_input = {"NPR Radiance Input"};
   {
@@ -1896,9 +1953,10 @@ void PlanarProbePipeline::render(View &view,
 
   npr_radiance_input_tx_ = nullptr;
   npr_radiance_input.release();
-
-  inst_.pipelines.data.ray_type = RAY_TYPE_CAMERA;
-  inst_.uniform_data.push_update();
+  for (int i = 0; i < ARRAY_SIZE(direct_radiance_txs_); i++) {
+    direct_radiance_txs_[i].release();
+    indirect_radiance_txs_[i].release();
+  }
 
   GPU_debug_group_end();
 }

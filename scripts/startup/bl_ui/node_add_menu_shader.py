@@ -146,11 +146,6 @@ class NODE_MT_shader_node_input_base(node_add_menu.NodeMenu):
                 "ShaderNodeWorldEnvironment",
                 poll=object_or_npr_eevee_shader_nodes_poll(context),
             )
-            self.node_operator(
-                layout,
-                "ShaderNodeLightProbeColor",
-                poll=object_or_npr_eevee_shader_nodes_poll(context),
-            )
         self.node_operator(
             layout,
             "ShaderNodeCurvature",
@@ -474,6 +469,11 @@ class NODE_MT_shader_node_vector_base(node_add_menu.NodeMenu):
         self.node_operator_with_searchable_enum(context, layout, "ShaderNodeVectorMath", "operation")
         self.node_operator(layout, "ShaderNodeVectorRotate")
         self.node_operator(layout, "ShaderNodeVectorTransform")
+        self.node_operator(
+            layout,
+            "ShaderNodeBasisTransform",
+            poll=eevee_shader_nodes_poll(context),
+        )
         self.node_operator(
             layout,
             "ShaderNodeWorldToTangent",

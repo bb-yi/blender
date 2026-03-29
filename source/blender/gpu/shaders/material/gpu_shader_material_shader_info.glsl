@@ -12,7 +12,6 @@ bool shader_info_is_zero(float3 value)
 #define SHADER_INFO_SOFT_SHADOW_MAX_EVAL_COUNT 8
 #define SHADER_INFO_SOFT_SHADOW_MAX_RAY_COUNT 4
 #define SHADER_INFO_SOFT_SHADOW_SPATIAL_MAX_TAPS 8
-#define SHADER_INFO_SHADOW_MODE_STABLE 0.0f
 #define SHADER_INFO_SHADOW_MODE_BUILTIN 1.0f
 #define SHADER_INFO_SHADOW_MODE_SOFT_FILTERED 2.0f
 
@@ -425,7 +424,7 @@ float shader_info_shadow_visibility(LightData light,
                                     float shadow_mode,
                                     float stable_shadow_samples)
 {
-  if (!shader_info_shadow_is_soft_filtered(shadow_mode)) {
+  if (shader_info_shadow_is_builtin(shadow_mode)) {
     return shader_info_shadow_visibility_single(light,
                                                 is_directional,
                                                 position,
@@ -433,7 +432,7 @@ float shader_info_shadow_visibility(LightData light,
                                                 shading_normal,
                                                 normal_offset,
                                                 geometry_offset,
-                                                shadow_mode,
+                                                SHADER_INFO_SHADOW_MODE_BUILTIN,
                                                 stable_shadow_samples);
   }
 

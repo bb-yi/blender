@@ -12,6 +12,11 @@ namespace blender {
 
 namespace nodes::node_shader_light_probe_color_cc {
 
+static bool node_add_ui_poll(const bContext * /*C*/)
+{
+  return false;
+}
+
 static void node_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
@@ -48,7 +53,7 @@ void register_node_type_sh_light_probe_color()
   ntype.enum_name_legacy = "LIGHT_PROBE_COLOR";
   ntype.nclass = NODE_CLASS_INPUT;
   ntype.declare = file_ns::node_declare;
-  ntype.add_ui_poll = object_or_npr_eevee_shader_nodes_poll;
+  ntype.add_ui_poll = file_ns::node_add_ui_poll;
   ntype.gpu_fn = file_ns::node_shader_gpu_light_probe_color;
 
   bke::node_register_type(ntype);
