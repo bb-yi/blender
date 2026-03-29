@@ -15,7 +15,7 @@
 
 #### 输出
 
-- `Frag Coord`：屏幕空间坐标（xy归一化到0-1，z为深度）
+- `Frag Coord`：屏幕空间坐标（xy 归一化到 0-1，z 为深度）
 
 - `Width`：渲染区域宽度
 
@@ -24,7 +24,6 @@
 #### 作用
 
 提供当前 Eevee 渲染窗口的坐标和像素尺寸。
-
 
 ### Scene Time
 
@@ -47,7 +46,7 @@
 
 - `Seconds`：当前帧对应的秒数
 
-- `Timeline`：0-1映射的场景时间（从开始帧到结束帧）
+- `Timeline`：0-1 映射的场景时间（从开始帧到结束帧）
 
 - `Scaled Frame`：当前帧除以 `Scale` 后的结果
 
@@ -66,9 +65,9 @@
 
 获得屏幕之间相邻像素之间的差异：
 
-- `DDX`：X方向的屏幕空间导数
+- `DDX`：X 方向的屏幕空间导数
 
-- `DDY`：Y方向的屏幕空间导数
+- `DDY`：Y 方向的屏幕空间导数
 
 - `DDXY`：`DDX` 和 `DDY` 的组合（`DDX + DDY`）
 
@@ -133,6 +132,7 @@
 #### 输入输出
 
 - 输入：`Vector`
+
 - 输出：`Color`、`Alpha`
 
 ### Screenspace Info
@@ -149,6 +149,7 @@
 #### 输入输出
 
 - 输入：`View Position`（摄像机空间位置）
+
 - 输出：`Scene Color`（场景颜色）、`Scene Depth`（场景深度值）
 
 #### 作用
@@ -163,8 +164,11 @@
 #### 使用说明
 
 - 渲染设置中需要打开 `Raytracing`
+
 - 材质选项 `Render Method` 选择 `Dithered`
+
 - 材质选项打开 `Raytraced Transmission`
+
 - `View Position` 默认输入为 `position` 变换到摄像机空间，再反转 z 轴
 
 <div align="center">
@@ -186,11 +190,12 @@
 #### 输入输出
 
 - 输入：`Direction`（采样方向）
+
 - 输出：`Color`（环境颜色）
 
 #### 作用
 
-直接采样 `Eevee` 的世界环境颜色，不依赖屏幕背后是否还有几何。
+直接采样 `Eevee` 的世界环境颜色，不依赖屏幕后方是否还有几何。
 
 #### 说明
 
@@ -202,6 +207,7 @@
 </div>
 
 - `Direction` 不连接时，默认使用当前表面的视线方向
+
 - `Direction` 连接后，可以按指定方向采样世界环境
 
 ### World To Tangent
@@ -218,6 +224,7 @@
 #### 输入输出
 
 - 输入：`Vector`（世界空间方向）
+
 - 输出：`Vector`（切线空间方向）
 
 #### 作用
@@ -257,35 +264,35 @@
 
 - `Direction`
 
-	- `To Basis`：把输入从世界/当前坐标解释为自定义基底下的坐标
+    - `To Basis`：把输入从世界 / 当前坐标解释为自定义基底下的坐标
 
-	- `From Basis`：把输入从自定义基底坐标还原回外部坐标
+    - `From Basis`：把输入从自定义基底坐标还原回外部坐标
 
 - `Type`
 
-	- `Point`：会参与 `Origin` 平移
+    - `Point`：会参与 `Origin` 平移
 
-	- `Vector`：只做方向/长度变换，不参与平移
+    - `Vector`：只做方向 / 长度变换，不参与平移
 
-	- `Normal`：按法线规则变换，并在输出前归一化
+    - `Normal`：按法线规则变换，并在输出前归一化
 
 - `Basis Input`
 
-	- `XYZ`：直接使用三根输入轴
+    - `XYZ`：直接使用三根输入轴
 
-	- `XY` / `XZ` / `YZ`：只使用两根轴，第三根轴由叉积自动补出
+    - `XY` / `XZ` / `YZ`：只使用两根轴，第三根轴由叉积自动补出
 
 - `Orthonormalize`
 
-	- 开启后会把输入轴正交化并归一化，更适合做切线空间、局部朝向这类纯方向基底
+    - 开启后会把输入轴正交化并归一化，更适合做切线空间、局部朝向这类纯方向基底
 
-	- 关闭后会保留输入轴长度，可用于带缩放的基底变换
+    - 关闭后会保留输入轴长度，可用于带缩放的基底变换
 
 - `Fallback`
 
-	- `Pass Through`：当基底退化时直接输出原始输入
+    - `Pass Through`：当基底退化时直接输出原始输入
 
-	- `Zero`：当基底退化时输出 `0, 0, 0`
+    - `Zero`：当基底退化时输出 `0, 0, 0`
 
 ### Bevel
 
@@ -301,6 +308,7 @@
 #### 输入输出
 
 - 输入：`Radius`（倒角半径）、`Normal`（表面法线提示）
+
 - 输出：`Normal`（倒角后的近似法线）
 
 #### 面板选项
@@ -318,4 +326,166 @@
 - `Eevee` 这里使用的是同物体屏幕空间近似
 
 - 结果依赖当前视角、深度缓冲和可见邻域，不等同于 `Cycles` 的真实 `Bevel`
+
+### Curvature
+
+#### 入口
+
+`Add > Input > Curvature`
+
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_05-06-57.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### 输入
+
+- `Samples`
+
+- `Sample Radius`
+
+- `Thickness`
+
+- `Scale`
+
+#### 输出
+
+- `Scene Curvature`：根据屏幕空间提取的曲率值
+
+- `Scene Rim`：边缘光
+
+#### 面板选项
+
+- `Local`：忽略其他物体深度
+
+#### 说明
+
+移植自 Goo Engine 的曲率节点，提供曲率和边缘光输出。
+
+### Shader Info
+
+#### 入口
+
+`Add > Input > Shader Info`
+
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_05-09-10.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### 输入
+
+- `World Position`：世界空间位置（默认使用当前位置）
+
+- `Normal`：表面法线（默认使用当前平滑法线）
+
+#### 输出
+
+- `Diffuse Shading`：兰伯特光照
+
+- `Shadow`：遮蔽阴影
+
+- `Ambient Lighting`：环境间接光（来自世界环境 + 光照探针）
+
+- `Half-Lambert Factor`：半兰伯特光照
+
+#### 说明
+
+- `Shadow`
+
+    - 可切换阴影模式
+
+    - `Built-in`：默认模式，使用 Eevee 原本的阴影计算
+
+    - `Soft Filtered`：把黑白抖动阴影变成更平滑的灰度半影
+
+- 节点面板新增 `Lightgroup`
+
+    - 只有 `Lightgroup ID` 相同的灯光，才会参与这个 `Shader Info` 节点的直接光照与阴影计算
+
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_05-12-44.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
+
+- 当前实现会排除 world sun 对这些输出的干扰，避免 HDRI 或世界环境里的“太阳光”混入直接结果。
+
+### Light Info
+
+#### 入口
+
+`Add > Input > Light Info`
+
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_05-13-13.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### 功能说明
+
+读取指定灯光信息。
+
+#### 固定输出
+
+- `Color`：灯光颜色
+
+- `Power`：灯光强度
+
+- `Type`：灯光类型
+
+    - `-1`：没有指定灯光
+
+    - `0`：Point
+
+    - `1`：Sun
+
+    - `2`：Spot
+
+    - `3`：Area
+
+#### 按灯光类型自动出现的输出
+
+- `Position`：灯光世界位置
+
+- `Direction`：灯光方向
+
+- `Radius`：灯光半径
+
+- `Spot Size`：灯光尺寸
+
+- `Sun Angle`：太阳角度
+
+#### 说明
+
+- 如果你要做逐灯处理，应该使用 `NPR Tree` 里的 `For Each Light`。
+
+### Scene Color
+
+#### 入口
+
+`Add > Input > Scene Color`
+
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_05-15-31.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
+
+仅在 `Filter` 域下可用。
+
+#### 作用
+
+读取 Eevee 当前场景缓冲，可在节点面板中切换 `Source`：
+
+- `Color`：读取渲染的最终场景颜色
+
+- `Depth`：读取线性深度值
+
+- `Normal`：读取渲染法线
+
+- `Position`：读取世界空间坐标
+
+#### 输入输出
+
+- 输入：`Vector`
+
 - 输出：`Color`、`Alpha`

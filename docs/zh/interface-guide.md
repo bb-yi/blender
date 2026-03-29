@@ -35,12 +35,21 @@
 
 ## 2. 世界环境排除
 
-### 行为说明
+### 作用
 
-- 允许选择一个集合，选择的集合不受世界环境影响
+允许选择一个集合，使该集合中的对象不受世界环境影响。
+
+### 入口
+
+`World Properties > Environment Lighting > Exclude Collection`
 
 <div align="center">
 	<img src="images/SnowShot_2026-03-28_05-29-43.png" alt="alt text" style="border-radius: 10px;">
 	<br>
 </div>
 
+### 行为说明
+
+- 被选中的集合会从世界环境照明中排除。
+
+- 适合在同一场景里分离角色、前景道具和背景环境的环境光影响范围。

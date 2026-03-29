@@ -19,11 +19,11 @@ This option is mainly used to reduce stutter caused by generating previews when 
 
 ### Behavior
 
-- When enabled: the material selector displays material previews using the current logic.
+- When enabled, the material selector displays material previews using the current logic.
 
-- When disabled: the material selector falls back to ordinary material icons and no longer triggers preview rendering in the dropdown list.
+- When disabled, the material selector falls back to ordinary material icons and no longer triggers preview rendering in the dropdown list.
 
-- Default is enabled.
+- The default value is enabled.
 
 ### Current Scope
 
@@ -35,11 +35,21 @@ This option is mainly used to reduce stutter caused by generating previews when 
 
 ## 2. World Environment Exclude
 
-### Behavior
+### Purpose
 
-- Lets you choose a collection that is not affected by the world environment.
+Lets you choose a collection so objects in that collection are not affected by the world environment.
+
+### Entry Point
+
+`World Properties > Environment Lighting > Exclude Collection`
 
 <div align="center">
 	<img src="images/SnowShot_2026-03-28_05-29-43.png" alt="World Environment Exclude" style="border-radius: 10px;">
 	<br>
 </div>
+
+### Behavior
+
+- The selected collection is excluded from world-environment lighting.
+
+- This is useful when you want to separate environment-light influence between characters, foreground props, and background elements in the same scene.

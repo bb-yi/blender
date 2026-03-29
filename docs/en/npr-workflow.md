@@ -1,93 +1,170 @@
 # NPR Tree Workflow
 
-## Overview
+## 1. Core Concept
 
 `NPR Tree` is a node tree attached after a regular object material to perform color post-processing, allowing shader output to be stylized in color form.
 
-### Key Features
+## 2. How to Attach It
 
-- Per-light processing using `For Each Light`
-- Real-time preview in the viewport
-- Built-in node groups for effects such as shadows and toon shading
-- Full shader control
+1. Keep the normal `Material Output` node and the base surface shading in a regular object material.
 
----
+2. Select the `Material Output` node.
 
-## NPR Input Node
+3. Create or assign a node group in its `NPR Tree` property.
 
-**Purpose:** Main input for NPR Tree processing
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_05-18-15.png" alt="NPR Tree Slot" style="border-radius: 10px;">
+	<br>
+</div>
 
-**Outputs (9 total):**
-- `Base Color` - Material base color
-- `Metallic` - Metallic property
-- `Roughness` - Surface roughness
-- `Normal` - Surface normal
-- `Alpha` - Transparency
-- `Emission` - Emission color
-- `IOR` - Index of refraction
-- `Light Direction` - Light direction
-- `Specular` - Specular strength
+4. To edit that tree, switch `Shader Type` to `NPR` at the top of the Shader Editor.
 
----
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_05-18-33.png" alt="NPR Shader Type" style="border-radius: 10px;">
+	<br>
+</div>
 
-## For Each Light Node
+## 3. Notes
 
-**Purpose:** Process rendering for each light in the scene
+- The material render mode needs to be set to `Dithered (Deferred)`
 
-**Outputs:**
-- `Light Index` - Current light ID, starting from 0
-- `Light Direction` - Direction from the surface toward the light
-- `Light Distance` - Distance to the light
-- `Light Color` - Light color value
-- `Light Energy` - Light intensity
+- You can use `Ctrl + Tab` to quickly switch between the object shader and the NPR tree
 
-**Usage Pattern:**
-```
-NPR Input → For Each Light → [Calculate per-light effects]
-                                → Merge results → Output
-```
+## 4. Main NPR Nodes
 
-**Common Uses:**
-- Toon shading with multiple light tones
-- Per-light cel shading
-- Multi-channel lighting effects
+In addition to the dedicated NPR nodes below, `Curvature` and `Raycast` can now also be used directly inside `NPR Tree`.
 
----
+### NPR Input
 
-## Other NPR Nodes
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_05-22-04.png" alt="NPR Input" style="border-radius: 10px;">
+	<br>
+</div>
 
-### Image Sample
-- Sample textures inside NPR Tree
-- Input: Image, UV coordinates
-- Output: Color, Alpha
+#### Purpose
+
+Reads the input buffers provided by the NPR rendering stage.
+
+#### Outputs
+
+- `Combined Color`: Final combined color after shading
+
+- `Diffuse Color`: Diffuse color
+
+- `Diffuse Direct`: Direct diffuse lighting
+
+- `Diffuse Indirect`: Indirect diffuse lighting from ray tracing and probes
+
+- `Specular Color`: Specular color
+
+- `Specular Direct`: Direct specular lighting
+
+- `Specular Indirect`: Indirect reflection
+
+- `Position`: World-space position
+
+- `Normal`: Surface normal
+
+These outputs behave more like image handles / texture handles, which makes them suitable for neighborhood sampling through `Image Sample` or for feeding into NPR nodes that accept this kind of input.
 
 ### NPR Refraction
-- Control refraction in the NPR pipeline
-- Parameters: IOR, Roughness
 
-### Built-in Node Groups
-- `Cavity` - Shadow-based shading
-- `Kuwahara Filter` - Artistic smoothing
-- `Curvature Shading` - Edge-based effects
-- `Shading Models` - Prebuilt toon / stylized shaders
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_05-22-16.png" alt="NPR Refraction" style="border-radius: 10px;">
+	<br>
+</div>
 
----
+#### Purpose
 
-## Quick Workflow Example
+Reads refraction-related buffers, similar to `Screenspace Info`.
 
-### Simple Toon Shading Setup
+See the usage notes of `Screenspace Info` for setup requirements.
 
-1. Create a material with `Principled BSDF`
-2. Add an `NPR Tree` node
-3. In NPR Tree (`Ctrl+Tab`):
-   - Connect `NPR Input` to `For Each Light`
-   - Sample lighting properties
-   - Apply toon shading from built-in node groups
-   - Merge all light contributions
-4. Output the result to the material
-5. Render in the viewport or final render
+#### Outputs
 
-**Tip:** Testing with different light setups usually gives better results.
+- `Combined Color`: Final color at the refraction event
 
-!!! warning
-    NPR Tree is Eevee-exclusive. Not available in Cycles.
+- `Position`: World-space position of the refraction hit
+
+### Image Sample
+
+#### Entry
+
+`Add > Utilities > Image Sample`
+
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_05-25-34.png" alt="Image Sample" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### Inputs / Outputs
+
+- Input: `Image` (image handle), `Offset` (sample offset)
+
+- Output: `Color` (sampled color)
+
+#### Purpose
+
+Samples image handles produced by nodes such as `NPR Input` or `NPR Refraction`.
+
+#### Offset Modes
+
+- `View`: Offset in view space
+
+- `Pixel`: Offset in pixel space
+
+### For Each Light
+
+#### Entry
+
+`Add > Utilities > For Each Light`
+
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_05-26-08.png" alt="For Each Light" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### Notes
+
+Executes its internal logic once for each light affecting the current surface, outputting information for one light on each iteration.
+
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_06-55-43.png" alt="For Each Light Example" style="border-radius: 10px;">
+	<br>
+	<sub>Reference setup</sub>
+</div>
+
+#### Built-In Available Data
+
+`For Each Light Input` currently provides:
+
+- Input: `Normal` (surface normal)
+
+- Outputs: `Color` (light color), `Direction` (light direction), `Distance` (light distance), `Attenuation` (light attenuation), `Shadow Mask` (shadow mask)
+
+## Built-In NPR Node Group Assets
+
+The current version already ports and organizes a set of commonly used node groups from the Blender 4.4 NPR build into assets that can be used in 5.1.
+
+### Main Built-In Node Groups
+
+- `Cavity`
+
+- `Co-Planar Edge Detection`
+
+- `Curvature`
+
+- `Kuwahara`
+
+- `Shading Models`
+
+- `Surface Curvature`
+
+### Asset Notes
+
+- These node groups have already been migrated to Blender 5.1 format.
+
+- Because some repeat-zone node names changed, projects from the 4.4 NPR Prototype may require manual reconnection of the related zone nodes.
+
+!!! warning "Eevee Only"
+    `NPR Tree` is currently supported only in `Eevee`, not in `Cycles`.

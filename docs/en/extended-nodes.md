@@ -65,9 +65,9 @@ Provides the coordinate and pixel size of the current Eevee render window.
 
 Gets differences between neighboring pixels in screen space:
 
-- `DDX`: Screen-space derivative in X direction
+- `DDX`: Screen-space derivative in the X direction
 
-- `DDY`: Screen-space derivative in Y direction
+- `DDY`: Screen-space derivative in the Y direction
 
 - `DDXY`: Combination of `DDX` and `DDY` (`DDX + DDY`)
 
@@ -130,6 +130,7 @@ Reads a `Render Textures` entry configured earlier in the scene.
 #### Inputs / Outputs
 
 - Input: `Vector`
+
 - Outputs: `Color`, `Alpha`
 
 ### Screenspace Info
@@ -146,6 +147,7 @@ Reads a `Render Textures` entry configured earlier in the scene.
 #### Inputs / Outputs
 
 - Input: `View Position` (camera-space position)
+
 - Outputs: `Scene Color` (scene color), `Scene Depth` (scene depth)
 
 #### Purpose
@@ -160,8 +162,11 @@ Gets the contents of the current render buffer color or depth.
 #### Usage Notes
 
 - `Raytracing` must be enabled in render settings
+
 - Set material `Render Method` to `Dithered`
+
 - Enable `Raytraced Transmission` in material options
+
 - The default `View Position` input is `position` transformed into camera space, then with the z-axis inverted
 
 <div align="center">
@@ -183,11 +188,12 @@ Gets the contents of the current render buffer color or depth.
 #### Inputs / Outputs
 
 - Input: `Direction` (sampling direction)
+
 - Output: `Color` (environment color)
 
 #### Purpose
 
-Directly samples the `Eevee` world environment color, without depending on whether geometry exists behind the screen.
+Directly samples the `Eevee` world environment color without depending on whether any geometry exists behind the screen.
 
 #### Notes
 
@@ -199,6 +205,7 @@ Directly samples the `Eevee` world environment color, without depending on wheth
 </div>
 
 - If `Direction` is not connected, the current surface view direction is used by default
+
 - If `Direction` is connected, the world environment can be sampled in the specified direction
 
 ### World To Tangent
@@ -215,6 +222,7 @@ Directly samples the `Eevee` world environment color, without depending on wheth
 #### Inputs / Outputs
 
 - Input: `Vector` (world-space direction)
+
 - Output: `Vector` (tangent-space direction)
 
 #### Purpose
@@ -254,35 +262,35 @@ Uses `origin + three basis axes` inside material nodes to perform custom coordin
 
 - `Direction`
 
-	- `To Basis`: Interpret the input from world/current coordinates into the custom basis
+    - `To Basis`: Interpret the input from world / current coordinates into the custom basis
 
-	- `From Basis`: Convert the input from custom basis coordinates back to external coordinates
+    - `From Basis`: Convert the input from custom basis coordinates back to external coordinates
 
 - `Type`
 
-	- `Point`: Includes `Origin` translation
+    - `Point`: Includes `Origin` translation
 
-	- `Vector`: Only transforms direction and length, without translation
+    - `Vector`: Only transforms direction and length, without translation
 
-	- `Normal`: Transforms following normal rules and normalizes before output
+    - `Normal`: Transforms following normal rules and normalizes before output
 
 - `Basis Input`
 
-	- `XYZ`: Use all three input axes directly
+    - `XYZ`: Use all three input axes directly
 
-	- `XY` / `XZ` / `YZ`: Use only two axes; the third axis is generated automatically by cross product
+    - `XY` / `XZ` / `YZ`: Use only two axes; the third axis is generated automatically by cross product
 
 - `Orthonormalize`
 
-	- When enabled, input axes are orthogonalized and normalized. More suitable for tangent space or local orientation bases
+    - When enabled, input axes are orthogonalized and normalized. This is more suitable for tangent space or local orientation bases
 
-	- When disabled, input axis lengths are preserved, which can be used for basis transforms with scaling
+    - When disabled, input axis lengths are preserved, which can be used for basis transforms with scaling
 
 - `Fallback`
 
-	- `Pass Through`: Output the original input when the basis degenerates
+    - `Pass Through`: Output the original input when the basis degenerates
 
-	- `Zero`: Output `0, 0, 0` when the basis degenerates
+    - `Zero`: Output `0, 0, 0` when the basis degenerates
 
 ### Bevel
 
@@ -298,6 +306,7 @@ Uses `origin + three basis axes` inside material nodes to perform custom coordin
 #### Inputs / Outputs
 
 - Input: `Radius` (bevel radius), `Normal` (surface normal hint)
+
 - Output: `Normal` (approximated beveled normal)
 
 #### Panel Option
@@ -314,4 +323,167 @@ Generates an approximate beveled normal in `Eevee` so hard edges can look smooth
 
 - `Eevee` here uses a same-object screen-space approximation
 
-- The result depends on current view, depth buffer, and visible neighborhood, and is not equivalent to the true `Bevel` in `Cycles`
+- The result depends on the current view, depth buffer, and visible neighborhood, and is not equivalent to the true `Bevel` in `Cycles`
+
+### Curvature
+
+#### Entry
+
+`Add > Input > Curvature`
+
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_05-06-57.png" alt="Curvature" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### Inputs
+
+- `Samples`
+
+- `Sample Radius`
+
+- `Thickness`
+
+- `Scale`
+
+#### Outputs
+
+- `Scene Curvature`: Curvature extracted from screen space
+
+- `Scene Rim`: Rim-light style edge output
+
+#### Panel Option
+
+- `Local`: Ignore depth from other objects
+
+#### Notes
+
+A curvature node ported from Goo Engine that provides curvature and rim outputs.
+
+### Shader Info
+
+#### Entry
+
+`Add > Input > Shader Info`
+
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_05-09-10.png" alt="Shader Info" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### Inputs
+
+- `World Position`: World-space position (defaults to the current position)
+
+- `Normal`: Surface normal (defaults to the current smooth normal)
+
+#### Outputs
+
+- `Diffuse Shading`: Lambert lighting
+
+- `Shadow`: Shadow mask
+
+- `Ambient Lighting`: Indirect ambient light from the world environment and lighting probes
+
+- `Half-Lambert Factor`: Half-Lambert lighting term
+
+#### Notes
+
+- `Shadow`
+
+    - Supports selectable shadow modes
+
+    - `Built-in`: Default mode, using Eevee's original shadow calculation
+
+    - `Soft Filtered`: Turns binary dithered shadows into smoother grayscale penumbra
+
+- The node panel includes a `Lightgroup` property
+
+    - Only lights with the same `Lightgroup ID` participate in this `Shader Info` node's direct lighting and shadow evaluation
+
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_05-12-44.png" alt="Shader Info Lightgroup" style="border-radius: 10px;">
+	<br>
+</div>
+
+- The current implementation excludes the world sun from these outputs so HDRIs or “sun” contributions embedded in the world environment do not contaminate the direct result.
+
+### Light Info
+
+#### Entry
+
+`Add > Input > Light Info`
+
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_05-13-13.png" alt="Light Info" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### Feature Description
+
+Reads information from a specified light.
+
+#### Fixed Outputs
+
+- `Color`: Light color
+
+- `Power`: Light intensity
+
+- `Type`: Light type
+
+    - `-1`: No light specified
+
+    - `0`: Point
+
+    - `1`: Sun
+
+    - `2`: Spot
+
+    - `3`: Area
+
+#### Outputs That Appear Depending on Light Type
+
+- `Position`: Light world position
+
+- `Direction`: Light direction
+
+- `Radius`: Light radius
+
+- `Spot Size`: Spot light size
+
+- `Sun Angle`: Sun angle
+
+#### Notes
+
+- For per-light processing, use `For Each Light` inside `NPR Tree` instead.
+
+### Scene Color
+
+#### Entry
+
+`Add > Input > Scene Color`
+
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_05-15-31.png" alt="Scene Color" style="border-radius: 10px;">
+	<br>
+</div>
+
+Available only in the `Filter` domain.
+
+#### Purpose
+
+Reads the current Eevee scene buffer. The `Source` can be switched in the node panel:
+
+- `Color`: Reads the final rendered scene color
+
+- `Depth`: Reads linear depth
+
+- `Normal`: Reads rendered normals
+
+- `Position`: Reads world-space positions
+
+#### Inputs / Outputs
+
+- Input: `Vector`
+
+- Outputs: `Color`, `Alpha`
