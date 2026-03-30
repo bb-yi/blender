@@ -159,6 +159,18 @@ def panel_node_draw(layout, ntree, _output_type, input_name):
         layout.label(text="No output node")
 
 
+def material_npr_tree(material):
+    ntree = material.node_tree
+    if ntree is None:
+        return None
+
+    output = ntree.get_output_node('EEVEE')
+    if output is None:
+        return None
+
+    return getattr(output, "nprtree", None)
+
+
 class EEVEE_MATERIAL_PT_surface(MaterialButtonsPanel, Panel):
     bl_label = "Surface"
     bl_context = "material"
@@ -433,6 +445,11 @@ class MATERIAL_PT_animation(MaterialButtonsPanel, Panel, PropertiesAnimationMixi
             col = layout.column(align=True)
             col.label(text="Shader Node Tree")
             self.draw_action_and_slot_selector(context, col, node_tree)
+
+        if npr_tree := material_npr_tree(material):
+            col = layout.column(align=True)
+            col.label(text="NPR Tree Action")
+            self.draw_action_and_slot_selector(context, col, npr_tree)
 
 
 classes = (

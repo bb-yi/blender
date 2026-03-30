@@ -3172,19 +3172,22 @@ void DepsgraphRelationBuilder::build_nodetree(bNodeTree *ntree)
        * code needs to be reconsidered. */
       build_collection(nullptr, reinterpret_cast<Collection *>(id));
     }
-    else if (bnode->is_group()) {
+    else if (id_type == ID_NT) {
       bNodeTree *group_ntree = id_cast<bNodeTree *>(id);
       build_nodetree(group_ntree);
       ComponentKey group_output_key(&group_ntree->id, NodeType::NTREE_OUTPUT);
       /* This relation is not necessary in all cases (e.g. when the group node is not connected to
        * the output). Currently, we lack the infrastructure to check for these cases efficiently.
-       * That can be added later. */
-      add_relation(group_output_key, ntree_output_key, "Group Node");
+       * That can be added later. Treat any node-tree ID reference the same way so secondary trees
+       * such as NPR attachments participate in animation evaluation as well. */
+      add_relation(group_output_key, ntree_output_key, bnode->is_group() ? "Group Node" :
+                                                                      "Node Tree ID");
       if (group_ntree->type == NTREE_GEOMETRY) {
         OperationKey group_preprocess_key(&group_ntree->id,
                                           NodeType::NTREE_GEOMETRY_PREPROCESS,
                                           OperationCode::NTREE_GEOMETRY_PREPROCESS);
-        add_relation(group_preprocess_key, ntree_geo_preprocess_key, "Group Node Preprocess");
+        add_relation(
+            group_preprocess_key, ntree_geo_preprocess_key, "Node Tree ID Preprocess");
       }
     }
     else {

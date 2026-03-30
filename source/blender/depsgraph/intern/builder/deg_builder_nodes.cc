@@ -2088,9 +2088,8 @@ void DepsgraphNodeBuilder::build_nodetree(bNodeTree *ntree)
     else if (id_type == ID_GR) {
       build_collection(nullptr, reinterpret_cast<Collection *>(id));
     }
-    else if (bnode->is_group()) {
-      bNodeTree *group_ntree = id_cast<bNodeTree *>(id);
-      build_nodetree(group_ntree);
+    else if (id_type == ID_NT) {
+      build_nodetree(id_cast<bNodeTree *>(id));
     }
     else {
       /* Ignore this case. It can happen when the node type is not known currently. Either because

@@ -87,6 +87,8 @@
 
 #include "ED_anim_api.hh"
 
+#include "NOD_shader.h"
+
 #include "SEQ_iterator.hh"
 #include "SEQ_modifier.hh"
 #include "SEQ_sequencer.hh"
@@ -2723,6 +2725,14 @@ static size_t animdata_filter_ds_material(bAnimContext *ac,
     if ((ma->nodetree) && !(ac->filters.flag & ADS_FILTER_NONTREE)) {
       tmp_items += animdata_filter_ds_nodetree(
           ac, &tmp_data, reinterpret_cast<ID *>(ma), ma->nodetree, filter_mode);
+    }
+
+    if (bNodeTree *npr_tree = npr_tree_get_from_mat(ma);
+        (npr_tree != nullptr) && (npr_tree != ma->nodetree) &&
+        !(ac->filters.flag & ADS_FILTER_NONTREE))
+    {
+      tmp_items += animdata_filter_ds_nodetree(
+          ac, &tmp_data, reinterpret_cast<ID *>(ma), npr_tree, filter_mode);
     }
   }
   END_ANIMFILTER_SUBCHANNELS;
