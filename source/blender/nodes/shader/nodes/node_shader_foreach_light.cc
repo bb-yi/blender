@@ -145,6 +145,7 @@ static int node_shader_fn(GPUMaterial *mat,
   if (!in[0].link) {
     GPU_link(mat, "world_normals_get", &in[0].link);
   }
+  GPU_material_flag_set(mat, GPU_MATFLAG_NPR_FOREACH_LIGHT);
   const int zone_id = node_storage(*node).output_node_id;
   return GPU_stack_link_zone(mat, node, "FOREACH_LIGHT_BEGIN", in, out, zone_id, false, 1, 5);
 }

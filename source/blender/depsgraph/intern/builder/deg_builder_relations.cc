@@ -2292,10 +2292,12 @@ void DepsgraphRelationBuilder::build_world(World *world)
   FOREACH_SCENE_OBJECT_BEGIN (scene_, object) {
     const OperationKey light_linking_key(
         &object->id, NodeType::SHADING, OperationCode::LIGHT_LINKING_UPDATE);
-    add_relation(world_key,
-                 light_linking_key,
-                 "World -> Object Light Linking",
-                 RELATION_CHECK_BEFORE_ADD);
+    if (has_node(light_linking_key)) {
+      add_relation(world_key,
+                   light_linking_key,
+                   "World -> Object Light Linking",
+                   RELATION_CHECK_BEFORE_ADD);
+    }
   }
   FOREACH_SCENE_OBJECT_END;
 

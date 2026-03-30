@@ -16,8 +16,6 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_surf_npr)
 
 #include "draw_view_lib.glsl"
 #include "eevee_deferred_combine_lib.glsl"
-#include "eevee_light_eval_lib.glsl"
-#include "eevee_lightprobe_eval_lib.glsl"
 #include "eevee_nodetree_frag_lib.glsl"
 #include "eevee_renderpass_lib.glsl"
 #include "eevee_sampling_lib.glsl"
@@ -61,8 +59,13 @@ void npr_input_impl(out TextureHandle combined_color,
 
 void npr_refraction_impl(out TextureHandle combined_color, out TextureHandle position)
 {
+#ifdef MAT_NPR_REFRACTION
   combined_color = TextureHandle(TEX_HANDLE_BACK_COMBINED_COLOR, 0);
   position = TextureHandle(TEX_HANDLE_BACK_POSITION, 0);
+#else
+  combined_color = TEXTURE_HANDLE_DEFAULT;
+  position = TEXTURE_HANDLE_DEFAULT;
+#endif
 }
 
 void input_aov_impl(uint hash, out TextureHandle color, out TextureHandle value)
@@ -157,17 +160,21 @@ float4 TextureHandle_eval_impl(TextureHandle tex, float2 offset, bool texel_offs
       return float4(imageLoad(rp_color_img, int3(texel, tex.index)).rgb, 0.0f);
     case TEX_HANDLE_RP_VALUE:
       return float4(imageLoad(rp_value_img, int3(texel, tex.index)).rrr, 0.0f);
+#ifdef MAT_NPR_REFRACTION
     case TEX_HANDLE_BACK_COMBINED_COLOR:
       return texelFetch(radiance_back_tx, texel, 0);
+#endif
     case TEX_HANDLE_POSITION: {
       float3 position = drw_point_screen_to_world(float3(screen_uv, depth));
       return float4(position, 0.0f);
     }
+#ifdef MAT_NPR_REFRACTION
     case TEX_HANDLE_BACK_POSITION: {
       float back_depth = texelFetch(hiz_back_tx, texel, 0).r;
       float3 back_position = drw_point_screen_to_world(float3(screen_uv, back_depth));
       return float4(back_position, 0.0f);
     }
+#endif
     default: {
       if (depth == 1.0f) {
         if (tex.type == TEX_HANDLE_COMBINED_COLOR) {
@@ -218,6 +225,7 @@ float4 TextureHandle_eval(TextureHandle tex)
 }
 
 #ifndef FOREACH_LIGHT_BEGIN
+#ifdef MAT_NPR_LIGHTING
 bool npr_is_zero(float3 value)
 {
   return all(lessThanEqual(abs(value), float3(1e-8f)));
@@ -306,6 +314,11 @@ bool foreach_light_setup(uint l_idx,
     }
 
 #  define FOREACH_LIGHT_END() LIGHT_FOREACH_ALL_END()
+#else
+#  define FOREACH_LIGHT_BEGIN( \
+      N, out_color, out_vector, out_distance, out_attenuation, out_shadow_mask)
+#  define FOREACH_LIGHT_END()
+#endif
 #endif
 
 float4 closure_to_rgba(Closure cl)

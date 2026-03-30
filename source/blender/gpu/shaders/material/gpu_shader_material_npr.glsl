@@ -4,7 +4,7 @@
 
 #ifdef GPU_SHADER
 
-#  if defined(NPR_SHADER) && defined(GPU_FRAGMENT_SHADER)
+#  if defined(NPR_SHADER) && defined(GPU_FRAGMENT_SHADER) && defined(MAT_NPR_LIGHTING)
 
 #    define NPR_STABLE_SHADOW_RAY_COUNT 8
 #    define NPR_STABLE_SHADOW_MIN_STEP_COUNT 6

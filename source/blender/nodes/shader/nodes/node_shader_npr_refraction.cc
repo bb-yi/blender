@@ -20,6 +20,7 @@ static int node_shader_gpu_npr_refraction(GPUMaterial *mat,
                                           GPUNodeStack *in,
                                           GPUNodeStack *out)
 {
+  GPU_material_flag_set(mat, GPU_MATFLAG_NPR_REFRACTION);
   return GPU_stack_link(mat, node, "npr_refraction", in, out);
 }
 

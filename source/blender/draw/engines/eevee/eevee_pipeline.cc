@@ -1934,6 +1934,7 @@ void PlanarProbePipeline::render(View &view,
   inst_.manager->submit(gbuffer_ps_, view);
 
   GPU_framebuffer_bind(combined_fb);
+  GPU_framebuffer_clear_color(combined_fb, float4(0.0f));
   inst_.manager->submit(eval_light_ps_, view);
   GPU_memory_barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS | GPU_BARRIER_TEXTURE_FETCH);
 
