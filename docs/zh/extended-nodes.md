@@ -301,7 +301,7 @@
 `Add > Texture > SDF Primitive`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-31_03-34-28.png" alt="alt text" style="border-radius: 10px;">
+	<img src="images/SnowShot_2026-03-31_03-34-28.png" alt="SDF Primitive" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -339,7 +339,7 @@
 `Add > Converter > SDF Operator`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-31_03-34-47.png" alt="alt text" style="border-radius: 10px;">
+	<img src="images/SnowShot_2026-03-31_03-34-47.png" alt="SDF Operator" style="border-radius: 10px;">
 	<br>
 </div>
 
