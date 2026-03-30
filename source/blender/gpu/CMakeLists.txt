@@ -673,6 +673,9 @@ set(GLSL_SRC
   shaders/material/gpu_shader_material_light_probe_color.glsl
   shaders/material/gpu_shader_material_world_to_tangent.glsl
   shaders/material/gpu_shader_material_basis_transform.glsl
+  shaders/material/gpu_shader_material_sdf_util.glsl
+  shaders/material/gpu_shader_material_sdf_primitive.glsl
+  shaders/material/gpu_shader_material_sdf_op.glsl
   shaders/material/gpu_shader_material_shader_info.glsl
   shaders/material/gpu_shader_material_screenspace_info.glsl
   shaders/material/gpu_shader_material_scene_color.glsl

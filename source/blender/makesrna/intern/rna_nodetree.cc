@@ -457,6 +457,119 @@ const EnumPropertyItem rna_enum_node_clamp_items[] = {
     {0, nullptr, 0, nullptr, nullptr},
 };
 
+const EnumPropertyItem rna_enum_node_sdf_primitive_items[] = {
+    {0, "", 0, N_("3D Primitives"), ""},
+    {SHD_SDF_3D_SPHERE, "SPHERE_3D", 0, "Sphere", "3D SDF sphere"},
+    {SHD_SDF_3D_BOX, "BOX_3D", 0, "Box", "3D SDF box"},
+    {SHD_SDF_3D_TORUS, "TORUS_3D", 0, "Torus", "3D SDF torus"},
+    {SHD_SDF_3D_CONE, "CONE_3D", 0, "Cone", "3D SDF cone"},
+    {SHD_SDF_3D_POINT_CONE, "POINT_CONE_3D", 0, "Point Cone", "3D SDF point cone"},
+    {SHD_SDF_3D_CYLINDER, "CYLINDER_3D", 0, "Cylinder", "3D SDF cylinder"},
+    {SHD_SDF_3D_POINT_CYLINDER,
+     "POINT_CYLINDER_3D",
+     0,
+     "Point Cylinder",
+     "3D SDF point cylinder"},
+    {SHD_SDF_3D_CAPSULE, "CAPSULE_3D", 0, "Capsule/Line", "3D SDF capsule"},
+    {SHD_SDF_3D_OCTAHEDRON, "OCTAHEDRON_3D", 0, "Octahedron", "3D SDF octahedron"},
+    {SHD_SDF_3D_HEX_PRISM, "HEX_PRISM_3D", 0, "Hex Prism", "3D SDF hex prism"},
+    {SHD_SDF_3D_HEX_PRISM_INCIRCLE,
+     "HEX_PRISM_INCIRCLE_3D",
+     0,
+     "Hex Prism Incircle",
+     "3D SDF hex prism incircle"},
+    {SHD_SDF_3D_PLANE, "PLANE_3D", 0, "Plane", "3D SDF plane"},
+    {SHD_SDF_3D_SOLID_ANGLE, "SOLID_ANGLE_3D", 0, "Solid Angle", "3D SDF solid angle"},
+    {SHD_SDF_3D_PYRAMID, "PYRAMID_3D", 0, "Pyramid", "3D SDF pyramid"},
+    {SHD_SDF_3D_DISC, "DISC_3D", 0, "Disc", "3D SDF disc"},
+    {SHD_SDF_3D_CIRCLE, "CIRCLE_3D", 0, "3D Circle", "3D SDF circle"},
+    {0, "", 0, N_("2D Primitives"), ""},
+    {SHD_SDF_2D_CIRCLE, "CIRCLE_2D", 0, "Circle", "2D SDF circle"},
+    {SHD_SDF_2D_RECTANGLE, "RECTANGLE_2D", 0, "Rectangle", "2D SDF rectangle"},
+    {SHD_SDF_2D_ELLIPSE, "ELLIPSE_2D", 0, "Ellipse", "2D SDF ellipse"},
+    {SHD_SDF_2D_TRIANGLE, "TRIANGLE_2D", 0, "Triangle", "2D SDF triangle"},
+    {SHD_SDF_2D_PENTAGON, "PENTAGON_2D", 0, "Pentagon", "2D SDF pentagon"},
+    {SHD_SDF_2D_HEXAGON, "HEXAGON_2D", 0, "Hexagon", "2D SDF hexagon"},
+    {SHD_SDF_2D_ISOSCELES, "ISOSCELES_2D", 0, "Isosceles Triangle", "2D SDF isosceles"},
+    {SHD_SDF_2D_TRAPEZOID, "TRAPEZOID_2D", 0, "Trapezoid", "2D SDF trapezoid"},
+    {SHD_SDF_2D_RHOMBUS, "RHOMBUS_2D", 0, "Rhombus", "2D SDF rhombus"},
+    {0, "", 0, N_("Stylized 2D Primitives"), ""},
+    {SHD_SDF_2D_STAR, "STAR_2D", 0, "Star", "2D SDF star"},
+    {SHD_SDF_2D_HEART, "HEART_2D", 0, "Heart", "2D SDF heart"},
+    {SHD_SDF_2D_PIE, "PIE_2D", 0, "Pie", "2D SDF pie"},
+    {SHD_SDF_2D_ARC, "ARC_2D", 0, "Arc", "2D SDF arc"},
+    {SHD_SDF_2D_MOON, "MOON_2D", 0, "Moon", "2D SDF moon"},
+    {SHD_SDF_2D_VESICA, "VESICA_2D", 0, "Vesica", "2D SDF vesica"},
+    {SHD_SDF_2D_CROSS, "CROSS_2D", 0, "Cross", "2D SDF cross"},
+    {SHD_SDF_2D_ROUNDX, "ROUNDX_2D", 0, "Rounded X", "2D SDF rounded X"},
+    {SHD_SDF_2D_HORSESHOE, "HORSESHOE_2D", 0, "Horseshoe", "2D SDF horseshoe"},
+    {SHD_SDF_2D_ROUND_JOINT, "ROUND_JOINT_2D", 0, "Round Joint", "2D SDF round joint"},
+    {SHD_SDF_2D_FLAT_JOINT, "FLAT_JOINT_2D", 0, "Flat Joint", "2D SDF flat joint"},
+    {0, "", 0, N_("2D Curve Primitives"), ""},
+    {SHD_SDF_2D_LINE, "LINE_2D", 0, "Line", "2D SDF line"},
+    {SHD_SDF_2D_CORNER, "CORNER_2D", 0, "Corner", "2D SDF corner"},
+    {SHD_SDF_2D_BEZIER, "BEZIER_2D", 0, "Quadratic Bezier", "2D SDF bezier"},
+    {SHD_SDF_2D_POINT_TRIANGLE,
+     "POINT_TRIANGLE_2D",
+     0,
+     "Point Triangle",
+     "2D SDF 3 point triangle"},
+    {SHD_SDF_2D_QUAD, "QUAD_2D", 0, "Quad", "2D SDF quad"},
+    {SHD_SDF_2D_PARABOLA, "PARABOLA_2D", 0, "Parabola", "2D SDF parabola"},
+    {SHD_SDF_2D_PARABOLA_SEGMENT,
+     "PARABOLA_SEGMENT_2D",
+     0,
+     "Parabola Segment",
+     "2D SDF parabola segment"},
+    {SHD_SDF_2D_UNEVEN_CAPSULE, "CAPSULE_2D", 0, "Uneven Capsule", "2D SDF capsule"},
+    {0, nullptr, 0, nullptr, nullptr},
+};
+
+const EnumPropertyItem rna_enum_node_sdf_op_items[] = {
+    {0, "", 0, N_("1 Input SDF Ops"), ""},
+    {SHD_SDF_OP_DILATE, "DILATE", 0, "Dilate", "Grow or shrink SDF boundary"},
+    {SHD_SDF_OP_ONION, "ONION", 0, "Onion", "Create N edges"},
+    {SHD_SDF_OP_ANNULAR, "ANNULAR", 0, "Annular", "Create edge on boundary of zero values"},
+    {SHD_SDF_OP_MASK, "MASK", 0, "Mask", "Create clamped 0-1 mask from negative SDF values"},
+    {SHD_SDF_OP_FLATTEN, "FLATTEN", 0, "Flatten", "Clamp range and map to [0-1] range"},
+    {SHD_SDF_OP_INVERT, "INVERT", 0, "Invert", "Invert SDF values"},
+    {SHD_SDF_OP_PULSE,
+     "PULSE",
+     0,
+     "Hermite Pulse",
+     "Hermite pulse between min and max SDF values"},
+    {0, "", 0, N_("2 Input SDF Ops"), ""},
+    {SHD_SDF_OP_BLEND, "BLEND", 0, "Blend", "Blend between SDF values"},
+    {SHD_SDF_OP_EXCLUSION, "EXCLUSION", 0, "Exclusion XOR", "Union with intersection removed"},
+    {SHD_SDF_OP_DIVIDE, "DIVIDE", 0, "Divide", "Union with gap between SDFs"},
+    {SHD_SDF_OP_PIPE, "PIPE", 0, "Pipe", "Produces a cylindrical pipe along the intersection"},
+    {SHD_SDF_OP_ENGRAVE, "ENGRAVE", 0, "Engrave", "Intersection with v-shaped cut out"},
+    {SHD_SDF_OP_GROOVE, "GROOVE", 0, "Groove", "Intersection with groove cut out"},
+    {SHD_SDF_OP_TONGUE, "TONGUE", 0, "Tongue", "Intersection with tongue cut out"},
+    {0, "", 0, N_("Union"), ""},
+    {SHD_SDF_OP_UNION, "UNION", 0, "Union", ""},
+    {SHD_SDF_OP_UNION_SMOOTH, "UNION_SMOOTH", 0, "Union Smooth", ""},
+    {SHD_SDF_OP_UNION_ROUND, "UNION_ROUND", 0, "Union Round", ""},
+    {SHD_SDF_OP_UNION_COLUMNS, "UNION_COLUMNS", 0, "Union Columns", ""},
+    {SHD_SDF_OP_UNION_STAIRS, "UNION_STAIRS", 0, "Union Stairs", ""},
+    {SHD_SDF_OP_UNION_CHAMFER, "UNION_CHAMFER", 0, "Union Chamfer", ""},
+    {0, "", 0, N_("Intersection"), ""},
+    {SHD_SDF_OP_INTERSECT, "INTERSECT", 0, "Intersect", ""},
+    {SHD_SDF_OP_INTERSECT_SMOOTH, "INTERSECT_SMOOTH", 0, "Intersect Smooth", ""},
+    {SHD_SDF_OP_INTERSECT_ROUND, "INTERSECT_ROUND", 0, "Intersect Round", ""},
+    {SHD_SDF_OP_INTERSECT_COLUMNS, "INTERSECT_COLUMNS", 0, "Intersect Columns", ""},
+    {SHD_SDF_OP_INTERSECT_STAIRS, "INTERSECT_STAIRS", 0, "Intersect Stairs", ""},
+    {SHD_SDF_OP_INTERSECT_CHAMFER, "INTERSECT_CHAMFER", 0, "Intersect Chamfer", ""},
+    {0, "", 0, N_("Difference"), ""},
+    {SHD_SDF_OP_DIFF, "DIFFERENCE", 0, "Difference", ""},
+    {SHD_SDF_OP_DIFF_SMOOTH, "DIFFERENCE_SMOOTH", 0, "Difference Smooth", ""},
+    {SHD_SDF_OP_DIFF_ROUND, "DIFFERENCE_ROUND", 0, "Difference Round", ""},
+    {SHD_SDF_OP_DIFF_COLUMNS, "DIFFERENCE_COLUMNS", 0, "Difference Columns", ""},
+    {SHD_SDF_OP_DIFF_STAIRS, "DIFFERENCE_STAIRS", 0, "Difference Stairs", ""},
+    {SHD_SDF_OP_DIFF_CHAMFER, "DIFFERENCE_CHAMFER", 0, "Difference Chamfer", ""},
+    {0, nullptr, 0, nullptr, nullptr},
+};
+
 static const EnumPropertyItem rna_enum_node_tex_dimensions_items[] = {
     {1, "1D", 0, "1D", "Use the scalar value W as input"},
     {2, "2D", 0, "2D", "Use the 2D vector (X, Y) as input. The Z component is ignored."},
@@ -5130,6 +5243,43 @@ static void def_sh_tex(BlenderRNA * /*brna*/, StructRNA *srna)
   RNA_def_property_pointer_sdna(prop, nullptr, "base.color_mapping");
   RNA_def_property_flag(prop, PROP_NEVER_NULL);
   RNA_def_property_ui_text(prop, "Color Mapping", "Color mapping settings");
+}
+
+static void def_sh_sdf_primitive(BlenderRNA *brna, StructRNA *srna)
+{
+  PropertyRNA *prop;
+
+  RNA_def_struct_sdna_from(srna, "NodeSdfPrimitive", "storage");
+  def_sh_tex(brna, srna);
+
+  prop = RNA_def_property(srna, "mode", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "mode");
+  RNA_def_property_enum_items(prop, rna_enum_node_sdf_primitive_items);
+  RNA_def_property_ui_text(prop, "Mode", "SDF primitive to evaluate");
+  RNA_def_property_update(prop, 0, "rna_ShaderNode_socket_update");
+
+  prop = RNA_def_property(srna, "invert", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "invert", 1);
+  RNA_def_property_ui_text(prop, "Invert", "Invert signed distance field");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+}
+
+static void def_sh_sdf_op(BlenderRNA * /*brna*/, StructRNA *srna)
+{
+  PropertyRNA *prop;
+
+  RNA_def_struct_sdna_from(srna, "NodeSdfOp", "storage");
+
+  prop = RNA_def_property(srna, "operation", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "operation");
+  RNA_def_property_enum_items(prop, rna_enum_node_sdf_op_items);
+  RNA_def_property_ui_text(prop, "Operation", "SDF operation to apply");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_ShaderNode_socket_update");
+
+  prop = RNA_def_property(srna, "invert", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "invert", 1);
+  RNA_def_property_ui_text(prop, "Invert", "Invert operation output value");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
 }
 
 static void def_sh_tex_sky(BlenderRNA *brna, StructRNA *srna)
@@ -10465,6 +10615,8 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("ShaderNode", "ShaderNodeLightProbeColor");
   define("ShaderNode", "ShaderNodeWorldToTangent", def_sh_world_to_tangent);
   define("ShaderNode", "ShaderNodeBasisTransform", def_sh_basis_transform);
+  define("ShaderNode", "ShaderNodeSdfPrimitive", def_sh_sdf_primitive);
+  define("ShaderNode", "ShaderNodeSdfOp", def_sh_sdf_op);
   define("ShaderNode", "ShaderNodeCurvature", def_sh_curvature);
   define("ShaderNode", "ShaderNodeShaderInfo", def_sh_shader_info);
   define("ShaderNode", "ShaderNodeLightInfo", def_sh_light_info);

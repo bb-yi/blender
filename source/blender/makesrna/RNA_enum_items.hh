@@ -193,6 +193,8 @@ DEF_ENUM(rna_enum_node_integer_math_items)
 DEF_ENUM(rna_enum_node_float_to_int_items)
 DEF_ENUM(rna_enum_node_map_range_items)
 DEF_ENUM(rna_enum_node_clamp_items)
+DEF_ENUM(rna_enum_node_sdf_primitive_items)
+DEF_ENUM(rna_enum_node_sdf_op_items)
 
 DEF_ENUM(rna_enum_node_compositor_extension_items)
 DEF_ENUM(rna_enum_node_compositor_interpolation_items)

@@ -427,6 +427,7 @@ class NODE_MT_shader_node_texture_base(node_add_menu.NodeMenu):
         self.node_operator(layout, "ShaderNodeTexEnvironment")
         self.node_operator(layout, "ShaderNodeTexGabor")
         self.node_operator(layout, "ShaderNodeTexGradient")
+        self.node_operator(layout, "ShaderNodeSdfPrimitive")
         self.node_operator(layout, "ShaderNodeTexIES")
         self.node_operator(layout, "ShaderNodeTexImage")
         self.node_operator(
@@ -497,6 +498,7 @@ class NODE_MT_shader_node_math_base(node_add_menu.NodeMenu):
             )
         self.node_operator(layout, "ShaderNodeFloatCurve")
         self.node_operator(layout, "ShaderNodeMapRange")
+        self.node_operator(layout, "ShaderNodeSdfOp")
         self.node_operator_with_searchable_enum(context, layout, "ShaderNodeMath", "operation")
         self.node_operator(layout, "ShaderNodeMix")
 
