@@ -92,6 +92,10 @@
 
 - `Basis Transform`
 
+- `SDF Primitive`
+
+- `SDF Operator`
+
 - `Bevel`
 
 - `Curvature`

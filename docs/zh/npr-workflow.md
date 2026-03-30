@@ -30,6 +30,13 @@
 
 - 可以使用 `Ctrl + Tab` 在物体和 NPR 之间快速切换
 
+- 当前 `NPR Tree` 使用的动作可在 `Material Properties > Animation > NPR Tree Action` 查看、切换或新建；这个槽位与普通材质动作分开管理
+
+<div align="center">
+	<img src="images/SnowShot_2026-03-31_03-35-17.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
+
 ## 4. 主要 NPR 节点
 
 除了下面这些专用 NPR 节点以外，`Curvature` 和 `Raycast` 现在也可以直接在 `NPR Tree` 中使用。

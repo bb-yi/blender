@@ -294,6 +294,83 @@
 
     - `Zero`：当基底退化时输出 `0, 0, 0`
 
+### SDF Primitive
+
+#### 入口
+
+`Add > Texture > SDF Primitive`
+
+<div align="center">
+	<img src="images/SnowShot_2026-03-31_03-34-28.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### 输出
+
+- `Distance`
+
+#### 作用
+
+在材质节点里直接生成符号距离场（SDF）基础形体，适合做程序遮罩、轮廓、形体过渡，以及后续布尔组合的基础输入。
+
+#### 主要模式
+
+- 3D 形体：`Sphere`、`Box`、`Torus`、`Cone`、`Point Cone`、`Cylinder`、`Point Cylinder`、`Capsule / Line`、`Octahedron`、`Hex Prism`、`Hex Prism Incircle`、`Plane`、`Solid Angle`、`Pyramid`、`Disc`、`3D Circle`
+- 2D 形体：`Circle`、`Rectangle`、`Ellipse`、`Triangle`、`Pentagon`、`Hexagon`、`Isosceles Triangle`、`Trapezoid`、`Rhombus`
+- 风格化 2D：`Star`、`Heart`、`Pie`、`Arc`、`Moon`、`Vesica`、`Cross`、`Rounded X`、`Horseshoe`、`Round Joint`、`Flat Joint`
+- 曲线 / 片段：`Line`、`Corner`、`Quadratic Bezier`、`Point Triangle`、`Quad`、`Parabola`、`Parabola Segment`、`Uneven Capsule`
+
+#### 输入说明
+
+- 固定基础输入为 `Vector`
+- 其余插口会按模式动态显示并重命名，常见参数有 `Size`、`Radius`、`Angle`、`Roundness`、`Linewidth`、`Point` 到 `Point_003`、`Value1` 到 `Value4`
+- 节点面板提供 `Mode` 和 `Invert`
+
+#### 使用说明
+
+- 输出的是距离值，不是颜色
+- 通常配合 `Math`、`ColorRamp`、`Map Range`、`SDF Operator` 等节点，把距离场转换成遮罩或最终图形
+- `Invert` 可直接翻转内外关系，方便把同一形体改成“孔”或“壳”
+
+### SDF Operator
+
+#### 入口
+
+`Add > Converter > SDF Operator`
+
+<div align="center">
+	<img src="images/SnowShot_2026-03-31_03-34-47.png" alt="alt text" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### 输出
+
+- `Distance`
+
+#### 作用
+
+对一个或两个 SDF 距离场做组合、裁切和轮廓变形，用来把多个基础形体继续拼成更复杂的结果。
+
+#### 主要运算
+
+- 单输入：`Dilate`、`Onion`、`Annular`、`Mask`、`Flatten`、`Invert`、`Hermite Pulse`
+- 双输入：`Blend`、`Exclusion XOR`、`Divide`、`Pipe`、`Engrave`、`Groove`、`Tongue`
+- 并集：`Union`、`Smooth Union`、`Round Union`、`Columns Union`、`Stairs Union`、`Chamfer Union`
+- 交集：`Intersect`、`Smooth Intersect`、`Round Intersect`、`Columns Intersect`、`Stairs Intersect`、`Chamfer Intersect`
+- 差集：`Difference`、`Smooth Difference`、`Round Difference`、`Columns Difference`、`Stairs Difference`、`Chamfer Difference`
+
+#### 输入说明
+
+- 基础输入包含 `Distance`、`Distance_001`、`Value`、`Value_001`、`Count`
+- 实际显示的插口名称和数量会随 `Operation` 自动变化
+- `Mask` 模式会额外显示 `Invert`
+
+#### 使用说明
+
+- 常见流程是先用多个 `SDF Primitive` 生成距离场，再通过 `SDF Operator` 做并集、交集或差集
+- `Smooth`、`Round`、`Chamfer`、`Stairs`、`Columns` 这类模式适合做更有风格化过渡的布尔边界
+- 最终依然输出距离值，通常还需要再接阈值、颜色映射或透明度控制节点
+
 ### Bevel
 
 #### 入口

@@ -292,6 +292,83 @@ Uses `origin + three basis axes` inside material nodes to perform custom coordin
 
     - `Zero`: Output `0, 0, 0` when the basis degenerates
 
+### SDF Primitive
+
+#### Entry
+
+`Add > Texture > SDF Primitive`
+
+<div align="center">
+	<img src="images/SnowShot_2026-03-31_03-34-28.png" alt="SDF Primitive" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### Output
+
+- `Distance`
+
+#### Purpose
+
+Generates signed distance field (SDF) base shapes directly inside material nodes. It is useful for procedural masks, silhouettes, shape transitions, and as the starting point for boolean-style combinations.
+
+#### Main Modes
+
+- 3D shapes: `Sphere`, `Box`, `Torus`, `Cone`, `Point Cone`, `Cylinder`, `Point Cylinder`, `Capsule / Line`, `Octahedron`, `Hex Prism`, `Hex Prism Incircle`, `Plane`, `Solid Angle`, `Pyramid`, `Disc`, `3D Circle`
+- 2D shapes: `Circle`, `Rectangle`, `Ellipse`, `Triangle`, `Pentagon`, `Hexagon`, `Isosceles Triangle`, `Trapezoid`, `Rhombus`
+- Stylized 2D shapes: `Star`, `Heart`, `Pie`, `Arc`, `Moon`, `Vesica`, `Cross`, `Rounded X`, `Horseshoe`, `Round Joint`, `Flat Joint`
+- Curve / segment shapes: `Line`, `Corner`, `Quadratic Bezier`, `Point Triangle`, `Quad`, `Parabola`, `Parabola Segment`, `Uneven Capsule`
+
+#### Input Notes
+
+- The fixed base input is `Vector`
+- Other sockets are shown and renamed dynamically per mode. Common parameters include `Size`, `Radius`, `Angle`, `Roundness`, `Linewidth`, `Point` to `Point_003`, and `Value1` to `Value4`
+- The node panel provides `Mode` and `Invert`
+
+#### Usage Notes
+
+- The output is a distance value, not a color
+- It is typically combined with nodes such as `Math`, `ColorRamp`, `Map Range`, and `SDF Operator` to turn the field into a mask or final shape
+- `Invert` flips the inside / outside relationship directly, which is useful for turning the same shape into a hole or shell
+
+### SDF Operator
+
+#### Entry
+
+`Add > Converter > SDF Operator`
+
+<div align="center">
+	<img src="images/SnowShot_2026-03-31_03-34-47.png" alt="SDF Operator" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### Output
+
+- `Distance`
+
+#### Purpose
+
+Combines, trims, and reshapes one or two SDF distance fields so multiple primitives can be assembled into more complex results.
+
+#### Main Operations
+
+- Single-input operations: `Dilate`, `Onion`, `Annular`, `Mask`, `Flatten`, `Invert`, `Hermite Pulse`
+- Two-input operations: `Blend`, `Exclusion XOR`, `Divide`, `Pipe`, `Engrave`, `Groove`, `Tongue`
+- Union family: `Union`, `Smooth Union`, `Round Union`, `Columns Union`, `Stairs Union`, `Chamfer Union`
+- Intersection family: `Intersect`, `Smooth Intersect`, `Round Intersect`, `Columns Intersect`, `Stairs Intersect`, `Chamfer Intersect`
+- Difference family: `Difference`, `Smooth Difference`, `Round Difference`, `Columns Difference`, `Stairs Difference`, `Chamfer Difference`
+
+#### Input Notes
+
+- Base inputs include `Distance`, `Distance_001`, `Value`, `Value_001`, and `Count`
+- The visible socket names and counts change automatically with `Operation`
+- `Mask` exposes an extra `Invert` toggle
+
+#### Usage Notes
+
+- A common workflow is to build several shapes with `SDF Primitive`, then combine them with `SDF Operator` through union, intersection, or difference
+- `Smooth`, `Round`, `Chamfer`, `Stairs`, and `Columns` are useful for more stylized boolean transitions
+- The node still outputs a distance value, so it usually needs a threshold, color remap, or alpha control afterward
+
 ### Bevel
 
 #### Entry

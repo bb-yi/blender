@@ -92,6 +92,10 @@ This document describes the NPR / Eevee extension features that have been added 
 
 - `Basis Transform`
 
+- `SDF Primitive`
+
+- `SDF Operator`
+
 - `Bevel`
 
 - `Curvature`

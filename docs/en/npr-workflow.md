@@ -30,6 +30,13 @@
 
 - You can use `Ctrl + Tab` to quickly switch between the object shader and the NPR tree
 
+- The action used by the current `NPR Tree` can be viewed, switched, or created in `Material Properties > Animation > NPR Tree Action`; this slot is separate from the regular material action
+
+<div align="center">
+	<img src="images/SnowShot_2026-03-31_03-35-17.png" alt="NPR Tree Action" style="border-radius: 10px;">
+	<br>
+</div>
+
 ## 4. Main NPR Nodes
 
 In addition to the dedicated NPR nodes below, `Curvature` and `Raycast` can now also be used directly inside `NPR Tree`.
