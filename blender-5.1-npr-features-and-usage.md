@@ -7,20 +7,21 @@
 
 ## 与官方 Blender 5.1 的主要区别
 
-当前这个 5.1 NPR 版本，和官方 Blender 5.1 相比，主要多了四类能力：
+当前这个 5.1 NPR 版本，和官方 Blender 5.1 相比，主要多了以下几类能力：
 
 1. `Eevee` 的场景级扩展工作流
    - `Render Textures`
    - `Filter Materials`
 
-2.  `Eevee` 的新着色器节点
-    - `Render Info`
-    - `Scene Time`
-    - `Screen Derivative`
-    - `World Environment`
-    - `Light Probe Color`
-    - `World To Tangent`
-    - `Bevel`
+2. `Eevee` 的新着色器节点
+   - `Render Info`
+   - `Scene Time`
+   - `Screen Derivative`
+   - `World Environment`
+   - `Light Probe Color`
+   - `World To Tangent`
+   - `Basis Transform`
+   - `Bevel`
 
 3. `Goo Engine` 移植节点
    - `Screenspace Info`
@@ -28,6 +29,8 @@
    - `Raycast`
    - `Shader Info`
    - `Light Info`
+   - `SDF Primitive`
+   - `SDF Operator`
 
 4. `NPR Tree` 工作流与配套节点
    - `NPR Input`
@@ -389,6 +392,73 @@
 - 普通网格需要有效的 UV 切线数据；曲线 / 毛发会优先使用已有的曲线切线基底
 - 如果对象没有可用切线基底，结果会退化为 `0`
 
+### SDF Primitive
+
+#### 入口
+
+`Add > Texture > SDF Primitive`
+
+#### 输出
+
+- `Distance`
+
+#### 作用
+
+在材质节点里直接生成符号距离场（SDF）基础形体，适合做程序遮罩、轮廓、形体过渡，以及后续布尔组合的基础输入。
+
+#### 主要模式
+
+- 3D 形体：`Sphere`、`Box`、`Torus`、`Cone`、`Point Cone`、`Cylinder`、`Point Cylinder`、`Capsule / Line`、`Octahedron`、`Hex Prism`、`Hex Prism Incircle`、`Plane`、`Solid Angle`、`Pyramid`、`Disc`、`3D Circle`
+- 2D 形体：`Circle`、`Rectangle`、`Ellipse`、`Triangle`、`Pentagon`、`Hexagon`、`Isosceles Triangle`、`Trapezoid`、`Rhombus`
+- 风格化 2D：`Star`、`Heart`、`Pie`、`Arc`、`Moon`、`Vesica`、`Cross`、`Rounded X`、`Horseshoe`、`Round Joint`、`Flat Joint`
+- 曲线 / 片段：`Line`、`Corner`、`Quadratic Bezier`、`Point Triangle`、`Quad`、`Parabola`、`Parabola Segment`、`Uneven Capsule`
+
+#### 输入说明
+
+- 固定基础输入为 `Vector`
+- 其余插口会按模式动态显示并重命名，常见参数有 `Size`、`Radius`、`Angle`、`Roundness`、`Linewidth`、`Point` 到 `Point_003`、`Value1` 到 `Value4`
+- 节点面板提供 `Mode` 和 `Invert`
+
+#### 使用说明
+
+- 输出的是距离值，不是颜色
+- 通常配合 `Math`、`ColorRamp`、`Map Range`、`SDF Operator` 等节点，把距离场转换成遮罩或最终图形
+- `Invert` 可直接翻转内外关系，方便把同一形体改成“孔”或“壳”
+
+### SDF Operator
+
+#### 入口
+
+`Add > Converter > SDF Operator`
+
+#### 输出
+
+- `Distance`
+
+#### 作用
+
+对一个或两个 SDF 距离场做组合、裁切和轮廓变形，用来把多个基础形体继续拼成更复杂的结果。
+
+#### 主要运算
+
+- 单输入：`Dilate`、`Onion`、`Annular`、`Mask`、`Flatten`、`Invert`、`Hermite Pulse`
+- 双输入：`Blend`、`Exclusion XOR`、`Divide`、`Pipe`、`Engrave`、`Groove`、`Tongue`
+- 并集：`Union`、`Smooth Union`、`Round Union`、`Columns Union`、`Stairs Union`、`Chamfer Union`
+- 交集：`Intersect`、`Smooth Intersect`、`Round Intersect`、`Columns Intersect`、`Stairs Intersect`、`Chamfer Intersect`
+- 差集：`Difference`、`Smooth Difference`、`Round Difference`、`Columns Difference`、`Stairs Difference`、`Chamfer Difference`
+
+#### 输入说明
+
+- 基础输入包含 `Distance`、`Distance_001`、`Value`、`Value_001`、`Count`
+- 实际显示的插口名称和数量会随 `Operation` 自动变化
+- `Mask` 模式会额外显示 `Invert`
+
+#### 使用说明
+
+- 常见流程是先用多个 `SDF Primitive` 生成距离场，再通过 `SDF Operator` 做并集、交集或差集
+- `Smooth`、`Round`、`Chamfer`、`Stairs`、`Columns` 这类模式适合做更有风格化过渡的布尔边界
+- 最终依然输出距离值，通常还需要再接阈值、颜色映射或透明度控制节点
+
 ### Bevel
 
 #### 入口
@@ -593,6 +663,7 @@
 
 ### 3. 说明
  - 材质的渲染方式需要设置为`抖动(延迟渲染)`
+ - `NPR Tree` 的关键帧与驱动器使用独立的 `NPR Tree Action`，可在 `Material Properties > Animation > NPR Tree Action` 查看、切换或新建。
 
 ### 4. 主要 NPR 节点
 

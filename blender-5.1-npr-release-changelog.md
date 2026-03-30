@@ -33,12 +33,82 @@
 
 | 发布时间 | Tag | 构建哈希 |
 | --- | --- | --- |
+| 2026-03-31 | `v5.1.0-npr-port-win64-60afe891f178` | `60afe891f178` |
+| 2026-03-30 | `v5.1.0-npr-port-win64-d1ab893d1f16` | `d1ab893d1f16` |
+| 2026-03-29 | `v5.1.0-npr-port-win64-1eba32610ca6` | `1eba32610ca6` |
 | 2026-03-25 | `v5.1.0-npr-port-win64-710a1b4934d6` | `710a1b4934d6` |
 | 2026-03-23 | `v5.1.0-npr-port-win64-66ed2fb9cad6` | `66ed2fb9cad6` |
 | 2026-03-22 | `v5.1.0-npr-port-win64-19c826ccb5ee` | `19c826ccb5ee` |
 | 2026-03-22 | `v5.1.0-npr-port-win64-0b5a1dd68c06` | `0b5a1dd68c06` |
 | 2026-03-21 | `v5.1.0-npr-port-win64-e3f8fa33c23f` | `e3f8fa33c23f` |
 | 2026-03-19 | `v5.1.0-npr-port-win64-c4b7253e825b` | `c4b7253e825b` |
+
+## 2026-03-31
+
+### `v5.1.0-npr-port-win64-60afe891f178`
+
+发布链接：https://github.com/bb-yi/blender/releases/tag/v5.1.0-npr-port-win64-60afe891f178
+
+#### 新增功能
+- 新增 Goo Engine 风格的 `SDF Primitive` / `SDF Operator` 节点。
+
+#### 修复与改进
+- 修复 `NPR Tree` 动画数据无法正确记录与切换的问题，恢复关键帧对应 `Action` 的创建与使用。
+- 修复 `NPR Tree` 节点参数驱动器无法正常生效的问题。
+
+#### Blender 信息
+- **版本**：`Blender 5.1.0`
+- **分支**：`npr-port-5.1`
+- **构建哈希**：`60afe891f178`
+- **平台**：`Windows x64`
+- **构建系统**：`CMake`
+
+## 2026-03-30
+
+### `v5.1.0-npr-port-win64-d1ab893d1f16`
+
+发布链接：https://github.com/bb-yi/blender/releases/tag/v5.1.0-npr-port-win64-d1ab893d1f16
+
+#### 修复与改进
+- 修复部分 `NPR` / 金属材质在光照探针与延迟路径中的错误取样问题，减少异常高亮与颜色错误。
+- 修复未实际使用的贴图采样路径仍占用 sampler 的问题，降低 `too many samplers in shader` 报错概率。
+- 修复 `LIGHT_LINKING_UPDATE` 缺失导致的控制台报错，以及 `World -> Object Light Linking` 依赖关系构建失败问题。
+- 修复当前 Windows 发布构建中的 RNA 节点运行时依赖问题，恢复 5.1 port 包的稳定打包流程。
+
+#### Blender 信息
+- **版本**：`Blender 5.1.0`
+- **分支**：`npr-port-5.1`
+- **构建哈希**：`d1ab893d1f16`
+- **平台**：`Windows x64`
+- **构建系统**：`CMake`
+
+## 2026-03-29
+
+### `v5.1.0-npr-port-win64-1eba32610ca6`
+
+发布链接：https://github.com/bb-yi/blender/releases/tag/v5.1.0-npr-port-win64-1eba32610ca6
+
+#### 新增功能
+- 新增 `Basis Transform` 节点。
+
+#### 修复与改进
+- 修复 `Environment Lighting > Exclude Collection` 在当前构建中不生效的问题。
+- 修复 Eevee 平面反射探针、球形光照探针场景下 `NPR Input` 部分输出异常发黑的问题。
+- 改进反射、折射以及世界环境参与时的 probe radiance 读取逻辑，减少 `NPR Tree` 在探针中的黑屏和错误取样问题。
+- 修复自发光材质添加 `NPR Tree` 后发光部分变黑的问题。
+- 修复 `Render Info > Frag Coord` 在相机视图下仍按窗口尺寸计算的问题。
+- 修复 `NPR Groups` 中重复添加同一资产节点组时生成 `.001` 数据块的问题，现在会复用已有节点组数据块。
+- 移除 `Curvature` 节点的 `Bevel Normal` 输出。
+- 移除 `Filter Materials` 中 `Scene Color` 的 `Shadow` 选项及相关底层实现。
+- 从添加菜单中隐藏 `Light Probe Color` 节点。
+- 调整 `Shader Info` 阴影模式逻辑，仅保留默认与平滑模式。
+
+#### Blender 信息
+- **版本**：`Blender 5.1.0`
+- **分支**：`npr-port-5.1`
+- **构建哈希**：`1eba32610ca6`
+- **平台**：`Windows x64`
+- **构建系统**：`CMake`
 
 ## 2026-03-25
 
