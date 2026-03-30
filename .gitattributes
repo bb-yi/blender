@@ -105,3 +105,6 @@
 *.avif filter=lfs diff=lfs merge=lfs -text
 *.heic filter=lfs diff=lfs merge=lfs -text
 scripts/modules/_bpy_internal/assets/remote_library_listing/*_openapi.py linguist-generated=true
+images/SnowShot_2026-03-28_06-55-43.png -filter -diff -merge text
+images/SnowShot_2026-03-28_07-50-39.png -filter -diff -merge text
+images/SnowShot_2026-03-28_07-51-05.png -filter -diff -merge text
