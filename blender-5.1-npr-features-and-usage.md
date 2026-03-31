@@ -31,6 +31,7 @@
    - `Light Info`
    - `SDF Primitive`
    - `SDF Operator`
+   - `SDF Vector Operator`
 
 4. `NPR Tree` 工作流与配套节点
    - `NPR Input`
@@ -458,6 +459,56 @@
 - 常见流程是先用多个 `SDF Primitive` 生成距离场，再通过 `SDF Operator` 做并集、交集或差集
 - `Smooth`、`Round`、`Chamfer`、`Stairs`、`Columns` 这类模式适合做更有风格化过渡的布尔边界
 - 最终依然输出距离值，通常还需要再接阈值、颜色映射或透明度控制节点
+
+### SDF Vector Operator
+
+#### 入口
+
+`Add > Utilities > Vector > SDF Vector Operator`
+
+#### 输出
+
+- `Vector`
+- `Position`
+- `Value`
+
+#### 作用
+
+在进入 `SDF Primitive` 之前，先对采样坐标、UV 或向量域做重复、镜像、旋转、扭曲、平铺和范围映射等处理。
+
+它更像是 SDF 工作流里的“坐标预处理器”：
+
+- 先改写空间
+- 再生成 SDF 形体
+- 最后用 `SDF Operator` 继续组合距离场
+
+#### 主要模式
+
+- 网格 / 重复：`Plane Reflect`、`Mirror`、`Polar`、`Repeat Infinite`、`Repeat Infinite Mirror`、`Repeat Finite`、`Octant`
+- 形变 / 变换：`Swizzle`、`Rotate`、`Spin`、`Extrude`、`Twist`、`Swirl`、`Pinch Inflate`、`Radial Shear`、`Bend`
+- UV 处理：`UV Rotate`、`UV Scale`、`UV Grid`、`UV Random Rotate`、`UV Random Flip`、`UV Tileset`
+- 范围映射：`Map -1-1`、`Map -0.5-0.5`、`Map 0-1`
+
+#### 输入输出说明
+
+- 固定基础输入为 `Vector`
+- 其余插口会按模式动态显示并重命名，常见名称有 `Spacing`、`Count`、`Center`、`Offset`、`Normal`、`Strength`、`Radius`、`Index`、`Padding`、`Scale`
+- `Vector` 输出表示处理后的坐标或 UV，可直接继续送入 `SDF Primitive` 或其他程序节点
+- `Position` 只在部分模式出现，通常用于输出格子坐标或镜像 / 分块后的辅助位置
+- `Value` 只在部分模式出现，含义会随模式变化，常见是遮罩值、极坐标分段辅助值，或 `Extrude` 的内部距离
+
+#### 面板选项
+
+- `Operation`：选择当前坐标处理模式
+- `Axis`：只在依赖主轴的模式里出现，用来指定当前操作基于哪组轴顺序处理
+
+#### 使用说明
+
+- 常见流程是 `Texture Coordinate / Object` -> `SDF Vector Operator` -> `SDF Primitive` -> `SDF Operator`
+- `Repeat`、`Mirror`、`Polar`、`Octant` 适合做规则重复、轴对称、环形重复和象限对称，不需要真的复制几何
+- `Rotate`、`Spin`、`Twist`、`Swirl`、`Bend` 适合先把空间扭曲，再让基础形体沿扭曲后的空间生成
+- `UV Grid`、`UV Random Rotate`、`UV Random Flip`、`UV Tileset` 适合做图案平铺、瓦片随机朝向和单张贴图分块复用
+- `Map -1-1`、`Map -0.5-0.5`、`Map 0-1` 适合在 UV 范围和 SDF 常见坐标范围之间快速切换
 
 ### Bevel
 

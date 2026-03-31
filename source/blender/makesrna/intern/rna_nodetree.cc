@@ -570,6 +570,86 @@ const EnumPropertyItem rna_enum_node_sdf_op_items[] = {
     {0, nullptr, 0, nullptr, nullptr},
 };
 
+const EnumPropertyItem rna_enum_node_sdf_vector_op_items[] = {
+    {0, "", 0, N_("Vector Grid Ops"), ""},
+    {SHD_SDF_VEC_OP_REFLECT,
+     "VEC_REFLECT",
+     0,
+     "Plane Reflect",
+     "Reflect position with a plane and offset"},
+    {SHD_SDF_VEC_OP_MIRROR,
+     "VEC_MIRROR",
+     0,
+     "Mirror",
+     "Mirror at an axis-aligned plane which is at a specified distance from the origin"},
+    {SHD_SDF_VEC_OP_POLAR, "VEC_POLAR", 0, "Polar", "Repeat around the origin by a fixed angle"},
+    {SHD_SDF_VEC_OP_REPEAT_INF,
+     "VEC_REPEAT_INF",
+     0,
+     "Repeat Infinite",
+     "Repeat position infinitely with spacing control"},
+    {SHD_SDF_VEC_OP_REPEAT_INF_MIRROR,
+     "VEC_REPEAT_INF_MIRROR",
+     0,
+     "Repeat Infinite Mirror",
+     "Repeat position infinitely but mirror every second cell so all boundaries match"},
+    {SHD_SDF_VEC_OP_REPEAT_FINITE,
+     "VEC_REPEAT_FINITE",
+     0,
+     "Repeat Finite",
+     "Repeat position with limits"},
+    {SHD_SDF_VEC_OP_OCTANT, "OCTANT", 0, "Octant", "Mirror in octant"},
+
+    {0, "", 0, N_("Vector FX Ops"), ""},
+    {SHD_SDF_VEC_OP_SWIZZLE, "VEC_SWIZZLE", 0, "Swizzle", "Swizzle axis"},
+    {SHD_SDF_VEC_OP_ROTATE, "VEC_ROTATE", 0, "Rotate", "Rotate position"},
+    {SHD_SDF_VEC_OP_SPIN, "VEC_SPIN", 0, "Spin", "Spin position around axis"},
+    {SHD_SDF_VEC_OP_EXTRUDE,
+     "VEC_EXTRUDE",
+     0,
+     "Extrude",
+     "Extrude position, does not preserve internal SDF"},
+    {SHD_SDF_VEC_OP_TWIST, "VEC_TWIST", 0, "Twist", "Twist around XY"},
+    {SHD_SDF_VEC_OP_SWIRL, "VEC_SWIRL", 0, "Swirl", "Swirl around XY"},
+    {SHD_SDF_VEC_OP_PINCH_INFLATE,
+     "VEC_PINCH_INFLATE",
+     0,
+     "Pinch Inflate",
+     "Pinch inflate around XYZ"},
+    {SHD_SDF_VEC_OP_RADIAL_SHEAR,
+     "VEC_RADIAL_SHEAR",
+     0,
+     "Radial Shear",
+     "Radially shear around XY"},
+    {SHD_SDF_VEC_OP_BEND, "VEC_BEND", 0, "Bend", "Bend position"},
+
+    {0, "", 0, N_("UV Ops"), ""},
+    {SHD_SDF_VEC_OP_ROTATE_UV,
+     "UV_ROTATE",
+     0,
+     "UV Rotate",
+     "Rotate UV around center point [.5,.5]"},
+    {SHD_SDF_VEC_OP_SCALE_UV, "UV_SCALE", 0, "UV Scale", "Scale UV from center point [.5,.5]"},
+    {SHD_SDF_VEC_OP_GRID, "UV_GRID", 0, "UV Grid", "UV grid"},
+    {SHD_SDF_VEC_OP_RND_UV,
+     "UV_RAND_ROTATE",
+     0,
+     "UV Random Rotate",
+     "Rotate UV coordinates by 90 degrees in grid"},
+    {SHD_SDF_VEC_OP_RND_UV_FLIP,
+     "UV_RAND_FLIP",
+     0,
+     "UV Random Flip",
+     "Flip and rotate UV coordinates"},
+    {SHD_SDF_VEC_OP_TILESET, "TILESET", 0, "UV Tileset", "Map UV grid to subset of a single UV"},
+
+    {0, "", 0, N_("Conversion"), ""},
+    {SHD_SDF_VEC_OP_MAP_11, "MAP_11", 0, "Map -1-1", "Map UV range [0,1] to [-1,1]"},
+    {SHD_SDF_VEC_OP_MAP_05, "MAP_05", 0, "Map -0.5-0.5", "Map UV range [0,1] to [-0.5,0.5]"},
+    {SHD_SDF_VEC_OP_MAP_UV, "MAP_UV", 0, "Map 0-1", "Map [-1,1] to UV range [0,1]"},
+    {0, nullptr, 0, nullptr, nullptr},
+};
+
 static const EnumPropertyItem rna_enum_node_tex_dimensions_items[] = {
     {1, "1D", 0, "1D", "Use the scalar value W as input"},
     {2, "2D", 0, "2D", "Use the 2D vector (X, Y) as input. The Z component is ignored."},
@@ -5279,6 +5359,35 @@ static void def_sh_sdf_op(BlenderRNA * /*brna*/, StructRNA *srna)
   prop = RNA_def_property(srna, "invert", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(prop, nullptr, "invert", 1);
   RNA_def_property_ui_text(prop, "Invert", "Invert operation output value");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+}
+
+static void def_sh_sdf_vector_op(BlenderRNA * /*brna*/, StructRNA *srna)
+{
+  static const EnumPropertyItem sdf_op_axis_items[] = {
+      {SHD_SDF_AXIS_XYZ, "XYZ_AXIS", 0, "XYZ Axis", ""},
+      {SHD_SDF_AXIS_XZY, "XZY_AXIS", 0, "XZY Axis", ""},
+      {SHD_SDF_AXIS_YXZ, "YXZ_AXIS", 0, "YXZ Axis", ""},
+      {SHD_SDF_AXIS_YZX, "YZX_AXIS", 0, "YZX Axis", ""},
+      {SHD_SDF_AXIS_ZXY, "ZXY_AXIS", 0, "ZXY Axis", ""},
+      {SHD_SDF_AXIS_ZYX, "ZYX_AXIS", 0, "ZYX Axis", ""},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+
+  PropertyRNA *prop;
+
+  RNA_def_struct_sdna_from(srna, "NodeSdfVectorOp", "storage");
+
+  prop = RNA_def_property(srna, "operation", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "operation");
+  RNA_def_property_enum_items(prop, rna_enum_node_sdf_vector_op_items);
+  RNA_def_property_ui_text(prop, "Operation", "Vector-domain operation to apply");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_ShaderNode_socket_update");
+
+  prop = RNA_def_property(srna, "axis", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "axis");
+  RNA_def_property_enum_items(prop, sdf_op_axis_items);
+  RNA_def_property_ui_text(prop, "Axis", "Axis order used by axis-aligned operations");
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
 }
 
@@ -10617,6 +10726,7 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("ShaderNode", "ShaderNodeBasisTransform", def_sh_basis_transform);
   define("ShaderNode", "ShaderNodeSdfPrimitive", def_sh_sdf_primitive);
   define("ShaderNode", "ShaderNodeSdfOp", def_sh_sdf_op);
+  define("ShaderNode", "ShaderNodeSdfVectorOp", def_sh_sdf_vector_op);
   define("ShaderNode", "ShaderNodeCurvature", def_sh_curvature);
   define("ShaderNode", "ShaderNodeShaderInfo", def_sh_shader_info);
   define("ShaderNode", "ShaderNodeLightInfo", def_sh_light_info);

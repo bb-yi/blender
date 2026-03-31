@@ -83,6 +83,7 @@ void register_shader_nodes()
   register_node_type_sh_basis_transform();
   register_node_type_sh_sdf_primitive();
   register_node_type_sh_sdf_op();
+  register_node_type_sh_sdf_vector_op();
   register_node_type_sh_shader_info();
   register_node_type_sh_screenspace_info();
   register_node_type_sh_scene_color();

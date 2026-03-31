@@ -87,6 +87,7 @@ set(SRC
   nodes/node_shader_basis_transform.cc
   nodes/node_shader_sdf_primitive.cc
   nodes/node_shader_sdf_op.cc
+  nodes/node_shader_sdf_vector_op.cc
   nodes/node_shader_shader_info.cc
   nodes/node_shader_screenspace_info.cc
   nodes/node_shader_scene_color.cc

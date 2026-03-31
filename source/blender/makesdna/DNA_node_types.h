@@ -1238,6 +1238,43 @@ enum NodeSdfOpOperation {
   SHD_SDF_OP_PULSE = 31,
 };
 
+enum NodeSdfVectorOpOperation {
+  SHD_SDF_VEC_OP_EXTRUDE = 0,
+  SHD_SDF_VEC_OP_REPEAT_INF = 1,
+  SHD_SDF_VEC_OP_REPEAT_FINITE = 2,
+  SHD_SDF_VEC_OP_TWIST = 3,
+  SHD_SDF_VEC_OP_BEND = 4,
+  SHD_SDF_VEC_OP_SWIZZLE = 5,
+  SHD_SDF_VEC_OP_ROTATE = 6,
+  SHD_SDF_VEC_OP_REFLECT = 7,
+  SHD_SDF_VEC_OP_MIRROR = 8,
+  SHD_SDF_VEC_OP_POLAR = 9,
+  SHD_SDF_VEC_OP_MAP_UV = 10,
+  SHD_SDF_VEC_OP_MAP_11 = 11,
+  SHD_SDF_VEC_OP_ROTATE_UV = 12,
+  SHD_SDF_VEC_OP_RND_UV = 13,
+  SHD_SDF_VEC_OP_OCTANT = 14,
+  SHD_SDF_VEC_OP_TILESET = 15,
+  SHD_SDF_VEC_OP_SPIN = 16,
+  SHD_SDF_VEC_OP_GRID = 17,
+  SHD_SDF_VEC_OP_RND_UV_FLIP = 18,
+  SHD_SDF_VEC_OP_SCALE_UV = 19,
+  SHD_SDF_VEC_OP_SWIRL = 20,
+  SHD_SDF_VEC_OP_RADIAL_SHEAR = 21,
+  SHD_SDF_VEC_OP_PINCH_INFLATE = 22,
+  SHD_SDF_VEC_OP_REPEAT_INF_MIRROR = 23,
+  SHD_SDF_VEC_OP_MAP_05 = 24,
+};
+
+enum NodeSdfAxis {
+  SHD_SDF_AXIS_XYZ = 0,
+  SHD_SDF_AXIS_XZY = 1,
+  SHD_SDF_AXIS_YXZ = 2,
+  SHD_SDF_AXIS_YZX = 3,
+  SHD_SDF_AXIS_ZXY = 4,
+  SHD_SDF_AXIS_ZYX = 5,
+};
+
 /* Geometry Nodes */
 
 enum GeometryNodeProximityTargetType {
@@ -2735,6 +2772,13 @@ struct NodeSdfOp {
 
   int operation = SHD_SDF_OP_UNION;
   int invert = 0;
+};
+
+struct NodeSdfVectorOp {
+  DNA_DEFINE_CXX_METHODS(NodeSdfVectorOp)
+
+  int operation = SHD_SDF_VEC_OP_GRID;
+  int axis = SHD_SDF_AXIS_XYZ;
 };
 
 struct NodeTexGabor {
