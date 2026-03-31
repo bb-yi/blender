@@ -179,7 +179,7 @@ void SphereProbeModule::ensure_cubemap_render_target(int resolution)
                                                        0,
                                                        1,
                                                        i,
-                                                       1,
+                                                       0,
                                                        true,
                                                        false);
     }
