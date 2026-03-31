@@ -1735,6 +1735,10 @@ void DeferredProbePipeline::render(View &view,
 
   opaque_layer_.radiance_behind_tx_ = dummy_black;
 
+  if (assign_if_different(inst_.pipelines.data.ray_type, RAY_TYPE_GLOSSY)) {
+    inst_.uniform_data.push_update();
+  }
+
   const eGPUTextureUsage usage_rw = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE;
   for (int i = 0; i < ARRAY_SIZE(direct_radiance_txs_); i++) {
     const int2 target_extent = (opaque_layer_.closure_count_ > i) ? extent : int2(1);
@@ -1742,6 +1746,8 @@ void DeferredProbePipeline::render(View &view,
         target_extent, gpu::TextureFormat::DEFERRED_RADIANCE_FORMAT, usage_rw);
     indirect_radiance_txs_[i].acquire(
         target_extent, gpu::TextureFormat::RAYTRACE_RADIANCE_FORMAT, usage_rw);
+    direct_radiance_txs_[i].clear(uint4(0u));
+    indirect_radiance_txs_[i].clear(float4(0.0f));
   }
 
   GPU_framebuffer_bind(prepass_fb);
@@ -1764,6 +1770,18 @@ void DeferredProbePipeline::render(View &view,
   GPU_framebuffer_bind(combined_fb);
   inst_.manager->submit(eval_light_ps_, view);
   GPU_memory_barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS | GPU_BARRIER_TEXTURE_FETCH);
+
+  if (assign_if_different(inst_.pipelines.data.ray_type, RAY_TYPE_CAMERA)) {
+    inst_.uniform_data.push_update();
+  }
+
+  inst_.pipelines.background.render(view, combined_fb);
+
+  gpu::Texture *shadow_source_tx = (inst_.render_buffers.data.shadow_id >= 0) ?
+                                       inst_.render_buffers.rp_value_tx.gpu_texture() :
+                                       nullptr;
+  inst_.pipelines.shadow_filter.set_source(shadow_source_tx, inst_.render_buffers.data.shadow_id);
+  inst_.pipelines.shadow_filter.render(view, extent, inst_.render_buffers.depth_tx);
 
   TextureFromPool npr_radiance_input = {"NPR Radiance Input"};
   {
@@ -1911,6 +1929,8 @@ void PlanarProbePipeline::render(View &view,
         target_extent, gpu::TextureFormat::DEFERRED_RADIANCE_FORMAT, usage_rw);
     indirect_radiance_txs_[i].acquire(
         target_extent, gpu::TextureFormat::RAYTRACE_RADIANCE_FORMAT, usage_rw);
+    direct_radiance_txs_[i].clear(uint4(0u));
+    indirect_radiance_txs_[i].clear(float4(0.0f));
   }
 
   inst_.pipelines.data.ray_type = RAY_TYPE_GLOSSY;
