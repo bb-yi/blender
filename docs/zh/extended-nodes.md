@@ -371,6 +371,141 @@
 - `Smooth`、`Round`、`Chamfer`、`Stairs`、`Columns` 这类模式适合做更有风格化过渡的布尔边界
 - 最终依然输出距离值，通常还需要再接阈值、颜色映射或透明度控制节点
 
+### SDF Vector Operator
+
+#### 入口
+
+`Add > Utilities > Vector > SDF Vector Operator`
+
+<div align="center">
+	<img src="images/SnowShot_2026-04-01_02-15-32.png" alt="SDF Vector Operator" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### 输出
+
+- `Vector`
+
+- `Position`
+
+- `Value`
+
+#### 作用
+
+对 SDF 工作流使用的坐标域、UV 域或向量域做预处理。它可以在真正进入 `SDF Primitive` 之前，先把空间做镜像、重复、旋转、扭曲、分块和平铺映射。
+
+这类节点不会直接生成距离场，而是先把“采样空间”改写掉，所以很适合放在：
+
+- `Texture Coordinate / Object`
+- `SDF Vector Operator`
+- `SDF Primitive`
+- `SDF Operator`
+
+这样的链路中间。
+
+#### 主要模式分类
+
+- `Plane Reflect`、`Mirror`、`Polar`、`Repeat Infinite`、`Repeat Infinite Mirror`、`Repeat Finite`、`Octant`
+  - 这组模式主要负责镜像、分段、循环重复和对称化空间
+
+- `Swizzle`、`Rotate`、`Spin`、`Extrude`、`Twist`、`Swirl`、`Pinch Inflate`、`Radial Shear`、`Bend`
+  - 这组模式主要负责坐标重排、旋转和各种变形
+
+- `UV Rotate`、`UV Scale`、`UV Grid`、`UV Random Rotate`、`UV Random Flip`、`UV Tileset`
+  - 这组模式主要负责 UV 的平铺、打散、旋转和子块映射
+
+- `Map -1-1`、`Map -0.5-0.5`、`Map 0-1`
+  - 这组模式主要负责 UV 与常见 SDF 坐标范围之间的快速映射
+
+#### 主要模式说明
+
+- `Plane Reflect`
+  - 按给定法线和偏移对空间做平面反射
+  - `Value` 可作为平面两侧的辅助遮罩值
+
+- `Mirror`
+  - 按当前 `Axis` 指定的平面方向做镜像
+  - `Spacing` 控制镜像参考间距
+  - `Position` 会给出镜像 / 分块后的辅助位置
+
+- `Polar`
+  - 把平面空间改写成环形重复的扇区结构
+  - 适合做放射状图案、花瓣、齿轮、徽章类重复
+
+- `Repeat Infinite`
+  - 以给定 `Spacing` 无限重复空间
+
+- `Repeat Infinite Mirror`
+  - 无限重复空间，但交替镜像每个单元，适合让边界方向衔接得更自然
+
+- `Repeat Finite`
+  - 和无限重复类似，但会额外用 `Count` 限制重复次数
+
+- `Octant`
+  - 把空间折叠到八分体 / 象限对称区域，适合快速制作对称形体
+
+- `Swizzle`
+  - 重新排列坐标轴顺序，例如 `XYZ`、`XZY`、`YZX`
+
+- `Rotate`
+  - 按 `Axis` 选择的主轴旋转空间
+
+- `Spin`
+  - 围绕主轴做旋转式坐标偏移
+  - 常用于制造旋转花纹或沿轴偏转的形体
+
+- `Extrude`
+  - 把二维距离域向第三维拉伸成厚度
+  - `Value` 输出内部距离辅助值
+
+- `Twist`
+  - 沿主轴对空间施加扭转
+
+- `Swirl`
+  - 围绕中心点做旋涡式扭曲
+  - `Center`、`Offset`、`Strength`、`Radius` 会共同控制旋涡范围和力度
+
+- `Pinch Inflate`
+  - 以中心区域为核心做收缩 / 膨胀
+  - 适合把形体向内夹紧或向外鼓起
+
+- `Radial Shear`
+  - 做环向剪切，适合做旋转扭折感更强的图案变形
+
+- `Bend`
+  - 沿主轴弯折空间
+
+- `UV Rotate`
+  - 围绕 `Center` 旋转 UV
+
+- `UV Scale`
+  - 围绕 UV 中心缩放
+
+- `UV Grid`
+  - 把 0-1 UV 切成规则网格
+  - `Vector` 输出当前格子内的局部 UV
+  - `Position` 输出格子坐标，适合继续做随机变化或索引
+
+- `UV Random Rotate`
+  - 根据输入的 `Position`，为每个格子随机选择 90 度旋转方向
+
+- `UV Random Flip`
+  - 根据输入的 `Position`，为每个格子随机翻转或旋转
+
+- `UV Tileset`
+  - 把当前 UV 映射到一张大图中的某个子块
+  - `Index` 选择块编号，`Padding` 控制边缘留白，`Scale` 控制块内缩放
+
+- `Map -1-1`
+  - 把 `0-1` UV 映射到 `-1 到 1`
+
+- `Map -0.5-0.5`
+  - 把 `0-1` UV 映射到 `-0.5 到 0.5`
+
+- `Map 0-1`
+  - 把常见的 SDF 中心坐标范围重新映射回标准 UV
+
+
 ### Bevel
 
 #### 入口

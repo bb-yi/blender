@@ -96,6 +96,8 @@ This document describes the NPR / Eevee extension features that have been added 
 
 - `SDF Operator`
 
+- `SDF Vector Operator`
+
 - `Bevel`
 
 - `Curvature`

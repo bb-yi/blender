@@ -369,6 +369,137 @@ Combines, trims, and reshapes one or two SDF distance fields so multiple primiti
 - `Smooth`, `Round`, `Chamfer`, `Stairs`, and `Columns` are useful for more stylized boolean transitions
 - The node still outputs a distance value, so it usually needs a threshold, color remap, or alpha control afterward
 
+### SDF Vector Operator
+
+#### Entry
+
+`Add > Utilities > Vector > SDF Vector Operator`
+
+<div align="center">
+	<img src="images/SnowShot_2026-04-01_02-15-32.png" alt="SDF Vector Operator" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### Outputs
+
+- `Vector`
+
+- `Position`
+
+- `Value`
+
+#### Purpose
+
+Preprocesses the coordinate, UV, or vector domain used by SDF workflows. Instead of generating a distance field directly, it rewrites the sampling space before the data reaches `SDF Primitive`.
+
+That makes it useful for workflows such as:
+
+- mirror or repeat the domain first
+- then generate the primitive in that modified space
+- then combine the resulting distance fields with `SDF Operator`
+
+#### Main Operation Groups
+
+- `Plane Reflect`, `Mirror`, `Polar`, `Repeat Infinite`, `Repeat Infinite Mirror`, `Repeat Finite`, `Octant`
+  - These modes handle reflection, symmetry, radial segmentation, and repeated spatial cells
+
+- `Swizzle`, `Rotate`, `Spin`, `Extrude`, `Twist`, `Swirl`, `Pinch Inflate`, `Radial Shear`, `Bend`
+  - These modes reorder or deform the coordinate system itself
+
+- `UV Rotate`, `UV Scale`, `UV Grid`, `UV Random Rotate`, `UV Random Flip`, `UV Tileset`
+  - These modes are focused on UV tiling, local UV transforms, and per-cell variation
+
+- `Map -1-1`, `Map -0.5-0.5`, `Map 0-1`
+  - These modes quickly convert between normalized UV ranges and the centered ranges often used in SDF setups
+
+#### Mode Reference
+
+- `Plane Reflect`
+  - Reflects the domain using a custom plane normal and offset
+  - `Value` can be used as a helper mask for which side of the plane is active
+
+- `Mirror`
+  - Mirrors space across an axis-aligned plane controlled by the selected `Axis`
+  - `Spacing` controls the reference interval
+  - `Position` exposes an auxiliary mirrored / cell position
+
+- `Polar`
+  - Rewrites planar space into repeated angular sectors around the origin
+  - Useful for radial motifs, petals, emblems, and gear-like repetition
+
+- `Repeat Infinite`
+  - Repeats the domain endlessly using `Spacing`
+
+- `Repeat Infinite Mirror`
+  - Repeats endlessly while mirroring every second cell, which helps neighboring boundaries line up more naturally
+
+- `Repeat Finite`
+  - Similar to infinite repeat, but constrained by `Count`
+
+- `Octant`
+  - Folds the domain into an octant / symmetric wedge for quick symmetrical constructions
+
+- `Swizzle`
+  - Reorders axis channels such as `XYZ`, `XZY`, or `YZX`
+
+- `Rotate`
+  - Rotates the domain around the selected main axis
+
+- `Spin`
+  - Applies an axis-based spin style coordinate offset
+  - Useful for rotational motifs and axial distortion
+
+- `Extrude`
+  - Turns a 2D distance domain into a thickness along the third axis
+  - `Value` outputs an internal-distance helper value
+
+- `Twist`
+  - Twists the domain along the chosen axis
+
+- `Swirl`
+  - Creates a vortex-like distortion around a center
+  - `Center`, `Offset`, `Strength`, and `Radius` control the affected region
+
+- `Pinch Inflate`
+  - Compresses or inflates space around a central region
+
+- `Radial Shear`
+  - Applies radial shear, useful for stronger rotational distortion patterns
+
+- `Bend`
+  - Bends the domain along the selected axis
+
+- `UV Rotate`
+  - Rotates UV coordinates around `Center`
+
+- `UV Scale`
+  - Scales UV coordinates around the UV center
+
+- `UV Grid`
+  - Splits 0-1 UV space into a regular grid
+  - `Vector` outputs the local UV inside the current cell
+  - `Position` outputs the cell coordinate for downstream indexing or randomization
+
+- `UV Random Rotate`
+  - Uses the input `Position` to pick a 90-degree random rotation per cell
+
+- `UV Random Flip`
+  - Uses the input `Position` to randomly flip or rotate each cell
+
+- `UV Tileset`
+  - Remaps the current UV into a sub-tile inside a larger texture sheet
+  - `Index` picks the tile, `Padding` controls margins, and `Scale` adjusts tile-space zoom
+
+- `Map -1-1`
+  - Remaps `0-1` UV into `-1 to 1`
+
+- `Map -0.5-0.5`
+  - Remaps `0-1` UV into `-0.5 to 0.5`
+
+- `Map 0-1`
+  - Remaps a centered SDF-style range back into standard UV space
+
+
 ### Bevel
 
 #### Entry

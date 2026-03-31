@@ -96,6 +96,8 @@
 
 - `SDF Operator`
 
+- `SDF Vector Operator`
+
 - `Bevel`
 
 - `Curvature`
