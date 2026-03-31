@@ -205,6 +205,49 @@ struct CreatorAtExitData_EarlyExit {
   bContext *C;
 };
 
+#ifdef WIN32
+struct CreatorAtExitData_ConsoleCodePage {
+  UINT input_code_page = 0;
+  UINT output_code_page = 0;
+  bool restore_input = false;
+  bool restore_output = false;
+};
+
+static bool win32_std_handle_is_console(const DWORD std_handle_id)
+{
+  HANDLE handle = GetStdHandle(std_handle_id);
+  if ((handle == nullptr) || (handle == INVALID_HANDLE_VALUE)) {
+    return false;
+  }
+
+  DWORD mode = 0;
+  return GetConsoleMode(handle, &mode) != 0;
+}
+
+static void win32_console_code_page_ensure_utf8(CreatorAtExitData_ConsoleCodePage *console_cp)
+{
+  BLI_assert(console_cp != nullptr);
+
+  if (win32_std_handle_is_console(STD_INPUT_HANDLE)) {
+    const UINT input_code_page = GetConsoleCP();
+    if ((input_code_page != 0) && (input_code_page != CP_UTF8)) {
+      console_cp->input_code_page = input_code_page;
+      console_cp->restore_input = SetConsoleCP(CP_UTF8) != 0;
+    }
+  }
+
+  if (win32_std_handle_is_console(STD_OUTPUT_HANDLE) ||
+      win32_std_handle_is_console(STD_ERROR_HANDLE))
+  {
+    const UINT output_code_page = GetConsoleOutputCP();
+    if ((output_code_page != 0) && (output_code_page != CP_UTF8)) {
+      console_cp->output_code_page = output_code_page;
+      console_cp->restore_output = SetConsoleOutputCP(CP_UTF8) != 0;
+    }
+  }
+}
+#endif
+
 /** Free data on early exit (if Python calls `sys.exit()` while parsing args for eg). */
 struct CreatorAtExitData {
 #ifndef WITH_PYTHON_MODULE
@@ -214,6 +257,9 @@ struct CreatorAtExitData {
 #ifdef USE_WIN32_UNICODE_ARGS
   char **argv;
   int argv_num;
+#endif
+#ifdef WIN32
+  CreatorAtExitData_ConsoleCodePage console_code_page;
 #endif
 
   /**
@@ -241,6 +287,15 @@ static void callback_main_atexit(void *user_data)
     }
     free((void *)app_init_data->argv);
     app_init_data->argv = nullptr;
+  }
+#endif
+
+#ifdef WIN32
+  if (app_init_data->console_code_page.restore_output) {
+    SetConsoleOutputCP(app_init_data->console_code_page.output_code_page);
+  }
+  if (app_init_data->console_code_page.restore_input) {
+    SetConsoleCP(app_init_data->console_code_page.input_code_page);
   }
 #endif
 
@@ -375,6 +430,10 @@ int main(int argc,
   const char **argv = const_cast<const char **>(app_init_data.argv);
 #  endif /* USE_WIN32_UNICODE_ARGS */
 #endif   /* WIN32 */
+
+#ifdef WIN32
+  win32_console_code_page_ensure_utf8(&app_init_data.console_code_page);
+#endif
 
 #if defined(WITH_OPENGL_BACKEND) && BLI_SUBPROCESS_SUPPORT
   if (STREQ(argv[0], "--compilation-subprocess")) {
