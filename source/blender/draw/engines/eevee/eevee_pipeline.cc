@@ -1767,9 +1767,14 @@ void DeferredProbePipeline::render(View &view,
 
   TextureFromPool npr_radiance_input = {"NPR Radiance Input"};
   {
-    npr_radiance_input.acquire(extent, GPU_texture_format(combined_tx));
+    npr_radiance_input.acquire(
+        extent,
+        GPU_texture_format(combined_tx),
+        GPU_TEXTURE_USAGE_ATTACHMENT | GPU_TEXTURE_USAGE_SHADER_READ);
     npr_radiance_input_tx_ = npr_radiance_input;
-    GPU_texture_copy(npr_radiance_input_tx_, combined_tx);
+    Framebuffer npr_radiance_fb;
+    npr_radiance_fb.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(npr_radiance_input_tx_));
+    GPU_framebuffer_blit(combined_fb, 0, npr_radiance_fb, 0, GPU_COLOR_BIT);
   }
 
   inst_.manager->submit(opaque_layer_.npr_ps_, view);
@@ -1945,9 +1950,14 @@ void PlanarProbePipeline::render(View &view,
 
   TextureFromPool npr_radiance_input = {"NPR Radiance Input"};
   {
-    npr_radiance_input.acquire(extent, GPU_texture_format(combined_tx));
+    npr_radiance_input.acquire(
+        extent,
+        GPU_texture_format(combined_tx),
+        GPU_TEXTURE_USAGE_ATTACHMENT | GPU_TEXTURE_USAGE_SHADER_READ);
     npr_radiance_input_tx_ = npr_radiance_input;
-    GPU_texture_copy(npr_radiance_input_tx_, combined_tx);
+    Framebuffer npr_radiance_fb;
+    npr_radiance_fb.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(npr_radiance_input_tx_));
+    GPU_framebuffer_blit(combined_fb, 0, npr_radiance_fb, 0, GPU_COLOR_BIT);
   }
 
   inst_.manager->submit(npr_ps_, view);
