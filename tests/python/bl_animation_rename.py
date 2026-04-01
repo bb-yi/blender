@@ -160,6 +160,55 @@ class PoseBoneRenameTest(unittest.TestCase):
         for fcurve in dupli_action.layers[0].strips[0].channelbags[0].fcurves:
             self.assertEqual(fcurve.data_path, f'pose.bones[\"{_BONE_NAME_A}"].location')
 
+    def test_pose_bone_hide_outliner_property(self) -> None:
+        pose_bone = self.armature_obj.pose.bones[_BONE_NAME_A]
+        self.assertTrue(hasattr(pose_bone, "hide_outliner"))
+        self.assertTrue(pose_bone.hide_outliner)
+
+        pose_bone.hide_outliner = False
+        self.assertFalse(pose_bone.hide_outliner)
+
+    def test_rename_pose_bone_hide_outliner_driver(self) -> None:
+        fcu = self.armature_obj.pose.bones[_BONE_NAME_A].driver_add("hide_outliner", -1)
+        self.assertEqual(fcu.data_path, f'pose.bones["{_BONE_NAME_A}"].hide_outliner')
+        _set_up_driver(fcu.driver, self.armature_obj, f'pose.bones["{_BONE_NAME_B}"].location[0]')
+
+        fcu_dupli = self.armature_obj_dupli.pose.bones[_BONE_NAME_A].driver_add("hide_outliner", -1)
+        self.assertEqual(fcu_dupli.data_path, fcu.data_path)
+        _set_up_driver(fcu_dupli.driver, self.armature_obj_dupli, f'pose.bones["{_BONE_NAME_B}"].location[0]')
+
+        bone_a_new_name = "bone_a_2"
+        self.armature_obj.pose.bones[_BONE_NAME_A].name = bone_a_new_name
+
+        self.assertEqual(len(self.armature_obj.animation_data.drivers), 1, "Shouldn't remove the driver")
+        self.assertEqual(fcu.data_path, f'pose.bones["{bone_a_new_name}"].hide_outliner')
+
+        self.assertEqual(
+            fcu_dupli.data_path,
+            f'pose.bones["{_BONE_NAME_A}"].hide_outliner',
+            "Should not modify the duplicate armature")
+
+    def test_rename_pose_bone_hide_outliner_animation(self) -> None:
+        self.armature_obj.pose.bones[_BONE_NAME_A].keyframe_insert("hide_outliner")
+        self.assertIsNotNone(self.armature_obj.animation_data.action)
+        action = self.armature_obj.animation_data.action
+        fcurves = action.layers[0].strips[0].channelbags[0].fcurves
+        self.assertEqual(len(fcurves), 1)
+        self.assertEqual(fcurves[0].data_path, f'pose.bones["{_BONE_NAME_A}"].hide_outliner')
+
+        self.armature_obj_dupli.pose.bones[_BONE_NAME_A].keyframe_insert("hide_outliner")
+        self.assertIsNotNone(self.armature_obj_dupli.animation_data.action)
+
+        bone_a_new_name = "bone_a_2"
+        self.armature_obj.pose.bones[_BONE_NAME_A].name = bone_a_new_name
+
+        self.assertEqual(fcurves[0].data_path, f'pose.bones["{bone_a_new_name}"].hide_outliner')
+
+        dupli_action = self.armature_obj_dupli.animation_data.action
+        dupli_fcurves = dupli_action.layers[0].strips[0].channelbags[0].fcurves
+        self.assertEqual(len(dupli_fcurves), 1)
+        self.assertEqual(dupli_fcurves[0].data_path, f'pose.bones["{_BONE_NAME_A}"].hide_outliner')
+
 
 def main():
     global args
