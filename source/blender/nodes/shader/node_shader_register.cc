@@ -48,6 +48,7 @@ void register_shader_nodes()
   register_node_type_sh_emission();
   register_node_type_sh_fresnel();
   register_node_type_sh_foreach_light();
+  register_node_type_sh_filter_object_info();
   register_node_type_sh_gamma();
   register_node_type_sh_geometry();
   register_node_type_sh_hair_info();

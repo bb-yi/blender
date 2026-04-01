@@ -6077,6 +6077,20 @@ static void def_sh_light_info(BlenderRNA * /*brna*/, StructRNA *srna)
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update_relations");
 }
 
+static void def_sh_filter_object_info(BlenderRNA * /*brna*/, StructRNA *srna)
+{
+  PropertyRNA *prop;
+
+  prop = RNA_def_property(srna, "object", PROP_POINTER, PROP_NONE);
+  RNA_def_property_pointer_sdna(prop, nullptr, "id");
+  RNA_def_property_struct_type(prop, "Object");
+  RNA_def_property_flag(prop, PROP_EDITABLE | PROP_ID_REFCOUNT);
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_ui_text(
+      prop, "Object", "Object to read the world-space location from for filter materials");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update_relations");
+}
+
 static void def_sh_vect_transform(BlenderRNA * /*brna*/, StructRNA *srna)
 {
   static const EnumPropertyItem prop_vect_type_items[] = {
@@ -10730,6 +10744,7 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("ShaderNode", "ShaderNodeCurvature", def_sh_curvature);
   define("ShaderNode", "ShaderNodeShaderInfo", def_sh_shader_info);
   define("ShaderNode", "ShaderNodeLightInfo", def_sh_light_info);
+  define("ShaderNode", "ShaderNodeFilterObjectInfo", def_sh_filter_object_info);
   define("ShaderNode", "ShaderNodeScreenspaceInfo");
   define("ShaderNode", "ShaderNodeSceneColor", def_sh_scene_color);
   define("ShaderNode", "ShaderNodeInputAOV", def_sh_input_aov);

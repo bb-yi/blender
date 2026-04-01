@@ -37,6 +37,7 @@ struct Image;
 struct ImageUser;
 struct Main;
 struct Material;
+struct Object;
 struct Scene;
 struct bNode;
 struct bNodeTree;
@@ -191,6 +192,10 @@ bool GPU_material_has_surface_output(GPUMaterial *mat);
 bool GPU_material_has_volume_output(GPUMaterial *mat);
 bool GPU_material_has_displacement_output(GPUMaterial *mat);
 bool GPU_material_has_filter_output(GPUMaterial *mat);
+
+int GPU_material_filter_object_info_ensure(GPUMaterial *material, Object *object);
+int GPU_material_filter_object_info_count(const GPUMaterial *material);
+Object *GPU_material_filter_object_info_get(const GPUMaterial *material, int index);
 
 bool GPU_material_flag_get(const GPUMaterial *mat, eGPUMaterialFlag flag);
 

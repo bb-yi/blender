@@ -18,6 +18,8 @@
 
 #include "GPU_material.hh"
 
+#include "eevee_filter_material_shared.hh"
+
 namespace blender::draw {
 class View;
 }
@@ -25,6 +27,7 @@ class View;
 namespace blender::eevee {
 
 using namespace draw;
+using FilterObjectInfoBuf = draw::UniformArrayBuffer<FilterObjectInfoData, FILTER_OBJECT_INFO_MAX>;
 
 class Instance;
 
@@ -42,9 +45,12 @@ class FilterMaterialModule {
   Framebuffer framebuffer_ = {"FilterMaterial.Framebuffer"};
   Texture ping_tx_ = {"FilterMaterial.Ping"};
   Texture pong_tx_ = {"FilterMaterial.Pong"};
+  FilterObjectInfoBuf filter_object_info_buf_ = {"FilterObjectInfoBuf"};
   bool uses_scene_depth_ = false;
   bool uses_scene_normal_ = false;
   bool uses_scene_position_ = false;
+
+  void update_filter_object_info_buffer(GPUMaterial *gpumat);
 
  public:
   FilterMaterialModule(Instance &inst) : inst_(inst) {}

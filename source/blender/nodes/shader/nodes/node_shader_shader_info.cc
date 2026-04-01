@@ -7,6 +7,7 @@
  */
 
 #include "node_shader_util.hh"
+#include "node_util.hh"
 
 #include "BLI_hash.h"
 #include "BLI_string.h"

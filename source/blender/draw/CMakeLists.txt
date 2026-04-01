@@ -598,6 +598,7 @@ set(GLSL_SRC
   engines/eevee/eevee_camera_shared.hh
   engines/eevee/eevee_debug_shared.hh
   engines/eevee/eevee_defines.hh
+  engines/eevee/eevee_filter_material_shared.hh
   engines/eevee/eevee_depth_of_field_shared.hh
   engines/eevee/eevee_film_shared.hh
   engines/eevee/eevee_hizbuffer_shared.hh

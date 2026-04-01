@@ -22,6 +22,7 @@
 #include "BLI_string.h"
 #include "BLI_time.h"
 #include "BLI_utildefines.h"
+#include "BLI_vector.hh"
 
 #include "BKE_main.hh"
 #include "BKE_material.hh"
@@ -94,6 +95,7 @@ struct GPUMaterial {
   GPUSkyBuilder *sky_builder = nullptr;
   /* Low level node graph(s). Also contains resources needed by the material. */
   GPUNodeGraph graph = {};
+  Vector<Object *> filter_object_infos;
 
   bool has_surface_output = false;
   bool has_volume_output = false;
@@ -375,6 +377,34 @@ bool GPU_material_has_displacement_output(GPUMaterial *mat)
 bool GPU_material_has_filter_output(GPUMaterial *mat)
 {
   return mat->has_filter_output;
+}
+
+int GPU_material_filter_object_info_ensure(GPUMaterial *material, Object *object)
+{
+  if (material == nullptr || object == nullptr) {
+    return -1;
+  }
+
+  const int existing_index = material->filter_object_infos.first_index_of_try(object);
+  if (existing_index != -1) {
+    return existing_index;
+  }
+
+  material->filter_object_infos.append(object);
+  return material->filter_object_infos.size() - 1;
+}
+
+int GPU_material_filter_object_info_count(const GPUMaterial *material)
+{
+  return (material != nullptr) ? material->filter_object_infos.size() : 0;
+}
+
+Object *GPU_material_filter_object_info_get(const GPUMaterial *material, int index)
+{
+  if (material == nullptr || index < 0 || index >= material->filter_object_infos.size()) {
+    return nullptr;
+  }
+  return material->filter_object_infos[index];
 }
 
 bool GPU_material_flag_get(const GPUMaterial *mat, eGPUMaterialFlag flag)

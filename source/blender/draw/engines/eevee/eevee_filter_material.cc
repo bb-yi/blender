@@ -11,10 +11,13 @@
 #include "DNA_scene_types.h"
 
 #include "BLI_listbase.h"
+#include "BLI_math_matrix.hh"
 #include "BLI_set.hh"
 
 #include "BKE_node_legacy_types.hh"
 #include "BKE_node.hh"
+
+#include "DEG_depsgraph_query.hh"
 
 #include "GPU_framebuffer.hh"
 #include "GPU_texture.hh"
@@ -23,6 +26,16 @@
 #include "eevee_instance.hh"
 
 namespace blender::eevee {
+
+static FilterObjectInfoData filter_object_info_default()
+{
+  FilterObjectInfoData data;
+  data.location = float4(0.0f);
+  data.rotation = float4(0.0f);
+  data.scale = float4(1.0f, 1.0f, 1.0f, 0.0f);
+  data.color = float4(0.0f);
+  return data;
+}
 
 static bool filter_material_is_valid(blender::Material *material)
 {
@@ -98,6 +111,44 @@ bool FilterMaterialModule::uses_aov() const
     }
   }
   return false;
+}
+
+void FilterMaterialModule::update_filter_object_info_buffer(GPUMaterial *gpumat)
+{
+  for (FilterObjectInfoData &entry : filter_object_info_buf_) {
+    entry = filter_object_info_default();
+  }
+
+  const int material_object_count = GPU_material_filter_object_info_count(gpumat);
+  const int object_count = (material_object_count < FILTER_OBJECT_INFO_MAX) ?
+                               material_object_count :
+                               FILTER_OBJECT_INFO_MAX;
+  for (int index = 0; index < object_count; index++) {
+    Object *object = GPU_material_filter_object_info_get(gpumat, index);
+    if (object == nullptr) {
+      continue;
+    }
+
+    Object *object_eval = DEG_get_evaluated(inst_.depsgraph, object);
+    const Object *runtime_object = (object_eval != nullptr) ? object_eval : object;
+
+    float3 location;
+    math::EulerXYZ rotation;
+    float3 scale;
+    math::to_loc_rot_scale<true>(runtime_object->object_to_world(), location, rotation, scale);
+    const float3 rotation_value = float3(rotation);
+
+    FilterObjectInfoData &entry = filter_object_info_buf_[index];
+    entry.location = float4(location[0], location[1], location[2], 0.0f);
+    entry.rotation = float4(rotation_value[0], rotation_value[1], rotation_value[2], 0.0f);
+    entry.scale = float4(scale[0], scale[1], scale[2], 0.0f);
+    entry.color = float4(runtime_object->color[0],
+                         runtime_object->color[1],
+                         runtime_object->color[2],
+                         runtime_object->color[3]);
+  }
+
+  filter_object_info_buf_.push_update();
 }
 
 void FilterMaterialModule::begin_sync()
@@ -178,12 +229,14 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
     PassSimple pass = {"FilterMaterial.Pass"};
     pass.state_set(DRW_STATE_WRITE_COLOR);
     pass.framebuffer_set(&framebuffer_);
+    update_filter_object_info_buffer(entries_[entry_index].gpumat);
     pass.material_set(*inst_.manager, entries_[entry_index].gpumat);
     pass.bind_texture("scene_color_tx", &scene_color_tx);
     pass.bind_texture("rp_color_tx", &inst_.render_buffers.rp_color_tx);
     pass.bind_texture("rp_value_tx", &inst_.render_buffers.rp_value_tx);
     pass.bind_texture("depth_tx", &inst_.render_buffers.depth_tx);
     pass.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);
+    pass.bind_ubo(FILTER_OBJECT_INFO_BUF_SLOT, &filter_object_info_buf_);
     pass.bind_resources(inst_.uniform_data);
     pass.bind_resources(inst_.sampling);
     pass.bind_resources(inst_.render_textures);
