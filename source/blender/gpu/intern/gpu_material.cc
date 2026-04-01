@@ -140,6 +140,8 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
     const char *name,
     eGPUMaterialEngine engine,
     uint64_t shader_uuid,
+    bool compile_surface_graph,
+    bool compile_npr_graph,
     bool deferred_compilation,
     GPUCodegenCallbackFn callback,
     void *thunk,
@@ -164,22 +166,30 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
   mat->name = name;
   result.material = mat;
 
-  /* Localize tree to create links for reroute and mute. */
   bNodeTree *npr_localtree = nullptr;
-  bNodeTree *localtree = bke::node_tree_add_tree(
-      nullptr, (StringRef(ntree->id.name) + " Inlined").c_str(), ntree->idname);
-  nodes::InlineShaderNodeTreeParams inline_params;
-  inline_params.allow_preserving_repeat_zones = true;
-  inline_params.target_engine_ = engine == GPU_MAT_EEVEE ? SHD_OUTPUT_EEVEE : SHD_OUTPUT_ALL;
-  nodes::inline_shader_node_tree(*ntree, *localtree, inline_params);
+  bNodeTree *localtree = nullptr;
+  if (compile_surface_graph) {
+    /* Localize tree to create links for reroute and mute. */
+    localtree = bke::node_tree_add_tree(
+        nullptr, (StringRef(ntree->id.name) + " Inlined").c_str(), ntree->idname);
+    nodes::InlineShaderNodeTreeParams inline_params;
+    inline_params.allow_preserving_repeat_zones = true;
+    inline_params.target_engine_ = engine == GPU_MAT_EEVEE ? SHD_OUTPUT_EEVEE : SHD_OUTPUT_ALL;
+    nodes::inline_shader_node_tree(*ntree, *localtree, inline_params);
 
-  for (nodes::InlineShaderNodeTreeParams::ErrorMessage &error : inline_params.r_error_messages) {
-    result.errors.append({error.node, std::move(error.message)});
+    for (nodes::InlineShaderNodeTreeParams::ErrorMessage &error : inline_params.r_error_messages) {
+      result.errors.append({error.node, std::move(error.message)});
+    }
+
+    ntreeGPUMaterialNodes(localtree, mat);
   }
-
-  ntreeGPUMaterialNodes(localtree, mat);
-  if (GPU_material_flag_get(mat, GPU_MATFLAG_NPR)) {
-    npr_localtree = ntreeGPUNPRNodes(ntree, mat);
+  if (compile_npr_graph) {
+    if (!compile_surface_graph && npr_tree_get(ntree) != nullptr) {
+      GPU_material_flag_set(mat, GPU_MATFLAG_NPR);
+    }
+    if (GPU_material_flag_get(mat, GPU_MATFLAG_NPR)) {
+      npr_localtree = ntreeGPUNPRNodes(ntree, mat);
+    }
   }
 
   gpu_material_ramp_texture_build(mat);
@@ -212,7 +222,9 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
   gpu_node_graph_free_nodes(&mat->graph);
   /* Only free after GPU_pass_shader_get where gpu::UniformBuf read data from the local
    * tree. */
-  BKE_id_free(nullptr, &localtree->id);
+  if (localtree != nullptr) {
+    BKE_id_free(nullptr, &localtree->id);
+  }
   if (npr_localtree != nullptr) {
     BKE_id_free(nullptr, &npr_localtree->id);
   }

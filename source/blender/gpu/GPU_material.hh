@@ -137,6 +137,8 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
     const char *name,
     eGPUMaterialEngine engine,
     uint64_t shader_uuid,
+    bool compile_surface_graph,
+    bool compile_npr_graph,
     bool deferred_compilation,
     GPUCodegenCallbackFn callback,
     void *thunk,

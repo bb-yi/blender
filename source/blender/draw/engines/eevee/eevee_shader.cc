@@ -1493,6 +1493,8 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
 {
   eMaterialDisplacement displacement_type = to_displacement_type(blender_mat->displacement_method);
   eMaterialThickness thickness_type = to_thickness_type(blender_mat->thickness_mode);
+  const bool compile_surface_graph = (pipeline_type != MAT_PIPE_DEFERRED_NPR);
+  const bool compile_npr_graph = (pipeline_type == MAT_PIPE_DEFERRED_NPR);
 
   uint64_t shader_uuid = shader_uuid_from_material_type(
       pipeline_type,
@@ -1514,6 +1516,8 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
       blender_mat->id.name,
       GPU_MAT_EEVEE,
       shader_uuid,
+      compile_surface_graph,
+      compile_npr_graph,
       deferred_compilation,
       codegen_callback,
       &thunk,
@@ -1538,6 +1542,8 @@ GPUMaterial *ShaderModule::world_shader_get(blender::World *blender_world,
       blender_world->id.name,
       GPU_MAT_EEVEE,
       shader_uuid,
+      true,
+      false,
       deferred_compilation,
       codegen_callback,
       &thunk);
