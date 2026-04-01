@@ -472,6 +472,57 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#3-pose-bone-hide-in-outliner" class="md-nav__link">
+    <span class="md-ellipsis">
+      3. Pose Bone Hide in Outliner
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Pose Bone Hide in Outliner">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#purpose_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      Purpose
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#entry-points" class="md-nav__link">
+    <span class="md-ellipsis">
+      Entry Points
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#behavior_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      Behavior
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#current-scope_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      Current Scope
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -621,6 +672,57 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#3-pose-bone-hide-in-outliner" class="md-nav__link">
+    <span class="md-ellipsis">
+      3. Pose Bone Hide in Outliner
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Pose Bone Hide in Outliner">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#purpose_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      Purpose
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#entry-points" class="md-nav__link">
+    <span class="md-ellipsis">
+      Entry Points
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#behavior_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      Behavior
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#current-scope_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      Current Scope
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -690,6 +792,45 @@
 </li>
 <li>
 <p>This is useful when you want to separate environment-light influence between characters, foreground props, and background elements in the same scene.</p>
+</li>
+</ul>
+<h2 id="3-pose-bone-hide-in-outliner">3. Pose Bone Hide in Outliner<a class="headerlink" href="#3-pose-bone-hide-in-outliner" title="Permanent link">&para;</a></h2>
+<h3 id="purpose_2">Purpose<a class="headerlink" href="#purpose_2" title="Permanent link">&para;</a></h3>
+<p>Adds a dedicated Outliner visibility flag to each <code>Pose Bone</code>, so large rigs can be kept cleaner in the Outliner without affecting the rig itself.</p>
+<p>This is useful for hiding mechanism bones, helper bones, or low-level control layers while keeping the more important rig hierarchy readable.</p>
+<h3 id="entry-points">Entry Points<a class="headerlink" href="#entry-points" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>Bone Properties &gt; Viewport Display &gt; Hide in Outliner</code></li>
+<li><code>Outliner &gt; Filter &gt; Hidden PoseBones</code></li>
+</ul>
+<h3 id="behavior_2">Behavior<a class="headerlink" href="#behavior_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li>
+<p>Every <code>Pose Bone</code> has its own <code>Hide in Outliner</code> toggle.</p>
+</li>
+<li>
+<p>This toggle is enabled by default.</p>
+</li>
+<li>
+<p><code>Hidden PoseBones</code> in the Outliner filter is also enabled by default, so existing rigs keep the same visible result until you disable that filter.</p>
+</li>
+<li>
+<p>Once <code>Outliner &gt; Filter &gt; Hidden PoseBones</code> is disabled, pose bones with <code>Hide in Outliner</code> enabled are hidden from the Outliner tree.</p>
+</li>
+<li>
+<p>If a hidden parent bone still has visible children, the visible children remain extracted in the tree so the whole branch does not disappear at once.</p>
+</li>
+</ul>
+<h3 id="current-scope_1">Current Scope<a class="headerlink" href="#current-scope_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li>
+<p>Applies only to <code>Pose Bone</code></p>
+</li>
+<li>
+<p>Does not affect <code>Edit Bone</code></p>
+</li>
+<li>
+<p>Only changes Outliner hierarchy visibility; it does not change transforms, animation, drivers, or rendering</p>
 </li>
 </ul>
 

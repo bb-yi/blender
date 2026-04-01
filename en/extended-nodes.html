@@ -1204,13 +1204,13 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#scene-color" class="md-nav__link">
+  <a href="#filter-object-info" class="md-nav__link">
     <span class="md-ellipsis">
-      Scene Color
+      Filter Object Info
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Scene Color">
+    <nav class="md-nav" aria-label="Filter Object Info">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -1224,6 +1224,66 @@
         
           <li class="md-nav__item">
   <a href="#purpose_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      Purpose
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#node-setting" class="md-nav__link">
+    <span class="md-ellipsis">
+      Node Setting
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#outputs_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      Outputs
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#notes_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      Notes
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scene-color" class="md-nav__link">
+    <span class="md-ellipsis">
+      Scene Color
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Scene Color">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#entry_17" class="md-nav__link">
+    <span class="md-ellipsis">
+      Entry
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#purpose_11" class="md-nav__link">
     <span class="md-ellipsis">
       Purpose
     </span>
@@ -2219,13 +2279,13 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#scene-color" class="md-nav__link">
+  <a href="#filter-object-info" class="md-nav__link">
     <span class="md-ellipsis">
-      Scene Color
+      Filter Object Info
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Scene Color">
+    <nav class="md-nav" aria-label="Filter Object Info">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -2239,6 +2299,66 @@
         
           <li class="md-nav__item">
   <a href="#purpose_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      Purpose
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#node-setting" class="md-nav__link">
+    <span class="md-ellipsis">
+      Node Setting
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#outputs_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      Outputs
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#notes_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      Notes
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scene-color" class="md-nav__link">
+    <span class="md-ellipsis">
+      Scene Color
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Scene Color">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#entry_17" class="md-nav__link">
+    <span class="md-ellipsis">
+      Entry
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#purpose_11" class="md-nav__link">
     <span class="md-ellipsis">
       Purpose
     </span>
@@ -3086,8 +3206,48 @@
 <ul>
 <li>For per-light processing, use <code>For Each Light</code> inside <code>NPR Tree</code> instead.</li>
 </ul>
-<h3 id="scene-color">Scene Color<a class="headerlink" href="#scene-color" title="Permanent link">&para;</a></h3>
+<h3 id="filter-object-info">Filter Object Info<a class="headerlink" href="#filter-object-info" title="Permanent link">&para;</a></h3>
 <h4 id="entry_16">Entry<a class="headerlink" href="#entry_16" title="Permanent link">&para;</a></h4>
+<p><code>Add &gt; Input &gt; Filter Object Info</code></p>
+<div align="center">
+    <img src="images/SnowShot_2026-04-01_20-29-09.png" alt="Filter Object Info" style="border-radius: 10px;">
+    <br>
+</div>
+
+<p>Available only in the <code>Filter</code> domain.</p>
+<h4 id="purpose_10">Purpose<a class="headerlink" href="#purpose_10" title="Permanent link">&para;</a></h4>
+<p>Reads the world-space transform and viewport display color of a chosen object, so filter materials can react to a controller object or scene helper.</p>
+<p>This is useful for object-driven masks, directional gradients, moving focal effects, or passing a custom color control into a full-screen filter.</p>
+<h4 id="node-setting">Node Setting<a class="headerlink" href="#node-setting" title="Permanent link">&para;</a></h4>
+<ul>
+<li><code>Object</code>: Choose which object the node should read</li>
+</ul>
+<h4 id="outputs_5">Outputs<a class="headerlink" href="#outputs_5" title="Permanent link">&para;</a></h4>
+<ul>
+<li>
+<p><code>Location</code>: Chosen object world-space location</p>
+</li>
+<li>
+<p><code>Rotation</code>: Chosen object world-space Euler rotation in radians</p>
+</li>
+<li>
+<p><code>Scale</code>: Chosen object world-space scale</p>
+</li>
+<li>
+<p><code>Color</code>: Chosen object viewport display color</p>
+</li>
+</ul>
+<h4 id="notes_6">Notes<a class="headerlink" href="#notes_6" title="Permanent link">&para;</a></h4>
+<ul>
+<li>
+<p>This reads the explicitly selected object, not the object currently being filtered on screen</p>
+</li>
+<li>
+<p>If no object is assigned, the node falls back to <code>0</code> for location / rotation / color and <code>1</code> for scale</p>
+</li>
+</ul>
+<h3 id="scene-color">Scene Color<a class="headerlink" href="#scene-color" title="Permanent link">&para;</a></h3>
+<h4 id="entry_17">Entry<a class="headerlink" href="#entry_17" title="Permanent link">&para;</a></h4>
 <p><code>Add &gt; Input &gt; Scene Color</code></p>
 <div align="center">
     <img src="images/SnowShot_2026-03-28_05-15-31.png" alt="Scene Color" style="border-radius: 10px;">
@@ -3095,7 +3255,7 @@
 </div>
 
 <p>Available only in the <code>Filter</code> domain.</p>
-<h4 id="purpose_10">Purpose<a class="headerlink" href="#purpose_10" title="Permanent link">&para;</a></h4>
+<h4 id="purpose_11">Purpose<a class="headerlink" href="#purpose_11" title="Permanent link">&para;</a></h4>
 <p>Reads the current Eevee scene buffer. The <code>Source</code> can be switched in the node panel:</p>
 <ul>
 <li>

@@ -1179,13 +1179,13 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#scene-color" class="md-nav__link">
+  <a href="#filter-object-info" class="md-nav__link">
     <span class="md-ellipsis">
-      Scene Color
+      Filter Object Info
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Scene Color">
+    <nav class="md-nav" aria-label="Filter Object Info">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -1208,6 +1208,66 @@
         
           <li class="md-nav__item">
   <a href="#_71" class="md-nav__link">
+    <span class="md-ellipsis">
+      节点设置
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_72" class="md-nav__link">
+    <span class="md-ellipsis">
+      输出
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_73" class="md-nav__link">
+    <span class="md-ellipsis">
+      说明
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scene-color" class="md-nav__link">
+    <span class="md-ellipsis">
+      Scene Color
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Scene Color">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_74" class="md-nav__link">
+    <span class="md-ellipsis">
+      入口
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_75" class="md-nav__link">
+    <span class="md-ellipsis">
+      作用
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_76" class="md-nav__link">
     <span class="md-ellipsis">
       输入输出
     </span>
@@ -2164,13 +2224,13 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#scene-color" class="md-nav__link">
+  <a href="#filter-object-info" class="md-nav__link">
     <span class="md-ellipsis">
-      Scene Color
+      Filter Object Info
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Scene Color">
+    <nav class="md-nav" aria-label="Filter Object Info">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -2193,6 +2253,66 @@
         
           <li class="md-nav__item">
   <a href="#_71" class="md-nav__link">
+    <span class="md-ellipsis">
+      节点设置
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_72" class="md-nav__link">
+    <span class="md-ellipsis">
+      输出
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_73" class="md-nav__link">
+    <span class="md-ellipsis">
+      说明
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scene-color" class="md-nav__link">
+    <span class="md-ellipsis">
+      Scene Color
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Scene Color">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_74" class="md-nav__link">
+    <span class="md-ellipsis">
+      入口
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_75" class="md-nav__link">
+    <span class="md-ellipsis">
+      作用
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_76" class="md-nav__link">
     <span class="md-ellipsis">
       输入输出
     </span>
@@ -3030,8 +3150,48 @@
 <ul>
 <li>如果你要做逐灯处理，应该使用 <code>NPR Tree</code> 里的 <code>For Each Light</code>。</li>
 </ul>
-<h3 id="scene-color">Scene Color<a class="headerlink" href="#scene-color" title="Permanent link">&para;</a></h3>
+<h3 id="filter-object-info">Filter Object Info<a class="headerlink" href="#filter-object-info" title="Permanent link">&para;</a></h3>
 <h4 id="_69">入口<a class="headerlink" href="#_69" title="Permanent link">&para;</a></h4>
+<p><code>Add &gt; Input &gt; Filter Object Info</code></p>
+<div align="center">
+    <img src="images/SnowShot_2026-04-01_20-29-09.png" alt="Filter Object Info" style="border-radius: 10px;">
+    <br>
+</div>
+
+<p>仅在 <code>Filter</code> 域下可用。</p>
+<h4 id="_70">作用<a class="headerlink" href="#_70" title="Permanent link">&para;</a></h4>
+<p>读取指定对象的世界空间变换和视口显示颜色，让滤镜材质可以跟随控制物体或场景辅助物体变化。</p>
+<p>它适合用来做基于对象驱动的遮罩、方向渐变、移动焦点特效，或者把一个对象颜色直接传给全屏滤镜。</p>
+<h4 id="_71">节点设置<a class="headerlink" href="#_71" title="Permanent link">&para;</a></h4>
+<ul>
+<li><code>Object</code>：指定要读取的对象</li>
+</ul>
+<h4 id="_72">输出<a class="headerlink" href="#_72" title="Permanent link">&para;</a></h4>
+<ul>
+<li>
+<p><code>Location</code>：所选对象的世界空间位置</p>
+</li>
+<li>
+<p><code>Rotation</code>：所选对象的世界空间欧拉旋转，单位为弧度</p>
+</li>
+<li>
+<p><code>Scale</code>：所选对象的世界空间缩放</p>
+</li>
+<li>
+<p><code>Color</code>：所选对象的视口显示颜色</p>
+</li>
+</ul>
+<h4 id="_73">说明<a class="headerlink" href="#_73" title="Permanent link">&para;</a></h4>
+<ul>
+<li>
+<p>这里读取的是明确指定的对象，不是当前屏幕上正在被滤镜处理的对象</p>
+</li>
+<li>
+<p>如果没有指定对象，节点会回退到默认值：位置 / 旋转 / 颜色为 <code>0</code>，缩放为 <code>1</code></p>
+</li>
+</ul>
+<h3 id="scene-color">Scene Color<a class="headerlink" href="#scene-color" title="Permanent link">&para;</a></h3>
+<h4 id="_74">入口<a class="headerlink" href="#_74" title="Permanent link">&para;</a></h4>
 <p><code>Add &gt; Input &gt; Scene Color</code></p>
 <div align="center">
     <img src="images/SnowShot_2026-03-28_05-15-31.png" alt="alt text" style="border-radius: 10px;">
@@ -3039,7 +3199,7 @@
 </div>
 
 <p>仅在 <code>Filter</code> 域下可用。</p>
-<h4 id="_70">作用<a class="headerlink" href="#_70" title="Permanent link">&para;</a></h4>
+<h4 id="_75">作用<a class="headerlink" href="#_75" title="Permanent link">&para;</a></h4>
 <p>读取 Eevee 当前场景缓冲，可在节点面板中切换 <code>Source</code>：</p>
 <ul>
 <li>
@@ -3055,7 +3215,7 @@
 <p><code>Position</code>：读取世界空间坐标</p>
 </li>
 </ul>
-<h4 id="_71">输入输出<a class="headerlink" href="#_71" title="Permanent link">&para;</a></h4>
+<h4 id="_76">输入输出<a class="headerlink" href="#_76" title="Permanent link">&para;</a></h4>
 <ul>
 <li>
 <p>输入：<code>Vector</code></p>
