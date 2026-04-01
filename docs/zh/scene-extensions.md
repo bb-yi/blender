@@ -100,7 +100,7 @@
 
 4. 打开 Shader Editor，把顶部 `Shader Type` 切换到 `Filter`。
 
-5. 在滤镜材质里使用 `Scene Color` 读取场景数据，用 `Filter Output` 输出结果。
+5. 在滤镜材质里使用 `Scene Color` 读取场景数据；如果需要让滤镜跟随某个对象的位置、旋转、缩放或颜色变化，可以再配合 `Filter Object Info`。
 
 6. 通过 `Execution Stage` 选择滤镜执行位置。
 

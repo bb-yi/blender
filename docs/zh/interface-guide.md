@@ -53,3 +53,36 @@
 - 被选中的集合会从世界环境照明中排除。
 
 - 适合在同一场景里分离角色、前景道具和背景环境的环境光影响范围。
+
+## 3. 骨骼在 Outliner 隐藏
+
+### 作用
+
+为每个 `Pose Bone` 增加单独的 Outliner 可见性标记，用来在不影响骨骼本身功能的前提下整理复杂绑定的层级显示。
+
+它适合把机制骨、辅助骨或不需要频繁查看的控制层从 Outliner 中隐藏，只保留更重要的骨架结构。
+
+### 入口
+
+- `Bone Properties > Viewport Display > Hide in Outliner`
+- `Outliner > Filter > Hidden PoseBones`
+
+### 行为说明
+
+- 每个 `Pose Bone` 都有自己的 `Hide in Outliner` 开关。
+
+- 这个开关默认是开启的。
+
+- `Outliner` 里的 `Hidden PoseBones` 过滤项默认也是开启的，所以默认不会立刻改变现有骨架的显示结果。
+
+- 当关闭 `Outliner > Filter > Hidden PoseBones` 后，勾选了 `Hide in Outliner` 的姿态骨骼会从 Outliner 树中隐藏。
+
+- 如果某个被隐藏的父骨骼仍然有可见子骨骼，可见子骨骼会继续保留在树里，不会整支层级一起消失。
+
+### 当前范围
+
+- 当前只作用于 `Pose Bone`
+
+- 不作用于 `Edit Bone`
+
+- 只改变 `Outliner` 的层级显示，不影响骨骼的变换、动画、驱动器和渲染结果

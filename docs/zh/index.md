@@ -60,7 +60,7 @@
 
     ---
 
-    查看更多界面和工作流选项
+    查看更多界面和工作流选项，包括骨骼在 Outliner 中的显示控制
 
     [查看 界面与设置 →](interface-guide.md)
 
@@ -106,6 +106,8 @@
 
 - `Light Info`
 
+- `Filter Object Info`
+
 - `Scene Color`
 
 ### 3. NPR Tree 工作流
@@ -125,6 +127,8 @@
 - 材质预览控制
 
 - 世界环境配置
+
+- 骨骼 Outliner 显示控制
 
 - 灯光组管理
 

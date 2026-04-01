@@ -665,6 +665,45 @@ Reads information from a specified light.
 
 - For per-light processing, use `For Each Light` inside `NPR Tree` instead.
 
+### Filter Object Info
+
+#### Entry
+
+`Add > Input > Filter Object Info`
+
+<div align="center">
+	<img src="images/SnowShot_2026-04-01_20-29-09.png" alt="Filter Object Info" style="border-radius: 10px;">
+	<br>
+</div>
+
+Available only in the `Filter` domain.
+
+#### Purpose
+
+Reads the world-space transform and viewport display color of a chosen object, so filter materials can react to a controller object or scene helper.
+
+This is useful for object-driven masks, directional gradients, moving focal effects, or passing a custom color control into a full-screen filter.
+
+#### Node Setting
+
+- `Object`: Choose which object the node should read
+
+#### Outputs
+
+- `Location`: Chosen object world-space location
+
+- `Rotation`: Chosen object world-space Euler rotation in radians
+
+- `Scale`: Chosen object world-space scale
+
+- `Color`: Chosen object viewport display color
+
+#### Notes
+
+- This reads the explicitly selected object, not the object currently being filtered on screen
+
+- If no object is assigned, the node falls back to `0` for location / rotation / color and `1` for scale
+
 ### Scene Color
 
 #### Entry

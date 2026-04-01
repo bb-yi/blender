@@ -671,6 +671,45 @@
 
 - 如果你要做逐灯处理，应该使用 `NPR Tree` 里的 `For Each Light`。
 
+### Filter Object Info
+
+#### 入口
+
+`Add > Input > Filter Object Info`
+
+<div align="center">
+	<img src="images/SnowShot_2026-04-01_20-29-09.png" alt="Filter Object Info" style="border-radius: 10px;">
+	<br>
+</div>
+
+仅在 `Filter` 域下可用。
+
+#### 作用
+
+读取指定对象的世界空间变换和视口显示颜色，让滤镜材质可以跟随控制物体或场景辅助物体变化。
+
+它适合用来做基于对象驱动的遮罩、方向渐变、移动焦点特效，或者把一个对象颜色直接传给全屏滤镜。
+
+#### 节点设置
+
+- `Object`：指定要读取的对象
+
+#### 输出
+
+- `Location`：所选对象的世界空间位置
+
+- `Rotation`：所选对象的世界空间欧拉旋转，单位为弧度
+
+- `Scale`：所选对象的世界空间缩放
+
+- `Color`：所选对象的视口显示颜色
+
+#### 说明
+
+- 这里读取的是明确指定的对象，不是当前屏幕上正在被滤镜处理的对象
+
+- 如果没有指定对象，节点会回退到默认值：位置 / 旋转 / 颜色为 `0`，缩放为 `1`
+
 ### Scene Color
 
 #### 入口

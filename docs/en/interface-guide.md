@@ -53,3 +53,36 @@ Lets you choose a collection so objects in that collection are not affected by t
 - The selected collection is excluded from world-environment lighting.
 
 - This is useful when you want to separate environment-light influence between characters, foreground props, and background elements in the same scene.
+
+## 3. Pose Bone Hide in Outliner
+
+### Purpose
+
+Adds a dedicated Outliner visibility flag to each `Pose Bone`, so large rigs can be kept cleaner in the Outliner without affecting the rig itself.
+
+This is useful for hiding mechanism bones, helper bones, or low-level control layers while keeping the more important rig hierarchy readable.
+
+### Entry Points
+
+- `Bone Properties > Viewport Display > Hide in Outliner`
+- `Outliner > Filter > Hidden PoseBones`
+
+### Behavior
+
+- Every `Pose Bone` has its own `Hide in Outliner` toggle.
+
+- This toggle is enabled by default.
+
+- `Hidden PoseBones` in the Outliner filter is also enabled by default, so existing rigs keep the same visible result until you disable that filter.
+
+- Once `Outliner > Filter > Hidden PoseBones` is disabled, pose bones with `Hide in Outliner` enabled are hidden from the Outliner tree.
+
+- If a hidden parent bone still has visible children, the visible children remain extracted in the tree so the whole branch does not disappear at once.
+
+### Current Scope
+
+- Applies only to `Pose Bone`
+
+- Does not affect `Edit Bone`
+
+- Only changes Outliner hierarchy visibility; it does not change transforms, animation, drivers, or rendering

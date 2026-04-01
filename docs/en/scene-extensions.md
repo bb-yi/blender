@@ -101,7 +101,7 @@ Node tree entry: Shader Node Editor > Shader Type > Filter
 
 4. Open Shader Editor and switch the top `Shader Type` to `Filter`.
 
-5. Use `Scene Color` to read scene data in the filter material, and output with `Filter Output`.
+5. Use `Scene Color` to read scene data, and use `Filter Object Info` when you want the filter to react to a chosen object's transform or viewport color.
 
 6. Use `Execution Stage` to choose where the filter runs.
 
