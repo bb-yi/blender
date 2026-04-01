@@ -11,6 +11,7 @@
 
 #include "MEM_guardedalloc.h"
 
+#include "DNA_action_types.h"
 #include "DNA_collection_types.h"
 
 #include "BLI_fnmatch.h"
@@ -896,6 +897,11 @@ static bool outliner_element_visible_get(const Scene *scene,
   }
 
   TreeStoreElem *tselem = TREESTORE(te);
+  if ((exclude_filter & SO_FILTER_NO_BONE_FLAG) && (tselem->type == TSE_POSE_CHANNEL)) {
+    const bPoseChannel *pchan = static_cast<const bPoseChannel *>(te->directdata);
+    return (pchan->drawflag & PCHAN_DRAW_HIDE_OUTLINER) == 0;
+  }
+
   if ((tselem->type == TSE_SOME_ID) && (te->idcode == ID_OB)) {
     if ((exclude_filter & SO_FILTER_OB_TYPE) == SO_FILTER_OB_TYPE) {
       return false;
@@ -1026,6 +1032,11 @@ static bool outliner_element_is_collection_or_object(TreeElement *te)
   TreeStoreElem *tselem = TREESTORE(te);
 
   if ((tselem->type == TSE_SOME_ID) && (te->idcode == ID_OB)) {
+    return true;
+  }
+
+  /* Pose bones can be hidden while keeping visible children in the tree. */
+  if (tselem->type == TSE_POSE_CHANNEL) {
     return true;
   }
 

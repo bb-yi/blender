@@ -181,6 +181,7 @@ enum eSpaceOutliner_Filter {
   SO_FILTER_ID_TYPE = (1 << 19),
 
   SO_FILTER_NO_OB_GREASE_PENCIL = (1 << 20),
+  SO_FILTER_NO_BONE_FLAG = (1 << 21),
 };
 
 #define SO_FILTER_OB_TYPE \
@@ -194,7 +195,7 @@ enum eSpaceOutliner_Filter {
 
 #define SO_FILTER_ANY \
   (SO_FILTER_NO_OB_CONTENT | SO_FILTER_NO_CHILDREN | SO_FILTER_OB_TYPE | SO_FILTER_OB_STATE | \
-   SO_FILTER_NO_COLLECTION | SO_FILTER_NO_VIEW_LAYERS)
+   SO_FILTER_NO_COLLECTION | SO_FILTER_NO_VIEW_LAYERS | SO_FILTER_NO_BONE_FLAG)
 
 /** #SpaceOutliner.filter_state */
 enum eSpaceOutliner_StateFilter {

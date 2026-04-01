@@ -329,6 +329,7 @@ class BONE_PT_display(BoneButtonsPanel, Panel):
         hide_select_sub = col.column()
         if pose_bone:
             col.prop(pose_bone, "hide", text="Hide", toggle=False)
+            col.prop(pose_bone, "hide_outliner", text="Hide in Outliner", toggle=False)
             hide_select_sub.active = not pose_bone.hide
         hide_select_sub.prop(bone, "hide_select", invert_checkbox=True)
         col.prop(bone, "display_type", text="Display As")
