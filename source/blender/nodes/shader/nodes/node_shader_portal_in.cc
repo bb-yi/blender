@@ -11,6 +11,7 @@
 #include "BLI_string_utils.hh"
 
 #include "UI_interface_layout.hh"
+#include "UI_resources.hh"
 
 #include "BKE_node_runtime.hh"
 

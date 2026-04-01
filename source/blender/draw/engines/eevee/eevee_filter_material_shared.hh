@@ -22,6 +22,7 @@ struct [[host_shared]] FilterObjectInfoData {
   float4 rotation;
   float4 scale;
   float4 color;
+  float4 metadata;
 };
 
 #ifndef GPU_SHADER

@@ -182,7 +182,9 @@ void ShadingView::render()
   inst_.sphere_probes.viewport_draw(render_view_, combined_fb_);
   inst_.planar_probes.viewport_draw(render_view_, combined_fb_);
 
-  gpu::Texture *combined_final_tx = render_postfx(rbufs.combined_tx);
+  gpu::Texture *postfx_input_tx = inst_.filter_materials.render_stage(
+      render_view_, rbufs.combined_tx, extent_, SCE_EEVEE_FILTER_STAGE_BEFORE_POSTFX);
+  gpu::Texture *combined_final_tx = render_postfx(postfx_input_tx);
   inst_.film.accumulate(jitter_view_, combined_final_tx);
 
   inst_.pipelines.shadow_filter.release();

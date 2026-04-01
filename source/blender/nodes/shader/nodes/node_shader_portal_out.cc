@@ -12,6 +12,7 @@
 #include "RNA_access.hh"
 
 #include "UI_interface_layout.hh"
+#include "UI_resources.hh"
 
 #include "node_shader_util.hh"
 #include "node_util.hh"

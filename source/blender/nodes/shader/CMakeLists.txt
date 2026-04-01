@@ -51,6 +51,7 @@ set(SRC
   nodes/node_shader_emission.cc
   nodes/node_shader_fresnel.cc
   nodes/node_shader_foreach_light.cc
+  nodes/node_shader_filter_object_mask.cc
   nodes/node_shader_filter_object_info.cc
   nodes/node_shader_gamma.cc
   nodes/node_shader_geometry.cc

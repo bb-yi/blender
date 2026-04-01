@@ -49,6 +49,7 @@ class FilterMaterialModule {
   bool uses_scene_depth_ = false;
   bool uses_scene_normal_ = false;
   bool uses_scene_position_ = false;
+  bool uses_cryptomatte_object_ = false;
 
   void update_filter_object_info_buffer(GPUMaterial *gpumat);
 
@@ -71,6 +72,10 @@ class FilterMaterialModule {
   bool uses_scene_position() const
   {
     return uses_scene_position_;
+  }
+  bool uses_cryptomatte_object() const
+  {
+    return uses_cryptomatte_object_;
   }
 
   bool has_stage_entries(SceneEEVEEFilterExecutionStage stage) const;

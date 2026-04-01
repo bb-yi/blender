@@ -340,6 +340,9 @@ void Film::init(const int2 &extent, const rcti *output_rect)
     if (inst_.filter_materials.uses_scene_position()) {
       enabled_passes_ |= EEVEE_RENDER_PASS_POSITION;
     }
+    if (inst_.filter_materials.uses_cryptomatte_object()) {
+      enabled_passes_ |= EEVEE_RENDER_PASS_CRYPTOMATTE_OBJECT;
+    }
 
     /* Filter obsolete passes. */
     enabled_passes_ &= ~(EEVEE_RENDER_PASS_UNUSED_8 | EEVEE_RENDER_PASS_UNUSED_14);

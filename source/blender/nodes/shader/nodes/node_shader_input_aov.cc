@@ -62,14 +62,14 @@ void register_node_type_sh_input_aov()
   sh_node_type_base(&ntype, "ShaderNodeInputAOV", SH_NODE_INPUT_AOV);
   ntype.enum_name_legacy = "INPUT_AOV";
   ntype.ui_name = "AOV Input";
-  ntype.ui_description = "Read a view-layer AOV inside the NPR shader tree";
+  ntype.ui_description = "Read a view-layer AOV inside the NPR or Filter shader tree";
   ntype.nclass = NODE_CLASS_INPUT;
   ntype.declare = file_ns::node_declare;
   ntype.draw_buttons = file_ns::node_shader_buts_input_aov;
   ntype.initfunc = file_ns::node_shader_init_input_aov;
   bke::node_type_storage(
       ntype, "NodeShaderOutputAOV", node_free_standard_storage, node_copy_standard_storage);
-  ntype.add_ui_poll = npr_shader_nodes_poll;
+  ntype.add_ui_poll = filter_or_npr_eevee_shader_nodes_poll;
   ntype.gpu_fn = file_ns::node_shader_gpu_input_aov;
   ntype.no_muting = true;
 

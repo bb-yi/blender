@@ -46,6 +46,7 @@ void register_node_type_sh_eevee_specular();
 void register_node_type_sh_emission();
 void register_node_type_sh_fresnel();
 void register_node_type_sh_foreach_light();
+void register_node_type_sh_filter_object_mask();
 void register_node_type_sh_filter_object_info();
 void register_node_type_sh_gamma();
 void register_node_type_sh_geometry();

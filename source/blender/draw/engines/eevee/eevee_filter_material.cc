@@ -10,10 +10,13 @@
 #include "DNA_node_types.h"
 #include "DNA_scene_types.h"
 
+#include <cstring>
+
 #include "BLI_listbase.h"
 #include "BLI_math_matrix.hh"
 #include "BLI_set.hh"
 
+#include "BKE_cryptomatte.hh"
 #include "BKE_node_legacy_types.hh"
 #include "BKE_node.hh"
 
@@ -34,6 +37,7 @@ static FilterObjectInfoData filter_object_info_default()
   data.rotation = float4(0.0f);
   data.scale = float4(1.0f, 1.0f, 1.0f, 0.0f);
   data.color = float4(0.0f);
+  data.metadata = float4(0.0f);
   return data;
 }
 
@@ -47,7 +51,8 @@ static void filter_material_collect_scene_sources(const bNodeTree &ntree,
                                                   Set<const bNodeTree *> &visited,
                                                   bool &r_uses_scene_depth,
                                                   bool &r_uses_scene_normal,
-                                                  bool &r_uses_scene_position)
+                                                  bool &r_uses_scene_position,
+                                                  bool &r_uses_cryptomatte_object)
 {
   if (visited.contains(&ntree)) {
     return;
@@ -60,17 +65,25 @@ static void filter_material_collect_scene_sources(const bNodeTree &ntree,
       r_uses_scene_depth |= (source == SHD_SCENE_SOURCE_DEPTH);
       r_uses_scene_normal |= (source == SHD_SCENE_SOURCE_NORMAL);
       r_uses_scene_position |= (source == SHD_SCENE_SOURCE_POSITION);
-      if (r_uses_scene_depth && r_uses_scene_normal && r_uses_scene_position) {
-        return;
-      }
+    }
+    else if (node->type_legacy == SH_NODE_FILTER_OBJECT_MASK) {
+      r_uses_cryptomatte_object = true;
+    }
+    if (r_uses_scene_depth && r_uses_scene_normal && r_uses_scene_position &&
+        r_uses_cryptomatte_object)
+    {
+      return;
     }
     if (node->type_legacy == NODE_GROUP && node->id != nullptr) {
       filter_material_collect_scene_sources(*reinterpret_cast<bNodeTree *>(node->id),
                                             visited,
                                             r_uses_scene_depth,
                                             r_uses_scene_normal,
-                                            r_uses_scene_position);
-      if (r_uses_scene_depth && r_uses_scene_normal && r_uses_scene_position) {
+                                            r_uses_scene_position,
+                                            r_uses_cryptomatte_object);
+      if (r_uses_scene_depth && r_uses_scene_normal && r_uses_scene_position &&
+          r_uses_cryptomatte_object)
+      {
         return;
       }
     }
@@ -82,6 +95,7 @@ void FilterMaterialModule::init()
   uses_scene_depth_ = false;
   uses_scene_normal_ = false;
   uses_scene_position_ = false;
+  uses_cryptomatte_object_ = false;
 
   Set<const bNodeTree *> visited;
   for (SceneFilterMaterial *filter_entry = static_cast<SceneFilterMaterial *>(
@@ -96,8 +110,11 @@ void FilterMaterialModule::init()
                                           visited,
                                           uses_scene_depth_,
                                           uses_scene_normal_,
-                                          uses_scene_position_);
-    if (uses_scene_depth_ && uses_scene_normal_ && uses_scene_position_) {
+                                          uses_scene_position_,
+                                          uses_cryptomatte_object_);
+    if (uses_scene_depth_ && uses_scene_normal_ && uses_scene_position_ &&
+        uses_cryptomatte_object_)
+    {
       break;
     }
   }
@@ -146,6 +163,9 @@ void FilterMaterialModule::update_filter_object_info_buffer(GPUMaterial *gpumat)
                          runtime_object->color[1],
                          runtime_object->color[2],
                          runtime_object->color[3]);
+    const char *name = object->id.name + 2;
+    const uint32_t hash = BKE_cryptomatte_hash(name, int(std::strlen(name)));
+    entry.metadata = float4(BKE_cryptomatte_hash_to_float(hash), 0.0f, 0.0f, 0.0f);
   }
 
   filter_object_info_buf_.push_update();
@@ -235,6 +255,7 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
     pass.bind_texture("rp_color_tx", &inst_.render_buffers.rp_color_tx);
     pass.bind_texture("rp_value_tx", &inst_.render_buffers.rp_value_tx);
     pass.bind_texture("depth_tx", &inst_.render_buffers.depth_tx);
+    pass.bind_texture("cryptomatte_tx", &inst_.render_buffers.cryptomatte_tx);
     pass.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);
     pass.bind_ubo(FILTER_OBJECT_INFO_BUF_SLOT, &filter_object_info_buf_);
     pass.bind_resources(inst_.uniform_data);
