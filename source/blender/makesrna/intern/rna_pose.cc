@@ -110,6 +110,13 @@ static void rna_PoseBone_visibility_update(Main * /* bmain */,
   WM_main_add_notifier(NC_OBJECT | ND_BONE_SELECT, ptr->owner_id);
 }
 
+static void rna_PoseBone_hide_outliner_update(Main * /* bmain */,
+                                              Scene * /* scene */,
+                                              PointerRNA *ptr)
+{
+  WM_main_add_notifier(NC_OBJECT | ND_BONE_SELECT, ptr->owner_id);
+}
+
 static void rna_Pose_dependency_update(Main *bmain, Scene * /*scene*/, PointerRNA *ptr)
 {
   DEG_relations_tag_update(bmain);
@@ -1239,7 +1246,7 @@ static void rna_def_pose_channel(BlenderRNA *brna)
       prop,
       "Hide in Outliner",
       "Hide this pose bone in the Outliner when \"Hidden PoseBones\" is disabled");
-  RNA_def_property_update(prop, NC_OBJECT | ND_POSE, "rna_Pose_update");
+  RNA_def_property_update(prop, NC_OBJECT | ND_BONE_SELECT, "rna_PoseBone_hide_outliner_update");
 
   prop = RNA_def_property(srna, "select", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
