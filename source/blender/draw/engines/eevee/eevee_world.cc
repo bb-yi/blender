@@ -61,6 +61,7 @@ float World::sun_threshold()
 void World::sync()
 {
   bool has_update = false;
+  uses_scene_time_ = false;
 
   WorldHandle wo_handle = {0};
   if (inst_.scene->world != nullptr) {
@@ -130,6 +131,7 @@ void World::sync()
     return;
   }
   is_ready_ = true;
+  uses_scene_time_ |= GPU_material_is_time_dependent(gpumat);
 
   inst_.manager->register_layer_attributes(gpumat);
 
@@ -160,6 +162,7 @@ void World::sync_volume(const WorldHandle &world_handle, bool wait_ready)
     has_volume_ = GPU_material_has_volume_output(gpumat);
     has_volume_scatter_ = GPU_material_flag_get(gpumat, GPU_MATFLAG_VOLUME_SCATTER);
     has_volume_absorption_ = GPU_material_flag_get(gpumat, GPU_MATFLAG_VOLUME_ABSORPTION);
+    uses_scene_time_ |= GPU_material_is_time_dependent(gpumat);
   }
   else {
     has_volume_ = has_volume_absorption_ = has_volume_scatter_ = false;

@@ -76,6 +76,7 @@ struct GPUMaterial {
   gpu::UniformBuf *ubo = nullptr;
   /* Some flags about the nodetree & the needed resources. */
   eGPUMaterialFlag flag = GPU_MATFLAG_UPDATED;
+  bool is_time_dependent = false;
   /* The engine type this material is compiled for. */
   eGPUMaterialEngine engine;
   /* Identify shader variations (shadow, probe, world background...) */
@@ -481,6 +482,16 @@ void GPU_material_flag_set(GPUMaterial *mat, eGPUMaterialFlag flag)
     mat->flag |= GPU_MATFLAG_COAT;
   }
   mat->flag |= flag;
+}
+
+void GPU_material_set_time_dependent(GPUMaterial *mat)
+{
+  mat->is_time_dependent = true;
+}
+
+bool GPU_material_is_time_dependent(const GPUMaterial *mat)
+{
+  return mat->is_time_dependent;
 }
 
 void GPU_material_uniform_buffer_create(GPUMaterial *material, ListBaseT<LinkData> *inputs)

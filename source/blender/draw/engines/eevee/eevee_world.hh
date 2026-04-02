@@ -58,6 +58,8 @@ class World {
   bool has_volume_scatter_ = false;
   /* Is true if the surface shader is compiled and ready. */
   bool is_ready_ = false;
+  /* Is true if any active world pass reads the current scene time. */
+  bool uses_scene_time_ = false;
 
   LookdevWorld lookdev_world_;
 
@@ -86,6 +88,11 @@ class World {
   bool is_ready() const
   {
     return is_ready_;
+  }
+
+  bool uses_scene_time() const
+  {
+    return uses_scene_time_;
   }
 
   float sun_threshold();

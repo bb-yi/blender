@@ -92,6 +92,8 @@ class Instance : public DrawEngine {
   uint64_t depsgraph_last_update_ = 0;
   bool overlays_enabled_ = false;
   bool skip_render_ = false;
+  bool last_viewport_scene_time_valid_ = false;
+  float last_viewport_scene_time_ = 0.0f;
   int2 render_extent_override_ = int2(-1);
 
   /** Info string displayed at the top of the render / viewport, or the console when baking. */

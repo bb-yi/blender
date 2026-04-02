@@ -174,6 +174,7 @@ void FilterMaterialModule::update_filter_object_info_buffer(GPUMaterial *gpumat)
 void FilterMaterialModule::begin_sync()
 {
   entries_.clear();
+  uses_scene_time_ = false;
 
   for (SceneFilterMaterial *filter_entry = static_cast<SceneFilterMaterial *>(
            inst_.scene->eevee.filter_materials.first);
@@ -199,6 +200,7 @@ void FilterMaterialModule::begin_sync()
       continue;
     }
 
+    uses_scene_time_ |= GPU_material_is_time_dependent(gpumat);
     inst_.manager->register_layer_attributes(gpumat);
     FilterPassEntry entry;
     entry.scene_filter = filter_entry;

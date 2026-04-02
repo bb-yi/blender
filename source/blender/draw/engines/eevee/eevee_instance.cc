@@ -8,6 +8,8 @@
  * An instance contains all structures needed to do a complete render.
  */
 
+#include <cmath>
+
 #include "CLG_log.h"
 
 #include "BKE_global.hh"
@@ -488,6 +490,19 @@ void Instance::end_sync()
   light_probes.end_sync();
   sphere_probes.end_sync();
   planar_probes.end_sync();
+
+  if (is_viewport()) {
+    const bool uses_scene_time = materials.has_time_dependent_materials() ||
+                                 world.uses_scene_time() || filter_materials.uses_scene_time();
+    const float scene_time = uniform_data.data.scene_time.frame;
+    if (uses_scene_time && last_viewport_scene_time_valid_ &&
+        std::abs(scene_time - last_viewport_scene_time_) > 1e-8f)
+    {
+      sampling.reset();
+    }
+    last_viewport_scene_time_ = scene_time;
+    last_viewport_scene_time_valid_ = true;
+  }
 
   uniform_data.push_update();
 

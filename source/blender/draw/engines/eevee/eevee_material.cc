@@ -112,6 +112,7 @@ void MaterialModule::begin_sync()
   queued_shaders_count = 0;
   queued_textures_count = 0;
   queued_optimize_shaders_count = 0;
+  has_time_dependent_materials_ = false;
 
   material_override = DEG_get_evaluated(inst_.depsgraph, inst_.view_layer->mat_override);
 
@@ -223,6 +224,8 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
       probe_capture,
       use_deferred_compilation,
       default_mat);
+
+  has_time_dependent_materials_ |= GPU_material_is_time_dependent(matpass.gpumat);
 
   queue_texture_loading(matpass.gpumat);
 

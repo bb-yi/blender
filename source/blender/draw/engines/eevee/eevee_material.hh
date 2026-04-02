@@ -360,6 +360,7 @@ class MaterialModule {
 
  private:
   Instance &inst_;
+  bool has_time_dependent_materials_ = false;
 
   Map<MaterialKey, Material> material_map_;
   Map<ShaderKey, PassMain::Sub *> shader_map_;
@@ -379,6 +380,10 @@ class MaterialModule {
 
   void begin_sync();
   void end_sync();
+  bool has_time_dependent_materials() const
+  {
+    return has_time_dependent_materials_;
+  }
 
   /**
    * Returned Material references are valid until the next call to this function or material_get().

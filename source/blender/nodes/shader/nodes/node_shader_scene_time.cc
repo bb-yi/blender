@@ -28,6 +28,7 @@ static int node_shader_gpu_scene_time(GPUMaterial *mat,
                                       GPUNodeStack *in,
                                       GPUNodeStack *out)
 {
+  GPU_material_set_time_dependent(mat);
   return GPU_stack_link(mat, node, "node_scene_time", in, out);
 }
 

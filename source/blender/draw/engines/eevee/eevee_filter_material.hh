@@ -50,6 +50,7 @@ class FilterMaterialModule {
   bool uses_scene_normal_ = false;
   bool uses_scene_position_ = false;
   bool uses_cryptomatte_object_ = false;
+  bool uses_scene_time_ = false;
 
   void update_filter_object_info_buffer(GPUMaterial *gpumat);
 
@@ -72,6 +73,10 @@ class FilterMaterialModule {
   bool uses_scene_position() const
   {
     return uses_scene_position_;
+  }
+  bool uses_scene_time() const
+  {
+    return uses_scene_time_;
   }
   bool uses_cryptomatte_object() const
   {
