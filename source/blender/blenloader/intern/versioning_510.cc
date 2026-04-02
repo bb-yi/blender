@@ -950,7 +950,7 @@ void blo_do_versions_510(FileData * /*fd*/, Library * /*lib*/, Main *bmain)
     }
   }
 
-  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 35)) {
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 36)) {
     FOREACH_NODETREE_BEGIN (bmain, ntree, id) {
       if (ntree->type != NTREE_SHADER) {
         continue;
@@ -960,6 +960,11 @@ void blo_do_versions_510(FileData * /*fd*/, Library * /*lib*/, Main *bmain)
             node.custom1 == SHD_SHADER_INFO_SHADOW_STABLE)
         {
           node.custom1 = SHD_SHADER_INFO_SHADOW_SOFT_FILTERED;
+        }
+        else if (node.type_legacy == SH_NODE_SCENE_COLOR &&
+                 node.custom1 == SHD_SCENE_SOURCE_SHADOW)
+        {
+          node.custom1 = SHD_SCENE_SOURCE_COLOR;
         }
       }
     }

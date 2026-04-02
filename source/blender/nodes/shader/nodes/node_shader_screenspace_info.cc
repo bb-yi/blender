@@ -28,7 +28,7 @@ static int node_shader_gpu_screenspace_info(GPUMaterial *mat,
 {
   const float use_explicit_view_position = (in[0].link != nullptr) ? 1.0f : 0.0f;
 
-  GPU_material_flag_set(mat, GPU_MATFLAG_SCREENSPACE_INFO);
+  GPU_material_flag_set(mat, GPU_MATFLAG_SCREENSPACE_INFO | GPU_MATFLAG_LIGHTPROBE_ACCESS);
   return GPU_stack_link(
       mat, node, "node_screenspace_info", in, out, GPU_constant(&use_explicit_view_position));
 }

@@ -15,10 +15,8 @@ float2 screenspace_info_project_uv(float3 sample_view_position)
 float4 screenspace_info_environment_fallback(float3 sample_view_position)
 {
   float3 sample_world_position = drw_point_view_to_world(sample_view_position);
-  float3 view_direction = -drw_world_incident_vector(sample_world_position);
-  LightProbeSample probe_sample = lightprobe_load(g_data.P, g_data.Ng, view_direction);
-  float3 radiance = lightprobe_spherical_sample_normalized_with_parallax(
-      probe_sample, g_data.P, view_direction, 0.0f);
+  float3 view_direction = safe_normalize(-drw_world_incident_vector(sample_world_position));
+  float3 radiance = lightprobe_world_sample(view_direction, 0.0f);
   return float4(radiance, 1.0f);
 }
 

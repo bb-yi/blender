@@ -14,8 +14,7 @@ void node_world_environment(float3 direction, out float4 color)
   }
   V = safe_normalize(V);
 
-  LightProbeSample samp = lightprobe_load(g_data.P, g_data.Ng, V);
-  float3 radiance = lightprobe_spherical_sample_normalized_with_parallax(samp, g_data.P, V, 0.0);
+  float3 radiance = lightprobe_world_sample(V, 0.0f);
   color = float4(radiance, 1.0f);
 #  else
   color = float4(0.0f);

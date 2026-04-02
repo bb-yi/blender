@@ -1284,7 +1284,8 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       dependencies.append("eevee_light_eval_lib.glsl");
     }
     if ((GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
-         GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR_FOREACH_LIGHT)) &&
+         GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR_FOREACH_LIGHT) ||
+         GPU_material_flag_get(gpumat, GPU_MATFLAG_LIGHTPROBE_ACCESS)) &&
         ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD))
     {
       dependencies.append("eevee_lightprobe_eval_lib.glsl");

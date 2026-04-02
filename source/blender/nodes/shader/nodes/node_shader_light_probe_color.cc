@@ -35,6 +35,7 @@ static int node_shader_gpu_light_probe_color(GPUMaterial *mat,
                                              GPUNodeStack *in,
                                              GPUNodeStack *out)
 {
+  GPU_material_flag_set(mat, GPU_MATFLAG_LIGHTPROBE_ACCESS);
   return GPU_stack_link(mat, node, "node_light_probe_color", in, out);
 }
 

@@ -22,6 +22,19 @@ struct LightProbeSample {
   int spherical_id;
 };
 
+int lightprobe_world_sphere_index()
+{
+  /* `random_probe == 1.0f` can never pass the score test, so the selector falls back to the
+   * final valid probe entry, which Eevee reserves for the world probe. */
+  return lightprobe_spheres_select(float3(0.0f), 1.0f);
+}
+
+float3 lightprobe_world_sample(float3 L, float lod)
+{
+  SphereProbeData world_probe = lightprobe_sphere_buf[lightprobe_world_sphere_index()];
+  return lightprobe_spheres_sample(L, lod, world_probe.atlas_coord).rgb;
+}
+
 /**
  * Return cached light-probe data at P.
  * Ng and V are use for biases.
