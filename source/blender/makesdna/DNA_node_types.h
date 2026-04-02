@@ -3015,6 +3015,7 @@ struct NodeShaderGLSLFunction {
   int parse_status = SHD_GLSL_FUNCTION_PARSE_DIRTY;
   int flags = 0;
   int signature_hash = 0;
+  int meta_hash = 0;
   int sampler_interpolation = SHD_INTERP_LINEAR;
   int sampler_extension = SHD_IMAGE_EXTENSION_REPEAT;
 

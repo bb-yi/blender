@@ -84,6 +84,8 @@
 
 - “函数内部”可以相对自由
 - “节点导出函数的参数和返回值”必须严格受限
+- “辅助函数”不必都遵守导出函数的边界类型限制；真正必须满足限制的是节点 `Function` 最终选中的那个函数
+- 因此辅助函数里可以出现 `bool` / `int` / `mat*` / 非方阵矩阵 / 更自由的 `out` 参数组合，但最终报告里必须再次明确真正要调用的是哪个导出函数
 
 
 ## 二、AI 转换时必须遵守的总规则
@@ -105,9 +107,14 @@
 - `HLSLPROGRAM`
 - `ENDCG`
 - `ENDHLSL`
+- `#version`
+- `precision highp/mediump/lowp ...`
+- `layout(...)`
 - 平台 pragma
 - 渲染状态声明
 - engine include
+- `/** SHADERDATA ... */`
+- `//proc:...`、`//proc:noise:...` 这类资源生成或工具元数据注释
 
 最终应只保留：
 
@@ -155,6 +162,12 @@ Function: your_function_name
 - `_MainTex` -> `sampler2D tex`
 - `i.uv` -> `vec2 uv`
 - `iChannelResolution[0].xy` -> `vec2 channel0_resolution`
+
+如果源码通过别名宏间接依赖这些运行时变量，也要先展开再参数化，例如：
+
+- `#define time iTime` -> 删除宏，直接使用 `float time`
+- `#define res iResolution.xy` -> 删除宏，直接使用 `vec2 resolution`
+- `#define frag gl_FragCoord.xy` -> 删除宏，改成显式参数 `vec2 frag_coord`
 
 ### 规则 4：如果来源代码依赖贴图采样，优先保留为 `sampler2D`
 
@@ -225,6 +238,10 @@ vec3 my_effect(vec2 uv, float time)
 - 只有当某个开关确实需要在节点运行时调节时，才把它改成受支持的函数参数，例如 `float enabled`
 - 删除未使用的辅助函数、注释掉的旧代码、媒体链接、说明文字、被宏禁用的分支
 - 对依赖实现细节的捷径写法要显式改写，例如 `smoothstep(a, b, t)` 在 `a > b` 时不要直接赌实现行为，应该改写成你自己可控的稳定辅助函数
+- 如果源码里有 `#define time iTime`、`#define T u_time` 这类“给运行时变量改别名”的宏，不要保留；应该展开成真实参数名
+- 如果源码里有共享可变的全局状态，例如 `float gTime;` 先在某处写入、再在多个 helper 中隐式读取，优先改成显式参数传递或局部变量
+- 如果源码里把比较结果直接塞进数值向量，例如 `vec3(dir.x == 0.0, dir.y == 0.0, dir.z == 0.0)`，不要赌隐式转换；改成显式三元表达式
+- 如果源码里用了 `mat3x2` / `mat2x3` / `mat4x3` 这类非方阵，或者同时出现 `vec * mat` 与 `mat * vec` 的双向乘法，优先拆成语义明确的辅助函数，不要把方向感很差的矩阵表达式原样照搬
 
 ### 规则 7：区分“普通贴图采样”和“运行时反馈 / 多通道缓冲”
 
@@ -301,6 +318,7 @@ Code:
 - 已支持边界类型: ...
 - 不支持或已删除: ...
 - 已近似或已替代: ...
+- Alpha 处理: 已保留 / 已拆分 / 原始 alpha 恒定 / 已省略
 - 验证情况: 已解析 / 已渲染 / 未验证
 ````
 
@@ -329,6 +347,9 @@ Outputs:
   - 明确列出被删除或当前节点不支持的东西，例如 `iChannel1 backbuffer feedback`、`UDIM`、`inout`
 - `已近似或已替代`
   - 明确列出做过近似的部分，例如“将上一帧反馈删除”“把宏分支固定为当前启用版本”
+- `Alpha 处理`
+  - 如果原 shader 的 `fragColor.a` 有意义，要明确写出它是保留为 `vec4.a`、拆成单独 `out float alpha`，还是被省略
+  - 如果原始 alpha 本来恒定为 `1.0`，也建议直接写明，避免用户误以为漏转
 - `验证情况`
   - 如果只做了静态转换，写 `未验证`
   - 如果通过节点解析，写 `已解析`
@@ -363,7 +384,11 @@ Outputs:
 - framebuffer 输出
 - `fragColor`
 - `gl_FragCoord` 直接依赖
+- `precision highp float;` 这类文件级精度声明
+- `#version`
+- `layout(...)`
 - 自定义 uniform 块
+- `/** SHADERDATA ... */`、`//proc:*` 这类元数据
 - 注释掉的旧代码、视频链接、音乐链接等与算法无关的内容
 - 仅用于切换功能的宏分支和未启用分支
 - 依赖上一帧结果或其他 pass 缓冲的运行时逻辑
@@ -613,6 +638,96 @@ S(1.0, y, st.y)
 - 在函数里自己处理正向、反向、退化区间
 - 再把所有原来的 `S(...)` 调用替换掉
 
+### 7. 不要依赖布尔值到数值类型的隐式转换
+
+错误：
+
+```glsl
+dir += vec3(dir.x == 0.0, dir.y == 0.0, dir.z == 0.0) * 1e-5;
+```
+
+应该改成：
+
+```glsl
+dir += vec3(dir.x == 0.0 ? 1e-5 : 0.0,
+            dir.y == 0.0 ? 1e-5 : 0.0,
+            dir.z == 0.0 ? 1e-5 : 0.0);
+```
+
+说明：
+
+- 原 shader 有时会依赖目标环境对 `bool` / `bvec*` 的宽松处理
+- 稳定转换时不要假设“比较结果可以直接当 `float` 用”
+- 这类写法优先改成显式三元表达式、`mix`、`step` 或手动 `float(...)` 化
+
+### 8. 非方阵或方向不清晰的矩阵运算优先展开成辅助函数
+
+有些来源代码会写出这类表达式：
+
+```glsl
+mat3x2 tri = mat3x2(...);
+vec3 coord = some_vec2 * tri;
+vec2 uv = tri * some_vec3;
+```
+
+即使原环境能跑，这类写法在转换后也常常不够直观，不利于稳定维护和排错。
+
+更推荐的做法是：
+
+- 把“投影”与“反投影”拆成两个显式 helper
+- 用 `dot(...)` 或明确分量组合来表达变换
+- 不要把“向量在左乘”还是“矩阵在左乘”的理解成本留给用户
+
+### 9. 不要保留共享可变全局状态
+
+错误：
+
+```glsl
+float gTime = 0.0;
+
+float wave(vec3 p)
+{
+  return sin(gTime + p.x);
+}
+
+vec3 effect(vec2 uv, float time)
+{
+  gTime = time;
+  return vec3(wave(vec3(uv, 0.0)));
+}
+```
+
+应该改成：
+
+```glsl
+float wave(vec3 p, float time)
+{
+  return sin(time + p.x);
+}
+
+vec3 effect(vec2 uv, float time)
+{
+  return vec3(wave(vec3(uv, 0.0), time));
+}
+```
+
+说明：
+
+- 像 `gTime`、`gFrame`、`gMouse` 这种“先写全局，再在 helper 里读”的模式，不适合当作稳定转换模板保留
+- 优先改成显式参数传递，避免隐式副作用和阅读歧义
+
+### 10. 原 shader 的 alpha 要显式处理
+
+如果原始代码里 `fragColor.a` 不是固定 `1.0`，不要在转换报告里省略这件事。
+
+可选做法：
+
+- 直接保留为 `vec4` 返回值
+- 或拆成 `out float alpha`
+- 如果当前转换故意只保留 RGB，也必须在结果报告里明确写出 alpha 被省略
+
+如果原 shader 的 alpha 本来恒定为 `1.0`，也建议在结果报告里写明“原始 alpha 恒定，因此未单独处理”。
+
 
 ## 六、AI 必须做的自检清单
 
@@ -640,6 +755,12 @@ S(1.0, y, st.y)
 20. 最终输出里是否再次明确写了节点 `Function` 一栏最终应调用的函数名？
 21. 最终输出里是否明确列出了不支持、删除、近似、替代和验证情况？
 22. 最终输出里的结果报告语言，是否跟随了用户当前使用的语言？
+23. 是否移除了 `precision` / `#version` / `layout(...)` / `SHADERDATA` / `proc:` 这类文件级声明或工具元数据？
+24. 如果源码通过 `#define time iTime` 之类的别名宏引用运行时变量，是否已经展开并参数化？
+25. 如果源码里用了共享可变全局状态（如 `gTime`），是否已经改成显式参数或局部变量？
+26. 如果源码里有把比较结果直接拿去构造 `vec*` 或参与数值运算的写法，是否已经改成显式数值表达式？
+27. 如果源码里用了 `mat3x2` / `mat2x3` 或其他方向不够直观的矩阵乘法，是否已经改写成更清晰的 helper？
+28. 如果原 shader 的 alpha 有实际含义，是否已经明确说明保留、拆分还是省略？
 
 
 ## 七、推荐的最小输出模板
@@ -672,6 +793,7 @@ vec3 converted_function(vec2 uv, float time, sampler2D tex)
 - 已支持边界类型: vec2, float, sampler2D, vec3 return
 - 不支持或已删除: 无
 - 已近似或已替代: 无
+- Alpha 处理: 原始 alpha 恒定
 - 验证情况: 未验证
 ````
 
@@ -684,6 +806,7 @@ vec3 converted_function(vec2 uv, float time, sampler2D tex)
 - 已支持边界类型: vec2, vec2, float, sampler2D, vec3 return
 - 不支持或已删除: 删除 iChannel1 的 backbuffer feedback
 - 已近似或已替代: 将多 pass 运行时依赖替换为单 pass 近似
+- Alpha 处理: 已省略
 - 验证情况: 已解析
 ````
 
@@ -864,6 +987,49 @@ if (condition) {
 ```
 
 
+## 示例 7：`mat3x2` 三角网格投影写法的稳定改写
+
+### 原始片段
+
+```glsl
+mat3x2 tri = mat3x2(-1,0, 0.5,0.866, 0.5,-0.866);
+vec3 coord = (res * 0.5 - fragCoord) * tri / res.y * SCALE + SCALE;
+if (texture(u_tex, .71 - (tri * vox) / 8e2).r < .6) break;
+```
+
+### 转换思路
+
+- 这类写法同时混用了 `vec2 * mat3x2` 和 `mat3x2 * vec3`
+- 即使原环境允许，也不适合作为稳定转换模板直接保留
+- 更稳妥的方式是把“投影”和“反投影”拆成两个语义明确的 helper
+
+### 转换后
+
+```text
+Function: triangle_dda
+```
+
+```glsl
+vec3 triangle_project(vec2 p)
+{
+  return vec3(dot(p, vec2(-1.0, 0.0)),
+              dot(p, vec2(0.5, 0.866)),
+              dot(p, vec2(0.5, -0.866)));
+}
+
+vec2 triangle_unproject(vec3 v)
+{
+  return vec2(-v.x + 0.5 * v.y + 0.5 * v.z,
+              0.866 * (v.y - v.z));
+}
+```
+
+说明：
+
+- 这种改法会比把非方阵乘法原样照搬更清楚
+- 同时也更适合在转换报告里解释“哪些地方做了等价重写”
+
+
 ## 九、推荐给 AI 的转换提示词
 
 如果你想让另一个 AI 帮你转换 shader，推荐直接给它下面这段要求：
@@ -879,10 +1045,11 @@ if (condition) {
 5. 不允许使用 inout，不允许 out sampler2D。
 6. 如果来源是 HLSL 或 ShaderLab，去掉语义、Pass、Properties、pragma 和引擎包装层。
 7. 贴图采样统一改成 `texture(tex, uv)`；如果原算法明确依赖显式 `LOD`，可以保留为 `textureLod(tex, uv, lod)`。
-8. 如果存在宏开关、死代码、未使用辅助函数、反向 `smoothstep` 这类依赖实现细节的写法，要收敛成稳定版本。
+8. 如果存在宏开关、死代码、未使用辅助函数、反向 `smoothstep`、运行时别名宏、共享可变全局状态、布尔到数值隐式转换、非方阵矩阵双向乘法这类不稳定写法，要收敛成稳定版本。
 9. 如果需要多个输出，用 out 参数，不要用 struct 返回。
-10. 在结果最后明确说明转换是 success / partial / failed，并列出不支持、删除、近似、替代、验证情况。
-11. 输出格式为：
+10. 如果原 shader 的 alpha 有意义，要明确说明是保留、拆分还是省略。
+11. 在结果最后明确说明转换是 success / partial / failed，并列出不支持、删除、近似、替代、alpha 处理、验证情况。
+12. 输出格式为：
    Function: ...
    Inputs: ...
    Outputs: ...
@@ -905,3 +1072,268 @@ if (condition) {
 5. 输出一个明确可选的导出函数
 
 只要严格遵守这份文档，绝大多数数学类 GLSL、很多 HLSL 片段逻辑、以及相当一部分 ShaderLab 片段逻辑，都可以被稳定改写为当前 Blender 节点可直接使用的版本。
+## 附录：GLSL Function Meta 语法
+
+`GLSL Function` 节点支持从 GLSL 源码里的块注释读取少量 Meta 信息，用来描述输入参数在 Blender 节点界面中的默认值、范围和子类型。
+
+这个 Meta 系统只负责节点 UI 语义，不改变 GLSL 函数逻辑本身。
+
+当前范围主要是：
+
+- 默认值
+- 最小值
+- 最大值
+- socket subtype
+
+### 1. 基本格式
+
+Meta 必须写在函数正上方的块注释里，并以 `@glsl_meta` 开头：
+
+```glsl
+/* @glsl_meta v1
+strength: default=0.5 min=0.0 max=1.0 subtype=factor
+tint: default=vec3(1.0, 0.8, 0.2)
+*/
+vec3 stylize(vec3 base_color, float strength, vec3 tint)
+{
+  return mix(base_color, tint, strength);
+}
+```
+
+### 2. 作用规则
+
+Meta 只会作用到它正下方那个函数。
+
+也就是说：
+
+- 每个函数最多对应一块 Meta
+- Meta 块应该紧贴函数上方
+- Meta 块内部只写“参数名: 属性”
+- 不再需要也不再推荐写 `function some_name`
+- 不再需要也不再推荐写 `some_function.some_param`
+
+如果 `@glsl_meta` 后面不是紧接着一个函数定义，而是夹了别的顶层代码，当前实现会报错。
+
+#### 2.1 推荐结构
+
+```glsl
+/* @glsl_meta v1
+strength: default=0.5
+tint: default=vec3(1.0, 0.8, 0.2)
+*/
+vec3 stylize(vec3 base_color, float strength, vec3 tint)
+{
+  return mix(base_color, tint, strength);
+}
+```
+
+这里的 `strength` 和 `tint` 会自动解释为正下方 `stylize` 的参数。
+
+#### 2.2 不再推荐的旧写法
+
+```glsl
+/* @glsl_meta v1
+stylize.strength: default=0.5
+stylize.tint: default=vec3(1.0, 0.8, 0.2)
+*/
+```
+
+这种旧写法现在不再推荐，建议改成“一函数一块 Meta，直接放在函数上方”。
+
+### 3. 当前支持的键
+
+#### 3.1 `default`
+
+- `float` 使用标量
+- `vec2/vec3/vec4` 使用对应构造器
+
+示例：
+
+```glsl
+strength: default=0.5
+uv_scale: default=vec2(1.0, 1.0)
+tint: default=vec3(1.0, 0.8, 0.2)
+color_a: default=vec4(1.0, 0.5, 0.2, 1.0)
+```
+
+#### 3.2 `min`
+
+用于设置输入 socket 的最小值。
+
+```glsl
+strength: min=0.0
+```
+
+#### 3.3 `max`
+
+用于设置输入 socket 的最大值。
+
+```glsl
+strength: max=1.0
+```
+
+#### 3.4 `subtype`
+
+用于设置 Blender socket subtype。
+
+`float` 常用值：
+
+- `none`
+- `unsigned`
+- `percentage`
+- `factor`
+- `mass`
+- `angle`
+- `time`
+- `time_absolute`
+- `distance`
+- `wavelength`
+
+`vec2/vec3/vec4` 常用值：
+
+- `none`
+- `factor`
+- `percentage`
+- `translation`
+- `direction`
+- `velocity`
+- `acceleration`
+- `euler`
+- `xyz`
+
+示例：
+
+```glsl
+strength: default=0.5 min=0.0 max=1.0 subtype=factor
+offset: default=vec3(0.0) subtype=translation
+normal_dir: default=vec3(0.0, 0.0, 1.0) subtype=direction
+```
+
+### 4. 行为规则
+
+#### 4.1 默认值同步规则
+
+`default` 不会在每次 redraw 时反复覆盖用户手动修改的 socket 值。
+
+当前逻辑是：
+
+- 当 Meta 内容第一次生效时，把 `default` 写入 socket 默认值
+- 只要 Meta 没变，用户手动改过的默认值会保留
+- 当 Meta 本身发生变化时，再同步一次新的默认值
+
+这意味着它更适合作为“函数作者建议值”，而不是强制锁死值。
+
+#### 4.2 `min/max/subtype` 的作用
+
+这三项属于 socket 声明的一部分，会直接影响 Blender 节点界面和 socket 类型。
+
+例如：
+
+- `subtype=factor` 会让 float 输入变成 `NodeSocketFloatFactor`
+- `subtype=xyz` 会让 vector 输入变成 `NodeSocketVectorXYZ`
+
+### 5. 当前限制
+
+当前版本有这些限制：
+
+- 只支持输入参数
+- 不支持返回值 Meta
+- 不支持 `out` 参数 Meta
+- 不支持 `inout`
+- 不支持 `sampler2D` Meta
+- 不支持 `int` / `bool` / `mat*` / `struct` / `array` 边界参数 Meta
+- 如果 Meta 指向了不存在的参数，会报错
+- 一个函数当前只支持一块 Meta
+
+### 6. 推荐写法
+
+```glsl
+/* @glsl_meta v1
+threshold: default=0.35 min=0.0 max=1.0 subtype=factor
+edge_width: default=0.08 min=0.0 max=1.0 subtype=factor
+edge_color: default=vec3(1.0, 0.5, 0.1)
+*/
+vec3 dissolve_mask(vec3 base_color, float threshold, float edge_width, vec3 edge_color)
+{
+  return base_color;
+}
+```
+
+### 7. 不推荐写法
+
+#### 7.1 旧的全局目标写法
+
+不要再写：
+
+```glsl
+/* @glsl_meta v1
+function stylize
+strength: default=0.5
+*/
+```
+
+也不要再写：
+
+```glsl
+/* @glsl_meta v1
+stylize.strength: default=0.5
+*/
+```
+
+现在更推荐也更稳定的方式，是把 Meta 直接放在函数正上方，并且块内只写参数名。
+
+#### 7.2 伪造 GLSL 形参默认值
+
+不要写：
+
+```glsl
+vec3 stylize(vec3 base_color, float strength = 0.5)
+```
+
+当前节点不会把这种写法当成 Blender 参数默认值系统。
+
+#### 7.3 给 `sampler2D` 写 Meta
+
+不要写：
+
+```glsl
+/* @glsl_meta v1
+tex: default=0.5
+*/
+vec4 sample_it(sampler2D tex, vec2 uv)
+{
+  return texture(tex, uv);
+}
+```
+
+`sampler2D` 当前由节点上的图片选择器处理，不走这个 Meta 通道。
+
+#### 7.4 给不存在的参数写 Meta
+
+不要写：
+
+```glsl
+/* @glsl_meta v1
+missing_param: default=1.0
+*/
+vec3 stylize(vec3 base_color, float strength)
+{
+  return base_color;
+}
+```
+
+这会直接触发解析错误。
+
+### 8. 给 AI 的转换建议
+
+如果你是另一个 AI，要把外部 GLSL / HLSL / ShaderLab 片段转换成 `GLSL Function` 节点可用代码：
+
+- 可以把“建议默认值”写进 Meta，而不是只写在说明文字里
+- 可以把“参数范围”写进 Meta，减少手动调节点的成本
+- 可以把 Blender 语义明确的参数标为合适 subtype
+- 不要把运行时资源、贴图选择、函数逻辑分支控制错误地塞进 Meta
+
+最稳妥的理解是：
+
+- GLSL 函数体负责算法
+- Meta 注释负责节点 UI 语义

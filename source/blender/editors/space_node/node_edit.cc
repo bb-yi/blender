@@ -2122,6 +2122,74 @@ void NODE_OT_shader_script_update(wmOperatorType *ot)
 /** \} */
 
 /* -------------------------------------------------------------------- */
+/** \name GLSL Function Refresh
+ * \{ */
+
+static bool node_glsl_function_refresh_poll(bContext *C)
+{
+  SpaceNode *snode = CTX_wm_space_node(C);
+  bNode *node = static_cast<bNode *>(
+      CTX_data_pointer_get_type(C, "node", RNA_ShaderNodeGLSLFunction).data);
+
+  if (!node && snode && snode->edittree) {
+    node = bke::node_get_active(*snode->edittree);
+  }
+
+  if (node && node->type_legacy == SH_NODE_GLSL_FUNCTION) {
+    return ED_operator_node_editable(C);
+  }
+
+  return false;
+}
+
+static wmOperatorStatus node_glsl_function_refresh_exec(bContext *C, wmOperator * /*op*/)
+{
+  SpaceNode *snode = CTX_wm_space_node(C);
+  PointerRNA nodeptr = CTX_data_pointer_get_type(C, "node", RNA_ShaderNodeGLSLFunction);
+
+  bNodeTree *ntree = nullptr;
+  bNode *node = nullptr;
+  if (nodeptr.data) {
+    ntree = id_cast<bNodeTree *>(nodeptr.owner_id);
+    node = static_cast<bNode *>(nodeptr.data);
+  }
+  else if (snode && snode->edittree) {
+    ntree = snode->edittree;
+    node = bke::node_get_active(*snode->edittree);
+  }
+
+  if (node == nullptr || ntree == nullptr || node->type_legacy != SH_NODE_GLSL_FUNCTION) {
+    return OPERATOR_CANCELLED;
+  }
+
+  if (NodeShaderGLSLFunction *data = static_cast<NodeShaderGLSLFunction *>(node->storage)) {
+    data->parse_status = SHD_GLSL_FUNCTION_PARSE_DIRTY;
+    data->signature_hash = 0;
+    data->meta_hash = 0;
+  }
+
+  BKE_ntree_update_tag_node_property(ntree, node);
+  BKE_main_ensure_invariants(*CTX_data_main(C), ntree->id);
+  WM_event_add_notifier(C, NC_NODE | NA_EDITED, &ntree->id);
+
+  return OPERATOR_FINISHED;
+}
+
+void NODE_OT_glsl_function_refresh(wmOperatorType *ot)
+{
+  ot->name = "Refresh GLSL Function Node";
+  ot->description = "Re-read the GLSL source and refresh the node sockets and status";
+  ot->idname = "NODE_OT_glsl_function_refresh";
+
+  ot->exec = node_glsl_function_refresh_exec;
+  ot->poll = node_glsl_function_refresh_poll;
+
+  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+}
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
 /** \name Node Viewer Border
  * \{ */
 
