@@ -4224,6 +4224,79 @@ static void rna_ShaderNodeScript_bytecode_set(PointerRNA *ptr, const char *value
   }
 }
 
+static void rna_ShaderNodeGLSLFunction_tag_dirty(PointerRNA *ptr)
+{
+  bNode *node = ptr->data_as<bNode>();
+  NodeShaderGLSLFunction *data = static_cast<NodeShaderGLSLFunction *>(node->storage);
+
+  if (data != nullptr) {
+    data->parse_status = SHD_GLSL_FUNCTION_PARSE_DIRTY;
+  }
+}
+
+static void rna_ShaderNodeGLSLFunction_update(Main *bmain, Scene *scene, PointerRNA *ptr)
+{
+  rna_ShaderNodeGLSLFunction_tag_dirty(ptr);
+  rna_Node_update(bmain, scene, ptr);
+}
+
+static NodeShaderGLSLFunction *rna_ShaderNodeGLSLFunction_ensure_parsed(PointerRNA *ptr)
+{
+  bNode *node = ptr->data_as<bNode>();
+  bNodeTree *ntree = reinterpret_cast<bNodeTree *>(ptr->owner_id);
+  NodeShaderGLSLFunction *data = static_cast<NodeShaderGLSLFunction *>(node->storage);
+
+  if (data == nullptr) {
+    return nullptr;
+  }
+  if (node->typeinfo != nullptr && node->typeinfo->updatefunc != nullptr && ntree != nullptr) {
+    node->typeinfo->updatefunc(ntree, node);
+  }
+  return data;
+}
+
+static int rna_ShaderNodeGLSLFunction_parse_status_get(PointerRNA *ptr)
+{
+  NodeShaderGLSLFunction *data = rna_ShaderNodeGLSLFunction_ensure_parsed(ptr);
+  return data != nullptr ? data->parse_status : SHD_GLSL_FUNCTION_PARSE_DIRTY;
+}
+
+static int rna_ShaderNodeGLSLFunction_signature_hash_get(PointerRNA *ptr)
+{
+  NodeShaderGLSLFunction *data = rna_ShaderNodeGLSLFunction_ensure_parsed(ptr);
+  return data != nullptr ? data->signature_hash : 0;
+}
+
+static void rna_ShaderNodeGLSLFunction_source_mode_set(PointerRNA *ptr, int value)
+{
+  bNode *node = ptr->data_as<bNode>();
+  NodeShaderGLSLFunction *data = static_cast<NodeShaderGLSLFunction *>(node->storage);
+
+  if (data == nullptr || data->source_mode == value) {
+    return;
+  }
+
+  data->source_mode = value;
+  data->parse_status = SHD_GLSL_FUNCTION_PARSE_DIRTY;
+  data->function_name[0] = '\0';
+
+  if (value == SHD_GLSL_FUNCTION_SOURCE_EXTERNAL) {
+    data->filepath[0] = '\0';
+
+    if (node->id != nullptr) {
+      Text *text = reinterpret_cast<Text *>(node->id);
+      if (text->filepath) {
+        STRNCPY(data->filepath, text->filepath);
+        BLI_path_abs(data->filepath, ID_BLEND_PATH_FROM_GLOBAL(&text->id));
+        BLI_path_rel(data->filepath, ID_BLEND_PATH_FROM_GLOBAL(ptr->owner_id));
+      }
+
+      id_us_min(node->id);
+      node->id = nullptr;
+    }
+  }
+}
+
 static void rna_ShaderNodeShaderInfo_lightgroup_get(PointerRNA *ptr, char *value)
 {
   bNode *node = ptr->data_as<bNode>();
@@ -4609,6 +4682,45 @@ static const EnumPropertyItem node_principled_hair_parametrization_items[] = {
 static const EnumPropertyItem node_script_mode_items[] = {
     {NODE_SCRIPT_INTERNAL, "INTERNAL", 0, "Internal", "Use internal text data-block"},
     {NODE_SCRIPT_EXTERNAL, "EXTERNAL", 0, "External", "Use external .osl or .oso file"},
+    {0, nullptr, 0, nullptr, nullptr},
+};
+
+static const EnumPropertyItem node_glsl_function_source_mode_items[] = {
+    {SHD_GLSL_FUNCTION_SOURCE_INTERNAL,
+     "INTERNAL",
+     0,
+     "Internal",
+     "Use an internal text data-block as the GLSL source"},
+    {SHD_GLSL_FUNCTION_SOURCE_EXTERNAL,
+     "EXTERNAL",
+     0,
+     "External",
+     "Use an external GLSL file path as the source"},
+    {0, nullptr, 0, nullptr, nullptr},
+};
+
+static const EnumPropertyItem node_glsl_function_parse_status_items[] = {
+    {SHD_GLSL_FUNCTION_PARSE_DIRTY,
+     "DIRTY",
+     0,
+     "Dirty",
+     "The GLSL function metadata needs to be reparsed"},
+    {SHD_GLSL_FUNCTION_PARSE_READY,
+     "READY",
+     0,
+     "Ready",
+     "The GLSL function metadata was parsed successfully"},
+    {SHD_GLSL_FUNCTION_PARSE_ERROR,
+     "ERROR",
+     0,
+     "Error",
+     "The GLSL function metadata failed to parse"},
+    {0, nullptr, 0, nullptr, nullptr},
+};
+
+static const EnumPropertyItem node_glsl_function_sampler_interpolation_items[] = {
+    {SHD_INTERP_LINEAR, "LINEAR", 0, "Linear", "Linearly interpolate between texels"},
+    {SHD_INTERP_CLOSEST, "CLOSEST", 0, "Closest", "Sample the closest texel without filtering"},
     {0, nullptr, 0, nullptr, nullptr},
 };
 
@@ -6844,6 +6956,68 @@ static void def_sh_script(BlenderRNA * /*brna*/, StructRNA *srna)
   parm = RNA_def_pointer(func, "sock", "NodeSocket", "Socket", "");
   RNA_def_parameter_flags(parm, PROP_NEVER_NULL, PARM_REQUIRED);
 #  endif
+}
+
+static void def_sh_glsl_function(BlenderRNA * /*brna*/, StructRNA *srna)
+{
+  PropertyRNA *prop;
+
+  prop = RNA_def_property(srna, "script", PROP_POINTER, PROP_NONE);
+  RNA_def_property_pointer_sdna(prop, nullptr, "id");
+  RNA_def_property_struct_type(prop, "Text");
+  RNA_def_property_flag(prop, PROP_EDITABLE | PROP_ID_REFCOUNT);
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_ui_text(prop, "Script", "Internal text data-block that defines GLSL functions");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_ShaderNodeGLSLFunction_update");
+
+  RNA_def_struct_sdna_from(srna, "NodeShaderGLSLFunction", "storage");
+
+  prop = RNA_def_property(srna, "filepath", PROP_STRING, PROP_FILEPATH);
+  RNA_def_property_ui_text(prop, "File Path", "External GLSL source path");
+  RNA_def_property_flag(prop, PROP_PATH_SUPPORTS_BLEND_RELATIVE);
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_ShaderNodeGLSLFunction_update");
+
+  prop = RNA_def_property(srna, "source_mode", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "source_mode");
+  RNA_def_property_enum_funcs(prop, nullptr, "rna_ShaderNodeGLSLFunction_source_mode_set", nullptr);
+  RNA_def_property_enum_items(prop, node_glsl_function_source_mode_items);
+  RNA_def_property_ui_text(prop, "Source", "Where the GLSL function source is loaded from");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  prop = RNA_def_property(srna, "function_name", PROP_STRING, PROP_NONE);
+  RNA_def_property_string_sdna(prop, nullptr, "function_name");
+  RNA_def_property_ui_text(prop, "Function", "Selected exported GLSL function name");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_ShaderNodeGLSLFunction_update");
+
+  prop = RNA_def_property(srna, "sampler_interpolation", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "sampler_interpolation");
+  RNA_def_property_enum_items(prop, node_glsl_function_sampler_interpolation_items);
+  RNA_def_property_ui_text(
+      prop, "Sampler Interpolation", "Filtering used for sampler2D image parameters");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_ShaderNodeGLSLFunction_update");
+
+  prop = RNA_def_property(srna, "sampler_extension", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "sampler_extension");
+  RNA_def_property_enum_items(prop, prop_image_extension);
+  RNA_def_property_ui_text(
+      prop, "Sampler Extension", "Wrapping mode used for sampler2D image parameters");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_ShaderNodeGLSLFunction_update");
+
+  prop = RNA_def_property(srna, "parse_status", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "parse_status");
+  RNA_def_property_enum_funcs(prop, "rna_ShaderNodeGLSLFunction_parse_status_get", nullptr, nullptr);
+  RNA_def_property_enum_items(prop, node_glsl_function_parse_status_items);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_ui_text(prop, "Parse Status", "Cached state of the GLSL function metadata");
+
+  prop = RNA_def_property(srna, "signature_hash", PROP_INT, PROP_UNSIGNED);
+  RNA_def_property_int_sdna(prop, nullptr, "signature_hash");
+  RNA_def_property_int_funcs(prop, "rna_ShaderNodeGLSLFunction_signature_hash_get", nullptr, nullptr);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_ui_text(
+      prop, "Signature Hash", "Cached hash for the parsed GLSL function signature");
+
+  RNA_def_struct_sdna_from(srna, "bNode", nullptr);
 }
 
 /* -- Compositor Nodes ------------------------------------------------------ */
@@ -10760,6 +10934,7 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("ShaderNode", "ShaderNodeLightInfo", def_sh_light_info);
   define("ShaderNode", "ShaderNodeFilterObjectMask", def_sh_filter_object_mask);
   define("ShaderNode", "ShaderNodeFilterObjectInfo", def_sh_filter_object_info);
+  define("ShaderNode", "ShaderNodeGLSLFunction", def_sh_glsl_function);
   define("ShaderNode", "ShaderNodeScreenspaceInfo");
   define("ShaderNode", "ShaderNodeSceneColor", def_sh_scene_color);
   define("ShaderNode", "ShaderNodeInputAOV", def_sh_input_aov);

@@ -291,7 +291,12 @@ void GPUCodegen::node_serialize(Set<StringRefNull> &used_libraries,
                                 std::stringstream &eval_ss,
                                 const GPUNode *node)
 {
-  gpu_material_library_use_function(used_libraries, node->name);
+  if (node->use_static_function) {
+    gpu_material_library_use_function(used_libraries, node->name);
+  }
+  else if (node->dependency_name[0] != '\0') {
+    used_libraries.add(node->dependency_name);
+  }
 
   auto source_reference = [&](GPUInput *input) {
     BLI_assert(ELEM(input->source, GPU_SOURCE_OUTPUT, GPU_SOURCE_ATTR));
@@ -620,6 +625,25 @@ void GPUCodegen::generate_graphs()
     for (GPUNodeGraphFunctionLink &funclink : graph.material_functions) {
       gpu_nodes_tag(&graph, funclink.outlink, GPU_NODE_TAG_FUNCTION);
     }
+  }
+
+  for (int i = 0; i < GPU_material_generated_source_count(&mat); i++) {
+    const GPUMaterialGeneratedSource *generated_source = GPU_material_generated_source_get(&mat, i);
+    if (generated_source == nullptr) {
+      continue;
+    }
+    BLI_hash_mm2a_add(
+        &hm2a_,
+        reinterpret_cast<const uchar *>(generated_source->filename.c_str()),
+        generated_source->filename.size());
+    for (const std::string &dependency : generated_source->dependencies) {
+      BLI_hash_mm2a_add(
+          &hm2a_, reinterpret_cast<const uchar *>(dependency.c_str()), dependency.size());
+    }
+    BLI_hash_mm2a_add(
+        &hm2a_,
+        reinterpret_cast<const uchar *>(generated_source->content.c_str()),
+        generated_source->content.size());
   }
 
   for (GPUMaterialAttribute &attr : graph.attributes) {

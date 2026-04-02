@@ -571,6 +571,11 @@ class NODE_MT_shader_node_utilities_base(node_add_menu.NodeMenu):
         if cycles_shader_nodes_poll(context):
             layout.separator()
             self.node_operator(layout, "ShaderNodeScript")
+        self.node_operator(
+            layout,
+            "ShaderNodeGLSLFunction",
+            poll=object_or_npr_eevee_shader_nodes_poll(context),
+        )
 
         self.draw_assets_for_catalog(layout, self.bl_label)
 

@@ -13,6 +13,8 @@
 #include "BLI_enum_flags.hh"
 #include "BLI_math_base.h"
 #include "BLI_set.hh"
+#include "BLI_span.hh"
+#include "BLI_string_ref.hh"
 
 #include "DNA_customdata_types.h" /* for eCustomDataType */
 #include "DNA_image_types.h"
@@ -200,6 +202,20 @@ bool GPU_material_has_filter_output(GPUMaterial *mat);
 int GPU_material_filter_object_info_ensure(GPUMaterial *material, Object *object);
 int GPU_material_filter_object_info_count(const GPUMaterial *material);
 Object *GPU_material_filter_object_info_get(const GPUMaterial *material, int index);
+
+struct GPUMaterialGeneratedSource {
+  std::string filename;
+  Vector<std::string> dependencies;
+  std::string content;
+};
+
+void GPU_material_generated_source_add(GPUMaterial *material,
+                                       StringRefNull filename,
+                                       Span<StringRefNull> dependencies,
+                                       StringRefNull content);
+int GPU_material_generated_source_count(const GPUMaterial *material);
+const GPUMaterialGeneratedSource *GPU_material_generated_source_get(const GPUMaterial *material,
+                                                                    int index);
 
 bool GPU_material_flag_get(const GPUMaterial *mat, eGPUMaterialFlag flag);
 
@@ -435,6 +451,12 @@ bool GPU_stack_link(GPUMaterial *mat,
                     GPUNodeStack *in,
                     GPUNodeStack *out,
                     ...);
+bool GPU_stack_link_custom(GPUMaterial *material,
+                           const bNode *bnode,
+                           StringRefNull name,
+                           StringRefNull dependency_name,
+                           GPUNodeStack *in,
+                           GPUNodeStack *out);
 
 bool GPU_stack_link_zone(GPUMaterial *material,
                          const bNode *bnode,

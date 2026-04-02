@@ -71,7 +71,10 @@ ENUM_OPERATORS(GPUNodeTag)
 struct GPUNode {
   GPUNode *next, *prev;
 
-  const char *name;
+  char name[128];
+  /* Material-local generated source key used by custom GPU nodes. */
+  char dependency_name[128];
+  bool use_static_function;
 
   /* Internal flag to mark nodes during pruning */
   GPUNodeTag tag;

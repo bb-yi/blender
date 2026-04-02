@@ -57,11 +57,13 @@ static void gpu_node_link_free(GPUNodeLink *link)
 
 /* Node Functions */
 
-static GPUNode *gpu_node_create(const char *name)
+static GPUNode *gpu_node_create(StringRefNull name, const bool use_static_function = true)
 {
   GPUNode *node = MEM_new_zeroed<GPUNode>("GPUNode");
 
-  node->name = name;
+  BLI_strncpy(node->name, name.c_str(), sizeof(node->name));
+  node->dependency_name[0] = '\0';
+  node->use_static_function = use_static_function;
   node->zone_index = -1;
   node->is_zone_end = false;
   node->skip_call = false;
@@ -864,6 +866,43 @@ bool GPU_stack_link(GPUMaterial *material,
   va_end(params);
 
   return valid;
+}
+
+bool GPU_stack_link_custom(GPUMaterial *material,
+                           const bNode *bnode,
+                           StringRefNull name,
+                           StringRefNull dependency_name,
+                           GPUNodeStack *in,
+                           GPUNodeStack *out)
+{
+  if (material == nullptr || name.is_empty()) {
+    return false;
+  }
+
+  GPUNodeGraph *graph = gpu_material_node_graph(material);
+  GPUNode *node = gpu_node_create(name, false);
+  if (!dependency_name.is_empty()) {
+    BLI_strncpy(node->dependency_name, dependency_name.c_str(), sizeof(node->dependency_name));
+  }
+
+  if (in) {
+    for (int i = 0; !in[i].end; i++) {
+      if (in[i].type != GPU_NONE) {
+        gpu_node_input_socket(material, bnode, node, &in[i], i);
+      }
+    }
+  }
+
+  if (out) {
+    for (int i = 0; !out[i].end; i++) {
+      if (out[i].type != GPU_NONE) {
+        gpu_node_output(node, out[i].type, &out[i].link);
+      }
+    }
+  }
+
+  BLI_addtail(&graph->nodes, node);
+  return true;
 }
 
 bool GPU_stack_link_zone(GPUMaterial *material,

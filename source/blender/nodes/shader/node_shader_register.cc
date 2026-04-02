@@ -52,6 +52,7 @@ void register_shader_nodes()
   register_node_type_sh_filter_object_info();
   register_node_type_sh_gamma();
   register_node_type_sh_geometry();
+  register_node_type_sh_glsl_function();
   register_node_type_sh_hair_info();
   register_node_type_sh_holdout();
   register_node_type_sh_hue_sat();

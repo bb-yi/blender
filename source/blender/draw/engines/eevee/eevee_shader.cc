@@ -24,6 +24,7 @@
 
 #include "BLI_assert.h"
 #include "BLI_math_bits.h"
+#include "BLI_set.hh"
 
 namespace blender::eevee {
 
@@ -833,6 +834,95 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   GPUCodegenOutput &codegen = *codegen_;
   ShaderCreateInfo &info = *reinterpret_cast<ShaderCreateInfo *>(codegen.create_info);
 
+  /* Material generated sources can use arbitrary per-material names, while the GPU dependency
+   * resolver only knows startup-registered files. Inline the referenced generated blocks here and
+   * keep only real library files in the dependency list. */
+  auto find_generated_source = [&](const StringRefNull filename) -> const GPUMaterialGeneratedSource * {
+    for (int i = 0; i < GPU_material_generated_source_count(gpumat); i++) {
+      const GPUMaterialGeneratedSource *generated_source = GPU_material_generated_source_get(gpumat,
+                                                                                             i);
+      if (generated_source != nullptr && generated_source->filename == filename) {
+        return generated_source;
+      }
+    }
+    return nullptr;
+  };
+
+  auto append_generated_dependency =
+      [&](auto &&self,
+          const StringRefNull dependency_name,
+          Set<StringRefNull> &r_static_dependencies,
+          Set<StringRefNull> &r_emitted_generated_sources,
+          std::stringstream &r_generated_source_block) -> void {
+    if (dependency_name.is_empty()) {
+      return;
+    }
+
+    const GPUMaterialGeneratedSource *generated_source = find_generated_source(dependency_name);
+    if (generated_source == nullptr) {
+      r_static_dependencies.add(dependency_name);
+      return;
+    }
+
+    if (!r_emitted_generated_sources.add(dependency_name)) {
+      return;
+    }
+
+    for (const std::string &generated_dependency : generated_source->dependencies) {
+      self(self,
+           StringRefNull(generated_dependency.c_str()),
+           r_static_dependencies,
+           r_emitted_generated_sources,
+           r_generated_source_block);
+    }
+
+    r_generated_source_block << generated_source->content;
+    if (!generated_source->content.empty() && generated_source->content.back() != '\n') {
+      r_generated_source_block << "\n";
+    }
+    r_generated_source_block << "\n";
+  };
+
+  auto append_graph_dependencies = [&](const Vector<StringRefNull> &dependencies,
+                                       Set<StringRefNull> &r_static_dependencies,
+                                       Set<StringRefNull> &r_emitted_generated_sources,
+                                       std::stringstream &r_generated_source_block) {
+    for (const StringRefNull dependency_name : dependencies) {
+      append_generated_dependency(append_generated_dependency,
+                                  dependency_name,
+                                  r_static_dependencies,
+                                  r_emitted_generated_sources,
+                                  r_generated_source_block);
+    }
+  };
+
+  auto finalize_dependencies = [](const Set<StringRefNull> &dependencies) {
+    Vector<StringRefNull> result;
+    result.reserve(dependencies.size());
+    for (const StringRefNull dependency_name : dependencies) {
+      result.append(dependency_name);
+    }
+    std::ranges::sort(result);
+    return result;
+  };
+
+  for (int i = 0; i < GPU_material_generated_source_count(gpumat); i++) {
+    const GPUMaterialGeneratedSource *generated_source = GPU_material_generated_source_get(gpumat,
+                                                                                           i);
+    if (generated_source == nullptr) {
+      continue;
+    }
+
+    Vector<StringRefNull> dependencies;
+    dependencies.reserve(generated_source->dependencies.size());
+    for (const std::string &dependency : generated_source->dependencies) {
+      dependencies.append(dependency.c_str());
+    }
+
+    info.generated_sources.append(
+        {generated_source->filename.c_str(), dependencies, generated_source->content});
+  }
+
   /* WORKAROUND: Add new ob attr buffer. */
   if (GPU_material_uniform_attributes(gpumat) != nullptr) {
     info.additional_info("draw_object_attributes");
@@ -1256,46 +1346,82 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
                                          (displacement_type != MAT_DISPLACEMENT_BUMP) &&
                                          !ELEM(geometry_type, MAT_GEOM_WORLD, MAT_GEOM_VOLUME);
 
+    Set<StringRefNull> generated_dependencies;
+    Set<StringRefNull> emitted_generated_sources;
+    std::stringstream generated_source_block;
+
+    if (use_vertex_displacement) {
+      generated_dependencies.add("eevee_geom_types_lib.glsl");
+      generated_dependencies.add("eevee_nodetree_lib.glsl");
+      append_graph_dependencies(codegen.displacement.dependencies,
+                                generated_dependencies,
+                                emitted_generated_sources,
+                                generated_source_block);
+    }
+
+    vert_gen << generated_source_block.str();
     vert_gen << "float3 nodetree_displacement()\n";
     vert_gen << "{\n";
     vert_gen << ((use_vertex_displacement) ? codegen.displacement.serialized :
                                              "return float3(0);\n");
     vert_gen << "}\n\n";
 
-    Vector<StringRefNull> dependencies = {};
-    if (use_vertex_displacement) {
-      dependencies.append("eevee_geom_types_lib.glsl");
-      dependencies.append("eevee_nodetree_lib.glsl");
-      dependencies.extend(codegen.displacement.dependencies);
-    }
+    Vector<StringRefNull> dependencies = use_vertex_displacement ?
+                                             finalize_dependencies(generated_dependencies) :
+                                             Vector<StringRefNull>{};
 
     info.generated_sources.append({"eevee_nodetree_vert_lib.glsl", dependencies, vert_gen.str()});
   }
 
   if (pipeline_type != MAT_PIPE_VOLUME_OCCUPANCY) {
-    Vector<StringRefNull> dependencies;
+    Set<StringRefNull> dependencies_set;
+    Set<StringRefNull> emitted_generated_sources;
+    std::stringstream generated_source_block;
     if (use_ao_node) {
-      dependencies.append("eevee_ambient_occlusion_lib.glsl");
+      dependencies_set.add("eevee_ambient_occlusion_lib.glsl");
     }
     if ((GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
          GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR_FOREACH_LIGHT)) &&
         ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD))
     {
-      dependencies.append("eevee_light_eval_lib.glsl");
+      dependencies_set.add("eevee_light_eval_lib.glsl");
     }
     if ((GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
          GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR_FOREACH_LIGHT) ||
          GPU_material_flag_get(gpumat, GPU_MATFLAG_LIGHTPROBE_ACCESS)) &&
         ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD))
     {
-      dependencies.append("eevee_lightprobe_eval_lib.glsl");
+      dependencies_set.add("eevee_lightprobe_eval_lib.glsl");
     }
-    dependencies.append("eevee_geom_types_lib.glsl");
-    dependencies.append("eevee_nodetree_lib.glsl");
+    dependencies_set.add("eevee_geom_types_lib.glsl");
+    dependencies_set.add("eevee_nodetree_lib.glsl");
 
     for (const auto &graph : codegen.material_functions) {
+      append_graph_dependencies(graph.dependencies,
+                                dependencies_set,
+                                emitted_generated_sources,
+                                generated_source_block);
+    }
+    if (!codegen.displacement.empty()) {
+      append_graph_dependencies(codegen.displacement.dependencies,
+                                dependencies_set,
+                                emitted_generated_sources,
+                                generated_source_block);
+    }
+    append_graph_dependencies(
+        codegen.surface.dependencies, dependencies_set, emitted_generated_sources, generated_source_block);
+    append_graph_dependencies(
+        codegen.npr.dependencies, dependencies_set, emitted_generated_sources, generated_source_block);
+    append_graph_dependencies(
+        codegen.filter.dependencies, dependencies_set, emitted_generated_sources, generated_source_block);
+    append_graph_dependencies(
+        codegen.thickness.dependencies, dependencies_set, emitted_generated_sources, generated_source_block);
+    append_graph_dependencies(
+        codegen.volume.dependencies, dependencies_set, emitted_generated_sources, generated_source_block);
+
+    frag_gen << generated_source_block.str();
+    for (const auto &graph : codegen.material_functions) {
       frag_gen << graph.serialized;
-      dependencies.extend(graph.dependencies);
     }
 
     if (!codegen.displacement.empty()) {
@@ -1305,7 +1431,6 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       frag_gen << "float3 nodetree_displacement()\n";
       frag_gen << "{\n";
       frag_gen << codegen.displacement.serialized;
-      dependencies.extend(codegen.displacement.dependencies);
       frag_gen << "}\n\n";
     }
 
@@ -1313,19 +1438,16 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     frag_gen << "{\n";
     frag_gen << "  closure_weights_reset(closure_rand);\n";
     frag_gen << codegen.surface.serialized_or_default("return Closure(0);\n");
-    dependencies.extend(codegen.surface.dependencies);
     frag_gen << "}\n\n";
 
     frag_gen << "float4 nodetree_npr()\n";
     frag_gen << "{\n";
     frag_gen << codegen.npr.serialized_or_default("return float4(0.0f);\n");
-    dependencies.extend(codegen.npr.dependencies);
     frag_gen << "}\n\n";
 
     frag_gen << "float4 nodetree_filter()\n";
     frag_gen << "{\n";
     frag_gen << codegen.filter.serialized_or_default("return float4(0.0f);\n");
-    dependencies.extend(codegen.filter.dependencies);
     frag_gen << "}\n\n";
 
     /* TODO(fclem): Find a way to pass material parameters inside the material UBO. */
@@ -1358,7 +1480,6 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     }
     else {
       frag_gen << codegen.thickness.serialized;
-      dependencies.extend(codegen.thickness.dependencies);
     }
     frag_gen << "}\n\n";
 
@@ -1366,9 +1487,9 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     frag_gen << "{\n";
     frag_gen << "  closure_weights_reset(0.0);\n";
     frag_gen << codegen.volume.serialized_or_default("return Closure(0);\n");
-    dependencies.extend(codegen.volume.dependencies);
     frag_gen << "}\n\n";
 
+    Vector<StringRefNull> dependencies = finalize_dependencies(dependencies_set);
     info.generated_sources.append({"eevee_nodetree_frag_lib.glsl", dependencies, frag_gen.str()});
   }
 

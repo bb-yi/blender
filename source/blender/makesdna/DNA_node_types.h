@@ -1276,6 +1276,17 @@ enum NodeSdfAxis {
   SHD_SDF_AXIS_ZYX = 5,
 };
 
+enum NodeGLSLFunctionSourceMode {
+  SHD_GLSL_FUNCTION_SOURCE_INTERNAL = 0,
+  SHD_GLSL_FUNCTION_SOURCE_EXTERNAL = 1,
+};
+
+enum NodeGLSLFunctionParseStatus {
+  SHD_GLSL_FUNCTION_PARSE_DIRTY = 0,
+  SHD_GLSL_FUNCTION_PARSE_READY = 1,
+  SHD_GLSL_FUNCTION_PARSE_ERROR = 2,
+};
+
 /* Geometry Nodes */
 
 enum GeometryNodeProximityTargetType {
@@ -2995,6 +3006,20 @@ struct NodeShaderScript {
 
   char bytecode_hash[64] = "";
   char *bytecode = nullptr;
+};
+
+struct NodeShaderGLSLFunction {
+  DNA_DEFINE_CXX_METHODS(NodeShaderGLSLFunction)
+
+  int source_mode = SHD_GLSL_FUNCTION_SOURCE_INTERNAL;
+  int parse_status = SHD_GLSL_FUNCTION_PARSE_DIRTY;
+  int flags = 0;
+  int signature_hash = 0;
+  int sampler_interpolation = SHD_INTERP_LINEAR;
+  int sampler_extension = SHD_IMAGE_EXTENSION_REPEAT;
+
+  char function_name[64] = "";
+  char filepath[/*FILE_MAX*/ 1024] = "";
 };
 
 struct NodeShaderTangent {

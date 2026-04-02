@@ -506,6 +506,10 @@ static void refresh_node(bNodeTree &ntree,
                          bool do_id_user)
 {
   if (node_decl.skip_updating_sockets) {
+    /* The declaration object may have been rebuilt even when sockets stay untouched.
+     * Clear per-socket declaration pointers so UI/runtime code never dereferences
+     * stale callbacks from the previous declaration instance. */
+    bke::node_socket_declarations_update(&node);
     return;
   }
   if (!node_decl.matches(node)) {
@@ -903,7 +907,7 @@ void node_socket_copy_default_value(bNodeSocket *to, const bNodeSocket *from)
   node_socket_init_default_value(to);
 
   /* use label instead of name if it has been set */
-  if (from->runtime->declaration->label_fn) {
+  if (from->runtime->declaration != nullptr && from->runtime->declaration->label_fn) {
     STRNCPY_UTF8(to->name, (*from->runtime->declaration->label_fn)(from->owner_node()).c_str());
   }
 
