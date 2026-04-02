@@ -116,6 +116,31 @@ static const char *node_shader_sdf_vector_op_get_name(int mode)
   return nullptr;
 }
 
+static int node_shader_sdf_vector_op_valid_operation(const int operation)
+{
+  return (node_shader_sdf_vector_op_get_name(operation) != nullptr) ? operation :
+                                                                    SHD_SDF_VEC_OP_GRID;
+}
+
+static int node_shader_sdf_vector_op_valid_axis(const int axis)
+{
+  return ELEM(axis,
+              SHD_SDF_AXIS_XYZ,
+              SHD_SDF_AXIS_XZY,
+              SHD_SDF_AXIS_YXZ,
+              SHD_SDF_AXIS_YZX,
+              SHD_SDF_AXIS_ZXY,
+              SHD_SDF_AXIS_ZYX) ?
+             axis :
+             SHD_SDF_AXIS_XYZ;
+}
+
+static void node_shader_sdf_vector_op_sanitize(NodeSdfVectorOp &sdf)
+{
+  sdf.operation = node_shader_sdf_vector_op_valid_operation(sdf.operation);
+  sdf.axis = node_shader_sdf_vector_op_valid_axis(sdf.axis);
+}
+
 static int node_shader_gpu_sdf_vector_op(GPUMaterial *mat,
                                          bNode *node,
                                          bNodeExecData * /*execdata*/,
@@ -123,14 +148,12 @@ static int node_shader_gpu_sdf_vector_op(GPUMaterial *mat,
                                          GPUNodeStack *out)
 {
   NodeSdfVectorOp *sdf = static_cast<NodeSdfVectorOp *>(node->storage);
+  node_shader_sdf_vector_op_sanitize(*sdf);
   const char *name = node_shader_sdf_vector_op_get_name(sdf->operation);
 
-  if (name != nullptr) {
-    float axis = float(sdf->axis);
-    return GPU_stack_link(mat, node, name, in, out, GPU_constant(&axis));
-  }
-
-  return 0;
+  BLI_assert(name != nullptr);
+  const float axis = float(sdf->axis);
+  return GPU_stack_link(mat, node, name, in, out, GPU_constant(&axis));
 }
 
 static void node_shader_label_sdf_vector_op(const bNodeTree * /*ntree*/,
@@ -141,7 +164,7 @@ static void node_shader_label_sdf_vector_op(const bNodeTree * /*ntree*/,
   NodeSdfVectorOp &node_storage = *static_cast<NodeSdfVectorOp *>(node->storage);
   const char *name;
   const bool enum_label = RNA_enum_name(
-      rna_enum_node_sdf_vector_op_items, node_storage.operation, &name);
+      rna_enum_node_sdf_vector_op_items, node_shader_sdf_vector_op_valid_operation(node_storage.operation), &name);
   if (!enum_label) {
     name = "Unknown SDF Vector Op";
   }
@@ -151,6 +174,7 @@ static void node_shader_label_sdf_vector_op(const bNodeTree * /*ntree*/,
 static void node_shader_update_sdf_vector_op(bNodeTree *ntree, bNode *node)
 {
   NodeSdfVectorOp *sdf = static_cast<NodeSdfVectorOp *>(node->storage);
+  node_shader_sdf_vector_op_sanitize(*sdf);
 
   bNodeSocket *sock_vector_1 = static_cast<bNodeSocket *>(BLI_findlink(&node->inputs, 0));
   bNodeSocket *sock_vector_2 = static_cast<bNodeSocket *>(BLI_findlink(&node->inputs, 1));

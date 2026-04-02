@@ -186,6 +186,16 @@ static const char *node_shader_sdf_primitive_get_name(int mode)
   return nullptr;
 }
 
+static int node_shader_sdf_primitive_valid_mode(const int mode)
+{
+  return (node_shader_sdf_primitive_get_name(mode) != nullptr) ? mode : SHD_SDF_3D_SPHERE;
+}
+
+static void node_shader_sdf_primitive_sanitize(NodeSdfPrimitive &sdf)
+{
+  sdf.mode = node_shader_sdf_primitive_valid_mode(sdf.mode);
+}
+
 static int node_shader_gpu_sdf_primitive(GPUMaterial *mat,
                                          bNode *node,
                                          bNodeExecData * /* execdata */,
@@ -195,16 +205,13 @@ static int node_shader_gpu_sdf_primitive(GPUMaterial *mat,
   node_shader_gpu_default_tex_coord(mat, node, &in[0].link);
   node_shader_gpu_tex_mapping(mat, node, in, out);
   NodeSdfPrimitive *sdf = (NodeSdfPrimitive *)node->storage;
+  node_shader_sdf_primitive_sanitize(*sdf);
 
   const char *name = node_shader_sdf_primitive_get_name(sdf->mode);
 
-  if (name != nullptr) {
-    float invert = (sdf->invert) ? 1.0f : -1.0f;
-    return GPU_stack_link(mat, node, name, in, out, GPU_constant(&invert));
-  }
-  else {
-    return 0;
-  }
+  BLI_assert(name != nullptr);
+  const float invert = (sdf->invert) ? 1.0f : -1.0f;
+  return GPU_stack_link(mat, node, name, in, out, GPU_constant(&invert));
 }
 
 static void node_shader_label_sdf_primitive(const struct bNodeTree */* ntree */,
@@ -214,7 +221,8 @@ static void node_shader_label_sdf_primitive(const struct bNodeTree */* ntree */,
 {
   NodeSdfPrimitive &node_storage = *(NodeSdfPrimitive *)node->storage;
   const char *name;
-  bool enum_label = RNA_enum_name(rna_enum_node_sdf_primitive_items, node_storage.mode, &name);
+  const int mode = node_shader_sdf_primitive_valid_mode(node_storage.mode);
+  bool enum_label = RNA_enum_name(rna_enum_node_sdf_primitive_items, mode, &name);
 
   if (!enum_label) {
     name = "Unknown SDF Primitive";
@@ -225,6 +233,7 @@ static void node_shader_label_sdf_primitive(const struct bNodeTree */* ntree */,
 static void node_shader_update_sdf_primitive(bNodeTree *ntree, bNode *node)
 {
   NodeSdfPrimitive *sdf = (NodeSdfPrimitive *)node->storage;
+  node_shader_sdf_primitive_sanitize(*sdf);
 
   bNodeSocket *sockRadius = (bNodeSocket *)BLI_findlink(&node->inputs, 2);
   bNodeSocket *sockValue1 = (bNodeSocket *)BLI_findlink(&node->inputs, 3);

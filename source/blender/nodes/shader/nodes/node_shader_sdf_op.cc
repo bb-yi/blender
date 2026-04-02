@@ -131,6 +131,16 @@ static const char *node_shader_sdf_op_get_name(int mode)
   return nullptr;
 }
 
+static int node_shader_sdf_op_valid_operation(const int operation)
+{
+  return (node_shader_sdf_op_get_name(operation) != nullptr) ? operation : SHD_SDF_OP_UNION;
+}
+
+static void node_shader_sdf_op_sanitize(NodeSdfOp &sdf)
+{
+  sdf.operation = node_shader_sdf_op_valid_operation(sdf.operation);
+}
+
 static int node_shader_gpu_sdf_op(GPUMaterial *mat,
                                   bNode *node,
                                   bNodeExecData * /* execdata */,
@@ -138,16 +148,13 @@ static int node_shader_gpu_sdf_op(GPUMaterial *mat,
                                   GPUNodeStack *out)
 {
   NodeSdfOp *sdf = (NodeSdfOp *)node->storage;
+  node_shader_sdf_op_sanitize(*sdf);
 
   const char *name = node_shader_sdf_op_get_name(sdf->operation);
 
-  if (name != nullptr) {
-    float invert = (sdf->invert) ? 1.0f : -1.0f;
-    return GPU_stack_link(mat, node, name, in, out, GPU_constant(&invert));
-  }
-  else {
-    return 0;
-  }
+  BLI_assert(name != nullptr);
+  const float invert = (sdf->invert) ? 1.0f : -1.0f;
+  return GPU_stack_link(mat, node, name, in, out, GPU_constant(&invert));
 }
 
 static void node_shader_label_sdf_op(const struct bNodeTree * /* ntree */,
@@ -157,7 +164,8 @@ static void node_shader_label_sdf_op(const struct bNodeTree * /* ntree */,
 {
   NodeSdfOp &node_storage = *(NodeSdfOp *)node->storage;
   const char *name;
-  bool enum_label = RNA_enum_name(rna_enum_node_sdf_op_items, node_storage.operation, &name);
+  const int operation = node_shader_sdf_op_valid_operation(node_storage.operation);
+  bool enum_label = RNA_enum_name(rna_enum_node_sdf_op_items, operation, &name);
   if (!enum_label) {
     name = "Unknown SDF Op";
   }
@@ -167,6 +175,7 @@ static void node_shader_label_sdf_op(const struct bNodeTree * /* ntree */,
 static void node_shader_update_sdf_op(bNodeTree *ntree, bNode *node)
 {
   NodeSdfOp *sdf = (NodeSdfOp *)node->storage;
+  node_shader_sdf_op_sanitize(*sdf);
 
   bNodeSocket *sockInputA = (bNodeSocket *)BLI_findlink(&node->inputs, 0);
   bNodeSocket *sockInputB = (bNodeSocket *)BLI_findlink(&node->inputs, 1);
