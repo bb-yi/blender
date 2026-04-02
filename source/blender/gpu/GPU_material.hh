@@ -107,6 +107,8 @@ enum eGPUMaterialFlag {
 
   /* Tells the render engine the material was just compiled or updated. */
   GPU_MATFLAG_UPDATED = (1 << 29),
+  /* Signals the material needs Eevee light-probe resources without enabling full lighting. */
+  GPU_MATFLAG_LIGHTPROBE_ACCESS = (1 << 30),
 };
 ENUM_OPERATORS(eGPUMaterialFlag);
 

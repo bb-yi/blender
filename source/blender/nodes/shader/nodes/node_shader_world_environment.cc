@@ -30,6 +30,7 @@ static int node_shader_gpu_world_environment(GPUMaterial *mat,
                                              GPUNodeStack *in,
                                              GPUNodeStack *out)
 {
+  GPU_material_flag_set(mat, GPU_MATFLAG_LIGHTPROBE_ACCESS);
   if (!in[0].link && is_zero_v3(in[0].vec)) {
     GPU_link(mat, "world_view_direction_get", &in[0].link);
   }

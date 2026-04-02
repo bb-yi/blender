@@ -16,6 +16,7 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_surf_npr)
 
 #include "draw_view_lib.glsl"
 #include "eevee_deferred_combine_lib.glsl"
+#include "eevee_lightprobe_eval_lib.glsl"
 #include "eevee_nodetree_frag_lib.glsl"
 #include "eevee_renderpass_lib.glsl"
 #include "eevee_sampling_lib.glsl"
