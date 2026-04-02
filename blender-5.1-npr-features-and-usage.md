@@ -14,6 +14,7 @@
    - `Filter Materials`
 
 2. `Eevee` 的新着色器节点
+   - `Filter Object Info`
    - `Render Info`
    - `Scene Time`
    - `Screen Derivative`
@@ -52,6 +53,7 @@
 
 6. 界面与工作流补充
    - `材质选择器预览开关`
+   - `骨骼 Outliner 隐藏`
 
 
 ## 一、Scene 级 Eevee 扩展
@@ -120,7 +122,7 @@
 2. 新建一个条目，或者直接点 `New Filter Material`。
 3. 选中的材质必须是 `Filter` 域材质。
 4. 打开 Shader Editor，把顶部 `Shader Type` 切换到 `Filter`。
-5. 在滤镜材质里使用 `Scene Color` 读取场景数据，用 `Filter Output` 输出结果。
+5. 在滤镜材质里使用 `Scene Color` 读取场景数据，也可以用 `Filter Object Info` 读取指定对象的变换 / 颜色信息。
 6. 通过 `Execution Stage` 选择滤镜执行位置。
 
 #### 重要说明
@@ -136,6 +138,48 @@
 ## 二、主要扩展节点
 
 **1. Filter 域节点**
+
+### Filter Object Info
+
+#### 入口
+
+`Add > Input > Filter Object Info`
+
+仅在 `Filter` 域下可用。
+
+<div align="center">
+  <img src="docs/images/SnowShot_2026-04-01_20-29-09.png" alt="Filter Object Info" style="border-radius: 10px;">
+  <br>
+</div>
+
+#### 作用
+
+读取指定对象的世界空间变换和视口显示颜色，方便在 `Filter Materials` 中做基于对象状态的全屏滤镜控制。
+
+它适合用来驱动遮罩中心、方向性渐变、跟随控制物体的位置特效，或者直接把对象颜色当作滤镜参数输入。
+
+#### 节点设置
+
+- 节点面板内可以指定一个 `Object`
+
+#### 输出
+
+- `Location`
+- `Rotation`
+- `Scale`
+- `Color`
+
+#### 输出说明
+
+- `Location`：所选对象的世界空间位置
+- `Rotation`：所选对象的世界空间欧拉旋转，单位为弧度
+- `Scale`：所选对象的世界空间缩放
+- `Color`：所选对象的视口显示颜色
+
+#### 说明
+
+- 这里读取的是指定对象的数据，不是当前正在被滤镜处理的对象
+- 如果没有指定对象，会输出默认值：位置 / 旋转 / 颜色为 `0`，缩放为 `1`
 
 ### Scene Color
 
@@ -867,6 +911,33 @@
 
 - `版本号 + npr post + 构建日期`
 - 例如：`5.1.0 npr post 2026-03-27`
+
+### 4. 骨骼 Outliner 隐藏
+
+#### 作用
+
+为每个 `Pose Bone` 增加单独的 Outliner 隐藏标记，用来整理复杂绑定的层级显示。
+
+它适合把机制骨、辅助骨或不需要频繁查看的控制层从 Outliner 中隐藏，只保留更重要的骨架结构。
+
+#### 入口
+
+- `Bone Properties > Viewport Display > Hide in Outliner`
+- `Outliner > Filter > Hidden PoseBones`
+
+#### 行为说明
+
+- 每个 `Pose Bone` 都有自己的 `Hide in Outliner` 开关。
+- 这个开关默认是开启的。
+- `Outliner` 里的 `Hidden PoseBones` 过滤项默认也是开启的，所以默认不会立刻改变现有骨架的显示结果。
+- 当关闭 `Outliner > Filter > Hidden PoseBones` 后，勾选了 `Hide in Outliner` 的姿态骨骼会从 Outliner 树中隐藏。
+- 如果某个被隐藏的父骨骼仍然有可见子骨骼，可见子骨骼会继续保留在树里，不会整支层级一起消失。
+
+#### 当前范围
+
+- 当前只作用于 `Pose Bone`
+- 不作用于 `Edit Bone`
+- 只改变 `Outliner` 的层级显示，不影响骨骼的变换、动画、驱动器和渲染结果
 
 
 ## 五、当前限制与注意事项
