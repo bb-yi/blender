@@ -1287,6 +1287,12 @@ enum NodeGLSLFunctionParseStatus {
   SHD_GLSL_FUNCTION_PARSE_ERROR = 2,
 };
 
+enum NodeFilterMaskMode {
+  SHD_FILTER_MASK_SINGLE_OBJECT = 0,
+  SHD_FILTER_MASK_OBJECT_LIST = 1,
+  SHD_FILTER_MASK_COLLECTION = 2,
+};
+
 /* Geometry Nodes */
 
 enum GeometryNodeProximityTargetType {
@@ -2856,6 +2862,18 @@ struct NodeTexMagic {
   NodeTexBase base;
   int depth = 0;
   char _pad[4] = {};
+};
+
+struct NodeFilterMaskItem {
+  struct Object *object = nullptr;
+};
+
+struct NodeFilterMask {
+  DNA_DEFINE_CXX_METHODS(NodeFilterMask)
+
+  NodeFilterMaskItem *items = nullptr;
+  int items_num = 0;
+  int active_index = 0;
 };
 
 struct NodeShaderAttribute {

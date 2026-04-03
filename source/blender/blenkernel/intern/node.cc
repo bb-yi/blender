@@ -397,6 +397,13 @@ void node_node_foreach_id(bNode *node, LibraryForeachIDData *data)
 {
   BKE_LIB_FOREACHID_PROCESS_ID(data, node->id, IDWALK_CB_USER);
 
+  if (node->type_legacy == SH_NODE_FILTER_OBJECT_MASK && node->storage != nullptr) {
+    NodeFilterMask *storage = static_cast<NodeFilterMask *>(node->storage);
+    for (NodeFilterMaskItem &item : MutableSpan(storage->items, storage->items_num)) {
+      BKE_LIB_FOREACHID_PROCESS_ID(data, reinterpret_cast<ID *&>(item.object), IDWALK_CB_USER);
+    }
+  }
+
   BKE_LIB_FOREACHID_PROCESS_FUNCTION_CALL(
       data, IDP_foreach_property(node->prop, IDP_TYPE_FILTER_ID, [&](IDProperty *prop) {
         BKE_lib_query_idpropertiesForeachIDLink_callback(prop, data);

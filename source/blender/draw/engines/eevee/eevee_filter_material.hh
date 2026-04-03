@@ -28,6 +28,7 @@ namespace blender::eevee {
 
 using namespace draw;
 using FilterObjectInfoBuf = draw::UniformArrayBuffer<FilterObjectInfoData, FILTER_OBJECT_INFO_MAX>;
+using FilterMaskHashBuf = draw::UniformArrayBuffer<FilterMaskHashData, FILTER_MASK_HASH_MAX>;
 
 class Instance;
 
@@ -46,6 +47,7 @@ class FilterMaterialModule {
   Texture ping_tx_ = {"FilterMaterial.Ping"};
   Texture pong_tx_ = {"FilterMaterial.Pong"};
   FilterObjectInfoBuf filter_object_info_buf_ = {"FilterObjectInfoBuf"};
+  FilterMaskHashBuf filter_mask_hash_buf_ = {"FilterMaskHashBuf"};
   bool uses_scene_depth_ = false;
   bool uses_scene_normal_ = false;
   bool uses_scene_position_ = false;
@@ -53,6 +55,7 @@ class FilterMaterialModule {
   bool uses_scene_time_ = false;
 
   void update_filter_object_info_buffer(GPUMaterial *gpumat);
+  void update_filter_mask_hash_buffer(GPUMaterial *gpumat);
 
  public:
   FilterMaterialModule(Instance &inst) : inst_(inst) {}

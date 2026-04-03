@@ -301,6 +301,7 @@
 #define PLANAR_PROBE_BUF_SLOT 4
 #define WORLD_SUNLIGHT_BUF_SLOT 6
 #define FILTER_OBJECT_INFO_BUF_SLOT 7
+#define FILTER_MASK_HASH_BUF_SLOT 9
 /* Only during pre-pass. */
 #define VELOCITY_CAMERA_PREV_BUF 2
 #define VELOCITY_CAMERA_CURR_BUF 3
@@ -346,6 +347,7 @@
 
 #define RENDER_TEXTURE_SLOT_MAX 4
 #define FILTER_OBJECT_INFO_MAX 32
+#define FILTER_MASK_HASH_MAX 128
 
 /* Cannot use math libraries in shared headers yet. */
 #define EEVEE_PI 3.14159265358979323846f /* pi */

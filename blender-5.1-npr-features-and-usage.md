@@ -139,6 +139,59 @@
 
 **1. Filter 域节点**
 
+### Filter Mask
+
+#### 入口
+
+`Add > Input > Filter Mask`
+
+仅在 `Filter` 域下可用。
+
+#### 作用
+
+在 `Filter Materials` 中基于 Eevee 的对象 `Cryptomatte` 数据快速生成对象遮罩。
+
+现在同一个节点已经支持三种选择方式：
+
+- `Single Object`
+- `Object List`
+- `Collection`
+
+它适合直接做指定角色、道具、前景组或集合范围内的局部滤镜，而不再需要堆很多个单对象节点后再手动用 `Max` 合并。
+
+#### 模式说明
+
+- `Single Object`
+  - 选择单个对象，输出该对象的遮罩
+- `Object List`
+  - 维护一个对象列表
+  - 支持 `Use Selection` 和 `Append Selection`
+  - 适合临时组合多个零散对象
+- `Collection`
+  - 选择一个集合
+  - 会递归匹配集合中的对象
+  - 适合角色组、道具组、前景组这类批量目标
+
+#### 输出
+
+- `Mask`
+- `Color`
+
+#### 输出说明
+
+- `Mask`
+  - 0 到 1 的浮点遮罩
+  - 适合直接接到 `Mix`、阈值、乘法、透明度、滤镜强度等因子输入
+- `Color`
+  - 遮罩的灰度预览输出
+  - 适合直接接到 `Filter Output > Color` 检查遮罩范围
+
+#### 使用建议
+
+- 真正做效果时，优先使用 `Mask` 作为混合因子
+- 调试遮罩范围时，可以先把 `Color` 直接接到 `Filter Output`
+- `Object List` 是当前最灵活的工作流，尤其适合快速从当前选择集生成遮罩
+
 ### Filter Object Info
 
 #### 入口
@@ -196,10 +249,8 @@
 - `Color`
 - `Depth`
 - `Normal`
-- `Shadow`
 - `Position`
 
-`Shadow` 会读取 Eevee 的阴影渲染通道，输出 0-1 灰度阴影值，可直接用于 Toon 分层、阈值、混合等滤镜处理。
 `Position` 会读取 Eevee 的世界空间位置通道，输出全局坐标。
 
 #### 输入输出

@@ -202,6 +202,9 @@ bool GPU_material_has_filter_output(GPUMaterial *mat);
 int GPU_material_filter_object_info_ensure(GPUMaterial *material, Object *object);
 int GPU_material_filter_object_info_count(const GPUMaterial *material);
 Object *GPU_material_filter_object_info_get(const GPUMaterial *material, int index);
+int GPU_material_filter_mask_object_append(GPUMaterial *material, Object *object);
+int GPU_material_filter_mask_object_count(const GPUMaterial *material);
+Object *GPU_material_filter_mask_object_get(const GPUMaterial *material, int index);
 
 struct GPUMaterialGeneratedSource {
   std::string filename;

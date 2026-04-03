@@ -41,6 +41,13 @@ static FilterObjectInfoData filter_object_info_default()
   return data;
 }
 
+static FilterMaskHashData filter_mask_hash_default()
+{
+  FilterMaskHashData data;
+  data.metadata = float4(0.0f);
+  return data;
+}
+
 static bool filter_material_is_valid(blender::Material *material)
 {
   return material != nullptr && material->eevee_domain == MA_EEVEE_DOMAIN_FILTER &&
@@ -171,6 +178,29 @@ void FilterMaterialModule::update_filter_object_info_buffer(GPUMaterial *gpumat)
   filter_object_info_buf_.push_update();
 }
 
+void FilterMaterialModule::update_filter_mask_hash_buffer(GPUMaterial *gpumat)
+{
+  for (FilterMaskHashData &entry : filter_mask_hash_buf_) {
+    entry = filter_mask_hash_default();
+  }
+
+  const int material_object_count = GPU_material_filter_mask_object_count(gpumat);
+  const int object_count = (material_object_count < FILTER_MASK_HASH_MAX) ? material_object_count :
+                                                                      FILTER_MASK_HASH_MAX;
+  for (int index = 0; index < object_count; index++) {
+    Object *object = GPU_material_filter_mask_object_get(gpumat, index);
+    if (object == nullptr) {
+      continue;
+    }
+
+    const char *name = object->id.name + 2;
+    const uint32_t hash = BKE_cryptomatte_hash(name, int(std::strlen(name)));
+    filter_mask_hash_buf_[index].metadata = float4(BKE_cryptomatte_hash_to_float(hash), 0.0f, 0.0f, 0.0f);
+  }
+
+  filter_mask_hash_buf_.push_update();
+}
+
 void FilterMaterialModule::begin_sync()
 {
   entries_.clear();
@@ -252,6 +282,7 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
     pass.state_set(DRW_STATE_WRITE_COLOR);
     pass.framebuffer_set(&framebuffer_);
     update_filter_object_info_buffer(entries_[entry_index].gpumat);
+    update_filter_mask_hash_buffer(entries_[entry_index].gpumat);
     pass.material_set(*inst_.manager, entries_[entry_index].gpumat);
     pass.bind_texture("scene_color_tx", &scene_color_tx);
     pass.bind_texture("rp_color_tx", &inst_.render_buffers.rp_color_tx);
@@ -260,6 +291,7 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
     pass.bind_texture("cryptomatte_tx", &inst_.render_buffers.cryptomatte_tx);
     pass.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);
     pass.bind_ubo(FILTER_OBJECT_INFO_BUF_SLOT, &filter_object_info_buf_);
+    pass.bind_ubo(FILTER_MASK_HASH_BUF_SLOT, &filter_mask_hash_buf_);
     pass.bind_resources(inst_.uniform_data);
     pass.bind_resources(inst_.sampling);
     pass.bind_resources(inst_.render_textures);

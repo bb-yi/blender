@@ -10,6 +10,10 @@
 - 新增 `World To Tangent` 节点。
   - 位置：`Add > Utilities > Vector > World To Tangent`
   - 可将世界空间方向向量转换为当前表面的切线空间方向，支持指定 `UV Map` 作为切线基底。
+- `Filter Object Mask` 升级为统一的 `Filter Mask` 节点。
+  - 支持 `Single Object`、`Object List`、`Collection`
+  - `Object List` 支持 `Use Selection` / `Append Selection`
+  - 新增灰度 `Color` 输出，方便直接预览遮罩范围
 - `Shader Info` 节点新增整数 `Lightgroup` 属性。
   - 只有灯光 `Lightgroup ID` 与节点一致时，该灯光才会参与 `Shader Info` 的直接光照与阴影计算。
 - Eevee 灯光数据新增 `Lightgroup ID` 属性。
@@ -20,6 +24,8 @@
   - 可控制材质下拉列表是否渲染材质预览图，关闭后改为普通材质图标以减少列表展开时的预览渲染开销。
 
 #### 修复与改进
+- 修复 `Filter Mask` 在切换到 `Object List` 模式时的节点界面崩溃问题。
+- 修复 `Filter Mask` 多对象 / 集合遮罩工作流，减少必须手动堆叠 `Max` 节点的操作。
 - 修复 `Shader Info > Ambient Lighting` 在 Volume 光照探头场景下使用面法线取样的问题。
   - 现在会使用平滑后的表面法线做 probe 取样，减少模型表面出现“平直着色/分面感”的间接光照结果。
 - 调整 `Shader Info` 灯光组界面与兼容逻辑。
