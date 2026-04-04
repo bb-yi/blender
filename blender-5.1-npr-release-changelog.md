@@ -13,7 +13,7 @@
 - `Filter Object Mask` 升级为统一的 `Filter Mask` 节点。
   - 支持 `Single Object`、`Object List`、`Collection`
   - `Object List` 支持 `Use Selection` / `Append Selection`
-  - 新增灰度 `Color` 输出，方便直接预览遮罩范围
+  - 输出精简为单一 `Mask`
 - `Shader Info` 节点新增整数 `Lightgroup` 属性。
   - 只有灯光 `Lightgroup ID` 与节点一致时，该灯光才会参与 `Shader Info` 的直接光照与阴影计算。
 - Eevee 灯光数据新增 `Lightgroup ID` 属性。
@@ -26,6 +26,9 @@
 #### 修复与改进
 - 修复 `Filter Mask` 在切换到 `Object List` 模式时的节点界面崩溃问题。
 - 修复 `Filter Mask` 多对象 / 集合遮罩工作流，减少必须手动堆叠 `Max` 节点的操作。
+- 修复 `Filter Mask` 在集合成员变化后遮罩不会立即刷新的问题。
+- 修复 `Filter Mask` 可错误选择摄像机、灯光等非几何对象的问题。
+- 修复 `Filter Mask` 在视图层删除对象后仍保留失效引用的问题。
 - 修复 `Shader Info > Ambient Lighting` 在 Volume 光照探头场景下使用面法线取样的问题。
   - 现在会使用平滑后的表面法线做 probe 取样，减少模型表面出现“平直着色/分面感”的间接光照结果。
 - 调整 `Shader Info` 灯光组界面与兼容逻辑。

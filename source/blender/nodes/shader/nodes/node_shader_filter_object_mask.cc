@@ -10,6 +10,7 @@
 
 #include "BKE_collection.hh"
 #include "BKE_context.hh"
+#include "BKE_lib_id.hh"
 
 #include "DNA_collection_types.h"
 #include "DNA_node_types.h"
@@ -61,8 +62,17 @@ struct FilterMaskItemsAccessor : public socket_items::SocketItemsAccessorDefault
   static void copy_item(const NodeFilterMaskItem &src, NodeFilterMaskItem &dst)
   {
     dst.object = src.object;
+    if (dst.object != nullptr && BKE_id_is_in_global_main(reinterpret_cast<ID *>(dst.object))) {
+      id_us_plus(reinterpret_cast<ID *>(dst.object));
+    }
   }
-  static void destruct_item(NodeFilterMaskItem * /*item*/) {}
+  static void destruct_item(NodeFilterMaskItem *item)
+  {
+    if (item->object != nullptr && BKE_id_is_in_global_main(reinterpret_cast<ID *>(item->object))) {
+      id_us_min(reinterpret_cast<ID *>(item->object));
+    }
+    item->object = nullptr;
+  }
   static void blend_write_item(BlendWriter * /*writer*/, const ItemT & /*item*/) {}
   static void blend_read_data_item(BlendDataReader * /*reader*/, ItemT & /*item*/) {}
   static void init(bNode & /*node*/, NodeFilterMaskItem &item)
@@ -104,28 +114,16 @@ static Collection *collection_from_node_id(const bNode &node)
              nullptr;
 }
 
-static const EnumPropertyItem filter_mask_mode_items[] = {
-    {SHD_FILTER_MASK_SINGLE_OBJECT, "OBJECT", 0, "Single Object", "Mask a single object"},
-    {SHD_FILTER_MASK_OBJECT_LIST,
-     "OBJECT_LIST",
-     0,
-     "Object List",
-     "Mask any object contained in the list"},
-    {SHD_FILTER_MASK_COLLECTION,
-     "COLLECTION",
-     0,
-     "Collection",
-     "Mask any object contained in the selected collection"},
-    {0, nullptr, 0, nullptr, nullptr},
-};
+static bool filter_mask_object_supported(const Object *object)
+{
+  return object != nullptr && OB_TYPE_IS_GEOMETRY(object->type);
+}
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
   b.add_output<decl::Float>("Mask")
       .description("Mask pixels that belong to the selected object set using Eevee Cryptomatte data");
-  b.add_output<decl::Color>("Color")
-      .description("Grayscale preview of the mask for direct visualization");
 }
 
 static void draw_filter_mask_list_item(uiList * /*ui_list*/,
@@ -246,10 +244,10 @@ static void node_shader_buts_filter_object_mask(ui::Layout &layout, bContext *C,
 
 static void append_mask_object(GPUMaterial *mat, Object *object, int &r_count)
 {
-  if (object == nullptr) {
+  if (!filter_mask_object_supported(object)) {
     return;
   }
-  if (GPU_material_filter_mask_object_append(mat, object) != -1) {
+  if (GPU_material_filter_object_info_ensure(mat, object) != -1) {
     r_count++;
   }
 }
@@ -260,15 +258,25 @@ static int node_shader_gpu_filter_object_mask(GPUMaterial *mat,
                                               GPUNodeStack * /*in*/,
                                               GPUNodeStack *out)
 {
-  int range_count = 0;
-  const float range_start = float(GPU_material_filter_mask_object_count(mat));
   const NodeFilterMaskMode mode = NodeFilterMaskMode(node->custom1);
+  if (mode == SHD_FILTER_MASK_SINGLE_OBJECT) {
+    Object *object = object_from_node_id(*node);
+    const float object_index = float(
+        filter_mask_object_supported(object) ? GPU_material_filter_object_info_ensure(mat, object) :
+                                               -1);
+    return GPU_stack_link(
+        mat, node, "node_filter_object_mask", nullptr, out, GPU_constant(&object_index));
+  }
+
+  GPUNodeLink *mask_link = nullptr;
+  GPU_link(mat, "set_value_zero", &mask_link);
+
+  const float zero = 0.0f;
+  const float one = 1.0f;
 
   switch (mode) {
-    case SHD_FILTER_MASK_SINGLE_OBJECT: {
-      append_mask_object(mat, object_from_node_id(*node), range_count);
+    case SHD_FILTER_MASK_SINGLE_OBJECT:
       break;
-    }
     case SHD_FILTER_MASK_OBJECT_LIST: {
       if (NodeFilterMask *node_storage = storage(*node)) {
         Set<Object *> unique_objects;
@@ -277,7 +285,16 @@ static int node_shader_gpu_filter_object_mask(GPUMaterial *mat,
           if (object == nullptr || !unique_objects.add(object)) {
             continue;
           }
-          append_mask_object(mat, object, range_count);
+          const float object_index = float(GPU_material_filter_object_info_ensure(mat, object));
+          GPUNodeLink *object_mask_link = nullptr;
+          GPU_link(mat,
+                   "node_filter_object_mask",
+                   GPU_constant(&object_index),
+                   &object_mask_link);
+          GPU_link(
+              mat, "math_add", mask_link, object_mask_link, GPU_constant(&zero), &mask_link);
+          GPU_link(
+              mat, "clamp_value", mask_link, GPU_constant(&zero), GPU_constant(&one), &mask_link);
         }
       }
       break;
@@ -289,7 +306,16 @@ static int node_shader_gpu_filter_object_mask(GPUMaterial *mat,
           if (object == nullptr || !unique_objects.add(object)) {
             continue;
           }
-          append_mask_object(mat, object, range_count);
+          const float object_index = float(GPU_material_filter_object_info_ensure(mat, object));
+          GPUNodeLink *object_mask_link = nullptr;
+          GPU_link(mat,
+                   "node_filter_object_mask",
+                   GPU_constant(&object_index),
+                   &object_mask_link);
+          GPU_link(
+              mat, "math_add", mask_link, object_mask_link, GPU_constant(&zero), &mask_link);
+          GPU_link(
+              mat, "clamp_value", mask_link, GPU_constant(&zero), GPU_constant(&one), &mask_link);
         }
         FOREACH_COLLECTION_OBJECT_RECURSIVE_END;
       }
@@ -297,14 +323,8 @@ static int node_shader_gpu_filter_object_mask(GPUMaterial *mat,
     }
   }
 
-  const float range_count_value = float(range_count);
-  return GPU_stack_link(mat,
-                        node,
-                        "node_filter_object_mask",
-                        nullptr,
-                        out,
-                        GPU_constant(&range_start),
-                        GPU_constant(&range_count_value));
+  out[0].link = mask_link;
+  return true;
 }
 
 static void node_init(bNodeTree * /*ntree*/, bNode *node)
@@ -377,11 +397,14 @@ static wmOperatorStatus filter_mask_items_from_selection_exec(bContext *C, wmOpe
   }
 
   CTX_DATA_BEGIN (C, Object *, object, selected_objects) {
-    if (object == nullptr || existing_objects.contains(object)) {
+    if (!filter_mask_object_supported(object) || existing_objects.contains(object)) {
       continue;
     }
     NodeFilterMaskItem *item = socket_items::add_item<FilterMaskItemsAccessor>(node);
     item->object = object;
+    if (item->object != nullptr && BKE_id_is_in_global_main(reinterpret_cast<ID *>(item->object))) {
+      id_us_plus(reinterpret_cast<ID *>(item->object));
+    }
     existing_objects.add(object);
   }
   CTX_DATA_END;
@@ -427,7 +450,8 @@ void register_node_type_sh_filter_object_mask()
   ntype.ui_description =
       "Create fast Eevee filter masks from a single object, an object list, or a collection using Cryptomatte data";
   ntype.nclass = NODE_CLASS_INPUT;
-  bke::node_type_storage(ntype, "NodeFilterMask", file_ns::node_free_storage, file_ns::node_copy_storage);
+  bke::node_type_storage(
+      ntype, "NodeFilterMask", file_ns::node_free_storage, file_ns::node_copy_storage);
   ntype.declare = file_ns::node_declare;
   ntype.initfunc = file_ns::node_init;
   ntype.draw_buttons = file_ns::node_shader_buts_filter_object_mask;
