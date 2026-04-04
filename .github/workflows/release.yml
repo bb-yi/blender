@@ -15,6 +15,9 @@ jobs:
   build-windows:
     name: Build Windows x64
     runs-on: windows-2025
+    permissions:
+      contents: read
+      actions: write
     steps:
       - uses: actions/checkout@v6
         with:
@@ -27,11 +30,16 @@ jobs:
           echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
           echo "build_date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
 
-      - name: Install Build Tools
-        shell: powershell
+      - name: sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Configure sccache
+        shell: bash
         run: |
-          if (!(Get-Command cmake -ErrorAction SilentlyContinue)) { choco install cmake --confirm }
-          if (!(Get-Command ninja -ErrorAction SilentlyContinue)) { choco install ninja --confirm }
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL}" >> $GITHUB_ENV
+          echo "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN}" >> $GITHUB_ENV
+          sccache --zero-stats
 
       - name: Setup Git LFS
         run: |
@@ -53,7 +61,13 @@ jobs:
 
       - name: Build Blender Release
         shell: cmd
-        run: call make.bat release builddir build_windows_release ninja
+        run: call make.bat release builddir build_windows_release ninja sccache
+
+      - name: sccache cleanup
+        shell: bash
+        run: |
+          sccache --show-stats
+          sccache --stop-server
 
       - name: Package Release Asset
         shell: pwsh
@@ -77,6 +91,9 @@ jobs:
   build-linux:
     name: Build Linux x64
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: write
     steps:
       - uses: actions/checkout@v6
         with:
@@ -97,6 +114,17 @@ jobs:
           sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100
           sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100
 
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ runner.os }}-ccache-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-ccache-
+          max-size: 5G
+
+      - name: Zero ccache stats
+        run: ccache -z
+
       - name: Setup Git LFS
         run: |
           git config lfs.url "https://projects.blender.org/blender/blender.git/info/lfs"
@@ -112,7 +140,12 @@ jobs:
           curl -L -o assets/nodes/npr_node_groups.blend https://github.com/bb-yi/blender/raw/refs/heads/npr-port-5.1/assets/nodes/npr_node_groups.blend
 
       - name: Build Blender Release
-        run: make release ninja
+        run: make release ninja ccache
+
+      - name: ccache cleanup
+        run: |
+          ccache -s
+          ccache --cleanup
 
       - name: Package Release Asset
         run: |
@@ -134,6 +167,9 @@ jobs:
   build-macos:
     name: Build macOS
     runs-on: macos-latest
+    permissions:
+      contents: read
+      actions: write
     steps:
       - uses: actions/checkout@v6
         with:
@@ -145,8 +181,16 @@ jobs:
           echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
           echo "build_date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
 
-      - name: Install Build Tools
-        run: brew install cmake ninja
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ runner.os }}-ccache-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-ccache-
+          max-size: 5G
+
+      - name: Zero ccache stats
+        run: ccache -z
 
       - name: Setup Git LFS
         run: |
@@ -163,7 +207,12 @@ jobs:
           curl -L -o assets/nodes/npr_node_groups.blend https://github.com/bb-yi/blender/raw/refs/heads/npr-port-5.1/assets/nodes/npr_node_groups.blend
 
       - name: Build Blender Release
-        run: make release ninja
+        run: make release ninja ccache
+
+      - name: ccache cleanup
+        run: |
+          ccache -s
+          ccache --cleanup
 
       - name: Package Release Asset
         run: |
