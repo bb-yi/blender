@@ -155,7 +155,11 @@ jobs:
           ASSET_NAME="blender-$VERSION-npr-port-linux64-$HASH-$DATE"
           TAR_FILE="$ASSET_NAME.tar.xz"
           BUILD_DIR="../build_linux_release/bin"
-          tar -cvJf "$TAR_FILE" -C "$BUILD_DIR" .
+          
+          mkdir -p "$ASSET_NAME"
+          cp -r "$BUILD_DIR"/* "$ASSET_NAME/"
+          
+          tar -cvJf "$TAR_FILE" "$ASSET_NAME"
           echo "TAR_PATH=$TAR_FILE" >> $GITHUB_ENV
 
       - name: Upload Linux Artifact
