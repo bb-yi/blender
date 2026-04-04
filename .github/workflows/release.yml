@@ -77,7 +77,7 @@ jobs:
           $DATE = "${{ steps.vars.outputs.build_date }}"
           $ASSET_NAME = "blender-$VERSION-npr-port-win64-$HASH-$DATE"
           $ZIP_FILE = "$ASSET_NAME.zip"
-          $BUILD_DIR = "..\build_windows_release\bin\Release"
+          $BUILD_DIR = "..\build_windows_release\bin"
           Write-Host "Packaging from $BUILD_DIR to $ZIP_FILE"
           Compress-Archive -Path "$BUILD_DIR\*" -DestinationPath $ZIP_FILE
           echo "ZIP_PATH=$ZIP_FILE" >> $env:GITHUB_ENV
