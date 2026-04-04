@@ -337,11 +337,18 @@ def blender_update(args: argparse.Namespace) -> str:
 def blender_lfs_update(args: argparse.Namespace) -> None:
     print_stage("Updating Blender Git LFS")
 
+    import subprocess
     # This seems to be required some times, e.g. on initial checkout from third party, non-lfs repository
     # (like the github one). The fallback repository set by `lfs_fallback_setup` is fetched, but running the
     # `update_command` above does not seem to do the actual checkout for these LFS-managed files.
     update_lfs_command = [args.git_command, "lfs", "pull"]
-    call(update_lfs_command)
+    result = subprocess.run(update_lfs_command, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"Warning: Blender Git LFS pull failed with exit code {result.returncode}")
+        if result.stderr:
+            print(f"Error details:\n{result.stderr}")
+    else:
+        print("Blender Git LFS updated successfully.")
 
 
 def resolve_external_url(blender_url: str, repo_name: str) -> str:
@@ -660,7 +667,15 @@ def lfs_fallback_setup(args: argparse.Namespace) -> None:
         make_utils.git_add_remote(args.git_command, fallback_remote, url, push_url)
 
         # Fetch potentially missing files.
-        call((args.git_command, "lfs", "fetch", fallback_remote))
+        import subprocess
+        fetch_cmd = (args.git_command, "lfs", "fetch", fallback_remote)
+        result = subprocess.run(fetch_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"Warning: Git LFS fetch from {fallback_remote} failed with exit code {result.returncode}")
+            if result.stderr:
+                print(f"Error details:\n{result.stderr}")
+        else:
+            print(f"LFS files fetched from {fallback_remote} successfully.")
 
 
 def main() -> int:

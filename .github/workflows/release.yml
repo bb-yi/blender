@@ -1,0 +1,234 @@
+name: Blender NPR Port Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag name for the release'
+        required: false
+        default: ''
+
+jobs:
+  build-windows:
+    name: Build Windows x64
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Get Short Hash & Date
+        id: vars
+        shell: bash
+        run: |
+          echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "build_date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
+
+      - name: Install Build Tools
+        shell: powershell
+        run: |
+          if (!(Get-Command cmake -ErrorAction SilentlyContinue)) { choco install cmake --confirm }
+          if (!(Get-Command ninja -ErrorAction SilentlyContinue)) { choco install ninja --confirm }
+
+      - name: Setup Git LFS
+        run: |
+          git config lfs.url "https://projects.blender.org/blender/blender.git/info/lfs"
+          git config lfs.remote.searchall false
+          git lfs install
+
+      - name: Blender Make Update
+        shell: bash
+        run: |
+          git submodule update --init --progress lib/windows_x64
+          python build_files/utils/make_update.py
+
+      - name: Download Extra Assets
+        shell: bash
+        run: |
+          curl -L -o release/datafiles/splash.png https://github.com/bb-yi/blender/raw/refs/heads/npr-port-5.1/release/datafiles/splash.png
+          curl -L -o assets/nodes/npr_node_groups.blend https://github.com/bb-yi/blender/raw/refs/heads/npr-port-5.1/assets/nodes/npr_node_groups.blend
+
+      - name: Build Blender Release
+        shell: cmd
+        run: call make.bat release builddir build_windows_release ninja
+
+      - name: Package Release Asset
+        shell: pwsh
+        run: |
+          $VERSION = "5.1.0"
+          $HASH = "${{ steps.vars.outputs.sha_short }}"
+          $DATE = "${{ steps.vars.outputs.build_date }}"
+          $ASSET_NAME = "blender-$VERSION-npr-port-win64-$HASH-$DATE"
+          $ZIP_FILE = "$ASSET_NAME.zip"
+          $BUILD_DIR = "..\build_windows_release\bin\Release"
+          Write-Host "Packaging from $BUILD_DIR to $ZIP_FILE"
+          Compress-Archive -Path "$BUILD_DIR\*" -DestinationPath $ZIP_FILE
+          echo "ZIP_PATH=$ZIP_FILE" >> $env:GITHUB_ENV
+
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-asset
+          path: ${{ env.ZIP_PATH }}
+
+  build-linux:
+    name: Build Linux x64
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Get Short Hash & Date
+        id: vars
+        run: |
+          echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "build_date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt install build-essential subversion cmake libx11-dev libxxf86vm-dev libxcursor-dev libxi-dev libxrandr-dev libxinerama-dev libegl-dev
+          sudo apt install libwayland-dev wayland-protocols libxkbcommon-dev libdbus-1-dev linux-libc-dev
+          sudo apt install gcc-14 g++-14
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100
+          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100
+
+      - name: Setup Git LFS
+        run: |
+          git config lfs.url "https://projects.blender.org/blender/blender.git/info/lfs"
+          git config lfs.remote.searchall false
+          git lfs install
+
+      - name: Blender Make Update
+        run: make update
+
+      - name: Download Extra Assets
+        run: |
+          curl -L -o release/datafiles/splash.png https://github.com/bb-yi/blender/raw/refs/heads/npr-port-5.1/release/datafiles/splash.png
+          curl -L -o assets/nodes/npr_node_groups.blend https://github.com/bb-yi/blender/raw/refs/heads/npr-port-5.1/assets/nodes/npr_node_groups.blend
+
+      - uses: rui314/setup-mold@v1
+
+      - name: Build Blender Release
+        run: make release ninja
+
+      - name: Package Release Asset
+        run: |
+          VERSION="5.1.0"
+          HASH="${{ steps.vars.outputs.sha_short }}"
+          DATE="${{ steps.vars.outputs.build_date }}"
+          ASSET_NAME="blender-$VERSION-npr-port-linux64-$HASH-$DATE"
+          TAR_FILE="$ASSET_NAME.tar.xz"
+          BUILD_DIR="../build_linux_release/bin"
+          tar -cvJf "$TAR_FILE" -C "$BUILD_DIR" .
+          echo "TAR_PATH=$TAR_FILE" >> $GITHUB_ENV
+
+      - name: Upload Linux Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-asset
+          path: ${{ env.TAR_PATH }}
+
+  build-macos:
+    name: Build macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Get Short Hash & Date
+        id: vars
+        run: |
+          echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "build_date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
+
+      - name: Install Build Tools
+        run: brew install cmake ninja
+
+      - name: Setup Git LFS
+        run: |
+          git config lfs.url "https://projects.blender.org/blender/blender.git/info/lfs"
+          git config lfs.remote.searchall false
+          git lfs install
+
+      - name: Blender Make Update
+        run: make update
+
+      - name: Download Extra Assets
+        run: |
+          curl -L -o release/datafiles/splash.png https://github.com/bb-yi/blender/raw/refs/heads/npr-port-5.1/release/datafiles/splash.png
+          curl -L -o assets/nodes/npr_node_groups.blend https://github.com/bb-yi/blender/raw/refs/heads/npr-port-5.1/assets/nodes/npr_node_groups.blend
+
+      - name: Build Blender Release
+        run: make release ninja
+
+      - name: Package Release Asset
+        run: |
+          VERSION="5.1.0"
+          HASH="${{ steps.vars.outputs.sha_short }}"
+          DATE="${{ steps.vars.outputs.build_date }}"
+          ASSET_NAME="blender-$VERSION-npr-port-macos-$HASH-$DATE"
+          DMG_FILE="$ASSET_NAME.dmg"
+          APP_BUNDLE=$(find ../build_darwin_release -name "Blender.app" -type d | head -n 1)
+          if [ -z "$APP_BUNDLE" ]; then
+            echo "Blender.app not found!"
+            exit 1
+          fi
+          hdiutil create -format UDZO -srcfolder "$APP_BUNDLE" "$DMG_FILE"
+          echo "DMG_PATH=$DMG_FILE" >> $GITHUB_ENV
+
+      - name: Upload macOS Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-asset
+          path: ${{ env.DMG_PATH }}
+
+  publish:
+    name: Create GitHub Release
+    needs: [build-windows, build-linux, build-macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Get Short Hash & Tag
+        id: vars
+        run: |
+          SHA_SHORT=$(git rev-parse --short HEAD)
+          echo "sha_short=$SHA_SHORT" >> $GITHUB_OUTPUT
+          
+          # Determine the tag:
+          # 1. Use manual input if provided
+          # 2. Use current tag if it's a push to a tag
+          # 3. Use 'v' + date + short sha as a fallback
+          if [ -n "${{ github.event.inputs.tag_name }}" ]; then
+            TAG="${{ github.event.inputs.tag_name }}"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="v5.1.0-build-$(date +'%Y%m%d')-$SHA_SHORT"
+          fi
+          echo "tag_name=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Blender 5.1.0 NPR Port - ${{ steps.vars.outputs.sha_short }}
+          tag_name: ${{ steps.vars.outputs.tag_name }}
+          files: artifacts/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
