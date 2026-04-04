@@ -78,8 +78,15 @@ jobs:
           $ASSET_NAME = "blender-$VERSION-npr-port-win64-$HASH-$DATE"
           $ZIP_FILE = "$ASSET_NAME.zip"
           $BUILD_DIR = "..\build_windows_release\bin"
-          Write-Host "Packaging from $BUILD_DIR to $ZIP_FILE"
-          Compress-Archive -Path "$BUILD_DIR\*" -DestinationPath $ZIP_FILE
+          
+          Write-Host "Creating $ASSET_NAME directory"
+          New-Item -ItemType Directory -Path $ASSET_NAME -Force
+          
+          Write-Host "Copying build files to $ASSET_NAME"
+          Copy-Item -Path "$BUILD_DIR\*" -Destination $ASSET_NAME -Recurse
+          
+          Write-Host "Packaging from $ASSET_NAME to $ZIP_FILE"
+          Compress-Archive -Path $ASSET_NAME -DestinationPath $ZIP_FILE
           echo "ZIP_PATH=$ZIP_FILE" >> $env:GITHUB_ENV
 
       - name: Upload Windows Artifact
