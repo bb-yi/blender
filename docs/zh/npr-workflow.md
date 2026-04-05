@@ -39,7 +39,7 @@
 
 ## 4. 主要 NPR 节点
 
-除了下面这些专用 NPR 节点以外，`Curvature` 和 `Raycast` 现在也可以直接在 `NPR Tree` 中使用。
+除了下面这些专用 NPR 节点以外，`Curvature`、`Raycast` 和 `GLSL Function` 现在也可以直接在 `NPR Tree` 中使用。
 
 ### NPR Input
 

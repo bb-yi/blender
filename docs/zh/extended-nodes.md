@@ -235,6 +235,167 @@
 
 - 节点面板中可指定 `UV Map`，该 UV 的切线会作为转换基底。
 
+### GLSL Function
+
+#### 入口
+
+`Add > Script > GLSL Function`
+
+<div align="center">
+	<img src="images/SnowShot_2026-04-03_17-01-40.png" alt="GLSL Function" style="border-radius: 10px;">
+	<br>
+</div>
+
+在 `Eevee` 物体材质和 `NPR Tree` 中都可用。
+
+#### 输入输出
+
+- 节点会根据当前选中的 GLSL 函数签名动态生成输入和输出
+
+- 返回值和 `out` 参数都会变成节点输出
+
+- `sampler2D` 不会显示成可连线输入口，而是在节点面板中直接显示为图片槽位
+
+#### 作用
+
+把一段用户编写的 `GLSL` 函数接入当前 `Eevee / NPR` 材质编译流程，适合做自定义数学节点、程序图案、SDF、纹理处理和小型屏幕函数封装。
+
+#### 基本使用方法
+
+1. 在 `Text Editor` 中写好 `GLSL`，或者准备一个外部 `.glsl` 文件。
+
+2. 添加 `GLSL Function` 节点。
+
+3. 在节点面板中选择源码来源：
+
+   - `内置`：使用 `Text` 数据块
+
+   - `外部`：使用外部 `.glsl` 文件
+
+4. 点击右侧刷新按钮重新解析源码。
+
+5. 在 `Function` 中手动选择真正要导出的函数名。
+
+6. 如果函数里有 `sampler2D` 参数，直接在节点参数区为每个采样器选图。
+
+#### 当前支持的函数边界类型
+
+- 输入参数：`float`、`vec2`、`vec3`、`vec4`、`sampler2D`
+
+- 输出参数：`out float`、`out vec2`、`out vec3`、`out vec4`
+
+- 返回值：`void`、`float`、`vec2`、`vec3`、`vec4`
+
+- 支持多输出：返回值 + 一个或多个 `out` 参数
+
+#### 说明
+
+- `Function` 为空时不会自动选第一个函数，需要手动指定
+
+- 支持多个 `sampler2D` 图片槽位；它们统一受 `Sampler Settings` 子面板控制
+
+- 修改 `Text` 数据块或外部文件后，可以直接点击刷新按钮更新节点，不需要重新选文件
+
+- 支持写在函数正上方的 `@glsl_meta` 块注释，用来声明默认值、范围和 subtype
+
+- 当前不支持 `inout`、`out sampler2D`、`int / bool / mat* / struct / array` 作为函数边界类型
+
+- 详细 GLSL 转换规范见仓库文档 `docs/glsl-function-node-conversion-guide.md`
+
+#### Meta 语法
+
+`GLSL Function` 支持从函数正上方的块注释读取少量 Meta 信息，用来控制节点输入口的默认值、范围和显示语义。
+
+Meta 只影响节点界面，不会改写 GLSL 函数逻辑本身。
+
+#### Meta 基本格式
+
+```glsl
+/* @glsl_meta v1
+strength: default=0.5 min=0.0 max=1.0 subtype=factor
+offset: default=vec3(0.0) subtype=translation
+tint: default=vec3(1.0, 0.8, 0.2)
+*/
+vec3 stylize(vec3 base_color, float strength, vec3 offset, vec3 tint)
+{
+  return mix(base_color, tint + offset, strength);
+}
+```
+
+#### Meta 规则
+
+- Meta 必须是块注释，并且以 `@glsl_meta` 开头
+
+- Meta 必须紧贴在目标函数正上方，中间不要夹别的顶层代码
+
+- 当前是一函数一块 Meta；它只作用于正下方那个函数
+
+- 每一行都使用 `参数名: key=value key=value` 语法
+
+- 建议一参数一行；当前也允许同一参数拆成多行补属性，但同一个属性不能重复
+
+- 旧的 `function some_name` 写法已经不再推荐
+
+- 旧的 `some_function.some_param: ...` 写法也不再推荐，当前建议直接写纯参数名
+
+#### 当前支持的 Meta 键
+
+- `default`
+
+    - `float` 直接写标量，例如 `default=0.5`
+
+    - `vec2 / vec3 / vec4` 必须写对应构造器，例如 `default=vec3(1.0, 0.8, 0.2)`
+
+    - 向量默认值也支持单标量广播，例如 `default=vec3(0.5)` 会把三个分量都设为 `0.5`
+
+- `min`
+
+    - 设置输入口最小值，例如 `min=0.0`
+
+    - 对 `vec*` 输入当前也是单个标量范围，不支持分量分别设置不同最小值
+
+- `max`
+
+    - 设置输入口最大值，例如 `max=1.0`
+
+    - 对 `vec*` 输入当前也是单个标量范围，不支持分量分别设置不同最大值
+
+- `subtype`
+
+    - 用于设置 Blender socket subtype
+
+    - `float` 常用值：`none`、`factor`、`percentage`、`angle`、`time`、`distance`
+
+    - `vec*` 常用值：`none`、`translation`、`direction`、`euler`、`xyz`
+
+#### Meta 生效行为
+
+- `default` 第一次生效时会写入 socket 默认值
+
+- 之后如果用户手动改过节点默认值，只要 Meta 本身没变化，这个手动值会保留
+
+- 当 Meta 内容发生变化时，节点会再同步一次新的默认值
+
+- `min / max / subtype` 属于 socket 声明，会直接影响节点输入口的范围和显示方式
+
+#### 当前限制
+
+- 只支持输入参数 Meta
+
+- 不支持返回值 Meta
+
+- 不支持 `out` 参数 Meta
+
+- 不支持 `sampler2D` Meta
+
+- 不支持 `inout`
+
+- 不支持 `int / bool / mat* / struct / array` 作为 Meta 目标参数类型
+
+- 如果 Meta 里写了函数中不存在的参数名，会直接报错
+
+- 如果 `min > max`，会直接报错
+
 ### Basis Transform
 
 #### 入口
