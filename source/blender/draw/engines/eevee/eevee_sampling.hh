@@ -143,6 +143,12 @@ class Sampling {
     return sample_;
   }
 
+  /* 0 based accumulation progress for the current viewport view. */
+  uint64_t viewport_sample_index() const
+  {
+    return max_ii(viewport_sample_, 0);
+  }
+
   bool use_clamp_direct() const
   {
     return clamp_data_.surface_direct < 1.0e19f;

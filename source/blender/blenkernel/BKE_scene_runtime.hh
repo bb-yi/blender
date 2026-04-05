@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include <string>
+
 #include "BKE_sound_types.hh"
 
 #include "BLI_map.hh"
@@ -55,11 +57,18 @@ struct SceneAudioRuntime {
   Set<AUD_SequenceEntry> speaker_handles;
 };
 
+struct SceneEeveePerformanceRuntime {
+  std::string viewport_summary;
+  std::string viewport_report;
+  std::string render_report;
+};
+
 class SceneRuntime : NonCopyable, NonMovable {
  public:
   CompositorRuntime compositor;
   SequencerRuntime sequencer;
   SceneAudioRuntime audio;
+  SceneEeveePerformanceRuntime eevee_performance;
 };
 
 }  // namespace bke

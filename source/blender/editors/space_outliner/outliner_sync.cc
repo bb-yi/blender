@@ -321,6 +321,7 @@ void ED_outliner_select_sync_from_outliner(bContext *C, SpaceOutliner *space_out
                                                        SO_LIBRARIES,
                                                        SO_OVERRIDES_LIBRARY,
                                                        SO_DATA_API,
+                                                       SO_EEVEE_PERFORMANCE,
                                                        SO_ID_ORPHANS))
   {
     return;

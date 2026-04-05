@@ -5,6 +5,7 @@
 set(INC
   ../include
   ../../blenfont
+  ../../draw/engines/eevee
   ../../makesrna
   # RNA_prototypes.hh
   ${CMAKE_BINARY_DIR}/source/blender/makesrna
@@ -30,6 +31,7 @@ set(SRC
   tree/common.cc
   tree/tree_display.cc
   tree/tree_display_data.cc
+  tree/tree_display_eevee_performance.cc
   tree/tree_display_libraries.cc
   tree/tree_display_orphaned.cc
   tree/tree_display_override_library_hierarchies.cc

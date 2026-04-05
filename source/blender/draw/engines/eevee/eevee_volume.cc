@@ -448,21 +448,30 @@ void VolumeModule::draw_compute(View &main_view, int2 extent)
     return;
   }
 
-  if (inst_.pipelines.deferred.is_empty()) {
-    /* This assume the volume are computed after deferred passes. This is needed to avoid broken
-     * lighting and shadowing as the lights are not setup otherwise (see #121971). */
-    inst_.hiz_buffer.swap_layer();
-    inst_.hiz_buffer.update();
-    inst_.volume_probes.set_view(main_view);
-    inst_.sphere_probes.set_view(main_view);
-    inst_.shadows.set_view(main_view, extent);
+  {
+    ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainVolumeComputeSetup);
+    if (inst_.pipelines.deferred.is_empty()) {
+      /* This assume the volume are computed after deferred passes. This is needed to avoid broken
+       * lighting and shadowing as the lights are not setup otherwise (see #121971). */
+      inst_.hiz_buffer.swap_layer();
+      inst_.hiz_buffer.update();
+      inst_.volume_probes.set_view(main_view);
+      inst_.sphere_probes.set_view(main_view);
+      inst_.shadows.set_view(main_view, extent);
+    }
+
+    scatter_tx_.swap();
+    extinction_tx_.swap();
   }
 
-  scatter_tx_.swap();
-  extinction_tx_.swap();
-
-  inst_.manager->submit(scatter_ps_, main_view);
-  inst_.manager->submit(integration_ps_, main_view);
+  {
+    ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainVolumeScatter);
+    inst_.manager->submit(scatter_ps_, main_view);
+  }
+  {
+    ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainVolumeIntegration);
+    inst_.manager->submit(integration_ps_, main_view);
+  }
 
   /* Copy history data. */
   history_viewmat_ = main_view.viewmat();
@@ -480,12 +489,20 @@ void VolumeModule::draw_resolve(View &view)
     return;
   }
 
-  inst_.hiz_buffer.update();
+  {
+    ScopedTelemetrySample telemetry_sample(inst_.telemetry,
+                                           TelemetryStageId::MainVolumeResolveHiZUpdate);
+    inst_.hiz_buffer.update();
+  }
 
-  resolve_fb_.ensure(GPU_ATTACHMENT_NONE,
-                     GPU_ATTACHMENT_TEXTURE(inst_.render_buffers.combined_tx));
-  resolve_fb_.bind();
-  inst_.manager->submit(resolve_ps_, view);
+  {
+    ScopedTelemetrySample telemetry_sample(inst_.telemetry,
+                                           TelemetryStageId::MainVolumeResolveComposite);
+    resolve_fb_.ensure(GPU_ATTACHMENT_NONE,
+                       GPU_ATTACHMENT_TEXTURE(inst_.render_buffers.combined_tx));
+    resolve_fb_.bind();
+    inst_.manager->submit(resolve_ps_, view);
+  }
 }
 
 }  // namespace blender::eevee

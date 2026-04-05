@@ -119,6 +119,7 @@ set(SRC
   engines/eevee/eevee_shader.cc
   engines/eevee/eevee_shadow.cc
   engines/eevee/eevee_subsurface.cc
+  engines/eevee/eevee_telemetry.cc
   engines/eevee/eevee_sync.cc
   engines/eevee/eevee_velocity.cc
   engines/eevee/eevee_view.cc

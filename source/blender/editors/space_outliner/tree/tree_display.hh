@@ -291,5 +291,15 @@ class TreeDisplayDataAPI final : public AbstractTreeDisplay {
   bool is_lazy_built() const override;
 };
 
+/* -------------------------------------------------------------------- */
+/* Eevee Performance Tree-Display */
+
+class TreeDisplayEeveePerformance final : public AbstractTreeDisplay {
+ public:
+  TreeDisplayEeveePerformance(SpaceOutliner &space_outliner);
+
+  ListBaseT<TreeElement> build_tree(const TreeSourceData &source_data) override;
+};
+
 }  // namespace ed::outliner
 }  // namespace blender
