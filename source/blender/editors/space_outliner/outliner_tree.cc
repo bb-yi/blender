@@ -263,7 +263,9 @@ TreeElement *AbstractTreeDisplay::add_element(ListBaseT<TreeElement> *lb,
     /* pass */
   }
   else if (ELEM(type, TSE_GENERIC_LABEL)) {
-    persistent_dataptr = nullptr;
+    if (owner_id == nullptr) {
+      persistent_dataptr = nullptr;
+    }
   }
   else if (persistent_dataptr == nullptr) {
     return nullptr;
@@ -1202,7 +1204,9 @@ void outliner_build_tree(Main *mainvar,
   }
   space_outliner->storeflag &= ~SO_TREESTORE_REBUILD;
 
-  if (region->runtime->do_draw & RGN_DRAW_NO_REBUILD) {
+  if ((region->runtime->do_draw & RGN_DRAW_NO_REBUILD) &&
+      (space_outliner->outlinevis != SO_EEVEE_PERFORMANCE))
+  {
     BLI_assert_msg(space_outliner->runtime->tree_display != nullptr,
                    "Skipping rebuild before tree was built properly, a full redraw should be "
                    "triggered instead");

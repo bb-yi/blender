@@ -406,8 +406,6 @@ class RENDER_PT_eevee_raytracing(RenderButtonsPanel, Panel):
         options = context.scene.eevee.ray_tracing_options
 
         col.prop(options, "resolution_scale")
-
-
 class RENDER_PT_eevee_screen_trace(RenderButtonsPanel, Panel):
     bl_label = "Screen Tracing"
     bl_options = {'DEFAULT_CLOSED'}

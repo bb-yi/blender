@@ -28,6 +28,8 @@ std::unique_ptr<AbstractTreeDisplay> AbstractTreeDisplay::create_from_display_mo
       return std::make_unique<TreeDisplaySequencer>(space_outliner);
     case SO_DATA_API:
       return std::make_unique<TreeDisplayDataAPI>(space_outliner);
+    case SO_EEVEE_PERFORMANCE:
+      return std::make_unique<TreeDisplayEeveePerformance>(space_outliner);
     case SO_ID_ORPHANS:
       return std::make_unique<TreeDisplayIDOrphans>(space_outliner);
     case SO_OVERRIDES_LIBRARY:

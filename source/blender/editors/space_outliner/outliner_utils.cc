@@ -338,6 +338,7 @@ float outliner_right_columns_width(const SpaceOutliner *space_outliner)
     case SO_DATA_API:
     case SO_SEQUENCE:
     case SO_LIBRARIES:
+    case SO_EEVEE_PERFORMANCE:
       return 0.0f;
     case SO_OVERRIDES_LIBRARY:
       switch (eSpaceOutliner_LibOverrideViewMode(space_outliner->lib_override_view_mode)) {

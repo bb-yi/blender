@@ -4019,6 +4019,7 @@ void draw_outliner(const bContext *C, bool do_rebuild)
                 SO_LIBRARIES,
                 SO_OVERRIDES_LIBRARY,
                 SO_DATA_API,
+                SO_EEVEE_PERFORMANCE,
                 SO_ID_ORPHANS))
       {
         outliner_sync_selection(C, tvc, space_outliner);

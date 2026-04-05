@@ -4310,6 +4310,11 @@ static void rna_def_space_outliner(BlenderRNA *brna)
        ICON_ORPHAN_DATA,
        "Unused Data",
        "Display data that is unused and/or will be lost when the file is reloaded"},
+      {SO_EEVEE_PERFORMANCE,
+       "EEVEE_PERFORMANCE",
+       ICON_RENDER_RESULT,
+       "Eevee Performance",
+       "Display Eevee performance profiler results as a hierarchical tree"},
       {0, nullptr, 0, nullptr, nullptr},
   };
 

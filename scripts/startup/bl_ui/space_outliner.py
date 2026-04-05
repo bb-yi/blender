@@ -95,6 +95,20 @@ class OUTLINER_HT_header(Header):
                 row = layout.row()
                 row.label(text="No Keying Set Active")
 
+        elif display_mode == 'EEVEE_PERFORMANCE':
+            eevee = scene.eevee
+
+            row = layout.row(align=True)
+            row.prop(eevee, "use_performance_profiler", text="Profiler", icon='TEMP')
+
+            sub = row.row(align=True)
+            sub.active = eevee.use_performance_profiler
+            sub.prop(eevee, "use_performance_profiler_pause", text="Pause", icon='PAUSE')
+            sub.prop(eevee, "use_performance_profiler_time_sort", text="Sort by Time", icon='SORTTIME')
+
+            row = layout.row(align=True)
+            row.popover(panel="OUTLINER_PT_eevee_performance", text="", icon='PREFERENCES')
+
 
 class OUTLINER_MT_editor_menus(Menu):
     bl_idname = "OUTLINER_MT_editor_menus"
@@ -518,6 +532,7 @@ class OUTLINER_PT_filter(Panel):
             row = sub.row()
             row.label(icon='STROKE')
             row.prop(space, "use_filter_object_grease_pencil", text="Grease Pencil")
+
         row = sub.row()
         row.label(icon='EMPTY_DATA')
         row.prop(space, "use_filter_object_empty", text="Empties")
@@ -538,6 +553,31 @@ class OUTLINER_PT_filter(Panel):
             row.prop(space, "use_filter_object_others", text="Others")
 
 
+class OUTLINER_PT_eevee_performance(Panel):
+    bl_space_type = 'OUTLINER'
+    bl_region_type = 'HEADER'
+    bl_label = "Eevee Performance"
+
+    @classmethod
+    def poll(cls, context):
+        return context.space_data.display_mode == 'EEVEE_PERFORMANCE'
+
+    def draw(self, context):
+        layout = self.layout
+        eevee = context.scene.eevee
+
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+
+        layout.prop(eevee, "use_performance_profiler", text="Enable", icon='TEMP')
+
+        col = layout.column()
+        col.active = eevee.use_performance_profiler
+        col.prop(eevee, "use_performance_profiler_pause", text="Pause Viewport Updates", icon='PAUSE')
+        col.prop(eevee, "use_performance_profiler_time_sort", text="Sort by Time", icon='SORTTIME')
+        col.prop(eevee, "performance_profiler_average_window", text="Average Window")
+
+
 classes = (
     OUTLINER_HT_header,
     OUTLINER_MT_editor_menus,
@@ -554,6 +594,7 @@ classes = (
     OUTLINER_MT_context_menu_view,
     OUTLINER_MT_view_pie,
     OUTLINER_PT_filter,
+    OUTLINER_PT_eevee_performance,
 )
 
 if __name__ == "__main__":  # only for live edit.

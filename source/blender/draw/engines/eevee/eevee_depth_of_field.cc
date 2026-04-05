@@ -589,6 +589,7 @@ void DepthOfField::render(View &view,
   constexpr eGPUTextureUsage usage_readwrite_attach = usage_readwrite |
                                                       GPU_TEXTURE_USAGE_ATTACHMENT;
   {
+    ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::DOFSetup);
     GPU_debug_group_begin("Setup");
     {
       bokeh_gather_lut_tx_.acquire(int2(DOF_BOKEH_LUT_SIZE), gpu::TextureFormat::SFLOAT_16_16);
@@ -630,6 +631,7 @@ void DepthOfField::render(View &view,
     }
     {
       GPU_debug_group_begin("Tile Prepare");
+      ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::DOFTilePrepare);
 
       /* WARNING: If format changes, make sure dof_tile_* GLSL constants are properly encoded. */
       tiles_fg_tx_.previous().acquire(
@@ -697,6 +699,10 @@ void DepthOfField::render(View &view,
 
   for (int is_background = 0; is_background < 2; is_background++) {
     GPU_debug_group_begin(is_background ? "Background Convolution" : "Foreground Convolution");
+    ScopedTelemetrySample telemetry_sample(
+        inst_.telemetry,
+        is_background ? TelemetryStageId::DOFBackgroundConvolution :
+                        TelemetryStageId::DOFForegroundConvolution);
 
     SwapChain<TextureFromPool, 2> &color_tx = is_background ? color_bg_tx_ : color_fg_tx_;
     SwapChain<TextureFromPool, 2> &weight_tx = is_background ? weight_bg_tx_ : weight_fg_tx_;
@@ -749,6 +755,7 @@ void DepthOfField::render(View &view,
   }
   {
     GPU_debug_group_begin("Hole Fill");
+    ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::DOFHoleFill);
 
     bokeh_gather_lut_tx_.release();
     bokeh_scatter_lut_tx_.release();
@@ -764,6 +771,7 @@ void DepthOfField::render(View &view,
   }
   {
     GPU_debug_group_begin("Resolve");
+    ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::DOFResolve);
 
     resolve_stable_color_tx_ = dof_buffer.stabilize_history_tx_;
 

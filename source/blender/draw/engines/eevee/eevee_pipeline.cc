@@ -393,10 +393,13 @@ void Prepass::setup_subpasses(DRWState common_state)
   }
 }
 
-PassMain::Sub *Prepass::add(blender::Material *blender_mat, GPUMaterial *gpumat, bool has_motion)
+PassMain::Sub *Prepass::add(blender::Material *blender_mat,
+                            GPUMaterial *gpumat,
+                            bool has_motion,
+                            bool force_write_id)
 {
   bool double_sided = !(blender_mat->blend_flag & MA_BL_CULL_BACKFACE);
-  bool write_id = GPU_material_flag_get(gpumat, GPU_MATFLAG_RAYCAST);
+  bool write_id = force_write_id || GPU_material_flag_get(gpumat, GPU_MATFLAG_RAYCAST);
   PassMain::Sub *pass = prepass_subpasses[double_sided][has_motion][write_id];
   return &pass->sub(GPU_material_get_name(gpumat));
 }
@@ -645,59 +648,83 @@ void ForwardPipeline::render(View &view,
 
   GPU_debug_group_begin("Forward.Opaque");
 
-  prepass_fb.bind();
-  inst_.manager->submit(prepass_ps_, view);
-
-  inst_.hiz_buffer.set_dirty();
-  inst_.hiz_buffer.update();
-
-  inst_.shadows.set_view(view, extent);
-  inst_.volume_probes.set_view(view);
-  inst_.sphere_probes.set_view(view);
-
-  transp_buffer_.acquire(extent, use_colored_transparency());
-
-  if (!use_colored_transparency()) {
-    /* NOTE: When using Vulkan this triggers a (false positive) validation warning about writing to
-     * an attachment that isn't filled. The warning could be removed by adding dummy attachments,
-     * recompiling the shader, etc. But it is not worth the hassle.
-     *
-     * VUID: Undefined-Value-ShaderOutputNotConsumed-DynamicRendering
-     * MessageId: 0x46877e3e
-     */
-    transparent_fb.ensure(GPU_ATTACHMENT_TEXTURE(depth_tx),
-                          GPU_ATTACHMENT_TEXTURE(transp_buffer_.r_channel_tx));
-  }
-  else {
-    transparent_fb.ensure(GPU_ATTACHMENT_TEXTURE(depth_tx),
-                          GPU_ATTACHMENT_TEXTURE(transp_buffer_.r_channel_tx),
-                          GPU_ATTACHMENT_TEXTURE(transp_buffer_.g_channel_tx),
-                          GPU_ATTACHMENT_TEXTURE(transp_buffer_.b_channel_tx),
-                          GPU_ATTACHMENT_TEXTURE(transp_buffer_.a_channel_tx));
+  {
+    ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainForwardPrepass);
+    prepass_fb.bind();
+    inst_.manager->submit(prepass_ps_, view);
   }
 
-  transparent_fb.bind();
-
-  if (use_colored_transparency()) {
-    /* Split channel targets. Radiance in 1st channel, transmittance in 2nd channel. */
-    transparent_fb.clear_color(float4(0.0f, 1.0f, 0.0f, 0.0f));
+  {
+    ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainForwardHiZUpdate);
+    inst_.hiz_buffer.set_dirty();
+    inst_.hiz_buffer.update();
   }
-  else {
-    transparent_fb.clear_color(float4(0.0f, 0.0f, 0.0f, 1.0f));
+
+  {
+    ScopedTelemetrySample telemetry_sample(inst_.telemetry,
+                                           TelemetryStageId::MainForwardShadowSetup);
+    inst_.shadows.set_view(view, extent);
+  }
+  {
+    ScopedTelemetrySample telemetry_sample(inst_.telemetry,
+                                           TelemetryStageId::MainForwardProbeSetup);
+    inst_.volume_probes.set_view(view);
+    inst_.sphere_probes.set_view(view);
+  }
+
+  {
+    ScopedTelemetrySample telemetry_sample(
+        inst_.telemetry, TelemetryStageId::MainForwardTransparencySetup);
+    transp_buffer_.acquire(extent, use_colored_transparency());
+
+    if (!use_colored_transparency()) {
+      /* NOTE: When using Vulkan this triggers a (false positive) validation warning about writing
+       * to an attachment that isn't filled. The warning could be removed by adding dummy
+       * attachments, recompiling the shader, etc. But it is not worth the hassle.
+       *
+       * VUID: Undefined-Value-ShaderOutputNotConsumed-DynamicRendering
+       * MessageId: 0x46877e3e
+       */
+      transparent_fb.ensure(GPU_ATTACHMENT_TEXTURE(depth_tx),
+                            GPU_ATTACHMENT_TEXTURE(transp_buffer_.r_channel_tx));
+    }
+    else {
+      transparent_fb.ensure(GPU_ATTACHMENT_TEXTURE(depth_tx),
+                            GPU_ATTACHMENT_TEXTURE(transp_buffer_.r_channel_tx),
+                            GPU_ATTACHMENT_TEXTURE(transp_buffer_.g_channel_tx),
+                            GPU_ATTACHMENT_TEXTURE(transp_buffer_.b_channel_tx),
+                            GPU_ATTACHMENT_TEXTURE(transp_buffer_.a_channel_tx));
+    }
+
+    transparent_fb.bind();
+
+    if (use_colored_transparency()) {
+      /* Split channel targets. Radiance in 1st channel, transmittance in 2nd channel. */
+      transparent_fb.clear_color(float4(0.0f, 1.0f, 0.0f, 0.0f));
+    }
+    else {
+      transparent_fb.clear_color(float4(0.0f, 0.0f, 0.0f, 1.0f));
+    }
   }
 
   if (has_opaque_) {
+    ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainForwardOpaque);
     inst_.manager->submit(opaque_ps_, view);
   }
 
   GPU_debug_group_end();
 
   if (has_transparent_) {
+    ScopedTelemetrySample telemetry_sample(inst_.telemetry,
+                                           TelemetryStageId::MainForwardTransparent);
     inst_.manager->submit(transparent_ps_, view);
   }
 
-  combined_fb.bind();
-  inst_.manager->submit(resolve_ps_, view);
+  {
+    ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainForwardResolve);
+    combined_fb.bind();
+    inst_.manager->submit(resolve_ps_, view);
+  }
 
   transp_buffer_.release();
 }
@@ -1070,9 +1097,10 @@ void DeferredLayer::end_sync(bool is_first_pass,
 
 PassMain::Sub *DeferredLayer::prepass_add(blender::Material *blender_mat,
                                           GPUMaterial *gpumat,
-                                          bool has_motion)
+                                          bool has_motion,
+                                          bool force_write_id)
 {
-  return prepass_ps_.add(blender_mat, gpumat, has_motion);
+  return prepass_ps_.add(blender_mat, gpumat, has_motion, force_write_id);
 }
 
 PassMain::Sub *DeferredLayer::material_add(blender::Material *blender_mat, GPUMaterial *gpumat)
@@ -1151,22 +1179,41 @@ gpu::Texture *DeferredLayer::render(View &main_view,
 
   if (use_screen_transmission_) {
     /* Update for refraction. */
+    ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainDeferredHiZUpdate);
     inst_.hiz_buffer.update();
   }
 
-  GPU_framebuffer_bind(prepass_fb);
-  inst_.manager->submit(prepass_ps_, render_view);
+  {
+    ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainDeferredPrepass);
+    GPU_framebuffer_bind(prepass_fb);
+    inst_.manager->submit(prepass_ps_, render_view);
+  }
 
   inst_.hiz_buffer.swap_layer();
   /* Update for lighting pass or AO node. */
-  inst_.hiz_buffer.update();
+  {
+    ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainDeferredHiZUpdate);
+    inst_.hiz_buffer.update();
+  }
 
-  inst_.volume_probes.set_view(render_view);
-  inst_.sphere_probes.set_view(render_view);
-  inst_.shadows.set_view(render_view, extent);
+  {
+    ScopedTelemetrySample telemetry_sample(inst_.telemetry,
+                                           TelemetryStageId::MainDeferredProbeSetup);
+    inst_.volume_probes.set_view(render_view);
+    inst_.sphere_probes.set_view(render_view);
+  }
+  {
+    ScopedTelemetrySample telemetry_sample(inst_.telemetry,
+                                           TelemetryStageId::MainDeferredShadowSetup);
+    inst_.shadows.set_view(render_view, extent);
+  }
 
-  inst_.gbuffer.bind(gbuffer_fb);
-  inst_.manager->submit(gbuffer_ps_, render_view);
+  {
+    ScopedTelemetrySample telemetry_sample(inst_.telemetry,
+                                           TelemetryStageId::MainDeferredGBufferPass);
+    inst_.gbuffer.bind(gbuffer_fb);
+    inst_.manager->submit(gbuffer_ps_, render_view);
+  }
 
   for (int i = 0; i < ARRAY_SIZE(direct_radiance_txs_); i++) {
     direct_radiance_txs_[i].acquire((closure_count_ > i) ? extent : int2(1),
@@ -1175,6 +1222,7 @@ gpu::Texture *DeferredLayer::render(View &main_view,
   }
 
   if (use_raytracing_) {
+    ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainDeferredRaytrace);
     indirect_result_ = inst_.raytracing.render(
         rt_buffer, radiance_behind_tx, closure_bits_, main_view, render_view);
   }
@@ -1185,11 +1233,17 @@ gpu::Texture *DeferredLayer::render(View &main_view,
     indirect_result_ = inst_.raytracing.alloc_dummy(rt_buffer);
   }
 
-  GPU_framebuffer_bind(combined_fb);
-  inst_.manager->submit(eval_light_ps_, render_view);
+  {
+    ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainDeferredEvalLight);
+    GPU_framebuffer_bind(combined_fb);
+    inst_.manager->submit(eval_light_ps_, render_view);
+  }
 
-  inst_.subsurface.render(
-      direct_radiance_txs_[0], indirect_result_.closures[0], closure_bits_, render_view);
+  {
+    ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainDeferredSubsurface);
+    inst_.subsurface.render(
+        direct_radiance_txs_[0], indirect_result_.closures[0], closure_bits_, render_view);
+  }
 
   radiance_feedback_tx_ = rt_buffer.feedback_ensure(!use_feedback_output_, extent);
   radiance_back_tx_ = radiance_behind_tx ? radiance_behind_tx : radiance_feedback_tx_;
@@ -1200,14 +1254,21 @@ gpu::Texture *DeferredLayer::render(View &main_view,
     GPU_texture_copy(radiance_feedback_tx_, rb.combined_tx);
   }
 
-  GPU_framebuffer_bind(combined_fb);
-  inst_.manager->submit(combine_ps_, render_view);
+  {
+    ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainDeferredCombine);
+    GPU_framebuffer_bind(combined_fb);
+    inst_.manager->submit(combine_ps_, render_view);
+  }
 
   if (!npr_ps_.is_empty()) {
     gpu::Texture *shadow_source_tx = (rb.data.shadow_id >= 0) ? rb.rp_value_tx.gpu_texture() :
                                                                  nullptr;
-    inst_.pipelines.shadow_filter.set_source(shadow_source_tx, rb.data.shadow_id);
-    inst_.pipelines.shadow_filter.render(render_view, extent, rb.depth_tx);
+    {
+      ScopedTelemetrySample telemetry_sample(inst_.telemetry,
+                                             TelemetryStageId::MainDeferredShadowFilter);
+      inst_.pipelines.shadow_filter.set_source(shadow_source_tx, rb.data.shadow_id);
+      inst_.pipelines.shadow_filter.render(render_view, extent, rb.depth_tx);
+    }
 
     TextureFromPool npr_radiance_input = {"NPR Radiance Input"};
     npr_radiance_input.acquire(extent,
@@ -1215,8 +1276,11 @@ gpu::Texture *DeferredLayer::render(View &main_view,
                                GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE);
     npr_radiance_input_tx_ = npr_radiance_input;
     GPU_texture_copy(npr_radiance_input_tx_, rb.combined_tx);
-    GPU_framebuffer_bind(combined_fb);
-    inst_.manager->submit(npr_ps_, render_view);
+    {
+      ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainDeferredNPR);
+      GPU_framebuffer_bind(combined_fb);
+      inst_.manager->submit(npr_ps_, render_view);
+    }
     npr_radiance_input_tx_ = nullptr;
     npr_radiance_input.release();
   }
@@ -1318,12 +1382,14 @@ void DeferredPipeline::debug_draw(draw::View &view, gpu::FrameBuffer *combined_f
 PassMain::Sub *DeferredPipeline::prepass_add(blender::Material *blender_mat,
                                              GPUMaterial *gpumat,
                                              bool has_motion,
-                                             short refraction_layer)
+                                             short refraction_layer,
+                                             bool force_write_id)
 {
   if (!use_combined_lightprobe_eval && (blender_mat->blend_flag & MA_BL_SS_REFRACTION)) {
-    return get_refraction_layer(refraction_layer).prepass_add(blender_mat, gpumat, has_motion);
+    return get_refraction_layer(refraction_layer)
+        .prepass_add(blender_mat, gpumat, has_motion, force_write_id);
   }
-  return opaque_layer_.prepass_add(blender_mat, gpumat, has_motion);
+  return opaque_layer_.prepass_add(blender_mat, gpumat, has_motion, force_write_id);
 }
 
 PassMain::Sub *DeferredPipeline::material_add(blender::Material *blender_mat,
@@ -1358,18 +1424,22 @@ void DeferredPipeline::render(View &main_view,
   gpu::Texture *feedback_tx = nullptr;
 
   GPU_debug_group_begin("Deferred.Opaque");
-  feedback_tx = opaque_layer_.render(main_view,
-                                     render_view,
-                                     prepass_fb,
-                                     combined_fb,
-                                     gbuffer_fb,
-                                     extent,
-                                     rt_buffer_opaque_layer,
-                                     feedback_tx);
+  {
+    ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainDeferredOpaque);
+    feedback_tx = opaque_layer_.render(main_view,
+                                       render_view,
+                                       prepass_fb,
+                                       combined_fb,
+                                       gbuffer_fb,
+                                       extent,
+                                       rt_buffer_opaque_layer,
+                                       feedback_tx);
+  }
   GPU_debug_group_end();
 
   GPU_debug_group_begin("Deferred.Refract");
   for (auto &[index, layer] : refraction_layers_) {
+    ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainDeferredRefract);
     feedback_tx = layer->render(main_view,
                                 render_view,
                                 prepass_fb,
@@ -1679,9 +1749,10 @@ void DeferredProbePipeline::end_sync()
 }
 
 PassMain::Sub *DeferredProbePipeline::prepass_add(blender::Material *blender_mat,
-                                                  GPUMaterial *gpumat)
+                                                  GPUMaterial *gpumat,
+                                                  bool force_write_id)
 {
-  return opaque_layer_.prepass_ps_.add(blender_mat, gpumat, false);
+  return opaque_layer_.prepass_ps_.add(blender_mat, gpumat, false, force_write_id);
 }
 
 PassMain::Sub *DeferredProbePipeline::material_add(blender::Material *blender_mat,
@@ -1853,9 +1924,10 @@ void PlanarProbePipeline::end_sync()
 }
 
 PassMain::Sub *PlanarProbePipeline::prepass_add(blender::Material *blender_mat,
-                                                GPUMaterial *gpumat)
+                                                GPUMaterial *gpumat,
+                                                bool force_write_id)
 {
-  return prepass_ps_.add(blender_mat, gpumat, false);
+  return prepass_ps_.add(blender_mat, gpumat, false, force_write_id);
 }
 
 PassMain::Sub *PlanarProbePipeline::material_add(blender::Material *blender_mat,
