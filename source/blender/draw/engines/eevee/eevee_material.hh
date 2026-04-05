@@ -384,6 +384,9 @@ class MaterialModule {
   {
     return has_time_dependent_materials_;
   }
+  int npr_material_count() const;
+  int raycast_material_count() const;
+  int glsl_function_material_count() const;
 
   /**
    * Returned Material references are valid until the next call to this function or material_get().

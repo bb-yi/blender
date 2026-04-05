@@ -9170,7 +9170,6 @@ namespace blender
       nullptr);
     RNA_def_property_range(prop, 1, 64);
     RNA_def_property_ui_range(prop, 1, 64, 1, 3);
-    RNA_def_property_int_default(prop, 8);
     RNA_def_property_ui_text(
       prop,
       "Performance Average Window",

@@ -240,6 +240,11 @@ class LightProbeModule {
   void sync_world(const blender::World *world, bool has_update);
   void end_sync();
 
+  int probe_count() const
+  {
+    return int(volume_map_.size() + sphere_map_.size() + planar_map_.size());
+  }
+
  private:
   void sync_sphere(const Object *ob, ObjectHandle &handle);
   void sync_volume(const Object *ob, ObjectHandle &handle);

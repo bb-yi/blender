@@ -195,7 +195,10 @@ class Prepass : public PassMain {
  public:
   Prepass(const char *name) : PassMain(name) {};
   void setup_subpasses(DRWState common_state);
-  PassMain::Sub *add(blender::Material *blender_mat, GPUMaterial *gpumat, bool has_motion);
+  PassMain::Sub *add(blender::Material *blender_mat,
+                     GPUMaterial *gpumat,
+                     bool has_motion,
+                     bool force_write_id = false);
 };
 
 /** \} */
@@ -422,7 +425,10 @@ class DeferredLayer : DeferredLayerBase {
   void begin_sync();
   void end_sync(bool is_first_pass, bool is_last_pass, bool next_layer_has_transmission);
 
-  PassMain::Sub *prepass_add(blender::Material *blender_mat, GPUMaterial *gpumat, bool has_motion);
+  PassMain::Sub *prepass_add(blender::Material *blender_mat,
+                             GPUMaterial *gpumat,
+                             bool has_motion,
+                             bool force_write_id = false);
   PassMain::Sub *material_add(blender::Material *blender_mat, GPUMaterial *gpumat);
   PassMain::Sub *npr_add(blender::Material *blender_mat, GPUMaterial *gpumat);
 
@@ -478,7 +484,8 @@ class DeferredPipeline {
   PassMain::Sub *prepass_add(blender::Material *blender_mat,
                              GPUMaterial *gpumat,
                              bool has_motion,
-                             short refraction_layer);
+                             short refraction_layer,
+                             bool force_write_id = false);
   PassMain::Sub *material_add(blender::Material *blender_mat,
                               GPUMaterial *gpumat,
                               short refraction_layer);
@@ -689,7 +696,9 @@ class DeferredProbePipeline {
   void begin_sync();
   void end_sync();
 
-  PassMain::Sub *prepass_add(blender::Material *blender_mat, GPUMaterial *gpumat);
+  PassMain::Sub *prepass_add(blender::Material *blender_mat,
+                             GPUMaterial *gpumat,
+                             bool force_write_id = false);
   PassMain::Sub *material_add(blender::Material *blender_mat, GPUMaterial *gpumat);
   PassMain::Sub *npr_add(blender::Material *blender_mat, GPUMaterial *gpumat);
 
@@ -752,7 +761,9 @@ class PlanarProbePipeline : DeferredLayerBase {
   void begin_sync();
   void end_sync();
 
-  PassMain::Sub *prepass_add(blender::Material *blender_mat, GPUMaterial *gpumat);
+  PassMain::Sub *prepass_add(blender::Material *blender_mat,
+                             GPUMaterial *gpumat,
+                             bool force_write_id = false);
   PassMain::Sub *material_add(blender::Material *blender_mat, GPUMaterial *gpumat);
   PassMain::Sub *npr_add(blender::Material *blender_mat, GPUMaterial *gpumat);
 

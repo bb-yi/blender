@@ -6,6 +6,7 @@
  * \ingroup eevee
  */
 
+#include "BLI_set.hh"
 #include "BLI_time.h"
 #include "DNA_material_types.h"
 
@@ -20,6 +21,27 @@
 #include "eevee_material.hh"
 
 namespace blender::eevee {
+
+static bool material_has_flag(const MaterialPass &pass, eGPUMaterialFlag flag)
+{
+  return (pass.gpumat != nullptr) && GPU_material_flag_get(pass.gpumat, flag);
+}
+
+static bool material_uses_glsl_function(const MaterialPass &pass)
+{
+  if (pass.gpumat == nullptr) {
+    return false;
+  }
+
+  const int generated_source_count = GPU_material_generated_source_count(pass.gpumat);
+  for (int i = 0; i < generated_source_count; i++) {
+    const GPUMaterialGeneratedSource *source = GPU_material_generated_source_get(pass.gpumat, i);
+    if (source != nullptr && source->filename.rfind("glsl_function_source_", 0) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
 
 /* -------------------------------------------------------------------- */
 /** \name Material
@@ -193,6 +215,49 @@ void MaterialModule::end_sync()
   }
   GPU_debug_group_end();
   texture_loading_queue_.clear();
+}
+
+int MaterialModule::npr_material_count() const
+{
+  Set<const blender::Material *> counted_materials;
+  for (const auto item : material_map_.items()) {
+    if (material_has_flag(item.value.npr, GPU_MATFLAG_NPR)) {
+      counted_materials.add(item.key.mat);
+    }
+  }
+  return int(counted_materials.size());
+}
+
+int MaterialModule::raycast_material_count() const
+{
+  Set<const blender::Material *> counted_materials;
+  for (const auto item : material_map_.items()) {
+    if (material_has_flag(item.value.shadow, GPU_MATFLAG_RAYCAST) ||
+        material_has_flag(item.value.shading, GPU_MATFLAG_RAYCAST) ||
+        material_has_flag(item.value.npr, GPU_MATFLAG_RAYCAST) ||
+        material_has_flag(item.value.prepass, GPU_MATFLAG_RAYCAST) ||
+        material_has_flag(item.value.capture, GPU_MATFLAG_RAYCAST))
+    {
+      counted_materials.add(item.key.mat);
+    }
+  }
+  return int(counted_materials.size());
+}
+
+int MaterialModule::glsl_function_material_count() const
+{
+  Set<const blender::Material *> counted_materials;
+  for (const auto item : material_map_.items()) {
+    if (material_uses_glsl_function(item.value.shadow) ||
+        material_uses_glsl_function(item.value.shading) ||
+        material_uses_glsl_function(item.value.npr) ||
+        material_uses_glsl_function(item.value.prepass) ||
+        material_uses_glsl_function(item.value.capture))
+    {
+      counted_materials.add(item.key.mat);
+    }
+  }
+  return int(counted_materials.size());
 }
 
 MaterialPass MaterialModule::material_pass_get(Object *ob,
