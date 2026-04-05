@@ -70,11 +70,12 @@ struct GLSLFunctionParam {
     float min_value = 0.0f;
     bool has_max = false;
     float max_value = 0.0f;
+    bool hide_value = false;
     std::optional<PropertySubType> subtype;
 
     bool has_any() const
     {
-      return has_default_value || has_min || has_max || subtype.has_value();
+      return has_default_value || has_min || has_max || hide_value || subtype.has_value();
     }
   };
 
@@ -120,12 +121,13 @@ struct GLSLRawParamMeta {
   std::optional<std::string> default_value;
   std::optional<std::string> min_value;
   std::optional<std::string> max_value;
+  std::optional<std::string> hide_value;
   std::optional<std::string> subtype;
 
   bool has_any() const
   {
     return default_value.has_value() || min_value.has_value() || max_value.has_value() ||
-           subtype.has_value();
+           hide_value.has_value() || subtype.has_value();
   }
 };
 
@@ -425,6 +427,21 @@ static std::string lowercase_copy(StringRef text)
   return result;
 }
 
+static bool parse_glsl_meta_bool_literal(const StringRef text, bool &r_value, std::string &r_error)
+{
+  const std::string normalized = lowercase_copy(trim_copy(text));
+  if (normalized == "1" || normalized == "true" || normalized == "yes" || normalized == "on") {
+    r_value = true;
+    return true;
+  }
+  if (normalized == "0" || normalized == "false" || normalized == "no" || normalized == "off") {
+    r_value = false;
+    return true;
+  }
+  r_error = "Expected a GLSL meta boolean literal";
+  return false;
+}
+
 static bool parse_glsl_meta_assignment_list(const StringRef text,
                                             Map<std::string, std::string> &r_assignments,
                                             std::string &r_error)
@@ -526,6 +543,11 @@ static bool merge_glsl_raw_param_meta(GLSLRawParamMeta &r_meta,
     }
     else if (key == "max") {
       if (!assign_once(r_meta.max_value, key, value)) {
+        return false;
+      }
+    }
+    else if (key == "hide_value") {
+      if (!assign_once(r_meta.hide_value, key, value)) {
         return false;
       }
     }
@@ -977,6 +999,12 @@ static bool apply_glsl_meta_to_param(const GLSLRawParamMeta &raw_meta,
     r_param.meta.has_max = true;
   }
 
+  if (raw_meta.hide_value.has_value()) {
+    if (!parse_glsl_meta_bool_literal(*raw_meta.hide_value, r_param.meta.hide_value, r_error)) {
+      return false;
+    }
+  }
+
   if (r_param.meta.has_min && r_param.meta.has_max &&
       r_param.meta.min_value > r_param.meta.max_value)
   {
@@ -1018,6 +1046,9 @@ static std::string build_glsl_meta_signature_key(const GLSLFunctionDefinition &f
     }
     if (param.meta.has_max) {
       ss << "max=" << param.meta.max_value << ';';
+    }
+    if (param.meta.hide_value) {
+      ss << "hide_value=1;";
     }
     if (param.meta.subtype.has_value()) {
       ss << "subtype=" << int(*param.meta.subtype) << ';';
@@ -1640,6 +1671,9 @@ static void add_glsl_socket_declaration(NodeDeclarationBuilder &b,
       if (param.meta.has_default_value) {
         decl.default_value(param.meta.default_value.x);
       }
+      if (param.meta.hide_value) {
+        decl.hide_value();
+      }
       if (param.meta.subtype.has_value()) {
         decl.subtype(*param.meta.subtype);
       }
@@ -1669,6 +1703,9 @@ static void add_glsl_socket_declaration(NodeDeclarationBuilder &b,
     }
     if (param.meta.subtype.has_value()) {
       decl.subtype(*param.meta.subtype);
+    }
+    if (param.meta.hide_value) {
+      decl.hide_value();
     }
   };
 

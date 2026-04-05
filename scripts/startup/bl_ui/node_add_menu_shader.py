@@ -72,6 +72,22 @@ def npr_shader_nodes_poll(context):
             snode.shader_type == 'NPR')
 
 
+def object_or_world_shader_nodes_poll(context):
+    return object_shader_nodes_poll(context) or world_shader_nodes_poll(context)
+
+
+def object_or_filter_shader_nodes_poll(context):
+    return object_shader_nodes_poll(context) or filter_eevee_shader_nodes_poll(context)
+
+
+def object_world_or_filter_shader_nodes_poll(context):
+    return (
+        object_shader_nodes_poll(context) or
+        world_shader_nodes_poll(context) or
+        filter_eevee_shader_nodes_poll(context)
+    )
+
+
 class NODE_MT_shader_node_input_base(node_add_menu.NodeMenu):
     bl_label = "Input"
 
@@ -300,6 +316,7 @@ class NODE_MT_shader_node_shader_base(node_add_menu.NodeMenu):
         self.node_operator(
             layout,
             "ShaderNodeEmission",
+            poll=object_world_or_filter_shader_nodes_poll(context),
         )
         self.node_operator(
             layout,
@@ -319,7 +336,7 @@ class NODE_MT_shader_node_shader_base(node_add_menu.NodeMenu):
         self.node_operator(
             layout,
             "ShaderNodeHoldout",
-            poll=object_shader_nodes_poll(context),
+            poll=object_or_filter_shader_nodes_poll(context),
         )
         self.node_operator(
             layout,
@@ -382,18 +399,23 @@ class NODE_MT_shader_node_shader_base(node_add_menu.NodeMenu):
         self.node_operator(
             layout,
             "ShaderNodeVolumePrincipled"
+            ,
+            poll=object_world_or_filter_shader_nodes_poll(context)
         )
         self.node_operator(
             layout,
             "ShaderNodeVolumeAbsorption",
+            poll=object_world_or_filter_shader_nodes_poll(context),
         )
         self.node_operator(
             layout,
             "ShaderNodeVolumeScatter",
+            poll=object_world_or_filter_shader_nodes_poll(context),
         )
         self.node_operator(
             layout,
             "ShaderNodeVolumeCoefficients",
+            poll=object_shader_nodes_poll(context),
         )
 
         self.draw_assets_for_catalog(layout, self.bl_label)

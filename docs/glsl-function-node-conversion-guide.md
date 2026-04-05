@@ -1083,6 +1083,7 @@ vec2 triangle_unproject(vec3 v)
 - 默认值
 - 最小值
 - 最大值
+- 隐藏数值输入控件
 - socket subtype
 
 ### 1. 基本格式
@@ -1208,6 +1209,29 @@ strength: default=0.5 min=0.0 max=1.0 subtype=factor
 offset: default=vec3(0.0) subtype=translation
 normal_dir: default=vec3(0.0, 0.0, 1.0) subtype=direction
 ```
+
+#### 3.5 `hide_value`
+
+用于隐藏输入 socket 的数值输入框，但保留 socket 本身。
+
+这意味着：
+
+- 仍然可以连线
+- 仍然保留接口
+- 只是节点面板里不显示具体数值输入控件
+
+示例：
+
+```glsl
+strength: default=0.5 hide_value=true
+```
+
+当前支持的布尔写法：
+
+- `true` / `false`
+- `1` / `0`
+- `yes` / `no`
+- `on` / `off`
 
 ### 4. 行为规则
 
