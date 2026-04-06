@@ -48,8 +48,11 @@ static void gpu_node_link_free(GPUNodeLink *link)
   }
 
   if (link->users == 0) {
-    if (link->output) {
+    if (link->link_type == GPU_NODE_LINK_OUTPUT && link->output) {
       link->output->link = nullptr;
+    }
+    if (link->link_type == GPU_NODE_LINK_FUNCTION_CALL && link->function_call) {
+      MEM_delete(link->function_call);
     }
     MEM_delete(link);
   }
@@ -159,11 +162,13 @@ static void gpu_node_input_link(GPUNode *node, GPUNodeLink *link, const GPUType 
       break;
     case GPU_NODE_LINK_DIFFERENTIATE_FLOAT_FN:
       input->source = GPU_SOURCE_FUNCTION_CALL;
-      /* NOTE(@fclem): End of function call is the return variable set during codegen. */
-      SNPRINTF(input->function_call,
-               "dF_branch_incomplete(%s(), %g, ",
-               link->differentiate_float.function_name,
-               link->differentiate_float.filter_width);
+      input->function_call = BLI_sprintfN("dF_branch_incomplete(%s(), %g, $OUT)",
+                                          link->differentiate_float.function_name,
+                                          link->differentiate_float.filter_width);
+      break;
+    case GPU_NODE_LINK_FUNCTION_CALL:
+      input->source = GPU_SOURCE_FUNCTION_CALL;
+      input->function_call = BLI_strdup(link->function_call);
       break;
     default:
       break;
@@ -174,6 +179,9 @@ static void gpu_node_input_link(GPUNode *node, GPUNodeLink *link, const GPUType 
   }
 
   if (link->link_type != GPU_NODE_LINK_OUTPUT) {
+    if (link->link_type == GPU_NODE_LINK_FUNCTION_CALL && link->function_call) {
+      MEM_delete(link->function_call);
+    }
     MEM_delete(link);
   }
   BLI_addtail(&node->inputs, input);
@@ -672,6 +680,14 @@ GPUNodeLink *GPU_uniform(const float *num)
   return link;
 }
 
+GPUNodeLink *GPU_function_call(StringRefNull function_call)
+{
+  GPUNodeLink *link = gpu_node_link_create();
+  link->link_type = GPU_NODE_LINK_FUNCTION_CALL;
+  link->function_call = BLI_strdup(function_call.c_str());
+  return link;
+}
+
 GPUNodeLink *GPU_differentiate_float_function(const char *function_name, const float filter_width)
 {
   GPUNodeLink *link = gpu_node_link_create();
@@ -969,6 +985,11 @@ static void gpu_inputs_free(ListBaseT<GPUInput> *inputs)
         break;
       case GPU_SOURCE_TEX:
         input.texture->users--;
+        break;
+      case GPU_SOURCE_FUNCTION_CALL:
+        if (input.function_call) {
+          MEM_delete(input.function_call);
+        }
         break;
       case GPU_SOURCE_TEX_TILED_MAPPING:
         /* Already handled by GPU_SOURCE_TEX. */

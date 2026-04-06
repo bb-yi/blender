@@ -1313,6 +1313,9 @@ class ShaderNodesInliner {
 
     /* Clear the parent frame pointer, because it does not exist in the destination tree. */
     copied_node.parent = nullptr;
+    copied_node.runtime->original = node.node->runtime->original ?
+                                        const_cast<bNode *>(node.node->runtime->original) :
+                                        const_cast<bNode *>(node.node);
 
     /* Setup input sockets for the copied node. */
     for (const bNodeSocket *src_input_socket : node->input_sockets()) {
@@ -1446,6 +1449,10 @@ class ShaderNodesInliner {
       return;
     }
     if (std::get_if<ClosureZoneValue>(&value.value)) {
+      if (original_node.is_type("ShaderNodeGLSLFunction") && dst_socket.type == SOCK_CLOSURE) {
+        /* sample2D closure sources are validated later by the GLSL Function compiler path. */
+        return;
+      }
       /* This type can't be assigned to a socket. One has to evaluate a closure. */
       BLI_assert_unreachable();
       return;

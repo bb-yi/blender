@@ -399,6 +399,7 @@ struct GPUCodegenOutput {
 
 GPUNodeLink *GPU_constant(const float *num);
 GPUNodeLink *GPU_uniform(const float *num);
+GPUNodeLink *GPU_function_call(StringRefNull function_call);
 GPUNodeLink *GPU_attribute(GPUMaterial *mat, eCustomDataType type, const char *name);
 /**
  * Add a GPU attribute that refers to the default color attribute on a geometry.
@@ -443,6 +444,10 @@ GPUNodeLink *GPU_color_band(GPUMaterial *mat, int size, float *pixels, float *r_
  * The result will be a vec2 containing dFdx and dFdy result of that function.
  */
 GPUNodeLink *GPU_differentiate_float_function(const char *function_name, const float filter_width);
+
+void GPU_material_closure_uv_source_push(GPUMaterial *material, StringRefNull source);
+void GPU_material_closure_uv_source_pop(GPUMaterial *material);
+StringRefNull GPU_material_closure_uv_source_get(const GPUMaterial *material);
 
 bool GPU_link(GPUMaterial *mat, const char *name, ...);
 bool GPU_stack_link(GPUMaterial *mat,

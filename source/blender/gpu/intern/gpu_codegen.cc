@@ -113,6 +113,22 @@ using blender::operator<<;
 /** \name GLSL code generation
  * \{ */
 
+static std::string gpu_function_call_expand(const char *function_call, const std::string &output)
+{
+  std::string call = function_call;
+  size_t placeholder_pos = call.find("$OUT");
+  if (placeholder_pos == std::string::npos) {
+    call += output;
+    call += ")";
+    return call;
+  }
+  while (placeholder_pos != std::string::npos) {
+    call.replace(placeholder_pos, 4, output);
+    placeholder_pos = call.find("$OUT", placeholder_pos + output.size());
+  }
+  return call;
+}
+
 const char *GPUCodegenCreateInfo::NameBuffer::append_sampler_name(const char name[32])
 {
   auto index = sampler_names.size();
@@ -339,8 +355,13 @@ void GPUCodegen::node_serialize(Set<StringRefNull> &used_libraries,
     };
     switch (input.source) {
       case GPU_SOURCE_FUNCTION_CALL:
-        eval_ss << type() << " " << &input << "; " << input.function_call << &input << ");\n";
+      {
+        std::stringstream output_name_ss;
+        output_name_ss << &input;
+        eval_ss << type() << " " << &input << "; "
+                << gpu_function_call_expand(input.function_call, output_name_ss.str()) << ";\n";
         break;
+      }
       case GPU_SOURCE_STRUCT:
         eval_ss << type() << " " << &input << " = "
                 << (input.type == GPU_CLOSURE ? "CLOSURE_DEFAULT" : "TEXTURE_HANDLE_DEFAULT")
@@ -618,7 +639,8 @@ void GPUCodegen::generate_graphs()
       /* Tag only the nodes needed for the current function */
       gpu_nodes_tag(&graph, func_link.outlink, GPU_NODE_TAG_FUNCTION);
       GPUGraphOutput graph = graph_serialize(GPU_NODE_TAG_FUNCTION, func_link.outlink);
-      eval_ss << "float " << func_link.name << "() {\n" << graph.serialized << "}\n\n";
+      eval_ss << func_link.return_type << " " << func_link.name << "() {\n"
+              << graph.serialized << "}\n\n";
       output.material_functions.append({eval_ss.str(), graph.dependencies});
     }
     /* Leave the function tags as they were before serialization */

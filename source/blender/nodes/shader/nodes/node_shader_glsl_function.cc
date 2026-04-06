@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <sstream>
 
+#include "node_exec.hh"
 #include "node_shader_util.hh"
 
 #include "BKE_image.hh"
@@ -25,6 +26,8 @@
 #include "BLI_string.h"
 
 #include "RNA_access.hh"
+
+#include "NOD_sync_sockets.hh"
 
 #include "UI_interface_layout.hh"
 #include "UI_resources.hh"
@@ -42,6 +45,7 @@ enum class GLSLBoundaryType {
   Vec3,
   Vec4,
   Sampler2D,
+  Sample2D,
   Void,
 };
 
@@ -54,6 +58,8 @@ struct GLSLToken {
   Kind kind;
   std::string text;
   char punctuation = '\0';
+  int64_t source_start = 0;
+  int64_t source_end = 0;
 };
 
 struct GLSLFunctionParam {
@@ -85,6 +91,8 @@ struct GLSLFunctionParam {
   std::string name;
   std::string identifier;
   int dimensions = 0;
+  int64_t type_source_start = -1;
+  int64_t type_source_end = -1;
   Meta meta;
 };
 
@@ -93,6 +101,8 @@ struct GLSLFunctionDefinition {
   std::string return_type_name;
   GLSLBoundaryType return_type = GLSLBoundaryType::Unsupported;
   Vector<GLSLFunctionParam> params;
+  int body_token_start = -1;
+  int body_token_end = -1;
 };
 
 struct GLSLParseResult {
@@ -117,6 +127,22 @@ struct GLSLParseResult {
   int meta_hash = 0;
 };
 
+struct GLSLSample2DUsage {
+  int texture_calls = 0;
+  bool uses_texture_lod = false;
+  bool uses_texture_grad = false;
+  bool uses_texture_size = false;
+  bool uses_texel_fetch = false;
+  bool uses_texture_gather = false;
+};
+
+enum class GLSLSample2DSourceKind : uint8_t {
+  None = 0,
+  ImageToClosure,
+  ClosureOutput,
+  Unsupported,
+};
+
 struct GLSLRawParamMeta {
   std::optional<std::string> default_value;
   std::optional<std::string> min_value;
@@ -131,9 +157,23 @@ struct GLSLRawParamMeta {
   }
 };
 
+struct GLSLClosureSampleHelper {
+  std::string param_name;
+  std::string helper_name;
+  std::string uv_global_name;
+  std::string sub_function_name;
+};
+
 static constexpr const char *result_socket_identifier = "Result";
 
 static Vector<GLSLToken> tokenize_glsl_source(const StringRef source);
+static const bNodeSocket *find_node_input_socket_by_identifier(const bNode &node,
+                                                               const StringRef identifier);
+static bNodeSocket *find_node_input_socket_by_identifier(bNode &node, const StringRef identifier);
+static const bNodeSocket *find_closure_output_socket_by_name(const bNode &node, const StringRef name);
+static bool closure_output_has_required_sample2d_signature(const bNode &closure_output_node,
+                                                           std::string &r_error);
+static bool glsl_param_has_input_socket(const GLSLFunctionParam &param);
 
 static bool is_identifier_start(const char c)
 {
@@ -162,6 +202,9 @@ static GLSLBoundaryType glsl_boundary_type_from_name(const StringRef type_name)
   if (type_name == "sampler2D") {
     return GLSLBoundaryType::Sampler2D;
   }
+  if (type_name == "sample2D") {
+    return GLSLBoundaryType::Sample2D;
+  }
   if (type_name == "void") {
     return GLSLBoundaryType::Void;
   }
@@ -184,7 +227,269 @@ static int glsl_boundary_dimensions(const GLSLBoundaryType type)
 
 static bool glsl_boundary_type_is_sampler(const GLSLBoundaryType type)
 {
+  return ELEM(type, GLSLBoundaryType::Sampler2D, GLSLBoundaryType::Sample2D);
+}
+
+static bool glsl_boundary_type_is_image_sampler(const GLSLBoundaryType type)
+{
   return type == GLSLBoundaryType::Sampler2D;
+}
+
+static bool glsl_boundary_type_is_sample2d(const GLSLBoundaryType type)
+{
+  return type == GLSLBoundaryType::Sample2D;
+}
+
+static const bNodeLink *find_used_direct_link(const bNodeSocket &socket)
+{
+  for (const bNodeLink *link : socket.directly_linked_links()) {
+    if (link->is_used()) {
+      return link;
+    }
+  }
+  return nullptr;
+}
+
+static GLSLSample2DSourceKind resolve_sample2d_source_kind(const bNode &node,
+                                                           const GLSLFunctionParam &param,
+                                                           const bNodeLink *&r_link)
+{
+  const bNodeSocket *sample_socket = find_node_input_socket_by_identifier(node, param.identifier);
+  if ((sample_socket == nullptr || !sample_socket->is_directly_linked()) && node.runtime->original) {
+    sample_socket = find_node_input_socket_by_identifier(*node.runtime->original, param.identifier);
+  }
+  if (sample_socket == nullptr) {
+    r_link = nullptr;
+    return GLSLSample2DSourceKind::None;
+  }
+
+  r_link = find_used_direct_link(*sample_socket);
+  if (r_link == nullptr || r_link->fromnode == nullptr) {
+    return GLSLSample2DSourceKind::None;
+  }
+  if (r_link->fromnode->is_type("ShaderNodeImageToClosure")) {
+    return GLSLSample2DSourceKind::ImageToClosure;
+  }
+  if (r_link->fromnode->is_type("NodeClosureOutput")) {
+    return GLSLSample2DSourceKind::ClosureOutput;
+  }
+  return GLSLSample2DSourceKind::Unsupported;
+}
+
+static Image *resolve_image_to_closure_image(const bNodeLink &link)
+{
+  if (link.fromnode == nullptr || !link.fromnode->is_type("ShaderNodeImageToClosure")) {
+    return nullptr;
+  }
+  const bNodeSocket &image_socket = link.fromnode->input_socket(0);
+  if (image_socket.type != SOCK_IMAGE || image_socket.default_value == nullptr) {
+    return nullptr;
+  }
+  return image_socket.default_value_typed<bNodeSocketValueImage>()->value;
+}
+
+static GPUSamplerState sampler_state_from_image_to_closure_node(const bNode &node)
+{
+  GPUSamplerState sampler_state = GPUSamplerState::default_sampler();
+
+  switch (node.custom2) {
+    case SHD_IMAGE_EXTENSION_EXTEND:
+      sampler_state.extend_x = GPU_SAMPLER_EXTEND_MODE_EXTEND;
+      sampler_state.extend_yz = GPU_SAMPLER_EXTEND_MODE_EXTEND;
+      break;
+    case SHD_IMAGE_EXTENSION_REPEAT:
+      sampler_state.extend_x = GPU_SAMPLER_EXTEND_MODE_REPEAT;
+      sampler_state.extend_yz = GPU_SAMPLER_EXTEND_MODE_REPEAT;
+      break;
+    case SHD_IMAGE_EXTENSION_CLIP:
+      sampler_state.extend_x = GPU_SAMPLER_EXTEND_MODE_CLAMP_TO_BORDER;
+      sampler_state.extend_yz = GPU_SAMPLER_EXTEND_MODE_CLAMP_TO_BORDER;
+      break;
+    case SHD_IMAGE_EXTENSION_MIRROR:
+      sampler_state.extend_x = GPU_SAMPLER_EXTEND_MODE_MIRRORED_REPEAT;
+      sampler_state.extend_yz = GPU_SAMPLER_EXTEND_MODE_MIRRORED_REPEAT;
+      break;
+    default:
+      break;
+  }
+
+  if (node.custom1 != SHD_INTERP_CLOSEST) {
+    sampler_state.filtering = GPU_SAMPLER_FILTERING_ANISOTROPIC | GPU_SAMPLER_FILTERING_LINEAR |
+                              GPU_SAMPLER_FILTERING_MIPMAP;
+  }
+
+  return sampler_state;
+}
+
+static Map<std::string, GLSLSample2DUsage> analyze_sample2d_usages(
+    const Vector<GLSLToken> &tokens, const GLSLFunctionDefinition &function)
+{
+  Map<std::string, GLSLSample2DUsage> usage_by_name;
+  for (const GLSLFunctionParam &param : function.params) {
+    if (glsl_boundary_type_is_sample2d(param.type) && glsl_param_has_input_socket(param)) {
+      usage_by_name.add(param.name, {});
+    }
+  }
+  if (usage_by_name.is_empty() || function.body_token_start < 0 || function.body_token_end < 0) {
+    return usage_by_name;
+  }
+
+  auto mark_usage = [&](const StringRef param_name, const StringRef call_name) {
+    GLSLSample2DUsage &usage = usage_by_name.lookup(param_name);
+    if (call_name == "texture") {
+      usage.texture_calls++;
+    }
+    else if (call_name == "textureLod") {
+      usage.uses_texture_lod = true;
+    }
+    else if (call_name == "textureGrad") {
+      usage.uses_texture_grad = true;
+    }
+    else if (call_name == "textureSize") {
+      usage.uses_texture_size = true;
+    }
+    else if (call_name == "texelFetch") {
+      usage.uses_texel_fetch = true;
+    }
+    else if (call_name == "textureGather") {
+      usage.uses_texture_gather = true;
+    }
+  };
+
+  for (int i = function.body_token_start; i <= function.body_token_end; i++) {
+    const GLSLToken &token = tokens[i];
+    if (token.kind != GLSLToken::Kind::Identifier) {
+      continue;
+    }
+    if (!ELEM(token.text.c_str(),
+              "texture",
+              "textureLod",
+              "textureGrad",
+              "textureSize",
+              "texelFetch",
+              "textureGather"))
+    {
+      continue;
+    }
+    if ((i + 1) > function.body_token_end || tokens[i + 1].kind != GLSLToken::Kind::Punctuation ||
+        tokens[i + 1].punctuation != '(')
+    {
+      continue;
+    }
+
+    int paren_depth = 1;
+    std::string first_identifier;
+    for (int j = i + 2; j <= function.body_token_end; j++) {
+      const GLSLToken &arg_token = tokens[j];
+      if (arg_token.kind == GLSLToken::Kind::Punctuation) {
+        if (arg_token.punctuation == '(') {
+          paren_depth++;
+        }
+        else if (arg_token.punctuation == ')') {
+          paren_depth--;
+          if (paren_depth == 0) {
+            break;
+          }
+        }
+        else if (arg_token.punctuation == ',' && paren_depth == 1) {
+          break;
+        }
+        continue;
+      }
+      if (paren_depth == 1 && arg_token.kind == GLSLToken::Kind::Identifier &&
+          first_identifier.empty())
+      {
+        first_identifier = arg_token.text;
+      }
+    }
+
+    if (!first_identifier.empty() && usage_by_name.contains(first_identifier)) {
+      mark_usage(first_identifier, token.text);
+    }
+  }
+
+  return usage_by_name;
+}
+
+static Map<std::string, GLSLSample2DSourceKind> resolve_sample2d_source_kinds(
+    const bNode &node, const GLSLFunctionDefinition &function)
+{
+  Map<std::string, GLSLSample2DSourceKind> source_kinds;
+  for (const GLSLFunctionParam &param : function.params) {
+    if (!glsl_param_has_input_socket(param) || !glsl_boundary_type_is_sample2d(param.type)) {
+      continue;
+    }
+    const bNodeLink *used_link = nullptr;
+    source_kinds.add_new(param.name, resolve_sample2d_source_kind(node, param, used_link));
+  }
+  return source_kinds;
+}
+
+static bool sample2d_usage_requires_image_source(const GLSLSample2DUsage &usage)
+{
+  return usage.uses_texture_size || usage.uses_texel_fetch || usage.uses_texture_gather;
+}
+
+static bool sample2d_usage_supported_for_closure_output(const GLSLSample2DUsage &usage)
+{
+  return !usage.uses_texture_lod && !usage.uses_texture_grad &&
+         !sample2d_usage_requires_image_source(usage);
+}
+
+static bool validate_sample2d_direct_texture_usage(const Vector<GLSLToken> &tokens,
+                                                   const GLSLFunctionDefinition &function,
+                                                   const StringRef param_name)
+{
+  Set<int> allowed_token_indices;
+  for (int i = function.body_token_start; i <= function.body_token_end; i++) {
+    const GLSLToken &token = tokens[i];
+    if (token.kind != GLSLToken::Kind::Identifier || token.text != "texture") {
+      continue;
+    }
+    if ((i + 1) > function.body_token_end || tokens[i + 1].kind != GLSLToken::Kind::Punctuation ||
+        tokens[i + 1].punctuation != '(')
+    {
+      continue;
+    }
+    int paren_depth = 1;
+    int comma_index = -1;
+    int closing_paren_index = -1;
+    for (int j = i + 2; j <= function.body_token_end; j++) {
+      const GLSLToken &arg_token = tokens[j];
+      if (arg_token.kind != GLSLToken::Kind::Punctuation) {
+        continue;
+      }
+      if (arg_token.punctuation == '(') {
+        paren_depth++;
+      }
+      else if (arg_token.punctuation == ')') {
+        paren_depth--;
+        if (paren_depth == 0) {
+          closing_paren_index = j;
+          break;
+        }
+      }
+      else if (arg_token.punctuation == ',' && paren_depth == 1) {
+        comma_index = j;
+      }
+    }
+    if (comma_index == -1 || closing_paren_index == -1 || (comma_index - (i + 2)) != 1) {
+      continue;
+    }
+    if (tokens[i + 2].kind == GLSLToken::Kind::Identifier && tokens[i + 2].text == param_name) {
+      allowed_token_indices.add(i + 2);
+    }
+  }
+
+  for (int i = function.body_token_start; i <= function.body_token_end; i++) {
+    const GLSLToken &token = tokens[i];
+    if (token.kind == GLSLToken::Kind::Identifier && token.text == param_name &&
+        !allowed_token_indices.contains(i))
+    {
+      return false;
+    }
+  }
+  return true;
 }
 
 static std::string make_socket_identifier(const StringRef prefix, const StringRef name)
@@ -272,32 +577,94 @@ static bNodeSocket *find_node_input_socket_by_identifier(bNode &node, const Stri
 }
 
 static bool validate_sampler_inputs(const bNode &node,
+                                    const Vector<GLSLToken> &tokens,
                                     const GLSLFunctionDefinition &function,
                                     std::string &r_error)
 {
+  const Map<std::string, GLSLSample2DUsage> usage_by_name = analyze_sample2d_usages(tokens,
+                                                                                    function);
+
   for (const GLSLFunctionParam &param : function.params) {
     if (!glsl_param_has_input_socket(param) || !glsl_boundary_type_is_sampler(param.type)) {
       continue;
     }
 
     const bNodeSocket *socket = find_node_input_socket_by_identifier(node, param.identifier);
-    if (socket == nullptr || socket->type != SOCK_IMAGE || socket->default_value == nullptr) {
+    if ((socket == nullptr || !socket->is_directly_linked()) && node.runtime->original) {
+      socket = find_node_input_socket_by_identifier(*node.runtime->original, param.identifier);
+    }
+    if (socket == nullptr) {
       continue;
     }
 
-    if (socket->is_directly_linked()) {
-      r_error = "sampler2D parameter '" + param.name +
-                "' does not support links yet; choose an image on the node";
+    if (glsl_boundary_type_is_image_sampler(param.type)) {
+      if (socket->type != SOCK_IMAGE || socket->default_value == nullptr) {
+        continue;
+      }
+      if (socket->is_directly_linked()) {
+        r_error = param.type_name + " parameter '" + param.name +
+                  "' does not support links yet; choose an image on the node";
+        return false;
+      }
+
+      Image *image = socket->default_value_typed<bNodeSocketValueImage>()->value;
+      if (image == nullptr) {
+        r_error = "Choose an image for " + param.type_name + " parameter '" + param.name + "'";
+        return false;
+      }
+      if (image->source == IMA_SRC_TILED) {
+        r_error = param.type_name + " parameter '" + param.name +
+                  "' does not support UDIM tiled images yet";
+        return false;
+      }
+      continue;
+    }
+
+    if (!socket->is_directly_linked()) {
+      r_error = "Connect an Image to Closure node to sample2D parameter '" + param.name + "'";
       return false;
     }
 
-    Image *image = socket->default_value_typed<bNodeSocketValueImage>()->value;
+    const bNodeLink *used_link = nullptr;
+    const GLSLSample2DSourceKind source_kind = resolve_sample2d_source_kind(node, param, used_link);
+    if (source_kind == GLSLSample2DSourceKind::ClosureOutput) {
+      const GLSLSample2DUsage usage = usage_by_name.lookup_default(param.name, {});
+      if (sample2d_usage_requires_image_source(usage)) {
+        r_error = "sample2D parameter '" + param.name +
+                  "' uses image-only sampling functions that require Image to Closure";
+        return false;
+      }
+      if (!sample2d_usage_supported_for_closure_output(usage)) {
+        r_error = "sample2D parameter '" + param.name +
+                  "' only supports texture(tex, uv) when driven by Closure Output";
+        return false;
+      }
+      if (!validate_sample2d_direct_texture_usage(tokens, function, param.name)) {
+        r_error = "sample2D parameter '" + param.name +
+                  "' only supports direct texture(tex, uv) calls when driven by Closure Output";
+        return false;
+      }
+      std::string closure_error;
+      if (!closure_output_has_required_sample2d_signature(*used_link->fromnode, closure_error)) {
+        r_error = "Closure Output connected to sample2D parameter '" + param.name +
+                  "' is missing required closure items: " + closure_error;
+        return false;
+      }
+      continue;
+    }
+    if (source_kind != GLSLSample2DSourceKind::ImageToClosure || used_link == nullptr) {
+      r_error = "sample2D parameter '" + param.name +
+                "' currently only supports Image to Closure";
+      return false;
+    }
+
+    Image *image = resolve_image_to_closure_image(*used_link);
     if (image == nullptr) {
-      r_error = "Choose an image for sampler2D parameter '" + param.name + "'";
+      r_error = "Choose an image on the Image to Closure node connected to '" + param.name + "'";
       return false;
     }
     if (image->source == IMA_SRC_TILED) {
-      r_error = "sampler2D parameter '" + param.name +
+      r_error = "sample2D parameter '" + param.name +
                 "' does not support UDIM tiled images yet";
       return false;
     }
@@ -328,13 +695,14 @@ static void sync_sampler_socket_visibility(bNode &node, const GLSLParseResult &p
   }
 
   for (const GLSLFunctionParam &param : parse_result.function.params) {
-    if (!glsl_param_has_input_socket(param) || !glsl_boundary_type_is_sampler(param.type)) {
+    if (!glsl_param_has_input_socket(param) || !glsl_boundary_type_is_image_sampler(param.type)) {
       continue;
     }
     if (bNodeSocket *socket = find_node_input_socket_by_identifier(node, param.identifier)) {
       socket->flag |= SOCK_HIDDEN;
     }
   }
+
 }
 
 static void draw_sampler_input_properties(ui::Layout &layout, PointerRNA *node_ptr, bNode &node)
@@ -1132,12 +1500,13 @@ static Vector<GLSLToken> tokenize_glsl_source(const StringRef source)
       while (i < source.size() && is_identifier_continue(source[i])) {
         i++;
       }
-      tokens.append({GLSLToken::Kind::Identifier, std::string(source.substr(start, i - start)), '\0'});
+      tokens.append(
+          {GLSLToken::Kind::Identifier, std::string(source.substr(start, i - start)), '\0', start, i});
       continue;
     }
 
     if (strchr("(){}[],;=", c) != nullptr) {
-      tokens.append({GLSLToken::Kind::Punctuation, std::string(1, c), c});
+      tokens.append({GLSLToken::Kind::Punctuation, std::string(1, c), c, i, i + 1});
     }
     i++;
   }
@@ -1189,15 +1558,17 @@ static bool parse_glsl_parameter_tokens(const Span<GLSLToken> tokens,
 
   const StringRef type_name = identifiers[identifiers.size() - 2];
   const StringRef param_name = identifiers.last();
+  const GLSLToken &type_token = tokens[tokens.size() - 2];
   const GLSLBoundaryType boundary_type = glsl_boundary_type_from_name(type_name);
   if (!ELEM(boundary_type,
             GLSLBoundaryType::Float,
             GLSLBoundaryType::Vec2,
             GLSLBoundaryType::Vec3,
             GLSLBoundaryType::Vec4,
-            GLSLBoundaryType::Sampler2D))
+            GLSLBoundaryType::Sampler2D,
+            GLSLBoundaryType::Sample2D))
   {
-    r_error = "Supported parameter types are float, vec2, vec3, vec4, and sampler2D";
+    r_error = "Supported parameter types are float, vec2, vec3, vec4, sampler2D, and sample2D";
     return false;
   }
 
@@ -1216,6 +1587,8 @@ static bool parse_glsl_parameter_tokens(const Span<GLSLToken> tokens,
   r_param.name = std::string(param_name);
   r_param.identifier = make_socket_identifier(has_out_qualifier ? "Out" : "In", param_name);
   r_param.dimensions = glsl_boundary_dimensions(boundary_type);
+  r_param.type_source_start = type_token.source_start;
+  r_param.type_source_end = type_token.source_end;
   return true;
 }
 
@@ -1297,6 +1670,39 @@ static bool parse_glsl_function_definition(const Vector<GLSLToken> &tokens,
     r_error = "The selected function does not expose any node outputs";
     return false;
   }
+
+  const int opening_brace_index = closing_paren_index + 1;
+  if (opening_brace_index >= tokens.size() || tokens[opening_brace_index].kind != GLSLToken::Kind::Punctuation ||
+      tokens[opening_brace_index].punctuation != '{')
+  {
+    r_error = "Could not resolve the GLSL function body";
+    return false;
+  }
+
+  int brace_depth = 1;
+  int closing_brace_index = -1;
+  for (int i = opening_brace_index + 1; i < tokens.size(); i++) {
+    const GLSLToken &token = tokens[i];
+    if (token.kind != GLSLToken::Kind::Punctuation) {
+      continue;
+    }
+    if (token.punctuation == '{') {
+      brace_depth++;
+    }
+    else if (token.punctuation == '}') {
+      brace_depth--;
+      if (brace_depth == 0) {
+        closing_brace_index = i;
+        break;
+      }
+    }
+  }
+  if (closing_brace_index == -1) {
+    r_error = "Could not resolve the GLSL function body";
+    return false;
+  }
+  r_function.body_token_start = opening_brace_index + 1;
+  r_function.body_token_end = closing_brace_index - 1;
 
   return true;
 }
@@ -1489,11 +1895,307 @@ static bool load_glsl_source(const bNode &node, std::string &r_source, std::stri
   return true;
 }
 
+static const bNodeSocket *find_closure_output_socket_by_name(const bNode &node, const StringRef name)
+{
+  if (!node.is_type("NodeClosureOutput")) {
+    return nullptr;
+  }
+  const auto &storage = *static_cast<const NodeClosureOutput *>(node.storage);
+  for (const int i : IndexRange(storage.output_items.items_num)) {
+    const NodeClosureOutputItem &item = storage.output_items.items[i];
+    if (item.name != nullptr && name == item.name) {
+      return &node.input_socket(i);
+    }
+  }
+  return nullptr;
+}
+
+static const bNode *find_localized_copy_of_original_node(const bNodeTree &tree, const bNode &original_node)
+{
+  for (const bNode *node : tree.nodes_by_type("NodeClosureOutput")) {
+    if (node->runtime->original == &original_node) {
+      return node;
+    }
+  }
+  return nullptr;
+}
+
+static bool closure_output_has_required_sample2d_signature(const bNode &closure_output_node,
+                                                           std::string &r_error)
+{
+  const auto &storage = *static_cast<const NodeClosureOutput *>(closure_output_node.storage);
+
+  bool has_uv = false;
+  for (const int i : IndexRange(storage.input_items.items_num)) {
+    const NodeClosureInputItem &item = storage.input_items.items[i];
+    if (item.name != nullptr && STREQ(item.name, "UV") && item.socket_type == SOCK_VECTOR) {
+      has_uv = true;
+      break;
+    }
+  }
+  if (!has_uv) {
+    r_error = "Closure Output must expose a Vector input item named 'UV' for sample2D";
+    return false;
+  }
+
+  const bNodeSocket *color_socket = find_closure_output_socket_by_name(closure_output_node, "Color");
+  if (color_socket == nullptr || color_socket->type != SOCK_RGBA) {
+    r_error = "Closure Output must expose an RGBA output item named 'Color' for sample2D";
+    return false;
+  }
+  return true;
+}
+
+static void mark_node_upstream_for_closure_helper(const bNode &node, Set<const bNode *> &r_visited_nodes);
+
+static void mark_socket_upstream_for_closure_helper(const bNodeSocket &socket,
+                                                    Set<const bNode *> &r_visited_nodes)
+{
+  for (const bNodeLink *link : socket.directly_linked_links()) {
+    if (!link->is_used() || link->fromnode == nullptr) {
+      continue;
+    }
+    mark_node_upstream_for_closure_helper(*link->fromnode, r_visited_nodes);
+  }
+}
+
+static void mark_node_upstream_for_closure_helper(const bNode &node, Set<const bNode *> &r_visited_nodes)
+{
+  if (!r_visited_nodes.add(&node)) {
+    return;
+  }
+  const_cast<bNode &>(node).runtime->need_exec = 1;
+  for (const bNodeSocket *input_socket : node.input_sockets()) {
+    mark_socket_upstream_for_closure_helper(*input_socket, r_visited_nodes);
+  }
+}
+
+static bool build_closure_sample_helper(GPUMaterial *mat,
+                                        const bNode &node,
+                                        const GLSLFunctionParam &param,
+                                        const StringRef helper_name,
+                                        const StringRef uv_global_name,
+                                        GLSLClosureSampleHelper &r_helper,
+                                        std::string &r_error)
+{
+  const bNodeLink *used_link = nullptr;
+  if (resolve_sample2d_source_kind(node, param, used_link) != GLSLSample2DSourceKind::ClosureOutput ||
+      used_link == nullptr || used_link->fromnode == nullptr)
+  {
+    r_error = "sample2D parameter '" + param.name + "' is missing a Closure Output source";
+    return false;
+  }
+
+  const bNode *closure_output_node = used_link->fromnode;
+  if (&closure_output_node->owner_tree() != &node.owner_tree()) {
+    if (const bNode *localized_node = find_localized_copy_of_original_node(node.owner_tree(),
+                                                                           *closure_output_node))
+    {
+      closure_output_node = localized_node;
+    }
+  }
+
+  std::string closure_error;
+  if (!closure_output_has_required_sample2d_signature(*closure_output_node, closure_error)) {
+    r_error = "Closure Output connected to '" + param.name + "' is missing required closure items: " +
+              closure_error;
+    return false;
+  }
+  const bNodeSocket *color_socket = find_closure_output_socket_by_name(*closure_output_node, "Color");
+
+  bNodeExecContext context = {};
+  bNodeTree *helper_tree = const_cast<bNodeTree *>(&closure_output_node->owner_tree());
+  bNodeTreeExec *exec = ntreeShaderBeginExecTree_internal(&context, helper_tree, bke::NODE_INSTANCE_KEY_BASE);
+  if (exec == nullptr) {
+    r_error = "Could not build a helper shader tree for sample2D parameter '" + param.name + "'";
+    return false;
+  }
+  BLI_SCOPED_DEFER([&]() { ntreeShaderEndExecTree_internal(exec); });
+
+  Vector<int> previous_need_exec;
+  for (bNode &tree_node : helper_tree->nodes) {
+    previous_need_exec.append(tree_node.runtime->need_exec);
+    tree_node.runtime->need_exec = 0;
+  }
+  BLI_SCOPED_DEFER([&]() {
+    int node_index = 0;
+    for (bNode &tree_node : helper_tree->nodes) {
+      tree_node.runtime->need_exec = previous_need_exec[node_index++];
+    }
+  });
+  Set<const bNode *> visited_nodes;
+  mark_socket_upstream_for_closure_helper(*color_socket, visited_nodes);
+
+  GPU_material_closure_uv_source_push(mat, StringRefNull(uv_global_name));
+  BLI_SCOPED_DEFER([&]() { GPU_material_closure_uv_source_pop(mat); });
+
+  ntreeExecGPUNodes(exec, mat, nullptr);
+
+  bNodeStack *color_stack = node_get_socket_stack(exec->stack, const_cast<bNodeSocket *>(color_socket));
+  GPUNodeLink *color_link = (color_stack != nullptr) ? static_cast<GPUNodeLink *>(color_stack->data) :
+                                                       nullptr;
+  if (color_link == nullptr && color_stack != nullptr) {
+    color_link = GPU_constant(color_stack->vec);
+  }
+  if (color_link == nullptr) {
+    r_error = "Could not evaluate Closure Output Color for sample2D parameter '" + param.name + "'";
+    return false;
+  }
+
+  const char *sub_function_name = GPU_material_split_sub_function(mat, GPU_VEC4, &color_link);
+  r_helper.param_name = param.name;
+  r_helper.helper_name = helper_name;
+  r_helper.uv_global_name = uv_global_name;
+  r_helper.sub_function_name = sub_function_name;
+  return true;
+}
+
+static std::string trim_source_range(const StringRef source, const int64_t start, const int64_t end)
+{
+  if (end <= start) {
+    return "";
+  }
+  return trim_copy(source.substr(start, end - start));
+}
+
+static const GLSLClosureSampleHelper *find_closure_sample_helper(
+    const Span<GLSLClosureSampleHelper> helpers, const StringRef param_name)
+{
+  for (const GLSLClosureSampleHelper &helper : helpers) {
+    if (param_name == helper.param_name) {
+      return &helper;
+    }
+  }
+  return nullptr;
+}
+
+static bool rewrite_glsl_source_for_sample2d(const StringRef source,
+                                             const Vector<GLSLToken> &tokens,
+                                             const GLSLFunctionDefinition &function,
+                                             const Map<std::string, GLSLSample2DSourceKind> &source_kinds,
+                                             const Span<GLSLClosureSampleHelper> closure_helpers,
+                                             std::string &r_rewritten_source,
+                                             std::string &r_error)
+{
+  struct Replacement {
+    int64_t start = 0;
+    int64_t end = 0;
+    std::string text;
+  };
+
+  Vector<Replacement> replacements;
+
+  for (const GLSLFunctionParam &param : function.params) {
+    if (!glsl_boundary_type_is_sample2d(param.type) || param.type_source_start < 0 ||
+        param.type_source_end <= param.type_source_start)
+    {
+      continue;
+    }
+    const GLSLSample2DSourceKind *source_kind = source_kinds.lookup_ptr(param.name);
+    if (source_kind != nullptr && *source_kind == GLSLSample2DSourceKind::ClosureOutput) {
+      replacements.append({param.type_source_start, param.type_source_end, "float"});
+    }
+  }
+
+  for (int i = function.body_token_start; i <= function.body_token_end; i++) {
+    const GLSLToken &token = tokens[i];
+    if (token.kind != GLSLToken::Kind::Identifier || token.text != "texture") {
+      continue;
+    }
+    if ((i + 1) > function.body_token_end || tokens[i + 1].kind != GLSLToken::Kind::Punctuation ||
+        tokens[i + 1].punctuation != '(')
+    {
+      continue;
+    }
+
+    int paren_depth = 1;
+    int closing_paren_index = -1;
+    Vector<int> comma_indices;
+    for (int j = i + 2; j <= function.body_token_end; j++) {
+      const GLSLToken &arg_token = tokens[j];
+      if (arg_token.kind != GLSLToken::Kind::Punctuation) {
+        continue;
+      }
+      if (arg_token.punctuation == '(') {
+        paren_depth++;
+      }
+      else if (arg_token.punctuation == ')') {
+        paren_depth--;
+        if (paren_depth == 0) {
+          closing_paren_index = j;
+          break;
+        }
+      }
+      else if (arg_token.punctuation == ',' && paren_depth == 1) {
+        comma_indices.append(j);
+      }
+    }
+
+    if (closing_paren_index == -1 || comma_indices.is_empty()) {
+      continue;
+    }
+
+    const std::string first_argument = trim_source_range(
+        source, tokens[i + 1].source_end, tokens[comma_indices[0]].source_start);
+    const GLSLClosureSampleHelper *helper = find_closure_sample_helper(closure_helpers, first_argument);
+    if (helper == nullptr) {
+      continue;
+    }
+    if (comma_indices.size() != 1) {
+      r_error = "sample2D parameter '" + helper->param_name +
+                "' only supports texture(tex, uv) when driven by Closure Output";
+      return false;
+    }
+
+    const std::string second_argument = trim_source_range(
+        source, tokens[comma_indices[0]].source_end, tokens[closing_paren_index].source_start);
+    replacements.append({token.source_start,
+                         tokens[closing_paren_index].source_end,
+                         helper->helper_name + "(" + second_argument + ")"});
+  }
+
+  r_rewritten_source = std::string(source);
+  for (int i = replacements.size() - 1; i >= 0; i--) {
+    const Replacement &replacement = replacements[i];
+    r_rewritten_source.replace(
+        replacement.start, replacement.end - replacement.start, replacement.text);
+  }
+  return true;
+}
+
+static std::string build_sample2d_closure_helper_block(
+    const Span<GLSLClosureSampleHelper> closure_helpers)
+{
+  if (closure_helpers.is_empty()) {
+    return "";
+  }
+
+  std::stringstream ss;
+  for (const GLSLClosureSampleHelper &helper : closure_helpers) {
+    ss << "vec4 " << helper.sub_function_name << "();\n";
+  }
+  ss << "\n";
+  for (const GLSLClosureSampleHelper &helper : closure_helpers) {
+    ss << "vec2 " << helper.uv_global_name << " = vec2(0.0);\n";
+  }
+  ss << "\n";
+  for (const GLSLClosureSampleHelper &helper : closure_helpers) {
+    ss << "vec4 " << helper.helper_name << "(vec2 uv)\n{\n";
+    ss << "  " << helper.uv_global_name << " = uv;\n";
+    ss << "  return " << helper.sub_function_name << "();\n";
+    ss << "}\n\n";
+  }
+  return ss.str();
+}
+
 static std::string build_namespaced_glsl_source(const StringRef prefix,
                                                 const Span<std::string> function_names,
-                                                const StringRef source)
+                                                const StringRef source,
+                                                const Span<GLSLClosureSampleHelper> closure_helpers)
 {
   std::stringstream ss;
+  ss << build_sample2d_closure_helper_block(closure_helpers);
+  ss << "#define sample2D sampler2D\n";
   for (const std::string &name : function_names) {
     ss << "#define " << name << " " << prefix << name << "\n";
   }
@@ -1504,10 +2206,23 @@ static std::string build_namespaced_glsl_source(const StringRef prefix,
   for (const std::string &name : function_names) {
     ss << "#undef " << name << "\n";
   }
+  ss << "#undef sample2D\n";
   return ss.str();
 }
 
-static std::string build_wrapper_glsl_source(const GLSLParseResult &parse_result)
+static StringRefNull emitted_type_name(const GLSLFunctionParam &param,
+                                       const GLSLSample2DSourceKind sample2d_source_kind)
+{
+  if (param.type != GLSLBoundaryType::Sample2D) {
+    return param.type_name;
+  }
+  return (sample2d_source_kind == GLSLSample2DSourceKind::ClosureOutput) ? StringRefNull("float") :
+                                                                            StringRefNull("sampler2D");
+}
+
+static std::string build_wrapper_glsl_source(
+    const GLSLParseResult &parse_result,
+    const Map<std::string, GLSLSample2DSourceKind> &sample2d_source_kinds)
 {
   const GLSLFunctionDefinition &function = parse_result.function;
 
@@ -1521,7 +2236,10 @@ static std::string build_wrapper_glsl_source(const GLSLParseResult &parse_result
     if (need_comma) {
       ss << ", ";
     }
-    ss << param.type_name << " " << make_wrapper_argument_name("in", param.name);
+    const GLSLSample2DSourceKind source_kind = sample2d_source_kinds.lookup_ptr(param.name) ?
+                                                   *sample2d_source_kinds.lookup_ptr(param.name) :
+                                                   GLSLSample2DSourceKind::None;
+    ss << emitted_type_name(param, source_kind) << " " << make_wrapper_argument_name("in", param.name);
     need_comma = true;
   }
   if (function.return_type != GLSLBoundaryType::Void) {
@@ -1564,6 +2282,50 @@ static std::string build_wrapper_glsl_source(const GLSLParseResult &parse_result
   return ss.str();
 }
 
+static bool build_specialized_glsl_sources(GPUMaterial *mat,
+                                           const bNode &node,
+                                           const GLSLParseResult &parse_result,
+                                           std::string &r_library_source,
+                                           std::string &r_wrapper_source,
+                                           std::string &r_error)
+{
+  const std::string stripped_source = strip_glsl_comments(parse_result.source);
+  const Vector<GLSLToken> tokens = tokenize_glsl_source(stripped_source);
+  const Map<std::string, GLSLSample2DSourceKind> source_kinds = resolve_sample2d_source_kinds(
+      node, parse_result.function);
+
+  Vector<GLSLClosureSampleHelper> closure_helpers;
+  for (const GLSLFunctionParam &param : parse_result.function.params) {
+    const GLSLSample2DSourceKind *source_kind = source_kinds.lookup_ptr(param.name);
+    if (source_kind == nullptr || *source_kind != GLSLSample2DSourceKind::ClosureOutput) {
+      continue;
+    }
+
+    GLSLClosureSampleHelper helper;
+    const std::string helper_name = "glsl_sample2d_" + std::to_string(node.identifier) + "_" +
+                                    param.identifier;
+    const std::string uv_global_name = helper_name + "_uv";
+    if (!build_closure_sample_helper(
+            mat, node, param, helper_name, uv_global_name, helper, r_error))
+    {
+      return false;
+    }
+    closure_helpers.append(helper);
+  }
+
+  std::string rewritten_source;
+  if (!rewrite_glsl_source_for_sample2d(
+          stripped_source, tokens, parse_result.function, source_kinds, closure_helpers, rewritten_source, r_error))
+  {
+    return false;
+  }
+
+  r_library_source = build_namespaced_glsl_source(
+      parse_result.source_prefix, parse_result.function_names, rewritten_source, closure_helpers);
+  r_wrapper_source = build_wrapper_glsl_source(parse_result, source_kinds);
+  return true;
+}
+
 static GLSLParseResult parse_glsl_for_node(const bNode &node)
 {
   GLSLParseResult result;
@@ -1602,7 +2364,7 @@ static GLSLParseResult parse_glsl_for_node(const bNode &node)
   if (!apply_glsl_meta_to_function(meta_by_key, result.function, result.meta_hash, result.error)) {
     return result;
   }
-  if (!validate_sampler_inputs(node, result.function, result.error)) {
+  if (!validate_sampler_inputs(node, tokens, result.function, result.error)) {
     return result;
   }
 
@@ -1626,8 +2388,9 @@ static GLSLParseResult parse_glsl_for_node(const bNode &node)
   result.wrapper_name = "glsl_fn_" + std::to_string(node.identifier) + "_" + signature_hash_hex;
   result.wrapper_filename = result.wrapper_name + ".glsl";
   result.library_source = build_namespaced_glsl_source(
-      result.source_prefix, result.function_names, result.source);
-  result.wrapper_source = build_wrapper_glsl_source(result);
+      result.source_prefix, result.function_names, result.source, Span<GLSLClosureSampleHelper>());
+  result.wrapper_source = build_wrapper_glsl_source(
+      result, Map<std::string, GLSLSample2DSourceKind>());
   return result;
 }
 
@@ -1654,9 +2417,15 @@ static void add_glsl_socket_declaration(NodeDeclarationBuilder &b,
                                         const StringRef socket_name,
                                         const StringRef socket_identifier)
 {
-  if (param.type == GLSLBoundaryType::Sampler2D) {
+  if (glsl_boundary_type_is_image_sampler(param.type)) {
     BLI_assert(!is_output);
     b.add_input<decl::Image>(socket_name, socket_identifier);
+    return;
+  }
+
+  if (glsl_boundary_type_is_sample2d(param.type)) {
+    BLI_assert(!is_output);
+    b.add_input<decl::Closure>(socket_name, socket_identifier);
     return;
   }
 
@@ -1840,7 +2609,7 @@ static void node_layout(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
   draw_node_layout_content(layout, ptr);
 }
 
-static void node_layout_ex(ui::Layout &layout, bContext *C, PointerRNA *ptr)
+static void node_layout_ex(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
 {
   draw_node_layout_content(layout, ptr);
 
@@ -1903,6 +2672,8 @@ static bool prepare_sampler_input_bindings(GPUMaterial *mat,
                                            const GLSLFunctionDefinition &function,
                                            GPUNodeStack *in)
 {
+  static float zero_value[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+
   if (in == nullptr || !glsl_function_has_sampler_inputs(function)) {
     return true;
   }
@@ -1910,32 +2681,80 @@ static bool prepare_sampler_input_bindings(GPUMaterial *mat,
   const NodeShaderGLSLFunction &storage = node_storage(node);
   const GPUSamplerState sampler_state = glsl_function_sampler_state(storage);
 
-  int input_index = 0;
+  auto find_input_stack_by_identifier = [&](const StringRef identifier) -> GPUNodeStack * {
+    int input_index = 0;
+    for (const bNodeSocket *socket : node.input_sockets()) {
+      if (identifier == socket->identifier) {
+        return &in[input_index];
+      }
+      input_index++;
+    }
+    return nullptr;
+  };
+
+  auto resolve_sample2d_image = [&](const GLSLFunctionParam &param) -> Image * {
+    const bNodeLink *used_link = nullptr;
+    const GLSLSample2DSourceKind source_kind = resolve_sample2d_source_kind(node, param, used_link);
+    if (source_kind != GLSLSample2DSourceKind::ImageToClosure || used_link == nullptr) {
+      return nullptr;
+    }
+    return resolve_image_to_closure_image(*used_link);
+  };
+
+  auto resolve_sample2d_sampler_state = [&](const GLSLFunctionParam &param) -> GPUSamplerState {
+    const bNodeLink *used_link = nullptr;
+    const GLSLSample2DSourceKind source_kind = resolve_sample2d_source_kind(node, param, used_link);
+    if (source_kind == GLSLSample2DSourceKind::ImageToClosure && used_link != nullptr &&
+        used_link->fromnode != nullptr)
+    {
+      return sampler_state_from_image_to_closure_node(*used_link->fromnode);
+    }
+    return sampler_state;
+  };
+
   for (const GLSLFunctionParam &param : function.params) {
     if (!glsl_param_has_input_socket(param)) {
       continue;
     }
 
     if (glsl_boundary_type_is_sampler(param.type)) {
-      const Span<const bNodeSocket *> input_sockets = node.input_sockets();
-      const bNodeSocket *socket = input_index < input_sockets.size() ? input_sockets[input_index] :
-                                                                     nullptr;
-      if (socket == nullptr || socket->type != SOCK_IMAGE || socket->default_value == nullptr ||
-          socket->is_directly_linked())
-      {
+      const std::string socket_identifier = param.identifier;
+      const bNodeSocket *socket = find_node_input_socket_by_identifier(node, socket_identifier);
+      GPUNodeStack *stack = find_input_stack_by_identifier(socket_identifier);
+      if (stack == nullptr) {
         return false;
       }
 
-      Image *image = socket->default_value_typed<bNodeSocketValueImage>()->value;
+      Image *image = nullptr;
+      if (glsl_boundary_type_is_sample2d(param.type)) {
+        const bNodeLink *used_link = nullptr;
+        const GLSLSample2DSourceKind source_kind = resolve_sample2d_source_kind(node, param, used_link);
+        if (source_kind == GLSLSample2DSourceKind::ClosureOutput) {
+          stack->type = GPU_FLOAT;
+          stack->link = GPU_constant(zero_value);
+          continue;
+        }
+        image = resolve_sample2d_image(param);
+      }
+      else {
+        if (socket == nullptr || socket->type != SOCK_IMAGE || socket->default_value == nullptr ||
+            socket->is_directly_linked())
+        {
+          return false;
+        }
+        image = socket->default_value_typed<bNodeSocketValueImage>()->value;
+      }
+
       if (image == nullptr || image->source == IMA_SRC_TILED) {
         return false;
       }
 
-      in[input_index].type = GPU_TEX2D;
-      in[input_index].link = GPU_image(mat, image, nullptr, sampler_state);
+      stack->type = GPU_TEX2D;
+      const GPUSamplerState active_sampler_state = glsl_boundary_type_is_sample2d(param.type) ?
+                                                      resolve_sample2d_sampler_state(param) :
+                                                      sampler_state;
+      stack->link = GPU_image(mat, image, nullptr, active_sampler_state);
     }
-
-    input_index++;
   }
 
   return true;
@@ -1947,6 +2766,36 @@ static void node_update(bNodeTree * /*ntree*/, bNode *node)
   cache_parse_status(*node, parse_result);
   sync_sampler_socket_visibility(*node, parse_result);
   sync_glsl_meta_defaults(*node, parse_result);
+}
+
+static bool node_insert_link(bke::NodeInsertLinkParams &params)
+{
+  if (params.link.tonode != &params.node || params.link.tosock->type != SOCK_CLOSURE ||
+      params.link.fromnode == nullptr || !params.link.fromnode->is_type("NodeClosureOutput"))
+  {
+    return true;
+  }
+  if (params.C == nullptr) {
+    return true;
+  }
+  SpaceNode *snode = CTX_wm_space_node(params.C);
+  if (snode == nullptr || snode->edittree != &params.ntree) {
+    return true;
+  }
+
+  bNode &closure_output_node = *params.link.fromnode;
+  const bke::bNodeZoneType *closure_zone_type = bke::zone_type_by_node_type(NODE_CLOSURE_OUTPUT);
+  if (closure_zone_type == nullptr) {
+    return true;
+  }
+  bNode *closure_input_node = closure_zone_type->get_corresponding_input(params.ntree,
+                                                                         closure_output_node);
+  if (closure_input_node == nullptr) {
+    return true;
+  }
+
+  sync_sockets_closure(*snode, *closure_input_node, closure_output_node, nullptr, params.link.fromsock);
+  return true;
 }
 
 static int gpu_shader_glsl_function(GPUMaterial *mat,
@@ -1982,8 +2831,25 @@ static int gpu_shader_glsl_function(GPUMaterial *mat,
     return 1;
   }
 
+  std::string library_source = parse_result.library_source;
+  std::string wrapper_source = parse_result.wrapper_source;
+  std::string specialized_error;
+  if (!build_specialized_glsl_sources(
+          mat, *node, parse_result, library_source, wrapper_source, specialized_error))
+  {
+    static float zero_value[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    if (out != nullptr) {
+      for (int i = 0; !out[i].end; i++) {
+        if (out[i].type != GPU_NONE) {
+          out[i].link = GPU_constant(zero_value);
+        }
+      }
+    }
+    return 1;
+  }
+
   GPU_material_generated_source_add(
-      mat, parse_result.source_filename.c_str(), {}, parse_result.library_source.c_str());
+      mat, parse_result.source_filename.c_str(), {}, library_source.c_str());
 
   Vector<StringRefNull> dependencies;
   dependencies.append(parse_result.source_filename.c_str());
@@ -1991,7 +2857,7 @@ static int gpu_shader_glsl_function(GPUMaterial *mat,
       mat,
       parse_result.wrapper_filename.c_str(),
       dependencies,
-      parse_result.wrapper_source.c_str());
+      wrapper_source.c_str());
 
   return GPU_stack_link_custom(mat,
                                node,
@@ -2020,6 +2886,7 @@ void register_node_type_sh_glsl_function()
   ntype.draw_buttons_ex = file_ns::node_layout_ex;
   ntype.initfunc = file_ns::node_init;
   ntype.updatefunc = file_ns::node_update;
+  ntype.insert_link = file_ns::node_insert_link;
   ntype.gpu_fn = file_ns::gpu_shader_glsl_function;
   ntype.add_ui_poll = object_or_npr_eevee_shader_nodes_poll;
   bke::node_type_storage(

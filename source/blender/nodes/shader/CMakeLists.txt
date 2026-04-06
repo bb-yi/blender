@@ -56,6 +56,7 @@ set(SRC
   nodes/node_shader_gamma.cc
   nodes/node_shader_geometry.cc
   nodes/node_shader_glsl_function.cc
+  nodes/node_shader_image_to_closure.cc
   nodes/node_shader_hair_info.cc
   nodes/node_shader_holdout.cc
   nodes/node_shader_hueSatVal.cc

@@ -98,6 +98,7 @@ struct GPUMaterial {
   GPUNodeGraph graph = {};
   Vector<Object *> filter_object_infos;
   Vector<GPUMaterialGeneratedSource> generated_sources;
+  Vector<std::string> closure_uv_source_stack;
 
   bool has_surface_output = false;
   bool has_volume_output = false;
@@ -531,6 +532,30 @@ GPUNodeGraph *gpu_material_node_graph(GPUMaterial *material)
   return &material->graph;
 }
 
+void GPU_material_closure_uv_source_push(GPUMaterial *material, StringRefNull source)
+{
+  if (material == nullptr) {
+    return;
+  }
+  material->closure_uv_source_stack.append(std::string(source));
+}
+
+void GPU_material_closure_uv_source_pop(GPUMaterial *material)
+{
+  if (material == nullptr || material->closure_uv_source_stack.is_empty()) {
+    return;
+  }
+  material->closure_uv_source_stack.pop_last();
+}
+
+StringRefNull GPU_material_closure_uv_source_get(const GPUMaterial *material)
+{
+  if (material == nullptr || material->closure_uv_source_stack.is_empty()) {
+    return {};
+  }
+  return material->closure_uv_source_stack.last();
+}
+
 /* Resources */
 
 gpu::Texture **gpu_material_sky_texture_layer_set(
@@ -716,6 +741,7 @@ char *GPU_material_split_sub_function(GPUMaterial *material,
 
   GPUNodeGraphFunctionLink *func_link = MEM_new_zeroed<GPUNodeGraphFunctionLink>(__func__);
   func_link->outlink = *link;
+  func_link->return_type = return_type;
   SNPRINTF(func_link->name, "ntree_fn%d", material->generated_function_len++);
   BLI_addtail(&material->graph.material_functions, func_link);
 

@@ -2,6 +2,8 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include <cstring>
+
 #include "node_geometry_util.hh"
 
 #include "BLI_string_utf8.h"
@@ -130,6 +132,54 @@ static bool node_insert_link(bke::NodeInsertLinkParams &params)
       params.ntree, params.node, *output_node, params.link);
 }
 
+static int gpu_shader_closure_input(GPUMaterial *mat,
+                                    bNode *node,
+                                    bNodeExecData * /*execdata*/,
+                                    GPUNodeStack * /*in*/,
+                                    GPUNodeStack *out)
+{
+  static float zero_value[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+
+  for (int i = 0; !out[i].end; i++) {
+    if (out[i].type != GPU_NONE) {
+      out[i].link = GPU_constant(zero_value);
+    }
+  }
+
+  const StringRefNull uv_source = GPU_material_closure_uv_source_get(mat);
+  if (uv_source.is_empty()) {
+    return 1;
+  }
+
+  int output_index = 0;
+  for (const bNodeSocket *socket : node->output_sockets()) {
+    if (socket->type != SOCK_VECTOR || !STREQ(socket->name, "UV")) {
+      output_index++;
+      continue;
+    }
+    std::string function_call;
+    switch (out[output_index].type) {
+      case GPU_VEC2:
+        function_call = "$OUT = " + std::string(uv_source);
+        break;
+      case GPU_VEC3:
+        function_call = "$OUT = float3(" + std::string(uv_source) + ", 0.0)";
+        break;
+      case GPU_VEC4:
+        function_call = "$OUT = float4(" + std::string(uv_source) + ", 0.0, 0.0)";
+        break;
+      default:
+        output_index++;
+        continue;
+    }
+
+    out[output_index].link = GPU_function_call(function_call.c_str());
+    break;
+  }
+
+  return 1;
+}
+
 static void node_register()
 {
   static bke::bNodeType ntype;
@@ -142,6 +192,7 @@ static void node_register()
   ntype.labelfunc = node_label;
   ntype.no_muting = true;
   ntype.insert_link = node_insert_link;
+  ntype.gpu_fn = gpu_shader_closure_input;
   ntype.draw_buttons_ex = node_layout_ex;
   bke::node_type_storage(
       ntype, "NodeClosureInput", node_free_standard_storage, node_copy_standard_storage);

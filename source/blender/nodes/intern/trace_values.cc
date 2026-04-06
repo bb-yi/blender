@@ -24,6 +24,12 @@ static bool is_evaluate_closure_node_input(const SocketInContext &socket)
          socket.owner_node()->is_type("NodeEvaluateClosure");
 }
 
+static bool is_glsl_function_sample2d_input(const SocketInContext &socket)
+{
+  return socket->is_input() && socket->type == SOCK_CLOSURE &&
+         socket.owner_node()->is_type("ShaderNodeGLSLFunction");
+}
+
 static bool is_closure_zone_output_socket(const SocketInContext &socket)
 {
   return socket->owner_node().is_type("NodeClosureOutput") && socket->is_output();
@@ -670,6 +676,11 @@ LinkedClosureSignatures gather_linked_target_closure_signatures(
           result.items.append({ClosureSignature::from_evaluate_closure_node(node, false),
                                bool(storage.flag & NODE_EVALUATE_CLOSURE_FLAG_DEFINE_SIGNATURE),
                                socket});
+          return true;
+        }
+        if (is_glsl_function_sample2d_input(socket)) {
+          result.items.append(
+              {ClosureSignature::from_glsl_function_sample2d_socket(node, *socket.socket), false, socket});
           return true;
         }
         return false;

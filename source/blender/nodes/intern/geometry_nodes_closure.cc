@@ -123,6 +123,24 @@ ClosureSignature ClosureSignature::from_evaluate_closure_node(const bNode &node,
   return signature;
 }
 
+ClosureSignature ClosureSignature::from_glsl_function_sample2d_socket(const bNode &node,
+                                                                      const bNodeSocket &socket)
+{
+  BLI_assert(node.is_type("ShaderNodeGLSLFunction"));
+  BLI_assert(socket.is_input());
+  BLI_assert(socket.type == SOCK_CLOSURE);
+  UNUSED_VARS_NDEBUG(node, socket);
+
+  ClosureSignature signature;
+  if (const bke::bNodeSocketType *input_type = bke::node_socket_type_find_static(SOCK_VECTOR)) {
+    signature.inputs.add({"UV", input_type, NODE_INTERFACE_SOCKET_STRUCTURE_TYPE_AUTO});
+  }
+  if (const bke::bNodeSocketType *output_type = bke::node_socket_type_find_static(SOCK_RGBA)) {
+    signature.outputs.add({"Color", output_type, NODE_INTERFACE_SOCKET_STRUCTURE_TYPE_AUTO});
+  }
+  return signature;
+}
+
 bool LinkedClosureSignatures::has_type_definition() const
 {
   for (const Item &item : this->items) {

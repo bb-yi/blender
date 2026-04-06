@@ -50,6 +50,7 @@ enum GPUNodeLinkType {
   GPU_NODE_LINK_IMAGE_SKY,
   GPU_NODE_LINK_OUTPUT,
   GPU_NODE_LINK_UNIFORM,
+  GPU_NODE_LINK_FUNCTION_CALL,
   GPU_NODE_LINK_DIFFERENTIATE_FLOAT_FN,
 };
 
@@ -114,6 +115,8 @@ struct GPUNodeLink {
       const char *function_name;
       float filter_width;
     } differentiate_float;
+    /* GPU_NODE_LINK_FUNCTION_CALL */
+    char *function_call;
   };
 };
 
@@ -154,7 +157,7 @@ struct GPUInput {
     /* GPU_SOURCE_LAYER_ATTR */
     GPULayerAttr *layer_attr;
     /* GPU_SOURCE_FUNCTION_CALL */
-    char function_call[64];
+    char *function_call;
   };
 
   /* True for Zone Items. */
@@ -172,6 +175,7 @@ struct GPUNodeGraphOutputLink {
 struct GPUNodeGraphFunctionLink {
   GPUNodeGraphFunctionLink *next, *prev;
   char name[16];
+  GPUType return_type;
   GPUNodeLink *outlink;
 };
 

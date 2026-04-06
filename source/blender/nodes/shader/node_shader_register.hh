@@ -51,6 +51,7 @@ void register_node_type_sh_filter_object_info();
 void register_node_type_sh_gamma();
 void register_node_type_sh_geometry();
 void register_node_type_sh_glsl_function();
+void register_node_type_sh_image_to_closure();
 void register_node_type_sh_hair_info();
 void register_node_type_sh_holdout();
 void register_node_type_sh_hue_sat();
