@@ -30,6 +30,7 @@
   - `vec3`
   - `vec4`
   - `sampler2D`
+  - `sample2D`
 - 输出参数 `out`
   - `float`
   - `vec2`
@@ -46,6 +47,7 @@
 
 - `inout`
 - `out sampler2D`
+- `out sample2D`
 - `int` / `bool` / `mat*` / `struct` / `array` 作为函数边界类型
 - 多返回值结构体
 - 递归
@@ -63,6 +65,11 @@
 - 所有 `sampler2D` 使用同一组节点级采样设置：
   - `Sampler Interpolation`
   - `Sampler Extension`
+- `sample2D` 会变成一个 `Closure` 输入口
+- `sample2D` 的图片来源应通过 `Image to Closure` 提供
+- `sample2D` 也可以接程序化 `Closure Output`
+- `Closure Output -> sample2D` 当前只保证 `texture(tex, uv)` 这种直接采样形式
+- 如果函数依赖显式 `LOD`、`grad` 或尺寸查询等图像专用能力，应优先使用 `Image to Closure`
 - `vec4` 虽然是合法边界类型，但当前 UI 中仍按“向量插口”处理，不会变成专门的颜色插口；如果只需要 `RGB`，优先考虑 `vec3`
 
 ### 4. 内部实现和边界接口要区分
@@ -169,7 +176,7 @@ Function: your_function_name
 - `#define res iResolution.xy` -> 删除宏，直接使用 `vec2 resolution`
 - `#define frag gl_FragCoord.xy` -> 删除宏，改成显式参数 `vec2 frag_coord`
 
-### 规则 4：如果来源代码依赖贴图采样，优先保留为 `sampler2D`
+### 规则 4：如果来源代码依赖贴图采样，先判断应该落成 `sampler2D` 还是 `sample2D`
 
 例如：
 
@@ -177,13 +184,19 @@ Function: your_function_name
 - Unity `sampler2D _MainTex`
 - GLSL `sampler2D`
 
-统一改成：
+如果只是“普通静态 2D 图片，由节点面板直接选图”，优先改成：
 
 ```glsl
 sampler2D tex
 ```
 
-基础采样通常改成：
+如果希望这个纹理输入既能接图片，也能接程序化纹理，优先改成：
+
+```glsl
+sample2D tex
+```
+
+基础采样通常都应改成：
 
 ```glsl
 texture(tex, uv)
@@ -197,10 +210,14 @@ textureLod(tex, uv, lod)
 
 也就是说：
 
-- 边界类型统一成 `sampler2D`
+- `sampler2D` 适合“节点面板里直接选图”的静态图片槽位
+- `sample2D` 适合“节点图里接图片或程序化纹理”的统一输入
+- 两者在函数体内部都可以写成 `texture(tex, uv)`
 - 函数体内部不必强行把所有采样都降级成最基础的 `texture`
 
-不要生成“需要把图片节点连进来”的说明，因为当前 `sampler2D` 不是那种工作流。
+- 不要生成“把普通图片节点直接连进 `sampler2D`”的说明，因为当前 `sampler2D` 不是那种工作流。
+- 不要生成“`sample2D` 能随便接任何 Closure”的说明；对程序化来源，当前只推荐 `Closure Output`。
+- 如果用了 `textureLod` / `textureGrad` / `textureSize` / `texelFetch` 一类图像专用能力，应默认提醒使用 `Image to Closure`。
 
 ### 规则 5：如果原代码是屏幕着色器，要把它改写成“可被材质节点调用的函数”
 
@@ -256,7 +273,8 @@ Shadertoy 的 `iChannel0~3` 并不总是“普通 2D 贴图”。
 
 对当前 `GLSL Function` 节点来说，最稳妥的规则是：
 
-- 如果某个通道本质上就是“普通静态 2D 图片采样”，改成 `sampler2D`
+- 如果某个通道本质上就是“普通静态 2D 图片采样，直接在节点面板选图”，改成 `sampler2D`
+- 如果某个通道希望在节点图里接图片或程序化纹理，且核心采样能收敛为 `texture(tex, uv)`，改成 `sample2D`
 - 如果某个通道依赖“上一帧反馈”“多 pass 缓冲”“运行时积累”“专用输入设备纹理”，不要假装它和普通 `sampler2D` 完全等价
 - 这类运行时依赖要么删除、要么近似、要么改成普通外部输入参数，但必须明确说明是“近似改写”，不是等价转换
 
@@ -744,23 +762,25 @@ vec3 effect(vec2 uv, float time)
 9. 如果用了纹理采样，是否已经改成 `texture(tex, uv)`，或者在确实需要时保留为 `textureLod(tex, uv, lod)`？
 10. 如果导出函数返回 `void`，是否仍然通过 `out` 参数暴露了至少一个输出？
 11. 如果有 `sampler2D` 参数，是否提醒了使用者在节点参数区为每个 `sampler2D` 选择图片？
-12. 如果有 `sampler2D` 参数，是否错误假设它支持连线输入或 `UDIM` 平铺图片？
-13. 如果源码里有宏开关、注释掉的旧代码、未使用辅助函数，是否已经收敛或删除？
-14. 如果源码里有反向 `smoothstep` 或类似依赖实现细节的捷径写法，是否已经改成稳定辅助函数？
-15. 如果源码依赖上一帧反馈、Buffer A/B/C/D、多 pass 中间结果、视频或键盘通道，是否已经明确说明删除、近似或替代方案？
-16. 如果来自 HLSL，是否已去掉所有语义标注？
-17. 如果来自 ShaderLab，是否只保留了核心逻辑？
-18. 是否避免依赖特定引擎的 include 和无法离开原运行时的宏？
-19. 最终输出里是否明确写了本次转换是 `成功`、`部分成功` 还是 `失败`？
-20. 最终输出里是否再次明确写了节点 `Function` 一栏最终应调用的函数名？
-21. 最终输出里是否明确列出了不支持、删除、近似、替代和验证情况？
-22. 最终输出里的结果报告语言，是否跟随了用户当前使用的语言？
-23. 是否移除了 `precision` / `#version` / `layout(...)` / `SHADERDATA` / `proc:` 这类文件级声明或工具元数据？
-24. 如果源码通过 `#define time iTime` 之类的别名宏引用运行时变量，是否已经展开并参数化？
-25. 如果源码里用了共享可变全局状态（如 `gTime`），是否已经改成显式参数或局部变量？
-26. 如果源码里有把比较结果直接拿去构造 `vec*` 或参与数值运算的写法，是否已经改成显式数值表达式？
-27. 如果源码里用了 `mat3x2` / `mat2x3` 或其他方向不够直观的矩阵乘法，是否已经改写成更清晰的 helper？
-28. 如果原 shader 的 alpha 有实际含义，是否已经明确说明保留、拆分还是省略？
+12. 如果有 `sample2D` 参数，是否明确说明应该连接 `Image to Closure` 或符合约定的 `Closure Output`？
+13. 如果有 `sampler2D` 参数，是否错误假设它支持连线输入或 `UDIM` 平铺图片？
+14. 如果有 `sample2D` 参数，是否错误假设它支持任意 Closure 或任意图像专用采样函数？
+15. 如果源码里有宏开关、注释掉的旧代码、未使用辅助函数，是否已经收敛或删除？
+16. 如果源码里有反向 `smoothstep` 或类似依赖实现细节的捷径写法，是否已经改成稳定辅助函数？
+17. 如果源码依赖上一帧反馈、Buffer A/B/C/D、多 pass 中间结果、视频或键盘通道，是否已经明确说明删除、近似或替代方案？
+18. 如果来自 HLSL，是否已去掉所有语义标注？
+19. 如果来自 ShaderLab，是否只保留了核心逻辑？
+20. 是否避免依赖特定引擎的 include 和无法离开原运行时的宏？
+21. 最终输出里是否明确写了本次转换是 `成功`、`部分成功` 还是 `失败`？
+22. 最终输出里是否再次明确写了节点 `Function` 一栏最终应调用的函数名？
+23. 最终输出里是否明确列出了不支持、删除、近似、替代和验证情况？
+24. 最终输出里的结果报告语言，是否跟随了用户当前使用的语言？
+25. 是否移除了 `precision` / `#version` / `layout(...)` / `SHADERDATA` / `proc:` 这类文件级声明或工具元数据？
+26. 如果源码通过 `#define time iTime` 之类的别名宏引用运行时变量，是否已经展开并参数化？
+27. 如果源码里用了共享可变全局状态（如 `gTime`），是否已经改成显式参数或局部变量？
+28. 如果源码里有把比较结果直接拿去构造 `vec*` 或参与数值运算的写法，是否已经改成显式数值表达式？
+29. 如果源码里用了 `mat3x2` / `mat2x3` 或其他方向不够直观的矩阵乘法，是否已经改写成更清晰的 helper？
+30. 如果原 shader 的 alpha 有实际含义，是否已经明确说明保留、拆分还是省略？
 
 
 ## 七、推荐的最小输出模板
@@ -1041,10 +1061,10 @@ vec2 triangle_unproject(vec3 v)
 1. 最终结果只能是普通 GLSL 函数源码，不要输出完整 shader 文件。
 2. 明确给出 Function 应设置的函数名。
 3. 把所有外部 uniform / 时间 / 分辨率 / 鼠标 / 贴图输入改成函数参数。
-4. 导出函数的参数和返回值只允许使用 float、vec2、vec3、vec4、sampler2D，以及 out float/vec2/vec3/vec4。
-5. 不允许使用 inout，不允许 out sampler2D。
+4. 导出函数的参数和返回值只允许使用 float、vec2、vec3、vec4、sampler2D、sample2D，以及 out float/vec2/vec3/vec4。
+5. 不允许使用 inout，不允许 out sampler2D，也不允许 out sample2D。
 6. 如果来源是 HLSL 或 ShaderLab，去掉语义、Pass、Properties、pragma 和引擎包装层。
-7. 贴图采样统一改成 `texture(tex, uv)`；如果原算法明确依赖显式 `LOD`，可以保留为 `textureLod(tex, uv, lod)`。
+7. 贴图采样优先改成 `texture(tex, uv)`；如果原算法明确依赖显式 `LOD`，可以保留为 `textureLod(tex, uv, lod)`，并说明这更适合配合 `Image to Closure`。
 8. 如果存在宏开关、死代码、未使用辅助函数、反向 `smoothstep`、运行时别名宏、共享可变全局状态、布尔到数值隐式转换、非方阵矩阵双向乘法这类不稳定写法，要收敛成稳定版本。
 9. 如果需要多个输出，用 out 参数，不要用 struct 返回。
 10. 如果原 shader 的 alpha 有意义，要明确说明是保留、拆分还是省略。
@@ -1316,7 +1336,7 @@ vec3 stylize(vec3 base_color, float strength = 0.5)
 
 当前节点不会把这种写法当成 Blender 参数默认值系统。
 
-#### 7.3 给 `sampler2D` 写 Meta
+#### 7.3 给 `sampler2D` / `sample2D` 写 Meta
 
 不要写：
 
@@ -1330,7 +1350,7 @@ vec4 sample_it(sampler2D tex, vec2 uv)
 }
 ```
 
-`sampler2D` 当前由节点上的图片选择器处理，不走这个 Meta 通道。
+`sampler2D` 当前由节点上的图片选择器处理，`sample2D` 当前由节点连线工作流处理，它们都不走这个 Meta 通道。
 
 #### 7.4 给不存在的参数写 Meta
 
