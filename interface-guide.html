@@ -523,6 +523,57 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#4-eevee-performance" class="md-nav__link">
+    <span class="md-ellipsis">
+      4. Eevee Performance
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Eevee Performance">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_13" class="md-nav__link">
+    <span class="md-ellipsis">
+      作用
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_14" class="md-nav__link">
+    <span class="md-ellipsis">
+      入口
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_15" class="md-nav__link">
+    <span class="md-ellipsis">
+      行为说明
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_16" class="md-nav__link">
+    <span class="md-ellipsis">
+      当前范围
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -723,6 +774,57 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#4-eevee-performance" class="md-nav__link">
+    <span class="md-ellipsis">
+      4. Eevee Performance
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Eevee Performance">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_13" class="md-nav__link">
+    <span class="md-ellipsis">
+      作用
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_14" class="md-nav__link">
+    <span class="md-ellipsis">
+      入口
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_15" class="md-nav__link">
+    <span class="md-ellipsis">
+      行为说明
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_16" class="md-nav__link">
+    <span class="md-ellipsis">
+      当前范围
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -831,6 +933,46 @@
 </li>
 <li>
 <p>只改变 <code>Outliner</code> 的层级显示，不影响骨骼的变换、动画、驱动器和渲染结果</p>
+</li>
+</ul>
+<h2 id="4-eevee-performance">4. Eevee Performance<a class="headerlink" href="#4-eevee-performance" title="Permanent link">&para;</a></h2>
+<h3 id="_13">作用<a class="headerlink" href="#_13" title="Permanent link">&para;</a></h3>
+<p>在 <code>Outliner</code> 中查看 Eevee 当前视口 / 最终渲染的性能统计、阶段拆分和功能提示，用来快速定位性能热点。</p>
+<p>它适合检查 <code>NPR Tree</code>、<code>GLSL Function</code>、滤镜材质、体积、景深等路径大概把时间花在了哪里。</p>
+<h3 id="_14">入口<a class="headerlink" href="#_14" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>Outliner &gt; Display Mode &gt; Eevee Performance</code></li>
+<li><code>Outliner</code> 头部中的 <code>Profiler</code> / <code>Pause</code> / <code>Sort by Time</code></li>
+<li><code>Outliner</code> 头部中的设置弹出面板 <code>Eevee Performance</code></li>
+</ul>
+<h3 id="_15">行为说明<a class="headerlink" href="#_15" title="Permanent link">&para;</a></h3>
+<ul>
+<li>
+<p>开启 <code>Profiler</code> 后，Eevee 会开始收集当前性能统计并在 <code>Outliner</code> 树中显示。</p>
+</li>
+<li>
+<p><code>Pause</code> 会暂停视口性能数据的继续刷新，方便查看当前结果。</p>
+</li>
+<li>
+<p><code>Sort by Time</code> 会按当前 CPU 开销排序阶段列表，而不是固定的管线顺序。</p>
+</li>
+<li>
+<p><code>Average Window</code> 用于设置平滑统计时使用的帧窗口大小。</p>
+</li>
+<li>
+<p>当前树结构会显示 <code>Viewport</code>、<code>Final Render</code>、<code>Metadata</code>、<code>Features</code>、<code>Stages</code>、<code>Hints</code> 等分组。</p>
+</li>
+</ul>
+<h3 id="_16">当前范围<a class="headerlink" href="#_16" title="Permanent link">&para;</a></h3>
+<ul>
+<li>
+<p>当前主要是 Eevee 的 CPU 侧阶段统计与功能提示，不是完整 GPU profiler</p>
+</li>
+<li>
+<p>只对 <code>Eevee</code> 有意义，不支持 <code>Cycles</code></p>
+</li>
+<li>
+<p>更适合作为“快速定位哪一段更重”的检查工具，不是逐微秒精确分析器</p>
 </li>
 </ul>
 

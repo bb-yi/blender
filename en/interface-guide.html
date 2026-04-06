@@ -523,6 +523,57 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#4-eevee-performance" class="md-nav__link">
+    <span class="md-ellipsis">
+      4. Eevee Performance
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Eevee Performance">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#purpose_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      Purpose
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#entry-points_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      Entry Points
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#behavior_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      Behavior
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#current-scope_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      Current Scope
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -723,6 +774,57 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#4-eevee-performance" class="md-nav__link">
+    <span class="md-ellipsis">
+      4. Eevee Performance
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Eevee Performance">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#purpose_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      Purpose
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#entry-points_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      Entry Points
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#behavior_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      Behavior
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#current-scope_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      Current Scope
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -831,6 +933,46 @@
 </li>
 <li>
 <p>Only changes Outliner hierarchy visibility; it does not change transforms, animation, drivers, or rendering</p>
+</li>
+</ul>
+<h2 id="4-eevee-performance">4. Eevee Performance<a class="headerlink" href="#4-eevee-performance" title="Permanent link">&para;</a></h2>
+<h3 id="purpose_3">Purpose<a class="headerlink" href="#purpose_3" title="Permanent link">&para;</a></h3>
+<p>Shows Eevee viewport / final-render performance summaries, stage breakdowns, and feature hints directly in the <code>Outliner</code>, so it is easier to spot likely bottlenecks.</p>
+<p>It is useful when checking where time is going in <code>NPR Tree</code>, <code>GLSL Function</code>, filter materials, volume, depth-of-field, and related Eevee paths.</p>
+<h3 id="entry-points_1">Entry Points<a class="headerlink" href="#entry-points_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>Outliner &gt; Display Mode &gt; Eevee Performance</code></li>
+<li><code>Profiler</code>, <code>Pause</code>, and <code>Sort by Time</code> controls in the <code>Outliner</code> header</li>
+<li>The <code>Eevee Performance</code> settings popover in the <code>Outliner</code> header</li>
+</ul>
+<h3 id="behavior_3">Behavior<a class="headerlink" href="#behavior_3" title="Permanent link">&para;</a></h3>
+<ul>
+<li>
+<p>Enabling <code>Profiler</code> starts collecting and showing the current performance data in the Outliner tree.</p>
+</li>
+<li>
+<p><code>Pause</code> freezes further viewport performance updates so the current result can be inspected.</p>
+</li>
+<li>
+<p><code>Sort by Time</code> orders stage lists by current CPU cost instead of fixed pipeline order.</p>
+</li>
+<li>
+<p><code>Average Window</code> controls how many frames are used for smoothing the displayed statistics.</p>
+</li>
+<li>
+<p>The current tree exposes groups such as <code>Viewport</code>, <code>Final Render</code>, <code>Metadata</code>, <code>Features</code>, <code>Stages</code>, and <code>Hints</code>.</p>
+</li>
+</ul>
+<h3 id="current-scope_2">Current Scope<a class="headerlink" href="#current-scope_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li>
+<p>This is currently an Eevee CPU-side stage breakdown and hint view, not a full GPU profiler</p>
+</li>
+<li>
+<p>It is only meaningful in <code>Eevee</code>, not in <code>Cycles</code></p>
+</li>
+<li>
+<p>It works best as a quick “which area is expensive” inspector rather than a per-microsecond analysis tool</p>
 </li>
 </ul>
 
