@@ -192,11 +192,11 @@ jobs:
           merge-multiple: true
 
       - name: Ensure Release Exists
-        run: gh release view "${{ steps.vars.outputs.tag_name }}"
+        run: gh release view "${{ steps.vars.outputs.tag_name }}" --repo "${{ github.repository }}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Assets to Release
-        run: gh release upload "${{ steps.vars.outputs.tag_name }}" artifacts/* --clobber
+        run: gh release upload "${{ steps.vars.outputs.tag_name }}" artifacts/* --clobber --repo "${{ github.repository }}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
