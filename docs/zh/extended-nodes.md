@@ -256,6 +256,8 @@
 
 - `sampler2D` 不会显示成可连线输入口，而是在节点面板中直接显示为图片槽位
 
+- `sample2D` 会显示成 `Closure` 输入口，可连接 `Image to Closure` 或符合约定的 `Closure Output`
+
 #### 作用
 
 把一段用户编写的 `GLSL` 函数接入当前 `Eevee / NPR` 材质编译流程，适合做自定义数学节点、程序图案、SDF、纹理处理和小型屏幕函数封装。
@@ -278,9 +280,11 @@
 
 6. 如果函数里有 `sampler2D` 参数，直接在节点参数区为每个采样器选图。
 
+7. 如果函数里有 `sample2D` 参数，使用节点连线输入：图片请通过 `Image to Closure`，程序化纹理请连接满足 `UV -> Color` 约定的 `Closure Output`。
+
 #### 当前支持的函数边界类型
 
-- 输入参数：`float`、`vec2`、`vec3`、`vec4`、`sampler2D`
+- 输入参数：`float`、`vec2`、`vec3`、`vec4`、`sampler2D`、`sample2D`
 
 - 输出参数：`out float`、`out vec2`、`out vec3`、`out vec4`
 
@@ -294,13 +298,37 @@
 
 - 支持多个 `sampler2D` 图片槽位；它们统一受 `Sampler Settings` 子面板控制
 
+- `sample2D` 统一走 `Closure` 输入工作流，适合把图片和程序化纹理都交给 `GLSL Function`
+
 - 修改 `Text` 数据块或外部文件后，可以直接点击刷新按钮更新节点，不需要重新选文件
 
-- 支持写在函数正上方的 `@glsl_meta` 块注释，用来声明默认值、范围和 subtype
+- 支持写在函数正上方的 `@glsl_meta` 块注释，用来声明默认值、范围、`hide_value` 和 subtype
 
 - 当前不支持 `inout`、`out sampler2D`、`int / bool / mat* / struct / array` 作为函数边界类型
 
+- `Closure Output -> GLSL Function(sample2D)` 当前只保证 `texture(tex, uv)` 这种直接采样形式
+
+- 如果函数要使用依赖真实图片资源的采样方式，例如显式 `LOD`、`grad` 或尺寸查询，应使用 `Image to Closure`
+
+- `Image to Closure` 节点本身没有图片输入插槽，图片是在节点面板中直接选择
+
+- `sampler2D` 和 `sample2D` 当前都不支持 `UDIM` 平铺图片
+
 - 详细 GLSL 转换规范见仓库文档 `docs/glsl-function-node-conversion-guide.md`
+
+#### `sample2D` 示例
+
+```glsl
+vec4 stylize(vec2 uv, float strength, sample2D tex)
+{
+  vec4 base = texture(tex, uv);
+  return mix(base, vec4(base.rgb * 1.2, base.a), strength);
+}
+```
+
+- 如果 `tex` 接的是 `Image to Closure`，`texture(tex, uv)` 会直接采样所选图片
+
+- 如果 `tex` 接的是 `Closure Output`，则会按 `UV` 输入和 `Color` 输出约定读取程序化纹理结果
 
 #### Meta 语法
 
@@ -395,6 +423,53 @@ vec3 stylize(vec3 base_color, float strength, vec3 offset, vec3 tint)
 - 如果 Meta 里写了函数中不存在的参数名，会直接报错
 
 - 如果 `min > max`，会直接报错
+
+### Image to Closure
+
+#### 入口
+
+`Add > Texture > Image to Closure`
+
+<div align="center">
+	<img src="images/image_to_closure_no_input.png" alt="Image to Closure" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### 输入输出
+
+- 输出：`Closure`
+
+#### 节点面板
+
+- `Image`：选择要适配进 `sample2D` 工作流的图片
+
+- `Interpolation`：设置采样插值方式
+
+- `Extension`：设置超出 `0..1` UV 范围时的扩展方式
+
+#### 作用
+
+把一张普通图片包装成 `sample2D` 可消费的 `Closure` 源。
+
+它主要用来给 `GLSL Function(sample2D)` 提供图像输入，同时保持和程序化纹理 `Closure Output` 相同的接线形式。
+
+#### 基本使用方法
+
+1. 添加 `Image to Closure` 节点。
+
+2. 在节点面板中选择 `Image`。
+
+3. 按需要设置 `Interpolation` 和 `Extension`。
+
+4. 把 `Closure` 输出连接到 `GLSL Function` 的 `sample2D` 输入。
+
+#### 说明
+
+- 这个节点现在没有图片输入插槽，图片只在节点面板中选择
+
+- 它是 `sample2D` 的图像适配节点，不是普通 `Image Texture` 的替代品
+
+- 当 `sample2D` 需要真实图片资源支持的采样能力时，应优先使用这个节点
 
 ### Basis Transform
 

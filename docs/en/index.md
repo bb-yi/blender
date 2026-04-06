@@ -60,7 +60,7 @@ This document describes the NPR / Eevee extension features that have been added 
 
     ---
 
-    Check additional interface options and workflow settings, including pose bone Outliner visibility.
+    Check additional interface options and workflow settings, including pose bone visibility and the Eevee Performance view.
 
     [View Interface & Settings →](interface-guide.md)
 
@@ -89,6 +89,10 @@ This document describes the NPR / Eevee extension features that have been added 
 - `World Environment`
 
 - `World To Tangent`
+
+- `GLSL Function`
+
+- `Image to Closure`
 
 - `Basis Transform`
 
@@ -127,6 +131,8 @@ This document describes the NPR / Eevee extension features that have been added 
 - Material preview control
 
 - World environment configuration
+
+- `Eevee Performance` Outliner view
 
 - Pose bone Outliner visibility
 

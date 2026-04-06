@@ -233,6 +233,144 @@ Converts a world-space direction vector into the tangent space of the current su
 
 - A `UV Map` can be specified in the node panel, and the tangent of that UV is used as the transform basis.
 
+### GLSL Function
+
+#### Entry
+
+`Add > Script > GLSL Function`
+
+<div align="center">
+	<img src="images/SnowShot_2026-04-03_17-01-40.png" alt="GLSL Function" style="border-radius: 10px;">
+	<br>
+</div>
+
+Available in both `Eevee` object materials and `NPR Tree`.
+
+#### Inputs / Outputs
+
+- The node generates inputs and outputs dynamically from the selected GLSL function signature
+
+- The return value and any `out` parameters become node outputs
+
+- `sampler2D` does not appear as a link socket; it is exposed as an image slot in the node panel
+
+- `sample2D` appears as a `Closure` input socket and can be driven by `Image to Closure` or a compatible `Closure Output`
+
+#### Purpose
+
+Injects a user-authored GLSL function into the current `Eevee / NPR` material compile path. It is useful for custom math nodes, procedural patterns, SDF helpers, texture processing, and small reusable screen-space functions.
+
+#### Basic Workflow
+
+1. Write the GLSL in the `Text Editor`, or prepare an external `.glsl` file.
+
+2. Add the `GLSL Function` node.
+
+3. Choose the source mode in the node panel:
+
+   - `Internal`: use a `Text` datablock
+
+   - `External`: use an external `.glsl` file
+
+4. Click the refresh button to re-parse the source.
+
+5. Choose the exported function name in `Function`.
+
+6. If the function has `sampler2D` parameters, choose images directly in the node panel.
+
+7. If the function has `sample2D` parameters, wire them with nodes: use `Image to Closure` for image sources, or a `Closure Output` that exposes the expected `UV -> Color` structure for procedural sources.
+
+#### Supported Boundary Types
+
+- Input parameters: `float`, `vec2`, `vec3`, `vec4`, `sampler2D`, `sample2D`
+
+- Output parameters: `out float`, `out vec2`, `out vec3`, `out vec4`
+
+- Return values: `void`, `float`, `vec2`, `vec3`, `vec4`
+
+- Multiple outputs are supported through `return value + out parameters`
+
+#### Notes
+
+- `Function` is not auto-selected; it must be chosen explicitly
+
+- Multiple `sampler2D` image slots are supported and share the node-level `Sampler Settings`
+
+- `sample2D` uses a unified closure input workflow so both images and procedural textures can feed the same GLSL parameter
+
+- Editing the `Text` datablock or external file only requires pressing refresh; the node does not have to be recreated
+
+- `@glsl_meta` block comments can define defaults, ranges, `hide_value`, and socket subtype hints
+
+- `Closure Output -> GLSL Function(sample2D)` currently only guarantees the direct `texture(tex, uv)` form
+
+- When the shader needs image-backed sampling features such as explicit `LOD`, `grad`, or size/query behavior, use `Image to Closure`
+
+- `Image to Closure` has no image input socket; the image is chosen directly in the node panel
+
+- `sampler2D` and `sample2D` do not currently support UDIM tiled images
+
+#### `sample2D` Example
+
+```glsl
+vec4 stylize(vec2 uv, float strength, sample2D tex)
+{
+  vec4 base = texture(tex, uv);
+  return mix(base, vec4(base.rgb * 1.2, base.a), strength);
+}
+```
+
+- When `tex` is driven by `Image to Closure`, `texture(tex, uv)` samples the chosen image
+
+- When `tex` is driven by `Closure Output`, the function reads the procedural texture through that closure's `UV` input and `Color` output contract
+
+### Image to Closure
+
+#### Entry
+
+`Add > Texture > Image to Closure`
+
+<div align="center">
+	<img src="images/image_to_closure_no_input.png" alt="Image to Closure" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### Outputs
+
+- `Closure`
+
+#### Node Panel
+
+- `Image`: choose the image that should be adapted into the `sample2D` workflow
+
+- `Interpolation`: choose the sampling interpolation
+
+- `Extension`: choose how UVs outside `0..1` are extended
+
+#### Purpose
+
+Wraps a regular image as a closure-backed source that can feed `GLSL Function(sample2D)`.
+
+This keeps image inputs and procedural closure inputs on the same wiring model.
+
+#### Basic Workflow
+
+1. Add an `Image to Closure` node.
+
+2. Choose an `Image` in the node panel.
+
+3. Adjust `Interpolation` and `Extension` if needed.
+
+4. Connect the `Closure` output to a `GLSL Function` `sample2D` input.
+
+#### Notes
+
+- The node no longer exposes an image input socket; the image is always chosen in the panel
+
+- It is an adapter for the `sample2D` workflow, not a replacement for the normal `Image Texture` node
+
+- Prefer this node whenever a `sample2D` parameter needs image-backed sampling behavior
+
 ### Basis Transform
 
 #### Entry

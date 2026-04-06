@@ -80,6 +80,8 @@ mkdocs build
   - Screenspace Info
   - World Environment
   - World To Tangent
+  - GLSL Function
+  - Image to Closure
   - Bevel
   - Curvature
   - Shader Info
@@ -98,6 +100,7 @@ mkdocs build
 ### 界面与工作流补充 (4_interface_workflow.md)
 - 材质选择器预览开关
 - 世界环境排除
+- Eevee Performance
 - Lightgroup ID
 - 启动图版本标识
 - 常见问题解决
@@ -183,6 +186,6 @@ mkdocs gh-deploy
 
 ---
 
-**最后更新**: 2026-03-28
+**最后更新**: 2026-04-06
 
 **构建工具**: MkDocs + Material Theme

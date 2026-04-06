@@ -60,7 +60,7 @@
 
     ---
 
-    查看更多界面和工作流选项，包括骨骼在 Outliner 中的显示控制
+    查看更多界面和工作流选项，包括骨骼显示控制和 Eevee Performance 视图
 
     [查看 界面与设置 →](interface-guide.md)
 
@@ -91,6 +91,8 @@
 - `World To Tangent`
 
 - `GLSL Function`
+
+- `Image to Closure`
 
 - `Basis Transform`
 
@@ -131,6 +133,8 @@
 - 世界环境配置
 
 - 骨骼 Outliner 显示控制
+
+- `Eevee Performance` Outliner 视图
 
 - 灯光组管理
 

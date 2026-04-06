@@ -86,3 +86,37 @@
 - 不作用于 `Edit Bone`
 
 - 只改变 `Outliner` 的层级显示，不影响骨骼的变换、动画、驱动器和渲染结果
+
+## 4. Eevee Performance
+
+### 作用
+
+在 `Outliner` 中查看 Eevee 当前视口 / 最终渲染的性能统计、阶段拆分和功能提示，用来快速定位性能热点。
+
+它适合检查 `NPR Tree`、`GLSL Function`、滤镜材质、体积、景深等路径大概把时间花在了哪里。
+
+### 入口
+
+- `Outliner > Display Mode > Eevee Performance`
+- `Outliner` 头部中的 `Profiler` / `Pause` / `Sort by Time`
+- `Outliner` 头部中的设置弹出面板 `Eevee Performance`
+
+### 行为说明
+
+- 开启 `Profiler` 后，Eevee 会开始收集当前性能统计并在 `Outliner` 树中显示。
+
+- `Pause` 会暂停视口性能数据的继续刷新，方便查看当前结果。
+
+- `Sort by Time` 会按当前 CPU 开销排序阶段列表，而不是固定的管线顺序。
+
+- `Average Window` 用于设置平滑统计时使用的帧窗口大小。
+
+- 当前树结构会显示 `Viewport`、`Final Render`、`Metadata`、`Features`、`Stages`、`Hints` 等分组。
+
+### 当前范围
+
+- 当前主要是 Eevee 的 CPU 侧阶段统计与功能提示，不是完整 GPU profiler
+
+- 只对 `Eevee` 有意义，不支持 `Cycles`
+
+- 更适合作为“快速定位哪一段更重”的检查工具，不是逐微秒精确分析器

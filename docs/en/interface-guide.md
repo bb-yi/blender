@@ -86,3 +86,37 @@ This is useful for hiding mechanism bones, helper bones, or low-level control la
 - Does not affect `Edit Bone`
 
 - Only changes Outliner hierarchy visibility; it does not change transforms, animation, drivers, or rendering
+
+## 4. Eevee Performance
+
+### Purpose
+
+Shows Eevee viewport / final-render performance summaries, stage breakdowns, and feature hints directly in the `Outliner`, so it is easier to spot likely bottlenecks.
+
+It is useful when checking where time is going in `NPR Tree`, `GLSL Function`, filter materials, volume, depth-of-field, and related Eevee paths.
+
+### Entry Points
+
+- `Outliner > Display Mode > Eevee Performance`
+- `Profiler`, `Pause`, and `Sort by Time` controls in the `Outliner` header
+- The `Eevee Performance` settings popover in the `Outliner` header
+
+### Behavior
+
+- Enabling `Profiler` starts collecting and showing the current performance data in the Outliner tree.
+
+- `Pause` freezes further viewport performance updates so the current result can be inspected.
+
+- `Sort by Time` orders stage lists by current CPU cost instead of fixed pipeline order.
+
+- `Average Window` controls how many frames are used for smoothing the displayed statistics.
+
+- The current tree exposes groups such as `Viewport`, `Final Render`, `Metadata`, `Features`, `Stages`, and `Hints`.
+
+### Current Scope
+
+- This is currently an Eevee CPU-side stage breakdown and hint view, not a full GPU profiler
+
+- It is only meaningful in `Eevee`, not in `Cycles`
+
+- It works best as a quick “which area is expensive” inspector rather than a per-microsecond analysis tool
