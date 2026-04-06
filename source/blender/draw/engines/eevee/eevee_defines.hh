@@ -346,7 +346,7 @@
 #define MATERIAL_TEXTURE_RESERVED_SLOT_LAST_NPR SCENE_SHADOW_TEX_SLOT
 
 #define RENDER_TEXTURE_SLOT_MAX 4
-#define FILTER_OBJECT_INFO_MAX 32
+#define FILTER_OBJECT_INFO_MAX 512
 #define FILTER_MASK_HASH_MAX 128
 
 /* Cannot use math libraries in shared headers yet. */
