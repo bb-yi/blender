@@ -18,18 +18,14 @@ namespace nodes::node_shader_image_to_closure_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Image>("Image").hide_value();
   b.add_output<decl::Closure>("Closure");
 }
 
 static void node_layout(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
 {
-  bNode &node = *static_cast<bNode *>(ptr->data);
-  bNodeSocket &socket = node.input_socket(0);
-  PointerRNA socket_ptr = RNA_pointer_create_discrete(ptr->owner_id, RNA_NodeSocket, &socket);
   layout.use_property_split_set(true);
   layout.use_property_decorate_set(false);
-  layout.prop(&socket_ptr, "default_value", ui::ITEM_R_SPLIT_EMPTY_NAME, socket.name, ICON_NONE);
+  layout.prop(ptr, "image", ui::ITEM_R_SPLIT_EMPTY_NAME, "Image", ICON_NONE);
   layout.prop(ptr, "interpolation", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
   layout.prop(ptr, "extension", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
 }

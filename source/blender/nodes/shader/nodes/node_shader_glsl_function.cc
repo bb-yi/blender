@@ -281,11 +281,7 @@ static Image *resolve_image_to_closure_image(const bNodeLink &link)
   if (link.fromnode == nullptr || !link.fromnode->is_type("ShaderNodeImageToClosure")) {
     return nullptr;
   }
-  const bNodeSocket &image_socket = link.fromnode->input_socket(0);
-  if (image_socket.type != SOCK_IMAGE || image_socket.default_value == nullptr) {
-    return nullptr;
-  }
-  return image_socket.default_value_typed<bNodeSocketValueImage>()->value;
+  return id_cast<Image *>(link.fromnode->id);
 }
 
 static GPUSamplerState sampler_state_from_image_to_closure_node(const bNode &node)
