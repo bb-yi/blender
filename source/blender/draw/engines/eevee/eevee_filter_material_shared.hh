@@ -25,7 +25,12 @@ struct [[host_shared]] FilterObjectInfoData {
   float4 metadata;
 };
 
+struct [[host_shared]] FilterMaskHashData {
+  float4 metadata;
+};
+
 #ifndef GPU_SHADER
 BLI_STATIC_ASSERT_ALIGN(FilterObjectInfoData, 16)
+BLI_STATIC_ASSERT_ALIGN(FilterMaskHashData, 16)
 }  // namespace blender::eevee
 #endif

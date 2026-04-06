@@ -97,6 +97,7 @@ struct GPUMaterial {
   /* Low level node graph(s). Also contains resources needed by the material. */
   GPUNodeGraph graph = {};
   Vector<Object *> filter_object_infos;
+  Vector<Object *> filter_mask_objects;
   Vector<GPUMaterialGeneratedSource> generated_sources;
   Vector<std::string> closure_uv_source_stack;
 
@@ -420,6 +421,29 @@ Object *GPU_material_filter_object_info_get(const GPUMaterial *material, int ind
     return nullptr;
   }
   return material->filter_object_infos[index];
+}
+
+int GPU_material_filter_mask_object_append(GPUMaterial *material, Object *object)
+{
+  if (material == nullptr || object == nullptr) {
+    return -1;
+  }
+
+  material->filter_mask_objects.append(object);
+  return material->filter_mask_objects.size() - 1;
+}
+
+int GPU_material_filter_mask_object_count(const GPUMaterial *material)
+{
+  return (material != nullptr) ? material->filter_mask_objects.size() : 0;
+}
+
+Object *GPU_material_filter_mask_object_get(const GPUMaterial *material, int index)
+{
+  if (material == nullptr || index < 0 || index >= material->filter_mask_objects.size()) {
+    return nullptr;
+  }
+  return material->filter_mask_objects[index];
 }
 
 void GPU_material_generated_source_add(GPUMaterial *material,
