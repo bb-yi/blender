@@ -12,18 +12,25 @@
 
 #include <cstring>
 
+#include "BLI_hash.h"
 #include "BLI_listbase.h"
 #include "BLI_math_matrix.hh"
 #include "BLI_set.hh"
 
+#include "BKE_collection.hh"
 #include "BKE_cryptomatte.hh"
+#include "BKE_layer.hh"
+#include "BKE_lib_id.hh"
 #include "BKE_node_legacy_types.hh"
 #include "BKE_node.hh"
 
 #include "DEG_depsgraph_query.hh"
 
+#include "GPU_material.hh"
 #include "GPU_framebuffer.hh"
 #include "GPU_texture.hh"
+
+#include "MEM_guardedalloc.h"
 
 #include "eevee_filter_material.hh"
 #include "eevee_instance.hh"
@@ -41,17 +48,225 @@ static FilterObjectInfoData filter_object_info_default()
   return data;
 }
 
-static FilterMaskHashData filter_mask_hash_default()
-{
-  FilterMaskHashData data;
-  data.metadata = float4(0.0f);
-  return data;
-}
-
 static bool filter_material_is_valid(blender::Material *material)
 {
   return material != nullptr && material->eevee_domain == MA_EEVEE_DOMAIN_FILTER &&
          material->nodetree != nullptr;
+}
+
+static bool filter_mask_object_supported(const Object *object)
+{
+  return object != nullptr && OB_TYPE_IS_GEOMETRY(object->type);
+}
+
+static bool filter_mask_object_in_view_layer(Depsgraph *depsgraph,
+                                             const Scene *scene,
+                                             ViewLayer *view_layer,
+                                             Object *object)
+{
+  if (!filter_mask_object_supported(object)) {
+    return false;
+  }
+
+  const Scene *scene_orig = DEG_get_original(scene);
+  if (scene_orig != nullptr && !BKE_scene_has_object(const_cast<Scene *>(scene_orig), object)) {
+    return false;
+  }
+
+  Object *object_eval = (depsgraph != nullptr) ? DEG_get_evaluated(depsgraph, object) : nullptr;
+  return BKE_view_layer_base_find(view_layer, object_eval ? object_eval : object) != nullptr;
+}
+
+static int16_t filter_mask_objects_signature(Span<Object *> objects)
+{
+  uint32_t hash = 2166136261u;
+  for (const Object *object : objects) {
+    hash ^= BLI_hash_string(object->id.name + 2);
+    hash *= 16777619u;
+  }
+  return int16_t(hash & 0x7FFFu);
+}
+
+static bool filter_mask_sanitize_object_list(NodeFilterMask &storage,
+                                             const Scene *scene,
+                                             Depsgraph *depsgraph,
+                                             ViewLayer *view_layer,
+                                             Vector<Object *> &r_objects)
+{
+  Set<Object *> unique_objects;
+  Vector<Object *> valid_objects;
+  valid_objects.reserve(storage.items_num);
+
+  for (const int index : IndexRange(storage.items_num)) {
+    Object *object = storage.items[index].object;
+    if (!filter_mask_object_in_view_layer(depsgraph, scene, view_layer, object) ||
+        !unique_objects.add(object))
+    {
+      continue;
+    }
+    valid_objects.append(object);
+  }
+
+  bool changed = (valid_objects.size() != storage.items_num);
+  if (!changed) {
+    for (const int index : valid_objects.index_range()) {
+      if (storage.items[index].object != valid_objects[index]) {
+        changed = true;
+        break;
+      }
+    }
+  }
+
+  if (changed) {
+    Set<Object *> kept_objects;
+    for (Object *object : valid_objects) {
+      kept_objects.add(object);
+    }
+    for (const int index : IndexRange(storage.items_num)) {
+      Object *object = storage.items[index].object;
+      if (object != nullptr && !kept_objects.contains(object) &&
+          BKE_id_is_in_global_main(reinterpret_cast<ID *>(object)))
+      {
+        id_us_min(reinterpret_cast<ID *>(object));
+      }
+    }
+    if (storage.items != nullptr) {
+      MEM_delete(storage.items);
+      storage.items = nullptr;
+    }
+    if (!valid_objects.is_empty()) {
+      storage.items = MEM_new_array<NodeFilterMaskItem>(valid_objects.size(), __func__);
+      for (const int index : valid_objects.index_range()) {
+        storage.items[index].object = valid_objects[index];
+      }
+    }
+    storage.items_num = valid_objects.size();
+    storage.active_index = valid_objects.is_empty() ? 0 :
+                                                   min_ii(storage.active_index,
+                                                          valid_objects.size() - 1);
+  }
+
+  r_objects = std::move(valid_objects);
+  return changed;
+}
+
+static Vector<Object *> filter_mask_collection_objects(const Scene *scene,
+                                                       Depsgraph *depsgraph,
+                                                       ViewLayer *view_layer,
+                                                       Collection *collection)
+{
+  Vector<Object *> objects;
+  if (collection == nullptr) {
+    return objects;
+  }
+
+  Set<Object *> unique_objects;
+  FOREACH_COLLECTION_OBJECT_RECURSIVE_BEGIN (collection, object) {
+    if (!filter_mask_object_in_view_layer(depsgraph, scene, view_layer, object) ||
+        !unique_objects.add(object))
+    {
+      continue;
+    }
+    objects.append(object);
+  }
+  FOREACH_COLLECTION_OBJECT_RECURSIVE_END;
+
+  return objects;
+}
+
+static bool filter_mask_sanitize_tree(bNodeTree &ntree,
+                                      const Scene *scene,
+                                      Depsgraph *depsgraph,
+                                      ViewLayer *view_layer,
+                                      Set<const bNodeTree *> &visited)
+{
+  if (visited.contains(&ntree)) {
+    return false;
+  }
+  visited.add(&ntree);
+
+  bool changed = false;
+  for (bNode *node = static_cast<bNode *>(ntree.nodes.first); node != nullptr; node = node->next) {
+    if (node->type_legacy == SH_NODE_FILTER_OBJECT_MASK) {
+      const NodeFilterMaskMode mode = NodeFilterMaskMode(node->custom1);
+      if (mode == SHD_FILTER_MASK_SINGLE_OBJECT) {
+        if (Object *object = (node->id != nullptr && GS(node->id->name) == ID_OB) ?
+                                 reinterpret_cast<Object *>(node->id) :
+                                 nullptr)
+        {
+          if (!filter_mask_object_in_view_layer(depsgraph, scene, view_layer, object)) {
+            id_us_min(node->id);
+            node->id = nullptr;
+            changed = true;
+          }
+        }
+        if (node->custom2 != 0) {
+          node->custom2 = 0;
+          changed = true;
+        }
+      }
+      else if (mode == SHD_FILTER_MASK_OBJECT_LIST) {
+        if (node->storage != nullptr) {
+          NodeFilterMask &storage = *static_cast<NodeFilterMask *>(node->storage);
+          Vector<Object *> valid_objects;
+          changed |= filter_mask_sanitize_object_list(
+              storage, scene, depsgraph, view_layer, valid_objects);
+          const int16_t signature = filter_mask_objects_signature(valid_objects);
+          if (node->custom2 != signature) {
+            node->custom2 = signature;
+            changed = true;
+          }
+        }
+      }
+      else if (mode == SHD_FILTER_MASK_COLLECTION) {
+        Collection *collection = (node->id != nullptr && GS(node->id->name) == ID_GR) ?
+                                     reinterpret_cast<Collection *>(node->id) :
+                                     nullptr;
+        const Vector<Object *> objects = filter_mask_collection_objects(
+            scene, depsgraph, view_layer, collection);
+        const int16_t signature = filter_mask_objects_signature(objects);
+        if (node->custom2 != signature) {
+          node->custom2 = signature;
+          changed = true;
+        }
+      }
+    }
+
+    if (node->type_legacy == NODE_GROUP && node->id != nullptr) {
+      changed |= filter_mask_sanitize_tree(
+          *reinterpret_cast<bNodeTree *>(node->id), scene, depsgraph, view_layer, visited);
+    }
+  }
+
+  return changed;
+}
+
+static bool filter_mask_tree_has_collection_mode(const bNodeTree &ntree,
+                                                 Set<const bNodeTree *> &visited)
+{
+  if (visited.contains(&ntree)) {
+    return false;
+  }
+  visited.add(&ntree);
+
+  for (const bNode *node = static_cast<const bNode *>(ntree.nodes.first); node != nullptr;
+       node = node->next)
+  {
+    if (node->type_legacy == SH_NODE_FILTER_OBJECT_MASK &&
+        NodeFilterMaskMode(node->custom1) == SHD_FILTER_MASK_COLLECTION)
+    {
+      return true;
+    }
+    if (node->type_legacy == NODE_GROUP && node->id != nullptr) {
+      if (filter_mask_tree_has_collection_mode(
+              *reinterpret_cast<const bNodeTree *>(node->id), visited))
+      {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 static void filter_material_collect_scene_sources(const bNodeTree &ntree,
@@ -178,33 +393,11 @@ void FilterMaterialModule::update_filter_object_info_buffer(GPUMaterial *gpumat)
   filter_object_info_buf_.push_update();
 }
 
-void FilterMaterialModule::update_filter_mask_hash_buffer(GPUMaterial *gpumat)
-{
-  for (FilterMaskHashData &entry : filter_mask_hash_buf_) {
-    entry = filter_mask_hash_default();
-  }
-
-  const int material_object_count = GPU_material_filter_mask_object_count(gpumat);
-  const int object_count = (material_object_count < FILTER_MASK_HASH_MAX) ? material_object_count :
-                                                                      FILTER_MASK_HASH_MAX;
-  for (int index = 0; index < object_count; index++) {
-    Object *object = GPU_material_filter_mask_object_get(gpumat, index);
-    if (object == nullptr) {
-      continue;
-    }
-
-    const char *name = object->id.name + 2;
-    const uint32_t hash = BKE_cryptomatte_hash(name, int(std::strlen(name)));
-    filter_mask_hash_buf_[index].metadata = float4(BKE_cryptomatte_hash_to_float(hash), 0.0f, 0.0f, 0.0f);
-  }
-
-  filter_mask_hash_buf_.push_update();
-}
-
 void FilterMaterialModule::begin_sync()
 {
   entries_.clear();
   uses_scene_time_ = false;
+  BKE_view_layer_synced_ensure(inst_.scene, inst_.view_layer);
 
   for (SceneFilterMaterial *filter_entry = static_cast<SceneFilterMaterial *>(
            inst_.scene->eevee.filter_materials.first);
@@ -213,6 +406,17 @@ void FilterMaterialModule::begin_sync()
   {
     if (!filter_entry->enabled || !filter_material_is_valid(filter_entry->material)) {
       continue;
+    }
+
+    Set<const bNodeTree *> visited;
+    const bool tree_changed = filter_mask_sanitize_tree(
+        *filter_entry->material->nodetree, inst_.scene, inst_.depsgraph, inst_.view_layer, visited);
+    visited.clear();
+    const bool has_collection_mode = filter_mask_tree_has_collection_mode(
+        *filter_entry->material->nodetree, visited);
+    if (tree_changed || has_collection_mode)
+    {
+      GPU_material_free(&filter_entry->material->gpumaterial);
     }
 
     GPUMaterial *gpumat = inst_.shaders.material_shader_get(filter_entry->material,
@@ -238,7 +442,6 @@ void FilterMaterialModule::begin_sync()
     entry.gpumat = gpumat;
     entries_.append(entry);
   }
-
 }
 
 bool FilterMaterialModule::has_stage_entries(SceneEEVEEFilterExecutionStage stage) const
@@ -282,7 +485,6 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
     pass.state_set(DRW_STATE_WRITE_COLOR);
     pass.framebuffer_set(&framebuffer_);
     update_filter_object_info_buffer(entries_[entry_index].gpumat);
-    update_filter_mask_hash_buffer(entries_[entry_index].gpumat);
     pass.material_set(*inst_.manager, entries_[entry_index].gpumat);
     pass.bind_texture("scene_color_tx", &scene_color_tx);
     pass.bind_texture("rp_color_tx", &inst_.render_buffers.rp_color_tx);
@@ -291,7 +493,6 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
     pass.bind_texture("cryptomatte_tx", &inst_.render_buffers.cryptomatte_tx);
     pass.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);
     pass.bind_ubo(FILTER_OBJECT_INFO_BUF_SLOT, &filter_object_info_buf_);
-    pass.bind_ubo(FILTER_MASK_HASH_BUF_SLOT, &filter_mask_hash_buf_);
     pass.bind_resources(inst_.uniform_data);
     pass.bind_resources(inst_.sampling);
     pass.bind_resources(inst_.render_textures);

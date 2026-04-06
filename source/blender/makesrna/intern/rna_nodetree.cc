@@ -26,9 +26,14 @@
 #include "BKE_attribute.hh"
 #include "BKE_context.hh"
 #include "BKE_geometry_set.hh"
+#include "BKE_layer.hh"
 #include "BKE_lib_id.hh"
+#include "BKE_main_invariants.hh"
 #include "BKE_node.hh"
 #include "BKE_node_legacy_types.hh"
+#include "BKE_node_tree_update.hh"
+
+#include "DEG_depsgraph_build.hh"
 
 #include "RNA_access.hh"
 #include "RNA_define.hh"
@@ -815,7 +820,18 @@ static void rna_NodeFilterMask_object_set(PointerRNA *ptr, PointerRNA value, Rep
 {
   bNode *node = ptr->data_as<bNode>();
   ID *id = static_cast<ID *>(value.data);
-  node->id = (id != nullptr && GS(id->name) == ID_OB) ? id : nullptr;
+  ID *new_id = (id != nullptr && GS(id->name) == ID_OB &&
+                OB_TYPE_IS_GEOMETRY(reinterpret_cast<Object *>(id)->type)) ?
+                   id :
+                   nullptr;
+  if (node->id != nullptr) {
+    id_us_min(node->id);
+    node->id = nullptr;
+  }
+  if (new_id != nullptr) {
+    id_us_plus(new_id);
+    node->id = new_id;
+  }
 }
 
 static PointerRNA rna_NodeFilterMask_collection_get(PointerRNA *ptr)
@@ -833,7 +849,43 @@ static void rna_NodeFilterMask_collection_set(PointerRNA *ptr,
 {
   bNode *node = ptr->data_as<bNode>();
   ID *id = static_cast<ID *>(value.data);
-  node->id = (id != nullptr && GS(id->name) == ID_GR) ? id : nullptr;
+  ID *new_id = (id != nullptr && GS(id->name) == ID_GR) ? id : nullptr;
+  if (node->id != nullptr) {
+    id_us_min(node->id);
+    node->id = nullptr;
+  }
+  if (new_id != nullptr) {
+    id_us_plus(new_id);
+    node->id = new_id;
+  }
+}
+
+static bool rna_NodeFilterMask_renderable_object_poll(PointerRNA * /*ptr*/, PointerRNA value)
+{
+  Object *object = static_cast<Object *>(value.data);
+  return object != nullptr && OB_TYPE_IS_GEOMETRY(object->type);
+}
+
+static PointerRNA rna_NodeFilterMaskItem_object_get(PointerRNA *ptr)
+{
+  NodeFilterMaskItem *item = static_cast<NodeFilterMaskItem *>(ptr->data);
+  return (item->object != nullptr) ? RNA_id_pointer_create(&item->object->id) : PointerRNA_NULL;
+}
+
+static void rna_NodeFilterMaskItem_object_set(PointerRNA *ptr,
+                                              PointerRNA value,
+                                              ReportList * /*reports*/)
+{
+  NodeFilterMaskItem *item = static_cast<NodeFilterMaskItem *>(ptr->data);
+  Object *object = static_cast<Object *>(value.data);
+  Object *new_object = (object != nullptr && OB_TYPE_IS_GEOMETRY(object->type)) ? object : nullptr;
+  if (item->object != nullptr && BKE_id_is_in_global_main(reinterpret_cast<ID *>(item->object))) {
+    id_us_min(reinterpret_cast<ID *>(item->object));
+  }
+  item->object = new_object;
+  if (item->object != nullptr && BKE_id_is_in_global_main(reinterpret_cast<ID *>(item->object))) {
+    id_us_plus(reinterpret_cast<ID *>(item->object));
+  }
 }
 
 static void rna_NodeFilterMaskItem_name_get(PointerRNA *ptr, char *value)
@@ -848,6 +900,32 @@ static int rna_NodeFilterMaskItem_name_length(PointerRNA *ptr)
   NodeFilterMaskItem *item = static_cast<NodeFilterMaskItem *>(ptr->data);
   const char *name = (item->object != nullptr) ? item->object->id.name + 2 : "<None>";
   return int(strlen(name));
+}
+
+static void rna_NodeFilterMaskItem_update(Main *bmain, Scene * /*scene*/, PointerRNA *ptr)
+{
+  bNodeTree &ntree = *reinterpret_cast<bNodeTree *>(ptr->owner_id);
+  NodeFilterMaskItem &item = *static_cast<NodeFilterMaskItem *>(ptr->data);
+
+  bNode *owner_node = nullptr;
+  for (bNode *node = static_cast<bNode *>(ntree.nodes.first); node != nullptr; node = node->next) {
+    if (node->type_legacy != SH_NODE_FILTER_OBJECT_MASK || node->storage == nullptr) {
+      continue;
+    }
+    NodeFilterMask *storage = static_cast<NodeFilterMask *>(node->storage);
+    if (&item >= storage->items && &item < (storage->items + storage->items_num)) {
+      owner_node = node;
+      break;
+    }
+  }
+
+  if (owner_node == nullptr) {
+    return;
+  }
+
+  BKE_ntree_update_tag_node_property(&ntree, owner_node);
+  BKE_main_ensure_invariants(*bmain, ntree.id);
+  DEG_relations_tag_update(bmain);
 }
 
 #ifndef RNA_RUNTIME
@@ -6306,7 +6384,11 @@ static void def_sh_filter_object_mask(BlenderRNA * /*brna*/, StructRNA *srna)
 
   prop = RNA_def_property(srna, "object", PROP_POINTER, PROP_NONE);
   RNA_def_property_pointer_funcs(
-      prop, "rna_NodeFilterMask_object_get", "rna_NodeFilterMask_object_set", nullptr, nullptr);
+      prop,
+      "rna_NodeFilterMask_object_get",
+      "rna_NodeFilterMask_object_set",
+      nullptr,
+      "rna_NodeFilterMask_renderable_object_poll");
   RNA_def_property_struct_type(prop, "Object");
   RNA_def_property_flag(prop, PROP_EDITABLE | PROP_ID_REFCOUNT);
   RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
@@ -8009,12 +8091,17 @@ static void def_sh_filter_mask_item(BlenderRNA *brna)
   RNA_def_struct_sdna(srna, "NodeFilterMaskItem");
 
   prop = RNA_def_property(srna, "object", PROP_POINTER, PROP_NONE);
-  RNA_def_property_pointer_sdna(prop, nullptr, "object");
   RNA_def_property_struct_type(prop, "Object");
+  RNA_def_property_pointer_funcs(
+      prop,
+      "rna_NodeFilterMaskItem_object_get",
+      "rna_NodeFilterMaskItem_object_set",
+      nullptr,
+      "rna_NodeFilterMask_renderable_object_poll");
   RNA_def_property_flag(prop, PROP_EDITABLE | PROP_ID_REFCOUNT);
   RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
   RNA_def_property_ui_text(prop, "Object", "Object included in the filter mask list");
-  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update_relations");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_NodeFilterMaskItem_update");
 
   prop = RNA_def_property(srna, "name", PROP_STRING, PROP_NONE);
   RNA_def_property_string_funcs(
