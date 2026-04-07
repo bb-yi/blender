@@ -501,6 +501,10 @@ Material &MaterialModule::material_sync(Object *ob,
       mat.npr = has_npr_tree ? material_pass_get(
                                    ob, blender_mat, MAT_PIPE_DEFERRED_NPR, geometry_type) :
                                MaterialPass();
+      if (material_has_flag(mat.npr, GPU_MATFLAG_RAYCAST) && mat.prepass.gpumat != nullptr) {
+        mat.prepass.sub_pass = inst_.pipelines.deferred.prepass_add(
+            blender_mat, mat.prepass.gpumat, has_motion, ob->refraction_layer_index, true);
+      }
       if (hide_on_camera) {
         /* Only null the sub_pass.
          * `mat.shading.gpumat` is always needed for using the GPU_material API. */
@@ -524,6 +528,12 @@ Material &MaterialModule::material_sync(Object *ob,
                                                      geometry_type,
                                                      MAT_PROBE_REFLECTION) :
                                                  MaterialPass();
+        if (material_has_flag(mat.lightprobe_sphere_npr, GPU_MATFLAG_RAYCAST) &&
+            mat.lightprobe_sphere_prepass.gpumat != nullptr)
+        {
+          mat.lightprobe_sphere_prepass.sub_pass = inst_.pipelines.probe.prepass_add(
+              blender_mat, mat.lightprobe_sphere_prepass.gpumat, true);
+        }
       }
       else {
         mat.lightprobe_sphere_prepass = MaterialPass();
@@ -543,6 +553,12 @@ Material &MaterialModule::material_sync(Object *ob,
                                                  geometry_type,
                                                  MAT_PROBE_PLANAR) :
                                              MaterialPass();
+        if (material_has_flag(mat.planar_probe_npr, GPU_MATFLAG_RAYCAST) &&
+            mat.planar_probe_prepass.gpumat != nullptr)
+        {
+          mat.planar_probe_prepass.sub_pass = inst_.pipelines.planar.prepass_add(
+              blender_mat, mat.planar_probe_prepass.gpumat, true);
+        }
       }
       else {
         mat.planar_probe_prepass = MaterialPass();
