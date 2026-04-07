@@ -18,5 +18,7 @@ STORAGE_BUF(LIGHT_CULL_BUF_SLOT, read, LightCullingData, light_cull_buf)
 STORAGE_BUF(LIGHT_BUF_SLOT, read, LightData, light_buf[])
 STORAGE_BUF(LIGHT_ZBIN_BUF_SLOT, read, uint, light_zbin_buf[])
 STORAGE_BUF(LIGHT_TILE_BUF_SLOT, read, uint, light_tile_buf[])
-UNIFORM_BUF(WORLD_SUNLIGHT_BUF_SLOT, LightData, sunlight_buf[WORLD_SUN_MAX])
+/* Metal codegen currently needs a literal size here; scoped enum constants from host_shared
+ * types are emitted into stage namespaces and are not visible unqualified in this declaration. */
+UNIFORM_BUF(WORLD_SUNLIGHT_BUF_SLOT, LightData, sunlight_buf[2])
 GPU_SHADER_CREATE_END()

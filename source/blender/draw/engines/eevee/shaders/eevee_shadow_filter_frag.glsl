@@ -55,13 +55,8 @@ void main()
     return;
   }
 
-  const float weights[7] = float[7](0.19648255f,
-                                    0.17603266f,
-                                    0.12098100f,
-                                    0.06475994f,
-                                    0.02699548f,
-                                    0.00876415f,
-                                    0.00221600f);
+  const float weights[7] = {
+      0.19648255f, 0.17603266f, 0.12098100f, 0.06475994f, 0.02699548f, 0.00876415f, 0.00221600f};
 
   float accum = center_shadow * weights[0];
   float weight_sum = weights[0];
