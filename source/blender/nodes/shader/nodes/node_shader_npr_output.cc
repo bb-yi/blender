@@ -56,7 +56,9 @@ static int node_shader_gpu_npr_output(GPUMaterial *mat,
       break;
   }
 
-  GPU_material_output_npr(mat, outlink_npr);
+  if (outlink_npr != nullptr) {
+    GPU_material_output_npr(mat, outlink_npr);
+  }
   return true;
 }
 

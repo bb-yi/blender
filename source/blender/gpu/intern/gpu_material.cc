@@ -429,21 +429,21 @@ int GPU_material_filter_mask_object_append(GPUMaterial *material, Object *object
     return -1;
   }
 
-  material->filter_object_infos.append(object);
-  return material->filter_object_infos.size() - 1;
+  material->filter_mask_objects.append(object);
+  return material->filter_mask_objects.size() - 1;
 }
 
 int GPU_material_filter_mask_object_count(const GPUMaterial *material)
 {
-  return (material != nullptr) ? material->filter_object_infos.size() : 0;
+  return (material != nullptr) ? material->filter_mask_objects.size() : 0;
 }
 
 Object *GPU_material_filter_mask_object_get(const GPUMaterial *material, int index)
 {
-  if (material == nullptr || index < 0 || index >= material->filter_object_infos.size()) {
+  if (material == nullptr || index < 0 || index >= material->filter_mask_objects.size()) {
     return nullptr;
   }
-  return material->filter_object_infos[index];
+  return material->filter_mask_objects[index];
 }
 
 void GPU_material_generated_source_add(GPUMaterial *material,

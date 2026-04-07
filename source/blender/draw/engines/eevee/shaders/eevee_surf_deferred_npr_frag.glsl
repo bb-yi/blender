@@ -132,7 +132,7 @@ float4 TextureHandle_eval_impl(TextureHandle tex, float2 offset, bool texel_offs
       case TEX_HANDLE_POSITION:
         return float4(g_data.P, 0.0f);
       case TEX_HANDLE_NORMAL:
-        return float4(g_data.N, 0.0f);
+        return float4(g_average_normal, 0.0f);
       default:
         break;
     }
@@ -349,6 +349,7 @@ void main()
   g_diffuse_color = float4(dc.diffuse_color, 1.0f);
   g_diffuse_direct = float4(dc.diffuse_direct, 1.0f);
   g_diffuse_indirect = float4(dc.diffuse_indirect, 1.0f);
+  g_average_normal = dc.average_normal;
   g_specular_color = float4(dc.specular_color, 1.0f);
   g_specular_direct = float4(dc.specular_direct, 1.0f);
   g_specular_indirect = float4(dc.specular_indirect, 1.0f);

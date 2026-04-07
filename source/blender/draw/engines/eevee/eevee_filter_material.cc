@@ -20,8 +20,6 @@
 
 #include "BKE_collection.hh"
 #include "BKE_cryptomatte.hh"
-#include "BKE_layer.hh"
-#include "BKE_lib_id.hh"
 #include "BKE_node_legacy_types.hh"
 #include "BKE_node.hh"
 
@@ -30,8 +28,6 @@
 #include "GPU_material.hh"
 #include "GPU_framebuffer.hh"
 #include "GPU_texture.hh"
-
-#include "MEM_guardedalloc.h"
 
 #include "eevee_filter_material.hh"
 #include "eevee_instance.hh"
@@ -60,24 +56,6 @@ static bool filter_mask_object_supported(const Object *object)
   return object != nullptr && OB_TYPE_IS_GEOMETRY(object->type);
 }
 
-static bool filter_mask_object_in_view_layer(Depsgraph *depsgraph,
-                                             const Scene *scene,
-                                             ViewLayer *view_layer,
-                                             Object *object)
-{
-  if (!filter_mask_object_supported(object)) {
-    return false;
-  }
-
-  const Scene *scene_orig = DEG_get_original(scene);
-  if (scene_orig != nullptr && !BKE_scene_has_object(const_cast<Scene *>(scene_orig), object)) {
-    return false;
-  }
-
-  Object *object_eval = (depsgraph != nullptr) ? DEG_get_evaluated(depsgraph, object) : nullptr;
-  return BKE_view_layer_base_find(view_layer, object_eval ? object_eval : object) != nullptr;
-}
-
 static int16_t filter_mask_objects_signature(Span<Object *> objects)
 {
   uint32_t hash = 2166136261u;
@@ -88,73 +66,7 @@ static int16_t filter_mask_objects_signature(Span<Object *> objects)
   return int16_t(hash & 0x7FFFu);
 }
 
-static bool filter_mask_sanitize_object_list(NodeFilterMask &storage,
-                                             const Scene *scene,
-                                             Depsgraph *depsgraph,
-                                             ViewLayer *view_layer,
-                                             Vector<Object *> &r_objects)
-{
-  Set<Object *> unique_objects;
-  Vector<Object *> valid_objects;
-  valid_objects.reserve(storage.items_num);
-
-  for (const int index : IndexRange(storage.items_num)) {
-    Object *object = storage.items[index].object;
-    if (!filter_mask_object_in_view_layer(depsgraph, scene, view_layer, object) ||
-        !unique_objects.add(object))
-    {
-      continue;
-    }
-    valid_objects.append(object);
-  }
-
-  bool changed = (valid_objects.size() != storage.items_num);
-  if (!changed) {
-    for (const int index : valid_objects.index_range()) {
-      if (storage.items[index].object != valid_objects[index]) {
-        changed = true;
-        break;
-      }
-    }
-  }
-
-  if (changed) {
-    Set<Object *> kept_objects;
-    for (Object *object : valid_objects) {
-      kept_objects.add(object);
-    }
-    for (const int index : IndexRange(storage.items_num)) {
-      Object *object = storage.items[index].object;
-      if (object != nullptr && !kept_objects.contains(object) &&
-          BKE_id_is_in_global_main(reinterpret_cast<ID *>(object)))
-      {
-        id_us_min(reinterpret_cast<ID *>(object));
-      }
-    }
-    if (storage.items != nullptr) {
-      MEM_delete(storage.items);
-      storage.items = nullptr;
-    }
-    if (!valid_objects.is_empty()) {
-      storage.items = MEM_new_array<NodeFilterMaskItem>(valid_objects.size(), __func__);
-      for (const int index : valid_objects.index_range()) {
-        storage.items[index].object = valid_objects[index];
-      }
-    }
-    storage.items_num = valid_objects.size();
-    storage.active_index = valid_objects.is_empty() ? 0 :
-                                                   min_ii(storage.active_index,
-                                                          valid_objects.size() - 1);
-  }
-
-  r_objects = std::move(valid_objects);
-  return changed;
-}
-
-static Vector<Object *> filter_mask_collection_objects(const Scene *scene,
-                                                       Depsgraph *depsgraph,
-                                                       ViewLayer *view_layer,
-                                                       Collection *collection)
+static Vector<Object *> filter_mask_collection_objects(Collection *collection)
 {
   Vector<Object *> objects;
   if (collection == nullptr) {
@@ -163,9 +75,7 @@ static Vector<Object *> filter_mask_collection_objects(const Scene *scene,
 
   Set<Object *> unique_objects;
   FOREACH_COLLECTION_OBJECT_RECURSIVE_BEGIN (collection, object) {
-    if (!filter_mask_object_in_view_layer(depsgraph, scene, view_layer, object) ||
-        !unique_objects.add(object))
-    {
+    if (!filter_mask_object_supported(object) || !unique_objects.add(object)) {
       continue;
     }
     objects.append(object);
@@ -175,11 +85,8 @@ static Vector<Object *> filter_mask_collection_objects(const Scene *scene,
   return objects;
 }
 
-static bool filter_mask_sanitize_tree(bNodeTree &ntree,
-                                      const Scene *scene,
-                                      Depsgraph *depsgraph,
-                                      ViewLayer *view_layer,
-                                      Set<const bNodeTree *> &visited)
+static bool filter_mask_update_collection_signatures(bNodeTree &ntree,
+                                                     Set<const bNodeTree *> &visited)
 {
   if (visited.contains(&ntree)) {
     return false;
@@ -188,86 +95,27 @@ static bool filter_mask_sanitize_tree(bNodeTree &ntree,
 
   bool changed = false;
   for (bNode *node = static_cast<bNode *>(ntree.nodes.first); node != nullptr; node = node->next) {
-    if (node->type_legacy == SH_NODE_FILTER_OBJECT_MASK) {
-      const NodeFilterMaskMode mode = NodeFilterMaskMode(node->custom1);
-      if (mode == SHD_FILTER_MASK_SINGLE_OBJECT) {
-        if (Object *object = (node->id != nullptr && GS(node->id->name) == ID_OB) ?
-                                 reinterpret_cast<Object *>(node->id) :
-                                 nullptr)
-        {
-          if (!filter_mask_object_in_view_layer(depsgraph, scene, view_layer, object)) {
-            id_us_min(node->id);
-            node->id = nullptr;
-            changed = true;
-          }
-        }
-        if (node->custom2 != 0) {
-          node->custom2 = 0;
-          changed = true;
-        }
-      }
-      else if (mode == SHD_FILTER_MASK_OBJECT_LIST) {
-        if (node->storage != nullptr) {
-          NodeFilterMask &storage = *static_cast<NodeFilterMask *>(node->storage);
-          Vector<Object *> valid_objects;
-          changed |= filter_mask_sanitize_object_list(
-              storage, scene, depsgraph, view_layer, valid_objects);
-          const int16_t signature = filter_mask_objects_signature(valid_objects);
-          if (node->custom2 != signature) {
-            node->custom2 = signature;
-            changed = true;
-          }
-        }
-      }
-      else if (mode == SHD_FILTER_MASK_COLLECTION) {
-        Collection *collection = (node->id != nullptr && GS(node->id->name) == ID_GR) ?
-                                     reinterpret_cast<Collection *>(node->id) :
-                                     nullptr;
-        const Vector<Object *> objects = filter_mask_collection_objects(
-            scene, depsgraph, view_layer, collection);
-        const int16_t signature = filter_mask_objects_signature(objects);
-        if (node->custom2 != signature) {
-          node->custom2 = signature;
-          changed = true;
-        }
+    if (node->type_legacy == SH_NODE_FILTER_OBJECT_MASK &&
+        NodeFilterMaskMode(node->custom1) == SHD_FILTER_MASK_COLLECTION)
+    {
+      Collection *collection = (node->id != nullptr && GS(node->id->name) == ID_GR) ?
+                                   reinterpret_cast<Collection *>(node->id) :
+                                   nullptr;
+      const Vector<Object *> objects = filter_mask_collection_objects(collection);
+      const int16_t signature = filter_mask_objects_signature(objects);
+      if (node->custom2 != signature) {
+        node->custom2 = signature;
+        changed = true;
       }
     }
 
     if (node->type_legacy == NODE_GROUP && node->id != nullptr) {
-      changed |= filter_mask_sanitize_tree(
-          *reinterpret_cast<bNodeTree *>(node->id), scene, depsgraph, view_layer, visited);
+      changed |= filter_mask_update_collection_signatures(
+          *reinterpret_cast<bNodeTree *>(node->id), visited);
     }
   }
 
   return changed;
-}
-
-static bool filter_mask_tree_has_collection_mode(const bNodeTree &ntree,
-                                                 Set<const bNodeTree *> &visited)
-{
-  if (visited.contains(&ntree)) {
-    return false;
-  }
-  visited.add(&ntree);
-
-  for (const bNode *node = static_cast<const bNode *>(ntree.nodes.first); node != nullptr;
-       node = node->next)
-  {
-    if (node->type_legacy == SH_NODE_FILTER_OBJECT_MASK &&
-        NodeFilterMaskMode(node->custom1) == SHD_FILTER_MASK_COLLECTION)
-    {
-      return true;
-    }
-    if (node->type_legacy == NODE_GROUP && node->id != nullptr) {
-      if (filter_mask_tree_has_collection_mode(
-              *reinterpret_cast<const bNodeTree *>(node->id), visited))
-      {
-        return true;
-      }
-    }
-  }
-
-  return false;
 }
 
 struct FilterMaterialAOVUsage {
@@ -335,86 +183,6 @@ static Vector<std::string> filter_material_collect_conflicting_aov_names(
     }
   }
   return conflicts;
-}
-
-static void filter_material_collect_conflicting_aov_layers(
-    const ViewLayer &view_layer,
-    const RenderBuffersInfoData &render_buffers_info,
-    const Span<std::string> conflicting_aov_names,
-    Vector<int> &r_color_layers,
-    Vector<int> &r_value_layers)
-{
-  if (conflicting_aov_names.is_empty()) {
-    return;
-  }
-
-  auto has_conflict_name = [&](const StringRef name) {
-    for (const std::string &conflict_name : conflicting_aov_names) {
-      if (conflict_name == name) {
-        return true;
-      }
-    }
-    return false;
-  };
-
-  int color_index = 0;
-  int value_index = 0;
-  for (const ViewLayerAOV &aov : view_layer.aovs) {
-    if (has_conflict_name(aov.name)) {
-      if (aov.type == AOV_TYPE_COLOR) {
-        r_color_layers.append(render_buffers_info.color_len + color_index);
-      }
-      else if (aov.type == AOV_TYPE_VALUE) {
-        r_value_layers.append(render_buffers_info.value_len + value_index);
-      }
-    }
-    if (aov.type == AOV_TYPE_COLOR) {
-      color_index++;
-    }
-    else if (aov.type == AOV_TYPE_VALUE) {
-      value_index++;
-    }
-  }
-}
-
-template<typename Fn> static void filter_material_for_each_contiguous_range(Span<int> layers, Fn &&fn)
-{
-  if (layers.is_empty()) {
-    return;
-  }
-
-  int range_start = layers.first();
-  int range_len = 1;
-  for (const int index : layers.index_range().drop_front(1)) {
-    if (layers[index] == (range_start + range_len)) {
-      range_len++;
-      continue;
-    }
-    fn(range_start, range_len);
-    range_start = layers[index];
-    range_len = 1;
-  }
-  fn(range_start, range_len);
-}
-
-static void filter_material_copy_snapshot_layers(gpu::Texture *dst,
-                                                 gpu::Texture *src,
-                                                 const Span<int> layers)
-{
-  if (layers.is_empty()) {
-    return;
-  }
-
-  const gpu::TextureFormat format = GPU_texture_format(src);
-  filter_material_for_each_contiguous_range(layers, [&](const int layer_start, const int layer_len) {
-    gpu::Texture *src_view = GPU_texture_create_view(
-        "FilterMaterial.AOVSnapshotSrc", src, format, 0, 9999, layer_start, layer_len, false, false);
-    gpu::Texture *dst_view = GPU_texture_create_view(
-        "FilterMaterial.AOVSnapshotDst", dst, format, 0, 9999, layer_start, layer_len, false, false);
-    GPU_texture_copy(dst_view, src_view);
-    GPU_texture_free(src_view);
-    GPU_texture_free(dst_view);
-  });
 }
 
 static void filter_material_collect_scene_sources(const bNodeTree &ntree,
@@ -507,11 +275,13 @@ void FilterMaterialModule::update_filter_object_info_buffer(GPUMaterial *gpumat)
   }
 
   const int material_object_count = GPU_material_filter_object_info_count(gpumat);
-  const int object_count = (material_object_count < FILTER_OBJECT_INFO_MAX) ?
-                               material_object_count :
-                               FILTER_OBJECT_INFO_MAX;
+  const int material_mask_count = GPU_material_filter_mask_object_count(gpumat);
+  const int object_count = min_ii(material_object_count + material_mask_count,
+                                  FILTER_OBJECT_INFO_MAX);
   for (int index = 0; index < object_count; index++) {
-    Object *object = GPU_material_filter_object_info_get(gpumat, index);
+    Object *object = (index < material_object_count) ?
+                         GPU_material_filter_object_info_get(gpumat, index) :
+                         GPU_material_filter_mask_object_get(gpumat, index - material_object_count);
     if (object == nullptr) {
       continue;
     }
@@ -545,7 +315,6 @@ void FilterMaterialModule::begin_sync()
 {
   entries_.clear();
   uses_scene_time_ = false;
-  BKE_view_layer_synced_ensure(inst_.scene, inst_.view_layer);
 
   for (SceneFilterMaterial *filter_entry = static_cast<SceneFilterMaterial *>(
            inst_.scene->eevee.filter_materials.first);
@@ -557,12 +326,9 @@ void FilterMaterialModule::begin_sync()
     }
 
     Set<const bNodeTree *> visited;
-    const bool tree_changed = filter_mask_sanitize_tree(
-        *filter_entry->material->nodetree, inst_.scene, inst_.depsgraph, inst_.view_layer, visited);
-    visited.clear();
-    const bool has_collection_mode = filter_mask_tree_has_collection_mode(
+    const bool collection_signature_changed = filter_mask_update_collection_signatures(
         *filter_entry->material->nodetree, visited);
-    if (tree_changed || has_collection_mode)
+    if (collection_signature_changed)
     {
       GPU_material_free(&filter_entry->material->gpumaterial);
     }
@@ -596,11 +362,6 @@ void FilterMaterialModule::begin_sync()
     entry.uses_aov_input = !aov_usage.input_names.is_empty();
     entry.uses_aov_output = !aov_usage.output_names.is_empty();
     entry.conflicting_aov_names = filter_material_collect_conflicting_aov_names(aov_usage);
-    filter_material_collect_conflicting_aov_layers(*inst_.view_layer,
-                                                   inst_.render_buffers.data,
-                                                   entry.conflicting_aov_names,
-                                                   entry.conflicting_color_layers,
-                                                   entry.conflicting_value_layers);
     entries_.append(entry);
   }
 }
@@ -663,12 +424,8 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
     gpu::Texture *aov_value_tx = inst_.render_buffers.rp_value_tx;
 
     if (!entries_[entry_index].conflicting_aov_names.is_empty()) {
-      filter_material_copy_snapshot_layers(aov_color_snapshot_tx_,
-                                           inst_.render_buffers.rp_color_tx,
-                                           entries_[entry_index].conflicting_color_layers);
-      filter_material_copy_snapshot_layers(aov_value_snapshot_tx_,
-                                           inst_.render_buffers.rp_value_tx,
-                                           entries_[entry_index].conflicting_value_layers);
+      GPU_texture_copy(aov_color_snapshot_tx_, inst_.render_buffers.rp_color_tx);
+      GPU_texture_copy(aov_value_snapshot_tx_, inst_.render_buffers.rp_value_tx);
       GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE | GPU_BARRIER_TEXTURE_FETCH |
                          GPU_BARRIER_SHADER_IMAGE_ACCESS);
       aov_color_tx = aov_color_snapshot_tx_;

@@ -38,6 +38,7 @@ float4 g_combined_color;
 float4 g_diffuse_color;
 float4 g_diffuse_direct;
 float4 g_diffuse_indirect;
+float3 g_average_normal;
 float4 g_specular_color;
 float4 g_specular_direct;
 float4 g_specular_indirect;

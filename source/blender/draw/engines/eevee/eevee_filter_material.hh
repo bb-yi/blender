@@ -14,7 +14,6 @@
 #include "DRW_gpu_wrapper.hh"
 #include "DRW_render.hh"
 
-#include "BLI_span.hh"
 #include "BLI_vector.hh"
 
 #include "GPU_material.hh"
@@ -42,8 +41,6 @@ class FilterMaterialModule {
     bool uses_aov_input = false;
     bool uses_aov_output = false;
     blender::Vector<std::string> conflicting_aov_names;
-    blender::Vector<int> conflicting_color_layers;
-    blender::Vector<int> conflicting_value_layers;
   };
 
   Instance &inst_;
