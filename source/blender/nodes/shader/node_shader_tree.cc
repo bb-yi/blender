@@ -1103,6 +1103,11 @@ void ntreeGPUMaterialNodes(bNodeTree *localtree, GPUMaterial *mat)
     if (output != nullptr) {
       ntreeExecGPUNodes(exec, mat, output);
     }
+    for (bNode &node : localtree->nodes) {
+      if (node.type_legacy == SH_NODE_OUTPUT_AOV) {
+        ntreeExecGPUNodes(exec, mat, &node);
+      }
+    }
     ntreeShaderEndExecTree(exec);
     return;
   }

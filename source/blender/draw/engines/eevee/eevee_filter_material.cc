@@ -16,6 +16,7 @@
 #include "BLI_listbase.h"
 #include "BLI_math_matrix.hh"
 #include "BLI_set.hh"
+#include "BLI_vector.hh"
 
 #include "BKE_collection.hh"
 #include "BKE_cryptomatte.hh"
@@ -269,6 +270,153 @@ static bool filter_mask_tree_has_collection_mode(const bNodeTree &ntree,
   return false;
 }
 
+struct FilterMaterialAOVUsage {
+  Vector<std::string> input_names;
+  Vector<std::string> output_names;
+};
+
+static void filter_material_add_aov_name(Vector<std::string> &names, const StringRef name)
+{
+  for (const std::string &existing : names) {
+    if (existing == name) {
+      return;
+    }
+  }
+  names.append(std::string(name));
+}
+
+static StringRef filter_material_aov_node_name(const bNode &node)
+{
+  if (node.storage == nullptr) {
+    return "";
+  }
+  const NodeShaderOutputAOV *aov = static_cast<const NodeShaderOutputAOV *>(node.storage);
+  return aov->name;
+}
+
+static void filter_material_collect_aov_usage(const bNodeTree &ntree,
+                                              Set<const bNodeTree *> &visited,
+                                              FilterMaterialAOVUsage &r_usage)
+{
+  if (visited.contains(&ntree)) {
+    return;
+  }
+  visited.add(&ntree);
+
+  for (const bNode *node = static_cast<const bNode *>(ntree.nodes.first); node != nullptr;
+       node = node->next)
+  {
+    if (ELEM(node->type_legacy, SH_NODE_INPUT_AOV, SH_NODE_OUTPUT_AOV)) {
+      const StringRef aov_name = filter_material_aov_node_name(*node);
+      if (!aov_name.is_empty()) {
+        Vector<std::string> &names = (node->type_legacy == SH_NODE_INPUT_AOV) ?
+                                         r_usage.input_names :
+                                         r_usage.output_names;
+        filter_material_add_aov_name(names, aov_name);
+      }
+    }
+    if (node->type_legacy == NODE_GROUP && node->id != nullptr) {
+      filter_material_collect_aov_usage(
+          *reinterpret_cast<const bNodeTree *>(node->id), visited, r_usage);
+    }
+  }
+}
+
+static Vector<std::string> filter_material_collect_conflicting_aov_names(
+    const FilterMaterialAOVUsage &usage)
+{
+  Vector<std::string> conflicts;
+  for (const std::string &input_name : usage.input_names) {
+    for (const std::string &output_name : usage.output_names) {
+      if (input_name == output_name) {
+        conflicts.append(input_name);
+        break;
+      }
+    }
+  }
+  return conflicts;
+}
+
+static void filter_material_collect_conflicting_aov_layers(
+    const ViewLayer &view_layer,
+    const RenderBuffersInfoData &render_buffers_info,
+    const Span<std::string> conflicting_aov_names,
+    Vector<int> &r_color_layers,
+    Vector<int> &r_value_layers)
+{
+  if (conflicting_aov_names.is_empty()) {
+    return;
+  }
+
+  auto has_conflict_name = [&](const StringRef name) {
+    for (const std::string &conflict_name : conflicting_aov_names) {
+      if (conflict_name == name) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  int color_index = 0;
+  int value_index = 0;
+  for (const ViewLayerAOV &aov : view_layer.aovs) {
+    if (has_conflict_name(aov.name)) {
+      if (aov.type == AOV_TYPE_COLOR) {
+        r_color_layers.append(render_buffers_info.color_len + color_index);
+      }
+      else if (aov.type == AOV_TYPE_VALUE) {
+        r_value_layers.append(render_buffers_info.value_len + value_index);
+      }
+    }
+    if (aov.type == AOV_TYPE_COLOR) {
+      color_index++;
+    }
+    else if (aov.type == AOV_TYPE_VALUE) {
+      value_index++;
+    }
+  }
+}
+
+template<typename Fn> static void filter_material_for_each_contiguous_range(Span<int> layers, Fn &&fn)
+{
+  if (layers.is_empty()) {
+    return;
+  }
+
+  int range_start = layers.first();
+  int range_len = 1;
+  for (const int index : layers.index_range().drop_front(1)) {
+    if (layers[index] == (range_start + range_len)) {
+      range_len++;
+      continue;
+    }
+    fn(range_start, range_len);
+    range_start = layers[index];
+    range_len = 1;
+  }
+  fn(range_start, range_len);
+}
+
+static void filter_material_copy_snapshot_layers(gpu::Texture *dst,
+                                                 gpu::Texture *src,
+                                                 const Span<int> layers)
+{
+  if (layers.is_empty()) {
+    return;
+  }
+
+  const gpu::TextureFormat format = GPU_texture_format(src);
+  filter_material_for_each_contiguous_range(layers, [&](const int layer_start, const int layer_len) {
+    gpu::Texture *src_view = GPU_texture_create_view(
+        "FilterMaterial.AOVSnapshotSrc", src, format, 0, 9999, layer_start, layer_len, false, false);
+    gpu::Texture *dst_view = GPU_texture_create_view(
+        "FilterMaterial.AOVSnapshotDst", dst, format, 0, 9999, layer_start, layer_len, false, false);
+    GPU_texture_copy(dst_view, src_view);
+    GPU_texture_free(src_view);
+    GPU_texture_free(dst_view);
+  });
+}
+
 static void filter_material_collect_scene_sources(const bNodeTree &ntree,
                                                   Set<const bNodeTree *> &visited,
                                                   bool &r_uses_scene_depth,
@@ -436,10 +584,23 @@ void FilterMaterialModule::begin_sync()
 
     uses_scene_time_ |= GPU_material_is_time_dependent(gpumat);
     inst_.manager->register_layer_attributes(gpumat);
+
+    visited.clear();
+    FilterMaterialAOVUsage aov_usage;
+    filter_material_collect_aov_usage(*filter_entry->material->nodetree, visited, aov_usage);
+
     FilterPassEntry entry;
     entry.scene_filter = filter_entry;
     entry.material = filter_entry->material;
     entry.gpumat = gpumat;
+    entry.uses_aov_input = !aov_usage.input_names.is_empty();
+    entry.uses_aov_output = !aov_usage.output_names.is_empty();
+    entry.conflicting_aov_names = filter_material_collect_conflicting_aov_names(aov_usage);
+    filter_material_collect_conflicting_aov_layers(*inst_.view_layer,
+                                                   inst_.render_buffers.data,
+                                                   entry.conflicting_aov_names,
+                                                   entry.conflicting_color_layers,
+                                                   entry.conflicting_value_layers);
     entries_.append(entry);
   }
 }
@@ -466,6 +627,26 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
   ping_tx_.ensure_2d(GPU_texture_format(input_tx), extent, GPU_TEXTURE_USAGE_GENERAL);
   pong_tx_.ensure_2d(GPU_texture_format(input_tx), extent, GPU_TEXTURE_USAGE_GENERAL);
 
+  bool stage_needs_aov_snapshot = false;
+  for (const FilterPassEntry &entry : entries_) {
+    if (entry.scene_filter != nullptr && entry.scene_filter->execution_stage == stage &&
+        !entry.conflicting_aov_names.is_empty())
+    {
+      stage_needs_aov_snapshot = true;
+      break;
+    }
+  }
+  if (stage_needs_aov_snapshot) {
+    aov_color_snapshot_tx_.ensure_2d_array(GPU_texture_format(inst_.render_buffers.rp_color_tx),
+                                           extent,
+                                           GPU_texture_layer_count(inst_.render_buffers.rp_color_tx),
+                                           GPU_TEXTURE_USAGE_GENERAL);
+    aov_value_snapshot_tx_.ensure_2d_array(GPU_texture_format(inst_.render_buffers.rp_value_tx),
+                                           extent,
+                                           GPU_texture_layer_count(inst_.render_buffers.rp_value_tx),
+                                           GPU_TEXTURE_USAGE_GENERAL);
+  }
+
   gpu::Texture *source_tx = input_tx;
   int stage_entry_index = 0;
 
@@ -478,6 +659,21 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
 
     Texture &target_tx = ((stage_entry_index & 1) == 0) ? ping_tx_ : pong_tx_;
     gpu::Texture *scene_color_tx = source_tx;
+    gpu::Texture *aov_color_tx = inst_.render_buffers.rp_color_tx;
+    gpu::Texture *aov_value_tx = inst_.render_buffers.rp_value_tx;
+
+    if (!entries_[entry_index].conflicting_aov_names.is_empty()) {
+      filter_material_copy_snapshot_layers(aov_color_snapshot_tx_,
+                                           inst_.render_buffers.rp_color_tx,
+                                           entries_[entry_index].conflicting_color_layers);
+      filter_material_copy_snapshot_layers(aov_value_snapshot_tx_,
+                                           inst_.render_buffers.rp_value_tx,
+                                           entries_[entry_index].conflicting_value_layers);
+      GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE | GPU_BARRIER_TEXTURE_FETCH |
+                         GPU_BARRIER_SHADER_IMAGE_ACCESS);
+      aov_color_tx = aov_color_snapshot_tx_;
+      aov_value_tx = aov_value_snapshot_tx_;
+    }
 
     framebuffer_.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(target_tx));
 
@@ -487,10 +683,12 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
     update_filter_object_info_buffer(entries_[entry_index].gpumat);
     pass.material_set(*inst_.manager, entries_[entry_index].gpumat);
     pass.bind_texture("scene_color_tx", &scene_color_tx);
-    pass.bind_texture("rp_color_tx", &inst_.render_buffers.rp_color_tx);
-    pass.bind_texture("rp_value_tx", &inst_.render_buffers.rp_value_tx);
+    pass.bind_texture("rp_color_tx", &aov_color_tx);
+    pass.bind_texture("rp_value_tx", &aov_value_tx);
     pass.bind_texture("depth_tx", &inst_.render_buffers.depth_tx);
     pass.bind_texture("cryptomatte_tx", &inst_.render_buffers.cryptomatte_tx);
+    pass.bind_image(RBUFS_COLOR_SLOT, &inst_.render_buffers.rp_color_tx);
+    pass.bind_image(RBUFS_VALUE_SLOT, &inst_.render_buffers.rp_value_tx);
     pass.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);
     pass.bind_ubo(FILTER_OBJECT_INFO_BUF_SLOT, &filter_object_info_buf_);
     pass.bind_resources(inst_.uniform_data);

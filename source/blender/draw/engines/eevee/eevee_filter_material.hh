@@ -14,11 +14,14 @@
 #include "DRW_gpu_wrapper.hh"
 #include "DRW_render.hh"
 
+#include "BLI_span.hh"
 #include "BLI_vector.hh"
 
 #include "GPU_material.hh"
 
 #include "eevee_filter_material_shared.hh"
+
+#include <string>
 
 namespace blender::draw {
 class View;
@@ -36,6 +39,11 @@ class FilterMaterialModule {
     SceneFilterMaterial *scene_filter = nullptr;
     blender::Material *material = nullptr;
     GPUMaterial *gpumat = nullptr;
+    bool uses_aov_input = false;
+    bool uses_aov_output = false;
+    blender::Vector<std::string> conflicting_aov_names;
+    blender::Vector<int> conflicting_color_layers;
+    blender::Vector<int> conflicting_value_layers;
   };
 
   Instance &inst_;
@@ -44,6 +52,8 @@ class FilterMaterialModule {
   Framebuffer framebuffer_ = {"FilterMaterial.Framebuffer"};
   Texture ping_tx_ = {"FilterMaterial.Ping"};
   Texture pong_tx_ = {"FilterMaterial.Pong"};
+  Texture aov_color_snapshot_tx_ = {"FilterMaterial.AOVColorSnapshot"};
+  Texture aov_value_snapshot_tx_ = {"FilterMaterial.AOVValueSnapshot"};
   FilterObjectInfoBuf filter_object_info_buf_ = {"FilterObjectInfoBuf"};
   bool uses_scene_depth_ = false;
   bool uses_scene_normal_ = false;

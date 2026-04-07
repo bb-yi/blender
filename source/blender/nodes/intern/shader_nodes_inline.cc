@@ -339,6 +339,7 @@ class ShaderNodesInliner {
             material != nullptr && material->eevee_domain == MA_EEVEE_DOMAIN_FILTER)
         {
           add_output_type("ShaderNodeOutputFilter");
+          add_output_type("ShaderNodeOutputAOV");
         }
         else {
           add_output_type("ShaderNodeOutputMaterial");

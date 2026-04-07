@@ -624,7 +624,9 @@ void GPUCodegen::generate_graphs()
       GPU_NODE_TAG_DISPLACEMENT, graph.outlink_displacement, nullptr);
   output.thickness = graph_serialize(GPU_NODE_TAG_THICKNESS, graph.outlink_thickness, nullptr);
   output.npr = graph_serialize(GPU_NODE_TAG_NPR, graph.outlink_npr, nullptr);
-  output.filter = graph_serialize(GPU_NODE_TAG_FILTER, graph.outlink_filter, nullptr);
+  output.filter = graph_serialize(GPU_NODE_TAG_FILTER | GPU_NODE_TAG_AOV,
+                                  graph.outlink_filter,
+                                  nullptr);
   if (!BLI_listbase_is_empty(&graph.outlink_compositor)) {
     output.composite = graph_serialize(GPU_NODE_TAG_COMPOSITOR);
   }
