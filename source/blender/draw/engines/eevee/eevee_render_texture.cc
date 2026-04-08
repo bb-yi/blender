@@ -55,6 +55,10 @@ RenderTextureData RenderTextureModule::slot_default_data()
   RenderTextureData data = {};
   data.viewproj = float4x4::identity();
   data.prev_viewproj = float4x4::identity();
+  data.camera_position = float4(0.0f);
+  data.camera_axis_x = float4(0.0f);
+  data.camera_axis_y = float4(0.0f);
+  data.camera_axis_z = float4(0.0f);
   data.info = int4(-1, 0, 0, 0);
   return data;
 }
@@ -185,6 +189,11 @@ void RenderTextureModule::slot_capture(const int slot_index)
 
   data_[slot_index].prev_viewproj = data_[slot_index].viewproj;
   data_[slot_index].viewproj = rt_camera.persmat;
+  const float4x4 camera_view_basis = math::transpose(rt_camera.viewmat);
+  data_[slot_index].camera_position = float4(rt_camera.viewinv.location(), 1.0f);
+  data_[slot_index].camera_axis_x = float4(camera_view_basis.x_axis(), 0.0f);
+  data_[slot_index].camera_axis_y = float4(camera_view_basis.y_axis(), 0.0f);
+  data_[slot_index].camera_axis_z = float4(camera_view_basis.z_axis(), 0.0f);
   data_[slot_index].info = int4(slot.uid,
                                 slot.extent.x,
                                 slot.extent.y,
