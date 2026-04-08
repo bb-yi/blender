@@ -11,9 +11,23 @@
 
 namespace blender::nodes::node_shader_npr_output_cc {
 
+class NPRColorOrImage : public decl::Color {
+ public:
+  static constexpr eNodeSocketDatatype static_socket_type = SOCK_RGBA;
+  using Builder = decl::ColorBuilder;
+
+  bool can_connect(const bNodeSocket &socket) const override
+  {
+    if (decl::Color::can_connect(socket)) {
+      return true;
+    }
+    return this->in_out != socket.in_out && socket.type == SOCK_IMAGE;
+  }
+};
+
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Color>("Color").hide_value();
+  b.add_input<NPRColorOrImage>("Color").hide_value();
 }
 
 static int node_shader_fn(GPUMaterial *mat,
@@ -23,9 +37,29 @@ static int node_shader_fn(GPUMaterial *mat,
                           GPUNodeStack * /*out*/)
 {
   GPUNodeLink *outlink_npr = nullptr;
-  /* Passthrough node in order to do the right socket conversions. */
-  if (in[0].link) {
-    GPU_link(mat, "npr_output", in[0].link, &outlink_npr);
+  if (!in[0].link) {
+    return true;
+  }
+
+  /* Keep output typing explicit so float/vector/TextureHandle all behave predictably. */
+  switch (in[0].sockettype) {
+    case SOCK_FLOAT:
+    case SOCK_INT:
+    case SOCK_BOOLEAN:
+      GPU_link(mat, "npr_output_float", in[0].link, &outlink_npr);
+      break;
+    case SOCK_VECTOR:
+      GPU_link(mat, "npr_output_vec3", in[0].link, &outlink_npr);
+      break;
+    case SOCK_IMAGE:
+      GPU_link(mat, "npr_output_texture_handle", in[0].link, &outlink_npr);
+      break;
+    default:
+      GPU_link(mat, "npr_output", in[0].link, &outlink_npr);
+      break;
+  }
+
+  if (outlink_npr != nullptr) {
     GPU_material_output_npr(mat, outlink_npr);
   }
   return true;

@@ -30,6 +30,7 @@ vec4 g_combined_color;
 vec4 g_diffuse_color;
 vec4 g_diffuse_direct;
 vec4 g_diffuse_indirect;
+vec3 g_average_normal;
 vec4 g_specular_color;
 vec4 g_specular_direct;
 vec4 g_specular_indirect;

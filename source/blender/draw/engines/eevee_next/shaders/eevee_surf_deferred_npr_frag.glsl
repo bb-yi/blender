@@ -85,6 +85,31 @@ vec4 TextureHandle_eval_impl(TextureHandle tex, vec2 offset, bool texel_offset)
     return vec4(0.0);
   }
 
+  if (all(equal(offset, vec2(0.0)))) {
+    switch (tex.type) {
+      case TEX_HANDLE_COMBINED_COLOR:
+        return swap_alpha(g_combined_color);
+      case TEX_HANDLE_DIFFUSE_COLOR:
+        return swap_alpha(g_diffuse_color);
+      case TEX_HANDLE_DIFFUSE_DIRECT:
+        return swap_alpha(g_diffuse_direct);
+      case TEX_HANDLE_DIFFUSE_INDIRECT:
+        return swap_alpha(g_diffuse_indirect);
+      case TEX_HANDLE_SPECULAR_COLOR:
+        return swap_alpha(g_specular_color);
+      case TEX_HANDLE_SPECULAR_DIRECT:
+        return swap_alpha(g_specular_direct);
+      case TEX_HANDLE_SPECULAR_INDIRECT:
+        return swap_alpha(g_specular_indirect);
+      case TEX_HANDLE_POSITION:
+        return vec4(g_data.P, 0.0);
+      case TEX_HANDLE_NORMAL:
+        return vec4(g_average_normal, 0.0);
+      default:
+        break;
+    }
+  }
+
   ivec2 texel = ivec2(gl_FragCoord.xy);
   ivec2 extent = textureSize(radiance_tx, 0);
   if (texel_offset) {
@@ -247,6 +272,18 @@ bool foreach_light_setup(uint l_idx,
 void main()
 {
   init_globals();
+
+  DeferredCombine dc = deferred_combine(ivec2(gl_FragCoord.xy));
+  deferred_combine_clamp(dc);
+  g_combined_color = deferred_combine_final_output(dc);
+  g_combined_color.a = saturate(1.0 - g_combined_color.a);
+  g_diffuse_color = vec4(dc.diffuse_color, 1.0);
+  g_diffuse_direct = vec4(dc.diffuse_direct, 1.0);
+  g_diffuse_indirect = vec4(dc.diffuse_indirect, 1.0);
+  g_average_normal = dc.average_normal;
+  g_specular_color = vec4(dc.specular_color, 1.0);
+  g_specular_direct = vec4(dc.specular_direct, 1.0);
+  g_specular_indirect = vec4(dc.specular_indirect, 1.0);
 
   out_radiance = swap_alpha(nodetree_npr());
 

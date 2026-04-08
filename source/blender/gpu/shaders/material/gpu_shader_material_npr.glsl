@@ -58,6 +58,25 @@ void npr_output(vec4 color, out vec4 out_color)
   out_color = color;
 }
 
+void npr_output_float(float color, out vec4 out_color)
+{
+  out_color = vec4(vec3(color), 1.0);
+}
+
+void npr_output_vec3(vec3 color, out vec4 out_color)
+{
+  out_color = vec4(color, 1.0);
+}
+
+void npr_output_texture_handle(TextureHandle color, out vec4 out_color)
+{
+#if defined(NPR_SHADER) && defined(GPU_FRAGMENT_SHADER)
+  out_color = TextureHandle_eval(color, vec2(0.0), false);
+#else
+  out_color = vec4(0.0);
+#endif
+}
+
 void npr_refraction(out TextureHandle combined_color, out TextureHandle position)
 {
 #if defined(NPR_SHADER) && defined(GPU_FRAGMENT_SHADER)
