@@ -6783,10 +6783,31 @@ static void def_sh_raycast(BlenderRNA * /*brna*/, StructRNA *srna)
 
 static void def_sh_curvature(BlenderRNA * /*brna*/, StructRNA *srna)
 {
+  static const EnumPropertyItem radius_type_items[] = {
+      {SHD_CURVATURE_RADIUS_PIXEL,
+       "PIXEL",
+       0,
+       "Pixel",
+       "Interpret Sample Radius in pixel units, so the effect changes with render resolution"},
+      {SHD_CURVATURE_RADIUS_VIEW,
+       "VIEW",
+       0,
+       "View",
+       "Interpret Sample Radius relative to the camera view using a fixed reference resolution, "
+       "keeping the effect stable across render resolutions and camera previews"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+
   PropertyRNA *prop = RNA_def_property(srna, "local", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(prop, nullptr, "custom1", 0);
   RNA_def_property_ui_text(
       prop, "Local", "Only consider the object itself when sampling curvature");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  prop = RNA_def_property(srna, "radius_type", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "custom2");
+  RNA_def_property_enum_items(prop, radius_type_items);
+  RNA_def_property_ui_text(prop, "Sample Radius", "How Sample Radius is interpreted");
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
 }
 

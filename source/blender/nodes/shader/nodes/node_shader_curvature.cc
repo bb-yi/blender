@@ -29,11 +29,17 @@ static void node_declare(NodeDeclarationBuilder &b)
 static void node_shader_init_curvature(bNodeTree * /*ntree*/, bNode *node)
 {
   node->custom1 = 0; /* Local */
+  node->custom2 = SHD_CURVATURE_RADIUS_PIXEL;
 }
 
 static void node_shader_buts_curvature(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
 {
   layout.prop(ptr, "local", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+  layout.prop(ptr,
+              "radius_type",
+              ui::ITEM_R_SPLIT_EMPTY_NAME | ui::ITEM_R_EXPAND,
+              std::nullopt,
+              ICON_NONE);
 }
 
 static int node_shader_gpu_curvature(GPUMaterial *mat,
@@ -43,11 +49,16 @@ static int node_shader_gpu_curvature(GPUMaterial *mat,
                                      GPUNodeStack *out)
 {
   GPU_material_flag_set(mat, GPU_MATFLAG_DIFFUSE);
+  const bool use_view_radius = (node->custom2 == SHD_CURVATURE_RADIUS_VIEW);
   if (node->custom1) {
     GPU_material_flag_set(mat, GPU_MATFLAG_RAYCAST);
-    return GPU_stack_link(mat, node, "node_screenspace_curvature_local", in, out);
+    return GPU_stack_link(
+        mat, node, use_view_radius ? "node_screenspace_curvature_local_view" :
+                                     "node_screenspace_curvature_local", in, out);
   }
-  return GPU_stack_link(mat, node, "node_screenspace_curvature", in, out);
+  return GPU_stack_link(
+      mat, node, use_view_radius ? "node_screenspace_curvature_view" :
+                                   "node_screenspace_curvature", in, out);
 }
 
 }  // namespace nodes::node_shader_curvature_cc
