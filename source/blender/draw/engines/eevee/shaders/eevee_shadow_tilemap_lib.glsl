@@ -148,6 +148,14 @@ int shadow_directional_tilemap_index(LightData light, float3 lP)
 
 #endif
 
+float shadow_directional_clipmap_scale(LightData light, float3 lP)
+{
+  float scale = length(lP) * 2.0f;
+  scale = max(scale * exp2(light.lod_bias), exp2(light.lod_min));
+  return clamp(
+      scale, exp2(float(light.sun().clipmap_lod_min)), exp2(float(light.sun().clipmap_lod_max)));
+}
+
 /**
  * This function should be the inverse of ShadowDirectional::coverage_get().
  *
@@ -163,9 +171,7 @@ float shadow_directional_level_fractional(LightData light, float3 lP)
     /* Since the distance is centered around the camera (and thus by extension the tile-map),
      * we need to multiply by 2 to get the lod level which covers the following range:
      * [-coverage_get(lod)/2..coverage_get(lod)/2] */
-    lod = log2(length(lP) * narrowing * 2.0f);
-    /* Apply light LOD bias. */
-    lod = max(lod + light.lod_bias, light.lod_min);
+    lod = log2(shadow_directional_clipmap_scale(light, lP) * narrowing);
   }
   else {
     /* The narrowing need to be stronger since the tile-map position is not rounded but floored. */

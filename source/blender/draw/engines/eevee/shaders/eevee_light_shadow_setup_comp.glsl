@@ -17,9 +17,9 @@ COMPUTE_SHADER_CREATE_INFO(eevee_light_shadow_setup)
 #include "gpu_shader_math_matrix_lib.glsl"
 #include "gpu_shader_math_matrix_projection_lib.glsl"
 
-int shadow_directional_coverage_get(int level)
+float shadow_directional_coverage_get(int level)
 {
-  return 1 << level;
+  return exp2(float(level));
 }
 
 void orthographic_sync(int tilemap_id,
@@ -144,8 +144,13 @@ void cascade_sync(LightData &light)
 void clipmap_sync(LightData &light)
 {
   float3 ws_camera_position = uniform_buf.camera.viewinv[3].xyz;
+  float3 ws_camera_backward = uniform_buf.camera.viewinv[2].xyz;
+  float clipmap_focus_distance = light.sun()._pad3;
+  float clipmap_focus_blend = clamp(light.sun()._pad4, 0.0f, 1.0f);
+  float3 ws_clipmap_focus = ws_camera_position - ws_camera_backward * clipmap_focus_distance;
+  float3 ws_clipmap_center = mix(ws_camera_position, ws_clipmap_focus, clipmap_focus_blend);
   float3 ls_camera_position = transform_direction_transposed(light.object_to_world,
-                                                             ws_camera_position);
+                                                             ws_clipmap_center);
 
   int level_min = light.sun().clipmap_lod_min;
   int level_max = light.sun().clipmap_lod_max;
@@ -155,8 +160,8 @@ void clipmap_sync(LightData &light)
   for (int lod = 0; lod < level_len; lod++) {
     int level = level_min + lod;
     /* Compute full offset from world origin to the smallest clipmap tile centered around the
-     * camera position. The offset is computed in smallest tile unit. */
-    float tile_size = float(1 << level) / float(SHADOW_TILEMAP_RES);
+     * clipmap focus point. The offset is computed in smallest tile unit. */
+    float tile_size = shadow_directional_coverage_get(level) / float(SHADOW_TILEMAP_RES);
     int2 level_offset = int2(round(ls_camera_position.xy / tile_size));
 
     orthographic_sync(light.tilemap_index + lod,

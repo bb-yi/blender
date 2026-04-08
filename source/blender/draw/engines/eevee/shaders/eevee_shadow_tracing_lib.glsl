@@ -345,12 +345,9 @@ float shadow_texel_radius_at_position(LightData light, const bool is_directional
     lP -= light_position_get(light);
     LightSunData sun = light.sun();
     if (light.type == LIGHT_SUN) {
-      /* Simplification of `coverage_get(shadow_directional_level_fractional)`.
-       * Do not apply the narrowing since we want the size of the tilemap (not its application
-       * radius). */
-      scale = length(lP) * 2.0f;
-      scale = max(scale * exp2(light.lod_bias), exp2(light.lod_min));
-      scale = clamp(scale, exp2(float(sun.clipmap_lod_min)), exp2(float(sun.clipmap_lod_max)));
+      /* Keep footprint computation aligned with directional selector + lod bias handling.
+       * Do not apply selector narrowing: we need tilemap size, not transition radius. */
+      scale = shadow_directional_clipmap_scale(light, lP);
     }
     else {
       /* Uniform distribution everywhere. No distance scaling.
