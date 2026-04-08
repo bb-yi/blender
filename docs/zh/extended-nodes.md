@@ -134,6 +134,10 @@
 - 输入：`Vector`
 
 - 输出：`Color`、`Alpha`
+- `Camera` 面板输出：`Camera Position`、`Axis X`、`Axis Y`、`Axis Z`
+
+不连接 `Vector` 时，节点会继续使用 Render Texture 相机的默认投影自动采样。
+`Camera Position` 与 `Axis X/Y/Z` 可用于在材质里把世界坐标转换到对应的 RT 相机空间，例如使用 `dot(P - Camera Position, Axis Z)` 计算该相机空间的 Z 值。
 
 ### Screenspace Info
 
