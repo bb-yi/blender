@@ -24,6 +24,17 @@ namespace blender {
 
 namespace nodes::node_geo_closure_cc {
 
+template<typename DeclarationBuilderT>
+static void apply_closure_structure_type(DeclarationBuilderT &decl, const int structure_type)
+{
+  if (structure_type != NODE_INTERFACE_SOCKET_STRUCTURE_TYPE_AUTO) {
+    decl.structure_type(StructureType(structure_type));
+  }
+  else {
+    decl.structure_type(StructureType::Dynamic);
+  }
+}
+
 /** Shared between closure input and output node. */
 static void node_layout_ex(ui::Layout &layout, bContext *C, PointerRNA *current_node_ptr)
 {
@@ -96,12 +107,7 @@ static void node_declare(NodeDeclarationBuilder &b)
         const eNodeSocketDatatype socket_type = eNodeSocketDatatype(item.socket_type);
         const std::string identifier = ClosureInputItemsAccessor::socket_identifier_for_item(item);
         auto &decl = b.add_output(socket_type, item.name, identifier);
-        if (item.structure_type != NODE_INTERFACE_SOCKET_STRUCTURE_TYPE_AUTO) {
-          decl.structure_type(StructureType(item.structure_type));
-        }
-        else {
-          decl.structure_type(StructureType::Dynamic);
-        }
+        apply_closure_structure_type(decl, item.structure_type);
       }
     }
   }
@@ -157,23 +163,10 @@ static int gpu_shader_closure_input(GPUMaterial *mat,
       output_index++;
       continue;
     }
-    std::string function_call;
-    switch (out[output_index].type) {
-      case GPU_VEC2:
-        function_call = "$OUT = " + std::string(uv_source);
-        break;
-      case GPU_VEC3:
-        function_call = "$OUT = float3(" + std::string(uv_source) + ", 0.0)";
-        break;
-      case GPU_VEC4:
-        function_call = "$OUT = float4(" + std::string(uv_source) + ", 0.0, 0.0)";
-        break;
-      default:
-        output_index++;
-        continue;
-    }
-
-    out[output_index].link = GPU_function_call(function_call.c_str());
+    const std::string uv_attr_expr = "$OUT = float4(" + std::string(uv_source) + ", 0.0, 1.0)";
+    GPUNodeLink *uv_attr_link = GPU_function_call(uv_attr_expr.c_str());
+    GPU_link(mat, "node_uvmap", uv_attr_link, &out[output_index].link);
+    node_shader_gpu_bump_tex_coord(mat, node, &out[output_index].link);
     break;
   }
 
@@ -217,12 +210,7 @@ static void node_declare(NodeDeclarationBuilder &b)
       const eNodeSocketDatatype socket_type = eNodeSocketDatatype(item.socket_type);
       const std::string identifier = ClosureOutputItemsAccessor::socket_identifier_for_item(item);
       auto &decl = b.add_input(socket_type, item.name, identifier).supports_field();
-      if (item.structure_type != NODE_INTERFACE_SOCKET_STRUCTURE_TYPE_AUTO) {
-        decl.structure_type(StructureType(item.structure_type));
-      }
-      else {
-        decl.structure_type(StructureType::Dynamic);
-      }
+      apply_closure_structure_type(decl, item.structure_type);
     }
   }
   b.add_input<decl::Extend>("", "__extend__");

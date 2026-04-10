@@ -25,6 +25,10 @@
 #include "BLI_set.hh"
 #include "BLI_string.h"
 
+#include "CLG_log.h"
+
+#include "intern/gpu_node_graph.hh"
+
 #include "RNA_access.hh"
 
 #include "NOD_sync_sockets.hh"
@@ -37,6 +41,8 @@ namespace blender {
 namespace nodes::node_shader_glsl_function_cc {
 
 NODE_STORAGE_FUNCS(NodeShaderGLSLFunction)
+
+static CLG_LogRef LOG = {"node.shader.glsl_function"};
 
 enum class GLSLBoundaryType {
   Unsupported = 0,
@@ -129,6 +135,7 @@ struct GLSLParseResult {
 
 struct GLSLSample2DUsage {
   int texture_calls = 0;
+  bool uses_texture_bias = false;
   bool uses_texture_lod = false;
   bool uses_texture_grad = false;
   bool uses_texture_size = false;
@@ -162,9 +169,31 @@ struct GLSLClosureSampleHelper {
   std::string helper_name;
   std::string uv_global_name;
   std::string sub_function_name;
+  GPUType return_type = GPU_VEC4;
+};
+
+struct GLSLTokenRange {
+  int start = -1;
+  int end = -1;
+};
+
+struct GLSLClosureSample2DDowngradeInfo {
+  Set<std::string> root_param_names;
+  bool uses_texture_bias = false;
+  bool uses_texture_lod = false;
+  bool uses_texture_grad = false;
+  bool uses_texture_size = false;
+  bool uses_texel_fetch = false;
+  bool uses_texture_gather = false;
+};
+
+struct GLSLClosureFunctionBindings {
+  std::string function_name;
+  Map<std::string, std::string> bindings;
 };
 
 static constexpr const char *result_socket_identifier = "Result";
+static constexpr int closure_output_virtual_texture_size = 1024;
 
 static Vector<GLSLToken> tokenize_glsl_source(const StringRef source);
 static const bNodeSocket *find_node_input_socket_by_identifier(const bNode &node,
@@ -174,6 +203,13 @@ static const bNodeSocket *find_closure_output_socket_by_name(const bNode &node, 
 static bool closure_output_has_required_sample2d_signature(const bNode &closure_output_node,
                                                            std::string &r_error);
 static bool glsl_param_has_input_socket(const GLSLFunctionParam &param);
+static Vector<std::string> find_top_level_glsl_function_names(const Vector<GLSLToken> &tokens);
+static bool find_glsl_function_definition(const Vector<GLSLToken> &tokens,
+                                          const StringRef function_name,
+                                          GLSLFunctionDefinition &r_function,
+                                          std::string &r_error);
+static bool is_sample2d_sampling_function_name(const StringRef name);
+static GPUType gpu_node_link_output_type(const GPUNodeLink &link);
 
 static bool is_identifier_start(const char c)
 {
@@ -250,6 +286,16 @@ static const bNodeLink *find_used_direct_link(const bNodeSocket &socket)
   return nullptr;
 }
 
+static const bNodeLink *find_any_direct_link(const bNodeSocket &socket)
+{
+  for (const bNodeLink *link : socket.directly_linked_links()) {
+    if (link->fromnode != nullptr) {
+      return link;
+    }
+  }
+  return nullptr;
+}
+
 static GLSLSample2DSourceKind resolve_sample2d_source_kind(const bNode &node,
                                                            const GLSLFunctionParam &param,
                                                            const bNodeLink *&r_link)
@@ -317,96 +363,6 @@ static GPUSamplerState sampler_state_from_image_to_closure_node(const bNode &nod
   return sampler_state;
 }
 
-static Map<std::string, GLSLSample2DUsage> analyze_sample2d_usages(
-    const Vector<GLSLToken> &tokens, const GLSLFunctionDefinition &function)
-{
-  Map<std::string, GLSLSample2DUsage> usage_by_name;
-  for (const GLSLFunctionParam &param : function.params) {
-    if (glsl_boundary_type_is_sample2d(param.type) && glsl_param_has_input_socket(param)) {
-      usage_by_name.add(param.name, {});
-    }
-  }
-  if (usage_by_name.is_empty() || function.body_token_start < 0 || function.body_token_end < 0) {
-    return usage_by_name;
-  }
-
-  auto mark_usage = [&](const StringRef param_name, const StringRef call_name) {
-    GLSLSample2DUsage &usage = usage_by_name.lookup(param_name);
-    if (call_name == "texture") {
-      usage.texture_calls++;
-    }
-    else if (call_name == "textureLod") {
-      usage.uses_texture_lod = true;
-    }
-    else if (call_name == "textureGrad") {
-      usage.uses_texture_grad = true;
-    }
-    else if (call_name == "textureSize") {
-      usage.uses_texture_size = true;
-    }
-    else if (call_name == "texelFetch") {
-      usage.uses_texel_fetch = true;
-    }
-    else if (call_name == "textureGather") {
-      usage.uses_texture_gather = true;
-    }
-  };
-
-  for (int i = function.body_token_start; i <= function.body_token_end; i++) {
-    const GLSLToken &token = tokens[i];
-    if (token.kind != GLSLToken::Kind::Identifier) {
-      continue;
-    }
-    if (!ELEM(token.text.c_str(),
-              "texture",
-              "textureLod",
-              "textureGrad",
-              "textureSize",
-              "texelFetch",
-              "textureGather"))
-    {
-      continue;
-    }
-    if ((i + 1) > function.body_token_end || tokens[i + 1].kind != GLSLToken::Kind::Punctuation ||
-        tokens[i + 1].punctuation != '(')
-    {
-      continue;
-    }
-
-    int paren_depth = 1;
-    std::string first_identifier;
-    for (int j = i + 2; j <= function.body_token_end; j++) {
-      const GLSLToken &arg_token = tokens[j];
-      if (arg_token.kind == GLSLToken::Kind::Punctuation) {
-        if (arg_token.punctuation == '(') {
-          paren_depth++;
-        }
-        else if (arg_token.punctuation == ')') {
-          paren_depth--;
-          if (paren_depth == 0) {
-            break;
-          }
-        }
-        else if (arg_token.punctuation == ',' && paren_depth == 1) {
-          break;
-        }
-        continue;
-      }
-      if (paren_depth == 1 && arg_token.kind == GLSLToken::Kind::Identifier &&
-          first_identifier.empty())
-      {
-        first_identifier = arg_token.text;
-      }
-    }
-
-    if (!first_identifier.empty() && usage_by_name.contains(first_identifier)) {
-      mark_usage(first_identifier, token.text);
-    }
-  }
-
-  return usage_by_name;
-}
-
 static Map<std::string, GLSLSample2DSourceKind> resolve_sample2d_source_kinds(
     const bNode &node, const GLSLFunctionDefinition &function)
 {
@@ -421,70 +377,521 @@ static Map<std::string, GLSLSample2DSourceKind> resolve_sample2d_source_kinds(
   return source_kinds;
 }
 
-static bool sample2d_usage_requires_image_source(const GLSLSample2DUsage &usage)
+static const GLSLFunctionDefinition *find_glsl_function_definition_by_name(
+    const Span<GLSLFunctionDefinition> functions, const StringRef name)
 {
-  return usage.uses_texture_size || usage.uses_texel_fetch || usage.uses_texture_gather;
-}
-
-static bool sample2d_usage_supported_for_closure_output(const GLSLSample2DUsage &usage)
-{
-  return !usage.uses_texture_lod && !usage.uses_texture_grad &&
-         !sample2d_usage_requires_image_source(usage);
-}
-
-static bool validate_sample2d_direct_texture_usage(const Vector<GLSLToken> &tokens,
-                                                   const GLSLFunctionDefinition &function,
-                                                   const StringRef param_name)
-{
-  Set<int> allowed_token_indices;
-  for (int i = function.body_token_start; i <= function.body_token_end; i++) {
-    const GLSLToken &token = tokens[i];
-    if (token.kind != GLSLToken::Kind::Identifier || token.text != "texture") {
-      continue;
-    }
-    if ((i + 1) > function.body_token_end || tokens[i + 1].kind != GLSLToken::Kind::Punctuation ||
-        tokens[i + 1].punctuation != '(')
-    {
-      continue;
-    }
-    int paren_depth = 1;
-    int comma_index = -1;
-    int closing_paren_index = -1;
-    for (int j = i + 2; j <= function.body_token_end; j++) {
-      const GLSLToken &arg_token = tokens[j];
-      if (arg_token.kind != GLSLToken::Kind::Punctuation) {
-        continue;
-      }
-      if (arg_token.punctuation == '(') {
-        paren_depth++;
-      }
-      else if (arg_token.punctuation == ')') {
-        paren_depth--;
-        if (paren_depth == 0) {
-          closing_paren_index = j;
-          break;
-        }
-      }
-      else if (arg_token.punctuation == ',' && paren_depth == 1) {
-        comma_index = j;
-      }
-    }
-    if (comma_index == -1 || closing_paren_index == -1 || (comma_index - (i + 2)) != 1) {
-      continue;
-    }
-    if (tokens[i + 2].kind == GLSLToken::Kind::Identifier && tokens[i + 2].text == param_name) {
-      allowed_token_indices.add(i + 2);
+  for (const GLSLFunctionDefinition &function : functions) {
+    if (function.name == name) {
+      return &function;
     }
   }
+  return nullptr;
+}
+
+static GLSLClosureFunctionBindings *find_glsl_closure_function_bindings(
+    Vector<GLSLClosureFunctionBindings> &bindings_by_function, const StringRef function_name)
+{
+  for (GLSLClosureFunctionBindings &bindings : bindings_by_function) {
+    if (bindings.function_name == function_name) {
+      return &bindings;
+    }
+  }
+  return nullptr;
+}
+
+static const GLSLClosureFunctionBindings *find_glsl_closure_function_bindings(
+    const Span<GLSLClosureFunctionBindings> bindings_by_function, const StringRef function_name)
+{
+  for (const GLSLClosureFunctionBindings &bindings : bindings_by_function) {
+    if (bindings.function_name == function_name) {
+      return &bindings;
+    }
+  }
+  return nullptr;
+}
+
+static bool ensure_closure_binding(Map<std::string, std::string> &r_bindings,
+                                   const StringRef identifier,
+                                   const StringRef root_param_name,
+                                   const StringRef function_name,
+                                   std::string &r_error,
+                                   bool &r_changed)
+{
+  const std::string identifier_key = std::string(identifier);
+  if (const std::string *existing_root = r_bindings.lookup_ptr(identifier_key)) {
+    if (*existing_root != root_param_name) {
+      r_error = "Closure Output sample2D identifier '" + identifier_key + "' in function '" +
+                std::string(function_name) + "' is bound to multiple inputs";
+      return false;
+    }
+    return true;
+  }
+  r_bindings.add_new(identifier_key, std::string(root_param_name));
+  r_changed = true;
+  return true;
+}
+
+static bool token_range_is_wrapped_by_parens(const Vector<GLSLToken> &tokens,
+                                             const int start,
+                                             const int end)
+{
+  if (start >= end || tokens[start].kind != GLSLToken::Kind::Punctuation ||
+      tokens[start].punctuation != '(' || tokens[end].kind != GLSLToken::Kind::Punctuation ||
+      tokens[end].punctuation != ')')
+  {
+    return false;
+  }
+
+  int paren_depth = 0;
+  for (int i = start; i <= end; i++) {
+    const GLSLToken &token = tokens[i];
+    if (token.kind != GLSLToken::Kind::Punctuation) {
+      continue;
+    }
+    if (token.punctuation == '(') {
+      paren_depth++;
+    }
+    else if (token.punctuation == ')') {
+      paren_depth--;
+      if (paren_depth == 0 && i < end) {
+        return false;
+      }
+    }
+  }
+  return paren_depth == 0;
+}
+
+static bool parse_single_identifier_token_range(const Vector<GLSLToken> &tokens,
+                                                int start,
+                                                int end,
+                                                std::string &r_identifier,
+                                                int &r_identifier_token_index)
+{
+  if (start > end) {
+    return false;
+  }
+  while (token_range_is_wrapped_by_parens(tokens, start, end)) {
+    start++;
+    end--;
+  }
+  if (start == end && tokens[start].kind == GLSLToken::Kind::Identifier) {
+    r_identifier = tokens[start].text;
+    r_identifier_token_index = start;
+    return true;
+  }
+  return false;
+}
+
+static Vector<GLSLTokenRange> collect_function_statement_ranges(const Vector<GLSLToken> &tokens,
+                                                                const GLSLFunctionDefinition &function)
+{
+  Vector<GLSLTokenRange> ranges;
+  int statement_start = function.body_token_start;
+  int paren_depth = 0;
 
   for (int i = function.body_token_start; i <= function.body_token_end; i++) {
     const GLSLToken &token = tokens[i];
-    if (token.kind == GLSLToken::Kind::Identifier && token.text == param_name &&
-        !allowed_token_indices.contains(i))
+    if (token.kind == GLSLToken::Kind::Punctuation) {
+      if (token.punctuation == '(') {
+        paren_depth++;
+      }
+      else if (token.punctuation == ')') {
+        paren_depth = max_ii(paren_depth - 1, 0);
+      }
+      if (paren_depth == 0 && ELEM(token.punctuation, ';', '{', '}')) {
+        if (statement_start <= (i - 1)) {
+          ranges.append({statement_start, i - 1});
+        }
+        statement_start = i + 1;
+      }
+    }
+  }
+  if (statement_start <= function.body_token_end) {
+    ranges.append({statement_start, function.body_token_end});
+  }
+  return ranges;
+}
+
+static bool parse_call_argument_ranges(const Vector<GLSLToken> &tokens,
+                                       const int open_paren_index,
+                                       const int max_token_index,
+                                       Vector<GLSLTokenRange> &r_argument_ranges,
+                                       int &r_closing_paren_index)
+{
+  r_argument_ranges.clear();
+  r_closing_paren_index = -1;
+  if ((open_paren_index + 1) > max_token_index) {
+    return false;
+  }
+
+  int arg_start = open_paren_index + 1;
+  int paren_depth = 1;
+  for (int i = open_paren_index + 1; i <= max_token_index; i++) {
+    const GLSLToken &token = tokens[i];
+    if (token.kind != GLSLToken::Kind::Punctuation) {
+      continue;
+    }
+    if (token.punctuation == '(') {
+      paren_depth++;
+    }
+    else if (token.punctuation == ')') {
+      paren_depth--;
+      if (paren_depth == 0) {
+        if (arg_start <= (i - 1)) {
+          r_argument_ranges.append({arg_start, i - 1});
+        }
+        r_closing_paren_index = i;
+        return true;
+      }
+    }
+    else if (token.punctuation == ',' && paren_depth == 1) {
+      if (arg_start <= (i - 1)) {
+        r_argument_ranges.append({arg_start, i - 1});
+      }
+      else {
+        r_argument_ranges.append({});
+      }
+      arg_start = i + 1;
+    }
+  }
+  return false;
+}
+
+static bool find_all_top_level_glsl_function_definitions(
+    const Vector<GLSLToken> &tokens,
+    const Span<std::string> function_names,
+    Vector<GLSLFunctionDefinition> &r_functions,
+    std::string &r_error)
+{
+  r_functions.clear();
+  for (const std::string &function_name : function_names) {
+    GLSLFunctionDefinition function;
+    if (!find_glsl_function_definition(tokens, function_name, function, r_error)) {
+      return false;
+    }
+    r_functions.append(function);
+  }
+  return true;
+}
+
+static bool parse_direct_identifier_assignment_statement(const Vector<GLSLToken> &tokens,
+                                                         const GLSLTokenRange &statement_range,
+                                                         std::string &r_lhs_identifier,
+                                                         int &r_lhs_token_index,
+                                                         std::string &r_rhs_identifier,
+                                                         int &r_rhs_token_index)
+{
+  int equals_index = -1;
+  int equals_count = 0;
+  for (int i = statement_range.start; i <= statement_range.end; i++) {
+    if (tokens[i].kind == GLSLToken::Kind::Punctuation && tokens[i].punctuation == '=') {
+      equals_count++;
+      if (equals_index == -1) {
+        equals_index = i;
+      }
+    }
+  }
+  if (equals_count != 1 || equals_index <= statement_range.start || equals_index >= statement_range.end) {
+    return false;
+  }
+
+  r_lhs_token_index = -1;
+  for (int i = statement_range.start; i < equals_index; i++) {
+    if (tokens[i].kind == GLSLToken::Kind::Identifier) {
+      r_lhs_token_index = i;
+    }
+  }
+  if (r_lhs_token_index == -1) {
+    return false;
+  }
+
+  if (!parse_single_identifier_token_range(
+          tokens, equals_index + 1, statement_range.end, r_rhs_identifier, r_rhs_token_index))
+  {
+    return false;
+  }
+
+  r_lhs_identifier = tokens[r_lhs_token_index].text;
+  return true;
+}
+
+static bool build_function_local_closure_bindings(const Vector<GLSLToken> &tokens,
+                                                  const GLSLFunctionDefinition &function,
+                                                  const Map<std::string, std::string> &seed_bindings,
+                                                  Map<std::string, std::string> &r_bindings,
+                                                  std::string &r_error)
+{
+  r_bindings = seed_bindings;
+  const Vector<GLSLTokenRange> statements = collect_function_statement_ranges(tokens, function);
+
+  bool changed = true;
+  while (changed) {
+    changed = false;
+    for (const GLSLTokenRange &statement : statements) {
+      std::string lhs_identifier;
+      std::string rhs_identifier;
+      int lhs_token_index = -1;
+      int rhs_token_index = -1;
+      if (!parse_direct_identifier_assignment_statement(
+              tokens, statement, lhs_identifier, lhs_token_index, rhs_identifier, rhs_token_index))
+      {
+        continue;
+      }
+      const std::string *root_param_name = r_bindings.lookup_ptr(rhs_identifier);
+      if (root_param_name == nullptr) {
+        continue;
+      }
+      if (!ensure_closure_binding(
+              r_bindings, lhs_identifier, *root_param_name, function.name, r_error, changed))
+      {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+static bool build_closure_sample2d_bindings_by_function(
+    const Vector<GLSLToken> &tokens,
+    const Span<GLSLFunctionDefinition> functions,
+    const GLSLFunctionDefinition &entry_function,
+    const Map<std::string, GLSLSample2DSourceKind> &entry_source_kinds,
+    Vector<GLSLClosureFunctionBindings> &r_bindings_by_function,
+    std::string &r_error)
+{
+  r_bindings_by_function.clear();
+  r_bindings_by_function.append({entry_function.name, {}});
+
+  bool changed = false;
+  GLSLClosureFunctionBindings &entry_bindings = r_bindings_by_function.last();
+  for (const GLSLFunctionParam &param : entry_function.params) {
+    if (!glsl_param_has_input_socket(param) || !glsl_boundary_type_is_sample2d(param.type)) {
+      continue;
+    }
+    const GLSLSample2DSourceKind source_kind = entry_source_kinds.lookup_default(
+        param.name, GLSLSample2DSourceKind::None);
+    if (source_kind != GLSLSample2DSourceKind::ClosureOutput) {
+      continue;
+    }
+    if (!ensure_closure_binding(
+            entry_bindings.bindings, param.name, param.name, entry_function.name, r_error, changed))
     {
       return false;
     }
   }
+
+  changed = true;
+  while (changed) {
+    changed = false;
+    for (const GLSLFunctionDefinition &function : functions) {
+      const GLSLClosureFunctionBindings *seed_bindings = find_glsl_closure_function_bindings(
+          r_bindings_by_function, function.name);
+      if (seed_bindings == nullptr || seed_bindings->bindings.is_empty()) {
+        continue;
+      }
+
+      Map<std::string, std::string> local_bindings;
+      if (!build_function_local_closure_bindings(
+              tokens, function, seed_bindings->bindings, local_bindings, r_error))
+      {
+        return false;
+      }
+
+      for (int i = function.body_token_start; i <= function.body_token_end; i++) {
+        const GLSLToken &token = tokens[i];
+        if (token.kind != GLSLToken::Kind::Identifier || (i + 1) > function.body_token_end ||
+            tokens[i + 1].kind != GLSLToken::Kind::Punctuation || tokens[i + 1].punctuation != '(')
+        {
+          continue;
+        }
+
+        const GLSLFunctionDefinition *callee = find_glsl_function_definition_by_name(functions,
+                                                                                     token.text);
+        if (callee == nullptr) {
+          continue;
+        }
+
+        Vector<GLSLTokenRange> argument_ranges;
+        int closing_paren_index = -1;
+        if (!parse_call_argument_ranges(
+                tokens, i + 1, function.body_token_end, argument_ranges, closing_paren_index))
+        {
+          continue;
+        }
+
+        for (int param_index = 0;
+             param_index < callee->params.size() && param_index < argument_ranges.size();
+             param_index++)
+        {
+          const GLSLFunctionParam &callee_param = callee->params[param_index];
+          if (!glsl_param_has_input_socket(callee_param) ||
+              !glsl_boundary_type_is_sample2d(callee_param.type))
+          {
+            continue;
+          }
+
+          std::string argument_identifier;
+          int argument_identifier_token_index = -1;
+          if (!parse_single_identifier_token_range(tokens,
+                                                   argument_ranges[param_index].start,
+                                                   argument_ranges[param_index].end,
+                                                   argument_identifier,
+                                                   argument_identifier_token_index))
+          {
+            continue;
+          }
+          if (argument_identifier_token_index < 0) {
+            continue;
+          }
+
+          const std::string *root_param_name = local_bindings.lookup_ptr(argument_identifier);
+          if (root_param_name == nullptr) {
+            continue;
+          }
+
+          GLSLClosureFunctionBindings *callee_bindings = find_glsl_closure_function_bindings(
+              r_bindings_by_function, callee->name);
+          if (callee_bindings == nullptr) {
+            r_bindings_by_function.append({callee->name, {}});
+            callee_bindings = &r_bindings_by_function.last();
+          }
+          if (!ensure_closure_binding(callee_bindings->bindings,
+                                      callee_param.name,
+                                      *root_param_name,
+                                      callee->name,
+                                      r_error,
+                                      changed))
+          {
+            return false;
+          }
+        }
+      }
+    }
+  }
+
+  return true;
+}
+
+static bool validate_closure_sample2d_bindings(
+    const Vector<GLSLToken> &tokens,
+    const Span<GLSLFunctionDefinition> functions,
+    const Span<GLSLClosureFunctionBindings> bindings_by_function,
+    std::string &r_error)
+{
+  for (const GLSLFunctionDefinition &function : functions) {
+    const GLSLClosureFunctionBindings *seed_bindings = find_glsl_closure_function_bindings(
+        bindings_by_function, function.name);
+    if (seed_bindings == nullptr || seed_bindings->bindings.is_empty()) {
+      continue;
+    }
+
+    Map<std::string, std::string> local_bindings;
+    if (!build_function_local_closure_bindings(
+            tokens, function, seed_bindings->bindings, local_bindings, r_error))
+    {
+      return false;
+    }
+
+    Set<int> allowed_identifier_token_indices;
+    const Vector<GLSLTokenRange> statements = collect_function_statement_ranges(tokens, function);
+    for (const GLSLTokenRange &statement : statements) {
+      std::string lhs_identifier;
+      std::string rhs_identifier;
+      int lhs_token_index = -1;
+      int rhs_token_index = -1;
+      if (!parse_direct_identifier_assignment_statement(
+              tokens, statement, lhs_identifier, lhs_token_index, rhs_identifier, rhs_token_index))
+      {
+        continue;
+      }
+      if (local_bindings.contains(rhs_identifier)) {
+        allowed_identifier_token_indices.add(rhs_token_index);
+      }
+      if (local_bindings.contains(lhs_identifier)) {
+        allowed_identifier_token_indices.add(lhs_token_index);
+      }
+    }
+
+    for (int i = function.body_token_start; i <= function.body_token_end; i++) {
+      const GLSLToken &token = tokens[i];
+      if (token.kind != GLSLToken::Kind::Identifier || (i + 1) > function.body_token_end ||
+          tokens[i + 1].kind != GLSLToken::Kind::Punctuation || tokens[i + 1].punctuation != '(')
+      {
+        continue;
+      }
+
+      Vector<GLSLTokenRange> argument_ranges;
+      int closing_paren_index = -1;
+      if (!parse_call_argument_ranges(
+              tokens, i + 1, function.body_token_end, argument_ranges, closing_paren_index))
+      {
+        continue;
+      }
+
+      if (is_sample2d_sampling_function_name(token.text))
+      {
+        if (!argument_ranges.is_empty()) {
+          std::string sampled_identifier;
+          int sampled_identifier_token_index = -1;
+          if (parse_single_identifier_token_range(tokens,
+                                                  argument_ranges[0].start,
+                                                  argument_ranges[0].end,
+                                                  sampled_identifier,
+                                                  sampled_identifier_token_index) &&
+              local_bindings.contains(sampled_identifier))
+          {
+            allowed_identifier_token_indices.add(sampled_identifier_token_index);
+          }
+        }
+        continue;
+      }
+
+      const GLSLFunctionDefinition *callee = find_glsl_function_definition_by_name(functions,
+                                                                                   token.text);
+      if (callee == nullptr) {
+        continue;
+      }
+      for (int param_index = 0;
+           param_index < callee->params.size() && param_index < argument_ranges.size();
+           param_index++)
+      {
+        const GLSLFunctionParam &callee_param = callee->params[param_index];
+        if (!glsl_param_has_input_socket(callee_param) ||
+            !glsl_boundary_type_is_sample2d(callee_param.type))
+        {
+          continue;
+        }
+
+        std::string argument_identifier;
+        int argument_identifier_token_index = -1;
+        if (parse_single_identifier_token_range(tokens,
+                                                argument_ranges[param_index].start,
+                                                argument_ranges[param_index].end,
+                                                argument_identifier,
+                                                argument_identifier_token_index) &&
+            local_bindings.contains(argument_identifier))
+        {
+          allowed_identifier_token_indices.add(argument_identifier_token_index);
+        }
+      }
+    }
+
+    for (int i = function.body_token_start; i <= function.body_token_end; i++) {
+      const GLSLToken &token = tokens[i];
+      if (token.kind != GLSLToken::Kind::Identifier || !local_bindings.contains(token.text) ||
+          allowed_identifier_token_indices.contains(i))
+      {
+        continue;
+      }
+
+      r_error = "Closure Output driven sample2D identifier '" + token.text + "' in function '" +
+                function.name +
+                "' must be used through texture-family sampling, direct function passthrough, or "
+                "direct alias assignment";
+      return false;
+    }
+  }
+
   return true;
 }
 
@@ -521,6 +928,33 @@ static bool glsl_param_has_input_socket(const GLSLFunctionParam &param)
   return ELEM(param.qualifier,
               GLSLFunctionParam::Qualifier::In,
               GLSLFunctionParam::Qualifier::InOut);
+}
+
+static bool is_sample2d_sampling_function_name(const StringRef name)
+{
+  return name == "texture" || name == "textureLod" || name == "textureGrad" ||
+         name == "textureSize" || name == "texelFetch" || name == "textureGather";
+}
+
+static std::string make_split_vec4_w_socket_identifier(const StringRef identifier)
+{
+  return std::string(identifier) + "_w";
+}
+
+static std::string make_split_vec4_w_socket_name(const StringRef name)
+{
+  return std::string(name) + " W";
+}
+
+static std::string make_wrapper_vec4_temp_name(const StringRef name)
+{
+  return std::string(name) + "_vec4_tmp";
+}
+
+static bool glsl_param_uses_color_socket(const GLSLFunctionParam &param)
+{
+  return ELEM(param.type, GLSLBoundaryType::Vec3, GLSLBoundaryType::Vec4) &&
+         param.meta.subtype.has_value() && *param.meta.subtype == PROP_COLOR;
 }
 
 static bool glsl_param_has_output_socket(const GLSLFunctionParam &param)
@@ -577,8 +1011,9 @@ static bool validate_sampler_inputs(const bNode &node,
                                     const GLSLFunctionDefinition &function,
                                     std::string &r_error)
 {
-  const Map<std::string, GLSLSample2DUsage> usage_by_name = analyze_sample2d_usages(tokens,
-                                                                                    function);
+  const Map<std::string, GLSLSample2DSourceKind> source_kinds = resolve_sample2d_source_kinds(node,
+                                                                                               function);
+  bool has_closure_output_sample2d = false;
 
   for (const GLSLFunctionParam &param : function.params) {
     if (!glsl_param_has_input_socket(param) || !glsl_boundary_type_is_sampler(param.type)) {
@@ -624,28 +1059,13 @@ static bool validate_sampler_inputs(const bNode &node,
     const bNodeLink *used_link = nullptr;
     const GLSLSample2DSourceKind source_kind = resolve_sample2d_source_kind(node, param, used_link);
     if (source_kind == GLSLSample2DSourceKind::ClosureOutput) {
-      const GLSLSample2DUsage usage = usage_by_name.lookup_default(param.name, {});
-      if (sample2d_usage_requires_image_source(usage)) {
-        r_error = "sample2D parameter '" + param.name +
-                  "' uses image-only sampling functions that require Image to Closure";
-        return false;
-      }
-      if (!sample2d_usage_supported_for_closure_output(usage)) {
-        r_error = "sample2D parameter '" + param.name +
-                  "' only supports texture(tex, uv) when driven by Closure Output";
-        return false;
-      }
-      if (!validate_sample2d_direct_texture_usage(tokens, function, param.name)) {
-        r_error = "sample2D parameter '" + param.name +
-                  "' only supports direct texture(tex, uv) calls when driven by Closure Output";
-        return false;
-      }
       std::string closure_error;
       if (!closure_output_has_required_sample2d_signature(*used_link->fromnode, closure_error)) {
         r_error = "Closure Output connected to sample2D parameter '" + param.name +
                   "' is missing required closure items: " + closure_error;
         return false;
       }
+      has_closure_output_sample2d = true;
       continue;
     }
     if (source_kind != GLSLSample2DSourceKind::ImageToClosure || used_link == nullptr) {
@@ -665,6 +1085,27 @@ static bool validate_sampler_inputs(const bNode &node,
       return false;
     }
   }
+
+  if (!has_closure_output_sample2d) {
+    return true;
+  }
+
+  const Vector<std::string> function_names = find_top_level_glsl_function_names(tokens);
+  Vector<GLSLFunctionDefinition> all_functions;
+  if (!find_all_top_level_glsl_function_definitions(tokens, function_names, all_functions, r_error)) {
+    return false;
+  }
+
+  Vector<GLSLClosureFunctionBindings> bindings_by_function;
+  if (!build_closure_sample2d_bindings_by_function(
+          tokens, all_functions, function, source_kinds, bindings_by_function, r_error))
+  {
+    return false;
+  }
+  if (!validate_closure_sample2d_bindings(tokens, all_functions, bindings_by_function, r_error)) {
+    return false;
+  }
+
   return true;
 }
 
@@ -1307,6 +1748,13 @@ static bool parse_glsl_meta_subtype(const StringRef text,
   else if (name == "xyz") {
     r_subtype = PROP_XYZ;
   }
+  else if (name == "color") {
+    if (!ELEM(type, GLSLBoundaryType::Vec3, GLSLBoundaryType::Vec4)) {
+      r_error = "GLSL meta vector subtype 'color' requires vec3 or vec4";
+      return false;
+    }
+    r_subtype = PROP_COLOR;
+  }
   else {
     r_error = "Unsupported GLSL meta vector subtype '" + std::string(text) + "'";
     return false;
@@ -1935,8 +2383,8 @@ static bool closure_output_has_required_sample2d_signature(const bNode &closure_
   }
 
   const bNodeSocket *color_socket = find_closure_output_socket_by_name(closure_output_node, "Color");
-  if (color_socket == nullptr || color_socket->type != SOCK_RGBA) {
-    r_error = "Closure Output must expose an RGBA output item named 'Color' for sample2D";
+  if (color_socket == nullptr || !ELEM(color_socket->type, SOCK_FLOAT, SOCK_VECTOR, SOCK_RGBA)) {
+    r_error = "Closure Output must expose a Float, Vector, or RGBA output item named 'Color' for sample2D";
     return false;
   }
   return true;
@@ -1998,6 +2446,11 @@ static bool build_closure_sample_helper(GPUMaterial *mat,
     return false;
   }
   const bNodeSocket *color_socket = find_closure_output_socket_by_name(*closure_output_node, "Color");
+  const bNodeLink *color_source_link = find_any_direct_link(*color_socket);
+  const bNodeSocket *sample_socket = color_socket;
+  if (color_source_link != nullptr && color_source_link->fromsock != nullptr) {
+    sample_socket = color_source_link->fromsock;
+  }
 
   bNodeExecContext context = {};
   bNodeTree *helper_tree = const_cast<bNodeTree *>(&closure_output_node->owner_tree());
@@ -2020,14 +2473,19 @@ static bool build_closure_sample_helper(GPUMaterial *mat,
     }
   });
   Set<const bNode *> visited_nodes;
-  mark_socket_upstream_for_closure_helper(*color_socket, visited_nodes);
+  if (color_source_link != nullptr && color_source_link->fromnode != nullptr) {
+    mark_node_upstream_for_closure_helper(*color_source_link->fromnode, visited_nodes);
+  }
+  else {
+    mark_socket_upstream_for_closure_helper(*color_socket, visited_nodes);
+  }
 
   GPU_material_closure_uv_source_push(mat, StringRefNull(uv_global_name));
   BLI_SCOPED_DEFER([&]() { GPU_material_closure_uv_source_pop(mat); });
 
   ntreeExecGPUNodes(exec, mat, nullptr);
 
-  bNodeStack *color_stack = node_get_socket_stack(exec->stack, const_cast<bNodeSocket *>(color_socket));
+  bNodeStack *color_stack = node_get_socket_stack(exec->stack, const_cast<bNodeSocket *>(sample_socket));
   GPUNodeLink *color_link = (color_stack != nullptr) ? static_cast<GPUNodeLink *>(color_stack->data) :
                                                        nullptr;
   if (color_link == nullptr && color_stack != nullptr) {
@@ -2038,11 +2496,37 @@ static bool build_closure_sample_helper(GPUMaterial *mat,
     return false;
   }
 
-  const char *sub_function_name = GPU_material_split_sub_function(mat, GPU_VEC4, &color_link);
+  GPUType helper_return_type = GPU_VEC4;
+  if (color_link != nullptr) {
+    const GPUType output_type = gpu_node_link_output_type(*color_link);
+    if (output_type == GPU_FLOAT) {
+      helper_return_type = GPU_FLOAT;
+    }
+    else if (ELEM(output_type, GPU_VEC2, GPU_VEC3)) {
+      helper_return_type = GPU_VEC3;
+    }
+    else if (output_type == GPU_NONE) {
+      if (sample_socket->type == SOCK_FLOAT) {
+        helper_return_type = GPU_FLOAT;
+      }
+      else if (sample_socket->type == SOCK_VECTOR) {
+        helper_return_type = GPU_VEC3;
+      }
+    }
+  }
+  else if (sample_socket->type == SOCK_FLOAT) {
+    helper_return_type = GPU_FLOAT;
+  }
+  else if (sample_socket->type == SOCK_VECTOR) {
+      helper_return_type = GPU_VEC3;
+  }
+
+  const char *sub_function_name = GPU_material_split_sub_function(mat, helper_return_type, &color_link);
   r_helper.param_name = param.name;
   r_helper.helper_name = helper_name;
   r_helper.uv_global_name = uv_global_name;
   r_helper.sub_function_name = sub_function_name;
+  r_helper.return_type = helper_return_type;
   return true;
 }
 
@@ -2065,13 +2549,54 @@ static const GLSLClosureSampleHelper *find_closure_sample_helper(
   return nullptr;
 }
 
-static bool rewrite_glsl_source_for_sample2d(const StringRef source,
-                                             const Vector<GLSLToken> &tokens,
-                                             const GLSLFunctionDefinition &function,
-                                             const Map<std::string, GLSLSample2DSourceKind> &source_kinds,
-                                             const Span<GLSLClosureSampleHelper> closure_helpers,
-                                             std::string &r_rewritten_source,
-                                             std::string &r_error)
+static GPUType gpu_node_link_output_type(const GPUNodeLink &link)
+{
+  return (link.link_type == GPU_NODE_LINK_OUTPUT && link.output != nullptr) ? link.output->type :
+                                                                              GPU_NONE;
+}
+
+static std::string make_closure_texel_fetch_expression(const GLSLClosureSampleHelper &helper,
+                                                       const StringRef coord_expression)
+{
+  std::stringstream ss;
+  ss << helper.helper_name << "((vec2(" << coord_expression << ") + vec2(0.5)) / vec2(" <<
+      float(closure_output_virtual_texture_size) << ", " <<
+      float(closure_output_virtual_texture_size) << "))";
+  return ss.str();
+}
+
+static std::string make_closure_gather_expression(const GLSLClosureSampleHelper &helper,
+                                                  const StringRef uv_expression,
+                                                  const StringRef component_expression)
+{
+  const std::string texel = "vec2(1.0 / " + std::to_string(closure_output_virtual_texture_size) +
+                            ".0, 1.0 / " + std::to_string(closure_output_virtual_texture_size) +
+                            ".0)";
+  const std::string component = component_expression.is_empty() ? "0" :
+                                                               std::string(component_expression);
+
+  std::stringstream ss;
+  ss << "vec4(";
+  ss << helper.helper_name << "(" << uv_expression << " + vec2(-0.5, 0.5) * " << texel << ")["
+     << component << "], ";
+  ss << helper.helper_name << "(" << uv_expression << " + vec2(0.5, 0.5) * " << texel << ")["
+     << component << "], ";
+  ss << helper.helper_name << "(" << uv_expression << " + vec2(0.5, -0.5) * " << texel << ")["
+     << component << "], ";
+  ss << helper.helper_name << "(" << uv_expression << " + vec2(-0.5, -0.5) * " << texel << ")["
+     << component << "])";
+  return ss.str();
+}
+
+static bool rewrite_glsl_source_for_sample2d(
+    const StringRef source,
+    const Vector<GLSLToken> &tokens,
+    const Span<GLSLFunctionDefinition> functions,
+    const Span<GLSLClosureFunctionBindings> bindings_by_function,
+    const Span<GLSLClosureSampleHelper> closure_helpers,
+    std::string &r_rewritten_source,
+    GLSLClosureSample2DDowngradeInfo &r_downgrade_info,
+    std::string &r_error)
 {
   struct Replacement {
     int64_t start = 0;
@@ -2081,73 +2606,152 @@ static bool rewrite_glsl_source_for_sample2d(const StringRef source,
 
   Vector<Replacement> replacements;
 
-  for (const GLSLFunctionParam &param : function.params) {
-    if (!glsl_boundary_type_is_sample2d(param.type) || param.type_source_start < 0 ||
-        param.type_source_end <= param.type_source_start)
-    {
-      continue;
-    }
-    const GLSLSample2DSourceKind *source_kind = source_kinds.lookup_ptr(param.name);
-    if (source_kind != nullptr && *source_kind == GLSLSample2DSourceKind::ClosureOutput) {
-      replacements.append({param.type_source_start, param.type_source_end, "float"});
-    }
-  }
-
-  for (int i = function.body_token_start; i <= function.body_token_end; i++) {
-    const GLSLToken &token = tokens[i];
-    if (token.kind != GLSLToken::Kind::Identifier || token.text != "texture") {
-      continue;
-    }
-    if ((i + 1) > function.body_token_end || tokens[i + 1].kind != GLSLToken::Kind::Punctuation ||
-        tokens[i + 1].punctuation != '(')
-    {
+  for (const GLSLFunctionDefinition &function : functions) {
+    const GLSLClosureFunctionBindings *seed_bindings = find_glsl_closure_function_bindings(
+        bindings_by_function, function.name);
+    if (seed_bindings == nullptr || seed_bindings->bindings.is_empty()) {
       continue;
     }
 
-    int paren_depth = 1;
-    int closing_paren_index = -1;
-    Vector<int> comma_indices;
-    for (int j = i + 2; j <= function.body_token_end; j++) {
-      const GLSLToken &arg_token = tokens[j];
-      if (arg_token.kind != GLSLToken::Kind::Punctuation) {
+    for (const GLSLFunctionParam &param : function.params) {
+      if (!glsl_boundary_type_is_sample2d(param.type) || param.type_source_start < 0 ||
+          param.type_source_end <= param.type_source_start || !seed_bindings->bindings.contains(param.name))
+      {
         continue;
       }
-      if (arg_token.punctuation == '(') {
-        paren_depth++;
-      }
-      else if (arg_token.punctuation == ')') {
-        paren_depth--;
-        if (paren_depth == 0) {
-          closing_paren_index = j;
-          break;
-        }
-      }
-      else if (arg_token.punctuation == ',' && paren_depth == 1) {
-        comma_indices.append(j);
-      }
+      replacements.append({param.type_source_start, param.type_source_end, "float"});
     }
 
-    if (closing_paren_index == -1 || comma_indices.is_empty()) {
-      continue;
-    }
-
-    const std::string first_argument = trim_source_range(
-        source, tokens[i + 1].source_end, tokens[comma_indices[0]].source_start);
-    const GLSLClosureSampleHelper *helper = find_closure_sample_helper(closure_helpers, first_argument);
-    if (helper == nullptr) {
-      continue;
-    }
-    if (comma_indices.size() != 1) {
-      r_error = "sample2D parameter '" + helper->param_name +
-                "' only supports texture(tex, uv) when driven by Closure Output";
+    Map<std::string, std::string> local_bindings;
+    if (!build_function_local_closure_bindings(
+            tokens, function, seed_bindings->bindings, local_bindings, r_error))
+    {
       return false;
     }
 
-    const std::string second_argument = trim_source_range(
-        source, tokens[comma_indices[0]].source_end, tokens[closing_paren_index].source_start);
-    replacements.append({token.source_start,
-                         tokens[closing_paren_index].source_end,
-                         helper->helper_name + "(" + second_argument + ")"});
+    for (int i = function.body_token_start; i <= function.body_token_end; i++) {
+      const GLSLToken &token = tokens[i];
+      if (token.kind != GLSLToken::Kind::Identifier ||
+          !is_sample2d_sampling_function_name(token.text) ||
+          (i + 1) > function.body_token_end || tokens[i + 1].kind != GLSLToken::Kind::Punctuation ||
+          tokens[i + 1].punctuation != '(')
+      {
+        continue;
+      }
+
+      Vector<GLSLTokenRange> argument_ranges;
+      int closing_paren_index = -1;
+      if (!parse_call_argument_ranges(
+              tokens, i + 1, function.body_token_end, argument_ranges, closing_paren_index) ||
+          argument_ranges.is_empty())
+      {
+        continue;
+      }
+
+      std::string sampled_identifier;
+      int sampled_identifier_token_index = -1;
+      if (!parse_single_identifier_token_range(tokens,
+                                               argument_ranges[0].start,
+                                               argument_ranges[0].end,
+                                               sampled_identifier,
+                                               sampled_identifier_token_index))
+      {
+        continue;
+      }
+      if (sampled_identifier_token_index < 0) {
+        continue;
+      }
+
+      const std::string *root_param_name = local_bindings.lookup_ptr(sampled_identifier);
+      if (root_param_name == nullptr) {
+        continue;
+      }
+
+      const GLSLClosureSampleHelper *helper = find_closure_sample_helper(closure_helpers,
+                                                                         *root_param_name);
+      if (helper == nullptr) {
+        r_error = "Could not resolve a Closure Output helper for sample2D parameter '" +
+                  *root_param_name + "'";
+        return false;
+      }
+
+      r_downgrade_info.root_param_names.add(*root_param_name);
+      std::string replacement_text;
+
+      if (token.text == "texture") {
+        if (argument_ranges.size() < 2) {
+          r_error = "sample2D parameter '" + *root_param_name +
+                    "' could not rewrite texture(...) from Closure Output";
+          return false;
+        }
+        const std::string uv_expression = trim_source_range(source,
+                                                            tokens[argument_ranges[1].start].source_start,
+                                                            tokens[argument_ranges[1].end].source_end);
+        replacement_text = helper->helper_name + "(" + uv_expression + ")";
+        r_downgrade_info.uses_texture_bias |= argument_ranges.size() > 2;
+      }
+      else if (token.text == "textureLod") {
+        if (argument_ranges.size() < 3) {
+          r_error = "sample2D parameter '" + *root_param_name +
+                    "' could not rewrite textureLod(...) from Closure Output";
+          return false;
+        }
+        const std::string uv_expression = trim_source_range(source,
+                                                            tokens[argument_ranges[1].start].source_start,
+                                                            tokens[argument_ranges[1].end].source_end);
+        replacement_text = helper->helper_name + "(" + uv_expression + ")";
+        r_downgrade_info.uses_texture_lod = true;
+      }
+      else if (token.text == "textureGrad") {
+        if (argument_ranges.size() < 4) {
+          r_error = "sample2D parameter '" + *root_param_name +
+                    "' could not rewrite textureGrad(...) from Closure Output";
+          return false;
+        }
+        const std::string uv_expression = trim_source_range(source,
+                                                            tokens[argument_ranges[1].start].source_start,
+                                                            tokens[argument_ranges[1].end].source_end);
+        replacement_text = helper->helper_name + "(" + uv_expression + ")";
+        r_downgrade_info.uses_texture_grad = true;
+      }
+      else if (token.text == "textureSize") {
+        replacement_text = "ivec2(" + std::to_string(closure_output_virtual_texture_size) + ", " +
+                           std::to_string(closure_output_virtual_texture_size) + ")";
+        r_downgrade_info.uses_texture_size = true;
+      }
+      else if (token.text == "texelFetch") {
+        if (argument_ranges.size() < 3) {
+          r_error = "sample2D parameter '" + *root_param_name +
+                    "' could not rewrite texelFetch(...) from Closure Output";
+          return false;
+        }
+        const std::string coord_expression = trim_source_range(source,
+                                                               tokens[argument_ranges[1].start].source_start,
+                                                               tokens[argument_ranges[1].end].source_end);
+        replacement_text = make_closure_texel_fetch_expression(*helper, coord_expression);
+        r_downgrade_info.uses_texel_fetch = true;
+      }
+      else if (token.text == "textureGather") {
+        if (argument_ranges.size() < 2) {
+          r_error = "sample2D parameter '" + *root_param_name +
+                    "' could not rewrite textureGather(...) from Closure Output";
+          return false;
+        }
+        const std::string uv_expression = trim_source_range(source,
+                                                            tokens[argument_ranges[1].start].source_start,
+                                                            tokens[argument_ranges[1].end].source_end);
+        const std::string component_expression =
+            argument_ranges.size() >= 3 ?
+                trim_source_range(source,
+                                  tokens[argument_ranges[2].start].source_start,
+                                  tokens[argument_ranges[2].end].source_end) :
+                "";
+        replacement_text = make_closure_gather_expression(*helper, uv_expression, component_expression);
+        r_downgrade_info.uses_texture_gather = true;
+      }
+
+      replacements.append({token.source_start, tokens[closing_paren_index].source_end, replacement_text});
+    }
   }
 
   r_rewritten_source = std::string(source);
@@ -2159,6 +2763,61 @@ static bool rewrite_glsl_source_for_sample2d(const StringRef source,
   return true;
 }
 
+static void log_closure_sample2d_downgrades(const bNode &node,
+                                            const GLSLParseResult &parse_result,
+                                            const GLSLClosureSample2DDowngradeInfo &info)
+{
+  if (!info.uses_texture_bias && !info.uses_texture_lod && !info.uses_texture_grad &&
+      !info.uses_texture_size && !info.uses_texel_fetch && !info.uses_texture_gather)
+  {
+    return;
+  }
+
+  std::stringstream ss;
+  ss << "GLSL Function node '" << node.name << "' function '" << parse_result.function.name
+     << "': Closure Output sample2D downgraded ";
+  bool need_separator = false;
+  auto append_item = [&](const StringRef text) {
+    if (need_separator) {
+      ss << ", ";
+    }
+    ss << text;
+    need_separator = true;
+  };
+
+  if (info.uses_texture_bias) {
+    append_item("texture(..., bias)->texture");
+  }
+  if (info.uses_texture_lod) {
+    append_item("textureLod->texture");
+  }
+  if (info.uses_texture_grad) {
+    append_item("textureGrad->texture");
+  }
+  if (info.uses_texture_size) {
+    append_item("textureSize->ivec2(1024, 1024)");
+  }
+  if (info.uses_texel_fetch) {
+    append_item("texelFetch->texture using virtual 1024x1024 size");
+  }
+  if (info.uses_texture_gather) {
+    append_item("textureGather->approximate 4-tap texture using virtual 1024x1024 size");
+  }
+  if (!info.root_param_names.is_empty()) {
+    ss << " for parameters ";
+    bool need_param_separator = false;
+    for (const std::string &param_name : info.root_param_names) {
+      if (need_param_separator) {
+        ss << ", ";
+      }
+      ss << "'" << param_name << "'";
+      need_param_separator = true;
+    }
+  }
+
+  CLOG_WARN(&LOG, "%s", ss.str().c_str());
+}
+
 static std::string build_sample2d_closure_helper_block(
     const Span<GLSLClosureSampleHelper> closure_helpers)
 {
@@ -2168,7 +2827,18 @@ static std::string build_sample2d_closure_helper_block(
 
   std::stringstream ss;
   for (const GLSLClosureSampleHelper &helper : closure_helpers) {
-    ss << "vec4 " << helper.sub_function_name << "();\n";
+    switch (helper.return_type) {
+      case GPU_FLOAT:
+        ss << "float " << helper.sub_function_name << "();\n";
+        break;
+      case GPU_VEC3:
+        ss << "vec3 " << helper.sub_function_name << "();\n";
+        break;
+      case GPU_VEC4:
+      default:
+        ss << "vec4 " << helper.sub_function_name << "();\n";
+        break;
+    }
   }
   ss << "\n";
   for (const GLSLClosureSampleHelper &helper : closure_helpers) {
@@ -2178,7 +2848,18 @@ static std::string build_sample2d_closure_helper_block(
   for (const GLSLClosureSampleHelper &helper : closure_helpers) {
     ss << "vec4 " << helper.helper_name << "(vec2 uv)\n{\n";
     ss << "  " << helper.uv_global_name << " = uv;\n";
-    ss << "  return " << helper.sub_function_name << "();\n";
+    switch (helper.return_type) {
+      case GPU_FLOAT:
+        ss << "  return vec4(vec3(" << helper.sub_function_name << "()), 1.0);\n";
+        break;
+      case GPU_VEC3:
+        ss << "  return vec4(" << helper.sub_function_name << "(), 1.0);\n";
+        break;
+      case GPU_VEC4:
+      default:
+        ss << "  return " << helper.sub_function_name << "();\n";
+        break;
+    }
     ss << "}\n\n";
   }
   return ss.str();
@@ -2209,11 +2890,28 @@ static std::string build_namespaced_glsl_source(const StringRef prefix,
 static StringRefNull emitted_type_name(const GLSLFunctionParam &param,
                                        const GLSLSample2DSourceKind sample2d_source_kind)
 {
+  if (glsl_param_uses_color_socket(param)) {
+    return StringRefNull("vec4");
+  }
   if (param.type != GLSLBoundaryType::Sample2D) {
     return param.type_name;
   }
   return (sample2d_source_kind == GLSLSample2DSourceKind::ClosureOutput) ? StringRefNull("float") :
                                                                             StringRefNull("sampler2D");
+}
+
+static std::string wrapper_argument_expression(const GLSLFunctionParam &param)
+{
+  const std::string argument_name = make_wrapper_argument_name("in", param.name);
+  if (glsl_param_uses_color_socket(param) && param.type == GLSLBoundaryType::Vec3) {
+    return argument_name + ".rgb";
+  }
+  return argument_name;
+}
+
+static bool glsl_output_is_split_vec4(const GLSLFunctionParam &param)
+{
+  return param.type == GLSLBoundaryType::Vec4;
 }
 
 static std::string build_wrapper_glsl_source(
@@ -2225,6 +2923,13 @@ static std::string build_wrapper_glsl_source(
   std::stringstream ss;
   ss << "void " << parse_result.wrapper_name << "(";
   bool need_comma = false;
+  auto append_wrapper_output = [&](const StringRefNull type_name, const StringRef name) {
+    if (need_comma) {
+      ss << ", ";
+    }
+    ss << "out " << type_name << " " << name;
+    need_comma = true;
+  };
   for (const GLSLFunctionParam &param : function.params) {
     if (!glsl_param_has_input_socket(param)) {
       continue;
@@ -2239,26 +2944,45 @@ static std::string build_wrapper_glsl_source(
     need_comma = true;
   }
   if (function.return_type != GLSLBoundaryType::Void) {
-    if (need_comma) {
-      ss << ", ";
+    if (function.return_type == GLSLBoundaryType::Vec4) {
+      append_wrapper_output("vec3", "out_result");
+      append_wrapper_output("float", "out_result_w");
     }
-    ss << "out " << function.return_type_name << " out_result";
-    need_comma = true;
+    else {
+      append_wrapper_output(function.return_type_name.c_str(), "out_result");
+    }
   }
   for (const GLSLFunctionParam &param : function.params) {
     if (!glsl_param_has_output_socket(param)) {
       continue;
     }
-    if (need_comma) {
-      ss << ", ";
+    if (glsl_output_is_split_vec4(param)) {
+      append_wrapper_output("vec3", make_wrapper_argument_name("out", param.name));
+      append_wrapper_output("float", make_split_vec4_w_socket_identifier(
+                                        make_wrapper_argument_name("out", param.name)));
     }
-    ss << "out " << param.type_name << " " << make_wrapper_argument_name("out", param.name);
-    need_comma = true;
+    else {
+      append_wrapper_output(param.type_name.c_str(), make_wrapper_argument_name("out", param.name));
+    }
   }
   ss << ")\n{\n";
+  if (function.return_type == GLSLBoundaryType::Vec4) {
+    ss << "  vec4 " << make_wrapper_vec4_temp_name("out_result") << ";\n";
+  }
+  for (const GLSLFunctionParam &param : function.params) {
+    if (glsl_param_has_output_socket(param) && glsl_output_is_split_vec4(param)) {
+      ss << "  vec4 " << make_wrapper_vec4_temp_name(make_wrapper_argument_name("out", param.name))
+         << ";\n";
+    }
+  }
   ss << "  ";
   if (function.return_type != GLSLBoundaryType::Void) {
-    ss << "out_result = ";
+    if (function.return_type == GLSLBoundaryType::Vec4) {
+      ss << make_wrapper_vec4_temp_name("out_result") << " = ";
+    }
+    else {
+      ss << "out_result = ";
+    }
   }
   ss << parse_result.source_prefix << function.name << "(";
   need_comma = false;
@@ -2267,14 +2991,33 @@ static std::string build_wrapper_glsl_source(
       ss << ", ";
     }
     if (glsl_param_has_output_socket(param)) {
-      ss << make_wrapper_argument_name("out", param.name);
+      if (glsl_output_is_split_vec4(param)) {
+        ss << make_wrapper_vec4_temp_name(make_wrapper_argument_name("out", param.name));
+      }
+      else {
+        ss << make_wrapper_argument_name("out", param.name);
+      }
     }
     else {
-      ss << make_wrapper_argument_name("in", param.name);
+      ss << wrapper_argument_expression(param);
     }
     need_comma = true;
   }
-  ss << ");\n}\n";
+  ss << ");\n";
+  if (function.return_type == GLSLBoundaryType::Vec4) {
+    ss << "  out_result = " << make_wrapper_vec4_temp_name("out_result") << ".xyz;\n";
+    ss << "  out_result_w = " << make_wrapper_vec4_temp_name("out_result") << ".w;\n";
+  }
+  for (const GLSLFunctionParam &param : function.params) {
+    if (glsl_param_has_output_socket(param) && glsl_output_is_split_vec4(param)) {
+      const std::string output_name = make_wrapper_argument_name("out", param.name);
+      const std::string temp_name = make_wrapper_vec4_temp_name(output_name);
+      ss << "  " << output_name << " = " << temp_name << ".xyz;\n";
+      ss << "  " << make_split_vec4_w_socket_identifier(output_name) << " = " << temp_name
+         << ".w;\n";
+    }
+  }
+  ss << "}\n";
   return ss.str();
 }
 
@@ -2289,6 +3032,19 @@ static bool build_specialized_glsl_sources(GPUMaterial *mat,
   const Vector<GLSLToken> tokens = tokenize_glsl_source(stripped_source);
   const Map<std::string, GLSLSample2DSourceKind> source_kinds = resolve_sample2d_source_kinds(
       node, parse_result.function);
+  Vector<GLSLFunctionDefinition> all_functions;
+  if (!find_all_top_level_glsl_function_definitions(
+          tokens, parse_result.function_names, all_functions, r_error))
+  {
+    return false;
+  }
+
+  Vector<GLSLClosureFunctionBindings> bindings_by_function;
+  if (!build_closure_sample2d_bindings_by_function(
+          tokens, all_functions, parse_result.function, source_kinds, bindings_by_function, r_error))
+  {
+    return false;
+  }
 
   Vector<GLSLClosureSampleHelper> closure_helpers;
   for (const GLSLFunctionParam &param : parse_result.function.params) {
@@ -2310,11 +3066,20 @@ static bool build_specialized_glsl_sources(GPUMaterial *mat,
   }
 
   std::string rewritten_source;
+  GLSLClosureSample2DDowngradeInfo downgrade_info;
   if (!rewrite_glsl_source_for_sample2d(
-          stripped_source, tokens, parse_result.function, source_kinds, closure_helpers, rewritten_source, r_error))
+          stripped_source,
+          tokens,
+          all_functions,
+          bindings_by_function,
+          closure_helpers,
+          rewritten_source,
+          downgrade_info,
+          r_error))
   {
     return false;
   }
+  log_closure_sample2d_downgrades(node, parse_result, downgrade_info);
 
   r_library_source = build_namespaced_glsl_source(
       parse_result.source_prefix, parse_result.function_names, rewritten_source, closure_helpers);
@@ -2446,6 +3211,22 @@ static void add_glsl_socket_declaration(NodeDeclarationBuilder &b,
     return;
   }
 
+  const bool use_color_socket = !is_output && glsl_param_uses_color_socket(param);
+  if (use_color_socket) {
+    auto &decl = b.add_input<decl::Color>(socket_name, socket_identifier);
+    if (param.meta.has_default_value) {
+      decl.default_value(ColorGeometry4f(param.meta.default_value.x,
+                                         param.meta.default_value.y,
+                                         param.meta.default_value.z,
+                                         param.type == GLSLBoundaryType::Vec4 ? param.meta.default_value.w :
+                                                                                1.0f));
+    }
+    if (param.meta.hide_value) {
+      decl.hide_value();
+    }
+    return;
+  }
+
   auto configure_vector_decl = [&](auto &decl) {
     decl.dimensions(param.dimensions)
         .min(param.meta.has_min ? param.meta.min_value : -10000.0f)
@@ -2475,6 +3256,13 @@ static void add_glsl_socket_declaration(NodeDeclarationBuilder &b,
   };
 
   if (is_output) {
+    if (glsl_output_is_split_vec4(param)) {
+      auto &decl = b.add_output<decl::Vector>(socket_name, socket_identifier);
+      decl.dimensions(3);
+      b.add_output<decl::Float>(make_split_vec4_w_socket_name(socket_name),
+                                make_split_vec4_w_socket_identifier(socket_identifier));
+      return;
+    }
     auto &decl = b.add_output<decl::Vector>(socket_name, socket_identifier);
     configure_vector_decl(decl);
   }
@@ -2507,6 +3295,16 @@ static void sync_glsl_meta_defaults(bNode &node, const GLSLParseResult &parse_re
 
     if (param.type == GLSLBoundaryType::Float && socket->type == SOCK_FLOAT) {
       socket->default_value_typed<bNodeSocketValueFloat>()->value = param.meta.default_value.x;
+    }
+    else if (glsl_param_uses_color_socket(param) && socket->type == SOCK_RGBA)
+    {
+      const int copy_count = (param.type == GLSLBoundaryType::Vec4) ? 4 : 3;
+      std::copy_n(&param.meta.default_value[0],
+                  copy_count,
+                  socket->default_value_typed<bNodeSocketValueRGBA>()->value);
+      if (param.type == GLSLBoundaryType::Vec3) {
+        socket->default_value_typed<bNodeSocketValueRGBA>()->value[3] = 1.0f;
+      }
     }
     else if (ELEM(param.type, GLSLBoundaryType::Vec2, GLSLBoundaryType::Vec3, GLSLBoundaryType::Vec4) &&
              socket->type == SOCK_VECTOR)
