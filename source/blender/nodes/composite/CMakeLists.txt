@@ -15,6 +15,8 @@ set(INC
   ../../compositor/derived_resources
   ../../compositor/utilities
   ../../sequencer
+  # Change this to your AE SDK headers location!
+  ${CMAKE_SOURCE_DIR}/../BlendifyAE/SDK/Examples/Headers
 
   # RNA_prototypes.hh
   ${CMAKE_BINARY_DIR}/source/blender/makesrna
@@ -24,6 +26,9 @@ set(INC_SYS
 )
 
 set(SRC
+  nodes/after_effects_host.cc
+  nodes/after_effects_host_suites.cc
+  nodes/after_effects_host_iterate16.cc
   nodes/node_composite_alpha_convert.cc
   nodes/node_composite_alpha_over.cc
   nodes/node_composite_anti_aliasing.cc
@@ -78,6 +83,7 @@ set(SRC
   nodes/node_composite_lens_distortion.cc
   nodes/node_composite_levels.cc
   nodes/node_composite_luminance_key.cc
+  nodes/node_composite_load_after_effects_plugin.cc
   nodes/node_composite_map_uv.cc
   nodes/node_composite_mask.cc
   nodes/node_composite_mask_to_sdf.cc
@@ -115,6 +121,8 @@ set(SRC
 
   include/NOD_compositor_file_output.hh
   node_composite_util.hh
+  nodes/after_effects_host.hh
+  nodes/after_effects_host_suites.hh
 )
 
 set(LIB

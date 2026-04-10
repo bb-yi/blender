@@ -88,3 +88,4 @@ compile_commands.json
 blendcache_*
 *.blend1
 *.blend2
+*.code-workspace
