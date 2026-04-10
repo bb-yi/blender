@@ -175,6 +175,7 @@ struct GPUNodeGraphOutputLink {
 struct GPUNodeGraphFunctionLink {
   GPUNodeGraphFunctionLink *next, *prev;
   char name[16];
+  char dependency_name[128];
   GPUType return_type;
   GPUNodeLink *outlink;
 };

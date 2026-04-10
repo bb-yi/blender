@@ -641,6 +641,9 @@ void GPUCodegen::generate_graphs()
       /* Tag only the nodes needed for the current function */
       gpu_nodes_tag(&graph, func_link.outlink, GPU_NODE_TAG_FUNCTION);
       GPUGraphOutput graph = graph_serialize(GPU_NODE_TAG_FUNCTION, func_link.outlink);
+      if (func_link.dependency_name[0] != '\0') {
+        graph.dependencies.append_non_duplicates(func_link.dependency_name);
+      }
       eval_ss << func_link.return_type << " " << func_link.name << "() {\n"
               << graph.serialized << "}\n\n";
       output.material_functions.append({eval_ss.str(), graph.dependencies});

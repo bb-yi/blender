@@ -43,6 +43,8 @@ namespace nodes::node_shader_glsl_function_cc {
 NODE_STORAGE_FUNCS(NodeShaderGLSLFunction)
 
 static CLG_LogRef LOG = {"node.shader.glsl_function"};
+static thread_local Set<std::string> active_closure_helper_keys;
+static thread_local Vector<const bNode *> active_closure_helper_nodes;
 
 enum class GLSLBoundaryType {
   Unsupported = 0,
@@ -128,6 +130,7 @@ struct GLSLParseResult {
   std::string wrapper_source;
 
   Vector<std::string> function_names;
+  Vector<std::string> global_names;
   GLSLFunctionDefinition function;
   int signature_hash = 0;
   int meta_hash = 0;
@@ -204,6 +207,8 @@ static bool closure_output_has_required_sample2d_signature(const bNode &closure_
                                                            std::string &r_error);
 static bool glsl_param_has_input_socket(const GLSLFunctionParam &param);
 static Vector<std::string> find_top_level_glsl_function_names(const Vector<GLSLToken> &tokens);
+static Vector<std::string> find_top_level_glsl_global_names(
+    const Vector<GLSLToken> &tokens, const Span<std::string> function_names);
 static bool find_glsl_function_definition(const Vector<GLSLToken> &tokens,
                                           const StringRef function_name,
                                           GLSLFunctionDefinition &r_function,
@@ -301,7 +306,13 @@ static GLSLSample2DSourceKind resolve_sample2d_source_kind(const bNode &node,
                                                            const bNodeLink *&r_link)
 {
   const bNodeSocket *sample_socket = find_node_input_socket_by_identifier(node, param.identifier);
-  if ((sample_socket == nullptr || !sample_socket->is_directly_linked()) && node.runtime->original) {
+  const bNode *active_helper_node = active_closure_helper_nodes.is_empty() ? nullptr :
+                                                                            active_closure_helper_nodes.last();
+  const bool allow_original_fallback = node.runtime->original &&
+                                       (active_helper_node == nullptr ||
+                                        node.runtime->original == active_helper_node);
+  if ((sample_socket == nullptr || !sample_socket->is_directly_linked()) && allow_original_fallback)
+  {
     sample_socket = find_node_input_socket_by_identifier(*node.runtime->original, param.identifier);
   }
   if (sample_socket == nullptr) {
@@ -2201,6 +2212,87 @@ static Vector<std::string> find_top_level_glsl_function_names(const Vector<GLSLT
   return names;
 }
 
+static Vector<std::string> find_top_level_glsl_global_names(
+    const Vector<GLSLToken> &tokens, const Span<std::string> function_names)
+{
+  Set<std::string> function_name_set;
+  for (const std::string &function_name : function_names) {
+    function_name_set.add(function_name);
+  }
+
+  Set<std::string> global_name_set;
+  int brace_depth = 0;
+  int paren_depth = 0;
+  int bracket_depth = 0;
+  std::string last_identifier;
+  bool last_identifier_is_function_name = false;
+
+  auto flush_identifier = [&]() {
+    if (last_identifier.empty()) {
+      return;
+    }
+    if (!last_identifier_is_function_name && !function_name_set.contains(last_identifier)) {
+      global_name_set.add(last_identifier);
+    }
+    last_identifier.clear();
+    last_identifier_is_function_name = false;
+  };
+
+  for (int i = 0; i < tokens.size(); i++) {
+    const GLSLToken &token = tokens[i];
+    if (token.kind == GLSLToken::Kind::Punctuation) {
+      switch (token.punctuation) {
+        case '{':
+          brace_depth++;
+          flush_identifier();
+          break;
+        case '}':
+          brace_depth = max_ii(0, brace_depth - 1);
+          flush_identifier();
+          break;
+        case '(':
+          if (brace_depth == 0 && paren_depth == 0 && bracket_depth == 0 && !last_identifier.empty()) {
+            last_identifier_is_function_name = true;
+          }
+          paren_depth++;
+          break;
+        case ')':
+          paren_depth = max_ii(0, paren_depth - 1);
+          break;
+        case '[':
+          bracket_depth++;
+          break;
+        case ']':
+          bracket_depth = max_ii(0, bracket_depth - 1);
+          break;
+        case ',':
+        case '=':
+        case ';':
+          if (brace_depth == 0 && paren_depth == 0 && bracket_depth == 0) {
+            flush_identifier();
+          }
+          break;
+        default:
+          break;
+      }
+      continue;
+    }
+
+    if (brace_depth == 0 && paren_depth == 0 && bracket_depth == 0 &&
+        token.kind == GLSLToken::Kind::Identifier)
+    {
+      last_identifier = token.text;
+      last_identifier_is_function_name = false;
+    }
+  }
+
+  Vector<std::string> global_names;
+  for (const std::string &name : global_name_set) {
+    global_names.append(name);
+  }
+  return global_names;
+}
+
 static bool find_glsl_function_definition(const Vector<GLSLToken> &tokens,
                                           const StringRef function_name,
                                           GLSLFunctionDefinition &r_function,
@@ -2356,7 +2448,7 @@ static const bNodeSocket *find_closure_output_socket_by_name(const bNode &node, 
 
 static const bNode *find_localized_copy_of_original_node(const bNodeTree &tree, const bNode &original_node)
 {
-  for (const bNode *node : tree.nodes_by_type("NodeClosureOutput")) {
+  for (const bNode *node : tree.all_nodes()) {
     if (node->runtime->original == &original_node) {
       return node;
     }
@@ -2405,11 +2497,19 @@ static void mark_socket_upstream_for_closure_helper(const bNodeSocket &socket,
 
 static void mark_node_upstream_for_closure_helper(const bNode &node, Set<const bNode *> &r_visited_nodes)
 {
-  if (!r_visited_nodes.add(&node)) {
+  const bNode *node_to_mark = &node;
+  const bNode *node_original = node.runtime->original ? node.runtime->original : &node;
+  if (const bNode *localized_node = find_localized_copy_of_original_node(node.owner_tree(),
+                                                                         *node_original))
+  {
+    node_to_mark = localized_node;
+  }
+
+  if (!r_visited_nodes.add(node_to_mark)) {
     return;
   }
-  const_cast<bNode &>(node).runtime->need_exec = 1;
-  for (const bNodeSocket *input_socket : node.input_sockets()) {
+  const_cast<bNode &>(*node_to_mark).runtime->need_exec = 1;
+  for (const bNodeSocket *input_socket : node_to_mark->input_sockets()) {
     mark_socket_upstream_for_closure_helper(*input_socket, r_visited_nodes);
   }
 }
@@ -2417,13 +2517,42 @@ static void mark_node_upstream_for_closure_helper(const bNode &node, Set<const b
 static bool build_closure_sample_helper(GPUMaterial *mat,
                                         const bNode &node,
                                         const GLSLFunctionParam &param,
+                                        const StringRef source_filename,
                                         const StringRef helper_name,
                                         const StringRef uv_global_name,
                                         GLSLClosureSampleHelper &r_helper,
                                         std::string &r_error)
 {
+  const bNode *logical_node = node.runtime->original ? node.runtime->original : &node;
+  const bNode *eval_node = &node;
+  if (const bNode *localized_node = find_localized_copy_of_original_node(node.owner_tree(),
+                                                                         *logical_node))
+  {
+    eval_node = localized_node;
+  }
+
+  const std::string helper_key = std::to_string(reinterpret_cast<uintptr_t>(eval_node)) + ":" +
+                                 param.name;
+  if (!active_closure_helper_keys.add(helper_key)) {
+    r_error = "Recursive nested Closure Output sample2D helper dependency detected on node '" +
+              std::string(logical_node->name) + "' parameter '" + param.name + "'";
+    return false;
+  }
+  active_closure_helper_nodes.append(logical_node);
+  const auto release_active_helper = [&]() {
+    active_closure_helper_keys.remove(helper_key);
+    active_closure_helper_nodes.pop_last();
+  };
+  bool active_helper_released = false;
+  BLI_SCOPED_DEFER([&]() {
+    if (!active_helper_released) {
+      release_active_helper();
+    }
+  });
+
   const bNodeLink *used_link = nullptr;
-  if (resolve_sample2d_source_kind(node, param, used_link) != GLSLSample2DSourceKind::ClosureOutput ||
+  if (resolve_sample2d_source_kind(*eval_node, param, used_link) !=
+          GLSLSample2DSourceKind::ClosureOutput ||
       used_link == nullptr || used_link->fromnode == nullptr)
   {
     r_error = "sample2D parameter '" + param.name + "' is missing a Closure Output source";
@@ -2431,12 +2560,13 @@ static bool build_closure_sample_helper(GPUMaterial *mat,
   }
 
   const bNode *closure_output_node = used_link->fromnode;
-  if (&closure_output_node->owner_tree() != &node.owner_tree()) {
-    if (const bNode *localized_node = find_localized_copy_of_original_node(node.owner_tree(),
-                                                                           *closure_output_node))
-    {
-      closure_output_node = localized_node;
-    }
+  const bNode *closure_output_original = closure_output_node->runtime->original ?
+                                             closure_output_node->runtime->original :
+                                             closure_output_node;
+  if (const bNode *localized_node = find_localized_copy_of_original_node(node.owner_tree(),
+                                                                         *closure_output_original))
+  {
+    closure_output_node = localized_node;
   }
 
   std::string closure_error;
@@ -2448,9 +2578,6 @@ static bool build_closure_sample_helper(GPUMaterial *mat,
   const bNodeSocket *color_socket = find_closure_output_socket_by_name(*closure_output_node, "Color");
   const bNodeLink *color_source_link = find_any_direct_link(*color_socket);
   const bNodeSocket *sample_socket = color_socket;
-  if (color_source_link != nullptr && color_source_link->fromsock != nullptr) {
-    sample_socket = color_source_link->fromsock;
-  }
 
   bNodeExecContext context = {};
   bNodeTree *helper_tree = const_cast<bNodeTree *>(&closure_output_node->owner_tree());
@@ -2482,6 +2609,8 @@ static bool build_closure_sample_helper(GPUMaterial *mat,
 
   GPU_material_closure_uv_source_push(mat, StringRefNull(uv_global_name));
   BLI_SCOPED_DEFER([&]() { GPU_material_closure_uv_source_pop(mat); });
+  GPU_material_closure_helper_dependency_push(mat, StringRefNull(source_filename));
+  BLI_SCOPED_DEFER([&]() { GPU_material_closure_helper_dependency_pop(mat); });
 
   ntreeExecGPUNodes(exec, mat, nullptr);
 
@@ -2520,6 +2649,9 @@ static bool build_closure_sample_helper(GPUMaterial *mat,
   else if (sample_socket->type == SOCK_VECTOR) {
       helper_return_type = GPU_VEC3;
   }
+
+  release_active_helper();
+  active_helper_released = true;
 
   const char *sub_function_name = GPU_material_split_sub_function(mat, helper_return_type, &color_link);
   r_helper.param_name = param.name;
@@ -2867,12 +2999,16 @@ static std::string build_sample2d_closure_helper_block(
 
 static std::string build_namespaced_glsl_source(const StringRef prefix,
                                                 const Span<std::string> function_names,
+                                                const Span<std::string> global_names,
                                                 const StringRef source,
                                                 const Span<GLSLClosureSampleHelper> closure_helpers)
 {
   std::stringstream ss;
   ss << build_sample2d_closure_helper_block(closure_helpers);
   ss << "#define sample2D sampler2D\n";
+  for (const std::string &name : global_names) {
+    ss << "#define " << name << " " << prefix << name << "\n";
+  }
   for (const std::string &name : function_names) {
     ss << "#define " << name << " " << prefix << name << "\n";
   }
@@ -2881,6 +3017,9 @@ static std::string build_namespaced_glsl_source(const StringRef prefix,
     ss << "\n";
   }
   for (const std::string &name : function_names) {
+    ss << "#undef " << name << "\n";
+  }
+  for (const std::string &name : global_names) {
     ss << "#undef " << name << "\n";
   }
   ss << "#undef sample2D\n";
@@ -3058,7 +3197,7 @@ static bool build_specialized_glsl_sources(GPUMaterial *mat,
                                     param.identifier;
     const std::string uv_global_name = helper_name + "_uv";
     if (!build_closure_sample_helper(
-            mat, node, param, helper_name, uv_global_name, helper, r_error))
+            mat, node, param, parse_result.source_filename, helper_name, uv_global_name, helper, r_error))
     {
       return false;
     }
@@ -3082,8 +3221,13 @@ static bool build_specialized_glsl_sources(GPUMaterial *mat,
   log_closure_sample2d_downgrades(node, parse_result, downgrade_info);
 
   r_library_source = build_namespaced_glsl_source(
-      parse_result.source_prefix, parse_result.function_names, rewritten_source, closure_helpers);
+      parse_result.source_prefix,
+      parse_result.function_names,
+      parse_result.global_names,
+      rewritten_source,
+      closure_helpers);
   r_wrapper_source = build_wrapper_glsl_source(parse_result, source_kinds);
+
   return true;
 }
 
@@ -3113,6 +3257,7 @@ static GLSLParseResult parse_glsl_for_node(const bNode &node)
     result.error = "No top-level GLSL function definition was found";
     return result;
   }
+  result.global_names = find_top_level_glsl_global_names(tokens, result.function_names);
 
   const NodeShaderGLSLFunction &storage = node_storage(node);
   const StringRef requested_function_name = storage.function_name;
@@ -3144,12 +3289,18 @@ static GLSLParseResult parse_glsl_for_node(const bNode &node)
   SNPRINTF(source_hash_hex, "%08x", source_hash);
   SNPRINTF(signature_hash_hex, "%08x", signature_hash);
   result.source_hash_hex = source_hash_hex;
-  result.source_prefix = "glsl_src_" + result.source_hash_hex + "_";
-  result.source_filename = "glsl_function_source_" + result.source_hash_hex + ".glsl";
+  const std::string node_id_suffix = std::to_string(node.identifier);
+  result.source_prefix = "glsl_src_" + result.source_hash_hex + "_" + node_id_suffix + "_";
+  result.source_filename =
+      "glsl_function_source_" + result.source_hash_hex + "_" + node_id_suffix + ".glsl";
   result.wrapper_name = "glsl_fn_" + std::to_string(node.identifier) + "_" + signature_hash_hex;
   result.wrapper_filename = result.wrapper_name + ".glsl";
   result.library_source = build_namespaced_glsl_source(
-      result.source_prefix, result.function_names, result.source, Span<GLSLClosureSampleHelper>());
+      result.source_prefix,
+      result.function_names,
+      result.global_names,
+      result.source,
+      Span<GLSLClosureSampleHelper>());
   result.wrapper_source = build_wrapper_glsl_source(
       result, Map<std::string, GLSLSample2DSourceKind>());
   return result;
@@ -3598,6 +3749,25 @@ static int gpu_shader_glsl_function(GPUMaterial *mat,
                                     GPUNodeStack *in,
                                     GPUNodeStack *out)
 {
+  if (!active_closure_helper_nodes.is_empty() &&
+      !GPU_material_closure_uv_source_get(mat).is_empty())
+  {
+    const bNode *logical_node = node->runtime->original ? node->runtime->original : node;
+    for (const bNode *active_logical_node : active_closure_helper_nodes) {
+      if (active_logical_node == logical_node) {
+        static float zero_value[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+        if (out != nullptr) {
+          for (int i = 0; !out[i].end; i++) {
+            if (out[i].type != GPU_NONE) {
+              out[i].link = GPU_constant(zero_value);
+            }
+          }
+        }
+        return 1;
+      }
+    }
+  }
+
   const GLSLParseResult parse_result = parse_glsl_for_node(*node);
   cache_parse_status(*node, parse_result);
   sync_glsl_meta_defaults(*node, parse_result);
@@ -3614,6 +3784,9 @@ static int gpu_shader_glsl_function(GPUMaterial *mat,
     return 1;
   }
   if (!prepare_sampler_input_bindings(mat, *node, parse_result.function, in)) {
+    CLOG_WARN(&LOG,
+              "GLSL Function node '%s' sampler preparation failed",
+              node->name);
     static float zero_value[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     if (out != nullptr) {
       for (int i = 0; !out[i].end; i++) {
@@ -3631,6 +3804,10 @@ static int gpu_shader_glsl_function(GPUMaterial *mat,
   if (!build_specialized_glsl_sources(
           mat, *node, parse_result, library_source, wrapper_source, specialized_error))
   {
+    CLOG_WARN(&LOG,
+              "GLSL Function node '%s' specialized source build failed: %s",
+              node->name,
+              specialized_error.c_str());
     static float zero_value[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     if (out != nullptr) {
       for (int i = 0; !out[i].end; i++) {
