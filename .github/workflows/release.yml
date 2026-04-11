@@ -13,7 +13,7 @@ on:
 jobs:
   build-linux:
     name: Build Linux x64
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     permissions:
       contents: read
       actions: write
@@ -31,23 +31,14 @@ jobs:
 
       - name: Install Dependencies
         run: |
+          sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
           sudo apt-get update
-          sudo apt install build-essential subversion cmake libx11-dev libxxf86vm-dev libxcursor-dev libxi-dev libxrandr-dev libxinerama-dev libegl-dev
-          sudo apt install libwayland-dev wayland-protocols libxkbcommon-dev libdbus-1-dev linux-libc-dev
-          sudo apt install gcc-14 g++-14
+          sudo apt-get install build-essential subversion libx11-dev libxxf86vm-dev libxcursor-dev libxi-dev libxrandr-dev libxinerama-dev libegl-dev
+          sudo apt-get install libwayland-dev wayland-protocols libxkbcommon-dev libdbus-1-dev linux-libc-dev
+          sudo apt-get install gcc-14 g++-14
+
           sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100
           sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100
-
-      - name: ccache
-        uses: hendrikmuhs/ccache-action@v1.2
-        with:
-          key: ${{ runner.os }}-ccache-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-ccache-
-          max-size: 5G
-
-      - name: Zero ccache stats
-        run: ccache -z
 
       - name: Setup Git LFS
         run: |
@@ -64,12 +55,7 @@ jobs:
           curl -L -o assets/nodes/npr_node_groups.blend https://github.com/bb-yi/blender/raw/refs/heads/npr-port-5.1/assets/nodes/npr_node_groups.blend
 
       - name: Build Blender Release
-        run: make release ninja ccache
-
-      - name: ccache cleanup
-        run: |
-          ccache -s
-          ccache --cleanup
+        run: make release ninja
 
       - name: Package Release Asset
         run: |
@@ -110,17 +96,6 @@ jobs:
           echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
           echo "build_date=$(date +'%Y%m%d')" >> $GITHUB_OUTPUT
 
-      - name: ccache
-        uses: hendrikmuhs/ccache-action@v1.2
-        with:
-          key: ${{ runner.os }}-ccache-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-ccache-
-          max-size: 5G
-
-      - name: Zero ccache stats
-        run: ccache -z
-
       - name: Setup Git LFS
         run: |
           git config lfs.url "https://projects.blender.org/blender/blender.git/info/lfs"
@@ -136,12 +111,7 @@ jobs:
           curl -L -o assets/nodes/npr_node_groups.blend https://github.com/bb-yi/blender/raw/refs/heads/npr-port-5.1/assets/nodes/npr_node_groups.blend
 
       - name: Build Blender Release
-        run: make release ninja ccache
-
-      - name: ccache cleanup
-        run: |
-          ccache -s
-          ccache --cleanup
+        run: make release ninja
 
       - name: Package Release Asset
         run: |
