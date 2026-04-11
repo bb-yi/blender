@@ -6811,6 +6811,95 @@ static void def_sh_curvature(BlenderRNA * /*brna*/, StructRNA *srna)
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
 }
 
+static void def_sh_water_ripples(BlenderRNA * /*brna*/, StructRNA *srna)
+{
+  static const EnumPropertyItem prop_water_ripples_mode_items[] = {
+      {NODE_WATER_RIPPLES_DROPS, "DROPS", 0, "Drops", "Water droplets"},
+      {NODE_WATER_RIPPLES_RIPPLES, "RIPPLES", 0, "Ripples", "Continuous ripples"},
+      {NODE_WATER_RIPPLES_FLOW, "FLOW", 0, "Flow", "Flowing water"},
+      {NODE_WATER_RIPPLES_CAUSTIC, "CAUSTIC", 0, "Caustic", "Caustic effect"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+
+  PropertyRNA *prop;
+
+  prop = RNA_def_property(srna, "mode", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "custom1");
+  RNA_def_property_enum_items(prop, prop_water_ripples_mode_items);
+  RNA_def_property_ui_text(prop, "Mode", "Procedural water ripples mode");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_ShaderNode_socket_update");
+}
+
+static void def_sh_tex_hexagon(BlenderRNA *brna, StructRNA *srna)
+{
+  static const EnumPropertyItem prop_hexagon_coords_items[] = {
+      {SHD_HEXAGON_COORDS_XY,
+       "XY",
+       0,
+       "XY Position",
+       "Cell ID pattern and UV coordinates output XY values"},
+      {SHD_HEXAGON_COORDS_HEX,
+       "HEX",
+       0,
+       "Hex Position",
+       "Cell ID pattern and UV coordinates output HEX values"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  static const EnumPropertyItem prop_hexagon_value_items[] = {
+      {SHD_HEXAGON_VALUE_HEX, "HEX", 0, "Hexagons", "Value based on hexagon distance function"},
+      {SHD_HEXAGON_VALUE_SDF,
+       "SDF",
+       0,
+       "SDF Hexagons",
+       "Value based on sdf hexagon distance function"},
+      {SHD_HEXAGON_VALUE_DOT, "DOT", 0, "Dots", "Value based on coordinate length"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  static const EnumPropertyItem prop_hexagon_direction_items[] = {
+      {0, "HORIZONTAL", 0, "Horizontal", "Hexagons point horizontally"},
+      {1, "VERTICAL", 0, "Vertical", "Hexagons point vertically"},
+      {2,
+       "HORIZONTAL_TILED",
+       0,
+       "Horizontal Tiled",
+       "Hexagons point horizontally with an aspect ratio to fit hexagon into a square"},
+      {3,
+       "VERTICAL_TILED",
+       0,
+       "Vertical Tiled",
+       "Hexagons point vertically with an aspect ratio to fit hexagon into a square"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+
+  PropertyRNA *prop;
+
+  RNA_def_struct_sdna_from(srna, "NodeTexHexagon", "storage");
+  def_sh_tex(brna, srna);
+
+  prop = RNA_def_property(srna, "coord_mode", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "coord_mode");
+  RNA_def_property_enum_items(prop, prop_hexagon_coords_items);
+  RNA_def_property_ui_text(prop, "Coordinate Mode", "Output XY or hex coordinates");
+  RNA_def_property_update(prop, 0, "rna_ShaderNode_socket_update");
+
+  prop = RNA_def_property(srna, "value_mode", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "value_mode");
+  RNA_def_property_enum_items(prop, prop_hexagon_value_items);
+  RNA_def_property_ui_text(prop, "Value Mode", "Method for drawing the hexagon shape");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_ShaderNode_socket_update");
+
+  prop = RNA_def_property(srna, "direction", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "direction");
+  RNA_def_property_enum_items(prop, prop_hexagon_direction_items);
+  RNA_def_property_ui_text(prop, "Direction", "Direction of hexagon pattern");
+  RNA_def_property_update(prop, 0, "rna_Node_update");
+
+  prop = RNA_def_property(srna, "use_clamp", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "use_clamp", 1);
+  RNA_def_property_ui_text(prop, "Clamp", "Clamp the value output to 0..1");
+  RNA_def_property_update(prop, 0, "rna_Node_update");
+}
+
 static void def_sh_displacement(BlenderRNA * /*brna*/, StructRNA *srna)
 {
   static const EnumPropertyItem prop_space_items[] = {
@@ -11247,12 +11336,15 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("ShaderNode", "ShaderNodeSqueeze");
   define("ShaderNode", "ShaderNodeSubsurfaceScattering", def_sh_subsurface);
   define("ShaderNode", "ShaderNodeTangent", def_sh_tangent);
+  define("ShaderNode", "ShaderNodeTwirl");
+  define("ShaderNode", "ShaderNodeWaterRipples", def_sh_water_ripples);
   define("ShaderNode", "ShaderNodeTexBrick", def_sh_tex_brick);
   define("ShaderNode", "ShaderNodeTexChecker", def_sh_tex_checker);
   define("ShaderNode", "ShaderNodeTexCoord", def_sh_tex_coord);
   define("ShaderNode", "ShaderNodeTexEnvironment", def_sh_tex_environment);
   define("ShaderNode", "ShaderNodeTexGabor", def_sh_tex_gabor);
   define("ShaderNode", "ShaderNodeTexGradient", def_sh_tex_gradient);
+  define("ShaderNode", "ShaderNodeTexHexagon", def_sh_tex_hexagon);
   define("ShaderNode", "ShaderNodeTexIES", def_sh_tex_ies);
   define("ShaderNode", "ShaderNodeTexImage", def_sh_tex_image);
   define("ShaderNode", "ShaderNodeTexMagic", def_sh_tex_magic);

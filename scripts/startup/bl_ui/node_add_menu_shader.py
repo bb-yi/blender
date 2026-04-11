@@ -459,6 +459,7 @@ class NODE_MT_shader_node_texture_base(node_add_menu.NodeMenu):
         self.node_operator(layout, "ShaderNodeTexEnvironment")
         self.node_operator(layout, "ShaderNodeTexGabor")
         self.node_operator(layout, "ShaderNodeTexGradient")
+        self.node_operator(layout, "ShaderNodeTexHexagon")
         self.node_operator(
             layout,
             "ShaderNodeSdfPrimitive",
@@ -476,6 +477,7 @@ class NODE_MT_shader_node_texture_base(node_add_menu.NodeMenu):
         self.node_operator(layout, "ShaderNodeTexSky")
         self.node_operator(layout, "ShaderNodeTexVoronoi")
         self.node_operator(layout, "ShaderNodeTexWave")
+        self.node_operator(layout, "ShaderNodeWaterRipples")
         self.node_operator(layout, "ShaderNodeTexWhiteNoise")
 
         self.draw_assets_for_catalog(layout, self.bl_label)
@@ -502,6 +504,7 @@ class NODE_MT_shader_node_vector_base(node_add_menu.NodeMenu):
         self.node_operator(layout, "ShaderNodeMapping")
         self.node_operator(layout, "ShaderNodeNormal")
         self.node_operator(layout, "ShaderNodeRadialTiling")
+        self.node_operator(layout, "ShaderNodeTwirl")
         self.node_operator(
             layout,
             "ShaderNodeSdfVectorOp",

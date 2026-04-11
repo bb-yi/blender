@@ -115,12 +115,15 @@ set(SRC
   nodes/node_shader_squeeze.cc
   nodes/node_shader_subsurface_scattering.cc
   nodes/node_shader_tangent.cc
+  nodes/node_shader_twirl.cc
+  nodes/node_shader_water_ripples.cc
   nodes/node_shader_tex_brick.cc
   nodes/node_shader_tex_checker.cc
   nodes/node_shader_tex_coord.cc
   nodes/node_shader_tex_environment.cc
   nodes/node_shader_tex_gabor.cc
   nodes/node_shader_tex_gradient.cc
+  nodes/node_shader_tex_hexagon.cc
   nodes/node_shader_tex_image.cc
   nodes/node_shader_tex_magic.cc
   nodes/node_shader_tex_noise.cc
