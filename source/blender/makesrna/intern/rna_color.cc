@@ -237,7 +237,8 @@ static std::optional<std::string> rna_ColorRamp_path(const PointerRNA *ptr)
         bNode *node;
 
         for (node = static_cast<bNode *>(ntree->nodes.first); node; node = node->next) {
-          if (ELEM(node->type_legacy, SH_NODE_VALTORGB, TEX_NODE_VALTORGB)) {
+          if (ELEM(node->type_legacy, SH_NODE_VALTORGB, TEX_NODE_VALTORGB))
+          {
             if (node->storage == ptr->data) {
               /* all node color ramp properties called 'color_ramp'
                * prepend path from ID to the node
@@ -305,7 +306,8 @@ static std::optional<std::string> rna_ColorRampElement_path(const PointerRNA *pt
         bNode *node;
 
         for (node = static_cast<bNode *>(ntree->nodes.first); node; node = node->next) {
-          if (ELEM(node->type_legacy, SH_NODE_VALTORGB, TEX_NODE_VALTORGB)) {
+          if (ELEM(node->type_legacy, SH_NODE_VALTORGB, TEX_NODE_VALTORGB))
+          {
             ramp_ptr = RNA_pointer_create_discrete(id, RNA_ColorRamp, node->storage);
             COLRAMP_GETPATH;
           }
@@ -361,7 +363,8 @@ static void rna_ColorRamp_update(Main *bmain, Scene * /*scene*/, PointerRNA *ptr
         bNode *node;
 
         for (node = static_cast<bNode *>(ntree->nodes.first); node; node = node->next) {
-          if (ELEM(node->type_legacy, SH_NODE_VALTORGB, TEX_NODE_VALTORGB)) {
+          if (ELEM(node->type_legacy, SH_NODE_VALTORGB, TEX_NODE_VALTORGB))
+          {
             BKE_ntree_update_tag_node_property(ntree, node);
             BKE_main_ensure_invariants(*bmain, ntree->id);
           }
@@ -1199,6 +1202,7 @@ static void rna_def_color_ramp(BlenderRNA *brna)
       {COLBAND_BLEND_RGB, "RGB", 0, "RGB", ""},
       {COLBAND_BLEND_HSV, "HSV", 0, "HSV", ""},
       {COLBAND_BLEND_HSL, "HSL", 0, "HSL", ""},
+      {COLBAND_BLEND_OKLAB, "OKLAB", 0, "OKLab", ""},
       {0, nullptr, 0, nullptr, nullptr},
   };
 

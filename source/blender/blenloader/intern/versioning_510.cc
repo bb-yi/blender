@@ -19,6 +19,7 @@
 #include "DNA_screen_types.h"
 #include "DNA_sequence_types.h"
 #include "DNA_scene_types.h"
+#include "DNA_texture_types.h"
 #include "DNA_windowmanager_types.h"
 #include "DNA_workspace_types.h"
 
@@ -965,6 +966,25 @@ void blo_do_versions_510(FileData * /*fd*/, Library * /*lib*/, Main *bmain)
                  node.custom1 == SHD_SCENE_SOURCE_SHADOW)
         {
           node.custom1 = SHD_SCENE_SOURCE_COLOR;
+        }
+      }
+    }
+    FOREACH_NODETREE_END;
+  }
+
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 37)) {
+    FOREACH_NODETREE_BEGIN (bmain, ntree, id) {
+      if (ntree->type != NTREE_SHADER) {
+        continue;
+      }
+      for (bNode &node : ntree->nodes) {
+        if (node.type_legacy == SH_NODE_OKLAB_COLOR_RAMP) {
+          node.type_legacy = SH_NODE_VALTORGB;
+          STRNCPY(node.idname, "ShaderNodeValToRGB");
+          if (node.storage) {
+            ColorBand *coba = static_cast<ColorBand *>(node.storage);
+            coba->color_mode = COLBAND_BLEND_OKLAB;
+          }
         }
       }
     }

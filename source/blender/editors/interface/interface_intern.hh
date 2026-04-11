@@ -476,6 +476,7 @@ struct ButtonHSVCube : public Button {
 /** Derived struct for #ButtonType::ColorBand. */
 struct ButtonColorBand : public Button {
   ColorBand *edit_coba = nullptr;
+  bool use_oklab = false;
 };
 
 /** Derived struct for #ButtonType::CurveProfile. */

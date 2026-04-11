@@ -8,6 +8,8 @@
 
 #include "DNA_texture_types.h"
 
+#include "MEM_guardedalloc.h"
+
 #include "BKE_colorband.hh"
 
 #include "BLI_color.hh"
@@ -54,6 +56,67 @@ static int gpu_shader_valtorgb(GPUMaterial *mat,
   /* Common / easy case optimization. */
   if (coba->tot == 1) {
     return GPU_link(mat, "set_rgba", GPU_uniform(&coba->data[0].r), &out[0].link);
+  }
+  if (coba->color_mode == COLBAND_BLEND_OKLAB) {
+    if (coba->tot == 2) {
+      float mul_bias[2];
+      switch (coba->ipotype) {
+        case COLBAND_INTERP_LINEAR:
+          mul_bias[0] = 1.0f / (coba->data[1].pos - coba->data[0].pos);
+          mul_bias[1] = -mul_bias[0] * coba->data[0].pos;
+          return GPU_stack_link(mat,
+                                node,
+                                "oklab_valtorgb_opti_linear",
+                                in,
+                                out,
+                                GPU_uniform(mul_bias),
+                                GPU_uniform(&coba->data[0].r),
+                                GPU_uniform(&coba->data[1].r));
+        case COLBAND_INTERP_CONSTANT:
+          mul_bias[1] = max_ff(coba->data[0].pos, coba->data[1].pos);
+          return GPU_stack_link(mat,
+                                node,
+                                "oklab_valtorgb_opti_constant",
+                                in,
+                                out,
+                                GPU_uniform(&mul_bias[1]),
+                                GPU_uniform(&coba->data[0].r),
+                                GPU_uniform(&coba->data[1].r));
+        case COLBAND_INTERP_EASE:
+          mul_bias[0] = 1.0f / (coba->data[1].pos - coba->data[0].pos);
+          mul_bias[1] = -mul_bias[0] * coba->data[0].pos;
+          return GPU_stack_link(mat,
+                                node,
+                                "oklab_valtorgb_opti_ease",
+                                in,
+                                out,
+                                GPU_uniform(mul_bias),
+                                GPU_uniform(&coba->data[0].r),
+                                GPU_uniform(&coba->data[1].r));
+        default:
+          break;
+      }
+    }
+
+    size = CM_TABLE + 1;
+    array = static_cast<float *>(
+        MEM_mallocN(sizeof(float) * size * 4, "OKLab Colorband Array"));
+    for (int i = 0; i < size; i++) {
+      const float pos = float(i) / float(CM_TABLE);
+      float color[4];
+      BKE_colorband_evaluate_oklab(coba, pos, color);
+      array[i * 4 + 0] = color[0];
+      array[i * 4 + 1] = color[1];
+      array[i * 4 + 2] = color[2];
+      array[i * 4 + 3] = color[3];
+    }
+
+    GPUNodeLink *tex = GPU_color_band(mat, size, array, &layer);
+    if (coba->ipotype == COLBAND_INTERP_CONSTANT) {
+      return GPU_stack_link(mat, node, "valtorgb_nearest", in, out, tex, GPU_constant(&layer));
+    }
+
+    return GPU_stack_link(mat, node, "oklab_valtorgb", in, out, tex, GPU_constant(&layer));
   }
   if ((coba->tot == 2) && (coba->color_mode == COLBAND_BLEND_RGB)) {
     float mul_bias[2];
@@ -135,7 +198,12 @@ class ColorBandFunction : public mf::MultiFunction {
 
     mask.foreach_index([&](const int64_t i) {
       ColorGeometry4f color;
-      BKE_colorband_evaluate(&color_band_, values[i], color);
+      if (color_band_.color_mode == COLBAND_BLEND_OKLAB) {
+        BKE_colorband_evaluate_oklab(&color_band_, values[i], color);
+      }
+      else {
+        BKE_colorband_evaluate(&color_band_, values[i], color);
+      }
       colors[i] = color;
       alphas[i] = color.a;
     });

@@ -23,6 +23,7 @@ void BKE_colorband_init_from_table_rgba(ColorBand *coba,
                                         bool filter_samples);
 ColorBand *BKE_colorband_add(bool rangetype);
 bool BKE_colorband_evaluate(const ColorBand *coba, float in, float out[4]);
+bool BKE_colorband_evaluate_oklab(const ColorBand *coba, float in, float out[4]);
 void BKE_colorband_evaluate_table_rgba(const ColorBand *coba, float **array, int *size);
 CBData *BKE_colorband_element_add(ColorBand *coba, float position);
 bool BKE_colorband_element_remove(ColorBand *coba, int index);
