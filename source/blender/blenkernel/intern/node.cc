@@ -3214,7 +3214,7 @@ std::optional<StringRefNull> node_static_socket_type(const int type,
           case PROP_EULER:
             return "NodeSocketVectorEuler2D";
           case PROP_XYZ:
-            return "NodeSocketVectorXYZ2D";
+            return "NodeSocketVector2D";
           case PROP_NONE:
           default:
             return "NodeSocketVector2D";
@@ -3383,7 +3383,7 @@ std::optional<StringRefNull> node_static_socket_interface_type_new(
           case PROP_EULER:
             return "NodeTreeInterfaceSocketVectorEuler2D";
           case PROP_XYZ:
-            return "NodeTreeInterfaceSocketVectorXYZ2D";
+            return "NodeTreeInterfaceSocketVector2D";
           case PROP_NONE:
           default:
             return "NodeTreeInterfaceSocketVector2D";

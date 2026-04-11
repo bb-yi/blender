@@ -195,7 +195,8 @@ static const bNodeSocketStaticTypeInfo node_socket_subtypes[] = {
      SOCK_VECTOR,
      PROP_ACCELERATION},
     {"NodeSocketVectorEuler2D", "NodeTreeInterfaceSocketVectorEuler2D", SOCK_VECTOR, PROP_EULER},
-    {"NodeSocketVectorXYZ2D", "NodeTreeInterfaceSocketVectorXYZ2D", SOCK_VECTOR, PROP_XYZ},
+    /* Legacy alias: "XYZ" is a 3D subtype, so 2D sockets fall back to the generic 2D vector. */
+    {"NodeSocketVectorXYZ2D", "NodeTreeInterfaceSocketVector2D", SOCK_VECTOR, PROP_NONE},
 
     {"NodeSocketVector4D", "NodeTreeInterfaceSocketVector4D", SOCK_VECTOR, PROP_NONE},
     {"NodeSocketVectorFactor4D",
