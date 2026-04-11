@@ -84,7 +84,7 @@ static int gpu_shader_bump(GPUMaterial *mat,
 
   const float filter_width = in[SOCK_FILTER_WIDTH_ID].vec[0];
   const char *height_function = GPU_material_split_sub_function(
-      mat, GPU_FLOAT, &in[SOCK_HEIGHT_ID].link);
+      mat, GPU_FLOAT, &in[SOCK_HEIGHT_ID].link, {});
 
   /* TODO (Miguel Pozo):
    * Currently, this doesn't compute the actual differentials, just the height at dX and dY

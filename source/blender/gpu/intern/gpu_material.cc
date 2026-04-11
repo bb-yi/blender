@@ -100,7 +100,6 @@ struct GPUMaterial {
   Vector<Object *> filter_mask_objects;
   Vector<GPUMaterialGeneratedSource> generated_sources;
   Vector<std::string> closure_uv_source_stack;
-  Vector<std::string> closure_helper_dependency_stack;
 
   bool has_surface_output = false;
   bool has_volume_output = false;
@@ -581,30 +580,6 @@ StringRefNull GPU_material_closure_uv_source_get(const GPUMaterial *material)
   return material->closure_uv_source_stack.last();
 }
 
-void GPU_material_closure_helper_dependency_push(GPUMaterial *material, StringRefNull dependency)
-{
-  if (material == nullptr) {
-    return;
-  }
-  material->closure_helper_dependency_stack.append(std::string(dependency));
-}
-
-void GPU_material_closure_helper_dependency_pop(GPUMaterial *material)
-{
-  if (material == nullptr || material->closure_helper_dependency_stack.is_empty()) {
-    return;
-  }
-  material->closure_helper_dependency_stack.pop_last();
-}
-
-StringRefNull GPU_material_closure_helper_dependency_get(const GPUMaterial *material)
-{
-  if (material == nullptr || material->closure_helper_dependency_stack.is_empty()) {
-    return {};
-  }
-  return material->closure_helper_dependency_stack.last();
-}
-
 /* Resources */
 
 gpu::Texture **gpu_material_sky_texture_layer_set(
@@ -770,7 +745,8 @@ void GPU_material_add_output_link_composite(GPUMaterial *material, GPUNodeLink *
 
 char *GPU_material_split_sub_function(GPUMaterial *material,
                                       GPUType return_type,
-                                      GPUNodeLink **link)
+                                      GPUNodeLink **link,
+                                      StringRefNull dependency_name)
 {
   /* Force cast to return type. */
   switch (return_type) {
@@ -792,7 +768,6 @@ char *GPU_material_split_sub_function(GPUMaterial *material,
   func_link->outlink = *link;
   func_link->return_type = return_type;
   SNPRINTF(func_link->name, "ntree_fn%d", material->generated_function_len++);
-  const StringRefNull dependency_name = GPU_material_closure_helper_dependency_get(material);
   if (!dependency_name.is_empty()) {
     BLI_strncpy(func_link->dependency_name, dependency_name.c_str(), sizeof(func_link->dependency_name));
   }

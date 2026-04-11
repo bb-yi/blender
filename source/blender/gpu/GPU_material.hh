@@ -451,9 +451,6 @@ GPUNodeLink *GPU_differentiate_float_function(const char *function_name, const f
 void GPU_material_closure_uv_source_push(GPUMaterial *material, StringRefNull source);
 void GPU_material_closure_uv_source_pop(GPUMaterial *material);
 StringRefNull GPU_material_closure_uv_source_get(const GPUMaterial *material);
-void GPU_material_closure_helper_dependency_push(GPUMaterial *material, StringRefNull dependency);
-void GPU_material_closure_helper_dependency_pop(GPUMaterial *material);
-StringRefNull GPU_material_closure_helper_dependency_get(const GPUMaterial *material);
 
 bool GPU_link(GPUMaterial *mat, const char *name, ...);
 bool GPU_stack_link(GPUMaterial *mat,
@@ -500,7 +497,8 @@ void GPU_material_add_output_link_composite(GPUMaterial *material, GPUNodeLink *
  */
 char *GPU_material_split_sub_function(GPUMaterial *material,
                                       GPUType return_type,
-                                      GPUNodeLink **link);
+                                      GPUNodeLink **link,
+                                      StringRefNull dependency_name);
 
 void GPU_material_flag_set(GPUMaterial *mat, eGPUMaterialFlag flag);
 eGPUMaterialFlag GPU_material_flag(const GPUMaterial *mat);
