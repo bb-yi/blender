@@ -242,16 +242,6 @@ static void node_shader_buts_filter_object_mask(ui::Layout &layout, bContext *C,
   }
 }
 
-static void append_mask_object(GPUMaterial *mat, Object *object, int &r_count)
-{
-  if (!filter_mask_object_supported(object)) {
-    return;
-  }
-  if (GPU_material_filter_object_info_ensure(mat, object) != -1) {
-    r_count++;
-  }
-}
-
 static int node_shader_gpu_filter_object_mask(GPUMaterial *mat,
                                               bNode *node,
                                               bNodeExecData * /*execdata*/,
