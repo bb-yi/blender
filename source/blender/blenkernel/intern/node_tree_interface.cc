@@ -279,7 +279,6 @@ static void socket_data_free(bNodeTreeInterfaceSocket &socket, const bool do_id_
       socket_data_id_user_decrement(get_socket_data_as<SocketDataType>(socket));
     }
     socket_data_free_impl(&get_socket_data_as<SocketDataType>(socket), do_id_user);
-    socket.socket_data = nullptr;
   });
 }
 
@@ -325,6 +324,7 @@ static void socket_data_copy_ptr(bNodeTreeInterfaceSocket &dst,
   socket_data_to_static_type(dst.socket_type, [&]<typename SocketDataType>() {
     if (dst.socket_data != nullptr) {
       socket_data_free(dst, true);
+      dst.socket_data = nullptr;
     }
 
     if (src_socket_data) {
@@ -899,6 +899,7 @@ bool bNodeTreeInterfaceSocket::set_socket_type(const StringRef new_socket_type)
 
   if (this->socket_data != nullptr) {
     socket_types::socket_data_free(*this, true);
+    this->socket_data = nullptr;
   }
   MEM_SAFE_DELETE(this->socket_type);
 
@@ -957,6 +958,7 @@ void bNodeTreeInterfaceSocket::init_from_socket_instance(const bNodeSocket *sock
 
   if (this->socket_data != nullptr) {
     socket_types::socket_data_free(*this, true);
+    this->socket_data = nullptr;
   }
   MEM_SAFE_DELETE(this->socket_type);
   if (socket->flag & SOCK_HIDE_VALUE) {

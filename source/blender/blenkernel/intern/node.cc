@@ -2930,7 +2930,6 @@ static void node_socket_free_default_value(bNodeSocket *sock, const bool do_id_u
       MEM_delete_void(sock->default_value);
       break;
   }
-  sock->default_value = nullptr;
 }
 
 /** \return True if the socket had an ID default value. */
@@ -3027,6 +3026,7 @@ void node_modify_socket_type(bNodeTree &ntree,
        * isn't removed. This assumes that the default value is stored in the same format for all
        * socket types with the same #eNodeSocketDatatype. */
       node_socket_free_default_value(&sock, true);
+      sock.default_value = nullptr;
     }
     else {
       /* Update the socket subtype when the storage isn't freed and recreated. */

@@ -533,6 +533,13 @@ void rna_NodeSocketStandard_float_range(
     PointerRNA *ptr, float *min, float *max, float *softmin, float *softmax)
 {
   bNodeSocket *sock = static_cast<bNodeSocket *>(ptr->data);
+  if (sock == nullptr || sock->typeinfo == nullptr || sock->default_value == nullptr) {
+    *min = -FLT_MAX;
+    *max = FLT_MAX;
+    *softmin = 0.0f;
+    *softmax = 0.0f;
+    return;
+  }
   bNodeSocketValueFloat *dval = static_cast<bNodeSocketValueFloat *>(sock->default_value);
   int subtype = sock->typeinfo->subtype;
 
@@ -550,6 +557,13 @@ void rna_NodeSocketStandard_int_range(
     PointerRNA *ptr, int *min, int *max, int *softmin, int *softmax)
 {
   bNodeSocket *sock = static_cast<bNodeSocket *>(ptr->data);
+  if (sock == nullptr || sock->typeinfo == nullptr || sock->default_value == nullptr) {
+    *min = INT_MIN;
+    *max = INT_MAX;
+    *softmin = 0;
+    *softmax = 0;
+    return;
+  }
   bNodeSocketValueInt *dval = static_cast<bNodeSocketValueInt *>(sock->default_value);
   int subtype = sock->typeinfo->subtype;
 
@@ -567,6 +581,13 @@ void rna_NodeSocketStandard_vector_range(
     PointerRNA *ptr, float *min, float *max, float *softmin, float *softmax)
 {
   bNodeSocket *sock = static_cast<bNodeSocket *>(ptr->data);
+  if (sock == nullptr || sock->default_value == nullptr) {
+    *min = -FLT_MAX;
+    *max = FLT_MAX;
+    *softmin = 0.0f;
+    *softmax = 0.0f;
+    return;
+  }
   bNodeSocketValueVector *dval = static_cast<bNodeSocketValueVector *>(sock->default_value);
 
   if (dval->max < dval->min) {
