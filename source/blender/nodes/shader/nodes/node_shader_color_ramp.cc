@@ -100,7 +100,7 @@ static int gpu_shader_valtorgb(GPUMaterial *mat,
 
     size = CM_TABLE + 1;
     array = static_cast<float *>(
-        MEM_mallocN(sizeof(float) * size * 4, "OKLab Colorband Array"));
+        mem_guarded::internal::mem_mallocN(sizeof(float) * size * 4, "OKLab Colorband Array"));
     for (int i = 0; i < size; i++) {
       const float pos = float(i) / float(CM_TABLE);
       float color[4];
