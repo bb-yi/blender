@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include "DNA_material_types.h"
+
 /** \file
  * \ingroup bke
  * \brief General operations, lookup, etc. for materials.
@@ -126,6 +128,11 @@ int BKE_object_material_ensure(Main *bmain, Object *ob, Material *material);
 
 Material *BKE_gpencil_material(Object *ob, short act);
 MaterialGPencilStyle *BKE_gpencil_material_settings(Object *ob, short act);
+
+inline eMaterialCullMethod BKE_material_surface_cull_method_get(const Material *material)
+{
+  return material != nullptr ? material_surface_cull_method_get(*material) : MA_SURFACE_CULL_NONE;
+}
 
 void BKE_texpaint_slot_refresh_cache(Scene *scene, Material *ma, const Object *ob);
 void BKE_texpaint_slots_refresh_object(Scene *scene, Object *ob);

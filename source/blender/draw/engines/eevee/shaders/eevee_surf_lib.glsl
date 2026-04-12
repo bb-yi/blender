@@ -16,6 +16,21 @@ SHADER_LIBRARY_CREATE_INFO(eevee_global_ubo)
 #include "gpu_shader_math_base_lib.glsl"
 #include "gpu_shader_math_vector_safe_lib.glsl"
 
+#define MAT_SURFACE_CULL_NONE 0
+#define MAT_SURFACE_CULL_BACK 1
+#define MAT_SURFACE_CULL_FRONT 2
+
+void material_surface_cull_discard()
+{
+#if defined(GPU_FRAGMENT_SHADER) && defined(MAT_SURFACE_CULL)
+  if ((surface_cull_mode == MAT_SURFACE_CULL_BACK && !gl_FrontFacing) ||
+      (surface_cull_mode == MAT_SURFACE_CULL_FRONT && gl_FrontFacing))
+  {
+    gpu_discard_fragment();
+  }
+#endif
+}
+
 #if defined(USE_BARYCENTRICS) && defined(GPU_FRAGMENT_SHADER) && defined(MAT_GEOM_MESH)
 float3 barycentric_distances_get()
 {

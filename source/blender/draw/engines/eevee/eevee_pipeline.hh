@@ -189,7 +189,7 @@ class ScreenSpaceShadowFilter {
  * \{ */
 
 class Prepass : public PassMain {
-  PassMain::Sub *prepass_subpasses[2 /*double sided*/][2 /*moving*/][2 /*write id*/] = {
+  PassMain::Sub *prepass_subpasses[3 /*cull mode*/][2 /*moving*/][2 /*write id*/] = {
       {{nullptr}}};
 
  public:
@@ -217,6 +217,7 @@ class ForwardPipeline {
 
   PassMain opaque_ps_ = {"Shading"};
   PassMain::Sub *opaque_single_sided_ps_ = nullptr;
+  PassMain::Sub *opaque_front_cull_ps_ = nullptr;
   PassMain::Sub *opaque_double_sided_ps_ = nullptr;
 
   PassSortable transparent_ps_ = {"Forward.Transparent"};
@@ -287,12 +288,15 @@ struct DeferredLayerBase {
   /* Shaders that use the ClosureToRGBA node needs to be rendered first.
    * Consider they hybrid forward and deferred. */
   PassMain::Sub *gbuffer_single_sided_hybrid_ps_ = nullptr;
+  PassMain::Sub *gbuffer_front_cull_hybrid_ps_ = nullptr;
   PassMain::Sub *gbuffer_double_sided_hybrid_ps_ = nullptr;
   PassMain::Sub *gbuffer_single_sided_ps_ = nullptr;
+  PassMain::Sub *gbuffer_front_cull_ps_ = nullptr;
   PassMain::Sub *gbuffer_double_sided_ps_ = nullptr;
 
   PassMain npr_ps_ = {"NPR"};
   PassMain::Sub *npr_single_sided_ps_ = nullptr;
+  PassMain::Sub *npr_front_cull_ps_ = nullptr;
   PassMain::Sub *npr_double_sided_ps_ = nullptr;
 
   gpu::Texture *radiance_behind_tx_ = nullptr;

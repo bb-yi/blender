@@ -41,7 +41,9 @@
 GPU_SHADER_CREATE_INFO(eevee_surf_deferred_base)
 DEFINE("MAT_DEFERRED")
 DEFINE("GBUFFER_WRITE")
+DEFINE("MAT_SURFACE_CULL")
 TYPEDEF_SOURCE("eevee_render_texture_shared.hh")
+PUSH_CONSTANT(int, surface_cull_mode)
 /* NOTE: This removes the possibility of using gl_FragDepth. */
 EARLY_FRAGMENT_TEST(true)
 /* Direct output. (Emissive, Holdout) */
@@ -77,9 +79,11 @@ GPU_SHADER_CREATE_END()
 
 GPU_SHADER_CREATE_INFO(eevee_surf_npr)
 DEFINE("NPR_SHADER")
+DEFINE("MAT_SURFACE_CULL")
 BUILTINS(BuiltinBits::NO_PREPROCESSOR)
 TYPEDEF_SOURCE("eevee_render_texture_shared.hh")
 EARLY_FRAGMENT_TEST(true)
+PUSH_CONSTANT(int, surface_cull_mode)
 FRAGMENT_OUT(0, float4, out_radiance)
 SAMPLER(NPR_RADIANCE_TEX_SLOT, sampler2D, radiance_tx)
 SAMPLER(DIRECT_RADIANCE_NPR_TX_SLOT_1 + 0, usampler2D, direct_radiance_1_tx)

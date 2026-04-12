@@ -30,6 +30,7 @@ float4 closure_to_rgba(Closure cl)
 
 void main()
 {
+  material_surface_cull_discard();
   init_globals();
 
   /* TODO(fclem): Remove random sampling for capture and accumulate color. */

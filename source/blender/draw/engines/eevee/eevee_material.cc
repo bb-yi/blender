@@ -383,6 +383,20 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
       /* Create a sub for this material as `shader_sub` is for sharing shader between materials. */
       matpass.sub_pass = &shader_sub->sub(GPU_material_get_name(matpass.gpumat));
       matpass.sub_pass->material_set(*inst_.manager, matpass.gpumat, true);
+      if (ELEM(pipeline_type,
+               MAT_PIPE_PREPASS_DEFERRED,
+               MAT_PIPE_PREPASS_DEFERRED_VELOCITY,
+               MAT_PIPE_PREPASS_FORWARD,
+               MAT_PIPE_PREPASS_FORWARD_VELOCITY,
+               MAT_PIPE_PREPASS_PLANAR,
+               MAT_PIPE_DEFERRED,
+               MAT_PIPE_DEFERRED_NPR,
+               MAT_PIPE_FORWARD,
+               MAT_PIPE_CAPTURE))
+      {
+        matpass.sub_pass->push_constant(
+            "surface_cull_mode", int(material_surface_cull_method_get(*blender_mat)));
+      }
       if (pipeline_type == MAT_PIPE_DEFERRED_NPR) {
         matpass.sub_pass->bind_resources(inst_.gbuffer);
         matpass.sub_pass->bind_resources(inst_.uniform_data);

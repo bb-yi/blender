@@ -297,6 +297,33 @@ static void rna_Material_render_method_set(PointerRNA *ptr, int new_render_metho
       break;
   }
 }
+
+static int rna_Material_surface_cull_method_get(PointerRNA *ptr)
+{
+  Material *material = id_cast<Material *>(ptr->owner_id);
+  return BKE_material_surface_cull_method_get(material);
+}
+
+static void rna_Material_surface_cull_method_set(PointerRNA *ptr, int new_value)
+{
+  Material *material = id_cast<Material *>(ptr->owner_id);
+  material->surface_cull_method = char(new_value);
+  SET_FLAG_FROM_TEST(material->blend_flag, new_value == MA_SURFACE_CULL_BACK, MA_BL_CULL_BACKFACE);
+}
+
+static bool rna_Material_use_backface_culling_get(PointerRNA *ptr)
+{
+  Material *material = id_cast<Material *>(ptr->owner_id);
+  return BKE_material_surface_cull_method_get(material) == MA_SURFACE_CULL_BACK;
+}
+
+static void rna_Material_use_backface_culling_set(PointerRNA *ptr, bool new_value)
+{
+  Material *material = id_cast<Material *>(ptr->owner_id);
+  material->surface_cull_method = new_value ? MA_SURFACE_CULL_BACK : MA_SURFACE_CULL_NONE;
+  SET_FLAG_FROM_TEST(material->blend_flag, new_value, MA_BL_CULL_BACKFACE);
+}
+
 static void rna_Material_transparent_shadow_set(PointerRNA *ptr, bool new_value)
 {
   Material *material = id_cast<Material *>(ptr->owner_id);
@@ -971,6 +998,12 @@ void RNA_def_material(BlenderRNA *brna)
        "known as forward rendering."},
       {0, nullptr, 0, nullptr, nullptr},
   };
+  static const EnumPropertyItem prop_eevee_surface_cull_method_items[] = {
+      {MA_SURFACE_CULL_NONE, "NONE", 0, "None", "Render both front and back faces"},
+      {MA_SURFACE_CULL_BACK, "BACK", 0, "Back", "Hide back-facing faces"},
+      {MA_SURFACE_CULL_FRONT, "FRONT", 0, "Front", "Hide front-facing faces"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
 
   static const EnumPropertyItem prop_eevee_domain_items[] = {
       {MA_EEVEE_DOMAIN_SURFACE,
@@ -1072,8 +1105,16 @@ void RNA_def_material(BlenderRNA *brna)
   RNA_def_property_update(prop, 0, "rna_Material_draw_update");
 #  endif
 
+  prop = RNA_def_property(srna, "surface_cull_method", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, prop_eevee_surface_cull_method_items);
+  RNA_def_property_enum_funcs(
+      prop, "rna_Material_surface_cull_method_get", "rna_Material_surface_cull_method_set", nullptr);
+  RNA_def_property_ui_text(prop, "Face Culling", "Control which face orientation is hidden");
+  RNA_def_property_update(prop, 0, "rna_Material_draw_update");
+
   prop = RNA_def_property(srna, "use_backface_culling", PROP_BOOLEAN, PROP_NONE);
-  RNA_def_property_boolean_sdna(prop, nullptr, "blend_flag", MA_BL_CULL_BACKFACE);
+  RNA_def_property_boolean_funcs(
+      prop, "rna_Material_use_backface_culling_get", "rna_Material_use_backface_culling_set");
   RNA_def_property_ui_text(
       prop, "Backface Culling", "Use back face culling to hide the back side of faces");
   RNA_def_property_update(prop, 0, "rna_Material_draw_update");

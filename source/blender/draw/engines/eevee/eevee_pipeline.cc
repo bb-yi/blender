@@ -23,6 +23,42 @@
 
 namespace blender::eevee {
 
+static eMaterialCullMethod material_surface_cull_method(const blender::Material *material)
+{
+  return material != nullptr ? blender::material_surface_cull_method_get(*material) :
+                               MA_SURFACE_CULL_NONE;
+}
+
+static DRWState material_surface_cull_state(const eMaterialCullMethod cull_method)
+{
+  switch (cull_method) {
+    case MA_SURFACE_CULL_BACK:
+      return DRW_STATE_CULL_BACK;
+    case MA_SURFACE_CULL_FRONT:
+      return DRW_STATE_CULL_FRONT;
+    case MA_SURFACE_CULL_NONE:
+    default:
+      return DRW_STATE_NO_DRAW;
+  }
+}
+
+template<typename PassType>
+static PassType *material_surface_cull_pass_get(PassType *double_sided_ps,
+                                                PassType *back_cull_ps,
+                                                PassType *front_cull_ps,
+                                                const blender::Material *material)
+{
+  switch (material_surface_cull_method(material)) {
+    case MA_SURFACE_CULL_BACK:
+      return back_cull_ps;
+    case MA_SURFACE_CULL_FRONT:
+      return front_cull_ps;
+    case MA_SURFACE_CULL_NONE:
+    default:
+      return double_sided_ps;
+  }
+}
+
 /* -------------------------------------------------------------------- */
 /** \name World Pipeline
  *
@@ -371,19 +407,21 @@ void Prepass::setup_subpasses(DRWState common_state)
    * The write will be optimized out if the attachment is empty. */
   common_state |= DRW_STATE_WRITE_COLOR;
 
-  static constexpr const char *subpass_names[2 /*double sided*/][2 /*moving*/][2 /*write id*/] = {
-      {{"SingleSided.Static.NoID", "SingleSided.Static.ID"},
-       {"SingleSided.Moving.NoID", "SingleSided.Moving.ID"}},
+  static constexpr const char *subpass_names[3 /*cull mode*/][2 /*moving*/][2 /*write id*/] = {
       {{"DoubleSided.Static.NoID", "DoubleSided.Static.ID"},
-       {"DoubleSided.Moving.NoID", "DoubleSided.Moving.ID"}}};
+       {"DoubleSided.Moving.NoID", "DoubleSided.Moving.ID"}},
+      {{"BackCull.Static.NoID", "BackCull.Static.ID"},
+       {"BackCull.Moving.NoID", "BackCull.Moving.ID"}},
+      {{"FrontCull.Static.NoID", "FrontCull.Static.ID"},
+       {"FrontCull.Moving.NoID", "FrontCull.Moving.ID"}}};
 
-  for (bool double_sided : {false, true}) {
+  for (int cull_mode = MA_SURFACE_CULL_NONE; cull_mode <= MA_SURFACE_CULL_FRONT; cull_mode++) {
     for (bool moving : {false, true}) {
       for (bool write_id : {false, true}) {
-        PassMain::Sub *&subpass = prepass_subpasses[double_sided][moving][write_id];
-        subpass = &this->sub(subpass_names[double_sided][moving][write_id]);
+        PassMain::Sub *&subpass = prepass_subpasses[cull_mode][moving][write_id];
+        subpass = &this->sub(subpass_names[cull_mode][moving][write_id]);
         subpass->state_set(common_state |
-                           (double_sided ? DRW_STATE_NO_DRAW : DRW_STATE_CULL_BACK));
+                           material_surface_cull_state(eMaterialCullMethod(cull_mode)));
         subpass->subpass_transition(GPU_ATTACHMENT_WRITE,
                                     {GPU_ATTACHMENT_WRITE, /* normal */
                                      write_id ? GPU_ATTACHMENT_WRITE : GPU_ATTACHMENT_IGNORE,
@@ -398,9 +436,9 @@ PassMain::Sub *Prepass::add(blender::Material *blender_mat,
                             bool has_motion,
                             bool force_write_id)
 {
-  bool double_sided = !(blender_mat->blend_flag & MA_BL_CULL_BACKFACE);
+  int cull_mode = material_surface_cull_method(blender_mat);
   bool write_id = force_write_id || GPU_material_flag_get(gpumat, GPU_MATFLAG_RAYCAST);
-  PassMain::Sub *pass = prepass_subpasses[double_sided][has_motion][write_id];
+  PassMain::Sub *pass = prepass_subpasses[cull_mode][has_motion][write_id];
   return &pass->sub(GPU_material_get_name(gpumat));
 }
 
@@ -456,9 +494,13 @@ void ForwardPipeline::sync()
       opaque_ps_.bind_resources(inst_.sphere_probes);
     }
 
-    opaque_single_sided_ps_ = &opaque_ps_.sub("SingleSided");
+    opaque_single_sided_ps_ = &opaque_ps_.sub("BackCull");
     opaque_single_sided_ps_->state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
                                        DRW_STATE_DEPTH_EQUAL | DRW_STATE_CULL_BACK);
+
+    opaque_front_cull_ps_ = &opaque_ps_.sub("FrontCull");
+    opaque_front_cull_ps_->state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
+                                     DRW_STATE_DEPTH_EQUAL | DRW_STATE_CULL_FRONT);
 
     opaque_double_sided_ps_ = &opaque_ps_.sub("DoubleSided");
     opaque_double_sided_ps_->state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
@@ -535,8 +577,8 @@ PassMain::Sub *ForwardPipeline::material_opaque_add(const Object *ob,
                  "PipelineModule::material_add()");
   has_holdout_ |= GPU_material_flag_get(gpumat, GPU_MATFLAG_HOLDOUT) ||
                   ob->visibility_flag & OB_HOLDOUT;
-  PassMain::Sub *pass = (blender_mat->blend_flag & MA_BL_CULL_BACKFACE) ? opaque_single_sided_ps_ :
-                                                                          opaque_double_sided_ps_;
+  PassMain::Sub *pass = material_surface_cull_pass_get(
+      opaque_double_sided_ps_, opaque_single_sided_ps_, opaque_front_cull_ps_, blender_mat);
   has_opaque_ = true;
   return &pass->sub(GPU_material_get_name(gpumat));
 }
@@ -550,14 +592,13 @@ PassMain::Sub *ForwardPipeline::prepass_transparent_add(const Object *ob,
   }
   DRWState state = DRW_STATE_WRITE_DEPTH | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
                    inst_.film.depth.test_state;
-  if (blender_mat->blend_flag & MA_BL_CULL_BACKFACE) {
-    state |= DRW_STATE_CULL_BACK;
-  }
+  state |= material_surface_cull_state(material_surface_cull_method(blender_mat));
   has_transparent_ = true;
   float sorting_value = math::dot(float3(ob->object_to_world().location()), camera_forward_);
   PassMain::Sub *pass = &transparent_ps_.sub(GPU_material_get_name(gpumat), sorting_value);
   pass->state_set(state);
   pass->material_set(*inst_.manager, gpumat, true);
+  pass->push_constant("surface_cull_mode", int(material_surface_cull_method(blender_mat)));
 
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_TO_RGBA) &&
       GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT))
@@ -574,9 +615,7 @@ PassMain::Sub *ForwardPipeline::material_transparent_add(const Object *ob,
 {
   DRWState state = DRW_STATE_WRITE_COLOR | DRW_STATE_BLEND_TRANSPARENCY |
                    DRW_STATE_CLIP_CONTROL_UNIT_RANGE | inst_.film.depth.test_state;
-  if (blender_mat->blend_flag & MA_BL_CULL_BACKFACE) {
-    state |= DRW_STATE_CULL_BACK;
-  }
+  state |= material_surface_cull_state(material_surface_cull_method(blender_mat));
   has_colored_transparency_ |= GPU_material_flag_get(gpumat,
                                                      GPU_MATFLAG_TRANSPARENT_MAYBE_COLORED) != 0;
   has_holdout_ |= GPU_material_flag_get(gpumat, GPU_MATFLAG_HOLDOUT) ||
@@ -589,6 +628,7 @@ PassMain::Sub *ForwardPipeline::material_transparent_add(const Object *ob,
   PassMain::Sub *pass = &transparent_ps_.sub(GPU_material_get_name(gpumat), sorting_value);
   pass->state_set(state);
   pass->material_set(*inst_.manager, gpumat, true);
+  pass->push_constant("surface_cull_mode", int(material_surface_cull_method(blender_mat)));
 
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_TO_RGBA) &&
       GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT))
@@ -778,12 +818,17 @@ void DeferredLayerBase::gbuffer_pass_sync(Instance &inst)
   DRWState state = DRW_STATE_WRITE_COLOR | DRW_STATE_DEPTH_EQUAL | DRW_STATE_WRITE_STENCIL |
                    DRW_STATE_CLIP_CONTROL_UNIT_RANGE | DRW_STATE_STENCIL_ALWAYS;
 
-  gbuffer_single_sided_hybrid_ps_ = &gbuffer_ps_.sub("DoubleSided");
+  gbuffer_single_sided_hybrid_ps_ = &gbuffer_ps_.sub("BackCull.Hybrid");
   gbuffer_single_sided_hybrid_ps_->bind_texture(RADIANCE_PREVIOUS_LAYER_TEX_SLOT,
                                                 &radiance_behind_tx_);
   gbuffer_single_sided_hybrid_ps_->state_set(state | DRW_STATE_CULL_BACK);
 
-  gbuffer_double_sided_hybrid_ps_ = &gbuffer_ps_.sub("SingleSided");
+  gbuffer_front_cull_hybrid_ps_ = &gbuffer_ps_.sub("FrontCull.Hybrid");
+  gbuffer_front_cull_hybrid_ps_->bind_texture(RADIANCE_PREVIOUS_LAYER_TEX_SLOT,
+                                              &radiance_behind_tx_);
+  gbuffer_front_cull_hybrid_ps_->state_set(state | DRW_STATE_CULL_FRONT);
+
+  gbuffer_double_sided_hybrid_ps_ = &gbuffer_ps_.sub("DoubleSided.Hybrid");
   gbuffer_double_sided_hybrid_ps_->bind_texture(RADIANCE_PREVIOUS_LAYER_TEX_SLOT,
                                                 &radiance_behind_tx_);
   gbuffer_double_sided_hybrid_ps_->state_set(state);
@@ -792,9 +837,13 @@ void DeferredLayerBase::gbuffer_pass_sync(Instance &inst)
   gbuffer_double_sided_ps_->bind_texture(RADIANCE_PREVIOUS_LAYER_TEX_SLOT, &radiance_behind_tx_);
   gbuffer_double_sided_ps_->state_set(state);
 
-  gbuffer_single_sided_ps_ = &gbuffer_ps_.sub("SingleSided");
+  gbuffer_single_sided_ps_ = &gbuffer_ps_.sub("BackCull");
   gbuffer_single_sided_ps_->bind_texture(RADIANCE_PREVIOUS_LAYER_TEX_SLOT, &radiance_behind_tx_);
   gbuffer_single_sided_ps_->state_set(state | DRW_STATE_CULL_BACK);
+
+  gbuffer_front_cull_ps_ = &gbuffer_ps_.sub("FrontCull");
+  gbuffer_front_cull_ps_->bind_texture(RADIANCE_PREVIOUS_LAYER_TEX_SLOT, &radiance_behind_tx_);
+  gbuffer_front_cull_ps_->state_set(state | DRW_STATE_CULL_FRONT);
 
   closure_bits_ = CLOSURE_NONE;
   closure_count_ = 0;
@@ -833,8 +882,11 @@ template<typename F> void DeferredLayerBase::npr_pass_sync(Instance &inst, F cal
   npr_double_sided_ps_ = &npr_ps_.sub("DoubleSided");
   npr_double_sided_ps_->state_set(state);
 
-  npr_single_sided_ps_ = &npr_ps_.sub("SingleSided");
+  npr_single_sided_ps_ = &npr_ps_.sub("BackCull");
   npr_single_sided_ps_->state_set(state | DRW_STATE_CULL_BACK);
+
+  npr_front_cull_ps_ = &npr_ps_.sub("FrontCull");
+  npr_front_cull_ps_->state_set(state | DRW_STATE_CULL_FRONT);
 }
 
 void DeferredLayer::begin_sync()
@@ -1116,14 +1168,17 @@ PassMain::Sub *DeferredLayer::material_add(blender::Material *blender_mat, GPUMa
   closure_count_ = max_ii(closure_count_, count_bits_i(closure_bits));
 
   bool has_shader_to_rgba = (closure_bits & CLOSURE_SHADER_TO_RGBA) != 0;
-  bool backface_culling = (blender_mat->blend_flag & MA_BL_CULL_BACKFACE) != 0;
   bool use_thickness_from_shadow = (blender_mat->blend_flag & MA_BL_THICKNESS_FROM_SHADOW) != 0;
 
-  PassMain::Sub *pass = (has_shader_to_rgba) ?
-                            ((backface_culling) ? gbuffer_single_sided_hybrid_ps_ :
-                                                  gbuffer_double_sided_hybrid_ps_) :
-                            ((backface_culling) ? gbuffer_single_sided_ps_ :
-                                                  gbuffer_double_sided_ps_);
+  PassMain::Sub *pass = has_shader_to_rgba ?
+                            material_surface_cull_pass_get(gbuffer_double_sided_hybrid_ps_,
+                                                           gbuffer_single_sided_hybrid_ps_,
+                                                           gbuffer_front_cull_hybrid_ps_,
+                                                           blender_mat) :
+                            material_surface_cull_pass_get(gbuffer_double_sided_ps_,
+                                                           gbuffer_single_sided_ps_,
+                                                           gbuffer_front_cull_ps_,
+                                                           blender_mat);
 
   PassMain::Sub *material_pass = &pass->sub(GPU_material_get_name(gpumat));
   /* Set stencil for some deferred specialized shaders. */
@@ -1141,9 +1196,8 @@ PassMain::Sub *DeferredLayer::material_add(blender::Material *blender_mat, GPUMa
 PassMain::Sub *DeferredLayer::npr_add(blender::Material *blender_mat, GPUMaterial *gpumat)
 {
   BLI_assert(GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR));
-  PassMain::Sub *pass = (blender_mat->blend_flag & MA_BL_CULL_BACKFACE) != 0 ?
-                            npr_single_sided_ps_ :
-                            npr_double_sided_ps_;
+  PassMain::Sub *pass = material_surface_cull_pass_get(
+      npr_double_sided_ps_, npr_single_sided_ps_, npr_front_cull_ps_, blender_mat);
 
   PassMain::Sub *material_pass = &pass->sub(GPU_material_get_name(gpumat));
 
@@ -1769,22 +1823,27 @@ PassMain::Sub *DeferredProbePipeline::material_add(blender::Material *blender_ma
   opaque_layer_.closure_count_ = max_ii(opaque_layer_.closure_count_, count_bits_i(closure_bits));
 
   bool has_shader_to_rgba = (closure_bits & CLOSURE_SHADER_TO_RGBA) != 0;
-  bool backface_culling = (blender_mat->blend_flag & MA_BL_CULL_BACKFACE) != 0;
 
-  PassMain::Sub *pass = (has_shader_to_rgba) ?
-                            ((backface_culling) ? opaque_layer_.gbuffer_single_sided_hybrid_ps_ :
-                                                  opaque_layer_.gbuffer_double_sided_hybrid_ps_) :
-                            ((backface_culling) ? opaque_layer_.gbuffer_single_sided_ps_ :
-                                                  opaque_layer_.gbuffer_double_sided_ps_);
+  PassMain::Sub *pass = has_shader_to_rgba ?
+                            material_surface_cull_pass_get(
+                                opaque_layer_.gbuffer_double_sided_hybrid_ps_,
+                                opaque_layer_.gbuffer_single_sided_hybrid_ps_,
+                                opaque_layer_.gbuffer_front_cull_hybrid_ps_,
+                                blender_mat) :
+                            material_surface_cull_pass_get(opaque_layer_.gbuffer_double_sided_ps_,
+                                                           opaque_layer_.gbuffer_single_sided_ps_,
+                                                           opaque_layer_.gbuffer_front_cull_ps_,
+                                                           blender_mat);
 
   return &pass->sub(GPU_material_get_name(gpumat));
 }
 
 PassMain::Sub *DeferredProbePipeline::npr_add(blender::Material *blender_mat, GPUMaterial *gpumat)
 {
-  PassMain::Sub *pass = (blender_mat->blend_flag & MA_BL_CULL_BACKFACE) ?
-                            opaque_layer_.npr_single_sided_ps_ :
-                            opaque_layer_.npr_double_sided_ps_;
+  PassMain::Sub *pass = material_surface_cull_pass_get(opaque_layer_.npr_double_sided_ps_,
+                                                       opaque_layer_.npr_single_sided_ps_,
+                                                       opaque_layer_.npr_front_cull_ps_,
+                                                       blender_mat);
 
   PassMain::Sub *material_ps = &pass->sub(GPU_material_get_name(gpumat));
   GPUPass *gpupass = GPU_material_get_pass(gpumat);
@@ -1944,21 +2003,24 @@ PassMain::Sub *PlanarProbePipeline::material_add(blender::Material *blender_mat,
   closure_count_ = max_ii(closure_count_, count_bits_i(closure_bits));
 
   bool has_shader_to_rgba = (closure_bits & CLOSURE_SHADER_TO_RGBA) != 0;
-  bool backface_culling = (blender_mat->blend_flag & MA_BL_CULL_BACKFACE) != 0;
 
-  PassMain::Sub *pass = (has_shader_to_rgba) ?
-                            ((backface_culling) ? gbuffer_single_sided_hybrid_ps_ :
-                                                  gbuffer_double_sided_hybrid_ps_) :
-                            ((backface_culling) ? gbuffer_single_sided_ps_ :
-                                                  gbuffer_double_sided_ps_);
+  PassMain::Sub *pass = has_shader_to_rgba ?
+                            material_surface_cull_pass_get(gbuffer_double_sided_hybrid_ps_,
+                                                           gbuffer_single_sided_hybrid_ps_,
+                                                           gbuffer_front_cull_hybrid_ps_,
+                                                           blender_mat) :
+                            material_surface_cull_pass_get(gbuffer_double_sided_ps_,
+                                                           gbuffer_single_sided_ps_,
+                                                           gbuffer_front_cull_ps_,
+                                                           blender_mat);
 
   return &pass->sub(GPU_material_get_name(gpumat));
 }
 
 PassMain::Sub *PlanarProbePipeline::npr_add(blender::Material *blender_mat, GPUMaterial *gpumat)
 {
-  PassMain::Sub *pass = (blender_mat->blend_flag & MA_BL_CULL_BACKFACE) ? npr_single_sided_ps_ :
-                                                                          npr_double_sided_ps_;
+  PassMain::Sub *pass = material_surface_cull_pass_get(
+      npr_double_sided_ps_, npr_single_sided_ps_, npr_front_cull_ps_, blender_mat);
 
   PassMain::Sub *material_ps = &pass->sub(GPU_material_get_name(gpumat));
   GPUPass *gpupass = GPU_material_get_pass(gpumat);

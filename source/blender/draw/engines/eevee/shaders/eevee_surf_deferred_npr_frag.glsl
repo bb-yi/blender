@@ -339,6 +339,7 @@ float4 closure_to_rgba(Closure cl)
 
 void main()
 {
+  material_surface_cull_discard();
   init_globals();
   int2 texel = int2(gl_FragCoord.xy);
   DeferredCombine dc = deferred_combine(texel);
