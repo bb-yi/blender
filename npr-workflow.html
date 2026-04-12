@@ -559,13 +559,13 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#npr" class="md-nav__link">
+  <a href="#5-npr" class="md-nav__link">
     <span class="md-ellipsis">
-      内置 NPR 节点组资产
+      5. 内置 NPR 节点组资产
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="内置 NPR 节点组资产">
+    <nav class="md-nav" aria-label="5. 内置 NPR 节点组资产">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -871,13 +871,13 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#npr" class="md-nav__link">
+  <a href="#5-npr" class="md-nav__link">
     <span class="md-ellipsis">
-      内置 NPR 节点组资产
+      5. 内置 NPR 节点组资产
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="内置 NPR 节点组资产">
+    <nav class="md-nav" aria-label="5. 内置 NPR 节点组资产">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -921,21 +921,16 @@
 
 <h1 id="npr-tree">NPR Tree 工作流<a class="headerlink" href="#npr-tree" title="Permanent link">&para;</a></h1>
 <h2 id="1">1. 基本概念<a class="headerlink" href="#1" title="Permanent link">&para;</a></h2>
-<p><code>NPR Tree</code> 是挂在普通物体材质之后进行颜色后处理的节点树，能够以颜色的形式对着色器的输出进行风格化处理。</p>
+<p><code>NPR Tree</code> 是挂在普通物体材质之外的第二套表现节点树，用来对 Eevee 的材质结果做 NPR 风格重组和二次表现。</p>
+<p>普通物体材质依然负责基础表面着色，<code>NPR Tree</code> 负责额外的 NPR 表现层。</p>
 <h2 id="2">2. 挂接方式<a class="headerlink" href="#2" title="Permanent link">&para;</a></h2>
 <ol>
-<li>
-<p>在普通物体材质中保留正常的 <code>Material Output</code> 和基础表面着色。</p>
-</li>
-<li>
-<p>选中 <code>Material Output</code> 节点。</p>
-</li>
-<li>
-<p>在它的 <code>NPR Tree</code> 属性里新建或指定一个节点组。</p>
-</li>
+<li>在普通物体材质中保留正常的 <code>Material Output</code> 和基础表面着色。</li>
+<li>选中 <code>Material Output</code> 节点。</li>
+<li>在它的 <code>NPR Tree</code> 属性里新建或指定一个节点组。</li>
 </ol>
 <div align="center">
-    <img src="images/SnowShot_2026-03-28_05-18-15.png" alt="alt text" style="border-radius: 10px;">
+    <img src="images/SnowShot_2026-03-28_05-18-15.png" alt="NPR Tree Slot" style="border-radius: 10px;">
     <br>
 </div>
 
@@ -943,21 +938,15 @@
 <li>需要编辑这棵树时，在 Shader Editor 顶部把 <code>Shader Type</code> 切到 <code>NPR</code>。</li>
 </ol>
 <div align="center">
-    <img src="images/SnowShot_2026-03-28_05-18-33.png" alt="alt text" style="border-radius: 10px;">
+    <img src="images/SnowShot_2026-03-28_05-18-33.png" alt="NPR Shader Type" style="border-radius: 10px;">
     <br>
 </div>
 
 <h2 id="3">3. 说明<a class="headerlink" href="#3" title="Permanent link">&para;</a></h2>
 <ul>
-<li>
-<p>材质的渲染方式需要设置为 <code>抖动（延迟渲染）</code></p>
-</li>
-<li>
-<p>可以使用 <code>Ctrl + Tab</code> 在物体和 NPR 之间快速切换</p>
-</li>
-<li>
-<p>当前 <code>NPR Tree</code> 使用的动作可在 <code>Material Properties &gt; Animation &gt; NPR Tree Action</code> 查看、切换或新建；这个槽位与普通材质动作分开管理</p>
-</li>
+<li>材质的渲染方式需要设置为 <code>抖动（延迟渲染）</code></li>
+<li>可以使用 <code>Ctrl + Tab</code> 在物体和 NPR 之间快速切换</li>
+<li><code>NPR Tree</code> 的关键帧与驱动器使用独立的 <code>NPR Tree Action</code>，可在 <code>Material Properties &gt; Animation &gt; NPR Tree Action</code> 查看、切换或新建</li>
 </ul>
 <div align="center">
     <img src="images/SnowShot_2026-03-31_03-35-17.png" alt="NPR Tree Action" style="border-radius: 10px;">
@@ -968,7 +957,7 @@
 <p>除了下面这些专用 NPR 节点以外，<code>Curvature</code>、<code>Raycast</code> 和 <code>GLSL Function</code> 现在也可以直接在 <code>NPR Tree</code> 中使用。</p>
 <h3 id="npr-input">NPR Input<a class="headerlink" href="#npr-input" title="Permanent link">&para;</a></h3>
 <div align="center">
-    <img src="images/SnowShot_2026-03-28_05-22-04.png" alt="alt text" style="border-radius: 10px;">
+    <img src="images/SnowShot_2026-03-28_05-22-04.png" alt="NPR Input" style="border-radius: 10px;">
     <br>
 </div>
 
@@ -976,138 +965,86 @@
 <p>读取 NPR 渲染阶段提供的输入缓冲。</p>
 <h4 id="_2">输出<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h4>
 <ul>
-<li>
-<p><code>Combined Color</code>：合成之后的最终颜色</p>
-</li>
-<li>
-<p><code>Diffuse Color</code>：漫反射颜色</p>
-</li>
-<li>
-<p><code>Diffuse Direct</code>：漫反射直接光</p>
-</li>
-<li>
-<p><code>Diffuse Indirect</code>：漫反射间接光（光线追踪、探针）</p>
-</li>
-<li>
-<p><code>Specular Color</code>：高光颜色</p>
-</li>
-<li>
-<p><code>Specular Direct</code>：高光直接光</p>
-</li>
-<li>
-<p><code>Specular Indirect</code>：间接反射</p>
-</li>
-<li>
-<p><code>Position</code>：世界空间位置</p>
-</li>
-<li>
-<p><code>Normal</code>：法线</p>
-</li>
+<li><code>Combined Color</code></li>
+<li><code>Diffuse Color</code></li>
+<li><code>Diffuse Direct</code></li>
+<li><code>Diffuse Indirect</code></li>
+<li><code>Specular Color</code></li>
+<li><code>Specular Direct</code></li>
+<li><code>Specular Indirect</code></li>
+<li><code>Position</code></li>
+<li><code>Normal</code></li>
 </ul>
 <p>这些输出本质上更接近图像句柄 / 纹理句柄，适合继续交给 <code>Image Sample</code> 做邻域采样，或接到支持这类输入的 NPR 节点上继续处理。</p>
 <h3 id="npr-refraction">NPR Refraction<a class="headerlink" href="#npr-refraction" title="Permanent link">&para;</a></h3>
 <div align="center">
-    <img src="images/SnowShot_2026-03-28_05-22-16.png" alt="alt text" style="border-radius: 10px;">
+    <img src="images/SnowShot_2026-03-28_05-22-16.png" alt="NPR Refraction" style="border-radius: 10px;">
     <br>
 </div>
 
 <h4 id="_3">作用<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h4>
 <p>读取折射相关缓冲，类似 <code>Screenspace Info</code>。</p>
-<p>参考 <code>Screenspace Info</code> 节点的使用说明。</p>
 <h4 id="_4">输出<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h4>
 <ul>
-<li>
-<p><code>Combined Color</code>：折射事件的最终颜色</p>
-</li>
-<li>
-<p><code>Position</code>：折射位置的世界坐标</p>
-</li>
+<li><code>Combined Color</code></li>
+<li><code>Position</code></li>
 </ul>
 <h3 id="image-sample">Image Sample<a class="headerlink" href="#image-sample" title="Permanent link">&para;</a></h3>
 <h4 id="_5">入口<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h4>
 <p><code>Add &gt; Utilities &gt; Image Sample</code></p>
 <div align="center">
-    <img src="images/SnowShot_2026-03-28_05-25-34.png" alt="alt text" style="border-radius: 10px;">
+    <img src="images/SnowShot_2026-03-28_05-25-34.png" alt="Image Sample" style="border-radius: 10px;">
     <br>
 </div>
 
 <h4 id="_6">输入输出<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h4>
 <ul>
-<li>
-<p>输入：<code>Image</code>（图像句柄）、<code>Offset</code>（采样偏移）</p>
-</li>
-<li>
-<p>输出：<code>Color</code>（采样结果颜色）</p>
-</li>
+<li>输入：<code>Image</code>、<code>Offset</code></li>
+<li>输出：<code>Color</code></li>
 </ul>
 <h4 id="_7">作用<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h4>
 <p>对 <code>NPR Input</code> / <code>NPR Refraction</code> 之类输出的图像句柄做采样。</p>
 <h4 id="_8">偏移模式<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h4>
 <ul>
-<li>
-<p><code>View</code>：按视空间偏移</p>
-</li>
-<li>
-<p><code>Pixel</code>：按像素偏移</p>
-</li>
+<li><code>View</code>：按视空间偏移</li>
+<li><code>Pixel</code>：按像素偏移</li>
 </ul>
 <h3 id="for-each-light">For Each Light<a class="headerlink" href="#for-each-light" title="Permanent link">&para;</a></h3>
 <h4 id="_9">入口<a class="headerlink" href="#_9" title="Permanent link">&para;</a></h4>
 <p><code>Add &gt; Utilities &gt; For Each Light</code></p>
 <div align="center">
-    <img src="images/SnowShot_2026-03-28_05-26-08.png" alt="alt text" style="border-radius: 10px;">
+    <img src="images/SnowShot_2026-03-28_05-26-08.png" alt="For Each Light" style="border-radius: 10px;">
     <br>
 </div>
 
 <h4 id="_10">说明<a class="headerlink" href="#_10" title="Permanent link">&para;</a></h4>
 <p>它会按当前影响表面的灯光逐个执行内部逻辑，每次循环输出一个灯光的信息。</p>
-<div align="center">
-    <img src="images/SnowShot_2026-03-28_06-55-43.png" alt="alt text" style="border-radius: 10px;">
-    <br>
-    <sub>使用参考</sub>
-</div>
-
 <h4 id="_11">内置可用信息<a class="headerlink" href="#_11" title="Permanent link">&para;</a></h4>
 <p><code>For Each Light Input</code> 当前提供：</p>
 <ul>
-<li>
-<p>输入：<code>Normal</code>（表面法线）</p>
-</li>
-<li>
-<p>输出：<code>Color</code>（灯光颜色）、<code>Direction</code>（灯光方向）、<code>Distance</code>（灯光距离）、<code>Attenuation</code>（灯光衰减）、<code>Shadow Mask</code>（阴影遮罩）</p>
-</li>
+<li>输入：<code>Normal</code></li>
+<li>输出：<code>Color</code></li>
+<li>输出：<code>Direction</code></li>
+<li>输出：<code>Distance</code></li>
+<li>输出：<code>Attenuation</code></li>
+<li>输出：<code>Shadow Mask</code></li>
 </ul>
-<h2 id="npr">内置 NPR 节点组资产<a class="headerlink" href="#npr" title="Permanent link">&para;</a></h2>
+<p>此外还支持在区域输入 / 输出上增添自定义 socket，用于在逐灯循环内部传递你自己的中间量。</p>
+<h2 id="5-npr">5. 内置 NPR 节点组资产<a class="headerlink" href="#5-npr" title="Permanent link">&para;</a></h2>
 <p>当前版本已经把 Blender 4.4 NPR 版本中的一批常用节点组，迁移并整理成了 5.1 可用的资产包。</p>
 <h3 id="_12">当前内置的主要节点组<a class="headerlink" href="#_12" title="Permanent link">&para;</a></h3>
 <ul>
-<li>
-<p><code>Cavity</code></p>
-</li>
-<li>
-<p><code>Co-Planar Edge Detection</code></p>
-</li>
-<li>
-<p><code>Curvature</code></p>
-</li>
-<li>
-<p><code>Kuwahara</code></p>
-</li>
-<li>
-<p><code>Shading Models</code></p>
-</li>
-<li>
-<p><code>Surface Curvature</code></p>
-</li>
+<li><code>Cavity</code></li>
+<li><code>Co-Planar Edge Detection</code></li>
+<li><code>Curvature</code></li>
+<li><code>Kuwahara</code></li>
+<li><code>Shading Models</code></li>
+<li><code>Surface Curvature</code></li>
 </ul>
 <h3 id="_13">资产说明<a class="headerlink" href="#_13" title="Permanent link">&para;</a></h3>
 <ul>
-<li>
-<p>这些节点组已经按 Blender 5.1 的格式迁移。</p>
-</li>
-<li>
-<p>由于重复区域节点名称修改了，4.4 NPR Prototype 的工程需要自己重新连接区域相关节点。</p>
-</li>
+<li>这些节点组已经按 Blender 5.1 的格式迁移</li>
+<li>由于重复区域节点名称修改了，4.4 NPR Prototype 的工程需要自己重新连接区域相关节点</li>
 </ul>
 <div class="admonition warning">
 <p class="admonition-title">Eevee 专用</p>

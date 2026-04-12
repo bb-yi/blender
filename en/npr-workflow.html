@@ -358,9 +358,9 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#1-core-concept" class="md-nav__link">
+  <a href="#1-basic-concept" class="md-nav__link">
     <span class="md-ellipsis">
-      1. Core Concept
+      1. Basic Concept
     </span>
   </a>
   
@@ -540,9 +540,9 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#built-in-available-data" class="md-nav__link">
+  <a href="#built-in-data" class="md-nav__link">
     <span class="md-ellipsis">
-      Built-In Available Data
+      Built-In Data
     </span>
   </a>
   
@@ -559,19 +559,19 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#built-in-npr-node-group-assets" class="md-nav__link">
+  <a href="#5-built-in-npr-node-group-assets" class="md-nav__link">
     <span class="md-ellipsis">
-      Built-In NPR Node Group Assets
+      5. Built-In NPR Node Group Assets
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Built-In NPR Node Group Assets">
+    <nav class="md-nav" aria-label="5. Built-In NPR Node Group Assets">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#main-built-in-node-groups" class="md-nav__link">
+  <a href="#main-built-in-assets" class="md-nav__link">
     <span class="md-ellipsis">
-      Main Built-In Node Groups
+      Main Built-In Assets
     </span>
   </a>
   
@@ -670,9 +670,9 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#1-core-concept" class="md-nav__link">
+  <a href="#1-basic-concept" class="md-nav__link">
     <span class="md-ellipsis">
-      1. Core Concept
+      1. Basic Concept
     </span>
   </a>
   
@@ -852,9 +852,9 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#built-in-available-data" class="md-nav__link">
+  <a href="#built-in-data" class="md-nav__link">
     <span class="md-ellipsis">
-      Built-In Available Data
+      Built-In Data
     </span>
   </a>
   
@@ -871,19 +871,19 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#built-in-npr-node-group-assets" class="md-nav__link">
+  <a href="#5-built-in-npr-node-group-assets" class="md-nav__link">
     <span class="md-ellipsis">
-      Built-In NPR Node Group Assets
+      5. Built-In NPR Node Group Assets
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Built-In NPR Node Group Assets">
+    <nav class="md-nav" aria-label="5. Built-In NPR Node Group Assets">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#main-built-in-node-groups" class="md-nav__link">
+  <a href="#main-built-in-assets" class="md-nav__link">
     <span class="md-ellipsis">
-      Main Built-In Node Groups
+      Main Built-In Assets
     </span>
   </a>
   
@@ -920,19 +920,14 @@
 
 
 <h1 id="npr-tree-workflow">NPR Tree Workflow<a class="headerlink" href="#npr-tree-workflow" title="Permanent link">&para;</a></h1>
-<h2 id="1-core-concept">1. Core Concept<a class="headerlink" href="#1-core-concept" title="Permanent link">&para;</a></h2>
-<p><code>NPR Tree</code> is a node tree attached after a regular object material to perform color post-processing, allowing shader output to be stylized in color form.</p>
+<h2 id="1-basic-concept">1. Basic Concept<a class="headerlink" href="#1-basic-concept" title="Permanent link">&para;</a></h2>
+<p><code>NPR Tree</code> is a second shading graph attached to a regular object material. It is used to reorganize and stylize Eevee material results in an NPR-oriented way.</p>
+<p>The regular object material still handles the base surface shading, while the <code>NPR Tree</code> adds an extra NPR presentation layer on top.</p>
 <h2 id="2-how-to-attach-it">2. How to Attach It<a class="headerlink" href="#2-how-to-attach-it" title="Permanent link">&para;</a></h2>
 <ol>
-<li>
-<p>Keep the normal <code>Material Output</code> node and the base surface shading in a regular object material.</p>
-</li>
-<li>
-<p>Select the <code>Material Output</code> node.</p>
-</li>
-<li>
-<p>Create or assign a node group in its <code>NPR Tree</code> property.</p>
-</li>
+<li>Keep the normal <code>Material Output</code> and base shading in the regular object material.</li>
+<li>Select the <code>Material Output</code> node.</li>
+<li>Create or assign a node group in its <code>NPR Tree</code> property.</li>
 </ol>
 <div align="center">
     <img src="images/SnowShot_2026-03-28_05-18-15.png" alt="NPR Tree Slot" style="border-radius: 10px;">
@@ -940,7 +935,7 @@
 </div>
 
 <ol>
-<li>To edit that tree, switch <code>Shader Type</code> to <code>NPR</code> at the top of the Shader Editor.</li>
+<li>To edit this tree, switch the Shader Editor top <code>Shader Type</code> to <code>NPR</code>.</li>
 </ol>
 <div align="center">
     <img src="images/SnowShot_2026-03-28_05-18-33.png" alt="NPR Shader Type" style="border-radius: 10px;">
@@ -949,15 +944,9 @@
 
 <h2 id="3-notes">3. Notes<a class="headerlink" href="#3-notes" title="Permanent link">&para;</a></h2>
 <ul>
-<li>
-<p>The material render mode needs to be set to <code>Dithered (Deferred)</code></p>
-</li>
-<li>
-<p>You can use <code>Ctrl + Tab</code> to quickly switch between the object shader and the NPR tree</p>
-</li>
-<li>
-<p>The action used by the current <code>NPR Tree</code> can be viewed, switched, or created in <code>Material Properties &gt; Animation &gt; NPR Tree Action</code>; this slot is separate from the regular material action</p>
-</li>
+<li>The material render mode needs to be set to <code>Dithered (Deferred)</code></li>
+<li><code>Ctrl + Tab</code> can be used to switch quickly between the regular object material and the NPR tree</li>
+<li><code>NPR Tree</code> keyframes and drivers use a dedicated <code>NPR Tree Action</code>, which can be viewed, switched, or created in <code>Material Properties &gt; Animation &gt; NPR Tree Action</code></li>
 </ul>
 <div align="center">
     <img src="images/SnowShot_2026-03-31_03-35-17.png" alt="NPR Tree Action" style="border-radius: 10px;">
@@ -965,7 +954,7 @@
 </div>
 
 <h2 id="4-main-npr-nodes">4. Main NPR Nodes<a class="headerlink" href="#4-main-npr-nodes" title="Permanent link">&para;</a></h2>
-<p>In addition to the dedicated NPR nodes below, <code>Curvature</code> and <code>Raycast</code> can now also be used directly inside <code>NPR Tree</code>.</p>
+<p>In addition to the dedicated NPR nodes below, <code>Curvature</code>, <code>Raycast</code>, and <code>GLSL Function</code> can also be used directly inside <code>NPR Tree</code>.</p>
 <h3 id="npr-input">NPR Input<a class="headerlink" href="#npr-input" title="Permanent link">&para;</a></h3>
 <div align="center">
     <img src="images/SnowShot_2026-03-28_05-22-04.png" alt="NPR Input" style="border-radius: 10px;">
@@ -976,35 +965,17 @@
 <p>Reads the input buffers provided by the NPR rendering stage.</p>
 <h4 id="outputs">Outputs<a class="headerlink" href="#outputs" title="Permanent link">&para;</a></h4>
 <ul>
-<li>
-<p><code>Combined Color</code>: Final combined color after shading</p>
-</li>
-<li>
-<p><code>Diffuse Color</code>: Diffuse color</p>
-</li>
-<li>
-<p><code>Diffuse Direct</code>: Direct diffuse lighting</p>
-</li>
-<li>
-<p><code>Diffuse Indirect</code>: Indirect diffuse lighting from ray tracing and probes</p>
-</li>
-<li>
-<p><code>Specular Color</code>: Specular color</p>
-</li>
-<li>
-<p><code>Specular Direct</code>: Direct specular lighting</p>
-</li>
-<li>
-<p><code>Specular Indirect</code>: Indirect reflection</p>
-</li>
-<li>
-<p><code>Position</code>: World-space position</p>
-</li>
-<li>
-<p><code>Normal</code>: Surface normal</p>
-</li>
+<li><code>Combined Color</code></li>
+<li><code>Diffuse Color</code></li>
+<li><code>Diffuse Direct</code></li>
+<li><code>Diffuse Indirect</code></li>
+<li><code>Specular Color</code></li>
+<li><code>Specular Direct</code></li>
+<li><code>Specular Indirect</code></li>
+<li><code>Position</code></li>
+<li><code>Normal</code></li>
 </ul>
-<p>These outputs behave more like image handles / texture handles, which makes them suitable for neighborhood sampling through <code>Image Sample</code> or for feeding into NPR nodes that accept this kind of input.</p>
+<p>These outputs are closer to image / texture handles than ordinary scalar values, so they are typically passed to <code>Image Sample</code> or other NPR-aware nodes for further processing.</p>
 <h3 id="npr-refraction">NPR Refraction<a class="headerlink" href="#npr-refraction" title="Permanent link">&para;</a></h3>
 <div align="center">
     <img src="images/SnowShot_2026-03-28_05-22-16.png" alt="NPR Refraction" style="border-radius: 10px;">
@@ -1012,16 +983,11 @@
 </div>
 
 <h4 id="purpose_1">Purpose<a class="headerlink" href="#purpose_1" title="Permanent link">&para;</a></h4>
-<p>Reads refraction-related buffers, similar to <code>Screenspace Info</code>.</p>
-<p>See the usage notes of <code>Screenspace Info</code> for setup requirements.</p>
+<p>Reads refraction-related buffers, similar in spirit to <code>Screenspace Info</code>.</p>
 <h4 id="outputs_1">Outputs<a class="headerlink" href="#outputs_1" title="Permanent link">&para;</a></h4>
 <ul>
-<li>
-<p><code>Combined Color</code>: Final color at the refraction event</p>
-</li>
-<li>
-<p><code>Position</code>: World-space position of the refraction hit</p>
-</li>
+<li><code>Combined Color</code></li>
+<li><code>Position</code></li>
 </ul>
 <h3 id="image-sample">Image Sample<a class="headerlink" href="#image-sample" title="Permanent link">&para;</a></h3>
 <h4 id="entry">Entry<a class="headerlink" href="#entry" title="Permanent link">&para;</a></h4>
@@ -1033,23 +999,15 @@
 
 <h4 id="inputs-outputs">Inputs / Outputs<a class="headerlink" href="#inputs-outputs" title="Permanent link">&para;</a></h4>
 <ul>
-<li>
-<p>Input: <code>Image</code> (image handle), <code>Offset</code> (sample offset)</p>
-</li>
-<li>
-<p>Output: <code>Color</code> (sampled color)</p>
-</li>
+<li>Inputs: <code>Image</code>, <code>Offset</code></li>
+<li>Output: <code>Color</code></li>
 </ul>
 <h4 id="purpose_2">Purpose<a class="headerlink" href="#purpose_2" title="Permanent link">&para;</a></h4>
-<p>Samples image handles produced by nodes such as <code>NPR Input</code> or <code>NPR Refraction</code>.</p>
+<p>Samples image-style handles such as those coming from <code>NPR Input</code> or <code>NPR Refraction</code>.</p>
 <h4 id="offset-modes">Offset Modes<a class="headerlink" href="#offset-modes" title="Permanent link">&para;</a></h4>
 <ul>
-<li>
-<p><code>View</code>: Offset in view space</p>
-</li>
-<li>
-<p><code>Pixel</code>: Offset in pixel space</p>
-</li>
+<li><code>View</code>: offset in view space</li>
+<li><code>Pixel</code>: offset in pixel space</li>
 </ul>
 <h3 id="for-each-light">For Each Light<a class="headerlink" href="#for-each-light" title="Permanent link">&para;</a></h3>
 <h4 id="entry_1">Entry<a class="headerlink" href="#entry_1" title="Permanent link">&para;</a></h4>
@@ -1060,58 +1018,33 @@
 </div>
 
 <h4 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h4>
-<p>Executes its internal logic once for each light affecting the current surface, outputting information for one light on each iteration.</p>
-<div align="center">
-    <img src="images/SnowShot_2026-03-28_06-55-43.png" alt="For Each Light Example" style="border-radius: 10px;">
-    <br>
-    <sub>Reference setup</sub>
-</div>
-
-<h4 id="built-in-available-data">Built-In Available Data<a class="headerlink" href="#built-in-available-data" title="Permanent link">&para;</a></h4>
+<p>This node runs its internal logic once for every light affecting the current surface and outputs per-light information during each iteration.</p>
+<h4 id="built-in-data">Built-In Data<a class="headerlink" href="#built-in-data" title="Permanent link">&para;</a></h4>
 <p><code>For Each Light Input</code> currently provides:</p>
 <ul>
-<li>
-<p>Input: <code>Normal</code> (surface normal)</p>
-</li>
-<li>
-<p>Outputs: <code>Color</code> (light color), <code>Direction</code> (light direction), <code>Distance</code> (light distance), <code>Attenuation</code> (light attenuation), <code>Shadow Mask</code> (shadow mask)</p>
-</li>
+<li>Input: <code>Normal</code></li>
+<li>Outputs: <code>Color</code>, <code>Direction</code>, <code>Distance</code>, <code>Attenuation</code>, <code>Shadow Mask</code></li>
 </ul>
-<h2 id="built-in-npr-node-group-assets">Built-In NPR Node Group Assets<a class="headerlink" href="#built-in-npr-node-group-assets" title="Permanent link">&para;</a></h2>
-<p>The current version already ports and organizes a set of commonly used node groups from the Blender 4.4 NPR build into assets that can be used in 5.1.</p>
-<h3 id="main-built-in-node-groups">Main Built-In Node Groups<a class="headerlink" href="#main-built-in-node-groups" title="Permanent link">&para;</a></h3>
+<p>It also supports custom area input / output sockets so intermediate values can be passed through the per-light loop.</p>
+<h2 id="5-built-in-npr-node-group-assets">5. Built-In NPR Node Group Assets<a class="headerlink" href="#5-built-in-npr-node-group-assets" title="Permanent link">&para;</a></h2>
+<p>This version already ports a group of commonly used node groups from the Blender 4.4 NPR branch and repackages them as 5.1-compatible assets.</p>
+<h3 id="main-built-in-assets">Main Built-In Assets<a class="headerlink" href="#main-built-in-assets" title="Permanent link">&para;</a></h3>
 <ul>
-<li>
-<p><code>Cavity</code></p>
-</li>
-<li>
-<p><code>Co-Planar Edge Detection</code></p>
-</li>
-<li>
-<p><code>Curvature</code></p>
-</li>
-<li>
-<p><code>Kuwahara</code></p>
-</li>
-<li>
-<p><code>Shading Models</code></p>
-</li>
-<li>
-<p><code>Surface Curvature</code></p>
-</li>
+<li><code>Cavity</code></li>
+<li><code>Co-Planar Edge Detection</code></li>
+<li><code>Curvature</code></li>
+<li><code>Kuwahara</code></li>
+<li><code>Shading Models</code></li>
+<li><code>Surface Curvature</code></li>
 </ul>
 <h3 id="asset-notes">Asset Notes<a class="headerlink" href="#asset-notes" title="Permanent link">&para;</a></h3>
 <ul>
-<li>
-<p>These node groups have already been migrated to Blender 5.1 format.</p>
-</li>
-<li>
-<p>Because some repeat-zone node names changed, projects from the 4.4 NPR Prototype may require manual reconnection of the related zone nodes.</p>
-</li>
+<li>These node groups have been migrated to the Blender 5.1 format</li>
+<li>Because repeat-zone node names changed, old Blender 4.4 NPR Prototype files may need to reconnect region-related nodes manually</li>
 </ul>
 <div class="admonition warning">
 <p class="admonition-title">Eevee Only</p>
-<p><code>NPR Tree</code> is currently supported only in <code>Eevee</code>, not in <code>Cycles</code>.</p>
+<p><code>NPR Tree</code> currently supports only <code>Eevee</code>, not <code>Cycles</code>.</p>
 </div>
 
 

@@ -419,27 +419,27 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#panel-entry-point" class="md-nav__link">
+  <a href="#panel-entry" class="md-nav__link">
     <span class="md-ellipsis">
-      Panel Entry Point
+      Panel Entry
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#configurable-parameters" class="md-nav__link">
+  <a href="#configurable-fields" class="md-nav__link">
     <span class="md-ellipsis">
-      Configurable Parameters
+      Configurable Fields
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#basic-usage" class="md-nav__link">
+  <a href="#basic-workflow" class="md-nav__link">
     <span class="md-ellipsis">
-      Basic Usage
+      Basic Workflow
     </span>
   </a>
   
@@ -470,18 +470,18 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#panel-entry-point_1" class="md-nav__link">
+  <a href="#panel-entry_1" class="md-nav__link">
     <span class="md-ellipsis">
-      Panel Entry Point
+      Panel Entry
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#basic-usage_1" class="md-nav__link">
+  <a href="#basic-workflow_1" class="md-nav__link">
     <span class="md-ellipsis">
-      Basic Usage
+      Basic Workflow
     </span>
   </a>
   
@@ -555,27 +555,27 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#panel-entry-point" class="md-nav__link">
+  <a href="#panel-entry" class="md-nav__link">
     <span class="md-ellipsis">
-      Panel Entry Point
+      Panel Entry
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#configurable-parameters" class="md-nav__link">
+  <a href="#configurable-fields" class="md-nav__link">
     <span class="md-ellipsis">
-      Configurable Parameters
+      Configurable Fields
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#basic-usage" class="md-nav__link">
+  <a href="#basic-workflow" class="md-nav__link">
     <span class="md-ellipsis">
-      Basic Usage
+      Basic Workflow
     </span>
   </a>
   
@@ -606,18 +606,18 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#panel-entry-point_1" class="md-nav__link">
+  <a href="#panel-entry_1" class="md-nav__link">
     <span class="md-ellipsis">
-      Panel Entry Point
+      Panel Entry
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#basic-usage_1" class="md-nav__link">
+  <a href="#basic-workflow_1" class="md-nav__link">
     <span class="md-ellipsis">
-      Basic Usage
+      Basic Workflow
     </span>
   </a>
   
@@ -655,157 +655,82 @@
 
 <h1 id="scene-level-eevee-extensions">Scene-Level Eevee Extensions<a class="headerlink" href="#scene-level-eevee-extensions" title="Permanent link">&para;</a></h1>
 <h2 id="1-render-textures">1. Render Textures<a class="headerlink" href="#1-render-textures" title="Permanent link">&para;</a></h2>
-<h3 id="feature-description">Feature Description<a class="headerlink" href="#feature-description" title="Permanent link">&para;</a></h3>
-<p><code>Render Textures</code> is a scene-level Eevee extra render texture system.</p>
-<p>It allows the scene to maintain up to <code>4</code> Render Texture slots in advance. Each slot can specify a camera and an output type, render the scene from that camera into a texture first, and then let regular object materials sample it through the <code>Render Texture</code> node.</p>
-<h3 id="panel-entry-point">Panel Entry Point<a class="headerlink" href="#panel-entry-point" title="Permanent link">&para;</a></h3>
+<h4 id="feature-description">Feature Description<a class="headerlink" href="#feature-description" title="Permanent link">&para;</a></h4>
+<p><code>Render Textures</code> is an additional scene-level Eevee render-texture system.</p>
+<p>It lets a scene maintain up to <code>4</code> render texture slots. Each slot can point to a camera and an output type, rendering that camera view into a texture that can later be sampled by the <code>Render Texture</code> node in regular object materials.</p>
+<h4 id="panel-entry">Panel Entry<a class="headerlink" href="#panel-entry" title="Permanent link">&para;</a></h4>
 <p><code>Scene Properties &gt; Render Textures</code></p>
 <div align="center">
-    <img src="images/SnowShot_2026-03-28_04-37-13.png" alt="Render Textures Panel" style="border-radius: 10px;">
-    <br>
+  <img src="images/SnowShot_2026-03-28_04-37-13.png" alt="Render Textures" style="border-radius: 10px;">
+  <br>
 </div>
 
-<h3 id="configurable-parameters">Configurable Parameters<a class="headerlink" href="#configurable-parameters" title="Permanent link">&para;</a></h3>
-<p>Each Render Texture entry currently supports:</p>
+<h4 id="configurable-fields">Configurable Fields<a class="headerlink" href="#configurable-fields" title="Permanent link">&para;</a></h4>
+<p>Each <code>Render Texture</code> entry currently supports:</p>
 <ul>
-<li>
-<p><code>Name</code>: Identifier of the texture entry, used for node references</p>
-</li>
-<li>
-<p><code>Enabled</code>: Enable or disable rendering of this texture</p>
-</li>
-<li>
-<p><code>Source</code>: Select what to capture</p>
-<ul>
-<li>
-<p><code>Color</code>: Capture the final Eevee color</p>
-</li>
-<li>
-<p><code>Depth</code>: Capture linear depth</p>
-</li>
-<li>
-<p><code>Normal</code>: Capture normals</p>
-</li>
+<li><code>Name</code></li>
+<li><code>Enabled</code></li>
+<li><code>Source</code></li>
+<li><code>Color</code>: Capture the final Eevee color</li>
+<li><code>Depth</code>: Capture linear depth</li>
+<li><code>Normal</code>: Capture normals</li>
+<li><code>Camera</code></li>
+<li><code>Resolution X / Y</code></li>
+<li><code>Update Mode</code></li>
+<li><code>Every Sample</code></li>
+<li><code>Every Frame</code></li>
+<li><code>Manual</code></li>
+<li><code>Format</code></li>
+<li><code>RGBA16F</code></li>
+<li><code>RGBA32F</code></li>
+<li><code>R16F</code></li>
+<li><code>R32F</code></li>
 </ul>
-</li>
-<li>
-<p><code>Camera</code>: Camera used to render this texture</p>
-</li>
-<li>
-<p><code>Resolution X / Y</code>: Output texture size in pixels; higher resolution uses more memory</p>
-</li>
-<li>
-<p><code>Update Mode</code>: Controls how often the texture is updated</p>
-<ul>
-<li>
-<p><code>Every Sample</code>: Update on every sample</p>
-</li>
-<li>
-<p><code>Every Frame</code>: Update once per frame</p>
-</li>
-<li>
-<p><code>Manual</code>: Update manually</p>
-</li>
-</ul>
-</li>
-<li>
-<p><code>Format</code>: Output data precision</p>
-<ul>
-<li>
-<p><code>RGBA16F</code>: 16-bit floating-point color, balanced quality and performance</p>
-</li>
-<li>
-<p><code>RGBA32F</code>: 32-bit high-precision color, requires more VRAM</p>
-</li>
-<li>
-<p><code>R16F</code>: 16-bit floating-point depth value</p>
-</li>
-<li>
-<p><code>R32F</code>: 32-bit high-precision depth value</p>
-</li>
-</ul>
-</li>
-</ul>
-<h3 id="basic-usage">Basic Usage<a class="headerlink" href="#basic-usage" title="Permanent link">&para;</a></h3>
+<h4 id="basic-workflow">Basic Workflow<a class="headerlink" href="#basic-workflow" title="Permanent link">&para;</a></h4>
 <ol>
-<li>
-<p>Open <code>Scene Properties &gt; Render Textures</code>.</p>
-</li>
-<li>
-<p>Create a <code>Render Texture</code> entry.</p>
-</li>
-<li>
-<p>Select <code>Source</code>, <code>Camera</code>, resolution, update mode, and format.</p>
-</li>
-<li>
-<p>Add <code>Add &gt; Texture &gt; Render Texture</code> in a regular object material.</p>
-</li>
-<li>
-<p>Select the matching <code>Render Texture</code> entry in the node panel.</p>
-</li>
-<li>
-<p>Use the node's <code>Color</code> / <code>Alpha</code> output in later material calculations.</p>
-</li>
+<li>Open <code>Scene Properties &gt; Render Textures</code>.</li>
+<li>Create a new <code>Render Texture</code> entry.</li>
+<li>Choose <code>Source</code>, <code>Camera</code>, resolution, update mode, and format.</li>
+<li>Add a <code>Add &gt; Texture &gt; Render Texture</code> node in a regular object material.</li>
+<li>Pick the matching <code>Render Texture</code> entry in the node panel.</li>
+<li>Use the node's <code>Color</code> / <code>Alpha</code> outputs in the rest of the material.</li>
 </ol>
 <h2 id="2-filter-materials">2. Filter Materials<a class="headerlink" href="#2-filter-materials" title="Permanent link">&para;</a></h2>
-<h3 id="feature-description_1">Feature Description<a class="headerlink" href="#feature-description_1" title="Permanent link">&para;</a></h3>
-<p>This is a scene-level Eevee full-screen filter stack. Each entry is a <code>Filter</code> domain material, and the current frame is processed in list order.</p>
-<h3 id="panel-entry-point_1">Panel Entry Point<a class="headerlink" href="#panel-entry-point_1" title="Permanent link">&para;</a></h3>
+<h4 id="feature-description_1">Feature Description<a class="headerlink" href="#feature-description_1" title="Permanent link">&para;</a></h4>
+<p><code>Filter Materials</code> is a scene-level Eevee full-screen filter stack. Each entry is a material in the <code>Filter</code> domain, and the stack is applied in list order to the current frame.</p>
+<h4 id="panel-entry_1">Panel Entry<a class="headerlink" href="#panel-entry_1" title="Permanent link">&para;</a></h4>
 <p><code>Scene Properties &gt; Filter Materials</code></p>
 <div align="center">
-    <img src="images/SnowShot_2026-03-28_04-41-53.png" alt="Filter Materials Panel" style="border-radius: 10px;">
-    <br>
+  <img src="images/SnowShot_2026-03-28_04-41-53.png" alt="Filter Materials" style="border-radius: 10px;">
+  <br>
 </div>
 
-<p>Node tree entry: Shader Node Editor &gt; Shader Type &gt; Filter</p>
+<p>Node-tree entry: Shader Editor &gt; Shader Type &gt; <code>Filter</code></p>
 <div align="center">
-    <img src="images/SnowShot_2026-03-28_04-42-42.png" alt="Filter Shader Type" style="border-radius: 10px;">
-    <br>
+  <img src="images/SnowShot_2026-03-28_04-42-42.png" alt="Filter Shader Type" style="border-radius: 10px;">
+  <br>
 </div>
 
-<h3 id="basic-usage_1">Basic Usage<a class="headerlink" href="#basic-usage_1" title="Permanent link">&para;</a></h3>
+<h4 id="basic-workflow_1">Basic Workflow<a class="headerlink" href="#basic-workflow_1" title="Permanent link">&para;</a></h4>
 <ol>
-<li>
-<p>Open <code>Scene Properties &gt; Filter Materials</code>.</p>
-</li>
-<li>
-<p>Create an entry, or click <code>New Filter Material</code> directly.</p>
-</li>
-<li>
-<p>The selected material must be a <code>Filter</code> domain material.</p>
-</li>
-<li>
-<p>Open Shader Editor and switch the top <code>Shader Type</code> to <code>Filter</code>.</p>
-</li>
-<li>
-<p>Use <code>Scene Color</code> to read scene data, and use <code>Filter Object Info</code> when you want the filter to react to a chosen object's transform or viewport color.</p>
-</li>
-<li>
-<p>Use <code>Execution Stage</code> to choose where the filter runs.</p>
-</li>
+<li>Open <code>Scene Properties &gt; Filter Materials</code>.</li>
+<li>Create a new entry, or click <code>New Filter Material</code>.</li>
+<li>The selected material must be a <code>Filter</code> domain material.</li>
+<li>In the Shader Editor, switch the top <code>Shader Type</code> to <code>Filter</code>.</li>
+<li>Use <code>Scene Color</code> to read scene data, and combine it with <code>Filter Object Info</code> or <code>Filter Mask</code> when object-driven control is needed.</li>
+<li>Use <code>AOV Input</code> if the filter needs to read an existing custom pass.</li>
+<li>Use <code>AOV Output</code> if the filter should write an intermediate or final result into a named AOV.</li>
+<li>Choose the insertion point with <code>Execution Stage</code>.</li>
 </ol>
-<h3 id="important-notes">Important Notes<a class="headerlink" href="#important-notes" title="Permanent link">&para;</a></h3>
+<h4 id="important-notes">Important Notes<a class="headerlink" href="#important-notes" title="Permanent link">&para;</a></h4>
 <ul>
-<li>
-<p>The default sampling coordinate of <code>Scene Color</code> is the <code>Window</code> output of the <code>Texture Coordinate</code> node</p>
-</li>
-<li>
-<p><code>AOV</code> input is supported</p>
-</li>
-<li>
-<p><code>Execution Stage</code> insertion points:</p>
-<ul>
-<li>
-<p><code>Before Volume Fog</code>: Execute before volume fog processing</p>
-</li>
-<li>
-<p><code>Before Depth of Field</code>: Execute before depth of field</p>
-</li>
-<li>
-<p><code>Before Composite</code>: Execute before the compositor</p>
-</li>
-</ul>
-</li>
+<li>The default sampling coordinate for <code>Scene Color</code> is the <code>Window</code> output of the <code>Texture Coordinate</code> node</li>
+<li><code>AOV Input</code> is supported</li>
+<li><code>AOV Output</code> is supported, so a filter can write to a named AOV before sending the final result into <code>Filter Output</code></li>
+<li><code>Execution Stage</code> currently provides three insertion points:</li>
+<li><code>Before Volume Fog</code></li>
+<li><code>Before Depth of Field</code></li>
+<li><code>Before Composite</code></li>
 </ul>
 
 

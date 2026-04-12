@@ -607,25 +607,25 @@
 
 <h1 id="blender-51-npr-port">Blender 5.1 NPR Port 新增功能与使用说明<a class="headerlink" href="#blender-51-npr-port" title="Permanent link">&para;</a></h1>
 <h2 id="_1">项目介绍<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
-<p><code>Blender 5.1 NPR Port</code> 是一个 NPR 特化的 <code>Blender</code> 分支，在融合了 <code>Goo Engine</code> 和 <code>4.4 NPR-prototype</code> 特色节点之外，还额外添加了一些实用特色节点。</p>
+<p><code>Blender 5.1 NPR Port</code> 是一个 NPR 特化的 <code>Blender</code> 分支，在融合了 <code>Goo Engine</code> 和 <code>4.4 NPR-prototype</code> 特色节点之外，还额外加入了一批面向 <code>Eevee</code> 的扩展节点、滤镜工作流和界面增强。</p>
 <p>大部分功能是 <code>Eevee</code> 专用，不支持 <code>Cycles</code>。</p>
 <h2 id="_2">文档范围<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
 <p>这份文档说明当前 <code>Blender 5.1 NPR Port</code> 相比官方 <code>Blender 5.1</code> 已经加入、并且当前分支内实际存在的 NPR / Eevee 扩展功能，以及它们的基本使用方法。</p>
 <h2 id="_3">节点一览<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
 <div align="center">
-    <img src="images/SnowShot_2026-03-28_07-50-39.png" alt="alt text" style="border-radius: 10px;">
+    <img src="images/SnowShot_2026-03-28_07-50-39.png" alt="Shader Nodes" style="border-radius: 10px;">
     <br>
     <sub>着色器节点</sub>
 </div>
 
 <div align="center">
-    <img src="images/SnowShot_2026-03-28_04-23-33.png" alt="alt text" style="border-radius: 10px;">
+    <img src="images/SnowShot_2026-03-28_04-23-33.png" alt="NPR Tree Nodes" style="border-radius: 10px;">
     <br>
-    <sub>NPR Tree 节点 (部分着色器节点也可以在NPR Tree中使用)</sub>
+    <sub>NPR Tree 节点（部分着色器节点也可以在 NPR Tree 中使用）</sub>
 </div>
 
 <div align="center">
-    <img src="images/SnowShot_2026-03-28_04-30-16.png" alt="alt text" style="border-radius: 10px;">
+    <img src="images/SnowShot_2026-03-28_04-30-16.png" alt="Filter Nodes" style="border-radius: 10px;">
     <br>
     <sub>滤镜节点</sub>
 </div>
@@ -641,19 +641,19 @@
 <li>
 <p><strong>扩展节点</strong></p>
 <hr />
-<p>深入了解各个新增节点的功能</p>
+<p>深入了解各个新增节点的功能和使用方式</p>
 <p><a href="extended-nodes.html">查看 扩展节点 →</a></p>
 </li>
 <li>
 <p><strong>NPR 工作流</strong></p>
 <hr />
-<p>学习 NPR Tree 的工作方式</p>
-<p><a href="npr-workflow.html">查看 NPR Tree 工作流 →</a></p>
+<p>学习 NPR Tree 的挂接方式和专用节点</p>
+<p><a href="npr-workflow.html">查看 NPR 工作流 →</a></p>
 </li>
 <li>
 <p><strong>界面与设置</strong></p>
 <hr />
-<p>查看更多界面和工作流选项，包括骨骼显示控制和 Eevee Performance 视图</p>
+<p>查看更多界面选项和工作流补充</p>
 <p><a href="interface-guide.html">查看 界面与设置 →</a></p>
 </li>
 </ul>
@@ -661,112 +661,57 @@
 <h2 id="_4">主要功能分类<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
 <h3 id="1-scene-eevee">1. Scene 级 Eevee 扩展<a class="headerlink" href="#1-scene-eevee" title="Permanent link">&para;</a></h3>
 <ul>
-<li>
-<p><code>Render Textures</code></p>
-</li>
-<li>
-<p><code>Filter Materials</code></p>
-</li>
+<li><code>Render Textures</code></li>
+<li><code>Filter Materials</code></li>
+<li><code>Filter</code> 域下可用的 <code>AOV Input / AOV Output</code></li>
 </ul>
 <h3 id="2">2. 着色器节点<a class="headerlink" href="#2" title="Permanent link">&para;</a></h3>
 <ul>
-<li>
-<p><code>Render Info</code></p>
-</li>
-<li>
-<p><code>Scene Time</code></p>
-</li>
-<li>
-<p><code>Screen Derivative</code></p>
-</li>
-<li>
-<p><code>Portal In / Portal Out</code></p>
-</li>
-<li>
-<p><code>Screenspace Info</code></p>
-</li>
-<li>
-<p><code>World Environment</code></p>
-</li>
-<li>
-<p><code>World To Tangent</code></p>
-</li>
-<li>
-<p><code>GLSL Function</code></p>
-</li>
-<li>
-<p><code>Image to Closure</code></p>
-</li>
-<li>
-<p><code>Basis Transform</code></p>
-</li>
-<li>
-<p><code>SDF Primitive</code></p>
-</li>
-<li>
-<p><code>SDF Operator</code></p>
-</li>
-<li>
-<p><code>SDF Vector Operator</code></p>
-</li>
-<li>
-<p><code>Bevel</code></p>
-</li>
-<li>
-<p><code>Curvature</code></p>
-</li>
-<li>
-<p><code>Shader Info</code></p>
-</li>
-<li>
-<p><code>Light Info</code></p>
-</li>
-<li>
-<p><code>Filter Object Info</code></p>
-</li>
-<li>
-<p><code>Scene Color</code></p>
-</li>
+<li><code>Filter Object Info</code></li>
+<li><code>Filter Mask</code></li>
+<li><code>Scene Color</code></li>
+<li><code>Render Info</code></li>
+<li><code>Scene Time</code></li>
+<li><code>Screen Derivative</code></li>
+<li><code>Portal In / Portal Out</code></li>
+<li><code>Screenspace Info</code></li>
+<li><code>World Environment</code></li>
+<li><code>Light Probe Color</code></li>
+<li><code>World To Tangent</code></li>
+<li><code>GLSL Function</code></li>
+<li><code>Image to Closure</code></li>
+<li><code>Basis Transform</code></li>
+<li><code>Twirl</code></li>
+<li><code>Water Ripples</code></li>
+<li><code>Hex Grid Texture</code></li>
+<li><code>SDF Primitive</code></li>
+<li><code>SDF Operator</code></li>
+<li><code>SDF Vector Operator</code></li>
+<li><code>Bevel</code></li>
+<li><code>Curvature</code></li>
+<li><code>Shader Info</code></li>
+<li><code>Light Info</code></li>
+<li><code>Color Ramp</code> 的 <code>OKLab</code> 模式</li>
 </ul>
 <h3 id="3-npr-tree">3. NPR Tree 工作流<a class="headerlink" href="#3-npr-tree" title="Permanent link">&para;</a></h3>
 <ul>
-<li>
-<p><code>NPR Input</code></p>
-</li>
-<li>
-<p><code>NPR Refraction</code></p>
-</li>
-<li>
-<p><code>Image Sample</code></p>
-</li>
-<li>
-<p><code>For Each Light</code></p>
-</li>
-<li>
-<p>内置节点组资产</p>
-</li>
+<li><code>NPR Input</code></li>
+<li><code>NPR Refraction</code></li>
+<li><code>Image Sample</code></li>
+<li><code>For Each Light</code></li>
+<li>内置节点组资产</li>
 </ul>
 <h3 id="4">4. 界面与设置<a class="headerlink" href="#4" title="Permanent link">&para;</a></h3>
 <ul>
-<li>
-<p>材质预览控制</p>
-</li>
-<li>
-<p>世界环境配置</p>
-</li>
-<li>
-<p>骨骼 Outliner 显示控制</p>
-</li>
-<li>
-<p><code>Eevee Performance</code> Outliner 视图</p>
-</li>
-<li>
-<p>灯光组管理</p>
-</li>
+<li><code>Eevee Performance</code> Outliner 视图</li>
+<li>材质预览控制</li>
+<li>材质剔除模式</li>
+<li>灯光组管理</li>
+<li>骨骼 Outliner 显示控制</li>
 </ul>
 <div class="admonition warning">
 <p class="admonition-title">Eevee 专用</p>
-<p>所有 NPR Port 功能都需要 <strong>Eevee 渲染引擎</strong>。不支持 Cycles。</p>
+<p>所有 NPR Port 功能都需要 <strong>Eevee 渲染引擎</strong>。不支持 <code>Cycles</code>。</p>
 </div>
 
 
