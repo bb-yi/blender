@@ -46,7 +46,7 @@ def make_camera():
     bpy.context.scene.camera = camera
 
 
-def make_shader_info_material(name, output_name):
+def make_shader_info_material(name, output_name, exponent=16.0):
     material = bpy.data.materials.new(name)
     material.use_nodes = True
 
@@ -58,7 +58,10 @@ def make_shader_info_material(name, output_name):
     emission = nodes.new("ShaderNodeEmission")
     emission.inputs["Strength"].default_value = 1.0
     shader_info = nodes.new("ShaderNodeShaderInfo")
+    exponent_value = nodes.new("ShaderNodeValue")
+    exponent_value.outputs[0].default_value = exponent
 
+    links.new(exponent_value.outputs[0], shader_info.inputs["Exponent"])
     links.new(shader_info.outputs[output_name], emission.inputs["Color"])
     links.new(emission.outputs["Emission"], output.inputs["Surface"])
     return material
@@ -167,6 +170,7 @@ def run_tests():
     try:
         assert_unshadowed_viewport("Diffuse Shading")
         assert_unshadowed_viewport("Half-Lambert Factor")
+        assert_unshadowed_viewport("Blinn-Phong Factor", min_value=0.05, tolerance=COLOR_EPSILON)
         write_result("PASS")
     except Exception:
         write_result("FAIL", traceback.format_exc())

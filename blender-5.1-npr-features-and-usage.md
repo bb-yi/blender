@@ -669,6 +669,7 @@
 
 - `World Position`
 - `Normal`
+- `Exponent`
 
 #### 输出
 
@@ -676,6 +677,7 @@
 - `Shadow`
 - `Ambient Lighting`
 - `Half-Lambert Factor`
+- `Blinn-Phong Factor`
 
 #### 各输出的含义
 
@@ -690,9 +692,15 @@
   - 来自探针 / 环境间接光的环境照明信息
 - `Half-Lambert Factor`
   - 每个灯光的半兰伯特光照之和,再钳制到0-1
+- `Blinn-Phong Factor`
+  - 每个灯光的布林冯高光因子按镜面通道加权求平均,再钳制到0-1
+  - 默认不直接乘阴影,需要时请与 `Shadow` 输出自行组合
 
 #### 额外说明
 
+- `Exponent`
+  - 控制布林冯高光的锐度,数值越高高光越集中
+  - 默认值为 `16`
 - 节点面板新增 `Shadow Mode`
   - `Built-in` / `Stable` / `Soft Filtered`
 - 当 `Shadow Mode = Stable` 或 `Soft Filtered` 时，可用 `Stable Samples` 提高阴影质量

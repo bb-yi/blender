@@ -37,7 +37,7 @@ def make_camera():
     return camera
 
 
-def make_shader_info_material(name, output_name):
+def make_shader_info_material(name, output_name, exponent=16.0):
     material = bpy.data.materials.new(name)
     material.use_nodes = True
 
@@ -55,12 +55,17 @@ def make_shader_info_material(name, output_name):
     shader_info = nodes.new("ShaderNodeShaderInfo")
     shader_info.location = (0.0, 0.0)
 
+    exponent_value = nodes.new("ShaderNodeValue")
+    exponent_value.location = (0.0, -140.0)
+    exponent_value.outputs[0].default_value = exponent
+
+    links.new(exponent_value.outputs[0], shader_info.inputs["Exponent"])
     links.new(shader_info.outputs[output_name], emission.inputs["Color"])
     links.new(emission.outputs["Emission"], output.inputs["Surface"])
     return material
 
 
-def make_shader_info_material_with_normal(name, output_name, normal_xyz):
+def make_shader_info_material_with_normal(name, output_name, normal_xyz, exponent=16.0):
     material = bpy.data.materials.new(name)
     material.use_nodes = True
 
@@ -84,7 +89,12 @@ def make_shader_info_material_with_normal(name, output_name, normal_xyz):
     normal_value.inputs["Y"].default_value = normal_xyz[1]
     normal_value.inputs["Z"].default_value = normal_xyz[2]
 
+    exponent_value = nodes.new("ShaderNodeValue")
+    exponent_value.location = (0.0, -260.0)
+    exponent_value.outputs[0].default_value = exponent
+
     links.new(normal_value.outputs["Vector"], shader_info.inputs["Normal"])
+    links.new(exponent_value.outputs[0], shader_info.inputs["Exponent"])
     links.new(shader_info.outputs[output_name], emission.inputs["Color"])
     links.new(emission.outputs["Emission"], output.inputs["Surface"])
     return material
@@ -376,6 +386,23 @@ def assert_diffuse_sun_gradient_on_sphere():
     )
 
 
+def assert_blinn_phong_gradient_on_sphere():
+    clear_scene()
+    configure_scene()
+    make_camera()
+    make_sphere(make_shader_info_material("BlinnPhongSphereMaterial", "Blinn-Phong Factor"))
+    make_light()
+
+    pixels, width, height = render_image()
+    bright_side = sample_world_point(pixels, width, height, -1.0, 0.0)
+    dark_side = sample_world_point(pixels, width, height, 1.0, 0.0)
+
+    assert bright_side[0] > dark_side[0] + 0.1, (
+        "Blinn-Phong Factor should concentrate toward the lit side of the sphere, "
+        f"got bright={bright_side} dark={dark_side}"
+    )
+
+
 assert hasattr(bpy.types, "ShaderNodeShaderInfo"), "ShaderNodeShaderInfo is not registered"
 
 assert_diffuse_response()
@@ -386,8 +413,12 @@ assert_world_sun_black("Diffuse Shading")
 assert_unshadowed_response("Half-Lambert Factor", min_value=0.2, tolerance=0.05)
 assert_half_lambert_lifts_negative_ndotl()
 assert_half_lambert_gradient_on_sphere()
+assert_unshadowed_response("Blinn-Phong Factor", min_value=0.05, tolerance=0.08)
+assert_blinn_phong_gradient_on_sphere()
 assert_shadow_response("Shadow")
+assert_no_light_black("Blinn-Phong Factor")
 assert_no_light_black("Shadow")
 assert_no_light_black("Half-Lambert Factor")
+assert_world_sun_black("Blinn-Phong Factor")
 assert_world_sun_black("Shadow")
 assert_world_sun_black("Half-Lambert Factor")

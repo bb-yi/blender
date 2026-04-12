@@ -491,19 +491,22 @@ bool shader_info_is_world_sun_light(uint light_index, LightData light, bool is_l
 [[node]]
 void node_shader_info(float3 position,
                       float3 normal_in,
+                      float exponent,
                       float shadow_mode,
                       float stable_shadow_samples,
                       float lightgroup_hash_value,
                       out float4 diffuse_shading,
                       out float shadow,
                       out float4 ambient_lighting,
-                      out float half_lambert_factor)
+                      out float half_lambert_factor,
+                      out float blinn_phong_factor)
 {
 #if defined(GPU_FRAGMENT_SHADER) && (defined(MAT_DEFERRED) || defined(MAT_FORWARD) || defined(NPR_SHADER))
   float3 shading_normal = shader_info_resolve_normal(normal_in);
   float3 geometry_normal = shader_info_resolve_normal(g_data.Ng);
   float3 probe_bias_normal = shader_info_resolve_normal(g_data.Ni);
   float3 view_vector = drw_world_incident_vector(position);
+  float safe_exponent = max(exponent, 1.0f);
   uint lightgroup_hash = floatBitsToUint(lightgroup_hash_value);
 
   ObjectInfos object_infos = drw_infos[drw_resource_id()];
@@ -516,6 +519,8 @@ void node_shader_info(float3 position,
   float shadow_weight_sum = 0.0f;
   float half_lambert_sum = 0.0f;
   float half_lambert_weight_sum = 0.0f;
+  float blinn_phong_sum = 0.0f;
+  float blinn_phong_weight_sum = 0.0f;
 
   LIGHT_FOREACH_ALL_BEGIN(light_cull_buf,
                           light_zbin_buf,
@@ -542,7 +547,8 @@ void node_shader_info(float3 position,
     bool is_world_sun = shader_info_is_world_sun_light(l_idx, light, is_local);
     float surface_attenuation = light_attenuation_surface(light, is_directional, lv);
     float diffuse_power = light_power_get(light, LIGHT_DIFFUSE);
-    if (diffuse_power < LIGHT_ATTENUATION_THRESHOLD) {
+    float specular_power = light_power_get(light, LIGHT_SPECULAR);
+    if (max(diffuse_power, specular_power) < LIGHT_ATTENUATION_THRESHOLD) {
       continue;
     }
 
@@ -550,21 +556,33 @@ void node_shader_info(float3 position,
       continue;
     }
 
-    float light_weight = diffuse_power * shader_info_max_component(light.color);
     float ndotl = dot(shading_normal, lv.L);
-    float lambert = saturate(ndotl);
     float half_lambert = saturate(ndotl * 0.5f + 0.5f);
 
-    float4 ltc_mat = float4(1.0f, 0.0f, 0.0f, 1.0f);
-    float diffuse_radiance = light_ltc(utility_tx, light, shading_normal, view_vector, lv, ltc_mat);
+    float diffuse_weight = diffuse_power * shader_info_max_component(light.color);
+    if (diffuse_power >= LIGHT_ATTENUATION_THRESHOLD) {
+      float4 ltc_mat = float4(1.0f, 0.0f, 0.0f, 1.0f);
+      float diffuse_radiance = light_ltc(utility_tx, light, shading_normal, view_vector, lv, ltc_mat);
 
-    /* Match Goo's Shader Info structure: direct diffuse uses the light's diffuse radiance
-     * without extra shadow masking or display remapping. */
-    diffuse_shading_sum += light.color * diffuse_power * diffuse_radiance;
-    half_lambert_sum += half_lambert * light_weight;
-    half_lambert_weight_sum += light_weight;
+      /* Match Goo's Shader Info structure: direct diffuse uses the light's diffuse radiance
+       * without extra shadow masking or display remapping. */
+      diffuse_shading_sum += light.color * diffuse_power * diffuse_radiance;
+      half_lambert_sum += half_lambert * diffuse_weight;
+      half_lambert_weight_sum += diffuse_weight;
+    }
 
-    if (surface_attenuation > LIGHT_ATTENUATION_THRESHOLD) {
+    if (specular_power >= LIGHT_ATTENUATION_THRESHOLD) {
+      float3 half_vector = safe_normalize(lv.L + view_vector);
+      float nh = saturate(dot(shading_normal, half_vector));
+      float blinn_phong = pow(nh, safe_exponent);
+      float specular_weight = specular_power * shader_info_max_component(light.color);
+      blinn_phong_sum += blinn_phong * specular_weight;
+      blinn_phong_weight_sum += specular_weight;
+    }
+
+    if (diffuse_power >= LIGHT_ATTENUATION_THRESHOLD &&
+        surface_attenuation > LIGHT_ATTENUATION_THRESHOLD)
+    {
       float visibility = shader_info_shadow_visibility(light,
                                                        is_directional,
                                                        lv.L,
@@ -576,8 +594,8 @@ void node_shader_info(float3 position,
                                                        shadow_mode,
                                                        stable_shadow_samples);
       float shadow_visibility = visibility * surface_attenuation;
-      visibility_sum += shadow_visibility * light_weight;
-      shadow_weight_sum += light_weight;
+      visibility_sum += shadow_visibility * diffuse_weight;
+      shadow_weight_sum += diffuse_weight;
     }
   }
   LIGHT_FOREACH_ALL_END();
@@ -601,10 +619,14 @@ void node_shader_info(float3 position,
   half_lambert_factor = (half_lambert_weight_sum > 1e-8f) ?
                             saturate(half_lambert_sum / half_lambert_weight_sum) :
                             0.0f;
+  blinn_phong_factor = (blinn_phong_weight_sum > 1e-8f) ?
+                           saturate(blinn_phong_sum / blinn_phong_weight_sum) :
+                           0.0f;
 #else
   diffuse_shading = float4(0.0f);
   shadow = 0.0f;
   ambient_lighting = float4(0.0f);
   half_lambert_factor = 0.0f;
+  blinn_phong_factor = 0.0f;
 #endif
 }
