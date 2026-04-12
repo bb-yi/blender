@@ -2,35 +2,33 @@
 
 ## 1. 基本概念
 
-`NPR Tree` 是挂在普通物体材质之后进行颜色后处理的节点树，能够以颜色的形式对着色器的输出进行风格化处理。
+`NPR Tree` 是挂在普通物体材质之外的第二套表现节点树，用来对 Eevee 的材质结果做 NPR 风格重组和二次表现。
+
+普通物体材质依然负责基础表面着色，`NPR Tree` 负责额外的 NPR 表现层。
 
 ## 2. 挂接方式
 
 1. 在普通物体材质中保留正常的 `Material Output` 和基础表面着色。
-
 2. 选中 `Material Output` 节点。
-
 3. 在它的 `NPR Tree` 属性里新建或指定一个节点组。
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_05-18-15.png" alt="alt text" style="border-radius: 10px;">
+	<img src="images/SnowShot_2026-03-28_05-18-15.png" alt="NPR Tree Slot" style="border-radius: 10px;">
 	<br>
 </div>
 
 4. 需要编辑这棵树时，在 Shader Editor 顶部把 `Shader Type` 切到 `NPR`。
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_05-18-33.png" alt="alt text" style="border-radius: 10px;">
+	<img src="images/SnowShot_2026-03-28_05-18-33.png" alt="NPR Shader Type" style="border-radius: 10px;">
 	<br>
 </div>
 
 ## 3. 说明
 
 - 材质的渲染方式需要设置为 `抖动（延迟渲染）`
-
 - 可以使用 `Ctrl + Tab` 在物体和 NPR 之间快速切换
-
-- 当前 `NPR Tree` 使用的动作可在 `Material Properties > Animation > NPR Tree Action` 查看、切换或新建；这个槽位与普通材质动作分开管理
+- `NPR Tree` 的关键帧与驱动器使用独立的 `NPR Tree Action`，可在 `Material Properties > Animation > NPR Tree Action` 查看、切换或新建
 
 <div align="center">
 	<img src="images/SnowShot_2026-03-31_03-35-17.png" alt="NPR Tree Action" style="border-radius: 10px;">
@@ -44,7 +42,7 @@
 ### NPR Input
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_05-22-04.png" alt="alt text" style="border-radius: 10px;">
+	<img src="images/SnowShot_2026-03-28_05-22-04.png" alt="NPR Input" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -54,30 +52,22 @@
 
 #### 输出
 
-- `Combined Color`：合成之后的最终颜色
-
-- `Diffuse Color`：漫反射颜色
-
-- `Diffuse Direct`：漫反射直接光
-
-- `Diffuse Indirect`：漫反射间接光（光线追踪、探针）
-
-- `Specular Color`：高光颜色
-
-- `Specular Direct`：高光直接光
-
-- `Specular Indirect`：间接反射
-
-- `Position`：世界空间位置
-
-- `Normal`：法线
+- `Combined Color`
+- `Diffuse Color`
+- `Diffuse Direct`
+- `Diffuse Indirect`
+- `Specular Color`
+- `Specular Direct`
+- `Specular Indirect`
+- `Position`
+- `Normal`
 
 这些输出本质上更接近图像句柄 / 纹理句柄，适合继续交给 `Image Sample` 做邻域采样，或接到支持这类输入的 NPR 节点上继续处理。
 
 ### NPR Refraction
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_05-22-16.png" alt="alt text" style="border-radius: 10px;">
+	<img src="images/SnowShot_2026-03-28_05-22-16.png" alt="NPR Refraction" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -85,13 +75,10 @@
 
 读取折射相关缓冲，类似 `Screenspace Info`。
 
-参考 `Screenspace Info` 节点的使用说明。
-
 #### 输出
 
-- `Combined Color`：折射事件的最终颜色
-
-- `Position`：折射位置的世界坐标
+- `Combined Color`
+- `Position`
 
 ### Image Sample
 
@@ -100,15 +87,14 @@
 `Add > Utilities > Image Sample`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_05-25-34.png" alt="alt text" style="border-radius: 10px;">
+	<img src="images/SnowShot_2026-03-28_05-25-34.png" alt="Image Sample" style="border-radius: 10px;">
 	<br>
 </div>
 
 #### 输入输出
 
-- 输入：`Image`（图像句柄）、`Offset`（采样偏移）
-
-- 输出：`Color`（采样结果颜色）
+- 输入：`Image`、`Offset`
+- 输出：`Color`
 
 #### 作用
 
@@ -117,7 +103,6 @@
 #### 偏移模式
 
 - `View`：按视空间偏移
-
 - `Pixel`：按像素偏移
 
 ### For Each Light
@@ -127,7 +112,7 @@
 `Add > Utilities > For Each Light`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_05-26-08.png" alt="alt text" style="border-radius: 10px;">
+	<img src="images/SnowShot_2026-03-28_05-26-08.png" alt="For Each Light" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -135,43 +120,36 @@
 
 它会按当前影响表面的灯光逐个执行内部逻辑，每次循环输出一个灯光的信息。
 
-<div align="center">
-	<img src="images/SnowShot_2026-03-28_06-55-43.png" alt="alt text" style="border-radius: 10px;">
-	<br>
-	<sub>使用参考</sub>
-</div>
-
 #### 内置可用信息
 
 `For Each Light Input` 当前提供：
 
-- 输入：`Normal`（表面法线）
+- 输入：`Normal`
+- 输出：`Color`
+- 输出：`Direction`
+- 输出：`Distance`
+- 输出：`Attenuation`
+- 输出：`Shadow Mask`
 
-- 输出：`Color`（灯光颜色）、`Direction`（灯光方向）、`Distance`（灯光距离）、`Attenuation`（灯光衰减）、`Shadow Mask`（阴影遮罩）
+此外还支持在区域输入 / 输出上增添自定义 socket，用于在逐灯循环内部传递你自己的中间量。
 
-## 内置 NPR 节点组资产
+## 5. 内置 NPR 节点组资产
 
 当前版本已经把 Blender 4.4 NPR 版本中的一批常用节点组，迁移并整理成了 5.1 可用的资产包。
 
 ### 当前内置的主要节点组
 
 - `Cavity`
-
 - `Co-Planar Edge Detection`
-
 - `Curvature`
-
 - `Kuwahara`
-
 - `Shading Models`
-
 - `Surface Curvature`
 
 ### 资产说明
 
-- 这些节点组已经按 Blender 5.1 的格式迁移。
-
-- 由于重复区域节点名称修改了，4.4 NPR Prototype 的工程需要自己重新连接区域相关节点。
+- 这些节点组已经按 Blender 5.1 的格式迁移
+- 由于重复区域节点名称修改了，4.4 NPR Prototype 的工程需要自己重新连接区域相关节点
 
 !!! warning "Eevee 专用"
     `NPR Tree` 当前仅支持 `Eevee`，不支持 `Cycles`。

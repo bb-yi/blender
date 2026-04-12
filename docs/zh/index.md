@@ -2,7 +2,7 @@
 
 ## 项目介绍
 
-`Blender 5.1 NPR Port` 是一个 NPR 特化的 `Blender` 分支，在融合了 `Goo Engine` 和 `4.4 NPR-prototype` 特色节点之外，还额外添加了一些实用特色节点。
+`Blender 5.1 NPR Port` 是一个 NPR 特化的 `Blender` 分支，在融合了 `Goo Engine` 和 `4.4 NPR-prototype` 特色节点之外，还额外加入了一批面向 `Eevee` 的扩展节点、滤镜工作流和界面增强。
 
 大部分功能是 `Eevee` 专用，不支持 `Cycles`。
 
@@ -13,19 +13,19 @@
 ## 节点一览
 
 <div align="center">
-    <img src="images/SnowShot_2026-03-28_07-50-39.png" alt="alt text" style="border-radius: 10px;">
+    <img src="images/SnowShot_2026-03-28_07-50-39.png" alt="Shader Nodes" style="border-radius: 10px;">
     <br>
     <sub>着色器节点</sub>
 </div>
 
 <div align="center">
-    <img src="images/SnowShot_2026-03-28_04-23-33.png" alt="alt text" style="border-radius: 10px;">
+    <img src="images/SnowShot_2026-03-28_04-23-33.png" alt="NPR Tree Nodes" style="border-radius: 10px;">
     <br>
-    <sub>NPR Tree 节点 (部分着色器节点也可以在NPR Tree中使用)</sub>
+    <sub>NPR Tree 节点（部分着色器节点也可以在 NPR Tree 中使用）</sub>
 </div>
 
 <div align="center">
-    <img src="images/SnowShot_2026-03-28_04-30-16.png" alt="alt text" style="border-radius: 10px;">
+    <img src="images/SnowShot_2026-03-28_04-30-16.png" alt="Filter Nodes" style="border-radius: 10px;">
     <br>
     <sub>滤镜节点</sub>
 </div>
@@ -44,7 +44,7 @@
 
     ---
 
-    深入了解各个新增节点的功能
+    深入了解各个新增节点的功能和使用方式
 
     [查看 扩展节点 →](extended-nodes.md)
 
@@ -52,15 +52,15 @@
 
     ---
 
-    学习 NPR Tree 的工作方式
+    学习 NPR Tree 的挂接方式和专用节点
 
-    [查看 NPR Tree 工作流 →](npr-workflow.md)
+    [查看 NPR 工作流 →](npr-workflow.md)
 
 - **界面与设置**
 
     ---
 
-    查看更多界面和工作流选项，包括骨骼显示控制和 Eevee Performance 视图
+    查看更多界面选项和工作流补充
 
     [查看 界面与设置 →](interface-guide.md)
 
@@ -71,72 +71,52 @@
 ### 1. Scene 级 Eevee 扩展
 
 - `Render Textures`
-
 - `Filter Materials`
+- `Filter` 域下可用的 `AOV Input / AOV Output`
 
 ### 2. 着色器节点
 
-- `Render Info`
-
-- `Scene Time`
-
-- `Screen Derivative`
-
-- `Portal In / Portal Out`
-
-- `Screenspace Info`
-
-- `World Environment`
-
-- `World To Tangent`
-
-- `GLSL Function`
-
-- `Image to Closure`
-
-- `Basis Transform`
-
-- `SDF Primitive`
-
-- `SDF Operator`
-
-- `SDF Vector Operator`
-
-- `Bevel`
-
-- `Curvature`
-
-- `Shader Info`
-
-- `Light Info`
-
 - `Filter Object Info`
-
+- `Filter Mask`
 - `Scene Color`
+- `Render Info`
+- `Scene Time`
+- `Screen Derivative`
+- `Portal In / Portal Out`
+- `Screenspace Info`
+- `World Environment`
+- `Light Probe Color`
+- `World To Tangent`
+- `GLSL Function`
+- `Image to Closure`
+- `Basis Transform`
+- `Twirl`
+- `Water Ripples`
+- `Hex Grid Texture`
+- `SDF Primitive`
+- `SDF Operator`
+- `SDF Vector Operator`
+- `Bevel`
+- `Curvature`
+- `Shader Info`
+- `Light Info`
+- `Color Ramp` 的 `OKLab` 模式
 
 ### 3. NPR Tree 工作流
 
 - `NPR Input`
-
 - `NPR Refraction`
-
 - `Image Sample`
-
 - `For Each Light`
-
 - 内置节点组资产
 
 ### 4. 界面与设置
 
+- `Eevee Performance` Outliner 视图
 - 材质预览控制
-
-- 世界环境配置
-
+- 材质剔除模式
+- 灯光组管理
 - 骨骼 Outliner 显示控制
 
-- `Eevee Performance` Outliner 视图
-
-- 灯光组管理
-
 !!! warning "Eevee 专用"
-    所有 NPR Port 功能都需要 **Eevee 渲染引擎**。不支持 Cycles。
+    所有 NPR Port 功能都需要 **Eevee 渲染引擎**。不支持 `Cycles`。

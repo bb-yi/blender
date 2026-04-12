@@ -2,7 +2,7 @@
 
 ## Project Introduction
 
-`Blender 5.1 NPR Port` is an NPR-focused `Blender` branch. In addition to integrating characteristic nodes from `Goo Engine` and the `4.4 NPR-prototype`, it also adds a number of practical extra nodes.
+`Blender 5.1 NPR Port` is an NPR-focused `Blender` branch. In addition to integrating characteristic nodes from `Goo Engine` and the `4.4 NPR-prototype`, it adds a set of Eevee-oriented extension nodes, filter workflows, and interface improvements.
 
 Most features are `Eevee`-only and do not support `Cycles`.
 
@@ -54,13 +54,13 @@ This document describes the NPR / Eevee extension features that have been added 
 
     Learn how the NPR Tree workflow is organized.
 
-    [View NPR Tree Workflow →](npr-workflow.md)
+    [View NPR Workflow →](npr-workflow.md)
 
 - **Interface & Settings**
 
     ---
 
-    Check additional interface options and workflow settings, including pose bone visibility and the Eevee Performance view.
+    Check additional interface options and workflow settings.
 
     [View Interface & Settings →](interface-guide.md)
 
@@ -71,72 +71,52 @@ This document describes the NPR / Eevee extension features that have been added 
 ### 1. Scene-Level Eevee Extensions
 
 - `Render Textures`
-
 - `Filter Materials`
+- `AOV Input / AOV Output` in the `Filter` domain
 
 ### 2. Shader Nodes
 
-- `Render Info`
-
-- `Scene Time`
-
-- `Screen Derivative`
-
-- `Portal In / Portal Out`
-
-- `Screenspace Info`
-
-- `World Environment`
-
-- `World To Tangent`
-
-- `GLSL Function`
-
-- `Image to Closure`
-
-- `Basis Transform`
-
-- `SDF Primitive`
-
-- `SDF Operator`
-
-- `SDF Vector Operator`
-
-- `Bevel`
-
-- `Curvature`
-
-- `Shader Info`
-
-- `Light Info`
-
 - `Filter Object Info`
-
+- `Filter Mask`
 - `Scene Color`
+- `Render Info`
+- `Scene Time`
+- `Screen Derivative`
+- `Portal In / Portal Out`
+- `Screenspace Info`
+- `World Environment`
+- `Light Probe Color`
+- `World To Tangent`
+- `GLSL Function`
+- `Image to Closure`
+- `Basis Transform`
+- `Twirl`
+- `Water Ripples`
+- `Hex Grid Texture`
+- `SDF Primitive`
+- `SDF Operator`
+- `SDF Vector Operator`
+- `Bevel`
+- `Curvature`
+- `Shader Info`
+- `Light Info`
+- `OKLab` mode in `Color Ramp`
 
-### 3. NPR Tree Workflow
+### 3. NPR Workflow
 
 - `NPR Input`
-
 - `NPR Refraction`
-
 - `Image Sample`
-
 - `For Each Light`
-
-- Built-in node group assets
+- Built-in node-group assets
 
 ### 4. Interface & Settings
 
-- Material preview control
-
-- World environment configuration
-
 - `Eevee Performance` Outliner view
-
+- Material preview control
+- Material face culling
+- Lightgroup management
 - Pose bone Outliner visibility
 
-- Light group management
-
 !!! warning "Eevee Only"
-    All NPR Port features require the **Eevee render engine**. Cycles is not supported.
+    All NPR Port features require the **Eevee render engine**. `Cycles` is not supported.

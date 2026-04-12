@@ -1,14 +1,44 @@
-# Interface & Workflow Notes
+# Interface and Workflow Additions
 
-## 1. Material Selector Preview Toggle
+## 1. Eevee Performance
 
 ### Purpose
 
-Controls whether material preview thumbnails are rendered in the material dropdown / search list.
+Shows Eevee viewport / final-render performance statistics, stage breakdowns, and hints directly in the `Outliner`, making it easier to locate heavy parts of the pipeline.
 
-This option is mainly used to reduce stutter caused by generating previews when opening the material selector in scenes with many materials.
+<div align="center">
+	<img src="images/placeholder_eevee_performance.png" alt="Eevee Performance" style="border-radius: 10px;">
+	<br>
+</div>
 
-### Entry Point
+### Entry
+
+- `Outliner > Display Mode > Eevee Performance`
+- `Profiler` / `Pause` / `Sort by Time` in the `Outliner` header
+- The `Eevee Performance` popover in the `Outliner` header
+
+### Behavior
+
+- Enabling `Profiler` starts collecting performance statistics and displays them in the `Outliner`
+- `Pause` freezes live updates so the current result can be inspected
+- `Sort by Time` sorts the stage list by CPU cost instead of fixed pipeline order
+- `Average Window` sets the frame window used for smoothing statistics
+- The tree currently includes groups such as `Viewport`, `Final Render`, `Metadata`, `Features`, `Stages`, and `Hints`
+
+### Current Scope
+
+- This is mainly a CPU-side Eevee stage profiler and hint view, not a full GPU profiler
+- It is meaningful only for `Eevee`, not for `Cycles`
+
+## 2. Material Selector Previews
+
+### Purpose
+
+Controls whether material previews are rendered in material drop-downs and search lists.
+
+This is mainly useful when many materials exist and expanding the selector would otherwise trigger too many preview renders.
+
+### Entry
 
 `Edit > Preferences > Editing > Objects > Materials > Material Selector Previews`
 
@@ -19,104 +49,80 @@ This option is mainly used to reduce stutter caused by generating previews when 
 
 ### Behavior
 
-- When enabled, the material selector displays material previews using the current logic.
-
-- When disabled, the material selector falls back to ordinary material icons and no longer triggers preview rendering in the dropdown list.
-
-- The default value is enabled.
+- When enabled: the selector shows material previews as usual
+- When disabled: the selector falls back to normal material icons and no longer triggers preview renders in the drop-down list
+- Default value: enabled
 
 ### Current Scope
 
-- Currently only affects material preview display in dropdown selectors such as `template_ID(...)`.
+- Only affects `template_ID(...)` style material pickers in drop-down lists
+- Does not affect the large preview sphere in `Material Properties`
+- Does not affect the actual material render result
 
-- Does not affect the large preview sphere in the `Material Properties` panel.
-
-- Does not affect the final rendering result of the material itself.
-
-## 2. World Environment Exclude
+## 3. Material Face Culling
 
 ### Purpose
 
-Lets you choose a collection so objects in that collection are not affected by the world environment.
-
-### Entry Point
-
-`World Properties > Environment Lighting > Exclude Collection`
+Adds clearer face-culling control for materials. In addition to the usual back-face culling, the NPR Port also supports `Front` culling.
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_05-29-43.png" alt="World Environment Exclude" style="border-radius: 10px;">
+	<img src="images/placeholder_material_face_culling.png" alt="Material Face Culling" style="border-radius: 10px;">
 	<br>
 </div>
 
-### Behavior
+### Entry
 
-- The selected collection is excluded from world-environment lighting.
+`Material Properties > Settings > Culling > Camera`
 
-- This is useful when you want to separate environment-light influence between characters, foreground props, and background elements in the same scene.
+### Available Modes
 
-## 3. Pose Bone Hide in Outliner
+- `None`: render both front and back faces
+- `Back`: hide back-facing faces
+- `Front`: hide front-facing faces
+
+### Notes
+
+- `Front` is useful for shell-style effects, inside-view setups, or some inverted-outline style tricks
+- `Shadow` and `Light Probe Volume` still keep their own culling controls
+
+## 4. Eevee Lightgroup ID
 
 ### Purpose
 
-Adds a dedicated Outliner visibility flag to each `Pose Bone`, so large rigs can be kept cleaner in the Outliner without affecting the rig itself.
+Assigns an integer light-group ID to Eevee lights so the `Shader Info` node can filter direct-light evaluation by group.
 
-This is useful for hiding mechanism bones, helper bones, or low-level control layers while keeping the more important rig hierarchy readable.
+### Entry
 
-### Entry Points
+`Light Data > Light > Lightgroup ID`
+
+### Behavior
+
+- Default value: `0`
+- When `Shader Info` also uses `Lightgroup = 0`, only lights with `Lightgroup ID = 0` are evaluated
+- If a `Shader Info` node uses another integer value, only lights with the same ID are included
+- This grouping currently affects only `Shader Info`, not the default Eevee material lighting path
+
+## 5. Pose Bone Outliner Visibility
+
+### Purpose
+
+Adds a dedicated Outliner visibility flag to each `Pose Bone`, making it easier to organize complex rigs without changing rig behavior itself.
+
+### Entry
 
 - `Bone Properties > Viewport Display > Hide in Outliner`
 - `Outliner > Filter > Hidden PoseBones`
 
 ### Behavior
 
-- Every `Pose Bone` has its own `Hide in Outliner` toggle.
-
-- This toggle is enabled by default.
-
-- `Hidden PoseBones` in the Outliner filter is also enabled by default, so existing rigs keep the same visible result until you disable that filter.
-
-- Once `Outliner > Filter > Hidden PoseBones` is disabled, pose bones with `Hide in Outliner` enabled are hidden from the Outliner tree.
-
-- If a hidden parent bone still has visible children, the visible children remain extracted in the tree so the whole branch does not disappear at once.
+- Every `Pose Bone` has its own `Hide in Outliner` toggle
+- The toggle is enabled by default
+- The `Hidden PoseBones` filter in the `Outliner` is also enabled by default, so existing rigs do not immediately change appearance
+- After disabling `Outliner > Filter > Hidden PoseBones`, bones with `Hide in Outliner` enabled are hidden from the tree
+- If a hidden parent still has visible child bones, those visible children remain in the tree instead of removing the whole hierarchy
 
 ### Current Scope
 
-- Applies only to `Pose Bone`
-
+- Affects `Pose Bone` only
 - Does not affect `Edit Bone`
-
-- Only changes Outliner hierarchy visibility; it does not change transforms, animation, drivers, or rendering
-
-## 4. Eevee Performance
-
-### Purpose
-
-Shows Eevee viewport / final-render performance summaries, stage breakdowns, and feature hints directly in the `Outliner`, so it is easier to spot likely bottlenecks.
-
-It is useful when checking where time is going in `NPR Tree`, `GLSL Function`, filter materials, volume, depth-of-field, and related Eevee paths.
-
-### Entry Points
-
-- `Outliner > Display Mode > Eevee Performance`
-- `Profiler`, `Pause`, and `Sort by Time` controls in the `Outliner` header
-- The `Eevee Performance` settings popover in the `Outliner` header
-
-### Behavior
-
-- Enabling `Profiler` starts collecting and showing the current performance data in the Outliner tree.
-
-- `Pause` freezes further viewport performance updates so the current result can be inspected.
-
-- `Sort by Time` orders stage lists by current CPU cost instead of fixed pipeline order.
-
-- `Average Window` controls how many frames are used for smoothing the displayed statistics.
-
-- The current tree exposes groups such as `Viewport`, `Final Render`, `Metadata`, `Features`, `Stages`, and `Hints`.
-
-### Current Scope
-
-- This is currently an Eevee CPU-side stage breakdown and hint view, not a full GPU profiler
-
-- It is only meaningful in `Eevee`, not in `Cycles`
-
-- It works best as a quick “which area is expensive” inspector rather than a per-microsecond analysis tool
+- Changes only the Outliner hierarchy display, not transforms, animation, drivers, or rendering

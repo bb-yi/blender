@@ -1,6 +1,115 @@
 # Extended Shader Nodes
 
-## 1. General Eevee Utility Nodes
+## 1. Filter-Domain Nodes
+
+### Filter Object Info
+
+#### Entry
+
+`Add > Input > Filter Object Info`
+
+Available only in the `Filter` domain.
+
+<div align="center">
+	<img src="images/filter_object_info.png" alt="Filter Object Info" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### Purpose
+
+Reads the world-space transform and viewport display color of a chosen object, making it easier to drive full-screen filters from scene helpers or controller objects.
+
+#### Node Setting
+
+- `Object`
+
+#### Outputs
+
+- `Location`
+- `Rotation`
+- `Scale`
+- `Color`
+
+#### Notes
+
+- `Location`: world-space location of the chosen object
+- `Rotation`: world-space Euler rotation in radians
+- `Scale`: world-space scale of the chosen object
+- `Color`: viewport display color of the chosen object
+- If no object is assigned, the node falls back to `0` for location / rotation / color and `1` for scale
+
+### Filter Mask
+
+#### Entry
+
+`Add > Input > Filter Mask`
+
+Available only in the `Filter` domain.
+
+<div align="center">
+	<img src="images/placeholder_filter_mask.png" alt="Filter Mask" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### Purpose
+
+Uses Eevee `Cryptomatte` object information to build fast object masks for filter materials.
+
+#### Output
+
+- `Mask`
+
+#### Panel Options
+
+- `Mode`
+  - `Single Object`
+  - `Object List`
+  - `Collection`
+
+#### Notes
+
+- `Single Object` is useful for one controller object
+- `Object List` is useful when a manual object set is needed, and can be filled from the current selection
+- `Collection` is useful when the mask should follow a collection hierarchy
+- The output is a `0-1` float mask that can be used with `Mix`, thresholds, AOV writing, or any other filter logic
+- Only renderable geometry objects are supported
+
+### Scene Color
+
+#### Entry
+
+`Add > Input > Scene Color`
+
+Available only in the `Filter` domain.
+
+<div align="center">
+	<img src="images/SnowShot_2026-03-28_05-15-31.png" alt="Scene Color" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### Purpose
+
+Reads the current Eevee scene buffer. The `Source` can be switched in the node panel:
+
+- `Color`
+- `Depth`
+- `Normal`
+- `Position`
+
+#### Inputs / Outputs
+
+- Input: `Vector`
+- Outputs: `Color`, `Alpha`
+
+#### Notes
+
+- `Color`: read the resolved scene color
+- `Depth`: read linear scene depth
+- `Normal`: read scene normals
+- `Position`: read the world-space position pass
+- If `Vector` is not connected, the node samples with the `Window` output of the `Texture Coordinate` node
+
+## 2. General Eevee Utility Nodes
 
 ### Render Info
 
@@ -15,15 +124,19 @@
 
 #### Outputs
 
-- `Frag Coord`: Screen-space coordinate (`xy` normalized to 0-1, `z` is depth)
-
-- `Width`: Render region width
-
-- `Height`: Render region height
+- `Frag Coord`
+- `Width`
+- `Height`
 
 #### Purpose
 
 Provides the coordinate and pixel size of the current Eevee render window.
+
+#### Notes
+
+- `Frag Coord.xy` is normalized screen UV in `0-1`
+- `Frag Coord.z` is the current fragment depth
+- `Width` / `Height` are the current render-region pixel dimensions
 
 ### Scene Time
 
@@ -38,17 +151,18 @@ Provides the coordinate and pixel size of the current Eevee render window.
 
 #### Input
 
-- `Scale`: Value used to scale frame numbers
+- `Scale`
 
 #### Outputs
 
-- `Frame`: Current frame number
+- `Frame`
+- `Seconds`
+- `Timeline`
+- `Scaled Frame`
 
-- `Seconds`: Seconds corresponding to the current frame
+#### Purpose
 
-- `Timeline`: Scene time remapped to 0-1 from start frame to end frame
-
-- `Scaled Frame`: Current frame divided by `Scale`
+Provides time-related values from the current scene.
 
 ### Screen Derivative
 
@@ -63,20 +177,19 @@ Provides the coordinate and pixel size of the current Eevee render window.
 
 #### Feature
 
-Gets differences between neighboring pixels in screen space:
+Gets the difference between neighboring pixels in screen space:
 
-- `DDX`: Screen-space derivative in the X direction
+- `DDX`
+- `DDY`
+- `DDXY`
 
-- `DDY`: Screen-space derivative in the Y direction
-
-- `DDXY`: Combination of `DDX` and `DDY` (`DDX + DDY`)
+where `DDXY` means `DDX + DDY`.
 
 ### Portal In / Portal Out
 
 #### Entry
 
 - `Add > Layout > Portal In`
-
 - `Add > Layout > Portal Out`
 
 <div align="center">
@@ -88,29 +201,15 @@ Gets differences between neighboring pixels in screen space:
 
 These are “portal” nodes used to organize node links.
 
-Their workflow can be understood as:
+#### Notes
 
-- `Portal In`: Store a named, typed value in the current node tree
+- `Portal In`: stores a named, typed value in the current node tree
+- `Portal Out`: retrieves that value later by name inside the same node tree
+- Creating a new `Portal In` generates a unique name automatically
+- `Portal Out` includes a magnifier button that jumps to the matching `Portal In`
+- Portals are only recognized inside the same shader node tree and do not automatically pass through node groups
 
-- `Portal Out`: Retrieve that value later by name within the same node tree
-
-#### Other Notes
-
-- Creating a new `Portal In` automatically generates a unique name.
-
-- `Portal Out` has a magnifier button that can jump to the matching `Portal In` location.
-
-#### Limits
-
-- Only recognized inside the same shader node tree.
-
-- Does not support crossing different node trees.
-
-- Does not automatically pass through node groups.
-
-- Inputs with the same name should keep only one source.
-
-## 2. Eevee Object Material Nodes
+## 3. Eevee Object Material Nodes
 
 ### Render Texture
 
@@ -125,12 +224,11 @@ Their workflow can be understood as:
 
 #### Purpose
 
-Reads a `Render Textures` entry configured earlier in the scene.
+Reads a `Render Textures` entry configured in the scene.
 
 #### Inputs / Outputs
 
 - Input: `Vector`
-
 - Outputs: `Color`, `Alpha`
 
 ### Screenspace Info
@@ -146,33 +244,19 @@ Reads a `Render Textures` entry configured earlier in the scene.
 
 #### Inputs / Outputs
 
-- Input: `View Position` (camera-space position)
-
-- Outputs: `Scene Color` (scene color), `Scene Depth` (scene depth)
+- Input: `View Position`
+- Outputs: `Scene Color`, `Scene Depth`
 
 #### Purpose
 
-Gets the contents of the current render buffer color or depth.
-
-<div align="center">
-	<img src="images/SnowShot_2026-03-28_04-59-57.png" alt="Screenspace Result" style="border-radius: 10px;">
-	<br>
-</div>
+Reads color or depth from the current render buffer.
 
 #### Usage Notes
 
 - `Raytracing` must be enabled in render settings
-
-- Set material `Render Method` to `Dithered`
-
-- Enable `Raytraced Transmission` in material options
-
-- The default `View Position` input is `position` transformed into camera space, then with the z-axis inverted
-
-<div align="center">
-	<img src="images/SnowShot_2026-03-28_04-59-28.png" alt="Screenspace Setup" style="border-radius: 10px;">
-	<br>
-</div>
+- Material `Render Method` must be set to `Dithered`
+- `Raytraced Transmission` must be enabled
+- The default `View Position` input transforms the current position into camera space and then flips the `Z` axis
 
 ### World Environment
 
@@ -187,26 +271,33 @@ Gets the contents of the current render buffer color or depth.
 
 #### Inputs / Outputs
 
-- Input: `Direction` (sampling direction)
-
-- Output: `Color` (environment color)
+- Input: `Direction`
+- Output: `Color`
 
 #### Purpose
 
-Directly samples the `Eevee` world environment color without depending on whether any geometry exists behind the screen.
+Directly samples the `Eevee` world environment color without depending on whether geometry exists behind the screen.
 
 #### Notes
 
-- Reads the world lighting probe color; probe resolution can be adjusted in the world environment
+- If `Direction` is not connected, the current surface view direction is used
+- If `Direction` is connected, the world environment is sampled in that direction
+- The result is closer to Eevee environment / probe lighting than to a screen-space buffer
 
-<div align="center">
-	<img src="images/SnowShot_2026-03-28_05-03-27.png" alt="World Environment Probe" style="border-radius: 10px;">
-	<br>
-</div>
+### Light Probe Color
 
-- If `Direction` is not connected, the current surface view direction is used by default
+#### Entry
 
-- If `Direction` is connected, the world environment can be sampled in the specified direction
+`Add > Input > Light Probe Color`
+
+#### Inputs / Outputs
+
+- Input: `Direction`
+- Outputs: `Reflection`, `Irradiance`, `Combined`
+
+#### Purpose
+
+Reads the currently available Eevee lighting-probe result directly, splitting it into reflection, irradiance, and combined outputs.
 
 ### World To Tangent
 
@@ -221,9 +312,8 @@ Directly samples the `Eevee` world environment color without depending on whethe
 
 #### Inputs / Outputs
 
-- Input: `Vector` (world-space direction)
-
-- Output: `Vector` (tangent-space direction)
+- Input: `Vector`
+- Output: `Vector`
 
 #### Purpose
 
@@ -231,7 +321,8 @@ Converts a world-space direction vector into the tangent space of the current su
 
 #### Notes
 
-- A `UV Map` can be specified in the node panel, and the tangent of that UV is used as the transform basis.
+- A `UV Map` can be chosen in the node panel, and the tangent of that UV is used as the basis
+- This is useful for anisotropic direction control, tangent-space flow, and local scan-direction effects
 
 ### GLSL Function
 
@@ -239,90 +330,31 @@ Converts a world-space direction vector into the tangent space of the current su
 
 `Add > Script > GLSL Function`
 
+Available in both `Eevee` object materials and `NPR Tree`.
+
 <div align="center">
-	<img src="images/SnowShot_2026-04-03_17-01-40.png" alt="GLSL Function" style="border-radius: 10px;">
+	<img src="images/placeholder_glsl_function.png" alt="GLSL Function" style="border-radius: 10px;">
 	<br>
 </div>
 
-Available in both `Eevee` object materials and `NPR Tree`.
-
-#### Inputs / Outputs
-
-- The node generates inputs and outputs dynamically from the selected GLSL function signature
-
-- The return value and any `out` parameters become node outputs
-
-- `sampler2D` does not appear as a link socket; it is exposed as an image slot in the node panel
-
-- `sample2D` appears as a `Closure` input socket and can be driven by `Image to Closure` or a compatible `Closure Output`
-
 #### Purpose
 
-Injects a user-authored GLSL function into the current `Eevee / NPR` material compile path. It is useful for custom math nodes, procedural patterns, SDF helpers, texture processing, and small reusable screen-space functions.
-
-#### Basic Workflow
-
-1. Write the GLSL in the `Text Editor`, or prepare an external `.glsl` file.
-
-2. Add the `GLSL Function` node.
-
-3. Choose the source mode in the node panel:
-
-   - `Internal`: use a `Text` datablock
-
-   - `External`: use an external `.glsl` file
-
-4. Click the refresh button to re-parse the source.
-
-5. Choose the exported function name in `Function`.
-
-6. If the function has `sampler2D` parameters, choose images directly in the node panel.
-
-7. If the function has `sample2D` parameters, wire them with nodes: use `Image to Closure` for image sources, or a `Closure Output` that exposes the expected `UV -> Color` structure for procedural sources.
+Injects a user-authored GLSL function into the current `Eevee / NPR` material compile path.
 
 #### Supported Boundary Types
 
 - Input parameters: `float`, `vec2`, `vec3`, `vec4`, `sampler2D`, `sample2D`
-
 - Output parameters: `out float`, `out vec2`, `out vec3`, `out vec4`
-
 - Return values: `void`, `float`, `vec2`, `vec3`, `vec4`
-
-- Multiple outputs are supported through `return value + out parameters`
 
 #### Notes
 
-- `Function` is not auto-selected; it must be chosen explicitly
-
-- Multiple `sampler2D` image slots are supported and share the node-level `Sampler Settings`
-
-- `sample2D` uses a unified closure input workflow so both images and procedural textures can feed the same GLSL parameter
-
-- Editing the `Text` datablock or external file only requires pressing refresh; the node does not have to be recreated
-
-- `@glsl_meta` block comments can define defaults, ranges, `hide_value`, and socket subtype hints
-
-- `Closure Output -> GLSL Function(sample2D)` currently only guarantees the direct `texture(tex, uv)` form
-
-- When the shader needs image-backed sampling features such as explicit `LOD`, `grad`, or size/query behavior, use `Image to Closure`
-
-- `Image to Closure` has no image input socket; the image is chosen directly in the node panel
-
-- `sampler2D` and `sample2D` do not currently support UDIM tiled images
-
-#### `sample2D` Example
-
-```glsl
-vec4 stylize(vec2 uv, float strength, sample2D tex)
-{
-  vec4 base = texture(tex, uv);
-  return mix(base, vec4(base.rgb * 1.2, base.a), strength);
-}
-```
-
-- When `tex` is driven by `Image to Closure`, `texture(tex, uv)` samples the chosen image
-
-- When `tex` is driven by `Closure Output`, the function reads the procedural texture through that closure's `UV` input and `Color` output contract
+- `Function` is not auto-selected and must be chosen explicitly
+- `sampler2D` uses image slots in the node panel instead of link sockets
+- `sample2D` becomes a `Closure` input and can be driven by `Image to Closure` or a compatible `Closure Output`
+- `Closure Output -> sample2D` currently guarantees only the direct `texture(tex, uv)` form
+- `@glsl_meta` supports `default`, `min`, `max`, `hide_value`, and `subtype`
+- Only `vec3 / vec4` inputs explicitly marked with `subtype=color` become color sockets
 
 ### Image to Closure
 
@@ -330,46 +362,26 @@ vec4 stylize(vec2 uv, float strength, sample2D tex)
 
 `Add > Texture > Image to Closure`
 
+Available in both `Eevee` object materials and `NPR Tree`.
+
 <div align="center">
-	<img src="images/image_to_closure_no_input.png" alt="Image to Closure" style="border-radius: 10px;">
+	<img src="images/placeholder_image_to_closure.png" alt="Image to Closure" style="border-radius: 10px;">
 	<br>
 </div>
 
-#### Outputs
+#### Output
 
 - `Closure`
 
-#### Node Panel
-
-- `Image`: choose the image that should be adapted into the `sample2D` workflow
-
-- `Interpolation`: choose the sampling interpolation
-
-- `Extension`: choose how UVs outside `0..1` are extended
-
 #### Purpose
 
-Wraps a regular image as a closure-backed source that can feed `GLSL Function(sample2D)`.
+Wraps a regular image as a closure-backed source for `sample2D` workflows.
 
-This keeps image inputs and procedural closure inputs on the same wiring model.
+#### Node Settings
 
-#### Basic Workflow
-
-1. Add an `Image to Closure` node.
-
-2. Choose an `Image` in the node panel.
-
-3. Adjust `Interpolation` and `Extension` if needed.
-
-4. Connect the `Closure` output to a `GLSL Function` `sample2D` input.
-
-#### Notes
-
-- The node no longer exposes an image input socket; the image is always chosen in the panel
-
-- It is an adapter for the `sample2D` workflow, not a replacement for the normal `Image Texture` node
-
-- Prefer this node whenever a `sample2D` parameter needs image-backed sampling behavior
+- `Image`
+- `Interpolation`
+- `Extension`
 
 ### Basis Transform
 
@@ -382,53 +394,105 @@ This keeps image inputs and procedural closure inputs on the same wiring model.
 	<br>
 </div>
 
+#### Purpose
+
+Uses `Origin + three basis axes` to perform custom coordinate-space transforms inside material nodes.
+
+### Twirl
+
+#### Entry
+
+`Add > Utilities > Vector > Twirl`
+
+<div align="center">
+	<img src="images/placeholder_twirl.png" alt="Twirl" style="border-radius: 10px;">
+	<br>
+</div>
+
 #### Inputs / Outputs
 
-- Input: `Vector` (point, direction, or normal to transform)
-
-- Input: `Origin` (origin of the custom basis, used only in `Point` mode)
-
-- Input: `X Axis`, `Y Axis`, `Z Axis` (custom basis axes)
-
-- Output: `Vector` (transformed result)
+- Inputs: `Vector`, `Center`, `Amount`
+- Output: `Vector`
 
 #### Purpose
 
-Uses `origin + three basis axes` inside material nodes to perform custom coordinate-system transforms. This is useful when there is no matrix input type available and you still need to process points, direction vectors, or normals.
+Twists the input coordinate field around a chosen center. This is useful for Goo Engine style swirls, distorted UVs, and radial deformations.
+
+### Water Ripples
+
+#### Entry
+
+`Add > Texture > Water Ripples`
+
+<div align="center">
+	<img src="images/placeholder_water_ripples.png" alt="Water Ripples" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### Inputs / Outputs
+
+- Inputs: `Vector`, `Time`, `Scale`, `Intensity`, `Speed`, `Detail`, `Bias`
+- Outputs: `Distorted Vector`, `Mask`
 
 #### Panel Options
 
+- `Mode`
+  - `Drops`
+  - `Ripples`
+  - `Flow`
+  - `Caustic`
+
+#### Purpose
+
+Generates procedural ripple distortion and a ripple mask.
+
+### Hex Grid Texture
+
+#### Entry
+
+`Add > Texture > Hex Grid Texture`
+
+<div align="center">
+	<img src="images/placeholder_hex_grid_texture.png" alt="Hex Grid Texture" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### Inputs
+
+- `Vector`
+- `Scale`
+- `Size`
+- `Radius`
+- `Roundness`
+
+#### Outputs
+
+- `Value`
+- `Color`
+- `Hex Coords`
+- `Position`
+- `Cell UV`
+- `Cell ID`
+
+#### Panel Options
+
+- `Coordinate Mode`
+  - `XY Position`
+  - `Hex Position`
+- `Value Mode`
+  - `Hexagons`
+  - `SDF Hexagons`
+  - `Dots`
 - `Direction`
+  - `Horizontal`
+  - `Vertical`
+  - `Horizontal Tiled`
+  - `Vertical Tiled`
+- `Clamp`
 
-    - `To Basis`: Interpret the input from world / current coordinates into the custom basis
+#### Purpose
 
-    - `From Basis`: Convert the input from custom basis coordinates back to external coordinates
-
-- `Type`
-
-    - `Point`: Includes `Origin` translation
-
-    - `Vector`: Only transforms direction and length, without translation
-
-    - `Normal`: Transforms following normal rules and normalizes before output
-
-- `Basis Input`
-
-    - `XYZ`: Use all three input axes directly
-
-    - `XY` / `XZ` / `YZ`: Use only two axes; the third axis is generated automatically by cross product
-
-- `Orthonormalize`
-
-    - When enabled, input axes are orthogonalized and normalized. This is more suitable for tangent space or local orientation bases
-
-    - When disabled, input axis lengths are preserved, which can be used for basis transforms with scaling
-
-- `Fallback`
-
-    - `Pass Through`: Output the original input when the basis degenerates
-
-    - `Zero`: Output `0, 0, 0` when the basis degenerates
+Generates a hex-grid texture that can be used for honeycomb patterns, cell partitioning, SDF masks, and hex-coordinate based lookups.
 
 ### SDF Primitive
 
@@ -447,26 +511,7 @@ Uses `origin + three basis axes` inside material nodes to perform custom coordin
 
 #### Purpose
 
-Generates signed distance field (SDF) base shapes directly inside material nodes. It is useful for procedural masks, silhouettes, shape transitions, and as the starting point for boolean-style combinations.
-
-#### Main Modes
-
-- 3D shapes: `Sphere`, `Box`, `Torus`, `Cone`, `Point Cone`, `Cylinder`, `Point Cylinder`, `Capsule / Line`, `Octahedron`, `Hex Prism`, `Hex Prism Incircle`, `Plane`, `Solid Angle`, `Pyramid`, `Disc`, `3D Circle`
-- 2D shapes: `Circle`, `Rectangle`, `Ellipse`, `Triangle`, `Pentagon`, `Hexagon`, `Isosceles Triangle`, `Trapezoid`, `Rhombus`
-- Stylized 2D shapes: `Star`, `Heart`, `Pie`, `Arc`, `Moon`, `Vesica`, `Cross`, `Rounded X`, `Horseshoe`, `Round Joint`, `Flat Joint`
-- Curve / segment shapes: `Line`, `Corner`, `Quadratic Bezier`, `Point Triangle`, `Quad`, `Parabola`, `Parabola Segment`, `Uneven Capsule`
-
-#### Input Notes
-
-- The fixed base input is `Vector`
-- Other sockets are shown and renamed dynamically per mode. Common parameters include `Size`, `Radius`, `Angle`, `Roundness`, `Linewidth`, `Point` to `Point_003`, and `Value1` to `Value4`
-- The node panel provides `Mode` and `Invert`
-
-#### Usage Notes
-
-- The output is a distance value, not a color
-- It is typically combined with nodes such as `Math`, `ColorRamp`, `Map Range`, and `SDF Operator` to turn the field into a mask or final shape
-- `Invert` flips the inside / outside relationship directly, which is useful for turning the same shape into a hole or shell
+Generates signed-distance-field base shapes directly inside material nodes.
 
 ### SDF Operator
 
@@ -485,27 +530,7 @@ Generates signed distance field (SDF) base shapes directly inside material nodes
 
 #### Purpose
 
-Combines, trims, and reshapes one or two SDF distance fields so multiple primitives can be assembled into more complex results.
-
-#### Main Operations
-
-- Single-input operations: `Dilate`, `Onion`, `Annular`, `Mask`, `Flatten`, `Invert`, `Hermite Pulse`
-- Two-input operations: `Blend`, `Exclusion XOR`, `Divide`, `Pipe`, `Engrave`, `Groove`, `Tongue`
-- Union family: `Union`, `Smooth Union`, `Round Union`, `Columns Union`, `Stairs Union`, `Chamfer Union`
-- Intersection family: `Intersect`, `Smooth Intersect`, `Round Intersect`, `Columns Intersect`, `Stairs Intersect`, `Chamfer Intersect`
-- Difference family: `Difference`, `Smooth Difference`, `Round Difference`, `Columns Difference`, `Stairs Difference`, `Chamfer Difference`
-
-#### Input Notes
-
-- Base inputs include `Distance`, `Distance_001`, `Value`, `Value_001`, and `Count`
-- The visible socket names and counts change automatically with `Operation`
-- `Mask` exposes an extra `Invert` toggle
-
-#### Usage Notes
-
-- A common workflow is to build several shapes with `SDF Primitive`, then combine them with `SDF Operator` through union, intersection, or difference
-- `Smooth`, `Round`, `Chamfer`, `Stairs`, and `Columns` are useful for more stylized boolean transitions
-- The node still outputs a distance value, so it usually needs a threshold, color remap, or alpha control afterward
+Combines, trims, and reshapes one or two SDF distance fields.
 
 ### SDF Vector Operator
 
@@ -521,122 +546,14 @@ Combines, trims, and reshapes one or two SDF distance fields so multiple primiti
 #### Outputs
 
 - `Vector`
-
 - `Position`
-
 - `Value`
 
 #### Purpose
 
-Preprocesses the coordinate, UV, or vector domain used by SDF workflows. Instead of generating a distance field directly, it rewrites the sampling space before the data reaches `SDF Primitive`.
+Preprocesses coordinate, UV, or vector domains before they are fed into `SDF Primitive`.
 
-That makes it useful for workflows such as:
-
-- mirror or repeat the domain first
-- then generate the primitive in that modified space
-- then combine the resulting distance fields with `SDF Operator`
-
-#### Main Operation Groups
-
-- `Plane Reflect`, `Mirror`, `Polar`, `Repeat Infinite`, `Repeat Infinite Mirror`, `Repeat Finite`, `Octant`
-  - These modes handle reflection, symmetry, radial segmentation, and repeated spatial cells
-
-- `Swizzle`, `Rotate`, `Spin`, `Extrude`, `Twist`, `Swirl`, `Pinch Inflate`, `Radial Shear`, `Bend`
-  - These modes reorder or deform the coordinate system itself
-
-- `UV Rotate`, `UV Scale`, `UV Grid`, `UV Random Rotate`, `UV Random Flip`, `UV Tileset`
-  - These modes are focused on UV tiling, local UV transforms, and per-cell variation
-
-- `Map -1-1`, `Map -0.5-0.5`, `Map 0-1`
-  - These modes quickly convert between normalized UV ranges and the centered ranges often used in SDF setups
-
-#### Mode Reference
-
-- `Plane Reflect`
-  - Reflects the domain using a custom plane normal and offset
-  - `Value` can be used as a helper mask for which side of the plane is active
-
-- `Mirror`
-  - Mirrors space across an axis-aligned plane controlled by the selected `Axis`
-  - `Spacing` controls the reference interval
-  - `Position` exposes an auxiliary mirrored / cell position
-
-- `Polar`
-  - Rewrites planar space into repeated angular sectors around the origin
-  - Useful for radial motifs, petals, emblems, and gear-like repetition
-
-- `Repeat Infinite`
-  - Repeats the domain endlessly using `Spacing`
-
-- `Repeat Infinite Mirror`
-  - Repeats endlessly while mirroring every second cell, which helps neighboring boundaries line up more naturally
-
-- `Repeat Finite`
-  - Similar to infinite repeat, but constrained by `Count`
-
-- `Octant`
-  - Folds the domain into an octant / symmetric wedge for quick symmetrical constructions
-
-- `Swizzle`
-  - Reorders axis channels such as `XYZ`, `XZY`, or `YZX`
-
-- `Rotate`
-  - Rotates the domain around the selected main axis
-
-- `Spin`
-  - Applies an axis-based spin style coordinate offset
-  - Useful for rotational motifs and axial distortion
-
-- `Extrude`
-  - Turns a 2D distance domain into a thickness along the third axis
-  - `Value` outputs an internal-distance helper value
-
-- `Twist`
-  - Twists the domain along the chosen axis
-
-- `Swirl`
-  - Creates a vortex-like distortion around a center
-  - `Center`, `Offset`, `Strength`, and `Radius` control the affected region
-
-- `Pinch Inflate`
-  - Compresses or inflates space around a central region
-
-- `Radial Shear`
-  - Applies radial shear, useful for stronger rotational distortion patterns
-
-- `Bend`
-  - Bends the domain along the selected axis
-
-- `UV Rotate`
-  - Rotates UV coordinates around `Center`
-
-- `UV Scale`
-  - Scales UV coordinates around the UV center
-
-- `UV Grid`
-  - Splits 0-1 UV space into a regular grid
-  - `Vector` outputs the local UV inside the current cell
-  - `Position` outputs the cell coordinate for downstream indexing or randomization
-
-- `UV Random Rotate`
-  - Uses the input `Position` to pick a 90-degree random rotation per cell
-
-- `UV Random Flip`
-  - Uses the input `Position` to randomly flip or rotate each cell
-
-- `UV Tileset`
-  - Remaps the current UV into a sub-tile inside a larger texture sheet
-  - `Index` picks the tile, `Padding` controls margins, and `Scale` adjusts tile-space zoom
-
-- `Map -1-1`
-  - Remaps `0-1` UV into `-1 to 1`
-
-- `Map -0.5-0.5`
-  - Remaps `0-1` UV into `-0.5 to 0.5`
-
-- `Map 0-1`
-  - Remaps a centered SDF-style range back into standard UV space
-
+## 4. Goo Engine / NPR-Oriented Input Nodes
 
 ### Bevel
 
@@ -651,25 +568,12 @@ That makes it useful for workflows such as:
 
 #### Inputs / Outputs
 
-- Input: `Radius` (bevel radius), `Normal` (surface normal hint)
-
-- Output: `Normal` (approximated beveled normal)
-
-#### Panel Option
-
-- `Samples` (higher sample counts improve quality but cost more performance)
+- Inputs: `Radius`, `Normal`
+- Output: `Normal`
 
 #### Purpose
 
 Generates an approximate beveled normal in `Eevee` so hard edges can look smoother.
-
-#### Notes
-
-- `Cycles` still uses the original true geometric bevel algorithm
-
-- `Eevee` here uses a same-object screen-space approximation
-
-- The result depends on the current view, depth buffer, and visible neighborhood, and is not equivalent to the true `Bevel` in `Cycles`
 
 ### Curvature
 
@@ -685,26 +589,27 @@ Generates an approximate beveled normal in `Eevee` so hard edges can look smooth
 #### Inputs
 
 - `Samples`
-
 - `Sample Radius`
-
 - `Thickness`
-
 - `Scale`
 
 #### Outputs
 
-- `Scene Curvature`: Curvature extracted from screen space
+- `Scene Curvature`
+- `Scene Rim`
 
-- `Scene Rim`: Rim-light style edge output
+#### Panel Options
 
-#### Panel Option
-
-- `Local`: Ignore depth from other objects
+- `Local`
+- `Sample Radius`
+  - `Pixel`
+  - `View`
 
 #### Notes
 
-A curvature node ported from Goo Engine that provides curvature and rim outputs.
+- In `Pixel` mode, `Sample Radius` is interpreted in pixels and therefore changes with render resolution
+- In `View` mode, `Sample Radius` is interpreted relative to the view, which helps keep rim width more consistent between viewport and final render
+- This is still a screen-space node, so the result depends on camera view, resolution, and sampling radius
 
 ### Shader Info
 
@@ -713,46 +618,31 @@ A curvature node ported from Goo Engine that provides curvature and rim outputs.
 `Add > Input > Shader Info`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_05-09-10.png" alt="Shader Info" style="border-radius: 10px;">
+	<img src="images/placeholder_shader_info_blinn_phong.png" alt="Shader Info" style="border-radius: 10px;">
 	<br>
 </div>
 
 #### Inputs
 
-- `World Position`: World-space position (defaults to the current position)
-
-- `Normal`: Surface normal (defaults to the current smooth normal)
+- `World Position`
+- `Normal`
+- `Exponent`
 
 #### Outputs
 
-- `Diffuse Shading`: Lambert lighting
-
-- `Shadow`: Shadow mask
-
-- `Ambient Lighting`: Indirect ambient light from the world environment and lighting probes
-
-- `Half-Lambert Factor`: Half-Lambert lighting term
+- `Diffuse Shading`
+- `Shadow`
+- `Ambient Lighting`
+- `Half-Lambert Factor`
+- `Blinn-Phong Factor`
 
 #### Notes
 
-- `Shadow`
-
-    - Supports selectable shadow modes
-
-    - `Built-in`: Default mode, using Eevee's original shadow calculation
-
-    - `Soft Filtered`: Turns binary dithered shadows into smoother grayscale penumbra
-
-- The node panel includes a `Lightgroup` property
-
-    - Only lights with the same `Lightgroup ID` participate in this `Shader Info` node's direct lighting and shadow evaluation
-
-<div align="center">
-	<img src="images/SnowShot_2026-03-28_05-12-44.png" alt="Shader Info Lightgroup" style="border-radius: 10px;">
-	<br>
-</div>
-
-- The current implementation excludes the world sun from these outputs so HDRIs or “sun” contributions embedded in the world environment do not contaminate the direct result.
+- `Shadow Mode`
+  - `Built-in`
+  - `Soft Filtered`
+- `Blinn-Phong Factor` outputs a Blinn-Phong highlight factor weighted by the light specular channel
+- The node panel includes a `Lightgroup` control
 
 ### Light Info
 
@@ -765,110 +655,35 @@ A curvature node ported from Goo Engine that provides curvature and rim outputs.
 	<br>
 </div>
 
-#### Feature Description
-
-Reads information from a specified light.
-
 #### Fixed Outputs
 
-- `Color`: Light color
-
-- `Power`: Light intensity
-
-- `Type`: Light type
-
-    - `-1`: No light specified
-
-    - `0`: Point
-
-    - `1`: Sun
-
-    - `2`: Spot
-
-    - `3`: Area
-
-#### Outputs That Appear Depending on Light Type
-
-- `Position`: Light world position
-
-- `Direction`: Light direction
-
-- `Radius`: Light radius
-
-- `Spot Size`: Spot light size
-
-- `Sun Angle`: Sun angle
+- `Color`
+- `Power`
+- `Type`
 
 #### Notes
 
-- For per-light processing, use `For Each Light` inside `NPR Tree` instead.
+- `Type` is an integer socket
+- For per-light processing, use `For Each Light` in the `NPR Tree`
 
-### Filter Object Info
+## 5. Built-In Node Enhancements
+
+### Color Ramp (OKLab Mode)
 
 #### Entry
 
-`Add > Input > Filter Object Info`
+`Add > Converter > Color Ramp`
 
 <div align="center">
-	<img src="images/SnowShot_2026-04-01_20-29-09.png" alt="Filter Object Info" style="border-radius: 10px;">
+	<img src="images/placeholder_color_ramp_oklab.png" alt="Color Ramp OKLab" style="border-radius: 10px;">
 	<br>
 </div>
 
-Available only in the `Filter` domain.
-
 #### Purpose
 
-Reads the world-space transform and viewport display color of a chosen object, so filter materials can react to a controller object or scene helper.
-
-This is useful for object-driven masks, directional gradients, moving focal effects, or passing a custom color control into a full-screen filter.
-
-#### Node Setting
-
-- `Object`: Choose which object the node should read
-
-#### Outputs
-
-- `Location`: Chosen object world-space location
-
-- `Rotation`: Chosen object world-space Euler rotation in radians
-
-- `Scale`: Chosen object world-space scale
-
-- `Color`: Chosen object viewport display color
+`Color Ramp` now supports an `OKLab` blend mode, giving more stable and perceptually smoother color transitions.
 
 #### Notes
 
-- This reads the explicitly selected object, not the object currently being filtered on screen
-
-- If no object is assigned, the node falls back to `0` for location / rotation / color and `1` for scale
-
-### Scene Color
-
-#### Entry
-
-`Add > Input > Scene Color`
-
-<div align="center">
-	<img src="images/SnowShot_2026-03-28_05-15-31.png" alt="Scene Color" style="border-radius: 10px;">
-	<br>
-</div>
-
-Available only in the `Filter` domain.
-
-#### Purpose
-
-Reads the current Eevee scene buffer. The `Source` can be switched in the node panel:
-
-- `Color`: Reads the final rendered scene color
-
-- `Depth`: Reads linear depth
-
-- `Normal`: Reads rendered normals
-
-- `Position`: Reads world-space positions
-
-#### Inputs / Outputs
-
-- Input: `Vector`
-
-- Outputs: `Color`, `Alpha`
+- The old standalone `OKLab Color Ramp` node has been merged back into `Color Ramp`
+- Existing node setups should now use the `OKLab` mode on `Color Ramp` directly

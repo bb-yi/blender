@@ -2,119 +2,91 @@
 
 ## 1. Render Textures
 
-### Feature Description
+#### Feature Description
 
-`Render Textures` is a scene-level Eevee extra render texture system.
+`Render Textures` is an additional scene-level Eevee render-texture system.
 
-It allows the scene to maintain up to `4` Render Texture slots in advance. Each slot can specify a camera and an output type, render the scene from that camera into a texture first, and then let regular object materials sample it through the `Render Texture` node.
+It lets a scene maintain up to `4` render texture slots. Each slot can point to a camera and an output type, rendering that camera view into a texture that can later be sampled by the `Render Texture` node in regular object materials.
 
-### Panel Entry Point
+#### Panel Entry
 
 `Scene Properties > Render Textures`
 
 <div align="center">
-    <img src="images/SnowShot_2026-03-28_04-37-13.png" alt="Render Textures Panel" style="border-radius: 10px;">
-    <br>
+  <img src="images/SnowShot_2026-03-28_04-37-13.png" alt="Render Textures" style="border-radius: 10px;">
+  <br>
 </div>
 
-### Configurable Parameters
+#### Configurable Fields
 
-Each Render Texture entry currently supports:
+Each `Render Texture` entry currently supports:
 
-- `Name`: Identifier of the texture entry, used for node references
+- `Name`
+- `Enabled`
+- `Source`
+  - `Color`: Capture the final Eevee color
+  - `Depth`: Capture linear depth
+  - `Normal`: Capture normals
+- `Camera`
+- `Resolution X / Y`
+- `Update Mode`
+  - `Every Sample`
+  - `Every Frame`
+  - `Manual`
+- `Format`
+  - `RGBA16F`
+  - `RGBA32F`
+  - `R16F`
+  - `R32F`
 
-- `Enabled`: Enable or disable rendering of this texture
-
-- `Source`: Select what to capture
-
-    - `Color`: Capture the final Eevee color
-
-    - `Depth`: Capture linear depth
-
-    - `Normal`: Capture normals
-
-- `Camera`: Camera used to render this texture
-
-- `Resolution X / Y`: Output texture size in pixels; higher resolution uses more memory
-
-- `Update Mode`: Controls how often the texture is updated
-
-    - `Every Sample`: Update on every sample
-
-    - `Every Frame`: Update once per frame
-
-    - `Manual`: Update manually
-
-- `Format`: Output data precision
-
-    - `RGBA16F`: 16-bit floating-point color, balanced quality and performance
-
-    - `RGBA32F`: 32-bit high-precision color, requires more VRAM
-
-    - `R16F`: 16-bit floating-point depth value
-
-    - `R32F`: 32-bit high-precision depth value
-
-### Basic Usage
+#### Basic Workflow
 
 1. Open `Scene Properties > Render Textures`.
-
-2. Create a `Render Texture` entry.
-
-3. Select `Source`, `Camera`, resolution, update mode, and format.
-
-4. Add `Add > Texture > Render Texture` in a regular object material.
-
-5. Select the matching `Render Texture` entry in the node panel.
-
-6. Use the node's `Color` / `Alpha` output in later material calculations.
+2. Create a new `Render Texture` entry.
+3. Choose `Source`, `Camera`, resolution, update mode, and format.
+4. Add a `Add > Texture > Render Texture` node in a regular object material.
+5. Pick the matching `Render Texture` entry in the node panel.
+6. Use the node's `Color` / `Alpha` outputs in the rest of the material.
 
 ## 2. Filter Materials
 
-### Feature Description
+#### Feature Description
 
-This is a scene-level Eevee full-screen filter stack. Each entry is a `Filter` domain material, and the current frame is processed in list order.
+`Filter Materials` is a scene-level Eevee full-screen filter stack. Each entry is a material in the `Filter` domain, and the stack is applied in list order to the current frame.
 
-### Panel Entry Point
+#### Panel Entry
 
 `Scene Properties > Filter Materials`
 
 <div align="center">
-    <img src="images/SnowShot_2026-03-28_04-41-53.png" alt="Filter Materials Panel" style="border-radius: 10px;">
-    <br>
+  <img src="images/SnowShot_2026-03-28_04-41-53.png" alt="Filter Materials" style="border-radius: 10px;">
+  <br>
 </div>
 
-Node tree entry: Shader Node Editor > Shader Type > Filter
+Node-tree entry: Shader Editor > Shader Type > `Filter`
 
 <div align="center">
-    <img src="images/SnowShot_2026-03-28_04-42-42.png" alt="Filter Shader Type" style="border-radius: 10px;">
-    <br>
+  <img src="images/SnowShot_2026-03-28_04-42-42.png" alt="Filter Shader Type" style="border-radius: 10px;">
+  <br>
 </div>
 
-### Basic Usage
+#### Basic Workflow
 
 1. Open `Scene Properties > Filter Materials`.
-
-2. Create an entry, or click `New Filter Material` directly.
-
+2. Create a new entry, or click `New Filter Material`.
 3. The selected material must be a `Filter` domain material.
+4. In the Shader Editor, switch the top `Shader Type` to `Filter`.
+5. Use `Scene Color` to read scene data, and combine it with `Filter Object Info` or `Filter Mask` when object-driven control is needed.
+6. Use `AOV Input` if the filter needs to read an existing custom pass.
+7. Use `AOV Output` if the filter should write an intermediate or final result into a named AOV.
+8. Choose the insertion point with `Execution Stage`.
 
-4. Open Shader Editor and switch the top `Shader Type` to `Filter`.
+#### Important Notes
 
-5. Use `Scene Color` to read scene data, and use `Filter Object Info` when you want the filter to react to a chosen object's transform or viewport color.
-
-6. Use `Execution Stage` to choose where the filter runs.
-
-### Important Notes
-
-- The default sampling coordinate of `Scene Color` is the `Window` output of the `Texture Coordinate` node
-
-- `AOV` input is supported
-
-- `Execution Stage` insertion points:
-
-    - `Before Volume Fog`: Execute before volume fog processing
-
-    - `Before Depth of Field`: Execute before depth of field
-
-    - `Before Composite`: Execute before the compositor
+- The default sampling coordinate for `Scene Color` is the `Window` output of the `Texture Coordinate` node
+- `AOV Input` is supported
+- `AOV Output` is supported, so a filter can write to a named AOV before sending the final result into `Filter Output`
+- `Execution Stage` currently provides three insertion points:
+  - `Before Volume Fog`
+  - `Before Depth of Field`
+  - `Before Composite`
