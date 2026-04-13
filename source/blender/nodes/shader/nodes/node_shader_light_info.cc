@@ -227,7 +227,7 @@ void register_node_type_sh_light_info()
   ntype.declare = file_ns::node_declare;
   ntype.draw_buttons = file_ns::node_shader_buts_light_info;
   ntype.updatefunc = file_ns::node_update;
-  ntype.add_ui_poll = object_eevee_shader_nodes_poll;
+  ntype.add_ui_poll = object_or_npr_eevee_shader_nodes_poll;
   ntype.gpu_fn = file_ns::node_shader_gpu_light_info;
 
   bke::node_register_type(ntype);

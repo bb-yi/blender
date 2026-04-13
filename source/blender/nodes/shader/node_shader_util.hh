@@ -61,6 +61,7 @@ bool object_cycles_shader_nodes_poll(const bContext *C);
 bool eevee_shader_nodes_poll(const bContext *C);
 bool object_eevee_shader_nodes_poll(const bContext *C);
 bool object_or_npr_eevee_shader_nodes_poll(const bContext *C);
+bool object_filter_or_npr_eevee_shader_nodes_poll(const bContext *C);
 bool filter_eevee_shader_nodes_poll(const bContext *C);
 bool npr_shader_nodes_poll(const bContext *C);
 bool filter_or_npr_eevee_shader_nodes_poll(const bContext *C);
