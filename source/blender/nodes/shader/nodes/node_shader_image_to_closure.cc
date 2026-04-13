@@ -52,7 +52,7 @@ void register_node_type_sh_image_to_closure()
   ntype.declare = file_ns::node_declare;
   ntype.draw_buttons = file_ns::node_layout;
   ntype.initfunc = file_ns::node_init;
-  ntype.add_ui_poll = object_or_npr_eevee_shader_nodes_poll;
+  ntype.add_ui_poll = object_filter_or_npr_eevee_shader_nodes_poll;
 
   bke::node_register_type(ntype);
 }

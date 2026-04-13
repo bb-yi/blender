@@ -97,14 +97,23 @@ void Film::init_aovs(const Set<std::string> &passes_used_by_viewport_compositor)
   }
 
   for (ViewLayerAOV *aov : aovs) {
-    bool is_value = (aov->type == AOV_TYPE_VALUE);
-    int &index = is_value ? aovs_info.value_len : aovs_info.color_len;
+    if (aov->type == AOV_TYPE_VALUE) {
+      aovs_info.value_len++;
+    }
+    else {
+      aovs_info.color_len++;
+    }
+  }
 
-    /* Pack hash in `AOVsInfoData` uint4 array. We place value AOVs after color AOVs. */
-    int combined_index = is_value ? aovs_info.color_len + index : index;
+  int color_index = 0;
+  int value_index = 0;
+  for (ViewLayerAOV *aov : aovs) {
+    const bool is_value = (aov->type == AOV_TYPE_VALUE);
+    const int index = is_value ? value_index++ : color_index++;
+
+    /* Value hashes live after all color hashes, so the split must use the final color count. */
+    const int combined_index = is_value ? aovs_info.color_len + index : index;
     aovs_info.hash[combined_index / 4][combined_index % 4] = BLI_hash_string(aov->name);
-
-    index++;
   }
 
   if (!aovs.is_empty()) {

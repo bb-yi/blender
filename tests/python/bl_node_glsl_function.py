@@ -3,8 +3,28 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 import sys
+import importlib.util
 import bpy
 import unittest
+from types import SimpleNamespace
+from pathlib import Path
+
+
+def load_source_node_add_menu_shader():
+    script_path = (
+        Path(__file__).resolve().parents[2]
+        / "scripts"
+        / "startup"
+        / "bl_ui"
+        / "node_add_menu_shader.py"
+    )
+    spec = importlib.util.spec_from_file_location("codex_node_add_menu_shader", script_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+node_add_menu_shader = load_source_node_add_menu_shader()
 
 
 def make_text_block(name, source):
@@ -40,13 +60,21 @@ def relink_and_update(tree, from_socket, to_socket):
     bpy.context.view_layer.update()
 
 
+def make_menu_context(shader_type, engine="BLENDER_EEVEE", tree_type="ShaderNodeTree"):
+    return SimpleNamespace(
+        engine=engine,
+        space_data=SimpleNamespace(tree_type=tree_type, shader_type=shader_type),
+    )
+
+
 class GLSLFunctionNodeTest(unittest.TestCase):
     def setUp(self):
         bpy.ops.wm.read_homefile(use_factory_startup=True)
 
-    def make_material_tree(self):
+    def make_material_tree(self, domain="SURFACE"):
         material = bpy.data.materials.new(name="GLSLFunctionTest")
         material.use_nodes = True
+        material.eevee_domain = domain
         tree = material.node_tree
         tree.nodes.clear()
         return material, tree
@@ -126,6 +154,67 @@ class GLSLFunctionNodeTest(unittest.TestCase):
 
         self.assertEqual(inner_node.parse_status, 'READY')
         self.assertEqual(outer_node.parse_status, 'READY')
+
+    def test_filter_domain_menu_poll_allows_glsl_nodes(self):
+        filter_context = make_menu_context("FILTER")
+        world_context = make_menu_context("WORLD")
+
+        self.assertTrue(
+            node_add_menu_shader.object_filter_or_npr_eevee_shader_nodes_poll(filter_context)
+        )
+        self.assertFalse(
+            node_add_menu_shader.object_filter_or_npr_eevee_shader_nodes_poll(world_context)
+        )
+
+    def test_filter_material_basic_function_builds_alpha_output(self):
+        material, tree = self.make_material_tree(domain="FILTER")
+        glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        output_node = tree.nodes.new("ShaderNodeOutputFilter")
+
+        source = "float alpha_passthrough(float x){\n  return x;\n}\n"
+        make_text_block("glsl_filter_alpha.glsl", source)
+        self.configure_glsl_node(glsl_node, "glsl_filter_alpha.glsl", "alpha_passthrough")
+
+        self.assertEqual(material.eevee_domain, "FILTER")
+        self.assertEqual(glsl_node.parse_status, 'READY')
+        self.assertIsNotNone(find_socket(glsl_node.inputs, "x"))
+        self.assertIsNotNone(find_socket(glsl_node.outputs, "Result"))
+
+        relink_and_update(
+            tree,
+            find_socket(glsl_node.outputs, "Result"),
+            find_socket(output_node.inputs, "Alpha"),
+        )
+
+        self.assertEqual(glsl_node.parse_status, 'READY')
+
+    def test_filter_material_image_sample2d_builds_color_output(self):
+        _, tree = self.make_material_tree(domain="FILTER")
+        glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        image_node = tree.nodes.new("ShaderNodeImageToClosure")
+        output_node = tree.nodes.new("ShaderNodeOutputFilter")
+
+        image = bpy.data.images.new("glsl_filter_test_image", 2, 2, alpha=True, float_buffer=True)
+        image.generated_color = (0.9, 0.4, 0.1, 1.0)
+        image_node.image = image
+
+        source = "vec4 sample_color(sample2D src, vec2 uv){\n  return texture(src, uv);\n}\n"
+        make_text_block("glsl_filter_sample2d_image.glsl", source)
+        self.configure_glsl_node(glsl_node, "glsl_filter_sample2d_image.glsl", "sample_color")
+
+        relink_and_update(
+            tree,
+            find_socket(image_node.outputs, "Closure"),
+            find_socket(glsl_node.inputs, "src"),
+        )
+        relink_and_update(
+            tree,
+            find_socket(glsl_node.outputs, "Result"),
+            find_socket(output_node.inputs, "Color"),
+        )
+        refresh_glsl_node(glsl_node)
+
+        self.assertEqual(glsl_node.parse_status, 'READY')
 
 
 if __name__ == "__main__":

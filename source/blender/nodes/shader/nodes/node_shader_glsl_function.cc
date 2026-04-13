@@ -4576,7 +4576,7 @@ namespace blender
     ntype.updatefunc = file_ns::node_update;
     ntype.insert_link = file_ns::node_insert_link;
     ntype.gpu_fn = file_ns::gpu_shader_glsl_function;
-    ntype.add_ui_poll = object_or_npr_eevee_shader_nodes_poll;
+    ntype.add_ui_poll = object_filter_or_npr_eevee_shader_nodes_poll;
     bke::node_type_storage(
       ntype, "NodeShaderGLSLFunction", node_free_standard_storage, node_copy_standard_storage);
 
