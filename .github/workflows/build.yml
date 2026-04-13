@@ -147,6 +147,16 @@ jobs:
           git config lfs.remote.searchall false
           git lfs install
 
+      - name: Download Windows Libraries
+        shell: pwsh
+        run: |
+          git config --local "submodule.lib/windows_x64.update" checkout
+          git submodule update --progress --init lib/windows_x64
+          git -C lib/windows_x64 config lfs.url "https://projects.blender.org/blender/blender.git/info/lfs"
+          git -C lib/windows_x64 config lfs.remote.searchall false
+          git -C lib/windows_x64 lfs install --local
+          git -C lib/windows_x64 lfs pull
+
       - name: Blender Make Update
         shell: cmd
         run: make.bat update
