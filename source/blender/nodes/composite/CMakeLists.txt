@@ -15,8 +15,8 @@ set(INC
   ../../compositor/derived_resources
   ../../compositor/utilities
   ../../sequencer
-  # Change this to your AE SDK headers location!
-  ${CMAKE_SOURCE_DIR}/../BlendifyAE/SDK/Examples/Headers
+  
+  include/Headers
 
   # RNA_prototypes.hh
   ${CMAKE_BINARY_DIR}/source/blender/makesrna
