@@ -8,6 +8,8 @@
 
 #include "MEM_guardedalloc.h"
 
+#include <cmath>
+
 #include "BLI_heap.h"
 #include "BLI_math_color.h"
 #include "BLI_math_vector.h"
@@ -396,6 +398,50 @@ static float colorband_hue_interp(
   return h_interp;
 }
 
+static void linear_srgb_to_oklab(const float *linear_rgb, float *oklab)
+{
+  const float l = 0.4122214708f * linear_rgb[0] + 0.5363325363f * linear_rgb[1] +
+                  0.0514459929f * linear_rgb[2];
+  const float m = 0.2119034982f * linear_rgb[0] + 0.6806995451f * linear_rgb[1] +
+                  0.1073969566f * linear_rgb[2];
+  const float s = 0.0883024619f * linear_rgb[0] + 0.2817188376f * linear_rgb[1] +
+                  0.6299787005f * linear_rgb[2];
+
+  const float l_root = cbrtf(l);
+  const float m_root = cbrtf(m);
+  const float s_root = cbrtf(s);
+
+  oklab[0] = 0.2104542553f * l_root + 0.7936177850f * m_root - 0.0040720468f * s_root;
+  oklab[1] = 1.9779984951f * l_root - 2.4285922050f * m_root + 0.4505937099f * s_root;
+  oklab[2] = 0.0259040371f * l_root + 0.7827717662f * m_root - 0.8086757660f * s_root;
+}
+
+static void oklab_to_linear_srgb(const float *oklab, float *linear_rgb)
+{
+  const float l_root = oklab[0] + 0.3963377774f * oklab[1] + 0.2158037573f * oklab[2];
+  const float m_root = oklab[0] - 0.1055613458f * oklab[1] - 0.0638541728f * oklab[2];
+  const float s_root = oklab[0] - 0.0894841775f * oklab[1] - 1.2914855480f * oklab[2];
+
+  const float l = l_root * l_root * l_root;
+  const float m = m_root * m_root * m_root;
+  const float s = s_root * s_root * s_root;
+
+  linear_rgb[0] = +4.0767416621f * l - 3.3077115913f * m + 0.2309699292f * s;
+  linear_rgb[1] = -1.2684380046f * l + 2.6097574011f * m - 0.3413193965f * s;
+  linear_rgb[2] = -0.0041960863f * l - 0.7034186147f * m + 1.7076147010f * s;
+
+  const float max_component = fmaxf(fmaxf(linear_rgb[0], linear_rgb[1]), linear_rgb[2]);
+  if (max_component > 1.0f) {
+    linear_rgb[0] /= max_component;
+    linear_rgb[1] /= max_component;
+    linear_rgb[2] /= max_component;
+  }
+
+  linear_rgb[0] = fmaxf(0.0f, linear_rgb[0]);
+  linear_rgb[1] = fmaxf(0.0f, linear_rgb[1]);
+  linear_rgb[2] = fmaxf(0.0f, linear_rgb[2]);
+}
+
 bool BKE_colorband_evaluate(const ColorBand *coba, float in, float out[4])
 {
   const CBData *cbd1, *cbd2, *cbd0, *cbd3;
@@ -405,6 +451,10 @@ bool BKE_colorband_evaluate(const ColorBand *coba, float in, float out[4])
 
   if (coba == nullptr || coba->tot == 0) {
     return false;
+  }
+
+  if (coba->color_mode == COLBAND_BLEND_OKLAB) {
+    return BKE_colorband_evaluate_oklab(coba, in, out);
   }
 
   cbd1 = coba->data;
@@ -557,6 +607,102 @@ bool BKE_colorband_evaluate(const ColorBand *coba, float in, float out[4])
   }
 
   return true; /* OK */
+}
+
+bool BKE_colorband_evaluate_oklab(const ColorBand *coba, float in, float out[4])
+{
+  CLAMP(in, 0.0f, 1.0f);
+
+  if (coba == nullptr || coba->tot == 0) {
+    out[0] = out[1] = out[2] = out[3] = 0.0f;
+    return false;
+  }
+
+  if (coba->tot == 1) {
+    const CBData *cbd = &coba->data[0];
+    out[0] = cbd->r;
+    out[1] = cbd->g;
+    out[2] = cbd->b;
+    out[3] = cbd->a;
+    return true;
+  }
+
+  const int ipotype = coba->ipotype;
+
+  int left_index = 0;
+  int right_index = 0;
+
+  for (int i = 0; i < coba->tot; i++) {
+    if (coba->data[i].pos <= in) {
+      left_index = i;
+    }
+    else {
+      right_index = i;
+      break;
+    }
+  }
+
+  if (left_index == right_index) {
+    const CBData *cbd;
+    if (in <= coba->data[0].pos) {
+      cbd = &coba->data[0];
+    }
+    else {
+      cbd = &coba->data[coba->tot - 1];
+    }
+    out[0] = cbd->r;
+    out[1] = cbd->g;
+    out[2] = cbd->b;
+    out[3] = cbd->a;
+    return true;
+  }
+
+  const CBData *left = &coba->data[left_index];
+  const CBData *right = &coba->data[right_index];
+
+  if (ipotype == COLBAND_INTERP_CONSTANT) {
+    out[0] = left->r;
+    out[1] = left->g;
+    out[2] = left->b;
+    out[3] = left->a;
+    return true;
+  }
+
+  float factor = (in - left->pos) / (right->pos - left->pos);
+  CLAMP(factor, 0.0f, 1.0f);
+
+  if (coba->ipotype == COLBAND_INTERP_EASE) {
+    const float fac2 = factor * factor;
+    factor = 3.0f * fac2 - 2.0f * fac2 * factor;
+  }
+
+  float left_linear[3] = {left->r, left->g, left->b};
+  float right_linear[3] = {right->r, right->g, right->b};
+
+  float left_oklab[3], right_oklab[3];
+  linear_srgb_to_oklab(left_linear, left_oklab);
+  linear_srgb_to_oklab(right_linear, right_oklab);
+
+  float mixed_oklab[3];
+  for (int i = 0; i < 3; i++) {
+    mixed_oklab[i] = left_oklab[i] + factor * (right_oklab[i] - left_oklab[i]);
+  }
+
+  float mixed_linear[3];
+  oklab_to_linear_srgb(mixed_oklab, mixed_linear);
+
+  const float mixed_alpha = left->a + factor * (right->a - left->a);
+
+  out[0] = mixed_linear[0];
+  out[1] = mixed_linear[1];
+  out[2] = mixed_linear[2];
+  out[3] = mixed_alpha;
+  CLAMP(out[0], 0.0f, 1.0f);
+  CLAMP(out[1], 0.0f, 1.0f);
+  CLAMP(out[2], 0.0f, 1.0f);
+  CLAMP(out[3], 0.0f, 1.0f);
+
+  return true;
 }
 
 void BKE_colorband_evaluate_table_rgba(const ColorBand *coba, float **array, int *size)

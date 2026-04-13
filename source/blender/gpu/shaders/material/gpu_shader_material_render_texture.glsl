@@ -88,15 +88,43 @@ bool render_texture_is_single_channel(const int storage_format)
   return storage_format == 2 || storage_format == 3;
 }
 
+void render_texture_camera_data_zero(out float3 position,
+                                     out float3 axis_x,
+                                     out float3 axis_y,
+                                     out float3 axis_z)
+{
+  position = float3(0.0f);
+  axis_x = float3(0.0f);
+  axis_y = float3(0.0f);
+  axis_z = float3(0.0f);
+}
+
+void render_texture_camera_data_get(const int slot,
+                                    out float3 position,
+                                    out float3 axis_x,
+                                    out float3 axis_y,
+                                    out float3 axis_z)
+{
+  position = render_texture_buf[slot].camera_position.xyz;
+  axis_x = render_texture_buf[slot].camera_axis_x.xyz;
+  axis_y = render_texture_buf[slot].camera_axis_y.xyz;
+  axis_z = render_texture_buf[slot].camera_axis_z.xyz;
+}
+
 [[node]]
 void node_render_texture_none(float3 vector,
                               float use_explicit_vector,
                               float render_texture_uid,
                               float4 &color,
-                              float &alpha)
+                              float &alpha,
+                              float3 &camera_position,
+                              float3 &axis_x,
+                              float3 &axis_y,
+                              float3 &axis_z)
 {
   color = float4(0.0f);
   alpha = 0.0f;
+  render_texture_camera_data_zero(camera_position, axis_x, axis_y, axis_z);
 }
 
 [[node]]
@@ -104,14 +132,21 @@ void node_render_texture(float3 vector,
                          float use_explicit_vector,
                          float render_texture_uid,
                          float4 &color,
-                         float &alpha)
+                         float &alpha,
+                         float3 &camera_position,
+                         float3 &axis_x,
+                         float3 &axis_y,
+                         float3 &axis_z)
 {
   int slot = render_texture_slot_find(int(render_texture_uid));
   if (slot == -1) {
     color = float4(0.0f);
     alpha = 0.0f;
+    render_texture_camera_data_zero(camera_position, axis_x, axis_y, axis_z);
     return;
   }
+
+  render_texture_camera_data_get(slot, camera_position, axis_x, axis_y, axis_z);
 
   int output_type = render_texture_output_type(slot);
   int storage_format = render_texture_storage_format(slot);

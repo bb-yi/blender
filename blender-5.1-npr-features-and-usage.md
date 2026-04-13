@@ -4,7 +4,6 @@
 
 这份文档说明当前 `Blender 5.1 NPR Port` 相比官方 `Blender 5.1` 已经加入、并且当前分支内实际存在的 NPR / Eevee 扩展功能，以及它们的基本使用方法。
 
-
 ## 与官方 Blender 5.1 的主要区别
 
 当前这个 5.1 NPR 版本，和官方 Blender 5.1 相比，主要多了以下几类能力：
@@ -15,6 +14,8 @@
 
 2. `Eevee` 的新着色器节点
    - `Filter Object Info`
+   - `Filter Mask`
+   - `Scene Color`
    - `Render Info`
    - `Scene Time`
    - `Screen Derivative`
@@ -23,6 +24,11 @@
    - `World To Tangent`
    - `Basis Transform`
    - `Bevel`
+   - `GLSL Function`
+   - `Image to Closure`
+   - `Twirl`
+   - `Water Ripples`
+   - `Hex Grid Texture`
 
 3. `Goo Engine` 移植节点
    - `Screenspace Info`
@@ -34,7 +40,11 @@
    - `SDF Operator`
    - `SDF Vector Operator`
 
-4. `NPR Tree` 工作流与配套节点
+4. 内置节点增强
+   - `Color Ramp` 新增 `OKLab` 模式
+   - 原独立 `OKLab Color Ramp` 已合并回 `Color Ramp`
+
+5. `NPR Tree` 工作流与配套节点
    - `NPR Input`
    - `NPR Output`
    - `NPR Refraction`
@@ -48,13 +58,12 @@
       - `Shading Models`
       - `Surface Curvature`
 
-5. 界面整理节点
-   - `Portal In / Portal Out`
-
 6. 界面与工作流补充
+   - `Eevee Performance`
    - `材质选择器预览开关`
+   - `材质剔除模式`
+   - `Eevee 灯光 Lightgroup ID`
    - `骨骼 Outliner 隐藏`
-
 
 ## 一、Scene 级 Eevee 扩展
 
@@ -65,7 +74,6 @@
 `Render Textures` 是场景级的 Eevee 额外渲染纹理系统。
 
 它允许场景预先维护最多 `4` 个 Render Texture 槽位，每个槽位都可以指定一个相机和一个输出类型，把该相机视角下的场景结果先渲染成纹理，再在普通物体材质中通过 `Render Texture` 节点采样。
-
 
 #### 面板入口
 
@@ -106,15 +114,14 @@
 
 #### 功能说明
 
-
 它是一套场景级的 Eevee 全屏滤镜栈。每个条目都是一个 `Filter` 域材质，按列表顺序依次对当前帧进行处理。
 
 #### 面板入口
 
 `Scene Properties > Filter Materials`
 
-节点树入口:
-着色器节点编辑器 > 着色器类型 > Filter
+节点树入口：
+着色器节点编辑器 > 着色器类型 > `Filter`
 
 #### 基本使用方法
 
@@ -122,18 +129,20 @@
 2. 新建一个条目，或者直接点 `New Filter Material`。
 3. 选中的材质必须是 `Filter` 域材质。
 4. 打开 Shader Editor，把顶部 `Shader Type` 切换到 `Filter`。
-5. 在滤镜材质里使用 `Scene Color` 读取场景数据，也可以用 `Filter Object Info` 读取指定对象的变换 / 颜色信息。
-6. 通过 `Execution Stage` 选择滤镜执行位置。
+5. 在滤镜材质里使用 `Scene Color` 读取场景数据，也可以用 `Filter Object Info` 或 `Filter Mask` 读取指定对象的控制信息。
+6. 如果需要读取已有自定义通道，可使用 `AOV Input`。
+7. 如果需要把滤镜中间结果或最终结果额外写入自定义通道，可使用 `AOV Output`。
+8. 通过 `Execution Stage` 选择滤镜执行位置。
 
 #### 重要说明
 
-- `Scene Color` 节点的默认采样坐标为`纹理坐标`节点的`Window`输出
-- 支持`AOV`输入
-- `Execution Stage` 目前提供三个位置:
+- `Scene Color` 节点的默认采样坐标为 `Texture Coordinate` 节点的 `Window` 输出
+- 支持 `AOV Input`
+- 支持 `AOV Output`，可以先写出命名 AOV，再继续把结果送到 `Filter Output`
+- `Execution Stage` 目前提供三个位置：
   - `Before Volume Fog`
   - `Before Depth of Field`
   - `Before Composite`
-
 
 ## 二、主要扩展节点
 
@@ -148,15 +157,13 @@
 仅在 `Filter` 域下可用。
 
 <div align="center">
-  <img src="docs/images/SnowShot_2026-04-01_20-29-09.png" alt="Filter Object Info" style="border-radius: 10px;">
+  <img src="docs/images/filter_object_info.png" alt="Filter Object Info" style="border-radius: 10px;">
   <br>
 </div>
 
 #### 作用
 
 读取指定对象的世界空间变换和视口显示颜色，方便在 `Filter Materials` 中做基于对象状态的全屏滤镜控制。
-
-它适合用来驱动遮罩中心、方向性渐变、跟随控制物体的位置特效，或者直接把对象颜色当作滤镜参数输入。
 
 #### 节点设置
 
@@ -176,10 +183,39 @@
 - `Scale`：所选对象的世界空间缩放
 - `Color`：所选对象的视口显示颜色
 
-#### 说明
 
-- 这里读取的是指定对象的数据，不是当前正在被滤镜处理的对象
-- 如果没有指定对象，会输出默认值：位置 / 旋转 / 颜色为 `0`，缩放为 `1`
+### Filter Mask
+
+#### 入口
+
+`Add > Input > Filter Mask`
+
+仅在 `Filter` 域下可用。
+
+<div align="center">
+  <img src="docs/images/placeholder_filter_mask.png" alt="Filter Mask" style="border-radius: 10px;">
+  <br>
+</div>
+
+#### 作用
+
+使用 Eevee 的 `Cryptomatte` 物体信息，为滤镜材质快速生成对象遮罩。
+
+#### 输出
+
+- `Mask`
+
+#### 面板选项
+
+- `Mode`
+  - `Single Object`：只跟踪一个对象
+  - `Object List`：维护一个对象列表
+  - `Collection`：直接使用一个集合及其递归子对象
+
+#### 限制
+
+- 只对可渲染的几何对象有效
+- 依赖 Eevee 的对象 ID / Cryptomatte 信息
 
 ### Scene Color
 
@@ -196,17 +232,20 @@
 - `Color`
 - `Depth`
 - `Normal`
-- `Shadow`
 - `Position`
-
-`Shadow` 会读取 Eevee 的阴影渲染通道，输出 0-1 灰度阴影值，可直接用于 Toon 分层、阈值、混合等滤镜处理。
-`Position` 会读取 Eevee 的世界空间位置通道，输出全局坐标。
 
 #### 输入输出
 
 - 输入：`Vector`
 - 输出：`Color`、`Alpha`
 
+#### 说明
+
+- `Color`：读取最终场景颜色
+- `Depth`：读取线性深度
+- `Normal`：读取场景法线
+- `Position`：读取世界空间位置
+- 不连接 `Vector` 时，默认按 `Texture Coordinate` 的 `Window` 坐标采样
 
 **2. Eevee 通用辅助节点**
 
@@ -219,6 +258,7 @@
 在 `Eevee` 下可用。
 
 #### 输出
+
 - `Frag Coord`
 - `Width`
 - `Height`
@@ -273,14 +313,13 @@
 
 #### 功能
 
-获得屏幕之间相邻像素之间的差异：
+获得屏幕相邻像素之间的差异：
 
 - `DDX`
 - `DDY`
 - `DDXY`
 
 其中 `DDXY` 表示 `DDX + DDY`。
-
 
 ### Portal In / Portal Out
 
@@ -309,55 +348,15 @@
 
 #### 其他
 
-- 新建 `Portal In` 时会自动生成唯一名称。
-- `Portal Out` 上带有放大镜按钮，可快速跳转到对应的 `Portal In` 位置。
+- 新建 `Portal In` 时会自动生成唯一名称
+- `Portal Out` 上带有放大镜按钮，可快速跳转到对应的 `Portal In` 位置
 
 #### 限制
 
-- 只在同一个 shader node tree 内识别。
-- 不支持跨节点树。
-- 不支持跨节点组自动穿透。
-- 同名输入应只保留一个来源。
-
-**3. Eevee 物体材质节点**
-
-### Render Texture
-
-#### 入口
-
-`Add > Texture > Render Texture`
-
-#### 作用
-
-读取前面在场景里配置好的 `Render Textures` 条目。
-
-#### 输入输出
-
-- 输入：`Vector`
-- 输出：`Color`、`Alpha`
-
-
-### Screenspace Info
-
-#### 入口
-
-`Add > Input > Screenspace Info`
-
-#### 输入输出
-
-- 输入：`View Position`
-- 输出：`Scene Color`、`Scene Depth`
-
-#### 作用
-
-获得当前的渲染缓冲颜色或深度的内容
-
-#### 使用说明
-
-- 渲染设置中需要打开`Raytracing`
-- 材质选项`Render Method`选择`Dithered`
-- 材质选项打开`Raytraced Transmission`
-- `View Position`默认输入为:`position`变换到摄像机空间,再反转z轴
+- 只在同一个 shader node tree 内识别
+- 不支持跨节点树
+- 不支持跨节点组自动穿透
+- 同名输入应只保留一个来源
 
 ### World Environment
 
@@ -378,7 +377,7 @@
 
 #### 说明
 
-- 适合获取被遮挡情况下的 world 环境颜色
+- 适合获取被遮挡情况下的世界环境颜色
 - 不读取屏幕背后物体的颜色
 - 输出更接近 `Eevee` 的环境 / probe 结果，而不是屏幕空间缓冲
 - `Direction` 不连接时，默认使用当前表面的视线方向
@@ -433,9 +432,243 @@
 - 主要用于把世界空间方向改写成以 `Tangent / Bitangent / Normal` 为基底的局部方向
 - 节点面板中可指定 `UV Map`，该 UV 的切线会作为转换基底
 - 适合拿来做各向异性方向控制、切线空间流向、局部扫描方向等效果
-- 当前版本处理的是“向量 / 方向”变换，不是“位置点”变换
-- 普通网格需要有效的 UV 切线数据；曲线 / 毛发会优先使用已有的曲线切线基底
-- 如果对象没有可用切线基底，结果会退化为 `0`
+
+### GLSL Function
+
+#### 入口
+
+`Add > Script > GLSL Function`
+
+在 `Eevee` 物体材质和 `NPR Tree` 中可用。
+
+<div align="center">
+  <img src="docs/images/placeholder_glsl_function.png" alt="GLSL Function" style="border-radius: 10px;">
+  <br>
+</div>
+
+#### 作用
+
+把一段用户编写的 `GLSL` 函数接入当前 `Eevee / NPR` 材质编译流程，适合做自定义数学节点、程序纹理、SDF、屏幕效果封装，以及移植一部分外部 GLSL / HLSL 逻辑。
+
+#### 基本使用方法
+
+1. 在 `Text Editor` 中准备一段 `GLSL` 函数源码，或者指定一个外部 `.glsl` 文件。
+2. 添加 `GLSL Function` 节点。
+3. 在节点面板中选择源码来源和目标函数。
+4. 如果修改了源码，可点击节点上的刷新按钮重新解析。
+5. 在 `Function` 中显式选择真正要导出的函数名。
+
+#### 当前支持的函数边界类型
+
+- 输入参数：`float`、`vec2`、`vec3`、`vec4`、`sampler2D`、`sample2D`
+- 输出参数：`out float`、`out vec2`、`out vec3`、`out vec4`
+- 返回值：`void`、`float`、`vec2`、`vec3`、`vec4`
+
+#### 重要说明
+
+- `Function` 不会自动选第一个函数，需要手动指定
+- `sampler2D` 由节点面板中的图片槽位选择，不是可连线输入
+- `sample2D` 会显示为 `Closure` 输入口，可连接 `Image to Closure` 或符合约定的 `Closure Output`
+- `Closure Output -> sample2D` 当前只保证 `texture(tex, uv)` 这种直接采样形式
+- 如果函数依赖 `textureLod`、`textureGrad`、`textureSize`、`texelFetch` 这类图像专用能力，应优先配合 `Image to Closure`
+- `@glsl_meta` 支持 `default`、`min`、`max`、`hide_value` 和 `subtype`
+- 只有显式写了 `subtype=color` 的 `vec3 / vec4` 输入，才会显示成颜色插口
+- `vec3 + subtype=color` 进入 GLSL 时按 `rgb` 使用，`alpha` 固定为 `1.0`
+- `vec4 + subtype=color` 会保留完整 `rgba`
+- 当前不支持把 `int / bool / mat* / struct / array` 作为导出函数边界类型
+
+#### 进一步说明
+
+如果要把外部 GLSL / HLSL / ShaderLab 代码稳定转换到这个节点，建议同时参考仓库内的 `docs/glsl-function-node-conversion-guide.md`。
+
+### Image to Closure
+
+#### 入口
+
+`Add > Texture > Image to Closure`
+
+在 `Eevee` 物体材质和 `NPR Tree` 中可用。
+
+<div align="center">
+  <img src="docs/images/placeholder_image_to_closure.png" alt="Image to Closure" style="border-radius: 10px;">
+  <br>
+</div>
+
+#### 输出
+
+- `Closure`
+
+#### 作用
+
+把一张普通图片包装成 `sample2D` 可消费的 `Closure` 源，主要用于给 `GLSL Function(sample2D)` 提供图像输入，同时保持和程序化 `Closure Output` 相同的接线形式。
+
+#### 节点设置
+
+- `Image`
+- `Interpolation`
+- `Extension`
+
+#### 使用说明
+
+- 这个节点没有普通贴图插口，图片是在节点面板里直接选择
+- 它主要是 `sample2D` 工作流的图像适配节点，不是普通 `Image Texture` 的替代品
+- 当函数需要图像资源专用采样能力时，应优先使用这个节点
+
+**3. Eevee 物体材质节点**
+
+### Render Texture
+
+#### 入口
+
+`Add > Texture > Render Texture`
+
+#### 作用
+
+读取前面在场景里配置好的 `Render Textures` 条目。
+
+#### 输入输出
+
+- 输入：`Vector`
+- 输出：`Color`、`Alpha`
+
+### Screenspace Info
+
+#### 入口
+
+`Add > Input > Screenspace Info`
+
+#### 输入输出
+
+- 输入：`View Position`
+- 输出：`Scene Color`、`Scene Depth`
+
+#### 作用
+
+获得当前渲染缓冲中的颜色或深度内容。
+
+#### 使用说明
+
+- 渲染设置中需要打开 `Raytracing`
+- 材质选项 `Render Method` 选择 `Dithered`
+- 材质选项打开 `Raytraced Transmission`
+- `View Position` 默认输入为把当前位置变换到摄像机空间后再反转 `Z` 轴
+
+### Twirl
+
+#### 入口
+
+`Add > Utilities > Vector > Twirl`
+
+<div align="center">
+  <img src="docs/images/placeholder_twirl.png" alt="Twirl" style="border-radius: 10px;">
+  <br>
+</div>
+
+#### 输入输出
+
+- 输入：`Vector`
+- 输入：`Center`
+- 输入：`Amount`
+- 输出：`Vector`
+
+#### 作用
+
+围绕指定中心对输入坐标做旋扭，适合做 Goo Engine 风格的旋涡、扭曲 UV、局部卷曲图案和极坐标变形。
+
+#### 说明
+
+- `Vector` 一般接 `Texture Coordinate`、`Generated`、`Object` 或自定义坐标
+- `Center` 用来指定旋扭中心
+- `Amount` 越大，离中心越远的位置旋转越明显
+
+### Water Ripples
+
+#### 入口
+
+`Add > Texture > Water Ripples`
+
+<div align="center">
+  <img src="docs/images/placeholder_water_ripples.png" alt="Water Ripples" style="border-radius: 10px;">
+  <br>
+</div>
+
+#### 输入输出
+
+- 输入：`Vector`
+- 输入：`Time`
+- 输入：`Scale`
+- 输入：`Intensity`
+- 输入：`Speed`
+- 输入：`Detail`
+- 输入：`Bias`
+- 输出：`Distorted Vector`
+- 输出：`Mask`
+
+#### 面板选项
+
+- `Mode`
+  - `Drops`
+  - `Ripples`
+  - `Flow`
+  - `Caustic`
+
+#### 作用
+
+生成程序化水波扰动和强度遮罩，既可以直接拿 `Mask` 做明暗、混合或阈值，也可以把 `Distorted Vector` 继续送到其他纹理节点做扭曲采样。
+
+### Hex Grid Texture
+
+#### 入口
+
+`Add > Texture > Hex Grid Texture`
+
+<div align="center">
+  <img src="docs/images/placeholder_hex_grid_texture.png" alt="Hex Grid Texture" style="border-radius: 10px;">
+  <br>
+</div>
+
+#### 输入
+
+- `Vector`
+- `Scale`
+- `Size`
+- `Radius`
+- `Roundness`
+
+#### 输出
+
+- `Value`
+- `Color`
+- `Hex Coords`
+- `Position`
+- `Cell UV`
+- `Cell ID`
+
+#### 面板选项
+
+- `Coordinate Mode`
+  - `XY Position`
+  - `Hex Position`
+- `Value Mode`
+  - `Hexagons`
+  - `SDF Hexagons`
+  - `Dots`
+- `Direction`
+  - `Horizontal`
+  - `Vertical`
+  - `Horizontal Tiled`
+  - `Vertical Tiled`
+- `Clamp`
+
+#### 作用
+
+生成六边形网格纹理，可用于蜂窝图案、格子分块、SDF 遮罩、六边形坐标分区和后续程序化贴图定位。
+
+#### 说明
+
+- `Value` 输出表示六边形值场，可继续拿去做阈值、混合或 SDF 处理
+- `Cell UV` 和 `Cell ID` 适合做每格独立变化、随机化和图案分区
+- `Clamp` 只影响 `Value` 输出，便于把结果限制到 `0-1`
 
 ### SDF Primitive
 
@@ -552,7 +785,6 @@
 - `Repeat`、`Mirror`、`Polar`、`Octant` 适合做规则重复、轴对称、环形重复和象限对称，不需要真的复制几何
 - `Rotate`、`Spin`、`Twist`、`Swirl`、`Bend` 适合先把空间扭曲，再让基础形体沿扭曲后的空间生成
 - `UV Grid`、`UV Random Rotate`、`UV Random Flip`、`UV Tileset` 适合做图案平铺、瓦片随机朝向和单张贴图分块复用
-- `Map -1-1`、`Map -0.5-0.5`、`Map 0-1` 适合在 UV 范围和 SDF 常见坐标范围之间快速切换
 
 ### Bevel
 
@@ -600,60 +832,24 @@
 
 - `Scene Curvature`
 - `Scene Rim`
-- `Bevel Normal`
 
 #### 面板选项
 
 - `Local`
+- `Sample Radius`
+  - `Pixel`
+  - `View`
 
 #### 作用
 
-移植的Goo Engine中的曲率节点,提供曲率和边缘光输出
+移植自 Goo Engine 的曲率节点，提供屏幕空间曲率和边缘光输出。
 
 #### 说明
 
 - `Local` 开启后，会尽量只按当前物体自身的信息计算
-- `Bevel Normal` 会输出一个基于屏幕空间邻域重建的近似倒角法线
-- `Bevel Normal` 适合接到点乘、假倒角、高光偏移等用法里
-- 节点本质上是屏幕空间采样节点，结果会受到当前视角、屏幕分辨率和采样半径影响
-- 直接观察时，通常 `Scene Rim` 会比 `Scene Curvature` 更容易看出效果
-
-### Raycast
-
-#### 入口
-
-`Add > Input > Raycast`
-
-在 `Eevee` 下可用，也可以直接在 `NPR Tree` 中使用。
-
-#### 输入
-
-- `Position`
-- `Direction`
-- `Length`
-
-#### 输出
-
-- `Is Hit`
-- `Self Hit`
-- `Hit Distance`
-- `Hit Position`
-- `Hit Normal`
-
-#### 面板选项
-
-- `Only Local`
-
-#### 作用
-
-基于 Eevee 屏幕空间信息发射射线，并返回命中结果。
-
-#### 说明
-
-- `Position` 默认使用世界坐标
-- `Direction` 默认使用表面法线方向
-- `Only Local` 开启后，会尽量只检测当前物体自身
-- 这是屏幕空间节点，命中结果依赖当前视角和可见缓冲
+- `Pixel` 模式下，`Sample Radius` 以像素为单位，效果会随分辨率变化
+- `View` 模式下，`Sample Radius` 会按视图相对尺度解释，更适合保持视图和最终渲染中的 rim 宽度一致
+- 这是屏幕空间节点，结果会受到当前视角、屏幕分辨率和采样半径影响
 
 ### Shader Info
 
@@ -661,10 +857,16 @@
 
 `Add > Input > Shader Info`
 
+<div align="center">
+  <img src="docs/images/placeholder_shader_info_blinn_phong.png" alt="Shader Info" style="border-radius: 10px;">
+  <br>
+</div>
+
 #### 输入
 
 - `World Position`
 - `Normal`
+- `Exponent`
 
 #### 输出
 
@@ -672,31 +874,37 @@
 - `Shadow`
 - `Ambient Lighting`
 - `Half-Lambert Factor`
+- `Blinn-Phong Factor`
 
 #### 各输出的含义
 
 - `Diffuse Shading`
-  - 每个灯光的兰伯特光照之和,再钳制到0-1
+  - 每个灯光的兰伯特光照之和，再钳制到 `0-1`
 - `Shadow`
   - 可切换阴影模式
-  - `Built-in` 默认模式，使用 Eevee 原本的阴影计算
-  - `Stable` 特殊模式，输出稳定的0-1灰度阴影遮罩，可直接拿去做toon阶梯、阈值和半影着色
-  - `Soft Filtered` 在 `Stable` 基础上，对当前表面附近的一像素邻域做额外采样和平均，把黑白抖动阴影变成更平滑的灰度半影
+  - `Built-in`：使用 Eevee 原本的阴影计算
+  - `Soft Filtered`：对当前表面附近的一像素邻域做额外采样和平均，把黑白抖动阴影重建成更平滑的灰度半影
 - `Ambient Lighting`
   - 来自探针 / 环境间接光的环境照明信息
 - `Half-Lambert Factor`
-  - 每个灯光的半兰伯特光照之和,再钳制到0-1
+  - 每个灯光的半兰伯特光照之和，再钳制到 `0-1`
+- `Blinn-Phong Factor`
+  - 每个灯光的布林冯高光因子按镜面通道加权求平均，再钳制到 `0-1`
+  - 默认不直接乘阴影，需要时请与 `Shadow` 输出自行组合
 
 #### 额外说明
 
+- `Exponent`
+  - 控制布林冯高光的锐度，数值越高高光越集中
+  - 默认值为 `16`
 - 节点面板新增 `Shadow Mode`
-  - `Built-in` / `Stable` / `Soft Filtered`
-- 当 `Shadow Mode = Stable` 或 `Soft Filtered` 时，可用 `Stable Samples` 提高阴影质量
-- `Soft Filtered` 更适合把单帧黑白阴影重建成连续灰度，但性能会比 `Stable` 更高
+  - `Built-in`
+  - `Soft Filtered`
+- 当 `Shadow Mode = Soft Filtered` 时，可用 `Stable Samples` 提高阴影质量
 - 节点面板新增整数 `Lightgroup`
   - 只有 `Lightgroup ID` 相同的灯光，才会参与这个 `Shader Info` 节点的直接光照与阴影计算
   - 默认值为 `0`，表示只接收 `Lightgroup ID = 0` 的灯光
-- 当前实现会排除 world sun 对这些输出的干扰，避免 HDRI 或世界环境里的“太阳光”混入直接结果。
+- 当前实现会排除 world sun 对这些输出的干扰，避免 HDRI 或世界环境里的“太阳光”混入直接结果
 
 ### Light Info
 
@@ -706,7 +914,7 @@
 
 #### 功能说明
 
-读取指定灯光信息
+读取指定灯光信息。
 
 #### 固定输出
 
@@ -739,7 +947,30 @@
 
 #### 说明
 
-- 如果你要做逐灯处理，应该使用 `NPR Tree` 里的 `For Each Light`。
+- 如果你要做逐灯处理，应该使用 `NPR Tree` 里的 `For Each Light`
+
+**4. 内置节点增强**
+
+### Color Ramp（OKLab 模式）
+
+#### 入口
+
+`Add > Converter > Color Ramp`
+
+<div align="center">
+  <img src="docs/images/placeholder_color_ramp_oklab.png" alt="Color Ramp OKLab" style="border-radius: 10px;">
+  <br>
+</div>
+
+#### 作用
+
+`Color Ramp` 现在支持 `OKLab` 混色模式，可在颜色过渡时得到更稳定、更接近感知均匀的渐变结果。
+
+#### 使用方法
+
+1. 添加普通 `Color Ramp` 节点。
+2. 在节点的颜色混合模式中切换到 `OKLab`。
+3. 按原来的方式编辑渐变色标即可。
 
 ## 三、NPR Tree 工作流
 
@@ -757,12 +988,13 @@
 4. 需要编辑这棵树时，在 Shader Editor 顶部把 `Shader Type` 切到 `NPR`。
 
 ### 3. 说明
- - 材质的渲染方式需要设置为`抖动(延迟渲染)`
- - `NPR Tree` 的关键帧与驱动器使用独立的 `NPR Tree Action`，可在 `Material Properties > Animation > NPR Tree Action` 查看、切换或新建。
+
+- 材质的渲染方式需要设置为 `抖动(延迟渲染)`
+- `NPR Tree` 的关键帧与驱动器使用独立的 `NPR Tree Action`，可在 `Material Properties > Animation > NPR Tree Action` 查看、切换或新建
 
 ### 4. 主要 NPR 节点
 
-除了下面这些专用 NPR 节点以外，`Curvature` 和 `Raycast` 现在也可以直接在 `NPR Tree` 中使用。
+除了下面这些专用 NPR 节点以外，`Curvature`、`Raycast` 和 `GLSL Function` 现在也可以直接在 `NPR Tree` 中使用。
 
 ### NPR Input
 
@@ -788,7 +1020,7 @@
 
 #### 作用
 
-读取折射相关缓冲,类似`Screenspace Info`
+读取折射相关缓冲，类似 `Screenspace Info`。
 
 #### 输出
 
@@ -823,7 +1055,7 @@
 
 #### 说明
 
-它会按当前影响表面的灯光逐个执行内部逻辑,每次循环输出一个灯光的信息
+它会按当前影响表面的灯光逐个执行内部逻辑，每次循环输出一个灯光的信息。
 
 #### 内置可用信息
 
@@ -837,7 +1069,6 @@
 - 输出：`Shadow Mask`
 
 此外还支持在区域输入 / 输出上增添自定义 socket，用于在逐灯循环内部传递你自己的中间量。
-
 
 ### 内置 NPR 节点组资产
 
@@ -854,13 +1085,42 @@
 
 ### 资产说明
 
-- 这些节点组已经按 Blender 5.1 的格式迁移。
-- 由于重复区域节点名称修改了,4.4 npr原型的工程需要自己重新连接重新区域相关的节点
-
+- 这些节点组已经按 Blender 5.1 的格式迁移
+- 由于重复区域节点名称修改了，4.4 NPR Prototype 的工程需要自己重新连接区域相关节点
 
 ## 四、界面与工作流补充
 
-### 1. 材质选择器预览开关
+### 1. Eevee Performance
+
+#### 作用
+
+在 `Outliner` 中查看 Eevee 当前视口 / 最终渲染的性能统计、阶段拆分和功能提示，用来快速定位性能热点。
+
+<div align="center">
+  <img src="docs/images/placeholder_eevee_performance.png" alt="Eevee Performance" style="border-radius: 10px;">
+  <br>
+</div>
+
+#### 入口
+
+- `Outliner > Display Mode > Eevee Performance`
+- `Outliner` 头部中的 `Profiler` / `Pause` / `Sort by Time`
+- `Outliner` 头部中的设置弹出面板 `Eevee Performance`
+
+#### 行为说明
+
+- 开启 `Profiler` 后，Eevee 会开始收集当前性能统计并在 `Outliner` 树中显示
+- `Pause` 会暂停视口性能数据的继续刷新，方便查看当前结果
+- `Sort by Time` 会按当前 CPU 开销排序阶段列表，而不是固定的管线顺序
+- `Average Window` 用于设置平滑统计时使用的帧窗口大小
+- 当前树结构会显示 `Viewport`、`Final Render`、`Metadata`、`Features`、`Stages`、`Hints` 等分组
+
+#### 说明
+
+- 当前主要是 Eevee 的 CPU 侧阶段统计与功能提示，不是完整 GPU profiler
+- 只对 `Eevee` 有意义，不支持 `Cycles`
+
+### 2. 材质选择器预览开关
 
 #### 作用
 
@@ -874,17 +1134,43 @@
 
 #### 行为说明
 
-- 开启时：材质选择器会按当前逻辑显示材质预览图。
-- 关闭时：材质选择器会退回普通材质图标，不再在下拉列表里触发材质预览渲染。
-- 默认值为开启。
+- 开启时：材质选择器会按当前逻辑显示材质预览图
+- 关闭时：材质选择器会退回普通材质图标，不再在下拉列表里触发材质预览渲染
+- 默认值为开启
 
 #### 当前范围
 
-- 目前只影响 `template_ID(...)` 这类材质选择器下拉列表中的材质预览显示。
-- 不影响 `Material Properties` 面板中的大预览球。
-- 不影响材质本身的正常渲染结果。
+- 目前只影响 `template_ID(...)` 这类材质选择器下拉列表中的材质预览显示
+- 不影响 `Material Properties` 面板中的大预览球
+- 不影响材质本身的正常渲染结果
 
-### 2. Eevee 灯光 Lightgroup ID
+### 3. 材质剔除模式
+
+#### 作用
+
+为材质提供更明确的面剔除控制，除了原本常见的背面剔除外，现在还支持 `正面剔除`。
+
+<div align="center">
+  <img src="docs/images/placeholder_material_face_culling.png" alt="Material Face Culling" style="border-radius: 10px;">
+  <br>
+</div>
+
+#### 入口
+
+`Material Properties > Settings > Culling > Camera`
+
+#### 可选模式
+
+- `None`：不剔除，正反面都渲染
+- `Back`：背面剔除
+- `Front`：正面剔除
+
+#### 说明
+
+- `Front` 适合做壳体内部观察、双层模型的反向显露，或某些特殊的描边 / 反相表现
+- `Shadow` 和 `Light Probe Volume` 仍然保留独立的剔除控制
+
+### 4. Eevee 灯光 Lightgroup ID
 
 #### 作用
 
@@ -901,7 +1187,7 @@
 - 如果某个 `Shader Info` 节点设置为其他整数值，则只有相同编号的灯光会参与该节点计算
 - 这个分组过滤当前只影响 `Shader Info` 节点，不会改动 Eevee 普通材质主通道的默认灯光结果
 
-### 3. 启动图版本标识
+### 5. 启动图版本标识
 
 #### 作用
 
@@ -912,7 +1198,7 @@
 - `版本号 + npr post + 构建日期`
 - 例如：`5.1.0 npr post 2026-03-27`
 
-### 4. 骨骼 Outliner 隐藏
+### 6. 骨骼 Outliner 隐藏
 
 #### 作用
 
@@ -927,11 +1213,11 @@
 
 #### 行为说明
 
-- 每个 `Pose Bone` 都有自己的 `Hide in Outliner` 开关。
-- 这个开关默认是开启的。
-- `Outliner` 里的 `Hidden PoseBones` 过滤项默认也是开启的，所以默认不会立刻改变现有骨架的显示结果。
-- 当关闭 `Outliner > Filter > Hidden PoseBones` 后，勾选了 `Hide in Outliner` 的姿态骨骼会从 Outliner 树中隐藏。
-- 如果某个被隐藏的父骨骼仍然有可见子骨骼，可见子骨骼会继续保留在树里，不会整支层级一起消失。
+- 每个 `Pose Bone` 都有自己的 `Hide in Outliner` 开关
+- 这个开关默认是开启的
+- `Outliner` 里的 `Hidden PoseBones` 过滤项默认也是开启的，所以默认不会立刻改变现有骨架的显示结果
+- 当关闭 `Outliner > Filter > Hidden PoseBones` 后，勾选了 `Hide in Outliner` 的姿态骨骼会从 Outliner 树中隐藏
+- 如果某个被隐藏的父骨骼仍然有可见子骨骼，可见子骨骼会继续保留在树里，不会整支层级一起消失
 
 #### 当前范围
 
@@ -939,12 +1225,12 @@
 - 不作用于 `Edit Bone`
 - 只改变 `Outliner` 的层级显示，不影响骨骼的变换、动画、驱动器和渲染结果
 
-
 ## 五、当前限制与注意事项
 
-- 大部分功能是 `Eevee` 专用，不支持 `Cycles`。
-- `Render Textures` 当前最多 `4` 个槽位。
-- `Filter Materials` 只能使用 `Filter` 域材质。
-- `Portal` 只在同一节点树内生效，不支持跨节点树和跨节点组自动穿透。
-- `Screenspace Info`、`Scene Color`、`Screen Derivative`、`Curvature`、`Bevel` 这类节点，本质上都依赖 Eevee 的屏幕空间或当前渲染缓冲信息。
-- 反射探头只会捕获NPR Tree之前的材质效果
+- 大部分功能是 `Eevee` 专用，不支持 `Cycles`
+- `Render Textures` 当前最多 `4` 个槽位
+- `Filter Materials` 只能使用 `Filter` 域材质
+- `Filter Mask` 依赖 Eevee 的对象 ID / Cryptomatte 数据
+- `Portal` 只在同一节点树内生效，不支持跨节点树和跨节点组自动穿透
+- `GLSL Function` 的导出函数边界类型仍然比较严格，建议把外部 shader 先收敛成普通函数再接入
+- `Screenspace Info`、`Scene Color`、`Screen Derivative`、`Curvature`、`Bevel` 这类节点，本质上都依赖 Eevee 的屏幕空间或当前渲染缓冲信息

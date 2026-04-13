@@ -291,6 +291,7 @@ struct ShaderKey {
     shader = GPU_material_get_shader(gpumat);
     options = uint64_t(shader_closure_bits_from_flag(gpumat));
     options = (options << 8) | blender_mat->blend_flag;
+    options = (options << 2) | uint64_t(material_surface_cull_method_get(*blender_mat));
     options = (options << 2) | uint64_t(probe_capture);
     options = (options << 16) | uint16_t(refraction_layer);
   }

@@ -37,11 +37,13 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.is_function_node();
   b.add_input<decl::Vector>("World Position").hide_value();
   b.add_input<decl::Vector>("Normal").hide_value();
+  b.add_input<decl::Float>("Exponent").default_value(16.0f).min(1.0f).max(512.0f);
 
   b.add_output<decl::Color>("Diffuse Shading");
   b.add_output<decl::Float>("Shadow");
   b.add_output<decl::Color>("Ambient Lighting");
   b.add_output<decl::Float>("Half-Lambert Factor");
+  b.add_output<decl::Float>("Blinn-Phong Factor");
 }
 
 static void node_shader_init_shader_info(bNodeTree * /*ntree*/, bNode *node)
@@ -79,7 +81,8 @@ static int node_shader_gpu_shader_info(GPUMaterial *mat,
                                       min_ii(node->custom2, stable_shadow_sample_max) :
                                       stable_shadow_sample_fallback;
   const float stable_shadow_samples = float(shadow_sample_count);
-  const NodeShaderShaderInfo *storage = static_cast<const NodeShaderShaderInfo *>(node->storage);
+  NodeShaderShaderInfo *storage = static_cast<NodeShaderShaderInfo *>(node->storage);
+  static int lightgroup_hash_fallback = 0;
   uint lightgroup_hash = shader_info_lightgroup_hash_from_id(0);
   if (storage != nullptr) {
     if (storage->lightgroup[0] != '\0') {
@@ -88,6 +91,10 @@ static int node_shader_gpu_shader_info(GPUMaterial *mat,
     else {
       lightgroup_hash = shader_info_lightgroup_hash_from_id(storage->lightgroup_id);
     }
+    storage->_pad = int(lightgroup_hash);
+  }
+  else {
+    lightgroup_hash_fallback = int(lightgroup_hash);
   }
 
   GPU_material_flag_set(mat, GPU_MATFLAG_DIFFUSE | GPU_MATFLAG_SHADER_INFO);
@@ -96,7 +103,8 @@ static int node_shader_gpu_shader_info(GPUMaterial *mat,
   }
   BLI_STATIC_ASSERT(sizeof(float) == sizeof(uint),
                     "GPUCodegen: Shader Info lightgroup hash needs float and uint to be the same size.");
-  GPUNodeLink *lightgroup_hash_link = GPU_constant(reinterpret_cast<float *>(&lightgroup_hash));
+  GPUNodeLink *lightgroup_hash_link = GPU_uniform(reinterpret_cast<float *>(
+      storage != nullptr ? &storage->_pad : &lightgroup_hash_fallback));
   return GPU_stack_link(mat,
                         node,
                         "node_shader_info",
@@ -118,7 +126,8 @@ void register_node_type_sh_shader_info()
   sh_node_type_base(&ntype, "ShaderNodeShaderInfo", SH_NODE_SHADER_INFO);
   ntype.ui_name = "Shader Info";
   ntype.ui_description =
-      "Expose Eevee direct light, shadow mask, and ambient probe information for the surface";
+      "Expose Eevee direct light, shadow mask, ambient probe, half-lambert, and Blinn-Phong "
+      "information for the surface";
   ntype.enum_name_legacy = "SHADERINFO";
   ntype.nclass = NODE_CLASS_INPUT;
   ntype.initfunc = file_ns::node_shader_init_shader_info;

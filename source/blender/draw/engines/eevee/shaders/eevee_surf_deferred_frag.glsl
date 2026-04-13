@@ -70,6 +70,7 @@ void main()
   clear_aovs();
 #endif
 
+  material_surface_cull_discard();
   init_globals();
 
   float noise = utility_tx_fetch(utility_tx, gl_FragCoord.xy, UTIL_BLUE_NOISE_LAYER).r;

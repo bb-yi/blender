@@ -19,7 +19,27 @@
 #include "draw_cache.hh"
 #include "draw_debug.hh"
 
+#include <cfloat>
+#include <unordered_map>
+
 namespace blender::eevee {
+
+namespace {
+
+struct DirectionalFocusData {
+  float3 position = float3(0.0f);
+  float distance = 0.0f;
+  float blend = 0.0f;
+};
+
+static std::unordered_map<const ShadowModule *, DirectionalFocusData> directional_focus_cache;
+
+static DirectionalFocusData &directional_focus_data_ensure(const ShadowModule &shadows)
+{
+  return directional_focus_cache[&shadows];
+}
+
+}  // namespace
 
 ShadowTechnique ShadowModule::shadow_technique = ShadowTechnique::ATOMIC_RASTER;
 
@@ -289,6 +309,81 @@ eShadowProjectionType ShadowDirectional::directional_distribution_type_get(const
   return camera.is_perspective() ? SHADOW_PROJECTION_CLIPMAP : SHADOW_PROJECTION_CASCADE;
 }
 
+static int clipmap_level_perspective_bias(const Camera &camera)
+{
+  if (!camera.is_perspective()) {
+    return 0;
+  }
+
+  const CameraData &cam_data = camera.data_get();
+  const float screen_diag = max_ff(cam_data.screen_diagonal_length, 1e-6f);
+  if (screen_diag >= 1.0f) {
+    return 0;
+  }
+
+  /* `screen_diagonal_length` is a normalized view-space frustum diagonal.
+   * Values below 1 mean the visible frustum footprint is narrower than the unit depth used by the
+   * default clipmap heuristic, which is exactly where telephoto views need finer directional LODs.
+   */
+  return clamp_i(int(floor(-log2(screen_diag))), 0, 8);
+}
+
+static void directional_focus_update(DirectionalFocusData &focus,
+                                     const Camera &camera,
+                                     const draw::StorageVectorBuffer<uint, 128> &curr_casters,
+                                     const draw::Manager &manager)
+{
+  focus.position = camera.position();
+  focus.distance = 0.0f;
+  focus.blend = 0.0f;
+
+  const int perspective_bias = clipmap_level_perspective_bias(camera);
+  if (!camera.is_perspective() || (perspective_bias == 0) || curr_casters.is_empty()) {
+    return;
+  }
+
+  const CameraData &cam_data = camera.data_get();
+  const float3 camera_position = camera.position();
+  const float3 view_direction = -camera.forward();
+  const auto &matrices = manager.matrix_buf.current();
+
+  float best_score = FLT_MAX;
+  float best_depth = 0.0f;
+  bool found_focus = false;
+
+  for (int64_t i : IndexRange(curr_casters.size())) {
+    const uint resource_id = curr_casters[i];
+    if (resource_id >= matrices.size()) {
+      continue;
+    }
+
+    const float3 caster_center = matrices[resource_id].model.location();
+    const float depth = math::dot(caster_center - camera_position, view_direction);
+    if ((depth <= cam_data.clip_near) || (depth >= cam_data.clip_far)) {
+      continue;
+    }
+
+    const float3 point_on_ray = camera_position + view_direction * depth;
+    const float ray_distance_sq = math::distance_squared(caster_center, point_on_ray);
+    const float projected_radius = max_ff(cam_data.screen_diagonal_length * depth, 1e-4f);
+    const float score = ray_distance_sq / (projected_radius * projected_radius) + depth * 1e-4f;
+
+    if (score < best_score) {
+      best_score = score;
+      best_depth = depth;
+      found_focus = true;
+    }
+  }
+
+  if (!found_focus) {
+    return;
+  }
+
+  focus.distance = best_depth;
+  focus.position = camera_position + view_direction * best_depth;
+  focus.blend = clamp_f(float(perspective_bias) / 3.0f, 0.0f, 1.0f);
+}
+
 /************************************************************************
  *                         Cascade Distribution                         *
  ************************************************************************/
@@ -306,7 +401,8 @@ void ShadowDirectional::cascade_tilemaps_distribution_near_far_points(const Came
       light.object_to_world, camera.position() - camera.forward() * cam_data.clip_near);
 }
 
-IndexRange ShadowDirectional::cascade_level_range(const Light &light, const Camera &camera)
+ShadowDirectional::LevelSpan ShadowDirectional::cascade_level_range(const Light &light,
+                                                                    const Camera &camera)
 {
   /* NOTE: All tile-maps are meant to have the same LOD
    * but we still return a range starting at the unique LOD. */
@@ -347,7 +443,7 @@ IndexRange ShadowDirectional::cascade_level_range(const Light &light, const Came
   /* Number of tile-maps needed to cover the whole view. */
   /* NOTE: floor + 0.5 to avoid 0 when parallel. */
   int tilemap_len = ceil(0.5f + depth_range_in_shadow_space / per_tilemap_coverage);
-  return IndexRange(lod_level, tilemap_len);
+  return LevelSpan{lod_level, lod_level + max_ii(tilemap_len, 1) - 1};
 }
 
 void ShadowDirectional::cascade_tilemaps_distribution(Light &light, const Camera &camera)
@@ -356,16 +452,19 @@ void ShadowDirectional::cascade_tilemaps_distribution(Light &light, const Camera
 
   float4x4 object_mat = light.object_to_world;
   object_mat.location() = float3(0.0f);
+  light.lod_bias = shadows_.global_lod_bias();
+  light.sun()._pad3 = 0.0f;
+  light.sun()._pad4 = 0.0f;
 
   /* All tile-maps use the first level size. */
-  float half_size = ShadowDirectional::coverage_get(levels_range.first()) / 2.0f;
-  float tile_size = ShadowDirectional::tile_size_get(levels_range.first());
+  float half_size = ShadowDirectional::coverage_get(levels_.lod_min) / 2.0f;
+  float tile_size = ShadowDirectional::tile_size_get(levels_.lod_min);
 
   float3 near_point, far_point;
   cascade_tilemaps_distribution_near_far_points(camera, light, near_point, far_point);
 
   float2 local_view_direction = normalize(far_point.xy() - near_point.xy());
-  float2 farthest_tilemap_center = local_view_direction * half_size * (levels_range.size() - 1);
+  float2 farthest_tilemap_center = local_view_direction * half_size * (levels_.size() - 1);
 
   /* Offset for smooth level transitions. */
   light.object_to_world.x.w = near_point.x;
@@ -379,11 +478,11 @@ void ShadowDirectional::cascade_tilemaps_distribution(Light &light, const Camera
 
   light.sun().clipmap_base_offset_neg = int2(0); /* Unused. */
   light.sun().clipmap_base_offset_pos = (offset_vector * (1 << 16)) /
-                                        max_ii(levels_range.size() - 1, 1);
+                                        max_ii(levels_.size() - 1, 1);
 
   /* \note cascade_level_range starts the range at the unique LOD to apply to all tile-maps. */
-  int level = levels_range.first();
-  for (int i : IndexRange(levels_range.size())) {
+  int level = levels_.lod_min;
+  for (int i : IndexRange(levels_.size())) {
     ShadowTileMap *tilemap = tilemaps_[i];
 
     /* Equal spacing between cascades layers since we want uniform shadow density. */
@@ -403,49 +502,60 @@ void ShadowDirectional::cascade_tilemaps_distribution(Light &light, const Camera
 
   /* Not really clip-maps, but this is in order to make #light_tilemap_max_get() work and determine
    * the scaling. */
-  light.sun().clipmap_lod_min = levels_range.first();
-  light.sun().clipmap_lod_max = levels_range.last();
+  light.sun().clipmap_lod_min = levels_.lod_min;
+  light.sun().clipmap_lod_max = levels_.lod_max;
 }
 
 /************************************************************************
  *                         Clip-map Distribution                        *
  ************************************************************************/
 
-IndexRange ShadowDirectional::clipmap_level_range(const Camera &cam)
+ShadowDirectional::LevelSpan ShadowDirectional::clipmap_level_range(const Camera &cam)
 {
   using namespace blender::math;
+
+  const CameraData &cam_data = cam.data_get();
   /* Covers the closest points of the view. */
-  /* FIXME: IndexRange does not support negative indices. Clamp to 0 for now. */
-  int min_level = max(0.0f, floor(log2(abs(cam.data_get().clip_near))));
+  int min_level = max_ii(0, floor(log2(max_ff(cam_data.clip_near, 1e-8f))));
   /* Covers the farthest points of the view. */
   int max_level = ceil(log2(cam.bound_radius() + distance(cam.bound_center(), cam.position())));
+
   /* We actually need to cover a bit more because of clipmap origin snapping. */
   max_level = max(min_level, max_level) + 1;
-  IndexRange range(min_level, max_level - min_level + 1);
+  LevelSpan span{min_level, max_level};
   /* 32 to be able to pack offset into a single int2.
    * The maximum level count is bounded by the mantissa of a 32bit float. */
   const int max_tilemap_per_shadows = 24;
-  /* Take top-most level to still cover the whole view. */
-  range = range.take_back(max_tilemap_per_shadows);
+  if (span.size() > max_tilemap_per_shadows) {
+    /* Keep the coarsest levels to preserve wide coverage when we hit the tile-map budget. */
+    span.lod_min = span.lod_max - (max_tilemap_per_shadows - 1);
+  }
 
-  return range;
+  return span;
 }
 
 void ShadowDirectional::clipmap_tilemaps_distribution(Light &light, const Camera &camera)
 {
+  const DirectionalFocusData &focus = directional_focus_data_ensure(shadows_);
+  const float3 clipmap_center = math::interpolate(
+      camera.position(), focus.position, focus.blend);
+
   float4x4 object_mat = light.object_to_world;
   object_mat.location() = float3(0.0f);
+  light.lod_bias = shadows_.global_lod_bias();
+  light.sun()._pad3 = focus.distance;
+  light.sun()._pad4 = focus.blend;
 
-  for (int lod : IndexRange(levels_range.size())) {
+  for (int lod : IndexRange(levels_.size())) {
     ShadowTileMap *tilemap = tilemaps_[lod];
 
-    int level = levels_range.first() + lod;
+    int level = levels_.lod_min + lod;
     /* Compute full offset from world origin to the smallest clipmap tile centered around the
-     * camera position. The offset is computed in smallest tile unit. */
+     * clipmap focus point. The offset is computed in smallest tile unit. */
     float tile_size = ShadowDirectional::tile_size_get(level);
     /* Moving to light space by multiplying by the transpose (which is the inverse). */
-    float2 light_space_camera_position = camera.position() * float2x3(object_mat.view<2, 3>());
-    int2 level_offset = int2(math::round(light_space_camera_position / tile_size));
+    float2 light_space_center = clipmap_center * float2x3(object_mat.view<2, 3>());
+    int2 level_offset = int2(math::round(light_space_center / tile_size));
 
     tilemap->sync_orthographic(
         object_mat, level_offset, level, SHADOW_PROJECTION_CLIPMAP, light.shadow_set_membership);
@@ -457,7 +567,7 @@ void ShadowDirectional::clipmap_tilemaps_distribution(Light &light, const Camera
 
   int2 pos_offset = int2(0);
   int2 neg_offset = int2(0);
-  for (int lod : IndexRange(levels_range.size() - 1)) {
+  for (int lod : IndexRange(levels_.size() - 1)) {
     /* Since offset can only differ by one tile from the higher level, we can compress that as a
      * single integer where one bit contains offset between 2 levels. Then a single bit shift in
      * the shader gives the number of tile to offset in the given tile-map space. However we need
@@ -475,13 +585,13 @@ void ShadowDirectional::clipmap_tilemaps_distribution(Light &light, const Camera
   light.sun().clipmap_base_offset_pos = pos_offset;
   light.sun().clipmap_base_offset_neg = neg_offset;
 
-  float tile_size_max = ShadowDirectional::tile_size_get(levels_range.last());
-  int2 level_offset_max = tilemaps_[levels_range.size() - 1]->grid_offset;
+  float tile_size_max = ShadowDirectional::tile_size_get(levels_.lod_max);
+  int2 level_offset_max = tilemaps_[levels_.size() - 1]->grid_offset;
 
   light.type = LIGHT_SUN;
 
   /* Used for selecting the clipmap level. */
-  float3 location = transform_direction_transposed(light.object_to_world, camera.position());
+  float3 location = transform_direction_transposed(light.object_to_world, clipmap_center);
   /* Offset for smooth level transitions. */
   light.object_to_world.x.w = location.x;
   light.object_to_world.y.w = location.y;
@@ -489,44 +599,57 @@ void ShadowDirectional::clipmap_tilemaps_distribution(Light &light, const Camera
   /* Used as origin for the clipmap_base_offset trick. */
   light.sun().clipmap_origin = float2(level_offset_max * tile_size_max);
 
-  light.sun().clipmap_lod_min = levels_range.first();
-  light.sun().clipmap_lod_max = levels_range.last();
+  light.sun().clipmap_lod_min = levels_.lod_min;
+  light.sun().clipmap_lod_max = levels_.lod_max;
 }
 
 void ShadowDirectional::release_excess_tilemaps(const Light &light, const Camera &camera)
 {
-  IndexRange levels_new = directional_distribution_type_get(camera) == SHADOW_PROJECTION_CASCADE ?
-                              cascade_level_range(light, camera) :
-                              clipmap_level_range(camera);
+  LevelSpan levels_new = directional_distribution_type_get(camera) == SHADOW_PROJECTION_CASCADE ?
+                             cascade_level_range(light, camera) :
+                             clipmap_level_range(camera);
 
-  if (levels_range == levels_new) {
+  if (levels_ == levels_new) {
     return;
   }
 
-  IndexRange isect_range = levels_range.intersect(levels_new);
-  IndexRange before_range(levels_range.start(), isect_range.start() - levels_range.start());
-  IndexRange after_range(isect_range.one_after_last(),
-                         levels_range.one_after_last() - isect_range.one_after_last());
+  const int isect_min = max_ii(levels_.lod_min, levels_new.lod_min);
+  const int isect_max = min_ii(levels_.lod_max, levels_new.lod_max);
+  if (isect_max < isect_min) {
+    shadows_.tilemap_pool.release(tilemaps_);
+    tilemaps_.clear();
+    levels_ = {};
+    return;
+  }
+
+  const int before_count = isect_min - levels_.lod_min;
+  const int isect_count = isect_max - isect_min + 1;
+  const int after_count = levels_.lod_max - isect_max;
 
   auto span = tilemaps_.as_span();
-  shadows_.tilemap_pool.release(span.slice(before_range.shift(-levels_range.start())));
-  shadows_.tilemap_pool.release(span.slice(after_range.shift(-levels_range.start())));
-  tilemaps_ = span.slice(isect_range.shift(-levels_range.start()));
-  levels_range = isect_range;
+  if (before_count > 0) {
+    shadows_.tilemap_pool.release(span.take_front(before_count));
+  }
+  if (after_count > 0) {
+    shadows_.tilemap_pool.release(span.take_back(after_count));
+  }
+  tilemaps_ = span.slice(before_count, isect_count);
+  levels_ = LevelSpan{isect_min, isect_max};
 }
 
 void ShadowDirectional::end_sync(Light &light, const Camera &camera)
 {
   ShadowTileMapPool &tilemap_pool = shadows_.tilemap_pool;
-  IndexRange levels_new = directional_distribution_type_get(camera) == SHADOW_PROJECTION_CASCADE ?
-                              cascade_level_range(light, camera) :
-                              clipmap_level_range(camera);
+  release_excess_tilemaps(light, camera);
+  LevelSpan levels_new = directional_distribution_type_get(camera) == SHADOW_PROJECTION_CASCADE ?
+                             cascade_level_range(light, camera) :
+                             clipmap_level_range(camera);
 
-  if (levels_range != levels_new) {
+  if (levels_ != levels_new) {
     /* Acquire missing tile-maps. */
-    IndexRange isect_range = levels_new.intersect(levels_range);
-    int64_t before_range = isect_range.start() - levels_new.start();
-    int64_t after_range = levels_new.one_after_last() - isect_range.one_after_last();
+    int64_t before_range = (levels_.size() > 0) ? (levels_.lod_min - levels_new.lod_min) :
+                                                levels_new.size();
+    int64_t after_range = (levels_.size() > 0) ? (levels_new.lod_max - levels_.lod_max) : 0;
 
     Vector<ShadowTileMap *> cached_tilemaps = tilemaps_;
     tilemaps_.clear();
@@ -538,7 +661,7 @@ void ShadowDirectional::end_sync(Light &light, const Camera &camera)
     for (int64_t i = 0; i < after_range; i++) {
       tilemaps_.append(tilemap_pool.acquire());
     }
-    levels_range = levels_new;
+    levels_ = levels_new;
   }
 
   light.tilemap_index = tilemap_pool.tilemaps_data.size();
@@ -806,6 +929,9 @@ void ShadowModule::end_sync()
       light.punctual->release_excess_tilemaps(light);
     }
   }
+
+  directional_focus_update(
+      directional_focus_data_ensure(*this), inst_.camera, curr_casters_, *inst_.manager);
 
   /* Allocate new tile-maps and fill shadow data of the lights. */
   tilemap_pool.tilemaps_data.clear();

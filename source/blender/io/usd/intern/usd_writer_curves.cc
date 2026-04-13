@@ -722,7 +722,7 @@ void USDCurvesWriter::assign_materials(const HierarchyContext &context,
     /* USD seems to support neither per-material nor per-face-group double-sidedness, so we just
      * use the flag from the first non-empty material slot. */
     usd_curves.CreateDoubleSidedAttr(
-        pxr::VtValue((material->blend_flag & MA_BL_CULL_BACKFACE) == 0));
+        pxr::VtValue(BKE_material_surface_cull_method_get(material) == MA_SURFACE_CULL_NONE));
 
     curve_material_bound = true;
     break;

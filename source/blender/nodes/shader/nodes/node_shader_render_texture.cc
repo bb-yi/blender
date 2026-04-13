@@ -18,9 +18,23 @@ namespace nodes::node_shader_render_texture_cc {
 static void node_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
-  b.add_input<decl::Vector>("Vector").hide_value();
+  b.use_custom_socket_order();
+  b.allow_any_socket_order();
   b.add_output<decl::Color>("Color");
   b.add_output<decl::Float>("Alpha");
+  b.add_default_layout();
+
+  b.add_input<decl::Vector>("Vector").hide_value();
+
+  PanelDeclarationBuilder &camera_panel = b.add_panel("Camera").default_closed(true);
+  camera_panel.add_output<decl::Vector>("Camera Position")
+      .description("World-space position of the camera used by this render texture");
+  camera_panel.add_output<decl::Vector>("Axis X")
+      .description("Dot with (P - Camera Position) to get render texture camera-space X");
+  camera_panel.add_output<decl::Vector>("Axis Y")
+      .description("Dot with (P - Camera Position) to get render texture camera-space Y");
+  camera_panel.add_output<decl::Vector>("Axis Z")
+      .description("Dot with (P - Camera Position) to get render texture camera-space Z");
 }
 
 static void node_shader_buts(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)

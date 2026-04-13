@@ -36,10 +36,12 @@
 
 GPU_SHADER_CREATE_INFO(eevee_surf_capture)
 DEFINE("MAT_CAPTURE")
+DEFINE("MAT_SURFACE_CULL")
 TYPEDEF_SOURCE("eevee_lightprobe_shared.hh")
 TYPEDEF_SOURCE("eevee_render_texture_shared.hh")
 STORAGE_BUF(SURFEL_BUF_SLOT, write, Surfel, surfel_buf[])
 STORAGE_BUF(CAPTURE_BUF_SLOT, read_write, CaptureInfoData, capture_info_buf)
+PUSH_CONSTANT(int, surface_cull_mode)
 PUSH_CONSTANT(bool, is_double_sided)
 FRAGMENT_SOURCE("eevee_surf_capture_frag.glsl")
 ADDITIONAL_INFO(eevee_global_ubo)

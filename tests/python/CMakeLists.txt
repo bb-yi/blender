@@ -733,6 +733,11 @@ if(TEST_SRC_DIR_EXISTS)
     --
     --testdir "${TEST_SRC_DIR}/node_group"
   )
+
+  add_blender_test(
+    bl_node_glsl_function
+    --python ${CMAKE_CURRENT_LIST_DIR}/bl_node_glsl_function.py
+  )
 endif()
 
 # ------------------------------------------------------------------------------

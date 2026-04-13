@@ -497,7 +497,8 @@ void GPU_material_add_output_link_composite(GPUMaterial *material, GPUNodeLink *
  */
 char *GPU_material_split_sub_function(GPUMaterial *material,
                                       GPUType return_type,
-                                      GPUNodeLink **link);
+                                      GPUNodeLink **link,
+                                      StringRefNull dependency_name);
 
 void GPU_material_flag_set(GPUMaterial *mat, eGPUMaterialFlag flag);
 eGPUMaterialFlag GPU_material_flag(const GPUMaterial *mat);

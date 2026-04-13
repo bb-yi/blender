@@ -464,11 +464,31 @@ namespace blender::eevee
   class ShadowDirectional : public NonCopyable, NonMovable
   {
   private:
+    struct LevelSpan {
+      int lod_min = 0;
+      int lod_max = -1;
+
+      int size() const
+      {
+        return (lod_max >= lod_min) ? (lod_max - lod_min + 1) : 0;
+      }
+
+      bool operator==(const LevelSpan &other) const
+      {
+        return lod_min == other.lod_min && lod_max == other.lod_max;
+      }
+
+      bool operator!=(const LevelSpan &other) const
+      {
+        return !(*this == other);
+      }
+    };
+
     ShadowModule& shadows_;
     /** Tile-map for each clip-map level. */
     Vector<ShadowTileMap*> tilemaps_;
-    /** Current range of clip-map / cascades levels covered by this shadow. */
-    IndexRange levels_range = IndexRange(0);
+    /** Current signed LOD span for clip-map / cascades levels covered by this shadow. */
+    LevelSpan levels_;
 
   public:
     ShadowDirectional(ShadowModule& module) : shadows_(module) {};
@@ -506,8 +526,8 @@ namespace blender::eevee
     }
 
   private:
-    IndexRange clipmap_level_range(const Camera& camera);
-    IndexRange cascade_level_range(const Light& light, const Camera& camera);
+    LevelSpan clipmap_level_range(const Camera& camera);
+    LevelSpan cascade_level_range(const Light& light, const Camera& camera);
 
     /**
      * Distribute tile-maps in a linear pattern along camera forward vector instead of a clipmap

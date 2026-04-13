@@ -1162,6 +1162,27 @@ enum NodeShaderOutputTarget {
   SHD_OUTPUT_CYCLES = 2,
 };
 
+/* Water ripples node mode. */
+enum {
+  NODE_WATER_RIPPLES_DROPS = 0,
+  NODE_WATER_RIPPLES_RIPPLES = 1,
+  NODE_WATER_RIPPLES_FLOW = 2,
+  NODE_WATER_RIPPLES_CAUSTIC = 3,
+};
+
+/* Hexagon node coords. */
+enum {
+  SHD_HEXAGON_COORDS_XY = 0,
+  SHD_HEXAGON_COORDS_HEX = 1,
+};
+
+/* Hexagon node value mode. */
+enum {
+  SHD_HEXAGON_VALUE_HEX = 0,
+  SHD_HEXAGON_VALUE_SDF = 1,
+  SHD_HEXAGON_VALUE_DOT = 2,
+};
+
 enum NodeSdfPrimitiveMode {
   SHD_SDF_2D_CIRCLE = 0,
   SHD_SDF_2D_RECTANGLE = 1,
@@ -3093,6 +3114,16 @@ struct NodeRadialTiling {
 
   uint8_t normalize = 0;
   char _pad[7] = {};
+};
+
+struct NodeTexHexagon {
+  DNA_DEFINE_CXX_METHODS(NodeTexHexagon)
+
+  NodeTexBase base;
+  int coord_mode = 0;
+  int value_mode = 0;
+  int direction = 0;
+  int use_clamp = 0;
 };
 
 struct NodeShaderUVMap {

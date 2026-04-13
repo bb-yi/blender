@@ -254,8 +254,8 @@ class EEVEE_MATERIAL_PT_thickness(MaterialButtonsPanel, Panel):
 
 
 def draw_material_surface_settings(layout, mat, is_eevee=True):
-    col = layout.column(heading="Backface Culling")
-    col.prop(mat, "use_backface_culling", text="Camera")
+    col = layout.column(heading="Culling")
+    col.prop(mat, "surface_cull_method", text="Camera")
     col.prop(mat, "use_backface_culling_shadow", text="Shadow")
     col.prop(mat, "use_backface_culling_lightprobe_volume", text="Light Probe Volume")
 

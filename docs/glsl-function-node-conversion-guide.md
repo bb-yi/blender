@@ -70,7 +70,10 @@
 - `sample2D` 也可以接程序化 `Closure Output`
 - `Closure Output -> sample2D` 当前只保证 `texture(tex, uv)` 这种直接采样形式
 - 如果函数依赖显式 `LOD`、`grad` 或尺寸查询等图像专用能力，应优先使用 `Image to Closure`
-- `vec4` 虽然是合法边界类型，但当前 UI 中仍按“向量插口”处理，不会变成专门的颜色插口；如果只需要 `RGB`，优先考虑 `vec3`
+- 默认情况下 `vec2/vec3/vec4` 仍然显示为“向量插口”
+- 只有显式写了 `subtype=color` 的 `vec3/vec4` 输入，才会显示为颜色插口
+- `vec3 + subtype=color` 会显示为颜色插口，内部按 `rgb` 使用，`alpha` 固定为 `1.0`
+- `vec4 + subtype=color` 会显示为颜色插口，并保留 `rgba`
 
 ### 4. 内部实现和边界接口要区分
 
@@ -1221,6 +1224,7 @@ strength: max=1.0
 - `acceleration`
 - `euler`
 - `xyz`
+- `color`（仅 `vec3/vec4`，会显示为颜色插口）
 
 示例：
 
@@ -1228,6 +1232,8 @@ strength: max=1.0
 strength: default=0.5 min=0.0 max=1.0 subtype=factor
 offset: default=vec3(0.0) subtype=translation
 normal_dir: default=vec3(0.0, 0.0, 1.0) subtype=direction
+tint: default=vec3(1.0, 0.8, 0.2) subtype=color
+overlay: default=vec4(1.0, 0.8, 0.2, 0.5) subtype=color
 ```
 
 #### 3.5 `hide_value`
@@ -1275,6 +1281,10 @@ strength: default=0.5 hide_value=true
 
 - `subtype=factor` 会让 float 输入变成 `NodeSocketFloatFactor`
 - `subtype=xyz` 会让 vector 输入变成 `NodeSocketVectorXYZ`
+- `vec3/vec4` 默认仍然是向量输入，不会自动变成颜色输入
+- `subtype=color` 会让 `vec3/vec4` 输入变成 `NodeSocketColor`
+- `vec3 + subtype=color` 进入 GLSL 函数时只使用 `rgb`
+- `vec4 + subtype=color` 进入 GLSL 函数时会保留 `rgba`
 
 ### 5. 当前限制
 
@@ -1295,7 +1305,7 @@ strength: default=0.5 hide_value=true
 /* @glsl_meta v1
 threshold: default=0.35 min=0.0 max=1.0 subtype=factor
 edge_width: default=0.08 min=0.0 max=1.0 subtype=factor
-edge_color: default=vec3(1.0, 0.5, 0.1)
+edge_color: default=vec3(1.0, 0.5, 0.1) subtype=color
 */
 vec3 dissolve_mask(vec3 base_color, float threshold, float edge_width, vec3 edge_color)
 {

@@ -37,6 +37,8 @@ float4 closure_to_rgba(Closure cl)
 
 void main()
 {
+  material_surface_cull_discard();
+
 #ifdef MAT_TRANSPARENT
   init_globals();
 

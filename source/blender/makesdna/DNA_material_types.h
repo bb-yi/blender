@@ -197,6 +197,13 @@ enum {
   MA_BL_THICKNESS_FROM_SHADOW = (1 << 7),
 };
 
+/** #Material::surface_cull_method */
+enum eMaterialCullMethod {
+  MA_SURFACE_CULL_NONE = 0,
+  MA_SURFACE_CULL_BACK = 1,
+  MA_SURFACE_CULL_FRONT = 2,
+};
+
 /** #Material::blend_shadow */
 enum {
   MA_BS_NONE = 0,
@@ -412,7 +419,8 @@ struct Material {
   /* Displacement. */
   float inflate_bounds = 0;
 
-  char _pad3[4] = {};
+  char surface_cull_method = MA_SURFACE_CULL_NONE;
+  char _pad3[3] = {};
 
   /**
    * Cached slots for texture painting, must be refreshed via
@@ -427,5 +435,20 @@ struct Material {
   struct MaterialGPencilStyle *gp_style = nullptr;
   struct MaterialLineArt lineart;
 };
+
+#ifdef __cplusplus
+inline eMaterialCullMethod material_surface_cull_method_get(const Material &material)
+{
+  switch (eMaterialCullMethod(material.surface_cull_method)) {
+    case MA_SURFACE_CULL_BACK:
+    case MA_SURFACE_CULL_FRONT:
+      return eMaterialCullMethod(material.surface_cull_method);
+    case MA_SURFACE_CULL_NONE:
+    default:
+      return (material.blend_flag & MA_BL_CULL_BACKFACE) != 0 ? MA_SURFACE_CULL_BACK :
+                                                                MA_SURFACE_CULL_NONE;
+  }
+}
+#endif
 
 }  // namespace blender

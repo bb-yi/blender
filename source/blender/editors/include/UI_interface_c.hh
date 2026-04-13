@@ -2414,6 +2414,8 @@ void template_preview(Layout *layout,
                       MTex *slot,
                       const char *preview_id);
 void template_color_ramp(Layout *layout, PointerRNA *ptr, StringRefNull propname, bool expand);
+void template_oklab_color_ramp(
+    Layout *layout, PointerRNA *ptr, StringRefNull propname, bool expand);
 /**
  * \param icon_scale: Scale of the icon, 1x == button height.
  */

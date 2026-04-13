@@ -546,7 +546,8 @@ static void node_foreach_working_space_color(ID *id, const IDTypeForeachColorFun
       NodeInputColor *input_color_storage = static_cast<NodeInputColor *>(node->storage);
       fn.single(input_color_storage->color);
     }
-    else if (ELEM(node->type_legacy, TEX_NODE_VALTORGB, SH_NODE_VALTORGB)) {
+    else if (ELEM(node->type_legacy, TEX_NODE_VALTORGB, SH_NODE_VALTORGB))
+    {
       ColorBand *coba = static_cast<ColorBand *>(node->storage);
       BKE_colorband_foreach_working_space_color(coba, fn);
     }
@@ -2929,7 +2930,6 @@ static void node_socket_free_default_value(bNodeSocket *sock, const bool do_id_u
       MEM_delete_void(sock->default_value);
       break;
   }
-  sock->default_value = nullptr;
 }
 
 /** \return True if the socket had an ID default value. */
@@ -3026,6 +3026,7 @@ void node_modify_socket_type(bNodeTree &ntree,
        * isn't removed. This assumes that the default value is stored in the same format for all
        * socket types with the same #eNodeSocketDatatype. */
       node_socket_free_default_value(&sock, true);
+      sock.default_value = nullptr;
     }
     else {
       /* Update the socket subtype when the storage isn't freed and recreated. */
@@ -3213,7 +3214,7 @@ std::optional<StringRefNull> node_static_socket_type(const int type,
           case PROP_EULER:
             return "NodeSocketVectorEuler2D";
           case PROP_XYZ:
-            return "NodeSocketVectorXYZ2D";
+            return "NodeSocketVector2D";
           case PROP_NONE:
           default:
             return "NodeSocketVector2D";
@@ -3382,7 +3383,7 @@ std::optional<StringRefNull> node_static_socket_interface_type_new(
           case PROP_EULER:
             return "NodeTreeInterfaceSocketVectorEuler2D";
           case PROP_XYZ:
-            return "NodeTreeInterfaceSocketVectorXYZ2D";
+            return "NodeTreeInterfaceSocketVector2D";
           case PROP_NONE:
           default:
             return "NodeTreeInterfaceSocketVector2D";

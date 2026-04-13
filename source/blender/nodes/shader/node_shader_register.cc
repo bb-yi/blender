@@ -111,12 +111,15 @@ void register_shader_nodes()
   register_node_type_sh_squeeze();
   register_node_type_sh_subsurface_scattering();
   register_node_type_sh_tangent();
+  register_node_type_sh_twirl();
+  register_node_type_sh_water_ripples();
   register_node_type_sh_tex_brick();
   register_node_type_sh_tex_checker();
   register_node_type_sh_tex_coord();
   register_node_type_sh_tex_environment();
   register_node_type_sh_tex_gabor();
   register_node_type_sh_tex_gradient();
+  register_node_type_sh_tex_hexagon();
   register_node_type_sh_tex_ies();
   register_node_type_sh_tex_image();
   register_node_type_sh_tex_magic();

@@ -18,6 +18,8 @@
 
 #include "DEG_depsgraph_query.hh"
 
+#include "BKE_material.hh"
+
 #include "hydra_scene_delegate.hh"
 #include "image.hh"
 
@@ -44,8 +46,8 @@ MaterialData::MaterialData(HydraSceneDelegate *scene_delegate,
 void MaterialData::init()
 {
   ID_LOGN("");
-  double_sided = ((id_cast<Material *>(const_cast<ID *>(id)))->blend_flag & MA_BL_CULL_BACKFACE) ==
-                 0;
+  double_sided = BKE_material_surface_cull_method_get(
+                     id_cast<Material *>(const_cast<ID *>(id))) == MA_SURFACE_CULL_NONE;
   material_network_map_ = pxr::VtValue();
 
   /* Create temporary in memory stage. */

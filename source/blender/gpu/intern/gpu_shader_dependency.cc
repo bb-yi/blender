@@ -501,6 +501,7 @@ namespace shader {
 
 #include "glsl_compositor_metadata_list.hh"
 #include "glsl_draw_metadata_list.hh"
+/* Generated metadata for all GPU shader sources, including material node functions. */
 #include "glsl_gpu_metadata_list.hh"
 #include "glsl_ocio_metadata_list.hh"
 #ifdef WITH_OPENSUBDIV

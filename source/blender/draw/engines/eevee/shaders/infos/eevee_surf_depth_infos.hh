@@ -36,8 +36,10 @@
 
 GPU_SHADER_CREATE_INFO(eevee_surf_depth)
 DEFINE("MAT_DEPTH")
+DEFINE("MAT_SURFACE_CULL")
 FRAGMENT_SOURCE("eevee_surf_depth_frag.glsl")
 TYPEDEF_SOURCE("eevee_render_texture_shared.hh")
+PUSH_CONSTANT(int, surface_cull_mode)
 FRAGMENT_OUT(PREPASS_FRAG_OUT_NORMAL, float4, out_normal)
 FRAGMENT_OUT(PREPASS_FRAG_OUT_OB_ID, uint, out_object_id)
 ADDITIONAL_INFO(eevee_global_ubo)

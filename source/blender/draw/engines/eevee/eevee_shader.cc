@@ -655,6 +655,16 @@ class SlotAllocator {
     return bitscan_forward_clear_uint64(&available_samplers_);
   }
 
+  void reserve_sampler_range(const int slot_first, const int slot_last)
+  {
+    if (slot_first < 0 || slot_last < slot_first) {
+      return;
+    }
+    for (int slot = slot_first; slot <= slot_last; slot++) {
+      available_samplers_ &= ~(uint64_t(1) << slot);
+    }
+  }
+
   void set_vertex_input(int index)
   {
     if ((available_vertex_id_ & 0xFFFFu) == 0) {
@@ -664,6 +674,42 @@ class SlotAllocator {
     available_vertex_id_ &= ~(uint32_t(1) << index);
   }
 };
+
+static int material_texture_reserved_slot_last(const eMaterialPipeline pipeline_type,
+                                               const eMaterialGeometry geometry_type)
+{
+  if (pipeline_type == MAT_PIPE_FILTER) {
+    return MATERIAL_TEXTURE_RESERVED_SLOT_LAST_FILTER;
+  }
+  if (pipeline_type == MAT_PIPE_DEFERRED_NPR) {
+    return MATERIAL_TEXTURE_RESERVED_SLOT_LAST_NPR;
+  }
+  if (geometry_type == MAT_GEOM_WORLD) {
+    return MATERIAL_TEXTURE_RESERVED_SLOT_LAST_WORLD;
+  }
+
+  switch (pipeline_type) {
+    case MAT_PIPE_DEFERRED:
+      return MATERIAL_TEXTURE_RESERVED_SLOT_LAST_HYBRID;
+    case MAT_PIPE_FORWARD:
+      return MATERIAL_TEXTURE_RESERVED_SLOT_LAST_FORWARD;
+    case MAT_PIPE_PREPASS_FORWARD_VELOCITY:
+    case MAT_PIPE_PREPASS_DEFERRED_VELOCITY:
+    case MAT_PIPE_PREPASS_OVERLAP:
+    case MAT_PIPE_PREPASS_FORWARD:
+    case MAT_PIPE_PREPASS_DEFERRED:
+    case MAT_PIPE_PREPASS_PLANAR:
+    case MAT_PIPE_SHADOW:
+    case MAT_PIPE_VOLUME_OCCUPANCY:
+    case MAT_PIPE_VOLUME_MATERIAL:
+    case MAT_PIPE_CAPTURE:
+      return MATERIAL_TEXTURE_RESERVED_SLOT_LAST_NO_EVAL;
+    case MAT_PIPE_FILTER:
+    case MAT_PIPE_DEFERRED_NPR:
+      break;
+  }
+  return -1;
+}
 
 static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &info,
                                               eMaterialPipeline pipeline_type,
@@ -982,6 +1028,8 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
 
   SlotAllocator slots = add_pipeline_create_info(
       info, pipeline_type, geometry_type, use_shader_to_rgba);
+  slots.reserve_sampler_range(MATERIAL_TEXTURE_RESERVED_SLOT_FIRST,
+                              material_texture_reserved_slot_last(pipeline_type, geometry_type));
 
   for (auto &resource : info.batch_resources_) {
     if (resource.bind_type == ShaderCreateInfo::Resource::BindType::SAMPLER) {
