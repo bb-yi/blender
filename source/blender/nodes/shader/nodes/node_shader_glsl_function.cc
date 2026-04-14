@@ -124,6 +124,7 @@ namespace blender
       bool ok = false;
       bool keep_existing_sockets = false;
       bool used_first_function = false;
+      bool uses_eevee_light_access = false;
 
       std::string error;
       std::string source;
@@ -226,6 +227,7 @@ namespace blender
       std::string& r_error);
     static Vector<std::string> find_top_level_glsl_global_names(
       const Vector<GLSLToken>& tokens, const Span<std::string> function_names);
+    static bool glsl_source_uses_eevee_light_access(const Vector<GLSLToken>& tokens);
     static bool find_glsl_function_definition(const Vector<GLSLToken>& tokens,
       const StringRef function_name,
       GLSLFunctionDefinition& r_function,
@@ -2670,6 +2672,33 @@ namespace blender
       return global_names;
     }
 
+    static bool is_glsl_light_access_identifier(const StringRef identifier)
+    {
+      return ELEM(identifier,
+        "GLSL_LIGHT_FOREACH_BEGIN",
+        "GLSL_LIGHT_FOREACH_END",
+        "glsl_light_color",
+        "glsl_light_vector",
+        "glsl_light_distance",
+        "glsl_light_diffuse_power",
+        "glsl_light_specular_power",
+        "glsl_light_surface_attenuation",
+        "glsl_light_shadow_visibility");
+    }
+
+    static bool glsl_source_uses_eevee_light_access(const Vector<GLSLToken>& tokens)
+    {
+      for (const GLSLToken& token : tokens)
+      {
+        if (token.kind == GLSLToken::Kind::Identifier &&
+          is_glsl_light_access_identifier(token.text))
+        {
+          return true;
+        }
+      }
+      return false;
+    }
+
     static bool find_glsl_function_definition(const Vector<GLSLToken>& tokens,
       const StringRef function_name,
       GLSLFunctionDefinition& r_function,
@@ -3766,6 +3795,7 @@ namespace blender
 
       const std::string stripped_source = strip_glsl_comments(source);
       const Vector<GLSLToken> tokens = tokenize_glsl_source(stripped_source);
+      result.uses_eevee_light_access = glsl_source_uses_eevee_light_access(tokens);
       result.function_names = find_top_level_glsl_function_names(tokens);
       if (result.function_names.is_empty())
       {
@@ -4311,6 +4341,10 @@ namespace blender
           }
         }
         return 1;
+      }
+      if (parse_result.uses_eevee_light_access)
+      {
+        GPU_material_flag_set(mat, GPU_MATFLAG_GLSL_LIGHT_ACCESS);
       }
       if (!prepare_sampler_input_bindings(mat, *node, parse_result.function, in))
       {

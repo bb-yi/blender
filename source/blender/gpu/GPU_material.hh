@@ -111,6 +111,8 @@ enum eGPUMaterialFlag {
   GPU_MATFLAG_UPDATED = (1 << 29),
   /* Signals the material needs Eevee light-probe resources without enabling full lighting. */
   GPU_MATFLAG_LIGHTPROBE_ACCESS = (1 << 30),
+  /* Signals the material needs Eevee direct-light resources for GLSL Function helper access. */
+  GPU_MATFLAG_GLSL_LIGHT_ACCESS = (1u << 31),
 };
 ENUM_OPERATORS(eGPUMaterialFlag);
 
