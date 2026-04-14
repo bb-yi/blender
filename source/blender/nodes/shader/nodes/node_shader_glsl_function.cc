@@ -29,8 +29,6 @@
 
 #include "intern/gpu_node_graph.hh"
 
-#include "RNA_access.hh"
-
 #include "NOD_sync_sockets.hh"
 
 #include "UI_interface_layout.hh"
@@ -55,7 +53,6 @@ namespace blender
       Vec2,
       Vec3,
       Vec4,
-      Sampler2D,
       Sample2D,
       Void,
     };
@@ -266,10 +263,6 @@ namespace blender
       }
       if (type_name == "sampler2D")
       {
-        return GLSLBoundaryType::Sampler2D;
-      }
-      if (type_name == "sample2D")
-      {
         return GLSLBoundaryType::Sample2D;
       }
       if (type_name == "void")
@@ -296,12 +289,7 @@ namespace blender
 
     static bool glsl_boundary_type_is_sampler(const GLSLBoundaryType type)
     {
-      return ELEM(type, GLSLBoundaryType::Sampler2D, GLSLBoundaryType::Sample2D);
-    }
-
-    static bool glsl_boundary_type_is_image_sampler(const GLSLBoundaryType type)
-    {
-      return type == GLSLBoundaryType::Sampler2D;
+      return type == GLSLBoundaryType::Sample2D;
     }
 
     static bool glsl_boundary_type_is_sample2d(const GLSLBoundaryType type)
@@ -515,7 +503,7 @@ namespace blender
       {
         if (*existing_root != root_param_name)
         {
-          r_error = "Closure Output sample2D identifier '" + identifier_key + "' in function '" +
+          r_error = "Closure Output sampler2D identifier '" + identifier_key + "' in function '" +
             std::string(function_name) + "' is bound to multiple inputs";
           return false;
         }
@@ -1036,7 +1024,7 @@ namespace blender
             continue;
           }
 
-          r_error = "Closure Output driven sample2D identifier '" + token.text + "' in function '" +
+          r_error = "Closure Output driven sampler2D identifier '" + token.text + "' in function '" +
             function.name +
             "' must be used through texture-family sampling, direct function passthrough, or "
             "direct alias assignment";
@@ -1186,87 +1174,53 @@ namespace blender
           continue;
         }
 
-        const bNodeSocket* socket = find_node_input_socket_by_identifier(node, param.identifier);
-        if ((socket == nullptr || !socket->is_directly_linked()) && node.runtime->original)
+        const bNodeSocket* socket = find_linked_sample2d_input_socket(node, param);
+        if (socket == nullptr && node.runtime->original)
         {
-          socket = find_node_input_socket_by_identifier(*node.runtime->original, param.identifier);
+          socket = find_linked_sample2d_input_socket(*node.runtime->original, param);
         }
-        if (socket == nullptr)
+        if (socket != nullptr)
         {
-          continue;
-        }
-
-        if (glsl_boundary_type_is_image_sampler(param.type))
-        {
-          if (socket->type != SOCK_IMAGE || socket->default_value == nullptr)
+          const bNodeLink* used_link = nullptr;
+          const bNode* logical_node = node.runtime->original ? node.runtime->original : &node;
+          GLSLSample2DSourceKind source_kind = resolve_sample2d_source_kind(
+            node, param, used_link, logical_node);
+          if (source_kind == GLSLSample2DSourceKind::GLSLFunction && used_link != nullptr)
           {
+            source_kind = resolve_nested_sample2d_source_kind(param, *used_link, used_link);
+          }
+          if (source_kind == GLSLSample2DSourceKind::ClosureOutput)
+          {
+            std::string closure_error;
+            if (!closure_output_has_required_sample2d_signature(*used_link->fromnode, closure_error))
+            {
+              r_error = "Closure Output connected to sampler2D parameter '" + param.name +
+                "' is missing required closure items: " + closure_error;
+              return false;
+            }
+            has_closure_output_sample2d = true;
             continue;
           }
-          if (socket->is_directly_linked())
+          if (source_kind != GLSLSample2DSourceKind::ImageToClosure || used_link == nullptr)
           {
-            r_error = param.type_name + " parameter '" + param.name +
-              "' does not support links yet; choose an image on the node";
+            r_error = "sampler2D parameter '" + param.name +
+              "' currently only supports Image to Closure or Closure Output links";
             return false;
           }
 
-          Image* image = socket->default_value_typed<bNodeSocketValueImage>()->value;
+          Image* image = resolve_image_to_closure_image(*used_link);
           if (image == nullptr)
           {
-            r_error = "Choose an image for " + param.type_name + " parameter '" + param.name + "'";
+            r_error = "Choose an image on the Image to Closure node connected to '" + param.name + "'";
             return false;
           }
           if (image->source == IMA_SRC_TILED)
           {
-            r_error = param.type_name + " parameter '" + param.name +
+            r_error = "sampler2D parameter '" + param.name +
               "' does not support UDIM tiled images yet";
             return false;
           }
           continue;
-        }
-
-        if (!socket->is_directly_linked())
-        {
-          continue;
-        }
-
-        const bNodeLink* used_link = nullptr;
-        const bNode* logical_node = node.runtime->original ? node.runtime->original : &node;
-        GLSLSample2DSourceKind source_kind = resolve_sample2d_source_kind(
-          node, param, used_link, logical_node);
-        if (source_kind == GLSLSample2DSourceKind::GLSLFunction && used_link != nullptr)
-        {
-          source_kind = resolve_nested_sample2d_source_kind(param, *used_link, used_link);
-        }
-        if (source_kind == GLSLSample2DSourceKind::ClosureOutput)
-        {
-          std::string closure_error;
-          if (!closure_output_has_required_sample2d_signature(*used_link->fromnode, closure_error))
-          {
-            r_error = "Closure Output connected to sample2D parameter '" + param.name +
-              "' is missing required closure items: " + closure_error;
-            return false;
-          }
-          has_closure_output_sample2d = true;
-          continue;
-        }
-        if (source_kind != GLSLSample2DSourceKind::ImageToClosure || used_link == nullptr)
-        {
-          r_error = "sample2D parameter '" + param.name +
-            "' currently only supports Image to Closure";
-          return false;
-        }
-
-        Image* image = resolve_image_to_closure_image(*used_link);
-        if (image == nullptr)
-        {
-          r_error = "Choose an image on the Image to Closure node connected to '" + param.name + "'";
-          return false;
-        }
-        if (image->source == IMA_SRC_TILED)
-        {
-          r_error = "sample2D parameter '" + param.name +
-            "' does not support UDIM tiled images yet";
-          return false;
         }
       }
 
@@ -1294,66 +1248,6 @@ namespace blender
       }
 
       return true;
-    }
-
-    static bool node_has_sampler_input_sockets(const bNode& node)
-    {
-      for (const bNodeSocket* socket : node.input_sockets())
-      {
-        if (socket->type == SOCK_IMAGE)
-        {
-          return true;
-        }
-      }
-      return false;
-    }
-
-    static void sync_sampler_socket_visibility(bNode& node, const GLSLParseResult& parse_result)
-    {
-      if (parse_result.function.name.empty())
-      {
-        return;
-      }
-
-      for (bNodeSocket* socket : node.input_sockets())
-      {
-        if (socket->type == SOCK_IMAGE)
-        {
-          socket->flag &= ~SOCK_HIDDEN;
-        }
-      }
-
-      for (const GLSLFunctionParam& param : parse_result.function.params)
-      {
-        if (!glsl_param_has_input_socket(param) || !glsl_boundary_type_is_image_sampler(param.type))
-        {
-          continue;
-        }
-        if (bNodeSocket* socket = find_node_input_socket_by_identifier(node, param.identifier))
-        {
-          socket->flag |= SOCK_HIDDEN;
-        }
-      }
-
-    }
-
-    static void draw_sampler_input_properties(ui::Layout& layout, PointerRNA* node_ptr, bNode& node)
-    {
-      if (!node_has_sampler_input_sockets(node))
-      {
-        return;
-      }
-
-      for (bNodeSocket* socket : node.input_sockets())
-      {
-        if (socket->type != SOCK_IMAGE)
-        {
-          continue;
-        }
-
-        PointerRNA socket_ptr = RNA_pointer_create_discrete(node_ptr->owner_id, RNA_NodeSocket, socket);
-        layout.prop(&socket_ptr, "default_value", ui::ITEM_R_SPLIT_EMPTY_NAME, socket->name, ICON_NONE);
-      }
     }
 
     static std::string trim_copy(const StringRef text)
@@ -2367,10 +2261,9 @@ namespace blender
         GLSLBoundaryType::Vec2,
         GLSLBoundaryType::Vec3,
         GLSLBoundaryType::Vec4,
-        GLSLBoundaryType::Sampler2D,
         GLSLBoundaryType::Sample2D))
       {
-        r_error = "Supported parameter types are float, vec2, vec3, vec4, sampler2D, and sample2D";
+        r_error = "Supported parameter types are float, vec2, vec3, vec4, and sampler2D";
         return false;
       }
 
@@ -2982,14 +2875,14 @@ namespace blender
       }
       if (!has_uv)
       {
-        r_error = "Closure Output must expose a Vector input item named 'UV' for sample2D";
+        r_error = "Closure Output must expose a Vector input item named 'UV' for sampler2D";
         return false;
       }
 
       const bNodeSocket* color_socket = find_closure_output_socket_by_name(closure_output_node, "Color");
       if (color_socket == nullptr || !ELEM(color_socket->type, SOCK_FLOAT, SOCK_VECTOR, SOCK_RGBA))
       {
-        r_error = "Closure Output must expose a Float, Vector, or RGBA output item named 'Color' for sample2D";
+        r_error = "Closure Output must expose a Float, Vector, or RGBA output item named 'Color' for sampler2D";
         return false;
       }
       return true;
@@ -3052,7 +2945,7 @@ namespace blender
         param.name;
       if (!active_closure_helper_keys.add(helper_key))
       {
-        r_error = "Recursive nested Closure Output sample2D helper dependency detected on node '" +
+        r_error = "Recursive nested Closure Output sampler2D helper dependency detected on node '" +
           std::string(logical_node->name) + "' parameter '" + param.name + "'";
         return false;
       }
@@ -3076,7 +2969,7 @@ namespace blender
         GLSLSample2DSourceKind::ClosureOutput ||
         used_link == nullptr || used_link->fromnode == nullptr)
       {
-        r_error = "sample2D parameter '" + param.name + "' is missing a Closure Output source";
+        r_error = "sampler2D parameter '" + param.name + "' is missing a Closure Output source";
         return false;
       }
 
@@ -3106,7 +2999,7 @@ namespace blender
       bNodeTreeExec* exec = ntreeShaderBeginExecTree_internal(&context, helper_tree, bke::NODE_INSTANCE_KEY_BASE);
       if (exec == nullptr)
       {
-        r_error = "Could not build a helper shader tree for sample2D parameter '" + param.name + "'";
+        r_error = "Could not build a helper shader tree for sampler2D parameter '" + param.name + "'";
         return false;
       }
       BLI_SCOPED_DEFER([&]() { ntreeShaderEndExecTree_internal(exec); });
@@ -3149,7 +3042,7 @@ namespace blender
       }
       if (color_link == nullptr)
       {
-        r_error = "Could not evaluate Closure Output Color for sample2D parameter '" + param.name + "'";
+        r_error = "Could not evaluate Closure Output Color for sampler2D parameter '" + param.name + "'";
         return false;
       }
 
@@ -3350,7 +3243,7 @@ namespace blender
             *root_param_name);
           if (helper == nullptr)
           {
-            r_error = "Could not resolve a Closure Output helper for sample2D parameter '" +
+            r_error = "Could not resolve a Closure Output helper for sampler2D parameter '" +
               *root_param_name + "'";
             return false;
           }
@@ -3362,7 +3255,7 @@ namespace blender
           {
             if (argument_ranges.size() < 2)
             {
-              r_error = "sample2D parameter '" + *root_param_name +
+              r_error = "sampler2D parameter '" + *root_param_name +
                 "' could not rewrite texture(...) from Closure Output";
               return false;
             }
@@ -3376,7 +3269,7 @@ namespace blender
           {
             if (argument_ranges.size() < 3)
             {
-              r_error = "sample2D parameter '" + *root_param_name +
+              r_error = "sampler2D parameter '" + *root_param_name +
                 "' could not rewrite textureLod(...) from Closure Output";
               return false;
             }
@@ -3390,7 +3283,7 @@ namespace blender
           {
             if (argument_ranges.size() < 4)
             {
-              r_error = "sample2D parameter '" + *root_param_name +
+              r_error = "sampler2D parameter '" + *root_param_name +
                 "' could not rewrite textureGrad(...) from Closure Output";
               return false;
             }
@@ -3410,7 +3303,7 @@ namespace blender
           {
             if (argument_ranges.size() < 3)
             {
-              r_error = "sample2D parameter '" + *root_param_name +
+              r_error = "sampler2D parameter '" + *root_param_name +
                 "' could not rewrite texelFetch(...) from Closure Output";
               return false;
             }
@@ -3424,7 +3317,7 @@ namespace blender
           {
             if (argument_ranges.size() < 2)
             {
-              r_error = "sample2D parameter '" + *root_param_name +
+              r_error = "sampler2D parameter '" + *root_param_name +
                 "' could not rewrite textureGather(...) from Closure Output";
               return false;
             }
@@ -3467,7 +3360,7 @@ namespace blender
 
       std::stringstream ss;
       ss << "GLSL Function node '" << node.name << "' function '" << parse_result.function.name
-        << "': Closure Output sample2D downgraded ";
+        << "': Closure Output sampler2D downgraded ";
       bool need_separator = false;
       auto append_item = [&](const StringRef text)
         {
@@ -3615,7 +3508,7 @@ namespace blender
       {
         return StringRefNull("vec4");
       }
-      if (param.type != GLSLBoundaryType::Sample2D)
+      if (!glsl_boundary_type_is_sampler(param.type))
       {
         return param.type_name;
       }
@@ -3647,6 +3540,15 @@ namespace blender
       std::stringstream ss;
       ss << "void " << parse_result.wrapper_name << "(";
       bool need_comma = false;
+      auto append_wrapper_input = [&](const StringRefNull type_name, const StringRef name)
+        {
+          if (need_comma)
+          {
+            ss << ", ";
+          }
+          ss << type_name << " " << name;
+          need_comma = true;
+        };
       auto append_wrapper_output = [&](const StringRefNull type_name, const StringRef name)
         {
           if (need_comma)
@@ -3662,15 +3564,10 @@ namespace blender
         {
           continue;
         }
-        if (need_comma)
-        {
-          ss << ", ";
-        }
         const GLSLSample2DSourceKind source_kind = sample2d_source_kinds.lookup_ptr(param.name) ?
           *sample2d_source_kinds.lookup_ptr(param.name) :
           GLSLSample2DSourceKind::None;
-        ss << emitted_type_name(param, source_kind) << " " << make_wrapper_argument_name("in", param.name);
-        need_comma = true;
+        append_wrapper_input(emitted_type_name(param, source_kind), make_wrapper_argument_name("in", param.name));
       }
       if (function.return_type != GLSLBoundaryType::Void)
       {
@@ -3958,13 +3855,6 @@ namespace blender
       const StringRef socket_name,
       const StringRef socket_identifier)
     {
-      if (glsl_boundary_type_is_image_sampler(param.type))
-      {
-        BLI_assert(!is_output);
-        b.add_input<decl::Image>(socket_name, socket_identifier);
-        return;
-      }
-
       if (glsl_boundary_type_is_sample2d(param.type))
       {
         BLI_assert(!is_output);
@@ -4196,10 +4086,7 @@ namespace blender
       const NodeShaderGLSLFunction& storage = node_storage(node);
       const GLSLParseResult parse_result = parse_glsl_for_node(node);
       cache_parse_status(node, parse_result);
-      sync_sampler_socket_visibility(node, parse_result);
       sync_glsl_meta_defaults(node, parse_result);
-
-      draw_sampler_input_properties(layout, ptr, node);
 
       if (parse_result.ok)
       {
@@ -4224,62 +4111,11 @@ namespace blender
     static void node_layout_ex(ui::Layout& layout, bContext* /*C*/, PointerRNA* ptr)
     {
       draw_node_layout_content(layout, ptr);
-
-      bNode& node = *static_cast<bNode*>(ptr->data);
-      if (!node_has_sampler_input_sockets(node))
-      {
-        return;
-      }
-
-      ui::Layout& box = layout.box();
-      box.use_property_split_set(true);
-      box.use_property_decorate_set(false);
-      box.label(IFACE_("Sampler Settings"), ICON_NONE);
-      box.prop(ptr, "sampler_interpolation", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
-      box.prop(ptr, "sampler_extension", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
     }
 
     static void node_init(bNodeTree* /*ntree*/, bNode* node)
     {
-      NodeShaderGLSLFunction* data = MEM_new<NodeShaderGLSLFunction>(__func__);
-      data->sampler_interpolation = SHD_INTERP_LINEAR;
-      data->sampler_extension = SHD_IMAGE_EXTENSION_REPEAT;
-      node->storage = data;
-    }
-
-    static GPUSamplerState glsl_function_sampler_state(const NodeShaderGLSLFunction& storage)
-    {
-      GPUSamplerState sampler_state = GPUSamplerState::default_sampler();
-
-      switch (storage.sampler_extension)
-      {
-      case SHD_IMAGE_EXTENSION_EXTEND:
-        sampler_state.extend_x = GPU_SAMPLER_EXTEND_MODE_EXTEND;
-        sampler_state.extend_yz = GPU_SAMPLER_EXTEND_MODE_EXTEND;
-        break;
-      case SHD_IMAGE_EXTENSION_REPEAT:
-        sampler_state.extend_x = GPU_SAMPLER_EXTEND_MODE_REPEAT;
-        sampler_state.extend_yz = GPU_SAMPLER_EXTEND_MODE_REPEAT;
-        break;
-      case SHD_IMAGE_EXTENSION_CLIP:
-        sampler_state.extend_x = GPU_SAMPLER_EXTEND_MODE_CLAMP_TO_BORDER;
-        sampler_state.extend_yz = GPU_SAMPLER_EXTEND_MODE_CLAMP_TO_BORDER;
-        break;
-      case SHD_IMAGE_EXTENSION_MIRROR:
-        sampler_state.extend_x = GPU_SAMPLER_EXTEND_MODE_MIRRORED_REPEAT;
-        sampler_state.extend_yz = GPU_SAMPLER_EXTEND_MODE_MIRRORED_REPEAT;
-        break;
-      default:
-        break;
-      }
-
-      if (storage.sampler_interpolation != SHD_INTERP_CLOSEST)
-      {
-        sampler_state.filtering = GPU_SAMPLER_FILTERING_ANISOTROPIC | GPU_SAMPLER_FILTERING_LINEAR |
-          GPU_SAMPLER_FILTERING_MIPMAP;
-      }
-
-      return sampler_state;
+      node->storage = MEM_new<NodeShaderGLSLFunction>(__func__);
     }
 
     static bool prepare_sampler_input_bindings(GPUMaterial* mat,
@@ -4293,9 +4129,6 @@ namespace blender
       {
         return true;
       }
-
-      const NodeShaderGLSLFunction& storage = node_storage(node);
-      const GPUSamplerState sampler_state = glsl_function_sampler_state(storage);
 
       auto find_input_stack_by_identifier = [&](const StringRef identifier) -> GPUNodeStack*
         {
@@ -4339,7 +4172,7 @@ namespace blender
           {
             return sampler_state_from_image_to_closure_node(*used_link->fromnode);
           }
-          return sampler_state;
+          return GPUSamplerState::default_sampler();
         };
 
       for (const GLSLFunctionParam& param : function.params)
@@ -4352,7 +4185,6 @@ namespace blender
         if (glsl_boundary_type_is_sampler(param.type))
         {
           const std::string socket_identifier = param.identifier;
-          const bNodeSocket* socket = find_node_input_socket_by_identifier(node, socket_identifier);
           GPUNodeStack* stack = find_input_stack_by_identifier(socket_identifier);
           if (stack == nullptr)
           {
@@ -4376,15 +4208,6 @@ namespace blender
             }
             image = resolve_sample2d_image(param);
           }
-          else
-          {
-            if (socket == nullptr || socket->type != SOCK_IMAGE || socket->default_value == nullptr ||
-              socket->is_directly_linked())
-            {
-              return false;
-            }
-            image = socket->default_value_typed<bNodeSocketValueImage>()->value;
-          }
 
           if (image == nullptr || image->source == IMA_SRC_TILED)
           {
@@ -4392,10 +4215,7 @@ namespace blender
           }
 
           stack->type = GPU_TEX2D;
-          const GPUSamplerState active_sampler_state = glsl_boundary_type_is_sample2d(param.type) ?
-            resolve_sample2d_sampler_state(param) :
-            sampler_state;
-          stack->link = GPU_image(mat, image, nullptr, active_sampler_state);
+          stack->link = GPU_image(mat, image, nullptr, resolve_sample2d_sampler_state(param));
         }
       }
 
@@ -4406,7 +4226,6 @@ namespace blender
     {
       const GLSLParseResult parse_result = parse_glsl_for_node(*node);
       cache_parse_status(*node, parse_result);
-      sync_sampler_socket_visibility(*node, parse_result);
       sync_glsl_meta_defaults(*node, parse_result);
     }
 

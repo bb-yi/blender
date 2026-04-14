@@ -4922,12 +4922,6 @@ static const EnumPropertyItem node_glsl_function_parse_status_items[] = {
     {0, nullptr, 0, nullptr, nullptr},
 };
 
-static const EnumPropertyItem node_glsl_function_sampler_interpolation_items[] = {
-    {SHD_INTERP_LINEAR, "LINEAR", 0, "Linear", "Linearly interpolate between texels"},
-    {SHD_INTERP_CLOSEST, "CLOSEST", 0, "Closest", "Sample the closest texel without filtering"},
-    {0, nullptr, 0, nullptr, nullptr},
-};
-
 static EnumPropertyItem node_ies_mode_items[] = {
     {NODE_IES_INTERNAL, "INTERNAL", 0, "Internal", "Use internal text data-block"},
     {NODE_IES_EXTERNAL, "EXTERNAL", 0, "External", "Use external .ies file"},
@@ -7358,20 +7352,6 @@ static void def_sh_glsl_function(BlenderRNA * /*brna*/, StructRNA *srna)
   prop = RNA_def_property(srna, "function_name", PROP_STRING, PROP_NONE);
   RNA_def_property_string_sdna(prop, nullptr, "function_name");
   RNA_def_property_ui_text(prop, "Function", "Selected exported GLSL function name");
-  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_ShaderNodeGLSLFunction_update");
-
-  prop = RNA_def_property(srna, "sampler_interpolation", PROP_ENUM, PROP_NONE);
-  RNA_def_property_enum_sdna(prop, nullptr, "sampler_interpolation");
-  RNA_def_property_enum_items(prop, node_glsl_function_sampler_interpolation_items);
-  RNA_def_property_ui_text(
-      prop, "Sampler Interpolation", "Filtering used for sampler2D image parameters");
-  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_ShaderNodeGLSLFunction_update");
-
-  prop = RNA_def_property(srna, "sampler_extension", PROP_ENUM, PROP_NONE);
-  RNA_def_property_enum_sdna(prop, nullptr, "sampler_extension");
-  RNA_def_property_enum_items(prop, prop_image_extension);
-  RNA_def_property_ui_text(
-      prop, "Sampler Extension", "Wrapping mode used for sampler2D image parameters");
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_ShaderNodeGLSLFunction_update");
 
   prop = RNA_def_property(srna, "parse_status", PROP_ENUM, PROP_NONE);

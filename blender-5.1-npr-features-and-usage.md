@@ -460,16 +460,16 @@
 
 #### 当前支持的函数边界类型
 
-- 输入参数：`float`、`vec2`、`vec3`、`vec4`、`sampler2D`、`sample2D`
+- 输入参数：`float`、`vec2`、`vec3`、`vec4`、`sampler2D`
 - 输出参数：`out float`、`out vec2`、`out vec3`、`out vec4`
 - 返回值：`void`、`float`、`vec2`、`vec3`、`vec4`
 
 #### 重要说明
 
 - `Function` 不会自动选第一个函数，需要手动指定
-- `sampler2D` 由节点面板中的图片槽位选择，不是可连线输入
-- `sample2D` 会显示为 `Closure` 输入口，可连接 `Image to Closure` 或符合约定的 `Closure Output`
-- `Closure Output -> sample2D` 当前只保证 `texture(tex, uv)` 这种直接采样形式
+- `sampler2D` 会显示为 `Closure` 输入口
+- `sampler2D` 可连接 `Image to Closure` 或符合约定的 `Closure Output`
+- `Closure Output -> sampler2D` 当前只保证 `texture(tex, uv)` 这种直接采样形式
 - 如果函数依赖 `textureLod`、`textureGrad`、`textureSize`、`texelFetch` 这类图像专用能力，应优先配合 `Image to Closure`
 - `@glsl_meta` 支持 `default`、`min`、`max`、`hide_value` 和 `subtype`
 - 只有显式写了 `subtype=color` 的 `vec3 / vec4` 输入，才会显示成颜色插口
@@ -500,7 +500,7 @@
 
 #### 作用
 
-把一张普通图片包装成 `sample2D` 可消费的 `Closure` 源，主要用于给 `GLSL Function(sample2D)` 提供图像输入，同时保持和程序化 `Closure Output` 相同的接线形式。
+把一张普通图片包装成 `sampler2D` 可消费的 `Closure` 源，主要用于给 `GLSL Function(sampler2D)` 提供图像输入，同时保持和程序化 `Closure Output` 相同的接线形式。
 
 #### 节点设置
 
@@ -511,7 +511,7 @@
 #### 使用说明
 
 - 这个节点没有普通贴图插口，图片是在节点面板里直接选择
-- 它主要是 `sample2D` 工作流的图像适配节点，不是普通 `Image Texture` 的替代品
+- 它主要是 `sampler2D` 工作流的图像适配节点，不是普通 `Image Texture` 的替代品
 - 当函数需要图像资源专用采样能力时，应优先使用这个节点
 
 **3. Eevee 物体材质节点**
