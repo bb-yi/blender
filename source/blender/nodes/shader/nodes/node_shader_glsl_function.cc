@@ -213,6 +213,8 @@ namespace blender
 
     static constexpr const char* result_socket_identifier = "Result";
     static constexpr int closure_output_virtual_texture_size = 1024;
+    static constexpr const char* glsl_light_access_helper_filename =
+      "gpu_shader_material_glsl_light_access.glsl";
 
     static Vector<GLSLToken> tokenize_glsl_source(const StringRef source);
     static const bNodeSocket* find_node_input_socket_by_identifier(const bNode& node,
@@ -4393,6 +4395,10 @@ namespace blender
         mat, parse_result.source_filename.c_str(), {}, library_source.c_str());
 
       Vector<StringRefNull> dependencies;
+      if (parse_result.uses_eevee_light_access)
+      {
+        dependencies.append(glsl_light_access_helper_filename);
+      }
       dependencies.append(parse_result.source_filename.c_str());
       GPU_material_generated_source_add(
         mat,

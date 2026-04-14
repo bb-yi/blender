@@ -649,6 +649,7 @@ set(GLSL_SRC
   shaders/material/gpu_shader_material_geometry.glsl
   shaders/material/gpu_shader_material_glass.glsl
   shaders/material/gpu_shader_material_glossy.glsl
+  shaders/material/gpu_shader_material_glsl_light_access.glsl
   shaders/material/gpu_shader_material_hair_info.glsl
   shaders/material/gpu_shader_material_hair.glsl
   shaders/material/gpu_shader_material_holdout.glsl
