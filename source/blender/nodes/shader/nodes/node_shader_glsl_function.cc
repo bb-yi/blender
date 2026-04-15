@@ -2722,9 +2722,7 @@ namespace blender
     static bool is_glsl_light_access_identifier(const StringRef identifier)
     {
       return identifier == "GLSLLight" || identifier == "glsl_light_count" ||
-        identifier == "glsl_light_get" || identifier == "glsl_light_shadow" ||
-        identifier == "glsl_light_diffuse_attenuation" ||
-        identifier == "glsl_light_specular_attenuation";
+        identifier == "glsl_light_get" || identifier == "glsl_light_shadow";
     }
 
     static bool is_glsl_light_access_deprecated_identifier(const StringRef identifier)
@@ -2733,7 +2731,9 @@ namespace blender
         identifier == "glsl_light_color" || identifier == "glsl_light_vector" ||
         identifier == "glsl_light_distance" || identifier == "glsl_light_diffuse_power" ||
         identifier == "glsl_light_specular_power" || identifier == "glsl_light_surface_attenuation" ||
-        identifier == "glsl_light_shadow_visibility";
+        identifier == "glsl_light_shadow_visibility" ||
+        identifier == "glsl_light_diffuse_attenuation" ||
+        identifier == "glsl_light_specular_attenuation";
     }
 
     static bool glsl_source_uses_eevee_light_access(const Vector<GLSLToken>& tokens)
@@ -3969,9 +3969,9 @@ vec3 glsl_ambient_lighting()
       if (glsl_source_uses_deprecated_eevee_light_access(tokens, deprecated_identifier))
       {
         result.error = "Deprecated Eevee light helper '" + deprecated_identifier +
-          "' was removed. Use GLSLLight, glsl_light_count(), glsl_light_get(), "
-          "glsl_light_shadow(), glsl_light_diffuse_attenuation(), and "
-          "glsl_light_specular_attenuation().";
+          "' was removed. Use glsl_light_get() to read GLSLLight.diffuse_color, "
+          "GLSLLight.specular_color, and GLSLLight.attenuation, then combine them with "
+          "glsl_light_shadow() manually.";
         return result;
       }
       result.uses_geometry_access = glsl_source_uses_geometry_access(tokens);

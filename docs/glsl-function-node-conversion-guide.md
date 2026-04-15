@@ -232,8 +232,6 @@ textureLod(tex, uv, lod)
 - `glsl_light_count()`
 - `glsl_light_get(light_index)`
 - `glsl_light_shadow(light_index, shading_normal)`
-- `glsl_light_diffuse_attenuation(light_index, shading_normal, view_vector)`
-- `glsl_light_specular_attenuation(light_index, shading_normal, view_vector, roughness)`
 - `GLSL_LIGHT_TYPE_INVALID`
 - `GLSL_LIGHT_TYPE_SUN`
 - `GLSL_LIGHT_TYPE_POINT`
@@ -253,9 +251,11 @@ textureLod(tex, uv, lod)
   - 日光：`sun().direction`
   - 聚光 / 面光：灯对象局部 `+Z` 轴对应的世界空间方向
   - 点光：返回 `vec3(0.0)`
-- `GLSLLight.attenuation` 仍然只是**基础 surface attenuation**
-- `glsl_light_diffuse_attenuation(...)` 才是更接近默认 `Diffuse BSDF` 直接光亮度的聚合衰减项；它内部组合了 diffuse power、surface attenuation、facing attenuation 和 diffuse LTC，但不包含 shadow
-- `glsl_light_specular_attenuation(...)` 是更接近默认 GGX 反射直接光亮度的聚合衰减项；它内部组合了 specular power、surface attenuation、facing attenuation 和 specular LTC，但不包含 shadow，也不包含材质侧 Fresnel / IOR / tint / metallic
+- `GLSLLight.diffuse_color` 表示**对自定义逐灯模型友好的 diffuse 颜色项**：它会把 Eevee 内部的 surface radiance 权重换算成更接近 point-like 直觉的通道能量，避免点光默认半径很小时数值爆炸
+- `GLSLLight.specular_color` 表示**对自定义逐灯模型友好的 specular 颜色项**：同样会把 Eevee 内部的 surface radiance 权重换算成更适合手写高光模型的通道能量
+- `GLSLLight.attenuation` 表示**适合自定义逐灯模型的基础衰减项**；它内部组合了 `light_point_light(...)` 和 `light_attenuation_surface(...)`，但不包含 `NdotL`、toon ramp、half-lambert、Blinn-Phong、GGX、`light_attenuation_facing(...)`、`light_ltc(...)`、shadow 或材质侧 Fresnel / IOR / metallic / tint / roughness
+- 推荐漫反射写法：`light.diffuse_color * light.attenuation * max(dot(N, light.vector), 0.0) * glsl_light_shadow(...)`
+- 推荐高光写法：`light.specular_color * light.attenuation * custom_spec_term * glsl_light_shadow(...)`
 - `glsl_light_count()` / `glsl_light_get(i)` 返回的是**当前片元局部可见灯列表**，不是场景全局稳定灯编号
 - 因此 `glsl_light_get(0)` 的含义是“当前片元局部列表里的第 0 盏有效灯”，不是“场景里固定编号的第 0 盏灯”
 
@@ -321,6 +321,29 @@ textureLod(tex, uv, lod)
 
 - 不要把 `glsl_ambient_lighting()` 说成“完整间接光照总和”
 - 不要把 reflection、combined、probe radiance、screen-space indirect 等其他概念混进这个 helper 的定义里
+
+### 规则 4.4：写自定义 PBR / 半 PBR 时，优先组合几何 helper、环境光 helper 和逐灯 helper
+
+当前推荐的组合方式是：
+
+- 几何：`glsl_normal()`、`glsl_true_normal()`、`glsl_incoming()`
+- 环境：`glsl_ambient_lighting()`
+- 逐灯：`glsl_light_count()`、`glsl_light_get(i)`、`glsl_light_shadow(i, N)`
+
+典型写法应按下面这个层次组织：
+
+- 漫反射部分：`diffuse_brdf * light.diffuse_color * light.attenuation * NdotL * shadow`
+- 高光部分：`specular_brdf * light.specular_color * light.attenuation * NdotL * shadow`
+- 环境部分：`glsl_ambient_lighting() * base_color * ambient_term`
+
+这里的关键点是：
+
+- `GLSLLight.diffuse_color` / `GLSLLight.specular_color` 已经是对自定义模型友好的逐灯颜色项
+- `GLSLLight.attenuation` 只负责基础逐灯衰减，不替你计算 `NdotL`、GGX、toon ramp 或阴影
+- 因此 `shadow` 仍然应显式写成 `glsl_light_shadow(i, N)`
+- 如果想写更接近标准 PBR 的版本，优先在函数体内部自己实现 Fresnel / NDF / Geometry，而不要再寻找旧的 `glsl_light_diffuse_attenuation(...)` 或 `glsl_light_specular_attenuation(...)`
+
+仓库内的 [`blender-5.1-npr-features-and-usage.md`](../blender-5.1-npr-features-and-usage.md) 已附带一段可直接粘贴到 `GLSL Function` 的 PBR 风格完整示例，可作为转换结果的参考模板。
 
 
 ### 规则 5：如果原代码是屏幕着色器，要把它改写成“可被材质节点调用的函数”

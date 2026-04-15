@@ -7,6 +7,63 @@ bool glsl_light_is_zero(float3 value)
   return all(lessThanEqual(abs(value), float3(1e-8f)));
 }
 
+float glsl_light_shape_radiance(LightData light)
+{
+  if (light.type == LIGHT_RECT || light.type == LIGHT_ELLIPSE) {
+    float area = light.area().size.x * light.area().size.y * 4.0f;
+    if (light.type == LIGHT_ELLIPSE) {
+      area *= M_PI / 4.0f;
+    }
+    return float(M_1_PI) / area;
+  }
+
+  if (light.type == LIGHT_OMNI_SPHERE || light.type == LIGHT_OMNI_DISK ||
+      light.type == LIGHT_SPOT_SPHERE || light.type == LIGHT_SPOT_DISK)
+  {
+    float area = float(4.0f * M_PI) * square(light.local().local.shape_radius);
+    return 1.0f / (area * float(M_PI));
+  }
+
+  if (is_sun_light(light.type)) {
+    float inv_sin_sq = 1.0f + 1.0f / square(light.sun().shape_radius);
+    return float(M_1_PI) * inv_sin_sq;
+  }
+
+  return 1.0f;
+}
+
+float glsl_light_point_radiance(LightData light)
+{
+  if (light.type == LIGHT_RECT || light.type == LIGHT_ELLIPSE) {
+    float area = light.area().size.x * light.area().size.y * 4.0f;
+    float tmp = M_PI_2 / (M_PI_2 + sqrt(area));
+    float mrp_scaling = tmp + (1.0f - tmp) * M_1_PI;
+    return float(M_1_PI) * mrp_scaling;
+  }
+
+  if (light.type == LIGHT_OMNI_SPHERE || light.type == LIGHT_OMNI_DISK ||
+      light.type == LIGHT_SPOT_SPHERE || light.type == LIGHT_SPOT_DISK)
+  {
+    return float(1.0f / (4.0f * M_PI));
+  }
+
+  if (is_sun_light(light.type)) {
+    return 1.0f;
+  }
+
+  return 1.0f;
+}
+
+float glsl_light_friendly_power(LightData light, LightingType type)
+{
+  float shape_power = glsl_light_shape_radiance(light);
+  float point_power = glsl_light_point_radiance(light);
+  if (shape_power <= 1e-16f) {
+    return 0.0f;
+  }
+  return light_power_get(light, type) * (point_power / shape_power);
+}
+
 float3 glsl_light_resolve_normal(float3 normal_value)
 {
   float normal_len_squared = dot(normal_value, normal_value);
@@ -17,16 +74,6 @@ float3 glsl_light_resolve_normal(float3 normal_value)
   float geom_len_squared = dot(g_data.Ng, g_data.Ng);
   if (geom_len_squared > 1e-16f) {
     return g_data.Ng * inversesqrt(geom_len_squared);
-  }
-
-  return float3(0.0f, 0.0f, 1.0f);
-}
-
-float3 glsl_light_resolve_view(float3 view_value)
-{
-  float view_len_squared = dot(view_value, view_value);
-  if (view_len_squared > 1e-16f) {
-    return view_value * inversesqrt(view_len_squared);
   }
 
   return float3(0.0f, 0.0f, 1.0f);
@@ -43,13 +90,12 @@ struct GLSLLight {
   bool valid;
   uint index;
   int type;
-  float3 color;
   float3 vector;
   float3 position;
   float3 direction;
   float distance;
-  float diffuse_power;
-  float specular_power;
+  float3 diffuse_color;
+  float3 specular_color;
   float attenuation;
 };
 
@@ -59,13 +105,12 @@ GLSLLight glsl_light_default()
   light.valid = false;
   light.index = 0u;
   light.type = GLSL_LIGHT_TYPE_INVALID;
-  light.color = float3(0.0f);
   light.vector = float3(0.0f, 0.0f, 1.0f);
   light.position = float3(0.0f);
   light.direction = float3(0.0f);
   light.distance = 0.0f;
-  light.diffuse_power = 0.0f;
-  light.specular_power = 0.0f;
+  light.diffuse_color = float3(0.0f);
+  light.specular_color = float3(0.0f);
   light.attenuation = 0.0f;
   return light;
 }
@@ -322,7 +367,6 @@ GLSLLight glsl_light_build(uint light_index, bool is_local, uint public_index)
   result.valid = true;
   result.index = public_index;
   result.type = glsl_light_public_type(light);
-  result.color = light.color;
   result.vector = light_vector.L;
   result.position = is_directional ? float3(0.0f) : light_position_get(light);
   if (is_directional) {
@@ -335,67 +379,11 @@ GLSLLight glsl_light_build(uint light_index, bool is_local, uint public_index)
     result.direction = float3(0.0f);
   }
   result.distance = light_vector.dist;
-  result.diffuse_power = light_power_get(light, LIGHT_DIFFUSE);
-  result.specular_power = light_power_get(light, LIGHT_SPECULAR);
-  result.attenuation = light_attenuation_surface(light, is_directional, light_vector);
+  result.diffuse_color = light.color * glsl_light_friendly_power(light, LIGHT_DIFFUSE);
+  result.specular_color = light.color * glsl_light_friendly_power(light, LIGHT_SPECULAR);
+  result.attenuation = light_point_light(light, is_directional, light_vector) *
+                       light_attenuation_surface(light, is_directional, light_vector);
   return result;
-}
-
-float glsl_light_diffuse_attenuation_from_lookup(LightData light,
-                                                 LightVector light_vector,
-                                                 bool is_directional,
-                                                 float3 shading_normal,
-                                                 float3 view_vector)
-{
-  float diffuse_power = light_power_get(light, LIGHT_DIFFUSE);
-  if (diffuse_power < LIGHT_ATTENUATION_THRESHOLD) {
-    return 0.0f;
-  }
-
-  float3 resolved_shading_normal = glsl_light_resolve_normal(shading_normal);
-  float3 resolved_view_vector = glsl_light_resolve_view(view_vector);
-  float attenuation = light_attenuation_surface(light, is_directional, light_vector);
-  attenuation *= light_attenuation_facing(
-      light, light_vector.L, light_vector.dist, resolved_shading_normal, false);
-  if (attenuation < LIGHT_ATTENUATION_THRESHOLD) {
-    return 0.0f;
-  }
-
-  float4 diffuse_ltc_mat = float4(1.0f, 0.0f, 0.0f, 1.0f);
-  float ltc_result = light_ltc(
-      utility_tx, light, resolved_shading_normal, resolved_view_vector, light_vector, diffuse_ltc_mat);
-  return diffuse_power * attenuation * ltc_result;
-}
-
-float glsl_light_specular_attenuation_from_lookup(LightData light,
-                                                  LightVector light_vector,
-                                                  bool is_directional,
-                                                  float3 shading_normal,
-                                                  float3 view_vector,
-                                                  float roughness)
-{
-  float specular_power = light_power_get(light, LIGHT_SPECULAR);
-  if (specular_power < LIGHT_ATTENUATION_THRESHOLD) {
-    return 0.0f;
-  }
-
-  float3 resolved_shading_normal = glsl_light_resolve_normal(shading_normal);
-  float3 resolved_view_vector = glsl_light_resolve_view(view_vector);
-  float attenuation = light_attenuation_surface(light, is_directional, light_vector);
-  attenuation *= light_attenuation_facing(
-      light, light_vector.L, light_vector.dist, resolved_shading_normal, false);
-  if (attenuation < LIGHT_ATTENUATION_THRESHOLD) {
-    return 0.0f;
-  }
-
-  float cos_theta = dot(resolved_shading_normal, resolved_view_vector);
-  float clamped_roughness = saturate(roughness);
-  auto &lut_tx = sampler_get(eevee_utility_texture, utility_tx);
-  float4 specular_ltc_mat = utility_tx_sample_lut(
-      lut_tx, cos_theta, clamped_roughness, UTIL_LTC_MAT_LAYER);
-  float ltc_result = light_ltc(
-      utility_tx, light, resolved_shading_normal, resolved_view_vector, light_vector, specular_ltc_mat);
-  return specular_power * attenuation * ltc_result;
 }
 
 int glsl_light_count()
@@ -467,47 +455,6 @@ float glsl_light_shadow(int light_ordinal, float3 shading_normal)
                      uniform_buf.shadow.step_count);
 }
 
-float glsl_light_diffuse_attenuation(int light_ordinal, float3 shading_normal, float3 view_vector)
-{
-  uint light_index = 0u;
-  bool is_local = false;
-  if (!glsl_light_find_ordinal(light_ordinal, light_index, is_local)) {
-    return 0.0f;
-  }
-
-  LightData light;
-  LightVector light_vector;
-  bool is_directional;
-  if (!glsl_light_lookup_cached(light_index, is_local, light, light_vector, is_directional)) {
-    return 0.0f;
-  }
-
-  return glsl_light_diffuse_attenuation_from_lookup(
-      light, light_vector, is_directional, shading_normal, view_vector);
-}
-
-float glsl_light_specular_attenuation(int light_ordinal,
-                                      float3 shading_normal,
-                                      float3 view_vector,
-                                      float roughness)
-{
-  uint light_index = 0u;
-  bool is_local = false;
-  if (!glsl_light_find_ordinal(light_ordinal, light_index, is_local)) {
-    return 0.0f;
-  }
-
-  LightData light;
-  LightVector light_vector;
-  bool is_directional;
-  if (!glsl_light_lookup_cached(light_index, is_local, light, light_vector, is_directional)) {
-    return 0.0f;
-  }
-
-  return glsl_light_specular_attenuation_from_lookup(
-      light, light_vector, is_directional, shading_normal, view_vector, roughness);
-}
-
 #else
 
 int glsl_light_count()
@@ -524,21 +471,6 @@ GLSLLight glsl_light_get(int light_ordinal)
 float glsl_light_shadow(int light_ordinal, float3 shading_normal)
 {
   UNUSED_VARS(light_ordinal, shading_normal);
-  return 0.0f;
-}
-
-float glsl_light_diffuse_attenuation(int light_ordinal, float3 shading_normal, float3 view_vector)
-{
-  UNUSED_VARS(light_ordinal, shading_normal, view_vector);
-  return 0.0f;
-}
-
-float glsl_light_specular_attenuation(int light_ordinal,
-                                      float3 shading_normal,
-                                      float3 view_vector,
-                                      float roughness)
-{
-  UNUSED_VARS(light_ordinal, shading_normal, view_vector, roughness);
   return 0.0f;
 }
 

@@ -483,15 +483,17 @@
 - `glsl_ambient_lighting()` 的语义对齐 `Shader Info` 的 `Ambient Lighting`，读取当前着色点的 probe / 环境间接光结果
 - `glsl_ambient_lighting()` 只返回这类环境漫反射项，不包含 reflection probe 反射颜色，也不包含 `Light Probe Color` 的 `Combined`
 - 这组环境光 helper 依赖 Eevee 的 light probe 数据；当前不把 `FILTER`、`World` 当作稳定保证范围
-- 内置了 Eevee 直接光辅助 helper，可在函数体里使用：`GLSLLight`、`glsl_light_count()`、`glsl_light_get(light_index)`、`glsl_light_shadow(light_index, shading_normal)`、`glsl_light_diffuse_attenuation(light_index, shading_normal, view_vector)`、`glsl_light_specular_attenuation(light_index, shading_normal, view_vector, roughness)`
+- 内置了 Eevee 直接光辅助 helper，可在函数体里使用：`GLSLLight`、`glsl_light_count()`、`glsl_light_get(light_index)`、`glsl_light_shadow(light_index, shading_normal)`
 - 旧的逐灯宏接口和单字段灯光 helper 已移除，新的公开用法只保留结构体接口
 - `GLSLLight.vector` 表示从当前表面点指向灯中心的归一化方向
 - `GLSLLight.type` 表示稳定的公开灯光类型：`SUN`、`POINT`、`SPOT`、`AREA_RECT`、`AREA_ELLIPSE`
 - `GLSLLight.position` 表示灯中心世界坐标；日光返回 `vec3(0.0)`
 - `GLSLLight.direction` 表示灯的世界空间朝向轴：日光使用 `sun().direction`，聚光 / 面光使用灯对象局部 `+Z` 轴对应的世界空间方向，点光返回 `vec3(0.0)`
-- `GLSLLight.attenuation` 仍然只表示基础的 surface attenuation，不包含 diffuse facing、LTC 或 shadow
-- `glsl_light_diffuse_attenuation(light_index, shading_normal, view_vector)` 返回更接近 Eevee 默认 `Diffuse BSDF` 直接光的标量衰减项，内部会组合 diffuse power、surface attenuation、facing attenuation 和 diffuse LTC，但不包含 shadow
-- `glsl_light_specular_attenuation(light_index, shading_normal, view_vector, roughness)` 返回更接近 Eevee 默认 GGX 反射直接光的标量衰减项，内部会组合 specular power、surface attenuation、facing attenuation 和 specular LTC，但不包含 shadow，也不包含材质侧的 Fresnel / IOR / tint / metallic
+- `GLSLLight.diffuse_color` 表示对自定义逐灯模型友好的 diffuse 颜色项：它会把 Eevee 内部的 surface radiance 权重换算成更接近 point-like 直觉的通道能量，避免点光默认半径很小时数值爆炸
+- `GLSLLight.specular_color` 表示对自定义逐灯模型友好的 specular 颜色项：同样会把 Eevee 内部的 surface radiance 权重换算成更适合手写高光模型的通道能量
+- `GLSLLight.attenuation` 表示适合自定义逐灯模型的基础衰减项，内部会组合 `light_point_light(...)` 和 `light_attenuation_surface(...)`，但不包含 `NdotL`、toon ramp、Blinn-Phong、GGX、`light_attenuation_facing(...)`、`light_ltc(...)`、shadow 或材质侧 Fresnel / IOR / metallic / tint / roughness
+- 推荐写法：`light.diffuse_color * light.attenuation * max(dot(N, light.vector), 0.0) * glsl_light_shadow(...)`
+- 推荐写法：`light.specular_color * light.attenuation * custom_spec_term * glsl_light_shadow(...)`
 - `glsl_light_count()` / `glsl_light_get(i)` 操作的是当前片元的局部可见灯列表，不是场景全局稳定灯编号
 - 这套直接光 helper 只是 Eevee 直接光访问辅助接口，不等于公开 `LightData`、`light_buf` 或 Eevee 内部宏
 - 这套直接光 helper 当前只支持普通 `Eevee` 物体材质，并且只在 `Deferred` / `Forward` 编译路径下提供直接光与阴影访问
@@ -501,6 +503,122 @@
 #### 进一步说明
 
 如果要把外部 GLSL / HLSL / ShaderLab 代码稳定转换到这个节点，建议同时参考仓库内的 `docs/glsl-function-node-conversion-guide.md`。
+
+#### 示例：PBR 风格直光 + 环境光
+
+下面这段示例演示当前 `GLSL Function` 如何直接同时使用：
+
+- 几何 helper：`glsl_normal()`、`glsl_true_normal()`、`glsl_incoming()`
+- 环境光 helper：`glsl_ambient_lighting()`
+- 逐灯 helper：`glsl_light_count()`、`glsl_light_get(i)`、`glsl_light_shadow(i, N)`
+
+函数名可设为 `pbr_lit`，并给它连接这些输入：
+
+- `base_color`
+- `roughness`
+- `metallic`
+- `ao`
+
+```glsl
+float saturate1(float x)
+{
+  return clamp(x, 0.0, 1.0);
+}
+
+float pow5(float x)
+{
+  float x2 = x * x;
+  return x2 * x2 * x;
+}
+
+vec3 fresnel_schlick(float cos_theta, vec3 F0)
+{
+  return F0 + (vec3(1.0) - F0) * pow5(1.0 - saturate1(cos_theta));
+}
+
+float distribution_ggx(float NdotH, float roughness)
+{
+  float a = roughness * roughness;
+  float a2 = a * a;
+  float nh2 = NdotH * NdotH;
+  float denom = nh2 * (a2 - 1.0) + 1.0;
+  return a2 / max(3.14159265 * denom * denom, 1e-6);
+}
+
+float geometry_schlick_ggx(float NdotV, float roughness)
+{
+  float r = roughness + 1.0;
+  float k = (r * r) / 8.0;
+  return NdotV / max(NdotV * (1.0 - k) + k, 1e-6);
+}
+
+float geometry_smith(float NdotV, float NdotL, float roughness)
+{
+  return geometry_schlick_ggx(NdotV, roughness) *
+         geometry_schlick_ggx(NdotL, roughness);
+}
+
+vec4 pbr_lit(vec3 base_color, float roughness, float metallic, float ao)
+{
+  vec3 N = normalize(glsl_normal());
+  vec3 Ng = normalize(glsl_true_normal());
+  vec3 V = normalize(glsl_incoming());
+
+  if (dot(N, Ng) < 0.0) {
+    N = Ng;
+  }
+
+  roughness = clamp(roughness, 0.04, 1.0);
+  metallic = clamp(metallic, 0.0, 1.0);
+  ao = clamp(ao, 0.0, 1.0);
+
+  vec3 F0 = mix(vec3(0.04), base_color, metallic);
+
+  vec3 direct_diffuse = vec3(0.0);
+  vec3 direct_specular = vec3(0.0);
+
+  for (int i = 0; i < glsl_light_count(); i++) {
+    GLSLLight light = glsl_light_get(i);
+    vec3 L = normalize(light.vector);
+    vec3 H = normalize(V + L);
+
+    float NdotL = saturate1(dot(N, L));
+    float NdotV = saturate1(dot(N, V));
+    float NdotH = saturate1(dot(N, H));
+    float VdotH = saturate1(dot(V, H));
+
+    if (NdotL <= 1e-5 || NdotV <= 1e-5) {
+      continue;
+    }
+
+    float shadow = glsl_light_shadow(i, N);
+
+    vec3 F = fresnel_schlick(VdotH, F0);
+    float D = distribution_ggx(NdotH, roughness);
+    float G = geometry_smith(NdotV, NdotL, roughness);
+
+    vec3 specular_brdf = (D * G * F) / max(4.0 * NdotV * NdotL, 1e-5);
+    vec3 kd = (vec3(1.0) - F) * (1.0 - metallic);
+    vec3 diffuse_brdf = kd * base_color / 3.14159265;
+
+    direct_diffuse += diffuse_brdf *
+                      light.diffuse_color *
+                      light.attenuation *
+                      NdotL *
+                      shadow;
+
+    direct_specular += specular_brdf *
+                       light.specular_color *
+                       light.attenuation *
+                       NdotL *
+                       shadow;
+  }
+
+  vec3 ambient = glsl_ambient_lighting() * base_color * (1.0 - metallic) * ao;
+  vec3 color = ambient + direct_diffuse + direct_specular;
+  return vec4(max(color, vec3(0.0)), 1.0);
+}
+```
 
 ### Image to Closure
 
