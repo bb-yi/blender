@@ -24,7 +24,6 @@
 #include "BLI_path_utils.hh"
 #include "BLI_set.hh"
 #include "BLI_string.h"
-
 #include "CLG_log.h"
 
 #include "intern/gpu_node_graph.hh"
@@ -124,6 +123,8 @@ namespace blender
       bool ok = false;
       bool keep_existing_sockets = false;
       bool used_first_function = false;
+      bool uses_geometry_access = false;
+      bool uses_lightprobe_access = false;
       bool uses_eevee_light_access = false;
 
       std::string error;
@@ -215,6 +216,8 @@ namespace blender
     static constexpr int closure_output_virtual_texture_size = 1024;
     static constexpr const char* glsl_light_access_helper_filename =
       "gpu_shader_material_glsl_light_access.glsl";
+    static constexpr const char* glsl_light_access_shader_info_dependency =
+      "gpu_shader_material_shader_info.glsl";
 
     static Vector<GLSLToken> tokenize_glsl_source(const StringRef source);
     static const bNodeSocket* find_node_input_socket_by_identifier(const bNode& node,
@@ -229,6 +232,8 @@ namespace blender
       std::string& r_error);
     static Vector<std::string> find_top_level_glsl_global_names(
       const Vector<GLSLToken>& tokens, const Span<std::string> function_names);
+    static bool glsl_source_uses_geometry_access(const Vector<GLSLToken>& tokens);
+    static bool glsl_source_uses_lightprobe_access(const Vector<GLSLToken>& tokens);
     static bool glsl_source_uses_eevee_light_access(const Vector<GLSLToken>& tokens);
     static bool find_glsl_function_definition(const Vector<GLSLToken>& tokens,
       const StringRef function_name,
@@ -2674,18 +2679,61 @@ namespace blender
       return global_names;
     }
 
-    static bool is_glsl_light_access_identifier(const StringRef identifier)
+    static bool is_glsl_geometry_access_identifier(const StringRef identifier)
     {
       return ELEM(identifier,
-        "GLSL_LIGHT_FOREACH_BEGIN",
-        "GLSL_LIGHT_FOREACH_END",
-        "glsl_light_color",
-        "glsl_light_vector",
-        "glsl_light_distance",
-        "glsl_light_diffuse_power",
-        "glsl_light_specular_power",
-        "glsl_light_surface_attenuation",
-        "glsl_light_shadow_visibility");
+        "glsl_position",
+        "glsl_normal",
+        "glsl_true_normal",
+        "glsl_incoming");
+    }
+
+    static bool glsl_source_uses_geometry_access(const Vector<GLSLToken>& tokens)
+    {
+      for (const GLSLToken& token : tokens)
+      {
+        if (token.kind == GLSLToken::Kind::Identifier &&
+            is_glsl_geometry_access_identifier(token.text))
+        {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    static bool is_glsl_lightprobe_access_identifier(const StringRef identifier)
+    {
+      return identifier == "glsl_ambient_lighting";
+    }
+
+    static bool glsl_source_uses_lightprobe_access(const Vector<GLSLToken>& tokens)
+    {
+      for (const GLSLToken& token : tokens)
+      {
+        if (token.kind == GLSLToken::Kind::Identifier &&
+            is_glsl_lightprobe_access_identifier(token.text))
+        {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    static bool is_glsl_light_access_identifier(const StringRef identifier)
+    {
+      return identifier == "GLSLLight" || identifier == "glsl_light_count" ||
+        identifier == "glsl_light_get" || identifier == "glsl_light_shadow" ||
+        identifier == "glsl_light_diffuse_attenuation" ||
+        identifier == "glsl_light_specular_attenuation";
+    }
+
+    static bool is_glsl_light_access_deprecated_identifier(const StringRef identifier)
+    {
+      return identifier == "GLSL_LIGHT_FOREACH_BEGIN" || identifier == "GLSL_LIGHT_FOREACH_END" ||
+        identifier == "glsl_light_color" || identifier == "glsl_light_vector" ||
+        identifier == "glsl_light_distance" || identifier == "glsl_light_diffuse_power" ||
+        identifier == "glsl_light_specular_power" || identifier == "glsl_light_surface_attenuation" ||
+        identifier == "glsl_light_shadow_visibility";
     }
 
     static bool glsl_source_uses_eevee_light_access(const Vector<GLSLToken>& tokens)
@@ -2695,6 +2743,21 @@ namespace blender
         if (token.kind == GLSLToken::Kind::Identifier &&
           is_glsl_light_access_identifier(token.text))
         {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    static bool glsl_source_uses_deprecated_eevee_light_access(const Vector<GLSLToken>& tokens,
+      std::string& r_identifier)
+    {
+      for (const GLSLToken& token : tokens)
+      {
+        if (token.kind == GLSLToken::Kind::Identifier &&
+          is_glsl_light_access_deprecated_identifier(token.text))
+        {
+          r_identifier = token.text;
           return true;
         }
       }
@@ -3498,14 +3561,117 @@ namespace blender
       return ss.str();
     }
 
+    static std::string build_glsl_geometry_helper_block()
+    {
+      return R"GLSL(
+#if defined(GPU_FRAGMENT_SHADER) && (defined(MAT_DEFERRED) || defined(MAT_FORWARD) || defined(NPR_SHADER))
+vec3 glsl_position()
+{
+  return g_data.P;
+}
+
+vec3 glsl_normal()
+{
+  return g_data.N;
+}
+
+vec3 glsl_true_normal()
+{
+  return g_data.Ng;
+}
+
+vec3 glsl_incoming()
+{
+  return coordinate_incoming(g_data.P);
+}
+#else
+vec3 glsl_position()
+{
+  return vec3(0.0);
+}
+
+vec3 glsl_normal()
+{
+  return vec3(0.0);
+}
+
+vec3 glsl_true_normal()
+{
+  return vec3(0.0);
+}
+
+vec3 glsl_incoming()
+{
+  return vec3(0.0);
+}
+#endif
+
+)GLSL";
+    }
+
+    static std::string build_glsl_lightprobe_helper_block()
+    {
+      return R"GLSL(
+#if defined(GPU_FRAGMENT_SHADER) && (defined(MAT_DEFERRED) || defined(MAT_FORWARD) || defined(NPR_SHADER))
+vec3 glsl_helper_ambient_safe_direction(vec3 value, vec3 fallback)
+{
+  float value_len_squared = dot(value, value);
+  if (value_len_squared > 1e-16) {
+    return value * inversesqrt(value_len_squared);
+  }
+
+  float fallback_len_squared = dot(fallback, fallback);
+  if (fallback_len_squared > 1e-16) {
+    return fallback * inversesqrt(fallback_len_squared);
+  }
+
+  return vec3(0.0, 0.0, 1.0);
+}
+
+vec3 glsl_ambient_lighting()
+{
+#ifdef SPHERE_PROBE
+  vec3 shading_normal = glsl_helper_ambient_safe_direction(g_data.N, g_data.Ng);
+  vec3 probe_bias_normal = glsl_helper_ambient_safe_direction(g_data.Ni, g_data.Ng);
+  vec3 view_vector = drw_world_incident_vector(g_data.P);
+
+  LightProbeSample probe_sample = lightprobe_load(g_data.P, probe_bias_normal, view_vector);
+  probe_sample.volume_irradiance = spherical_harmonics_clamp(probe_sample.volume_irradiance,
+                                                             uniform_buf.clamp.surface_indirect);
+  return max(spherical_harmonics_evaluate_lambert(shading_normal, probe_sample.volume_irradiance),
+             vec3(0.0));
+#else
+  return vec3(0.0);
+#endif
+}
+#else
+vec3 glsl_ambient_lighting()
+{
+  return vec3(0.0);
+}
+#endif
+
+)GLSL";
+    }
+
     static std::string build_namespaced_glsl_source(const StringRef prefix,
       const Span<std::string> function_names,
       const Span<std::string> global_names,
       const StringRef source,
-      const Span<GLSLClosureSampleHelper> closure_helpers)
+      const Span<GLSLClosureSampleHelper> closure_helpers,
+      const bool include_geometry_helpers,
+      const bool include_lightprobe_helpers)
     {
       std::stringstream ss;
       ss << build_sample2d_closure_helper_block(closure_helpers);
+      if (include_geometry_helpers)
+      {
+        ss << build_glsl_geometry_helper_block();
+      }
+      if (include_lightprobe_helpers)
+      {
+        ss << build_glsl_lightprobe_helper_block();
+      }
       ss << "#define sample2D sampler2D\n";
       for (const std::string& name : global_names)
       {
@@ -3767,7 +3933,9 @@ namespace blender
         parse_result.function_names,
         parse_result.global_names,
         rewritten_source,
-        closure_helpers);
+        closure_helpers,
+        parse_result.uses_geometry_access,
+        parse_result.uses_lightprobe_access);
       r_wrapper_source = build_wrapper_glsl_source(parse_result, source_kinds);
 
       return true;
@@ -3797,6 +3965,17 @@ namespace blender
 
       const std::string stripped_source = strip_glsl_comments(source);
       const Vector<GLSLToken> tokens = tokenize_glsl_source(stripped_source);
+      std::string deprecated_identifier;
+      if (glsl_source_uses_deprecated_eevee_light_access(tokens, deprecated_identifier))
+      {
+        result.error = "Deprecated Eevee light helper '" + deprecated_identifier +
+          "' was removed. Use GLSLLight, glsl_light_count(), glsl_light_get(), "
+          "glsl_light_shadow(), glsl_light_diffuse_attenuation(), and "
+          "glsl_light_specular_attenuation().";
+        return result;
+      }
+      result.uses_geometry_access = glsl_source_uses_geometry_access(tokens);
+      result.uses_lightprobe_access = glsl_source_uses_lightprobe_access(tokens);
       result.uses_eevee_light_access = glsl_source_uses_eevee_light_access(tokens);
       result.function_names = find_top_level_glsl_function_names(tokens);
       if (result.function_names.is_empty())
@@ -3855,7 +4034,9 @@ namespace blender
         result.function_names,
         result.global_names,
         result.source,
-        Span<GLSLClosureSampleHelper>());
+        Span<GLSLClosureSampleHelper>(),
+        result.uses_geometry_access,
+        result.uses_lightprobe_access);
       result.wrapper_source = build_wrapper_glsl_source(
         result, Map<std::string, GLSLSample2DSourceKind>());
       return result;
@@ -4348,6 +4529,10 @@ namespace blender
       {
         GPU_material_flag_set(mat, GPU_MATFLAG_GLSL_LIGHT_ACCESS);
       }
+      if (parse_result.uses_lightprobe_access)
+      {
+        GPU_material_flag_set(mat, GPU_MATFLAG_LIGHTPROBE_ACCESS);
+      }
       if (!prepare_sampler_input_bindings(mat, *node, parse_result.function, in))
       {
         CLOG_WARN(&LOG,
@@ -4390,13 +4575,18 @@ namespace blender
         }
         return 1;
       }
-
       GPU_material_generated_source_add(
-        mat, parse_result.source_filename.c_str(), {}, library_source.c_str());
+        mat,
+        parse_result.source_filename.c_str(),
+        {},
+        library_source.c_str());
 
       Vector<StringRefNull> dependencies;
       if (parse_result.uses_eevee_light_access)
       {
+        /* Share one helper library across all GLSL Function nodes in the material and let the
+         * dependency resolver deduplicate Eevee light/shadow support code. */
+        dependencies.append(glsl_light_access_shader_info_dependency);
         dependencies.append(glsl_light_access_helper_filename);
       }
       dependencies.append(parse_result.source_filename.c_str());

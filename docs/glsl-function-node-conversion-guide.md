@@ -222,6 +222,107 @@ textureLod(tex, uv, lod)
 - 不要生成“`sample2D` 能随便接任何 Closure”的说明；对程序化来源，当前只推荐 `Closure Output`。
 - 如果用了 `textureLod` / `textureGrad` / `textureSize` / `texelFetch` 一类图像专用能力，应默认提醒使用 `Image to Closure`。
 
+### 规则 4.1：如果要使用 Eevee 逐灯辅助接口，必须把范围说清楚
+
+当前 `GLSL Function` 额外提供了一组 **Eevee 直接光 helper API**，目的是让函数体能在受控范围内读取逐灯直接光信息。
+
+这组接口目前包括：
+
+- `GLSLLight`
+- `glsl_light_count()`
+- `glsl_light_get(light_index)`
+- `glsl_light_shadow(light_index, shading_normal)`
+- `glsl_light_diffuse_attenuation(light_index, shading_normal, view_vector)`
+- `glsl_light_specular_attenuation(light_index, shading_normal, view_vector, roughness)`
+- `GLSL_LIGHT_TYPE_INVALID`
+- `GLSL_LIGHT_TYPE_SUN`
+- `GLSL_LIGHT_TYPE_POINT`
+- `GLSL_LIGHT_TYPE_SPOT`
+- `GLSL_LIGHT_TYPE_AREA_RECT`
+- `GLSL_LIGHT_TYPE_AREA_ELLIPSE`
+- 旧的逐灯宏接口和 `glsl_light_color(...)` 这类单字段 helper 已移除，不再作为公开用法支持
+- `GLSLLight.vector` 表示**从当前着色点指向灯中心的归一化方向**
+- `GLSLLight.type` 表示稳定的公开灯光类型：
+  - `GLSL_LIGHT_TYPE_SUN`
+  - `GLSL_LIGHT_TYPE_POINT`
+  - `GLSL_LIGHT_TYPE_SPOT`
+  - `GLSL_LIGHT_TYPE_AREA_RECT`
+  - `GLSL_LIGHT_TYPE_AREA_ELLIPSE`
+- `GLSLLight.position` 表示**灯中心世界坐标**；日光没有有限位置，因此返回 `vec3(0.0)`
+- `GLSLLight.direction` 表示**灯的世界空间朝向轴**：
+  - 日光：`sun().direction`
+  - 聚光 / 面光：灯对象局部 `+Z` 轴对应的世界空间方向
+  - 点光：返回 `vec3(0.0)`
+- `GLSLLight.attenuation` 仍然只是**基础 surface attenuation**
+- `glsl_light_diffuse_attenuation(...)` 才是更接近默认 `Diffuse BSDF` 直接光亮度的聚合衰减项；它内部组合了 diffuse power、surface attenuation、facing attenuation 和 diffuse LTC，但不包含 shadow
+- `glsl_light_specular_attenuation(...)` 是更接近默认 GGX 反射直接光亮度的聚合衰减项；它内部组合了 specular power、surface attenuation、facing attenuation 和 specular LTC，但不包含 shadow，也不包含材质侧 Fresnel / IOR / tint / metallic
+- `glsl_light_count()` / `glsl_light_get(i)` 返回的是**当前片元局部可见灯列表**，不是场景全局稳定灯编号
+- 因此 `glsl_light_get(0)` 的含义是“当前片元局部列表里的第 0 盏有效灯”，不是“场景里固定编号的第 0 盏灯”
+
+必须同时明确下面几点：
+
+- 这只是 **Eevee 直接光 helper**，不是公开 `LightData`、`light_buf` 或 Eevee 内部宏
+- V1 只支持普通 `Eevee` 物体材质
+- V1 只覆盖 `Deferred` / `Forward` 路径中的 **direct light + shadow**
+- 对这套 **direct light helper** 来说，`FILTER`、`NPR Tree`、`World` 当前都不支持，而且它本身也不负责 probe / indirect / volume lighting
+
+因此：
+
+- 不要生成“可以直接访问 Eevee 全部灯光内部数据结构”的说明
+- 不要生成“在任意 shader 域都支持逐灯 helper”的说明
+- 不要把 indirect / probe / volume 结果说成这套 helper 的能力范围
+
+### 规则 4.2：如果只是想在函数体里读几何体输入，优先使用内置几何 helper
+
+当前 `GLSL Function` 还提供了一组**几何 helper**，目的是让函数体直接读取常用几何输入，而不是额外再拉一圈节点线。
+
+这组接口目前包括：
+
+- `glsl_position()`
+- `glsl_normal()`
+- `glsl_true_normal()`
+- `glsl_incoming()`
+
+它们的语义直接对齐内置 `Geometry` 节点：
+
+- `glsl_position()` = `Geometry.Position`
+- `glsl_normal()` = `Geometry.Normal`
+- `glsl_true_normal()` = `Geometry.True Normal`
+- `glsl_incoming()` = `Geometry.Incoming`
+
+使用这组 helper 时要明确：
+
+- 这是**几何输入快捷接口**，不是新的导出函数边界类型
+- 它的优势是函数体里更紧凑，不代表外部节点输入方式被废弃
+- 如果某段逻辑本身就更适合由节点图显式传参，例如要让同一个函数复用外部改写后的法线、位置或别的来源，仍然应该保留普通输入参数
+- 当前这组几何 helper 按普通 `Eevee` 物体材质和 `NPR Tree` 的几何语义工作；`FILTER`、`World` 不作为稳定保证范围
+
+因此：
+
+- 不要把它说成“任意域都稳定可用”的全局 GLSL 内建
+- 不要把它和 `Texture Coordinate`、`Camera`、`Object Info` 等别的输入节点混成一组等价接口
+
+### 规则 4.3：如果要读 `Shader Info` 那种环境光，使用 `glsl_ambient_lighting()`
+
+当前 `GLSL Function` 还提供了一个**环境光 helper**：
+
+- `glsl_ambient_lighting()`
+
+它的语义对齐 `Shader Info` 的 `Ambient Lighting` 输出，也就是当前着色点的 probe / 环境**间接漫反射**结果。
+
+使用这条接口时要明确：
+
+- 它只返回这类环境漫反射项，不包含 reflection probe 反射颜色
+- 它也不等于 `Light Probe Color` 的 `Combined`
+- 它依赖 Eevee 的 light probe 数据路径，因此应当按 light-probe 相关能力来描述，而不是按逐灯 direct-light helper 来描述
+- 当前不把 `FILTER`、`World` 当作稳定保证范围
+
+因此：
+
+- 不要把 `glsl_ambient_lighting()` 说成“完整间接光照总和”
+- 不要把 reflection、combined、probe radiance、screen-space indirect 等其他概念混进这个 helper 的定义里
+
+
 ### 规则 5：如果原代码是屏幕着色器，要把它改写成“可被材质节点调用的函数”
 
 最常见的错误是直接把 Shadertoy 或后处理 shader 原封不动贴进来。

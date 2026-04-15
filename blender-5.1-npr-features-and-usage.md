@@ -476,6 +476,27 @@
 - `vec3 + subtype=color` 进入 GLSL 时按 `rgb` 使用，`alpha` 固定为 `1.0`
 - `vec4 + subtype=color` 会保留完整 `rgba`
 - 当前不支持把 `int / bool / mat* / struct / array` 作为导出函数边界类型
+- 内置了几何 helper，可在函数体里直接读取：`glsl_position()`、`glsl_normal()`、`glsl_true_normal()`、`glsl_incoming()`
+- 这四个 helper 的语义直接对齐 `Geometry` 节点的 `Position`、`Normal`、`True Normal`、`Incoming` 输出
+- 这组几何 helper 当前按普通 `Eevee` 物体材质和 `NPR Tree` 的几何语义工作；`FILTER`、`World` 不作为稳定保证范围
+- 内置了环境光 helper：`glsl_ambient_lighting()`
+- `glsl_ambient_lighting()` 的语义对齐 `Shader Info` 的 `Ambient Lighting`，读取当前着色点的 probe / 环境间接光结果
+- `glsl_ambient_lighting()` 只返回这类环境漫反射项，不包含 reflection probe 反射颜色，也不包含 `Light Probe Color` 的 `Combined`
+- 这组环境光 helper 依赖 Eevee 的 light probe 数据；当前不把 `FILTER`、`World` 当作稳定保证范围
+- 内置了 Eevee 直接光辅助 helper，可在函数体里使用：`GLSLLight`、`glsl_light_count()`、`glsl_light_get(light_index)`、`glsl_light_shadow(light_index, shading_normal)`、`glsl_light_diffuse_attenuation(light_index, shading_normal, view_vector)`、`glsl_light_specular_attenuation(light_index, shading_normal, view_vector, roughness)`
+- 旧的逐灯宏接口和单字段灯光 helper 已移除，新的公开用法只保留结构体接口
+- `GLSLLight.vector` 表示从当前表面点指向灯中心的归一化方向
+- `GLSLLight.type` 表示稳定的公开灯光类型：`SUN`、`POINT`、`SPOT`、`AREA_RECT`、`AREA_ELLIPSE`
+- `GLSLLight.position` 表示灯中心世界坐标；日光返回 `vec3(0.0)`
+- `GLSLLight.direction` 表示灯的世界空间朝向轴：日光使用 `sun().direction`，聚光 / 面光使用灯对象局部 `+Z` 轴对应的世界空间方向，点光返回 `vec3(0.0)`
+- `GLSLLight.attenuation` 仍然只表示基础的 surface attenuation，不包含 diffuse facing、LTC 或 shadow
+- `glsl_light_diffuse_attenuation(light_index, shading_normal, view_vector)` 返回更接近 Eevee 默认 `Diffuse BSDF` 直接光的标量衰减项，内部会组合 diffuse power、surface attenuation、facing attenuation 和 diffuse LTC，但不包含 shadow
+- `glsl_light_specular_attenuation(light_index, shading_normal, view_vector, roughness)` 返回更接近 Eevee 默认 GGX 反射直接光的标量衰减项，内部会组合 specular power、surface attenuation、facing attenuation 和 specular LTC，但不包含 shadow，也不包含材质侧的 Fresnel / IOR / tint / metallic
+- `glsl_light_count()` / `glsl_light_get(i)` 操作的是当前片元的局部可见灯列表，不是场景全局稳定灯编号
+- 这套直接光 helper 只是 Eevee 直接光访问辅助接口，不等于公开 `LightData`、`light_buf` 或 Eevee 内部宏
+- 这套直接光 helper 当前只支持普通 `Eevee` 物体材质，并且只在 `Deferred` / `Forward` 编译路径下提供直接光与阴影访问
+- 对这套直接光 helper 来说，`FILTER`、`NPR Tree`、`World`、probe / indirect / volume lighting 当前都不在支持范围内
+
 
 #### 进一步说明
 
