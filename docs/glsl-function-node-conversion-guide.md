@@ -1294,6 +1294,10 @@ stylize.tint: default=vec3(1.0, 0.8, 0.2)
 
 - `float` 使用标量
 - `vec2/vec3/vec4` 使用对应构造器
+- `float/vec2/vec3/vec4` 也可以直接写 GLSL 表达式默认值
+- 当 `default=` 是表达式时，socket 未连接会使用这段表达式；一旦连线，就使用连线值
+- 当 `default=` 是表达式时，节点会自动隐藏这个输入的数值输入框，但保留 socket 本身
+- 表达式默认值可以引用同一份源码里的 top-level helper 函数，也可以直接调用 `glsl_position()`、`glsl_normal()`、`glsl_ambient_lighting()` 这类内置 helper
 
 示例：
 
@@ -1302,6 +1306,37 @@ strength: default=0.5
 uv_scale: default=vec2(1.0, 1.0)
 tint: default=vec3(1.0, 0.8, 0.2)
 color_a: default=vec4(1.0, 0.5, 0.2, 1.0)
+```
+
+表达式默认值示例：
+
+```glsl
+position_ws: default=glsl_position()
+normal_ws: default=normalize(glsl_normal())
+ambient: default=glsl_ambient_lighting()
+```
+
+更完整的推荐写法：
+
+```glsl
+vec3 default_surface_color()
+{
+  return glsl_position() * 0.25 + vec3(0.5);
+}
+
+/* @glsl_meta v1
+surface_color: default=default_surface_color()
+*/
+vec4 emit_surface_color(vec3 surface_color)
+{
+  return vec4(surface_color, 1.0);
+}
+```
+
+如果表达式比较复杂，建议最外层包一层括号，这样在 Meta 行里更稳妥：
+
+```glsl
+mask: default=(smoothstep(0.2, 0.8, glsl_position().z))
 ```
 
 #### 3.2 `min`
@@ -1391,9 +1426,11 @@ strength: default=0.5 hide_value=true
 
 当前逻辑是：
 
-- 当 Meta 内容第一次生效时，把 `default` 写入 socket 默认值
-- 只要 Meta 没变，用户手动改过的默认值会保留
-- 当 Meta 本身发生变化时，再同步一次新的默认值
+- 当 `default` 是 literal（例如 `0.5`、`vec3(...)`）时，Meta 第一次生效会把它写入 socket 默认值
+- 只要 Meta 没变，用户手动改过的 literal 默认值会保留
+- 当 Meta 本身发生变化时，再同步一次新的 literal 默认值
+- 当 `default` 是表达式时，不会写入 RNA/socket 静态默认值
+- 表达式默认值只在 wrapper 运行时参与：未连接时用表达式，已连接时用连线值
 
 这意味着它更适合作为“函数作者建议值”，而不是强制锁死值。
 
@@ -1420,6 +1457,8 @@ strength: default=0.5 hide_value=true
 - 不支持 `inout`
 - 不支持 `sampler2D` Meta
 - 不支持 `int` / `bool` / `mat*` / `struct` / `array` 边界参数 Meta
+- 表达式默认值当前只支持输入参数 `float / vec2 / vec3 / vec4`
+- 表达式默认值不要引用同函数的其他参数名；这类值在 wrapper 里不会自动展开成可见局部变量
 - 如果 Meta 指向了不存在的参数，会报错
 - 一个函数当前只支持一块 Meta
 

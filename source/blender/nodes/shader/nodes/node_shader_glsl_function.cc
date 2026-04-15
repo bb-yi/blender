@@ -84,6 +84,7 @@ namespace blender
       {
         bool has_default_value = false;
         float4 default_value = float4(0.0f);
+        std::optional<std::string> default_expression;
         bool has_min = false;
         float min_value = 0.0f;
         bool has_max = false;
@@ -93,7 +94,8 @@ namespace blender
 
         bool has_any() const
         {
-          return has_default_value || has_min || has_max || hide_value || subtype.has_value();
+          return has_default_value || default_expression.has_value() || has_min || has_max ||
+            hide_value || subtype.has_value();
         }
       };
 
@@ -235,6 +237,9 @@ namespace blender
     static bool glsl_source_uses_geometry_access(const Vector<GLSLToken>& tokens);
     static bool glsl_source_uses_lightprobe_access(const Vector<GLSLToken>& tokens);
     static bool glsl_source_uses_eevee_light_access(const Vector<GLSLToken>& tokens);
+    static bool glsl_function_meta_uses_geometry_access(const GLSLFunctionDefinition& function);
+    static bool glsl_function_meta_uses_lightprobe_access(const GLSLFunctionDefinition& function);
+    static bool glsl_function_meta_uses_eevee_light_access(const GLSLFunctionDefinition& function);
     static bool find_glsl_function_definition(const Vector<GLSLToken>& tokens,
       const StringRef function_name,
       GLSLFunctionDefinition& r_function,
@@ -343,6 +348,24 @@ namespace blender
         return sample_socket;
       }
       return nullptr;
+    }
+
+    static const bNodeSocket* find_glsl_function_input_socket(const bNode& node,
+      const GLSLFunctionParam& param)
+    {
+      const bNodeSocket* socket = find_node_input_socket_by_identifier(node, param.identifier);
+      if ((socket == nullptr || !socket->is_directly_linked()) && node.runtime->original)
+      {
+        socket = find_node_input_socket_by_identifier(*node.runtime->original, param.identifier);
+      }
+      return socket;
+    }
+
+    static bool glsl_function_input_is_directly_linked(const bNode& node,
+      const GLSLFunctionParam& param)
+    {
+      const bNodeSocket* socket = find_glsl_function_input_socket(node, param);
+      return socket != nullptr && socket->is_directly_linked();
     }
 
     static GLSLSample2DSourceKind resolve_sample2d_source_kind(const bNode& node,
@@ -1998,24 +2021,41 @@ namespace blender
 
       if (raw_meta.default_value.has_value())
       {
+        bool parsed_literal_default = false;
         if (r_param.type == GLSLBoundaryType::Float)
         {
-          if (!parse_glsl_meta_float_literal(*raw_meta.default_value,
-            r_param.meta.default_value.x,
-            r_error))
+          float literal_default = 0.0f;
+          if (parse_glsl_meta_float_literal(*raw_meta.default_value, literal_default, r_error))
           {
-            return false;
+            r_param.meta.default_value.x = literal_default;
+            r_param.meta.has_default_value = true;
+            parsed_literal_default = true;
           }
         }
         else
         {
-          if (!parse_glsl_meta_vector_default(
-            *raw_meta.default_value, r_param.dimensions, r_param.meta.default_value, r_error))
+          float4 literal_default = float4(0.0f);
+          if (parse_glsl_meta_vector_default(
+            *raw_meta.default_value, r_param.dimensions, literal_default, r_error))
           {
-            return false;
+            r_param.meta.default_value = literal_default;
+            r_param.meta.has_default_value = true;
+            parsed_literal_default = true;
           }
         }
-        r_param.meta.has_default_value = true;
+        if (!parsed_literal_default)
+        {
+          r_param.meta.default_expression = trim_copy(*raw_meta.default_value);
+          if (r_param.meta.default_expression->empty())
+          {
+            r_error = "GLSL meta default expression cannot be empty";
+            return false;
+          }
+          /* Expression defaults are runtime values, so the inline socket value must stay hidden
+           * and the wrapper injects the expression only when the input socket is not linked. */
+          r_param.meta.hide_value = true;
+          r_error.clear();
+        }
       }
 
       if (raw_meta.min_value.has_value())
@@ -2086,6 +2126,10 @@ namespace blender
             ss << param.meta.default_value[i];
           }
           ss << ';';
+        }
+        if (param.meta.default_expression.has_value())
+        {
+          ss << "default_expr=" << *param.meta.default_expression << ';';
         }
         if (param.meta.has_min)
         {
@@ -2688,6 +2732,20 @@ namespace blender
         "glsl_incoming");
     }
 
+    static bool glsl_expression_uses_identifier(const StringRef expression,
+      bool (*predicate)(const StringRef identifier))
+    {
+      const Vector<GLSLToken> tokens = tokenize_glsl_source(expression);
+      for (const GLSLToken& token : tokens)
+      {
+        if (token.kind == GLSLToken::Kind::Identifier && predicate(StringRef(token.text)))
+        {
+          return true;
+        }
+      }
+      return false;
+    }
+
     static bool glsl_source_uses_geometry_access(const Vector<GLSLToken>& tokens)
     {
       for (const GLSLToken& token : tokens)
@@ -2749,6 +2807,48 @@ namespace blender
       return false;
     }
 
+    static bool glsl_function_meta_uses_geometry_access(const GLSLFunctionDefinition& function)
+    {
+      for (const GLSLFunctionParam& param : function.params)
+      {
+        if (param.meta.default_expression.has_value() &&
+          glsl_expression_uses_identifier(*param.meta.default_expression,
+            is_glsl_geometry_access_identifier))
+        {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    static bool glsl_function_meta_uses_lightprobe_access(const GLSLFunctionDefinition& function)
+    {
+      for (const GLSLFunctionParam& param : function.params)
+      {
+        if (param.meta.default_expression.has_value() &&
+          glsl_expression_uses_identifier(*param.meta.default_expression,
+            is_glsl_lightprobe_access_identifier))
+        {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    static bool glsl_function_meta_uses_eevee_light_access(const GLSLFunctionDefinition& function)
+    {
+      for (const GLSLFunctionParam& param : function.params)
+      {
+        if (param.meta.default_expression.has_value() &&
+          glsl_expression_uses_identifier(*param.meta.default_expression,
+            is_glsl_light_access_identifier))
+        {
+          return true;
+        }
+      }
+      return false;
+    }
+
     static bool glsl_source_uses_deprecated_eevee_light_access(const Vector<GLSLToken>& tokens,
       std::string& r_identifier)
     {
@@ -2759,6 +2859,29 @@ namespace blender
         {
           r_identifier = token.text;
           return true;
+        }
+      }
+      return false;
+    }
+
+    static bool glsl_function_meta_uses_deprecated_eevee_light_access(
+      const GLSLFunctionDefinition& function, std::string& r_identifier)
+    {
+      for (const GLSLFunctionParam& param : function.params)
+      {
+        if (!param.meta.default_expression.has_value())
+        {
+          continue;
+        }
+        const Vector<GLSLToken> tokens = tokenize_glsl_source(*param.meta.default_expression);
+        for (const GLSLToken& token : tokens)
+        {
+          if (token.kind == GLSLToken::Kind::Identifier &&
+            is_glsl_light_access_deprecated_identifier(token.text))
+          {
+            r_identifier = token.text;
+            return true;
+          }
         }
       }
       return false;
@@ -3713,8 +3836,13 @@ vec3 glsl_ambient_lighting()
         StringRefNull("sampler2D");
     }
 
-    static std::string wrapper_argument_expression(const GLSLFunctionParam& param)
+    static std::string wrapper_argument_expression(const bNode& node, const GLSLFunctionParam& param)
     {
+      if (param.meta.default_expression.has_value() &&
+        !glsl_function_input_is_directly_linked(node, param))
+      {
+        return *param.meta.default_expression;
+      }
       const std::string argument_name = make_wrapper_argument_name("in", param.name);
       if (glsl_param_uses_color_socket(param) && param.type == GLSLBoundaryType::Vec3)
       {
@@ -3729,12 +3857,36 @@ vec3 glsl_ambient_lighting()
     }
 
     static std::string build_wrapper_glsl_source(
+      const bNode& node,
       const GLSLParseResult& parse_result,
       const Map<std::string, GLSLSample2DSourceKind>& sample2d_source_kinds)
     {
       const GLSLFunctionDefinition& function = parse_result.function;
+      const bool uses_expression_defaults = [&]()
+        {
+          for (const GLSLFunctionParam& param : function.params)
+          {
+            if (param.meta.default_expression.has_value())
+            {
+              return true;
+            }
+          }
+          return false;
+        }();
 
       std::stringstream ss;
+      if (uses_expression_defaults)
+      {
+        for (const std::string& name : parse_result.global_names)
+        {
+          ss << "#define " << name << " " << parse_result.source_prefix << name << "\n";
+        }
+        for (const std::string& name : parse_result.function_names)
+        {
+          ss << "#define " << name << " " << parse_result.source_prefix << name << "\n";
+        }
+        ss << "\n";
+      }
       ss << "void " << parse_result.wrapper_name << "(";
       bool need_comma = false;
       auto append_wrapper_input = [&](const StringRefNull type_name, const StringRef name)
@@ -3841,7 +3993,7 @@ vec3 glsl_ambient_lighting()
         }
         else
         {
-          ss << wrapper_argument_expression(param);
+          ss << wrapper_argument_expression(node, param);
         }
         need_comma = true;
       }
@@ -3863,6 +4015,17 @@ vec3 glsl_ambient_lighting()
         }
       }
       ss << "}\n";
+      if (uses_expression_defaults)
+      {
+        for (const std::string& name : parse_result.function_names)
+        {
+          ss << "#undef " << name << "\n";
+        }
+        for (const std::string& name : parse_result.global_names)
+        {
+          ss << "#undef " << name << "\n";
+        }
+      }
       return ss.str();
     }
 
@@ -3936,7 +4099,7 @@ vec3 glsl_ambient_lighting()
         closure_helpers,
         parse_result.uses_geometry_access,
         parse_result.uses_lightprobe_access);
-      r_wrapper_source = build_wrapper_glsl_source(parse_result, source_kinds);
+      r_wrapper_source = build_wrapper_glsl_source(node, parse_result, source_kinds);
 
       return true;
     }
@@ -4003,6 +4166,17 @@ vec3 glsl_ambient_lighting()
       {
         return result;
       }
+      if (glsl_function_meta_uses_deprecated_eevee_light_access(result.function, deprecated_identifier))
+      {
+        result.error = "Deprecated Eevee light helper '" + deprecated_identifier +
+          "' was removed. Use glsl_light_get() to read GLSLLight.diffuse_color, "
+          "GLSLLight.specular_color, and GLSLLight.attenuation, then combine them with "
+          "glsl_light_shadow() manually.";
+        return result;
+      }
+      result.uses_geometry_access |= glsl_function_meta_uses_geometry_access(result.function);
+      result.uses_lightprobe_access |= glsl_function_meta_uses_lightprobe_access(result.function);
+      result.uses_eevee_light_access |= glsl_function_meta_uses_eevee_light_access(result.function);
       if (!validate_sampler_inputs(node, tokens, result.function, result.error))
       {
         return result;
@@ -4038,7 +4212,7 @@ vec3 glsl_ambient_lighting()
         result.uses_geometry_access,
         result.uses_lightprobe_access);
       result.wrapper_source = build_wrapper_glsl_source(
-        result, Map<std::string, GLSLSample2DSourceKind>());
+        node, result, Map<std::string, GLSLSample2DSourceKind>());
       return result;
     }
 
