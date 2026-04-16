@@ -518,9 +518,7 @@ void node_shader_info(float3 position,
   float visibility_sum = 0.0f;
   float shadow_weight_sum = 0.0f;
   float half_lambert_sum = 0.0f;
-  float half_lambert_weight_sum = 0.0f;
   float blinn_phong_sum = 0.0f;
-  float blinn_phong_weight_sum = 0.0f;
 
   LIGHT_FOREACH_ALL_BEGIN(light_cull_buf,
                           light_zbin_buf,
@@ -562,22 +560,22 @@ void node_shader_info(float3 position,
     float diffuse_weight = diffuse_power * shader_info_max_component(light.color);
     if (diffuse_power >= LIGHT_ATTENUATION_THRESHOLD) {
       float4 ltc_mat = float4(1.0f, 0.0f, 0.0f, 1.0f);
-      float diffuse_radiance = light_ltc(utility_tx, light, shading_normal, view_vector, lv, ltc_mat);
+      /* Shader Info diffuse should stay on the same light-range envelope as Eevee's light culling
+       * and shadow visibility paths. Omitting surface attenuation keeps the LTC response alive past
+       * the intended local-light falloff and can show up as visibly blocky light-range boundaries. */
+      float diffuse_radiance = light_ltc(utility_tx, light, shading_normal, view_vector, lv, ltc_mat) *
+                               surface_attenuation;
 
-      /* Match Goo's Shader Info structure: direct diffuse uses the light's diffuse radiance
-       * without extra shadow masking or display remapping. */
+      /* Keep Shader Info diffuse unshadowed and undisplay-remapped. */
       diffuse_shading_sum += light.color * diffuse_power * diffuse_radiance;
-      half_lambert_sum += half_lambert * diffuse_weight;
-      half_lambert_weight_sum += diffuse_weight;
+      half_lambert_sum += half_lambert * surface_attenuation;
     }
 
     if (specular_power >= LIGHT_ATTENUATION_THRESHOLD) {
       float3 half_vector = safe_normalize(lv.L + view_vector);
       float nh = saturate(dot(shading_normal, half_vector));
       float blinn_phong = pow(nh, safe_exponent);
-      float specular_weight = specular_power * shader_info_max_component(light.color);
-      blinn_phong_sum += blinn_phong * specular_weight;
-      blinn_phong_weight_sum += specular_weight;
+      blinn_phong_sum += blinn_phong * surface_attenuation;
     }
 
     if (diffuse_power >= LIGHT_ATTENUATION_THRESHOLD &&
@@ -616,12 +614,8 @@ void node_shader_info(float3 position,
   ambient_lighting = float4(0.0f);
 #  endif
 
-  half_lambert_factor = (half_lambert_weight_sum > 1e-8f) ?
-                            saturate(half_lambert_sum / half_lambert_weight_sum) :
-                            0.0f;
-  blinn_phong_factor = (blinn_phong_weight_sum > 1e-8f) ?
-                           saturate(blinn_phong_sum / blinn_phong_weight_sum) :
-                           0.0f;
+  half_lambert_factor = saturate(half_lambert_sum);
+  blinn_phong_factor = saturate(blinn_phong_sum);
 #else
   diffuse_shading = float4(0.0f);
   shadow = 0.0f;

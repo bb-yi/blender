@@ -365,6 +365,27 @@ def assert_half_lambert_gradient_on_sphere():
     )
 
 
+def assert_half_lambert_point_gradient_on_plane():
+    clear_scene()
+    configure_scene()
+    make_camera()
+    make_plane(make_shader_info_material("HalfLambertPlaneMaterial", "Half-Lambert Factor"))
+    make_light()
+
+    pixels, width, height = render_image()
+    bright_side = sample_world_point(pixels, width, height, -2.0, 0.0)
+    upper_mid = sample_world_point(pixels, width, height, -1.0, 0.0)
+    center = sample_world_point(pixels, width, height, 0.0, 0.0)
+    lower_mid = sample_world_point(pixels, width, height, 1.0, 0.0)
+    dark_side = sample_world_point(pixels, width, height, 2.0, 0.0)
+
+    assert dark_side[0] < lower_mid[0] < center[0] < upper_mid[0] < bright_side[0], (
+        "Half-Lambert Factor under a single point light should stay as a smooth local-light "
+        f"falloff, got dark={dark_side} lower_mid={lower_mid} center={center} "
+        f"upper_mid={upper_mid} bright={bright_side}"
+    )
+
+
 def assert_diffuse_sun_gradient_on_sphere():
     clear_scene()
     configure_scene()
@@ -381,6 +402,27 @@ def assert_diffuse_sun_gradient_on_sphere():
 
     assert 0.0 <= dark_side[0] < lower_mid[0] < center[0] < upper_mid[0] < bright_side[0], (
         "Diffuse Shading under a single Sun light should stay as a smooth Goo-style gradient, "
+        f"got dark={dark_side} lower_mid={lower_mid} center={center} "
+        f"upper_mid={upper_mid} bright={bright_side}"
+    )
+
+
+def assert_diffuse_point_gradient_on_plane():
+    clear_scene()
+    configure_scene()
+    make_camera()
+    make_plane(make_shader_info_material("DiffusePointPlaneMaterial", "Diffuse Shading"))
+    make_light()
+
+    pixels, width, height = render_image()
+    bright_side = sample_world_point(pixels, width, height, -2.0, 0.0)
+    upper_mid = sample_world_point(pixels, width, height, -1.0, 0.0)
+    center = sample_world_point(pixels, width, height, 0.0, 0.0)
+    lower_mid = sample_world_point(pixels, width, height, 1.0, 0.0)
+    dark_side = sample_world_point(pixels, width, height, 2.0, 0.0)
+
+    assert dark_side[0] < lower_mid[0] < center[0] < upper_mid[0] < bright_side[0], (
+        "Diffuse Shading under a single point light should stay as a smooth local-light falloff, "
         f"got dark={dark_side} lower_mid={lower_mid} center={center} "
         f"upper_mid={upper_mid} bright={bright_side}"
     )
@@ -403,18 +445,42 @@ def assert_blinn_phong_gradient_on_sphere():
     )
 
 
+def assert_blinn_phong_point_gradient_on_plane():
+    clear_scene()
+    configure_scene()
+    make_camera()
+    make_plane(make_shader_info_material("BlinnPhongPlaneMaterial", "Blinn-Phong Factor"))
+    make_light()
+
+    pixels, width, height = render_image()
+    bright_side = sample_world_point(pixels, width, height, -2.0, 0.0)
+    upper_mid = sample_world_point(pixels, width, height, -1.0, 0.0)
+    center = sample_world_point(pixels, width, height, 0.0, 0.0)
+    lower_mid = sample_world_point(pixels, width, height, 1.0, 0.0)
+    dark_side = sample_world_point(pixels, width, height, 2.0, 0.0)
+
+    assert dark_side[0] < lower_mid[0] < center[0] < upper_mid[0] < bright_side[0], (
+        "Blinn-Phong Factor under a single point light should stay as a smooth local-light "
+        f"falloff, got dark={dark_side} lower_mid={lower_mid} center={center} "
+        f"upper_mid={upper_mid} bright={bright_side}"
+    )
+
+
 assert hasattr(bpy.types, "ShaderNodeShaderInfo"), "ShaderNodeShaderInfo is not registered"
 
 assert_diffuse_response()
 assert_diffuse_sun_gradient_on_sphere()
+assert_diffuse_point_gradient_on_plane()
 assert_unshadowed_response("Diffuse Shading", min_value=0.2, tolerance=0.05)
 assert_no_light_black("Diffuse Shading")
 assert_world_sun_black("Diffuse Shading")
 assert_unshadowed_response("Half-Lambert Factor", min_value=0.2, tolerance=0.05)
 assert_half_lambert_lifts_negative_ndotl()
 assert_half_lambert_gradient_on_sphere()
+assert_half_lambert_point_gradient_on_plane()
 assert_unshadowed_response("Blinn-Phong Factor", min_value=0.05, tolerance=0.08)
 assert_blinn_phong_gradient_on_sphere()
+assert_blinn_phong_point_gradient_on_plane()
 assert_shadow_response("Shadow")
 assert_no_light_black("Blinn-Phong Factor")
 assert_no_light_black("Shadow")
