@@ -231,7 +231,7 @@ static GPUNodeLink *gpu_uniformbuffer_link(GPUMaterial *mat,
     return nullptr;
   }
 
-  if (!ELEM(socket->type, SOCK_INT, SOCK_FLOAT, SOCK_VECTOR, SOCK_RGBA)) {
+  if (!ELEM(socket->type, SOCK_INT, SOCK_FLOAT, SOCK_BOOLEAN, SOCK_VECTOR, SOCK_RGBA)) {
     return nullptr;
   }
 

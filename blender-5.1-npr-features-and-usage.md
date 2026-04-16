@@ -466,6 +466,21 @@
 
 #### 重要说明
 
+```glsl
+struct GLSLLight {
+  bool valid;
+  uint index;
+  int type;
+  vec3 vector;
+  vec3 position;
+  vec3 direction;
+  float distance;
+  vec3 diffuse_color;
+  vec3 specular_color;
+  float attenuation;
+};
+```
+
 - `Function` 不会自动选第一个函数，需要手动指定
 - `sampler2D` 会显示为 `Closure` 输入口
 - `sampler2D` 可连接 `Image to Closure` 或符合约定的 `Closure Output`
@@ -487,13 +502,12 @@
 - `glsl_ambient_lighting()` 只返回这类环境漫反射项，不包含 reflection probe 反射颜色，也不包含 `Light Probe Color` 的 `Combined`
 - 这组环境光 helper 依赖 Eevee 的 light probe 数据；当前不把 `FILTER`、`World` 当作稳定保证范围
 - 内置了 Eevee 直接光辅助 helper，可在函数体里使用：`GLSLLight`、`glsl_light_count()`、`glsl_light_get(light_index)`、`glsl_light_shadow(light_index, shading_normal)`
-- 旧的逐灯宏接口和单字段灯光 helper 已移除，新的公开用法只保留结构体接口
 - `GLSLLight.vector` 表示从当前表面点指向灯中心的归一化方向
 - `GLSLLight.type` 表示稳定的公开灯光类型：`SUN`、`POINT`、`SPOT`、`AREA_RECT`、`AREA_ELLIPSE`
 - `GLSLLight.position` 表示灯中心世界坐标；日光返回 `vec3(0.0)`
 - `GLSLLight.direction` 表示灯的世界空间朝向轴：日光使用 `sun().direction`，聚光 / 面光使用灯对象局部 `+Z` 轴对应的世界空间方向，点光返回 `vec3(0.0)`
-- `GLSLLight.diffuse_color` 表示对自定义逐灯模型友好的 diffuse 颜色项：它会把 Eevee 内部的 surface radiance 权重换算成更接近 point-like 直觉的通道能量，避免点光默认半径很小时数值爆炸
-- `GLSLLight.specular_color` 表示对自定义逐灯模型友好的 specular 颜色项：同样会把 Eevee 内部的 surface radiance 权重换算成更适合手写高光模型的通道能量
+- `GLSLLight.diffuse_color` 表示对自定义逐灯模型友好的 diffuse 颜色项
+- `GLSLLight.specular_color` 表示对自定义逐灯模型友好的 specular 颜色项
 - `GLSLLight.attenuation` 表示适合自定义逐灯模型的基础衰减项，内部会组合 `light_point_light(...)` 和 `light_attenuation_surface(...)`，但不包含 `NdotL`、toon ramp、Blinn-Phong、GGX、`light_attenuation_facing(...)`、`light_ltc(...)`、shadow 或材质侧 Fresnel / IOR / metallic / tint / roughness
 - 推荐写法：`light.diffuse_color * light.attenuation * max(dot(N, light.vector), 0.0) * glsl_light_shadow(...)`
 - 推荐写法：`light.specular_color * light.attenuation * custom_spec_term * glsl_light_shadow(...)`
@@ -506,6 +520,110 @@
 #### 进一步说明
 
 如果要把外部 GLSL / HLSL / ShaderLab 代码稳定转换到这个节点，建议同时参考仓库内的 `docs/glsl-function-node-conversion-guide.md`。
+
+#### 示例：`mode` 对照调试 shader
+
+如果你想在一个 `GLSL Function` 节点里按 `mode` 切换并读取这组 helper，下面这段可以直接作为起点。
+
+由于导出函数边界当前不支持 `int / bool`，示例把 `mode` 和 `light_index` 都写成 `float` 输入，再在函数体里转成 `int`。
+
+| `mode` | 对应 helper / 字段 | 示例返回值 |
+| --- | --- | --- |
+| `0` | `glsl_position()` | `vec4(glsl_position(), 1.0)` |
+| `1` | `glsl_normal()` | `vec4(glsl_normal(), 1.0)` |
+| `2` | `glsl_true_normal()` | `vec4(glsl_true_normal(), 1.0)` |
+| `3` | `glsl_incoming()` | `vec4(glsl_incoming(), 1.0)` |
+| `4` | `glsl_ambient_lighting()` | `vec4(glsl_ambient_lighting(), 1.0)` |
+| `5` | `glsl_light_count()` | `vec4(vec3(float(glsl_light_count())), 1.0)` |
+| `6` | `light.valid` | `vec4(vec3(light.valid ? 1.0 : 0.0), 1.0)` |
+| `7` | `light.type` | `vec4(vec3(float(light.type)), 1.0)` |
+| `8` | `light.vector` | `vec4(light.vector, 1.0)` |
+| `9` | `light.position` | `vec4(light.position, 1.0)` |
+| `10` | `light.direction` | `vec4(light.direction, 1.0)` |
+| `11` | `light.distance` | `vec4(vec3(light.distance), 1.0)` |
+| `12` | `light.diffuse_color` | `vec4(light.diffuse_color, 1.0)` |
+| `13` | `light.specular_color` | `vec4(light.specular_color, 1.0)` |
+| `14` | `light.attenuation` | `vec4(vec3(light.attenuation), 1.0)` |
+| `15` | `glsl_light_shadow(i, N)` | `vec4(vec3(glsl_light_shadow(i, N)), 1.0)` |
+
+补充说明：
+
+- `mode 6` 到 `15` 依赖 `light_index`
+- 这里的 `light_index` 是 `glsl_light_get(i)` 的逐灯 ordinal，不是场景全局稳定灯编号
+- `light_index` 越界时，`glsl_light_get(i)` 会返回默认无效灯；`glsl_light_shadow(i, N)` 会返回 `0.0`
+- `light.type` 的公开取值为：`0=INVALID`、`1=SUN`、`2=POINT`、`3=SPOT`、`4=AREA_RECT`、`5=AREA_ELLIPSE`
+- 如果把 `mode 0/1/2/3/8/9/10` 直接接到颜色显示，负值分量通常还需要在节点外再做一次可视化 remap
+
+函数名可设为 `shader_info_mode_debug`，并给它连接这些输入：
+
+- `mode`
+- `light_index`
+
+```glsl
+vec4 pack_scalar(float value)
+{
+  return vec4(vec3(value), 1.0);
+}
+
+vec4 shader_info_mode_debug(float mode, float light_index)
+{
+  int mode_i = max(int(floor(mode + 0.5)), 0);
+  int light_i = max(int(floor(light_index + 0.5)), 0);
+  GLSLLight light = glsl_light_get(light_i);
+  vec3 N = normalize(glsl_normal());
+
+  if (mode_i == 0) {
+    return vec4(glsl_position(), 1.0);
+  }
+  if (mode_i == 1) {
+    return vec4(glsl_normal(), 1.0);
+  }
+  if (mode_i == 2) {
+    return vec4(glsl_true_normal(), 1.0);
+  }
+  if (mode_i == 3) {
+    return vec4(glsl_incoming(), 1.0);
+  }
+  if (mode_i == 4) {
+    return vec4(glsl_ambient_lighting(), 1.0);
+  }
+  if (mode_i == 5) {
+    return pack_scalar(float(glsl_light_count()));
+  }
+  if (mode_i == 6) {
+    return pack_scalar(light.valid ? 1.0 : 0.0);
+  }
+  if (mode_i == 7) {
+    return pack_scalar(float(light.type));
+  }
+  if (mode_i == 8) {
+    return vec4(light.vector, 1.0);
+  }
+  if (mode_i == 9) {
+    return vec4(light.position, 1.0);
+  }
+  if (mode_i == 10) {
+    return vec4(light.direction, 1.0);
+  }
+  if (mode_i == 11) {
+    return pack_scalar(light.distance);
+  }
+  if (mode_i == 12) {
+    return vec4(light.diffuse_color, 1.0);
+  }
+  if (mode_i == 13) {
+    return vec4(light.specular_color, 1.0);
+  }
+  if (mode_i == 14) {
+    return pack_scalar(light.attenuation);
+  }
+  if (mode_i == 15) {
+    return pack_scalar(glsl_light_shadow(light_i, N));
+  }
+
+  return vec4(1.0, 0.0, 1.0, 1.0);
+}
+```
 
 #### 示例：PBR 风格直光 + 环境光
 

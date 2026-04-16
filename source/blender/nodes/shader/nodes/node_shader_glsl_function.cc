@@ -49,6 +49,8 @@ namespace blender
     {
       Unsupported = 0,
       Float,
+      Int,
+      Bool,
       Vec2,
       Vec3,
       Vec4,
@@ -263,6 +265,14 @@ namespace blender
       {
         return GLSLBoundaryType::Float;
       }
+      if (type_name == "int")
+      {
+        return GLSLBoundaryType::Int;
+      }
+      if (type_name == "bool")
+      {
+        return GLSLBoundaryType::Bool;
+      }
       if (type_name == "vec2")
       {
         return GLSLBoundaryType::Vec2;
@@ -304,6 +314,11 @@ namespace blender
     static bool glsl_boundary_type_is_sampler(const GLSLBoundaryType type)
     {
       return type == GLSLBoundaryType::Sample2D;
+    }
+
+    static bool glsl_boundary_type_uses_float_transport(const GLSLBoundaryType type)
+    {
+      return ELEM(type, GLSLBoundaryType::Int, GLSLBoundaryType::Bool);
     }
 
     static bool glsl_boundary_type_is_sample2d(const GLSLBoundaryType type)
@@ -1127,6 +1142,11 @@ namespace blender
       return std::string(name) + "_vec4_tmp";
     }
 
+    static std::string make_wrapper_temp_name(const StringRef name)
+    {
+      return std::string(name) + "_tmp";
+    }
+
     static bool glsl_param_uses_color_socket(const GLSLFunctionParam& param)
     {
       return ELEM(param.type, GLSLBoundaryType::Vec3, GLSLBoundaryType::Vec4) &&
@@ -1380,6 +1400,26 @@ namespace blender
       }
       r_error = "Expected a GLSL meta boolean literal";
       return false;
+    }
+
+    static bool parse_glsl_meta_int_literal(const StringRef text, int& r_value, std::string& r_error)
+    {
+      const std::string trimmed = trim_copy(text);
+      if (trimmed.empty())
+      {
+        r_error = "GLSL meta integer value cannot be empty";
+        return false;
+      }
+
+      char* end = nullptr;
+      const long value = std::strtol(trimmed.c_str(), &end, 10);
+      if (end == trimmed.c_str() || trim_copy(end).size() != 0)
+      {
+        r_error = "Could not parse GLSL meta integer value '" + trimmed + "'";
+        return false;
+      }
+      r_value = int(value);
+      return true;
     }
 
     static bool parse_glsl_meta_assignment_list(const StringRef text,
@@ -2032,6 +2072,26 @@ namespace blender
             parsed_literal_default = true;
           }
         }
+        else if (r_param.type == GLSLBoundaryType::Int)
+        {
+          int literal_default = 0;
+          if (parse_glsl_meta_int_literal(*raw_meta.default_value, literal_default, r_error))
+          {
+            r_param.meta.default_value.x = float(literal_default);
+            r_param.meta.has_default_value = true;
+            parsed_literal_default = true;
+          }
+        }
+        else if (r_param.type == GLSLBoundaryType::Bool)
+        {
+          bool literal_default = false;
+          if (parse_glsl_meta_bool_literal(*raw_meta.default_value, literal_default, r_error))
+          {
+            r_param.meta.default_value.x = literal_default ? 1.0f : 0.0f;
+            r_param.meta.has_default_value = true;
+            parsed_literal_default = true;
+          }
+        }
         else
         {
           float4 literal_default = float4(0.0f);
@@ -2060,7 +2120,21 @@ namespace blender
 
       if (raw_meta.min_value.has_value())
       {
-        if (!parse_glsl_meta_float_literal(*raw_meta.min_value, r_param.meta.min_value, r_error))
+        if (r_param.type == GLSLBoundaryType::Int)
+        {
+          int min_value = 0;
+          if (!parse_glsl_meta_int_literal(*raw_meta.min_value, min_value, r_error))
+          {
+            return false;
+          }
+          r_param.meta.min_value = float(min_value);
+        }
+        else if (r_param.type == GLSLBoundaryType::Bool)
+        {
+          r_error = "GLSL meta min is not supported for bool inputs";
+          return false;
+        }
+        else if (!parse_glsl_meta_float_literal(*raw_meta.min_value, r_param.meta.min_value, r_error))
         {
           return false;
         }
@@ -2069,7 +2143,21 @@ namespace blender
 
       if (raw_meta.max_value.has_value())
       {
-        if (!parse_glsl_meta_float_literal(*raw_meta.max_value, r_param.meta.max_value, r_error))
+        if (r_param.type == GLSLBoundaryType::Int)
+        {
+          int max_value = 0;
+          if (!parse_glsl_meta_int_literal(*raw_meta.max_value, max_value, r_error))
+          {
+            return false;
+          }
+          r_param.meta.max_value = float(max_value);
+        }
+        else if (r_param.type == GLSLBoundaryType::Bool)
+        {
+          r_error = "GLSL meta max is not supported for bool inputs";
+          return false;
+        }
+        else if (!parse_glsl_meta_float_literal(*raw_meta.max_value, r_param.meta.max_value, r_error))
         {
           return false;
         }
@@ -2311,12 +2399,14 @@ namespace blender
       const GLSLBoundaryType boundary_type = glsl_boundary_type_from_name(type_name);
       if (!ELEM(boundary_type,
         GLSLBoundaryType::Float,
+        GLSLBoundaryType::Int,
+        GLSLBoundaryType::Bool,
         GLSLBoundaryType::Vec2,
         GLSLBoundaryType::Vec3,
         GLSLBoundaryType::Vec4,
         GLSLBoundaryType::Sample2D))
       {
-        r_error = "Supported parameter types are float, vec2, vec3, vec4, and sampler2D";
+        r_error = "Supported parameter types are float, int, bool, vec2, vec3, vec4, and sampler2D";
         return false;
       }
 
@@ -2370,11 +2460,13 @@ namespace blender
       if (!ELEM(r_function.return_type,
         GLSLBoundaryType::Void,
         GLSLBoundaryType::Float,
+        GLSLBoundaryType::Int,
+        GLSLBoundaryType::Bool,
         GLSLBoundaryType::Vec2,
         GLSLBoundaryType::Vec3,
         GLSLBoundaryType::Vec4))
       {
-        r_error = "Supported return types are void, float, vec2, vec3, and vec4";
+        r_error = "Supported return types are void, float, int, bool, vec2, vec3, and vec4";
         return false;
       }
 
@@ -3828,12 +3920,21 @@ vec3 glsl_ambient_lighting()
       {
         return StringRefNull("vec4");
       }
+      if (glsl_boundary_type_uses_float_transport(param.type))
+      {
+        return StringRefNull("float");
+      }
       if (!glsl_boundary_type_is_sampler(param.type))
       {
         return param.type_name;
       }
       return (sample2d_source_kind == GLSLSample2DSourceKind::ClosureOutput) ? StringRefNull("float") :
         StringRefNull("sampler2D");
+    }
+
+    static StringRefNull emitted_type_name(const GLSLBoundaryType type, const StringRefNull type_name)
+    {
+      return glsl_boundary_type_uses_float_transport(type) ? StringRefNull("float") : type_name;
     }
 
     static std::string wrapper_argument_expression(const bNode& node, const GLSLFunctionParam& param)
@@ -3848,12 +3949,25 @@ vec3 glsl_ambient_lighting()
       {
         return argument_name + ".rgb";
       }
+      if (param.type == GLSLBoundaryType::Int)
+      {
+        return "int(round(" + argument_name + "))";
+      }
+      if (param.type == GLSLBoundaryType::Bool)
+      {
+        return "(" + argument_name + " != 0.0)";
+      }
       return argument_name;
     }
 
     static bool glsl_output_is_split_vec4(const GLSLFunctionParam& param)
     {
       return param.type == GLSLBoundaryType::Vec4;
+    }
+
+    static bool glsl_boundary_type_uses_output_temp(const GLSLBoundaryType type)
+    {
+      return ELEM(type, GLSLBoundaryType::Vec4, GLSLBoundaryType::Int, GLSLBoundaryType::Bool);
     }
 
     static std::string build_wrapper_glsl_source(
@@ -3927,7 +4041,8 @@ vec3 glsl_ambient_lighting()
         }
         else
         {
-          append_wrapper_output(function.return_type_name.c_str(), "out_result");
+          append_wrapper_output(emitted_type_name(function.return_type, function.return_type_name.c_str()),
+            "out_result");
         }
       }
       for (const GLSLFunctionParam& param : function.params)
@@ -3944,20 +4059,38 @@ vec3 glsl_ambient_lighting()
         }
         else
         {
-          append_wrapper_output(param.type_name.c_str(), make_wrapper_argument_name("out", param.name));
+          append_wrapper_output(emitted_type_name(param.type, param.type_name.c_str()),
+            make_wrapper_argument_name("out", param.name));
         }
       }
       ss << ")\n{\n";
-      if (function.return_type == GLSLBoundaryType::Vec4)
+      if (glsl_boundary_type_uses_output_temp(function.return_type))
       {
-        ss << "  vec4 " << make_wrapper_vec4_temp_name("out_result") << ";\n";
+        if (function.return_type == GLSLBoundaryType::Vec4)
+        {
+          ss << "  vec4 " << make_wrapper_vec4_temp_name("out_result") << ";\n";
+        }
+        else
+        {
+          ss << "  " << function.return_type_name << " " << make_wrapper_temp_name("out_result")
+            << ";\n";
+        }
       }
       for (const GLSLFunctionParam& param : function.params)
       {
-        if (glsl_param_has_output_socket(param) && glsl_output_is_split_vec4(param))
+        if (glsl_param_has_output_socket(param) && glsl_boundary_type_uses_output_temp(param.type))
         {
-          ss << "  vec4 " << make_wrapper_vec4_temp_name(make_wrapper_argument_name("out", param.name))
-            << ";\n";
+          if (glsl_output_is_split_vec4(param))
+          {
+            ss << "  vec4 "
+              << make_wrapper_vec4_temp_name(make_wrapper_argument_name("out", param.name))
+              << ";\n";
+          }
+          else
+          {
+            ss << "  " << param.type_name << " "
+              << make_wrapper_temp_name(make_wrapper_argument_name("out", param.name)) << ";\n";
+          }
         }
       }
       ss << "  ";
@@ -3966,6 +4099,10 @@ vec3 glsl_ambient_lighting()
         if (function.return_type == GLSLBoundaryType::Vec4)
         {
           ss << make_wrapper_vec4_temp_name("out_result") << " = ";
+        }
+        else if (glsl_boundary_type_uses_float_transport(function.return_type))
+        {
+          ss << make_wrapper_temp_name("out_result") << " = ";
         }
         else
         {
@@ -3986,6 +4123,10 @@ vec3 glsl_ambient_lighting()
           {
             ss << make_wrapper_vec4_temp_name(make_wrapper_argument_name("out", param.name));
           }
+          else if (glsl_boundary_type_uses_float_transport(param.type))
+          {
+            ss << make_wrapper_temp_name(make_wrapper_argument_name("out", param.name));
+          }
           else
           {
             ss << make_wrapper_argument_name("out", param.name);
@@ -4003,15 +4144,36 @@ vec3 glsl_ambient_lighting()
         ss << "  out_result = " << make_wrapper_vec4_temp_name("out_result") << ".xyz;\n";
         ss << "  out_result_w = " << make_wrapper_vec4_temp_name("out_result") << ".w;\n";
       }
+      else if (function.return_type == GLSLBoundaryType::Int)
+      {
+        ss << "  out_result = float(" << make_wrapper_temp_name("out_result") << ");\n";
+      }
+      else if (function.return_type == GLSLBoundaryType::Bool)
+      {
+        ss << "  out_result = " << make_wrapper_temp_name("out_result") << " ? 1.0 : 0.0;\n";
+      }
       for (const GLSLFunctionParam& param : function.params)
       {
-        if (glsl_param_has_output_socket(param) && glsl_output_is_split_vec4(param))
+        if (glsl_param_has_output_socket(param) && glsl_boundary_type_uses_output_temp(param.type))
         {
           const std::string output_name = make_wrapper_argument_name("out", param.name);
-          const std::string temp_name = make_wrapper_vec4_temp_name(output_name);
-          ss << "  " << output_name << " = " << temp_name << ".xyz;\n";
-          ss << "  " << make_split_vec4_w_socket_identifier(output_name) << " = " << temp_name
-            << ".w;\n";
+          if (glsl_output_is_split_vec4(param))
+          {
+            const std::string temp_name = make_wrapper_vec4_temp_name(output_name);
+            ss << "  " << output_name << " = " << temp_name << ".xyz;\n";
+            ss << "  " << make_split_vec4_w_socket_identifier(output_name) << " = " << temp_name
+              << ".w;\n";
+          }
+          else if (param.type == GLSLBoundaryType::Int)
+          {
+            ss << "  " << output_name << " = float(" << make_wrapper_temp_name(output_name)
+              << ");\n";
+          }
+          else if (param.type == GLSLBoundaryType::Bool)
+          {
+            ss << "  " << output_name << " = " << make_wrapper_temp_name(output_name)
+              << " ? 1.0 : 0.0;\n";
+          }
         }
       }
       ss << "}\n";
@@ -4276,6 +4438,50 @@ vec3 glsl_ambient_lighting()
         return;
       }
 
+      if (param.type == GLSLBoundaryType::Int)
+      {
+        if (is_output)
+        {
+          b.add_output<decl::Int>(socket_name, socket_identifier);
+        }
+        else
+        {
+          auto& decl = b.add_input<decl::Int>(socket_name, socket_identifier)
+            .min(param.meta.has_min ? int(param.meta.min_value) : -10000)
+            .max(param.meta.has_max ? int(param.meta.max_value) : 10000);
+          if (param.meta.has_default_value)
+          {
+            decl.default_value(int(param.meta.default_value.x));
+          }
+          if (param.meta.hide_value)
+          {
+            decl.hide_value();
+          }
+        }
+        return;
+      }
+
+      if (param.type == GLSLBoundaryType::Bool)
+      {
+        if (is_output)
+        {
+          b.add_output<decl::Bool>(socket_name, socket_identifier);
+        }
+        else
+        {
+          auto& decl = b.add_input<decl::Bool>(socket_name, socket_identifier);
+          if (param.meta.has_default_value)
+          {
+            decl.default_value(param.meta.default_value.x != 0.0f);
+          }
+          if (param.meta.hide_value)
+          {
+            decl.hide_value();
+          }
+        }
+        return;
+      }
+
       const bool use_color_socket = !is_output && glsl_param_uses_color_socket(param);
       if (use_color_socket)
       {
@@ -4377,6 +4583,15 @@ vec3 glsl_ambient_lighting()
         if (param.type == GLSLBoundaryType::Float && socket->type == SOCK_FLOAT)
         {
           socket->default_value_typed<bNodeSocketValueFloat>()->value = param.meta.default_value.x;
+        }
+        else if (param.type == GLSLBoundaryType::Int && socket->type == SOCK_INT)
+        {
+          socket->default_value_typed<bNodeSocketValueInt>()->value = int(param.meta.default_value.x);
+        }
+        else if (param.type == GLSLBoundaryType::Bool && socket->type == SOCK_BOOLEAN)
+        {
+          socket->default_value_typed<bNodeSocketValueBoolean>()->value =
+            param.meta.default_value.x != 0.0f;
         }
         else if (glsl_param_uses_color_socket(param) && socket->type == SOCK_RGBA)
         {
