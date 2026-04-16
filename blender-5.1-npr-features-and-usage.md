@@ -460,9 +460,9 @@
 
 #### 当前支持的函数边界类型
 
-- 输入参数：`float`、`vec2`、`vec3`、`vec4`、`sampler2D`
-- 输出参数：`out float`、`out vec2`、`out vec3`、`out vec4`
-- 返回值：`void`、`float`、`vec2`、`vec3`、`vec4`
+- 输入参数：`float`、`int`、`bool`、`vec2`、`vec3`、`vec4`、`sampler2D`
+- 输出参数：`out float`、`out int`、`out bool`、`out vec2`、`out vec3`、`out vec4`
+- 返回值：`void`、`float`、`int`、`bool`、`vec2`、`vec3`、`vec4`
 
 #### 重要说明
 
@@ -471,6 +471,7 @@ struct GLSLLight {
   bool valid;
   uint index;
   int type;
+  int lightgroup_id;
   vec3 vector;
   vec3 position;
   vec3 direction;
@@ -493,7 +494,8 @@ struct GLSLLight {
 - 只有显式写了 `subtype=color` 的 `vec3 / vec4` 输入，才会显示成颜色插口
 - `vec3 + subtype=color` 进入 GLSL 时按 `rgb` 使用，`alpha` 固定为 `1.0`
 - `vec4 + subtype=color` 会保留完整 `rgba`
-- 当前不支持把 `int / bool / mat* / struct / array` 作为导出函数边界类型
+- 当前不支持把 `mat* / struct / array` 作为导出函数边界类型
+- 导出函数边界当前已经支持 `int / bool`，适合直接写模式开关、枚举值、`lightgroup_id` 这类参数
 - 内置了几何 helper，可在函数体里直接读取：`glsl_position()`、`glsl_normal()`、`glsl_true_normal()`、`glsl_incoming()`
 - 这四个 helper 的语义直接对齐 `Geometry` 节点的 `Position`、`Normal`、`True Normal`、`Incoming` 输出
 - 这组几何 helper 当前按普通 `Eevee` 物体材质和 `NPR Tree` 的几何语义工作；`FILTER`、`World` 不作为稳定保证范围
@@ -504,6 +506,7 @@ struct GLSLLight {
 - 内置了 Eevee 直接光辅助 helper，可在函数体里使用：`GLSLLight`、`glsl_light_count()`、`glsl_light_get(light_index)`、`glsl_light_shadow(light_index, shading_normal)`
 - `GLSLLight.vector` 表示从当前表面点指向灯中心的归一化方向
 - `GLSLLight.type` 表示稳定的公开灯光类型：`SUN`、`POINT`、`SPOT`、`AREA_RECT`、`AREA_ELLIPSE`
+- `GLSLLight.lightgroup_id` 表示这盏灯的整数 `Lightgroup ID`，可直接用于自定义逐灯过滤
 - `GLSLLight.position` 表示灯中心世界坐标；日光返回 `vec3(0.0)`
 - `GLSLLight.direction` 表示灯的世界空间朝向轴：日光使用 `sun().direction`，聚光 / 面光使用灯对象局部 `+Z` 轴对应的世界空间方向，点光返回 `vec3(0.0)`
 - `GLSLLight.diffuse_color` 表示对自定义逐灯模型友好的 diffuse 颜色项
@@ -525,8 +528,6 @@ struct GLSLLight {
 
 如果你想在一个 `GLSL Function` 节点里按 `mode` 切换并读取这组 helper，下面这段可以直接作为起点。
 
-由于导出函数边界当前不支持 `int / bool`，示例把 `mode` 和 `light_index` 都写成 `float` 输入，再在函数体里转成 `int`。
-
 | `mode` | 对应 helper / 字段 | 示例返回值 |
 | --- | --- | --- |
 | `0` | `glsl_position()` | `vec4(glsl_position(), 1.0)` |
@@ -537,22 +538,24 @@ struct GLSLLight {
 | `5` | `glsl_light_count()` | `vec4(vec3(float(glsl_light_count())), 1.0)` |
 | `6` | `light.valid` | `vec4(vec3(light.valid ? 1.0 : 0.0), 1.0)` |
 | `7` | `light.type` | `vec4(vec3(float(light.type)), 1.0)` |
-| `8` | `light.vector` | `vec4(light.vector, 1.0)` |
-| `9` | `light.position` | `vec4(light.position, 1.0)` |
-| `10` | `light.direction` | `vec4(light.direction, 1.0)` |
-| `11` | `light.distance` | `vec4(vec3(light.distance), 1.0)` |
-| `12` | `light.diffuse_color` | `vec4(light.diffuse_color, 1.0)` |
-| `13` | `light.specular_color` | `vec4(light.specular_color, 1.0)` |
-| `14` | `light.attenuation` | `vec4(vec3(light.attenuation), 1.0)` |
-| `15` | `glsl_light_shadow(i, N)` | `vec4(vec3(glsl_light_shadow(i, N)), 1.0)` |
+| `8` | `light.lightgroup_id` | `vec4(vec3(float(light.lightgroup_id)), 1.0)` |
+| `9` | `light.vector` | `vec4(light.vector, 1.0)` |
+| `10` | `light.position` | `vec4(light.position, 1.0)` |
+| `11` | `light.direction` | `vec4(light.direction, 1.0)` |
+| `12` | `light.distance` | `vec4(vec3(light.distance), 1.0)` |
+| `13` | `light.diffuse_color` | `vec4(light.diffuse_color, 1.0)` |
+| `14` | `light.specular_color` | `vec4(light.specular_color, 1.0)` |
+| `15` | `light.attenuation` | `vec4(vec3(light.attenuation), 1.0)` |
+| `16` | `glsl_light_shadow(i, N)` | `vec4(vec3(glsl_light_shadow(i, N)), 1.0)` |
 
 补充说明：
 
-- `mode 6` 到 `15` 依赖 `light_index`
+- `mode 6` 到 `16` 依赖 `light_index`
 - 这里的 `light_index` 是 `glsl_light_get(i)` 的逐灯 ordinal，不是场景全局稳定灯编号
 - `light_index` 越界时，`glsl_light_get(i)` 会返回默认无效灯；`glsl_light_shadow(i, N)` 会返回 `0.0`
 - `light.type` 的公开取值为：`0=INVALID`、`1=SUN`、`2=POINT`、`3=SPOT`、`4=AREA_RECT`、`5=AREA_ELLIPSE`
-- 如果把 `mode 0/1/2/3/8/9/10` 直接接到颜色显示，负值分量通常还需要在节点外再做一次可视化 remap
+- `light.lightgroup_id` 的取值直接对应灯光数据面板里的 `Lightgroup ID`
+- 如果把 `mode 0/1/2/3/9/10/11` 直接接到颜色显示，负值分量通常还需要在节点外再做一次可视化 remap
 
 函数名可设为 `shader_info_mode_debug`，并给它连接这些输入：
 
@@ -565,10 +568,10 @@ vec4 pack_scalar(float value)
   return vec4(vec3(value), 1.0);
 }
 
-vec4 shader_info_mode_debug(float mode, float light_index)
+vec4 shader_info_mode_debug(int mode, int light_index)
 {
-  int mode_i = max(int(floor(mode + 0.5)), 0);
-  int light_i = max(int(floor(light_index + 0.5)), 0);
+  int mode_i = max(mode, 0);
+  int light_i = max(light_index, 0);
   GLSLLight light = glsl_light_get(light_i);
   vec3 N = normalize(glsl_normal());
 
@@ -597,33 +600,83 @@ vec4 shader_info_mode_debug(float mode, float light_index)
     return pack_scalar(float(light.type));
   }
   if (mode_i == 8) {
-    return vec4(light.vector, 1.0);
+    return pack_scalar(float(light.lightgroup_id));
   }
   if (mode_i == 9) {
-    return vec4(light.position, 1.0);
+    return vec4(light.vector, 1.0);
   }
   if (mode_i == 10) {
-    return vec4(light.direction, 1.0);
+    return vec4(light.position, 1.0);
   }
   if (mode_i == 11) {
-    return pack_scalar(light.distance);
+    return vec4(light.direction, 1.0);
   }
   if (mode_i == 12) {
-    return vec4(light.diffuse_color, 1.0);
+    return pack_scalar(light.distance);
   }
   if (mode_i == 13) {
-    return vec4(light.specular_color, 1.0);
+    return vec4(light.diffuse_color, 1.0);
   }
   if (mode_i == 14) {
-    return pack_scalar(light.attenuation);
+    return vec4(light.specular_color, 1.0);
   }
   if (mode_i == 15) {
+    return pack_scalar(light.attenuation);
+  }
+  if (mode_i == 16) {
     return pack_scalar(glsl_light_shadow(light_i, N));
   }
 
   return vec4(1.0, 0.0, 1.0, 1.0);
 }
 ```
+
+#### 示例：按 `lightgroup_id` 过滤灯光
+
+如果你想在 `GLSL Function` 里只接收某一个灯光组，可以直接读取 `GLSLLight.lightgroup_id`。
+
+函数名可设为 `lightgroup_lambert`，并给它连接这些输入：
+
+- `albedo`
+- `target_lightgroup_id`
+
+```glsl
+vec4 lightgroup_lambert(vec3 albedo, int target_lightgroup_id)
+{
+  vec3 N = normalize(glsl_normal());
+  vec3 result = vec3(0.0);
+
+  for (int i = 0; i < glsl_light_count(); i++) {
+    GLSLLight light = glsl_light_get(i);
+    if (!light.valid) {
+      continue;
+    }
+    if (light.lightgroup_id != target_lightgroup_id) {
+      continue;
+    }
+
+    float NdotL = max(dot(N, light.vector), 0.0);
+    if (NdotL <= 0.0) {
+      continue;
+    }
+
+    float shadow = glsl_light_shadow(i, N);
+    result += albedo *
+              light.diffuse_color *
+              light.attenuation *
+              NdotL *
+              shadow;
+  }
+
+  return vec4(result, 1.0);
+}
+```
+
+补充说明：
+
+- 这里的 `target_lightgroup_id` 直接对应灯光数据面板里的 `Lightgroup ID`
+- 如果你想“排除某一个灯光组”，把判断改成 `if (light.lightgroup_id == target_lightgroup_id) continue;`
+- 这种过滤只影响你在这个函数里自己写的逐灯模型，不会自动改动 Eevee 普通材质主通道的默认灯光结果
 
 #### 示例：PBR 风格直光 + 环境光
 
@@ -1434,7 +1487,7 @@ vec4 pbr_lit(vec3 base_color, float roughness, float metallic, float ao)
 
 #### 作用
 
-为 Eevee 灯光指定一个整数灯光组编号，供 `Shader Info` 节点做分组过滤。
+为 Eevee 灯光指定一个整数灯光组编号，供 `Shader Info` 节点和 `GLSL Function` 中的 `GLSLLight.lightgroup_id` 做分组过滤。
 
 #### 入口
 
@@ -1445,7 +1498,8 @@ vec4 pbr_lit(vec3 base_color, float roughness, float metallic, float ao)
 - 默认值为 `0`
 - `Shader Info` 节点的 `Lightgroup` 也为 `0` 时，只会计算 `Lightgroup ID = 0` 的灯光
 - 如果某个 `Shader Info` 节点设置为其他整数值，则只有相同编号的灯光会参与该节点计算
-- 这个分组过滤当前只影响 `Shader Info` 节点，不会改动 Eevee 普通材质主通道的默认灯光结果
+- 在 `GLSL Function` 里，`glsl_light_get(i).lightgroup_id` 会返回这个整数值，可直接用于自定义逐灯 `continue` / `exclude` 过滤
+- 这个分组过滤当前不会自动改动 Eevee 普通材质主通道的默认灯光结果；只有 `Shader Info` 或你自己写的 `GLSL Function` 显式使用时才会生效
 
 ### 5. 启动图版本标识
 

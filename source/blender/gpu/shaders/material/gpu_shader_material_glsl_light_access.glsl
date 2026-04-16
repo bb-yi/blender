@@ -90,6 +90,7 @@ struct GLSLLight {
   bool valid;
   uint index;
   int type;
+  int lightgroup_id;
   float3 vector;
   float3 position;
   float3 direction;
@@ -105,6 +106,7 @@ GLSLLight glsl_light_default()
   light.valid = false;
   light.index = 0u;
   light.type = GLSL_LIGHT_TYPE_INVALID;
+  light.lightgroup_id = 0;
   light.vector = float3(0.0f, 0.0f, 1.0f);
   light.position = float3(0.0f);
   light.direction = float3(0.0f);
@@ -367,6 +369,7 @@ GLSLLight glsl_light_build(uint light_index, bool is_local, uint public_index)
   result.valid = true;
   result.index = public_index;
   result.type = glsl_light_public_type(light);
+  result.lightgroup_id = light.lightgroup_id;
   result.vector = light_vector.L;
   result.position = is_directional ? float3(0.0f) : light_position_get(light);
   if (is_directional) {

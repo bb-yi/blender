@@ -494,7 +494,7 @@ void node_shader_info(float3 position,
                       float exponent,
                       float shadow_mode,
                       float stable_shadow_samples,
-                      float lightgroup_hash_value,
+                      float lightgroup_id_value,
                       out float4 diffuse_shading,
                       out float shadow,
                       out float4 ambient_lighting,
@@ -507,7 +507,7 @@ void node_shader_info(float3 position,
   float3 probe_bias_normal = shader_info_resolve_normal(g_data.Ni);
   float3 view_vector = drw_world_incident_vector(position);
   float safe_exponent = max(exponent, 1.0f);
-  uint lightgroup_hash = floatBitsToUint(lightgroup_hash_value);
+  int lightgroup_id = int(round(lightgroup_id_value));
 
   ObjectInfos object_infos = drw_infos[drw_resource_id()];
   uchar receiver_light_set = receiver_light_set_get(object_infos);
@@ -539,7 +539,7 @@ void node_shader_info(float3 position,
     if (!light_linking_affects_receiver(light.light_set_membership, receiver_light_set)) {
       continue;
     }
-    if (light.lightgroup_hash != lightgroup_hash) {
+    if (light.lightgroup_id != lightgroup_id) {
       continue;
     }
 

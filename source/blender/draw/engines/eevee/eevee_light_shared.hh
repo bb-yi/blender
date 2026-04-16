@@ -201,8 +201,8 @@ struct [[host_shared]] LightData {
   float lod_min;
   /* True if the light uses jittered soft shadows. */
   bool32_t shadow_jitter;
-  /** Hash of the Blender lightgroup name. Zero means ungrouped. */
-  uint lightgroup_hash;
+  /** Numeric lightgroup used by Shader Info and GLSL light access. */
+  int lightgroup_id;
   uint2 light_set_membership;
   /** Used by shadow sync. */
   /* TODO(fclem): this should be part of #eevee::Light struct. But for some reason it gets cleared

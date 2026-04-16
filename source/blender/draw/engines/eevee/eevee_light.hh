@@ -89,7 +89,7 @@ struct Light : public LightData, NonCopyable {
             const blender::Light *la,
             const LightLinking *light_linking,
             float threshold,
-            uint lightgroup_hash = 0u);
+            int lightgroup_id = 0);
 
   void shadow_ensure(ShadowModule &shadows);
   void shadow_discard_safe(ShadowModule &shadows);
