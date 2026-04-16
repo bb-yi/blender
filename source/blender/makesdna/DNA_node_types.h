@@ -3104,7 +3104,6 @@ struct NodeShaderBasisTransform {
 struct NodeShaderShaderInfo {
   DNA_DEFINE_CXX_METHODS(NodeShaderShaderInfo)
 
-  char lightgroup[64] = "";
   int lightgroup_id = 0;
   int _pad = 0;
 };

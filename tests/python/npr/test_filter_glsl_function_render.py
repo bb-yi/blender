@@ -137,7 +137,7 @@ def make_filter_material_sample2d():
     glsl.location = (260.0, 0.0)
     make_text_block(
         "filter_glsl_sample2d.glsl",
-        "vec4 sample_color(sample2D tex, vec2 uv){\n"
+        "vec4 sample_color(sampler2D tex, vec2 uv){\n"
         "  return texture(tex, uv);\n"
         "}\n",
     )
@@ -215,9 +215,9 @@ def test_sample2d_image_to_closure():
     bpy.context.view_layer.update()
     color = sample_center_color(render_image())
 
-    assert color[0] > 0.9, f"Expected sample2D filter red channel near 1.0, got {color}"
-    assert 0.2 < color[1] < 0.3, f"Expected sample2D filter green channel near 0.25, got {color}"
-    assert color[2] < 0.1, f"Expected sample2D filter blue channel near 0.0, got {color}"
+    assert color[0] > 0.9, f"Expected sampler2D filter red channel near 1.0, got {color}"
+    assert 0.2 < color[1] < 0.3, f"Expected sampler2D filter green channel near 0.25, got {color}"
+    assert color[2] < 0.1, f"Expected sampler2D filter blue channel near 0.0, got {color}"
 
 
 def main():

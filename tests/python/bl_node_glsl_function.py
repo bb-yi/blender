@@ -95,6 +95,21 @@ class GLSLFunctionNodeTest(unittest.TestCase):
 
         self.assertEqual(node.parse_status, 'ERROR')
 
+    def test_removed_light_alignment_helpers_are_rejected(self):
+        _, tree = self.make_material_tree()
+        node = tree.nodes.new("ShaderNodeGLSLFunction")
+        source = (
+            "vec4 legacy_light(vec3 normal, vec3 incoming){\n"
+            "  float value = glsl_light_diffuse_attenuation(0, normal, incoming);\n"
+            "  return vec4(vec3(value), 1.0);\n"
+            "}\n"
+        )
+        make_text_block("glsl_removed_light_helper.glsl", source)
+
+        self.configure_glsl_node(node, "glsl_removed_light_helper.glsl", "legacy_light")
+
+        self.assertEqual(node.parse_status, 'ERROR')
+
     def test_image_sample2d_builds_color_output(self):
         _, tree = self.make_material_tree()
         glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
@@ -104,7 +119,7 @@ class GLSLFunctionNodeTest(unittest.TestCase):
         image.generated_color = (0.25, 0.5, 0.75, 1.0)
         image_node.image = image
 
-        source = "vec4 sample_color(sample2D src, vec2 uv){\n" "  return texture(src, uv);\n" "}\n"
+        source = "vec4 sample_color(sampler2D src, vec2 uv){\n" "  return texture(src, uv);\n" "}\n"
         make_text_block("glsl_sample2d_image.glsl", source)
         self.configure_glsl_node(glsl_node, "glsl_sample2d_image.glsl", "sample_color")
 
@@ -131,8 +146,8 @@ class GLSLFunctionNodeTest(unittest.TestCase):
         image.generated_color = (0.8, 0.2, 0.1, 1.0)
         image_node.image = image
 
-        inner_source = "vec4 inner_sample(sample2D src, vec2 uv){\n" "  return texture(src, uv);\n" "}\n"
-        outer_source = "vec4 outer_sample(sample2D src, vec2 uv){\n" "  return inner_sample(src, uv);\n" "}\n" "vec4 inner_sample(sample2D src, vec2 uv){\n" "  return texture(src, uv);\n" "}\n"
+        inner_source = "vec4 inner_sample(sampler2D src, vec2 uv){\n" "  return texture(src, uv);\n" "}\n"
+        outer_source = "vec4 outer_sample(sampler2D src, vec2 uv){\n" "  return inner_sample(src, uv);\n" "}\n" "vec4 inner_sample(sampler2D src, vec2 uv){\n" "  return texture(src, uv);\n" "}\n"
         make_text_block("glsl_nested_inner.glsl", inner_source)
         make_text_block("glsl_nested_outer.glsl", outer_source)
 
@@ -198,7 +213,7 @@ class GLSLFunctionNodeTest(unittest.TestCase):
         image.generated_color = (0.9, 0.4, 0.1, 1.0)
         image_node.image = image
 
-        source = "vec4 sample_color(sample2D src, vec2 uv){\n  return texture(src, uv);\n}\n"
+        source = "vec4 sample_color(sampler2D src, vec2 uv){\n  return texture(src, uv);\n}\n"
         make_text_block("glsl_filter_sample2d_image.glsl", source)
         self.configure_glsl_node(glsl_node, "glsl_filter_sample2d_image.glsl", "sample_color")
 

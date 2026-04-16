@@ -26,19 +26,24 @@
 
 - 输入参数 `in`
   - `float`
+  - `int`
+  - `bool`
   - `vec2`
   - `vec3`
   - `vec4`
   - `sampler2D`
-  - `sample2D`
 - 输出参数 `out`
   - `float`
+  - `int`
+  - `bool`
   - `vec2`
   - `vec3`
   - `vec4`
 - 返回值
   - `void`
   - `float`
+  - `int`
+  - `bool`
   - `vec2`
   - `vec3`
   - `vec4`
@@ -47,29 +52,20 @@
 
 - `inout`
 - `out sampler2D`
-- `out sample2D`
-- `int` / `bool` / `mat*` / `struct` / `array` 作为函数边界类型
+- `mat*` / `struct` / `array` 作为函数边界类型
 - 多返回值结构体
 - 递归
 - 依赖外部运行时注入的全局 uniform 体系
+- 历史 `sample2D` 旧写法不再作为公开函数边界类型，统一改写为 `sampler2D`
 
 ### 3. 当前和 UI 相关的重要事实
 
 - `Function` 现在必须显式指定，不会自动选第一个函数
-- `sampler2D` 在节点图形界面中不会显示成可连线输入口
-- `sampler2D` 对应的图片是在节点参数区直接选择
-- 允许存在多个 `sampler2D` 参数，每个参数都在节点参数区单独选图
-- 只要某个 `sampler2D` 参数还没选图，节点的 `parse status` 就可能保持 `ERROR`
-- `sampler2D` 当前不支持直接连线输入
-- `sampler2D` 当前不支持 `UDIM` 平铺图片
-- 所有 `sampler2D` 使用同一组节点级采样设置：
-  - `Sampler Interpolation`
-  - `Sampler Extension`
-- `sample2D` 会变成一个 `Closure` 输入口
-- `sample2D` 的图片来源应通过 `Image to Closure` 提供
-- `sample2D` 也可以接程序化 `Closure Output`
-- `Closure Output -> sample2D` 当前只保证 `texture(tex, uv)` 这种直接采样形式
+- `sampler2D` 会显示为 `Closure` 输入口
+- `sampler2D` 可连接 `Image to Closure` 或符合约定的 `Closure Output`
+- `Closure Output -> sampler2D` 当前只保证 `texture(tex, uv)` 这种直接采样形式
 - 如果函数依赖显式 `LOD`、`grad` 或尺寸查询等图像专用能力，应优先使用 `Image to Closure`
+- 导出函数边界当前已经支持 `int / bool`，适合直接作为模式开关、枚举值、`lightgroup_id` 这类参数
 - 默认情况下 `vec2/vec3/vec4` 仍然显示为“向量插口”
 - 只有显式写了 `subtype=color` 的 `vec3/vec4` 输入，才会显示为颜色插口
 - `vec3 + subtype=color` 会显示为颜色插口，内部按 `rgb` 使用，`alpha` 固定为 `1.0`
@@ -179,7 +175,7 @@ Function: your_function_name
 - `#define res iResolution.xy` -> 删除宏，直接使用 `vec2 resolution`
 - `#define frag gl_FragCoord.xy` -> 删除宏，改成显式参数 `vec2 frag_coord`
 
-### 规则 4：如果来源代码依赖贴图采样，先判断应该落成 `sampler2D` 还是 `sample2D`
+### 规则 4：如果来源代码依赖贴图采样，统一落成 `sampler2D`
 
 例如：
 
@@ -191,12 +187,6 @@ Function: your_function_name
 
 ```glsl
 sampler2D tex
-```
-
-如果希望这个纹理输入既能接图片，也能接程序化纹理，优先改成：
-
-```glsl
-sample2D tex
 ```
 
 基础采样通常都应改成：
@@ -213,14 +203,139 @@ textureLod(tex, uv, lod)
 
 也就是说：
 
-- `sampler2D` 适合“节点面板里直接选图”的静态图片槽位
-- `sample2D` 适合“节点图里接图片或程序化纹理”的统一输入
-- 两者在函数体内部都可以写成 `texture(tex, uv)`
+- 公开函数边界统一使用 `sampler2D`
+- `sampler2D` 的来源可以是 `Image to Closure`，也可以是符合约定的 `Closure Output`
+- 在函数体内部统一写成 `texture(tex, uv)`
 - 函数体内部不必强行把所有采样都降级成最基础的 `texture`
 
-- 不要生成“把普通图片节点直接连进 `sampler2D`”的说明，因为当前 `sampler2D` 不是那种工作流。
-- 不要生成“`sample2D` 能随便接任何 Closure”的说明；对程序化来源，当前只推荐 `Closure Output`。
+- 不要再生成 `sample2D` 作为公开函数参数类型。
+- 不要生成“`sampler2D` 能随便接任何 Closure”的说明；对程序化来源，当前只推荐 `Closure Output`。
 - 如果用了 `textureLod` / `textureGrad` / `textureSize` / `texelFetch` 一类图像专用能力，应默认提醒使用 `Image to Closure`。
+
+### 规则 4.1：如果要使用 Eevee 逐灯辅助接口，必须把范围说清楚
+
+当前 `GLSL Function` 额外提供了一组 **Eevee 直接光 helper API**，目的是让函数体能在受控范围内读取逐灯直接光信息。
+
+这组接口目前包括：
+
+- `GLSLLight`
+- `glsl_light_count()`
+- `glsl_light_get(light_index)`
+- `glsl_light_shadow(light_index, shading_normal)`
+- `GLSL_LIGHT_TYPE_INVALID`
+- `GLSL_LIGHT_TYPE_SUN`
+- `GLSL_LIGHT_TYPE_POINT`
+- `GLSL_LIGHT_TYPE_SPOT`
+- `GLSL_LIGHT_TYPE_AREA_RECT`
+- `GLSL_LIGHT_TYPE_AREA_ELLIPSE`
+- 旧的逐灯宏接口和 `glsl_light_color(...)` 这类单字段 helper 已移除，不再作为公开用法支持
+- `GLSLLight.vector` 表示**从当前着色点指向灯中心的归一化方向**
+- `GLSLLight.type` 表示稳定的公开灯光类型：
+  - `GLSL_LIGHT_TYPE_SUN`
+  - `GLSL_LIGHT_TYPE_POINT`
+  - `GLSL_LIGHT_TYPE_SPOT`
+  - `GLSL_LIGHT_TYPE_AREA_RECT`
+  - `GLSL_LIGHT_TYPE_AREA_ELLIPSE`
+- `GLSLLight.lightgroup_id` 表示这盏灯的整数 `Lightgroup ID`，可直接用于自定义逐灯过滤
+- `GLSLLight.position` 表示**灯中心世界坐标**；日光没有有限位置，因此返回 `vec3(0.0)`
+- `GLSLLight.direction` 表示**灯的世界空间朝向轴**：
+  - 日光：`sun().direction`
+  - 聚光 / 面光：灯对象局部 `+Z` 轴对应的世界空间方向
+  - 点光：返回 `vec3(0.0)`
+- `GLSLLight.diffuse_color` 表示**对自定义逐灯模型友好的 diffuse 颜色项**：它会把 Eevee 内部的 surface radiance 权重换算成更接近 point-like 直觉的通道能量，避免点光默认半径很小时数值爆炸
+- `GLSLLight.specular_color` 表示**对自定义逐灯模型友好的 specular 颜色项**：同样会把 Eevee 内部的 surface radiance 权重换算成更适合手写高光模型的通道能量
+- `GLSLLight.attenuation` 表示**适合自定义逐灯模型的基础衰减项**；它内部组合了 `light_point_light(...)` 和 `light_attenuation_surface(...)`，但不包含 `NdotL`、toon ramp、half-lambert、Blinn-Phong、GGX、`light_attenuation_facing(...)`、`light_ltc(...)`、shadow 或材质侧 Fresnel / IOR / metallic / tint / roughness
+- 推荐漫反射写法：`light.diffuse_color * light.attenuation * max(dot(N, light.vector), 0.0) * glsl_light_shadow(...)`
+- 推荐高光写法：`light.specular_color * light.attenuation * custom_spec_term * glsl_light_shadow(...)`
+- `glsl_light_count()` / `glsl_light_get(i)` 返回的是**当前片元局部可见灯列表**，不是场景全局稳定灯编号
+- 因此 `glsl_light_get(0)` 的含义是“当前片元局部列表里的第 0 盏有效灯”，不是“场景里固定编号的第 0 盏灯”
+
+必须同时明确下面几点：
+
+- 这只是 **Eevee 直接光 helper**，不是公开 `LightData`、`light_buf` 或 Eevee 内部宏
+- V1 只支持普通 `Eevee` 物体材质
+- V1 只覆盖 `Deferred` / `Forward` 路径中的 **direct light + shadow**
+- 对这套 **direct light helper** 来说，`FILTER`、`NPR Tree`、`World` 当前都不支持，而且它本身也不负责 probe / indirect / volume lighting
+
+因此：
+
+- 不要生成“可以直接访问 Eevee 全部灯光内部数据结构”的说明
+- 不要生成“在任意 shader 域都支持逐灯 helper”的说明
+- 不要把 indirect / probe / volume 结果说成这套 helper 的能力范围
+
+### 规则 4.2：如果只是想在函数体里读几何体输入，优先使用内置几何 helper
+
+当前 `GLSL Function` 还提供了一组**几何 helper**，目的是让函数体直接读取常用几何输入，而不是额外再拉一圈节点线。
+
+这组接口目前包括：
+
+- `glsl_position()`
+- `glsl_normal()`
+- `glsl_true_normal()`
+- `glsl_incoming()`
+
+它们的语义直接对齐内置 `Geometry` 节点：
+
+- `glsl_position()` = `Geometry.Position`
+- `glsl_normal()` = `Geometry.Normal`
+- `glsl_true_normal()` = `Geometry.True Normal`
+- `glsl_incoming()` = `Geometry.Incoming`
+
+使用这组 helper 时要明确：
+
+- 这是**几何输入快捷接口**，不是新的导出函数边界类型
+- 它的优势是函数体里更紧凑，不代表外部节点输入方式被废弃
+- 如果某段逻辑本身就更适合由节点图显式传参，例如要让同一个函数复用外部改写后的法线、位置或别的来源，仍然应该保留普通输入参数
+- 当前这组几何 helper 按普通 `Eevee` 物体材质和 `NPR Tree` 的几何语义工作；`FILTER`、`World` 不作为稳定保证范围
+
+因此：
+
+- 不要把它说成“任意域都稳定可用”的全局 GLSL 内建
+- 不要把它和 `Texture Coordinate`、`Camera`、`Object Info` 等别的输入节点混成一组等价接口
+
+### 规则 4.3：如果要读 `Shader Info` 那种环境光，使用 `glsl_ambient_lighting()`
+
+当前 `GLSL Function` 还提供了一个**环境光 helper**：
+
+- `glsl_ambient_lighting()`
+
+它的语义对齐 `Shader Info` 的 `Ambient Lighting` 输出，也就是当前着色点的 probe / 环境**间接漫反射**结果。
+
+使用这条接口时要明确：
+
+- 它只返回这类环境漫反射项，不包含 reflection probe 反射颜色
+- 它也不等于 `Light Probe Color` 的 `Combined`
+- 它依赖 Eevee 的 light probe 数据路径，因此应当按 light-probe 相关能力来描述，而不是按逐灯 direct-light helper 来描述
+- 当前不把 `FILTER`、`World` 当作稳定保证范围
+
+因此：
+
+- 不要把 `glsl_ambient_lighting()` 说成“完整间接光照总和”
+- 不要把 reflection、combined、probe radiance、screen-space indirect 等其他概念混进这个 helper 的定义里
+
+### 规则 4.4：写自定义 PBR / 半 PBR 时，优先组合几何 helper、环境光 helper 和逐灯 helper
+
+当前推荐的组合方式是：
+
+- 几何：`glsl_normal()`、`glsl_true_normal()`、`glsl_incoming()`
+- 环境：`glsl_ambient_lighting()`
+- 逐灯：`glsl_light_count()`、`glsl_light_get(i)`、`glsl_light_shadow(i, N)`
+
+典型写法应按下面这个层次组织：
+
+- 漫反射部分：`diffuse_brdf * light.diffuse_color * light.attenuation * NdotL * shadow`
+- 高光部分：`specular_brdf * light.specular_color * light.attenuation * NdotL * shadow`
+- 环境部分：`glsl_ambient_lighting() * base_color * ambient_term`
+
+这里的关键点是：
+
+- `GLSLLight.diffuse_color` / `GLSLLight.specular_color` 已经是对自定义模型友好的逐灯颜色项
+- `GLSLLight.attenuation` 只负责基础逐灯衰减，不替你计算 `NdotL`、GGX、toon ramp 或阴影
+- 因此 `shadow` 仍然应显式写成 `glsl_light_shadow(i, N)`
+- 如果想写更接近标准 PBR 的版本，优先在函数体内部自己实现 Fresnel / NDF / Geometry，而不要再寻找旧的 `glsl_light_diffuse_attenuation(...)` 或 `glsl_light_specular_attenuation(...)`
+
+仓库内的 [`blender-5.1-npr-features-and-usage.md`](../blender-5.1-npr-features-and-usage.md) 已附带一段可直接粘贴到 `GLSL Function` 的 PBR 风格完整示例，可作为转换结果的参考模板。
+
 
 ### 规则 5：如果原代码是屏幕着色器，要把它改写成“可被材质节点调用的函数”
 
@@ -277,7 +392,7 @@ Shadertoy 的 `iChannel0~3` 并不总是“普通 2D 贴图”。
 对当前 `GLSL Function` 节点来说，最稳妥的规则是：
 
 - 如果某个通道本质上就是“普通静态 2D 图片采样，直接在节点面板选图”，改成 `sampler2D`
-- 如果某个通道希望在节点图里接图片或程序化纹理，且核心采样能收敛为 `texture(tex, uv)`，改成 `sample2D`
+- 如果某个通道希望在节点图里接图片或程序化纹理，且核心采样能收敛为 `texture(tex, uv)`，公开函数边界仍然改成 `sampler2D`，再在节点侧用 `Image to Closure` 或 `Closure Output` 提供来源
 - 如果某个通道依赖“上一帧反馈”“多 pass 缓冲”“运行时积累”“专用输入设备纹理”，不要假装它和普通 `sampler2D` 完全等价
 - 这类运行时依赖要么删除、要么近似、要么改成普通外部输入参数，但必须明确说明是“近似改写”，不是等价转换
 
@@ -765,9 +880,9 @@ vec3 effect(vec2 uv, float time)
 9. 如果用了纹理采样，是否已经改成 `texture(tex, uv)`，或者在确实需要时保留为 `textureLod(tex, uv, lod)`？
 10. 如果导出函数返回 `void`，是否仍然通过 `out` 参数暴露了至少一个输出？
 11. 如果有 `sampler2D` 参数，是否提醒了使用者在节点参数区为每个 `sampler2D` 选择图片？
-12. 如果有 `sample2D` 参数，是否明确说明应该连接 `Image to Closure` 或符合约定的 `Closure Output`？
-13. 如果有 `sampler2D` 参数，是否错误假设它支持连线输入或 `UDIM` 平铺图片？
-14. 如果有 `sample2D` 参数，是否错误假设它支持任意 Closure 或任意图像专用采样函数？
+12. 如果有 `sampler2D` 参数，是否明确说明应通过 `Image to Closure` 或符合约定的 `Closure Output` 提供来源？
+13. 如果有 `sampler2D` 参数，是否错误假设它支持任意 Closure、任意图像专用采样函数或旧的面板选图工作流？
+14. 如果原始来源使用了历史 `sample2D` 旧写法，是否已经统一改写成公开的 `sampler2D` 边界类型？
 15. 如果源码里有宏开关、注释掉的旧代码、未使用辅助函数，是否已经收敛或删除？
 16. 如果源码里有反向 `smoothstep` 或类似依赖实现细节的捷径写法，是否已经改成稳定辅助函数？
 17. 如果源码依赖上一帧反馈、Buffer A/B/C/D、多 pass 中间结果、视频或键盘通道，是否已经明确说明删除、近似或替代方案？
@@ -1064,8 +1179,8 @@ vec2 triangle_unproject(vec3 v)
 1. 最终结果只能是普通 GLSL 函数源码，不要输出完整 shader 文件。
 2. 明确给出 Function 应设置的函数名。
 3. 把所有外部 uniform / 时间 / 分辨率 / 鼠标 / 贴图输入改成函数参数。
-4. 导出函数的参数和返回值只允许使用 float、vec2、vec3、vec4、sampler2D、sample2D，以及 out float/vec2/vec3/vec4。
-5. 不允许使用 inout，不允许 out sampler2D，也不允许 out sample2D。
+4. 导出函数的参数和返回值只允许使用 float、int、bool、vec2、vec3、vec4、sampler2D，以及 out float/int/bool/vec2/vec3/vec4。
+5. 不允许使用 inout，也不允许 out sampler2D。
 6. 如果来源是 HLSL 或 ShaderLab，去掉语义、Pass、Properties、pragma 和引擎包装层。
 7. 贴图采样优先改成 `texture(tex, uv)`；如果原算法明确依赖显式 `LOD`，可以保留为 `textureLod(tex, uv, lod)`，并说明这更适合配合 `Image to Closure`。
 8. 如果存在宏开关、死代码、未使用辅助函数、反向 `smoothstep`、运行时别名宏、共享可变全局状态、布尔到数值隐式转换、非方阵矩阵双向乘法这类不稳定写法，要收敛成稳定版本。
@@ -1170,6 +1285,10 @@ stylize.tint: default=vec3(1.0, 0.8, 0.2)
 
 - `float` 使用标量
 - `vec2/vec3/vec4` 使用对应构造器
+- `float/vec2/vec3/vec4` 也可以直接写 GLSL 表达式默认值
+- 当 `default=` 是表达式时，socket 未连接会使用这段表达式；一旦连线，就使用连线值
+- 当 `default=` 是表达式时，节点会自动隐藏这个输入的数值输入框，但保留 socket 本身
+- 表达式默认值可以引用同一份源码里的 top-level helper 函数，也可以直接调用 `glsl_position()`、`glsl_normal()`、`glsl_ambient_lighting()` 这类内置 helper
 
 示例：
 
@@ -1178,6 +1297,37 @@ strength: default=0.5
 uv_scale: default=vec2(1.0, 1.0)
 tint: default=vec3(1.0, 0.8, 0.2)
 color_a: default=vec4(1.0, 0.5, 0.2, 1.0)
+```
+
+表达式默认值示例：
+
+```glsl
+position_ws: default=glsl_position()
+normal_ws: default=normalize(glsl_normal())
+ambient: default=glsl_ambient_lighting()
+```
+
+更完整的推荐写法：
+
+```glsl
+vec3 default_surface_color()
+{
+  return glsl_position() * 0.25 + vec3(0.5);
+}
+
+/* @glsl_meta v1
+surface_color: default=default_surface_color()
+*/
+vec4 emit_surface_color(vec3 surface_color)
+{
+  return vec4(surface_color, 1.0);
+}
+```
+
+如果表达式比较复杂，建议最外层包一层括号，这样在 Meta 行里更稳妥：
+
+```glsl
+mask: default=(smoothstep(0.2, 0.8, glsl_position().z))
 ```
 
 #### 3.2 `min`
@@ -1267,9 +1417,11 @@ strength: default=0.5 hide_value=true
 
 当前逻辑是：
 
-- 当 Meta 内容第一次生效时，把 `default` 写入 socket 默认值
-- 只要 Meta 没变，用户手动改过的默认值会保留
-- 当 Meta 本身发生变化时，再同步一次新的默认值
+- 当 `default` 是 literal（例如 `0.5`、`vec3(...)`）时，Meta 第一次生效会把它写入 socket 默认值
+- 只要 Meta 没变，用户手动改过的 literal 默认值会保留
+- 当 Meta 本身发生变化时，再同步一次新的 literal 默认值
+- 当 `default` 是表达式时，不会写入 RNA/socket 静态默认值
+- 表达式默认值只在 wrapper 运行时参与：未连接时用表达式，已连接时用连线值
 
 这意味着它更适合作为“函数作者建议值”，而不是强制锁死值。
 
@@ -1296,6 +1448,8 @@ strength: default=0.5 hide_value=true
 - 不支持 `inout`
 - 不支持 `sampler2D` Meta
 - 不支持 `int` / `bool` / `mat*` / `struct` / `array` 边界参数 Meta
+- 表达式默认值当前只支持输入参数 `float / vec2 / vec3 / vec4`
+- 表达式默认值不要引用同函数的其他参数名；这类值在 wrapper 里不会自动展开成可见局部变量
 - 如果 Meta 指向了不存在的参数，会报错
 - 一个函数当前只支持一块 Meta
 
@@ -1346,7 +1500,7 @@ vec3 stylize(vec3 base_color, float strength = 0.5)
 
 当前节点不会把这种写法当成 Blender 参数默认值系统。
 
-#### 7.3 给 `sampler2D` / `sample2D` 写 Meta
+#### 7.3 给 `sampler2D` 写 Meta
 
 不要写：
 
@@ -1360,7 +1514,7 @@ vec4 sample_it(sampler2D tex, vec2 uv)
 }
 ```
 
-`sampler2D` 当前由节点上的图片选择器处理，`sample2D` 当前由节点连线工作流处理，它们都不走这个 Meta 通道。
+`sampler2D` 当前通过 `Image to Closure` 或 `Closure Output` 接入来源，本身不走这个 Meta 通道。
 
 #### 7.4 给不存在的参数写 Meta
 

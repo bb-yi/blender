@@ -9,9 +9,6 @@
 #include "node_shader_util.hh"
 #include "node_util.hh"
 
-#include "BLI_hash.h"
-#include "BLI_string.h"
-
 #include "RNA_access.hh"
 
 #include "UI_interface_layout.hh"
@@ -24,13 +21,6 @@ namespace nodes::node_shader_shader_info_cc {
 static constexpr int stable_shadow_sample_default = 8;
 static constexpr int stable_shadow_sample_fallback = 8;
 static constexpr int stable_shadow_sample_max = 32;
-
-static uint shader_info_lightgroup_hash_from_id(const int lightgroup_id)
-{
-  char lightgroup_name[16];
-  BLI_snprintf(lightgroup_name, sizeof(lightgroup_name), "%d", max_ii(lightgroup_id, 0));
-  return BLI_hash_string(lightgroup_name);
-}
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
@@ -82,29 +72,12 @@ static int node_shader_gpu_shader_info(GPUMaterial *mat,
                                       stable_shadow_sample_fallback;
   const float stable_shadow_samples = float(shadow_sample_count);
   NodeShaderShaderInfo *storage = static_cast<NodeShaderShaderInfo *>(node->storage);
-  static int lightgroup_hash_fallback = 0;
-  uint lightgroup_hash = shader_info_lightgroup_hash_from_id(0);
-  if (storage != nullptr) {
-    if (storage->lightgroup[0] != '\0') {
-      lightgroup_hash = BLI_hash_string(storage->lightgroup);
-    }
-    else {
-      lightgroup_hash = shader_info_lightgroup_hash_from_id(storage->lightgroup_id);
-    }
-    storage->_pad = int(lightgroup_hash);
-  }
-  else {
-    lightgroup_hash_fallback = int(lightgroup_hash);
-  }
+  const float lightgroup_id_value = float(storage != nullptr ? max_ii(storage->lightgroup_id, 0) : 0);
 
   GPU_material_flag_set(mat, GPU_MATFLAG_DIFFUSE | GPU_MATFLAG_SHADER_INFO);
   if (node->custom1 == SHD_SHADER_INFO_SHADOW_SOFT_FILTERED) {
     GPU_material_flag_set(mat, GPU_MATFLAG_RAYCAST);
   }
-  BLI_STATIC_ASSERT(sizeof(float) == sizeof(uint),
-                    "GPUCodegen: Shader Info lightgroup hash needs float and uint to be the same size.");
-  GPUNodeLink *lightgroup_hash_link = GPU_uniform(reinterpret_cast<float *>(
-      storage != nullptr ? &storage->_pad : &lightgroup_hash_fallback));
   return GPU_stack_link(mat,
                         node,
                         "node_shader_info",
@@ -112,7 +85,7 @@ static int node_shader_gpu_shader_info(GPUMaterial *mat,
                         out,
                         GPU_constant(&shadow_mode),
                         GPU_constant(&stable_shadow_samples),
-                        lightgroup_hash_link);
+                        GPU_constant(&lightgroup_id_value));
 }
 
 }  // namespace nodes::node_shader_shader_info_cc

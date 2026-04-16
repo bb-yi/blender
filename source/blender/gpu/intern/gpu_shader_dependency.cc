@@ -676,9 +676,14 @@ Vector<StringRefNull> gpu_shader_dependency_get_resolved_source(
     const StringRefNull shader_name)
 {
   Vector<StringRefNull> result;
+  if (g_sources == nullptr) {
+    std::cerr << "Error source registry is not initialized : " << shader_source_name << std::endl;
+    return result;
+  }
   GPUSource *src = g_sources->lookup_default(shader_source_name, nullptr);
   if (src == nullptr) {
     std::cerr << "Error source not found : " << shader_source_name << std::endl;
+    return result;
   }
   CLOG_TRACE(&LOG, "Resolved Source Tree (Mermaid flowchart) %s", shader_name.c_str());
   if (CLOG_CHECK(&LOG, CLG_LEVEL_TRACE)) {
@@ -693,9 +698,14 @@ Vector<StringRefNull> gpu_shader_dependency_get_resolved_source(
 
 StringRefNull gpu_shader_dependency_get_source(const StringRefNull shader_source_name)
 {
+  if (g_sources == nullptr) {
+    std::cerr << "Error source registry is not initialized : " << shader_source_name << std::endl;
+    return "";
+  }
   GPUSource *src = g_sources->lookup_default(shader_source_name, nullptr);
   if (src == nullptr) {
     std::cerr << "Error source not found : " << shader_source_name << std::endl;
+    return "";
   }
   return src->source;
 }

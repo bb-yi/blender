@@ -17,11 +17,7 @@
 #include "DNA_light_types.h"
 #include "DNA_sdna_type_ids.hh"
 
-#include "BLI_hash.h"
-#include "BLI_string.h"
-
 #include "BKE_light.h"
-#include "BKE_layer.hh"
 
 namespace blender::eevee {
 
@@ -29,23 +25,6 @@ namespace blender::eevee {
 static uint2 uint64_to_uint2(uint64_t data)
 {
   return {uint(data), uint(data >> uint64_t(32))};
-}
-
-static uint lightgroup_hash_from_membership(const LightgroupMembership *lightgroup)
-{
-  char lightgroup_name[64] = "";
-  if (lightgroup == nullptr || BKE_lightgroup_membership_get(lightgroup, lightgroup_name) <= 0) {
-    STRNCPY(lightgroup_name, "0");
-  }
-
-  return BLI_hash_string(lightgroup_name);
-}
-
-static uint lightgroup_hash_from_id(const int lightgroup_id)
-{
-  char lightgroup_name[16];
-  BLI_snprintf(lightgroup_name, sizeof(lightgroup_name), "%d", max_ii(lightgroup_id, 0));
-  return BLI_hash_string(lightgroup_name);
 }
 
 /* -------------------------------------------------------------------- */
@@ -81,7 +60,7 @@ void Light::sync(ShadowModule &shadows,
                  const blender::Light *la,
                  const LightLinking *light_linking /* = nullptr */,
                  float threshold,
-                 uint lightgroup_hash)
+                 int lightgroup_id)
 {
   using namespace blender::math;
 
@@ -125,7 +104,7 @@ void Light::sync(ShadowModule &shadows,
   this->lod_min = shadow_lod_min_get(la);
   this->filter_radius = la->shadow_filter_radius;
   this->shadow_jitter = (la->mode & LA_SHADOW_JITTER) != 0;
-  this->lightgroup_hash = lightgroup_hash;
+  this->lightgroup_id = max_ii(lightgroup_id, 0);
 
   if (la->mode & LA_SHADOW) {
     shadow_ensure(shadows);
@@ -411,16 +390,13 @@ void LightModule::add_world_sun_light(const ObjectKey &key, bool use_diffuse, bo
 
   Light &light = light_map_.lookup_or_add_default(key);
   light.used = true;
-  const uint world_lightgroup_hash = (inst_.scene->world != nullptr) ?
-                                         lightgroup_hash_from_membership(inst_.scene->world->lightgroup) :
-                                         0u;
   light.sync(inst_.shadows,
              float4x4::identity(),
              visibility_flag,
              &la,
              nullptr,
              light_threshold_,
-             world_lightgroup_hash);
+             0);
 
   sun_lights_len_ += 1;
 }
@@ -479,17 +455,13 @@ void LightModule::sync_light(const Object *ob, ObjectHandle &handle)
   light.used = true;
   if (handle.recalc != 0 || !light.initialized) {
     light.initialized = true;
-    uint lightgroup_hash = lightgroup_hash_from_id(la.lightgroup_id);
-    if (la.lightgroup_id == 0 && ob->lightgroup != nullptr && ob->lightgroup->name[0] != '\0') {
-      lightgroup_hash = lightgroup_hash_from_membership(ob->lightgroup);
-    }
     light.sync(inst_.shadows,
                ob->object_to_world(),
                ob->visibility_flag,
                &la,
                ob->light_linking,
                light_threshold_,
-               lightgroup_hash);
+               la.lightgroup_id);
   }
   sun_lights_len_ += int(is_sun_light(light.type));
   local_lights_len_ += int(!is_sun_light(light.type));
