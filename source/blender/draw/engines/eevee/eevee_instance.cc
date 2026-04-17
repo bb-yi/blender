@@ -93,22 +93,29 @@ namespace blender::eevee
 
       if (camera)
       {
-        if (scene->r.mode & R_BORDER)
-        {
-          rctf viewborder;
-          /* TODO(fclem) Might be better to get it from DRW. */
-          ED_view3d_calc_camera_border(scene, depsgraph, region, v3d, rv3d, false, &viewborder);
-          float viewborder_sizex = BLI_rctf_size_x(&viewborder);
-          float viewborder_sizey = BLI_rctf_size_y(&viewborder);
-          rect.xmin = floorf(viewborder.xmin + (scene->r.border.xmin * viewborder_sizex));
-          rect.ymin = floorf(viewborder.ymin + (scene->r.border.ymin * viewborder_sizey));
-          rect.xmax = floorf(viewborder.xmin + (scene->r.border.xmax * viewborder_sizex));
-          rect.ymax = floorf(viewborder.ymin + (scene->r.border.ymax * viewborder_sizey));
-          /* Clamp it to the viewport area. */
-          rect.xmin = max(rect.xmin, 0);
-          rect.ymin = max(rect.ymin, 0);
-          rect.xmax = min(rect.xmax, size.x);
-          rect.ymax = min(rect.ymax, size.y);
+        if (scene->r.mode & R_BORDER) {
+          if (draw_ctx->is_viewport_image_render()) {
+            rect.xmin = scene->r.border.xmin * size[0];
+            rect.ymin = scene->r.border.ymin * size[1];
+            rect.xmax = scene->r.border.xmax * size[0];
+            rect.ymax = scene->r.border.ymax * size[1];
+          }
+          else {
+            rctf viewborder;
+            /* TODO(fclem) Might be better to get it from DRW. */
+            ED_view3d_calc_camera_border(scene, depsgraph, region, v3d, rv3d, false, &viewborder);
+            float viewborder_sizex = BLI_rctf_size_x(&viewborder);
+            float viewborder_sizey = BLI_rctf_size_y(&viewborder);
+            rect.xmin = floorf(viewborder.xmin + (scene->r.border.xmin * viewborder_sizex));
+            rect.ymin = floorf(viewborder.ymin + (scene->r.border.ymin * viewborder_sizey));
+            rect.xmax = floorf(viewborder.xmin + (scene->r.border.xmax * viewborder_sizex));
+            rect.ymax = floorf(viewborder.ymin + (scene->r.border.ymax * viewborder_sizey));
+            /* Clamp it to the viewport area. */
+            rect.xmin = max(rect.xmin, 0);
+            rect.ymin = max(rect.ymin, 0);
+            rect.xmax = min(rect.xmax, size.x);
+            rect.ymax = min(rect.ymax, size.y);
+          }
         }
       }
       else if (v3d->flag2 & V3D_RENDER_BORDER)

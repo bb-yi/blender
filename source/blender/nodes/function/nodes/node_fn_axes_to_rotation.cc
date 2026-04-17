@@ -131,6 +131,10 @@ static void node_build_multi_function(NodeMultiFunctionBuilder &builder)
 {
   const bNode &node = builder.node();
   if (node.custom1 == node.custom2) {
+    static auto fallback_fn = mf::build::SI2_SO<float3, float3, math::Quaternion>(
+        "Axes to Rotation fallback",
+        [](const float3 & /*a*/, const float3 & /*b*/) { return math::Quaternion::identity(); });
+    builder.set_matching_fn(fallback_fn);
     return;
   }
   builder.construct_and_set_matching_fn<AxesToRotationFunction>(

@@ -35,6 +35,7 @@
 #include "BKE_idprop.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_main.hh"
+#include "BKE_mesh_legacy_convert.hh"
 #include "BKE_node.hh"
 #include "BKE_node_legacy_types.hh"
 #include "BKE_node_runtime.hh"
@@ -919,6 +920,12 @@ void blo_do_versions_510(FileData * /*fd*/, Library * /*lib*/, Main *bmain)
           scene.toolsettings->snap_mode_tools = SCE_SNAP_TO_GEOM;
         }
       }
+    }
+  }
+
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 30)) {
+    for (Mesh &mesh : bmain->meshes) {
+      bke::mesh_freestyle_marks_to_generic(mesh);
     }
   }
 
