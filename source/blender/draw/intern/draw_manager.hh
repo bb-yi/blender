@@ -86,6 +86,7 @@ class Manager {
    * This is because attribute list is arbitrary.
    */
   ObjectAttributeBuf attributes_buf;
+  ObjectAttributeLegacyBuf attributes_legacy_buf;
 
   /**
    * Table of all View Layer attributes required by shaders, used to populate the buffer below.
@@ -437,6 +438,7 @@ inline void Manager::extract_object_attributes(ResourceHandle handle,
                                                const ObjectRef &ref,
                                                const GPUMaterial *material)
 {
+  constexpr uint legacy_attr_slots = 8;
   ObjectInfos &infos = infos_buf.current().get_or_resize(handle.resource_index());
   infos.object_attrs_offset = attribute_len_;
 
@@ -446,7 +448,12 @@ inline void Manager::extract_object_attributes(ResourceHandle handle,
   }
 
   for (const GPUUniformAttr &attr : attr_list->list) {
-    if (attributes_buf.get_or_resize(attribute_len_).sync(ref, *&attr)) {
+    ObjectAttribute &object_attr = attributes_buf.get_or_resize(attribute_len_);
+    if (object_attr.sync(ref, *&attr)) {
+      BLI_assert(handle.resource_index() < DRW_RESOURCE_CHUNK_LEN);
+      BLI_assert(attr.id >= 0 && attr.id < legacy_attr_slots);
+      attributes_legacy_buf[handle.resource_index() * legacy_attr_slots + attr.id] = float4(
+          object_attr.data_x, object_attr.data_y, object_attr.data_z, object_attr.data_w);
       infos.object_attrs_len++;
       attribute_len_++;
     }
@@ -457,6 +464,7 @@ inline void Manager::extract_object_attributes(ResourceHandle handle,
                                                const ObjectRef &ref,
                                                Span<GPUMaterial *> materials)
 {
+  constexpr uint legacy_attr_slots = 8;
   ObjectInfos &infos = infos_buf.current().get_or_resize(handle.resource_index());
   infos.object_attrs_offset = attribute_len_;
 
@@ -476,7 +484,12 @@ inline void Manager::extract_object_attributes(ResourceHandle handle,
         continue;
       }
       hash_cache.append(attr.hash_code);
-      if (attributes_buf.get_or_resize(attribute_len_).sync(ref, *&attr)) {
+      ObjectAttribute &object_attr = attributes_buf.get_or_resize(attribute_len_);
+      if (object_attr.sync(ref, *&attr)) {
+        BLI_assert(handle.resource_index() < DRW_RESOURCE_CHUNK_LEN);
+        BLI_assert(attr.id >= 0 && attr.id < legacy_attr_slots);
+        attributes_legacy_buf[handle.resource_index() * legacy_attr_slots + attr.id] = float4(
+            object_attr.data_x, object_attr.data_y, object_attr.data_z, object_attr.data_w);
         infos.object_attrs_len++;
         attribute_len_++;
       }

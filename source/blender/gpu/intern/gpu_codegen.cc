@@ -285,9 +285,15 @@ void GPUCodegen::generate_resources()
   }
 
   if (!BLI_listbase_is_empty(&graph.uniform_attrs.list)) {
+    constexpr int legacy_attr_slots = 8;
     ss << "struct UniformAttrs {\n";
+    int attr_count = 0;
     for (GPUUniformAttr &attr : graph.uniform_attrs.list) {
       ss << "vec4 attr" << attr.id << ";\n";
+      attr_count++;
+    }
+    for (int i = attr_count; i < legacy_attr_slots; i++) {
+      ss << "vec4 _pad" << i << ";\n";
     }
     ss << "};\n\n";
 
