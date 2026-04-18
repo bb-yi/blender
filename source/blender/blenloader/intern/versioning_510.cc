@@ -8,10 +8,14 @@
 
 #define DNA_DEPRECATED_ALLOW
 
+/* Define macros in `DNA_genfile.h`. */
+#define DNA_GENFILE_VERSIONING_MACROS
+
 #include "DNA_ID.h"
 
 #include "DNA_brush_enums.h"
 #include "DNA_brush_types.h"
+#include "DNA_genfile.h"
 #include "DNA_light_types.h"
 #include "DNA_material_types.h"
 #include "DNA_mesh_types.h"
@@ -22,6 +26,8 @@
 #include "DNA_texture_types.h"
 #include "DNA_windowmanager_types.h"
 #include "DNA_workspace_types.h"
+
+#undef DNA_GENFILE_VERSIONING_MACROS
 
 #include "BLI_listbase.h"
 #include "BLI_math_vector.h"
@@ -684,7 +690,7 @@ void do_versions_after_linking_510(FileData *fd, Main *bmain)
    */
 }
 
-void blo_do_versions_510(FileData * /*fd*/, Library * /*lib*/, Main *bmain)
+void blo_do_versions_510(FileData *fd, Library * /*lib*/, Main *bmain)
 {
   if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 1)) {
     FOREACH_NODETREE_BEGIN (bmain, node_tree, id) {
@@ -996,6 +1002,32 @@ void blo_do_versions_510(FileData * /*fd*/, Library * /*lib*/, Main *bmain)
       }
     }
     FOREACH_NODETREE_END;
+  }
+
+  if (!DNA_struct_member_exists(fd->filesdna, "Material", "char", "surface_cull_method")) {
+    /* `surface_cull_method` replaced `Material._pad3[4]` in this branch.
+     * Some old local builds already wrote the runtime value into `_pad3[0]`
+     * before the saved DNA was refreshed, so older files can legitimately
+     * carry the cull mode in `_pad3[0]` instead of a named field.
+     *
+     * Recover the explicit enum from `_pad3[0]` when present, otherwise fall
+     * back to the legacy backface-culling bit for files from before the enum
+     * existed. */
+    for (Material &mat : bmain->materials) {
+      const char legacy_cull_method = mat._pad3[0];
+      if (ELEM(legacy_cull_method, MA_SURFACE_CULL_BACK, MA_SURFACE_CULL_FRONT)) {
+        mat.surface_cull_method = legacy_cull_method;
+      }
+      else if (mat.blend_flag & MA_BL_CULL_BACKFACE) {
+        mat.surface_cull_method = MA_SURFACE_CULL_BACK;
+      }
+      else {
+        mat.surface_cull_method = MA_SURFACE_CULL_NONE;
+      }
+
+      SET_FLAG_FROM_TEST(
+          mat.blend_flag, mat.surface_cull_method == MA_SURFACE_CULL_BACK, MA_BL_CULL_BACKFACE);
+    }
   }
 
   /**

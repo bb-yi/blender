@@ -3873,20 +3873,10 @@ vec3 glsl_ambient_lighting()
       const Span<std::string> function_names,
       const Span<std::string> global_names,
       const StringRef source,
-      const Span<GLSLClosureSampleHelper> closure_helpers,
-      const bool include_geometry_helpers,
-      const bool include_lightprobe_helpers)
+      const Span<GLSLClosureSampleHelper> closure_helpers)
     {
       std::stringstream ss;
       ss << build_sample2d_closure_helper_block(closure_helpers);
-      if (include_geometry_helpers)
-      {
-        ss << build_glsl_geometry_helper_block();
-      }
-      if (include_lightprobe_helpers)
-      {
-        ss << build_glsl_lightprobe_helper_block();
-      }
       ss << "#define sample2D sampler2D\n";
       for (const std::string& name : global_names)
       {
@@ -4258,9 +4248,7 @@ vec3 glsl_ambient_lighting()
         parse_result.function_names,
         parse_result.global_names,
         rewritten_source,
-        closure_helpers,
-        parse_result.uses_geometry_access,
-        parse_result.uses_lightprobe_access);
+        closure_helpers);
       r_wrapper_source = build_wrapper_glsl_source(node, parse_result, source_kinds);
 
       return true;
@@ -4370,9 +4358,7 @@ vec3 glsl_ambient_lighting()
         result.function_names,
         result.global_names,
         result.source,
-        Span<GLSLClosureSampleHelper>(),
-        result.uses_geometry_access,
-        result.uses_lightprobe_access);
+        Span<GLSLClosureSampleHelper>());
       result.wrapper_source = build_wrapper_glsl_source(
         node, result, Map<std::string, GLSLSample2DSourceKind>());
       return result;
@@ -4964,6 +4950,18 @@ vec3 glsl_ambient_lighting()
         }
         return 1;
       }
+      if (parse_result.uses_geometry_access)
+      {
+        const std::string geometry_helper_source = build_glsl_geometry_helper_block();
+        GPU_material_generated_source_add(
+          mat, GPU_GLSL_FUNCTION_GEOMETRY_HELPER_FILENAME, {}, geometry_helper_source.c_str());
+      }
+      if (parse_result.uses_lightprobe_access)
+      {
+        const std::string lightprobe_helper_source = build_glsl_lightprobe_helper_block();
+        GPU_material_generated_source_add(
+          mat, GPU_GLSL_FUNCTION_LIGHTPROBE_HELPER_FILENAME, {}, lightprobe_helper_source.c_str());
+      }
       GPU_material_generated_source_add(
         mat,
         parse_result.source_filename.c_str(),
@@ -4979,6 +4977,17 @@ vec3 glsl_ambient_lighting()
         dependencies.append(glsl_light_access_helper_filename);
       }
       dependencies.append(parse_result.source_filename.c_str());
+      eGPUCustomNodeDependencyFlag dependency_flags = GPU_CUSTOM_NODE_DEPENDENCY_NONE;
+      if (parse_result.uses_geometry_access)
+      {
+        dependency_flags = eGPUCustomNodeDependencyFlag(
+          dependency_flags | GPU_CUSTOM_NODE_DEPENDENCY_GLSL_GEOMETRY_HELPERS);
+      }
+      if (parse_result.uses_lightprobe_access)
+      {
+        dependency_flags = eGPUCustomNodeDependencyFlag(
+          dependency_flags | GPU_CUSTOM_NODE_DEPENDENCY_GLSL_LIGHTPROBE_HELPERS);
+      }
       GPU_material_generated_source_add(
         mat,
         parse_result.wrapper_filename.c_str(),
@@ -4989,6 +4998,7 @@ vec3 glsl_ambient_lighting()
         node,
         parse_result.wrapper_name.c_str(),
         parse_result.wrapper_filename.c_str(),
+        dependency_flags,
         in,
         out);
     }

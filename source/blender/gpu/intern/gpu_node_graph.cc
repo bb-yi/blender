@@ -888,6 +888,7 @@ bool GPU_stack_link_custom(GPUMaterial *material,
                            const bNode *bnode,
                            StringRefNull name,
                            StringRefNull dependency_name,
+                           eGPUCustomNodeDependencyFlag dependency_flags,
                            GPUNodeStack *in,
                            GPUNodeStack *out)
 {
@@ -900,6 +901,7 @@ bool GPU_stack_link_custom(GPUMaterial *material,
   if (!dependency_name.is_empty()) {
     BLI_strncpy(node->dependency_name, dependency_name.c_str(), sizeof(node->dependency_name));
   }
+  node->dependency_flags = dependency_flags;
 
   if (in) {
     for (int i = 0; !in[i].end; i++) {

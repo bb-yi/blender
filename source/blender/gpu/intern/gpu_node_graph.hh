@@ -75,6 +75,7 @@ struct GPUNode {
   char name[128];
   /* Material-local generated source key used by custom GPU nodes. */
   char dependency_name[128];
+  eGPUCustomNodeDependencyFlag dependency_flags;
   bool use_static_function;
 
   /* Internal flag to mark nodes during pruning */
