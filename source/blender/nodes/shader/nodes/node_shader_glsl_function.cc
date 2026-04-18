@@ -4553,51 +4553,9 @@ vec3 glsl_ambient_lighting()
         return;
       }
 
-      for (const GLSLFunctionParam& param : parse_result.function.params)
-      {
-        if (!glsl_param_has_input_socket(param) || !param.meta.has_default_value)
-        {
-          continue;
-        }
-
-        bNodeSocket* socket = find_node_input_socket_by_identifier(node, param.identifier);
-        if (socket == nullptr || socket->default_value == nullptr)
-        {
-          continue;
-        }
-
-        if (param.type == GLSLBoundaryType::Float && socket->type == SOCK_FLOAT)
-        {
-          socket->default_value_typed<bNodeSocketValueFloat>()->value = param.meta.default_value.x;
-        }
-        else if (param.type == GLSLBoundaryType::Int && socket->type == SOCK_INT)
-        {
-          socket->default_value_typed<bNodeSocketValueInt>()->value = int(param.meta.default_value.x);
-        }
-        else if (param.type == GLSLBoundaryType::Bool && socket->type == SOCK_BOOLEAN)
-        {
-          socket->default_value_typed<bNodeSocketValueBoolean>()->value =
-            param.meta.default_value.x != 0.0f;
-        }
-        else if (glsl_param_uses_color_socket(param) && socket->type == SOCK_RGBA)
-        {
-          const int copy_count = (param.type == GLSLBoundaryType::Vec4) ? 4 : 3;
-          std::copy_n(&param.meta.default_value[0],
-            copy_count,
-            socket->default_value_typed<bNodeSocketValueRGBA>()->value);
-          if (param.type == GLSLBoundaryType::Vec3)
-          {
-            socket->default_value_typed<bNodeSocketValueRGBA>()->value[3] = 1.0f;
-          }
-        }
-        else if (ELEM(param.type, GLSLBoundaryType::Vec2, GLSLBoundaryType::Vec3, GLSLBoundaryType::Vec4) &&
-          socket->type == SOCK_VECTOR)
-        {
-          std::copy_n(
-            &param.meta.default_value[0], param.dimensions, socket->default_value_typed<bNodeSocketValueVector>()->value);
-        }
-      }
-
+      /* Socket declarations already initialize defaults for newly created sockets. Re-applying
+       * GLSL meta defaults here would overwrite user-edited values on refresh for unchanged
+       * parameters with the same identifier. */
       storage.meta_hash = parse_result.meta_hash;
     }
 

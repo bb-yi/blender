@@ -2165,7 +2165,6 @@ static wmOperatorStatus node_glsl_function_refresh_exec(bContext *C, wmOperator 
   if (NodeShaderGLSLFunction *data = static_cast<NodeShaderGLSLFunction *>(node->storage)) {
     data->parse_status = SHD_GLSL_FUNCTION_PARSE_DIRTY;
     data->signature_hash = 0;
-    data->meta_hash = 0;
   }
 
   BKE_ntree_update_tag_node_property(ntree, node);
