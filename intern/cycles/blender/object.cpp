@@ -50,9 +50,10 @@ bool BlenderSync::BKE_object_is_modified(blender::Object &b_ob)
     return true;
   }
 
-  /* object level material links */
+  /* Object level material links. Note the geometry material slot array may not match
+   * the object matbits array, so we need to guard against out of bouds. */
   for (const int i : blender::IndexRange(BKE_object_material_count_eval(&b_ob))) {
-    if (b_ob.matbits[i] != 0) {
+    if (i < b_ob.totcol && b_ob.matbits && b_ob.matbits[i] != 0) {
       return true;
     }
   }
@@ -203,8 +204,9 @@ Object *BlenderSync::sync_object(blender::ViewLayer &b_view_layer,
   /* Visibility flags for both parent and child. */
   blender::PointerRNA b_ob_rna_ptr = RNA_id_pointer_create(&b_ob.id);
   blender::PointerRNA cobject = RNA_pointer_get(&b_ob_rna_ptr, "cycles");
+  /* Note base_parent is null for objects from the background scene. */
   const blender::Base *base_parent = BKE_view_layer_base_find(&b_view_layer, b_parent);
-  const bool use_holdout = ((base_parent->flag & blender::BASE_HOLDOUT) != 0) ||
+  const bool use_holdout = (base_parent && (base_parent->flag & blender::BASE_HOLDOUT) != 0) ||
                            ((b_parent->visibility_flag & blender::OB_HOLDOUT) != 0);
   uint visibility = object_ray_visibility(b_ob) & PATH_RAY_ALL_VISIBILITY;
 
@@ -220,7 +222,7 @@ Object *BlenderSync::sync_object(blender::ViewLayer &b_view_layer,
 #endif
 
   /* Clear camera visibility for indirect only objects. */
-  const bool use_indirect_only = !use_holdout &&
+  const bool use_indirect_only = !use_holdout && base_parent &&
                                  ((base_parent->flag & blender::BASE_INDIRECT_ONLY) != 0);
   if (use_indirect_only) {
     visibility &= ~PATH_RAY_CAMERA;

@@ -535,6 +535,24 @@ void VKBackend::detect_workarounds(VKDevice &device)
     extensions.host_image_copy = false;
   }
 
+#ifdef _WIN32
+  /* Intel 7th to 10th Gen Processor iGPUs show a black screen at application startup when using
+   * VK_EXT_vertex_input_dynamic_state. The used driver version for these iGPUs is 101.2xxx or
+   * older.
+   *
+   * See #147721
+   */
+  if (GPU_type_matches(GPU_DEVICE_INTEL | GPU_DEVICE_INTEL_UHD, GPU_OS_WIN, GPU_DRIVER_OFFICIAL)) {
+    const uint32_t driver_version = device.physical_device_properties_get().driverVersion;
+    uint32_t driver_version_major = driver_version >> 14u;
+    uint32_t driver_version_minor = driver_version & 0x3fffu;
+    if (driver_version_major < 101 || (driver_version_major == 101 && driver_version_minor < 3000))
+    {
+      extensions.vertex_input_dynamic_state = false;
+    }
+  }
+#endif
+
 #ifdef __APPLE__
   extensions.extended_dynamic_state = false;
 #endif
