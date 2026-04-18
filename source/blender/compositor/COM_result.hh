@@ -132,8 +132,7 @@ class Result {
    * member stores the number of results that share the data. This is heap allocated and have the
    * same lifetime as allocated data, that's because this reference count is shared by all results
    * that share the same data. Unlike the result's reference count, the data is freed if the count
-   * becomes 1, that is, data is no longer shared with some other result. This is nullptr if the
-   * data is external. */
+   * becomes 1, that is, data is no longer shared with some other result. */
   int *data_reference_count_ = nullptr;
   /* If the result is a single value, this member stores the value of the result, the value of
    * which will be identical to that stored in the data_ member. The active variant member depends

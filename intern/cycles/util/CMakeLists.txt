@@ -37,6 +37,7 @@ set(SRC
 
 set(LIB
   PUBLIC bf::dependencies::openimageio
+  PRIVATE bf::dependencies::jpeg
   ${TBB_LIBRARIES}
   ${ZSTD_LIBRARIES}
 )

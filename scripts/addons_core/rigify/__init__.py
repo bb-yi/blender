@@ -657,6 +657,7 @@ def register():
     for cls in classes:
         register_class(cls)
 
+    register_usetime_properties()
     register_rna_properties()
 
     prefs = RigifyPreferences.get_instance()
@@ -689,6 +690,7 @@ def unregister():
     prefs.register_feature_sets(False)
 
     unregister_rna_properties()
+    unregister_usetime_properties()
 
     # Classes.
     for cls in classes:
@@ -701,6 +703,26 @@ def unregister():
     metarig_menu.unregister()
     ui.unregister()
     feature_set_list.unregister()
+
+
+def register_usetime_properties() -> None:
+    """
+    Register all properties that are required at use-time.
+    This makes it possible to use a rigify created rig without having the rigify addon enabled.
+    See rig_ui_template.py
+    """
+    coll_store = bpy.types.BoneCollection
+    coll_store.rigify_ui_row = bpy.props.IntProperty(
+        name="UI Row", default=0, min=0,
+        description="If not zero, row of the UI panel where the button for this collection is shown")
+    coll_store.rigify_ui_title = bpy.props.StringProperty(
+        name="UI Title", description="Text to use on the UI panel button instead of the collection name")
+
+
+def unregister_usetime_properties() -> None:
+    coll_store: typing.Any = bpy.types.BoneCollection
+    del coll_store.rigify_ui_row
+    del coll_store.rigify_ui_title
 
 
 def register_rna_properties() -> None:
@@ -807,11 +829,6 @@ def register_rna_properties() -> None:
     coll_store = bpy.types.BoneCollection
 
     coll_store.rigify_uid = IntProperty(name="Unique ID", default=-1)
-    coll_store.rigify_ui_row = IntProperty(
-        name="UI Row", default=0, min=0,
-        description="If not zero, row of the UI panel where the button for this collection is shown")
-    coll_store.rigify_ui_title = StringProperty(
-        name="UI Title", description="Text to use on the UI panel button instead of the collection name")
     coll_store.rigify_sel_set = BoolProperty(
         name="Add Selection Set", default=False, description='Add Selection Set for this collection')
     coll_store.rigify_color_set_id = IntProperty(name="Color Set ID", default=0, min=0)
@@ -895,8 +912,6 @@ def unregister_rna_properties() -> None:
     coll_store: typing.Any = bpy.types.BoneCollection
 
     del coll_store.rigify_uid
-    del coll_store.rigify_ui_row
-    del coll_store.rigify_ui_title
     del coll_store.rigify_ui_title_name
     del coll_store.rigify_sel_set
     del coll_store.rigify_color_set_id
