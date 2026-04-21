@@ -89,24 +89,25 @@ namespace blender::eevee
     eCubeFace cubeface = Z_NEG;
     /** Cached, used for detecting updates. */
     float4x4 object_mat = float4x4::identity();
+    float shadow_map_scale;
+ public:
+  ShadowTileMap(int tiles_index_) : ShadowTileMapData{}
+  {
+    tiles_index = tiles_index_;
+    /* For now just the same index. */
+    clip_data_index = tiles_index_ / SHADOW_TILEDATA_PER_TILEMAP;
+    /* Avoid uninitialized data. */
+    this->grid_offset = int2(0);
+    this->grid_shift = int2(0);
+    this->set_dirty();
+  }
 
-  public:
-    ShadowTileMap(int tiles_index_) : ShadowTileMapData{}
-    {
-      tiles_index = tiles_index_;
-      /* For now just the same index. */
-      clip_data_index = tiles_index_ / SHADOW_TILEDATA_PER_TILEMAP;
-      /* Avoid uninitialized data. */
-      this->grid_offset = int2(0);
-      this->grid_shift = int2(0);
-      this->set_dirty();
-    }
-
-    void sync_orthographic(const float4x4& object_mat_,
-      int2 origin_offset,
-      int clipmap_level,
-      eShadowProjectionType projection_type_,
-      uint2 shadow_set_membership_ = ~uint2(0));
+  void sync_orthographic(const float4x4 &object_mat_,
+                         int2 origin_offset,
+                         int clipmap_level,
+                         float shadow_map_scale,
+                         eShadowProjectionType projection_type_,
+                         uint2 shadow_set_membership_ = ~uint2(0));
 
     void sync_cubeface(eLightType light_type_,
       const float4x4& object_mat,
@@ -346,14 +347,16 @@ namespace blender::eevee
 
     /** Scene immutable parameters. */
 
-    /* Render setting that reduces the LOD for every light. */
-    float global_lod_bias_ = 0.0f;
-    /** For now, needs to be hardcoded. */
-    int shadow_page_size_ = SHADOW_PAGE_RES;
-    /** Maximum number of allocated pages. Maximum value is SHADOW_MAX_TILEMAP. */
-    int shadow_page_len_ = SHADOW_MAX_TILEMAP;
-    /** Global switch. */
-    bool enabled_ = true;
+  /* Render setting that reduces the LOD for every light. */
+  float global_lod_bias_ = 0.0f;
+  /* Shadow map scale */
+  float shadow_map_scale = 1.0f;
+  /** For now, needs to be hardcoded. */
+  int shadow_page_size_ = SHADOW_PAGE_RES;
+  /** Maximum number of allocated pages. Maximum value is SHADOW_MAX_TILEMAP. */
+  int shadow_page_len_ = SHADOW_MAX_TILEMAP;
+  /** Global switch. */
+  bool enabled_ = true;
 
   public:
     ShadowModule(Instance& inst, ShadowSceneData& data);

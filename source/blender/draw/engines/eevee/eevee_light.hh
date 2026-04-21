@@ -61,6 +61,7 @@ struct Light : public LightData, NonCopyable {
   {
     /* Avoid valgrind warning. */
     this->type = LIGHT_SUN;
+    shadow_map_scale = 1.0f;
   }
 
   /* Only used for debugging. */
@@ -90,6 +91,9 @@ struct Light : public LightData, NonCopyable {
             const LightLinking *light_linking,
             float threshold,
             int lightgroup_id = 0);
+
+  /* Per-light user scale for shadow map world-size (LOD0 world-side scale). */
+  float shadow_map_scale = 1.0f;
 
   void shadow_ensure(ShadowModule &shadows);
   void shadow_discard_safe(ShadowModule &shadows);
