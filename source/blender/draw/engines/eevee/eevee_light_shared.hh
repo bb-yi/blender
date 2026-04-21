@@ -161,7 +161,7 @@ struct [[host_shared]] LightSunData {
   /** Angle covered by the light shape for shadow ray casting. */
   float shadow_angle;
   float shadow_angle_cos;
-  float _pad3;
+  float shadow_map_scale;
   float _pad4;
 
   /** Offset to convert from world units to tile space of the clipmap_lod_max. */

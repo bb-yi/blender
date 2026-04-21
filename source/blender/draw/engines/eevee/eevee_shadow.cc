@@ -31,6 +31,7 @@ ShadowTechnique ShadowModule::shadow_technique = ShadowTechnique::ATOMIC_RASTER;
 void ShadowTileMap::sync_orthographic(const float4x4 &object_mat_,
                                       int2 origin_offset,
                                       int clipmap_level,
+                                      float shadow_map_scale_,
                                       eShadowProjectionType projection_type_,
                                       uint2 shadow_set_membership_)
 {
@@ -44,6 +45,13 @@ void ShadowTileMap::sync_orthographic(const float4x4 &object_mat_,
   light_type = eLightType::LIGHT_SUN;
   shadow_set_membership = shadow_set_membership_;
 
+  /* If the shadow map scale changed, mark the tilemap dirty so it gets re-generated.
+   * This mirrors the behaviour when the light direction / object matrix changes. */
+  if (shadow_map_scale != shadow_map_scale_) {
+    set_dirty();
+  }
+  shadow_map_scale = shadow_map_scale_;
+
   grid_shift = origin_offset - grid_offset;
   grid_offset = origin_offset;
 
@@ -52,7 +60,9 @@ void ShadowTileMap::sync_orthographic(const float4x4 &object_mat_,
     set_dirty();
   }
 
-  float tile_size = ShadowDirectional::tile_size_get(level);
+  //const float scale = clamp_f(shadow_map_scale, 0.01f, 100.0f);
+  float base_tile_size = ShadowDirectional::tile_size_get(level);
+  float tile_size = base_tile_size;
 
   /* object_mat is a rotation matrix. Reduce imprecision by taking the transpose which is also the
    * inverse in this particular case. */
@@ -251,8 +261,11 @@ void ShadowPunctual::end_sync(Light &light)
   float far = int_as_float(light.clip_far);
   for (int i : tilemaps_.index_range()) {
     eCubeFace face = eCubeFace(Z_NEG + i);
+    const float scale = clamp_f(light.shadow_map_scale, 0.01f, 100.0f);
+    float near_s = near * scale;
+    float far_s = far * scale;
     tilemaps_[face]->sync_cubeface(
-        light.type, object_to_world, near, far, face, light.shadow_set_membership);
+        light.type, object_to_world, near_s, far_s, face, light.shadow_set_membership);
   }
 
   light.local().tilemaps_count = tilemaps_needed;
@@ -390,7 +403,7 @@ void ShadowDirectional::cascade_tilemaps_distribution(Light &light, const Camera
     int2 level_offset = origin_offset +
                         shadow_cascade_grid_offset(light.sun().clipmap_base_offset_pos, i);
     tilemap->sync_orthographic(
-        object_mat, level_offset, level, SHADOW_PROJECTION_CASCADE, light.shadow_set_membership);
+        object_mat, level_offset, level, light.shadow_map_scale, SHADOW_PROJECTION_CASCADE, light.shadow_set_membership);
 
     /* Add shadow tile-maps grouped by lights to the GPU buffer. */
     shadows_.tilemap_pool.tilemaps_data.append(*tilemap);
@@ -448,7 +461,7 @@ void ShadowDirectional::clipmap_tilemaps_distribution(Light &light, const Camera
     int2 level_offset = int2(math::round(light_space_camera_position / tile_size));
 
     tilemap->sync_orthographic(
-        object_mat, level_offset, level, SHADOW_PROJECTION_CLIPMAP, light.shadow_set_membership);
+        object_mat, level_offset, level, light.shadow_map_scale, SHADOW_PROJECTION_CLIPMAP, light.shadow_set_membership);
 
     /* Add shadow tile-maps grouped by lights to the GPU buffer. */
     shadows_.tilemap_pool.tilemaps_data.append(*tilemap);

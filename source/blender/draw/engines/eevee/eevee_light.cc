@@ -103,6 +103,8 @@ void Light::sync(ShadowModule &shadows,
   this->lod_min = shadow_lod_min_get(la);
   this->filter_radius = la->shadow_filter_radius;
   this->shadow_jitter = (la->mode & LA_SHADOW_JITTER) != 0;
+  /* Store user-configurable shadow map scale for later shadow sync. */
+  this->shadow_map_scale = la->shadow_map_scale;
 
   if (la->mode & LA_SHADOW) {
     shadow_ensure(shadows);
@@ -214,6 +216,8 @@ void Light::shape_parameters_set(const blender::Light *la,
     l_sun.shape_radius = clamp(tanf(sun_half_angle), 0.001f, 20.0f);
     /* Stable shading direction. */
     l_sun.direction = z_axis;
+
+    l_sun.shadow_map_scale = la->shadow_map_scale;
   }
   else if (is_area_light(this->type)) {
     LightAreaData &l_area = this->area();

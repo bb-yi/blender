@@ -17,16 +17,18 @@ COMPUTE_SHADER_CREATE_INFO(eevee_light_shadow_setup)
 #include "gpu_shader_math_matrix_lib.glsl"
 #include "gpu_shader_math_matrix_projection_lib.glsl"
 
-int shadow_directional_coverage_get(int level)
+float shadow_directional_coverage_get(int level, float scale)
 {
-  return 1 << level;
+  return exp2(level) * scale;
 }
 
 void orthographic_sync(int tilemap_id,
                        Transform object_to_world,
                        int2 origin_offset,
                        int clipmap_level,
-                       eShadowProjectionType projection_type)
+                       eShadowProjectionType projection_type,
+                       float scale
+                       )
 {
   /* Do not check translation. */
   object_to_world.x.w = 0.0f;
@@ -53,7 +55,7 @@ void orthographic_sync(int tilemap_id,
   /* TODO(fclem): Remove this duplicate. Only needed because of the base offset packing. */
   tilemaps_buf[tilemap_id].grid_offset = origin_offset;
 
-  float level_size = shadow_directional_coverage_get(clipmap_level);
+  float level_size = shadow_directional_coverage_get(clipmap_level, scale);
   float half_size = level_size / 2.0f;
   float tile_size = level_size / float(SHADOW_TILEMAP_RES);
   float2 center_offset = float2(origin_offset) * tile_size;
@@ -80,6 +82,8 @@ void orthographic_sync(int tilemap_id,
 
 void cascade_sync(LightData &light)
 {
+  float scale = light.sun().shadow_map_scale;
+
   int level_min = light.sun().clipmap_lod_min;
   int level_max = light.sun().clipmap_lod_max;
   int level_range = level_max - level_min;
@@ -91,7 +95,7 @@ void cascade_sync(LightData &light)
   float camera_clip_far = uniform_buf.camera.clip_far;
 
   /* All tile-maps use the first level size. */
-  float level_size = shadow_directional_coverage_get(level_min);
+  float level_size = shadow_directional_coverage_get(level_min, scale);
   float half_size = level_size / 2.0f;
   float tile_size = level_size / float(SHADOW_TILEMAP_RES);
 
@@ -126,7 +130,9 @@ void cascade_sync(LightData &light)
                       light.object_to_world,
                       level_offset,
                       level_min,
-                      SHADOW_PROJECTION_CASCADE);
+                      SHADOW_PROJECTION_CASCADE,
+                      scale
+                      );
   }
 
   float2 clipmap_origin = float2(origin_offset) * tile_size;
@@ -143,6 +149,8 @@ void cascade_sync(LightData &light)
 
 void clipmap_sync(LightData &light)
 {
+  float scale = light.sun().shadow_map_scale;
+
   float3 ws_camera_position = uniform_buf.camera.viewinv[3].xyz;
   float3 ls_camera_position = transform_direction_transposed(light.object_to_world,
                                                              ws_camera_position);
@@ -163,7 +171,9 @@ void clipmap_sync(LightData &light)
                       light.object_to_world,
                       level_offset,
                       level,
-                      SHADOW_PROJECTION_CLIPMAP);
+                      SHADOW_PROJECTION_CLIPMAP,
+                      scale
+                      );
 
     clipmap_origin = float2(level_offset) * tile_size;
   }

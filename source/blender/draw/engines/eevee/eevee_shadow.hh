@@ -87,6 +87,8 @@ struct ShadowTileMap : public ShadowTileMapData {
   /** Cached, used for detecting updates. */
   float4x4 object_mat = float4x4::identity();
 
+  float shadow_map_scale;
+
  public:
   ShadowTileMap(int tiles_index_) : ShadowTileMapData{}
   {
@@ -102,6 +104,7 @@ struct ShadowTileMap : public ShadowTileMapData {
   void sync_orthographic(const float4x4 &object_mat_,
                          int2 origin_offset,
                          int clipmap_level,
+                         float shadow_map_scale,
                          eShadowProjectionType projection_type_,
                          uint2 shadow_set_membership_ = ~uint2(0));
 
@@ -342,6 +345,9 @@ class ShadowModule {
 
   /* Render setting that reduces the LOD for every light. */
   float global_lod_bias_ = 0.0f;
+
+  float shadow_map_scale = 1.0f;
+
   /** For now, needs to be hardcoded. */
   int shadow_page_size_ = SHADOW_PAGE_RES;
   /** Maximum number of allocated pages. Maximum value is SHADOW_MAX_TILEMAP. */
@@ -486,7 +492,7 @@ class ShadowDirectional : public NonCopyable, NonMovable {
   {
     /* This function should be kept in sync with shadow_directional_level(). */
     /* \note If we would to introduce a global scaling option it would be here. */
-    return exp2(lvl);
+    return exp2(lvl-1);
   }
 
   /* Return coverage of a single tile for a tile-map of this LOD in world unit. */

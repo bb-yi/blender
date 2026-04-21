@@ -199,6 +199,9 @@ class DATA_PT_EEVEE_light_shadow(DataButtonsPanel, Panel):
         row.prop(light, "shadow_maximum_resolution", text="Resolution Limit")
         if light.type != 'SUN':
             row.prop(light, "use_absolute_resolution", text="", icon='DRIVER_DISTANCE')
+        if light.type == 'SUN':
+            sub = sub.column(align=True)
+            sub.prop(light, "shadow_map_scale", text="Shadow Map Scale")    
 
 
 class DATA_PT_EEVEE_light_influence(DataButtonsPanel, Panel):

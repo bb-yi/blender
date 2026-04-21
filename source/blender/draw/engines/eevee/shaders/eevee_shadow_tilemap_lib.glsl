@@ -163,7 +163,8 @@ float shadow_directional_level_fractional(LightData light, float3 lP)
     /* Since the distance is centered around the camera (and thus by extension the tile-map),
      * we need to multiply by 2 to get the lod level which covers the following range:
      * [-coverage_get(lod)/2..coverage_get(lod)/2] */
-    lod = log2(length(lP) * narrowing * 2.0f);
+    float scale = light.sun().shadow_map_scale;
+    lod = log2(length(lP) * narrowing * 2.0f / scale);
     /* Apply light LOD bias. */
     lod = max(lod + light.lod_bias, light.lod_min);
   }
@@ -290,7 +291,7 @@ ShadowCoordinates shadow_directional_coordinates_at_level(LightData light, float
                                                       level_relative);
   /* UV in [0..1] range over the tilemap. */
   float2 tilemap_uv = lP.xy - light.sun().clipmap_origin;
-  tilemap_uv *= exp2(float(-lod_relative));
+  tilemap_uv *= exp2(float(-lod_relative)) / light.sun().shadow_map_scale;
   tilemap_uv -= float2(clipmap_offset) * (1.0f / float(SHADOW_TILEMAP_RES));
   tilemap_uv = saturate(tilemap_uv + 0.5f);
 
