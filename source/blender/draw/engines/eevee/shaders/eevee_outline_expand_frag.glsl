@@ -9,16 +9,11 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_outline_expand)
 #include "draw_view_lib.glsl"
 #include "eevee_outline_lib.glsl"
 
-float outline_depth_fetch(int2 texel)
-{
-  return 1.0f - texelFetch(depth_tx, texel, 0).r;
-}
-
 void main()
 {
   const int2 texel = int2(gl_FragCoord.xy);
   const int2 extent = textureSize(outline_seed_tx, 0);
-  const float center_depth = outline_depth_fetch(texel);
+  const float center_depth = texelFetch(depth_tx, texel, 0).r;
   const uint center_outline_id = outline_id_unpack(texelFetch(outline_info_tx, texel, 0).a);
 
   float4 best_color = float4(0.0f);
@@ -57,13 +52,11 @@ void main()
         continue;
       }
 
-      const float sample_depth = outline_depth_fetch(sample_texel);
+      const float sample_depth = texelFetch(depth_tx, sample_texel, 0).r;
       const uint sample_outline_id = outline_id_unpack(texelFetch(outline_info_tx, sample_texel, 0).a);
       const float2 sample_uv = (float2(sample_texel) + 0.5f) / float2(extent);
       const float linear_depth = -drw_point_screen_to_view(float3(sample_uv, sample_depth)).z;
 
-      /* Silhouette seeds should expand only onto the background / farther-object side of the edge,
-       * while normal discontinuity seeds are allowed to stay on the same object. */
       if (seed_is_silhouette && center_outline_id != 0u && center_outline_id == sample_outline_id) {
         continue;
       }
