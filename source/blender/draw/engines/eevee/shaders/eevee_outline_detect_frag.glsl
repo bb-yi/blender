@@ -10,17 +10,6 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_outline_detect)
 #include "eevee_gbuffer_read_lib.glsl"
 #include "eevee_outline_lib.glsl"
 
-float outline_depth_fetch(int2 texel)
-{
-  return 1.0f - texelFetch(depth_tx, texel, 0).r;
-}
-
-float3 outline_view_position_from_depth(int2 texel, int2 extent, float depth)
-{
-  const float2 uv = (float2(texel) + 0.5f) / float2(extent);
-  return drw_point_screen_to_view(float3(uv, depth));
-}
-
 void main()
 {
   const int2 texel = int2(gl_FragCoord.xy);
@@ -37,15 +26,15 @@ void main()
     return;
   }
 
-  const float center_depth = outline_depth_fetch(texel);
-  if (center_depth >= 1.0f) {
+  const float center_depth = texelFetch(depth_tx, texel, 0).r;
+  if (center_depth == 1.0f) {
     return;
   }
 
   const gbuffer::Header center_header = gbuffer::read_header(texel);
   const bool center_has_gbuffer = !center_header.is_empty();
   const float3 center_normal = center_has_gbuffer ? gbuffer::read_normal(texel) : float3(0.0f);
-  const float3 center_vP = outline_view_position_from_depth(texel, extent, center_depth);
+  const float3 center_vP = outline_screen_to_view(texel, extent, center_depth);
   const uint center_outline_id = outline_id_unpack(outline_info.a);
 
   const int2 offsets[4] = {int2(-1, 0), int2(1, 0), int2(0, -1), int2(0, 1)};
@@ -61,19 +50,19 @@ void main()
     }
 
     const float sample_outline_alpha = texelFetch(outline_color_tx, sample_texel, 0).a;
-    const float sample_depth = outline_depth_fetch(sample_texel);
+    const float sample_depth = texelFetch(depth_tx, sample_texel, 0).r;
 
-    if (sample_outline_alpha <= 0.0f || sample_depth >= 1.0f) {
+    if (sample_outline_alpha <= 0.0f || sample_depth == 1.0f) {
       has_id_boundary = true;
       continue;
     }
 
-    if (center_depth <= sample_depth) {
+    if (center_depth >= sample_depth) {
       const gbuffer::Header sample_header = gbuffer::read_header(sample_texel);
       const bool sample_has_gbuffer = !sample_header.is_empty();
       const float3 sample_normal = sample_has_gbuffer ? gbuffer::read_normal(sample_texel) :
                                                         float3(0.0f);
-      const float3 sample_vP = outline_view_position_from_depth(sample_texel, extent, sample_depth);
+      const float3 sample_vP = outline_screen_to_view(sample_texel, extent, sample_depth);
       const uint sample_outline_id = outline_id_unpack(
           texelFetch(outline_info_tx, sample_texel, 0).a);
 

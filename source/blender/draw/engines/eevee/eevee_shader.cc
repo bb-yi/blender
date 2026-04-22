@@ -120,7 +120,9 @@ ShaderGroups ShaderModule::static_shaders_load(const ShaderGroups request_bits,
                                        DEFERRED_AOV_CLEAR,
                                        DEFERRED_TILE_CLASSIFY,
                                        OUTLINE_DETECT,
-                                       OUTLINE_EXPAND};
+                                       OUTLINE_JFA_INIT,
+                                       OUTLINE_JFA_STEP,
+                                       OUTLINE_RESOLVE};
     request(DEFERRED_LIGHTING_SHADERS, AS_SPAN(shader_list));
   }
   {
@@ -369,8 +371,12 @@ const char *ShaderModule::static_shader_create_info_name_get(eShaderType shader_
       return "eevee_deferred_light_triple";
     case OUTLINE_DETECT:
       return "eevee_outline_detect";
-    case OUTLINE_EXPAND:
-      return "eevee_outline_expand";
+    case OUTLINE_JFA_INIT:
+      return "eevee_outline_jfa_init";
+    case OUTLINE_JFA_STEP:
+      return "eevee_outline_jfa_step";
+    case OUTLINE_RESOLVE:
+      return "eevee_outline_resolve";
     case DEFERRED_AOV_CLEAR:
       return "eevee_deferred_aov_clear";
     case DEFERRED_CAPTURE_EVAL:

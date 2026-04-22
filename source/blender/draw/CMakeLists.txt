@@ -509,8 +509,10 @@ set(GLSL_SRC
   engines/eevee/shaders/eevee_nodetree_type_lib.glsl
   engines/eevee/shaders/eevee_nodetree_vert_lib.glsl
   engines/eevee/shaders/eevee_outline_detect_frag.glsl
-  engines/eevee/shaders/eevee_outline_expand_frag.glsl
+  engines/eevee/shaders/eevee_outline_jfa_init_frag.glsl
+  engines/eevee/shaders/eevee_outline_jfa_step_comp.glsl
   engines/eevee/shaders/eevee_outline_lib.glsl
+  engines/eevee/shaders/eevee_outline_resolve_frag.glsl
   engines/eevee/shaders/eevee_occupancy_convert_frag.glsl
   engines/eevee/shaders/eevee_occupancy_lib.glsl
   engines/eevee/shaders/eevee_octahedron_lib.glsl

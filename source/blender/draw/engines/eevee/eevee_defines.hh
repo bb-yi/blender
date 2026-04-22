@@ -275,6 +275,7 @@
 #define OUTLINE_INFO_TEX_SLOT 43
 #define OUTLINE_SEED_TEX_SLOT 44
 #define OUTLINE_DEPTH_TEX_SLOT 45
+#define OUTLINE_JFA_TEX_SLOT 46
 
 /* Images. */
 #define RBUFS_COLOR_SLOT 0
@@ -285,6 +286,9 @@
 #define GBUF_HEADER_SLOT 5
 #define OUTLINE_COLOR_SLOT 6
 #define OUTLINE_INFO_SLOT 7
+#define OUTLINE_JFA_IN_IMG_SLOT 0
+#define OUTLINE_JFA_OUT_IMG_SLOT 1
+#define OUTLINE_JFA_STEP_GROUP_SIZE 16
 /* Volume properties pass do not write to `rbufs`. Reuse the same bind points. */
 #define VOLUME_PROP_SCATTERING_IMG_SLOT 0
 #define VOLUME_PROP_EXTINCTION_IMG_SLOT 1

@@ -37,6 +37,12 @@ float outline_pixel_world_size_at(float depth, int2 extent, int2 texel)
                   drw_point_screen_to_view(float3(next_uv, depth)));
 }
 
+float3 outline_screen_to_view(int2 texel, int2 extent, float depth)
+{
+  const float2 uv = (float2(texel) + 0.5f) / float2(extent);
+  return drw_point_screen_to_view(float3(uv, depth));
+}
+
 void output_outline(
     float4 line_color, float line_width, float depth_threshold, float normal_threshold, float outline_id)
 {

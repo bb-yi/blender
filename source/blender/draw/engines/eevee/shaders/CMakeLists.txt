@@ -62,7 +62,8 @@ set(SRC_GLSL_FRAG
   eevee_light_culling_debug_frag.glsl
   eevee_lookdev_display_frag.glsl
   eevee_outline_detect_frag.glsl
-  eevee_outline_expand_frag.glsl
+  eevee_outline_jfa_init_frag.glsl
+  eevee_outline_resolve_frag.glsl
   eevee_occupancy_convert_frag.glsl
   eevee_renderpass_clear_frag.glsl
   eevee_shadow_filter_frag.glsl
@@ -124,6 +125,7 @@ set(SRC_GLSL_COMP
   eevee_motion_blur_dilate_comp.glsl
   eevee_motion_blur_flatten_comp.glsl
   eevee_motion_blur_gather_comp.glsl
+  eevee_outline_jfa_step_comp.glsl
   eevee_ray_denoise_bilateral_comp.glsl
   eevee_ray_denoise_spatial_comp.glsl
   eevee_ray_denoise_temporal_comp.glsl
