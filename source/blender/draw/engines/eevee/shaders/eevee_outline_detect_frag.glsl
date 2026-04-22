@@ -10,6 +10,11 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_outline_detect)
 #include "eevee_gbuffer_read_lib.glsl"
 #include "eevee_outline_lib.glsl"
 
+float outline_depth_fetch(int2 texel)
+{
+  return 1.0f - texelFetch(depth_tx, texel, 0).r;
+}
+
 void main()
 {
   const int2 texel = int2(gl_FragCoord.xy);
@@ -26,8 +31,8 @@ void main()
     return;
   }
 
-  const float center_depth = texelFetch(depth_tx, texel, 0).r;
-  if (center_depth == 1.0f) {
+  const float center_depth = outline_depth_fetch(texel);
+  if (center_depth >= 1.0f) {
     return;
   }
 
@@ -50,14 +55,14 @@ void main()
     }
 
     const float sample_outline_alpha = texelFetch(outline_color_tx, sample_texel, 0).a;
-    const float sample_depth = texelFetch(depth_tx, sample_texel, 0).r;
+    const float sample_depth = outline_depth_fetch(sample_texel);
 
-    if (sample_outline_alpha <= 0.0f || sample_depth == 1.0f) {
+    if (sample_outline_alpha <= 0.0f || sample_depth >= 1.0f) {
       has_id_boundary = true;
       continue;
     }
 
-    if (center_depth >= sample_depth) {
+    if (center_depth <= sample_depth) {
       const gbuffer::Header sample_header = gbuffer::read_header(sample_texel);
       const bool sample_has_gbuffer = !sample_header.is_empty();
       const float3 sample_normal = sample_has_gbuffer ? gbuffer::read_normal(sample_texel) :

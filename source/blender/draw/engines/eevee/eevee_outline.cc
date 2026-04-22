@@ -45,7 +45,7 @@ void OutlineModule::sync()
   jfa_step_ps_.barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS);
 
   resolve_ps_.init();
-  resolve_ps_.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_BLEND_CUSTOM);
+  resolve_ps_.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_BLEND_TRANSPARENCY);
   resolve_ps_.shader_set(inst_.shaders.static_shader_get(OUTLINE_RESOLVE));
   resolve_ps_.bind_texture("depth_tx", &inst_.render_buffers.depth_tx);
   resolve_ps_.bind_texture("outline_seed_tx", &edge_seed_tx_);
