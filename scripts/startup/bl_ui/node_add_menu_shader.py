@@ -54,6 +54,13 @@ def object_or_npr_eevee_shader_nodes_poll(context):
             snode.shader_type in {'OBJECT', 'NPR'})
 
 
+def outline_control_shader_nodes_poll(context):
+    if not object_or_npr_eevee_shader_nodes_poll(context):
+        return False
+    mat = context.material
+    return mat is not None and mat.surface_render_method != 'BLENDED'
+
+
 def object_filter_or_npr_eevee_shader_nodes_poll(context):
     snode = context.space_data
     return (eevee_shader_nodes_poll(context) and
@@ -262,7 +269,7 @@ class NODE_MT_shader_node_output_base(node_add_menu.NodeMenu):
             layout,
             "ShaderNodeOutlineControl",
             label="Outline Control",
-            poll=object_or_npr_eevee_shader_nodes_poll(context),
+            poll=outline_control_shader_nodes_poll(context),
         )
         self.node_operator(
             layout,

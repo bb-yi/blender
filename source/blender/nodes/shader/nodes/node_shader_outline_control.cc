@@ -2,8 +2,15 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include "DNA_material_types.h"
+
+#include "BKE_context.hh"
+
 #include "node_shader_util.hh"
 #include "node_util.hh"
+
+#include "RNA_access.hh"
+#include "RNA_prototypes.hh"
 
 namespace blender {
 
@@ -30,6 +37,17 @@ static int node_shader_gpu_outline_control(GPUMaterial *mat,
   return true;
 }
 
+static bool node_add_ui_poll(const bContext *C)
+{
+  if (!object_or_npr_eevee_shader_nodes_poll(C)) {
+    return false;
+  }
+
+  PointerRNA material_ptr = CTX_data_pointer_get_type(C, "material", RNA_Material);
+  const Material *material = static_cast<const Material *>(material_ptr.data);
+  return material != nullptr && material->surface_render_method != MA_SURFACE_METHOD_FORWARD;
+}
+
 }  // namespace nodes::node_shader_outline_control_cc
 
 void register_node_type_sh_outline_control()
@@ -44,7 +62,7 @@ void register_node_type_sh_outline_control()
   ntype.ui_description = "Write Eevee outline parameters for the built-in screen-space outline pass";
   ntype.nclass = NODE_CLASS_OUTPUT;
   ntype.declare = file_ns::node_declare;
-  ntype.add_ui_poll = object_or_npr_eevee_shader_nodes_poll;
+  ntype.add_ui_poll = file_ns::node_add_ui_poll;
   ntype.gpu_fn = file_ns::node_shader_gpu_outline_control;
   ntype.no_muting = true;
 

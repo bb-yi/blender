@@ -9,11 +9,16 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_outline_expand)
 #include "draw_view_lib.glsl"
 #include "eevee_outline_lib.glsl"
 
+float outline_depth_fetch(int2 texel)
+{
+  return 1.0f - texelFetch(depth_tx, texel, 0).r;
+}
+
 void main()
 {
   const int2 texel = int2(gl_FragCoord.xy);
   const int2 extent = textureSize(outline_seed_tx, 0);
-  const float center_depth = texelFetch(depth_tx, texel, 0).r;
+  const float center_depth = outline_depth_fetch(texel);
   const uint center_outline_id = outline_id_unpack(texelFetch(outline_info_tx, texel, 0).a);
 
   float4 best_color = float4(0.0f);
@@ -52,7 +57,7 @@ void main()
         continue;
       }
 
-      const float sample_depth = texelFetch(depth_tx, sample_texel, 0).r;
+      const float sample_depth = outline_depth_fetch(sample_texel);
       const uint sample_outline_id = outline_id_unpack(texelFetch(outline_info_tx, sample_texel, 0).a);
       const float2 sample_uv = (float2(sample_texel) + 0.5f) / float2(extent);
       const float linear_depth = -drw_point_screen_to_view(float3(sample_uv, sample_depth)).z;
@@ -61,13 +66,14 @@ void main()
         continue;
       }
 
-      bool use_sample = alpha > best_color.a;
-      use_sample = use_sample || ((abs(alpha - best_color.a) < 1e-6f) &&
-                                  (linear_depth < best_linear_depth));
-
       if (sample_outline_id != center_outline_id && center_depth < sample_depth) {
-        use_sample = false;
+        continue;
       }
+
+      const float depth_epsilon = 1e-6f;
+      bool use_sample = linear_depth < (best_linear_depth - depth_epsilon);
+      use_sample = use_sample || ((abs(linear_depth - best_linear_depth) <= depth_epsilon) &&
+                                  (alpha > best_color.a));
 
       if (use_sample) {
         best_color = float4(outline_color.rgb * alpha, alpha);
