@@ -40,6 +40,9 @@ blender::World *World::default_world_get()
 
 blender::World *World::scene_world_get()
 {
+  if (inst_.scene == nullptr) {
+    return default_world_get();
+  }
   return (inst_.scene->world != nullptr) ? inst_.scene->world : default_world_get();
 }
 

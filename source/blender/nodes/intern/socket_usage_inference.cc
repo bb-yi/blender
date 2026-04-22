@@ -284,6 +284,7 @@ class SocketUsageInferencerImpl {
         break;
       }
       case SH_NODE_OUTPUT_AOV:
+      case SH_NODE_OUTLINE_CONTROL:
       case SH_NODE_OUTPUT_LIGHT:
       case SH_NODE_OUTPUT_WORLD:
       case SH_NODE_OUTPUT_LINESTYLE:

@@ -736,6 +736,13 @@ void GPU_material_add_output_link_aov(GPUMaterial *material, GPUNodeLink *link, 
   BLI_addtail(&material->graph.outlink_aovs, aov_link);
 }
 
+void GPU_material_add_output_link_outline(GPUMaterial *material, GPUNodeLink *link)
+{
+  GPUNodeGraphOutputLink *outline_link = MEM_new_zeroed<GPUNodeGraphOutputLink>(__func__);
+  outline_link->outlink = link;
+  BLI_addtail(&material->graph.outlink_outlines, outline_link);
+}
+
 void GPU_material_add_output_link_composite(GPUMaterial *material, GPUNodeLink *link)
 {
   GPUNodeGraphOutputLink *compositor_link = MEM_new_zeroed<GPUNodeGraphOutputLink>(__func__);

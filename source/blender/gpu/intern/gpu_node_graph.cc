@@ -1039,6 +1039,7 @@ void gpu_node_graph_free_nodes(GPUNodeGraph *graph)
 void gpu_node_graph_free(GPUNodeGraph *graph)
 {
   BLI_freelistN(&graph->outlink_aovs);
+  BLI_freelistN(&graph->outlink_outlines);
   BLI_freelistN(&graph->material_functions);
   BLI_freelistN(&graph->outlink_compositor);
   gpu_node_graph_free_nodes(graph);
@@ -1107,6 +1108,9 @@ void gpu_node_graph_prune_unused(GPUNodeGraph *graph)
 
   for (GPUNodeGraphOutputLink &aovlink : graph->outlink_aovs) {
     gpu_nodes_tag(graph, aovlink.outlink, GPU_NODE_TAG_AOV);
+  }
+  for (GPUNodeGraphOutputLink &outline_link : graph->outlink_outlines) {
+    gpu_nodes_tag(graph, outline_link.outlink, GPU_NODE_TAG_OUTLINE);
   }
   for (GPUNodeGraphFunctionLink &funclink : graph->material_functions) {
     gpu_nodes_tag(graph, funclink.outlink, GPU_NODE_TAG_FUNCTION);

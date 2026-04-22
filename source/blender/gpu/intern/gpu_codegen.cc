@@ -630,12 +630,15 @@ void GPUCodegen::generate_graphs()
   set_unique_ids();
 
   output.surface = graph_serialize(
-      GPU_NODE_TAG_SURFACE | GPU_NODE_TAG_AOV, graph.outlink_surface, "CLOSURE_DEFAULT");
+      GPU_NODE_TAG_SURFACE | GPU_NODE_TAG_AOV | GPU_NODE_TAG_OUTLINE,
+      graph.outlink_surface,
+      "CLOSURE_DEFAULT");
   output.volume = graph_serialize(GPU_NODE_TAG_VOLUME, graph.outlink_volume, "CLOSURE_DEFAULT");
   output.displacement = graph_serialize(
       GPU_NODE_TAG_DISPLACEMENT, graph.outlink_displacement, nullptr);
   output.thickness = graph_serialize(GPU_NODE_TAG_THICKNESS, graph.outlink_thickness, nullptr);
-  output.npr = graph_serialize(GPU_NODE_TAG_NPR, graph.outlink_npr, nullptr);
+  output.npr = graph_serialize(
+      GPU_NODE_TAG_NPR | GPU_NODE_TAG_OUTLINE, graph.outlink_npr, "float4(0.0f)");
   output.filter = graph_serialize(GPU_NODE_TAG_FILTER | GPU_NODE_TAG_AOV,
                                   graph.outlink_filter,
                                   nullptr);

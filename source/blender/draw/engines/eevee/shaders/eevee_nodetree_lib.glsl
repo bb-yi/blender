@@ -17,6 +17,7 @@ SHADER_LIBRARY_CREATE_INFO(eevee_hiz_data)
 #include "draw_object_infos_lib.glsl"
 #include "draw_view_lib.glsl"
 #include "eevee_nodetree_closures_lib.glsl"
+#include "eevee_outline_lib.glsl"
 #include "eevee_ray_trace_screen_lib.glsl"
 #include "eevee_renderpass_lib.glsl"
 #include "eevee_sampling_lib.glsl"

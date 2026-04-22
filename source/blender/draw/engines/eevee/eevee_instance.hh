@@ -44,6 +44,7 @@
 #include "eevee_lookdev.hh"
 #include "eevee_material.hh"
 #include "eevee_motion_blur.hh"
+#include "eevee_outline.hh"
 #include "eevee_pipeline.hh"
 #include "eevee_raytrace.hh"
 #include "eevee_render_texture.hh"
@@ -126,6 +127,7 @@ namespace blender::eevee
     Sampling sampling;
     RenderTextureModule render_textures;
     FilterMaterialModule filter_materials;
+    OutlineModule outline;
     Camera camera;
     Film film;
     RenderBuffers render_buffers;
@@ -211,6 +213,7 @@ namespace blender::eevee
       sampling(*this, uniform_data.data.clamp),
       render_textures(*this),
       filter_materials(*this),
+      outline(*this),
       camera(*this, uniform_data.data.camera),
       film(*this, uniform_data.data.film),
       render_buffers(*this, uniform_data.data.render_pass),

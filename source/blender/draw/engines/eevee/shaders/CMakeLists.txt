@@ -61,6 +61,8 @@ set(SRC_GLSL_FRAG
   eevee_hiz_debug_frag.glsl
   eevee_light_culling_debug_frag.glsl
   eevee_lookdev_display_frag.glsl
+  eevee_outline_detect_frag.glsl
+  eevee_outline_expand_frag.glsl
   eevee_occupancy_convert_frag.glsl
   eevee_renderpass_clear_frag.glsl
   eevee_shadow_filter_frag.glsl
@@ -199,6 +201,7 @@ set(SRC_GLSL_LIB
   # eevee_nodetree_lib.glsl # Has dependency on draw_model_lib that is hard to resolve
   eevee_occupancy_lib.glsl
   eevee_octahedron_lib.glsl
+  eevee_outline_lib.glsl
   eevee_ray_generate_lib.glsl
   eevee_ray_trace_screen_lib.glsl
   eevee_ray_types_lib.glsl

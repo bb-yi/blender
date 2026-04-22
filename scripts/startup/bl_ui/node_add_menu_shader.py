@@ -260,6 +260,12 @@ class NODE_MT_shader_node_output_base(node_add_menu.NodeMenu):
         )
         self.node_operator(
             layout,
+            "ShaderNodeOutlineControl",
+            label="Outline Control",
+            poll=object_or_npr_eevee_shader_nodes_poll(context),
+        )
+        self.node_operator(
+            layout,
             "ShaderNodeOutputLight",
             poll=object_not_eevee_shader_nodes_poll(context),
         )

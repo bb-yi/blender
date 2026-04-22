@@ -190,6 +190,8 @@ namespace blender::eevee
         rt_buffer_refract_);
     }
 
+    inst_.outline.render(render_view_, combined_fb_, extent_);
+
     inst_.gbuffer.release();
 
     if (inst_.filter_materials.has_stage_entries(SCE_EEVEE_FILTER_STAGE_BEFORE_VOLUME_FOG))

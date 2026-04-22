@@ -110,6 +110,7 @@ set(SRC
   engines/eevee/eevee_lut.cc
   engines/eevee/eevee_material.cc
   engines/eevee/eevee_motion_blur.cc
+  engines/eevee/eevee_outline.cc
   engines/eevee/eevee_pipeline.cc
   engines/eevee/eevee_precompute.cc
   engines/eevee/eevee_raytrace.cc
@@ -345,6 +346,7 @@ set(GLSL_SRC
   engines/eevee/shaders/infos/eevee_material_infos.hh
   engines/eevee/shaders/infos/eevee_motion_blur_infos.hh
   engines/eevee/shaders/infos/eevee_nodetree_infos.hh
+  engines/eevee/shaders/infos/eevee_outline_infos.hh
   engines/eevee/shaders/infos/eevee_render_texture_infos.hh
   engines/eevee/shaders/infos/eevee_raycast_infos.hh
   engines/eevee/shaders/infos/eevee_sampling_infos.hh
@@ -506,6 +508,9 @@ set(GLSL_SRC
   engines/eevee/shaders/eevee_nodetree_lib.glsl
   engines/eevee/shaders/eevee_nodetree_type_lib.glsl
   engines/eevee/shaders/eevee_nodetree_vert_lib.glsl
+  engines/eevee/shaders/eevee_outline_detect_frag.glsl
+  engines/eevee/shaders/eevee_outline_expand_frag.glsl
+  engines/eevee/shaders/eevee_outline_lib.glsl
   engines/eevee/shaders/eevee_occupancy_convert_frag.glsl
   engines/eevee/shaders/eevee_occupancy_lib.glsl
   engines/eevee/shaders/eevee_octahedron_lib.glsl

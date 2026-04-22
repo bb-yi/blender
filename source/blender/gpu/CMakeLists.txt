@@ -668,6 +668,7 @@ set(GLSL_SRC
   shaders/material/gpu_shader_material_normal.glsl
   shaders/material/gpu_shader_material_normal_map.glsl
   shaders/material/gpu_shader_material_npr.glsl
+  shaders/material/gpu_shader_material_outline_control.glsl
   shaders/material/gpu_shader_material_render_info.glsl
   shaders/material/gpu_shader_material_scene_time.glsl
   shaders/material/gpu_shader_material_world_environment.glsl

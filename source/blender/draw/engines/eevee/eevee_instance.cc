@@ -348,7 +348,13 @@ namespace blender::eevee
   void Instance::update_eval_members()
   {
     scene = DEG_get_evaluated_scene(depsgraph);
+    if (scene == nullptr) {
+      scene = DEG_get_input_scene(depsgraph);
+    }
     view_layer = DEG_get_evaluated_view_layer(depsgraph);
+    if (view_layer == nullptr) {
+      view_layer = DEG_get_input_view_layer(depsgraph);
+    }
     camera_eval_object = (camera_orig_object) ? DEG_get_evaluated(depsgraph, camera_orig_object) :
       nullptr;
 
@@ -556,6 +562,7 @@ namespace blender::eevee
     film.end_sync();
     cryptomatte.end_sync();
     pipelines.end_sync();
+    outline.sync();
     render_textures.end_sync();
     filter_materials.end_sync();
     light_probes.end_sync();

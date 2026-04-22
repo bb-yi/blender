@@ -327,6 +327,7 @@ class ShaderNodesInliner {
     if (is_npr_tree) {
       add_output_type("ShaderNodeNPR_Output");
       add_output_type("ShaderNodeOutputAOV");
+      add_output_type("ShaderNodeOutlineControl");
       return output_sockets;
     }
 
@@ -345,6 +346,7 @@ class ShaderNodesInliner {
           add_output_type("ShaderNodeOutputMaterial");
           add_output_type("ShaderNodeOutputLight");
           add_output_type("ShaderNodeOutputAOV");
+          add_output_type("ShaderNodeOutlineControl");
         }
         break;
       case ID_WO:
@@ -357,6 +359,7 @@ class ShaderNodesInliner {
       case ID_NT:
         add_output_type("ShaderNodeNPR_Output");
         add_output_type("ShaderNodeOutputAOV");
+        add_output_type("ShaderNodeOutlineControl");
         break;
       default:
         BLI_assert_unreachable();

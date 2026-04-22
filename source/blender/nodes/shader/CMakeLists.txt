@@ -79,6 +79,7 @@ set(SRC
   nodes/node_shader_npr_input.cc
   nodes/node_shader_npr_output.cc
   nodes/node_shader_npr_refraction.cc
+  nodes/node_shader_outline_control.cc
   nodes/node_shader_output_filter.cc
   nodes/node_shader_portal_in.cc
   nodes/node_shader_portal_out.cc

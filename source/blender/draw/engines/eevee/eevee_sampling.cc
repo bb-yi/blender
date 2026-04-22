@@ -27,12 +27,17 @@ namespace blender::eevee {
 
 void Sampling::init(const Scene *scene)
 {
+  const Scene *scene_ref = (scene != nullptr) ? scene : inst_.scene;
+  const ViewLayer *view_layer = inst_.view_layer;
+
   /* Note: Cycles have different option for view layers sample overrides. The current behavior
    * matches the default `Use`, which simply override if non-zero. */
-  uint64_t render_sample_count = (inst_.view_layer->samples > 0) ? inst_.view_layer->samples :
-                                                                   scene->eevee.taa_render_samples;
+  uint64_t render_sample_count = (view_layer != nullptr && view_layer->samples > 0) ?
+                                     view_layer->samples :
+                                     ((scene_ref != nullptr) ? scene_ref->eevee.taa_render_samples : 1);
 
-  sample_count_ = inst_.is_viewport() ? scene->eevee.taa_samples : render_sample_count;
+  sample_count_ = (inst_.is_viewport() && scene_ref != nullptr) ? scene_ref->eevee.taa_samples :
+                                                                  render_sample_count;
 
   if (inst_.is_image_render) {
     sample_count_ = math::max(uint64_t(1), sample_count_);
@@ -52,12 +57,13 @@ void Sampling::init(const Scene *scene)
     }
   }
 
-  motion_blur_steps_ = !inst_.is_viewport() && ((scene->r.mode & R_MBLUR) != 0) ?
-                           scene->eevee.motion_blur_steps :
+  motion_blur_steps_ = !inst_.is_viewport() && scene_ref != nullptr &&
+                               ((scene_ref->r.mode & R_MBLUR) != 0) ?
+                           scene_ref->eevee.motion_blur_steps :
                            1;
   sample_count_ = divide_ceil_u(sample_count_, motion_blur_steps_);
 
-  if (scene->eevee.flag & SCE_EEVEE_DOF_JITTER) {
+  if (scene_ref != nullptr && (scene_ref->eevee.flag & SCE_EEVEE_DOF_JITTER)) {
     if (sample_count_ == infinite_sample_count_) {
       /* Special case for viewport continuous rendering. We clamp to a max sample
        * to avoid the jittered dof never converging. */
@@ -81,13 +87,18 @@ void Sampling::init(const Scene *scene)
   auto clamp_value_load = [](float value) { return (value > 0.0) ? value : 1e20; };
 
   clamp_data_.sun_threshold = clamp_value_load(inst_.world.sun_threshold());
-  clamp_data_.surface_direct = clamp_value_load(scene->eevee.clamp_surface_direct);
-  clamp_data_.surface_indirect = clamp_value_load(scene->eevee.clamp_surface_indirect);
-  clamp_data_.volume_direct = clamp_value_load(scene->eevee.clamp_volume_direct);
-  clamp_data_.volume_indirect = clamp_value_load(scene->eevee.clamp_volume_indirect);
+  clamp_data_.surface_direct = clamp_value_load(
+      scene_ref != nullptr ? scene_ref->eevee.clamp_surface_direct : 0.0f);
+  clamp_data_.surface_indirect = clamp_value_load(
+      scene_ref != nullptr ? scene_ref->eevee.clamp_surface_indirect : 0.0f);
+  clamp_data_.volume_direct = clamp_value_load(
+      scene_ref != nullptr ? scene_ref->eevee.clamp_volume_direct : 0.0f);
+  clamp_data_.volume_indirect = clamp_value_load(
+      scene_ref != nullptr ? scene_ref->eevee.clamp_volume_indirect : 0.0f);
 
-  clamp_data_.direct_scale = scene->eevee.direct_light_intensity;
-  clamp_data_.indirect_scale = scene->eevee.indirect_light_intensity;
+  clamp_data_.direct_scale = (scene_ref != nullptr) ? scene_ref->eevee.direct_light_intensity : 1.0f;
+  clamp_data_.indirect_scale = (scene_ref != nullptr) ? scene_ref->eevee.indirect_light_intensity :
+                                                        1.0f;
 }
 
 void Sampling::init(const Object &probe_object)

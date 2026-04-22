@@ -43,6 +43,28 @@ static bool material_uses_glsl_function(const MaterialPass &pass)
   return false;
 }
 
+static bool node_tree_uses_outline_control(const bNodeTree &ntree, Set<const bNodeTree *> &visited)
+{
+  if (visited.contains(&ntree)) {
+    return false;
+  }
+  visited.add(&ntree);
+
+  for (const bNode *node = static_cast<const bNode *>(ntree.nodes.first); node != nullptr;
+       node = node->next)
+  {
+    if (node->type_legacy == SH_NODE_OUTLINE_CONTROL) {
+      return true;
+    }
+    if (node->type_legacy == NODE_GROUP && node->id != nullptr &&
+        node_tree_uses_outline_control(*reinterpret_cast<const bNodeTree *>(node->id), visited))
+    {
+      return true;
+    }
+  }
+  return false;
+}
+
 /* -------------------------------------------------------------------- */
 /** \name Material
  *
@@ -258,6 +280,32 @@ int MaterialModule::glsl_function_material_count() const
     }
   }
   return int(counted_materials.size());
+}
+
+bool MaterialModule::has_visible_outline_materials() const
+{
+  Set<const blender::Material *> counted_materials;
+  for (const auto item : material_map_.items()) {
+    blender::Material *material = item.key.mat;
+    if (material == nullptr || !counted_materials.add(material)) {
+      continue;
+    }
+
+    if (material->nodetree != nullptr) {
+      Set<const bNodeTree *> visited;
+      if (node_tree_uses_outline_control(*material->nodetree, visited)) {
+        return true;
+      }
+    }
+
+    if (bNodeTree *npr_tree = npr_tree_get_from_mat(material)) {
+      Set<const bNodeTree *> visited;
+      if (node_tree_uses_outline_control(*npr_tree, visited)) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 MaterialPass MaterialModule::material_pass_get(Object *ob,

@@ -71,6 +71,7 @@ void BackgroundPipeline::sync(GPUMaterial *gpumat,
 {
   Manager &manager = *inst_.manager;
   RenderBuffers &rbufs = inst_.render_buffers;
+  gpu::Shader *shader = (gpumat != nullptr) ? GPU_material_get_shader(gpumat) : nullptr;
 
   clear_ps_.init();
   clear_ps_.state_set(DRW_STATE_WRITE_COLOR);
@@ -87,6 +88,9 @@ void BackgroundPipeline::sync(GPUMaterial *gpumat,
   clear_ps_.barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS);
 
   world_ps_.init();
+  if (shader == nullptr) {
+    return;
+  }
   world_ps_.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
                       DRW_STATE_DEPTH_EQUAL);
   world_ps_.material_set(manager, gpumat);
@@ -133,6 +137,7 @@ void WorldPipeline::sync(GPUMaterial *gpumat)
   const int2 extent(1);
   constexpr eGPUTextureUsage usage = GPU_TEXTURE_USAGE_SHADER_WRITE |
                                      GPU_TEXTURE_USAGE_SHADER_READ;
+  gpu::Shader *shader = (gpumat != nullptr) ? GPU_material_get_shader(gpumat) : nullptr;
   dummy_cryptomatte_tx_.ensure_2d(gpu::TextureFormat::SFLOAT_32_32_32_32, extent, usage);
   dummy_renderpass_tx_.ensure_2d(gpu::TextureFormat::SFLOAT_16_16_16_16, extent, usage);
   dummy_aov_color_tx_.ensure_2d_array(gpu::TextureFormat::SFLOAT_16_16_16_16, extent, 1, usage);
@@ -140,6 +145,10 @@ void WorldPipeline::sync(GPUMaterial *gpumat)
 
   PassSimple &pass = cubemap_face_ps_;
   pass.init();
+  if (shader == nullptr) {
+    use_lightpath_node_ = false;
+    return;
+  }
   pass.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_DEPTH_ALWAYS);
 
   Manager &manager = *inst_.manager;
@@ -190,6 +199,11 @@ void WorldVolumePipeline::sync(GPUMaterial *gpumat)
               GPU_material_has_volume_output(gpumat);
   if (!is_valid_) {
     /* Skip if the material has not compiled yet. */
+    return;
+  }
+
+  if (GPU_material_get_shader(gpumat) == nullptr) {
+    is_valid_ = false;
     return;
   }
 
@@ -791,6 +805,8 @@ void DeferredLayerBase::gbuffer_pass_sync(Instance &inst)
   gbuffer_ps_.bind_image(RBUFS_VALUE_SLOT, &inst.render_buffers.rp_value_tx);
   /* Cryptomatte. */
   gbuffer_ps_.bind_image(RBUFS_CRYPTOMATTE_SLOT, &inst.render_buffers.cryptomatte_tx);
+  gbuffer_ps_.bind_image(OUTLINE_COLOR_SLOT, &inst.render_buffers.outline_color_tx);
+  gbuffer_ps_.bind_image(OUTLINE_INFO_SLOT, &inst.render_buffers.outline_info_tx);
   /* Storage Buffer. */
   /* Textures. */
   gbuffer_ps_.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst.pipelines.utility_tx);
@@ -857,6 +873,8 @@ template<typename F> void DeferredLayerBase::npr_pass_sync(Instance &inst, F cal
   npr_ps_.bind_texture(SCENE_SHADOW_TEX_SLOT, &inst.pipelines.shadow_filter.texture_ref());
   npr_ps_.bind_image(RBUFS_COLOR_SLOT, &inst.render_buffers.rp_color_tx);
   npr_ps_.bind_image(RBUFS_VALUE_SLOT, &inst.render_buffers.rp_value_tx);
+  npr_ps_.bind_image(OUTLINE_COLOR_SLOT, &inst.render_buffers.outline_color_tx);
+  npr_ps_.bind_image(OUTLINE_INFO_SLOT, &inst.render_buffers.outline_info_tx);
   /* Bind manually to fixed slots before the sub-pass shader is selected.
    * `bind_resources(inst.gbuffer)` resolves sampler bindings from the active shader interface,
    * which is not available yet during probe NPR pass setup and can crash in viewport sync. */

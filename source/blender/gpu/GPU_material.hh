@@ -499,6 +499,7 @@ void GPU_material_output_npr(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_output_filter(GPUMaterial *material, GPUNodeLink *link);
 
 void GPU_material_add_output_link_aov(GPUMaterial *material, GPUNodeLink *link, int hash);
+void GPU_material_add_output_link_outline(GPUMaterial *material, GPUNodeLink *link);
 
 void GPU_material_add_output_link_composite(GPUMaterial *material, GPUNodeLink *link);
 

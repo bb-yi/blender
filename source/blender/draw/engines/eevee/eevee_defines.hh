@@ -271,6 +271,10 @@
 #define FILTER_DEPTH_TEX_SLOT 39
 #define FILTER_CRYPTOMATTE_TEX_SLOT 40
 #define SCENE_SHADOW_TEX_SLOT 41
+#define OUTLINE_COLOR_TEX_SLOT 42
+#define OUTLINE_INFO_TEX_SLOT 43
+#define OUTLINE_SEED_TEX_SLOT 44
+#define OUTLINE_DEPTH_TEX_SLOT 45
 
 /* Images. */
 #define RBUFS_COLOR_SLOT 0
@@ -279,6 +283,8 @@
 #define GBUF_CLOSURE_SLOT 3
 #define GBUF_NORMAL_SLOT 4
 #define GBUF_HEADER_SLOT 5
+#define OUTLINE_COLOR_SLOT 6
+#define OUTLINE_INFO_SLOT 7
 /* Volume properties pass do not write to `rbufs`. Reuse the same bind points. */
 #define VOLUME_PROP_SCATTERING_IMG_SLOT 0
 #define VOLUME_PROP_EXTINCTION_IMG_SLOT 1
@@ -348,6 +354,7 @@
 #define RENDER_TEXTURE_SLOT_MAX 4
 #define FILTER_OBJECT_INFO_MAX 512
 #define FILTER_MASK_HASH_MAX 128
+#define OUTLINE_MAX_WIDTH 20.0f
 
 /* Cannot use math libraries in shared headers yet. */
 #define EEVEE_PI 3.14159265358979323846f /* pi */

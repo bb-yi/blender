@@ -114,6 +114,13 @@ void RenderBuffers::acquire(int2 extent)
                                      EEVEE_RENDER_PASS_CRYPTOMATTE_MATERIAL),
                          cryptomatte_format,
                          GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE);
+
+  const eGPUTextureUsage outline_usage = GPU_TEXTURE_USAGE_SHADER_READ |
+                                         GPU_TEXTURE_USAGE_SHADER_WRITE;
+  outline_color_tx.acquire(extent, gpu::TextureFormat::SFLOAT_16_16_16_16, outline_usage);
+  outline_info_tx.acquire(extent, gpu::TextureFormat::UNORM_16_16_16_16, outline_usage);
+  outline_color_tx.clear(float4(0.0f));
+  outline_info_tx.clear(float4(0.0f));
 }
 
 void RenderBuffers::release()
@@ -133,6 +140,8 @@ void RenderBuffers::release()
   prepass_normal_tx.release();
 
   cryptomatte_tx.release();
+  outline_color_tx.release();
+  outline_info_tx.release();
 }
 
 gpu::TextureFormat RenderBuffers::vector_tx_format()

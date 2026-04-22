@@ -65,6 +65,7 @@ enum GPUNodeTag {
   GPU_NODE_TAG_COMPOSITOR = (1 << 6),
   GPU_NODE_TAG_NPR = (1 << 7),
   GPU_NODE_TAG_FILTER = (1 << 8),
+  GPU_NODE_TAG_OUTLINE = (1 << 9),
 };
 
 ENUM_OPERATORS(GPUNodeTag)
@@ -194,6 +195,8 @@ struct GPUNodeGraph {
   GPUNodeLink *outlink_filter;
   /* List of GPUNodeGraphOutputLink */
   ListBaseT<GPUNodeGraphOutputLink> outlink_aovs;
+  /* List of GPUNodeGraphOutputLink */
+  ListBaseT<GPUNodeGraphOutputLink> outlink_outlines;
   /* List of GPUNodeGraphFunctionLink */
   ListBaseT<GPUNodeGraphFunctionLink> material_functions;
   /* List of GPUNodeGraphOutputLink */

@@ -388,6 +388,7 @@ class MaterialModule {
   int npr_material_count() const;
   int raycast_material_count() const;
   int glsl_function_material_count() const;
+  bool has_visible_outline_materials() const;
 
   /**
    * Returned Material references are valid until the next call to this function or material_get().
