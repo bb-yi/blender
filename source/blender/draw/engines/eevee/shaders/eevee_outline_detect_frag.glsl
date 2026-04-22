@@ -94,6 +94,6 @@ void main()
   const bool has_internal_edge = max_delta_angle > normal_threshold;
 
   if (has_silhouette || has_internal_edge) {
-    out_outline_seed = float4(outline_color.rgb, has_silhouette ? -line_width : line_width);
+    out_outline_seed = float4(outline_color.rgb, line_width);
   }
 }

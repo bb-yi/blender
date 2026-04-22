@@ -33,9 +33,7 @@ void main()
       }
 
       const float4 seed = texelFetch(outline_seed_tx, sample_texel, 0);
-      const float seed_width_signed = seed.a;
-      const float seed_width = abs(seed_width_signed);
-      const bool seed_is_silhouette = seed_width_signed < 0.0f;
+      const float seed_width = seed.a;
       if (seed_width <= 0.0f) {
         continue;
       }
@@ -62,18 +60,13 @@ void main()
       const float2 sample_uv = (float2(sample_texel) + 0.5f) / float2(extent);
       const float linear_depth = -drw_point_screen_to_view(float3(sample_uv, sample_depth)).z;
 
-      if (seed_is_silhouette && center_outline_id != 0u && center_outline_id == sample_outline_id) {
-        continue;
-      }
-
       if (sample_outline_id != center_outline_id && center_depth < sample_depth) {
         continue;
       }
 
-      const float depth_epsilon = 1e-6f;
-      bool use_sample = linear_depth < (best_linear_depth - depth_epsilon);
-      use_sample = use_sample || ((abs(linear_depth - best_linear_depth) <= depth_epsilon) &&
-                                  (alpha > best_color.a));
+      bool use_sample = alpha > best_color.a;
+      use_sample = use_sample || ((abs(alpha - best_color.a) < 1e-6f) &&
+                                  (linear_depth < best_linear_depth));
 
       if (use_sample) {
         best_color = float4(outline_color.rgb * alpha, alpha);
