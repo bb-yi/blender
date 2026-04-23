@@ -19,7 +19,7 @@ namespace nodes::node_shader_outline_control_cc {
 static void node_declare(NodeDeclarationBuilder &b)
 {
   b.add_input<decl::Color>("Line Color").default_value({0.0f, 0.0f, 0.0f, 1.0f});
-  b.add_input<decl::Float>("Line Width").default_value(2.0f).min(0.0f).max(20.0f);
+  b.add_input<decl::Float>("Line Width").default_value(2.0f).min(0.0f);
   b.add_input<decl::Float>("Depth Threshold").default_value(0.1f).min(0.0f).max(1.0f);
   b.add_input<decl::Float>("Normal Threshold").default_value(0.5f).min(0.0f).max(1.0f);
   b.add_input<decl::Int>("Outline ID").default_value(0).min(0).max(65535);

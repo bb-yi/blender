@@ -8,14 +8,26 @@
 #include "gpu_shader_math_base_lib.glsl"
 #include "gpu_shader_utildefines_lib.glsl"
 
+/* Width is stored in a UNORM16 channel. Reserve the top code-point so unpacking never hits 1.0
+ * exactly and can represent very large widths without a fixed shader-side cap. */
+#define OUTLINE_WIDTH_PACK_MAX (65534.0f / 65535.0f)
+
 float outline_width_pack(float width)
 {
-  return saturate(width / OUTLINE_MAX_WIDTH);
+  width = max(width, 0.0f);
+  if (width <= 0.0f) {
+    return 0.0f;
+  }
+  return min(width / (width + 1.0f), OUTLINE_WIDTH_PACK_MAX);
 }
 
 float outline_width_unpack(float width_packed)
 {
-  return width_packed * OUTLINE_MAX_WIDTH;
+  width_packed = clamp(width_packed, 0.0f, OUTLINE_WIDTH_PACK_MAX);
+  if (width_packed <= 0.0f) {
+    return 0.0f;
+  }
+  return width_packed / (1.0f - width_packed);
 }
 
 float outline_id_pack(uint outline_id)
