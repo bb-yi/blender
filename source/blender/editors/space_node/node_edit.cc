@@ -33,6 +33,7 @@
 #include "BKE_scene.hh"
 #include "BKE_scene_runtime.hh"
 #include "BKE_screen.hh"
+#include "BKE_text.h"
 
 #include "BLI_listbase.h"
 #include "BLI_math_vector.h"
@@ -2125,24 +2126,10 @@ void NODE_OT_shader_script_update(wmOperatorType *ot)
 /** \name GLSL Function Refresh
  * \{ */
 
-static bool node_glsl_function_refresh_poll(bContext *C)
-{
-  SpaceNode *snode = CTX_wm_space_node(C);
-  bNode *node = static_cast<bNode *>(
-      CTX_data_pointer_get_type(C, "node", RNA_ShaderNodeGLSLFunction).data);
-
-  if (!node && snode && snode->edittree) {
-    node = bke::node_get_active(*snode->edittree);
-  }
-
-  if (node && node->type_legacy == SH_NODE_GLSL_FUNCTION) {
-    return ED_operator_node_editable(C);
-  }
-
-  return false;
-}
-
-static wmOperatorStatus node_glsl_function_refresh_exec(bContext *C, wmOperator * /*op*/)
+static bool node_glsl_function_context_get(bContext *C,
+                                           bNodeTree **r_ntree,
+                                           PointerRNA *r_nodeptr,
+                                           bNode **r_node)
 {
   SpaceNode *snode = CTX_wm_space_node(C);
   PointerRNA nodeptr = CTX_data_pointer_get_type(C, "node", RNA_ShaderNodeGLSLFunction);
@@ -2156,9 +2143,35 @@ static wmOperatorStatus node_glsl_function_refresh_exec(bContext *C, wmOperator 
   else if (snode && snode->edittree) {
     ntree = snode->edittree;
     node = bke::node_get_active(*snode->edittree);
+    if (node != nullptr && node->type_legacy == SH_NODE_GLSL_FUNCTION) {
+      nodeptr = RNA_pointer_create_discrete(&ntree->id, RNA_ShaderNodeGLSLFunction, node);
+    }
   }
 
   if (node == nullptr || ntree == nullptr || node->type_legacy != SH_NODE_GLSL_FUNCTION) {
+    return false;
+  }
+
+  *r_ntree = ntree;
+  *r_nodeptr = nodeptr;
+  *r_node = node;
+  return true;
+}
+
+static bool node_glsl_function_refresh_poll(bContext *C)
+{
+  bNodeTree *ntree = nullptr;
+  PointerRNA nodeptr = {};
+  bNode *node = nullptr;
+  return node_glsl_function_context_get(C, &ntree, &nodeptr, &node) && ED_operator_node_editable(C);
+}
+
+static wmOperatorStatus node_glsl_function_refresh_exec(bContext *C, wmOperator * /*op*/)
+{
+  bNodeTree *ntree = nullptr;
+  PointerRNA nodeptr = {};
+  bNode *node = nullptr;
+  if (!node_glsl_function_context_get(C, &ntree, &nodeptr, &node)) {
     return OPERATOR_CANCELLED;
   }
 
@@ -2172,6 +2185,41 @@ static wmOperatorStatus node_glsl_function_refresh_exec(bContext *C, wmOperator 
   WM_event_add_notifier(C, NC_NODE | NA_EDITED, &ntree->id);
 
   return OPERATOR_FINISHED;
+}
+
+static wmOperatorStatus node_glsl_function_new_text_exec(bContext *C, wmOperator * /*op*/)
+{
+  bNodeTree *ntree = nullptr;
+  PointerRNA nodeptr = {};
+  bNode *node = nullptr;
+  if (!node_glsl_function_context_get(C, &ntree, &nodeptr, &node)) {
+    return OPERATOR_CANCELLED;
+  }
+
+  PropertyRNA *script_prop = RNA_struct_find_property(&nodeptr, "script");
+  if (script_prop == nullptr) {
+    return OPERATOR_CANCELLED;
+  }
+
+  Text *text = BKE_text_add(CTX_data_main(C), DATA_("Text"));
+  PointerRNA text_ptr = RNA_id_pointer_create(&text->id);
+  RNA_property_pointer_set(&nodeptr, script_prop, text_ptr, nullptr);
+  RNA_property_update(C, &nodeptr, script_prop);
+
+  WM_event_add_notifier(C, NC_TEXT | NA_ADDED, text);
+  return OPERATOR_FINISHED;
+}
+
+void NODE_OT_glsl_function_new_text(wmOperatorType *ot)
+{
+  ot->name = "New GLSL Function Text";
+  ot->description = "Create a new Text datablock and assign it to the active GLSL Function node";
+  ot->idname = "NODE_OT_glsl_function_new_text";
+
+  ot->poll = node_glsl_function_refresh_poll;
+  ot->exec = node_glsl_function_new_text_exec;
+
+  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
 }
 
 void NODE_OT_glsl_function_refresh(wmOperatorType *ot)
