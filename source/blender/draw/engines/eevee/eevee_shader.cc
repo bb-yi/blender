@@ -1685,8 +1685,14 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
 {
   eMaterialDisplacement displacement_type = to_displacement_type(blender_mat->displacement_method);
   eMaterialThickness thickness_type = to_thickness_type(blender_mat->thickness_mode);
-  const bool compile_surface_graph = (pipeline_type != MAT_PIPE_DEFERRED_NPR);
   const bool compile_npr_graph = (pipeline_type == MAT_PIPE_DEFERRED_NPR);
+  const bool needs_npr_vertex_displacement = compile_npr_graph &&
+                                             (displacement_type != MAT_DISPLACEMENT_BUMP);
+  /* NPR passes normally only need the attached NPR tree, but true displacement lives on the
+   * primary material output. Compile that graph too so the NPR pass uses the same deformed
+   * geometry as the prepass/shading passes. */
+  const bool compile_surface_graph = (pipeline_type != MAT_PIPE_DEFERRED_NPR) ||
+                                     needs_npr_vertex_displacement;
 
   uint64_t shader_uuid = shader_uuid_from_material_type(
       pipeline_type,

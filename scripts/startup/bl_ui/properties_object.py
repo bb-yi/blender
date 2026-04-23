@@ -168,6 +168,7 @@ class OBJECT_PT_relations(ObjectButtonsPanel, Panel):
         col = flow.column()
 
         col.prop(ob, "pass_index")
+        col.prop(ob, "refraction_layer_index")
 
 
 class COLLECTION_MT_context_menu(Menu):

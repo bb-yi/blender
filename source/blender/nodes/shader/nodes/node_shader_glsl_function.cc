@@ -31,6 +31,7 @@
 #include "NOD_sync_sockets.hh"
 
 #include "UI_interface_layout.hh"
+#include "UI_interface_c.hh"
 #include "UI_resources.hh"
 
 namespace blender
@@ -4602,7 +4603,7 @@ vec3 glsl_ambient_lighting()
       }
     }
 
-    static void draw_node_layout_content(ui::Layout& layout, PointerRNA* ptr)
+    static void draw_node_layout_content(ui::Layout& layout, bContext* C, PointerRNA* ptr)
     {
       layout.use_property_split_set(true);
       layout.use_property_decorate_set(false);
@@ -4614,16 +4615,57 @@ vec3 glsl_ambient_lighting()
       }
 
       {
-        ui::Layout& row = layout.row(true);
-        if (RNA_enum_get(ptr, "source_mode") == SHD_GLSL_FUNCTION_SOURCE_INTERNAL)
+        const bool is_internal = RNA_enum_get(ptr, "source_mode") == SHD_GLSL_FUNCTION_SOURCE_INTERNAL;
+        const bool has_script = RNA_pointer_get(ptr, "script").data != nullptr;
+
+        if (is_internal && !has_script)
         {
-          row.prop(ptr, "script", ui::ITEM_R_SPLIT_EMPTY_NAME, "", ICON_NONE);
+          ui::Layout &split = layout.split(0.4f, false);
+          split.use_property_split_set(false);
+          split.use_property_decorate_set(false);
+
+          ui::Layout &label_row = split.row(false);
+          label_row.use_property_split_set(false);
+          label_row.use_property_decorate_set(false);
+          label_row.label("", ICON_NONE);
+
+          ui::Layout &field_row = split.row(true);
+          field_row.use_property_split_set(false);
+          field_row.use_property_decorate_set(false);
+          field_row.op("node.glsl_function_new_text", "", ICON_ADD);
+          if (C != nullptr)
+          {
+            template_id(&field_row, C, ptr, "script", nullptr, nullptr, nullptr);
+          }
+          else
+          {
+            field_row.prop(ptr, "script", UI_ITEM_NONE, "", ICON_NONE);
+          }
+          field_row.op("node.glsl_function_refresh", "", ICON_FILE_REFRESH);
         }
         else
         {
-          row.prop(ptr, "filepath", ui::ITEM_R_SPLIT_EMPTY_NAME, "", ICON_NONE);
+          ui::Layout& row = layout.row(true);
+          row.use_property_split_set(false);
+          row.use_property_decorate_set(false);
+
+          if (is_internal)
+          {
+            if (C != nullptr)
+            {
+              template_id(&row, C, ptr, "script", nullptr, nullptr, nullptr);
+            }
+            else
+            {
+              row.prop(ptr, "script", UI_ITEM_NONE, "", ICON_NONE);
+            }
+          }
+          else
+          {
+            row.prop(ptr, "filepath", UI_ITEM_NONE, "", ICON_NONE);
+          }
+          row.op("node.glsl_function_refresh", "", ICON_FILE_REFRESH);
         }
-        row.op("node.glsl_function_refresh", "", ICON_FILE_REFRESH);
       }
 
       layout.prop(ptr, "function_name", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
@@ -4649,14 +4691,14 @@ vec3 glsl_ambient_lighting()
       }
     }
 
-    static void node_layout(ui::Layout& layout, bContext* /*C*/, PointerRNA* ptr)
+    static void node_layout(ui::Layout& layout, bContext* C, PointerRNA* ptr)
     {
-      draw_node_layout_content(layout, ptr);
+      draw_node_layout_content(layout, C, ptr);
     }
 
-    static void node_layout_ex(ui::Layout& layout, bContext* /*C*/, PointerRNA* ptr)
+    static void node_layout_ex(ui::Layout& layout, bContext* C, PointerRNA* ptr)
     {
-      draw_node_layout_content(layout, ptr);
+      draw_node_layout_content(layout, C, ptr);
     }
 
     static void node_init(bNodeTree* /*ntree*/, bNode* node)
