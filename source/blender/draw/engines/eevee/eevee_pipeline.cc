@@ -1283,6 +1283,10 @@ gpu::Texture *DeferredLayer::render(View &main_view,
   {
     ScopedTelemetrySample telemetry_sample(inst_.telemetry,
                                            TelemetryStageId::MainDeferredGBufferPass);
+    if (inst_.outline.enabled()) {
+      rb.outline_color_tx.clear(float4(0.0f));
+      rb.outline_info_tx.clear(float4(0.0f));
+    }
     inst_.gbuffer.bind(gbuffer_fb);
     inst_.manager->submit(gbuffer_ps_, render_view);
   }
@@ -1355,6 +1359,10 @@ gpu::Texture *DeferredLayer::render(View &main_view,
     }
     npr_radiance_input_tx_ = nullptr;
     npr_radiance_input.release();
+  }
+
+  if (inst_.outline.enabled()) {
+    inst_.outline.render(render_view, combined_fb, extent);
   }
 
   if (use_feedback_output_) {
