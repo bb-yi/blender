@@ -10,9 +10,51 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_outline_detect)
 #include "eevee_gbuffer_read_lib.glsl"
 #include "eevee_outline_lib.glsl"
 
-float outline_depth_fetch(int2 texel)
+float outline_screen_depth_fetch(int2 texel)
 {
   return 1.0f - texelFetch(depth_tx, texel, 0).r;
+}
+
+float3 outline_screen_to_view(int2 texel, int2 extent, float screen_depth)
+{
+  const float2 uv = (float2(texel) + 0.5f) / float2(extent);
+  return drw_point_screen_to_view(float3(uv, screen_depth));
+}
+
+float3 outline_reconstruct_normal(int2 texel, int2 extent, float3 current_view_direction)
+{
+  const int2 texel_min = int2(0);
+  const int2 texel_max = extent - int2(1);
+
+  const float3 t0 = outline_screen_to_view(texel, extent, outline_screen_depth_fetch(texel));
+  const float3 x1 = outline_screen_to_view(
+      clamp(texel + int2(-1, 0), texel_min, texel_max),
+      extent,
+      outline_screen_depth_fetch(clamp(texel + int2(-1, 0), texel_min, texel_max)));
+  const float3 x2 = outline_screen_to_view(
+      clamp(texel + int2(1, 0), texel_min, texel_max),
+      extent,
+      outline_screen_depth_fetch(clamp(texel + int2(1, 0), texel_min, texel_max)));
+  const float3 y1 = outline_screen_to_view(
+      clamp(texel + int2(0, -1), texel_min, texel_max),
+      extent,
+      outline_screen_depth_fetch(clamp(texel + int2(0, -1), texel_min, texel_max)));
+  const float3 y2 = outline_screen_to_view(
+      clamp(texel + int2(0, 1), texel_min, texel_max),
+      extent,
+      outline_screen_depth_fetch(clamp(texel + int2(0, 1), texel_min, texel_max)));
+
+  const float x_distance_1 = abs(x1.z - t0.z);
+  const float x_distance_2 = abs(x2.z - t0.z);
+  const float y_distance_1 = abs(y1.z - t0.z);
+  const float y_distance_2 = abs(y2.z - t0.z);
+
+  const float3 x = (x_distance_1 < x_distance_2) ? x1 : x2;
+  const float3 y = (y_distance_1 < y_distance_2) ? y1 : y2;
+
+  float3 n = normalize(cross(x - t0, y - t0));
+  n = (dot(n, current_view_direction) < 0.0f) ? n : -n;
+  return drw_normal_view_to_world(n);
 }
 
 void main()
@@ -31,16 +73,34 @@ void main()
     return;
   }
 
-  const float center_depth = outline_depth_fetch(texel);
+  const float center_depth = outline_screen_depth_fetch(texel);
   if (center_depth >= 1.0f) {
     return;
   }
 
   const gbuffer::Header center_header = gbuffer::read_header(texel);
-  const bool center_has_gbuffer = !center_header.is_empty();
-  const float3 center_normal = center_has_gbuffer ? gbuffer::read_normal(texel) : float3(0.0f);
-  const float3 center_vP = outline_screen_to_view(texel, extent, center_depth);
+  if (center_header.is_empty()) {
+    return;
+  }
+
+  const float3 center_normal = gbuffer::read_normal(texel);
+  const float3 center_position = outline_screen_to_view(texel, extent, center_depth);
   const uint center_outline_id = outline_id_unpack(outline_info.a);
+  const float2 center_uv = (float2(texel) + 0.5f) / float2(extent);
+  const float3 current_view_direction = drw_point_screen_to_view(float3(center_uv, 1.0f));
+
+  float3 true_normal = float3(0.0f);
+  for (int x = -1; x <= 1; x++) {
+    for (int y = -1; y <= 1; y++) {
+      const int2 sample_texel = texel + int2(x, y);
+      if (any(lessThan(sample_texel, int2(0))) || any(greaterThanEqual(sample_texel, extent))) {
+        continue;
+      }
+      true_normal += outline_reconstruct_normal(sample_texel, extent, current_view_direction);
+    }
+  }
+  true_normal = normalize(true_normal);
+  const float3 true_normal_camera = drw_normal_world_to_view(true_normal);
 
   const int2 offsets[4] = {int2(-1, 0), int2(1, 0), int2(0, -1), int2(0, 1)};
   float max_delta_distance = 0.0f;
@@ -54,33 +114,23 @@ void main()
       continue;
     }
 
-    const float sample_outline_alpha = texelFetch(outline_color_tx, sample_texel, 0).a;
-    const float sample_depth = outline_depth_fetch(sample_texel);
-
-    if (sample_outline_alpha <= 0.0f || sample_depth >= 1.0f) {
-      has_id_boundary = true;
-      continue;
-    }
+    const float sample_depth = outline_screen_depth_fetch(sample_texel);
+    const bool sample_has_gbuffer = !gbuffer::read_header(sample_texel).is_empty();
+    const float3 sample_normal = sample_has_gbuffer ? gbuffer::read_normal(sample_texel) : float3(0.0f);
+    const float3 sample_position = outline_screen_to_view(sample_texel, extent, sample_depth);
+    const uint sample_outline_id = outline_id_unpack(texelFetch(outline_info_tx, sample_texel, 0).a);
 
     if (center_depth <= sample_depth) {
-      const gbuffer::Header sample_header = gbuffer::read_header(sample_texel);
-      const bool sample_has_gbuffer = !sample_header.is_empty();
-      const float3 sample_normal = sample_has_gbuffer ? gbuffer::read_normal(sample_texel) :
-                                                        float3(0.0f);
-      const float3 sample_vP = outline_screen_to_view(sample_texel, extent, sample_depth);
-      const uint sample_outline_id = outline_id_unpack(
-          texelFetch(outline_info_tx, sample_texel, 0).a);
-
-      const float delta_normal = (center_has_gbuffer && sample_has_gbuffer) ?
-                                     (1.0f - dot(center_normal, sample_normal)) :
-                                     0.0f;
+      const float delta_normal = dot(center_normal, sample_normal);
+      const float plane_distance = dot(true_normal_camera, center_position);
+      const float sample_plane_distance = dot(true_normal_camera, sample_position);
       const float pixel_world_size = max(
           outline_pixel_world_size_at(sample_depth, extent, sample_texel), 1e-6f);
-      const float delta_distance = abs(center_vP.z - sample_vP.z) / pixel_world_size;
+      const float delta_distance = abs(plane_distance - sample_plane_distance) / pixel_world_size;
 
       max_delta_distance = max(max_delta_distance, delta_distance);
-      max_delta_angle = max(max_delta_angle, delta_normal);
-      has_id_boundary = has_id_boundary || (sample_outline_id != center_outline_id);
+      max_delta_angle = max(max_delta_angle, 1.0f - delta_normal);
+      has_id_boundary = has_id_boundary || sample_outline_id != center_outline_id;
     }
   }
 
