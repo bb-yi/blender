@@ -909,6 +909,7 @@ template<typename F> void DeferredLayerBase::npr_pass_sync(Instance &inst, F cal
 
 void DeferredLayer::begin_sync()
 {
+  has_outline_ = false;
   {
     prepass_ps_.init();
     /* Textures. */
@@ -1184,6 +1185,7 @@ PassMain::Sub *DeferredLayer::material_add(blender::Material *blender_mat, GPUMa
   }
   closure_bits_ |= closure_bits;
   closure_count_ = max_ii(closure_count_, count_bits_i(closure_bits));
+  has_outline_ = has_outline_ || inst_.materials.material_uses_outline_control(blender_mat);
 
   bool has_shader_to_rgba = (closure_bits & CLOSURE_SHADER_TO_RGBA) != 0;
   bool use_thickness_from_shadow = (blender_mat->blend_flag & MA_BL_THICKNESS_FROM_SHADOW) != 0;
@@ -1214,6 +1216,7 @@ PassMain::Sub *DeferredLayer::material_add(blender::Material *blender_mat, GPUMa
 PassMain::Sub *DeferredLayer::npr_add(blender::Material *blender_mat, GPUMaterial *gpumat)
 {
   BLI_assert(GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR));
+  has_outline_ = has_outline_ || inst_.materials.material_uses_outline_control(blender_mat);
   PassMain::Sub *pass = material_surface_cull_pass_get(
       npr_double_sided_ps_, npr_single_sided_ps_, npr_front_cull_ps_, blender_mat);
 
@@ -1283,7 +1286,7 @@ gpu::Texture *DeferredLayer::render(View &main_view,
   {
     ScopedTelemetrySample telemetry_sample(inst_.telemetry,
                                            TelemetryStageId::MainDeferredGBufferPass);
-    if (inst_.outline.enabled()) {
+    if (has_outline_) {
       rb.outline_color_tx.clear(float4(0.0f));
       rb.outline_info_tx.clear(float4(0.0f));
     }
@@ -1361,7 +1364,7 @@ gpu::Texture *DeferredLayer::render(View &main_view,
     npr_radiance_input.release();
   }
 
-  if (inst_.outline.enabled()) {
+  if (has_outline_) {
     inst_.outline.render(render_view, combined_fb, extent);
   }
 

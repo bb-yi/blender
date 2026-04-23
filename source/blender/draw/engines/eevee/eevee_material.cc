@@ -291,20 +291,33 @@ bool MaterialModule::has_visible_outline_materials() const
       continue;
     }
 
-    if (material->nodetree != nullptr) {
-      Set<const bNodeTree *> visited;
-      if (node_tree_uses_outline_control(*material->nodetree, visited)) {
-        return true;
-      }
-    }
-
-    if (bNodeTree *npr_tree = npr_tree_get_from_mat(material)) {
-      Set<const bNodeTree *> visited;
-      if (node_tree_uses_outline_control(*npr_tree, visited)) {
-        return true;
-      }
+    if (material_uses_outline_control(material)) {
+      return true;
     }
   }
+  return false;
+}
+
+bool MaterialModule::material_uses_outline_control(const blender::Material *material) const
+{
+  if (material == nullptr) {
+    return false;
+  }
+
+  if (material->nodetree != nullptr) {
+    Set<const bNodeTree *> visited;
+    if (node_tree_uses_outline_control(*material->nodetree, visited)) {
+      return true;
+    }
+  }
+
+  if (bNodeTree *npr_tree = npr_tree_get_from_mat(const_cast<blender::Material *>(material))) {
+    Set<const bNodeTree *> visited;
+    if (node_tree_uses_outline_control(*npr_tree, visited)) {
+      return true;
+    }
+  }
+
   return false;
 }
 

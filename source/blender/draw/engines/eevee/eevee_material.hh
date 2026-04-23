@@ -389,6 +389,7 @@ class MaterialModule {
   int raycast_material_count() const;
   int glsl_function_material_count() const;
   bool has_visible_outline_materials() const;
+  bool material_uses_outline_control(const blender::Material *material) const;
 
   /**
    * Returned Material references are valid until the next call to this function or material_get().

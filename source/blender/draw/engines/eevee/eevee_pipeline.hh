@@ -415,6 +415,7 @@ class DeferredLayer : DeferredLayerBase {
   bool use_screen_reflection_ = false;
   bool use_clamp_direct_ = false;
   bool use_clamp_indirect_ = false;
+  bool has_outline_ = false;
 
  public:
   DeferredLayer(Instance &inst) : inst_(inst)
