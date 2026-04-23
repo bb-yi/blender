@@ -173,13 +173,14 @@ void SphereProbeModule::ensure_cubemap_render_target(int resolution)
   if (cubemap_tx_.ensure_cube(gpu::TextureFormat::SFLOAT_16_16_16_16, resolution, usage)) {
     for (int i : IndexRange(6)) {
       GPU_TEXTURE_FREE_SAFE(cubemap_face_views_[i]);
+      /* Each cubemap face view addresses exactly one array layer. */
       cubemap_face_views_[i] = GPU_texture_create_view("Probe.Cubemap.View",
                                                        cubemap_tx_,
                                                        gpu::TextureFormat::SFLOAT_16_16_16_16,
                                                        0,
                                                        1,
                                                        i,
-                                                       0,
+                                                       1,
                                                        true,
                                                        false);
     }
