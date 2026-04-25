@@ -4,8 +4,6 @@
 
 #include "BLI_math_base.h"
 
-#include "DNA_layer_types.h"
-
 #include "GPU_capabilities.hh"
 #include "GPU_texture.hh"
 
@@ -19,9 +17,8 @@ void OutlineModule::sync()
   const bool previous_enabled = enabled_;
   const bool previous_use_in_combined = use_in_combined_;
   const bool has_outline_materials = inst_.materials.has_visible_outline_materials();
-  const bool use_in_combined = (inst_.view_layer->eevee.flag &
-                                VIEW_LAYER_EEVEE_USE_OUTLINE_IN_COMBINED) != 0;
   const bool public_pass_enabled = inst_.render_buffers.data.outline_id != -1;
+  const bool use_in_combined = !public_pass_enabled;
   enabled_ = has_outline_materials && (GPU_max_images() > OUTLINE_INFO_SLOT) &&
              (use_in_combined || public_pass_enabled);
   use_in_combined_ = use_in_combined;

@@ -908,9 +908,7 @@ void Film::accumulate(View &view, gpu::Texture *combined_final_tx)
   history_display_tx_ = combined_tx_.current();
   outline_resolved_input_tx_ = inst_.outline.resolved_texture_or(dummy_outline_tx_.gpu_texture());
   has_outline_input_ = inst_.outline.has_result();
-  use_outline_in_combined_ = has_outline_input_ &&
-                             ((inst_.view_layer->eevee.flag &
-                               VIEW_LAYER_EEVEE_USE_OUTLINE_IN_COMBINED) != 0);
+  use_outline_in_combined_ = has_outline_input_ && inst_.outline.use_in_combined();
   data_.display_only = false;
   inst_.uniform_data.push_update();
 

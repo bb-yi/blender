@@ -65,11 +65,6 @@ enum eViewLayerGreasePencilFlags {
   GREASE_PENCIL_AS_SEPARATE_PASS = (1 << 0),
 };
 
-enum eViewLayerEEVEEFlags {
-  VIEW_LAYER_EEVEE_USE_OUTLINE_IN_COMBINED = (1 << 0),
-};
-ENUM_OPERATORS(eViewLayerEEVEEFlags)
-
 /* #ViewLayerAOV.type */
 enum eViewLayerAOVType {
   AOV_TYPE_VALUE = 0,
@@ -210,7 +205,7 @@ struct LayerCollection {
 /* Type containing EEVEE settings per view-layer */
 struct ViewLayerEEVEE {
   int render_passes = 0;
-  int flag = VIEW_LAYER_EEVEE_USE_OUTLINE_IN_COMBINED;
+  int flag = 0;
   float ambient_occlusion_distance = 10.0f;
   int _pad = 0;
 };
