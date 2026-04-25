@@ -117,6 +117,7 @@ void main()
   float max_delta_distance = 0.0f;
   float max_delta_angle = 0.0f;
   bool has_id_boundary = false;
+  float seed_line_width = line_width;
 
   for (int i = 0; i < 4; i++) {
     const int2 offset = offsets[i];
@@ -129,7 +130,14 @@ void main()
     const bool sample_has_gbuffer = !gbuffer::read_header(sample_texel).is_empty();
     const float3 sample_normal = sample_has_gbuffer ? gbuffer::read_normal(sample_texel) : float3(0.0f);
     const float3 sample_position = outline_screen_to_view(sample_texel, extent, sample_depth);
-    const uint sample_outline_id = outline_id_unpack(outline_source_info_fetch(sample_texel).a);
+    const float4 sample_outline_info = outline_source_info_fetch(sample_texel);
+    const float sample_line_width = outline_width_unpack(sample_outline_info.r);
+    const uint sample_outline_id = outline_id_unpack(sample_outline_info.a);
+
+    if (sample_outline_id != center_outline_id) {
+      has_id_boundary = true;
+      seed_line_width = max(seed_line_width, sample_line_width);
+    }
 
     if (center_depth <= sample_depth) {
       const float delta_normal = dot(center_normal, sample_normal);
@@ -141,7 +149,6 @@ void main()
 
       max_delta_distance = max(max_delta_distance, delta_distance);
       max_delta_angle = max(max_delta_angle, 1.0f - delta_normal);
-      has_id_boundary = has_id_boundary || sample_outline_id != center_outline_id;
     }
   }
 
@@ -149,6 +156,6 @@ void main()
   const bool has_internal_edge = max_delta_angle > normal_threshold;
 
   if (has_silhouette || has_internal_edge) {
-    out_outline_seed = float4(outline_color.rgb, line_width);
+    out_outline_seed = float4(outline_color.rgb, seed_line_width);
   }
 }
