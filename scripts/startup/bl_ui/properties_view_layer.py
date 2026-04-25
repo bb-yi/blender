@@ -127,7 +127,7 @@ class VIEWLAYER_PT_eevee_layer_passes_data(ViewLayerButtonsPanel, Panel):
         sub.active = not scene.render.use_motion_blur
         sub.prop(view_layer, "use_pass_vector")
         col.prop(view_layer, "use_pass_grease_pencil", text="Grease Pencil")
-        col.prop(view_layer_eevee, "use_pass_outline", text="Outline Pass")
+        col.prop(view_layer_eevee, "use_pass_outline", text="Outline")
 
 
 class VIEWLAYER_PT_workbench_layer_passes_data(ViewLayerButtonsPanel, Panel):
