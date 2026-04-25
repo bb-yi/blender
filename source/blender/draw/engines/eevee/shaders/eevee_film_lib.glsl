@@ -517,6 +517,19 @@ float4 film_store_combined(FilmSample dst,
   color_src = film_apply_outline_to_combined(color_src, outline_color);
 
   if (use_reprojection) {
+    /* Screen-space outlines are already a resolved post effect. Reprojecting their shaded result
+     * through Combined history can leave partially darkened pixels behind after navigation stops,
+     * so current outlined pixels bypass temporal history. */
+    if (use_outline_in_combined && outline_color.a > 1e-4f) {
+      color = clamp_negative_values(color_src);
+      if (display_id == -1) {
+        display = color;
+      }
+      color = film_patch_float_for_16f_storage(color);
+      imageStoreFast(out_combined_img, dst.texel, color);
+      return color;
+    }
+
     /* Interactive accumulation. Do reprojection and Temporal Anti-Aliasing. */
 
     /* Reproject by finding where this pixel was in the previous frame. */
