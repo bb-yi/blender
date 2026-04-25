@@ -73,6 +73,11 @@ class Film {
 
   /** Incoming combined buffer with post FX applied (motion blur + depth of field). */
   gpu::Texture *combined_final_tx_ = nullptr;
+  gpu::Texture *history_display_tx_ = nullptr;
+  gpu::Texture *outline_resolved_input_tx_ = nullptr;
+  bool32_t use_outline_in_combined_ = false;
+  bool32_t has_outline_input_ = false;
+  int outline_id_ = -1;
 
   /** Are we using the compute shader/pipeline. */
   bool use_compute_ = false;
@@ -93,8 +98,11 @@ class Film {
   Texture cryptomatte_tx_;
   /** Combined "Color" buffer. Double buffered to allow re-projection. */
   SwapChain<Texture, 2> combined_tx_;
+  /** Final public Combined result. Keeps Outline separate from the TAA history buffer. */
+  Texture combined_output_tx_ = {"combined_output_tx"};
   /** Weight buffers. Double buffered to allow updating it during accumulation. */
   SwapChain<Texture, 2> weight_tx_;
+  Texture dummy_outline_tx_ = {"dummy_outline_tx"};
 
   PassSimple accumulate_ps_ = {"Film.Accumulate"};
   PassSimple copy_ps_ = {"Film.Copy"};
@@ -217,7 +225,8 @@ class Film {
            !ELEM(pass_type,
                  EEVEE_RENDER_PASS_COMBINED,
                  EEVEE_RENDER_PASS_VECTOR,
-                 EEVEE_RENDER_PASS_TRANSPARENT);
+                 EEVEE_RENDER_PASS_TRANSPARENT,
+                 EEVEE_RENDER_PASS_OUTLINE);
   }
 
   /* Returns layer offset in the accumulation texture. -1 if the pass is not enabled. */
@@ -256,6 +265,8 @@ class Film {
         return data_.ambient_occlusion_id;
       case EEVEE_RENDER_PASS_TRANSPARENT:
         return data_.transparent_id;
+      case EEVEE_RENDER_PASS_OUTLINE:
+        return outline_id_;
       case EEVEE_RENDER_PASS_CRYPTOMATTE_OBJECT:
         return data_.cryptomatte_object_id;
       case EEVEE_RENDER_PASS_CRYPTOMATTE_ASSET:
@@ -332,6 +343,9 @@ class Film {
         break;
       case EEVEE_RENDER_PASS_TRANSPARENT:
         result.append(RE_PASSNAME_TRANSPARENT);
+        break;
+      case EEVEE_RENDER_PASS_OUTLINE:
+        result.append(RE_PASSNAME_OUTLINE);
         break;
       case EEVEE_RENDER_PASS_CRYPTOMATTE_OBJECT:
         build_cryptomatte_passes(RE_PASSNAME_CRYPTOMATTE_OBJECT);

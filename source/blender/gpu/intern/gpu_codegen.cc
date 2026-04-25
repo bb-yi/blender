@@ -296,6 +296,9 @@ void GPUCodegen::generate_resources()
       ss << "vec4 _pad" << i << ";\n";
     }
     ss << "};\n\n";
+    ss << "#define UniformAttrs_host_shared_ UniformAttrs\n";
+    ss << "#define UniformAttrs_host_shared_uniform_ UniformAttrs\n";
+    ss << "\n";
 
     /* TODO(fclem): Use the macro for length. Currently not working for EEVEE. */
     /* DRW_RESOURCE_CHUNK_LEN = 512 */

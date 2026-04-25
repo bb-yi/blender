@@ -17,6 +17,7 @@ class OutlineModule {
  private:
   Instance &inst_;
   bool enabled_ = false;
+  bool use_in_combined_ = false;
 
   PassSimple detect_ps_ = {"Outline.Detect"};
   PassSimple jfa_init_ps_ = {"Outline.JFA.Init"};
@@ -25,8 +26,10 @@ class OutlineModule {
 
   Framebuffer detect_fb_ = {"Outline.Detect.FB"};
   Framebuffer jfa_init_fb_ = {"Outline.JFA.Init.FB"};
+  Framebuffer resolve_fb_ = {"Outline.Resolve.FB"};
 
   TextureFromPool edge_seed_tx_ = {"Outline.EdgeSeed"};
+  TextureFromPool resolved_outline_tx_ = {"Outline.Resolved"};
   SwapChain<TextureFromPool, 2> jfa_tx_;
 
   int jfa_step_size_ = 1;
@@ -36,11 +39,27 @@ class OutlineModule {
   OutlineModule(Instance &inst) : inst_(inst) {}
 
   void sync();
-  void render(View &view, Framebuffer &combined_fb, int2 extent);
+  void render(View &view, int2 extent);
+  void release_result();
 
   bool enabled() const
   {
     return enabled_;
+  }
+
+  bool use_in_combined() const
+  {
+    return enabled_ && use_in_combined_;
+  }
+
+  bool has_result() const
+  {
+    return resolved_outline_tx_.is_valid();
+  }
+
+  gpu::Texture *resolved_texture_or(gpu::Texture *fallback) const
+  {
+    return has_result() ? resolved_outline_tx_ : fallback;
   }
 };
 

@@ -553,8 +553,35 @@ void film_store_combined(
   if (display_id == -1) {
     display = color;
   }
+
   color = film_patch_float_for_16f_storage(color);
   imageStoreFast(out_combined_img, dst.texel, color);
+}
+
+float4 film_outline_resolved_fetch(int2 texel_film)
+{
+  if (!has_outline_input) {
+    return float4(0.0f);
+  }
+
+  const FilmSample outline_sample = film_sample_get(0, texel_film);
+  return texelFetch(outline_resolved_tx, outline_sample.texel, 0);
+}
+
+void film_store_combined_output(int2 texel_film, float4 color, float4 &display)
+{
+  if (any(isnan(color))) {
+    color = float4(0.0f, 0.0f, 0.0f, 1.0f);
+  }
+
+  color = clamp_negative_values(color);
+
+  if (display_id == -1) {
+    display = color;
+  }
+
+  color = film_patch_float_for_16f_storage(color);
+  imageStoreFast(combined_output_img, texel_film, color);
 }
 
 void film_store_color(FilmSample dst,
@@ -694,6 +721,13 @@ void film_process_data(int2 texel_film, float4 &out_color, float &out_depth)
     }
     /* NOTE: src.texel is center texel in incoming data buffer. */
     film_store_combined(dst, src.texel, combined_accum, weight_accum, out_color);
+
+    float4 combined_output = out_color;
+    if (use_outline_in_combined) {
+      const float4 outline_color = film_outline_resolved_fetch(texel_film);
+      combined_output = outline_color + combined_output * (1.0f - outline_color.a);
+    }
+    film_store_combined_output(texel_film, combined_output, out_color);
   }
 
   if (flag_test(enabled_categories, PASS_CATEGORY_DATA)) {
@@ -837,6 +871,11 @@ void film_process_data(int2 texel_film, float4 &out_color, float &out_depth)
     transparent_accum.a = weight_accum - transparent_accum.a;
 
     film_store_color(dst, uniform_buf.film.transparent_id, transparent_accum, out_color);
+  }
+
+  if (outline_id != -1) {
+    const float4 outline_data = film_outline_resolved_fetch(texel_film);
+    film_store_data(texel_film, outline_id, outline_data, out_color);
   }
 
   if (flag_test(enabled_categories, PASS_CATEGORY_AOV)) {

@@ -46,12 +46,12 @@ struct [[host_shared]] RenderBuffersInfoData {
   int emission_id;
   int environment_id;
   int transparent_id;
+  int outline_id;
   /* Value */
   int value_len;
   int shadow_id;
   int ambient_occlusion_id;
-  int _pad0;
-  int _pad1;
+  int _pad0[5];
 };
 
 #ifndef GPU_SHADER

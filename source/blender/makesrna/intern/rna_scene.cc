@@ -5463,6 +5463,19 @@ namespace blender
       prop, "Transparent", "Deliver alpha blended surfaces in a separate pass");
     RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_ViewLayer_pass_update");
 
+    prop = RNA_def_property(srna, "use_outline_in_combined", PROP_BOOLEAN, PROP_NONE);
+    RNA_def_property_boolean_sdna(
+      prop, nullptr, "flag", VIEW_LAYER_EEVEE_USE_OUTLINE_IN_COMBINED);
+    RNA_def_property_ui_text(
+      prop, "Outline in Combined", "Composite screen-space outlines directly into Combined");
+    RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_ViewLayer_pass_update");
+
+    prop = RNA_def_property(srna, "use_pass_outline", PROP_BOOLEAN, PROP_NONE);
+    RNA_def_property_boolean_sdna(prop, nullptr, "render_passes", EEVEE_RENDER_PASS_OUTLINE);
+    RNA_def_property_ui_text(
+      prop, "Outline", "Deliver screen-space outlines in a separate pass");
+    RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_ViewLayer_pass_update");
+
     prop = RNA_def_property(srna, "ambient_occlusion_distance", PROP_FLOAT, PROP_DISTANCE);
     RNA_def_property_range(prop, 0.0f, 100000.0f);
     RNA_def_property_ui_range(prop, 0.0f, 100.0f, 1, 3);

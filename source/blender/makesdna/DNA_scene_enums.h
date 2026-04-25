@@ -148,6 +148,7 @@ enum eScenePassType {
 #define RE_PASSNAME_FREESTYLE "Freestyle"
 #define RE_PASSNAME_VOLUME_LIGHT "Volume Direct"
 #define RE_PASSNAME_TRANSPARENT "Transparent"
+#define RE_PASSNAME_OUTLINE "Outline"
 
 #define RE_PASSNAME_CRYPTOMATTE_OBJECT "CryptoObject"
 #define RE_PASSNAME_CRYPTOMATTE_ASSET "CryptoAsset"

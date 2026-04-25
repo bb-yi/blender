@@ -9,10 +9,21 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_outline_detect)
 #include "draw_view_lib.glsl"
 #include "eevee_gbuffer_read_lib.glsl"
 #include "eevee_outline_lib.glsl"
+#include "eevee_reverse_z_lib.glsl"
+
+float4 outline_source_color_fetch(int2 texel)
+{
+  return texelFetch(outline_color_tx, texel, 0);
+}
+
+float4 outline_source_info_fetch(int2 texel)
+{
+  return texelFetch(outline_info_tx, texel, 0);
+}
 
 float outline_screen_depth_fetch(int2 texel)
 {
-  return 1.0f - texelFetch(depth_tx, texel, 0).r;
+  return reverse_z::read(texelFetch(depth_tx, texel, 0).r);
 }
 
 float3 outline_screen_to_view(int2 texel, int2 extent, float screen_depth)
@@ -62,8 +73,8 @@ void main()
   const int2 texel = int2(gl_FragCoord.xy);
   const int2 extent = textureSize(depth_tx, 0);
 
-  const float4 outline_color = texelFetch(outline_color_tx, texel, 0);
-  const float4 outline_info = texelFetch(outline_info_tx, texel, 0);
+  const float4 outline_color = outline_source_color_fetch(texel);
+  const float4 outline_info = outline_source_info_fetch(texel);
   const float line_width = outline_width_unpack(outline_info.r);
   const float depth_threshold = pow(outline_info.g, 10.0f) * 999.0f + 1.0f;
   const float normal_threshold = max(0.01f, outline_info.b);
@@ -118,7 +129,7 @@ void main()
     const bool sample_has_gbuffer = !gbuffer::read_header(sample_texel).is_empty();
     const float3 sample_normal = sample_has_gbuffer ? gbuffer::read_normal(sample_texel) : float3(0.0f);
     const float3 sample_position = outline_screen_to_view(sample_texel, extent, sample_depth);
-    const uint sample_outline_id = outline_id_unpack(texelFetch(outline_info_tx, sample_texel, 0).a);
+    const uint sample_outline_id = outline_id_unpack(outline_source_info_fetch(sample_texel).a);
 
     if (center_depth <= sample_depth) {
       const float delta_normal = dot(center_normal, sample_normal);

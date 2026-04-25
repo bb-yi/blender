@@ -235,6 +235,7 @@ const GPUMaterialGeneratedSource *GPU_material_generated_source_get(const GPUMat
                                                                     int index);
 
 bool GPU_material_flag_get(const GPUMaterial *mat, eGPUMaterialFlag flag);
+bool GPU_material_has_outline_output(const GPUMaterial *mat);
 
 uint64_t GPU_material_uuid_get(GPUMaterial *mat);
 

@@ -41,6 +41,10 @@ void clear_aovs()
 #endif
 }
 
+void clear_outline()
+{
+}
+
 int aov_color_index(uint hash)
 {
 #if defined(GPU_FRAGMENT_SHADER)

@@ -9,6 +9,7 @@
   */
 
 #include <cmath>
+#include <cstring>
 #include <sstream>
 
 #include "CLG_log.h"
@@ -33,7 +34,9 @@
 #include "GPU_pass.hh"
 #include "IMB_imbuf_types.hh"
 
+#include "RE_engine.h"
 #include "RE_pipeline.h"
+#include "render_types.h"
 
 #include "eevee_instance.hh"
 
@@ -202,12 +205,7 @@ namespace blender::eevee
       }
       if (output_rect)
       {
-        int2 offset = int2(output_rect->xmin, output_rect->ymin);
-        int2 extent = int2(BLI_rcti_size_x(output_rect), BLI_rcti_size_y(output_rect));
-        if (offset != film.get_data().offset || extent != film.get_data().extent)
-        {
-          sampling.reset();
-        }
+        sampling.reset();
       }
       if (assign_if_different(overlays_enabled_, v3d && !(v3d->flag2 & V3D_HIDE_OVERLAYS)))
       {
@@ -347,13 +345,32 @@ namespace blender::eevee
 
   void Instance::update_eval_members()
   {
+    Scene *scene_input = DEG_get_input_scene(depsgraph);
+    if (render && render->re && render->re->scene) {
+      scene_input = render->re->scene;
+    }
     scene = DEG_get_evaluated_scene(depsgraph);
     if (scene == nullptr) {
-      scene = DEG_get_input_scene(depsgraph);
+      scene = scene_input;
     }
     view_layer = DEG_get_evaluated_view_layer(depsgraph);
     if (view_layer == nullptr) {
       view_layer = DEG_get_input_view_layer(depsgraph);
+    }
+    if (render && scene_input) {
+      ViewLayer *render_view_layer = nullptr;
+      if (render_layer && render_layer->name[0] != '\0') {
+        for (ViewLayer &candidate : scene_input->view_layers) {
+          if (std::strcmp(candidate.name, render_layer->name) == 0) {
+            render_view_layer = &candidate;
+            break;
+          }
+        }
+      }
+      if (render_view_layer == nullptr) {
+        render_view_layer = static_cast<ViewLayer *>(scene_input->view_layers.first);
+      }
+      view_layer = render_view_layer;
     }
     camera_eval_object = (camera_orig_object) ? DEG_get_evaluated(depsgraph, camera_orig_object) :
       nullptr;
@@ -1030,6 +1047,8 @@ namespace blender::eevee
     CHECK_PASS_LEGACY(SHADOW, SOCK_RGBA, 3, "RGB");
     CHECK_PASS_LEGACY(AO, SOCK_RGBA, 3, "RGB");
     CHECK_PASS_EEVEE(TRANSPARENT, SOCK_RGBA, 4, "RGBA");
+    RE_engine_register_pass(
+        engine, scene, view_layer, RE_PASSNAME_OUTLINE, 4, "RGBA", SOCK_RGBA);
 
     for (ViewLayerAOV& aov : view_layer->aovs)
     {

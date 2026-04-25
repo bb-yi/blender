@@ -64,12 +64,11 @@ void output_outline(
 
   float4 stored_color = line_color;
   stored_color.a = saturate(stored_color.a);
+  float4 stored_info = float4(outline_width_pack(line_width),
+                              saturate(depth_threshold),
+                              saturate(normal_threshold),
+                              outline_id_pack(resolved_outline_id));
   imageStoreFast(outline_color_img, texel, stored_color);
-  imageStoreFast(outline_info_img,
-                 texel,
-                 float4(outline_width_pack(line_width),
-                        saturate(depth_threshold),
-                        saturate(normal_threshold),
-                        outline_id_pack(resolved_outline_id)));
+  imageStoreFast(outline_info_img, texel, stored_info);
 #endif
 }

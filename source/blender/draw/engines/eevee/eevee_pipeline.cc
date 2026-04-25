@@ -1286,10 +1286,6 @@ gpu::Texture *DeferredLayer::render(View &main_view,
   {
     ScopedTelemetrySample telemetry_sample(inst_.telemetry,
                                            TelemetryStageId::MainDeferredGBufferPass);
-    if (has_outline_) {
-      rb.outline_color_tx.clear(float4(0.0f));
-      rb.outline_info_tx.clear(float4(0.0f));
-    }
     inst_.gbuffer.bind(gbuffer_fb);
     inst_.manager->submit(gbuffer_ps_, render_view);
   }
@@ -1365,7 +1361,7 @@ gpu::Texture *DeferredLayer::render(View &main_view,
   }
 
   if (has_outline_) {
-    inst_.outline.render(render_view, combined_fb, extent);
+    inst_.outline.render(render_view, extent);
   }
 
   if (use_feedback_output_) {

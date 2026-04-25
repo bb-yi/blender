@@ -61,6 +61,7 @@ void main()
 {
   /* Clear AOVs first. In case the material renders to them. */
   clear_aovs();
+  clear_outline();
 
   material_surface_cull_discard();
   init_globals();

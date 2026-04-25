@@ -20,4 +20,5 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_deferred_aov_clear)
 void main()
 {
   clear_aovs();
+  clear_outline();
 }

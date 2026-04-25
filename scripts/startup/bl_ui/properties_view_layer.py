@@ -178,7 +178,9 @@ class VIEWLAYER_PT_eevee_layer_passes_light(ViewLayerButtonsPanel, Panel):
         col.prop(view_layer, "use_pass_environment")
         col.prop(view_layer, "use_pass_shadow")
         col.prop(view_layer, "use_pass_ambient_occlusion", text="Ambient Occlusion")
+        col.prop(view_layer_eevee, "use_outline_in_combined", text="Outline in Combined")
         col.prop(view_layer_eevee, "use_pass_transparent", text="Transparent")
+        col.prop(view_layer_eevee, "use_pass_outline", text="Outline")
 
         col = layout.column()
         col.active = view_layer.use_pass_ambient_occlusion

@@ -17,6 +17,8 @@
 #include "BLI_rect.h"
 #include "BLI_set.hh"
 
+#include "DNA_layer_types.h"
+
 #include "BKE_compositor.hh"
 #include "BKE_main.hh"
 #include "BKE_node.hh"
@@ -489,6 +491,7 @@ void Film::init(const int2 &extent, const rcti *output_rect)
     data_.shadow_id = pass_index_get(EEVEE_RENDER_PASS_SHADOW);
     data_.ambient_occlusion_id = pass_index_get(EEVEE_RENDER_PASS_AO);
     data_.transparent_id = pass_index_get(EEVEE_RENDER_PASS_TRANSPARENT);
+    outline_id_ = pass_index_get(EEVEE_RENDER_PASS_OUTLINE);
 
     data_.aov_color_id = data_.color_len;
     data_.aov_value_id = data_.value_len;
@@ -539,6 +542,8 @@ void Film::init(const int2 &extent, const rcti *output_rect)
     reset += depth_tx_.ensure_2d(depth_format, data_.extent);
     reset += combined_tx_.current().ensure_2d(color_format, data_.extent);
     reset += combined_tx_.next().ensure_2d(color_format, data_.extent);
+    reset += combined_output_tx_.ensure_2d(color_format, data_.extent);
+    reset += dummy_outline_tx_.ensure_2d(color_format, int2(1));
     /* Two layers, one for nearest sample weight and one for weight accumulation. */
     reset += weight_tx_.current().ensure_2d_array(weight_format, weight_extent, 2);
     reset += weight_tx_.next().ensure_2d_array(weight_format, weight_extent, 2);
@@ -564,6 +569,8 @@ void Film::init(const int2 &extent, const rcti *output_rect)
       color_accum_tx_.clear(float4(0.0f));
       value_accum_tx_.clear(float4(0.0f));
       combined_tx_.current().clear(float4(0.0f));
+      combined_output_tx_.clear(float4(0.0f));
+      dummy_outline_tx_.clear(float4(0.0f));
       weight_tx_.current().clear(float4(0.0f));
       depth_tx_.clear(float4(0.0f));
       cryptomatte_tx_.clear(float4(0.0f));
@@ -658,17 +665,22 @@ void Film::init_pass(PassSimple &pass, gpu::Shader *sh)
   pass.bind_texture("rp_color_tx", &rbuffers.rp_color_tx);
   pass.bind_texture("rp_value_tx", &rbuffers.rp_value_tx);
   pass.bind_texture("cryptomatte_tx", &rbuffers.cryptomatte_tx);
+  pass.bind_texture("in_combined_tx", &history_display_tx_, filter);
+  pass.bind_texture("outline_resolved_tx", &outline_resolved_input_tx_);
+  pass.push_constant("outline_id", &outline_id_, 1);
+  pass.push_constant("use_outline_in_combined", &use_outline_in_combined_, 1);
+  pass.push_constant("has_outline_input", &has_outline_input_, 1);
   /* NOTE(@fclem): 16 is the max number of sampled texture in many implementations.
    * If we need more, we need to pack more of the similar passes in the same textures as arrays or
    * use image binding instead. */
   pass.bind_image("in_weight_img", &weight_tx_.current());
   pass.bind_image("out_weight_img", &weight_tx_.next());
-  pass.bind_texture("in_combined_tx", &combined_tx_.current(), filter);
   pass.bind_image("out_combined_img", &combined_tx_.next());
   pass.bind_image("depth_img", &depth_tx_);
   pass.bind_image("color_accum_img", &color_accum_tx_);
   pass.bind_image("value_accum_img", &value_accum_tx_);
   pass.bind_image("cryptomatte_img", &cryptomatte_tx_);
+  pass.bind_image("combined_output_img", &combined_output_tx_);
   pass.bind_resources(inst_.uniform_data);
 }
 
@@ -893,7 +905,12 @@ void Film::accumulate(View &view, gpu::Texture *combined_final_tx)
   update_sample_table();
 
   combined_final_tx_ = combined_final_tx;
-
+  history_display_tx_ = combined_tx_.current();
+  outline_resolved_input_tx_ = inst_.outline.resolved_texture_or(dummy_outline_tx_.gpu_texture());
+  has_outline_input_ = inst_.outline.has_result();
+  use_outline_in_combined_ = has_outline_input_ &&
+                             ((inst_.view_layer->eevee.flag &
+                               VIEW_LAYER_EEVEE_USE_OUTLINE_IN_COMBINED) != 0);
   data_.display_only = false;
   inst_.uniform_data.push_update();
 
@@ -921,6 +938,7 @@ void Film::display()
   GPU_framebuffer_viewport_set(dfbl->default_fb, UNPACK2(data_.offset), UNPACK2(data_.extent));
 
   combined_final_tx_ = inst_.render_buffers.combined_tx;
+  history_display_tx_ = combined_output_tx_;
 
   data_.display_only = true;
   inst_.uniform_data.push_update();
@@ -965,7 +983,7 @@ gpu::Texture *Film::get_pass_texture(eViewLayerEEVEEPassType pass_type, int laye
   const bool is_cryptomatte = storage_type == PASS_STORAGE_CRYPTOMATTE;
 
   Texture &accum_tx = (pass_type == EEVEE_RENDER_PASS_COMBINED) ?
-                          combined_tx_.current() :
+                          combined_output_tx_ :
                       (pass_type == EEVEE_RENDER_PASS_DEPTH) ?
                           depth_tx_ :
                           (is_cryptomatte ? cryptomatte_tx_ :

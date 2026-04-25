@@ -445,6 +445,7 @@ static void blo_update_defaults_scene(Main *bmain, Scene *scene)
   /* Disable Z pass by default. */
   for (ViewLayer &view_layer : scene->view_layers) {
     view_layer.passflag &= ~SCE_PASS_DEPTH;
+    view_layer.eevee.flag = VIEW_LAYER_EEVEE_USE_OUTLINE_IN_COMBINED;
     view_layer.eevee.ambient_occlusion_distance = 10.0f;
   }
 

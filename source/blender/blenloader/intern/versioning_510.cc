@@ -1030,6 +1030,14 @@ void blo_do_versions_510(FileData *fd, Library * /*lib*/, Main *bmain)
     }
   }
 
+  if (!DNA_struct_member_exists(fd->filesdna, "ViewLayerEEVEE", "int", "flag")) {
+    for (Scene &scene : bmain->scenes) {
+      for (ViewLayer &view_layer : scene.view_layers) {
+        view_layer.eevee.flag |= VIEW_LAYER_EEVEE_USE_OUTLINE_IN_COMBINED;
+      }
+    }
+  }
+
   /**
    * Always bump subversion in BKE_blender_version.h when adding versioning
    * code here, and wrap it inside a MAIN_VERSION_FILE_ATLEAST check.

@@ -249,6 +249,7 @@ namespace blender::eevee
         TelemetryStageId::MainFilmAccumulate);
       inst_.film.accumulate(jitter_view_, combined_final_tx);
     }
+    inst_.outline.release_result();
 
     inst_.pipelines.shadow_filter.release();
     rbufs.release();

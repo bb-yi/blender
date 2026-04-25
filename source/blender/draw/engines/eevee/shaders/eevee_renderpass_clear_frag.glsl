@@ -18,6 +18,7 @@ void main()
 
   /* Clear Render Buffers. */
   clear_aovs();
+  clear_outline();
   float4 clear_color = float4(0.0f, 0.0f, 0.0f, 1.0f);
   output_renderpass_color(uniform_buf.render_pass.environment_id, clear_color);
   output_renderpass_color(uniform_buf.render_pass.normal_id, clear_color);

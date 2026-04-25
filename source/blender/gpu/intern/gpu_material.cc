@@ -495,6 +495,11 @@ bool GPU_material_flag_get(const GPUMaterial *mat, eGPUMaterialFlag flag)
   return (mat->flag & flag) != 0;
 }
 
+bool GPU_material_has_outline_output(const GPUMaterial *mat)
+{
+  return mat != nullptr && !BLI_listbase_is_empty(&mat->graph.outlink_outlines);
+}
+
 eGPUMaterialFlag GPU_material_flag(const GPUMaterial *mat)
 {
   return mat->flag;

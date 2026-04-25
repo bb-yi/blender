@@ -48,6 +48,7 @@ void RenderBuffers::init()
   data.shadow_id = pass_index_get(EEVEE_RENDER_PASS_SHADOW);
   data.ambient_occlusion_id = pass_index_get(EEVEE_RENDER_PASS_AO);
   data.transparent_id = pass_index_get(EEVEE_RENDER_PASS_TRANSPARENT);
+  data.outline_id = pass_index_get(EEVEE_RENDER_PASS_OUTLINE);
 
   data.aovs = inst_.film.aovs_info;
 }
@@ -121,6 +122,7 @@ void RenderBuffers::acquire(int2 extent)
   outline_info_tx.acquire(extent, gpu::TextureFormat::UNORM_16_16_16_16, outline_usage);
   outline_color_tx.clear(float4(0.0f));
   outline_info_tx.clear(float4(0.0f));
+
 }
 
 void RenderBuffers::release()

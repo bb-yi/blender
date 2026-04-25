@@ -55,14 +55,20 @@ enum eViewLayerEEVEEPassType {
   EEVEE_RENDER_PASS_VECTOR = (1 << 19),
   EEVEE_RENDER_PASS_TRANSPARENT = (1 << 20),
   EEVEE_RENDER_PASS_POSITION = (1 << 21),
+  EEVEE_RENDER_PASS_OUTLINE = (1 << 22),
 };
-#define EEVEE_RENDER_PASS_MAX_BIT 21
+#define EEVEE_RENDER_PASS_MAX_BIT 22
 ENUM_OPERATORS(eViewLayerEEVEEPassType)
 
 /* #ViewLayer::grease_pencil_flags */
 enum eViewLayerGreasePencilFlags {
   GREASE_PENCIL_AS_SEPARATE_PASS = (1 << 0),
 };
+
+enum eViewLayerEEVEEFlags {
+  VIEW_LAYER_EEVEE_USE_OUTLINE_IN_COMBINED = (1 << 0),
+};
+ENUM_OPERATORS(eViewLayerEEVEEFlags)
 
 /* #ViewLayerAOV.type */
 enum eViewLayerAOVType {
@@ -204,7 +210,9 @@ struct LayerCollection {
 /* Type containing EEVEE settings per view-layer */
 struct ViewLayerEEVEE {
   int render_passes = 0;
+  int flag = VIEW_LAYER_EEVEE_USE_OUTLINE_IN_COMBINED;
   float ambient_occlusion_distance = 10.0f;
+  int _pad = 0;
 };
 
 /** AOV Render-pass definition. */

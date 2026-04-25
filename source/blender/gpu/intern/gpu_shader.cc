@@ -220,6 +220,7 @@ gpu::Shader *GPU_shader_create_from_info_name(const char *info_name)
     std::cerr << "Warning: Trying to compile \"" << info.name_
               << "\" which was not marked for static compilation.\n";
   }
+
   return GPU_shader_create_from_info(_info);
 }
 

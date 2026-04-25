@@ -9,6 +9,7 @@
 #  include "draw_view_infos.hh"
 #  include "eevee_common_infos.hh"
 #  include "eevee_fullscreen_infos.hh"
+#  include "eevee_uniform_infos.hh"
 #endif
 
 #include "eevee_defines.hh"
@@ -21,6 +22,7 @@ SAMPLER(OUTLINE_DEPTH_TEX_SLOT, sampler2DDepth, depth_tx)
 SAMPLER(OUTLINE_COLOR_TEX_SLOT, sampler2D, outline_color_tx)
 SAMPLER(OUTLINE_INFO_TEX_SLOT, sampler2D, outline_info_tx)
 ADDITIONAL_INFO(eevee_gbuffer_data)
+ADDITIONAL_INFO(eevee_global_ubo)
 ADDITIONAL_INFO(eevee_fullscreen)
 ADDITIONAL_INFO(draw_view)
 TYPEDEF_SOURCE("eevee_defines.hh")
@@ -54,6 +56,7 @@ SAMPLER(OUTLINE_SEED_TEX_SLOT, sampler2D, outline_seed_tx)
 SAMPLER(OUTLINE_COLOR_TEX_SLOT, sampler2D, outline_color_tx)
 SAMPLER(OUTLINE_INFO_TEX_SLOT, sampler2D, outline_info_tx)
 SAMPLER(OUTLINE_JFA_TEX_SLOT, sampler2D, jfa_tx)
+ADDITIONAL_INFO(eevee_global_ubo)
 ADDITIONAL_INFO(eevee_fullscreen)
 ADDITIONAL_INFO(draw_view)
 TYPEDEF_SOURCE("eevee_defines.hh")

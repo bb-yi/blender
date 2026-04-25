@@ -39,7 +39,6 @@
  * \{ */
 
 GPU_SHADER_CREATE_INFO(eevee_outline_out)
-DEFINE("MAT_OUTLINE_SUPPORT")
 IMAGE_FREQ(OUTLINE_COLOR_SLOT, SFLOAT_16_16_16_16, write, image2D, outline_color_img, PASS)
 IMAGE_FREQ(OUTLINE_INFO_SLOT, UNORM_16_16_16_16, write, image2D, outline_info_img, PASS)
 GPU_SHADER_CREATE_END()
@@ -71,7 +70,6 @@ ADDITIONAL_INFO(eevee_global_ubo)
 ADDITIONAL_INFO(eevee_utility_texture)
 ADDITIONAL_INFO(eevee_sampling_data)
 ADDITIONAL_INFO(eevee_hiz_data)
-ADDITIONAL_INFO(eevee_outline_out)
 /* Needed by custom material nodes that sample Eevee world / reflection probe data directly. */
 ADDITIONAL_INFO(eevee_lightprobe_data)
 ADDITIONAL_INFO(eevee_render_texture_data)
@@ -108,7 +106,6 @@ ADDITIONAL_INFO(eevee_sampling_data)
 ADDITIONAL_INFO(eevee_hiz_data)
 ADDITIONAL_INFO(draw_view_culling)
 ADDITIONAL_INFO(eevee_render_pass_inout)
-ADDITIONAL_INFO(eevee_outline_out)
 FRAGMENT_SOURCE("eevee_surf_deferred_npr_frag.glsl")
 GPU_SHADER_CREATE_END()
 

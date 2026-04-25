@@ -4,7 +4,10 @@
 
 #include "BLI_math_base.h"
 
+#include "DNA_layer_types.h"
+
 #include "GPU_capabilities.hh"
+#include "GPU_texture.hh"
 
 #include "eevee_instance.hh"
 #include "eevee_outline.hh"
@@ -13,10 +16,24 @@ namespace blender::eevee {
 
 void OutlineModule::sync()
 {
+  const bool previous_enabled = enabled_;
+  const bool previous_use_in_combined = use_in_combined_;
   const bool has_outline_materials = inst_.materials.has_visible_outline_materials();
-  enabled_ = has_outline_materials && GPU_max_images() > OUTLINE_INFO_SLOT;
+  const bool use_in_combined = (inst_.view_layer->eevee.flag &
+                                VIEW_LAYER_EEVEE_USE_OUTLINE_IN_COMBINED) != 0;
+  const bool public_pass_enabled = inst_.render_buffers.data.outline_id != -1;
+  enabled_ = has_outline_materials && (GPU_max_images() > OUTLINE_INFO_SLOT) &&
+             (use_in_combined || public_pass_enabled);
+  use_in_combined_ = use_in_combined;
+
+  if (inst_.is_viewport() &&
+      (previous_enabled != enabled_ || previous_use_in_combined != use_in_combined_))
+  {
+    inst_.sampling.reset();
+  }
 
   if (!enabled_) {
+    release_result();
     return;
   }
 
@@ -45,7 +62,7 @@ void OutlineModule::sync()
   jfa_step_ps_.barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS);
 
   resolve_ps_.init();
-  resolve_ps_.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_BLEND_TRANSPARENCY);
+  resolve_ps_.state_set(DRW_STATE_WRITE_COLOR);
   resolve_ps_.shader_set(inst_.shaders.static_shader_get(OUTLINE_RESOLVE));
   resolve_ps_.bind_texture("depth_tx", &inst_.render_buffers.depth_tx);
   resolve_ps_.bind_texture("outline_seed_tx", &edge_seed_tx_);
@@ -55,7 +72,7 @@ void OutlineModule::sync()
   resolve_ps_.draw_procedural(GPU_PRIM_TRIS, 1, 3);
 }
 
-void OutlineModule::render(View &view, Framebuffer &combined_fb, int2 extent)
+void OutlineModule::render(View &view, int2 extent)
 {
   if (!enabled_) {
     return;
@@ -72,6 +89,7 @@ void OutlineModule::render(View &view, Framebuffer &combined_fb, int2 extent)
   detect_fb_.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(edge_seed_tx_));
   detect_ps_.framebuffer_set(&detect_fb_);
   GPU_framebuffer_bind(detect_fb_);
+  GPU_memory_barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS | GPU_BARRIER_TEXTURE_FETCH);
   drw.submit(detect_ps_, view);
   GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH);
 
@@ -108,20 +126,30 @@ void OutlineModule::render(View &view, Framebuffer &combined_fb, int2 extent)
     step_size /= 2;
   }
 
-  /* Resolve pass: look up nearest seed and composite. */
+  /* Resolve pass: look up nearest seed and output the outline source result. */
   /* After the last swap+submit, the result is in jfa_tx_.current().
    * But resolve_ps_ reads from jfa_tx_.previous() (bound at sync time).
    * We need one more swap so previous() points to the final result. */
   jfa_tx_.swap();
 
-  resolve_ps_.framebuffer_set(&combined_fb);
-  GPU_framebuffer_bind(combined_fb);
+  resolved_outline_tx_.acquire(extent,
+                               gpu::TextureFormat::SFLOAT_16_16_16_16,
+                               GPU_TEXTURE_USAGE_ATTACHMENT | GPU_TEXTURE_USAGE_SHADER_READ);
+  resolved_outline_tx_.clear(float4(0.0f));
+  resolve_fb_.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(resolved_outline_tx_));
+  resolve_ps_.framebuffer_set(&resolve_fb_);
+  GPU_framebuffer_bind(resolve_fb_);
   drw.submit(resolve_ps_, view);
   GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH);
 
   edge_seed_tx_.release();
   jfa_tx_.current().release();
   jfa_tx_.previous().release();
+}
+
+void OutlineModule::release_result()
+{
+  resolved_outline_tx_.release();
 }
 
 }  // namespace blender::eevee

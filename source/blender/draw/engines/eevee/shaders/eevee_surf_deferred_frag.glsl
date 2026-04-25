@@ -68,6 +68,7 @@ void main()
 #ifndef MAT_REFRACTION
   /* Clear AOVs first. In case the material renders to them. */
   clear_aovs();
+  clear_outline();
 #endif
 
   material_surface_cull_discard();

@@ -1050,6 +1050,10 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     info.additional_info("eevee_render_pass_out");
     info.additional_info("eevee_cryptomatte_out");
   }
+  if (GPU_material_has_outline_output(gpumat) && pipeline_type != MAT_PIPE_FORWARD) {
+    info.additional_info("eevee_outline_out");
+    info.define("MAT_OUTLINE_SUPPORT");
+  }
 
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_TO_RGBA)) {
     info.define("MAT_SHADER_TO_RGBA");
