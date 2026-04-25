@@ -98,7 +98,7 @@ class Film {
   Texture cryptomatte_tx_;
   /** Combined "Color" buffer. Double buffered to allow re-projection. */
   SwapChain<Texture, 2> combined_tx_;
-  /** Final public Combined result. Keeps Outline separate from the TAA history buffer. */
+  /** Final public Combined result for display and pass access. */
   Texture combined_output_tx_ = {"combined_output_tx"};
   /** Weight buffers. Double buffered to allow updating it during accumulation. */
   SwapChain<Texture, 2> weight_tx_;

@@ -205,7 +205,12 @@ namespace blender::eevee
       }
       if (output_rect)
       {
-        sampling.reset();
+        int2 offset = int2(output_rect->xmin, output_rect->ymin);
+        int2 extent = int2(BLI_rcti_size_x(output_rect), BLI_rcti_size_y(output_rect));
+        if (offset != film.get_data().offset || extent != film.get_data().extent)
+        {
+          sampling.reset();
+        }
       }
       if (assign_if_different(overlays_enabled_, v3d && !(v3d->flag2 & V3D_HIDE_OVERLAYS)))
       {

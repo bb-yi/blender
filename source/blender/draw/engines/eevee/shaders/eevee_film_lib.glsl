@@ -481,12 +481,32 @@ float4 clamp_negative_values(float4 color)
   return color;
 }
 
+float4 film_outline_resolved_fetch(int2 texel_render)
+{
+  if (!has_outline_input) {
+    return float4(0.0f);
+  }
+  return texelFetch(outline_resolved_tx, texel_render, 0);
+}
+
+float4 film_apply_outline_to_combined(float4 combined_color, float4 outline_color)
+{
+  if (!use_outline_in_combined) {
+    return combined_color;
+  }
+  return outline_color + combined_color * (1.0f - outline_color.a);
+}
+
 /* Returns resolved final color. */
-void film_store_combined(
-    FilmSample dst, int2 src_texel, float4 color, float color_weight, float4 &display)
+float4 film_store_combined(FilmSample dst,
+                           int2 src_texel,
+                           float4 color,
+                           float color_weight,
+                           float4 outline_color,
+                           float4 &display)
 {
   if (combined_id == -1) {
-    return;
+    return float4(0.0f);
   }
 
   float4 color_src, color_dst;
@@ -494,6 +514,7 @@ void film_store_combined(
 
   /* Undo the weighting to get final spatially-filtered color. */
   color_src = color / color_weight;
+  color_src = film_apply_outline_to_combined(color_src, outline_color);
 
   if (use_reprojection) {
     /* Interactive accumulation. Do reprojection and Temporal Anti-Aliasing. */
@@ -556,16 +577,7 @@ void film_store_combined(
 
   color = film_patch_float_for_16f_storage(color);
   imageStoreFast(out_combined_img, dst.texel, color);
-}
-
-float4 film_outline_resolved_fetch(int2 texel_film)
-{
-  if (!has_outline_input) {
-    return float4(0.0f);
-  }
-
-  const FilmSample outline_sample = film_sample_get(0, texel_film);
-  return texelFetch(outline_resolved_tx, outline_sample.texel, 0);
+  return color;
 }
 
 void film_store_combined_output(int2 texel_film, float4 color, float4 &display)
@@ -713,21 +725,24 @@ void film_process_data(int2 texel_film, float4 &out_color, float &out_depth)
     /* NOTE: Do weight accumulation again since we use custom weights. */
     float weight_accum = 0.0f;
     float4 combined_accum = float4(0.0f);
+    float4 outline_accum = float4(0.0f);
 
     FilmSample src;
     for (int i = samples_len - 1; i >= 0; i--) {
       src = film_sample_get(i, texel_film);
       film_sample_accum_combined(src, combined_accum, weight_accum);
+      outline_accum += film_outline_resolved_fetch(src.texel) * src.weight;
     }
+    const float4 outline_color = outline_accum / weight_accum;
     /* NOTE: src.texel is center texel in incoming data buffer. */
-    film_store_combined(dst, src.texel, combined_accum, weight_accum, out_color);
+    const float4 combined_color = film_store_combined(
+        dst, src.texel, combined_accum, weight_accum, outline_color, out_color);
 
-    float4 combined_output = out_color;
-    if (use_outline_in_combined) {
-      const float4 outline_color = film_outline_resolved_fetch(texel_film);
-      combined_output = outline_color + combined_output * (1.0f - outline_color.a);
+    film_store_combined_output(texel_film, combined_color, out_color);
+
+    if (outline_id != -1) {
+      film_store_color(dst, outline_id, outline_accum, out_color, false);
     }
-    film_store_combined_output(texel_film, combined_output, out_color);
   }
 
   if (flag_test(enabled_categories, PASS_CATEGORY_DATA)) {
@@ -871,11 +886,6 @@ void film_process_data(int2 texel_film, float4 &out_color, float &out_depth)
     transparent_accum.a = weight_accum - transparent_accum.a;
 
     film_store_color(dst, uniform_buf.film.transparent_id, transparent_accum, out_color);
-  }
-
-  if (outline_id != -1) {
-    const float4 outline_data = film_outline_resolved_fetch(texel_film);
-    film_store_data(texel_film, outline_id, outline_data, out_color);
   }
 
   if (flag_test(enabled_categories, PASS_CATEGORY_AOV)) {
