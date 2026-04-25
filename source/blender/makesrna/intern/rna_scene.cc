@@ -5467,8 +5467,9 @@ namespace blender
     RNA_def_property_boolean_sdna(prop, nullptr, "render_passes", EEVEE_RENDER_PASS_OUTLINE);
     RNA_def_property_ui_text(
       prop,
-      "Outline",
-      "Deliver screen-space outlines in a separate pass instead of compositing them into Combined");
+      "Outline Pass",
+      "Expose screen-space outlines as a separate pass; when disabled, outlines are composited "
+      "into Combined");
     RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_ViewLayer_pass_update");
 
     prop = RNA_def_property(srna, "ambient_occlusion_distance", PROP_FLOAT, PROP_DISTANCE);

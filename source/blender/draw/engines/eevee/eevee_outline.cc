@@ -17,7 +17,9 @@ void OutlineModule::sync()
   const bool previous_enabled = enabled_;
   const bool previous_use_in_combined = use_in_combined_;
   const bool has_outline_materials = inst_.materials.has_visible_outline_materials();
-  const bool public_pass_enabled = inst_.render_buffers.data.outline_id != -1;
+  const bool public_pass_enabled =
+      ((inst_.view_layer->eevee.render_passes & EEVEE_RENDER_PASS_OUTLINE) != 0) ||
+      inst_.render_buffers.data.outline_id != -1;
   const bool use_in_combined = !public_pass_enabled;
   enabled_ = has_outline_materials && (GPU_max_images() > OUTLINE_INFO_SLOT) &&
              (use_in_combined || public_pass_enabled);

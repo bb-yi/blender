@@ -132,7 +132,8 @@ static void declare_extra_passes(NodeDeclarationBuilder &b,
  * exist in the new state. The outputs are set as unavailable, so they are not accessible to the
  * user. This is useful to retain links if the user changed the render engine and thus the passes
  * changed. */
-static void declare_old_linked_outputs(NodeDeclarationBuilder &b)
+static void declare_old_linked_outputs(NodeDeclarationBuilder &b,
+                                       const bool remove_disabled_outline_output)
 {
   Set<std::string> added_outputs_identifiers;
   for (const SocketDeclaration *output_declaration : b.declaration().sockets(SOCK_OUT)) {
@@ -143,6 +144,9 @@ static void declare_old_linked_outputs(NodeDeclarationBuilder &b)
   node_tree->ensure_topology_cache();
   for (const bNodeSocket *output : node->output_sockets()) {
     if (added_outputs_identifiers.contains(output->identifier)) {
+      continue;
+    }
+    if (remove_disabled_outline_output && StringRef(output->identifier) == RE_PASSNAME_OUTLINE) {
       continue;
     }
     if (!output->is_directly_linked()) {
@@ -166,7 +170,8 @@ static void node_declare(NodeDeclarationBuilder &b)
     return;
   }
 
-  BLI_SCOPED_DEFER([&]() { declare_old_linked_outputs(b); });
+  bool remove_disabled_outline_output = false;
+  BLI_SCOPED_DEFER([&]() { declare_old_linked_outputs(b, remove_disabled_outline_output); });
 
   Scene *scene = reinterpret_cast<Scene *>(node->id);
   if (!scene) {
@@ -191,6 +196,10 @@ static void node_declare(NodeDeclarationBuilder &b)
     declare_existing(b);
     return;
   }
+
+  remove_disabled_outline_output = StringRef(scene->r.engine) == RE_engine_id_BLENDER_EEVEE &&
+                                   (view_layer->eevee.render_passes &
+                                    EEVEE_RENDER_PASS_OUTLINE) == 0;
 
   RenderEngine *engine = RE_engine_create(engine_type);
   RE_engine_update_render_passes(engine, scene, view_layer, declare_pass_callback, &b);
