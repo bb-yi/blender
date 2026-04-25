@@ -515,21 +515,9 @@ float4 film_store_combined(FilmSample dst,
   /* Undo the weighting to get final spatially-filtered color. */
   color_src = color / color_weight;
   color_src = film_apply_outline_to_combined(color_src, outline_color);
+  const float outline_factor = saturate(outline_color.a);
 
   if (use_reprojection) {
-    /* Screen-space outlines are already a resolved post effect. Reprojecting their shaded result
-     * through Combined history can leave partially darkened pixels behind after navigation stops,
-     * so current outlined pixels bypass temporal history. */
-    if (use_outline_in_combined && outline_color.a > 1e-4f) {
-      color = clamp_negative_values(color_src);
-      if (display_id == -1) {
-        display = color;
-      }
-      color = film_patch_float_for_16f_storage(color);
-      imageStoreFast(out_combined_img, dst.texel, color);
-      return color;
-    }
-
     /* Interactive accumulation. Do reprojection and Temporal Anti-Aliasing. */
 
     /* Reproject by finding where this pixel was in the previous frame. */
@@ -550,12 +538,21 @@ float4 film_store_combined(FilmSample dst,
 
     float blend = film_history_blend_factor(
         velocity, history_texel, min_color.x, max_color.x, color_src.x, color_dst.x);
+    if (use_outline_in_combined && outline_factor > 1e-4f) {
+      blend = max(blend, outline_factor * 0.35f);
+    }
 
     color_dst = film_amend_combined_history(min_color, max_color, color_dst, color_src, src_texel);
 
-    /* Luma weighted blend to avoid flickering. */
-    weight_dst = film_luma_weight(color_dst.x) * (1.0f - blend);
-    weight_src = film_luma_weight(color_src.x) * (blend);
+    if (use_outline_in_combined && outline_factor > 1e-4f) {
+      weight_dst = 1.0f - blend;
+      weight_src = blend;
+    }
+    else {
+      /* Luma weighted blend to avoid flickering. */
+      weight_dst = film_luma_weight(color_dst.x) * (1.0f - blend);
+      weight_src = film_luma_weight(color_src.x) * (blend);
+    }
   }
   else {
     /* Everything is static. Use render accumulation. */
