@@ -726,14 +726,16 @@ void film_process_data(int2 texel_film, float4 &out_color, float &out_depth)
     float weight_accum = 0.0f;
     float4 combined_accum = float4(0.0f);
     float4 outline_accum = float4(0.0f);
+    float outline_weight_accum = 0.0f;
 
     FilmSample src;
     for (int i = samples_len - 1; i >= 0; i--) {
       src = film_sample_get(i, texel_film);
       film_sample_accum_combined(src, combined_accum, weight_accum);
       outline_accum += film_outline_resolved_fetch(src.texel) * src.weight;
+      outline_weight_accum += src.weight;
     }
-    const float4 outline_color = outline_accum / weight_accum;
+    const float4 outline_color = outline_accum / max(outline_weight_accum, 1e-8f);
     /* NOTE: src.texel is center texel in incoming data buffer. */
     const float4 combined_color = film_store_combined(
         dst, src.texel, combined_accum, weight_accum, outline_color, out_color);
