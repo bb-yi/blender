@@ -494,7 +494,9 @@ float4 film_apply_outline_to_combined(float4 combined_color, float4 outline_colo
   if (!use_outline_in_combined) {
     return combined_color;
   }
-  return outline_color + combined_color * (1.0f - outline_color.a);
+  float4 outline_color_ycocg = outline_color;
+  outline_color_ycocg.rgb = colorspace_YCoCg_from_scene_linear(outline_color.rgb);
+  return outline_color_ycocg + combined_color * (1.0f - outline_color_ycocg.a);
 }
 
 /* Returns resolved final color. */
