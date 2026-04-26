@@ -349,7 +349,8 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
       geometry_type,
       probe_capture,
       use_deferred_compilation,
-      default_mat);
+      default_mat,
+      inst_.scene->eevee.use_outline != 0);
 
   has_time_dependent_materials_ |= GPU_material_is_time_dependent(matpass.gpumat);
 
@@ -382,7 +383,8 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
           geometry_type,
           probe_capture,
           false,
-          nullptr);
+          nullptr,
+          inst_.scene->eevee.use_outline != 0);
       break;
     case GPU_MAT_FAILED:
     default:
@@ -396,7 +398,8 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
           geometry_type,
           probe_capture,
           false,
-          nullptr);
+          nullptr,
+          inst_.scene->eevee.use_outline != 0);
       break;
   }
   /* Returned material should be ready to be drawn. */
@@ -489,8 +492,12 @@ Material &MaterialModule::material_sync(Object *ob,
   bool hide_on_camera = ob->visibility_flag & OB_HIDE_CAMERA;
 
   if (geometry_type == MAT_GEOM_VOLUME) {
-    MaterialKey material_key(
-        blender_mat, geometry_type, MAT_PIPE_VOLUME_MATERIAL, ob->visibility_flag, 0);
+    MaterialKey material_key(blender_mat,
+                             geometry_type,
+                             MAT_PIPE_VOLUME_MATERIAL,
+                             ob->visibility_flag,
+                             0,
+                             inst_.scene->eevee.use_outline != 0);
     Material &mat = material_map_.lookup_or_add_cb(material_key, [&]() {
       Material mat = {};
       mat.volume_occupancy = material_pass_get(
@@ -530,8 +537,12 @@ Material &MaterialModule::material_sync(Object *ob,
     prepass_pipe = has_motion ? MAT_PIPE_PREPASS_DEFERRED_VELOCITY : MAT_PIPE_PREPASS_DEFERRED;
   }
 
-  MaterialKey material_key(
-      blender_mat, geometry_type, surface_pipe, ob->visibility_flag, ob->refraction_layer_index);
+  MaterialKey material_key(blender_mat,
+                           geometry_type,
+                           surface_pipe,
+                           ob->visibility_flag,
+                           ob->refraction_layer_index,
+                           inst_.scene->eevee.use_outline != 0);
 
   Material &mat = material_map_.lookup_or_add_cb(material_key, [&]() {
     Material mat = {};
@@ -750,7 +761,14 @@ ShaderGroups MaterialModule::default_materials_load(bool block_until_ready)
   auto request_shader =
       [&](blender::Material *mat, eMaterialPipeline pipeline, eMaterialGeometry geom) {
         GPUMaterial *gpu_mat = inst_.shaders.material_shader_get(
-            mat, mat->nodetree, pipeline, geom, MAT_PROBE_NONE, !block_until_ready, nullptr);
+            mat,
+            mat->nodetree,
+            pipeline,
+            geom,
+            MAT_PROBE_NONE,
+            !block_until_ready,
+            nullptr,
+            inst_.scene->eevee.use_outline != 0);
         shaders_are_ready = shaders_are_ready && GPU_material_status(gpu_mat) == GPU_MAT_SUCCESS;
       };
 

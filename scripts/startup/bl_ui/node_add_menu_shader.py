@@ -55,7 +55,7 @@ def object_or_npr_eevee_shader_nodes_poll(context):
 
 
 def outline_control_shader_nodes_poll(context):
-    return object_shader_nodes_poll(context) or npr_shader_nodes_poll(context)
+    return object_or_npr_eevee_shader_nodes_poll(context)
 
 
 def object_filter_or_npr_eevee_shader_nodes_poll(context):

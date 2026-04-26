@@ -300,7 +300,8 @@ class ShaderModule {
                                    eMaterialGeometry geometry_type,
                                    eMaterialProbe probe_capture,
                                    bool deferred_compilation,
-                                   blender::Material *default_mat);
+                                   blender::Material *default_mat,
+                                   bool use_outline = true);
   GPUMaterial *world_shader_get(blender::World *blender_world,
                                 bNodeTree *nodetree,
                                 eMaterialPipeline pipeline_type,

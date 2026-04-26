@@ -881,13 +881,15 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   eMaterialThickness thickness_type;
   eMaterialProbe probe_capture;
   bool transparent_shadows;
+  bool use_outline;
   material_type_from_shader_uuid(shader_uuid,
                                  pipeline_type,
                                  geometry_type,
                                  displacement_type,
                                  thickness_type,
                                  probe_capture,
-                                 transparent_shadows);
+                                 transparent_shadows,
+                                 use_outline);
 
   GPUCodegenOutput &codegen = *codegen_;
   ShaderCreateInfo &info = *reinterpret_cast<ShaderCreateInfo *>(codegen.create_info);
@@ -1050,7 +1052,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     info.additional_info("eevee_render_pass_out");
     info.additional_info("eevee_cryptomatte_out");
   }
-  if (GPU_material_has_outline_output(gpumat) &&
+  if (use_outline && GPU_material_has_outline_output(gpumat) &&
       ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD))
   {
     info.additional_info((pipeline_type == MAT_PIPE_FORWARD) ? "eevee_surf_forward_outline_out" :
@@ -1621,13 +1623,15 @@ static GPUPass *pass_replacement_cb(void *void_thunk, GPUMaterial *mat)
   eMaterialThickness thickness_type;
   eMaterialProbe probe_capture;
   bool transparent_shadows;
+  bool use_outline;
   material_type_from_shader_uuid(shader_uuid,
                                  pipeline_type,
                                  geometry_type,
                                  displacement_type,
                                  thickness_type,
                                  probe_capture,
-                                 transparent_shadows);
+                                 transparent_shadows,
+                                 use_outline);
 
   bool is_shadow_pass = pipeline_type == eMaterialPipeline::MAT_PIPE_SHADOW;
   bool is_prepass = ELEM(pipeline_type,
@@ -1656,7 +1660,8 @@ static GPUPass *pass_replacement_cb(void *void_thunk, GPUMaterial *mat)
                                                                  geometry_type,
                                                                  probe_capture,
                                                                  false,
-                                                                 nullptr);
+                                                                 nullptr,
+                                                                 use_outline);
     return GPU_material_get_pass(mat);
   }
 
@@ -1688,7 +1693,8 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
                                                eMaterialGeometry geometry_type,
                                                eMaterialProbe probe_capture,
                                                bool deferred_compilation,
-                                               blender::Material *default_mat)
+                                               blender::Material *default_mat,
+                                               bool use_outline)
 {
   eMaterialDisplacement displacement_type = to_displacement_type(blender_mat->displacement_method);
   eMaterialThickness thickness_type = to_thickness_type(blender_mat->thickness_mode);
@@ -1707,7 +1713,8 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
       displacement_type,
       thickness_type,
       probe_capture,
-      blender_mat->blend_flag);
+      blender_mat->blend_flag,
+      use_outline);
 
   bool is_default_material = default_mat == nullptr;
   BLI_assert(blender_mat != default_mat);

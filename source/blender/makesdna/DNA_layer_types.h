@@ -205,9 +205,8 @@ struct LayerCollection {
 /* Type containing EEVEE settings per view-layer */
 struct ViewLayerEEVEE {
   int render_passes = 0;
-  int flag = 0;
   float ambient_occlusion_distance = 10.0f;
-  int _pad = 0;
+  int _pad[2] = {};
 };
 
 /** AOV Render-pass definition. */

@@ -1052,7 +1052,12 @@ namespace blender::eevee
     CHECK_PASS_LEGACY(SHADOW, SOCK_RGBA, 3, "RGB");
     CHECK_PASS_LEGACY(AO, SOCK_RGBA, 3, "RGB");
     CHECK_PASS_EEVEE(TRANSPARENT, SOCK_RGBA, 4, "RGBA");
-    CHECK_PASS_EEVEE(OUTLINE, SOCK_RGBA, 4, "RGBA");
+    if (scene->eevee.use_outline &&
+        (view_layer->eevee.render_passes & EEVEE_RENDER_PASS_OUTLINE))
+    {
+      RE_engine_register_pass(
+          engine, scene, view_layer, RE_PASSNAME_OUTLINE, 4, "RGBA", SOCK_RGBA);
+    }
 
     for (ViewLayerAOV& aov : view_layer->aovs)
     {

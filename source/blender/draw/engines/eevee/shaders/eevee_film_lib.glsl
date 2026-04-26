@@ -733,7 +733,7 @@ void film_process_data(int2 texel_film, float4 &out_color, float &out_depth)
   /* NOTE: We split the accumulations into separate loops to avoid using too much registers and
    * maximize occupancy. */
 
-  if (combined_id != -1) {
+  if (combined_id != -1 || outline_id != -1) {
     /* NOTE: Do weight accumulation again since we use custom weights. */
     float weight_accum = 0.0f;
     float4 combined_accum = float4(0.0f);
@@ -743,16 +743,21 @@ void film_process_data(int2 texel_film, float4 &out_color, float &out_depth)
     FilmSample src;
     for (int i = samples_len - 1; i >= 0; i--) {
       src = film_sample_get(i, texel_film);
-      film_sample_accum_combined(src, combined_accum, weight_accum);
+      if (combined_id != -1) {
+        film_sample_accum_combined(src, combined_accum, weight_accum);
+      }
       outline_accum += film_outline_resolved_fetch(src.texel) * src.weight;
       outline_weight_accum += src.weight;
     }
     const float4 outline_color = outline_accum / max(outline_weight_accum, 1e-8f);
-    /* NOTE: src.texel is center texel in incoming data buffer. */
-    const float4 combined_color = film_store_combined(
-        dst, src.texel, combined_accum, weight_accum, outline_color, out_color);
 
-    film_store_combined_output(texel_film, combined_color, out_color);
+    if (combined_id != -1) {
+      /* NOTE: src.texel is center texel in incoming data buffer. */
+      const float4 combined_color = film_store_combined(
+          dst, src.texel, combined_accum, weight_accum, outline_color, out_color);
+
+      film_store_combined_output(texel_film, combined_color, out_color);
+    }
 
     if (outline_id != -1) {
       film_store_color(dst, outline_id, outline_accum, out_color, false);

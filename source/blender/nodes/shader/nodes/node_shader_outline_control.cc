@@ -46,7 +46,7 @@ static int node_shader_gpu_outline_control(GPUMaterial *mat,
 
 static bool node_add_ui_poll(const bContext *C)
 {
-  return object_shader_nodes_poll(C) || npr_shader_nodes_poll(C);
+  return object_or_npr_eevee_shader_nodes_poll(C);
 }
 
 }  // namespace nodes::node_shader_outline_control_cc

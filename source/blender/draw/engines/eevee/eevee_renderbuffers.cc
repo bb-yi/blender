@@ -118,11 +118,13 @@ void RenderBuffers::acquire(int2 extent)
 
   const eGPUTextureUsage outline_usage = GPU_TEXTURE_USAGE_SHADER_READ |
                                          GPU_TEXTURE_USAGE_SHADER_WRITE;
-  outline_color_tx.acquire(extent, gpu::TextureFormat::SFLOAT_16_16_16_16, outline_usage);
-  outline_info_tx.acquire(extent, gpu::TextureFormat::UNORM_16_16_16_16, outline_usage);
+  const bool use_outline_buffers = inst_.scene->eevee.use_outline &&
+                                   inst_.materials.has_visible_outline_materials();
+  const int2 outline_extent = use_outline_buffers ? extent : int2(1);
+  outline_color_tx.acquire(outline_extent, gpu::TextureFormat::SFLOAT_16_16_16_16, outline_usage);
+  outline_info_tx.acquire(outline_extent, gpu::TextureFormat::UNORM_16_16_16_16, outline_usage);
   outline_color_tx.clear(float4(0.0f));
   outline_info_tx.clear(float4(0.0f));
-
 }
 
 void RenderBuffers::release()

@@ -83,7 +83,8 @@ static inline void material_type_from_shader_uuid(uint64_t shader_uuid,
                                                   eMaterialDisplacement &displacement_type,
                                                   eMaterialThickness &thickness_type,
                                                   eMaterialProbe &probe_capture,
-                                                  bool &transparent_shadows)
+                                                  bool &transparent_shadows,
+                                                  bool &use_outline)
 {
   const uint64_t geometry_mask = ((1u << 4u) - 1u);
   const uint64_t pipeline_mask = ((1u << 4u) - 1u);
@@ -96,6 +97,7 @@ static inline void material_type_from_shader_uuid(uint64_t shader_uuid,
   thickness_type = static_cast<eMaterialThickness>((shader_uuid >> 9u) & thickness_mask);
   probe_capture = static_cast<eMaterialProbe>((shader_uuid >> 10u) & probe_mask);
   transparent_shadows = (shader_uuid >> 12u) & 1u;
+  use_outline = (shader_uuid >> 13u) & 1u;
 }
 
 static inline uint64_t shader_uuid_from_material_type(
@@ -104,7 +106,8 @@ static inline uint64_t shader_uuid_from_material_type(
     eMaterialDisplacement displacement_type = MAT_DISPLACEMENT_BUMP,
     eMaterialThickness thickness_type = MAT_THICKNESS_SPHERE,
     eMaterialProbe probe_capture = MAT_PROBE_NONE,
-    char blend_flags = 0)
+    char blend_flags = 0,
+    bool use_outline = true)
 {
   BLI_assert(int64_t(displacement_type) < (1 << 1));
   BLI_assert(int64_t(thickness_type) < (1 << 1));
@@ -120,6 +123,7 @@ static inline uint64_t shader_uuid_from_material_type(
   uuid |= thickness_type << 9;
   uuid |= uint64_t(probe_capture) << 10;
   uuid |= transparent_shadows << 12;
+  uuid |= uint64_t(use_outline) << 13;
   return uuid;
 }
 
@@ -239,7 +243,8 @@ struct MaterialKey {
               eMaterialGeometry geometry,
               eMaterialPipeline pipeline,
               short visibility_flags,
-              short refraction_layer)
+              short refraction_layer,
+              bool use_outline)
       : mat(mat_)
   {
     options = shader_uuid_from_material_type(pipeline,
@@ -247,7 +252,8 @@ struct MaterialKey {
                                              to_displacement_type(mat_->displacement_method),
                                              to_thickness_type(mat_->thickness_mode),
                                              MAT_PROBE_NONE,
-                                             mat_->blend_flag);
+                                             mat_->blend_flag,
+                                             use_outline);
     options = (options << 1) | (visibility_flags & OB_HIDE_CAMERA ? 0 : 1);
     options = (options << 1) | (visibility_flags & OB_HIDE_SHADOW ? 0 : 1);
     options = (options << 1) | (visibility_flags & OB_HIDE_PROBE_CUBEMAP ? 0 : 1);

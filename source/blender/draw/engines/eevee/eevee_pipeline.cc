@@ -579,7 +579,7 @@ PassMain::Sub *ForwardPipeline::prepass_opaque_add(blender::Material *blender_ma
 
   has_opaque_ = true;
   PassMain::Sub *pass = prepass_ps_.add(blender_mat, gpumat, has_motion);
-  if (GPU_material_has_outline_output(gpumat)) {
+  if (inst_.scene->eevee.use_outline && GPU_material_has_outline_output(gpumat)) {
     pass->bind_image(OUTLINE_COLOR_SLOT, &inst_.render_buffers.outline_color_tx);
     pass->bind_image(OUTLINE_INFO_SLOT, &inst_.render_buffers.outline_info_tx);
   }
@@ -599,7 +599,7 @@ PassMain::Sub *ForwardPipeline::material_opaque_add(const Object *ob,
       opaque_double_sided_ps_, opaque_single_sided_ps_, opaque_front_cull_ps_, blender_mat);
   has_opaque_ = true;
   PassMain::Sub *sub_pass = &pass->sub(GPU_material_get_name(gpumat));
-  if (GPU_material_has_outline_output(gpumat)) {
+  if (inst_.scene->eevee.use_outline && GPU_material_has_outline_output(gpumat)) {
     sub_pass->bind_image(OUTLINE_COLOR_SLOT, &inst_.render_buffers.outline_color_tx);
     sub_pass->bind_image(OUTLINE_INFO_SLOT, &inst_.render_buffers.outline_info_tx);
   }
@@ -650,7 +650,7 @@ PassMain::Sub *ForwardPipeline::material_transparent_add(const Object *ob,
   pass->state_set(state);
   pass->material_set(*inst_.manager, gpumat, true);
   pass->push_constant("surface_cull_mode", int(material_surface_cull_method(blender_mat)));
-  if (GPU_material_has_outline_output(gpumat)) {
+  if (inst_.scene->eevee.use_outline && GPU_material_has_outline_output(gpumat)) {
     pass->bind_image(OUTLINE_COLOR_SLOT, &inst_.render_buffers.outline_color_tx);
     pass->bind_image(OUTLINE_INFO_SLOT, &inst_.render_buffers.outline_info_tx);
   }
