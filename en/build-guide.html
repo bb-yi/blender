@@ -1,24 +1,22 @@
 
 <!doctype html>
-<html lang="zh" class="no-js">
+<html lang="en" class="no-js">
   <head>
     
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Blender 5.1 NPR Port 新增功能与使用说明">
+        <meta name="description" content="Blender 5.1 NPR Port Features & Usage Guide">
       
       
         <meta name="author" content="NPR Port Team">
       
       
-        <link rel="canonical" href="https://bb-yi.github.io/blender/scene-extensions.html">
+        <link rel="canonical" href="https://bb-yi.github.io/blender/en/build-guide.html">
       
       
-        <link rel="prev" href="interface-guide.html">
+        <link rel="prev" href="scene-extensions.html">
       
-      
-        <link rel="next" href="build-guide.html">
       
       
       <link rel="icon" href="assets/images/favicon.png">
@@ -26,7 +24,7 @@
     
     
       
-        <title>Scene 级 Eevee 扩展 - Blender 5.1 NPR Port 文档</title>
+        <title>Local Build Workflow - Blender 5.1 NPR Port Documentation</title>
       
     
     
@@ -78,8 +76,8 @@
     <div data-md-component="skip">
       
         
-        <a href="#scene-eevee" class="md-skip">
-          跳转至
+        <a href="#local-build-workflow" class="md-skip">
+          Skip to content
         </a>
       
     </div>
@@ -93,8 +91,8 @@
   
 
 <header class="md-header md-header--shadow" data-md-component="header">
-  <nav class="md-header__inner md-grid" aria-label="页眉">
-    <a href="index.html" title="Blender 5.1 NPR Port 文档" class="md-header__button md-logo" aria-label="Blender 5.1 NPR Port 文档" data-md-component="logo">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="index.html" title="Blender 5.1 NPR Port Documentation" class="md-header__button md-logo" aria-label="Blender 5.1 NPR Port Documentation" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -108,13 +106,13 @@
       <div class="md-header__ellipsis">
         <div class="md-header__topic">
           <span class="md-ellipsis">
-            Blender 5.1 NPR Port 文档
+            Blender 5.1 NPR Port Documentation
           </span>
         </div>
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Scene 级 Eevee 扩展
+              Local Build Workflow
             
           </span>
         </div>
@@ -127,9 +125,9 @@
     
     
     
-    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="red"  aria-label="深色模式"  type="radio" name="__palette" id="__palette_0">
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="red"  aria-label="Dark mode"  type="radio" name="__palette" id="__palette_0">
     
-      <label class="md-header__button md-icon" title="深色模式" for="__palette_1" hidden>
+      <label class="md-header__button md-icon" title="Dark mode" for="__palette_1" hidden>
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
       </label>
     
@@ -137,9 +135,9 @@
     
     
     
-    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="red"  aria-label="亮色模式"  type="radio" name="__palette" id="__palette_1">
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="red"  aria-label="Light mode"  type="radio" name="__palette" id="__palette_1">
     
-      <label class="md-header__button md-icon" title="亮色模式" for="__palette_0" hidden>
+      <label class="md-header__button md-icon" title="Light mode" for="__palette_0" hidden>
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
       </label>
     
@@ -154,21 +152,21 @@
       <div class="md-header__option">
   <div class="md-select">
     
-    <button class="md-header__button md-icon" aria-label="选择当前语言">
+    <button class="md-header__button md-icon" aria-label="Select language">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m12.87 15.07-2.54-2.51.03-.03A17.5 17.5 0 0 0 14.07 6H17V4h-7V2H8v2H1v2h11.17C11.5 7.92 10.44 9.75 9 11.35 8.07 10.32 7.3 9.19 6.69 8h-2c.73 1.63 1.73 3.17 2.98 4.56l-5.09 5.02L4 19l5-5 3.11 3.11zM18.5 10h-2L12 22h2l1.12-3h4.75L21 22h2zm-2.62 7 1.62-4.33L19.12 17z"/></svg>
     </button>
     <div class="md-select__inner">
       <ul class="md-select__list">
         
           <li class="md-select__item">
-            <a href="/blender/" hreflang="zh" class="md-select__link">
-              中文
+            <a href="/blender/en/" hreflang="en" class="md-select__link">
+              English
             </a>
           </li>
         
           <li class="md-select__item">
-            <a href="/blender/en/" hreflang="en" class="md-select__link">
-              English
+            <a href="/blender/" hreflang="zh" class="md-select__link">
+              中文
             </a>
           </li>
         
@@ -188,16 +186,16 @@
   <label class="md-search__overlay" for="__search"></label>
   <div class="md-search__inner" role="search">
     <form class="md-search__form" name="search">
-      <input type="text" class="md-search__input" name="query" aria-label="搜索" placeholder="搜索" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
       <label class="md-search__icon md-icon" for="__search">
         
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
         
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
       </label>
-      <nav class="md-search__options" aria-label="查找">
+      <nav class="md-search__options" aria-label="Search">
         
-        <button type="reset" class="md-search__icon md-icon" title="清空当前内容" aria-label="清空当前内容" tabindex="-1">
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
           
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
         </button>
@@ -210,7 +208,7 @@
       <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
         <div class="md-search-result" data-md-component="search-result">
           <div class="md-search-result__meta">
-            正在初始化搜索引擎
+            Initializing search
           </div>
           <ol class="md-search-result__list" role="presentation"></ol>
         </div>
@@ -244,15 +242,15 @@
 
 
 
-<nav class="md-nav md-nav--primary" aria-label="导航栏" data-md-level="0">
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="index.html" title="Blender 5.1 NPR Port 文档" class="md-nav__button md-logo" aria-label="Blender 5.1 NPR Port 文档" data-md-component="logo">
+    <a href="index.html" title="Blender 5.1 NPR Port Documentation" class="md-nav__button md-logo" aria-label="Blender 5.1 NPR Port Documentation" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
 
     </a>
-    Blender 5.1 NPR Port 文档
+    Blender 5.1 NPR Port Documentation
   </label>
   
   <ul class="md-nav__list" data-md-scrollfix>
@@ -269,7 +267,7 @@
   
   
   <span class="md-ellipsis">
-    首页
+    Home
     
   </span>
   
@@ -291,7 +289,7 @@
   
   
   <span class="md-ellipsis">
-    扩展着色器节点
+    Extended Nodes
     
   </span>
   
@@ -313,7 +311,7 @@
   
   
   <span class="md-ellipsis">
-    NPR Tree 工作流
+    NPR Workflow
     
   </span>
   
@@ -335,7 +333,29 @@
   
   
   <span class="md-ellipsis">
-    界面与设置
+    Interface & Settings
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="scene-extensions.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Scene Extensions
     
   </span>
   
@@ -366,7 +386,7 @@
   
   
   <span class="md-ellipsis">
-    Scene 级 Eevee 扩展
+    Local Build Workflow
     
   </span>
   
@@ -374,12 +394,12 @@
           <span class="md-nav__icon md-icon"></span>
         </label>
       
-      <a href="scene-extensions.html" class="md-nav__link md-nav__link--active">
+      <a href="build-guide.html" class="md-nav__link md-nav__link--active">
         
   
   
   <span class="md-ellipsis">
-    Scene 级 Eevee 扩展
+    Local Build Workflow
     
   </span>
   
@@ -388,7 +408,7 @@
       
         
 
-<nav class="md-nav md-nav--secondary" aria-label="目录">
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
   
   
   
@@ -397,51 +417,60 @@
   
     <label class="md-nav__title" for="__toc">
       <span class="md-nav__icon md-icon"></span>
-      目录
+      Table of contents
     </label>
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#1-render-textures" class="md-nav__link">
+  <a href="#fixed-rules" class="md-nav__link">
     <span class="md-ellipsis">
-      1. Render Textures
+      Fixed Rules
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="1. Render Textures">
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#daily-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      Daily Commands
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Daily Commands">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#_1" class="md-nav__link">
+  <a href="#default-daily-testing" class="md-nav__link">
     <span class="md-ellipsis">
-      功能说明
+      Default / Daily Testing
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#_2" class="md-nav__link">
+  <a href="#parallel-mainline-mainfix" class="md-nav__link">
     <span class="md-ellipsis">
-      面板入口
+      Parallel Mainline Mainfix
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#_3" class="md-nav__link">
+  <a href="#release-build-cycles-enabled" class="md-nav__link">
     <span class="md-ellipsis">
-      可配置内容
+      Release Build / Cycles Enabled
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#_4" class="md-nav__link">
+  <a href="#if-unity-objects-go-stale" class="md-nav__link">
     <span class="md-ellipsis">
-      基本使用方法
+      If Unity Objects Go Stale
     </span>
   </a>
   
@@ -453,97 +482,55 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-filter-materials" class="md-nav__link">
+  <a href="#validation" class="md-nav__link">
     <span class="md-ellipsis">
-      2. Filter Materials
+      Validation
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="2. Filter Materials">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#_5" class="md-nav__link">
-    <span class="md-ellipsis">
-      功能说明
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_6" class="md-nav__link">
-    <span class="md-ellipsis">
-      面板入口
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_7" class="md-nav__link">
-    <span class="md-ellipsis">
-      基本使用方法
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_8" class="md-nav__link">
-    <span class="md-ellipsis">
-      重要说明
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#3-eevee-outline" class="md-nav__link">
+  <a href="#common-problems" class="md-nav__link">
     <span class="md-ellipsis">
-      3. Eevee Outline
+      Common Problems
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="3. Eevee Outline">
+    <nav class="md-nav" aria-label="Common Problems">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#_9" class="md-nav__link">
+  <a href="#install-fails-because-files-are-in-use" class="md-nav__link">
     <span class="md-ellipsis">
-      功能说明
+      INSTALL Fails Because Files Are In Use
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#_10" class="md-nav__link">
+  <a href="#build_ninja_sccache_pollbat-looks-stuck" class="md-nav__link">
     <span class="md-ellipsis">
-      面板入口
+      build_ninja_sccache_poll.bat Looks Stuck
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#_11" class="md-nav__link">
+  <a href="#sccache-or-clexe-returns-1" class="md-nav__link">
     <span class="md-ellipsis">
-      行为说明
+      sccache or cl.exe Returns -1
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#_12" class="md-nav__link">
+  <a href="#windows-precompiled-libs-not-found" class="md-nav__link">
     <span class="md-ellipsis">
-      建议补图
+      Windows Precompiled Libs Not Found
     </span>
   </a>
   
@@ -562,28 +549,6 @@
   
 
     
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="build-guide.html" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    本地构建流程
-    
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-    
   </ul>
 </nav>
                   </div>
@@ -597,7 +562,7 @@
                   <div class="md-sidebar__inner">
                     
 
-<nav class="md-nav md-nav--secondary" aria-label="目录">
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
   
   
   
@@ -606,51 +571,60 @@
   
     <label class="md-nav__title" for="__toc">
       <span class="md-nav__icon md-icon"></span>
-      目录
+      Table of contents
     </label>
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#1-render-textures" class="md-nav__link">
+  <a href="#fixed-rules" class="md-nav__link">
     <span class="md-ellipsis">
-      1. Render Textures
+      Fixed Rules
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="1. Render Textures">
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#daily-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      Daily Commands
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Daily Commands">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#_1" class="md-nav__link">
+  <a href="#default-daily-testing" class="md-nav__link">
     <span class="md-ellipsis">
-      功能说明
+      Default / Daily Testing
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#_2" class="md-nav__link">
+  <a href="#parallel-mainline-mainfix" class="md-nav__link">
     <span class="md-ellipsis">
-      面板入口
+      Parallel Mainline Mainfix
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#_3" class="md-nav__link">
+  <a href="#release-build-cycles-enabled" class="md-nav__link">
     <span class="md-ellipsis">
-      可配置内容
+      Release Build / Cycles Enabled
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#_4" class="md-nav__link">
+  <a href="#if-unity-objects-go-stale" class="md-nav__link">
     <span class="md-ellipsis">
-      基本使用方法
+      If Unity Objects Go Stale
     </span>
   </a>
   
@@ -662,97 +636,55 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-filter-materials" class="md-nav__link">
+  <a href="#validation" class="md-nav__link">
     <span class="md-ellipsis">
-      2. Filter Materials
+      Validation
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="2. Filter Materials">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#_5" class="md-nav__link">
-    <span class="md-ellipsis">
-      功能说明
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_6" class="md-nav__link">
-    <span class="md-ellipsis">
-      面板入口
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_7" class="md-nav__link">
-    <span class="md-ellipsis">
-      基本使用方法
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_8" class="md-nav__link">
-    <span class="md-ellipsis">
-      重要说明
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#3-eevee-outline" class="md-nav__link">
+  <a href="#common-problems" class="md-nav__link">
     <span class="md-ellipsis">
-      3. Eevee Outline
+      Common Problems
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="3. Eevee Outline">
+    <nav class="md-nav" aria-label="Common Problems">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#_9" class="md-nav__link">
+  <a href="#install-fails-because-files-are-in-use" class="md-nav__link">
     <span class="md-ellipsis">
-      功能说明
+      INSTALL Fails Because Files Are In Use
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#_10" class="md-nav__link">
+  <a href="#build_ninja_sccache_pollbat-looks-stuck" class="md-nav__link">
     <span class="md-ellipsis">
-      面板入口
+      build_ninja_sccache_poll.bat Looks Stuck
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#_11" class="md-nav__link">
+  <a href="#sccache-or-clexe-returns-1" class="md-nav__link">
     <span class="md-ellipsis">
-      行为说明
+      sccache or cl.exe Returns -1
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#_12" class="md-nav__link">
+  <a href="#windows-precompiled-libs-not-found" class="md-nav__link">
     <span class="md-ellipsis">
-      建议补图
+      Windows Precompiled Libs Not Found
     </span>
   </a>
   
@@ -779,109 +711,76 @@
 
 
 
-<h1 id="scene-eevee">Scene 级 Eevee 扩展<a class="headerlink" href="#scene-eevee" title="Permanent link">&para;</a></h1>
-<h2 id="1-render-textures">1. Render Textures<a class="headerlink" href="#1-render-textures" title="Permanent link">&para;</a></h2>
-<h4 id="_1">功能说明<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h4>
-<p><code>Render Textures</code> 是场景级的 Eevee 额外渲染纹理系统。</p>
-<p>它允许场景预先维护最多 <code>4</code> 个 Render Texture 槽位。每个槽位都可以指定一个相机和一个输出类型，把该相机视角下的场景结果先渲染成纹理，再在普通物体材质中通过 <code>Render Texture</code> 节点采样。</p>
-<h4 id="_2">面板入口<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h4>
-<p><code>Scene Properties &gt; Render Textures</code></p>
-<div align="center">
-  <img src="images/SnowShot_2026-03-28_04-37-13.png" alt="Render Textures" style="border-radius: 10px;">
-  <br>
-</div>
-
-<h4 id="_3">可配置内容<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h4>
-<p>每个 <code>Render Texture</code> 条目当前支持：</p>
+<h1 id="local-build-workflow">Local Build Workflow<a class="headerlink" href="#local-build-workflow" title="Permanent link">&para;</a></h1>
+<p>This page is specific to the current Blender NPR workspace:</p>
 <ul>
-<li><code>Name</code></li>
-<li><code>Enabled</code></li>
-<li><code>Source</code></li>
-<li><code>Color</code>：捕获最终 Eevee 颜色</li>
-<li><code>Depth</code>：捕获线性深度</li>
-<li><code>Normal</code>：捕获法线</li>
-<li><code>Camera</code></li>
-<li><code>Resolution X / Y</code></li>
-<li><code>Update Mode</code></li>
-<li><code>Every Sample</code></li>
-<li><code>Every Frame</code></li>
-<li><code>Manual</code></li>
-<li><code>Format</code></li>
-<li><code>RGBA16F</code></li>
-<li><code>RGBA32F</code></li>
-<li><code>R16F</code></li>
-<li><code>R32F</code></li>
+<li>Source tree: <code>E:\blender_bulid_test\blender_npr_bulid\blender_5_1_port</code></li>
+<li>Parallel mainline worktree: <code>E:\blender_bulid_test\blender_npr_bulid\blender_5_1_port_mainfix</code></li>
+<li>Default build tree: <code>build_windows_x64_vc17_Release_5_1_port_clean_ninja</code></li>
+<li>Default install tree: <code>install_windows_x64_vc17_Release_5_1_port_clean</code></li>
+<li>Mainfix build tree: <code>build_windows_x64_vc17_Release_5_1_port_mainfix_ninja</code></li>
+<li>Mainfix install tree: <code>install_windows_x64_vc17_Release_5_1_port_mainfix</code></li>
 </ul>
-<h4 id="_4">基本使用方法<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h4>
+<p>The goal is to keep local collaboration on one consistent incremental build workflow instead of repeatedly reconfiguring CMake, creating new build folders, or debugging environment mistakes as if they were source failures.</p>
+<h2 id="fixed-rules">Fixed Rules<a class="headerlink" href="#fixed-rules" title="Permanent link">&para;</a></h2>
 <ol>
-<li>打开 <code>Scene Properties &gt; Render Textures</code>。</li>
-<li>新建一个 <code>Render Texture</code> 条目。</li>
-<li>选择 <code>Source</code>、<code>Camera</code>、分辨率、刷新模式和格式。</li>
-<li>在普通物体材质里添加 <code>Add &gt; Texture &gt; Render Texture</code> 节点。</li>
-<li>在节点面板中选择对应的 <code>Render Texture</code> 条目。</li>
-<li>使用节点输出的 <code>Color</code> / <code>Alpha</code> 参与后续材质计算。</li>
+<li>Reuse the existing Ninja build trees; do not create new <code>build_*</code> folders casually.</li>
+<li>Prefer incremental builds; do not jump to <code>reconfigure-clean</code> unless the cache is truly broken.</li>
+<li>Validate from the install tree, not from the build-tree executable.</li>
+<li>Non-interactive runs should always include <code>--no-pause</code>.</li>
+<li>Never run concurrent builds in the same build tree. Check for stale <code>cmake.exe</code> / <code>ninja.exe</code> first.</li>
 </ol>
-<h2 id="2-filter-materials">2. Filter Materials<a class="headerlink" href="#2-filter-materials" title="Permanent link">&para;</a></h2>
-<h4 id="_5">功能说明<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h4>
-<p>它是一套场景级的 Eevee 全屏滤镜栈。每个条目都是一个 <code>Filter</code> 域材质，按列表顺序依次对当前帧进行处理。</p>
-<h4 id="_6">面板入口<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h4>
-<p><code>Scene Properties &gt; Filter Materials</code></p>
-<div align="center">
-  <img src="images/SnowShot_2026-03-28_04-41-53.png" alt="Filter Materials" style="border-radius: 10px;">
-  <br>
-</div>
-
-<p>节点树入口：着色器节点编辑器 &gt; 着色器类型 &gt; <code>Filter</code></p>
-<div align="center">
-  <img src="images/SnowShot_2026-03-28_04-42-42.png" alt="Filter Shader Type" style="border-radius: 10px;">
-  <br>
-</div>
-
-<h4 id="_7">基本使用方法<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h4>
-<ol>
-<li>打开 <code>Scene Properties &gt; Filter Materials</code>。</li>
-<li>新建一个条目，或者直接点 <code>New Filter Material</code>。</li>
-<li>选中的材质必须是 <code>Filter</code> 域材质。</li>
-<li>打开 Shader Editor，把顶部 <code>Shader Type</code> 切换到 <code>Filter</code>。</li>
-<li>在滤镜材质里使用 <code>Scene Color</code> 读取场景数据，也可以配合 <code>Filter Object Info</code> 或 <code>Filter Mask</code> 做对象驱动控制。</li>
-<li>如果需要读取已有自定义通道，可使用 <code>AOV Input</code>。</li>
-<li>如果需要把滤镜中间结果或最终结果额外写入自定义通道，可使用 <code>AOV Output</code>。</li>
-<li>通过 <code>Execution Stage</code> 选择滤镜执行位置。</li>
-</ol>
-<h4 id="_8">重要说明<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h4>
+<h2 id="daily-commands">Daily Commands<a class="headerlink" href="#daily-commands" title="Permanent link">&para;</a></h2>
+<h3 id="default-daily-testing">Default / Daily Testing<a class="headerlink" href="#default-daily-testing" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="p">.\</span><span class="n">build_ninja_sccache_poll</span><span class="p">.</span><span class="n">bat</span> <span class="n">install</span> <span class="p">-</span><span class="n">-no-pause</span>
+</code></pre></div>
 <ul>
-<li><code>Scene Color</code> 节点的默认采样坐标为 <code>Texture Coordinate</code> 节点的 <code>Window</code> 输出</li>
-<li>支持 <code>AOV Input</code></li>
-<li>支持 <code>AOV Output</code>，可以先写出命名 AOV，再继续把结果送到 <code>Filter Output</code></li>
-<li><code>Execution Stage</code> 目前提供三个位置：</li>
-<li><code>Before Volume Fog</code></li>
-<li><code>Before Depth of Field</code></li>
-<li><code>Before Composite</code></li>
+<li>Default mode keeps <code>WITH_CYCLES=OFF</code></li>
+<li>Output goes to <code>install_windows_x64_vc17_Release_5_1_port_clean</code></li>
 </ul>
-<h2 id="3-eevee-outline">3. Eevee Outline<a class="headerlink" href="#3-eevee-outline" title="Permanent link">&para;</a></h2>
-<h4 id="_9">功能说明<a class="headerlink" href="#_9" title="Permanent link">&para;</a></h4>
-<p><code>Eevee Outline</code> 是场景级描边总开关，用于控制当前 NPR Port 内置的屏幕空间描边系统。</p>
-<h4 id="_10">面板入口<a class="headerlink" href="#_10" title="Permanent link">&para;</a></h4>
-<p><code>Render Properties &gt; Outline</code></p>
-<p>描边 Render Pass 入口：</p>
-<p><code>View Layer Properties &gt; Passes &gt; Data &gt; Outline</code></p>
-<h4 id="_11">行为说明<a class="headerlink" href="#_11" title="Permanent link">&para;</a></h4>
+<h3 id="parallel-mainline-mainfix">Parallel Mainline Mainfix<a class="headerlink" href="#parallel-mainline-mainfix" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="p">.\</span><span class="n">build_ninja_sccache_poll</span><span class="p">.</span><span class="n">bat</span> <span class="n">mainfix</span> <span class="n">install</span> <span class="p">-</span><span class="n">-no-pause</span>
+</code></pre></div>
 <ul>
-<li>默认开启，保持 <code>Outline Control</code> 节点和 <code>Outline</code> Render Pass 的正常行为</li>
-<li>关闭后，<code>Outline Control</code> 节点不会影响 Combined 渲染结果</li>
-<li>关闭后，即使 View Layer 中启用了 <code>Outline</code> Render Pass，也不会输出描边内容</li>
-<li>该开关用于快速回到与未启用描边系统时一致的 Eevee 渲染结果</li>
-<li>当 <code>Outline</code> Render Pass 未开启时，描边结果会直接合成进 <code>Combined</code></li>
-<li>当 <code>Outline</code> Render Pass 开启时，可在合成器或后续流程中单独读取描边结果</li>
-<li>该功能依赖材质中的 <code>Outline Control</code> 节点实际写入描边参数；没有节点输出时不会自动生成描边</li>
+<li>Uses <code>blender_5_1_port_mainfix</code></li>
+<li>Outputs to <code>install_windows_x64_vc17_Release_5_1_port_mainfix</code></li>
+<li>Does not overwrite the default install tree</li>
 </ul>
-<h4 id="_12">建议补图<a class="headerlink" href="#_12" title="Permanent link">&para;</a></h4>
+<h3 id="release-build-cycles-enabled">Release Build / Cycles Enabled<a class="headerlink" href="#release-build-cycles-enabled" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="p">.\</span><span class="n">build_ninja_sccache_poll</span><span class="p">.</span><span class="n">bat</span> <span class="n">with-cycles</span> <span class="n">install</span> <span class="p">-</span><span class="n">-no-pause</span>
+</code></pre></div>
+<h3 id="if-unity-objects-go-stale">If Unity Objects Go Stale<a class="headerlink" href="#if-unity-objects-go-stale" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="p">.\</span><span class="n">build_ninja_sccache</span><span class="p">.</span><span class="n">bat</span> <span class="n">clean-unity</span> <span class="n">install</span> <span class="p">-</span><span class="n">-no-pause</span>
+</code></pre></div>
+<h2 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h2>
+<p>After a build, check the install-tree binary first:</p>
+<div class="highlight"><pre><span></span><code><span class="p">&amp;</span> <span class="s2">&quot;.\install_windows_x64_vc17_Release_5_1_port_clean\blender.exe&quot;</span> <span class="p">-</span><span class="n">-background</span> <span class="p">-</span><span class="n">-factory-startup</span> <span class="p">-</span><span class="n">-version</span>
+</code></pre></div>
+<p>Or for mainfix:</p>
+<div class="highlight"><pre><span></span><code><span class="p">&amp;</span> <span class="s2">&quot;.\install_windows_x64_vc17_Release_5_1_port_mainfix\blender.exe&quot;</span> <span class="p">-</span><span class="n">-background</span> <span class="p">-</span><span class="n">-factory-startup</span> <span class="p">-</span><span class="n">-version</span>
+</code></pre></div>
+<p>Timestamps alone are not enough. Add at least one background smoke test before treating the install tree as validated.</p>
+<h2 id="common-problems">Common Problems<a class="headerlink" href="#common-problems" title="Permanent link">&para;</a></h2>
+<h3 id="install-fails-because-files-are-in-use"><code>INSTALL</code> Fails Because Files Are In Use<a class="headerlink" href="#install-fails-because-files-are-in-use" title="Permanent link">&para;</a></h3>
+<p>The usual cause is that the install-tree <code>blender.exe</code> is still running. Close the matching install-tree Blender first, then rerun <code>install</code>.</p>
+<h3 id="build_ninja_sccache_pollbat-looks-stuck"><code>build_ninja_sccache_poll.bat</code> Looks Stuck<a class="headerlink" href="#build_ninja_sccache_pollbat-looks-stuck" title="Permanent link">&para;</a></h3>
 <ul>
-<li><code>images/placeholder_eevee_outline.png</code></li>
-<li>建议内容：<code>Render Properties &gt; Outline</code> 面板</li>
-<li><code>images/placeholder_outline_render_pass.png</code></li>
-<li>建议内容：<code>View Layer Properties &gt; Passes &gt; Data &gt; Outline</code> 位置，或合成器读取 <code>Outline</code> pass 的示例</li>
+<li>Check whether <code>cmake.exe</code>, <code>ninja.exe</code>, or <code>cl.exe</code> are still active</li>
+<li>Inspect <code>temp\codex-build-logs</code></li>
+<li>Do not start a second build chain on the same build tree</li>
 </ul>
+<h3 id="sccache-or-clexe-returns-1"><code>sccache</code> or <code>cl.exe</code> Returns <code>-1</code><a class="headerlink" href="#sccache-or-clexe-returns-1" title="Permanent link">&para;</a></h3>
+<p>Reduce concurrency and continue incrementally, for example:</p>
+<div class="highlight"><pre><span></span><code><span class="nv">$env:BUILD_JOBS</span><span class="p">=</span><span class="s1">&#39;8&#39;</span>
+<span class="p">.\</span><span class="n">build_ninja_sccache_poll</span><span class="p">.</span><span class="n">bat</span> <span class="n">mainfix</span> <span class="n">install</span> <span class="p">-</span><span class="n">-no-pause</span>
+</code></pre></div>
+<h3 id="windows-precompiled-libs-not-found">Windows Precompiled Libs Not Found<a class="headerlink" href="#windows-precompiled-libs-not-found" title="Permanent link">&para;</a></h3>
+<p><code>blender_5_1_port_mainfix\lib\windows_x64</code> must remain usable. The current safe setup is:</p>
+<ul>
+<li>Keep the <code>windows_x64</code> root as a real directory</li>
+<li>Reuse child library folders with junctions that point to <code>blender_5_1_port\lib\windows_x64\...</code></li>
+</ul>
+<p>Do not make the entire <code>windows_x64</code> root itself a junction.</p>
 
 
 
@@ -907,7 +806,7 @@
           <button type="button" class="md-top md-icon" data-md-component="top" hidden>
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
-  回到页面顶部
+  Back to top
 </button>
         
       </main>
@@ -954,7 +853,7 @@
     
     
       
-      <script id="__config" type="application/json">{"base": ".", "features": ["navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.select", "content.code.annotate", "content.tabs.link", "toc.follow"], "search": "assets/javascripts/workers/search.973d3a69.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u590d\u5236", "clipboard.copy": "\u590d\u5236", "search.result.more.one": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.more.other": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 # \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.none": "\u6ca1\u6709\u627e\u5230\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.one": "\u627e\u5230 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.other": "# \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.placeholder": "\u952e\u5165\u4ee5\u5f00\u59cb\u641c\u7d22", "search.result.term.missing": "\u7f3a\u5c11", "select.version": "\u9009\u62e9\u5f53\u524d\u7248\u672c"}, "version": null}</script>
+      <script id="__config" type="application/json">{"base": ".", "features": ["navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.select", "content.code.annotate", "content.tabs.link", "toc.follow"], "search": "assets/javascripts/workers/search.973d3a69.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
       <script src="assets/javascripts/bundle.f55a23d4.min.js"></script>

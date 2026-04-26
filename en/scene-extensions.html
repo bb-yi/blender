@@ -18,6 +18,8 @@
         <link rel="prev" href="interface-guide.html">
       
       
+        <link rel="next" href="build-guide.html">
+      
       
       <link rel="icon" href="assets/images/favicon.png">
       <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.6.22">
@@ -501,10 +503,83 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#3-eevee-outline" class="md-nav__link">
+    <span class="md-ellipsis">
+      3. Eevee Outline
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Eevee Outline">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#feature-description_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      Feature Description
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#panel-entry_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      Panel Entry
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#behavior" class="md-nav__link">
+    <span class="md-ellipsis">
+      Behavior
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#suggested-images" class="md-nav__link">
+    <span class="md-ellipsis">
+      Suggested Images
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
       
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="build-guide.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Local Build Workflow
+    
+  </span>
+  
+
+      </a>
     </li>
   
 
@@ -637,6 +712,57 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#3-eevee-outline" class="md-nav__link">
+    <span class="md-ellipsis">
+      3. Eevee Outline
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Eevee Outline">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#feature-description_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      Feature Description
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#panel-entry_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      Panel Entry
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#behavior" class="md-nav__link">
+    <span class="md-ellipsis">
+      Behavior
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#suggested-images" class="md-nav__link">
+    <span class="md-ellipsis">
+      Suggested Images
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -731,6 +857,30 @@
 <li><code>Before Volume Fog</code></li>
 <li><code>Before Depth of Field</code></li>
 <li><code>Before Composite</code></li>
+</ul>
+<h2 id="3-eevee-outline">3. Eevee Outline<a class="headerlink" href="#3-eevee-outline" title="Permanent link">&para;</a></h2>
+<h4 id="feature-description_2">Feature Description<a class="headerlink" href="#feature-description_2" title="Permanent link">&para;</a></h4>
+<p><code>Eevee Outline</code> is the scene-level master switch for the built-in screen-space outline system in the NPR Port.</p>
+<h4 id="panel-entry_2">Panel Entry<a class="headerlink" href="#panel-entry_2" title="Permanent link">&para;</a></h4>
+<p><code>Render Properties &gt; Outline</code></p>
+<p>Outline render-pass entry:</p>
+<p><code>View Layer Properties &gt; Passes &gt; Data &gt; Outline</code></p>
+<h4 id="behavior">Behavior<a class="headerlink" href="#behavior" title="Permanent link">&para;</a></h4>
+<ul>
+<li>Enabled by default so <code>Outline Control</code> nodes and the <code>Outline</code> render pass work normally</li>
+<li>When disabled, <code>Outline Control</code> no longer affects the Combined result</li>
+<li>When disabled, the <code>Outline</code> render pass also stops producing outline data</li>
+<li>The toggle is meant as a quick way to return Eevee to the same look as a build without the outline system</li>
+<li>If the <code>Outline</code> render pass is not enabled, outlines are composited into <code>Combined</code></li>
+<li>If the <code>Outline</code> render pass is enabled, outline data can be read as a separate pass in compositing or later processing</li>
+<li>No outlines are generated unless a material actually writes outline parameters through <code>Outline Control</code></li>
+</ul>
+<h4 id="suggested-images">Suggested Images<a class="headerlink" href="#suggested-images" title="Permanent link">&para;</a></h4>
+<ul>
+<li><code>images/placeholder_eevee_outline.png</code></li>
+<li>Suggested content: the <code>Render Properties &gt; Outline</code> panel</li>
+<li><code>images/placeholder_outline_render_pass.png</code></li>
+<li>Suggested content: the <code>View Layer &gt; Passes &gt; Data &gt; Outline</code> toggle, or a compositor example reading the <code>Outline</code> pass</li>
 </ul>
 
 

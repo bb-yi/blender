@@ -12,13 +12,11 @@
         <meta name="author" content="NPR Port Team">
       
       
-        <link rel="canonical" href="https://bb-yi.github.io/blender/interface-guide.html">
+        <link rel="canonical" href="https://bb-yi.github.io/blender/build-guide.html">
       
       
-        <link rel="prev" href="npr-workflow.html">
+        <link rel="prev" href="scene-extensions.html">
       
-      
-        <link rel="next" href="scene-extensions.html">
       
       
       <link rel="icon" href="assets/images/favicon.png">
@@ -26,7 +24,7 @@
     
     
       
-        <title>界面与设置 - Blender 5.1 NPR Port 文档</title>
+        <title>本地构建流程 - Blender 5.1 NPR Port 文档</title>
       
     
     
@@ -114,7 +112,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              界面与设置
+              本地构建流程
             
           </span>
         </div>
@@ -327,32 +325,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    界面与设置
-    
-  </span>
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="interface-guide.html" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="interface-guide.html" class="md-nav__link">
         
   
   
@@ -363,305 +339,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="目录">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      目录
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#1-eevee-performance" class="md-nav__link">
-    <span class="md-ellipsis">
-      1. Eevee Performance
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="1. Eevee Performance">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#_2" class="md-nav__link">
-    <span class="md-ellipsis">
-      作用
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_3" class="md-nav__link">
-    <span class="md-ellipsis">
-      入口
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_4" class="md-nav__link">
-    <span class="md-ellipsis">
-      行为说明
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_5" class="md-nav__link">
-    <span class="md-ellipsis">
-      当前范围
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#2" class="md-nav__link">
-    <span class="md-ellipsis">
-      2. 材质选择器预览开关
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="2. 材质选择器预览开关">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#_6" class="md-nav__link">
-    <span class="md-ellipsis">
-      作用
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_7" class="md-nav__link">
-    <span class="md-ellipsis">
-      入口
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_8" class="md-nav__link">
-    <span class="md-ellipsis">
-      行为说明
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_9" class="md-nav__link">
-    <span class="md-ellipsis">
-      当前范围
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#3" class="md-nav__link">
-    <span class="md-ellipsis">
-      3. 材质剔除模式
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="3. 材质剔除模式">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#_10" class="md-nav__link">
-    <span class="md-ellipsis">
-      作用
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_11" class="md-nav__link">
-    <span class="md-ellipsis">
-      入口
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_12" class="md-nav__link">
-    <span class="md-ellipsis">
-      可选模式
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_13" class="md-nav__link">
-    <span class="md-ellipsis">
-      说明
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#4-eevee-lightgroup-id" class="md-nav__link">
-    <span class="md-ellipsis">
-      4. Eevee 灯光 Lightgroup ID
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="4. Eevee 灯光 Lightgroup ID">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#_14" class="md-nav__link">
-    <span class="md-ellipsis">
-      作用
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_15" class="md-nav__link">
-    <span class="md-ellipsis">
-      入口
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_16" class="md-nav__link">
-    <span class="md-ellipsis">
-      行为说明
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#5" class="md-nav__link">
-    <span class="md-ellipsis">
-      5. 启动图版本标识
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="5. 启动图版本标识">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#_17" class="md-nav__link">
-    <span class="md-ellipsis">
-      作用
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_18" class="md-nav__link">
-    <span class="md-ellipsis">
-      当前显示格式
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#6-outliner" class="md-nav__link">
-    <span class="md-ellipsis">
-      6. 骨骼在 Outliner 隐藏
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="6. 骨骼在 Outliner 隐藏">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#_19" class="md-nav__link">
-    <span class="md-ellipsis">
-      作用
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_20" class="md-nav__link">
-    <span class="md-ellipsis">
-      入口
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_21" class="md-nav__link">
-    <span class="md-ellipsis">
-      行为说明
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_22" class="md-nav__link">
-    <span class="md-ellipsis">
-      当前范围
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -692,10 +369,32 @@
       
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="build-guide.html" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    本地构建流程
+    
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="build-guide.html" class="md-nav__link md-nav__link--active">
         
   
   
@@ -706,6 +405,146 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      固定规则
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      日常命令
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="日常命令">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      默认 / 日常测试
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mainfix" class="md-nav__link">
+    <span class="md-ellipsis">
+      并行主线 mainfix
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cycles" class="md-nav__link">
+    <span class="md-ellipsis">
+      发布前 / 需要 Cycles
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#unity" class="md-nav__link">
+    <span class="md-ellipsis">
+      遇到 Unity 漏编
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      验证方式
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      常见问题
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="常见问题">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#install" class="md-nav__link">
+    <span class="md-ellipsis">
+      INSTALL 失败 / 文件被占用
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#build_ninja_sccache_pollbat" class="md-nav__link">
+    <span class="md-ellipsis">
+      build_ninja_sccache_poll.bat 看起来卡住
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sccache-clexe-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      sccache 或 cl.exe 返回 -1
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#windows" class="md-nav__link">
+    <span class="md-ellipsis">
+      Windows 预编译库找不到
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -737,274 +576,115 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#1-eevee-performance" class="md-nav__link">
-    <span class="md-ellipsis">
-      1. Eevee Performance
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="1. Eevee Performance">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
   <a href="#_2" class="md-nav__link">
     <span class="md-ellipsis">
-      作用
+      固定规则
     </span>
   </a>
   
 </li>
-        
-          <li class="md-nav__item">
+      
+        <li class="md-nav__item">
   <a href="#_3" class="md-nav__link">
     <span class="md-ellipsis">
-      入口
+      日常命令
     </span>
   </a>
   
-</li>
+    <nav class="md-nav" aria-label="日常命令">
+      <ul class="md-nav__list">
         
           <li class="md-nav__item">
   <a href="#_4" class="md-nav__link">
     <span class="md-ellipsis">
-      行为说明
+      默认 / 日常测试
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
+  <a href="#mainfix" class="md-nav__link">
+    <span class="md-ellipsis">
+      并行主线 mainfix
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cycles" class="md-nav__link">
+    <span class="md-ellipsis">
+      发布前 / 需要 Cycles
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#unity" class="md-nav__link">
+    <span class="md-ellipsis">
+      遇到 Unity 漏编
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#_5" class="md-nav__link">
     <span class="md-ellipsis">
-      当前范围
+      验证方式
     </span>
   </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#2" class="md-nav__link">
-    <span class="md-ellipsis">
-      2. 材质选择器预览开关
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="2. 材质选择器预览开关">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
   <a href="#_6" class="md-nav__link">
     <span class="md-ellipsis">
-      作用
+      常见问题
     </span>
   </a>
   
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_7" class="md-nav__link">
-    <span class="md-ellipsis">
-      入口
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_8" class="md-nav__link">
-    <span class="md-ellipsis">
-      行为说明
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_9" class="md-nav__link">
-    <span class="md-ellipsis">
-      当前范围
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#3" class="md-nav__link">
-    <span class="md-ellipsis">
-      3. 材质剔除模式
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="3. 材质剔除模式">
+    <nav class="md-nav" aria-label="常见问题">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#_10" class="md-nav__link">
+  <a href="#install" class="md-nav__link">
     <span class="md-ellipsis">
-      作用
+      INSTALL 失败 / 文件被占用
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#_11" class="md-nav__link">
+  <a href="#build_ninja_sccache_pollbat" class="md-nav__link">
     <span class="md-ellipsis">
-      入口
+      build_ninja_sccache_poll.bat 看起来卡住
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#_12" class="md-nav__link">
+  <a href="#sccache-clexe-1" class="md-nav__link">
     <span class="md-ellipsis">
-      可选模式
+      sccache 或 cl.exe 返回 -1
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#_13" class="md-nav__link">
+  <a href="#windows" class="md-nav__link">
     <span class="md-ellipsis">
-      说明
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#4-eevee-lightgroup-id" class="md-nav__link">
-    <span class="md-ellipsis">
-      4. Eevee 灯光 Lightgroup ID
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="4. Eevee 灯光 Lightgroup ID">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#_14" class="md-nav__link">
-    <span class="md-ellipsis">
-      作用
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_15" class="md-nav__link">
-    <span class="md-ellipsis">
-      入口
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_16" class="md-nav__link">
-    <span class="md-ellipsis">
-      行为说明
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#5" class="md-nav__link">
-    <span class="md-ellipsis">
-      5. 启动图版本标识
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="5. 启动图版本标识">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#_17" class="md-nav__link">
-    <span class="md-ellipsis">
-      作用
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_18" class="md-nav__link">
-    <span class="md-ellipsis">
-      当前显示格式
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#6-outliner" class="md-nav__link">
-    <span class="md-ellipsis">
-      6. 骨骼在 Outliner 隐藏
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="6. 骨骼在 Outliner 隐藏">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#_19" class="md-nav__link">
-    <span class="md-ellipsis">
-      作用
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_20" class="md-nav__link">
-    <span class="md-ellipsis">
-      入口
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_21" class="md-nav__link">
-    <span class="md-ellipsis">
-      行为说明
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#_22" class="md-nav__link">
-    <span class="md-ellipsis">
-      当前范围
+      Windows 预编译库找不到
     </span>
   </a>
   
@@ -1031,121 +711,76 @@
 
 
 
-<h1 id="_1">界面与工作流补充<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h1>
-<h2 id="1-eevee-performance">1. Eevee Performance<a class="headerlink" href="#1-eevee-performance" title="Permanent link">&para;</a></h2>
-<h3 id="_2">作用<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h3>
-<p>在 <code>Outliner</code> 中查看 Eevee 当前视口 / 最终渲染的性能统计、阶段拆分和功能提示，用来快速定位性能热点。</p>
-<div align="center">
-    <img src="images/placeholder_eevee_performance.png" alt="Eevee Performance" style="border-radius: 10px;">
-    <br>
-</div>
-
-<h3 id="_3">入口<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h3>
+<h1 id="_1">本地构建流程<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h1>
+<p>本文档只针对当前 Blender NPR 工作区：</p>
 <ul>
-<li><code>Outliner &gt; Display Mode &gt; Eevee Performance</code></li>
-<li><code>Outliner</code> 头部中的 <code>Profiler</code> / <code>Pause</code> / <code>Sort by Time</code></li>
-<li><code>Outliner</code> 头部中的设置弹出面板 <code>Eevee Performance</code></li>
+<li>源码目录：<code>E:\blender_bulid_test\blender_npr_bulid\blender_5_1_port</code></li>
+<li>并行主线 worktree：<code>E:\blender_bulid_test\blender_npr_bulid\blender_5_1_port_mainfix</code></li>
+<li>默认构建树：<code>build_windows_x64_vc17_Release_5_1_port_clean_ninja</code></li>
+<li>默认安装树：<code>install_windows_x64_vc17_Release_5_1_port_clean</code></li>
+<li>mainfix 构建树：<code>build_windows_x64_vc17_Release_5_1_port_mainfix_ninja</code></li>
+<li>mainfix 安装树：<code>install_windows_x64_vc17_Release_5_1_port_mainfix</code></li>
 </ul>
-<h3 id="_4">行为说明<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h3>
+<p>目标是让本地协作时都走同一套增量构建和验证流程，不重复新建目录、手动猜测环境或误把安装占用当成源码错误。</p>
+<h2 id="_2">固定规则<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<ol>
+<li>默认使用现有 Ninja 构建树，不新建新的 <code>build_*</code> 目录。</li>
+<li>默认做增量编译，不随意 <code>reconfigure-clean</code>。</li>
+<li>最终测试以安装树里的 <code>blender.exe</code> 为准，不以 build tree 可执行文件代替。</li>
+<li>非交互环境统一追加 <code>--no-pause</code>。</li>
+<li>同一构建树禁止并发编译；开始前先确认没有残留 <code>cmake.exe</code> / <code>ninja.exe</code>。</li>
+</ol>
+<h2 id="_3">日常命令<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<h3 id="_4">默认 / 日常测试<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="p">.\</span><span class="n">build_ninja_sccache_poll</span><span class="p">.</span><span class="n">bat</span> <span class="n">install</span> <span class="p">-</span><span class="n">-no-pause</span>
+</code></pre></div>
 <ul>
-<li>开启 <code>Profiler</code> 后，Eevee 会开始收集当前性能统计并在 <code>Outliner</code> 树中显示</li>
-<li><code>Pause</code> 会暂停视口性能数据的继续刷新，方便查看当前结果</li>
-<li><code>Sort by Time</code> 会按当前 CPU 开销排序阶段列表，而不是固定的管线顺序</li>
-<li><code>Average Window</code> 用于设置平滑统计时使用的帧窗口大小</li>
-<li>当前树结构会显示 <code>Viewport</code>、<code>Final Render</code>、<code>Metadata</code>、<code>Features</code>、<code>Stages</code>、<code>Hints</code> 等分组</li>
+<li>默认 <code>WITH_CYCLES=OFF</code></li>
+<li>输出到 <code>install_windows_x64_vc17_Release_5_1_port_clean</code></li>
 </ul>
-<h3 id="_5">当前范围<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h3>
+<h3 id="mainfix">并行主线 mainfix<a class="headerlink" href="#mainfix" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="p">.\</span><span class="n">build_ninja_sccache_poll</span><span class="p">.</span><span class="n">bat</span> <span class="n">mainfix</span> <span class="n">install</span> <span class="p">-</span><span class="n">-no-pause</span>
+</code></pre></div>
 <ul>
-<li>当前主要是 Eevee 的 CPU 侧阶段统计与功能提示，不是完整 GPU profiler</li>
-<li>只对 <code>Eevee</code> 有意义，不支持 <code>Cycles</code></li>
+<li>使用 <code>blender_5_1_port_mainfix</code></li>
+<li>输出到 <code>install_windows_x64_vc17_Release_5_1_port_mainfix</code></li>
+<li>不覆盖默认安装树</li>
 </ul>
-<h2 id="2">2. 材质选择器预览开关<a class="headerlink" href="#2" title="Permanent link">&para;</a></h2>
-<h3 id="_6">作用<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h3>
-<p>控制材质下拉列表 / 搜索列表中是否渲染材质预览图。</p>
-<p>这个开关主要用于在材质很多时，减少展开材质选择器时生成预览图的卡顿。</p>
-<h3 id="_7">入口<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h3>
-<p><code>Edit &gt; Preferences &gt; Editing &gt; Objects &gt; Materials &gt; Material Selector Previews</code></p>
-<div align="center">
-    <img src="images/SnowShot_2026-03-28_05-28-34.png" alt="Material Selector Previews" style="border-radius: 10px;">
-    <br>
-</div>
-
-<h3 id="_8">行为说明<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h3>
+<h3 id="cycles">发布前 / 需要 Cycles<a class="headerlink" href="#cycles" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="p">.\</span><span class="n">build_ninja_sccache_poll</span><span class="p">.</span><span class="n">bat</span> <span class="n">with-cycles</span> <span class="n">install</span> <span class="p">-</span><span class="n">-no-pause</span>
+</code></pre></div>
+<h3 id="unity">遇到 Unity 漏编<a class="headerlink" href="#unity" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="p">.\</span><span class="n">build_ninja_sccache</span><span class="p">.</span><span class="n">bat</span> <span class="n">clean-unity</span> <span class="n">install</span> <span class="p">-</span><span class="n">-no-pause</span>
+</code></pre></div>
+<h2 id="_5">验证方式<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
+<p>构建完成后优先检查安装树版本：</p>
+<div class="highlight"><pre><span></span><code><span class="p">&amp;</span> <span class="s2">&quot;.\install_windows_x64_vc17_Release_5_1_port_clean\blender.exe&quot;</span> <span class="p">-</span><span class="n">-background</span> <span class="p">-</span><span class="n">-factory-startup</span> <span class="p">-</span><span class="n">-version</span>
+</code></pre></div>
+<p>或 mainfix：</p>
+<div class="highlight"><pre><span></span><code><span class="p">&amp;</span> <span class="s2">&quot;.\install_windows_x64_vc17_Release_5_1_port_mainfix\blender.exe&quot;</span> <span class="p">-</span><span class="n">-background</span> <span class="p">-</span><span class="n">-factory-startup</span> <span class="p">-</span><span class="n">-version</span>
+</code></pre></div>
+<p>时间戳本身不足以证明运行时已经更新，最好至少再补一条后台 smoke test。</p>
+<h2 id="_6">常见问题<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h2>
+<h3 id="install"><code>INSTALL</code> 失败 / 文件被占用<a class="headerlink" href="#install" title="Permanent link">&para;</a></h3>
+<p>最常见原因是安装树里的 <code>blender.exe</code> 还在运行。先关闭对应安装树的 Blender，再重跑 <code>install</code>。</p>
+<h3 id="build_ninja_sccache_pollbat"><code>build_ninja_sccache_poll.bat</code> 看起来卡住<a class="headerlink" href="#build_ninja_sccache_pollbat" title="Permanent link">&para;</a></h3>
 <ul>
-<li>开启时：材质选择器会按当前逻辑显示材质预览图</li>
-<li>关闭时：材质选择器会退回普通材质图标，不再在下拉列表里触发材质预览渲染</li>
-<li>默认值为开启</li>
+<li>先看是否仍有 <code>cmake.exe</code> / <code>ninja.exe</code> / <code>cl.exe</code></li>
+<li>再看 <code>temp\codex-build-logs</code></li>
+<li>不要在同一构建树上再启动第二条编译链</li>
 </ul>
-<h3 id="_9">当前范围<a class="headerlink" href="#_9" title="Permanent link">&para;</a></h3>
+<h3 id="sccache-clexe-1"><code>sccache</code> 或 <code>cl.exe</code> 返回 <code>-1</code><a class="headerlink" href="#sccache-clexe-1" title="Permanent link">&para;</a></h3>
+<p>优先降低并发继续增量续跑，例如：</p>
+<div class="highlight"><pre><span></span><code><span class="nv">$env:BUILD_JOBS</span><span class="p">=</span><span class="s1">&#39;8&#39;</span>
+<span class="p">.\</span><span class="n">build_ninja_sccache_poll</span><span class="p">.</span><span class="n">bat</span> <span class="n">mainfix</span> <span class="n">install</span> <span class="p">-</span><span class="n">-no-pause</span>
+</code></pre></div>
+<h3 id="windows">Windows 预编译库找不到<a class="headerlink" href="#windows" title="Permanent link">&para;</a></h3>
+<p><code>blender_5_1_port_mainfix\lib\windows_x64</code> 必须可用。当前允许的做法是：</p>
 <ul>
-<li>目前只影响 <code>template_ID(...)</code> 这类材质选择器下拉列表中的材质预览显示</li>
-<li>不影响 <code>Material Properties</code> 面板中的大预览球</li>
-<li>不影响材质本身的正常渲染结果</li>
+<li><code>windows_x64</code> 根目录保留为真实目录</li>
+<li>内部各库子目录用 junction 指向 <code>blender_5_1_port\lib\windows_x64\...</code></li>
 </ul>
-<h2 id="3">3. 材质剔除模式<a class="headerlink" href="#3" title="Permanent link">&para;</a></h2>
-<h3 id="_10">作用<a class="headerlink" href="#_10" title="Permanent link">&para;</a></h3>
-<p>为材质提供更明确的面剔除控制，除了原本常见的背面剔除外，现在还支持 <code>正面剔除</code>。</p>
-<div align="center">
-    <img src="images/placeholder_material_face_culling.png" alt="Material Face Culling" style="border-radius: 10px;">
-    <br>
-</div>
-
-<h3 id="_11">入口<a class="headerlink" href="#_11" title="Permanent link">&para;</a></h3>
-<p><code>Material Properties &gt; Settings &gt; Culling &gt; Camera</code></p>
-<h3 id="_12">可选模式<a class="headerlink" href="#_12" title="Permanent link">&para;</a></h3>
-<ul>
-<li><code>None</code>：不剔除，正反面都渲染</li>
-<li><code>Back</code>：背面剔除</li>
-<li><code>Front</code>：正面剔除</li>
-</ul>
-<h3 id="_13">说明<a class="headerlink" href="#_13" title="Permanent link">&para;</a></h3>
-<ul>
-<li><code>Front</code> 适合做壳体内部观察、双层模型的反向显露，或某些特殊的描边 / 反相表现</li>
-<li><code>Shadow</code> 和 <code>Light Probe Volume</code> 仍然保留独立的剔除控制</li>
-</ul>
-<h2 id="4-eevee-lightgroup-id">4. Eevee 灯光 Lightgroup ID<a class="headerlink" href="#4-eevee-lightgroup-id" title="Permanent link">&para;</a></h2>
-<h3 id="_14">作用<a class="headerlink" href="#_14" title="Permanent link">&para;</a></h3>
-<p>为 Eevee 灯光指定一个整数灯光组编号，供 <code>Shader Info</code> 节点做分组过滤。</p>
-<h3 id="_15">入口<a class="headerlink" href="#_15" title="Permanent link">&para;</a></h3>
-<p><code>Light Data &gt; Light &gt; Lightgroup ID</code></p>
-<h3 id="_16">行为说明<a class="headerlink" href="#_16" title="Permanent link">&para;</a></h3>
-<ul>
-<li>默认值为 <code>0</code></li>
-<li><code>Shader Info</code> 节点的 <code>Lightgroup</code> 也为 <code>0</code> 时，只会计算 <code>Lightgroup ID = 0</code> 的灯光</li>
-<li>如果某个 <code>Shader Info</code> 节点设置为其他整数值，则只有相同编号的灯光会参与该节点计算</li>
-<li>这个分组过滤当前只影响 <code>Shader Info</code> 节点，不会改动 Eevee 普通材质主通道的默认灯光结果</li>
-</ul>
-<h2 id="5">5. 启动图版本标识<a class="headerlink" href="#5" title="Permanent link">&para;</a></h2>
-<h3 id="_17">作用<a class="headerlink" href="#_17" title="Permanent link">&para;</a></h3>
-<p>在启动图右上角的版本文字后追加当前 NPR 构建标识与构建日期，方便快速区分自定义构建版本。</p>
-<h3 id="_18">当前显示格式<a class="headerlink" href="#_18" title="Permanent link">&para;</a></h3>
-<ul>
-<li><code>版本号 + npr post + 构建日期</code></li>
-<li>例如：<code>5.1.0 npr post 2026-03-27</code></li>
-</ul>
-<h2 id="6-outliner">6. 骨骼在 Outliner 隐藏<a class="headerlink" href="#6-outliner" title="Permanent link">&para;</a></h2>
-<h3 id="_19">作用<a class="headerlink" href="#_19" title="Permanent link">&para;</a></h3>
-<p>为每个 <code>Pose Bone</code> 增加单独的 Outliner 可见性标记，用来在不影响骨骼本身功能的前提下整理复杂绑定的层级显示。</p>
-<p>它适合把机制骨、辅助骨或不需要频繁查看的控制层从 Outliner 中隐藏，只保留更重要的骨架结构。</p>
-<h3 id="_20">入口<a class="headerlink" href="#_20" title="Permanent link">&para;</a></h3>
-<ul>
-<li><code>Bone Properties &gt; Viewport Display &gt; Hide in Outliner</code></li>
-<li><code>Outliner &gt; Filter &gt; Hidden PoseBones</code></li>
-</ul>
-<h3 id="_21">行为说明<a class="headerlink" href="#_21" title="Permanent link">&para;</a></h3>
-<ul>
-<li>每个 <code>Pose Bone</code> 都有自己的 <code>Hide in Outliner</code> 开关</li>
-<li>这个开关默认是开启的</li>
-<li><code>Outliner</code> 里的 <code>Hidden PoseBones</code> 过滤项默认也是开启的，所以默认不会立刻改变现有骨架的显示结果</li>
-<li>当关闭 <code>Outliner &gt; Filter &gt; Hidden PoseBones</code> 后，勾选了 <code>Hide in Outliner</code> 的姿态骨骼会从 Outliner 树中隐藏</li>
-<li>如果某个被隐藏的父骨骼仍然有可见子骨骼，可见子骨骼会继续保留在树里，不会整支层级一起消失</li>
-</ul>
-<h3 id="_22">当前范围<a class="headerlink" href="#_22" title="Permanent link">&para;</a></h3>
-<ul>
-<li>当前只作用于 <code>Pose Bone</code></li>
-<li>不作用于 <code>Edit Bone</code></li>
-<li>只改变 <code>Outliner</code> 的层级显示，不影响骨骼的变换、动画、驱动器和渲染结果</li>
-</ul>
+<p>不要把整个 <code>windows_x64</code> 根目录直接做成 junction。</p>
 
 
 
