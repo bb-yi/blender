@@ -18,6 +18,8 @@
 
 #include "gpu_shader_create_info.hh"
 
+#include "NOD_shader.h"
+
 #include "eevee_shader.hh"
 
 #include "eevee_shadow.hh"
@@ -27,6 +29,21 @@
 #include "BLI_set.hh"
 
 namespace blender::eevee {
+
+static bool material_output_has_depth_offset(bNodeTree *nodetree)
+{
+  if (nodetree == nullptr) {
+    return false;
+  }
+  nodetree->ensure_topology_cache();
+  bNode *output = ntreeShaderOutputNode(nodetree, SHD_OUTPUT_EEVEE);
+  if (output == nullptr) {
+    return false;
+  }
+  const bNodeSocket *depth_offset = output->input_by_identifier("Depth Offset");
+  return depth_offset != nullptr && depth_offset->is_available() &&
+         depth_offset->is_directly_linked();
+}
 
 /* -------------------------------------------------------------------- */
 /** \name Module
@@ -726,7 +743,8 @@ static int material_texture_reserved_slot_last(const eMaterialPipeline pipeline_
 static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &info,
                                               eMaterialPipeline pipeline_type,
                                               eMaterialGeometry geometry_type,
-                                              const bool use_shader_to_rgba)
+                                              const bool use_shader_to_rgba,
+                                              const bool has_depth_offset)
 {
   using namespace blender::gpu::shader;
 
@@ -776,7 +794,8 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
               pipeline_info_name = "eevee_surf_shadow_atomic";
             } break;
             case ShadowTechnique::TILE_COPY: {
-              pipeline_info_name = "eevee_surf_shadow_tbdr";
+              pipeline_info_name = has_depth_offset ? "eevee_surf_shadow_tbdr_depth_offset" :
+                                                       "eevee_surf_shadow_tbdr";
             } break;
             default: {
               BLI_assert_unreachable();
@@ -797,20 +816,24 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
           break;
         case MAT_PIPE_DEFERRED:
           if (use_shader_to_rgba) {
-            pipeline_info_name = "eevee_surf_deferred_hybrid";
+            pipeline_info_name = has_depth_offset ? "eevee_surf_deferred_hybrid_depth_offset" :
+                                                    "eevee_surf_deferred_hybrid";
             info.name_ += "_deferred_hybrid";
           }
           else {
-            pipeline_info_name = "eevee_surf_deferred";
+            pipeline_info_name = has_depth_offset ? "eevee_surf_deferred_depth_offset" :
+                                                    "eevee_surf_deferred";
             info.name_ += "_deferred";
           }
           break;
         case MAT_PIPE_DEFERRED_NPR:
-          pipeline_info_name = "eevee_surf_npr";
+          pipeline_info_name = has_depth_offset ? "eevee_surf_npr_depth_offset" :
+                                                  "eevee_surf_npr";
           info.name_ += "_deferred_npr";
           break;
         case MAT_PIPE_FORWARD:
-          pipeline_info_name = "eevee_surf_forward";
+          pipeline_info_name = has_depth_offset ? "eevee_surf_forward_depth_offset" :
+                                                  "eevee_surf_forward";
           info.name_ += "_forward";
           break;
         default:
@@ -1036,10 +1059,33 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     }
   }
 
+  const bool has_depth_offset =
+      GPU_material_has_depth_offset_output(gpumat) && geometry_type_has_surface(geometry_type) &&
+      ELEM(pipeline_type,
+           MAT_PIPE_PREPASS_FORWARD_VELOCITY,
+           MAT_PIPE_PREPASS_DEFERRED_VELOCITY,
+           MAT_PIPE_PREPASS_OVERLAP,
+           MAT_PIPE_PREPASS_FORWARD,
+           MAT_PIPE_PREPASS_DEFERRED,
+           MAT_PIPE_PREPASS_PLANAR,
+           MAT_PIPE_DEFERRED,
+           MAT_PIPE_DEFERRED_NPR,
+           MAT_PIPE_FORWARD,
+           MAT_PIPE_SHADOW);
+
   SlotAllocator slots = add_pipeline_create_info(
-      info, pipeline_type, geometry_type, use_shader_to_rgba);
+      info, pipeline_type, geometry_type, use_shader_to_rgba, has_depth_offset);
   slots.reserve_sampler_range(MATERIAL_TEXTURE_RESERVED_SLOT_FIRST,
                               material_texture_reserved_slot_last(pipeline_type, geometry_type));
+  if (has_depth_offset) {
+    info.define("MAT_DEPTH_OFFSET");
+    if (pipeline_type != MAT_PIPE_SHADOW ||
+        ShadowModule::shadow_technique == ShadowTechnique::TILE_COPY)
+    {
+      info.early_fragment_test(false);
+      info.depth_write(DepthWrite::ANY);
+    }
+  }
 
   for (auto &resource : info.batch_resources_) {
     if (resource.bind_type == ShaderCreateInfo::Resource::BindType::SAMPLER) {
@@ -1494,6 +1540,12 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
         codegen.filter.dependencies, dependencies_set, emitted_generated_sources, generated_source_block);
     append_graph_dependencies(
         codegen.thickness.dependencies, dependencies_set, emitted_generated_sources, generated_source_block);
+    if (has_depth_offset && codegen.depth_offset.has_value()) {
+      append_graph_dependencies(codegen.depth_offset->dependencies,
+                                dependencies_set,
+                                emitted_generated_sources,
+                                generated_source_block);
+    }
     append_graph_dependencies(
         codegen.volume.dependencies, dependencies_set, emitted_generated_sources, generated_source_block);
 
@@ -1560,6 +1612,14 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       frag_gen << codegen.thickness.serialized;
     }
     frag_gen << "}\n\n";
+
+    if (has_depth_offset) {
+      BLI_assert(codegen.depth_offset.has_value());
+      frag_gen << "float nodetree_depth_offset()\n";
+      frag_gen << "{\n";
+      frag_gen << codegen.depth_offset->serialized_or_default("return 0.0f;\n");
+      frag_gen << "}\n\n";
+    }
 
     frag_gen << "Closure nodetree_volume()\n";
     frag_gen << "{\n";
@@ -1648,11 +1708,14 @@ static GPUPass *pass_replacement_cb(void *void_thunk, GPUMaterial *mat)
   bool has_shadow_transparency = has_transparency && transparent_shadows;
   bool has_raytraced_transmission = blender_mat && (blender_mat->blend_flag & MA_BL_SS_REFRACTION);
   bool has_raycast = GPU_material_flag_get(mat, GPU_MATFLAG_RAYCAST);
+  bool has_depth_offset = GPU_material_has_depth_offset_output(mat);
 
   bool can_use_default = (is_shadow_pass &&
-                          (!has_vertex_displacement && !has_shadow_transparency)) ||
+                          (!has_vertex_displacement && !has_shadow_transparency &&
+                           !has_depth_offset)) ||
                          (is_prepass && (!has_vertex_displacement && !has_transparency &&
-                                         !has_raytraced_transmission && !has_raycast));
+                                         !has_raytraced_transmission && !has_raycast &&
+                                         !has_depth_offset));
   if (can_use_default) {
     GPUMaterial *mat = thunk->shader_module->material_shader_get(thunk->default_mat,
                                                                  thunk->default_mat->nodetree,
@@ -1701,11 +1764,13 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
   const bool compile_npr_graph = (pipeline_type == MAT_PIPE_DEFERRED_NPR);
   const bool needs_npr_vertex_displacement = compile_npr_graph &&
                                              (displacement_type != MAT_DISPLACEMENT_BUMP);
+  const bool needs_npr_depth_offset = compile_npr_graph &&
+                                      material_output_has_depth_offset(nodetree);
   /* NPR passes normally only need the attached NPR tree, but true displacement lives on the
-   * primary material output. Compile that graph too so the NPR pass uses the same deformed
-   * geometry as the prepass/shading passes. */
+   * primary material output. Depth Offset is also a material output and must use the same custom
+   * depth for DEPTH_EQUAL and screen-space position reads. */
   const bool compile_surface_graph = (pipeline_type != MAT_PIPE_DEFERRED_NPR) ||
-                                     needs_npr_vertex_displacement;
+                                     needs_npr_vertex_displacement || needs_npr_depth_offset;
 
   uint64_t shader_uuid = shader_uuid_from_material_type(
       pipeline_type,

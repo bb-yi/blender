@@ -640,6 +640,10 @@ void GPUCodegen::generate_graphs()
   output.displacement = graph_serialize(
       GPU_NODE_TAG_DISPLACEMENT, graph.outlink_displacement, nullptr);
   output.thickness = graph_serialize(GPU_NODE_TAG_THICKNESS, graph.outlink_thickness, nullptr);
+  if (graph.outlink_depth_offset != nullptr) {
+    output.depth_offset = graph_serialize(
+        GPU_NODE_TAG_DEPTH_OFFSET, graph.outlink_depth_offset, nullptr);
+  }
   output.npr = graph_serialize(
       GPU_NODE_TAG_NPR | GPU_NODE_TAG_OUTLINE, graph.outlink_npr, "float4(0.0f)");
   output.filter = graph_serialize(GPU_NODE_TAG_FILTER | GPU_NODE_TAG_AOV,

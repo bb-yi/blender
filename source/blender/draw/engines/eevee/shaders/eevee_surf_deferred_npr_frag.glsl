@@ -130,7 +130,17 @@ float4 TextureHandle_eval_impl(TextureHandle tex, float2 offset, bool texel_offs
       case TEX_HANDLE_SPECULAR_INDIRECT:
         return swap_alpha(g_specular_indirect);
       case TEX_HANDLE_POSITION:
+#ifdef MAT_DEPTH_OFFSET
+      {
+        int2 texel = int2(gl_FragCoord.xy);
+        int2 extent = textureSize(radiance_tx, 0);
+        float depth = texelFetch(hiz_tx, texel, 0).r;
+        float2 screen_uv = (float2(texel) + 0.5f) / float2(extent);
+        return float4(drw_point_screen_to_world(float3(screen_uv, depth)), 0.0f);
+      }
+#else
         return float4(g_data.P, 0.0f);
+#endif
       case TEX_HANDLE_NORMAL:
         return float4(g_average_normal, 0.0f);
       default:
@@ -341,6 +351,11 @@ void main()
 {
   material_surface_cull_discard();
   init_globals();
+
+#ifdef MAT_DEPTH_OFFSET
+  material_depth_offset_write();
+#endif
+
   int2 texel = int2(gl_FragCoord.xy);
   DeferredCombine dc = deferred_combine(texel);
   deferred_combine_clamp(dc);

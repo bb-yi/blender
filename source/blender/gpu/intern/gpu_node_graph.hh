@@ -60,12 +60,13 @@ enum GPUNodeTag {
   GPU_NODE_TAG_VOLUME = (1 << 1),
   GPU_NODE_TAG_DISPLACEMENT = (1 << 2),
   GPU_NODE_TAG_THICKNESS = (1 << 3),
-  GPU_NODE_TAG_AOV = (1 << 4),
-  GPU_NODE_TAG_FUNCTION = (1 << 5),
-  GPU_NODE_TAG_COMPOSITOR = (1 << 6),
-  GPU_NODE_TAG_NPR = (1 << 7),
-  GPU_NODE_TAG_FILTER = (1 << 8),
-  GPU_NODE_TAG_OUTLINE = (1 << 9),
+  GPU_NODE_TAG_DEPTH_OFFSET = (1 << 4),
+  GPU_NODE_TAG_AOV = (1 << 5),
+  GPU_NODE_TAG_FUNCTION = (1 << 6),
+  GPU_NODE_TAG_COMPOSITOR = (1 << 7),
+  GPU_NODE_TAG_NPR = (1 << 8),
+  GPU_NODE_TAG_FILTER = (1 << 9),
+  GPU_NODE_TAG_OUTLINE = (1 << 10),
 };
 
 ENUM_OPERATORS(GPUNodeTag)
@@ -191,6 +192,7 @@ struct GPUNodeGraph {
   GPUNodeLink *outlink_volume;
   GPUNodeLink *outlink_displacement;
   GPUNodeLink *outlink_thickness;
+  GPUNodeLink *outlink_depth_offset;
   GPUNodeLink *outlink_npr;
   GPUNodeLink *outlink_filter;
   /* List of GPUNodeGraphOutputLink */

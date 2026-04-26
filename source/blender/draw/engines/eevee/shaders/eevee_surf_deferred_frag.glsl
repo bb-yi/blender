@@ -77,6 +77,10 @@ void main()
   float noise = utility_tx_fetch(utility_tx, gl_FragCoord.xy, UTIL_BLUE_NOISE_LAYER).r;
   float closure_rand = fract(noise + sampling_rng_1D_get(SAMPLING_CLOSURE));
 
+#ifdef MAT_DEPTH_OFFSET
+  material_depth_offset_write();
+#endif
+
   fragment_displacement();
 
   nodetree_surface(closure_rand);

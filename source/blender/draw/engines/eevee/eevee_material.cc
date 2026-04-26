@@ -416,9 +416,12 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
 
     const bool has_displacement = GPU_material_has_displacement_output(matpass.gpumat) &&
                                   (blender_mat->displacement_method != MA_DISPLACEMENT_BUMP);
+    const bool has_depth_offset = GPU_material_has_depth_offset_output(matpass.gpumat);
     const bool has_volume = GPU_material_has_volume_output(matpass.gpumat);
 
-    if (((pipeline_type == MAT_PIPE_SHADOW) && (is_transparent || has_displacement)) || has_volume)
+    if (((pipeline_type == MAT_PIPE_SHADOW) &&
+         (is_transparent || has_displacement || has_depth_offset)) ||
+        has_volume)
     {
       /* WORKAROUND: This is to avoid lingering shadows from default material.
        * Ideally, we should tag the caster object to update only the needed areas but that's a bit

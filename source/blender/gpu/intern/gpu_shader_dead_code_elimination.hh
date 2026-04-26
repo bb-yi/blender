@@ -279,6 +279,9 @@ struct DeadCodeEliminator
     if (graph.names.contains("nodetree_thickness")) {
       entry_points.append(graph.names.lookup("nodetree_thickness"));
     }
+    if (graph.names.contains("nodetree_depth_offset")) {
+      entry_points.append(graph.names.lookup("nodetree_depth_offset"));
+    }
     if (graph.names.contains("derivative_scale_get")) {
       entry_points.append(graph.names.lookup("derivative_scale_get"));
     }

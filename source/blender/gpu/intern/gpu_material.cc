@@ -104,6 +104,7 @@ struct GPUMaterial {
   bool has_surface_output = false;
   bool has_volume_output = false;
   bool has_displacement_output = false;
+  bool has_depth_offset_output = false;
   bool has_filter_output = false;
 
   std::string name;
@@ -388,6 +389,11 @@ bool GPU_material_has_volume_output(GPUMaterial *mat)
 bool GPU_material_has_displacement_output(GPUMaterial *mat)
 {
   return mat->has_displacement_output;
+}
+
+bool GPU_material_has_depth_offset_output(GPUMaterial *mat)
+{
+  return mat->has_depth_offset_output;
 }
 
 bool GPU_material_has_filter_output(GPUMaterial *mat)
@@ -715,6 +721,14 @@ void GPU_material_output_thickness(GPUMaterial *material, GPUNodeLink *link)
 {
   if (!material->graph.outlink_thickness) {
     material->graph.outlink_thickness = link;
+  }
+}
+
+void GPU_material_output_depth_offset(GPUMaterial *material, GPUNodeLink *link)
+{
+  if (!material->graph.outlink_depth_offset) {
+    material->graph.outlink_depth_offset = link;
+    material->has_depth_offset_output = true;
   }
 }
 

@@ -39,10 +39,12 @@ void main()
 
 #ifdef SHADOW_UPDATE_TBDR
   float ndc_depth = gl_FragCoord.z;
+  bool is_discarded = false;
 /* We need to write to `gl_FragDepth` un-conditionally. So we cannot early exit or use discard. */
 #  define discard_result \
     linear_depth = FLT_MAX; \
-    ndc_depth = 1.0f;
+    ndc_depth = 1.0f; \
+    is_discarded = true;
 #else
 #  define discard_result \
     gpu_discard_fragment(); \
@@ -66,6 +68,20 @@ void main()
   if (transparency > random_threshold) {
     discard_result;
   }
+#endif
+
+#if defined(MAT_DEPTH_OFFSET) && !defined(MAT_TRANSPARENT)
+  init_globals();
+#endif
+
+#ifdef MAT_DEPTH_OFFSET
+  float depth_offset = nodetree_depth_offset();
+  linear_depth = max(0.0f, linear_depth - depth_offset);
+#  ifdef SHADOW_UPDATE_TBDR
+  if (!is_discarded) {
+    ndc_depth = material_depth_offset_frag_depth(depth_offset);
+  }
+#  endif
 #endif
 
 #ifdef SHADOW_UPDATE_ATOMIC_RASTER
