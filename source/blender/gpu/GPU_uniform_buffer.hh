@@ -57,6 +57,7 @@ void GPU_uniformbuf_clear_to_zero(gpu::UniformBuf *ubo);
 #define GPU_ATTRIBUTE_UBO_BLOCK_NAME "unf_attrs"
 #define GPU_LAYER_ATTRIBUTE_UBO_BLOCK_NAME "drw_layer_attrs"
 constexpr static int GPU_NODE_TREE_UBO_SLOT = 0;
+constexpr static int GPU_ATTRIBUTE_UBO_SLOT = 8;
 
 #define GPU_UBO_FREE_SAFE(ubo) \
   do { \

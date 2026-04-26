@@ -781,7 +781,7 @@ float4 attr_load_color_post(float4 attr)
 
 #ifdef EEVEE_LEGACY_UNIFORM_ATTR
 #  define UNI_ATTR(a) (a)
-#  define resource_id drw_resource_id()
+#  define uni_attr_resource_id drw_resource_id()
 #endif
 
 float4 attr_load_uniform(float4 attr, const uint attr_hash)
