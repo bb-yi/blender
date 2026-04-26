@@ -827,6 +827,57 @@ vec4 pbr_lit(vec3 base_color, float roughness, float metallic, float ao)
 - 它主要是 `sampler2D` 工作流的图像适配节点，不是普通 `Image Texture` 的替代品
 - 当函数需要图像资源专用采样能力时，应优先使用这个节点
 
+### Basis Transform
+
+#### 入口
+
+`Add > Utilities > Vector > Basis Transform`
+
+在 `Eevee` 物体材质和 `NPR Tree` 中可用。
+
+<div align="center">
+  <img src="docs/images/SnowShot_2026-03-28_07-51-05.png" alt="Basis Transform" style="border-radius: 10px;">
+  <br>
+</div>
+
+#### 输入输出
+
+- 输入：`Vector`
+- 输入：`Origin`
+- 输入：`X Axis`
+- 输入：`Y Axis`
+- 输入：`Z Axis`
+- 输出：`Vector`
+
+#### 面板选项
+
+- `Direction`
+  - `To Basis`
+  - `From Basis`
+- `Vector Type`
+  - `Point`
+  - `Vector`
+  - `Normal`
+- `Basis Input`
+  - `XY`
+  - `XZ`
+  - `YZ`
+  - `XYZ`
+- `Orthonormalize`
+- `Fallback`
+
+#### 作用
+
+基于 `Origin + 轴向输入` 在材质节点里完成自定义基底变换，可用于处理点、方向向量和法线。
+
+#### 说明
+
+- `Point` 模式会把 `Origin` 当作平移参考；`Vector` 和 `Normal` 模式只做方向变换
+- `Basis Input` 可以只提供两根轴，由节点补出第三根轴；也可以显式输入 `XYZ`
+- `Orthonormalize` 适合在输入轴不完全正交时做稳定化，减少基底误差
+- `Fallback` 用于控制基底退化或长度异常时的回退行为
+- 适合做局部坐标投影、程序贴图定向、各向异性方向控制和自定义法线空间转换
+
 **3. Eevee 物体材质节点**
 
 ### Render Texture
