@@ -990,7 +990,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       if (resource_info.bind_type == ShaderCreateInfo::Resource::BindType::UNIFORM_BUFFER &&
           resource_info.uniformbuf.name == GPU_ATTRIBUTE_UBO_BLOCK_NAME "[512]")
       {
-        resource_info.slot = 4;
+        resource_info.slot = GPU_ATTRIBUTE_UBO_SLOT;
         break;
       }
     }

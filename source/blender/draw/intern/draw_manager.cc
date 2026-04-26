@@ -165,7 +165,7 @@ void Manager::resource_bind()
   GPU_storagebuf_bind(matrix_buf.current(), DRW_OBJ_MAT_SLOT);
   GPU_storagebuf_bind(infos_buf.current(), DRW_OBJ_INFOS_SLOT);
   GPU_storagebuf_bind(attributes_buf, DRW_OBJ_ATTR_SLOT);
-  GPU_uniformbuf_bind(attributes_legacy_buf, 4);
+  GPU_uniformbuf_bind(attributes_legacy_buf, GPU_ATTRIBUTE_UBO_SLOT);
   GPU_uniformbuf_bind(layer_attributes_buf, DRW_LAYER_ATTR_UBO_SLOT);
 }
 
