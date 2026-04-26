@@ -469,7 +469,6 @@ void ForwardPipeline::sync()
   camera_forward_ = inst_.camera.forward();
   has_opaque_ = false;
   has_transparent_ = false;
-  has_colored_transparency_ = false;
   has_holdout_ = false;
 
   {
@@ -645,8 +644,6 @@ PassMain::Sub *ForwardPipeline::material_transparent_add(const Object *ob,
   DRWState state = DRW_STATE_WRITE_COLOR | DRW_STATE_BLEND_TRANSPARENCY |
                    DRW_STATE_CLIP_CONTROL_UNIT_RANGE | inst_.film.depth.test_state;
   state |= material_surface_cull_state(material_surface_cull_method(blender_mat));
-  has_colored_transparency_ |= GPU_material_flag_get(gpumat,
-                                                     GPU_MATFLAG_TRANSPARENT_MAYBE_COLORED) != 0;
   has_holdout_ |= GPU_material_flag_get(gpumat, GPU_MATFLAG_HOLDOUT) ||
                   (ob->base_flag & BASE_HOLDOUT) || (ob->visibility_flag & OB_HOLDOUT);
   has_transparent_ = true;

@@ -1050,6 +1050,30 @@ static bool gpu_material_uses_filter_domain(GPUMaterial *mat)
   return material != nullptr && material->eevee_domain == MA_EEVEE_DOMAIN_FILTER;
 }
 
+static void ntree_exec_gpu_nodes_of_type(bNodeTreeExec *exec,
+                                         GPUMaterial *mat,
+                                         bNodeTree *tree,
+                                         const short node_type,
+                                         const int *depth = nullptr)
+{
+  for (bNode &node : tree->nodes) {
+    if (node.type_legacy == node_type) {
+      ntreeExecGPUNodes(exec, mat, &node, depth);
+    }
+  }
+}
+
+static void ntree_shader_to_rgba_depth_count_of_type(bNodeTree *tree,
+                                                     const short node_type,
+                                                     int16_t &max_depth)
+{
+  for (bNode &node : tree->nodes) {
+    if (node.type_legacy == node_type) {
+      iter_shader_to_rgba_depth_count(tree, &node, max_depth);
+    }
+  }
+}
+
 bNodeTree *ntreeGPUNPRNodes(bNodeTree *material_tree, GPUMaterial *mat)
 {
   bNodeTree *npr_tree = npr_tree_get(material_tree);
@@ -1067,16 +1091,8 @@ bNodeTree *ntreeGPUNPRNodes(bNodeTree *material_tree, GPUMaterial *mat)
   if (bNode *npr_output = ntreeShaderNPROutputNode(localtree)) {
     ntreeExecGPUNodes(exec, mat, npr_output);
   }
-  for (bNode &node : localtree->nodes) {
-    if (node.type_legacy == SH_NODE_OUTPUT_AOV) {
-      ntreeExecGPUNodes(exec, mat, &node);
-    }
-  }
-  for (bNode &node : localtree->nodes) {
-    if (node.type_legacy == SH_NODE_OUTLINE_CONTROL) {
-      ntreeExecGPUNodes(exec, mat, &node);
-    }
-  }
+  ntree_exec_gpu_nodes_of_type(exec, mat, localtree, SH_NODE_OUTPUT_AOV);
+  ntree_exec_gpu_nodes_of_type(exec, mat, localtree, SH_NODE_OUTLINE_CONTROL);
 
   ntreeShaderEndExecTree(exec);
   return localtree;
@@ -1108,16 +1124,8 @@ void ntreeGPUMaterialNodes(bNodeTree *localtree, GPUMaterial *mat)
     if (output != nullptr) {
       ntreeExecGPUNodes(exec, mat, output);
     }
-    for (bNode &node : localtree->nodes) {
-      if (node.type_legacy == SH_NODE_OUTPUT_AOV) {
-        ntreeExecGPUNodes(exec, mat, &node);
-      }
-    }
-    for (bNode &node : localtree->nodes) {
-      if (node.type_legacy == SH_NODE_OUTLINE_CONTROL) {
-        ntreeExecGPUNodes(exec, mat, &node);
-      }
-    }
+    ntree_exec_gpu_nodes_of_type(exec, mat, localtree, SH_NODE_OUTPUT_AOV);
+    ntree_exec_gpu_nodes_of_type(exec, mat, localtree, SH_NODE_OUTLINE_CONTROL);
     ntreeShaderEndExecTree(exec);
     return;
   }
@@ -1130,24 +1138,12 @@ void ntreeGPUMaterialNodes(bNodeTree *localtree, GPUMaterial *mat)
   if (output != nullptr) {
     iter_shader_to_rgba_depth_count(localtree, output, max_depth);
   }
-  for (bNode &node : localtree->nodes) {
-    if (node.type_legacy == SH_NODE_OUTPUT_AOV) {
-      iter_shader_to_rgba_depth_count(localtree, &node, max_depth);
-    }
-  }
+  ntree_shader_to_rgba_depth_count_of_type(localtree, SH_NODE_OUTPUT_AOV, max_depth);
   for (int depth = max_depth; depth >= 0; depth--) {
     ntreeExecGPUNodes(exec, mat, output, &depth);
-    for (bNode &node : localtree->nodes) {
-      if (node.type_legacy == SH_NODE_OUTPUT_AOV) {
-        ntreeExecGPUNodes(exec, mat, &node, &depth);
-      }
-    }
+    ntree_exec_gpu_nodes_of_type(exec, mat, localtree, SH_NODE_OUTPUT_AOV, &depth);
   }
-  for (bNode &node : localtree->nodes) {
-    if (node.type_legacy == SH_NODE_OUTLINE_CONTROL) {
-      ntreeExecGPUNodes(exec, mat, &node);
-    }
-  }
+  ntree_exec_gpu_nodes_of_type(exec, mat, localtree, SH_NODE_OUTLINE_CONTROL);
   ntreeShaderEndExecTree(exec);
 }
 
