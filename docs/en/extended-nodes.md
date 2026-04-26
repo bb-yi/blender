@@ -339,22 +339,97 @@ Available in both `Eevee` object materials and `NPR Tree`.
 
 #### Purpose
 
-Injects a user-authored GLSL function into the current `Eevee / NPR` material compile path.
+Injects a user-authored GLSL function into the current `Eevee / NPR` material compile path. This is useful for custom math nodes, procedural textures, SDF logic, screen-space effects, and porting parts of external GLSL / HLSL code.
+
+#### Basic Workflow
+
+1. Prepare a GLSL function in the `Text Editor` or point the node to an external `.glsl` file.
+2. Add a `GLSL Function` node.
+3. Choose the source and the target function in the node panel.
+4. Refresh the node after editing the source.
+5. Explicitly select the exported function name in `Function`.
 
 #### Supported Boundary Types
 
-- Input parameters: `float`, `vec2`, `vec3`, `vec4`, `sampler2D`, `sample2D`
-- Output parameters: `out float`, `out vec2`, `out vec3`, `out vec4`
-- Return values: `void`, `float`, `vec2`, `vec3`, `vec4`
+- Input parameters: `float`, `int`, `bool`, `vec2`, `vec3`, `vec4`, `sampler2D`
+- Output parameters: `out float`, `out int`, `out bool`, `out vec2`, `out vec3`, `out vec4`
+- Return values: `void`, `float`, `int`, `bool`, `vec2`, `vec3`, `vec4`
 
-#### Notes
+#### Important Notes
 
 - `Function` is not auto-selected and must be chosen explicitly
-- `sampler2D` uses image slots in the node panel instead of link sockets
-- `sample2D` becomes a `Closure` input and can be driven by `Image to Closure` or a compatible `Closure Output`
-- `Closure Output -> sample2D` currently guarantees only the direct `texture(tex, uv)` form
+- `sampler2D` appears as a `Closure` input
+- `sampler2D` can be connected to `Image to Closure` or a compatible `Closure Output`
+- `Closure Output -> sampler2D` currently guarantees only the direct `texture(tex, uv)` path
+- If the function depends on `textureLod`, `textureGrad`, `textureSize`, or `texelFetch`, prefer driving it with `Image to Closure`
 - `@glsl_meta` supports `default`, `min`, `max`, `hide_value`, and `subtype`
+- `@glsl_meta default=` also accepts expressions such as `glsl_position()`, `normalize(glsl_normal())`, or `glsl_ambient_lighting()`
+- Expression defaults are recommended only for `float / vec2 / vec3 / vec4` inputs and should not directly reference other exported parameters
 - Only `vec3 / vec4` inputs explicitly marked with `subtype=color` become color sockets
+- `vec3 + subtype=color` enters GLSL as `rgb` with `alpha = 1.0`
+- `vec4 + subtype=color` keeps full `rgba`
+- Exported boundary types do not currently support `mat*`, `struct`, or `array`
+- `int / bool` boundaries are useful for mode switches, enums, and `lightgroup_id` style parameters
+- Built-in geometry helpers are available in the function body: `glsl_position()`, `glsl_normal()`, `glsl_true_normal()`, `glsl_incoming()`
+- Built-in ambient-light helper: `glsl_ambient_lighting()`
+- Built-in direct-light helpers: `GLSLLight`, `glsl_light_count()`, `glsl_light_get(light_index)`, `glsl_light_shadow(light_index, shading_normal)`
+- `GLSLLight.lightgroup_id` maps directly to the light data panel `Lightgroup ID`
+- `GLSLLight.attenuation` is a base attenuation term for custom per-light models; it does not include `NdotL`, toon ramps, Blinn-Phong, GGX, shadows, or material-side Fresnel / metallic / roughness behavior
+- Recommended diffuse pattern: `light.diffuse_color * light.attenuation * max(dot(N, light.vector), 0.0) * glsl_light_shadow(...)`
+- Recommended specular pattern: `light.specular_color * light.attenuation * custom_spec_term * glsl_light_shadow(...)`
+
+#### Example: `mode` Debug Mapping
+
+If you want one `GLSL Function` node to switch between helper outputs with a single `mode` parameter, this mapping is the current reference:
+
+| `mode` | Helper / Field |
+| --- | --- |
+| `0` | `glsl_position()` |
+| `1` | `glsl_normal()` |
+| `2` | `glsl_true_normal()` |
+| `3` | `glsl_incoming()` |
+| `4` | `glsl_ambient_lighting()` |
+| `5` | `glsl_light_count()` |
+| `6` | `light.valid` |
+| `7` | `light.type` |
+| `8` | `light.lightgroup_id` |
+| `9` | `light.vector` |
+| `10` | `light.position` |
+| `11` | `light.direction` |
+| `12` | `light.distance` |
+| `13` | `light.diffuse_color` |
+| `14` | `light.specular_color` |
+| `15` | `light.attenuation` |
+| `16` | `glsl_light_shadow(i, N)` |
+
+#### Example: Filter by `lightgroup_id`
+
+You can filter Eevee direct lights inside `GLSL Function` by reading `GLSLLight.lightgroup_id`.
+
+```glsl
+vec4 lightgroup_lambert(vec3 albedo, int target_lightgroup_id)
+{
+  vec3 N = normalize(glsl_normal());
+  vec3 result = vec3(0.0);
+
+  for (int i = 0; i < glsl_light_count(); i++) {
+    GLSLLight light = glsl_light_get(i);
+    if (!light.valid || light.lightgroup_id != target_lightgroup_id) {
+      continue;
+    }
+
+    float NdotL = max(dot(N, light.vector), 0.0);
+    if (NdotL <= 0.0) {
+      continue;
+    }
+
+    float shadow = glsl_light_shadow(i, N);
+    result += albedo * light.diffuse_color * light.attenuation * NdotL * shadow;
+  }
+
+  return vec4(result, 1.0);
+}
+```
 
 ### Image to Closure
 
@@ -383,6 +458,12 @@ Wraps a regular image as a closure-backed source for `sample2D` workflows.
 - `Interpolation`
 - `Extension`
 
+#### Usage Notes
+
+- This node does not expose a normal image socket; the image is selected directly in the node panel
+- It is an adapter for `sampler2D` workflows, not a replacement for `Image Texture`
+- Prefer it when a function needs image-resource specific sampling behavior
+
 ### Basis Transform
 
 #### Entry
@@ -396,7 +477,36 @@ Wraps a regular image as a closure-backed source for `sample2D` workflows.
 
 #### Purpose
 
-Uses `Origin + three basis axes` to perform custom coordinate-space transforms inside material nodes.
+Transforms points, vectors, or normals to or from a custom basis defined by `Origin + axis inputs`.
+
+#### Inputs / Outputs
+
+- Inputs: `Vector`, `Origin`, `X Axis`, `Y Axis`, `Z Axis`
+- Output: `Vector`
+
+#### Panel Options
+
+- `Direction`
+  - `To Basis`
+  - `From Basis`
+- `Vector Type`
+  - `Point`
+  - `Vector`
+  - `Normal`
+- `Basis Input`
+  - `XY`
+  - `XZ`
+  - `YZ`
+  - `XYZ`
+- `Orthonormalize`
+- `Fallback`
+
+#### Notes
+
+- `Point` mode uses `Origin` as the translation reference, while `Vector` and `Normal` only transform direction
+- `Basis Input` can derive the missing axis from two supplied axes, or use explicit `XYZ`
+- `Orthonormalize` helps stabilize imperfect or non-orthogonal input axes
+- Useful for local basis projection, procedural texture orientation, anisotropic direction control, and custom normal-space conversion
 
 ### Twirl
 
@@ -607,6 +717,7 @@ Generates an approximate beveled normal in `Eevee` so hard edges can look smooth
 
 #### Notes
 
+- `Local` tries to keep the evaluation focused on the current object
 - In `Pixel` mode, `Sample Radius` is interpreted in pixels and therefore changes with render resolution
 - In `View` mode, `Sample Radius` is interpreted relative to the view, which helps keep rim width more consistent between viewport and final render
 - This is still a screen-space node, so the result depends on camera view, resolution, and sampling radius
@@ -636,13 +747,25 @@ Generates an approximate beveled normal in `Eevee` so hard edges can look smooth
 - `Half-Lambert Factor`
 - `Blinn-Phong Factor`
 
+#### Meaning of Each Output
+
+- `Diffuse Shading`: the summed Lambert diffuse term from valid lights, clamped to `0-1`
+- `Shadow`: switchable shadow evaluation output
+- `Ambient Lighting`: probe / environment indirect-light contribution
+- `Half-Lambert Factor`: summed half-Lambert diffuse term, clamped to `0-1`
+- `Blinn-Phong Factor`: averaged Blinn-Phong highlight factor weighted by each light's specular channel, clamped to `0-1`
+
 #### Notes
 
 - `Shadow Mode`
   - `Built-in`
   - `Soft Filtered`
-- `Blinn-Phong Factor` outputs a Blinn-Phong highlight factor weighted by the light specular channel
+- `Soft Filtered` samples a local neighborhood around the current surface to rebuild smoother gray penumbra from Eevee's dithered black/white shadow result
+- `Blinn-Phong Factor` does not automatically include shadow; multiply it with `Shadow` when needed
+- `Exponent` controls highlight sharpness and defaults to `16`
 - The node panel includes a `Lightgroup` control
+- Only lights with the same `Lightgroup ID` participate in this `Shader Info` node
+- World-sun style interference is excluded from these direct-light outputs
 
 ### Light Info
 
@@ -655,15 +778,41 @@ Generates an approximate beveled normal in `Eevee` so hard edges can look smooth
 	<br>
 </div>
 
+#### Feature Description
+
+Reads information from a selected light.
+
 #### Fixed Outputs
 
 - `Color`
 - `Power`
 - `Type`
 
+`Type` is an integer socket with the following values:
+
+- `-1`: no light assigned
+- `0`: Point
+- `1`: Sun
+- `2`: Spot
+- `3`: Area
+
+#### Outputs That Appear by Light Type
+
+- `Position`
+- `Direction`
+- `Radius`
+- `Spot Size`
+- `Sun Angle`
+
+Current behavior depends on the selected light type:
+
+- `Point`: `Position`, `Radius`
+- `Sun`: `Direction`, `Sun Angle`
+- `Spot`: `Position`, `Direction`, `Radius`, `Spot Size`
+- `Area`: `Position`, `Direction`, `Radius`
+
 #### Notes
 
-- `Type` is an integer socket
 - For per-light processing, use `For Each Light` in the `NPR Tree`
 
 ## 5. Built-In Node Enhancements

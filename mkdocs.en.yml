@@ -8,12 +8,12 @@ docs_dir: docs/en
 theme:
   name: material
   language: en
-  palette: 
+  palette:
     - scheme: default
       primary: indigo
       accent: red
       toggle:
-        icon: material/brightness-7 
+        icon: material/brightness-7
         name: Dark mode
     - scheme: slate
       primary: indigo
@@ -38,21 +38,22 @@ nav:
   - NPR Workflow: npr-workflow.md
   - Interface & Settings: interface-guide.md
   - Scene Extensions: scene-extensions.md
+  - Local Build Workflow: build-guide.md
 
 markdown_extensions:
-    - admonition
-    - attr_list
-    - md_in_html
-    - pymdownx.superfences
-    - pymdownx.inlinehilite
-    - pymdownx.snippets
-    - pymdownx.tabbed:
-        alternate_style: true
-    - pymdownx.arithmatex:
-        generic: true
-    - tables
-    - toc:
-        permalink: true
+  - admonition
+  - attr_list
+  - md_in_html
+  - pymdownx.superfences
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.arithmatex:
+      generic: true
+  - tables
+  - toc:
+      permalink: true
 
 use_directory_urls: false
 

@@ -8,12 +8,12 @@ docs_dir: docs/zh
 theme:
   name: material
   language: zh
-  palette: 
+  palette:
     - scheme: default
       primary: indigo
       accent: red
       toggle:
-        icon: material/brightness-7 
+        icon: material/brightness-7
         name: 深色模式
     - scheme: slate
       primary: indigo
@@ -38,21 +38,22 @@ nav:
   - NPR Tree 工作流: npr-workflow.md
   - 界面与设置: interface-guide.md
   - Scene 级 Eevee 扩展: scene-extensions.md
+  - 本地构建流程: build-guide.md
 
 markdown_extensions:
-    - admonition
-    - attr_list
-    - md_in_html
-    - pymdownx.superfences
-    - pymdownx.inlinehilite
-    - pymdownx.snippets
-    - pymdownx.tabbed:
-        alternate_style: true
-    - pymdownx.arithmatex:
-        generic: true
-    - tables
-    - toc:
-        permalink: true
+  - admonition
+  - attr_list
+  - md_in_html
+  - pymdownx.superfences
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.arithmatex:
+      generic: true
+  - tables
+  - toc:
+      permalink: true
 
 use_directory_urls: false
 
@@ -74,5 +75,4 @@ extra:
 
 extra_javascript:
   - javascripts/mathjax.js
-  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
   - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js

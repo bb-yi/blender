@@ -102,7 +102,18 @@ Assigns an integer light-group ID to Eevee lights so the `Shader Info` node can 
 - If a `Shader Info` node uses another integer value, only lights with the same ID are included
 - This grouping currently affects only `Shader Info`, not the default Eevee material lighting path
 
-## 5. Pose Bone Outliner Visibility
+## 5. Splash Version Tag
+
+### Purpose
+
+Appends the current NPR build tag and build date to the version text in the top-right corner of the splash screen, so custom builds are easier to distinguish at a glance.
+
+### Current Format
+
+- `version + npr post + build date`
+- Example: `5.1.0 npr post 2026-03-27`
+
+## 6. Pose Bone Outliner Visibility
 
 ### Purpose
 

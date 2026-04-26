@@ -53,7 +53,7 @@
 
 #### 作用
 
-使用 Eevee 的 `Cryptomatte` 物体信息，为滤镜材质快速生成对象遮罩。
+使用 Eevee `Cryptomatte` 对象信息，为滤镜材质快速生成对象遮罩。
 
 #### 输出
 
@@ -68,7 +68,7 @@
 
 #### 说明
 
-- `Single Object` 适合快速指定单个控制物体
+- `Single Object` 适合快速指定单个控制对象
 - `Object List` 适合手动维护一组对象，也可以用 `Use Selection` / `Append Selection` 从当前选择批量填充
 - `Collection` 适合按集合层级统一管理遮罩对象
 - 输出是 `0-1` 浮点遮罩，可直接接到 `Mix`、阈值、AOV 写出或其他滤镜控制链路中
@@ -206,7 +206,7 @@
 - `Portal In`：在当前节点树里存一个有名字、有类型的值
 - `Portal Out`：在同一节点树内按名字把这个值取出来继续使用
 - 新建 `Portal In` 时会自动生成唯一名称
-- `Portal Out` 上带有放大镜按钮，可快速跳转到对应的 `Portal In` 位置
+- `Portal Out` 上带有放大镜按钮，可快速跳转到对应的 `Portal In`
 - 只在同一个 shader node tree 内识别，不支持跨节点树和跨节点组自动穿透
 
 ## 3. Eevee 物体材质节点
@@ -276,13 +276,13 @@
 
 #### 作用
 
-直接采样 `Eevee` 的世界环境颜色，不依赖屏幕背后是否还有几何。
+直接采样 Eevee 的世界环境颜色，不依赖屏幕后方是否还有几何。
 
 #### 说明
 
 - `Direction` 不连接时，默认使用当前表面的视线方向
 - `Direction` 连接后，可以按指定方向采样世界环境
-- 输出更接近 `Eevee` 的环境 / probe 结果，而不是屏幕空间缓冲
+- 输出更接近 Eevee 的环境 / probe 结果，而不是屏幕空间缓冲
 
 ### Light Probe Color
 
@@ -297,12 +297,12 @@
 
 #### 作用
 
-直接读取 Eevee 当前可用的光照探头结果，分别输出反射探头颜色、环境谐波漫反射颜色，以及两者叠加后的结果。
+直接读取 Eevee 当前可用的光照探针结果，分别输出反射探针颜色、环境谐波漫反射颜色，以及两者叠加后的结果。
 
 #### 说明
 
-- `Reflection` 更接近反射探头 / 世界环境方向采样结果
-- `Irradiance` 更接近体积光照探头或环境谐波的漫反射光照结果
+- `Reflection` 更接近反射探针 / 世界环境方向采样结果
+- `Irradiance` 更接近体积光照探针或环境谐波的漫反射光照结果
 - `Combined` 为 `Reflection + Irradiance`
 
 ### World To Tangent
@@ -328,7 +328,7 @@
 #### 说明
 
 - 节点面板中可指定 `UV Map`，该 UV 的切线会作为转换基底
-- 适合做各向异性方向控制、切线空间流向和局部扫描方向效果
+- 适合拿来做各向异性方向控制、切线空间流向、局部扫描方向等效果
 
 ### GLSL Function
 
@@ -345,22 +345,97 @@
 
 #### 作用
 
-把一段用户编写的 `GLSL` 函数接入当前 `Eevee / NPR` 材质编译流程。
+把一段用户编写的 `GLSL` 函数接入当前 `Eevee / NPR` 材质编译流程，适合做自定义数学节点、程序纹理、SDF、屏幕效果封装，以及移植一部分外部 GLSL / HLSL 逻辑。
+
+#### 基本使用方法
+
+1. 在 `Text Editor` 中准备一段 `GLSL` 函数源码，或者指定一个外部 `.glsl` 文件。
+2. 添加 `GLSL Function` 节点。
+3. 在节点面板中选择源码来源和目标函数。
+4. 如果修改了源码，可点击节点上的刷新按钮重新解析。
+5. 在 `Function` 中显式选择真正要导出的函数名。
 
 #### 当前支持的函数边界类型
 
-- 输入参数：`float`、`vec2`、`vec3`、`vec4`、`sampler2D`、`sample2D`
-- 输出参数：`out float`、`out vec2`、`out vec3`、`out vec4`
-- 返回值：`void`、`float`、`vec2`、`vec3`、`vec4`
+- 输入参数：`float`、`int`、`bool`、`vec2`、`vec3`、`vec4`、`sampler2D`
+- 输出参数：`out float`、`out int`、`out bool`、`out vec2`、`out vec3`、`out vec4`
+- 返回值：`void`、`float`、`int`、`bool`、`vec2`、`vec3`、`vec4`
 
-#### 说明
+#### 重要说明
 
 - `Function` 不会自动选第一个函数，需要手动指定
-- `sampler2D` 由节点面板中的图片槽位选择，不是可连线输入
-- `sample2D` 会显示为 `Closure` 输入口，可连接 `Image to Closure` 或符合约定的 `Closure Output`
-- `Closure Output -> sample2D` 当前只保证 `texture(tex, uv)` 这种直接采样形式
+- `sampler2D` 会显示为 `Closure` 输入口
+- `sampler2D` 可连接 `Image to Closure` 或符合约定的 `Closure Output`
+- `Closure Output -> sampler2D` 当前只保证 `texture(tex, uv)` 这种直接采样形式
+- 如果函数依赖 `textureLod`、`textureGrad`、`textureSize`、`texelFetch` 这类图像专用能力，应优先配合 `Image to Closure`
 - `@glsl_meta` 支持 `default`、`min`、`max`、`hide_value` 和 `subtype`
+- `@glsl_meta default=` 除了 literal 以外，也支持 `glsl_position()`、`normalize(glsl_normal())`、`glsl_ambient_lighting()` 这类表达式默认值
+- 表达式默认值当前只建议用于输入参数 `float / vec2 / vec3 / vec4`，并且不要直接引用同函数其他参数名
 - 只有显式写了 `subtype=color` 的 `vec3 / vec4` 输入，才会显示成颜色插口
+- `vec3 + subtype=color` 进入 GLSL 时按 `rgb` 使用，`alpha` 固定为 `1.0`
+- `vec4 + subtype=color` 会保留完整 `rgba`
+- 当前不支持把 `mat* / struct / array` 作为导出函数边界类型
+- 导出函数边界当前已经支持 `int / bool`，适合直接写模式开关、枚举值、`lightgroup_id` 这类参数
+- 内置了几何 helper，可在函数体里直接读取：`glsl_position()`、`glsl_normal()`、`glsl_true_normal()`、`glsl_incoming()`
+- 内置了环境光 helper：`glsl_ambient_lighting()`
+- 内置了 Eevee 直接光辅助 helper，可在函数体里使用：`GLSLLight`、`glsl_light_count()`、`glsl_light_get(light_index)`、`glsl_light_shadow(light_index, shading_normal)`
+- `GLSLLight.lightgroup_id` 直接对应灯光数据面板里的 `Lightgroup ID`
+- `GLSLLight.attenuation` 只是自定义逐灯模型的基础衰减项，不包含 `NdotL`、toon ramp、Blinn-Phong、GGX、shadow 或材质侧 Fresnel / metallic / roughness
+- 推荐写法：`light.diffuse_color * light.attenuation * max(dot(N, light.vector), 0.0) * glsl_light_shadow(...)`
+- 推荐写法：`light.specular_color * light.attenuation * custom_spec_term * glsl_light_shadow(...)`
+
+#### 示例：`mode` 对照调试 helper
+
+如果你想在一个 `GLSL Function` 节点里按 `mode` 切换并读取这组 helper，下面这张表可以直接作为对照：
+
+| `mode` | 对应 helper / 字段 |
+| --- | --- |
+| `0` | `glsl_position()` |
+| `1` | `glsl_normal()` |
+| `2` | `glsl_true_normal()` |
+| `3` | `glsl_incoming()` |
+| `4` | `glsl_ambient_lighting()` |
+| `5` | `glsl_light_count()` |
+| `6` | `light.valid` |
+| `7` | `light.type` |
+| `8` | `light.lightgroup_id` |
+| `9` | `light.vector` |
+| `10` | `light.position` |
+| `11` | `light.direction` |
+| `12` | `light.distance` |
+| `13` | `light.diffuse_color` |
+| `14` | `light.specular_color` |
+| `15` | `light.attenuation` |
+| `16` | `glsl_light_shadow(i, N)` |
+
+#### 示例：按 `lightgroup_id` 过滤灯光
+
+如果你想在 `GLSL Function` 里只接收某一个灯光组，可以直接读取 `GLSLLight.lightgroup_id`：
+
+```glsl
+vec4 lightgroup_lambert(vec3 albedo, int target_lightgroup_id)
+{
+  vec3 N = normalize(glsl_normal());
+  vec3 result = vec3(0.0);
+
+  for (int i = 0; i < glsl_light_count(); i++) {
+    GLSLLight light = glsl_light_get(i);
+    if (!light.valid || light.lightgroup_id != target_lightgroup_id) {
+      continue;
+    }
+
+    float NdotL = max(dot(N, light.vector), 0.0);
+    if (NdotL <= 0.0) {
+      continue;
+    }
+
+    float shadow = glsl_light_shadow(i, N);
+    result += albedo * light.diffuse_color * light.attenuation * NdotL * shadow;
+  }
+
+  return vec4(result, 1.0);
+}
+```
 
 ### Image to Closure
 
@@ -389,6 +464,12 @@
 - `Interpolation`
 - `Extension`
 
+#### 使用说明
+
+- 这个节点没有普通贴图插口，图片是在节点面板里直接选择
+- 它主要是 `sampler2D` 工作流的图像适配节点，不是普通 `Image Texture` 的替代品
+- 当函数需要图像资源专用采样能力时，应优先使用这个节点
+
 ### Basis Transform
 
 #### 入口
@@ -402,7 +483,41 @@
 
 #### 作用
 
-在材质节点里用 `Origin + 三根基轴` 来完成自定义坐标系变换，适合在没有矩阵输入类型的情况下处理点、方向向量和法线。
+基于 `Origin + 轴向输入` 在材质节点里完成自定义基底变换，可用于处理点、方向向量和法线。
+
+#### 输入输出
+
+- 输入：`Vector`
+- 输入：`Origin`
+- 输入：`X Axis`
+- 输入：`Y Axis`
+- 输入：`Z Axis`
+- 输出：`Vector`
+
+#### 面板选项
+
+- `Direction`
+  - `To Basis`
+  - `From Basis`
+- `Vector Type`
+  - `Point`
+  - `Vector`
+  - `Normal`
+- `Basis Input`
+  - `XY`
+  - `XZ`
+  - `YZ`
+  - `XYZ`
+- `Orthonormalize`
+- `Fallback`
+
+#### 说明
+
+- `Point` 模式会把 `Origin` 当作平移参考；`Vector` 和 `Normal` 模式只做方向变换
+- `Basis Input` 可以只提供两根轴，由节点补出第三根轴；也可以显式输入 `XYZ`
+- `Orthonormalize` 适合在输入轴不完全正交时做稳定化，减少基底误差
+- `Fallback` 用于控制基底退化或长度异常时的回退行为
+- 适合做局部坐标投影、程序贴图定向、各向异性方向控制和自定义法线空间转换
 
 ### Twirl
 
@@ -545,7 +660,7 @@
 
 #### 作用
 
-对一个或两个 SDF 距离场做组合、裁切和轮廓变形。
+对一个或两个 SDF 距离场做组合、裁切和软边变形。
 
 ### SDF Vector Operator
 
@@ -588,7 +703,7 @@
 
 #### 作用
 
-在 `Eevee` 中生成近似的倒角法线，用来让硬边看起来更圆润。
+在 `Eevee` 中生成近似的倒角法线，让硬边看起来更圆润。
 
 ### Curvature
 
@@ -622,6 +737,7 @@
 
 #### 说明
 
+- `Local` 开启后，会尽量只按当前物体自身的信息计算
 - `Pixel` 模式下，`Sample Radius` 以像素为单位，效果会随分辨率变化
 - `View` 模式下，`Sample Radius` 会按视图相对尺度解释，更适合保持视图和最终渲染中的 rim 宽度一致
 - 这是屏幕空间节点，结果会受到当前视角、屏幕分辨率和采样半径影响
@@ -651,13 +767,34 @@
 - `Half-Lambert Factor`
 - `Blinn-Phong Factor`
 
-#### 说明
+#### 各输出的含义
+
+- `Diffuse Shading`
+  - 每个灯光的兰伯特光照之和，再钳制到 `0-1`
+- `Shadow`
+  - 可切换阴影模式
+  - `Built-in`：使用 Eevee 原本的阴影计算
+  - `Soft Filtered`：对当前表面附近的一像素邻域做额外采样和平均，把黑白抖动阴影重建成更平滑的灰度半影
+- `Ambient Lighting`
+  - 来自探针 / 环境间接光的环境照明信息
+- `Half-Lambert Factor`
+  - 每个灯光的半兰伯特光照之和，再钳制到 `0-1`
+- `Blinn-Phong Factor`
+  - 每个灯光的布林冯高光因子按镜面通道加权求平均，再钳制到 `0-1`
+  - 默认不直接乘阴影，需要时请与 `Shadow` 输出自行组合
+
+#### 额外说明
 
 - `Shadow Mode`
   - `Built-in`
   - `Soft Filtered`
-- `Blinn-Phong Factor` 会输出基于镜面通道加权后的布林冯高光因子
+- `Exponent`
+  - 控制布林冯高光的锐度，数值越高高光越集中
+  - 默认值为 `16`
+- 当 `Shadow Mode = Soft Filtered` 时，可用 `Stable Samples` 提高阴影质量
 - 节点面板新增 `Lightgroup`
+  - 只有 `Lightgroup ID` 相同的灯光，才会参与这个 `Shader Info` 节点的直接光照与阴影计算
+- 当前实现会排除 world sun 对这些输出的干扰，避免 HDRI 或世界环境里的“太阳光”混入直接结果
 
 ### Light Info
 
@@ -670,15 +807,41 @@
 	<br>
 </div>
 
+#### 功能说明
+
+读取指定灯光信息。
+
 #### 固定输出
 
 - `Color`
 - `Power`
 - `Type`
 
+其中 `Type` 是整数插槽，含义为：
+
+- `-1`：没有指定灯光
+- `0`：Point
+- `1`：Sun
+- `2`：Spot
+- `3`：Area
+
+#### 按灯光类型自动出现的输出
+
+- `Position`
+- `Direction`
+- `Radius`
+- `Spot Size`
+- `Sun Angle`
+
+当前版本会根据灯光类型自动隐藏 / 显示相关接口：
+
+- `Point`：`Position`、`Radius`
+- `Sun`：`Direction`、`Sun Angle`
+- `Spot`：`Position`、`Direction`、`Radius`、`Spot Size`
+- `Area`：`Position`、`Direction`、`Radius`
+
 #### 说明
 
-- `Type` 为整数插槽
 - 如果你要做逐灯处理，应该使用 `NPR Tree` 里的 `For Each Light`
 
 ## 5. 内置节点增强
