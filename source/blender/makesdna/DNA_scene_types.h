@@ -2727,7 +2727,8 @@ struct SceneEEVEE {
   int performance_profiler_average_window = 8;
   int performance_profiler_viewport_pause = 0;
   int stage_output_view = SCE_EEVEE_STAGE_VIEW_OFF;
-  int _pad2 = 0;
+  char use_outline = true;
+  char _pad2[3] = {};
 };
 
 struct SceneGpencil {

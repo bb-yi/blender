@@ -1030,6 +1030,14 @@ void blo_do_versions_510(FileData *fd, Library * /*lib*/, Main *bmain)
     }
   }
 
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 40) &&
+      !DNA_struct_member_exists(fd->filesdna, "SceneEEVEE", "char", "use_outline"))
+  {
+    for (Scene &scene : bmain->scenes) {
+      scene.eevee.use_outline = true;
+    }
+  }
+
   /**
    * Always bump subversion in BKE_blender_version.h when adding versioning
    * code here, and wrap it inside a MAIN_VERSION_FILE_ATLEAST check.

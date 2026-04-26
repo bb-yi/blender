@@ -730,6 +730,28 @@ class RENDER_PT_eevee_sampling_advanced(RenderButtonsPanel, Panel):
         col.prop(props, "light_threshold")
 
 
+class RENDER_PT_eevee_outline(RenderButtonsPanel, Panel):
+    bl_label = "Outline"
+    bl_options = {'DEFAULT_CLOSED'}
+    COMPAT_ENGINES = {'BLENDER_EEVEE'}
+
+    @classmethod
+    def poll(cls, context):
+        return (context.engine in cls.COMPAT_ENGINES)
+
+    def draw_header(self, context):
+        props = context.scene.eevee
+        self.layout.prop(props, "use_outline", text="")
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+
+        col = layout.column()
+        col.label(text="Uses Outline Control nodes and the Outline render pass.")
+
+
 class RENDER_PT_eevee_film(RenderButtonsPanel, Panel):
     bl_label = "Film"
     bl_options = {'DEFAULT_CLOSED'}
@@ -1183,6 +1205,7 @@ classes = (
     RENDER_PT_eevee_depth_of_field,
     RENDER_PT_eevee_motion_blur,
     RENDER_PT_eevee_motion_blur_curve,
+    RENDER_PT_eevee_outline,
     RENDER_PT_eevee_film,
     RENDER_PT_eevee_performance,
     RENDER_PT_eevee_performance_memory,
