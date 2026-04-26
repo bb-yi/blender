@@ -610,8 +610,7 @@ PassMain::Sub *ForwardPipeline::prepass_transparent_add(const Object *ob,
                                                         blender::Material *blender_mat,
                                                         GPUMaterial *gpumat)
 {
-  const bool needs_outline_depth = GPU_material_has_outline_output(gpumat);
-  if ((blender_mat->blend_flag & MA_BL_HIDE_BACKFACE) == 0 && !needs_outline_depth) {
+  if ((blender_mat->blend_flag & MA_BL_HIDE_BACKFACE) == 0) {
     return nullptr;
   }
   DRWState state = DRW_STATE_WRITE_DEPTH | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
@@ -623,10 +622,6 @@ PassMain::Sub *ForwardPipeline::prepass_transparent_add(const Object *ob,
   pass->state_set(state);
   pass->material_set(*inst_.manager, gpumat, true);
   pass->push_constant("surface_cull_mode", int(material_surface_cull_method(blender_mat)));
-  if (GPU_material_has_outline_output(gpumat)) {
-    pass->bind_image(OUTLINE_COLOR_SLOT, &inst_.render_buffers.outline_color_tx);
-    pass->bind_image(OUTLINE_INFO_SLOT, &inst_.render_buffers.outline_info_tx);
-  }
 
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_TO_RGBA) &&
       GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT))
@@ -655,6 +650,10 @@ PassMain::Sub *ForwardPipeline::material_transparent_add(const Object *ob,
   pass->state_set(state);
   pass->material_set(*inst_.manager, gpumat, true);
   pass->push_constant("surface_cull_mode", int(material_surface_cull_method(blender_mat)));
+  if (GPU_material_has_outline_output(gpumat)) {
+    pass->bind_image(OUTLINE_COLOR_SLOT, &inst_.render_buffers.outline_color_tx);
+    pass->bind_image(OUTLINE_INFO_SLOT, &inst_.render_buffers.outline_info_tx);
+  }
 
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_TO_RGBA) &&
       GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT))
@@ -695,8 +694,8 @@ void ForwardPipeline::TransparencyBuffer::release()
 bool ForwardPipeline::use_colored_transparency() const
 {
   /* The monochromatic transparent path regressed on this branch and only preserves the first
-   * radiance channel in final renders. Force the split-channel path until the single-target path
-   * is brought back in sync. */
+   * radiance channel in final renders. Force the split-channel path for real transparent draws
+   * until the single-target path is brought back in sync. */
   return has_transparent_ || has_holdout_;
 }
 
@@ -713,6 +712,16 @@ void ForwardPipeline::render(View &view,
   }
 
   inst_.hiz_buffer.swap_layer();
+
+  const bool needs_transparency_resolve = has_opaque_ || has_transparent_ ||
+                                          inst_.render_buffers.data.transparent_id != -1;
+  const bool use_colored_transparency = needs_transparency_resolve &&
+                                        this->use_colored_transparency();
+  const bool32_t use_monochromatic_transmittance = !use_colored_transparency;
+  if (inst_.pipelines.data.use_monochromatic_transmittance != use_monochromatic_transmittance) {
+    inst_.pipelines.data.use_monochromatic_transmittance = use_monochromatic_transmittance;
+    inst_.uniform_data.push_update();
+  }
 
   GPU_debug_group_begin("Forward.Opaque");
 
@@ -740,12 +749,12 @@ void ForwardPipeline::render(View &view,
     inst_.sphere_probes.set_view(view);
   }
 
-  {
+  if (needs_transparency_resolve) {
     ScopedTelemetrySample telemetry_sample(
         inst_.telemetry, TelemetryStageId::MainForwardTransparencySetup);
-    transp_buffer_.acquire(extent, use_colored_transparency());
+    transp_buffer_.acquire(extent, use_colored_transparency);
 
-    if (!use_colored_transparency()) {
+    if (!use_colored_transparency) {
       /* NOTE: When using Vulkan this triggers a (false positive) validation warning about writing
        * to an attachment that isn't filled. The warning could be removed by adding dummy
        * attachments, recompiling the shader, etc. But it is not worth the hassle.
@@ -766,7 +775,7 @@ void ForwardPipeline::render(View &view,
 
     transparent_fb.bind();
 
-    if (use_colored_transparency()) {
+    if (use_colored_transparency) {
       /* Split channel targets. Radiance in 1st channel, transmittance in 2nd channel. */
       transparent_fb.clear_color(float4(0.0f, 1.0f, 0.0f, 0.0f));
     }
@@ -788,13 +797,13 @@ void ForwardPipeline::render(View &view,
     inst_.manager->submit(transparent_ps_, view);
   }
 
-  {
+  if (needs_transparency_resolve) {
     ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainForwardResolve);
     combined_fb.bind();
     inst_.manager->submit(resolve_ps_, view);
-  }
 
-  transp_buffer_.release();
+    transp_buffer_.release();
+  }
 }
 
 /** \} */

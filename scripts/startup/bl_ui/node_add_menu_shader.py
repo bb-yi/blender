@@ -55,10 +55,7 @@ def object_or_npr_eevee_shader_nodes_poll(context):
 
 
 def outline_control_shader_nodes_poll(context):
-    if not object_or_npr_eevee_shader_nodes_poll(context):
-        return False
-    mat = context.material
-    return mat is not None and mat.surface_render_method != 'BLENDED'
+    return object_shader_nodes_poll(context) or npr_shader_nodes_poll(context)
 
 
 def object_filter_or_npr_eevee_shader_nodes_poll(context):
