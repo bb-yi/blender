@@ -144,6 +144,23 @@
   - `Before Depth of Field`
   - `Before Composite`
 
+### 3. Eevee Outline
+
+#### 功能说明
+
+`Eevee Outline` 是场景级描边总开关，用于控制当前分支新增的屏幕空间描边系统。
+
+#### 面板入口
+
+`Render Properties > Outline`
+
+#### 行为说明
+
+- 默认开启，保持 `Outline Control` 节点和 `Outline` Render Pass 的正常行为
+- 关闭后，`Outline Control` 节点不会影响 Combined 渲染结果
+- 关闭后，即使 View Layer 中启用了 `Outline` Render Pass，也不会输出描边内容
+- 该开关用于快速回到与未启用描边系统时一致的 Eevee 渲染结果
+
 ## 二、主要扩展节点
 
 **1. Filter 域节点**
