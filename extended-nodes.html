@@ -1120,6 +1120,15 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#pbr" class="md-nav__link">
+    <span class="md-ellipsis">
+      示例：PBR 风格直光 + 环境光
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1888,28 +1897,6 @@
   
   <span class="md-ellipsis">
     Scene 级 Eevee 扩展
-    
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="build-guide.html" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    本地构建流程
     
   </span>
   
@@ -2725,6 +2712,15 @@
   <a href="#lightgroup_id" class="md-nav__link">
     <span class="md-ellipsis">
       示例：按 lightgroup_id 过滤灯光
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pbr" class="md-nav__link">
+    <span class="md-ellipsis">
+      示例：PBR 风格直光 + 环境光
     </span>
   </a>
   
@@ -3793,6 +3789,9 @@
 <li><code>Closure Output -&gt; sampler2D</code> 当前只保证 <code>texture(tex, uv)</code> 这种直接采样形式</li>
 <li>如果函数依赖 <code>textureLod</code>、<code>textureGrad</code>、<code>textureSize</code>、<code>texelFetch</code> 这类图像专用能力，应优先配合 <code>Image to Closure</code></li>
 <li><code>@glsl_meta</code> 支持 <code>default</code>、<code>min</code>、<code>max</code>、<code>hide_value</code> 和 <code>subtype</code></li>
+<li><code>float</code> 当前支持的 <code>subtype</code>：<code>none</code>、<code>unsigned</code>、<code>percentage</code>、<code>factor</code>、<code>mass</code>、<code>angle</code>、<code>time</code>、<code>time_absolute</code>、<code>distance</code>、<code>wavelength</code></li>
+<li><code>vec2 / vec3 / vec4</code> 当前支持的 <code>subtype</code>：<code>none</code>、<code>factor</code>、<code>percentage</code>、<code>translation</code>、<code>direction</code>、<code>velocity</code>、<code>acceleration</code>、<code>euler</code>、<code>xyz</code></li>
+<li><code>subtype=color</code> 额外只支持 <code>vec3</code> 和 <code>vec4</code></li>
 <li><code>@glsl_meta default=</code> 除了 literal 以外，也支持 <code>glsl_position()</code>、<code>normalize(glsl_normal())</code>、<code>glsl_ambient_lighting()</code> 这类表达式默认值</li>
 <li>表达式默认值当前只建议用于输入参数 <code>float / vec2 / vec3 / vec4</code>，并且不要直接引用同函数其他参数名</li>
 <li>只有显式写了 <code>subtype=color</code> 的 <code>vec3 / vec4</code> 输入，才会显示成颜色插口</li>
@@ -3911,6 +3910,119 @@
 <span class="w">  </span><span class="p">}</span>
 
 <span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="kt">vec4</span><span class="p">(</span><span class="n">result</span><span class="p">,</span><span class="w"> </span><span class="mf">1.0</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+<h4 id="pbr">示例：PBR 风格直光 + 环境光<a class="headerlink" href="#pbr" title="Permanent link">&para;</a></h4>
+<p>下面这段示例演示当前 <code>GLSL Function</code> 如何直接同时使用：</p>
+<ul>
+<li>几何 helper：<code>glsl_normal()</code>、<code>glsl_true_normal()</code>、<code>glsl_incoming()</code></li>
+<li>环境光 helper：<code>glsl_ambient_lighting()</code></li>
+<li>逐灯 helper：<code>glsl_light_count()</code>、<code>glsl_light_get(i)</code>、<code>glsl_light_shadow(i, N)</code></li>
+</ul>
+<p>函数名可设为 <code>pbr_lit</code>，并给它连接这些输入：</p>
+<ul>
+<li><code>base_color</code></li>
+<li><code>roughness</code></li>
+<li><code>metallic</code></li>
+<li><code>ao</code></li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="kt">float</span><span class="w"> </span><span class="n">saturate1</span><span class="p">(</span><span class="kt">float</span><span class="w"> </span><span class="n">x</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="n">clamp</span><span class="p">(</span><span class="n">x</span><span class="p">,</span><span class="w"> </span><span class="mf">0.0</span><span class="p">,</span><span class="w"> </span><span class="mf">1.0</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="kt">float</span><span class="w"> </span><span class="n">pow5</span><span class="p">(</span><span class="kt">float</span><span class="w"> </span><span class="n">x</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">  </span><span class="kt">float</span><span class="w"> </span><span class="n">x2</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">x</span><span class="p">;</span>
+<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="n">x2</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">x2</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">x</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="kt">vec3</span><span class="w"> </span><span class="n">fresnel_schlick</span><span class="p">(</span><span class="kt">float</span><span class="w"> </span><span class="n">cos_theta</span><span class="p">,</span><span class="w"> </span><span class="kt">vec3</span><span class="w"> </span><span class="n">F0</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="n">F0</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="p">(</span><span class="kt">vec3</span><span class="p">(</span><span class="mf">1.0</span><span class="p">)</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">F0</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">pow5</span><span class="p">(</span><span class="mf">1.0</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">saturate1</span><span class="p">(</span><span class="n">cos_theta</span><span class="p">));</span>
+<span class="p">}</span>
+
+<span class="kt">float</span><span class="w"> </span><span class="n">distribution_ggx</span><span class="p">(</span><span class="kt">float</span><span class="w"> </span><span class="n">NdotH</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">roughness</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">  </span><span class="kt">float</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">roughness</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">roughness</span><span class="p">;</span>
+<span class="w">  </span><span class="kt">float</span><span class="w"> </span><span class="n">a2</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">a</span><span class="p">;</span>
+<span class="w">  </span><span class="kt">float</span><span class="w"> </span><span class="n">nh2</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">NdotH</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">NdotH</span><span class="p">;</span>
+<span class="w">  </span><span class="kt">float</span><span class="w"> </span><span class="n">denom</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">nh2</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="p">(</span><span class="n">a2</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mf">1.0</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mf">1.0</span><span class="p">;</span>
+<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="n">a2</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">max</span><span class="p">(</span><span class="mf">3.14159265</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">denom</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">denom</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="n">e</span><span class="o">-</span><span class="mi">6</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="kt">float</span><span class="w"> </span><span class="n">geometry_schlick_ggx</span><span class="p">(</span><span class="kt">float</span><span class="w"> </span><span class="n">NdotV</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">roughness</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">  </span><span class="kt">float</span><span class="w"> </span><span class="n">r</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">roughness</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mf">1.0</span><span class="p">;</span>
+<span class="w">  </span><span class="kt">float</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">r</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">r</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mf">8.0</span><span class="p">;</span>
+<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="n">NdotV</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">max</span><span class="p">(</span><span class="n">NdotV</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="p">(</span><span class="mf">1.0</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">k</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">k</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="n">e</span><span class="o">-</span><span class="mi">6</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="kt">float</span><span class="w"> </span><span class="n">geometry_smith</span><span class="p">(</span><span class="kt">float</span><span class="w"> </span><span class="n">NdotV</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">NdotL</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">roughness</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="n">geometry_schlick_ggx</span><span class="p">(</span><span class="n">NdotV</span><span class="p">,</span><span class="w"> </span><span class="n">roughness</span><span class="p">)</span><span class="w"> </span><span class="o">*</span>
+<span class="w">         </span><span class="n">geometry_schlick_ggx</span><span class="p">(</span><span class="n">NdotL</span><span class="p">,</span><span class="w"> </span><span class="n">roughness</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="kt">vec4</span><span class="w"> </span><span class="n">pbr_lit</span><span class="p">(</span><span class="kt">vec3</span><span class="w"> </span><span class="n">base_color</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">roughness</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">metallic</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">ao</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">  </span><span class="kt">vec3</span><span class="w"> </span><span class="n">N</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">normalize</span><span class="p">(</span><span class="n">glsl_normal</span><span class="p">());</span>
+<span class="w">  </span><span class="kt">vec3</span><span class="w"> </span><span class="n">Ng</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">normalize</span><span class="p">(</span><span class="n">glsl_true_normal</span><span class="p">());</span>
+<span class="w">  </span><span class="kt">vec3</span><span class="w"> </span><span class="n">V</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">normalize</span><span class="p">(</span><span class="n">glsl_incoming</span><span class="p">());</span>
+
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">dot</span><span class="p">(</span><span class="n">N</span><span class="p">,</span><span class="w"> </span><span class="n">Ng</span><span class="p">)</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mf">0.0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">N</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Ng</span><span class="p">;</span>
+<span class="w">  </span><span class="p">}</span>
+
+<span class="w">  </span><span class="n">roughness</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">clamp</span><span class="p">(</span><span class="n">roughness</span><span class="p">,</span><span class="w"> </span><span class="mf">0.04</span><span class="p">,</span><span class="w"> </span><span class="mf">1.0</span><span class="p">);</span>
+<span class="w">  </span><span class="n">metallic</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">clamp</span><span class="p">(</span><span class="n">metallic</span><span class="p">,</span><span class="w"> </span><span class="mf">0.0</span><span class="p">,</span><span class="w"> </span><span class="mf">1.0</span><span class="p">);</span>
+<span class="w">  </span><span class="n">ao</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">clamp</span><span class="p">(</span><span class="n">ao</span><span class="p">,</span><span class="w"> </span><span class="mf">0.0</span><span class="p">,</span><span class="w"> </span><span class="mf">1.0</span><span class="p">);</span>
+
+<span class="w">  </span><span class="kt">vec3</span><span class="w"> </span><span class="n">F0</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">mix</span><span class="p">(</span><span class="kt">vec3</span><span class="p">(</span><span class="mf">0.04</span><span class="p">),</span><span class="w"> </span><span class="n">base_color</span><span class="p">,</span><span class="w"> </span><span class="n">metallic</span><span class="p">);</span>
+
+<span class="w">  </span><span class="kt">vec3</span><span class="w"> </span><span class="n">direct_diffuse</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kt">vec3</span><span class="p">(</span><span class="mf">0.0</span><span class="p">);</span>
+<span class="w">  </span><span class="kt">vec3</span><span class="w"> </span><span class="n">direct_specular</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kt">vec3</span><span class="p">(</span><span class="mf">0.0</span><span class="p">);</span>
+
+<span class="w">  </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mo">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">glsl_light_count</span><span class="p">();</span><span class="w"> </span><span class="n">i</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">GLSLLight</span><span class="w"> </span><span class="n">light</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">glsl_light_get</span><span class="p">(</span><span class="n">i</span><span class="p">);</span>
+<span class="w">    </span><span class="kt">vec3</span><span class="w"> </span><span class="n">L</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">normalize</span><span class="p">(</span><span class="n">light</span><span class="p">.</span><span class="n">vector</span><span class="p">);</span>
+<span class="w">    </span><span class="kt">vec3</span><span class="w"> </span><span class="n">H</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">normalize</span><span class="p">(</span><span class="n">V</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">L</span><span class="p">);</span>
+
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">NdotL</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">saturate1</span><span class="p">(</span><span class="n">dot</span><span class="p">(</span><span class="n">N</span><span class="p">,</span><span class="w"> </span><span class="n">L</span><span class="p">));</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">NdotV</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">saturate1</span><span class="p">(</span><span class="n">dot</span><span class="p">(</span><span class="n">N</span><span class="p">,</span><span class="w"> </span><span class="n">V</span><span class="p">));</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">NdotH</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">saturate1</span><span class="p">(</span><span class="n">dot</span><span class="p">(</span><span class="n">N</span><span class="p">,</span><span class="w"> </span><span class="n">H</span><span class="p">));</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">VdotH</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">saturate1</span><span class="p">(</span><span class="n">dot</span><span class="p">(</span><span class="n">V</span><span class="p">,</span><span class="w"> </span><span class="n">H</span><span class="p">));</span>
+
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">NdotL</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="mi">1</span><span class="n">e</span><span class="o">-</span><span class="mi">5</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="n">NdotV</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="mi">1</span><span class="n">e</span><span class="o">-</span><span class="mi">5</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="k">continue</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">shadow</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">glsl_light_shadow</span><span class="p">(</span><span class="n">i</span><span class="p">,</span><span class="w"> </span><span class="n">N</span><span class="p">);</span>
+
+<span class="w">    </span><span class="kt">vec3</span><span class="w"> </span><span class="n">F</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">fresnel_schlick</span><span class="p">(</span><span class="n">VdotH</span><span class="p">,</span><span class="w"> </span><span class="n">F0</span><span class="p">);</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">D</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">distribution_ggx</span><span class="p">(</span><span class="n">NdotH</span><span class="p">,</span><span class="w"> </span><span class="n">roughness</span><span class="p">);</span>
+<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">G</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">geometry_smith</span><span class="p">(</span><span class="n">NdotV</span><span class="p">,</span><span class="w"> </span><span class="n">NdotL</span><span class="p">,</span><span class="w"> </span><span class="n">roughness</span><span class="p">);</span>
+
+<span class="w">    </span><span class="kt">vec3</span><span class="w"> </span><span class="n">specular_brdf</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">D</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">G</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">F</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">max</span><span class="p">(</span><span class="mf">4.0</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">NdotV</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">NdotL</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="n">e</span><span class="o">-</span><span class="mi">5</span><span class="p">);</span>
+<span class="w">    </span><span class="kt">vec3</span><span class="w"> </span><span class="n">kd</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">vec3</span><span class="p">(</span><span class="mf">1.0</span><span class="p">)</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">F</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="p">(</span><span class="mf">1.0</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">metallic</span><span class="p">);</span>
+<span class="w">    </span><span class="kt">vec3</span><span class="w"> </span><span class="n">diffuse_brdf</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">kd</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">base_color</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mf">3.14159265</span><span class="p">;</span>
+
+<span class="w">    </span><span class="n">direct_diffuse</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">diffuse_brdf</span><span class="w"> </span><span class="o">*</span>
+<span class="w">                      </span><span class="n">light</span><span class="p">.</span><span class="n">diffuse_color</span><span class="w"> </span><span class="o">*</span>
+<span class="w">                      </span><span class="n">light</span><span class="p">.</span><span class="n">attenuation</span><span class="w"> </span><span class="o">*</span>
+<span class="w">                      </span><span class="n">NdotL</span><span class="w"> </span><span class="o">*</span>
+<span class="w">                      </span><span class="n">shadow</span><span class="p">;</span>
+
+<span class="w">    </span><span class="n">direct_specular</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">specular_brdf</span><span class="w"> </span><span class="o">*</span>
+<span class="w">                       </span><span class="n">light</span><span class="p">.</span><span class="n">specular_color</span><span class="w"> </span><span class="o">*</span>
+<span class="w">                       </span><span class="n">light</span><span class="p">.</span><span class="n">attenuation</span><span class="w"> </span><span class="o">*</span>
+<span class="w">                       </span><span class="n">NdotL</span><span class="w"> </span><span class="o">*</span>
+<span class="w">                       </span><span class="n">shadow</span><span class="p">;</span>
+<span class="w">  </span><span class="p">}</span>
+
+<span class="w">  </span><span class="kt">vec3</span><span class="w"> </span><span class="n">ambient</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">glsl_ambient_lighting</span><span class="p">()</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">base_color</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="p">(</span><span class="mf">1.0</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">metallic</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">ao</span><span class="p">;</span>
+<span class="w">  </span><span class="kt">vec3</span><span class="w"> </span><span class="n">color</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ambient</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">direct_diffuse</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">direct_specular</span><span class="p">;</span>
+<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="kt">vec4</span><span class="p">(</span><span class="n">max</span><span class="p">(</span><span class="n">color</span><span class="p">,</span><span class="w"> </span><span class="kt">vec3</span><span class="p">(</span><span class="mf">0.0</span><span class="p">)),</span><span class="w"> </span><span class="mf">1.0</span><span class="p">);</span>
 <span class="p">}</span>
 </code></pre></div>
 <h3 id="image-to-closure">Image to Closure<a class="headerlink" href="#image-to-closure" title="Permanent link">&para;</a></h3>
