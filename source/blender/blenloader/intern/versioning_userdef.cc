@@ -1792,7 +1792,15 @@ void BLO_sanitize_experimental_features_userpref_blend(UserDef *userdef)
   }
 #endif
 
+  /* Keep the PR #145849 node gates usable in NPR release builds. The nodes are present in this
+   * branch, but still opt-in through preferences. */
+  const char use_geometry_nodes_lists = userdef->experimental.use_geometry_nodes_lists;
+  const char use_geometry_bundle = userdef->experimental.use_geometry_bundle;
+
   MEMSET_STRUCT_AFTER(&userdef->experimental, 0, SANITIZE_AFTER_HERE);
+
+  userdef->experimental.use_geometry_nodes_lists = use_geometry_nodes_lists;
+  userdef->experimental.use_geometry_bundle = use_geometry_bundle;
 }
 
 #undef USER_LMOUSESELECT

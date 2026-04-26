@@ -2979,8 +2979,23 @@ class USERPREF_PT_experimental_new_features(ExperimentalPanel, Panel):
                 ({"property": "use_extended_asset_browser"},
                  ("blender/blender/projects/10", "Pipeline, Assets & IO Project Page")),
                 ({"property": "use_shader_node_previews"}, ("blender/blender/issues/110353", "#110353")),
-                ({"property": "use_geometry_nodes_lists"}, ("blender/blender/issues/140918", "#140918")),
-                ({"property": "use_geometry_bundle"}, ("blender/blender/issues/150574", "#150574")),
+            ),
+        )
+
+
+class USERPREF_PT_experimental_pr_145849(Panel):
+    bl_space_type = 'PREFERENCES'
+    bl_region_type = 'WINDOW'
+    bl_context = "experimental"
+    bl_label = "PR 145849"
+
+    def draw(self, context):
+        _draw_experimental_items(
+            self.layout,
+            context.preferences,
+            (
+                ({"property": "use_geometry_nodes_lists"}, ("blender/blender/pulls/145849", "#145849")),
+                ({"property": "use_geometry_bundle"}, ("blender/blender/pulls/145849", "#145849")),
             ),
         )
 
@@ -3129,6 +3144,7 @@ classes = (
     USERPREF_PT_addons_filter,
 
     USERPREF_PT_experimental_new_features,
+    USERPREF_PT_experimental_pr_145849,
     USERPREF_PT_experimental_prototypes,
     # USERPREF_PT_experimental_tweaks,
 

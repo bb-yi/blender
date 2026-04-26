@@ -11,6 +11,7 @@
 1. `Eevee` 的场景级扩展工作流
    - `Render Textures`
    - `Filter Materials`
+   - `Eevee Outline`
 
 2. `Eevee` 的新着色器节点
    - `Filter Object Info`
@@ -19,6 +20,7 @@
    - `Render Info`
    - `Scene Time`
    - `Screen Derivative`
+   - `Outline Control`
    - `World Environment`
    - `Light Probe Color`
    - `World To Tangent`
@@ -148,11 +150,15 @@
 
 #### 功能说明
 
-`Eevee Outline` 是场景级描边总开关，用于控制当前分支新增的屏幕空间描边系统。
+`Eevee Outline` 是场景级描边总开关，用于控制当前 NPR Port 内置的屏幕空间描边系统。
 
 #### 面板入口
 
 `Render Properties > Outline`
+
+描边 Render Pass 入口：
+
+`View Layer Properties > Passes > Data > Outline`
 
 #### 行为说明
 
@@ -160,6 +166,16 @@
 - 关闭后，`Outline Control` 节点不会影响 Combined 渲染结果
 - 关闭后，即使 View Layer 中启用了 `Outline` Render Pass，也不会输出描边内容
 - 该开关用于快速回到与未启用描边系统时一致的 Eevee 渲染结果
+- 当 `Outline` Render Pass 未开启时，描边结果会直接合成进 `Combined`
+- 当 `Outline` Render Pass 开启时，可在合成器或后续流程中单独读取描边结果
+- 该功能依赖材质中的 `Outline Control` 节点实际写入描边参数；没有节点输出时不会自动生成描边
+
+#### 建议补图
+
+- `docs/images/placeholder_eevee_outline.png`
+  - 建议内容：`Render Properties > Outline` 面板
+- `docs/images/placeholder_outline_render_pass.png`
+  - 建议内容：`View Layer Properties > Passes > Data > Outline` 位置，或合成器读取 `Outline` pass 的示例
 
 ## 二、主要扩展节点
 
@@ -374,6 +390,49 @@
 - 不支持跨节点树
 - 不支持跨节点组自动穿透
 - 同名输入应只保留一个来源
+
+### Outline Control
+
+#### 入口
+
+`Add > Output > Outline Control`
+
+在 `Eevee` 物体材质和 `NPR Tree` 中可用。
+
+#### 输入
+
+- `Line Color`
+- `Line Alpha`
+- `Line Width`
+- `Depth Threshold`
+- `Normal Threshold`
+- `Outline ID`
+
+#### 作用
+
+为 Eevee 内置屏幕空间描边系统写入描边参数。
+
+#### 使用方法
+
+1. 在需要产生描边的材质里添加 `Outline Control` 节点。
+2. 通过 `Line Color`、`Line Alpha` 和 `Line Width` 控制描边颜色、透明度和宽度。
+3. 通过 `Depth Threshold` 与 `Normal Threshold` 调整轮廓边和内部折线的检测敏感度。
+4. 在 `Render Properties > Outline` 中保持全局描边开关开启。
+5. 如果需要单独输出描边结果，在 `View Layer Properties > Passes > Data` 中开启 `Outline` Render Pass。
+
+#### 说明
+
+- 这是一个辅助输出节点，不替代 `Material Output`，可与普通表面输出同时存在
+- `Line Alpha` 会与 `Line Color.a` 相乘，最终共同决定描边透明度
+- `Line Width <= 0` 或最终 alpha 为 `0` 时，不会写出描边
+- `Outline ID = 0` 时，系统会按对象资源 ID 自动分配描边分组
+- `Outline ID > 0` 时，可以手动把多个对象或多个材质表面并到同一个描边分组里
+- `Depth Threshold` 更偏向控制深度断层轮廓，`Normal Threshold` 更偏向控制法线夹角造成的内部边
+
+#### 建议补图
+
+- `docs/images/placeholder_outline_control.png`
+  - 建议内容：`Outline Control` 节点面板和一组典型参数
 
 ### World Environment
 
