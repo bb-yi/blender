@@ -38,7 +38,6 @@ nav:
   - NPR Tree 工作流: npr-workflow.md
   - 界面与设置: interface-guide.md
   - Scene 级 Eevee 扩展: scene-extensions.md
-  - 本地构建流程: build-guide.md
 
 markdown_extensions:
   - admonition

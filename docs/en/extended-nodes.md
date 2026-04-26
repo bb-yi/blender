@@ -412,6 +412,9 @@ Injects a user-authored GLSL function into the current `Eevee / NPR` material co
 - `Closure Output -> sampler2D` currently guarantees only the direct `texture(tex, uv)` path
 - If the function depends on `textureLod`, `textureGrad`, `textureSize`, or `texelFetch`, prefer driving it with `Image to Closure`
 - `@glsl_meta` supports `default`, `min`, `max`, `hide_value`, and `subtype`
+- Supported `subtype` values for `float`: `none`, `unsigned`, `percentage`, `factor`, `mass`, `angle`, `time`, `time_absolute`, `distance`, `wavelength`
+- Supported `subtype` values for `vec2 / vec3 / vec4`: `none`, `factor`, `percentage`, `translation`, `direction`, `velocity`, `acceleration`, `euler`, `xyz`
+- `subtype=color` is additionally supported for `vec3` and `vec4`
 - `@glsl_meta default=` also accepts expressions such as `glsl_position()`, `normalize(glsl_normal())`, or `glsl_ambient_lighting()`
 - Expression defaults are recommended only for `float / vec2 / vec3 / vec4` inputs and should not directly reference other exported parameters
 - Only `vec3 / vec4` inputs explicitly marked with `subtype=color` become color sockets
@@ -477,6 +480,124 @@ vec4 lightgroup_lambert(vec3 albedo, int target_lightgroup_id)
   }
 
   return vec4(result, 1.0);
+}
+```
+
+#### Example: PBR-Style Direct Light + Ambient Light
+
+This example shows how the current `GLSL Function` workflow can combine:
+
+- Geometry helpers: `glsl_normal()`, `glsl_true_normal()`, `glsl_incoming()`
+- Ambient-light helper: `glsl_ambient_lighting()`
+- Per-light helpers: `glsl_light_count()`, `glsl_light_get(i)`, `glsl_light_shadow(i, N)`
+
+Function name suggestion: `pbr_lit`
+
+Recommended inputs:
+
+- `base_color`
+- `roughness`
+- `metallic`
+- `ao`
+
+```glsl
+float saturate1(float x)
+{
+  return clamp(x, 0.0, 1.0);
+}
+
+float pow5(float x)
+{
+  float x2 = x * x;
+  return x2 * x2 * x;
+}
+
+vec3 fresnel_schlick(float cos_theta, vec3 F0)
+{
+  return F0 + (vec3(1.0) - F0) * pow5(1.0 - saturate1(cos_theta));
+}
+
+float distribution_ggx(float NdotH, float roughness)
+{
+  float a = roughness * roughness;
+  float a2 = a * a;
+  float nh2 = NdotH * NdotH;
+  float denom = nh2 * (a2 - 1.0) + 1.0;
+  return a2 / max(3.14159265 * denom * denom, 1e-6);
+}
+
+float geometry_schlick_ggx(float NdotV, float roughness)
+{
+  float r = roughness + 1.0;
+  float k = (r * r) / 8.0;
+  return NdotV / max(NdotV * (1.0 - k) + k, 1e-6);
+}
+
+float geometry_smith(float NdotV, float NdotL, float roughness)
+{
+  return geometry_schlick_ggx(NdotV, roughness) *
+         geometry_schlick_ggx(NdotL, roughness);
+}
+
+vec4 pbr_lit(vec3 base_color, float roughness, float metallic, float ao)
+{
+  vec3 N = normalize(glsl_normal());
+  vec3 Ng = normalize(glsl_true_normal());
+  vec3 V = normalize(glsl_incoming());
+
+  if (dot(N, Ng) < 0.0) {
+    N = Ng;
+  }
+
+  roughness = clamp(roughness, 0.04, 1.0);
+  metallic = clamp(metallic, 0.0, 1.0);
+  ao = clamp(ao, 0.0, 1.0);
+
+  vec3 F0 = mix(vec3(0.04), base_color, metallic);
+
+  vec3 direct_diffuse = vec3(0.0);
+  vec3 direct_specular = vec3(0.0);
+
+  for (int i = 0; i < glsl_light_count(); i++) {
+    GLSLLight light = glsl_light_get(i);
+    vec3 L = normalize(light.vector);
+    vec3 H = normalize(V + L);
+
+    float NdotL = saturate1(dot(N, L));
+    float NdotV = saturate1(dot(N, V));
+    float NdotH = saturate1(dot(N, H));
+    float VdotH = saturate1(dot(V, H));
+
+    if (NdotL <= 1e-5 || NdotV <= 1e-5) {
+      continue;
+    }
+
+    float shadow = glsl_light_shadow(i, N);
+
+    vec3 F = fresnel_schlick(VdotH, F0);
+    float D = distribution_ggx(NdotH, roughness);
+    float G = geometry_smith(NdotV, NdotL, roughness);
+
+    vec3 specular_brdf = (D * G * F) / max(4.0 * NdotV * NdotL, 1e-5);
+    vec3 kd = (vec3(1.0) - F) * (1.0 - metallic);
+    vec3 diffuse_brdf = kd * base_color / 3.14159265;
+
+    direct_diffuse += diffuse_brdf *
+                      light.diffuse_color *
+                      light.attenuation *
+                      NdotL *
+                      shadow;
+
+    direct_specular += specular_brdf *
+                       light.specular_color *
+                       light.attenuation *
+                       NdotL *
+                       shadow;
+  }
+
+  vec3 ambient = glsl_ambient_lighting() * base_color * (1.0 - metallic) * ao;
+  vec3 color = ambient + direct_diffuse + direct_specular;
+  return vec4(max(color, vec3(0.0)), 1.0);
 }
 ```
 

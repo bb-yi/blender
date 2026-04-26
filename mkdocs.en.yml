@@ -38,7 +38,6 @@ nav:
   - NPR Workflow: npr-workflow.md
   - Interface & Settings: interface-guide.md
   - Scene Extensions: scene-extensions.md
-  - Local Build Workflow: build-guide.md
 
 markdown_extensions:
   - admonition
