@@ -77,10 +77,34 @@ namespace blender::ed::space_node {
 /** \name Utilities
  * \{ */
 
+static bool is_npr_root_tree(const bNodeTree &node_tree)
+{
+  for (const bNode *node = static_cast<const bNode *>(node_tree.nodes.first); node != nullptr;
+       node = node->next)
+  {
+    if (STREQ(node->idname, "ShaderNodeNPR_Output")) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool node_space_uses_npr_tree(const SpaceNode &snode)
+{
+  SpaceNode &mutable_snode = const_cast<SpaceNode &>(snode);
+  if (!ED_node_is_shader(&mutable_snode)) {
+    return false;
+  }
+  if (snode.shaderfrom == SNODE_SHADER_NPR) {
+    return true;
+  }
+  const bNodeTree *root_tree = snode.nodetree ? snode.nodetree : snode.edittree;
+  return root_tree != nullptr && is_npr_root_tree(*root_tree);
+}
+
 static eAssetImportMethod node_group_asset_import_method(const SpaceNode &snode)
 {
-  return (snode.shaderfrom == SNODE_SHADER_NPR) ? ASSET_IMPORT_APPEND_REUSE :
-                                                  ASSET_IMPORT_APPEND;
+  return node_space_uses_npr_tree(snode) ? ASSET_IMPORT_APPEND_REUSE : ASSET_IMPORT_APPEND;
 }
 
 static void position_node_based_on_mouse(bNode &node, const float2 &location)

@@ -6,6 +6,7 @@
 #include "AS_asset_representation.hh"
 
 #include "BLI_listbase.h"
+#include "BLI_string.h"
 #include "BLI_string_utf8.h"
 
 #include "DNA_space_types.h"
@@ -46,10 +47,35 @@ using nodes::SocketLinkOperation;
 
 namespace ed::space_node {
 
+static bool is_npr_root_tree(const bNodeTree &node_tree)
+{
+  for (const bNode *node = static_cast<const bNode *>(node_tree.nodes.first); node != nullptr;
+       node = node->next)
+  {
+    if (STREQ(node->idname, "ShaderNodeNPR_Output")) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool node_space_uses_npr_tree(const SpaceNode &snode)
+{
+  SpaceNode &mutable_snode = const_cast<SpaceNode &>(snode);
+  if (!ED_node_is_shader(&mutable_snode)) {
+    return false;
+  }
+  if (snode.shaderfrom == SNODE_SHADER_NPR) {
+    return true;
+  }
+  const bNodeTree *root_tree = snode.nodetree ? snode.nodetree : snode.edittree;
+  return root_tree != nullptr && is_npr_root_tree(*root_tree);
+}
+
 static eAssetImportMethod node_group_asset_import_method(const bContext &C)
 {
   const SpaceNode *snode = CTX_wm_space_node(&C);
-  return (snode != nullptr && snode->shaderfrom == SNODE_SHADER_NPR) ?
+  return (snode != nullptr && node_space_uses_npr_tree(*snode)) ?
              ASSET_IMPORT_APPEND_REUSE :
              ASSET_IMPORT_APPEND;
 }
