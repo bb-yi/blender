@@ -90,11 +90,7 @@ void main()
   }
 
   const gbuffer::Header center_header = gbuffer::read_header(texel);
-  if (center_header.is_empty()) {
-    return;
-  }
-
-  const float3 center_normal = gbuffer::read_normal(texel);
+  const bool center_has_gbuffer = !center_header.is_empty();
   const float3 center_position = outline_screen_to_view(texel, extent, center_depth);
   const uint center_outline_id = outline_id_unpack(outline_info.a);
   const float2 center_uv = (float2(texel) + 0.5f) / float2(extent);
@@ -111,6 +107,15 @@ void main()
     }
   }
   true_normal = normalize(true_normal);
+  if (any(isnan(true_normal))) {
+    return;
+  }
+  const float3 center_gbuffer_normal = center_has_gbuffer ? gbuffer::read_normal(texel) : true_normal;
+  const float center_normal_alignment = dot(center_gbuffer_normal, true_normal);
+  const float3 center_normal = (center_has_gbuffer && center_normal_alignment > 0.5f) ?
+                                   center_gbuffer_normal :
+                                   true_normal;
+  const bool mask_only_outline = !(center_has_gbuffer && center_normal_alignment > 0.5f);
   const float3 true_normal_camera = drw_normal_world_to_view(true_normal);
 
   const int2 offsets[4] = {int2(-1, 0), int2(1, 0), int2(0, -1), int2(0, 1)};
@@ -128,7 +133,14 @@ void main()
 
     const float sample_depth = outline_screen_depth_fetch(sample_texel);
     const bool sample_has_gbuffer = !gbuffer::read_header(sample_texel).is_empty();
-    const float3 sample_normal = sample_has_gbuffer ? gbuffer::read_normal(sample_texel) : float3(0.0f);
+    const float3 sample_true_normal = outline_reconstruct_normal(
+        sample_texel, extent, current_view_direction);
+    const float3 sample_gbuffer_normal = sample_has_gbuffer ? gbuffer::read_normal(sample_texel) :
+                                                            sample_true_normal;
+    const float sample_normal_alignment = dot(sample_gbuffer_normal, sample_true_normal);
+    const float3 sample_normal = (sample_has_gbuffer && sample_normal_alignment > 0.5f) ?
+                                     sample_gbuffer_normal :
+                                     sample_true_normal;
     const float3 sample_position = outline_screen_to_view(sample_texel, extent, sample_depth);
     const float4 sample_outline_info = outline_source_info_fetch(sample_texel);
     const float sample_line_width = outline_width_unpack(sample_outline_info.r);
@@ -139,7 +151,7 @@ void main()
       seed_line_width = max(seed_line_width, sample_line_width);
     }
 
-    if (center_depth <= sample_depth) {
+    if (!mask_only_outline && center_depth <= sample_depth) {
       const float delta_normal = dot(center_normal, sample_normal);
       const float plane_distance = dot(true_normal_camera, center_position);
       const float sample_plane_distance = dot(true_normal_camera, sample_position);
@@ -152,8 +164,8 @@ void main()
     }
   }
 
-  const bool has_silhouette = has_id_boundary || max_delta_distance > depth_threshold;
-  const bool has_internal_edge = max_delta_angle > normal_threshold;
+  const bool has_silhouette = has_id_boundary || (!mask_only_outline && max_delta_distance > depth_threshold);
+  const bool has_internal_edge = !mask_only_outline && max_delta_angle > normal_threshold;
 
   if (has_silhouette || has_internal_edge) {
     out_outline_seed = float4(outline_color.rgb, seed_line_width);

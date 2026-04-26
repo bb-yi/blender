@@ -882,8 +882,13 @@ void ShadowModule::sync_object(const Object *ob,
                                bool is_alpha_blend,
                                bool has_transparent_shadows)
 {
+  /* Alpha blended materials are currently unstable in this branch's shadow sync/update path.
+   * Keep them out of the shadow system until the transparent shadow path is fixed. */
+  if (is_alpha_blend) {
+    return;
+  }
   bool is_shadow_caster = !(ob->visibility_flag & OB_HIDE_SHADOW);
-  if (!is_shadow_caster && !is_alpha_blend) {
+  if (!is_shadow_caster) {
     return;
   }
 
@@ -907,10 +912,6 @@ void ShadowModule::sync_object(const Object *ob,
 
   if (is_shadow_caster) {
     curr_casters_.append(resource_handle.raw());
-  }
-
-  if (is_alpha_blend && !inst_.is_baking()) {
-    tilemap_usage_transparent_ps_->draw(box_batch_, resource_handle);
   }
 }
 

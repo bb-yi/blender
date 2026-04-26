@@ -85,6 +85,7 @@ GPU_SHADER_CREATE_END()
 
 GPU_SHADER_CREATE_INFO(eevee_film_copy_frag)
 DO_STATIC_COMPILATION()
+IMAGE(2, SFLOAT_16_16_16_16, read, image2D, combined_output_img)
 IMAGE(3, SFLOAT_16_16_16_16, read, image2D, out_combined_img)
 IMAGE(4, SFLOAT_32, read, image2D, depth_img)
 IMAGE(5, SFLOAT_16_16_16_16, read, image2DArray, color_accum_img)

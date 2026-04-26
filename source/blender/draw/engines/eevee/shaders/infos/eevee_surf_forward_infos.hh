@@ -34,6 +34,11 @@
 #include "eevee_defines.hh"
 #include "gpu_shader_create_info.hh"
 
+GPU_SHADER_CREATE_INFO(eevee_surf_forward_outline_out)
+IMAGE_FREQ(OUTLINE_COLOR_SLOT, SFLOAT_16_16_16_16, write, image2D, outline_color_img, PASS)
+IMAGE_FREQ(OUTLINE_INFO_SLOT, UNORM_16_16_16_16, write, image2D, outline_info_img, PASS)
+GPU_SHADER_CREATE_END()
+
 GPU_SHADER_CREATE_INFO(eevee_surf_forward)
 DEFINE("MAT_FORWARD")
 DEFINE("MAT_SURFACE_CULL")

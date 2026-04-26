@@ -579,7 +579,12 @@ PassMain::Sub *ForwardPipeline::prepass_opaque_add(blender::Material *blender_ma
    * is no mix shader (could do better constant folding but that's expensive). */
 
   has_opaque_ = true;
-  return prepass_ps_.add(blender_mat, gpumat, has_motion);
+  PassMain::Sub *pass = prepass_ps_.add(blender_mat, gpumat, has_motion);
+  if (GPU_material_has_outline_output(gpumat)) {
+    pass->bind_image(OUTLINE_COLOR_SLOT, &inst_.render_buffers.outline_color_tx);
+    pass->bind_image(OUTLINE_INFO_SLOT, &inst_.render_buffers.outline_info_tx);
+  }
+  return pass;
 }
 
 PassMain::Sub *ForwardPipeline::material_opaque_add(const Object *ob,
@@ -594,14 +599,20 @@ PassMain::Sub *ForwardPipeline::material_opaque_add(const Object *ob,
   PassMain::Sub *pass = material_surface_cull_pass_get(
       opaque_double_sided_ps_, opaque_single_sided_ps_, opaque_front_cull_ps_, blender_mat);
   has_opaque_ = true;
-  return &pass->sub(GPU_material_get_name(gpumat));
+  PassMain::Sub *sub_pass = &pass->sub(GPU_material_get_name(gpumat));
+  if (GPU_material_has_outline_output(gpumat)) {
+    sub_pass->bind_image(OUTLINE_COLOR_SLOT, &inst_.render_buffers.outline_color_tx);
+    sub_pass->bind_image(OUTLINE_INFO_SLOT, &inst_.render_buffers.outline_info_tx);
+  }
+  return sub_pass;
 }
 
 PassMain::Sub *ForwardPipeline::prepass_transparent_add(const Object *ob,
                                                         blender::Material *blender_mat,
                                                         GPUMaterial *gpumat)
 {
-  if ((blender_mat->blend_flag & MA_BL_HIDE_BACKFACE) == 0) {
+  const bool needs_outline_depth = GPU_material_has_outline_output(gpumat);
+  if ((blender_mat->blend_flag & MA_BL_HIDE_BACKFACE) == 0 && !needs_outline_depth) {
     return nullptr;
   }
   DRWState state = DRW_STATE_WRITE_DEPTH | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
@@ -613,6 +624,10 @@ PassMain::Sub *ForwardPipeline::prepass_transparent_add(const Object *ob,
   pass->state_set(state);
   pass->material_set(*inst_.manager, gpumat, true);
   pass->push_constant("surface_cull_mode", int(material_surface_cull_method(blender_mat)));
+  if (GPU_material_has_outline_output(gpumat)) {
+    pass->bind_image(OUTLINE_COLOR_SLOT, &inst_.render_buffers.outline_color_tx);
+    pass->bind_image(OUTLINE_INFO_SLOT, &inst_.render_buffers.outline_info_tx);
+  }
 
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_TO_RGBA) &&
       GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT))
@@ -682,8 +697,10 @@ void ForwardPipeline::TransparencyBuffer::release()
 
 bool ForwardPipeline::use_colored_transparency() const
 {
-  /* Holdout also enables transparency since it uses the 4th target. */
-  return has_colored_transparency_ || has_holdout_;
+  /* The monochromatic transparent path regressed on this branch and only preserves the first
+   * radiance channel in final renders. Force the split-channel path until the single-target path
+   * is brought back in sync. */
+  return has_transparent_ || has_holdout_;
 }
 
 void ForwardPipeline::render(View &view,
@@ -1358,10 +1375,6 @@ gpu::Texture *DeferredLayer::render(View &main_view,
     }
     npr_radiance_input_tx_ = nullptr;
     npr_radiance_input.release();
-  }
-
-  if (has_outline_) {
-    inst_.outline.render(render_view, extent);
   }
 
   if (use_feedback_output_) {

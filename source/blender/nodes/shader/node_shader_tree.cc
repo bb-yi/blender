@@ -1068,7 +1068,12 @@ bNodeTree *ntreeGPUNPRNodes(bNodeTree *material_tree, GPUMaterial *mat)
     ntreeExecGPUNodes(exec, mat, npr_output);
   }
   for (bNode &node : localtree->nodes) {
-    if (ELEM(node.type_legacy, SH_NODE_OUTPUT_AOV, SH_NODE_OUTLINE_CONTROL)) {
+    if (node.type_legacy == SH_NODE_OUTPUT_AOV) {
+      ntreeExecGPUNodes(exec, mat, &node);
+    }
+  }
+  for (bNode &node : localtree->nodes) {
+    if (node.type_legacy == SH_NODE_OUTLINE_CONTROL) {
       ntreeExecGPUNodes(exec, mat, &node);
     }
   }
@@ -1104,7 +1109,12 @@ void ntreeGPUMaterialNodes(bNodeTree *localtree, GPUMaterial *mat)
       ntreeExecGPUNodes(exec, mat, output);
     }
     for (bNode &node : localtree->nodes) {
-      if (ELEM(node.type_legacy, SH_NODE_OUTPUT_AOV, SH_NODE_OUTLINE_CONTROL)) {
+      if (node.type_legacy == SH_NODE_OUTPUT_AOV) {
+        ntreeExecGPUNodes(exec, mat, &node);
+      }
+    }
+    for (bNode &node : localtree->nodes) {
+      if (node.type_legacy == SH_NODE_OUTLINE_CONTROL) {
         ntreeExecGPUNodes(exec, mat, &node);
       }
     }
@@ -1121,16 +1131,21 @@ void ntreeGPUMaterialNodes(bNodeTree *localtree, GPUMaterial *mat)
     iter_shader_to_rgba_depth_count(localtree, output, max_depth);
   }
   for (bNode &node : localtree->nodes) {
-    if (ELEM(node.type_legacy, SH_NODE_OUTPUT_AOV, SH_NODE_OUTLINE_CONTROL)) {
+    if (node.type_legacy == SH_NODE_OUTPUT_AOV) {
       iter_shader_to_rgba_depth_count(localtree, &node, max_depth);
     }
   }
   for (int depth = max_depth; depth >= 0; depth--) {
     ntreeExecGPUNodes(exec, mat, output, &depth);
     for (bNode &node : localtree->nodes) {
-      if (ELEM(node.type_legacy, SH_NODE_OUTPUT_AOV, SH_NODE_OUTLINE_CONTROL)) {
+      if (node.type_legacy == SH_NODE_OUTPUT_AOV) {
         ntreeExecGPUNodes(exec, mat, &node, &depth);
       }
+    }
+  }
+  for (bNode &node : localtree->nodes) {
+    if (node.type_legacy == SH_NODE_OUTLINE_CONTROL) {
+      ntreeExecGPUNodes(exec, mat, &node);
     }
   }
   ntreeShaderEndExecTree(exec);

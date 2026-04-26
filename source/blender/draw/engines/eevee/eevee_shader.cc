@@ -1051,9 +1051,10 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     info.additional_info("eevee_cryptomatte_out");
   }
   if (GPU_material_has_outline_output(gpumat) &&
-      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR))
+      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD))
   {
-    info.additional_info("eevee_outline_out");
+    info.additional_info((pipeline_type == MAT_PIPE_FORWARD) ? "eevee_surf_forward_outline_out" :
+                                                             "eevee_outline_out");
     info.define("MAT_OUTLINE_SUPPORT");
   }
 

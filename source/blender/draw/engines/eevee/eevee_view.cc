@@ -228,6 +228,10 @@ namespace blender::eevee
         render_view_, rbufs.depth_tx, prepass_fb_, transparent_fb_, combined_fb_, extent_);
     }
 
+    if (inst_.outline.enabled()) {
+      inst_.outline.render(render_view_, extent_);
+    }
+
     inst_.lights.debug_draw(render_view_, combined_fb_);
     inst_.hiz_buffer.debug_draw(render_view_, combined_fb_);
     inst_.shadows.debug_draw(render_view_, combined_fb_);

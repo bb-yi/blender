@@ -31,6 +31,7 @@ static int node_shader_gpu_outline_control(GPUMaterial *mat,
                                            GPUNodeStack *in,
                                            GPUNodeStack *out)
 {
+  GPU_material_flag_set(mat, GPU_MATFLAG_OBJECT_INFO);
   GPUNodeLink *outlink = nullptr;
   GPU_stack_link(mat, node, "node_output_outline", in, out, &outlink);
   GPU_material_add_output_link_outline(mat, outlink);
@@ -39,13 +40,7 @@ static int node_shader_gpu_outline_control(GPUMaterial *mat,
 
 static bool node_add_ui_poll(const bContext *C)
 {
-  if (!object_or_npr_eevee_shader_nodes_poll(C)) {
-    return false;
-  }
-
-  PointerRNA material_ptr = CTX_data_pointer_get_type(C, "material", RNA_Material);
-  const Material *material = static_cast<const Material *>(material_ptr.data);
-  return material != nullptr && material->surface_render_method != MA_SURFACE_METHOD_FORWARD;
+  return object_or_npr_eevee_shader_nodes_poll(C);
 }
 
 }  // namespace nodes::node_shader_outline_control_cc
