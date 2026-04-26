@@ -6,7 +6,7 @@
 
 `Render Textures` 是场景级的 Eevee 额外渲染纹理系统。
 
-它允许场景预先维护最多 `4` 个 Render Texture 槽位，每个槽位都可以指定一个相机和一个输出类型，把该相机视角下的场景结果先渲染成纹理，再在普通物体材质中通过 `Render Texture` 节点采样。
+它允许场景预先维护最多 `4` 个 Render Texture 槽位。每个槽位都可以指定一个相机和一个输出类型，把该相机视角下的场景结果先渲染成纹理，再在普通物体材质中通过 `Render Texture` 节点采样。
 
 #### 面板入口
 
@@ -19,7 +19,7 @@
 
 #### 可配置内容
 
-每个 Render Texture 条目当前支持：
+每个 `Render Texture` 条目当前支持：
 
 - `Name`
 - `Enabled`
@@ -90,3 +90,34 @@
   - `Before Volume Fog`
   - `Before Depth of Field`
   - `Before Composite`
+
+## 3. Eevee Outline
+
+#### 功能说明
+
+`Eevee Outline` 是场景级描边总开关，用于控制当前 NPR Port 内置的屏幕空间描边系统。
+
+#### 面板入口
+
+`Render Properties > Outline`
+
+描边 Render Pass 入口：
+
+`View Layer Properties > Passes > Data > Outline`
+
+#### 行为说明
+
+- 默认开启，保持 `Outline Control` 节点和 `Outline` Render Pass 的正常行为
+- 关闭后，`Outline Control` 节点不会影响 Combined 渲染结果
+- 关闭后，即使 View Layer 中启用了 `Outline` Render Pass，也不会输出描边内容
+- 该开关用于快速回到与未启用描边系统时一致的 Eevee 渲染结果
+- 当 `Outline` Render Pass 未开启时，描边结果会直接合成进 `Combined`
+- 当 `Outline` Render Pass 开启时，可在合成器或后续流程中单独读取描边结果
+- 该功能依赖材质中的 `Outline Control` 节点实际写入描边参数；没有节点输出时不会自动生成描边
+
+#### 建议补图
+
+- `images/placeholder_eevee_outline.png`
+  - 建议内容：`Render Properties > Outline` 面板
+- `images/placeholder_outline_render_pass.png`
+  - 建议内容：`View Layer Properties > Passes > Data > Outline` 位置，或合成器读取 `Outline` pass 的示例

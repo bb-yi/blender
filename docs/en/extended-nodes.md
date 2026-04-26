@@ -211,6 +211,49 @@ These are “portal” nodes used to organize node links.
 
 ## 3. Eevee Object Material Nodes
 
+### Outline Control
+
+#### Entry
+
+`Add > Output > Outline Control`
+
+Available in `Eevee` object materials and `NPR Tree`.
+
+#### Inputs
+
+- `Line Color`
+- `Line Alpha`
+- `Line Width`
+- `Depth Threshold`
+- `Normal Threshold`
+- `Outline ID`
+
+#### Purpose
+
+Writes outline parameters for Eevee's built-in screen-space outline pass.
+
+#### Basic Workflow
+
+1. Add `Outline Control` to a material that should contribute outlines.
+2. Use `Line Color`, `Line Alpha`, and `Line Width` to control the visible stroke.
+3. Use `Depth Threshold` and `Normal Threshold` to tune silhouette edges versus internal edge detection.
+4. Keep `Render Properties > Outline` enabled globally.
+5. Enable `View Layer Properties > Passes > Data > Outline` when the outline result should be available as a separate pass.
+
+#### Notes
+
+- This is an auxiliary output node; it does not replace `Material Output`
+- `Line Alpha` is multiplied with `Line Color.a`, and together they determine final opacity
+- If `Line Width <= 0` or the final alpha resolves to `0`, nothing is written
+- `Outline ID = 0` uses automatic grouping from the object resource ID
+- `Outline ID > 0` can be used to force multiple objects or surfaces into the same outline group
+- `Depth Threshold` is more related to depth discontinuity edges, while `Normal Threshold` is more related to internal edges from normal variation
+
+#### Suggested Images
+
+- `images/placeholder_outline_control.png`
+  - Suggested content: the `Outline Control` node with a representative parameter setup
+
 ### Render Texture
 
 #### Entry
@@ -348,6 +391,12 @@ Injects a user-authored GLSL function into the current `Eevee / NPR` material co
 3. Choose the source and the target function in the node panel.
 4. Refresh the node after editing the source.
 5. Explicitly select the exported function name in `Function`.
+
+#### Example Project
+
+- GLSL Function example `.blend` project:
+  [Google Drive](https://drive.google.com/file/d/1dHtj8ZHMT9s2rPHAzfXm7gE7SbQqj-GT/view?usp=sharing)
+- This file is intended as a ready-made reference scene for the current `GLSL Function` workflow and node setup.
 
 #### Supported Boundary Types
 

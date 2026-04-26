@@ -2,7 +2,7 @@
 
 ## 项目介绍
 
-`Blender 5.1 NPR Port` 是一个 NPR 特化的 `Blender` 分支，在融合了 `Goo Engine` 和 `4.4 NPR-prototype` 特色节点之外，还额外加入了一批面向 `Eevee` 的扩展节点、滤镜工作流和界面增强。
+`Blender 5.1 NPR Port` 是一个 NPR 特化的 `Blender` 分支。在融合 `Goo Engine` 和 `4.4 NPR-prototype` 特色节点之外，还额外加入了一批面向 `Eevee` 的扩展节点、滤镜工作流和界面增强。
 
 大部分功能是 `Eevee` 专用，不支持 `Cycles`。
 
@@ -21,7 +21,7 @@
 <div align="center">
     <img src="images/SnowShot_2026-03-28_04-23-33.png" alt="NPR Tree Nodes" style="border-radius: 10px;">
     <br>
-    <sub>NPR Tree 节点（部分着色器节点也可以在 NPR Tree 中使用）</sub>
+    <sub>NPR Tree 节点（部分着色器节点也可在 NPR Tree 中使用）</sub>
 </div>
 
 <div align="center">
@@ -36,33 +36,33 @@
 
     ---
 
-    从场景级 Eevee 扩展开始了解基础功能
+    从场景级 Eevee 扩展开始了解核心功能。
 
-    [查看 Scene 级扩展 →](scene-extensions.md)
+    [查看 Scene 级扩展](scene-extensions.md)
 
 - **扩展节点**
 
     ---
 
-    深入了解各个新增节点的功能和使用方式
+    深入查看新增节点的用途和接线方式。
 
-    [查看 扩展节点 →](extended-nodes.md)
+    [查看扩展节点](extended-nodes.md)
 
 - **NPR 工作流**
 
     ---
 
-    学习 NPR Tree 的挂接方式和专用节点
+    了解 NPR Tree 的挂接方式和专用节点。
 
-    [查看 NPR 工作流 →](npr-workflow.md)
+    [查看 NPR 工作流](npr-workflow.md)
 
 - **界面与设置**
 
     ---
 
-    查看更多界面选项和工作流补充
+    查看额外的界面选项与工作流补充。
 
-    [查看 界面与设置 →](interface-guide.md)
+    [查看界面与设置](interface-guide.md)
 
 </div>
 
@@ -72,6 +72,7 @@
 
 - `Render Textures`
 - `Filter Materials`
+- `Eevee Outline`
 - `Filter` 域下可用的 `AOV Input / AOV Output`
 
 ### 2. 着色器节点
@@ -83,6 +84,7 @@
 - `Scene Time`
 - `Screen Derivative`
 - `Portal In / Portal Out`
+- `Outline Control`
 - `Screenspace Info`
 - `World Environment`
 - `Light Probe Color`
@@ -116,6 +118,7 @@
 - 材质预览控制
 - 材质剔除模式
 - 灯光组管理
+- 启动图版本标识
 - 骨骼 Outliner 显示控制
 
 !!! warning "Eevee 专用"

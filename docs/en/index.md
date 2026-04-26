@@ -72,6 +72,7 @@ This document describes the NPR / Eevee extension features that have been added 
 
 - `Render Textures`
 - `Filter Materials`
+- `Eevee Outline`
 - `AOV Input / AOV Output` in the `Filter` domain
 
 ### 2. Shader Nodes
@@ -83,6 +84,7 @@ This document describes the NPR / Eevee extension features that have been added 
 - `Scene Time`
 - `Screen Derivative`
 - `Portal In / Portal Out`
+- `Outline Control`
 - `Screenspace Info`
 - `World Environment`
 - `Light Probe Color`
@@ -116,6 +118,7 @@ This document describes the NPR / Eevee extension features that have been added 
 - Material preview control
 - Material face culling
 - Lightgroup management
+- Splash version tag
 - Pose bone Outliner visibility
 
 !!! warning "Eevee Only"

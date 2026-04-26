@@ -90,3 +90,34 @@ Node-tree entry: Shader Editor > Shader Type > `Filter`
   - `Before Volume Fog`
   - `Before Depth of Field`
   - `Before Composite`
+
+## 3. Eevee Outline
+
+#### Feature Description
+
+`Eevee Outline` is the scene-level master switch for the built-in screen-space outline system in the NPR Port.
+
+#### Panel Entry
+
+`Render Properties > Outline`
+
+Outline render-pass entry:
+
+`View Layer Properties > Passes > Data > Outline`
+
+#### Behavior
+
+- Enabled by default so `Outline Control` nodes and the `Outline` render pass work normally
+- When disabled, `Outline Control` no longer affects the Combined result
+- When disabled, the `Outline` render pass also stops producing outline data
+- The toggle is meant as a quick way to return Eevee to the same look as a build without the outline system
+- If the `Outline` render pass is not enabled, outlines are composited into `Combined`
+- If the `Outline` render pass is enabled, outline data can be read as a separate pass in compositing or later processing
+- No outlines are generated unless a material actually writes outline parameters through `Outline Control`
+
+#### Suggested Images
+
+- `images/placeholder_eevee_outline.png`
+  - Suggested content: the `Render Properties > Outline` panel
+- `images/placeholder_outline_render_pass.png`
+  - Suggested content: the `View Layer > Passes > Data > Outline` toggle, or a compositor example reading the `Outline` pass
