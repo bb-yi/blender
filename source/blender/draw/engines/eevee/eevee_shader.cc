@@ -910,6 +910,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   eMaterialProbe probe_capture;
   bool transparent_shadows;
   bool use_outline;
+  bool uuid_depth_offset_affect_lighting;
   material_type_from_shader_uuid(shader_uuid,
                                  pipeline_type,
                                  geometry_type,
@@ -917,7 +918,9 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
                                  thickness_type,
                                  probe_capture,
                                  transparent_shadows,
-                                 use_outline);
+                                 use_outline,
+                                 uuid_depth_offset_affect_lighting);
+  UNUSED_VARS(uuid_depth_offset_affect_lighting);
 
   GPUCodegenOutput &codegen = *codegen_;
   ShaderCreateInfo &info = *reinterpret_cast<ShaderCreateInfo *>(codegen.create_info);
@@ -1698,6 +1701,7 @@ static GPUPass *pass_replacement_cb(void *void_thunk, GPUMaterial *mat)
   eMaterialProbe probe_capture;
   bool transparent_shadows;
   bool use_outline;
+  bool depth_offset_affect_lighting;
   material_type_from_shader_uuid(shader_uuid,
                                  pipeline_type,
                                  geometry_type,
@@ -1705,7 +1709,9 @@ static GPUPass *pass_replacement_cb(void *void_thunk, GPUMaterial *mat)
                                  thickness_type,
                                  probe_capture,
                                  transparent_shadows,
-                                 use_outline);
+                                 use_outline,
+                                 depth_offset_affect_lighting);
+  UNUSED_VARS(depth_offset_affect_lighting);
 
   bool is_shadow_pass = pipeline_type == eMaterialPipeline::MAT_PIPE_SHADOW;
   bool is_prepass = ELEM(pipeline_type,
@@ -1795,7 +1801,8 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
       thickness_type,
       probe_capture,
       blender_mat->blend_flag,
-      use_outline);
+      use_outline,
+      material_depth_offset_affects_lighting(blender_mat));
 
   bool is_default_material = default_mat == nullptr;
   BLI_assert(blender_mat != default_mat);

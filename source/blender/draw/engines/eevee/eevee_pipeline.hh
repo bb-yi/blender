@@ -289,23 +289,14 @@ struct DeferredLayerBase {
   PassMain::Sub *gbuffer_single_sided_hybrid_ps_ = nullptr;
   PassMain::Sub *gbuffer_front_cull_hybrid_ps_ = nullptr;
   PassMain::Sub *gbuffer_double_sided_hybrid_ps_ = nullptr;
-  PassMain::Sub *gbuffer_single_sided_hybrid_depth_offset_ps_ = nullptr;
-  PassMain::Sub *gbuffer_front_cull_hybrid_depth_offset_ps_ = nullptr;
-  PassMain::Sub *gbuffer_double_sided_hybrid_depth_offset_ps_ = nullptr;
   PassMain::Sub *gbuffer_single_sided_ps_ = nullptr;
   PassMain::Sub *gbuffer_front_cull_ps_ = nullptr;
   PassMain::Sub *gbuffer_double_sided_ps_ = nullptr;
-  PassMain::Sub *gbuffer_single_sided_depth_offset_ps_ = nullptr;
-  PassMain::Sub *gbuffer_front_cull_depth_offset_ps_ = nullptr;
-  PassMain::Sub *gbuffer_double_sided_depth_offset_ps_ = nullptr;
 
   PassMain npr_ps_ = {"NPR"};
   PassMain::Sub *npr_single_sided_ps_ = nullptr;
   PassMain::Sub *npr_front_cull_ps_ = nullptr;
   PassMain::Sub *npr_double_sided_ps_ = nullptr;
-  PassMain::Sub *npr_single_sided_depth_offset_ps_ = nullptr;
-  PassMain::Sub *npr_front_cull_depth_offset_ps_ = nullptr;
-  PassMain::Sub *npr_double_sided_depth_offset_ps_ = nullptr;
 
   gpu::Texture *radiance_behind_tx_ = nullptr;
 

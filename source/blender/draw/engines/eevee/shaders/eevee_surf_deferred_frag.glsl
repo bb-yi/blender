@@ -77,16 +77,20 @@ void main()
   float noise = utility_tx_fetch(utility_tx, gl_FragCoord.xy, UTIL_BLUE_NOISE_LAYER).r;
   float closure_rand = fract(noise + sampling_rng_1D_get(SAMPLING_CLOSURE));
 
+#ifdef MAT_DEPTH_OFFSET
+  float depth_offset = nodetree_depth_offset();
+#endif
+
 #ifdef MAT_DEPTH_OFFSET_NO_LIGHTING
-  constexpr bool use_surface_depth = true;
-  float surface_depth = saturate(drw_depth_view_to_screen(drw_point_world_to_view(g_data.P).z));
+  bool use_surface_depth = !material_depth_offset_is_zero(depth_offset);
+  float surface_depth = use_surface_depth ? reverse_z::read(gl_FragCoord.z) : 0.0f;
 #else
   constexpr bool use_surface_depth = false;
   float surface_depth = 0.0f;
 #endif
 
 #ifdef MAT_DEPTH_OFFSET
-  material_depth_offset_write();
+  material_depth_offset_write(depth_offset);
 #endif
 
   fragment_displacement();

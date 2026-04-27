@@ -863,9 +863,6 @@ void DeferredLayerBase::gbuffer_pass_sync(Instance &inst)
 
   DRWState state = DRW_STATE_WRITE_COLOR | DRW_STATE_DEPTH_EQUAL | DRW_STATE_WRITE_STENCIL |
                    DRW_STATE_CLIP_CONTROL_UNIT_RANGE | DRW_STATE_STENCIL_ALWAYS;
-  DRWState depth_offset_state = DRW_STATE_WRITE_COLOR | DRW_STATE_DEPTH_GREATER_EQUAL |
-                                DRW_STATE_WRITE_STENCIL | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
-                                DRW_STATE_STENCIL_ALWAYS;
 
   gbuffer_single_sided_hybrid_ps_ = &gbuffer_ps_.sub("BackCull.Hybrid");
   gbuffer_single_sided_hybrid_ps_->bind_texture(RADIANCE_PREVIOUS_LAYER_TEX_SLOT,
@@ -882,24 +879,6 @@ void DeferredLayerBase::gbuffer_pass_sync(Instance &inst)
                                                 &radiance_behind_tx_);
   gbuffer_double_sided_hybrid_ps_->state_set(state);
 
-  gbuffer_single_sided_hybrid_depth_offset_ps_ = &gbuffer_ps_.sub("BackCull.Hybrid.DepthOffset");
-  gbuffer_single_sided_hybrid_depth_offset_ps_->bind_texture(RADIANCE_PREVIOUS_LAYER_TEX_SLOT,
-                                                             &radiance_behind_tx_);
-  gbuffer_single_sided_hybrid_depth_offset_ps_->state_set(depth_offset_state |
-                                                          DRW_STATE_CULL_BACK);
-
-  gbuffer_front_cull_hybrid_depth_offset_ps_ = &gbuffer_ps_.sub("FrontCull.Hybrid.DepthOffset");
-  gbuffer_front_cull_hybrid_depth_offset_ps_->bind_texture(RADIANCE_PREVIOUS_LAYER_TEX_SLOT,
-                                                           &radiance_behind_tx_);
-  gbuffer_front_cull_hybrid_depth_offset_ps_->state_set(depth_offset_state |
-                                                        DRW_STATE_CULL_FRONT);
-
-  gbuffer_double_sided_hybrid_depth_offset_ps_ = &gbuffer_ps_.sub(
-      "DoubleSided.Hybrid.DepthOffset");
-  gbuffer_double_sided_hybrid_depth_offset_ps_->bind_texture(RADIANCE_PREVIOUS_LAYER_TEX_SLOT,
-                                                             &radiance_behind_tx_);
-  gbuffer_double_sided_hybrid_depth_offset_ps_->state_set(depth_offset_state);
-
   gbuffer_double_sided_ps_ = &gbuffer_ps_.sub("DoubleSided");
   gbuffer_double_sided_ps_->bind_texture(RADIANCE_PREVIOUS_LAYER_TEX_SLOT, &radiance_behind_tx_);
   gbuffer_double_sided_ps_->state_set(state);
@@ -911,21 +890,6 @@ void DeferredLayerBase::gbuffer_pass_sync(Instance &inst)
   gbuffer_front_cull_ps_ = &gbuffer_ps_.sub("FrontCull");
   gbuffer_front_cull_ps_->bind_texture(RADIANCE_PREVIOUS_LAYER_TEX_SLOT, &radiance_behind_tx_);
   gbuffer_front_cull_ps_->state_set(state | DRW_STATE_CULL_FRONT);
-
-  gbuffer_double_sided_depth_offset_ps_ = &gbuffer_ps_.sub("DoubleSided.DepthOffset");
-  gbuffer_double_sided_depth_offset_ps_->bind_texture(RADIANCE_PREVIOUS_LAYER_TEX_SLOT,
-                                                      &radiance_behind_tx_);
-  gbuffer_double_sided_depth_offset_ps_->state_set(depth_offset_state);
-
-  gbuffer_single_sided_depth_offset_ps_ = &gbuffer_ps_.sub("BackCull.DepthOffset");
-  gbuffer_single_sided_depth_offset_ps_->bind_texture(RADIANCE_PREVIOUS_LAYER_TEX_SLOT,
-                                                      &radiance_behind_tx_);
-  gbuffer_single_sided_depth_offset_ps_->state_set(depth_offset_state | DRW_STATE_CULL_BACK);
-
-  gbuffer_front_cull_depth_offset_ps_ = &gbuffer_ps_.sub("FrontCull.DepthOffset");
-  gbuffer_front_cull_depth_offset_ps_->bind_texture(RADIANCE_PREVIOUS_LAYER_TEX_SLOT,
-                                                    &radiance_behind_tx_);
-  gbuffer_front_cull_depth_offset_ps_->state_set(depth_offset_state | DRW_STATE_CULL_FRONT);
 
   closure_bits_ = CLOSURE_NONE;
   closure_count_ = 0;
@@ -963,8 +927,6 @@ template<typename F> void DeferredLayerBase::npr_pass_sync(Instance &inst, F cal
 
   DRWState state = DRW_STATE_WRITE_COLOR | DRW_STATE_DEPTH_EQUAL |
                    DRW_STATE_CLIP_CONTROL_UNIT_RANGE;
-  DRWState depth_offset_state = DRW_STATE_WRITE_COLOR | DRW_STATE_DEPTH_GREATER_EQUAL |
-                                DRW_STATE_CLIP_CONTROL_UNIT_RANGE;
 
   npr_double_sided_ps_ = &npr_ps_.sub("DoubleSided");
   npr_double_sided_ps_->state_set(state);
@@ -974,15 +936,6 @@ template<typename F> void DeferredLayerBase::npr_pass_sync(Instance &inst, F cal
 
   npr_front_cull_ps_ = &npr_ps_.sub("FrontCull");
   npr_front_cull_ps_->state_set(state | DRW_STATE_CULL_FRONT);
-
-  npr_double_sided_depth_offset_ps_ = &npr_ps_.sub("DoubleSided.DepthOffset");
-  npr_double_sided_depth_offset_ps_->state_set(depth_offset_state);
-
-  npr_single_sided_depth_offset_ps_ = &npr_ps_.sub("BackCull.DepthOffset");
-  npr_single_sided_depth_offset_ps_->state_set(depth_offset_state | DRW_STATE_CULL_BACK);
-
-  npr_front_cull_depth_offset_ps_ = &npr_ps_.sub("FrontCull.DepthOffset");
-  npr_front_cull_depth_offset_ps_->state_set(depth_offset_state | DRW_STATE_CULL_FRONT);
 }
 
 void DeferredLayer::begin_sync()
@@ -1268,26 +1221,15 @@ PassMain::Sub *DeferredLayer::material_add(blender::Material *blender_mat, GPUMa
 
   bool has_shader_to_rgba = (closure_bits & CLOSURE_SHADER_TO_RGBA) != 0;
   bool use_thickness_from_shadow = (blender_mat->blend_flag & MA_BL_THICKNESS_FROM_SHADOW) != 0;
-  bool has_depth_offset = GPU_material_has_depth_offset_output(gpumat);
-  bool use_depth_offset_state = has_depth_offset &&
-                                !GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT);
-
-  PassMain::Sub *double_sided_ps = has_shader_to_rgba ? gbuffer_double_sided_hybrid_ps_ :
-                                                        gbuffer_double_sided_ps_;
-  PassMain::Sub *single_sided_ps = has_shader_to_rgba ? gbuffer_single_sided_hybrid_ps_ :
-                                                        gbuffer_single_sided_ps_;
-  PassMain::Sub *front_cull_ps = has_shader_to_rgba ? gbuffer_front_cull_hybrid_ps_ :
-                                                      gbuffer_front_cull_ps_;
-  if (use_depth_offset_state) {
-    double_sided_ps = has_shader_to_rgba ? gbuffer_double_sided_hybrid_depth_offset_ps_ :
-                                           gbuffer_double_sided_depth_offset_ps_;
-    single_sided_ps = has_shader_to_rgba ? gbuffer_single_sided_hybrid_depth_offset_ps_ :
-                                           gbuffer_single_sided_depth_offset_ps_;
-    front_cull_ps = has_shader_to_rgba ? gbuffer_front_cull_hybrid_depth_offset_ps_ :
-                                         gbuffer_front_cull_depth_offset_ps_;
-  }
-  PassMain::Sub *pass = material_surface_cull_pass_get(
-      double_sided_ps, single_sided_ps, front_cull_ps, blender_mat);
+  PassMain::Sub *pass = has_shader_to_rgba ?
+                            material_surface_cull_pass_get(gbuffer_double_sided_hybrid_ps_,
+                                                           gbuffer_single_sided_hybrid_ps_,
+                                                           gbuffer_front_cull_hybrid_ps_,
+                                                           blender_mat) :
+                            material_surface_cull_pass_get(gbuffer_double_sided_ps_,
+                                                           gbuffer_single_sided_ps_,
+                                                           gbuffer_front_cull_ps_,
+                                                           blender_mat);
 
   PassMain::Sub *material_pass = &pass->sub(GPU_material_get_name(gpumat));
   /* Set stencil for some deferred specialized shaders. */
@@ -1307,14 +1249,8 @@ PassMain::Sub *DeferredLayer::npr_add(blender::Material *blender_mat, GPUMateria
   BLI_assert(GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR));
   use_depth_offset_lighting_data_ |= material_uses_depth_offset_lighting_data(blender_mat, gpumat);
   has_outline_ = has_outline_ || inst_.materials.material_uses_outline_control(blender_mat);
-  bool has_depth_offset = GPU_material_has_depth_offset_output(gpumat);
-  bool use_depth_offset_state = has_depth_offset &&
-                                !GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT);
   PassMain::Sub *pass = material_surface_cull_pass_get(
-      use_depth_offset_state ? npr_double_sided_depth_offset_ps_ : npr_double_sided_ps_,
-      use_depth_offset_state ? npr_single_sided_depth_offset_ps_ : npr_single_sided_ps_,
-      use_depth_offset_state ? npr_front_cull_depth_offset_ps_ : npr_front_cull_ps_,
-      blender_mat);
+      npr_double_sided_ps_, npr_single_sided_ps_, npr_front_cull_ps_, blender_mat);
 
   PassMain::Sub *material_pass = &pass->sub(GPU_material_get_name(gpumat));
 

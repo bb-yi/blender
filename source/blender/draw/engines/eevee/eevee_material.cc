@@ -177,6 +177,9 @@ void MaterialModule::begin_sync()
 
   material_override = DEG_get_evaluated(inst_.depsgraph, inst_.view_layer->mat_override);
 
+  depth_offset_shadow_disabled_mats_ = current_depth_offset_shadow_disabled_mats_;
+  current_depth_offset_shadow_disabled_mats_.clear();
+
   uint64_t next_update = GPU_pass_global_compilation_count();
   gpu_pass_last_update_ = gpu_pass_next_update_;
   gpu_pass_next_update_ = next_update;
@@ -692,7 +695,18 @@ Material &MaterialModule::material_sync(Object *ob,
                                                                                   mat.shading);
     /* Shadow maps cannot represent this material mode consistently because lighting evaluates the
      * depth-offset position while the caster geometry remains at the original surface. */
-    if (!(ob->visibility_flag & OB_HIDE_SHADOW) && !disable_depth_offset_shadow) {
+    const bool is_shadow_caster = !(ob->visibility_flag & OB_HIDE_SHADOW);
+    if (is_shadow_caster) {
+      const bool was_depth_offset_shadow_disabled = depth_offset_shadow_disabled_mats_.contains(
+          blender_mat);
+      if (disable_depth_offset_shadow) {
+        current_depth_offset_shadow_disabled_mats_.add(blender_mat);
+      }
+      if (was_depth_offset_shadow_disabled != disable_depth_offset_shadow) {
+        inst_.shadows.reset();
+      }
+    }
+    if (is_shadow_caster && !disable_depth_offset_shadow) {
       mat.shadow = material_pass_get(ob, blender_mat, MAT_PIPE_SHADOW, geometry_type);
     }
     else {

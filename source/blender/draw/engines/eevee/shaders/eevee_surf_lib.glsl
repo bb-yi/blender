@@ -123,9 +123,14 @@ void init_interface()
 }
 
 #if defined(GPU_FRAGMENT_SHADER) && defined(MAT_DEPTH_OFFSET)
+bool material_depth_offset_is_zero(float depth_offset)
+{
+  return abs(depth_offset) <= 1.0e-8f;
+}
+
 float material_depth_offset_frag_depth(float depth_offset)
 {
-  if (depth_offset == 0.0f) {
+  if (material_depth_offset_is_zero(depth_offset)) {
     return gl_FragCoord.z;
   }
   float vP_z = drw_depth_screen_to_view(reverse_z::read(gl_FragCoord.z));
@@ -139,9 +144,14 @@ float material_depth_offset_frag_depth()
 }
 
 #  if !defined(MAT_SHADOW) || defined(SHADOW_UPDATE_TBDR)
+void material_depth_offset_write(float depth_offset)
+{
+  gl_FragDepth = material_depth_offset_frag_depth(depth_offset);
+}
+
 void material_depth_offset_write()
 {
-  gl_FragDepth = material_depth_offset_frag_depth();
+  material_depth_offset_write(nodetree_depth_offset());
 }
 #  endif
 #endif
