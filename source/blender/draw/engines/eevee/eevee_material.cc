@@ -32,6 +32,13 @@ static bool material_has_depth_offset_output(const MaterialPass &pass)
   return (pass.gpumat != nullptr) && GPU_material_has_depth_offset_output(pass.gpumat);
 }
 
+static bool material_depth_offset_disables_shadow(const blender::Material &material,
+                                                  const MaterialPass &surface_pass)
+{
+  return material_depth_offset_affects_lighting(material) &&
+         material_has_depth_offset_output(surface_pass);
+}
+
 static bool material_has_flag(const MaterialPass &pass, eGPUMaterialFlag flag)
 {
   return (pass.gpumat != nullptr) && GPU_material_flag_get(pass.gpumat, flag);
@@ -681,7 +688,11 @@ Material &MaterialModule::material_sync(Object *ob,
       }
     }
 
-    if (!(ob->visibility_flag & OB_HIDE_SHADOW)) {
+    const bool disable_depth_offset_shadow = material_depth_offset_disables_shadow(*blender_mat,
+                                                                                  mat.shading);
+    /* Shadow maps cannot represent this material mode consistently because lighting evaluates the
+     * depth-offset position while the caster geometry remains at the original surface. */
+    if (!(ob->visibility_flag & OB_HIDE_SHADOW) && !disable_depth_offset_shadow) {
       mat.shadow = material_pass_get(ob, blender_mat, MAT_PIPE_SHADOW, geometry_type);
     }
     else {
@@ -691,7 +702,8 @@ Material &MaterialModule::material_sync(Object *ob,
     mat.is_alpha_blend_transparent = use_forward_pipeline &&
                                      GPU_material_flag_get(mat.shading.gpumat,
                                                            GPU_MATFLAG_TRANSPARENT);
-    mat.has_transparent_shadows = blender_mat->blend_flag & MA_BL_TRANSPARENT_SHADOW &&
+    mat.has_transparent_shadows = !disable_depth_offset_shadow &&
+                                  ((blender_mat->blend_flag & MA_BL_TRANSPARENT_SHADOW) != 0) &&
                                   GPU_material_flag_get(mat.shading.gpumat,
                                                         GPU_MATFLAG_TRANSPARENT);
 

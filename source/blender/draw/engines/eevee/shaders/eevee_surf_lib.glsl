@@ -125,9 +125,12 @@ void init_interface()
 #if defined(GPU_FRAGMENT_SHADER) && defined(MAT_DEPTH_OFFSET)
 float material_depth_offset_frag_depth(float depth_offset)
 {
-  float3 vP = drw_point_world_to_view(g_data.P);
-  vP.z = min(vP.z + depth_offset, -drw_view_near());
-  return saturate(reverse_z::read(drw_depth_view_to_screen(vP.z)));
+  if (depth_offset == 0.0f) {
+    return gl_FragCoord.z;
+  }
+  float vP_z = drw_depth_screen_to_view(reverse_z::read(gl_FragCoord.z));
+  vP_z = min(vP_z + depth_offset, -drw_view_near());
+  return saturate(reverse_z::read(drw_depth_view_to_screen(vP_z)));
 }
 
 float material_depth_offset_frag_depth()

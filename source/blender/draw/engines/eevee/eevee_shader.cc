@@ -1079,8 +1079,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
             MAT_PIPE_PREPASS_PLANAR,
             MAT_PIPE_DEFERRED,
             MAT_PIPE_DEFERRED_NPR,
-            MAT_PIPE_FORWARD) ||
-       (depth_offset_affect_lighting && pipeline_type == MAT_PIPE_SHADOW));
+            MAT_PIPE_FORWARD));
   const bool separate_depth_offset_lighting =
       has_depth_offset && !depth_offset_affect_lighting &&
       ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR);
