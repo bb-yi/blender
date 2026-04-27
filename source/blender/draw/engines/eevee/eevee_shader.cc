@@ -799,8 +799,7 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
               pipeline_info_name = "eevee_surf_shadow_atomic";
             } break;
             case ShadowTechnique::TILE_COPY: {
-              pipeline_info_name = has_depth_offset ? "eevee_surf_shadow_tbdr_depth_offset" :
-                                                       "eevee_surf_shadow_tbdr";
+              pipeline_info_name = "eevee_surf_shadow_tbdr";
             } break;
             default: {
               BLI_assert_unreachable();
@@ -1729,12 +1728,9 @@ static GPUPass *pass_replacement_cb(void *void_thunk, GPUMaterial *mat)
   bool has_raytraced_transmission = blender_mat && (blender_mat->blend_flag & MA_BL_SS_REFRACTION);
   bool has_raycast = GPU_material_flag_get(mat, GPU_MATFLAG_RAYCAST);
   bool has_depth_offset = GPU_material_has_depth_offset_output(mat);
-  bool has_shadow_depth_offset = has_depth_offset &&
-                                 material_depth_offset_affects_lighting(blender_mat);
 
   bool can_use_default = (is_shadow_pass &&
-                          (!has_vertex_displacement && !has_shadow_transparency &&
-                           !has_shadow_depth_offset)) ||
+                          (!has_vertex_displacement && !has_shadow_transparency)) ||
                          (is_prepass && (!has_vertex_displacement && !has_transparency &&
                                          !has_raytraced_transmission && !has_raycast &&
                                          !has_depth_offset));

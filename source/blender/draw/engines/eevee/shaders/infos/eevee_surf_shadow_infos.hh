@@ -77,12 +77,3 @@ DEPTH_WRITE(DepthWrite::GREATER)
 /* F32 color attachment for on-tile depth accumulation without atomics. */
 FRAGMENT_OUT_ROG(0, float, out_depth, SHADOW_ROG_ID)
 GPU_SHADER_CREATE_END()
-
-GPU_SHADER_CREATE_INFO(eevee_surf_shadow_tbdr_depth_offset)
-ADDITIONAL_INFO(eevee_surf_shadow)
-DEFINE("SHADOW_UPDATE_TBDR")
-BUILTINS(BuiltinBits::LAYER)
-DEPTH_WRITE(DepthWrite::ANY)
-/* F32 color attachment for on-tile depth accumulation without atomics. */
-FRAGMENT_OUT_ROG(0, float, out_depth, SHADOW_ROG_ID)
-GPU_SHADER_CREATE_END()

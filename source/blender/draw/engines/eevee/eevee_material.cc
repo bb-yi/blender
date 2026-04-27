@@ -438,11 +438,7 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
                                   (blender_mat->displacement_method != MA_DISPLACEMENT_BUMP);
     const bool has_volume = GPU_material_has_volume_output(matpass.gpumat);
 
-    const bool has_depth_offset = material_has_depth_offset_output(matpass) &&
-                                  material_depth_offset_affects_lighting(*blender_mat);
-
-    if (((pipeline_type == MAT_PIPE_SHADOW) &&
-         (is_transparent || has_displacement || has_depth_offset)) ||
+    if (((pipeline_type == MAT_PIPE_SHADOW) && (is_transparent || has_displacement)) ||
         has_volume)
     {
       /* WORKAROUND: This is to avoid lingering shadows from default material.

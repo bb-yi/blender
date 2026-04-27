@@ -167,6 +167,10 @@ float4 TextureHandle_eval_impl(TextureHandle tex, float2 offset, bool texel_offs
   texel = clamp(texel, int2(0), extent - int2(1));
 
   float depth = texelFetch(hiz_tx, texel, 0).r;
+#ifdef MAT_DEPTH_OFFSET_NO_LIGHTING
+  const gbuffer::Layers gbuf = gbuffer::read_layers(texel);
+  depth = gbuffer::read_surface_depth(gbuf.header, texel, depth);
+#endif
   float2 screen_uv = (float2(texel) + 0.5f) / float2(extent);
 
   switch (tex.type) {
