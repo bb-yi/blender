@@ -196,6 +196,20 @@ float thickness_unpack(float thickness_packed)
   return (thickness_packed > 0.5f) ? -thickness : thickness;
 }
 
+float surface_depth_pack(float surface_depth)
+{
+  /* Stored in a 16-bit UNORM channel. Screen depth needs extra precision near 1.0 when the
+   * camera near clip is very small, otherwise reconstructing the original surface position can
+   * drift enough for local light shadow tests to self-shadow depth-offset materials. */
+  return 1.0f - sqrt(saturate(1.0f - surface_depth));
+}
+
+float surface_depth_unpack(float surface_depth_packed)
+{
+  float inv_depth = 1.0f - saturate(surface_depth_packed);
+  return 1.0f - inv_depth * inv_depth;
+}
+
 /**
  * Pack color with values in the range of [0..8] using a 2 bit shared exponent.
  * This allows values up to 8 with some color degradation.
@@ -502,12 +516,12 @@ struct AdditionalInfo {
 
   static float2 pack(float thickness, float surface_depth)
   {
-    return float2(thickness_pack(thickness), surface_depth);
+    return float2(thickness_pack(thickness), surface_depth_pack(surface_depth));
   }
 
   static AdditionalInfo unpack(float2 data)
   {
-    return {thickness_unpack(data.x), data.y};
+    return {thickness_unpack(data.x), surface_depth_unpack(data.y)};
   }
 };
 
