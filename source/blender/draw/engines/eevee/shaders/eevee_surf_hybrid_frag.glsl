@@ -81,12 +81,17 @@ void write_header_data(int2 texel, int layer, uint data)
       out_gbuf_header_img, int3(texel, layer - GBUF_HEADER_FB_LAYER_COUNT), uint4(data));
 }
 
+#ifdef MAT_DEPTH_OFFSET
+bool depth_offset_fragment_matches_prepass(float depth_offset)
+{
+  float fragment_depth = reverse_z::read(material_depth_offset_frag_depth(depth_offset));
+  float prepass_depth = texelFetch(hiz_tx, int2(gl_FragCoord.xy), 0).r;
+  return abs(fragment_depth - prepass_depth) <= 1.0e-6f;
+}
+#endif
+
 void main()
 {
-  /* Clear AOVs first. In case the material renders to them. */
-  clear_aovs();
-  clear_outline();
-
   material_surface_cull_discard();
   init_globals();
 
@@ -95,7 +100,15 @@ void main()
 
 #ifdef MAT_DEPTH_OFFSET
   float depth_offset = nodetree_depth_offset();
+  if (!depth_offset_fragment_matches_prepass(depth_offset)) {
+    gpu_discard_fragment();
+    return;
+  }
 #endif
+
+  /* Clear AOVs first. In case the material renders to them. */
+  clear_aovs();
+  clear_outline();
 
 #ifdef MAT_DEPTH_OFFSET_NO_LIGHTING
   bool use_surface_depth = !material_depth_offset_is_zero(depth_offset);
