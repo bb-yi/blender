@@ -941,6 +941,12 @@ void Film::display()
 
   combined_final_tx_ = inst_.render_buffers.combined_tx;
   history_display_tx_ = combined_output_tx_;
+  /* The outline result is transient and may have been released when viewport sampling
+   * converged or the material graph stopped producing outline output. Refresh the optional
+   * binding here as well, otherwise the display-only pass can keep a dangling texture pointer. */
+  outline_resolved_input_tx_ = inst_.outline.resolved_texture_or(dummy_outline_tx_.gpu_texture());
+  has_outline_input_ = inst_.outline.has_result();
+  use_outline_in_combined_ = has_outline_input_ && inst_.outline.use_in_combined();
 
   data_.display_only = true;
   inst_.uniform_data.push_update();
