@@ -304,6 +304,8 @@ struct DeferredLayerBase {
   eClosureBits closure_bits_ = CLOSURE_NONE;
   /* Maximum closure count considering all material in this pass. */
   int closure_count_ = 0;
+  /* True if any material needs the original, un-offset surface depth for lighting. */
+  bool use_depth_offset_lighting_data_ = false;
 
   /* Stencil values used during the deferred pipeline. */
   enum class StencilBits : uint8_t {
@@ -348,8 +350,10 @@ struct DeferredLayerBase {
      * For now, allocate a custom normal layer for each Closure. */
     int count = to_gbuffer_bin_count(closure_bits_);
     /* Count the additional information layer needed by some closures. */
-    count += count_bits_i(closure_bits_ &
-                          (CLOSURE_SSS | CLOSURE_TRANSLUCENT | CLOSURE_REFRACTION));
+    const int additional_data_layer_count = count_bits_i(
+        closure_bits_ & (CLOSURE_SSS | CLOSURE_TRANSLUCENT | CLOSURE_REFRACTION));
+    count += additional_data_layer_count;
+    count += (use_depth_offset_lighting_data_ && additional_data_layer_count == 0) ? 1 : 0;
     return count;
   }
 

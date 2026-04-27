@@ -258,6 +258,7 @@ def draw_material_surface_settings(layout, mat, is_eevee=True):
     col.prop(mat, "surface_cull_method", text="Camera")
     col.prop(mat, "use_backface_culling_shadow", text="Shadow")
     col.prop(mat, "use_backface_culling_lightprobe_volume", text="Light Probe Volume")
+    col.prop(mat, "depth_offset_affect_lighting", text="Depth Offset Affects Lighting")
 
     col = layout.column(align=True)
 

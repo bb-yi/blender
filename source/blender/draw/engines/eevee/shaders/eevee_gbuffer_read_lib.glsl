@@ -226,6 +226,15 @@ float read_thickness(Header header, int2 texel)
   return gbuffer::AdditionalInfo::unpack(data_packed).thickness;
 }
 
+float read_surface_depth(Header header, int2 texel, float fallback_depth)
+{
+  if (!header.use_surface_depth()) {
+    return fallback_depth;
+  }
+  float2 data_packed = gbuffer::detail::fetch_additional_data(texel).rg;
+  return gbuffer::AdditionalInfo::unpack(data_packed).surface_depth;
+}
+
 /* Returns the first world normal stored in the gbuffer. Assume gbuffer header is non-null. */
 float3 read_normal(int2 texel)
 {

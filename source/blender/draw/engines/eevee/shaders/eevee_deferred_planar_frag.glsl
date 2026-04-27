@@ -53,6 +53,7 @@ void main()
 
   const gbuffer::Layers gbuf = gbuffer::read_layers(texel);
   const uchar closure_count = gbuf.header.closure_len();
+  const float surface_depth = gbuffer::read_surface_depth(gbuf.header, texel, depth);
   const float thickness = gbuffer::read_thickness(gbuf.header, texel);
   const uint3 bin_indices = gbuf.header.bin_index_per_layer();
 
@@ -113,7 +114,7 @@ void main()
     cl_refract.data *= inv_weight;
   }
 
-  float3 P = drw_point_screen_to_world(float3(screen_uv, depth));
+  float3 P = drw_point_screen_to_world(float3(screen_uv, surface_depth));
   float3 Ng = gbuf.header.geometry_normal(gbuf.surface_N());
   float3 V = drw_world_incident_vector(P);
   float vPz = dot(drw_view_forward(), P) - dot(drw_view_forward(), drw_view_position());

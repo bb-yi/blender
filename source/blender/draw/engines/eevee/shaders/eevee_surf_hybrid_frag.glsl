@@ -93,6 +93,14 @@ void main()
   float noise = utility_tx_fetch(utility_tx, gl_FragCoord.xy, UTIL_BLUE_NOISE_LAYER).r;
   float closure_rand = fract(noise + sampling_rng_1D_get(SAMPLING_CLOSURE));
 
+#ifdef MAT_DEPTH_OFFSET_NO_LIGHTING
+  constexpr bool use_surface_depth = true;
+  float surface_depth = saturate(drw_depth_view_to_screen(drw_point_world_to_view(g_data.P).z));
+#else
+  constexpr bool use_surface_depth = false;
+  float surface_depth = 0.0f;
+#endif
+
 #ifdef MAT_DEPTH_OFFSET
   material_depth_offset_write();
 #endif
@@ -158,7 +166,13 @@ void main()
 #endif
   const bool use_object_id = use_sss || use_light_linking || use_terminator_offset;
 
-  gbuffer::Packed gbuf = gbuffer::pack(gbuf_data, g_data.Ng, g_data.N, g_thickness, use_object_id);
+  gbuffer::Packed gbuf = gbuffer::pack(gbuf_data,
+                                       g_data.Ng,
+                                       g_data.N,
+                                       g_thickness,
+                                       use_object_id,
+                                       use_surface_depth,
+                                       surface_depth);
 
   /* Output header and first closure using frame-buffer attachment. */
   out_gbuf_header = gbuf.header;
@@ -196,7 +210,7 @@ void main()
 #endif
 
 #if defined(GBUFFER_HAS_REFRACTION) || defined(GBUFFER_HAS_SUBSURFACE) || \
-    defined(GBUFFER_HAS_TRANSLUCENT)
+    defined(GBUFFER_HAS_TRANSLUCENT) || defined(MAT_DEPTH_OFFSET_NO_LIGHTING)
   if (flag_test(gbuf.used_layers, ADDITIONAL_DATA)) {
     write_normal_data(
         out_texel, uniform_buf.pipeline.gbuffer_additional_data_layer_id, gbuf.additional_info);

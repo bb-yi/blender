@@ -45,6 +45,11 @@ static bool material_output_has_depth_offset(bNodeTree *nodetree)
          depth_offset->is_directly_linked();
 }
 
+static bool material_depth_offset_affects_lighting(const blender::Material *material)
+{
+  return material == nullptr || material->depth_offset_affect_lighting != 0;
+}
+
 /* -------------------------------------------------------------------- */
 /** \name Module
  *
@@ -1059,19 +1064,26 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     }
   }
 
+  const blender::Material *blender_mat = GPU_material_get_material(gpumat);
+  const bool depth_offset_affect_lighting = material_depth_offset_affects_lighting(blender_mat);
+  const bool has_depth_offset_output = GPU_material_has_depth_offset_output(gpumat) &&
+                                       geometry_type_has_surface(geometry_type);
   const bool has_depth_offset =
-      GPU_material_has_depth_offset_output(gpumat) && geometry_type_has_surface(geometry_type) &&
-      ELEM(pipeline_type,
-           MAT_PIPE_PREPASS_FORWARD_VELOCITY,
-           MAT_PIPE_PREPASS_DEFERRED_VELOCITY,
-           MAT_PIPE_PREPASS_OVERLAP,
-           MAT_PIPE_PREPASS_FORWARD,
-           MAT_PIPE_PREPASS_DEFERRED,
-           MAT_PIPE_PREPASS_PLANAR,
-           MAT_PIPE_DEFERRED,
-           MAT_PIPE_DEFERRED_NPR,
-           MAT_PIPE_FORWARD,
-           MAT_PIPE_SHADOW);
+      has_depth_offset_output &&
+      (ELEM(pipeline_type,
+            MAT_PIPE_PREPASS_FORWARD_VELOCITY,
+            MAT_PIPE_PREPASS_DEFERRED_VELOCITY,
+            MAT_PIPE_PREPASS_OVERLAP,
+            MAT_PIPE_PREPASS_FORWARD,
+            MAT_PIPE_PREPASS_DEFERRED,
+            MAT_PIPE_PREPASS_PLANAR,
+            MAT_PIPE_DEFERRED,
+            MAT_PIPE_DEFERRED_NPR,
+            MAT_PIPE_FORWARD) ||
+       (depth_offset_affect_lighting && pipeline_type == MAT_PIPE_SHADOW));
+  const bool separate_depth_offset_lighting =
+      has_depth_offset && !depth_offset_affect_lighting &&
+      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR);
 
   SlotAllocator slots = add_pipeline_create_info(
       info, pipeline_type, geometry_type, use_shader_to_rgba, has_depth_offset);
@@ -1079,6 +1091,9 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
                               material_texture_reserved_slot_last(pipeline_type, geometry_type));
   if (has_depth_offset) {
     info.define("MAT_DEPTH_OFFSET");
+    if (separate_depth_offset_lighting) {
+      info.define("MAT_DEPTH_OFFSET_NO_LIGHTING");
+    }
     if (pipeline_type != MAT_PIPE_SHADOW ||
         ShadowModule::shadow_technique == ShadowTechnique::TILE_COPY)
     {
@@ -1709,10 +1724,12 @@ static GPUPass *pass_replacement_cb(void *void_thunk, GPUMaterial *mat)
   bool has_raytraced_transmission = blender_mat && (blender_mat->blend_flag & MA_BL_SS_REFRACTION);
   bool has_raycast = GPU_material_flag_get(mat, GPU_MATFLAG_RAYCAST);
   bool has_depth_offset = GPU_material_has_depth_offset_output(mat);
+  bool has_shadow_depth_offset = has_depth_offset &&
+                                 material_depth_offset_affects_lighting(blender_mat);
 
   bool can_use_default = (is_shadow_pass &&
                           (!has_vertex_displacement && !has_shadow_transparency &&
-                           !has_depth_offset)) ||
+                           !has_shadow_depth_offset)) ||
                          (is_prepass && (!has_vertex_displacement && !has_transparency &&
                                          !has_raytraced_transmission && !has_raycast &&
                                          !has_depth_offset));

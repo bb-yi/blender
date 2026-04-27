@@ -22,6 +22,16 @@
 
 namespace blender::eevee {
 
+static bool material_depth_offset_affects_lighting(const blender::Material &material)
+{
+  return material.depth_offset_affect_lighting != 0;
+}
+
+static bool material_has_depth_offset_output(const MaterialPass &pass)
+{
+  return (pass.gpumat != nullptr) && GPU_material_has_depth_offset_output(pass.gpumat);
+}
+
 static bool material_has_flag(const MaterialPass &pass, eGPUMaterialFlag flag)
 {
   return (pass.gpumat != nullptr) && GPU_material_flag_get(pass.gpumat, flag);
@@ -416,8 +426,10 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
 
     const bool has_displacement = GPU_material_has_displacement_output(matpass.gpumat) &&
                                   (blender_mat->displacement_method != MA_DISPLACEMENT_BUMP);
-    const bool has_depth_offset = GPU_material_has_depth_offset_output(matpass.gpumat);
     const bool has_volume = GPU_material_has_volume_output(matpass.gpumat);
+
+    const bool has_depth_offset = material_has_depth_offset_output(matpass) &&
+                                  material_depth_offset_affects_lighting(*blender_mat);
 
     if (((pipeline_type == MAT_PIPE_SHADOW) &&
          (is_transparent || has_displacement || has_depth_offset)) ||

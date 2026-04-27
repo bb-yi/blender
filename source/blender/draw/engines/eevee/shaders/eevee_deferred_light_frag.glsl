@@ -58,10 +58,11 @@ void main()
 
   const float depth = texelFetch(hiz_tx, texel, 0).r - bias;
   const gbuffer::Layers gbuf = gbuffer::read_layers(texel);
+  const float surface_depth = gbuffer::read_surface_depth(gbuf.header, texel, depth);
   const float thickness = gbuffer::read_thickness(gbuf.header, texel);
   const uchar closure_count = gbuf.header.closure_len();
 
-  const float3 P = drw_point_screen_to_world(float3(screen_uv, depth));
+  const float3 P = drw_point_screen_to_world(float3(screen_uv, surface_depth));
   const float3 Ng = gbuf.header.geometry_normal(gbuf.surface_N());
   const float3 V = drw_world_incident_vector(P);
   const float vPz = dot(drw_view_forward(), P) - dot(drw_view_forward(), drw_view_position());

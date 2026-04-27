@@ -63,7 +63,8 @@ void main()
     data_in.closure[0] = cl1;
     data_in.closure[1] = cl1;
 
-    const gbuffer::Packed data_out = gbuffer::pack(data_in, Ng, N, thickness, false);
+    const gbuffer::Packed data_out = gbuffer::pack(
+        data_in, Ng, N, thickness, false, false, 0.0f);
     const gbuffer::Header header = gbuffer::Header::from_data(data_out.header);
 
     EXPECT_EQ(uint(data_out.used_layers), 0u);
@@ -81,7 +82,8 @@ void main()
     data_in.closure[0] = cl1;
     data_in.closure[1] = cl2;
 
-    const gbuffer::Packed data_out = gbuffer::pack(data_in, Ng, N, thickness, false);
+    const gbuffer::Packed data_out = gbuffer::pack(
+        data_in, Ng, N, thickness, false, false, 0.0f);
     const gbuffer::Header header = gbuffer::Header::from_data(data_out.header);
 
     EXPECT_EQ(uint(data_out.used_layers), uint(NORMAL_DATA_1));
@@ -100,7 +102,8 @@ void main()
     data_in.closure[1] = cl2;
     data_in.closure[2] = cl2;
 
-    const gbuffer::Packed data_out = gbuffer::pack(data_in, Ng, N, thickness, false);
+    const gbuffer::Packed data_out = gbuffer::pack(
+        data_in, Ng, N, thickness, false, false, 0.0f);
     const gbuffer::Header header = gbuffer::Header::from_data(data_out.header);
 
     EXPECT_EQ(uint(data_out.used_layers), uint(NORMAL_DATA_1 | CLOSURE_DATA_2));
@@ -120,7 +123,8 @@ void main()
     data_in.closure[1] = cl1;
     data_in.closure[2] = cl2;
 
-    const gbuffer::Packed data_out = gbuffer::pack(data_in, Ng, N, thickness, false);
+    const gbuffer::Packed data_out = gbuffer::pack(
+        data_in, Ng, N, thickness, false, false, 0.0f);
     const gbuffer::Header header = gbuffer::Header::from_data(data_out.header);
 
     EXPECT_EQ(uint(data_out.used_layers), uint(NORMAL_DATA_1 | CLOSURE_DATA_2));
@@ -140,7 +144,8 @@ void main()
     data_in.closure[1] = cl2;
     data_in.closure[2] = cl1;
 
-    const gbuffer::Packed data_out = gbuffer::pack(data_in, Ng, N, thickness, false);
+    const gbuffer::Packed data_out = gbuffer::pack(
+        data_in, Ng, N, thickness, false, false, 0.0f);
     const gbuffer::Header header = gbuffer::Header::from_data(data_out.header);
 
     EXPECT_EQ(uint(data_out.used_layers), uint(NORMAL_DATA_2 | CLOSURE_DATA_2));
@@ -160,7 +165,8 @@ void main()
     data_in.closure[1] = cl2;
     data_in.closure[2] = cl3;
 
-    const gbuffer::Packed data_out = gbuffer::pack(data_in, Ng, N, thickness, false);
+    const gbuffer::Packed data_out = gbuffer::pack(
+        data_in, Ng, N, thickness, false, false, 0.0f);
     const gbuffer::Header header = gbuffer::Header::from_data(data_out.header);
 
     EXPECT_EQ(uint(data_out.used_layers), uint(NORMAL_DATA_1 | NORMAL_DATA_2 | CLOSURE_DATA_2));
@@ -181,7 +187,8 @@ void main()
     data_in.closure[1] = cl_none;
     data_in.closure[2] = cl3;
 
-    const gbuffer::Packed data_out = gbuffer::pack(data_in, Ng, N, thickness, false);
+    const gbuffer::Packed data_out = gbuffer::pack(
+        data_in, Ng, N, thickness, false, false, 0.0f);
     const gbuffer::Header header = gbuffer::Header::from_data(data_out.header);
 
     EXPECT_EQ(uint(data_out.used_layers), uint(NORMAL_DATA_1));
@@ -200,7 +207,8 @@ void main()
     data_in.closure[1] = cl_none;
     data_in.closure[2] = cl3;
 
-    const gbuffer::Packed data_out = gbuffer::pack(data_in, Ng, N, thickness, false);
+    const gbuffer::Packed data_out = gbuffer::pack(
+        data_in, Ng, N, thickness, false, false, 0.0f);
     const gbuffer::Header header = gbuffer::Header::from_data(data_out.header);
 
     EXPECT_EQ(uint(data_out.used_layers), uint(0));

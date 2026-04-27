@@ -59,6 +59,13 @@ static PassType *material_surface_cull_pass_get(PassType *double_sided_ps,
   }
 }
 
+static bool material_uses_depth_offset_lighting_data(const blender::Material *material,
+                                                     GPUMaterial *gpumat)
+{
+  return material != nullptr && material->depth_offset_affect_lighting == 0 &&
+         GPU_material_has_depth_offset_output(gpumat);
+}
+
 /* -------------------------------------------------------------------- */
 /** \name World Pipeline
  *
@@ -886,6 +893,7 @@ void DeferredLayerBase::gbuffer_pass_sync(Instance &inst)
 
   closure_bits_ = CLOSURE_NONE;
   closure_count_ = 0;
+  use_depth_offset_lighting_data_ = false;
   radiance_behind_tx_ = nullptr;
 }
 
@@ -1208,6 +1216,7 @@ PassMain::Sub *DeferredLayer::material_add(blender::Material *blender_mat, GPUMa
   }
   closure_bits_ |= closure_bits;
   closure_count_ = max_ii(closure_count_, count_bits_i(closure_bits));
+  use_depth_offset_lighting_data_ |= material_uses_depth_offset_lighting_data(blender_mat, gpumat);
   has_outline_ = has_outline_ || inst_.materials.material_uses_outline_control(blender_mat);
 
   bool has_shader_to_rgba = (closure_bits & CLOSURE_SHADER_TO_RGBA) != 0;
@@ -1239,6 +1248,7 @@ PassMain::Sub *DeferredLayer::material_add(blender::Material *blender_mat, GPUMa
 PassMain::Sub *DeferredLayer::npr_add(blender::Material *blender_mat, GPUMaterial *gpumat)
 {
   BLI_assert(GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR));
+  use_depth_offset_lighting_data_ |= material_uses_depth_offset_lighting_data(blender_mat, gpumat);
   has_outline_ = has_outline_ || inst_.materials.material_uses_outline_control(blender_mat);
   PassMain::Sub *pass = material_surface_cull_pass_get(
       npr_double_sided_ps_, npr_single_sided_ps_, npr_front_cull_ps_, blender_mat);
@@ -1865,6 +1875,8 @@ PassMain::Sub *DeferredProbePipeline::material_add(blender::Material *blender_ma
   }
   opaque_layer_.closure_bits_ |= closure_bits;
   opaque_layer_.closure_count_ = max_ii(opaque_layer_.closure_count_, count_bits_i(closure_bits));
+  opaque_layer_.use_depth_offset_lighting_data_ |= material_uses_depth_offset_lighting_data(
+      blender_mat, gpumat);
 
   bool has_shader_to_rgba = (closure_bits & CLOSURE_SHADER_TO_RGBA) != 0;
 
@@ -1888,6 +1900,8 @@ PassMain::Sub *DeferredProbePipeline::npr_add(blender::Material *blender_mat, GP
                                                        opaque_layer_.npr_single_sided_ps_,
                                                        opaque_layer_.npr_front_cull_ps_,
                                                        blender_mat);
+  opaque_layer_.use_depth_offset_lighting_data_ |= material_uses_depth_offset_lighting_data(
+      blender_mat, gpumat);
 
   PassMain::Sub *material_ps = &pass->sub(GPU_material_get_name(gpumat));
   GPUPass *gpupass = GPU_material_get_pass(gpumat);
@@ -1996,6 +2010,7 @@ void PlanarProbePipeline::begin_sync()
 
   closure_bits_ = CLOSURE_NONE;
   closure_count_ = 0;
+  use_depth_offset_lighting_data_ = false;
 }
 
 void PlanarProbePipeline::end_sync()
@@ -2045,6 +2060,7 @@ PassMain::Sub *PlanarProbePipeline::material_add(blender::Material *blender_mat,
   }
   closure_bits_ |= closure_bits;
   closure_count_ = max_ii(closure_count_, count_bits_i(closure_bits));
+  use_depth_offset_lighting_data_ |= material_uses_depth_offset_lighting_data(blender_mat, gpumat);
 
   bool has_shader_to_rgba = (closure_bits & CLOSURE_SHADER_TO_RGBA) != 0;
 
@@ -2065,6 +2081,7 @@ PassMain::Sub *PlanarProbePipeline::npr_add(blender::Material *blender_mat, GPUM
 {
   PassMain::Sub *pass = material_surface_cull_pass_get(
       npr_double_sided_ps_, npr_single_sided_ps_, npr_front_cull_ps_, blender_mat);
+  use_depth_offset_lighting_data_ |= material_uses_depth_offset_lighting_data(blender_mat, gpumat);
 
   PassMain::Sub *material_ps = &pass->sub(GPU_material_get_name(gpumat));
   GPUPass *gpupass = GPU_material_get_pass(gpumat);
