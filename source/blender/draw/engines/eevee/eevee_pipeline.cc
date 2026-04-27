@@ -1099,10 +1099,12 @@ void DeferredLayer::end_sync(bool is_first_pass,
         const bool use_split_indirect = do_split_direct_indirect_radiance(inst_);
         const bool use_lightprobe_eval = do_merge_direct_indirect_eval(inst_);
         PassSimple::Sub &sub = pass.sub("Eval.Light");
-        /* Use depth test to reject background pixels which have not been stencil cleared. */
+        /* Stencil rejects pixels without GBuffer data. Do not also depth-test this fullscreen pass:
+         * materials that write gl_FragDepth can move the prepass depth outside the fullscreen
+         * triangle compare range, leaving valid GBuffer pixels unlit. */
         /* WORKAROUND: Avoid rasterizer discard by enabling stencil write, but the shaders actually
          * use no fragment output. */
-        sub.state_set(DRW_STATE_WRITE_STENCIL | DRW_STATE_STENCIL_EQUAL | DRW_STATE_DEPTH_GREATER);
+        sub.state_set(DRW_STATE_WRITE_STENCIL | DRW_STATE_STENCIL_EQUAL);
         sub.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);
         sub.bind_image(RBUFS_COLOR_SLOT, &inst_.render_buffers.rp_color_tx);
         sub.bind_image(RBUFS_VALUE_SLOT, &inst_.render_buffers.rp_value_tx);
