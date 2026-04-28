@@ -563,10 +563,12 @@ struct GLSLLight {
 - `sampler2D` 可连接 `Image to Closure` 或符合约定的 `Closure Output`
 - `Closure Output -> sampler2D` 当前只保证 `texture(tex, uv)` 这种直接采样形式
 - 如果函数依赖 `textureLod`、`textureGrad`、`textureSize`、`texelFetch` 这类图像专用能力，应优先配合 `Image to Closure`
-- `@glsl_meta` 支持 `default`、`min`、`max`、`hide_value` 和 `subtype`
+- `@glsl_meta` 支持 `default`、`min`、`max`、`hide_value`、`subtype` 和一级折叠面板分组
 - `@glsl_meta default=` 除了 literal 以外，也支持 `glsl_position()`、`normalize(glsl_normal())`、`glsl_ambient_lighting()` 这类表达式默认值
 - 当 `@glsl_meta default=` 使用表达式时，socket 未连接就取表达式，连接后就取连线值，并自动隐藏这个输入的数值编辑框
 - 表达式默认值当前只建议用于输入参数 `float / vec2 / vec3 / vec4`，并且不要直接引用同函数其他参数名
+- `@panel "Name" closed=true|false` 可以把后续输入放到面板内，必须用 `@end_panel` 显式关闭
+- 面板只支持一级，不支持嵌套；面板内可以写 `param:` 空属性行，只做分组不改默认值
 - 只有显式写了 `subtype=color` 的 `vec3 / vec4` 输入，才会显示成颜色插口
 - `vec3 + subtype=color` 进入 GLSL 时按 `rgb` 使用，`alpha` 固定为 `1.0`
 - `vec4 + subtype=color` 会保留完整 `rgba`

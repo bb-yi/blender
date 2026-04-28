@@ -1223,6 +1223,7 @@ vec2 triangle_unproject(vec3 v)
 - 最大值
 - 隐藏数值输入控件
 - socket subtype
+- 一级折叠面板分组
 
 ### 1. 基本格式
 
@@ -1409,6 +1410,47 @@ strength: default=0.5 hide_value=true
 - `yes` / `no`
 - `on` / `off`
 
+#### 3.6 `@panel` / `@end_panel`
+
+用于把大量输入参数分组到节点上的一级折叠面板里。面板只影响 UI 排列，不改变 socket identifier，也不改变 GLSL 函数调用方式。
+
+```glsl
+/* @glsl_meta v1
+base_color: default=vec3(1.0) subtype=color
+
+@panel "Specular" closed=true
+specular: default=0.5 min=0.0 max=1.0 subtype=factor
+roughness: default=0.5 min=0.0 max=1.0 subtype=factor
+anisotropy:
+@end_panel
+
+@panel "Thin Film" closed=false
+film_thickness: default=0.0 min=0.0
+film_ior: default=1.5 min=1.0
+@end_panel
+*/
+vec3 shader(
+  vec3 base_color,
+  float specular,
+  float roughness,
+  float anisotropy,
+  float film_thickness,
+  float film_ior)
+{
+  return base_color;
+}
+```
+
+规则：
+
+- `@panel "Name" closed=true|false` 开始一个面板
+- `closed` 省略时默认为 `true`
+- 面板名可以加引号；不带空格的名字可以不加引号
+- `@end_panel` 必须显式关闭当前面板
+- 面板内允许 `param:` 这种空属性行，表示只把参数放到当前面板，不改默认值或范围
+- V1 只支持一级面板，不支持嵌套
+- 重复 `@end_panel`、未关闭面板、嵌套 `@panel` 都会报 parse error
+
 ### 4. 行为规则
 
 #### 4.1 默认值同步规则
@@ -1418,8 +1460,8 @@ strength: default=0.5 hide_value=true
 当前逻辑是：
 
 - 当 `default` 是 literal（例如 `0.5`、`vec3(...)`）时，Meta 第一次生效会把它写入 socket 默认值
-- 只要 Meta 没变，用户手动改过的 literal 默认值会保留
-- 当 Meta 本身发生变化时，再同步一次新的 literal 默认值
+- 刷新后只要参数名和 socket identifier 没变，用户手动改过的 literal 默认值会保留
+- Meta 本身发生变化时，新出现的 socket 会使用新的声明默认值；已有同名 socket 不会被强制重置
 - 当 `default` 是表达式时，不会写入 RNA/socket 静态默认值
 - 表达式默认值只在 wrapper 运行时参与：未连接时用表达式，已连接时用连线值
 
@@ -1447,7 +1489,9 @@ strength: default=0.5 hide_value=true
 - 不支持 `out` 参数 Meta
 - 不支持 `inout`
 - 不支持 `sampler2D` Meta
-- 不支持 `int` / `bool` / `mat*` / `struct` / `array` 边界参数 Meta
+- 不支持 `mat*` / `struct` / `array` 边界参数 Meta
+- panel 只支持一级，不支持嵌套
+- panel 必须显式 `@end_panel` 关闭
 - 表达式默认值当前只支持输入参数 `float / vec2 / vec3 / vec4`
 - 表达式默认值不要引用同函数的其他参数名；这类值在 wrapper 里不会自动展开成可见局部变量
 - 如果 Meta 指向了不存在的参数，会报错

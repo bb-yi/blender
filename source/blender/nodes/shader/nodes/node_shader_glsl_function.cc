@@ -139,6 +139,7 @@ namespace blender
         bool has_default_value = false;
         float4 default_value = float4(0.0f);
         std::optional<std::string> default_expression;
+        std::optional<std::string> panel_name;
         bool has_min = false;
         float min_value = 0.0f;
         bool has_max = false;
@@ -148,8 +149,8 @@ namespace blender
 
         bool has_any() const
         {
-          return has_default_value || default_expression.has_value() || has_min || has_max ||
-            hide_value || subtype.has_value();
+          return has_default_value || default_expression.has_value() || panel_name.has_value() ||
+            has_min || has_max || hide_value || subtype.has_value();
         }
       };
 
@@ -164,12 +165,19 @@ namespace blender
       Meta meta;
     };
 
+    struct GLSLPanelMeta
+    {
+      std::string name;
+      bool default_closed = true;
+    };
+
     struct GLSLFunctionDefinition
     {
       std::string name;
       std::string return_type_name;
       GLSLBoundaryType return_type = GLSLBoundaryType::Unsupported;
       Vector<GLSLFunctionParam> params;
+      Vector<GLSLPanelMeta> panels;
       int body_token_start = -1;
       int body_token_end = -1;
     };
@@ -228,11 +236,12 @@ namespace blender
       std::optional<std::string> max_value;
       std::optional<std::string> hide_value;
       std::optional<std::string> subtype;
+      std::optional<std::string> panel_name;
 
       bool has_any() const
       {
         return default_value.has_value() || min_value.has_value() || max_value.has_value() ||
-          hide_value.has_value() || subtype.has_value();
+          hide_value.has_value() || subtype.has_value() || panel_name.has_value();
       }
     };
 
@@ -1158,6 +1167,12 @@ namespace blender
       return identifier;
     }
 
+    static int make_panel_identifier(const StringRef name)
+    {
+      const std::string key = "glsl_meta_panel_" + std::string(name);
+      return int(BLI_ghashutil_strhash_p(key.c_str()) & 0x7fffffff);
+    }
+
     static std::string make_wrapper_argument_name(const StringRef prefix, const StringRef name)
     {
       std::string identifier = make_socket_identifier(prefix, name);
@@ -1558,6 +1573,111 @@ namespace blender
       return true;
     }
 
+    static bool parse_glsl_meta_panel_directive(const StringRef text,
+      GLSLPanelMeta& r_panel,
+      std::string& r_error)
+    {
+      int64_t i = 0;
+      while (i < text.size() && std::isspace(uchar(text[i])))
+      {
+        i++;
+      }
+      if (i >= text.size())
+      {
+        r_error = "GLSL meta panel name cannot be empty";
+        return false;
+      }
+
+      if (text[i] == '"')
+      {
+        i++;
+        std::string name;
+        bool found_end_quote = false;
+        while (i < text.size())
+        {
+          const char c = text[i];
+          if (c == '"')
+          {
+            found_end_quote = true;
+            i++;
+            break;
+          }
+          name.push_back(c);
+          i++;
+        }
+        if (!found_end_quote)
+        {
+          r_error = "Unterminated GLSL meta panel name";
+          return false;
+        }
+        r_panel.name = trim_copy(name);
+      }
+      else
+      {
+        const int64_t name_start = i;
+        while (i < text.size() && !std::isspace(uchar(text[i])))
+        {
+          i++;
+        }
+        r_panel.name = trim_copy(text.substr(name_start, i - name_start));
+      }
+
+      if (r_panel.name.empty())
+      {
+        r_error = "GLSL meta panel name cannot be empty";
+        return false;
+      }
+
+      const std::string attributes_text = trim_copy(text.substr(i));
+      if (attributes_text.empty())
+      {
+        r_panel.default_closed = true;
+        return true;
+      }
+
+      Map<std::string, std::string> assignments;
+      if (!parse_glsl_meta_assignment_list(attributes_text, assignments, r_error))
+      {
+        return false;
+      }
+
+      for (const auto& item : assignments.items())
+      {
+        const StringRef key = item.key;
+        const StringRef value = item.value;
+        if (key != "closed")
+        {
+          r_error = "Unsupported GLSL meta panel attribute '" + std::string(key) + "'";
+          return false;
+        }
+        if (!parse_glsl_meta_bool_literal(value, r_panel.default_closed, r_error))
+        {
+          return false;
+        }
+      }
+
+      return true;
+    }
+
+    static bool assign_glsl_raw_meta_panel(GLSLRawParamMeta& r_meta,
+      const StringRef panel_name,
+      const StringRef param_name,
+      std::string& r_error)
+    {
+      if (r_meta.panel_name.has_value())
+      {
+        if (*r_meta.panel_name != panel_name)
+        {
+          r_error = "GLSL meta parameter '" + std::string(param_name) +
+            "' cannot belong to multiple panels";
+          return false;
+        }
+        return true;
+      }
+      r_meta.panel_name = std::string(panel_name);
+      return true;
+    }
+
     static bool merge_glsl_raw_param_meta(GLSLRawParamMeta& r_meta,
       const Map<std::string, std::string>& assignments,
       std::string& r_error)
@@ -1626,6 +1746,7 @@ namespace blender
 
     static bool parse_glsl_meta_block(const StringRef comment,
       Map<std::string, GLSLRawParamMeta>& r_param_meta_by_name,
+      Vector<GLSLPanelMeta>& r_panels,
       bool& r_is_meta_block,
       std::string& r_error)
     {
@@ -1633,6 +1754,8 @@ namespace blender
       std::stringstream stream{ std::string(comment) };
       std::string line;
       bool header_seen = false;
+      std::optional<std::string> active_panel_name;
+      Set<std::string> panel_names;
 
       while (std::getline(stream, line))
       {
@@ -1657,6 +1780,52 @@ namespace blender
           continue;
         }
 
+        if (StringRef(normalized).startswith("@panel") &&
+            (normalized.size() == 6 || std::isspace(uchar(normalized[6]))))
+        {
+          if (active_panel_name.has_value())
+          {
+            r_error = "Nested GLSL meta panels are not supported";
+            return false;
+          }
+
+          GLSLPanelMeta panel;
+          if (!parse_glsl_meta_panel_directive(StringRef(normalized).drop_prefix(6), panel, r_error))
+          {
+            return false;
+          }
+          if (!panel_names.add(panel.name))
+          {
+            r_error = "Duplicate GLSL meta panel '" + panel.name + "'";
+            return false;
+          }
+          active_panel_name = panel.name;
+          r_panels.append(panel);
+          continue;
+        }
+
+        if (StringRef(normalized).startswith("@end_panel"))
+        {
+          if (normalized != "@end_panel")
+          {
+            r_error = "GLSL meta @end_panel does not support attributes";
+            return false;
+          }
+          if (!active_panel_name.has_value())
+          {
+            r_error = "GLSL meta @end_panel has no matching @panel";
+            return false;
+          }
+          active_panel_name.reset();
+          continue;
+        }
+
+        if (StringRef(normalized).startswith("@"))
+        {
+          r_error = "Unsupported GLSL meta directive '" + normalized + "'";
+          return false;
+        }
+
         if (StringRef(normalized).startswith("function "))
         {
           r_error =
@@ -1674,7 +1843,7 @@ namespace blender
 
         std::string target = trim_copy(StringRef(normalized).substr(0, separator));
         const std::string attributes_text = trim_copy(StringRef(normalized).substr(separator + 1));
-        if (target.empty() || attributes_text.empty())
+        if (target.empty() || (attributes_text.empty() && !active_panel_name.has_value()))
         {
           r_error = "GLSL meta lines must define a target and at least one attribute";
           return false;
@@ -1707,12 +1876,26 @@ namespace blender
           meta = *existing;
         }
 
+        if (active_panel_name.has_value())
+        {
+          if (!assign_glsl_raw_meta_panel(meta, *active_panel_name, param_name, r_error))
+          {
+            return false;
+          }
+        }
+
         if (!merge_glsl_raw_param_meta(meta, assignments, r_error))
         {
           return false;
         }
 
         r_param_meta_by_name.add_overwrite(param_name, meta);
+      }
+
+      if (active_panel_name.has_value())
+      {
+        r_error = "GLSL meta panel '" + *active_panel_name + "' must be closed with @end_panel";
+        return false;
       }
 
       return true;
@@ -1810,6 +1993,7 @@ namespace blender
 
     static bool extract_glsl_meta(const StringRef source,
       Map<std::string, GLSLRawParamMeta>& r_meta_by_key,
+      Map<std::string, Vector<GLSLPanelMeta>>& r_panels_by_function,
       std::string& r_error)
     {
       Set<std::string> functions_with_meta;
@@ -1837,9 +2021,11 @@ namespace blender
           }
 
           Map<std::string, GLSLRawParamMeta> param_meta_by_name;
+          Vector<GLSLPanelMeta> panels;
           bool is_meta_block = false;
           if (!parse_glsl_meta_block(source.substr(body_start, body_end - body_start),
             param_meta_by_name,
+            panels,
             is_meta_block,
             r_error))
           {
@@ -1865,6 +2051,10 @@ namespace blender
           for (const auto& item : param_meta_by_name.items())
           {
             r_meta_by_key.add(make_glsl_meta_key(function_name, item.key), item.value);
+          }
+          if (!panels.is_empty())
+          {
+            r_panels_by_function.add(function_name, panels);
           }
           continue;
         }
@@ -2239,12 +2429,21 @@ namespace blender
         r_param.meta.subtype = subtype;
       }
 
+      if (raw_meta.panel_name.has_value())
+      {
+        r_param.meta.panel_name = *raw_meta.panel_name;
+      }
+
       return true;
     }
 
     static std::string build_glsl_meta_signature_key(const GLSLFunctionDefinition& function)
     {
       std::stringstream ss;
+      for (const GLSLPanelMeta& panel : function.panels)
+      {
+        ss << "panel{" << panel.name << ";closed=" << int(panel.default_closed) << '}';
+      }
       for (const GLSLFunctionParam& param : function.params)
       {
         if (!param.meta.has_any())
@@ -2269,6 +2468,10 @@ namespace blender
         {
           ss << "default_expr=" << *param.meta.default_expression << ';';
         }
+        if (param.meta.panel_name.has_value())
+        {
+          ss << "panel=" << *param.meta.panel_name << ';';
+        }
         if (param.meta.has_min)
         {
           ss << "min=" << param.meta.min_value << ';';
@@ -2291,10 +2494,16 @@ namespace blender
     }
 
     static bool apply_glsl_meta_to_function(const Map<std::string, GLSLRawParamMeta>& meta_by_key,
+      const Map<std::string, Vector<GLSLPanelMeta>>& panels_by_function,
       GLSLFunctionDefinition& r_function,
       int& r_meta_hash,
       std::string& r_error)
     {
+      if (const Vector<GLSLPanelMeta>* panels = panels_by_function.lookup_ptr(r_function.name))
+      {
+        r_function.panels = *panels;
+      }
+
       Set<std::string> param_names;
       for (const GLSLFunctionParam& param : r_function.params)
       {
@@ -4327,7 +4536,8 @@ vec3 glsl_ambient_lighting()
       }
 
       Map<std::string, GLSLRawParamMeta> meta_by_key;
-      if (!extract_glsl_meta(source, meta_by_key, result.error))
+      Map<std::string, Vector<GLSLPanelMeta>> panels_by_function;
+      if (!extract_glsl_meta(source, meta_by_key, panels_by_function, result.error))
       {
         return result;
       }
@@ -4368,7 +4578,8 @@ vec3 glsl_ambient_lighting()
       {
         return result;
       }
-      if (!apply_glsl_meta_to_function(meta_by_key, result.function, result.meta_hash, result.error))
+      if (!apply_glsl_meta_to_function(
+        meta_by_key, panels_by_function, result.function, result.meta_hash, result.error))
       {
         return result;
       }
@@ -4440,7 +4651,7 @@ vec3 glsl_ambient_lighting()
       }
     }
 
-    static void add_glsl_socket_declaration(NodeDeclarationBuilder& b,
+    static void add_glsl_socket_declaration(DeclarationListBuilder& b,
       const GLSLFunctionParam& param,
       const bool is_output,
       const StringRef socket_name,
@@ -4630,31 +4841,85 @@ vec3 glsl_ambient_lighting()
         return;
       }
 
+      const bool has_panels = !parse_result.function.panels.is_empty();
+      if (has_panels)
+      {
+        b.use_custom_socket_order();
+      }
+
+      auto add_output_declarations = [&]() {
+        if (parse_result.function.return_type != GLSLBoundaryType::Void)
+        {
+          GLSLFunctionParam output_param;
+          output_param.type = parse_result.function.return_type;
+          output_param.type_name = parse_result.function.return_type_name;
+          output_param.dimensions = glsl_boundary_dimensions(parse_result.function.return_type);
+          add_glsl_socket_declaration(
+            b, output_param, true, "Result", result_socket_identifier);
+        }
+
+        for (const GLSLFunctionParam& param : parse_result.function.params)
+        {
+          if (glsl_param_has_output_socket(param))
+          {
+            add_glsl_socket_declaration(
+              b, param, true, param.name, make_socket_identifier("Out", param.name));
+          }
+        }
+      };
+
+      if (has_panels)
+      {
+        add_output_declarations();
+        b.add_default_layout();
+      }
+
+      Map<std::string, int> panel_indices;
+      for (const int panel_index : parse_result.function.panels.index_range())
+      {
+        const GLSLPanelMeta& panel = parse_result.function.panels[panel_index];
+        panel_indices.add(panel.name, panel_index);
+      }
+      Map<std::string, PanelDeclarationBuilder*> panel_builders;
+      auto ensure_panel_builder = [&](const std::string& panel_name) -> PanelDeclarationBuilder* {
+        if (PanelDeclarationBuilder** existing_builder = panel_builders.lookup_ptr(panel_name))
+        {
+          return *existing_builder;
+        }
+        const int* panel_index = panel_indices.lookup_ptr(panel_name);
+        if (panel_index == nullptr)
+        {
+          return nullptr;
+        }
+        const GLSLPanelMeta& panel = parse_result.function.panels[*panel_index];
+        PanelDeclarationBuilder& panel_builder =
+          b.add_panel(panel.name, make_panel_identifier(panel.name)).default_closed(
+            panel.default_closed);
+        panel_builders.add(panel.name, &panel_builder);
+        return &panel_builder;
+      };
+
       for (const GLSLFunctionParam& param : parse_result.function.params)
       {
         if (glsl_param_has_input_socket(param))
         {
+          if (param.meta.panel_name.has_value())
+          {
+            if (PanelDeclarationBuilder* panel_builder = ensure_panel_builder(
+                  *param.meta.panel_name))
+            {
+              add_glsl_socket_declaration(
+                *panel_builder, param, false, param.name, param.identifier);
+              continue;
+            }
+          }
           add_glsl_socket_declaration(b, param, false, param.name, param.identifier);
         }
       }
 
-      if (parse_result.function.return_type != GLSLBoundaryType::Void)
+      if (!has_panels)
       {
-        GLSLFunctionParam output_param;
-        output_param.type = parse_result.function.return_type;
-        output_param.type_name = parse_result.function.return_type_name;
-        output_param.dimensions = glsl_boundary_dimensions(parse_result.function.return_type);
-        add_glsl_socket_declaration(
-          b, output_param, true, "Result", result_socket_identifier);
-      }
-
-      for (const GLSLFunctionParam& param : parse_result.function.params)
-      {
-        if (glsl_param_has_output_socket(param))
-        {
-          add_glsl_socket_declaration(
-            b, param, true, param.name, make_socket_identifier("Out", param.name));
-        }
+        add_output_declarations();
       }
     }
 
