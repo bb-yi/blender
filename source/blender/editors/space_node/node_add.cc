@@ -102,7 +102,7 @@ static bool node_space_uses_npr_tree(const SpaceNode &snode)
   return root_tree != nullptr && is_npr_root_tree(*root_tree);
 }
 
-static eAssetImportMethod node_group_asset_import_method(const SpaceNode &snode)
+eAssetImportMethod node_group_asset_import_method(const SpaceNode &snode)
 {
   return node_space_uses_npr_tree(snode) ? ASSET_IMPORT_APPEND_REUSE : ASSET_IMPORT_APPEND;
 }

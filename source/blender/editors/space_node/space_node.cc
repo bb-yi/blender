@@ -43,6 +43,7 @@
 
 #include "BLT_translation.hh"
 
+#include "ED_asset_import.hh"
 #include "ED_asset_shelf.hh"
 #include "ED_image.hh"
 #include "ED_node.hh"
@@ -1001,6 +1002,21 @@ static bool node_group_drop_poll(bContext *C, wmDrag *drag, const wmEvent * /*ev
   return true;
 }
 
+static ID *node_group_drag_id_get_or_import(bContext *C, wmDrag *drag)
+{
+  if (drag->type == WM_DRAG_ASSET) {
+    SpaceNode *snode = CTX_wm_space_node(C);
+    wmDragAsset *asset_data = WM_drag_get_asset_data(drag, ID_NT);
+    if (snode && asset_data && node_group_asset_import_method(*snode) == ASSET_IMPORT_APPEND_REUSE)
+    {
+      return asset::asset_local_id_ensure_imported(
+          *CTX_data_main(C), *asset_data->asset, 0, ASSET_IMPORT_APPEND_REUSE);
+    }
+  }
+
+  return WM_drag_get_local_ID_or_import_from_asset(C, drag, 0);
+}
+
 static bool node_object_drop_poll(bContext *C, wmDrag *drag, const wmEvent * /*event*/)
 {
   return WM_drag_is_ID_type(drag, ID_OB) && !ui::button_active_drop_name(C);
@@ -1137,7 +1153,7 @@ static bool node_panel_drop_poll(bContext *C, wmDrag *drag, const wmEvent *event
 
 static void node_group_drop_copy(bContext *C, wmDrag *drag, wmDropBox *drop)
 {
-  ID *id = WM_drag_get_local_ID_or_import_from_asset(C, drag, 0);
+  ID *id = node_group_drag_id_get_or_import(C, drag);
   if (id) {
     RNA_int_set(drop->ptr, "session_uid", int(id->session_uid));
   }

@@ -15,6 +15,8 @@
 
 #include "BKE_node.hh"
 
+#include "DNA_space_types.h"
+
 #include "UI_interface.hh"
 #include "UI_interface_layout.hh"
 #include "UI_view2d.hh"
@@ -433,6 +435,7 @@ void draw_nodespace_back_pix(const bContext &C,
 
 bNode *add_node(const bContext &C, StringRef idname, const float2 &location);
 bNode *add_static_node(const bContext &C, int type, const float2 &location);
+eAssetImportMethod node_group_asset_import_method(const SpaceNode &snode);
 
 void NODE_OT_add_reroute(wmOperatorType *ot);
 void NODE_OT_add_group(wmOperatorType *ot);
