@@ -14,6 +14,7 @@
 
 #include "BLI_enum_flags.hh"
 #include "BLI_map.hh"
+#include "BLI_set.hh"
 #include "BLI_vector.hh"
 
 #include "GPU_material.hh"
@@ -84,7 +85,8 @@ static inline void material_type_from_shader_uuid(uint64_t shader_uuid,
                                                   eMaterialThickness &thickness_type,
                                                   eMaterialProbe &probe_capture,
                                                   bool &transparent_shadows,
-                                                  bool &use_outline)
+                                                  bool &use_outline,
+                                                  bool &depth_offset_affect_lighting)
 {
   const uint64_t geometry_mask = ((1u << 4u) - 1u);
   const uint64_t pipeline_mask = ((1u << 4u) - 1u);
@@ -98,6 +100,7 @@ static inline void material_type_from_shader_uuid(uint64_t shader_uuid,
   probe_capture = static_cast<eMaterialProbe>((shader_uuid >> 10u) & probe_mask);
   transparent_shadows = (shader_uuid >> 12u) & 1u;
   use_outline = (shader_uuid >> 13u) & 1u;
+  depth_offset_affect_lighting = (shader_uuid >> 14u) & 1u;
 }
 
 static inline uint64_t shader_uuid_from_material_type(
@@ -107,7 +110,8 @@ static inline uint64_t shader_uuid_from_material_type(
     eMaterialThickness thickness_type = MAT_THICKNESS_SPHERE,
     eMaterialProbe probe_capture = MAT_PROBE_NONE,
     char blend_flags = 0,
-    bool use_outline = true)
+    bool use_outline = true,
+    bool depth_offset_affect_lighting = false)
 {
   BLI_assert(int64_t(displacement_type) < (1 << 1));
   BLI_assert(int64_t(thickness_type) < (1 << 1));
@@ -124,6 +128,7 @@ static inline uint64_t shader_uuid_from_material_type(
   uuid |= uint64_t(probe_capture) << 10;
   uuid |= transparent_shadows << 12;
   uuid |= uint64_t(use_outline) << 13;
+  uuid |= uint64_t(depth_offset_affect_lighting) << 14;
   return uuid;
 }
 
@@ -253,7 +258,8 @@ struct MaterialKey {
                                              to_thickness_type(mat_->thickness_mode),
                                              MAT_PROBE_NONE,
                                              mat_->blend_flag,
-                                             use_outline);
+                                             use_outline,
+                                             mat_->depth_offset_affect_lighting != 0);
     options = (options << 1) | (visibility_flags & OB_HIDE_CAMERA ? 0 : 1);
     options = (options << 1) | (visibility_flags & OB_HIDE_SHADOW ? 0 : 1);
     options = (options << 1) | (visibility_flags & OB_HIDE_PROBE_CUBEMAP ? 0 : 1);
@@ -371,6 +377,8 @@ class MaterialModule {
 
   Map<MaterialKey, Material> material_map_;
   Map<ShaderKey, PassMain::Sub *> shader_map_;
+  Set<blender::Material *> depth_offset_shadow_disabled_mats_;
+  Set<blender::Material *> current_depth_offset_shadow_disabled_mats_;
 
   MaterialArray material_array_;
 

@@ -103,7 +103,7 @@ struct Packer {
   /* Packed GBuffer data in layer indexing. */
   ClosurePacking closures[GBUFFER_LAYER_MAX];
   /* Additional info to be stored inside the normal stack. */
-  float additional_info;
+  float2 additional_info;
   /* Header containing which closures are encoded and which normals are used. */
   Header header;
 
@@ -243,7 +243,7 @@ struct Packer {
     }
 
     if (this->header.has_additional_data()) {
-      data.additional_info = float2(this->additional_info);
+      data.additional_info = this->additional_info;
       set_flag_from_test(used_layers, true, ADDITIONAL_DATA);
     }
 
@@ -263,17 +263,22 @@ struct InputClosures {
 };
 
 /**
-  * surface_N: Fallback normal is there is no closure.
-  * thickness: Additional object information if any closure needs it.
-  float thickness;
-  * use_object_id: True if surface uses a dedicated object id layer. Should only be turned on if
-  needed. */
-Packed pack(
-    InputClosures cl_data, float3 Ng, packed_float3 surface_N, float thickness, bool use_object_id)
+ * surface_N: Fallback normal if there is no closure.
+ * thickness: Additional object information if any closure needs it.
+ * use_object_id: True if surface uses a dedicated object id layer.
+ * use_surface_depth: True if the additional-data layer stores the original surface depth. */
+Packed pack(InputClosures cl_data,
+            float3 Ng,
+            packed_float3 surface_N,
+            float thickness,
+            bool use_object_id,
+            bool use_surface_depth,
+            float surface_depth)
 {
   Packer packer;
   packer.header = Header::zero();
   packer.header.use_object_id_set(use_object_id);
+  packer.header.use_surface_depth_set(use_surface_depth);
 
   for (int i = 0; i < GBUFFER_LAYER_MAX; i++) {
     packer.closures[i] = pack_closure(cl_data.closure[i]);
@@ -284,7 +289,7 @@ Packed pack(
   }
 
   if (packer.header.has_additional_data()) {
-    packer.additional_info = gbuffer::AdditionalInfo::pack(thickness).x;
+    packer.additional_info = gbuffer::AdditionalInfo::pack(thickness, surface_depth);
   }
 
   /* ---- Switch from Bin to Layer order. ---- */

@@ -392,6 +392,7 @@ Closure nodetree_surface(float closure_rand);
 Closure nodetree_volume();
 float3 nodetree_displacement();
 float nodetree_thickness();
+float nodetree_depth_offset();
 float4 closure_to_rgba(Closure cl);
 float4 nodetree_npr();
 #endif

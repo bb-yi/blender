@@ -27,10 +27,10 @@
 #  error Closure data count and eval count must match
 #endif
 
-void forward_lighting_eval(float thickness, float3 &radiance, float3 &transmittance)
+void forward_lighting_eval(float3 P, float thickness, float3 &radiance, float3 &transmittance)
 {
-  float vPz = dot(drw_view_forward(), g_data.P) - dot(drw_view_forward(), drw_view_position());
-  float3 V = drw_world_incident_vector(g_data.P);
+  float vPz = dot(drw_view_forward(), P) - dot(drw_view_forward(), drw_view_position());
+  float3 V = drw_world_incident_vector(P);
 
   ClosureLightStack stack;
   for (int i = 0; i < LIGHT_CLOSURE_EVAL_COUNT; i++) {
@@ -45,8 +45,7 @@ void forward_lighting_eval(float thickness, float3 &radiance, float3 &transmitta
   bool world_environment_disabled = world_environment_disabled_get(object_infos);
   float normal_offset = object_infos.shadow_terminator_normal_offset;
   float geometry_offset = object_infos.shadow_terminator_geometry_offset;
-  light_eval_reflection(
-      stack, g_data.P, g_data.Ng, V, vPz, receiver_light_set, normal_offset, geometry_offset);
+  light_eval_reflection(stack, P, g_data.Ng, V, vPz, receiver_light_set, normal_offset, geometry_offset);
 
 #if defined(MAT_SUBSURFACE) || defined(MAT_REFRACTION) || defined(MAT_TRANSLUCENT)
 
@@ -68,15 +67,8 @@ void forward_lighting_eval(float thickness, float3 &radiance, float3 &transmitta
       stack.cl[0] = closure_light_new(cl_transmit, V, thickness);
 
       /* NOTE: Only evaluates `stack.cl[0]`. */
-      light_eval_transmission(stack,
-                              g_data.P,
-                              g_data.Ng,
-                              V,
-                              vPz,
-                              thickness,
-                              receiver_light_set,
-                              normal_offset,
-                              geometry_offset);
+      light_eval_transmission(
+          stack, P, g_data.Ng, V, vPz, thickness, receiver_light_set, normal_offset, geometry_offset);
     }
 
 #  if defined(MAT_SUBSURFACE)
@@ -95,7 +87,7 @@ void forward_lighting_eval(float thickness, float3 &radiance, float3 &transmitta
 
   LightProbeSample samp;
   if (!world_environment_disabled) {
-    samp = lightprobe_load(g_data.P, g_data.Ng, V);
+    samp = lightprobe_load(P, g_data.Ng, V);
 
     float clamp_indirect_sh = uniform_buf.clamp.surface_indirect;
     samp.volume_irradiance = spherical_harmonics_clamp(samp.volume_irradiance,
@@ -111,7 +103,7 @@ void forward_lighting_eval(float thickness, float3 &radiance, float3 &transmitta
       float3 direct_light = closure_light_get(stack, i).light_shadowed;
       float3 indirect_light = float3(0.0f);
       if (!world_environment_disabled) {
-        indirect_light = lightprobe_eval(samp, cl, g_data.P, V, thickness);
+        indirect_light = lightprobe_eval(samp, cl, P, V, thickness);
       }
 
       if ((cl.type == CLOSURE_BSDF_TRANSLUCENT_ID ||

@@ -7,6 +7,17 @@ bool glsl_light_is_zero(float3 value)
   return all(lessThanEqual(abs(value), float3(1e-8f)));
 }
 
+float glsl_light_power_get(LightData light, LightingType type)
+{
+  /* Mask anything above 3. See LIGHT_TRANSLUCENT_WITH_THICKNESS. */
+  return light.power[type & 3u];
+}
+
+bool glsl_light_linking_affects_receiver(uint2 light_set_membership, uchar receiver_light_set)
+{
+  return bitmask64_test(light_set_membership, receiver_light_set);
+}
+
 float glsl_light_shape_radiance(LightData light)
 {
   if (light.type == LIGHT_RECT || light.type == LIGHT_ELLIPSE) {
@@ -61,7 +72,7 @@ float glsl_light_friendly_power(LightData light, LightingType type)
   if (shape_power <= 1e-16f) {
     return 0.0f;
   }
-  return light_power_get(light, type) * (point_power / shape_power);
+  return glsl_light_power_get(light, type) * (point_power / shape_power);
 }
 
 float3 glsl_light_resolve_normal(float3 normal_value)
@@ -117,8 +128,7 @@ GLSLLight glsl_light_default()
   return light;
 }
 
-#if defined(GPU_FRAGMENT_SHADER) && defined(MAT_GLSL_LIGHT_ACCESS) && \
-    (defined(MAT_DEFERRED) || defined(MAT_FORWARD))
+#if defined(GPU_FRAGMENT_SHADER) && defined(MAT_GLSL_LIGHT_ACCESS)
 
 bool glsl_light_index_matches_locality(uint light_index, bool is_local)
 {
@@ -145,7 +155,7 @@ bool glsl_light_lookup(uint light_index,
 
   ObjectInfos object_infos = drw_infos[drw_resource_id()];
   uchar receiver_light_set = receiver_light_set_get(object_infos);
-  if (!light_linking_affects_receiver(light.light_set_membership, receiver_light_set)) {
+  if (!glsl_light_linking_affects_receiver(light.light_set_membership, receiver_light_set)) {
     return false;
   }
 
@@ -163,133 +173,9 @@ bool glsl_light_loop_accept(uint light_index, bool is_local)
     return false;
   }
 
-  float diffuse_power = light_power_get(light, LIGHT_DIFFUSE);
-  float specular_power = light_power_get(light, LIGHT_SPECULAR);
+  float diffuse_power = glsl_light_power_get(light, LIGHT_DIFFUSE);
+  float specular_power = glsl_light_power_get(light, LIGHT_SPECULAR);
   return max(diffuse_power, specular_power) >= LIGHT_ATTENUATION_THRESHOLD;
-}
-
-struct GLSLLightCursor {
-  uint tile_word_offset;
-  uint min_index;
-  uint max_index;
-  uint word_min;
-  uint word_max;
-  uint word_idx;
-  uint word;
-  uint light_index;
-  uint state;
-  bool initialized;
-};
-
-GLSLLightCursor glsl_light_cursor_state;
-bool glsl_light_cached_valid = false;
-int glsl_light_cached_ordinal = -1;
-uint glsl_light_cached_index = 0u;
-bool glsl_light_cached_is_local = false;
-bool glsl_light_cached_lookup_valid = false;
-LightData glsl_light_cached_light;
-LightVector glsl_light_cached_light_vector;
-bool glsl_light_cached_lookup_is_directional = false;
-int glsl_light_cached_count = -1;
-
-bool glsl_light_lookup_cached(uint light_index,
-                              bool is_local,
-                              out LightData light,
-                              out LightVector light_vector,
-                              out bool is_directional)
-{
-  if (glsl_light_cached_lookup_valid && glsl_light_cached_index == light_index &&
-      glsl_light_cached_is_local == is_local)
-  {
-    light = glsl_light_cached_light;
-    light_vector = glsl_light_cached_light_vector;
-    is_directional = glsl_light_cached_lookup_is_directional;
-    return true;
-  }
-
-  bool ok = glsl_light_lookup(light_index, is_local, light, light_vector, is_directional);
-  if (ok) {
-    glsl_light_cached_lookup_valid = true;
-    glsl_light_cached_index = light_index;
-    glsl_light_cached_is_local = is_local;
-    glsl_light_cached_light = light;
-    glsl_light_cached_light_vector = light_vector;
-    glsl_light_cached_lookup_is_directional = is_directional;
-  }
-  return ok;
-}
-
-void glsl_light_cursor_begin()
-{
-  uint2 tile_co = uint2(gl_FragCoord.xy / light_cull_buf.tile_size);
-  glsl_light_cursor_state.tile_word_offset = (tile_co.x + tile_co.y * light_cull_buf.tile_x_len) *
-                                             light_cull_buf.tile_word_len;
-
-  int zbin_index = culling_z_to_zbin(
-      light_cull_buf.zbin_scale, light_cull_buf.zbin_bias, drw_point_world_to_view(g_data.P).z);
-  zbin_index = clamp(zbin_index, 0, CULLING_ZBIN_COUNT - 1);
-  uint zbin_data = light_zbin_buf[zbin_index];
-  uint min_index = zbin_data & 0xFFFFu;
-  uint max_index = zbin_data >> 16u;
-
-  glsl_light_cursor_state.word_min = min_index >> 5u;
-  glsl_light_cursor_state.word_max = max_index >> 5u;
-  glsl_light_cursor_state.min_index = min_index;
-  glsl_light_cursor_state.max_index = max_index;
-  glsl_light_cursor_state.word_idx = glsl_light_cursor_state.word_min;
-  glsl_light_cursor_state.word = 0u;
-  glsl_light_cursor_state.light_index = (light_cull_buf.local_lights_len == 0u) ? 0xFFFFFFFFu :
-                                                                                   (light_cull_buf.local_lights_len - 1u);
-  glsl_light_cursor_state.state = 1u;
-  glsl_light_cursor_state.initialized = true;
-}
-
-bool glsl_light_cursor_next(out uint r_light_index, out bool r_is_local)
-{
-  if (!glsl_light_cursor_state.initialized) {
-    glsl_light_cursor_begin();
-  }
-
-  while (true) {
-    if (glsl_light_cursor_state.state == 1u) {
-      if (glsl_light_cursor_state.word_idx > glsl_light_cursor_state.word_max) {
-        glsl_light_cursor_state.state = 3u;
-      }
-      else {
-        glsl_light_cursor_state.word = light_tile_buf[glsl_light_cursor_state.tile_word_offset +
-                                                      glsl_light_cursor_state.word_idx];
-        glsl_light_cursor_state.word &= zbin_mask(glsl_light_cursor_state.word_idx,
-                                                  glsl_light_cursor_state.min_index,
-                                                  glsl_light_cursor_state.max_index);
-        glsl_light_cursor_state.state = 2u;
-      }
-    }
-
-    if (glsl_light_cursor_state.state == 2u) {
-      int bit_index = findLSB(glsl_light_cursor_state.word);
-      if (bit_index == -1) {
-        glsl_light_cursor_state.word_idx++;
-        glsl_light_cursor_state.state = 1u;
-        continue;
-      }
-      glsl_light_cursor_state.word &= ~(1u << uint(bit_index));
-      glsl_light_cursor_state.light_index = glsl_light_cursor_state.word_idx * 32u + uint(bit_index);
-      r_light_index = glsl_light_cursor_state.light_index;
-      r_is_local = true;
-      return true;
-    }
-
-    if (glsl_light_cursor_state.state == 3u) {
-      glsl_light_cursor_state.light_index = max(light_cull_buf.local_lights_len,
-                                                glsl_light_cursor_state.light_index + 1u);
-      if (glsl_light_cursor_state.light_index >= light_cull_buf.items_count) {
-        return false;
-      }
-      r_light_index = glsl_light_cursor_state.light_index;
-      r_is_local = false;
-      return true;
-    }
-  }
 }
 
 bool glsl_light_find_ordinal(int light_ordinal, out uint r_light_index, out bool r_is_local)
@@ -298,44 +184,24 @@ bool glsl_light_find_ordinal(int light_ordinal, out uint r_light_index, out bool
     return false;
   }
 
-  if (glsl_light_cached_valid && glsl_light_cached_ordinal == light_ordinal) {
-    r_light_index = glsl_light_cached_index;
-    r_is_local = glsl_light_cached_is_local;
-    return true;
-  }
-
   int current = 0;
-  if (!glsl_light_cached_valid || light_ordinal < glsl_light_cached_ordinal) {
-    glsl_light_cursor_state.initialized = false;
-    glsl_light_cached_valid = false;
-    glsl_light_cached_lookup_valid = false;
-  }
-  else if (glsl_light_cached_ordinal >= 0) {
-    current = glsl_light_cached_ordinal + 1;
-  }
-
-  while (glsl_light_cursor_next(r_light_index, r_is_local)) {
-    LightData light;
-    LightVector light_vector;
-    bool is_directional;
-    if (!glsl_light_lookup_cached(r_light_index, r_is_local, light, light_vector, is_directional))
-    {
-      continue;
-    }
-    float diffuse_power = light_power_get(light, LIGHT_DIFFUSE);
-    float specular_power = light_power_get(light, LIGHT_SPECULAR);
-    if (max(diffuse_power, specular_power) < LIGHT_ATTENUATION_THRESHOLD) {
+  LIGHT_FOREACH_ALL_BEGIN(light_cull_buf,
+                          light_zbin_buf,
+                          light_tile_buf,
+                          gl_FragCoord.xy,
+                          drw_point_world_to_view(g_data.P).z,
+                          light_index,
+                          is_local)
+    if (!glsl_light_loop_accept(light_index, is_local)) {
       continue;
     }
     if (current == light_ordinal) {
-      glsl_light_cached_valid = true;
-      glsl_light_cached_ordinal = light_ordinal;
-      glsl_light_cached_index = r_light_index;
-      glsl_light_cached_is_local = r_is_local;
+      r_light_index = light_index;
+      r_is_local = is_local;
       return true;
     }
     current += 1;
-  }
+  LIGHT_FOREACH_ALL_END()
   return false;
 }
 
@@ -362,7 +228,7 @@ GLSLLight glsl_light_build(uint light_index, bool is_local, uint public_index)
   LightData light;
   LightVector light_vector;
   bool is_directional;
-  if (!glsl_light_lookup_cached(light_index, is_local, light, light_vector, is_directional)) {
+  if (!glsl_light_lookup(light_index, is_local, light, light_vector, is_directional)) {
     return result;
   }
 
@@ -391,9 +257,6 @@ GLSLLight glsl_light_build(uint light_index, bool is_local, uint public_index)
 
 int glsl_light_count()
 {
-  if (glsl_light_cached_count >= 0) {
-    return glsl_light_cached_count;
-  }
   int count = 0;
   LIGHT_FOREACH_ALL_BEGIN(light_cull_buf,
                           light_zbin_buf,
@@ -407,7 +270,6 @@ int glsl_light_count()
     }
     count += 1;
   LIGHT_FOREACH_ALL_END()
-  glsl_light_cached_count = count;
   return count;
 }
 
@@ -423,6 +285,7 @@ GLSLLight glsl_light_get(int light_ordinal)
 
 float glsl_light_shadow(int light_ordinal, float3 shading_normal)
 {
+#  if defined(MAT_GLSL_LIGHT_SHADOW_ACCESS)
   uint light_index = 0u;
   bool is_local = false;
   if (!glsl_light_find_ordinal(light_ordinal, light_index, is_local)) {
@@ -432,7 +295,7 @@ float glsl_light_shadow(int light_ordinal, float3 shading_normal)
   LightData light;
   LightVector light_vector;
   bool is_directional;
-  if (!glsl_light_lookup_cached(light_index, is_local, light, light_vector, is_directional)) {
+  if (!glsl_light_lookup(light_index, is_local, light, light_vector, is_directional)) {
     return 0.0f;
   }
 
@@ -456,6 +319,9 @@ float glsl_light_shadow(int light_ordinal, float3 shading_normal)
                      object_infos.shadow_terminator_geometry_offset,
                      uniform_buf.shadow.ray_count,
                      uniform_buf.shadow.step_count);
+#  else
+  return 0.0f;
+#  endif
 }
 
 #else

@@ -29,11 +29,12 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_cryptomatte_out)
 
 /* Global thickness because it is needed for closure_to_rgba. */
 float g_thickness;
+float3 g_forward_lighting_P;
 
 float4 closure_to_rgba(Closure cl_unused)
 {
   float3 radiance, transmittance;
-  forward_lighting_eval(g_thickness, radiance, transmittance);
+  forward_lighting_eval(g_forward_lighting_P, g_thickness, radiance, transmittance);
 
   /* Reset for the next closure tree. */
   float noise = utility_tx_fetch(utility_tx, gl_FragCoord.xy, UTIL_BLUE_NOISE_LAYER).r;
@@ -41,10 +42,10 @@ float4 closure_to_rgba(Closure cl_unused)
   closure_weights_reset(closure_rand);
 
 #if defined(MAT_TRANSPARENT) && defined(MAT_SHADER_TO_RGBA)
-  float3 V = -drw_world_incident_vector(g_data.P);
-  LightProbeSample samp = lightprobe_load(g_data.P, g_data.Ng, V);
+  float3 V = -drw_world_incident_vector(g_forward_lighting_P);
+  LightProbeSample samp = lightprobe_load(g_forward_lighting_P, g_data.Ng, V);
   float3 radiance_behind = lightprobe_spherical_sample_normalized_with_parallax(
-      samp, g_data.P, V, 0.0);
+      samp, g_forward_lighting_P, V, 0.0);
 
 #  ifndef MAT_FIRST_LAYER
   int2 texel = int2(gl_FragCoord.xy);
@@ -81,17 +82,52 @@ void write_header_data(int2 texel, int layer, uint data)
       out_gbuf_header_img, int3(texel, layer - GBUF_HEADER_FB_LAYER_COUNT), uint4(data));
 }
 
+#ifdef MAT_DEPTH_OFFSET
+bool depth_offset_fragment_matches_prepass(float depth_offset)
+{
+  float fragment_depth = reverse_z::read(material_depth_offset_frag_depth(depth_offset));
+  float prepass_depth = texelFetch(hiz_tx, int2(gl_FragCoord.xy), 0).r;
+  return abs(fragment_depth - prepass_depth) <= 1.0e-6f;
+}
+#endif
+
 void main()
 {
-  /* Clear AOVs first. In case the material renders to them. */
-  clear_aovs();
-  clear_outline();
-
   material_surface_cull_discard();
   init_globals();
 
   float noise = utility_tx_fetch(utility_tx, gl_FragCoord.xy, UTIL_BLUE_NOISE_LAYER).r;
   float closure_rand = fract(noise + sampling_rng_1D_get(SAMPLING_CLOSURE));
+
+  g_forward_lighting_P = g_data.P;
+#ifdef MAT_DEPTH_OFFSET
+  float depth_offset = nodetree_depth_offset();
+  if (!depth_offset_fragment_matches_prepass(depth_offset)) {
+    gpu_discard_fragment();
+    return;
+  }
+#  ifndef MAT_DEPTH_OFFSET_NO_LIGHTING
+  if (!material_depth_offset_is_zero(depth_offset)) {
+    g_forward_lighting_P = material_depth_offset_world_position(depth_offset);
+  }
+#  endif
+#endif
+
+  /* Clear AOVs first. In case the material renders to them. */
+  clear_aovs();
+  clear_outline();
+
+#ifdef MAT_DEPTH_OFFSET_NO_LIGHTING
+  bool use_surface_depth = !material_depth_offset_is_zero(depth_offset);
+  float surface_depth = use_surface_depth ? reverse_z::read(gl_FragCoord.z) : 0.0f;
+#else
+  constexpr bool use_surface_depth = false;
+  float surface_depth = 0.0f;
+#endif
+
+#ifdef MAT_DEPTH_OFFSET
+  material_depth_offset_write(depth_offset);
+#endif
 
   g_thickness = nodetree_thickness() * thickness_mode;
 
@@ -154,7 +190,13 @@ void main()
 #endif
   const bool use_object_id = use_sss || use_light_linking || use_terminator_offset;
 
-  gbuffer::Packed gbuf = gbuffer::pack(gbuf_data, g_data.Ng, g_data.N, g_thickness, use_object_id);
+  gbuffer::Packed gbuf = gbuffer::pack(gbuf_data,
+                                       g_data.Ng,
+                                       g_data.N,
+                                       g_thickness,
+                                       use_object_id,
+                                       use_surface_depth,
+                                       surface_depth);
 
   /* Output header and first closure using frame-buffer attachment. */
   out_gbuf_header = gbuf.header;
@@ -192,7 +234,7 @@ void main()
 #endif
 
 #if defined(GBUFFER_HAS_REFRACTION) || defined(GBUFFER_HAS_SUBSURFACE) || \
-    defined(GBUFFER_HAS_TRANSLUCENT)
+    defined(GBUFFER_HAS_TRANSLUCENT) || defined(MAT_DEPTH_OFFSET_NO_LIGHTING)
   if (flag_test(gbuf.used_layers, ADDITIONAL_DATA)) {
     write_normal_data(
         out_texel, uniform_buf.pipeline.gbuffer_additional_data_layer_id, gbuf.additional_info);

@@ -196,6 +196,20 @@ float thickness_unpack(float thickness_packed)
   return (thickness_packed > 0.5f) ? -thickness : thickness;
 }
 
+float surface_depth_pack(float surface_depth)
+{
+  /* Stored in a 16-bit UNORM channel. Screen depth needs extra precision near 1.0 when the
+   * camera near clip is very small, otherwise reconstructing the original surface position can
+   * drift enough for local light shadow tests to self-shadow depth-offset materials. */
+  return 1.0f - sqrt(saturate(1.0f - surface_depth));
+}
+
+float surface_depth_unpack(float surface_depth_packed)
+{
+  float inv_depth = 1.0f - saturate(surface_depth_packed);
+  return 1.0f - inv_depth * inv_depth;
+}
+
 /**
  * Pack color with values in the range of [0..8] using a 2 bit shared exponent.
  * This allows values up to 8 with some color degradation.
@@ -299,8 +313,9 @@ struct Header {
    *
    *  Use Object ID
    *    |
-   *    |
-   * |  v |         UNUSED         |       Geometric normal      |       UNUSED      |
+   *    |Use Surface Depth
+   *    | |
+   * |  v v |       UNUSED       |       Geometric normal      |       UNUSED      |
    * |....|....|....|....|....|....|....|....|....|....|....|....|....|....|....|....|
    *   31   30   29   28   27   26   25   24   23   22   21   20   19   18   17   16
    *
@@ -348,6 +363,14 @@ struct Header {
   void use_object_id_set(bool value)
   {
     set_flag_from_test(this->header_, value, 1u << 31u);
+  }
+  bool use_surface_depth() const
+  {
+    return flag_test(this->header_, 1u << 30u);
+  }
+  void use_surface_depth_set(bool value)
+  {
+    set_flag_from_test(this->header_, value, 1u << 30u);
   }
 
   /**
@@ -466,8 +489,8 @@ struct Header {
 
   bool has_additional_data() const
   {
-    /* For now, this is true. Only the transmission closures use the thickness data. */
-    return this->has_transmission();
+    /* Transmission closures use thickness. Depth-offset materials can store un-offset depth. */
+    return this->has_transmission() || this->use_surface_depth();
   }
 
   /* For a given bin index, return the associated layer index.
@@ -489,15 +512,16 @@ struct Header {
 /* Added data inside the Tangent Space layers. */
 struct AdditionalInfo {
   float thickness;
+  float surface_depth;
 
-  static float2 pack(float thickness)
+  static float2 pack(float thickness, float surface_depth)
   {
-    return float2(thickness_pack(thickness), 0.0f /* UNUSED */);
+    return float2(thickness_pack(thickness), surface_depth_pack(surface_depth));
   }
 
   static AdditionalInfo unpack(float2 data)
   {
-    return {thickness_unpack(data.x)};
+    return {thickness_unpack(data.x), surface_depth_unpack(data.y)};
   }
 };
 

@@ -420,7 +420,8 @@ struct Material {
   float inflate_bounds = 0;
 
   char surface_cull_method = MA_SURFACE_CULL_NONE;
-  char _pad3[3] = {};
+  char depth_offset_affect_lighting = false;
+  char _pad3[2] = {};
 
   /**
    * Cached slots for texture painting, must be refreshed via

@@ -14,6 +14,7 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.add_input<decl::Shader>("Volume").translation_context(BLT_I18NCONTEXT_ID_ID);
   b.add_input<decl::Vector>("Displacement").hide_value();
   b.add_input<decl::Float>("Thickness").hide_value();
+  b.add_input<decl::Float>("Depth Offset").hide_value();
 }
 
 static int node_shader_gpu_output_material(GPUMaterial *mat,
@@ -23,6 +24,7 @@ static int node_shader_gpu_output_material(GPUMaterial *mat,
                                            GPUNodeStack * /*out*/)
 {
   GPUNodeLink *outlink_surface, *outlink_volume, *outlink_displacement, *outlink_thickness;
+  GPUNodeLink *outlink_depth_offset;
   /* Passthrough node in order to do the right socket conversions (important for displacement). */
   if (in[0].link) {
     GPU_link(mat, "node_output_material_surface", in[0].link, &outlink_surface);
@@ -39,6 +41,10 @@ static int node_shader_gpu_output_material(GPUMaterial *mat,
   if (in[3].link) {
     GPU_link(mat, "node_output_material_thickness", in[3].link, &outlink_thickness);
     GPU_material_output_thickness(mat, outlink_thickness);
+  }
+  if (BLI_listbase_count(&node->inputs) > 4 && in[4].link) {
+    GPU_link(mat, "node_output_material_depth_offset", in[4].link, &outlink_depth_offset);
+    GPU_material_output_depth_offset(mat, outlink_depth_offset);
   }
   if (node->id != nullptr) {
     GPU_material_flag_set(mat, GPU_MATFLAG_NPR);

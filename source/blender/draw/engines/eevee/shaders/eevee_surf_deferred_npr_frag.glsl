@@ -16,6 +16,7 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_surf_npr)
 
 #include "draw_view_lib.glsl"
 #include "eevee_deferred_combine_lib.glsl"
+#include "eevee_gbuffer_read_lib.glsl"
 #include "eevee_nodetree_frag_lib.glsl"
 #include "eevee_renderpass_lib.glsl"
 #include "eevee_sampling_lib.glsl"
@@ -130,7 +131,21 @@ float4 TextureHandle_eval_impl(TextureHandle tex, float2 offset, bool texel_offs
       case TEX_HANDLE_SPECULAR_INDIRECT:
         return swap_alpha(g_specular_indirect);
       case TEX_HANDLE_POSITION:
+#ifdef MAT_DEPTH_OFFSET
+      {
+        int2 texel = int2(gl_FragCoord.xy);
+        int2 extent = textureSize(radiance_tx, 0);
+        float depth = texelFetch(hiz_tx, texel, 0).r;
+#  ifdef MAT_DEPTH_OFFSET_NO_LIGHTING
+        const gbuffer::Layers gbuf = gbuffer::read_layers(texel);
+        depth = gbuffer::read_surface_depth(gbuf.header, texel, depth);
+#  endif
+        float2 screen_uv = (float2(texel) + 0.5f) / float2(extent);
+        return float4(drw_point_screen_to_world(float3(screen_uv, depth)), 0.0f);
+      }
+#else
         return float4(g_data.P, 0.0f);
+#endif
       case TEX_HANDLE_NORMAL:
         return float4(g_average_normal, 0.0f);
       default:
@@ -152,6 +167,10 @@ float4 TextureHandle_eval_impl(TextureHandle tex, float2 offset, bool texel_offs
   texel = clamp(texel, int2(0), extent - int2(1));
 
   float depth = texelFetch(hiz_tx, texel, 0).r;
+#ifdef MAT_DEPTH_OFFSET_NO_LIGHTING
+  const gbuffer::Layers gbuf = gbuffer::read_layers(texel);
+  depth = gbuffer::read_surface_depth(gbuf.header, texel, depth);
+#endif
   float2 screen_uv = (float2(texel) + 0.5f) / float2(extent);
 
   switch (tex.type) {
@@ -341,6 +360,11 @@ void main()
 {
   material_surface_cull_discard();
   init_globals();
+
+#ifdef MAT_DEPTH_OFFSET
+  material_depth_offset_write();
+#endif
+
   int2 texel = int2(gl_FragCoord.xy);
   DeferredCombine dc = deferred_combine(texel);
   deferred_combine_clamp(dc);

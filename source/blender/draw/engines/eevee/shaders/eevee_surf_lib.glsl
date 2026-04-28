@@ -15,6 +15,7 @@ SHADER_LIBRARY_CREATE_INFO(eevee_global_ubo)
 #include "gpu_shader_codegen_lib.glsl"
 #include "gpu_shader_math_base_lib.glsl"
 #include "gpu_shader_math_vector_safe_lib.glsl"
+#include "eevee_reverse_z_lib.glsl"
 
 #define MAT_SURFACE_CULL_NONE 0
 #define MAT_SURFACE_CULL_BACK 1
@@ -120,6 +121,75 @@ void init_interface()
   drw_ResourceID_iface.resource_index = drw_resource_id_raw();
 #endif
 }
+
+#if defined(GPU_FRAGMENT_SHADER) && defined(MAT_DEPTH_OFFSET)
+bool material_depth_offset_is_zero(float depth_offset)
+{
+  return abs(depth_offset) <= 1.0e-8f;
+}
+
+float material_depth_offset_view_z(float depth_offset)
+{
+  float vP_z = drw_depth_screen_to_view(reverse_z::read(gl_FragCoord.z));
+  return vP_z + depth_offset;
+}
+
+bool material_depth_offset_is_clipped(float depth_offset)
+{
+  if (material_depth_offset_is_zero(depth_offset)) {
+    return false;
+  }
+  float vP_z = material_depth_offset_view_z(depth_offset);
+  return vP_z > drw_view_near() || vP_z < drw_view_far();
+}
+
+float material_depth_offset_frag_depth(float depth_offset)
+{
+  if (material_depth_offset_is_zero(depth_offset)) {
+    return gl_FragCoord.z;
+  }
+  float vP_z = material_depth_offset_view_z(depth_offset);
+  return saturate(reverse_z::read(drw_depth_view_to_screen(vP_z)));
+}
+
+float material_depth_offset_screen_depth(float depth_offset)
+{
+  return reverse_z::read(material_depth_offset_frag_depth(depth_offset));
+}
+
+float3 material_depth_offset_world_position_from_depth(float screen_depth)
+{
+  float2 screen_uv = gl_FragCoord.xy * uniform_buf.volumes.main_view_extent_inv;
+  return drw_point_screen_to_world(float3(screen_uv, screen_depth));
+}
+
+float3 material_depth_offset_world_position(float depth_offset)
+{
+  return material_depth_offset_world_position_from_depth(
+      material_depth_offset_screen_depth(depth_offset));
+}
+
+float material_depth_offset_frag_depth()
+{
+  return material_depth_offset_frag_depth(nodetree_depth_offset());
+}
+
+#  if !defined(MAT_SHADOW) || defined(SHADOW_UPDATE_TBDR)
+void material_depth_offset_write(float depth_offset)
+{
+  if (material_depth_offset_is_clipped(depth_offset)) {
+    gpu_discard_fragment();
+    return;
+  }
+  gl_FragDepth = material_depth_offset_frag_depth(depth_offset);
+}
+
+void material_depth_offset_write()
+{
+  material_depth_offset_write(nodetree_depth_offset());
+}
+#  endif
+#endif
 
 #if defined(GPU_VERTEX_SHADER) && defined(MAT_SHADOW)
 void shadow_viewport_layer_set(int view_id, int lod)

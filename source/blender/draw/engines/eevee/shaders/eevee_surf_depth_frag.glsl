@@ -60,6 +60,10 @@ void main()
   }
 #endif
 
+#if defined(MAT_DEPTH_OFFSET) && !defined(MAT_TRANSPARENT)
+  init_globals();
+#endif
+
 #ifdef MAT_CLIP_PLANE
   /* Do not use hardware clip planes as they modify the rasterization (some GPUs add vertices).
    * This would in turn create a discrepancy between the pre-pass depth and the G-buffer depth
@@ -70,9 +74,22 @@ void main()
   }
 #endif
 
+#ifdef MAT_DEPTH_OFFSET
+  float depth_offset = nodetree_depth_offset();
+#endif
+
 #ifdef MAT_VELOCITY
+#  ifdef MAT_DEPTH_OFFSET
+  out_velocity = velocity_surface_depth_offset(
+      interp.P + motion.prev, interp.P, interp.P + motion.next, depth_offset);
+#  else
   out_velocity = velocity_surface(interp.P + motion.prev, interp.P, interp.P + motion.next);
+#  endif
   out_velocity = velocity_pack(out_velocity);
+#endif
+
+#ifdef MAT_DEPTH_OFFSET
+  material_depth_offset_write(depth_offset);
 #endif
 
   /* Always written, but may be optimized out by frame-buffer/subpass setup. */

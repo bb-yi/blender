@@ -36,3 +36,9 @@ void node_output_material_thickness(float thickness, float &out_thickness)
    * which the object is usually viewed at. */
   out_thickness = min(min(thickness_vec.x, thickness_vec.y), thickness_vec.z);
 }
+
+[[node]]
+void node_output_material_depth_offset(float depth_offset, float &out_depth_offset)
+{
+  out_depth_offset = depth_offset;
+}

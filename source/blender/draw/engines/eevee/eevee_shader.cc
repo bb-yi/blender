@@ -18,6 +18,8 @@
 
 #include "gpu_shader_create_info.hh"
 
+#include "NOD_shader.h"
+
 #include "eevee_shader.hh"
 
 #include "eevee_shadow.hh"
@@ -27,6 +29,166 @@
 #include "BLI_set.hh"
 
 namespace blender::eevee {
+
+static bool material_output_has_depth_offset(bNodeTree *nodetree)
+{
+  if (nodetree == nullptr) {
+    return false;
+  }
+  nodetree->ensure_topology_cache();
+  bNode *output = ntreeShaderOutputNode(nodetree, SHD_OUTPUT_EEVEE);
+  if (output == nullptr) {
+    return false;
+  }
+  const bNodeSocket *depth_offset = output->input_by_identifier("Depth Offset");
+  return depth_offset != nullptr && depth_offset->is_available() &&
+         depth_offset->is_directly_linked();
+}
+
+static bool material_depth_offset_affects_lighting(const blender::Material *material)
+{
+  return material == nullptr || material->depth_offset_affect_lighting != 0;
+}
+
+static bool material_pipeline_supports_depth_offset(eMaterialPipeline pipeline_type,
+                                                    eMaterialGeometry geometry_type)
+{
+  return geometry_type_has_surface(geometry_type) &&
+         ELEM(pipeline_type,
+              MAT_PIPE_PREPASS_FORWARD_VELOCITY,
+              MAT_PIPE_PREPASS_DEFERRED_VELOCITY,
+              MAT_PIPE_PREPASS_OVERLAP,
+              MAT_PIPE_PREPASS_FORWARD,
+              MAT_PIPE_PREPASS_DEFERRED,
+              MAT_PIPE_PREPASS_PLANAR,
+              MAT_PIPE_DEFERRED,
+              MAT_PIPE_DEFERRED_NPR,
+              MAT_PIPE_FORWARD);
+}
+
+static const GPUMaterialGeneratedSource *material_generated_source_find(
+    const GPUMaterial *gpumat, const StringRefNull filename)
+{
+  for (int i = 0; i < GPU_material_generated_source_count(gpumat); i++) {
+    const GPUMaterialGeneratedSource *generated_source = GPU_material_generated_source_get(gpumat,
+                                                                                           i);
+    if (generated_source != nullptr && generated_source->filename == filename) {
+      return generated_source;
+    }
+  }
+  return nullptr;
+}
+
+static bool material_dependency_tree_contains(const GPUMaterial *gpumat,
+                                              const StringRefNull dependency_name,
+                                              const StringRefNull needle,
+                                              Set<std::string> &visited)
+{
+  if (dependency_name == needle) {
+    return true;
+  }
+  if (dependency_name.is_empty() || !visited.add(std::string(dependency_name.c_str()))) {
+    return false;
+  }
+  const GPUMaterialGeneratedSource *generated_source = material_generated_source_find(
+      gpumat, dependency_name);
+  if (generated_source == nullptr) {
+    return false;
+  }
+  for (const std::string &dependency : generated_source->dependencies) {
+    if (material_dependency_tree_contains(
+            gpumat, StringRefNull(dependency.c_str()), needle, visited))
+    {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool material_graph_dependency_tree_contains(const GPUMaterial *gpumat,
+                                                    const GPUGraphOutput &graph,
+                                                    const StringRefNull needle)
+{
+  Set<std::string> visited;
+  for (const StringRefNull dependency_name : graph.dependencies) {
+    if (material_dependency_tree_contains(gpumat, dependency_name, needle, visited)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool material_dependency_tree_source_contains(const GPUMaterial *gpumat,
+                                                     const StringRefNull dependency_name,
+                                                     const StringRefNull needle,
+                                                     Set<std::string> &visited)
+{
+  if (dependency_name.is_empty() || !visited.add(std::string(dependency_name.c_str()))) {
+    return false;
+  }
+  const GPUMaterialGeneratedSource *generated_source = material_generated_source_find(
+      gpumat, dependency_name);
+  if (generated_source == nullptr) {
+    return false;
+  }
+  if (generated_source->content.find(needle.c_str()) != std::string::npos) {
+    return true;
+  }
+  for (const std::string &dependency : generated_source->dependencies) {
+    if (material_dependency_tree_source_contains(
+            gpumat, StringRefNull(dependency.c_str()), needle, visited))
+    {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool material_graph_dependency_source_contains(const GPUMaterial *gpumat,
+                                                      const GPUGraphOutput &graph,
+                                                      const StringRefNull needle)
+{
+  Set<std::string> visited;
+  for (const StringRefNull dependency_name : graph.dependencies) {
+    if (material_dependency_tree_source_contains(gpumat, dependency_name, needle, visited)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool material_graph_uses_glsl_light_access(const GPUMaterial *gpumat,
+                                                  const GPUGraphOutput &graph)
+{
+  return material_graph_dependency_tree_contains(
+      gpumat, graph, "gpu_shader_material_glsl_light_access.glsl");
+}
+
+static bool material_graph_serialized_contains(const GPUGraphOutput &graph,
+                                               const StringRefNull needle)
+{
+  return graph.serialized.find(needle.c_str()) != std::string::npos;
+}
+
+static bool material_depth_offset_graph_has_unsupported_dependencies(const GPUMaterial *gpumat,
+                                                                     const GPUGraphOutput &graph)
+{
+  return material_graph_serialized_contains(graph, "node_shader_to_rgba(") ||
+         material_graph_serialized_contains(graph, "node_shader_info(") ||
+         material_graph_serialized_contains(graph, "node_scene_color(") ||
+         material_graph_serialized_contains(graph, "node_screenspace_info(") ||
+         material_graph_serialized_contains(graph, "node_light_probe_color(") ||
+         material_graph_dependency_source_contains(gpumat, graph, "glsl_ambient_lighting") ||
+         material_graph_dependency_source_contains(gpumat, graph, "glsl_light_shadow");
+}
+
+static bool material_depth_offset_graph_uses_supported_light_access(
+    const GPUMaterial *gpumat, const std::optional<GPUGraphOutput> &graph)
+{
+  return graph.has_value() &&
+         !material_depth_offset_graph_has_unsupported_dependencies(gpumat, *graph) &&
+         material_graph_uses_glsl_light_access(gpumat, *graph);
+}
 
 /* -------------------------------------------------------------------- */
 /** \name Module
@@ -726,7 +888,8 @@ static int material_texture_reserved_slot_last(const eMaterialPipeline pipeline_
 static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &info,
                                               eMaterialPipeline pipeline_type,
                                               eMaterialGeometry geometry_type,
-                                              const bool use_shader_to_rgba)
+                                              const bool use_shader_to_rgba,
+                                              const bool has_depth_offset)
 {
   using namespace blender::gpu::shader;
 
@@ -797,20 +960,24 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
           break;
         case MAT_PIPE_DEFERRED:
           if (use_shader_to_rgba) {
-            pipeline_info_name = "eevee_surf_deferred_hybrid";
+            pipeline_info_name = has_depth_offset ? "eevee_surf_deferred_hybrid_depth_offset" :
+                                                    "eevee_surf_deferred_hybrid";
             info.name_ += "_deferred_hybrid";
           }
           else {
-            pipeline_info_name = "eevee_surf_deferred";
+            pipeline_info_name = has_depth_offset ? "eevee_surf_deferred_depth_offset" :
+                                                    "eevee_surf_deferred";
             info.name_ += "_deferred";
           }
           break;
         case MAT_PIPE_DEFERRED_NPR:
-          pipeline_info_name = "eevee_surf_npr";
+          pipeline_info_name = has_depth_offset ? "eevee_surf_npr_depth_offset" :
+                                                  "eevee_surf_npr";
           info.name_ += "_deferred_npr";
           break;
         case MAT_PIPE_FORWARD:
-          pipeline_info_name = "eevee_surf_forward";
+          pipeline_info_name = has_depth_offset ? "eevee_surf_forward_depth_offset" :
+                                                  "eevee_surf_forward";
           info.name_ += "_forward";
           break;
         default:
@@ -873,7 +1040,8 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   using namespace blender::gpu::shader;
 
   uint64_t shader_uuid = GPU_material_uuid_get(gpumat);
-  const bool use_shader_to_rgba = GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_TO_RGBA);
+  const bool use_shader_to_rgba = material_graph_serialized_contains(codegen_->surface,
+                                                                     "node_shader_to_rgba(");
 
   eMaterialPipeline pipeline_type;
   eMaterialGeometry geometry_type;
@@ -882,6 +1050,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   eMaterialProbe probe_capture;
   bool transparent_shadows;
   bool use_outline;
+  bool uuid_depth_offset_affect_lighting;
   material_type_from_shader_uuid(shader_uuid,
                                  pipeline_type,
                                  geometry_type,
@@ -889,7 +1058,9 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
                                  thickness_type,
                                  probe_capture,
                                  transparent_shadows,
-                                 use_outline);
+                                 use_outline,
+                                 uuid_depth_offset_affect_lighting);
+  UNUSED_VARS(uuid_depth_offset_affect_lighting);
 
   GPUCodegenOutput &codegen = *codegen_;
   ShaderCreateInfo &info = *reinterpret_cast<ShaderCreateInfo *>(codegen.create_info);
@@ -897,17 +1068,6 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   /* Material generated sources can use arbitrary per-material names, while the GPU dependency
    * resolver only knows startup-registered files. Inline the referenced generated blocks here and
    * keep only real library files in the dependency list. */
-  auto find_generated_source = [&](const StringRefNull filename) -> const GPUMaterialGeneratedSource * {
-    for (int i = 0; i < GPU_material_generated_source_count(gpumat); i++) {
-      const GPUMaterialGeneratedSource *generated_source = GPU_material_generated_source_get(gpumat,
-                                                                                             i);
-      if (generated_source != nullptr && generated_source->filename == filename) {
-        return generated_source;
-      }
-    }
-    return nullptr;
-  };
-
   auto append_generated_dependency =
       [&](auto &&self,
           const StringRefNull dependency_name,
@@ -918,7 +1078,8 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       return;
     }
 
-    const GPUMaterialGeneratedSource *generated_source = find_generated_source(dependency_name);
+    const GPUMaterialGeneratedSource *generated_source = material_generated_source_find(
+        gpumat, dependency_name);
     if (generated_source == nullptr) {
       r_static_dependencies.add(dependency_name);
       return;
@@ -1036,10 +1197,47 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     }
   }
 
+  const blender::Material *blender_mat = GPU_material_get_material(gpumat);
+  const bool depth_offset_affect_lighting = material_depth_offset_affects_lighting(blender_mat);
+  const bool has_depth_offset = GPU_material_has_depth_offset_output(gpumat) &&
+                                material_pipeline_supports_depth_offset(pipeline_type,
+                                                                        geometry_type);
+  const bool depth_offset_uses_light_access =
+      has_depth_offset &&
+      material_depth_offset_graph_uses_supported_light_access(gpumat, codegen_->depth_offset);
+  bool material_pass_uses_glsl_light_access =
+      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD) &&
+      (material_graph_uses_glsl_light_access(gpumat, codegen.surface) ||
+       material_graph_uses_glsl_light_access(gpumat, codegen.npr) ||
+       material_graph_uses_glsl_light_access(gpumat, codegen.filter) ||
+       material_graph_uses_glsl_light_access(gpumat, codegen.thickness) ||
+       material_graph_uses_glsl_light_access(gpumat, codegen.volume));
+  for (const GPUGraphOutput &graph : codegen.material_functions) {
+    material_pass_uses_glsl_light_access |=
+        material_graph_uses_glsl_light_access(gpumat, graph);
+  }
+  const bool uses_glsl_light_access = material_pass_uses_glsl_light_access ||
+                                      depth_offset_uses_light_access;
+  const bool separate_depth_offset_lighting =
+      has_depth_offset && !depth_offset_affect_lighting &&
+      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR);
+
   SlotAllocator slots = add_pipeline_create_info(
-      info, pipeline_type, geometry_type, use_shader_to_rgba);
+      info, pipeline_type, geometry_type, use_shader_to_rgba, has_depth_offset);
   slots.reserve_sampler_range(MATERIAL_TEXTURE_RESERVED_SLOT_FIRST,
                               material_texture_reserved_slot_last(pipeline_type, geometry_type));
+  if (has_depth_offset) {
+    info.define("MAT_DEPTH_OFFSET");
+    if (separate_depth_offset_lighting) {
+      info.define("MAT_DEPTH_OFFSET_NO_LIGHTING");
+    }
+    if (pipeline_type != MAT_PIPE_SHADOW ||
+        ShadowModule::shadow_technique == ShadowTechnique::TILE_COPY)
+    {
+      info.early_fragment_test(false);
+      info.depth_write(DepthWrite::ANY);
+    }
+  }
 
   for (auto &resource : info.batch_resources_) {
     if (resource.bind_type == ShaderCreateInfo::Resource::BindType::SAMPLER) {
@@ -1060,7 +1258,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     info.define("MAT_OUTLINE_SUPPORT");
   }
 
-  if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_TO_RGBA)) {
+  if (use_shader_to_rgba) {
     info.define("MAT_SHADER_TO_RGBA");
   }
 
@@ -1078,8 +1276,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   }
 
   if (ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD) &&
-      (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_TO_RGBA) ||
-       GPU_material_flag_get(gpumat, GPU_MATFLAG_SCREENSPACE_INFO)))
+      (use_shader_to_rgba || GPU_material_flag_get(gpumat, GPU_MATFLAG_SCREENSPACE_INFO)))
   {
     info.additional_info("eevee_hiz_prev_data");
     info.additional_info("eevee_previous_layer_radiance");
@@ -1092,12 +1289,16 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     info.additional_info("eevee_light_data");
     info.additional_info("eevee_shadow_data");
   }
-  if (GPU_material_flag_get(gpumat, GPU_MATFLAG_GLSL_LIGHT_ACCESS) &&
-      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD))
-  {
+  if (uses_glsl_light_access) {
     info.define("MAT_GLSL_LIGHT_ACCESS");
+    if (depth_offset_uses_light_access) {
+      info.define("LIGHT_ITER_FORCE_NO_CULLING");
+    }
     info.additional_info("eevee_light_data");
-    info.additional_info("eevee_shadow_data");
+    if (material_pass_uses_glsl_light_access) {
+      info.define("MAT_GLSL_LIGHT_SHADOW_ACCESS");
+      info.additional_info("eevee_shadow_data");
+    }
   }
   if ((GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
        GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR_FOREACH_LIGHT) ||
@@ -1215,8 +1416,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     }
   }
 
-  if ((pipeline_type == MAT_PIPE_FORWARD) ||
-      GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_TO_RGBA))
+  if ((pipeline_type == MAT_PIPE_FORWARD) || use_shader_to_rgba)
   {
     switch (closure_bin_count) {
       case 0:
@@ -1452,17 +1652,22 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     if (use_ao_node) {
       dependencies_set.add("eevee_ambient_occlusion_lib.glsl");
     }
-    if ((GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
-         GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR_FOREACH_LIGHT) ||
-         GPU_material_flag_get(gpumat, GPU_MATFLAG_GLSL_LIGHT_ACCESS)) &&
-        ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD))
-
-    {
+    const bool pipeline_uses_light_eval =
+        (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
+         GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR_FOREACH_LIGHT)) &&
+        ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD);
+    if (pipeline_uses_light_eval || material_pass_uses_glsl_light_access) {
       dependencies_set.add("eevee_light_eval_lib.glsl");
       dependencies_set.add("eevee_light_iter_lib.glsl");
       dependencies_set.add("eevee_light_lib.glsl");
       dependencies_set.add("eevee_shadow_tracing_lib.glsl");
-
+    }
+    if (uses_glsl_light_access) {
+      dependencies_set.add("eevee_light_iter_lib.glsl");
+      dependencies_set.add("eevee_light_lib.glsl");
+    }
+    if (material_pass_uses_glsl_light_access) {
+      dependencies_set.add("eevee_shadow_tracing_lib.glsl");
     }
     if ((GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
          GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR_FOREACH_LIGHT) ||
@@ -1494,6 +1699,14 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
         codegen.filter.dependencies, dependencies_set, emitted_generated_sources, generated_source_block);
     append_graph_dependencies(
         codegen.thickness.dependencies, dependencies_set, emitted_generated_sources, generated_source_block);
+    if (has_depth_offset && codegen.depth_offset.has_value() &&
+        !material_depth_offset_graph_has_unsupported_dependencies(gpumat, *codegen.depth_offset))
+    {
+      append_graph_dependencies(codegen.depth_offset->dependencies,
+                                dependencies_set,
+                                emitted_generated_sources,
+                                generated_source_block);
+    }
     append_graph_dependencies(
         codegen.volume.dependencies, dependencies_set, emitted_generated_sources, generated_source_block);
 
@@ -1561,6 +1774,19 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     }
     frag_gen << "}\n\n";
 
+    if (has_depth_offset) {
+      BLI_assert(codegen.depth_offset.has_value());
+      frag_gen << "float nodetree_depth_offset()\n";
+      frag_gen << "{\n";
+      if (material_depth_offset_graph_has_unsupported_dependencies(gpumat, *codegen.depth_offset)) {
+        frag_gen << "return 0.0f;\n";
+      }
+      else {
+        frag_gen << codegen.depth_offset->serialized_or_default("return 0.0f;\n");
+      }
+      frag_gen << "}\n\n";
+    }
+
     frag_gen << "Closure nodetree_volume()\n";
     frag_gen << "{\n";
     frag_gen << "  closure_weights_reset(0.0);\n";
@@ -1624,6 +1850,7 @@ static GPUPass *pass_replacement_cb(void *void_thunk, GPUMaterial *mat)
   eMaterialProbe probe_capture;
   bool transparent_shadows;
   bool use_outline;
+  bool depth_offset_affect_lighting;
   material_type_from_shader_uuid(shader_uuid,
                                  pipeline_type,
                                  geometry_type,
@@ -1631,7 +1858,9 @@ static GPUPass *pass_replacement_cb(void *void_thunk, GPUMaterial *mat)
                                  thickness_type,
                                  probe_capture,
                                  transparent_shadows,
-                                 use_outline);
+                                 use_outline,
+                                 depth_offset_affect_lighting);
+  UNUSED_VARS(depth_offset_affect_lighting);
 
   bool is_shadow_pass = pipeline_type == eMaterialPipeline::MAT_PIPE_SHADOW;
   bool is_prepass = ELEM(pipeline_type,
@@ -1648,11 +1877,13 @@ static GPUPass *pass_replacement_cb(void *void_thunk, GPUMaterial *mat)
   bool has_shadow_transparency = has_transparency && transparent_shadows;
   bool has_raytraced_transmission = blender_mat && (blender_mat->blend_flag & MA_BL_SS_REFRACTION);
   bool has_raycast = GPU_material_flag_get(mat, GPU_MATFLAG_RAYCAST);
+  bool has_depth_offset = GPU_material_has_depth_offset_output(mat);
 
   bool can_use_default = (is_shadow_pass &&
                           (!has_vertex_displacement && !has_shadow_transparency)) ||
                          (is_prepass && (!has_vertex_displacement && !has_transparency &&
-                                         !has_raytraced_transmission && !has_raycast));
+                                         !has_raytraced_transmission && !has_raycast &&
+                                         !has_depth_offset));
   if (can_use_default) {
     GPUMaterial *mat = thunk->shader_module->material_shader_get(thunk->default_mat,
                                                                  thunk->default_mat->nodetree,
@@ -1698,14 +1929,18 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
 {
   eMaterialDisplacement displacement_type = to_displacement_type(blender_mat->displacement_method);
   eMaterialThickness thickness_type = to_thickness_type(blender_mat->thickness_mode);
+  const bool has_depth_offset_output = material_output_has_depth_offset(nodetree) &&
+                                       material_pipeline_supports_depth_offset(pipeline_type,
+                                                                               geometry_type);
   const bool compile_npr_graph = (pipeline_type == MAT_PIPE_DEFERRED_NPR);
   const bool needs_npr_vertex_displacement = compile_npr_graph &&
                                              (displacement_type != MAT_DISPLACEMENT_BUMP);
+  const bool needs_npr_depth_offset = compile_npr_graph && has_depth_offset_output;
   /* NPR passes normally only need the attached NPR tree, but true displacement lives on the
-   * primary material output. Compile that graph too so the NPR pass uses the same deformed
-   * geometry as the prepass/shading passes. */
+   * primary material output. Depth Offset is also a material output and must use the same custom
+   * depth for DEPTH_EQUAL and screen-space position reads. */
   const bool compile_surface_graph = (pipeline_type != MAT_PIPE_DEFERRED_NPR) ||
-                                     needs_npr_vertex_displacement;
+                                     needs_npr_vertex_displacement || needs_npr_depth_offset;
 
   uint64_t shader_uuid = shader_uuid_from_material_type(
       pipeline_type,
@@ -1714,7 +1949,8 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
       thickness_type,
       probe_capture,
       blender_mat->blend_flag,
-      use_outline);
+      use_outline,
+      material_depth_offset_affects_lighting(blender_mat));
 
   bool is_default_material = default_mat == nullptr;
   BLI_assert(blender_mat != default_mat);

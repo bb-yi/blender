@@ -22,6 +22,23 @@
 
 namespace blender::eevee {
 
+static bool material_depth_offset_affects_lighting(const blender::Material &material)
+{
+  return material.depth_offset_affect_lighting != 0;
+}
+
+static bool material_has_depth_offset_output(const MaterialPass &pass)
+{
+  return (pass.gpumat != nullptr) && GPU_material_has_depth_offset_output(pass.gpumat);
+}
+
+static bool material_depth_offset_disables_shadow(const blender::Material &material,
+                                                  const MaterialPass &surface_pass)
+{
+  return material_depth_offset_affects_lighting(material) &&
+         material_has_depth_offset_output(surface_pass);
+}
+
 static bool material_has_flag(const MaterialPass &pass, eGPUMaterialFlag flag)
 {
   return (pass.gpumat != nullptr) && GPU_material_flag_get(pass.gpumat, flag);
@@ -159,6 +176,9 @@ void MaterialModule::begin_sync()
   has_time_dependent_materials_ = false;
 
   material_override = DEG_get_evaluated(inst_.depsgraph, inst_.view_layer->mat_override);
+
+  depth_offset_shadow_disabled_mats_ = current_depth_offset_shadow_disabled_mats_;
+  current_depth_offset_shadow_disabled_mats_.clear();
 
   uint64_t next_update = GPU_pass_global_compilation_count();
   gpu_pass_last_update_ = gpu_pass_next_update_;
@@ -418,7 +438,8 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
                                   (blender_mat->displacement_method != MA_DISPLACEMENT_BUMP);
     const bool has_volume = GPU_material_has_volume_output(matpass.gpumat);
 
-    if (((pipeline_type == MAT_PIPE_SHADOW) && (is_transparent || has_displacement)) || has_volume)
+    if (((pipeline_type == MAT_PIPE_SHADOW) && (is_transparent || has_displacement)) ||
+        has_volume)
     {
       /* WORKAROUND: This is to avoid lingering shadows from default material.
        * Ideally, we should tag the caster object to update only the needed areas but that's a bit
@@ -666,7 +687,22 @@ Material &MaterialModule::material_sync(Object *ob,
       }
     }
 
-    if (!(ob->visibility_flag & OB_HIDE_SHADOW)) {
+    const bool disable_depth_offset_shadow = material_depth_offset_disables_shadow(*blender_mat,
+                                                                                  mat.shading);
+    /* Shadow maps cannot represent this material mode consistently because lighting evaluates the
+     * depth-offset position while the caster geometry remains at the original surface. */
+    const bool is_shadow_caster = !(ob->visibility_flag & OB_HIDE_SHADOW);
+    if (is_shadow_caster) {
+      const bool was_depth_offset_shadow_disabled = depth_offset_shadow_disabled_mats_.contains(
+          blender_mat);
+      if (disable_depth_offset_shadow) {
+        current_depth_offset_shadow_disabled_mats_.add(blender_mat);
+      }
+      if (was_depth_offset_shadow_disabled != disable_depth_offset_shadow) {
+        inst_.shadows.reset();
+      }
+    }
+    if (is_shadow_caster && !disable_depth_offset_shadow) {
       mat.shadow = material_pass_get(ob, blender_mat, MAT_PIPE_SHADOW, geometry_type);
     }
     else {
@@ -676,7 +712,8 @@ Material &MaterialModule::material_sync(Object *ob,
     mat.is_alpha_blend_transparent = use_forward_pipeline &&
                                      GPU_material_flag_get(mat.shading.gpumat,
                                                            GPU_MATFLAG_TRANSPARENT);
-    mat.has_transparent_shadows = blender_mat->blend_flag & MA_BL_TRANSPARENT_SHADOW &&
+    mat.has_transparent_shadows = !disable_depth_offset_shadow &&
+                                  ((blender_mat->blend_flag & MA_BL_TRANSPARENT_SHADOW) != 0) &&
                                   GPU_material_flag_get(mat.shading.gpumat,
                                                         GPU_MATFLAG_TRANSPARENT);
 

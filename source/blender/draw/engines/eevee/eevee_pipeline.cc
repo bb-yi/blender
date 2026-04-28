@@ -59,6 +59,14 @@ static PassType *material_surface_cull_pass_get(PassType *double_sided_ps,
   }
 }
 
+static bool material_uses_depth_offset_lighting_data(const blender::Material *material,
+                                                     GPUMaterial *gpumat)
+{
+  return material != nullptr && gpumat != nullptr &&
+         material->depth_offset_affect_lighting == 0 &&
+         GPU_material_has_depth_offset_output(gpumat);
+}
+
 /* -------------------------------------------------------------------- */
 /** \name World Pipeline
  *
@@ -481,6 +489,7 @@ void ForwardPipeline::sync()
       prepass_ps_.bind_resources(inst_.velocity);
       prepass_ps_.bind_resources(inst_.sampling);
       prepass_ps_.bind_resources(inst_.render_textures);
+      prepass_ps_.bind_resources(inst_.lights);
     }
 
     prepass_ps_.setup_subpasses(DRW_STATE_WRITE_DEPTH | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
@@ -886,6 +895,7 @@ void DeferredLayerBase::gbuffer_pass_sync(Instance &inst)
 
   closure_bits_ = CLOSURE_NONE;
   closure_count_ = 0;
+  use_depth_offset_lighting_data_ = false;
   radiance_behind_tx_ = nullptr;
 }
 
@@ -947,6 +957,7 @@ void DeferredLayer::begin_sync()
     prepass_ps_.bind_resources(inst_.velocity);
     prepass_ps_.bind_resources(inst_.sampling);
     prepass_ps_.bind_resources(inst_.render_textures);
+    prepass_ps_.bind_resources(inst_.lights);
 
     /* Clear stencil buffer so that prepass can tag it. Then draw a full-screen triangle that will
      * clear AOVs for all the pixels touched by this layer. */
@@ -1091,10 +1102,12 @@ void DeferredLayer::end_sync(bool is_first_pass,
         const bool use_split_indirect = do_split_direct_indirect_radiance(inst_);
         const bool use_lightprobe_eval = do_merge_direct_indirect_eval(inst_);
         PassSimple::Sub &sub = pass.sub("Eval.Light");
-        /* Use depth test to reject background pixels which have not been stencil cleared. */
+        /* Stencil rejects pixels without GBuffer data. Do not also depth-test this fullscreen pass:
+         * materials that write gl_FragDepth can move the prepass depth outside the fullscreen
+         * triangle compare range, leaving valid GBuffer pixels unlit. */
         /* WORKAROUND: Avoid rasterizer discard by enabling stencil write, but the shaders actually
          * use no fragment output. */
-        sub.state_set(DRW_STATE_WRITE_STENCIL | DRW_STATE_STENCIL_EQUAL | DRW_STATE_DEPTH_GREATER);
+        sub.state_set(DRW_STATE_WRITE_STENCIL | DRW_STATE_STENCIL_EQUAL);
         sub.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);
         sub.bind_image(RBUFS_COLOR_SLOT, &inst_.render_buffers.rp_color_tx);
         sub.bind_image(RBUFS_VALUE_SLOT, &inst_.render_buffers.rp_value_tx);
@@ -1208,11 +1221,11 @@ PassMain::Sub *DeferredLayer::material_add(blender::Material *blender_mat, GPUMa
   }
   closure_bits_ |= closure_bits;
   closure_count_ = max_ii(closure_count_, count_bits_i(closure_bits));
+  use_depth_offset_lighting_data_ |= material_uses_depth_offset_lighting_data(blender_mat, gpumat);
   has_outline_ = has_outline_ || inst_.materials.material_uses_outline_control(blender_mat);
 
   bool has_shader_to_rgba = (closure_bits & CLOSURE_SHADER_TO_RGBA) != 0;
   bool use_thickness_from_shadow = (blender_mat->blend_flag & MA_BL_THICKNESS_FROM_SHADOW) != 0;
-
   PassMain::Sub *pass = has_shader_to_rgba ?
                             material_surface_cull_pass_get(gbuffer_double_sided_hybrid_ps_,
                                                            gbuffer_single_sided_hybrid_ps_,
@@ -1239,6 +1252,7 @@ PassMain::Sub *DeferredLayer::material_add(blender::Material *blender_mat, GPUMa
 PassMain::Sub *DeferredLayer::npr_add(blender::Material *blender_mat, GPUMaterial *gpumat)
 {
   BLI_assert(GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR));
+  use_depth_offset_lighting_data_ |= material_uses_depth_offset_lighting_data(blender_mat, gpumat);
   has_outline_ = has_outline_ || inst_.materials.material_uses_outline_control(blender_mat);
   PassMain::Sub *pass = material_surface_cull_pass_get(
       npr_double_sided_ps_, npr_single_sided_ps_, npr_front_cull_ps_, blender_mat);
@@ -1800,6 +1814,7 @@ void DeferredProbePipeline::begin_sync()
     pass.bind_resources(inst_.uniform_data);
     pass.bind_resources(inst_.velocity);
     pass.bind_resources(inst_.sampling);
+    pass.bind_resources(inst_.lights);
   }
   pass.setup_subpasses(DRW_STATE_WRITE_DEPTH | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
                        inst_.film.depth.test_state);
@@ -1865,6 +1880,8 @@ PassMain::Sub *DeferredProbePipeline::material_add(blender::Material *blender_ma
   }
   opaque_layer_.closure_bits_ |= closure_bits;
   opaque_layer_.closure_count_ = max_ii(opaque_layer_.closure_count_, count_bits_i(closure_bits));
+  opaque_layer_.use_depth_offset_lighting_data_ |= material_uses_depth_offset_lighting_data(
+      blender_mat, gpumat);
 
   bool has_shader_to_rgba = (closure_bits & CLOSURE_SHADER_TO_RGBA) != 0;
 
@@ -1888,6 +1905,8 @@ PassMain::Sub *DeferredProbePipeline::npr_add(blender::Material *blender_mat, GP
                                                        opaque_layer_.npr_single_sided_ps_,
                                                        opaque_layer_.npr_front_cull_ps_,
                                                        blender_mat);
+  opaque_layer_.use_depth_offset_lighting_data_ |= material_uses_depth_offset_lighting_data(
+      blender_mat, gpumat);
 
   PassMain::Sub *material_ps = &pass->sub(GPU_material_get_name(gpumat));
   GPUPass *gpupass = GPU_material_get_pass(gpumat);
@@ -1908,6 +1927,7 @@ void DeferredProbePipeline::render(View &view,
   GPU_debug_group_begin("Probe.Render");
 
   opaque_layer_.radiance_behind_tx_ = dummy_black;
+  inst_.lights.set_view(view, extent);
 
   const eGPUTextureUsage usage_rw = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE;
   for (int i = 0; i < ARRAY_SIZE(direct_radiance_txs_); i++) {
@@ -1924,7 +1944,6 @@ void DeferredProbePipeline::render(View &view,
   inst_.hiz_buffer.set_source(&inst_.render_buffers.depth_tx);
   inst_.hiz_buffer.update();
 
-  inst_.lights.set_view(view, extent);
   inst_.shadows.set_view(view, extent);
   inst_.volume_probes.set_view(view);
   inst_.sphere_probes.set_view(view);
@@ -1979,6 +1998,7 @@ void PlanarProbePipeline::begin_sync()
     prepass_ps_.bind_resources(inst_.uniform_data);
     prepass_ps_.bind_resources(inst_.sampling);
     prepass_ps_.bind_resources(inst_.render_textures);
+    prepass_ps_.bind_resources(inst_.lights);
     prepass_ps_.setup_subpasses(DRW_STATE_WRITE_DEPTH | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
                                 inst_.film.depth.test_state);
   }
@@ -1996,6 +2016,7 @@ void PlanarProbePipeline::begin_sync()
 
   closure_bits_ = CLOSURE_NONE;
   closure_count_ = 0;
+  use_depth_offset_lighting_data_ = false;
 }
 
 void PlanarProbePipeline::end_sync()
@@ -2045,6 +2066,7 @@ PassMain::Sub *PlanarProbePipeline::material_add(blender::Material *blender_mat,
   }
   closure_bits_ |= closure_bits;
   closure_count_ = max_ii(closure_count_, count_bits_i(closure_bits));
+  use_depth_offset_lighting_data_ |= material_uses_depth_offset_lighting_data(blender_mat, gpumat);
 
   bool has_shader_to_rgba = (closure_bits & CLOSURE_SHADER_TO_RGBA) != 0;
 
@@ -2065,6 +2087,7 @@ PassMain::Sub *PlanarProbePipeline::npr_add(blender::Material *blender_mat, GPUM
 {
   PassMain::Sub *pass = material_surface_cull_pass_get(
       npr_double_sided_ps_, npr_single_sided_ps_, npr_front_cull_ps_, blender_mat);
+  use_depth_offset_lighting_data_ |= material_uses_depth_offset_lighting_data(blender_mat, gpumat);
 
   PassMain::Sub *material_ps = &pass->sub(GPU_material_get_name(gpumat));
   GPUPass *gpupass = GPU_material_get_pass(gpumat);
@@ -2098,6 +2121,7 @@ void PlanarProbePipeline::render(View &view,
 
   inst_.pipelines.data.ray_type = RAY_TYPE_GLOSSY;
   inst_.uniform_data.push_update();
+  inst_.lights.set_view(view, extent);
 
   GPU_framebuffer_bind(prepass_fb);
   GPU_framebuffer_clear_depth(prepass_fb, inst_.film.depth.clear_value);
@@ -2108,7 +2132,6 @@ void PlanarProbePipeline::render(View &view,
   inst_.hiz_buffer.set_source(&depth_layer_tx, 0);
   inst_.hiz_buffer.update();
 
-  inst_.lights.set_view(view, extent);
   inst_.shadows.set_view(view, extent);
   inst_.volume_probes.set_view(view);
   inst_.sphere_probes.set_view(view);

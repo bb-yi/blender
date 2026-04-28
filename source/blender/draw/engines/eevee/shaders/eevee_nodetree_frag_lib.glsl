@@ -37,6 +37,12 @@ float nodetree_thickness()
   return 0.1f;
 }
 
+/* Material graph connected to the depth offset output. */
+float nodetree_depth_offset()
+{
+  return 0.0f;
+}
+
 /* Replaced by define at runtime. */
 /* TODO(fclem): Find a way to pass material parameters inside the material UBO. */
 float thickness_mode = 1.0f;

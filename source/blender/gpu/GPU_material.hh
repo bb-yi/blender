@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include <optional>
 #include <string>
 
 #include "BLI_enum_flags.hh"
@@ -211,6 +212,7 @@ void GPU_material_uniform_buffer_create(GPUMaterial *material, ListBaseT<LinkDat
 bool GPU_material_has_surface_output(GPUMaterial *mat);
 bool GPU_material_has_volume_output(GPUMaterial *mat);
 bool GPU_material_has_displacement_output(GPUMaterial *mat);
+bool GPU_material_has_depth_offset_output(GPUMaterial *mat);
 bool GPU_material_has_filter_output(GPUMaterial *mat);
 
 int GPU_material_filter_object_info_ensure(GPUMaterial *material, Object *object);
@@ -407,6 +409,7 @@ struct GPUCodegenOutput {
   GPUGraphOutput surface;
   GPUGraphOutput volume;
   GPUGraphOutput thickness;
+  std::optional<GPUGraphOutput> depth_offset;
   GPUGraphOutput npr;
   GPUGraphOutput filter;
   GPUGraphOutput composite;
@@ -496,6 +499,7 @@ void GPU_material_output_surface(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_output_volume(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_output_displacement(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_output_thickness(GPUMaterial *material, GPUNodeLink *link);
+void GPU_material_output_depth_offset(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_output_npr(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_output_filter(GPUMaterial *material, GPUNodeLink *link);
 

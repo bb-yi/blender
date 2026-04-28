@@ -1112,6 +1112,15 @@ void RNA_def_material(BlenderRNA *brna)
   RNA_def_property_ui_text(prop, "Face Culling", "Control which face orientation is hidden");
   RNA_def_property_update(prop, 0, "rna_Material_draw_update");
 
+  prop = RNA_def_property(srna, "depth_offset_affect_lighting", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "depth_offset_affect_lighting", 1);
+  RNA_def_property_ui_text(
+      prop,
+      "Depth Offset Affects Lighting",
+      "Let Material Output > Depth Offset also affect lighting-related depth reconstruction "
+      "instead of only affecting depth testing");
+  RNA_def_property_update(prop, 0, "rna_Material_draw_update");
+
   prop = RNA_def_property(srna, "use_backface_culling", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_funcs(
       prop, "rna_Material_use_backface_culling_get", "rna_Material_use_backface_culling_set");
