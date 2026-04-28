@@ -781,18 +781,9 @@ float4 attr_load_color_post(float4 attr)
  *
  * \{ */
 
-#ifdef EEVEE_LEGACY_UNIFORM_ATTR
-#  define UNI_ATTR(a) (a)
-#  define uni_attr_resource_id ((drw_resource_id() < 512u) ? drw_resource_id() : 511u)
-#endif
-
 float4 attr_load_uniform(float4 attr, const uint attr_hash)
 {
-#ifdef EEVEE_LEGACY_UNIFORM_ATTR
-  return (drw_resource_id() < 512u) ? attr : drw_object_attribute(attr_hash);
-#else
   return drw_object_attribute(attr_hash);
-#endif
 }
 
 /** \} */

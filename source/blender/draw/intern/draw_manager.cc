@@ -56,7 +56,6 @@ void Manager::begin_sync(Object *object_active)
 
   acquired_textures.clear();
   layer_attributes.clear();
-  memset(attributes_legacy_buf.data(), 0, sizeof(float4) * 8 * 512);
 
 /* For some reason, if this uninitialized data pattern was enabled (ie release asserts enabled),
  * The viewport just gives up rendering objects on ARM64 devices. Possibly Mesa GLOn12-related. */
@@ -122,7 +121,6 @@ void Manager::end_sync()
   bounds_buf.current().push_update();
   infos_buf.current().push_update();
   attributes_buf.push_update();
-  attributes_legacy_buf.push_update();
   layer_attributes_buf.push_update();
 
   /* Useful for debugging the following resource finalize. But will trigger the drawing of the GPU
@@ -165,7 +163,6 @@ void Manager::resource_bind()
   GPU_storagebuf_bind(matrix_buf.current(), DRW_OBJ_MAT_SLOT);
   GPU_storagebuf_bind(infos_buf.current(), DRW_OBJ_INFOS_SLOT);
   GPU_storagebuf_bind(attributes_buf, DRW_OBJ_ATTR_SLOT);
-  GPU_uniformbuf_bind(attributes_legacy_buf, GPU_ATTRIBUTE_UBO_SLOT);
   GPU_uniformbuf_bind(layer_attributes_buf, DRW_LAYER_ATTR_UBO_SLOT);
 }
 

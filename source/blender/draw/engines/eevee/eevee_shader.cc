@@ -1146,16 +1146,19 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
 
   /* WORKAROUND: Add new ob attr buffer. */
   if (GPU_material_uniform_attributes(gpumat) != nullptr) {
-    info.define("EEVEE_LEGACY_UNIFORM_ATTR");
     info.additional_info("draw_object_attributes");
+
+    /* Search and remove the old object attribute UBO which would creating bind point collision. */
     for (auto &resource_info : info.batch_resources_) {
       if (resource_info.bind_type == ShaderCreateInfo::Resource::BindType::UNIFORM_BUFFER &&
           resource_info.uniformbuf.name == GPU_ATTRIBUTE_UBO_BLOCK_NAME "[512]")
       {
-        resource_info.slot = GPU_ATTRIBUTE_UBO_SLOT;
+        info.batch_resources_.remove_first_occurrence_and_reorder(resource_info);
         break;
       }
     }
+    /* Remove references to the UBO. */
+    info.define("UNI_ATTR(a)", "float4(0.0)");
   }
 
   bool use_ao_node = false;

@@ -53,8 +53,7 @@ static std::ostream &operator<<(std::ostream &stream, const GPUInput *input)
     case GPU_SOURCE_ATTR:
       return stream << "var_attrs.v" << input->attr->id;
     case GPU_SOURCE_UNIFORM_ATTR:
-      return stream << "UNI_ATTR(unf_attrs[uni_attr_resource_id].attr" << input->uniform_attr->id
-                    << ")";
+      return stream << "UNI_ATTR(unf_attrs[resource_id].attr" << input->uniform_attr->id << ")";
     case GPU_SOURCE_LAYER_ATTR:
       return stream << "attr_load_layer(" << input->layer_attr->hash_code << ")";
     case GPU_SOURCE_STRUCT:
@@ -286,15 +285,9 @@ void GPUCodegen::generate_resources()
   }
 
   if (!BLI_listbase_is_empty(&graph.uniform_attrs.list)) {
-    constexpr int legacy_attr_slots = 8;
     ss << "struct UniformAttrs {\n";
-    int attr_count = 0;
     for (GPUUniformAttr &attr : graph.uniform_attrs.list) {
       ss << "vec4 attr" << attr.id << ";\n";
-      attr_count++;
-    }
-    for (int i = attr_count; i < legacy_attr_slots; i++) {
-      ss << "vec4 _pad" << i << ";\n";
     }
     ss << "};\n\n";
     ss << "#define UniformAttrs_host_shared_ UniformAttrs\n";
