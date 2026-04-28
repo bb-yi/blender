@@ -169,6 +169,15 @@ float3 material_depth_offset_world_position(float depth_offset)
       material_depth_offset_screen_depth(depth_offset));
 }
 
+float3 material_depth_offset_apply_nodetree_position(float depth_offset)
+{
+  if (!material_depth_offset_is_zero(depth_offset)) {
+    g_data.P = material_depth_offset_world_position(depth_offset);
+    g_data.ray_length = distance(g_data.P, drw_view_position());
+  }
+  return g_data.P;
+}
+
 float material_depth_offset_frag_depth()
 {
   return material_depth_offset_frag_depth(nodetree_depth_offset());

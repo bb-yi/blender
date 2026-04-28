@@ -362,7 +362,9 @@ void main()
   init_globals();
 
 #ifdef MAT_DEPTH_OFFSET
-  material_depth_offset_write();
+  float depth_offset = nodetree_depth_offset();
+  material_depth_offset_write(depth_offset);
+  material_depth_offset_apply_nodetree_position(depth_offset);
 #endif
 
   int2 texel = int2(gl_FragCoord.xy);

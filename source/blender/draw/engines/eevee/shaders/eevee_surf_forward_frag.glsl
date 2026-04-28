@@ -76,7 +76,10 @@ void main()
   float depth_offset = nodetree_depth_offset();
   if (!material_depth_offset_is_zero(depth_offset)) {
     volume_depth = material_depth_offset_screen_depth(depth_offset);
-    g_forward_lighting_P = material_depth_offset_world_position_from_depth(volume_depth);
+    float3 depth_offset_P = material_depth_offset_apply_nodetree_position(depth_offset);
+#  ifndef MAT_DEPTH_OFFSET_NO_LIGHTING
+    g_forward_lighting_P = depth_offset_P;
+#  endif
   }
   material_depth_offset_write(depth_offset);
 #endif
