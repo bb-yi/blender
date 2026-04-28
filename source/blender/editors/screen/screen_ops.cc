@@ -86,6 +86,9 @@
 #include "UI_view2d.hh"
 
 #include "GPU_capabilities.hh"
+#include "GPU_init_exit.hh"
+#include "GPU_platform.hh"
+#include "GPU_shader.hh"
 
 #include "wm_window.hh"
 
@@ -6439,6 +6442,14 @@ static void stop_playback(bContext *C)
   WM_event_add_notifier(C, NC_SCENE | ND_TRANSFORM, scene);
 }
 
+static bool should_wait_for_shader_compilation_before_playback()
+{
+  return GPU_is_init() &&
+         GPU_type_matches_ex(
+             GPU_DEVICE_NVIDIA, GPU_OS_WIN, GPU_DRIVER_OFFICIAL, GPU_BACKEND_OPENGL) &&
+         GPU_shader_compiler_has_pending_work();
+}
+
 static wmOperatorStatus start_playback(bContext *C, int sync, int mode)
 {
   Main *bmain = CTX_data_main(C);
@@ -6457,6 +6468,10 @@ static wmOperatorStatus start_playback(bContext *C, int sync, int mode)
     BKE_scene_graph_evaluated_ensure(depsgraph, bmain);
   }
   Scene *scene_eval = DEG_get_evaluated_scene(depsgraph);
+
+  if (should_wait_for_shader_compilation_before_playback()) {
+    GPU_shader_compiler_wait_for_all();
+  }
 
   BKE_callback_exec_id_depsgraph(bmain, &scene->id, depsgraph, BKE_CB_EVT_ANIMATION_PLAYBACK_PRE);
 

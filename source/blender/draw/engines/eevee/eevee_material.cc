@@ -795,6 +795,7 @@ Material &MaterialModule::material_get(Object *ob,
 ShaderGroups MaterialModule::default_materials_load(bool block_until_ready)
 {
   bool shaders_are_ready = true;
+  const bool use_outline = inst_.scene != nullptr && inst_.scene->eevee.use_outline != 0;
   auto request_shader =
       [&](blender::Material *mat, eMaterialPipeline pipeline, eMaterialGeometry geom) {
         GPUMaterial *gpu_mat = inst_.shaders.material_shader_get(
@@ -805,7 +806,7 @@ ShaderGroups MaterialModule::default_materials_load(bool block_until_ready)
             MAT_PROBE_NONE,
             !block_until_ready,
             nullptr,
-            inst_.scene->eevee.use_outline != 0);
+            use_outline);
         shaders_are_ready = shaders_are_ready && GPU_material_status(gpu_mat) == GPU_MAT_SUCCESS;
       };
 
