@@ -152,6 +152,23 @@ float material_depth_offset_frag_depth(float depth_offset)
   return saturate(reverse_z::read(drw_depth_view_to_screen(vP_z)));
 }
 
+float material_depth_offset_screen_depth(float depth_offset)
+{
+  return reverse_z::read(material_depth_offset_frag_depth(depth_offset));
+}
+
+float3 material_depth_offset_world_position_from_depth(float screen_depth)
+{
+  float2 screen_uv = gl_FragCoord.xy * uniform_buf.volumes.main_view_extent_inv;
+  return drw_point_screen_to_world(float3(screen_uv, screen_depth));
+}
+
+float3 material_depth_offset_world_position(float depth_offset)
+{
+  return material_depth_offset_world_position_from_depth(
+      material_depth_offset_screen_depth(depth_offset));
+}
+
 float material_depth_offset_frag_depth()
 {
   return material_depth_offset_frag_depth(nodetree_depth_offset());

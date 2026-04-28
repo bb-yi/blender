@@ -27,11 +27,12 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_surf_forward)
 
 /* Global thickness because it is needed for closure_to_rgba. */
 float g_thickness;
+float3 g_forward_lighting_P;
 
 float4 closure_to_rgba(Closure cl_unused)
 {
   float3 radiance, transmittance;
-  forward_lighting_eval(g_thickness, radiance, transmittance);
+  forward_lighting_eval(g_forward_lighting_P, g_thickness, radiance, transmittance);
 
   /* Reset for the next closure tree. */
   float noise = utility_tx_fetch(utility_tx, gl_FragCoord.xy, UTIL_BLUE_NOISE_LAYER).r;
@@ -39,10 +40,10 @@ float4 closure_to_rgba(Closure cl_unused)
   closure_weights_reset(closure_rand);
 
 #if defined(MAT_TRANSPARENT) && defined(MAT_SHADER_TO_RGBA)
-  float3 V = -drw_world_incident_vector(g_data.P);
-  LightProbeSample samp = lightprobe_load(g_data.P, g_data.Ng, V);
+  float3 V = -drw_world_incident_vector(g_forward_lighting_P);
+  LightProbeSample samp = lightprobe_load(g_forward_lighting_P, g_data.Ng, V);
   float3 radiance_behind = lightprobe_spherical_sample_normalized_with_parallax(
-      samp, g_data.P, V, 0.0);
+      samp, g_forward_lighting_P, V, 0.0);
 
 #  ifndef MAT_FIRST_LAYER
   int2 texel = int2(gl_FragCoord.xy);
@@ -69,8 +70,15 @@ void main()
   float noise = utility_tx_fetch(utility_tx, gl_FragCoord.xy, UTIL_BLUE_NOISE_LAYER).r;
   float closure_rand = fract(noise + sampling_rng_1D_get(SAMPLING_CLOSURE));
 
+  g_forward_lighting_P = g_data.P;
+  float volume_depth = reverse_z::read(gl_FragCoord.z);
 #ifdef MAT_DEPTH_OFFSET
-  material_depth_offset_write();
+  float depth_offset = nodetree_depth_offset();
+  if (!material_depth_offset_is_zero(depth_offset)) {
+    volume_depth = material_depth_offset_screen_depth(depth_offset);
+    g_forward_lighting_P = material_depth_offset_world_position_from_depth(volume_depth);
+  }
+  material_depth_offset_write(depth_offset);
 #endif
 
   fragment_displacement();
@@ -80,12 +88,12 @@ void main()
   nodetree_surface(closure_rand);
 
   float3 radiance, transmittance;
-  forward_lighting_eval(g_thickness, radiance, transmittance);
+  forward_lighting_eval(g_forward_lighting_P, g_thickness, radiance, transmittance);
 
   /* Volumetric resolve and compositing. */
   float2 uvs = gl_FragCoord.xy * uniform_buf.volumes.main_view_extent_inv;
   VolumeResolveSample vol = volume_resolve(
-      float3(uvs, reverse_z::read(gl_FragCoord.z)), volume_transmittance_tx, volume_scattering_tx);
+      float3(uvs, volume_depth), volume_transmittance_tx, volume_scattering_tx);
   /* Removes the part of the volume scattering that has
    * already been added to the destination pixels by the opaque resolve.
    * Since we do that using the blending pipeline we need to account for material transmittance. */

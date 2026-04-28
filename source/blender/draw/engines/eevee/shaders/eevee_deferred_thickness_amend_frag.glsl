@@ -113,12 +113,7 @@ void main()
   /* Bias the shading point position because of depth buffer precision.
    * Constant is taken from https://www.terathon.com/gdc07_lengyel.pdf. */
   constexpr float bias = 2.4e-7f;
-  const float depth = texelFetch(hiz_tx, texel, 0).r - bias;
-
-  const float3 P = drw_point_screen_to_world(float3(screen_uv, depth));
-  const float vPz = dot(drw_view_forward(), P) - dot(drw_view_forward(), drw_view_position());
-
-  const float3 Ng = gbuffer::normal_unpack(imageLoad(gbuf_normal_img, int3(texel, 0)).rg);
+  const float depth = texelFetch(hiz_tx, texel, 0).r;
 
   /* Use manual fetch because gbuffer::read_thickness expect a read only texture input. */
   gbuffer::Header header = gbuffer::Header::from_data(
@@ -126,7 +121,15 @@ void main()
 
   uchar data_layer = uniform_buf.pipeline.gbuffer_additional_data_layer_id;
   float2 data_packed = imageLoad(gbuf_normal_img, int3(texel, int(data_layer))).rg;
-  float gbuffer_thickness = gbuffer::thickness_unpack(data_packed.x);
+  gbuffer::AdditionalInfo additional_info = gbuffer::AdditionalInfo::unpack(data_packed);
+  float surface_depth = (header.use_surface_depth() ? additional_info.surface_depth : depth) - bias;
+
+  const float3 P = drw_point_screen_to_world(float3(screen_uv, surface_depth));
+  const float vPz = dot(drw_view_forward(), P) - dot(drw_view_forward(), drw_view_position());
+
+  const float3 Ng = gbuffer::normal_unpack(imageLoad(gbuf_normal_img, int3(texel, 0)).rg);
+
+  float gbuffer_thickness = additional_info.thickness;
   if (gbuffer_thickness == 0.0f) {
     return;
   }

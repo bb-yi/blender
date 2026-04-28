@@ -1291,7 +1291,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   }
   if (uses_glsl_light_access) {
     info.define("MAT_GLSL_LIGHT_ACCESS");
-    if (depth_offset_uses_light_access && !material_pass_uses_glsl_light_access) {
+    if (depth_offset_uses_light_access) {
       info.define("LIGHT_ITER_FORCE_NO_CULLING");
     }
     info.additional_info("eevee_light_data");

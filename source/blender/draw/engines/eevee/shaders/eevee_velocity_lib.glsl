@@ -50,6 +50,27 @@ float4 velocity_surface(float3 P_prv, float3 P, float3 P_nxt)
   return motion;
 }
 
+float3 velocity_depth_offset_position(float4x4 viewmat,
+                                      float4x4 viewinv,
+                                      float3 P,
+                                      float depth_offset)
+{
+  if (abs(depth_offset) <= 1.0e-8f) {
+    return P;
+  }
+  float3 vP = transform_point(viewmat, P);
+  vP.z += depth_offset;
+  return transform_point(viewinv, vP);
+}
+
+float4 velocity_surface_depth_offset(float3 P_prv, float3 P, float3 P_nxt, float depth_offset)
+{
+  return velocity_surface(
+      velocity_depth_offset_position(camera_prev.viewmat, camera_prev.viewinv, P_prv, depth_offset),
+      velocity_depth_offset_position(camera_curr.viewmat, camera_curr.viewinv, P, depth_offset),
+      velocity_depth_offset_position(camera_next.viewmat, camera_next.viewinv, P_nxt, depth_offset));
+}
+
 /**
  * Given a view space view vector \a vV, compute the previous and next motion vectors for
  * background pixels.
