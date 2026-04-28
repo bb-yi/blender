@@ -263,11 +263,10 @@ struct InputClosures {
 };
 
 /**
-  * surface_N: Fallback normal is there is no closure.
-  * thickness: Additional object information if any closure needs it.
-  float thickness;
-  * use_object_id: True if surface uses a dedicated object id layer. Should only be turned on if
-  needed. */
+ * surface_N: Fallback normal if there is no closure.
+ * thickness: Additional object information if any closure needs it.
+ * use_object_id: True if surface uses a dedicated object id layer.
+ * use_surface_depth: True if the additional-data layer stores the original surface depth. */
 Packed pack(InputClosures cl_data,
             float3 Ng,
             packed_float3 surface_N,

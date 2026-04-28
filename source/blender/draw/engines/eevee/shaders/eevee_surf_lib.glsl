@@ -128,13 +128,27 @@ bool material_depth_offset_is_zero(float depth_offset)
   return abs(depth_offset) <= 1.0e-8f;
 }
 
+float material_depth_offset_view_z(float depth_offset)
+{
+  float vP_z = drw_depth_screen_to_view(reverse_z::read(gl_FragCoord.z));
+  return vP_z + depth_offset;
+}
+
+bool material_depth_offset_is_clipped(float depth_offset)
+{
+  if (material_depth_offset_is_zero(depth_offset)) {
+    return false;
+  }
+  float vP_z = material_depth_offset_view_z(depth_offset);
+  return vP_z > drw_view_near() || vP_z < drw_view_far();
+}
+
 float material_depth_offset_frag_depth(float depth_offset)
 {
   if (material_depth_offset_is_zero(depth_offset)) {
     return gl_FragCoord.z;
   }
-  float vP_z = drw_depth_screen_to_view(reverse_z::read(gl_FragCoord.z));
-  vP_z = min(vP_z + depth_offset, -drw_view_near());
+  float vP_z = material_depth_offset_view_z(depth_offset);
   return saturate(reverse_z::read(drw_depth_view_to_screen(vP_z)));
 }
 
@@ -146,6 +160,10 @@ float material_depth_offset_frag_depth()
 #  if !defined(MAT_SHADOW) || defined(SHADOW_UPDATE_TBDR)
 void material_depth_offset_write(float depth_offset)
 {
+  if (material_depth_offset_is_clipped(depth_offset)) {
+    gpu_discard_fragment();
+    return;
+  }
   gl_FragDepth = material_depth_offset_frag_depth(depth_offset);
 }
 

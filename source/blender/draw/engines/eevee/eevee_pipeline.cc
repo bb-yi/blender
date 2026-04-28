@@ -62,7 +62,8 @@ static PassType *material_surface_cull_pass_get(PassType *double_sided_ps,
 static bool material_uses_depth_offset_lighting_data(const blender::Material *material,
                                                      GPUMaterial *gpumat)
 {
-  return material != nullptr && material->depth_offset_affect_lighting == 0 &&
+  return material != nullptr && gpumat != nullptr &&
+         material->depth_offset_affect_lighting == 0 &&
          GPU_material_has_depth_offset_output(gpumat);
 }
 
@@ -488,6 +489,7 @@ void ForwardPipeline::sync()
       prepass_ps_.bind_resources(inst_.velocity);
       prepass_ps_.bind_resources(inst_.sampling);
       prepass_ps_.bind_resources(inst_.render_textures);
+      prepass_ps_.bind_resources(inst_.lights);
     }
 
     prepass_ps_.setup_subpasses(DRW_STATE_WRITE_DEPTH | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
@@ -955,6 +957,7 @@ void DeferredLayer::begin_sync()
     prepass_ps_.bind_resources(inst_.velocity);
     prepass_ps_.bind_resources(inst_.sampling);
     prepass_ps_.bind_resources(inst_.render_textures);
+    prepass_ps_.bind_resources(inst_.lights);
 
     /* Clear stencil buffer so that prepass can tag it. Then draw a full-screen triangle that will
      * clear AOVs for all the pixels touched by this layer. */
@@ -1811,6 +1814,7 @@ void DeferredProbePipeline::begin_sync()
     pass.bind_resources(inst_.uniform_data);
     pass.bind_resources(inst_.velocity);
     pass.bind_resources(inst_.sampling);
+    pass.bind_resources(inst_.lights);
   }
   pass.setup_subpasses(DRW_STATE_WRITE_DEPTH | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
                        inst_.film.depth.test_state);
@@ -1923,6 +1927,7 @@ void DeferredProbePipeline::render(View &view,
   GPU_debug_group_begin("Probe.Render");
 
   opaque_layer_.radiance_behind_tx_ = dummy_black;
+  inst_.lights.set_view(view, extent);
 
   const eGPUTextureUsage usage_rw = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE;
   for (int i = 0; i < ARRAY_SIZE(direct_radiance_txs_); i++) {
@@ -1939,7 +1944,6 @@ void DeferredProbePipeline::render(View &view,
   inst_.hiz_buffer.set_source(&inst_.render_buffers.depth_tx);
   inst_.hiz_buffer.update();
 
-  inst_.lights.set_view(view, extent);
   inst_.shadows.set_view(view, extent);
   inst_.volume_probes.set_view(view);
   inst_.sphere_probes.set_view(view);
@@ -1994,6 +1998,7 @@ void PlanarProbePipeline::begin_sync()
     prepass_ps_.bind_resources(inst_.uniform_data);
     prepass_ps_.bind_resources(inst_.sampling);
     prepass_ps_.bind_resources(inst_.render_textures);
+    prepass_ps_.bind_resources(inst_.lights);
     prepass_ps_.setup_subpasses(DRW_STATE_WRITE_DEPTH | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
                                 inst_.film.depth.test_state);
   }
@@ -2116,6 +2121,7 @@ void PlanarProbePipeline::render(View &view,
 
   inst_.pipelines.data.ray_type = RAY_TYPE_GLOSSY;
   inst_.uniform_data.push_update();
+  inst_.lights.set_view(view, extent);
 
   GPU_framebuffer_bind(prepass_fb);
   GPU_framebuffer_clear_depth(prepass_fb, inst_.film.depth.clear_value);
@@ -2126,7 +2132,6 @@ void PlanarProbePipeline::render(View &view,
   inst_.hiz_buffer.set_source(&depth_layer_tx, 0);
   inst_.hiz_buffer.update();
 
-  inst_.lights.set_view(view, extent);
   inst_.shadows.set_view(view, extent);
   inst_.volume_probes.set_view(view);
   inst_.sphere_probes.set_view(view);
