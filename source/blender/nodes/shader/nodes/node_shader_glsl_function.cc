@@ -13,6 +13,8 @@
 #include "node_exec.hh"
 #include "node_shader_util.hh"
 
+#include "BLO_read_write.hh"
+
 #include "BKE_image.hh"
 #include "BKE_node_runtime.hh"
 #include "BKE_text.h"
@@ -42,9 +44,58 @@ namespace blender
 
     NODE_STORAGE_FUNCS(NodeShaderGLSLFunction)
 
-      static CLG_LogRef LOG = { "node.shader.glsl_function" };
+    static CLG_LogRef LOG = { "node.shader.glsl_function" };
     static thread_local Set<std::string> active_closure_helper_keys;
     static thread_local Vector<const bNode*> active_closure_helper_nodes;
+
+    static void node_storage_free(bNode* node)
+    {
+      NodeShaderGLSLFunction* storage = static_cast<NodeShaderGLSLFunction*>(node->storage);
+      if (storage == nullptr)
+      {
+        return;
+      }
+      if (storage->packed_source != nullptr)
+      {
+        MEM_delete(storage->packed_source);
+      }
+      MEM_delete(storage);
+      node->storage = nullptr;
+    }
+
+    static void node_storage_copy(bNodeTree* /*dst_ntree*/, bNode* dest_node, const bNode* src_node)
+    {
+      const NodeShaderGLSLFunction* src_storage = static_cast<const NodeShaderGLSLFunction*>(
+        src_node->storage);
+      if (src_storage == nullptr)
+      {
+        dest_node->storage = nullptr;
+        return;
+      }
+
+      NodeShaderGLSLFunction* dst_storage = MEM_dupalloc(src_storage);
+      if (src_storage->packed_source != nullptr)
+      {
+        dst_storage->packed_source = BLI_strdup(src_storage->packed_source);
+      }
+      dest_node->storage = dst_storage;
+    }
+
+    static void node_storage_blend_write(const bNodeTree& /*tree*/,
+                                         const bNode& node,
+                                         BlendWriter& writer)
+    {
+      const NodeShaderGLSLFunction& storage = node_storage(node);
+      BLO_write_string(&writer, storage.packed_source);
+    }
+
+    static void node_storage_blend_read(bNodeTree& /*tree*/,
+                                        bNode& node,
+                                        BlendDataReader& reader)
+    {
+      NodeShaderGLSLFunction& storage = node_storage(node);
+      BLO_read_string(&reader, &storage.packed_source);
+    }
 
     enum class GLSLBoundaryType
     {
@@ -3128,6 +3179,12 @@ namespace blender
       char* buffer = BLI_file_read_text_as_mem(absolute_path, 0, &buffer_len);
       if (buffer == nullptr)
       {
+        if (storage.packed_source != nullptr)
+        {
+          r_source = storage.packed_source;
+          return true;
+        }
+
         r_error = "Could not open the GLSL file";
         return false;
       }
@@ -5022,8 +5079,11 @@ vec3 glsl_ambient_lighting()
     ntype.insert_link = file_ns::node_insert_link;
     ntype.gpu_fn = file_ns::gpu_shader_glsl_function;
     ntype.add_ui_poll = object_filter_or_npr_eevee_shader_nodes_poll;
+    ntype.blend_write_storage_content = file_ns::node_storage_blend_write;
+    ntype.blend_data_read_storage_content = file_ns::node_storage_blend_read;
+
     bke::node_type_storage(
-      ntype, "NodeShaderGLSLFunction", node_free_standard_storage, node_copy_standard_storage);
+      ntype, "NodeShaderGLSLFunction", file_ns::node_storage_free, file_ns::node_storage_copy);
 
     bke::node_register_type(ntype);
   }

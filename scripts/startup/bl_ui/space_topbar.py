@@ -609,6 +609,13 @@ class TOPBAR_MT_help(Menu):
 
         layout.separator()
 
+        layout.operator("wm.url_open", text="NPR Branch Documentation", icon='URL').url = \
+            "https://bb-yi.github.io/blender/index.html"
+        layout.operator("wm.url_open", text="Report NPR Bug", icon='URL').url = \
+            "https://github.com/bb-yi/blender/issues"
+
+        layout.separator()
+
         if show_developer:
             layout.operator(
                 "wm.url_open",

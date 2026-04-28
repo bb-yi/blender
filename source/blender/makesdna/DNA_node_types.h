@@ -3065,6 +3065,8 @@ struct NodeShaderGLSLFunction {
 
   char function_name[64] = "";
   char filepath[/*FILE_MAX*/ 1024] = "";
+  char _pad[4] = {};
+  char *packed_source = nullptr;
 };
 
 struct NodeShaderTangent {

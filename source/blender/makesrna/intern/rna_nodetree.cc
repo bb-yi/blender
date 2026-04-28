@@ -4444,6 +4444,24 @@ static void rna_ShaderNodeGLSLFunction_update(Main *bmain, Scene *scene, Pointer
   rna_Node_update(bmain, scene, ptr);
 }
 
+static void rna_ShaderNodeGLSLFunction_filepath_set(PointerRNA *ptr, const char *value)
+{
+  bNode *node = ptr->data_as<bNode>();
+  NodeShaderGLSLFunction *data = static_cast<NodeShaderGLSLFunction *>(node->storage);
+
+  if (data == nullptr) {
+    return;
+  }
+
+  if (!STREQ(data->filepath, value) && data->packed_source != nullptr) {
+    MEM_delete(data->packed_source);
+    data->packed_source = nullptr;
+  }
+
+  STRNCPY(data->filepath, value);
+  data->parse_status = SHD_GLSL_FUNCTION_PARSE_DIRTY;
+}
+
 static NodeShaderGLSLFunction *rna_ShaderNodeGLSLFunction_ensure_parsed(PointerRNA *ptr)
 {
   bNode *node = ptr->data_as<bNode>();
@@ -4483,6 +4501,10 @@ static void rna_ShaderNodeGLSLFunction_source_mode_set(PointerRNA *ptr, int valu
   data->source_mode = value;
   data->parse_status = SHD_GLSL_FUNCTION_PARSE_DIRTY;
   data->function_name[0] = '\0';
+  if (data->packed_source != nullptr) {
+    MEM_delete(data->packed_source);
+    data->packed_source = nullptr;
+  }
 
   if (value == SHD_GLSL_FUNCTION_SOURCE_EXTERNAL) {
     data->filepath[0] = '\0';
@@ -7297,6 +7319,7 @@ static void def_sh_glsl_function(BlenderRNA * /*brna*/, StructRNA *srna)
   prop = RNA_def_property(srna, "filepath", PROP_STRING, PROP_FILEPATH);
   RNA_def_property_ui_text(prop, "File Path", "External GLSL source path");
   RNA_def_property_flag(prop, PROP_PATH_SUPPORTS_BLEND_RELATIVE);
+  RNA_def_property_string_funcs(prop, nullptr, nullptr, "rna_ShaderNodeGLSLFunction_filepath_set");
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_ShaderNodeGLSLFunction_update");
 
   prop = RNA_def_property(srna, "source_mode", PROP_ENUM, PROP_NONE);

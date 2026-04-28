@@ -24,11 +24,13 @@
 #include "DNA_ID.h"
 #include "DNA_image_types.h"
 #include "DNA_modifier_types.h"
+#include "DNA_node_types.h"
 #include "DNA_packedFile_types.h"
 #include "DNA_sound_types.h"
 #include "DNA_vfont_types.h"
 #include "DNA_volume_types.h"
 
+#include "BLI_fileops.h"
 #include "BLI_listbase.h"
 #include "BLI_path_utils.hh"
 #include "BLI_string.h"
@@ -40,6 +42,8 @@
 #include "BKE_image_format.hh"
 #include "BKE_library.hh"
 #include "BKE_main.hh"
+#include "BKE_node.hh"
+#include "BKE_node_legacy_types.hh"
 #include "BKE_packedFile.hh"
 #include "BKE_report.hh"
 #include "BKE_sound.hh"
@@ -57,6 +61,107 @@
 namespace blender {
 
 static CLG_LogRef LOG = {"lib.packedfile"};
+
+static NodeShaderGLSLFunction *glsl_function_external_source_storage(bNode *node)
+{
+  if (node->type_legacy != SH_NODE_GLSL_FUNCTION || node->storage == nullptr) {
+    return nullptr;
+  }
+
+  NodeShaderGLSLFunction *storage = static_cast<NodeShaderGLSLFunction *>(node->storage);
+  if (storage->source_mode != SHD_GLSL_FUNCTION_SOURCE_EXTERNAL || storage->filepath[0] == '\0') {
+    return nullptr;
+  }
+  return storage;
+}
+
+static const NodeShaderGLSLFunction *glsl_function_external_source_storage(const bNode *node)
+{
+  return glsl_function_external_source_storage(const_cast<bNode *>(node));
+}
+
+static int pack_glsl_function_external_sources(Main *bmain, ReportList *reports)
+{
+  int tot = 0;
+
+  FOREACH_NODETREE_BEGIN (bmain, ntree, owner_id) {
+    if (!ID_IS_EDITABLE(owner_id)) {
+      continue;
+    }
+
+    for (bNode &node : ntree->nodes) {
+      NodeShaderGLSLFunction *storage = glsl_function_external_source_storage(&node);
+      if (storage == nullptr) {
+        continue;
+      }
+      if (storage->packed_source != nullptr) {
+        continue;
+      }
+
+      char absolute_path[FILE_MAX];
+      STRNCPY(absolute_path, storage->filepath);
+      BLI_path_abs(absolute_path, BKE_main_blendfile_path(bmain));
+
+      size_t buffer_len = 0;
+      char *buffer = BLI_file_read_text_as_mem(absolute_path, 0, &buffer_len);
+      if (buffer == nullptr) {
+        BKE_reportf(
+            reports, RPT_ERROR, "Unable to pack GLSL Function source '%s'", storage->filepath);
+        continue;
+      }
+
+      storage->packed_source = MEM_new_array_uninitialized<char>(
+          buffer_len + 1, "GLSL Function packed source");
+      memcpy(storage->packed_source, buffer, buffer_len);
+      storage->packed_source[buffer_len] = '\0';
+      MEM_delete(buffer);
+      tot++;
+    }
+  }
+  FOREACH_NODETREE_END;
+
+  return tot;
+}
+
+static void unpack_glsl_function_external_sources(Main *bmain,
+                                                  ReportList *reports,
+                                                  enum ePF_FileStatus how)
+{
+  FOREACH_NODETREE_BEGIN (bmain, ntree, owner_id) {
+    if (!ID_IS_EDITABLE(owner_id)) {
+      continue;
+    }
+
+    for (bNode &node : ntree->nodes) {
+      NodeShaderGLSLFunction *storage = glsl_function_external_source_storage(&node);
+      if (storage == nullptr || storage->packed_source == nullptr) {
+        continue;
+      }
+
+      const size_t buffer_len = strlen(storage->packed_source);
+      void *buffer = MEM_new_uninitialized(std::max(buffer_len, size_t(1)),
+                                           "GLSL Function unpack source");
+      memcpy(buffer, storage->packed_source, buffer_len);
+      PackedFile *packed_source = BKE_packedfile_new_from_memory(buffer, buffer_len, nullptr);
+      char *new_file_path = BKE_packedfile_unpack_to_file(reports,
+                                                          BKE_main_blendfile_path(bmain),
+                                                          storage->filepath,
+                                                          storage->filepath,
+                                                          packed_source,
+                                                          how);
+      BKE_packedfile_free(packed_source);
+      if (new_file_path == nullptr) {
+        continue;
+      }
+
+      MEM_delete(storage->packed_source);
+      storage->packed_source = nullptr;
+      STRNCPY(storage->filepath, new_file_path);
+      MEM_delete(new_file_path);
+    }
+  }
+  FOREACH_NODETREE_END;
+}
 
 int BKE_packedfile_seek(PackedFile *pf, int offset, int whence)
 {
@@ -157,6 +262,20 @@ PackedFileCount BKE_packedfile_count_all(Main *bmain)
       count.individual_files++;
     }
   }
+
+  FOREACH_NODETREE_BEGIN (bmain, ntree, owner_id) {
+    if (ID_IS_LINKED(owner_id)) {
+      continue;
+    }
+
+    for (const bNode &node : ntree->nodes) {
+      const NodeShaderGLSLFunction *storage = glsl_function_external_source_storage(&node);
+      if (storage != nullptr && storage->packed_source != nullptr) {
+        count.individual_files++;
+      }
+    }
+  }
+  FOREACH_NODETREE_END;
 
   for (Object &object : bmain->objects) {
     if (ID_IS_LINKED(&object)) {
@@ -331,6 +450,8 @@ void BKE_packedfile_pack_all(Main *bmain, ReportList *reports, bool verbose)
       tot++;
     }
   }
+
+  tot += pack_glsl_function_external_sources(bmain, reports);
 
   for (Object &object : bmain->objects) {
     if (ID_IS_LINKED(&object)) {
@@ -873,6 +994,8 @@ void BKE_packedfile_unpack_all(Main *bmain, ReportList *reports, enum ePF_FileSt
       BKE_packedfile_unpack_volume(bmain, reports, volume, how);
     }
   }
+
+  unpack_glsl_function_external_sources(bmain, reports, how);
 
   for (Object &object : bmain->objects) {
     if (ID_IS_LINKED(&object)) {
