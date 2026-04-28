@@ -411,12 +411,15 @@ Injects a user-authored GLSL function into the current `Eevee / NPR` material co
 - `sampler2D` can be connected to `Image to Closure` or a compatible `Closure Output`
 - `Closure Output -> sampler2D` currently guarantees only the direct `texture(tex, uv)` path
 - If the function depends on `textureLod`, `textureGrad`, `textureSize`, or `texelFetch`, prefer driving it with `Image to Closure`
-- `@glsl_meta` supports `default`, `min`, `max`, `hide_value`, and `subtype`
+- `@glsl_meta` supports `default`, `min`, `max`, `hide_value`, `subtype`, `description`, and one-level panel groups
 - Supported `subtype` values for `float`: `none`, `unsigned`, `percentage`, `factor`, `mass`, `angle`, `time`, `time_absolute`, `distance`, `wavelength`
 - Supported `subtype` values for `vec2 / vec3 / vec4`: `none`, `factor`, `percentage`, `translation`, `direction`, `velocity`, `acceleration`, `euler`, `xyz`
 - `subtype=color` is additionally supported for `vec3` and `vec4`
 - `@glsl_meta default=` also accepts expressions such as `glsl_position()`, `normalize(glsl_normal())`, or `glsl_ambient_lighting()`
 - Expression defaults are recommended only for `float / vec2 / vec3 / vec4` inputs and should not directly reference other exported parameters
+- `description="..."` adds a tooltip description to an input socket and supports quoted single-line text with spaces
+- `@panel "Name" closed=true|false` groups following inputs into one-level collapsible panels and must be closed with `@end_panel`
+- `sampler2D` can use `description` and panel grouping, but does not support `default / min / max / hide_value / subtype`
 - Only `vec3 / vec4` inputs explicitly marked with `subtype=color` become color sockets
 - `vec3 + subtype=color` enters GLSL as `rgb` with `alpha = 1.0`
 - `vec4 + subtype=color` keeps full `rgba`
@@ -429,6 +432,35 @@ Injects a user-authored GLSL function into the current `Eevee / NPR` material co
 - `GLSLLight.attenuation` is a base attenuation term for custom per-light models; it does not include `NdotL`, toon ramps, Blinn-Phong, GGX, shadows, or material-side Fresnel / metallic / roughness behavior
 - Recommended diffuse pattern: `light.diffuse_color * light.attenuation * max(dot(N, light.vector), 0.0) * glsl_light_shadow(...)`
 - Recommended specular pattern: `light.specular_color * light.attenuation * custom_spec_term * glsl_light_shadow(...)`
+
+#### Example: Parameter Meta with Descriptions and Panels
+
+`description="..."` is shown as the input socket tooltip. `@panel` groups many inputs into one-level collapsible panels on the node.
+
+```glsl
+/* @glsl_meta v1
+base_color: default=vec3(1.0) subtype=color description="Base surface color"
+
+@panel Specular closed=true
+specular: default=0.5 min=0.0 max=1.0 subtype=factor description="Specular strength"
+roughness: default=0.45 min=0.0 max=1.0 subtype=factor description="Highlight roughness"
+@end_panel
+
+@panel Texture closed=true
+tex: description="Texture closure used by texture(tex, uv)"
+uv: default=vec2(0.0) description="Texture coordinates"
+@end_panel
+*/
+vec4 annotated_shader(vec3 base_color, float specular, float roughness, sampler2D tex, vec2 uv)
+{
+  vec3 tex_color = texture(tex, uv).rgb;
+  vec3 color = mix(base_color, tex_color, specular * (1.0 - roughness));
+  return vec4(color, 1.0);
+}
+```
+
+- `description` affects UI only and does not change socket identifiers, default synchronization, or GLSL calls
+- Panels support one level only, cannot be nested, and must be closed explicitly with `@end_panel`
 
 #### Example: `mode` Debug Mapping
 

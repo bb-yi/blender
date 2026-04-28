@@ -417,12 +417,15 @@
 - `sampler2D` 可连接 `Image to Closure` 或符合约定的 `Closure Output`
 - `Closure Output -> sampler2D` 当前只保证 `texture(tex, uv)` 这种直接采样形式
 - 如果函数依赖 `textureLod`、`textureGrad`、`textureSize`、`texelFetch` 这类图像专用能力，应优先配合 `Image to Closure`
-- `@glsl_meta` 支持 `default`、`min`、`max`、`hide_value` 和 `subtype`
+- `@glsl_meta` 支持 `default`、`min`、`max`、`hide_value`、`subtype`、`description` 和一级折叠面板分组
 - `float` 当前支持的 `subtype`：`none`、`unsigned`、`percentage`、`factor`、`mass`、`angle`、`time`、`time_absolute`、`distance`、`wavelength`
 - `vec2 / vec3 / vec4` 当前支持的 `subtype`：`none`、`factor`、`percentage`、`translation`、`direction`、`velocity`、`acceleration`、`euler`、`xyz`
 - `subtype=color` 额外只支持 `vec3` 和 `vec4`
 - `@glsl_meta default=` 除了 literal 以外，也支持 `glsl_position()`、`normalize(glsl_normal())`、`glsl_ambient_lighting()` 这类表达式默认值
 - 表达式默认值当前只建议用于输入参数 `float / vec2 / vec3 / vec4`，并且不要直接引用同函数其他参数名
+- `description="..."` 可以给输入 socket 写 tooltip 注释，支持带空格的单行引号字符串
+- `@panel "Name" closed=true|false` 可以把后续输入放到节点上的一级折叠面板里，必须用 `@end_panel` 显式关闭
+- `sampler2D` 可写 `description` 并放进 panel，但不支持 `default / min / max / hide_value / subtype`
 - 只有显式写了 `subtype=color` 的 `vec3 / vec4` 输入，才会显示成颜色插口
 - `vec3 + subtype=color` 进入 GLSL 时按 `rgb` 使用，`alpha` 固定为 `1.0`
 - `vec4 + subtype=color` 会保留完整 `rgba`
@@ -435,6 +438,35 @@
 - `GLSLLight.attenuation` 只是自定义逐灯模型的基础衰减项，不包含 `NdotL`、toon ramp、Blinn-Phong、GGX、shadow 或材质侧 Fresnel / metallic / roughness
 - 推荐写法：`light.diffuse_color * light.attenuation * max(dot(N, light.vector), 0.0) * glsl_light_shadow(...)`
 - 推荐写法：`light.specular_color * light.attenuation * custom_spec_term * glsl_light_shadow(...)`
+
+#### 示例：带注释和面板的参数 Meta
+
+`description="..."` 会显示为输入 socket 的 tooltip；`@panel` 可以把大量输入分组到节点上的一级折叠面板里。
+
+```glsl
+/* @glsl_meta v1
+base_color: default=vec3(1.0) subtype=color description="Base surface color"
+
+@panel Specular closed=true
+specular: default=0.5 min=0.0 max=1.0 subtype=factor description="Specular strength"
+roughness: default=0.45 min=0.0 max=1.0 subtype=factor description="Highlight roughness"
+@end_panel
+
+@panel Texture closed=true
+tex: description="Texture closure used by texture(tex, uv)"
+uv: default=vec2(0.0) description="Texture coordinates"
+@end_panel
+*/
+vec4 annotated_shader(vec3 base_color, float specular, float roughness, sampler2D tex, vec2 uv)
+{
+  vec3 tex_color = texture(tex, uv).rgb;
+  vec3 color = mix(base_color, tex_color, specular * (1.0 - roughness));
+  return vec4(color, 1.0);
+}
+```
+
+- `description` 只影响 UI，不改变 socket identifier、默认值同步规则或 GLSL 调用方式
+- 面板只支持一级，不支持嵌套，且必须用 `@end_panel` 显式关闭
 
 #### 示例：`mode` 对照调试 helper
 
