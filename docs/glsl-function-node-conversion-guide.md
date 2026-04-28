@@ -1212,7 +1212,7 @@ vec2 triangle_unproject(vec3 v)
 只要严格遵守这份文档，绝大多数数学类 GLSL、很多 HLSL 片段逻辑、以及相当一部分 ShaderLab 片段逻辑，都可以被稳定改写为当前 Blender 节点可直接使用的版本。
 ## 附录：GLSL Function Meta 语法
 
-`GLSL Function` 节点支持从 GLSL 源码里的块注释读取少量 Meta 信息，用来描述输入参数在 Blender 节点界面中的默认值、范围和子类型。
+`GLSL Function` 节点支持从 GLSL 源码里的块注释读取少量 Meta 信息，用来描述输入参数在 Blender 节点界面中的默认值、范围、子类型和注释。
 
 这个 Meta 系统只负责节点 UI 语义，不改变 GLSL 函数逻辑本身。
 
@@ -1223,6 +1223,7 @@ vec2 triangle_unproject(vec3 v)
 - 最大值
 - 隐藏数值输入控件
 - socket subtype
+- socket 注释 / tooltip
 - 一级折叠面板分组
 
 ### 1. 基本格式
@@ -1231,8 +1232,8 @@ Meta 必须写在函数正上方的块注释里，并以 `@glsl_meta` 开头：
 
 ```glsl
 /* @glsl_meta v1
-strength: default=0.5 min=0.0 max=1.0 subtype=factor
-tint: default=vec3(1.0, 0.8, 0.2)
+strength: default=0.5 min=0.0 max=1.0 subtype=factor description="Blend amount"
+tint: default=vec3(1.0, 0.8, 0.2) description="Target tint color"
 */
 vec3 stylize(vec3 base_color, float strength, vec3 tint)
 {
@@ -1410,7 +1411,28 @@ strength: default=0.5 hide_value=true
 - `yes` / `no`
 - `on` / `off`
 
-#### 3.6 `@panel` / `@end_panel`
+#### 3.6 `description`
+
+用于给输入 socket 写描述文本。这个文本会进入 socket declaration 的 `description`，在 Blender 节点 tooltip 中显示。
+
+推荐使用带引号的单行字符串：
+
+```glsl
+strength: default=0.5 min=0.0 max=1.0 subtype=factor description="Blend amount for the effect"
+tint: default=vec3(1.0, 0.8, 0.2) subtype=color description="Main tint color"
+tex: description="Source texture closure"
+```
+
+规则：
+
+- `description="..."` 支持空格
+- 如果文本里需要写引号，使用 `\"`
+- 如果文本里需要写反斜杠，使用 `\\`
+- V1 只支持单行描述，不支持跨行文本
+- `description` 只影响 UI，不改变 socket identifier、默认值、范围或 GLSL 函数调用方式
+- `sampler2D` 只支持 `description` 和 panel 分组，不支持 `default/min/max/hide_value/subtype`
+
+#### 3.7 `@panel` / `@end_panel`
 
 用于把大量输入参数分组到节点上的一级折叠面板里。面板只影响 UI 排列，不改变 socket identifier，也不改变 GLSL 函数调用方式。
 
@@ -1467,9 +1489,9 @@ vec3 shader(
 
 这意味着它更适合作为“函数作者建议值”，而不是强制锁死值。
 
-#### 4.2 `min/max/subtype` 的作用
+#### 4.2 `min/max/subtype/description` 的作用
 
-这三项属于 socket 声明的一部分，会直接影响 Blender 节点界面和 socket 类型。
+这些项属于 socket 声明的一部分，会直接影响 Blender 节点界面、socket 类型或 tooltip。
 
 例如：
 
@@ -1479,6 +1501,7 @@ vec3 shader(
 - `subtype=color` 会让 `vec3/vec4` 输入变成 `NodeSocketColor`
 - `vec3 + subtype=color` 进入 GLSL 函数时只使用 `rgb`
 - `vec4 + subtype=color` 进入 GLSL 函数时会保留 `rgba`
+- `description="..."` 会显示在 socket tooltip 中，不影响计算
 
 ### 5. 当前限制
 
@@ -1488,7 +1511,7 @@ vec3 shader(
 - 不支持返回值 Meta
 - 不支持 `out` 参数 Meta
 - 不支持 `inout`
-- 不支持 `sampler2D` Meta
+- `sampler2D` 只支持 `description` 和 panel 分组，不支持默认值、范围、隐藏值或 subtype
 - 不支持 `mat*` / `struct` / `array` 边界参数 Meta
 - panel 只支持一级，不支持嵌套
 - panel 必须显式 `@end_panel` 关闭
@@ -1501,9 +1524,9 @@ vec3 shader(
 
 ```glsl
 /* @glsl_meta v1
-threshold: default=0.35 min=0.0 max=1.0 subtype=factor
-edge_width: default=0.08 min=0.0 max=1.0 subtype=factor
-edge_color: default=vec3(1.0, 0.5, 0.1) subtype=color
+threshold: default=0.35 min=0.0 max=1.0 subtype=factor description="Mask cutoff"
+edge_width: default=0.08 min=0.0 max=1.0 subtype=factor description="Soft edge width"
+edge_color: default=vec3(1.0, 0.5, 0.1) subtype=color description="Edge highlight color"
 */
 vec3 dissolve_mask(vec3 base_color, float threshold, float edge_width, vec3 edge_color)
 {
@@ -1544,7 +1567,7 @@ vec3 stylize(vec3 base_color, float strength = 0.5)
 
 当前节点不会把这种写法当成 Blender 参数默认值系统。
 
-#### 7.3 给 `sampler2D` 写 Meta
+#### 7.3 给 `sampler2D` 写数值 Meta
 
 不要写：
 
@@ -1558,7 +1581,22 @@ vec4 sample_it(sampler2D tex, vec2 uv)
 }
 ```
 
-`sampler2D` 当前通过 `Image to Closure` 或 `Closure Output` 接入来源，本身不走这个 Meta 通道。
+`sampler2D` 当前通过 `Image to Closure` 或 `Closure Output` 接入来源，不支持默认值、范围、隐藏值或 subtype。
+
+可以写 `description`，也可以放进 panel：
+
+```glsl
+/* @glsl_meta v1
+@panel Texture closed=true
+tex: description="Texture closure used by texture(tex, uv)"
+uv: default=vec2(0.0) description="Texture coordinates"
+@end_panel
+*/
+vec4 sample_it(sampler2D tex, vec2 uv)
+{
+  return texture(tex, uv);
+}
+```
 
 #### 7.4 给不存在的参数写 Meta
 

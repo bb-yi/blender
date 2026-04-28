@@ -140,6 +140,7 @@ namespace blender
         float4 default_value = float4(0.0f);
         std::optional<std::string> default_expression;
         std::optional<std::string> panel_name;
+        std::optional<std::string> description;
         bool has_min = false;
         float min_value = 0.0f;
         bool has_max = false;
@@ -150,7 +151,7 @@ namespace blender
         bool has_any() const
         {
           return has_default_value || default_expression.has_value() || panel_name.has_value() ||
-            has_min || has_max || hide_value || subtype.has_value();
+            description.has_value() || has_min || has_max || hide_value || subtype.has_value();
         }
       };
 
@@ -237,11 +238,19 @@ namespace blender
       std::optional<std::string> hide_value;
       std::optional<std::string> subtype;
       std::optional<std::string> panel_name;
+      std::optional<std::string> description;
 
       bool has_any() const
       {
         return default_value.has_value() || min_value.has_value() || max_value.has_value() ||
-          hide_value.has_value() || subtype.has_value() || panel_name.has_value();
+          hide_value.has_value() || subtype.has_value() || panel_name.has_value() ||
+          description.has_value();
+      }
+
+      bool has_sampler_unsupported_meta() const
+      {
+        return default_value.has_value() || min_value.has_value() || max_value.has_value() ||
+          hide_value.has_value() || subtype.has_value();
       }
     };
 
@@ -1487,6 +1496,45 @@ namespace blender
       return true;
     }
 
+    static bool parse_glsl_meta_quoted_string(const StringRef text,
+      int64_t& r_index,
+      std::string& r_value,
+      std::string& r_error)
+    {
+      BLI_assert(r_index < text.size() && text[r_index] == '"');
+      r_index++;
+      while (r_index < text.size())
+      {
+        const char c = text[r_index];
+        r_index++;
+        if (c == '"')
+        {
+          return true;
+        }
+        if (c == '\\')
+        {
+          if (r_index >= text.size())
+          {
+            r_error = "Unterminated escape sequence in GLSL meta quoted string";
+            return false;
+          }
+          const char escaped = text[r_index];
+          r_index++;
+          if (ELEM(escaped, '"', '\\'))
+          {
+            r_value.push_back(escaped);
+            continue;
+          }
+          r_error = "Unsupported escape sequence in GLSL meta quoted string";
+          return false;
+        }
+        r_value.push_back(c);
+      }
+
+      r_error = "Unterminated GLSL meta quoted string";
+      return false;
+    }
+
     static bool parse_glsl_meta_assignment_list(const StringRef text,
       Map<std::string, std::string>& r_assignments,
       std::string& r_error)
@@ -1536,27 +1584,44 @@ namespace blender
           return false;
         }
 
-        const int64_t value_start = i;
-        int paren_depth = 0;
-        while (i < text.size())
+        std::string value;
+        if (text[i] == '"')
         {
-          const char c = text[i];
-          if (c == '(')
+          if (!parse_glsl_meta_quoted_string(text, i, value, r_error))
           {
-            paren_depth++;
+            return false;
           }
-          else if (c == ')')
+          if (i < text.size() && !std::isspace(uchar(text[i])))
           {
-            paren_depth = std::max(paren_depth - 1, 0);
+            r_error = "GLSL meta quoted attribute values must be followed by whitespace";
+            return false;
           }
-          else if (paren_depth == 0 && std::isspace(uchar(c)))
+        }
+        else
+        {
+          const int64_t value_start = i;
+          int paren_depth = 0;
+          while (i < text.size())
           {
-            break;
+            const char c = text[i];
+            if (c == '(')
+            {
+              paren_depth++;
+            }
+            else if (c == ')')
+            {
+              paren_depth = std::max(paren_depth - 1, 0);
+            }
+            else if (paren_depth == 0 && std::isspace(uchar(c)))
+            {
+              break;
+            }
+            i++;
           }
-          i++;
+          value = std::string(text.substr(value_start, i - value_start));
         }
 
-        const std::string value = trim_copy(text.substr(value_start, i - value_start));
+        value = trim_copy(value);
         if (value.empty())
         {
           r_error = "GLSL meta attribute is missing a value";
@@ -1730,6 +1795,13 @@ namespace blender
         else if (key == "subtype")
         {
           if (!assign_once(r_meta.subtype, key, value))
+          {
+            return false;
+          }
+        }
+        else if (key == "description")
+        {
+          if (!assign_once(r_meta.description, key, value))
           {
             return false;
           }
@@ -2295,8 +2367,22 @@ namespace blender
       }
       if (glsl_boundary_type_is_sampler(r_param.type))
       {
-        r_error = "GLSL meta does not support sampler2D parameters yet";
-        return false;
+        if (raw_meta.has_sampler_unsupported_meta())
+        {
+          r_error =
+            "GLSL meta default, min, max, hide_value, and subtype are not supported for "
+            "sampler2D parameters";
+          return false;
+        }
+        if (raw_meta.description.has_value())
+        {
+          r_param.meta.description = *raw_meta.description;
+        }
+        if (raw_meta.panel_name.has_value())
+        {
+          r_param.meta.panel_name = *raw_meta.panel_name;
+        }
+        return true;
       }
 
       if (raw_meta.default_value.has_value())
@@ -2429,6 +2515,11 @@ namespace blender
         r_param.meta.subtype = subtype;
       }
 
+      if (raw_meta.description.has_value())
+      {
+        r_param.meta.description = *raw_meta.description;
+      }
+
       if (raw_meta.panel_name.has_value())
       {
         r_param.meta.panel_name = *raw_meta.panel_name;
@@ -2471,6 +2562,10 @@ namespace blender
         if (param.meta.panel_name.has_value())
         {
           ss << "panel=" << *param.meta.panel_name << ';';
+        }
+        if (param.meta.description.has_value())
+        {
+          ss << "description=" << *param.meta.description << ';';
         }
         if (param.meta.has_min)
         {
@@ -4657,10 +4752,18 @@ vec3 glsl_ambient_lighting()
       const StringRef socket_name,
       const StringRef socket_identifier)
     {
+      auto apply_input_description = [&](auto& decl) {
+        if (!is_output && param.meta.description.has_value())
+        {
+          decl.description(*param.meta.description);
+        }
+      };
+
       if (glsl_boundary_type_is_sample2d(param.type))
       {
         BLI_assert(!is_output);
-        b.add_input<decl::Closure>(socket_name, socket_identifier);
+        auto& decl = b.add_input<decl::Closure>(socket_name, socket_identifier);
+        apply_input_description(decl);
         return;
       }
 
@@ -4687,6 +4790,7 @@ vec3 glsl_ambient_lighting()
           {
             decl.subtype(*param.meta.subtype);
           }
+          apply_input_description(decl);
         }
         return;
       }
@@ -4710,6 +4814,7 @@ vec3 glsl_ambient_lighting()
           {
             decl.hide_value();
           }
+          apply_input_description(decl);
         }
         return;
       }
@@ -4731,6 +4836,7 @@ vec3 glsl_ambient_lighting()
           {
             decl.hide_value();
           }
+          apply_input_description(decl);
         }
         return;
       }
@@ -4751,6 +4857,7 @@ vec3 glsl_ambient_lighting()
         {
           decl.hide_value();
         }
+        apply_input_description(decl);
         return;
       }
 
@@ -4785,6 +4892,7 @@ vec3 glsl_ambient_lighting()
           {
             decl.hide_value();
           }
+          apply_input_description(decl);
         };
 
       if (is_output)

@@ -136,6 +136,81 @@ class GLSLFunctionNodeTest(unittest.TestCase):
 
         self.assertEqual(glsl_node.parse_status, 'READY')
 
+    def test_meta_description_preserves_existing_socket_values(self):
+        _, tree = self.make_material_tree()
+        node = tree.nodes.new("ShaderNodeGLSLFunction")
+        source = (
+            "/* @glsl_meta v1\n"
+            "strength: default=0.25 min=0.0 max=1.0 subtype=factor "
+            "description=\"Blend amount for the effect\"\n"
+            "tint: default=vec3(1.0, 0.8, 0.2) subtype=color "
+            "description=\"Main tint color\"\n"
+            "*/\n"
+            "vec3 stylize(vec3 base_color, float strength, vec3 tint){\n"
+            "  return mix(base_color, tint, strength);\n"
+            "}\n"
+        )
+        text = make_text_block("glsl_meta_description.glsl", source)
+
+        self.configure_glsl_node(node, "glsl_meta_description.glsl", "stylize")
+        self.assertEqual(node.parse_status, 'READY')
+        strength_socket = find_socket(node.inputs, "strength")
+        self.assertAlmostEqual(strength_socket.default_value, 0.25)
+        strength_socket.default_value = 0.75
+
+        text.clear()
+        text.write(
+            "/* @glsl_meta v1\n"
+            "strength: default=0.25 min=0.0 max=1.0 subtype=factor "
+            "description=\"Updated blend amount\"\n"
+            "tint: default=vec3(1.0, 0.8, 0.2) subtype=color "
+            "description=\"Updated tint color\"\n"
+            "*/\n"
+            "vec3 stylize(vec3 base_color, float strength, vec3 tint){\n"
+            "  return mix(base_color, tint, strength);\n"
+            "}\n"
+        )
+        refresh_glsl_node(node)
+
+        self.assertEqual(node.parse_status, 'READY')
+        self.assertAlmostEqual(find_socket(node.inputs, "strength").default_value, 0.75)
+
+    def test_sampler2d_meta_allows_description_and_panel_only(self):
+        _, tree = self.make_material_tree()
+        node = tree.nodes.new("ShaderNodeGLSLFunction")
+        source = (
+            "/* @glsl_meta v1\n"
+            "@panel Texture closed=true\n"
+            "tex: description=\"Texture closure used by texture(tex, uv)\"\n"
+            "uv: default=vec2(0.0) description=\"Texture coordinates\"\n"
+            "@end_panel\n"
+            "*/\n"
+            "vec4 sample_it(sampler2D tex, vec2 uv){\n"
+            "  return texture(tex, uv);\n"
+            "}\n"
+        )
+        make_text_block("glsl_sampler_description.glsl", source)
+
+        self.configure_glsl_node(node, "glsl_sampler_description.glsl", "sample_it")
+
+        self.assertEqual(node.parse_status, 'READY')
+        self.assertIsNotNone(find_socket(node.inputs, "tex"))
+
+        bad_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        bad_source = (
+            "/* @glsl_meta v1\n"
+            "tex: default=0.5\n"
+            "*/\n"
+            "vec4 bad_sampler(sampler2D tex, vec2 uv){\n"
+            "  return texture(tex, uv);\n"
+            "}\n"
+        )
+        make_text_block("glsl_sampler_bad_meta.glsl", bad_source)
+
+        self.configure_glsl_node(bad_node, "glsl_sampler_bad_meta.glsl", "bad_sampler")
+
+        self.assertEqual(bad_node.parse_status, 'ERROR')
+
     def test_nested_sample2d_closure_links_parse(self):
         _, tree = self.make_material_tree()
         outer_node = tree.nodes.new("ShaderNodeGLSLFunction")
