@@ -439,7 +439,8 @@ inline void Manager::extract_object_attributes(ResourceHandle handle,
                                                const GPUMaterial *material)
 {
   constexpr uint legacy_attr_slots = 8;
-  ObjectInfos &infos = infos_buf.current().get_or_resize(handle.resource_index());
+  const uint resource_index = handle.resource_index();
+  ObjectInfos &infos = infos_buf.current().get_or_resize(resource_index);
   infos.object_attrs_offset = attribute_len_;
 
   const GPUUniformAttrList *attr_list = GPU_material_uniform_attributes(material);
@@ -450,10 +451,12 @@ inline void Manager::extract_object_attributes(ResourceHandle handle,
   for (const GPUUniformAttr &attr : attr_list->list) {
     ObjectAttribute &object_attr = attributes_buf.get_or_resize(attribute_len_);
     if (object_attr.sync(ref, *&attr)) {
-      BLI_assert(handle.resource_index() < DRW_RESOURCE_CHUNK_LEN);
-      BLI_assert(attr.id >= 0 && attr.id < legacy_attr_slots);
-      attributes_legacy_buf[handle.resource_index() * legacy_attr_slots + attr.id] = float4(
-          object_attr.data_x, object_attr.data_y, object_attr.data_z, object_attr.data_w);
+      const bool can_write_legacy_attr = resource_index < DRW_RESOURCE_CHUNK_LEN && attr.id >= 0 &&
+                                         attr.id < legacy_attr_slots;
+      if (can_write_legacy_attr) {
+        attributes_legacy_buf[resource_index * legacy_attr_slots + attr.id] = float4(
+            object_attr.data_x, object_attr.data_y, object_attr.data_z, object_attr.data_w);
+      }
       infos.object_attrs_len++;
       attribute_len_++;
     }
@@ -465,7 +468,8 @@ inline void Manager::extract_object_attributes(ResourceHandle handle,
                                                Span<GPUMaterial *> materials)
 {
   constexpr uint legacy_attr_slots = 8;
-  ObjectInfos &infos = infos_buf.current().get_or_resize(handle.resource_index());
+  const uint resource_index = handle.resource_index();
+  ObjectInfos &infos = infos_buf.current().get_or_resize(resource_index);
   infos.object_attrs_offset = attribute_len_;
 
   /* Simple cache solution to avoid duplicates. */
@@ -486,10 +490,12 @@ inline void Manager::extract_object_attributes(ResourceHandle handle,
       hash_cache.append(attr.hash_code);
       ObjectAttribute &object_attr = attributes_buf.get_or_resize(attribute_len_);
       if (object_attr.sync(ref, *&attr)) {
-        BLI_assert(handle.resource_index() < DRW_RESOURCE_CHUNK_LEN);
-        BLI_assert(attr.id >= 0 && attr.id < legacy_attr_slots);
-        attributes_legacy_buf[handle.resource_index() * legacy_attr_slots + attr.id] = float4(
-            object_attr.data_x, object_attr.data_y, object_attr.data_z, object_attr.data_w);
+        const bool can_write_legacy_attr = resource_index < DRW_RESOURCE_CHUNK_LEN &&
+                                           attr.id >= 0 && attr.id < legacy_attr_slots;
+        if (can_write_legacy_attr) {
+          attributes_legacy_buf[resource_index * legacy_attr_slots + attr.id] = float4(
+              object_attr.data_x, object_attr.data_y, object_attr.data_z, object_attr.data_w);
+        }
         infos.object_attrs_len++;
         attribute_len_++;
       }
