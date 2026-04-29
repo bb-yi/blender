@@ -43,6 +43,11 @@ void clear_aovs()
 
 void clear_outline()
 {
+#if defined(MAT_OUTLINE_CLEAR) && defined(GPU_FRAGMENT_SHADER)
+  int2 texel = int2(gl_FragCoord.xy);
+  imageStoreFast(outline_color_img, texel, float4(0.0f));
+  imageStoreFast(outline_info_img, texel, float4(0.0f));
+#endif
 }
 
 int aov_color_index(uint hash)

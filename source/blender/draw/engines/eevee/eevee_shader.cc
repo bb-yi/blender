@@ -1254,12 +1254,19 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     info.additional_info("eevee_render_pass_out");
     info.additional_info("eevee_cryptomatte_out");
   }
-  if (use_outline && GPU_material_has_outline_output(gpumat) &&
+  const bool has_outline_output = GPU_material_has_outline_output(gpumat);
+  if (use_outline &&
+      (has_outline_output || pipeline_type == MAT_PIPE_FORWARD) &&
       ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD))
   {
     info.additional_info((pipeline_type == MAT_PIPE_FORWARD) ? "eevee_surf_forward_outline_out" :
-                                                             "eevee_outline_out");
-    info.define("MAT_OUTLINE_SUPPORT");
+                                                              "eevee_outline_out");
+    if (pipeline_type == MAT_PIPE_FORWARD) {
+      info.define("MAT_OUTLINE_CLEAR");
+    }
+    if (has_outline_output) {
+      info.define("MAT_OUTLINE_SUPPORT");
+    }
   }
 
   if (use_shader_to_rgba) {
