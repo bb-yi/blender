@@ -340,6 +340,15 @@ bool foreach_light_setup(uint l_idx,
 #endif
 #endif
 
+#ifdef MAT_DEPTH_OFFSET
+bool depth_offset_fragment_matches_prepass(float depth_offset)
+{
+  float fragment_depth = reverse_z::read(material_depth_offset_frag_depth(depth_offset));
+  float prepass_depth = texelFetch(hiz_tx, int2(gl_FragCoord.xy), 0).r;
+  return abs(fragment_depth - prepass_depth) <= 1.0e-6f;
+}
+#endif
+
 float4 closure_to_rgba(Closure cl)
 {
   UNUSED_VARS(cl);
@@ -363,6 +372,10 @@ void main()
 
 #ifdef MAT_DEPTH_OFFSET
   float depth_offset = nodetree_depth_offset();
+  if (!depth_offset_fragment_matches_prepass(depth_offset)) {
+    gpu_discard_fragment();
+    return;
+  }
   material_depth_offset_write(depth_offset);
   material_depth_offset_apply_nodetree_position(depth_offset);
 #endif
