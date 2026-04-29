@@ -27,9 +27,11 @@ class OutlineModule {
   Framebuffer detect_fb_ = {"Outline.Detect.FB"};
   Framebuffer jfa_init_fb_ = {"Outline.JFA.Init.FB"};
   Framebuffer resolve_fb_ = {"Outline.Resolve.FB"};
+  Framebuffer occlusion_fb_ = {"Outline.Occlusion.FB"};
 
   TextureFromPool edge_seed_tx_ = {"Outline.EdgeSeed"};
   TextureFromPool resolved_outline_tx_ = {"Outline.Resolved"};
+  TextureFromPool occlusion_depth_tx_ = {"Outline.OcclusionDepth"};
   SwapChain<TextureFromPool, 2> jfa_tx_;
 
   int jfa_step_size_ = 1;

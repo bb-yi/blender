@@ -223,11 +223,14 @@ class ForwardPipeline {
   PassSortable transparent_ps_ = {"Forward.Transparent"};
   float3 camera_forward_;
 
+  PassMain outline_occlusion_ps_ = {"Forward.OutlineOcclusion"};
+
   PassSimple resolve_ps_ = {"Forward.Resolve"};
 
   bool has_opaque_ = false;
   bool has_transparent_ = false;
   bool has_holdout_ = false;
+  bool has_outline_occluders_ = false;
 
   struct TransparencyBuffer {
     /* Channels are packed separately for technical reason (see eevee_surf_forward_frag.glsl for
@@ -261,10 +264,13 @@ class ForwardPipeline {
                                          blender::Material *blender_mat,
                                          GPUMaterial *gpumat);
   PassMain::Sub *material_transparent_add(const Object *ob,
-                                          blender::Material *blender_mat,
-                                          GPUMaterial *gpumat);
+                                           blender::Material *blender_mat,
+                                           GPUMaterial *gpumat);
+  PassMain::Sub *outline_occlusion_add(blender::Material *blender_mat, GPUMaterial *gpumat);
 
   bool use_colored_transparency() const;
+  bool has_outline_occluders() const;
+  void render_outline_occlusion(View &view, Framebuffer &outline_occlusion_fb);
 
   void render(View &view,
               gpu::Texture *depth_tx,

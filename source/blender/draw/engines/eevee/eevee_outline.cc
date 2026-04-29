@@ -66,6 +66,10 @@ void OutlineModule::sync()
   resolve_ps_.state_set(DRW_STATE_WRITE_COLOR);
   resolve_ps_.shader_set(inst_.shaders.static_shader_get(OUTLINE_RESOLVE));
   resolve_ps_.bind_texture("depth_tx", &inst_.render_buffers.depth_tx);
+  gpu::Texture **outline_occlusion_depth_ref =
+      inst_.pipelines.forward.has_outline_occluders() ? &occlusion_depth_tx_ :
+                                                        &inst_.render_buffers.depth_tx;
+  resolve_ps_.bind_texture("outline_occlusion_depth_tx", outline_occlusion_depth_ref);
   resolve_ps_.bind_texture("outline_seed_tx", &edge_seed_tx_);
   resolve_ps_.bind_texture("outline_color_tx", &inst_.render_buffers.outline_color_tx);
   resolve_ps_.bind_texture("outline_info_tx", &inst_.render_buffers.outline_info_tx);
@@ -80,6 +84,22 @@ void OutlineModule::render(View &view, int2 extent)
   }
 
   auto &drw = *inst_.manager;
+
+  if (inst_.pipelines.forward.has_outline_occluders()) {
+    occlusion_depth_tx_.acquire(extent,
+                                gpu::TextureFormat::SFLOAT_32_DEPTH_UINT_8,
+                                GPU_TEXTURE_USAGE_ATTACHMENT | GPU_TEXTURE_USAGE_SHADER_READ);
+    GPU_texture_copy(occlusion_depth_tx_, inst_.render_buffers.depth_tx);
+    GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE | GPU_BARRIER_TEXTURE_FETCH |
+                       GPU_BARRIER_FRAMEBUFFER);
+
+    occlusion_fb_.ensure(GPU_ATTACHMENT_TEXTURE(occlusion_depth_tx_));
+    inst_.pipelines.forward.render_outline_occlusion(view, occlusion_fb_);
+    GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH);
+  }
+  else {
+    occlusion_depth_tx_.release();
+  }
 
   edge_seed_tx_.acquire(extent, gpu::TextureFormat::SFLOAT_16_16_16_16, GPU_TEXTURE_USAGE_GENERAL);
   edge_seed_tx_.clear(float4(0.0f));
@@ -146,11 +166,13 @@ void OutlineModule::render(View &view, int2 extent)
   edge_seed_tx_.release();
   jfa_tx_.current().release();
   jfa_tx_.previous().release();
+  occlusion_depth_tx_.release();
 }
 
 void OutlineModule::release_result()
 {
   resolved_outline_tx_.release();
+  occlusion_depth_tx_.release();
 }
 
 }  // namespace blender::eevee

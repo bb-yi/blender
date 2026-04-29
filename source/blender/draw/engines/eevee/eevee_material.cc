@@ -584,6 +584,7 @@ Material &MaterialModule::material_sync(Object *ob,
       mat.shading = material_pass_get(ob, blender_mat, surface_pipe, geometry_type);
       mat.npr = MaterialPass();
       mat.overlap_masking = MaterialPass();
+      mat.outline_occlusion = MaterialPass();
       mat.lightprobe_sphere_prepass = MaterialPass();
       mat.lightprobe_sphere_shading = MaterialPass();
       mat.planar_probe_prepass = MaterialPass();
@@ -608,6 +609,15 @@ Material &MaterialModule::material_sync(Object *ob,
       mat.npr = has_npr_tree ? material_pass_get(
                                    ob, blender_mat, MAT_PIPE_DEFERRED_NPR, geometry_type) :
                                MaterialPass();
+      if (!hide_on_camera && inst_.scene->eevee.use_outline != 0 && use_forward_pipeline &&
+          GPU_material_flag_get(mat.shading.gpumat, GPU_MATFLAG_TRANSPARENT))
+      {
+        mat.outline_occlusion = material_pass_get(
+            ob, blender_mat, MAT_PIPE_PREPASS_OVERLAP, geometry_type);
+      }
+      else {
+        mat.outline_occlusion = MaterialPass();
+      }
       if (material_has_flag(mat.npr, GPU_MATFLAG_RAYCAST) && mat.prepass.gpumat != nullptr) {
         mat.prepass.sub_pass = inst_.pipelines.deferred.prepass_add(
             blender_mat, mat.prepass.gpumat, has_motion, ob->refraction_layer_index, true);
@@ -725,6 +735,10 @@ Material &MaterialModule::material_sync(Object *ob,
      * NOTE: Pre-pass needs to be created first in order to be sorted first. */
     mat.overlap_masking.sub_pass = inst_.pipelines.forward.prepass_transparent_add(
         ob, blender_mat, mat.shading.gpumat);
+    if (inst_.scene->eevee.use_outline != 0 && mat.outline_occlusion.gpumat != nullptr) {
+      mat.outline_occlusion.sub_pass = inst_.pipelines.forward.outline_occlusion_add(
+          blender_mat, mat.outline_occlusion.gpumat);
+    }
     mat.shading.sub_pass = inst_.pipelines.forward.material_transparent_add(
         ob, blender_mat, mat.shading.gpumat);
   }

@@ -69,7 +69,11 @@ void attenuate_outline(float keep_factor)
     return;
   }
 
-  outline_color.rgb *= keep_factor;
+  outline_color.a *= keep_factor;
+  if (outline_color.a <= 1e-5f) {
+    clear_outline();
+    return;
+  }
   imageStoreFast(outline_color_img, texel, outline_color);
 #endif
 }

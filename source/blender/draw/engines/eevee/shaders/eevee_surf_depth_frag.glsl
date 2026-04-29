@@ -44,7 +44,11 @@ void main()
 
   nodetree_surface(0.0f);
 
-#  ifdef MAT_FORWARD
+#  ifdef MAT_OUTLINE_OCCLUSION
+  /* Outline resolve needs a binary front-most surface mask. Treat any visible transparent
+   * coverage as an occluder, but keep fully transparent regions from writing depth. */
+  float threshold = 1.0f - 1e-5f;
+#  elif defined(MAT_FORWARD)
   /* Pre-pass only allows fully opaque areas to cut through all transparent layers. */
   float threshold = 0.0f;
 #  else

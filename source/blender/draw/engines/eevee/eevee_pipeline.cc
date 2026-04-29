@@ -478,6 +478,7 @@ void ForwardPipeline::sync()
   has_opaque_ = false;
   has_transparent_ = false;
   has_holdout_ = false;
+  has_outline_occluders_ = false;
 
   {
     prepass_ps_.init();
@@ -551,6 +552,15 @@ void ForwardPipeline::sync()
     sub.bind_resources(inst_.hiz_buffer.front);
     sub.bind_resources(inst_.volume_probes);
     sub.bind_resources(inst_.sphere_probes);
+  }
+  {
+    outline_occlusion_ps_.init();
+    outline_occlusion_ps_.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);
+    outline_occlusion_ps_.bind_resources(inst_.uniform_data);
+    outline_occlusion_ps_.bind_resources(inst_.velocity);
+    outline_occlusion_ps_.bind_resources(inst_.sampling);
+    outline_occlusion_ps_.bind_resources(inst_.render_textures);
+    outline_occlusion_ps_.bind_resources(inst_.lights);
   }
   {
     gpu::Shader *sh = inst_.shaders.static_shader_get(TRANSPARENCY_RESOLVE);
@@ -673,6 +683,25 @@ PassMain::Sub *ForwardPipeline::material_transparent_add(const Object *ob,
   return pass;
 }
 
+PassMain::Sub *ForwardPipeline::outline_occlusion_add(blender::Material *blender_mat,
+                                                      GPUMaterial *gpumat)
+{
+  if (gpumat == nullptr) {
+    return nullptr;
+  }
+
+  DRWState state = DRW_STATE_WRITE_DEPTH | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
+                   inst_.film.depth.test_state;
+  state |= material_surface_cull_state(material_surface_cull_method(blender_mat));
+
+  has_outline_occluders_ = true;
+  PassMain::Sub *pass = &outline_occlusion_ps_.sub(GPU_material_get_name(gpumat));
+  pass->state_set(state);
+  pass->material_set(*inst_.manager, gpumat, true);
+  pass->push_constant("surface_cull_mode", int(material_surface_cull_method(blender_mat)));
+  return pass;
+}
+
 void ForwardPipeline::TransparencyBuffer::acquire(int2 extent, bool use_colored_transparency)
 {
   eGPUTextureUsage usage = GPU_TEXTURE_USAGE_ATTACHMENT | GPU_TEXTURE_USAGE_SHADER_READ;
@@ -706,6 +735,23 @@ bool ForwardPipeline::use_colored_transparency() const
    * radiance channel in final renders. Force the split-channel path for real transparent draws
    * until the single-target path is brought back in sync. */
   return has_transparent_ || has_holdout_;
+}
+
+bool ForwardPipeline::has_outline_occluders() const
+{
+  return has_outline_occluders_;
+}
+
+void ForwardPipeline::render_outline_occlusion(View &view, Framebuffer &outline_occlusion_fb)
+{
+  if (!has_outline_occluders_) {
+    return;
+  }
+
+  GPU_debug_group_begin("Forward.OutlineOcclusion");
+  outline_occlusion_fb.bind();
+  inst_.manager->submit(outline_occlusion_ps_, view);
+  GPU_debug_group_end();
 }
 
 void ForwardPipeline::render(View &view,

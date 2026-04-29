@@ -341,6 +341,7 @@ struct Material {
   MaterialPass npr;
   MaterialPass prepass;
   MaterialPass overlap_masking;
+  MaterialPass outline_occlusion;
   MaterialPass capture;
   MaterialPass lightprobe_sphere_prepass;
   MaterialPass lightprobe_sphere_shading;

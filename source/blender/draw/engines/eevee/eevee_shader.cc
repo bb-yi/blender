@@ -926,6 +926,9 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
         case MAT_PIPE_PREPASS_DEFERRED:
           pipeline_info_name = "eevee_surf_depth";
           info.name_ += "_depth";
+          if (pipeline_type == MAT_PIPE_PREPASS_OVERLAP) {
+            info.define("MAT_OUTLINE_OCCLUSION");
+          }
           break;
         case MAT_PIPE_PREPASS_PLANAR:
           pipeline_info_name = "eevee_surf_depth";
@@ -2207,6 +2210,22 @@ void ShaderModule::material_create_info_pipelines_amend(eMaterialGeometry geomet
     }
 
     case MAT_PIPE_PREPASS_FORWARD: {
+      r_info.pipeline_state()
+          .primitive(prim_type)
+          .state(GPU_WRITE_DEPTH,
+                 GPU_BLEND_NONE,
+                 GPU_CULL_NONE,
+                 GPU_DEPTH_GREATER_EQUAL,
+                 GPU_STENCIL_NONE,
+                 GPU_STENCIL_OP_NONE,
+                 GPU_VERTEX_LAST)
+          .viewports(1)
+          .depth_format(gpu::TextureTargetFormat::SFLOAT_32_DEPTH_UINT_8)
+          .stencil_format(gpu::TextureTargetFormat::SFLOAT_32_DEPTH_UINT_8)
+          .color_format(gpu::TextureTargetFormat::SFLOAT_16_16);
+      break;
+    }
+    case MAT_PIPE_PREPASS_OVERLAP: {
       r_info.pipeline_state()
           .primitive(prim_type)
           .state(GPU_WRITE_DEPTH,
