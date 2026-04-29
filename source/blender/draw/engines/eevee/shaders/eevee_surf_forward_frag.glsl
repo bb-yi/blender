@@ -62,9 +62,9 @@ void main()
 {
   /* Clear AOVs first. In case the material renders to them. */
   clear_aovs();
-  clear_outline();
 
   material_surface_cull_discard();
+  outline_output_reset();
   init_globals();
 
   float noise = utility_tx_fetch(utility_tx, gl_FragCoord.xy, UTIL_BLUE_NOISE_LAYER).r;
@@ -92,6 +92,8 @@ void main()
 
   float3 radiance, transmittance;
   forward_lighting_eval(g_forward_lighting_P, g_thickness, radiance, transmittance);
+  attenuate_outline(saturate(average(transmittance)));
+  outline_output_flush();
 
   /* Volumetric resolve and compositing. */
   float2 uvs = gl_FragCoord.xy * uniform_buf.volumes.main_view_extent_inv;

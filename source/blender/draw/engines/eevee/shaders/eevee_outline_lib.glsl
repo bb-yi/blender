@@ -40,6 +40,32 @@ uint outline_id_unpack(float outline_id_packed)
   return uint(clamp(outline_id_packed, 0.0f, 1.0f) * 65535.0f + 0.5f);
 }
 
+#if defined(MAT_OUTLINE_SUPPORT) && defined(MAT_OUTLINE_CLEAR) && defined(GPU_FRAGMENT_SHADER)
+float4 g_outline_staged_color;
+float4 g_outline_staged_info;
+#endif
+
+void outline_output_reset()
+{
+#if defined(MAT_OUTLINE_SUPPORT) && defined(MAT_OUTLINE_CLEAR) && defined(GPU_FRAGMENT_SHADER)
+  g_outline_staged_color = float4(0.0f);
+  g_outline_staged_info = float4(0.0f);
+#endif
+}
+
+void outline_output_flush()
+{
+#if defined(MAT_OUTLINE_SUPPORT) && defined(MAT_OUTLINE_CLEAR) && defined(GPU_FRAGMENT_SHADER)
+  if (g_outline_staged_color.a <= 0.0f || g_outline_staged_info.r <= 0.0f) {
+    return;
+  }
+
+  int2 texel = int2(gl_FragCoord.xy);
+  imageStoreFast(outline_color_img, texel, g_outline_staged_color);
+  imageStoreFast(outline_info_img, texel, g_outline_staged_info);
+#endif
+}
+
 float outline_pixel_world_size_at(float depth, int2 extent, int2 texel)
 {
   float2 uv = (float2(texel) + 0.5f) / float2(extent);
@@ -68,7 +94,12 @@ void output_outline(
                               saturate(depth_threshold),
                               saturate(normal_threshold),
                               outline_id_pack(resolved_outline_id));
+#  if defined(MAT_OUTLINE_CLEAR)
+  g_outline_staged_color = stored_color;
+  g_outline_staged_info = stored_info;
+#  else
   imageStoreFast(outline_color_img, texel, stored_color);
   imageStoreFast(outline_info_img, texel, stored_info);
+#  endif
 #endif
 }

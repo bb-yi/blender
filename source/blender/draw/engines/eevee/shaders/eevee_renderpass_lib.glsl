@@ -50,6 +50,30 @@ void clear_outline()
 #endif
 }
 
+void attenuate_outline(float keep_factor)
+{
+#if defined(MAT_OUTLINE_CLEAR) && defined(GPU_FRAGMENT_SHADER)
+  int2 texel = int2(gl_FragCoord.xy);
+  keep_factor = saturate(keep_factor);
+  if (keep_factor <= 1e-5f) {
+    clear_outline();
+    return;
+  }
+  if (keep_factor >= 0.99999f) {
+    return;
+  }
+
+  float4 outline_color = imageLoadFast(outline_color_img, texel);
+  if (outline_color.a <= 1e-5f) {
+    clear_outline();
+    return;
+  }
+
+  outline_color.rgb *= keep_factor;
+  imageStoreFast(outline_color_img, texel, outline_color);
+#endif
+}
+
 int aov_color_index(uint hash)
 {
 #if defined(GPU_FRAGMENT_SHADER)
