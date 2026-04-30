@@ -819,6 +819,9 @@ void BKE_image_tag_glsl_closure_settings_changed(Main *bmain, Image *ima)
     return;
   }
 
+  DEG_id_tag_update(&ima->id, ID_RECALC_SYNC_TO_EVAL);
+  BKE_ntree_update_tag_id_changed(bmain, &ima->id);
+
   Set<ID *> changed_ntree_ids;
   Set<ID *> changed_owner_ids;
   FOREACH_NODETREE_BEGIN (bmain, ntree, owner_id) {
