@@ -85,6 +85,7 @@
 #include "BKE_library.hh"
 #include "BKE_main.hh"
 #include "BKE_main_invariants.hh"
+#include "BKE_material.hh"
 #include "BKE_node.hh"
 #include "BKE_node_legacy_types.hh"
 #include "BKE_node_runtime.hh"
@@ -110,6 +111,9 @@
 #include "DEG_depsgraph_query.hh"
 
 #include "DRW_engine.hh"
+
+#include "WM_api.hh"
+#include "WM_types.hh"
 
 #include "BLO_read_write.hh"
 
@@ -876,12 +880,22 @@ void BKE_image_tag_glsl_closure_settings_changed(Main *bmain, Image *ima)
         Material *material = id_cast<Material *>(owner_id);
         GPU_material_free(&material->gpumaterial);
         DEG_id_tag_update(&material->id, ID_RECALC_SHADING | ID_RECALC_SYNC_TO_EVAL);
+        for (Object &object : bmain->objects) {
+          const short *materials_num = BKE_object_material_len_p(&object);
+          if (materials_num != nullptr && *materials_num > 0 &&
+              BKE_object_material_index_get(&object, material) != -1)
+          {
+            DEG_id_tag_update(&object.id, ID_RECALC_SHADING);
+          }
+        }
+        WM_main_add_notifier(NC_MATERIAL | ND_SHADING_DRAW, material);
         break;
       }
       case ID_WO: {
         World *world = id_cast<World *>(owner_id);
         GPU_material_free(&world->gpumaterial);
         DEG_id_tag_update(&world->id, ID_RECALC_SHADING | ID_RECALC_SYNC_TO_EVAL);
+        WM_main_add_notifier(NC_WORLD | ND_WORLD_DRAW, world);
         break;
       }
       default:

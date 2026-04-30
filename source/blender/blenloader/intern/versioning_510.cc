@@ -684,6 +684,30 @@ void do_versions_after_linking_510(FileData *fd, Main *bmain)
     }
   }
 
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 43) ||
+      !DNA_struct_member_exists(fd->filesdna, "Image", "char", "image_to_closure_texture_type"))
+  {
+    Set<Image *> migrated_images;
+    FOREACH_NODETREE_BEGIN (bmain, ntree, id) {
+      if (ntree->type != NTREE_SHADER) {
+        continue;
+      }
+      for (bNode &node : ntree->nodes) {
+        if (node.type_legacy != SH_NODE_IMAGE_TO_CLOSURE || node.id == nullptr ||
+            GS(node.id->name) != ID_IM)
+        {
+          continue;
+        }
+        Image *image = id_cast<Image *>(node.id);
+        if (migrated_images.add(image)) {
+          image->image_to_closure_interpolation = node.custom1;
+          image->image_to_closure_extension = node.custom2;
+        }
+      }
+    }
+    FOREACH_NODETREE_END;
+  }
+
   /**
    * Always bump subversion in BKE_blender_version.h when adding versioning
    * code here, and wrap it inside a MAIN_VERSION_FILE_ATLEAST check.
@@ -1061,24 +1085,6 @@ void blo_do_versions_510(FileData *fd, Library * /*lib*/, Main *bmain)
       image.image_to_closure_texture_height = 16;
       image.image_to_closure_texture_depth = 16;
     }
-
-    Set<Image *> migrated_images;
-    FOREACH_NODETREE_BEGIN (bmain, ntree, id) {
-      if (ntree->type != NTREE_SHADER) {
-        continue;
-      }
-      for (bNode &node : ntree->nodes) {
-        if (node.type_legacy != SH_NODE_IMAGE_TO_CLOSURE) {
-          continue;
-        }
-        Image *image = id_cast<Image *>(node.id);
-        if (image != nullptr && migrated_images.add(image)) {
-          image->image_to_closure_interpolation = node.custom1;
-          image->image_to_closure_extension = node.custom2;
-        }
-      }
-    }
-    FOREACH_NODETREE_END;
   }
 
   /**
