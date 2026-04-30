@@ -19,6 +19,8 @@
 #include "BKE_node_runtime.hh"
 #include "BKE_text.h"
 
+#include "DNA_material_types.h"
+
 #include "BLI_fileops.h"
 #include "BLI_ghash.h"
 #include "BLI_map.hh"
@@ -47,6 +49,20 @@ namespace blender
     static CLG_LogRef LOG = { "node.shader.glsl_function" };
     static thread_local Set<std::string> active_closure_helper_keys;
     static thread_local Vector<const bNode*> active_closure_helper_nodes;
+
+    static const char* glsl_function_material_name(GPUMaterial* mat)
+    {
+      if (mat == nullptr)
+      {
+        return "<unknown>";
+      }
+      if (Material* material = GPU_material_get_material(mat))
+      {
+        return material->id.name + 2;
+      }
+      const char* gpu_material_name = GPU_material_get_name(mat);
+      return gpu_material_name != nullptr ? gpu_material_name : "<unknown>";
+    }
 
     static void node_storage_free(bNode* node)
     {
@@ -4017,7 +4033,8 @@ namespace blender
       return true;
     }
 
-    static void log_closure_sample2d_downgrades(const bNode& node,
+    static void log_closure_sample2d_downgrades(GPUMaterial* mat,
+      const bNode& node,
       const GLSLParseResult& parse_result,
       const GLSLClosureSample2DDowngradeInfo& info)
     {
@@ -4028,8 +4045,9 @@ namespace blender
       }
 
       std::stringstream ss;
-      ss << "GLSL Function node '" << node.name << "' function '" << parse_result.function.name
-        << "': Closure Output sampler2D downgraded ";
+      ss << "GLSL Function material '" << glsl_function_material_name(mat) << "' node '"
+         << node.name << "' function '" << parse_result.function.name
+         << "': Closure Output sampler2D downgraded ";
       bool need_separator = false;
       auto append_item = [&](const StringRef text)
         {
@@ -4601,7 +4619,7 @@ vec3 glsl_ambient_lighting()
       {
         return false;
       }
-      log_closure_sample2d_downgrades(node, parse_result, downgrade_info);
+      log_closure_sample2d_downgrades(mat, node, parse_result, downgrade_info);
 
       r_library_source = build_namespaced_glsl_source(
         parse_result.source_prefix,
@@ -5339,7 +5357,8 @@ vec3 glsl_ambient_lighting()
       if (!prepare_sampler_input_bindings(mat, *node, parse_result.function, in))
       {
         CLOG_WARN(&LOG,
-          "GLSL Function node '%s' sampler preparation failed",
+          "GLSL Function material '%s' node '%s' sampler preparation failed",
+          glsl_function_material_name(mat),
           node->name);
         static float zero_value[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
         if (out != nullptr)
@@ -5362,7 +5381,8 @@ vec3 glsl_ambient_lighting()
         mat, *node, parse_result, library_source, wrapper_source, specialized_error))
       {
         CLOG_WARN(&LOG,
-          "GLSL Function node '%s' specialized source build failed: %s",
+          "GLSL Function material '%s' node '%s' specialized source build failed: %s",
+          glsl_function_material_name(mat),
           node->name,
           specialized_error.c_str());
         static float zero_value[4] = { 0.0f, 0.0f, 0.0f, 0.0f };

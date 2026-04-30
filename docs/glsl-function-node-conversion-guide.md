@@ -63,7 +63,7 @@
 - `Function` 现在必须显式指定，不会自动选第一个函数
 - `sampler2D` 会显示为 `Closure` 输入口
 - `sampler2D` 可连接 `Image to Closure` 或符合约定的 `Closure Output`
-- `Closure Output -> sampler2D` 当前只保证 `texture(tex, uv)` 这种直接采样形式
+- `Closure Output -> sampler2D` 当前只保证 `texture(tex, coord)` 这种直接采样形式；`coord` 的语义由闭包内部决定，普通贴图通常是 UV，NPR 图像句柄通常是 `Image Sample.Offset`
 - 如果函数依赖显式 `LOD`、`grad` 或尺寸查询等图像专用能力，应优先使用 `Image to Closure`
 - 导出函数边界当前已经支持 `int / bool`，适合直接作为模式开关、枚举值、`lightgroup_id` 这类参数
 - 默认情况下 `vec2/vec3/vec4` 仍然显示为“向量插口”
@@ -189,7 +189,7 @@ Function: your_function_name
 sampler2D tex
 ```
 
-基础采样通常都应改成：
+普通贴图的基础采样通常都应改成：
 
 ```glsl
 texture(tex, uv)
@@ -205,12 +205,94 @@ textureLod(tex, uv, lod)
 
 - 公开函数边界统一使用 `sampler2D`
 - `sampler2D` 的来源可以是 `Image to Closure`，也可以是符合约定的 `Closure Output`
-- 在函数体内部统一写成 `texture(tex, uv)`
+- 普通贴图在函数体内部通常写成 `texture(tex, uv)`
 - 函数体内部不必强行把所有采样都降级成最基础的 `texture`
 
 - 不要再生成 `sample2D` 作为公开函数参数类型。
 - 不要生成“`sampler2D` 能随便接任何 Closure”的说明；对程序化来源，当前只推荐 `Closure Output`。
 - 如果用了 `textureLod` / `textureGrad` / `textureSize` / `texelFetch` 一类图像专用能力，应默认提醒使用 `Image to Closure`。
+
+### 规则 4A：NPR Tree 里的图像句柄采样仍可用 `sampler2D`，但坐标是偏移量
+
+这里必须先区分两类完全不同的“采样”：
+
+- 普通静态图片、贴图、LUT、噪声图：按上面的规则转成 `sampler2D tex`，函数里使用 `texture(tex, uv)`，外部直接接 UV。
+- `NPR Tree` 中来自 `NPR Input`、`AOV Input`、`NPR Refraction`、`NPR SSS Input`、渲染结果或 NPR 运行时缓冲的输出：也可以包装成 `sampler2D` 闭包输入，但 `texture(image, coord)` 里的 `coord` 应按 `Image Sample.Offset` 理解，不是 mesh UV。
+
+后一类输出在节点图里是图像句柄 / `TextureHandle` 语义。它们不能作为 `GLSL Function` 的公开边界类型直接传入，但可以通过 `Closure Output -> sampler2D` 间接采样。闭包内部的采样节点是 `Image Sample`。
+
+典型闭包节点连接应写成类似：
+
+```text
+Closure Input.UV -> Image Sample.Offset
+NPR Input.Combined Color / AOV Input.Color / NPR Refraction.Combined Color -> Image Sample.Image
+Image Sample.Color -> Closure Output.Color
+Closure Output -> GLSL Function 的 sampler2D 输入
+```
+
+这里 `Closure Input` 的接口项仍然叫 `UV`，但在这个闭包里它只是承载 GLSL `texture(image, coord)` 的第二个参数。因为它被接到了 `Image Sample.Offset`，所以语义应写成 `offset`。
+
+`Image Sample.Offset` 表示**相对当前像素 / 当前采样点的偏移**，不是绝对 UV：
+
+- `Offset = vec3(0.0, 0.0, 0.0)`：采样当前像素。
+- `Pixel` 模式下 `Offset = vec3(1.0, 0.0, 0.0)`：采样右侧 1 个像素，不是 `uv.x = 1.0`。
+- `Pixel` 模式下 `Offset = vec3(-1.0, 0.0, 0.0)`：采样左侧 1 个像素。
+- `View` 模式下 `Offset` 按节点暴露的视图 / 屏幕空间偏移语义工作，不能直接把它解释成 mesh UV。
+
+因此 NPR Tree 图像句柄的 GLSL Function 示例应写成：
+
+```glsl
+vec4 npr_sample_current_pixel(sampler2D image)
+{
+  return texture(image, vec2(0.0));
+}
+
+vec4 npr_sample_pixel_right(sampler2D image, float radius)
+{
+  return texture(image, vec2(radius, 0.0));
+}
+```
+
+如果写邻域采样、高斯模糊、边缘检测、SSAO 之类效果，函数参数也应命名为 `offset` / `radius` / `pixel_radius`，不要命名成 `uv`：
+
+```glsl
+vec4 npr_gaussian_blur_3x3(sampler2D image, vec2 offset, float radius)
+{
+  float r = max(radius, 0.0);
+  vec4 sum = vec4(0.0);
+  sum += texture(image, offset + vec2(-r, -r)) * 1.0;
+  sum += texture(image, offset + vec2( 0, -r)) * 2.0;
+  sum += texture(image, offset + vec2( r, -r)) * 1.0;
+  sum += texture(image, offset + vec2(-r,  0)) * 2.0;
+  sum += texture(image, offset + vec2( 0,  0)) * 4.0;
+  sum += texture(image, offset + vec2( r,  0)) * 2.0;
+  sum += texture(image, offset + vec2(-r,  r)) * 1.0;
+  sum += texture(image, offset + vec2( 0,  r)) * 2.0;
+  sum += texture(image, offset + vec2( r,  r)) * 1.0;
+  return sum / 16.0;
+}
+```
+
+如果原始屏幕 shader 写的是：
+
+```glsl
+texture(buffer, uv + delta_pixels / resolution)
+```
+
+并且用户明确说明这是 `NPR Tree` 中采样 `NPR Input` / `AOV` 这类缓冲，那么转换报告应写成：
+
+- `buffer` 来源改为 `NPR Input` / `AOV Input` / 对应 NPR 图像句柄，再通过 `Image Sample -> Closure Output -> sampler2D` 提供给 GLSL Function。
+- `uv + delta_pixels / resolution` 不要按 mesh UV 翻译；应把第二个参数改成 NPR 采样偏移，例如 `offset + delta_pixels`。
+- 当前像素采样用 `texture(buffer, vec2(0.0))` 或 `texture(buffer, offset)`，其中 `offset` 默认为 `vec2(0.0)`。
+- 邻域采样优先用 `Pixel` 模式，例如 `texture(buffer, offset + delta_pixels)`。
+- 只有在确实需要视图空间偏移时，才说明使用 `View` 模式；不要把归一化 UV 偏移直接塞给 `Pixel` 模式。
+
+因此：
+
+- 不要因为没有 UV 就判定这类 `NPR Tree` 采样不能转换；这里的坐标本来就是偏移量。
+- 不要因为它使用 `sampler2D` 就自动把第二个参数命名成 `uv`。
+- 不要把 mesh UV 直接接到闭包内部的 `Image Sample.Offset`，除非用户明确要用 UV 值伪装偏移。
+- 转换报告应写清楚：图像句柄采样发生在 `Image Sample` 闭包内部，GLSL 函数边界仍然是 `sampler2D image`，但 `texture(image, offset)` 的 `offset` 是 NPR 偏移量。
 
 ### 规则 4.1：如果要使用 Eevee 逐灯辅助接口，必须把范围说清楚
 
@@ -393,6 +475,7 @@ Shadertoy 的 `iChannel0~3` 并不总是“普通 2D 贴图”。
 
 - 如果某个通道本质上就是“普通静态 2D 图片采样，直接在节点面板选图”，改成 `sampler2D`
 - 如果某个通道希望在节点图里接图片或程序化纹理，且核心采样能收敛为 `texture(tex, uv)`，公开函数边界仍然改成 `sampler2D`，再在节点侧用 `Image to Closure` 或 `Closure Output` 提供来源
+- 如果某个通道在 `NPR Tree` 中实际来自 `NPR Input`、`AOV Input`、`NPR Refraction`、`NPR SSS Input` 或其他 NPR 运行时图像句柄，仍然可以改成 `sampler2D` 闭包输入；但闭包内部应使用 `Image Sample.Image + Offset`，GLSL 里的 `texture(image, coord)` 第二个参数应按 offset 写法和命名
 - 如果某个通道依赖“上一帧反馈”“多 pass 缓冲”“运行时积累”“专用输入设备纹理”，不要假装它和普通 `sampler2D` 完全等价
 - 这类运行时依赖要么删除、要么近似、要么改成普通外部输入参数，但必须明确说明是“近似改写”，不是等价转换
 
@@ -877,28 +960,30 @@ vec3 effect(vec2 uv, float time)
 6. 导出函数的参数和返回值是否只用了允许的边界类型？
 7. 是否错误保留了 `inout`？
 8. 是否把 `sampler2D` 写成了 `out`？
-9. 如果用了纹理采样，是否已经改成 `texture(tex, uv)`，或者在确实需要时保留为 `textureLod(tex, uv, lod)`？
+9. 如果用了普通贴图采样，是否已经改成 `texture(tex, uv)`；如果是 NPR 图像句柄采样，是否已经改成 `texture(image, offset)` 语义；如果确实需要显式级别，是否说明了 `textureLod` 等限制？
 10. 如果导出函数返回 `void`，是否仍然通过 `out` 参数暴露了至少一个输出？
 11. 如果有 `sampler2D` 参数，是否提醒了使用者在节点参数区为每个 `sampler2D` 选择图片？
 12. 如果有 `sampler2D` 参数，是否明确说明应通过 `Image to Closure` 或符合约定的 `Closure Output` 提供来源？
 13. 如果有 `sampler2D` 参数，是否错误假设它支持任意 Closure、任意图像专用采样函数或旧的面板选图工作流？
 14. 如果原始来源使用了历史 `sample2D` 旧写法，是否已经统一改写成公开的 `sampler2D` 边界类型？
-15. 如果源码里有宏开关、注释掉的旧代码、未使用辅助函数，是否已经收敛或删除？
-16. 如果源码里有反向 `smoothstep` 或类似依赖实现细节的捷径写法，是否已经改成稳定辅助函数？
-17. 如果源码依赖上一帧反馈、Buffer A/B/C/D、多 pass 中间结果、视频或键盘通道，是否已经明确说明删除、近似或替代方案？
-18. 如果来自 HLSL，是否已去掉所有语义标注？
-19. 如果来自 ShaderLab，是否只保留了核心逻辑？
-20. 是否避免依赖特定引擎的 include 和无法离开原运行时的宏？
-21. 最终输出里是否明确写了本次转换是 `成功`、`部分成功` 还是 `失败`？
-22. 最终输出里是否再次明确写了节点 `Function` 一栏最终应调用的函数名？
-23. 最终输出里是否明确列出了不支持、删除、近似、替代和验证情况？
-24. 最终输出里的结果报告语言，是否跟随了用户当前使用的语言？
-25. 是否移除了 `precision` / `#version` / `layout(...)` / `SHADERDATA` / `proc:` 这类文件级声明或工具元数据？
-26. 如果源码通过 `#define time iTime` 之类的别名宏引用运行时变量，是否已经展开并参数化？
-27. 如果源码里用了共享可变全局状态（如 `gTime`），是否已经改成显式参数或局部变量？
-28. 如果源码里有把比较结果直接拿去构造 `vec*` 或参与数值运算的写法，是否已经改成显式数值表达式？
-29. 如果源码里用了 `mat3x2` / `mat2x3` 或其他方向不够直观的矩阵乘法，是否已经改写成更清晰的 helper？
-30. 如果原 shader 的 alpha 有实际含义，是否已经明确说明保留、拆分还是省略？
+15. 如果用户明确说是 `NPR Tree`，且来源是 `NPR Input` / `AOV Input` / `NPR Refraction` / `NPR SSS Input` 这类图像句柄，是否保留 `sampler2D` 闭包输入，同时说明闭包内部要用 `Image Sample.Image + Offset`？
+16. 是否明确说明 `texture(image, offset)` 里的 `offset` 不是 UV，`vec2(0.0)` 采当前像素，`Pixel` 模式下 `vec2(1.0, 0.0)` 表示右移 1 个像素？
+17. 如果源码里有宏开关、注释掉的旧代码、未使用辅助函数，是否已经收敛或删除？
+18. 如果源码里有反向 `smoothstep` 或类似依赖实现细节的捷径写法，是否已经改成稳定辅助函数？
+19. 如果源码依赖上一帧反馈、Buffer A/B/C/D、多 pass 中间结果、视频或键盘通道，是否已经明确说明删除、近似或替代方案？
+20. 如果来自 HLSL，是否已去掉所有语义标注？
+21. 如果来自 ShaderLab，是否只保留了核心逻辑？
+22. 是否避免依赖特定引擎的 include 和无法离开原运行时的宏？
+23. 最终输出里是否明确写了本次转换是 `成功`、`部分成功` 还是 `失败`？
+24. 最终输出里是否再次明确写了节点 `Function` 一栏最终应调用的函数名？
+25. 最终输出里是否明确列出了不支持、删除、近似、替代和验证情况？
+26. 最终输出里的结果报告语言，是否跟随了用户当前使用的语言？
+27. 是否移除了 `precision` / `#version` / `layout(...)` / `SHADERDATA` / `proc:` 这类文件级声明或工具元数据？
+28. 如果源码通过 `#define time iTime` 之类的别名宏引用运行时变量，是否已经展开并参数化？
+29. 如果源码里用了共享可变全局状态（如 `gTime`），是否已经改成显式参数或局部变量？
+30. 如果源码里有把比较结果直接拿去构造 `vec*` 或参与数值运算的写法，是否已经改成显式数值表达式？
+31. 如果源码里用了 `mat3x2` / `mat2x3` 或其他方向不够直观的矩阵乘法，是否已经改写成更清晰的 helper？
+32. 如果原 shader 的 alpha 有实际含义，是否已经明确说明保留、拆分还是省略？
 
 
 ## 七、推荐的最小输出模板
