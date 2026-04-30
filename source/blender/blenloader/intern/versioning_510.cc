@@ -16,6 +16,7 @@
 #include "DNA_brush_enums.h"
 #include "DNA_brush_types.h"
 #include "DNA_genfile.h"
+#include "DNA_image_types.h"
 #include "DNA_light_types.h"
 #include "DNA_material_types.h"
 #include "DNA_mesh_types.h"
@@ -31,6 +32,7 @@
 
 #include "BLI_listbase.h"
 #include "BLI_math_vector.h"
+#include "BLI_set.hh"
 #include "BLI_string.h"
 #include "BLI_sys_types.h"
 
@@ -1045,6 +1047,38 @@ void blo_do_versions_510(FileData *fd, Library * /*lib*/, Main *bmain)
     for (Material &mat : bmain->materials) {
       mat.depth_offset_affect_lighting = false;
     }
+  }
+
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 43) ||
+      !DNA_struct_member_exists(fd->filesdna, "Image", "char", "image_to_closure_texture_type"))
+  {
+    for (Image &image : bmain->images) {
+      image.image_to_closure_texture_type = IMA_IMAGE_TO_CLOSURE_TEXTURE_2D;
+      image.image_to_closure_texture_size_mode = IMA_IMAGE_TO_CLOSURE_3D_LUT_SIZE_AUTO;
+      image.image_to_closure_interpolation = SHD_INTERP_LINEAR;
+      image.image_to_closure_extension = SHD_IMAGE_EXTENSION_REPEAT;
+      image.image_to_closure_texture_width = 16;
+      image.image_to_closure_texture_height = 16;
+      image.image_to_closure_texture_depth = 16;
+    }
+
+    Set<Image *> migrated_images;
+    FOREACH_NODETREE_BEGIN (bmain, ntree, id) {
+      if (ntree->type != NTREE_SHADER) {
+        continue;
+      }
+      for (bNode &node : ntree->nodes) {
+        if (node.type_legacy != SH_NODE_IMAGE_TO_CLOSURE) {
+          continue;
+        }
+        Image *image = id_cast<Image *>(node.id);
+        if (image != nullptr && migrated_images.add(image)) {
+          image->image_to_closure_interpolation = node.custom1;
+          image->image_to_closure_extension = node.custom2;
+        }
+      }
+    }
+    FOREACH_NODETREE_END;
   }
 
   /**

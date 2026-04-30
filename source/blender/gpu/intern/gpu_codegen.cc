@@ -14,6 +14,7 @@
 
 #include "BLI_span.hh"
 #include "BLI_string.h"
+#include "BLI_utildefines.h"
 #include "BLI_vector.hh"
 
 #include "BKE_cryptomatte.hh"
@@ -59,8 +60,16 @@ static std::ostream &operator<<(std::ostream &stream, const GPUInput *input)
     case GPU_SOURCE_STRUCT:
       return stream << "strct" << input->id;
     case GPU_SOURCE_TEX:
+      if (input->texture == nullptr || input->texture->sampler_name[0] == '\0') {
+        BLI_assert_msg(0, "Invalid material texture input");
+        return stream << "gpu_invalid_sampler";
+      }
       return stream << input->texture->sampler_name;
     case GPU_SOURCE_TEX_TILED_MAPPING:
+      if (input->texture == nullptr || input->texture->tiled_mapping_name[0] == '\0') {
+        BLI_assert_msg(0, "Invalid material tiled texture input");
+        return stream << "gpu_invalid_tiled_sampler";
+      }
       return stream << input->texture->tiled_mapping_name;
     default:
       BLI_assert(0);
@@ -239,6 +248,17 @@ void GPUCodegen::generate_resources()
   /* Textures. */
   int slot = 0;
   for (GPUMaterialTexture &tex : graph.textures) {
+    const int data_source_count = (tex.ima != nullptr) + (tex.colorband != nullptr) +
+                                  (tex.sky != nullptr);
+    const bool valid_3d_lut_state = !tex.use_3d_lut_strip ||
+                                    (tex.ima != nullptr && tex.colorband == nullptr &&
+                                     tex.sky == nullptr && tex.tiled_mapping_name[0] == '\0' &&
+                                     tex.lut_3d_width > 0 && tex.lut_3d_height > 0 &&
+                                     tex.lut_3d_depth > 0);
+    if (data_source_count != 1 || tex.sampler_name[0] == '\0' || !valid_3d_lut_state) {
+      BLI_assert_msg(0, "Invalid material texture resource");
+      continue;
+    }
     if (tex.colorband) {
       const char *name = info.name_buffer.append_sampler_name(tex.sampler_name);
       info.sampler(slot++, ImageType::Float1DArray, name, Frequency::BATCH);
@@ -256,7 +276,11 @@ void GPUCodegen::generate_resources()
     }
     else {
       const char *name = info.name_buffer.append_sampler_name(tex.sampler_name);
-      info.sampler(slot++, ImageType::Float2D, name, Frequency::BATCH);
+      BLI_assert(tex.ima != nullptr);
+      info.sampler(slot++,
+                   tex.use_3d_lut_strip ? ImageType::Float3D : ImageType::Float2D,
+                   name,
+                   Frequency::BATCH);
     }
   }
 

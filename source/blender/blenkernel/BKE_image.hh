@@ -68,6 +68,10 @@ struct ImageRuntime {
 
   /* The 2 is for the left/right stereo eyes. */
   gpu::Texture *gputexture[/*TEXTARGET_COUNT*/ 3][2] = {};
+  gpu::Texture *gputexture_3d_lut_strip = nullptr;
+  int gputexture_3d_lut_width = 0;
+  int gputexture_3d_lut_height = 0;
+  int gputexture_3d_lut_depth = 0;
 
   /* GPU texture flag. */
   int gpuframenr = IMAGE_GPU_FRAME_NONE;
@@ -652,6 +656,24 @@ ImageGPUTextures BKE_image_get_gpu_material_texture(Image *image,
 ImageGPUTextures BKE_image_get_gpu_material_texture_try(Image *image,
                                                         ImageUser *iuser,
                                                         const bool use_tile_mapping);
+
+ImageGPUTextures BKE_image_get_gpu_material_3d_lut_texture(Image *image,
+                                                           ImageUser *iuser,
+                                                           int width,
+                                                           int height,
+                                                           int depth);
+
+/* Same as BKE_image_get_gpu_material_3d_lut_texture but will not load the texture if it isn't
+ * already. */
+ImageGPUTextures BKE_image_get_gpu_material_3d_lut_texture_try(Image *image,
+                                                               ImageUser *iuser,
+                                                               int width,
+                                                               int height,
+                                                               int depth);
+
+void BKE_image_free_gpu_3d_lut_textures(Image *ima);
+
+void BKE_image_tag_glsl_closure_settings_changed(Main *bmain, Image *ima);
 
 /**
  * Is the alpha of the `gpu::Texture` for a given image/ibuf premultiplied.

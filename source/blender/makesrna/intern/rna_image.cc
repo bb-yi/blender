@@ -6,9 +6,11 @@
  * \ingroup RNA
  */
 
+#include <climits>
 #include <cstdlib>
 
 #include "DNA_image_types.h"
+#include "DNA_node_types.h"
 #include "DNA_scene_types.h"
 
 #include "BLT_translation.hh"
@@ -54,7 +56,6 @@ static const EnumPropertyItem image_source_items[] = {
 #  include "BLI_listbase.h"
 #  include "BLI_math_base.h"
 #  include "BLI_math_vector.h"
-
 #  include "BKE_global.hh"
 #  include "BKE_image.hh"
 #  include "BKE_image_format.hh"
@@ -326,6 +327,14 @@ static void rna_Image_gpu_texture_update(Main * /*bmain*/, Scene * /*scene*/, Po
   }
 
   WM_main_add_notifier(NC_IMAGE | ND_DISPLAY, &ima->id);
+}
+
+static void rna_Image_glsl_closure_update(Main *bmain, Scene * /*scene*/, PointerRNA *ptr)
+{
+  Image *ima = id_cast<Image *>(ptr->owner_id);
+  BKE_image_tag_glsl_closure_settings_changed(bmain, ima);
+  WM_main_add_notifier(NC_IMAGE | ND_DISPLAY, &ima->id);
+  WM_main_add_notifier(NC_NODE | NA_EDITED, nullptr);
 }
 
 static const EnumPropertyItem *rna_Image_source_itemf(bContext * /*C*/,
@@ -1159,6 +1168,62 @@ static void rna_def_image(BlenderRNA *brna)
        "Ignore alpha channel from the file and make image fully opaque"},
       {0, nullptr, 0, nullptr, nullptr},
   };
+  static const EnumPropertyItem glsl_closure_texture_type_items[] = {
+      {IMA_IMAGE_TO_CLOSURE_TEXTURE_2D,
+       "IMAGE_2D",
+       0,
+       "2D Image",
+       "Expose the image as a 2D sampler"},
+      {IMA_IMAGE_TO_CLOSURE_TEXTURE_3D_LUT_STRIP,
+       "LUT_STRIP_3D",
+       0,
+       "3D LUT Strip",
+       "Convert a horizontal LUT strip into a real 3D texture sampler"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  static const EnumPropertyItem glsl_closure_size_mode_items[] = {
+      {IMA_IMAGE_TO_CLOSURE_3D_LUT_SIZE_AUTO,
+       "AUTO",
+       0,
+       "Auto",
+       "Infer cubic 3D LUT size from a strip where width = height * height"},
+      {IMA_IMAGE_TO_CLOSURE_3D_LUT_SIZE_MANUAL,
+       "MANUAL",
+       0,
+       "Manual",
+       "Use explicit 3D LUT width, height, and depth"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  static const EnumPropertyItem glsl_closure_interpolation_items[] = {
+      {SHD_INTERP_LINEAR, "Linear", 0, "Linear", "Linear interpolation"},
+      {SHD_INTERP_CLOSEST, "Closest", 0, "Closest", "No interpolation (sample closest texel)"},
+      {SHD_INTERP_CUBIC, "Cubic", 0, "Cubic", "Cubic interpolation"},
+      {SHD_INTERP_SMART, "Smart", 0, "Smart", "Bicubic when magnifying, else bilinear (OSL only)"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  static const EnumPropertyItem glsl_closure_extension_items[] = {
+      {SHD_IMAGE_EXTENSION_REPEAT,
+       "REPEAT",
+       0,
+       "Repeat",
+       "Cause the image to repeat horizontally and vertically"},
+      {SHD_IMAGE_EXTENSION_EXTEND,
+       "EXTEND",
+       0,
+       "Extend",
+       "Extend by repeating edge pixels of the image"},
+      {SHD_IMAGE_EXTENSION_CLIP,
+       "CLIP",
+       0,
+       "Clip",
+       "Clip to image size and set exterior pixels as transparent"},
+      {SHD_IMAGE_EXTENSION_MIRROR,
+       "MIRROR",
+       0,
+       "Mirror",
+       "Repeatedly flip the image horizontally and vertically"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
 
   srna = RNA_def_struct(brna, "Image", "ID");
   RNA_def_struct_ui_text(
@@ -1397,6 +1462,62 @@ static void rna_def_image(BlenderRNA *brna)
                            "Representation of alpha in the image file, to convert to and from "
                            "when saving and loading the image");
   RNA_def_property_update(prop, NC_IMAGE | ND_DISPLAY, "rna_Image_alpha_mode_update");
+
+  prop = RNA_def_property(srna, "glsl_closure_texture_type", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "image_to_closure_texture_type");
+  RNA_def_property_enum_items(prop, glsl_closure_texture_type_items);
+  RNA_def_property_flag(prop, PROP_NO_DEG_UPDATE);
+  RNA_def_property_ui_text(
+      prop, "GLSL Closure Texture Type", "Sampler texture type used by Image to Closure nodes");
+  RNA_def_property_update(prop, NC_IMAGE | ND_DISPLAY, "rna_Image_glsl_closure_update");
+
+  prop = RNA_def_property(srna, "glsl_closure_size_mode", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "image_to_closure_texture_size_mode");
+  RNA_def_property_enum_items(prop, glsl_closure_size_mode_items);
+  RNA_def_property_flag(prop, PROP_NO_DEG_UPDATE);
+  RNA_def_property_ui_text(
+      prop, "GLSL Closure Size Mode", "How 3D LUT strip dimensions are determined");
+  RNA_def_property_update(prop, NC_IMAGE | ND_DISPLAY, "rna_Image_glsl_closure_update");
+
+  prop = RNA_def_property(srna, "glsl_closure_width", PROP_INT, PROP_NONE);
+  RNA_def_property_int_sdna(prop, nullptr, "image_to_closure_texture_width");
+  RNA_def_property_range(prop, 1, INT_MAX);
+  RNA_def_property_ui_range(prop, 1, 4096, 1, -1);
+  RNA_def_property_flag(prop, PROP_NO_DEG_UPDATE);
+  RNA_def_property_ui_text(prop, "GLSL Closure Width", "Manual 3D LUT width");
+  RNA_def_property_update(prop, NC_IMAGE | ND_DISPLAY, "rna_Image_glsl_closure_update");
+
+  prop = RNA_def_property(srna, "glsl_closure_height", PROP_INT, PROP_NONE);
+  RNA_def_property_int_sdna(prop, nullptr, "image_to_closure_texture_height");
+  RNA_def_property_range(prop, 1, INT_MAX);
+  RNA_def_property_ui_range(prop, 1, 4096, 1, -1);
+  RNA_def_property_flag(prop, PROP_NO_DEG_UPDATE);
+  RNA_def_property_ui_text(prop, "GLSL Closure Height", "Manual 3D LUT height");
+  RNA_def_property_update(prop, NC_IMAGE | ND_DISPLAY, "rna_Image_glsl_closure_update");
+
+  prop = RNA_def_property(srna, "glsl_closure_depth", PROP_INT, PROP_NONE);
+  RNA_def_property_int_sdna(prop, nullptr, "image_to_closure_texture_depth");
+  RNA_def_property_range(prop, 1, INT_MAX);
+  RNA_def_property_ui_range(prop, 1, 4096, 1, -1);
+  RNA_def_property_flag(prop, PROP_NO_DEG_UPDATE);
+  RNA_def_property_ui_text(prop, "GLSL Closure Depth", "Manual 3D LUT depth");
+  RNA_def_property_update(prop, NC_IMAGE | ND_DISPLAY, "rna_Image_glsl_closure_update");
+
+  prop = RNA_def_property(srna, "glsl_closure_interpolation", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "image_to_closure_interpolation");
+  RNA_def_property_enum_items(prop, glsl_closure_interpolation_items);
+  RNA_def_property_flag(prop, PROP_NO_DEG_UPDATE);
+  RNA_def_property_ui_text(prop, "GLSL Closure Interpolation", "Texture interpolation");
+  RNA_def_property_update(prop, NC_IMAGE | ND_DISPLAY, "rna_Image_glsl_closure_update");
+
+  prop = RNA_def_property(srna, "glsl_closure_extension", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "image_to_closure_extension");
+  RNA_def_property_enum_items(prop, glsl_closure_extension_items);
+  RNA_def_property_flag(prop, PROP_NO_DEG_UPDATE);
+  RNA_def_property_ui_text(
+      prop, "GLSL Closure Extension", "How the image is extrapolated past its original bounds");
+  RNA_def_property_translation_context(prop, BLT_I18NCONTEXT_ID_IMAGE);
+  RNA_def_property_update(prop, NC_IMAGE | ND_DISPLAY, "rna_Image_glsl_closure_update");
 
   prop = RNA_def_property(srna, "use_half_precision", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_negative_sdna(prop, nullptr, "flag", IMA_HIGH_BITDEPTH);

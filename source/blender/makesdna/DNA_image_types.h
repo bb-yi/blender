@@ -40,6 +40,21 @@ enum eGPUTextureTarget {
   TEXTARGET_2D_ARRAY = 1,
   TEXTARGET_TILE_MAPPING = 2,
   TEXTARGET_COUNT = 3,
+  /* Cached separately from Image.runtime.gputexture because many dimensions can exist per image. */
+  TEXTARGET_3D_LUT_STRIP = TEXTARGET_COUNT,
+};
+
+/* Image to Closure texture type. Stored on the Image data-block so all nodes using the same image
+ * share the same sampler interpretation. */
+enum {
+  IMA_IMAGE_TO_CLOSURE_TEXTURE_2D = 0,
+  IMA_IMAGE_TO_CLOSURE_TEXTURE_3D_LUT_STRIP = 1,
+};
+
+/* Image to Closure 3D LUT strip size mode. */
+enum {
+  IMA_IMAGE_TO_CLOSURE_3D_LUT_SIZE_AUTO = 0,
+  IMA_IMAGE_TO_CLOSURE_3D_LUT_SIZE_MANUAL = 1,
 };
 
 /** #Image.flag */
@@ -246,15 +261,24 @@ struct Image {
   ColorManagedColorspaceSettings colorspace_settings;
   char alpha_mode = 0;
 
-  char _pad = {};
+  char image_to_closure_texture_type = IMA_IMAGE_TO_CLOSURE_TEXTURE_2D;
+  char image_to_closure_texture_size_mode = IMA_IMAGE_TO_CLOSURE_3D_LUT_SIZE_AUTO;
+  char image_to_closure_interpolation = 0;
+  char image_to_closure_extension = 0;
+  char _pad[3] = {};
+  int image_to_closure_texture_width = 16;
+  int image_to_closure_texture_height = 16;
+  int image_to_closure_texture_depth = 16;
 
   /* Multiview */
   /** For viewer node stereoscopy. */
   char eye = 0;
   char views_format = 0;
+  char _pad4[2] = {};
 
   /* ImageTile list for UDIMs. */
   int active_tile_index = 0;
+  char _pad5[4] = {};
   ListBaseT<ImageTile> tiles = {nullptr, nullptr};
 
   ListBaseT<ImageView> views = {nullptr, nullptr};

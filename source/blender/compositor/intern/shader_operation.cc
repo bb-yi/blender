@@ -23,6 +23,7 @@
 #include "DNA_customdata_types.h"
 #include "DNA_node_types.h"
 
+#include "BKE_image.hh"
 #include "BKE_node.hh"
 #include "BKE_node_runtime.hh"
 
@@ -83,12 +84,32 @@ void ShaderOperation::bind_material_resources(gpu::Shader *shader)
     GPU_uniformbuf_bind(ubo, GPU_shader_get_ubo_binding(shader, GPU_UBO_BLOCK_NAME));
   }
 
-  /* Bind color band textures needed by curve and ramp nodes. */
+  /* Bind material textures needed by shader nodes. */
   ListBaseT<GPUMaterialTexture> textures = GPU_material_textures(material_);
   for (GPUMaterialTexture &texture : textures) {
     if (texture.colorband) {
       const int texture_image_unit = GPU_shader_get_sampler_binding(shader, texture.sampler_name);
       GPU_texture_bind(*texture.colorband, texture_image_unit);
+    }
+    else if (texture.ima) {
+      ImageUser *iuser = texture.iuser_available ? &texture.iuser : nullptr;
+      const bool use_tile_mapping = texture.tiled_mapping_name[0];
+      ImageGPUTextures gputex =
+          texture.use_3d_lut_strip ?
+              BKE_image_get_gpu_material_3d_lut_texture(texture.ima,
+                                                        iuser,
+                                                        texture.lut_3d_width,
+                                                        texture.lut_3d_height,
+                                                        texture.lut_3d_depth) :
+              BKE_image_get_gpu_material_texture(texture.ima, iuser, use_tile_mapping);
+
+      const int texture_image_unit = GPU_shader_get_sampler_binding(shader, texture.sampler_name);
+      GPU_texture_bind_ex(*gputex.texture, texture.sampler_state, texture_image_unit);
+      if (gputex.tile_mapping) {
+        const int tile_mapping_image_unit = GPU_shader_get_sampler_binding(
+            shader, texture.tiled_mapping_name);
+        GPU_texture_bind_ex(*gputex.tile_mapping, texture.sampler_state, tile_mapping_image_unit);
+      }
     }
   }
 }

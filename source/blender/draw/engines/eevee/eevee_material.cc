@@ -196,8 +196,14 @@ void MaterialModule::queue_texture_loading(GPUMaterial *material)
     if (tex->ima) {
       const bool use_tile_mapping = tex->tiled_mapping_name[0];
       ImageUser *iuser = tex->iuser_available ? &tex->iuser : nullptr;
-      ImageGPUTextures gputex = BKE_image_get_gpu_material_texture_try(
-          tex->ima, iuser, use_tile_mapping);
+      ImageGPUTextures gputex = tex->use_3d_lut_strip ?
+                                     BKE_image_get_gpu_material_3d_lut_texture_try(tex->ima,
+                                                                                   iuser,
+                                                                                   tex->lut_3d_width,
+                                                                                   tex->lut_3d_height,
+                                                                                   tex->lut_3d_depth) :
+                                     BKE_image_get_gpu_material_texture_try(
+                                         tex->ima, iuser, use_tile_mapping);
       if (*gputex.texture == nullptr) {
         texture_loading_queue_.append(tex);
       }
@@ -244,8 +250,14 @@ void MaterialModule::end_sync()
 
     const bool use_tile_mapping = tex->tiled_mapping_name[0];
     ImageUser *iuser = tex->iuser_available ? &tex->iuser : nullptr;
-    ImageGPUTextures gputex = BKE_image_get_gpu_material_texture(
-        tex->ima, iuser, use_tile_mapping);
+    ImageGPUTextures gputex = tex->use_3d_lut_strip ?
+                                  BKE_image_get_gpu_material_3d_lut_texture(tex->ima,
+                                                                             iuser,
+                                                                             tex->lut_3d_width,
+                                                                             tex->lut_3d_height,
+                                                                             tex->lut_3d_depth) :
+                                  BKE_image_get_gpu_material_texture(
+                                      tex->ima, iuser, use_tile_mapping);
 
     /* Acquire the textures since they were not existing inside `PassBase::material_set()`. */
     inst_.manager->acquire_texture(*gputex.texture);

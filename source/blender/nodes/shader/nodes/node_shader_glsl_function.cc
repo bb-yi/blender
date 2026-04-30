@@ -30,6 +30,10 @@
 #include "BLI_string.h"
 #include "CLG_log.h"
 
+#include "GPU_capabilities.hh"
+
+#include "IMB_imbuf_types.hh"
+
 #include "intern/gpu_node_graph.hh"
 
 #include "NOD_sync_sockets.hh"
@@ -123,6 +127,7 @@ namespace blender
       Vec3,
       Vec4,
       Sample2D,
+      Sample3D,
       Void,
     };
 
@@ -373,6 +378,10 @@ namespace blender
       {
         return GLSLBoundaryType::Sample2D;
       }
+      if (type_name == "sampler3D")
+      {
+        return GLSLBoundaryType::Sample3D;
+      }
       if (type_name == "void")
       {
         return GLSLBoundaryType::Void;
@@ -397,7 +406,7 @@ namespace blender
 
     static bool glsl_boundary_type_is_sampler(const GLSLBoundaryType type)
     {
-      return type == GLSLBoundaryType::Sample2D;
+      return ELEM(type, GLSLBoundaryType::Sample2D, GLSLBoundaryType::Sample3D);
     }
 
     static bool glsl_boundary_type_uses_float_transport(const GLSLBoundaryType type)
@@ -408,6 +417,17 @@ namespace blender
     static bool glsl_boundary_type_is_sample2d(const GLSLBoundaryType type)
     {
       return type == GLSLBoundaryType::Sample2D;
+    }
+
+    static bool glsl_boundary_type_is_sample3d(const GLSLBoundaryType type)
+    {
+      return type == GLSLBoundaryType::Sample3D;
+    }
+
+    static StringRefNull sampler_type_name(const GLSLBoundaryType type)
+    {
+      return glsl_boundary_type_is_sample3d(type) ? StringRefNull("sampler3D") :
+                                                    StringRefNull("sampler2D");
     }
 
     static const bNodeLink* find_used_direct_link(const bNodeSocket& socket)
@@ -530,11 +550,125 @@ namespace blender
       return id_cast<Image*>(link.fromnode->id);
     }
 
+    struct ResolvedLut3DStripDimensions
+    {
+      int width = 0;
+      int height = 0;
+      int depth = 0;
+    };
+
+    static Image* image_to_closure_image(const bNode& node)
+    {
+      return id_cast<Image*>(node.id);
+    }
+
+    static int image_to_closure_texture_type(const bNode& node)
+    {
+      const Image* image = image_to_closure_image(node);
+      return image ? image->image_to_closure_texture_type : IMA_IMAGE_TO_CLOSURE_TEXTURE_2D;
+    }
+
+    static int image_to_closure_texture_size_mode(const bNode& node)
+    {
+      const Image* image = image_to_closure_image(node);
+      return image ? image->image_to_closure_texture_size_mode :
+                     IMA_IMAGE_TO_CLOSURE_3D_LUT_SIZE_AUTO;
+    }
+
+    static int image_to_closure_interpolation(const bNode& node)
+    {
+      const Image* image = image_to_closure_image(node);
+      return image ? image->image_to_closure_interpolation : SHD_INTERP_LINEAR;
+    }
+
+    static int image_to_closure_extension(const bNode& node)
+    {
+      const Image* image = image_to_closure_image(node);
+      return image ? image->image_to_closure_extension : SHD_IMAGE_EXTENSION_REPEAT;
+    }
+
+    static bool resolve_3d_lut_strip_dimensions(const bNode& image_to_closure_node,
+      const Image& image,
+      ResolvedLut3DStripDimensions& r_dimensions,
+      std::string& r_error)
+    {
+      if (image.source == IMA_SRC_TILED)
+      {
+        r_error = "3D LUT Strip does not support UDIM tiled images";
+        return false;
+      }
+
+      ImageUser iuser = {};
+      BKE_imageuser_default(&iuser);
+      void* lock = nullptr;
+      ImBuf* ibuf = BKE_image_acquire_ibuf(const_cast<Image*>(&image), &iuser, &lock);
+      if (ibuf == nullptr)
+      {
+        BKE_image_release_ibuf(const_cast<Image*>(&image), ibuf, lock);
+        r_error = "Could not load the 3D LUT Strip image";
+        return false;
+      }
+
+      const int width = ibuf->x;
+      const int height = ibuf->y;
+      const int max_size = GPU_max_texture_3d_size();
+      BKE_image_release_ibuf(const_cast<Image*>(&image), ibuf, lock);
+
+      if (image_to_closure_texture_size_mode(image_to_closure_node) ==
+          IMA_IMAGE_TO_CLOSURE_3D_LUT_SIZE_MANUAL)
+      {
+        const int lut_width = image.image_to_closure_texture_width;
+        const int lut_height = image.image_to_closure_texture_height;
+        const int lut_depth = image.image_to_closure_texture_depth;
+        if (lut_width <= 0 || lut_height <= 0 || lut_depth <= 0)
+        {
+          r_error = "Manual 3D LUT Strip dimensions must be greater than zero";
+          return false;
+        }
+        if (int64_t(width) != int64_t(lut_width) * int64_t(lut_depth) ||
+            height != lut_height)
+        {
+          r_error =
+            "Manual 3D LUT Strip dimensions require source width = Width * Depth and source "
+            "height = Height";
+          return false;
+        }
+        if (max_size > 0 &&
+            (lut_width > max_size || lut_height > max_size || lut_depth > max_size))
+        {
+          r_error = "Manual 3D LUT Strip dimensions exceed the GPU 3D texture limit";
+          return false;
+        }
+        r_dimensions.width = lut_width;
+        r_dimensions.height = lut_height;
+        r_dimensions.depth = lut_depth;
+        return true;
+      }
+
+      if (height <= 0 || int64_t(width) != int64_t(height) * int64_t(height))
+      {
+        r_error =
+          "Auto 3D LUT Strip images must be horizontal cubic strips where width = height * height";
+        return false;
+      }
+      if (max_size > 0 && height > max_size)
+      {
+        r_error = "3D LUT Strip size exceeds the GPU 3D texture limit";
+        return false;
+      }
+      r_dimensions.width = height;
+      r_dimensions.height = height;
+      r_dimensions.depth = height;
+      return true;
+    }
+
     static GPUSamplerState sampler_state_from_image_to_closure_node(const bNode& node)
     {
       GPUSamplerState sampler_state = GPUSamplerState::default_sampler();
+      const bool use_3d_lut_strip =
+        image_to_closure_texture_type(node) == IMA_IMAGE_TO_CLOSURE_TEXTURE_3D_LUT_STRIP;
 
-      switch (node.custom2)
+      switch (image_to_closure_extension(node))
       {
       case SHD_IMAGE_EXTENSION_EXTEND:
         sampler_state.extend_x = GPU_SAMPLER_EXTEND_MODE_EXTEND;
@@ -556,10 +690,12 @@ namespace blender
         break;
       }
 
-      if (node.custom1 != SHD_INTERP_CLOSEST)
+      if (image_to_closure_interpolation(node) != SHD_INTERP_CLOSEST)
       {
-        sampler_state.filtering = GPU_SAMPLER_FILTERING_ANISOTROPIC | GPU_SAMPLER_FILTERING_LINEAR |
-          GPU_SAMPLER_FILTERING_MIPMAP;
+        sampler_state.filtering = use_3d_lut_strip ?
+                                    GPU_SAMPLER_FILTERING_LINEAR :
+                                    GPU_SAMPLER_FILTERING_ANISOTROPIC |
+                                      GPU_SAMPLER_FILTERING_LINEAR | GPU_SAMPLER_FILTERING_MIPMAP;
       }
 
       return sampler_state;
@@ -1333,6 +1469,12 @@ namespace blender
           }
           if (source_kind == GLSLSample2DSourceKind::ClosureOutput)
           {
+            if (glsl_boundary_type_is_sample3d(param.type))
+            {
+              r_error = "Closure Output connected to sampler3D parameter '" + param.name +
+                "' is not supported; use an Image to Closure node set to 3D LUT Strip";
+              return false;
+            }
             std::string closure_error;
             if (!closure_output_has_required_sample2d_signature(*used_link->fromnode, closure_error))
             {
@@ -1345,8 +1487,34 @@ namespace blender
           }
           if (source_kind != GLSLSample2DSourceKind::ImageToClosure || used_link == nullptr)
           {
-            r_error = "sampler2D parameter '" + param.name +
-              "' currently only supports Image to Closure or Closure Output links";
+            r_error = std::string(sampler_type_name(param.type).c_str()) + " parameter '" + param.name +
+              "' currently only supports Image to Closure" +
+              (glsl_boundary_type_is_sample2d(param.type) ? " or Closure Output links" : " links");
+            return false;
+          }
+
+          if (used_link->fromnode != nullptr)
+          {
+            const int texture_type = image_to_closure_texture_type(*used_link->fromnode);
+            if (glsl_boundary_type_is_sample2d(param.type) &&
+                texture_type != IMA_IMAGE_TO_CLOSURE_TEXTURE_2D)
+            {
+              r_error = "sampler2D parameter '" + param.name +
+                "' requires an Image to Closure node set to 2D Image";
+              return false;
+            }
+            if (glsl_boundary_type_is_sample3d(param.type) &&
+                texture_type != IMA_IMAGE_TO_CLOSURE_TEXTURE_3D_LUT_STRIP)
+            {
+              r_error = "sampler3D parameter '" + param.name +
+                "' requires an Image to Closure node set to 3D LUT Strip";
+              return false;
+            }
+          }
+          else
+          {
+            r_error = std::string(sampler_type_name(param.type).c_str()) + " parameter '" +
+              param.name + "' is missing an Image to Closure source";
             return false;
           }
 
@@ -1355,6 +1523,18 @@ namespace blender
           {
             r_error = "Choose an image on the Image to Closure node connected to '" + param.name + "'";
             return false;
+          }
+          if (glsl_boundary_type_is_sample3d(param.type))
+          {
+            std::string lut_error;
+            ResolvedLut3DStripDimensions dimensions;
+            if (!resolve_3d_lut_strip_dimensions(
+                  *used_link->fromnode, *image, dimensions, lut_error))
+            {
+              r_error = "sampler3D parameter '" + param.name + "': " + lut_error;
+              return false;
+            }
+            continue;
           }
           if (image->source == IMA_SRC_TILED)
           {
@@ -2387,7 +2567,7 @@ namespace blender
         {
           r_error =
             "GLSL meta default, min, max, hide_value, and subtype are not supported for "
-            "sampler2D parameters";
+            "sampler parameters";
           return false;
         }
         if (raw_meta.description.has_value())
@@ -2774,9 +2954,12 @@ namespace blender
         GLSLBoundaryType::Vec2,
         GLSLBoundaryType::Vec3,
         GLSLBoundaryType::Vec4,
-        GLSLBoundaryType::Sample2D))
+        GLSLBoundaryType::Sample2D,
+        GLSLBoundaryType::Sample3D))
       {
-        r_error = "Supported parameter types are float, int, bool, vec2, vec3, vec4, and sampler2D";
+        r_error =
+          "Supported parameter types are float, int, bool, vec2, vec3, vec4, sampler2D, and "
+          "sampler3D";
         return false;
       }
 
@@ -2788,7 +2971,7 @@ namespace blender
       }
       if (has_out_qualifier && glsl_boundary_type_is_sampler(boundary_type))
       {
-        r_error = "sampler2D parameters only support input qualifiers";
+        r_error = "sampler parameters only support input qualifiers";
         return false;
       }
       r_param.qualifier = has_out_qualifier ? GLSLFunctionParam::Qualifier::Out :
@@ -4296,8 +4479,12 @@ vec3 glsl_ambient_lighting()
       {
         return param.type_name;
       }
+      if (glsl_boundary_type_is_sample3d(param.type))
+      {
+        return StringRefNull("sampler3D");
+      }
       return (sample2d_source_kind == GLSLSample2DSourceKind::ClosureOutput) ? StringRefNull("float") :
-        StringRefNull("sampler2D");
+                                                                               StringRefNull("sampler2D");
     }
 
     static StringRefNull emitted_type_name(const GLSLBoundaryType type, const StringRefNull type_name)
@@ -4777,7 +4964,7 @@ vec3 glsl_ambient_lighting()
         }
       };
 
-      if (glsl_boundary_type_is_sample2d(param.type))
+      if (glsl_boundary_type_is_sampler(param.type))
       {
         BLI_assert(!is_output);
         auto& decl = b.add_input<decl::Closure>(socket_name, socket_identifier);
@@ -5190,6 +5377,11 @@ vec3 glsl_ambient_lighting()
           {
             return nullptr;
           }
+          if (used_link->fromnode == nullptr ||
+              image_to_closure_texture_type(*used_link->fromnode) != IMA_IMAGE_TO_CLOSURE_TEXTURE_2D)
+          {
+            return nullptr;
+          }
           return resolve_image_to_closure_image(*used_link);
         };
 
@@ -5207,6 +5399,21 @@ vec3 glsl_ambient_lighting()
             return sampler_state_from_image_to_closure_node(*used_link->fromnode);
           }
           return GPUSamplerState::default_sampler();
+        };
+
+      auto resolve_image_to_closure_link = [&](const GLSLFunctionParam& param) -> const bNodeLink*
+        {
+          const bNodeLink* used_link = nullptr;
+          GLSLSample2DSourceKind source_kind = resolve_sample2d_source_kind(node, param, used_link);
+          if (source_kind == GLSLSample2DSourceKind::GLSLFunction && used_link != nullptr)
+          {
+            source_kind = resolve_nested_sample2d_source_kind(param, *used_link, used_link);
+          }
+          if (source_kind != GLSLSample2DSourceKind::ImageToClosure || used_link == nullptr)
+          {
+            return nullptr;
+          }
+          return used_link;
         };
 
       for (const GLSLFunctionParam& param : function.params)
@@ -5241,6 +5448,37 @@ vec3 glsl_ambient_lighting()
               continue;
             }
             image = resolve_sample2d_image(param);
+          }
+          else if (glsl_boundary_type_is_sample3d(param.type))
+          {
+            const bNodeLink* used_link = resolve_image_to_closure_link(param);
+            if (used_link == nullptr || used_link->fromnode == nullptr ||
+                image_to_closure_texture_type(*used_link->fromnode) !=
+                    IMA_IMAGE_TO_CLOSURE_TEXTURE_3D_LUT_STRIP)
+            {
+              return false;
+            }
+            image = resolve_image_to_closure_image(*used_link);
+            if (image == nullptr || image->source == IMA_SRC_TILED)
+            {
+              return false;
+            }
+            ResolvedLut3DStripDimensions dimensions;
+            std::string lut_error;
+            if (!resolve_3d_lut_strip_dimensions(
+                  *used_link->fromnode, *image, dimensions, lut_error))
+            {
+              return false;
+            }
+            stack->type = GPU_TEX3D;
+            stack->link = GPU_image_3d_lut_strip(mat,
+              image,
+              nullptr,
+              dimensions.width,
+              dimensions.height,
+              dimensions.depth,
+              sampler_state_from_image_to_closure_node(*used_link->fromnode));
+            continue;
           }
 
           if (image == nullptr || image->source == IMA_SRC_TILED)

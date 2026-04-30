@@ -20,6 +20,7 @@
 
 #include "DNA_node_types.h"
 #include "DNA_object_types.h"
+#include "DNA_image_types.h"
 #include "DNA_texture_types.h"
 
 #include "BKE_animsys.h"
@@ -984,8 +985,6 @@ static const EnumPropertyItem node_cryptomatte_layer_name_items[] = {
 #  include "ED_node.hh"
 #  include "ED_render.hh"
 
-#  include "GPU_material.hh"
-
 #  include "NOD_common.hh"
 #  include "NOD_composite.hh"
 #  include "NOD_compositor_file_output.hh"
@@ -1017,7 +1016,6 @@ static const EnumPropertyItem node_cryptomatte_layer_name_items[] = {
 
 #  include "DNA_scene_types.h"
 #  include "DNA_text_types.h"
-
 #  include "WM_api.hh"
 
 #  include "DEG_depsgraph_query.hh"
@@ -3616,6 +3614,131 @@ static void rna_Node_scene_set(PointerRNA *ptr, PointerRNA value, ReportList * /
   node->id = static_cast<ID *>(value.data);
 
   id_us_plus(node->id);
+}
+
+static Image *rna_ShaderNodeImageToClosure_image_data(PointerRNA *ptr)
+{
+  bNode *node = ptr->data_as<bNode>();
+  return id_cast<Image *>(node->id);
+}
+
+static int rna_ShaderNodeImageToClosure_texture_type_get(PointerRNA *ptr)
+{
+  Image *image = rna_ShaderNodeImageToClosure_image_data(ptr);
+  return image ? image->image_to_closure_texture_type : IMA_IMAGE_TO_CLOSURE_TEXTURE_2D;
+}
+
+static void rna_ShaderNodeImageToClosure_texture_type_set(PointerRNA *ptr, int value)
+{
+  Image *image = rna_ShaderNodeImageToClosure_image_data(ptr);
+  if (image == nullptr) {
+    return;
+  }
+  image->image_to_closure_texture_type = value;
+}
+
+static int rna_ShaderNodeImageToClosure_size_mode_get(PointerRNA *ptr)
+{
+  Image *image = rna_ShaderNodeImageToClosure_image_data(ptr);
+  return image ? image->image_to_closure_texture_size_mode :
+                 IMA_IMAGE_TO_CLOSURE_3D_LUT_SIZE_AUTO;
+}
+
+static void rna_ShaderNodeImageToClosure_size_mode_set(PointerRNA *ptr, int value)
+{
+  Image *image = rna_ShaderNodeImageToClosure_image_data(ptr);
+  if (image == nullptr) {
+    return;
+  }
+  image->image_to_closure_texture_size_mode = value;
+}
+
+static int rna_ShaderNodeImageToClosure_width_get(PointerRNA *ptr)
+{
+  Image *image = rna_ShaderNodeImageToClosure_image_data(ptr);
+  return image ? image->image_to_closure_texture_width : 16;
+}
+
+static void rna_ShaderNodeImageToClosure_width_set(PointerRNA *ptr, int value)
+{
+  Image *image = rna_ShaderNodeImageToClosure_image_data(ptr);
+  if (image == nullptr) {
+    return;
+  }
+  image->image_to_closure_texture_width = max_ii(value, 1);
+}
+
+static int rna_ShaderNodeImageToClosure_height_get(PointerRNA *ptr)
+{
+  Image *image = rna_ShaderNodeImageToClosure_image_data(ptr);
+  return image ? image->image_to_closure_texture_height : 16;
+}
+
+static void rna_ShaderNodeImageToClosure_height_set(PointerRNA *ptr, int value)
+{
+  Image *image = rna_ShaderNodeImageToClosure_image_data(ptr);
+  if (image == nullptr) {
+    return;
+  }
+  image->image_to_closure_texture_height = max_ii(value, 1);
+}
+
+static int rna_ShaderNodeImageToClosure_depth_get(PointerRNA *ptr)
+{
+  Image *image = rna_ShaderNodeImageToClosure_image_data(ptr);
+  return image ? image->image_to_closure_texture_depth : 16;
+}
+
+static void rna_ShaderNodeImageToClosure_depth_set(PointerRNA *ptr, int value)
+{
+  Image *image = rna_ShaderNodeImageToClosure_image_data(ptr);
+  if (image == nullptr) {
+    return;
+  }
+  image->image_to_closure_texture_depth = max_ii(value, 1);
+}
+
+static int rna_ShaderNodeImageToClosure_interpolation_get(PointerRNA *ptr)
+{
+  Image *image = rna_ShaderNodeImageToClosure_image_data(ptr);
+  return image ? image->image_to_closure_interpolation : SHD_INTERP_LINEAR;
+}
+
+static void rna_ShaderNodeImageToClosure_interpolation_set(PointerRNA *ptr, int value)
+{
+  Image *image = rna_ShaderNodeImageToClosure_image_data(ptr);
+  if (image == nullptr) {
+    return;
+  }
+  image->image_to_closure_interpolation = value;
+}
+
+static int rna_ShaderNodeImageToClosure_extension_get(PointerRNA *ptr)
+{
+  Image *image = rna_ShaderNodeImageToClosure_image_data(ptr);
+  return image ? image->image_to_closure_extension : SHD_IMAGE_EXTENSION_REPEAT;
+}
+
+static void rna_ShaderNodeImageToClosure_extension_set(PointerRNA *ptr, int value)
+{
+  Image *image = rna_ShaderNodeImageToClosure_image_data(ptr);
+  if (image == nullptr) {
+    return;
+  }
+  image->image_to_closure_extension = value;
+}
+
+static void rna_ShaderNodeImageToClosure_settings_update(Main *bmain,
+                                                         Scene * /*scene*/,
+                                                         PointerRNA *ptr)
+{
+  Image *image = rna_ShaderNodeImageToClosure_image_data(ptr);
+  if (image == nullptr) {
+    return;
+  }
+  BKE_image_tag_glsl_closure_settings_changed(bmain, image);
+  WM_main_add_notifier(NC_IMAGE | ND_DISPLAY, &image->id);
+  WM_main_add_notifier(NC_NODE | NA_EDITED, nullptr);
 }
 
 static void rna_Node_image_layer_update(Main *bmain, Scene *scene, PointerRNA *ptr)
@@ -7611,6 +7734,29 @@ static void def_sh_render_texture(BlenderRNA * /*brna*/, StructRNA *srna)
 
 static void def_sh_image_to_closure(BlenderRNA * /*brna*/, StructRNA *srna)
 {
+  static const EnumPropertyItem texture_type_items[] = {
+      {IMA_IMAGE_TO_CLOSURE_TEXTURE_2D, "IMAGE_2D", 0, "2D Image", "Expose the image as a 2D sampler"},
+      {IMA_IMAGE_TO_CLOSURE_TEXTURE_3D_LUT_STRIP,
+       "LUT_STRIP_3D",
+       0,
+       "3D LUT Strip",
+       "Convert a horizontal LUT strip into a real 3D texture sampler"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  static const EnumPropertyItem texture_size_mode_items[] = {
+      {IMA_IMAGE_TO_CLOSURE_3D_LUT_SIZE_AUTO,
+       "AUTO",
+       0,
+       "Auto",
+       "Infer cubic 3D LUT size from a strip where width = height * height"},
+      {IMA_IMAGE_TO_CLOSURE_3D_LUT_SIZE_MANUAL,
+       "MANUAL",
+       0,
+       "Manual",
+       "Use explicit 3D LUT width, height, and depth"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+
   PropertyRNA *prop;
 
   prop = RNA_def_property(srna, "image", PROP_POINTER, PROP_NONE);
@@ -7623,19 +7769,83 @@ static void def_sh_image_to_closure(BlenderRNA * /*brna*/, StructRNA *srna)
   RNA_def_property_pointer_funcs(
       prop, nullptr, nullptr, nullptr, "rna_Image_no_renderresult_or_viewer_poll");
 
+  prop = RNA_def_property(srna, "texture_type", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, texture_type_items);
+  RNA_def_property_enum_funcs(prop,
+                              "rna_ShaderNodeImageToClosure_texture_type_get",
+                              "rna_ShaderNodeImageToClosure_texture_type_set",
+                              nullptr);
+  RNA_def_property_flag(prop, PROP_NO_DEG_UPDATE);
+  RNA_def_property_ui_text(prop, "Texture Type", "Sampler texture type exposed by this closure");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_ShaderNodeImageToClosure_settings_update");
+
+  prop = RNA_def_property(srna, "texture_size_mode", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, texture_size_mode_items);
+  RNA_def_property_enum_funcs(prop,
+                              "rna_ShaderNodeImageToClosure_size_mode_get",
+                              "rna_ShaderNodeImageToClosure_size_mode_set",
+                              nullptr);
+  RNA_def_property_flag(prop, PROP_NO_DEG_UPDATE);
+  RNA_def_property_ui_text(prop, "Size Mode", "How 3D LUT strip dimensions are determined");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_ShaderNodeImageToClosure_settings_update");
+
+  prop = RNA_def_property(srna, "texture_width", PROP_INT, PROP_NONE);
+  RNA_def_property_int_default(prop, 16);
+  RNA_def_property_int_funcs(prop,
+                             "rna_ShaderNodeImageToClosure_width_get",
+                             "rna_ShaderNodeImageToClosure_width_set",
+                             nullptr);
+  RNA_def_property_flag(prop, PROP_NO_DEG_UPDATE);
+  RNA_def_property_range(prop, 1, INT_MAX);
+  RNA_def_property_ui_range(prop, 1, 4096, 1, -1);
+  RNA_def_property_ui_text(prop, "Width", "Manual 3D LUT width");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_ShaderNodeImageToClosure_settings_update");
+
+  prop = RNA_def_property(srna, "texture_height", PROP_INT, PROP_NONE);
+  RNA_def_property_int_default(prop, 16);
+  RNA_def_property_int_funcs(prop,
+                             "rna_ShaderNodeImageToClosure_height_get",
+                             "rna_ShaderNodeImageToClosure_height_set",
+                             nullptr);
+  RNA_def_property_flag(prop, PROP_NO_DEG_UPDATE);
+  RNA_def_property_range(prop, 1, INT_MAX);
+  RNA_def_property_ui_range(prop, 1, 4096, 1, -1);
+  RNA_def_property_ui_text(prop, "Height", "Manual 3D LUT height");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_ShaderNodeImageToClosure_settings_update");
+
+  prop = RNA_def_property(srna, "texture_depth", PROP_INT, PROP_NONE);
+  RNA_def_property_int_default(prop, 16);
+  RNA_def_property_int_funcs(prop,
+                             "rna_ShaderNodeImageToClosure_depth_get",
+                             "rna_ShaderNodeImageToClosure_depth_set",
+                             nullptr);
+  RNA_def_property_flag(prop, PROP_NO_DEG_UPDATE);
+  RNA_def_property_range(prop, 1, INT_MAX);
+  RNA_def_property_ui_range(prop, 1, 4096, 1, -1);
+  RNA_def_property_ui_text(prop, "Depth", "Manual 3D LUT depth");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_ShaderNodeImageToClosure_settings_update");
+
   prop = RNA_def_property(srna, "interpolation", PROP_ENUM, PROP_NONE);
-  RNA_def_property_enum_sdna(prop, nullptr, "custom1");
   RNA_def_property_enum_items(prop, sh_tex_prop_interpolation_items);
+  RNA_def_property_enum_funcs(prop,
+                              "rna_ShaderNodeImageToClosure_interpolation_get",
+                              "rna_ShaderNodeImageToClosure_interpolation_set",
+                              nullptr);
+  RNA_def_property_flag(prop, PROP_NO_DEG_UPDATE);
   RNA_def_property_ui_text(prop, "Interpolation", "Texture interpolation");
-  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_ShaderNodeImageToClosure_settings_update");
 
   prop = RNA_def_property(srna, "extension", PROP_ENUM, PROP_NONE);
-  RNA_def_property_enum_sdna(prop, nullptr, "custom2");
   RNA_def_property_enum_items(prop, prop_image_extension);
+  RNA_def_property_enum_funcs(prop,
+                              "rna_ShaderNodeImageToClosure_extension_get",
+                              "rna_ShaderNodeImageToClosure_extension_set",
+                              nullptr);
+  RNA_def_property_flag(prop, PROP_NO_DEG_UPDATE);
   RNA_def_property_ui_text(
       prop, "Extension", "How the image is extrapolated past its original bounds");
   RNA_def_property_translation_context(prop, BLT_I18NCONTEXT_ID_IMAGE);
-  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_ShaderNodeImageToClosure_settings_update");
 }
 
 static void def_sh_render_info(BlenderRNA * /*brna*/, StructRNA *srna)

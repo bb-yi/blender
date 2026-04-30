@@ -28,8 +28,10 @@
 #include "BLI_listbase.h"
 #include "BLI_path_utils.hh"
 #include "BLI_rect.h"
+#include "BLI_set.hh"
 #include "BLI_string.h"
 #include "BLI_string_utils.hh"
+#include "BLI_vector.hh"
 
 #include "CLG_log.h"
 
@@ -82,6 +84,7 @@
 #include "BKE_lib_id.hh"
 #include "BKE_library.hh"
 #include "BKE_main.hh"
+#include "BKE_main_invariants.hh"
 #include "BKE_node.hh"
 #include "BKE_node_legacy_types.hh"
 #include "BKE_node_runtime.hh"
@@ -259,6 +262,15 @@ static void image_foreach_cache(ID *id,
       function_callback(
           id, &key, reinterpret_cast<void **>(&image->runtime->gputexture[a][eye]), 0, user_data);
     }
+  }
+
+  if (image->runtime->gputexture_3d_lut_strip != nullptr) {
+    key.identifier = runtime_base_id + offsetof(bke::ImageRuntime, gputexture_3d_lut_strip);
+    function_callback(id,
+                      &key,
+                      reinterpret_cast<void **>(&image->runtime->gputexture_3d_lut_strip),
+                      0,
+                      user_data);
   }
 }
 
@@ -782,6 +794,9 @@ bool BKE_image_scale(Image *image, int width, int height, ImageUser *iuser)
 
 bool BKE_image_has_opengl_texture(Image *ima)
 {
+  if (ima->runtime->gputexture_3d_lut_strip != nullptr) {
+    return true;
+  }
   for (int eye = 0; eye < 2; eye++) {
     for (int i = 0; i < TEXTARGET_COUNT; i++) {
       if (ima->runtime->gputexture[i][eye] != nullptr) {
@@ -790,6 +805,94 @@ bool BKE_image_has_opengl_texture(Image *ima)
     }
   }
   return false;
+}
+
+void BKE_image_tag_glsl_closure_settings_changed(Main *bmain, Image *ima)
+{
+  if (ima == nullptr) {
+    return;
+  }
+
+  BKE_image_free_gpu_3d_lut_textures(ima);
+
+  if (bmain == nullptr) {
+    return;
+  }
+
+  Set<ID *> changed_ntree_ids;
+  Set<ID *> changed_owner_ids;
+  FOREACH_NODETREE_BEGIN (bmain, ntree, owner_id) {
+    bool tree_uses_image_to_closure = false;
+    for (bNode *node : ntree->all_nodes()) {
+      if (node->type_legacy == SH_NODE_IMAGE_TO_CLOSURE && node->id == &ima->id) {
+        BKE_ntree_update_tag_node_property(ntree, node);
+        tree_uses_image_to_closure = true;
+      }
+    }
+
+    if (tree_uses_image_to_closure) {
+      changed_ntree_ids.add(&ntree->id);
+    }
+    if (tree_uses_image_to_closure && owner_id != nullptr) {
+      changed_owner_ids.add(owner_id);
+    }
+  }
+  FOREACH_NODETREE_END;
+
+  if (changed_ntree_ids.is_empty()) {
+    return;
+  }
+
+  bool found_new_tree_user = true;
+  while (found_new_tree_user) {
+    found_new_tree_user = false;
+    FOREACH_NODETREE_BEGIN (bmain, ntree, owner_id) {
+      bool tree_uses_changed_group = false;
+      for (bNode *node : ntree->all_nodes()) {
+        if (node->id != nullptr && GS(node->id->name) == ID_NT &&
+            changed_ntree_ids.contains(node->id))
+        {
+          BKE_ntree_update_tag_node_property(ntree, node);
+          tree_uses_changed_group = true;
+        }
+      }
+
+      if (tree_uses_changed_group && changed_ntree_ids.add(&ntree->id)) {
+        found_new_tree_user = true;
+      }
+      if (tree_uses_changed_group && owner_id != nullptr) {
+        changed_owner_ids.add(owner_id);
+      }
+    }
+    FOREACH_NODETREE_END;
+  }
+
+  for (ID *owner_id : changed_owner_ids) {
+    switch (GS(owner_id->name)) {
+      case ID_MA: {
+        Material *material = id_cast<Material *>(owner_id);
+        GPU_material_free(&material->gpumaterial);
+        DEG_id_tag_update(&material->id, ID_RECALC_SHADING | ID_RECALC_SYNC_TO_EVAL);
+        break;
+      }
+      case ID_WO: {
+        World *world = id_cast<World *>(owner_id);
+        GPU_material_free(&world->gpumaterial);
+        DEG_id_tag_update(&world->id, ID_RECALC_SHADING | ID_RECALC_SYNC_TO_EVAL);
+        break;
+      }
+      default:
+        DEG_id_tag_update(owner_id, ID_RECALC_SYNC_TO_EVAL);
+        break;
+    }
+  }
+
+  Vector<ID *> modified_ntree_ids;
+  modified_ntree_ids.reserve(changed_ntree_ids.size());
+  for (ID *ntree_id : changed_ntree_ids) {
+    modified_ntree_ids.append(ntree_id);
+  }
+  BKE_main_ensure_invariants(*bmain, modified_ntree_ids.as_span());
 }
 
 static int image_get_tile_number_from_iuser(const Image *ima, const ImageUser *iuser)
@@ -2863,7 +2966,7 @@ static void image_walk_gpu_materials(
     GPUMaterial *gpu_material = static_cast<GPUMaterial *>(link.data);
     ListBaseT<GPUMaterialTexture> textures = GPU_material_textures(gpu_material);
     for (GPUMaterialTexture &gpu_material_texture : textures) {
-      if (gpu_material_texture.iuser_available) {
+      if (gpu_material_texture.ima != nullptr && gpu_material_texture.iuser_available) {
         callback(gpu_material_texture.ima, id, &gpu_material_texture.iuser, customdata);
       }
     }

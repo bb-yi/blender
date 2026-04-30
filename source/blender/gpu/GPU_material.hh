@@ -314,16 +314,21 @@ struct GPUMaterialAttribute {
 };
 
 struct GPUMaterialTexture {
-  GPUMaterialTexture *next, *prev;
-  Image *ima;
-  ImageUser iuser;
-  bool iuser_available;
-  gpu::Texture **colorband;
-  gpu::Texture **sky;
-  char sampler_name[32];       /* Name of sampler in GLSL. */
-  char tiled_mapping_name[32]; /* Name of tile mapping sampler in GLSL. */
-  int users;
-  GPUSamplerState sampler_state;
+  GPUMaterialTexture *next = nullptr;
+  GPUMaterialTexture *prev = nullptr;
+  Image *ima = nullptr;
+  ImageUser iuser = {};
+  bool iuser_available = false;
+  bool use_3d_lut_strip = false;
+  int lut_3d_width = 0;
+  int lut_3d_height = 0;
+  int lut_3d_depth = 0;
+  gpu::Texture **colorband = nullptr;
+  gpu::Texture **sky = nullptr;
+  char sampler_name[32] = {};       /* Name of sampler in GLSL. */
+  char tiled_mapping_name[32] = {}; /* Name of tile mapping sampler in GLSL. */
+  int users = 0;
+  GPUSamplerState sampler_state = GPUSamplerState::default_sampler();
 };
 
 ListBaseT<GPUMaterialAttribute> GPU_material_attributes(const GPUMaterial *material);
@@ -445,6 +450,13 @@ GPUNodeLink *GPU_image(GPUMaterial *mat,
                        Image *ima,
                        ImageUser *iuser,
                        GPUSamplerState sampler_state);
+GPUNodeLink *GPU_image_3d_lut_strip(GPUMaterial *mat,
+                                    Image *ima,
+                                    ImageUser *iuser,
+                                    int width,
+                                    int height,
+                                    int depth,
+                                    GPUSamplerState sampler_state);
 void GPU_image_tiled(GPUMaterial *mat,
                      Image *ima,
                      ImageUser *iuser,

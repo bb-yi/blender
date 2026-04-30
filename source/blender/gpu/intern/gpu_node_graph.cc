@@ -74,6 +74,26 @@ static GPUNode *gpu_node_create(StringRefNull name, const bool use_static_functi
   return node;
 }
 
+static void gpu_node_free(GPUNode *node);
+
+static bool gpu_material_texture_state_is_valid(const GPUMaterialTexture &tex)
+{
+  const int data_source_count = (tex.ima != nullptr) + (tex.colorband != nullptr) +
+                                (tex.sky != nullptr);
+  if (data_source_count != 1) {
+    return false;
+  }
+  if (tex.sampler_name[0] == '\0') {
+    return false;
+  }
+  if (tex.use_3d_lut_strip) {
+    return tex.ima != nullptr && tex.colorband == nullptr && tex.sky == nullptr &&
+           tex.tiled_mapping_name[0] == '\0' && tex.lut_3d_width > 0 &&
+           tex.lut_3d_height > 0 && tex.lut_3d_depth > 0;
+  }
+  return tex.lut_3d_width == 0 && tex.lut_3d_height == 0 && tex.lut_3d_depth == 0;
+}
+
 static void gpu_node_input_link(GPUNode *node, GPUNodeLink *link, const GPUType type)
 {
   GPUInput *input;
@@ -247,19 +267,26 @@ static GPUNodeLink *gpu_uniformbuffer_link(GPUMaterial *mat,
   return link;
 }
 
-static void gpu_node_input_socket(
+static bool gpu_node_input_socket(
     GPUMaterial *material, const bNode *bnode, GPUNode *node, GPUNodeStack *sock, const int index)
 {
   if (sock->link) {
     gpu_node_input_link(node, sock->link, sock->type);
+    return true;
+  }
+  else if (ELEM(sock->type, GPU_TEX1D_ARRAY, GPU_TEX2D, GPU_TEX2D_ARRAY, GPU_TEX3D)) {
+    BLI_assert_msg(0, "Sampler GPU socket requires a texture link");
+    return false;
   }
   else if ((material != nullptr) &&
            (gpu_uniformbuffer_link(material, bnode, sock, index, SOCK_IN) != nullptr))
   {
     gpu_node_input_link(node, sock->link, sock->type);
+    return true;
   }
   else {
     gpu_node_input_link(node, GPU_constant(sock->vec), sock->type);
+    return true;
   }
 }
 
@@ -511,13 +538,31 @@ static GPUMaterialTexture *gpu_node_graph_add_texture(GPUNodeGraph *graph,
                                                       gpu::Texture **colorband,
                                                       gpu::Texture **sky,
                                                       bool is_tiled,
+                                                      bool use_3d_lut_strip,
+                                                      int lut_3d_width,
+                                                      int lut_3d_height,
+                                                      int lut_3d_depth,
                                                       GPUSamplerState sampler_state)
 {
+  if (!use_3d_lut_strip) {
+    lut_3d_width = 0;
+    lut_3d_height = 0;
+    lut_3d_depth = 0;
+  }
+  const int data_source_count = (ima != nullptr) + (colorband != nullptr) + (sky != nullptr);
+  BLI_assert(data_source_count == 1);
+  BLI_assert(!use_3d_lut_strip || (ima != nullptr && colorband == nullptr && sky == nullptr &&
+                                   !is_tiled && lut_3d_width > 0 && lut_3d_height > 0 &&
+                                   lut_3d_depth > 0));
+
   /* Find existing texture. */
   int num_textures = 0;
   GPUMaterialTexture *tex = static_cast<GPUMaterialTexture *>(graph->textures.first);
   for (; tex; tex = tex->next) {
     if (tex->ima == ima && tex->colorband == colorband && tex->sky == sky &&
+        tex->use_3d_lut_strip == use_3d_lut_strip &&
+        tex->lut_3d_width == lut_3d_width && tex->lut_3d_height == lut_3d_height &&
+        tex->lut_3d_depth == lut_3d_depth &&
         tex->sampler_state == sampler_state)
     {
       break;
@@ -535,12 +580,20 @@ static GPUMaterialTexture *gpu_node_graph_add_texture(GPUNodeGraph *graph,
     }
     tex->colorband = colorband;
     tex->sky = sky;
+    tex->use_3d_lut_strip = use_3d_lut_strip;
+    tex->lut_3d_width = lut_3d_width;
+    tex->lut_3d_height = lut_3d_height;
+    tex->lut_3d_depth = lut_3d_depth;
     tex->sampler_state = sampler_state;
     SNPRINTF(tex->sampler_name, "samp%d", num_textures);
     if (is_tiled) {
       SNPRINTF(tex->tiled_mapping_name, "tsamp%d", num_textures);
     }
+    BLI_assert(gpu_material_texture_state_is_valid(*tex));
     BLI_addtail(&graph->textures, tex);
+  }
+  else {
+    BLI_assert(gpu_material_texture_state_is_valid(*tex));
   }
 
   tex->users++;
@@ -706,7 +759,23 @@ GPUNodeLink *GPU_image(GPUMaterial *mat,
   GPUNodeLink *link = gpu_node_link_create();
   link->link_type = GPU_NODE_LINK_IMAGE;
   link->texture = gpu_node_graph_add_texture(
-      graph, ima, iuser, nullptr, nullptr, false, sampler_state);
+      graph, ima, iuser, nullptr, nullptr, false, false, 0, 0, 0, sampler_state);
+  return link;
+}
+
+GPUNodeLink *GPU_image_3d_lut_strip(GPUMaterial *mat,
+                                    Image *ima,
+                                    ImageUser *iuser,
+                                    const int width,
+                                    const int height,
+                                    const int depth,
+                                    GPUSamplerState sampler_state)
+{
+  GPUNodeGraph *graph = gpu_material_node_graph(mat);
+  GPUNodeLink *link = gpu_node_link_create();
+  link->link_type = GPU_NODE_LINK_IMAGE;
+  link->texture = gpu_node_graph_add_texture(
+      graph, ima, iuser, nullptr, nullptr, false, true, width, height, depth, sampler_state);
   return link;
 }
 
@@ -723,7 +792,7 @@ GPUNodeLink *GPU_image_sky(GPUMaterial *mat,
   GPUNodeLink *link = gpu_node_link_create();
   link->link_type = GPU_NODE_LINK_IMAGE_SKY;
   link->texture = gpu_node_graph_add_texture(
-      graph, nullptr, nullptr, nullptr, sky, false, sampler_state);
+      graph, nullptr, nullptr, nullptr, sky, false, false, 0, 0, 0, sampler_state);
   return link;
 }
 
@@ -736,7 +805,7 @@ void GPU_image_tiled(GPUMaterial *mat,
 {
   GPUNodeGraph *graph = gpu_material_node_graph(mat);
   GPUMaterialTexture *texture = gpu_node_graph_add_texture(
-      graph, ima, iuser, nullptr, nullptr, true, sampler_state);
+      graph, ima, iuser, nullptr, nullptr, true, false, 0, 0, 0, sampler_state);
 
   (*r_image_tiled_link) = gpu_node_link_create();
   (*r_image_tiled_link)->link_type = GPU_NODE_LINK_IMAGE_TILED;
@@ -756,7 +825,17 @@ GPUNodeLink *GPU_color_band(GPUMaterial *mat, int size, float *pixels, float *r_
   GPUNodeLink *link = gpu_node_link_create();
   link->link_type = GPU_NODE_LINK_COLORBAND;
   link->texture = gpu_node_graph_add_texture(
-      graph, nullptr, nullptr, colorband, nullptr, false, GPUSamplerState::internal_sampler());
+      graph,
+      nullptr,
+      nullptr,
+      colorband,
+      nullptr,
+      false,
+      false,
+      0,
+      0,
+      0,
+      GPUSamplerState::internal_sampler());
   return link;
 }
 
@@ -823,7 +902,10 @@ static bool gpu_stack_link_v(GPUMaterial *material,
   if (in) {
     for (i = 0; !in[i].end; i++) {
       if (in[i].type != GPU_NONE) {
-        gpu_node_input_socket(material, bnode, node, &in[i], i);
+        if (!gpu_node_input_socket(material, bnode, node, &in[i], i)) {
+          gpu_node_free(node);
+          return false;
+        }
         totin++;
       }
     }
@@ -852,7 +934,10 @@ static bool gpu_stack_link_v(GPUMaterial *material,
       if (totin == 0) {
         link = va_arg(params, GPUNodeLink *);
         if (link->socket) {
-          gpu_node_input_socket(nullptr, nullptr, node, link->socket, -1);
+          if (!gpu_node_input_socket(nullptr, nullptr, node, link->socket, -1)) {
+            gpu_node_free(node);
+            return false;
+          }
         }
         else {
           gpu_node_input_link(node, link, function->paramtype[i]);
@@ -906,7 +991,10 @@ bool GPU_stack_link_custom(GPUMaterial *material,
   if (in) {
     for (int i = 0; !in[i].end; i++) {
       if (in[i].type != GPU_NONE) {
-        gpu_node_input_socket(material, bnode, node, &in[i], i);
+        if (!gpu_node_input_socket(material, bnode, node, &in[i], i)) {
+          gpu_node_free(node);
+          return false;
+        }
       }
     }
   }
@@ -943,7 +1031,10 @@ bool GPU_stack_link_zone(GPUMaterial *material,
   if (in) {
     for (int i = 0; !in[i].end; i++) {
       if (in[i].type != GPU_NONE) {
-        gpu_node_input_socket(material, bnode, node, &in[i], i);
+        if (!gpu_node_input_socket(material, bnode, node, &in[i], i)) {
+          gpu_node_free(node);
+          return false;
+        }
       }
     }
   }
