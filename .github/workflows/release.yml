@@ -13,7 +13,7 @@ on:
 jobs:
   build-linux:
     name: Build Linux x64
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       actions: write
@@ -47,12 +47,12 @@ jobs:
             done
           }
 
-          retry sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
           retry sudo apt-get update
           retry sudo apt-get install -y build-essential subversion libx11-dev libxxf86vm-dev libxcursor-dev libxi-dev libxrandr-dev libxinerama-dev libegl-dev
           retry sudo apt-get install -y libwayland-dev wayland-protocols libxkbcommon-dev libdbus-1-dev linux-libc-dev
-          retry sudo apt-get install -y gcc-14 g++-14
 
+          gcc-14 --version
+          g++-14 --version
           sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100
           sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100
 
