@@ -22,11 +22,27 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
-          sudo apt-get update
-          sudo apt-get install build-essential subversion libx11-dev libxxf86vm-dev libxcursor-dev libxi-dev libxrandr-dev libxinerama-dev libegl-dev
-          sudo apt-get install libwayland-dev wayland-protocols libxkbcommon-dev libdbus-1-dev linux-libc-dev
-          sudo apt-get install gcc-14 g++-14
+          retry() {
+            local attempts=5
+            local delay=20
+            local n=1
+            until "$@"; do
+              if [ "$n" -ge "$attempts" ]; then
+                echo "Command failed after $attempts attempts: $*" >&2
+                return 1
+              fi
+              echo "Command failed, retrying in ${delay}s ($n/$attempts): $*" >&2
+              sleep "$delay"
+              n=$((n + 1))
+              delay=$((delay * 2))
+            done
+          }
+
+          retry sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
+          retry sudo apt-get update
+          retry sudo apt-get install -y build-essential subversion libx11-dev libxxf86vm-dev libxcursor-dev libxi-dev libxrandr-dev libxinerama-dev libegl-dev
+          retry sudo apt-get install -y libwayland-dev wayland-protocols libxkbcommon-dev libdbus-1-dev linux-libc-dev
+          retry sudo apt-get install -y gcc-14 g++-14
 
           sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 100
           sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100
