@@ -59,6 +59,15 @@ constexpr int IMAGE_GPU_VIEW_NONE = std::numeric_limits<short>::max();
 
 namespace bke {
 
+struct ImageRuntimeGPUTexture3DLutStrip {
+  ImageRuntimeGPUTexture3DLutStrip *next = nullptr;
+  ImageRuntimeGPUTexture3DLutStrip *prev = nullptr;
+  gpu::Texture *texture = nullptr;
+  int width = 0;
+  int height = 0;
+  int depth = 0;
+};
+
 struct ImageRuntime {
   /* Mutex used to guarantee thread-safe access to the cached ImBuf of the corresponding image ID.
    */
@@ -68,10 +77,7 @@ struct ImageRuntime {
 
   /* The 2 is for the left/right stereo eyes. */
   gpu::Texture *gputexture[/*TEXTARGET_COUNT*/ 3][2] = {};
-  gpu::Texture *gputexture_3d_lut_strip = nullptr;
-  int gputexture_3d_lut_width = 0;
-  int gputexture_3d_lut_height = 0;
-  int gputexture_3d_lut_depth = 0;
+  ListBaseT<ImageRuntimeGPUTexture3DLutStrip> gputextures_3d_lut_strip = {nullptr, nullptr};
 
   /* GPU texture flag. */
   int gpuframenr = IMAGE_GPU_FRAME_NONE;
@@ -672,8 +678,6 @@ ImageGPUTextures BKE_image_get_gpu_material_3d_lut_texture_try(Image *image,
                                                                int depth);
 
 void BKE_image_free_gpu_3d_lut_textures(Image *ima);
-
-void BKE_image_tag_glsl_closure_settings_changed(Main *bmain, Image *ima);
 
 /**
  * Is the alpha of the `gpu::Texture` for a given image/ibuf premultiplied.

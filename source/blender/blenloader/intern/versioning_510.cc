@@ -6,6 +6,8 @@
  * \ingroup blenloader
  */
 
+#include <algorithm>
+
 #define DNA_DEPRECATED_ALLOW
 
 /* Define macros in `DNA_genfile.h`. */
@@ -32,7 +34,6 @@
 
 #include "BLI_listbase.h"
 #include "BLI_math_vector.h"
-#include "BLI_set.hh"
 #include "BLI_string.h"
 #include "BLI_sys_types.h"
 
@@ -619,6 +620,115 @@ static void convert_brush_flags_to_type(Brush &brush)
   }
 }
 
+static int version_image_to_closure_interpolation(const int value)
+{
+  return ELEM(value, SHD_INTERP_LINEAR, SHD_INTERP_CLOSEST, SHD_INTERP_CUBIC, SHD_INTERP_SMART) ?
+             value :
+             SHD_INTERP_LINEAR;
+}
+
+static int version_image_to_closure_extension(const int value)
+{
+  return ELEM(value,
+              SHD_IMAGE_EXTENSION_REPEAT,
+              SHD_IMAGE_EXTENSION_EXTEND,
+              SHD_IMAGE_EXTENSION_CLIP,
+              SHD_IMAGE_EXTENSION_MIRROR) ?
+             value :
+             SHD_IMAGE_EXTENSION_REPEAT;
+}
+
+static NodeShaderImageToClosure *version_ensure_image_to_closure_node_storage(bNode &node)
+{
+  if (node.storage == nullptr) {
+    NodeShaderImageToClosure *storage = MEM_new<NodeShaderImageToClosure>(__func__);
+    storage->interpolation = version_image_to_closure_interpolation(node.custom1);
+    storage->extension = version_image_to_closure_extension(node.custom2);
+    node.storage = storage;
+  }
+  return static_cast<NodeShaderImageToClosure *>(node.storage);
+}
+
+static void version_init_image_to_closure_node_storage(Main *bmain)
+{
+  FOREACH_NODETREE_BEGIN (bmain, ntree, id) {
+    if (ntree->type != NTREE_SHADER) {
+      continue;
+    }
+    for (bNode &node : ntree->nodes) {
+      if (node.type_legacy != SH_NODE_IMAGE_TO_CLOSURE) {
+        continue;
+      }
+      version_ensure_image_to_closure_node_storage(node);
+    }
+  }
+  FOREACH_NODETREE_END;
+}
+
+static void version_migrate_image_to_closure_legacy_image_settings(FileData *fd, Main *bmain)
+{
+  if (!DNA_struct_member_exists(fd->filesdna, "Image", "char", "image_to_closure_texture_type")) {
+    return;
+  }
+  const bool has_size_mode = DNA_struct_member_exists(
+      fd->filesdna, "Image", "char", "image_to_closure_texture_size_mode");
+  const bool has_interpolation = DNA_struct_member_exists(
+      fd->filesdna, "Image", "char", "image_to_closure_interpolation");
+  const bool has_extension = DNA_struct_member_exists(
+      fd->filesdna, "Image", "char", "image_to_closure_extension");
+  const bool has_texture_width = DNA_struct_member_exists(
+      fd->filesdna, "Image", "int", "image_to_closure_texture_width");
+  const bool has_texture_height = DNA_struct_member_exists(
+      fd->filesdna, "Image", "int", "image_to_closure_texture_height");
+  const bool has_texture_depth = DNA_struct_member_exists(
+      fd->filesdna, "Image", "int", "image_to_closure_texture_depth");
+
+  FOREACH_NODETREE_BEGIN (bmain, ntree, id) {
+    if (ntree->type != NTREE_SHADER) {
+      continue;
+    }
+    for (bNode &node : ntree->nodes) {
+      if (node.type_legacy != SH_NODE_IMAGE_TO_CLOSURE || node.id == nullptr ||
+          GS(node.id->name) != ID_IM)
+      {
+        continue;
+      }
+
+      const Image *image = id_cast<Image *>(node.id);
+      NodeShaderImageToClosure *storage = version_ensure_image_to_closure_node_storage(node);
+      storage->texture_type = ELEM(image->image_to_closure_texture_type,
+                                   IMA_IMAGE_TO_CLOSURE_TEXTURE_2D,
+                                   IMA_IMAGE_TO_CLOSURE_TEXTURE_3D_LUT_STRIP) ?
+                                  image->image_to_closure_texture_type :
+                                  IMA_IMAGE_TO_CLOSURE_TEXTURE_2D;
+      if (has_size_mode) {
+        storage->texture_size_mode = ELEM(image->image_to_closure_texture_size_mode,
+                                          IMA_IMAGE_TO_CLOSURE_3D_LUT_SIZE_AUTO,
+                                          IMA_IMAGE_TO_CLOSURE_3D_LUT_SIZE_MANUAL) ?
+                                         image->image_to_closure_texture_size_mode :
+                                         IMA_IMAGE_TO_CLOSURE_3D_LUT_SIZE_AUTO;
+      }
+      if (has_interpolation) {
+        storage->interpolation = version_image_to_closure_interpolation(
+            image->image_to_closure_interpolation);
+      }
+      if (has_extension) {
+        storage->extension = version_image_to_closure_extension(image->image_to_closure_extension);
+      }
+      if (has_texture_width) {
+        storage->texture_width = std::max<int>(image->image_to_closure_texture_width, 1);
+      }
+      if (has_texture_height) {
+        storage->texture_height = std::max<int>(image->image_to_closure_texture_height, 1);
+      }
+      if (has_texture_depth) {
+        storage->texture_depth = std::max<int>(image->image_to_closure_texture_depth, 1);
+      }
+    }
+  }
+  FOREACH_NODETREE_END;
+}
+
 void do_versions_after_linking_510(FileData *fd, Main *bmain)
 {
   /* Some blend files were saved with an invalid active viewer key, possibly due to a bug that
@@ -684,28 +794,9 @@ void do_versions_after_linking_510(FileData *fd, Main *bmain)
     }
   }
 
-  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 43) ||
-      !DNA_struct_member_exists(fd->filesdna, "Image", "char", "image_to_closure_texture_type"))
+  if (!DNA_struct_exists(fd->filesdna, "NodeShaderImageToClosure"))
   {
-    Set<Image *> migrated_images;
-    FOREACH_NODETREE_BEGIN (bmain, ntree, id) {
-      if (ntree->type != NTREE_SHADER) {
-        continue;
-      }
-      for (bNode &node : ntree->nodes) {
-        if (node.type_legacy != SH_NODE_IMAGE_TO_CLOSURE || node.id == nullptr ||
-            GS(node.id->name) != ID_IM)
-        {
-          continue;
-        }
-        Image *image = id_cast<Image *>(node.id);
-        if (migrated_images.add(image)) {
-          image->image_to_closure_interpolation = node.custom1;
-          image->image_to_closure_extension = node.custom2;
-        }
-      }
-    }
-    FOREACH_NODETREE_END;
+    version_migrate_image_to_closure_legacy_image_settings(fd, bmain);
   }
 
   /**
@@ -1073,18 +1164,10 @@ void blo_do_versions_510(FileData *fd, Library * /*lib*/, Main *bmain)
     }
   }
 
-  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 43) ||
-      !DNA_struct_member_exists(fd->filesdna, "Image", "char", "image_to_closure_texture_type"))
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 44) ||
+      !DNA_struct_exists(fd->filesdna, "NodeShaderImageToClosure"))
   {
-    for (Image &image : bmain->images) {
-      image.image_to_closure_texture_type = IMA_IMAGE_TO_CLOSURE_TEXTURE_2D;
-      image.image_to_closure_texture_size_mode = IMA_IMAGE_TO_CLOSURE_3D_LUT_SIZE_AUTO;
-      image.image_to_closure_interpolation = SHD_INTERP_LINEAR;
-      image.image_to_closure_extension = SHD_IMAGE_EXTENSION_REPEAT;
-      image.image_to_closure_texture_width = 16;
-      image.image_to_closure_texture_height = 16;
-      image.image_to_closure_texture_depth = 16;
-    }
+    version_init_image_to_closure_node_storage(bmain);
   }
 
   /**

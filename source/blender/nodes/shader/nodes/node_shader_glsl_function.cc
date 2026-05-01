@@ -557,34 +557,33 @@ namespace blender
       int depth = 0;
     };
 
-    static Image* image_to_closure_image(const bNode& node)
+    static const NodeShaderImageToClosure* image_to_closure_storage(const bNode& node)
     {
-      return id_cast<Image*>(node.id);
+      return static_cast<const NodeShaderImageToClosure*>(node.storage);
     }
 
     static int image_to_closure_texture_type(const bNode& node)
     {
-      const Image* image = image_to_closure_image(node);
-      return image ? image->image_to_closure_texture_type : IMA_IMAGE_TO_CLOSURE_TEXTURE_2D;
+      const NodeShaderImageToClosure* storage = image_to_closure_storage(node);
+      return storage ? storage->texture_type : IMA_IMAGE_TO_CLOSURE_TEXTURE_2D;
     }
 
     static int image_to_closure_texture_size_mode(const bNode& node)
     {
-      const Image* image = image_to_closure_image(node);
-      return image ? image->image_to_closure_texture_size_mode :
-                     IMA_IMAGE_TO_CLOSURE_3D_LUT_SIZE_AUTO;
+      const NodeShaderImageToClosure* storage = image_to_closure_storage(node);
+      return storage ? storage->texture_size_mode : IMA_IMAGE_TO_CLOSURE_3D_LUT_SIZE_AUTO;
     }
 
     static int image_to_closure_interpolation(const bNode& node)
     {
-      const Image* image = image_to_closure_image(node);
-      return image ? image->image_to_closure_interpolation : SHD_INTERP_LINEAR;
+      const NodeShaderImageToClosure* storage = image_to_closure_storage(node);
+      return storage ? storage->interpolation : SHD_INTERP_LINEAR;
     }
 
     static int image_to_closure_extension(const bNode& node)
     {
-      const Image* image = image_to_closure_image(node);
-      return image ? image->image_to_closure_extension : SHD_IMAGE_EXTENSION_REPEAT;
+      const NodeShaderImageToClosure* storage = image_to_closure_storage(node);
+      return storage ? storage->extension : SHD_IMAGE_EXTENSION_REPEAT;
     }
 
     static bool resolve_3d_lut_strip_dimensions(const bNode& image_to_closure_node,
@@ -617,9 +616,10 @@ namespace blender
       if (image_to_closure_texture_size_mode(image_to_closure_node) ==
           IMA_IMAGE_TO_CLOSURE_3D_LUT_SIZE_MANUAL)
       {
-        const int lut_width = image.image_to_closure_texture_width;
-        const int lut_height = image.image_to_closure_texture_height;
-        const int lut_depth = image.image_to_closure_texture_depth;
+        const NodeShaderImageToClosure* storage = image_to_closure_storage(image_to_closure_node);
+        const int lut_width = storage ? storage->texture_width : 16;
+        const int lut_height = storage ? storage->texture_height : 16;
+        const int lut_depth = storage ? storage->texture_depth : 16;
         if (lut_width <= 0 || lut_height <= 0 || lut_depth <= 0)
         {
           r_error = "Manual 3D LUT Strip dimensions must be greater than zero";

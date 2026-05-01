@@ -329,36 +329,39 @@ static gpu::Texture **image_gpu_3d_lut_strip_texture_ptr(Image *ima,
                                                          const int height,
                                                          const int depth)
 {
-  if (ima->runtime->gputexture_3d_lut_strip != nullptr &&
-      (ima->runtime->gputexture_3d_lut_width != width ||
-       ima->runtime->gputexture_3d_lut_height != height ||
-       ima->runtime->gputexture_3d_lut_depth != depth))
+  for (bke::ImageRuntimeGPUTexture3DLutStrip &lut :
+       ima->runtime->gputextures_3d_lut_strip)
   {
-    image_gpu_texture_free_later(ima->runtime->gputexture_3d_lut_strip);
-    ima->runtime->gputexture_3d_lut_strip = nullptr;
+    if (lut.width == width && lut.height == height && lut.depth == depth) {
+      return &lut.texture;
+    }
   }
 
-  ima->runtime->gputexture_3d_lut_width = width;
-  ima->runtime->gputexture_3d_lut_height = height;
-  ima->runtime->gputexture_3d_lut_depth = depth;
-  return &ima->runtime->gputexture_3d_lut_strip;
+  bke::ImageRuntimeGPUTexture3DLutStrip *lut =
+      MEM_new<bke::ImageRuntimeGPUTexture3DLutStrip>(__func__);
+  lut->width = width;
+  lut->height = height;
+  lut->depth = depth;
+  BLI_addtail(&ima->runtime->gputextures_3d_lut_strip, lut);
+  return &lut->texture;
 }
 
 static void image_free_gpu_3d_lut_textures(Image *ima, const bool immediate)
 {
-  if (ima->runtime->gputexture_3d_lut_strip == nullptr) {
-    return;
+  for (bke::ImageRuntimeGPUTexture3DLutStrip &lut :
+       ima->runtime->gputextures_3d_lut_strip)
+  {
+    if (lut.texture == nullptr) {
+      continue;
+    }
+    if (immediate) {
+      GPU_texture_free(lut.texture);
+    }
+    else {
+      image_gpu_texture_free_later(lut.texture);
+    }
+    lut.texture = nullptr;
   }
-  if (immediate) {
-    GPU_texture_free(ima->runtime->gputexture_3d_lut_strip);
-  }
-  else {
-    image_gpu_texture_free_later(ima->runtime->gputexture_3d_lut_strip);
-  }
-  ima->runtime->gputexture_3d_lut_strip = nullptr;
-  ima->runtime->gputexture_3d_lut_width = 0;
-  ima->runtime->gputexture_3d_lut_height = 0;
-  ima->runtime->gputexture_3d_lut_depth = 0;
 }
 
 static gpu::Texture *image_gpu_texture_3d_lut_strip_create(Image *ima,

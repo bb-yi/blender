@@ -639,6 +639,18 @@ enum {
   SHD_IMAGE_EXTENSION_MIRROR = 3,
 };
 
+/* Image to Closure texture interpretation. */
+enum {
+  IMA_IMAGE_TO_CLOSURE_TEXTURE_2D = 0,
+  IMA_IMAGE_TO_CLOSURE_TEXTURE_3D_LUT_STRIP = 1,
+};
+
+/* Image to Closure 3D LUT strip size mode. */
+enum {
+  IMA_IMAGE_TO_CLOSURE_3D_LUT_SIZE_AUTO = 0,
+  IMA_IMAGE_TO_CLOSURE_3D_LUT_SIZE_MANUAL = 1,
+};
+
 /* image texture */
 enum {
   SHD_PROJ_FLAT = 0,
@@ -2775,6 +2787,19 @@ struct NodeTexImage {
   float projection_blend = 0;
   int interpolation = 0;
   int extension = 0;
+  char _pad[4] = {};
+};
+
+struct NodeShaderImageToClosure {
+  DNA_DEFINE_CXX_METHODS(NodeShaderImageToClosure)
+
+  int texture_type = IMA_IMAGE_TO_CLOSURE_TEXTURE_2D;
+  int texture_size_mode = IMA_IMAGE_TO_CLOSURE_3D_LUT_SIZE_AUTO;
+  int interpolation = SHD_INTERP_LINEAR;
+  int extension = SHD_IMAGE_EXTENSION_REPEAT;
+  int texture_width = 16;
+  int texture_height = 16;
+  int texture_depth = 16;
   char _pad[4] = {};
 };
 
