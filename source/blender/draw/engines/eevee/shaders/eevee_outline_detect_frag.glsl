@@ -145,13 +145,14 @@ void main()
     const float4 sample_outline_info = outline_source_info_fetch(sample_texel);
     const float sample_line_width = outline_width_unpack(sample_outline_info.r);
     const uint sample_outline_id = outline_id_unpack(sample_outline_info.a);
+    const bool center_is_not_behind_sample = center_depth <= sample_depth + 1.0e-5f;
 
-    if (sample_outline_id != center_outline_id) {
+    if (center_is_not_behind_sample && sample_outline_id != center_outline_id) {
       has_id_boundary = true;
       seed_line_width = max(seed_line_width, sample_line_width);
     }
 
-    if (!mask_only_outline && center_depth <= sample_depth) {
+    if (!mask_only_outline && center_is_not_behind_sample) {
       const float delta_normal = dot(center_normal, sample_normal);
       const float plane_distance = dot(true_normal_camera, center_position);
       const float sample_plane_distance = dot(true_normal_camera, sample_position);
