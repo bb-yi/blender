@@ -30,14 +30,31 @@ float outline_width_unpack(float width_packed)
   return width_packed / (1.0f - width_packed);
 }
 
-float outline_id_pack(uint outline_id)
+#define OUTLINE_ID_VALUE_MASK 32767u
+#define OUTLINE_ID_EDGE_BIT 32768u
+
+uint outline_id_bits_unpack(float outline_id_packed)
 {
-  return float(min(outline_id, 65535u)) / 65535.0f;
+  return uint(clamp(outline_id_packed, 0.0f, 1.0f) * 65535.0f + 0.5f);
+}
+
+float outline_id_pack(uint outline_id, bool id_edge)
+{
+  uint packed_id = min(outline_id, OUTLINE_ID_VALUE_MASK);
+  if (id_edge) {
+    packed_id |= OUTLINE_ID_EDGE_BIT;
+  }
+  return float(packed_id) / 65535.0f;
 }
 
 uint outline_id_unpack(float outline_id_packed)
 {
-  return uint(clamp(outline_id_packed, 0.0f, 1.0f) * 65535.0f + 0.5f);
+  return outline_id_bits_unpack(outline_id_packed) & OUTLINE_ID_VALUE_MASK;
+}
+
+bool outline_id_edge_unpack(float outline_id_packed)
+{
+  return (outline_id_bits_unpack(outline_id_packed) & OUTLINE_ID_EDGE_BIT) != 0u;
 }
 
 #if defined(MAT_OUTLINE_SUPPORT) && defined(MAT_OUTLINE_CLEAR) && defined(GPU_FRAGMENT_SHADER)
@@ -75,8 +92,12 @@ float outline_pixel_world_size_at(float depth, int2 extent, int2 texel)
                   drw_point_screen_to_view(float3(next_uv, depth)));
 }
 
-void output_outline(
-    float4 line_color, float line_width, float depth_threshold, float normal_threshold, float outline_id)
+void output_outline(float4 line_color,
+                    float line_width,
+                    float depth_threshold,
+                    float normal_threshold,
+                    float outline_id,
+                    bool id_edge)
 {
 #if defined(MAT_OUTLINE_SUPPORT) && defined(GPU_FRAGMENT_SHADER)
   if (line_width <= 0.0f || line_color.a <= 0.0f) {
@@ -86,14 +107,15 @@ void output_outline(
   int2 texel = int2(gl_FragCoord.xy);
   uint custom_outline_id = uint(max(outline_id, 0.0f) + 0.5f);
   uint resolved_outline_id = (custom_outline_id > 0u) ? custom_outline_id :
-                                                      min(drw_resource_id() + 1u, 65535u);
+                                                      min(drw_resource_id() + 1u,
+                                                          OUTLINE_ID_VALUE_MASK);
 
   float4 stored_color = line_color;
   stored_color.a = saturate(stored_color.a);
   float4 stored_info = float4(outline_width_pack(line_width),
                               saturate(depth_threshold),
                               saturate(normal_threshold),
-                              outline_id_pack(resolved_outline_id));
+                              outline_id_pack(resolved_outline_id, id_edge));
 #  if defined(MAT_OUTLINE_CLEAR)
   g_outline_staged_color = stored_color;
   g_outline_staged_info = stored_info;

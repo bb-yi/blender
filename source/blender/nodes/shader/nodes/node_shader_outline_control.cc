@@ -28,7 +28,10 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.add_input<decl::Float>("Line Width").default_value(2.0f).min(0.0f);
   b.add_input<decl::Float>("Depth Threshold").default_value(0.1f).min(0.0f).max(1.0f);
   b.add_input<decl::Float>("Normal Threshold").default_value(0.5f).min(0.0f).max(1.0f);
-  b.add_input<decl::Int>("Outline ID").default_value(0).min(0).max(65535);
+  b.add_input<decl::Int>("Outline ID").default_value(0).min(0).max(32767);
+  b.add_input<decl::Bool>("ID Edge")
+      .default_value(true)
+      .description("Draw outlines where the outline ID changes");
 }
 
 static int node_shader_gpu_outline_control(GPUMaterial *mat,

@@ -665,6 +665,39 @@ static void version_init_image_to_closure_node_storage(Main *bmain)
   FOREACH_NODETREE_END;
 }
 
+static void version_add_outline_control_id_edge_input(Main *bmain)
+{
+  FOREACH_NODETREE_BEGIN (bmain, ntree, id) {
+    if (ntree->type != NTREE_SHADER) {
+      continue;
+    }
+    for (bNode &node : ntree->nodes) {
+      if (node.type_legacy != SH_NODE_OUTLINE_CONTROL &&
+          !STREQ(node.idname, "ShaderNodeOutlineControl"))
+      {
+        continue;
+      }
+
+      if (bNodeSocket *outline_id_input = bke::node_find_socket(node, SOCK_IN, "Outline ID")) {
+        if (outline_id_input->type == SOCK_INT && outline_id_input->default_value != nullptr) {
+          bNodeSocketValueInt *value = outline_id_input->default_value_typed<bNodeSocketValueInt>();
+          value->value = std::min(value->value, 32767);
+          value->max = std::min(value->max, 32767);
+        }
+      }
+
+      if (bke::node_find_socket(node, SOCK_IN, "ID Edge") != nullptr) {
+        continue;
+      }
+
+      bNodeSocket &id_edge_input = version_node_add_socket(
+          *ntree, node, SOCK_IN, "NodeSocketBool", "ID Edge");
+      id_edge_input.default_value_typed<bNodeSocketValueBoolean>()->value = true;
+    }
+  }
+  FOREACH_NODETREE_END;
+}
+
 static void version_migrate_image_to_closure_legacy_image_settings(FileData *fd, Main *bmain)
 {
   if (!DNA_struct_member_exists(fd->filesdna, "Image", "char", "image_to_closure_texture_type")) {
@@ -1168,6 +1201,10 @@ void blo_do_versions_510(FileData *fd, Library * /*lib*/, Main *bmain)
       !DNA_struct_exists(fd->filesdna, "NodeShaderImageToClosure"))
   {
     version_init_image_to_closure_node_storage(bmain);
+  }
+
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 45)) {
+    version_add_outline_control_id_edge_input(bmain);
   }
 
   /**
