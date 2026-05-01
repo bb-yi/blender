@@ -321,7 +321,7 @@ class Meshes : Overlay {
       gpu::Batch *geom = DRW_mesh_batch_cache_get_edit_triangles(mesh);
       edit_mesh_prepass_ps_.draw(geom, res_handle);
     }
-    if (draw_as_solid && !state.is_render_depth_available) {
+    if (draw_as_solid && (!state.is_render_depth_available || state.use_depth_offset_prepass)) {
       gpu::Batch *geom = DRW_cache_mesh_surface_get(ob);
       edit_mesh_prepass_ps_.draw(geom, res_handle);
     }

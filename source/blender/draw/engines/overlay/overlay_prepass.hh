@@ -264,7 +264,9 @@ class Prepass : Overlay {
         break;
       }
       case OB_GREASE_PENCIL:
-        if (!res.is_selection() && state.is_render_depth_available) {
+        if (!res.is_selection() && state.is_render_depth_available &&
+            !state.use_depth_offset_prepass)
+        {
           /* Disable during display, only enable for selection.
            * The grease pencil engine already renders it properly. */
           return;

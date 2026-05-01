@@ -155,6 +155,8 @@ struct State {
   bool draw_background = false;
   /** True if the render engine outputs satisfactory depth information to the depth buffer. */
   bool is_render_depth_available = false;
+  /** True when material depth offset can make the render depth mismatch overlay geometry. */
+  bool use_depth_offset_prepass = false;
   /** Whether we should render a vignette over the scene. */
   bool vignette_enabled = false;
   /** Should text draw in this mode? */

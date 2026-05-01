@@ -7,16 +7,82 @@
  */
 
 #include "BKE_colorband.hh"
-#include "DEG_depsgraph_query.hh"
+#include "BKE_layer.hh"
+#include "BKE_material.hh"
+#include "BKE_node_runtime.hh"
+#include "BKE_paint.hh"
 
 #include "ED_view3d.hh"
 
-#include "BKE_paint.hh"
+#include "DEG_depsgraph_query.hh"
+
+#include "NOD_shader.h"
 
 #include "draw_debug.hh"
 #include "overlay_instance.hh"
 
 namespace blender::draw::overlay {
+
+static bool material_output_has_depth_offset(const Material *material)
+{
+  if (material == nullptr || material->nodetree == nullptr) {
+    return false;
+  }
+
+  bNodeTree *nodetree = material->nodetree;
+  nodetree->ensure_topology_cache();
+  bNode *output = ntreeShaderOutputNode(nodetree, SHD_OUTPUT_EEVEE);
+  if (output == nullptr) {
+    return false;
+  }
+
+  const bNodeSocket *depth_offset = output->input_by_identifier("Depth Offset");
+  return depth_offset != nullptr && depth_offset->is_available() &&
+         depth_offset->is_directly_linked();
+}
+
+static bool object_materials_have_depth_offset(const Object *object)
+{
+  if (object == nullptr || object->data == nullptr || !OB_TYPE_SUPPORT_MATERIAL(object->type) ||
+      !DEG_is_evaluated(object))
+  {
+    return false;
+  }
+
+  const int materials_num = BKE_object_material_used_with_fallback_eval(*object);
+  for (int i = 0; i < materials_num; i++) {
+    Material *material = BKE_object_material_get_eval(const_cast<Object *>(object), i + 1);
+    if (material_output_has_depth_offset(material)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+static bool visible_depsgraph_uses_depth_offset_material(Depsgraph *depsgraph, const View3D *v3d)
+{
+  if (depsgraph == nullptr) {
+    return false;
+  }
+
+  DEGObjectIterSettings deg_iter_settings = {nullptr};
+  deg_iter_settings.depsgraph = depsgraph;
+  deg_iter_settings.flags = DEG_OBJECT_ITER_FOR_RENDER_ENGINE_FLAGS;
+  bool found_depth_offset = false;
+  DEG_OBJECT_ITER_BEGIN (&deg_iter_settings, object) {
+    if (v3d != nullptr && !BKE_object_is_visible_in_viewport(v3d, object)) {
+      continue;
+    }
+    if (object_materials_have_depth_offset(object)) {
+      found_depth_offset = true;
+      break;
+    }
+  }
+  DEG_OBJECT_ITER_END;
+
+  return found_depth_offset;
+}
 
 void Instance::init()
 {
@@ -45,6 +111,7 @@ void Instance::init()
   state.skip_particles = ctx->mode == DRWContext::DEPTH_ACTIVE_OBJECT;
   state.is_material_select = ctx->is_material_select();
   state.draw_background = ctx->options.draw_background;
+  state.use_depth_offset_prepass = false;
   state.show_text = false;
 
   /* Note there might be less than 6 planes, but we always compute the 6 of them for simplicity. */
@@ -102,6 +169,13 @@ void Instance::init()
       state.overlay.wireframe_threshold = state.v3d->overlay.wireframe_threshold;
       state.overlay.wireframe_opacity = state.v3d->overlay.wireframe_opacity;
     }
+
+    state.use_depth_offset_prepass = state.is_render_depth_available && viewport_uses_eevee &&
+                                     !state.is_depth_only_drawing && !resources.is_selection() &&
+                                     !state.hide_overlays &&
+                                     (state.v3d->shading.type > OB_SOLID) &&
+                                     visible_depsgraph_uses_depth_offset_material(state.depsgraph,
+                                                                                  state.v3d);
 
     state.do_pose_xray = state.show_bone_selection();
     state.do_pose_fade_geom = state.do_pose_xray && !(state.object_mode & OB_MODE_WEIGHT_PAINT) &&
@@ -889,9 +963,9 @@ void Instance::draw_v3d(Manager &manager, View &view)
       GPU_framebuffer_clear_color_depth(resources.overlay_line_fb, clear_color, 1.0f);
     }
     else {
-      if (!state.is_render_depth_available) {
-        /* If the render engine is not outputting correct depth,
-         * clear the depth and render a depth prepass. */
+      if (!state.is_render_depth_available || state.use_depth_offset_prepass) {
+        /* If the render engine is not outputting correct depth, or if material Depth Offset
+         * moved the final render depth away from overlay geometry, rebuild overlay depth. */
         GPU_framebuffer_clear_color_depth(resources.overlay_line_fb, clear_color, 1.0f);
       }
       else {
@@ -1130,8 +1204,10 @@ bool Instance::object_needs_prepass(const ObjectRef &ob_ref, bool in_paint_mode)
   }
 
   if (!state.xray_enabled) {
-    /* Force depth prepass if depth buffer form render engine is not available. */
-    if (!state.is_render_depth_available && (ob_ref.object->dt >= OB_SOLID)) {
+    /* Force depth prepass if render depth is unavailable or does not match overlay geometry. */
+    if ((!state.is_render_depth_available || state.use_depth_offset_prepass) &&
+        (ob_ref.object->dt >= OB_SOLID))
+    {
       return true;
     }
   }
