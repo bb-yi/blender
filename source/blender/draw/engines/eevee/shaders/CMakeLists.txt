@@ -36,6 +36,7 @@ set(SRC_GLSL_VERT
   eevee_geom_volume_vert.glsl
   eevee_geom_world_vert.glsl
   eevee_lookdev_display_vert.glsl
+  eevee_outline_freestyle_vert.glsl
   eevee_shadow_page_tile_vert.glsl
   eevee_shadow_tag_usage_vert.glsl
 )
@@ -62,6 +63,7 @@ set(SRC_GLSL_FRAG
   eevee_light_culling_debug_frag.glsl
   eevee_lookdev_display_frag.glsl
   eevee_outline_detect_frag.glsl
+  eevee_outline_freestyle_frag.glsl
   eevee_outline_jfa_init_frag.glsl
   eevee_outline_resolve_frag.glsl
   eevee_occupancy_convert_frag.glsl

@@ -7,6 +7,8 @@
 #include "DRW_gpu_wrapper.hh"
 #include "draw_pass.hh"
 
+struct Object;
+
 namespace blender::eevee {
 
 using namespace draw;
@@ -20,6 +22,7 @@ class OutlineModule {
   bool use_in_combined_ = false;
 
   PassSimple detect_ps_ = {"Outline.Detect"};
+  PassMain freestyle_edge_ps_ = {"Outline.FreestyleEdge"};
   PassSimple jfa_init_ps_ = {"Outline.JFA.Init"};
   PassSimple jfa_step_ps_ = {"Outline.JFA.Step"};
   PassSimple resolve_ps_ = {"Outline.Resolve"};
@@ -39,6 +42,9 @@ class OutlineModule {
 
  public:
   OutlineModule(Instance &inst) : inst_(inst) {}
+
+  void begin_sync();
+  void sync_object(Object *ob, ResourceHandleRange res_handle);
 
   void sync();
   void render(View &view, int2 extent);

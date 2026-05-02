@@ -154,6 +154,8 @@ void SyncModule::sync_mesh(Object *ob, ObjectHandle &ob_handle, const ObjectRef 
     return;
   }
 
+  inst_.outline.sync_object(ob, res_handle);
+
   bool is_alpha_blend = false;
   bool has_transparent_shadows = false;
   bool has_volume = false;

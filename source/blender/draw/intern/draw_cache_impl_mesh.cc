@@ -674,6 +674,13 @@ gpu::Batch *DRW_mesh_batch_cache_get_all_edges(Mesh &mesh)
   return DRW_batch_request(&cache.batch.all_edges);
 }
 
+gpu::Batch *DRW_mesh_batch_cache_get_freestyle_edges(Mesh &mesh)
+{
+  MeshBatchCache &cache = *mesh_batch_cache_get(mesh);
+  cache.batch_requested |= MBC_FREESTYLE_EDGES;
+  return DRW_batch_request(&cache.batch.freestyle_edges);
+}
+
 gpu::Batch *DRW_mesh_batch_cache_get_surface(Mesh &mesh)
 {
   MeshBatchCache &cache = *mesh_batch_cache_get(mesh);
@@ -1318,6 +1325,13 @@ void DRW_mesh_batch_cache_create_requested(TaskGraph &task_graph,
                          GPU_PRIM_LINES_ADJ,
                          list,
                          IBOType::LinesAdjacency,
+                         {VBOType::Position}});
+    }
+    if (batches_to_create & MBC_FREESTYLE_EDGES) {
+      batch_info.append({*cache.batch.freestyle_edges,
+                         GPU_PRIM_LINES,
+                         list,
+                         IBOType::FreestyleLines,
                          {VBOType::Position}});
     }
     if (batches_to_create & MBC_SURFACE_WEIGHTS) {
