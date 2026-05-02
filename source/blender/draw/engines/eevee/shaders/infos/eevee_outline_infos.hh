@@ -66,6 +66,7 @@ GPU_SHADER_CREATE_END()
 
 GPU_SHADER_CREATE_INFO(eevee_outline_freestyle)
 DO_STATIC_COMPILATION()
+BUILTINS(BuiltinBits::CLIP_CONTROL)
 VERTEX_IN(0, float3, pos)
 FRAGMENT_OUT(0, float4, out_outline_seed)
 SAMPLER(OUTLINE_DEPTH_TEX_SLOT, sampler2DDepth, depth_tx)
