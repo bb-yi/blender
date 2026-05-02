@@ -42,7 +42,9 @@ void main()
   const float4 outline_color = outline_source_color_fetch(texel);
   const float4 outline_info = outline_source_info_fetch(texel);
   const float line_width = outline_width_unpack(outline_info.r);
-  if (line_width <= 0.0f || outline_color.a <= 0.0f) {
+  if (line_width <= 0.0f || outline_color.a <= 0.0f ||
+      !outline_freestyle_edge_unpack(outline_info.b))
+  {
     discard;
   }
 

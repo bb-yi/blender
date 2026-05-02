@@ -76,14 +76,14 @@ void main()
   const float4 outline_color = outline_source_color_fetch(texel);
   const float4 outline_info = outline_source_info_fetch(texel);
   const float line_width = outline_width_unpack(outline_info.r);
+  const float normal_threshold_input = outline_normal_threshold_unpack(outline_info.b);
   const bool use_depth_outline = outline_info.g < 1.0f;
-  const bool use_normal_outline = outline_info.b < 1.0f;
+  const bool use_normal_outline = normal_threshold_input < 1.0f;
   const bool use_geometry_outline = use_depth_outline || use_normal_outline;
   const bool center_id_edge = outline_id_edge_unpack(outline_info.a);
-  const float depth_threshold = use_depth_outline ? pow(outline_info.g, 10.0f) * 999.0f +
-                                                       1.0f :
+  const float depth_threshold = use_depth_outline ? pow(outline_info.g, 10.0f) * 999.0f + 1.0f :
                                                    0.0f;
-  const float normal_threshold = max(0.01f, outline_info.b);
+  const float normal_threshold = max(0.01f, normal_threshold_input);
 
   out_outline_seed = float4(0.0f);
   if (line_width <= 0.0f || outline_color.a <= 0.0f) {

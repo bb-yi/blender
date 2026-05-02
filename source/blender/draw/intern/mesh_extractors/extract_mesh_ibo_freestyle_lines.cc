@@ -129,56 +129,70 @@ gpu::IndexBufPtr extract_freestyle_lines(const MeshRenderData &mr)
 gpu::IndexBufPtr extract_freestyle_lines_subdiv(const DRWSubdivCache &subdiv_cache,
                                                 const MeshRenderData &mr)
 {
-  const int loose_edges_num = subdiv_loose_edges_num(mr, subdiv_cache);
   const int max_index = subdiv_full_vbo_size(mr, subdiv_cache);
-  const int lines_num = subdiv_cache.num_subdiv_edges + loose_edges_num;
-
-  GPUIndexBufBuilder builder;
-  GPU_indexbuf_init(&builder, GPU_PRIM_LINES, lines_num, max_index);
-  MutableSpan<uint2> data = GPU_indexbuf_get_data(&builder).cast<uint2>();
-  data.fill(uint2(gpu::RESTART_INDEX));
 
   auto edge_visible = [&](const int edge) {
     return mr.hide_edge.is_empty() || !mr.hide_edge[edge];
   };
 
-  auto edge_marked = [&](const int edge) {
-    if (edge < 0 || edge >= mr.edges_num || !edge_visible(edge)) {
-      return false;
+  Array<bool> marked_edges(mr.edges_num, false);
+  bool has_marked_edge = false;
+  if (mr.extract_type == MeshExtractType::Mesh) {
+    const bke::AttributeAccessor attributes = mr.mesh->attributes();
+    const bke::AttributeReader<bool> freestyle_edge_attr = attributes.lookup<bool>(
+        "freestyle_edge", bke::AttrDomain::Edge);
+    if (!freestyle_edge_attr) {
+      return build_freestyle_lines_ibo(Span<uint2>(), max_index);
     }
-    if (mr.extract_type == MeshExtractType::Mesh) {
-      const bke::AttributeAccessor attributes = mr.mesh->attributes();
-      const bke::AttributeReader<bool> freestyle_edge_attr = attributes.lookup<bool>(
-          "freestyle_edge", bke::AttrDomain::Edge);
-      if (!freestyle_edge_attr) {
-        return false;
-      }
-      const VArraySpan<bool> freestyle_edges(freestyle_edge_attr.varray);
-      return freestyle_edges[edge];
+    const VArraySpan<bool> freestyle_edges(freestyle_edge_attr.varray);
+    for (const int edge : IndexRange(mr.edges_num)) {
+      marked_edges[edge] = edge_visible(edge) && freestyle_edges[edge];
+      has_marked_edge = has_marked_edge || marked_edges[edge];
     }
-
+  }
+  else {
     if (mr.freestyle_edge_ofs == -1) {
-      return false;
+      return build_freestyle_lines_ibo(Span<uint2>(), max_index);
     }
-    BMesh *bm = mr.bm;
-    const BMEdge *eed = BM_edge_at_index(bm, edge);
-    return !BM_elem_flag_test_bool(eed, BM_ELEM_HIDDEN) &&
-           BM_ELEM_CD_GET_BOOL(eed, mr.freestyle_edge_ofs);
-  };
+    BMIter iter;
+    BMEdge *eed;
+    BM_ITER_MESH (eed, &iter, mr.bm, BM_EDGES_OF_MESH) {
+      const int edge = BM_elem_index_get(eed);
+      if (edge >= 0 && edge < mr.edges_num) {
+        marked_edges[edge] = !BM_elem_flag_test_bool(eed, BM_ELEM_HIDDEN) &&
+                             BM_ELEM_CD_GET_BOOL(eed, mr.freestyle_edge_ofs);
+        has_marked_edge = has_marked_edge || marked_edges[edge];
+      }
+    }
+  }
+  if (!has_marked_edge) {
+    return build_freestyle_lines_ibo(Span<uint2>(), max_index);
+  }
 
   const Span<int> subdiv_loop_edge_index = subdiv_cache.edges_orig_index->data<int>();
   const Span<int> subdiv_loop_subdiv_edge_index(subdiv_cache.subdiv_loop_subdiv_edge_index,
                                                 subdiv_cache.num_subdiv_loops);
+  Vector<uint2> lines;
+  Array<bool> used_subdiv_edges(subdiv_cache.num_subdiv_edges, false);
+
   const int quads_num = subdiv_cache.num_subdiv_quads;
   for (const int subdiv_quad_index : IndexRange(quads_num)) {
     const IndexRange subdiv_face(subdiv_quad_index * 4, 4);
     for (const int corner : subdiv_face) {
       const int coarse_edge_index = subdiv_loop_edge_index[corner];
-      if (!edge_marked(coarse_edge_index)) {
+      if (coarse_edge_index < 0 || coarse_edge_index >= mr.edges_num ||
+          !marked_edges[coarse_edge_index])
+      {
         continue;
       }
       const int subdiv_edge_index = subdiv_loop_subdiv_edge_index[corner];
-      data[subdiv_edge_index] = edge_from_corners(subdiv_face, corner);
+      if (subdiv_edge_index < 0 || subdiv_edge_index >= subdiv_cache.num_subdiv_edges) {
+        continue;
+      }
+      if (!used_subdiv_edges[subdiv_edge_index]) {
+        used_subdiv_edges[subdiv_edge_index] = true;
+        lines.append(edge_from_corners(subdiv_face, corner));
+      }
     }
   }
 
@@ -187,17 +201,16 @@ gpu::IndexBufPtr extract_freestyle_lines_subdiv(const DRWSubdivCache &subdiv_cac
   const Span<int> loose_edges = mr.loose_edges;
   for (const int loose_edge_index : loose_edges.index_range()) {
     const int edge = loose_edges[loose_edge_index];
-    if (!edge_marked(edge)) {
+    if (edge < 0 || edge >= mr.edges_num || !marked_edges[edge]) {
       continue;
     }
-    const int line_start = subdiv_cache.num_subdiv_edges + loose_edge_index * edges_per_edge;
     const int vertex_start = loose_start + loose_edge_index * edges_per_edge * 2;
     for (const int i : IndexRange(edges_per_edge)) {
-      data[line_start + i] = uint2(vertex_start + i * 2, vertex_start + i * 2 + 1);
+      lines.append(uint2(vertex_start + i * 2, vertex_start + i * 2 + 1));
     }
   }
 
-  return gpu::IndexBufPtr(GPU_indexbuf_build_ex(&builder, 0, max_index, true));
+  return build_freestyle_lines_ibo(lines, max_index);
 }
 
 }  // namespace blender::draw

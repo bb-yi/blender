@@ -32,6 +32,8 @@ float outline_width_unpack(float width_packed)
 
 #define OUTLINE_ID_VALUE_MASK 32767u
 #define OUTLINE_ID_EDGE_BIT 32768u
+#define OUTLINE_NORMAL_THRESHOLD_VALUE_MASK 32767u
+#define OUTLINE_FREESTYLE_EDGE_BIT 32768u
 
 uint outline_id_bits_unpack(float outline_id_packed)
 {
@@ -55,6 +57,35 @@ uint outline_id_unpack(float outline_id_packed)
 bool outline_id_edge_unpack(float outline_id_packed)
 {
   return (outline_id_bits_unpack(outline_id_packed) & OUTLINE_ID_EDGE_BIT) != 0u;
+}
+
+uint outline_normal_threshold_bits_unpack(float threshold_packed)
+{
+  return uint(clamp(threshold_packed, 0.0f, 1.0f) * 65535.0f + 0.5f);
+}
+
+float outline_normal_threshold_pack(float threshold, bool freestyle_edge)
+{
+  uint packed_threshold = uint(saturate(threshold) *
+                                   float(OUTLINE_NORMAL_THRESHOLD_VALUE_MASK) +
+                               0.5f);
+  if (freestyle_edge) {
+    packed_threshold |= OUTLINE_FREESTYLE_EDGE_BIT;
+  }
+  return float(packed_threshold) / 65535.0f;
+}
+
+float outline_normal_threshold_unpack(float threshold_packed)
+{
+  return float(outline_normal_threshold_bits_unpack(threshold_packed) &
+               OUTLINE_NORMAL_THRESHOLD_VALUE_MASK) /
+         float(OUTLINE_NORMAL_THRESHOLD_VALUE_MASK);
+}
+
+bool outline_freestyle_edge_unpack(float threshold_packed)
+{
+  return (outline_normal_threshold_bits_unpack(threshold_packed) & OUTLINE_FREESTYLE_EDGE_BIT) !=
+         0u;
 }
 
 #if defined(MAT_OUTLINE_SUPPORT) && defined(MAT_OUTLINE_CLEAR) && defined(GPU_FRAGMENT_SHADER)
@@ -97,7 +128,8 @@ void output_outline(float4 line_color,
                     float depth_threshold,
                     float normal_threshold,
                     float outline_id,
-                    bool id_edge)
+                    bool id_edge,
+                    bool freestyle_edge)
 {
 #if defined(MAT_OUTLINE_SUPPORT) && defined(GPU_FRAGMENT_SHADER)
   if (line_width <= 0.0f || line_color.a <= 0.0f) {
@@ -114,7 +146,7 @@ void output_outline(float4 line_color,
   stored_color.a = saturate(stored_color.a);
   float4 stored_info = float4(outline_width_pack(line_width),
                               saturate(depth_threshold),
-                              saturate(normal_threshold),
+                              outline_normal_threshold_pack(normal_threshold, freestyle_edge),
                               outline_id_pack(resolved_outline_id, id_edge));
 #  if defined(MAT_OUTLINE_CLEAR)
   g_outline_staged_color = stored_color;
