@@ -350,8 +350,9 @@ static void image_blend_write(BlendWriter *writer, ID *id, const void *id_addres
 
   /* Clear all data that isn't read to reduce false detection of changed image during memfile undo.
    */
+  bke::ImageRuntime *runtime = ima->runtime;
+  ListBaseT<ImageAnim> anims = ima->anims;
   ima->runtime = nullptr;
-
   BLI_listbase_clear(&ima->anims);
 
   ImagePackedFile *imapf;
@@ -373,6 +374,8 @@ static void image_blend_write(BlendWriter *writer, ID *id, const void *id_addres
 
   /* write LibData */
   writer->write_id_struct(id_address, ima);
+  ima->runtime = runtime;
+  ima->anims = anims;
   BKE_id_blend_write(writer, &ima->id);
 
   for (ImagePackedFile &imapf : ima->packedfiles) {
