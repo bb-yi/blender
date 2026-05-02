@@ -32,6 +32,9 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.add_input<decl::Bool>("ID Edge")
       .default_value(true)
       .description("Draw outlines where the outline ID changes");
+  b.add_input<decl::Bool>("Freestyle Edge")
+      .default_value(true)
+      .description("Draw outlines on mesh edges marked as Freestyle edges");
 }
 
 static int node_shader_gpu_outline_control(GPUMaterial *mat,

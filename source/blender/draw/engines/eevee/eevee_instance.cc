@@ -438,6 +438,8 @@ namespace blender::eevee
     film.sync();
     render_textures.begin_sync();
     filter_materials.begin_sync();
+
+    outline.begin_sync();
     ambient_occlusion.sync();
     volume_probes.sync();
     lookdev.sync();

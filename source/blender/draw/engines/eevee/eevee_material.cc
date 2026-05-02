@@ -323,7 +323,7 @@ bool MaterialModule::has_visible_outline_materials() const
       continue;
     }
 
-    if (material_uses_outline_control(material)) {
+    if (item.value.uses_outline_control) {
       return true;
     }
   }
@@ -533,6 +533,7 @@ Material &MaterialModule::material_sync(Object *ob,
                              inst_.scene->eevee.use_outline != 0);
     Material &mat = material_map_.lookup_or_add_cb(material_key, [&]() {
       Material mat = {};
+      mat.uses_outline_control = material_uses_outline_control(blender_mat);
       mat.volume_occupancy = material_pass_get(
           ob, blender_mat, MAT_PIPE_VOLUME_OCCUPANCY, MAT_GEOM_VOLUME);
       mat.volume_material = material_pass_get(
@@ -579,6 +580,7 @@ Material &MaterialModule::material_sync(Object *ob,
 
   Material &mat = material_map_.lookup_or_add_cb(material_key, [&]() {
     Material mat = {};
+    mat.uses_outline_control = material_uses_outline_control(blender_mat);
     if (is_filter_material) {
       /* Filter-domain materials are scene fullscreen passes, not object surface materials. */
       return mat;
