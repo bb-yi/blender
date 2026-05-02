@@ -717,7 +717,7 @@ static void version_add_outline_control_freestyle_edge_input(Main *bmain)
 
       bNodeSocket &freestyle_edge_input = version_node_add_socket(
           *ntree, node, SOCK_IN, "NodeSocketBool", "Freestyle Edge");
-      freestyle_edge_input.default_value_typed<bNodeSocketValueBoolean>()->value = true;
+      freestyle_edge_input.default_value_typed<bNodeSocketValueBoolean>()->value = false;
     }
   }
   FOREACH_NODETREE_END;

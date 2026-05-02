@@ -89,8 +89,8 @@ struct MeshRenderData {
   int edge_crease_ofs;
   int vert_crease_ofs;
   int bweight_ofs;
-  int freestyle_edge_ofs;
-  int freestyle_face_ofs;
+  int freestyle_edge_ofs = -1;
+  int freestyle_face_ofs = -1;
   /** Mesh */
   const Mesh *mesh;
   Span<float3> vert_positions;

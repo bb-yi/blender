@@ -17,7 +17,7 @@ namespace blender::eevee {
 void OutlineModule::begin_sync()
 {
   freestyle_edge_ps_.init();
-  freestyle_edge_ps_.state_set(DRW_STATE_WRITE_COLOR);
+  freestyle_edge_ps_.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_CLIP_CONTROL_UNIT_RANGE);
   freestyle_edge_ps_.shader_set(inst_.shaders.static_shader_get(OUTLINE_FREESTYLE));
   freestyle_edge_ps_.bind_texture("depth_tx", &inst_.render_buffers.depth_tx);
   freestyle_edge_ps_.bind_texture("outline_color_tx", &inst_.render_buffers.outline_color_tx);

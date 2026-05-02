@@ -30,6 +30,32 @@ static gpu::IndexBufPtr build_freestyle_lines_ibo(const Span<uint2> lines, const
   return gpu::IndexBufPtr(GPU_indexbuf_build_ex(&builder, 0, max_index, false));
 }
 
+static bool mesh_edge_visible(const MeshRenderData &mr,
+                              const int edge,
+                              const bool use_subsurf_optimal_display)
+{
+  if (use_subsurf_optimal_display &&
+      !mr.mesh->runtime->subsurf_optimal_display_edges.is_empty() &&
+      !mr.mesh->runtime->subsurf_optimal_display_edges[edge])
+  {
+    return false;
+  }
+  if (!mr.hide_edge.is_empty() && mr.hide_edge[edge]) {
+    return false;
+  }
+  if (mr.hide_unmapped_edges && mr.orig_index_edge != nullptr &&
+      mr.orig_index_edge[edge] == ORIGINDEX_NONE)
+  {
+    return false;
+  }
+  return true;
+}
+
+static bool bmesh_edge_visible(const BMEdge &edge)
+{
+  return !BM_elem_flag_test_bool(&edge, BM_ELEM_HIDDEN);
+}
+
 static void extract_freestyle_lines_mesh(const MeshRenderData &mr, gpu::IndexBufPtr &ibo)
 {
   const int max_index = mr.corners_num + mr.loose_edges.size() * 2;
@@ -42,9 +68,6 @@ static void extract_freestyle_lines_mesh(const MeshRenderData &mr, gpu::IndexBuf
   }
 
   const VArraySpan<bool> freestyle_edges(freestyle_edge_attr.varray);
-  const auto edge_visible = [&](const int edge) {
-    return mr.hide_edge.is_empty() || !mr.hide_edge[edge];
-  };
 
   Vector<uint2> lines;
   Array<bool> used(mr.edges_num, false);
@@ -54,7 +77,7 @@ static void extract_freestyle_lines_mesh(const MeshRenderData &mr, gpu::IndexBuf
     const IndexRange face = faces[face_index];
     for (const int corner : face) {
       const int edge = corner_edges[corner];
-      if (!used[edge] && edge_visible(edge) && freestyle_edges[edge]) {
+      if (!used[edge] && mesh_edge_visible(mr, edge, true) && freestyle_edges[edge]) {
         used[edge] = true;
         lines.append(edge_from_corners(face, corner));
       }
@@ -64,7 +87,7 @@ static void extract_freestyle_lines_mesh(const MeshRenderData &mr, gpu::IndexBuf
   const Span<int> loose_edges = mr.loose_edges;
   for (const int loose_edge_index : loose_edges.index_range()) {
     const int edge = loose_edges[loose_edge_index];
-    if (!used[edge] && edge_visible(edge) && freestyle_edges[edge]) {
+    if (!used[edge] && mesh_edge_visible(mr, edge, false) && freestyle_edges[edge]) {
       const uint corner_a = mr.corners_num + loose_edge_index * 2;
       const uint corner_b = mr.corners_num + loose_edge_index * 2 + 1;
       lines.append(uint2(corner_a, corner_b));
@@ -93,8 +116,7 @@ static void extract_freestyle_lines_bm(const MeshRenderData &mr, gpu::IndexBufPt
   BMIter iter;
   BMEdge *eed;
   BM_ITER_MESH (eed, &iter, bm, BM_EDGES_OF_MESH) {
-    if (!BM_elem_flag_test_bool(eed, BM_ELEM_HIDDEN) &&
-        BM_ELEM_CD_GET_BOOL(eed, freestyle_edge_ofs))
+    if (bmesh_edge_visible(*eed) && BM_ELEM_CD_GET_BOOL(eed, freestyle_edge_ofs))
     {
       if (eed->l) {
         lines.append(uint2(BM_elem_index_get(eed->l), BM_elem_index_get(eed->l->next)));
@@ -131,10 +153,6 @@ gpu::IndexBufPtr extract_freestyle_lines_subdiv(const DRWSubdivCache &subdiv_cac
 {
   const int max_index = subdiv_full_vbo_size(mr, subdiv_cache);
 
-  auto edge_visible = [&](const int edge) {
-    return mr.hide_edge.is_empty() || !mr.hide_edge[edge];
-  };
-
   Array<bool> marked_edges(mr.edges_num, false);
   bool has_marked_edge = false;
   if (mr.extract_type == MeshExtractType::Mesh) {
@@ -146,7 +164,7 @@ gpu::IndexBufPtr extract_freestyle_lines_subdiv(const DRWSubdivCache &subdiv_cac
     }
     const VArraySpan<bool> freestyle_edges(freestyle_edge_attr.varray);
     for (const int edge : IndexRange(mr.edges_num)) {
-      marked_edges[edge] = edge_visible(edge) && freestyle_edges[edge];
+      marked_edges[edge] = mesh_edge_visible(mr, edge, false) && freestyle_edges[edge];
       has_marked_edge = has_marked_edge || marked_edges[edge];
     }
   }
@@ -159,7 +177,7 @@ gpu::IndexBufPtr extract_freestyle_lines_subdiv(const DRWSubdivCache &subdiv_cac
     BM_ITER_MESH (eed, &iter, mr.bm, BM_EDGES_OF_MESH) {
       const int edge = BM_elem_index_get(eed);
       if (edge >= 0 && edge < mr.edges_num) {
-        marked_edges[edge] = !BM_elem_flag_test_bool(eed, BM_ELEM_HIDDEN) &&
+        marked_edges[edge] = bmesh_edge_visible(*eed) &&
                              BM_ELEM_CD_GET_BOOL(eed, mr.freestyle_edge_ofs);
         has_marked_edge = has_marked_edge || marked_edges[edge];
       }
@@ -170,6 +188,7 @@ gpu::IndexBufPtr extract_freestyle_lines_subdiv(const DRWSubdivCache &subdiv_cac
   }
 
   const Span<int> subdiv_loop_edge_index = subdiv_cache.edges_orig_index->data<int>();
+  const Span<int> subdiv_loop_edge_draw_flag = subdiv_cache.edges_draw_flag->data<int>();
   const Span<int> subdiv_loop_subdiv_edge_index(subdiv_cache.subdiv_loop_subdiv_edge_index,
                                                 subdiv_cache.num_subdiv_loops);
   Vector<uint2> lines;
@@ -179,6 +198,9 @@ gpu::IndexBufPtr extract_freestyle_lines_subdiv(const DRWSubdivCache &subdiv_cac
   for (const int subdiv_quad_index : IndexRange(quads_num)) {
     const IndexRange subdiv_face(subdiv_quad_index * 4, 4);
     for (const int corner : subdiv_face) {
+      if (subdiv_loop_edge_draw_flag[corner] == 0) {
+        continue;
+      }
       const int coarse_edge_index = subdiv_loop_edge_index[corner];
       if (coarse_edge_index < 0 || coarse_edge_index >= mr.edges_num ||
           !marked_edges[coarse_edge_index])
