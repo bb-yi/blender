@@ -58,6 +58,7 @@ static void ensure_dependency_data(MeshRenderData &mr,
 
   const bool calc_loose_geom = ibo_requests.contains(IBOType::Lines) ||
                                ibo_requests.contains(IBOType::LinesLoose) ||
+                               ibo_requests.contains(IBOType::FreestyleLines) ||
                                ibo_requests.contains(IBOType::Points) ||
                                vbo_requests.contains(VBOType::Position) ||
                                vbo_requests.contains(VBOType::EditData) ||
@@ -410,6 +411,9 @@ void mesh_buffer_cache_create_requested_subdiv(MeshBatchCache &cache,
     if (lines_loose_ibo) {
       buffers.ibos.add_new(IBOType::LinesLoose, std::move(lines_loose_ibo));
     }
+  }
+  if (ibos_to_create.contains(IBOType::FreestyleLines)) {
+    buffers.ibos.add_new(IBOType::FreestyleLines, extract_freestyle_lines_subdiv(subdiv_cache, mr));
   }
   if (ibos_to_create.contains(IBOType::Tris)) {
     buffers.ibos.add_new(IBOType::Tris, extract_tris_subdiv(subdiv_cache, cache));

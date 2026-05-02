@@ -14,6 +14,7 @@
 
 #include "GPU_index_buffer.hh"
 
+#include "draw_subdivision.hh"
 #include "extract_mesh.hh"
 
 namespace blender::draw {
@@ -123,6 +124,80 @@ gpu::IndexBufPtr extract_freestyle_lines(const MeshRenderData &mr)
     extract_freestyle_lines_bm(mr, ibo);
   }
   return ibo;
+}
+
+gpu::IndexBufPtr extract_freestyle_lines_subdiv(const DRWSubdivCache &subdiv_cache,
+                                                const MeshRenderData &mr)
+{
+  const int loose_edges_num = subdiv_loose_edges_num(mr, subdiv_cache);
+  const int max_index = subdiv_full_vbo_size(mr, subdiv_cache);
+  const int lines_num = subdiv_cache.num_subdiv_edges + loose_edges_num;
+
+  GPUIndexBufBuilder builder;
+  GPU_indexbuf_init(&builder, GPU_PRIM_LINES, lines_num, max_index);
+  MutableSpan<uint2> data = GPU_indexbuf_get_data(&builder).cast<uint2>();
+  data.fill(uint2(gpu::RESTART_INDEX));
+
+  auto edge_visible = [&](const int edge) {
+    return mr.hide_edge.is_empty() || !mr.hide_edge[edge];
+  };
+
+  auto edge_marked = [&](const int edge) {
+    if (edge < 0 || edge >= mr.edges_num || !edge_visible(edge)) {
+      return false;
+    }
+    if (mr.extract_type == MeshExtractType::Mesh) {
+      const bke::AttributeAccessor attributes = mr.mesh->attributes();
+      const bke::AttributeReader<bool> freestyle_edge_attr = attributes.lookup<bool>(
+          "freestyle_edge", bke::AttrDomain::Edge);
+      if (!freestyle_edge_attr) {
+        return false;
+      }
+      const VArraySpan<bool> freestyle_edges(freestyle_edge_attr.varray);
+      return freestyle_edges[edge];
+    }
+
+    if (mr.freestyle_edge_ofs == -1) {
+      return false;
+    }
+    BMesh *bm = mr.bm;
+    const BMEdge *eed = BM_edge_at_index(bm, edge);
+    return !BM_elem_flag_test_bool(eed, BM_ELEM_HIDDEN) &&
+           BM_ELEM_CD_GET_BOOL(eed, mr.freestyle_edge_ofs);
+  };
+
+  const Span<int> subdiv_loop_edge_index = subdiv_cache.edges_orig_index->data<int>();
+  const Span<int> subdiv_loop_subdiv_edge_index(subdiv_cache.subdiv_loop_subdiv_edge_index,
+                                                subdiv_cache.num_subdiv_loops);
+  const int quads_num = subdiv_cache.num_subdiv_quads;
+  for (const int subdiv_quad_index : IndexRange(quads_num)) {
+    const IndexRange subdiv_face(subdiv_quad_index * 4, 4);
+    for (const int corner : subdiv_face) {
+      const int coarse_edge_index = subdiv_loop_edge_index[corner];
+      if (!edge_marked(coarse_edge_index)) {
+        continue;
+      }
+      const int subdiv_edge_index = subdiv_loop_subdiv_edge_index[corner];
+      data[subdiv_edge_index] = edge_from_corners(subdiv_face, corner);
+    }
+  }
+
+  const int edges_per_edge = subdiv_edges_per_coarse_edge(subdiv_cache);
+  const int loose_start = subdiv_cache.num_subdiv_loops;
+  const Span<int> loose_edges = mr.loose_edges;
+  for (const int loose_edge_index : loose_edges.index_range()) {
+    const int edge = loose_edges[loose_edge_index];
+    if (!edge_marked(edge)) {
+      continue;
+    }
+    const int line_start = subdiv_cache.num_subdiv_edges + loose_edge_index * edges_per_edge;
+    const int vertex_start = loose_start + loose_edge_index * edges_per_edge * 2;
+    for (const int i : IndexRange(edges_per_edge)) {
+      data[line_start + i] = uint2(vertex_start + i * 2, vertex_start + i * 2 + 1);
+    }
+  }
+
+  return gpu::IndexBufPtr(GPU_indexbuf_build_ex(&builder, 0, max_index, true));
 }
 
 }  // namespace blender::draw
