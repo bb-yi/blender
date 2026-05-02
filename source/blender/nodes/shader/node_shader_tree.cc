@@ -91,13 +91,8 @@ static void shader_get_from_context(const bContext *C,
     bNodeTree *world_nprtree = (scene->world != nullptr) ? npr_tree_get(scene->world->nodetree) :
                                                            nullptr;
     if (snode->shaderfrom == SNODE_SHADER_NPR && world_nprtree != nullptr) {
-      bNodeTree *object_nprtree = nullptr;
-      if (ob != nullptr && ob->type != OB_LAMP) {
-        object_nprtree = npr_tree_get_from_mat(BKE_object_material_get(ob, ob->actcol));
-      }
       const bool is_world_npr_context = snode->from == &scene->world->id ||
-                                        ELEM(snode->id, &scene->world->id, &world_nprtree->id) ||
-                                        object_nprtree == nullptr;
+                                        ELEM(snode->id, &scene->world->id, &world_nprtree->id);
       if (is_world_npr_context) {
         *r_from = &scene->world->id;
         *r_id = &world_nprtree->id;
