@@ -66,6 +66,21 @@ static Vector<GPUMaterial *> npr_and_probe_materials(const Material &material)
   return filtered;
 }
 
+static bool material_array_uses_outline_control(const MaterialArray &material_array,
+                                                Span<gpu::Batch *> mat_geom)
+{
+  for (const int i : material_array.materials.index_range()) {
+    if (i >= mat_geom.size() || mat_geom[i] == nullptr) {
+      continue;
+    }
+
+    if (material_array.materials[i].uses_outline_control) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /* -------------------------------------------------------------------- */
 /** \name Recalc
  *
@@ -154,7 +169,9 @@ void SyncModule::sync_mesh(Object *ob, ObjectHandle &ob_handle, const ObjectRef 
     return;
   }
 
-  inst_.outline.sync_object(ob, res_handle);
+  if (material_array_uses_outline_control(material_array, mat_geom)) {
+    inst_.outline.sync_object(ob, res_handle);
+  }
 
   bool is_alpha_blend = false;
   bool has_transparent_shadows = false;
