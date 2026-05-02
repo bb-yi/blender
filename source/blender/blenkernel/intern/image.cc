@@ -29,8 +29,10 @@
 #include "BLI_listbase.h"
 #include "BLI_path_utils.hh"
 #include "BLI_rect.h"
+#include "BLI_set.hh"
 #include "BLI_string.h"
 #include "BLI_string_utils.hh"
+#include "BLI_vector.hh"
 
 #include "CLG_log.h"
 
@@ -83,6 +85,8 @@
 #include "BKE_lib_id.hh"
 #include "BKE_library.hh"
 #include "BKE_main.hh"
+#include "BKE_main_invariants.hh"
+#include "BKE_material.hh"
 #include "BKE_node.hh"
 #include "BKE_node_legacy_types.hh"
 #include "BKE_node_runtime.hh"
@@ -108,6 +112,9 @@
 #include "DEG_depsgraph_query.hh"
 
 #include "DRW_engine.hh"
+
+#include "WM_api.hh"
+#include "WM_types.hh"
 
 #include "BLO_read_write.hh"
 
@@ -811,6 +818,100 @@ bool BKE_image_has_opengl_texture(Image *ima)
     }
   }
   return false;
+}
+
+static void image_tag_glsl_closure_users_changed(Main *bmain, Image *ima)
+{
+  if (bmain == nullptr || ima == nullptr) {
+    return;
+  }
+
+  Set<ID *> changed_ntree_ids;
+  Set<ID *> changed_owner_ids;
+  FOREACH_NODETREE_BEGIN (bmain, ntree, owner_id) {
+    bool tree_uses_image_to_closure = false;
+    for (bNode *node : ntree->all_nodes()) {
+      if (node->type_legacy == SH_NODE_IMAGE_TO_CLOSURE && node->id == &ima->id) {
+        BKE_ntree_update_tag_node_property(ntree, node);
+        tree_uses_image_to_closure = true;
+      }
+    }
+
+    if (tree_uses_image_to_closure) {
+      changed_ntree_ids.add(&ntree->id);
+    }
+    if (tree_uses_image_to_closure && owner_id != nullptr) {
+      changed_owner_ids.add(owner_id);
+    }
+  }
+  FOREACH_NODETREE_END;
+
+  if (changed_ntree_ids.is_empty()) {
+    return;
+  }
+
+  bool found_new_tree_user = true;
+  while (found_new_tree_user) {
+    found_new_tree_user = false;
+    FOREACH_NODETREE_BEGIN (bmain, ntree, owner_id) {
+      bool tree_uses_changed_group = false;
+      for (bNode *node : ntree->all_nodes()) {
+        if (node->id != nullptr && GS(node->id->name) == ID_NT &&
+            changed_ntree_ids.contains(node->id))
+        {
+          BKE_ntree_update_tag_node_property(ntree, node);
+          tree_uses_changed_group = true;
+        }
+      }
+
+      if (tree_uses_changed_group && changed_ntree_ids.add(&ntree->id)) {
+        found_new_tree_user = true;
+      }
+      if (tree_uses_changed_group && owner_id != nullptr) {
+        changed_owner_ids.add(owner_id);
+      }
+    }
+    FOREACH_NODETREE_END;
+  }
+
+  DEG_id_tag_update(&ima->id, ID_RECALC_SYNC_TO_EVAL);
+
+  for (ID *owner_id : changed_owner_ids) {
+    switch (GS(owner_id->name)) {
+      case ID_MA: {
+        Material *material = id_cast<Material *>(owner_id);
+        GPU_material_free(&material->gpumaterial);
+        DEG_id_tag_update(&material->id, ID_RECALC_SHADING | ID_RECALC_SYNC_TO_EVAL);
+        for (Object &object : bmain->objects) {
+          const short *materials_num = BKE_object_material_len_p(&object);
+          if (materials_num != nullptr && *materials_num > 0 &&
+              BKE_object_material_index_get(&object, material) != -1)
+          {
+            DEG_id_tag_update(&object.id, ID_RECALC_SHADING);
+          }
+        }
+        WM_main_add_notifier(NC_MATERIAL | ND_SHADING_DRAW, material);
+        break;
+      }
+      case ID_WO: {
+        World *world = id_cast<World *>(owner_id);
+        GPU_material_free(&world->gpumaterial);
+        DEG_id_tag_update(&world->id, ID_RECALC_SHADING | ID_RECALC_SYNC_TO_EVAL);
+        WM_main_add_notifier(NC_WORLD | ND_WORLD_DRAW, world);
+        break;
+      }
+      default:
+        DEG_id_tag_update(owner_id, ID_RECALC_SYNC_TO_EVAL);
+        break;
+    }
+  }
+
+  Vector<ID *> modified_ntree_ids;
+  modified_ntree_ids.reserve(changed_ntree_ids.size());
+  for (ID *ntree_id : changed_ntree_ids) {
+    modified_ntree_ids.append(ntree_id);
+  }
+  BKE_main_ensure_invariants(*bmain, modified_ntree_ids.as_span());
 }
 
 static int image_get_tile_number_from_iuser(const Image *ima, const ImageUser *iuser)
@@ -3322,6 +3423,10 @@ void BKE_image_signal(Main *bmain, Image *ima, ImageUser *iuser, int signal)
   /* NOTE: It is important that the image is unlocked before calling the node tree updates since
    * its update functions might need to acquire image buffers from this image. */
   ima->runtime->cache_mutex.unlock();
+
+  if (signal == IMA_SIGNAL_COLORMANAGE) {
+    image_tag_glsl_closure_users_changed(bmain, ima);
+  }
 
   BKE_ntree_update_tag_id_changed(bmain, &ima->id);
   BKE_ntree_update(*bmain);

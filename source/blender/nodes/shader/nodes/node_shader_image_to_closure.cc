@@ -30,7 +30,8 @@ static void node_layout(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
   layout.use_property_decorate_set(false);
   layout.prop(ptr, "image", ui::ITEM_R_SPLIT_EMPTY_NAME, "Image", ICON_NONE);
 
-  if (ptr->data_as<bNode>()->id == nullptr) {
+  bNode *node = ptr->data_as<bNode>();
+  if (node->id == nullptr) {
     ui::Layout &settings = layout.column(false);
     settings.enabled_set(false);
     settings.prop(ptr, "texture_type", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
@@ -50,6 +51,7 @@ static void node_layout(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
       layout.prop(ptr, "texture_depth", ui::ITEM_R_SPLIT_EMPTY_NAME, "Depth", ICON_NONE);
     }
   }
+  layout.prop(ptr, "colorspace", ui::ITEM_R_SPLIT_EMPTY_NAME, "Color Space", ICON_NONE);
   layout.prop(ptr, "interpolation", ui::ITEM_R_SPLIT_EMPTY_NAME, "Interpolation", ICON_NONE);
   layout.prop(ptr, "extension", ui::ITEM_R_SPLIT_EMPTY_NAME, "Extension", ICON_NONE);
 }

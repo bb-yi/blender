@@ -3711,6 +3711,61 @@ static void rna_ShaderNodeImageToClosure_extension_set(PointerRNA *ptr, int valu
   rna_ShaderNodeImageToClosure_storage_ensure(ptr)->extension = value;
 }
 
+static Image *rna_ShaderNodeImageToClosure_get_image_id(PointerRNA *ptr)
+{
+  const bNode *node = ptr->data_as<bNode>();
+  return id_cast<Image *>(node->id);
+}
+
+static int rna_ShaderNodeImageToClosure_colorspace_get(PointerRNA *ptr)
+{
+  const Image *image = rna_ShaderNodeImageToClosure_get_image_id(ptr);
+  if (image == nullptr) {
+    return -1;
+  }
+
+  return IMB_colormanagement_colorspace_get_named_index(image->colorspace_settings.name);
+}
+
+static void rna_ShaderNodeImageToClosure_colorspace_set(PointerRNA *ptr, int value)
+{
+  Image *image = rna_ShaderNodeImageToClosure_get_image_id(ptr);
+  const char *name = IMB_colormanagement_colorspace_get_indexed_name(value);
+
+  if (image && name && name[0]) {
+    STRNCPY_UTF8(image->colorspace_settings.name, name);
+  }
+}
+
+static const EnumPropertyItem *rna_ShaderNodeImageToClosure_colorspace_itemf(
+    bContext * /*C*/, PointerRNA * /*ptr*/, PropertyRNA * /*prop*/, bool *r_free)
+{
+  EnumPropertyItem *items = nullptr;
+  int totitem = 0;
+
+  IMB_colormanagement_colorspace_items_add(&items, &totitem);
+  RNA_enum_item_end(&items, &totitem);
+
+  *r_free = true;
+
+  return items;
+}
+
+static void rna_ShaderNodeImageToClosure_colorspace_update(Main *bmain,
+                                                           Scene * /*scene*/,
+                                                           PointerRNA *ptr)
+{
+  Image *image = rna_ShaderNodeImageToClosure_get_image_id(ptr);
+  if (image == nullptr) {
+    return;
+  }
+
+  BKE_image_signal(bmain, image, nullptr, IMA_SIGNAL_COLORMANAGE);
+
+  WM_main_add_notifier(NC_IMAGE | ND_DISPLAY, &image->id);
+  WM_main_add_notifier(NC_IMAGE | NA_EDITED, &image->id);
+}
+
 static void rna_ShaderNodeImageToClosure_settings_update(Main *bmain,
                                                          Scene * /*scene*/,
                                                          PointerRNA *ptr)
@@ -7757,6 +7812,18 @@ static void def_sh_image_to_closure(BlenderRNA * /*brna*/, StructRNA *srna)
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
   RNA_def_property_pointer_funcs(
       prop, nullptr, nullptr, nullptr, "rna_Image_no_renderresult_or_viewer_poll");
+
+  prop = RNA_def_property(srna, "colorspace", PROP_ENUM, PROP_NONE);
+  RNA_def_property_flag(prop, PROP_ENUM_NO_CONTEXT);
+  RNA_def_property_enum_items(prop, rna_enum_color_space_convert_default_items);
+  RNA_def_property_enum_funcs(prop,
+                              "rna_ShaderNodeImageToClosure_colorspace_get",
+                              "rna_ShaderNodeImageToClosure_colorspace_set",
+                              "rna_ShaderNodeImageToClosure_colorspace_itemf");
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_ui_text(prop, "Color Space", "Color space in the image file");
+  RNA_def_property_update(
+      prop, NC_NODE | NA_EDITED, "rna_ShaderNodeImageToClosure_colorspace_update");
 
   prop = RNA_def_property(srna, "texture_type", PROP_ENUM, PROP_NONE);
   RNA_def_property_enum_items(prop, texture_type_items);
