@@ -3551,7 +3551,7 @@ static bool rna_NodeGroup_node_tree_poll(PointerRNA *ptr, const PointerRNA value
   return bke::node_group_poll(ntree, ngroup, &disabled_hint);
 }
 
-static bool rna_ShaderNodeOutputMaterial_nprtree_valid(PointerRNA *ptr, bNodeTree *ngroup)
+static bool rna_ShaderNodeOutput_nprtree_valid(PointerRNA *ptr, bNodeTree *ngroup)
 {
   if (ngroup == nullptr) {
     return false;
@@ -3571,9 +3571,9 @@ static bool rna_ShaderNodeOutputMaterial_nprtree_valid(PointerRNA *ptr, bNodeTre
   return !ngroup->nodes_by_type("ShaderNodeNPR_Output").is_empty();
 }
 
-static void rna_ShaderNodeOutputMaterial_nprtree_set(PointerRNA *ptr,
-                                                     const PointerRNA value,
-                                                     ReportList * /*reports*/)
+static void rna_ShaderNodeOutput_nprtree_set(PointerRNA *ptr,
+                                             const PointerRNA value,
+                                             ReportList * /*reports*/)
 {
   bNode *node = ptr->data_as<bNode>();
   bNodeTree *ngroup = static_cast<bNodeTree *>(value.data);
@@ -3586,7 +3586,7 @@ static void rna_ShaderNodeOutputMaterial_nprtree_set(PointerRNA *ptr,
     return;
   }
 
-  if (!rna_ShaderNodeOutputMaterial_nprtree_valid(ptr, ngroup)) {
+  if (!rna_ShaderNodeOutput_nprtree_valid(ptr, ngroup)) {
     return;
   }
 
@@ -3597,9 +3597,9 @@ static void rna_ShaderNodeOutputMaterial_nprtree_set(PointerRNA *ptr,
   node->id = &ngroup->id;
 }
 
-static bool rna_ShaderNodeOutputMaterial_nprtree_poll(PointerRNA *ptr, const PointerRNA value)
+static bool rna_ShaderNodeOutput_nprtree_poll(PointerRNA *ptr, const PointerRNA value)
 {
-  return rna_ShaderNodeOutputMaterial_nprtree_valid(ptr, static_cast<bNodeTree *>(value.data));
+  return rna_ShaderNodeOutput_nprtree_valid(ptr, static_cast<bNodeTree *>(value.data));
 }
 
 static void rna_Node_scene_set(PointerRNA *ptr, PointerRNA value, ReportList * /*reports*/)
@@ -5683,12 +5683,12 @@ static void def_sh_output(BlenderRNA * /*brna*/, StructRNA *srna)
   RNA_def_property_pointer_funcs(
       prop,
       nullptr,
-      "rna_ShaderNodeOutputMaterial_nprtree_set",
+      "rna_ShaderNodeOutput_nprtree_set",
       nullptr,
-      "rna_ShaderNodeOutputMaterial_nprtree_poll");
+      "rna_ShaderNodeOutput_nprtree_poll");
   RNA_def_property_flag(prop, PROP_EDITABLE);
   RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
-  RNA_def_property_ui_text(prop, "NPR Tree", "Secondary NPR node tree attached to this material output");
+  RNA_def_property_ui_text(prop, "NPR Tree", "Secondary NPR node tree attached to this shader output");
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
 }
 

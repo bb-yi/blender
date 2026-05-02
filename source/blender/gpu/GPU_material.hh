@@ -158,6 +158,7 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
     uint64_t shader_uuid,
     bool compile_surface_graph,
     bool compile_npr_graph,
+    bool force_npr_graph,
     bool deferred_compilation,
     GPUCodegenCallbackFn callback,
     void *thunk,

@@ -25,6 +25,49 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_surf_world)
 #include "eevee_sampling_lib.glsl"
 #include "eevee_surf_lib.glsl"
 
+#define TEX_HANDLE_NULL 0u
+#define TEX_HANDLE_WORLD_COMBINED_COLOR 1u
+
+float4 g_world_combined_color;
+
+#ifdef NPR_SHADER
+void npr_input_impl(out TextureHandle combined_color,
+                    out TextureHandle diffuse_color,
+                    out TextureHandle diffuse_direct,
+                    out TextureHandle diffuse_indirect,
+                    out TextureHandle specular_color,
+                    out TextureHandle specular_direct,
+                    out TextureHandle specular_indirect,
+                    out TextureHandle position,
+                    out TextureHandle normal)
+{
+  combined_color = TextureHandle(TEX_HANDLE_WORLD_COMBINED_COLOR, 0);
+  diffuse_color = TEXTURE_HANDLE_DEFAULT;
+  diffuse_direct = TEXTURE_HANDLE_DEFAULT;
+  diffuse_indirect = TEXTURE_HANDLE_DEFAULT;
+  specular_color = TEXTURE_HANDLE_DEFAULT;
+  specular_direct = TEXTURE_HANDLE_DEFAULT;
+  specular_indirect = TEXTURE_HANDLE_DEFAULT;
+  position = TEXTURE_HANDLE_DEFAULT;
+  normal = TEXTURE_HANDLE_DEFAULT;
+}
+
+float4 TextureHandle_eval(TextureHandle tex, float2 offset, bool texel_offset)
+{
+  UNUSED_VARS(offset);
+  UNUSED_VARS(texel_offset);
+  if (tex.type == TEX_HANDLE_WORLD_COMBINED_COLOR) {
+    return g_world_combined_color;
+  }
+  return float4(0.0f);
+}
+
+float4 TextureHandle_eval(TextureHandle tex)
+{
+  return TextureHandle_eval(tex, float2(0.0f), false);
+}
+#endif
+
 float4 closure_to_rgba(Closure cl)
 {
   return float4(0.0f);
@@ -60,6 +103,11 @@ void main()
     float radiance_mix_factor = sphere_probe_roughness_to_mix_fac(world_background_blur);
     out_background.rgb = mix(out_background.rgb, radiance_sh, radiance_mix_factor);
   }
+
+#ifdef NPR_SHADER
+  g_world_combined_color = out_background;
+  out_background = nodetree_npr();
+#endif
 
   /* Output environment pass. */
 #ifdef MAT_RENDER_PASS_SUPPORT

@@ -147,6 +147,7 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
     uint64_t shader_uuid,
     bool compile_surface_graph,
     bool compile_npr_graph,
+    bool force_npr_graph,
     bool deferred_compilation,
     GPUCodegenCallbackFn callback,
     void *thunk,
@@ -189,7 +190,7 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
     ntreeGPUMaterialNodes(localtree, mat);
   }
   if (compile_npr_graph) {
-    if (!compile_surface_graph && npr_tree_get(ntree) != nullptr) {
+    if (force_npr_graph || (!compile_surface_graph && npr_tree_get(ntree) != nullptr)) {
       GPU_material_flag_set(mat, GPU_MATFLAG_NPR);
     }
     if (GPU_material_flag_get(mat, GPU_MATFLAG_NPR)) {

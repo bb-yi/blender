@@ -54,12 +54,14 @@
 #include "BKE_main_invariants.hh"
 #include "BKE_material.hh"
 #include "BKE_node.hh"
+#include "BKE_node_legacy_types.hh"
 #include "BKE_node_runtime.hh"
 #include "BKE_node_tree_update.hh"
 #include "BKE_npr.hh"
 #include "BKE_object.hh"
 #include "BKE_report.hh"
 #include "BKE_scene.hh"
+#include "BKE_screen.hh"
 #include "BKE_texture.h"
 #include "BKE_vfont.hh"
 #include "BKE_workspace.hh"
@@ -1029,6 +1031,71 @@ void WORLD_OT_new(wmOperatorType *ot)
 /** \name New NPR Tree Operator
  * \{ */
 
+static ARegion *node_editor_window_region_get(const bContext *C)
+{
+  if (ScrArea *area = CTX_wm_area(C)) {
+    return BKE_area_find_region_type(area, RGN_TYPE_WINDOW);
+  }
+  return nullptr;
+}
+
+static bNode *node_output_find_by_name(bNodeTree *ntree, const char *node_name)
+{
+  if (ntree == nullptr || node_name[0] == '\0') {
+    return nullptr;
+  }
+  for (bNode *node : ntree->all_nodes()) {
+    if (STREQ(node->name, node_name)) {
+      return node;
+    }
+  }
+  return nullptr;
+}
+
+static wmOperatorStatus npr_tree_edit_from_output_node(bContext *C,
+                                                       wmOperator *op,
+                                                       bNode *output,
+                                                       bNodeTree *tree)
+{
+  SpaceNode *snode = CTX_wm_space_node(C);
+  if (snode == nullptr || !ED_node_is_shader(snode)) {
+    BKE_report(op->reports, RPT_ERROR, "No active shader node editor");
+    return OPERATOR_CANCELLED;
+  }
+  if (output == nullptr) {
+    BKE_report(op->reports, RPT_ERROR, "No shader output node selected");
+    return OPERATOR_CANCELLED;
+  }
+  if (tree == nullptr) {
+    if (output->id == nullptr || GS(output->id->name) != ID_NT) {
+      BKE_report(op->reports, RPT_ERROR, "Shader output has no NPR tree");
+      return OPERATOR_CANCELLED;
+    }
+    tree = reinterpret_cast<bNodeTree *>(output->id);
+  }
+
+  ID *from = nullptr;
+  if (output->type_legacy == SH_NODE_OUTPUT_WORLD) {
+    Scene *scene = CTX_data_scene(C);
+    if (scene == nullptr || scene->world == nullptr) {
+      BKE_report(op->reports, RPT_ERROR, "Scene has no active world");
+      return OPERATOR_CANCELLED;
+    }
+    from = &scene->world->id;
+  }
+  else {
+    Object *object = CTX_data_active_object(C);
+    from = (object != nullptr) ? &object->id : snode->from;
+  }
+
+  snode->shaderfrom = SNODE_SHADER_NPR;
+  ED_node_tree_start(node_editor_window_region_get(C), snode, tree, &tree->id, from);
+
+  WM_event_add_notifier(C, NC_SPACE | ND_SPACE_NODE, nullptr);
+  WM_event_add_notifier(C, NC_NODE | ND_NODES, tree);
+  return OPERATOR_FINISHED;
+}
+
 static wmOperatorStatus new_npr_tree_exec(bContext *C, wmOperator *op)
 {
   Main *bmain = CTX_data_main(C);
@@ -1049,8 +1116,53 @@ static wmOperatorStatus new_npr_tree_exec(bContext *C, wmOperator *op)
     PointerRNA idptr = RNA_id_pointer_create(&tree->id);
     RNA_property_pointer_set(&ptr, prop, idptr, nullptr);
     RNA_property_update(C, &ptr, prop);
+
+    bNode *output = static_cast<bNode *>(ptr.data);
+    if (output != nullptr && output->type_legacy == SH_NODE_OUTPUT_WORLD) {
+      return npr_tree_edit_from_output_node(C, op, output, tree);
+    }
   }
   else {
+    SpaceNode *snode = CTX_wm_space_node(C);
+    Scene *scene = CTX_data_scene(C);
+    if (snode != nullptr && snode->shaderfrom == SNODE_SHADER_WORLD && scene != nullptr &&
+        scene->world != nullptr)
+    {
+      World *world = scene->world;
+      if (world->nodetree == nullptr) {
+        nodes::node_tree_shader_default(C, bmain, &world->id);
+      }
+      if (world->nodetree == nullptr) {
+        BKE_report(op->reports, RPT_ERROR, "World has no shader node tree");
+        return OPERATOR_CANCELLED;
+      }
+
+      bNode *output = ntreeShaderOutputNode(world->nodetree, SHD_OUTPUT_EEVEE);
+      if (output == nullptr) {
+        BKE_report(op->reports, RPT_ERROR, "World has no active Eevee world output");
+        return OPERATOR_CANCELLED;
+      }
+
+      if (output->id != nullptr && GS(output->id->name) == ID_NT) {
+        tree = reinterpret_cast<bNodeTree *>(output->id);
+      }
+      else {
+        tree = BKE_npr_tree_add(bmain, DATA_("NPR Tree"));
+        BKE_id_move_to_same_lib(*bmain, tree->id, world->id);
+
+        if (output->id != nullptr) {
+          id_us_min(output->id);
+        }
+        output->id = &tree->id;
+        id_us_plus(output->id);
+
+        BKE_ntree_update_tag_node_property(world->nodetree, output);
+        BKE_ntree_update_after_single_tree_change(*bmain, *world->nodetree);
+      }
+      WM_event_add_notifier(C, NC_WORLD | ND_WORLD, world);
+      return npr_tree_edit_from_output_node(C, op, output, tree);
+    }
+
     Object *object = CTX_data_active_object(C);
     if (object == nullptr) {
       BKE_report(op->reports, RPT_ERROR, "No active object to attach an NPR tree to");
@@ -1103,11 +1215,56 @@ void RENDER_OT_npr_new(wmOperatorType *ot)
 {
   ot->name = "New NPR Tree";
   ot->idname = "RENDER_OT_npr_new";
-  ot->description = "Add a new NPR shader tree to the active material output";
+  ot->description = "Add a new NPR shader tree to the active shader output";
 
   ot->exec = new_npr_tree_exec;
 
   ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO | OPTYPE_INTERNAL;
+}
+
+static wmOperatorStatus npr_tree_edit_exec(bContext *C, wmOperator *op)
+{
+  SpaceNode *snode = CTX_wm_space_node(C);
+  if (snode == nullptr || !ED_node_is_shader(snode)) {
+    BKE_report(op->reports, RPT_ERROR, "No active shader node editor");
+    return OPERATOR_CANCELLED;
+  }
+
+  bNodeTree *ntree = snode->edittree;
+  if (ntree == nullptr && snode->shaderfrom == SNODE_SHADER_WORLD) {
+    Scene *scene = CTX_data_scene(C);
+    ntree = (scene != nullptr && scene->world != nullptr) ? scene->world->nodetree : nullptr;
+  }
+
+  if (ntree == nullptr) {
+    BKE_report(op->reports, RPT_ERROR, "No active shader node tree");
+    return OPERATOR_CANCELLED;
+  }
+
+  char node_name[MAX_NAME];
+  RNA_string_get(op->ptr, "node_name", node_name);
+
+  bNode *output = node_output_find_by_name(ntree, node_name);
+  if (output == nullptr) {
+    output = bke::node_get_active(*ntree);
+  }
+
+  return npr_tree_edit_from_output_node(C, op, output, nullptr);
+}
+
+void RENDER_OT_npr_edit(wmOperatorType *ot)
+{
+  ot->name = "Edit NPR Tree";
+  ot->idname = "RENDER_OT_npr_edit";
+  ot->description = "Edit the NPR shader tree attached to this shader output";
+
+  ot->exec = npr_tree_edit_exec;
+
+  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO | OPTYPE_INTERNAL;
+
+  PropertyRNA *prop = RNA_def_string(
+      ot->srna, "node_name", nullptr, MAX_NAME, "Node Name", "Shader output node name");
+  RNA_def_property_flag(prop, PROP_SKIP_SAVE);
 }
 
 /** \} */

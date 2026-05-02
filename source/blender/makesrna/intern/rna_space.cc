@@ -8270,7 +8270,7 @@ static void rna_def_space_node(BlenderRNA *brna)
        "Line Style",
        "Edit shader nodes from Line Style"},
 #  endif
-      {SNODE_SHADER_NPR, "NPR", ICON_IMAGE, "NPR", "Edit NPR shader nodes from Object"},
+      {SNODE_SHADER_NPR, "NPR", ICON_IMAGE, "NPR", "Edit NPR shader nodes"},
       {0, nullptr, 0, nullptr, nullptr},
   };
 

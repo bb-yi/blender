@@ -88,6 +88,23 @@ static void shader_get_from_context(const bContext *C,
   Object *ob = BKE_view_layer_active_object_get(view_layer);
 
   if (ELEM(snode->shaderfrom, SNODE_SHADER_OBJECT, SNODE_SHADER_NPR)) {
+    bNodeTree *world_nprtree = (scene->world != nullptr) ? npr_tree_get(scene->world->nodetree) :
+                                                           nullptr;
+    if (snode->shaderfrom == SNODE_SHADER_NPR && world_nprtree != nullptr) {
+      bNodeTree *object_nprtree = nullptr;
+      if (ob != nullptr && ob->type != OB_LAMP) {
+        object_nprtree = npr_tree_get_from_mat(BKE_object_material_get(ob, ob->actcol));
+      }
+      const bool is_world_npr_context = snode->from == &scene->world->id ||
+                                        ELEM(snode->id, &scene->world->id, &world_nprtree->id) ||
+                                        object_nprtree == nullptr;
+      if (is_world_npr_context) {
+        *r_from = &scene->world->id;
+        *r_id = &world_nprtree->id;
+        *r_ntree = world_nprtree;
+        return;
+      }
+    }
     if (ob) {
       *r_from = &ob->id;
       if (ob->type == OB_LAMP) {

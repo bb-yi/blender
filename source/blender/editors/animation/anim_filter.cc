@@ -3339,6 +3339,14 @@ static size_t animdata_filter_ds_world(bAnimContext *ac,
       tmp_items += animdata_filter_ds_nodetree(
           ac, &tmp_data, reinterpret_cast<ID *>(wo), wo->nodetree, filter_mode);
     }
+
+    if (bNodeTree *npr_tree = npr_tree_get(wo->nodetree);
+        (npr_tree != nullptr) && (npr_tree != wo->nodetree) &&
+        !(ac->filters.flag & ADS_FILTER_NONTREE))
+    {
+      tmp_items += animdata_filter_ds_nodetree(
+          ac, &tmp_data, reinterpret_cast<ID *>(wo), npr_tree, filter_mode);
+    }
   }
   END_ANIMFILTER_SUBCHANNELS;
 

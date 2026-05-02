@@ -10,6 +10,18 @@ from bpy_extras.node_utils import find_node_input
 from bl_ui.space_properties import PropertiesAnimationMixin
 
 
+def world_npr_tree(world):
+    ntree = world.node_tree
+    if ntree is None:
+        return None
+
+    output = ntree.get_output_node('EEVEE')
+    if output is None:
+        return None
+
+    return getattr(output, "nprtree", None)
+
+
 class WorldButtonsPanel:
     bl_space_type = 'PROPERTIES'
     bl_region_type = 'WINDOW'
@@ -94,6 +106,11 @@ class WORLD_PT_animation(WorldButtonsPanel, PropertiesAnimationMixin, PropertyPa
             col = layout.column(align=True)
             col.label(text="Shader Node Tree")
             self.draw_action_and_slot_selector(context, col, node_tree)
+
+        if npr_tree := world_npr_tree(world):
+            col = layout.column(align=True)
+            col.label(text="NPR Tree Action")
+            self.draw_action_and_slot_selector(context, col, npr_tree)
 
 
 class WORLD_PT_custom_props(WorldButtonsPanel, PropertyPanel, Panel):

@@ -1278,6 +1278,9 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   if (use_shader_to_rgba) {
     info.define("MAT_SHADER_TO_RGBA");
   }
+  if (geometry_type == MAT_GEOM_WORLD && GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR)) {
+    info.define("NPR_SHADER");
+  }
 
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_RENDER_TEXTURE) &&
       pipeline_type == MAT_PIPE_DEFERRED_NPR)
@@ -1983,6 +1986,7 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
       shader_uuid,
       compile_surface_graph,
       compile_npr_graph,
+      false,
       deferred_compilation,
       codegen_callback,
       &thunk,
@@ -1996,7 +2000,16 @@ GPUMaterial *ShaderModule::world_shader_get(blender::World *blender_world,
                                             eMaterialPipeline pipeline_type,
                                             bool deferred_compilation)
 {
-  uint64_t shader_uuid = shader_uuid_from_material_type(pipeline_type, MAT_GEOM_WORLD);
+  const bool compile_npr_graph = pipeline_type == MAT_PIPE_DEFERRED &&
+                                 npr_tree_get(nodetree) != nullptr;
+  uint64_t shader_uuid = shader_uuid_from_material_type(pipeline_type,
+                                                        MAT_GEOM_WORLD,
+                                                        MAT_DISPLACEMENT_BUMP,
+                                                        MAT_THICKNESS_SPHERE,
+                                                        MAT_PROBE_NONE,
+                                                        0,
+                                                        true,
+                                                        compile_npr_graph);
 
   CallbackThunk thunk = {this, nullptr};
 
@@ -2008,7 +2021,8 @@ GPUMaterial *ShaderModule::world_shader_get(blender::World *blender_world,
       GPU_MAT_EEVEE,
       shader_uuid,
       true,
-      false,
+      compile_npr_graph,
+      compile_npr_graph,
       deferred_compilation,
       codegen_callback,
       &thunk);

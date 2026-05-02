@@ -418,7 +418,14 @@ static void node_buts_output_shader(ui::Layout &layout, bContext * /*C*/, Pointe
 static void node_buts_output_shader_with_npr(ui::Layout &layout, bContext *C, PointerRNA *ptr)
 {
   layout.prop(ptr, "target", DEFAULT_FLAGS, "", ICON_NONE);
-  template_id(&layout, C, ptr, "nprtree", "render.npr_new", nullptr, nullptr);
+  ui::Layout &row = layout.row(true);
+  template_id(&row, C, ptr, "nprtree", "render.npr_new", nullptr, nullptr);
+
+  bNode *node = static_cast<bNode *>(ptr->data);
+  if (node != nullptr && node->id != nullptr && GS(node->id->name) == ID_NT) {
+    PointerRNA op_ptr = row.op("RENDER_OT_npr_edit", std::nullopt, ICON_NODETREE);
+    RNA_string_set(&op_ptr, "node_name", node->name);
+  }
 }
 
 static void node_shader_buts_scatter(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
@@ -471,10 +478,10 @@ static void node_shader_set_butfunc(bke::bNodeType *ntype)
       ntype->draw_buttons = node_shader_buts_glossy;
       break;
     case SH_NODE_OUTPUT_MATERIAL:
+    case SH_NODE_OUTPUT_WORLD:
       ntype->draw_buttons = node_buts_output_shader_with_npr;
       break;
     case SH_NODE_OUTPUT_LIGHT:
-    case SH_NODE_OUTPUT_WORLD:
       ntype->draw_buttons = node_buts_output_shader;
       break;
     case SH_NODE_VOLUME_SCATTER:

@@ -166,11 +166,15 @@ void ED_node_tree_pop(ARegion *region, SpaceNode *snode)
   /* don't remove root */
   if (path == snode->treepath.first) {
     if (ED_node_is_shader(snode)) {
-      if (snode->shaderfrom == SNODE_SHADER_OBJECT && npr_tree_get(snode->nodetree) != nullptr) {
+      if (ELEM(snode->shaderfrom, SNODE_SHADER_OBJECT, SNODE_SHADER_WORLD) &&
+          npr_tree_get(snode->nodetree) != nullptr)
+      {
         snode->shaderfrom = SNODE_SHADER_NPR;
       }
       else if (snode->shaderfrom == SNODE_SHADER_NPR) {
-        snode->shaderfrom = SNODE_SHADER_OBJECT;
+        snode->shaderfrom = snode->from != nullptr && GS(snode->from->name) == ID_WO ?
+                                SNODE_SHADER_WORLD :
+                                SNODE_SHADER_OBJECT;
       }
     }
     return;
