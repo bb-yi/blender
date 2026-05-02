@@ -420,12 +420,6 @@ static void node_buts_output_shader_with_npr(ui::Layout &layout, bContext *C, Po
   layout.prop(ptr, "target", DEFAULT_FLAGS, "", ICON_NONE);
   ui::Layout &row = layout.row(true);
   template_id(&row, C, ptr, "nprtree", "render.npr_new", nullptr, nullptr);
-
-  bNode *node = static_cast<bNode *>(ptr->data);
-  if (node != nullptr && node->id != nullptr && GS(node->id->name) == ID_NT) {
-    PointerRNA op_ptr = row.op("RENDER_OT_npr_edit", std::nullopt, ICON_NODETREE);
-    RNA_string_set(&op_ptr, "node_name", node->name);
-  }
 }
 
 static void node_shader_buts_scatter(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)

@@ -32,7 +32,6 @@ void MATERIAL_OT_new(wmOperatorType *ot);
 void TEXTURE_OT_new(wmOperatorType *ot);
 void WORLD_OT_new(wmOperatorType *ot);
 void RENDER_OT_npr_new(wmOperatorType *ot);
-void RENDER_OT_npr_edit(wmOperatorType *ot);
 
 void MATERIAL_OT_copy(wmOperatorType *ot);
 void MATERIAL_OT_paste(wmOperatorType *ot);
