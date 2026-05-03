@@ -52,6 +52,9 @@
 #include <BulletCollision/Gimpact/btGImpactCollisionAlgorithm.h>
 #include <BulletCollision/Gimpact/btGImpactShape.h>
 
+using namespace std;
+
+
 struct rbDynamicsWorld {
   btDiscreteDynamicsWorld *dynamicsWorld;
   btDefaultCollisionConfiguration *collisionConfiguration;
@@ -59,10 +62,16 @@ struct rbDynamicsWorld {
   btBroadphaseInterface *pairCache;
   btConstraintSolver *constraintSolver;
   btOverlapFilterCallback *filterCallback;
+  int whitelist;
 };
 struct rbRigidBody {
   btRigidBody *body;
   int col_groups;
+  int col_group_idx;
+  int col_group_mask;
+  struct rbRigidBody **no_collision_bodies;
+  int no_collision_count;
+  int no_collision_capacity;
 };
 
 struct rbVert {
@@ -88,17 +97,51 @@ struct rbCollisionShape {
 };
 
 struct rbFilterCallback : public btOverlapFilterCallback {
+  int whitelist;
+  bool (*noCollisionCallback)(const rbRigidBody *, const rbRigidBody *);
+
+  rbFilterCallback(int whitelist_val) : whitelist(whitelist_val), noCollisionCallback(nullptr) {}
+
+  bool checkNoCollisionBodies(const rbRigidBody *rb0, const rbRigidBody *rb1) const
+  {
+    for (int i = 0; i < rb0->no_collision_count; i++) {
+      if (rb0->no_collision_bodies[i] == rb1) {
+        return true;
+      }
+    }
+    for (int i = 0; i < rb1->no_collision_count; i++) {
+      if (rb1->no_collision_bodies[i] == rb0) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   bool needBroadphaseCollision(btBroadphaseProxy *proxy0, btBroadphaseProxy *proxy1) const override
   {
     rbRigidBody *rb0 = (rbRigidBody *)((btRigidBody *)proxy0->m_clientObject)->getUserPointer();
     rbRigidBody *rb1 = (rbRigidBody *)((btRigidBody *)proxy1->m_clientObject)->getUserPointer();
 
+    /* 1. Highest priority: no_collision_objects - Disable multiple collisions */
+    if (checkNoCollisionBodies(rb0, rb1)) {
+      return false;
+    }
+
+    if (noCollisionCallback && noCollisionCallback(rb0, rb1)) {
+      return false;
+    }
+
+    /* 2. collision_collections system */
     bool collides;
     collides = (proxy0->m_collisionFilterGroup & proxy1->m_collisionFilterMask) != 0;
     collides = collides && (proxy1->m_collisionFilterGroup & proxy0->m_collisionFilterMask);
     collides = collides && (rb0->col_groups & rb1->col_groups);
-
-    return collides;
+    
+    /* Use col_group_whitelist to control the whitelist/blacklist mode for collision_collections. */
+    if (whitelist) {
+      return collides;
+    }
+    return !collides;
   }
 };
 
@@ -121,7 +164,7 @@ static inline void copy_quat_btquat(float quat[4], const btQuaternion &btquat)
 
 /* Setup ---------------------------- */
 
-rbDynamicsWorld *RB_dworld_new(const float gravity[3])
+rbDynamicsWorld *RB_dworld_new(const float gravity[3], int whitelist)
 {
   rbDynamicsWorld *world = new rbDynamicsWorld;
 
@@ -133,8 +176,12 @@ rbDynamicsWorld *RB_dworld_new(const float gravity[3])
 
   world->pairCache = new btDbvtBroadphase();
 
-  world->filterCallback = new rbFilterCallback();
+  world->whitelist = whitelist;
+  world->filterCallback = new rbFilterCallback(whitelist);
   world->pairCache->getOverlappingPairCache()->setOverlapFilterCallback(world->filterCallback);
+
+  rbFilterCallback *filterCallback = static_cast<rbFilterCallback *>(world->filterCallback);
+  filterCallback->noCollisionCallback = nullptr;
 
   /* constraint solving */
   world->constraintSolver = new btSequentialImpulseConstraintSolver();
@@ -158,6 +205,23 @@ void RB_dworld_delete(rbDynamicsWorld *world)
   delete world->collisionConfiguration;
   delete world->filterCallback;
   delete world;
+}
+
+void RB_dworld_set_whitelist_mode(rbDynamicsWorld *world, int whitelist)
+{
+  world->whitelist = whitelist;
+  if (world->filterCallback) {
+    rbFilterCallback *callback = static_cast<rbFilterCallback *>(world->filterCallback);
+    callback->whitelist = whitelist;
+  }
+}
+
+void RB_dworld_set_no_collision_callback(rbDynamicsWorld *world, bool (*callback)(const rbRigidBody *, const rbRigidBody *))
+{
+  if (world->filterCallback) {
+    rbFilterCallback *filterCallback = static_cast<rbFilterCallback *>(world->filterCallback);
+    filterCallback->noCollisionCallback = callback;
+  }
 }
 
 /* Settings ------------------------- */
@@ -328,6 +392,13 @@ rbRigidBody *RB_body_new(rbCollisionShape *shape, const float loc[3], const floa
 
   object->body->setUserPointer(object);
 
+  object->no_collision_bodies = nullptr;
+  object->no_collision_count = 0;
+  object->no_collision_capacity = 0;
+  
+  object->col_group_idx = 0;
+  object->col_group_mask = 0;
+
   return object;
 }
 
@@ -353,7 +424,48 @@ void RB_body_delete(rbRigidBody *object)
   }
 
   delete body;
+
+  /* free no_collision_bodies array */
+  delete[] object->no_collision_bodies;
+
   delete object;
+}
+
+void RB_body_add_no_collision_body(rbRigidBody *object, rbRigidBody *no_collision_body)
+{
+  for (int i = 0; i < object->no_collision_count; i++) {
+    if (object->no_collision_bodies[i] == no_collision_body) {
+      return;
+    }
+  }
+
+  if (object->no_collision_count >= object->no_collision_capacity) {
+    int new_capacity = object->no_collision_capacity == 0 ? 4 : object->no_collision_capacity * 2;
+    rbRigidBody **new_bodies = new rbRigidBody *[new_capacity];
+    for (int i = 0; i < object->no_collision_count; i++) {
+      new_bodies[i] = object->no_collision_bodies[i];
+    }
+    delete[] object->no_collision_bodies;
+    object->no_collision_bodies = new_bodies;
+    object->no_collision_capacity = new_capacity;
+  }
+
+  object->no_collision_bodies[object->no_collision_count++] = no_collision_body;
+}
+
+void RB_body_clear_no_collision_bodies(rbRigidBody *object)
+{
+  object->no_collision_count = 0;
+}
+
+void RB_body_set_col_group_idx(rbRigidBody *object, int idx)
+{
+  object->col_group_idx = idx;
+}
+
+void RB_body_set_col_group_mask(rbRigidBody *object, int mask)
+{
+  object->col_group_mask = mask;
 }
 
 /* Settings ------------------------- */

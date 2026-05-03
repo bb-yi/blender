@@ -443,6 +443,16 @@ static void object_foreach_id(ID *id, LibraryForeachIDData *data)
     }
   }
 
+  if (object->rigidbody_object) {
+    for (RigidBodyNoCollisionOb *nc = static_cast<RigidBodyNoCollisionOb *>(
+             object->rigidbody_object->no_collision_objects.first);
+         nc != nullptr;
+         nc = nc->next)
+    {
+      BKE_LIB_FOREACHID_PROCESS_IDSUPER(data, nc->ob, IDWALK_CB_USER);
+    }
+  }
+
   if (object->rigidbody_constraint) {
     BKE_LIB_FOREACHID_PROCESS_IDSUPER(
         data, object->rigidbody_constraint->ob1, IDWALK_CB_NEVER_SELF);
@@ -730,6 +740,9 @@ static void object_blend_write(BlendWriter *writer, ID *id, const void *id_addre
   if (ob->rigidbody_object) {
     /* TODO: if any extra data is added to handle duplis, will need separate function then */
     writer->write_struct(ob->rigidbody_object);
+    writer->write_struct_list_by_id(
+        dna::sdna_struct_id_get<RigidBodyNoCollisionOb>(),
+        &ob->rigidbody_object->no_collision_objects);
   }
   if (ob->rigidbody_constraint) {
     writer->write_struct(ob->rigidbody_constraint);
@@ -903,6 +916,7 @@ static void object_blend_read_data(BlendDataReader *reader, ID *id)
     RigidBodyOb *rbo = ob->rigidbody_object;
     /* Allocate runtime-only struct */
     rbo->shared = MEM_new<RigidBodyOb_Shared>("RigidBodyObShared");
+    BLO_read_struct_list(reader, RigidBodyNoCollisionOb, &rbo->no_collision_objects);
   }
   BLO_read_struct(reader, RigidBodyCon, &ob->rigidbody_constraint);
   if (ob->rigidbody_constraint) {

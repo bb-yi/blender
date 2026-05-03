@@ -2,10 +2,10 @@
 #
 # SPDX-License-Identifier: GPL-2.0-or-later
 
+import bpy
 from bpy.types import (
     Panel,
 )
-
 
 def rigid_body_warning(layout, text):
     row = layout.row(align=True)
@@ -220,7 +220,7 @@ class PHYSICS_PT_rigid_body_collisions_sensitivity(PHYSICS_PT_rigidbody_panel, P
 
 
 class PHYSICS_PT_rigid_body_collisions_collections(PHYSICS_PT_rigidbody_panel, Panel):
-    bl_label = "Collections"
+    bl_label = "Collision Collections"
     bl_parent_id = "PHYSICS_PT_rigid_body_collisions"
     bl_options = {'DEFAULT_CLOSED'}
     COMPAT_ENGINES = {
@@ -242,8 +242,83 @@ class PHYSICS_PT_rigid_body_collisions_collections(PHYSICS_PT_rigidbody_panel, P
         ob = context.object
         rbo = ob.rigid_body
 
-        layout.prop(rbo, "collision_collections", text="")
+        col = layout.column(align=True)
 
+        col.prop(context.scene.rigidbody_world, "col_group_whitelist", text="Whitelist mode")
+
+        c = col.row(align=True)
+        for i in range(5):
+            c.prop(rbo, "collision_collections", index=i, text=str(i), toggle=True)
+
+        c = col.row(align=True)
+        for i in range(5, 10):
+            c.prop(rbo, "collision_collections", index=i, text=str(i), toggle=True)
+
+        c = col.row(align=True)
+        for i in range(10, 15):
+            c.prop(rbo, "collision_collections", index=i, text=str(i), toggle=True)
+
+        c = col.row(align=True)
+        for i in range(15, 20):
+            c.prop(rbo, "collision_collections", index=i, text=str(i), toggle=True)
+
+class PHYSICS_PT_rigid_body_no_collision_objects(PHYSICS_PT_rigidbody_panel, Panel):
+    bl_label = "Disable Collision Collections"
+    bl_parent_id = "PHYSICS_PT_rigid_body_collisions"
+    bl_options = {'DEFAULT_CLOSED'}
+    COMPAT_ENGINES = {
+        'BLENDER_RENDER',
+        'BLENDER_EEVEE_NEXT',
+        'BLENDER_WORKBENCH',
+    }
+    @classmethod
+    def poll(cls, context):
+        obj = context.object
+        if obj.parent is not None and obj.parent.rigid_body is not None:
+            return False
+        return (obj and obj.rigid_body and (context.engine in cls.COMPAT_ENGINES))
+
+    def draw(self, context):
+        layout = self.layout
+
+        ob = context.object
+        rbo = ob.rigid_body
+
+        layout.prop(rbo, "col_group_idx", text="Collision Group")
+
+        layout.label(text="Collision Mask:")
+
+        col = layout.column(align=True)
+
+        c = col.row(align=True)
+        for i in range(5):
+            c.prop(rbo, "col_group_mask", index=i, text=str(i), toggle=True)
+
+        c = col.row(align=True)
+        for i in range(5, 10):
+            c.prop(rbo, "col_group_mask", index=i, text=str(i), toggle=True)
+
+        c = col.row(align=True)
+        for i in range(10, 15):
+            c.prop(rbo, "col_group_mask", index=i, text=str(i), toggle=True)
+
+        c = col.row(align=True)
+        for i in range(15, 20):
+            c.prop(rbo, "col_group_mask", index=i, text=str(i), toggle=True)
+
+        layout.operator("rigidbody.build_collision_mask")
+
+        layout.label(text="Disable Collision:")
+
+        row = layout.row(align=True)
+        row.enabled = not context.screen.is_animation_playing # Do not allow users to make changes while the animation is playing
+        row.template_list("PHYSICS_UL_no_collision_collection", "",
+        rbo, "no_collision_objects",
+        rbo, "no_collision_objects_index",)
+
+        col = row.column(align=True)
+        col.operator("rigidbody.add_no_collision_collection", text="", icon='ADD')
+        col.operator("rigidbody.remove_no_collision_collection", text="", icon='REMOVE')
 
 class PHYSICS_PT_rigid_body_dynamics(PHYSICS_PT_rigidbody_panel, Panel):
     bl_label = "Dynamics"
@@ -326,6 +401,10 @@ class PHYSICS_PT_rigid_body_dynamics_deactivation(PHYSICS_PT_rigidbody_panel, Pa
         col.prop(rbo, "deactivate_angular_velocity", text="Angular")
         # TODO: other parameters such as time?
 
+class PHYSICS_UL_no_collision_collection(bpy.types.UIList):
+
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        layout.prop(item, "rigid_body", text="Rigid Body")
 
 classes = (
     PHYSICS_PT_rigid_body,
@@ -336,8 +415,9 @@ classes = (
     PHYSICS_PT_rigid_body_collisions_collections,
     PHYSICS_PT_rigid_body_dynamics,
     PHYSICS_PT_rigid_body_dynamics_deactivation,
+    PHYSICS_UL_no_collision_collection,
+    PHYSICS_PT_rigid_body_no_collision_objects,
 )
-
 
 if __name__ == "__main__":  # only for live edit.
     from bpy.utils import register_class

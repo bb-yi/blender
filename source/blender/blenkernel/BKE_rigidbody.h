@@ -133,6 +133,12 @@ void BKE_rigidbody_validate_sim_world(struct Scene *scene,
                                       bool rebuild);
 
 /**
+ * Set whitelist mode for collision filtering.
+ * Only valid when physics world already exists.
+ */
+void BKE_rigidbody_world_set_whitelist_mode(struct RigidBodyWorld *rbw, int whitelist);
+
+/**
  * Helper function to calculate volume of rigid-body object.
  *
  * TODO: allow a parameter to specify method used to calculate this?

@@ -2896,6 +2896,10 @@ struct Scene {
   /** RigidBody simulation world+settings. */
   struct RigidBodyWorld *rigidbody_world = nullptr;
 
+  /** col_group_whitelist for rigid body system. */
+  char col_group_whitelist = 0;
+  char _pad9[7] = {};
+
   struct PreviewImage *preview = nullptr;
 
   /** ViewLayer, defined in DNA_layer_types.h */

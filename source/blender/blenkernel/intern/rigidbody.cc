@@ -173,6 +173,17 @@ void BKE_rigidbody_free_object(Object *ob, RigidBodyWorld *rbw)
     return;
   }
 
+  /* free no_collision_objects list */
+  for (RigidBodyNoCollisionOb *nc = static_cast<RigidBodyNoCollisionOb *>(
+           rbo->no_collision_objects.first);
+       nc != nullptr;)
+  {
+    RigidBodyNoCollisionOb *nc_next = nc->next;
+    MEM_delete(nc);
+    nc = nc_next;
+  }
+  BLI_listbase_clear(&rbo->no_collision_objects);
+
   /* free physics references */
   if (is_orig) {
     if (rbo->shared->physics_object) {
@@ -772,8 +783,28 @@ static void rigidbody_validate_sim_object(RigidBodyWorld *rbw, Object *ob, bool 
   }
 
   if (rbw && rbw->shared->runtime->physics_world && rbo->shared->physics_object) {
+    rbRigidBody *rb = static_cast<rbRigidBody *>(rbo->shared->physics_object);
+
+    RB_body_clear_no_collision_bodies(rb);
+    for (RigidBodyNoCollisionOb *nc = static_cast<RigidBodyNoCollisionOb *>(rbo->no_collision_objects.first);
+         nc;
+         nc = nc->next)
+    {
+      if (nc->ob == nullptr) {
+        continue;
+      }
+      if (nc->ob->rigidbody_object && nc->ob->rigidbody_object->shared->physics_object) {
+        rbRigidBody *rb_other = static_cast<rbRigidBody *>(nc->ob->rigidbody_object->shared->physics_object);
+        RB_body_add_no_collision_body(rb, rb_other);
+      }
+    }
+
+    /* Set collision group information */
+    RB_body_set_col_group_idx(rb, rbo->col_group_idx);
+    RB_body_set_col_group_mask(rb, rbo->col_group_mask);
+
     RB_dworld_add_body(rbw->shared->runtime->physics_world,
-                       static_cast<rbRigidBody *>(rbo->shared->physics_object),
+                       rb,
                        rbo->col_groups);
   }
 }
@@ -1115,12 +1146,19 @@ void BKE_rigidbody_validate_sim_world(Scene *scene, RigidBodyWorld *rbw, bool re
     if (rbw->shared->runtime->physics_world) {
       RB_dworld_delete(rbw->shared->runtime->physics_world);
     }
-    rbw->shared->runtime->physics_world = RB_dworld_new(scene->physics_settings.gravity);
+    rbw->shared->runtime->physics_world = RB_dworld_new(scene->physics_settings.gravity, rbw->col_group_whitelist);
   }
 
   RB_dworld_set_solver_iterations(rbw->shared->runtime->physics_world, rbw->num_solver_iterations);
   RB_dworld_set_split_impulse(rbw->shared->runtime->physics_world,
                               rbw->flag & RBW_FLAG_USE_SPLIT_IMPULSE);
+}
+
+void BKE_rigidbody_world_set_whitelist_mode(RigidBodyWorld *rbw, int whitelist)
+{
+  if (rbw && rbw->shared->runtime->physics_world) {
+    RB_dworld_set_whitelist_mode(rbw->shared->runtime->physics_world, whitelist);
+  }
 }
 
 /* ************************************** */
@@ -1154,6 +1192,7 @@ RigidBodyWorld *BKE_rigidbody_create_world(Scene *scene)
    * The blender default scene has a frame rate of 24, so take 10 sub-steps (24fps * 10). */
   rbw->substeps_per_frame = 10;
   rbw->num_solver_iterations = 10; /* 10 is bullet default */
+  rbw->col_group_whitelist = 0;
 
   rbw->shared->pointcache = BKE_ptcache_add(&(rbw->shared->ptcaches));
   rbw->shared->pointcache->step = 1;
@@ -1239,7 +1278,7 @@ RigidBodyOb *BKE_rigidbody_create_object(Scene *scene, Object *ob, short type)
   rbo->lin_damping = 0.04f;
   rbo->ang_damping = 0.1f;
 
-  rbo->col_groups = 1;
+  rbo->col_groups = 0;
 
   /* use triangle meshes for passive objects
    * use convex hulls for active objects since dynamic triangle meshes are very unstable
@@ -1716,6 +1755,33 @@ static void rigidbody_update_sim_ob(Depsgraph *depsgraph, Object *ob, RigidBodyO
   if (is_selected && (G.moving & G_TRANSFORM_OBJ)) {
     RB_body_set_kinematic_state(static_cast<rbRigidBody *>(rbo->shared->physics_object), true);
     RB_body_set_mass(static_cast<rbRigidBody *>(rbo->shared->physics_object), 0.0f);
+  }
+
+  RigidBodyWorld *rbw = static_cast<RigidBodyWorld *>(scene->rigidbody_world);
+  if (rbw && rbw->shared->runtime && rbw->shared->runtime->physics_world) {
+    rbRigidBody *rb = static_cast<rbRigidBody *>(rbo->shared->physics_object);
+    if (rb != nullptr) {
+      /* Update collision group */
+      RB_body_set_col_group_idx(rb, rbo->col_group_idx);
+      RB_body_set_col_group_mask(rb, rbo->col_group_mask);
+
+      /* Update the list of non-colliding objects */
+      RB_body_clear_no_collision_bodies(rb);
+      for (RigidBodyNoCollisionOb *nc = static_cast<RigidBodyNoCollisionOb *>(rbo->no_collision_objects.first);
+           nc;
+           nc = nc->next)
+      {
+        if (nc->ob == nullptr) {
+          continue;
+        }
+        if (nc->ob->rigidbody_object && nc->ob->rigidbody_object->shared && nc->ob->rigidbody_object->shared->physics_object) {
+          rbRigidBody *rb_other = static_cast<rbRigidBody *>(nc->ob->rigidbody_object->shared->physics_object);
+          if (rb_other != nullptr) {
+            RB_body_add_no_collision_body(rb, rb_other);
+          }
+        }
+      }
+    }
   }
 
   /* NOTE: no other settings need to be explicitly updated here,
@@ -2434,6 +2500,19 @@ static RigidBodyOb *rigidbody_copy_object(const Object *ob, const int flag)
 
     /* just duplicate the whole struct first (to catch all the settings) */
     rboN = MEM_dupalloc(ob->rigidbody_object);
+    /* Initialize the list base for the new object */
+    BLI_listbase_clear(&rboN->no_collision_objects);
+
+    /* Copy the no collision objects list */
+    for (RigidBodyNoCollisionOb *nc_orig = static_cast<RigidBodyNoCollisionOb *>(
+             ob->rigidbody_object->no_collision_objects.first);
+         nc_orig != nullptr;
+         nc_orig = nc_orig->next)
+    {
+      RigidBodyNoCollisionOb *nc_new = MEM_new_zeroed<RigidBodyNoCollisionOb>("RigidBodyNoCollisionOb");
+      nc_new->ob = nc_orig->ob;
+      BLI_addtail(&rboN->no_collision_objects, nc_new);
+    }
 
     if (is_orig) {
       /* This is a regular copy, and not an evaluated copy for depsgraph evaluation */

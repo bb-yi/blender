@@ -315,9 +315,94 @@ class ConnectRigidBodies(Operator):
             self.report({'WARNING'}, "No other objects selected")
             return {'CANCELLED'}
 
+# add no collision object to rigid body
+class AddNoCollisionCollectionToRigidBody(Operator):
+    """Add no collision object to rigid body"""
+    bl_idname = "rigidbody.add_no_collision_collection"
+    bl_label = "Add No Collision Object"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        ob = context.object
+        rbo = ob.rigid_body
+        if rbo:
+            # Get selected objects (excluding active object)
+            selected_objs = [obj for obj in context.selected_objects if obj != ob and obj.rigid_body]
+            if selected_objs:
+                # Add first selected object to no collision list
+                nc = rbo.no_collision_objects.add()
+                nc.rigid_body = selected_objs[0]
+
+        return {'FINISHED'}
+
+# remove no collision object from rigid body
+class RemoveNoCollisionCollectionFromRigidBody(Operator):
+    """Remove no collision object from rigid body"""
+    bl_idname = "rigidbody.remove_no_collision_collection"
+    bl_label = "Remove No Collision Object"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        ob = context.object
+        rbo = ob.rigid_body
+        if rbo:
+            index = rbo.no_collision_objects_index
+            if index >= 0 and index < len(rbo.no_collision_objects):
+                rbo.no_collision_objects.remove(index)
+                rbo.no_collision_objects_index = min(index, len(rbo.no_collision_objects) - 1)
+        return {'FINISHED'}
+
+# Select a mask
+class BuildCollisionMaskFromRigidBody(Operator):
+    """Selected Build collision mask from rigid body"""
+    bl_idname = "rigidbody.build_collision_mask"
+    bl_label = "Selected Build Collision Mask"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    # Is the animation playing
+    @classmethod
+    def poll(cls, context):
+        # If an animation is currently playing, the operation is disabled.
+        if context.screen and context.screen.is_animation_playing:
+            return False
+        return True
+
+    def execute(self, context):
+
+        # Selected rigid body objects
+        selected_objects = [obj for obj in context.selected_objects if obj.rigid_body]
+
+        # Clear - Use a loop to delete all elements
+        for obj in selected_objects:
+            nc_objects = obj.rigid_body.no_collision_objects
+            for i in range(len(nc_objects) - 1, -1, -1):
+                nc_objects.remove(i)
+
+        for obj in selected_objects:
+            for obj2 in selected_objects:
+                if obj != obj2: # Exclude oneself
+
+                    # Store the collision group mask
+                    mask = []
+                    for i, bit in enumerate(obj.rigid_body.col_group_mask):
+                        if bit:
+                            mask.append(i)
+
+                    for i in mask:
+                        if i == obj2.rigid_body.col_group_idx:
+
+                            item = obj.rigid_body.no_collision_objects.add()
+                            item.rigid_body = obj2
+
+        return {'FINISHED'}
+
+
 
 classes = (
     BakeToKeyframes,
     ConnectRigidBodies,
     CopyRigidbodySettings,
+    AddNoCollisionCollectionToRigidBody,
+    RemoveNoCollisionCollectionFromRigidBody,
+    BuildCollisionMaskFromRigidBody,
 )

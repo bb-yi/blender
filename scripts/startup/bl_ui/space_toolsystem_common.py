@@ -430,7 +430,10 @@ class ToolSelectPanelHelper:
 
     @classmethod
     def _tool_group_active_get_from_item(cls, item):
-        index = cls._tool_group_active.get(item[0].idname, 0)
+        tool_group_active = getattr(cls, '_tool_group_active', None)
+        if tool_group_active is None:
+            return 0
+        index = tool_group_active.get(item[0].idname, 0)
         # Can happen in the case a group is dynamic.
         #
         # NOTE(Campbell): that in this case it's possible the order could change too,
@@ -443,11 +446,14 @@ class ToolSelectPanelHelper:
 
     @classmethod
     def _tool_group_active_set_by_id(cls, context, idname_group, idname):
+        tool_group_active = getattr(cls, '_tool_group_active', None)
+        if tool_group_active is None:
+            return False
         item_group = cls._tool_get_group_by_id(context, idname_group, coerce=True)
         if item_group:
             for i, item in enumerate(item_group):
                 if item and item.idname == idname:
-                    cls._tool_group_active[item_group[0].idname] = i
+                    tool_group_active[item_group[0].idname] = i
                     return True
         return False
 
@@ -715,7 +721,9 @@ class ToolSelectPanelHelper:
 
                 if is_active:
                     # not ideal, write this every time :S
-                    cls._tool_group_active[item[0].idname] = index
+                    tool_group_active = getattr(cls, '_tool_group_active', None)
+                    if tool_group_active is not None:
+                        tool_group_active[item[0].idname] = index
                 else:
                     index = cls._tool_group_active_get_from_item(item)
 
@@ -1015,7 +1023,9 @@ def _activate_by_item(context, space_type, item, index, *, as_fallback=False):
         if index_new == -1:
             raise Exception("Fallback tool not found in group")
 
-        cls._tool_group_active[tool_fallback_id] = index_new
+        tool_group_active = getattr(cls, '_tool_group_active', None)
+        if tool_group_active is not None:
+            tool_group_active[tool_fallback_id] = index_new
 
         # Done, now get the current tool to replace the item & index.
         tool_active = ToolSelectPanelHelper._tool_active_from_context(context, space_type)
@@ -1131,7 +1141,9 @@ def activate_by_id_or_cycle(context, space_type, idname, *, offset=1, as_fallbac
 
     index_found = (tool_active.index + offset) % len(item_group)
 
-    cls._tool_group_active[item_group[0].idname] = index_found
+    tool_group_active = getattr(cls, '_tool_group_active', None)
+    if tool_group_active is not None:
+        tool_group_active[item_group[0].idname] = index_found
 
     item_found = item_group[index_found]
     _activate_by_item(context, space_type, item_found, index_found)

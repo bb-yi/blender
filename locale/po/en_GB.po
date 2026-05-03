@@ -123,6 +123,47 @@ msgid "F-Curves in this group"
 msgstr "F-Curves in this group"
 
 
+msgid "Collision Collections"
+msgstr "Collision Collections"
+
+
+msgid "Collision Group"
+msgstr "Collision Group"
+
+
+msgid "Collision Mask:"
+msgstr "Collision Mask:"
+
+
+msgctxt "Operator"
+msgid "Selected Build Collision Mask"
+msgstr "Selected Build Collision Mask"
+
+
+msgid "Non-Collision Distance Scale"
+msgstr "Non-Collision Distance Scale"
+
+
+msgid "The distance scale for creating extra non-collision constraints while building physics"
+msgstr "The distance scale for creating extra non-collision constraints while building physics"
+
+
+msgid "Selected Build collision mask from rigid body"
+msgstr "Selected Build collision mask from rigid body"
+
+
+msgid "Whitelist mode"
+msgstr "Whitelist Mode"
+
+
+msgid "Disable Collision Collections"
+msgstr "Disable Collision Collections"
+
+
+msgid "Disable Collision:"
+msgstr "Disable Collision:"
+
+
 msgid "Color Set"
 msgstr "Colour Set"
 

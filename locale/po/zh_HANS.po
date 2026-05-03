@@ -125,6 +125,47 @@ msgid "F-Curves in this group"
 msgstr "当前组中的函数曲线"
 
 
+msgid "Collision Collections"
+msgstr "碰撞集合"
+
+
+msgid "Collision Group"
+msgstr "碰撞组"
+
+
+msgid "Collision Mask:"
+msgstr "碰撞组遮罩："
+
+
+msgctxt "Operator"
+msgid "Selected Build Collision Mask"
+msgstr "从选择构建遮罩"
+
+
+msgid "Non-Collision Distance Scale"
+msgstr "非碰撞距离缩放"
+
+
+msgid "The distance scale for creating extra non-collision constraints while building physics"
+msgstr "构建物理时创建额外非碰撞约束的距离缩放"
+
+
+msgid "Selected Build collision mask from rigid body"
+msgstr "从刚体构建选择的碰撞遮罩"
+
+
+msgid "Whitelist mode"
+msgstr "白名单模式"
+
+
+msgid "Disable Collision Collections"
+msgstr "禁用碰撞集合"
+
+
+msgid "Disable Collision:"
+msgstr "禁用碰撞："
+
+
 msgid "Color Set"
 msgstr "配色集"
 

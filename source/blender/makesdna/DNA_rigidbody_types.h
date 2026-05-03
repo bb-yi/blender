@@ -29,6 +29,14 @@ enum eRigidBodyWorld_Flag {
   RBW_FLAG_USE_SPLIT_IMPULSE = (1 << 2),
 };
 
+/* ******************************** */
+/* RigidBody No Collision Object */
+
+typedef struct RigidBodyNoCollisionOb {
+  struct RigidBodyNoCollisionOb *next, *prev;
+  struct Object *ob;
+} RigidBodyNoCollisionOb;
+
 /** #RigidBodyOb.type */
 enum eRigidBodyOb_Type {
   /* active geometry participant in simulation. is directly controlled by sim */
@@ -187,7 +195,9 @@ struct RigidBodyWorld {
   /** Group containing objects to use for Rigid Body Constraints. */
   struct Collection *constraints = nullptr;
 
-  char _pad[4] = {};
+  /** col_group_whitelist for rigid body system. */
+  int col_group_whitelist;
+
   /** Last frame world was evaluated for (internal). */
   float ltime = 0;
 
@@ -245,9 +255,22 @@ struct RigidBodyOb {
   int flag = 0;
   /** Collision groups that determines which rigid bodies can collide with each other. */
   int col_groups = 0;
+
+  /** Custom collision group index for rigid body system. */
+  int col_group_idx;
+  /** Collision groups mask for rigid body system. */
+  int col_group_mask;
+
   /** (eRigidBody_MeshSource) mesh source for mesh based collision shapes. */
   short mesh_source = 0;
   char _pad[2] = {};
+
+  /** Index of active no collision object. */
+  int no_collision_objects_index;
+  char _pad3[4] = {};
+
+  /** List of objects that this rigid body should not collide with. */
+  ListBase no_collision_objects;
 
   /* Physics Parameters */
   /** How much object 'weighs' (i.e. absolute 'amount of stuff' it holds). */
@@ -276,6 +299,8 @@ struct RigidBodyOb {
   /** Rigid body position. */
   float pos[3] = {};
   char _pad1[4] = {};
+
+  char _pad2[16]; /* Reserved for future use. */
 
   /** This pointer is shared between all evaluated copies. */
   struct RigidBodyOb_Shared *shared = nullptr;
