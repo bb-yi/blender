@@ -2960,7 +2960,7 @@ static void image_walk_ntree_all_users(
       break;
     case NTREE_COMPOSIT:
       for (bNode *node : ntree->all_nodes()) {
-        if (node->id && node->type_legacy == CMP_NODE_IMAGE) {
+        if (node->id && node->type_legacy == CMP_NODE_IMAGE && node->storage != nullptr) {
           Image *ima = id_cast<Image *>(node->id);
           ImageUser *iuser = static_cast<ImageUser *>(node->storage);
           callback(ima, id, iuser, customdata);

@@ -318,7 +318,14 @@ CachedImage::CachedImage(Context &context,
   BKE_image_release_renderresult(nullptr, image, render_result);
 
   ImBuf *image_buffer = BKE_image_acquire_ibuf(image, &image_user_for_pass, nullptr);
+  if (!image_buffer) {
+    return;
+  }
   ImBuf *linear_image_buffer = compute_linear_buffer(image_buffer);
+  if (!linear_image_buffer) {
+    BKE_image_release_ibuf(image, image_buffer, nullptr);
+    return;
+  }
 
   this->populate_meta_data(image_buffer);
 
