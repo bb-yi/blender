@@ -3798,6 +3798,10 @@ static void rna_Node_image_layer_update(Main *bmain, Scene *scene, PointerRNA *p
     return;
   }
 
+  if (ima == nullptr || iuser == nullptr) {
+    return;
+  }
+
   BKE_image_multilayer_index(ima->rr, iuser);
   BKE_image_signal(bmain, ima, iuser, IMA_SIGNAL_SRC_CHANGE);
 

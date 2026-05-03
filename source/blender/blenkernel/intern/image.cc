@@ -2932,19 +2932,41 @@ static void image_walk_ntree_all_users(
     void *customdata,
     void callback(Image *ima, ID *iuser_id, ImageUser *iuser, void *customdata))
 {
+  auto node_image_user_get = [](bNode &node) -> ImageUser * {
+    if (node.storage == nullptr) {
+      return nullptr;
+    }
+
+    switch (node.type_legacy) {
+      case SH_NODE_TEX_IMAGE:
+        return &static_cast<NodeTexImage *>(node.storage)->iuser;
+      case SH_NODE_TEX_ENVIRONMENT:
+        return &static_cast<NodeTexEnvironment *>(node.storage)->iuser;
+      case TEX_NODE_IMAGE:
+      case CMP_NODE_IMAGE:
+        return static_cast<ImageUser *>(node.storage);
+      case CMP_NODE_CRYPTOMATTE:
+        return &static_cast<NodeCryptomatte *>(node.storage)->iuser;
+      default:
+        return nullptr;
+    }
+  };
+
   switch (ntree->type) {
     case NTREE_SHADER:
       for (bNode *node : ntree->all_nodes()) {
         if (node->id) {
           if (node->type_legacy == SH_NODE_TEX_IMAGE) {
-            NodeTexImage *tex = static_cast<NodeTexImage *>(node->storage);
             Image *ima = id_cast<Image *>(node->id);
-            callback(ima, id, &tex->iuser, customdata);
+            if (ImageUser *iuser = node_image_user_get(*node)) {
+              callback(ima, id, iuser, customdata);
+            }
           }
           if (node->type_legacy == SH_NODE_TEX_ENVIRONMENT) {
-            NodeTexImage *tex = static_cast<NodeTexImage *>(node->storage);
             Image *ima = id_cast<Image *>(node->id);
-            callback(ima, id, &tex->iuser, customdata);
+            if (ImageUser *iuser = node_image_user_get(*node)) {
+              callback(ima, id, iuser, customdata);
+            }
           }
         }
       }
@@ -2953,24 +2975,27 @@ static void image_walk_ntree_all_users(
       for (bNode *node : ntree->all_nodes()) {
         if (node->id && node->type_legacy == TEX_NODE_IMAGE) {
           Image *ima = id_cast<Image *>(node->id);
-          ImageUser *iuser = static_cast<ImageUser *>(node->storage);
-          callback(ima, id, iuser, customdata);
+          if (ImageUser *iuser = node_image_user_get(*node)) {
+            callback(ima, id, iuser, customdata);
+          }
         }
       }
       break;
     case NTREE_COMPOSIT:
       for (bNode *node : ntree->all_nodes()) {
-        if (node->id && node->type_legacy == CMP_NODE_IMAGE && node->storage != nullptr) {
+        if (node->id && node->type_legacy == CMP_NODE_IMAGE) {
           Image *ima = id_cast<Image *>(node->id);
-          ImageUser *iuser = static_cast<ImageUser *>(node->storage);
-          callback(ima, id, iuser, customdata);
+          if (ImageUser *iuser = node_image_user_get(*node)) {
+            callback(ima, id, iuser, customdata);
+          }
         }
         if (node->type_legacy == CMP_NODE_CRYPTOMATTE) {
           CMPNodeCryptomatteSource source = static_cast<CMPNodeCryptomatteSource>(node->custom1);
           if (source == CMP_NODE_CRYPTOMATTE_SOURCE_IMAGE) {
             Image *image = id_cast<Image *>(node->id);
-            ImageUser *image_user = &static_cast<NodeCryptomatte *>(node->storage)->iuser;
-            callback(image, id, image_user, customdata);
+            if (ImageUser *iuser = node_image_user_get(*node)) {
+              callback(image, id, iuser, customdata);
+            }
           }
         }
       }

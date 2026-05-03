@@ -66,6 +66,10 @@ bool operator==(const CachedImageKey &a, const CachedImageKey &b)
 static RenderLayer *get_render_layer(const RenderResult *render_result,
                                      const ImageUser &image_user)
 {
+  if (!render_result) {
+    return nullptr;
+  }
+
   const ListBaseT<RenderLayer> *layers = &render_result->layers;
   return static_cast<RenderLayer *>(BLI_findlink(layers, image_user.layer));
 }
@@ -175,6 +179,29 @@ static ImageUser compute_image_user_for_pass(const Context &context,
   return image_user_for_pass;
 }
 
+static const RenderPass *resolve_image_user_for_pass(const Context &context,
+                                                     const Image *image,
+                                                     const RenderResult *render_result,
+                                                     const ImageUser *image_user,
+                                                     const char *pass_name,
+                                                     ImageUser &r_image_user_for_pass)
+{
+  r_image_user_for_pass = compute_image_user_for_pass(
+      context, image, render_result, image_user, pass_name);
+
+  if (!BKE_image_is_multilayer(image)) {
+    return nullptr;
+  }
+
+  if (!render_result) {
+    r_image_user_for_pass.pass = -1;
+    return nullptr;
+  }
+
+  return BKE_image_multilayer_index(const_cast<RenderResult *>(render_result),
+                                    &r_image_user_for_pass);
+}
+
 /* The image buffer might be stored as an sRGB 8-bit image, while the compositor expects linear
  * float images, so compute a linear float buffer for the image buffer. This will also do linear
  * space conversion and alpha pre-multiplication as needed. We could store those images in sRGB GPU
@@ -195,6 +222,9 @@ static ImBuf *compute_linear_buffer(ImBuf *image_buffer)
    * after to retain important information like precision and alpha mode. */
   ImBuf *linear_image_buffer = IMB_allocImBuf(
       image_buffer->x, image_buffer->y, image_buffer->planes, 0);
+  if (!linear_image_buffer) {
+    return nullptr;
+  }
   linear_image_buffer->flags = image_buffer->flags;
 
   /* Assign the float buffer if it exists, as well as its number of channels. */
@@ -208,6 +238,10 @@ static ImBuf *compute_linear_buffer(ImBuf *image_buffer)
     IMB_assign_byte_buffer(
         linear_image_buffer, image_buffer->byte_buffer, IB_DO_NOT_TAKE_OWNERSHIP);
     IMB_float_from_byte(linear_image_buffer);
+    if (!linear_image_buffer->float_buffer.data) {
+      IMB_freeImBuf(linear_image_buffer);
+      return nullptr;
+    }
   }
 
   /* If the image buffer contained compressed data, assign them as well, but only if the color
@@ -299,17 +333,16 @@ CachedImage::CachedImage(Context &context,
 
   RenderResult *render_result = BKE_image_acquire_renderresult(nullptr, image);
 
-  ImageUser image_user_for_pass = compute_image_user_for_pass(
-      context, image, render_result, image_user, pass_name);
+  ImageUser image_user_for_pass;
+  const RenderPass *render_pass = resolve_image_user_for_pass(
+      context, image, render_result, image_user, pass_name, image_user_for_pass);
 
-  /* Pass or layer were not found. */
-  if (BKE_image_is_multilayer(image) && image_user_for_pass.pass == -1) {
+  if (BKE_image_is_multilayer(image) && render_pass == nullptr) {
     BKE_image_release_renderresult(nullptr, image, render_result);
     return;
   }
 
-  if (BKE_image_is_multilayer(image)) {
-    const RenderPass *render_pass = get_render_pass(render_result, image_user_for_pass);
+  if (render_pass != nullptr) {
     this->result.set_type(get_pass_type(render_pass));
   }
 

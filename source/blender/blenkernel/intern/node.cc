@@ -1890,31 +1890,41 @@ static void node_blend_read_data_storage(BlendDataReader *reader, bNodeTree *ntr
     }
     case SH_NODE_TEX_IMAGE: {
       NodeTexImage *tex = static_cast<NodeTexImage *>(node->storage);
-      tex->iuser.scene = nullptr;
+      if (tex != nullptr) {
+        tex->iuser.scene = nullptr;
+      }
       break;
     }
     case SH_NODE_TEX_ENVIRONMENT: {
       NodeTexEnvironment *tex = static_cast<NodeTexEnvironment *>(node->storage);
-      tex->iuser.scene = nullptr;
+      if (tex != nullptr) {
+        tex->iuser.scene = nullptr;
+      }
       break;
     }
     case CMP_NODE_IMAGE:
     case CMP_NODE_VIEWER: {
       ImageUser *iuser = static_cast<ImageUser *>(node->storage);
-      iuser->scene = nullptr;
+      if (iuser != nullptr) {
+        iuser->scene = nullptr;
+      }
       break;
     }
     case CMP_NODE_CRYPTOMATTE_LEGACY:
     case CMP_NODE_CRYPTOMATTE: {
       NodeCryptomatte *nc = static_cast<NodeCryptomatte *>(node->storage);
-      BLO_read_string(reader, &nc->matte_id);
-      BLO_read_struct_list(reader, CryptomatteEntry, &nc->entries);
-      BLI_listbase_clear(&nc->runtime.layers);
+      if (nc != nullptr) {
+        BLO_read_string(reader, &nc->matte_id);
+        BLO_read_struct_list(reader, CryptomatteEntry, &nc->entries);
+        BLI_listbase_clear(&nc->runtime.layers);
+      }
       break;
     }
     case TEX_NODE_IMAGE: {
       ImageUser *iuser = static_cast<ImageUser *>(node->storage);
-      iuser->scene = nullptr;
+      if (iuser != nullptr) {
+        iuser->scene = nullptr;
+      }
       break;
     }
     default:

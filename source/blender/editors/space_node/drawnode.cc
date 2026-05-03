@@ -400,6 +400,55 @@ static void node_shader_buts_tex_environment_ex(ui::Layout &layout, bContext *C,
   layout.prop(ptr, "projection", DEFAULT_FLAGS, IFACE_("Projection"), ICON_NONE);
 }
 
+static void node_shader_buts_image_to_closure(ui::Layout &layout, bContext *C, PointerRNA *ptr)
+{
+  PointerRNA imaptr = RNA_pointer_get(ptr, "image");
+  template_id(&layout, C, ptr, "image", "IMAGE_OT_new", "IMAGE_OT_open", nullptr);
+
+  if (!imaptr.data) {
+    ui::Layout &settings = layout.column(false);
+    settings.enabled_set(false);
+    settings.prop(ptr, "texture_type", DEFAULT_FLAGS, std::nullopt, ICON_NONE);
+    settings.prop(ptr, "interpolation", DEFAULT_FLAGS, std::nullopt, ICON_NONE);
+    settings.prop(ptr, "extension", DEFAULT_FLAGS, std::nullopt, ICON_NONE);
+    return;
+  }
+
+  layout.prop(ptr, "texture_type", DEFAULT_FLAGS, IFACE_("Texture Type"), ICON_NONE);
+  if (RNA_enum_get(ptr, "texture_type") == IMA_IMAGE_TO_CLOSURE_TEXTURE_3D_LUT_STRIP) {
+    layout.prop(ptr, "texture_size_mode", DEFAULT_FLAGS, IFACE_("Size Mode"), ICON_NONE);
+    if (RNA_enum_get(ptr, "texture_size_mode") == IMA_IMAGE_TO_CLOSURE_3D_LUT_SIZE_MANUAL) {
+      layout.prop(ptr, "texture_width", DEFAULT_FLAGS, IFACE_("Width"), ICON_NONE);
+      layout.prop(ptr, "texture_height", DEFAULT_FLAGS, IFACE_("Height"), ICON_NONE);
+      layout.prop(ptr, "texture_depth", DEFAULT_FLAGS, IFACE_("Depth"), ICON_NONE);
+    }
+  }
+
+  if (imaptr.data) {
+    Image *image = static_cast<Image *>(imaptr.data);
+    PointerRNA colorspace_settings_ptr = RNA_pointer_get(&imaptr, "colorspace_settings");
+    ui::Layout &split = layout.split(0.33f, true);
+    split.label(IFACE_("Color Space"), ICON_NONE);
+    split.prop(&colorspace_settings_ptr, "name", DEFAULT_FLAGS, "", ICON_NONE);
+
+    if (BKE_image_is_dirty(image)) {
+      split.enabled_set(false);
+    }
+
+    if (image->source != IMA_SRC_GENERATED) {
+      ui::Layout &split_2 = layout.split(0.33f, true);
+      split_2.label(IFACE_("Alpha"), ICON_NONE);
+      split_2.prop(&imaptr, "alpha_mode", DEFAULT_FLAGS, "", ICON_NONE);
+
+      const bool is_data = IMB_colormanagement_space_name_is_data(
+          image->colorspace_settings.name);
+      split_2.active_set(!is_data);
+    }
+  }
+  layout.prop(ptr, "interpolation", DEFAULT_FLAGS, "", ICON_NONE);
+  layout.prop(ptr, "extension", DEFAULT_FLAGS, "", ICON_NONE);
+}
+
 static void node_shader_buts_displacement(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
 {
   layout.prop(ptr, "space", DEFAULT_FLAGS, "", ICON_NONE);
@@ -463,6 +512,9 @@ static void node_shader_set_butfunc(bke::bNodeType *ntype)
     case SH_NODE_TEX_ENVIRONMENT:
       ntype->draw_buttons = node_shader_buts_tex_environment;
       ntype->draw_buttons_ex = node_shader_buts_tex_environment_ex;
+      break;
+    case SH_NODE_IMAGE_TO_CLOSURE:
+      ntype->draw_buttons = node_shader_buts_image_to_closure;
       break;
     case SH_NODE_DISPLACEMENT:
     case SH_NODE_VECTOR_DISPLACEMENT:
@@ -599,13 +651,15 @@ static void node_composit_buts_cryptomatte(ui::Layout &layout, bContext *C, Poin
     template_id(&col, C, ptr, "image", nullptr, "IMAGE_OT_open", nullptr);
 
     NodeCryptomatte *crypto = static_cast<NodeCryptomatte *>(node->storage);
-    PointerRNA imaptr = RNA_pointer_get(ptr, "image");
-    PointerRNA iuserptr = RNA_pointer_create_discrete(
-        ptr->owner_id, RNA_ImageUser, &crypto->iuser);
-    layout.context_ptr_set("image_user", &iuserptr);
+    if (crypto != nullptr) {
+      PointerRNA imaptr = RNA_pointer_get(ptr, "image");
+      PointerRNA iuserptr = RNA_pointer_create_discrete(
+          ptr->owner_id, RNA_ImageUser, &crypto->iuser);
+      layout.context_ptr_set("image_user", &iuserptr);
 
-    node_buts_image_user(col, C, ptr, &imaptr, &iuserptr, false, false);
-    node_buts_image_views(col, C, ptr, &imaptr);
+      node_buts_image_user(col, C, ptr, &imaptr, &iuserptr, false, false);
+      node_buts_image_views(col, C, ptr, &imaptr);
+    }
   }
 
   ui::Layout &col_2 = layout.column(true);
