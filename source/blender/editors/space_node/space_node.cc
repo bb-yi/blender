@@ -1009,12 +1009,14 @@ static bool node_group_drop_poll(bContext *C, wmDrag *drag, const wmEvent * /*ev
 static ID *node_group_drag_id_get_or_import(bContext *C, wmDrag *drag)
 {
   if (drag->type == WM_DRAG_ASSET) {
-    SpaceNode *snode = CTX_wm_space_node(C);
     wmDragAsset *asset_data = WM_drag_get_asset_data(drag, ID_NT);
-    if (snode && asset_data && node_group_asset_import_method(*snode) == ASSET_IMPORT_APPEND_REUSE)
-    {
-      return asset::asset_local_id_ensure_imported(
-          *CTX_data_main(C), *asset_data->asset, 0, ASSET_IMPORT_APPEND_REUSE);
+    if (asset_data) {
+      if (const std::optional<eAssetImportMethod> import_method =
+              node_group_asset_import_method(*asset_data->asset))
+      {
+        return asset::asset_local_id_ensure_imported(
+            *CTX_data_main(C), *asset_data->asset, 0, *import_method);
+      }
     }
   }
 

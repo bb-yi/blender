@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include <optional>
+
 #include "BLI_compute_context.hh"
 #include "BLI_enum_flags.hh"
 #include "BLI_vector.hh"
@@ -41,6 +43,9 @@ extern const char *node_context_dir[];
 
 namespace ed::asset {
 struct AssetItemTree;
+}
+namespace asset_system {
+class AssetRepresentation;
 }
 
 /**
@@ -435,7 +440,8 @@ void draw_nodespace_back_pix(const bContext &C,
 
 bNode *add_node(const bContext &C, StringRef idname, const float2 &location);
 bNode *add_static_node(const bContext &C, int type, const float2 &location);
-eAssetImportMethod node_group_asset_import_method(const SpaceNode &snode);
+std::optional<eAssetImportMethod> node_group_asset_import_method(
+    const asset_system::AssetRepresentation &asset);
 
 void NODE_OT_add_reroute(wmOperatorType *ot);
 void NODE_OT_add_group(wmOperatorType *ot);

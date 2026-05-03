@@ -8,6 +8,7 @@
 
 #include <numeric>
 
+#include "AS_asset_library.hh"
 #include "AS_asset_representation.hh"
 
 #include "MEM_guardedalloc.h"
@@ -77,34 +78,26 @@ namespace blender::ed::space_node {
 /** \name Utilities
  * \{ */
 
-static bool is_npr_root_tree(const bNodeTree &node_tree)
+static bool is_builtin_npr_group_asset(const asset_system::AssetRepresentation &asset)
 {
-  for (const bNode *node = static_cast<const bNode *>(node_tree.nodes.first); node != nullptr;
-       node = node->next)
-  {
-    if (STREQ(node->idname, "ShaderNodeNPR_Output")) {
-      return true;
-    }
-  }
-  return false;
-}
-
-static bool node_space_uses_npr_tree(const SpaceNode &snode)
-{
-  SpaceNode &mutable_snode = const_cast<SpaceNode &>(snode);
-  if (!ED_node_is_shader(&mutable_snode)) {
+  if (asset.owner_asset_library().library_type() != ASSET_LIBRARY_ESSENTIALS) {
     return false;
   }
-  if (snode.shaderfrom == SNODE_SHADER_NPR) {
-    return true;
-  }
-  const bNodeTree *root_tree = snode.nodetree ? snode.nodetree : snode.edittree;
-  return root_tree != nullptr && is_npr_root_tree(*root_tree);
+
+  static const asset_system::CatalogID npr_groups_catalog_id(
+      "ee51ee5f-d28f-4de4-8881-54dbd865436e");
+  return asset.get_metadata().catalog_id == npr_groups_catalog_id;
 }
 
-eAssetImportMethod node_group_asset_import_method(const SpaceNode &snode)
+std::optional<eAssetImportMethod> node_group_asset_import_method(
+    const asset_system::AssetRepresentation &asset)
 {
-  return node_space_uses_npr_tree(snode) ? ASSET_IMPORT_APPEND_REUSE : ASSET_IMPORT_APPEND;
+  /* Keep the built-in NPR group bundle reusable, but do not override import behavior for other
+   * asset libraries. This preserves Link libraries and avoids appending duplicate `.001` groups. */
+  if (is_builtin_npr_group_asset(asset)) {
+    return ASSET_IMPORT_APPEND_REUSE;
+  }
+  return std::nullopt;
 }
 
 static void position_node_based_on_mouse(bNode &node, const float2 &location)
@@ -508,10 +501,8 @@ static bool add_node_group_asset(const bContext &C,
   SpaceNode &snode = *CTX_wm_space_node(&C);
   bNodeTree &edit_tree = *snode.edittree;
 
-  /* NPR tree group assets should reuse the first imported datablock so repeated adds keep
-   * referencing the same editable node group. Other node editors still append a fresh copy. */
   bNodeTree *node_group = reinterpret_cast<bNodeTree *>(asset::asset_local_id_ensure_imported(
-      bmain, asset, 0, node_group_asset_import_method(snode)));
+      bmain, asset, 0, node_group_asset_import_method(asset)));
   if (!node_group) {
     return false;
   }
@@ -600,7 +591,7 @@ static wmOperatorStatus node_swap_group_asset_invoke(bContext *C,
   }
   bNodeTree *node_group = reinterpret_cast<bNodeTree *>(
       asset::asset_local_id_ensure_imported(
-          bmain, *asset, 0, node_group_asset_import_method(snode)));
+          bmain, *asset, 0, node_group_asset_import_method(*asset)));
   if (!node_group) {
     return OPERATOR_CANCELLED;
   }

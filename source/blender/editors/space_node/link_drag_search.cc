@@ -6,7 +6,6 @@
 #include "AS_asset_representation.hh"
 
 #include "BLI_listbase.h"
-#include "BLI_string.h"
 #include "BLI_string_utf8.h"
 
 #include "DNA_space_types.h"
@@ -46,12 +45,6 @@ namespace blender {
 using nodes::SocketLinkOperation;
 
 namespace ed::space_node {
-
-static eAssetImportMethod node_group_asset_import_method(const bContext &C)
-{
-  const SpaceNode *snode = CTX_wm_space_node(&C);
-  return snode != nullptr ? node_group_asset_import_method(*snode) : ASSET_IMPORT_APPEND;
-}
 
 struct LinkDragSearchStorage {
   bNode &from_node;
@@ -218,10 +211,8 @@ static void search_link_ops_for_asset_metadata(const bNodeTree &node_tree,
          [&asset, &socket_property, in_out](nodes::LinkSearchOpParams &params) {
            Main &bmain = *CTX_data_main(&params.C);
 
-           /* Match add-menu behavior: NPR tree assets reuse their local datablock, while other
-            * node editors still append a fresh editable copy. */
            bNodeTree *group = reinterpret_cast<bNodeTree *>(asset::asset_local_id_ensure_imported(
-               bmain, asset, 0, node_group_asset_import_method(params.C)));
+               bmain, asset, 0, node_group_asset_import_method(asset)));
            if (!group) {
              return;
            }
