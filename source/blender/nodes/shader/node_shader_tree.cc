@@ -92,7 +92,8 @@ static void shader_get_from_context(const bContext *C,
                                                            nullptr;
     if (snode->shaderfrom == SNODE_SHADER_NPR && world_nprtree != nullptr) {
       const bool is_world_npr_context = snode->from == &scene->world->id ||
-                                        ELEM(snode->id, &scene->world->id, &world_nprtree->id);
+                                        ELEM(snode->id, &scene->world->id, &world_nprtree->id) ||
+                                        snode->nodetree == scene->world->nodetree;
       if (is_world_npr_context) {
         *r_from = &scene->world->id;
         *r_id = &world_nprtree->id;
