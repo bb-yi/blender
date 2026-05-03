@@ -85,6 +85,16 @@ static bool node_group_operator_active_poll(bContext *C)
   return false;
 }
 
+static bool node_group_edit_poll(bContext *C)
+{
+  if (node_group_operator_active_poll(C)) {
+    return true;
+  }
+
+  SpaceNode *snode = CTX_wm_space_node(C);
+  return snode != nullptr && ED_node_is_shader(snode) && snode->shaderfrom == SNODE_SHADER_NPR;
+}
+
 static bool node_group_operator_editable(bContext *C)
 {
   if (ED_operator_node_editable(C)) {
@@ -131,6 +141,9 @@ StringRef node_group_idname(const bContext *C)
 static bNode *node_group_get_active(bContext *C, const StringRef node_idname)
 {
   SpaceNode *snode = CTX_wm_space_node(C);
+  if (snode->edittree == nullptr) {
+    return nullptr;
+  }
   bNode *node = bke::node_get_active(*snode->edittree);
 
   if (node && node->idname == node_idname) {
@@ -153,6 +166,16 @@ static wmOperatorStatus node_group_edit_exec(bContext *C, wmOperator *op)
   const bool exit = RNA_boolean_get(op->ptr, "exit");
 
   ED_preview_kill_jobs(CTX_wm_manager(C), CTX_data_main(C));
+
+  if (snode->edittree == nullptr) {
+    if (exit && ED_node_is_shader(snode) && snode->shaderfrom == SNODE_SHADER_NPR) {
+      ED_node_tree_pop(region, snode);
+      WM_event_add_notifier(C, NC_SCENE | ND_NODES, nullptr);
+      WM_event_add_notifier(C, NC_NODE | ND_NODE_GIZMO, nullptr);
+      return OPERATOR_FINISHED;
+    }
+    return OPERATOR_CANCELLED;
+  }
 
   bNode *gnode = node_group_get_active(C, node_idname);
 
@@ -182,7 +205,7 @@ void NODE_OT_group_edit(wmOperatorType *ot)
 
   /* API callbacks. */
   ot->exec = node_group_edit_exec;
-  ot->poll = node_group_operator_active_poll;
+  ot->poll = node_group_edit_poll;
 
   /* flags */
   ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
