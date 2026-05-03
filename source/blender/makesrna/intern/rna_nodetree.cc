@@ -3721,7 +3721,8 @@ static int rna_ShaderNodeImageToClosure_colorspace_get(PointerRNA *ptr)
 {
   const Image *image = rna_ShaderNodeImageToClosure_get_image_id(ptr);
   if (image == nullptr) {
-    return -1;
+    return IMB_colormanagement_colorspace_get_named_index(
+        IMB_colormanagement_role_colorspace_name_get(COLOR_ROLE_DEFAULT_BYTE));
   }
 
   return IMB_colormanagement_colorspace_get_named_index(image->colorspace_settings.name);
