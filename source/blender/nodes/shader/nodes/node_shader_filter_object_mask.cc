@@ -9,7 +9,6 @@
 #include "node_shader_util.hh"
 
 #include "BKE_collection.hh"
-#include "BKE_context.hh"
 #include "BKE_lib_id.hh"
 
 #include "DNA_collection_types.h"
@@ -31,7 +30,6 @@
 #include "NOD_socket_items.hh"
 #include "NOD_socket_items_blend.hh"
 #include "NOD_socket_items_ops.hh"
-
 namespace blender {
 
 namespace nodes::node_shader_filter_object_mask_cc {
