@@ -19,6 +19,9 @@ void main()
     if (display_id == -1) {
       out_color = texelFetch(in_combined_tx, texel_film, 0);
     }
+    else if (uniform_buf.film.display_storage_type == PASS_STORAGE_DEPTH) {
+      out_color = film_display_depth_color(out_depth);
+    }
     else if (uniform_buf.film.display_storage_type == PASS_STORAGE_VALUE) {
       out_color.rgb = imageLoadFast(value_accum_img, int3(texel_film, display_id)).rrr;
       out_color.a = 1.0f;

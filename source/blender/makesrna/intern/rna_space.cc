@@ -514,6 +514,7 @@ static const EnumPropertyItem rna_enum_view3dshading_render_pass_type_items[] = 
     {EEVEE_RENDER_PASS_VOLUME_LIGHT, "VOLUME_LIGHT", 0, "Volume Light", ""},
 
     RNA_ENUM_ITEM_HEADING(CTX_N_(BLT_I18NCONTEXT_RENDER_LAYER, "Data"), nullptr),
+    {EEVEE_RENDER_PASS_DEPTH, "DEPTH", 0, "Depth", ""},
     {EEVEE_RENDER_PASS_POSITION, "POSITION", 0, "Position", ""},
     {EEVEE_RENDER_PASS_NORMAL, "NORMAL", 0, "Normal", ""},
     {EEVEE_RENDER_PASS_MIST, "MIST", 0, "Mist", ""},

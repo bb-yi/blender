@@ -31,6 +31,11 @@ float film_depth_convert_to_scene(float depth)
   return -drw_depth_screen_to_view(depth);
 }
 
+float4 film_display_depth_color(float depth)
+{
+  return float4(float3(depth), 1.0f);
+}
+
 /* Load a texture sample in a specific format. Combined pass needs to use this. */
 float4 film_texelfetch_as_YCoCg_opacity(sampler2D tx, int2 texel)
 {
@@ -637,7 +642,7 @@ void film_store_color(FilmSample dst,
     color.a = 1.0f;
   }
 
-  if (display_id == pass_id) {
+  if (uniform_buf.film.display_storage_type == PASS_STORAGE_COLOR && display_id == pass_id) {
     display = color;
   }
   color = film_patch_float_for_16f_storage(color);
@@ -659,7 +664,7 @@ void film_store_value(FilmSample dst, int pass_id, float value, float4 &display)
     value = 0.0f;
   }
 
-  if (display_id == pass_id) {
+  if (uniform_buf.film.display_storage_type == PASS_STORAGE_VALUE && display_id == pass_id) {
     display = float4(value, value, value, 1.0f);
   }
   value = film_patch_float_for_16f_storage(value);
@@ -673,7 +678,7 @@ void film_store_data(int2 texel_film, int pass_id, float4 data_sample, float4 &d
     return;
   }
 
-  if (display_id == pass_id) {
+  if (uniform_buf.film.display_storage_type == PASS_STORAGE_COLOR && display_id == pass_id) {
     display = data_sample;
   }
   imageStoreFast(color_accum_img, int3(texel_film, pass_id), data_sample);
@@ -779,6 +784,9 @@ void film_process_data(int2 texel_film, float4 &out_color, float &out_depth)
                        float2(uniform_buf.film.render_extent));
 
       film_store_depth(texel_film, depth, out_depth);
+      if (uniform_buf.film.display_storage_type == PASS_STORAGE_DEPTH) {
+        out_color = film_display_depth_color(out_depth);
+      }
       if (normal_id != -1) {
         float4 normal = texelFetch(
             rp_color_tx, int3(film_sample.texel, uniform_buf.render_pass.normal_id), 0);
@@ -796,6 +804,9 @@ void film_process_data(int2 texel_film, float4 &out_color, float &out_depth)
       out_depth = imageLoadFast(depth_img, texel_film).r;
       if (display_id == -1) {
         /* NOP. */
+      }
+      else if (uniform_buf.film.display_storage_type == PASS_STORAGE_DEPTH) {
+        out_color = film_display_depth_color(out_depth);
       }
       else if (display_id == normal_id) {
         out_color = imageLoadFast(color_accum_img, int3(texel_film, display_id));

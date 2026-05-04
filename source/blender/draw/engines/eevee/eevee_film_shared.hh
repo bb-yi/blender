@@ -24,7 +24,8 @@ enum [[host_shared]] eFilmWeightLayerIndex : uint32_t {
 enum [[host_shared]] ePassStorageType : uint32_t {
   PASS_STORAGE_COLOR,
   PASS_STORAGE_VALUE,
-  PASS_STORAGE_CRYPTOMATTE
+  PASS_STORAGE_CRYPTOMATTE,
+  PASS_STORAGE_DEPTH
 };
 
 enum [[host_shared]] PassCategory : uint32_t {

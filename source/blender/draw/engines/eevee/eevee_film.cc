@@ -465,6 +465,10 @@ void Film::init(const int2 &extent, const rcti *output_rect)
     data_.combined_id = (enabled_passes_ & EEVEE_RENDER_PASS_COMBINED) ? 0 : -1;
     /* Depth is in a separate buffer. */
     data_.depth_id = (enabled_passes_ & EEVEE_RENDER_PASS_DEPTH) ? 0 : -1;
+    if (inst_.is_viewport() && inst_.v3d->shading.render_pass == EEVEE_RENDER_PASS_DEPTH) {
+      data_.display_id = data_.depth_id;
+      data_.display_storage_type = PASS_STORAGE_DEPTH;
+    }
 
     data_.color_len = 0;
     data_.value_len = 0;
@@ -1026,6 +1030,8 @@ static eShaderType get_write_pass_shader_type(eViewLayerEEVEEPassType pass_type)
       return FILM_PASS_CONVERT_COLOR;
     case PASS_STORAGE_CRYPTOMATTE:
       return FILM_PASS_CONVERT_CRYPTOMATTE;
+    case PASS_STORAGE_DEPTH:
+      return FILM_PASS_CONVERT_DEPTH;
   }
 
   return FILM_PASS_CONVERT_VALUE;

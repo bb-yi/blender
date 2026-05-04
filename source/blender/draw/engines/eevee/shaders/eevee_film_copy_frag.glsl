@@ -28,12 +28,20 @@ float4 cryptomatte_false_color(float hash)
                 1.0f);
 }
 
+float4 film_display_depth_color(float depth)
+{
+  return float4(float3(depth), 1.0f);
+}
+
 void main()
 {
   int2 texel = int2(gl_FragCoord.xy);
 
   if (display_id == -1) {
     out_color = imageLoadFast(combined_output_img, texel);
+  }
+  else if (uniform_buf.film.display_storage_type == PASS_STORAGE_DEPTH) {
+    out_color = film_display_depth_color(imageLoadFast(depth_img, texel).r);
   }
   else if (uniform_buf.film.display_storage_type == PASS_STORAGE_VALUE) {
     out_color.rgb = imageLoadFast(value_accum_img, int3(texel, display_id)).rrr;
