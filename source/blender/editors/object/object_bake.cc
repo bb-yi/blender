@@ -10,6 +10,7 @@
 
 #include "MEM_guardedalloc.h"
 
+#include "DNA_image_types.h"
 #include "DNA_layer_types.h"
 #include "DNA_mesh_types.h"
 #include "DNA_object_types.h"
