@@ -326,9 +326,19 @@ void Film::init(const int2 &extent, const rcti *output_rect)
     /* Enable passes that need to be rendered. */
     if (inst_.is_viewport()) {
       /* Viewport Case. */
-      eViewLayerEEVEEPassType enabled_passes = eViewLayerEEVEEPassType(
-                                                   inst_.v3d->shading.render_pass) |
-                                               viewport_compositor_enabled_passes_;
+      const eViewLayerEEVEEPassType selected_pass = eViewLayerEEVEEPassType(
+          inst_.v3d->shading.render_pass);
+      const eViewLayerEEVEEPassType scene_enabled_passes = enabled_passes(inst_.view_layer);
+      eViewLayerEEVEEPassType enabled_passes = viewport_compositor_enabled_passes_;
+
+      if (!ELEM(selected_pass,
+                EEVEE_RENDER_PASS_CRYPTOMATTE_OBJECT,
+                EEVEE_RENDER_PASS_CRYPTOMATTE_ASSET,
+                EEVEE_RENDER_PASS_CRYPTOMATTE_MATERIAL) ||
+          (scene_enabled_passes & selected_pass))
+      {
+        enabled_passes |= selected_pass;
+      }
 
       if (inst_.overlays_enabled() || inst_.gpencil_engine_enabled()) {
         /* Overlays and Grease Pencil needs the depth for correct compositing.
@@ -350,9 +360,6 @@ void Film::init(const int2 &extent, const rcti *output_rect)
     }
     if (inst_.filter_materials.uses_scene_position()) {
       enabled_passes_ |= EEVEE_RENDER_PASS_POSITION;
-    }
-    if (inst_.filter_materials.uses_cryptomatte_object()) {
-      enabled_passes_ |= EEVEE_RENDER_PASS_CRYPTOMATTE_OBJECT;
     }
 
     /* Filter obsolete passes. */

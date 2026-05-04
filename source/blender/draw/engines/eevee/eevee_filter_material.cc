@@ -256,6 +256,14 @@ void FilterMaterialModule::init()
       break;
     }
   }
+
+  if (uses_cryptomatte_object_ &&
+      (inst_.view_layer->cryptomatte_flag & VIEW_LAYER_CRYPTOMATTE_OBJECT) == 0)
+  {
+    inst_.info_append_i18n(
+        "Filter Object Mask requires the Crypto Object pass. Enable it in the view layer to make "
+        "the mask effective.");
+  }
 }
 
 bool FilterMaterialModule::uses_aov() const

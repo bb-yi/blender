@@ -23,6 +23,7 @@ def configure_scene():
     scene.view_settings.look = "None"
     scene.world.use_nodes = False
     scene.world.color = (0.0, 0.0, 0.0)
+    bpy.context.view_layer.use_pass_cryptomatte_object = False
 
     while len(scene.eevee.filter_materials) > 0:
         scene.eevee.filter_materials.remove(0)
@@ -132,6 +133,13 @@ def main():
     attach_filter_material(make_filter_material(target))
 
     bpy.context.view_layer.update()
+    pixels_disabled = render_image()
+
+    red_center_disabled = sample_red(pixels_disabled, RESOLUTION // 2, RESOLUTION // 2)
+    red_corner_disabled = sample_red(pixels_disabled, 4, 4)
+
+    bpy.context.view_layer.use_pass_cryptomatte_object = True
+    bpy.context.view_layer.update()
     pixels_initial = render_image()
 
     red_center_initial = sample_red(pixels_initial, RESOLUTION // 2, RESOLUTION // 2)
@@ -142,10 +150,20 @@ def main():
     pixels_moved = render_image()
     red_center_moved = sample_red(pixels_moved, RESOLUTION // 2, RESOLUTION // 2)
 
+    print(f"FILTER_OBJECT_MASK_RED_CENTER_DISABLED={red_center_disabled:.6f}")
+    print(f"FILTER_OBJECT_MASK_RED_CORNER_DISABLED={red_corner_disabled:.6f}")
     print(f"FILTER_OBJECT_MASK_RED_CENTER_INITIAL={red_center_initial:.6f}")
     print(f"FILTER_OBJECT_MASK_RED_CORNER_INITIAL={red_corner_initial:.6f}")
     print(f"FILTER_OBJECT_MASK_RED_CENTER_MOVED={red_center_moved:.6f}")
 
+    assert red_center_disabled < 0.1, (
+        f"Expected Filter Object Mask to stay dark when Crypto Object pass is disabled, got "
+        f"{red_center_disabled}"
+    )
+    assert red_corner_disabled < 0.1, (
+        f"Expected pixels outside the selected object to stay dark when Crypto Object is disabled, "
+        f"got {red_corner_disabled}"
+    )
     assert red_center_initial > 0.8, (
         f"Expected the selected object to be masked at the center, got {red_center_initial}"
     )
