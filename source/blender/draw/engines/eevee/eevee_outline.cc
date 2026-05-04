@@ -67,6 +67,7 @@ void OutlineModule::sync()
   detect_ps_.state_set(DRW_STATE_WRITE_COLOR);
   detect_ps_.shader_set(inst_.shaders.static_shader_get(OUTLINE_DETECT));
   detect_ps_.bind_texture("depth_tx", &inst_.render_buffers.depth_tx);
+  detect_ps_.bind_texture("prepass_normal_tx", &inst_.render_buffers.prepass_normal_tx);
   detect_ps_.bind_texture("outline_color_tx", &inst_.render_buffers.outline_color_tx);
   detect_ps_.bind_texture("outline_info_tx", &inst_.render_buffers.outline_info_tx);
   detect_ps_.bind_resources(inst_.uniform_data);

@@ -68,10 +68,39 @@ float3 outline_reconstruct_normal(int2 texel, int2 extent, float3 current_view_d
   return drw_normal_view_to_world(n);
 }
 
+bool outline_prepass_normal_available(int2 extent)
+{
+  return all(equal(textureSize(prepass_normal_tx, 0), extent));
+}
+
+float3 outline_surface_normal_or_reconstructed(int2 texel,
+                                               float3 reconstructed_normal,
+                                               bool use_prepass_normal,
+                                               out bool has_surface_normal)
+{
+  const gbuffer::Header header = gbuffer::read_header(texel);
+  if (!header.is_empty()) {
+    has_surface_normal = true;
+    return gbuffer::read_normal(texel);
+  }
+
+  if (use_prepass_normal) {
+    const float3 packed_normal = texelFetch(prepass_normal_tx, texel, 0).rgb;
+    if (any(greaterThan(packed_normal, float3(0.0f)))) {
+      has_surface_normal = true;
+      return normalize(packed_normal * 2.0f - 1.0f);
+    }
+  }
+
+  has_surface_normal = false;
+  return reconstructed_normal;
+}
+
 void main()
 {
   const int2 texel = int2(gl_FragCoord.xy);
   const int2 extent = textureSize(depth_tx, 0);
+  const bool use_prepass_normal = outline_prepass_normal_available(extent);
 
   const float4 outline_color = outline_source_color_fetch(texel);
   const float4 outline_info = outline_source_info_fetch(texel);
@@ -107,8 +136,6 @@ void main()
   bool mask_only_outline = false;
 
   if (use_geometry_outline) {
-    const gbuffer::Header center_header = gbuffer::read_header(texel);
-    const bool center_has_gbuffer = !center_header.is_empty();
     center_position = outline_screen_to_view(texel, extent, center_depth);
     const float2 center_uv = (float2(texel) + 0.5f) / float2(extent);
     current_view_direction = drw_point_screen_to_view(float3(center_uv, 1.0f));
@@ -127,13 +154,14 @@ void main()
     if (any(isnan(true_normal))) {
       return;
     }
-    const float3 center_gbuffer_normal = center_has_gbuffer ? gbuffer::read_normal(texel) :
-                                                              true_normal;
-    const float center_normal_alignment = dot(center_gbuffer_normal, true_normal);
-    center_normal = (center_has_gbuffer && center_normal_alignment > 0.5f) ?
-                        center_gbuffer_normal :
+    bool center_has_surface_normal = false;
+    const float3 center_surface_normal = outline_surface_normal_or_reconstructed(
+        texel, true_normal, use_prepass_normal, center_has_surface_normal);
+    const float center_normal_alignment = dot(center_surface_normal, true_normal);
+    center_normal = (center_has_surface_normal && center_normal_alignment > 0.5f) ?
+                        center_surface_normal :
                         true_normal;
-    mask_only_outline = !(center_has_gbuffer && center_normal_alignment > 0.5f);
+    mask_only_outline = !(center_has_surface_normal && center_normal_alignment > 0.5f);
     true_normal_camera = drw_normal_world_to_view(true_normal);
   }
 
@@ -164,14 +192,14 @@ void main()
     }
 
     if (use_geometry_outline && !mask_only_outline && center_is_not_behind_sample) {
-      const bool sample_has_gbuffer = !gbuffer::read_header(sample_texel).is_empty();
       const float3 sample_true_normal = outline_reconstruct_normal(
           sample_texel, extent, current_view_direction);
-      const float3 sample_gbuffer_normal = sample_has_gbuffer ? gbuffer::read_normal(sample_texel) :
-                                                              sample_true_normal;
-      const float sample_normal_alignment = dot(sample_gbuffer_normal, sample_true_normal);
-      const float3 sample_normal = (sample_has_gbuffer && sample_normal_alignment > 0.5f) ?
-                                       sample_gbuffer_normal :
+      bool sample_has_surface_normal = false;
+      const float3 sample_surface_normal = outline_surface_normal_or_reconstructed(
+          sample_texel, sample_true_normal, use_prepass_normal, sample_has_surface_normal);
+      const float sample_normal_alignment = dot(sample_surface_normal, sample_true_normal);
+      const float3 sample_normal = (sample_has_surface_normal && sample_normal_alignment > 0.5f) ?
+                                       sample_surface_normal :
                                        sample_true_normal;
       const float3 sample_position = outline_screen_to_view(sample_texel, extent, sample_depth);
       const float delta_normal = dot(center_normal, sample_normal);

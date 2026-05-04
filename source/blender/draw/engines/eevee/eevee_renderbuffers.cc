@@ -80,13 +80,19 @@ void RenderBuffers::acquire(int2 extent)
 
   /* TODO(fclem): Make vector pass allocation optional if no TAA or motion blur is needed. */
   vector_tx.acquire(extent, vector_tx_format(), usage_attachment_read_write);
+  const bool use_prepass_normal = inst_.pipelines.has_raycast || inst_.outline.enabled();
   if (inst_.pipelines.has_raycast) {
     object_id_tx.acquire(extent, gpu::TextureFormat::UINT_16, usage_attachment_read);
+  }
+  else {
+    /* Still acquire it, since the passes can't conditionally bind textures. */
+    object_id_tx.acquire(int2(1), gpu::TextureFormat::UINT_16, GPU_TEXTURE_USAGE_SHADER_READ);
+  }
+  if (use_prepass_normal) {
     prepass_normal_tx.acquire(extent, gpu::TextureFormat::UNORM_10_10_10_2, usage_attachment_read);
   }
   else {
-    /* Still acquire them, since the passes can't conditionally bind textures. */
-    object_id_tx.acquire(int2(1), gpu::TextureFormat::UINT_16, GPU_TEXTURE_USAGE_SHADER_READ);
+    /* Still acquire it, since the passes can't conditionally bind textures. */
     prepass_normal_tx.acquire(
         int2(1), gpu::TextureFormat::UNORM_10_10_10_2, GPU_TEXTURE_USAGE_SHADER_READ);
   }
