@@ -190,7 +190,7 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
     ntreeGPUMaterialNodes(localtree, mat);
   }
   if (compile_npr_graph) {
-    if (force_npr_graph || (!compile_surface_graph && npr_tree_get(ntree) != nullptr)) {
+    if (force_npr_graph || npr_tree_get(ntree) != nullptr) {
       GPU_material_flag_set(mat, GPU_MATFLAG_NPR);
     }
     if (GPU_material_flag_get(mat, GPU_MATFLAG_NPR)) {

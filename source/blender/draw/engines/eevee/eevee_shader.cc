@@ -1390,24 +1390,31 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   }
 
   if (ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR)) {
-    switch (closure_bin_count) {
-      /* These need to be separated since the strings need to be static. */
-      case 0:
-      case 1:
-        info.define("GBUFFER_LAYER_MAX", "1");
-        break;
-      case 2:
-        info.define("GBUFFER_LAYER_MAX", "2");
-        break;
-      case 3:
-        info.define("GBUFFER_LAYER_MAX", "3");
-        break;
-      default:
-        BLI_assert_unreachable();
-        break;
+    if (pipeline_type == MAT_PIPE_DEFERRED_NPR) {
+      /* NPR reads the already-written material GBuffer, so it cannot be specialized to the
+       * NPR tree's own closures. */
+      info.define("GBUFFER_LAYER_MAX", "3");
+    }
+    else {
+      switch (closure_bin_count) {
+        /* These need to be separated since the strings need to be static. */
+        case 0:
+        case 1:
+          info.define("GBUFFER_LAYER_MAX", "1");
+          break;
+        case 2:
+          info.define("GBUFFER_LAYER_MAX", "2");
+          break;
+        case 3:
+          info.define("GBUFFER_LAYER_MAX", "3");
+          break;
+        default:
+          BLI_assert_unreachable();
+          break;
+      }
     }
 
-    if (closure_bin_count == 2) {
+    if (closure_bin_count == 2 && pipeline_type != MAT_PIPE_DEFERRED_NPR) {
       /* In a lot of cases, we can predict that we do not need the extra GBuffer layers. This
        * simplifies the shader code and improves compilation time (see #145347). */
       const bool colorless_reflection = !GPU_material_flag_get(
