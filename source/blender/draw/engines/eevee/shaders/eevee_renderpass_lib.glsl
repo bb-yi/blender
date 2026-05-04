@@ -52,7 +52,7 @@ void clear_outline()
 
 void attenuate_outline(float keep_factor)
 {
-#if defined(MAT_OUTLINE_CLEAR) && defined(GPU_FRAGMENT_SHADER)
+#if defined(MAT_OUTLINE_CLEAR) && defined(MAT_FORWARD) && defined(GPU_FRAGMENT_SHADER)
   int2 texel = int2(gl_FragCoord.xy);
   keep_factor = saturate(keep_factor);
   if (keep_factor <= 1e-5f) {

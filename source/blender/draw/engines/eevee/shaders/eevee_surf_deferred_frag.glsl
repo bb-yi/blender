@@ -91,8 +91,8 @@ void main()
 #ifndef MAT_REFRACTION
   /* Clear AOVs first. In case the material renders to them. */
   clear_aovs();
-  clear_outline();
 #endif
+  clear_outline();
 
 #ifdef MAT_DEPTH_OFFSET_NO_LIGHTING
   bool use_surface_depth = !material_depth_offset_is_zero(depth_offset);

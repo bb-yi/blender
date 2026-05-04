@@ -386,6 +386,8 @@ class DeferredLayer : DeferredLayerBase {
   PassSimple eval_light_ps_ = {"EvalLights"};
   /* Combine direct and indirect light contributions and apply BSDF color. */
   PassSimple combine_ps_ = {"Combine"};
+  /* Clear render-pass outputs for pixels touched by secondary deferred layers. */
+  PassSimple aov_clear_ps_ = {"AOV.Clear"};
 
   /**
    * Accumulation textures for all stages of lighting evaluation (Light, SSR, SSSS, SSGI ...).
@@ -425,6 +427,7 @@ class DeferredLayer : DeferredLayerBase {
   bool use_clamp_direct_ = false;
   bool use_clamp_indirect_ = false;
   bool has_outline_ = false;
+  bool is_first_pass_ = true;
 
  public:
   DeferredLayer(Instance &inst) : inst_(inst)

@@ -271,13 +271,15 @@
 #define FILTER_DEPTH_TEX_SLOT 39
 #define FILTER_CRYPTOMATTE_TEX_SLOT 40
 #define SCENE_SHADOW_TEX_SLOT 41
-#define OUTLINE_DEPTH_TEX_SLOT 0
-#define OUTLINE_COLOR_TEX_SLOT 1
-#define OUTLINE_INFO_TEX_SLOT 2
-#define OUTLINE_SEED_TEX_SLOT 3
-#define OUTLINE_JFA_TEX_SLOT 4
-#define OUTLINE_RESOLVED_TEX_SLOT 5
-#define OUTLINE_OCCLUSION_DEPTH_TEX_SLOT 6
+/* Outline post-process shaders can include GBuffer/draw resources, so keep their texture slots
+ * out of the common low range. */
+#define OUTLINE_DEPTH_TEX_SLOT 42
+#define OUTLINE_COLOR_TEX_SLOT 43
+#define OUTLINE_INFO_TEX_SLOT 44
+#define OUTLINE_SEED_TEX_SLOT 45
+#define OUTLINE_JFA_TEX_SLOT 46
+#define OUTLINE_RESOLVED_TEX_SLOT 47
+#define OUTLINE_OCCLUSION_DEPTH_TEX_SLOT 48
 
 /* Images. */
 #define RBUFS_COLOR_SLOT 0

@@ -989,6 +989,7 @@ template<typename F> void DeferredLayerBase::npr_pass_sync(Instance &inst, F cal
 void DeferredLayer::begin_sync()
 {
   has_outline_ = false;
+  is_first_pass_ = true;
   {
     prepass_ps_.init();
     /* Textures. */
@@ -1013,6 +1014,19 @@ void DeferredLayer::begin_sync()
     prepass_ps_.setup_subpasses(DRW_STATE_WRITE_STENCIL | DRW_STATE_STENCIL_ALWAYS |
                                 DRW_STATE_WRITE_DEPTH | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
                                 inst_.film.depth.test_state);
+  }
+  {
+    aov_clear_ps_.init();
+    aov_clear_ps_.state_set(DRW_STATE_WRITE_STENCIL | DRW_STATE_STENCIL_EQUAL |
+                            DRW_STATE_CLIP_CONTROL_UNIT_RANGE);
+    aov_clear_ps_.state_stencil(0x0u, 0x0u, 0xFFu);
+    aov_clear_ps_.shader_set(inst_.shaders.static_shader_get(DEFERRED_AOV_CLEAR));
+    aov_clear_ps_.bind_image(RBUFS_COLOR_SLOT, &inst_.render_buffers.rp_color_tx);
+    aov_clear_ps_.bind_image(RBUFS_VALUE_SLOT, &inst_.render_buffers.rp_value_tx);
+    aov_clear_ps_.bind_image(OUTLINE_COLOR_SLOT, &inst_.render_buffers.outline_color_tx);
+    aov_clear_ps_.bind_image(OUTLINE_INFO_SLOT, &inst_.render_buffers.outline_info_tx);
+    aov_clear_ps_.bind_resources(inst_.uniform_data);
+    aov_clear_ps_.draw_procedural(GPU_PRIM_TRIS, 1, 3);
   }
 
   this->gbuffer_pass_sync(inst_);
@@ -1044,6 +1058,7 @@ void DeferredLayer::end_sync(bool is_first_pass,
                              bool is_last_pass,
                              bool next_layer_has_transmission)
 {
+  is_first_pass_ = is_first_pass;
   const bool has_any_closure = closure_bits_ != 0;
   /* We need the feedback output in case of refraction in the next pass (see #126455). */
   const bool is_layer_refracted = (next_layer_has_transmission && has_any_closure);
@@ -1345,6 +1360,12 @@ gpu::Texture *DeferredLayer::render(View &main_view,
     ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainDeferredPrepass);
     GPU_framebuffer_bind(prepass_fb);
     inst_.manager->submit(prepass_ps_, render_view);
+  }
+
+  if (!is_first_pass_) {
+    ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainDeferredPrepass);
+    GPU_framebuffer_bind(prepass_fb);
+    inst_.manager->submit(aov_clear_ps_, render_view);
   }
 
   inst_.hiz_buffer.swap_layer();
