@@ -34,7 +34,10 @@ void node_light_probe_color(float3 direction,
   float3 geometry_normal = light_probe_color_safe_direction(g_data.Ng, float3(0.0f, 0.0f, 1.0f));
   float3 shading_normal = light_probe_color_resolve_shading_normal();
   float3 view_vector = drw_world_incident_vector(g_data.P);
-  float3 reflection_direction = light_probe_color_safe_direction(direction, -view_vector);
+  float3 reflected_view_direction = light_probe_color_safe_direction(
+      -reflect(view_vector, shading_normal), -view_vector);
+  float3 reflection_direction = light_probe_color_safe_direction(direction,
+                                                                reflected_view_direction);
   float3 irradiance_direction = light_probe_color_safe_direction(direction, shading_normal);
 
   LightProbeSample probe_sample = lightprobe_load(g_data.P, geometry_normal, view_vector);

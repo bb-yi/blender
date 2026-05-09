@@ -65,7 +65,7 @@ def make_emission_material(name, color):
     return material
 
 
-def make_light_probe_color_material(output_name, use_custom_direction=False):
+def make_light_probe_color_material(output_name, use_custom_direction=False, direct_surface=False):
     material = bpy.data.materials.new(f"LightProbeColor_{output_name}")
     material.use_nodes = True
 
@@ -92,8 +92,11 @@ def make_light_probe_color_material(output_name, use_custom_direction=False):
 
         links.new(direction.outputs["Vector"], probe_color.inputs["Direction"])
 
-    links.new(probe_color.outputs[output_name], emission.inputs["Color"])
-    links.new(emission.outputs["Emission"], output.inputs["Surface"])
+    if direct_surface:
+        links.new(probe_color.outputs[output_name], output.inputs["Surface"])
+    else:
+        links.new(probe_color.outputs[output_name], emission.inputs["Color"])
+        links.new(emission.outputs["Emission"], output.inputs["Surface"])
 
     return material
 
@@ -148,6 +151,10 @@ front_plane = make_plane("FrontPlane", 0.0)
 front_plane.data.materials.clear()
 front_plane.data.materials.append(make_light_probe_color_material("Reflection"))
 assert_green_probe(render_center_pixel(), "Reflection", minimum_green=0.8, max_other=0.1)
+
+front_plane.data.materials.clear()
+front_plane.data.materials.append(make_light_probe_color_material("Reflection", direct_surface=True))
+assert_green_probe(render_center_pixel(), "Reflection direct to Surface", minimum_green=0.8, max_other=0.1)
 
 front_plane.data.materials.clear()
 front_plane.data.materials.append(make_light_probe_color_material("Irradiance"))
