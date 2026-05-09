@@ -90,6 +90,8 @@ namespace blender::eevee
     /** Cached, used for detecting updates. */
     float4x4 object_mat = float4x4::identity();
 
+    float shadow_map_scale;
+
   public:
     ShadowTileMap(int tiles_index_) : ShadowTileMapData{}
     {
@@ -105,6 +107,7 @@ namespace blender::eevee
     void sync_orthographic(const float4x4& object_mat_,
       int2 origin_offset,
       int clipmap_level,
+      float shadow_map_scale,
       eShadowProjectionType projection_type_,
       uint2 shadow_set_membership_ = ~uint2(0));
 
@@ -348,6 +351,9 @@ namespace blender::eevee
 
     /* Render setting that reduces the LOD for every light. */
     float global_lod_bias_ = 0.0f;
+
+    /* Scale of sunlight shadow map size, also length of LOD0 */
+    float shadow_map_scale = 1.0f;
     /** For now, needs to be hardcoded. */
     int shadow_page_size_ = SHADOW_PAGE_RES;
     /** Maximum number of allocated pages. Maximum value is SHADOW_MAX_TILEMAP. */

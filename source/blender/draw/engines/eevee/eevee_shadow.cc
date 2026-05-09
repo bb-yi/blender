@@ -51,6 +51,7 @@ ShadowTechnique ShadowModule::shadow_technique = ShadowTechnique::ATOMIC_RASTER;
 void ShadowTileMap::sync_orthographic(const float4x4 &object_mat_,
                                       int2 origin_offset,
                                       int clipmap_level,
+                                      float shadow_map_scale_,
                                       eShadowProjectionType projection_type_,
                                       uint2 shadow_set_membership_)
 {
@@ -63,6 +64,13 @@ void ShadowTileMap::sync_orthographic(const float4x4 &object_mat_,
   level = clipmap_level;
   light_type = eLightType::LIGHT_SUN;
   shadow_set_membership = shadow_set_membership_;
+
+    /* If the shadow map scale changed, mark the tilemap dirty so it gets re-generated.
+   * This mirrors the behaviour when the light direction / object matrix changes. */
+  if (shadow_map_scale != shadow_map_scale_) {
+    set_dirty();
+  }
+  shadow_map_scale = shadow_map_scale_;
 
   grid_shift = origin_offset - grid_offset;
   grid_offset = origin_offset;
@@ -453,8 +461,8 @@ void ShadowDirectional::cascade_tilemaps_distribution(Light &light, const Camera
   float4x4 object_mat = light.object_to_world;
   object_mat.location() = float3(0.0f);
   light.lod_bias = shadows_.global_lod_bias();
-  light.sun()._pad3 = 0.0f;
-  light.sun()._pad4 = 0.0f;
+  light.sun().focus_distance = 0.0f;
+  light.sun().focus_blend = 0.0f;
 
   /* All tile-maps use the first level size. */
   float half_size = ShadowDirectional::coverage_get(levels_.lod_min) / 2.0f;
@@ -488,8 +496,12 @@ void ShadowDirectional::cascade_tilemaps_distribution(Light &light, const Camera
     /* Equal spacing between cascades layers since we want uniform shadow density. */
     int2 level_offset = origin_offset +
                         shadow_cascade_grid_offset(light.sun().clipmap_base_offset_pos, i);
-    tilemap->sync_orthographic(
-        object_mat, level_offset, level, SHADOW_PROJECTION_CASCADE, light.shadow_set_membership);
+    tilemap->sync_orthographic(object_mat,
+                               level_offset,
+                               level,
+                               light.shadow_map_scale,
+                               SHADOW_PROJECTION_CASCADE,
+                               light.shadow_set_membership);
 
     /* Add shadow tile-maps grouped by lights to the GPU buffer. */
     shadows_.tilemap_pool.tilemaps_data.append(*tilemap);
@@ -543,8 +555,8 @@ void ShadowDirectional::clipmap_tilemaps_distribution(Light &light, const Camera
   float4x4 object_mat = light.object_to_world;
   object_mat.location() = float3(0.0f);
   light.lod_bias = shadows_.global_lod_bias();
-  light.sun()._pad3 = focus.distance;
-  light.sun()._pad4 = focus.blend;
+  light.sun().focus_distance = focus.distance;
+  light.sun().focus_blend = focus.blend;
 
   for (int lod : IndexRange(levels_.size())) {
     ShadowTileMap *tilemap = tilemaps_[lod];
@@ -557,8 +569,12 @@ void ShadowDirectional::clipmap_tilemaps_distribution(Light &light, const Camera
     float2 light_space_center = clipmap_center * float2x3(object_mat.view<2, 3>());
     int2 level_offset = int2(math::round(light_space_center / tile_size));
 
-    tilemap->sync_orthographic(
-        object_mat, level_offset, level, SHADOW_PROJECTION_CLIPMAP, light.shadow_set_membership);
+    tilemap->sync_orthographic(object_mat,
+                               level_offset,
+                               level,
+                               light.shadow_map_scale,
+                               SHADOW_PROJECTION_CLIPMAP,
+                               light.shadow_set_membership);
 
     /* Add shadow tile-maps grouped by lights to the GPU buffer. */
     shadows_.tilemap_pool.tilemaps_data.append(*tilemap);
