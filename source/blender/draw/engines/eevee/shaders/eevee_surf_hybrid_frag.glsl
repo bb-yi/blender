@@ -114,8 +114,11 @@ void main()
   }
 #endif
 
-  /* Clear AOVs first. In case the material renders to them. */
+#ifndef MAT_REFRACTION
+  /* First visible hybrid surfaces replace previous AOV data. Refraction layers must preserve the
+   * AOVs from the already-rendered surface behind unless they explicitly write an AOV themselves. */
   clear_aovs();
+#endif
   clear_outline();
 
 #ifdef MAT_DEPTH_OFFSET_NO_LIGHTING
