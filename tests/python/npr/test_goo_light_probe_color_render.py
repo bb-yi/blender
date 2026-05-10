@@ -104,6 +104,32 @@ def make_light_probe_color_material(
     return material
 
 
+def make_light_probe_color_npr_material(output_name):
+    material = bpy.data.materials.new(f"LightProbeColorNPR_{output_name}")
+    material.use_nodes = True
+
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+    nodes.clear()
+
+    output = nodes.new("ShaderNodeOutputMaterial")
+    emission = nodes.new("ShaderNodeEmission")
+    emission.inputs["Color"].default_value = (1.0, 0.0, 0.0, 1.0)
+    emission.inputs["Strength"].default_value = 1.0
+    links.new(emission.outputs["Emission"], output.inputs["Surface"])
+
+    npr_tree = bpy.data.node_groups.new(f"LightProbeColorNPRTree_{output_name}", "ShaderNodeTree")
+    npr_nodes = npr_tree.nodes
+    npr_links = npr_tree.links
+
+    probe_color = npr_nodes.new("ShaderNodeLightProbeColor")
+    npr_output = npr_nodes.new("ShaderNodeNPR_Output")
+    npr_links.new(probe_color.outputs[output_name], npr_output.inputs["Color"])
+
+    output.nprtree = npr_tree
+    return material
+
+
 def render_center_pixel():
     scene = bpy.context.scene
     file_descriptor, filepath = tempfile.mkstemp(suffix=".exr")
@@ -174,3 +200,7 @@ front_plane.data.materials.append(
 assert_green_probe(
     render_center_pixel(), "Reflection with custom direction and roughness", minimum_green=0.8, max_other=0.1
 )
+
+front_plane.data.materials.clear()
+front_plane.data.materials.append(make_light_probe_color_npr_material("Reflection"))
+assert_green_probe(render_center_pixel(), "Reflection in NPR Tree", minimum_green=0.8, max_other=0.1)
