@@ -92,7 +92,8 @@ float shader_info_shadow_soft_deband_noise(float3 position, float3 light_vector)
                dot(light_vector, float3(0.03125f, 0.125f, 0.2109375f));
   return interleaved_gradient_noise(gl_FragCoord.xy, seed, 0.0f);
 #else
-  UNUSED_VARS(position, light_vector);
+  UNUSED_VARS(position);
+  UNUSED_VARS(light_vector);
   return 0.5f;
 #endif
 }

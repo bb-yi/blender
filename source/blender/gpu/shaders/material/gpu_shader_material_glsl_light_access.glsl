@@ -339,7 +339,8 @@ GLSLLight glsl_light_get(int light_ordinal)
 
 float glsl_light_shadow(int light_ordinal, float3 shading_normal)
 {
-  UNUSED_VARS(light_ordinal, shading_normal);
+  UNUSED_VARS(light_ordinal);
+  UNUSED_VARS(shading_normal);
   return 0.0f;
 }
 
