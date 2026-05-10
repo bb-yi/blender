@@ -711,6 +711,7 @@ void Film::end_sync()
   if (inst_.is_viewport()) {
     /* Bypass history for scene-content updates even during interactive reprojection. */
     if (inst_.discard_viewport_history()) {
+      use_reprojection_ = false;
       data_.use_history = false;
     }
     /* Just bypass the reprojection and reset the accumulation. */

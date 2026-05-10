@@ -220,7 +220,8 @@ namespace blender::eevee
       {
         sampling.reset();
       }
-      if (is_navigating && scene->eevee.flag & SCE_EEVEE_SHADOW_JITTERED_VIEWPORT)
+      if ((is_navigating || is_transforming) &&
+          (scene->eevee.flag & SCE_EEVEE_SHADOW_JITTERED_VIEWPORT))
       {
         sampling.reset();
       }
@@ -564,7 +565,14 @@ namespace blender::eevee
     shadows.end_sync(); /* Needs to be before lights. */
     lights.end_sync();
 
-    discard_viewport_history_ = shadows.viewport_history_invalidated();
+    const bool viewport_soft_shadow_transform =
+        is_viewport() && is_transforming &&
+        (scene->eevee.flag & SCE_EEVEE_SHADOW_ENABLED) &&
+        (scene->eevee.flag & SCE_EEVEE_SHADOW_JITTERED_VIEWPORT);
+    discard_viewport_history_ = is_viewport() &&
+                                (depsgraph_last_update_ != DEG_get_update_count(depsgraph) ||
+                                 shadows.viewport_history_invalidated() ||
+                                 viewport_soft_shadow_transform);
     if (is_viewport())
     {
       const bool uses_scene_time = materials.has_time_dependent_materials() ||
