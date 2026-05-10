@@ -708,10 +708,16 @@ void Film::end_sync()
 {
   use_reprojection_ = inst_.sampling.interactive_mode();
 
-  /* Just bypass the reprojection and reset the accumulation. */
-  if (inst_.is_viewport() && !use_reprojection_ && inst_.sampling.is_reset()) {
-    use_reprojection_ = false;
-    data_.use_history = false;
+  if (inst_.is_viewport()) {
+    /* Bypass history for scene-content updates even during interactive reprojection. */
+    if (inst_.discard_viewport_history()) {
+      data_.use_history = false;
+    }
+    /* Just bypass the reprojection and reset the accumulation. */
+    else if (!use_reprojection_ && inst_.sampling.is_reset()) {
+      use_reprojection_ = false;
+      data_.use_history = false;
+    }
   }
 
   aovs_info.push_update();
