@@ -564,7 +564,7 @@ namespace blender::eevee
     shadows.end_sync(); /* Needs to be before lights. */
     lights.end_sync();
 
-    discard_viewport_history_ = is_viewport() && depsgraph_last_update_ != DEG_get_update_count(depsgraph);
+    discard_viewport_history_ = shadows.viewport_history_invalidated();
     if (is_viewport())
     {
       const bool uses_scene_time = materials.has_time_dependent_materials() ||

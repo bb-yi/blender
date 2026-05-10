@@ -20,6 +20,7 @@
 #include "draw_debug.hh"
 
 #include <cfloat>
+#include <cmath>
 #include <unordered_map>
 
 namespace blender::eevee {
@@ -720,8 +721,19 @@ void ShadowModule::init()
                     (inst_.is_image_render ||
                      (!inst_.is_navigating && !inst_.is_transforming && !inst_.is_playback &&
                       (scene.eevee.flag & SCE_EEVEE_SHADOW_JITTERED_VIEWPORT)));
+  const bool was_enabled = enabled_;
+  const bool was_jittered = data_.use_jitter;
+  const bool jitter_was_disabled_by_transform = viewport_jitter_disabled_by_transform_;
+  viewport_jitter_disabled_by_transform_ = inst_.is_viewport() && enable_shadow &&
+                                           inst_.is_transforming &&
+                                           (scene.eevee.flag &
+                                            SCE_EEVEE_SHADOW_JITTERED_VIEWPORT);
   update_lights |= assign_if_different(enabled_, enable_shadow);
   update_lights |= assign_if_different(data_.use_jitter, bool32_t(use_jitter));
+  viewport_history_invalidated_ =
+      inst_.is_viewport() &&
+      ((was_enabled != enabled_) ||
+       (!was_jittered && data_.use_jitter && jitter_was_disabled_by_transform));
   if (update_lights) {
     /* Force light reset. */
     for (Light &light : inst_.lights.light_map_.values()) {
@@ -892,6 +904,7 @@ void ShadowModule::sync_object(const Object *ob,
   const bool is_initialized = shadow_ob.resource_handle.is_valid();
   const bool has_jittered_transparency = has_transparent_shadows && data_.use_jitter;
   if (is_shadow_caster && (handle.recalc || !is_initialized || has_jittered_transparency)) {
+    viewport_history_invalidated_ |= inst_.is_viewport() && data_.use_jitter;
     if (handle.recalc && is_initialized) {
       past_casters_updated_.append(shadow_ob.resource_handle.raw());
     }
@@ -916,6 +929,8 @@ void ShadowModule::sync_object(const Object *ob,
 
 void ShadowModule::end_sync()
 {
+  const DirectionalFocusData old_focus = directional_focus_data_ensure(*this);
+
   /* Delete unused shadows first to release tile-maps that could be reused for new lights. */
   for (Light &light : inst_.lights.light_map_.values()) {
     /* Do not discard lights in baking mode. See WORKAROUND in `surfels_create`. */
@@ -932,6 +947,12 @@ void ShadowModule::end_sync()
 
   directional_focus_update(
       directional_focus_data_ensure(*this), inst_.camera, curr_casters_, *inst_.manager);
+  const DirectionalFocusData &new_focus = directional_focus_data_ensure(*this);
+  viewport_history_invalidated_ |= inst_.is_viewport() && data_.use_jitter &&
+                                   (math::distance_squared(old_focus.position,
+                                                           new_focus.position) > 1.0e-10f ||
+                                    std::abs(old_focus.distance - new_focus.distance) > 1.0e-5f ||
+                                    std::abs(old_focus.blend - new_focus.blend) > 1.0e-5f);
 
   /* Allocate new tile-maps and fill shadow data of the lights. */
   tilemap_pool.tilemaps_data.clear();
@@ -959,6 +980,7 @@ void ShadowModule::end_sync()
     if (!shadow_ob.used && !inst_.is_baking()) {
       /* May not be a caster, but it does not matter, be conservative. */
       past_casters_updated_.append(shadow_ob.resource_handle.raw());
+      viewport_history_invalidated_ |= inst_.is_viewport() && data_.use_jitter;
       objects_.remove(it);
     }
     else {

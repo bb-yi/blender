@@ -354,6 +354,8 @@ namespace blender::eevee
     int shadow_page_len_ = SHADOW_MAX_TILEMAP;
     /** Global switch. */
     bool enabled_ = true;
+    bool viewport_history_invalidated_ = false;
+    bool viewport_jitter_disabled_by_transform_ = false;
 
   public:
     ShadowModule(Instance& inst, ShadowSceneData& data);
@@ -400,6 +402,11 @@ namespace blender::eevee
     float global_lod_bias() const
     {
       return global_lod_bias_;
+    }
+
+    bool viewport_history_invalidated() const
+    {
+      return viewport_history_invalidated_;
     }
 
     /* Set all shadows to update. To be called before `end_sync`. */
