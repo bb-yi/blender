@@ -22,6 +22,12 @@ static void node_declare(NodeDeclarationBuilder &b)
           "World-space direction used to sample Eevee light probe data. When not connected, "
           "Reflection follows the reflected view direction and Irradiance follows the surface "
           "normal");
+  b.add_input<decl::Float>("Roughness")
+      .default_value(0.0f)
+      .min(0.0f)
+      .max(1.0f)
+      .subtype(PROP_FACTOR)
+      .description("Controls reflection probe blur, from mirror sharp to fully rough");
   b.add_output<decl::Color>("Reflection");
   b.add_output<decl::Color>("Irradiance");
   b.add_output<decl::Color>("Combined");

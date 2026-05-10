@@ -12,10 +12,12 @@ material.use_nodes = True
 node = material.node_tree.nodes.new("ShaderNodeLightProbeColor")
 
 assert node.bl_label == "Light Probe Color"
-assert [socket.name for socket in node.inputs] == ["Direction"]
+assert [socket.name for socket in node.inputs] == ["Direction", "Roughness"]
 assert [socket.name for socket in node.outputs] == ["Reflection", "Irradiance", "Combined"]
 assert node.inputs["Direction"].type == "VECTOR"
 assert node.inputs["Direction"].hide_value is True
+assert node.inputs["Roughness"].type == "VALUE"
+assert node.inputs["Roughness"].default_value == 0.0
 assert node.outputs["Reflection"].type == "RGBA"
 assert node.outputs["Irradiance"].type == "RGBA"
 assert node.outputs["Combined"].type == "RGBA"

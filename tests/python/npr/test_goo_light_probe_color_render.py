@@ -65,7 +65,9 @@ def make_emission_material(name, color):
     return material
 
 
-def make_light_probe_color_material(output_name, use_custom_direction=False, direct_surface=False):
+def make_light_probe_color_material(
+    output_name, use_custom_direction=False, direct_surface=False, roughness=0.0
+):
     material = bpy.data.materials.new(f"LightProbeColor_{output_name}")
     material.use_nodes = True
 
@@ -82,6 +84,7 @@ def make_light_probe_color_material(output_name, use_custom_direction=False, dir
 
     probe_color = nodes.new("ShaderNodeLightProbeColor")
     probe_color.location = (0.0, 0.0)
+    probe_color.inputs["Roughness"].default_value = roughness
 
     if use_custom_direction:
         direction = nodes.new("ShaderNodeCombineXYZ")
@@ -166,6 +169,8 @@ assert_green_probe(render_center_pixel(), "Combined", minimum_green=0.8, max_oth
 
 front_plane.data.materials.clear()
 front_plane.data.materials.append(
-    make_light_probe_color_material("Reflection", use_custom_direction=True)
+    make_light_probe_color_material("Reflection", use_custom_direction=True, roughness=1.0)
 )
-assert_green_probe(render_center_pixel(), "Reflection with custom direction", minimum_green=0.8, max_other=0.1)
+assert_green_probe(
+    render_center_pixel(), "Reflection with custom direction and roughness", minimum_green=0.8, max_other=0.1
+)

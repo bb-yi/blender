@@ -24,6 +24,7 @@ float3 light_probe_color_resolve_shading_normal()
 
 [[node]]
 void node_light_probe_color(float3 direction,
+                            float roughness,
                             out float4 reflection,
                             out float4 irradiance,
                             out float4 combined)
@@ -39,13 +40,14 @@ void node_light_probe_color(float3 direction,
   float3 reflection_direction = light_probe_color_safe_direction(direction,
                                                                 reflected_view_direction);
   float3 irradiance_direction = light_probe_color_safe_direction(direction, shading_normal);
+  float reflection_lod = sphere_probe_roughness_to_lod(saturate(roughness));
 
   LightProbeSample probe_sample = lightprobe_load(g_data.P, geometry_normal, view_vector);
   probe_sample.volume_irradiance = spherical_harmonics_clamp(probe_sample.volume_irradiance,
                                                              uniform_buf.clamp.surface_indirect);
 
   float3 reflection_rgb = lightprobe_spherical_sample_normalized_with_parallax(
-      probe_sample, g_data.P, reflection_direction, 0.0f);
+      probe_sample, g_data.P, reflection_direction, reflection_lod);
   float3 irradiance_rgb = max(spherical_harmonics_evaluate_lambert(irradiance_direction,
                                                                    probe_sample.volume_irradiance),
                               float3(0.0f));
