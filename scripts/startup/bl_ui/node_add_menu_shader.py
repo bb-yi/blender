@@ -57,6 +57,54 @@ def light_eevee_shader_nodes_poll(context):
             is_light)
 
 
+def light_eevee_shader_node_type_supported(node_idname):
+    return node_idname in {
+        "ShaderNodeEeveeLightShaderInfo",
+        "ShaderNodeEeveeLightShaderOutput",
+        "ShaderNodeRGB",
+        "ShaderNodeValue",
+        "ShaderNodeSceneTime",
+        "ShaderNodeBlackbody",
+        "ShaderNodeBrightContrast",
+        "ShaderNodeValToRGB",
+        "ShaderNodeGamma",
+        "ShaderNodeHueSaturation",
+        "ShaderNodeInvert",
+        "ShaderNodeMix",
+        "ShaderNodeRGBCurve",
+        "ShaderNodeWavelength",
+        "ShaderNodeCombineColor",
+        "ShaderNodeSeparateColor",
+        "ShaderNodeRGBToBW",
+        "ShaderNodeTexBrick",
+        "ShaderNodeTexChecker",
+        "ShaderNodeTexGabor",
+        "ShaderNodeTexGradient",
+        "ShaderNodeTexHexagon",
+        "ShaderNodeTexImage",
+        "ShaderNodeTexMagic",
+        "ShaderNodeTexNoise",
+        "ShaderNodeTexVoronoi",
+        "ShaderNodeTexWave",
+        "ShaderNodeWaterRipples",
+        "ShaderNodeTexWhiteNoise",
+        "ShaderNodeCombineXYZ",
+        "ShaderNodeSeparateXYZ",
+        "ShaderNodeMapRange",
+        "ShaderNodeMapping",
+        "ShaderNodeNormal",
+        "ShaderNodeVectorCurve",
+        "ShaderNodeVectorMath",
+        "ShaderNodeVectorRotate",
+        "ShaderNodeVectorTransform",
+        "ShaderNodeClamp",
+        "ShaderNodeFloatCurve",
+        "ShaderNodeMath",
+        "NodeFrame",
+        "NodeReroute",
+    }
+
+
 def object_eevee_shader_nodes_poll(context):
     return (object_shader_nodes_poll(context) and
             eevee_shader_nodes_poll(context))
@@ -119,6 +167,17 @@ class NODE_MT_shader_node_input_base(node_add_menu.NodeMenu):
 
     def draw(self, context):
         layout = self.layout
+
+        if light_eevee_shader_nodes_poll(context):
+            self.node_operator(layout, "ShaderNodeRGB")
+            self.node_operator(layout, "ShaderNodeValue")
+            self.node_operator(layout, "ShaderNodeSceneTime")
+            self.node_operator(
+                layout,
+                "ShaderNodeEeveeLightShaderInfo",
+                label="Light Shader Info",
+            )
+            return
 
         self.node_operator(layout, "ShaderNodeAmbientOcclusion")
         self.node_operator(layout, "ShaderNodeAttribute")
@@ -284,6 +343,14 @@ class NODE_MT_shader_node_output_base(node_add_menu.NodeMenu):
     def draw(self, context):
         layout = self.layout
 
+        if light_eevee_shader_nodes_poll(context):
+            self.node_operator(
+                layout,
+                "ShaderNodeEeveeLightShaderOutput",
+                label="Light Shader Output",
+            )
+            return
+
         self.node_operator(
             layout,
             "ShaderNodeOutputAOV",
@@ -340,6 +407,9 @@ class NODE_MT_shader_node_shader_base(node_add_menu.NodeMenu):
 
     def draw(self, context):
         layout = self.layout
+
+        if light_eevee_shader_nodes_poll(context):
+            return
 
         self.node_operator(
             layout,
@@ -476,6 +546,23 @@ class NODE_MT_shader_node_color_base(node_add_menu.NodeMenu):
     def draw(self, context):
         layout = self.layout
 
+        if light_eevee_shader_nodes_poll(context):
+            self.node_operator(layout, "ShaderNodeBlackbody")
+            self.node_operator(layout, "ShaderNodeBrightContrast")
+            self.node_operator(layout, "ShaderNodeValToRGB")
+            self.node_operator(layout, "ShaderNodeGamma")
+            self.node_operator(layout, "ShaderNodeHueSaturation")
+            self.node_operator(layout, "ShaderNodeInvert")
+            self.color_mix_node(context, layout)
+            self.node_operator(layout, "ShaderNodeRGBCurve")
+            self.node_operator(layout, "ShaderNodeWavelength")
+            layout.separator()
+            self.node_operator(layout, "ShaderNodeCombineColor")
+            self.node_operator(layout, "ShaderNodeSeparateColor")
+            layout.separator()
+            self.node_operator(layout, "ShaderNodeRGBToBW")
+            return
+
         layout.separator()
         self.node_operator(layout, "ShaderNodeBlackbody")
         self.node_operator(layout, "ShaderNodeBrightContrast")
@@ -500,8 +587,23 @@ class NODE_MT_shader_node_color_base(node_add_menu.NodeMenu):
 class NODE_MT_shader_node_texture_base(node_add_menu.NodeMenu):
     bl_label = "Texture"
 
-    def draw(self, _context):
+    def draw(self, context):
         layout = self.layout
+
+        if light_eevee_shader_nodes_poll(context):
+            self.node_operator(layout, "ShaderNodeTexBrick")
+            self.node_operator(layout, "ShaderNodeTexChecker")
+            self.node_operator(layout, "ShaderNodeTexGabor")
+            self.node_operator(layout, "ShaderNodeTexGradient")
+            self.node_operator(layout, "ShaderNodeTexHexagon")
+            self.node_operator(layout, "ShaderNodeTexImage")
+            self.node_operator(layout, "ShaderNodeTexMagic")
+            self.node_operator(layout, "ShaderNodeTexNoise")
+            self.node_operator(layout, "ShaderNodeTexVoronoi")
+            self.node_operator(layout, "ShaderNodeTexWave")
+            self.node_operator(layout, "ShaderNodeWaterRipples")
+            self.node_operator(layout, "ShaderNodeTexWhiteNoise")
+            return
 
         self.node_operator(layout, "ShaderNodeTexBrick")
         self.node_operator(layout, "ShaderNodeTexChecker")
@@ -512,14 +614,14 @@ class NODE_MT_shader_node_texture_base(node_add_menu.NodeMenu):
         self.node_operator(
             layout,
             "ShaderNodeSdfPrimitive",
-            poll=eevee_shader_nodes_poll(_context),
+            poll=eevee_shader_nodes_poll(context),
         )
         self.node_operator(layout, "ShaderNodeTexIES")
         self.node_operator(layout, "ShaderNodeTexImage")
         self.node_operator(
             layout,
             "ShaderNodeRenderTexture",
-            poll=object_eevee_shader_nodes_poll(_context),
+            poll=object_eevee_shader_nodes_poll(context),
         )
         self.node_operator(layout, "ShaderNodeTexMagic")
         self.node_operator(layout, "ShaderNodeTexNoise")
@@ -538,6 +640,26 @@ class NODE_MT_shader_node_vector_base(node_add_menu.NodeMenu):
 
     def draw(self, context):
         layout = self.layout
+
+        if light_eevee_shader_nodes_poll(context):
+            self.node_operator(layout, "ShaderNodeCombineXYZ")
+            props = self.node_operator(layout, "ShaderNodeMapRange")
+            ops = props.settings.add()
+            ops.name = "data_type"
+            ops.value = "'FLOAT_VECTOR'"
+            props = self.node_operator(layout, "ShaderNodeMix", label="Mix Vector")
+            ops = props.settings.add()
+            ops.name = "data_type"
+            ops.value = "'VECTOR'"
+            self.node_operator(layout, "ShaderNodeSeparateXYZ")
+            layout.separator()
+            self.node_operator(layout, "ShaderNodeMapping")
+            self.node_operator(layout, "ShaderNodeNormal")
+            self.node_operator(layout, "ShaderNodeVectorCurve")
+            self.node_operator_with_searchable_enum(context, layout, "ShaderNodeVectorMath", "operation")
+            self.node_operator(layout, "ShaderNodeVectorRotate")
+            self.node_operator(layout, "ShaderNodeVectorTransform")
+            return
 
         self.node_operator(layout, "ShaderNodeCombineXYZ")
         props = self.node_operator(layout, "ShaderNodeMapRange")
@@ -584,6 +706,14 @@ class NODE_MT_shader_node_math_base(node_add_menu.NodeMenu):
     def draw(self, context):
         layout = self.layout
 
+        if light_eevee_shader_nodes_poll(context):
+            self.node_operator(layout, "ShaderNodeClamp")
+            self.node_operator(layout, "ShaderNodeFloatCurve")
+            self.node_operator(layout, "ShaderNodeMapRange")
+            self.node_operator_with_searchable_enum(context, layout, "ShaderNodeMath", "operation")
+            self.node_operator(layout, "ShaderNodeMix")
+            return
+
         self.node_operator(layout, "ShaderNodeClamp")
         if eevee_shader_nodes_poll(context):
             self.node_operator_with_searchable_enum(
@@ -605,8 +735,11 @@ class NODE_MT_shader_node_math_base(node_add_menu.NodeMenu):
 class NODE_MT_shader_node_displacement_base(node_add_menu.NodeMenu):
     bl_label = "Displacement"
 
-    def draw(self, _context):
+    def draw(self, context):
         layout = self.layout
+
+        if light_eevee_shader_nodes_poll(context):
+            return
 
         self.node_operator(layout, "ShaderNodeBump")
         self.node_operator(layout, "ShaderNodeDisplacement")
@@ -621,6 +754,11 @@ class NODE_MT_shader_node_utilities_base(node_add_menu.NodeMenu):
 
     def draw(self, context):
         layout = self.layout
+
+        if light_eevee_shader_nodes_poll(context):
+            self.draw_menu(layout, "Utilities/Math")
+            self.draw_menu(layout, "Utilities/Vector")
+            return
 
         self.draw_menu(layout, "Utilities/Math")
         self.draw_menu(layout, "Utilities/Vector")
@@ -663,11 +801,13 @@ class NODE_MT_shader_node_layout_base(node_add_menu.NodeMenu):
     bl_label = "Layout"
     menu_path = "Layout"
 
-    def draw(self, _context):
+    def draw(self, context):
         layout = self.layout
 
         self.node_operator(layout, "NodeFrame", search_weight=-1)
         self.node_operator(layout, "NodeReroute")
+        if light_eevee_shader_nodes_poll(context):
+            return
         layout.separator()
         self.node_operator(layout, "ShaderNodePortalIn")
         self.node_operator(layout, "ShaderNodePortalOut")
@@ -684,8 +824,18 @@ class NODE_MT_shader_node_all_base(node_add_menu.NodeMenu):
     # & Swap menus can share the same layout while each using their
     # corresponding menus
     def draw(self, context):
-        del context
         layout = self.layout
+        if light_eevee_shader_nodes_poll(context):
+            self.draw_menu(layout, "Input")
+            self.draw_menu(layout, "Output")
+            layout.separator()
+            self.draw_menu(layout, "Color")
+            self.draw_menu(layout, "Texture")
+            self.draw_menu(layout, "Utilities")
+            layout.separator()
+            self.draw_menu(layout, "Layout")
+            return
+
         self.draw_menu(layout, "Input")
         self.draw_menu(layout, "Output")
         layout.separator()

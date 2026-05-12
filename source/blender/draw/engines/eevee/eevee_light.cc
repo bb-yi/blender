@@ -568,6 +568,7 @@ void LightModule::begin_sync()
   local_lights_len_ = 0;
   light_shader_materials_.clear();
   light_shader_lights_.clear();
+  has_time_dependent_light_shaders_ = false;
 
   if (use_sun_lights_ && inst_.world.sun_threshold() > 0.0f) {
     if (inst_.pipelines.world.use_lightpath_node()) {
@@ -626,6 +627,7 @@ void LightModule::sync_light(const Object *ob, ObjectHandle &handle)
       light.light_shader_index = light_shader_materials_.size();
       light_shader_materials_.append(gpumat);
       light_shader_lights_.append(static_cast<const LightData &>(light));
+      has_time_dependent_light_shaders_ |= GPU_material_is_time_dependent(gpumat);
       inst_.manager->register_layer_attributes(gpumat);
     }
   }

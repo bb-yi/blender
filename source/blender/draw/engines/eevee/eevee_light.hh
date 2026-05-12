@@ -175,6 +175,7 @@ class LightModule {
   Vector<GPUMaterial *> light_shader_materials_;
   Vector<LightData> light_shader_lights_;
   LightDataBuf light_shader_light_buf_ = {"LightShader.Lights"};
+  bool has_time_dependent_light_shaders_ = false;
   /** Culling information. */
   LightCullingDataBuf culling_data_buf_ = {"LightCull_data"};
   /** Z-distance matching the key for each visible lights. Used for sorting. */
@@ -218,6 +219,11 @@ class LightModule {
   int light_count() const
   {
     return lights_len_;
+  }
+
+  bool has_time_dependent_light_shaders() const
+  {
+    return has_time_dependent_light_shaders_;
   }
 
   template<typename PassType> void bind_resources(PassType &pass)

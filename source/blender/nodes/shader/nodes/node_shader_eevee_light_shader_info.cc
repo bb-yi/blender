@@ -13,10 +13,11 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.add_output<decl::Color>("Default Color");
   b.add_output<decl::Float>("Default Intensity");
   b.add_output<decl::Float>("Default Attenuation");
-  b.add_output<decl::Vector>("World Position");
-  b.add_output<decl::Vector>("Direction");
   b.add_output<decl::Float>("Distance");
   b.add_output<decl::Vector>("Light Space");
+  b.add_output<decl::Vector>("Direction");
+  b.add_output<decl::Vector>("World Position");
+  b.add_output<decl::Vector>("Rotation").description("XYZ Euler rotation of the light in radians");
 }
 
 static int node_shader_gpu_eevee_light_shader_info(GPUMaterial *mat,
