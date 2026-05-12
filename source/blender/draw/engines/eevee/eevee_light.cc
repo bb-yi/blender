@@ -106,6 +106,8 @@ void Light::sync(ShadowModule &shadows,
   this->shadow_jitter = (la->mode & LA_SHADOW_JITTER) != 0;
   this->lightgroup_id = max_ii(lightgroup_id, 0);
 
+  this->shadow_map_scale = la->shadow_map_scale;
+
   if (la->mode & LA_SHADOW) {
     shadow_ensure(shadows);
   }

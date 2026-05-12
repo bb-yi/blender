@@ -161,8 +161,8 @@ struct [[host_shared]] LightSunData {
   /** Angle covered by the light shape for shadow ray casting. */
   float shadow_angle;
   float shadow_angle_cos;
-  float _pad3;
-  float _pad4;
+  float focus_distance;
+  float focus_blend;
 
   /** Offset to convert from world units to tile space of the clipmap_lod_max. */
   float2 clipmap_origin;
@@ -203,11 +203,17 @@ struct [[host_shared]] LightData {
   bool32_t shadow_jitter;
   /** Numeric lightgroup used by Shader Info and GLSL light access. */
   int lightgroup_id;
+
   uint2 light_set_membership;
   /** Used by shadow sync. */
   /* TODO(fclem): this should be part of #eevee::Light struct. But for some reason it gets cleared
    * to zero after each sync cycle. */
   uint2 shadow_set_membership;
+
+  float shadow_map_scale;
+  float _pad7;
+  float _pad8;
+  float _pad9;
 
   union {
     union_t<struct LightLocalData> local;
