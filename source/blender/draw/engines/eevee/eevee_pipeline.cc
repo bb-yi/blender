@@ -1199,6 +1199,7 @@ void DeferredLayer::end_sync(bool is_first_pass,
           sub.bind_resources(inst_.uniform_data);
           sub.bind_resources(inst_.gbuffer);
           sub.bind_resources(inst_.lights);
+          inst_.lights.bind_light_shader_resources(sub);
           sub.bind_resources(inst_.shadows);
           sub.bind_resources(inst_.sampling);
           sub.bind_resources(inst_.render_textures);
@@ -1393,6 +1394,7 @@ gpu::Texture *DeferredLayer::render(View &main_view,
     inst_.gbuffer.bind(gbuffer_fb);
     inst_.manager->submit(gbuffer_ps_, render_view);
   }
+  inst_.lights.eval_light_shaders(render_view, extent);
 
   for (int i = 0; i < ARRAY_SIZE(direct_radiance_txs_); i++) {
     direct_radiance_txs_[i].acquire((closure_count_ > i) ? extent : int2(1),

@@ -158,6 +158,7 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
     uint64_t shader_uuid,
     bool compile_surface_graph,
     bool compile_npr_graph,
+    bool compile_light_shader_graph,
     bool force_npr_graph,
     bool deferred_compilation,
     GPUCodegenCallbackFn callback,
@@ -215,6 +216,7 @@ bool GPU_material_has_volume_output(GPUMaterial *mat);
 bool GPU_material_has_displacement_output(GPUMaterial *mat);
 bool GPU_material_has_depth_offset_output(GPUMaterial *mat);
 bool GPU_material_has_filter_output(GPUMaterial *mat);
+bool GPU_material_has_light_shader_output(GPUMaterial *mat);
 
 int GPU_material_filter_object_info_ensure(GPUMaterial *material, Object *object);
 int GPU_material_filter_object_info_count(const GPUMaterial *material);
@@ -418,6 +420,7 @@ struct GPUCodegenOutput {
   std::optional<GPUGraphOutput> depth_offset;
   GPUGraphOutput npr;
   GPUGraphOutput filter;
+  std::optional<GPUGraphOutput> light_shader;
   GPUGraphOutput composite;
   Vector<GPUGraphOutput> material_functions;
 
@@ -515,6 +518,7 @@ void GPU_material_output_thickness(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_output_depth_offset(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_output_npr(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_output_filter(GPUMaterial *material, GPUNodeLink *link);
+void GPU_material_output_light_shader(GPUMaterial *material, GPUNodeLink *link);
 
 void GPU_material_add_output_link_aov(GPUMaterial *material, GPUNodeLink *link, int hash);
 void GPU_material_add_output_link_outline(GPUMaterial *material, GPUNodeLink *link);

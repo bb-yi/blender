@@ -243,6 +243,8 @@
 #define RADIANCE_PREVIOUS_LAYER_TEX_SLOT 11
 #define OBJECT_ID_TEX_SLOT 12
 #define PREPASS_NORMAL_TEX_SLOT 13
+/* Only during deferred direct-light evaluation. Reuses a slot unused by that pass. */
+#define LIGHT_SHADER_TEX_SLOT 12
 /* Currently only used by ray-tracing, but might become used by forward too. */
 #define PLANAR_PROBE_DEPTH_TEX_SLOT 14
 #define PLANAR_PROBE_RADIANCE_TEX_SLOT 15
@@ -329,6 +331,8 @@
 #define LIGHT_ZBIN_BUF_SLOT 2
 #define LIGHT_TILE_BUF_SLOT 3
 #define IRRADIANCE_BRICK_BUF_SLOT 4
+/* Only during deferred direct-light evaluation. */
+#define LIGHT_SHADER_INDEX_BUF_SLOT 5
 #define SAMPLING_BUF_SLOT 6
 #define CRYPTOMATTE_BUF_SLOT 7
 /* Only during surface capture. */

@@ -42,6 +42,21 @@ def object_not_eevee_shader_nodes_poll(context):
             not eevee_shader_nodes_poll(context))
 
 
+def light_eevee_shader_nodes_poll(context):
+    snode = context.space_data
+    rna_type = getattr(getattr(snode, "id", None), "bl_rna", None)
+    is_light = False
+    while rna_type is not None:
+        if rna_type.identifier == "Light":
+            is_light = True
+            break
+        rna_type = getattr(rna_type, "base", None)
+    return (eevee_shader_nodes_poll(context) and
+            snode.tree_type == 'ShaderNodeTree' and
+            snode.shader_type == 'OBJECT' and
+            is_light)
+
+
 def object_eevee_shader_nodes_poll(context):
     return (object_shader_nodes_poll(context) and
             eevee_shader_nodes_poll(context))
@@ -200,6 +215,12 @@ class NODE_MT_shader_node_input_base(node_add_menu.NodeMenu):
         )
         self.node_operator(
             layout,
+            "ShaderNodeEeveeLightShaderInfo",
+            label="Light Shader Info",
+            poll=light_eevee_shader_nodes_poll(context),
+        )
+        self.node_operator(
+            layout,
             "ShaderNodeFilterObjectInfo",
             poll=filter_eevee_shader_nodes_poll(context),
         )
@@ -277,6 +298,12 @@ class NODE_MT_shader_node_output_base(node_add_menu.NodeMenu):
             layout,
             "ShaderNodeOutputLight",
             poll=object_not_eevee_shader_nodes_poll(context),
+        )
+        self.node_operator(
+            layout,
+            "ShaderNodeEeveeLightShaderOutput",
+            label="Light Shader Output",
+            poll=light_eevee_shader_nodes_poll(context),
         )
         self.node_operator(
             layout,

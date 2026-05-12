@@ -23,6 +23,10 @@
 
 #include "eevee_material_shared.hh"
 
+namespace blender {
+struct Light;
+}
+
 namespace blender::eevee {
 
 using StaticShader = gpu::StaticShader;
@@ -307,8 +311,12 @@ class ShaderModule {
                                 bNodeTree *nodetree,
                                 eMaterialPipeline pipeline_type,
                                 bool deferred_compilation);
+  GPUMaterial *light_shader_get(blender::Light *blender_light,
+                                bNodeTree *nodetree,
+                                bool deferred_compilation);
 
   void material_create_info_amend(GPUMaterial *mat, GPUCodegenOutput *codegen);
+  void light_create_info_amend(GPUMaterial *mat, GPUCodegenOutput *codegen);
 
   /** Only to be used by Instance constructor. */
   static ShaderModule *module_get();

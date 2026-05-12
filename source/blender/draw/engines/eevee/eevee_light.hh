@@ -21,9 +21,13 @@
 
 #pragma once
 
+#include <memory>
+
 #include "DNA_light_types.h"
 
 #include "DRW_gpu_wrapper.hh"
+
+#include "BLI_vector.hh"
 
 #include "eevee_camera.hh"
 #include "eevee_light_shared.hh"
@@ -47,11 +51,13 @@ using LightCullingTileBuf = draw::StorageArrayBuffer<uint, LIGHT_CHUNK, true>;
 using LightCullingZbinBuf = draw::StorageArrayBuffer<uint, CULLING_ZBIN_COUNT, true>;
 using LightCullingZdistBuf = draw::StorageArrayBuffer<float, LIGHT_CHUNK, true>;
 using LightDataBuf = draw::StorageArrayBuffer<LightData, LIGHT_CHUNK>;
+using LightShaderIndexBuf = draw::StorageArrayBuffer<int, LIGHT_CHUNK>;
 
 struct Light : public LightData, NonCopyable {
  public:
   bool initialized = false;
   bool used = false;
+  int light_shader_index = -1;
 
   /** Pointers to source Shadow. Type depends on `LightData::type`. */
   ShadowDirectional *directional = nullptr;
@@ -70,6 +76,7 @@ struct Light : public LightData, NonCopyable {
     *static_cast<LightData *>(this) = other;
     this->initialized = other.initialized;
     this->used = other.used;
+    this->light_shader_index = other.light_shader_index;
     this->directional = other.directional;
     this->punctual = other.punctual;
     other.directional = nullptr;
@@ -156,6 +163,14 @@ class LightModule {
 
   /** LightData buffer used for rendering. Filled by the culling pass. */
   LightDataBuf culling_light_buf_ = {"Lights_culled"};
+  LightShaderIndexBuf light_shader_src_index_buf_ = {"LightShader.SrcIndices"};
+  LightShaderIndexBuf light_shader_index_buf_ = {"LightShader.CulledIndices"};
+  Texture light_shader_dummy_tx_ = {"LightShader.Dummy"};
+  Texture light_shader_tx_ = {"LightShader"};
+  Vector<std::unique_ptr<Framebuffer>> light_shader_fbs_;
+  Vector<GPUMaterial *> light_shader_materials_;
+  Vector<LightData> light_shader_lights_;
+  LightDataBuf light_shader_light_buf_ = {"LightShader.Lights"};
   /** Culling information. */
   LightCullingDataBuf culling_data_buf_ = {"LightCull_data"};
   /** Z-distance matching the key for each visible lights. Used for sorting. */
@@ -192,6 +207,7 @@ class LightModule {
    * Update acceleration structure for the given view.
    */
   void set_view(View &view, const int2 extent);
+  void eval_light_shaders(View &view, const int2 extent);
 
   void debug_draw(View &view, gpu::FrameBuffer *view_fb);
 
@@ -209,10 +225,20 @@ class LightModule {
     pass.bind_ubo(WORLD_SUNLIGHT_BUF_SLOT, world_sunlight_ubo());
   }
 
+  template<typename PassType> void bind_light_shader_resources(PassType &pass)
+  {
+    pass.bind_texture(LIGHT_SHADER_TEX_SLOT,
+                      (light_shader_materials_.is_empty() || !light_shader_tx_.is_valid()) ?
+                          &light_shader_dummy_tx_ :
+                          &light_shader_tx_);
+    pass.bind_ssbo(LIGHT_SHADER_INDEX_BUF_SLOT, &light_shader_index_buf_);
+  }
+
  private:
   gpu::UniformBuf *world_sunlight_ubo() const;
   void culling_pass_sync();
   void update_pass_sync();
+  void light_shader_pass_sync(const int2 extent);
   void debug_pass_sync();
   void culling_extent_sync(const int2 render_extent);
 

@@ -15,16 +15,39 @@
 #include "eevee_light.hh"
 
 #include "DNA_light_types.h"
+#include "DNA_node_types.h"
 #include "DNA_sdna_type_ids.hh"
 
 #include "BKE_light.h"
+#include "BKE_node_legacy_types.hh"
 
 namespace blender::eevee {
+
+static bool light_nodetree_has_eevee_light_shader_output(const bNodeTree *nodetree)
+{
+  if (nodetree == nullptr) {
+    return false;
+  }
+  for (const bNode &node : nodetree->nodes) {
+    if (node.type_legacy == SH_NODE_EEVEE_LIGHT_SHADER_OUTPUT) {
+      return true;
+    }
+  }
+  return false;
+}
 
 /* Convert by putting the least significant bits in the first component. */
 static uint2 uint64_to_uint2(uint64_t data)
 {
   return {uint(data), uint(data >> uint64_t(32))};
+}
+
+static void light_shader_index_buf_ensure_no_shader(LightShaderIndexBuf &index_buf, int len)
+{
+  index_buf.resize(len);
+  for (const int i : IndexRange(len)) {
+    index_buf[i] = -1;
+  }
 }
 
 /* -------------------------------------------------------------------- */
@@ -426,6 +449,8 @@ void LightModule::begin_sync()
 
   sun_lights_len_ = 0;
   local_lights_len_ = 0;
+  light_shader_materials_.clear();
+  light_shader_lights_.clear();
 
   if (use_sun_lights_ && inst_.world.sun_threshold() > 0.0f) {
     if (inst_.pipelines.world.use_lightpath_node()) {
@@ -463,6 +488,19 @@ void LightModule::sync_light(const Object *ob, ObjectHandle &handle)
                light_threshold_,
                la.lightgroup_id);
   }
+  light.light_shader_index = -1;
+  if (light_nodetree_has_eevee_light_shader_output(la.nodetree) && !inst_.is_baking()) {
+    GPUMaterial *gpumat = inst_.shaders.light_shader_get(
+        const_cast<blender::Light *>(&la), la.nodetree, false);
+    if (gpumat != nullptr && GPU_material_status(gpumat) == GPU_MAT_SUCCESS &&
+        GPU_material_has_light_shader_output(gpumat))
+    {
+      light.light_shader_index = light_shader_materials_.size();
+      light_shader_materials_.append(gpumat);
+      light_shader_lights_.append(static_cast<const LightData &>(light));
+      inst_.manager->register_layer_attributes(gpumat);
+    }
+  }
   sun_lights_len_ += int(is_sun_light(light.type));
   local_lights_len_ += int(!is_sun_light(light.type));
 }
@@ -476,6 +514,7 @@ void LightModule::end_sync()
   /* NOTE: We resize this buffer before removing deleted lights. */
   int lights_allocated = ceil_to_multiple_u(max_ii(light_map_.size(), 1), LIGHT_CHUNK);
   light_buf_.resize(lights_allocated);
+  light_shader_index_buf_ensure_no_shader(light_shader_src_index_buf_, lights_allocated);
 
   /* Track light deletion. */
   /* Indices inside GPU data array. */
@@ -495,12 +534,14 @@ void LightModule::end_sync()
     int dst_idx = is_sun_light(light.type) ? sun_lights_idx++ : local_lights_idx++;
     /* Put all light data into global data SSBO. */
     light_buf_[dst_idx] = light;
+    light_shader_src_index_buf_[dst_idx] = light.light_shader_index;
 
     /* Untag for next sync. */
     light.used = false;
   }
   /* This scene data buffer is then immutable after this point. */
   light_buf_.push_update();
+  light_shader_src_index_buf_.push_update();
 
   /* If exceeding the limit, just trim off the excess to avoid glitchy rendering. */
   if (sun_lights_len_ + local_lights_len_ > CULLING_MAX_ITEM) {
@@ -515,7 +556,8 @@ void LightModule::end_sync()
   culling_key_buf_.resize(lights_allocated);
   culling_zdist_buf_.resize(lights_allocated);
   culling_light_buf_.resize(lights_allocated);
-
+  light_shader_index_buf_ensure_no_shader(light_shader_index_buf_, lights_allocated);
+  light_shader_pass_sync(inst_.render_extent_get());
   culling_extent_sync(inst_.render_extent_get());
 }
 
@@ -579,6 +621,8 @@ void LightModule::culling_pass_sync()
     sub.bind_ssbo("out_light_buf", culling_light_buf_);
     sub.bind_ssbo("out_zdist_buf", culling_zdist_buf_);
     sub.bind_ssbo("out_key_buf", culling_key_buf_);
+    sub.bind_ssbo("in_light_shader_index_buf", light_shader_src_index_buf_);
+    sub.bind_ssbo("out_light_shader_index_buf", light_shader_index_buf_);
     sub.dispatch(int3(culling_select_dispatch_size, 1, 1));
     sub.barrier(GPU_BARRIER_SHADER_STORAGE);
   }
@@ -590,6 +634,8 @@ void LightModule::culling_pass_sync()
     sub.bind_ssbo("out_light_buf", culling_light_buf_);
     sub.bind_ssbo("in_zdist_buf", culling_zdist_buf_);
     sub.bind_ssbo("in_key_buf", culling_key_buf_);
+    sub.bind_ssbo("in_light_shader_index_buf", light_shader_src_index_buf_);
+    sub.bind_ssbo("out_light_shader_index_buf", light_shader_index_buf_);
     sub.dispatch(int3(culling_sort_dispatch_size, 1, 1));
     sub.barrier(GPU_BARRIER_SHADER_STORAGE);
   }
@@ -631,6 +677,68 @@ void LightModule::update_pass_sync()
   pass.bind_resources(inst_.sampling);
   pass.dispatch(int3(shadow_setup_dispatch_size, 1, 1));
   pass.barrier(GPU_BARRIER_SHADER_STORAGE);
+}
+
+void LightModule::light_shader_pass_sync(const int2 extent)
+{
+  constexpr eGPUTextureUsage usage = GPU_TEXTURE_USAGE_ATTACHMENT | GPU_TEXTURE_USAGE_SHADER_READ;
+  const float white[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+  light_shader_dummy_tx_.ensure_2d_array(
+      gpu::TextureFormat::SFLOAT_16_16_16_16, int2(1), 1, usage, white);
+  if (light_shader_materials_.is_empty()) {
+    light_shader_tx_.free();
+    light_shader_fbs_.clear();
+    return;
+  }
+
+  const int layer_len = light_shader_materials_.size();
+  const int lights_allocated = ceil_to_multiple_u(max_ii(layer_len, 1), LIGHT_CHUNK);
+  light_shader_light_buf_.resize(lights_allocated);
+  for (const int layer : light_shader_lights_.index_range()) {
+    light_shader_light_buf_[layer] = light_shader_lights_[layer];
+  }
+  light_shader_light_buf_.push_update();
+
+  light_shader_tx_.ensure_2d_array(
+      gpu::TextureFormat::SFLOAT_16_16_16_16, math::max(extent, int2(1)), layer_len, usage);
+  light_shader_tx_.ensure_layer_views();
+
+  while (light_shader_fbs_.size() < layer_len) {
+    light_shader_fbs_.append(std::make_unique<Framebuffer>("LightShader.Framebuffer"));
+  }
+  while (light_shader_fbs_.size() > layer_len) {
+    light_shader_fbs_.remove_last();
+  }
+  for (const int layer : light_shader_materials_.index_range()) {
+    light_shader_fbs_[layer]->ensure(
+        GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE_LAYER(light_shader_tx_.layer_view(layer), 0));
+  }
+}
+
+void LightModule::eval_light_shaders(View &view, const int2 extent)
+{
+  if (light_shader_materials_.is_empty()) {
+    return;
+  }
+
+  light_shader_pass_sync(extent);
+
+  for (const int layer : light_shader_materials_.index_range()) {
+    PassSimple pass = {"LightShader.Pass"};
+    pass.state_set(DRW_STATE_WRITE_COLOR);
+    pass.framebuffer_set(&*light_shader_fbs_[layer]);
+    pass.clear_color(float4(1.0f));
+    pass.material_set(*inst_.manager, light_shader_materials_[layer]);
+    pass.push_constant("light_index", layer);
+    pass.bind_resources(inst_.uniform_data);
+    pass.bind_resources(inst_.gbuffer);
+    pass.bind_resources(inst_.hiz_buffer.front);
+    pass.bind_resources(inst_.lights);
+    pass.bind_ssbo(LIGHT_BUF_SLOT, &light_shader_light_buf_);
+    pass.draw_procedural(GPU_PRIM_TRIS, 1, 3);
+    inst_.manager->submit(pass, view);
+  }
+  GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH);
 }
 
 void LightModule::debug_pass_sync()

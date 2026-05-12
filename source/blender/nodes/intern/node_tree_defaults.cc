@@ -87,6 +87,27 @@ void node_tree_shader_default(const bContext *C, Main *bmain, ID *id)
                          *bke::node_find_socket(*shader, SOCK_OUT, "Emission"),
                          *output,
                          *bke::node_find_socket(*output, SOCK_IN, "Surface"));
+
+      bNode *light_shader_info = bke::node_add_static_node(
+          nullptr, *ntree, SH_NODE_EEVEE_LIGHT_SHADER_INFO);
+      bNode *light_shader_output = bke::node_add_static_node(
+          nullptr, *ntree, SH_NODE_EEVEE_LIGHT_SHADER_OUTPUT);
+      bke::node_add_link(*ntree,
+                         *light_shader_info,
+                         *bke::node_find_socket(*light_shader_info, SOCK_OUT, "Default Color"),
+                         *light_shader_output,
+                         *bke::node_find_socket(*light_shader_output, SOCK_IN, "Color"));
+      bke::node_add_link(
+          *ntree,
+          *light_shader_info,
+          *bke::node_find_socket(*light_shader_info, SOCK_OUT, "Default Attenuation"),
+          *light_shader_output,
+          *bke::node_find_socket(*light_shader_output, SOCK_IN, "Attenuation"));
+
+      light_shader_info->location[0] = -200.0f;
+      light_shader_info->location[1] = -140.0f;
+      light_shader_output->location[0] = 200.0f;
+      light_shader_output->location[1] = -140.0f;
     }
 
     shader->location[0] = -200.0f;

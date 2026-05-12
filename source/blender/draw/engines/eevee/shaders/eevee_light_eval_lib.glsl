@@ -156,6 +156,14 @@ void light_eval_single(uint l_idx,
                                        (stack.cl[0].type == LIGHT_TRANSLUCENT_WITH_THICKNESS);
 
   float attenuation = light_attenuation_surface(light, is_directional, lv);
+#ifdef LIGHT_SHADER_TEXTURE_EVAL
+  int light_shader_index = light_shader_index_buf[l_idx];
+  if (!is_transmission && light_shader_index >= 0) {
+    float4 light_shader = texelFetch(light_shader_tx, int3(int2(PIXEL), light_shader_index), 0);
+    light.color = light_shader.rgb;
+    attenuation = light_shader.a;
+  }
+#endif
 
   if (!is_translucent_with_thickness) {
     /* Only do attenuation for this case, since we integrate the whole sphere for translucency.

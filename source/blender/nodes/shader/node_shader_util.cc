@@ -141,6 +141,18 @@ bool object_eevee_shader_nodes_poll(const bContext *C)
   return STREQ(engine_type->idname, "BLENDER_EEVEE");
 }
 
+bool light_eevee_shader_nodes_poll(const bContext *C)
+{
+  const SpaceNode *snode = CTX_wm_space_node(C);
+  if (snode == nullptr || snode->shaderfrom != SNODE_SHADER_OBJECT || snode->id == nullptr ||
+      GS(snode->id->name) != ID_LA)
+  {
+    return false;
+  }
+  const RenderEngineType *engine_type = CTX_data_engine_type(C);
+  return engine_type != nullptr && STREQ(engine_type->idname, "BLENDER_EEVEE");
+}
+
 bool object_or_npr_eevee_shader_nodes_poll(const bContext *C)
 {
   const SpaceNode *snode = CTX_wm_space_node(C);

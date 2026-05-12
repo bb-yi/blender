@@ -1057,6 +1057,23 @@ static bNode *ntreeShaderFilterOutputNode(bNodeTree *localtree)
   return output;
 }
 
+static bNode *ntreeShaderEeveeLightShaderOutputNode(bNodeTree *localtree)
+{
+  bNode *output = nullptr;
+  for (bNode &node : localtree->nodes) {
+    if (node.type_legacy != SH_NODE_EEVEE_LIGHT_SHADER_OUTPUT) {
+      continue;
+    }
+    if (output == nullptr) {
+      output = &node;
+    }
+    else if ((node.flag & NODE_DO_OUTPUT) && !(output->flag & NODE_DO_OUTPUT)) {
+      output = &node;
+    }
+  }
+  return output;
+}
+
 static bool gpu_material_uses_filter_domain(GPUMaterial *mat)
 {
   const Material *material = GPU_material_get_material(mat);
@@ -1109,6 +1126,21 @@ bNodeTree *ntreeGPUNPRNodes(bNodeTree *material_tree, GPUMaterial *mat)
 
   ntreeShaderEndExecTree(exec);
   return localtree;
+}
+
+void ntreeGPULightShaderNodes(bNodeTree *localtree, GPUMaterial *mat)
+{
+  ntree_shader_unlink_script_nodes(localtree);
+  bke::node_tree_runtime::materialize_shader_portals(*localtree);
+  bNode *output = ntreeShaderEeveeLightShaderOutputNode(localtree);
+
+  ntree_shader_pruned_unused(localtree, output);
+
+  bNodeTreeExec *exec = ntreeShaderBeginExecTree(localtree);
+  if (output != nullptr) {
+    ntreeExecGPUNodes(exec, mat, output);
+  }
+  ntreeShaderEndExecTree(exec);
 }
 
 void ntreeGPUMaterialNodes(bNodeTree *localtree, GPUMaterial *mat)

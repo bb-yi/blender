@@ -11,6 +11,7 @@
 
 #include "DEG_depsgraph.hh"
 
+#include "DNA_light_types.h"
 #include "DNA_material_types.h"
 #include "DNA_node_types.h"
 #include "DNA_scene_types.h"
@@ -63,6 +64,11 @@ static void propagate_node_tree_changes(Main &bmain, const std::optional<Span<ID
     DEG_id_tag_update(&ntree.id, ID_RECALC_SYNC_TO_EVAL);
 
     if (ntree.type != NTREE_SHADER || GS(owner_id.name) != ID_MA) {
+      if (ntree.type == NTREE_SHADER && GS(owner_id.name) == ID_LA) {
+        Light &light = reinterpret_cast<Light &>(owner_id);
+        GPU_material_free(&light.gpumaterial);
+        DEG_id_tag_update(&light.id, ID_RECALC_SHADING | ID_RECALC_SYNC_TO_EVAL);
+      }
       return;
     }
 

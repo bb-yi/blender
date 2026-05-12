@@ -666,6 +666,10 @@ void GPUCodegen::generate_graphs()
   output.filter = graph_serialize(GPU_NODE_TAG_FILTER | GPU_NODE_TAG_AOV,
                                   graph.outlink_filter,
                                   nullptr);
+  if (graph.outlink_light_shader != nullptr) {
+    output.light_shader = graph_serialize(
+        GPU_NODE_TAG_LIGHT_SHADER, graph.outlink_light_shader, "float4(1.0f)");
+  }
   if (!BLI_listbase_is_empty(&graph.outlink_compositor)) {
     output.composite = graph_serialize(GPU_NODE_TAG_COMPOSITOR);
   }
