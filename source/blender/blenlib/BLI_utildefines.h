@@ -567,7 +567,7 @@ extern bool BLI_memory_is_zero(const void *arr, size_t arr_size);
 #define EXPR_NOP(expr) (void)(0 ? ((void)(expr), 1) : 0)
 
 #if defined(_MSC_VER) && !defined(__clang__)
-#  define BLI_NO_UNIQUE_ADDRESS [[msvc::no_unique_address]]
+#  define BLI_NO_UNIQUE_ADDRESS
 #elif defined(__has_cpp_attribute)
 #  if __has_cpp_attribute(no_unique_address)
 #    define BLI_NO_UNIQUE_ADDRESS [[no_unique_address]]
