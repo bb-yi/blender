@@ -723,70 +723,6 @@ static void version_add_outline_control_freestyle_edge_input(Main *bmain)
   FOREACH_NODETREE_END;
 }
 
-static void version_migrate_image_to_closure_legacy_image_settings(FileData *fd, Main *bmain)
-{
-  if (!DNA_struct_member_exists(fd->filesdna, "Image", "char", "image_to_closure_texture_type")) {
-    return;
-  }
-  const bool has_size_mode = DNA_struct_member_exists(
-      fd->filesdna, "Image", "char", "image_to_closure_texture_size_mode");
-  const bool has_interpolation = DNA_struct_member_exists(
-      fd->filesdna, "Image", "char", "image_to_closure_interpolation");
-  const bool has_extension = DNA_struct_member_exists(
-      fd->filesdna, "Image", "char", "image_to_closure_extension");
-  const bool has_texture_width = DNA_struct_member_exists(
-      fd->filesdna, "Image", "int", "image_to_closure_texture_width");
-  const bool has_texture_height = DNA_struct_member_exists(
-      fd->filesdna, "Image", "int", "image_to_closure_texture_height");
-  const bool has_texture_depth = DNA_struct_member_exists(
-      fd->filesdna, "Image", "int", "image_to_closure_texture_depth");
-
-  FOREACH_NODETREE_BEGIN (bmain, ntree, id) {
-    if (ntree->type != NTREE_SHADER) {
-      continue;
-    }
-    for (bNode &node : ntree->nodes) {
-      if (node.type_legacy != SH_NODE_IMAGE_TO_CLOSURE || node.id == nullptr ||
-          GS(node.id->name) != ID_IM)
-      {
-        continue;
-      }
-
-      const Image *image = id_cast<Image *>(node.id);
-      NodeShaderImageToClosure *storage = version_ensure_image_to_closure_node_storage(node);
-      storage->texture_type = ELEM(image->image_to_closure_texture_type,
-                                   IMA_IMAGE_TO_CLOSURE_TEXTURE_2D,
-                                   IMA_IMAGE_TO_CLOSURE_TEXTURE_3D_LUT_STRIP) ?
-                                  image->image_to_closure_texture_type :
-                                  IMA_IMAGE_TO_CLOSURE_TEXTURE_2D;
-      if (has_size_mode) {
-        storage->texture_size_mode = ELEM(image->image_to_closure_texture_size_mode,
-                                          IMA_IMAGE_TO_CLOSURE_3D_LUT_SIZE_AUTO,
-                                          IMA_IMAGE_TO_CLOSURE_3D_LUT_SIZE_MANUAL) ?
-                                         image->image_to_closure_texture_size_mode :
-                                         IMA_IMAGE_TO_CLOSURE_3D_LUT_SIZE_AUTO;
-      }
-      if (has_interpolation) {
-        storage->interpolation = version_image_to_closure_interpolation(
-            image->image_to_closure_interpolation);
-      }
-      if (has_extension) {
-        storage->extension = version_image_to_closure_extension(image->image_to_closure_extension);
-      }
-      if (has_texture_width) {
-        storage->texture_width = std::max<int>(image->image_to_closure_texture_width, 1);
-      }
-      if (has_texture_height) {
-        storage->texture_height = std::max<int>(image->image_to_closure_texture_height, 1);
-      }
-      if (has_texture_depth) {
-        storage->texture_depth = std::max<int>(image->image_to_closure_texture_depth, 1);
-      }
-    }
-  }
-  FOREACH_NODETREE_END;
-}
-
 void do_versions_after_linking_510(FileData *fd, Main *bmain)
 {
   /* Some blend files were saved with an invalid active viewer key, possibly due to a bug that
@@ -850,11 +786,6 @@ void do_versions_after_linking_510(FileData *fd, Main *bmain)
         gp_style.fill_rgba[3] = 0.0f;
       }
     }
-  }
-
-  if (!DNA_struct_exists(fd->filesdna, "NodeShaderImageToClosure"))
-  {
-    version_migrate_image_to_closure_legacy_image_settings(fd, bmain);
   }
 
   /**

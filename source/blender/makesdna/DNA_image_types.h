@@ -248,25 +248,15 @@ struct Image {
   ColorManagedColorspaceSettings colorspace_settings;
   char alpha_mode = 0;
 
-  /** Deprecated compatibility fields for early sampler3D branch builds. */
-  DNA_DEPRECATED char image_to_closure_texture_type = 0;
-  DNA_DEPRECATED char image_to_closure_texture_size_mode = 0;
-  DNA_DEPRECATED char image_to_closure_interpolation = 0;
-  DNA_DEPRECATED char image_to_closure_extension = 0;
-  char _pad[3] = {};
-  DNA_DEPRECATED int image_to_closure_texture_width = 16;
-  DNA_DEPRECATED int image_to_closure_texture_height = 16;
-  DNA_DEPRECATED int image_to_closure_texture_depth = 16;
+  char _pad = {};
 
   /* Multiview */
   /** For viewer node stereoscopy. */
   char eye = 0;
   char views_format = 0;
-  char _pad4[2] = {};
 
   /* ImageTile list for UDIMs. */
   int active_tile_index = 0;
-  char _pad5[4] = {};
   ListBaseT<ImageTile> tiles = {nullptr, nullptr};
 
   ListBaseT<ImageView> views = {nullptr, nullptr};
