@@ -58,6 +58,7 @@ struct Light : public LightData, NonCopyable {
   bool initialized = false;
   bool used = false;
   int light_shader_index = -1;
+  int volume_light_shader_index = -1;
   float light_shader_range_scale = 1.0f;
 
   /** Pointers to source Shadow. Type depends on `LightData::type`. */
@@ -78,6 +79,7 @@ struct Light : public LightData, NonCopyable {
     this->initialized = other.initialized;
     this->used = other.used;
     this->light_shader_index = other.light_shader_index;
+    this->volume_light_shader_index = other.volume_light_shader_index;
     this->light_shader_range_scale = other.light_shader_range_scale;
     this->directional = other.directional;
     this->punctual = other.punctual;
@@ -169,12 +171,21 @@ class LightModule {
   LightDataBuf culling_light_buf_ = {"Lights_culled"};
   LightShaderIndexBuf light_shader_src_index_buf_ = {"LightShader.SrcIndices"};
   LightShaderIndexBuf light_shader_index_buf_ = {"LightShader.CulledIndices"};
+  LightShaderIndexBuf volume_light_shader_src_index_buf_ = {"VolumeLightShader.SrcIndices"};
+  LightShaderIndexBuf volume_light_shader_index_buf_ = {"VolumeLightShader.CulledIndices"};
+  LightShaderIndexBuf light_shader_no_index_buf_ = {"LightShader.NoIndices"};
   Texture light_shader_dummy_tx_ = {"LightShader.Dummy"};
   Texture light_shader_tx_ = {"LightShader"};
+  Texture volume_light_shader_dummy_tx_ = {"VolumeLightShader.Dummy"};
+  Texture volume_light_shader_tx_ = {"VolumeLightShader"};
   Vector<std::unique_ptr<Framebuffer>> light_shader_fbs_;
   Vector<GPUMaterial *> light_shader_materials_;
+  Vector<GPUMaterial *> volume_light_shader_materials_;
   Vector<LightData> light_shader_lights_;
+  Vector<LightData> volume_light_shader_lights_;
   LightDataBuf light_shader_light_buf_ = {"LightShader.Lights"};
+  LightDataBuf volume_light_shader_light_buf_ = {"VolumeLightShader.Lights"};
+  bool volume_light_shader_valid_ = false;
   bool has_time_dependent_light_shaders_ = false;
   /** Culling information. */
   LightCullingDataBuf culling_data_buf_ = {"LightCull_data"};
@@ -213,6 +224,8 @@ class LightModule {
    */
   void set_view(View &view, const int2 extent);
   void eval_light_shaders(View &view, const int2 extent);
+  void sync_volume_light_shaders(const int3 grid_size);
+  void eval_volume_light_shaders(View &view, const int3 grid_size);
 
   void debug_draw(View &view, gpu::FrameBuffer *view_fb);
 
@@ -244,11 +257,25 @@ class LightModule {
     pass.bind_ssbo(LIGHT_SHADER_INDEX_BUF_SLOT, &light_shader_index_buf_);
   }
 
+  template<typename PassType> void bind_volume_light_shader_resources(PassType &pass)
+  {
+    pass.bind_texture(LIGHT_SHADER_TEX_SLOT,
+                      (!volume_light_shader_valid_ || volume_light_shader_materials_.is_empty() ||
+                       !volume_light_shader_tx_.is_valid()) ?
+                          &volume_light_shader_dummy_tx_ :
+                          &volume_light_shader_tx_);
+    pass.bind_ssbo(LIGHT_SHADER_INDEX_BUF_SLOT,
+                   (!volume_light_shader_valid_ || volume_light_shader_materials_.is_empty()) ?
+                       &light_shader_no_index_buf_ :
+                       &volume_light_shader_index_buf_);
+  }
+
  private:
   gpu::UniformBuf *world_sunlight_ubo() const;
   void culling_pass_sync();
   void update_pass_sync();
   void light_shader_pass_sync(const int2 extent);
+  void volume_light_shader_pass_sync(const int3 grid_size);
   void debug_pass_sync();
   void culling_extent_sync(const int2 render_extent);
 

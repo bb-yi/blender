@@ -145,6 +145,9 @@ void VolumeModule::end_sync()
       valid_history_ = false;
     }
   }
+  if (inst_.discard_viewport_history()) {
+    valid_history_ = false;
+  }
 
   if (inst_.camera.is_perspective()) {
     float sample_distribution = scene_eval->eevee.volumetric_sample_distribution;
@@ -279,7 +282,13 @@ void VolumeModule::end_sync()
   scatter_ps_.init();
   scatter_ps_.shader_set(
       inst_.shaders.static_shader_get(use_lights_ ? VOLUME_SCATTER_WITH_LIGHTS : VOLUME_SCATTER));
+  if (use_lights_) {
+    inst_.lights.sync_volume_light_shaders(data_.tex_size);
+  }
   scatter_ps_.bind_resources(inst_.lights);
+  if (use_lights_) {
+    inst_.lights.bind_volume_light_shader_resources(scatter_ps_);
+  }
   scatter_ps_.bind_resources(inst_.sphere_probes);
   scatter_ps_.bind_resources(inst_.volume_probes);
   scatter_ps_.bind_resources(inst_.shadows);
@@ -459,6 +468,7 @@ void VolumeModule::draw_compute(View &main_view, int2 extent)
       inst_.sphere_probes.set_view(main_view);
       inst_.shadows.set_view(main_view, extent);
     }
+    inst_.lights.eval_volume_light_shaders(main_view, data_.tex_size);
 
     scatter_tx_.swap();
     extinction_tx_.swap();

@@ -22,6 +22,8 @@
 #include "BKE_node.hh"
 #include "BKE_node_legacy_types.hh"
 
+#include "GPU_capabilities.hh"
+
 namespace blender::eevee {
 
 static const bNode *light_nodetree_eevee_light_shader_output_get(const bNodeTree *nodetree)
@@ -567,7 +569,9 @@ void LightModule::begin_sync()
   sun_lights_len_ = 0;
   local_lights_len_ = 0;
   light_shader_materials_.clear();
+  volume_light_shader_materials_.clear();
   light_shader_lights_.clear();
+  volume_light_shader_lights_.clear();
   has_time_dependent_light_shaders_ = false;
 
   if (use_sun_lights_ && inst_.world.sun_threshold() > 0.0f) {
@@ -618,6 +622,7 @@ void LightModule::sync_light(const Object *ob, ObjectHandle &handle)
     light.sun().direction = light_z_axis(light);
   }
   light.light_shader_index = -1;
+  light.volume_light_shader_index = -1;
   if (light_nodetree_needs_eevee_light_shader_eval(la.nodetree) && !inst_.is_baking()) {
     GPUMaterial *gpumat = inst_.shaders.light_shader_get(
         const_cast<blender::Light *>(&la), la.nodetree, false);
@@ -629,6 +634,22 @@ void LightModule::sync_light(const Object *ob, ObjectHandle &handle)
       light_shader_lights_.append(static_cast<const LightData &>(light));
       has_time_dependent_light_shaders_ |= GPU_material_is_time_dependent(gpumat);
       inst_.manager->register_layer_attributes(gpumat);
+
+      GPUMaterial *volume_gpumat = inst_.shaders.light_shader_volume_get(
+          const_cast<blender::Light *>(&la), la.nodetree, false);
+      if (volume_gpumat != nullptr && GPU_material_status(volume_gpumat) == GPU_MAT_SUCCESS &&
+          GPU_material_has_light_shader_output(volume_gpumat))
+      {
+        light.volume_light_shader_index = volume_light_shader_materials_.size();
+        volume_light_shader_materials_.append(volume_gpumat);
+        volume_light_shader_lights_.append(static_cast<const LightData &>(light));
+        has_time_dependent_light_shaders_ |= GPU_material_is_time_dependent(volume_gpumat);
+        inst_.manager->register_layer_attributes(volume_gpumat);
+      }
+      else {
+        inst_.info_append_i18n(
+            "Error: Custom light shader failed to compile for volume lighting.");
+      }
     }
   }
   sun_lights_len_ += int(is_sun_light(light.type));
@@ -645,6 +666,8 @@ void LightModule::end_sync()
   int lights_allocated = ceil_to_multiple_u(max_ii(light_map_.size(), 1), LIGHT_CHUNK);
   light_buf_.resize(lights_allocated);
   light_shader_index_buf_ensure_no_shader(light_shader_src_index_buf_, lights_allocated);
+  light_shader_index_buf_ensure_no_shader(volume_light_shader_src_index_buf_, lights_allocated);
+  light_shader_index_buf_ensure_no_shader(light_shader_no_index_buf_, lights_allocated);
 
   /* Track light deletion. */
   /* Indices inside GPU data array. */
@@ -665,6 +688,7 @@ void LightModule::end_sync()
     /* Put all light data into global data SSBO. */
     light_buf_[dst_idx] = light;
     light_shader_src_index_buf_[dst_idx] = light.light_shader_index;
+    volume_light_shader_src_index_buf_[dst_idx] = light.volume_light_shader_index;
 
     /* Untag for next sync. */
     light.used = false;
@@ -672,6 +696,8 @@ void LightModule::end_sync()
   /* This scene data buffer is then immutable after this point. */
   light_buf_.push_update();
   light_shader_src_index_buf_.push_update();
+  volume_light_shader_src_index_buf_.push_update();
+  light_shader_no_index_buf_.push_update();
 
   /* If exceeding the limit, just trim off the excess to avoid glitchy rendering. */
   if (sun_lights_len_ + local_lights_len_ > CULLING_MAX_ITEM) {
@@ -687,6 +713,7 @@ void LightModule::end_sync()
   culling_zdist_buf_.resize(lights_allocated);
   culling_light_buf_.resize(lights_allocated);
   light_shader_index_buf_ensure_no_shader(light_shader_index_buf_, lights_allocated);
+  light_shader_index_buf_ensure_no_shader(volume_light_shader_index_buf_, lights_allocated);
   light_shader_pass_sync(inst_.render_extent_get());
   culling_extent_sync(inst_.render_extent_get());
 }
@@ -753,6 +780,8 @@ void LightModule::culling_pass_sync()
     sub.bind_ssbo("out_key_buf", culling_key_buf_);
     sub.bind_ssbo("in_light_shader_index_buf", light_shader_src_index_buf_);
     sub.bind_ssbo("out_light_shader_index_buf", light_shader_index_buf_);
+    sub.bind_ssbo("in_volume_light_shader_index_buf", volume_light_shader_src_index_buf_);
+    sub.bind_ssbo("out_volume_light_shader_index_buf", volume_light_shader_index_buf_);
     sub.dispatch(int3(culling_select_dispatch_size, 1, 1));
     sub.barrier(GPU_BARRIER_SHADER_STORAGE);
   }
@@ -766,6 +795,8 @@ void LightModule::culling_pass_sync()
     sub.bind_ssbo("in_key_buf", culling_key_buf_);
     sub.bind_ssbo("in_light_shader_index_buf", light_shader_src_index_buf_);
     sub.bind_ssbo("out_light_shader_index_buf", light_shader_index_buf_);
+    sub.bind_ssbo("in_volume_light_shader_index_buf", volume_light_shader_src_index_buf_);
+    sub.bind_ssbo("out_volume_light_shader_index_buf", volume_light_shader_index_buf_);
     sub.dispatch(int3(culling_sort_dispatch_size, 1, 1));
     sub.barrier(GPU_BARRIER_SHADER_STORAGE);
   }
@@ -845,6 +876,39 @@ void LightModule::light_shader_pass_sync(const int2 extent)
   }
 }
 
+void LightModule::volume_light_shader_pass_sync(const int3 grid_size)
+{
+  constexpr eGPUTextureUsage usage = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE;
+  const float white[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+  volume_light_shader_valid_ = false;
+  volume_light_shader_dummy_tx_.ensure_2d_array(
+      gpu::TextureFormat::SFLOAT_16_16_16_16, int2(1), 1, usage, white);
+  if (volume_light_shader_materials_.is_empty()) {
+    volume_light_shader_tx_.free();
+    return;
+  }
+
+  const int layer_len = volume_light_shader_materials_.size() * max_ii(grid_size.z, 1);
+  if (layer_len > GPU_max_texture_layers()) {
+    volume_light_shader_tx_.free();
+    inst_.info_append_i18n("Error: Too many custom light shader volume layers.");
+    return;
+  }
+
+  volume_light_shader_tx_.ensure_2d_array(gpu::TextureFormat::SFLOAT_16_16_16_16,
+                                          math::max(int2(grid_size), int2(1)),
+                                          layer_len,
+                                          usage);
+  const int lights_allocated = ceil_to_multiple_u(max_ii(volume_light_shader_materials_.size(), 1),
+                                                  LIGHT_CHUNK);
+  volume_light_shader_light_buf_.resize(lights_allocated);
+  for (const int layer : volume_light_shader_lights_.index_range()) {
+    volume_light_shader_light_buf_[layer] = volume_light_shader_lights_[layer];
+  }
+  volume_light_shader_light_buf_.push_update();
+  volume_light_shader_valid_ = volume_light_shader_tx_.is_valid();
+}
+
 void LightModule::eval_light_shaders(View &view, const int2 extent)
 {
   if (light_shader_materials_.is_empty()) {
@@ -870,6 +934,38 @@ void LightModule::eval_light_shaders(View &view, const int2 extent)
     inst_.manager->submit(pass, view);
   }
   GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH);
+}
+
+void LightModule::sync_volume_light_shaders(const int3 grid_size)
+{
+  volume_light_shader_pass_sync(grid_size);
+}
+
+void LightModule::eval_volume_light_shaders(View &view, const int3 grid_size)
+{
+  if (volume_light_shader_materials_.is_empty() || !volume_light_shader_valid_) {
+    return;
+  }
+  if (!volume_light_shader_tx_.is_valid()) {
+    return;
+  }
+
+  volume_light_shader_tx_.clear(float4(1.0f));
+
+  for (const int layer : volume_light_shader_materials_.index_range()) {
+    PassSimple pass = {"VolumeLightShader.Pass"};
+    pass.material_set(*inst_.manager, volume_light_shader_materials_[layer]);
+    pass.push_constant("light_index", layer);
+    pass.bind_resources(inst_.uniform_data);
+    pass.bind_resources(inst_.sampling);
+    pass.bind_resources(inst_.lights);
+    pass.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);
+    pass.bind_ssbo(LIGHT_BUF_SLOT, &volume_light_shader_light_buf_);
+    pass.bind_image("out_light_shader_img", &volume_light_shader_tx_);
+    pass.dispatch(math::divide_ceil(grid_size, int3(VOLUME_GROUP_SIZE)));
+    inst_.manager->submit(pass, view);
+  }
+  GPU_memory_barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_SHADER_IMAGE_ACCESS);
 }
 
 void LightModule::debug_pass_sync()

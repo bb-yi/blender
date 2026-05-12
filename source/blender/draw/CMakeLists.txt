@@ -488,6 +488,7 @@ set(GLSL_SRC
   engines/eevee/shaders/eevee_light_iter_lib.glsl
   engines/eevee/shaders/eevee_light_lib.glsl
   engines/eevee/shaders/eevee_light_shader_frag.glsl
+  engines/eevee/shaders/eevee_light_shader_volume_comp.glsl
   engines/eevee/shaders/eevee_lightprobe_eval_lib.glsl
   engines/eevee/shaders/eevee_lightprobe_volume_bounds_comp.glsl
   engines/eevee/shaders/eevee_lightprobe_volume_ray_comp.glsl

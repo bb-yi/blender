@@ -51,12 +51,20 @@ void node_eevee_light_shader_info(out float4 default_color,
   default_color = float4(default_intensity > 0.0f ? light.color / default_intensity :
                                                      float3(1.0f),
                          1.0f);
-  default_attenuation = is_directional ?
-                            1.0f :
-                            light_point_light(light, is_directional, light_vector) *
-                                light_influence_attenuation(
-                                    light_vector.dist,
-                                    light.local().local.influence_radius_invsqr_surface);
+  if (is_directional) {
+    default_attenuation = 1.0f;
+  }
+  else {
+    float default_influence_radius_invsqr =
+#  if defined(MAT_LIGHT_SHADER_VOLUME)
+        light.local().local.influence_radius_invsqr_volume;
+#  else
+        light.local().local.influence_radius_invsqr_surface;
+#  endif
+    default_attenuation = light_point_light(light, is_directional, light_vector) *
+                          light_influence_attenuation(light_vector.dist,
+                                                      default_influence_radius_invsqr);
+  }
   distance = light_vector.dist;
   light_space = light_world_to_local_point(light, g_data.P);
   direction = light_vector.L;
