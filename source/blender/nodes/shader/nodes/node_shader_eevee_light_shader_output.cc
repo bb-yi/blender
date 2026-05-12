@@ -15,6 +15,7 @@ constexpr float default_range_scale = 1.0f;
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
+  b.use_custom_socket_order();
   b.add_input<decl::Color>("Color").default_value({1.0f, 1.0f, 1.0f, 1.0f});
   b.add_input<decl::Float>("Intensity").default_value(1.0f).min(0.0f);
   b.add_input<decl::Float>("Attenuation").default_value(1.0f).min(0.0f);
