@@ -164,6 +164,10 @@ bool node_tree_light_shader_default_ensure(bNodeTree &ntree)
     changed = true;
     link_missing_inputs = true;
   }
+  if (!(light_shader_output->flag & NODE_OPTIONS)) {
+    light_shader_output->flag |= NODE_OPTIONS;
+    changed = true;
+  }
 
   light_shader_default_nodes_link(
       ntree, *light_shader_info, *light_shader_output, link_missing_inputs, changed);

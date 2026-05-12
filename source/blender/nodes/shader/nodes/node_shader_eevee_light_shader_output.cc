@@ -23,6 +23,7 @@ static void node_declare(NodeDeclarationBuilder &b)
 static void node_shader_init_eevee_light_shader_output(bNodeTree * /*ntree*/, bNode *node)
 {
   node->custom3 = default_range_scale;
+  node->flag |= NODE_OPTIONS;
 }
 
 static void node_shader_buts_eevee_light_shader_output(ui::Layout &layout,
@@ -66,6 +67,7 @@ void register_node_type_sh_eevee_light_shader_output()
   ntype.nclass = NODE_CLASS_OUTPUT;
   ntype.declare = file_ns::node_declare;
   ntype.draw_buttons = file_ns::node_shader_buts_eevee_light_shader_output;
+  ntype.draw_buttons_ex = file_ns::node_shader_buts_eevee_light_shader_output;
   ntype.initfunc = file_ns::node_shader_init_eevee_light_shader_output;
   ntype.add_ui_poll = light_eevee_shader_nodes_poll;
   ntype.gpu_fn = file_ns::node_shader_gpu_eevee_light_shader_output;
