@@ -11,6 +11,7 @@ namespace nodes::node_shader_eevee_light_shader_info_cc {
 static void node_declare(NodeDeclarationBuilder &b)
 {
   b.add_output<decl::Color>("Default Color");
+  b.add_output<decl::Float>("Default Intensity");
   b.add_output<decl::Float>("Default Attenuation");
   b.add_output<decl::Vector>("World Position");
   b.add_output<decl::Vector>("Direction");

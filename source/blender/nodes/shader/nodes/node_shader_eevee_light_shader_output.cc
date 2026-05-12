@@ -11,6 +11,7 @@ namespace nodes::node_shader_eevee_light_shader_output_cc {
 static void node_declare(NodeDeclarationBuilder &b)
 {
   b.add_input<decl::Color>("Color").default_value({1.0f, 1.0f, 1.0f, 1.0f});
+  b.add_input<decl::Float>("Intensity").default_value(1.0f).min(0.0f);
   b.add_input<decl::Float>("Attenuation").default_value(1.0f).min(0.0f);
 }
 
@@ -20,8 +21,8 @@ static int node_shader_gpu_eevee_light_shader_output(GPUMaterial *mat,
                                                      GPUNodeStack *in,
                                                      GPUNodeStack *out)
 {
-  if (!in[0].hasinput && !in[1].hasinput && !node_socket_not_white(in[0]) &&
-      in[1].socket_is_one())
+  if (!in[0].hasinput && !in[1].hasinput && !in[2].hasinput && !node_socket_not_white(in[0]) &&
+      in[1].socket_is_one() && in[2].socket_is_one())
   {
     return true;
   }

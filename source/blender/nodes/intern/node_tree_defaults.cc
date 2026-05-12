@@ -97,6 +97,11 @@ void node_tree_shader_default(const bContext *C, Main *bmain, ID *id)
                          *bke::node_find_socket(*light_shader_info, SOCK_OUT, "Default Color"),
                          *light_shader_output,
                          *bke::node_find_socket(*light_shader_output, SOCK_IN, "Color"));
+      bke::node_add_link(*ntree,
+                         *light_shader_info,
+                         *bke::node_find_socket(*light_shader_info, SOCK_OUT, "Default Intensity"),
+                         *light_shader_output,
+                         *bke::node_find_socket(*light_shader_output, SOCK_IN, "Intensity"));
       bke::node_add_link(
           *ntree,
           *light_shader_info,
