@@ -18,6 +18,9 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.add_input<decl::Color>("Color").default_value({1.0f, 1.0f, 1.0f, 1.0f});
   b.add_input<decl::Float>("Intensity").default_value(1.0f).min(0.0f);
   b.add_input<decl::Float>("Attenuation").default_value(1.0f).min(0.0f);
+  b.add_layout([](ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr) {
+    layout.prop(ptr, "range_scale", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+  });
 }
 
 static void node_shader_init_eevee_light_shader_output(bNodeTree * /*ntree*/, bNode *node)
@@ -65,6 +68,7 @@ void register_node_type_sh_eevee_light_shader_output()
   ntype.ui_name = "Light Shader Output";
   ntype.ui_description = "Output custom Eevee direct-light color and attenuation for a light";
   ntype.nclass = NODE_CLASS_OUTPUT;
+  bke::node_type_size_preset(ntype, bke::eNodeSizePreset::Large);
   ntype.declare = file_ns::node_declare;
   ntype.draw_buttons = file_ns::node_shader_buts_eevee_light_shader_output;
   ntype.draw_buttons_ex = file_ns::node_shader_buts_eevee_light_shader_output;
