@@ -4,15 +4,32 @@
 
 #include "node_shader_util.hh"
 
+#include "UI_interface_layout.hh"
+#include "UI_resources.hh"
+
 namespace blender {
 
 namespace nodes::node_shader_eevee_light_shader_output_cc {
+
+constexpr float default_range_scale = 1.0f;
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
   b.add_input<decl::Color>("Color").default_value({1.0f, 1.0f, 1.0f, 1.0f});
   b.add_input<decl::Float>("Intensity").default_value(1.0f).min(0.0f);
   b.add_input<decl::Float>("Attenuation").default_value(1.0f).min(0.0f);
+}
+
+static void node_shader_init_eevee_light_shader_output(bNodeTree * /*ntree*/, bNode *node)
+{
+  node->custom3 = default_range_scale;
+}
+
+static void node_shader_buts_eevee_light_shader_output(ui::Layout &layout,
+                                                       bContext * /*C*/,
+                                                       PointerRNA *ptr)
+{
+  layout.prop(ptr, "range_scale", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
 }
 
 static int node_shader_gpu_eevee_light_shader_output(GPUMaterial *mat,
@@ -48,6 +65,8 @@ void register_node_type_sh_eevee_light_shader_output()
   ntype.ui_description = "Output custom Eevee direct-light color and attenuation for a light";
   ntype.nclass = NODE_CLASS_OUTPUT;
   ntype.declare = file_ns::node_declare;
+  ntype.draw_buttons = file_ns::node_shader_buts_eevee_light_shader_output;
+  ntype.initfunc = file_ns::node_shader_init_eevee_light_shader_output;
   ntype.add_ui_poll = light_eevee_shader_nodes_poll;
   ntype.gpu_fn = file_ns::node_shader_gpu_eevee_light_shader_output;
   ntype.no_muting = true;

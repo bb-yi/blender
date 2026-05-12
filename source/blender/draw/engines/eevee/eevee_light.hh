@@ -58,6 +58,7 @@ struct Light : public LightData, NonCopyable {
   bool initialized = false;
   bool used = false;
   int light_shader_index = -1;
+  float light_shader_range_scale = 1.0f;
 
   /** Pointers to source Shadow. Type depends on `LightData::type`. */
   ShadowDirectional *directional = nullptr;
@@ -77,6 +78,7 @@ struct Light : public LightData, NonCopyable {
     this->initialized = other.initialized;
     this->used = other.used;
     this->light_shader_index = other.light_shader_index;
+    this->light_shader_range_scale = other.light_shader_range_scale;
     this->directional = other.directional;
     this->punctual = other.punctual;
     other.directional = nullptr;
@@ -95,6 +97,7 @@ struct Light : public LightData, NonCopyable {
             char visibility_flag,
             const blender::Light *la,
             const LightLinking *light_linking,
+            float light_shader_range_scale,
             float threshold,
             int lightgroup_id = 0);
 
@@ -110,6 +113,7 @@ struct Light : public LightData, NonCopyable {
   void shape_parameters_set(const blender::Light *la,
                             const float3 &scale,
                             const float3 &z_axis,
+                            float light_shader_range_scale,
                             float threshold,
                             bool use_jitter);
   float shape_radiance_get();

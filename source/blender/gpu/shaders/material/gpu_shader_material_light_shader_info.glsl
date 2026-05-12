@@ -20,7 +20,11 @@ void node_eevee_light_shader_info(out float4 default_color,
   default_color = float4(default_intensity > 0.0f ? light.color / default_intensity :
                                                      float3(1.0f),
                          1.0f);
-  default_attenuation = light_attenuation_surface(light, is_directional, light_vector);
+  default_attenuation = is_directional ?
+                            1.0f :
+                            light_influence_attenuation(
+                                light_vector.dist,
+                                light.local().local.influence_radius_invsqr_surface);
   world_position = is_directional ? float3(0.0f) : light_position_get(light);
   direction = is_directional ? light.sun().direction : light_z_axis(light);
   distance = light_vector.dist;

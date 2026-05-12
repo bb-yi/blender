@@ -161,7 +161,11 @@ void light_eval_single(uint l_idx,
   if (!is_transmission && light_shader_index >= 0) {
     float4 light_shader = texelFetch(light_shader_tx, int3(int2(PIXEL), light_shader_index), 0);
     light.color = light_shader.rgb;
-    attenuation = light_shader.a;
+    attenuation = light_attenuation_common(light, is_directional, lv.L) * light_shader.a;
+    if (!is_directional) {
+      attenuation *= light_influence_cutoff(lv.dist,
+                                            light.local().local.influence_radius_invsqr_surface);
+    }
   }
 #endif
 

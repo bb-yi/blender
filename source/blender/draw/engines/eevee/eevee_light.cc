@@ -36,6 +36,28 @@ static bool light_nodetree_has_eevee_light_shader_output(const bNodeTree *nodetr
   return false;
 }
 
+static float light_nodetree_eevee_light_shader_range_scale_get(const bNodeTree *nodetree)
+{
+  if (nodetree == nullptr) {
+    return 1.0f;
+  }
+
+  const bNode *output = nullptr;
+  for (const bNode &node : nodetree->nodes) {
+    if (node.type_legacy != SH_NODE_EEVEE_LIGHT_SHADER_OUTPUT) {
+      continue;
+    }
+    if (output == nullptr || ((node.flag & NODE_DO_OUTPUT) && !(output->flag & NODE_DO_OUTPUT))) {
+      output = &node;
+    }
+  }
+
+  if (output == nullptr) {
+    return 1.0f;
+  }
+  return (output->custom3 > 0.0f && isfinite(output->custom3)) ? output->custom3 : 1.0f;
+}
+
 /* Convert by putting the least significant bits in the first component. */
 static uint2 uint64_to_uint2(uint64_t data)
 {
@@ -82,6 +104,7 @@ void Light::sync(ShadowModule &shadows,
                  char visibility_flag,
                  const blender::Light *la,
                  const LightLinking *light_linking /* = nullptr */,
+                 float light_shader_range_scale,
                  float threshold,
                  int lightgroup_id)
 {
@@ -91,6 +114,7 @@ void Light::sync(ShadowModule &shadows,
   if (assign_if_different(this->type, new_type)) {
     shadow_discard_safe(shadows);
   }
+  this->light_shader_range_scale = light_shader_range_scale;
 
   this->color = BKE_light_power(*la) * BKE_light_color(*la);
   if (la->mode & LA_UNNORMALIZED) {
@@ -108,8 +132,12 @@ void Light::sync(ShadowModule &shadows,
 
   this->object_to_world = object_to_world;
 
-  shape_parameters_set(
-      la, scale, object_to_world.z_axis(), threshold, shadows.get_data().use_jitter);
+  shape_parameters_set(la,
+                       scale,
+                       object_to_world.z_axis(),
+                       light_shader_range_scale,
+                       threshold,
+                       shadows.get_data().use_jitter);
 
   const bool diffuse_visibility = (visibility_flag & OB_HIDE_DIFFUSE) == 0;
   const bool glossy_visibility = (visibility_flag & OB_HIDE_GLOSSY) == 0;
@@ -198,6 +226,7 @@ float Light::attenuation_radius_get(const blender::Light *la,
 void Light::shape_parameters_set(const blender::Light *la,
                                  const float3 &scale,
                                  const float3 &z_axis,
+                                 const float light_shader_range_scale,
                                  const float threshold,
                                  const bool use_jitter)
 {
@@ -211,8 +240,10 @@ void Light::shape_parameters_set(const blender::Light *la,
     const float surface_max_power = max(la->diff_fac, la->spec_fac) * max_power;
     const float volume_max_power = la->volume_fac * max_power;
 
-    float influence_radius_surface = attenuation_radius_get(la, threshold, surface_max_power);
-    float influence_radius_volume = attenuation_radius_get(la, threshold, volume_max_power);
+    float influence_radius_surface = attenuation_radius_get(la, threshold, surface_max_power) *
+                                     light_shader_range_scale;
+    float influence_radius_volume = attenuation_radius_get(la, threshold, volume_max_power) *
+                                    light_shader_range_scale;
 
     l_local.local.influence_radius_max = max(influence_radius_surface, influence_radius_volume);
     l_local.local.influence_radius_invsqr_surface = safe_rcp(square(influence_radius_surface));
@@ -418,6 +449,7 @@ void LightModule::add_world_sun_light(const ObjectKey &key, bool use_diffuse, bo
              visibility_flag,
              &la,
              nullptr,
+             1.0f,
              light_threshold_,
              0);
 
@@ -478,13 +510,18 @@ void LightModule::sync_light(const Object *ob, ObjectHandle &handle)
 
   Light &light = light_map_.lookup_or_add_default(handle.object_key);
   light.used = true;
-  if (handle.recalc != 0 || !light.initialized) {
+  const float light_shader_range_scale = light_nodetree_eevee_light_shader_range_scale_get(
+      la.nodetree);
+  if (handle.recalc != 0 || !light.initialized ||
+      (is_local_light(light.type) && light.light_shader_range_scale != light_shader_range_scale))
+  {
     light.initialized = true;
     light.sync(inst_.shadows,
                ob->object_to_world(),
                ob->visibility_flag,
                &la,
                ob->light_linking,
+               light_shader_range_scale,
                light_threshold_,
                la.lightgroup_id);
   }

@@ -18,6 +18,8 @@
 
 #include "GPU_material.hh"
 
+#include "NOD_defaults.hh"
+
 #include "WM_api.hh"
 #include "WM_types.hh"
 #include <optional>
@@ -56,7 +58,9 @@ static void send_notifiers_after_node_tree_change(ID *id, bNodeTree *ntree)
   }
 }
 
-static void propagate_node_tree_changes(Main &bmain, const std::optional<Span<ID *>> modified_ids)
+static void propagate_node_tree_changes(Main &bmain,
+                                        const std::optional<Span<ID *>> modified_ids,
+                                        const Span<bNodeTree *> extra_modified_trees)
 {
   NodeTreeUpdateExtraParams params;
   params.tree_changed_fn = [&bmain](bNodeTree &ntree, ID &owner_id) {
@@ -113,14 +117,54 @@ static void propagate_node_tree_changes(Main &bmain, const std::optional<Span<ID
         modified_trees->append(reinterpret_cast<bNodeTree *>(id));
       }
     }
+    modified_trees->extend(extra_modified_trees);
   }
 
   BKE_ntree_update(bmain, modified_trees, params);
 }
 
+static bNodeTree *ensure_light_default_shader_nodes(Light &light)
+{
+  bNodeTree *ntree = light.nodetree;
+  if (ntree == nullptr || ntree->type != NTREE_SHADER) {
+    return nullptr;
+  }
+  if (!nodes::node_tree_light_shader_default_ensure(*ntree)) {
+    return nullptr;
+  }
+  BKE_ntree_update_tag_all(ntree);
+  return ntree;
+}
+
+static Vector<bNodeTree *> ensure_default_light_shader_nodes(
+    Main &bmain, const std::optional<Span<ID *>> modified_ids)
+{
+  Vector<bNodeTree *> changed_trees;
+  if (modified_ids.has_value()) {
+    for (ID *id : *modified_ids) {
+      if (GS(id->name) == ID_LA) {
+        if (bNodeTree *ntree = ensure_light_default_shader_nodes(reinterpret_cast<Light &>(*id))) {
+          changed_trees.append(ntree);
+        }
+      }
+    }
+    return changed_trees;
+  }
+
+  for (Light *light = static_cast<Light *>(bmain.lights.first); light != nullptr;
+       light = static_cast<Light *>(light->id.next))
+  {
+    if (bNodeTree *ntree = ensure_light_default_shader_nodes(*light)) {
+      changed_trees.append(ntree);
+    }
+  }
+  return changed_trees;
+}
+
 void BKE_main_ensure_invariants(Main &bmain, const std::optional<Span<ID *>> modified_ids)
 {
-  propagate_node_tree_changes(bmain, modified_ids);
+  Vector<bNodeTree *> changed_trees = ensure_default_light_shader_nodes(bmain, modified_ids);
+  propagate_node_tree_changes(bmain, modified_ids, changed_trees);
 }
 
 void BKE_main_ensure_invariants(Main &bmain, ID &modified_id)

@@ -12,6 +12,7 @@
 #include <type_traits>
 
 #include "BLI_linear_allocator.hh"
+#include "BLI_math_base.h"
 #include "BLI_math_rotation.h"
 #include "BLI_string.h"
 #include "BLI_string_utf8.h"
@@ -4763,6 +4764,18 @@ static void rna_ShaderNode_is_active_output_set(PointerRNA *ptr, bool value)
   }
 }
 
+static float rna_ShaderNodeEeveeLightShaderOutput_range_scale_get(PointerRNA *ptr)
+{
+  const bNode *node = ptr->data_as<bNode>();
+  return (node->custom3 > 0.0f && isfinite(node->custom3)) ? node->custom3 : 1.0f;
+}
+
+static void rna_ShaderNodeEeveeLightShaderOutput_range_scale_set(PointerRNA *ptr, float value)
+{
+  bNode *node = ptr->data_as<bNode>();
+  node->custom3 = (value > 0.0f && isfinite(value)) ? value : 1.0f;
+}
+
 static void rna_GroupOutput_is_active_output_set(PointerRNA *ptr, bool value)
 {
   bNodeTree *ntree = reinterpret_cast<bNodeTree *>(ptr->owner_id);
@@ -5694,6 +5707,28 @@ static void def_sh_output(BlenderRNA * /*brna*/, StructRNA *srna)
   RNA_def_property_flag(prop, PROP_EDITABLE);
   RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
   RNA_def_property_ui_text(prop, "NPR Tree", "Secondary NPR node tree attached to this shader output");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+}
+
+static void def_sh_eevee_light_shader_output(BlenderRNA *brna, StructRNA *srna)
+{
+  def_sh_output(brna, srna);
+
+  PropertyRNA *prop;
+
+  prop = RNA_def_property(srna, "range_scale", PROP_FLOAT, PROP_FACTOR);
+  RNA_def_property_float_sdna(prop, nullptr, "custom3");
+  RNA_def_property_float_funcs(prop,
+                               "rna_ShaderNodeEeveeLightShaderOutput_range_scale_get",
+                               "rna_ShaderNodeEeveeLightShaderOutput_range_scale_set",
+                               nullptr);
+  RNA_def_property_range(prop, 1e-6f, FLT_MAX);
+  RNA_def_property_ui_range(prop, 0.01f, 10.0f, 0.1f, 3);
+  RNA_def_property_ui_text(
+      prop,
+      "Range Scale",
+      "Scale Eevee's light influence radius for culling and shadow usage. A value of 1 keeps "
+      "the original light range");
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
 }
 
@@ -11571,7 +11606,7 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("ShaderNode", "ShaderNodeNPR_Refraction");
   define("ShaderNode", "ShaderNodeOutlineControl");
   define("ShaderNode", "ShaderNodeEeveeLightShaderInfo");
-  define("ShaderNode", "ShaderNodeEeveeLightShaderOutput", def_sh_output);
+  define("ShaderNode", "ShaderNodeEeveeLightShaderOutput", def_sh_eevee_light_shader_output);
   define("ShaderNode", "ShaderNodePortalIn", def_sh_portal_in);
   define("ShaderNode", "ShaderNodePortalOut", def_sh_portal_out);
   define("ShaderNode", "ShaderNodeRenderTexture", def_sh_render_texture);
