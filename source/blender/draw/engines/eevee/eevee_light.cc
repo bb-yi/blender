@@ -19,29 +19,16 @@
 #include "DNA_sdna_type_ids.hh"
 
 #include "BKE_light.h"
+#include "BKE_node.hh"
 #include "BKE_node_legacy_types.hh"
 
 namespace blender::eevee {
 
-static bool light_nodetree_has_eevee_light_shader_output(const bNodeTree *nodetree)
+static const bNode *light_nodetree_eevee_light_shader_output_get(const bNodeTree *nodetree)
 {
   if (nodetree == nullptr) {
-    return false;
+    return nullptr;
   }
-  for (const bNode &node : nodetree->nodes) {
-    if (node.type_legacy == SH_NODE_EEVEE_LIGHT_SHADER_OUTPUT) {
-      return true;
-    }
-  }
-  return false;
-}
-
-static float light_nodetree_eevee_light_shader_range_scale_get(const bNodeTree *nodetree)
-{
-  if (nodetree == nullptr) {
-    return 1.0f;
-  }
-
   const bNode *output = nullptr;
   for (const bNode &node : nodetree->nodes) {
     if (node.type_legacy != SH_NODE_EEVEE_LIGHT_SHADER_OUTPUT) {
@@ -51,11 +38,95 @@ static float light_nodetree_eevee_light_shader_range_scale_get(const bNodeTree *
       output = &node;
     }
   }
+  return output;
+}
 
+static float light_nodetree_eevee_light_shader_range_scale_get(const bNodeTree *nodetree)
+{
+  const bNode *output = light_nodetree_eevee_light_shader_output_get(nodetree);
   if (output == nullptr) {
     return 1.0f;
   }
   return (output->custom3 > 0.0f && isfinite(output->custom3)) ? output->custom3 : 1.0f;
+}
+
+static const bNodeLink *light_nodetree_link_to_input_get(const bNodeTree &nodetree,
+                                                         const bNodeSocket &input)
+{
+  const bNodeLink *direct_link = nullptr;
+  for (const bNodeLink &link : nodetree.links) {
+    if (link.tosock != &input) {
+      continue;
+    }
+    if (direct_link != nullptr) {
+      return nullptr;
+    }
+    direct_link = &link;
+  }
+  return direct_link;
+}
+
+static bool light_nodetree_output_input_is_default_info_link(const bNodeTree &nodetree,
+                                                             const bNode &output,
+                                                             const char *to_identifier,
+                                                             const char *from_identifier,
+                                                             const bNode *&r_info_node)
+{
+  const bNodeSocket *to_socket = bke::node_find_socket(output, SOCK_IN, to_identifier);
+  if (to_socket == nullptr || (to_socket->flag & SOCK_UNAVAIL)) {
+    return false;
+  }
+
+  const bNodeLink *link = light_nodetree_link_to_input_get(nodetree, *to_socket);
+  if (link == nullptr || (link->flag & NODE_LINK_MUTED) || (link->flag & NODE_LINK_VALID) == 0 ||
+      link->fromnode == nullptr || link->fromsock == nullptr)
+  {
+    return false;
+  }
+
+  const bNode &info = *link->fromnode;
+  if (info.type_legacy != SH_NODE_EEVEE_LIGHT_SHADER_INFO || (info.flag & NODE_MUTED)) {
+    return false;
+  }
+  if (r_info_node != nullptr && r_info_node != &info) {
+    return false;
+  }
+
+  const bNodeSocket *from_socket = bke::node_find_socket(info, SOCK_OUT, from_identifier);
+  if (from_socket == nullptr || (from_socket->flag & SOCK_UNAVAIL) ||
+      link->fromsock != from_socket)
+  {
+    return false;
+  }
+
+  r_info_node = &info;
+  return true;
+}
+
+static bool light_nodetree_eevee_light_shader_output_is_default_passthrough(
+    const bNodeTree *nodetree)
+{
+  const bNode *output = light_nodetree_eevee_light_shader_output_get(nodetree);
+  if (nodetree == nullptr || output == nullptr || (output->flag & NODE_MUTED)) {
+    return false;
+  }
+  if (fabsf(light_nodetree_eevee_light_shader_range_scale_get(nodetree) - 1.0f) > 1e-6f) {
+    return false;
+  }
+
+  const bNode *info_node = nullptr;
+  return light_nodetree_output_input_is_default_info_link(
+             *nodetree, *output, "Color", "Default Color", info_node) &&
+         light_nodetree_output_input_is_default_info_link(
+             *nodetree, *output, "Intensity", "Default Intensity", info_node) &&
+         light_nodetree_output_input_is_default_info_link(
+             *nodetree, *output, "Attenuation", "Default Attenuation", info_node);
+}
+
+static bool light_nodetree_needs_eevee_light_shader_eval(const bNodeTree *nodetree)
+{
+  return light_nodetree_eevee_light_shader_output_get(nodetree) != nullptr &&
+         !light_nodetree_eevee_light_shader_output_is_default_passthrough(nodetree);
 }
 
 /* Convert by putting the least significant bits in the first component. */
@@ -93,6 +164,27 @@ static eLightType to_light_type(short blender_light_type,
   }
 }
 
+static float4x4 light_object_to_world_normalized_get(float4x4 object_to_world, float3 &r_scale)
+{
+  using namespace blender::math;
+
+  object_to_world.view<3, 3>() = normalize_and_get_size(object_to_world.view<3, 3>(), r_scale);
+
+  /* Make sure we have consistent handedness (in case of negatively scaled Z axis). */
+  float3 back = cross(float3(object_to_world.x_axis()), float3(object_to_world.y_axis()));
+  if (dot(back, float3(object_to_world.z_axis())) < 0.0f) {
+    negate_v3(object_to_world.y_axis());
+  }
+
+  return object_to_world;
+}
+
+static float4x4 light_object_to_world_normalized_get(float4x4 object_to_world)
+{
+  float3 scale;
+  return light_object_to_world_normalized_get(object_to_world, scale);
+}
+
 /** \} */
 
 /* -------------------------------------------------------------------- */
@@ -122,14 +214,7 @@ void Light::sync(ShadowModule &shadows,
   }
 
   float3 scale;
-  object_to_world.view<3, 3>() = normalize_and_get_size(object_to_world.view<3, 3>(), scale);
-
-  /* Make sure we have consistent handedness (in case of negatively scaled Z axis). */
-  float3 back = cross(float3(object_to_world.x_axis()), float3(object_to_world.y_axis()));
-  if (dot(back, float3(object_to_world.z_axis())) < 0.0f) {
-    negate_v3(object_to_world.y_axis());
-  }
-
+  object_to_world = light_object_to_world_normalized_get(object_to_world, scale);
   this->object_to_world = object_to_world;
 
   shape_parameters_set(la,
@@ -525,8 +610,14 @@ void LightModule::sync_light(const Object *ob, ObjectHandle &handle)
                light_threshold_,
                la.lightgroup_id);
   }
+  else if (is_sun_light(light.type)) {
+    /* Directional shadow sync stores view-dependent clipmap offsets in the matrix translation.
+     * Restore the source object transform before exposing it to light shader nodes this frame. */
+    light.object_to_world = light_object_to_world_normalized_get(ob->object_to_world());
+    light.sun().direction = light_z_axis(light);
+  }
   light.light_shader_index = -1;
-  if (light_nodetree_has_eevee_light_shader_output(la.nodetree) && !inst_.is_baking()) {
+  if (light_nodetree_needs_eevee_light_shader_eval(la.nodetree) && !inst_.is_baking()) {
     GPUMaterial *gpumat = inst_.shaders.light_shader_get(
         const_cast<blender::Light *>(&la), la.nodetree, false);
     if (gpumat != nullptr && GPU_material_status(gpumat) == GPU_MAT_SUCCESS &&
@@ -771,6 +862,7 @@ void LightModule::eval_light_shaders(View &view, const int2 extent)
     pass.bind_resources(inst_.gbuffer);
     pass.bind_resources(inst_.hiz_buffer.front);
     pass.bind_resources(inst_.lights);
+    pass.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);
     pass.bind_ssbo(LIGHT_BUF_SLOT, &light_shader_light_buf_);
     pass.draw_procedural(GPU_PRIM_TRIS, 1, 3);
     inst_.manager->submit(pass, view);

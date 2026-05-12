@@ -22,10 +22,11 @@ void node_eevee_light_shader_info(out float4 default_color,
                          1.0f);
   default_attenuation = is_directional ?
                             1.0f :
-                            light_influence_attenuation(
-                                light_vector.dist,
-                                light.local().local.influence_radius_invsqr_surface);
-  world_position = is_directional ? float3(0.0f) : light_position_get(light);
+                            light_point_light(light, is_directional, light_vector) *
+                                light_influence_attenuation(
+                                    light_vector.dist,
+                                    light.local().local.influence_radius_invsqr_surface);
+  world_position = light_position_get(light);
   direction = is_directional ? light.sun().direction : light_z_axis(light);
   distance = light_vector.dist;
   light_space = light_world_to_local_point(light, g_data.P);

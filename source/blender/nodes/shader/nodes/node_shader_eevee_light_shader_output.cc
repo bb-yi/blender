@@ -40,15 +40,9 @@ static void node_shader_buts_eevee_light_shader_output(ui::Layout &layout,
 static int node_shader_gpu_eevee_light_shader_output(GPUMaterial *mat,
                                                      bNode *node,
                                                      bNodeExecData * /*execdata*/,
-                                                     GPUNodeStack *in,
-                                                     GPUNodeStack *out)
+  GPUNodeStack *in,
+  GPUNodeStack *out)
 {
-  if (!in[0].hasinput && !in[1].hasinput && !in[2].hasinput && !node_socket_not_white(in[0]) &&
-      in[1].socket_is_one() && in[2].socket_is_one())
-  {
-    return true;
-  }
-
   GPUNodeLink *outlink_light_shader = nullptr;
   GPU_stack_link(mat, node, "node_output_eevee_light_shader", in, out, &outlink_light_shader);
   GPU_material_output_light_shader(mat, outlink_light_shader);
