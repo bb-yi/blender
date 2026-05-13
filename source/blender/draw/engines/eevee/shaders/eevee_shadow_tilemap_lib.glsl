@@ -175,7 +175,7 @@ float shadow_directional_level_fractional(LightData light, float3 lP)
 
     lod = log2(shadow_directional_clipmap_scale(light, lP) * narrowing / scale);
 
-    lod = max(lod + light.lod_bias, light.lod_min);
+    lod = max(lod, light.lod_min);
   }
   else {
     /* The narrowing need to be stronger since the tile-map position is not rounded but floored. */
