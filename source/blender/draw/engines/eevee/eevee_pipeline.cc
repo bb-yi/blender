@@ -1915,6 +1915,7 @@ void DeferredProbePipeline::end_sync()
     pass.bind_resources(inst_.uniform_data);
     pass.bind_resources(inst_.gbuffer);
     pass.bind_resources(inst_.lights);
+    inst_.lights.bind_light_shader_resources(pass);
     pass.bind_resources(inst_.shadows);
     pass.bind_resources(inst_.sampling);
     pass.bind_resources(inst_.hiz_buffer.front);
@@ -2022,6 +2023,7 @@ void DeferredProbePipeline::render(View &view,
 
   inst_.gbuffer.bind(gbuffer_fb);
   inst_.manager->submit(opaque_layer_.gbuffer_ps_, view);
+  inst_.lights.eval_light_shaders(view, extent);
 
   GPU_framebuffer_bind(combined_fb);
   inst_.manager->submit(eval_light_ps_, view);
@@ -2099,6 +2101,7 @@ void PlanarProbePipeline::end_sync()
     pass.bind_resources(inst_.uniform_data);
     pass.bind_resources(inst_.gbuffer);
     pass.bind_resources(inst_.lights);
+    inst_.lights.bind_light_shader_resources(pass);
     pass.bind_resources(inst_.shadows);
     pass.bind_resources(inst_.sampling);
     pass.bind_resources(inst_.render_textures);
@@ -2207,6 +2210,7 @@ void PlanarProbePipeline::render(View &view,
 
   inst_.gbuffer.bind(gbuffer_fb);
   inst_.manager->submit(gbuffer_ps_, view);
+  inst_.lights.eval_light_shaders(view, extent);
 
   GPU_framebuffer_bind(combined_fb);
   GPU_framebuffer_clear_color(combined_fb, float4(0.0f));
