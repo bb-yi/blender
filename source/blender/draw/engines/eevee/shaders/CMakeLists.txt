@@ -112,6 +112,7 @@ set(SRC_GLSL_COMP
   eevee_light_culling_tile_comp.glsl
   eevee_light_culling_zbin_comp.glsl
   eevee_light_shadow_setup_comp.glsl
+  eevee_light_shader_surfel_comp.glsl
   eevee_light_shader_volume_comp.glsl
   eevee_lightprobe_sphere_convolve_comp.glsl
   eevee_lightprobe_sphere_irradiance_comp.glsl

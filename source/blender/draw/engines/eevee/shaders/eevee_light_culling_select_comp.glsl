@@ -41,6 +41,8 @@ void main()
         in_light_shader_index_buf[l_idx];
     out_volume_light_shader_index_buf[light_cull_buf.local_lights_len + l_idx] =
         in_volume_light_shader_index_buf[l_idx];
+    out_surfel_light_shader_index_buf[light_cull_buf.local_lights_len + l_idx] =
+        in_surfel_light_shader_index_buf[l_idx];
     return;
   }
 

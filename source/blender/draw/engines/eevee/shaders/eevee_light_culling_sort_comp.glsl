@@ -70,5 +70,7 @@ void main()
     out_light_shader_index_buf[prefix_sum] = in_light_shader_index_buf[input_index];
     out_volume_light_shader_index_buf[prefix_sum] =
         in_volume_light_shader_index_buf[input_index];
+    out_surfel_light_shader_index_buf[prefix_sum] =
+        in_surfel_light_shader_index_buf[input_index];
   }
 }

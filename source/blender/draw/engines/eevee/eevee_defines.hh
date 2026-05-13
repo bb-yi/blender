@@ -333,6 +333,8 @@
 #define IRRADIANCE_BRICK_BUF_SLOT 4
 /* Only during deferred direct-light evaluation. */
 #define LIGHT_SHADER_INDEX_BUF_SLOT 5
+#define LIGHT_SHADER_SURFEL_INDEX_BUF_SLOT 8
+#define LIGHT_SHADER_SURFEL_BUF_SLOT 9
 #define SAMPLING_BUF_SLOT 6
 #define CRYPTOMATTE_BUF_SLOT 7
 /* Only during surface capture. */

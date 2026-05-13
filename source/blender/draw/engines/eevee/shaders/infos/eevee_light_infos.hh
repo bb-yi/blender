@@ -7,6 +7,7 @@
 #  include "gpu_shader_compat.hh"
 
 #  include "eevee_light_shared.hh"
+#  include "eevee_lightprobe_shared.hh"
 #endif
 
 #include "eevee_defines.hh"
@@ -49,6 +50,24 @@ COMPUTE_SOURCE("eevee_light_shader_volume_comp.glsl")
 ADDITIONAL_INFO(draw_view)
 ADDITIONAL_INFO(eevee_global_ubo)
 ADDITIONAL_INFO(eevee_sampling_data)
+ADDITIONAL_INFO(eevee_light_data)
+ADDITIONAL_INFO(eevee_utility_texture)
+ADDITIONAL_INFO(draw_modelmat)
+ADDITIONAL_INFO(draw_object_infos)
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(eevee_light_shader_surfel)
+DEFINE("MAT_LIGHT_SHADER")
+DEFINE("MAT_LIGHT_SHADER_SURFEL")
+LOCAL_GROUP_SIZE(SURFEL_GROUP_SIZE)
+PUSH_CONSTANT(int, light_index)
+STORAGE_BUF(SURFEL_BUF_SLOT, read, Surfel, surfel_buf[])
+STORAGE_BUF(CAPTURE_BUF_SLOT, read, CaptureInfoData, capture_info_buf)
+STORAGE_BUF(LIGHT_SHADER_SURFEL_BUF_SLOT, write, float4, out_light_shader_buf[])
+COMPUTE_SOURCE("eevee_light_shader_surfel_comp.glsl")
+TYPEDEF_SOURCE("eevee_lightprobe_shared.hh")
+ADDITIONAL_INFO(draw_view)
+ADDITIONAL_INFO(eevee_global_ubo)
 ADDITIONAL_INFO(eevee_light_data)
 ADDITIONAL_INFO(eevee_utility_texture)
 ADDITIONAL_INFO(draw_modelmat)

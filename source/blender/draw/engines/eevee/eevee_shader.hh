@@ -317,10 +317,14 @@ class ShaderModule {
   GPUMaterial *light_shader_volume_get(blender::Light *blender_light,
                                        bNodeTree *nodetree,
                                        bool deferred_compilation);
+  GPUMaterial *light_shader_surfel_get(blender::Light *blender_light,
+                                       bNodeTree *nodetree,
+                                       bool deferred_compilation);
 
   void material_create_info_amend(GPUMaterial *mat, GPUCodegenOutput *codegen);
   void light_create_info_amend(GPUMaterial *mat, GPUCodegenOutput *codegen);
   void light_volume_create_info_amend(GPUMaterial *mat, GPUCodegenOutput *codegen);
+  void light_surfel_create_info_amend(GPUMaterial *mat, GPUCodegenOutput *codegen);
 
   /** Only to be used by Instance constructor. */
   static ShaderModule *module_get();
