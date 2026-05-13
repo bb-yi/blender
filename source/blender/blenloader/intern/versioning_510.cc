@@ -1167,6 +1167,14 @@ void blo_do_versions_510(FileData *fd, Library * /*lib*/, Main *bmain)
     version_add_outline_control_freestyle_edge_input(bmain);
   }
 
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 47)) {
+    for (Light &light : bmain->lights) {
+      if (light.shadow_map_scale <= 0.0f) {
+        light.shadow_map_scale = 1.0f;
+      }
+    }
+  }
+
   /**
    * Always bump subversion in BKE_blender_version.h when adding versioning
    * code here, and wrap it inside a MAIN_VERSION_FILE_ATLEAST check.
