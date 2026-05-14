@@ -234,6 +234,11 @@ add_blender_test(
 )
 
 add_blender_test(
+  script_npr_multi_layers_rna
+  --python ${CMAKE_CURRENT_LIST_DIR}/npr/test_multi_npr_layers_rna.py
+)
+
+add_blender_test(
   script_bundled_modules
   --python ${CMAKE_CURRENT_LIST_DIR}/bl_bundled_modules.py -- --inside-blender
 )

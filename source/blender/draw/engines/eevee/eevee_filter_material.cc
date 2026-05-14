@@ -341,7 +341,8 @@ void FilterMaterialModule::begin_sync()
                                                             MAT_PROBE_NONE,
                                                             false,
                                                             nullptr,
-                                                            false);
+                                                            false,
+                                                            0);
     const int status = (gpumat != nullptr) ? GPU_material_status(gpumat) : -1;
     const int has_filter_output = (gpumat != nullptr) ?
                                       int(GPU_material_has_filter_output(gpumat)) :

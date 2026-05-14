@@ -346,6 +346,16 @@ struct MaterialLineArt {
   char _pad = {};
 };
 
+struct MaterialNPRLayer {
+  MaterialNPRLayer *next = nullptr;
+  MaterialNPRLayer *prev = nullptr;
+  char name[64] = {};
+  int uid = 0;
+  char enabled = false;
+  char _pad[3] = {};
+  struct bNodeTree *node_tree = nullptr;
+};
+
 struct Material {
 #ifdef __cplusplus
   DNA_DEFINE_CXX_METHODS(Material)
@@ -388,6 +398,9 @@ struct Material {
    * the UI or Python API by setting `use_nodes = True`. Therefore, #nodetree is required to never
    * be nullptr. */
   struct bNodeTree *nodetree = nullptr;
+  ListBase npr_layers = {};
+  int active_npr_layer_index = -1;
+  int _pad_multi_npr = 0;
   struct PreviewImage *preview = nullptr;
 
   /* Freestyle line settings. */

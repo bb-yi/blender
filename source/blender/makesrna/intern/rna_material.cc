@@ -19,6 +19,8 @@
 
 #include "BKE_customdata.hh"
 
+#include "BLI_string.h"
+
 #include "RNA_define.hh"
 #include "RNA_enum_types.hh"
 
@@ -187,6 +189,162 @@ static void rna_Material_eevee_domain_update(Main *bmain, Scene * /*scene*/, Poi
       WM_main_add_notifier(NC_SCENE | ND_RENDER_OPTIONS, scene);
     }
   }
+}
+
+static void rna_Material_npr_layer_tag_update(Main * /*bmain*/, Scene * /*scene*/, PointerRNA *ptr)
+{
+  Material *ma = id_cast<Material *>(ptr->owner_id);
+  DEG_id_tag_update(&ma->id, ID_RECALC_SHADING);
+  WM_main_add_notifier(NC_MATERIAL | ND_SHADING, ma);
+}
+
+static int rna_Material_npr_layer_active_index_max(const Material *material)
+{
+  return max_ii(-1, BLI_listbase_count(&material->npr_layers) - 1);
+}
+
+static void rna_Material_active_npr_layer_index_range(
+    PointerRNA *ptr, int *min, int *max, int * /*softmin*/, int * /*softmax*/)
+{
+  Material *material = static_cast<Material *>(ptr->data);
+  *min = -1;
+  *max = rna_Material_npr_layer_active_index_max(material);
+}
+
+static int rna_Material_active_npr_layer_index_get(PointerRNA *ptr)
+{
+  Material *material = static_cast<Material *>(ptr->data);
+  return std::clamp(material->active_npr_layer_index,
+                    -1,
+                    rna_Material_npr_layer_active_index_max(material));
+}
+
+static void rna_Material_active_npr_layer_index_set(PointerRNA *ptr, int value)
+{
+  Material *material = static_cast<Material *>(ptr->data);
+  material->active_npr_layer_index = std::clamp(
+      value, -1, rna_Material_npr_layer_active_index_max(material));
+}
+
+static std::optional<std::string> rna_MaterialNPRLayer_path(const PointerRNA *ptr)
+{
+  const MaterialNPRLayer *layer = static_cast<MaterialNPRLayer *>(ptr->data);
+  char escaped_name[sizeof(layer->name) * 2 + 1];
+  const int escaped_len = BLI_str_escape(escaped_name, layer->name, sizeof(escaped_name));
+  return std::string("npr_layers[\"") + std::string(escaped_name, escaped_len) + "\"]";
+}
+
+static void rna_MaterialNPRLayer_name_set(PointerRNA *ptr, const char *value)
+{
+  Material *material = reinterpret_cast<Material *>(ptr->owner_id);
+  MaterialNPRLayer *layer = static_cast<MaterialNPRLayer *>(ptr->data);
+  STRNCPY_UTF8(layer->name, value);
+  BLI_uniquename(&material->npr_layers,
+                 layer,
+                 DATA_("NPR Layer"),
+                 '.',
+                 offsetof(MaterialNPRLayer, name),
+                 sizeof(layer->name));
+}
+
+static bool rna_MaterialNPRLayer_node_tree_valid(PointerRNA *ptr, bNodeTree *ngroup)
+{
+  if (ngroup == nullptr || ngroup->type != NTREE_SHADER) {
+    return false;
+  }
+  if (ptr->owner_id != nullptr && ptr->owner_id->lib != nullptr &&
+      ngroup->id.lib != ptr->owner_id->lib)
+  {
+    return false;
+  }
+  ngroup->ensure_topology_cache();
+  return !ngroup->nodes_by_type("ShaderNodeNPR_Output").is_empty();
+}
+
+static void rna_MaterialNPRLayer_node_tree_set(PointerRNA *ptr,
+                                               PointerRNA value,
+                                               ReportList *reports)
+{
+  MaterialNPRLayer *layer = static_cast<MaterialNPRLayer *>(ptr->data);
+  bNodeTree *ngroup = static_cast<bNodeTree *>(value.data);
+  if (ngroup != nullptr && !rna_MaterialNPRLayer_node_tree_valid(ptr, ngroup)) {
+    BKE_report(reports, RPT_ERROR, "Node tree must be a shader NPR tree with an NPR Output node");
+    return;
+  }
+  if (layer->node_tree != nullptr) {
+    id_us_min(&layer->node_tree->id);
+  }
+  layer->node_tree = ngroup;
+  if (layer->node_tree != nullptr) {
+    id_us_plus(&layer->node_tree->id);
+  }
+}
+
+static bool rna_MaterialNPRLayer_node_tree_poll(PointerRNA *ptr, PointerRNA value)
+{
+  return rna_MaterialNPRLayer_node_tree_valid(ptr, static_cast<bNodeTree *>(value.data));
+}
+
+static MaterialNPRLayer *rna_Material_npr_layer_add(ID *id, Material *material)
+{
+  MaterialNPRLayer *layer = BKE_material_npr_layer_add(material, nullptr);
+  DEG_id_tag_update(id, ID_RECALC_SHADING);
+  WM_main_add_notifier(NC_MATERIAL | ND_SHADING, material);
+  return layer;
+}
+
+static void rna_Material_npr_layer_remove(ID *id, Material *material, ReportList *reports, int index)
+{
+  MaterialNPRLayer *layer = static_cast<MaterialNPRLayer *>(BLI_findlink(&material->npr_layers,
+                                                                         index));
+  if (layer == nullptr) {
+    BKE_reportf(reports, RPT_ERROR, "NPR layer index %d not found", index);
+    return;
+  }
+  BKE_material_npr_layer_remove(material, layer);
+  DEG_id_tag_update(id, ID_RECALC_SHADING);
+  WM_main_add_notifier(NC_MATERIAL | ND_SHADING, material);
+}
+
+static void rna_Material_npr_layer_move(ID *id, Material *material, ReportList *reports, int from, int to)
+{
+  if (!BLI_listbase_move_index(&material->npr_layers, from, to)) {
+    BKE_reportf(reports, RPT_ERROR, "Could not move NPR layer from index %d to %d", from, to);
+    return;
+  }
+  material->active_npr_layer_index = to;
+  DEG_id_tag_update(id, ID_RECALC_SHADING);
+  WM_main_add_notifier(NC_MATERIAL | ND_SHADING, material);
+}
+
+static void rna_def_material_npr_layers(BlenderRNA *brna, PropertyRNA *cprop)
+{
+  StructRNA *srna;
+  FunctionRNA *func;
+  PropertyRNA *parm;
+
+  RNA_def_property_srna(cprop, "MaterialNPRLayers");
+  srna = RNA_def_struct(brna, "MaterialNPRLayers", nullptr);
+  RNA_def_struct_sdna(srna, "Material");
+  RNA_def_struct_ui_text(srna, "Material NPR Layers", "Collection of material-local NPR layers");
+
+  func = RNA_def_function(srna, "add", "rna_Material_npr_layer_add");
+  RNA_def_function_flag(func, FUNC_USE_SELF_ID);
+  parm = RNA_def_pointer(func, "layer", "MaterialNPRLayer", "", "Newly created NPR layer");
+  RNA_def_function_return(func, parm);
+
+  func = RNA_def_function(srna, "remove", "rna_Material_npr_layer_remove");
+  RNA_def_function_flag(func, FUNC_USE_SELF_ID | FUNC_USE_REPORTS);
+  parm = RNA_def_int(func, "index", -1, INT_MIN, INT_MAX, "Index", "Index to remove", -1, INT_MAX);
+  RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
+
+  func = RNA_def_function(srna, "move", "rna_Material_npr_layer_move");
+  RNA_def_function_flag(func, FUNC_USE_SELF_ID | FUNC_USE_REPORTS);
+  parm = RNA_def_int(
+      func, "from_index", -1, INT_MIN, INT_MAX, "From Index", "Index to move", -1, INT_MAX);
+  RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
+  parm = RNA_def_int(func, "to_index", -1, INT_MIN, INT_MAX, "To Index", "Target index", -1, INT_MAX);
+  RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
 }
 
 static void rna_Material_texpaint_begin(CollectionPropertyIterator *iter, PointerRNA *ptr)
@@ -864,6 +1022,41 @@ static void rna_def_material_greasepencil(BlenderRNA *brna)
   RNA_def_property_ui_text(
       prop, "Is Fill Visible", "True when opacity of fill is set high enough to be visible");
 }
+
+static void rna_def_material_npr_layer(BlenderRNA *brna)
+{
+  StructRNA *srna;
+  PropertyRNA *prop;
+
+  srna = RNA_def_struct(brna, "MaterialNPRLayer", nullptr);
+  RNA_def_struct_sdna(srna, "MaterialNPRLayer");
+  RNA_def_struct_ui_text(srna, "Material NPR Layer", "Ordered NPR shader tree layer for Eevee");
+  RNA_def_struct_path_func(srna, "rna_MaterialNPRLayer_path");
+
+  prop = RNA_def_property(srna, "name", PROP_STRING, PROP_NONE);
+  RNA_def_property_string_funcs(prop, nullptr, nullptr, "rna_MaterialNPRLayer_name_set");
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_ui_text(prop, "Name", "Layer name");
+  RNA_def_struct_name_property(srna, prop);
+  RNA_def_property_update(prop, NC_MATERIAL | ND_SHADING, "rna_Material_npr_layer_tag_update");
+
+  prop = RNA_def_property(srna, "enabled", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "enabled", 1);
+  RNA_def_property_ui_text(prop, "Enabled", "Render this NPR layer");
+  RNA_def_property_update(prop, NC_MATERIAL | ND_SHADING, "rna_Material_npr_layer_tag_update");
+
+  prop = RNA_def_property(srna, "node_tree", PROP_POINTER, PROP_NONE);
+  RNA_def_property_struct_type(prop, "NodeTree");
+  RNA_def_property_flag(prop, PROP_EDITABLE | PROP_ID_REFCOUNT);
+  RNA_def_property_pointer_funcs(prop,
+                                 nullptr,
+                                 "rna_MaterialNPRLayer_node_tree_set",
+                                 nullptr,
+                                 "rna_MaterialNPRLayer_node_tree_poll");
+  RNA_def_property_ui_text(prop, "NPR Tree", "Shader node tree evaluated by this NPR layer");
+  RNA_def_property_update(prop, NC_MATERIAL | ND_SHADING, "rna_Material_npr_layer_tag_update");
+}
+
 static void rna_def_material_lineart(BlenderRNA *brna)
 {
   StructRNA *srna;
@@ -1249,6 +1442,21 @@ void RNA_def_material(BlenderRNA *brna)
   RNA_def_property_clear_flag(prop, PROP_PTR_NO_OWNERSHIP);
   RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
   RNA_def_property_ui_text(prop, "Node Tree", "Node tree for node based materials");
+
+  prop = RNA_def_property(srna, "npr_layers", PROP_COLLECTION, PROP_NONE);
+  RNA_def_property_collection_sdna(prop, nullptr, "npr_layers", nullptr);
+  RNA_def_property_struct_type(prop, "MaterialNPRLayer");
+  RNA_def_property_ui_text(prop, "NPR Layers", "Ordered Eevee NPR tree stack");
+  rna_def_material_npr_layers(brna, prop);
+  rna_def_material_npr_layer(brna);
+
+  prop = RNA_def_property(srna, "active_npr_layer_index", PROP_INT, PROP_NONE);
+  RNA_def_property_int_funcs(prop,
+                             "rna_Material_active_npr_layer_index_get",
+                             "rna_Material_active_npr_layer_index_set",
+                             "rna_Material_active_npr_layer_index_range");
+  RNA_def_property_ui_text(prop, "Active NPR Layer Index", "Index of the active NPR layer");
+  RNA_def_property_update(prop, NC_MATERIAL | ND_SHADING, nullptr);
 
   prop = RNA_def_property(srna, "use_nodes", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(prop, nullptr, "use_nodes", 1);

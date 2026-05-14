@@ -151,7 +151,8 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
     bool deferred_compilation,
     GPUCodegenCallbackFn callback,
     void *thunk,
-    GPUMaterialPassReplacementCallbackFn pass_replacement_cb)
+    GPUMaterialPassReplacementCallbackFn pass_replacement_cb,
+    int npr_layer_index)
 {
   /* Search if this material is not already compiled. */
   for (LinkData &link : *gpumaterials) {
@@ -190,11 +191,13 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
     ntreeGPUMaterialNodes(localtree, mat);
   }
   if (compile_npr_graph) {
-    if (force_npr_graph || npr_tree_get(ntree) != nullptr) {
+    if (force_npr_graph || npr_tree_get(ntree) != nullptr ||
+        (ma != nullptr && npr_tree_get_from_mat_layer(ma, npr_layer_index) != nullptr))
+    {
       GPU_material_flag_set(mat, GPU_MATFLAG_NPR);
     }
     if (GPU_material_flag_get(mat, GPU_MATFLAG_NPR)) {
-      npr_localtree = ntreeGPUNPRNodes(ntree, mat);
+      npr_localtree = ntreeGPUNPRNodesLayer(ntree, mat, npr_layer_index);
     }
   }
 

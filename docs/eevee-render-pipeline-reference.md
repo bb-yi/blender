@@ -585,6 +585,12 @@ deferred 主阶段结束后释放 GBuffer。
 
 这些都会直接影响主表面阶段的耗时结构。
 
+当前项目进度：
+
+- Stage 1 已开始落地，`Material` 侧已经接入 `npr_layers` 数据结构和对应的 RNA / 序列化支持。
+- Stage 2 已推进到按 layer 取树、按 layer 编译的阶段，EEVEE 和 GPU material 的 key 路径正在改成 layer-aware。
+- 还没有进入多 layer 的实际 draw pass 提交，所以当前更接近“编译层准备完成”，不是最终多层渲染完成态。
+
 ### 4. GLSL Function / Raycast / NPR Tree
 
 这些功能会间接影响：

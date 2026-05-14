@@ -139,6 +139,14 @@ static void material_copy_data(Main *bmain,
         MEM_dupalloc(material_src->gp_style));
   }
 
+  BLI_duplicatelist(&material_dst->npr_layers, &material_src->npr_layers);
+  LISTBASE_FOREACH (MaterialNPRLayer *, layer, &material_dst->npr_layers) {
+    if (layer->node_tree != nullptr) {
+      id_us_plus(&layer->node_tree->id);
+    }
+  }
+  material_dst->active_npr_layer_index = material_src->active_npr_layer_index;
+
   BLI_listbase_clear(&material_dst->gpumaterial);
 
   /* TODO: Duplicate Engine Settings and set runtime to nullptr. */
@@ -150,6 +158,13 @@ static void material_free_data(ID *id)
 
   /* Free gpu material before the ntree */
   GPU_material_free(&material->gpumaterial);
+
+  LISTBASE_FOREACH (MaterialNPRLayer *, layer, &material->npr_layers) {
+    if (layer->node_tree != nullptr) {
+      id_us_min(&layer->node_tree->id);
+    }
+  }
+  BLI_freelistN(&material->npr_layers);
 
   /* is no lib link block, but material extension */
   if (material->nodetree) {
@@ -174,6 +189,9 @@ static void material_foreach_id(ID *id, LibraryForeachIDData *data)
   /* Node-trees **are owned by IDs**, treat them as mere sub-data and not real ID! */
   BKE_LIB_FOREACHID_PROCESS_FUNCTION_CALL(
       data, BKE_library_foreach_ID_embedded(data, (ID **)&material->nodetree));
+  LISTBASE_FOREACH (MaterialNPRLayer *, layer, &material->npr_layers) {
+    BKE_LIB_FOREACHID_PROCESS_IDSUPER(data, layer->node_tree, IDWALK_CB_USER);
+  }
   if (material->texpaintslot != nullptr) {
     BKE_LIB_FOREACHID_PROCESS_IDSUPER(data, material->texpaintslot->ima, IDWALK_CB_NOP);
   }
@@ -213,6 +231,7 @@ static void material_blend_write(BlendWriter *writer, ID *id, const void *id_add
   /* write LibData */
   writer->write_id_struct(id_address, ma);
   BKE_id_blend_write(writer, &ma->id);
+  writer->write_struct_list(&ma->npr_layers);
 
   /* nodetree is integral part of material, no libdata */
   if (ma->nodetree) {
@@ -239,6 +258,7 @@ static void material_blend_read_data(BlendDataReader *reader, ID *id)
   BLO_read_struct(reader, PreviewImage, &ma->preview);
   BKE_previewimg_blend_read(reader, ma->preview);
 
+  BLO_read_struct_list(reader, MaterialNPRLayer, &ma->npr_layers);
   BLI_listbase_clear(&ma->gpumaterial);
 
   BLO_read_struct(reader, MaterialGPencilStyle, &ma->gp_style);

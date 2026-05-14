@@ -39,6 +39,7 @@
 
 #include "BKE_asset.hh"
 #include "BKE_attribute_legacy_convert.hh"
+#include "BKE_material.hh"
 #include "BKE_customdata.hh"
 #include "BKE_grease_pencil_legacy_convert.hh"
 #include "BKE_idprop.hh"
@@ -344,6 +345,27 @@ static void version_clear_unused_strip_flags(Main &bmain)
         return true;
       });
     }
+  }
+}
+
+static void version_material_npr_layers(Main &bmain)
+{
+  for (Material &ma : bmain.materials) {
+    if (ma.nodetree == nullptr || !BLI_listbase_is_empty(&ma.npr_layers)) {
+      continue;
+    }
+    bNode *output = ntreeShaderOutputNode(ma.nodetree, SHD_OUTPUT_EEVEE);
+    if (output == nullptr || output->id == nullptr || GS(output->id->name) != ID_NT) {
+      continue;
+    }
+    MaterialNPRLayer *layer = MEM_new_zeroed<MaterialNPRLayer>("MaterialNPRLayer");
+    STRNCPY(layer->name, "NPR Layer");
+    layer->uid = 1;
+    layer->enabled = true;
+    layer->node_tree = reinterpret_cast<bNodeTree *>(output->id);
+    id_us_plus(&layer->node_tree->id);
+    BLI_addtail(&ma.npr_layers, layer);
+    ma.active_npr_layer_index = 0;
   }
 }
 
@@ -851,6 +873,8 @@ void do_versions_after_linking_510(FileData *fd, Main *bmain)
       }
     }
   }
+
+  version_material_npr_layers(*bmain);
 
   if (!DNA_struct_exists(fd->filesdna, "NodeShaderImageToClosure"))
   {

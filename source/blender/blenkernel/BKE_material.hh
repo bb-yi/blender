@@ -25,6 +25,7 @@ struct Scene;
 struct bNode;
 struct bNodeTree;
 struct MaterialGPencilStyle;
+struct MaterialNPRLayer;
 
 /* -------------------------------------------------------------------- */
 /** \name Module
@@ -62,6 +63,8 @@ Material *BKE_material_add(Main *bmain, const char *name);
 Material *BKE_gpencil_material_add(Main *bmain, const char *name);
 void BKE_gpencil_material_attr_init(Material *ma);
 void BKE_material_make_node_previews_dirty(Material *ma);
+MaterialNPRLayer *BKE_material_npr_layer_add(Material *material, bNodeTree *tree);
+void BKE_material_npr_layer_remove(Material *material, MaterialNPRLayer *layer);
 
 /* UNUSED */
 // void automatname(Material *);

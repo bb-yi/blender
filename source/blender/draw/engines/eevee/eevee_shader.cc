@@ -1057,6 +1057,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   bool transparent_shadows;
   bool use_outline;
   bool uuid_depth_offset_affect_lighting;
+  int npr_layer_index;
   material_type_from_shader_uuid(shader_uuid,
                                  pipeline_type,
                                  geometry_type,
@@ -1065,7 +1066,8 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
                                  probe_capture,
                                  transparent_shadows,
                                  use_outline,
-                                 uuid_depth_offset_affect_lighting);
+                                 uuid_depth_offset_affect_lighting,
+                                 npr_layer_index);
   UNUSED_VARS(uuid_depth_offset_affect_lighting);
 
   GPUCodegenOutput &codegen = *codegen_;
@@ -1854,6 +1856,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
 struct CallbackThunk {
   ShaderModule *shader_module;
   blender::Material *default_mat;
+  int npr_layer_index;
 };
 
 /* WATCH: This can be called from another thread! Needs to not touch the shader module in any
@@ -1882,6 +1885,7 @@ static GPUPass *pass_replacement_cb(void *void_thunk, GPUMaterial *mat)
   bool transparent_shadows;
   bool use_outline;
   bool depth_offset_affect_lighting;
+  int npr_layer_index;
   material_type_from_shader_uuid(shader_uuid,
                                  pipeline_type,
                                  geometry_type,
@@ -1890,8 +1894,10 @@ static GPUPass *pass_replacement_cb(void *void_thunk, GPUMaterial *mat)
                                  probe_capture,
                                  transparent_shadows,
                                  use_outline,
-                                 depth_offset_affect_lighting);
+                                 depth_offset_affect_lighting,
+                                 npr_layer_index);
   UNUSED_VARS(depth_offset_affect_lighting);
+  UNUSED_VARS(npr_layer_index);
 
   bool is_shadow_pass = pipeline_type == eMaterialPipeline::MAT_PIPE_SHADOW;
   bool is_prepass = ELEM(pipeline_type,
@@ -1923,7 +1929,8 @@ static GPUPass *pass_replacement_cb(void *void_thunk, GPUMaterial *mat)
                                                                  probe_capture,
                                                                  false,
                                                                  nullptr,
-                                                                 use_outline);
+                                                                 use_outline,
+                                                                 thunk->npr_layer_index);
     return GPU_material_get_pass(mat);
   }
 
@@ -1956,7 +1963,8 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
                                                eMaterialProbe probe_capture,
                                                bool deferred_compilation,
                                                blender::Material *default_mat,
-                                               bool use_outline)
+                                               bool use_outline,
+                                               int npr_layer_index)
 {
   eMaterialDisplacement displacement_type = to_displacement_type(blender_mat->displacement_method);
   eMaterialThickness thickness_type = to_thickness_type(blender_mat->thickness_mode);
@@ -1981,12 +1989,13 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
       probe_capture,
       blender_mat->blend_flag,
       use_outline,
-      material_depth_offset_affects_lighting(blender_mat));
+      material_depth_offset_affects_lighting(blender_mat),
+      npr_layer_index);
 
   bool is_default_material = default_mat == nullptr;
   BLI_assert(blender_mat != default_mat);
 
-  CallbackThunk thunk = {this, default_mat};
+  CallbackThunk thunk = {this, default_mat, npr_layer_index};
 
   GPUMaterialFromNodeTreeResult material_from_tree = GPU_material_from_nodetree(
       blender_mat,
@@ -2001,7 +2010,8 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
       deferred_compilation,
       codegen_callback,
       &thunk,
-      is_default_material ? nullptr : pass_replacement_cb);
+      is_default_material ? nullptr : pass_replacement_cb,
+      npr_layer_index);
   store_node_tree_errors(material_from_tree);
   return material_from_tree.material;
 }
@@ -2020,9 +2030,10 @@ GPUMaterial *ShaderModule::world_shader_get(blender::World *blender_world,
                                                         MAT_PROBE_NONE,
                                                         0,
                                                         true,
-                                                        compile_npr_graph);
+                                                        compile_npr_graph,
+                                                        0);
 
-  CallbackThunk thunk = {this, nullptr};
+  CallbackThunk thunk = {this, nullptr, 0};
 
   GPUMaterialFromNodeTreeResult material_from_tree = GPU_material_from_nodetree(
       nullptr,

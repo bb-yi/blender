@@ -113,7 +113,10 @@ static void shader_get_from_context(const bContext *C,
           *r_id = &ma->id;
           *r_ntree = ma->nodetree;
           if (snode->shaderfrom == SNODE_SHADER_NPR) {
-            bNodeTree *nprtree = npr_tree_get_from_mat(ma);
+            bNodeTree *nprtree = npr_tree_get_from_mat_layer(ma, ma->active_npr_layer_index);
+            if (nprtree == nullptr) {
+              nprtree = npr_tree_get_from_mat(ma);
+            }
             *r_id = (nprtree != nullptr) ? &nprtree->id : nullptr;
             *r_ntree = nprtree;
           }
@@ -1030,6 +1033,48 @@ bNodeTree *npr_tree_get_from_mat(Material *material)
   return npr_tree_get(material->nodetree);
 }
 
+int npr_tree_count_from_mat(Material *material)
+{
+  if (material == nullptr) {
+    return 0;
+  }
+
+  int count = 0;
+  LISTBASE_FOREACH (MaterialNPRLayer *, layer, &material->npr_layers) {
+    if (layer->enabled && layer->node_tree != nullptr) {
+      count++;
+    }
+  }
+
+  if (count == 0 && npr_tree_get_from_mat(material) != nullptr) {
+    return 1;
+  }
+  return count;
+}
+
+bNodeTree *npr_tree_get_from_mat_layer(Material *material, int layer_index)
+{
+  if (material == nullptr || layer_index < 0) {
+    return nullptr;
+  }
+
+  int enabled_index = 0;
+  LISTBASE_FOREACH (MaterialNPRLayer *, layer, &material->npr_layers) {
+    if (!layer->enabled || layer->node_tree == nullptr) {
+      continue;
+    }
+    if (enabled_index == layer_index) {
+      return layer->node_tree;
+    }
+    enabled_index++;
+  }
+
+  if (enabled_index == 0 && layer_index == 0) {
+    return npr_tree_get_from_mat(material);
+  }
+  return nullptr;
+}
+
 static bNode *ntreeShaderNPROutputNode(bNodeTree *localtree)
 {
   for (bNode &node : localtree->nodes) {
@@ -1087,9 +1132,13 @@ static void ntree_shader_to_rgba_depth_count_of_type(bNodeTree *tree,
   }
 }
 
-bNodeTree *ntreeGPUNPRNodes(bNodeTree *material_tree, GPUMaterial *mat)
+bNodeTree *ntreeGPUNPRNodesLayer(bNodeTree *material_tree, GPUMaterial *mat, int layer_index)
 {
-  bNodeTree *npr_tree = npr_tree_get(material_tree);
+  Material *material = GPU_material_get_material(mat);
+  bNodeTree *npr_tree = npr_tree_get_from_mat_layer(material, layer_index);
+  if (npr_tree == nullptr && layer_index == 0) {
+    npr_tree = npr_tree_get(material_tree);
+  }
   if (npr_tree == nullptr) {
     return nullptr;
   }
@@ -1109,6 +1158,11 @@ bNodeTree *ntreeGPUNPRNodes(bNodeTree *material_tree, GPUMaterial *mat)
 
   ntreeShaderEndExecTree(exec);
   return localtree;
+}
+
+bNodeTree *ntreeGPUNPRNodes(bNodeTree *material_tree, GPUMaterial *mat)
+{
+  return ntreeGPUNPRNodesLayer(material_tree, mat, 0);
 }
 
 void ntreeGPUMaterialNodes(bNodeTree *localtree, GPUMaterial *mat)

@@ -415,7 +415,8 @@ void LookdevModule::sync_pass(PassSimple &pass,
       MAT_PROBE_NONE,
       false,
       inst_.materials.default_surface,
-      false);
+      false,
+      0);
   pass.state_set(state);
   pass.material_set(*inst_.manager, gpumat);
   pass.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);

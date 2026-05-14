@@ -349,6 +349,16 @@ bool MaterialModule::material_uses_outline_control(const blender::Material *mate
       return true;
     }
   }
+  if (npr_tree_count_from_mat(const_cast<blender::Material *>(material)) > 0) {
+    for (const MaterialNPRLayer &layer : material->npr_layers) {
+      if (layer.enabled && layer.node_tree != nullptr) {
+        Set<const bNodeTree *> visited;
+        if (node_tree_uses_outline_control(*layer.node_tree, visited)) {
+          return true;
+        }
+      }
+    }
+  }
 
   return false;
 }
@@ -357,7 +367,8 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
                                                blender::Material *blender_mat,
                                                eMaterialPipeline pipeline_type,
                                                eMaterialGeometry geometry_type,
-                                               eMaterialProbe probe_capture)
+                                               eMaterialProbe probe_capture,
+                                               int npr_layer_index)
 {
   if (blender_mat->eevee_domain == MA_EEVEE_DOMAIN_FILTER) {
     /* Filter materials are evaluated as a dedicated fullscreen post pass. */
@@ -382,7 +393,8 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
       probe_capture,
       use_deferred_compilation,
       default_mat,
-      inst_.scene->eevee.use_outline != 0);
+      inst_.scene->eevee.use_outline != 0,
+      npr_layer_index);
 
   has_time_dependent_materials_ |= GPU_material_is_time_dependent(matpass.gpumat);
 
@@ -416,7 +428,8 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
           probe_capture,
           false,
           nullptr,
-          inst_.scene->eevee.use_outline != 0);
+          inst_.scene->eevee.use_outline != 0,
+          npr_layer_index);
       break;
     case GPU_MAT_FAILED:
     default:
@@ -431,7 +444,8 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
           probe_capture,
           false,
           nullptr,
-          inst_.scene->eevee.use_outline != 0);
+          inst_.scene->eevee.use_outline != 0,
+          npr_layer_index);
       break;
   }
   /* Returned material should be ready to be drawn. */
@@ -468,7 +482,8 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
     ShaderKey shader_key(matpass.gpumat,
                          blender_mat,
                          probe_capture,
-                         ob->refraction_layer_index);
+                         ob->refraction_layer_index,
+                         npr_layer_index);
 
     PassMain::Sub *shader_sub = shader_map_.lookup_or_add_cb(shader_key, [&]() {
       /* First time encountering this shader. Create a sub that will contain materials using it. */
@@ -611,23 +626,23 @@ Material &MaterialModule::material_sync(Object *ob,
     else {
       /* Order is important for transparent. */
       if (!hide_on_camera) {
-        mat.prepass = material_pass_get(ob, blender_mat, prepass_pipe, geometry_type);
+        mat.prepass = material_pass_get(ob, blender_mat, prepass_pipe, geometry_type, MAT_PROBE_NONE, 0);
       }
       else {
         mat.prepass = MaterialPass();
       }
 
-      mat.shading = material_pass_get(ob, blender_mat, surface_pipe, geometry_type);
+      mat.shading = material_pass_get(ob, blender_mat, surface_pipe, geometry_type, MAT_PROBE_NONE, 0);
       const bool has_npr_tree = !hide_on_camera && (surface_pipe == MAT_PIPE_DEFERRED) &&
-                                (npr_tree_get_from_mat(blender_mat) != nullptr);
+                                (npr_tree_count_from_mat(blender_mat) > 0);
       mat.npr = has_npr_tree ? material_pass_get(
-                                   ob, blender_mat, MAT_PIPE_DEFERRED_NPR, geometry_type) :
+                                   ob, blender_mat, MAT_PIPE_DEFERRED_NPR, geometry_type, MAT_PROBE_NONE, 0) :
                                MaterialPass();
       if (!hide_on_camera && inst_.scene->eevee.use_outline != 0 && use_forward_pipeline &&
           GPU_material_flag_get(mat.shading.gpumat, GPU_MATFLAG_TRANSPARENT))
       {
         mat.outline_occlusion = material_pass_get(
-            ob, blender_mat, MAT_PIPE_PREPASS_OVERLAP, geometry_type);
+            ob, blender_mat, MAT_PIPE_PREPASS_OVERLAP, geometry_type, MAT_PROBE_NONE, 0);
       }
       else {
         mat.outline_occlusion = MaterialPass();
@@ -834,7 +849,8 @@ ShaderGroups MaterialModule::default_materials_load(bool block_until_ready)
             MAT_PROBE_NONE,
             !block_until_ready,
             nullptr,
-            use_outline);
+            use_outline,
+            0);
         shaders_are_ready = shaders_are_ready && GPU_material_status(gpu_mat) == GPU_MAT_SUCCESS;
       };
 
