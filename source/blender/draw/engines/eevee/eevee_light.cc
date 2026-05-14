@@ -778,6 +778,7 @@ void LightModule::begin_sync()
   front_light_shader_missing_prepass_reported_ = false;
   front_light_shader_needed_ = false;
   has_time_dependent_light_shaders_ = false;
+  has_time_dependent_uniform_light_shaders_ = false;
 
   if (use_sun_lights_ && inst_.world.sun_threshold() > 0.0f) {
     if (inst_.pipelines.world.use_lightpath_node()) {
@@ -842,7 +843,9 @@ void LightModule::sync_light(const Object *ob, ObjectHandle &handle)
       light.uniform_light_shader_index = uniform_light_shader_materials_.size();
       uniform_light_shader_materials_.append(uniform_gpumat);
       uniform_light_shader_lights_.append(static_cast<const LightData &>(light));
-      has_time_dependent_light_shaders_ |= GPU_material_is_time_dependent(uniform_gpumat);
+      const bool is_time_dependent = GPU_material_is_time_dependent(uniform_gpumat);
+      has_time_dependent_light_shaders_ |= is_time_dependent;
+      has_time_dependent_uniform_light_shaders_ |= is_time_dependent;
       inst_.manager->register_layer_attributes(uniform_gpumat);
     }
     else {
@@ -973,6 +976,34 @@ void LightModule::end_sync()
     /* Untag for next sync. */
     light.used = false;
   }
+  const bool too_many_lights = sun_lights_len_ + local_lights_len_ > CULLING_MAX_ITEM;
+  /* If exceeding the limit, just trim off the excess to avoid glitchy rendering. */
+  if (too_many_lights) {
+    sun_lights_len_ = min_ii(sun_lights_len_, CULLING_MAX_ITEM);
+    local_lights_len_ = min_ii(local_lights_len_, CULLING_MAX_ITEM - sun_lights_len_);
+    light_shader_materials_.clear();
+    front_light_shader_materials_.clear();
+    volume_light_shader_materials_.clear();
+    surfel_light_shader_materials_.clear();
+    uniform_light_shader_materials_.clear();
+    light_shader_lights_.clear();
+    front_light_shader_lights_.clear();
+    volume_light_shader_lights_.clear();
+    surfel_light_shader_lights_.clear();
+    uniform_light_shader_lights_.clear();
+    has_time_dependent_light_shaders_ = false;
+    has_time_dependent_uniform_light_shaders_ = false;
+    inst_.info_append_i18n("Error: Too many lights in the scene.");
+  }
+  lights_len_ = sun_lights_len_ + local_lights_len_;
+  if (too_many_lights) {
+    light_shader_index_buf_ensure_no_shader(light_shader_src_index_buf_, lights_len_);
+    light_shader_index_buf_ensure_no_shader(front_light_shader_src_index_buf_, lights_len_);
+    light_shader_index_buf_ensure_no_shader(volume_light_shader_src_index_buf_, lights_len_);
+    light_shader_index_buf_ensure_no_shader(surfel_light_shader_src_index_buf_, lights_len_);
+    light_shader_index_buf_ensure_no_shader(light_shader_no_index_buf_, lights_len_);
+  }
+
   /* This scene data buffer is then immutable after this point. */
   light_buf_.push_update();
   light_shader_src_index_buf_.push_update();
@@ -980,14 +1011,6 @@ void LightModule::end_sync()
   volume_light_shader_src_index_buf_.push_update();
   surfel_light_shader_src_index_buf_.push_update();
   light_shader_no_index_buf_.push_update();
-
-  /* If exceeding the limit, just trim off the excess to avoid glitchy rendering. */
-  if (sun_lights_len_ + local_lights_len_ > CULLING_MAX_ITEM) {
-    sun_lights_len_ = min_ii(sun_lights_len_, CULLING_MAX_ITEM);
-    local_lights_len_ = min_ii(local_lights_len_, CULLING_MAX_ITEM - sun_lights_len_);
-    inst_.info_append_i18n("Error: Too many lights in the scene.");
-  }
-  lights_len_ = sun_lights_len_ + local_lights_len_;
 
   /* Resize to the actual number of lights after pruning. */
   lights_allocated = ceil_to_multiple_u(max_ii(lights_len_, 1), LIGHT_CHUNK);
@@ -1440,7 +1463,7 @@ void LightModule::eval_uniform_light_shaders(View &view)
     return;
   }
 
-  if (uniform_light_shader_valid_) {
+  if (uniform_light_shader_valid_ && !has_time_dependent_uniform_light_shaders_) {
     return;
   }
 

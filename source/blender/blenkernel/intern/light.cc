@@ -151,6 +151,10 @@ static void light_blend_write(BlendWriter *writer, ID *id, const void *id_addres
   /* Forward compatibility for Use Nodes. */
   la->use_nodes = true;
 
+  /* Clean up runtime data, important in undo case to reduce false detection of changed
+   * datablocks. */
+  BLI_listbase_clear(&la->gpumaterial);
+
   /* write LibData */
   writer->write_id_struct(id_address, la);
   BKE_id_blend_write(writer, &la->id);

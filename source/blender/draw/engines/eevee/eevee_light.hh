@@ -219,6 +219,7 @@ class LightModule {
   bool volume_light_shader_valid_ = false;
   bool surfel_light_shader_valid_ = false;
   bool has_time_dependent_light_shaders_ = false;
+  bool has_time_dependent_uniform_light_shaders_ = false;
   /** Culling information. */
   LightCullingDataBuf culling_data_buf_ = {"LightCull_data"};
   /** Z-distance matching the key for each visible lights. Used for sorting. */
