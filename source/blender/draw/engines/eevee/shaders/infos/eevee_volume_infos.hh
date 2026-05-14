@@ -56,6 +56,7 @@ DEFINE("VOLUME_SHADOW")
 SAMPLER(9, sampler3D, extinction_tx)
 SAMPLER(LIGHT_SHADER_TEX_SLOT, sampler2DArray, light_shader_tx)
 STORAGE_BUF(LIGHT_SHADER_INDEX_BUF_SLOT, read, int, light_shader_index_buf[])
+STORAGE_BUF(LIGHT_SHADER_UNIFORM_BUF_SLOT, read, float4, light_shader_uniform_buf[])
 DO_STATIC_COMPILATION()
 GPU_SHADER_CREATE_END()
 

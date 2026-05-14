@@ -468,6 +468,7 @@ void VolumeModule::draw_compute(View &main_view, int2 extent)
       inst_.sphere_probes.set_view(main_view);
       inst_.shadows.set_view(main_view, extent);
     }
+    inst_.lights.eval_uniform_light_shaders(main_view);
     inst_.lights.eval_volume_light_shaders(main_view, data_.tex_size);
 
     scatter_tx_.swap();

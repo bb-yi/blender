@@ -80,7 +80,8 @@ void RenderBuffers::acquire(int2 extent)
 
   /* TODO(fclem): Make vector pass allocation optional if no TAA or motion blur is needed. */
   vector_tx.acquire(extent, vector_tx_format(), usage_attachment_read_write);
-  const bool use_prepass_normal = inst_.pipelines.has_raycast || inst_.outline.enabled();
+  const bool use_prepass_normal = inst_.pipelines.has_raycast || inst_.outline.enabled() ||
+                                  inst_.lights.needs_front_light_shader();
   if (inst_.pipelines.has_raycast) {
     object_id_tx.acquire(extent, gpu::TextureFormat::UINT_16, usage_attachment_read);
   }

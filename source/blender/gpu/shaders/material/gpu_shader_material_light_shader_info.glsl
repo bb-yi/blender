@@ -58,6 +58,8 @@ void node_eevee_light_shader_info(out float4 default_color,
     float default_influence_radius_invsqr =
 #  if defined(MAT_LIGHT_SHADER_VOLUME)
         light.local().local.influence_radius_invsqr_volume;
+#  elif defined(MAT_LIGHT_SHADER_UNIFORM)
+        light.local().local.influence_radius_invsqr_surface;
 #  else
         light.local().local.influence_radius_invsqr_surface;
 #  endif

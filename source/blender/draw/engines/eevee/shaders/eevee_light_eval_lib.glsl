@@ -254,9 +254,22 @@ void light_eval_single(uint l_idx,
 
   float attenuation = light_attenuation_surface(light, is_directional, lv);
   bool light_shader_no_distance_falloff = false;
-#ifdef LIGHT_SHADER_TEXTURE_EVAL
+#if defined(LIGHT_SHADER_TEXTURE_EVAL) || defined(LIGHT_SHADER_SURFEL_EVAL)
   int light_shader_index = light_shader_index_buf[l_idx];
-  if (!is_transmission && light_shader_index >= 0) {
+  int light_shader_uniform_index = (light_shader_index < -1) ? -light_shader_index - 2 : -1;
+  if (!is_transmission && light_shader_uniform_index >= 0) {
+    float4 light_shader = light_shader_uniform_buf[light_shader_uniform_index];
+    light.color = light_shader.rgb;
+    attenuation = light_attenuation_common(light, is_directional, lv.L) * light_shader.a;
+    light_shader_no_distance_falloff = true;
+    if (!is_directional) {
+      attenuation *= light_influence_cutoff(lv.dist,
+                                            light.local().local.influence_radius_invsqr_surface);
+    }
+  }
+#endif
+#ifdef LIGHT_SHADER_TEXTURE_EVAL
+  if (!is_transmission && light_shader_uniform_index < 0 && light_shader_index >= 0) {
     float4 light_shader = texelFetch(light_shader_tx, int3(int2(PIXEL), light_shader_index), 0);
     light.color = light_shader.rgb;
     attenuation = light_attenuation_common(light, is_directional, lv.L) * light_shader.a;
@@ -268,8 +281,7 @@ void light_eval_single(uint l_idx,
   }
 #endif
 #ifdef LIGHT_SHADER_SURFEL_EVAL
-  int light_shader_index = light_shader_index_buf[l_idx];
-  if (!is_transmission && light_shader_index >= 0) {
+  if (!is_transmission && light_shader_uniform_index < 0 && light_shader_index >= 0) {
     float4 light_shader = light_shader_surfel_buf[light_shader_index *
                                                       int(capture_info_buf.surfel_len) +
                                                   light_shader_surfel_index];

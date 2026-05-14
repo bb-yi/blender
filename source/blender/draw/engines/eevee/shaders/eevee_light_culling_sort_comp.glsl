@@ -68,6 +68,8 @@ void main()
     uint input_index = in_key_buf[src_index];
     out_light_buf[prefix_sum] = in_light_buf[input_index];
     out_light_shader_index_buf[prefix_sum] = in_light_shader_index_buf[input_index];
+    out_front_light_shader_index_buf[prefix_sum] =
+        in_front_light_shader_index_buf[input_index];
     out_volume_light_shader_index_buf[prefix_sum] =
         in_volume_light_shader_index_buf[input_index];
     out_surfel_light_shader_index_buf[prefix_sum] =

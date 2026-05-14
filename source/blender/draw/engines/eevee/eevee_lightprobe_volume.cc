@@ -1242,6 +1242,7 @@ void IrradianceBake::surfels_lights_eval()
   inst_.hiz_buffer.set_source(&inst_.render_buffers.depth_tx);
   inst_.lights.set_view(view_z_, grid_pixel_extent_.xy());
   inst_.shadows.set_view(view_z_, grid_pixel_extent_.xy());
+  inst_.lights.eval_uniform_light_shaders(view_z_);
   inst_.lights.eval_surfel_light_shaders(
       view_z_, surfels_buf_, capture_info_buf_, capture_info_buf_.surfel_len);
   if (GPU_type_matches(GPU_DEVICE_ANY, GPU_OS_MAC, GPU_DRIVER_ANY)) {

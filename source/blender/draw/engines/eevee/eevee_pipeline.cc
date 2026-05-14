@@ -508,6 +508,7 @@ void ForwardPipeline::sync()
 
       opaque_ps_.bind_resources(inst_.uniform_data);
       opaque_ps_.bind_resources(inst_.lights);
+      inst_.lights.bind_front_light_shader_resources(opaque_ps_);
       opaque_ps_.bind_resources(inst_.shadows);
       opaque_ps_.bind_resources(inst_.volume.result);
       opaque_ps_.bind_resources(inst_.sampling);
@@ -545,6 +546,7 @@ void ForwardPipeline::sync()
 
     sub.bind_resources(inst_.uniform_data);
     sub.bind_resources(inst_.lights);
+    inst_.lights.bind_front_light_shader_resources(sub);
     sub.bind_resources(inst_.shadows);
     sub.bind_resources(inst_.volume.result);
     sub.bind_resources(inst_.sampling);
@@ -597,6 +599,7 @@ PassMain::Sub *ForwardPipeline::prepass_opaque_add(blender::Material *blender_ma
    * is no mix shader (could do better constant folding but that's expensive). */
 
   has_opaque_ = true;
+  inst_.lights.tag_front_light_shader_needed();
   PassMain::Sub *pass = prepass_ps_.add(blender_mat, gpumat, has_motion);
   if (inst_.scene->eevee.use_outline && GPU_material_has_outline_output(gpumat)) {
     pass->bind_image(OUTLINE_COLOR_SLOT, &inst_.render_buffers.outline_color_tx);
@@ -617,6 +620,7 @@ PassMain::Sub *ForwardPipeline::material_opaque_add(const Object *ob,
   PassMain::Sub *pass = material_surface_cull_pass_get(
       opaque_double_sided_ps_, opaque_single_sided_ps_, opaque_front_cull_ps_, blender_mat);
   has_opaque_ = true;
+  inst_.lights.tag_front_light_shader_needed();
   PassMain::Sub *sub_pass = &pass->sub(GPU_material_get_name(gpumat));
   if (inst_.scene->eevee.use_outline) {
     sub_pass->bind_image(OUTLINE_COLOR_SLOT, &inst_.render_buffers.outline_color_tx);
@@ -636,6 +640,7 @@ PassMain::Sub *ForwardPipeline::prepass_transparent_add(const Object *ob,
                    inst_.film.depth.test_state;
   state |= material_surface_cull_state(material_surface_cull_method(blender_mat));
   has_transparent_ = true;
+  inst_.lights.tag_front_light_shader_needed();
   float sorting_value = math::dot(float3(ob->object_to_world().location()), camera_forward_);
   PassMain::Sub *pass = &transparent_ps_.sub(GPU_material_get_name(gpumat), sorting_value);
   pass->state_set(state);
@@ -661,6 +666,7 @@ PassMain::Sub *ForwardPipeline::material_transparent_add(const Object *ob,
   has_holdout_ |= GPU_material_flag_get(gpumat, GPU_MATFLAG_HOLDOUT) ||
                   (ob->base_flag & BASE_HOLDOUT) || (ob->visibility_flag & OB_HOLDOUT);
   has_transparent_ = true;
+  inst_.lights.tag_front_light_shader_needed();
   /* Must be checked here too,
    * since this function is not called from PipelineModule::material_add. */
   inst_.pipelines.has_raycast |= GPU_material_flag_get(gpumat, GPU_MATFLAG_RAYCAST);
@@ -803,6 +809,8 @@ void ForwardPipeline::render(View &view,
     inst_.volume_probes.set_view(view);
     inst_.sphere_probes.set_view(view);
   }
+  inst_.lights.eval_uniform_light_shaders(view);
+  inst_.lights.eval_front_light_shaders(view, extent);
 
   if (needs_transparency_resolve) {
     ScopedTelemetrySample telemetry_sample(
@@ -892,7 +900,6 @@ void DeferredLayerBase::gbuffer_pass_sync(Instance &inst)
   gbuffer_ps_.bind_resources(inst.uniform_data);
   gbuffer_ps_.bind_resources(inst.sampling);
   gbuffer_ps_.bind_resources(inst.hiz_buffer.front);
-  gbuffer_ps_.bind_resources(inst.hiz_buffer.front);
   gbuffer_ps_.bind_resources(inst.render_textures);
   gbuffer_ps_.bind_resources(inst.cryptomatte);
 
@@ -915,16 +922,19 @@ void DeferredLayerBase::gbuffer_pass_sync(Instance &inst)
   gbuffer_single_sided_hybrid_ps_ = &gbuffer_ps_.sub("BackCull.Hybrid");
   gbuffer_single_sided_hybrid_ps_->bind_texture(RADIANCE_PREVIOUS_LAYER_TEX_SLOT,
                                                 &radiance_behind_tx_);
+  inst.lights.bind_front_light_shader_resources(*gbuffer_single_sided_hybrid_ps_);
   gbuffer_single_sided_hybrid_ps_->state_set(state | DRW_STATE_CULL_BACK);
 
   gbuffer_front_cull_hybrid_ps_ = &gbuffer_ps_.sub("FrontCull.Hybrid");
   gbuffer_front_cull_hybrid_ps_->bind_texture(RADIANCE_PREVIOUS_LAYER_TEX_SLOT,
                                               &radiance_behind_tx_);
+  inst.lights.bind_front_light_shader_resources(*gbuffer_front_cull_hybrid_ps_);
   gbuffer_front_cull_hybrid_ps_->state_set(state | DRW_STATE_CULL_FRONT);
 
   gbuffer_double_sided_hybrid_ps_ = &gbuffer_ps_.sub("DoubleSided.Hybrid");
   gbuffer_double_sided_hybrid_ps_->bind_texture(RADIANCE_PREVIOUS_LAYER_TEX_SLOT,
                                                 &radiance_behind_tx_);
+  inst.lights.bind_front_light_shader_resources(*gbuffer_double_sided_hybrid_ps_);
   gbuffer_double_sided_hybrid_ps_->state_set(state);
 
   gbuffer_double_sided_ps_ = &gbuffer_ps_.sub("DoubleSided");
@@ -1287,6 +1297,9 @@ PassMain::Sub *DeferredLayer::material_add(blender::Material *blender_mat, GPUMa
   has_outline_ = has_outline_ || inst_.materials.material_uses_outline_control(blender_mat);
 
   bool has_shader_to_rgba = (closure_bits & CLOSURE_SHADER_TO_RGBA) != 0;
+  if (has_shader_to_rgba) {
+    inst_.lights.tag_front_light_shader_needed();
+  }
   bool use_thickness_from_shadow = (blender_mat->blend_flag & MA_BL_THICKNESS_FROM_SHADOW) != 0;
   PassMain::Sub *pass = has_shader_to_rgba ?
                             material_surface_cull_pass_get(gbuffer_double_sided_hybrid_ps_,
@@ -1387,6 +1400,8 @@ gpu::Texture *DeferredLayer::render(View &main_view,
                                            TelemetryStageId::MainDeferredShadowSetup);
     inst_.shadows.set_view(render_view, extent);
   }
+  inst_.lights.eval_uniform_light_shaders(render_view);
+  inst_.lights.eval_front_light_shaders(render_view, extent);
 
   {
     ScopedTelemetrySample telemetry_sample(inst_.telemetry,
@@ -1954,6 +1969,9 @@ PassMain::Sub *DeferredProbePipeline::material_add(blender::Material *blender_ma
       blender_mat, gpumat);
 
   bool has_shader_to_rgba = (closure_bits & CLOSURE_SHADER_TO_RGBA) != 0;
+  if (has_shader_to_rgba) {
+    inst_.lights.tag_front_light_shader_needed();
+  }
 
   PassMain::Sub *pass = has_shader_to_rgba ?
                             material_surface_cull_pass_get(
@@ -2017,6 +2035,8 @@ void DeferredProbePipeline::render(View &view,
   inst_.shadows.set_view(view, extent);
   inst_.volume_probes.set_view(view);
   inst_.sphere_probes.set_view(view);
+  inst_.lights.eval_uniform_light_shaders(view);
+  inst_.lights.eval_front_light_shaders(view, extent);
 
   /* Update for lighting pass. */
   inst_.hiz_buffer.update();
@@ -2141,6 +2161,9 @@ PassMain::Sub *PlanarProbePipeline::material_add(blender::Material *blender_mat,
   use_depth_offset_lighting_data_ |= material_uses_depth_offset_lighting_data(blender_mat, gpumat);
 
   bool has_shader_to_rgba = (closure_bits & CLOSURE_SHADER_TO_RGBA) != 0;
+  if (has_shader_to_rgba) {
+    inst_.lights.tag_front_light_shader_needed();
+  }
 
   PassMain::Sub *pass = has_shader_to_rgba ?
                             material_surface_cull_pass_get(gbuffer_double_sided_hybrid_ps_,
@@ -2207,6 +2230,8 @@ void PlanarProbePipeline::render(View &view,
   inst_.shadows.set_view(view, extent);
   inst_.volume_probes.set_view(view);
   inst_.sphere_probes.set_view(view);
+  inst_.lights.eval_uniform_light_shaders(view);
+  inst_.lights.eval_front_light_shaders(view, extent);
 
   inst_.gbuffer.bind(gbuffer_fb);
   inst_.manager->submit(gbuffer_ps_, view);
