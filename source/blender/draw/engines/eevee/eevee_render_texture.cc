@@ -221,9 +221,10 @@ void RenderTextureModule::slot_capture(const int slot_index)
                       GPU_ATTACHMENT_TEXTURE(rbufs.combined_tx));
 
   const bool with_raycast = inst_.pipelines.has_raycast;
+  const bool with_prepass_normal = with_raycast || inst_.lights.needs_front_light_shader();
   prepass_fb_.ensure(
       GPU_ATTACHMENT_TEXTURE(rbufs.depth_tx),
-      with_raycast ? GPU_ATTACHMENT_TEXTURE(rbufs.prepass_normal_tx) : GPU_ATTACHMENT_NONE,
+      with_prepass_normal ? GPU_ATTACHMENT_TEXTURE(rbufs.prepass_normal_tx) : GPU_ATTACHMENT_NONE,
       with_raycast ? GPU_ATTACHMENT_TEXTURE(rbufs.object_id_tx) : GPU_ATTACHMENT_NONE,
       GPU_ATTACHMENT_TEXTURE(rbufs.vector_tx));
 
@@ -242,6 +243,8 @@ void RenderTextureModule::slot_capture(const int slot_index)
   GPU_texture_clear(rbufs.vector_tx, GPU_DATA_FLOAT, &clear_velocity);
   if (with_raycast) {
     rbufs.object_id_tx.clear(uint4(0));
+  }
+  if (with_prepass_normal) {
     rbufs.prepass_normal_tx.clear(float4(0.0f));
   }
 

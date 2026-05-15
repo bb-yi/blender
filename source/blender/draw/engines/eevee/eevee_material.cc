@@ -480,6 +480,12 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
       /* Create a sub for this material as `shader_sub` is for sharing shader between materials. */
       matpass.sub_pass = &shader_sub->sub(GPU_material_get_name(matpass.gpumat));
       matpass.sub_pass->material_set(*inst_.manager, matpass.gpumat, true);
+      if (pipeline_type == MAT_PIPE_FORWARD ||
+          (pipeline_type == MAT_PIPE_DEFERRED &&
+           GPU_material_flag_get(matpass.gpumat, GPU_MATFLAG_SHADER_TO_RGBA)))
+      {
+        inst_.lights.bind_front_light_shader_resources(*matpass.sub_pass);
+      }
       if (ELEM(pipeline_type,
                MAT_PIPE_PREPASS_DEFERRED,
                MAT_PIPE_PREPASS_DEFERRED_VELOCITY,

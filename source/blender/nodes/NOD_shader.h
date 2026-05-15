@@ -32,6 +32,7 @@ struct bNode *ntreeShaderOutputNode(struct bNodeTree *ntree, int target);
 struct bNodeTree *npr_tree_get(struct bNodeTree *ntree);
 struct bNodeTree *npr_tree_get_from_mat(struct Material *material);
 struct bNodeTree *ntreeGPUNPRNodes(struct bNodeTree *material_tree, struct GPUMaterial *mat);
+void ntreeGPULightShaderNodes(struct bNodeTree *localtree, struct GPUMaterial *mat);
 
 /**
  * This one needs to work on a local tree.

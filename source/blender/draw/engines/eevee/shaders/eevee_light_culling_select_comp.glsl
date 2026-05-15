@@ -37,6 +37,14 @@ void main()
     }
     /* NOTE: We know the index because sun lights are packed at the start of the input buffer. */
     out_light_buf[light_cull_buf.local_lights_len + l_idx] = light;
+    out_light_shader_index_buf[light_cull_buf.local_lights_len + l_idx] =
+        in_light_shader_index_buf[l_idx];
+    out_front_light_shader_index_buf[light_cull_buf.local_lights_len + l_idx] =
+        in_front_light_shader_index_buf[l_idx];
+    out_volume_light_shader_index_buf[light_cull_buf.local_lights_len + l_idx] =
+        in_volume_light_shader_index_buf[l_idx];
+    out_surfel_light_shader_index_buf[light_cull_buf.local_lights_len + l_idx] =
+        in_surfel_light_shader_index_buf[l_idx];
     return;
   }
 

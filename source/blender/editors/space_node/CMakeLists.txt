@@ -11,6 +11,7 @@ set(INC
   ../../compositor/derived_resources
   ../../compositor/utilities
   ../../makesrna
+  ../../nodes
   ../../nodes/geometry/include
   ../../sequencer
   ../asset

@@ -25,6 +25,11 @@ namespace nodes {
 void node_tree_shader_default(const bContext *C, Main *bmain, ID *id);
 
 /**
+ * Adds the default Eevee light shader nodes to a light shader tree if they are missing.
+ */
+bool node_tree_light_shader_default_ensure(bNodeTree &ntree);
+
+/**
  * Assumes nothing being done in ntree yet, sets the default in/out node.
  * Called from compositing buttons or header.
  */

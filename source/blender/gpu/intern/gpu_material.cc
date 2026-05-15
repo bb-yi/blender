@@ -14,6 +14,7 @@
 #include "MEM_guardedalloc.h"
 
 #include "DNA_material_types.h"
+#include "DNA_light_types.h"
 #include "DNA_scene_types.h"
 #include "DNA_world_types.h"
 
@@ -106,6 +107,7 @@ struct GPUMaterial {
   bool has_displacement_output = false;
   bool has_depth_offset_output = false;
   bool has_filter_output = false;
+  bool has_light_shader_output = false;
 
   std::string name;
 
@@ -147,6 +149,7 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
     uint64_t shader_uuid,
     bool compile_surface_graph,
     bool compile_npr_graph,
+    bool compile_light_shader_graph,
     bool force_npr_graph,
     bool deferred_compilation,
     GPUCodegenCallbackFn callback,
@@ -174,7 +177,7 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
 
   bNodeTree *npr_localtree = nullptr;
   bNodeTree *localtree = nullptr;
-  if (compile_surface_graph) {
+  if (compile_surface_graph || compile_light_shader_graph) {
     /* Localize tree to create links for reroute and mute. */
     localtree = bke::node_tree_add_tree(
         nullptr, (StringRef(ntree->id.name) + " Inlined").c_str(), ntree->idname);
@@ -187,7 +190,12 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
       result.errors.append({error.node, std::move(error.message)});
     }
 
-    ntreeGPUMaterialNodes(localtree, mat);
+    if (compile_surface_graph) {
+      ntreeGPUMaterialNodes(localtree, mat);
+    }
+    if (compile_light_shader_graph) {
+      ntreeGPULightShaderNodes(localtree, mat);
+    }
   }
   if (compile_npr_graph) {
     if (force_npr_graph || npr_tree_get(ntree) != nullptr) {
@@ -311,6 +319,10 @@ void GPU_materials_free(Main *bmain)
     GPU_material_free(&wo.gpumaterial);
   }
 
+  for (Light &la : bmain->lights) {
+    GPU_material_free(&la.gpumaterial);
+  }
+
   BKE_material_defaults_free_gpu();
 }
 
@@ -400,6 +412,11 @@ bool GPU_material_has_depth_offset_output(GPUMaterial *mat)
 bool GPU_material_has_filter_output(GPUMaterial *mat)
 {
   return mat->has_filter_output;
+}
+
+bool GPU_material_has_light_shader_output(GPUMaterial *mat)
+{
+  return mat != nullptr && mat->has_light_shader_output;
 }
 
 int GPU_material_filter_object_info_ensure(GPUMaterial *material, Object *object)
@@ -745,6 +762,14 @@ void GPU_material_output_filter(GPUMaterial *material, GPUNodeLink *link)
   if (link != nullptr && !material->graph.outlink_filter) {
     material->graph.outlink_filter = link;
     material->has_filter_output = true;
+  }
+}
+
+void GPU_material_output_light_shader(GPUMaterial *material, GPUNodeLink *link)
+{
+  if (link != nullptr && !material->graph.outlink_light_shader) {
+    material->graph.outlink_light_shader = link;
+    material->has_light_shader_output = true;
   }
 }
 

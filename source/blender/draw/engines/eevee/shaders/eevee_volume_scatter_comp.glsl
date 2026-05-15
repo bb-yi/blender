@@ -105,6 +105,33 @@ float3 volume_light_eval(
   LightVector lv = light_shape_vector_get(light, is_directional, P);
 
   float attenuation = light_attenuation_volume(light, is_directional, lv);
+  bool use_light_shader_no_distance = false;
+#ifdef LIGHT_SHADER_TEXTURE_EVAL
+  int light_shader_index = light_shader_index_buf[l_idx];
+  int light_shader_uniform_index = (light_shader_index < -1) ? -light_shader_index - 2 : -1;
+  if (light_shader_uniform_index >= 0) {
+    float4 light_shader = light_shader_uniform_buf[light_shader_uniform_index];
+    light.color = light_shader.rgb;
+    attenuation = light_attenuation_common(light, is_directional, lv.L) * light_shader.a;
+    use_light_shader_no_distance = true;
+    if (!is_directional) {
+      attenuation *= light_influence_cutoff(lv.dist,
+                                            light.local().local.influence_radius_invsqr_volume);
+    }
+  }
+  if (light_shader_uniform_index < 0 && light_shader_index >= 0) {
+    int layer = light_shader_index * uniform_buf.volumes.tex_size.z + int(gl_GlobalInvocationID.z);
+    float4 light_shader = texelFetch(
+        light_shader_tx, int3(int2(gl_GlobalInvocationID.xy), layer), 0);
+    light.color = light_shader.rgb;
+    attenuation = light_attenuation_common(light, is_directional, lv.L) * light_shader.a;
+    use_light_shader_no_distance = true;
+    if (!is_directional) {
+      attenuation *= light_influence_cutoff(lv.dist,
+                                            light.local().local.influence_radius_invsqr_volume);
+    }
+  }
+#endif
   if (attenuation < LIGHT_ATTENUATION_THRESHOLD) {
     return float3(0);
   }
@@ -121,7 +148,9 @@ float3 volume_light_eval(
     return float3(0);
   }
 
-  float3 Li = volume_light(light, is_directional, lv) * visibility;
+  float3 Li = use_light_shader_no_distance ?
+                  (light.color * light.power[LIGHT_VOLUME] * visibility) :
+                  (volume_light(light, is_directional, lv) * visibility);
 
   if (light.tilemap_index != LIGHT_NO_SHADOW) {
     Li *= volume_shadow(light, is_directional, P, lv, extinction_tx);

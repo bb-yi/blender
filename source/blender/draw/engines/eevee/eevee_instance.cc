@@ -576,7 +576,8 @@ namespace blender::eevee
     if (is_viewport())
     {
       const bool uses_scene_time = materials.has_time_dependent_materials() ||
-        world.uses_scene_time() || filter_materials.uses_scene_time();
+        world.uses_scene_time() || filter_materials.uses_scene_time() ||
+        lights.has_time_dependent_light_shaders();
       const float scene_time = uniform_data.data.scene_time.frame;
       const bool scene_time_changed = uses_scene_time && last_viewport_scene_time_valid_ &&
         std::abs(scene_time - last_viewport_scene_time_) > 1e-8f;

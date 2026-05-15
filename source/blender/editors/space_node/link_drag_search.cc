@@ -23,6 +23,7 @@
 
 #include "NOD_socket.hh"
 #include "NOD_socket_search_link.hh"
+#include "NOD_shader_light_nodes.hh"
 
 #include "BLT_translation.hh"
 
@@ -272,9 +273,15 @@ static void gather_socket_link_operations(const bContext &C,
                                           Vector<SocketLinkOperation> &search_link_ops)
 {
   const SpaceNode &snode = *CTX_wm_space_node(&C);
+  const bool is_light_shader = nodes::light_eevee_shader_nodes_poll(&C);
   for (const bke::bNodeType *node_type : bke::node_types_get()) {
     const char *disabled_hint;
     if (node_type->poll && !node_type->poll(node_type, &node_tree, &disabled_hint)) {
+      continue;
+    }
+    if (is_light_shader &&
+        !nodes::light_eevee_shader_node_type_supported(StringRefNull(node_type->idname)))
+    {
       continue;
     }
     if (node_type->add_ui_poll && !node_type->add_ui_poll(&C)) {
@@ -291,6 +298,9 @@ static void gather_socket_link_operations(const bContext &C,
   }
 
   search_link_ops.append({IFACE_("Reroute"), add_reroute_node_fn});
+  if (is_light_shader) {
+    return;
+  }
 
   const bool is_node_group = !(node_tree.id.flag & ID_FLAG_EMBEDDED_DATA);
 

@@ -12,6 +12,7 @@
 
 #include "DNA_ID.h"
 #include "DNA_defs.h"
+#include "DNA_listBase.h"
 
 namespace blender {
 
@@ -163,6 +164,7 @@ struct Light {
 
   /* Nodes */
   struct bNodeTree *nodetree = nullptr;
+  ListBaseT<LinkData> gpumaterial = {nullptr, nullptr};
 
   /* Deprecated. */
   DNA_DEPRECATED float energy_deprecated = 10.0f;

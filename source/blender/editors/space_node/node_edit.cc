@@ -547,6 +547,7 @@ void ED_node_set_active(
              SH_NODE_OUTPUT_MATERIAL,
              SH_NODE_OUTPUT_WORLD,
              SH_NODE_OUTPUT_LIGHT,
+             SH_NODE_EEVEE_LIGHT_SHADER_OUTPUT,
              SH_NODE_OUTPUT_LINESTYLE))
     {
       for (bNode *node_iter : ntree->all_nodes()) {

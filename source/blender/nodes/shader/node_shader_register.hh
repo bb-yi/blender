@@ -41,6 +41,8 @@ void register_node_type_sh_curve_vec();
 void register_node_type_sh_curvature();
 void register_node_type_sh_displacement();
 void register_node_type_sh_dynamic();
+void register_node_type_sh_eevee_light_shader_info();
+void register_node_type_sh_eevee_light_shader_output();
 void register_node_type_sh_eevee_metallic();
 void register_node_type_sh_eevee_specular();
 void register_node_type_sh_emission();

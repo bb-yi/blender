@@ -18,6 +18,7 @@
 #include "DNA_node_types.h"
 #include "DNA_scene_types.h"
 
+#include "BLI_listbase.h"
 #include "BLI_math_base.hh"
 #include "BLI_math_matrix.hh"
 #include "BLI_math_matrix_types.hh"
@@ -30,6 +31,8 @@
 #include "BKE_light.h"
 #include "BKE_node.hh"
 #include "BKE_preview_image.hh"
+
+#include "GPU_material.hh"
 
 #include "BLT_translation.hh"
 
@@ -95,11 +98,15 @@ static void light_copy_data(Main *bmain,
   else {
     la_dst->preview = nullptr;
   }
+
+  BLI_listbase_clear(&la_dst->gpumaterial);
 }
 
 static void light_free_data(ID *id)
 {
   Light *la = id_cast<Light *>(id);
+
+  GPU_material_free(&la->gpumaterial);
 
   /* is no lib link block, but light extension */
   if (la->nodetree) {
@@ -144,6 +151,10 @@ static void light_blend_write(BlendWriter *writer, ID *id, const void *id_addres
   /* Forward compatibility for Use Nodes. */
   la->use_nodes = true;
 
+  /* Clean up runtime data, important in undo case to reduce false detection of changed
+   * datablocks. */
+  BLI_listbase_clear(&la->gpumaterial);
+
   /* write LibData */
   writer->write_id_struct(id_address, la);
   BKE_id_blend_write(writer, &la->id);
@@ -165,6 +176,7 @@ static void light_blend_read_data(BlendDataReader *reader, ID *id)
 
   BLO_read_struct(reader, PreviewImage, &la->preview);
   BKE_previewimg_blend_read(reader, la->preview);
+  BLI_listbase_clear(&la->gpumaterial);
 }
 
 IDTypeInfo IDType_ID_LA = {

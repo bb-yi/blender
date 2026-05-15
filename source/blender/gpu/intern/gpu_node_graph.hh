@@ -67,6 +67,7 @@ enum GPUNodeTag {
   GPU_NODE_TAG_NPR = (1 << 8),
   GPU_NODE_TAG_FILTER = (1 << 9),
   GPU_NODE_TAG_OUTLINE = (1 << 10),
+  GPU_NODE_TAG_LIGHT_SHADER = (1 << 11),
 };
 
 ENUM_OPERATORS(GPUNodeTag)
@@ -195,6 +196,7 @@ struct GPUNodeGraph {
   GPUNodeLink *outlink_depth_offset;
   GPUNodeLink *outlink_npr;
   GPUNodeLink *outlink_filter;
+  GPUNodeLink *outlink_light_shader;
   /* List of GPUNodeGraphOutputLink */
   ListBaseT<GPUNodeGraphOutputLink> outlink_aovs;
   /* List of GPUNodeGraphOutputLink */

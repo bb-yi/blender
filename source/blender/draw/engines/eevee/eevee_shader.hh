@@ -23,9 +23,21 @@
 
 #include "eevee_material_shared.hh"
 
+namespace blender {
+struct Light;
+}
+
 namespace blender::eevee {
 
 using StaticShader = gpu::StaticShader;
+
+enum class eLightShaderPipeline {
+  Surface = 0,
+  Front,
+  Volume,
+  Surfel,
+  Uniform,
+};
 
 /* Keep alphabetical order and clean prefix. */
 enum eShaderType {
@@ -306,6 +318,10 @@ class ShaderModule {
   GPUMaterial *world_shader_get(blender::World *blender_world,
                                 bNodeTree *nodetree,
                                 eMaterialPipeline pipeline_type,
+                                bool deferred_compilation);
+  GPUMaterial *light_shader_get(blender::Light *blender_light,
+                                bNodeTree *nodetree,
+                                eLightShaderPipeline pipeline_type,
                                 bool deferred_compilation);
 
   void material_create_info_amend(GPUMaterial *mat, GPUCodegenOutput *codegen);

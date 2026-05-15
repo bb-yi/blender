@@ -61,6 +61,8 @@ set(SRC_GLSL_FRAG
   eevee_filter_material_frag.glsl
   eevee_hiz_debug_frag.glsl
   eevee_light_culling_debug_frag.glsl
+  eevee_light_shader_frag.glsl
+  eevee_light_shader_front_frag.glsl
   eevee_lookdev_display_frag.glsl
   eevee_outline_detect_frag.glsl
   eevee_outline_freestyle_frag.glsl
@@ -112,6 +114,9 @@ set(SRC_GLSL_COMP
   eevee_light_culling_tile_comp.glsl
   eevee_light_culling_zbin_comp.glsl
   eevee_light_shadow_setup_comp.glsl
+  eevee_light_shader_surfel_comp.glsl
+  eevee_light_shader_uniform_comp.glsl
+  eevee_light_shader_volume_comp.glsl
   eevee_lightprobe_sphere_convolve_comp.glsl
   eevee_lightprobe_sphere_irradiance_comp.glsl
   eevee_lightprobe_sphere_remap_comp.glsl
@@ -194,6 +199,7 @@ set(SRC_GLSL_LIB
   eevee_light_eval_lib.glsl
   eevee_light_iter_lib.glsl
   eevee_light_lib.glsl
+  eevee_light_shader_common_lib.glsl
   eevee_lightprobe_eval_lib.glsl
   eevee_lightprobe_lib.glsl
   eevee_lightprobe_sphere_eval_lib.glsl

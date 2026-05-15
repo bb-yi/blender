@@ -107,6 +107,12 @@ static void rna_Light_tag_dependent_node_trees(Main *bmain, Light *la)
         DEG_id_tag_update(&world->id, ID_RECALC_SHADING | ID_RECALC_SYNC_TO_EVAL);
         break;
       }
+      case ID_LA: {
+        Light *light = id_cast<Light *>(owner_id);
+        GPU_material_free(&light->gpumaterial);
+        DEG_id_tag_update(&light->id, ID_RECALC_SHADING | ID_RECALC_SYNC_TO_EVAL);
+        break;
+      }
       default:
         DEG_id_tag_update(owner_id, ID_RECALC_SYNC_TO_EVAL);
         break;

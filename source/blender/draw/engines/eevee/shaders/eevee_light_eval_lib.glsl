@@ -27,6 +27,7 @@ SHADER_LIBRARY_CREATE_INFO(eevee_light_data)
 #include "eevee_shadow_tracing_lib.glsl"
 #include "eevee_thickness_lib.glsl"
 #include "gpu_shader_codegen_lib.glsl"
+#include "gpu_shader_math_constants_lib.glsl"
 #include "gpu_shader_utildefines_lib.glsl"
 
 /* If using compute, the shader should define its own pixel. */
@@ -34,6 +35,10 @@ SHADER_LIBRARY_CREATE_INFO(eevee_light_data)
 #  define PIXEL gl_FragCoord.xy
 #elif defined(GPU_LIBRARY_SHADER)
 #  define PIXEL float2(0)
+#endif
+
+#ifdef LIGHT_SHADER_SURFEL_EVAL
+int light_shader_surfel_index;
 #endif
 
 #ifdef GLSL_CPP_STUBS
@@ -104,19 +109,111 @@ bool light_linking_affects_receiver(uint2 light_set_membership, uchar receiver_l
   return bitmask64_test(light_set_membership, receiver_light_set);
 }
 
+float light_shader_shape_radiance_get(LightData light)
+{
+  if (light.type == LIGHT_RECT || light.type == LIGHT_ELLIPSE) {
+    float area = light.area().size.x * light.area().size.y * 4.0f;
+    if (light.type == LIGHT_ELLIPSE) {
+      area *= M_PI / 4.0f;
+    }
+    return float(M_1_PI) / area;
+  }
+
+  if (light.type == LIGHT_OMNI_SPHERE || light.type == LIGHT_OMNI_DISK ||
+      light.type == LIGHT_SPOT_SPHERE || light.type == LIGHT_SPOT_DISK)
+  {
+    float area = float(4.0f * M_PI) * square(light.local().local.shape_radius);
+    return 1.0f / (area * float(M_PI));
+  }
+
+  if (is_sun_light(light.type)) {
+    float inv_sin_sq = 1.0f + 1.0f / square(light.sun().shape_radius);
+    return float(M_1_PI) * inv_sin_sq;
+  }
+
+  return 1.0f;
+}
+
+float light_shader_point_radiance_get(LightData light)
+{
+  if (light.type == LIGHT_RECT || light.type == LIGHT_ELLIPSE) {
+    float area = light.area().size.x * light.area().size.y * 4.0f;
+    float tmp = M_PI_2 / (M_PI_2 + sqrt(area));
+    float mrp_scaling = tmp + (1.0f - tmp) * M_1_PI;
+    return float(M_1_PI) * mrp_scaling;
+  }
+
+  if (light.type == LIGHT_OMNI_SPHERE || light.type == LIGHT_OMNI_DISK ||
+      light.type == LIGHT_SPOT_SPHERE || light.type == LIGHT_SPOT_DISK)
+  {
+    return float(1.0f / (4.0f * M_PI));
+  }
+
+  if (is_sun_light(light.type)) {
+    return 1.0f;
+  }
+
+  return 1.0f;
+}
+
+float light_shader_no_distance_power_get(LightData light, LightingType type)
+{
+  if (is_sun_light(light.type)) {
+    return light_power_get(light, type);
+  }
+
+  float shape_power = light_shader_shape_radiance_get(light);
+  if (shape_power <= 1e-16f) {
+    return 0.0f;
+  }
+  return light_power_get(light, type) * (light_shader_point_radiance_get(light) / shape_power);
+}
+
+float light_shader_distance_falloff_get(LightData light,
+                                        LightVector lv,
+                                        const bool is_directional)
+{
+  if (is_directional) {
+    return 1.0f;
+  }
+
+  float shape_power = light_shader_shape_radiance_get(light);
+  if (shape_power <= 1e-16f) {
+    return 0.0f;
+  }
+  return light_point_light(light, is_directional, lv) *
+         (light_shader_point_radiance_get(light) / shape_power);
+}
+
+float light_shader_no_distance_ltc(LightData light,
+                                   LightVector lv,
+                                   ClosureLight cl,
+                                   float3 V,
+                                   const bool is_directional)
+{
+  float ltc_result = light_ltc(utility_tx, light, cl.N, V, lv, cl.ltc_mat);
+  return ltc_result / max(light_shader_distance_falloff_get(light, lv, is_directional), 1e-8f);
+}
+
 void light_eval_single_closure(LightData light,
                                LightVector lv,
                                ClosureLight &cl,
                                float3 V,
                                float attenuation,
                                float shadow,
-                               const bool is_transmission)
+                               const bool is_transmission,
+                               const bool light_shader_no_distance_falloff,
+                               const bool is_directional)
 {
-  attenuation *= light_power_get(light, cl.type);
+  attenuation *= light_shader_no_distance_falloff ?
+                     light_shader_no_distance_power_get(light, cl.type) :
+                     light_power_get(light, cl.type);
   if (attenuation < 1e-30f) {
     return;
   }
-  float ltc_result = light_ltc(utility_tx, light, cl.N, V, lv, cl.ltc_mat);
+  float ltc_result = light_shader_no_distance_falloff ?
+                         light_shader_no_distance_ltc(light, lv, cl, V, is_directional) :
+                         light_ltc(utility_tx, light, cl.N, V, lv, cl.ltc_mat);
   float3 out_radiance = light.color * ltc_result;
   float visibility = shadow * attenuation;
   cl.light_shadowed += visibility * out_radiance;
@@ -156,6 +253,47 @@ void light_eval_single(uint l_idx,
                                        (stack.cl[0].type == LIGHT_TRANSLUCENT_WITH_THICKNESS);
 
   float attenuation = light_attenuation_surface(light, is_directional, lv);
+  bool light_shader_no_distance_falloff = false;
+#if defined(LIGHT_SHADER_TEXTURE_EVAL) || defined(LIGHT_SHADER_SURFEL_EVAL)
+  int light_shader_index = light_shader_index_buf[l_idx];
+  int light_shader_uniform_index = (light_shader_index < -1) ? -light_shader_index - 2 : -1;
+  if (!is_transmission && light_shader_uniform_index >= 0) {
+    float4 light_shader = light_shader_uniform_buf[light_shader_uniform_index];
+    light.color = light_shader.rgb;
+    attenuation = light_attenuation_common(light, is_directional, lv.L) * light_shader.a;
+    light_shader_no_distance_falloff = true;
+    if (!is_directional) {
+      attenuation *= light_influence_cutoff(lv.dist,
+                                            light.local().local.influence_radius_invsqr_surface);
+    }
+  }
+#endif
+#ifdef LIGHT_SHADER_TEXTURE_EVAL
+  if (!is_transmission && light_shader_uniform_index < 0 && light_shader_index >= 0) {
+    float4 light_shader = texelFetch(light_shader_tx, int3(int2(PIXEL), light_shader_index), 0);
+    light.color = light_shader.rgb;
+    attenuation = light_attenuation_common(light, is_directional, lv.L) * light_shader.a;
+    light_shader_no_distance_falloff = true;
+    if (!is_directional) {
+      attenuation *= light_influence_cutoff(lv.dist,
+                                            light.local().local.influence_radius_invsqr_surface);
+    }
+  }
+#endif
+#ifdef LIGHT_SHADER_SURFEL_EVAL
+  if (!is_transmission && light_shader_uniform_index < 0 && light_shader_index >= 0) {
+    float4 light_shader = light_shader_surfel_buf[light_shader_index *
+                                                      int(capture_info_buf.surfel_len) +
+                                                  light_shader_surfel_index];
+    light.color = light_shader.rgb;
+    attenuation = light_attenuation_common(light, is_directional, lv.L) * light_shader.a;
+    light_shader_no_distance_falloff = true;
+    if (!is_directional) {
+      attenuation *= light_influence_cutoff(lv.dist,
+                                            light.local().local.influence_radius_invsqr_surface);
+    }
+  }
+#endif
 
   if (!is_translucent_with_thickness) {
     /* Only do attenuation for this case, since we integrate the whole sphere for translucency.
@@ -191,13 +329,37 @@ void light_eval_single(uint l_idx,
     attenuation *= M_1_PI;
   }
 
-  light_eval_single_closure(light, lv, stack.cl[0], V, attenuation, shadow, is_transmission);
+  light_eval_single_closure(light,
+                            lv,
+                            stack.cl[0],
+                            V,
+                            attenuation,
+                            shadow,
+                            is_transmission,
+                            light_shader_no_distance_falloff,
+                            is_directional);
   if (!is_transmission) {
 #if LIGHT_CLOSURE_EVAL_COUNT > 1
-    light_eval_single_closure(light, lv, stack.cl[1], V, attenuation, shadow, is_transmission);
+    light_eval_single_closure(light,
+                              lv,
+                              stack.cl[1],
+                              V,
+                              attenuation,
+                              shadow,
+                              is_transmission,
+                              light_shader_no_distance_falloff,
+                              is_directional);
 #endif
 #if LIGHT_CLOSURE_EVAL_COUNT > 2
-    light_eval_single_closure(light, lv, stack.cl[2], V, attenuation, shadow, is_transmission);
+    light_eval_single_closure(light,
+                              lv,
+                              stack.cl[2],
+                              V,
+                              attenuation,
+                              shadow,
+                              is_transmission,
+                              light_shader_no_distance_falloff,
+                              is_directional);
 #endif
 #if LIGHT_CLOSURE_EVAL_COUNT > 3
 #  error

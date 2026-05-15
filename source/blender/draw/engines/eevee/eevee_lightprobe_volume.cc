@@ -781,6 +781,7 @@ void IrradianceBake::sync()
     pass.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);
     pass.bind_resources(inst_.uniform_data);
     pass.bind_resources(inst_.lights);
+    inst_.lights.bind_surfel_light_shader_resources(pass);
     pass.bind_resources(inst_.shadows);
     /* Sync with the surfel creation stage. */
     pass.barrier(GPU_BARRIER_SHADER_STORAGE);
@@ -1241,6 +1242,9 @@ void IrradianceBake::surfels_lights_eval()
   inst_.hiz_buffer.set_source(&inst_.render_buffers.depth_tx);
   inst_.lights.set_view(view_z_, grid_pixel_extent_.xy());
   inst_.shadows.set_view(view_z_, grid_pixel_extent_.xy());
+  inst_.lights.eval_uniform_light_shaders(view_z_);
+  inst_.lights.eval_surfel_light_shaders(
+      view_z_, surfels_buf_, capture_info_buf_, capture_info_buf_.surfel_len);
   if (GPU_type_matches(GPU_DEVICE_ANY, GPU_OS_MAC, GPU_DRIVER_ANY)) {
     /* There seems to be a synchronization issue with shadow rendering pass. If not waiting, the
      * surfels are lit without shadows. Waiting for sync here shouldn't be a huge bottleneck

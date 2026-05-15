@@ -10,6 +10,7 @@
 #include "node_util.hh"
 
 #include "UI_interface_layout.hh"
+#include "UI_resources.hh"
 
 namespace blender {
 

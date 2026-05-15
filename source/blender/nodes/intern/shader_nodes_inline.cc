@@ -355,6 +355,7 @@ class ShaderNodesInliner {
         break;
       case ID_LA:
         add_output_type("ShaderNodeOutputLight");
+        add_output_type("ShaderNodeEeveeLightShaderOutput");
         break;
       case ID_NT:
         add_output_type("ShaderNodeNPR_Output");

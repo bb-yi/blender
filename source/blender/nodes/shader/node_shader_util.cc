@@ -21,6 +21,7 @@
 
 #include "node_shader_util.hh"
 
+#include "NOD_shader_light_nodes.hh"
 #include "NOD_socket_search_link.hh"
 
 #include "RE_engine.h"
@@ -139,6 +140,11 @@ bool object_eevee_shader_nodes_poll(const bContext *C)
   }
   const RenderEngineType *engine_type = CTX_data_engine_type(C);
   return STREQ(engine_type->idname, "BLENDER_EEVEE");
+}
+
+bool light_eevee_shader_nodes_poll(const bContext *C)
+{
+  return nodes::light_eevee_shader_nodes_poll(C);
 }
 
 bool object_or_npr_eevee_shader_nodes_poll(const bContext *C)

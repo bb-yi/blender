@@ -6,6 +6,7 @@
 
 #include "draw_math_geom_lib.glsl"
 #include "eevee_ltc_lib.glsl"
+#include "gpu_shader_math_base_lib.glsl"
 
 /* Attenuation cutoff needs to be the same in the shadow loop and the light eval loop. */
 #define LIGHT_ATTENUATION_THRESHOLD 1e-6f
@@ -82,6 +83,14 @@ float light_influence_attenuation(float dist, float inv_sqr_influence)
   float factor = square(dist) * inv_sqr_influence;
   float fac = saturate(1.0f - square(factor));
   return square(fac);
+}
+
+float light_influence_cutoff(float dist, float inv_sqr_influence)
+{
+  if (inv_sqr_influence <= 0.0f) {
+    return 0.0f;
+  }
+  return float(square(dist) * inv_sqr_influence < 1.0f);
 }
 
 float light_spot_attenuation(LightData light, float3 L)

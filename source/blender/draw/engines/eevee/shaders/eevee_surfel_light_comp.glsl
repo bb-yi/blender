@@ -29,6 +29,7 @@ void main()
   }
 
   Surfel surfel = surfel_buf[index];
+  light_shader_surfel_index = index;
 
   /* There is no view dependent effect as we evaluate everything using diffuse. */
   float3 V = surfel.normal;

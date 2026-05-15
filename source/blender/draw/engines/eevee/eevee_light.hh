@@ -21,12 +21,17 @@
 
 #pragma once
 
+#include <memory>
+
 #include "DNA_light_types.h"
 
 #include "DRW_gpu_wrapper.hh"
 
+#include "BLI_vector.hh"
+
 #include "eevee_camera.hh"
 #include "eevee_light_shared.hh"
+#include "eevee_lightprobe_shared.hh"
 #include "eevee_sampling.hh"
 #include "eevee_sync.hh"
 
@@ -47,11 +52,20 @@ using LightCullingTileBuf = draw::StorageArrayBuffer<uint, LIGHT_CHUNK, true>;
 using LightCullingZbinBuf = draw::StorageArrayBuffer<uint, CULLING_ZBIN_COUNT, true>;
 using LightCullingZdistBuf = draw::StorageArrayBuffer<float, LIGHT_CHUNK, true>;
 using LightDataBuf = draw::StorageArrayBuffer<LightData, LIGHT_CHUNK>;
+using LightShaderIndexBuf = draw::StorageArrayBuffer<int, LIGHT_CHUNK>;
+using SurfelLightShaderBuf = draw::StorageArrayBuffer<float4, LIGHT_CHUNK, true>;
+using UniformLightShaderBuf = draw::StorageArrayBuffer<float4, LIGHT_CHUNK, true>;
 
 struct Light : public LightData, NonCopyable {
  public:
   bool initialized = false;
   bool used = false;
+  int light_shader_index = -1;
+  int front_light_shader_index = -1;
+  int volume_light_shader_index = -1;
+  int surfel_light_shader_index = -1;
+  int uniform_light_shader_index = -1;
+  float light_shader_range_scale = 1.0f;
 
   /** Pointers to source Shadow. Type depends on `LightData::type`. */
   ShadowDirectional *directional = nullptr;
@@ -70,6 +84,12 @@ struct Light : public LightData, NonCopyable {
     *static_cast<LightData *>(this) = other;
     this->initialized = other.initialized;
     this->used = other.used;
+    this->light_shader_index = other.light_shader_index;
+    this->front_light_shader_index = other.front_light_shader_index;
+    this->volume_light_shader_index = other.volume_light_shader_index;
+    this->surfel_light_shader_index = other.surfel_light_shader_index;
+    this->uniform_light_shader_index = other.uniform_light_shader_index;
+    this->light_shader_range_scale = other.light_shader_range_scale;
     this->directional = other.directional;
     this->punctual = other.punctual;
     other.directional = nullptr;
@@ -88,6 +108,7 @@ struct Light : public LightData, NonCopyable {
             char visibility_flag,
             const blender::Light *la,
             const LightLinking *light_linking,
+            float light_shader_range_scale,
             float threshold,
             int lightgroup_id = 0);
 
@@ -98,11 +119,11 @@ struct Light : public LightData, NonCopyable {
 
  private:
   float shadow_lod_min_get(const blender::Light *la);
-  float shadow_shape_size_get(const blender::Light *la);
   float attenuation_radius_get(const blender::Light *la, float light_threshold, float light_power);
   void shape_parameters_set(const blender::Light *la,
                             const float3 &scale,
                             const float3 &z_axis,
+                            float light_shader_range_scale,
                             float threshold,
                             bool use_jitter);
   float shape_radiance_get();
@@ -156,6 +177,46 @@ class LightModule {
 
   /** LightData buffer used for rendering. Filled by the culling pass. */
   LightDataBuf culling_light_buf_ = {"Lights_culled"};
+  LightShaderIndexBuf light_shader_src_index_buf_ = {"LightShader.SrcIndices"};
+  LightShaderIndexBuf light_shader_index_buf_ = {"LightShader.CulledIndices"};
+  LightShaderIndexBuf front_light_shader_src_index_buf_ = {"FrontLightShader.SrcIndices"};
+  LightShaderIndexBuf front_light_shader_index_buf_ = {"FrontLightShader.CulledIndices"};
+  LightShaderIndexBuf volume_light_shader_src_index_buf_ = {"VolumeLightShader.SrcIndices"};
+  LightShaderIndexBuf volume_light_shader_index_buf_ = {"VolumeLightShader.CulledIndices"};
+  LightShaderIndexBuf surfel_light_shader_src_index_buf_ = {"SurfelLightShader.SrcIndices"};
+  LightShaderIndexBuf surfel_light_shader_index_buf_ = {"SurfelLightShader.CulledIndices"};
+  Texture light_shader_tx_ = {"LightShader"};
+  Texture front_light_shader_tx_ = {"FrontLightShader"};
+  Texture volume_light_shader_dummy_tx_ = {"VolumeLightShader.Dummy"};
+  Texture volume_light_shader_tx_ = {"VolumeLightShader"};
+  Vector<std::unique_ptr<Framebuffer>> light_shader_fbs_;
+  Vector<std::unique_ptr<Framebuffer>> front_light_shader_fbs_;
+  Vector<GPUMaterial *> light_shader_materials_;
+  Vector<GPUMaterial *> front_light_shader_materials_;
+  Vector<GPUMaterial *> volume_light_shader_materials_;
+  Vector<GPUMaterial *> surfel_light_shader_materials_;
+  Vector<GPUMaterial *> uniform_light_shader_materials_;
+  Vector<LightData> light_shader_lights_;
+  Vector<LightData> front_light_shader_lights_;
+  Vector<LightData> volume_light_shader_lights_;
+  Vector<LightData> surfel_light_shader_lights_;
+  Vector<LightData> uniform_light_shader_lights_;
+  LightDataBuf light_shader_light_buf_ = {"LightShader.Lights"};
+  LightDataBuf front_light_shader_light_buf_ = {"FrontLightShader.Lights"};
+  LightDataBuf volume_light_shader_light_buf_ = {"VolumeLightShader.Lights"};
+  LightDataBuf surfel_light_shader_light_buf_ = {"SurfelLightShader.Lights"};
+  LightDataBuf uniform_light_shader_light_buf_ = {"UniformLightShader.Lights"};
+  SurfelLightShaderBuf surfel_light_shader_buf_ = {"SurfelLightShader.Results"};
+  UniformLightShaderBuf uniform_light_shader_buf_ = {"UniformLightShader.Results"};
+  bool light_shader_valid_ = false;
+  bool front_light_shader_valid_ = false;
+  bool uniform_light_shader_valid_ = false;
+  bool uniform_light_shader_evaluated_ = false;
+  bool front_light_shader_missing_prepass_reported_ = false;
+  bool front_light_shader_needed_ = false;
+  bool volume_light_shader_valid_ = false;
+  bool surfel_light_shader_valid_ = false;
+  bool has_time_dependent_light_shaders_ = false;
   /** Culling information. */
   LightCullingDataBuf culling_data_buf_ = {"LightCull_data"};
   /** Z-distance matching the key for each visible lights. Used for sorting. */
@@ -192,12 +253,36 @@ class LightModule {
    * Update acceleration structure for the given view.
    */
   void set_view(View &view, const int2 extent);
+  void eval_light_shaders(View &view, const int2 extent);
+  void eval_front_light_shaders(View &view, const int2 extent);
+  void eval_uniform_light_shaders(View &view);
+  void sync_volume_light_shaders(const int3 grid_size);
+  void eval_volume_light_shaders(View &view, const int3 grid_size);
+  void eval_surfel_light_shaders(View &view,
+                                 draw::StorageArrayBuffer<Surfel, 64> &surfels_buf,
+                                 draw::StorageBuffer<CaptureInfoData> &capture_info_buf,
+                                 uint surfel_len);
 
   void debug_draw(View &view, gpu::FrameBuffer *view_fb);
 
   int light_count() const
   {
     return lights_len_;
+  }
+
+  bool has_time_dependent_light_shaders() const
+  {
+    return has_time_dependent_light_shaders_;
+  }
+
+  bool needs_front_light_shader() const
+  {
+    return front_light_shader_needed_ && !front_light_shader_materials_.is_empty();
+  }
+
+  void tag_front_light_shader_needed()
+  {
+    front_light_shader_needed_ = true;
   }
 
   template<typename PassType> void bind_resources(PassType &pass)
@@ -209,14 +294,52 @@ class LightModule {
     pass.bind_ubo(WORLD_SUNLIGHT_BUF_SLOT, world_sunlight_ubo());
   }
 
+  template<typename PassType> void bind_light_shader_resources(PassType &pass)
+  {
+    pass.bind_texture(LIGHT_SHADER_TEX_SLOT, &light_shader_tx_);
+    pass.bind_ssbo(LIGHT_SHADER_INDEX_BUF_SLOT, &light_shader_index_buf_);
+    pass.bind_ssbo(LIGHT_SHADER_UNIFORM_BUF_SLOT, &uniform_light_shader_buf_);
+  }
+
+  template<typename PassType> void bind_front_light_shader_resources(PassType &pass)
+  {
+    pass.bind_texture(LIGHT_SHADER_TEX_SLOT, &front_light_shader_tx_);
+    pass.bind_ssbo(LIGHT_SHADER_INDEX_BUF_SLOT, &front_light_shader_index_buf_);
+    pass.bind_ssbo(LIGHT_SHADER_UNIFORM_BUF_SLOT, &uniform_light_shader_buf_);
+  }
+
+  template<typename PassType> void bind_volume_light_shader_resources(PassType &pass)
+  {
+    pass.bind_texture(LIGHT_SHADER_TEX_SLOT,
+                      (!volume_light_shader_valid_ || volume_light_shader_materials_.is_empty() ||
+                       !volume_light_shader_tx_.is_valid()) ?
+                          &volume_light_shader_dummy_tx_ :
+                          &volume_light_shader_tx_);
+    pass.bind_ssbo(LIGHT_SHADER_INDEX_BUF_SLOT, &volume_light_shader_index_buf_);
+    pass.bind_ssbo(LIGHT_SHADER_UNIFORM_BUF_SLOT, &uniform_light_shader_buf_);
+  }
+
+  template<typename PassType> void bind_surfel_light_shader_resources(PassType &pass)
+  {
+    pass.bind_ssbo(LIGHT_SHADER_SURFEL_INDEX_BUF_SLOT, &surfel_light_shader_index_buf_);
+    pass.bind_ssbo(LIGHT_SHADER_SURFEL_BUF_SLOT, &surfel_light_shader_buf_);
+    pass.bind_ssbo(LIGHT_SHADER_UNIFORM_BUF_SLOT, &uniform_light_shader_buf_);
+  }
+
  private:
   gpu::UniformBuf *world_sunlight_ubo() const;
   void culling_pass_sync();
   void update_pass_sync();
+  void light_shader_pass_sync(const int2 extent);
+  void front_light_shader_pass_sync(const int2 extent);
+  void uniform_light_shader_pass_sync();
+  void volume_light_shader_pass_sync(const int3 grid_size);
+  void surfel_light_shader_pass_sync(uint surfel_len);
   void debug_pass_sync();
   void culling_extent_sync(const int2 render_extent);
 
   void add_world_sun_light(const ObjectKey &key, bool use_diffuse, bool use_glossy);
+  void disable_point_dependent_front_light_shader_indices();
 };
 
 /** \} */

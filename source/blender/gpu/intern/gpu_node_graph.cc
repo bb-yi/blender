@@ -1126,6 +1126,7 @@ void gpu_node_graph_free_nodes(GPUNodeGraph *graph)
   graph->outlink_depth_offset = nullptr;
   graph->outlink_npr = nullptr;
   graph->outlink_filter = nullptr;
+  graph->outlink_light_shader = nullptr;
 }
 
 void gpu_node_graph_free(GPUNodeGraph *graph)
@@ -1198,6 +1199,7 @@ void gpu_node_graph_prune_unused(GPUNodeGraph *graph)
   gpu_nodes_tag(graph, graph->outlink_depth_offset, GPU_NODE_TAG_DEPTH_OFFSET);
   gpu_nodes_tag(graph, graph->outlink_npr, GPU_NODE_TAG_NPR);
   gpu_nodes_tag(graph, graph->outlink_filter, GPU_NODE_TAG_FILTER);
+  gpu_nodes_tag(graph, graph->outlink_light_shader, GPU_NODE_TAG_LIGHT_SHADER);
 
   for (GPUNodeGraphOutputLink &aovlink : graph->outlink_aovs) {
     gpu_nodes_tag(graph, aovlink.outlink, GPU_NODE_TAG_AOV);

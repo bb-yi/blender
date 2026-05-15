@@ -251,6 +251,9 @@
 #define GBUF_NORMAL_TEX_SLOT 17
 #define GBUF_HEADER_TEX_SLOT 18
 #define NPR_RADIANCE_TEX_SLOT 19
+/* Custom light shader eval never runs in the NPR material pass, so it can reuse this low slot
+ * without requiring texture units beyond the common OpenGL fragment limit. */
+#define LIGHT_SHADER_TEX_SLOT 19
 #define DIRECT_RADIANCE_NPR_TX_SLOT_1 20
 #define INDIRECT_RADIANCE_NPR_TX_SLOT_1 23
 #define BACK_HIZ_TX_SLOT 26
@@ -329,6 +332,11 @@
 #define LIGHT_ZBIN_BUF_SLOT 2
 #define LIGHT_TILE_BUF_SLOT 3
 #define IRRADIANCE_BRICK_BUF_SLOT 4
+/* Only during deferred direct-light evaluation. */
+#define LIGHT_SHADER_INDEX_BUF_SLOT 5
+#define LIGHT_SHADER_SURFEL_INDEX_BUF_SLOT 8
+#define LIGHT_SHADER_SURFEL_BUF_SLOT 9
+#define LIGHT_SHADER_UNIFORM_BUF_SLOT 13
 #define SAMPLING_BUF_SLOT 6
 #define CRYPTOMATTE_BUF_SLOT 7
 /* Only during surface capture. */
