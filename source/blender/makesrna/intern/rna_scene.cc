@@ -9310,7 +9310,6 @@ namespace blender
 
     prop = RNA_def_property(srna, "use_outline", PROP_BOOLEAN, PROP_NONE);
     RNA_def_property_boolean_sdna(prop, nullptr, "use_outline", 1);
-    RNA_def_property_boolean_default(prop, true);
     RNA_def_property_ui_text(
       prop,
       "Outline",
