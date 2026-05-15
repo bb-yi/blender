@@ -200,6 +200,9 @@ void GLStateManager::set_depth_test(const GPUDepthTest value)
     case GPU_DEPTH_GREATER_EQUAL:
       func = GL_GEQUAL;
       break;
+    case GPU_DEPTH_NOT_EQUAL:
+      func = GL_NOTEQUAL;
+      break;
     case GPU_DEPTH_ALWAYS:
     default:
       func = GL_ALWAYS;

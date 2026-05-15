@@ -1005,6 +1005,37 @@ void RNA_def_material(BlenderRNA *brna)
       {0, nullptr, 0, nullptr, nullptr},
   };
 
+  static const EnumPropertyItem prop_eevee_ztest_mode_items[] = {
+      {MA_ZTEST_LESS, "LESS", 0, "Less", "Pass when the material depth is less than the stored depth"},
+      {MA_ZTEST_GREATER,
+       "GREATER",
+       0,
+       "Greater",
+       "Pass when the material depth is greater than the stored depth"},
+      {MA_ZTEST_LESS_EQUAL,
+       "LESS_EQUAL",
+       0,
+       "Less Equal",
+       "Pass when the material depth is less than or equal to the stored depth"},
+      {MA_ZTEST_GREATER_EQUAL,
+       "GREATER_EQUAL",
+       0,
+       "Greater Equal",
+       "Pass when the material depth is greater than or equal to the stored depth"},
+      {MA_ZTEST_EQUAL,
+       "EQUAL",
+       0,
+       "Equal",
+       "Pass when the material depth equals the stored depth"},
+      {MA_ZTEST_NOT_EQUAL,
+       "NOT_EQUAL",
+       0,
+       "Not Equal",
+       "Pass when the material depth does not equal the stored depth"},
+      {MA_ZTEST_ALWAYS, "ALWAYS", 0, "Always", "Always pass the depth test"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+
   static const EnumPropertyItem prop_eevee_domain_items[] = {
       {MA_EEVEE_DOMAIN_SURFACE,
        "SURFACE",
@@ -1110,6 +1141,12 @@ void RNA_def_material(BlenderRNA *brna)
   RNA_def_property_enum_funcs(
       prop, "rna_Material_surface_cull_method_get", "rna_Material_surface_cull_method_set", nullptr);
   RNA_def_property_ui_text(prop, "Face Culling", "Control which face orientation is hidden");
+  RNA_def_property_update(prop, 0, "rna_Material_draw_update");
+
+  prop = RNA_def_property(srna, "ztest_mode", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "ztest_mode");
+  RNA_def_property_enum_items(prop, prop_eevee_ztest_mode_items);
+  RNA_def_property_ui_text(prop, "ZTest Mode", "Depth test mode used by Eevee surface rendering");
   RNA_def_property_update(prop, 0, "rna_Material_draw_update");
 
   prop = RNA_def_property(srna, "depth_offset_affect_lighting", PROP_BOOLEAN, PROP_NONE);

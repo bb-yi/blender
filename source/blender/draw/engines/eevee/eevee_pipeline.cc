@@ -42,6 +42,43 @@ static DRWState material_surface_cull_state(const eMaterialCullMethod cull_metho
   }
 }
 
+static eMaterialZTestMode material_ztest_mode(const blender::Material *material)
+{
+  return material != nullptr ? blender::material_ztest_mode_get(*material) : MA_ZTEST_LESS_EQUAL;
+}
+
+static DRWState material_ztest_state(const eMaterialZTestMode ztest_mode,
+                                     const DRWState default_depth_state)
+{
+  const bool default_is_greater = (default_depth_state & DRW_STATE_DEPTH_TEST_ENABLED) ==
+                                  DRW_STATE_DEPTH_GREATER_EQUAL;
+  switch (ztest_mode) {
+    case MA_ZTEST_LESS:
+      return default_is_greater ? DRW_STATE_DEPTH_GREATER : DRW_STATE_DEPTH_LESS;
+    case MA_ZTEST_GREATER:
+      return default_is_greater ? DRW_STATE_DEPTH_LESS : DRW_STATE_DEPTH_GREATER;
+    case MA_ZTEST_GREATER_EQUAL:
+      return default_is_greater ? DRW_STATE_DEPTH_LESS_EQUAL : DRW_STATE_DEPTH_GREATER_EQUAL;
+    case MA_ZTEST_EQUAL:
+      return DRW_STATE_DEPTH_EQUAL;
+    case MA_ZTEST_NOT_EQUAL:
+      return DRW_STATE_DEPTH_NOT_EQUAL;
+    case MA_ZTEST_ALWAYS:
+      return DRW_STATE_DEPTH_ALWAYS;
+    case MA_ZTEST_LESS_EQUAL:
+    default:
+      return default_depth_state & DRW_STATE_DEPTH_TEST_ENABLED;
+  }
+}
+
+static DRWState material_ztest_state_replace(DRWState state,
+                                             const eMaterialZTestMode ztest_mode,
+                                             const DRWState default_depth_state)
+{
+  return (state & ~DRW_STATE_DEPTH_TEST_ENABLED) |
+         material_ztest_state(ztest_mode, default_depth_state);
+}
+
 template<typename PassType>
 static PassType *material_surface_cull_pass_get(PassType *double_sided_ps,
                                                 PassType *back_cull_ps,
@@ -423,12 +460,19 @@ void ScreenSpaceShadowFilter::release()
  * Helper class for handling prepasses in Forward and Deferred pipelines.
  * \{ */
 
-void Prepass::setup_subpasses(DRWState common_state)
+void Prepass::setup_subpasses(DRWState common_state, DRWState default_depth_state)
 {
   /* We can't know at this point if the normal target is enabled, so we always enable color write.
    * The write will be optimized out if the attachment is empty. */
   common_state |= DRW_STATE_WRITE_COLOR;
 
+  static constexpr const char *ztest_names[7 /*ztest*/] = {"LEqual",
+                                                           "Less",
+                                                           "Greater",
+                                                           "GEqual",
+                                                           "Equal",
+                                                           "NotEqual",
+                                                           "Always"};
   static constexpr const char *subpass_names[3 /*cull mode*/][2 /*moving*/][2 /*write id*/] = {
       {{"DoubleSided.Static.NoID", "DoubleSided.Static.ID"},
        {"DoubleSided.Moving.NoID", "DoubleSided.Moving.ID"}},
@@ -437,17 +481,22 @@ void Prepass::setup_subpasses(DRWState common_state)
       {{"FrontCull.Static.NoID", "FrontCull.Static.ID"},
        {"FrontCull.Moving.NoID", "FrontCull.Moving.ID"}}};
 
-  for (int cull_mode = MA_SURFACE_CULL_NONE; cull_mode <= MA_SURFACE_CULL_FRONT; cull_mode++) {
-    for (bool moving : {false, true}) {
-      for (bool write_id : {false, true}) {
-        PassMain::Sub *&subpass = prepass_subpasses[cull_mode][moving][write_id];
-        subpass = &this->sub(subpass_names[cull_mode][moving][write_id]);
-        subpass->state_set(common_state |
-                           material_surface_cull_state(eMaterialCullMethod(cull_mode)));
-        subpass->subpass_transition(GPU_ATTACHMENT_WRITE,
-                                    {GPU_ATTACHMENT_WRITE, /* normal */
-                                     write_id ? GPU_ATTACHMENT_WRITE : GPU_ATTACHMENT_IGNORE,
-                                     moving ? GPU_ATTACHMENT_WRITE : GPU_ATTACHMENT_IGNORE});
+  for (int ztest_mode = MA_ZTEST_LESS_EQUAL; ztest_mode <= MA_ZTEST_ALWAYS; ztest_mode++) {
+    DRWState ztest_state = material_ztest_state_replace(
+        common_state, eMaterialZTestMode(ztest_mode), default_depth_state);
+    PassMain::Sub &ztest_pass = this->sub(ztest_names[ztest_mode]);
+    for (int cull_mode = MA_SURFACE_CULL_NONE; cull_mode <= MA_SURFACE_CULL_FRONT; cull_mode++) {
+      for (bool moving : {false, true}) {
+        for (bool write_id : {false, true}) {
+          PassMain::Sub *&subpass = prepass_subpasses[ztest_mode][cull_mode][moving][write_id];
+          subpass = &ztest_pass.sub(subpass_names[cull_mode][moving][write_id]);
+          subpass->state_set(ztest_state |
+                             material_surface_cull_state(eMaterialCullMethod(cull_mode)));
+          subpass->subpass_transition(GPU_ATTACHMENT_WRITE,
+                                      {GPU_ATTACHMENT_WRITE, /* normal */
+                                       write_id ? GPU_ATTACHMENT_WRITE : GPU_ATTACHMENT_IGNORE,
+                                       moving ? GPU_ATTACHMENT_WRITE : GPU_ATTACHMENT_IGNORE});
+        }
       }
     }
   }
@@ -458,9 +507,10 @@ PassMain::Sub *Prepass::add(blender::Material *blender_mat,
                             bool has_motion,
                             bool force_write_id)
 {
+  int ztest_mode = material_ztest_mode(blender_mat);
   int cull_mode = material_surface_cull_method(blender_mat);
   bool write_id = force_write_id || GPU_material_flag_get(gpumat, GPU_MATFLAG_RAYCAST);
-  PassMain::Sub *pass = prepass_subpasses[cull_mode][has_motion][write_id];
+  PassMain::Sub *pass = prepass_subpasses[ztest_mode][cull_mode][has_motion][write_id];
   return &pass->sub(GPU_material_get_name(gpumat));
 }
 
@@ -494,6 +544,7 @@ void ForwardPipeline::sync()
     }
 
     prepass_ps_.setup_subpasses(DRW_STATE_WRITE_DEPTH | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
+                                    inst_.film.depth.test_state,
                                 inst_.film.depth.test_state);
   }
   {
@@ -638,6 +689,8 @@ PassMain::Sub *ForwardPipeline::prepass_transparent_add(const Object *ob,
   }
   DRWState state = DRW_STATE_WRITE_DEPTH | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
                    inst_.film.depth.test_state;
+  state = material_ztest_state_replace(
+      state, material_ztest_mode(blender_mat), inst_.film.depth.test_state);
   state |= material_surface_cull_state(material_surface_cull_method(blender_mat));
   has_transparent_ = true;
   inst_.lights.tag_front_light_shader_needed();
@@ -662,6 +715,8 @@ PassMain::Sub *ForwardPipeline::material_transparent_add(const Object *ob,
 {
   DRWState state = DRW_STATE_WRITE_COLOR | DRW_STATE_BLEND_TRANSPARENCY |
                    DRW_STATE_CLIP_CONTROL_UNIT_RANGE | inst_.film.depth.test_state;
+  state = material_ztest_state_replace(
+      state, material_ztest_mode(blender_mat), inst_.film.depth.test_state);
   state |= material_surface_cull_state(material_surface_cull_method(blender_mat));
   has_holdout_ |= GPU_material_flag_get(gpumat, GPU_MATFLAG_HOLDOUT) ||
                   (ob->base_flag & BASE_HOLDOUT) || (ob->visibility_flag & OB_HOLDOUT);
@@ -699,6 +754,8 @@ PassMain::Sub *ForwardPipeline::outline_occlusion_add(blender::Material *blender
 
   DRWState state = DRW_STATE_WRITE_DEPTH | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
                    inst_.film.depth.test_state;
+  state = material_ztest_state_replace(
+      state, material_ztest_mode(blender_mat), inst_.film.depth.test_state);
   state |= material_surface_cull_state(material_surface_cull_method(blender_mat));
 
   has_outline_occluders_ = true;
@@ -1023,7 +1080,8 @@ void DeferredLayer::begin_sync()
     prepass_ps_.state_stencil(0xFFu, 0u, 0xFFu);
 
     prepass_ps_.setup_subpasses(DRW_STATE_WRITE_STENCIL | DRW_STATE_STENCIL_ALWAYS |
-                                DRW_STATE_WRITE_DEPTH | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
+                                    DRW_STATE_WRITE_DEPTH | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
+                                    inst_.film.depth.test_state,
                                 inst_.film.depth.test_state);
   }
   {
@@ -1905,6 +1963,7 @@ void DeferredProbePipeline::begin_sync()
     pass.bind_resources(inst_.lights);
   }
   pass.setup_subpasses(DRW_STATE_WRITE_DEPTH | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
+                           inst_.film.depth.test_state,
                        inst_.film.depth.test_state);
 
   opaque_layer_.gbuffer_pass_sync(inst_);
@@ -2099,6 +2158,7 @@ void PlanarProbePipeline::begin_sync()
     prepass_ps_.bind_resources(inst_.render_textures);
     prepass_ps_.bind_resources(inst_.lights);
     prepass_ps_.setup_subpasses(DRW_STATE_WRITE_DEPTH | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
+                                    inst_.film.depth.test_state,
                                 inst_.film.depth.test_state);
   }
 

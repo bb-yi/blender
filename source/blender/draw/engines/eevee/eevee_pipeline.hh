@@ -189,12 +189,12 @@ class ScreenSpaceShadowFilter {
  * \{ */
 
 class Prepass : public PassMain {
-  PassMain::Sub *prepass_subpasses[3 /*cull mode*/][2 /*moving*/][2 /*write id*/] = {
-      {{nullptr}}};
+  PassMain::Sub *prepass_subpasses[7 /*ztest*/][3 /*cull mode*/][2 /*moving*/]
+                                      [2 /*write id*/] = {{{{nullptr}}}};
 
  public:
   Prepass(const char *name) : PassMain(name) {};
-  void setup_subpasses(DRWState common_state);
+  void setup_subpasses(DRWState common_state, DRWState default_depth_state);
   PassMain::Sub *add(blender::Material *blender_mat,
                      GPUMaterial *gpumat,
                      bool has_motion,

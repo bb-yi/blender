@@ -467,6 +467,7 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
   else {
     ShaderKey shader_key(matpass.gpumat,
                          blender_mat,
+                         pipeline_type,
                          probe_capture,
                          ob->refraction_layer_index);
 

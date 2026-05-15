@@ -236,6 +236,17 @@ static inline eMaterialGeometry to_material_geometry(const Object *ob)
   }
 }
 
+static inline bool pipeline_uses_material_ztest(eMaterialPipeline pipeline_type)
+{
+  return ELEM(pipeline_type,
+              MAT_PIPE_PREPASS_DEFERRED,
+              MAT_PIPE_PREPASS_DEFERRED_VELOCITY,
+              MAT_PIPE_PREPASS_FORWARD,
+              MAT_PIPE_PREPASS_FORWARD_VELOCITY,
+              MAT_PIPE_PREPASS_PLANAR,
+              MAT_PIPE_PREPASS_OVERLAP);
+}
+
 /**
  * Unique key to identify each material in the hash-map.
  * This is above the shader binning.
@@ -297,6 +308,7 @@ struct ShaderKey {
 
   ShaderKey(GPUMaterial *gpumat,
             blender::Material *blender_mat,
+            eMaterialPipeline pipeline_type,
             eMaterialProbe probe_capture,
             short refraction_layer)
   {
@@ -304,6 +316,10 @@ struct ShaderKey {
     options = uint64_t(shader_closure_bits_from_flag(gpumat));
     options = (options << 8) | blender_mat->blend_flag;
     options = (options << 2) | uint64_t(material_surface_cull_method_get(*blender_mat));
+    options = (options << 3) |
+              uint64_t(pipeline_uses_material_ztest(pipeline_type) ?
+                           material_ztest_mode_get(*blender_mat) :
+                           MA_ZTEST_LESS_EQUAL);
     options = (options << 2) | uint64_t(probe_capture);
     options = (options << 16) | uint16_t(refraction_layer);
   }

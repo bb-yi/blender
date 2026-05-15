@@ -170,6 +170,8 @@ static MTLCompareFunction gpu_depth_function_to_metal(GPUDepthTest depth_func)
       return MTLCompareFunctionGreater;
     case GPU_DEPTH_GREATER_EQUAL:
       return MTLCompareFunctionGreaterEqual;
+    case GPU_DEPTH_NOT_EQUAL:
+      return MTLCompareFunctionNotEqual;
     case GPU_DEPTH_ALWAYS:
       return MTLCompareFunctionAlways;
     default:

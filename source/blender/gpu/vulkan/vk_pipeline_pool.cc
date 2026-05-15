@@ -404,6 +404,9 @@ std::string VKGraphicsInfo::pipeline_info_source() const
     case GPU_DEPTH_GREATER_EQUAL:
       result << "GPU_DEPTH_GREATER_EQUAL";
       break;
+    case GPU_DEPTH_NOT_EQUAL:
+      result << "GPU_DEPTH_NOT_EQUAL";
+      break;
     case GPU_DEPTH_ALWAYS:
       result << "GPU_DEPTH_ALWAYS";
       break;

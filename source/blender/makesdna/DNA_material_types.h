@@ -204,6 +204,17 @@ enum eMaterialCullMethod {
   MA_SURFACE_CULL_FRONT = 2,
 };
 
+/** #Material::ztest_mode */
+enum eMaterialZTestMode {
+  MA_ZTEST_LESS_EQUAL = 0,
+  MA_ZTEST_LESS = 1,
+  MA_ZTEST_GREATER = 2,
+  MA_ZTEST_GREATER_EQUAL = 3,
+  MA_ZTEST_EQUAL = 4,
+  MA_ZTEST_NOT_EQUAL = 5,
+  MA_ZTEST_ALWAYS = 6,
+};
+
 /** #Material::blend_shadow */
 enum {
   MA_BS_NONE = 0,
@@ -421,7 +432,8 @@ struct Material {
 
   char surface_cull_method = MA_SURFACE_CULL_NONE;
   char depth_offset_affect_lighting = false;
-  char _pad3[2] = {};
+  char ztest_mode = MA_ZTEST_LESS_EQUAL;
+  char _pad3[1] = {};
 
   /**
    * Cached slots for texture painting, must be refreshed via
@@ -447,7 +459,23 @@ inline eMaterialCullMethod material_surface_cull_method_get(const Material &mate
     case MA_SURFACE_CULL_NONE:
     default:
       return (material.blend_flag & MA_BL_CULL_BACKFACE) != 0 ? MA_SURFACE_CULL_BACK :
-                                                                MA_SURFACE_CULL_NONE;
+                                                              MA_SURFACE_CULL_NONE;
+  }
+}
+
+inline eMaterialZTestMode material_ztest_mode_get(const Material &material)
+{
+  switch (eMaterialZTestMode(material.ztest_mode)) {
+    case MA_ZTEST_LESS:
+    case MA_ZTEST_GREATER:
+    case MA_ZTEST_LESS_EQUAL:
+    case MA_ZTEST_GREATER_EQUAL:
+    case MA_ZTEST_EQUAL:
+    case MA_ZTEST_NOT_EQUAL:
+    case MA_ZTEST_ALWAYS:
+      return eMaterialZTestMode(material.ztest_mode);
+    default:
+      return MA_ZTEST_LESS_EQUAL;
   }
 }
 #endif

@@ -28,7 +28,8 @@
   "Literal['NONE', 'ALPHA', 'ALPHA_PREMULT', 'ADDITIVE', " \
   "'ADDITIVE_PREMULT', 'MULTIPLY', 'SUBTRACT', 'INVERT']"
 #define PYDOC_DEPTHTEST_LITERAL \
-  "Literal['NONE', 'ALWAYS', 'LESS', 'LESS_EQUAL', 'EQUAL', 'GREATER', 'GREATER_EQUAL']"
+  "Literal['NONE', 'ALWAYS', 'LESS', 'LESS_EQUAL', 'EQUAL', 'GREATER', 'GREATER_EQUAL', " \
+  "'NOT_EQUAL']"
 
 namespace blender {
 
@@ -62,6 +63,7 @@ static const PyC_StringEnumItems pygpu_state_depthtest_items[] = {
     {GPU_DEPTH_EQUAL, "EQUAL"},
     {GPU_DEPTH_GREATER, "GREATER"},
     {GPU_DEPTH_GREATER_EQUAL, "GREATER_EQUAL"},
+    {GPU_DEPTH_NOT_EQUAL, "NOT_EQUAL"},
     {0, nullptr},
 };
 
