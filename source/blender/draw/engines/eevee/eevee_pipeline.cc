@@ -675,6 +675,7 @@ PassMain::Sub *ForwardPipeline::material_transparent_add(const Object *ob,
   pass->state_set(state);
   pass->material_set(*inst_.manager, gpumat, true);
   pass->push_constant("surface_cull_mode", int(material_surface_cull_method(blender_mat)));
+  inst_.lights.bind_front_light_shader_resources(*pass);
   if (inst_.scene->eevee.use_outline) {
     pass->bind_image(OUTLINE_COLOR_SLOT, &inst_.render_buffers.outline_color_tx);
     pass->bind_image(OUTLINE_INFO_SLOT, &inst_.render_buffers.outline_info_tx);
@@ -1312,6 +1313,9 @@ PassMain::Sub *DeferredLayer::material_add(blender::Material *blender_mat, GPUMa
                                                            blender_mat);
 
   PassMain::Sub *material_pass = &pass->sub(GPU_material_get_name(gpumat));
+  if (has_shader_to_rgba) {
+    inst_.lights.bind_front_light_shader_resources(*material_pass);
+  }
   /* Set stencil for some deferred specialized shaders. */
   uint8_t material_stencil_bits = 0u;
   if (use_thickness_from_shadow) {
@@ -1984,7 +1988,11 @@ PassMain::Sub *DeferredProbePipeline::material_add(blender::Material *blender_ma
                                                            opaque_layer_.gbuffer_front_cull_ps_,
                                                            blender_mat);
 
-  return &pass->sub(GPU_material_get_name(gpumat));
+  PassMain::Sub *material_pass = &pass->sub(GPU_material_get_name(gpumat));
+  if (has_shader_to_rgba) {
+    inst_.lights.bind_front_light_shader_resources(*material_pass);
+  }
+  return material_pass;
 }
 
 PassMain::Sub *DeferredProbePipeline::npr_add(blender::Material *blender_mat, GPUMaterial *gpumat)
@@ -2175,7 +2183,11 @@ PassMain::Sub *PlanarProbePipeline::material_add(blender::Material *blender_mat,
                                                            gbuffer_front_cull_ps_,
                                                            blender_mat);
 
-  return &pass->sub(GPU_material_get_name(gpumat));
+  PassMain::Sub *material_pass = &pass->sub(GPU_material_get_name(gpumat));
+  if (has_shader_to_rgba) {
+    inst_.lights.bind_front_light_shader_resources(*material_pass);
+  }
+  return material_pass;
 }
 
 PassMain::Sub *PlanarProbePipeline::npr_add(blender::Material *blender_mat, GPUMaterial *gpumat)

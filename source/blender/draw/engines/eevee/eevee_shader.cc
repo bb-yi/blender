@@ -907,6 +907,13 @@ class SlotAllocator {
     }
   }
 
+  void reserve_sampler(const int slot)
+  {
+    if (slot >= 0 && slot < 64) {
+      available_samplers_ &= ~(uint64_t(1) << slot);
+    }
+  }
+
   void set_vertex_input(int index)
   {
     if ((available_vertex_id_ & 0xFFFFu) == 0) {
@@ -1242,6 +1249,9 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       info, pipeline_type, geometry_type, use_shader_to_rgba, has_depth_offset);
   slots.reserve_sampler_range(MATERIAL_TEXTURE_RESERVED_SLOT_FIRST,
                               material_texture_reserved_slot_last(pipeline_type, geometry_type));
+  if (ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD)) {
+    slots.reserve_sampler(LIGHT_SHADER_TEX_SLOT);
+  }
   if (has_depth_offset) {
     info.define("MAT_DEPTH_OFFSET");
     if (separate_depth_offset_lighting) {
@@ -1874,6 +1884,7 @@ void ShaderModule::light_create_info_amend(GPUMaterial *gpumat, GPUCodegenOutput
   slots.reserve_slots(*light_shader_info);
   slots.reserve_sampler_range(MATERIAL_TEXTURE_RESERVED_SLOT_FIRST,
                               MATERIAL_TEXTURE_RESERVED_SLOT_LAST_NO_EVAL);
+  slots.reserve_sampler(LIGHT_SHADER_TEX_SLOT);
 
   for (auto &resource : info.batch_resources_) {
     if (resource.bind_type == ShaderCreateInfo::Resource::BindType::SAMPLER) {
@@ -1958,6 +1969,7 @@ void ShaderModule::light_front_create_info_amend(GPUMaterial *gpumat, GPUCodegen
   slots.reserve_slots(*light_shader_info);
   slots.reserve_sampler_range(MATERIAL_TEXTURE_RESERVED_SLOT_FIRST,
                               MATERIAL_TEXTURE_RESERVED_SLOT_LAST_NO_EVAL);
+  slots.reserve_sampler(LIGHT_SHADER_TEX_SLOT);
 
   for (auto &resource : info.batch_resources_) {
     if (resource.bind_type == ShaderCreateInfo::Resource::BindType::SAMPLER) {
@@ -2040,6 +2052,7 @@ void ShaderModule::light_volume_create_info_amend(GPUMaterial *gpumat, GPUCodege
   slots.reserve_slots(*light_shader_info);
   slots.reserve_sampler_range(MATERIAL_TEXTURE_RESERVED_SLOT_FIRST,
                               MATERIAL_TEXTURE_RESERVED_SLOT_LAST_NO_EVAL);
+  slots.reserve_sampler(LIGHT_SHADER_TEX_SLOT);
 
   for (auto &resource : info.batch_resources_) {
     if (resource.bind_type == ShaderCreateInfo::Resource::BindType::SAMPLER) {
@@ -2122,6 +2135,7 @@ void ShaderModule::light_surfel_create_info_amend(GPUMaterial *gpumat, GPUCodege
   slots.reserve_slots(*light_shader_info);
   slots.reserve_sampler_range(MATERIAL_TEXTURE_RESERVED_SLOT_FIRST,
                               MATERIAL_TEXTURE_RESERVED_SLOT_LAST_NO_EVAL);
+  slots.reserve_sampler(LIGHT_SHADER_TEX_SLOT);
 
   for (auto &resource : info.batch_resources_) {
     if (resource.bind_type == ShaderCreateInfo::Resource::BindType::SAMPLER) {
@@ -2205,6 +2219,7 @@ void ShaderModule::light_uniform_create_info_amend(GPUMaterial *gpumat,
   slots.reserve_slots(*light_shader_info);
   slots.reserve_sampler_range(MATERIAL_TEXTURE_RESERVED_SLOT_FIRST,
                               MATERIAL_TEXTURE_RESERVED_SLOT_LAST_NO_EVAL);
+  slots.reserve_sampler(LIGHT_SHADER_TEX_SLOT);
 
   for (auto &resource : info.batch_resources_) {
     if (resource.bind_type == ShaderCreateInfo::Resource::BindType::SAMPLER) {

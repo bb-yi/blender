@@ -775,10 +775,10 @@ void LightModule::begin_sync()
   light_shader_valid_ = false;
   front_light_shader_valid_ = false;
   uniform_light_shader_valid_ = false;
+  uniform_light_shader_evaluated_ = false;
   front_light_shader_missing_prepass_reported_ = false;
   front_light_shader_needed_ = false;
   has_time_dependent_light_shaders_ = false;
-  has_time_dependent_uniform_light_shaders_ = false;
 
   if (use_sun_lights_ && inst_.world.sun_threshold() > 0.0f) {
     if (inst_.pipelines.world.use_lightpath_node()) {
@@ -845,7 +845,6 @@ void LightModule::sync_light(const Object *ob, ObjectHandle &handle)
       uniform_light_shader_lights_.append(static_cast<const LightData &>(light));
       const bool is_time_dependent = GPU_material_is_time_dependent(uniform_gpumat);
       has_time_dependent_light_shaders_ |= is_time_dependent;
-      has_time_dependent_uniform_light_shaders_ |= is_time_dependent;
       inst_.manager->register_layer_attributes(uniform_gpumat);
     }
     else {
@@ -992,7 +991,6 @@ void LightModule::end_sync()
     surfel_light_shader_lights_.clear();
     uniform_light_shader_lights_.clear();
     has_time_dependent_light_shaders_ = false;
-    has_time_dependent_uniform_light_shaders_ = false;
     inst_.info_append_i18n("Error: Too many lights in the scene.");
   }
   lights_len_ = sun_lights_len_ + local_lights_len_;
@@ -1263,6 +1261,7 @@ void LightModule::front_light_shader_pass_sync(const int2 extent)
 void LightModule::uniform_light_shader_pass_sync()
 {
   uniform_light_shader_valid_ = false;
+  uniform_light_shader_evaluated_ = false;
   const int result_len = max_ii(uniform_light_shader_materials_.size(), 1);
   uniform_light_shader_buf_.resize(result_len);
   uniform_light_shader_buf_.clear_to_zero();
@@ -1277,6 +1276,7 @@ void LightModule::uniform_light_shader_pass_sync()
     uniform_light_shader_light_buf_[layer] = uniform_light_shader_lights_[layer];
   }
   uniform_light_shader_light_buf_.push_update();
+  uniform_light_shader_valid_ = true;
 }
 
 void LightModule::disable_point_dependent_surface_light_shader_indices()
@@ -1459,11 +1459,11 @@ void LightModule::eval_front_light_shaders(View &view, const int2 extent)
 
 void LightModule::eval_uniform_light_shaders(View &view)
 {
-  if (uniform_light_shader_materials_.is_empty()) {
+  if (uniform_light_shader_materials_.is_empty() || !uniform_light_shader_valid_) {
     return;
   }
 
-  if (uniform_light_shader_valid_ && !has_time_dependent_uniform_light_shaders_) {
+  if (uniform_light_shader_evaluated_) {
     return;
   }
 
@@ -1480,7 +1480,7 @@ void LightModule::eval_uniform_light_shaders(View &view)
     inst_.manager->submit(pass, view);
   }
   GPU_memory_barrier(GPU_BARRIER_SHADER_STORAGE);
-  uniform_light_shader_valid_ = true;
+  uniform_light_shader_evaluated_ = true;
 }
 
 void LightModule::sync_volume_light_shaders(const int3 grid_size)

@@ -214,12 +214,12 @@ class LightModule {
   bool light_shader_valid_ = false;
   bool front_light_shader_valid_ = false;
   bool uniform_light_shader_valid_ = false;
+  bool uniform_light_shader_evaluated_ = false;
   bool front_light_shader_missing_prepass_reported_ = false;
   bool front_light_shader_needed_ = false;
   bool volume_light_shader_valid_ = false;
   bool surfel_light_shader_valid_ = false;
   bool has_time_dependent_light_shaders_ = false;
-  bool has_time_dependent_uniform_light_shaders_ = false;
   /** Culling information. */
   LightCullingDataBuf culling_data_buf_ = {"LightCull_data"};
   /** Z-distance matching the key for each visible lights. Used for sorting. */
