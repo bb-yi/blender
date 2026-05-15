@@ -31,6 +31,14 @@ namespace blender::eevee {
 
 using StaticShader = gpu::StaticShader;
 
+enum class eLightShaderPipeline {
+  Surface = 0,
+  Front,
+  Volume,
+  Surfel,
+  Uniform,
+};
+
 /* Keep alphabetical order and clean prefix. */
 enum eShaderType {
   AMBIENT_OCCLUSION_PASS = 0,
@@ -313,26 +321,10 @@ class ShaderModule {
                                 bool deferred_compilation);
   GPUMaterial *light_shader_get(blender::Light *blender_light,
                                 bNodeTree *nodetree,
+                                eLightShaderPipeline pipeline_type,
                                 bool deferred_compilation);
-  GPUMaterial *light_shader_front_get(blender::Light *blender_light,
-                                      bNodeTree *nodetree,
-                                      bool deferred_compilation);
-  GPUMaterial *light_shader_volume_get(blender::Light *blender_light,
-                                       bNodeTree *nodetree,
-                                       bool deferred_compilation);
-  GPUMaterial *light_shader_surfel_get(blender::Light *blender_light,
-                                       bNodeTree *nodetree,
-                                       bool deferred_compilation);
-  GPUMaterial *light_shader_uniform_get(blender::Light *blender_light,
-                                        bNodeTree *nodetree,
-                                        bool deferred_compilation);
 
   void material_create_info_amend(GPUMaterial *mat, GPUCodegenOutput *codegen);
-  void light_create_info_amend(GPUMaterial *mat, GPUCodegenOutput *codegen);
-  void light_front_create_info_amend(GPUMaterial *mat, GPUCodegenOutput *codegen);
-  void light_volume_create_info_amend(GPUMaterial *mat, GPUCodegenOutput *codegen);
-  void light_surfel_create_info_amend(GPUMaterial *mat, GPUCodegenOutput *codegen);
-  void light_uniform_create_info_amend(GPUMaterial *mat, GPUCodegenOutput *codegen);
 
   /** Only to be used by Instance constructor. */
   static ShaderModule *module_get();

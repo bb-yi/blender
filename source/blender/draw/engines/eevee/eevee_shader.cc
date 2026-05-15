@@ -1868,187 +1868,68 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   material_create_info_pipelines_amend(geometry_type, pipeline_type, info);
 }
 
-void ShaderModule::light_create_info_amend(GPUMaterial *gpumat, GPUCodegenOutput *codegen_)
+struct LightShaderPipelineInfo {
+  eLightShaderPipeline pipeline_type;
+  const char *create_info_name;
+  const char *name_suffix;
+  const char *error_label;
+  uint64_t shader_uuid;
+};
+
+static const LightShaderPipelineInfo &light_shader_pipeline_info_get(
+    const eLightShaderPipeline pipeline_type)
 {
-  using namespace blender::gpu::shader;
-
-  GPUCodegenOutput &codegen = *codegen_;
-  ShaderCreateInfo &info = *reinterpret_cast<ShaderCreateInfo *>(codegen.create_info);
-
-  info.additional_info("eevee_light_shader");
-  info.name_ += "_light_shader";
-
-  SlotAllocator slots;
-  const ShaderCreateInfo *light_shader_info = reinterpret_cast<const ShaderCreateInfo *>(
-      GPU_shader_create_info_get("eevee_light_shader"));
-  slots.reserve_slots(*light_shader_info);
-  slots.reserve_sampler_range(MATERIAL_TEXTURE_RESERVED_SLOT_FIRST,
-                              MATERIAL_TEXTURE_RESERVED_SLOT_LAST_NO_EVAL);
-  slots.reserve_sampler(LIGHT_SHADER_TEX_SLOT);
-
-  for (auto &resource : info.batch_resources_) {
-    if (resource.bind_type == ShaderCreateInfo::Resource::BindType::SAMPLER) {
-      resource.slot = slots.get_next_sampler();
-    }
+  static constexpr LightShaderPipelineInfo infos[] = {
+      {eLightShaderPipeline::Surface,
+       "eevee_light_shader",
+       "_light_shader",
+       "Light shader",
+       0xEEAA0001u},
+      {eLightShaderPipeline::Front,
+       "eevee_light_shader_front",
+       "_light_shader_front",
+       "Front-layer light shader",
+       0xEEAA0005u},
+      {eLightShaderPipeline::Volume,
+       "eevee_light_shader_volume",
+       "_light_shader_volume",
+       "Volume light shader",
+       0xEEAA0002u},
+      {eLightShaderPipeline::Surfel,
+       "eevee_light_shader_surfel",
+       "_light_shader_surfel",
+       "Surfel light shader",
+       0xEEAA0003u},
+      {eLightShaderPipeline::Uniform,
+       "eevee_light_shader_uniform",
+       "_light_shader_uniform",
+       "Uniform light shader",
+       0xEEAA0004u},
+  };
+  const int index = int(pipeline_type);
+  BLI_assert(index >= 0 && index < ARRAY_SIZE(infos));
+  if (index < 0 || index >= ARRAY_SIZE(infos)) {
+    return infos[0];
   }
-
-  /* Bit of a workaround. Make sure that the nodetree UBO is part of the eevee_node_tree
-   * interface and not the interface with the shader name. */
-  for (auto &res : info.batch_resources_) {
-    res.info_name = "eevee_node_tree";
-  }
-  for (auto &res : info.pass_resources_) {
-    res.info_name = "eevee_node_tree";
-  }
-  for (auto &res : info.geometry_resources_) {
-    res.info_name = "eevee_node_tree";
-  }
-
-  std::string generated_resource_header = info.typedef_source_generated;
-  generated_resource_header += "#ifdef CREATE_INFO_RES_PASS_eevee_node_tree\n";
-  generated_resource_header += "CREATE_INFO_RES_PASS_eevee_node_tree\n";
-  generated_resource_header += "#endif\n";
-  generated_resource_header += "#ifdef CREATE_INFO_RES_BATCH_eevee_node_tree\n";
-  generated_resource_header += "CREATE_INFO_RES_BATCH_eevee_node_tree\n";
-  generated_resource_header += "#endif\n";
-  generated_resource_header += "#ifdef CREATE_INFO_RES_GEOMETRY_eevee_node_tree\n";
-  generated_resource_header += "CREATE_INFO_RES_GEOMETRY_eevee_node_tree\n";
-  generated_resource_header += "#endif\n";
-  generated_resource_header += "\n";
-  info.generated_sources.append({"eevee_nodetree_type_lib.glsl", {}, generated_resource_header});
-
-  Set<StringRefNull> dependencies_set;
-  Set<StringRefNull> emitted_generated_sources;
-  std::stringstream generated_source_block;
-  dependencies_set.add("eevee_geom_types_lib.glsl");
-  dependencies_set.add("eevee_attributes_world_lib.glsl");
-  dependencies_set.add("eevee_light_lib.glsl");
-  dependencies_set.add("eevee_nodetree_lib.glsl");
-  if (codegen.light_shader.has_value()) {
-    material_graph_dependencies_append(gpumat,
-                                       codegen.light_shader->dependencies,
-                                       dependencies_set,
-                                       emitted_generated_sources,
-                                       generated_source_block);
-  }
-
-  std::stringstream frag_gen;
-  frag_gen << "void attrib_load(WorldPoint domain) {}\n\n";
-  frag_gen << generated_source_block.str();
-  frag_gen << "float4 nodetree_light_shader()\n";
-  frag_gen << "{\n";
-  frag_gen << (codegen.light_shader.has_value() ?
-                   codegen.light_shader->serialized_or_default("return float4(1.0f);\n") :
-                   "return float4(1.0f);\n");
-  frag_gen << "}\n\n";
-
-  Vector<StringRefNull> dependencies = material_dependencies_finalize(dependencies_set);
-  info.generated_sources.append({"eevee_nodetree_frag_lib.glsl", dependencies, frag_gen.str()});
-
-  const char *material_name = (info.name_.c_str() + 2);
-  if (slots.sampler_overflow()) {
-    std::cerr << "Error: EEVEE: Light shader " << material_name << " uses too many samplers."
-              << std::endl;
-    info.batch_resources_.clear();
-  }
+  BLI_assert(infos[index].pipeline_type == pipeline_type);
+  return infos[index];
 }
 
-void ShaderModule::light_front_create_info_amend(GPUMaterial *gpumat, GPUCodegenOutput *codegen_)
+static void light_create_info_amend(GPUMaterial *gpumat,
+                                    GPUCodegenOutput *codegen_,
+                                    const LightShaderPipelineInfo &pipeline_info)
 {
   using namespace blender::gpu::shader;
 
   GPUCodegenOutput &codegen = *codegen_;
   ShaderCreateInfo &info = *reinterpret_cast<ShaderCreateInfo *>(codegen.create_info);
 
-  info.additional_info("eevee_light_shader_front");
-  info.name_ += "_light_shader_front";
+  info.additional_info(pipeline_info.create_info_name);
+  info.name_ += pipeline_info.name_suffix;
 
   SlotAllocator slots;
   const ShaderCreateInfo *light_shader_info = reinterpret_cast<const ShaderCreateInfo *>(
-      GPU_shader_create_info_get("eevee_light_shader_front"));
-  slots.reserve_slots(*light_shader_info);
-  slots.reserve_sampler_range(MATERIAL_TEXTURE_RESERVED_SLOT_FIRST,
-                              MATERIAL_TEXTURE_RESERVED_SLOT_LAST_NO_EVAL);
-  slots.reserve_sampler(LIGHT_SHADER_TEX_SLOT);
-
-  for (auto &resource : info.batch_resources_) {
-    if (resource.bind_type == ShaderCreateInfo::Resource::BindType::SAMPLER) {
-      resource.slot = slots.get_next_sampler();
-    }
-  }
-
-  for (auto &res : info.batch_resources_) {
-    res.info_name = "eevee_node_tree";
-  }
-  for (auto &res : info.pass_resources_) {
-    res.info_name = "eevee_node_tree";
-  }
-  for (auto &res : info.geometry_resources_) {
-    res.info_name = "eevee_node_tree";
-  }
-
-  std::string generated_resource_header = info.typedef_source_generated;
-  generated_resource_header += "#ifdef CREATE_INFO_RES_PASS_eevee_node_tree\n";
-  generated_resource_header += "CREATE_INFO_RES_PASS_eevee_node_tree\n";
-  generated_resource_header += "#endif\n";
-  generated_resource_header += "#ifdef CREATE_INFO_RES_BATCH_eevee_node_tree\n";
-  generated_resource_header += "CREATE_INFO_RES_BATCH_eevee_node_tree\n";
-  generated_resource_header += "#endif\n";
-  generated_resource_header += "#ifdef CREATE_INFO_RES_GEOMETRY_eevee_node_tree\n";
-  generated_resource_header += "CREATE_INFO_RES_GEOMETRY_eevee_node_tree\n";
-  generated_resource_header += "#endif\n";
-  generated_resource_header += "\n";
-  info.generated_sources.append({"eevee_nodetree_type_lib.glsl", {}, generated_resource_header});
-
-  Set<StringRefNull> dependencies_set;
-  Set<StringRefNull> emitted_generated_sources;
-  std::stringstream generated_source_block;
-  dependencies_set.add("eevee_geom_types_lib.glsl");
-  dependencies_set.add("eevee_attributes_world_lib.glsl");
-  dependencies_set.add("eevee_light_lib.glsl");
-  dependencies_set.add("eevee_nodetree_lib.glsl");
-  if (codegen.light_shader.has_value()) {
-    material_graph_dependencies_append(gpumat,
-                                       codegen.light_shader->dependencies,
-                                       dependencies_set,
-                                       emitted_generated_sources,
-                                       generated_source_block);
-  }
-
-  std::stringstream frag_gen;
-  frag_gen << "void attrib_load(WorldPoint domain) {}\n\n";
-  frag_gen << generated_source_block.str();
-  frag_gen << "float4 nodetree_light_shader()\n";
-  frag_gen << "{\n";
-  frag_gen << (codegen.light_shader.has_value() ?
-                   codegen.light_shader->serialized_or_default("return float4(1.0f);\n") :
-                   "return float4(1.0f);\n");
-  frag_gen << "}\n\n";
-
-  Vector<StringRefNull> dependencies = material_dependencies_finalize(dependencies_set);
-  info.generated_sources.append({"eevee_nodetree_frag_lib.glsl", dependencies, frag_gen.str()});
-
-  const char *material_name = (info.name_.c_str() + 2);
-  if (slots.sampler_overflow()) {
-    std::cerr << "Error: EEVEE: Front-layer light shader " << material_name
-              << " uses too many samplers." << std::endl;
-    info.batch_resources_.clear();
-  }
-}
-
-void ShaderModule::light_volume_create_info_amend(GPUMaterial *gpumat, GPUCodegenOutput *codegen_)
-{
-  using namespace blender::gpu::shader;
-
-  GPUCodegenOutput &codegen = *codegen_;
-  ShaderCreateInfo &info = *reinterpret_cast<ShaderCreateInfo *>(codegen.create_info);
-
-  info.additional_info("eevee_light_shader_volume");
-  info.name_ += "_light_shader_volume";
-
-  SlotAllocator slots;
-  const ShaderCreateInfo *light_shader_info = reinterpret_cast<const ShaderCreateInfo *>(
-      GPU_shader_create_info_get("eevee_light_shader_volume"));
+      GPU_shader_create_info_get(pipeline_info.create_info_name));
   slots.reserve_slots(*light_shader_info);
   slots.reserve_sampler_range(MATERIAL_TEXTURE_RESERVED_SLOT_FIRST,
                               MATERIAL_TEXTURE_RESERVED_SLOT_LAST_NO_EVAL);
@@ -2113,174 +1994,7 @@ void ShaderModule::light_volume_create_info_amend(GPUMaterial *gpumat, GPUCodege
 
   const char *material_name = (info.name_.c_str() + 2);
   if (slots.sampler_overflow()) {
-    std::cerr << "Error: EEVEE: Volume light shader " << material_name
-              << " uses too many samplers." << std::endl;
-    info.batch_resources_.clear();
-  }
-}
-
-void ShaderModule::light_surfel_create_info_amend(GPUMaterial *gpumat, GPUCodegenOutput *codegen_)
-{
-  using namespace blender::gpu::shader;
-
-  GPUCodegenOutput &codegen = *codegen_;
-  ShaderCreateInfo &info = *reinterpret_cast<ShaderCreateInfo *>(codegen.create_info);
-
-  info.additional_info("eevee_light_shader_surfel");
-  info.name_ += "_light_shader_surfel";
-
-  SlotAllocator slots;
-  const ShaderCreateInfo *light_shader_info = reinterpret_cast<const ShaderCreateInfo *>(
-      GPU_shader_create_info_get("eevee_light_shader_surfel"));
-  slots.reserve_slots(*light_shader_info);
-  slots.reserve_sampler_range(MATERIAL_TEXTURE_RESERVED_SLOT_FIRST,
-                              MATERIAL_TEXTURE_RESERVED_SLOT_LAST_NO_EVAL);
-  slots.reserve_sampler(LIGHT_SHADER_TEX_SLOT);
-
-  for (auto &resource : info.batch_resources_) {
-    if (resource.bind_type == ShaderCreateInfo::Resource::BindType::SAMPLER) {
-      resource.slot = slots.get_next_sampler();
-    }
-  }
-
-  for (auto &res : info.batch_resources_) {
-    res.info_name = "eevee_node_tree";
-  }
-  for (auto &res : info.pass_resources_) {
-    res.info_name = "eevee_node_tree";
-  }
-  for (auto &res : info.geometry_resources_) {
-    res.info_name = "eevee_node_tree";
-  }
-
-  std::string generated_resource_header = info.typedef_source_generated;
-  generated_resource_header += "#ifdef CREATE_INFO_RES_PASS_eevee_node_tree\n";
-  generated_resource_header += "CREATE_INFO_RES_PASS_eevee_node_tree\n";
-  generated_resource_header += "#endif\n";
-  generated_resource_header += "#ifdef CREATE_INFO_RES_BATCH_eevee_node_tree\n";
-  generated_resource_header += "CREATE_INFO_RES_BATCH_eevee_node_tree\n";
-  generated_resource_header += "#endif\n";
-  generated_resource_header += "#ifdef CREATE_INFO_RES_GEOMETRY_eevee_node_tree\n";
-  generated_resource_header += "CREATE_INFO_RES_GEOMETRY_eevee_node_tree\n";
-  generated_resource_header += "#endif\n";
-  generated_resource_header += "\n";
-  info.generated_sources.append({"eevee_nodetree_type_lib.glsl", {}, generated_resource_header});
-
-  Set<StringRefNull> dependencies_set;
-  Set<StringRefNull> emitted_generated_sources;
-  std::stringstream generated_source_block;
-  dependencies_set.add("eevee_geom_types_lib.glsl");
-  dependencies_set.add("eevee_attributes_world_lib.glsl");
-  dependencies_set.add("eevee_light_lib.glsl");
-  dependencies_set.add("eevee_nodetree_lib.glsl");
-  if (codegen.light_shader.has_value()) {
-    material_graph_dependencies_append(gpumat,
-                                       codegen.light_shader->dependencies,
-                                       dependencies_set,
-                                       emitted_generated_sources,
-                                       generated_source_block);
-  }
-
-  std::stringstream comp_gen;
-  comp_gen << "void attrib_load(WorldPoint domain) {}\n\n";
-  comp_gen << generated_source_block.str();
-  comp_gen << "float4 nodetree_light_shader()\n";
-  comp_gen << "{\n";
-  comp_gen << (codegen.light_shader.has_value() ?
-                   codegen.light_shader->serialized_or_default("return float4(1.0f);\n") :
-                   "return float4(1.0f);\n");
-  comp_gen << "}\n\n";
-
-  Vector<StringRefNull> dependencies = material_dependencies_finalize(dependencies_set);
-  info.generated_sources.append({"eevee_nodetree_frag_lib.glsl", dependencies, comp_gen.str()});
-
-  const char *material_name = (info.name_.c_str() + 2);
-  if (slots.sampler_overflow()) {
-    std::cerr << "Error: EEVEE: Surfel light shader " << material_name
-              << " uses too many samplers." << std::endl;
-    info.batch_resources_.clear();
-  }
-}
-
-void ShaderModule::light_uniform_create_info_amend(GPUMaterial *gpumat,
-                                                   GPUCodegenOutput *codegen_)
-{
-  using namespace blender::gpu::shader;
-
-  GPUCodegenOutput &codegen = *codegen_;
-  ShaderCreateInfo &info = *reinterpret_cast<ShaderCreateInfo *>(codegen.create_info);
-
-  info.additional_info("eevee_light_shader_uniform");
-  info.name_ += "_light_shader_uniform";
-
-  SlotAllocator slots;
-  const ShaderCreateInfo *light_shader_info = reinterpret_cast<const ShaderCreateInfo *>(
-      GPU_shader_create_info_get("eevee_light_shader_uniform"));
-  slots.reserve_slots(*light_shader_info);
-  slots.reserve_sampler_range(MATERIAL_TEXTURE_RESERVED_SLOT_FIRST,
-                              MATERIAL_TEXTURE_RESERVED_SLOT_LAST_NO_EVAL);
-  slots.reserve_sampler(LIGHT_SHADER_TEX_SLOT);
-
-  for (auto &resource : info.batch_resources_) {
-    if (resource.bind_type == ShaderCreateInfo::Resource::BindType::SAMPLER) {
-      resource.slot = slots.get_next_sampler();
-    }
-  }
-
-  for (auto &res : info.batch_resources_) {
-    res.info_name = "eevee_node_tree";
-  }
-  for (auto &res : info.pass_resources_) {
-    res.info_name = "eevee_node_tree";
-  }
-  for (auto &res : info.geometry_resources_) {
-    res.info_name = "eevee_node_tree";
-  }
-
-  std::string generated_resource_header = info.typedef_source_generated;
-  generated_resource_header += "#ifdef CREATE_INFO_RES_PASS_eevee_node_tree\n";
-  generated_resource_header += "CREATE_INFO_RES_PASS_eevee_node_tree\n";
-  generated_resource_header += "#endif\n";
-  generated_resource_header += "#ifdef CREATE_INFO_RES_BATCH_eevee_node_tree\n";
-  generated_resource_header += "CREATE_INFO_RES_BATCH_eevee_node_tree\n";
-  generated_resource_header += "#endif\n";
-  generated_resource_header += "#ifdef CREATE_INFO_RES_GEOMETRY_eevee_node_tree\n";
-  generated_resource_header += "CREATE_INFO_RES_GEOMETRY_eevee_node_tree\n";
-  generated_resource_header += "#endif\n";
-  generated_resource_header += "\n";
-  info.generated_sources.append({"eevee_nodetree_type_lib.glsl", {}, generated_resource_header});
-
-  Set<StringRefNull> dependencies_set;
-  Set<StringRefNull> emitted_generated_sources;
-  std::stringstream generated_source_block;
-  dependencies_set.add("eevee_geom_types_lib.glsl");
-  dependencies_set.add("eevee_attributes_world_lib.glsl");
-  dependencies_set.add("eevee_light_lib.glsl");
-  dependencies_set.add("eevee_nodetree_lib.glsl");
-  if (codegen.light_shader.has_value()) {
-    material_graph_dependencies_append(gpumat,
-                                       codegen.light_shader->dependencies,
-                                       dependencies_set,
-                                       emitted_generated_sources,
-                                       generated_source_block);
-  }
-
-  std::stringstream comp_gen;
-  comp_gen << "void attrib_load(WorldPoint domain) {}\n\n";
-  comp_gen << generated_source_block.str();
-  comp_gen << "float4 nodetree_light_shader()\n";
-  comp_gen << "{\n";
-  comp_gen << (codegen.light_shader.has_value() ?
-                   codegen.light_shader->serialized_or_default("return float4(1.0f);\n") :
-                   "return float4(1.0f);\n");
-  comp_gen << "}\n\n";
-
-  Vector<StringRefNull> dependencies = material_dependencies_finalize(dependencies_set);
-  info.generated_sources.append({"eevee_nodetree_frag_lib.glsl", dependencies, comp_gen.str()});
-
-  const char *material_name = (info.name_.c_str() + 2);
-  if (slots.sampler_overflow()) {
-    std::cerr << "Error: EEVEE: Uniform light shader " << material_name
+    std::cerr << "Error: EEVEE: " << pipeline_info.error_label << " " << material_name
               << " uses too many samplers." << std::endl;
     info.batch_resources_.clear();
   }
@@ -2301,40 +2015,9 @@ static void codegen_callback(void *void_thunk, GPUMaterial *mat, GPUCodegenOutpu
 
 static void light_codegen_callback(void *void_thunk, GPUMaterial *mat, GPUCodegenOutput *codegen)
 {
-  ShaderModule *shader_module = static_cast<ShaderModule *>(void_thunk);
-  shader_module->light_create_info_amend(mat, codegen);
-}
-
-static void light_front_codegen_callback(void *void_thunk,
-                                         GPUMaterial *mat,
-                                         GPUCodegenOutput *codegen)
-{
-  ShaderModule *shader_module = static_cast<ShaderModule *>(void_thunk);
-  shader_module->light_front_create_info_amend(mat, codegen);
-}
-
-static void light_volume_codegen_callback(void *void_thunk,
-                                          GPUMaterial *mat,
-                                          GPUCodegenOutput *codegen)
-{
-  ShaderModule *shader_module = static_cast<ShaderModule *>(void_thunk);
-  shader_module->light_volume_create_info_amend(mat, codegen);
-}
-
-static void light_surfel_codegen_callback(void *void_thunk,
-                                          GPUMaterial *mat,
-                                          GPUCodegenOutput *codegen)
-{
-  ShaderModule *shader_module = static_cast<ShaderModule *>(void_thunk);
-  shader_module->light_surfel_create_info_amend(mat, codegen);
-}
-
-static void light_uniform_codegen_callback(void *void_thunk,
-                                           GPUMaterial *mat,
-                                           GPUCodegenOutput *codegen)
-{
-  ShaderModule *shader_module = static_cast<ShaderModule *>(void_thunk);
-  shader_module->light_uniform_create_info_amend(mat, codegen);
+  const LightShaderPipelineInfo *pipeline_info = static_cast<const LightShaderPipelineInfo *>(
+      void_thunk);
+  light_create_info_amend(mat, codegen, *pipeline_info);
 }
 
 static GPUPass *pass_replacement_cb(void *void_thunk, GPUMaterial *mat)
@@ -2518,9 +2201,10 @@ GPUMaterial *ShaderModule::world_shader_get(blender::World *blender_world,
 
 GPUMaterial *ShaderModule::light_shader_get(blender::Light *blender_light,
                                             bNodeTree *nodetree,
+                                            const eLightShaderPipeline pipeline_type,
                                             bool deferred_compilation)
 {
-  constexpr uint64_t shader_uuid = 0xEEAA0001u;
+  const LightShaderPipelineInfo &pipeline_info = light_shader_pipeline_info_get(pipeline_type);
 
   GPUMaterialFromNodeTreeResult material_from_tree = GPU_material_from_nodetree(
       nullptr,
@@ -2528,110 +2212,14 @@ GPUMaterial *ShaderModule::light_shader_get(blender::Light *blender_light,
       &blender_light->gpumaterial,
       blender_light->id.name,
       GPU_MAT_EEVEE,
-      shader_uuid,
+      pipeline_info.shader_uuid,
       false,
       false,
       true,
       false,
       deferred_compilation,
       light_codegen_callback,
-      this);
-  store_node_tree_errors(material_from_tree);
-  return material_from_tree.material;
-}
-
-GPUMaterial *ShaderModule::light_shader_front_get(blender::Light *blender_light,
-                                                  bNodeTree *nodetree,
-                                                  bool deferred_compilation)
-{
-  constexpr uint64_t shader_uuid = 0xEEAA0005u;
-
-  GPUMaterialFromNodeTreeResult material_from_tree = GPU_material_from_nodetree(
-      nullptr,
-      nodetree,
-      &blender_light->gpumaterial,
-      blender_light->id.name,
-      GPU_MAT_EEVEE,
-      shader_uuid,
-      false,
-      false,
-      true,
-      false,
-      deferred_compilation,
-      light_front_codegen_callback,
-      this);
-  store_node_tree_errors(material_from_tree);
-  return material_from_tree.material;
-}
-
-GPUMaterial *ShaderModule::light_shader_volume_get(blender::Light *blender_light,
-                                                   bNodeTree *nodetree,
-                                                   bool deferred_compilation)
-{
-  constexpr uint64_t shader_uuid = 0xEEAA0002u;
-
-  GPUMaterialFromNodeTreeResult material_from_tree = GPU_material_from_nodetree(
-      nullptr,
-      nodetree,
-      &blender_light->gpumaterial,
-      blender_light->id.name,
-      GPU_MAT_EEVEE,
-      shader_uuid,
-      false,
-      false,
-      true,
-      false,
-      deferred_compilation,
-      light_volume_codegen_callback,
-      this);
-  store_node_tree_errors(material_from_tree);
-  return material_from_tree.material;
-}
-
-GPUMaterial *ShaderModule::light_shader_surfel_get(blender::Light *blender_light,
-                                                   bNodeTree *nodetree,
-                                                   bool deferred_compilation)
-{
-  constexpr uint64_t shader_uuid = 0xEEAA0003u;
-
-  GPUMaterialFromNodeTreeResult material_from_tree = GPU_material_from_nodetree(
-      nullptr,
-      nodetree,
-      &blender_light->gpumaterial,
-      blender_light->id.name,
-      GPU_MAT_EEVEE,
-      shader_uuid,
-      false,
-      false,
-      true,
-      false,
-      deferred_compilation,
-      light_surfel_codegen_callback,
-      this);
-  store_node_tree_errors(material_from_tree);
-  return material_from_tree.material;
-}
-
-GPUMaterial *ShaderModule::light_shader_uniform_get(blender::Light *blender_light,
-                                                    bNodeTree *nodetree,
-                                                    bool deferred_compilation)
-{
-  constexpr uint64_t shader_uuid = 0xEEAA0004u;
-
-  GPUMaterialFromNodeTreeResult material_from_tree = GPU_material_from_nodetree(
-      nullptr,
-      nodetree,
-      &blender_light->gpumaterial,
-      blender_light->id.name,
-      GPU_MAT_EEVEE,
-      shader_uuid,
-      false,
-      false,
-      true,
-      false,
-      deferred_compilation,
-      light_uniform_codegen_callback,
-      this);
+      const_cast<LightShaderPipelineInfo *>(&pipeline_info));
   store_node_tree_errors(material_from_tree);
   return material_from_tree.material;
 }

@@ -14,25 +14,12 @@ COMPUTE_SHADER_CREATE_INFO(eevee_light_shader_volume)
 #include "draw_view_lib.glsl"
 #include "eevee_attributes_world_lib.glsl"
 #include "eevee_light_lib.glsl"
+#include "eevee_light_shader_common_lib.glsl"
 #include "eevee_nodetree_frag_lib.glsl"
 #include "eevee_volume_lib.glsl"
 #include "gpu_shader_codegen_lib.glsl"
 
 float4 nodetree_light_shader();
-
-void init_light_shader_globals()
-{
-  g_data.is_strand = false;
-  g_data.hair_diameter = 0.0f;
-  g_data.hair_strand_id = 0;
-  g_data.ray_type = uniform_buf.pipeline.ray_type;
-  g_data.ray_depth = 0.0f;
-  g_data.barycentric_coords = float2(0.0f);
-  g_data.barycentric_dists = float3(0.0f);
-  g_data.curve_T = float3(0.0f);
-  g_data.curve_B = float3(0.0f);
-  g_data.curve_N = float3(0.0f);
-}
 
 void main()
 {
@@ -42,7 +29,7 @@ void main()
     return;
   }
 
-  init_light_shader_globals();
+  light_shader_globals_init();
 
   float offset = sampling_rng_1D_get(SAMPLING_VOLUME_W);
   float jitter = volume_froxel_jitter(froxel.xy, offset);
@@ -58,9 +45,8 @@ void main()
 
   attrib_load(WorldPoint{0});
 
-  float4 result = nodetree_light_shader();
   int layer = light_index * uniform_buf.volumes.tex_size.z + froxel.z;
   imageStoreFast(out_light_shader_img,
                  int3(froxel.xy, layer),
-                 float4(max(result.rgb, float3(0.0f)), max(result.a, 0.0f)));
+                 light_shader_result_clamp(nodetree_light_shader()));
 }

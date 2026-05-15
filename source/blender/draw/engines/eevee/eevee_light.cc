@@ -136,16 +136,11 @@ static bool light_nodetree_eevee_light_shader_output_is_default_passthrough(
              *nodetree, *output, "Attenuation", "Default Attenuation", info_node);
 }
 
-static bool light_nodetree_needs_eevee_light_shader_eval(const bNodeTree *nodetree)
-{
-  return light_nodetree_eevee_light_shader_output_get(nodetree) != nullptr &&
-         !light_nodetree_eevee_light_shader_output_is_default_passthrough(nodetree);
-}
-
 static LightShaderDependency light_shader_dependency_join(const LightShaderDependency a,
                                                           const LightShaderDependency b)
 {
-  return (a == LightShaderDependency::PointDependent || b == LightShaderDependency::PointDependent) ?
+  return (a == LightShaderDependency::PointDependent ||
+          b == LightShaderDependency::PointDependent) ?
              LightShaderDependency::PointDependent :
              LightShaderDependency::Uniform;
 }
@@ -832,91 +827,60 @@ void LightModule::sync_light(const Object *ob, ObjectHandle &handle)
   light.volume_light_shader_index = -1;
   light.surfel_light_shader_index = -1;
   light.uniform_light_shader_index = -1;
+  auto register_light_shader = [&](const eLightShaderPipeline pipeline_type,
+                                   int &r_light_shader_index,
+                                   Vector<GPUMaterial *> &materials,
+                                   Vector<LightData> &lights,
+                                   const char *error_message) {
+    GPUMaterial *gpumat = inst_.shaders.light_shader_get(
+        const_cast<blender::Light *>(&la), la.nodetree, pipeline_type, false);
+    if (gpumat != nullptr && GPU_material_status(gpumat) == GPU_MAT_SUCCESS &&
+        GPU_material_has_light_shader_output(gpumat))
+    {
+      r_light_shader_index = materials.size();
+      materials.append(gpumat);
+      lights.append(static_cast<const LightData &>(light));
+      has_time_dependent_light_shaders_ |= GPU_material_is_time_dependent(gpumat);
+      inst_.manager->register_layer_attributes(gpumat);
+      return;
+    }
+    inst_.info_append_i18n(error_message);
+  };
   const LightShaderDependency light_shader_dependency =
       light_nodetree_eevee_light_shader_dependency_get(la.nodetree);
   if (light_shader_dependency == LightShaderDependency::Uniform) {
-    GPUMaterial *uniform_gpumat = inst_.shaders.light_shader_uniform_get(
-        const_cast<blender::Light *>(&la), la.nodetree, false);
-    if (uniform_gpumat != nullptr && GPU_material_status(uniform_gpumat) == GPU_MAT_SUCCESS &&
-        GPU_material_has_light_shader_output(uniform_gpumat))
-    {
-      light.uniform_light_shader_index = uniform_light_shader_materials_.size();
-      uniform_light_shader_materials_.append(uniform_gpumat);
-      uniform_light_shader_lights_.append(static_cast<const LightData &>(light));
-      const bool is_time_dependent = GPU_material_is_time_dependent(uniform_gpumat);
-      has_time_dependent_light_shaders_ |= is_time_dependent;
-      inst_.manager->register_layer_attributes(uniform_gpumat);
-    }
-    else {
-      inst_.info_append_i18n("Error: Uniform custom light shader failed to compile.");
-    }
+    register_light_shader(eLightShaderPipeline::Uniform,
+                          light.uniform_light_shader_index,
+                          uniform_light_shader_materials_,
+                          uniform_light_shader_lights_,
+                          "Error: Uniform custom light shader failed to compile.");
   }
   else if (light_shader_dependency == LightShaderDependency::PointDependent) {
     if (inst_.is_baking()) {
-      GPUMaterial *surfel_gpumat = inst_.shaders.light_shader_surfel_get(
-          const_cast<blender::Light *>(&la), la.nodetree, false);
-      if (surfel_gpumat != nullptr && GPU_material_status(surfel_gpumat) == GPU_MAT_SUCCESS &&
-          GPU_material_has_light_shader_output(surfel_gpumat))
-      {
-        light.surfel_light_shader_index = surfel_light_shader_materials_.size();
-        surfel_light_shader_materials_.append(surfel_gpumat);
-        surfel_light_shader_lights_.append(static_cast<const LightData &>(light));
-        has_time_dependent_light_shaders_ |= GPU_material_is_time_dependent(surfel_gpumat);
-        inst_.manager->register_layer_attributes(surfel_gpumat);
-      }
-      else {
-        inst_.info_append_i18n(
-            "Error: Custom light shader failed to compile for volume probe baking.");
-      }
+      register_light_shader(eLightShaderPipeline::Surfel,
+                            light.surfel_light_shader_index,
+                            surfel_light_shader_materials_,
+                            surfel_light_shader_lights_,
+                            "Error: Custom light shader failed to compile for volume probe "
+                            "baking.");
     }
     else {
-      GPUMaterial *gpumat = inst_.shaders.light_shader_get(
-          const_cast<blender::Light *>(&la), la.nodetree, false);
-      if (gpumat != nullptr && GPU_material_status(gpumat) == GPU_MAT_SUCCESS &&
-          GPU_material_has_light_shader_output(gpumat))
-      {
-        light.light_shader_index = light_shader_materials_.size();
-        light_shader_materials_.append(gpumat);
-        light_shader_lights_.append(static_cast<const LightData &>(light));
-        has_time_dependent_light_shaders_ |= GPU_material_is_time_dependent(gpumat);
-        inst_.manager->register_layer_attributes(gpumat);
-      }
-      else {
-        inst_.info_append_i18n(
-            "Error: Custom light shader failed to compile for surface lighting.");
-      }
-
-      GPUMaterial *front_gpumat = inst_.shaders.light_shader_front_get(
-          const_cast<blender::Light *>(&la), la.nodetree, false);
-      if (front_gpumat != nullptr && GPU_material_status(front_gpumat) == GPU_MAT_SUCCESS &&
-          GPU_material_has_light_shader_output(front_gpumat))
-      {
-        light.front_light_shader_index = front_light_shader_materials_.size();
-        front_light_shader_materials_.append(front_gpumat);
-        front_light_shader_lights_.append(static_cast<const LightData &>(light));
-        has_time_dependent_light_shaders_ |= GPU_material_is_time_dependent(front_gpumat);
-        inst_.manager->register_layer_attributes(front_gpumat);
-      }
-      else {
-        inst_.info_append_i18n(
-            "Error: Custom light shader failed to compile for front-layer surface lighting.");
-      }
-
-      GPUMaterial *volume_gpumat = inst_.shaders.light_shader_volume_get(
-          const_cast<blender::Light *>(&la), la.nodetree, false);
-      if (volume_gpumat != nullptr && GPU_material_status(volume_gpumat) == GPU_MAT_SUCCESS &&
-          GPU_material_has_light_shader_output(volume_gpumat))
-      {
-        light.volume_light_shader_index = volume_light_shader_materials_.size();
-        volume_light_shader_materials_.append(volume_gpumat);
-        volume_light_shader_lights_.append(static_cast<const LightData &>(light));
-        has_time_dependent_light_shaders_ |= GPU_material_is_time_dependent(volume_gpumat);
-        inst_.manager->register_layer_attributes(volume_gpumat);
-      }
-      else {
-        inst_.info_append_i18n(
-            "Error: Custom light shader failed to compile for volume lighting.");
-      }
+      register_light_shader(eLightShaderPipeline::Surface,
+                            light.light_shader_index,
+                            light_shader_materials_,
+                            light_shader_lights_,
+                            "Error: Custom light shader failed to compile for surface lighting.");
+      register_light_shader(eLightShaderPipeline::Front,
+                            light.front_light_shader_index,
+                            front_light_shader_materials_,
+                            front_light_shader_lights_,
+                            "Error: Custom light shader failed to compile for front-layer "
+                            "surface lighting.");
+      register_light_shader(eLightShaderPipeline::Volume,
+                            light.volume_light_shader_index,
+                            volume_light_shader_materials_,
+                            volume_light_shader_lights_,
+                            "Error: Custom light shader failed to compile for volume lighting.");
     }
   }
   sun_lights_len_ += int(is_sun_light(light.type));
@@ -936,7 +900,6 @@ void LightModule::end_sync()
   light_shader_index_buf_ensure_no_shader(front_light_shader_src_index_buf_, lights_allocated);
   light_shader_index_buf_ensure_no_shader(volume_light_shader_src_index_buf_, lights_allocated);
   light_shader_index_buf_ensure_no_shader(surfel_light_shader_src_index_buf_, lights_allocated);
-  light_shader_index_buf_ensure_no_shader(light_shader_no_index_buf_, lights_allocated);
 
   /* Track light deletion. */
   /* Indices inside GPU data array. */
@@ -966,11 +929,11 @@ void LightModule::end_sync()
                                                      uniform_encoded_index :
                                                      light.front_light_shader_index;
     volume_light_shader_src_index_buf_[dst_idx] = (light.uniform_light_shader_index >= 0) ?
-                                                     uniform_encoded_index :
-                                                     light.volume_light_shader_index;
+                                                      uniform_encoded_index :
+                                                      light.volume_light_shader_index;
     surfel_light_shader_src_index_buf_[dst_idx] = (light.uniform_light_shader_index >= 0) ?
-                                                     uniform_encoded_index :
-                                                     light.surfel_light_shader_index;
+                                                      uniform_encoded_index :
+                                                      light.surfel_light_shader_index;
 
     /* Untag for next sync. */
     light.used = false;
@@ -999,7 +962,6 @@ void LightModule::end_sync()
     light_shader_index_buf_ensure_no_shader(front_light_shader_src_index_buf_, lights_len_);
     light_shader_index_buf_ensure_no_shader(volume_light_shader_src_index_buf_, lights_len_);
     light_shader_index_buf_ensure_no_shader(surfel_light_shader_src_index_buf_, lights_len_);
-    light_shader_index_buf_ensure_no_shader(light_shader_no_index_buf_, lights_len_);
   }
 
   /* This scene data buffer is then immutable after this point. */
@@ -1008,7 +970,6 @@ void LightModule::end_sync()
   front_light_shader_src_index_buf_.push_update();
   volume_light_shader_src_index_buf_.push_update();
   surfel_light_shader_src_index_buf_.push_update();
-  light_shader_no_index_buf_.push_update();
 
   /* Resize to the actual number of lights after pruning. */
   lights_allocated = ceil_to_multiple_u(max_ii(lights_len_, 1), LIGHT_CHUNK);
@@ -1024,7 +985,8 @@ void LightModule::end_sync()
   uniform_light_shader_pass_sync();
   light_shader_pass_sync(inst_.render_extent_get());
   if (!front_light_shader_tx_.is_valid()) {
-    constexpr eGPUTextureUsage usage = GPU_TEXTURE_USAGE_ATTACHMENT | GPU_TEXTURE_USAGE_SHADER_READ;
+    constexpr eGPUTextureUsage usage = GPU_TEXTURE_USAGE_ATTACHMENT |
+                                       GPU_TEXTURE_USAGE_SHADER_READ;
     const float white[4] = {1.0f, 1.0f, 1.0f, 1.0f};
     front_light_shader_tx_.ensure_2d_array(
         gpu::TextureFormat::SFLOAT_16_16_16_16, int2(1), 1, usage, white);
@@ -1167,8 +1129,6 @@ void LightModule::light_shader_pass_sync(const int2 extent)
   constexpr eGPUTextureUsage usage = GPU_TEXTURE_USAGE_ATTACHMENT | GPU_TEXTURE_USAGE_SHADER_READ;
   const float white[4] = {1.0f, 1.0f, 1.0f, 1.0f};
   light_shader_valid_ = false;
-  light_shader_dummy_tx_.ensure_2d_array(
-      gpu::TextureFormat::SFLOAT_16_16_16_16, int2(1), 1, usage, white);
   if (light_shader_materials_.is_empty()) {
     light_shader_tx_.ensure_2d_array(
         gpu::TextureFormat::SFLOAT_16_16_16_16, int2(1), 1, usage, white);
@@ -1182,7 +1142,7 @@ void LightModule::light_shader_pass_sync(const int2 extent)
         gpu::TextureFormat::SFLOAT_16_16_16_16, int2(1), 1, usage, white);
     light_shader_fbs_.clear();
     light_shader_index_buf_disable_point_dependent(light_shader_index_buf_,
-                                                  max_ii(lights_len_, 1));
+                                                   max_ii(lights_len_, 1));
     light_shader_index_buf_.push_update();
     inst_.info_append_i18n("Error: Too many custom light shader surface layers.");
     return;
@@ -1228,7 +1188,7 @@ void LightModule::front_light_shader_pass_sync(const int2 extent)
     front_light_shader_tx_.ensure_2d_array(
         gpu::TextureFormat::SFLOAT_16_16_16_16, int2(1), 1, usage, white);
     front_light_shader_fbs_.clear();
-    disable_point_dependent_surface_light_shader_indices();
+    disable_point_dependent_front_light_shader_indices();
     inst_.info_append_i18n("Error: Too many custom light shader front-layer surface layers.");
     return;
   }
@@ -1279,16 +1239,17 @@ void LightModule::uniform_light_shader_pass_sync()
   uniform_light_shader_valid_ = true;
 }
 
-void LightModule::disable_point_dependent_surface_light_shader_indices()
+void LightModule::disable_point_dependent_front_light_shader_indices()
 {
   light_shader_index_buf_disable_point_dependent(front_light_shader_index_buf_,
-                                                max_ii(lights_len_, 1));
+                                                 max_ii(lights_len_, 1));
   front_light_shader_index_buf_.push_update();
 }
 
 void LightModule::volume_light_shader_pass_sync(const int3 grid_size)
 {
-  constexpr eGPUTextureUsage usage = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE;
+  constexpr eGPUTextureUsage usage = GPU_TEXTURE_USAGE_SHADER_READ |
+                                     GPU_TEXTURE_USAGE_SHADER_WRITE;
   const float white[4] = {1.0f, 1.0f, 1.0f, 1.0f};
   volume_light_shader_valid_ = false;
   volume_light_shader_dummy_tx_.ensure_2d_array(
@@ -1302,7 +1263,7 @@ void LightModule::volume_light_shader_pass_sync(const int3 grid_size)
   if (layer_len > GPU_max_texture_layers()) {
     volume_light_shader_tx_.free();
     light_shader_index_buf_disable_point_dependent(volume_light_shader_index_buf_,
-                                                  max_ii(lights_len_, 1));
+                                                   max_ii(lights_len_, 1));
     volume_light_shader_index_buf_.push_update();
     inst_.info_append_i18n("Error: Too many custom light shader volume layers.");
     return;
@@ -1329,7 +1290,7 @@ void LightModule::surfel_light_shader_pass_sync(uint surfel_len)
     surfel_light_shader_buf_.resize(1);
     surfel_light_shader_buf_.clear_to_zero();
     light_shader_index_buf_disable_point_dependent(surfel_light_shader_index_buf_,
-                                                  max_ii(lights_len_, 1));
+                                                   max_ii(lights_len_, 1));
     surfel_light_shader_index_buf_.push_update();
     return;
   }
@@ -1352,7 +1313,7 @@ void LightModule::surfel_light_shader_pass_sync(uint surfel_len)
     surfel_light_shader_buf_.resize(1);
     surfel_light_shader_buf_.clear_to_zero();
     light_shader_index_buf_disable_point_dependent(surfel_light_shader_index_buf_,
-                                                  max_ii(lights_len_, 1));
+                                                   max_ii(lights_len_, 1));
     surfel_light_shader_index_buf_.push_update();
     inst_.info_append_i18n(
         "Error: Too many custom light shader surfel bake samples ({} / {} MBytes).",
@@ -1416,13 +1377,14 @@ void LightModule::eval_front_light_shaders(View &view, const int2 extent)
                                       inst_.render_buffers.prepass_normal_tx.height()) :
                                  int2(0);
   if (!has_prepass_normal || normal_extent != math::max(extent, int2(1))) {
-    constexpr eGPUTextureUsage usage = GPU_TEXTURE_USAGE_ATTACHMENT | GPU_TEXTURE_USAGE_SHADER_READ;
+    constexpr eGPUTextureUsage usage = GPU_TEXTURE_USAGE_ATTACHMENT |
+                                       GPU_TEXTURE_USAGE_SHADER_READ;
     const float white[4] = {1.0f, 1.0f, 1.0f, 1.0f};
     front_light_shader_valid_ = false;
     front_light_shader_tx_.ensure_2d_array(
         gpu::TextureFormat::SFLOAT_16_16_16_16, int2(1), 1, usage, white);
     front_light_shader_fbs_.clear();
-    disable_point_dependent_surface_light_shader_indices();
+    disable_point_dependent_front_light_shader_indices();
     if (!front_light_shader_missing_prepass_reported_) {
       inst_.info_append_i18n(
           "Error: Point-dependent custom light shader front-layer cache needs a full-size "
@@ -1434,7 +1396,7 @@ void LightModule::eval_front_light_shaders(View &view, const int2 extent)
 
   front_light_shader_pass_sync(extent);
   if (!front_light_shader_valid_) {
-    disable_point_dependent_surface_light_shader_indices();
+    disable_point_dependent_front_light_shader_indices();
     return;
   }
 

@@ -119,7 +119,6 @@ struct Light : public LightData, NonCopyable {
 
  private:
   float shadow_lod_min_get(const blender::Light *la);
-  float shadow_shape_size_get(const blender::Light *la);
   float attenuation_radius_get(const blender::Light *la, float light_threshold, float light_power);
   void shape_parameters_set(const blender::Light *la,
                             const float3 &scale,
@@ -186,8 +185,6 @@ class LightModule {
   LightShaderIndexBuf volume_light_shader_index_buf_ = {"VolumeLightShader.CulledIndices"};
   LightShaderIndexBuf surfel_light_shader_src_index_buf_ = {"SurfelLightShader.SrcIndices"};
   LightShaderIndexBuf surfel_light_shader_index_buf_ = {"SurfelLightShader.CulledIndices"};
-  LightShaderIndexBuf light_shader_no_index_buf_ = {"LightShader.NoIndices"};
-  Texture light_shader_dummy_tx_ = {"LightShader.Dummy"};
   Texture light_shader_tx_ = {"LightShader"};
   Texture front_light_shader_tx_ = {"FrontLightShader"};
   Texture volume_light_shader_dummy_tx_ = {"VolumeLightShader.Dummy"};
@@ -342,7 +339,7 @@ class LightModule {
   void culling_extent_sync(const int2 render_extent);
 
   void add_world_sun_light(const ObjectKey &key, bool use_diffuse, bool use_glossy);
-  void disable_point_dependent_surface_light_shader_indices();
+  void disable_point_dependent_front_light_shader_indices();
 };
 
 /** \} */

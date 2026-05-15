@@ -487,6 +487,7 @@ set(GLSL_SRC
   engines/eevee/shaders/eevee_light_eval_lib.glsl
   engines/eevee/shaders/eevee_light_iter_lib.glsl
   engines/eevee/shaders/eevee_light_lib.glsl
+  engines/eevee/shaders/eevee_light_shader_common_lib.glsl
   engines/eevee/shaders/eevee_light_shader_frag.glsl
   engines/eevee/shaders/eevee_light_shader_front_frag.glsl
   engines/eevee/shaders/eevee_light_shader_surfel_comp.glsl
