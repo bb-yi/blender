@@ -456,17 +456,8 @@ struct Material {
 
   char surface_cull_method = MA_SURFACE_CULL_NONE;
   char depth_offset_affect_lighting = false;
-  char stencil_enabled = false;
-  char stencil_reference = 0;
-  char stencil_read_mask = 15;
-  char stencil_write_mask = 15;
-  char stencil_test = MA_STENCIL_ALWAYS;
-  char stencil_pass_op = MA_STENCIL_OP_KEEP;
-  char stencil_fail_op = MA_STENCIL_OP_KEEP;
-  char stencil_zfail_op = MA_STENCIL_OP_KEEP;
-  short stencil_order = 0;
   char ztest_mode = MA_ZTEST_LESS_EQUAL;
-  char _pad3[7] = {};
+  char _pad3[1] = {};
 
   /**
    * Cached slots for texture painting, must be refreshed via
@@ -480,6 +471,17 @@ struct Material {
   /** Grease pencil color. */
   struct MaterialGPencilStyle *gp_style = nullptr;
   struct MaterialLineArt lineart;
+
+  char stencil_enabled = false;
+  char stencil_reference = 0;
+  char stencil_read_mask = 15;
+  char stencil_write_mask = 15;
+  char stencil_test = MA_STENCIL_ALWAYS;
+  char stencil_pass_op = MA_STENCIL_OP_KEEP;
+  char stencil_fail_op = MA_STENCIL_OP_KEEP;
+  char stencil_zfail_op = MA_STENCIL_OP_KEEP;
+  short stencil_order = 0;
+  char _pad4[6] = {};
 };
 
 #ifdef __cplusplus

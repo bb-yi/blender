@@ -277,6 +277,7 @@ struct MaterialKey {
     options = (options << 1) | (visibility_flags & OB_HIDE_PROBE_CUBEMAP ? 0 : 1);
     options = (options << 1) | (visibility_flags & OB_HIDE_PROBE_PLANAR ? 0 : 1);
     options = (options << 16) | uint16_t(refraction_layer);
+    options = (options << 3) | uint64_t(material_ztest_mode_get(*mat_));
     const uint64_t stencil_enabled = mat_->stencil_enabled != 0;
     stencil_order = stencil_enabled ? mat_->stencil_order : 0;
     options = (options << 1) | stencil_enabled;
