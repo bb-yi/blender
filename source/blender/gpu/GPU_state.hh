@@ -134,8 +134,24 @@ enum GPUDepthTest {
 enum GPUStencilTest {
   GPU_STENCIL_NONE = 0,
   GPU_STENCIL_ALWAYS,
+  GPU_STENCIL_NEVER,
   GPU_STENCIL_EQUAL,
   GPU_STENCIL_NEQUAL,
+  GPU_STENCIL_LESS,
+  GPU_STENCIL_LEQUAL,
+  GPU_STENCIL_GREATER,
+  GPU_STENCIL_GEQUAL,
+};
+
+enum GPUStencilOpType {
+  GPU_STENCIL_OP_KEEP = 0,
+  GPU_STENCIL_OP_ZERO,
+  GPU_STENCIL_OP_REPLACE_VALUE,
+  GPU_STENCIL_OP_INCREMENT_CLAMP,
+  GPU_STENCIL_OP_DECREMENT_CLAMP,
+  GPU_STENCIL_OP_INVERT,
+  GPU_STENCIL_OP_INCREMENT_WRAP,
+  GPU_STENCIL_OP_DECREMENT_WRAP,
 };
 
 enum GPUStencilOp {
@@ -144,7 +160,36 @@ enum GPUStencilOp {
   /** Special values for stencil shadows. */
   GPU_STENCIL_OP_COUNT_DEPTH_PASS,
   GPU_STENCIL_OP_COUNT_DEPTH_FAIL,
+  GPU_STENCIL_OP_CUSTOM = (1 << 12),
 };
+
+static inline GPUStencilOp GPU_stencil_op_create(GPUStencilOpType stencil_fail,
+                                                 GPUStencilOpType depth_fail,
+                                                 GPUStencilOpType depth_pass)
+{
+  return GPUStencilOp(GPU_STENCIL_OP_CUSTOM | (stencil_fail << 0) | (depth_fail << 4) |
+                      (depth_pass << 8));
+}
+
+static inline bool GPU_stencil_op_is_custom(GPUStencilOp operation)
+{
+  return (uint32_t(operation) & uint32_t(GPU_STENCIL_OP_CUSTOM)) != 0;
+}
+
+static inline GPUStencilOpType GPU_stencil_op_stencil_fail(GPUStencilOp operation)
+{
+  return GPUStencilOpType((uint32_t(operation) >> 0) & 0xFu);
+}
+
+static inline GPUStencilOpType GPU_stencil_op_depth_fail(GPUStencilOp operation)
+{
+  return GPUStencilOpType((uint32_t(operation) >> 4) & 0xFu);
+}
+
+static inline GPUStencilOpType GPU_stencil_op_depth_pass(GPUStencilOp operation)
+{
+  return GPUStencilOpType((uint32_t(operation) >> 8) & 0xFu);
+}
 
 enum GPUFaceCullTest {
   GPU_CULL_NONE = 0, /* Culling disabled. */
@@ -161,6 +206,7 @@ void GPU_blend(GPUBlend blend);
 void GPU_face_culling(GPUFaceCullTest culling);
 void GPU_depth_test(GPUDepthTest test);
 void GPU_stencil_test(GPUStencilTest test);
+void GPU_stencil_operation_set(GPUStencilOp operation);
 void GPU_provoking_vertex(GPUProvokingVertex vert);
 void GPU_front_facing(bool invert);
 void GPU_scissor_test(bool enable);

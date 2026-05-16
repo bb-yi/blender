@@ -612,6 +612,7 @@ Material &MaterialModule::material_sync(Object *ob,
       mat.planar_probe_shading = MaterialPass();
       mat.volume_occupancy = MaterialPass();
       mat.volume_material = MaterialPass();
+      mat.stencil = MaterialPass();
       mat.has_volume = false; /* TODO */
       mat.has_surface = GPU_material_has_surface_output(mat.shading.gpumat);
     }
@@ -652,6 +653,7 @@ Material &MaterialModule::material_sync(Object *ob,
 
       mat.overlap_masking = MaterialPass();
       mat.capture = MaterialPass();
+      mat.stencil = MaterialPass();
 
       if (inst_.needs_lightprobe_sphere_passes() && !(ob->visibility_flag & OB_HIDE_PROBE_CUBEMAP))
       {
@@ -747,6 +749,25 @@ Material &MaterialModule::material_sync(Object *ob,
                                   ((blender_mat->blend_flag & MA_BL_TRANSPARENT_SHADOW) != 0) &&
                                   GPU_material_flag_get(mat.shading.gpumat,
                                                         GPU_MATFLAG_TRANSPARENT);
+
+    MaterialStencilState stencil = material_stencil_state_get(blender_mat);
+    if (!hide_on_camera && mat.has_surface && stencil.enabled && !mat.is_alpha_blend_transparent &&
+        mat.prepass.gpumat != nullptr)
+    {
+      mat.stencil.gpumat = mat.prepass.gpumat;
+      mat.stencil.sub_pass = use_forward_pipeline ?
+                                 inst_.pipelines.forward.stencil_opaque_add(blender_mat,
+                                                                            mat.stencil.gpumat,
+                                                                            has_motion,
+                                                                            false) :
+                                 inst_.pipelines.deferred.stencil_add(
+                                     blender_mat,
+                                     mat.stencil.gpumat,
+                                     ob->refraction_layer_index,
+                                     has_motion,
+                                     material_has_flag(mat.npr, GPU_MATFLAG_RAYCAST));
+      mat.prepass.sub_pass = nullptr;
+    }
 
     return mat;
   });

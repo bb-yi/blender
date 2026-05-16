@@ -200,12 +200,6 @@ struct GBuffer {
       return;
     }
 
-    if (!GPU_stencil_export_support()) {
-      /* Clearing custom load-store frame-buffers is invalid,
-       * clear the stencil as a regular frame-buffer first. */
-      GPU_framebuffer_bind(gbuffer_fb);
-      GPU_framebuffer_clear_stencil(gbuffer_fb, 0x0u);
-    }
     GPU_framebuffer_bind_ex(
         gbuffer_fb,
         {

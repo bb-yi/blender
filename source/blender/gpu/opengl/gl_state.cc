@@ -218,23 +218,53 @@ void GLStateManager::set_depth_test(const GPUDepthTest value)
   }
 }
 
-void GLStateManager::set_stencil_test(const GPUStencilTest test, const GPUStencilOp operation)
+static GLenum stencil_op_to_gl(const GPUStencilOpType operation)
 {
   switch (operation) {
-    case GPU_STENCIL_OP_REPLACE:
-      glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
-      break;
-    case GPU_STENCIL_OP_COUNT_DEPTH_PASS:
-      glStencilOpSeparate(GL_BACK, GL_KEEP, GL_KEEP, GL_INCR_WRAP);
-      glStencilOpSeparate(GL_FRONT, GL_KEEP, GL_KEEP, GL_DECR_WRAP);
-      break;
-    case GPU_STENCIL_OP_COUNT_DEPTH_FAIL:
-      glStencilOpSeparate(GL_BACK, GL_KEEP, GL_DECR_WRAP, GL_KEEP);
-      glStencilOpSeparate(GL_FRONT, GL_KEEP, GL_INCR_WRAP, GL_KEEP);
-      break;
-    case GPU_STENCIL_OP_NONE:
+    case GPU_STENCIL_OP_ZERO:
+      return GL_ZERO;
+    case GPU_STENCIL_OP_REPLACE_VALUE:
+      return GL_REPLACE;
+    case GPU_STENCIL_OP_INCREMENT_CLAMP:
+      return GL_INCR;
+    case GPU_STENCIL_OP_DECREMENT_CLAMP:
+      return GL_DECR;
+    case GPU_STENCIL_OP_INVERT:
+      return GL_INVERT;
+    case GPU_STENCIL_OP_INCREMENT_WRAP:
+      return GL_INCR_WRAP;
+    case GPU_STENCIL_OP_DECREMENT_WRAP:
+      return GL_DECR_WRAP;
+    case GPU_STENCIL_OP_KEEP:
     default:
-      glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+      return GL_KEEP;
+  }
+}
+
+void GLStateManager::set_stencil_test(const GPUStencilTest test, const GPUStencilOp operation)
+{
+  if (!GPU_stencil_op_is_custom(operation)) {
+    switch (operation) {
+      case GPU_STENCIL_OP_REPLACE:
+        glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+        break;
+      case GPU_STENCIL_OP_COUNT_DEPTH_PASS:
+        glStencilOpSeparate(GL_BACK, GL_KEEP, GL_KEEP, GL_INCR_WRAP);
+        glStencilOpSeparate(GL_FRONT, GL_KEEP, GL_KEEP, GL_DECR_WRAP);
+        break;
+      case GPU_STENCIL_OP_COUNT_DEPTH_FAIL:
+        glStencilOpSeparate(GL_BACK, GL_KEEP, GL_DECR_WRAP, GL_KEEP);
+        glStencilOpSeparate(GL_FRONT, GL_KEEP, GL_INCR_WRAP, GL_KEEP);
+        break;
+      default:
+        glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+        break;
+    }
+  }
+  else {
+    glStencilOp(stencil_op_to_gl(GPU_stencil_op_stencil_fail(operation)),
+                stencil_op_to_gl(GPU_stencil_op_depth_fail(operation)),
+                stencil_op_to_gl(GPU_stencil_op_depth_pass(operation)));
   }
 
   if (test != GPU_STENCIL_NONE) {
@@ -254,6 +284,21 @@ void GLStateManager::set_stencil_mask(const GPUStencilTest test, const GPUStateM
       break;
     case GPU_STENCIL_EQUAL:
       func = GL_EQUAL;
+      break;
+    case GPU_STENCIL_NEVER:
+      func = GL_NEVER;
+      break;
+    case GPU_STENCIL_LESS:
+      func = GL_LESS;
+      break;
+    case GPU_STENCIL_LEQUAL:
+      func = GL_LEQUAL;
+      break;
+    case GPU_STENCIL_GREATER:
+      func = GL_GREATER;
+      break;
+    case GPU_STENCIL_GEQUAL:
+      func = GL_GEQUAL;
       break;
     case GPU_STENCIL_ALWAYS:
       func = GL_ALWAYS;

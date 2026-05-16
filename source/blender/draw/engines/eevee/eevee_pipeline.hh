@@ -35,6 +35,23 @@ namespace eevee {
 class Instance;
 struct RayTraceBuffer;
 
+static constexpr uint8_t EEVEE_STENCIL_USER_MASK = 0x0Fu;
+static constexpr uint8_t EEVEE_STENCIL_INTERNAL_MASK = 0xF0u;
+
+struct MaterialStencilState {
+  bool enabled = false;
+  DRWState test_state = DRW_STATE_STENCIL_ALWAYS;
+  GPUStencilTest test = GPU_STENCIL_ALWAYS;
+  GPUStencilOpType pass = GPU_STENCIL_OP_KEEP;
+  GPUStencilOpType fail = GPU_STENCIL_OP_KEEP;
+  GPUStencilOpType zfail = GPU_STENCIL_OP_KEEP;
+  uint8_t reference = 0u;
+  uint8_t read_mask = 0u;
+  uint8_t write_mask = 0u;
+};
+
+MaterialStencilState material_stencil_state_get(const blender::Material *material);
+
 /* -------------------------------------------------------------------- */
 /** \name World Background Pipeline
  *
@@ -213,6 +230,7 @@ class ForwardPipeline {
  private:
   Instance &inst_;
 
+  PassSortable stencil_ps_ = {"Stencil"};
   Prepass prepass_ps_ = {"Prepass"};
 
   PassMain opaque_ps_ = {"Shading"};
@@ -231,6 +249,7 @@ class ForwardPipeline {
   bool has_transparent_ = false;
   bool has_holdout_ = false;
   bool has_outline_occluders_ = false;
+  bool has_stencil_ = false;
 
   struct TransparencyBuffer {
     /* Channels are packed separately for technical reason (see eevee_surf_forward_frag.glsl for
@@ -256,6 +275,10 @@ class ForwardPipeline {
   PassMain::Sub *prepass_opaque_add(blender::Material *blender_mat,
                                     GPUMaterial *gpumat,
                                     bool has_motion);
+  PassMain::Sub *stencil_opaque_add(blender::Material *blender_mat,
+                                    GPUMaterial *gpumat,
+                                    bool has_motion,
+                                    bool force_write_id);
   PassMain::Sub *material_opaque_add(const Object *ob,
                                      blender::Material *blender_mat,
                                      GPUMaterial *gpumat);
@@ -287,6 +310,7 @@ class ForwardPipeline {
  * \{ */
 
 struct DeferredLayerBase {
+  PassSortable stencil_ps_ = {"Stencil"};
   Prepass prepass_ps_ = {"Prepass"};
 
   PassMain gbuffer_ps_ = {"Shading"};
@@ -315,16 +339,16 @@ struct DeferredLayerBase {
 
   /* Stencil values used during the deferred pipeline. */
   enum class StencilBits : uint8_t {
-    /* Bits 0 to 1 are reserved for closure count [0..3]. */
-    CLOSURE_COUNT_0 = (1u << 0u),
-    CLOSURE_COUNT_1 = (1u << 1u),
+    /* Bits 4 to 5 are reserved for closure count [0..3]. */
+    CLOSURE_COUNT_0 = (1u << 4u),
+    CLOSURE_COUNT_1 = (1u << 5u),
     /* Set for pixels have a transmission closure. */
-    TRANSMISSION = (1u << 2u),
+    TRANSMISSION = (1u << 6u),
     /** Bits set by the StencilClassify pass. Set per pixel from gbuffer header data. */
     HEADER_BITS = CLOSURE_COUNT_0 | CLOSURE_COUNT_1 | TRANSMISSION,
 
     /* Set for materials that uses the shadow amend pass. */
-    THICKNESS_FROM_SHADOW = (1u << 3u),
+    THICKNESS_FROM_SHADOW = (1u << 7u),
     /** Bits set by the material gbuffer pass. Set per materials. */
     MATERIAL_BITS = THICKNESS_FROM_SHADOW,
   };
@@ -370,6 +394,13 @@ struct DeferredLayerBase {
 
   void gbuffer_pass_sync(Instance &inst);
   template<typename F> void npr_pass_sync(Instance &inst, F callback);
+
+  PassMain::Sub *stencil_add(blender::Material *blender_mat,
+                             GPUMaterial *gpumat,
+                             Instance &inst,
+                             DRWState depth_state,
+                             bool has_motion,
+                             bool force_write_id);
 };
 
 class DeferredPipeline;
@@ -427,6 +458,7 @@ class DeferredLayer : DeferredLayerBase {
   bool use_clamp_direct_ = false;
   bool use_clamp_indirect_ = false;
   bool has_outline_ = false;
+  bool has_stencil_ = false;
   bool is_first_pass_ = true;
 
  public:
@@ -446,6 +478,10 @@ class DeferredLayer : DeferredLayerBase {
                              GPUMaterial *gpumat,
                              bool has_motion,
                              bool force_write_id = false);
+  PassMain::Sub *stencil_add(blender::Material *blender_mat,
+                             GPUMaterial *gpumat,
+                             bool has_motion,
+                             bool force_write_id);
   PassMain::Sub *material_add(blender::Material *blender_mat, GPUMaterial *gpumat);
   PassMain::Sub *npr_add(blender::Material *blender_mat, GPUMaterial *gpumat);
 
@@ -506,6 +542,11 @@ class DeferredPipeline {
   PassMain::Sub *material_add(blender::Material *blender_mat,
                               GPUMaterial *gpumat,
                               short refraction_layer);
+  PassMain::Sub *stencil_add(blender::Material *blender_mat,
+                             GPUMaterial *gpumat,
+                             short refraction_layer,
+                             bool has_motion,
+                             bool force_write_id);
   PassMain::Sub *npr_add(blender::Material *blender_mat, GPUMaterial *gpumat, short refraction_layer);
 
   void render(View &main_view,

@@ -74,6 +74,7 @@ set(SRC_GLSL_FRAG
   eevee_shadow_debug_frag.glsl
   eevee_shadow_page_tile_frag.glsl
   eevee_shadow_tag_usage_frag.glsl
+  eevee_stencil_value_visualize_frag.glsl
   eevee_surf_capture_frag.glsl
   eevee_surf_deferred_frag.glsl
   eevee_surf_depth_frag.glsl

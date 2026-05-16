@@ -507,6 +507,28 @@ struct VKGraphicsPipelineCreateInfoBuilder {
           vk_pipeline_depth_stencil_state_create_info.stencilTestEnable = VK_TRUE;
           vk_pipeline_depth_stencil_state_create_info.front.compareOp = VK_COMPARE_OP_EQUAL;
           break;
+        case GPU_STENCIL_NEVER:
+          vk_pipeline_depth_stencil_state_create_info.stencilTestEnable = VK_TRUE;
+          vk_pipeline_depth_stencil_state_create_info.front.compareOp = VK_COMPARE_OP_NEVER;
+          break;
+        case GPU_STENCIL_LESS:
+          vk_pipeline_depth_stencil_state_create_info.stencilTestEnable = VK_TRUE;
+          vk_pipeline_depth_stencil_state_create_info.front.compareOp = VK_COMPARE_OP_LESS;
+          break;
+        case GPU_STENCIL_LEQUAL:
+          vk_pipeline_depth_stencil_state_create_info.stencilTestEnable = VK_TRUE;
+          vk_pipeline_depth_stencil_state_create_info.front.compareOp =
+              VK_COMPARE_OP_LESS_OR_EQUAL;
+          break;
+        case GPU_STENCIL_GREATER:
+          vk_pipeline_depth_stencil_state_create_info.stencilTestEnable = VK_TRUE;
+          vk_pipeline_depth_stencil_state_create_info.front.compareOp = VK_COMPARE_OP_GREATER;
+          break;
+        case GPU_STENCIL_GEQUAL:
+          vk_pipeline_depth_stencil_state_create_info.stencilTestEnable = VK_TRUE;
+          vk_pipeline_depth_stencil_state_create_info.front.compareOp =
+              VK_COMPARE_OP_GREATER_OR_EQUAL;
+          break;
         case GPU_STENCIL_ALWAYS:
           vk_pipeline_depth_stencil_state_create_info.stencilTestEnable = VK_TRUE;
           vk_pipeline_depth_stencil_state_create_info.front.compareOp = VK_COMPARE_OP_ALWAYS;
@@ -517,45 +539,79 @@ struct VKGraphicsPipelineCreateInfoBuilder {
           break;
       }
 
-      switch (shaders_info.state.stencil_op) {
-        case GPU_STENCIL_OP_REPLACE:
-          vk_pipeline_depth_stencil_state_create_info.front.failOp = VK_STENCIL_OP_KEEP;
-          vk_pipeline_depth_stencil_state_create_info.front.passOp = VK_STENCIL_OP_REPLACE;
-          vk_pipeline_depth_stencil_state_create_info.front.depthFailOp = VK_STENCIL_OP_KEEP;
-          vk_pipeline_depth_stencil_state_create_info.back =
-              vk_pipeline_depth_stencil_state_create_info.front;
-          break;
+      auto stencil_op_to_vk = [](const GPUStencilOpType operation) {
+        switch (operation) {
+          case GPU_STENCIL_OP_ZERO:
+            return VK_STENCIL_OP_ZERO;
+          case GPU_STENCIL_OP_REPLACE_VALUE:
+            return VK_STENCIL_OP_REPLACE;
+          case GPU_STENCIL_OP_INCREMENT_CLAMP:
+            return VK_STENCIL_OP_INCREMENT_AND_CLAMP;
+          case GPU_STENCIL_OP_DECREMENT_CLAMP:
+            return VK_STENCIL_OP_DECREMENT_AND_CLAMP;
+          case GPU_STENCIL_OP_INVERT:
+            return VK_STENCIL_OP_INVERT;
+          case GPU_STENCIL_OP_INCREMENT_WRAP:
+            return VK_STENCIL_OP_INCREMENT_AND_WRAP;
+          case GPU_STENCIL_OP_DECREMENT_WRAP:
+            return VK_STENCIL_OP_DECREMENT_AND_WRAP;
+          case GPU_STENCIL_OP_KEEP:
+          default:
+            return VK_STENCIL_OP_KEEP;
+        }
+      };
 
-        case GPU_STENCIL_OP_COUNT_DEPTH_PASS:
-          vk_pipeline_depth_stencil_state_create_info.front.failOp = VK_STENCIL_OP_KEEP;
-          vk_pipeline_depth_stencil_state_create_info.front.passOp =
-              VK_STENCIL_OP_DECREMENT_AND_WRAP;
-          vk_pipeline_depth_stencil_state_create_info.front.depthFailOp = VK_STENCIL_OP_KEEP;
-          vk_pipeline_depth_stencil_state_create_info.back =
-              vk_pipeline_depth_stencil_state_create_info.front;
-          vk_pipeline_depth_stencil_state_create_info.back.passOp =
-              VK_STENCIL_OP_INCREMENT_AND_WRAP;
-          break;
+      if (!GPU_stencil_op_is_custom(GPUStencilOp(shaders_info.state.stencil_op))) {
+        switch (shaders_info.state.stencil_op) {
+          case GPU_STENCIL_OP_REPLACE:
+            vk_pipeline_depth_stencil_state_create_info.front.failOp = VK_STENCIL_OP_KEEP;
+            vk_pipeline_depth_stencil_state_create_info.front.passOp = VK_STENCIL_OP_REPLACE;
+            vk_pipeline_depth_stencil_state_create_info.front.depthFailOp = VK_STENCIL_OP_KEEP;
+            vk_pipeline_depth_stencil_state_create_info.back =
+                vk_pipeline_depth_stencil_state_create_info.front;
+            break;
 
-        case GPU_STENCIL_OP_COUNT_DEPTH_FAIL:
-          vk_pipeline_depth_stencil_state_create_info.front.failOp = VK_STENCIL_OP_KEEP;
-          vk_pipeline_depth_stencil_state_create_info.front.passOp = VK_STENCIL_OP_KEEP;
-          vk_pipeline_depth_stencil_state_create_info.front.depthFailOp =
-              VK_STENCIL_OP_INCREMENT_AND_WRAP;
-          vk_pipeline_depth_stencil_state_create_info.back =
-              vk_pipeline_depth_stencil_state_create_info.front;
-          vk_pipeline_depth_stencil_state_create_info.back.depthFailOp =
-              VK_STENCIL_OP_DECREMENT_AND_WRAP;
-          break;
+          case GPU_STENCIL_OP_COUNT_DEPTH_PASS:
+            vk_pipeline_depth_stencil_state_create_info.front.failOp = VK_STENCIL_OP_KEEP;
+            vk_pipeline_depth_stencil_state_create_info.front.passOp =
+                VK_STENCIL_OP_DECREMENT_AND_WRAP;
+            vk_pipeline_depth_stencil_state_create_info.front.depthFailOp = VK_STENCIL_OP_KEEP;
+            vk_pipeline_depth_stencil_state_create_info.back =
+                vk_pipeline_depth_stencil_state_create_info.front;
+            vk_pipeline_depth_stencil_state_create_info.back.passOp =
+                VK_STENCIL_OP_INCREMENT_AND_WRAP;
+            break;
 
-        case GPU_STENCIL_OP_NONE:
-        default:
-          vk_pipeline_depth_stencil_state_create_info.front.failOp = VK_STENCIL_OP_KEEP;
-          vk_pipeline_depth_stencil_state_create_info.front.passOp = VK_STENCIL_OP_KEEP;
-          vk_pipeline_depth_stencil_state_create_info.front.depthFailOp = VK_STENCIL_OP_KEEP;
-          vk_pipeline_depth_stencil_state_create_info.back =
-              vk_pipeline_depth_stencil_state_create_info.front;
-          break;
+          case GPU_STENCIL_OP_COUNT_DEPTH_FAIL:
+            vk_pipeline_depth_stencil_state_create_info.front.failOp = VK_STENCIL_OP_KEEP;
+            vk_pipeline_depth_stencil_state_create_info.front.passOp = VK_STENCIL_OP_KEEP;
+            vk_pipeline_depth_stencil_state_create_info.front.depthFailOp =
+                VK_STENCIL_OP_INCREMENT_AND_WRAP;
+            vk_pipeline_depth_stencil_state_create_info.back =
+                vk_pipeline_depth_stencil_state_create_info.front;
+            vk_pipeline_depth_stencil_state_create_info.back.depthFailOp =
+                VK_STENCIL_OP_DECREMENT_AND_WRAP;
+            break;
+
+          default:
+            vk_pipeline_depth_stencil_state_create_info.front.failOp = VK_STENCIL_OP_KEEP;
+            vk_pipeline_depth_stencil_state_create_info.front.passOp = VK_STENCIL_OP_KEEP;
+            vk_pipeline_depth_stencil_state_create_info.front.depthFailOp = VK_STENCIL_OP_KEEP;
+            vk_pipeline_depth_stencil_state_create_info.back =
+                vk_pipeline_depth_stencil_state_create_info.front;
+            break;
+        }
+      }
+      else {
+        const GPUStencilOp stencil_op = GPUStencilOp(shaders_info.state.stencil_op);
+        vk_pipeline_depth_stencil_state_create_info.front.failOp = stencil_op_to_vk(
+            GPU_stencil_op_stencil_fail(stencil_op));
+        vk_pipeline_depth_stencil_state_create_info.front.depthFailOp = stencil_op_to_vk(
+            GPU_stencil_op_depth_fail(stencil_op));
+        vk_pipeline_depth_stencil_state_create_info.front.passOp = stencil_op_to_vk(
+            GPU_stencil_op_depth_pass(stencil_op));
+        vk_pipeline_depth_stencil_state_create_info.back =
+            vk_pipeline_depth_stencil_state_create_info.front;
       }
     }
   }

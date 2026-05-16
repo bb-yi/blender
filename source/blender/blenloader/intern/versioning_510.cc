@@ -1186,6 +1186,22 @@ void blo_do_versions_510(FileData *fd, Library * /*lib*/, Main *bmain)
     }
   }
 
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 48)) {
+    if (!DNA_struct_member_exists(fd->filesdna, "Material", "char", "stencil_enabled")) {
+      for (Material &mat : bmain->materials) {
+        mat.stencil_enabled = false;
+        mat.stencil_reference = 0;
+        mat.stencil_read_mask = 15;
+        mat.stencil_write_mask = 15;
+        mat.stencil_test = MA_STENCIL_ALWAYS;
+        mat.stencil_pass_op = MA_STENCIL_OP_KEEP;
+        mat.stencil_fail_op = MA_STENCIL_OP_KEEP;
+        mat.stencil_zfail_op = MA_STENCIL_OP_KEEP;
+        mat.stencil_order = 0;
+      }
+    }
+  }
+
   /**
    * Always bump subversion in BKE_blender_version.h when adding versioning
    * code here, and wrap it inside a MAIN_VERSION_FILE_ATLEAST check.

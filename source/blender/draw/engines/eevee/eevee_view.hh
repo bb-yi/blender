@@ -82,6 +82,9 @@ class ShadingView {
  private:
   void render_transparent_pass(RenderBuffers &rbufs);
 
+  bool is_stencil_value_preview() const;
+  void render_stencil_value_preview();
+
   gpu::Texture *render_postfx(gpu::Texture *input_tx);
 
   void update_view();

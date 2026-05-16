@@ -30,6 +30,58 @@ static CLG_LogRef LOG = {"gpu.vulkan"};
 
 namespace gpu {
 
+static void gpu_stencil_op_to_string(std::stringstream &result, const GPUStencilOp operation)
+{
+  if (!GPU_stencil_op_is_custom(operation)) {
+    switch (operation) {
+      case GPU_STENCIL_OP_REPLACE:
+        result << "GPU_STENCIL_OP_REPLACE";
+        return;
+      case GPU_STENCIL_OP_COUNT_DEPTH_PASS:
+        result << "GPU_STENCIL_OP_COUNT_DEPTH_PASS";
+        return;
+      case GPU_STENCIL_OP_COUNT_DEPTH_FAIL:
+        result << "GPU_STENCIL_OP_COUNT_DEPTH_FAIL";
+        return;
+      case GPU_STENCIL_OP_NONE:
+        result << "GPU_STENCIL_OP_NONE";
+        return;
+      default:
+        BLI_assert_unreachable();
+        result << "GPU_STENCIL_OP_NONE";
+        return;
+    }
+  }
+
+  result << "GPU_stencil_op_create(";
+  auto op_to_string = [](const GPUStencilOpType operation) {
+    switch (operation) {
+      case GPU_STENCIL_OP_KEEP:
+        return "GPU_STENCIL_OP_KEEP";
+      case GPU_STENCIL_OP_ZERO:
+        return "GPU_STENCIL_OP_ZERO";
+      case GPU_STENCIL_OP_REPLACE_VALUE:
+        return "GPU_STENCIL_OP_REPLACE_VALUE";
+      case GPU_STENCIL_OP_INCREMENT_CLAMP:
+        return "GPU_STENCIL_OP_INCREMENT_CLAMP";
+      case GPU_STENCIL_OP_DECREMENT_CLAMP:
+        return "GPU_STENCIL_OP_DECREMENT_CLAMP";
+      case GPU_STENCIL_OP_INVERT:
+        return "GPU_STENCIL_OP_INVERT";
+      case GPU_STENCIL_OP_INCREMENT_WRAP:
+        return "GPU_STENCIL_OP_INCREMENT_WRAP";
+      case GPU_STENCIL_OP_DECREMENT_WRAP:
+        return "GPU_STENCIL_OP_DECREMENT_WRAP";
+      default:
+        BLI_assert_unreachable();
+        return "GPU_STENCIL_OP_KEEP";
+    }
+  };
+  result << op_to_string(GPU_stencil_op_stencil_fail(operation)) << ", ";
+  result << op_to_string(GPU_stencil_op_depth_fail(operation)) << ", ";
+  result << op_to_string(GPU_stencil_op_depth_pass(operation)) << ")";
+}
+
 void VKPipelinePool::init()
 {
   VKDevice &device = VKBackend::get().device;
@@ -422,33 +474,33 @@ std::string VKGraphicsInfo::pipeline_info_source() const
     case GPU_STENCIL_ALWAYS:
       result << "GPU_STENCIL_ALWAYS";
       break;
+    case GPU_STENCIL_NEVER:
+      result << "GPU_STENCIL_NEVER";
+      break;
     case GPU_STENCIL_EQUAL:
       result << "GPU_STENCIL_EQUAL";
       break;
     case GPU_STENCIL_NEQUAL:
       result << "GPU_STENCIL_NEQUAL";
       break;
+    case GPU_STENCIL_LESS:
+      result << "GPU_STENCIL_LESS";
+      break;
+    case GPU_STENCIL_LEQUAL:
+      result << "GPU_STENCIL_LEQUAL";
+      break;
+    case GPU_STENCIL_GREATER:
+      result << "GPU_STENCIL_GREATER";
+      break;
+    case GPU_STENCIL_GEQUAL:
+      result << "GPU_STENCIL_GEQUAL";
+      break;
     default:
       BLI_assert_unreachable();
   }
   /* Stencil operation */
   result << ",\n         ";
-  switch (shaders.state.stencil_op) {
-    case GPU_STENCIL_OP_NONE:
-      result << "GPU_STENCIL_OP_NONE";
-      break;
-    case GPU_STENCIL_OP_REPLACE:
-      result << "GPU_STENCIL_OP_REPLACE";
-      break;
-    case GPU_STENCIL_OP_COUNT_DEPTH_PASS:
-      result << "GPU_STENCIL_OP_COUNT_DEPTH_PASS";
-      break;
-    case GPU_STENCIL_OP_COUNT_DEPTH_FAIL:
-      result << "GPU_STENCIL_OP_COUNT_DEPTH_FAIL";
-      break;
-    default:
-      BLI_assert_unreachable();
-  }
+  gpu_stencil_op_to_string(result, GPUStencilOp(shaders.state.stencil_op));
   /* Provoking vertex */
   result << ",\n         ";
   switch (shaders.state.provoking_vert) {

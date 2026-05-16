@@ -55,6 +55,8 @@ struct RecordingState {
   bool front_facing = true;
   bool inverted_view = false;
   DRWState pipeline_state = DRW_STATE_NO_DRAW;
+  GPUStencilTest stencil_test = GPU_STENCIL_NONE;
+  GPUStencilOp stencil_op = GPU_STENCIL_OP_NONE;
   int clip_plane_count = 0;
   /** Used for pass simple resource ID. Starts at 1 as 0 is the identity handle. */
   int instance_offset = 1;
@@ -118,6 +120,8 @@ enum class Type : uint8_t {
   SubPassTransition,
   StateSet,
   StencilSet,
+  StencilTestSet,
+  StencilOpSet,
 
   /** Special commands stored in separate buffers. */
   SubPass,
@@ -489,6 +493,20 @@ struct StencilSet {
   std::string serialize() const;
 };
 
+struct StencilTestSet {
+  GPUStencilTest test;
+
+  void execute(RecordingState &state) const;
+  std::string serialize() const;
+};
+
+struct StencilOpSet {
+  GPUStencilOp operation;
+
+  void execute(RecordingState &state) const;
+  std::string serialize() const;
+};
+
 union Undetermined {
   ShaderBind shader_bind;
   ResourceBind resource_bind;
@@ -506,6 +524,8 @@ union Undetermined {
   ClearMulti clear_multi;
   StateSet state_set;
   StencilSet stencil_set;
+  StencilTestSet stencil_test_set;
+  StencilOpSet stencil_op_set;
 };
 
 /** Try to keep the command size as low as possible for performance. */

@@ -32,6 +32,41 @@ namespace blender::eevee
 
   void ShadingView::init() {}
 
+  bool ShadingView::is_stencil_value_preview() const
+  {
+    return inst_.is_viewport() && inst_.v3d != nullptr &&
+           inst_.v3d->shading.render_pass == EEVEE_RENDER_PASS_STENCIL_VALUE;
+  }
+
+  void ShadingView::render_stencil_value_preview()
+  {
+    GPU_framebuffer_bind(combined_fb_);
+
+    PassSimple pass("StencilValuePreview");
+    pass.framebuffer_set(&combined_fb_);
+    pass.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_STENCIL_EQUAL);
+    pass.shader_set(inst_.shaders.static_shader_get(STENCIL_VALUE_VISUALIZE));
+
+    for (int stencil_value = 0; stencil_value < 16; stencil_value++) {
+      PassSimple::Sub &sub = pass.sub("Value");
+      sub.state_stencil(0x0u, uint8_t(stencil_value), EEVEE_STENCIL_USER_MASK);
+      sub.push_constant("stencil_value", stencil_value);
+      sub.push_constant("is_background", false);
+      sub.draw_procedural(GPU_PRIM_TRIS, 1, 3);
+    }
+
+    PassSimple::Sub &background_sub = pass.sub("Background");
+    background_sub.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_STENCIL_EQUAL |
+                             DRW_STATE_DEPTH_EQUAL | DRW_STATE_CLIP_CONTROL_UNIT_RANGE);
+    background_sub.state_stencil(0x0u, 0x0u, EEVEE_STENCIL_USER_MASK);
+    background_sub.push_constant("stencil_value", 0);
+    background_sub.push_constant("is_background", true);
+    background_sub.draw_procedural(GPU_PRIM_TRIS, 1, 3);
+
+    inst_.manager->submit(pass, render_view_);
+    GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH);
+  }
+
   void ShadingView::sync()
   {
     int2 render_extent = inst_.film.render_extent_get();
@@ -244,15 +279,21 @@ namespace blender::eevee
     inst_.sphere_probes.viewport_draw(render_view_, combined_fb_);
     inst_.planar_probes.viewport_draw(render_view_, combined_fb_);
 
-    gpu::Texture* postfx_input_tx = rbufs.combined_tx;
-    if (inst_.filter_materials.has_stage_entries(SCE_EEVEE_FILTER_STAGE_BEFORE_POSTFX))
+    gpu::Texture* combined_final_tx = rbufs.combined_tx;
+    if (is_stencil_value_preview()) {
+      render_stencil_value_preview();
+    }
+    else if (inst_.filter_materials.has_stage_entries(SCE_EEVEE_FILTER_STAGE_BEFORE_POSTFX))
     {
       ScopedTelemetrySample telemetry_sample(inst_.telemetry,
         TelemetryStageId::MainFilterBeforePostFX);
-      postfx_input_tx = inst_.filter_materials.render_stage(
+      gpu::Texture* postfx_input_tx = inst_.filter_materials.render_stage(
         render_view_, rbufs.combined_tx, extent_, SCE_EEVEE_FILTER_STAGE_BEFORE_POSTFX);
+      combined_final_tx = render_postfx(postfx_input_tx);
     }
-    gpu::Texture* combined_final_tx = render_postfx(postfx_input_tx);
+    else {
+      combined_final_tx = render_postfx(rbufs.combined_tx);
+    }
     {
       ScopedTelemetrySample telemetry_sample(inst_.telemetry,
         TelemetryStageId::MainFilmAccumulate);

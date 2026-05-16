@@ -299,7 +299,12 @@ void StateSet::execute(RecordingState &recording_state) const
   bool state_changed = assign_if_different(recording_state.pipeline_state, new_state);
   bool clip_changed = assign_if_different(recording_state.clip_plane_count, clip_plane_count);
 
-  if (!state_changed && !clip_changed) {
+  const GPUStencilTest stencil_test = to_stencil_test(new_state);
+  const GPUStencilOp stencil_op = to_stencil_op(new_state);
+  bool stencil_test_changed = assign_if_different(recording_state.stencil_test, stencil_test);
+  bool stencil_op_changed = assign_if_different(recording_state.stencil_op, stencil_op);
+
+  if (!state_changed && !clip_changed && !stencil_test_changed && !stencil_op_changed) {
     return;
   }
 
@@ -307,8 +312,8 @@ void StateSet::execute(RecordingState &recording_state) const
                 to_blend(new_state),
                 to_face_cull_test(new_state),
                 to_depth_test(new_state),
-                to_stencil_test(new_state),
-                to_stencil_op(new_state),
+                stencil_test,
+                stencil_op,
                 to_provoking_vertex(new_state));
 
   if (new_state & DRW_STATE_CLIP_CONTROL_UNIT_RANGE) {
@@ -352,6 +357,20 @@ void StencilSet::execute() const
   GPU_stencil_write_mask_set(write_mask);
   GPU_stencil_compare_mask_set(compare_mask);
   GPU_stencil_reference_set(reference);
+}
+
+void StencilTestSet::execute(RecordingState &state) const
+{
+  if (assign_if_different(state.stencil_test, test)) {
+    GPU_stencil_test(test);
+  }
+}
+
+void StencilOpSet::execute(RecordingState &state) const
+{
+  if (assign_if_different(state.stencil_op, operation)) {
+    GPU_stencil_operation_set(operation);
+  }
 }
 
 /** \} */
@@ -687,6 +706,20 @@ std::string StencilSet::serialize() const
   std::stringstream ss;
   ss << ".stencil_set(write_mask=0b" << std::bitset<8>(write_mask) << ", reference=0b"
      << std::bitset<8>(reference) << ", compare_mask=0b" << std::bitset<8>(compare_mask) << ")";
+  return ss.str();
+}
+
+std::string StencilTestSet::serialize() const
+{
+  return ".stencil_test_set(" + std::to_string(test) + ")";
+}
+
+std::string StencilOpSet::serialize() const
+{
+  std::stringstream ss;
+  ss << ".stencil_op_set(fail=" << GPU_stencil_op_stencil_fail(operation)
+     << ", zfail=" << GPU_stencil_op_depth_fail(operation)
+     << ", pass=" << GPU_stencil_op_depth_pass(operation) << ")";
   return ss.str();
 }
 

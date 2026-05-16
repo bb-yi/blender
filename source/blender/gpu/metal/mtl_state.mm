@@ -186,10 +186,20 @@ static MTLCompareFunction gpu_stencil_func_to_metal(GPUStencilTest stencil_func)
   switch (stencil_func) {
     case GPU_STENCIL_NONE:
       return MTLCompareFunctionAlways;
+    case GPU_STENCIL_NEVER:
+      return MTLCompareFunctionNever;
     case GPU_STENCIL_EQUAL:
       return MTLCompareFunctionEqual;
     case GPU_STENCIL_NEQUAL:
       return MTLCompareFunctionNotEqual;
+    case GPU_STENCIL_LESS:
+      return MTLCompareFunctionLess;
+    case GPU_STENCIL_LEQUAL:
+      return MTLCompareFunctionLessEqual;
+    case GPU_STENCIL_GREATER:
+      return MTLCompareFunctionGreater;
+    case GPU_STENCIL_GEQUAL:
+      return MTLCompareFunctionGreaterEqual;
     case GPU_STENCIL_ALWAYS:
       return MTLCompareFunctionAlways;
     default:
@@ -208,6 +218,29 @@ void MTLStateManager::set_depth_test(const GPUDepthTest value)
   ds_state.depth_test_enabled = (value != GPU_DEPTH_NONE);
   ds_state.depth_function = gpu_depth_function_to_metal(value);
   pipeline_state.dirty_flags |= MTL_PIPELINE_STATE_DEPTHSTENCIL_FLAG;
+}
+
+static MTLStencilOperation gpu_stencil_op_to_metal(const GPUStencilOpType operation)
+{
+  switch (operation) {
+    case GPU_STENCIL_OP_ZERO:
+      return MTLStencilOperationZero;
+    case GPU_STENCIL_OP_REPLACE_VALUE:
+      return MTLStencilOperationReplace;
+    case GPU_STENCIL_OP_INCREMENT_CLAMP:
+      return MTLStencilOperationIncrementClamp;
+    case GPU_STENCIL_OP_DECREMENT_CLAMP:
+      return MTLStencilOperationDecrementClamp;
+    case GPU_STENCIL_OP_INVERT:
+      return MTLStencilOperationInvert;
+    case GPU_STENCIL_OP_INCREMENT_WRAP:
+      return MTLStencilOperationIncrementWrap;
+    case GPU_STENCIL_OP_DECREMENT_WRAP:
+      return MTLStencilOperationDecrementWrap;
+    case GPU_STENCIL_OP_KEEP:
+    default:
+      return MTLStencilOperationKeep;
+  }
 }
 
 void MTLStateManager::mtl_stencil_mask(uint mask)
@@ -267,39 +300,47 @@ static void mtl_stencil_set_op(MTLContext *context,
 
 void MTLStateManager::set_stencil_test(const GPUStencilTest test, const GPUStencilOp operation)
 {
-  switch (operation) {
-    case GPU_STENCIL_OP_REPLACE:
-      mtl_stencil_set_op(
-          context_, MTLStencilOperationKeep, MTLStencilOperationKeep, MTLStencilOperationReplace);
-      break;
-    case GPU_STENCIL_OP_COUNT_DEPTH_PASS:
-      mtl_stencil_set_op_separate(context_,
-                                  GPU_CULL_BACK,
-                                  MTLStencilOperationKeep,
-                                  MTLStencilOperationKeep,
-                                  MTLStencilOperationIncrementWrap);
-      mtl_stencil_set_op_separate(context_,
-                                  GPU_CULL_FRONT,
-                                  MTLStencilOperationKeep,
-                                  MTLStencilOperationKeep,
-                                  MTLStencilOperationDecrementWrap);
-      break;
-    case GPU_STENCIL_OP_COUNT_DEPTH_FAIL:
-      mtl_stencil_set_op_separate(context_,
-                                  GPU_CULL_BACK,
-                                  MTLStencilOperationKeep,
-                                  MTLStencilOperationDecrementWrap,
-                                  MTLStencilOperationKeep);
-      mtl_stencil_set_op_separate(context_,
-                                  GPU_CULL_FRONT,
-                                  MTLStencilOperationKeep,
-                                  MTLStencilOperationIncrementWrap,
-                                  MTLStencilOperationKeep);
-      break;
-    case GPU_STENCIL_OP_NONE:
-    default:
-      mtl_stencil_set_op(
-          context_, MTLStencilOperationKeep, MTLStencilOperationKeep, MTLStencilOperationKeep);
+  if (!GPU_stencil_op_is_custom(operation)) {
+    switch (operation) {
+      case GPU_STENCIL_OP_REPLACE:
+        mtl_stencil_set_op(
+            context_, MTLStencilOperationKeep, MTLStencilOperationKeep, MTLStencilOperationReplace);
+        break;
+      case GPU_STENCIL_OP_COUNT_DEPTH_PASS:
+        mtl_stencil_set_op_separate(context_,
+                                    GPU_CULL_BACK,
+                                    MTLStencilOperationKeep,
+                                    MTLStencilOperationKeep,
+                                    MTLStencilOperationIncrementWrap);
+        mtl_stencil_set_op_separate(context_,
+                                    GPU_CULL_FRONT,
+                                    MTLStencilOperationKeep,
+                                    MTLStencilOperationKeep,
+                                    MTLStencilOperationDecrementWrap);
+        break;
+      case GPU_STENCIL_OP_COUNT_DEPTH_FAIL:
+        mtl_stencil_set_op_separate(context_,
+                                    GPU_CULL_BACK,
+                                    MTLStencilOperationKeep,
+                                    MTLStencilOperationDecrementWrap,
+                                    MTLStencilOperationKeep);
+        mtl_stencil_set_op_separate(context_,
+                                    GPU_CULL_FRONT,
+                                    MTLStencilOperationKeep,
+                                    MTLStencilOperationIncrementWrap,
+                                    MTLStencilOperationKeep);
+        break;
+      default:
+        mtl_stencil_set_op(
+            context_, MTLStencilOperationKeep, MTLStencilOperationKeep, MTLStencilOperationKeep);
+        break;
+    }
+  }
+  else {
+    mtl_stencil_set_op(context_,
+                       gpu_stencil_op_to_metal(GPU_stencil_op_stencil_fail(operation)),
+                       gpu_stencil_op_to_metal(GPU_stencil_op_depth_fail(operation)),
+                       gpu_stencil_op_to_metal(GPU_stencil_op_depth_pass(operation)));
   }
 
   BLI_assert(context_);

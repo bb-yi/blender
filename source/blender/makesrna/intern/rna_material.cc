@@ -1004,6 +1004,76 @@ void RNA_def_material(BlenderRNA *brna)
       {MA_SURFACE_CULL_FRONT, "FRONT", 0, "Front", "Hide front-facing faces"},
       {0, nullptr, 0, nullptr, nullptr},
   };
+  static const EnumPropertyItem prop_eevee_stencil_test_items[] = {
+      {MA_STENCIL_ALWAYS, "ALWAYS", 0, "Always", "Always pass the stencil test"},
+      {MA_STENCIL_NEVER, "NEVER", 0, "Never", "Never pass the stencil test"},
+      {MA_STENCIL_EQUAL,
+       "EQUAL",
+       0,
+       "Equal",
+       "Pass when the masked stencil value equals the masked reference value"},
+      {MA_STENCIL_NOT_EQUAL,
+       "NOT_EQUAL",
+       0,
+       "Not Equal",
+       "Pass when the masked stencil value differs from the masked reference value"},
+      {MA_STENCIL_LESS,
+       "LESS",
+       0,
+       "Less",
+       "Pass when the masked stencil value is less than the masked reference value"},
+      {MA_STENCIL_LESS_EQUAL,
+       "LESS_EQUAL",
+       0,
+       "Less Equal",
+       "Pass when the masked stencil value is less than or equal to the masked reference value"},
+      {MA_STENCIL_GREATER,
+       "GREATER",
+       0,
+       "Greater",
+       "Pass when the masked stencil value is greater than the masked reference value"},
+      {MA_STENCIL_GREATER_EQUAL,
+       "GREATER_EQUAL",
+       0,
+       "Greater Equal",
+       "Pass when the masked stencil value is greater than or equal to the masked reference value"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  static const EnumPropertyItem prop_eevee_stencil_op_items[] = {
+      {MA_STENCIL_OP_KEEP, "KEEP", 0, "Keep", "Keep the current stencil value"},
+      {MA_STENCIL_OP_ZERO, "ZERO", 0, "Zero", "Write zero to the masked stencil bits"},
+      {MA_STENCIL_OP_REPLACE,
+       "REPLACE",
+       0,
+       "Replace",
+       "Replace the masked stencil bits with the reference value"},
+      {MA_STENCIL_OP_INCREMENT_CLAMP,
+       "INCREMENT_CLAMP",
+       0,
+       "Increment Clamp",
+       "Increment the masked stencil value and clamp to its maximum"},
+      {MA_STENCIL_OP_DECREMENT_CLAMP,
+       "DECREMENT_CLAMP",
+       0,
+       "Decrement Clamp",
+       "Decrement the masked stencil value and clamp to zero"},
+      {MA_STENCIL_OP_INVERT,
+       "INVERT",
+       0,
+       "Invert",
+       "Invert the masked stencil bits"},
+      {MA_STENCIL_OP_INCREMENT_WRAP,
+       "INCREMENT_WRAP",
+       0,
+       "Increment Wrap",
+       "Increment the masked stencil value and wrap at its maximum"},
+      {MA_STENCIL_OP_DECREMENT_WRAP,
+       "DECREMENT_WRAP",
+       0,
+       "Decrement Wrap",
+       "Decrement the masked stencil value and wrap at zero"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
 
   static const EnumPropertyItem prop_eevee_ztest_mode_items[] = {
       {MA_ZTEST_LESS, "LESS", 0, "Less", "Pass when the material depth is less than the stored depth"},
@@ -1179,6 +1249,79 @@ void RNA_def_material(BlenderRNA *brna)
       "Light Probe Volume Backface Culling",
       "Consider material single sided for light probe volume capture. "
       "Additionally helps rejecting probes inside the object to avoid light leaks.");
+  RNA_def_property_update(prop, 0, "rna_Material_draw_update");
+
+  prop = RNA_def_property(srna, "use_stencil", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "stencil_enabled", 1);
+  RNA_def_property_ui_text(prop, "Stencil", "Enable Eevee material stencil test and write state");
+  RNA_def_property_update(prop, 0, "rna_Material_draw_update");
+
+  prop = RNA_def_property(srna, "stencil_order", PROP_INT, PROP_NONE);
+  RNA_def_property_int_sdna(prop, nullptr, "stencil_order");
+  RNA_def_property_range(prop, -100, 100);
+  RNA_def_property_ui_text(
+      prop, "Stencil Order", "Order used when submitting Eevee material stencil writers");
+  RNA_def_property_update(prop, 0, "rna_Material_draw_update");
+
+  prop = RNA_def_property(srna, "stencil_reference", PROP_INT, PROP_UNSIGNED);
+  RNA_def_property_int_sdna(prop, nullptr, "stencil_reference");
+  RNA_def_property_range(prop, 0, 15);
+  RNA_def_property_ui_text(prop, "Stencil Reference", "User stencil reference value in the range 0 to 15");
+  RNA_def_property_update(prop, 0, "rna_Material_draw_update");
+
+  prop = RNA_def_property(srna, "stencil_read_mask", PROP_INT, PROP_UNSIGNED);
+  RNA_def_property_int_sdna(prop, nullptr, "stencil_read_mask");
+  RNA_def_property_range(prop, 0, 15);
+  RNA_def_property_ui_text(prop,
+                           "Stencil Read Mask",
+                           "User stencil bit mask used when comparing, in the range 0 to 15");
+  RNA_def_property_update(prop, 0, "rna_Material_draw_update");
+
+  prop = RNA_def_property(srna, "stencil_read_mask_bits", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_bitset_array_sdna(prop, nullptr, "stencil_read_mask", 1 << 0, 4);
+  RNA_def_property_ui_text(prop, "Stencil Read Mask Bits", "User stencil bits used when comparing");
+  RNA_def_property_update(prop, 0, "rna_Material_draw_update");
+
+  prop = RNA_def_property(srna, "stencil_write_mask", PROP_INT, PROP_UNSIGNED);
+  RNA_def_property_int_sdna(prop, nullptr, "stencil_write_mask");
+  RNA_def_property_range(prop, 0, 15);
+  RNA_def_property_ui_text(prop,
+                           "Stencil Write Mask",
+                           "User stencil bit mask used when replacing, in the range 0 to 15");
+  RNA_def_property_update(prop, 0, "rna_Material_draw_update");
+
+  prop = RNA_def_property(srna, "stencil_write_mask_bits", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_bitset_array_sdna(prop, nullptr, "stencil_write_mask", 1 << 0, 4);
+  RNA_def_property_ui_text(prop, "Stencil Write Mask Bits", "User stencil bits used when writing");
+  RNA_def_property_update(prop, 0, "rna_Material_draw_update");
+
+  prop = RNA_def_property(srna, "stencil_test", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "stencil_test");
+  RNA_def_property_enum_items(prop, prop_eevee_stencil_test_items);
+  RNA_def_property_ui_text(prop, "Stencil Test", "Comparison used by the material stencil test");
+  RNA_def_property_update(prop, 0, "rna_Material_draw_update");
+
+  prop = RNA_def_property(srna, "stencil_pass_op", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "stencil_pass_op");
+  RNA_def_property_enum_items(prop, prop_eevee_stencil_op_items);
+  RNA_def_property_ui_text(
+      prop, "Stencil Pass", "Operation applied to user stencil bits when the draw passes");
+  RNA_def_property_update(prop, 0, "rna_Material_draw_update");
+
+  prop = RNA_def_property(srna, "stencil_fail_op", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "stencil_fail_op");
+  RNA_def_property_enum_items(prop, prop_eevee_stencil_op_items);
+  RNA_def_property_ui_text(
+      prop, "Stencil Fail", "Operation applied to user stencil bits when the stencil test fails");
+  RNA_def_property_update(prop, 0, "rna_Material_draw_update");
+
+  prop = RNA_def_property(srna, "stencil_zfail_op", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "stencil_zfail_op");
+  RNA_def_property_enum_items(prop, prop_eevee_stencil_op_items);
+  RNA_def_property_ui_text(prop,
+                           "Stencil ZFail",
+                           "Operation applied to user stencil bits when the stencil test passes "
+                           "but the depth test fails");
   RNA_def_property_update(prop, 0, "rna_Material_draw_update");
 
   prop = RNA_def_property(srna, "use_transparent_shadow", PROP_BOOLEAN, PROP_NONE);

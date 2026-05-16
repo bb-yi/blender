@@ -31,9 +31,9 @@ union GPUState {
     /** GPUDepthTest */
     uint32_t depth_test : 3;
     /** GPUStencilTest */
-    uint32_t stencil_test : 3;
+    uint32_t stencil_test : 4;
     /** GPUStencilOp */
-    uint32_t stencil_op : 3;
+    uint32_t stencil_op : 13;
     /** GPUProvokingVertex */
     uint32_t provoking_vert : 1;
     /** Enable bits. */

@@ -171,6 +171,12 @@ def material_npr_tree(material):
     return getattr(output, "nprtree", None)
 
 
+def draw_stencil_mask_bits(layout, mat, label, mask_property):
+    row = layout.row(heading=label, align=True)
+    for bit in reversed(range(4)):
+        row.prop(mat, mask_property, index=bit, text=str(bit), toggle=True)
+
+
 class EEVEE_MATERIAL_PT_surface(MaterialButtonsPanel, Panel):
     bl_label = "Surface"
     bl_context = "material"
@@ -263,6 +269,14 @@ def draw_material_surface_settings(layout, mat, is_eevee=True):
     col = layout.column()
     col.prop(mat, "ztest_mode", text="ZTest")
 
+    if is_eevee:
+        header, panel = layout.panel("material_surface_stencil_settings", default_closed=True)
+        header.label(text="Stencil")
+        if panel:
+            panel.use_property_split = True
+            panel.use_property_decorate = False
+            draw_material_stencil_settings(panel, mat)
+
     col = layout.column(align=True)
 
     if is_eevee:
@@ -291,6 +305,20 @@ def draw_material_surface_settings(layout, mat, is_eevee=True):
     col.prop(mat, "thickness_mode", text="Thickness")
     if mat.surface_render_method == 'DITHERED':
         col.prop(mat, "use_thickness_from_shadow", text="From Shadow")
+
+
+def draw_material_stencil_settings(layout, mat):
+    layout.prop(mat, "use_stencil", text="Enabled")
+    sub = layout.column(align=True)
+    sub.active = mat.use_stencil
+    sub.prop(mat, "stencil_order", text="Order")
+    sub.prop(mat, "stencil_reference", text="Reference")
+    draw_stencil_mask_bits(sub, mat, "Read Mask", "stencil_read_mask_bits")
+    draw_stencil_mask_bits(sub, mat, "Write Mask", "stencil_write_mask_bits")
+    sub.prop(mat, "stencil_test", text="Test")
+    sub.prop(mat, "stencil_pass_op", text="Pass")
+    sub.prop(mat, "stencil_fail_op", text="Fail")
+    sub.prop(mat, "stencil_zfail_op", text="ZFail")
 
 
 def draw_material_volume_settings(layout, mat, is_eevee=True):

@@ -254,6 +254,7 @@ static inline bool pipeline_uses_material_ztest(eMaterialPipeline pipeline_type)
 struct MaterialKey {
   blender::Material *mat;
   uint64_t options;
+  short stencil_order;
 
   MaterialKey(blender::Material *mat_,
               eMaterialGeometry geometry,
@@ -276,16 +277,26 @@ struct MaterialKey {
     options = (options << 1) | (visibility_flags & OB_HIDE_PROBE_CUBEMAP ? 0 : 1);
     options = (options << 1) | (visibility_flags & OB_HIDE_PROBE_PLANAR ? 0 : 1);
     options = (options << 16) | uint16_t(refraction_layer);
+    const uint64_t stencil_enabled = mat_->stencil_enabled != 0;
+    stencil_order = stencil_enabled ? mat_->stencil_order : 0;
+    options = (options << 1) | stencil_enabled;
+    options = (options << 4) | (stencil_enabled ? uint64_t(mat_->stencil_reference & 0x0F) : 0);
+    options = (options << 4) | (stencil_enabled ? uint64_t(mat_->stencil_read_mask & 0x0F) : 0);
+    options = (options << 4) | (stencil_enabled ? uint64_t(mat_->stencil_write_mask & 0x0F) : 0);
+    options = (options << 3) | (stencil_enabled ? uint64_t(mat_->stencil_test & 0x07) : 0);
+    options = (options << 3) | (stencil_enabled ? uint64_t(mat_->stencil_pass_op & 0x07) : 0);
+    options = (options << 3) | (stencil_enabled ? uint64_t(mat_->stencil_fail_op & 0x07) : 0);
+    options = (options << 3) | (stencil_enabled ? uint64_t(mat_->stencil_zfail_op & 0x07) : 0);
   }
 
   uint64_t hash() const
   {
-    return uint64_t(mat) + options;
+    return uint64_t(mat) + options + (uint64_t(uint16_t(stencil_order)) << 48);
   }
 
   bool operator==(const MaterialKey &k) const
   {
-    return (mat == k.mat) && (options == k.options);
+    return (mat == k.mat) && (options == k.options) && (stencil_order == k.stencil_order);
   }
 };
 
@@ -357,6 +368,7 @@ struct Material {
   MaterialPass shading;
   MaterialPass npr;
   MaterialPass prepass;
+  MaterialPass stencil;
   MaterialPass overlap_masking;
   MaterialPass outline_occlusion;
   MaterialPass capture;

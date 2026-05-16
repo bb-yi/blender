@@ -56,6 +56,8 @@ enum eViewLayerEEVEEPassType {
   EEVEE_RENDER_PASS_TRANSPARENT = (1 << 20),
   EEVEE_RENDER_PASS_POSITION = (1 << 21),
   EEVEE_RENDER_PASS_OUTLINE = (1 << 22),
+  /** Viewport-only debug display. Not stored in #ViewLayerEEVEE.render_passes. */
+  EEVEE_RENDER_PASS_STENCIL_VALUE = (1 << 29),
 };
 #define EEVEE_RENDER_PASS_MAX_BIT 22
 ENUM_OPERATORS(eViewLayerEEVEEPassType)
