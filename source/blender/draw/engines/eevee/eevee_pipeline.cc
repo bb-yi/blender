@@ -29,6 +29,11 @@ static eMaterialCullMethod material_surface_cull_method(const blender::Material 
                                MA_SURFACE_CULL_NONE;
 }
 
+static float material_stencil_order(const blender::Material *material)
+{
+  return material != nullptr ? float(material->stencil_order) : 0.0f;
+}
+
 static DRWState material_surface_cull_state(const eMaterialCullMethod cull_method)
 {
   switch (cull_method) {
@@ -57,6 +62,132 @@ static PassType *material_surface_cull_pass_get(PassType *double_sided_ps,
     default:
       return double_sided_ps;
   }
+}
+
+static DRWState material_stencil_drw_test_state(GPUStencilTest test)
+{
+  switch (test) {
+    case GPU_STENCIL_ALWAYS:
+      return DRW_STATE_STENCIL_ALWAYS;
+    case GPU_STENCIL_EQUAL:
+      return DRW_STATE_STENCIL_EQUAL;
+    case GPU_STENCIL_NEQUAL:
+      return DRW_STATE_STENCIL_NEQUAL;
+    default:
+      /* Full comparison is applied by state_stencil_test(). */
+      return DRW_STATE_STENCIL_ALWAYS;
+  }
+}
+
+static GPUStencilOpType material_stencil_op_type(eMaterialStencilOp op)
+{
+  switch (op) {
+    case MA_STENCIL_OP_ZERO:
+      return GPU_STENCIL_OP_ZERO;
+    case MA_STENCIL_OP_REPLACE:
+      return GPU_STENCIL_OP_REPLACE_VALUE;
+    case MA_STENCIL_OP_INCREMENT_CLAMP:
+      return GPU_STENCIL_OP_INCREMENT_CLAMP;
+    case MA_STENCIL_OP_DECREMENT_CLAMP:
+      return GPU_STENCIL_OP_DECREMENT_CLAMP;
+    case MA_STENCIL_OP_INVERT:
+      return GPU_STENCIL_OP_INVERT;
+    case MA_STENCIL_OP_INCREMENT_WRAP:
+      return GPU_STENCIL_OP_INCREMENT_WRAP;
+    case MA_STENCIL_OP_DECREMENT_WRAP:
+      return GPU_STENCIL_OP_DECREMENT_WRAP;
+    case MA_STENCIL_OP_KEEP:
+    default:
+      return GPU_STENCIL_OP_KEEP;
+  }
+}
+
+MaterialStencilState material_stencil_state_get(const blender::Material *material)
+{
+  MaterialStencilState state;
+  if (material == nullptr || !material->stencil_enabled) {
+    return state;
+  }
+
+  state.enabled = true;
+  state.reference = uint8_t(material->stencil_reference & EEVEE_STENCIL_USER_MASK);
+  state.read_mask = uint8_t(material->stencil_read_mask & EEVEE_STENCIL_USER_MASK);
+  state.write_mask = uint8_t(material->stencil_write_mask & EEVEE_STENCIL_USER_MASK);
+  state.pass = material_stencil_op_type(eMaterialStencilOp(material->stencil_pass_op));
+  state.fail = material_stencil_op_type(eMaterialStencilOp(material->stencil_fail_op));
+  state.zfail = material_stencil_op_type(eMaterialStencilOp(material->stencil_zfail_op));
+
+  switch (eMaterialStencilTest(material->stencil_test)) {
+    case MA_STENCIL_NEVER:
+      state.test = GPU_STENCIL_NEVER;
+      break;
+    case MA_STENCIL_EQUAL:
+      state.test = GPU_STENCIL_EQUAL;
+      break;
+    case MA_STENCIL_NOT_EQUAL:
+      state.test = GPU_STENCIL_NEQUAL;
+      break;
+    case MA_STENCIL_LESS:
+      state.test = GPU_STENCIL_LESS;
+      break;
+    case MA_STENCIL_LESS_EQUAL:
+      state.test = GPU_STENCIL_LEQUAL;
+      break;
+    case MA_STENCIL_GREATER:
+      state.test = GPU_STENCIL_GREATER;
+      break;
+    case MA_STENCIL_GREATER_EQUAL:
+      state.test = GPU_STENCIL_GEQUAL;
+      break;
+    case MA_STENCIL_ALWAYS:
+    default:
+      state.test = GPU_STENCIL_ALWAYS;
+      break;
+  }
+  state.test_state = material_stencil_drw_test_state(state.test);
+  return state;
+}
+
+static PassMain::Sub *material_stencil_pass_add(PassSortable &stencil_ps,
+                                                Instance &inst,
+                                                blender::Material *blender_mat,
+                                                GPUMaterial *gpumat,
+                                                bool has_motion,
+                                                bool force_write_id)
+{
+  BLI_assert_msg(GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT) == false,
+                 "Transparent stencil writers are not supported in v1.");
+
+  MaterialStencilState stencil = material_stencil_state_get(blender_mat);
+  if (!stencil.enabled) {
+    return nullptr;
+  }
+
+  PassMain::Sub *pass = &stencil_ps.sub(GPU_material_get_name(gpumat),
+                                        material_stencil_order(blender_mat));
+  pass->bind_texture(RBUFS_UTILITY_TEX_SLOT, inst.pipelines.utility_tx);
+  pass->bind_resources(inst.uniform_data);
+  pass->bind_resources(inst.velocity);
+  pass->bind_resources(inst.sampling);
+  pass->bind_resources(inst.render_textures);
+  pass->bind_resources(inst.lights);
+  const bool write_id = force_write_id || GPU_material_flag_get(gpumat, GPU_MATFLAG_RAYCAST);
+  pass->subpass_transition(GPU_ATTACHMENT_WRITE,
+                           {GPU_ATTACHMENT_WRITE, /* normal */
+                            write_id ? GPU_ATTACHMENT_WRITE : GPU_ATTACHMENT_IGNORE,
+                            has_motion ? GPU_ATTACHMENT_WRITE : GPU_ATTACHMENT_IGNORE});
+  const DRWState state = DRW_STATE_WRITE_DEPTH | DRW_STATE_WRITE_COLOR | DRW_STATE_WRITE_STENCIL |
+                         DRW_STATE_CLIP_CONTROL_UNIT_RANGE | inst.film.depth.test_state |
+                         material_surface_cull_state(material_surface_cull_method(blender_mat)) |
+                         stencil.test_state;
+  pass->state_set(state);
+  pass->state_stencil_op(stencil.fail, stencil.zfail, stencil.pass);
+  pass->state_stencil(stencil.write_mask, stencil.reference, stencil.read_mask);
+  pass->state_stencil_test(stencil.test);
+  pass->material_set(*inst.manager, gpumat, true);
+  pass->push_constant("surface_cull_mode", int(material_surface_cull_method(blender_mat)));
+
+  return pass;
 }
 
 static bool material_uses_depth_offset_lighting_data(const blender::Material *material,
@@ -479,7 +610,9 @@ void ForwardPipeline::sync()
   has_transparent_ = false;
   has_holdout_ = false;
   has_outline_occluders_ = false;
+  has_stencil_ = false;
 
+  stencil_ps_.init();
   {
     prepass_ps_.init();
 
@@ -605,6 +738,17 @@ PassMain::Sub *ForwardPipeline::prepass_opaque_add(blender::Material *blender_ma
     pass->bind_image(OUTLINE_COLOR_SLOT, &inst_.render_buffers.outline_color_tx);
     pass->bind_image(OUTLINE_INFO_SLOT, &inst_.render_buffers.outline_info_tx);
   }
+  return pass;
+}
+
+PassMain::Sub *ForwardPipeline::stencil_opaque_add(blender::Material *blender_mat,
+                                                   GPUMaterial *gpumat,
+                                                   bool has_motion,
+                                                   bool force_write_id)
+{
+  PassMain::Sub *pass = material_stencil_pass_add(
+      stencil_ps_, inst_, blender_mat, gpumat, has_motion, force_write_id);
+  has_stencil_ |= pass != nullptr;
   return pass;
 }
 
@@ -791,6 +935,12 @@ void ForwardPipeline::render(View &view,
     ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainForwardPrepass);
     prepass_fb.bind();
     inst_.manager->submit(prepass_ps_, view);
+  }
+
+  if (has_stencil_) {
+    ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainForwardPrepass);
+    prepass_fb.bind();
+    inst_.manager->submit(stencil_ps_, view);
   }
 
   {
@@ -1000,7 +1150,9 @@ template<typename F> void DeferredLayerBase::npr_pass_sync(Instance &inst, F cal
 void DeferredLayer::begin_sync()
 {
   has_outline_ = false;
+  has_stencil_ = false;
   is_first_pass_ = true;
+  stencil_ps_.init();
   {
     prepass_ps_.init();
     /* Textures. */
@@ -1017,10 +1169,10 @@ void DeferredLayer::begin_sync()
     prepass_ps_.bind_resources(inst_.render_textures);
     prepass_ps_.bind_resources(inst_.lights);
 
-    /* Clear stencil buffer so that prepass can tag it. Then draw a full-screen triangle that will
-     * clear AOVs for all the pixels touched by this layer. */
-    prepass_ps_.clear_stencil(0xFFu);
-    prepass_ps_.state_stencil(0xFFu, 0u, 0xFFu);
+    /* Clear the frame stencil before material stencil writers run. The prepass then tags Eevee's
+     * high bits while material writers later populate the user low bits for this frame. */
+    prepass_ps_.clear_stencil(0x00u);
+    prepass_ps_.state_stencil(EEVEE_STENCIL_INTERNAL_MASK, 0u, EEVEE_STENCIL_INTERNAL_MASK);
 
     prepass_ps_.setup_subpasses(DRW_STATE_WRITE_STENCIL | DRW_STATE_STENCIL_ALWAYS |
                                 DRW_STATE_WRITE_DEPTH | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
@@ -1030,7 +1182,7 @@ void DeferredLayer::begin_sync()
     aov_clear_ps_.init();
     aov_clear_ps_.state_set(DRW_STATE_WRITE_STENCIL | DRW_STATE_STENCIL_EQUAL |
                             DRW_STATE_CLIP_CONTROL_UNIT_RANGE);
-    aov_clear_ps_.state_stencil(0x0u, 0x0u, 0xFFu);
+    aov_clear_ps_.state_stencil(0x0u, 0x0u, EEVEE_STENCIL_INTERNAL_MASK);
     aov_clear_ps_.shader_set(inst_.shaders.static_shader_get(DEFERRED_AOV_CLEAR));
     aov_clear_ps_.bind_image(RBUFS_COLOR_SLOT, &inst_.render_buffers.rp_color_tx);
     aov_clear_ps_.bind_image(RBUFS_VALUE_SLOT, &inst_.render_buffers.rp_value_tx);
@@ -1121,7 +1273,9 @@ void DeferredLayer::end_sync(bool is_first_pass,
       sub.state_set(DRW_STATE_WRITE_STENCIL | DRW_STATE_STENCIL_ALWAYS);
       if (GPU_stencil_export_support()) {
         /* The shader sets the stencil directly in one full-screen pass. */
-        sub.state_stencil(uint8_t(StencilBits::HEADER_BITS), /* Set by shader */ 0x0u, 0xFFu);
+        sub.state_stencil(uint8_t(StencilBits::HEADER_BITS),
+                          /* Set by shader */ EEVEE_STENCIL_INTERNAL_MASK,
+                          EEVEE_STENCIL_INTERNAL_MASK);
         sub.draw_procedural(GPU_PRIM_TRIS, 1, 3);
       }
       else {
@@ -1129,7 +1283,7 @@ void DeferredLayer::end_sync(bool is_first_pass,
          * stencil bit we need to set and accumulate the result. */
         auto set_bit = [&](StencilBits bit) {
           sub.push_constant("current_bit", int(bit));
-          sub.state_stencil(uint8_t(bit), 0xFFu, 0xFFu);
+          sub.state_stencil(uint8_t(bit), EEVEE_STENCIL_INTERNAL_MASK, EEVEE_STENCIL_INTERNAL_MASK);
           sub.draw_procedural(GPU_PRIM_TRIS, 1, 3);
         };
 
@@ -1220,13 +1374,15 @@ void DeferredLayer::end_sync(bool is_first_pass,
           uint8_t compare_mask = uint8_t(StencilBits::CLOSURE_COUNT_0) |
                                  uint8_t(StencilBits::CLOSURE_COUNT_1) |
                                  uint8_t(StencilBits::TRANSMISSION);
-          sub.state_stencil(0x0u, i + 1, compare_mask);
+          const uint8_t closure_stencil = uint8_t((i + 1) << 4);
+          sub.state_stencil(0x0u, closure_stencil, compare_mask);
           sub.draw_procedural(GPU_PRIM_TRIS, 1, 3);
           if (use_transmission) {
             /* Separate pass for transmission BSDF as their evaluation is quite costly. */
             set_specialization_constants(sub, sh, true);
             sub.shader_set(sh);
-            sub.state_stencil(0x0u, (i + 1) | uint8_t(StencilBits::TRANSMISSION), compare_mask);
+            sub.state_stencil(
+                0x0u, closure_stencil | uint8_t(StencilBits::TRANSMISSION), compare_mask);
             sub.draw_procedural(GPU_PRIM_TRIS, 1, 3);
           }
         }
@@ -1283,6 +1439,28 @@ PassMain::Sub *DeferredLayer::prepass_add(blender::Material *blender_mat,
   return prepass_ps_.add(blender_mat, gpumat, has_motion, force_write_id);
 }
 
+PassMain::Sub *DeferredLayerBase::stencil_add(blender::Material *blender_mat,
+                                              GPUMaterial *gpumat,
+                                              Instance &inst,
+                                              DRWState /*depth_state*/,
+                                              bool has_motion,
+                                              bool force_write_id)
+{
+  return material_stencil_pass_add(
+      stencil_ps_, inst, blender_mat, gpumat, has_motion, force_write_id);
+}
+
+PassMain::Sub *DeferredLayer::stencil_add(blender::Material *blender_mat,
+                                          GPUMaterial *gpumat,
+                                          bool has_motion,
+                                          bool force_write_id)
+{
+  PassMain::Sub *pass = DeferredLayerBase::stencil_add(
+      blender_mat, gpumat, inst_, inst_.film.depth.test_state, has_motion, force_write_id);
+  has_stencil_ |= pass != nullptr;
+  return pass;
+}
+
 PassMain::Sub *DeferredLayer::material_add(blender::Material *blender_mat, GPUMaterial *gpumat)
 {
   eClosureBits closure_bits = shader_closure_bits_from_flag(gpumat);
@@ -1323,7 +1501,9 @@ PassMain::Sub *DeferredLayer::material_add(blender::Material *blender_mat, GPUMa
   }
   /* We use this opportunity to clear the stencil bits. The undefined areas are discarded using the
    * gbuf header value. */
-  material_pass->state_stencil(0xFFu, material_stencil_bits, 0xFFu);
+  material_pass->state_stencil(EEVEE_STENCIL_INTERNAL_MASK,
+                               material_stencil_bits,
+                               EEVEE_STENCIL_INTERNAL_MASK);
 
   return material_pass;
 }
@@ -1378,6 +1558,12 @@ gpu::Texture *DeferredLayer::render(View &main_view,
     ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainDeferredPrepass);
     GPU_framebuffer_bind(prepass_fb);
     inst_.manager->submit(prepass_ps_, render_view);
+  }
+
+  if (has_stencil_) {
+    ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainDeferredPrepass);
+    GPU_framebuffer_bind(prepass_fb);
+    inst_.manager->submit(stencil_ps_, render_view);
   }
 
   if (!is_first_pass_) {
@@ -1600,6 +1786,19 @@ PassMain::Sub *DeferredPipeline::material_add(blender::Material *blender_mat,
     return get_refraction_layer(refraction_layer).material_add(blender_mat, gpumat);
   }
   return opaque_layer_.material_add(blender_mat, gpumat);
+}
+
+PassMain::Sub *DeferredPipeline::stencil_add(blender::Material *blender_mat,
+                                             GPUMaterial *gpumat,
+                                             short refraction_layer,
+                                             bool has_motion,
+                                             bool force_write_id)
+{
+  if (!use_combined_lightprobe_eval && (blender_mat->blend_flag & MA_BL_SS_REFRACTION)) {
+    return get_refraction_layer(refraction_layer).stencil_add(
+        blender_mat, gpumat, has_motion, force_write_id);
+  }
+  return opaque_layer_.stencil_add(blender_mat, gpumat, has_motion, force_write_id);
 }
 
 PassMain::Sub *DeferredPipeline::npr_add(blender::Material *blender_mat,
@@ -1893,6 +2092,7 @@ void DeferredProbePipeline::begin_sync()
 {
   Prepass &pass = opaque_layer_.prepass_ps_;
   pass.init();
+  pass.clear_stencil(0x00u);
   {
     /* Common resources. */
 
@@ -2092,6 +2292,7 @@ void PlanarProbePipeline::begin_sync()
 {
   {
     prepass_ps_.init();
+    prepass_ps_.clear_stencil(0x00u);
     prepass_ps_.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);
     prepass_ps_.bind_ubo(CLIP_PLANE_BUF, inst_.planar_probes.world_clip_buf_);
     prepass_ps_.bind_resources(inst_.uniform_data);

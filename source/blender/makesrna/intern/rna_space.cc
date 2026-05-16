@@ -518,6 +518,11 @@ static const EnumPropertyItem rna_enum_view3dshading_render_pass_type_items[] = 
     {EEVEE_RENDER_PASS_POSITION, "POSITION", 0, "Position", ""},
     {EEVEE_RENDER_PASS_NORMAL, "NORMAL", 0, "Normal", ""},
     {EEVEE_RENDER_PASS_MIST, "MIST", 0, "Mist", ""},
+    {EEVEE_RENDER_PASS_STENCIL_VALUE,
+     "STENCIL_VALUE",
+     0,
+     "Stencil Value",
+     "Viewport-only display of EEVEE material stencil values"},
     {EEVEE_RENDER_PASS_CRYPTOMATTE_OBJECT, "CryptoObject", 0, "CryptoObject", ""},
     {EEVEE_RENDER_PASS_CRYPTOMATTE_ASSET, "CryptoAsset", 0, "CryptoAsset", ""},
     {EEVEE_RENDER_PASS_CRYPTOMATTE_MATERIAL, "CryptoMaterial", 0, "CryptoMaterial", ""},
@@ -1686,6 +1691,7 @@ static const EnumPropertyItem *rna_3DViewShading_render_pass_itemf(bContext *C,
       }
     }
     else if (ELEM(item->value,
+                  EEVEE_RENDER_PASS_STENCIL_VALUE,
                   EEVEE_RENDER_PASS_CRYPTOMATTE_OBJECT,
                   EEVEE_RENDER_PASS_CRYPTOMATTE_ASSET,
                   EEVEE_RENDER_PASS_CRYPTOMATTE_MATERIAL) &&

@@ -331,11 +331,14 @@ void Film::init(const int2 &extent, const rcti *output_rect)
       const eViewLayerEEVEEPassType scene_enabled_passes = enabled_passes(inst_.view_layer);
       eViewLayerEEVEEPassType enabled_passes = viewport_compositor_enabled_passes_;
 
-      if (!ELEM(selected_pass,
-                EEVEE_RENDER_PASS_CRYPTOMATTE_OBJECT,
-                EEVEE_RENDER_PASS_CRYPTOMATTE_ASSET,
-                EEVEE_RENDER_PASS_CRYPTOMATTE_MATERIAL) ||
-          (scene_enabled_passes & selected_pass))
+      if (selected_pass == EEVEE_RENDER_PASS_STENCIL_VALUE) {
+        enabled_passes |= EEVEE_RENDER_PASS_COMBINED;
+      }
+      else if (!ELEM(selected_pass,
+                     EEVEE_RENDER_PASS_CRYPTOMATTE_OBJECT,
+                     EEVEE_RENDER_PASS_CRYPTOMATTE_ASSET,
+                     EEVEE_RENDER_PASS_CRYPTOMATTE_MATERIAL) ||
+               (scene_enabled_passes & selected_pass))
       {
         enabled_passes |= selected_pass;
       }

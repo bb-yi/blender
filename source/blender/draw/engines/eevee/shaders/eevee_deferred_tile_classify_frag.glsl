@@ -16,19 +16,19 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_deferred_tile_classify)
 void main()
 {
   gbuffer::Header header = gbuffer::Header::from_data(in_gbuffer_header);
-  int closure_count = int(header.closure_len());
+  int closure_count_bits = int(header.closure_len()) << 4;
   int is_transmission = 0;
   if (header.has_transmission()) {
-    is_transmission = 1 << 2;
+    is_transmission = 1 << 6;
   }
 
 #if defined(GPU_ARB_shader_stencil_export) || defined(GPU_METAL)
-  gl_FragStencilRefARB = closure_count | is_transmission;
+  gl_FragStencilRefARB = closure_count_bits | is_transmission;
 #else
   /* Instead of setting the stencil at once, we do it (literally) bit by bit.
    * Discard fragments that do not have a number of closure whose bit-pattern
    * overlap the current stencil un-masked bit. */
-  if ((current_bit & (closure_count | is_transmission)) == 0) {
+  if ((current_bit & (closure_count_bits | is_transmission)) == 0) {
     gpu_discard_fragment();
     return;
   }

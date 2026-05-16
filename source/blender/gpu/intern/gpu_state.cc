@@ -77,6 +77,11 @@ void GPU_stencil_test(GPUStencilTest test)
   SET_IMMUTABLE_STATE(stencil_test, test);
 }
 
+void GPU_stencil_operation_set(GPUStencilOp operation)
+{
+  SET_IMMUTABLE_STATE(stencil_op, operation);
+}
+
 void GPU_line_smooth(bool enable)
 {
   SET_IMMUTABLE_STATE(line_smooth, enable);

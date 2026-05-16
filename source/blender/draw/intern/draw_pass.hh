@@ -220,6 +220,10 @@ class PassBase {
    * https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/VkStencilOpState.html
    */
   void state_stencil(uint8_t write_mask, uint8_t reference, uint8_t compare_mask);
+  void state_stencil_test(GPUStencilTest test);
+  void state_stencil_op(GPUStencilOpType fail,
+                        GPUStencilOpType zfail,
+                        GPUStencilOpType pass);
 
   /**
    * Bind a shader. Any following bind() or push_constant() call will use its interface.
@@ -743,6 +747,10 @@ void PassBase<T>::warm_shader_specialization(command::RecordingState &state) con
         break;
       case command::Type::StencilSet:
         break;
+      case command::Type::StencilTestSet:
+        break;
+      case command::Type::StencilOpSet:
+        break;
     }
   }
 
@@ -814,6 +822,12 @@ template<class T> void PassBase<T>::submit(command::RecordingState &state) const
       case command::Type::StencilSet:
         commands_[header.index].stencil_set.execute();
         break;
+      case command::Type::StencilTestSet:
+        commands_[header.index].stencil_test_set.execute(state);
+        break;
+      case command::Type::StencilOpSet:
+        commands_[header.index].stencil_op_set.execute(state);
+        break;
     }
   }
 
@@ -877,6 +891,12 @@ template<class T> std::string PassBase<T>::serialize(std::string line_prefix) co
         break;
       case Type::StencilSet:
         ss << line_prefix << commands_[header.index].stencil_set.serialize() << std::endl;
+        break;
+      case Type::StencilTestSet:
+        ss << line_prefix << commands_[header.index].stencil_test_set.serialize() << std::endl;
+        break;
+      case Type::StencilOpSet:
+        ss << line_prefix << commands_[header.index].stencil_op_set.serialize() << std::endl;
         break;
     }
   }
@@ -1101,6 +1121,20 @@ template<class T>
 inline void PassBase<T>::state_stencil(uint8_t write_mask, uint8_t reference, uint8_t compare_mask)
 {
   create_command(Type::StencilSet).stencil_set = {write_mask, compare_mask, reference};
+}
+
+template<class T> inline void PassBase<T>::state_stencil_test(GPUStencilTest test)
+{
+  create_command(Type::StencilTestSet).stencil_test_set = {test};
+}
+
+template<class T>
+inline void PassBase<T>::state_stencil_op(GPUStencilOpType fail,
+                                          GPUStencilOpType zfail,
+                                          GPUStencilOpType pass)
+{
+  create_command(Type::StencilOpSet).stencil_op_set = {
+      GPU_stencil_op_create(fail, zfail, pass)};
 }
 
 template<class T> inline void PassBase<T>::shader_set(gpu::Shader *shader)

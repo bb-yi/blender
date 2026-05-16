@@ -204,6 +204,30 @@ enum eMaterialCullMethod {
   MA_SURFACE_CULL_FRONT = 2,
 };
 
+/** #Material::stencil_test */
+enum eMaterialStencilTest {
+  MA_STENCIL_ALWAYS = 0,
+  MA_STENCIL_NEVER = 1,
+  MA_STENCIL_EQUAL = 2,
+  MA_STENCIL_NOT_EQUAL = 3,
+  MA_STENCIL_LESS = 4,
+  MA_STENCIL_LESS_EQUAL = 5,
+  MA_STENCIL_GREATER = 6,
+  MA_STENCIL_GREATER_EQUAL = 7,
+};
+
+/** #Material::stencil_pass_op, #Material::stencil_fail_op, #Material::stencil_zfail_op */
+enum eMaterialStencilOp {
+  MA_STENCIL_OP_KEEP = 0,
+  MA_STENCIL_OP_ZERO = 1,
+  MA_STENCIL_OP_REPLACE = 2,
+  MA_STENCIL_OP_INCREMENT_CLAMP = 3,
+  MA_STENCIL_OP_DECREMENT_CLAMP = 4,
+  MA_STENCIL_OP_INVERT = 5,
+  MA_STENCIL_OP_INCREMENT_WRAP = 6,
+  MA_STENCIL_OP_DECREMENT_WRAP = 7,
+};
+
 /** #Material::blend_shadow */
 enum {
   MA_BS_NONE = 0,
@@ -421,7 +445,15 @@ struct Material {
 
   char surface_cull_method = MA_SURFACE_CULL_NONE;
   char depth_offset_affect_lighting = false;
-  char _pad3[2] = {};
+  char stencil_enabled = false;
+  char stencil_reference = 0;
+  char stencil_read_mask = 15;
+  char stencil_write_mask = 15;
+  char stencil_test = MA_STENCIL_ALWAYS;
+  char stencil_pass_op = MA_STENCIL_OP_KEEP;
+  char stencil_fail_op = MA_STENCIL_OP_KEEP;
+  char stencil_zfail_op = MA_STENCIL_OP_KEEP;
+  short stencil_order = 0;
 
   /**
    * Cached slots for texture painting, must be refreshed via

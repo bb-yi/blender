@@ -1114,13 +1114,13 @@ void blo_do_versions_510(FileData *fd, Library * /*lib*/, Main *bmain)
     /* `surface_cull_method` replaced `Material._pad3[4]` in this branch.
      * Some old local builds already wrote the runtime value into `_pad3[0]`
      * before the saved DNA was refreshed, so older files can legitimately
-     * carry the cull mode in `_pad3[0]` instead of a named field.
+     * carry the cull mode in the byte that is now `stencil_enabled` instead of a named field.
      *
-     * Recover the explicit enum from `_pad3[0]` when present, otherwise fall
+     * Recover the explicit enum from that legacy byte when present, otherwise fall
      * back to the legacy backface-culling bit for files from before the enum
      * existed. */
     for (Material &mat : bmain->materials) {
-      const char legacy_cull_method = mat._pad3[0];
+      const char legacy_cull_method = mat.stencil_enabled;
       if (ELEM(legacy_cull_method, MA_SURFACE_CULL_BACK, MA_SURFACE_CULL_FRONT)) {
         mat.surface_cull_method = legacy_cull_method;
       }
@@ -1171,6 +1171,22 @@ void blo_do_versions_510(FileData *fd, Library * /*lib*/, Main *bmain)
     for (Light &light : bmain->lights) {
       if (light.shadow_map_scale <= 0.0f) {
         light.shadow_map_scale = 1.0f;
+      }
+    }
+  }
+
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 48)) {
+    if (!DNA_struct_member_exists(fd->filesdna, "Material", "char", "stencil_enabled")) {
+      for (Material &mat : bmain->materials) {
+        mat.stencil_enabled = false;
+        mat.stencil_reference = 0;
+        mat.stencil_read_mask = 15;
+        mat.stencil_write_mask = 15;
+        mat.stencil_test = MA_STENCIL_ALWAYS;
+        mat.stencil_pass_op = MA_STENCIL_OP_KEEP;
+        mat.stencil_fail_op = MA_STENCIL_OP_KEEP;
+        mat.stencil_zfail_op = MA_STENCIL_OP_KEEP;
+        mat.stencil_order = 0;
       }
     }
   }

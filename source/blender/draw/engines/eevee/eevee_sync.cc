@@ -200,6 +200,7 @@ void SyncModule::sync_mesh(Object *ob, ObjectHandle &ob_handle, const ObjectRef 
     geometry_call(material.capture.sub_pass, geom, res_handle);
     geometry_call(material.overlap_masking.sub_pass, geom, res_handle);
     geometry_call(material.outline_occlusion.sub_pass, geom, res_handle);
+    geometry_call(material.stencil.sub_pass, geom, res_handle);
     geometry_call(material.prepass.sub_pass, geom, res_handle);
     geometry_call(material.shading.sub_pass, geom, res_handle);
     geometry_call(
@@ -298,6 +299,7 @@ bool SyncModule::sync_sculpt(Object *ob, ObjectHandle &ob_handle, const ObjectRe
     geometry_call(material.capture.sub_pass, geom, res_handle);
     geometry_call(material.overlap_masking.sub_pass, geom, res_handle);
     geometry_call(material.outline_occlusion.sub_pass, geom, res_handle);
+    geometry_call(material.stencil.sub_pass, geom, res_handle);
     geometry_call(material.prepass.sub_pass, geom, res_handle);
     geometry_call(material.shading.sub_pass, geom, res_handle);
     geometry_call(material.npr.sub_pass, geom_npr, res_handle);
@@ -392,6 +394,7 @@ void SyncModule::sync_pointcloud(Object *ob, ObjectHandle &ob_handle, const Obje
   drawcall_add(material.capture);
   drawcall_add(material.overlap_masking);
   drawcall_add(material.outline_occlusion);
+  drawcall_add(material.stencil);
   drawcall_add(material.prepass);
   drawcall_add(material.shading);
   drawcall_add(material.npr);
@@ -558,6 +561,7 @@ void SyncModule::sync_curves(Object *ob,
   drawcall_add(material.capture);
   drawcall_add(material.overlap_masking);
   drawcall_add(material.outline_occlusion);
+  drawcall_add(material.stencil);
   drawcall_add(material.prepass);
   drawcall_add(material.shading);
   drawcall_add(material.npr);
