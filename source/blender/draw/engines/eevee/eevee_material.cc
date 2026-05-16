@@ -39,6 +39,38 @@ static bool material_depth_offset_disables_shadow(const blender::Material &mater
          material_has_depth_offset_output(surface_pass);
 }
 
+static void material_surface_stencil_state_set(PassMain::Sub &pass,
+                                               const blender::Material *blender_mat,
+                                               eMaterialPipeline pipeline_type,
+                                               eMaterialProbe probe_capture)
+{
+  if (probe_capture != MAT_PROBE_NONE) {
+    return;
+  }
+
+  const MaterialStencilState stencil = material_stencil_state_get(blender_mat);
+  if (pipeline_type == MAT_PIPE_DEFERRED) {
+    uint8_t material_stencil_bits = 0u;
+    if (blender_mat->blend_flag & MA_BL_THICKNESS_FROM_SHADOW) {
+      material_stencil_bits |= uint8_t(DeferredLayerBase::StencilBits::THICKNESS_FROM_SHADOW);
+    }
+    const uint8_t reference = material_stencil_bits | (stencil.enabled ? stencil.reference : 0u);
+    const uint8_t compare_mask = stencil.enabled ? stencil.read_mask : EEVEE_STENCIL_INTERNAL_MASK;
+
+    pass.state_stencil_op(
+        GPU_STENCIL_OP_KEEP, GPU_STENCIL_OP_KEEP, GPU_STENCIL_OP_REPLACE_VALUE);
+    pass.state_stencil(EEVEE_STENCIL_INTERNAL_MASK, reference, compare_mask);
+    pass.state_stencil_test(stencil.enabled ? stencil.test : GPU_STENCIL_ALWAYS);
+    return;
+  }
+
+  if (ELEM(pipeline_type, MAT_PIPE_FORWARD, MAT_PIPE_DEFERRED_NPR)) {
+    pass.state_stencil_op(GPU_STENCIL_OP_KEEP, GPU_STENCIL_OP_KEEP, GPU_STENCIL_OP_KEEP);
+    pass.state_stencil(0x0u, stencil.enabled ? stencil.reference : 0u, stencil.enabled ? stencil.read_mask : 0u);
+    pass.state_stencil_test(stencil.enabled ? stencil.test : GPU_STENCIL_NONE);
+  }
+}
+
 static bool material_has_flag(const MaterialPass &pass, eGPUMaterialFlag flag)
 {
   return (pass.gpumat != nullptr) && GPU_material_flag_get(pass.gpumat, flag);
@@ -501,6 +533,8 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
         matpass.sub_pass->push_constant(
             "surface_cull_mode", int(material_surface_cull_method_get(*blender_mat)));
       }
+      material_surface_stencil_state_set(
+          *matpass.sub_pass, blender_mat, pipeline_type, probe_capture);
       if (pipeline_type == MAT_PIPE_DEFERRED_NPR) {
         matpass.sub_pass->bind_resources(inst_.gbuffer);
         matpass.sub_pass->bind_resources(inst_.uniform_data);

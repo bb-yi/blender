@@ -214,7 +214,9 @@ static PassMain::Sub *material_stencil_pass_add(PassSortable &stencil_ps,
                             write_id ? GPU_ATTACHMENT_WRITE : GPU_ATTACHMENT_IGNORE,
                             has_motion ? GPU_ATTACHMENT_WRITE : GPU_ATTACHMENT_IGNORE});
   const DRWState state = DRW_STATE_WRITE_DEPTH | DRW_STATE_WRITE_COLOR | DRW_STATE_WRITE_STENCIL |
-                         DRW_STATE_CLIP_CONTROL_UNIT_RANGE | inst.film.depth.test_state |
+                         DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
+                         material_ztest_state(material_ztest_mode(blender_mat),
+                                              inst.film.depth.test_state) |
                          material_surface_cull_state(material_surface_cull_method(blender_mat)) |
                          stencil.test_state;
   pass->state_set(state);
@@ -225,6 +227,19 @@ static PassMain::Sub *material_stencil_pass_add(PassSortable &stencil_ps,
   pass->push_constant("surface_cull_mode", int(material_surface_cull_method(blender_mat)));
 
   return pass;
+}
+
+static void material_stencil_test_only_state_set(PassMain::Sub &pass,
+                                                 const blender::Material *blender_mat)
+{
+  const MaterialStencilState stencil = material_stencil_state_get(blender_mat);
+  if (!stencil.enabled) {
+    return;
+  }
+
+  pass.state_stencil_op(GPU_STENCIL_OP_KEEP, GPU_STENCIL_OP_KEEP, GPU_STENCIL_OP_KEEP);
+  pass.state_stencil(0x0u, stencil.reference, stencil.read_mask);
+  pass.state_stencil_test(stencil.test);
 }
 
 static bool material_uses_depth_offset_lighting_data(const blender::Material *material,
@@ -843,6 +858,7 @@ PassMain::Sub *ForwardPipeline::prepass_transparent_add(const Object *ob,
   pass->state_set(state);
   pass->material_set(*inst_.manager, gpumat, true);
   pass->push_constant("surface_cull_mode", int(material_surface_cull_method(blender_mat)));
+  material_stencil_test_only_state_set(*pass, blender_mat);
 
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_TO_RGBA) &&
       GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT))
@@ -874,6 +890,7 @@ PassMain::Sub *ForwardPipeline::material_transparent_add(const Object *ob,
   pass->state_set(state);
   pass->material_set(*inst_.manager, gpumat, true);
   pass->push_constant("surface_cull_mode", int(material_surface_cull_method(blender_mat)));
+  material_stencil_test_only_state_set(*pass, blender_mat);
   inst_.lights.bind_front_light_shader_resources(*pass);
   if (inst_.scene->eevee.use_outline) {
     pass->bind_image(OUTLINE_COLOR_SLOT, &inst_.render_buffers.outline_color_tx);
@@ -907,6 +924,7 @@ PassMain::Sub *ForwardPipeline::outline_occlusion_add(blender::Material *blender
   pass->state_set(state);
   pass->material_set(*inst_.manager, gpumat, true);
   pass->push_constant("surface_cull_mode", int(material_surface_cull_method(blender_mat)));
+  material_stencil_test_only_state_set(*pass, blender_mat);
   return pass;
 }
 
@@ -1329,7 +1347,7 @@ void DeferredLayer::end_sync(bool is_first_pass,
         sub.bind_ssbo("dummy_workaround_buf", &inst_.film.aovs_info);
       }
       sub.state_set(DRW_STATE_WRITE_STENCIL | DRW_STATE_STENCIL_ALWAYS);
-      if (GPU_stencil_export_support()) {
+      if (GPU_stencil_export_support() && !has_stencil_) {
         /* The shader sets the stencil directly in one full-screen pass. */
         sub.state_stencil(uint8_t(StencilBits::HEADER_BITS),
                           /* Set by shader */ EEVEE_STENCIL_INTERNAL_MASK,
