@@ -270,6 +270,7 @@ static inline bool pipeline_uses_material_write_state(eMaterialPipeline pipeline
 struct MaterialKey {
   blender::Material *mat;
   uint64_t options;
+  uint32_t stencil_options;
   short stencil_order;
 
   MaterialKey(blender::Material *mat_,
@@ -298,24 +299,32 @@ struct MaterialKey {
     options = (options << 1) | uint64_t(material_depth_write_get(*mat_));
     const uint64_t stencil_enabled = mat_->stencil_enabled != 0;
     stencil_order = stencil_enabled ? mat_->stencil_order : 0;
-    options = (options << 1) | stencil_enabled;
-    options = (options << 4) | (stencil_enabled ? uint64_t(mat_->stencil_reference & 0x0F) : 0);
-    options = (options << 4) | (stencil_enabled ? uint64_t(mat_->stencil_read_mask & 0x0F) : 0);
-    options = (options << 4) | (stencil_enabled ? uint64_t(mat_->stencil_write_mask & 0x0F) : 0);
-    options = (options << 3) | (stencil_enabled ? uint64_t(mat_->stencil_test & 0x07) : 0);
-    options = (options << 3) | (stencil_enabled ? uint64_t(mat_->stencil_pass_op & 0x07) : 0);
-    options = (options << 3) | (stencil_enabled ? uint64_t(mat_->stencil_fail_op & 0x07) : 0);
-    options = (options << 3) | (stencil_enabled ? uint64_t(mat_->stencil_zfail_op & 0x07) : 0);
+    stencil_options = uint32_t(stencil_enabled);
+    stencil_options = (stencil_options << 4) |
+                      (stencil_enabled ? uint32_t(mat_->stencil_reference & 0x0F) : 0);
+    stencil_options = (stencil_options << 4) |
+                      (stencil_enabled ? uint32_t(mat_->stencil_read_mask & 0x0F) : 0);
+    stencil_options = (stencil_options << 4) |
+                      (stencil_enabled ? uint32_t(mat_->stencil_write_mask & 0x0F) : 0);
+    stencil_options = (stencil_options << 3) |
+                      (stencil_enabled ? uint32_t(mat_->stencil_test & 0x07) : 0);
+    stencil_options = (stencil_options << 3) |
+                      (stencil_enabled ? uint32_t(mat_->stencil_pass_op & 0x07) : 0);
+    stencil_options = (stencil_options << 3) |
+                      (stencil_enabled ? uint32_t(mat_->stencil_fail_op & 0x07) : 0);
+    stencil_options = (stencil_options << 3) |
+                      (stencil_enabled ? uint32_t(mat_->stencil_zfail_op & 0x07) : 0);
   }
 
   uint64_t hash() const
   {
-    return blender::get_default_hash(mat, options, stencil_order);
+    return blender::get_default_hash(mat, options, stencil_options, stencil_order);
   }
 
   bool operator==(const MaterialKey &k) const
   {
-    return (mat == k.mat) && (options == k.options) && (stencil_order == k.stencil_order);
+    return (mat == k.mat) && (options == k.options) && (stencil_options == k.stencil_options) &&
+           (stencil_order == k.stencil_order);
   }
 };
 

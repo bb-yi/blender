@@ -1153,7 +1153,9 @@ void blo_do_versions_510(FileData *fd, Library * /*lib*/, Main *bmain)
     }
   }
 
-  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 49)) {
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 49) ||
+      !DNA_struct_member_exists(fd->filesdna, "Material", "char", "ztest_mode"))
+  {
     if (!DNA_struct_member_exists(fd->filesdna, "Material", "char", "ztest_mode")) {
       for (Material &mat : bmain->materials) {
         mat.ztest_mode = MA_ZTEST_LESS_EQUAL;
@@ -1188,7 +1190,9 @@ void blo_do_versions_510(FileData *fd, Library * /*lib*/, Main *bmain)
     }
   }
 
-  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 48)) {
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 48) ||
+      !DNA_struct_member_exists(fd->filesdna, "Material", "char", "stencil_enabled"))
+  {
     if (!DNA_struct_member_exists(fd->filesdna, "Material", "char", "stencil_enabled")) {
       for (Material &mat : bmain->materials) {
         mat.stencil_enabled = false;
