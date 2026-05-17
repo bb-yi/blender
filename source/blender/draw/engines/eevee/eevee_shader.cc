@@ -1285,10 +1285,13 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     }
   }
 
-  /* Deferred materials write render passes here. NPR binds the in/out variant in its base info. */
-  if (pipeline_type == MAT_PIPE_DEFERRED) {
+  /* Deferred and forward materials write render passes here. NPR binds the in/out variant in its
+   * base info. */
+  if (ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD)) {
     info.additional_info("eevee_render_pass_out");
-    info.additional_info("eevee_cryptomatte_out");
+    if (pipeline_type == MAT_PIPE_DEFERRED) {
+      info.additional_info("eevee_cryptomatte_out");
+    }
   }
   const bool has_outline_output = GPU_material_has_outline_output(gpumat);
   const bool clears_outline_output =
@@ -1482,7 +1485,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     }
   }
 
-  if ((pipeline_type == MAT_PIPE_FORWARD) || use_shader_to_rgba)
+  if ((pipeline_type == MAT_PIPE_FORWARD) || use_front_light_shader_in_surface_pass)
   {
     switch (closure_bin_count) {
       case 0:

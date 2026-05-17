@@ -94,6 +94,10 @@ void main()
 
   nodetree_surface(closure_rand);
 
+#ifdef MAT_RENDER_PASS_SUPPORT
+  output_renderpass_color(uniform_buf.render_pass.normal_id, float4(g_data.N, 1.0f));
+#endif
+
   float3 radiance, transmittance;
   forward_lighting_eval(g_forward_lighting_P, g_thickness, radiance, transmittance);
   attenuate_outline(saturate(average(transmittance)));

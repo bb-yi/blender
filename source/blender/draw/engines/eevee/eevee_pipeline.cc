@@ -742,6 +742,8 @@ void ForwardPipeline::sync()
       opaque_ps_.bind_texture(RADIANCE_PREVIOUS_LAYER_TEX_SLOT, &inst_.render_buffers.combined_tx);
       opaque_ps_.bind_texture(OBJECT_ID_TEX_SLOT, &inst_.render_buffers.object_id_tx);
       opaque_ps_.bind_texture(PREPASS_NORMAL_TEX_SLOT, &inst_.render_buffers.prepass_normal_tx);
+      opaque_ps_.bind_image(RBUFS_COLOR_SLOT, &inst_.render_buffers.rp_color_tx);
+      opaque_ps_.bind_image(RBUFS_VALUE_SLOT, &inst_.render_buffers.rp_value_tx);
 
       opaque_ps_.bind_resources(inst_.uniform_data);
       opaque_ps_.bind_resources(inst_.lights);
@@ -780,6 +782,8 @@ void ForwardPipeline::sync()
     sub.bind_texture(RADIANCE_PREVIOUS_LAYER_TEX_SLOT, &inst_.render_buffers.combined_tx);
     sub.bind_texture(OBJECT_ID_TEX_SLOT, &inst_.render_buffers.object_id_tx);
     sub.bind_texture(PREPASS_NORMAL_TEX_SLOT, &inst_.render_buffers.prepass_normal_tx);
+    sub.bind_image(RBUFS_COLOR_SLOT, &inst_.render_buffers.rp_color_tx);
+    sub.bind_image(RBUFS_VALUE_SLOT, &inst_.render_buffers.rp_value_tx);
 
     sub.bind_resources(inst_.uniform_data);
     sub.bind_resources(inst_.lights);
@@ -799,6 +803,8 @@ void ForwardPipeline::sync()
     sub.bind_texture(RADIANCE_PREVIOUS_LAYER_TEX_SLOT, &inst_.render_buffers.combined_tx);
     sub.bind_texture(OBJECT_ID_TEX_SLOT, &inst_.render_buffers.object_id_tx);
     sub.bind_texture(PREPASS_NORMAL_TEX_SLOT, &inst_.render_buffers.prepass_normal_tx);
+    sub.bind_image(RBUFS_COLOR_SLOT, &inst_.render_buffers.rp_color_tx);
+    sub.bind_image(RBUFS_VALUE_SLOT, &inst_.render_buffers.rp_value_tx);
     sub.bind_resources(inst_.uniform_data);
     sub.bind_resources(inst_.lights);
     inst_.lights.bind_front_light_shader_resources(sub);
@@ -1340,10 +1346,14 @@ void DeferredLayer::begin_sync()
     prepass_ps_.bind_resources(inst_.render_textures);
     prepass_ps_.bind_resources(inst_.lights);
 
-    /* Clear the frame stencil before material stencil writers run. The prepass then tags Eevee's
-     * high bits while material writers later populate the user low bits for this frame. */
-    prepass_ps_.clear_stencil(0x00u);
-    prepass_ps_.state_stencil(EEVEE_STENCIL_INTERNAL_MASK, 0u, EEVEE_STENCIL_INTERNAL_MASK);
+    /* Clear user stencil to 0 for this frame while keeping an internal untouched marker. The
+     * marker is cleared only by fragments that pass the current layer prepass, so secondary layer
+     * outline clearing stays limited to pixels actually touched by this layer. The material
+     * GBuffer pass later rewrites this bit with its normal THICKNESS_FROM_SHADOW meaning before
+     * lighting evaluation. */
+    const uint8_t prepass_untouched_stencil = uint8_t(StencilBits::THICKNESS_FROM_SHADOW);
+    prepass_ps_.clear_stencil(prepass_untouched_stencil);
+    prepass_ps_.state_stencil(prepass_untouched_stencil, 0u, prepass_untouched_stencil);
 
     prepass_ps_.setup_subpasses(DRW_STATE_WRITE_STENCIL | DRW_STATE_STENCIL_ALWAYS |
                                     DRW_STATE_WRITE_DEPTH | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
@@ -1354,7 +1364,9 @@ void DeferredLayer::begin_sync()
     aov_clear_ps_.init();
     aov_clear_ps_.state_set(DRW_STATE_WRITE_STENCIL | DRW_STATE_STENCIL_EQUAL |
                             DRW_STATE_CLIP_CONTROL_UNIT_RANGE);
-    aov_clear_ps_.state_stencil(0x0u, 0x0u, EEVEE_STENCIL_INTERNAL_MASK);
+    aov_clear_ps_.state_stencil(0x0u,
+                                0x0u,
+                                uint8_t(StencilBits::THICKNESS_FROM_SHADOW));
     aov_clear_ps_.shader_set(inst_.shaders.static_shader_get(DEFERRED_AOV_CLEAR));
     aov_clear_ps_.bind_image(RBUFS_COLOR_SLOT, &inst_.render_buffers.rp_color_tx);
     aov_clear_ps_.bind_image(RBUFS_VALUE_SLOT, &inst_.render_buffers.rp_value_tx);
