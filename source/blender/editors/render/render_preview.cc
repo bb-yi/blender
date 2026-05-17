@@ -42,6 +42,7 @@
 #include "DNA_scene_types.h"
 #include "DNA_screen_types.h"
 #include "DNA_space_types.h"
+#include "DNA_userdef_types.h"
 #include "DNA_world_types.h"
 
 #include "BKE_animsys.h"
@@ -737,6 +738,13 @@ void ED_preview_draw(
     ID *id = static_cast<ID *>(idp);
     ID *parent = static_cast<ID *>(parentp);
     MTex *slot = static_cast<MTex *>(slotp);
+    if (!ED_preview_id_auto_render_is_enabled(id) ||
+        !ED_preview_id_auto_render_is_enabled(parent))
+    {
+      ui_preview->tag &= ~UI_PREVIEW_TAG_DIRTY;
+      return;
+    }
+
     SpaceProperties *sbuts = CTX_wm_space_properties(C);
     const void *owner = CTX_wm_area(C);
     ShaderPreview *sp = static_cast<ShaderPreview *>(
@@ -2143,6 +2151,12 @@ bool ED_preview_use_image_size(const PreviewImage *preview, eIconSizes size)
   return size == ICON_SIZE_PREVIEW && preview->runtime->deferred_loading_data;
 }
 
+bool ED_preview_id_auto_render_is_enabled(const ID *id)
+{
+  return (id == nullptr) || (GS(id->name) != ID_MA) ||
+         ((U.uiflag & USER_MATERIAL_SELECTOR_PREVIEWS) != 0);
+}
+
 bool ED_preview_id_is_supported(const ID *id, const char **r_disabled_hint)
 {
   if (id == nullptr) {
@@ -2334,6 +2348,12 @@ void ED_preview_shader_job(const bContext *C,
   ShaderPreview *sp;
   Scene *scene = CTX_data_scene(C);
   const ID_Type id_type = GS(id->name);
+
+  if (!ED_preview_id_auto_render_is_enabled(id) ||
+      !ED_preview_id_auto_render_is_enabled(parent))
+  {
+    return;
+  }
 
   BLI_assert(BKE_previewimg_id_supports_jobs(id));
 

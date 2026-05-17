@@ -1663,10 +1663,15 @@ def brush_basic__draw_color_selector(context, layout, brush, gp_settings):
     icon_id = 0
     txt_ma = ""
     if ma:
-        ma.id_data.preview_ensure()
-        if ma.id_data.preview:
-            icon_id = ma.id_data.preview.icon_id
+        use_material_preview = context.preferences.edit.use_material_selector_previews
+        if use_material_preview:
+            ma.id_data.preview_ensure()
+            if ma.id_data.preview:
+                icon_id = ma.id_data.preview.icon_id
+                txt_ma = ma.name
+        else:
             txt_ma = ma.name
+        if txt_ma:
             maxw = 25
             if len(txt_ma) > maxw:
                 txt_ma = txt_ma[:maxw - 5] + '..' + txt_ma[-3:]
@@ -1674,12 +1679,20 @@ def brush_basic__draw_color_selector(context, layout, brush, gp_settings):
     sub = row.row(align=True)
     sub.enabled = not gp_settings.use_material_pin
     sub.ui_units_x = 8
-    sub.popover(
-        panel="TOPBAR_PT_grease_pencil_materials",
-        text=txt_ma,
-        translate=False,
-        icon_value=icon_id,
-    )
+    if ma and not context.preferences.edit.use_material_selector_previews:
+        sub.popover(
+            panel="TOPBAR_PT_grease_pencil_materials",
+            text=txt_ma,
+            translate=False,
+            icon='MATERIAL',
+        )
+    else:
+        sub.popover(
+            panel="TOPBAR_PT_grease_pencil_materials",
+            text=txt_ma,
+            translate=False,
+            icon_value=icon_id,
+        )
 
     row.prop(gp_settings, "use_material_pin", text="")
 

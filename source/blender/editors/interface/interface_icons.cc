@@ -1301,6 +1301,10 @@ static void icon_set_image(const bContext *C,
                            enum eIconSizes size,
                            const bool use_job)
 {
+  if (!ED_preview_id_auto_render_is_enabled(id)) {
+    return;
+  }
+
   if (!prv_img) {
     if (G.debug & G_DEBUG) {
       CLOG_WARN(&LOG, "%s: no preview image for this ID: %s", __func__, id->name);
@@ -1937,7 +1941,15 @@ int id_icon_get(const bContext *C, ID *id, const bool big)
 
   /* icon */
   switch (GS(id->name)) {
-    case ID_MA: /* fall through */
+    case ID_MA:
+      if (!ED_preview_id_auto_render_is_enabled(id)) {
+        iconid = icon_from_idcode(ID_MA);
+        break;
+      }
+      iconid = BKE_icon_id_ensure(id);
+      /* checks if not exists, or changed */
+      icon_render_id(C, nullptr, id, big ? ICON_SIZE_PREVIEW : ICON_SIZE_ICON, true);
+      break;
     case ID_TE: /* fall through */
     case ID_IM: /* fall through */
     case ID_WO: /* fall through */

@@ -86,6 +86,10 @@ bool ED_preview_use_image_size(const PreviewImage *preview, eIconSizes size);
  * Check if \a id is supported by the automatic preview render.
  */
 bool ED_preview_id_is_supported(const ID *id, const char **r_disabled_hint = nullptr);
+/**
+ * Check if automatic preview rendering is currently enabled for \a id.
+ */
+bool ED_preview_id_auto_render_is_enabled(const ID *id);
 
 void ED_preview_set_visibility(Main *pr_main,
                                Scene *scene,

@@ -8329,10 +8329,17 @@ class VIEW3D_MT_greasepencil_material_active(Menu):
             mat = slot.material
             if not mat:
                 continue
-            mat.id_data.preview_ensure()
-            if mat and mat.id_data and mat.id_data.preview:
-                icon = mat.id_data.preview.icon_id
-                layout.operator("grease_pencil.set_material", text=mat.name, icon_value=icon).slot = mat.name
+            use_material_preview = context.preferences.edit.use_material_selector_previews
+            if use_material_preview:
+                mat.id_data.preview_ensure()
+                if mat.id_data.preview:
+                    layout.operator(
+                        "grease_pencil.set_material", text=mat.name,
+                        icon_value=mat.id_data.preview.icon_id,
+                    ).slot = mat.name
+                    continue
+            if not use_material_preview:
+                layout.operator("grease_pencil.set_material", text=mat.name, icon='MATERIAL').slot = mat.name
 
 
 class VIEW3D_MT_grease_pencil_assign_material(Menu):

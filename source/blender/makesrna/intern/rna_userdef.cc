@@ -250,6 +250,7 @@ static const EnumPropertyItem rna_enum_preferences_asset_import_method_items[] =
 #  include "MEM_guardedalloc.h"
 
 #  include "ED_asset_list.hh"
+#  include "ED_render.hh"
 #  include "ED_screen.hh"
 
 #  include "UI_interface.hh"
@@ -295,6 +296,17 @@ static void rna_userdef_update(Main * /*bmain*/, Scene * /*scene*/, PointerRNA *
 {
   WM_main_add_notifier(NC_WINDOW, nullptr);
   USERDEF_TAG_DIRTY;
+}
+
+static void rna_userdef_material_selector_previews_update(Main *bmain,
+                                                          Scene *scene,
+                                                          PointerRNA *ptr)
+{
+  if ((U.uiflag & USER_MATERIAL_SELECTOR_PREVIEWS) == 0 && bmain) {
+    ED_preview_kill_jobs(static_cast<wmWindowManager *>(bmain->wm.first), bmain);
+  }
+
+  rna_userdef_update(bmain, scene, ptr);
 }
 
 static void rna_userdef_theme_update(Main *bmain, Scene *scene, PointerRNA *ptr)
@@ -5530,8 +5542,9 @@ static void rna_def_userdef_edit(BlenderRNA *brna)
   RNA_def_property_boolean_sdna(prop, nullptr, "uiflag", USER_MATERIAL_SELECTOR_PREVIEWS);
   RNA_def_property_ui_text(prop,
                            "Material Selector Previews",
-                           "Render preview images for materials in selector drop-down lists");
-  RNA_def_property_update(prop, 0, "rna_userdef_update");
+                           "Render automatic preview images for materials in selector "
+                           "drop-down lists and material preview panels");
+  RNA_def_property_update(prop, 0, "rna_userdef_material_selector_previews_update");
 
   prop = RNA_def_property(srna, "object_align", PROP_ENUM, PROP_NONE);
   RNA_def_property_enum_bitflag_sdna(prop, nullptr, "flag");

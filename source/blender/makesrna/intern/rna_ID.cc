@@ -236,6 +236,7 @@ const IDFilterEnumPropertyItem rna_enum_id_type_filter_items[] = {
 #  include "DEG_depsgraph_query.hh"
 
 #  include "ED_asset.hh"
+#  include "ED_render.hh"
 
 #  include "WM_api.hh"
 
@@ -1521,6 +1522,10 @@ static void rna_ImagePreview_icon_pixels_float_set(PointerRNA *ptr, const float 
 
 static int rna_ImagePreview_icon_id_get(PointerRNA *ptr)
 {
+  if (!ED_preview_id_auto_render_is_enabled(ptr->owner_id)) {
+    return 0;
+  }
+
   /* Using a callback here allows us to only generate icon matching
    * that preview when icon_id is requested. */
   return BKE_icon_preview_ensure(ptr->owner_id, static_cast<PreviewImage *>(ptr->data));

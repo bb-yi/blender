@@ -16,6 +16,7 @@
 
 #include "DNA_ID.h"
 #include "DNA_gpencil_legacy_types.h"
+#include "DNA_userdef_types.h"
 
 #include "BLI_fileops.h"
 #include "BLI_linklist_lockfree.h"
@@ -347,6 +348,10 @@ int BKE_icon_gplayer_color_ensure(bGPDlayer *gpl)
 int BKE_icon_preview_ensure(ID *id, PreviewImage *preview)
 {
   if (!preview || G.background) {
+    return 0;
+  }
+
+  if (id && GS(id->name) == ID_MA && (U.uiflag & USER_MATERIAL_SELECTOR_PREVIEWS) == 0) {
     return 0;
   }
 
