@@ -1153,14 +1153,16 @@ void blo_do_versions_510(FileData *fd, Library * /*lib*/, Main *bmain)
     }
   }
 
-  if (!DNA_struct_member_exists(fd->filesdna, "Material", "char", "ztest_mode")) {
-    for (Material &mat : bmain->materials) {
-      mat.ztest_mode = MA_ZTEST_LESS_EQUAL;
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 49)) {
+    if (!DNA_struct_member_exists(fd->filesdna, "Material", "char", "ztest_mode")) {
+      for (Material &mat : bmain->materials) {
+        mat.ztest_mode = MA_ZTEST_LESS_EQUAL;
+      }
     }
-  }
-  else {
-    for (Material &mat : bmain->materials) {
-      mat.ztest_mode = char(material_ztest_mode_get(mat));
+    else {
+      for (Material &mat : bmain->materials) {
+        mat.ztest_mode = char(material_ztest_mode_get(mat));
+      }
     }
   }
 

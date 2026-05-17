@@ -90,7 +90,7 @@ namespace blender::eevee
     /** Cached, used for detecting updates. */
     float4x4 object_mat = float4x4::identity();
 
-    float shadow_map_scale;
+    float shadow_map_scale = 1.0f;
 
   public:
     ShadowTileMap(int tiles_index_) : ShadowTileMapData{}
