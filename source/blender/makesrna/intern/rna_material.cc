@@ -1217,7 +1217,12 @@ void RNA_def_material(BlenderRNA *brna)
   prop = RNA_def_property(srna, "ztest_mode", PROP_ENUM, PROP_NONE);
   RNA_def_property_enum_sdna(prop, nullptr, "ztest_mode");
   RNA_def_property_enum_items(prop, prop_eevee_ztest_mode_items);
-  RNA_def_property_ui_text(prop, "ZTest Mode", "Depth test mode used by Eevee surface rendering");
+  RNA_def_property_ui_text(
+      prop,
+      "ZTest Mode",
+      "Depth test mode used by Eevee surface rendering. NEVER skips every "
+      "fragment, including stencil writes, so stencil writers should keep the "
+      "default LESS_EQUAL and disable Color/Depth Write instead");
   RNA_def_property_update(prop, 0, "rna_Material_draw_update");
 
   prop = RNA_def_property(srna, "use_color_write", PROP_BOOLEAN, PROP_NONE);
@@ -1273,7 +1278,12 @@ void RNA_def_material(BlenderRNA *brna)
   RNA_def_property_int_sdna(prop, nullptr, "stencil_order");
   RNA_def_property_range(prop, -100, 100);
   RNA_def_property_ui_text(
-      prop, "Stencil Order", "Order used when submitting Eevee material stencil writers");
+      prop,
+      "Stencil Order",
+      "Submission order for Eevee material stencil writers. Lower values are "
+      "submitted first within the stencil pass, so writers must use a smaller "
+      "order than any reader that relies on the value they write (the default "
+      "0 leaves the order unspecified between equal values)");
   RNA_def_property_update(prop, 0, "rna_Material_draw_update");
 
   prop = RNA_def_property(srna, "stencil_reference", PROP_INT, PROP_UNSIGNED);
