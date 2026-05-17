@@ -389,7 +389,8 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
                                                blender::Material *blender_mat,
                                                eMaterialPipeline pipeline_type,
                                                eMaterialGeometry geometry_type,
-                                               eMaterialProbe probe_capture)
+                                               eMaterialProbe probe_capture,
+                                               const bool register_pass)
 {
   if (blender_mat->eevee_domain == MA_EEVEE_DOMAIN_FILTER) {
     /* Filter materials are evaluated as a dedicated fullscreen post pass. */
@@ -492,7 +493,7 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
     }
   }
 
-  if (is_volume || (is_forward && is_transparent)) {
+  if (!register_pass || is_volume || (is_forward && is_transparent)) {
     /* Sub pass is generated later. */
     matpass.sub_pass = nullptr;
   }
@@ -599,8 +600,12 @@ Material &MaterialModule::material_sync(Object *ob,
     return mat;
   }
 
-  const bool use_forward_pipeline = (blender_mat->surface_render_method ==
-                                     MA_SURFACE_METHOD_FORWARD);
+  const bool color_write = material_color_write_get(*blender_mat);
+  const bool depth_write = material_depth_write_get(*blender_mat);
+  const bool uses_custom_ztest = material_ztest_mode_get(*blender_mat) != MA_ZTEST_LESS_EQUAL;
+  const bool use_forward_pipeline = blender_mat->surface_render_method ==
+                                        MA_SURFACE_METHOD_FORWARD ||
+                                    !depth_write || uses_custom_ztest;
   const bool is_filter_material = blender_mat->eevee_domain == MA_EEVEE_DOMAIN_FILTER;
   eMaterialPipeline surface_pipe, prepass_pipe;
   if (use_forward_pipeline) {
@@ -654,19 +659,23 @@ Material &MaterialModule::material_sync(Object *ob,
       /* Order is important for transparent. */
       if (!hide_on_camera) {
         mat.prepass = material_pass_get(ob, blender_mat, prepass_pipe, geometry_type);
+        if (!depth_write) {
+          mat.prepass.sub_pass = nullptr;
+        }
       }
       else {
         mat.prepass = MaterialPass();
       }
 
       mat.shading = material_pass_get(ob, blender_mat, surface_pipe, geometry_type);
-      const bool has_npr_tree = !hide_on_camera && (surface_pipe == MAT_PIPE_DEFERRED) &&
-                                (npr_tree_get_from_mat(blender_mat) != nullptr);
-      mat.npr = has_npr_tree ? material_pass_get(
+      const bool has_deferred_npr_tree = !hide_on_camera && (surface_pipe == MAT_PIPE_DEFERRED) &&
+                                         (npr_tree_get_from_mat(blender_mat) != nullptr);
+      const bool has_surface_npr_tree = has_deferred_npr_tree && color_write;
+      mat.npr = has_surface_npr_tree ? material_pass_get(
                                    ob, blender_mat, MAT_PIPE_DEFERRED_NPR, geometry_type) :
                                MaterialPass();
-      if (!hide_on_camera && inst_.scene->eevee.use_outline != 0 && use_forward_pipeline &&
-          GPU_material_flag_get(mat.shading.gpumat, GPU_MATFLAG_TRANSPARENT))
+      if (!hide_on_camera && color_write && inst_.scene->eevee.use_outline != 0 &&
+          use_forward_pipeline && material_has_flag(mat.shading, GPU_MATFLAG_TRANSPARENT))
       {
         mat.outline_occlusion = material_pass_get(
             ob, blender_mat, MAT_PIPE_PREPASS_OVERLAP, geometry_type);
@@ -678,7 +687,7 @@ Material &MaterialModule::material_sync(Object *ob,
         mat.prepass.sub_pass = inst_.pipelines.deferred.prepass_add(
             blender_mat, mat.prepass.gpumat, has_motion, ob->refraction_layer_index, true);
       }
-      if (hide_on_camera) {
+      if (hide_on_camera || !color_write) {
         /* Only null the sub_pass.
          * `mat.shading.gpumat` is always needed for using the GPU_material API. */
         mat.shading.sub_pass = nullptr;
@@ -695,10 +704,10 @@ Material &MaterialModule::material_sync(Object *ob,
             ob, blender_mat, MAT_PIPE_PREPASS_DEFERRED, geometry_type, MAT_PROBE_REFLECTION);
         mat.lightprobe_sphere_shading = material_pass_get(
             ob, blender_mat, MAT_PIPE_DEFERRED, geometry_type, MAT_PROBE_REFLECTION);
-        mat.lightprobe_sphere_npr = has_npr_tree ? material_pass_get(
-                                                     ob,
-                                                     blender_mat,
-                                                     MAT_PIPE_DEFERRED_NPR,
+        mat.lightprobe_sphere_npr = has_deferred_npr_tree ? material_pass_get(
+                                                      ob,
+                                                      blender_mat,
+                                                      MAT_PIPE_DEFERRED_NPR,
                                                      geometry_type,
                                                      MAT_PROBE_REFLECTION) :
                                                  MaterialPass();
@@ -720,10 +729,10 @@ Material &MaterialModule::material_sync(Object *ob,
             ob, blender_mat, MAT_PIPE_PREPASS_PLANAR, geometry_type, MAT_PROBE_PLANAR);
         mat.planar_probe_shading = material_pass_get(
             ob, blender_mat, MAT_PIPE_DEFERRED, geometry_type, MAT_PROBE_PLANAR);
-        mat.planar_probe_npr = has_npr_tree ? material_pass_get(
-                                                 ob,
-                                                 blender_mat,
-                                                 MAT_PIPE_DEFERRED_NPR,
+        mat.planar_probe_npr = has_deferred_npr_tree ? material_pass_get(
+                                                  ob,
+                                                  blender_mat,
+                                                  MAT_PIPE_DEFERRED_NPR,
                                                  geometry_type,
                                                  MAT_PROBE_PLANAR) :
                                              MaterialPass();
@@ -754,8 +763,10 @@ Material &MaterialModule::material_sync(Object *ob,
       }
     }
 
-    const bool disable_depth_offset_shadow = material_depth_offset_disables_shadow(*blender_mat,
-                                                                                  mat.shading);
+    const MaterialPass surface_pass_for_depth_offset = mat.shading.gpumat != nullptr ? mat.shading :
+                                                                                       mat.prepass;
+    const bool disable_depth_offset_shadow = material_depth_offset_disables_shadow(
+        *blender_mat, surface_pass_for_depth_offset);
     /* Shadow maps cannot represent this material mode consistently because lighting evaluates the
      * depth-offset position while the caster geometry remains at the original surface. */
     const bool is_shadow_caster = !(ob->visibility_flag & OB_HIDE_SHADOW);
@@ -776,20 +787,20 @@ Material &MaterialModule::material_sync(Object *ob,
       mat.shadow = MaterialPass();
     }
 
-    mat.is_alpha_blend_transparent = use_forward_pipeline &&
-                                     GPU_material_flag_get(mat.shading.gpumat,
-                                                           GPU_MATFLAG_TRANSPARENT);
+    mat.is_alpha_blend_transparent = color_write && use_forward_pipeline &&
+                                     material_has_flag(mat.shading, GPU_MATFLAG_TRANSPARENT);
     mat.has_transparent_shadows = !disable_depth_offset_shadow &&
                                   ((blender_mat->blend_flag & MA_BL_TRANSPARENT_SHADOW) != 0) &&
-                                  GPU_material_flag_get(mat.shading.gpumat,
-                                                        GPU_MATFLAG_TRANSPARENT);
+                                  material_has_flag(mat.shading, GPU_MATFLAG_TRANSPARENT);
 
     MaterialStencilState stencil = material_stencil_state_get(blender_mat);
     if (!hide_on_camera && mat.has_surface && stencil.enabled && !mat.is_alpha_blend_transparent &&
         mat.prepass.gpumat != nullptr)
     {
       mat.stencil.gpumat = mat.prepass.gpumat;
-      mat.stencil.sub_pass = use_forward_pipeline ?
+      const bool use_forward_stencil_pipeline = blender_mat->surface_render_method ==
+                                                MA_SURFACE_METHOD_FORWARD;
+      mat.stencil.sub_pass = use_forward_stencil_pipeline ?
                                  inst_.pipelines.forward.stencil_opaque_add(blender_mat,
                                                                             mat.stencil.gpumat,
                                                                             has_motion,

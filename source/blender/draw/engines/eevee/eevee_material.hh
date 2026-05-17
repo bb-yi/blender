@@ -244,7 +244,22 @@ static inline bool pipeline_uses_material_ztest(eMaterialPipeline pipeline_type)
               MAT_PIPE_PREPASS_FORWARD,
               MAT_PIPE_PREPASS_FORWARD_VELOCITY,
               MAT_PIPE_PREPASS_PLANAR,
-              MAT_PIPE_PREPASS_OVERLAP);
+              MAT_PIPE_PREPASS_OVERLAP,
+              MAT_PIPE_FORWARD);
+}
+
+static inline bool pipeline_uses_material_write_state(eMaterialPipeline pipeline_type)
+{
+  return ELEM(pipeline_type,
+              MAT_PIPE_PREPASS_DEFERRED,
+              MAT_PIPE_PREPASS_DEFERRED_VELOCITY,
+              MAT_PIPE_PREPASS_FORWARD,
+              MAT_PIPE_PREPASS_FORWARD_VELOCITY,
+              MAT_PIPE_PREPASS_PLANAR,
+              MAT_PIPE_PREPASS_OVERLAP,
+              MAT_PIPE_DEFERRED,
+              MAT_PIPE_DEFERRED_NPR,
+              MAT_PIPE_FORWARD);
 }
 
 /**
@@ -278,6 +293,8 @@ struct MaterialKey {
     options = (options << 1) | (visibility_flags & OB_HIDE_PROBE_PLANAR ? 0 : 1);
     options = (options << 16) | uint16_t(refraction_layer);
     options = (options << 3) | uint64_t(material_ztest_mode_get(*mat_));
+    options = (options << 1) | uint64_t(material_color_write_get(*mat_));
+    options = (options << 1) | uint64_t(material_depth_write_get(*mat_));
     const uint64_t stencil_enabled = mat_->stencil_enabled != 0;
     stencil_order = stencil_enabled ? mat_->stencil_order : 0;
     options = (options << 1) | stencil_enabled;
@@ -332,6 +349,12 @@ struct ShaderKey {
               uint64_t(pipeline_uses_material_ztest(pipeline_type) ?
                            material_ztest_mode_get(*blender_mat) :
                            MA_ZTEST_LESS_EQUAL);
+    const bool use_material_write_state = (probe_capture == MAT_PROBE_NONE) &&
+                                          pipeline_uses_material_write_state(pipeline_type);
+    options = (options << 1) |
+              uint64_t(use_material_write_state ? material_color_write_get(*blender_mat) : true);
+    options = (options << 1) |
+              uint64_t(use_material_write_state ? material_depth_write_get(*blender_mat) : true);
     options = (options << 2) | uint64_t(probe_capture);
     options = (options << 16) | uint16_t(refraction_layer);
   }
@@ -468,7 +491,8 @@ class MaterialModule {
                                  blender::Material *blender_mat,
                                  eMaterialPipeline pipeline_type,
                                  eMaterialGeometry geometry_type,
-                                 eMaterialProbe probe_capture = MAT_PROBE_NONE);
+                                 eMaterialProbe probe_capture = MAT_PROBE_NONE,
+                                 bool register_pass = true);
 
   /* Push unloaded texture used by this material to the texture loading queue. */
   void queue_texture_loading(GPUMaterial *material);

@@ -487,6 +487,9 @@ struct VKGraphicsPipelineCreateInfoBuilder {
         case GPU_DEPTH_ALWAYS:
           vk_pipeline_depth_stencil_state_create_info.depthCompareOp = VK_COMPARE_OP_ALWAYS;
           break;
+        case GPU_DEPTH_NEVER:
+          vk_pipeline_depth_stencil_state_create_info.depthCompareOp = VK_COMPARE_OP_NEVER;
+          break;
         case GPU_DEPTH_NONE:
           vk_pipeline_depth_stencil_state_create_info.depthTestEnable = VK_FALSE;
           vk_pipeline_depth_stencil_state_create_info.depthCompareOp = VK_COMPARE_OP_NEVER;

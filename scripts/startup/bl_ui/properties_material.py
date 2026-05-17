@@ -266,6 +266,8 @@ def draw_material_surface_settings(layout, mat, is_eevee=True):
     col.prop(mat, "use_backface_culling_lightprobe_volume", text="Light Probe Volume")
     col.prop(mat, "depth_offset_affect_lighting", text="Depth Offset Affects Lighting")
 
+    col = layout.column()
+    col.prop(mat, "ztest_mode", text="ZTest")
     if is_eevee:
         header, panel = layout.panel("material_surface_stencil_settings", default_closed=True)
         header.label(text="Stencil")
@@ -274,8 +276,9 @@ def draw_material_surface_settings(layout, mat, is_eevee=True):
             panel.use_property_decorate = False
             draw_material_stencil_settings(panel, mat)
 
-    col = layout.column()
-    col.prop(mat, "ztest_mode", text="ZTest")
+        col = layout.column()
+        col.prop(mat, "use_color_write", text="Color Write")
+        col.prop(mat, "use_depth_write", text="Depth Write")
 
     col = layout.column(align=True)
 

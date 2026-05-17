@@ -34,7 +34,7 @@ enum DRWState : uint32_t {
   DRW_STATE_WRITE_STENCIL = (1 << 2),
   DRW_STATE_WRITE_STENCIL_SHADOW_PASS = (2 << 2),
   DRW_STATE_WRITE_STENCIL_SHADOW_FAIL = (3 << 2),
-  /** Depth test. These options are mutual exclusive and packed into 3 bits */
+  /** Depth test. These options are mutual exclusive and packed into 4 bits. */
   DRW_STATE_DEPTH_ALWAYS = (1 << 4),
   DRW_STATE_DEPTH_LESS = (2 << 4),
   DRW_STATE_DEPTH_LESS_EQUAL = (3 << 4),
@@ -42,31 +42,32 @@ enum DRWState : uint32_t {
   DRW_STATE_DEPTH_GREATER = (5 << 4),
   DRW_STATE_DEPTH_GREATER_EQUAL = (6 << 4),
   DRW_STATE_DEPTH_NOT_EQUAL = (7 << 4),
+  DRW_STATE_DEPTH_NEVER = (8 << 4),
   /** Culling test */
-  DRW_STATE_CULL_BACK = (1 << 7),
-  DRW_STATE_CULL_FRONT = (1 << 8),
+  DRW_STATE_CULL_BACK = (1 << 8),
+  DRW_STATE_CULL_FRONT = (1 << 9),
   /** Stencil test. These options are mutually exclusive and packed into 2 bits. */
-  DRW_STATE_STENCIL_ALWAYS = (1 << 9),
-  DRW_STATE_STENCIL_EQUAL = (2 << 9),
-  DRW_STATE_STENCIL_NEQUAL = (3 << 9),
+  DRW_STATE_STENCIL_ALWAYS = (1 << 10),
+  DRW_STATE_STENCIL_EQUAL = (2 << 10),
+  DRW_STATE_STENCIL_NEQUAL = (3 << 10),
 
   /** Blend state. These options are mutual exclusive and packed into 4 bits */
-  DRW_STATE_BLEND_ADD = (1 << 11),
+  DRW_STATE_BLEND_ADD = (1 << 12),
   /** Same as additive but let alpha accumulate without pre-multiply. */
-  DRW_STATE_BLEND_ADD_FULL = (2 << 11),
+  DRW_STATE_BLEND_ADD_FULL = (2 << 12),
   /** Standard alpha blending. */
-  DRW_STATE_BLEND_ALPHA = (3 << 11),
+  DRW_STATE_BLEND_ALPHA = (3 << 12),
   /** Use that if color is already pre-multiply by alpha. */
-  DRW_STATE_BLEND_ALPHA_PREMUL = (4 << 11),
-  DRW_STATE_BLEND_BACKGROUND = (5 << 11),
-  DRW_STATE_BLEND_OIT = (6 << 11),
-  DRW_STATE_BLEND_MUL = (7 << 11),
-  DRW_STATE_BLEND_SUB = (8 << 11),
+  DRW_STATE_BLEND_ALPHA_PREMUL = (4 << 12),
+  DRW_STATE_BLEND_BACKGROUND = (5 << 12),
+  DRW_STATE_BLEND_OIT = (6 << 12),
+  DRW_STATE_BLEND_MUL = (7 << 12),
+  DRW_STATE_BLEND_SUB = (8 << 12),
   /** Use dual source blending. WARNING: Only one color buffer allowed. */
-  DRW_STATE_BLEND_CUSTOM = (9 << 11),
-  DRW_STATE_LOGIC_INVERT = (10 << 11),
-  DRW_STATE_BLEND_ALPHA_UNDER_PREMUL = (11 << 11),
-  DRW_STATE_BLEND_TRANSPARENCY = (12 << 11),
+  DRW_STATE_BLEND_CUSTOM = (9 << 12),
+  DRW_STATE_LOGIC_INVERT = (10 << 12),
+  DRW_STATE_BLEND_ALPHA_UNDER_PREMUL = (11 << 12),
+  DRW_STATE_BLEND_TRANSPARENCY = (12 << 12),
 
   /* See GPU_clip_control_unit_range. */
   DRW_STATE_CLIP_CONTROL_UNIT_RANGE = (1 << 28),
@@ -90,7 +91,7 @@ ENUM_OPERATORS(DRWState);
 #define DRW_STATE_DEPTH_TEST_ENABLED \
   (DRW_STATE_DEPTH_ALWAYS | DRW_STATE_DEPTH_LESS | DRW_STATE_DEPTH_LESS_EQUAL | \
    DRW_STATE_DEPTH_EQUAL | DRW_STATE_DEPTH_GREATER | DRW_STATE_DEPTH_GREATER_EQUAL | \
-   DRW_STATE_DEPTH_NOT_EQUAL)
+   DRW_STATE_DEPTH_NOT_EQUAL | DRW_STATE_DEPTH_NEVER)
 #define DRW_STATE_STENCIL_TEST_ENABLED \
   (DRW_STATE_STENCIL_ALWAYS | DRW_STATE_STENCIL_EQUAL | DRW_STATE_STENCIL_NEQUAL)
 #define DRW_STATE_WRITE_STENCIL_ENABLED \
@@ -147,6 +148,8 @@ static inline GPUDepthTest to_depth_test(DRWState state)
       return GPU_DEPTH_NOT_EQUAL;
     case DRW_STATE_DEPTH_ALWAYS:
       return GPU_DEPTH_ALWAYS;
+    case DRW_STATE_DEPTH_NEVER:
+      return GPU_DEPTH_NEVER;
     default:
       return GPU_DEPTH_NONE;
   }

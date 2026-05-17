@@ -213,6 +213,7 @@ enum eMaterialZTestMode {
   MA_ZTEST_EQUAL = 4,
   MA_ZTEST_NOT_EQUAL = 5,
   MA_ZTEST_ALWAYS = 6,
+  MA_ZTEST_NEVER = 7,
 };
 
 /** #Material::stencil_test */
@@ -481,7 +482,9 @@ struct Material {
   char stencil_fail_op = MA_STENCIL_OP_KEEP;
   char stencil_zfail_op = MA_STENCIL_OP_KEEP;
   short stencil_order = 0;
-  char _pad4[6] = {};
+  char color_write = true;
+  char depth_write = true;
+  char _pad4[4] = {};
 };
 
 #ifdef __cplusplus
@@ -508,10 +511,21 @@ inline eMaterialZTestMode material_ztest_mode_get(const Material &material)
     case MA_ZTEST_EQUAL:
     case MA_ZTEST_NOT_EQUAL:
     case MA_ZTEST_ALWAYS:
+    case MA_ZTEST_NEVER:
       return eMaterialZTestMode(material.ztest_mode);
     default:
       return MA_ZTEST_LESS_EQUAL;
   }
+}
+
+inline bool material_color_write_get(const Material &material)
+{
+  return material.color_write != 0;
+}
+
+inline bool material_depth_write_get(const Material &material)
+{
+  return material.depth_write != 0;
 }
 #endif
 

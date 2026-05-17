@@ -174,6 +174,8 @@ static MTLCompareFunction gpu_depth_function_to_metal(GPUDepthTest depth_func)
       return MTLCompareFunctionNotEqual;
     case GPU_DEPTH_ALWAYS:
       return MTLCompareFunctionAlways;
+    case GPU_DEPTH_NEVER:
+      return MTLCompareFunctionNever;
     default:
       BLI_assert(false && "Invalid GPUDepthTest");
       break;

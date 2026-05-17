@@ -1202,6 +1202,16 @@ void blo_do_versions_510(FileData *fd, Library * /*lib*/, Main *bmain)
     }
   }
 
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 49) ||
+      !DNA_struct_member_exists(fd->filesdna, "Material", "char", "color_write") ||
+      !DNA_struct_member_exists(fd->filesdna, "Material", "char", "depth_write"))
+  {
+    for (Material &mat : bmain->materials) {
+      mat.color_write = true;
+      mat.depth_write = true;
+    }
+  }
+
   /**
    * Always bump subversion in BKE_blender_version.h when adding versioning
    * code here, and wrap it inside a MAIN_VERSION_FILE_ATLEAST check.

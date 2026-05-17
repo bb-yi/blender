@@ -206,7 +206,7 @@ class ScreenSpaceShadowFilter {
  * \{ */
 
 class Prepass : public PassMain {
-  PassMain::Sub *prepass_subpasses[7 /*ztest*/][3 /*cull mode*/][2 /*moving*/]
+  PassMain::Sub *prepass_subpasses[8 /*ztest*/][3 /*cull mode*/][2 /*moving*/]
                                       [2 /*write id*/] = {{{{nullptr}}}};
 
  public:
@@ -237,6 +237,7 @@ class ForwardPipeline {
   PassMain::Sub *opaque_single_sided_ps_ = nullptr;
   PassMain::Sub *opaque_front_cull_ps_ = nullptr;
   PassMain::Sub *opaque_double_sided_ps_ = nullptr;
+  PassSortable no_depth_ps_ = {"Shading.NoDepth"};
 
   PassSortable transparent_ps_ = {"Forward.Transparent"};
   float3 camera_forward_;
@@ -247,6 +248,7 @@ class ForwardPipeline {
 
   bool has_opaque_ = false;
   bool has_transparent_ = false;
+  bool has_no_depth_ = false;
   bool has_holdout_ = false;
   bool has_outline_occluders_ = false;
   bool has_stencil_ = false;
@@ -282,6 +284,9 @@ class ForwardPipeline {
   PassMain::Sub *material_opaque_add(const Object *ob,
                                      blender::Material *blender_mat,
                                      GPUMaterial *gpumat);
+  PassMain::Sub *material_no_depth_add(const Object *ob,
+                                       blender::Material *blender_mat,
+                                       GPUMaterial *gpumat);
 
   PassMain::Sub *prepass_transparent_add(const Object *ob,
                                          blender::Material *blender_mat,
@@ -458,6 +463,7 @@ class DeferredLayer : DeferredLayerBase {
   bool use_clamp_direct_ = false;
   bool use_clamp_indirect_ = false;
   bool has_outline_ = false;
+  bool has_prepass_ = false;
   bool has_stencil_ = false;
   bool is_first_pass_ = true;
 
@@ -487,7 +493,7 @@ class DeferredLayer : DeferredLayerBase {
 
   bool is_empty() const
   {
-    return closure_count_ == 0;
+    return !has_prepass_ && !has_stencil_ && closure_count_ == 0;
   }
 
   bool has_transmission() const
@@ -1054,6 +1060,12 @@ class PipelineModule {
       case MAT_PIPE_DEFERRED_NPR:
         return deferred.npr_add(blender_mat, gpumat, ob->refraction_layer_index);
       case MAT_PIPE_FORWARD:
+        if (!material_color_write_get(*blender_mat)) {
+          return nullptr;
+        }
+        if (!material_depth_write_get(*blender_mat)) {
+          return forward.material_no_depth_add(ob, blender_mat, gpumat);
+        }
         return forward.material_opaque_add(ob, blender_mat, gpumat);
       case MAT_PIPE_SHADOW:
         return shadow.surface_material_add(blender_mat, gpumat);

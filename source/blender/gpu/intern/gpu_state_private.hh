@@ -29,7 +29,7 @@ union GPUState {
     /** GPUFaceCullTest */
     uint32_t culling_test : 2;
     /** GPUDepthTest */
-    uint32_t depth_test : 3;
+    uint32_t depth_test : 4;
     /** GPUStencilTest */
     uint32_t stencil_test : 4;
     /** GPUStencilOp */

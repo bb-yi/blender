@@ -1103,6 +1103,7 @@ void RNA_def_material(BlenderRNA *brna)
        "Not Equal",
        "Pass when the material depth does not equal the stored depth"},
       {MA_ZTEST_ALWAYS, "ALWAYS", 0, "Always", "Always pass the depth test"},
+      {MA_ZTEST_NEVER, "NEVER", 0, "Never", "Never pass the depth test"},
       {0, nullptr, 0, nullptr, nullptr},
   };
 
@@ -1217,6 +1218,18 @@ void RNA_def_material(BlenderRNA *brna)
   RNA_def_property_enum_sdna(prop, nullptr, "ztest_mode");
   RNA_def_property_enum_items(prop, prop_eevee_ztest_mode_items);
   RNA_def_property_ui_text(prop, "ZTest Mode", "Depth test mode used by Eevee surface rendering");
+  RNA_def_property_update(prop, 0, "rna_Material_draw_update");
+
+  prop = RNA_def_property(srna, "use_color_write", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "color_write", 1);
+  RNA_def_property_ui_text(
+      prop, "Color Write", "Write Eevee material surface color output");
+  RNA_def_property_update(prop, 0, "rna_Material_draw_update");
+
+  prop = RNA_def_property(srna, "use_depth_write", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "depth_write", 1);
+  RNA_def_property_ui_text(
+      prop, "Depth Write", "Write Eevee material surface depth output");
   RNA_def_property_update(prop, 0, "rna_Material_draw_update");
 
   prop = RNA_def_property(srna, "depth_offset_affect_lighting", PROP_BOOLEAN, PROP_NONE);

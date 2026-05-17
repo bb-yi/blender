@@ -34,6 +34,30 @@ static float material_stencil_order(const blender::Material *material)
   return material != nullptr ? float(material->stencil_order) : 0.0f;
 }
 
+static bool material_color_write_enabled(const blender::Material *material)
+{
+  return material == nullptr || blender::material_color_write_get(*material);
+}
+
+static bool material_depth_write_enabled(const blender::Material *material)
+{
+  return material == nullptr || blender::material_depth_write_get(*material);
+}
+
+static DRWState material_write_state(const blender::Material *material,
+                                     const bool color_default,
+                                     const bool depth_default)
+{
+  DRWState state = DRW_STATE_NO_DRAW;
+  if (color_default && material_color_write_enabled(material)) {
+    state |= DRW_STATE_WRITE_COLOR;
+  }
+  if (depth_default && material_depth_write_enabled(material)) {
+    state |= DRW_STATE_WRITE_DEPTH;
+  }
+  return state;
+}
+
 static DRWState material_surface_cull_state(const eMaterialCullMethod cull_method)
 {
   switch (cull_method) {
@@ -70,6 +94,8 @@ static DRWState material_ztest_state(const eMaterialZTestMode ztest_mode,
       return DRW_STATE_DEPTH_NOT_EQUAL;
     case MA_ZTEST_ALWAYS:
       return DRW_STATE_DEPTH_ALWAYS;
+    case MA_ZTEST_NEVER:
+      return DRW_STATE_DEPTH_NEVER;
     case MA_ZTEST_LESS_EQUAL:
     default:
       return default_depth_state & DRW_STATE_DEPTH_TEST_ENABLED;
@@ -213,8 +239,8 @@ static PassMain::Sub *material_stencil_pass_add(PassSortable &stencil_ps,
                            {GPU_ATTACHMENT_WRITE, /* normal */
                             write_id ? GPU_ATTACHMENT_WRITE : GPU_ATTACHMENT_IGNORE,
                             has_motion ? GPU_ATTACHMENT_WRITE : GPU_ATTACHMENT_IGNORE});
-  const DRWState state = DRW_STATE_WRITE_DEPTH | DRW_STATE_WRITE_COLOR | DRW_STATE_WRITE_STENCIL |
-                         DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
+  const DRWState state = material_write_state(blender_mat, true, true) |
+                         DRW_STATE_WRITE_STENCIL | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
                          material_ztest_state(material_ztest_mode(blender_mat),
                                               inst.film.depth.test_state) |
                          material_surface_cull_state(material_surface_cull_method(blender_mat)) |
@@ -612,13 +638,14 @@ void Prepass::setup_subpasses(DRWState common_state, DRWState default_depth_stat
    * The write will be optimized out if the attachment is empty. */
   common_state |= DRW_STATE_WRITE_COLOR;
 
-  static constexpr const char *ztest_names[7 /*ztest*/] = {"LEqual",
+  static constexpr const char *ztest_names[8 /*ztest*/] = {"LEqual",
                                                            "Less",
                                                            "Greater",
                                                            "GEqual",
                                                            "Equal",
                                                            "NotEqual",
-                                                           "Always"};
+                                                           "Always",
+                                                           "Never"};
   static constexpr const char *subpass_names[3 /*cull mode*/][2 /*moving*/][2 /*write id*/] = {
       {{"DoubleSided.Static.NoID", "DoubleSided.Static.ID"},
        {"DoubleSided.Moving.NoID", "DoubleSided.Moving.ID"}},
@@ -627,7 +654,7 @@ void Prepass::setup_subpasses(DRWState common_state, DRWState default_depth_stat
       {{"FrontCull.Static.NoID", "FrontCull.Static.ID"},
        {"FrontCull.Moving.NoID", "FrontCull.Moving.ID"}}};
 
-  for (int ztest_mode = MA_ZTEST_LESS_EQUAL; ztest_mode <= MA_ZTEST_ALWAYS; ztest_mode++) {
+  for (int ztest_mode = MA_ZTEST_LESS_EQUAL; ztest_mode <= MA_ZTEST_NEVER; ztest_mode++) {
     DRWState ztest_state = material_ztest_state_replace(
         common_state, eMaterialZTestMode(ztest_mode), default_depth_state);
     PassMain::Sub &ztest_pass = this->sub(ztest_names[ztest_mode]);
@@ -673,6 +700,7 @@ void ForwardPipeline::sync()
   camera_forward_ = inst_.camera.forward();
   has_opaque_ = false;
   has_transparent_ = false;
+  has_no_depth_ = false;
   has_holdout_ = false;
   has_outline_occluders_ = false;
   has_stencil_ = false;
@@ -717,17 +745,17 @@ void ForwardPipeline::sync()
       opaque_ps_.bind_resources(inst_.sphere_probes);
     }
 
+    const DRWState opaque_state = DRW_STATE_WRITE_COLOR | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
+                                  DRW_STATE_DEPTH_EQUAL;
+
     opaque_single_sided_ps_ = &opaque_ps_.sub("BackCull");
-    opaque_single_sided_ps_->state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
-                                       DRW_STATE_DEPTH_EQUAL | DRW_STATE_CULL_BACK);
+    opaque_single_sided_ps_->state_set(opaque_state | DRW_STATE_CULL_BACK);
 
     opaque_front_cull_ps_ = &opaque_ps_.sub("FrontCull");
-    opaque_front_cull_ps_->state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
-                                     DRW_STATE_DEPTH_EQUAL | DRW_STATE_CULL_FRONT);
+    opaque_front_cull_ps_->state_set(opaque_state | DRW_STATE_CULL_FRONT);
 
     opaque_double_sided_ps_ = &opaque_ps_.sub("DoubleSided");
-    opaque_double_sided_ps_->state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
-                                       DRW_STATE_DEPTH_EQUAL);
+    opaque_double_sided_ps_->state_set(opaque_state);
   }
   {
     transparent_ps_.init();
@@ -743,6 +771,24 @@ void ForwardPipeline::sync()
     sub.bind_texture(OBJECT_ID_TEX_SLOT, &inst_.render_buffers.object_id_tx);
     sub.bind_texture(PREPASS_NORMAL_TEX_SLOT, &inst_.render_buffers.prepass_normal_tx);
 
+    sub.bind_resources(inst_.uniform_data);
+    sub.bind_resources(inst_.lights);
+    inst_.lights.bind_front_light_shader_resources(sub);
+    sub.bind_resources(inst_.shadows);
+    sub.bind_resources(inst_.volume.result);
+    sub.bind_resources(inst_.sampling);
+    sub.bind_resources(inst_.render_textures);
+    sub.bind_resources(inst_.hiz_buffer.front);
+    sub.bind_resources(inst_.volume_probes);
+    sub.bind_resources(inst_.sphere_probes);
+  }
+  {
+    no_depth_ps_.init();
+    PassMain::Sub &sub = no_depth_ps_.sub("ResourceBind", -FLT_MAX);
+    sub.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);
+    sub.bind_texture(RADIANCE_PREVIOUS_LAYER_TEX_SLOT, &inst_.render_buffers.combined_tx);
+    sub.bind_texture(OBJECT_ID_TEX_SLOT, &inst_.render_buffers.object_id_tx);
+    sub.bind_texture(PREPASS_NORMAL_TEX_SLOT, &inst_.render_buffers.prepass_normal_tx);
     sub.bind_resources(inst_.uniform_data);
     sub.bind_resources(inst_.lights);
     inst_.lights.bind_front_light_shader_resources(sub);
@@ -839,6 +885,37 @@ PassMain::Sub *ForwardPipeline::material_opaque_add(const Object *ob,
   return sub_pass;
 }
 
+PassMain::Sub *ForwardPipeline::material_no_depth_add(const Object *ob,
+                                                      blender::Material *blender_mat,
+                                                      GPUMaterial *gpumat)
+{
+  BLI_assert_msg(material_color_write_enabled(blender_mat),
+                 "No-depth visible pass is only used by materials that write color.");
+  DRWState state = material_write_state(blender_mat, true, false) |
+                   DRW_STATE_CLIP_CONTROL_UNIT_RANGE | inst_.film.depth.test_state |
+                   material_surface_cull_state(material_surface_cull_method(blender_mat));
+  state = material_ztest_state_replace(
+      state, material_ztest_mode(blender_mat), inst_.film.depth.test_state);
+
+  has_opaque_ = true;
+  has_no_depth_ = true;
+  has_holdout_ |= GPU_material_flag_get(gpumat, GPU_MATFLAG_HOLDOUT) ||
+                  (ob->base_flag & BASE_HOLDOUT) || (ob->visibility_flag & OB_HOLDOUT);
+  inst_.lights.tag_front_light_shader_needed();
+  float sorting_value = math::dot(float3(ob->object_to_world().location()), camera_forward_);
+  PassMain::Sub *pass = &no_depth_ps_.sub(GPU_material_get_name(gpumat), sorting_value);
+  pass->state_set(state);
+  pass->material_set(*inst_.manager, gpumat, true);
+  pass->push_constant("surface_cull_mode", int(material_surface_cull_method(blender_mat)));
+  material_stencil_test_only_state_set(*pass, blender_mat);
+  inst_.lights.bind_front_light_shader_resources(*pass);
+  if (inst_.scene->eevee.use_outline) {
+    pass->bind_image(OUTLINE_COLOR_SLOT, &inst_.render_buffers.outline_color_tx);
+    pass->bind_image(OUTLINE_INFO_SLOT, &inst_.render_buffers.outline_info_tx);
+  }
+  return pass;
+}
+
 PassMain::Sub *ForwardPipeline::prepass_transparent_add(const Object *ob,
                                                         blender::Material *blender_mat,
                                                         GPUMaterial *gpumat)
@@ -846,8 +923,8 @@ PassMain::Sub *ForwardPipeline::prepass_transparent_add(const Object *ob,
   if ((blender_mat->blend_flag & MA_BL_HIDE_BACKFACE) == 0) {
     return nullptr;
   }
-  DRWState state = DRW_STATE_WRITE_DEPTH | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
-                   inst_.film.depth.test_state;
+  DRWState state = material_write_state(blender_mat, false, true) |
+                   DRW_STATE_CLIP_CONTROL_UNIT_RANGE | inst_.film.depth.test_state;
   state = material_ztest_state_replace(
       state, material_ztest_mode(blender_mat), inst_.film.depth.test_state);
   state |= material_surface_cull_state(material_surface_cull_method(blender_mat));
@@ -873,7 +950,7 @@ PassMain::Sub *ForwardPipeline::material_transparent_add(const Object *ob,
                                                          blender::Material *blender_mat,
                                                          GPUMaterial *gpumat)
 {
-  DRWState state = DRW_STATE_WRITE_COLOR | DRW_STATE_BLEND_TRANSPARENCY |
+  DRWState state = material_write_state(blender_mat, true, false) | DRW_STATE_BLEND_TRANSPARENCY |
                    DRW_STATE_CLIP_CONTROL_UNIT_RANGE | inst_.film.depth.test_state;
   state = material_ztest_state_replace(
       state, material_ztest_mode(blender_mat), inst_.film.depth.test_state);
@@ -913,8 +990,8 @@ PassMain::Sub *ForwardPipeline::outline_occlusion_add(blender::Material *blender
     return nullptr;
   }
 
-  DRWState state = DRW_STATE_WRITE_DEPTH | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
-                   inst_.film.depth.test_state;
+  DRWState state = material_write_state(blender_mat, false, true) |
+                   DRW_STATE_CLIP_CONTROL_UNIT_RANGE | inst_.film.depth.test_state;
   state = material_ztest_state_replace(
       state, material_ztest_mode(blender_mat), inst_.film.depth.test_state);
   state |= material_surface_cull_state(material_surface_cull_method(blender_mat));
@@ -988,13 +1065,15 @@ void ForwardPipeline::render(View &view,
                              int2 extent)
 {
   /* We need to ensure the pipeline runs if outputing the transparent render-pass (see #154895). */
-  if (!has_transparent_ && !has_opaque_ && inst_.render_buffers.data.transparent_id == -1) {
+  if (!has_transparent_ && !has_opaque_ && !has_no_depth_ &&
+      inst_.render_buffers.data.transparent_id == -1)
+  {
     return;
   }
 
   inst_.hiz_buffer.swap_layer();
 
-  const bool needs_transparency_resolve = has_opaque_ || has_transparent_ ||
+  const bool needs_transparency_resolve = has_opaque_ || has_no_depth_ || has_transparent_ ||
                                           inst_.render_buffers.data.transparent_id != -1;
   const bool use_colored_transparency = needs_transparency_resolve &&
                                         this->use_colored_transparency();
@@ -1076,6 +1155,11 @@ void ForwardPipeline::render(View &view,
   if (has_opaque_) {
     ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainForwardOpaque);
     inst_.manager->submit(opaque_ps_, view);
+  }
+
+  if (has_no_depth_) {
+    ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainForwardOpaque);
+    inst_.manager->submit(no_depth_ps_, view);
   }
 
   GPU_debug_group_end();
@@ -1225,6 +1309,7 @@ template<typename F> void DeferredLayerBase::npr_pass_sync(Instance &inst, F cal
 void DeferredLayer::begin_sync()
 {
   has_outline_ = false;
+  has_prepass_ = false;
   has_stencil_ = false;
   is_first_pass_ = true;
   stencil_ps_.init();
@@ -1512,6 +1597,7 @@ PassMain::Sub *DeferredLayer::prepass_add(blender::Material *blender_mat,
                                           bool has_motion,
                                           bool force_write_id)
 {
+  has_prepass_ = true;
   return prepass_ps_.add(blender_mat, gpumat, has_motion, force_write_id);
 }
 
@@ -1534,12 +1620,19 @@ PassMain::Sub *DeferredLayer::stencil_add(blender::Material *blender_mat,
   PassMain::Sub *pass = DeferredLayerBase::stencil_add(
       blender_mat, gpumat, inst_, inst_.film.depth.test_state, has_motion, force_write_id);
   has_stencil_ |= pass != nullptr;
+  has_prepass_ |= pass != nullptr;
   return pass;
 }
 
 PassMain::Sub *DeferredLayer::material_add(blender::Material *blender_mat, GPUMaterial *gpumat)
 {
   eClosureBits closure_bits = shader_closure_bits_from_flag(gpumat);
+  const bool color_write = material_color_write_enabled(blender_mat);
+  const bool depth_write = material_depth_write_enabled(blender_mat);
+  const bool depth_only = !color_write && depth_write;
+  if (depth_only) {
+    return nullptr;
+  }
   if (closure_bits == eClosureBits(0)) {
     /* Fix the case where there is no active closure in the shader.
      * In this case we force the evaluation of emission to avoid disabling the entire layer by
@@ -1612,7 +1705,7 @@ gpu::Texture *DeferredLayer::render(View &main_view,
                                     RayTraceBuffer &rt_buffer,
                                     gpu::Texture *radiance_behind_tx)
 {
-  if (closure_count_ == 0) {
+  if (this->is_empty()) {
     return radiance_behind_tx;
   }
 
@@ -1640,6 +1733,12 @@ gpu::Texture *DeferredLayer::render(View &main_view,
     ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainDeferredPrepass);
     GPU_framebuffer_bind(prepass_fb);
     inst_.manager->submit(stencil_ps_, render_view);
+  }
+
+  if (closure_count_ == 0) {
+    inst_.hiz_buffer.swap_layer();
+    inst_.hiz_buffer.update();
+    return radiance_behind_tx;
   }
 
   if (!is_first_pass_) {

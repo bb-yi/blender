@@ -462,6 +462,9 @@ std::string VKGraphicsInfo::pipeline_info_source() const
     case GPU_DEPTH_ALWAYS:
       result << "GPU_DEPTH_ALWAYS";
       break;
+    case GPU_DEPTH_NEVER:
+      result << "GPU_DEPTH_NEVER";
+      break;
     default:
       BLI_assert_unreachable();
   }
