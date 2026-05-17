@@ -54,6 +54,12 @@ static void material_surface_stencil_state_set(PassMain::Sub &pass,
     if (blender_mat->blend_flag & MA_BL_THICKNESS_FROM_SHADOW) {
       material_stencil_bits |= uint8_t(DeferredLayerBase::StencilBits::THICKNESS_FROM_SHADOW);
     }
+    /* The deferred prepass clears stencil to 0, so when no internal bit needs
+     * to be written and user stencil is off, leaving the pass's default state
+     * means no per-draw stencil commands are emitted. */
+    if (material_stencil_bits == 0u && !stencil.enabled) {
+      return;
+    }
     const uint8_t reference = material_stencil_bits | (stencil.enabled ? stencil.reference : 0u);
     const uint8_t compare_mask = stencil.enabled ? stencil.read_mask : EEVEE_STENCIL_INTERNAL_MASK;
 
@@ -65,9 +71,12 @@ static void material_surface_stencil_state_set(PassMain::Sub &pass,
   }
 
   if (ELEM(pipeline_type, MAT_PIPE_FORWARD, MAT_PIPE_DEFERRED_NPR)) {
+    if (!stencil.enabled) {
+      return;
+    }
     pass.state_stencil_op(GPU_STENCIL_OP_KEEP, GPU_STENCIL_OP_KEEP, GPU_STENCIL_OP_KEEP);
-    pass.state_stencil(0x0u, stencil.enabled ? stencil.reference : 0u, stencil.enabled ? stencil.read_mask : 0u);
-    pass.state_stencil_test(stencil.enabled ? stencil.test : GPU_STENCIL_NONE);
+    pass.state_stencil(0x0u, stencil.reference, stencil.read_mask);
+    pass.state_stencil_test(stencil.test);
   }
 }
 
