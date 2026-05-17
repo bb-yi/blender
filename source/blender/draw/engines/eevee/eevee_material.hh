@@ -13,6 +13,7 @@
 #include "DRW_render.hh"
 
 #include "BLI_enum_flags.hh"
+#include "BLI_hash.hh"
 #include "BLI_map.hh"
 #include "BLI_set.hh"
 #include "BLI_vector.hh"
@@ -309,7 +310,7 @@ struct MaterialKey {
 
   uint64_t hash() const
   {
-    return uint64_t(mat) + options + (uint64_t(uint16_t(stencil_order)) << 48);
+    return blender::get_default_hash(mat, options, stencil_order);
   }
 
   bool operator==(const MaterialKey &k) const
