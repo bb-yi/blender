@@ -1120,9 +1120,6 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   using namespace blender::gpu::shader;
 
   uint64_t shader_uuid = GPU_material_uuid_get(gpumat);
-  const bool use_shader_to_rgba = material_graph_serialized_contains(codegen_->surface,
-                                                                     "node_shader_to_rgba(");
-
   eMaterialPipeline pipeline_type;
   eMaterialGeometry geometry_type;
   eMaterialDisplacement displacement_type;
@@ -1144,6 +1141,8 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
 
   GPUCodegenOutput &codegen = *codegen_;
   ShaderCreateInfo &info = *reinterpret_cast<ShaderCreateInfo *>(codegen.create_info);
+  const bool use_shader_to_rgba = material_graph_serialized_contains(codegen.surface,
+                                                                     "node_shader_to_rgba(");
 
   /* Material generated sources can use arbitrary per-material names, while the GPU dependency
    * resolver only knows startup-registered files. Inline the referenced generated blocks here and
@@ -1230,13 +1229,20 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   const bool depth_offset_uses_light_access =
       has_depth_offset &&
       material_depth_offset_graph_uses_supported_light_access(gpumat, codegen_->depth_offset);
+  const bool surface_graph_uses_glsl_light_access =
+      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD) &&
+      material_graph_uses_glsl_light_access(gpumat, codegen.surface);
+  const bool npr_graph_uses_glsl_light_access =
+      pipeline_type == MAT_PIPE_DEFERRED_NPR &&
+      material_graph_uses_glsl_light_access(gpumat, codegen.npr);
+  const bool surface_pass_uses_glsl_light_access = surface_graph_uses_glsl_light_access ||
+                                                   npr_graph_uses_glsl_light_access;
   bool material_pass_uses_glsl_light_access =
-      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD) &&
-      (material_graph_uses_glsl_light_access(gpumat, codegen.surface) ||
-       material_graph_uses_glsl_light_access(gpumat, codegen.npr) ||
-       material_graph_uses_glsl_light_access(gpumat, codegen.filter) ||
-       material_graph_uses_glsl_light_access(gpumat, codegen.thickness) ||
-       material_graph_uses_glsl_light_access(gpumat, codegen.volume));
+      surface_pass_uses_glsl_light_access ||
+      (ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD) &&
+       (material_graph_uses_glsl_light_access(gpumat, codegen.filter) ||
+        material_graph_uses_glsl_light_access(gpumat, codegen.thickness) ||
+        material_graph_uses_glsl_light_access(gpumat, codegen.volume)));
   for (const GPUGraphOutput &graph : codegen.material_functions) {
     material_pass_uses_glsl_light_access |=
         material_graph_uses_glsl_light_access(gpumat, graph);
@@ -1247,12 +1253,18 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       has_depth_offset && !depth_offset_affect_lighting &&
       ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR);
 
+  const bool use_front_light_shader_in_surface_pass =
+      use_shader_to_rgba || surface_graph_uses_glsl_light_access;
+
   SlotAllocator slots = add_pipeline_create_info(
-      info, pipeline_type, geometry_type, use_shader_to_rgba, has_depth_offset);
+      info, pipeline_type, geometry_type, use_front_light_shader_in_surface_pass, has_depth_offset);
   slots.reserve_sampler_range(MATERIAL_TEXTURE_RESERVED_SLOT_FIRST,
                               material_texture_reserved_slot_last(pipeline_type, geometry_type));
   if (ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD)) {
     slots.reserve_sampler(LIGHT_SHADER_TEX_SLOT);
+  }
+  else if (pipeline_type == MAT_PIPE_DEFERRED_NPR) {
+    slots.reserve_sampler(LIGHT_SHADER_NPR_TEX_SLOT);
   }
   if (has_depth_offset) {
     info.define("MAT_DEPTH_OFFSET");
@@ -1340,6 +1352,11 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     if (material_pass_uses_glsl_light_access) {
       info.define("MAT_GLSL_LIGHT_SHADOW_ACCESS");
       info.additional_info("eevee_shadow_data");
+    }
+    if (surface_pass_uses_glsl_light_access) {
+      info.define("MAT_GLSL_LIGHT_SHADER_EVAL");
+      info.define("LIGHT_SHADER_TEXTURE_EVAL");
+      GPU_material_glsl_light_shader_eval_set(gpumat);
     }
   }
   if ((GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||

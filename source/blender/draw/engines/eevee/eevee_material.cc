@@ -525,7 +525,9 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
       matpass.sub_pass->material_set(*inst_.manager, matpass.gpumat, true);
       if (pipeline_type == MAT_PIPE_FORWARD ||
           (pipeline_type == MAT_PIPE_DEFERRED &&
-           GPU_material_flag_get(matpass.gpumat, GPU_MATFLAG_SHADER_TO_RGBA)))
+           (GPU_material_flag_get(matpass.gpumat, GPU_MATFLAG_SHADER_TO_RGBA) ||
+            GPU_material_has_glsl_light_shader_eval(matpass.gpumat) ||
+            GPU_material_flag_get(matpass.gpumat, GPU_MATFLAG_GLSL_LIGHT_ACCESS))))
       {
         inst_.lights.bind_front_light_shader_resources(*matpass.sub_pass);
       }
@@ -551,6 +553,7 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
         matpass.sub_pass->bind_resources(inst_.sampling);
         matpass.sub_pass->bind_resources(inst_.hiz_buffer.front);
         matpass.sub_pass->bind_resources(inst_.lights);
+        inst_.lights.bind_npr_front_light_shader_resources(*matpass.sub_pass);
         matpass.sub_pass->bind_resources(inst_.shadows);
         if (probe_capture != MAT_PROBE_NONE) {
           /* Probe NPR passes rebind the material shader on the material sub-pass. Re-apply the

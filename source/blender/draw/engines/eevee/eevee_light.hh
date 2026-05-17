@@ -308,6 +308,13 @@ class LightModule {
     pass.bind_ssbo(LIGHT_SHADER_UNIFORM_BUF_SLOT, &uniform_light_shader_buf_);
   }
 
+  template<typename PassType> void bind_npr_front_light_shader_resources(PassType &pass)
+  {
+    pass.bind_texture(LIGHT_SHADER_NPR_TEX_SLOT, &front_light_shader_tx_);
+    pass.bind_ssbo(LIGHT_SHADER_INDEX_BUF_SLOT, &front_light_shader_index_buf_);
+    pass.bind_ssbo(LIGHT_SHADER_UNIFORM_BUF_SLOT, &uniform_light_shader_buf_);
+  }
+
   template<typename PassType> void bind_volume_light_shader_resources(PassType &pass)
   {
     pass.bind_texture(LIGHT_SHADER_TEX_SLOT,

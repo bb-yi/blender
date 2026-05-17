@@ -251,8 +251,6 @@
 #define GBUF_NORMAL_TEX_SLOT 17
 #define GBUF_HEADER_TEX_SLOT 18
 #define NPR_RADIANCE_TEX_SLOT 19
-/* Custom light shader eval never runs in the NPR material pass, so it can reuse this low slot
- * without requiring texture units beyond the common OpenGL fragment limit. */
 #define LIGHT_SHADER_TEX_SLOT 19
 #define DIRECT_RADIANCE_NPR_TX_SLOT_1 20
 #define INDIRECT_RADIANCE_NPR_TX_SLOT_1 23
@@ -274,6 +272,9 @@
 #define FILTER_DEPTH_TEX_SLOT 39
 #define FILTER_CRYPTOMATTE_TEX_SLOT 40
 #define SCENE_SHADOW_TEX_SLOT 41
+/* NPR material passes already use slot 19 for their radiance input. Reuse a filter-only slot
+ * already reserved away from material texture allocation. */
+#define LIGHT_SHADER_NPR_TEX_SLOT FILTER_SCENE_COLOR_TEX_SLOT
 /* Outline post-process shaders can include GBuffer/draw resources, so keep their texture slots
  * out of the common low range. */
 #define OUTLINE_DEPTH_TEX_SLOT 42

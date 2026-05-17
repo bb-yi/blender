@@ -108,6 +108,7 @@ struct GPUMaterial {
   bool has_depth_offset_output = false;
   bool has_filter_output = false;
   bool has_light_shader_output = false;
+  bool has_glsl_light_shader_eval = false;
 
   std::string name;
 
@@ -417,6 +418,11 @@ bool GPU_material_has_filter_output(GPUMaterial *mat)
 bool GPU_material_has_light_shader_output(GPUMaterial *mat)
 {
   return mat != nullptr && mat->has_light_shader_output;
+}
+
+bool GPU_material_has_glsl_light_shader_eval(const GPUMaterial *mat)
+{
+  return mat != nullptr && mat->has_glsl_light_shader_eval;
 }
 
 int GPU_material_filter_object_info_ensure(GPUMaterial *material, Object *object)
@@ -770,6 +776,13 @@ void GPU_material_output_light_shader(GPUMaterial *material, GPUNodeLink *link)
   if (link != nullptr && !material->graph.outlink_light_shader) {
     material->graph.outlink_light_shader = link;
     material->has_light_shader_output = true;
+  }
+}
+
+void GPU_material_glsl_light_shader_eval_set(GPUMaterial *material)
+{
+  if (material != nullptr) {
+    material->has_glsl_light_shader_eval = true;
   }
 }
 

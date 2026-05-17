@@ -127,6 +127,16 @@ static PassType *material_surface_cull_pass_get(PassType *double_sided_ps,
   }
 }
 
+static bool material_needs_front_light_shader_resources(const GPUMaterial *gpumat,
+                                                        const eClosureBits closure_bits)
+{
+  /* The raw GLSL light flag is an early registration hint. The precise evaluated-light marker is
+   * only available after the material create info has been amended. */
+  return (closure_bits & CLOSURE_SHADER_TO_RGBA) != 0 ||
+         GPU_material_has_glsl_light_shader_eval(gpumat) ||
+         GPU_material_flag_get(gpumat, GPU_MATFLAG_GLSL_LIGHT_ACCESS);
+}
+
 static DRWState material_stencil_drw_test_state(GPUStencilTest test)
 {
   switch (test) {
@@ -1287,6 +1297,7 @@ template<typename F> void DeferredLayerBase::npr_pass_sync(Instance &inst, F cal
   npr_ps_.bind_resources(inst.hiz_buffer.front);
   npr_ps_.bind_resources(inst.render_textures);
   npr_ps_.bind_resources(inst.lights);
+  inst.lights.bind_npr_front_light_shader_resources(npr_ps_);
   npr_ps_.bind_resources(inst.shadows);
   npr_ps_.bind_resources(inst.sphere_probes);
   npr_ps_.bind_resources(inst.volume_probes);
@@ -1644,12 +1655,13 @@ PassMain::Sub *DeferredLayer::material_add(blender::Material *blender_mat, GPUMa
   use_depth_offset_lighting_data_ |= material_uses_depth_offset_lighting_data(blender_mat, gpumat);
   has_outline_ = has_outline_ || inst_.materials.material_uses_outline_control(blender_mat);
 
-  bool has_shader_to_rgba = (closure_bits & CLOSURE_SHADER_TO_RGBA) != 0;
-  if (has_shader_to_rgba) {
+  const bool needs_front_light_shader = material_needs_front_light_shader_resources(gpumat,
+                                                                                   closure_bits);
+  if (needs_front_light_shader) {
     inst_.lights.tag_front_light_shader_needed();
   }
   bool use_thickness_from_shadow = (blender_mat->blend_flag & MA_BL_THICKNESS_FROM_SHADOW) != 0;
-  PassMain::Sub *pass = has_shader_to_rgba ?
+  PassMain::Sub *pass = needs_front_light_shader ?
                             material_surface_cull_pass_get(gbuffer_double_sided_hybrid_ps_,
                                                            gbuffer_single_sided_hybrid_ps_,
                                                            gbuffer_front_cull_hybrid_ps_,
@@ -1660,7 +1672,7 @@ PassMain::Sub *DeferredLayer::material_add(blender::Material *blender_mat, GPUMa
                                                            blender_mat);
 
   PassMain::Sub *material_pass = &pass->sub(GPU_material_get_name(gpumat));
-  if (has_shader_to_rgba) {
+  if (needs_front_light_shader) {
     inst_.lights.bind_front_light_shader_resources(*material_pass);
   }
   /* Set stencil for some deferred specialized shaders. */
@@ -1682,10 +1694,16 @@ PassMain::Sub *DeferredLayer::npr_add(blender::Material *blender_mat, GPUMateria
   BLI_assert(GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR));
   use_depth_offset_lighting_data_ |= material_uses_depth_offset_lighting_data(blender_mat, gpumat);
   has_outline_ = has_outline_ || inst_.materials.material_uses_outline_control(blender_mat);
+  if (GPU_material_has_glsl_light_shader_eval(gpumat) ||
+      GPU_material_flag_get(gpumat, GPU_MATFLAG_GLSL_LIGHT_ACCESS))
+  {
+    inst_.lights.tag_front_light_shader_needed();
+  }
   PassMain::Sub *pass = material_surface_cull_pass_get(
       npr_double_sided_ps_, npr_single_sided_ps_, npr_front_cull_ps_, blender_mat);
 
   PassMain::Sub *material_pass = &pass->sub(GPU_material_get_name(gpumat));
+  inst_.lights.bind_npr_front_light_shader_resources(*material_pass);
 
   /* Bind the material shader before setting NPR-specific push constants. */
   GPUPass *gpupass = GPU_material_get_pass(gpumat);
@@ -2348,12 +2366,13 @@ PassMain::Sub *DeferredProbePipeline::material_add(blender::Material *blender_ma
   opaque_layer_.use_depth_offset_lighting_data_ |= material_uses_depth_offset_lighting_data(
       blender_mat, gpumat);
 
-  bool has_shader_to_rgba = (closure_bits & CLOSURE_SHADER_TO_RGBA) != 0;
-  if (has_shader_to_rgba) {
+  const bool needs_front_light_shader = material_needs_front_light_shader_resources(gpumat,
+                                                                                   closure_bits);
+  if (needs_front_light_shader) {
     inst_.lights.tag_front_light_shader_needed();
   }
 
-  PassMain::Sub *pass = has_shader_to_rgba ?
+  PassMain::Sub *pass = needs_front_light_shader ?
                             material_surface_cull_pass_get(
                                 opaque_layer_.gbuffer_double_sided_hybrid_ps_,
                                 opaque_layer_.gbuffer_single_sided_hybrid_ps_,
@@ -2365,7 +2384,7 @@ PassMain::Sub *DeferredProbePipeline::material_add(blender::Material *blender_ma
                                                            blender_mat);
 
   PassMain::Sub *material_pass = &pass->sub(GPU_material_get_name(gpumat));
-  if (has_shader_to_rgba) {
+  if (needs_front_light_shader) {
     inst_.lights.bind_front_light_shader_resources(*material_pass);
   }
   return material_pass;
@@ -2379,8 +2398,14 @@ PassMain::Sub *DeferredProbePipeline::npr_add(blender::Material *blender_mat, GP
                                                        blender_mat);
   opaque_layer_.use_depth_offset_lighting_data_ |= material_uses_depth_offset_lighting_data(
       blender_mat, gpumat);
+  if (GPU_material_has_glsl_light_shader_eval(gpumat) ||
+      GPU_material_flag_get(gpumat, GPU_MATFLAG_GLSL_LIGHT_ACCESS))
+  {
+    inst_.lights.tag_front_light_shader_needed();
+  }
 
   PassMain::Sub *material_ps = &pass->sub(GPU_material_get_name(gpumat));
+  inst_.lights.bind_npr_front_light_shader_resources(*material_ps);
   GPUPass *gpupass = GPU_material_get_pass(gpumat);
   material_ps->shader_set(GPU_pass_shader_get(gpupass));
   material_ps->push_constant("use_split_radiance", true);
@@ -2546,12 +2571,13 @@ PassMain::Sub *PlanarProbePipeline::material_add(blender::Material *blender_mat,
   closure_count_ = max_ii(closure_count_, count_bits_i(closure_bits));
   use_depth_offset_lighting_data_ |= material_uses_depth_offset_lighting_data(blender_mat, gpumat);
 
-  bool has_shader_to_rgba = (closure_bits & CLOSURE_SHADER_TO_RGBA) != 0;
-  if (has_shader_to_rgba) {
+  const bool needs_front_light_shader = material_needs_front_light_shader_resources(gpumat,
+                                                                                   closure_bits);
+  if (needs_front_light_shader) {
     inst_.lights.tag_front_light_shader_needed();
   }
 
-  PassMain::Sub *pass = has_shader_to_rgba ?
+  PassMain::Sub *pass = needs_front_light_shader ?
                             material_surface_cull_pass_get(gbuffer_double_sided_hybrid_ps_,
                                                            gbuffer_single_sided_hybrid_ps_,
                                                            gbuffer_front_cull_hybrid_ps_,
@@ -2562,7 +2588,7 @@ PassMain::Sub *PlanarProbePipeline::material_add(blender::Material *blender_mat,
                                                            blender_mat);
 
   PassMain::Sub *material_pass = &pass->sub(GPU_material_get_name(gpumat));
-  if (has_shader_to_rgba) {
+  if (needs_front_light_shader) {
     inst_.lights.bind_front_light_shader_resources(*material_pass);
   }
   return material_pass;
@@ -2573,8 +2599,14 @@ PassMain::Sub *PlanarProbePipeline::npr_add(blender::Material *blender_mat, GPUM
   PassMain::Sub *pass = material_surface_cull_pass_get(
       npr_double_sided_ps_, npr_single_sided_ps_, npr_front_cull_ps_, blender_mat);
   use_depth_offset_lighting_data_ |= material_uses_depth_offset_lighting_data(blender_mat, gpumat);
+  if (GPU_material_has_glsl_light_shader_eval(gpumat) ||
+      GPU_material_flag_get(gpumat, GPU_MATFLAG_GLSL_LIGHT_ACCESS))
+  {
+    inst_.lights.tag_front_light_shader_needed();
+  }
 
   PassMain::Sub *material_ps = &pass->sub(GPU_material_get_name(gpumat));
+  inst_.lights.bind_npr_front_light_shader_resources(*material_ps);
   GPUPass *gpupass = GPU_material_get_pass(gpumat);
   material_ps->shader_set(GPU_pass_shader_get(gpupass));
   material_ps->push_constant("use_split_radiance", true);

@@ -222,6 +222,43 @@ int glsl_light_public_type(LightData light)
   return GLSL_LIGHT_TYPE_POINT;
 }
 
+bool glsl_light_shader_eval(uint light_index,
+                            LightData light,
+                            LightVector light_vector,
+                            bool is_directional,
+                            inout GLSLLight result)
+{
+#if defined(MAT_GLSL_LIGHT_SHADER_EVAL)
+  int light_shader_index = light_shader_index_buf[light_index];
+  int light_shader_uniform_index = (light_shader_index < -1) ? -light_shader_index - 2 : -1;
+  float4 light_shader;
+  if (light_shader_uniform_index >= 0) {
+    light_shader = light_shader_uniform_buf[light_shader_uniform_index];
+  }
+#  if defined(LIGHT_SHADER_TEXTURE_EVAL)
+  else if (light_shader_index >= 0) {
+    light_shader = texelFetch(light_shader_tx, int3(int2(gl_FragCoord.xy), light_shader_index), 0);
+  }
+#  endif
+  else {
+    return false;
+  }
+
+  result.diffuse_color = light_shader.rgb * glsl_light_friendly_power(light, LIGHT_DIFFUSE);
+  result.specular_color = light_shader.rgb * glsl_light_friendly_power(light, LIGHT_SPECULAR);
+  result.attenuation = light_attenuation_common(light, is_directional, light_vector.L) *
+                       light_shader.a;
+  if (!is_directional) {
+    result.attenuation *= light_influence_cutoff(
+        light_vector.dist, light.local().local.influence_radius_invsqr_surface);
+  }
+  return true;
+#else
+  UNUSED_VARS(light_index, light, light_vector, is_directional, result);
+  return false;
+#endif
+}
+
 GLSLLight glsl_light_build(uint light_index, bool is_local, uint public_index)
 {
   GLSLLight result = glsl_light_default();
@@ -252,6 +289,7 @@ GLSLLight glsl_light_build(uint light_index, bool is_local, uint public_index)
   result.specular_color = light.color * glsl_light_friendly_power(light, LIGHT_SPECULAR);
   result.attenuation = light_point_light(light, is_directional, light_vector) *
                        light_attenuation_surface(light, is_directional, light_vector);
+  glsl_light_shader_eval(light_index, light, light_vector, is_directional, result);
   return result;
 }
 

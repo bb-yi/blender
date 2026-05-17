@@ -217,6 +217,7 @@ bool GPU_material_has_displacement_output(GPUMaterial *mat);
 bool GPU_material_has_depth_offset_output(GPUMaterial *mat);
 bool GPU_material_has_filter_output(GPUMaterial *mat);
 bool GPU_material_has_light_shader_output(GPUMaterial *mat);
+bool GPU_material_has_glsl_light_shader_eval(const GPUMaterial *mat);
 
 int GPU_material_filter_object_info_ensure(GPUMaterial *material, Object *object);
 int GPU_material_filter_object_info_count(const GPUMaterial *material);
@@ -519,6 +520,7 @@ void GPU_material_output_depth_offset(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_output_npr(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_output_filter(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_output_light_shader(GPUMaterial *material, GPUNodeLink *link);
+void GPU_material_glsl_light_shader_eval_set(GPUMaterial *material);
 
 void GPU_material_add_output_link_aov(GPUMaterial *material, GPUNodeLink *link, int hash);
 void GPU_material_add_output_link_outline(GPUMaterial *material, GPUNodeLink *link);
