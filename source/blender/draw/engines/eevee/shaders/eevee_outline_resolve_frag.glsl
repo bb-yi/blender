@@ -25,6 +25,16 @@ float outline_depth_fetch(int2 texel)
   return reverse_z::read(texelFetch(depth_tx, texel, 0).r);
 }
 
+float outline_raw_depth_fetch(int2 texel)
+{
+  return texelFetch(depth_tx, texel, 0).r;
+}
+
+float4 outline_velocity_fetch(int2 texel)
+{
+  return texelFetch(vector_tx, texel, 0);
+}
+
 float outline_occlusion_depth_fetch(int2 texel)
 {
   return reverse_z::read(texelFetch(outline_occlusion_depth_tx, texel, 0).r);
@@ -37,6 +47,8 @@ void main()
   const float center_occlusion_depth = outline_occlusion_depth_fetch(texel);
   const uint center_outline_id = outline_id_unpack(outline_source_info_fetch(texel).a);
   float4 outline_pass_color = float4(0.0f);
+  float outline_pass_depth = outline_raw_depth_fetch(texel);
+  float4 outline_pass_velocity = float4(0.0f);
 
   const float2 seed_coord = texelFetch(jfa_tx, texel, 0).rg;
   if (seed_coord.x >= -1e9f) {
@@ -65,8 +77,12 @@ void main()
 
       if (alpha > 0.0f && !(blocked_by_scene_surface || blocked_by_forward_occluder)) {
         outline_pass_color = float4(outline_color.rgb * alpha, alpha);
+        outline_pass_depth = outline_raw_depth_fetch(seed_texel);
+        outline_pass_velocity = outline_velocity_fetch(seed_texel);
       }
     }
   }
   out_outline_color = outline_pass_color;
+  out_outline_depth = outline_pass_depth;
+  out_outline_velocity = outline_pass_velocity;
 }

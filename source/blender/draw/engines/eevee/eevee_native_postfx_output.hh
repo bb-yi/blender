@@ -120,9 +120,11 @@ class NativePostFXOutputModule {
 
   bool resolve_source(RuntimeOutput &output);
   void extract_source(const RuntimeOutput &output, gpu::Texture *output_tx);
+  void acquire_velocity_work_texture(TextureFromPool &texture, int2 extent);
   gpu::Texture *apply_camera_fx(View &view,
                                 gpu::Texture *input_tx,
                                 gpu::Texture *output_tx,
+                                gpu::Texture *depth_tx,
                                 gpu::Texture *velocity_tx,
                                 DepthOfFieldBuffer &dof_buffer,
                                 const ViewLayerNativePostFXOutput &output);

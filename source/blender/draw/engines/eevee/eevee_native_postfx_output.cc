@@ -11,11 +11,20 @@
 #include "BLI_string.h"
 
 #include "GPU_texture.hh"
+#include "GPU_state.hh"
 
 #include "eevee_instance.hh"
 #include "eevee_native_postfx_output.hh"
 
 namespace blender::eevee {
+
+static void velocity_work_texture_release(TextureFromPool &texture, gpu::TextureFormat format)
+{
+  if (format == gpu::TextureFormat::SFLOAT_16_16 && texture.is_valid()) {
+    GPU_texture_swizzle_set(texture, "rgba");
+  }
+  texture.release();
+}
 
 enum eNativePostFXExtractSource : int {
   NATIVE_POSTFX_EXTRACT_DEPTH = 0,
@@ -304,6 +313,7 @@ gpu::Texture *NativePostFXOutputModule::apply_camera_fx(
     View &view,
     gpu::Texture *input_tx,
     gpu::Texture *output_tx,
+    gpu::Texture *depth_tx,
     gpu::Texture *velocity_tx,
     DepthOfFieldBuffer &dof_buffer,
     const ViewLayerNativePostFXOutput &output)
@@ -319,17 +329,27 @@ gpu::Texture *NativePostFXOutputModule::apply_camera_fx(
 
   gpu::Texture *input = input_tx;
   gpu::Texture *output_work = output_tx;
+  gpu::Texture *depth = (depth_tx != nullptr) ? depth_tx : inst_.render_buffers.depth_tx;
   gpu::Texture *velocity = velocity_tx;
 
   if (use_motion_blur) {
-    inst_.motion_blur.render(
-        view, &input, &output_work, inst_.render_buffers.depth_tx, velocity);
+    inst_.motion_blur.render(view, &input, &output_work, depth, velocity);
   }
   if (use_dof) {
-    inst_.depth_of_field.render(
-        view, &input, &output_work, dof_buffer, inst_.render_buffers.depth_tx, velocity);
+    inst_.depth_of_field.render(view, &input, &output_work, dof_buffer, depth, velocity);
   }
   return input;
+}
+
+void NativePostFXOutputModule::acquire_velocity_work_texture(TextureFromPool &texture,
+                                                            int2 extent)
+{
+  constexpr eGPUTextureUsage usage = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE;
+  const gpu::TextureFormat format = inst_.render_buffers.vector_tx_format();
+  texture.acquire(extent, format, usage);
+  if (format == gpu::TextureFormat::SFLOAT_16_16) {
+    GPU_texture_swizzle_set(texture, "rgrg");
+  }
 }
 
 uint64_t NativePostFXOutputModule::output_signature(const RuntimeOutput &output)
@@ -402,19 +422,39 @@ void NativePostFXOutputModule::render(View &view)
     gpu::Texture *final_tx = source_tx_.gpu_texture();
     if (uses_effects) {
       effect_tx_.acquire(extent, gpu::TextureFormat::SFLOAT_16_16_16_16, usage);
+      gpu::Texture *depth_tx = inst_.render_buffers.depth_tx;
       gpu::Texture *velocity_tx = nullptr;
+      gpu::Texture *source_velocity_tx = inst_.render_buffers.vector_tx;
+      if (output.data->source == VIEW_LAYER_NATIVE_POSTFX_SOURCE_OUTLINE) {
+        if (inst_.outline.resolved_depth_texture() != nullptr) {
+          depth_tx = inst_.outline.resolved_depth_texture();
+        }
+        if (inst_.outline.resolved_velocity_texture() != nullptr) {
+          source_velocity_tx = inst_.outline.resolved_velocity_texture();
+        }
+      }
       if (use_motion_blur) {
-        velocity_tx_.acquire(extent, inst_.render_buffers.vector_tx_format(), usage);
-        GPU_texture_copy(velocity_tx_.gpu_texture(), inst_.render_buffers.vector_tx);
+        acquire_velocity_work_texture(velocity_tx_, extent);
+        GPU_texture_copy(velocity_tx_.gpu_texture(), source_velocity_tx);
+        GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE | GPU_BARRIER_TEXTURE_FETCH |
+                           GPU_BARRIER_SHADER_IMAGE_ACCESS);
         velocity_tx = velocity_tx_.gpu_texture();
       }
-      final_tx = apply_camera_fx(
-          view, source_tx_.gpu_texture(), effect_tx_.gpu_texture(), velocity_tx, dof_buffers_[index], *output.data);
+      else if (use_dof && output.data->source == VIEW_LAYER_NATIVE_POSTFX_SOURCE_OUTLINE) {
+        velocity_tx = source_velocity_tx;
+      }
+      final_tx = apply_camera_fx(view,
+                                 source_tx_.gpu_texture(),
+                                 effect_tx_.gpu_texture(),
+                                 depth_tx,
+                                 velocity_tx,
+                                 dof_buffers_[index],
+                                 *output.data);
     }
 
     pack_output(output, final_tx);
 
-    velocity_tx_.release();
+    velocity_work_texture_release(velocity_tx_, inst_.render_buffers.vector_tx_format());
     effect_tx_.release();
     source_tx_.release();
   }
@@ -442,18 +482,33 @@ gpu::Texture *NativePostFXOutputModule::render_outline_for_combined(View &view,
   constexpr eGPUTextureUsage usage = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE;
   default_outline_tx_.acquire(extent, gpu::TextureFormat::SFLOAT_16_16_16_16, usage);
   GPU_texture_copy(default_outline_tx_.gpu_texture(), outline_tx);
+  GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE | GPU_BARRIER_TEXTURE_FETCH);
   default_outline_effect_tx_.acquire(extent, gpu::TextureFormat::SFLOAT_16_16_16_16, usage);
 
   gpu::Texture *velocity_tx = nullptr;
+  gpu::Texture *depth_tx = inst_.outline.resolved_depth_texture();
+  if (depth_tx == nullptr) {
+    depth_tx = inst_.render_buffers.depth_tx;
+  }
   if (inst_.motion_blur.postfx_enabled()) {
-    default_outline_velocity_tx_.acquire(extent, inst_.render_buffers.vector_tx_format(), usage);
-    GPU_texture_copy(default_outline_velocity_tx_.gpu_texture(), inst_.render_buffers.vector_tx);
+    gpu::Texture *source_velocity_tx = inst_.outline.resolved_velocity_texture();
+    if (source_velocity_tx == nullptr) {
+      source_velocity_tx = inst_.render_buffers.vector_tx;
+    }
+    acquire_velocity_work_texture(default_outline_velocity_tx_, extent);
+    GPU_texture_copy(default_outline_velocity_tx_.gpu_texture(), source_velocity_tx);
+    GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE | GPU_BARRIER_TEXTURE_FETCH |
+                       GPU_BARRIER_SHADER_IMAGE_ACCESS);
     velocity_tx = default_outline_velocity_tx_.gpu_texture();
+  }
+  else if (inst_.depth_of_field.postfx_enabled()) {
+    velocity_tx = inst_.outline.resolved_velocity_texture();
   }
 
   gpu::Texture *final_tx = apply_camera_fx(view,
                                            default_outline_tx_.gpu_texture(),
                                            default_outline_effect_tx_.gpu_texture(),
+                                           depth_tx,
                                            velocity_tx,
                                            default_outline_dof_buffer_,
                                            output);
@@ -468,7 +523,7 @@ gpu::Texture *NativePostFXOutputModule::render_outline_for_combined(View &view,
     default_outline_effect_tx_.release();
   }
 
-  default_outline_velocity_tx_.release();
+  velocity_work_texture_release(default_outline_velocity_tx_, inst_.render_buffers.vector_tx_format());
   return final_tx;
 }
 
@@ -476,10 +531,10 @@ void NativePostFXOutputModule::release()
 {
   source_tx_.release();
   effect_tx_.release();
-  velocity_tx_.release();
+  velocity_work_texture_release(velocity_tx_, inst_.render_buffers.vector_tx_format());
   default_outline_tx_.release();
   default_outline_effect_tx_.release();
-  default_outline_velocity_tx_.release();
+  velocity_work_texture_release(default_outline_velocity_tx_, inst_.render_buffers.vector_tx_format());
 }
 
 }  // namespace blender::eevee
