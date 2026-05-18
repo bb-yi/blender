@@ -756,16 +756,28 @@ vec4 shader_info_mode_debug(int mode, int light_index)
 
 如果你想在 `GLSL Function` 里只接收某一个灯光组，可以直接读取 `GLSLLight.lightgroup_id`。
 
-函数名可设为 `lightgroup_lambert`，并给它连接这些输入：
-
-- `albedo`
-- `target_lightgroup_id`
+函数名可设为 `lightgroup_lambert`。这个版本同时展示 `subtype=color`、`int / bool` 默认值、`description`、`min / max`、`subtype=factor` 和 `@panel`：
 
 ```glsl
-vec4 lightgroup_lambert(vec3 albedo, int target_lightgroup_id)
+/* @glsl_meta v1
+albedo: default=vec3(1.0) subtype=color description="Diffuse albedo for the selected light group"
+target_lightgroup_id: default=0 description="Only lights with this Lightgroup ID are included"
+
+@panel Shading closed=false
+use_shadow: default=true description="Apply glsl_light_shadow to selected lights"
+shadow_strength: default=1.0 min=0.0 max=1.0 subtype=factor description="Blend from unshadowed to fully shadowed direct light"
+ambient_floor: default=0.0 min=0.0 max=1.0 subtype=factor description="Small constant fill after lightgroup filtering"
+@end_panel
+*/
+vec4 lightgroup_lambert(vec3 albedo,
+                        int target_lightgroup_id,
+                        bool use_shadow,
+                        float shadow_strength,
+                        float ambient_floor)
 {
   vec3 N = normalize(glsl_normal());
   vec3 result = vec3(0.0);
+  float shadow_mix = clamp(shadow_strength, 0.0, 1.0);
 
   for (int i = 0; i < glsl_light_count(); i++) {
     GLSLLight light = glsl_light_get(i);
@@ -781,7 +793,8 @@ vec4 lightgroup_lambert(vec3 albedo, int target_lightgroup_id)
       continue;
     }
 
-    float shadow = glsl_light_shadow(i, N);
+    float shadow = use_shadow ? glsl_light_shadow(i, N) : 1.0;
+    shadow = mix(1.0, shadow, shadow_mix);
     result += albedo *
               light.diffuse_color *
               light.attenuation *
@@ -789,6 +802,7 @@ vec4 lightgroup_lambert(vec3 albedo, int target_lightgroup_id)
               shadow;
   }
 
+  result += albedo * clamp(ambient_floor, 0.0, 1.0);
   return vec4(result, 1.0);
 }
 ```
@@ -797,6 +811,7 @@ vec4 lightgroup_lambert(vec3 albedo, int target_lightgroup_id)
 
 - 这里的 `target_lightgroup_id` 直接对应灯光数据面板里的 `Lightgroup ID`
 - 如果你想“排除某一个灯光组”，把判断改成 `if (light.lightgroup_id == target_lightgroup_id) continue;`
+- `use_shadow`、`shadow_strength`、`ambient_floor` 展示了布尔输入、factor 范围和 panel 分组的常见写法
 - 这种过滤只影响你在这个函数里自己写的逐灯模型，不会自动改动 Eevee 普通材质主通道的默认灯光结果
 
 #### 示例：PBR 风格直光 + 环境光
@@ -807,14 +822,24 @@ vec4 lightgroup_lambert(vec3 albedo, int target_lightgroup_id)
 - 环境光 helper：`glsl_ambient_lighting()`
 - 逐灯 helper：`glsl_light_count()`、`glsl_light_get(i)`、`glsl_light_shadow(i, N)`
 
-函数名可设为 `pbr_lit`，并给它连接这些输入：
-
-- `base_color`
-- `roughness`
-- `metallic`
-- `ao`
+函数名可设为 `pbr_lit`。这个版本把常用表面参数放进 `Surface` 面板，并把内置 helper 作为 expression default 暴露成可选覆盖输入：
 
 ```glsl
+/* @glsl_meta v1
+base_color: default=vec3(0.8, 0.72, 0.6) subtype=color description="Base surface albedo"
+
+@panel Surface closed=false
+roughness: default=0.45 min=0.04 max=1.0 subtype=factor description="Microfacet roughness"
+metallic: default=0.0 min=0.0 max=1.0 subtype=factor description="Metallic blend amount"
+ao: default=1.0 min=0.0 max=1.0 subtype=factor description="Ambient occlusion multiplier"
+@end_panel
+
+@panel Builtin Helpers closed=true
+normal_ws: default=normalize(glsl_normal()) hide_value=true description="Optional world-space shading normal override"
+view_ws: default=normalize(glsl_incoming()) hide_value=true description="Optional world-space view direction override"
+ambient_light: default=glsl_ambient_lighting() subtype=color hide_value=true description="Optional ambient lighting override"
+@end_panel
+*/
 float saturate1(float x)
 {
   return clamp(x, 0.0, 1.0);
@@ -853,11 +878,17 @@ float geometry_smith(float NdotV, float NdotL, float roughness)
          geometry_schlick_ggx(NdotL, roughness);
 }
 
-vec4 pbr_lit(vec3 base_color, float roughness, float metallic, float ao)
+vec4 pbr_lit(vec3 base_color,
+             float roughness,
+             float metallic,
+             float ao,
+             vec3 normal_ws,
+             vec3 view_ws,
+             vec3 ambient_light)
 {
-  vec3 N = normalize(glsl_normal());
+  vec3 N = normalize(normal_ws);
   vec3 Ng = normalize(glsl_true_normal());
-  vec3 V = normalize(glsl_incoming());
+  vec3 V = normalize(view_ws);
 
   if (dot(N, Ng) < 0.0) {
     N = Ng;
@@ -909,11 +940,16 @@ vec4 pbr_lit(vec3 base_color, float roughness, float metallic, float ao)
                        shadow;
   }
 
-  vec3 ambient = glsl_ambient_lighting() * base_color * (1.0 - metallic) * ao;
+  vec3 ambient = ambient_light * base_color * (1.0 - metallic) * ao;
   vec3 color = ambient + direct_diffuse + direct_specular;
   return vec4(max(color, vec3(0.0)), 1.0);
 }
 ```
+
+补充说明：
+
+- `normal_ws`、`view_ws`、`ambient_light` 都有表达式默认值；socket 未连接时会自动调用对应内置 helper，连接后则使用外部输入
+- `hide_value=true` 用于这类 helper 覆盖输入，避免节点上显示一个容易误解的静态默认数值
 
 ### Image to Closure
 
@@ -1798,6 +1834,7 @@ vec4(Color.rgb * max(Intensity, 0.0), max(Attenuation, 0.0))
 - 常见写入层做法是开启 `Stencil`，使用 `Pass = Replace`，并关闭 `Color Write` / `Depth Write`
 - 常见读取层做法是开启 `Stencil`，设置 `Test = Equal` 或 `Not Equal`，再使用相同的 `Reference` / mask 组合
 - 如果一个材质既要参与深度遮挡又要写 stencil，需要特别检查 `ZTest` 和 `Depth Write` 的组合，避免片元在深度测试阶段被提前拒绝
+- 可在 3D Viewport 的 `Viewport Shading > Render Pass` 中选择 `Stencil Value`，直接预览当前视图里的模板值
 
 #### 示例图
 
@@ -1811,6 +1848,12 @@ vec4(Color.rgb * max(Intensity, 0.0), max(Attenuation, 0.0))
   <img src="docs/images/material_stencil_example.gif" alt="Material stencil example" style="border-radius: 10px;">
   <br>
   <sub>Stencil 写入与读取的遮罩示例</sub>
+</div>
+
+<div align="center">
+  <img src="docs/images/Stencil_Value.png" alt="Viewport stencil value preview" style="border-radius: 10px;">
+  <br>
+  <sub>Viewport Shading 中使用 Stencil Value 预览模板值</sub>
 </div>
 
 ### 5. Eevee 灯光 Lightgroup ID
