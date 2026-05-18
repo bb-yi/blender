@@ -65,9 +65,14 @@ class OutlineModule {
     return resolved_outline_tx_.is_valid();
   }
 
-  gpu::Texture *resolved_texture_or(gpu::Texture *fallback) const
+  gpu::Texture *resolved_texture_or(gpu::Texture *fallback)
   {
-    return has_result() ? resolved_outline_tx_ : fallback;
+    return has_result() ? resolved_outline_tx_.gpu_texture() : fallback;
+  }
+
+  gpu::Texture *resolved_texture()
+  {
+    return has_result() ? resolved_outline_tx_.gpu_texture() : nullptr;
   }
 };
 

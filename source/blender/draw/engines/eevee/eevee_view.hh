@@ -47,12 +47,14 @@ class ShadingView {
   RayTraceBuffer rt_buffer_opaque_;
   RayTraceBuffer rt_buffer_refract_;
   DepthOfFieldBuffer dof_buffer_;
+  DepthOfFieldBuffer outline_dof_buffer_;
 
   Framebuffer prepass_fb_ = {"prepass_fb_"};
   Framebuffer combined_fb_ = {"combined_fb_"};
   Framebuffer gbuffer_fb_ = {"gbuffer_fb_"};
   Framebuffer transparent_fb_ = {"transparent"};
   TextureFromPool postfx_tx_;
+  TextureFromPool outline_postfx_tx_;
 
   /** Main views is created from the camera (or is from the viewport). It is not jittered. */
   View main_view_ = {"main_view"};
@@ -85,7 +87,10 @@ class ShadingView {
   bool is_stencil_value_preview() const;
   void render_stencil_value_preview();
 
-  gpu::Texture *render_postfx(gpu::Texture *input_tx);
+  gpu::Texture *render_postfx(gpu::Texture *input_tx,
+                              TextureFromPool &postfx_tx,
+                              DepthOfFieldBuffer &dof_buffer,
+                              bool use_filter_materials);
 
   void update_view();
 };

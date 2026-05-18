@@ -5,6 +5,7 @@
 from bpy.types import Menu, Panel, UIList, ViewLayer
 from bpy.app.translations import contexts as i18n_contexts
 
+from bl_ui.generic_ui_list import draw_ui_list
 from rna_prop_ui import PropertyPanel
 
 
@@ -29,6 +30,26 @@ class VIEWLAYER_UL_aov(UIList):
         split = row.split(factor=0.65)
         split.row().prop(item, "name", text="", icon=self.aov_icon(item), emboss=False)
         split.row().prop(item, "type", text="", emboss=False)
+
+
+class VIEWLAYER_UL_native_postfx_outputs(UIList):
+    def draw_item(self, _context, layout, _data, item, _icon, _active_data, _active_propname, _index):
+        output = item
+        if self.layout_type in {'DEFAULT', 'COMPACT'}:
+            row = layout.row(align=True)
+            row.prop(
+                output,
+                "enabled",
+                text="",
+                emboss=False,
+                icon='HIDE_OFF' if output.enabled else 'HIDE_ON',
+            )
+            icon = 'ERROR' if not output.is_valid else 'RENDERLAYERS'
+            row.prop(output, "name", text="", icon=icon, emboss=False)
+            row.prop(output, "source", text="", emboss=False)
+        elif self.layout_type == 'GRID':
+            layout.alignment = 'CENTER'
+            layout.label(text="", icon='RENDERLAYERS')
 
 
 class ViewLayerButtonsPanel:
@@ -219,6 +240,49 @@ class VIEWLAYER_PT_layer_passes_aov(ViewLayerAOVPanelHelper, Panel):
     COMPAT_ENGINES = {'BLENDER_EEVEE'}
 
 
+class VIEWLAYER_PT_layer_passes_native_postfx(ViewLayerButtonsPanel, Panel):
+    bl_label = "Native Camera FX Outputs"
+    bl_parent_id = "VIEWLAYER_PT_layer_passes"
+    COMPAT_ENGINES = {'BLENDER_EEVEE'}
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+
+        view_layer = context.view_layer
+
+        list_col = layout.column()
+        list_col.use_property_split = False
+        list_col.use_property_decorate = False
+        draw_ui_list(
+            list_col,
+            context,
+            class_name="VIEWLAYER_UL_native_postfx_outputs",
+            unique_id="view_layer_native_postfx_outputs",
+            list_path="view_layer.native_postfx_outputs",
+            active_index_path="view_layer.active_native_postfx_output_index",
+        )
+
+        output = view_layer.active_native_postfx_output
+        if output is None:
+            return
+
+        col = layout.column()
+        col.prop(output, "name")
+        col.prop(output, "enabled")
+        col.prop(output, "source")
+        if output.source == 'AOV':
+            col.prop_search(output, "source_aov", view_layer, "aovs", text="AOV")
+
+        row = col.row(align=True)
+        row.prop(output, "use_motion_blur", toggle=True)
+        row.prop(output, "use_depth_of_field", toggle=True)
+
+        if not output.is_valid:
+            col.label(text="Conflicts with another render pass or has an unavailable source", icon='ERROR')
+
+
 class ViewLayerCryptomattePanelHelper(ViewLayerButtonsPanel):
     bl_label = "Cryptomatte"
 
@@ -353,11 +417,13 @@ classes = (
     VIEWLAYER_PT_eevee_layer_passes_light,
     VIEWLAYER_PT_layer_passes_cryptomatte,
     VIEWLAYER_PT_layer_passes_aov,
+    VIEWLAYER_PT_layer_passes_native_postfx,
     VIEWLAYER_PT_layer_passes_lightgroups,
     VIEWLAYER_PT_filter,
     VIEWLAYER_PT_override,
     VIEWLAYER_PT_layer_custom_props,
     VIEWLAYER_UL_aov,
+    VIEWLAYER_UL_native_postfx_outputs,
 )
 
 if __name__ == "__main__":  # only for live edit.

@@ -78,6 +78,39 @@ enum eViewLayerAOVFlag {
   AOV_CONFLICT = (1 << 0),
 };
 
+/* #ViewLayerNativePostFXOutput.source */
+enum eViewLayerNativePostFXOutputSource {
+  VIEW_LAYER_NATIVE_POSTFX_SOURCE_DEPTH = 0,
+  VIEW_LAYER_NATIVE_POSTFX_SOURCE_NORMAL = 1,
+  VIEW_LAYER_NATIVE_POSTFX_SOURCE_POSITION = 2,
+  VIEW_LAYER_NATIVE_POSTFX_SOURCE_VECTOR = 3,
+  VIEW_LAYER_NATIVE_POSTFX_SOURCE_DIFFUSE_LIGHT = 4,
+  VIEW_LAYER_NATIVE_POSTFX_SOURCE_DIFFUSE_COLOR = 5,
+  VIEW_LAYER_NATIVE_POSTFX_SOURCE_SPECULAR_LIGHT = 6,
+  VIEW_LAYER_NATIVE_POSTFX_SOURCE_SPECULAR_COLOR = 7,
+  VIEW_LAYER_NATIVE_POSTFX_SOURCE_VOLUME_LIGHT = 8,
+  VIEW_LAYER_NATIVE_POSTFX_SOURCE_EMISSION = 9,
+  VIEW_LAYER_NATIVE_POSTFX_SOURCE_ENVIRONMENT = 10,
+  VIEW_LAYER_NATIVE_POSTFX_SOURCE_SHADOW = 11,
+  VIEW_LAYER_NATIVE_POSTFX_SOURCE_AO = 12,
+  VIEW_LAYER_NATIVE_POSTFX_SOURCE_TRANSPARENT = 13,
+  VIEW_LAYER_NATIVE_POSTFX_SOURCE_AOV = 14,
+  VIEW_LAYER_NATIVE_POSTFX_SOURCE_OUTLINE = 15,
+};
+
+/* #ViewLayerNativePostFXOutput.effects */
+enum eViewLayerNativePostFXOutputEffect {
+  VIEW_LAYER_NATIVE_POSTFX_OUTPUT_EFFECT_MOTION_BLUR = (1 << 0),
+  VIEW_LAYER_NATIVE_POSTFX_OUTPUT_EFFECT_DOF = (1 << 1),
+};
+
+/* #ViewLayerNativePostFXOutput.flag */
+enum eViewLayerNativePostFXOutputFlag {
+  VIEW_LAYER_NATIVE_POSTFX_OUTPUT_ENABLED = (1 << 0),
+  VIEW_LAYER_NATIVE_POSTFX_OUTPUT_CONFLICT = (1 << 1),
+  VIEW_LAYER_NATIVE_POSTFX_OUTPUT_SOURCE_INVALID = (1 << 2),
+};
+
 /* #ViewLayer.cryptomatte_flag */
 enum eViewLayerCryptomatteFlags {
   VIEW_LAYER_CRYPTOMATTE_OBJECT = (1 << 0),
@@ -223,6 +256,24 @@ struct ViewLayerAOV {
   int type = 0;
 };
 
+/** Native camera post-FX render-pass definition. */
+struct ViewLayerNativePostFXOutput {
+  struct ViewLayerNativePostFXOutput *next = nullptr, *prev = nullptr;
+
+  /** Public render-pass name. */
+  char name[64] = "";
+  /** Optional AOV source name when source is #VIEW_LAYER_NATIVE_POSTFX_SOURCE_AOV. */
+  char source_aov[64] = "";
+  /** Bitmask of #eViewLayerNativePostFXOutputFlag. */
+  int flag = VIEW_LAYER_NATIVE_POSTFX_OUTPUT_ENABLED;
+  /** #eViewLayerNativePostFXOutputSource. */
+  int source = VIEW_LAYER_NATIVE_POSTFX_SOURCE_OUTLINE;
+  /** Bitmask of #eViewLayerNativePostFXOutputEffect. */
+  int effects = VIEW_LAYER_NATIVE_POSTFX_OUTPUT_EFFECT_MOTION_BLUR |
+                VIEW_LAYER_NATIVE_POSTFX_OUTPUT_EFFECT_DOF;
+  int _pad = 0;
+};
+
 /** Light-group Render-pass definition. */
 struct ViewLayerLightgroup {
   struct ViewLayerLightgroup *next = nullptr, *prev = nullptr;
@@ -276,6 +327,9 @@ struct ViewLayer {
 
   ListBaseT<ViewLayerAOV> aovs = {nullptr, nullptr};
   ViewLayerAOV *active_aov = nullptr;
+
+  ListBaseT<ViewLayerNativePostFXOutput> native_postfx_outputs = {nullptr, nullptr};
+  ViewLayerNativePostFXOutput *active_native_postfx_output = nullptr;
 
   ListBaseT<ViewLayerLightgroup> lightgroups = {nullptr, nullptr};
   ViewLayerLightgroup *active_lightgroup = nullptr;

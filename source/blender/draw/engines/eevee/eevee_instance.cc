@@ -234,6 +234,7 @@ namespace blender::eevee
     sampling.init(scene);
     camera.init();
     filter_materials.init();
+    native_postfx_outputs.init();
     film.init(output_res, output_rect);
     render_buffers.init();
     render_textures.init();
@@ -317,6 +318,7 @@ namespace blender::eevee
     sampling.init(scene);
     camera.init();
     filter_materials.init();
+    native_postfx_outputs.init();
     /* Film isn't used but init to avoid side effects in other module. */
     rcti empty_rect{ 0, 0, 0, 0 };
     film.init(int2(1), &empty_rect);
@@ -772,6 +774,30 @@ namespace blender::eevee
       }
     }
 
+    /* Generated native camera post-FX outputs. */
+    for (ViewLayerNativePostFXOutput &output : view_layer->native_postfx_outputs)
+    {
+      if ((output.flag & VIEW_LAYER_NATIVE_POSTFX_OUTPUT_ENABLED) == 0 ||
+          (output.flag & (VIEW_LAYER_NATIVE_POSTFX_OUTPUT_CONFLICT |
+                          VIEW_LAYER_NATIVE_POSTFX_OUTPUT_SOURCE_INVALID)) != 0)
+      {
+        continue;
+      }
+      RenderPass* rp = RE_pass_find_by_name(render_layer, output.name, view_name);
+      if (!rp)
+      {
+        continue;
+      }
+      float* result = film.read_native_postfx_output(&output);
+
+      if (result)
+      {
+        BLI_mutex_lock(&render->update_render_passes_mutex);
+        RE_pass_set_buffer_data(rp, result);
+        BLI_mutex_unlock(&render->update_render_passes_mutex);
+      }
+    }
+
     /* The vector pass is initialized to weird values. Set it to neutral value if not rendered. */
     if ((pass_bits & EEVEE_RENDER_PASS_VECTOR) == 0)
     {
@@ -1087,6 +1113,23 @@ namespace blender::eevee
       default:
         break;
       }
+    }
+
+    for (ViewLayerNativePostFXOutput& output : view_layer->native_postfx_outputs)
+    {
+      if ((output.flag & VIEW_LAYER_NATIVE_POSTFX_OUTPUT_ENABLED) == 0 ||
+          (output.flag & (VIEW_LAYER_NATIVE_POSTFX_OUTPUT_CONFLICT |
+                          VIEW_LAYER_NATIVE_POSTFX_OUTPUT_SOURCE_INVALID)) != 0)
+      {
+        continue;
+      }
+
+      int channels = 4;
+      const char* chan_id = "RGBA";
+      eNodeSocketDatatype socket_type = SOCK_RGBA;
+      NativePostFXOutputModule::output_render_pass_info(
+        output, view_layer, channels, chan_id, socket_type);
+      RE_engine_register_pass(engine, scene, view_layer, output.name, channels, chan_id, socket_type);
     }
 
     /* NOTE: Name channels lowercase `rgba` so that compression rules check in OpenEXR DWA code uses

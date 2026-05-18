@@ -38,6 +38,7 @@
 
 #include "eevee_film.hh"
 #include "eevee_instance.hh"
+#include "eevee_native_postfx_output.hh"
 
 namespace blender::eevee {
 
@@ -165,6 +166,58 @@ gpu::Texture *Film::get_aov_texture(ViewLayerAOV *aov)
 
   int index = aov_index + (is_value ? data_.aov_value_id : data_.aov_color_id);
   return accum_tx.layer_view(index);
+}
+
+float *Film::read_native_postfx_output(ViewLayerNativePostFXOutput *output)
+{
+  gpu::Texture *pass_tx = this->get_native_postfx_output_texture(output);
+
+  if (pass_tx == nullptr) {
+    return nullptr;
+  }
+
+  GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE);
+
+  float *result = static_cast<float *>(GPU_texture_read(pass_tx, GPU_DATA_FLOAT, 0));
+
+  int channels = 4;
+  const char *chan_id = "RGBA";
+  eNodeSocketDatatype socket_type = SOCK_RGBA;
+  NativePostFXOutputModule::output_render_pass_info(
+      *output, inst_.view_layer, channels, chan_id, socket_type);
+  if (channels == 3) {
+    for (const int px : IndexRange(GPU_texture_width(pass_tx) * GPU_texture_height(pass_tx))) {
+      float3 tmp = *(reinterpret_cast<float3 *>(result + px * 4));
+      *(reinterpret_cast<float3 *>(result) + px) = tmp;
+    }
+  }
+
+  return result;
+}
+
+gpu::Texture *Film::get_native_postfx_output_texture(ViewLayerNativePostFXOutput *output)
+{
+  for (const NativePostFXOutputModule::RuntimeOutput &runtime :
+       inst_.native_postfx_outputs.outputs_get())
+  {
+    if (runtime.data != output) {
+      continue;
+    }
+
+    Texture &accum_tx = runtime.storage_type == PASS_STORAGE_VALUE ? value_accum_tx_ :
+                                                                     color_accum_tx_;
+    const int index = runtime.storage_type == PASS_STORAGE_VALUE ?
+                          data_.native_postfx_value_id + runtime.value_index :
+                          data_.native_postfx_color_id + runtime.color_index;
+    if (index < 0) {
+      return nullptr;
+    }
+
+    accum_tx.ensure_layer_views();
+    return accum_tx.layer_view(index);
+  }
+
+  return nullptr;
 }
 
 /** \} */
@@ -321,6 +374,11 @@ void Film::init(const int2 &extent, const rcti *output_rect)
 
   enabled_categories_ = PassCategory(0);
   init_aovs(passes_used_by_viewport_compositor);
+  if (assign_if_different(native_postfx_outputs_hash_,
+                          inst_.native_postfx_outputs.outputs_hash_get()))
+  {
+    sampling.reset();
+  }
 
   {
     /* Enable passes that need to be rendered. */
@@ -524,6 +582,16 @@ void Film::init(const int2 &extent, const rcti *output_rect)
 
     data_.color_len += data_.aov_color_len;
     data_.value_len += data_.aov_value_len;
+
+    data_.native_postfx_color_id = data_.color_len;
+    data_.native_postfx_value_id = data_.value_len;
+    data_.native_postfx_color_len = inst_.native_postfx_outputs.color_len_get();
+    data_.native_postfx_value_len = inst_.native_postfx_outputs.value_len_get();
+    if (data_.native_postfx_color_len > 0 || data_.native_postfx_value_len > 0) {
+      enabled_categories_ |= PASS_CATEGORY_NATIVE_POSTFX;
+    }
+    data_.color_len += data_.native_postfx_color_len;
+    data_.value_len += data_.native_postfx_value_len;
 
     int cryptomatte_id = 0;
     auto cryptomatte_index_get = [&](eViewLayerEEVEEPassType pass_type) {
@@ -787,6 +855,11 @@ eViewLayerEEVEEPassType Film::enabled_passes_get() const
   return enabled_passes_;
 }
 
+eViewLayerEEVEEPassType Film::render_buffer_passes_get() const
+{
+  return enabled_passes_get() | inst_.native_postfx_outputs.required_passes_get();
+}
+
 int Film::cryptomatte_layer_len_get() const
 {
   int result = 0;
@@ -918,7 +991,10 @@ void Film::update_sample_table()
   }
 }
 
-void Film::accumulate(View &view, gpu::Texture *combined_final_tx)
+void Film::accumulate(View &view,
+                      gpu::Texture *combined_final_tx,
+                      gpu::Texture *outline_raw_tx,
+                      gpu::Texture *outline_combined_tx)
 {
   if (inst_.is_viewport()) {
     DefaultFramebufferList *dfbl = inst_.draw_ctx->viewport_framebuffer_list_get();
@@ -936,9 +1012,12 @@ void Film::accumulate(View &view, gpu::Texture *combined_final_tx)
 
   combined_final_tx_ = combined_final_tx;
   history_display_tx_ = combined_tx_.current();
-  outline_resolved_input_tx_ = inst_.outline.resolved_texture_or(dummy_outline_tx_.gpu_texture());
-  has_outline_input_ = inst_.outline.has_result();
-  use_outline_in_combined_ = has_outline_input_ && inst_.outline.use_in_combined();
+  gpu::Texture *outline_input_tx = (outline_combined_tx != nullptr) ? outline_combined_tx :
+                                                                    outline_raw_tx;
+  outline_resolved_input_tx_ = (outline_input_tx != nullptr) ? outline_input_tx :
+                                                              dummy_outline_tx_.gpu_texture();
+  has_outline_input_ = outline_input_tx != nullptr;
+  use_outline_in_combined_ = outline_combined_tx != nullptr;
   data_.display_only = false;
   inst_.uniform_data.push_update();
 
@@ -1129,6 +1208,37 @@ void Film::write_viewport_compositor_passes()
 
     PassSimple write_pass_ps = {"Film.WriteViewportCompositorPass"};
     const eShaderType write_shader_type = get_aov_write_pass_shader_type(&aov);
+    write_pass_ps.shader_set(inst_.shaders.static_shader_get(write_shader_type));
+    write_pass_ps.push_constant("offset", data_.offset);
+    write_pass_ps.bind_texture("input_tx", pass_texture);
+    write_pass_ps.bind_image("output_img", output_pass_texture);
+    write_pass_ps.barrier(GPU_BARRIER_TEXTURE_FETCH);
+    write_pass_ps.dispatch(math::divide_ceil(this->display_extent, int2(FILM_GROUP_SIZE)));
+    inst_.manager->submit(write_pass_ps);
+  }
+
+  /* Write generated native camera post-FX outputs. */
+  for (ViewLayerNativePostFXOutput &output : inst_.view_layer->native_postfx_outputs) {
+    if ((output.flag & VIEW_LAYER_NATIVE_POSTFX_OUTPUT_ENABLED) == 0 ||
+        (output.flag & (VIEW_LAYER_NATIVE_POSTFX_OUTPUT_CONFLICT |
+                        VIEW_LAYER_NATIVE_POSTFX_OUTPUT_SOURCE_INVALID)) != 0)
+    {
+      continue;
+    }
+    gpu::Texture *pass_texture = this->get_native_postfx_output_texture(&output);
+    if (!pass_texture) {
+      continue;
+    }
+
+    draw::TextureFromPool &output_pass_texture = DRW_viewport_pass_texture_get(output.name);
+    output_pass_texture.acquire(this->display_extent, GPU_texture_format(pass_texture));
+
+    PassSimple write_pass_ps = {"Film.WriteViewportCompositorNativePostFXPass"};
+    const ePassStorageType storage_type = NativePostFXOutputModule::output_storage_type(
+        output, inst_.view_layer);
+    const eShaderType write_shader_type = storage_type == PASS_STORAGE_VALUE ?
+                                              FILM_PASS_CONVERT_VALUE :
+                                              FILM_PASS_CONVERT_COLOR;
     write_pass_ps.shader_set(inst_.shaders.static_shader_get(write_shader_type));
     write_pass_ps.push_constant("offset", data_.offset);
     write_pass_ps.bind_texture("input_tx", pass_texture);

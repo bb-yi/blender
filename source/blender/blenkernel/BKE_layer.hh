@@ -647,6 +647,18 @@ void BKE_view_layer_verify_aov(RenderEngine *engine, Scene *scene, ViewLayer *vi
 bool BKE_view_layer_has_valid_aov(ViewLayer *view_layer);
 ViewLayer *BKE_view_layer_find_with_aov(Scene *scene, ViewLayerAOV *aov);
 
+ViewLayerNativePostFXOutput *BKE_view_layer_add_native_postfx_output(ViewLayer *view_layer);
+void BKE_view_layer_remove_native_postfx_output(ViewLayer *view_layer,
+                                                ViewLayerNativePostFXOutput *output);
+void BKE_view_layer_set_active_native_postfx_output(ViewLayer *view_layer,
+                                                    ViewLayerNativePostFXOutput *output);
+void BKE_view_layer_verify_native_postfx_outputs(RenderEngine *engine,
+                                                 Scene *scene,
+                                                 ViewLayer *view_layer);
+bool BKE_view_layer_has_valid_native_postfx_output(ViewLayer *view_layer);
+ViewLayer *BKE_view_layer_find_with_native_postfx_output(Scene *scene,
+                                                         ViewLayerNativePostFXOutput *output);
+
 ViewLayerLightgroup *BKE_view_layer_add_lightgroup(ViewLayer *view_layer, const char *name);
 void BKE_view_layer_remove_lightgroup(ViewLayer *view_layer, ViewLayerLightgroup *lightgroup);
 void BKE_view_layer_set_active_lightgroup(ViewLayer *view_layer, ViewLayerLightgroup *lightgroup);

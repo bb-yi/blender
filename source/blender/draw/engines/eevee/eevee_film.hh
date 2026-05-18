@@ -118,6 +118,7 @@ class Film {
   PassCategory enabled_categories_ = PassCategory(0);
   bool use_reprojection_ = false;
   bool is_valid_render_extent_ = true;
+  uint64_t native_postfx_outputs_hash_ = 0;
 
  public:
   Film(Instance &inst, FilmData &data) : inst_(inst), data_(data) {};
@@ -134,7 +135,10 @@ class Film {
   }
 
   /** Accumulate the newly rendered sample contained in #RenderBuffers and blit to display. */
-  void accumulate(View &view, gpu::Texture *combined_final_tx);
+  void accumulate(View &view,
+                  gpu::Texture *combined_final_tx,
+                  gpu::Texture *outline_raw_tx,
+                  gpu::Texture *outline_combined_tx);
 
   /** Sort and normalize cryptomatte samples. */
   void cryptomatte_sort();
@@ -144,9 +148,11 @@ class Film {
 
   float *read_pass(eViewLayerEEVEEPassType pass_type, int layer_offset);
   float *read_aov(ViewLayerAOV *aov);
+  float *read_native_postfx_output(ViewLayerNativePostFXOutput *output);
 
   gpu::Texture *get_pass_texture(eViewLayerEEVEEPassType pass_type, int layer_offset);
   gpu::Texture *get_aov_texture(ViewLayerAOV *aov);
+  gpu::Texture *get_native_postfx_output_texture(ViewLayerNativePostFXOutput *output);
 
   void write_viewport_compositor_passes();
 
@@ -201,6 +207,7 @@ class Film {
   }
 
   eViewLayerEEVEEPassType enabled_passes_get() const;
+  eViewLayerEEVEEPassType render_buffer_passes_get() const;
   int cryptomatte_layer_len_get() const;
 
   /** WARNING: Film and RenderBuffers use different storage types for AO and Shadow. */
