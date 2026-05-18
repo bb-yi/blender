@@ -55,8 +55,9 @@
 
 ### 当前范围
 
-- 目前只影响 `template_ID(...)` 这类材质选择器下拉列表中的材质预览显示
-- 不影响 `Material Properties` 面板中的大预览球
+- 关闭后会阻止材质选择器、材质下拉 / 搜索列表，以及材质自动预览面板触发新的材质预览图渲染
+- 关闭时会清理正在运行的材质预览作业，避免旧作业继续占用 Eevee 预览渲染
+- 不影响 3D Viewport 的 `Material Preview` / `Rendered` 视图模式
 - 不影响材质本身的正常渲染结果
 
 ## 3. 材质剔除模式
@@ -85,11 +86,88 @@
 - `Front` 适合做壳体内部观察、双层模型的反向显露，或某些特殊的描边 / 反相表现
 - `Shadow` 和 `Light Probe Volume` 仍然保留独立的剔除控制
 
-## 4. Eevee 灯光 Lightgroup ID
+## 4. 材质 Surface 渲染状态
 
 ### 作用
 
-为 Eevee 灯光指定一个整数灯光组编号，供 `Shader Info` 节点做分组过滤。
+在 Eevee Surface 材质上直接控制深度测试、颜色写入、深度写入和模板测试 / 写入状态，用于遮罩、门户、特殊描边层、隐藏写入层等需要精确控制渲染状态的效果。
+
+### 入口
+
+`Material Properties > Settings > Surface`
+
+<div align="center">
+	<img src="images/material_surface_state_controls.png" alt="材质 Surface 渲染状态控制" style="border-radius: 10px;">
+	<br>
+	<sub>Material Properties > Settings > Surface 中的 ZTest、Stencil、Color Write 与 Depth Write</sub>
+</div>
+
+### ZTest
+
+`ZTest` 决定片元如何和已有深度比较：
+
+- `Less`
+- `Greater`
+- `Less Equal`
+- `Greater Equal`
+- `Equal`
+- `Not Equal`
+- `Always`
+- `Never`
+
+默认应保持 `Less Equal`。`ZTest Never` 会拒绝整个片元，包括 stencil 写入；如果材质是模板写入层，通常应保留 `Less Equal`，然后按需要关闭 `Color Write` 和 `Depth Write`。
+
+### Color Write / Depth Write
+
+- `Color Write`：控制该 Surface 材质是否写入 Eevee 颜色输出
+- `Depth Write`：控制该 Surface 材质是否写入 Eevee 深度输出
+
+这两个开关只控制写入结果，不等于关闭节点树求值。透明、描边、AOV、模板等路径仍应按当前材质和管线规则理解。
+
+### Stencil
+
+`Stencil` 折叠面板包含：
+
+- `Enabled`
+- `Order`
+- `Reference`
+- `Read Mask`
+- `Write Mask`
+- `Test`
+- `Pass`
+- `Fail`
+- `ZFail`
+
+`Test` 可选：`Always`、`Never`、`Equal`、`Not Equal`、`Less`、`Less Equal`、`Greater`、`Greater Equal`。
+
+`Pass / Fail / ZFail` 可选：`Keep`、`Zero`、`Replace`、`Increment Clamp`、`Decrement Clamp`、`Invert`、`Increment Wrap`、`Decrement Wrap`。
+
+### 说明
+
+- `Order` 控制 Eevee stencil pass 内部提交顺序，数值小的材质先提交
+- `Reference`、`Read Mask`、`Write Mask` 当前使用 4-bit 用户 stencil 范围
+- 常见写入层做法是开启 `Stencil`，使用 `Pass = Replace`，并关闭 `Color Write` / `Depth Write`
+- 常见读取层做法是开启 `Stencil`，设置 `Test = Equal` 或 `Not Equal`，再使用相同的 `Reference` / mask 组合
+- 如果一个材质既要参与深度遮挡又要写 stencil，需要特别检查 `ZTest` 和 `Depth Write` 的组合，避免片元在深度测试阶段被提前拒绝
+- 可在 3D Viewport 的 `Viewport Shading > Render Pass` 中选择 `Stencil Value`，直接预览当前视图里的模板值
+
+<div align="center">
+	<img src="images/material_stencil_example.gif" alt="材质 Stencil 示例" style="border-radius: 10px;">
+	<br>
+	<sub>Stencil 写入与读取的遮罩示例</sub>
+</div>
+
+<div align="center">
+	<img src="images/Stencil_Value.png" alt="视图模板值预览" style="border-radius: 10px;">
+	<br>
+	<sub>Viewport Shading 中使用 Stencil Value 预览模板值</sub>
+</div>
+
+## 5. Eevee 灯光 Lightgroup ID
+
+### 作用
+
+为 Eevee 灯光指定一个整数灯光组编号，供 `Shader Info` 节点和 `GLSL Function` 中的 `GLSLLight.lightgroup_id` 做分组过滤。
 
 ### 入口
 
@@ -100,9 +178,35 @@
 - 默认值为 `0`
 - `Shader Info` 节点的 `Lightgroup` 也为 `0` 时，只会计算 `Lightgroup ID = 0` 的灯光
 - 如果某个 `Shader Info` 节点设置为其他整数值，则只有相同编号的灯光会参与该节点计算
-- 这个分组过滤当前只影响 `Shader Info` 节点，不会改动 Eevee 普通材质主通道的默认灯光结果
+- 在 `GLSL Function` 里，`glsl_light_get(i).lightgroup_id` 会返回这个整数值，可直接用于自定义逐灯 `continue` / `exclude` 过滤
+- 这个分组过滤当前不会自动改动 Eevee 普通材质主通道的默认灯光结果；只有 `Shader Info` 或你自己写的 `GLSL Function` 显式使用时才会生效
 
-## 5. 启动图版本标识
+## 6. 太阳光 Shadow Map Scale
+
+### 作用
+
+为 Eevee Sun 灯光提供单独的阴影贴图覆盖尺度控制，用来调整太阳光 clipmap shadow 的覆盖范围和有效细节分布。
+
+### 入口
+
+`Light Data > Shadow > Shadow Map Scale`
+
+该选项只在 `Sun` 灯光上显示。
+
+<div align="center">
+	<img src="images/sun_shadow_map_scale.png" alt="太阳光 Shadow Map Scale" style="border-radius: 10px;">
+	<br>
+	<sub>Sun 灯光的 Shadow Map Scale 设置</sub>
+</div>
+
+### 行为说明
+
+- 默认值为 `1`
+- 增大数值会扩大 Sun shadow map 的覆盖尺度，通常会降低单位区域内的有效阴影细节
+- 减小数值会把阴影贴图集中到更小范围，通常能提高近处细节，但更容易暴露覆盖范围不足或边界问题
+- 该设置只影响 Eevee Sun shadow map 的采样 / 覆盖行为，不改变灯光颜色、能量、方向或材质侧着色模型
+
+## 7. 启动图版本标识
 
 ### 作用
 
@@ -113,7 +217,7 @@
 - `版本号 + npr post + 构建日期`
 - 例如：`5.1.0 npr post 2026-03-27`
 
-## 6. 骨骼在 Outliner 隐藏
+## 8. 骨骼在 Outliner 隐藏
 
 ### 作用
 

@@ -436,6 +436,10 @@
 - 内置了 Eevee 直接光辅助 helper，可在函数体里使用：`GLSLLight`、`glsl_light_count()`、`glsl_light_get(light_index)`、`glsl_light_shadow(light_index, shading_normal)`
 - `GLSLLight.lightgroup_id` 直接对应灯光数据面板里的 `Lightgroup ID`
 - `GLSLLight.attenuation` 只是自定义逐灯模型的基础衰减项，不包含 `NdotL`、toon ramp、Blinn-Phong、GGX、shadow 或材质侧 Fresnel / metallic / roughness
+- 如果灯光节点树使用了 `Light Shader Output`，`glsl_light_get(i).diffuse_color`、`glsl_light_get(i).specular_color` 和 `glsl_light_get(i).attenuation` 会读取 Light Shader 评估后的颜色与衰减
+- `Light Shader Output` 只影响这三个颜色 / 衰减字段；`type`、`index`、`lightgroup_id`、`vector`、`position`、`direction`、`distance` 仍来自 Eevee 原始灯光数据
+- 没有 Light Shader 输出时，`GLSLLight` 保持普通 Eevee 灯光访问行为
+- 这套直接光 helper 面向 Eevee 物体材质和 `NPR Tree` 的 Surface/Fragment 路径；`Filter`、`World`、体积、probe / indirect lighting 不作为稳定公共语义
 - 推荐写法：`light.diffuse_color * light.attenuation * max(dot(N, light.vector), 0.0) * glsl_light_shadow(...)`
 - 推荐写法：`light.specular_color * light.attenuation * custom_spec_term * glsl_light_shadow(...)`
 
@@ -494,13 +498,28 @@ vec4 annotated_shader(vec3 base_color, float specular, float roughness, sampler2
 
 #### 示例：按 `lightgroup_id` 过滤灯光
 
-如果你想在 `GLSL Function` 里只接收某一个灯光组，可以直接读取 `GLSLLight.lightgroup_id`：
+如果你想在 `GLSL Function` 里只接收某一个灯光组，可以直接读取 `GLSLLight.lightgroup_id`。下面这个版本同时展示 `subtype=color`、`int / bool` 默认值、`description`、`min / max`、`subtype=factor` 和 `@panel`：
 
 ```glsl
-vec4 lightgroup_lambert(vec3 albedo, int target_lightgroup_id)
+/* @glsl_meta v1
+albedo: default=vec3(1.0) subtype=color description="Diffuse albedo for the selected light group"
+target_lightgroup_id: default=0 description="Only lights with this Lightgroup ID are included"
+
+@panel Shading closed=false
+use_shadow: default=true description="Apply glsl_light_shadow to selected lights"
+shadow_strength: default=1.0 min=0.0 max=1.0 subtype=factor description="Blend from unshadowed to fully shadowed direct light"
+ambient_floor: default=0.0 min=0.0 max=1.0 subtype=factor description="Small constant fill after lightgroup filtering"
+@end_panel
+*/
+vec4 lightgroup_lambert(vec3 albedo,
+                        int target_lightgroup_id,
+                        bool use_shadow,
+                        float shadow_strength,
+                        float ambient_floor)
 {
   vec3 N = normalize(glsl_normal());
   vec3 result = vec3(0.0);
+  float shadow_mix = clamp(shadow_strength, 0.0, 1.0);
 
   for (int i = 0; i < glsl_light_count(); i++) {
     GLSLLight light = glsl_light_get(i);
@@ -513,10 +532,12 @@ vec4 lightgroup_lambert(vec3 albedo, int target_lightgroup_id)
       continue;
     }
 
-    float shadow = glsl_light_shadow(i, N);
+    float shadow = use_shadow ? glsl_light_shadow(i, N) : 1.0;
+    shadow = mix(1.0, shadow, shadow_mix);
     result += albedo * light.diffuse_color * light.attenuation * NdotL * shadow;
   }
 
+  result += albedo * clamp(ambient_floor, 0.0, 1.0);
   return vec4(result, 1.0);
 }
 ```
@@ -529,14 +550,24 @@ vec4 lightgroup_lambert(vec3 albedo, int target_lightgroup_id)
 - 环境光 helper：`glsl_ambient_lighting()`
 - 逐灯 helper：`glsl_light_count()`、`glsl_light_get(i)`、`glsl_light_shadow(i, N)`
 
-函数名可设为 `pbr_lit`，并给它连接这些输入：
-
-- `base_color`
-- `roughness`
-- `metallic`
-- `ao`
+函数名可设为 `pbr_lit`。这个版本把常用表面参数放进 `Surface` 面板，并把内置 helper 作为 expression default 暴露成可选覆盖输入：
 
 ```glsl
+/* @glsl_meta v1
+base_color: default=vec3(0.8, 0.72, 0.6) subtype=color description="Base surface albedo"
+
+@panel Surface closed=false
+roughness: default=0.45 min=0.04 max=1.0 subtype=factor description="Microfacet roughness"
+metallic: default=0.0 min=0.0 max=1.0 subtype=factor description="Metallic blend amount"
+ao: default=1.0 min=0.0 max=1.0 subtype=factor description="Ambient occlusion multiplier"
+@end_panel
+
+@panel Builtin Helpers closed=true
+normal_ws: default=normalize(glsl_normal()) hide_value=true description="Optional world-space shading normal override"
+view_ws: default=normalize(glsl_incoming()) hide_value=true description="Optional world-space view direction override"
+ambient_light: default=glsl_ambient_lighting() subtype=color hide_value=true description="Optional ambient lighting override"
+@end_panel
+*/
 float saturate1(float x)
 {
   return clamp(x, 0.0, 1.0);
@@ -575,11 +606,17 @@ float geometry_smith(float NdotV, float NdotL, float roughness)
          geometry_schlick_ggx(NdotL, roughness);
 }
 
-vec4 pbr_lit(vec3 base_color, float roughness, float metallic, float ao)
+vec4 pbr_lit(vec3 base_color,
+             float roughness,
+             float metallic,
+             float ao,
+             vec3 normal_ws,
+             vec3 view_ws,
+             vec3 ambient_light)
 {
-  vec3 N = normalize(glsl_normal());
+  vec3 N = normalize(normal_ws);
   vec3 Ng = normalize(glsl_true_normal());
-  vec3 V = normalize(glsl_incoming());
+  vec3 V = normalize(view_ws);
 
   if (dot(N, Ng) < 0.0) {
     N = Ng;
@@ -631,11 +668,16 @@ vec4 pbr_lit(vec3 base_color, float roughness, float metallic, float ao)
                        shadow;
   }
 
-  vec3 ambient = glsl_ambient_lighting() * base_color * (1.0 - metallic) * ao;
+  vec3 ambient = ambient_light * base_color * (1.0 - metallic) * ao;
   vec3 color = ambient + direct_diffuse + direct_specular;
   return vec4(max(color, vec3(0.0)), 1.0);
 }
 ```
+
+补充说明：
+
+- `normal_ws`、`view_ws`、`ambient_light` 都有表达式默认值；socket 未连接时会自动调用对应内置 helper，连接后则使用外部输入
+- `hide_value=true` 用于这类 helper 覆盖输入，避免节点上显示一个容易误解的静态默认数值
 
 ### Image to Closure
 
@@ -1043,6 +1085,65 @@ vec4 pbr_lit(vec3 base_color, float roughness, float metallic, float ao)
 #### 说明
 
 - 如果你要做逐灯处理，应该使用 `NPR Tree` 里的 `For Each Light`
+
+### Light Shader Info / Light Shader Output
+
+#### 入口
+
+在灯光的 Eevee Light Shader 节点树中使用：
+
+- `Add > Input > Light Shader Info`
+- `Add > Output > Light Shader Output`
+
+#### 功能说明
+
+`Light Shader Output` 用来为单盏 Eevee 灯光输出自定义的直接光颜色、强度和衰减。它只用于灯光节点树，不是普通物体材质输出节点。
+
+<div align="center">
+	<img src="images/light_shader_output_node.png" alt="Light Shader Output 节点树" style="border-radius: 10px;">
+	<br>
+	<sub>灯光节点树中的 Light Shader Info 与 Light Shader Output</sub>
+</div>
+
+#### Light Shader Info 输出
+
+- `Default Color`
+- `Default Intensity`
+- `Default Attenuation`
+- `Distance`
+- `Light Space`
+- `Direction`
+- `World Position`
+- `Rotation`
+
+这些输出读取当前被评估灯光在当前采样点上的默认数据，适合作为自定义灯光 shader 的原始输入。
+
+#### Light Shader Output 输入和设置
+
+- `Color`：输出灯光颜色
+- `Intensity`：乘到 `Color` 上的非负强度
+- `Attenuation`：输出到 Light Shader 缓存 alpha 的非负衰减值
+- `Range Scale`：缩放 Eevee 参与剔除和阴影使用的灯光影响范围；默认 `1` 保持原始灯光范围
+
+最终写出的 Light Shader 结果语义为：
+
+```glsl
+vec4(Color.rgb * max(Intensity, 0.0), max(Attenuation, 0.0))
+```
+
+#### 行为说明
+
+- 如果灯光没有自定义 Light Shader 输出，会保持普通 Eevee 灯光行为
+- Light Shader 结果会参与 Eevee surface、deferred / NPR、forward、volume、probe capture 等已接入路径的直接光评估
+- `GLSL Function` 的 `glsl_light_get(i)` 在 Surface 材质路径中会读取已评估的 Light Shader 颜色和衰减
+- `GLSL Function` 只把 Light Shader 结果应用到 `diffuse_color`、`specular_color` 和 `attenuation`；灯光类型、位置、方向、距离和 `lightgroup_id` 保持 raw 灯光数据
+- 体积、probe bake、surfel 等路径会使用 Light Shader Output 参与 Eevee 自身光照，但不扩展 `GLSL Function` 灯光 helper 的公共语义
+
+<div align="center">
+	<img src="images/light_shader_output_effect.png" alt="Light Shader Output 效果" style="border-radius: 10px;">
+	<br>
+	<sub>Light Shader Output 对灯光颜色与衰减的影响示例</sub>
+</div>
 
 ## 5. 内置节点增强
 

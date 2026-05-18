@@ -91,6 +91,8 @@ This document describes the NPR / Eevee extension features that have been added 
 - `World To Tangent`
 - `GLSL Function`
 - `Image to Closure`
+- `Light Shader Info`
+- `Light Shader Output`
 - `Basis Transform`
 - `Twirl`
 - `Water Ripples`
@@ -117,7 +119,9 @@ This document describes the NPR / Eevee extension features that have been added 
 - `Eevee Performance` Outliner view
 - Material preview control
 - Material face culling
+- Material `ZTest / Stencil / Color Write / Depth Write`
 - Lightgroup management
+- Sun `Shadow Map Scale`
 - Splash version tag
 - Pose bone Outliner visibility
 

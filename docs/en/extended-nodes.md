@@ -430,6 +430,10 @@ Injects a user-authored GLSL function into the current `Eevee / NPR` material co
 - Built-in direct-light helpers: `GLSLLight`, `glsl_light_count()`, `glsl_light_get(light_index)`, `glsl_light_shadow(light_index, shading_normal)`
 - `GLSLLight.lightgroup_id` maps directly to the light data panel `Lightgroup ID`
 - `GLSLLight.attenuation` is a base attenuation term for custom per-light models; it does not include `NdotL`, toon ramps, Blinn-Phong, GGX, shadows, or material-side Fresnel / metallic / roughness behavior
+- If the light node tree uses `Light Shader Output`, `glsl_light_get(i).diffuse_color`, `glsl_light_get(i).specular_color`, and `glsl_light_get(i).attenuation` read the Light Shader evaluated color and attenuation
+- `Light Shader Output` affects only those color / attenuation fields; `type`, `index`, `lightgroup_id`, `vector`, `position`, `direction`, and `distance` still come from raw Eevee light data
+- Without a Light Shader output, `GLSLLight` keeps the normal Eevee light-access behavior
+- These direct-light helpers target Eevee object materials and `NPR Tree` Surface/Fragment paths; `Filter`, `World`, volume, probe / indirect lighting are not stable public helper semantics
 - Recommended diffuse pattern: `light.diffuse_color * light.attenuation * max(dot(N, light.vector), 0.0) * glsl_light_shadow(...)`
 - Recommended specular pattern: `light.specular_color * light.attenuation * custom_spec_term * glsl_light_shadow(...)`
 
@@ -490,15 +494,35 @@ If you want one `GLSL Function` node to switch between helper outputs with a sin
 
 You can filter Eevee direct lights inside `GLSL Function` by reading `GLSLLight.lightgroup_id`.
 
+Function name suggestion: `lightgroup_lambert`. This version also demonstrates `subtype=color`, `int` / `bool` defaults, `description`, `min` / `max`, `subtype=factor`, and `@panel`:
+
 ```glsl
-vec4 lightgroup_lambert(vec3 albedo, int target_lightgroup_id)
+/* @glsl_meta v1
+albedo: default=vec3(1.0) subtype=color description="Diffuse albedo for the selected light group"
+target_lightgroup_id: default=0 description="Only lights with this Lightgroup ID are included"
+
+@panel Shading closed=false
+use_shadow: default=true description="Apply glsl_light_shadow to selected lights"
+shadow_strength: default=1.0 min=0.0 max=1.0 subtype=factor description="Blend from unshadowed to fully shadowed direct light"
+ambient_floor: default=0.0 min=0.0 max=1.0 subtype=factor description="Small constant fill after lightgroup filtering"
+@end_panel
+*/
+vec4 lightgroup_lambert(vec3 albedo,
+                        int target_lightgroup_id,
+                        bool use_shadow,
+                        float shadow_strength,
+                        float ambient_floor)
 {
   vec3 N = normalize(glsl_normal());
   vec3 result = vec3(0.0);
+  float shadow_mix = clamp(shadow_strength, 0.0, 1.0);
 
   for (int i = 0; i < glsl_light_count(); i++) {
     GLSLLight light = glsl_light_get(i);
-    if (!light.valid || light.lightgroup_id != target_lightgroup_id) {
+    if (!light.valid) {
+      continue;
+    }
+    if (light.lightgroup_id != target_lightgroup_id) {
       continue;
     }
 
@@ -507,13 +531,26 @@ vec4 lightgroup_lambert(vec3 albedo, int target_lightgroup_id)
       continue;
     }
 
-    float shadow = glsl_light_shadow(i, N);
-    result += albedo * light.diffuse_color * light.attenuation * NdotL * shadow;
+    float shadow = use_shadow ? glsl_light_shadow(i, N) : 1.0;
+    shadow = mix(1.0, shadow, shadow_mix);
+    result += albedo *
+              light.diffuse_color *
+              light.attenuation *
+              NdotL *
+              shadow;
   }
 
+  result += albedo * clamp(ambient_floor, 0.0, 1.0);
   return vec4(result, 1.0);
 }
 ```
+
+Notes:
+
+- `target_lightgroup_id` maps directly to the light data panel's `Lightgroup ID`
+- To exclude one light group instead, change the test to `if (light.lightgroup_id == target_lightgroup_id) continue;`
+- `use_shadow`, `shadow_strength`, and `ambient_floor` show common boolean input, factor range, and panel grouping patterns
+- This filtering only affects the per-light model you write in this function; it does not change Eevee's regular material lighting path
 
 #### Example: PBR-Style Direct Light + Ambient Light
 
@@ -523,16 +560,24 @@ This example shows how the current `GLSL Function` workflow can combine:
 - Ambient-light helper: `glsl_ambient_lighting()`
 - Per-light helpers: `glsl_light_count()`, `glsl_light_get(i)`, `glsl_light_shadow(i, N)`
 
-Function name suggestion: `pbr_lit`
-
-Recommended inputs:
-
-- `base_color`
-- `roughness`
-- `metallic`
-- `ao`
+Function name suggestion: `pbr_lit`. This version groups common surface parameters in the `Surface` panel and exposes built-in helpers as expression defaults that can still be overridden by connected sockets:
 
 ```glsl
+/* @glsl_meta v1
+base_color: default=vec3(0.8, 0.72, 0.6) subtype=color description="Base surface albedo"
+
+@panel Surface closed=false
+roughness: default=0.45 min=0.04 max=1.0 subtype=factor description="Microfacet roughness"
+metallic: default=0.0 min=0.0 max=1.0 subtype=factor description="Metallic blend amount"
+ao: default=1.0 min=0.0 max=1.0 subtype=factor description="Ambient occlusion multiplier"
+@end_panel
+
+@panel Builtin Helpers closed=true
+normal_ws: default=normalize(glsl_normal()) hide_value=true description="Optional world-space shading normal override"
+view_ws: default=normalize(glsl_incoming()) hide_value=true description="Optional world-space view direction override"
+ambient_light: default=glsl_ambient_lighting() subtype=color hide_value=true description="Optional ambient lighting override"
+@end_panel
+*/
 float saturate1(float x)
 {
   return clamp(x, 0.0, 1.0);
@@ -571,11 +616,17 @@ float geometry_smith(float NdotV, float NdotL, float roughness)
          geometry_schlick_ggx(NdotL, roughness);
 }
 
-vec4 pbr_lit(vec3 base_color, float roughness, float metallic, float ao)
+vec4 pbr_lit(vec3 base_color,
+             float roughness,
+             float metallic,
+             float ao,
+             vec3 normal_ws,
+             vec3 view_ws,
+             vec3 ambient_light)
 {
-  vec3 N = normalize(glsl_normal());
+  vec3 N = normalize(normal_ws);
   vec3 Ng = normalize(glsl_true_normal());
-  vec3 V = normalize(glsl_incoming());
+  vec3 V = normalize(view_ws);
 
   if (dot(N, Ng) < 0.0) {
     N = Ng;
@@ -627,11 +678,16 @@ vec4 pbr_lit(vec3 base_color, float roughness, float metallic, float ao)
                        shadow;
   }
 
-  vec3 ambient = glsl_ambient_lighting() * base_color * (1.0 - metallic) * ao;
+  vec3 ambient = ambient_light * base_color * (1.0 - metallic) * ao;
   vec3 color = ambient + direct_diffuse + direct_specular;
   return vec4(max(color, vec3(0.0)), 1.0);
 }
 ```
+
+Notes:
+
+- `normal_ws`, `view_ws`, and `ambient_light` use expression defaults; unconnected sockets call the built-in helpers, while connected sockets use the external override
+- `hide_value=true` is useful for helper override inputs so the node does not show a misleading static default value
 
 ### Image to Closure
 
@@ -1016,6 +1072,65 @@ Current behavior depends on the selected light type:
 #### Notes
 
 - For per-light processing, use `For Each Light` in the `NPR Tree`
+
+### Light Shader Info / Light Shader Output
+
+#### Entry
+
+Use these nodes in an Eevee Light Shader node tree:
+
+- `Add > Input > Light Shader Info`
+- `Add > Output > Light Shader Output`
+
+#### Feature Description
+
+`Light Shader Output` lets a single Eevee light output custom direct-light color, intensity, and attenuation. It is used only in light node trees, not as a regular object material output.
+
+<div align="center">
+	<img src="images/light_shader_output_node.png" alt="Light Shader Output node setup" style="border-radius: 10px;">
+	<br>
+	<sub>Light Shader Info and Light Shader Output in a light node tree</sub>
+</div>
+
+#### Light Shader Info Outputs
+
+- `Default Color`
+- `Default Intensity`
+- `Default Attenuation`
+- `Distance`
+- `Light Space`
+- `Direction`
+- `World Position`
+- `Rotation`
+
+These outputs expose the current light's default data at the evaluated sample point and are meant as source inputs for custom light shaders.
+
+#### Light Shader Output Inputs and Settings
+
+- `Color`: output light color
+- `Intensity`: non-negative multiplier applied to `Color`
+- `Attenuation`: non-negative value written to the Light Shader cache alpha channel
+- `Range Scale`: scales the Eevee light influence radius used for culling and shadow usage; `1` keeps the original light range
+
+The written Light Shader result has this meaning:
+
+```glsl
+vec4(Color.rgb * max(Intensity, 0.0), max(Attenuation, 0.0))
+```
+
+#### Behavior
+
+- Lights without a custom Light Shader output keep normal Eevee lighting behavior
+- The Light Shader result participates in the connected Eevee direct-light paths, including surface, deferred / NPR, forward, volume, and probe capture paths
+- In Surface material paths, `GLSL Function` `glsl_light_get(i)` reads the evaluated Light Shader color and attenuation
+- `GLSL Function` applies the Light Shader result only to `diffuse_color`, `specular_color`, and `attenuation`; light type, position, direction, distance, and `lightgroup_id` remain raw light data
+- Volume, probe bake, and surfel paths can use Light Shader Output for Eevee lighting, but they do not extend the public `GLSL Function` light-helper semantics
+
+<div align="center">
+	<img src="images/light_shader_output_effect.png" alt="Light Shader Output effect" style="border-radius: 10px;">
+	<br>
+	<sub>Example effect of Light Shader Output on light color and attenuation</sub>
+</div>
 
 ## 5. Built-In Node Enhancements
 

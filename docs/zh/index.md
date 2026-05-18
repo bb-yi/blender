@@ -91,6 +91,8 @@
 - `World To Tangent`
 - `GLSL Function`
 - `Image to Closure`
+- `Light Shader Info`
+- `Light Shader Output`
 - `Basis Transform`
 - `Twirl`
 - `Water Ripples`
@@ -117,7 +119,9 @@
 - `Eevee Performance` Outliner 视图
 - 材质预览控制
 - 材质剔除模式
+- 材质 `ZTest / Stencil / Color Write / Depth Write`
 - 灯光组管理
+- 太阳光 `Shadow Map Scale`
 - 启动图版本标识
 - 骨骼 Outliner 显示控制
 

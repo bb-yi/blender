@@ -55,8 +55,9 @@ This is mainly useful when many materials exist and expanding the selector would
 
 ### Current Scope
 
-- Only affects `template_ID(...)` style material pickers in drop-down lists
-- Does not affect the large preview sphere in `Material Properties`
+- When disabled, this prevents material selectors, material drop-down / search lists, and automatic material preview panels from starting new material preview renders
+- Disabling the option also clears running material preview jobs so old preview renders do not keep occupying Eevee
+- Does not affect the 3D Viewport `Material Preview` / `Rendered` shading modes
 - Does not affect the actual material render result
 
 ## 3. Material Face Culling
@@ -85,11 +86,88 @@ Adds clearer face-culling control for materials. In addition to the usual back-f
 - `Front` is useful for shell-style effects, inside-view setups, or some inverted-outline style tricks
 - `Shadow` and `Light Probe Volume` still keep their own culling controls
 
-## 4. Eevee Lightgroup ID
+## 4. Material Surface Render State
 
 ### Purpose
 
-Assigns an integer light-group ID to Eevee lights so the `Shader Info` node can filter direct-light evaluation by group.
+Provides direct Eevee Surface material controls for depth test, color write, depth write, and stencil test / write state. These are useful for masks, portals, special outline layers, hidden writer materials, and other effects that need explicit render-state control.
+
+### Entry
+
+`Material Properties > Settings > Surface`
+
+<div align="center">
+	<img src="images/material_surface_state_controls.png" alt="Material surface render-state controls" style="border-radius: 10px;">
+	<br>
+	<sub>ZTest, Stencil, Color Write, and Depth Write in Material Properties > Settings > Surface</sub>
+</div>
+
+### ZTest
+
+`ZTest` controls how a fragment compares against the stored depth:
+
+- `Less`
+- `Greater`
+- `Less Equal`
+- `Greater Equal`
+- `Equal`
+- `Not Equal`
+- `Always`
+- `Never`
+
+The default should usually stay `Less Equal`. `ZTest Never` rejects the whole fragment, including stencil writes. For stencil writer materials, usually keep `Less Equal` and disable `Color Write` / `Depth Write` when needed.
+
+### Color Write / Depth Write
+
+- `Color Write`: controls whether the Surface material writes Eevee color output
+- `Depth Write`: controls whether the Surface material writes Eevee depth output
+
+These toggles control writes only; they do not disable node-tree evaluation. Transparent, outline, AOV, and stencil paths should still be interpreted through the current material and pipeline rules.
+
+### Stencil
+
+The `Stencil` panel contains:
+
+- `Enabled`
+- `Order`
+- `Reference`
+- `Read Mask`
+- `Write Mask`
+- `Test`
+- `Pass`
+- `Fail`
+- `ZFail`
+
+`Test` options: `Always`, `Never`, `Equal`, `Not Equal`, `Less`, `Less Equal`, `Greater`, `Greater Equal`.
+
+`Pass / Fail / ZFail` options: `Keep`, `Zero`, `Replace`, `Increment Clamp`, `Decrement Clamp`, `Invert`, `Increment Wrap`, `Decrement Wrap`.
+
+### Notes
+
+- `Order` controls submission order inside the Eevee stencil pass; lower values are submitted first
+- `Reference`, `Read Mask`, and `Write Mask` currently use a 4-bit user stencil range
+- A common writer setup enables `Stencil`, uses `Pass = Replace`, and disables `Color Write` / `Depth Write`
+- A common reader setup enables `Stencil`, uses `Test = Equal` or `Not Equal`, and matches the same `Reference` / mask combination
+- If one material both participates in depth occlusion and writes stencil, check the `ZTest` and `Depth Write` combination carefully so fragments are not rejected before stencil writes happen
+- To inspect the stencil buffer in the viewport, choose `Stencil Value` from `Viewport Shading > Render Pass`
+
+<div align="center">
+	<img src="images/material_stencil_example.gif" alt="Material stencil example" style="border-radius: 10px;">
+	<br>
+	<sub>Stencil writer and reader mask example</sub>
+</div>
+
+<div align="center">
+	<img src="images/Stencil_Value.png" alt="Viewport stencil value preview" style="border-radius: 10px;">
+	<br>
+	<sub>Previewing stencil values with Viewport Shading > Stencil Value</sub>
+</div>
+
+## 5. Eevee Lightgroup ID
+
+### Purpose
+
+Assigns an integer light-group ID to Eevee lights so the `Shader Info` node and `GLSL Function` `GLSLLight.lightgroup_id` can filter direct-light evaluation by group.
 
 ### Entry
 
@@ -100,9 +178,35 @@ Assigns an integer light-group ID to Eevee lights so the `Shader Info` node can 
 - Default value: `0`
 - When `Shader Info` also uses `Lightgroup = 0`, only lights with `Lightgroup ID = 0` are evaluated
 - If a `Shader Info` node uses another integer value, only lights with the same ID are included
-- This grouping currently affects only `Shader Info`, not the default Eevee material lighting path
+- In `GLSL Function`, `glsl_light_get(i).lightgroup_id` returns this integer and can be used for custom per-light include / exclude logic
+- This grouping does not automatically modify the default Eevee material lighting path; it only affects `Shader Info` or custom `GLSL Function` logic that explicitly uses it
 
-## 5. Splash Version Tag
+## 6. Sun Shadow Map Scale
+
+### Purpose
+
+Adds a separate coverage-scale control for Eevee Sun shadow maps, making it possible to adjust the coverage range and effective detail distribution of the Sun clipmap shadow.
+
+### Entry
+
+`Light Data > Shadow > Shadow Map Scale`
+
+This option is shown only for `Sun` lights.
+
+<div align="center">
+	<img src="images/sun_shadow_map_scale.png" alt="Sun Shadow Map Scale" style="border-radius: 10px;">
+	<br>
+	<sub>Shadow Map Scale setting on a Sun light</sub>
+</div>
+
+### Behavior
+
+- Default value: `1`
+- Higher values expand the Sun shadow-map coverage scale and usually reduce effective detail per area
+- Lower values concentrate the shadow map into a smaller range and can improve nearby detail, but can expose insufficient coverage or boundary issues more easily
+- This setting affects only Eevee Sun shadow-map sampling / coverage behavior; it does not change light color, energy, direction, or material-side shading
+
+## 7. Splash Version Tag
 
 ### Purpose
 
@@ -113,7 +217,7 @@ Appends the current NPR build tag and build date to the version text in the top-
 - `version + npr post + build date`
 - Example: `5.1.0 npr post 2026-03-27`
 
-## 6. Pose Bone Outliner Visibility
+## 8. Pose Bone Outliner Visibility
 
 ### Purpose
 
