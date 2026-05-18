@@ -28,6 +28,8 @@
    - `Bevel`
    - `GLSL Function`
    - `Image to Closure`
+   - `Light Shader Info`
+   - `Light Shader Output`
    - `Twirl`
    - `Water Ripples`
    - `Hex Grid Texture`
@@ -64,7 +66,9 @@
    - `Eevee Performance`
    - `材质选择器预览开关`
    - `材质剔除模式`
+   - `材质 ZTest / Stencil / Color Write / Depth Write`
    - `Eevee 灯光 Lightgroup ID`
+   - `太阳光 Shadow Map Scale`
    - `骨骼 Outliner 隐藏`
 
 ## 一、Scene 级 Eevee 扩展
@@ -595,12 +599,16 @@ struct GLSLLight {
 - `GLSLLight.diffuse_color` 表示对自定义逐灯模型友好的 diffuse 颜色项
 - `GLSLLight.specular_color` 表示对自定义逐灯模型友好的 specular 颜色项
 - `GLSLLight.attenuation` 表示适合自定义逐灯模型的基础衰减项，内部会组合 `light_point_light(...)` 和 `light_attenuation_surface(...)`，但不包含 `NdotL`、toon ramp、Blinn-Phong、GGX、`light_attenuation_facing(...)`、`light_ltc(...)`、shadow 或材质侧 Fresnel / IOR / metallic / tint / roughness
+- 如果灯光节点树使用了 `Light Shader Output`，`glsl_light_get(i).diffuse_color`、`glsl_light_get(i).specular_color` 和 `glsl_light_get(i).attenuation` 会读取 Light Shader 评估后的颜色与衰减
+- `Light Shader Output` 只影响上述颜色 / 衰减字段；`type`、`index`、`lightgroup_id`、`vector`、`position`、`direction`、`distance` 仍来自 Eevee 原始灯光数据
+- 没有 Light Shader 输出、或当前灯光不需要评估缓存时，这三个字段保持普通 Eevee 灯光访问行为
+- 如果旧 shader 依赖 `diffuse_color / specular_color / attenuation` 作为纯 raw light color，需要改为按新的 Light Shader 语义理解这些字段
 - 推荐写法：`light.diffuse_color * light.attenuation * max(dot(N, light.vector), 0.0) * glsl_light_shadow(...)`
 - 推荐写法：`light.specular_color * light.attenuation * custom_spec_term * glsl_light_shadow(...)`
 - `glsl_light_count()` / `glsl_light_get(i)` 操作的是当前片元的局部可见灯列表，不是场景全局稳定灯编号
 - 这套直接光 helper 只是 Eevee 直接光访问辅助接口，不等于公开 `LightData`、`light_buf` 或 Eevee 内部宏
-- 这套直接光 helper 当前只支持普通 `Eevee` 物体材质，并且只在 `Deferred` / `Forward` 编译路径下提供直接光与阴影访问
-- 对这套直接光 helper 来说，`FILTER`、`NPR Tree`、`World`、probe / indirect / volume lighting 当前都不在支持范围内
+- 这套直接光 helper 当前支持普通 `Eevee` 物体材质和 `NPR Tree` 的 Surface/Fragment 材质路径，并且只在 `Deferred` / `Forward` 这类 Surface 编译路径下提供直接光与阴影访问
+- 对这套直接光 helper 来说，`FILTER`、`World`、probe / indirect / volume lighting 当前都不在支持范围内
 
 #### 示例：带注释和面板的参数 Meta
 
@@ -1426,6 +1434,71 @@ vec4 pbr_lit(vec3 base_color, float roughness, float metallic, float ao)
 
 - 如果你要做逐灯处理，应该使用 `NPR Tree` 里的 `For Each Light`
 
+### Light Shader Info / Light Shader Output
+
+#### 入口
+
+在灯光的 Eevee Light Shader 节点树中使用：
+
+- `Add > Input > Light Shader Info`
+- `Add > Output > Light Shader Output`
+
+#### 功能说明
+
+`Light Shader Output` 用来为单盏 Eevee 灯光输出自定义的直接光颜色、强度和衰减。它不是普通物体材质输出节点，只在灯光节点树中使用。
+
+#### Light Shader Info 输出
+
+- `Default Color`
+- `Default Intensity`
+- `Default Attenuation`
+- `Distance`
+- `Light Space`
+- `Direction`
+- `World Position`
+- `Rotation`
+
+这些输出用于读取当前被评估灯光在当前采样点上的默认数据，适合在自定义灯光 shader 中作为原始输入继续加工。
+
+#### Light Shader Output 输入和设置
+
+- `Color`
+  - 输出灯光颜色
+- `Intensity`
+  - 乘到 `Color` 上的非负强度
+- `Attenuation`
+  - 输出到 Light Shader 缓存 alpha 的非负衰减值
+- `Range Scale`
+  - 缩放 Eevee 参与剔除和阴影使用的灯光影响范围；默认 `1` 保持原始灯光范围
+
+最终写出的 Light Shader 结果语义为：
+
+```glsl
+vec4(Color.rgb * max(Intensity, 0.0), max(Attenuation, 0.0))
+```
+
+#### 行为说明
+
+- 如果灯光没有自定义 Light Shader 输出，会保持普通 Eevee 灯光行为
+- Light Shader 结果会参与 Eevee surface、deferred / NPR、forward、volume、probe capture 等已接入路径的直接光评估
+- `GLSL Function` 的 `glsl_light_get(i)` 在 Surface 材质路径中会读取已评估的 Light Shader 颜色和衰减
+- `GLSL Function` 只把 Light Shader 结果应用到 `diffuse_color`、`specular_color` 和 `attenuation`；灯光类型、位置、方向、距离和 `lightgroup_id` 保持 raw 灯光数据
+- 体积、probe bake、surfel 等路径会使用 Light Shader Output 参与 Eevee 自身光照，但不扩展 `GLSL Function` 灯光 helper 的公共语义
+
+#### 示例图
+
+<div align="center">
+  <img src="docs/images/light_shader_output_node.png" alt="Light Shader Output node setup" style="border-radius: 10px;">
+  <br>
+  <sub>灯光节点树中的 Light Shader Info 与 Light Shader Output</sub>
+</div>
+
+<div align="center">
+  <img src="docs/images/light_shader_output_effect.png" alt="Light Shader Output effect" style="border-radius: 10px;">
+  <br>
+  <sub>Light Shader Output 对灯光颜色与衰减的影响示例</sub>
+</div>
+
 **4. 内置节点增强**
 
 ### Color Ramp（OKLab 模式）
@@ -1617,8 +1690,9 @@ vec4 pbr_lit(vec3 base_color, float roughness, float metallic, float ao)
 
 #### 当前范围
 
-- 目前只影响 `template_ID(...)` 这类材质选择器下拉列表中的材质预览显示
-- 不影响 `Material Properties` 面板中的大预览球
+- 关闭后会阻止材质选择器、材质下拉 / 搜索列表，以及材质自动预览面板触发新的材质预览图渲染
+- 关闭时会清理正在运行的材质预览作业，避免旧作业继续占用 Eevee 预览渲染
+- 不影响 3D Viewport 的 `Material Preview` / `Rendered` 视图模式
 - 不影响材质本身的正常渲染结果
 
 ### 3. 材质剔除模式
@@ -1647,7 +1721,99 @@ vec4 pbr_lit(vec3 base_color, float roughness, float metallic, float ao)
 - `Front` 适合做壳体内部观察、双层模型的反向显露，或某些特殊的描边 / 反相表现
 - `Shadow` 和 `Light Probe Volume` 仍然保留独立的剔除控制
 
-### 4. Eevee 灯光 Lightgroup ID
+### 4. 材质 Surface 渲染状态
+
+#### 作用
+
+在 Eevee Surface 材质上直接控制深度测试、颜色写入、深度写入和模板测试 / 写入状态，用于遮罩、门户、特殊描边层、隐藏写入层等需要精确控制渲染状态的效果。
+
+#### 入口
+
+`Material Properties > Settings > Surface`
+
+#### ZTest
+
+`ZTest` 决定片元如何和已有深度比较：
+
+- `Less`
+- `Greater`
+- `Less Equal`
+- `Greater Equal`
+- `Equal`
+- `Not Equal`
+- `Always`
+- `Never`
+
+默认应保持 `Less Equal`。`ZTest Never` 会拒绝整个片元，包括 stencil 写入；如果材质是模板写入层，通常应保留 `Less Equal`，然后按需要关闭 `Color Write` 和 `Depth Write`。
+
+#### Color Write / Depth Write
+
+- `Color Write`
+  - 控制该 Surface 材质是否写入 Eevee 颜色输出
+- `Depth Write`
+  - 控制该 Surface 材质是否写入 Eevee 深度输出
+
+这两个开关只控制写入结果，不等于关闭节点树求值。透明、描边、AOV、模板等路径仍应按当前材质和管线规则理解。
+
+#### Stencil
+
+`Stencil` 折叠面板包含：
+
+- `Enabled`
+- `Order`
+- `Reference`
+- `Read Mask`
+- `Write Mask`
+- `Test`
+- `Pass`
+- `Fail`
+- `ZFail`
+
+`Test` 可选：
+
+- `Always`
+- `Never`
+- `Equal`
+- `Not Equal`
+- `Less`
+- `Less Equal`
+- `Greater`
+- `Greater Equal`
+
+`Pass / Fail / ZFail` 可选：
+
+- `Keep`
+- `Zero`
+- `Replace`
+- `Increment Clamp`
+- `Decrement Clamp`
+- `Invert`
+- `Increment Wrap`
+- `Decrement Wrap`
+
+#### 说明
+
+- `Order` 控制 Eevee stencil pass 内部提交顺序，数值小的材质先提交
+- `Reference`、`Read Mask`、`Write Mask` 当前使用 4-bit 用户 stencil 范围
+- 常见写入层做法是开启 `Stencil`，使用 `Pass = Replace`，并关闭 `Color Write` / `Depth Write`
+- 常见读取层做法是开启 `Stencil`，设置 `Test = Equal` 或 `Not Equal`，再使用相同的 `Reference` / mask 组合
+- 如果一个材质既要参与深度遮挡又要写 stencil，需要特别检查 `ZTest` 和 `Depth Write` 的组合，避免片元在深度测试阶段被提前拒绝
+
+#### 示例图
+
+<div align="center">
+  <img src="docs/images/material_surface_state_controls.png" alt="Material surface render-state controls" style="border-radius: 10px;">
+  <br>
+  <sub>Material Properties > Settings > Surface 中的 ZTest、Stencil、Color Write 与 Depth Write</sub>
+</div>
+
+<div align="center">
+  <img src="docs/images/material_stencil_example.gif" alt="Material stencil example" style="border-radius: 10px;">
+  <br>
+  <sub>Stencil 写入与读取的遮罩示例</sub>
+</div>
+
+### 5. Eevee 灯光 Lightgroup ID
 
 #### 作用
 
@@ -1665,7 +1831,34 @@ vec4 pbr_lit(vec3 base_color, float roughness, float metallic, float ao)
 - 在 `GLSL Function` 里，`glsl_light_get(i).lightgroup_id` 会返回这个整数值，可直接用于自定义逐灯 `continue` / `exclude` 过滤
 - 这个分组过滤当前不会自动改动 Eevee 普通材质主通道的默认灯光结果；只有 `Shader Info` 或你自己写的 `GLSL Function` 显式使用时才会生效
 
-### 5. 启动图版本标识
+### 6. 太阳光 Shadow Map Scale
+
+#### 作用
+
+为 Eevee Sun 灯光提供单独的阴影贴图覆盖尺度控制，用来调整太阳光 clipmap shadow 的覆盖范围和有效细节分布。
+
+#### 入口
+
+`Light Data > Shadow > Shadow Map Scale`
+
+该选项只在 `Sun` 灯光上显示。
+
+#### 行为说明
+
+- 默认值为 `1`
+- 增大数值会扩大 Sun shadow map 的覆盖尺度，通常会降低单位区域内的有效阴影细节
+- 减小数值会把阴影贴图集中到更小范围，通常能提高近处细节，但更容易暴露覆盖范围不足或边界问题
+- 该设置只影响 Eevee Sun shadow map 的采样 / 覆盖行为，不改变灯光颜色、能量、方向或材质侧着色模型
+
+#### 示例图
+
+<div align="center">
+  <img src="docs/images/sun_shadow_map_scale.png" alt="Sun Shadow Map Scale" style="border-radius: 10px;">
+  <br>
+  <sub>Sun 灯光的 Shadow Map Scale 设置</sub>
+</div>
+
+### 7. 启动图版本标识
 
 #### 作用
 
@@ -1676,7 +1869,7 @@ vec4 pbr_lit(vec3 base_color, float roughness, float metallic, float ao)
 - `版本号 + npr post + 构建日期`
 - 例如：`5.1.0 npr post 2026-03-27`
 
-### 6. 骨骼 Outliner 隐藏
+### 8. 骨骼 Outliner 隐藏
 
 #### 作用
 
