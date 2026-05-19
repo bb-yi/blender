@@ -390,13 +390,16 @@ void rna_ViewLayer_active_native_postfx_output_index_range(
 int rna_ViewLayer_active_native_postfx_output_index_get(PointerRNA *ptr);
 void rna_ViewLayer_active_native_postfx_output_index_set(PointerRNA *ptr, int value);
 ViewLayerNativePostFXOutput *rna_ViewLayer_native_postfx_output_add(ID *id,
-                                                                    ViewLayer *view_layer);
+                                                                    ViewLayer *view_layer,
+                                                                    Main *bmain);
 void rna_ViewLayer_native_postfx_output_remove(ID *id,
                                                ViewLayer *view_layer,
+                                               Main *bmain,
                                                ReportList *reports,
                                                int index);
 void rna_ViewLayer_native_postfx_output_move(ID *id,
                                              ViewLayer *view_layer,
+                                             Main *bmain,
                                              ReportList *reports,
                                              int from,
                                              int to);

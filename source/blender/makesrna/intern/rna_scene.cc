@@ -3466,74 +3466,6 @@ namespace blender
     view_layer->active_native_postfx_output = output;
   }
 
-  ViewLayerNativePostFXOutput* rna_ViewLayer_native_postfx_output_add(ID* id,
-                                                                      ViewLayer* view_layer)
-  {
-    Scene* scene = id_cast<Scene*>(id);
-    ViewLayerNativePostFXOutput* output = BKE_view_layer_add_native_postfx_output(view_layer);
-    RenderEngineType* engine_type = RE_engines_find(scene->r.engine);
-    if (engine_type->update_render_passes)
-    {
-      RenderEngine* engine = RE_engine_create(engine_type);
-      if (engine)
-      {
-        BKE_view_layer_verify_native_postfx_outputs(engine, scene, view_layer);
-      }
-      RE_engine_free(engine);
-    }
-    return output;
-  }
-
-  void rna_ViewLayer_native_postfx_output_remove(
-    ID* id, ViewLayer* view_layer, ReportList* reports, int index)
-  {
-    ViewLayerNativePostFXOutput* output = static_cast<ViewLayerNativePostFXOutput*>(
-      BLI_findlink(&view_layer->native_postfx_outputs, index));
-    if (output == nullptr)
-    {
-      BKE_reportf(reports, RPT_ERROR, "Native PostFX output not found in view-layer '%s'",
-        view_layer->name);
-      return;
-    }
-    BKE_view_layer_remove_native_postfx_output(view_layer, output);
-
-    Scene* scene = id_cast<Scene*>(id);
-    RenderEngineType* engine_type = RE_engines_find(scene->r.engine);
-    if (engine_type->update_render_passes)
-    {
-      RenderEngine* engine = RE_engine_create(engine_type);
-      if (engine)
-      {
-        BKE_view_layer_verify_native_postfx_outputs(engine, scene, view_layer);
-      }
-      RE_engine_free(engine);
-    }
-  }
-
-  void rna_ViewLayer_native_postfx_output_move(
-    ID* /*id*/, ViewLayer* view_layer, ReportList* reports, int from, int to)
-  {
-    if (from == to)
-    {
-      return;
-    }
-
-    const int active_index = BLI_findindex(&view_layer->native_postfx_outputs,
-      view_layer->active_native_postfx_output);
-    if (!BLI_listbase_move_index(&view_layer->native_postfx_outputs, from, to))
-    {
-      BKE_reportf(reports, RPT_ERROR, "Could not move Native PostFX output from index '%d' to '%d'",
-        from, to);
-      return;
-    }
-
-    if (active_index == from)
-    {
-      view_layer->active_native_postfx_output = static_cast<ViewLayerNativePostFXOutput*>(
-        BLI_findlink(&view_layer->native_postfx_outputs, to));
-    }
-  }
-
   static std::optional<std::string> rna_ViewLayerNativePostFXOutput_path(const PointerRNA* ptr)
   {
     const ViewLayerNativePostFXOutput* output = static_cast<ViewLayerNativePostFXOutput*>(
@@ -5699,21 +5631,21 @@ namespace blender
 
     func = RNA_def_function(srna, "add", "rna_ViewLayer_native_postfx_output_add");
     RNA_def_function_ui_description(func, "Add a native camera FX output");
-    RNA_def_function_flag(func, FUNC_USE_SELF_ID);
+    RNA_def_function_flag(func, FUNC_USE_SELF_ID | FUNC_USE_MAIN);
     parm = RNA_def_pointer(
       func, "output", "NativePostFXOutput", "", "Newly created native camera FX output");
     RNA_def_function_return(func, parm);
 
     func = RNA_def_function(srna, "remove", "rna_ViewLayer_native_postfx_output_remove");
     RNA_def_function_ui_description(func, "Remove a native camera FX output");
-    RNA_def_function_flag(func, FUNC_USE_SELF_ID | FUNC_USE_REPORTS);
+    RNA_def_function_flag(func, FUNC_USE_SELF_ID | FUNC_USE_MAIN | FUNC_USE_REPORTS);
     parm = RNA_def_int(
       func, "index", -1, INT_MIN, INT_MAX, "Index", "Index to remove", -1, INT_MAX);
     RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
 
     func = RNA_def_function(srna, "move", "rna_ViewLayer_native_postfx_output_move");
     RNA_def_function_ui_description(func, "Move a native camera FX output");
-    RNA_def_function_flag(func, FUNC_USE_SELF_ID | FUNC_USE_REPORTS);
+    RNA_def_function_flag(func, FUNC_USE_SELF_ID | FUNC_USE_MAIN | FUNC_USE_REPORTS);
     parm = RNA_def_int(
       func, "from_index", -1, INT_MIN, INT_MAX, "From Index", "Index to move", -1, INT_MAX);
     RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);

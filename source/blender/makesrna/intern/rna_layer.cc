@@ -25,6 +25,7 @@
 #  endif
 
 #  include "DNA_collection_types.h"
+#  include "DNA_node_types.h"
 #  include "DNA_object_types.h"
 
 #  include "RNA_access.hh"
@@ -33,6 +34,7 @@
 #  include "BKE_idprop.hh"
 #  include "BKE_layer.hh"
 #  include "BKE_main.hh"
+#  include "BKE_main_invariants.hh"
 #  include "BKE_mesh.hh"
 #  include "BKE_node.hh"
 #  include "BKE_node_tree_update.hh"
@@ -172,6 +174,89 @@ static void rna_ViewLayer_update_render_passes(ID *id, Main *bmain)
     RE_engine_free(engine);
     engine = nullptr;
   }
+}
+
+static void rna_ViewLayer_native_postfx_output_list_update(ID *id,
+                                                           ViewLayer *view_layer,
+                                                           Main *bmain)
+{
+  Scene *scene = id_cast<Scene *>(id);
+  RenderEngineType *engine_type = RE_engines_find(scene->r.engine);
+  if (engine_type->update_render_passes) {
+    RenderEngine *engine = RE_engine_create(engine_type);
+    if (engine) {
+      BKE_view_layer_verify_native_postfx_outputs(engine, scene, view_layer);
+    }
+    RE_engine_free(engine);
+  }
+
+  BKE_ntree_update_tag_id_changed(bmain, &scene->id);
+  BKE_ntree_update(*bmain);
+
+  DEG_id_tag_update(&scene->id, ID_RECALC_SYNC_TO_EVAL);
+  WM_main_add_notifier(NC_SCENE | ND_RENDER_OPTIONS, scene);
+  if (scene->compositing_node_group) {
+    bNodeTree *ntree = scene->compositing_node_group;
+    WM_main_add_notifier(NC_NODE | NA_EDITED, &ntree->id);
+    WM_main_add_notifier(NC_SCENE | ND_NODES, &ntree->id);
+    BKE_main_ensure_invariants(*bmain, ntree->id);
+  }
+}
+
+ViewLayerNativePostFXOutput *rna_ViewLayer_native_postfx_output_add(ID *id,
+                                                                    ViewLayer *view_layer,
+                                                                    Main *bmain)
+{
+  ViewLayerNativePostFXOutput *output = BKE_view_layer_add_native_postfx_output(view_layer);
+  rna_ViewLayer_native_postfx_output_list_update(id, view_layer, bmain);
+  return output;
+}
+
+void rna_ViewLayer_native_postfx_output_remove(ID *id,
+                                               ViewLayer *view_layer,
+                                               Main *bmain,
+                                               ReportList *reports,
+                                               int index)
+{
+  ViewLayerNativePostFXOutput *output = static_cast<ViewLayerNativePostFXOutput *>(
+      BLI_findlink(&view_layer->native_postfx_outputs, index));
+  if (output == nullptr) {
+    BKE_reportf(
+        reports, RPT_ERROR, "Native PostFX output not found in view-layer '%s'", view_layer->name);
+    return;
+  }
+  BKE_view_layer_remove_native_postfx_output(view_layer, output);
+  rna_ViewLayer_native_postfx_output_list_update(id, view_layer, bmain);
+}
+
+void rna_ViewLayer_native_postfx_output_move(ID *id,
+                                             ViewLayer *view_layer,
+                                             Main *bmain,
+                                             ReportList *reports,
+                                             int from,
+                                             int to)
+{
+  if (from == to) {
+    return;
+  }
+
+  const int active_index = BLI_findindex(&view_layer->native_postfx_outputs,
+                                         view_layer->active_native_postfx_output);
+  if (!BLI_listbase_move_index(&view_layer->native_postfx_outputs, from, to)) {
+    BKE_reportf(reports,
+                RPT_ERROR,
+                "Could not move Native PostFX output from index '%d' to '%d'",
+                from,
+                to);
+    return;
+  }
+
+  if (active_index == from) {
+    view_layer->active_native_postfx_output = static_cast<ViewLayerNativePostFXOutput *>(
+        BLI_findlink(&view_layer->native_postfx_outputs, to));
+  }
+
+  rna_ViewLayer_native_postfx_output_list_update(id, view_layer, bmain);
 }
 
 static PointerRNA rna_ViewLayer_objects_get(CollectionPropertyIterator *iter)
