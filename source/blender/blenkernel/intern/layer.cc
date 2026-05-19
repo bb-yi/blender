@@ -2753,7 +2753,7 @@ void BKE_view_layer_verify_aov(RenderEngine *engine, Scene *scene, ViewLayer *vi
 ViewLayerNativePostFXOutput *BKE_view_layer_add_native_postfx_output(ViewLayer *view_layer)
 {
   ViewLayerNativePostFXOutput *output = MEM_new<ViewLayerNativePostFXOutput>(__func__);
-  STRNCPY_UTF8(output->name, DATA_("Outline PostFX"));
+  STRNCPY_UTF8(output->name, DATA_("Native PostFX"));
   output->source = VIEW_LAYER_NATIVE_POSTFX_SOURCE_OUTLINE;
   output->effects = VIEW_LAYER_NATIVE_POSTFX_OUTPUT_EFFECT_MOTION_BLUR |
                     VIEW_LAYER_NATIVE_POSTFX_OUTPUT_EFFECT_DOF;
