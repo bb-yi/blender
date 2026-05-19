@@ -111,6 +111,8 @@ enum eViewLayerNativePostFXOutputFlag {
   VIEW_LAYER_NATIVE_POSTFX_OUTPUT_SOURCE_INVALID = (1 << 2),
 };
 
+#define VIEW_LAYER_NATIVE_POSTFX_OUTPUT_MAX 32
+
 /* #ViewLayer.cryptomatte_flag */
 enum eViewLayerCryptomatteFlags {
   VIEW_LAYER_CRYPTOMATTE_OBJECT = (1 << 0),

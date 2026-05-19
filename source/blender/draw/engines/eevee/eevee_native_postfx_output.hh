@@ -26,7 +26,7 @@ class Instance;
 
 class NativePostFXOutputModule {
  public:
-  static constexpr int output_max = 32;
+  static constexpr int output_max = VIEW_LAYER_NATIVE_POSTFX_OUTPUT_MAX;
 
   struct RuntimeOutput {
     ViewLayerNativePostFXOutput *data = nullptr;
@@ -47,7 +47,6 @@ class NativePostFXOutputModule {
   int color_len_ = 0;
   int value_len_ = 0;
   uint64_t outputs_hash_ = 0;
-  bool requires_outline_source_ = false;
 
   TextureFromPool source_tx_ = {"native_postfx_source"};
   TextureFromPool effect_tx_ = {"native_postfx_effect"};
@@ -96,13 +95,9 @@ class NativePostFXOutputModule {
     return Span<const RuntimeOutput>(outputs_.data(), outputs_.size());
   }
 
-  bool requires_outline_source() const
-  {
-    return requires_outline_source_;
-  }
-
   void render(View &view);
   gpu::Texture *render_outline_for_combined(View &view, gpu::Texture *outline_tx);
+  void release_default_outline_history();
   void release();
 
   static ePassStorageType output_storage_type(const ViewLayerNativePostFXOutput &output,

@@ -281,6 +281,9 @@ namespace blender::eevee
             render_view_, outline_combined_tx);
       }
     }
+    else {
+      inst_.native_postfx_outputs.release_default_outline_history();
+    }
     inst_.native_postfx_outputs.render(render_view_);
 
     inst_.lights.debug_draw(render_view_, combined_fb_);

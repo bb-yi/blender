@@ -2685,9 +2685,9 @@ static void viewlayer_native_postfx_output_active_set(ViewLayer *view_layer,
   }
 }
 
-static bool viewlayer_native_postfx_output_source_valid(const Scene *scene,
-                                                       const ViewLayer *view_layer,
-                                                       const ViewLayerNativePostFXOutput *output)
+static bool viewlayer_native_postfx_output_source_valid(const ViewLayer *view_layer,
+                                                        const ViewLayerNativePostFXOutput *output,
+                                                        const bool check_aov_conflict)
 {
   if (output->source == VIEW_LAYER_NATIVE_POSTFX_SOURCE_AOV) {
     if (output->source_aov[0] == '\0') {
@@ -2695,10 +2695,7 @@ static bool viewlayer_native_postfx_output_source_valid(const Scene *scene,
     }
     const ViewLayerAOV *aov = static_cast<const ViewLayerAOV *>(
         BLI_findstring(&view_layer->aovs, output->source_aov, offsetof(ViewLayerAOV, name)));
-    return aov != nullptr && (aov->flag & AOV_CONFLICT) == 0;
-  }
-  if (output->source == VIEW_LAYER_NATIVE_POSTFX_SOURCE_OUTLINE) {
-    return scene != nullptr && scene->eevee.use_outline != 0;
+    return aov != nullptr && (!check_aov_conflict || (aov->flag & AOV_CONFLICT) == 0);
   }
   return true;
 }
@@ -2717,6 +2714,19 @@ static void bke_view_layer_verify_outputs(RenderEngine *engine, Scene *scene, Vi
     output.flag &= ~(VIEW_LAYER_NATIVE_POSTFX_OUTPUT_CONFLICT |
                      VIEW_LAYER_NATIVE_POSTFX_OUTPUT_SOURCE_INVALID);
   }
+
+  int native_postfx_output_index = 0;
+  for (ViewLayerNativePostFXOutput &output : view_layer->native_postfx_outputs) {
+    bool source_invalid = !viewlayer_native_postfx_output_source_valid(
+        view_layer, &output, false);
+    if (!source_invalid && (output.flag & VIEW_LAYER_NATIVE_POSTFX_OUTPUT_ENABLED) != 0) {
+      source_invalid = native_postfx_output_index++ >= VIEW_LAYER_NATIVE_POSTFX_OUTPUT_MAX;
+    }
+    SET_FLAG_FROM_TEST(output.flag,
+                       source_invalid,
+                       VIEW_LAYER_NATIVE_POSTFX_OUTPUT_SOURCE_INVALID);
+  }
+
   RE_engine_update_render_passes(
       engine, scene, view_layer, bke_view_layer_verify_render_pass_cb, &name_count);
   for (ViewLayerAOV &aov : view_layer->aovs) {
@@ -2727,9 +2737,11 @@ static void bke_view_layer_verify_outputs(RenderEngine *engine, Scene *scene, Vi
     const int count = name_count.lookup_default(output.name, 0);
     SET_FLAG_FROM_TEST(
         output.flag, count > 1, VIEW_LAYER_NATIVE_POSTFX_OUTPUT_CONFLICT);
-    SET_FLAG_FROM_TEST(output.flag,
-                       !viewlayer_native_postfx_output_source_valid(scene, view_layer, &output),
-                       VIEW_LAYER_NATIVE_POSTFX_OUTPUT_SOURCE_INVALID);
+    SET_FLAG_FROM_TEST(
+        output.flag,
+        (output.flag & VIEW_LAYER_NATIVE_POSTFX_OUTPUT_SOURCE_INVALID) != 0 ||
+            !viewlayer_native_postfx_output_source_valid(view_layer, &output, true),
+        VIEW_LAYER_NATIVE_POSTFX_OUTPUT_SOURCE_INVALID);
   }
 }
 

@@ -140,7 +140,6 @@ void NativePostFXOutputModule::init()
   color_len_ = 0;
   value_len_ = 0;
   outputs_hash_ = 0;
-  requires_outline_source_ = false;
 
   int output_index = 0;
   for (ViewLayerNativePostFXOutput &output : inst_.view_layer->native_postfx_outputs) {
@@ -162,7 +161,6 @@ void NativePostFXOutputModule::init()
     else {
       runtime.color_index = color_len_++;
     }
-    requires_outline_source_ |= output.source == VIEW_LAYER_NATIVE_POSTFX_SOURCE_OUTLINE;
     outputs_hash_ = (outputs_hash_ * 33u) ^ BLI_hash_string(output.name);
     outputs_hash_ = (outputs_hash_ * 33u) ^ uint64_t(output.source);
     outputs_hash_ = (outputs_hash_ * 33u) ^ uint64_t(output.effects);
@@ -172,6 +170,11 @@ void NativePostFXOutputModule::init()
     }
     outputs_.append(runtime);
     output_index++;
+  }
+
+  for (const int index : IndexRange(outputs_.size(), output_max - outputs_.size())) {
+    dof_buffers_[index].stabilize_history_tx_.release();
+    dof_signatures_[index] = 0;
   }
 }
 
@@ -464,6 +467,7 @@ gpu::Texture *NativePostFXOutputModule::render_outline_for_combined(View &view,
                                                                     gpu::Texture *outline_tx)
 {
   if (outline_tx == nullptr) {
+    release_default_outline_history();
     return nullptr;
   }
 
@@ -475,6 +479,7 @@ gpu::Texture *NativePostFXOutputModule::render_outline_for_combined(View &view,
 
   const bool uses_effects = (inst_.motion_blur.postfx_enabled() || inst_.depth_of_field.postfx_enabled());
   if (!uses_effects) {
+    release_default_outline_history();
     return outline_tx;
   }
 
@@ -525,6 +530,11 @@ gpu::Texture *NativePostFXOutputModule::render_outline_for_combined(View &view,
 
   velocity_work_texture_release(default_outline_velocity_tx_, inst_.render_buffers.vector_tx_format());
   return final_tx;
+}
+
+void NativePostFXOutputModule::release_default_outline_history()
+{
+  default_outline_dof_buffer_.stabilize_history_tx_.release();
 }
 
 void NativePostFXOutputModule::release()

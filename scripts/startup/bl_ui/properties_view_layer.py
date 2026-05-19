@@ -280,7 +280,7 @@ class VIEWLAYER_PT_layer_passes_native_postfx(ViewLayerButtonsPanel, Panel):
         row.prop(output, "use_depth_of_field", toggle=True)
 
         if not output.is_valid:
-            col.label(text="Conflicts with another render pass or has an unavailable source", icon='ERROR')
+            col.label(text="Conflicts with another pass, has an unavailable source, or exceeds the limit", icon='ERROR')
 
 
 class ViewLayerCryptomattePanelHelper(ViewLayerButtonsPanel):
