@@ -243,7 +243,6 @@ static PassMain::Sub *material_stencil_pass_add(PassSortable &stencil_ps,
   pass->bind_resources(inst.velocity);
   pass->bind_resources(inst.sampling);
   pass->bind_resources(inst.render_textures);
-  pass->bind_resources(inst.lights);
   const bool write_id = force_write_id || GPU_material_flag_get(gpumat, GPU_MATFLAG_RAYCAST);
   pass->subpass_transition(GPU_ATTACHMENT_WRITE,
                            {GPU_ATTACHMENT_WRITE, /* normal */
@@ -726,7 +725,6 @@ void ForwardPipeline::sync()
       prepass_ps_.bind_resources(inst_.velocity);
       prepass_ps_.bind_resources(inst_.sampling);
       prepass_ps_.bind_resources(inst_.render_textures);
-      prepass_ps_.bind_resources(inst_.lights);
     }
 
     prepass_ps_.setup_subpasses(DRW_STATE_WRITE_DEPTH | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
@@ -1344,7 +1342,6 @@ void DeferredLayer::begin_sync()
     prepass_ps_.bind_resources(inst_.velocity);
     prepass_ps_.bind_resources(inst_.sampling);
     prepass_ps_.bind_resources(inst_.render_textures);
-    prepass_ps_.bind_resources(inst_.lights);
 
     /* Clear user stencil to 0 for this frame while keeping an internal untouched marker. The
      * marker is cleared only by fragments that pass the current layer prepass, so secondary layer
@@ -2307,7 +2304,6 @@ void DeferredProbePipeline::begin_sync()
     pass.bind_resources(inst_.uniform_data);
     pass.bind_resources(inst_.velocity);
     pass.bind_resources(inst_.sampling);
-    pass.bind_resources(inst_.lights);
   }
   pass.setup_subpasses(DRW_STATE_WRITE_DEPTH | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
                            inst_.film.depth.test_state,
@@ -2511,7 +2507,6 @@ void PlanarProbePipeline::begin_sync()
     prepass_ps_.bind_resources(inst_.uniform_data);
     prepass_ps_.bind_resources(inst_.sampling);
     prepass_ps_.bind_resources(inst_.render_textures);
-    prepass_ps_.bind_resources(inst_.lights);
     prepass_ps_.setup_subpasses(DRW_STATE_WRITE_DEPTH | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
                                     inst_.film.depth.test_state,
                                 inst_.film.depth.test_state);
