@@ -38,6 +38,7 @@ bool light_eevee_shader_node_type_supported(const StringRefNull idname)
       "ShaderNodeBlackbody",
       "ShaderNodeBrightContrast",
       "ShaderNodeValToRGB",
+      "ShaderNodeOKLabColorRamp",
       "ShaderNodeGamma",
       "ShaderNodeHueSaturation",
       "ShaderNodeInvert",

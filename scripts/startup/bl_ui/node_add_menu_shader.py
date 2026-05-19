@@ -67,6 +67,7 @@ def light_eevee_shader_node_type_supported(node_idname):
         "ShaderNodeBlackbody",
         "ShaderNodeBrightContrast",
         "ShaderNodeValToRGB",
+        "ShaderNodeOKLabColorRamp",
         "ShaderNodeGamma",
         "ShaderNodeHueSaturation",
         "ShaderNodeInvert",
@@ -550,6 +551,7 @@ class NODE_MT_shader_node_color_base(node_add_menu.NodeMenu):
             self.node_operator(layout, "ShaderNodeBlackbody")
             self.node_operator(layout, "ShaderNodeBrightContrast")
             self.node_operator(layout, "ShaderNodeValToRGB")
+            self.node_operator(layout, "ShaderNodeOKLabColorRamp")
             self.node_operator(layout, "ShaderNodeGamma")
             self.node_operator(layout, "ShaderNodeHueSaturation")
             self.node_operator(layout, "ShaderNodeInvert")
@@ -567,6 +569,7 @@ class NODE_MT_shader_node_color_base(node_add_menu.NodeMenu):
         self.node_operator(layout, "ShaderNodeBlackbody")
         self.node_operator(layout, "ShaderNodeBrightContrast")
         self.node_operator(layout, "ShaderNodeValToRGB")
+        self.node_operator(layout, "ShaderNodeOKLabColorRamp")
         self.node_operator(layout, "ShaderNodeGamma")
         self.node_operator(layout, "ShaderNodeHueSaturation")
         self.node_operator(layout, "ShaderNodeInvert")

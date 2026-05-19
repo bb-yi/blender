@@ -218,7 +218,7 @@ static void colorband_buttons_layout(Layout &layout,
   const float unit = BLI_rctf_size_x(butr) / 14.0f;
   const float xs = butr->xmin;
   const float ys = butr->ymin;
-  const bool use_oklab_preview = use_oklab || (coba->color_mode == COLBAND_BLEND_OKLAB);
+  const bool use_oklab_preview = use_oklab;
 
   PointerRNA ptr = RNA_pointer_create_discrete(cb.ptr.owner_id, RNA_ColorRamp, coba);
 

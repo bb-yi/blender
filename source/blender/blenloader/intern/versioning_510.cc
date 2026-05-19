@@ -1091,25 +1091,6 @@ void blo_do_versions_510(FileData *fd, Library * /*lib*/, Main *bmain)
     FOREACH_NODETREE_END;
   }
 
-  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 37)) {
-    FOREACH_NODETREE_BEGIN (bmain, ntree, id) {
-      if (ntree->type != NTREE_SHADER) {
-        continue;
-      }
-      for (bNode &node : ntree->nodes) {
-        if (node.type_legacy == SH_NODE_OKLAB_COLOR_RAMP) {
-          node.type_legacy = SH_NODE_VALTORGB;
-          STRNCPY(node.idname, "ShaderNodeValToRGB");
-          if (node.storage) {
-            ColorBand *coba = static_cast<ColorBand *>(node.storage);
-            coba->color_mode = COLBAND_BLEND_OKLAB;
-          }
-        }
-      }
-    }
-    FOREACH_NODETREE_END;
-  }
-
   if (!DNA_struct_member_exists(fd->filesdna, "Material", "char", "surface_cull_method")) {
     /* `surface_cull_method` replaced `Material._pad3[4]` in this branch.
      * Some old local builds already wrote the runtime value into `_pad3[0]`
@@ -1216,6 +1197,25 @@ void blo_do_versions_510(FileData *fd, Library * /*lib*/, Main *bmain)
       mat.color_write = true;
       mat.depth_write = true;
     }
+  }
+
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 50)) {
+    FOREACH_NODETREE_BEGIN (bmain, ntree, id) {
+      for (bNode &node : ntree->nodes) {
+        if (node.type_legacy == SH_NODE_VALTORGB) {
+          ColorBand *coba = static_cast<ColorBand *>(node.storage);
+          if (coba && coba->color_mode == COLBAND_BLEND_OKLAB) {
+            node.type_legacy = SH_NODE_OKLAB_COLOR_RAMP;
+            STRNCPY(node.idname, "ShaderNodeOKLabColorRamp");
+          }
+        }
+        if (node.type_legacy == SH_NODE_OKLAB_COLOR_RAMP && node.storage) {
+          ColorBand *coba = static_cast<ColorBand *>(node.storage);
+          coba->color_mode = COLBAND_BLEND_OKLAB;
+        }
+      }
+    }
+    FOREACH_NODETREE_END;
   }
 
   /**

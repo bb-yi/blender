@@ -112,6 +112,11 @@ static void node_buts_colorramp(ui::Layout &layout, bContext * /*C*/, PointerRNA
   template_color_ramp(&layout, ptr, "color_ramp", false);
 }
 
+static void node_buts_oklab_colorramp(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
+{
+  template_oklab_color_ramp(&layout, ptr, "color_ramp", false);
+}
+
 static void node_buts_curvevec(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
 {
   template_curve_mapping(&layout, ptr, "mapping", 'v', false, false, false, false, false);
@@ -497,6 +502,9 @@ static void node_shader_set_butfunc(bke::bNodeType *ntype)
       break;
     case SH_NODE_VALTORGB:
       ntype->draw_buttons = node_buts_colorramp;
+      break;
+    case SH_NODE_OKLAB_COLOR_RAMP:
+      ntype->draw_buttons = node_buts_oklab_colorramp;
       break;
     case SH_NODE_MATH:
       ntype->draw_buttons = node_buts_math;

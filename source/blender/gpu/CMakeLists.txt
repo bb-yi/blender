@@ -686,6 +686,7 @@ set(GLSL_SRC
   shaders/material/gpu_shader_material_scene_color.glsl
   shaders/material/gpu_shader_material_filter_object_mask.glsl
   shaders/material/gpu_shader_material_object_info.glsl
+  shaders/material/gpu_shader_material_oklab_colorramp.glsl
   shaders/material/gpu_shader_material_filter_object_info.glsl
   shaders/material/gpu_shader_material_output_aov.glsl
   shaders/material/gpu_shader_material_output_material.glsl
