@@ -110,6 +110,33 @@ class GLSLFunctionNodeTest(unittest.TestCase):
 
         self.assertEqual(node.parse_status, 'ERROR')
 
+    def test_vec4_input_uses_four_dimensional_vector_socket(self):
+        _, tree = self.make_material_tree()
+        node = tree.nodes.new("ShaderNodeGLSLFunction")
+        source = (
+            "/* @glsl_meta v1\n"
+            "color: default=vec4(0.1, 0.2, 0.3, 0.4)\n"
+            "*/\n"
+            "vec4 passthrough_vec4(vec4 color){\n"
+            "  return color;\n"
+            "}\n"
+        )
+        make_text_block("glsl_vec4_input_socket.glsl", source)
+
+        self.configure_glsl_node(node, "glsl_vec4_input_socket.glsl", "passthrough_vec4")
+
+        self.assertEqual(node.parse_status, 'READY')
+        color_socket = find_socket(node.inputs, "color")
+        self.assertEqual(color_socket.bl_idname, "NodeSocketVector4D")
+        self.assertEqual(len(color_socket.default_value), 4)
+        self.assertAlmostEqual(color_socket.default_value[3], 0.4)
+
+        color_socket.default_value = (0.0, 0.0, 0.0, 0.0)
+        refresh_glsl_node(node)
+
+        self.assertEqual(node.parse_status, 'READY')
+        self.assertAlmostEqual(find_socket(node.inputs, "color").default_value[3], 0.0)
+
     def test_image_sample2d_builds_color_output(self):
         _, tree = self.make_material_tree()
         glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
