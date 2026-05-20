@@ -134,6 +134,7 @@ void register_shader_nodes()
   register_node_type_sh_uvalongstroke();
   register_node_type_sh_uvmap();
   register_node_type_sh_valtorgb();
+  register_node_type_sh_oklab_color_ramp();
   register_node_type_sh_value();
   register_node_type_sh_vect_math();
   register_node_type_sh_vect_transform();

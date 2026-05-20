@@ -96,6 +96,7 @@ class NODE_MT_compositor_node_color_base(node_add_menu.NodeMenu):
         layout.separator()
         self.node_operator(layout, "ShaderNodeBlackbody")
         self.node_operator(layout, "ShaderNodeValToRGB")
+        self.node_operator(layout, "ShaderNodeOKLabColorRamp")
         self.node_operator(layout, "CompositorNodeConvertColorSpace")
         self.node_operator(layout, "CompositorNodeConvertToDisplay")
         layout.separator()

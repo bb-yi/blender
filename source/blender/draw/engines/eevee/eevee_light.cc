@@ -170,6 +170,7 @@ static bool light_shader_node_type_is_uniform(const int type)
     case SH_NODE_BLACKBODY:
     case SH_NODE_BRIGHTCONTRAST:
     case SH_NODE_VALTORGB:
+    case SH_NODE_OKLAB_COLOR_RAMP:
     case SH_NODE_GAMMA:
     case SH_NODE_HUE_SAT:
     case SH_NODE_INVERT:

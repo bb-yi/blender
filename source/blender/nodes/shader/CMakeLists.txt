@@ -77,6 +77,7 @@ set(SRC
   nodes/node_shader_mix_shader.cc
   nodes/node_shader_normal.cc
   nodes/node_shader_normal_map.cc
+  nodes/node_shader_oklab_color_ramp.cc
   nodes/node_shader_npr_image_sample.cc
   nodes/node_shader_npr_input.cc
   nodes/node_shader_npr_output.cc

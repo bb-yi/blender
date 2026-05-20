@@ -32,6 +32,13 @@ const EnumPropertyItem rna_enum_color_space_convert_default_items[] = {
     {0, nullptr, 0, nullptr, nullptr},
 };
 
+static const EnumPropertyItem rna_enum_color_ramp_color_mode_items[] = {
+    {COLBAND_BLEND_RGB, "RGB", 0, "RGB", ""},
+    {COLBAND_BLEND_HSV, "HSV", 0, "HSV", ""},
+    {COLBAND_BLEND_HSL, "HSL", 0, "HSL", ""},
+    {0, nullptr, 0, nullptr, nullptr},
+};
+
 }
 
 #ifdef RNA_RUNTIME
@@ -74,6 +81,11 @@ const EnumPropertyItem rna_enum_color_space_convert_default_items[] = {
 #  include "SEQ_relations.hh"
 
 namespace blender {
+
+static const EnumPropertyItem rna_enum_oklab_color_ramp_color_mode_items[] = {
+    {COLBAND_BLEND_OKLAB, "OKLAB", 0, "OKLab", ""},
+    {0, nullptr, 0, nullptr, nullptr},
+};
 
 struct SeqCurveMappingUpdateData {
   Scene *scene;
@@ -237,7 +249,10 @@ static std::optional<std::string> rna_ColorRamp_path(const PointerRNA *ptr)
         bNode *node;
 
         for (node = static_cast<bNode *>(ntree->nodes.first); node; node = node->next) {
-          if (ELEM(node->type_legacy, SH_NODE_VALTORGB, TEX_NODE_VALTORGB))
+          if (ELEM(node->type_legacy,
+                   SH_NODE_VALTORGB,
+                   TEX_NODE_VALTORGB,
+                   SH_NODE_OKLAB_COLOR_RAMP))
           {
             if (node->storage == ptr->data) {
               /* all node color ramp properties called 'color_ramp'
@@ -306,7 +321,10 @@ static std::optional<std::string> rna_ColorRampElement_path(const PointerRNA *pt
         bNode *node;
 
         for (node = static_cast<bNode *>(ntree->nodes.first); node; node = node->next) {
-          if (ELEM(node->type_legacy, SH_NODE_VALTORGB, TEX_NODE_VALTORGB))
+          if (ELEM(node->type_legacy,
+                   SH_NODE_VALTORGB,
+                   TEX_NODE_VALTORGB,
+                   SH_NODE_OKLAB_COLOR_RAMP))
           {
             ramp_ptr = RNA_pointer_create_discrete(id, RNA_ColorRamp, node->storage);
             COLRAMP_GETPATH;
@@ -363,7 +381,10 @@ static void rna_ColorRamp_update(Main *bmain, Scene * /*scene*/, PointerRNA *ptr
         bNode *node;
 
         for (node = static_cast<bNode *>(ntree->nodes.first); node; node = node->next) {
-          if (ELEM(node->type_legacy, SH_NODE_VALTORGB, TEX_NODE_VALTORGB))
+          if (ELEM(node->type_legacy,
+                   SH_NODE_VALTORGB,
+                   TEX_NODE_VALTORGB,
+                   SH_NODE_OKLAB_COLOR_RAMP))
           {
             BKE_ntree_update_tag_node_property(ntree, node);
             BKE_main_ensure_invariants(*bmain, ntree->id);
@@ -395,6 +416,27 @@ static void rna_ColorRamp_update(Main *bmain, Scene * /*scene*/, PointerRNA *ptr
         break;
     }
   }
+}
+
+static const EnumPropertyItem *rna_ColorRamp_color_mode_itemf(bContext * /*C*/,
+                                                              PointerRNA *ptr,
+                                                              PropertyRNA * /*prop*/,
+                                                              bool *r_free)
+{
+  *r_free = false;
+
+  if (ptr->owner_id && GS(ptr->owner_id->name) == ID_NT) {
+    const bNodeTree *ntree = id_cast<const bNodeTree *>(ptr->owner_id);
+    for (const bNode *node = static_cast<const bNode *>(ntree->nodes.first); node;
+         node = node->next)
+    {
+      if (node->storage == ptr->data && node->type_legacy == SH_NODE_OKLAB_COLOR_RAMP) {
+        return rna_enum_oklab_color_ramp_color_mode_items;
+      }
+    }
+  }
+
+  return rna_enum_color_ramp_color_mode_items;
 }
 
 static void rna_ColorRamp_eval(ColorBand *coba, float position, float color[4])
@@ -1198,14 +1240,6 @@ static void rna_def_color_ramp(BlenderRNA *brna)
       {0, nullptr, 0, nullptr, nullptr},
   };
 
-  static const EnumPropertyItem prop_mode_items[] = {
-      {COLBAND_BLEND_RGB, "RGB", 0, "RGB", ""},
-      {COLBAND_BLEND_HSV, "HSV", 0, "HSV", ""},
-      {COLBAND_BLEND_HSL, "HSL", 0, "HSL", ""},
-      {COLBAND_BLEND_OKLAB, "OKLAB", 0, "OKLab", ""},
-      {0, nullptr, 0, nullptr, nullptr},
-  };
-
   static const EnumPropertyItem prop_hsv_items[] = {
       {COLBAND_HUE_NEAR, "NEAR", 0, "Near", ""},
       {COLBAND_HUE_FAR, "FAR", 0, "Far", ""},
@@ -1240,7 +1274,9 @@ static void rna_def_color_ramp(BlenderRNA *brna)
 
   prop = RNA_def_property(srna, "color_mode", PROP_ENUM, PROP_NONE);
   RNA_def_property_enum_sdna(prop, nullptr, "color_mode");
-  RNA_def_property_enum_items(prop, prop_mode_items);
+  RNA_def_property_enum_items(prop, rna_enum_color_ramp_color_mode_items);
+  RNA_def_property_enum_funcs(prop, nullptr, nullptr, "rna_ColorRamp_color_mode_itemf");
+  RNA_def_property_flag(prop, PROP_ENUM_NO_CONTEXT);
   RNA_def_property_ui_text(prop, "Color Mode", "Set color mode to use for interpolation");
   RNA_def_property_update(prop, 0, "rna_ColorRamp_update");
 

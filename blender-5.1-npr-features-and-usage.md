@@ -45,8 +45,8 @@
    - `SDF Vector Operator`
 
 4. 内置节点增强
-   - `Color Ramp` 新增 `OKLab` 模式
-   - 原独立 `OKLab Color Ramp` 已合并回 `Color Ramp`
+   - 恢复独立 `OKLab Color Ramp` 节点
+   - 普通 `Color Ramp` 保持 RGB / HSV / HSL 模式
 
 5. `NPR Tree` 工作流与配套节点
    - `NPR Input`
@@ -1537,11 +1537,11 @@ vec4(Color.rgb * max(Intensity, 0.0), max(Attenuation, 0.0))
 
 **4. 内置节点增强**
 
-### Color Ramp（OKLab 模式）
+### OKLab Color Ramp
 
 #### 入口
 
-`Add > Converter > Color Ramp`
+`Add > Color > OKLab Color Ramp`
 
 <div align="center">
   <img src="docs/images/placeholder_color_ramp_oklab.png" alt="Color Ramp OKLab" style="border-radius: 10px;">
@@ -1550,12 +1550,12 @@ vec4(Color.rgb * max(Intensity, 0.0), max(Attenuation, 0.0))
 
 #### 作用
 
-`Color Ramp` 现在支持 `OKLab` 混色模式，可在颜色过渡时得到更稳定、更接近感知均匀的渐变结果。
+`OKLab Color Ramp` 是独立节点，用 OKLab 路径评价渐变色标，可在颜色过渡时得到更稳定、更接近感知均匀的渐变结果。普通 `Color Ramp` 保持原有 RGB / HSV / HSL 工作流；旧版保存为 `Color Ramp + OKLab` 的文件会自动迁回独立节点。
 
 #### 使用方法
 
-1. 添加普通 `Color Ramp` 节点。
-2. 在节点的颜色混合模式中切换到 `OKLab`。
+1. 添加 `OKLab Color Ramp` 节点。
+2. 连接 `Fac` 输入。
 3. 按原来的方式编辑渐变色标即可。
 
 ## 三、NPR Tree 工作流

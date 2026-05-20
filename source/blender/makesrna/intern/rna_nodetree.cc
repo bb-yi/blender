@@ -11669,6 +11669,7 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("ShaderNode", "ShaderNodeUVAlongStroke", def_sh_uvalongstroke);
   define("ShaderNode", "ShaderNodeUVMap", def_sh_uvmap);
   define("ShaderNode", "ShaderNodeValToRGB", def_colorramp);
+  define("ShaderNode", "ShaderNodeOKLabColorRamp", def_colorramp);
   define("ShaderNode", "ShaderNodeValue");
   define("ShaderNode", "ShaderNodeVectorCurve", def_vector_curve);
   define("ShaderNode", "ShaderNodeVectorDisplacement", def_sh_vector_displacement);

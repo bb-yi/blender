@@ -627,8 +627,6 @@ bool BKE_colorband_evaluate_oklab(const ColorBand *coba, float in, float out[4])
     return true;
   }
 
-  const int ipotype = coba->ipotype;
-
   int left_index = 0;
   int right_index = 0;
 
@@ -660,7 +658,7 @@ bool BKE_colorband_evaluate_oklab(const ColorBand *coba, float in, float out[4])
   const CBData *left = &coba->data[left_index];
   const CBData *right = &coba->data[right_index];
 
-  if (ipotype == COLBAND_INTERP_CONSTANT) {
+  if (coba->ipotype == COLBAND_INTERP_CONSTANT) {
     out[0] = left->r;
     out[1] = left->g;
     out[2] = left->b;
