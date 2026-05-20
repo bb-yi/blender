@@ -611,8 +611,10 @@ bool BKE_colorband_evaluate(const ColorBand *coba, float in, float out[4])
 
 bool BKE_colorband_evaluate_oklab(const ColorBand *coba, float in, float out[4])
 {
+  /* Clamp input. */
   CLAMP(in, 0.0f, 1.0f);
 
+  /* Handle edge cases. */
   if (coba == nullptr || coba->tot == 0) {
     out[0] = out[1] = out[2] = out[3] = 0.0f;
     return false;
@@ -627,6 +629,7 @@ bool BKE_colorband_evaluate_oklab(const ColorBand *coba, float in, float out[4])
     return true;
   }
 
+  /* Find the appropriate color stops. */
   int left_index = 0;
   int right_index = 0;
 
@@ -640,12 +643,15 @@ bool BKE_colorband_evaluate_oklab(const ColorBand *coba, float in, float out[4])
     }
   }
 
+  /* Handle boundary cases. */
   if (left_index == right_index) {
     const CBData *cbd;
     if (in <= coba->data[0].pos) {
+      /* Before first stop. */
       cbd = &coba->data[0];
     }
     else {
+      /* After last stop. */
       cbd = &coba->data[coba->tot - 1];
     }
     out[0] = cbd->r;
@@ -655,42 +661,43 @@ bool BKE_colorband_evaluate_oklab(const ColorBand *coba, float in, float out[4])
     return true;
   }
 
+  /* Interpolate between the two stops using OKLab. */
   const CBData *left = &coba->data[left_index];
   const CBData *right = &coba->data[right_index];
 
-  if (coba->ipotype == COLBAND_INTERP_CONSTANT) {
-    out[0] = left->r;
-    out[1] = left->g;
-    out[2] = left->b;
-    out[3] = left->a;
-    return true;
-  }
-
+  /* Calculate interpolation factor. */
   float factor = (in - left->pos) / (right->pos - left->pos);
   CLAMP(factor, 0.0f, 1.0f);
 
+  /* Apply ease interpolation if needed (same as original colorband). */
   if (coba->ipotype == COLBAND_INTERP_EASE) {
     const float fac2 = factor * factor;
     factor = 3.0f * fac2 - 2.0f * fac2 * factor;
   }
 
+  /* For OKLab interpolation - colorband data is already in Linear RGB space. */
   float left_linear[3] = {left->r, left->g, left->b};
   float right_linear[3] = {right->r, right->g, right->b};
 
+  /* Convert to OKLab. */
   float left_oklab[3], right_oklab[3];
   linear_srgb_to_oklab(left_linear, left_oklab);
   linear_srgb_to_oklab(right_linear, right_oklab);
 
+  /* Interpolate in OKLab space. */
   float mixed_oklab[3];
   for (int i = 0; i < 3; i++) {
     mixed_oklab[i] = left_oklab[i] + factor * (right_oklab[i] - left_oklab[i]);
   }
 
+  /* Convert back to Linear sRGB. */
   float mixed_linear[3];
   oklab_to_linear_srgb(mixed_oklab, mixed_linear);
 
+  /* Mix alpha linearly. */
   const float mixed_alpha = left->a + factor * (right->a - left->a);
 
+  /* Output in Linear RGB space (what Blender's shader system expects). */
   out[0] = mixed_linear[0];
   out[1] = mixed_linear[1];
   out[2] = mixed_linear[2];

@@ -6,7 +6,6 @@
  * \ingroup shdnodes
  */
 
-#include <algorithm>
 #include <cmath>
 #include <memory>
 #include <utility>
@@ -29,59 +28,71 @@ namespace blender {
 
 namespace nodes::node_shader_oklab_color_ramp_cc {
 
-static void local_linear_srgb_to_oklab(const float *linear_rgb, float *oklab)
+/* OKLab color space conversion functions. */
+
+static float3 linear_srgb_to_oklab(const float3 &c)
 {
-  const float l = 0.4122214708f * linear_rgb[0] + 0.5363325363f * linear_rgb[1] +
-                  0.0514459929f * linear_rgb[2];
-  const float m = 0.2119034982f * linear_rgb[0] + 0.6806995451f * linear_rgb[1] +
-                  0.1073969566f * linear_rgb[2];
-  const float s = 0.0883024619f * linear_rgb[0] + 0.2817188376f * linear_rgb[1] +
-                  0.6299787005f * linear_rgb[2];
+  /* Convert Linear sRGB to LMS (cone response). */
+  const float l = 0.4122214708f * c.x + 0.5363325363f * c.y + 0.0514459929f * c.z;
+  const float m = 0.2119034982f * c.x + 0.6806995451f * c.y + 0.1073969566f * c.z;
+  const float s = 0.0883024619f * c.x + 0.2817188376f * c.y + 0.6299787005f * c.z;
 
-  const float l_root = (l >= 0.0f) ? std::pow(l, 1.0f / 3.0f) : -std::pow(-l, 1.0f / 3.0f);
-  const float m_root = (m >= 0.0f) ? std::pow(m, 1.0f / 3.0f) : -std::pow(-m, 1.0f / 3.0f);
-  const float s_root = (s >= 0.0f) ? std::pow(s, 1.0f / 3.0f) : -std::pow(-s, 1.0f / 3.0f);
+  /* Apply cube root. */
+  const float l_ = (l >= 0.0f) ? powf(l, 1.0f / 3.0f) : -powf(-l, 1.0f / 3.0f);
+  const float m_ = (m >= 0.0f) ? powf(m, 1.0f / 3.0f) : -powf(-m, 1.0f / 3.0f);
+  const float s_ = (s >= 0.0f) ? powf(s, 1.0f / 3.0f) : -powf(-s, 1.0f / 3.0f);
 
-  oklab[0] = 0.2104542553f * l_root + 0.7936177850f * m_root - 0.0040720468f * s_root;
-  oklab[1] = 1.9779984951f * l_root - 2.4285922050f * m_root + 0.4505937099f * s_root;
-  oklab[2] = 0.0259040371f * l_root + 0.7827717662f * m_root - 0.8086757660f * s_root;
+  /* Convert to OKLab. */
+  return float3(0.2104542553f * l_ + 0.7936177850f * m_ - 0.0040720468f * s_,
+                1.9779984951f * l_ - 2.4285922050f * m_ + 0.4505937099f * s_,
+                0.0259040371f * l_ + 0.7827717662f * m_ - 0.8086757660f * s_);
 }
 
-static void local_oklab_to_linear_srgb(const float *oklab, float *linear_rgb)
+static float3 oklab_to_linear_srgb(const float3 &c)
 {
-  const float l_root = oklab[0] + 0.3963377774f * oklab[1] + 0.2158037573f * oklab[2];
-  const float m_root = oklab[0] - 0.1055613458f * oklab[1] - 0.0638541728f * oklab[2];
-  const float s_root = oklab[0] - 0.0894841775f * oklab[1] - 1.2914855480f * oklab[2];
+  /* Convert OKLab back to LMS cone response. */
+  const float l_ = c.x + 0.3963377774f * c.y + 0.2158037573f * c.z;
+  const float m_ = c.x - 0.1055613458f * c.y - 0.0638541728f * c.z;
+  const float s_ = c.x - 0.0894841775f * c.y - 1.2914855480f * c.z;
 
-  const float l = l_root * l_root * l_root;
-  const float m = m_root * m_root * m_root;
-  const float s = s_root * s_root * s_root;
+  /* Apply cube (power of 3). */
+  const float l = l_ * l_ * l_;
+  const float m = m_ * m_ * m_;
+  const float s = s_ * s_ * s_;
 
-  linear_rgb[0] = +4.0767416621f * l - 3.3077115913f * m + 0.2309699292f * s;
-  linear_rgb[1] = -1.2684380046f * l + 2.6097574011f * m - 0.3413193965f * s;
-  linear_rgb[2] = -0.0041960863f * l - 0.7034186147f * m + 1.7076147010f * s;
+  /* Convert back to Linear sRGB. */
+  return float3(+4.0767416621f * l - 3.3077115913f * m + 0.2309699292f * s,
+                -1.2684380046f * l + 2.6097574011f * m - 0.3413193965f * s,
+                -0.0041960863f * l - 0.7034186147f * m + 1.7076147010f * s);
 }
 
-static void local_srgb_to_linear(const float *srgb, float *linear)
+static float3 srgb_to_linear(const float3 &color)
 {
-  for (int i = 0; i < 3; i++) {
-    linear[i] = (srgb[i] > 0.04045f) ? std::pow((srgb[i] + 0.055f) / 1.055f, 2.4f) :
-                                       srgb[i] / 12.92f;
-  }
+  const float3 a = color / 12.92f;
+  const float3 temp = (color + 0.055f) / 1.055f;
+  const float3 b = float3(powf(temp.x, 2.4f), powf(temp.y, 2.4f), powf(temp.z, 2.4f));
+  const float3 selector = float3(color.x > 0.04045f ? 1.0f : 0.0f,
+                                 color.y > 0.04045f ? 1.0f : 0.0f,
+                                 color.z > 0.04045f ? 1.0f : 0.0f);
+  return a * (float3(1.0f) - selector) + b * selector;
 }
 
-static void local_linear_to_srgb(const float *linear, float *srgb)
+static float3 linear_to_srgb(const float3 &color)
 {
-  for (int i = 0; i < 3; i++) {
-    srgb[i] = (linear[i] > 0.0031308f) ?
-                  1.055f * std::pow(linear[i], 1.0f / 2.4f) - 0.055f :
-                  linear[i] * 12.92f;
-  }
+  const float3 a = color * 12.92f;
+  const float3 powered = float3(
+      powf(color.x, 1.0f / 2.4f), powf(color.y, 1.0f / 2.4f), powf(color.z, 1.0f / 2.4f));
+  const float3 b = 1.055f * powered - 0.055f;
+  const float3 selector = float3(color.x > 0.0031308f ? 1.0f : 0.0f,
+                                 color.y > 0.0031308f ? 1.0f : 0.0f,
+                                 color.z > 0.0031308f ? 1.0f : 0.0f);
+  return a * (float3(1.0f) - selector) + b * selector;
 }
 
+/* OKLab-based colorband evaluation. */
 static void oklab_colorband_evaluate(const ColorBand *coba, float in, ColorGeometry4f &out)
 {
-  in = std::clamp(in, 0.0f, 1.0f);
+  in = math::clamp(in, 0.0f, 1.0f);
 
   if (coba->tot == 0) {
     out = ColorGeometry4f(0.0f, 0.0f, 0.0f, 0.0f);
@@ -115,32 +126,23 @@ static void oklab_colorband_evaluate(const ColorBand *coba, float in, ColorGeome
 
   const CBData &left = coba->data[left_index];
   const CBData &right = coba->data[right_index];
-  const float factor = std::clamp((in - left.pos) / (right.pos - left.pos), 0.0f, 1.0f);
+  const float factor = math::clamp((in - left.pos) / (right.pos - left.pos), 0.0f, 1.0f);
 
-  float left_linear[3], right_linear[3];
-  const float left_srgb[3] = {left.r, left.g, left.b};
-  const float right_srgb[3] = {right.r, right.g, right.b};
-  local_srgb_to_linear(left_srgb, left_linear);
-  local_srgb_to_linear(right_srgb, right_linear);
+  /* Convert colors to Linear sRGB first. */
+  const float3 left_linear = srgb_to_linear(float3(left.r, left.g, left.b));
+  const float3 right_linear = srgb_to_linear(float3(right.r, right.g, right.b));
 
-  float left_oklab[3], right_oklab[3];
-  local_linear_srgb_to_oklab(left_linear, left_oklab);
-  local_linear_srgb_to_oklab(right_linear, right_oklab);
-
-  float mixed_oklab[3];
-  for (int i = 0; i < 3; i++) {
-    mixed_oklab[i] = left_oklab[i] + factor * (right_oklab[i] - left_oklab[i]);
-  }
-
-  float mixed_linear[3], mixed_srgb[3];
-  local_oklab_to_linear_srgb(mixed_oklab, mixed_linear);
-  local_linear_to_srgb(mixed_linear, mixed_srgb);
+  /* Convert to OKLab, interpolate in OKLab space, then convert back to sRGB. */
+  const float3 left_oklab = linear_srgb_to_oklab(left_linear);
+  const float3 right_oklab = linear_srgb_to_oklab(right_linear);
+  const float3 mixed_oklab = math::interpolate(left_oklab, right_oklab, factor);
+  const float3 mixed_srgb = linear_to_srgb(oklab_to_linear_srgb(mixed_oklab));
 
   const float mixed_alpha = left.a + factor * (right.a - left.a);
-  out = ColorGeometry4f(std::clamp(mixed_srgb[0], 0.0f, 1.0f),
-                        std::clamp(mixed_srgb[1], 0.0f, 1.0f),
-                        std::clamp(mixed_srgb[2], 0.0f, 1.0f),
-                        std::clamp(mixed_alpha, 0.0f, 1.0f));
+  out = ColorGeometry4f(math::clamp(mixed_srgb.x, 0.0f, 1.0f),
+                        math::clamp(mixed_srgb.y, 0.0f, 1.0f),
+                        math::clamp(mixed_srgb.z, 0.0f, 1.0f),
+                        math::clamp(mixed_alpha, 0.0f, 1.0f));
 }
 
 static void sh_node_oklab_valtorgb_declare(NodeDeclarationBuilder &b)
