@@ -91,7 +91,66 @@
   - `Before Depth of Field`
   - `Before Composite`
 
-## 3. Eevee Outline
+## 3. Native Camera FX Outputs
+
+#### 功能说明
+
+`Native Camera FX Outputs` 是 View Layer 级的 Eevee 原生后期输出系统。它可以把指定的渲染通道抽出后，单独套用 Eevee 的 `Motion Blur` 和 / 或 `Depth of Field`，再以新的 Render Pass 输出。
+
+这适合为描边、AOV、深度、法线、光照分量等通道生成带相机运动模糊或景深的版本，用于合成器、后续滤镜或外部后期流程。
+
+#### 面板入口
+
+`View Layer Properties > Passes > Native Camera FX Outputs`
+
+#### 可配置内容
+
+每个输出条目支持：
+
+- `Name`：生成的 Render Pass 名称
+- `Enabled`：是否生成该输出
+- `Source`：要处理的来源通道
+- `Shader AOV`：当 `Source` 为 `Shader AOV` 时选择具体 AOV 名称
+- `Motion Blur`：套用 Eevee 原生运动模糊
+- `Depth of Field`：套用 Eevee 原生景深
+
+#### Source 支持项
+
+- `Depth`
+- `Normal`
+- `Position`
+- `Vector`
+- `Diffuse Light`
+- `Diffuse Color`
+- `Specular Light`
+- `Specular Color`
+- `Volume Light`
+- `Emission`
+- `Environment`
+- `Shadow`
+- `Ambient Occlusion`
+- `Transparent`
+- `Shader AOV`
+- `Outline`
+
+#### 基本使用方法
+
+1. 切换到 `Eevee` 渲染引擎。
+2. 打开 `View Layer Properties > Passes > Native Camera FX Outputs`。
+3. 新建一个输出条目。
+4. 设置 `Name` 和 `Source`。
+5. 按需要启用 `Motion Blur`、`Depth of Field`，或同时启用两者。
+6. 在合成器或后续流程中读取同名 Render Pass。
+
+#### 重要说明
+
+- `Motion Blur` 仍需要场景 / View Layer 中启用 Eevee 运动模糊
+- `Depth of Field` 仍使用当前相机的景深设置
+- `Shader AOV` 来源必须选择 View Layer 中已经存在的 AOV 名称
+- 如果条目出现无效状态，通常是名称冲突、来源 AOV 不存在，或超过当前可用输出数量
+- 描边通道可作为 `Outline` 来源输出，并可单独获得带景深或运动模糊的版本
+
+## 4. Eevee Outline
 
 #### 功能说明
 

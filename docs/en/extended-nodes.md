@@ -423,6 +423,7 @@ Injects a user-authored GLSL function into the current `Eevee / NPR` material co
 - Only `vec3 / vec4` inputs explicitly marked with `subtype=color` become color sockets
 - `vec3 + subtype=color` enters GLSL as `rgb` with `alpha = 1.0`
 - `vec4 + subtype=color` keeps full `rgba`
+- Refreshing or recompiling the node preserves the `w` component of `vec4` inputs instead of degrading them to `vec3 / rgb`
 - Exported boundary types do not currently support `mat*`, `struct`, or `array`
 - `int / bool` boundaries are useful for mode switches, enums, and `lightgroup_id` style parameters
 - Built-in geometry helpers are available in the function body: `glsl_position()`, `glsl_normal()`, `glsl_true_normal()`, `glsl_incoming()`
@@ -1134,11 +1135,11 @@ vec4(Color.rgb * max(Intensity, 0.0), max(Attenuation, 0.0))
 
 ## 5. Built-In Node Enhancements
 
-### Color Ramp (OKLab Mode)
+### OKLab Color Ramp
 
 #### Entry
 
-`Add > Converter > Color Ramp`
+`Add > Color > OKLab Color Ramp`
 
 <div align="center">
 	<img src="images/placeholder_color_ramp_oklab.png" alt="Color Ramp OKLab" style="border-radius: 10px;">
@@ -1147,9 +1148,11 @@ vec4(Color.rgb * max(Intensity, 0.0), max(Attenuation, 0.0))
 
 #### Purpose
 
-`Color Ramp` now supports an `OKLab` blend mode, giving more stable and perceptually smoother color transitions.
+The standalone `OKLab Color Ramp` node always evaluates the ramp in the OKLab color space, giving more stable and perceptually smoother color transitions.
 
 #### Notes
 
-- The old standalone `OKLab Color Ramp` node has been merged back into `Color Ramp`
-- Existing node setups should now use the `OKLab` mode on `Color Ramp` directly
+- Regular `Color Ramp` keeps the existing RGB / HSV / HSL workflow
+- `OKLab Color Ramp` uses the same input, output, and stop-editing workflow as regular `Color Ramp`
+- Older files saved as `Color Ramp + OKLab` mode are migrated back to the standalone `OKLab Color Ramp` node when opened
+- The node is available in Shader, Geometry, Compositor, and Eevee Light Shader supported node trees

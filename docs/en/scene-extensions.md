@@ -91,7 +91,66 @@ Node-tree entry: Shader Editor > Shader Type > `Filter`
   - `Before Depth of Field`
   - `Before Composite`
 
-## 3. Eevee Outline
+## 3. Native Camera FX Outputs
+
+#### Feature Description
+
+`Native Camera FX Outputs` is a View Layer level Eevee native post-effect output system. It can extract a selected render channel, apply Eevee native `Motion Blur` and / or `Depth of Field` to that channel, and publish the result as a new render pass.
+
+This is useful for generating camera-FX versions of outlines, AOVs, depth, normals, lighting components, and other channels for compositor, filter, or external post-production workflows.
+
+#### Panel Entry
+
+`View Layer Properties > Passes > Native Camera FX Outputs`
+
+#### Configurable Fields
+
+Each output entry supports:
+
+- `Name`: Name of the generated render pass
+- `Enabled`: Whether this output is generated
+- `Source`: Source channel to process
+- `Shader AOV`: AOV name used when `Source` is `Shader AOV`
+- `Motion Blur`: Apply Eevee native motion blur
+- `Depth of Field`: Apply Eevee native depth of field
+
+#### Supported Sources
+
+- `Depth`
+- `Normal`
+- `Position`
+- `Vector`
+- `Diffuse Light`
+- `Diffuse Color`
+- `Specular Light`
+- `Specular Color`
+- `Volume Light`
+- `Emission`
+- `Environment`
+- `Shadow`
+- `Ambient Occlusion`
+- `Transparent`
+- `Shader AOV`
+- `Outline`
+
+#### Basic Workflow
+
+1. Switch the render engine to `Eevee`.
+2. Open `View Layer Properties > Passes > Native Camera FX Outputs`.
+3. Add an output entry.
+4. Set `Name` and `Source`.
+5. Enable `Motion Blur`, `Depth of Field`, or both as needed.
+6. Read the generated render pass by name in the compositor or later pipeline stage.
+
+#### Important Notes
+
+- `Motion Blur` still requires Eevee motion blur to be enabled for the scene / View Layer
+- `Depth of Field` still uses the active camera depth-of-field settings
+- `Shader AOV` sources must point to an existing AOV name on the View Layer
+- Invalid entries usually indicate a name conflict, a missing source AOV, or that the current output limit has been exceeded
+- The outline channel can be selected as the `Outline` source and exported with its own depth of field or motion blur
+
+## 4. Eevee Outline
 
 #### Feature Description
 

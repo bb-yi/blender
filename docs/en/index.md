@@ -10,6 +10,14 @@ Most features are `Eevee`-only and do not support `Cycles`.
 
 This document describes the NPR / Eevee extension features that have been added to the current `Blender 5.1 NPR Port` branch compared with official `Blender 5.1`, together with their basic usage.
 
+## 5.1.2 Highlights
+
+- Merged official `Blender 5.1.2` fixes and version updates
+- Added `Native Camera FX Outputs`, allowing Eevee native `Motion Blur` and `Depth of Field` to be applied to selected View Layer channels
+- Restored the standalone `OKLab Color Ramp` node; regular `Color Ramp` keeps the existing RGB / HSV / HSL workflow
+- Fixed `GLSL Function` `vec4` inputs losing the `w` component during refresh or compile paths
+- Updated the NPR Port splash screen
+
 ## Node Overview
 
 <div align="center">
@@ -73,6 +81,7 @@ This document describes the NPR / Eevee extension features that have been added 
 - `Render Textures`
 - `Filter Materials`
 - `Eevee Outline`
+- `Native Camera FX Outputs`
 - `AOV Input / AOV Output` in the `Filter` domain
 
 ### 2. Shader Nodes
@@ -104,7 +113,7 @@ This document describes the NPR / Eevee extension features that have been added 
 - `Curvature`
 - `Shader Info`
 - `Light Info`
-- `OKLab` mode in `Color Ramp`
+- `OKLab Color Ramp`
 
 ### 3. NPR Workflow
 

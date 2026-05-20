@@ -429,6 +429,7 @@
 - 只有显式写了 `subtype=color` 的 `vec3 / vec4` 输入，才会显示成颜色插口
 - `vec3 + subtype=color` 进入 GLSL 时按 `rgb` 使用，`alpha` 固定为 `1.0`
 - `vec4 + subtype=color` 会保留完整 `rgba`
+- 刷新或重新编译节点时，`vec4` 输入会保留 `w` 分量，不会退化成 `vec3 / rgb`
 - 当前不支持把 `mat* / struct / array` 作为导出函数边界类型
 - 导出函数边界当前已经支持 `int / bool`，适合直接写模式开关、枚举值、`lightgroup_id` 这类参数
 - 内置了几何 helper，可在函数体里直接读取：`glsl_position()`、`glsl_normal()`、`glsl_true_normal()`、`glsl_incoming()`
@@ -1147,11 +1148,11 @@ vec4(Color.rgb * max(Intensity, 0.0), max(Attenuation, 0.0))
 
 ## 5. 内置节点增强
 
-### Color Ramp（OKLab 模式）
+### OKLab Color Ramp
 
 #### 入口
 
-`Add > Converter > Color Ramp`
+`Add > Color > OKLab Color Ramp`
 
 <div align="center">
 	<img src="images/placeholder_color_ramp_oklab.png" alt="Color Ramp OKLab" style="border-radius: 10px;">
@@ -1160,9 +1161,11 @@ vec4(Color.rgb * max(Intensity, 0.0), max(Attenuation, 0.0))
 
 #### 作用
 
-`Color Ramp` 现在支持 `OKLab` 混色模式，可在颜色过渡时得到更稳定、更接近感知均匀的渐变结果。
+独立的 `OKLab Color Ramp` 节点会固定使用 OKLab 颜色空间评价色带，可在颜色过渡时得到更稳定、更接近感知均匀的渐变结果。
 
 #### 说明
 
-- 旧的独立 `OKLab Color Ramp` 节点已经合并回 `Color Ramp`
-- 如果旧节点树使用过 OKLab 专用版本，当前应统一改用 `Color Ramp` 的 `OKLab` 模式
+- 普通 `Color Ramp` 保持原有 RGB / HSV / HSL 工作流
+- `OKLab Color Ramp` 的输入、输出和 stop 编辑方式与普通 `Color Ramp` 一致
+- 旧版 `Color Ramp + OKLab` 模式文件会在打开时迁移回独立 `OKLab Color Ramp` 节点
+- 该节点可用于 Shader、Geometry、Compositor 以及 Eevee Light Shader 支持的节点树

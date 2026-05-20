@@ -10,6 +10,14 @@
 
 这份文档说明当前 `Blender 5.1 NPR Port` 相比官方 `Blender 5.1` 已经加入、并且当前分支内实际存在的 NPR / Eevee 扩展功能，以及它们的基本使用方法。
 
+## 5.1.2 更新重点
+
+- 合并官方 `Blender 5.1.2` 修复与版本更新
+- 新增 `Native Camera FX Outputs`，可在 `View Layer` 中把 Eevee 原生 `Motion Blur` 和 `Depth of Field` 应用到指定通道
+- 恢复独立 `OKLab Color Ramp` 节点，普通 `Color Ramp` 保持原有 RGB / HSV / HSL 工作流
+- 修复 `GLSL Function` 的 `vec4` 输入在刷新或编译路径中丢失 `w` 分量的问题
+- 更新 NPR Port 启动画面
+
 ## 节点一览
 
 <div align="center">
@@ -73,6 +81,7 @@
 - `Render Textures`
 - `Filter Materials`
 - `Eevee Outline`
+- `Native Camera FX Outputs`
 - `Filter` 域下可用的 `AOV Input / AOV Output`
 
 ### 2. 着色器节点
@@ -104,7 +113,7 @@
 - `Curvature`
 - `Shader Info`
 - `Light Info`
-- `Color Ramp` 的 `OKLab` 模式
+- `OKLab Color Ramp`
 
 ### 3. NPR Tree 工作流
 
