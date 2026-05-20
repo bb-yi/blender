@@ -203,7 +203,7 @@ const bNodeSocket *node_shader_portal_out_source_socket(const bNode &portal_out)
   return bke::node_tree_runtime::find_shader_portal_source_socket(*tree, portal_out);
 }
 
-static void nodestack_get_vec(float *in, short type_in, bNodeStack *ns)
+static void nodestack_get_vec(float *in, short type_in, bNodeStack *ns, const int dimensions)
 {
   const float *from = ns->vec;
 
@@ -220,6 +220,10 @@ static void nodestack_get_vec(float *in, short type_in, bNodeStack *ns)
       in[0] = from[0];
       in[1] = from[0];
       in[2] = from[0];
+      in[3] = from[0];
+    }
+    else if (dimensions == 4) {
+      copy_v4_v4(in, from);
     }
     else {
       copy_v3_v3(in, from);
@@ -257,7 +261,10 @@ void node_gpu_stack_from_data(GPUNodeStack *gs, bNodeSocket *socket, bNodeStack 
     gs->sockettype = socket->type;
   }
   else {
-    nodestack_get_vec(gs->vec, socket->type, ns);
+    const int dimensions = (socket->type == SOCK_VECTOR) ?
+                               socket->default_value_typed<bNodeSocketValueVector>()->dimensions :
+                               0;
+    nodestack_get_vec(gs->vec, socket->type, ns, dimensions);
     gs->link = static_cast<GPUNodeLink *>(ns->data);
 
     if (socket->type == SOCK_FLOAT) {

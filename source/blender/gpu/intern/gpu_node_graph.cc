@@ -225,6 +225,17 @@ static const char *gpu_uniform_set_function_from_type(eNodeSocketDatatype type)
   }
 }
 
+static const char *gpu_uniform_set_function_from_socket(const bNodeSocket &socket)
+{
+  if (socket.type == SOCK_VECTOR) {
+    const bNodeSocketValueVector *value = static_cast<const bNodeSocketValueVector *>(
+        socket.default_value);
+    return (value != nullptr && value->dimensions == 4) ? "set_rgba" : "set_rgb";
+  }
+
+  return gpu_uniform_set_function_from_type(eNodeSocketDatatype(socket.type));
+}
+
 /**
  * Link stack uniform buffer.
  * This is called for the input/output sockets that are not connected.
@@ -259,7 +270,7 @@ static GPUNodeLink *gpu_uniformbuffer_link(GPUMaterial *mat,
 
   if (in_out == SOCK_IN) {
     GPU_link(mat,
-             gpu_uniform_set_function_from_type(eNodeSocketDatatype(socket->type)),
+             gpu_uniform_set_function_from_socket(*socket),
              link,
              &stack->link);
   }
