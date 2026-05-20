@@ -1855,13 +1855,13 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#color-rampoklab" class="md-nav__link">
+  <a href="#oklab-color-ramp" class="md-nav__link">
     <span class="md-ellipsis">
-      Color Ramp（OKLab 模式）
+      OKLab Color Ramp
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Color Ramp（OKLab 模式）">
+    <nav class="md-nav" aria-label="OKLab Color Ramp">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -3521,13 +3521,13 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#color-rampoklab" class="md-nav__link">
+  <a href="#oklab-color-ramp" class="md-nav__link">
     <span class="md-ellipsis">
-      Color Ramp（OKLab 模式）
+      OKLab Color Ramp
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Color Ramp（OKLab 模式）">
+    <nav class="md-nav" aria-label="OKLab Color Ramp">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -3938,6 +3938,7 @@
 <li>只有显式写了 <code>subtype=color</code> 的 <code>vec3 / vec4</code> 输入，才会显示成颜色插口</li>
 <li><code>vec3 + subtype=color</code> 进入 GLSL 时按 <code>rgb</code> 使用，<code>alpha</code> 固定为 <code>1.0</code></li>
 <li><code>vec4 + subtype=color</code> 会保留完整 <code>rgba</code></li>
+<li>刷新或重新编译节点时，<code>vec4</code> 输入会保留 <code>w</code> 分量，不会退化成 <code>vec3 / rgb</code></li>
 <li>当前不支持把 <code>mat* / struct / array</code> 作为导出函数边界类型</li>
 <li>导出函数边界当前已经支持 <code>int / bool</code>，适合直接写模式开关、枚举值、<code>lightgroup_id</code> 这类参数</li>
 <li>内置了几何 helper，可在函数体里直接读取：<code>glsl_position()</code>、<code>glsl_normal()</code>、<code>glsl_true_normal()</code>、<code>glsl_incoming()</code></li>
@@ -4634,20 +4635,22 @@
 </div>
 
 <h2 id="5">5. 内置节点增强<a class="headerlink" href="#5" title="Permanent link">&para;</a></h2>
-<h3 id="color-rampoklab">Color Ramp（OKLab 模式）<a class="headerlink" href="#color-rampoklab" title="Permanent link">&para;</a></h3>
+<h3 id="oklab-color-ramp">OKLab Color Ramp<a class="headerlink" href="#oklab-color-ramp" title="Permanent link">&para;</a></h3>
 <h4 id="_112">入口<a class="headerlink" href="#_112" title="Permanent link">&para;</a></h4>
-<p><code>Add &gt; Converter &gt; Color Ramp</code></p>
+<p><code>Add &gt; Color &gt; OKLab Color Ramp</code></p>
 <div align="center">
     <img src="images/placeholder_color_ramp_oklab.png" alt="Color Ramp OKLab" style="border-radius: 10px;">
     <br>
 </div>
 
 <h4 id="_113">作用<a class="headerlink" href="#_113" title="Permanent link">&para;</a></h4>
-<p><code>Color Ramp</code> 现在支持 <code>OKLab</code> 混色模式，可在颜色过渡时得到更稳定、更接近感知均匀的渐变结果。</p>
+<p>独立的 <code>OKLab Color Ramp</code> 节点会固定使用 OKLab 颜色空间评价色带，可在颜色过渡时得到更稳定、更接近感知均匀的渐变结果。</p>
 <h4 id="_114">说明<a class="headerlink" href="#_114" title="Permanent link">&para;</a></h4>
 <ul>
-<li>旧的独立 <code>OKLab Color Ramp</code> 节点已经合并回 <code>Color Ramp</code></li>
-<li>如果旧节点树使用过 OKLab 专用版本，当前应统一改用 <code>Color Ramp</code> 的 <code>OKLab</code> 模式</li>
+<li>普通 <code>Color Ramp</code> 保持原有 RGB / HSV / HSL 工作流</li>
+<li><code>OKLab Color Ramp</code> 的输入、输出和 stop 编辑方式与普通 <code>Color Ramp</code> 一致</li>
+<li>旧版 <code>Color Ramp + OKLab</code> 模式文件会在打开时迁移回独立 <code>OKLab Color Ramp</code> 节点</li>
+<li>该节点可用于 Shader、Geometry、Compositor 以及 Eevee Light Shader 支持的节点树</li>
 </ul>
 
 

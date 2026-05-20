@@ -1846,13 +1846,13 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#color-ramp-oklab-mode" class="md-nav__link">
+  <a href="#oklab-color-ramp" class="md-nav__link">
     <span class="md-ellipsis">
-      Color Ramp (OKLab Mode)
+      OKLab Color Ramp
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Color Ramp (OKLab Mode)">
+    <nav class="md-nav" aria-label="OKLab Color Ramp">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -3503,13 +3503,13 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#color-ramp-oklab-mode" class="md-nav__link">
+  <a href="#oklab-color-ramp" class="md-nav__link">
     <span class="md-ellipsis">
-      Color Ramp (OKLab Mode)
+      OKLab Color Ramp
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Color Ramp (OKLab Mode)">
+    <nav class="md-nav" aria-label="OKLab Color Ramp">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -3914,6 +3914,7 @@
 <li>Only <code>vec3 / vec4</code> inputs explicitly marked with <code>subtype=color</code> become color sockets</li>
 <li><code>vec3 + subtype=color</code> enters GLSL as <code>rgb</code> with <code>alpha = 1.0</code></li>
 <li><code>vec4 + subtype=color</code> keeps full <code>rgba</code></li>
+<li>Refreshing or recompiling the node preserves the <code>w</code> component of <code>vec4</code> inputs instead of degrading them to <code>vec3 / rgb</code></li>
 <li>Exported boundary types do not currently support <code>mat*</code>, <code>struct</code>, or <code>array</code></li>
 <li><code>int / bool</code> boundaries are useful for mode switches, enums, and <code>lightgroup_id</code> style parameters</li>
 <li>Built-in geometry helpers are available in the function body: <code>glsl_position()</code>, <code>glsl_normal()</code>, <code>glsl_true_normal()</code>, <code>glsl_incoming()</code></li>
@@ -4602,20 +4603,22 @@
 </div>
 
 <h2 id="5-built-in-node-enhancements">5. Built-In Node Enhancements<a class="headerlink" href="#5-built-in-node-enhancements" title="Permanent link">&para;</a></h2>
-<h3 id="color-ramp-oklab-mode">Color Ramp (OKLab Mode)<a class="headerlink" href="#color-ramp-oklab-mode" title="Permanent link">&para;</a></h3>
+<h3 id="oklab-color-ramp">OKLab Color Ramp<a class="headerlink" href="#oklab-color-ramp" title="Permanent link">&para;</a></h3>
 <h4 id="entry_27">Entry<a class="headerlink" href="#entry_27" title="Permanent link">&para;</a></h4>
-<p><code>Add &gt; Converter &gt; Color Ramp</code></p>
+<p><code>Add &gt; Color &gt; OKLab Color Ramp</code></p>
 <div align="center">
     <img src="images/placeholder_color_ramp_oklab.png" alt="Color Ramp OKLab" style="border-radius: 10px;">
     <br>
 </div>
 
 <h4 id="purpose_21">Purpose<a class="headerlink" href="#purpose_21" title="Permanent link">&para;</a></h4>
-<p><code>Color Ramp</code> now supports an <code>OKLab</code> blend mode, giving more stable and perceptually smoother color transitions.</p>
+<p>The standalone <code>OKLab Color Ramp</code> node always evaluates the ramp in the OKLab color space, giving more stable and perceptually smoother color transitions.</p>
 <h4 id="notes_12">Notes<a class="headerlink" href="#notes_12" title="Permanent link">&para;</a></h4>
 <ul>
-<li>The old standalone <code>OKLab Color Ramp</code> node has been merged back into <code>Color Ramp</code></li>
-<li>Existing node setups should now use the <code>OKLab</code> mode on <code>Color Ramp</code> directly</li>
+<li>Regular <code>Color Ramp</code> keeps the existing RGB / HSV / HSL workflow</li>
+<li><code>OKLab Color Ramp</code> uses the same input, output, and stop-editing workflow as regular <code>Color Ramp</code></li>
+<li>Older files saved as <code>Color Ramp + OKLab</code> mode are migrated back to the standalone <code>OKLab Color Ramp</code> node when opened</li>
+<li>The node is available in Shader, Geometry, Compositor, and Eevee Light Shader supported node trees</li>
 </ul>
 
 

@@ -330,6 +330,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#512-highlights" class="md-nav__link">
+    <span class="md-ellipsis">
+      5.1.2 Highlights
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#node-overview" class="md-nav__link">
     <span class="md-ellipsis">
       Node Overview
@@ -530,6 +539,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#512-highlights" class="md-nav__link">
+    <span class="md-ellipsis">
+      5.1.2 Highlights
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#node-overview" class="md-nav__link">
     <span class="md-ellipsis">
       Node Overview
@@ -611,6 +629,14 @@
 <p>Most features are <code>Eevee</code>-only and do not support <code>Cycles</code>.</p>
 <h2 id="documentation-scope">Documentation Scope<a class="headerlink" href="#documentation-scope" title="Permanent link">&para;</a></h2>
 <p>This document describes the NPR / Eevee extension features that have been added to the current <code>Blender 5.1 NPR Port</code> branch compared with official <code>Blender 5.1</code>, together with their basic usage.</p>
+<h2 id="512-highlights">5.1.2 Highlights<a class="headerlink" href="#512-highlights" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Merged official <code>Blender 5.1.2</code> fixes and version updates</li>
+<li>Added <code>Native Camera FX Outputs</code>, allowing Eevee native <code>Motion Blur</code> and <code>Depth of Field</code> to be applied to selected View Layer channels</li>
+<li>Restored the standalone <code>OKLab Color Ramp</code> node; regular <code>Color Ramp</code> keeps the existing RGB / HSV / HSL workflow</li>
+<li>Fixed <code>GLSL Function</code> <code>vec4</code> inputs losing the <code>w</code> component during refresh or compile paths</li>
+<li>Updated the NPR Port splash screen</li>
+</ul>
 <h2 id="node-overview">Node Overview<a class="headerlink" href="#node-overview" title="Permanent link">&para;</a></h2>
 <div align="center">
     <img src="images/SnowShot_2026-03-28_07-50-39.png" alt="Shader Nodes" style="border-radius: 10px;">
@@ -664,6 +690,7 @@
 <li><code>Render Textures</code></li>
 <li><code>Filter Materials</code></li>
 <li><code>Eevee Outline</code></li>
+<li><code>Native Camera FX Outputs</code></li>
 <li><code>AOV Input / AOV Output</code> in the <code>Filter</code> domain</li>
 </ul>
 <h3 id="2-shader-nodes">2. Shader Nodes<a class="headerlink" href="#2-shader-nodes" title="Permanent link">&para;</a></h3>
@@ -695,7 +722,7 @@
 <li><code>Curvature</code></li>
 <li><code>Shader Info</code></li>
 <li><code>Light Info</code></li>
-<li><code>OKLab</code> mode in <code>Color Ramp</code></li>
+<li><code>OKLab Color Ramp</code></li>
 </ul>
 <h3 id="3-npr-workflow">3. NPR Workflow<a class="headerlink" href="#3-npr-workflow" title="Permanent link">&para;</a></h3>
 <ul>
