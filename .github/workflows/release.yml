@@ -79,7 +79,16 @@ jobs:
       - name: Package Release Asset
         working-directory: blender
         run: |
-          VERSION="5.1.1"
+          VERSION=$(python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          header = Path("source/blender/blenkernel/BKE_blender_version.h").read_text()
+          version = int(re.search(r"^#define BLENDER_VERSION\s+(\d+)$", header, re.M).group(1))
+          patch = int(re.search(r"^#define BLENDER_VERSION_PATCH\s+(\d+)$", header, re.M).group(1))
+          print(f"{version // 100}.{version % 100}.{patch}")
+          PY
+          )
           HASH="${{ steps.vars.outputs.sha_short }}"
           DATE="${{ steps.vars.outputs.build_date }}"
           ASSET_NAME="blender-$VERSION-npr-port-linux64-$HASH-$DATE"
@@ -135,7 +144,16 @@ jobs:
 
       - name: Package Release Asset
         run: |
-          VERSION="5.1.1"
+          VERSION=$(python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          header = Path("source/blender/blenkernel/BKE_blender_version.h").read_text()
+          version = int(re.search(r"^#define BLENDER_VERSION\s+(\d+)$", header, re.M).group(1))
+          patch = int(re.search(r"^#define BLENDER_VERSION_PATCH\s+(\d+)$", header, re.M).group(1))
+          print(f"{version // 100}.{version % 100}.{patch}")
+          PY
+          )
           HASH="${{ steps.vars.outputs.sha_short }}"
           DATE="${{ steps.vars.outputs.build_date }}"
           ASSET_NAME="blender-$VERSION-npr-port-macos-$HASH-$DATE"

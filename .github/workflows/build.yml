@@ -70,7 +70,16 @@ jobs:
       - name: Package Release Asset
         working-directory: blender
         run: |
-          VERSION="5.1.1"
+          VERSION=$(python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          header = Path("source/blender/blenkernel/BKE_blender_version.h").read_text()
+          version = int(re.search(r"^#define BLENDER_VERSION\s+(\d+)$", header, re.M).group(1))
+          patch = int(re.search(r"^#define BLENDER_VERSION_PATCH\s+(\d+)$", header, re.M).group(1))
+          print(f"{version // 100}.{version % 100}.{patch}")
+          PY
+          )
           HASH="${{ steps.vars.outputs.sha_short }}"
           DATE="${{ steps.vars.outputs.build_date }}"
           ASSET_NAME="blender-$VERSION-npr-port-linux64-$HASH-$DATE"
@@ -124,7 +133,16 @@ jobs:
 
       - name: Package Release Asset
         run: |
-          VERSION="5.1.1"
+          VERSION=$(python3 - <<'PY'
+          import re
+          from pathlib import Path
+
+          header = Path("source/blender/blenkernel/BKE_blender_version.h").read_text()
+          version = int(re.search(r"^#define BLENDER_VERSION\s+(\d+)$", header, re.M).group(1))
+          patch = int(re.search(r"^#define BLENDER_VERSION_PATCH\s+(\d+)$", header, re.M).group(1))
+          print(f"{version // 100}.{version % 100}.{patch}")
+          PY
+          )
           HASH="${{ steps.vars.outputs.sha_short }}"
           DATE="${{ steps.vars.outputs.build_date }}"
           ASSET_NAME="blender-$VERSION-npr-port-macos-$HASH-$DATE"
@@ -194,7 +212,10 @@ jobs:
       - name: Package Release Asset
         shell: pwsh
         run: |
-          $Version = "5.1.0"
+          $Header = Get-Content -Raw -LiteralPath "source/blender/blenkernel/BKE_blender_version.h"
+          $BaseVersion = [int]([regex]::Match($Header, "(?m)^#define BLENDER_VERSION\s+(\d+)\s*$").Groups[1].Value)
+          $PatchVersion = [int]([regex]::Match($Header, "(?m)^#define BLENDER_VERSION_PATCH\s+(\d+)\s*$").Groups[1].Value)
+          $Version = "{0}.{1}.{2}" -f [math]::Floor($BaseVersion / 100), ($BaseVersion % 100), $PatchVersion
           $Hash = "${{ steps.vars.outputs.sha_short }}"
           $Date = "${{ steps.vars.outputs.build_date }}"
           $AssetName = "blender-$Version-npr-port-win64-$Hash-$Date"
