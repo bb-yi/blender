@@ -4,6 +4,14 @@
 
 这份文档说明当前 `Blender 5.1 NPR Port` 相比官方 `Blender 5.1` 已经加入、并且当前分支内实际存在的 NPR / Eevee 扩展功能，以及它们的基本使用方法。
 
+## 5.1.2 更新重点
+
+- 合并官方 `Blender 5.1.2` 修复与版本更新
+- 新增 `Native Camera FX Outputs`，可在 `View Layer` 中把 Eevee 原生 `Motion Blur` 和 `Depth of Field` 应用到指定通道
+- 恢复独立 `OKLab Color Ramp` 节点，普通 `Color Ramp` 保持原有 RGB / HSV / HSL 工作流
+- 修复 `GLSL Function` 的 `vec4` 输入在刷新或编译路径中丢失 `w` 分量的问题
+- 更新 NPR Port 启动画面
+
 ## 与官方 Blender 5.1 的主要区别
 
 当前这个 5.1 NPR 版本，和官方 Blender 5.1 相比，主要多了以下几类能力：
@@ -12,6 +20,7 @@
    - `Render Textures`
    - `Filter Materials`
    - `Eevee Outline`
+   - `Native Camera FX Outputs`
 
 2. `Eevee` 的新着色器节点
    - `Filter Object Info`
@@ -150,7 +159,66 @@
   - `Before Depth of Field`
   - `Before Composite`
 
-### 3. Eevee Outline
+### 3. Native Camera FX Outputs
+
+#### 功能说明
+
+`Native Camera FX Outputs` 是 View Layer 级的 Eevee 原生后期输出系统。它可以把指定的渲染通道抽出后，单独套用 Eevee 的 `Motion Blur` 和 / 或 `Depth of Field`，再以新的 Render Pass 输出。
+
+这适合为描边、AOV、深度、法线、光照分量等通道生成带相机运动模糊或景深的版本，用于合成器、后续滤镜或外部后期流程。
+
+#### 面板入口
+
+`View Layer Properties > Passes > Native Camera FX Outputs`
+
+#### 可配置内容
+
+每个输出条目支持：
+
+- `Name`：生成的 Render Pass 名称
+- `Enabled`：是否生成该输出
+- `Source`：要处理的来源通道
+- `Shader AOV`：当 `Source` 为 `Shader AOV` 时选择具体 AOV 名称
+- `Motion Blur`：套用 Eevee 原生运动模糊
+- `Depth of Field`：套用 Eevee 原生景深
+
+#### Source 支持项
+
+- `Depth`
+- `Normal`
+- `Position`
+- `Vector`
+- `Diffuse Light`
+- `Diffuse Color`
+- `Specular Light`
+- `Specular Color`
+- `Volume Light`
+- `Emission`
+- `Environment`
+- `Shadow`
+- `Ambient Occlusion`
+- `Transparent`
+- `Shader AOV`
+- `Outline`
+
+#### 基本使用方法
+
+1. 切换到 `Eevee` 渲染引擎。
+2. 打开 `View Layer Properties > Passes > Native Camera FX Outputs`。
+3. 新建一个输出条目。
+4. 设置 `Name` 和 `Source`。
+5. 按需要启用 `Motion Blur`、`Depth of Field`，或同时启用两者。
+6. 在合成器或后续流程中读取同名 Render Pass。
+
+#### 重要说明
+
+- `Motion Blur` 仍需要场景 / View Layer 中启用 Eevee 运动模糊
+- `Depth of Field` 仍使用当前相机的景深设置
+- `Shader AOV` 来源必须选择 View Layer 中已经存在的 AOV 名称
+- 如果条目出现无效状态，通常是名称冲突、来源 AOV 不存在，或超过当前可用输出数量
+- 描边通道可作为 `Outline` 来源输出，并可单独获得带景深或运动模糊的版本
+
+### 4. Eevee Outline
 
 #### 功能说明
 
@@ -581,6 +649,7 @@ struct GLSLLight {
 - 只有显式写了 `subtype=color` 的 `vec3 / vec4` 输入，才会显示成颜色插口
 - `vec3 + subtype=color` 进入 GLSL 时按 `rgb` 使用，`alpha` 固定为 `1.0`
 - `vec4 + subtype=color` 会保留完整 `rgba`
+- 刷新或重新编译节点时，`vec4` 输入会保留 `w` 分量，不会退化成 `vec3 / rgb`
 - 当前不支持把 `mat* / struct / array` 作为导出函数边界类型
 - 导出函数边界当前已经支持 `int / bool`，适合直接写模式开关、枚举值、`lightgroup_id` 这类参数
 - 内置了几何 helper，可在函数体里直接读取：`glsl_position()`、`glsl_normal()`、`glsl_true_normal()`、`glsl_incoming()`
