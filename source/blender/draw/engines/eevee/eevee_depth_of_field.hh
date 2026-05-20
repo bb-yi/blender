@@ -56,6 +56,8 @@ class DepthOfField {
   static constexpr GPUSamplerState with_filter = {GPU_SAMPLER_FILTERING_LINEAR};
 
   /** Input/Output texture references. */
+  gpu::Texture *depth_tx_ = nullptr;
+  gpu::Texture *velocity_tx_ = nullptr;
   gpu::Texture *input_color_tx_ = nullptr;
   gpu::Texture *output_color_tx_ = nullptr;
 
@@ -180,7 +182,9 @@ class DepthOfField {
   void render(View &view,
               gpu::Texture **input_tx,
               gpu::Texture **output_tx,
-              DepthOfFieldBuffer &dof_buffer);
+              DepthOfFieldBuffer &dof_buffer,
+              gpu::Texture *depth_tx = nullptr,
+              gpu::Texture *velocity_tx = nullptr);
 
   bool postfx_enabled() const
   {

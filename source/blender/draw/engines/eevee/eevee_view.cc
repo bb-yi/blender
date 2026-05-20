@@ -272,6 +272,20 @@ namespace blender::eevee
       inst_.outline.render(render_view_, extent_);
     }
 
+    gpu::Texture *outline_raw_tx = inst_.outline.resolved_texture();
+    gpu::Texture *outline_combined_tx = nullptr;
+    if (inst_.outline.use_in_combined()) {
+      outline_combined_tx = outline_raw_tx;
+      if (outline_combined_tx != nullptr) {
+        outline_combined_tx = inst_.native_postfx_outputs.render_outline_for_combined(
+            render_view_, outline_combined_tx);
+      }
+    }
+    else {
+      inst_.native_postfx_outputs.release_default_outline_history();
+    }
+    inst_.native_postfx_outputs.render(render_view_);
+
     inst_.lights.debug_draw(render_view_, combined_fb_);
     inst_.hiz_buffer.debug_draw(render_view_, combined_fb_);
     inst_.shadows.debug_draw(render_view_, combined_fb_);
@@ -289,17 +303,18 @@ namespace blender::eevee
         TelemetryStageId::MainFilterBeforePostFX);
       gpu::Texture* postfx_input_tx = inst_.filter_materials.render_stage(
         render_view_, rbufs.combined_tx, extent_, SCE_EEVEE_FILTER_STAGE_BEFORE_POSTFX);
-      combined_final_tx = render_postfx(postfx_input_tx);
+      combined_final_tx = render_postfx(postfx_input_tx, postfx_tx_, dof_buffer_, true);
     }
     else {
-      combined_final_tx = render_postfx(rbufs.combined_tx);
+      combined_final_tx = render_postfx(rbufs.combined_tx, postfx_tx_, dof_buffer_, true);
     }
     {
       ScopedTelemetrySample telemetry_sample(inst_.telemetry,
         TelemetryStageId::MainFilmAccumulate);
-      inst_.film.accumulate(jitter_view_, combined_final_tx);
+      inst_.film.accumulate(jitter_view_, combined_final_tx, outline_raw_tx, outline_combined_tx);
     }
     inst_.outline.release_result();
+    inst_.native_postfx_outputs.release();
 
     inst_.pipelines.shadow_filter.release();
     rbufs.release();
@@ -308,13 +323,17 @@ namespace blender::eevee
     GPU_debug_group_end();
   }
 
-  gpu::Texture* ShadingView::render_postfx(gpu::Texture* input_tx)
+  gpu::Texture* ShadingView::render_postfx(gpu::Texture* input_tx,
+                                           TextureFromPool &postfx_tx,
+                                           DepthOfFieldBuffer &dof_buffer,
+                                           bool use_filter_materials)
   {
     const bool uses_postfx_passes = inst_.depth_of_field.postfx_enabled() ||
       inst_.motion_blur.postfx_enabled();
     const bool uses_filter_passes =
-      inst_.filter_materials.has_stage_entries(SCE_EEVEE_FILTER_STAGE_BEFORE_DEPTH_OF_FIELD) ||
-      inst_.filter_materials.has_stage_entries(SCE_EEVEE_FILTER_STAGE_BEFORE_COMPOSITE);
+      use_filter_materials &&
+      (inst_.filter_materials.has_stage_entries(SCE_EEVEE_FILTER_STAGE_BEFORE_DEPTH_OF_FIELD) ||
+       inst_.filter_materials.has_stage_entries(SCE_EEVEE_FILTER_STAGE_BEFORE_COMPOSITE));
 
     if (!uses_postfx_passes && !uses_filter_passes)
     {
@@ -322,7 +341,7 @@ namespace blender::eevee
     }
     if (uses_postfx_passes)
     {
-      postfx_tx_.acquire(extent_, gpu::TextureFormat::SFLOAT_16_16_16_16);
+      postfx_tx.acquire(extent_, gpu::TextureFormat::SFLOAT_16_16_16_16);
     }
 
     /* Fix a sync bug on AMD + Mesa when volume + motion blur create artifacts
@@ -331,17 +350,18 @@ namespace blender::eevee
       !inst_.depth_of_field.postfx_enabled() &&
       GPU_type_matches_ex(GPU_DEVICE_ATI, GPU_OS_UNIX, GPU_DRIVER_OFFICIAL, GPU_BACKEND_OPENGL))
     {
-      postfx_tx_.clear(float4(0.0f));
+      postfx_tx.clear(float4(0.0f));
     }
 
-    gpu::Texture* output_tx = uses_postfx_passes ? postfx_tx_.gpu_texture() : nullptr;
+    gpu::Texture* output_tx = uses_postfx_passes ? postfx_tx.gpu_texture() : nullptr;
 
     if (inst_.motion_blur.postfx_enabled())
     {
       ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::PostMotionBlur);
       inst_.motion_blur.render(render_view_, &input_tx, &output_tx);
     }
-    if (inst_.filter_materials.has_stage_entries(SCE_EEVEE_FILTER_STAGE_BEFORE_DEPTH_OF_FIELD))
+    if (use_filter_materials &&
+        inst_.filter_materials.has_stage_entries(SCE_EEVEE_FILTER_STAGE_BEFORE_DEPTH_OF_FIELD))
     {
       ScopedTelemetrySample telemetry_sample(inst_.telemetry,
         TelemetryStageId::PostFilterBeforeDepthOfField);
@@ -351,9 +371,10 @@ namespace blender::eevee
     if (inst_.depth_of_field.postfx_enabled())
     {
       ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::PostDepthOfField);
-      inst_.depth_of_field.render(render_view_, &input_tx, &output_tx, dof_buffer_);
+      inst_.depth_of_field.render(render_view_, &input_tx, &output_tx, dof_buffer);
     }
-    if (inst_.filter_materials.has_stage_entries(SCE_EEVEE_FILTER_STAGE_BEFORE_COMPOSITE))
+    if (use_filter_materials &&
+        inst_.filter_materials.has_stage_entries(SCE_EEVEE_FILTER_STAGE_BEFORE_COMPOSITE))
     {
       ScopedTelemetrySample telemetry_sample(inst_.telemetry,
         TelemetryStageId::PostFilterBeforeComposite);

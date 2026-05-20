@@ -44,6 +44,7 @@
 #include "eevee_lookdev.hh"
 #include "eevee_material.hh"
 #include "eevee_motion_blur.hh"
+#include "eevee_native_postfx_output.hh"
 #include "eevee_outline.hh"
 #include "eevee_pipeline.hh"
 #include "eevee_raytrace.hh"
@@ -128,6 +129,7 @@ namespace blender::eevee
     RenderTextureModule render_textures;
     FilterMaterialModule filter_materials;
     OutlineModule outline;
+    NativePostFXOutputModule native_postfx_outputs;
     Camera camera;
     Film film;
     RenderBuffers render_buffers;
@@ -214,6 +216,7 @@ namespace blender::eevee
       render_textures(*this),
       filter_materials(*this),
       outline(*this),
+      native_postfx_outputs(*this),
       camera(*this, uniform_data.data.camera),
       film(*this, uniform_data.data.film),
       render_buffers(*this, uniform_data.data.render_pass),

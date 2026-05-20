@@ -111,6 +111,7 @@ set(SRC
   engines/eevee/eevee_lut.cc
   engines/eevee/eevee_material.cc
   engines/eevee/eevee_motion_blur.cc
+  engines/eevee/eevee_native_postfx_output.cc
   engines/eevee/eevee_outline.cc
   engines/eevee/eevee_pipeline.cc
   engines/eevee/eevee_precompute.cc
@@ -211,6 +212,7 @@ set(SRC
   engines/eevee/eevee_lut.hh
   engines/eevee/eevee_material.hh
   engines/eevee/eevee_motion_blur.hh
+  engines/eevee/eevee_native_postfx_output.hh
   engines/eevee/eevee_pipeline.hh
   engines/eevee/eevee_precompute.hh
   engines/eevee/eevee_raytrace.hh
@@ -346,6 +348,7 @@ set(GLSL_SRC
   engines/eevee/shaders/infos/eevee_lut_infos.hh
   engines/eevee/shaders/infos/eevee_material_infos.hh
   engines/eevee/shaders/infos/eevee_motion_blur_infos.hh
+  engines/eevee/shaders/infos/eevee_native_postfx_output_infos.hh
   engines/eevee/shaders/infos/eevee_nodetree_infos.hh
   engines/eevee/shaders/infos/eevee_outline_infos.hh
   engines/eevee/shaders/infos/eevee_render_texture_infos.hh
@@ -510,6 +513,8 @@ set(GLSL_SRC
   engines/eevee/shaders/eevee_motion_blur_flatten_comp.glsl
   engines/eevee/shaders/eevee_motion_blur_gather_comp.glsl
   engines/eevee/shaders/eevee_motion_blur_lib.glsl
+  engines/eevee/shaders/eevee_native_postfx_output_extract_comp.glsl
+  engines/eevee/shaders/eevee_native_postfx_output_pack_comp.glsl
   engines/eevee/shaders/eevee_nodetree_closures_lib.glsl
   engines/eevee/shaders/eevee_nodetree_frag_lib.glsl
   engines/eevee/shaders/eevee_nodetree_lib.glsl

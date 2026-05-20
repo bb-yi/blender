@@ -947,6 +947,45 @@ void film_process_data(int2 texel_film, float4 &out_color, float &out_depth)
     }
   }
 
+  if (flag_test(enabled_categories, PASS_CATEGORY_NATIVE_POSTFX)) {
+    for (int output_index = 0; output_index < uniform_buf.film.native_postfx_color_len;
+         output_index++)
+    {
+      float4 output_accum = float4(0.0f);
+      int source_layer = uniform_buf.render_pass.color_len +
+                         uniform_buf.render_pass.aovs.color_len + output_index;
+
+      for (int i = 0; i < samples_len; i++) {
+        FilmSample src = film_sample_get(i, texel_film);
+        film_sample_accum(src,
+                          uniform_buf.film.native_postfx_color_id + output_index,
+                          source_layer,
+                          rp_color_tx,
+                          output_accum);
+      }
+      film_store_color(
+          dst, uniform_buf.film.native_postfx_color_id + output_index, output_accum, out_color, false);
+    }
+
+    for (int output_index = 0; output_index < uniform_buf.film.native_postfx_value_len;
+         output_index++)
+    {
+      float output_accum = 0.0f;
+      int source_layer = uniform_buf.render_pass.value_len +
+                         uniform_buf.render_pass.aovs.value_len + output_index;
+
+      for (int i = 0; i < samples_len; i++) {
+        FilmSample src = film_sample_get(i, texel_film);
+        film_sample_accum(src,
+                          uniform_buf.film.native_postfx_value_id + output_index,
+                          source_layer,
+                          rp_value_tx,
+                          output_accum);
+      }
+      film_store_value(dst, uniform_buf.film.native_postfx_value_id + output_index, output_accum, out_color);
+    }
+  }
+
   if (flag_test(enabled_categories, PASS_CATEGORY_CRYPTOMATTE)) {
     if (uniform_buf.film.cryptomatte_samples_len != 0) {
       /* Cryptomatte passes cannot be cleared by a weighted store like other passes. */

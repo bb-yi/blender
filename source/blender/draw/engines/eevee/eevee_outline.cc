@@ -92,6 +92,7 @@ void OutlineModule::sync()
   resolve_ps_.state_set(DRW_STATE_WRITE_COLOR);
   resolve_ps_.shader_set(inst_.shaders.static_shader_get(OUTLINE_RESOLVE));
   resolve_ps_.bind_texture("depth_tx", &inst_.render_buffers.depth_tx);
+  resolve_ps_.bind_texture("vector_tx", &inst_.render_buffers.vector_tx);
   gpu::Texture **outline_occlusion_depth_ref =
       inst_.pipelines.forward.has_outline_occluders() ? &occlusion_depth_tx_ :
                                                         &inst_.render_buffers.depth_tx;
@@ -188,8 +189,24 @@ void OutlineModule::render(View &view, int2 extent)
   resolved_outline_tx_.acquire(extent,
                                gpu::TextureFormat::SFLOAT_16_16_16_16,
                                GPU_TEXTURE_USAGE_ATTACHMENT | GPU_TEXTURE_USAGE_SHADER_READ);
+  resolved_depth_tx_.acquire(extent,
+                             gpu::TextureFormat::SFLOAT_32,
+                             GPU_TEXTURE_USAGE_ATTACHMENT | GPU_TEXTURE_USAGE_SHADER_READ);
+  resolved_velocity_tx_.acquire(extent,
+                                inst_.render_buffers.vector_tx_format(),
+                                GPU_TEXTURE_USAGE_ATTACHMENT | GPU_TEXTURE_USAGE_SHADER_READ);
+  const bool do_motion_vectors_swizzle = inst_.render_buffers.vector_tx_format() ==
+                                         gpu::TextureFormat::SFLOAT_16_16;
+  if (do_motion_vectors_swizzle) {
+    GPU_texture_swizzle_set(resolved_velocity_tx_, "rgrg");
+  }
   resolved_outline_tx_.clear(float4(0.0f));
-  resolve_fb_.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(resolved_outline_tx_));
+  resolved_depth_tx_.clear(float4(0.0f));
+  resolved_velocity_tx_.clear(float4(0.0f));
+  resolve_fb_.ensure(GPU_ATTACHMENT_NONE,
+                     GPU_ATTACHMENT_TEXTURE(resolved_outline_tx_),
+                     GPU_ATTACHMENT_TEXTURE(resolved_depth_tx_),
+                     GPU_ATTACHMENT_TEXTURE(resolved_velocity_tx_));
   resolve_ps_.framebuffer_set(&resolve_fb_);
   GPU_framebuffer_bind(resolve_fb_);
   drw.submit(resolve_ps_, view);
@@ -203,7 +220,14 @@ void OutlineModule::render(View &view, int2 extent)
 
 void OutlineModule::release_result()
 {
+  const bool do_motion_vectors_swizzle = inst_.render_buffers.vector_tx_format() ==
+                                         gpu::TextureFormat::SFLOAT_16_16;
+  if (do_motion_vectors_swizzle && resolved_velocity_tx_.is_valid()) {
+    GPU_texture_swizzle_set(resolved_velocity_tx_, "rgba");
+  }
   resolved_outline_tx_.release();
+  resolved_depth_tx_.release();
+  resolved_velocity_tx_.release();
   occlusion_depth_tx_.release();
 }
 

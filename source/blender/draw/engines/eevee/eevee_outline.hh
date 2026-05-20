@@ -34,6 +34,8 @@ class OutlineModule {
 
   TextureFromPool edge_seed_tx_ = {"Outline.EdgeSeed"};
   TextureFromPool resolved_outline_tx_ = {"Outline.Resolved"};
+  TextureFromPool resolved_depth_tx_ = {"Outline.ResolvedDepth"};
+  TextureFromPool resolved_velocity_tx_ = {"Outline.ResolvedVelocity"};
   TextureFromPool occlusion_depth_tx_ = {"Outline.OcclusionDepth"};
   SwapChain<TextureFromPool, 2> jfa_tx_;
 
@@ -65,9 +67,27 @@ class OutlineModule {
     return resolved_outline_tx_.is_valid();
   }
 
-  gpu::Texture *resolved_texture_or(gpu::Texture *fallback) const
+  gpu::Texture *resolved_texture_or(gpu::Texture *fallback)
   {
-    return has_result() ? resolved_outline_tx_ : fallback;
+    return has_result() ? resolved_outline_tx_.gpu_texture() : fallback;
+  }
+
+  gpu::Texture *resolved_texture()
+  {
+    return has_result() ? resolved_outline_tx_.gpu_texture() : nullptr;
+  }
+
+  gpu::Texture *resolved_depth_texture()
+  {
+    return has_result() && resolved_depth_tx_.is_valid() ? resolved_depth_tx_.gpu_texture() :
+                                                           nullptr;
+  }
+
+  gpu::Texture *resolved_velocity_texture()
+  {
+    return has_result() && resolved_velocity_tx_.is_valid() ?
+               resolved_velocity_tx_.gpu_texture() :
+               nullptr;
   }
 };
 

@@ -41,7 +41,7 @@ namespace blender::eevee {
 void VelocityModule::init()
 {
   if (!inst_.is_viewport() && !inst_.is_baking() &&
-      (inst_.film.enabled_passes_get() & EEVEE_RENDER_PASS_VECTOR) &&
+      (inst_.film.render_buffer_passes_get() & EEVEE_RENDER_PASS_VECTOR) &&
       !inst_.motion_blur.postfx_enabled())
   {
     /* No motion blur and the vector pass was requested. Do the steps sync here. */

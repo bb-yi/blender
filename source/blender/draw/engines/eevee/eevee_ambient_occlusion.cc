@@ -34,7 +34,7 @@ namespace blender::eevee {
 
 void AmbientOcclusion::init()
 {
-  render_pass_enabled_ = inst_.film.enabled_passes_get() & EEVEE_RENDER_PASS_AO;
+  render_pass_enabled_ = inst_.film.render_buffer_passes_get() & EEVEE_RENDER_PASS_AO;
 
   const SceneEEVEE &sce_eevee = inst_.scene->eevee;
   const ViewLayerEEVEE &view_layer_eevee = inst_.view_layer->eevee;

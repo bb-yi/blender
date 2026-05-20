@@ -589,8 +589,44 @@ namespace blender
   };
 
   static const EnumPropertyItem rna_enum_view_layer_aov_type_items[] = {
-      {AOV_TYPE_COLOR, "COLOR", 0, "Color", ""},
-      {AOV_TYPE_VALUE, "VALUE", 0, "Value", ""},
+    {AOV_TYPE_COLOR, "COLOR", 0, "Color", ""},
+    {AOV_TYPE_VALUE, "VALUE", 0, "Value", ""},
+    {0, nullptr, 0, nullptr, nullptr},
+  };
+
+  static const EnumPropertyItem rna_enum_view_layer_native_postfx_source_items[] = {
+      {VIEW_LAYER_NATIVE_POSTFX_SOURCE_DEPTH, "DEPTH", 0, "Depth", ""},
+      {VIEW_LAYER_NATIVE_POSTFX_SOURCE_NORMAL, "NORMAL", 0, "Normal", ""},
+      {VIEW_LAYER_NATIVE_POSTFX_SOURCE_POSITION, "POSITION", 0, "Position", ""},
+      {VIEW_LAYER_NATIVE_POSTFX_SOURCE_VECTOR, "VECTOR", 0, "Vector", ""},
+      {VIEW_LAYER_NATIVE_POSTFX_SOURCE_DIFFUSE_LIGHT,
+       "DIFFUSE_LIGHT",
+       0,
+       "Diffuse Light",
+       ""},
+      {VIEW_LAYER_NATIVE_POSTFX_SOURCE_DIFFUSE_COLOR,
+       "DIFFUSE_COLOR",
+       0,
+       "Diffuse Color",
+       ""},
+      {VIEW_LAYER_NATIVE_POSTFX_SOURCE_SPECULAR_LIGHT,
+       "SPECULAR_LIGHT",
+       0,
+       "Specular Light",
+       ""},
+      {VIEW_LAYER_NATIVE_POSTFX_SOURCE_SPECULAR_COLOR,
+       "SPECULAR_COLOR",
+       0,
+       "Specular Color",
+       ""},
+      {VIEW_LAYER_NATIVE_POSTFX_SOURCE_VOLUME_LIGHT, "VOLUME_LIGHT", 0, "Volume Light", ""},
+      {VIEW_LAYER_NATIVE_POSTFX_SOURCE_EMISSION, "EMISSION", 0, "Emission", ""},
+      {VIEW_LAYER_NATIVE_POSTFX_SOURCE_ENVIRONMENT, "ENVIRONMENT", 0, "Environment", ""},
+      {VIEW_LAYER_NATIVE_POSTFX_SOURCE_SHADOW, "SHADOW", 0, "Shadow", ""},
+      {VIEW_LAYER_NATIVE_POSTFX_SOURCE_AO, "AO", 0, "Ambient Occlusion", ""},
+      {VIEW_LAYER_NATIVE_POSTFX_SOURCE_TRANSPARENT, "TRANSPARENT", 0, "Transparent", ""},
+      {VIEW_LAYER_NATIVE_POSTFX_SOURCE_AOV, "AOV", 0, "Shader AOV", ""},
+      {VIEW_LAYER_NATIVE_POSTFX_SOURCE_OUTLINE, "OUTLINE", 0, "Outline", ""},
       {0, nullptr, 0, nullptr, nullptr},
   };
 
@@ -2188,6 +2224,11 @@ namespace blender
       ViewLayerAOV* aov = static_cast<ViewLayerAOV*>(ptr->data);
       view_layer = BKE_view_layer_find_with_aov(scene, aov);
     }
+    else if (ptr->type == RNA_NativePostFXOutput)
+    {
+      ViewLayerNativePostFXOutput* output = static_cast<ViewLayerNativePostFXOutput*>(ptr->data);
+      view_layer = BKE_view_layer_find_with_native_postfx_output(scene, output);
+    }
     else if (ptr->type == RNA_Lightgroup)
     {
       ViewLayerLightgroup* lightgroup = static_cast<ViewLayerLightgroup*>(ptr->data);
@@ -3399,6 +3440,49 @@ namespace blender
     ViewLayer* view_layer = static_cast<ViewLayer*>(ptr->data);
     ViewLayerAOV* aov = static_cast<ViewLayerAOV*>(BLI_findlink(&view_layer->aovs, value));
     view_layer->active_aov = aov;
+  }
+
+  void rna_ViewLayer_active_native_postfx_output_index_range(
+    PointerRNA* ptr, int* min, int* max, int* /*softmin*/, int* /*softmax*/)
+  {
+    ViewLayer* view_layer = static_cast<ViewLayer*>(ptr->data);
+
+    *min = 0;
+    *max = max_ii(0, BLI_listbase_count(&view_layer->native_postfx_outputs) - 1);
+  }
+
+  int rna_ViewLayer_active_native_postfx_output_index_get(PointerRNA* ptr)
+  {
+    ViewLayer* view_layer = static_cast<ViewLayer*>(ptr->data);
+    return BLI_findindex(&view_layer->native_postfx_outputs,
+      view_layer->active_native_postfx_output);
+  }
+
+  void rna_ViewLayer_active_native_postfx_output_index_set(PointerRNA* ptr, int value)
+  {
+    ViewLayer* view_layer = static_cast<ViewLayer*>(ptr->data);
+    ViewLayerNativePostFXOutput* output = static_cast<ViewLayerNativePostFXOutput*>(
+      BLI_findlink(&view_layer->native_postfx_outputs, value));
+    view_layer->active_native_postfx_output = output;
+  }
+
+  static std::optional<std::string> rna_ViewLayerNativePostFXOutput_path(const PointerRNA* ptr)
+  {
+    const ViewLayerNativePostFXOutput* output = static_cast<ViewLayerNativePostFXOutput*>(
+      ptr->data);
+    const Scene* scene = reinterpret_cast<const Scene*>(ptr->owner_id);
+    for (const ViewLayer& view_layer : scene->view_layers)
+    {
+      if (BLI_findindex(&view_layer.native_postfx_outputs, output) != -1)
+      {
+        char view_layer_path[sizeof(view_layer.name) * 3];
+        rna_ViewLayer_path_buffer_get(&view_layer, view_layer_path, sizeof(view_layer_path));
+        char output_name_esc[sizeof(output->name) * 2];
+        BLI_str_escape(output_name_esc, output->name, sizeof(output_name_esc));
+        return fmt::format("{}.native_postfx_outputs[\"{}\"]", view_layer_path, output_name_esc);
+      }
+    }
+    return std::nullopt;
   }
 
   void rna_ViewLayer_active_lightgroup_index_range(
@@ -5533,6 +5617,100 @@ namespace blender
     RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_ViewLayer_pass_update");
   }
 
+  static void rna_def_view_layer_native_postfx_outputs(BlenderRNA* brna, PropertyRNA* cprop)
+  {
+    StructRNA* srna;
+    FunctionRNA* func;
+    PropertyRNA* parm;
+
+    RNA_def_property_srna(cprop, "NativePostFXOutputs");
+    srna = RNA_def_struct(brna, "NativePostFXOutputs", nullptr);
+    RNA_def_struct_sdna(srna, "ViewLayer");
+    RNA_def_struct_ui_text(
+      srna, "Native Camera FX Outputs", "Collection of Eevee native camera FX outputs");
+
+    func = RNA_def_function(srna, "add", "rna_ViewLayer_native_postfx_output_add");
+    RNA_def_function_ui_description(func, "Add a native camera FX output");
+    RNA_def_function_flag(func, FUNC_USE_SELF_ID | FUNC_USE_MAIN);
+    parm = RNA_def_pointer(
+      func, "output", "NativePostFXOutput", "", "Newly created native camera FX output");
+    RNA_def_function_return(func, parm);
+
+    func = RNA_def_function(srna, "remove", "rna_ViewLayer_native_postfx_output_remove");
+    RNA_def_function_ui_description(func, "Remove a native camera FX output");
+    RNA_def_function_flag(func, FUNC_USE_SELF_ID | FUNC_USE_MAIN | FUNC_USE_REPORTS);
+    parm = RNA_def_int(
+      func, "index", -1, INT_MIN, INT_MAX, "Index", "Index to remove", -1, INT_MAX);
+    RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
+
+    func = RNA_def_function(srna, "move", "rna_ViewLayer_native_postfx_output_move");
+    RNA_def_function_ui_description(func, "Move a native camera FX output");
+    RNA_def_function_flag(func, FUNC_USE_SELF_ID | FUNC_USE_MAIN | FUNC_USE_REPORTS);
+    parm = RNA_def_int(
+      func, "from_index", -1, INT_MIN, INT_MAX, "From Index", "Index to move", -1, INT_MAX);
+    RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
+    parm = RNA_def_int(
+      func, "to_index", -1, INT_MIN, INT_MAX, "To Index", "Target index", -1, INT_MAX);
+    RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
+  }
+
+  static void rna_def_view_layer_native_postfx_output(BlenderRNA* brna)
+  {
+    StructRNA* srna;
+    PropertyRNA* prop;
+
+    srna = RNA_def_struct(brna, "NativePostFXOutput", nullptr);
+    RNA_def_struct_sdna(srna, "ViewLayerNativePostFXOutput");
+    RNA_def_struct_path_func(srna, "rna_ViewLayerNativePostFXOutput_path");
+    RNA_def_struct_ui_text(srna, "Native Camera FX Output", "");
+
+    prop = RNA_def_property(srna, "name", PROP_STRING, PROP_NONE);
+    RNA_def_property_string_sdna(prop, nullptr, "name");
+    RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+    RNA_def_property_ui_text(prop, "Name", "Name of the generated render pass");
+    RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_ViewLayer_pass_update");
+    RNA_def_struct_name_property(srna, prop);
+
+    prop = RNA_def_property(srna, "enabled", PROP_BOOLEAN, PROP_NONE);
+    RNA_def_property_boolean_sdna(
+      prop, nullptr, "flag", VIEW_LAYER_NATIVE_POSTFX_OUTPUT_ENABLED);
+    RNA_def_property_ui_text(prop, "Enabled", "Generate this native camera FX output");
+    RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_ViewLayer_pass_update");
+
+    prop = RNA_def_property(srna, "is_valid", PROP_BOOLEAN, PROP_NONE);
+    RNA_def_property_boolean_negative_sdna(prop,
+      nullptr,
+      "flag",
+      VIEW_LAYER_NATIVE_POSTFX_OUTPUT_CONFLICT |
+        VIEW_LAYER_NATIVE_POSTFX_OUTPUT_SOURCE_INVALID);
+    RNA_def_property_ui_text(prop, "Valid", "Name and source are valid");
+
+    prop = RNA_def_property(srna, "source", PROP_ENUM, PROP_NONE);
+    RNA_def_property_enum_sdna(prop, nullptr, "source");
+    RNA_def_property_enum_items(prop, rna_enum_view_layer_native_postfx_source_items);
+    RNA_def_property_enum_default(prop, VIEW_LAYER_NATIVE_POSTFX_SOURCE_OUTLINE);
+    RNA_def_property_ui_text(prop, "Source", "Render pass to process with native camera effects");
+    RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_ViewLayer_pass_update");
+
+    prop = RNA_def_property(srna, "source_aov", PROP_STRING, PROP_NONE);
+    RNA_def_property_string_sdna(prop, nullptr, "source_aov");
+    RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+    RNA_def_property_ui_text(prop, "Source AOV", "Shader AOV name used when Source is Shader AOV");
+    RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_ViewLayer_pass_update");
+
+    prop = RNA_def_property(srna, "use_motion_blur", PROP_BOOLEAN, PROP_NONE);
+    RNA_def_property_boolean_sdna(
+      prop, nullptr, "effects", VIEW_LAYER_NATIVE_POSTFX_OUTPUT_EFFECT_MOTION_BLUR);
+    RNA_def_property_ui_text(prop, "Motion Blur", "Apply Eevee native motion blur");
+    RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_ViewLayer_pass_update");
+
+    prop = RNA_def_property(srna, "use_depth_of_field", PROP_BOOLEAN, PROP_NONE);
+    RNA_def_property_boolean_sdna(
+      prop, nullptr, "effects", VIEW_LAYER_NATIVE_POSTFX_OUTPUT_EFFECT_DOF);
+    RNA_def_property_ui_text(prop, "Depth of Field", "Apply Eevee native depth of field");
+    RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_ViewLayer_pass_update");
+  }
+
   static void rna_def_view_layer_lightgroups(BlenderRNA* brna, PropertyRNA* cprop)
   {
     StructRNA* srna;
@@ -5657,6 +5835,27 @@ namespace blender
         "rna_ViewLayer_active_aov_index_set",
         "rna_ViewLayer_active_aov_index_range");
       RNA_def_property_ui_text(prop, "Active AOV Index", "Index of active AOV");
+      RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, nullptr);
+
+      prop = RNA_def_property(srna, "native_postfx_outputs", PROP_COLLECTION, PROP_NONE);
+      RNA_def_property_collection_sdna(prop, nullptr, "native_postfx_outputs", nullptr);
+      RNA_def_property_struct_type(prop, "NativePostFXOutput");
+      RNA_def_property_ui_text(prop, "Native Camera FX Outputs", "");
+      rna_def_view_layer_native_postfx_outputs(brna, prop);
+
+      prop = RNA_def_property(srna, "active_native_postfx_output", PROP_POINTER, PROP_NONE);
+      RNA_def_property_struct_type(prop, "NativePostFXOutput");
+      RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+      RNA_def_property_ui_text(
+        prop, "Native Camera FX Output", "Active native camera FX output");
+
+      prop = RNA_def_property(srna, "active_native_postfx_output_index", PROP_INT, PROP_UNSIGNED);
+      RNA_def_property_int_funcs(prop,
+        "rna_ViewLayer_active_native_postfx_output_index_get",
+        "rna_ViewLayer_active_native_postfx_output_index_set",
+        "rna_ViewLayer_active_native_postfx_output_index_range");
+      RNA_def_property_ui_text(
+        prop, "Active Native Camera FX Output Index", "Index of active native camera FX output");
       RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, nullptr);
 
       prop = RNA_def_property(srna, "lightgroups", PROP_COLLECTION, PROP_NONE);
@@ -10369,6 +10568,7 @@ namespace blender
     rna_def_scene_eevee(brna);
     rna_def_scene_hydra(brna);
     rna_def_view_layer_aov(brna);
+    rna_def_view_layer_native_postfx_output(brna);
     rna_def_view_layer_lightgroup(brna);
     rna_def_view_layer_eevee(brna);
     rna_def_scene_gpencil(brna);

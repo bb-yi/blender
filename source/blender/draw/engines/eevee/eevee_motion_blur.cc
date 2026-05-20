@@ -155,8 +155,8 @@ void MotionBlurModule::sync()
                              MOTION_BLUR_TILE_FLATTEN_RGBA;
     sub.shader_set(inst_.shaders.static_shader_get(shader));
     sub.bind_ubo("motion_blur_buf", data_);
-    sub.bind_texture("depth_tx", &render_buffers.depth_tx);
-    sub.bind_image("velocity_img", &render_buffers.vector_tx);
+    sub.bind_texture("depth_tx", &depth_tx_);
+    sub.bind_image("velocity_img", &velocity_tx_);
     sub.bind_image("out_tiles_img", &tiles_tx_);
     sub.dispatch(&dispatch_flatten_size_);
     sub.barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS | GPU_BARRIER_TEXTURE_FETCH);
@@ -176,8 +176,8 @@ void MotionBlurModule::sync()
     sub.shader_set(inst_.shaders.static_shader_get(MOTION_BLUR_GATHER));
     sub.bind_ubo("motion_blur_buf", data_);
     sub.bind_ssbo("tile_indirection_buf", tile_indirection_buf_);
-    sub.bind_texture("depth_tx", &render_buffers.depth_tx, no_filter);
-    sub.bind_texture("velocity_tx", &render_buffers.vector_tx, no_filter);
+    sub.bind_texture("depth_tx", &depth_tx_, no_filter);
+    sub.bind_texture("velocity_tx", &velocity_tx_, no_filter);
     sub.bind_texture("in_color_tx", &input_color_tx_, no_filter);
     sub.bind_image("in_tiles_img", &tiles_tx_);
     sub.bind_image("out_color_img", &output_color_tx_);
@@ -187,15 +187,20 @@ void MotionBlurModule::sync()
   }
 }
 
-void MotionBlurModule::render(View &view, gpu::Texture **input_tx, gpu::Texture **output_tx)
+void MotionBlurModule::render(View &view,
+                              gpu::Texture **input_tx,
+                              gpu::Texture **output_tx,
+                              gpu::Texture *depth_tx,
+                              gpu::Texture *velocity_tx)
 {
   if (!motion_blur_fx_enabled_) {
     return;
   }
 
-  const Texture &depth_tx = inst_.render_buffers.depth_tx;
+  depth_tx_ = (depth_tx != nullptr) ? depth_tx : inst_.render_buffers.depth_tx;
+  velocity_tx_ = (velocity_tx != nullptr) ? velocity_tx : inst_.render_buffers.vector_tx;
 
-  int2 extent = {depth_tx.width(), depth_tx.height()};
+  int2 extent = {GPU_texture_width(depth_tx_), GPU_texture_height(depth_tx_)};
   int2 tiles_extent = math::divide_ceil(extent, int2(MOTION_BLUR_TILE_SIZE));
 
   if (inst_.is_viewport()) {

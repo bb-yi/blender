@@ -258,12 +258,10 @@ void DepthOfField::bokeh_lut_pass_sync()
 
 void DepthOfField::setup_pass_sync()
 {
-  RenderBuffers &render_buffers = inst_.render_buffers;
-
   setup_ps_.init();
   setup_ps_.shader_set(inst_.shaders.static_shader_get(DOF_SETUP));
   setup_ps_.bind_texture("color_tx", &input_color_tx_, no_filter);
-  setup_ps_.bind_texture("depth_tx", &render_buffers.depth_tx, no_filter);
+  setup_ps_.bind_texture("depth_tx", &depth_tx_, no_filter);
   setup_ps_.bind_ubo("dof_buf", data_);
   setup_ps_.bind_image("out_color_img", &setup_color_tx_);
   setup_ps_.bind_image("out_coc_img", &setup_coc_tx_);
@@ -273,7 +271,6 @@ void DepthOfField::setup_pass_sync()
 
 void DepthOfField::stabilize_pass_sync()
 {
-  RenderBuffers &render_buffers = inst_.render_buffers;
   VelocityModule &velocity = inst_.velocity;
 
   stabilize_ps_.init();
@@ -284,9 +281,9 @@ void DepthOfField::stabilize_pass_sync()
   stabilize_ps_.bind_ubo("camera_next", &(*velocity.camera_steps[STEP_PREVIOUS]));
   stabilize_ps_.bind_texture("coc_tx", &setup_coc_tx_, no_filter);
   stabilize_ps_.bind_texture("color_tx", &setup_color_tx_, no_filter);
-  stabilize_ps_.bind_texture("velocity_tx", &render_buffers.vector_tx, no_filter);
+  stabilize_ps_.bind_texture("velocity_tx", &velocity_tx_, no_filter);
   stabilize_ps_.bind_texture("in_history_tx", &stabilize_input_, with_filter);
-  stabilize_ps_.bind_texture("depth_tx", &render_buffers.depth_tx, no_filter);
+  stabilize_ps_.bind_texture("depth_tx", &depth_tx_, no_filter);
   stabilize_ps_.bind_ubo("dof_buf", data_);
   stabilize_ps_.push_constant("u_use_history", &stabilize_valid_history_, 1);
   stabilize_ps_.bind_image("out_coc_img", reduced_coc_tx_.mip_view(0));
@@ -459,7 +456,6 @@ void DepthOfField::hole_fill_pass_sync()
 void DepthOfField::resolve_pass_sync()
 {
   GPUSamplerState with_filter = {GPU_SAMPLER_FILTERING_LINEAR};
-  RenderBuffers &render_buffers = inst_.render_buffers;
   gpu::Shader *sh = inst_.shaders.static_shader_get(use_bokeh_lut_ ? DOF_RESOLVE_LUT :
                                                                      DOF_RESOLVE);
 
@@ -467,7 +463,7 @@ void DepthOfField::resolve_pass_sync()
   resolve_ps_.specialize_constant(sh, "do_debug_color", inst_.debug_mode == DEBUG_DOF_PLANES);
   resolve_ps_.shader_set(sh);
   resolve_ps_.bind_ubo("dof_buf", data_);
-  resolve_ps_.bind_texture("depth_tx", &render_buffers.depth_tx, no_filter);
+  resolve_ps_.bind_texture("depth_tx", &depth_tx_, no_filter);
   resolve_ps_.bind_texture("color_tx", &input_color_tx_, no_filter);
   resolve_ps_.bind_texture("stable_color_tx", &resolve_stable_color_tx_, no_filter);
   resolve_ps_.bind_texture("color_bg_tx", &color_bg_tx_.current(), with_filter);
@@ -513,12 +509,16 @@ void DepthOfField::update_sample_table()
 void DepthOfField::render(View &view,
                           gpu::Texture **input_tx,
                           gpu::Texture **output_tx,
-                          DepthOfFieldBuffer &dof_buffer)
+                          DepthOfFieldBuffer &dof_buffer,
+                          gpu::Texture *depth_tx,
+                          gpu::Texture *velocity_tx)
 {
   if (fx_radius_ == 0.0f) {
     return;
   }
 
+  depth_tx_ = (depth_tx != nullptr) ? depth_tx : inst_.render_buffers.depth_tx;
+  velocity_tx_ = (velocity_tx != nullptr) ? velocity_tx : inst_.render_buffers.vector_tx;
   input_color_tx_ = *input_tx;
   output_color_tx_ = *output_tx;
   extent_ = {GPU_texture_width(input_color_tx_), GPU_texture_height(input_color_tx_)};

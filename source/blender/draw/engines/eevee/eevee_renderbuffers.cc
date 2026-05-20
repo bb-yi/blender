@@ -23,7 +23,7 @@ namespace blender::eevee {
 
 void RenderBuffers::init()
 {
-  const eViewLayerEEVEEPassType enabled_passes = inst_.film.enabled_passes_get();
+  const eViewLayerEEVEEPassType enabled_passes = inst_.film.render_buffer_passes_get();
 
   data.color_len = 0;
   data.value_len = 0;
@@ -55,7 +55,7 @@ void RenderBuffers::init()
 
 void RenderBuffers::acquire(int2 extent)
 {
-  const eViewLayerEEVEEPassType enabled_passes = inst_.film.enabled_passes_get();
+  const eViewLayerEEVEEPassType enabled_passes = inst_.film.render_buffer_passes_get();
 
   extent_ = extent;
 
@@ -104,8 +104,10 @@ void RenderBuffers::acquire(int2 extent)
     GPU_texture_swizzle_set(vector_tx, "rgrg");
   }
 
-  int color_len = data.color_len + data.aovs.color_len;
-  int value_len = data.value_len + data.aovs.value_len;
+  int color_len = data.color_len + data.aovs.color_len +
+                  inst_.native_postfx_outputs.color_len_get();
+  int value_len = data.value_len + data.aovs.value_len +
+                  inst_.native_postfx_outputs.value_len_get();
 
   rp_color_tx.ensure_2d_array(color_format,
                               (color_len > 0) ? extent : int2(1),
@@ -156,7 +158,7 @@ void RenderBuffers::release()
 
 gpu::TextureFormat RenderBuffers::vector_tx_format()
 {
-  const eViewLayerEEVEEPassType enabled_passes = inst_.film.enabled_passes_get();
+  const eViewLayerEEVEEPassType enabled_passes = inst_.film.render_buffer_passes_get();
   bool do_full_vector_render_pass = ((enabled_passes & EEVEE_RENDER_PASS_VECTOR) ||
                                      inst_.motion_blur.postfx_enabled()) &&
                                     !inst_.is_viewport();

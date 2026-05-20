@@ -361,6 +361,9 @@ ShaderGroups ShaderModule::static_shaders_load(const ShaderGroups request_bits,
                                        RENDER_TEXTURE_EXTRACT_RGBA32F,
                                        RENDER_TEXTURE_EXTRACT_R16F,
                                        RENDER_TEXTURE_EXTRACT_R32F,
+                                       NATIVE_POSTFX_OUTPUT_EXTRACT,
+                                       NATIVE_POSTFX_OUTPUT_PACK_COLOR,
+                                       NATIVE_POSTFX_OUTPUT_PACK_VALUE,
                                        FILM_COPY,
                                        FILM_COMP,
                                        FILM_CRYPTOMATTE_POST,
@@ -643,6 +646,12 @@ const char *ShaderModule::static_shader_create_info_name_get(eShaderType shader_
       return "eevee_motion_blur_tiles_flatten_rgba";
     case MOTION_BLUR_TILE_FLATTEN_RG:
       return "eevee_motion_blur_tiles_flatten_rg";
+    case NATIVE_POSTFX_OUTPUT_EXTRACT:
+      return "eevee_native_postfx_output_extract";
+    case NATIVE_POSTFX_OUTPUT_PACK_COLOR:
+      return "eevee_native_postfx_output_pack_color";
+    case NATIVE_POSTFX_OUTPUT_PACK_VALUE:
+      return "eevee_native_postfx_output_pack_value";
     case DEBUG_SURFELS:
       return "eevee_debug_surfels";
     case DEBUG_IRRADIANCE_GRID:

@@ -250,6 +250,8 @@ void BKE_view_layer_free_ex(ViewLayer *view_layer, const bool do_id_user)
 
   BLI_freelistN(&view_layer->aovs);
   view_layer->active_aov = nullptr;
+  BLI_freelistN(&view_layer->native_postfx_outputs);
+  view_layer->active_native_postfx_output = nullptr;
   BLI_freelistN(&view_layer->lightgroups);
   view_layer->active_lightgroup = nullptr;
 
@@ -440,6 +442,30 @@ static void layer_aov_copy_data(ViewLayer *view_layer_dst,
   }
 }
 
+static void layer_native_postfx_output_copy_data(
+    ViewLayer *view_layer_dst,
+    const ViewLayer *view_layer_src,
+    ListBaseT<ViewLayerNativePostFXOutput> *outputs_dst,
+    const ListBaseT<ViewLayerNativePostFXOutput> *outputs_src)
+{
+  BLI_duplicatelist(outputs_dst, outputs_src);
+
+  ViewLayerNativePostFXOutput *output_dst = static_cast<ViewLayerNativePostFXOutput *>(
+      outputs_dst->first);
+  const ViewLayerNativePostFXOutput *output_src =
+      static_cast<const ViewLayerNativePostFXOutput *>(outputs_src->first);
+
+  while (output_dst != nullptr) {
+    BLI_assert(output_src);
+    if (output_src == view_layer_src->active_native_postfx_output) {
+      view_layer_dst->active_native_postfx_output = output_dst;
+    }
+
+    output_dst = output_dst->next;
+    output_src = output_src->next;
+  }
+}
+
 static void layer_lightgroup_copy_data(ViewLayer *view_layer_dst,
                                        const ViewLayer *view_layer_src,
                                        ListBaseT<ViewLayerLightgroup> *lightgroups_dst,
@@ -539,6 +565,12 @@ void BKE_view_layer_copy_data(Scene *scene_dst,
   BLI_listbase_clear(&view_layer_dst->aovs);
   layer_aov_copy_data(
       view_layer_dst, view_layer_src, &view_layer_dst->aovs, &view_layer_src->aovs);
+
+  BLI_listbase_clear(&view_layer_dst->native_postfx_outputs);
+  layer_native_postfx_output_copy_data(view_layer_dst,
+                                       view_layer_src,
+                                       &view_layer_dst->native_postfx_outputs,
+                                       &view_layer_src->native_postfx_outputs);
 
   BLI_listbase_clear(&view_layer_dst->lightgroups);
   layer_lightgroup_copy_data(
@@ -2454,6 +2486,9 @@ void BKE_view_layer_blend_write(BlendWriter *writer, const Scene *scene, ViewLay
   for (ViewLayerAOV &aov : view_layer->aovs) {
     writer->write_struct(&aov);
   }
+  for (ViewLayerNativePostFXOutput &output : view_layer->native_postfx_outputs) {
+    writer->write_struct(&output);
+  }
   for (ViewLayerLightgroup &lightgroup : view_layer->lightgroups) {
     writer->write_struct(&lightgroup);
   }
@@ -2510,6 +2545,11 @@ void BKE_view_layer_blend_read_data(BlendDataReader *reader, ViewLayer *view_lay
 
   BLO_read_struct_list(reader, ViewLayerAOV, &view_layer->aovs);
   BLO_read_struct(reader, ViewLayerAOV, &view_layer->active_aov);
+
+  BLO_read_struct_list(
+      reader, ViewLayerNativePostFXOutput, &view_layer->native_postfx_outputs);
+  BLO_read_struct(
+      reader, ViewLayerNativePostFXOutput, &view_layer->active_native_postfx_output);
 
   BLO_read_struct_list(reader, ViewLayerLightgroup, &view_layer->lightgroups);
   BLO_read_struct(reader, ViewLayerLightgroup, &view_layer->active_lightgroup);
@@ -2598,13 +2638,13 @@ void BKE_view_layer_set_active_aov(ViewLayer *view_layer, ViewLayerAOV *aov)
 
 using ViewLayerAOVNameCountMap = Map<std::string, int>;
 
-static void bke_view_layer_verify_aov_cb(void *userdata,
-                                         Scene * /*scene*/,
-                                         ViewLayer * /*view_layer*/,
-                                         const char *name,
-                                         int /*channels*/,
-                                         const char * /*chanid*/,
-                                         eNodeSocketDatatype /*type*/)
+static void bke_view_layer_verify_render_pass_cb(void *userdata,
+                                                 Scene * /*scene*/,
+                                                 ViewLayer * /*view_layer*/,
+                                                 const char *name,
+                                                 int /*channels*/,
+                                                 const char * /*chanid*/,
+                                                 eNodeSocketDatatype /*type*/)
 {
   auto *name_count = static_cast<ViewLayerAOVNameCountMap *>(userdata);
   name_count->lookup_or_add(name, 0)++;
@@ -2615,21 +2655,142 @@ static void bke_view_layer_verify_aov_cb(void *userdata,
   }
 }
 
-void BKE_view_layer_verify_aov(RenderEngine *engine, Scene *scene, ViewLayer *view_layer)
+static void viewlayer_native_postfx_output_make_name_unique(ViewLayer *view_layer)
+{
+  ViewLayerNativePostFXOutput *output = view_layer->active_native_postfx_output;
+  if (output == nullptr) {
+    return;
+  }
+
+  /* Don't allow dots, it's incompatible with OpenEXR convention to store channels
+   * as "layer.pass.channel". */
+  BLI_string_replace_char(output->name, '.', '_');
+  BLI_uniquename(&view_layer->native_postfx_outputs,
+                 output,
+                 DATA_("Native PostFX"),
+                 '_',
+                 offsetof(ViewLayerNativePostFXOutput, name),
+                 sizeof(output->name));
+}
+
+static void viewlayer_native_postfx_output_active_set(ViewLayer *view_layer,
+                                                      ViewLayerNativePostFXOutput *output)
+{
+  if (output != nullptr) {
+    BLI_assert(BLI_findindex(&view_layer->native_postfx_outputs, output) != -1);
+    view_layer->active_native_postfx_output = output;
+  }
+  else {
+    view_layer->active_native_postfx_output = nullptr;
+  }
+}
+
+static bool viewlayer_native_postfx_output_source_valid(const ViewLayer *view_layer,
+                                                        const ViewLayerNativePostFXOutput *output,
+                                                        const bool check_aov_conflict)
+{
+  if (output->source == VIEW_LAYER_NATIVE_POSTFX_SOURCE_AOV) {
+    if (output->source_aov[0] == '\0') {
+      return false;
+    }
+    const ViewLayerAOV *aov = static_cast<const ViewLayerAOV *>(
+        BLI_findstring(&view_layer->aovs, output->source_aov, offsetof(ViewLayerAOV, name)));
+    return aov != nullptr && (!check_aov_conflict || (aov->flag & AOV_CONFLICT) == 0);
+  }
+  return true;
+}
+
+static void bke_view_layer_verify_outputs(RenderEngine *engine, Scene *scene, ViewLayer *view_layer)
 {
   viewlayer_aov_make_name_unique(view_layer);
+  viewlayer_native_postfx_output_make_name_unique(view_layer);
 
   ViewLayerAOVNameCountMap name_count;
   for (ViewLayerAOV &aov : view_layer->aovs) {
     /* Disable conflict flag, so that the AOV is included when iterating over all passes below. */
     aov.flag &= ~AOV_CONFLICT;
   }
+  for (ViewLayerNativePostFXOutput &output : view_layer->native_postfx_outputs) {
+    output.flag &= ~(VIEW_LAYER_NATIVE_POSTFX_OUTPUT_CONFLICT |
+                     VIEW_LAYER_NATIVE_POSTFX_OUTPUT_SOURCE_INVALID);
+  }
+
+  int native_postfx_output_index = 0;
+  for (ViewLayerNativePostFXOutput &output : view_layer->native_postfx_outputs) {
+    bool source_invalid = !viewlayer_native_postfx_output_source_valid(
+        view_layer, &output, false);
+    if (!source_invalid && (output.flag & VIEW_LAYER_NATIVE_POSTFX_OUTPUT_ENABLED) != 0) {
+      source_invalid = native_postfx_output_index++ >= VIEW_LAYER_NATIVE_POSTFX_OUTPUT_MAX;
+    }
+    SET_FLAG_FROM_TEST(output.flag,
+                       source_invalid,
+                       VIEW_LAYER_NATIVE_POSTFX_OUTPUT_SOURCE_INVALID);
+  }
+
   RE_engine_update_render_passes(
-      engine, scene, view_layer, bke_view_layer_verify_aov_cb, &name_count);
+      engine, scene, view_layer, bke_view_layer_verify_render_pass_cb, &name_count);
   for (ViewLayerAOV &aov : view_layer->aovs) {
     const int count = name_count.lookup_default(aov.name, 0);
     SET_FLAG_FROM_TEST(aov.flag, count > 1, AOV_CONFLICT);
   }
+  for (ViewLayerNativePostFXOutput &output : view_layer->native_postfx_outputs) {
+    const int count = name_count.lookup_default(output.name, 0);
+    SET_FLAG_FROM_TEST(
+        output.flag, count > 1, VIEW_LAYER_NATIVE_POSTFX_OUTPUT_CONFLICT);
+    SET_FLAG_FROM_TEST(
+        output.flag,
+        (output.flag & VIEW_LAYER_NATIVE_POSTFX_OUTPUT_SOURCE_INVALID) != 0 ||
+            !viewlayer_native_postfx_output_source_valid(view_layer, &output, true),
+        VIEW_LAYER_NATIVE_POSTFX_OUTPUT_SOURCE_INVALID);
+  }
+}
+
+void BKE_view_layer_verify_aov(RenderEngine *engine, Scene *scene, ViewLayer *view_layer)
+{
+  bke_view_layer_verify_outputs(engine, scene, view_layer);
+}
+
+ViewLayerNativePostFXOutput *BKE_view_layer_add_native_postfx_output(ViewLayer *view_layer)
+{
+  ViewLayerNativePostFXOutput *output = MEM_new<ViewLayerNativePostFXOutput>(__func__);
+  STRNCPY_UTF8(output->name, DATA_("Native PostFX"));
+  output->source = VIEW_LAYER_NATIVE_POSTFX_SOURCE_OUTLINE;
+  output->effects = VIEW_LAYER_NATIVE_POSTFX_OUTPUT_EFFECT_MOTION_BLUR |
+                    VIEW_LAYER_NATIVE_POSTFX_OUTPUT_EFFECT_DOF;
+  output->flag = VIEW_LAYER_NATIVE_POSTFX_OUTPUT_ENABLED;
+  BLI_addtail(&view_layer->native_postfx_outputs, output);
+  viewlayer_native_postfx_output_active_set(view_layer, output);
+  viewlayer_native_postfx_output_make_name_unique(view_layer);
+  return output;
+}
+
+void BKE_view_layer_remove_native_postfx_output(ViewLayer *view_layer,
+                                                ViewLayerNativePostFXOutput *output)
+{
+  BLI_assert(BLI_findindex(&view_layer->native_postfx_outputs, output) != -1);
+  BLI_assert(output != nullptr);
+  if (view_layer->active_native_postfx_output == output) {
+    if (output->next) {
+      viewlayer_native_postfx_output_active_set(view_layer, output->next);
+    }
+    else {
+      viewlayer_native_postfx_output_active_set(view_layer, output->prev);
+    }
+  }
+  BLI_freelinkN(&view_layer->native_postfx_outputs, output);
+}
+
+void BKE_view_layer_set_active_native_postfx_output(ViewLayer *view_layer,
+                                                    ViewLayerNativePostFXOutput *output)
+{
+  viewlayer_native_postfx_output_active_set(view_layer, output);
+}
+
+void BKE_view_layer_verify_native_postfx_outputs(RenderEngine *engine,
+                                                 Scene *scene,
+                                                 ViewLayer *view_layer)
+{
+  bke_view_layer_verify_outputs(engine, scene, view_layer);
 }
 
 bool BKE_view_layer_has_valid_aov(ViewLayer *view_layer)
@@ -2642,10 +2803,34 @@ bool BKE_view_layer_has_valid_aov(ViewLayer *view_layer)
   return false;
 }
 
+bool BKE_view_layer_has_valid_native_postfx_output(ViewLayer *view_layer)
+{
+  for (ViewLayerNativePostFXOutput &output : view_layer->native_postfx_outputs) {
+    const int invalid_flags = VIEW_LAYER_NATIVE_POSTFX_OUTPUT_CONFLICT |
+                              VIEW_LAYER_NATIVE_POSTFX_OUTPUT_SOURCE_INVALID;
+    if ((output.flag & VIEW_LAYER_NATIVE_POSTFX_OUTPUT_ENABLED) && (output.flag & invalid_flags) == 0)
+    {
+      return true;
+    }
+  }
+  return false;
+}
+
 ViewLayer *BKE_view_layer_find_with_aov(Scene *scene, ViewLayerAOV *aov)
 {
   for (ViewLayer &view_layer : scene->view_layers) {
     if (BLI_findindex(&view_layer.aovs, aov) != -1) {
+      return &view_layer;
+    }
+  }
+  return nullptr;
+}
+
+ViewLayer *BKE_view_layer_find_with_native_postfx_output(Scene *scene,
+                                                         ViewLayerNativePostFXOutput *output)
+{
+  for (ViewLayer &view_layer : scene->view_layers) {
+    if (BLI_findindex(&view_layer.native_postfx_outputs, output) != -1) {
       return &view_layer;
     }
   }

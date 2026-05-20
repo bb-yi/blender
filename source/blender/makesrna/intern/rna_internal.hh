@@ -39,6 +39,7 @@ struct PropertyDefRNA;
 struct ReportList;
 struct SDNA;
 struct ViewLayer;
+struct ViewLayerNativePostFXOutput;
 
 /* Data structures used during define */
 
@@ -384,6 +385,24 @@ void rna_ViewLayer_active_aov_index_range(
     PointerRNA *ptr, int *min, int *max, int *softmin, int *softmax);
 int rna_ViewLayer_active_aov_index_get(PointerRNA *ptr);
 void rna_ViewLayer_active_aov_index_set(PointerRNA *ptr, int value);
+void rna_ViewLayer_active_native_postfx_output_index_range(
+    PointerRNA *ptr, int *min, int *max, int *softmin, int *softmax);
+int rna_ViewLayer_active_native_postfx_output_index_get(PointerRNA *ptr);
+void rna_ViewLayer_active_native_postfx_output_index_set(PointerRNA *ptr, int value);
+ViewLayerNativePostFXOutput *rna_ViewLayer_native_postfx_output_add(ID *id,
+                                                                    ViewLayer *view_layer,
+                                                                    Main *bmain);
+void rna_ViewLayer_native_postfx_output_remove(ID *id,
+                                               ViewLayer *view_layer,
+                                               Main *bmain,
+                                               ReportList *reports,
+                                               int index);
+void rna_ViewLayer_native_postfx_output_move(ID *id,
+                                             ViewLayer *view_layer,
+                                             Main *bmain,
+                                             ReportList *reports,
+                                             int from,
+                                             int to);
 void rna_ViewLayer_active_lightgroup_index_range(
     PointerRNA *ptr, int *min, int *max, int *softmin, int *softmax);
 int rna_ViewLayer_active_lightgroup_index_get(PointerRNA *ptr);
