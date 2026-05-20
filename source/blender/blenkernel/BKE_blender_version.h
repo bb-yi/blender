@@ -22,7 +22,7 @@ namespace blender {
 /** Blender major and minor version. */
 #define BLENDER_VERSION 501
 /** Blender patch version for bug-fix releases. */
-#define BLENDER_VERSION_PATCH 1
+#define BLENDER_VERSION_PATCH 2
 /** Blender release cycle stage: alpha/beta/rc/release. */
 #define BLENDER_VERSION_CYCLE release
 /** Blender release type suffix. LTS or blank. */
