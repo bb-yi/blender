@@ -16,6 +16,7 @@
 #include <cstring>
 #include <string>
 
+#include "BLI_array.hh"
 #include "BLI_math_vector.hh"
 #include "BLI_map.hh"
 #include "BLI_set.hh"
@@ -35,6 +36,7 @@
 #include "BKE_lib_id.hh"
 #include "BKE_material.hh"
 #include "BKE_mesh.hh"
+#include "BKE_mesh_tangent.hh"
 #include "BKE_node.hh"
 #include "BKE_node_legacy_types.hh"
 #include "BKE_node_runtime.hh"
@@ -84,6 +86,12 @@ constexpr int eevee_bake_supported_pass_type = SCE_PASS_EMIT;
 struct BakeBatchAttribute {
   const GPUMaterialAttribute *gpu_attr = nullptr;
   uint format_attr = uint(-1);
+  int tangent_layer = -1;
+};
+
+struct BakeBatchTangentLayer {
+  std::string uv_name;
+  Array<float4> values;
 };
 
 struct BakeDrawGroup {
@@ -336,23 +344,6 @@ static bool validate_gpu_material_for_bake(RenderEngine *engine,
     return false;
   }
 
-  for (const GPUMaterialAttribute &attr : GPU_material_attributes(gpumat)) {
-    if (attr.type == CD_TANGENT) {
-      std::string message =
-          "Eevee Color Bake does not support tangent-space material attributes yet";
-      if (attr.name[0] != '\0') {
-        message += " (attribute \"";
-        message += attr.name;
-        message += "\")";
-      }
-      message += " in material \"";
-      message += material_name(material);
-      message += "\"";
-      eevee_bake_report_error(engine, message);
-      return false;
-    }
-  }
-
   return true;
 }
 
@@ -451,6 +442,106 @@ static bool lookup_uv_attribute(const Mesh &mesh,
   return !r_uvs.is_empty();
 }
 
+static int find_tangent_layer_index(const Span<BakeBatchTangentLayer> tangent_layers,
+                                    const StringRef uv_name)
+{
+  for (const int i : tangent_layers.index_range()) {
+    if (tangent_layers[i].uv_name == uv_name) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+static bool resolve_tangent_uv_name(RenderEngine *engine,
+                                    const Mesh &mesh,
+                                    const blender::Material *material,
+                                    const GPUMaterialAttribute &attr,
+                                    std::string &r_uv_name)
+{
+  StringRef uv_name = attr.name;
+  if (uv_name.is_empty()) {
+    uv_name = default_uv_name(mesh);
+  }
+
+  if (uv_name.is_empty()) {
+    std::string message =
+        "Eevee Color Bake requires a UV map for tangent-space material attributes in material \"";
+    message += material_name(material);
+    message += "\"";
+    eevee_bake_report_error(engine, message);
+    return false;
+  }
+
+  VArraySpan<float2> uvs;
+  if (!lookup_uv_attribute(mesh, uv_name, uvs)) {
+    std::string message = "Eevee Color Bake requires corner-domain UV map \"";
+    message += uv_name;
+    message += "\" for tangent-space material attributes in material \"";
+    message += material_name(material);
+    message += "\"";
+    eevee_bake_report_error(engine, message);
+    return false;
+  }
+
+  r_uv_name = uv_name;
+  return true;
+}
+
+static bool ensure_tangent_layer(RenderEngine *engine,
+                                 const Mesh &mesh,
+                                 const blender::Material *material,
+                                 const GPUMaterialAttribute &attr,
+                                 Vector<BakeBatchTangentLayer> &r_tangent_layers,
+                                 int &r_layer_index)
+{
+  std::string uv_name;
+  if (!resolve_tangent_uv_name(engine, mesh, material, attr, uv_name)) {
+    return false;
+  }
+
+  r_layer_index = find_tangent_layer_index(r_tangent_layers.as_span(), uv_name);
+  if (r_layer_index != -1) {
+    return true;
+  }
+
+  VArraySpan<float2> uv_map;
+  lookup_uv_attribute(mesh, uv_name, uv_map);
+  Array<Span<float2>> uv_map_spans(1);
+  uv_map_spans[0] = uv_map;
+
+  const bke::AttributeAccessor attributes = mesh.attributes();
+  const VArraySpan<bool> sharp_faces = *attributes.lookup<bool>("sharp_face",
+                                                               bke::AttrDomain::Face);
+
+  Array<Array<float4>> tangents = bke::mesh::calc_uv_tangents(mesh.vert_positions(),
+                                                             mesh.faces(),
+                                                             mesh.corner_verts(),
+                                                             mesh.corner_tris(),
+                                                             mesh.corner_tri_faces(),
+                                                             sharp_faces,
+                                                             mesh.vert_normals(),
+                                                             mesh.face_normals(),
+                                                             mesh.corner_normals(),
+                                                             uv_map_spans);
+  if (tangents.is_empty() || tangents[0].size() != mesh.corners_num) {
+    std::string message = "Eevee Color Bake failed to calculate tangent space for UV map \"";
+    message += uv_name;
+    message += "\" in material \"";
+    message += material_name(material);
+    message += "\"";
+    eevee_bake_report_error(engine, message);
+    return false;
+  }
+
+  BakeBatchTangentLayer layer;
+  layer.uv_name = uv_name;
+  layer.values = std::move(tangents[0]);
+  r_tangent_layers.append(std::move(layer));
+  r_layer_index = int(r_tangent_layers.size()) - 1;
+  return true;
+}
+
 static float4 attribute_value_for_corner(const Mesh &mesh,
                                          const GPUMaterialAttribute &attr,
                                          const int corner)
@@ -530,6 +621,7 @@ static gpu::Batch *build_bake_batch_for_material(RenderEngine *engine,
                                                  const BakeImage &image,
                                                  const Mesh &mesh,
                                                  const Span<int> primitive_ids,
+                                                 const blender::Material *material,
                                                  const GPUMaterial *gpumat)
 {
   if (primitive_ids.is_empty()) {
@@ -556,12 +648,20 @@ static gpu::Batch *build_bake_batch_for_material(RenderEngine *engine,
   added_attribute_names.add("bake_uv");
 
   Vector<BakeBatchAttribute> batch_attributes;
+  Vector<BakeBatchTangentLayer> tangent_layers;
   for (const GPUMaterialAttribute &gpu_attr : GPU_material_attributes(gpumat)) {
     if (added_attribute_names.add(gpu_attr.input_name)) {
       BakeBatchAttribute batch_attr;
       batch_attr.gpu_attr = &gpu_attr;
       batch_attr.format_attr = GPU_vertformat_attr_add(
           &format, gpu_attr.input_name, gpu::VertAttrType::SFLOAT_32_32_32_32);
+      if (gpu_attr.type == CD_TANGENT) {
+        if (!ensure_tangent_layer(
+                engine, mesh, material, gpu_attr, tangent_layers, batch_attr.tangent_layer))
+        {
+          return nullptr;
+        }
+      }
       batch_attributes.append(batch_attr);
     }
   }
@@ -590,7 +690,9 @@ static gpu::Batch *build_bake_batch_for_material(RenderEngine *engine,
       GPU_vertbuf_attr_set(vbo, bake_uv_attr, vertex_i, &bake_uv);
 
       for (const BakeBatchAttribute &batch_attr : batch_attributes) {
-        const float4 value = attribute_value_for_corner(mesh, *batch_attr.gpu_attr, corner);
+        const float4 value = (batch_attr.tangent_layer == -1) ?
+                                 attribute_value_for_corner(mesh, *batch_attr.gpu_attr, corner) :
+                                 tangent_layers[batch_attr.tangent_layer].values[corner];
         GPU_vertbuf_attr_set(vbo, batch_attr.format_attr, vertex_i, &value);
       }
     }
@@ -833,7 +935,7 @@ static bool run_gpu_bake(RenderEngine *engine,
         }
 
         gpu::Batch *batch = build_bake_batch_for_material(
-            engine, image, mesh, item.value.as_span(), gpumat);
+            engine, image, mesh, item.value.as_span(), material, gpumat);
         if (batch == nullptr) {
           ok = false;
           break;

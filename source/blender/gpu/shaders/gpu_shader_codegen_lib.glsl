@@ -77,7 +77,9 @@ float4 TextureHandle_eval(TextureHandle tex)
 #define float4_from_float(v) float4(float3(v), 1.0f)
 #define float4_from_TextureHandle(t) TextureHandle_eval(t)
 
-#ifdef GPU_FRAGMENT_SHADER
+#ifdef MAT_BAKE_COLOR
+#  define FrontFacing true
+#elif defined(GPU_FRAGMENT_SHADER)
 #  define FrontFacing gl_FrontFacing
 #else
 #  define FrontFacing true

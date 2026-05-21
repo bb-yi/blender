@@ -45,6 +45,7 @@ object.bake(type='EMIT')
   - Image Texture。
   - Checker、Noise、Voronoi 等可由 Eevee GPUMaterial 编译的本地程序纹理。
   - UV Map、Texture Coordinate、Mapping、ColorRamp、Math、Mix、Reroute。
+  - Tangent Space Normal Map、Tangent 节点 UV Map 模式、World To Tangent 等依赖 UV tangent attribute 的本地材质逻辑。
   - Node Group。
   - GLSL Function，包括不依赖屏幕输入的本地颜色逻辑。
 - Eevee/NPR 本地颜色：
@@ -78,6 +79,7 @@ object.bake(type='EMIT')
   - 重写为 GPU/DRW bake 调度器。
   - 删除 CPU `BakeEvalContext`、节点递归、灯光 CPU 估算和常量材质缓存。
   - 校验 Eevee Color Bake 支持范围。
+  - 为 bake 专用 VBO 补齐 `CD_TANGENT` 输入：按 GPUMaterial 请求的 UV layer 调用 `bke::mesh::calc_uv_tangents()`，上传 `float4` tangent/sign，供现有 Eevee material shader 使用。
   - 为每个 `BakeImage` 创建 offscreen color target，提交 UV-space draw，readback 到 `Combined` pass。
   - 显式启用 GPU context，并用 `DRWContext::CUSTOM` 包住 custom pipeline。
 
@@ -110,9 +112,11 @@ object.bake(type='EMIT')
   - 注册 bake geometry/material shader 和 datatoc。
 
 - `source/blender/draw/engines/eevee/eevee_nodetree_lib.glsl`
+- `source/blender/gpu/shaders/gpu_shader_codegen_lib.glsl`
 - `source/blender/gpu/shaders/material/gpu_shader_material_principled.glsl`
 - `source/blender/gpu/shaders/material/gpu_shader_material_shader_info.glsl`
   - 补齐 bake shader 需要的本地颜色、NPR 和 Shader Info/light helper 输出。
+  - `MAT_BAKE_COLOR` 下将 shader `FrontFacing` 固定为 true，使 Normal Map、Bump、Geometry Backfacing 等本地节点按源 mesh 正面求值，不受 UV-space 三角形 winding 影响。
 
 ## 实现注意事项
 
@@ -120,6 +124,7 @@ object.bake(type='EMIT')
 - bake draw 必须绑定 `inst.lights.bind_resources(sub)`，不能直接绑定 raw `light_buf_`。raw light buffer 的顺序与 light iteration 期望的 culled light buffer 顺序不同，会导致 Shader Info/light helper 结果错误。
 - Shader 编译和纹理准备必须完成后再读回结果。不能用 default/error material 当作临时 fallback。
 - `.glsl`、shader create-info 或相关 `.hh` 改动后，若安装树结果没有变化，优先检查 stale datatoc / unity object，必要时执行 mainfix `clean-unity install`。
+- Tangent support 只负责 mesh/UV tangent space。没有可解析 UV map 的 tangent-space material attribute 会明确失败；不引入 CPU 节点求值 fallback。
 
 ## Release 测试
 
@@ -140,6 +145,7 @@ E:\blender_bulid_test\blender_npr_bulid\test\release\cases\eevee_color_bake
 - GLSL Function 本地颜色。
 - 本地 NPR Tree 颜色。
 - Shader Info 灯光响应，灯光强度提高后 bake 像素变亮。
+- Tangent Space Normal Map 光照响应，证明 tangent-space material attribute 被 GPU/DRW bake batch 正确上传并参与 shader 求值。
 
 覆盖的负向场景：
 
@@ -164,12 +170,15 @@ E:\blender_bulid_test\blender_npr_bulid\install_windows_x64_vc17_Release_5_1_por
 .\run_release_tests.bat --no-pause
 ```
 
+日常 Eevee bake 修改只要求 no-Cycles mainfix 构建和 `eevee-color-bake` 专项通过；完整 release suite 中的 Cycles case 只在发布/打包需要 `with-cycles` 构建时运行。
+
 ## 验收标准
 
 - Eevee 下 `bpy.ops.object.bake(type='EMIT')` 能把本地材质颜色写入目标 image texture。
 - 普通纹理、程序节点、UV/Mapping、Node Group 和 GLSL Function 不再被 CPU 白名单限制。
 - 本地 NPR Tree 颜色能覆盖 surface color 并被烘焙。
 - Shader Info/light helper 能读取 Eevee light 资源，灯光变化会反映到 bake 结果。
+- Tangent-space material attributes 能在 Eevee bake 中参与 GPU 材质求值，Tangent Space Normal Map 的光照结果会随 tangent-space normal 改变。
 - 不支持的屏幕空间、AOV、Filter-domain、refraction 和非 Emit 场景明确失败。
 - 现有 Cycles bake 行为不改变。
-- mainfix 安装树专项 release case 通过，完整 release 测试通过。
+- mainfix 安装树专项 release case 通过；完整 release 测试留到需要 `with-cycles` 发布构建时执行。
