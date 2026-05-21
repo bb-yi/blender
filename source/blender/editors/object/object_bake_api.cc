@@ -569,7 +569,7 @@ static bool bake_object_check(const Scene *scene,
         Material *mat = BKE_object_material_get(ob, mat_nr);
         if (mat != nullptr) {
           BKE_reportf(reports,
-                      RPT_INFO,
+                      RPT_WARNING,
                       "No active and selected image texture node found in material \"%s\" (%d) "
                       "for object \"%s\"",
                       mat->id.name + 2,
@@ -578,7 +578,7 @@ static bool bake_object_check(const Scene *scene,
         }
         else {
           BKE_reportf(reports,
-                      RPT_INFO,
+                      RPT_WARNING,
                       "No active image found in material slot (%d) for object \"%s\"",
                       i,
                       ob->id.name + 2);
@@ -1375,6 +1375,7 @@ static bool bake_targets_init(const BakeAPIRender *bkr,
   }
 
   if (targets->pixels_num == 0) {
+    BKE_report(reports, RPT_WARNING, "No bakeable pixels found for the active bake target");
     return false;
   }
 

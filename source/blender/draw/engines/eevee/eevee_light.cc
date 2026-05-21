@@ -1578,6 +1578,74 @@ void LightModule::set_view(View &view, const int2 extent)
   culling_data_buf_.view_is_flipped = view.is_inverted();
   culling_data_buf_.push_update();
 
+  if (inst_.is_color_bake) {
+    culling_data_buf_.visible_count = uint(local_lights_len_);
+    culling_data_buf_.push_update();
+
+    auto light_data_for_bake = [&](const int src_index) {
+      LightData light = light_buf_[src_index];
+      if (is_sun_light(light.type) && light.color.x < 0.0f) {
+        light.color = inst_.world.sunlight[src_index].color;
+        light.object_to_world = inst_.world.sunlight[src_index].object_to_world;
+
+        LightSunData sun_data = light.sun();
+        sun_data.direction = transform_z_axis(inst_.world.sunlight[src_index].object_to_world);
+        light.sun() = sun_data;
+      }
+      return light;
+    };
+
+    for (const int i : IndexRange(local_lights_len_)) {
+      const int src_index = sun_lights_len_ + i;
+      culling_light_buf_[i] = light_data_for_bake(src_index);
+      light_shader_index_buf_[i] = light_shader_src_index_buf_[src_index];
+      front_light_shader_index_buf_[i] = front_light_shader_src_index_buf_[src_index];
+      volume_light_shader_index_buf_[i] = volume_light_shader_src_index_buf_[src_index];
+      surfel_light_shader_index_buf_[i] = surfel_light_shader_src_index_buf_[src_index];
+    }
+    for (const int i : IndexRange(sun_lights_len_)) {
+      const int dst_index = local_lights_len_ + i;
+      culling_light_buf_[dst_index] = light_data_for_bake(i);
+      light_shader_index_buf_[dst_index] = light_shader_src_index_buf_[i];
+      front_light_shader_index_buf_[dst_index] = front_light_shader_src_index_buf_[i];
+      volume_light_shader_index_buf_[dst_index] = volume_light_shader_src_index_buf_[i];
+      surfel_light_shader_index_buf_[dst_index] = surfel_light_shader_src_index_buf_[i];
+    }
+    culling_light_buf_.push_update();
+    light_shader_index_buf_.push_update();
+    front_light_shader_index_buf_.push_update();
+    volume_light_shader_index_buf_.push_update();
+    surfel_light_shader_index_buf_.push_update();
+
+    const uint zbin_max = uint(std::max(local_lights_len_ - 1, 0));
+    const uint zbin_value = local_lights_len_ > 0 ? (zbin_max << 16u) : 0u;
+    for (const int i : IndexRange(CULLING_ZBIN_COUNT)) {
+      culling_zbin_buf_[i] = zbin_value;
+    }
+    culling_zbin_buf_.push_update();
+
+    for (const int64_t i : IndexRange(culling_tile_buf_.size())) {
+      culling_tile_buf_[i] = 0u;
+    }
+    const uint word_per_tile = culling_data_buf_.tile_word_len;
+    const uint tile_count = culling_data_buf_.tile_x_len * culling_data_buf_.tile_y_len;
+    for (uint tile_index = 0; tile_index < tile_count; tile_index++) {
+      for (uint word_index = 0; word_index < word_per_tile; word_index++) {
+        const uint light_index = word_index * 32u;
+        uint mask = 0u;
+        if (light_index < uint(local_lights_len_)) {
+          const uint bit_count = std::min(32u, uint(local_lights_len_) - light_index);
+          mask = (bit_count == 32u) ? 0xFFFFFFFFu : ((1u << bit_count) - 1u);
+        }
+        culling_tile_buf_[tile_index * word_per_tile + word_index] = mask;
+      }
+    }
+    culling_tile_buf_.push_update();
+
+    inst_.manager->submit(update_ps_, view);
+    return;
+  }
+
   inst_.manager->submit(culling_ps_, view);
   inst_.manager->submit(update_ps_, view);
 }
