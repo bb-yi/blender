@@ -489,6 +489,53 @@ bool shader_info_is_world_sun_light(uint light_index, LightData light, bool is_l
   return (color_delta < 1e-4f) && (direction_alignment > 0.9999f);
 }
 
+bool shader_info_apply_light_shader(uint light_index,
+                                    inout LightData light,
+                                    LightVector lv,
+                                    bool is_directional,
+                                    inout float attenuation)
+{
+#if defined(LIGHT_SHADER_TEXTURE_EVAL)
+  int light_shader_index = light_shader_index_buf[light_index];
+  int light_shader_uniform_index = (light_shader_index < -1) ? -light_shader_index - 2 : -1;
+  float4 light_shader;
+  if (light_shader_uniform_index >= 0) {
+    light_shader = light_shader_uniform_buf[light_shader_uniform_index];
+  }
+  else if (light_shader_index >= 0) {
+    light_shader = texelFetch(light_shader_tx, int3(int2(gl_FragCoord.xy), light_shader_index), 0);
+  }
+  else {
+    return false;
+  }
+
+  light.color = light_shader.rgb;
+  attenuation = light_attenuation_common(light, is_directional, lv.L) * light_shader.a;
+  if (!is_directional) {
+    attenuation *= light_influence_cutoff(lv.dist,
+                                          light.local().local.influence_radius_invsqr_surface);
+  }
+  return true;
+#else
+  return false;
+#endif
+}
+
+float shader_info_light_ltc(LightData light,
+                            LightVector lv,
+                            float3 normal,
+                            float3 view_vector,
+                            float4 ltc_mat,
+                            bool light_shader_no_distance_falloff,
+                            bool is_directional)
+{
+  float ltc_result = light_ltc(utility_tx, light, normal, view_vector, lv, ltc_mat);
+  if (light_shader_no_distance_falloff) {
+    ltc_result /= max(light_shader_distance_falloff_get(light, lv, is_directional), 1e-8f);
+  }
+  return ltc_result;
+}
+
 [[node]]
 void node_shader_info(float3 position,
                       float3 normal_in,
@@ -532,9 +579,6 @@ void node_shader_info(float3 position,
     LightData light = light_buf[l_idx];
     bool is_directional = !is_local;
 
-    if (shader_info_is_zero(light.color)) {
-      continue;
-    }
     if (!light_linking_affects_receiver(light.light_set_membership, receiver_light_set)) {
       continue;
     }
@@ -544,14 +588,25 @@ void node_shader_info(float3 position,
 
     LightVector lv = light_vector_get(light, is_directional, position);
     bool is_world_sun = shader_info_is_world_sun_light(l_idx, light, is_local);
-    float surface_attenuation = light_attenuation_surface(light, is_directional, lv);
-    float diffuse_power = light_power_get(light, LIGHT_DIFFUSE);
-    float specular_power = light_power_get(light, LIGHT_SPECULAR);
-    if (max(diffuse_power, specular_power) < LIGHT_ATTENUATION_THRESHOLD) {
+    if (is_world_sun) {
       continue;
     }
 
-    if (is_world_sun) {
+    float surface_attenuation = light_attenuation_surface(light, is_directional, lv);
+    bool light_shader_no_distance_falloff = shader_info_apply_light_shader(
+        l_idx, light, lv, is_directional, surface_attenuation);
+
+    if (shader_info_is_zero(light.color) || surface_attenuation < LIGHT_ATTENUATION_THRESHOLD) {
+      continue;
+    }
+
+    float diffuse_power = light_shader_no_distance_falloff ?
+                              light_shader_no_distance_power_get(light, LIGHT_DIFFUSE) :
+                              light_power_get(light, LIGHT_DIFFUSE);
+    float specular_power = light_shader_no_distance_falloff ?
+                               light_shader_no_distance_power_get(light, LIGHT_SPECULAR) :
+                               light_power_get(light, LIGHT_SPECULAR);
+    if (max(diffuse_power, specular_power) < LIGHT_ATTENUATION_THRESHOLD) {
       continue;
     }
 
@@ -564,7 +619,13 @@ void node_shader_info(float3 position,
       /* Shader Info diffuse should stay on the same light-range envelope as Eevee's light culling
        * and shadow visibility paths. Omitting surface attenuation keeps the LTC response alive past
        * the intended local-light falloff and can show up as visibly blocky light-range boundaries. */
-      float diffuse_radiance = light_ltc(utility_tx, light, shading_normal, view_vector, lv, ltc_mat) *
+      float diffuse_radiance = shader_info_light_ltc(light,
+                                                     lv,
+                                                     shading_normal,
+                                                     view_vector,
+                                                     ltc_mat,
+                                                     light_shader_no_distance_falloff,
+                                                     is_directional) *
                                surface_attenuation;
 
       /* Keep Shader Info diffuse unshadowed and undisplay-remapped. */

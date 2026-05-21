@@ -133,6 +133,7 @@ static bool material_needs_front_light_shader_resources(const GPUMaterial *gpuma
   /* The raw GLSL light flag is an early registration hint. The precise evaluated-light marker is
    * only available after the material create info has been amended. */
   return (closure_bits & CLOSURE_SHADER_TO_RGBA) != 0 ||
+         GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
          GPU_material_has_glsl_light_shader_eval(gpumat) ||
          GPU_material_flag_get(gpumat, GPU_MATFLAG_GLSL_LIGHT_ACCESS);
 }
@@ -1706,7 +1707,8 @@ PassMain::Sub *DeferredLayer::npr_add(blender::Material *blender_mat, GPUMateria
   BLI_assert(GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR));
   use_depth_offset_lighting_data_ |= material_uses_depth_offset_lighting_data(blender_mat, gpumat);
   has_outline_ = has_outline_ || inst_.materials.material_uses_outline_control(blender_mat);
-  if (GPU_material_has_glsl_light_shader_eval(gpumat) ||
+  if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
+      GPU_material_has_glsl_light_shader_eval(gpumat) ||
       GPU_material_flag_get(gpumat, GPU_MATFLAG_GLSL_LIGHT_ACCESS))
   {
     inst_.lights.tag_front_light_shader_needed();
@@ -2410,7 +2412,8 @@ PassMain::Sub *DeferredProbePipeline::npr_add(blender::Material *blender_mat, GP
                                                        blender_mat);
   opaque_layer_.use_depth_offset_lighting_data_ |= material_uses_depth_offset_lighting_data(
       blender_mat, gpumat);
-  if (GPU_material_has_glsl_light_shader_eval(gpumat) ||
+  if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
+      GPU_material_has_glsl_light_shader_eval(gpumat) ||
       GPU_material_flag_get(gpumat, GPU_MATFLAG_GLSL_LIGHT_ACCESS))
   {
     inst_.lights.tag_front_light_shader_needed();
@@ -2611,7 +2614,8 @@ PassMain::Sub *PlanarProbePipeline::npr_add(blender::Material *blender_mat, GPUM
   PassMain::Sub *pass = material_surface_cull_pass_get(
       npr_double_sided_ps_, npr_single_sided_ps_, npr_front_cull_ps_, blender_mat);
   use_depth_offset_lighting_data_ |= material_uses_depth_offset_lighting_data(blender_mat, gpumat);
-  if (GPU_material_has_glsl_light_shader_eval(gpumat) ||
+  if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
+      GPU_material_has_glsl_light_shader_eval(gpumat) ||
       GPU_material_flag_get(gpumat, GPU_MATFLAG_GLSL_LIGHT_ACCESS))
   {
     inst_.lights.tag_front_light_shader_needed();

@@ -526,6 +526,7 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
       if (pipeline_type == MAT_PIPE_FORWARD ||
           (pipeline_type == MAT_PIPE_DEFERRED &&
            (GPU_material_flag_get(matpass.gpumat, GPU_MATFLAG_SHADER_TO_RGBA) ||
+            GPU_material_flag_get(matpass.gpumat, GPU_MATFLAG_SHADER_INFO) ||
             GPU_material_has_glsl_light_shader_eval(matpass.gpumat) ||
             GPU_material_flag_get(matpass.gpumat, GPU_MATFLAG_GLSL_LIGHT_ACCESS))))
       {

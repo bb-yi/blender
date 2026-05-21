@@ -1249,12 +1249,15 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   }
   const bool uses_glsl_light_access = material_pass_uses_glsl_light_access ||
                                       depth_offset_uses_light_access;
+  const bool surface_pass_uses_shader_info =
+      GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) &&
+      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD);
   const bool separate_depth_offset_lighting =
       has_depth_offset && !depth_offset_affect_lighting &&
       ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR);
 
   const bool use_front_light_shader_in_surface_pass =
-      use_shader_to_rgba || surface_graph_uses_glsl_light_access;
+      use_shader_to_rgba || surface_graph_uses_glsl_light_access || surface_pass_uses_shader_info;
 
   SlotAllocator slots = add_pipeline_create_info(
       info, pipeline_type, geometry_type, use_front_light_shader_in_surface_pass, has_depth_offset);
@@ -1380,6 +1383,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       pipeline_type == MAT_PIPE_DEFERRED_NPR)
   {
     info.define("MAT_NPR_SHADER_INFO");
+    info.define("LIGHT_SHADER_TEXTURE_EVAL");
   }
 
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_DIFFUSE)) {
