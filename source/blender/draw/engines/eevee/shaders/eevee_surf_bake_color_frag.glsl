@@ -19,11 +19,33 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_geom_bake_mesh)
 FRAGMENT_SHADER_CREATE_INFO(eevee_surf_bake_color)
 
 #include "draw_view_lib.glsl"
-#include "eevee_light_eval_lib.glsl"
-#include "eevee_lightprobe_eval_lib.glsl"
+#include "eevee_forward_lib.glsl"
 #include "eevee_nodetree_frag_lib.glsl"
 #include "eevee_sampling_lib.glsl"
 #include "eevee_surf_lib.glsl"
+
+/* Global lighting state used by Shader to RGB and by the final bake output. */
+float g_thickness;
+float3 g_forward_lighting_P;
+
+float4 bake_closure_to_rgba()
+{
+  float3 radiance, transmittance;
+  forward_lighting_eval(g_forward_lighting_P, g_thickness, radiance, transmittance);
+
+  /* Reset for the next closure tree, matching the regular forward path. */
+  float noise = utility_tx_fetch(utility_tx, gl_FragCoord.xy, UTIL_BLUE_NOISE_LAYER).r;
+  float closure_rand = fract(noise + sampling_rng_1D_get(SAMPLING_CLOSURE));
+  closure_weights_reset(closure_rand);
+
+  return float4(radiance, saturate(1.0f - average(transmittance)));
+}
+
+float4 closure_to_rgba(Closure cl_unused)
+{
+  UNUSED_VARS(cl_unused);
+  return bake_closure_to_rgba();
+}
 
 #ifdef NPR_SHADER
 
@@ -126,17 +148,21 @@ void main()
   g_data.Ng = g_data.N;
   fragment_displacement();
 
-  nodetree_surface(0.5f);
+  float noise = utility_tx_fetch(utility_tx, gl_FragCoord.xy, UTIL_BLUE_NOISE_LAYER).r;
+  float closure_rand = fract(noise + sampling_rng_1D_get(SAMPLING_CLOSURE));
+
+  g_forward_lighting_P = g_data.P;
+  g_thickness = nodetree_thickness() * thickness_mode;
+
+  nodetree_surface(closure_rand);
 
   float3 albedo = bake_color_resolve();
-  float alpha = saturate(1.0f - average(g_transmittance));
-  float3 emission = g_emission;
-  float3 color = any(greaterThan(abs(emission), float3(1e-6f))) ? emission : albedo;
+  float4 shaded = bake_closure_to_rgba();
 
 #ifdef NPR_SHADER
-  g_combined_color = float4(color, 1.0f);
+  g_combined_color = float4(shaded.rgb, 1.0f);
   g_diffuse_color = float4(albedo, 1.0f);
-  g_diffuse_direct = float4(albedo, 1.0f);
+  g_diffuse_direct = float4(shaded.rgb, 1.0f);
   g_diffuse_indirect = float4(0.0f, 0.0f, 0.0f, 1.0f);
   g_specular_color = float4(0.0f, 0.0f, 0.0f, 1.0f);
   g_specular_direct = float4(0.0f, 0.0f, 0.0f, 1.0f);
@@ -145,6 +171,6 @@ void main()
 
   out_color = npr_bake_swap_alpha(nodetree_npr());
 #else
-  out_color = float4(color, alpha);
+  out_color = shaded;
 #endif
 }

@@ -1529,7 +1529,8 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     }
   }
 
-  if ((pipeline_type == MAT_PIPE_FORWARD) || use_front_light_shader_in_surface_pass)
+  if (ELEM(pipeline_type, MAT_PIPE_FORWARD, MAT_PIPE_BAKE_COLOR) ||
+      use_front_light_shader_in_surface_pass)
   {
     switch (closure_bin_count) {
       case 0:
