@@ -59,6 +59,7 @@ object.bake(type='EMIT')
 - 普通 Shader/BSDF Surface 烘焙的是局部 Eevee 着色结果。没有场景灯光且 world 为黑时，普通 BSDF 输出接近黑色，这是预期行为。
 - Emission 仍直接输出自发光颜色，不依赖场景灯光。
 - 场景灯光的颜色、强度、位置、法线、粗糙度、探针等会参与局部求值。
+- bake pass 在读取材质前会渲染 world probe，使 Diffuse/BSDF 能得到 scene world 的环境光。
 - V1 不实现投影阴影 bake。bake shader 在 `MAT_BAKE_COLOR` 下跳过 shadow map attenuation，避免依赖普通相机渲染阶段准备的 shadow atlas。启用阴影不会导致 bake 失败，但不保证 shadow caster 投影结果。
 - 视角相关效果只代表 bake pass 的局部求值上下文，不等同最终相机视图。
 
@@ -88,6 +89,7 @@ object.bake(type='EMIT')
   - 校验 Eevee Color Bake 支持范围。
   - 为 bake 专用 VBO 补齐 `CD_TANGENT` 输入。
   - 为每个 `BakeImage` 创建 offscreen color target，提交 UV-space draw，readback 到 `Combined` pass。
+  - draw 前执行 bake 专用 `capture_view.render_world()`，保证 world probe 环境光可用于局部 BSDF 求值。
   - 显式启用 GPU context，并用 `DRWContext::CUSTOM` 包住 custom pipeline。
 - `source/blender/draw/engines/eevee/eevee_shader.cc`
   - 为 bake pipeline 创建专用 material shader variant。
@@ -129,6 +131,7 @@ E:\blender_bulid_test\blender_npr_bulid\test\release\cases\eevee_color_bake
 - 纯 Emission。
 - Principled Emission。
 - 普通 BSDF 无灯光接近黑色。
+- 普通 BSDF 在 scene world 环境光增强后变亮。
 - 普通 BSDF 在点光下随灯光强度变亮。
 - `Shader to RGB` 在点光下随灯光强度变亮。
 - 多材质多 image。

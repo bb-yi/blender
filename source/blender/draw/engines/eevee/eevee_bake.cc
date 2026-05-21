@@ -797,6 +797,9 @@ static bool draw_bake_groups(RenderEngine *engine,
 
   DRW_submission_start();
 
+  inst.sampling.step();
+  inst.capture_view.render_world();
+
   inst.volume_probes.set_view(view);
   inst.sphere_probes.set_view(view);
   inst.lights.set_view(view, int2(width, height));
