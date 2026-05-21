@@ -952,6 +952,7 @@ static int material_texture_reserved_slot_last(const eMaterialPipeline pipeline_
     case MAT_PIPE_DEFERRED:
       return MATERIAL_TEXTURE_RESERVED_SLOT_LAST_HYBRID;
     case MAT_PIPE_FORWARD:
+    case MAT_PIPE_BAKE_COLOR:
       return MATERIAL_TEXTURE_RESERVED_SLOT_LAST_FORWARD;
     case MAT_PIPE_PREPASS_FORWARD_VELOCITY:
     case MAT_PIPE_PREPASS_DEFERRED_VELOCITY:
@@ -1047,6 +1048,10 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
           pipeline_info_name = "eevee_surf_capture";
           info.name_ += "_capture";
           break;
+        case MAT_PIPE_BAKE_COLOR:
+          pipeline_info_name = "eevee_surf_bake_color";
+          info.name_ += "_bake_color";
+          break;
         case MAT_PIPE_DEFERRED:
           if (use_shader_to_rgba) {
             pipeline_info_name = has_depth_offset ? "eevee_surf_deferred_hybrid_depth_offset" :
@@ -1088,8 +1093,9 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
       info.name_ += "_curves";
       break;
     case MAT_GEOM_MESH:
-      geometry_info_name = "eevee_geom_mesh";
-      info.name_ += "_mesh";
+      geometry_info_name = (pipeline_type == MAT_PIPE_BAKE_COLOR) ? "eevee_geom_bake_mesh" :
+                                                                    "eevee_geom_mesh";
+      info.name_ += (pipeline_type == MAT_PIPE_BAKE_COLOR) ? "_bake_mesh" : "_mesh";
       break;
     case MAT_GEOM_POINTCLOUD:
       geometry_info_name = "eevee_geom_pointcloud";
@@ -1193,7 +1199,11 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   bool use_ao_node = false;
 
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_AO) &&
-      ELEM(pipeline_type, MAT_PIPE_FORWARD, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR) &&
+      ELEM(pipeline_type,
+           MAT_PIPE_FORWARD,
+           MAT_PIPE_DEFERRED,
+           MAT_PIPE_DEFERRED_NPR,
+           MAT_PIPE_BAKE_COLOR) &&
       geometry_type_has_surface(geometry_type))
   {
     info.define("MAT_AMBIENT_OCCLUSION");
@@ -1211,7 +1221,11 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   }
 
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_RAYCAST) &&
-      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD))
+      ELEM(pipeline_type,
+           MAT_PIPE_DEFERRED,
+           MAT_PIPE_DEFERRED_NPR,
+           MAT_PIPE_FORWARD,
+           MAT_PIPE_BAKE_COLOR))
   {
     info.additional_info("eevee_raycast");
   }
@@ -1239,16 +1253,20 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       has_depth_offset &&
       material_depth_offset_graph_uses_supported_light_access(gpumat, codegen_->depth_offset);
   const bool surface_graph_uses_glsl_light_access =
-      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD) &&
+      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD, MAT_PIPE_BAKE_COLOR) &&
       material_graph_uses_glsl_light_access(gpumat, codegen.surface);
   const bool npr_graph_uses_glsl_light_access =
-      pipeline_type == MAT_PIPE_DEFERRED_NPR &&
+      ELEM(pipeline_type, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_BAKE_COLOR) &&
       material_graph_uses_glsl_light_access(gpumat, codegen.npr);
   const bool surface_pass_uses_glsl_light_access = surface_graph_uses_glsl_light_access ||
                                                    npr_graph_uses_glsl_light_access;
   bool material_pass_uses_glsl_light_access =
       surface_pass_uses_glsl_light_access ||
-      (ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD) &&
+      (ELEM(pipeline_type,
+            MAT_PIPE_DEFERRED,
+            MAT_PIPE_DEFERRED_NPR,
+            MAT_PIPE_FORWARD,
+            MAT_PIPE_BAKE_COLOR) &&
        (material_graph_uses_glsl_light_access(gpumat, codegen.filter) ||
         material_graph_uses_glsl_light_access(gpumat, codegen.thickness) ||
         material_graph_uses_glsl_light_access(gpumat, codegen.volume)));
@@ -1270,6 +1288,9 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   slots.reserve_sampler_range(MATERIAL_TEXTURE_RESERVED_SLOT_FIRST,
                               material_texture_reserved_slot_last(pipeline_type, geometry_type));
   if (ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD)) {
+    slots.reserve_sampler(LIGHT_SHADER_TEX_SLOT);
+  }
+  else if (pipeline_type == MAT_PIPE_BAKE_COLOR) {
     slots.reserve_sampler(LIGHT_SHADER_TEX_SLOT);
   }
   else if (pipeline_type == MAT_PIPE_DEFERRED_NPR) {
@@ -1327,6 +1348,9 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   if (geometry_type == MAT_GEOM_WORLD && GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR)) {
     info.define("NPR_SHADER");
   }
+  if (pipeline_type == MAT_PIPE_BAKE_COLOR && GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR)) {
+    info.define("NPR_SHADER");
+  }
 
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_RENDER_TEXTURE) &&
       pipeline_type == MAT_PIPE_DEFERRED_NPR)
@@ -1350,14 +1374,21 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
 
   if ((GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
        GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR_FOREACH_LIGHT)) &&
-      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD))
+      ELEM(pipeline_type,
+           MAT_PIPE_DEFERRED,
+           MAT_PIPE_DEFERRED_NPR,
+           MAT_PIPE_FORWARD,
+           MAT_PIPE_BAKE_COLOR))
   {
     info.additional_info("eevee_light_data");
     info.additional_info("eevee_shadow_data");
   }
+  if (pipeline_type == MAT_PIPE_BAKE_COLOR) {
+    info.define("LIGHT_ITER_FORCE_NO_CULLING");
+  }
   if (uses_glsl_light_access) {
     info.define("MAT_GLSL_LIGHT_ACCESS");
-    if (depth_offset_uses_light_access) {
+    if (depth_offset_uses_light_access && pipeline_type != MAT_PIPE_BAKE_COLOR) {
       info.define("LIGHT_ITER_FORCE_NO_CULLING");
     }
     info.additional_info("eevee_light_data");
@@ -1374,19 +1405,23 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   if ((GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
        GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR_FOREACH_LIGHT) ||
        GPU_material_flag_get(gpumat, GPU_MATFLAG_LIGHTPROBE_ACCESS)) &&
-      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD))
+      ELEM(pipeline_type,
+           MAT_PIPE_DEFERRED,
+           MAT_PIPE_DEFERRED_NPR,
+           MAT_PIPE_FORWARD,
+           MAT_PIPE_BAKE_COLOR))
   {
     info.additional_info("eevee_lightprobe_data");
   }
 
   if ((GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
        GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR_FOREACH_LIGHT)) &&
-      pipeline_type == MAT_PIPE_DEFERRED_NPR)
+      ELEM(pipeline_type, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_BAKE_COLOR))
   {
     info.define("MAT_NPR_LIGHTING");
   }
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) &&
-      pipeline_type == MAT_PIPE_DEFERRED_NPR)
+      ELEM(pipeline_type, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_BAKE_COLOR))
   {
     info.define("MAT_NPR_SHADER_INFO");
   }
@@ -1734,7 +1769,11 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     const bool pipeline_uses_light_eval =
         (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
          GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR_FOREACH_LIGHT)) &&
-        ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD);
+        ELEM(pipeline_type,
+             MAT_PIPE_DEFERRED,
+             MAT_PIPE_DEFERRED_NPR,
+             MAT_PIPE_FORWARD,
+             MAT_PIPE_BAKE_COLOR);
     if (pipeline_uses_light_eval || material_pass_uses_glsl_light_access) {
       dependencies_set.add("eevee_light_eval_lib.glsl");
       dependencies_set.add("eevee_light_iter_lib.glsl");
@@ -1751,7 +1790,11 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     if ((GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
          GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR_FOREACH_LIGHT) ||
          GPU_material_flag_get(gpumat, GPU_MATFLAG_LIGHTPROBE_ACCESS)) &&
-        ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD))
+        ELEM(pipeline_type,
+             MAT_PIPE_DEFERRED,
+             MAT_PIPE_DEFERRED_NPR,
+             MAT_PIPE_FORWARD,
+             MAT_PIPE_BAKE_COLOR))
     {
       dependencies_set.add("eevee_lightprobe_eval_lib.glsl");
     }
@@ -2150,7 +2193,9 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
   const bool has_depth_offset_output = material_output_has_depth_offset(nodetree) &&
                                        material_pipeline_supports_depth_offset(pipeline_type,
                                                                                geometry_type);
-  const bool compile_npr_graph = (pipeline_type == MAT_PIPE_DEFERRED_NPR);
+  const bool compile_npr_graph = (pipeline_type == MAT_PIPE_DEFERRED_NPR) ||
+                                 (pipeline_type == MAT_PIPE_BAKE_COLOR &&
+                                  npr_tree_get(nodetree) != nullptr);
   const bool needs_npr_vertex_displacement = compile_npr_graph &&
                                              (displacement_type != MAT_DISPLACEMENT_BUMP);
   const bool needs_npr_depth_offset = compile_npr_graph && has_depth_offset_output;
@@ -2447,6 +2492,21 @@ void ShaderModule::material_create_info_pipelines_amend(eMaterialGeometry geomet
           .viewports(1)
           .depth_format(gpu::TextureTargetFormat::SFLOAT_32_DEPTH_UINT_8)
           .stencil_format(gpu::TextureTargetFormat::SFLOAT_32_DEPTH_UINT_8)
+          .color_format(gpu::TextureTargetFormat::SFLOAT_16_16_16_16);
+      break;
+    }
+
+    case MAT_PIPE_BAKE_COLOR: {
+      r_info.pipeline_state()
+          .primitive(prim_type)
+          .state(GPU_WRITE_COLOR,
+                 GPU_BLEND_NONE,
+                 GPU_CULL_NONE,
+                 GPU_DEPTH_NONE,
+                 GPU_STENCIL_NONE,
+                 GPU_STENCIL_OP_NONE,
+                 GPU_VERTEX_LAST)
+          .viewports(1)
           .color_format(gpu::TextureTargetFormat::SFLOAT_16_16_16_16);
       break;
     }

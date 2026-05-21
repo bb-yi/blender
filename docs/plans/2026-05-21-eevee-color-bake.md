@@ -1,285 +1,175 @@
-# Eevee Color Bake 实现计划
+# Eevee Color Bake GPU/DRW 实现说明
 
-**目标：** 在 Eevee 中补齐现有 Blender Bake 工作流的本地材质颜色烘焙能力。V1 只做 Eevee-only `EMIT` / Color Bake，不追求 Cycles 全 bake 类型一一对应。
+**状态：** 已在 `feat/eevee-color-bake` 上落地 GPU/DRW UV-space 单路径实现。旧的 CPU 节点白名单求值器不再保留，也不作为 fallback。
 
-**架构：** 复用 Blender 通用 Bake API 负责目标图像发现、UV 像素覆盖、有效像素 mask、margin 扩展和最终图像输出；新增 Eevee bake 回调，在 UV 空间把 mesh 三角形 rasterize 到目标图，同时执行真实 Eevee 材质 GPU 路径，允许受支持的本地 NPR 颜色逻辑和 Eevee light/shadow/lightprobe 资源参与。
+**目标：** 补齐 Eevee 下的 `object.bake(type='EMIT')` 工作流，把它作为 Eevee-only Color Bake 使用。它烘焙的是材质图在 UV 空间可本地求出的颜色，不是 Cycles 完整 bake pass 矩阵，也不是最终相机可见色。
 
-**技术栈：** C++、Blender `RenderEngineType.bake`、Draw Manager custom pipeline、Eevee material pipeline、GLSL create-info、Python UI、release-case 后台验证。
+**公开入口：** 继续使用现有 Python API 和通用 Bake API：
 
----
+```python
+bpy.ops.object.bake(type="EMIT")
+```
 
-## Summary
+## 实现路线
 
-- V1 实现为 Eevee `EMIT` / Color Bake pass，而不是 Cycles bake 的完整复制。
-- 公开入口继续使用现有 operator：`bpy.ops.object.bake(type='EMIT')`。
-- Eevee 注册 `RenderEngineType.bake` 回调；非 V1 支持的 bake type 必须明确报错。
-- 烘焙方式是 UV 空间 rasterization，不做 CPU Base Color 假烘焙，也不读取相机最终画面。
-- 继续使用通用 Bake API 的 image target、多 image、UV island、margin 和输出逻辑，降低对现有系统的侵入。
+Eevee Color Bake 只有一条实现链路：
 
-## Actual V1 Landing
+```text
+object.bake(type='EMIT')
+  -> 通用 Bake API 生成 BakePixel / BakePrimitive / BakeDifferential / BakeImage
+  -> Eevee RenderEngineType.bake 回调
+  -> GPU context + DRW custom pipeline
+  -> UV-space mesh raster pass
+  -> Eevee GPUMaterial / NPR 本地颜色求值
+  -> GPU readback 到 RenderResult Combined pass
+  -> 通用 Bake API 处理 margin 与 image 写回
+```
 
-本轮落地的是保守、可后台验证的 Eevee-only `EMIT` / Color Bake V1：
+关键点：
 
-- 复用通用 Bake API 的 `BakePixel`、image target、multi image、UV island、margin 和写回路径。
-- Eevee 增加 `RenderEngineType.bake` 回调，并把结果写入 bake `Combined` pass。
-- 材质求值先走 CPU 本地 evaluator，覆盖 Emission、Principled Emission、RGB、Value、Mix、Math、Reroute、本地 NPR Output Color，以及 `Shader Info` 的基础灯光输出。
-- 该 V1 不走 Draw Manager / GPU material bake pipeline，不编译 arbitrary material shader，也不执行 `GLSL Function` 代码。
-- 对 GPU/屏幕依赖或当前无法真实求值的节点明确失败，避免用户拿到默认材质、黑图或半写入图像。
-
-后续如果要做到原始设计中的 GPU/DRW UV-space material bake，需要另起第二阶段，在本 V1 的错误门禁和 release case 基础上继续替换 evaluator，而不是扩大 CPU evaluator 的节点覆盖面。
+- 通用 Bake API 仍负责 image texture target、有效像素、UV island、margin 和最终图片写回。
+- Eevee bake 回调只负责校验、建立 GPU/DRW 绘制环境、提交 UV 空间 draw、读回颜色。
+- 材质不在 CPU 上解释节点。纹理、程序节点、Node Group、GLSL Function、Shader Info 和本地 NPR Tree 都走现有 Eevee GPUMaterial 编译路径。
+- bake shader 输出 scene-linear RGBA 到 `Combined` bake pass，色彩空间转换继续交给现有 image/bake 写回层。
 
 ## 支持范围
 
-- Render engine：只支持 `BLENDER_EEVEE`。
-- Bake type：只支持 `SCE_PASS_EMIT`，在 Eevee 中解释为 Color Bake。
-- Target：只支持 `scene.render.bake` 的 image texture target，遵循现有 active image per material 规则。
-- Geometry：只支持 mesh object 自身烘焙。
-- 材质：
-  - 普通 Eevee surface material。
-  - Emission / 本地材质颜色输出。
-  - RGB、Value、Mix、Math、Reroute 这类可确定求值的本地节点子集。
-  - `Shader Info` 的 Diffuse Shading、Shadow、Ambient Lighting、Half-Lambert Factor、Blinn-Phong Factor 基础 CPU 近似。
-  - 不依赖屏幕/GBuffer 输入的本地 NPR Tree 颜色处理。
-- 输出：
-  - 通过现有 `Combined` bake result 输出 scene-linear RGBA float。
-  - 支持多材质、多目标 image。
-  - 支持现有有效像素 mask 和 margin 扩展。
+- Render engine：`BLENDER_EEVEE`。
+- Bake type：只接受 `SCE_PASS_EMIT`，在 Eevee 中解释为 Color Bake。
+- Target：`scene.render.bake.target == IMAGE_TEXTURES`。
+- Geometry：mesh object 自身 bake。
+- 图像：沿用现有 active image texture target 规则，支持多材质、多 image、UV island 和 margin；UDIM/tile 目标由通用 Bake API 的 `BakeImage` 分发机制承接。
+- 普通材质颜色：
+  - Emission。
+  - Principled Base Color 与 Emission。
+  - Image Texture。
+  - Checker、Noise、Voronoi 等可由 Eevee GPUMaterial 编译的本地程序纹理。
+  - UV Map、Texture Coordinate、Mapping、ColorRamp、Math、Mix、Reroute。
+  - Node Group。
+  - GLSL Function，包括不依赖屏幕输入的本地颜色逻辑。
+- Eevee/NPR 本地颜色：
+  - 本地 NPR Tree `nodetree_npr()` 颜色输出。
+  - Shader Info 本地光照相关输出。
+  - GLSL Function light helper 和 NPR foreach light 所需的 Eevee light/shadow/lightprobe 资源。
 
 ## 不支持范围
 
-- 所有非 `EMIT` bake type，包括 `COMBINED`、Diffuse、Glossy、Transmission、AO、Normal、Position、Roughness、UV 和 pass filters。
-- Selected-to-active、cage、multires、高低模 ray projection，以及 Cycles 风格真实 ray bake 语义。
-- 非 image target、vertex color target、volume、curve、point cloud、world、Filter-domain material。
-- `NPR Input` 屏幕/GBuffer 读取、`NPR Refraction`、Input AOV、Screen Space Info、Scene Color、Render Texture feedback、back-buffer 读取和最终视图后处理。
-- `GLSL Function` 任意 GPU 代码和 light helper。本 V1 会明确报错，不做 CPU 伪执行。
-- Image Texture、UV Map、Attribute、Normal Map、Bump、Noise 等依赖 GPU 材质或纹理采样的普通材质节点。本 V1 不把这些节点静默降级为默认颜色。
-- 透明排序一致性、最终相机可见色匹配。
-- Camera / Window / Screen 坐标在 V1 bake 中不保证有有意义的结果。
+这些场景必须在写出错误图片前失败，并给出明确错误：
 
-遇到不支持场景必须在输出图像前明确失败。黑图、半成品图或默认材质 fallback 都不算可接受结果。
+- 非 `EMIT` bake type：`COMBINED`、Diffuse、Glossy、Transmission、AO、Normal、Position、Roughness、UV 以及 Cycles pass filter 矩阵。
+- Selected-to-active、高低模 ray projection、cage、multires 和 Cycles 风格真实 ray bake 语义。
+- 非 image texture target、vertex color target、volume、curve、point cloud、world bake。
+- 依赖屏幕或历史帧的节点和路径：
+  - `NPR Input` 的 GBuffer/screen 读取。
+  - `Scene Color`。
+  - `Screen Space Info`。
+  - `Render Texture` feedback。
+  - `NPR Refraction` / back-buffer。
+  - Input AOV / Output AOV。
+  - Filter-domain output。
+- 后处理、视图合成、最终可见色、透明排序与屏幕层合成一致性。
+- Camera / Window / Screen 坐标语义只在材质本地求值范围内可用，不保证等同最终视图。
 
-## 外部实现参考
+## 主要修改文件
 
-实时渲染器常见的材质烘焙模型是：
+源码仓库：`blender_5_1_port_mainfix`
 
-- 把 UV 展开的三角形绘制到 render target。
-- 对每个 fragment 执行真实材质 shader。
-- 把 render target 读回目标贴图。
+- `source/blender/draw/engines/eevee/eevee_bake.cc`
+  - 重写为 GPU/DRW bake 调度器。
+  - 删除 CPU `BakeEvalContext`、节点递归、灯光 CPU 估算和常量材质缓存。
+  - 校验 Eevee Color Bake 支持范围。
+  - 为每个 `BakeImage` 创建 offscreen color target，提交 UV-space draw，readback 到 `Combined` pass。
+  - 显式启用 GPU context，并用 `DRWContext::CUSTOM` 包住 custom pipeline。
 
-Unity RenderTexture material blit、Unreal glTF exporter 的 material baking、Substance mesh-map baking 都符合这个方向。Blender Eevee 这里不能简单画 fullscreen quad，因为材质求值还需要原始 mesh position、normal、UV、attribute 以及 Eevee light/shadow/lightprobe 资源。
+- `source/blender/draw/engines/eevee/eevee_material_shared.hh`
+  - 新增 `MAT_PIPE_BAKE_COLOR`。
 
-## 实现任务
+- `source/blender/draw/engines/eevee/eevee_shader.cc`
+  - 为 bake pipeline 创建专用 material shader variant。
+  - bake pipeline 复用 surface graph，并在 NPR 材质中接入本地 `nodetree_npr()`。
+  - bake pipeline 绑定 Shader Info、GLSL light helper、NPR foreach light 所需资源。
+  - 固定定义 `LIGHT_ITER_FORCE_NO_CULLING`，避免 UV-space bake 缺少普通视图 culling 数据导致 light iteration 为空。
 
-### Task 1: 增加 Eevee Bake 入口
+- `source/blender/draw/engines/eevee/shaders/eevee_geom_bake_mesh_vert.glsl`
+  - 使用 bake UV 生成 clip-space position。
+  - 保留原始 mesh position、normal、UV 和 attribute 供材质节点使用。
 
-**文件：**
-- 修改：`source/blender/draw/engines/eevee/eevee_engine.cc`
-- 新增：`source/blender/draw/engines/eevee/eevee_bake.hh`
-- 新增：`source/blender/draw/engines/eevee/eevee_bake.cc`
-- 修改：`source/blender/draw/CMakeLists.txt`
+- `source/blender/draw/engines/eevee/shaders/eevee_surf_bake_color_frag.glsl`
+  - 普通材质输出本地 surface color/emission。
+  - NPR 材质输出本地 `nodetree_npr()` 结果。
+  - 不读取 deferred combine、radiance、hiz、prepass、back-buffer 或后处理输入。
+  - `init_globals()` 后恢复 mesh 插值法线，避免 UV 空间 winding 影响 local light helper。
 
-**要求：**
-- 在 Eevee `RenderEngineType` 中注册 `eevee_bake`。
-- 只接受 `SCE_PASS_EMIT`。
-- 对当前 `BakeImage` 尺寸和 layer name 调用 `RE_engine_begin_result()`。
-- 把 Eevee bake 结果写入 `Combined` pass。
-- 用 `RE_engine_end_result()` 结束，让 `render_result_to_bake()` 把像素复制到 `BakeTargets.result`。
-- 不支持输入使用 `RE_engine_set_error_message()` 和 report 明确失败。
+- `source/blender/draw/engines/eevee/shaders/infos/eevee_surf_bake_infos.hh`
+  - 注册 bake color surface create-info。
 
-**注意：**
-- 通用 Bake API 已经创建 `BakePrimitive` 和 `BakeDifferential` pass，不要重写 target image 和 margin 系统。
-- bake 回调会按 `BakeImage` 调用；使用 `engine->bake.image_id` 和 `engine->bake.targets->images[image_id]`。
-- bake 回调不能调用普通相机 `render_frame()` 路径。
+- `source/blender/draw/engines/eevee/shaders/infos/eevee_geom_infos.hh`
+- `source/blender/draw/engines/eevee/shaders/infos/eevee_material_infos.hh`
+- `source/blender/draw/engines/eevee/shaders/CMakeLists.txt`
+- `source/blender/draw/CMakeLists.txt`
+  - 注册 bake geometry/material shader 和 datatoc。
 
-### Task 2: 增加 Eevee 材质 Bake Pipeline
+- `source/blender/draw/engines/eevee/eevee_nodetree_lib.glsl`
+- `source/blender/gpu/shaders/material/gpu_shader_material_principled.glsl`
+- `source/blender/gpu/shaders/material/gpu_shader_material_shader_info.glsl`
+  - 补齐 bake shader 需要的本地颜色、NPR 和 Shader Info/light helper 输出。
 
-**文件：**
-- 修改：`source/blender/draw/engines/eevee/eevee_material_shared.hh`
-- 修改：`source/blender/draw/engines/eevee/eevee_material.hh`
-- 修改：`source/blender/draw/engines/eevee/eevee_material.cc`
-- 修改：`source/blender/draw/engines/eevee/eevee_shader.cc`
-- 修改：`source/blender/draw/engines/eevee/eevee_shader.hh`
-- 修改：`source/blender/draw/engines/eevee/eevee_pipeline.hh`
-- 修改：`source/blender/draw/engines/eevee/eevee_pipeline.cc`
+## 实现注意事项
 
-**要求：**
-- 新增普通本地颜色输出的 bake material pipeline。
-- 新增本地 `nodetree_npr()` 输出的 bake NPR material pipeline。
-- bake pipeline 必须同步编译，或等待 queued shader 编译完成后再继续。
-- bake 期间不能使用 default/error material 作为临时 fallback，否则会静默输出错误贴图。
-- 按材质需求绑定 Eevee 资源：
-  - material shader 必需的 global UBO 和 utility texture。
-  - `Shader Info` 和 GLSL light helper 需要的 `eevee_light_data`。
-  - shadow-aware helper 需要的 `eevee_shadow_data`。
-  - Shader Info / ambient helper 需要的 `eevee_lightprobe_data`。
+- bake 回调不是普通 Eevee render path。它不能依赖 camera render 的 GBuffer、film、postprocess 或 final combine。
+- bake draw 必须绑定 `inst.lights.bind_resources(sub)`，不能直接绑定 raw `light_buf_`。raw light buffer 的顺序与 light iteration 期望的 culled light buffer 顺序不同，会导致 Shader Info/light helper 结果错误。
+- Shader 编译和纹理准备必须完成后再读回结果。不能用 default/error material 当作临时 fallback。
+- `.glsl`、shader create-info 或相关 `.hh` 改动后，若安装树结果没有变化，优先检查 stale datatoc / unity object，必要时执行 mainfix `clean-unity install`。
 
-**注意：**
-- 复用现有材质资源和 sampler reserved-slot 规则，不新增临时 sampler slot。
-- 扩展 `material_texture_reserved_slot_last()` 和 create-info amend 逻辑以覆盖 bake pipeline。
-- shader UUID packing 必须包含新 pipeline，不能和现有 pipeline alias。
-- Filter-domain material 应直接报不支持，不能返回空 pass 或默认 pass。
+## Release 测试
 
-### Task 3: 在 UV 空间绘制 Mesh 三角形
+外层 release case：
 
-**文件：**
-- 新增：`source/blender/draw/engines/eevee/shaders/eevee_geom_mesh_bake_vert.glsl`
-- 新增：`source/blender/draw/engines/eevee/shaders/eevee_surf_bake_frag.glsl`
-- 新增：`source/blender/draw/engines/eevee/shaders/eevee_surf_bake_npr_frag.glsl`
-- 新增：`source/blender/draw/engines/eevee/shaders/infos/eevee_surf_bake_infos.hh`
-- 修改：`source/blender/draw/engines/eevee/shaders/infos/eevee_material_infos.hh`
-- 修改：`source/blender/draw/engines/eevee/shaders/CMakeLists.txt`
-- 修改：`source/blender/draw/CMakeLists.txt`
-
-**要求：**
-- vertex shader 使用 bake UV 写 clip-space position。
-- 材质求值仍使用原始 mesh surface 数据：
-  - object/world position
-  - normal 和 true normal
-  - UV 和 custom attributes
-  - 可用时的 tangent data
-- fragment shader 输出 scene-linear RGBA 到 offscreen color target，再拷贝进 bake `Combined` pass。
-- 每次只绘制 material slot 映射到当前 `BakeImage` 的三角形。
-
-**注意：**
-- 不能把 edit-UV batch 当作最终方案。它把 active UV alias 成 `pos`，但不足以保留 world-space 节点和法线相关节点需要的原始 surface context。
-- 优先做专用 bake vertex input 或轻量 bake batch，同时保留 UV position 和原始 surface attributes。
-- 继续依赖 rasterization derivatives，使 texture filtering、bump、normal map 更接近 Eevee 材质渲染。
-
-### Task 4: 接入 DRW Custom Pipeline
-
-**文件：**
-- 修改：`source/blender/draw/engines/eevee/eevee_bake.cc`
-- 修改：`source/blender/draw/engines/eevee/eevee_instance.hh`
-- 修改：`source/blender/draw/engines/eevee/eevee_instance.cc`
-
-**要求：**
-- 后台 bake 必须进入有效 GPU / Draw Manager context。
-- 参考 light bake 模式：`DRWContext::CUSTOM`、`DRW_custom_pipeline_begin()`、sync/render、`DRW_custom_pipeline_end()`。
-- 绘制前同步 scene lights、shadows、light probes、材质资源和目标物体。
-- 等待 queued material shader / texture 编译完成后重新 sync，再执行 bake draw。
-
-**注意：**
-- `RE_bake_engine()` 会直接调用 engine bake 回调，不会自动包完整 `DRW_render_to_image()` final-render 路径。
-- 普通 Eevee camera render path 依赖 camera frame、film、GBuffer、post-processing，不适合作为 bake 路径。
-- 建议新增独立 material-bake mode，不要把所有逻辑硬塞进 `is_light_bake`，除非实现时能证明不会造成语义混乱。
-
-### Task 5: 增加验证和错误门禁
-
-**文件：**
-- 修改：`source/blender/editors/object/object_bake_api.cc`
-- 修改：`source/blender/gpu/GPU_material.hh`
-- 修改：`source/blender/nodes/shader/nodes/node_shader_npr_input.cc`
-- 可能修改：`source/blender/nodes/shader/nodes/node_shader_npr_refraction.cc`
-- 可能修改：`source/blender/nodes/shader/nodes/node_shader_input_aov.cc`
-
-**要求：**
-- Eevee bake 在 engine 执行前拒绝不支持的 bake type。
-- 拒绝 selected-to-active、cage、multires、vertex-color target、非 mesh object、Filter-domain material。
-- 拒绝使用屏幕依赖节点的材质：
-  - `NPR Input`
-  - `NPR Refraction`
-  - Input AOV
-  - Screen Space Info
-  - Scene Color / Render Texture feedback
-- 错误信息要指出具体不支持功能。
-
-**注意：**
-- `NPR Refraction`、AOV、Screen Space Info 已经有 material flag。`NPR Input` 需要新增 material flag，或在 bake 前扫描 node tree。
-- 验证必须足够早，避免用户拿到 stale 或半写入图像。
-
-### Task 6: 增加最小 Eevee Bake UI
-
-**文件：**
-- 修改：`scripts/startup/bl_ui/properties_render.py`
-- 避免修改 Cycles addon UI，除非只是复用共享 helper。
-
-**要求：**
-- 当 engine 为 `BLENDER_EEVEE` 时，在 Render Properties 显示一个小型 Eevee Bake panel。
-- Bake 按钮调用 `object.bake(type='EMIT')`。
-- 只显示 image texture target 和 margin 所需的现有 bake output 控件。
-- 不暴露 Cycles 完整 bake type 矩阵。
-
-**注意：**
-- Python 用户仍然可以手动调用其他 `bpy.ops.object.bake(type=...)`；这些类型必须被验证层或 Eevee bake 回调拒绝。
-
-### Task 7: 增加 Release Test Case
-
-**文件：**
-- 新增：`test/release/cases/eevee_color_bake/case.json`
-- 新增：`test/release/cases/eevee_color_bake/README.md`
-- 新增：`test/release/cases/eevee_color_bake/run.py`
-
-**要求：**
-- 测试放在外层 workspace release-test 系统中，不作为临时文件塞进源码仓库。
-- 使用安装树 Blender 后台运行。
-- 创建 UV plane，烘焙纯 emission 材质，断言中心像素颜色。
-- 两个 material slot 分别烘焙到两个 image，断言每个 image 收到正确颜色。
-- `Shader Info` 或 `GLSL Function` light helper 材质：改变灯光颜色/强度后，断言 bake 像素变化。
-- 本地 NPR color 材质：断言阈值/混合输出符合预期。
-- 负向测试：unsupported bake type 和 screen-dependent NPR input 必须产生明确错误。
-
-**注意：**
-- `case.json` 和 README 必须描述真实语义通过条件，不能只写“脚本返回 0”。
-- 输出图像和日志放到 release case 的 out/log 路径，不放源码根目录。
-
-## Commit Plan
-
-按以下顺序拆提交：
-
-```powershell
-git -C blender_5_1_port_mainfix commit -m "docs: plan eevee color bake"
-git -C blender_5_1_port_mainfix commit -m "feat: add eevee color bake callback"
-git -C blender_5_1_port_mainfix commit -m "feat: add eevee uv-space bake pipeline"
-git -C blender_5_1_port_mainfix commit -m "feat: support eevee local npr color bake"
-git -C blender_5_1_port_mainfix commit -m "test: cover eevee color bake"
-git -C blender_5_1_port_mainfix commit -m "ui: expose eevee color bake panel"
+```text
+E:\blender_bulid_test\blender_npr_bulid\test\release\cases\eevee_color_bake
 ```
 
-第一条提交只包含本文档。源码实现从后续提交开始。
+覆盖的正向场景：
 
-## Verification
+- 纯 Emission。
+- Principled Base Color / Emission。
+- 多材质多 image。
+- Image Texture。
+- Checker + UV Map + Mapping + ColorRamp。
+- Node Group。
+- GLSL Function 本地颜色。
+- 本地 NPR Tree 颜色。
+- Shader Info 灯光响应，灯光强度提高后 bake 像素变亮。
 
-从外层 workspace 根目录构建：
+覆盖的负向场景：
 
-```powershell
-.\build_ninja_sccache_poll.bat mainfix install --no-pause
-```
+- 非 `EMIT` bake type。
+- `NPR Input`。
+- `Scene Color`。
+- `Screen Space Info`。
+- `Render Texture`。
+- `NPR Refraction`。
+- Input AOV / Output AOV。
+- Filter-domain output。
 
-使用 mainfix 安装树验证：
+专项验证命令：
 
 ```powershell
 E:\blender_bulid_test\blender_npr_bulid\install_windows_x64_vc17_Release_5_1_port_mainfix\blender.exe --background --factory-startup --python test\release\cases\eevee_color_bake\run.py
 ```
 
-shader/header 改动后，在信任失败或成功前必须检查：
+完整 release 测试：
 
-- 没有残留 `cmake.exe` 或 `ninja.exe` 进程。
-- 安装树 `blender.exe --version` 对应当前分支。
-- 如果改了 `.glsl`、`.hh` 或 shader create-info，检查 generated shader source 和相关 `bf_draw` / `bf_gpu` object 时间戳。
-- 如果输出黑、透明或崩在无关 Eevee 代码，优先怀疑 stale draw/GPU object，再判断逻辑设计。
+```powershell
+.\run_release_tests.bat --no-pause
+```
 
-## 风险和规避
+## 验收标准
 
-- **UV batch 风险：** edit-UV batch 能把 UV 当 `pos`，但不足以做真实材质求值。使用专用 bake geometry path 保留原始 surface 数据。
-- **GPU context 风险：** bake callback 是直接调用，不是 final-render 包装。Eevee bake 路径内部必须建立 DRW custom pipeline。
-- **Shader 编译风险：** deferred compilation fallback 会静默烘焙错误颜色。必须等待编译完成并重新 sync。
-- **Sampler slot 风险：** `Shader Info` 和 GLSL light helper 依赖 Eevee 固定资源槽。扩展现有 reserved-slot 逻辑，不做局部临时绑定。
-- **Screen-data 风险：** V1 无法重建 NPR screen/GBuffer 输入。必须明确拒绝。
-- **构建陈旧风险：** 当前 workspace 已知存在 stale object 和 datatoc 问题。信任 runtime 前检查 install-tree hash 和 object 时间戳。
-
-## Acceptance Criteria
-
-- Eevee 下 `bpy.ops.object.bake(type='EMIT')` 能为简单 emission 材质写出正确图像。
-- 多材质、多 image bake 分别写入正确目标图。
-- 支持的 light-dependent 材质在改变灯光后 bake 结果随之变化。
-- 支持的本地 NPR color 材质能烘焙 NPR color 结果。
-- 不支持的 pass type 和 screen-dependent 材质给出明确错误。
-- 现有 Cycles bake 行为不变。
-- release case 使用 mainfix 安装树通过。
-
-## Assumptions
-
-- 基线分支是 `blender_5_1_port_mainfix` 中的 `npr-port-5.1`。
-- V1 是本地 Eevee/NPR color bake，不是最终可见色 bake。
-- V1 不新增 DNA/RNA bake 设置。
-- 完整 Cycles bake parity 需要在 V1 之后另起设计。
+- Eevee 下 `bpy.ops.object.bake(type='EMIT')` 能把本地材质颜色写入目标 image texture。
+- 普通纹理、程序节点、UV/Mapping、Node Group 和 GLSL Function 不再被 CPU 白名单限制。
+- 本地 NPR Tree 颜色能覆盖 surface color 并被烘焙。
+- Shader Info/light helper 能读取 Eevee light 资源，灯光变化会反映到 bake 结果。
+- 不支持的屏幕空间、AOV、Filter-domain、refraction 和非 Emit 场景明确失败。
+- 现有 Cycles bake 行为不改变。
+- mainfix 安装树专项 release case 通过，完整 release 测试通过。

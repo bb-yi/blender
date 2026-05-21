@@ -94,6 +94,10 @@ void node_bsdf_principled(float4 base_color,
   float3 V = coordinate_incoming(g_data.P);
   float NV = dot(N, V);
 
+#ifdef MAT_BAKE_COLOR
+  const float bake_color_weight = weight;
+#endif
+
   /* Transparency component. */
   if (true) {
     ClosureTransparency transparency_data;
@@ -104,6 +108,10 @@ void node_bsdf_principled(float4 base_color,
 
     weight *= alpha;
   }
+
+#ifdef MAT_BAKE_COLOR
+  bake_color_principled_begin(base_color.rgb, bake_color_weight);
+#endif
 
   /* First layer: Sheen */
   float3 sheen_data_color = float3(0.0f);
@@ -263,6 +271,10 @@ void node_bsdf_principled(float4 base_color,
     diffuse_data.weight = 1.0f;
     closure_eval(diffuse_data);
   }
+#endif
+
+#ifdef MAT_BAKE_COLOR
+  bake_color_principled_end();
 #endif
 
   result = Closure(0);

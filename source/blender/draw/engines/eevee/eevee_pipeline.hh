@@ -1074,6 +1074,9 @@ class PipelineModule {
       case MAT_PIPE_FILTER:
         BLI_assert_msg(0, "Filter shaders are evaluated by the filter material module.");
         return nullptr;
+      case MAT_PIPE_BAKE_COLOR:
+        BLI_assert_msg(0, "Bake shaders are evaluated by the Eevee bake callback.");
+        return nullptr;
 
       case MAT_PIPE_VOLUME_OCCUPANCY:
       case MAT_PIPE_VOLUME_MATERIAL:

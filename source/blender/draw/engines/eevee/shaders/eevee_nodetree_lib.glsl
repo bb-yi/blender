@@ -62,9 +62,50 @@ void npr_refraction_impl(out TextureHandle combined_color, out TextureHandle pos
   cl.N = in_cl.N; \
   cl.type = closure_type_get(in_cl);
 
+#ifdef MAT_BAKE_COLOR
+packed_float3 g_bake_color;
+float g_bake_color_weight;
+int g_bake_principled_depth;
+
+void bake_color_accumulate(float3 color, float weight)
+{
+  if (weight <= CLOSURE_WEIGHT_CUTOFF) {
+    return;
+  }
+  g_bake_color += max(color, float3(0.0f)) * weight;
+  g_bake_color_weight += weight;
+}
+
+void bake_color_principled_begin(float3 base_color, float weight)
+{
+  bake_color_accumulate(base_color, weight);
+  g_bake_principled_depth += 1;
+}
+
+void bake_color_principled_end()
+{
+  g_bake_principled_depth = max(g_bake_principled_depth - 1, 0);
+}
+
+bool bake_color_use_closure_accumulator()
+{
+  return g_bake_principled_depth == 0;
+}
+
+float3 bake_color_resolve()
+{
+  return g_bake_color;
+}
+#endif
+
 /* Single BSDFs. */
 Closure closure_eval(ClosureDiffuse diffuse)
 {
+#ifdef MAT_BAKE_COLOR
+  if (bake_color_use_closure_accumulator()) {
+    bake_color_accumulate(diffuse.color, diffuse.weight);
+  }
+#endif
   ClosureUndetermined cl;
   closure_base_copy(cl, diffuse);
 #if (CLOSURE_BIN_COUNT > 1) && defined(MAT_TRANSLUCENT) && !defined(MAT_CLEARCOAT)
@@ -79,6 +120,11 @@ Closure closure_eval(ClosureDiffuse diffuse)
 
 Closure closure_eval(ClosureSubsurface diffuse)
 {
+#ifdef MAT_BAKE_COLOR
+  if (bake_color_use_closure_accumulator()) {
+    bake_color_accumulate(diffuse.color, diffuse.weight);
+  }
+#endif
   ClosureUndetermined cl;
   closure_base_copy(cl, diffuse);
   cl.data.rgb = diffuse.sss_radius;
@@ -89,6 +135,11 @@ Closure closure_eval(ClosureSubsurface diffuse)
 
 Closure closure_eval(ClosureTranslucent translucent)
 {
+#ifdef MAT_BAKE_COLOR
+  if (bake_color_use_closure_accumulator()) {
+    bake_color_accumulate(translucent.color, translucent.weight);
+  }
+#endif
   ClosureUndetermined cl;
   closure_base_copy(cl, translucent);
   /* Transmission Closures are always in first bin. */
@@ -115,6 +166,11 @@ bool g_closure_reflection_bin = true;
 
 Closure closure_eval(ClosureReflection reflection)
 {
+#ifdef MAT_BAKE_COLOR
+  if (bake_color_use_closure_accumulator()) {
+    bake_color_accumulate(reflection.color, reflection.weight);
+  }
+#endif
   ClosureUndetermined cl;
   closure_base_copy(cl, reflection);
   cl.data.r = reflection.roughness;
@@ -149,6 +205,11 @@ Closure closure_eval(ClosureReflection reflection)
 
 Closure closure_eval(ClosureRefraction refraction)
 {
+#ifdef MAT_BAKE_COLOR
+  if (bake_color_use_closure_accumulator()) {
+    bake_color_accumulate(refraction.color, refraction.weight);
+  }
+#endif
   ClosureUndetermined cl;
   closure_base_copy(cl, refraction);
   cl.data.r = refraction.roughness;

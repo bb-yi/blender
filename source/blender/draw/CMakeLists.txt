@@ -360,6 +360,7 @@ set(GLSL_SRC
   engines/eevee/shaders/infos/eevee_shadow_filter_infos.hh
   engines/eevee/shaders/infos/eevee_shadow_pipeline_infos.hh
   engines/eevee/shaders/infos/eevee_subsurface_infos.hh
+  engines/eevee/shaders/infos/eevee_surf_bake_infos.hh
   engines/eevee/shaders/infos/eevee_surf_capture_infos.hh
   engines/eevee/shaders/infos/eevee_surf_deferred_infos.hh
   engines/eevee/shaders/infos/eevee_surf_depth_infos.hh
@@ -469,6 +470,7 @@ set(GLSL_SRC
   engines/eevee/shaders/eevee_gbuffer_lib.glsl
   engines/eevee/shaders/eevee_gbuffer_read_lib.glsl
   engines/eevee/shaders/eevee_gbuffer_write_lib.glsl
+  engines/eevee/shaders/eevee_geom_bake_mesh_vert.glsl
   engines/eevee/shaders/eevee_geom_curves_vert.glsl
   engines/eevee/shaders/eevee_geom_mesh_vert.glsl
   engines/eevee/shaders/eevee_geom_pointcloud_vert.glsl
@@ -588,6 +590,7 @@ set(GLSL_SRC
   engines/eevee/shaders/eevee_subsurface_lib.glsl
   engines/eevee/shaders/eevee_subsurface_setup_comp.glsl
   engines/eevee/shaders/eevee_surf_capture_frag.glsl
+  engines/eevee/shaders/eevee_surf_bake_color_frag.glsl
   engines/eevee/shaders/eevee_surf_deferred_frag.glsl
   engines/eevee/shaders/eevee_surf_deferred_npr_frag.glsl
   engines/eevee/shaders/eevee_surf_depth_frag.glsl

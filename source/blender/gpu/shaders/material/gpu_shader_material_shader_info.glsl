@@ -502,7 +502,9 @@ void node_shader_info(float3 position,
                       out float half_lambert_factor,
                       out float blinn_phong_factor)
 {
-#if defined(GPU_FRAGMENT_SHADER) && (defined(MAT_DEFERRED) || defined(MAT_FORWARD) || defined(NPR_SHADER))
+#if defined(GPU_FRAGMENT_SHADER) && \
+    (defined(MAT_DEFERRED) || defined(MAT_FORWARD) || defined(NPR_SHADER) || \
+     defined(MAT_BAKE_COLOR))
   float3 shading_normal = shader_info_resolve_normal(normal_in);
   float3 geometry_normal = shader_info_resolve_normal(g_data.Ng);
   float3 probe_bias_normal = shader_info_resolve_normal(g_data.Ni);

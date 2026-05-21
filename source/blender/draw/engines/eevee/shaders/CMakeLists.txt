@@ -30,6 +30,7 @@ set(SRC_GLSL_VERT
   eevee_display_lightprobe_sphere_vert.glsl
   eevee_display_lightprobe_volume_vert.glsl
   eevee_fullscreen_vert.glsl
+  eevee_geom_bake_mesh_vert.glsl
   eevee_geom_curves_vert.glsl
   eevee_geom_mesh_vert.glsl
   eevee_geom_pointcloud_vert.glsl
@@ -75,6 +76,7 @@ set(SRC_GLSL_FRAG
   eevee_shadow_page_tile_frag.glsl
   eevee_shadow_tag_usage_frag.glsl
   eevee_stencil_value_visualize_frag.glsl
+  eevee_surf_bake_color_frag.glsl
   eevee_surf_capture_frag.glsl
   eevee_surf_deferred_frag.glsl
   eevee_surf_depth_frag.glsl
