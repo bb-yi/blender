@@ -30,6 +30,7 @@ set(SRC_GLSL_VERT
   eevee_display_lightprobe_sphere_vert.glsl
   eevee_display_lightprobe_volume_vert.glsl
   eevee_fullscreen_vert.glsl
+  eevee_geom_bake_mesh_basic_vert.glsl
   eevee_geom_bake_mesh_vert.glsl
   eevee_geom_curves_vert.glsl
   eevee_geom_mesh_vert.glsl
@@ -43,6 +44,7 @@ set(SRC_GLSL_VERT
 )
 
 set(SRC_GLSL_FRAG
+  eevee_bake_light_shader_surface_frag.glsl
   eevee_debug_gbuffer_frag.glsl
   eevee_debug_irradiance_grid_frag.glsl
   eevee_debug_surfels_frag.glsl
@@ -62,6 +64,7 @@ set(SRC_GLSL_FRAG
   eevee_filter_material_frag.glsl
   eevee_hiz_debug_frag.glsl
   eevee_light_culling_debug_frag.glsl
+  eevee_light_shader_bake_frag.glsl
   eevee_light_shader_frag.glsl
   eevee_light_shader_front_frag.glsl
   eevee_lookdev_display_frag.glsl

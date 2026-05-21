@@ -34,6 +34,7 @@ using StaticShader = gpu::StaticShader;
 enum class eLightShaderPipeline {
   Surface = 0,
   Front,
+  Bake,
   Volume,
   Surfel,
   Uniform,
@@ -42,6 +43,7 @@ enum class eLightShaderPipeline {
 /* Keep alphabetical order and clean prefix. */
 enum eShaderType {
   AMBIENT_OCCLUSION_PASS = 0,
+  BAKE_LIGHT_SHADER_SURFACE,
 
   FILM_COPY,
   FILM_COMP,

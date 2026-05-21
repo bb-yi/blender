@@ -573,6 +573,8 @@ const char *ShaderModule::static_shader_create_info_name_get(eShaderType shader_
   switch (shader_type) {
     case AMBIENT_OCCLUSION_PASS:
       return "eevee_ambient_occlusion_pass";
+    case BAKE_LIGHT_SHADER_SURFACE:
+      return "eevee_bake_light_shader_surface_mesh";
     case FILM_COPY:
       return "eevee_film_copy_frag";
     case FILM_COMP:
@@ -1972,6 +1974,11 @@ static const LightShaderPipelineInfo &light_shader_pipeline_info_get(
        "_light_shader_front",
        "Front-layer light shader",
        0xEEAA0005u},
+      {eLightShaderPipeline::Bake,
+       "eevee_light_shader_bake",
+       "_light_shader_bake",
+       "Bake light shader",
+       0xEEAA0006u},
       {eLightShaderPipeline::Volume,
        "eevee_light_shader_volume",
        "_light_shader_volume",

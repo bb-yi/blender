@@ -255,6 +255,10 @@ class LightModule {
   void set_view(View &view, const int2 extent);
   void eval_light_shaders(View &view, const int2 extent);
   void eval_front_light_shaders(View &view, const int2 extent);
+  void eval_bake_light_shaders(View &view,
+                               const int2 extent,
+                               Texture &position_tx,
+                               Texture &normal_tx);
   void eval_uniform_light_shaders(View &view);
   void sync_volume_light_shaders(const int3 grid_size);
   void eval_volume_light_shaders(View &view, const int3 grid_size);
@@ -278,6 +282,11 @@ class LightModule {
   bool needs_front_light_shader() const
   {
     return front_light_shader_needed_ && !front_light_shader_materials_.is_empty();
+  }
+
+  bool needs_bake_light_shader() const
+  {
+    return !front_light_shader_materials_.is_empty();
   }
 
   void tag_front_light_shader_needed()

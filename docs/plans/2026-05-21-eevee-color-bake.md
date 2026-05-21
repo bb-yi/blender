@@ -53,6 +53,7 @@ object.bake(type='EMIT')
   - 本地 NPR Tree `nodetree_npr()` 输出。
   - Shader Info 本地光照相关输出。
   - GLSL Function light helper 和 NPR foreach light 所需的 Eevee light/lightprobe 资源。
+  - Light datablock 上的 Light Shader Info / Light Shader Output 节点，包括依赖当前受光点的 `Light Space`、`Distance`、`Direction` 等本地输入。
 
 ## 光照语义
 
@@ -107,6 +108,9 @@ object.bake(type='EMIT')
 - `source/blender/draw/engines/eevee/shaders/infos/eevee_surf_bake_infos.hh`
   - 注册 bake color surface create-info，并补齐 light shader texture/uniform 资源。
   - 对 bake material 启用 local light no-cull 迭代，避免 UV-space 像素与普通相机 tile culling 不一致导致漏光。
+- `source/blender/draw/engines/eevee/shaders/eevee_light_shader_bake_frag.glsl`
+  - 使用 UV-space bake 预先写出的世界坐标和法线评价 point-dependent Light Shader 节点树。
+  - 输出给 bake surface shader 读取的 light shader texture，避免复用普通视图 prepass depth/normal。
 - `source/blender/draw/engines/eevee/shaders/eevee_light_eval_lib.glsl`
   - `MAT_BAKE_COLOR` 下恢复 shadow map attenuation；普通渲染 shader 不受影响。
 - `source/blender/draw/engines/eevee/eevee_shadow.cc` / `eevee_shadow.hh`
@@ -148,6 +152,7 @@ E:\blender_bulid_test\blender_npr_bulid\test\release\cases\eevee_color_bake
 - GLSL Function 本地颜色。
 - 本地 NPR Tree 颜色。
 - Shader Info 灯光响应。
+- Light Shader Info / Light Shader Output 节点的点依赖颜色响应。
 - Tangent Space Normal Map 光照响应。
 
 覆盖的负向场景：
@@ -177,6 +182,7 @@ E:\blender_bulid_test\blender_npr_bulid\test\release\cases\eevee_color_bake
 - 纹理、程序节点、UV/Mapping、Node Group 和 GLSL Function 不再受 CPU 节点白名单限制。
 - 本地 NPR Tree 颜色能覆盖 surface color 并被烘焙。
 - Shader Info/light helper 能读取 Eevee light 资源，灯光变化会反映到 bake 结果。
+- Light Shader 节点能使用当前 bake 像素的世界位置和法线，`Light Space` 等点依赖输出会反映到 bake 结果。
 - Tangent-space material attributes 能在 Eevee bake 中参与 GPU 材质求值。
 - 不支持的屏幕空间、AOV、Filter-domain、refraction 和非 Emit 场景明确失败。
 - 现有 Cycles bake 行为不改变。

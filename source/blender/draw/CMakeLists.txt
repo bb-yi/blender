@@ -470,6 +470,7 @@ set(GLSL_SRC
   engines/eevee/shaders/eevee_gbuffer_lib.glsl
   engines/eevee/shaders/eevee_gbuffer_read_lib.glsl
   engines/eevee/shaders/eevee_gbuffer_write_lib.glsl
+  engines/eevee/shaders/eevee_geom_bake_mesh_basic_vert.glsl
   engines/eevee/shaders/eevee_geom_bake_mesh_vert.glsl
   engines/eevee/shaders/eevee_geom_curves_vert.glsl
   engines/eevee/shaders/eevee_geom_mesh_vert.glsl
@@ -485,6 +486,7 @@ set(GLSL_SRC
   engines/eevee/shaders/eevee_horizon_scan_comp.glsl
   engines/eevee/shaders/eevee_horizon_scan_lib.glsl
   engines/eevee/shaders/eevee_horizon_setup_comp.glsl
+  engines/eevee/shaders/eevee_bake_light_shader_surface_frag.glsl
   engines/eevee/shaders/eevee_light_culling_debug_frag.glsl
   engines/eevee/shaders/eevee_light_culling_select_comp.glsl
   engines/eevee/shaders/eevee_light_culling_sort_comp.glsl
@@ -495,6 +497,7 @@ set(GLSL_SRC
   engines/eevee/shaders/eevee_light_iter_lib.glsl
   engines/eevee/shaders/eevee_light_lib.glsl
   engines/eevee/shaders/eevee_light_shader_common_lib.glsl
+  engines/eevee/shaders/eevee_light_shader_bake_frag.glsl
   engines/eevee/shaders/eevee_light_shader_frag.glsl
   engines/eevee/shaders/eevee_light_shader_front_frag.glsl
   engines/eevee/shaders/eevee_light_shader_surfel_comp.glsl

@@ -852,6 +852,36 @@ static void bind_bake_resources(PassSimple::Sub &sub, Instance &inst)
   sub.bind_resources(inst.sphere_probes);
 }
 
+static void draw_bake_light_shader_surface_context(
+    Instance &inst,
+    const Vector<BakeDrawGroup> &draw_groups,
+    const draw::ResourceHandleRange resource_handle,
+    draw::Texture &position_tx,
+    draw::Texture &normal_tx,
+    draw::View &view)
+{
+  draw::Framebuffer framebuffer("EeveeColorBake.LightShaderSurfaceFramebuffer");
+  framebuffer.ensure(GPU_ATTACHMENT_NONE,
+                     GPU_ATTACHMENT_TEXTURE(position_tx),
+                     GPU_ATTACHMENT_TEXTURE(normal_tx));
+
+  PassSimple pass("Eevee.ColorBake.LightShaderSurface");
+  pass.shader_set(inst.shaders.static_shader_get(BAKE_LIGHT_SHADER_SURFACE));
+  pass.framebuffer_set(&framebuffer);
+  pass.clear_color(float4(0.0f));
+  pass.state_set(DRW_STATE_WRITE_COLOR);
+
+  for (const BakeDrawGroup &group : draw_groups) {
+    if (group.batch == nullptr) {
+      continue;
+    }
+    pass.sub(material_name(group.material)).draw(group.batch, resource_handle);
+  }
+
+  inst.manager->submit(pass, view);
+  GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH);
+}
+
 static bool draw_bake_groups(RenderEngine *engine,
                              Instance &inst,
                              const Vector<BakeDrawGroup> &draw_groups,
@@ -868,6 +898,19 @@ static bool draw_bake_groups(RenderEngine *engine,
 
   draw::Framebuffer framebuffer("EeveeColorBake.Framebuffer");
   framebuffer.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(color_tx));
+
+  draw::Texture light_shader_position_tx("EeveeColorBake.LightShaderPosition");
+  draw::Texture light_shader_normal_tx("EeveeColorBake.LightShaderNormal");
+  if (inst.lights.needs_bake_light_shader()) {
+    constexpr eGPUTextureUsage usage = GPU_TEXTURE_USAGE_ATTACHMENT |
+                                       GPU_TEXTURE_USAGE_SHADER_READ;
+    light_shader_position_tx.ensure_2d(gpu::TextureFormat::SFLOAT_32_32_32_32,
+                                       int2(width, height),
+                                       usage);
+    light_shader_normal_tx.ensure_2d(gpu::TextureFormat::SFLOAT_16_16_16_16,
+                                     int2(width, height),
+                                     usage);
+  }
 
   ScopedBakeRenderBuffers render_buffers_scope(inst, int2(width, height));
   draw::Framebuffer depth_framebuffer("EeveeColorBake.Depth");
@@ -891,7 +934,12 @@ static bool draw_bake_groups(RenderEngine *engine,
   inst.lights.set_view(view, int2(width, height));
   inst.shadows.set_view(view, int2(width, height));
   inst.lights.eval_uniform_light_shaders(view);
-  inst.lights.eval_front_light_shaders(view, int2(width, height));
+  if (inst.lights.needs_bake_light_shader()) {
+    draw_bake_light_shader_surface_context(
+        inst, draw_groups, resource_handle, light_shader_position_tx, light_shader_normal_tx, view);
+    inst.lights.eval_bake_light_shaders(
+        view, int2(width, height), light_shader_position_tx, light_shader_normal_tx);
+  }
 
   PassSimple pass("Eevee.ColorBake");
   pass.framebuffer_set(&framebuffer);

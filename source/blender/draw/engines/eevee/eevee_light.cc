@@ -859,7 +859,14 @@ void LightModule::sync_light(const Object *ob, ObjectHandle &handle)
                           "Error: Uniform custom light shader failed to compile.");
   }
   else if (light_shader_dependency == LightShaderDependency::PointDependent) {
-    if (inst_.is_baking()) {
+    if (inst_.is_color_bake) {
+      register_light_shader(eLightShaderPipeline::Bake,
+                            light.front_light_shader_index,
+                            front_light_shader_materials_,
+                            front_light_shader_lights_,
+                            "Error: Custom light shader failed to compile for color baking.");
+    }
+    else if (inst_.is_baking()) {
       register_light_shader(eLightShaderPipeline::Surfel,
                             light.surfel_light_shader_index,
                             surfel_light_shader_materials_,
@@ -1415,6 +1422,40 @@ void LightModule::eval_front_light_shaders(View &view, const int2 extent)
     pass.bind_resources(inst_.lights);
     pass.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);
     pass.bind_texture(PREPASS_NORMAL_TEX_SLOT, &inst_.render_buffers.prepass_normal_tx);
+    pass.bind_ssbo(LIGHT_BUF_SLOT, &front_light_shader_light_buf_);
+    pass.draw_procedural(GPU_PRIM_TRIS, 1, 3);
+    inst_.manager->submit(pass, view);
+  }
+  GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH);
+}
+
+void LightModule::eval_bake_light_shaders(View &view,
+                                          const int2 extent,
+                                          Texture &position_tx,
+                                          Texture &normal_tx)
+{
+  if (front_light_shader_materials_.is_empty()) {
+    return;
+  }
+
+  front_light_shader_pass_sync(extent);
+  if (!front_light_shader_valid_) {
+    disable_point_dependent_front_light_shader_indices();
+    return;
+  }
+
+  for (const int layer : front_light_shader_materials_.index_range()) {
+    PassSimple pass = {"BakeLightShader.Pass"};
+    pass.state_set(DRW_STATE_WRITE_COLOR);
+    pass.framebuffer_set(&*front_light_shader_fbs_[layer]);
+    pass.clear_color(float4(1.0f));
+    pass.material_set(*inst_.manager, front_light_shader_materials_[layer]);
+    pass.push_constant("light_index", layer);
+    pass.bind_resources(inst_.uniform_data);
+    pass.bind_resources(inst_.lights);
+    pass.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);
+    pass.bind_texture("bake_light_shader_position_tx", &position_tx);
+    pass.bind_texture("bake_light_shader_normal_tx", &normal_tx);
     pass.bind_ssbo(LIGHT_BUF_SLOT, &front_light_shader_light_buf_);
     pass.draw_procedural(GPU_PRIM_TRIS, 1, 3);
     inst_.manager->submit(pass, view);
