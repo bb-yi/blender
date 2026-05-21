@@ -235,6 +235,7 @@ namespace blender::eevee
 
     PassSimple tilemap_setup_ps_ = { "TilemapSetup" };
     PassMain tilemap_usage_ps_ = { "TagUsage" };
+    PassSimple tilemap_usage_bake_receiver_ps_ = { "TagBakeReceiverUsage" };
     PassSimple tilemap_update_ps_ = { "TilemapUpdate" };
 
     PassMain::Sub* tilemap_usage_transparent_ps_ = nullptr;
@@ -250,6 +251,7 @@ namespace blender::eevee
     StorageVectorBuffer<uint, 128> past_casters_updated_ = { "PastCastersUpdated" };
     StorageVectorBuffer<uint, 128> curr_casters_updated_ = { "CurrCastersUpdated" };
     StorageVectorBuffer<uint, 128> jittered_transparent_casters_ = { "JitteredTransparentCasters" };
+    StorageVectorBuffer<uint, 128> bake_receivers_ = { "BakeReceivers" };
     /** List of Resource IDs (to get bounds) for getting minimum clip-maps bounds. */
     StorageVectorBuffer<uint, 128> curr_casters_ = { "CurrCasters" };
 
@@ -380,6 +382,8 @@ namespace blender::eevee
       const ResourceHandleRange& resource_handle,
       bool is_alpha_blend,
       bool has_transparent_shadows);
+    /** Conservatively tag shadow pages needed by a color-bake receiver bounds. */
+    void sync_bake_receiver_bounds(const ResourceHandleRange& resource_handle);
     void end_sync();
 
     void set_lights_data();

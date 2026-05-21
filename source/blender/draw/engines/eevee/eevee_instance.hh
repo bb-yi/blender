@@ -168,6 +168,8 @@ namespace blender::eevee
 
     /** True if the instance is created for light baking. */
     bool is_light_bake = false;
+    /** True if the instance is created for Eevee color baking. */
+    bool is_color_bake = false;
     /** True if the instance is created for either viewport image render or final image render. */
     bool is_image_render = false;
     /** True if the instance is created only for viewport image render. */

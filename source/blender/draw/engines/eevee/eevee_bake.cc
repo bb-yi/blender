@@ -13,10 +13,13 @@
 
 #include "eevee_bake.hh"
 
+#include <algorithm>
+#include <cfloat>
 #include <cstring>
 #include <string>
 
 #include "BLI_array.hh"
+#include "BLI_math_matrix.hh"
 #include "BLI_math_vector.hh"
 #include "BLI_map.hh"
 #include "BLI_set.hh"
@@ -116,6 +119,30 @@ struct ScopedBakeCamera {
   }
 };
 
+struct BakeWorldBounds {
+  float3 center = float3(0.0f);
+  float3 extent = float3(1.0f);
+  float radius = 1.0f;
+};
+
+struct ScopedBakeRenderBuffers {
+  Instance &inst;
+  bool acquired = false;
+
+  ScopedBakeRenderBuffers(Instance &inst, const int2 extent) : inst(inst)
+  {
+    inst.render_buffers.acquire(extent);
+    acquired = true;
+  }
+
+  ~ScopedBakeRenderBuffers()
+  {
+    if (acquired) {
+      inst.render_buffers.release();
+    }
+  }
+};
+
 static void eevee_bake_report_error(RenderEngine *engine, const std::string &message)
 {
   RE_engine_report(engine, RPT_ERROR, message.c_str());
@@ -125,6 +152,59 @@ static void eevee_bake_report_error(RenderEngine *engine, const std::string &mes
 static const char *material_name(const blender::Material *material)
 {
   return material ? material->id.name + 2 : "<None>";
+}
+
+static BakeWorldBounds compute_bake_world_bounds(const Object &object, const Mesh &mesh)
+{
+  BakeWorldBounds bounds;
+  const Span<float3> positions = mesh.vert_positions();
+  if (positions.is_empty()) {
+    bounds.center = object.object_to_world().location();
+    return bounds;
+  }
+
+  float3 min = float3(FLT_MAX);
+  float3 max = float3(-FLT_MAX);
+  for (const float3 &position : positions) {
+    const float3 world_position = math::transform_point(object.object_to_world(), position);
+    math::min_max(world_position, min, max);
+  }
+
+  bounds.center = (min + max) * 0.5f;
+  bounds.extent = math::max(max - min, float3(0.001f));
+  bounds.radius = std::max(math::length(bounds.extent) * 0.5f, 0.5f);
+  return bounds;
+}
+
+static void configure_bake_camera(ScopedBakeCamera &bake_camera,
+                                  const Object &object,
+                                  const Mesh &mesh)
+{
+  const BakeWorldBounds bounds = compute_bake_world_bounds(object, mesh);
+  const float ortho_scale = std::max(bounds.radius * 2.5f, 1.0f);
+  const float clip_end = std::max(bounds.radius * 6.0f + 4.0f, 10.0f);
+  const float3 camera_backward = math::normalize(float3(0.45f, -0.65f, 1.0f));
+  const float3 camera_location = bounds.center + camera_backward * (bounds.radius * 2.5f + 2.0f);
+  const float3 camera_right = math::normalize(math::cross(float3(0.0f, 1.0f, 0.0f),
+                                                         camera_backward));
+  const float3 camera_up = math::cross(camera_backward, camera_right);
+
+  float4x4 camera_to_world = float4x4::identity();
+  camera_to_world.x_axis() = camera_right;
+  camera_to_world.y_axis() = camera_up;
+  camera_to_world.z_axis() = camera_backward;
+  camera_to_world.location() = camera_location;
+
+  bake_camera.object->loc[0] = camera_location.x;
+  bake_camera.object->loc[1] = camera_location.y;
+  bake_camera.object->loc[2] = camera_location.z;
+  bake_camera.object->runtime->object_to_world = camera_to_world;
+  bake_camera.object->runtime->world_to_object = math::invert(camera_to_world);
+
+  bake_camera.data->type = CAM_ORTHO;
+  bake_camera.data->ortho_scale = ortho_scale;
+  bake_camera.data->clip_start = 0.01f;
+  bake_camera.data->clip_end = clip_end;
 }
 
 static std::string node_display_name(const bNode &node)
@@ -747,14 +827,12 @@ static GPUMaterial *compile_bake_material(RenderEngine *engine,
   return gpumat;
 }
 
-static bool sync_scene_lights_and_probes(RenderEngine *engine,
-                                         Depsgraph *depsgraph,
-                                         Instance &inst)
+static bool sync_scene_for_bake(RenderEngine *engine, Depsgraph *depsgraph, Instance &inst)
 {
   DRW_render_object_iter(
       engine, depsgraph, [&](draw::ObjectRef &ob_ref, RenderEngine *, Depsgraph *) {
         const Object *ob = ob_ref.object;
-        if (!ELEM(ob->type, OB_LAMP, OB_LIGHTPROBE)) {
+        if (!ELEM(ob->type, OB_LAMP, OB_LIGHTPROBE, OB_MESH, OB_CURVES, OB_POINTCLOUD)) {
           return;
         }
         inst.object_sync(ob_ref, *inst.manager);
@@ -791,8 +869,16 @@ static bool draw_bake_groups(RenderEngine *engine,
   draw::Framebuffer framebuffer("EeveeColorBake.Framebuffer");
   framebuffer.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(color_tx));
 
+  ScopedBakeRenderBuffers render_buffers_scope(inst, int2(width, height));
+  draw::Framebuffer depth_framebuffer("EeveeColorBake.Depth");
+  depth_framebuffer.ensure(GPU_ATTACHMENT_TEXTURE(inst.render_buffers.depth_tx));
+  depth_framebuffer.bind();
+  depth_framebuffer.clear_depth(1.0f);
+  inst.hiz_buffer.set_source(&inst.render_buffers.depth_tx);
+
   draw::View view("EeveeColorBake.View");
-  view.sync(float4x4::identity(), float4x4::identity());
+  const CameraData &camera_data = inst.camera.data_get();
+  view.sync(camera_data.viewmat, camera_data.winmat);
   view.visibility_test(false);
 
   DRW_submission_start();
@@ -803,6 +889,7 @@ static bool draw_bake_groups(RenderEngine *engine,
   inst.volume_probes.set_view(view);
   inst.sphere_probes.set_view(view);
   inst.lights.set_view(view, int2(width, height));
+  inst.shadows.set_view(view, int2(width, height));
   inst.lights.eval_uniform_light_shaders(view);
   inst.lights.eval_front_light_shaders(view, int2(width, height));
 
@@ -888,6 +975,7 @@ static bool run_gpu_bake(RenderEngine *engine,
   {
     Instance *inst_ptr = MEM_new<Instance>("Eevee Color Bake Instance");
     Instance &inst = *inst_ptr;
+    inst.is_color_bake = true;
     ScopedBakeCamera bake_camera;
     bake_camera.object = BKE_object_add_only_object(nullptr,
                                                     OB_CAMERA,
@@ -898,10 +986,7 @@ static bool run_gpu_bake(RenderEngine *engine,
     }
     else {
       bake_camera.object->data = &bake_camera.data->id;
-      bake_camera.data->type = CAM_ORTHO;
-      bake_camera.data->ortho_scale = 2.0f;
-      bake_camera.data->clip_start = 0.01f;
-      bake_camera.data->clip_end = 100.0f;
+      configure_bake_camera(bake_camera, *object, mesh);
     }
     rcti rect;
     rect.xmin = 0;
@@ -922,10 +1007,13 @@ static bool run_gpu_bake(RenderEngine *engine,
       draw::Manager &manager = *inst.manager;
       manager.begin_sync();
       inst.begin_sync();
-      sync_scene_lights_and_probes(engine, depsgraph, inst);
+      sync_scene_for_bake(engine, depsgraph, inst);
 
       draw::ObjectRef object_ref(object);
-      draw::ResourceHandleRange resource_handle = manager.resource_handle(object_ref);
+      const float receiver_bounds_inflate = std::max(
+          compute_bake_world_bounds(*object, mesh).radius * 0.02f, 0.01f);
+      draw::ResourceHandleRange resource_handle = manager.resource_handle(object_ref,
+                                                                          receiver_bounds_inflate);
 
       Vector<BakeDrawGroup> draw_groups;
       Vector<GPUMaterial *> gpu_materials;
@@ -956,6 +1044,7 @@ static bool run_gpu_bake(RenderEngine *engine,
 
       if (ok) {
         manager.extract_object_attributes(resource_handle, object_ref, gpu_materials);
+        inst.shadows.sync_bake_receiver_bounds(resource_handle);
       }
 
       inst.end_sync();

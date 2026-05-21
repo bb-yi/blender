@@ -474,6 +474,7 @@ ShaderGroups ShaderModule::static_shaders_load(const ShaderGroups request_bits,
                                        SHADOW_TILEMAP_RENDERMAP,
                                        SHADOW_TILEMAP_INIT,
                                        SHADOW_TILEMAP_TAG_UPDATE,
+                                       SHADOW_TILEMAP_TAG_USAGE_BOUNDS,
                                        SHADOW_TILEMAP_TAG_USAGE_OPAQUE,
                                        SHADOW_TILEMAP_TAG_USAGE_TRANSPARENT,
                                        SHADOW_VIEW_VISIBILITY};
@@ -788,6 +789,8 @@ const char *ShaderModule::static_shader_create_info_name_get(eShaderType shader_
       return "eevee_shadow_tilemap_init";
     case SHADOW_TILEMAP_TAG_UPDATE:
       return "eevee_shadow_tag_update";
+    case SHADOW_TILEMAP_TAG_USAGE_BOUNDS:
+      return "eevee_shadow_tag_usage_bounds";
     case SHADOW_TILEMAP_TAG_USAGE_OPAQUE:
       return "eevee_shadow_tag_usage_opaque";
     case SHADOW_TILEMAP_TAG_USAGE_SURFELS:

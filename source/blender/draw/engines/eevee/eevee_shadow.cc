@@ -832,6 +832,7 @@ void ShadowModule::begin_sync()
   curr_casters_updated_.clear();
   curr_casters_.clear();
   jittered_transparent_casters_.clear();
+  bake_receivers_.clear();
   update_casters_ = true;
 
   if (box_batch_ == nullptr) {
@@ -943,6 +944,15 @@ void ShadowModule::sync_object(const Object *ob,
   }
 }
 
+void ShadowModule::sync_bake_receiver_bounds(const ResourceHandleRange &resource_handle)
+{
+  if (!inst_.is_color_bake || !resource_handle.is_valid()) {
+    return;
+  }
+
+  bake_receivers_.append(resource_handle.raw());
+}
+
 void ShadowModule::end_sync()
 {
   const DirectionalFocusData old_focus = directional_focus_data_ensure(*this);
@@ -1007,6 +1017,7 @@ void ShadowModule::end_sync()
   past_casters_updated_.push_update();
   curr_casters_updated_.push_update();
   jittered_transparent_casters_.push_update();
+  bake_receivers_.push_update();
 
   curr_casters_.push_update();
 
@@ -1089,6 +1100,20 @@ void ShadowModule::end_sync()
           sub.dispatch(int3(1, 1, tilemap_pool.tilemaps_unused.size()));
         }
         sub.barrier(GPU_BARRIER_SHADER_STORAGE);
+      }
+    }
+
+    {
+      PassSimple &pass = tilemap_usage_bake_receiver_ps_;
+      pass.init();
+      if (bake_receivers_.size() > 0) {
+        pass.shader_set(inst_.shaders.static_shader_get(SHADOW_TILEMAP_TAG_USAGE_BOUNDS));
+        pass.bind_ssbo("tilemaps_buf", tilemap_pool.tilemaps_data);
+        pass.bind_ssbo("tiles_buf", tilemap_pool.tiles_data);
+        pass.bind_ssbo("bounds_buf", &manager.bounds_buf.current());
+        pass.bind_ssbo("resource_ids_buf", bake_receivers_);
+        pass.dispatch(int3(bake_receivers_.size(), 1, tilemap_pool.tilemaps_data.size()));
+        pass.barrier(GPU_BARRIER_SHADER_STORAGE);
       }
     }
 
@@ -1498,6 +1523,9 @@ void ShadowModule::set_view(View &view, int2 extent)
       }
       if (loop_count == 0) {
         inst_.manager->submit(jittered_transparent_caster_update_ps_, view);
+      }
+      if (inst_.is_color_bake) {
+        inst_.manager->submit(tilemap_usage_bake_receiver_ps_, view);
       }
       inst_.manager->submit(tilemap_usage_ps_, view);
       inst_.manager->submit(tilemap_update_ps_, view);

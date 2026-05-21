@@ -306,14 +306,20 @@ void light_eval_single(uint l_idx,
   }
 
   float shadow = 1.0f;
-#ifndef MAT_BAKE_COLOR
   if (light.tilemap_index != LIGHT_NO_SHADOW) {
+    float3 shadow_P = P;
+#ifdef MAT_BAKE_COLOR
+    if (is_directional) {
+      float texel_radius = shadow_texel_radius_at_position(light, is_directional, P);
+      shadow_P += Ng * max(texel_radius * 32.0f, 0.05f);
+    }
+#endif
     shadow = shadow_eval(light,
                          is_directional,
                          is_transmission,
                          is_translucent_with_thickness,
                          thickness,
-                         P,
+                         shadow_P,
                          Ng,
                          stack.cl[0].N,
                          terminator_normal_offset,
@@ -321,7 +327,6 @@ void light_eval_single(uint l_idx,
                          ray_count,
                          ray_step_count);
   }
-#endif
 
   if (is_translucent_with_thickness) {
     /* This makes the LTC compute the solid angle of the light (still with the cosine term applied

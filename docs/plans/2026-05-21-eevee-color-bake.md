@@ -60,7 +60,8 @@ object.bake(type='EMIT')
 - Emission 仍直接输出自发光颜色，不依赖场景灯光。
 - 场景灯光的颜色、强度、位置、法线、粗糙度、探针等会参与局部求值。
 - bake pass 在读取材质前会渲染 world probe，使 Diffuse/BSDF 能得到 scene world 的环境光。
-- V1 不实现投影阴影 bake。bake shader 在 `MAT_BAKE_COLOR` 下跳过 shadow map attenuation，避免依赖普通相机渲染阶段准备的 shadow atlas。启用阴影不会导致 bake 失败，但不保证 shadow caster 投影结果。
+- V1 支持点光、聚光和太阳光的保守 shadow-map bake。Color Bake 会在 bake 回调内部同步可见 shadow caster，按 bake target bounds 标记 receiver 需要的 shadow pages，并在 bake shader 中执行 `shadow_eval()`。这条路径只在执行 Eevee Color Bake 时运行，不增加普通 viewport/render 的每帧成本。
+- 阴影语义仍是 Eevee 局部 shadow-map 结果，不等同 Cycles selected-to-active/cage 阴影、透明阴影排序、屏幕空间阴影或最终相机视图逐像素一致性。
 - 视角相关效果只代表 bake pass 的局部求值上下文，不等同最终相机视图。
 
 ## 不支持范围
@@ -87,6 +88,9 @@ object.bake(type='EMIT')
 - `source/blender/draw/engines/eevee/eevee_bake.cc`
   - GPU/DRW bake 调度器。
   - 校验 Eevee Color Bake 支持范围。
+  - bake 场景同步 `OB_LAMP`、`OB_LIGHTPROBE` 和可见 mesh/curve/point cloud shadow caster。
+  - 根据 bake target world bounds 配置临时正交 bake camera，稳定太阳光 cascade 覆盖范围。
+  - 为 bake receiver bounds 执行保守 shadow page usage tagging。
   - 为 bake 专用 VBO 补齐 `CD_TANGENT` 输入。
   - 为每个 `BakeImage` 创建 offscreen color target，提交 UV-space draw，readback 到 `Combined` pass。
   - draw 前执行 bake 专用 `capture_view.render_world()`，保证 world probe 环境光可用于局部 BSDF 求值。
@@ -102,8 +106,11 @@ object.bake(type='EMIT')
   - 不读取 deferred combine、radiance、hiz、prepass、back-buffer 或后处理输入。
 - `source/blender/draw/engines/eevee/shaders/infos/eevee_surf_bake_infos.hh`
   - 注册 bake color surface create-info，并补齐 light shader texture/uniform 资源。
+  - 对 bake material 启用 local light no-cull 迭代，避免 UV-space 像素与普通相机 tile culling 不一致导致漏光。
 - `source/blender/draw/engines/eevee/shaders/eevee_light_eval_lib.glsl`
-  - `MAT_BAKE_COLOR` 下禁用 shadow map attenuation，普通渲染 shader 不受影响。
+  - `MAT_BAKE_COLOR` 下恢复 shadow map attenuation；普通渲染 shader 不受影响。
+- `source/blender/draw/engines/eevee/eevee_shadow.cc` / `eevee_shadow.hh`
+  - 新增 Color Bake receiver bounds tagging 入口，复用现有透明 bounds usage tagging shader 保守标记 shadow pages。
 - `source/blender/draw/engines/eevee/shaders/eevee_geom_bake_mesh_vert.glsl`
   - 使用 bake UV 生成 clip-space position。
   - 保留原始 mesh position、normal、UV 和 attribute 供材质节点使用。
