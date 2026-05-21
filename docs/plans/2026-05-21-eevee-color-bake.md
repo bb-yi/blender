@@ -16,6 +16,18 @@
 - 烘焙方式是 UV 空间 rasterization，不做 CPU Base Color 假烘焙，也不读取相机最终画面。
 - 继续使用通用 Bake API 的 image target、多 image、UV island、margin 和输出逻辑，降低对现有系统的侵入。
 
+## Actual V1 Landing
+
+本轮落地的是保守、可后台验证的 Eevee-only `EMIT` / Color Bake V1：
+
+- 复用通用 Bake API 的 `BakePixel`、image target、multi image、UV island、margin 和写回路径。
+- Eevee 增加 `RenderEngineType.bake` 回调，并把结果写入 bake `Combined` pass。
+- 材质求值先走 CPU 本地 evaluator，覆盖 Emission、Principled Emission、RGB、Value、Mix、Math、Reroute、本地 NPR Output Color，以及 `Shader Info` 的基础灯光输出。
+- 该 V1 不走 Draw Manager / GPU material bake pipeline，不编译 arbitrary material shader，也不执行 `GLSL Function` 代码。
+- 对 GPU/屏幕依赖或当前无法真实求值的节点明确失败，避免用户拿到默认材质、黑图或半写入图像。
+
+后续如果要做到原始设计中的 GPU/DRW UV-space material bake，需要另起第二阶段，在本 V1 的错误门禁和 release case 基础上继续替换 evaluator，而不是扩大 CPU evaluator 的节点覆盖面。
+
 ## 支持范围
 
 - Render engine：只支持 `BLENDER_EEVEE`。
@@ -25,9 +37,8 @@
 - 材质：
   - 普通 Eevee surface material。
   - Emission / 本地材质颜色输出。
-  - Eevee surface shader 中可正常编译的 texture、UV、attribute 等本地节点。
-  - `Shader Info`。
-  - `GLSL Function` light helper。
+  - RGB、Value、Mix、Math、Reroute 这类可确定求值的本地节点子集。
+  - `Shader Info` 的 Diffuse Shading、Shadow、Ambient Lighting、Half-Lambert Factor、Blinn-Phong Factor 基础 CPU 近似。
   - 不依赖屏幕/GBuffer 输入的本地 NPR Tree 颜色处理。
 - 输出：
   - 通过现有 `Combined` bake result 输出 scene-linear RGBA float。
@@ -40,6 +51,8 @@
 - Selected-to-active、cage、multires、高低模 ray projection，以及 Cycles 风格真实 ray bake 语义。
 - 非 image target、vertex color target、volume、curve、point cloud、world、Filter-domain material。
 - `NPR Input` 屏幕/GBuffer 读取、`NPR Refraction`、Input AOV、Screen Space Info、Scene Color、Render Texture feedback、back-buffer 读取和最终视图后处理。
+- `GLSL Function` 任意 GPU 代码和 light helper。本 V1 会明确报错，不做 CPU 伪执行。
+- Image Texture、UV Map、Attribute、Normal Map、Bump、Noise 等依赖 GPU 材质或纹理采样的普通材质节点。本 V1 不把这些节点静默降级为默认颜色。
 - 透明排序一致性、最终相机可见色匹配。
 - Camera / Window / Screen 坐标在 V1 bake 中不保证有有意义的结果。
 

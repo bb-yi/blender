@@ -16,6 +16,7 @@
 #include "DNA_mesh_types.h"
 #include "DNA_meshdata_types.h"
 #include "DNA_object_types.h"
+#include "DNA_scene_enums.h"
 
 #include "RNA_access.hh"
 #include "RNA_define.hh"
@@ -646,6 +647,31 @@ static bool bake_pass_filter_check(eScenePassType pass_type,
       return true;
       break;
   }
+}
+
+static bool bake_eevee_color_bake_check(const BakeAPIRender *bkr)
+{
+  if (!BKE_scene_uses_blender_eevee(bkr->scene)) {
+    return true;
+  }
+
+  if (bkr->pass_type != SCE_PASS_EMIT) {
+    BKE_report(bkr->reports, RPT_ERROR, "Eevee Color Bake only supports the Emit bake type");
+    return false;
+  }
+  if (bkr->target != R_BAKE_TARGET_IMAGE_TEXTURES) {
+    BKE_report(bkr->reports, RPT_ERROR, "Eevee Color Bake only supports Image Textures targets");
+    return false;
+  }
+  if (bkr->is_selected_to_active) {
+    BKE_report(bkr->reports, RPT_ERROR, "Eevee Color Bake does not support Selected to Active");
+    return false;
+  }
+  if (bkr->is_cage) {
+    BKE_report(bkr->reports, RPT_ERROR, "Eevee Color Bake does not support cage baking");
+    return false;
+  }
+  return true;
 }
 
 /* before even getting in the bake function we check for some basic errors */
@@ -1823,6 +1849,11 @@ static wmOperatorStatus bake(const BakeAPIRender *bkr,
     BKE_reportf(reports, RPT_ERROR, "Problem baking object \"%s\"", ob_low->id.name + 2);
     op_result = OPERATOR_CANCELLED;
   }
+  else if (BKE_scene_uses_blender_eevee(scene) && bkr->pass_type == SCE_PASS_EMIT &&
+           BKE_reports_contain(reports, RPT_ERROR))
+  {
+    op_result = OPERATOR_CANCELLED;
+  }
   else {
     /* save the results */
     if (bake_targets_output(
@@ -1967,6 +1998,11 @@ static wmOperatorStatus bake_exec(bContext *C, wmOperator *op)
     return result;
   }
 
+  if (!bake_eevee_color_bake_check(&bkr)) {
+    G.is_rendering = false;
+    return result;
+  }
+
   if (!bake_objects_check(bkr.main,
                           bkr.scene,
                           bkr.view_layer,
@@ -2016,6 +2052,11 @@ static void bake_startjob(void *bkv, wmJobWorkerStatus *worker_status)
   RE_SetReports(bkr->render, bkr->reports);
 
   if (!bake_pass_filter_check(bkr->pass_type, bkr->pass_filter, bkr->reports)) {
+    bkr->result = OPERATOR_CANCELLED;
+    return;
+  }
+
+  if (!bake_eevee_color_bake_check(bkr)) {
     bkr->result = OPERATOR_CANCELLED;
     return;
   }

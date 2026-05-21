@@ -283,6 +283,28 @@ class RENDER_PT_eevee_motion_blur_curve(RenderButtonsPanel, Panel):
         row.operator("render.shutter_curve_preset", icon='NOCURVE', text="").shape = 'MAX'
 
 
+class RENDER_PT_eevee_bake(RenderButtonsPanel, Panel):
+    bl_label = "Bake"
+    bl_options = {'DEFAULT_CLOSED'}
+    COMPAT_ENGINES = {'BLENDER_EEVEE'}
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+
+        scene = context.scene
+        bake = scene.render.bake
+
+        layout.operator("object.bake", text="Bake Color", icon='RENDER_STILL').type = 'EMIT'
+
+        col = layout.column(align=True)
+        col.prop(bake, "target", text="Target")
+        col.prop(bake, "use_clear", text="Clear Image")
+        col.prop(bake, "margin")
+        col.prop(bake, "margin_type")
+
+
 class RENDER_PT_eevee_depth_of_field(RenderButtonsPanel, Panel):
     bl_label = "Depth of Field"
     bl_options = {'DEFAULT_CLOSED'}
@@ -1205,6 +1227,7 @@ classes = (
     RENDER_PT_eevee_depth_of_field,
     RENDER_PT_eevee_motion_blur,
     RENDER_PT_eevee_motion_blur_curve,
+    RENDER_PT_eevee_bake,
     RENDER_PT_eevee_outline,
     RENDER_PT_eevee_film,
     RENDER_PT_eevee_performance,
