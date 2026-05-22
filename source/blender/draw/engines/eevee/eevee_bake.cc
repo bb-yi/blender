@@ -85,6 +85,7 @@ namespace blender::eevee {
 namespace {
 
 constexpr int eevee_bake_supported_pass_type = SCE_PASS_EMIT;
+constexpr int eevee_bake_max_accumulated_samples = 64;
 
 struct BakeBatchAttribute {
   const GPUMaterialAttribute *gpu_attr = nullptr;
@@ -333,6 +334,13 @@ static bool node_tree_contains_unsupported_bake_node(const bNodeTree &ntree,
         r_node = node;
         r_feature = "Screen Space Info";
         return true;
+      case SH_NODE_SHADER_INFO:
+        if (node->custom1 == SHD_SHADER_INFO_SHADOW_SOFT_FILTERED) {
+          r_node = node;
+          r_feature = "Shader Info Soft Filtered shadows";
+          return true;
+        }
+        break;
       case NODE_GROUP:
         if (const bNodeTree *group_tree = reinterpret_cast<const bNodeTree *>(node->id)) {
           if (node_tree_contains_unsupported_bake_node(
@@ -924,52 +932,86 @@ static bool draw_bake_groups(RenderEngine *engine,
   view.sync(camera_data.viewmat, camera_data.winmat);
   view.visibility_test(false);
 
-  DRW_submission_start();
+  const int64_t pixel_count = int64_t(width) * int64_t(height);
+  const int sample_count = int(std::max<uint64_t>(
+      1,
+      std::min<uint64_t>(inst.sampling.sample_count(), eevee_bake_max_accumulated_samples)));
+  Array<float4> accumulated_color(pixel_count, float4(0.0f));
 
-  inst.sampling.step();
-  inst.capture_view.render_world();
-
-  inst.volume_probes.set_view(view);
-  inst.sphere_probes.set_view(view);
-  inst.lights.set_view(view, int2(width, height));
-  inst.shadows.set_view(view, int2(width, height));
-  inst.lights.eval_uniform_light_shaders(view);
-  if (inst.lights.needs_bake_light_shader()) {
-    draw_bake_light_shader_surface_context(
-        inst, draw_groups, resource_handle, light_shader_position_tx, light_shader_normal_tx, view);
-    inst.lights.eval_bake_light_shaders(
-        view, int2(width, height), light_shader_position_tx, light_shader_normal_tx);
-  }
-
-  PassSimple pass("Eevee.ColorBake");
-  pass.framebuffer_set(&framebuffer);
-  pass.clear_color(float4(0.0f));
-  pass.state_set(DRW_STATE_WRITE_COLOR);
-
-  for (const BakeDrawGroup &group : draw_groups) {
-    if (group.batch == nullptr || group.gpumat == nullptr) {
-      continue;
+  for (int sample : IndexRange(sample_count)) {
+    if (RE_engine_test_break(engine)) {
+      return false;
     }
-    PassSimple::Sub &sub = pass.sub(material_name(group.material));
-    sub.material_set(*inst.manager, group.gpumat, false);
-    bind_bake_resources(sub, inst);
-    sub.push_constant("surface_cull_mode", int(BKE_material_surface_cull_method_get(group.material)));
-    sub.draw(group.batch, resource_handle);
+
+    DRW_submission_start();
+
+    inst.sampling.step();
+    inst.capture_view.render_world();
+
+    inst.volume_probes.set_view(view);
+    inst.sphere_probes.set_view(view);
+    inst.lights.set_view(view, int2(width, height));
+    inst.shadows.set_view(view, int2(width, height));
+    inst.lights.eval_uniform_light_shaders(view);
+    if (inst.lights.needs_bake_light_shader()) {
+      draw_bake_light_shader_surface_context(inst,
+                                             draw_groups,
+                                             resource_handle,
+                                             light_shader_position_tx,
+                                             light_shader_normal_tx,
+                                             view);
+      inst.lights.eval_bake_light_shaders(
+          view, int2(width, height), light_shader_position_tx, light_shader_normal_tx);
+    }
+
+    PassSimple pass("Eevee.ColorBake");
+    pass.framebuffer_set(&framebuffer);
+    pass.clear_color(float4(0.0f));
+    pass.state_set(DRW_STATE_WRITE_COLOR);
+
+    for (const BakeDrawGroup &group : draw_groups) {
+      if (group.batch == nullptr || group.gpumat == nullptr) {
+        continue;
+      }
+      PassSimple::Sub &sub = pass.sub(material_name(group.material));
+      sub.material_set(*inst.manager, group.gpumat, false);
+      bind_bake_resources(sub, inst);
+      sub.push_constant("surface_cull_mode",
+                        int(BKE_material_surface_cull_method_get(group.material)));
+      sub.draw(group.batch, resource_handle);
+    }
+
+    inst.manager->submit(pass, view);
+
+    DRW_submission_end();
+
+    GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE | GPU_BARRIER_TEXTURE_FETCH);
+    float4 *readback = color_tx.read<float4>(GPU_DATA_FLOAT);
+    if (readback == nullptr) {
+      eevee_bake_report_error(engine, "Eevee Color Bake failed to read back the GPU result");
+      return false;
+    }
+
+    for (int64_t pixel_i : IndexRange(pixel_count)) {
+      accumulated_color[pixel_i] += readback[pixel_i];
+    }
+    MEM_delete(readback);
+
+    if ((sample == 0) || ((sample + 1) % 16 == 0) || (sample + 1 == sample_count)) {
+      std::string re_info = "Eevee Color Baking " + std::to_string(sample + 1) + " / " +
+                            std::to_string(sample_count) + " samples";
+      RE_engine_update_stats(engine, nullptr, re_info.c_str());
+    }
+    RE_engine_update_progress(engine, float(sample + 1) / float(sample_count));
+    GPU_render_step();
   }
 
-  inst.manager->submit(pass, view);
-
-  DRW_submission_end();
-
-  GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE | GPU_BARRIER_TEXTURE_FETCH);
-  float4 *readback = color_tx.read<float4>(GPU_DATA_FLOAT);
-  if (readback == nullptr) {
-    eevee_bake_report_error(engine, "Eevee Color Bake failed to read back the GPU result");
-    return false;
+  const float sample_weight = 1.0f / float(sample_count);
+  for (int64_t pixel_i : IndexRange(pixel_count)) {
+    accumulated_color[pixel_i] *= sample_weight;
   }
-
-  std::memcpy(combined_pass->ibuf->float_buffer.data, readback, sizeof(float4) * width * height);
-  MEM_delete(readback);
+  std::memcpy(
+      combined_pass->ibuf->float_buffer.data, accumulated_color.data(), sizeof(float4) * pixel_count);
   return true;
 }
 
@@ -1025,16 +1067,21 @@ static bool run_gpu_bake(RenderEngine *engine,
     Instance &inst = *inst_ptr;
     inst.is_color_bake = true;
     ScopedBakeCamera bake_camera;
-    bake_camera.object = BKE_object_add_only_object(nullptr,
-                                                    OB_CAMERA,
-                                                    "Eevee Color Bake Camera");
-    bake_camera.data = BKE_id_new_nomain<blender::Camera>("Eevee Color Bake Camera");
-    if (bake_camera.object == nullptr || bake_camera.data == nullptr) {
-      ok = false;
-    }
-    else {
-      bake_camera.object->data = &bake_camera.data->id;
-      configure_bake_camera(bake_camera, *object, mesh);
+    Scene *input_scene = DEG_get_input_scene(depsgraph);
+    Object *camera_object = (input_scene != nullptr) ? input_scene->camera : nullptr;
+    if (camera_object == nullptr) {
+      bake_camera.object = BKE_object_add_only_object(nullptr,
+                                                      OB_CAMERA,
+                                                      "Eevee Color Bake Camera");
+      bake_camera.data = BKE_id_new_nomain<blender::Camera>("Eevee Color Bake Camera");
+      if (bake_camera.object == nullptr || bake_camera.data == nullptr) {
+        ok = false;
+      }
+      else {
+        bake_camera.object->data = &bake_camera.data->id;
+        configure_bake_camera(bake_camera, *object, mesh);
+        camera_object = bake_camera.object;
+      }
     }
     rcti rect;
     rect.xmin = 0;
@@ -1047,10 +1094,12 @@ static bool run_gpu_bake(RenderEngine *engine,
                 &rect,
                 engine,
                 depsgraph,
-                bake_camera.object,
+                camera_object,
                 render_layer);
-      inst.camera_orig_object = bake_camera.object;
-      inst.camera_eval_object = bake_camera.object;
+      if (bake_camera.object != nullptr) {
+        inst.camera_orig_object = bake_camera.object;
+        inst.camera_eval_object = bake_camera.object;
+      }
 
       draw::Manager &manager = *inst.manager;
       manager.begin_sync();

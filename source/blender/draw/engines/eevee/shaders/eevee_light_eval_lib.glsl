@@ -307,19 +307,12 @@ void light_eval_single(uint l_idx,
 
   float shadow = 1.0f;
   if (light.tilemap_index != LIGHT_NO_SHADOW) {
-    float3 shadow_P = P;
-#ifdef MAT_BAKE_COLOR
-    if (is_directional) {
-      float texel_radius = shadow_texel_radius_at_position(light, is_directional, P);
-      shadow_P += Ng * max(texel_radius * 32.0f, 0.05f);
-    }
-#endif
     shadow = shadow_eval(light,
                          is_directional,
                          is_transmission,
                          is_translucent_with_thickness,
                          thickness,
-                         shadow_P,
+                         P,
                          Ng,
                          stack.cl[0].N,
                          terminator_normal_offset,
