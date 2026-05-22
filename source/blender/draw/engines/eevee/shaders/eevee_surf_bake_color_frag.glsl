@@ -145,12 +145,7 @@ void main()
    * Keep local material lighting helpers on the evaluated mesh normal. */
   g_data.Ni = interp.N;
   g_data.N = safe_normalize(interp.N);
-  float3 geometry_normal = cross(gpu_dfdx(g_data.P), gpu_dfdy(g_data.P));
-  g_data.Ng = (length_squared(geometry_normal) > 1.0e-16f) ? safe_normalize(geometry_normal) :
-                                                            g_data.N;
-  if (dot(g_data.Ng, g_data.N) < 0.0f) {
-    g_data.Ng = -g_data.Ng;
-  }
+  g_data.Ng = g_data.N;
   fragment_displacement();
 
   float noise = utility_tx_fetch(utility_tx, gl_FragCoord.xy, UTIL_BLUE_NOISE_LAYER).r;

@@ -132,6 +132,12 @@ struct BakeWorldBounds {
   float radius = 1.0f;
 };
 
+struct BakeLocalBounds {
+  float3 center = float3(0.0f);
+  float3 extent = float3(1.0f);
+  float radius = 1.0f;
+};
+
 struct ScopedBakeRenderBuffers {
   Instance &inst;
   bool acquired = false;
@@ -175,6 +181,26 @@ static BakeWorldBounds compute_bake_world_bounds(const Object &object, const Mes
   for (const float3 &position : positions) {
     const float3 world_position = math::transform_point(object.object_to_world(), position);
     math::min_max(world_position, min, max);
+  }
+
+  bounds.center = (min + max) * 0.5f;
+  bounds.extent = math::max(max - min, float3(0.001f));
+  bounds.radius = std::max(math::length(bounds.extent) * 0.5f, 0.5f);
+  return bounds;
+}
+
+static BakeLocalBounds compute_bake_local_bounds(const Mesh &mesh)
+{
+  BakeLocalBounds bounds;
+  const Span<float3> positions = mesh.vert_positions();
+  if (positions.is_empty()) {
+    return bounds;
+  }
+
+  float3 min = float3(FLT_MAX);
+  float3 max = float3(-FLT_MAX);
+  for (const float3 &position : positions) {
+    math::min_max(position, min, max);
   }
 
   bounds.center = (min + max) * 0.5f;
@@ -1440,6 +1466,12 @@ static bool run_gpu_bake(RenderEngine *engine,
         inst.camera_orig_object = bake_camera.object;
         inst.camera_eval_object = bake_camera.object;
       }
+      CameraData bake_camera_data;
+      if (camera_data_from_object(
+              inst.scene, bake_camera.object, int2(width, height), bake_camera_data))
+      {
+        inst.camera.override(bake_camera_data, true);
+      }
 
       draw::Manager &manager = *inst.manager;
       manager.begin_sync();
@@ -1447,7 +1479,7 @@ static bool run_gpu_bake(RenderEngine *engine,
       sync_scene_for_bake(engine, depsgraph, inst);
 
       draw::ObjectRef object_ref(object);
-      const BakeWorldBounds receiver_bounds = compute_bake_world_bounds(*object, mesh);
+      const BakeLocalBounds receiver_bounds = compute_bake_local_bounds(mesh);
       const float3 receiver_bounds_half_extent = receiver_bounds.extent * 0.5f +
                                                  float3(std::max(receiver_bounds.radius * 0.02f,
                                                                  0.01f));
