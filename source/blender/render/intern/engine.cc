@@ -780,6 +780,7 @@ bool RE_bake_engine(Render *re,
                     const int object_id,
                     const BakePixel pixel_array[],
                     const BakeTargets *targets,
+                    const StringRef uv_layer,
                     const eScenePassType pass_type,
                     const int pass_filter,
                     float result[])
@@ -818,6 +819,7 @@ bool RE_bake_engine(Render *re,
     /* Bake all images. */
     engine->bake.targets = targets;
     engine->bake.pixels = pixel_array;
+    uv_layer.copy_bytes_truncated(engine->bake.uv_layer);
     engine->bake.result = result;
     engine->bake.object_id = object_id;
 

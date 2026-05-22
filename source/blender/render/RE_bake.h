@@ -79,6 +79,7 @@ bool RE_bake_engine(struct Render *re,
                     int object_id,
                     const BakePixel pixel_array[],
                     const BakeTargets *targets,
+                    StringRef uv_layer,
                     eScenePassType pass_type,
                     int pass_filter,
                     float result[]);

@@ -19,6 +19,7 @@
 #include <string>
 
 #include "BLI_array.hh"
+#include "BLI_color.hh"
 #include "BLI_math_matrix.hh"
 #include "BLI_math_vector.hh"
 #include "BLI_map.hh"
@@ -27,6 +28,7 @@
 #include "BLI_vector.hh"
 #include "BLI_vector_set.hh"
 
+#include "DNA_customdata_types.h"
 #include "DNA_material_types.h"
 #include "DNA_camera_types.h"
 #include "DNA_mesh_types.h"
@@ -36,6 +38,8 @@
 #include "DNA_scene_types.h"
 
 #include "BKE_attribute.hh"
+#include "BKE_attribute_math.hh"
+#include "BKE_customdata.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_material.hh"
 #include "BKE_mesh.hh"
@@ -86,6 +90,8 @@ namespace {
 
 constexpr int eevee_bake_supported_pass_type = SCE_PASS_EMIT;
 constexpr int eevee_bake_max_accumulated_samples = 64;
+constexpr int64_t eevee_bake_full_sample_pixel_limit = int64_t(1024) * 1024;
+constexpr int64_t eevee_bake_medium_sample_pixel_limit = int64_t(4096) * 4096;
 
 struct BakeBatchAttribute {
   const GPUMaterialAttribute *gpu_attr = nullptr;
@@ -232,6 +238,14 @@ static bool image_dimensions_match(const RenderEngine *engine, const int width, 
   return image.width == width && image.height == height;
 }
 
+static std::string bake_uv_layer_name(const RenderEngine *engine, const Mesh &mesh)
+{
+  if (engine->bake.uv_layer[0] != '\0') {
+    return engine->bake.uv_layer;
+  }
+  return mesh.active_or_default_uv_map_name();
+}
+
 static bool validate_bake_request(RenderEngine *engine,
                                   Object *object,
                                   const int pass_type,
@@ -282,80 +296,274 @@ static bool validate_bake_request(RenderEngine *engine,
   return true;
 }
 
-static bool node_tree_contains_unsupported_bake_node(const bNodeTree &ntree,
-                                                     Set<const bNodeTree *> &visited,
-                                                     const bNode *&r_node,
-                                                     const char *&r_feature)
+static const char *unsupported_bake_feature_for_node(const bNode &node)
 {
-  if (visited.contains(&ntree)) {
+  switch (node.type_legacy) {
+    case SH_NODE_NPR_INPUT:
+      return "NPR Input screen/GBuffer reads";
+    case SH_NODE_NPR_IMAGE_SAMPLE:
+      return "NPR Image Sample";
+    case SH_NODE_NPR_REFRACTION:
+      return "NPR Refraction";
+    case SH_NODE_INPUT_AOV:
+      return "Input AOV";
+    case SH_NODE_OUTPUT_AOV:
+      return "Output AOV";
+    case SH_NODE_OUTPUT_FILTER:
+      return "Filter-domain output";
+    case SH_NODE_RENDER_TEXTURE:
+      return "Render Texture feedback";
+    case SH_NODE_SCENE_COLOR:
+      return "Scene Color";
+    case SH_NODE_SCREENSPACE_INFO:
+      return "Screen Space Info";
+    case SH_NODE_SHADER_INFO:
+      if (node.custom1 == SHD_SHADER_INFO_SHADOW_SOFT_FILTERED) {
+        return "Shader Info Soft Filtered shadows";
+      }
+      break;
+    default:
+      break;
+  }
+  return nullptr;
+}
+
+static const bNode *find_active_output_node(const bNodeTree &ntree, const int output_type)
+{
+  for (const bNode *node : ntree.all_nodes()) {
+    if (node->type_legacy == output_type && (node->flag & NODE_DO_OUTPUT) &&
+        !node->is_muted())
+    {
+      return node;
+    }
+  }
+  for (const bNode *node : ntree.all_nodes()) {
+    if (node->type_legacy == output_type && !node->is_muted()) {
+      return node;
+    }
+  }
+  return nullptr;
+}
+
+static bool node_tree_contains_unsupported_bake_dependency(
+    const bNodeTree &ntree,
+    const bNodeSocket *root_socket,
+    Set<const bNodeTree *> &visited_trees,
+    Map<const bNodeTree *, const bNode *> &group_node_by_tree,
+    const bNode *&r_node,
+    const char *&r_feature);
+
+static bool node_tree_contains_direct_unsupported_bake_output_node(const bNodeTree &ntree,
+                                                                   const int output_type,
+                                                                   const char *feature,
+                                                                   const bNode *&r_node,
+                                                                   const char *&r_feature)
+{
+  for (const bNode *node : ntree.all_nodes()) {
+    if (node->type_legacy == output_type && !node->is_muted()) {
+      r_node = node;
+      r_feature = feature;
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool node_group_contains_unsupported_bake_side_effect(const bNodeTree &group_tree,
+                                                             const bNode *&r_node,
+                                                             const char *&r_feature)
+{
+  if (node_tree_contains_direct_unsupported_bake_output_node(
+          group_tree, SH_NODE_OUTPUT_AOV, "Output AOV", r_node, r_feature))
+  {
+    return true;
+  }
+  if (node_tree_contains_direct_unsupported_bake_output_node(
+          group_tree, SH_NODE_OUTPUT_FILTER, "Filter-domain output", r_node, r_feature))
+  {
+    return true;
+  }
+  return false;
+}
+
+static bool node_output_contains_unsupported_bake_dependency(
+    const bNodeTree &ntree,
+    const bNode *node,
+    const bNodeSocket *output_socket,
+    Set<const bNodeTree *> &visited_trees,
+    Map<const bNodeTree *, const bNode *> &group_node_by_tree,
+    const bNode *&r_node,
+    const char *&r_feature)
+{
+  if (node == nullptr || node->is_muted()) {
     return false;
   }
-  visited.add(&ntree);
 
-  for (const bNode *node : ntree.all_nodes()) {
-    if ((node->flag & NODE_MUTED) != 0) {
-      continue;
+  if (const char *feature = unsupported_bake_feature_for_node(*node)) {
+    r_node = node;
+    r_feature = feature;
+    return true;
+  }
+
+  if (node->type_legacy == NODE_GROUP) {
+    const bNodeTree *group_tree = reinterpret_cast<const bNodeTree *>(node->id);
+    if (group_tree == nullptr || output_socket == nullptr) {
+      return false;
     }
+    group_tree->ensure_topology_cache();
+    if (node_group_contains_unsupported_bake_side_effect(*group_tree, r_node, r_feature)) {
+      return true;
+    }
+    const bNode *group_output_node = find_active_output_node(*group_tree, NODE_GROUP_OUTPUT);
+    if (group_output_node == nullptr) {
+      return false;
+    }
+    const bNodeSocket *group_output_input = group_output_node->input_by_identifier(
+        output_socket->identifier);
+    const bNode *previous_group_node = group_node_by_tree.lookup_default(group_tree, nullptr);
+    group_node_by_tree.add_overwrite(group_tree, node);
+    const bool found = node_tree_contains_unsupported_bake_dependency(
+        *group_tree, group_output_input, visited_trees, group_node_by_tree, r_node, r_feature);
+    if (previous_group_node != nullptr) {
+      group_node_by_tree.add_overwrite(group_tree, previous_group_node);
+    }
+    else {
+      group_node_by_tree.remove(group_tree);
+    }
+    return found;
+  }
 
-    switch (node->type_legacy) {
-      case SH_NODE_NPR_INPUT:
-        r_node = node;
-        r_feature = "NPR Input screen/GBuffer reads";
-        return true;
-      case SH_NODE_NPR_IMAGE_SAMPLE:
-        r_node = node;
-        r_feature = "NPR Image Sample";
-        return true;
-      case SH_NODE_NPR_REFRACTION:
-        r_node = node;
-        r_feature = "NPR Refraction";
-        return true;
-      case SH_NODE_INPUT_AOV:
-        r_node = node;
-        r_feature = "Input AOV";
-        return true;
-      case SH_NODE_OUTPUT_AOV:
-        r_node = node;
-        r_feature = "Output AOV";
-        return true;
-      case SH_NODE_OUTPUT_FILTER:
-        r_node = node;
-        r_feature = "Filter-domain output";
-        return true;
-      case SH_NODE_RENDER_TEXTURE:
-        r_node = node;
-        r_feature = "Render Texture feedback";
-        return true;
-      case SH_NODE_SCENE_COLOR:
-        r_node = node;
-        r_feature = "Scene Color";
-        return true;
-      case SH_NODE_SCREENSPACE_INFO:
-        r_node = node;
-        r_feature = "Screen Space Info";
-        return true;
-      case SH_NODE_SHADER_INFO:
-        if (node->custom1 == SHD_SHADER_INFO_SHADOW_SOFT_FILTERED) {
-          r_node = node;
-          r_feature = "Shader Info Soft Filtered shadows";
-          return true;
-        }
-        break;
-      case NODE_GROUP:
-        if (const bNodeTree *group_tree = reinterpret_cast<const bNodeTree *>(node->id)) {
-          if (node_tree_contains_unsupported_bake_node(
-                  *group_tree, visited, r_node, r_feature))
+  if (node->type_legacy == NODE_GROUP_INPUT) {
+    const bNode *group_node = group_node_by_tree.lookup_default(&ntree, nullptr);
+    if (output_socket != nullptr && group_node != nullptr) {
+      if (const bNodeSocket *group_input = group_node->input_by_identifier(
+              output_socket->identifier))
+      {
+        const bNodeTree &owner_tree = group_node->owner_tree();
+        owner_tree.ensure_topology_cache();
+        for (const bNodeLink *link : group_input->directly_linked_links()) {
+          if (!link->is_used()) {
+            continue;
+          }
+          if (node_output_contains_unsupported_bake_dependency(
+                  owner_tree,
+                  link->fromnode,
+                  link->fromsock,
+                  visited_trees,
+                  group_node_by_tree,
+                  r_node,
+                  r_feature))
           {
             return true;
           }
         }
-        break;
-      default:
-        break;
+      }
+    }
+    return false;
+  }
+
+  for (const bNodeSocket *socket : node->input_sockets()) {
+    for (const bNodeLink *link : socket->directly_linked_links()) {
+      if (!link->is_used()) {
+        continue;
+      }
+      if (node_output_contains_unsupported_bake_dependency(
+              ntree,
+              link->fromnode,
+              link->fromsock,
+              visited_trees,
+              group_node_by_tree,
+              r_node,
+              r_feature))
+      {
+        return true;
+      }
     }
   }
 
   return false;
+}
+
+static bool node_tree_contains_unsupported_bake_dependency(const bNodeTree &ntree,
+                                                           const bNodeSocket *root_socket,
+                                                           Set<const bNodeTree *> &visited_trees,
+                                                           Map<const bNodeTree *, const bNode *>
+                                                               &group_node_by_tree,
+                                                           const bNode *&r_node,
+                                                           const char *&r_feature)
+{
+  if (root_socket == nullptr || visited_trees.contains(&ntree)) {
+    return false;
+  }
+
+  ntree.ensure_topology_cache();
+  visited_trees.add(&ntree);
+  bool found = false;
+  for (const bNodeLink *link : root_socket->directly_linked_links()) {
+    if (!link->is_used()) {
+      continue;
+    }
+    if (node_output_contains_unsupported_bake_dependency(
+            ntree,
+            link->fromnode,
+            link->fromsock,
+            visited_trees,
+            group_node_by_tree,
+            r_node,
+            r_feature))
+    {
+      found = true;
+      break;
+    }
+  }
+  visited_trees.remove(&ntree);
+  return found;
+}
+
+static bool output_node_inputs_contain_unsupported_bake_dependency(
+    const bNodeTree &ntree,
+    const bNode &output_node,
+    Set<const bNodeTree *> &visited_trees,
+    Map<const bNodeTree *, const bNode *> &group_node_by_tree,
+    const bNode *&r_node,
+    const char *&r_feature)
+{
+  for (const bNodeSocket *socket : output_node.input_sockets()) {
+    if (node_tree_contains_unsupported_bake_dependency(
+            ntree, socket, visited_trees, group_node_by_tree, r_node, r_feature))
+    {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool material_tree_contains_unsupported_bake_node(const bNodeTree &ntree,
+                                                         Set<const bNodeTree *> &visited_trees,
+                                                         const bNode *&r_node,
+                                                         const char *&r_feature)
+{
+  const bNode *output_node = find_active_output_node(ntree, SH_NODE_OUTPUT_MATERIAL);
+  if (output_node == nullptr || output_node->input_sockets().is_empty()) {
+    return false;
+  }
+  Map<const bNodeTree *, const bNode *> group_node_by_tree;
+  return output_node_inputs_contain_unsupported_bake_dependency(
+      ntree, *output_node, visited_trees, group_node_by_tree, r_node, r_feature);
+}
+
+static bool npr_tree_contains_unsupported_bake_node(const bNodeTree &ntree,
+                                                    Set<const bNodeTree *> &visited_trees,
+                                                    const bNode *&r_node,
+                                                    const char *&r_feature)
+{
+  const bNode *output_node = find_active_output_node(ntree, SH_NODE_NPR_OUTPUT);
+  if (output_node == nullptr || output_node->input_sockets().is_empty()) {
+    return false;
+  }
+  Map<const bNodeTree *, const bNode *> group_node_by_tree;
+  return output_node_inputs_contain_unsupported_bake_dependency(
+      ntree, *output_node, visited_trees, group_node_by_tree, r_node, r_feature);
 }
 
 static bool validate_material_node_trees_for_bake(RenderEngine *engine, blender::Material *material)
@@ -369,23 +577,66 @@ static bool validate_material_node_trees_for_bake(RenderEngine *engine, blender:
     message += unsupported_feature;
     message += " in material \"";
     message += material_name(material);
-    message += "\" (node \"";
-    message += node_display_name(*unsupported_node);
-    message += "\")";
+    message += "\"";
+    if (unsupported_node != nullptr) {
+      message += " (node \"";
+      message += node_display_name(*unsupported_node);
+      message += "\")";
+    }
     eevee_bake_report_error(engine, message);
   };
 
-  if (material->nodetree != nullptr &&
-      node_tree_contains_unsupported_bake_node(
-          *material->nodetree, visited, unsupported_node, unsupported_feature))
-  {
+  if (material->eevee_domain == MA_EEVEE_DOMAIN_FILTER) {
+    unsupported_node = (material->nodetree != nullptr) ?
+                           find_active_output_node(*material->nodetree, SH_NODE_OUTPUT_FILTER) :
+                           nullptr;
+    unsupported_feature = "Filter-domain output";
     report_unsupported();
     return false;
   }
 
+  if (material->nodetree != nullptr) {
+    if (node_tree_contains_direct_unsupported_bake_output_node(*material->nodetree,
+                                                               SH_NODE_OUTPUT_AOV,
+                                                               "Output AOV",
+                                                               unsupported_node,
+                                                               unsupported_feature))
+    {
+      report_unsupported();
+      return false;
+    }
+
+    if (node_tree_contains_direct_unsupported_bake_output_node(*material->nodetree,
+                                                               SH_NODE_OUTPUT_FILTER,
+                                                               "Filter-domain output",
+                                                               unsupported_node,
+                                                               unsupported_feature))
+    {
+      report_unsupported();
+      return false;
+    }
+
+    if (material_tree_contains_unsupported_bake_node(
+            *material->nodetree, visited, unsupported_node, unsupported_feature))
+    {
+      report_unsupported();
+      return false;
+    }
+  }
+
   visited.clear();
   if (bNodeTree *npr_tree = npr_tree_get_from_mat(material)) {
-    if (node_tree_contains_unsupported_bake_node(
+    if (node_tree_contains_direct_unsupported_bake_output_node(*npr_tree,
+                                                               SH_NODE_OUTPUT_AOV,
+                                                               "Output AOV",
+                                                               unsupported_node,
+                                                               unsupported_feature))
+    {
+      report_unsupported();
+      return false;
+    }
+
+    if (npr_tree_contains_unsupported_bake_node(
             *npr_tree, visited, unsupported_node, unsupported_feature))
     {
       report_unsupported();
@@ -447,6 +698,9 @@ static Mesh *mesh_for_bake(Depsgraph *depsgraph, Object *object)
   mesh->corner_tris();
   mesh->corner_tri_faces();
   mesh->corner_normals();
+  if (mesh->corner_edges().size() != mesh->corners_num) {
+    bke::mesh_calc_edges(*mesh, true, false);
+  }
   return mesh;
 }
 
@@ -630,12 +884,117 @@ static bool ensure_tangent_layer(RenderEngine *engine,
   return true;
 }
 
+static float4 bake_attribute_fallback_value(const GPUMaterialAttribute &attr)
+{
+  return attr.is_default_color ? float4(1.0f) : float4(0.0f, 0.0f, 0.0f, 1.0f);
+}
+
+static float4 orco_value_for_corner(const Mesh &mesh, const int vert)
+{
+  if (const float3 *orco = static_cast<const float3 *>(
+          CustomData_get_layer(&mesh.vert_data, CD_ORCO)))
+  {
+    return float4(orco[vert], 0.0f);
+  }
+
+  float3 normalized = mesh.vert_positions()[vert];
+  BKE_mesh_orco_verts_transform(
+      const_cast<Mesh *>(&mesh), MutableSpan<float3>(&normalized, 1), false);
+  return float4(normalized, 0.0f);
+}
+
+static float4 value_to_attribute_float4(const float value)
+{
+  return float4(value, value, value, 1.0f);
+}
+
+static float4 value_to_attribute_float4(const float2 value)
+{
+  return float4(value.x, value.y, 0.0f, 1.0f);
+}
+
+static float4 value_to_attribute_float4(const float3 value)
+{
+  return float4(value, 1.0f);
+}
+
+static float4 value_to_attribute_float4(const int value)
+{
+  const float v = float(value);
+  return float4(v, v, v, 1.0f);
+}
+
+static float4 value_to_attribute_float4(const int2 value)
+{
+  return float4(float(value.x), float(value.y), 0.0f, 1.0f);
+}
+
+static float4 value_to_attribute_float4(const int8_t value)
+{
+  const float v = float(value);
+  return float4(v, v, v, 1.0f);
+}
+
+static float4 value_to_attribute_float4(const short2 value)
+{
+  return float4(float(value.x), float(value.y), 0.0f, 1.0f);
+}
+
+static float4 value_to_attribute_float4(const bool value)
+{
+  const float v = value ? 1.0f : 0.0f;
+  return float4(v, v, v, 1.0f);
+}
+
+static float4 value_to_attribute_float4(const ColorGeometry4f value)
+{
+  return float4(value.r, value.g, value.b, value.a);
+}
+
+static float4 value_to_attribute_float4(const ColorGeometry4b value)
+{
+  const ColorGeometry4f decoded = color::decode(value);
+  return float4(decoded.r, decoded.g, decoded.b, decoded.a);
+}
+
+static float4 value_to_attribute_float4(const math::Quaternion value)
+{
+  return float4(value.w, value.x, value.y, value.z);
+}
+
+static float4 value_to_attribute_float4(const float4x4 value)
+{
+  const float *matrix = value.base_ptr();
+  return float4(matrix[0], matrix[1], matrix[2], matrix[3]);
+}
+
+static int attribute_element_index_for_corner(const Mesh &mesh,
+                                              const bke::AttrDomain domain,
+                                              const int corner,
+                                              const int face)
+{
+  switch (domain) {
+    case bke::AttrDomain::Point:
+      return mesh.corner_verts()[corner];
+    case bke::AttrDomain::Edge:
+      return mesh.corner_edges()[corner];
+    case bke::AttrDomain::Face:
+      return face;
+    case bke::AttrDomain::Corner:
+      return corner;
+    default:
+      return -1;
+  }
+}
+
 static float4 attribute_value_for_corner(const Mesh &mesh,
                                          const GPUMaterialAttribute &attr,
-                                         const int corner)
+                                         const int corner,
+                                         const int vert,
+                                         const int face)
 {
   if (attr.type == CD_ORCO) {
-    return float4(0.0f, 0.0f, 0.0f, 1.0f);
+    return orco_value_for_corner(mesh, vert);
   }
 
   StringRef name = attr.name;
@@ -649,65 +1008,38 @@ static float4 attribute_value_for_corner(const Mesh &mesh,
   const bke::AttributeAccessor attributes = mesh.attributes();
   const std::optional<bke::AttributeMetaData> meta = attributes.lookup_meta_data(name);
   if (!meta) {
-    return attr.is_default_color ? float4(1.0f) : float4(0.0f, 0.0f, 0.0f, 1.0f);
+    return bake_attribute_fallback_value(attr);
+  }
+  if (meta->data_type == bke::AttrType::String) {
+    return bake_attribute_fallback_value(attr);
   }
 
-  switch (meta->data_type) {
-    case bke::AttrType::Float2: {
-      const bke::AttributeReader<float2> reader = attributes.lookup<float2>(
-          name, bke::AttrDomain::Corner);
-      if (reader) {
-        const float2 value = VArraySpan<float2>(*reader)[corner];
-        return float4(value.x, value.y, 0.0f, 1.0f);
-      }
-      break;
-    }
-    case bke::AttrType::Float3: {
-      const bke::AttributeReader<float3> reader = attributes.lookup<float3>(
-          name, bke::AttrDomain::Corner);
-      if (reader) {
-        const float3 value = VArraySpan<float3>(*reader)[corner];
-        return float4(value, 1.0f);
-      }
-      break;
-    }
-    case bke::AttrType::Float: {
-      const bke::AttributeReader<float> reader = attributes.lookup<float>(
-          name, bke::AttrDomain::Corner);
-      if (reader) {
-        const float value = VArraySpan<float>(*reader)[corner];
-        return float4(value, 0.0f, 0.0f, 1.0f);
-      }
-      break;
-    }
-    case bke::AttrType::Int32: {
-      const bke::AttributeReader<int> reader = attributes.lookup<int>(name,
-                                                                      bke::AttrDomain::Corner);
-      if (reader) {
-        const float value = float(VArraySpan<int>(*reader)[corner]);
-        return float4(value, 0.0f, 0.0f, 1.0f);
-      }
-      break;
-    }
-    case bke::AttrType::Bool: {
-      const bke::AttributeReader<bool> reader = attributes.lookup<bool>(name,
-                                                                        bke::AttrDomain::Corner);
-      if (reader) {
-        const float value = VArraySpan<bool>(*reader)[corner] ? 1.0f : 0.0f;
-        return float4(value, 0.0f, 0.0f, 1.0f);
-      }
-      break;
-    }
-    default:
-      break;
+  const bke::GAttributeReader reader = attributes.lookup(name);
+  if (!reader) {
+    return bake_attribute_fallback_value(attr);
   }
 
-  return attr.is_default_color ? float4(1.0f) : float4(0.0f, 0.0f, 0.0f, 1.0f);
+  const int element_index = attribute_element_index_for_corner(mesh, reader.domain, corner, face);
+  if (element_index < 0) {
+    return bake_attribute_fallback_value(attr);
+  }
+
+  const GVArraySpan span(*reader);
+  if (element_index >= span.size()) {
+    return bake_attribute_fallback_value(attr);
+  }
+
+  float4 value = bake_attribute_fallback_value(attr);
+  bke::attribute_math::to_static_type(reader.varray.type(), [&]<typename T>() {
+    value = value_to_attribute_float4(span.typed<T>()[element_index]);
+  });
+  return value;
 }
 
 static gpu::Batch *build_bake_batch_for_material(RenderEngine *engine,
                                                  const BakeImage &image,
                                                  const Mesh &mesh,
+                                                 const StringRef bake_uv_name,
                                                  const Span<int> primitive_ids,
                                                  const blender::Material *material,
                                                  const GPUMaterial *gpumat)
@@ -717,8 +1049,11 @@ static gpu::Batch *build_bake_batch_for_material(RenderEngine *engine,
   }
 
   VArraySpan<float2> bake_uvs;
-  if (!lookup_uv_attribute(mesh, mesh.active_or_default_uv_map_name(), bake_uvs)) {
-    eevee_bake_report_error(engine, "Eevee Color Bake requires an active UV map");
+  if (!lookup_uv_attribute(mesh, bake_uv_name, bake_uvs)) {
+    std::string message = "Eevee Color Bake requires bake UV map \"";
+    message += bake_uv_name;
+    message += "\"";
+    eevee_bake_report_error(engine, message);
     return nullptr;
   }
 
@@ -755,6 +1090,7 @@ static gpu::Batch *build_bake_batch_for_material(RenderEngine *engine,
   }
 
   const Span<int3> corner_tris = mesh.corner_tris();
+  const Span<int> tri_faces = mesh.corner_tri_faces();
   const Span<int> corner_verts = mesh.corner_verts();
   const Span<float3> positions = mesh.vert_positions();
   const Span<float3> corner_normals = mesh.corner_normals();
@@ -765,6 +1101,7 @@ static gpu::Batch *build_bake_batch_for_material(RenderEngine *engine,
   int vertex_i = 0;
   for (const int primitive_id : primitive_ids) {
     const int3 tri = corner_tris[primitive_id];
+    const int face = tri_faces[primitive_id];
     for (int tri_corner = 0; tri_corner < 3; tri_corner++, vertex_i++) {
       const int corner = tri[tri_corner];
       const int vert = corner_verts[corner];
@@ -779,7 +1116,8 @@ static gpu::Batch *build_bake_batch_for_material(RenderEngine *engine,
 
       for (const BakeBatchAttribute &batch_attr : batch_attributes) {
         const float4 value = (batch_attr.tangent_layer == -1) ?
-                                 attribute_value_for_corner(mesh, *batch_attr.gpu_attr, corner) :
+                                 attribute_value_for_corner(
+                                     mesh, *batch_attr.gpu_attr, corner, vert, face) :
                                  tangent_layers[batch_attr.tangent_layer].values[corner];
         GPU_vertbuf_attr_set(vbo, batch_attr.format_attr, vertex_i, &value);
       }
@@ -933,9 +1271,17 @@ static bool draw_bake_groups(RenderEngine *engine,
   view.visibility_test(false);
 
   const int64_t pixel_count = int64_t(width) * int64_t(height);
-  const int sample_count = int(std::max<uint64_t>(
-      1,
-      std::min<uint64_t>(inst.sampling.sample_count(), eevee_bake_max_accumulated_samples)));
+  uint64_t max_sample_count = eevee_bake_max_accumulated_samples;
+  /* Every bake sample requires a full float texture readback for CPU accumulation. Keep high
+   * resolution bakes bounded without changing normal viewport/render sampling. */
+  if (pixel_count > eevee_bake_medium_sample_pixel_limit) {
+    max_sample_count = 4;
+  }
+  else if (pixel_count > eevee_bake_full_sample_pixel_limit) {
+    max_sample_count = 16;
+  }
+  const int sample_count = int(
+      std::max<uint64_t>(1, std::min<uint64_t>(inst.sampling.sample_count(), max_sample_count)));
   Array<float4> accumulated_color(pixel_count, float4(0.0f));
 
   for (int sample : IndexRange(sample_count)) {
@@ -1067,21 +1413,15 @@ static bool run_gpu_bake(RenderEngine *engine,
     Instance &inst = *inst_ptr;
     inst.is_color_bake = true;
     ScopedBakeCamera bake_camera;
-    Scene *input_scene = DEG_get_input_scene(depsgraph);
-    Object *camera_object = (input_scene != nullptr) ? input_scene->camera : nullptr;
-    if (camera_object == nullptr) {
-      bake_camera.object = BKE_object_add_only_object(nullptr,
-                                                      OB_CAMERA,
-                                                      "Eevee Color Bake Camera");
-      bake_camera.data = BKE_id_new_nomain<blender::Camera>("Eevee Color Bake Camera");
-      if (bake_camera.object == nullptr || bake_camera.data == nullptr) {
-        ok = false;
-      }
-      else {
-        bake_camera.object->data = &bake_camera.data->id;
-        configure_bake_camera(bake_camera, *object, mesh);
-        camera_object = bake_camera.object;
-      }
+    bake_camera.object = BKE_object_add_only_object(nullptr, OB_CAMERA, "Eevee Color Bake Camera");
+    bake_camera.data = BKE_id_new_nomain<blender::Camera>("Eevee Color Bake Camera");
+    Object *camera_object = bake_camera.object;
+    if (bake_camera.object == nullptr || bake_camera.data == nullptr) {
+      ok = false;
+    }
+    else {
+      bake_camera.object->data = &bake_camera.data->id;
+      configure_bake_camera(bake_camera, *object, mesh);
     }
     rcti rect;
     rect.xmin = 0;
@@ -1107,13 +1447,17 @@ static bool run_gpu_bake(RenderEngine *engine,
       sync_scene_for_bake(engine, depsgraph, inst);
 
       draw::ObjectRef object_ref(object);
-      const float receiver_bounds_inflate = std::max(
-          compute_bake_world_bounds(*object, mesh).radius * 0.02f, 0.01f);
-      draw::ResourceHandleRange resource_handle = manager.resource_handle(object_ref,
-                                                                          receiver_bounds_inflate);
+      const BakeWorldBounds receiver_bounds = compute_bake_world_bounds(*object, mesh);
+      const float3 receiver_bounds_half_extent = receiver_bounds.extent * 0.5f +
+                                                 float3(std::max(receiver_bounds.radius * 0.02f,
+                                                                 0.01f));
+      const float4x4 object_matrix = object->object_to_world();
+      draw::ResourceHandleRange resource_handle = manager.resource_handle(
+          object_ref, &object_matrix, &receiver_bounds.center, &receiver_bounds_half_extent);
 
       Vector<BakeDrawGroup> draw_groups;
       Vector<GPUMaterial *> gpu_materials;
+      const std::string bake_uv_name = bake_uv_layer_name(engine, mesh);
       for (const auto &item : primitives_by_material.items()) {
         blender::Material *material = material_from_index(object, item.key);
         GPUMaterial *gpumat = compile_bake_material(engine, inst, material);
@@ -1123,7 +1467,7 @@ static bool run_gpu_bake(RenderEngine *engine,
         }
 
         gpu::Batch *batch = build_bake_batch_for_material(
-            engine, image, mesh, item.value.as_span(), material, gpumat);
+            engine, image, mesh, bake_uv_name, item.value.as_span(), material, gpumat);
         if (batch == nullptr) {
           ok = false;
           break;

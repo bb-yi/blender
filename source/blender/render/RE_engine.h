@@ -147,6 +147,7 @@ struct RenderEngine {
   struct {
     const struct BakeTargets *targets;
     const struct BakePixel *pixels;
+    char uv_layer[/*MAX_CUSTOMDATA_LAYER_NAME*/ 68];
     float *result;
     int image_id;
     int object_id;
