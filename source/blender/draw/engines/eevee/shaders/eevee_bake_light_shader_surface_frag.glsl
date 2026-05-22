@@ -15,5 +15,5 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_bake_light_shader_surface)
 void main()
 {
   out_position = float4(interp.P, 1.0f);
-  out_normal = float4(normalize(interp.N), 1.0f);
+  out_normal = float4(normalize(bake_interp.Ng), 1.0f);
 }

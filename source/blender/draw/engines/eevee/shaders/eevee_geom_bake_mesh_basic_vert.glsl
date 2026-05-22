@@ -14,6 +14,7 @@ void main()
 
   interp.P = drw_point_object_to_world(pos);
   interp.N = normalize(drw_normal_object_to_world(nor));
+  bake_interp.Ng = normalize(drw_normal_object_to_world(geom_nor));
 
   gl_Position = float4(bake_uv * 2.0f - 1.0f, 0.0f, 1.0f);
 }

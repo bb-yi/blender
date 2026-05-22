@@ -145,7 +145,7 @@ void main()
    * Keep local material lighting helpers on the evaluated mesh normal. */
   g_data.Ni = interp.N;
   g_data.N = safe_normalize(interp.N);
-  g_data.Ng = g_data.N;
+  g_data.Ng = safe_normalize(bake_interp.Ng);
   fragment_displacement();
 
   float noise = utility_tx_fetch(utility_tx, gl_FragCoord.xy, UTIL_BLUE_NOISE_LAYER).r;

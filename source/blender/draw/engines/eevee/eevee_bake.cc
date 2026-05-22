@@ -240,6 +240,19 @@ static void configure_bake_camera(ScopedBakeCamera &bake_camera,
   bake_camera.data->clip_end = clip_end;
 }
 
+static Object *scene_render_camera_get(RenderEngine *engine)
+{
+  if (engine == nullptr || engine->re == nullptr) {
+    return nullptr;
+  }
+
+  Object *camera = RE_GetCamera(engine->re);
+  if (camera != nullptr && camera->type == OB_CAMERA) {
+    return camera;
+  }
+  return nullptr;
+}
+
 static std::string node_display_name(const bNode &node)
 {
   if (node.label[0] != '\0') {
@@ -1090,11 +1103,14 @@ static gpu::Batch *build_bake_batch_for_material(RenderEngine *engine,
       &format, "nor", gpu::VertAttrType::SFLOAT_32_32_32);
   const uint bake_uv_attr = GPU_vertformat_attr_add(
       &format, "bake_uv", gpu::VertAttrType::SFLOAT_32_32);
+  const uint geom_nor_attr = GPU_vertformat_attr_add(
+      &format, "geom_nor", gpu::VertAttrType::SFLOAT_32_32_32);
 
   Set<std::string> added_attribute_names;
   added_attribute_names.add("pos");
   added_attribute_names.add("nor");
   added_attribute_names.add("bake_uv");
+  added_attribute_names.add("geom_nor");
 
   Vector<BakeBatchAttribute> batch_attributes;
   Vector<BakeBatchTangentLayer> tangent_layers;
@@ -1119,6 +1135,7 @@ static gpu::Batch *build_bake_batch_for_material(RenderEngine *engine,
   const Span<int> tri_faces = mesh.corner_tri_faces();
   const Span<int> corner_verts = mesh.corner_verts();
   const Span<float3> positions = mesh.vert_positions();
+  const Span<float3> face_normals = mesh.face_normals();
   const Span<float3> corner_normals = mesh.corner_normals();
 
   gpu::VertBuf *vbo = GPU_vertbuf_create_with_format(format);
@@ -1128,6 +1145,7 @@ static gpu::Batch *build_bake_batch_for_material(RenderEngine *engine,
   for (const int primitive_id : primitive_ids) {
     const int3 tri = corner_tris[primitive_id];
     const int face = tri_faces[primitive_id];
+    const float3 &geometry_normal = face_normals[face];
     for (int tri_corner = 0; tri_corner < 3; tri_corner++, vertex_i++) {
       const int corner = tri[tri_corner];
       const int vert = corner_verts[corner];
@@ -1139,6 +1157,7 @@ static gpu::Batch *build_bake_batch_for_material(RenderEngine *engine,
       GPU_vertbuf_attr_set(vbo, pos_attr, vertex_i, &position);
       GPU_vertbuf_attr_set(vbo, nor_attr, vertex_i, &normal);
       GPU_vertbuf_attr_set(vbo, bake_uv_attr, vertex_i, &bake_uv);
+      GPU_vertbuf_attr_set(vbo, geom_nor_attr, vertex_i, &geometry_normal);
 
       for (const BakeBatchAttribute &batch_attr : batch_attributes) {
         const float4 value = (batch_attr.tangent_layer == -1) ?
@@ -1439,15 +1458,19 @@ static bool run_gpu_bake(RenderEngine *engine,
     Instance &inst = *inst_ptr;
     inst.is_color_bake = true;
     ScopedBakeCamera bake_camera;
-    bake_camera.object = BKE_object_add_only_object(nullptr, OB_CAMERA, "Eevee Color Bake Camera");
-    bake_camera.data = BKE_id_new_nomain<blender::Camera>("Eevee Color Bake Camera");
-    Object *camera_object = bake_camera.object;
-    if (bake_camera.object == nullptr || bake_camera.data == nullptr) {
-      ok = false;
-    }
-    else {
-      bake_camera.object->data = &bake_camera.data->id;
-      configure_bake_camera(bake_camera, *object, mesh);
+    Object *camera_object = scene_render_camera_get(engine);
+    const bool use_fallback_camera = (camera_object == nullptr);
+    if (use_fallback_camera) {
+      bake_camera.object = BKE_object_add_only_object(nullptr, OB_CAMERA, "Eevee Color Bake Camera");
+      bake_camera.data = BKE_id_new_nomain<blender::Camera>("Eevee Color Bake Camera");
+      camera_object = bake_camera.object;
+      if (bake_camera.object == nullptr || bake_camera.data == nullptr) {
+        ok = false;
+      }
+      else {
+        bake_camera.object->data = &bake_camera.data->id;
+        configure_bake_camera(bake_camera, *object, mesh);
+      }
     }
     rcti rect;
     rect.xmin = 0;
@@ -1462,15 +1485,15 @@ static bool run_gpu_bake(RenderEngine *engine,
                 depsgraph,
                 camera_object,
                 render_layer);
-      if (bake_camera.object != nullptr) {
+      if (use_fallback_camera && bake_camera.object != nullptr) {
         inst.camera_orig_object = bake_camera.object;
         inst.camera_eval_object = bake_camera.object;
-      }
-      CameraData bake_camera_data;
-      if (camera_data_from_object(
-              inst.scene, bake_camera.object, int2(width, height), bake_camera_data))
-      {
-        inst.camera.override(bake_camera_data, true);
+        CameraData bake_camera_data;
+        if (camera_data_from_object(
+                inst.scene, bake_camera.object, int2(width, height), bake_camera_data))
+        {
+          inst.camera.override(bake_camera_data, true);
+        }
       }
 
       draw::Manager &manager = *inst.manager;
