@@ -100,6 +100,7 @@ void register_shader_nodes()
   register_node_type_sh_output_linestyle();
   register_node_type_sh_output_material();
   register_node_type_sh_output_world();
+  register_node_type_sh_parallax();
   register_node_type_sh_particle_info();
   register_node_type_sh_point_info();
   register_node_type_sh_radial_tiling();

@@ -104,6 +104,7 @@ set(SRC
   nodes/node_shader_output_linestyle.cc
   nodes/node_shader_output_material.cc
   nodes/node_shader_output_world.cc
+  nodes/node_shader_parallax.cc
   nodes/node_shader_particle_info.cc
   nodes/node_shader_point_info.cc
   nodes/node_shader_radial_tiling.cc

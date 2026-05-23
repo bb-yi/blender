@@ -851,6 +851,12 @@ enum NodeShaderInfoShadowMode {
   SHD_SHADER_INFO_SHADOW_SOFT_FILTERED = 2,
 };
 
+enum NodeParallaxMode {
+  SHD_PARALLAX_PLANE_OFFSET = 0,
+  SHD_PARALLAX_STEEP = 1,
+  SHD_PARALLAX_OCCLUSION = 2,
+};
+
 enum NodeCompareMode {
   NODE_COMPARE_MODE_ELEMENT = 0,
   NODE_COMPARE_MODE_LENGTH = 1,

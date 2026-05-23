@@ -1454,8 +1454,11 @@ class ShaderNodesInliner {
       return;
     }
     if (std::get_if<ClosureZoneValue>(&value.value)) {
-      if (original_node.is_type("ShaderNodeGLSLFunction") && dst_socket.type == SOCK_CLOSURE) {
-        /* sampler2D closure sources are validated later by the GLSL Function compiler path. */
+      if ((original_node.is_type("ShaderNodeGLSLFunction") ||
+           original_node.is_type("ShaderNodeParallax")) &&
+          dst_socket.type == SOCK_CLOSURE)
+      {
+        /* Closure sources are validated later by the consuming shader-node compiler path. */
         return;
       }
       /* This type can't be assigned to a socket. One has to evaluate a closure. */
