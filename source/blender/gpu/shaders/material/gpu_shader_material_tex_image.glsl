@@ -71,6 +71,19 @@ void node_tex_image_linear(float3 co, sampler2D ima, float4 &color, float &alpha
 }
 
 [[node]]
+void node_tex_image_linear_grad(
+    float3 co, float2 dx, float2 dy, sampler2D ima, float4 &color, float &alpha)
+{
+#ifdef GPU_FRAGMENT_SHADER
+  color = textureGrad(ima, co.xy, dx, dy);
+#else
+  color = texture(ima, co.xy);
+#endif
+
+  alpha = color.a;
+}
+
+[[node]]
 void node_tex_image_cubic(float3 co, sampler2D ima, float4 &color, float &alpha)
 {
   color = texture_bicubic(ima, co.xy);

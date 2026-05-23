@@ -100,6 +100,7 @@ void register_node_type_sh_output_light();
 void register_node_type_sh_output_linestyle();
 void register_node_type_sh_output_material();
 void register_node_type_sh_output_world();
+void register_node_type_sh_parallax();
 void register_node_type_sh_particle_info();
 void register_node_type_sh_point_info();
 void register_node_type_sh_radial_tiling();

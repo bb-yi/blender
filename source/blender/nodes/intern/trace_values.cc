@@ -30,6 +30,12 @@ static bool is_glsl_function_sample2d_input(const SocketInContext &socket)
          socket.owner_node()->is_type("ShaderNodeGLSLFunction");
 }
 
+static bool is_parallax_height_source_input(const SocketInContext &socket)
+{
+  return socket->is_input() && socket->type == SOCK_CLOSURE &&
+         socket.owner_node()->is_type("ShaderNodeParallax");
+}
+
 static bool is_closure_zone_output_socket(const SocketInContext &socket)
 {
   return socket->owner_node().is_type("NodeClosureOutput") && socket->is_output();
@@ -681,6 +687,13 @@ LinkedClosureSignatures gather_linked_target_closure_signatures(
         if (is_glsl_function_sample2d_input(socket)) {
           result.items.append(
               {ClosureSignature::from_glsl_function_sample2d_socket(node, *socket.socket), false, socket});
+          return true;
+        }
+        if (is_parallax_height_source_input(socket)) {
+          result.items.append({ClosureSignature::from_parallax_height_source_socket(
+                                   node, *socket.socket),
+                               false,
+                               socket});
           return true;
         }
         return false;

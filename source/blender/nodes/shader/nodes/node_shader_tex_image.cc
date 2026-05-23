@@ -2,6 +2,8 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include <string>
+
 #include "node_shader_util.hh"
 #include "node_util.hh"
 
@@ -91,6 +93,12 @@ static int node_shader_gpu_tex_image(GPUMaterial *mat,
                               GPU_SAMPLER_FILTERING_MIPMAP;
   }
   const bool use_cubic = ELEM(tex->interpolation, SHD_INTERP_CUBIC, SHD_INTERP_SMART);
+  StringRefNull closure_uv_dx_source;
+  StringRefNull closure_uv_dy_source;
+  GPU_material_closure_uv_gradient_source_get(
+      mat, closure_uv_dx_source, closure_uv_dy_source);
+  const bool use_closure_uv_gradients = !use_cubic && !closure_uv_dx_source.is_empty() &&
+                                        !closure_uv_dy_source.is_empty();
 
   /* Only use UDIM tiles if projection is flat.
    * Otherwise treat the first tile as a single image. (See #141776). */
@@ -108,7 +116,19 @@ static int node_shader_gpu_tex_image(GPUMaterial *mat,
     switch (tex->projection) {
       case SHD_PROJ_FLAT: {
         GPUNodeLink *gpu_image = GPU_image(mat, ima, iuser, sampler_state);
-        GPU_stack_link(mat, node, gpu_node_name, in, out, gpu_image);
+        if (use_closure_uv_gradients) {
+          const std::string dx_expr = "$OUT = float4(" + std::string(closure_uv_dx_source) +
+                                      ", 0.0, 1.0)";
+          const std::string dy_expr = "$OUT = float4(" + std::string(closure_uv_dy_source) +
+                                      ", 0.0, 1.0)";
+          GPUNodeLink *uv_dx_link = GPU_function_call(dx_expr.c_str());
+          GPUNodeLink *uv_dy_link = GPU_function_call(dy_expr.c_str());
+          GPU_stack_link(
+              mat, node, "node_tex_image_linear_grad", in, out, uv_dx_link, uv_dy_link, gpu_image);
+        }
+        else {
+          GPU_stack_link(mat, node, gpu_node_name, in, out, gpu_image);
+        }
         break;
       }
       case SHD_PROJ_BOX: {

@@ -851,6 +851,14 @@ enum NodeShaderInfoShadowMode {
   SHD_SHADER_INFO_SHADOW_SOFT_FILTERED = 2,
 };
 
+enum NodeParallaxMode {
+  SHD_PARALLAX_PLANE_OFFSET = 0,
+  SHD_PARALLAX_STEEP = 1,
+  SHD_PARALLAX_OCCLUSION = 2,
+  SHD_PARALLAX_RELIEF = 3,
+  SHD_PARALLAX_SECANT_RELIEF = 4,
+};
+
 enum NodeCompareMode {
   NODE_COMPARE_MODE_ELEMENT = 0,
   NODE_COMPARE_MODE_LENGTH = 1,
@@ -3115,6 +3123,13 @@ struct NodeShaderNormalMap {
 struct NodeShaderWorldToTangent {
   DNA_DEFINE_CXX_METHODS(NodeShaderWorldToTangent)
 
+  char uv_map[/*MAX_CUSTOMDATA_LAYER_NAME_NO_PREFIX*/ 64] = "";
+};
+
+struct NodeShaderParallax {
+  DNA_DEFINE_CXX_METHODS(NodeShaderParallax)
+
+  int use_shadow = 0;
   char uv_map[/*MAX_CUSTOMDATA_LAYER_NAME_NO_PREFIX*/ 64] = "";
 };
 

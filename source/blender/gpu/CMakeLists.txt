@@ -692,6 +692,7 @@ set(GLSL_SRC
   shaders/material/gpu_shader_material_output_material.glsl
   shaders/material/gpu_shader_material_render_texture.glsl
   shaders/material/gpu_shader_material_output_world.glsl
+  shaders/material/gpu_shader_material_parallax.glsl
   shaders/material/gpu_shader_material_particle_info.glsl
   shaders/material/gpu_shader_material_point_info.glsl
   shaders/material/gpu_shader_material_principled.glsl

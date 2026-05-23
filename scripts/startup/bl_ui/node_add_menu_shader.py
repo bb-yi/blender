@@ -677,6 +677,11 @@ class NODE_MT_shader_node_vector_base(node_add_menu.NodeMenu):
         layout.separator()
         self.node_operator(layout, "ShaderNodeMapping")
         self.node_operator(layout, "ShaderNodeNormal")
+        self.node_operator(
+            layout,
+            "ShaderNodeParallax",
+            poll=object_or_npr_eevee_shader_nodes_poll(context),
+        )
         self.node_operator(layout, "ShaderNodeRadialTiling")
         self.node_operator(layout, "ShaderNodeTwirl")
         self.node_operator(

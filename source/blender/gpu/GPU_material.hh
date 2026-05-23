@@ -486,6 +486,13 @@ GPUNodeLink *GPU_differentiate_float_function(const char *function_name, const f
 void GPU_material_closure_uv_source_push(GPUMaterial *material, StringRefNull source);
 void GPU_material_closure_uv_source_pop(GPUMaterial *material);
 StringRefNull GPU_material_closure_uv_source_get(const GPUMaterial *material);
+void GPU_material_closure_uv_gradient_source_push(GPUMaterial *material,
+                                                  StringRefNull dx_source,
+                                                  StringRefNull dy_source);
+void GPU_material_closure_uv_gradient_source_pop(GPUMaterial *material);
+void GPU_material_closure_uv_gradient_source_get(const GPUMaterial *material,
+                                                 StringRefNull &r_dx_source,
+                                                 StringRefNull &r_dy_source);
 
 bool GPU_link(GPUMaterial *mat, const char *name, ...);
 bool GPU_stack_link(GPUMaterial *mat,
