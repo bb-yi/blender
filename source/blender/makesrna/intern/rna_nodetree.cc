@@ -7806,16 +7806,11 @@ static void def_sh_parallax(BlenderRNA * /*brna*/, StructRNA *srna)
        0,
        "Plane Offset",
        "Offset UVs by view direction and scale without a height source"},
-      {SHD_PARALLAX_STEEP,
-       "STEEP",
-       0,
-       "Steep Parallax",
-       "March through a closure-backed height source using angle-adaptive steps"},
       {SHD_PARALLAX_OCCLUSION,
        "OCCLUSION",
        0,
        "Parallax Occlusion",
-       "Refine steep parallax intersections for low-angle views"},
+       "March through a closure-backed height source and refine low-angle intersections"},
       {0, nullptr, 0, nullptr, nullptr},
   };
 
@@ -7824,7 +7819,7 @@ static void def_sh_parallax(BlenderRNA * /*brna*/, StructRNA *srna)
   prop = RNA_def_property(srna, "mode", PROP_ENUM, PROP_NONE);
   RNA_def_property_enum_sdna(prop, nullptr, "custom1");
   RNA_def_property_enum_items(prop, mode_items);
-  RNA_def_property_enum_default(prop, SHD_PARALLAX_STEEP);
+  RNA_def_property_enum_default(prop, SHD_PARALLAX_OCCLUSION);
   RNA_def_property_ui_text(prop, "Mode", "Parallax offset algorithm");
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_ShaderNode_socket_update");
   RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
