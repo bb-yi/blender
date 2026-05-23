@@ -42,6 +42,7 @@
 #include "RNA_enum_types.hh"
 
 #include "NOD_common.hh"
+#include "NOD_socket.hh"
 
 #include "rna_internal.hh"
 #include "rna_internal_types.hh"
@@ -4718,6 +4719,72 @@ static void rna_ShaderNodeShaderInfo_lightgroup_id_set(PointerRNA *ptr, int valu
   data->lightgroup_id = max_ii(value, 0);
 }
 
+static NodeShaderParallax *rna_ShaderNodeParallax_storage_ensure(PointerRNA *ptr)
+{
+  bNode *node = ptr->data_as<bNode>();
+  if (node->storage == nullptr) {
+    node->storage = MEM_new<NodeShaderParallax>(__func__);
+  }
+  return static_cast<NodeShaderParallax *>(node->storage);
+}
+
+static const NodeShaderParallax *rna_ShaderNodeParallax_storage(PointerRNA *ptr)
+{
+  const bNode *node = ptr->data_as<const bNode>();
+  return static_cast<const NodeShaderParallax *>(node->storage);
+}
+
+static void rna_ShaderNodeParallax_uv_map_get(PointerRNA *ptr, char *value)
+{
+  const NodeShaderParallax *data = rna_ShaderNodeParallax_storage(ptr);
+  strcpy(value, data ? data->uv_map : "");
+}
+
+static int rna_ShaderNodeParallax_uv_map_length(PointerRNA *ptr)
+{
+  const NodeShaderParallax *data = rna_ShaderNodeParallax_storage(ptr);
+  return strlen(data ? data->uv_map : "");
+}
+
+static void rna_ShaderNodeParallax_uv_map_set(PointerRNA *ptr, const char *value)
+{
+  NodeShaderParallax *data = rna_ShaderNodeParallax_storage_ensure(ptr);
+  STRNCPY(data->uv_map, value);
+}
+
+static int rna_ShaderNodeParallax_mode_get(PointerRNA *ptr)
+{
+  const bNode *node = ptr->data_as<const bNode>();
+  return node->custom1 & 0xff;
+}
+
+static void rna_ShaderNodeParallax_mode_set(PointerRNA *ptr, int value)
+{
+  bNodeTree *ntree = reinterpret_cast<bNodeTree *>(ptr->owner_id);
+  bNode *node = ptr->data_as<bNode>();
+  node->custom1 = value;
+  if (ntree != nullptr) {
+    nodes::update_node_declaration_and_sockets(*ntree, *node);
+  }
+}
+
+static bool rna_ShaderNodeParallax_use_shadow_get(PointerRNA *ptr)
+{
+  const NodeShaderParallax *data = rna_ShaderNodeParallax_storage(ptr);
+  return data && data->use_shadow != 0;
+}
+
+static void rna_ShaderNodeParallax_use_shadow_set(PointerRNA *ptr, bool value)
+{
+  bNodeTree *ntree = reinterpret_cast<bNodeTree *>(ptr->owner_id);
+  bNode *node = ptr->data_as<bNode>();
+  NodeShaderParallax *data = rna_ShaderNodeParallax_storage_ensure(ptr);
+  data->use_shadow = value ? 1 : 0;
+  if (ntree != nullptr) {
+    nodes::update_node_declaration_and_sockets(*ntree, *node);
+  }
+}
+
 static void rna_ShaderNodeScript_update(Main *bmain, Scene *scene, PointerRNA *ptr)
 {
   bNodeTree *ntree = reinterpret_cast<bNodeTree *>(ptr->owner_id);
@@ -7811,16 +7878,43 @@ static void def_sh_parallax(BlenderRNA * /*brna*/, StructRNA *srna)
        0,
        "Parallax Occlusion",
        "March through a closure-backed height source and refine low-angle intersections"},
+      {SHD_PARALLAX_RELIEF,
+       "RELIEF",
+       0,
+       "Relief Parallax Mapping",
+       "Linear relief search followed by binary refinement"},
+      {SHD_PARALLAX_SECANT_RELIEF,
+       "SECANT_RELIEF",
+       0,
+       "Secant Method Relief Mapping",
+       "Linear relief search followed by secant refinement"},
       {0, nullptr, 0, nullptr, nullptr},
   };
 
   PropertyRNA *prop;
 
   prop = RNA_def_property(srna, "mode", PROP_ENUM, PROP_NONE);
-  RNA_def_property_enum_sdna(prop, nullptr, "custom1");
   RNA_def_property_enum_items(prop, mode_items);
   RNA_def_property_enum_default(prop, SHD_PARALLAX_OCCLUSION);
+  RNA_def_property_enum_funcs(
+      prop, "rna_ShaderNodeParallax_mode_get", "rna_ShaderNodeParallax_mode_set", nullptr);
   RNA_def_property_ui_text(prop, "Mode", "Parallax offset algorithm");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_ShaderNode_socket_update");
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+
+  prop = RNA_def_property(srna, "uv_map", PROP_STRING, PROP_NONE);
+  RNA_def_property_string_funcs(prop,
+                                "rna_ShaderNodeParallax_uv_map_get",
+                                "rna_ShaderNodeParallax_uv_map_length",
+                                "rna_ShaderNodeParallax_uv_map_set");
+  RNA_def_property_ui_text(prop, "UV Map", "UV Map used to compute the tangent basis");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  prop = RNA_def_property(srna, "use_shadow", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_funcs(prop,
+                                 "rna_ShaderNodeParallax_use_shadow_get",
+                                 "rna_ShaderNodeParallax_use_shadow_set");
+  RNA_def_property_ui_text(prop, "Shadow", "Output a single directional-light parallax shadow");
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_ShaderNode_socket_update");
   RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
 }

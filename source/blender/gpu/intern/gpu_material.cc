@@ -101,6 +101,8 @@ struct GPUMaterial {
   Vector<Object *> filter_mask_objects;
   Vector<GPUMaterialGeneratedSource> generated_sources;
   Vector<std::string> closure_uv_source_stack;
+  Vector<std::string> closure_uv_dx_source_stack;
+  Vector<std::string> closure_uv_dy_source_stack;
 
   bool has_surface_output = false;
   bool has_volume_output = false;
@@ -613,6 +615,43 @@ StringRefNull GPU_material_closure_uv_source_get(const GPUMaterial *material)
     return {};
   }
   return material->closure_uv_source_stack.last();
+}
+
+void GPU_material_closure_uv_gradient_source_push(GPUMaterial *material,
+                                                  StringRefNull dx_source,
+                                                  StringRefNull dy_source)
+{
+  if (material == nullptr) {
+    return;
+  }
+  material->closure_uv_dx_source_stack.append(std::string(dx_source));
+  material->closure_uv_dy_source_stack.append(std::string(dy_source));
+}
+
+void GPU_material_closure_uv_gradient_source_pop(GPUMaterial *material)
+{
+  if (material == nullptr || material->closure_uv_dx_source_stack.is_empty() ||
+      material->closure_uv_dy_source_stack.is_empty())
+  {
+    return;
+  }
+  material->closure_uv_dx_source_stack.pop_last();
+  material->closure_uv_dy_source_stack.pop_last();
+}
+
+void GPU_material_closure_uv_gradient_source_get(const GPUMaterial *material,
+                                                 StringRefNull &r_dx_source,
+                                                 StringRefNull &r_dy_source)
+{
+  r_dx_source = {};
+  r_dy_source = {};
+  if (material == nullptr || material->closure_uv_dx_source_stack.is_empty() ||
+      material->closure_uv_dy_source_stack.is_empty())
+  {
+    return;
+  }
+  r_dx_source = material->closure_uv_dx_source_stack.last();
+  r_dy_source = material->closure_uv_dy_source_stack.last();
 }
 
 /* Resources */
