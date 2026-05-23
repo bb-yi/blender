@@ -23,6 +23,7 @@
 #include "BLI_math_matrix.hh"
 #include "BLI_math_vector.hh"
 #include "BLI_map.hh"
+#include "BLI_offset_indices.hh"
 #include "BLI_set.hh"
 #include "BLI_string.h"
 #include "BLI_vector.hh"
@@ -108,6 +109,16 @@ struct BakeDrawGroup {
   blender::Material *material = nullptr;
   GPUMaterial *gpumat = nullptr;
   gpu::Batch *batch = nullptr;
+};
+
+struct BakeTriData {
+  Array<int3> corner_tris;
+  Array<int> tri_faces;
+};
+
+struct BakePrimitiveMask {
+  Array<int> primitive_ids;
+  bool has_valid_pixels = false;
 };
 
 struct ScopedBakeCamera {
@@ -356,6 +367,18 @@ static const char *unsupported_bake_feature_for_node(const bNode &node)
       return "Scene Color";
     case SH_NODE_SCREENSPACE_INFO:
       return "Screen Space Info";
+    case SH_NODE_AMBIENT_OCCLUSION:
+      return "Ambient Occlusion screen-space sampling";
+    case SH_NODE_BEVEL:
+      return "Bevel screen-space raycast";
+    case SH_NODE_CURVATURE:
+      return "Curvature screen-space depth sampling";
+    case SH_NODE_RAYCAST:
+      return "Raycast screen-space tracing";
+    case SH_NODE_BSDF_TRANSPARENT:
+      return "Transparent BSDF layering";
+    case SH_NODE_BSDF_RAY_PORTAL:
+      return "Ray Portal BSDF";
     case SH_NODE_SHADER_INFO:
       if (node.custom1 == SHD_SHADER_INFO_SHADOW_SOFT_FILTERED) {
         return "Shader Info Soft Filtered shadows";
@@ -705,6 +728,15 @@ static const char *unsupported_gpu_material_flag(const GPUMaterial *gpumat)
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_FILTER_MATERIAL)) {
     return "Filter-domain material";
   }
+  if (GPU_material_flag_get(gpumat, GPU_MATFLAG_RAYCAST)) {
+    return "screen-space raycast/depth sampling";
+  }
+  if (GPU_material_flag_get(gpumat, GPU_MATFLAG_AO)) {
+    return "Ambient Occlusion screen-space sampling";
+  }
+  if (GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT)) {
+    return "transparent material layering";
+  }
   return nullptr;
 }
 
@@ -743,6 +775,18 @@ static Mesh *mesh_for_bake(Depsgraph *depsgraph, Object *object)
   return mesh;
 }
 
+static BakeTriData bake_tri_data_from_mesh(const Mesh &mesh)
+{
+  BakeTriData data;
+  const int tris_num = poly_to_tri_count(mesh.faces_num, mesh.corners_num);
+  data.corner_tris = Array<int3>(tris_num);
+  data.tri_faces = Array<int>(tris_num);
+  bke::mesh::corner_tris_calc(
+      mesh.vert_positions(), mesh.faces(), mesh.corner_verts(), data.corner_tris);
+  bke::mesh::corner_tris_calc_face_indices(mesh.faces(), data.tri_faces);
+  return data;
+}
+
 static int material_index_for_primitive(const Object &object,
                                         const int primitive_id,
                                         const Span<int> tri_faces,
@@ -767,14 +811,18 @@ static blender::Material *material_from_index(Object *object, const int material
 static bool collect_image_primitives_by_material(RenderEngine *engine,
                                                  const BakeImage &image,
                                                  const Object &object,
+                                                 const BakeTriData &tri_data,
                                                  const Mesh &mesh,
+                                                 BakePrimitiveMask &r_primitive_mask,
                                                  Map<int, VectorSet<int>> &r_primitives_by_material)
 {
-  const Span<int> tri_faces = mesh.corner_tri_faces();
+  const Span<int> tri_faces = tri_data.tri_faces;
   const bke::AttributeAccessor attributes = mesh.attributes();
   const VArraySpan<int> material_indices = *attributes.lookup<int>("material_index",
                                                                    bke::AttrDomain::Face);
   const BakePixel *pixels = engine->bake.pixels + image.offset;
+  r_primitive_mask.primitive_ids = Array<int>(int64_t(image.width) * int64_t(image.height), -1);
+  r_primitive_mask.has_valid_pixels = false;
 
   for (int y = 0; y < image.height; y++) {
     for (int x = 0; x < image.width; x++) {
@@ -787,6 +835,9 @@ static bool collect_image_primitives_by_material(RenderEngine *engine,
             engine, "Eevee Color Bake primitive index is outside the evaluated mesh triangle range");
         return false;
       }
+
+      r_primitive_mask.primitive_ids[y * image.width + x] = pixel.primitive_id;
+      r_primitive_mask.has_valid_pixels = true;
 
       const int material_index = material_index_for_primitive(
           object, pixel.primitive_id, tri_faces, material_indices);
@@ -1077,6 +1128,7 @@ static float4 attribute_value_for_corner(const Mesh &mesh,
 
 static gpu::Batch *build_bake_batch_for_material(RenderEngine *engine,
                                                  const BakeImage &image,
+                                                 const BakeTriData &tri_data,
                                                  const Mesh &mesh,
                                                  const StringRef bake_uv_name,
                                                  const Span<int> primitive_ids,
@@ -1105,12 +1157,15 @@ static gpu::Batch *build_bake_batch_for_material(RenderEngine *engine,
       &format, "bake_uv", gpu::VertAttrType::SFLOAT_32_32);
   const uint geom_nor_attr = GPU_vertformat_attr_add(
       &format, "geom_nor", gpu::VertAttrType::SFLOAT_32_32_32);
+  const uint primitive_id_attr = GPU_vertformat_attr_add(
+      &format, "primitive_id", gpu::VertAttrType::SINT_32);
 
   Set<std::string> added_attribute_names;
   added_attribute_names.add("pos");
   added_attribute_names.add("nor");
   added_attribute_names.add("bake_uv");
   added_attribute_names.add("geom_nor");
+  added_attribute_names.add("primitive_id");
 
   Vector<BakeBatchAttribute> batch_attributes;
   Vector<BakeBatchTangentLayer> tangent_layers;
@@ -1131,8 +1186,8 @@ static gpu::Batch *build_bake_batch_for_material(RenderEngine *engine,
     }
   }
 
-  const Span<int3> corner_tris = mesh.corner_tris();
-  const Span<int> tri_faces = mesh.corner_tri_faces();
+  const Span<int3> corner_tris = tri_data.corner_tris;
+  const Span<int> tri_faces = tri_data.tri_faces;
   const Span<int> corner_verts = mesh.corner_verts();
   const Span<float3> positions = mesh.vert_positions();
   const Span<float3> face_normals = mesh.face_normals();
@@ -1153,11 +1208,14 @@ static gpu::Batch *build_bake_batch_for_material(RenderEngine *engine,
       const float3 normal = corner_normals[corner];
       const float2 uv = bake_uvs[corner];
       const float2 bake_uv = uv - float2(image.uv_offset);
+      const float2 raster_uv = bake_uv -
+                               float2(0.001f / float(image.width), 0.002f / float(image.height));
 
       GPU_vertbuf_attr_set(vbo, pos_attr, vertex_i, &position);
       GPU_vertbuf_attr_set(vbo, nor_attr, vertex_i, &normal);
-      GPU_vertbuf_attr_set(vbo, bake_uv_attr, vertex_i, &bake_uv);
+      GPU_vertbuf_attr_set(vbo, bake_uv_attr, vertex_i, &raster_uv);
       GPU_vertbuf_attr_set(vbo, geom_nor_attr, vertex_i, &geometry_normal);
+      GPU_vertbuf_attr_set(vbo, primitive_id_attr, vertex_i, &primitive_id);
 
       for (const BakeBatchAttribute &batch_attr : batch_attributes) {
         const float4 value = (batch_attr.tangent_layer == -1) ?
@@ -1247,6 +1305,7 @@ static void draw_bake_light_shader_surface_context(
     Instance &inst,
     const Vector<BakeDrawGroup> &draw_groups,
     const draw::ResourceHandleRange resource_handle,
+    gpu::Texture *primitive_tx,
     draw::Texture &position_tx,
     draw::Texture &normal_tx,
     draw::View &view)
@@ -1266,7 +1325,9 @@ static void draw_bake_light_shader_surface_context(
     if (group.batch == nullptr) {
       continue;
     }
-    pass.sub(material_name(group.material)).draw(group.batch, resource_handle);
+    PassSimple::Sub &sub = pass.sub(material_name(group.material));
+    sub.bind_texture("bake_primitive_tx", primitive_tx);
+    sub.draw(group.batch, resource_handle);
   }
 
   inst.manager->submit(pass, view);
@@ -1277,10 +1338,33 @@ static bool draw_bake_groups(RenderEngine *engine,
                              Instance &inst,
                              const Vector<BakeDrawGroup> &draw_groups,
                              const draw::ResourceHandleRange resource_handle,
+                             const BakePrimitiveMask &primitive_mask,
                              RenderPass *combined_pass,
                              const int width,
                              const int height)
 {
+  if (!primitive_mask.has_valid_pixels) {
+    std::fill_n(combined_pass->ibuf->float_buffer.data,
+                int64_t(width) * int64_t(height) * 4,
+                0.0f);
+    return true;
+  }
+
+  gpu::Texture *primitive_tx = GPU_texture_create_2d("EeveeColorBake.PrimitiveMask",
+                                                     width,
+                                                     height,
+                                                     1,
+                                                     gpu::TextureFormat::SINT_32,
+                                                     GPU_TEXTURE_USAGE_SHADER_READ,
+                                                     nullptr);
+  if (primitive_tx == nullptr) {
+    eevee_bake_report_error(engine, "Eevee Color Bake failed to create the primitive mask");
+    return false;
+  }
+  GPU_texture_update(primitive_tx, GPU_DATA_INT, primitive_mask.primitive_ids.data());
+  GPU_texture_filter_mode(primitive_tx, false);
+  GPU_texture_extend_mode(primitive_tx, GPU_SAMPLER_EXTEND_MODE_EXTEND);
+
   draw::Texture color_tx("EeveeColorBake.Color");
   color_tx.ensure_2d(gpu::TextureFormat::SFLOAT_32_32_32_32,
                      int2(width, height),
@@ -1331,6 +1415,7 @@ static bool draw_bake_groups(RenderEngine *engine,
 
   for (int sample : IndexRange(sample_count)) {
     if (RE_engine_test_break(engine)) {
+      GPU_TEXTURE_FREE_SAFE(primitive_tx);
       return false;
     }
 
@@ -1348,6 +1433,7 @@ static bool draw_bake_groups(RenderEngine *engine,
       draw_bake_light_shader_surface_context(inst,
                                              draw_groups,
                                              resource_handle,
+                                             primitive_tx,
                                              light_shader_position_tx,
                                              light_shader_normal_tx,
                                              view);
@@ -1367,6 +1453,7 @@ static bool draw_bake_groups(RenderEngine *engine,
       PassSimple::Sub &sub = pass.sub(material_name(group.material));
       sub.material_set(*inst.manager, group.gpumat, false);
       bind_bake_resources(sub, inst);
+      sub.bind_texture("bake_primitive_tx", primitive_tx);
       sub.push_constant("surface_cull_mode",
                         int(BKE_material_surface_cull_method_get(group.material)));
       sub.draw(group.batch, resource_handle);
@@ -1380,6 +1467,7 @@ static bool draw_bake_groups(RenderEngine *engine,
     float4 *readback = color_tx.read<float4>(GPU_DATA_FLOAT);
     if (readback == nullptr) {
       eevee_bake_report_error(engine, "Eevee Color Bake failed to read back the GPU result");
+      GPU_TEXTURE_FREE_SAFE(primitive_tx);
       return false;
     }
 
@@ -1403,6 +1491,7 @@ static bool draw_bake_groups(RenderEngine *engine,
   }
   std::memcpy(
       combined_pass->ibuf->float_buffer.data, accumulated_color.data(), sizeof(float4) * pixel_count);
+  GPU_TEXTURE_FREE_SAFE(primitive_tx);
   return true;
 }
 
@@ -1416,8 +1505,12 @@ static bool run_gpu_bake(RenderEngine *engine,
                          const int width,
                          const int height)
 {
+  BakeTriData tri_data = bake_tri_data_from_mesh(mesh);
+  BakePrimitiveMask primitive_mask;
   Map<int, VectorSet<int>> primitives_by_material;
-  if (!collect_image_primitives_by_material(engine, image, *object, mesh, primitives_by_material)) {
+  if (!collect_image_primitives_by_material(
+          engine, image, *object, tri_data, mesh, primitive_mask, primitives_by_material))
+  {
     return false;
   }
 
@@ -1522,7 +1615,7 @@ static bool run_gpu_bake(RenderEngine *engine,
         }
 
         gpu::Batch *batch = build_bake_batch_for_material(
-            engine, image, mesh, bake_uv_name, item.value.as_span(), material, gpumat);
+            engine, image, tri_data, mesh, bake_uv_name, item.value.as_span(), material, gpumat);
         if (batch == nullptr) {
           ok = false;
           break;
@@ -1547,7 +1640,13 @@ static bool run_gpu_bake(RenderEngine *engine,
       manager.end_sync();
 
       if (ok && !draw_groups.is_empty()) {
-        ok = draw_bake_groups(engine, inst, draw_groups, resource_handle, combined_pass, width, height);
+        ok = draw_bake_groups(
+            engine, inst, draw_groups, resource_handle, primitive_mask, combined_pass, width, height);
+      }
+      else if (ok) {
+        std::fill_n(combined_pass->ibuf->float_buffer.data,
+                    int64_t(width) * int64_t(height) * 4,
+                    0.0f);
       }
 
       for (BakeDrawGroup &group : draw_groups) {

@@ -28,15 +28,37 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_surf_bake_color)
 float g_thickness;
 float3 g_forward_lighting_P;
 
+float bake_closure_rand_get()
+{
+  float noise = utility_tx_fetch(utility_tx, gl_FragCoord.xy, UTIL_BLUE_NOISE_LAYER).r;
+  return fract(noise + sampling_rng_1D_get(SAMPLING_CLOSURE));
+}
+
+void bake_closure_tree_reset(float closure_rand)
+{
+  closure_weights_reset(closure_rand);
+  g_closure_reflection_bin = true;
+#ifdef MAT_BAKE_COLOR
+  g_bake_principled_depth = 0;
+#endif
+}
+
+void bake_color_accumulator_reset()
+{
+#ifdef MAT_BAKE_COLOR
+  g_bake_color = float3(0.0f);
+  g_bake_color_weight = 0.0f;
+  g_bake_principled_depth = 0;
+#endif
+}
+
 float4 bake_closure_to_rgba()
 {
   float3 radiance, transmittance;
   forward_lighting_eval(g_forward_lighting_P, g_thickness, radiance, transmittance);
 
   /* Reset for the next closure tree, matching the regular forward path. */
-  float noise = utility_tx_fetch(utility_tx, gl_FragCoord.xy, UTIL_BLUE_NOISE_LAYER).r;
-  float closure_rand = fract(noise + sampling_rng_1D_get(SAMPLING_CLOSURE));
-  closure_weights_reset(closure_rand);
+  bake_closure_tree_reset(bake_closure_rand_get());
 
   return float4(radiance, saturate(1.0f - average(transmittance)));
 }
@@ -139,6 +161,12 @@ float4 TextureHandle_eval(TextureHandle tex)
 
 void main()
 {
+  int2 texel = int2(gl_FragCoord.xy);
+  if (texelFetch(bake_primitive_tx, texel, 0).r != bake_interp.primitive_id) {
+    gpu_discard_fragment();
+    return;
+  }
+
   material_surface_cull_discard();
   init_globals();
   /* UV-space front-facing is defined by UV triangle winding, not by the source mesh surface.
@@ -148,12 +176,13 @@ void main()
   g_data.Ng = safe_normalize(bake_interp.Ng);
   fragment_displacement();
 
-  float noise = utility_tx_fetch(utility_tx, gl_FragCoord.xy, UTIL_BLUE_NOISE_LAYER).r;
-  float closure_rand = fract(noise + sampling_rng_1D_get(SAMPLING_CLOSURE));
+  float closure_rand = bake_closure_rand_get();
 
   g_forward_lighting_P = g_data.P;
   g_thickness = nodetree_thickness() * thickness_mode;
 
+  bake_color_accumulator_reset();
+  bake_closure_tree_reset(closure_rand);
   nodetree_surface(closure_rand);
 
   float3 albedo = bake_color_resolve();

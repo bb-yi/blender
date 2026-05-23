@@ -14,6 +14,12 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_bake_light_shader_surface)
 
 void main()
 {
+  int2 texel = int2(gl_FragCoord.xy);
+  if (texelFetch(bake_primitive_tx, texel, 0).r != bake_interp.primitive_id) {
+    gpu_discard_fragment();
+    return;
+  }
+
   out_position = float4(interp.P, 1.0f);
   out_normal = float4(normalize(bake_interp.Ng), 1.0f);
 }

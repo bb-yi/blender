@@ -20,6 +20,8 @@
 #  include "eevee_uniform_infos.hh"
 #endif
 
+#define EEVEE_BAKE_PRIMITIVE_TEX_SLOT FILTER_AOV_VALUE_TEX_SLOT
+
 #ifdef GLSL_CPP_STUBS
 #  define MAT_TRANSPARENT
 #endif
@@ -35,6 +37,7 @@ DEFINE("LIGHT_ITER_FORCE_NO_CULLING")
 BUILTINS(BuiltinBits::NO_PREPROCESSOR)
 PUSH_CONSTANT(int, surface_cull_mode)
 FRAGMENT_OUT(0, float4, out_color)
+SAMPLER(EEVEE_BAKE_PRIMITIVE_TEX_SLOT, isampler2D, bake_primitive_tx)
 SAMPLER(LIGHT_SHADER_TEX_SLOT, sampler2DArray, light_shader_tx)
 STORAGE_BUF(LIGHT_SHADER_INDEX_BUF_SLOT, read, int, light_shader_index_buf[])
 STORAGE_BUF(LIGHT_SHADER_UNIFORM_BUF_SLOT, read, float4, light_shader_uniform_buf[])
@@ -50,6 +53,7 @@ GPU_SHADER_CREATE_END()
 GPU_SHADER_CREATE_INFO(eevee_bake_light_shader_surface)
 FRAGMENT_OUT(0, float4, out_position)
 FRAGMENT_OUT(1, float4, out_normal)
+SAMPLER(EEVEE_BAKE_PRIMITIVE_TEX_SLOT, isampler2D, bake_primitive_tx)
 FRAGMENT_SOURCE("eevee_bake_light_shader_surface_frag.glsl")
 GPU_SHADER_CREATE_END()
 

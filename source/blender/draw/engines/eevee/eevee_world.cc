@@ -48,8 +48,10 @@ blender::World *World::scene_world_get()
 
 float World::sun_threshold()
 {
-  /* No sun extraction during baking. */
-  if (inst_.is_baking()) {
+  /* No sun extraction during baking. Color bake reads light data from the CPU-side culling
+   * buffers, while world sunlight extraction is written on the GPU. Treating the extracted world
+   * sun as a regular bake light would make repeated bakes depend on stale GPU buffer contents. */
+  if (inst_.is_baking() || inst_.is_color_bake) {
     return 0.0;
   }
 

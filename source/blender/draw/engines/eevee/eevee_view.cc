@@ -507,6 +507,7 @@ namespace blender::eevee
               GPU_ATTACHMENT_NONE,
               GPU_ATTACHMENT_TEXTURE_CUBEFACE(inst_.sphere_probes.cubemap_tx_, face));
             GPU_framebuffer_bind(combined_fb_);
+            GPU_framebuffer_clear_color(combined_fb_, float4(0.0f));
             inst_.pipelines.world.render(view);
           }
         };
