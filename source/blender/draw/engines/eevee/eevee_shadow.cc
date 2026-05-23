@@ -920,8 +920,9 @@ void ShadowModule::sync_object(const Object *ob,
   shadow_ob.used = true;
   const bool is_initialized = shadow_ob.resource_handle.is_valid();
   const bool has_jittered_transparency = has_transparent_shadows && data_.use_jitter;
-  if (is_shadow_caster && (handle.recalc || !is_initialized || has_jittered_transparency)) {
-    viewport_history_invalidated_ |= inst_.is_viewport() && data_.use_jitter;
+  const bool caster_changed = handle.recalc || !is_initialized;
+  if (is_shadow_caster && (caster_changed || has_jittered_transparency)) {
+    viewport_history_invalidated_ |= inst_.is_viewport() && data_.use_jitter && caster_changed;
     if (handle.recalc && is_initialized) {
       past_casters_updated_.append(shadow_ob.resource_handle.raw());
     }
