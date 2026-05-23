@@ -12,11 +12,13 @@
 #include "node_shader_util.hh"
 #include "node_util.hh"
 
+#include "BKE_context.hh"
 #include "BKE_image.hh"
 #include "BKE_node_runtime.hh"
 
 #include "DNA_image_types.h"
 #include "DNA_node_types.h"
+#include "DNA_space_types.h"
 
 #include "BLI_memory_utils.hh"
 #include "BLI_set.hh"
@@ -36,6 +38,18 @@ namespace nodes::node_shader_parallax_cc {
 
 static CLG_LogRef LOG = {"node.shader.parallax"};
 static constexpr const char *parallax_helper_filename = "gpu_shader_material_parallax.glsl";
+static constexpr const char *parallax_plane_wrapper_filename =
+    "__node_parallax_plane_offset_runtime.glsl";
+static constexpr const char *parallax_plane_wrapper_name =
+    "node_parallax_plane_offset_runtime";
+static constexpr const char *parallax_image_steep_wrapper_filename =
+    "__node_parallax_image_steep_runtime.glsl";
+static constexpr const char *parallax_image_steep_wrapper_name =
+    "node_parallax_image_steep_runtime";
+static constexpr const char *parallax_image_occlusion_wrapper_filename =
+    "__node_parallax_image_occlusion_runtime.glsl";
+static constexpr const char *parallax_image_occlusion_wrapper_name =
+    "node_parallax_image_occlusion_runtime";
 static thread_local Set<std::string> active_height_helper_keys;
 static thread_local Vector<const bNode *> active_height_helper_nodes;
 
@@ -173,9 +187,10 @@ static bool closure_output_has_required_height_signature(const bNode &closure_ou
     return false;
   }
 
-  const bNodeSocket *color_socket = find_closure_output_socket_by_name(closure_output_node, "Color");
-  if (color_socket == nullptr || !ELEM(color_socket->type, SOCK_FLOAT, SOCK_VECTOR, SOCK_RGBA)) {
-    r_error = "Closure Output must expose a Float, Vector, or RGBA output item named 'Color'";
+  const bNodeSocket *height_socket = find_closure_output_socket_by_name(closure_output_node,
+                                                                       "Height");
+  if (height_socket == nullptr || height_socket->type != SOCK_FLOAT) {
+    r_error = "Closure Output must expose a Float output item named 'Height'";
     return false;
   }
 
@@ -213,12 +228,6 @@ static void mark_node_upstream_for_height_helper(const bNode &node,
   for (const bNodeSocket *input_socket : node_to_mark->input_sockets()) {
     mark_socket_upstream_for_height_helper(*input_socket, r_visited_nodes);
   }
-}
-
-static GPUType gpu_node_link_output_type(const GPUNodeLink &link)
-{
-  return (link.link_type == GPU_NODE_LINK_OUTPUT && link.output != nullptr) ? link.output->type :
-                                                                            GPU_NONE;
 }
 
 static const NodeShaderImageToClosure *image_to_closure_storage(const bNode &node)
@@ -367,9 +376,10 @@ static bool build_closure_output_height_helper(GPUMaterial *mat,
     return false;
   }
 
-  const bNodeSocket *color_socket = find_closure_output_socket_by_name(*closure_output_node, "Color");
-  const bNodeLink *color_source_link = find_any_direct_link(*color_socket);
-  const bNodeSocket *sample_socket = color_socket;
+  const bNodeSocket *height_socket = find_closure_output_socket_by_name(*closure_output_node,
+                                                                       "Height");
+  const bNodeLink *height_source_link = find_any_direct_link(*height_socket);
+  const bNodeSocket *sample_socket = height_socket;
 
   bNodeExecContext context = {};
   bNodeTree *helper_tree = const_cast<bNodeTree *>(&closure_output_node->owner_tree());
@@ -394,11 +404,11 @@ static bool build_closure_output_height_helper(GPUMaterial *mat,
   });
 
   Set<const bNode *> visited_nodes;
-  if (color_source_link != nullptr && color_source_link->fromnode != nullptr) {
-    mark_node_upstream_for_height_helper(*color_source_link->fromnode, visited_nodes);
+  if (height_source_link != nullptr && height_source_link->fromnode != nullptr) {
+    mark_node_upstream_for_height_helper(*height_source_link->fromnode, visited_nodes);
   }
   else {
-    mark_socket_upstream_for_height_helper(*color_socket, visited_nodes);
+    mark_socket_upstream_for_height_helper(*height_socket, visited_nodes);
   }
 
   GPU_material_closure_uv_source_push(mat, StringRefNull(uv_global_name));
@@ -406,43 +416,28 @@ static bool build_closure_output_height_helper(GPUMaterial *mat,
 
   ntreeExecGPUNodes(exec, mat, nullptr);
 
-  bNodeStack *color_stack = node_get_socket_stack(exec->stack, const_cast<bNodeSocket *>(sample_socket));
-  GPUNodeLink *color_link = (color_stack != nullptr) ? static_cast<GPUNodeLink *>(color_stack->data) :
-                                                       nullptr;
-  if (color_link == nullptr && color_stack != nullptr) {
-    color_link = GPU_constant(color_stack->vec);
+  bNodeStack *height_stack = node_get_socket_stack(exec->stack,
+                                                  const_cast<bNodeSocket *>(sample_socket));
+  GPUNodeLink *height_gpu_link = (height_stack != nullptr) ?
+                                     static_cast<GPUNodeLink *>(height_stack->data) :
+                                     nullptr;
+  if (height_gpu_link == nullptr && height_stack != nullptr) {
+    height_gpu_link = GPU_constant(height_stack->vec);
   }
-  if (color_link == nullptr) {
-    r_error = "Could not evaluate Parallax Height Source Color";
+  if (height_gpu_link == nullptr) {
+    r_error = "Could not evaluate Parallax Height Source Height";
     return false;
-  }
-
-  GPUType helper_return_type = GPU_VEC4;
-  const GPUType output_type = gpu_node_link_output_type(*color_link);
-  if (output_type == GPU_FLOAT) {
-    helper_return_type = GPU_FLOAT;
-  }
-  else if (ELEM(output_type, GPU_VEC2, GPU_VEC3)) {
-    helper_return_type = GPU_VEC3;
-  }
-  else if (output_type == GPU_NONE) {
-    if (sample_socket->type == SOCK_FLOAT) {
-      helper_return_type = GPU_FLOAT;
-    }
-    else if (sample_socket->type == SOCK_VECTOR) {
-      helper_return_type = GPU_VEC3;
-    }
   }
 
   release_active_helper();
   active_helper_released = true;
 
   const char *sub_function_name = GPU_material_split_sub_function(
-      mat, helper_return_type, &color_link, StringRefNull(wrapper_filename));
+      mat, GPU_FLOAT, &height_gpu_link, StringRefNull(wrapper_filename));
   r_helper.helper_name = helper_name;
   r_helper.uv_global_name = uv_global_name;
   r_helper.sub_function_name = sub_function_name;
-  r_helper.return_type = helper_return_type;
+  r_helper.return_type = GPU_FLOAT;
   r_helper.uses_image = false;
   return true;
 }
@@ -632,6 +627,59 @@ static std::string build_wrapper_source(const StringRef wrapper_name,
   return ss.str();
 }
 
+static std::string build_plane_offset_wrapper_source()
+{
+  std::stringstream ss;
+  ss << "void " << parallax_plane_wrapper_name << "(float3 uv_in, float scale, out float3 uv_out)\n";
+  ss << "{\n";
+  ss << "  node_parallax_plane_offset(uv_in, scale, uv_out);\n";
+  ss << "}\n";
+  return ss.str();
+}
+
+static void add_plane_offset_wrapper_source(GPUMaterial *mat)
+{
+  const Vector<StringRefNull> dependencies = {parallax_helper_filename};
+  const std::string wrapper_source = build_plane_offset_wrapper_source();
+  GPU_material_generated_source_add(
+      mat, parallax_plane_wrapper_filename, dependencies, wrapper_source.c_str());
+}
+
+static StringRefNull image_wrapper_name_for_mode(const int mode)
+{
+  return mode == SHD_PARALLAX_OCCLUSION ? parallax_image_occlusion_wrapper_name :
+                                          parallax_image_steep_wrapper_name;
+}
+
+static StringRefNull image_wrapper_filename_for_mode(const int mode)
+{
+  return mode == SHD_PARALLAX_OCCLUSION ? parallax_image_occlusion_wrapper_filename :
+                                          parallax_image_steep_wrapper_filename;
+}
+
+static std::string build_image_wrapper_source(const StringRef wrapper_name, const int mode)
+{
+  std::stringstream ss;
+  ss << "void " << wrapper_name
+     << "(sampler2D height_image, float3 uv_in, float scale, float midlevel, ";
+  ss << "float min_steps, float max_steps, float refinement_steps, out float3 uv_out)\n";
+  ss << "{\n";
+  ss << "  node_parallax_image_mode(height_image, uv_in, scale, midlevel, min_steps, ";
+  ss << "max_steps, refinement_steps, " << mode << ", uv_out);\n";
+  ss << "}\n";
+  return ss.str();
+}
+
+static void add_image_wrapper_source(GPUMaterial *mat,
+                                     const StringRef wrapper_name,
+                                     const StringRefNull wrapper_filename,
+                                     const int mode)
+{
+  const Vector<StringRefNull> dependencies = {parallax_helper_filename};
+  const std::string wrapper_source = build_image_wrapper_source(wrapper_name, mode);
+  GPU_material_generated_source_add(mat, wrapper_filename, dependencies, wrapper_source.c_str());
+}
+
 static int gpu_shader_parallax(GPUMaterial *mat,
                                bNode *node,
                                bNodeExecData * /*execdata*/,
@@ -657,7 +705,14 @@ static int gpu_shader_parallax(GPUMaterial *mat,
 
   if (node->custom1 == SHD_PARALLAX_PLANE_OFFSET) {
     ensure_uv_stack(mat, node, in);
-    return GPU_stack_link(mat, node, "node_parallax_plane_offset", in, out);
+    add_plane_offset_wrapper_source(mat);
+    return GPU_stack_link_custom(mat,
+                                 node,
+                                 parallax_plane_wrapper_name,
+                                 parallax_plane_wrapper_filename,
+                                 GPU_CUSTOM_NODE_DEPENDENCY_NONE,
+                                 in,
+                                 out);
   }
 
   const bNodeLink *height_link = nullptr;
@@ -669,6 +724,7 @@ static int gpu_shader_parallax(GPUMaterial *mat,
 
   GPUNodeStack *height_stack = find_input_stack_by_identifier(*node, in, "Height Source");
   HeightHelper height_helper;
+  bool uses_image_height_source = false;
   if (height_link->fromnode->is_type("ShaderNodeImageToClosure")) {
     if (!build_image_height_helper(mat, *height_link, helper_name, height_helper, height_stack)) {
       CLOG_WARN(&LOG,
@@ -678,6 +734,7 @@ static int gpu_shader_parallax(GPUMaterial *mat,
       set_fallback_outputs(mat, node, in, out);
       return 1;
     }
+    uses_image_height_source = true;
   }
   else if (height_link->fromnode->is_type("NodeClosureOutput")) {
     std::string error;
@@ -710,13 +767,31 @@ static int gpu_shader_parallax(GPUMaterial *mat,
 
   ensure_uv_stack(mat, node, in);
 
+  if (uses_image_height_source) {
+    const StringRefNull image_wrapper_name = image_wrapper_name_for_mode(node->custom1);
+    const StringRefNull image_wrapper_filename = image_wrapper_filename_for_mode(node->custom1);
+    add_image_wrapper_source(mat, image_wrapper_name, image_wrapper_filename, node->custom1);
+    return GPU_stack_link_custom(mat,
+                                 node,
+                                 image_wrapper_name,
+                                 image_wrapper_filename,
+                                 GPU_CUSTOM_NODE_DEPENDENCY_NONE,
+                                 in,
+                                 out);
+  }
+
   const std::string wrapper_source = build_wrapper_source(wrapper_name, height_helper, node->custom1);
   const Vector<StringRefNull> dependencies = {parallax_helper_filename};
   GPU_material_generated_source_add(
       mat, wrapper_filename.c_str(), dependencies, wrapper_source.c_str());
 
-  return GPU_stack_link_custom(
-      mat, node, wrapper_name.c_str(), wrapper_filename.c_str(), GPU_CUSTOM_NODE_DEPENDENCY_NONE, in, out);
+  return GPU_stack_link_custom(mat,
+                               node,
+                               wrapper_name.c_str(),
+                               wrapper_filename.c_str(),
+                               GPU_CUSTOM_NODE_DEPENDENCY_NONE,
+                               in,
+                               out);
 }
 
 static bool node_insert_link(bke::NodeInsertLinkParams &params)
