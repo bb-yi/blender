@@ -296,6 +296,11 @@ static std::string bake_uv_layer_name(const RenderEngine *engine, const Mesh &me
   return mesh.active_or_default_uv_map_name();
 }
 
+static bool bake_target_is_color_attribute(const BakeImage &image)
+{
+  return image.image == nullptr;
+}
+
 static bool validate_bake_request(RenderEngine *engine,
                                   Object *object,
                                   const int pass_type,
@@ -330,8 +335,10 @@ static bool validate_bake_request(RenderEngine *engine,
   }
   if (engine->re != nullptr && engine->re->scene != nullptr) {
     const BakeData &bake = engine->re->scene->r.bake;
-    if (bake.target != R_BAKE_TARGET_IMAGE_TEXTURES) {
-      eevee_bake_report_error(engine, "Eevee Color Bake only supports Image Textures targets");
+    if (!ELEM(bake.target, R_BAKE_TARGET_IMAGE_TEXTURES, R_BAKE_TARGET_VERTEX_COLORS)) {
+      eevee_bake_report_error(
+          engine,
+          "Eevee Color Bake only supports Image Textures or Active Color Attribute targets");
       return false;
     }
     if (bake.flag & R_BAKE_TO_ACTIVE) {
@@ -848,6 +855,48 @@ static bool collect_image_primitives_by_material(RenderEngine *engine,
   return true;
 }
 
+static bool collect_color_attribute_primitives_by_material(
+    RenderEngine *engine,
+    const BakeImage &image,
+    const Object &object,
+    const BakeTriData &tri_data,
+    const Mesh &mesh,
+    BakePrimitiveMask &r_primitive_mask,
+    Map<int, VectorSet<int>> &r_primitives_by_material)
+{
+  const Span<int> tri_faces = tri_data.tri_faces;
+  const bke::AttributeAccessor attributes = mesh.attributes();
+  const VArraySpan<int> material_indices = *attributes.lookup<int>("material_index",
+                                                                   bke::AttrDomain::Face);
+  const BakePixel *pixels = engine->bake.pixels + image.offset;
+  r_primitive_mask.primitive_ids = Array<int>(int64_t(image.width) * int64_t(image.height), -1);
+  r_primitive_mask.has_valid_pixels = false;
+
+  for (int y = 0; y < image.height; y++) {
+    for (int x = 0; x < image.width; x++) {
+      const int pixel_i = y * image.width + x;
+      const BakePixel &pixel = pixels[pixel_i];
+      if (pixel.object_id != engine->bake.object_id || pixel.primitive_id < 0) {
+        continue;
+      }
+      if (pixel.primitive_id >= tri_faces.size()) {
+        eevee_bake_report_error(
+            engine, "Eevee Color Bake primitive index is outside the evaluated mesh triangle range");
+        return false;
+      }
+
+      r_primitive_mask.primitive_ids[pixel_i] = pixel.primitive_id;
+      r_primitive_mask.has_valid_pixels = true;
+
+      const int material_index = material_index_for_primitive(
+          object, pixel.primitive_id, tri_faces, material_indices);
+      r_primitives_by_material.lookup_or_add_default(material_index).add(pixel_i);
+    }
+  }
+
+  return true;
+}
+
 static StringRefNull default_uv_name(const Mesh &mesh)
 {
   const StringRefNull default_name = mesh.default_uv_map_name();
@@ -1126,6 +1175,45 @@ static float4 attribute_value_for_corner(const Mesh &mesh,
   return value;
 }
 
+static float3 barycentric_point(const float3 &a,
+                                const float3 &b,
+                                const float3 &c,
+                                const float2 barycentric_uv)
+{
+  const float w0 = barycentric_uv.x;
+  const float w1 = barycentric_uv.y;
+  const float w2 = 1.0f - w0 - w1;
+  return a * w0 + b * w1 + c * w2;
+}
+
+static float4 barycentric_point(const float4 &a,
+                                const float4 &b,
+                                const float4 &c,
+                                const float2 barycentric_uv)
+{
+  const float w0 = barycentric_uv.x;
+  const float w1 = barycentric_uv.y;
+  const float w2 = 1.0f - w0 - w1;
+  return a * w0 + b * w1 + c * w2;
+}
+
+static float4 barycentric_attribute_value_for_primitive(const Mesh &mesh,
+                                                        const BakeTriData &tri_data,
+                                                        const GPUMaterialAttribute &attr,
+                                                        const int primitive_id,
+                                                        const float2 barycentric_uv)
+{
+  const int3 tri = tri_data.corner_tris[primitive_id];
+  const Span<int> tri_faces = tri_data.tri_faces;
+  const Span<int> corner_verts = mesh.corner_verts();
+  const int face = tri_faces[primitive_id];
+
+  const float4 v0 = attribute_value_for_corner(mesh, attr, tri[0], corner_verts[tri[0]], face);
+  const float4 v1 = attribute_value_for_corner(mesh, attr, tri[1], corner_verts[tri[1]], face);
+  const float4 v2 = attribute_value_for_corner(mesh, attr, tri[2], corner_verts[tri[2]], face);
+  return barycentric_point(v0, v1, v2, barycentric_uv);
+}
+
 static gpu::Batch *build_bake_batch_for_material(RenderEngine *engine,
                                                  const BakeImage &image,
                                                  const BakeTriData &tri_data,
@@ -1222,6 +1310,123 @@ static gpu::Batch *build_bake_batch_for_material(RenderEngine *engine,
                                  attribute_value_for_corner(
                                      mesh, *batch_attr.gpu_attr, corner, vert, face) :
                                  tangent_layers[batch_attr.tangent_layer].values[corner];
+        GPU_vertbuf_attr_set(vbo, batch_attr.format_attr, vertex_i, &value);
+      }
+    }
+  }
+
+  return GPU_batch_create_ex(GPU_PRIM_TRIS, vbo, nullptr, GPU_BATCH_OWNS_VBO);
+}
+
+static gpu::Batch *build_color_attribute_batch_for_material(RenderEngine *engine,
+                                                            const BakeImage &image,
+                                                            const BakeTriData &tri_data,
+                                                            const Mesh &mesh,
+                                                            const Span<int> pixel_ids,
+                                                            const blender::Material *material,
+                                                            const GPUMaterial *gpumat)
+{
+  if (pixel_ids.is_empty()) {
+    return nullptr;
+  }
+
+  GPUVertFormat format = {};
+  const uint pos_attr = GPU_vertformat_attr_add(
+      &format, "pos", gpu::VertAttrType::SFLOAT_32_32_32);
+  const uint nor_attr = GPU_vertformat_attr_add(
+      &format, "nor", gpu::VertAttrType::SFLOAT_32_32_32);
+  const uint bake_uv_attr = GPU_vertformat_attr_add(
+      &format, "bake_uv", gpu::VertAttrType::SFLOAT_32_32);
+  const uint geom_nor_attr = GPU_vertformat_attr_add(
+      &format, "geom_nor", gpu::VertAttrType::SFLOAT_32_32_32);
+  const uint primitive_id_attr = GPU_vertformat_attr_add(
+      &format, "primitive_id", gpu::VertAttrType::SINT_32);
+
+  Set<std::string> added_attribute_names;
+  added_attribute_names.add("pos");
+  added_attribute_names.add("nor");
+  added_attribute_names.add("bake_uv");
+  added_attribute_names.add("geom_nor");
+  added_attribute_names.add("primitive_id");
+
+  Vector<BakeBatchAttribute> batch_attributes;
+  Vector<BakeBatchTangentLayer> tangent_layers;
+  for (const GPUMaterialAttribute &gpu_attr : GPU_material_attributes(gpumat)) {
+    if (added_attribute_names.add(gpu_attr.input_name)) {
+      BakeBatchAttribute batch_attr;
+      batch_attr.gpu_attr = &gpu_attr;
+      batch_attr.format_attr = GPU_vertformat_attr_add(
+          &format, gpu_attr.input_name, gpu::VertAttrType::SFLOAT_32_32_32_32);
+      if (gpu_attr.type == CD_TANGENT) {
+        if (!ensure_tangent_layer(
+                engine, mesh, material, gpu_attr, tangent_layers, batch_attr.tangent_layer))
+        {
+          return nullptr;
+        }
+      }
+      batch_attributes.append(batch_attr);
+    }
+  }
+
+  const BakePixel *pixels = engine->bake.pixels + image.offset;
+  const Span<int3> corner_tris = tri_data.corner_tris;
+  const Span<int> tri_faces = tri_data.tri_faces;
+  const Span<int> corner_verts = mesh.corner_verts();
+  const Span<float3> positions = mesh.vert_positions();
+  const Span<float3> face_normals = mesh.face_normals();
+  const Span<float3> corner_normals = mesh.corner_normals();
+
+  gpu::VertBuf *vbo = GPU_vertbuf_create_with_format(format);
+  GPU_vertbuf_data_alloc(*vbo, pixel_ids.size() * 6);
+
+  int vertex_i = 0;
+  for (const int pixel_i : pixel_ids) {
+    const BakePixel &pixel = pixels[pixel_i];
+    const int primitive_id = pixel.primitive_id;
+    const int3 tri = corner_tris[primitive_id];
+    const int face = tri_faces[primitive_id];
+    const float2 barycentric_uv = float2(pixel.uv[0], pixel.uv[1]);
+    const float3 &geometry_normal = face_normals[face];
+    const float3 position = barycentric_point(positions[corner_verts[tri[0]]],
+                                              positions[corner_verts[tri[1]]],
+                                              positions[corner_verts[tri[2]]],
+                                              barycentric_uv);
+    const float3 normal = math::normalize(barycentric_point(corner_normals[tri[0]],
+                                                            corner_normals[tri[1]],
+                                                            corner_normals[tri[2]],
+                                                            barycentric_uv));
+
+    const int x = pixel_i % image.width;
+    const int y = pixel_i / image.width;
+    const float pixel_x0 = float(x) / float(image.width);
+    const float pixel_x1 = float(x + 1) / float(image.width);
+    const float pixel_y0 = float(y) / float(image.height);
+    const float pixel_y1 = float(y + 1) / float(image.height);
+    const float2 raster_uvs[6] = {
+        float2(pixel_x0, pixel_y0),
+        float2(pixel_x1, pixel_y0),
+        float2(pixel_x1, pixel_y1),
+        float2(pixel_x0, pixel_y0),
+        float2(pixel_x1, pixel_y1),
+        float2(pixel_x0, pixel_y1),
+    };
+
+    for (int tri_corner = 0; tri_corner < 6; tri_corner++, vertex_i++) {
+      GPU_vertbuf_attr_set(vbo, pos_attr, vertex_i, &position);
+      GPU_vertbuf_attr_set(vbo, nor_attr, vertex_i, &normal);
+      GPU_vertbuf_attr_set(vbo, bake_uv_attr, vertex_i, &raster_uvs[tri_corner]);
+      GPU_vertbuf_attr_set(vbo, geom_nor_attr, vertex_i, &geometry_normal);
+      GPU_vertbuf_attr_set(vbo, primitive_id_attr, vertex_i, &primitive_id);
+
+      for (const BakeBatchAttribute &batch_attr : batch_attributes) {
+        const float4 value = (batch_attr.tangent_layer == -1) ?
+                                 barycentric_attribute_value_for_primitive(
+                                     mesh, tri_data, *batch_attr.gpu_attr, primitive_id, barycentric_uv) :
+                                 barycentric_point(
+                                     tangent_layers[batch_attr.tangent_layer].values[tri[0]],
+                                     tangent_layers[batch_attr.tangent_layer].values[tri[1]],
+                                     tangent_layers[batch_attr.tangent_layer].values[tri[2]],
+                                     barycentric_uv);
         GPU_vertbuf_attr_set(vbo, batch_attr.format_attr, vertex_i, &value);
       }
     }
@@ -1508,8 +1713,12 @@ static bool run_gpu_bake(RenderEngine *engine,
   BakeTriData tri_data = bake_tri_data_from_mesh(mesh);
   BakePrimitiveMask primitive_mask;
   Map<int, VectorSet<int>> primitives_by_material;
-  if (!collect_image_primitives_by_material(
-          engine, image, *object, tri_data, mesh, primitive_mask, primitives_by_material))
+  const bool is_color_attribute_target = bake_target_is_color_attribute(image);
+  if (is_color_attribute_target ?
+          !collect_color_attribute_primitives_by_material(
+              engine, image, *object, tri_data, mesh, primitive_mask, primitives_by_material) :
+          !collect_image_primitives_by_material(
+              engine, image, *object, tri_data, mesh, primitive_mask, primitives_by_material))
   {
     return false;
   }
@@ -1614,8 +1823,22 @@ static bool run_gpu_bake(RenderEngine *engine,
           break;
         }
 
-        gpu::Batch *batch = build_bake_batch_for_material(
-            engine, image, tri_data, mesh, bake_uv_name, item.value.as_span(), material, gpumat);
+        gpu::Batch *batch = is_color_attribute_target ?
+                                 build_color_attribute_batch_for_material(engine,
+                                                                          image,
+                                                                          tri_data,
+                                                                          mesh,
+                                                                          item.value.as_span(),
+                                                                          material,
+                                                                          gpumat) :
+                                 build_bake_batch_for_material(engine,
+                                                               image,
+                                                               tri_data,
+                                                               mesh,
+                                                               bake_uv_name,
+                                                               item.value.as_span(),
+                                                               material,
+                                                               gpumat);
         if (batch == nullptr) {
           ok = false;
           break;

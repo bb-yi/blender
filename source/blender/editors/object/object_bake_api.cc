@@ -467,6 +467,29 @@ static bool is_noncolor_pass(eScenePassType pass_type)
               SCE_PASS_INDEXMA);
 }
 
+static bool active_color_attribute_bake_target_check(const Mesh &mesh, ReportList *reports)
+{
+  const StringRefNull attr_name = mesh.active_color_attribute;
+  const bke::AttributeAccessor attributes = mesh.attributes();
+  const std::optional<bke::AttributeMetaData> meta = attr_name.is_empty() ?
+                                                        std::nullopt :
+                                                        attributes.lookup_meta_data(attr_name);
+
+  if (!meta || !ELEM(meta->data_type, bke::AttrType::ColorByte, bke::AttrType::ColorFloat)) {
+    BKE_report(reports, RPT_ERROR, "No active color attribute to bake to");
+    return false;
+  }
+
+  if (!ELEM(meta->domain, bke::AttrDomain::Point, bke::AttrDomain::Corner)) {
+    BKE_report(reports,
+               RPT_ERROR,
+               "Active color attribute bake target must be on the Point or Corner domain");
+    return false;
+  }
+
+  return true;
+}
+
 /* if all is good tag image and return true */
 static bool bake_object_check(const Scene *scene,
                               ViewLayer *view_layer,
@@ -500,11 +523,7 @@ static bool bake_object_check(const Scene *scene,
   }
 
   if (target == R_BAKE_TARGET_VERTEX_COLORS) {
-    if (!BKE_id_attributes_color_find(&mesh->id, mesh->active_color_attribute)) {
-      BKE_reportf(reports,
-                  RPT_ERROR,
-                  "Mesh does not have an active color attribute \"%s\"",
-                  mesh->id.name + 2);
+    if (!active_color_attribute_bake_target_check(*mesh, reports)) {
       return false;
     }
   }
@@ -659,8 +678,10 @@ static bool bake_eevee_color_bake_check(const BakeAPIRender *bkr)
     BKE_report(bkr->reports, RPT_ERROR, "Eevee Color Bake only supports the Emit bake type");
     return false;
   }
-  if (bkr->target != R_BAKE_TARGET_IMAGE_TEXTURES) {
-    BKE_report(bkr->reports, RPT_ERROR, "Eevee Color Bake only supports Image Textures targets");
+  if (!ELEM(bkr->target, R_BAKE_TARGET_IMAGE_TEXTURES, R_BAKE_TARGET_VERTEX_COLORS)) {
+    BKE_report(bkr->reports,
+               RPT_ERROR,
+               "Eevee Color Bake only supports Image Textures or Active Color Attribute targets");
     return false;
   }
   if (bkr->is_selected_to_active) {
@@ -1044,8 +1065,7 @@ static bool bake_targets_init_vertex_colors(Main *bmain,
   }
 
   Mesh *mesh = id_cast<Mesh *>(ob->data);
-  if (!BKE_id_attributes_color_find(&mesh->id, mesh->active_color_attribute)) {
-    BKE_report(reports, RPT_ERROR, "No active color attribute to bake to");
+  if (!active_color_attribute_bake_target_check(*mesh, reports)) {
     return false;
   }
 
@@ -1212,7 +1232,7 @@ static void convert_float_color_to_byte_color(const ColorGeometry4f *float_color
 {
   if (is_noncolor) {
     for (int i = 0; i < num; i++) {
-      unit_float_to_uchar_clamp_v4(&byte_colors->r, float_colors[i]);
+      unit_float_to_uchar_clamp_v4(&byte_colors[i].r, float_colors[i]);
     }
   }
   else {

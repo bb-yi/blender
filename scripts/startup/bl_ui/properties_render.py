@@ -300,7 +300,7 @@ class RENDER_PT_eevee_bake(RenderButtonsPanel, Panel):
 
         col = layout.column(align=True)
         col.prop(bake, "target", text="Target")
-        col.prop(bake, "use_clear", text="Clear Image")
+        col.prop(bake, "use_clear", text="Clear Target")
         col.prop(bake, "margin")
         col.prop(bake, "margin_type")
 
