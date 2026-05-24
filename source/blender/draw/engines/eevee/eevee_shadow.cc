@@ -10,6 +10,7 @@
 
 #include "BLI_math_matrix.hh"
 #include "GPU_batch_utils.hh"
+#include "GPU_capabilities.hh"
 #include "GPU_compute.hh"
 
 #include "GPU_context.hh"
@@ -760,29 +761,93 @@ void ShadowModule::init()
   data_.ray_count = clamp_i(scene.eevee.shadow_ray_count, 1, SHADOW_MAX_RAY);
   data_.step_count = clamp_i(scene.eevee.shadow_step_count, 1, SHADOW_MAX_STEP);
 
-  /* Pool size is in MBytes. */
-  const size_t pool_byte_size = enabled_ ? scene.eevee.shadow_pool_size * square_i(1024) : 1;
-  const size_t page_byte_size = square_i(shadow_page_size_) * sizeof(int);
-  shadow_page_len_ = int(divide_ceil_ul(pool_byte_size, page_byte_size));
-  shadow_page_len_ = min_ii(shadow_page_len_, SHADOW_MAX_PAGE);
-
   const int2 atlas_extent = shadow_page_size_ * int2(SHADOW_PAGE_PER_ROW);
-  const int atlas_layers = divide_ceil_u(shadow_page_len_, SHADOW_PAGE_PER_LAYER);
 
   eGPUTextureUsage tex_usage = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE;
   if (ShadowModule::shadow_technique == ShadowTechnique::ATOMIC_RASTER) {
     tex_usage |= GPU_TEXTURE_USAGE_ATOMIC;
   }
-  if (atlas_tx_.ensure_2d_array(atlas_type, atlas_extent, atlas_layers, tex_usage)) {
-    /* Global update. */
-    do_full_update_ = true;
+
+  const int previous_pool_size_requested = shadow_pool_size_requested_;
+  shadow_pool_size_requested_ = enabled_ ? max_ii(scene.eevee.shadow_pool_size, 16) : 0;
+  const bool keep_degraded_pool = enabled_ && atlas_tx_.is_valid() &&
+                                  (previous_pool_size_requested == shadow_pool_size_requested_) &&
+                                  (shadow_pool_size_allocated_ > 0) &&
+                                  (shadow_pool_size_allocated_ < shadow_pool_size_requested_);
+
+  const size_t page_byte_size = square_i(shadow_page_size_) * sizeof(int);
+  const uint64_t requested_pool_byte_size = uint64_t(shadow_pool_size_requested_) * square_i(1024);
+  const int requested_page_len = enabled_ ?
+                                     max_ii(1,
+                                            int(divide_ceil_ul(requested_pool_byte_size,
+                                                               page_byte_size))) :
+                                     1;
+  const uint64_t max_hardware_page_len = uint64_t(max_ii(1, GPU_max_texture_layers())) *
+                                         SHADOW_PAGE_PER_LAYER;
+  const int max_page_len = int(max_hardware_page_len < uint64_t(SHADOW_MAX_PAGE) ?
+                                   max_hardware_page_len :
+                                   uint64_t(SHADOW_MAX_PAGE));
+  const int clamped_page_len = min_ii(requested_page_len, max_page_len);
+
+  if (!keep_degraded_pool) {
+    int pool_size_to_try = min_ii(
+        shadow_pool_size_requested_,
+        int((uint64_t(clamped_page_len) * page_byte_size) / square_i(1024)));
+    pool_size_to_try = power_of_2_min_i(max_ii(16, pool_size_to_try));
+    pool_size_to_try = min_ii(pool_size_to_try, shadow_pool_size_requested_);
+    for (; enabled_ && pool_size_to_try >= 16; pool_size_to_try /= 2) {
+      const uint64_t pool_byte_size = uint64_t(pool_size_to_try) * square_i(1024);
+      const int page_len = min_ii(
+          clamped_page_len, int(divide_ceil_ul(pool_byte_size, page_byte_size)));
+      const int atlas_layers = divide_ceil_u(page_len, SHADOW_PAGE_PER_LAYER);
+
+      const bool created = atlas_tx_.ensure_2d_array(
+          ShadowModule::atlas_type, atlas_extent, atlas_layers, tex_usage);
+      if (atlas_tx_.is_valid()) {
+        const int allocated_size = int((uint64_t(page_len) * page_byte_size) / square_i(1024));
+        if (created || shadow_page_len_ != page_len ||
+            shadow_pool_size_allocated_ != allocated_size)
+        {
+          do_full_update_ = true;
+        }
+        shadow_page_len_ = page_len;
+        shadow_pool_size_allocated_ = allocated_size;
+        break;
+      }
+      shadow_pool_size_allocated_ = 0;
+      atlas_tx_.free();
+    }
+    if (enabled_ && shadow_pool_size_allocated_ == 0) {
+      shadow_page_len_ = 0;
+    }
   }
 
-  /* Make allocation safe. Avoids crash later on. */
+  if (!enabled_) {
+    if (shadow_page_len_ != 1 || shadow_pool_size_allocated_ != 0) {
+      do_full_update_ = true;
+    }
+    shadow_page_len_ = 1;
+    shadow_pool_size_allocated_ = 0;
+    if (atlas_tx_.ensure_2d_array(ShadowModule::atlas_type, int2(1), 1)) {
+      do_full_update_ = true;
+    }
+  }
+
+  /* Make allocation safe. Avoids crashes later on. */
   if (!atlas_tx_.is_valid()) {
-    atlas_tx_.ensure_2d_array(ShadowModule::atlas_type, int2(1), 1);
+    atlas_tx_.free();
+    do_full_update_ |= shadow_page_len_ != 0 || shadow_pool_size_allocated_ != 0;
+    shadow_page_len_ = 0;
+    shadow_pool_size_allocated_ = 0;
+    do_full_update_ |= atlas_tx_.ensure_2d_array(ShadowModule::atlas_type, int2(1), 1);
     inst_.info_append_i18n(
         "Error: Could not allocate shadow atlas. Most likely out of GPU memory.");
+  }
+  else if (enabled_ && shadow_pool_size_allocated_ != shadow_pool_size_requested_) {
+    inst_.info_append_i18n(
+        "Warning: Could not allocate shadow pool of {} MB, using {} MB instead.",
+        shadow_pool_size_requested_,
+        shadow_pool_size_allocated_);
   }
 
   /* Read end of the swap-chain to avoid stall. */

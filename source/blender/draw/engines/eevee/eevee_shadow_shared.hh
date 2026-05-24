@@ -202,13 +202,24 @@ enum [[host_shared]] eShadowFlag : uint32_t {
   SHADOW_IS_USED = (1u << 31u)
 };
 
-/* NOTE: Trust the input to be in valid range (max is [3,3,255]).
- * If it is in valid range, it should pack to 12bits so that `shadow_tile_pack()` can use it.
- * But sometime this is used to encode invalid pages uint3(-1) and it needs to output uint(-1).
+/* Page and cache indices share the same 15 bit payload in packed tile data. */
+#define SHADOW_PAGE_MASK 32767u
+#define SHADOW_PAGE_PER_LAYER_LOD 4u
+#define SHADOW_PAGE_LAYER_MASK 2047u
+#define SHADOW_SAMPLING_TILE_LOD_MASK 7u
+#define SHADOW_SAMPLING_TILE_LOD_OFFSET_BITS 7u
+#define SHADOW_SAMPLING_TILE_LOD_OFFSET_MASK 127u
+
+/* NOTE: Trust the input to be in valid range (max is [3,3,2047]).
+ * If it is in valid range, it should pack to 15 bits so that `shadow_tile_pack()` can use it.
+ * Sometimes this is used to encode invalid pages like uint3(-1). Callers that care about
+ * invalid values must check the original packed value or tile flags, not the unpacked page.
  */
 static inline uint shadow_page_pack(uint3 page)
 {
-  return (page.x << 0u) | (page.y << 2u) | (page.z << 4u);
+  BLI_STATIC_ASSERT(SHADOW_PAGE_PER_ROW <= 4 && SHADOW_PAGE_PER_COL <= 4, "Update page packing")
+  BLI_STATIC_ASSERT(SHADOW_MAX_PAGE <= 32768, "Update page packing")
+  return (page.x << 0u) | (page.y << 2u) | (page.z << SHADOW_PAGE_PER_LAYER_LOD);
 }
 static inline uint3 shadow_page_unpack(uint data)
 {
@@ -216,36 +227,43 @@ static inline uint3 shadow_page_unpack(uint data)
   BLI_STATIC_ASSERT(SHADOW_PAGE_PER_ROW <= 4 && SHADOW_PAGE_PER_COL <= 4, "Update page packing")
   page.x = (data >> 0u) & 3u;
   page.y = (data >> 2u) & 3u;
-  BLI_STATIC_ASSERT(SHADOW_MAX_PAGE <= 4096, "Update page packing")
-  page.z = (data >> 4u) & 255u;
+  BLI_STATIC_ASSERT(SHADOW_MAX_PAGE <= 32768, "Update page packing")
+  page.z = (data >> SHADOW_PAGE_PER_LAYER_LOD) & SHADOW_PAGE_LAYER_MASK;
   return page;
 }
 
 static inline ShadowTileData shadow_tile_unpack(ShadowTileDataPacked data)
 {
   ShadowTileData tile;
-  tile.page = shadow_page_unpack(data);
-  /* -- 12 bits -- */
-  /* Unused bits. */
+  uint payload = data & SHADOW_PAGE_MASK;
   /* -- 15 bits -- */
-  BLI_STATIC_ASSERT(SHADOW_MAX_PAGE <= 4096, "Update page packing")
-  tile.cache_index = (data >> 15u) & 4095u;
+  /* Unused bits. */
   /* -- 27 bits -- */
   tile.is_used = (data & SHADOW_IS_USED) != 0;
   tile.is_cached = (data & SHADOW_IS_CACHED) != 0;
   tile.is_allocated = (data & SHADOW_IS_ALLOCATED) != 0;
   tile.is_rendered = (data & SHADOW_IS_RENDERED) != 0;
   tile.do_update = (data & SHADOW_DO_UPDATE) != 0;
+  if (tile.is_cached && !tile.is_allocated) {
+    tile.page = uint3(~0u);
+    tile.cache_index = payload;
+  }
+  else {
+    tile.page = shadow_page_unpack(payload);
+    tile.cache_index = uint(-1);
+  }
   return tile;
 }
 
 static inline ShadowTileDataPacked shadow_tile_pack(ShadowTileData tile)
 {
-  uint data;
-  /* NOTE: Page might be set to invalid values for tracking invalid usages.
-   * So we have to mask the result. */
-  data = shadow_page_pack(tile.page) & uint(SHADOW_MAX_PAGE - 1);
-  data |= (tile.cache_index & 4095u) << 15u;
+  uint data = 0;
+  if (tile.is_cached && !tile.is_allocated) {
+    data = tile.cache_index & SHADOW_PAGE_MASK;
+  }
+  else {
+    data = shadow_page_pack(tile.page) & SHADOW_PAGE_MASK;
+  }
   data |= (tile.is_used ? uint(SHADOW_IS_USED) : 0);
   data |= (tile.is_allocated ? uint(SHADOW_IS_ALLOCATED) : 0);
   data |= (tile.is_cached ? uint(SHADOW_IS_CACHED) : 0);
@@ -272,30 +290,28 @@ struct ShadowSamplingTile {
 /** \note Stored packed as a uint. */
 #define ShadowSamplingTilePacked uint
 
-/* NOTE: Trust the input to be in valid range [0, (1 << SHADOW_TILEMAP_MAX_CLIPMAP_LOD) - 1].
- * Maximum LOD level index we can store is SHADOW_TILEMAP_MAX_CLIPMAP_LOD,
- * so we need SHADOW_TILEMAP_MAX_CLIPMAP_LOD bits to store the offset in each dimension.
- * Result fits into SHADOW_TILEMAP_MAX_CLIPMAP_LOD * 2 bits. */
+/* NOTE: Trust the input to be in valid range [0, 127]. */
 static inline uint shadow_lod_offset_pack(uint2 ofs)
 {
   BLI_STATIC_ASSERT(SHADOW_TILEMAP_MAX_CLIPMAP_LOD <= 8, "Update page packing")
-  return ofs.x | (ofs.y << SHADOW_TILEMAP_MAX_CLIPMAP_LOD);
+  return (ofs.x & SHADOW_SAMPLING_TILE_LOD_OFFSET_MASK) |
+         ((ofs.y & SHADOW_SAMPLING_TILE_LOD_OFFSET_MASK) <<
+          SHADOW_SAMPLING_TILE_LOD_OFFSET_BITS);
 }
 static inline uint2 shadow_lod_offset_unpack(uint data)
 {
-  return (uint2(data) >> uint2(0, SHADOW_TILEMAP_MAX_CLIPMAP_LOD)) &
-         uint2((1 << SHADOW_TILEMAP_MAX_CLIPMAP_LOD) - 1);
+  return (uint2(data) >> uint2(0, SHADOW_SAMPLING_TILE_LOD_OFFSET_BITS)) &
+         uint2(SHADOW_SAMPLING_TILE_LOD_OFFSET_MASK);
 }
 
 static inline ShadowSamplingTile shadow_sampling_tile_unpack(ShadowSamplingTilePacked data)
 {
   ShadowSamplingTile tile;
   tile.page = shadow_page_unpack(data);
-  /* -- 12 bits -- */
-  /* Max value is actually SHADOW_TILEMAP_MAX_CLIPMAP_LOD but we mask the bits. */
-  tile.lod = (data >> 12u) & 15u;
-  /* -- 16 bits -- */
-  tile.lod_offset = shadow_lod_offset_unpack(data >> 16u);
+  /* -- 15 bits -- */
+  tile.lod = (data >> 15u) & SHADOW_SAMPLING_TILE_LOD_MASK;
+  /* -- 18 bits -- */
+  tile.lod_offset = shadow_lod_offset_unpack(data >> 18u);
   /* -- 32 bits -- */
   tile.is_valid = data != 0u;
 #ifndef GPU_SHADER
@@ -318,10 +334,9 @@ static inline ShadowSamplingTilePacked shadow_sampling_tile_pack(ShadowSamplingT
   if (tile.lod == 0) {
     tile.lod_offset.x = 1;
   }
-  uint data = shadow_page_pack(tile.page);
-  /* Max value is actually SHADOW_TILEMAP_MAX_CLIPMAP_LOD but we mask the bits. */
-  data |= (tile.lod & 15u) << 12u;
-  data |= shadow_lod_offset_pack(tile.lod_offset) << 16u;
+  uint data = shadow_page_pack(tile.page) & SHADOW_PAGE_MASK;
+  data |= (tile.lod & SHADOW_SAMPLING_TILE_LOD_MASK) << 15u;
+  data |= shadow_lod_offset_pack(tile.lod_offset) << 18u;
   return data;
 }
 
@@ -342,3 +357,10 @@ static inline ShadowSamplingTile shadow_sampling_tile_create(ShadowTileData tile
 #ifndef GPU_SHADER
 }  // namespace blender::eevee
 #endif
+
+#undef SHADOW_SAMPLING_TILE_LOD_OFFSET_MASK
+#undef SHADOW_SAMPLING_TILE_LOD_OFFSET_BITS
+#undef SHADOW_SAMPLING_TILE_LOD_MASK
+#undef SHADOW_PAGE_LAYER_MASK
+#undef SHADOW_PAGE_PER_LAYER_LOD
+#undef SHADOW_PAGE_MASK
