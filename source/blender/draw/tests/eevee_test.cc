@@ -23,6 +23,13 @@ using namespace blender::eevee;
 using ShadowPageCacheBuf = draw::StorageArrayBuffer<uint2, SHADOW_MAX_PAGE, false>;
 using ShadowTileDataBuf = draw::StorageArrayBuffer<ShadowTileDataPacked, SHADOW_MAX_TILE, false>;
 
+static uint3 shadow_page_from_index(uint page_index)
+{
+  return uint3((page_index % SHADOW_PAGE_PER_ROW),
+               (page_index / SHADOW_PAGE_PER_ROW) % SHADOW_PAGE_PER_COL,
+               (page_index / SHADOW_PAGE_PER_LAYER));
+}
+
 static void test_eevee_shadow_shift_clear()
 {
   GPU_render_begin();
@@ -385,18 +392,15 @@ static void test_eevee_shadow_free()
   int page_free_count = SHADOW_MAX_PAGE - 6;
 
   for (uint i : IndexRange(2, page_free_count)) {
-    uint3 page = uint3((i % SHADOW_PAGE_PER_ROW),
-                       (i / SHADOW_PAGE_PER_ROW) % SHADOW_PAGE_PER_COL,
-                       (i / SHADOW_PAGE_PER_LAYER));
-    pages_free_data[i] = shadow_page_pack(page);
+    pages_free_data[i] = shadow_page_pack(shadow_page_from_index(i));
   }
   pages_free_data.push_update();
 
   pages_infos_data.page_free_count = page_free_count;
   pages_infos_data.page_alloc_count = 0;
-  pages_infos_data.page_cached_next = 2u;
+  pages_infos_data.page_cached_next = 3u;
   pages_infos_data.page_cached_start = 0u;
-  pages_infos_data.page_cached_end = 2u;
+  pages_infos_data.page_cached_end = 3u;
   pages_infos_data.push_update();
 
   for (uint i : IndexRange(pages_cached_data.size())) {
@@ -404,6 +408,7 @@ static void test_eevee_shadow_free()
   }
   pages_cached_data[0] = uint2(0, tile_orphaned_cached);
   pages_cached_data[1] = uint2(1, tile_used_cached);
+  pages_cached_data[2] = uint2(2, tile_unused_cached);
   pages_cached_data.push_update();
 
   {
@@ -418,6 +423,7 @@ static void test_eevee_shadow_free()
 
     tile.is_cached = true;
     tile.is_allocated = false;
+    tile.cache_index = 0;
     tiles_data[tile_orphaned_cached] = shadow_tile_pack(tile);
 
     tile.is_cached = false;
@@ -430,6 +436,7 @@ static void test_eevee_shadow_free()
 
     tile.is_cached = true;
     tile.is_allocated = false;
+    tile.cache_index = 1;
     tiles_data[tile_used_cached] = shadow_tile_pack(tile);
 
     tile.is_cached = false;
@@ -443,6 +450,7 @@ static void test_eevee_shadow_free()
     tile.is_used = false;
     tile.is_cached = true;
     tile.is_allocated = false;
+    tile.cache_index = 2;
     tiles_data[tile_unused_cached] = shadow_tile_pack(tile);
 
     tile.is_cached = false;
@@ -492,8 +500,8 @@ static void test_eevee_shadow_free()
   EXPECT_EQ(shadow_tile_unpack(tiles_data[tile_unused_allocated]).is_allocated, false);
   EXPECT_EQ(pages_infos_data.page_alloc_count, 1);
   EXPECT_EQ(pages_infos_data.page_free_count, page_free_count + 2);
-  EXPECT_EQ(pages_infos_data.page_cached_next, 3);
-  EXPECT_EQ(pages_infos_data.page_cached_end, 2);
+  EXPECT_EQ(pages_infos_data.page_cached_next, 4);
+  EXPECT_EQ(pages_infos_data.page_cached_end, 3);
 
   GPU_shader_unbind();
 
@@ -520,8 +528,7 @@ class TestDefrag {
              StringRefNull expect)
   {
     for (uint i : IndexRange(SHADOW_MAX_PAGE)) {
-      uint2 page = {i % SHADOW_PAGE_PER_ROW, i / SHADOW_PAGE_PER_ROW};
-      pages_free_data[i] = page.x | (page.y << 16u);
+      pages_free_data[i] = shadow_page_pack(shadow_page_from_index(i));
     }
 
     for (uint i : IndexRange(tiles_data.size())) {
@@ -662,8 +669,7 @@ class TestAlloc {
     }
 
     for (uint i : IndexRange(0, page_free_count)) {
-      uint2 page = {i % SHADOW_PAGE_PER_ROW, i / SHADOW_PAGE_PER_ROW};
-      pages_free_data[i] = page.x | (page.y << 16u);
+      pages_free_data[i] = shadow_page_pack(shadow_page_from_index(i));
     }
     pages_free_data.push_update();
     pages_cached_data.push_update();
@@ -1189,35 +1195,65 @@ DRAW_TEST(eevee_shadow_finalize)
 
 static void test_eevee_shadow_tile_packing()
 {
-  Vector<uint> test_values{0x00000000u, 0x00000001u, 0x0000000Fu, 0x000000FFu, 0xABCDEF01u,
-                           0xAAAAAAAAu, 0xBBBBBBBBu, 0xCCCCCCCCu, 0xDDDDDDDDu, 0xEEEEEEEEu,
-                           0xFFFFFFFFu, 0xDEADBEEFu, 0x8BADF00Du, 0xABADCAFEu, 0x0D15EA5Eu,
-                           0xFEE1DEADu, 0xDEADC0DEu, 0xC00010FFu, 0xBBADBEEFu, 0xBAAAAAADu};
+  Vector<uint> page_indices{0u, 1u, 4095u, 8191u, 16383u, 32767u};
 
-  for (auto value : test_values) {
-    EXPECT_EQ(shadow_page_unpack(value),
-              shadow_page_unpack(shadow_page_pack(shadow_page_unpack(value))));
+  for (const uint page_index : page_indices) {
+    const uint3 page = shadow_page_from_index(page_index);
+    EXPECT_EQ(shadow_page_pack(page), page_index);
+    EXPECT_EQ(shadow_page_unpack(page_index), page);
 
-    EXPECT_EQ(shadow_lod_offset_unpack(value),
-              shadow_lod_offset_unpack(shadow_lod_offset_pack(shadow_lod_offset_unpack(value))));
+    ShadowTileData tile = {};
+    tile.page = page;
+    tile.cache_index = uint(-1);
+    tile.is_used = true;
+    tile.do_update = true;
+    tile.is_allocated = true;
+    tile.is_rendered = true;
+    tile.is_cached = false;
+    ShadowTileData result_tile = shadow_tile_unpack(shadow_tile_pack(tile));
+    EXPECT_EQ(result_tile.page, page);
+    EXPECT_EQ(result_tile.cache_index, uint(-1));
+    EXPECT_EQ(result_tile.is_used, true);
+    EXPECT_EQ(result_tile.do_update, true);
+    EXPECT_EQ(result_tile.is_allocated, true);
+    EXPECT_EQ(result_tile.is_rendered, true);
+    EXPECT_EQ(result_tile.is_cached, false);
 
-    ShadowTileData expected_tile = shadow_tile_unpack(value);
-    ShadowTileData result_tile = shadow_tile_unpack(shadow_tile_pack(expected_tile));
-    EXPECT_EQ(expected_tile.page, result_tile.page);
-    EXPECT_EQ(expected_tile.cache_index, result_tile.cache_index);
-    EXPECT_EQ(expected_tile.is_used, result_tile.is_used);
-    EXPECT_EQ(expected_tile.do_update, result_tile.do_update);
-    EXPECT_EQ(expected_tile.is_allocated, result_tile.is_allocated);
-    EXPECT_EQ(expected_tile.is_rendered, result_tile.is_rendered);
-    EXPECT_EQ(expected_tile.is_cached, result_tile.is_cached);
+    tile = {};
+    tile.page = uint3(~0u);
+    tile.cache_index = page_index;
+    tile.is_used = true;
+    tile.do_update = false;
+    tile.is_allocated = false;
+    tile.is_rendered = false;
+    tile.is_cached = true;
+    result_tile = shadow_tile_unpack(shadow_tile_pack(tile));
+    EXPECT_EQ(result_tile.page, uint3(~0u));
+    EXPECT_EQ(result_tile.cache_index, page_index);
+    EXPECT_EQ(result_tile.is_used, true);
+    EXPECT_EQ(result_tile.do_update, false);
+    EXPECT_EQ(result_tile.is_allocated, false);
+    EXPECT_EQ(result_tile.is_rendered, false);
+    EXPECT_EQ(result_tile.is_cached, true);
+  }
 
-    ShadowSamplingTile expected_sampling_tile = shadow_sampling_tile_unpack(value);
-    ShadowSamplingTile result_sampling_tile = shadow_sampling_tile_unpack(
-        shadow_sampling_tile_pack(expected_sampling_tile));
-    EXPECT_EQ(expected_sampling_tile.page, result_sampling_tile.page);
-    EXPECT_EQ(expected_sampling_tile.lod, result_sampling_tile.lod);
-    EXPECT_EQ(expected_sampling_tile.lod_offset, result_sampling_tile.lod_offset);
-    EXPECT_EQ(expected_sampling_tile.is_valid, result_sampling_tile.is_valid);
+  Vector<uint> lod_values{0u, 1u, 5u, 7u};
+  Vector<uint> lod_offsets{0u, 1u, 63u, 127u};
+
+  for (const uint lod : lod_values) {
+    for (const uint ofs : lod_offsets) {
+      ShadowSamplingTile tile = {};
+      tile.page = shadow_page_from_index(32767u);
+      tile.lod = lod;
+      tile.lod_offset = uint2(ofs);
+      tile.is_valid = true;
+
+      ShadowSamplingTile result_tile = shadow_sampling_tile_unpack(shadow_sampling_tile_pack(tile));
+      EXPECT_EQ(result_tile.page, tile.page);
+      EXPECT_EQ(result_tile.lod, lod);
+      EXPECT_EQ(result_tile.lod_offset, lod == 0u ? uint2(0, ofs) : uint2(ofs));
+      EXPECT_EQ(result_tile.is_valid, true);
+    }
   }
 }
 DRAW_TEST(eevee_shadow_tile_packing)
@@ -1244,7 +1280,7 @@ static void test_eevee_shadow_tilemap_amend()
   pixel_get(17, 16, 2) = shadow_sampling_tile_pack(tile);
   tile.page = uint3(3, 0, 0);
   pixel_get(20, 20, 1) = shadow_sampling_tile_pack(tile);
-  tile.page = uint3(4, 0, 0);
+  tile.page = uint3(0, 1, 0);
   pixel_get(17, 16, 0) = shadow_sampling_tile_pack(tile);
 
   Texture tilemap_tx = {"tilemap_tx"};

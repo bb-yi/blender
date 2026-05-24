@@ -358,8 +358,12 @@ namespace blender::eevee
     float shadow_map_scale = 1.0f;
     /** For now, needs to be hardcoded. */
     int shadow_page_size_ = SHADOW_PAGE_RES;
-    /** Maximum number of allocated pages. Maximum value is SHADOW_MAX_TILEMAP. */
-    int shadow_page_len_ = SHADOW_MAX_TILEMAP;
+    /** Maximum number of allocated pages. Maximum value is SHADOW_MAX_PAGE. */
+    int shadow_page_len_ = SHADOW_MAX_PAGE;
+    /** Requested and effectively allocated pool size in megabytes. */
+    int shadow_pool_size_requested_ = 0;
+    int shadow_pool_size_allocated_ = 0;
+    int shadow_pool_retry_countdown_ = 0;
     /** Global switch. */
     bool enabled_ = true;
     bool viewport_history_invalidated_ = false;
