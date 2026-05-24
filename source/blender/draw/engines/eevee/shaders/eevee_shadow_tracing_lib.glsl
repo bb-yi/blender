@@ -177,6 +177,12 @@ ShadowRayDirectional shadow_ray_generate_directional(
   return ray;
 }
 
+ShadowCoordinates shadow_map_trace_sample_coord(ShadowRayDirectional &ray, float ray_time)
+{
+  float3 ray_pos = ray.origin + ray.direction * ray_time;
+  return shadow_directional_coordinates(ray.light, ray_pos);
+}
+
 ShadowTracingSample shadow_map_trace_sample(ShadowMapTracingState state, ShadowRayDirectional &ray)
 {
   /* Ray position is ray local position with origin at light origin. */
@@ -276,6 +282,14 @@ ShadowRayPunctual shadow_ray_generate_punctual(LightData light,
   ray.local_ray_up = safe_normalize(cross(cross(ray.origin, ray.direction), ray.direction));
   ray.light = light;
   return ray;
+}
+
+ShadowCoordinates shadow_map_trace_sample_coord(ShadowRayPunctual &ray, float ray_time)
+{
+  float3 receiver_pos = ray.origin + ray.direction * ray_time;
+  int face_id = shadow_punctual_face_index_get(receiver_pos);
+  float3 face_pos = shadow_punctual_local_position_to_face_local(face_id, receiver_pos);
+  return shadow_punctual_coordinates(ray.light, face_pos, face_id);
 }
 
 ShadowTracingSample shadow_map_trace_sample(ShadowMapTracingState state, ShadowRayPunctual &ray)

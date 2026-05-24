@@ -712,6 +712,32 @@ ShadowModule::ShadowModule(Instance &inst, ShadowSceneData &data) : inst_(inst),
   }
 }
 
+void ShadowModule::ensure_caster_atlas()
+{
+  eGPUTextureUsage usage = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE |
+                           GPU_TEXTURE_USAGE_ATOMIC;
+  if (use_caster_atlas_) {
+    int3 atlas_size = atlas_tx_.size();
+    if (atlas_size.x > 0 && atlas_size.y > 0 && atlas_size.z > 0) {
+      const bool created = caster_atlas_tx_.ensure_2d_array(ShadowModule::atlas_type,
+                                                            atlas_size.xy(),
+                                                            atlas_size.z,
+                                                            usage);
+      if (created) {
+        caster_atlas_tx_.filter_mode(false);
+      }
+      return;
+    }
+  }
+
+  caster_atlas_tx_.free();
+  const bool created = caster_atlas_dummy_tx_.ensure_2d_array(
+      ShadowModule::atlas_type, int2(1), 1, usage);
+  if (created) {
+    caster_atlas_dummy_tx_.filter_mode(false);
+  }
+}
+
 void ShadowModule::init()
 {
   /* Temp: Disable TILE_COPY path while efficient solution for parameter buffer overflow is
@@ -898,6 +924,13 @@ void ShadowModule::init()
   }
 
   atlas_tx_.filter_mode(false);
+  if (caster_atlas_tx_.is_valid()) {
+    caster_atlas_tx_.filter_mode(false);
+  }
+  if (caster_atlas_dummy_tx_.is_valid()) {
+    caster_atlas_dummy_tx_.filter_mode(false);
+  }
+  update_caster_atlas_ref();
 
   /* Create different viewport to support different update region size. The most fitting viewport
    * is then selected during the tilemap finalize stage in `viewport_select`. */
@@ -914,6 +947,8 @@ void ShadowModule::init()
 
 void ShadowModule::begin_sync()
 {
+  use_caster_atlas_next_ = false;
+
   past_casters_updated_.clear();
   curr_casters_updated_.clear();
   curr_casters_.clear();
@@ -1042,6 +1077,14 @@ void ShadowModule::sync_bake_receiver_bounds(const ResourceHandleRange &resource
 
 void ShadowModule::end_sync()
 {
+  const bool previous_use_caster_atlas = use_caster_atlas_;
+  use_caster_atlas_ = use_caster_atlas_next_ && enabled_ &&
+                      ShadowModule::shadow_technique == ShadowTechnique::ATOMIC_RASTER;
+  use_caster_atlas_push_ = int(use_caster_atlas_);
+  do_full_update_ |= previous_use_caster_atlas != use_caster_atlas_;
+  ensure_caster_atlas();
+  update_caster_atlas_ref();
+
   const DirectionalFocusData old_focus = directional_focus_data_ensure(*this);
 
   /* Delete unused shadows first to release tile-maps that could be reused for new lights. */
@@ -1368,7 +1411,9 @@ void ShadowModule::end_sync()
         sub.shader_set(inst_.shaders.static_shader_get(SHADOW_PAGE_CLEAR));
         sub.bind_ssbo("pages_infos_buf", pages_infos_data_);
         sub.bind_ssbo("dst_coord_buf", dst_coord_buf_);
+        sub.push_constant("use_shadow_caster_atlas", use_caster_atlas_);
         sub.bind_image("shadow_atlas_img", atlas_tx_);
+        sub.bind_image("shadow_caster_atlas_img", caster_atlas_ref());
         sub.dispatch(clear_dispatch_buf_);
         sub.barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS);
       }

@@ -36,6 +36,7 @@
 
 GPU_SHADER_NAMED_INTERFACE_INFO(eevee_surf_shadow_atomic_iface, shadow_iface)
 FLAT(int, shadow_view_id)
+FLAT(uint, resource_id)
 GPU_SHADER_NAMED_INTERFACE_END(shadow_iface)
 
 GPU_SHADER_NAMED_INTERFACE_INFO(eevee_surf_shadow_clipping_iface, shadow_clip)
@@ -51,6 +52,7 @@ TYPEDEF_SOURCE("eevee_render_texture_shared.hh")
 BUILTINS(BuiltinBits::VIEWPORT_INDEX)
 VERTEX_OUT(eevee_surf_shadow_clipping_iface)
 STORAGE_BUF(SHADOW_RENDER_VIEW_BUF_SLOT, read, ShadowRenderView, render_view_buf[SHADOW_VIEW_MAX])
+PUSH_CONSTANT(bool, use_shadow_caster_atlas)
 FRAGMENT_SOURCE("eevee_surf_shadow_frag.glsl")
 ADDITIONAL_INFO(eevee_global_ubo)
 ADDITIONAL_INFO(eevee_utility_texture)
@@ -65,6 +67,11 @@ BUILTINS(BuiltinBits::TEXTURE_ATOMIC)
 VERTEX_OUT(eevee_surf_shadow_atomic_iface)
 STORAGE_BUF(SHADOW_RENDER_MAP_BUF_SLOT, read, uint, render_map_buf[SHADOW_RENDER_MAP_SIZE])
 IMAGE(SHADOW_ATLAS_IMG_SLOT, UINT_32, read_write, uimage2DArrayAtomic, shadow_atlas_img)
+IMAGE(SHADOW_CASTER_ATLAS_IMG_SLOT,
+      UINT_32,
+      read_write,
+      uimage2DArrayAtomic,
+      shadow_caster_atlas_img)
 GPU_SHADER_CREATE_END()
 
 GPU_SHADER_CREATE_INFO(eevee_surf_shadow_tbdr)

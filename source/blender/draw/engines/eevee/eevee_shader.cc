@@ -1391,6 +1391,12 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   {
     info.additional_info("eevee_light_data");
     info.additional_info("eevee_shadow_data");
+    if (GPU_material_has_shader_info_shadow_classification(gpumat) &&
+        ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD))
+    {
+      info.define("SHADOW_CASTER_CLASSIFY");
+      info.additional_info("eevee_shadow_caster_data");
+    }
   }
   if (pipeline_type == MAT_PIPE_BAKE_COLOR) {
     info.define("LIGHT_ITER_FORCE_NO_CULLING");

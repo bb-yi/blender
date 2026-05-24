@@ -286,6 +286,13 @@ namespace blender::eevee
     static constexpr gpu::TextureFormat atlas_type = gpu::TextureFormat::UINT_32;
     /** Atlas containing all physical pages. */
     Texture atlas_tx_ = { "shadow_atlas_tx_" };
+    /** Optional atlas containing packed shadow caster identifiers for Shader Info classification. */
+    Texture caster_atlas_tx_ = { "shadow_caster_atlas_tx_" };
+    Texture caster_atlas_dummy_tx_ = { "shadow_caster_atlas_dummy_tx_" };
+    gpu::Texture *caster_atlas_ref_ = nullptr;
+    bool use_caster_atlas_ = false;
+    bool use_caster_atlas_next_ = false;
+    int use_caster_atlas_push_ = 0;
 
     /** Pool of unallocated pages waiting to be assigned to specific tiles in the tile-map atlas. */
     ShadowPageHeapBuf pages_free_data_ = { "PagesFreeBuf" };
@@ -402,10 +409,39 @@ namespace blender::eevee
     void debug_end_sync();
     void debug_draw(View& view, gpu::FrameBuffer* view_fb);
 
+    void tag_caster_atlas_needed()
+    {
+      use_caster_atlas_next_ = true;
+    }
+
+    bool use_caster_atlas() const
+    {
+      return use_caster_atlas_;
+    }
+
+    const int *use_caster_atlas_push_ref() const
+    {
+      return &use_caster_atlas_push_;
+    }
+
+    void update_caster_atlas_ref()
+    {
+      caster_atlas_ref_ = use_caster_atlas_ ? caster_atlas_tx_.gpu_texture() :
+                                              caster_atlas_dummy_tx_.gpu_texture();
+    }
+
+    gpu::Texture **caster_atlas_ref()
+    {
+      return &caster_atlas_ref_;
+    }
+
+    void ensure_caster_atlas();
+
     template<typename PassType> void bind_resources(PassType& pass)
     {
       pass.bind_texture(SHADOW_ATLAS_TEX_SLOT, &atlas_tx_);
       pass.bind_texture(SHADOW_TILEMAPS_TEX_SLOT, &tilemap_pool.tilemap_tx);
+      pass.bind_texture(SHADOW_CASTER_ATLAS_TEX_SLOT, &caster_atlas_ref_);
     }
 
     const ShadowSceneData& get_data()

@@ -509,6 +509,7 @@ void ShadowPipeline::sync()
     if (!shadow_update_tbdr) {
       /* We do not need all of the shadow information when using the TBDR-optimized approach. */
       pass.bind_image(SHADOW_ATLAS_IMG_SLOT, inst_.shadows.atlas_tx_);
+      pass.bind_image(SHADOW_CASTER_ATLAS_IMG_SLOT, inst_.shadows.caster_atlas_ref());
       pass.bind_ssbo(SHADOW_RENDER_MAP_BUF_SLOT, &inst_.shadows.render_map_buf_);
       pass.bind_ssbo(SHADOW_PAGE_INFO_SLOT, &inst_.shadows.pages_infos_data_);
     }
@@ -546,7 +547,12 @@ PassMain::Sub *ShadowPipeline::surface_material_add(blender::Material *material,
   PassMain::Sub *pass = (material->blend_flag & MA_BL_CULL_BACKFACE_SHADOW) ?
                             surface_single_sided_ps_ :
                             surface_double_sided_ps_;
-  return &pass->sub(GPU_material_get_name(gpumat));
+  PassMain::Sub *material_pass = &pass->sub(GPU_material_get_name(gpumat));
+  GPUPass *gpupass = GPU_material_get_pass(gpumat);
+  material_pass->shader_set(GPU_pass_shader_get(gpupass));
+  material_pass->push_constant("use_shadow_caster_atlas",
+                               inst_.shadows.use_caster_atlas_push_ref());
+  return material_pass;
 }
 
 void ShadowPipeline::render(View &view)
@@ -1967,6 +1973,99 @@ void DeferredPipeline::debug_draw(draw::View &view, gpu::FrameBuffer *combined_f
 
   GPU_framebuffer_bind(combined_fb);
   inst.manager->submit(debug_draw_ps_, view);
+}
+
+PassMain::Sub *PipelineModule::material_add(Object *ob,
+                                            blender::Material *blender_mat,
+                                            GPUMaterial *gpumat,
+                                            eMaterialPipeline pipeline_type,
+                                            eMaterialProbe probe_capture)
+{
+  if (GPU_material_flag_get(gpumat, GPU_MATFLAG_RAYCAST)) {
+    has_raycast = true;
+  }
+  if (GPU_material_has_shader_info_shadow_classification(gpumat) &&
+      (pipeline_type == MAT_PIPE_DEFERRED || pipeline_type == MAT_PIPE_DEFERRED_NPR ||
+       pipeline_type == MAT_PIPE_FORWARD))
+  {
+    inst_.shadows.tag_caster_atlas_needed();
+  }
+
+  if (probe_capture == MAT_PROBE_REFLECTION) {
+    switch (pipeline_type) {
+      case MAT_PIPE_PREPASS_DEFERRED:
+        return probe.prepass_add(blender_mat, gpumat);
+      case MAT_PIPE_DEFERRED:
+        return probe.material_add(blender_mat, gpumat);
+      case MAT_PIPE_DEFERRED_NPR:
+        return probe.npr_add(blender_mat, gpumat);
+      default:
+        BLI_assert_unreachable();
+        break;
+    }
+  }
+  if (probe_capture == MAT_PROBE_PLANAR) {
+    switch (pipeline_type) {
+      case MAT_PIPE_PREPASS_PLANAR:
+        return planar.prepass_add(blender_mat, gpumat);
+      case MAT_PIPE_DEFERRED:
+        return planar.material_add(blender_mat, gpumat);
+      case MAT_PIPE_DEFERRED_NPR:
+        return planar.npr_add(blender_mat, gpumat);
+      default:
+        BLI_assert_unreachable();
+        break;
+    }
+  }
+
+  switch (pipeline_type) {
+    case MAT_PIPE_PREPASS_DEFERRED:
+      return deferred.prepass_add(blender_mat, gpumat, false, ob->refraction_layer_index);
+    case MAT_PIPE_PREPASS_FORWARD:
+      return forward.prepass_opaque_add(blender_mat, gpumat, false);
+    case MAT_PIPE_PREPASS_OVERLAP:
+      BLI_assert_msg(0, "Overlap prepass should register to the forward pipeline directly.");
+      return nullptr;
+
+    case MAT_PIPE_PREPASS_DEFERRED_VELOCITY:
+      return deferred.prepass_add(blender_mat, gpumat, true, ob->refraction_layer_index);
+    case MAT_PIPE_PREPASS_FORWARD_VELOCITY:
+      return forward.prepass_opaque_add(blender_mat, gpumat, true);
+
+    case MAT_PIPE_DEFERRED:
+      return deferred.material_add(blender_mat, gpumat, ob->refraction_layer_index);
+    case MAT_PIPE_DEFERRED_NPR:
+      return deferred.npr_add(blender_mat, gpumat, ob->refraction_layer_index);
+    case MAT_PIPE_FORWARD:
+      if (!material_color_write_get(*blender_mat)) {
+        return nullptr;
+      }
+      if (!material_depth_write_get(*blender_mat)) {
+        return forward.material_no_depth_add(ob, blender_mat, gpumat);
+      }
+      return forward.material_opaque_add(ob, blender_mat, gpumat);
+    case MAT_PIPE_SHADOW:
+      return shadow.surface_material_add(blender_mat, gpumat);
+    case MAT_PIPE_CAPTURE:
+      return capture.surface_material_add(blender_mat, gpumat);
+    case MAT_PIPE_FILTER:
+      BLI_assert_msg(0, "Filter shaders are evaluated by the filter material module.");
+      return nullptr;
+    case MAT_PIPE_BAKE_COLOR:
+      BLI_assert_msg(0, "Bake shaders are evaluated by the Eevee bake callback.");
+      return nullptr;
+
+    case MAT_PIPE_VOLUME_OCCUPANCY:
+    case MAT_PIPE_VOLUME_MATERIAL:
+      BLI_assert_msg(0, "Volume shaders must register to the volume pipeline directly.");
+      return nullptr;
+
+    case MAT_PIPE_PREPASS_PLANAR:
+      /* Should be handled by the `probe_capture == MAT_PROBE_PLANAR` case. */
+      BLI_assert_unreachable();
+      return nullptr;
+  }
+  return nullptr;
 }
 
 PassMain::Sub *DeferredPipeline::prepass_add(blender::Material *blender_mat,

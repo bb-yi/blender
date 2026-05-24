@@ -14,6 +14,7 @@ bool shader_info_is_zero(float3 value)
 #define SHADER_INFO_SOFT_SHADOW_SPATIAL_MAX_TAPS 8
 #define SHADER_INFO_SHADOW_MODE_BUILTIN 1.0f
 #define SHADER_INFO_SHADOW_MODE_SOFT_FILTERED 2.0f
+#define SHADER_INFO_SHADOW_UNKNOWN_CASTER_ID 0xFFFFFFFFu
 
 float shader_info_max_component(float3 value)
 {
@@ -229,6 +230,261 @@ float shader_info_shadow_visibility_single(LightData light,
                             stable_ray_count,
                             ray_step_count);
 }
+
+#if defined(SHADOW_CASTER_CLASSIFY)
+struct ShaderInfoShadowClassification {
+  float visibility;
+  float self_shadow;
+  float cast_shadow;
+};
+
+ShaderInfoShadowClassification shader_info_shadow_classification_none()
+{
+  ShaderInfoShadowClassification result;
+  result.visibility = 1.0f;
+  result.self_shadow = 0.0f;
+  result.cast_shadow = 0.0f;
+  return result;
+}
+
+uint shader_info_shadow_caster_id_read(ShadowCoordinates coord)
+{
+  ShadowSamplingTile tile = shadow_tile_load(shadow_tilemaps_tx,
+                                             coord.tilemap_tile,
+                                             coord.tilemap_index);
+  if (!tile.is_valid) {
+    return SHADER_INFO_SHADOW_UNKNOWN_CASTER_ID;
+  }
+
+  constexpr uint page_shift = uint(SHADOW_PAGE_LOD);
+  constexpr uint page_mask = ~(0xFFFFFFFFu << uint(SHADOW_PAGE_LOD));
+
+  uint2 texel = coord.tilemap_texel;
+  texel += uint2(tile.lod_offset << SHADOW_PAGE_LOD);
+  uint2 texel_page = (texel >> tile.lod) & page_mask;
+  texel = (uint2(tile.page.xy) << page_shift) | texel_page;
+
+  uint packed_value = texelFetch(shadow_caster_atlas_tx, int3(int2(texel), int(tile.page.z)), 0).r;
+  if (packed_value == 0xFFFFFFFFu) {
+    return SHADER_INFO_SHADOW_UNKNOWN_CASTER_ID;
+  }
+  return packed_value & 0xFFFFu;
+}
+
+template<typename ShadowRayType>
+uint shader_info_shadow_trace_caster_id(ShadowRayType ray, int sample_count, float step_offset)
+{
+  ShadowMapTracingState state = shadow_map_trace_init(sample_count, step_offset);
+  uint caster_id = SHADER_INFO_SHADOW_UNKNOWN_CASTER_ID;
+  for (int i = 0; (i <= sample_count) && (i <= SHADOW_MAX_STEP) && (state.hit == false); i++)
+  {
+    state.ray_time = square(saturate(float(i) * state.ray_step_mul + state.ray_step_bias));
+    ShadowTracingSample samp = shadow_map_trace_sample(state, ray);
+    if (!samp.skip_sample) {
+      caster_id = shader_info_shadow_caster_id_read(shadow_map_trace_sample_coord(ray,
+                                                                                  state.ray_time));
+    }
+    shadow_map_trace_hit_check(state, samp, i == sample_count);
+  }
+  return state.hit ? caster_id : SHADER_INFO_SHADOW_UNKNOWN_CASTER_ID;
+}
+
+template uint shader_info_shadow_trace_caster_id<ShadowRayDirectional>(ShadowRayDirectional,
+                                                                       int,
+                                                                       float);
+template uint shader_info_shadow_trace_caster_id<ShadowRayPunctual>(ShadowRayPunctual, int, float);
+
+ShaderInfoShadowClassification shader_info_shadow_classification_seeded(
+    LightData light,
+    const bool is_directional,
+    float3 P,
+    float3 Ng,
+    float3 N,
+    float terminator_normal_offset,
+    float terminator_geometry_offset,
+    int ray_count,
+    int ray_step_count,
+    float3 random_shadow_3d,
+    float2 random_pcf_2d)
+{
+  int safe_ray_count = clamp(ray_count, 1, SHADOW_MAX_RAY);
+  int safe_step_count = clamp(ray_step_count, 1, SHADOW_MAX_STEP);
+  uint self_id = drw_resource_id() & 0xFFFFu;
+
+  float distance_to_shadow;
+  float3 L;
+  if (is_directional) {
+    L = light_z_axis(light);
+  }
+  else {
+    L = light_position_get(light) + light.local().local.shadow_position - P;
+    L = normalize_and_get_length(L, distance_to_shadow);
+  }
+
+  float texel_radius = shadow_texel_radius_at_position(light, is_directional, P);
+  P = offset_ray(P, Ng);
+  P += (light.filter_radius * texel_radius) * shadow_pcf_offset(L, Ng, random_pcf_2d);
+  P += Ng * shadow_normal_offset(Ng, L, texel_radius);
+  P += N * shadow_terminator_offset(N, L, terminator_normal_offset, terminator_geometry_offset);
+
+  float3 lP = is_directional ? light_world_to_local_direction(light, P) :
+                               light_world_to_local_point(light, P);
+  float3 lNg = light_world_to_local_direction(light, Ng);
+
+  float self_hit = 0.0f;
+  float cast_hit = 0.0f;
+  float unknown_hit = 0.0f;
+  for (int ray_index = 0; ray_index < SHADOW_MAX_RAY; ray_index++) {
+    if (ray_index >= safe_ray_count) {
+      break;
+    }
+
+    float2 random_ray_2d = fract(hammersley_2d(ray_index, safe_ray_count) + random_shadow_3d.xy);
+    uint caster_id;
+    if (is_directional) {
+      ShadowRayDirectional clip_ray = shadow_ray_generate_directional(
+          light, random_ray_2d, lP, lNg, texel_radius);
+      caster_id = shader_info_shadow_trace_caster_id(clip_ray, safe_step_count, random_shadow_3d.z);
+    }
+    else {
+      ShadowRayPunctual clip_ray = shadow_ray_generate_punctual(light, random_ray_2d, lP, lNg);
+      caster_id = shader_info_shadow_trace_caster_id(clip_ray, safe_step_count, random_shadow_3d.z);
+    }
+
+    if (caster_id == SHADER_INFO_SHADOW_UNKNOWN_CASTER_ID) {
+      unknown_hit += 1.0f;
+    }
+    else if (caster_id == self_id) {
+      self_hit += 1.0f;
+    }
+    else {
+      cast_hit += 1.0f;
+    }
+  }
+
+  ShaderInfoShadowClassification result;
+  float inv_count = 1.0f / float(safe_ray_count);
+  result.self_shadow = saturate(self_hit * inv_count);
+  result.cast_shadow = saturate(cast_hit * inv_count);
+  result.visibility = saturate(1.0f - (self_hit + cast_hit + unknown_hit) * inv_count);
+  return result;
+}
+
+ShaderInfoShadowClassification shader_info_shadow_classification_single(
+    LightData light,
+    bool is_directional,
+    float3 position,
+    float3 geometry_normal,
+    float3 shading_normal,
+    float normal_offset,
+    float geometry_offset,
+    float shadow_mode,
+    float stable_shadow_samples)
+{
+  if (light.tilemap_index == LIGHT_NO_SHADOW) {
+    return shader_info_shadow_classification_none();
+  }
+
+  int ray_count = shader_info_shadow_is_builtin(shadow_mode) ?
+                      uniform_buf.shadow.ray_count :
+                      shader_info_shadow_stable_ray_count(stable_shadow_samples);
+  int ray_step_count = shader_info_shadow_is_builtin(shadow_mode) ?
+                           uniform_buf.shadow.step_count :
+                           max(uniform_buf.shadow.step_count,
+                               SHADER_INFO_STABLE_SHADOW_MIN_STEP_COUNT);
+  float3 random_shadow_3d;
+  float2 random_pcf_2d;
+  if (shader_info_shadow_is_builtin(shadow_mode)) {
+    shadow_eval_random_numbers_get(float3(0.0f), random_shadow_3d, random_pcf_2d);
+  }
+  else {
+    random_shadow_3d = float3(0.5f);
+    random_pcf_2d = float2(0.0f);
+  }
+
+  return shader_info_shadow_classification_seeded(light,
+                                                  is_directional,
+                                                  position,
+                                                  geometry_normal,
+                                                  shading_normal,
+                                                  normal_offset,
+                                                  geometry_offset,
+                                                  ray_count,
+                                                  ray_step_count,
+                                                  random_shadow_3d,
+                                                  random_pcf_2d);
+}
+
+ShaderInfoShadowClassification shader_info_shadow_classification(
+    LightData light,
+    bool is_directional,
+    float3 light_vector,
+    float3 position,
+    float3 geometry_normal,
+    float3 shading_normal,
+    float normal_offset,
+    float geometry_offset,
+    float shadow_mode,
+    float stable_shadow_samples)
+{
+  UNUSED_VARS(light_vector);
+  if (!shader_info_shadow_is_soft_filtered(shadow_mode)) {
+    return shader_info_shadow_classification_single(light,
+                                                    is_directional,
+                                                    position,
+                                                    geometry_normal,
+                                                    shading_normal,
+                                                    normal_offset,
+                                                    geometry_offset,
+                                                    shadow_mode,
+                                                    stable_shadow_samples);
+  }
+
+  int eval_count = shader_info_shadow_soft_filtered_eval_count(stable_shadow_samples);
+  int ray_count = shader_info_shadow_soft_filtered_ray_count(stable_shadow_samples, eval_count);
+  int ray_step_count = max(uniform_buf.shadow.step_count, SHADER_INFO_STABLE_SHADOW_MIN_STEP_COUNT);
+  float3 frame_rotation_3d = shader_info_shadow_soft_frame_rotation_3d();
+  float2 frame_rotation_2d = shader_info_shadow_soft_frame_rotation_2d();
+
+  float visibility_sum = 0.0f;
+  float self_sum = 0.0f;
+  float cast_sum = 0.0f;
+  float weight_sum = 0.0f;
+  for (int tap_index = 0; tap_index < SHADER_INFO_STABLE_SHADOW_MAX_RAY_COUNT; tap_index++) {
+    if (tap_index >= eval_count) {
+      break;
+    }
+
+    float2 ray_tap = shadow_stable_hammersley_2d(tap_index, eval_count, frame_rotation_3d.xy);
+    float2 pcf_tap = shadow_stable_hammersley_2d(
+        tap_index, eval_count, frame_rotation_2d + float2(0.37f, 0.13f));
+    float z_tap = fract(van_der_corput_radical_inverse(uint(tap_index * 1103515245u + 12345u)) +
+                        frame_rotation_3d.z);
+    ShaderInfoShadowClassification tap = shader_info_shadow_classification_seeded(
+        light,
+        is_directional,
+        position,
+        geometry_normal,
+        shading_normal,
+        normal_offset,
+        geometry_offset,
+        ray_count,
+        ray_step_count,
+        float3(ray_tap, z_tap),
+        pcf_tap);
+    visibility_sum += tap.visibility;
+    self_sum += tap.self_shadow;
+    cast_sum += tap.cast_shadow;
+    weight_sum += 1.0f;
+  }
+
+  ShaderInfoShadowClassification result;
+  result.visibility = saturate(visibility_sum / max(weight_sum, 1e-6f));
+  result.self_shadow = saturate(self_sum / max(weight_sum, 1e-6f));
+  result.cast_shadow = saturate(cast_sum / max(weight_sum, 1e-6f));
+  return result;
+}
+#endif
 
 float shader_info_shadow_soft_visibility_core(LightData light,
                                               bool is_directional,
@@ -547,7 +803,9 @@ void node_shader_info(float3 position,
                       out float shadow,
                       out float4 ambient_lighting,
                       out float half_lambert_factor,
-                      out float blinn_phong_factor)
+                      out float blinn_phong_factor,
+                      out float self_shadow,
+                      out float cast_shadow)
 {
 #if defined(GPU_FRAGMENT_SHADER) && \
     (defined(MAT_DEFERRED) || defined(MAT_FORWARD) || defined(NPR_SHADER) || \
@@ -566,6 +824,8 @@ void node_shader_info(float3 position,
 
   float3 diffuse_shading_sum = float3(0.0f);
   float visibility_sum = 0.0f;
+  float self_shadow_sum = 0.0f;
+  float cast_shadow_sum = 0.0f;
   float shadow_weight_sum = 0.0f;
   float half_lambert_sum = 0.0f;
   float blinn_phong_sum = 0.0f;
@@ -657,6 +917,21 @@ void node_shader_info(float3 position,
                                                        stable_shadow_samples);
       float shadow_visibility = visibility * surface_attenuation;
       visibility_sum += shadow_visibility * diffuse_weight;
+#  if defined(SHADOW_CASTER_CLASSIFY)
+      ShaderInfoShadowClassification classification = shader_info_shadow_classification(
+          light,
+          is_directional,
+          lv.L,
+          position,
+          geometry_normal,
+          shading_normal,
+          normal_offset,
+          geometry_offset,
+          shadow_mode,
+          stable_shadow_samples);
+      self_shadow_sum += classification.self_shadow * surface_attenuation * diffuse_weight;
+      cast_shadow_sum += classification.cast_shadow * surface_attenuation * diffuse_weight;
+#  endif
       shadow_weight_sum += diffuse_weight;
     }
   }
@@ -664,6 +939,12 @@ void node_shader_info(float3 position,
 
   diffuse_shading = float4(diffuse_shading_sum, 1.0f);
   shadow = (shadow_weight_sum > 1e-8f) ? saturate(visibility_sum / shadow_weight_sum) : 0.0f;
+  self_shadow = (shadow_weight_sum > 1e-8f) ?
+                    1.0f - saturate(self_shadow_sum / shadow_weight_sum) :
+                    1.0f;
+  cast_shadow = (shadow_weight_sum > 1e-8f) ?
+                    1.0f - saturate(cast_shadow_sum / shadow_weight_sum) :
+                    1.0f;
 
 #  ifdef SPHERE_PROBE
   /* Use the interpolated surface normal for probe lookup bias so smooth-shaded meshes do not
@@ -686,5 +967,7 @@ void node_shader_info(float3 position,
   ambient_lighting = float4(0.0f);
   half_lambert_factor = 0.0f;
   blinn_phong_factor = 0.0f;
+  self_shadow = 1.0f;
+  cast_shadow = 1.0f;
 #endif
 }

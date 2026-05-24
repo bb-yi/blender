@@ -22,4 +22,7 @@ void main()
   page_co.xy = page_co.xy * SHADOW_PAGE_RES + gl_GlobalInvocationID.xy;
 
   imageStoreFast(shadow_atlas_img, int3(page_co), uint4(floatBitsToUint(FLT_MAX)));
+  if (use_shadow_caster_atlas) {
+    imageStoreFast(shadow_caster_atlas_img, int3(page_co), uint4(0xFFFFFFFFu));
+  }
 }

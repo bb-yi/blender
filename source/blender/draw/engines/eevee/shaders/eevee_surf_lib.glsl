@@ -205,6 +205,7 @@ void shadow_viewport_layer_set(int view_id, int lod)
 {
 #  ifdef SHADOW_UPDATE_ATOMIC_RASTER
   shadow_iface.shadow_view_id = view_id;
+  shadow_iface.resource_id = drw_resource_id();
 #  else
   /* We still render to a layered frame-buffer in the case of Metal + Tile Based Renderer.
    * Since it needs correct depth buffering, each view needs to not overlap each others.
