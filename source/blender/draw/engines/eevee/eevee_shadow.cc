@@ -28,6 +28,8 @@ namespace blender::eevee {
 
 namespace {
 
+static constexpr int shadow_pool_retry_cooldown = 120;
+
 struct DirectionalFocusData {
   float3 position = float3(0.0f);
   float distance = 0.0f;
@@ -770,10 +772,17 @@ void ShadowModule::init()
 
   const int previous_pool_size_requested = shadow_pool_size_requested_;
   shadow_pool_size_requested_ = enabled_ ? max_ii(scene.eevee.shadow_pool_size, 16) : 0;
-  const bool keep_degraded_pool = enabled_ && atlas_tx_.is_valid() &&
-                                  (previous_pool_size_requested == shadow_pool_size_requested_) &&
-                                  (shadow_pool_size_allocated_ > 0) &&
-                                  (shadow_pool_size_allocated_ < shadow_pool_size_requested_);
+  const bool is_same_pool_request = previous_pool_size_requested == shadow_pool_size_requested_;
+  const bool has_limited_pool = enabled_ && atlas_tx_.is_valid() &&
+                                (shadow_pool_size_allocated_ < shadow_pool_size_requested_);
+  const bool keep_limited_pool = has_limited_pool && is_same_pool_request &&
+                                 (shadow_pool_retry_countdown_ != 0);
+  if (keep_limited_pool && shadow_pool_retry_countdown_ > 0) {
+    shadow_pool_retry_countdown_--;
+  }
+  if (!enabled_ || !is_same_pool_request || !has_limited_pool) {
+    shadow_pool_retry_countdown_ = 0;
+  }
 
   const size_t page_byte_size = square_i(shadow_page_size_) * sizeof(int);
   const uint64_t requested_pool_byte_size = uint64_t(shadow_pool_size_requested_) * square_i(1024);
@@ -789,12 +798,13 @@ void ShadowModule::init()
                                    uint64_t(SHADOW_MAX_PAGE));
   const int clamped_page_len = min_ii(requested_page_len, max_page_len);
 
-  if (!keep_degraded_pool) {
+  if (!keep_limited_pool) {
     int pool_size_to_try = min_ii(
         shadow_pool_size_requested_,
         int((uint64_t(clamped_page_len) * page_byte_size) / square_i(1024)));
     pool_size_to_try = power_of_2_min_i(max_ii(16, pool_size_to_try));
     pool_size_to_try = min_ii(pool_size_to_try, shadow_pool_size_requested_);
+    const int pool_size_retry_ceiling = pool_size_to_try;
     for (; enabled_ && pool_size_to_try >= 16; pool_size_to_try /= 2) {
       const uint64_t pool_byte_size = uint64_t(pool_size_to_try) * square_i(1024);
       const int page_len = min_ii(
@@ -812,6 +822,15 @@ void ShadowModule::init()
         }
         shadow_page_len_ = page_len;
         shadow_pool_size_allocated_ = allocated_size;
+        if (shadow_pool_size_allocated_ >= shadow_pool_size_requested_) {
+          shadow_pool_retry_countdown_ = 0;
+        }
+        else if (shadow_pool_size_allocated_ < pool_size_retry_ceiling) {
+          shadow_pool_retry_countdown_ = shadow_pool_retry_cooldown;
+        }
+        else {
+          shadow_pool_retry_countdown_ = -1;
+        }
         break;
       }
       shadow_pool_size_allocated_ = 0;
@@ -819,6 +838,7 @@ void ShadowModule::init()
     }
     if (enabled_ && shadow_pool_size_allocated_ == 0) {
       shadow_page_len_ = 0;
+      shadow_pool_retry_countdown_ = shadow_pool_retry_cooldown;
     }
   }
 
@@ -828,6 +848,7 @@ void ShadowModule::init()
     }
     shadow_page_len_ = 1;
     shadow_pool_size_allocated_ = 0;
+    shadow_pool_retry_countdown_ = 0;
     if (atlas_tx_.ensure_2d_array(ShadowModule::atlas_type, int2(1), 1)) {
       do_full_update_ = true;
     }
@@ -836,7 +857,7 @@ void ShadowModule::init()
   /* Make allocation safe. Avoids crashes later on. */
   if (!atlas_tx_.is_valid()) {
     atlas_tx_.free();
-    do_full_update_ |= shadow_page_len_ != 0 || shadow_pool_size_allocated_ != 0;
+    do_full_update_ = true;
     shadow_page_len_ = 0;
     shadow_pool_size_allocated_ = 0;
     do_full_update_ |= atlas_tx_.ensure_2d_array(ShadowModule::atlas_type, int2(1), 1);

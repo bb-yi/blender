@@ -29,6 +29,12 @@
 
 namespace blender::gpu {
 
+static void clear_gl_errors()
+{
+  for (int i = 0; i < 16 && glGetError() != GL_NO_ERROR; i++) {
+  }
+}
+
 /* -------------------------------------------------------------------- */
 /** \name Creation & Deletion
  * \{ */
@@ -69,6 +75,10 @@ bool GLTexture::init_internal()
   const bool is_cubemap = bool(type_ == GPU_TEXTURE_CUBE);
   const int dimensions = (is_cubemap) ? 2 : this->dimensions_count();
 
+  /* Attribute allocation errors to the storage call below. This lets callers reliably fall back
+   * when the driver accepts the proxy check but the real storage allocation runs out of memory. */
+  clear_gl_errors();
+
   switch (dimensions) {
     default:
     case 1:
@@ -80,6 +90,9 @@ bool GLTexture::init_internal()
     case 3:
       glTexStorage3D(target_, mipmaps_, internal_format, w_, h_, d_);
       break;
+  }
+  if (glGetError() != GL_NO_ERROR) {
+    return false;
   }
   this->mip_range_set(0, mipmaps_ - 1);
 

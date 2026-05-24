@@ -363,6 +363,7 @@ namespace blender::eevee
     /** Requested and effectively allocated pool size in megabytes. */
     int shadow_pool_size_requested_ = 0;
     int shadow_pool_size_allocated_ = 0;
+    int shadow_pool_retry_countdown_ = 0;
     /** Global switch. */
     bool enabled_ = true;
     bool viewport_history_invalidated_ = false;
