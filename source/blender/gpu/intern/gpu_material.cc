@@ -101,6 +101,7 @@ struct GPUMaterial {
   Vector<Object *> filter_mask_objects;
   Vector<GPUMaterialGeneratedSource> generated_sources;
   Vector<std::string> closure_uv_source_stack;
+  Vector<GPUType> closure_uv_source_type_stack;
   Vector<std::string> closure_uv_dx_source_stack;
   Vector<std::string> closure_uv_dy_source_stack;
 
@@ -595,10 +596,18 @@ GPUNodeGraph *gpu_material_node_graph(GPUMaterial *material)
 
 void GPU_material_closure_uv_source_push(GPUMaterial *material, StringRefNull source)
 {
+  GPU_material_closure_uv_source_push(material, source, GPU_VEC2);
+}
+
+void GPU_material_closure_uv_source_push(GPUMaterial *material,
+                                         StringRefNull source,
+                                         GPUType source_type)
+{
   if (material == nullptr) {
     return;
   }
   material->closure_uv_source_stack.append(std::string(source));
+  material->closure_uv_source_type_stack.append(source_type);
 }
 
 void GPU_material_closure_uv_source_pop(GPUMaterial *material)
@@ -607,6 +616,9 @@ void GPU_material_closure_uv_source_pop(GPUMaterial *material)
     return;
   }
   material->closure_uv_source_stack.pop_last();
+  if (!material->closure_uv_source_type_stack.is_empty()) {
+    material->closure_uv_source_type_stack.pop_last();
+  }
 }
 
 StringRefNull GPU_material_closure_uv_source_get(const GPUMaterial *material)
@@ -615,6 +627,14 @@ StringRefNull GPU_material_closure_uv_source_get(const GPUMaterial *material)
     return {};
   }
   return material->closure_uv_source_stack.last();
+}
+
+GPUType GPU_material_closure_uv_source_type_get(const GPUMaterial *material)
+{
+  if (material == nullptr || material->closure_uv_source_type_stack.is_empty()) {
+    return GPU_NONE;
+  }
+  return material->closure_uv_source_type_stack.last();
 }
 
 void GPU_material_closure_uv_gradient_source_push(GPUMaterial *material,

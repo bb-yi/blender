@@ -156,6 +156,7 @@ static int gpu_shader_closure_input(GPUMaterial *mat,
   if (uv_source.is_empty()) {
     return 1;
   }
+  const GPUType uv_source_type = GPU_material_closure_uv_source_type_get(mat);
 
   int output_index = 0;
   for (const bNodeSocket *socket : node->output_sockets()) {
@@ -163,10 +164,17 @@ static int gpu_shader_closure_input(GPUMaterial *mat,
       output_index++;
       continue;
     }
-    const std::string uv_attr_expr = "$OUT = float4(" + std::string(uv_source) + ", 0.0, 1.0)";
-    GPUNodeLink *uv_attr_link = GPU_function_call(uv_attr_expr.c_str());
-    GPU_link(mat, "node_uvmap", uv_attr_link, &out[output_index].link);
-    node_shader_gpu_bump_tex_coord(mat, node, &out[output_index].link);
+    if (uv_source_type == GPU_VEC3) {
+      const std::string uv_attr_expr = "$OUT = " + std::string(uv_source);
+      out[output_index].link = GPU_function_call(uv_attr_expr.c_str());
+    }
+    else {
+      const std::string uv_attr_expr = "$OUT = float4(" + std::string(uv_source) +
+                                       ", 0.0, 1.0)";
+      GPUNodeLink *uv_attr_link = GPU_function_call(uv_attr_expr.c_str());
+      GPU_link(mat, "node_uvmap", uv_attr_link, &out[output_index].link);
+      node_shader_gpu_bump_tex_coord(mat, node, &out[output_index].link);
+    }
     break;
   }
 

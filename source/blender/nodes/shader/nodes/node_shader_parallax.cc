@@ -16,6 +16,8 @@
 #include "BKE_image.hh"
 #include "BKE_node_runtime.hh"
 
+#include "BLO_read_write.hh"
+
 #include "DEG_depsgraph_query.hh"
 
 #include "DNA_image_types.h"
@@ -165,6 +167,13 @@ static void node_init(bNodeTree * /*ntree*/, bNode *node)
   node->custom1 = SHD_PARALLAX_OCCLUSION;
   node->custom2 = 0;
   node->storage = MEM_new<NodeShaderParallax>("NodeShaderParallax");
+}
+
+static void node_blend_read_storage(bNodeTree & /*ntree*/, bNode &node, BlendDataReader & /*reader*/)
+{
+  if (node.storage == nullptr) {
+    node.storage = MEM_new<NodeShaderParallax>("NodeShaderParallax");
+  }
 }
 
 static const bNodeSocket *find_node_input_socket_by_identifier(const bNode &node,
@@ -466,6 +475,15 @@ static bool build_closure_output_height_helper(GPUMaterial *mat,
   });
 
   Set<const bNode *> visited_nodes;
+  if (const bke::bNodeZoneType *closure_zone_type = bke::zone_type_by_node_type(
+          NODE_CLOSURE_OUTPUT))
+  {
+    if (bNode *closure_input_node = closure_zone_type->get_corresponding_input(
+            *helper_tree, const_cast<bNode &>(*closure_output_node)))
+    {
+      mark_node_upstream_for_height_helper(*closure_input_node, visited_nodes);
+    }
+  }
   if (height_source_link != nullptr && height_source_link->fromnode != nullptr) {
     mark_node_upstream_for_height_helper(*height_source_link->fromnode, visited_nodes);
   }
@@ -473,7 +491,7 @@ static bool build_closure_output_height_helper(GPUMaterial *mat,
     mark_socket_upstream_for_height_helper(*height_socket, visited_nodes);
   }
 
-  GPU_material_closure_uv_source_push(mat, StringRefNull(uv_global_name));
+  GPU_material_closure_uv_source_push(mat, StringRefNull(uv_global_name), GPU_VEC3);
   BLI_SCOPED_DEFER([&]() { GPU_material_closure_uv_source_pop(mat); });
   const std::string uv_dx_global_name = uv_global_name + "_dx";
   const std::string uv_dy_global_name = uv_global_name + "_dy";
@@ -591,10 +609,10 @@ static std::string build_height_helper_block(const HeightHelper &helper)
       break;
   }
   ss << "\n";
-  ss << "float2 " << helper.uv_global_name << " = float2(0.0);\n";
+  ss << "float3 " << helper.uv_global_name << " = float3(0.0);\n";
   ss << "float2 " << helper.uv_global_name << "_dx = float2(0.0);\n";
   ss << "float2 " << helper.uv_global_name << "_dy = float2(0.0);\n\n";
-  ss << "float " << helper.helper_name << "(float2 uv, float2 uv_dx, float2 uv_dy)\n{\n";
+  ss << "float " << helper.helper_name << "(float3 uv, float2 uv_dx, float2 uv_dy)\n{\n";
   ss << "  " << helper.uv_global_name << " = uv;\n";
   ss << "  " << helper.uv_global_name << "_dx = uv_dx;\n";
   ss << "  " << helper.uv_global_name << "_dy = uv_dy;\n";
@@ -742,9 +760,9 @@ static std::string build_wrapper_source(const StringRef wrapper_name,
     ss << "  float previous_ray_height = 1.0f;\n";
     ss << "  float2 current_uv = uv_in.xy - delta_uv;\n";
     ss << "  float current_height = " << height_helper.helper_name;
-    ss << "(current_uv, uv_dx, uv_dy) + height_offset;\n";
+    ss << "(float3(current_uv, uv_in.z), uv_dx, uv_dy) + height_offset;\n";
     ss << "  float previous_height = " << height_helper.helper_name;
-    ss << "(uv_in.xy, uv_dx, uv_dy) + height_offset;\n";
+    ss << "(uv_in, uv_dx, uv_dy) + height_offset;\n";
     ss << "  float ray_height = 1.0f - layer_depth;\n";
     ss << "  for (int i = 0; i < 128; i++) {\n";
     ss << "    if (i >= int(layer_count) || current_height > ray_height) {\n";
@@ -756,7 +774,7 @@ static std::string build_wrapper_source(const StringRef wrapper_name,
     ss << "    ray_height -= layer_depth;\n";
     ss << "    current_uv -= delta_uv;\n";
     ss << "    current_height = " << height_helper.helper_name;
-    ss << "(current_uv, uv_dx, uv_dy) + height_offset;\n";
+    ss << "(float3(current_uv, uv_in.z), uv_dx, uv_dy) + height_offset;\n";
     ss << "  }\n";
     ss << "  if (" << mode << " == PARALLAX_MODE_OCCLUSION) {\n";
     ss << "    uv_out = float3(parallax_interpolate_uv(current_uv, current_height, ";
@@ -777,7 +795,7 @@ static std::string build_wrapper_source(const StringRef wrapper_name,
     ss << "      float2 middle_uv = (after_uv + before_uv) * 0.5f;\n";
     ss << "      float middle_ray_height = (after_ray_height + before_ray_height) * 0.5f;\n";
     ss << "      float middle_height = " << height_helper.helper_name;
-    ss << "(middle_uv, uv_dx, uv_dy) + height_offset;\n";
+    ss << "(float3(middle_uv, uv_in.z), uv_dx, uv_dy) + height_offset;\n";
     ss << "      float delta = middle_height - middle_ray_height;\n";
     ss << "      if (delta > 0.0f) {\n";
     ss << "        after_uv = middle_uv;\n";
@@ -815,7 +833,7 @@ static std::string build_wrapper_source(const StringRef wrapper_name,
     ss << "      float2 intersection_uv = uv_in.xy - ";
     ss << "(1.0f - intersection_ray_height) * delta_uv * layer_count;\n";
     ss << "      float intersection_height = " << height_helper.helper_name;
-    ss << "(intersection_uv, uv_dx, uv_dy) + height_offset;\n";
+    ss << "(float3(intersection_uv, uv_in.z), uv_dx, uv_dy) + height_offset;\n";
     ss << "      float delta = intersection_ray_height - intersection_height;\n";
     ss << "      if (delta < 0.0f) {\n";
     ss << "        after_uv = intersection_uv;\n";
@@ -840,13 +858,15 @@ static std::string build_wrapper_source(const StringRef wrapper_name,
     ss << "    uv_out = float3(current_uv, uv_in.z);\n";
     ss << "  }\n";
     ss << "  float hit_height = " << height_helper.helper_name;
-    ss << "(uv_out.xy, uv_dx, uv_dy) + height_offset;\n";
+    ss << "(uv_out, uv_dx, uv_dy) + height_offset;\n";
     if (use_normal) {
       ss << "  float normal_step = max(max(length(uv_dx), length(uv_dy)), 1.0e-4f);\n";
       ss << "  float u_height = " << height_helper.helper_name;
-      ss << "(uv_out.xy + float2(normal_step, 0.0f), uv_dx, uv_dy) + height_offset;\n";
+      ss << "(float3(uv_out.xy + float2(normal_step, 0.0f), uv_out.z), uv_dx, uv_dy) + ";
+      ss << "height_offset;\n";
       ss << "  float v_height = " << height_helper.helper_name;
-      ss << "(uv_out.xy + float2(0.0f, normal_step), uv_dx, uv_dy) + height_offset;\n";
+      ss << "(float3(uv_out.xy + float2(0.0f, normal_step), uv_out.z), uv_dx, uv_dy) + ";
+      ss << "height_offset;\n";
       ss << "  normal_out = parallax_normal_from_height_samples(tangent, hit_height, ";
       ss << "u_height, v_height, normal_step, normal_step, scale);\n";
     }
@@ -875,7 +895,7 @@ static std::string build_wrapper_source(const StringRef wrapper_name,
       ss << "  float2 shadow_uv_offset = shadow_delta_uv;\n";
       ss << "  float shadow_ray_height = hit_height + shadow_layer_depth;\n";
       ss << "  float shadow_height = " << height_helper.helper_name;
-      ss << "(uv_out.xy + shadow_uv_offset, uv_dx, uv_dy) + height_offset;\n";
+      ss << "(float3(uv_out.xy + shadow_uv_offset, uv_out.z), uv_dx, uv_dy) + height_offset;\n";
       ss << "  for (int i = 0; i < 128; i++) {\n";
       ss << "    if (i >= int(shadow_layer_count) || shadow_ray_height >= 1.0f) {\n";
       ss << "      break;\n";
@@ -887,7 +907,7 @@ static std::string build_wrapper_source(const StringRef wrapper_name,
       ss << "    shadow_ray_height += shadow_layer_depth;\n";
       ss << "    shadow_uv_offset += shadow_delta_uv;\n";
       ss << "    shadow_height = " << height_helper.helper_name;
-      ss << "(uv_out.xy + shadow_uv_offset, uv_dx, uv_dy) + height_offset;\n";
+      ss << "(float3(uv_out.xy + shadow_uv_offset, uv_out.z), uv_dx, uv_dy) + height_offset;\n";
       ss << "  }\n";
     }
     ss << "}\n";
@@ -1158,6 +1178,7 @@ void register_node_type_sh_parallax()
   bke::node_type_size_preset(ntype, bke::eNodeSizePreset::Middle);
   bke::node_type_storage(
       ntype, "NodeShaderParallax", node_free_standard_storage, node_copy_standard_storage);
+  ntype.blend_data_read_storage_content = file_ns::node_blend_read_storage;
   ntype.gpu_fn = file_ns::gpu_shader_parallax;
   ntype.insert_link = file_ns::node_insert_link;
 

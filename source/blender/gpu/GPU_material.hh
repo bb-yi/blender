@@ -484,8 +484,12 @@ GPUNodeLink *GPU_color_band(GPUMaterial *mat, int size, float *pixels, float *r_
 GPUNodeLink *GPU_differentiate_float_function(const char *function_name, const float filter_width);
 
 void GPU_material_closure_uv_source_push(GPUMaterial *material, StringRefNull source);
+void GPU_material_closure_uv_source_push(GPUMaterial *material,
+                                         StringRefNull source,
+                                         GPUType source_type);
 void GPU_material_closure_uv_source_pop(GPUMaterial *material);
 StringRefNull GPU_material_closure_uv_source_get(const GPUMaterial *material);
+GPUType GPU_material_closure_uv_source_type_get(const GPUMaterial *material);
 void GPU_material_closure_uv_gradient_source_push(GPUMaterial *material,
                                                   StringRefNull dx_source,
                                                   StringRefNull dy_source);

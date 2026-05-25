@@ -117,14 +117,15 @@ static int node_shader_gpu_tex_image(GPUMaterial *mat,
       case SHD_PROJ_FLAT: {
         GPUNodeLink *gpu_image = GPU_image(mat, ima, iuser, sampler_state);
         if (use_closure_uv_gradients) {
-          const std::string dx_expr = "$OUT = float4(" + std::string(closure_uv_dx_source) +
-                                      ", 0.0, 1.0)";
-          const std::string dy_expr = "$OUT = float4(" + std::string(closure_uv_dy_source) +
-                                      ", 0.0, 1.0)";
+          const std::string dx_expr = "$OUT = " + std::string(closure_uv_dx_source);
+          const std::string dy_expr = "$OUT = " + std::string(closure_uv_dy_source);
           GPUNodeLink *uv_dx_link = GPU_function_call(dx_expr.c_str());
           GPUNodeLink *uv_dy_link = GPU_function_call(dy_expr.c_str());
-          GPU_stack_link(
-              mat, node, "node_tex_image_linear_grad", in, out, uv_dx_link, uv_dy_link, gpu_image);
+          if (!GPU_stack_link(
+                  mat, node, "node_tex_image_linear_grad", in, out, uv_dx_link, uv_dy_link, gpu_image))
+          {
+            GPU_stack_link(mat, node, gpu_node_name, in, out, gpu_image);
+          }
         }
         else {
           GPU_stack_link(mat, node, gpu_node_name, in, out, gpu_image);

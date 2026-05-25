@@ -5855,6 +5855,10 @@ void *BLO_read_struct_by_name_array(BlendDataReader *reader,
                                     const void *old_address)
 {
   const int struct_index = DNA_struct_find_with_alias(reader->fd->memsdna, struct_name);
+  if (UNLIKELY(struct_index == -1)) {
+    CLOG_WARN(&LOG, "Can't find SDNA code <%s> while reading data-block", struct_name);
+    return nullptr;
+  }
   BLI_assert(STREQ(DNA_struct_identifier(const_cast<SDNA *>(reader->fd->memsdna), struct_index),
                    struct_name));
   const size_t struct_size = size_t(DNA_struct_size(reader->fd->memsdna, struct_index));
