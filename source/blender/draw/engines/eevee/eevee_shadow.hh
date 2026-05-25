@@ -292,6 +292,7 @@ namespace blender::eevee
     gpu::Texture *caster_atlas_ref_ = nullptr;
     bool use_caster_atlas_ = false;
     bool use_caster_atlas_next_ = false;
+    bool caster_atlas_allocation_failed_ = false;
     int use_caster_atlas_push_ = 0;
 
     /** Pool of unallocated pages waiting to be assigned to specific tiles in the tile-map atlas. */

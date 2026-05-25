@@ -238,6 +238,11 @@ struct ShaderInfoShadowClassification {
   float cast_shadow;
 };
 
+struct ShaderInfoShadowTraceResult {
+  bool hit;
+  uint caster_id;
+};
+
 ShaderInfoShadowClassification shader_info_shadow_classification_none()
 {
   ShaderInfoShadowClassification result;
@@ -272,7 +277,9 @@ uint shader_info_shadow_caster_id_read(ShadowCoordinates coord)
 }
 
 template<typename ShadowRayType>
-uint shader_info_shadow_trace_caster_id(ShadowRayType ray, int sample_count, float step_offset)
+ShaderInfoShadowTraceResult shader_info_shadow_trace_caster_id(ShadowRayType ray,
+                                                               int sample_count,
+                                                               float step_offset)
 {
   ShadowMapTracingState state = shadow_map_trace_init(sample_count, step_offset);
   uint caster_id = SHADER_INFO_SHADOW_UNKNOWN_CASTER_ID;
@@ -286,13 +293,17 @@ uint shader_info_shadow_trace_caster_id(ShadowRayType ray, int sample_count, flo
     }
     shadow_map_trace_hit_check(state, samp, i == sample_count);
   }
-  return state.hit ? caster_id : SHADER_INFO_SHADOW_UNKNOWN_CASTER_ID;
+
+  ShaderInfoShadowTraceResult result;
+  result.hit = state.hit;
+  result.caster_id = state.hit ? caster_id : SHADER_INFO_SHADOW_UNKNOWN_CASTER_ID;
+  return result;
 }
 
-template uint shader_info_shadow_trace_caster_id<ShadowRayDirectional>(ShadowRayDirectional,
-                                                                       int,
-                                                                       float);
-template uint shader_info_shadow_trace_caster_id<ShadowRayPunctual>(ShadowRayPunctual, int, float);
+template ShaderInfoShadowTraceResult shader_info_shadow_trace_caster_id<ShadowRayDirectional>(
+    ShadowRayDirectional, int, float);
+template ShaderInfoShadowTraceResult shader_info_shadow_trace_caster_id<ShadowRayPunctual>(
+    ShadowRayPunctual, int, float);
 
 ShaderInfoShadowClassification shader_info_shadow_classification_seeded(
     LightData light,
@@ -340,21 +351,29 @@ ShaderInfoShadowClassification shader_info_shadow_classification_seeded(
     }
 
     float2 random_ray_2d = fract(hammersley_2d(ray_index, safe_ray_count) + random_shadow_3d.xy);
-    uint caster_id;
+    ShaderInfoShadowTraceResult trace_result;
     if (is_directional) {
       ShadowRayDirectional clip_ray = shadow_ray_generate_directional(
           light, random_ray_2d, lP, lNg, texel_radius);
-      caster_id = shader_info_shadow_trace_caster_id(clip_ray, safe_step_count, random_shadow_3d.z);
+      trace_result = shader_info_shadow_trace_caster_id(clip_ray,
+                                                        safe_step_count,
+                                                        random_shadow_3d.z);
     }
     else {
       ShadowRayPunctual clip_ray = shadow_ray_generate_punctual(light, random_ray_2d, lP, lNg);
-      caster_id = shader_info_shadow_trace_caster_id(clip_ray, safe_step_count, random_shadow_3d.z);
+      trace_result = shader_info_shadow_trace_caster_id(clip_ray,
+                                                        safe_step_count,
+                                                        random_shadow_3d.z);
     }
 
-    if (caster_id == SHADER_INFO_SHADOW_UNKNOWN_CASTER_ID) {
+    if (!trace_result.hit) {
+      continue;
+    }
+
+    if (trace_result.caster_id == SHADER_INFO_SHADOW_UNKNOWN_CASTER_ID) {
       unknown_hit += 1.0f;
     }
-    else if (caster_id == self_id) {
+    else if (trace_result.caster_id == self_id) {
       self_hit += 1.0f;
     }
     else {
@@ -723,6 +742,58 @@ float shader_info_shadow_visibility(LightData light,
   return saturate(visibility);
 }
 
+#if defined(SHADOW_CASTER_CLASSIFY)
+ShaderInfoShadowClassification shader_info_shadow_classified_visibility(
+    LightData light,
+    bool is_directional,
+    float3 light_vector,
+    float3 position,
+    float3 geometry_normal,
+    float3 shading_normal,
+    float normal_offset,
+    float geometry_offset,
+    float shadow_mode,
+    float stable_shadow_samples)
+{
+  ShaderInfoShadowClassification result = shader_info_shadow_classification(light,
+                                                                            is_directional,
+                                                                            light_vector,
+                                                                            position,
+                                                                            geometry_normal,
+                                                                            shading_normal,
+                                                                            normal_offset,
+                                                                            geometry_offset,
+                                                                            shadow_mode,
+                                                                            stable_shadow_samples);
+  if (!shader_info_shadow_is_soft_filtered(shadow_mode)) {
+    return result;
+  }
+
+  float3 frame_rotation_3d = shader_info_shadow_soft_frame_rotation_3d();
+  float2 frame_rotation_2d = shader_info_shadow_soft_frame_rotation_2d();
+  result.visibility = shader_info_shadow_soft_spatial_visibility(light,
+                                                                 is_directional,
+                                                                 position,
+                                                                 geometry_normal,
+                                                                 shading_normal,
+                                                                 normal_offset,
+                                                                 geometry_offset,
+                                                                 stable_shadow_samples,
+                                                                 result.visibility,
+                                                                 frame_rotation_3d,
+                                                                 frame_rotation_2d);
+
+  int eval_count = shader_info_shadow_soft_filtered_eval_count(stable_shadow_samples);
+  int ray_count = shader_info_shadow_soft_filtered_ray_count(stable_shadow_samples, eval_count);
+  float effective_sample_count = float(eval_count * ray_count);
+  float deband_strength = saturate(result.visibility * (1.0f - result.visibility) * 4.0f);
+  float deband_noise = shader_info_shadow_soft_deband_noise(position, light_vector) - 0.5f;
+  result.visibility += deband_noise * deband_strength / max(effective_sample_count * 2.0f, 1.0f);
+  result.visibility = saturate(result.visibility);
+  return result;
+}
+#endif
+
 bool shader_info_is_world_sun_light(uint light_index, LightData light, bool is_local)
 {
   if (is_local || !is_sun_light(light.type)) {
@@ -905,20 +976,8 @@ void node_shader_info(float3 position,
     if (diffuse_power >= LIGHT_ATTENUATION_THRESHOLD &&
         surface_attenuation > LIGHT_ATTENUATION_THRESHOLD)
     {
-      float visibility = shader_info_shadow_visibility(light,
-                                                       is_directional,
-                                                       lv.L,
-                                                       position,
-                                                       geometry_normal,
-                                                       shading_normal,
-                                                       normal_offset,
-                                                       geometry_offset,
-                                                       shadow_mode,
-                                                       stable_shadow_samples);
-      float shadow_visibility = visibility * surface_attenuation;
-      visibility_sum += shadow_visibility * diffuse_weight;
 #  if defined(SHADOW_CASTER_CLASSIFY)
-      ShaderInfoShadowClassification classification = shader_info_shadow_classification(
+      ShaderInfoShadowClassification classification = shader_info_shadow_classified_visibility(
           light,
           is_directional,
           lv.L,
@@ -929,9 +988,23 @@ void node_shader_info(float3 position,
           geometry_offset,
           shadow_mode,
           stable_shadow_samples);
+      float visibility = classification.visibility;
       self_shadow_sum += classification.self_shadow * surface_attenuation * diffuse_weight;
       cast_shadow_sum += classification.cast_shadow * surface_attenuation * diffuse_weight;
+#  else
+      float visibility = shader_info_shadow_visibility(light,
+                                                       is_directional,
+                                                       lv.L,
+                                                       position,
+                                                       geometry_normal,
+                                                       shading_normal,
+                                                       normal_offset,
+                                                       geometry_offset,
+                                                       shadow_mode,
+                                                       stable_shadow_samples);
 #  endif
+      float shadow_visibility = visibility * surface_attenuation;
+      visibility_sum += shadow_visibility * diffuse_weight;
       shadow_weight_sum += diffuse_weight;
     }
   }

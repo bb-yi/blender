@@ -723,11 +723,24 @@ void ShadowModule::ensure_caster_atlas()
                                                             atlas_size.xy(),
                                                             atlas_size.z,
                                                             usage);
-      if (created) {
-        caster_atlas_tx_.filter_mode(false);
+      if (caster_atlas_tx_.is_valid()) {
+        if (created) {
+          caster_atlas_tx_.filter_mode(false);
+        }
+        caster_atlas_allocation_failed_ = false;
+        return;
       }
-      return;
     }
+
+    caster_atlas_tx_.free();
+    use_caster_atlas_ = false;
+    use_caster_atlas_push_ = 0;
+    if (!caster_atlas_allocation_failed_) {
+      inst_.info_append_i18n(
+          "Warning: Could not allocate Shader Info shadow classification atlas. Self Shadow and "
+          "Cast Shadow outputs will stay unclassified.");
+    }
+    caster_atlas_allocation_failed_ = true;
   }
 
   caster_atlas_tx_.free();
@@ -1078,8 +1091,13 @@ void ShadowModule::sync_bake_receiver_bounds(const ResourceHandleRange &resource
 void ShadowModule::end_sync()
 {
   const bool previous_use_caster_atlas = use_caster_atlas_;
-  use_caster_atlas_ = use_caster_atlas_next_ && enabled_ &&
-                      ShadowModule::shadow_technique == ShadowTechnique::ATOMIC_RASTER;
+  const bool requested_use_caster_atlas = use_caster_atlas_next_ && enabled_ &&
+                                          ShadowModule::shadow_technique ==
+                                              ShadowTechnique::ATOMIC_RASTER;
+  if (!requested_use_caster_atlas) {
+    caster_atlas_allocation_failed_ = false;
+  }
+  use_caster_atlas_ = requested_use_caster_atlas && !caster_atlas_allocation_failed_;
   use_caster_atlas_push_ = int(use_caster_atlas_);
   do_full_update_ |= previous_use_caster_atlas != use_caster_atlas_;
   ensure_caster_atlas();

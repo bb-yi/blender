@@ -1285,6 +1285,9 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   const bool surface_pass_uses_shader_info =
       GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) &&
       ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD);
+  const bool use_shader_info_shadow_classification =
+      GPU_material_has_shader_info_shadow_classification(gpumat) &&
+      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD);
   const bool separate_depth_offset_lighting =
       has_depth_offset && !depth_offset_affect_lighting &&
       ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR);
@@ -1304,6 +1307,9 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   }
   else if (pipeline_type == MAT_PIPE_DEFERRED_NPR) {
     slots.reserve_sampler(LIGHT_SHADER_NPR_TEX_SLOT);
+  }
+  if (use_shader_info_shadow_classification) {
+    slots.reserve_sampler(SHADOW_CASTER_ATLAS_TEX_SLOT);
   }
   if (has_depth_offset) {
     info.define("MAT_DEPTH_OFFSET");
@@ -1391,9 +1397,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   {
     info.additional_info("eevee_light_data");
     info.additional_info("eevee_shadow_data");
-    if (GPU_material_has_shader_info_shadow_classification(gpumat) &&
-        ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD))
-    {
+    if (use_shader_info_shadow_classification) {
       info.define("SHADOW_CASTER_CLASSIFY");
       info.additional_info("eevee_shadow_caster_data");
     }
