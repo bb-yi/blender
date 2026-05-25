@@ -1050,3 +1050,33 @@ void node_shader_info(float3 position,
   cast_shadow = 1.0f;
 #endif
 }
+
+[[node]]
+void node_shader_info(float3 position,
+                      float3 normal_in,
+                      float exponent,
+                      float shadow_mode,
+                      float stable_shadow_samples,
+                      float lightgroup_id_value,
+                      out float4 diffuse_shading,
+                      out float shadow,
+                      out float4 ambient_lighting,
+                      out float half_lambert_factor,
+                      out float blinn_phong_factor)
+{
+  float self_shadow;
+  float cast_shadow;
+  node_shader_info(position,
+                   normal_in,
+                   exponent,
+                   shadow_mode,
+                   stable_shadow_samples,
+                   lightgroup_id_value,
+                   diffuse_shading,
+                   shadow,
+                   ambient_lighting,
+                   half_lambert_factor,
+                   blinn_phong_factor,
+                   self_shadow,
+                   cast_shadow);
+}

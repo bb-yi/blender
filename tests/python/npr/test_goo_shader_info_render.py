@@ -129,6 +129,39 @@ def make_blocker():
     return blocker
 
 
+def make_self_shadow_caster(material):
+    mesh = bpy.data.meshes.new("ShaderInfoSelfShadowMesh")
+    vertices = [
+        (-4.0, -4.0, 0.0),
+        (4.0, -4.0, 0.0),
+        (4.0, 4.0, 0.0),
+        (-4.0, 4.0, 0.0),
+        (-0.5, -0.5, 0.0),
+        (0.5, -0.5, 0.0),
+        (0.5, 0.5, 0.0),
+        (-0.5, 0.5, 0.0),
+        (-0.5, -0.5, 2.0),
+        (0.5, -0.5, 2.0),
+        (0.5, 0.5, 2.0),
+        (-0.5, 0.5, 2.0),
+    ]
+    faces = [
+        (0, 1, 2, 3),
+        (8, 9, 10, 11),
+        (4, 5, 9, 8),
+        (5, 6, 10, 9),
+        (6, 7, 11, 10),
+        (7, 4, 8, 11),
+    ]
+    mesh.from_pydata(vertices, [], faces)
+    mesh.update()
+
+    obj = bpy.data.objects.new("ShaderInfoSelfShadowCaster", mesh)
+    bpy.context.scene.collection.objects.link(obj)
+    obj.data.materials.append(material)
+    return obj
+
+
 def make_light():
     light_data = bpy.data.lights.new("ShaderInfoPoint", type="POINT")
     light_data.energy = 5000.0
@@ -238,6 +271,14 @@ def build_scene(output_name, with_light=True, with_blocker=False, world_mode="bl
         make_light()
 
 
+def build_self_shadow_scene(output_name):
+    clear_scene()
+    configure_scene()
+    make_camera()
+    make_self_shadow_caster(make_shader_info_material(f"{output_name}SelfCasterMaterial", output_name))
+    make_light()
+
+
 def assert_diffuse_response():
     build_scene("Diffuse Shading", with_light=True, with_blocker=False)
     lit_pixels, lit_width, lit_height = render_image()
@@ -288,6 +329,62 @@ def assert_shadow_response(output_name):
     )
     assert shadowed[0] < unblocked[0] - 0.35, (
         f"{output_name} should darken with blocker, got shadowed={shadowed} unblocked={unblocked}"
+    )
+
+
+def assert_self_and_cast_shadow_classification():
+    build_self_shadow_scene("Self Shadow")
+    self_pixels, self_width, self_height = render_image()
+    self_shadowed = sample_world_point(self_pixels, self_width, self_height, 1.4, 0.0)
+    self_lit = sample_world_point(self_pixels, self_width, self_height, -1.4, 0.0)
+
+    build_self_shadow_scene("Cast Shadow")
+    self_cast_pixels, self_cast_width, self_cast_height = render_image()
+    self_cast_shadowed = sample_world_point(
+        self_cast_pixels, self_cast_width, self_cast_height, 1.4, 0.0
+    )
+    self_cast_lit = sample_world_point(
+        self_cast_pixels, self_cast_width, self_cast_height, -1.4, 0.0
+    )
+
+    build_scene("Self Shadow", with_light=True, with_blocker=True)
+    cast_self_pixels, cast_self_width, cast_self_height = render_image()
+    cast_self_shadowed = sample_world_point(
+        cast_self_pixels, cast_self_width, cast_self_height, 1.4, 0.0
+    )
+    cast_self_lit = sample_world_point(cast_self_pixels, cast_self_width, cast_self_height, -1.4, 0.0)
+
+    build_scene("Cast Shadow", with_light=True, with_blocker=True)
+    cast_pixels, cast_width, cast_height = render_image()
+    cast_shadowed = sample_world_point(cast_pixels, cast_width, cast_height, 1.4, 0.0)
+    cast_lit = sample_world_point(cast_pixels, cast_width, cast_height, -1.4, 0.0)
+
+    assert self_lit[0] > 0.9, f"Self Shadow should stay bright outside self-shadow, got {self_lit}"
+    assert self_shadowed[0] < self_lit[0] - 0.35, (
+        "Self Shadow should darken when the caster and receiver are the same object, "
+        f"got shadowed={self_shadowed} lit={self_lit}"
+    )
+    assert self_cast_shadowed[0] > 0.8, (
+        "Cast Shadow should ignore same-object self-shadow, "
+        f"got shadowed={self_cast_shadowed} lit={self_cast_lit}"
+    )
+    assert abs(self_cast_shadowed[0] - self_cast_lit[0]) < 0.1, (
+        "Cast Shadow should remain stable in the same-object self-shadow region, "
+        f"got shadowed={self_cast_shadowed} lit={self_cast_lit}"
+    )
+
+    assert cast_lit[0] > 0.9, f"Cast Shadow should stay bright outside cast shadow, got {cast_lit}"
+    assert cast_shadowed[0] < cast_lit[0] - 0.35, (
+        "Cast Shadow should darken when a different object casts the shadow, "
+        f"got shadowed={cast_shadowed} lit={cast_lit}"
+    )
+    assert cast_self_shadowed[0] > 0.8, (
+        "Self Shadow should ignore different-object cast shadow, "
+        f"got shadowed={cast_self_shadowed} lit={cast_self_lit}"
+    )
+    assert abs(cast_self_shadowed[0] - cast_self_lit[0]) < 0.1, (
+        "Self Shadow should remain stable in the different-object cast-shadow region, "
+        f"got shadowed={cast_self_shadowed} lit={cast_self_lit}"
     )
 
 
@@ -482,6 +579,7 @@ assert_unshadowed_response("Blinn-Phong Factor", min_value=0.05, tolerance=0.08)
 assert_blinn_phong_gradient_on_sphere()
 assert_blinn_phong_point_gradient_on_plane()
 assert_shadow_response("Shadow")
+assert_self_and_cast_shadow_classification()
 assert_no_light_black("Blinn-Phong Factor")
 assert_no_light_black("Shadow")
 assert_no_light_black("Half-Lambert Factor")
