@@ -42,6 +42,11 @@ struct [[host_shared]] ShadowSceneData {
   float film_pixel_radius;
   /* Global switch for jittered shadows. */
   bool32_t use_jitter;
+  /* True when the auxiliary caster-id atlas is valid for Shader Info shadow classification. */
+  bool32_t use_caster_atlas;
+  int _pad0;
+  int _pad1;
+  int _pad2;
 };
 
 /* Light Clamping. */

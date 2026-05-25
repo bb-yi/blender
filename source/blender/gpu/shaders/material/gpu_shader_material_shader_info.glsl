@@ -403,6 +403,9 @@ ShaderInfoShadowClassification shader_info_shadow_classification_single(
   if (light.tilemap_index == LIGHT_NO_SHADOW) {
     return shader_info_shadow_classification_none();
   }
+  if (!uniform_buf.shadow.use_caster_atlas) {
+    return shader_info_shadow_classification_none();
+  }
 
   int ray_count = shader_info_shadow_is_builtin(shadow_mode) ?
                       uniform_buf.shadow.ray_count :
@@ -447,6 +450,9 @@ ShaderInfoShadowClassification shader_info_shadow_classification(
     float stable_shadow_samples)
 {
   UNUSED_VARS(light_vector);
+  if (!uniform_buf.shadow.use_caster_atlas) {
+    return shader_info_shadow_classification_none();
+  }
   if (!shader_info_shadow_is_soft_filtered(shadow_mode)) {
     return shader_info_shadow_classification_single(light,
                                                     is_directional,

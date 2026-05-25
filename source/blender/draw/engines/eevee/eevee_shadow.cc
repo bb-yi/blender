@@ -1102,6 +1102,7 @@ void ShadowModule::end_sync()
   do_full_update_ |= previous_use_caster_atlas != use_caster_atlas_;
   ensure_caster_atlas();
   update_caster_atlas_ref();
+  data_.use_caster_atlas = bool32_t(use_caster_atlas_);
 
   const DirectionalFocusData old_focus = directional_focus_data_ensure(*this);
 
@@ -1429,7 +1430,7 @@ void ShadowModule::end_sync()
         sub.shader_set(inst_.shaders.static_shader_get(SHADOW_PAGE_CLEAR));
         sub.bind_ssbo("pages_infos_buf", pages_infos_data_);
         sub.bind_ssbo("dst_coord_buf", dst_coord_buf_);
-        sub.push_constant("use_shadow_caster_atlas", use_caster_atlas_);
+        sub.push_constant("use_shadow_caster_atlas", use_caster_atlas_push_);
         sub.bind_image("shadow_atlas_img", atlas_tx_);
         sub.bind_image("shadow_caster_atlas_img", caster_atlas_ref());
         sub.dispatch(clear_dispatch_buf_);

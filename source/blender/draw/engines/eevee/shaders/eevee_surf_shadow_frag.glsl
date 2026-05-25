@@ -103,7 +103,7 @@ void main()
   u_depth += 2;
 
   imageAtomicMin(shadow_atlas_img, out_texel, u_depth);
-  if (use_shadow_caster_atlas) {
+  if (use_shadow_caster_atlas != 0) {
     uint packed_caster = (u_depth & 0xFFFF0000u) | (shadow_iface.resource_id & 0xFFFFu);
     imageAtomicMin(shadow_caster_atlas_img, out_texel, packed_caster);
   }
