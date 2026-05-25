@@ -252,10 +252,16 @@ DO_STATIC_COMPILATION()
 LOCAL_GROUP_SIZE(SHADOW_PAGE_CLEAR_GROUP_SIZE, SHADOW_PAGE_CLEAR_GROUP_SIZE)
 STORAGE_BUF(2, read, ShadowPagesInfoData, pages_infos_buf)
 STORAGE_BUF(6, read, uint, dst_coord_buf[SHADOW_RENDER_MAP_SIZE])
+PUSH_CONSTANT(bool, use_shadow_caster_atlas)
 TYPEDEF_SOURCE("eevee_defines.hh")
 TYPEDEF_SOURCE("eevee_shadow_shared.hh")
 COMPUTE_SOURCE("eevee_shadow_page_clear_comp.glsl")
 IMAGE(SHADOW_ATLAS_IMG_SLOT, UINT_32, read_write, uimage2DArrayAtomic, shadow_atlas_img)
+IMAGE(SHADOW_CASTER_ATLAS_IMG_SLOT,
+      UINT_32,
+      read_write,
+      uimage2DArrayAtomic,
+      shadow_caster_atlas_img)
 GPU_SHADER_CREATE_END()
 
 /* TBDR clear implementation. */

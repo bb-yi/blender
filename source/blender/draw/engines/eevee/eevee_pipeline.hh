@@ -949,6 +949,9 @@ class UtilityTexture : public Texture {
  * \{ */
 
 class PipelineModule {
+ private:
+  Instance &inst_;
+
  public:
   BackgroundPipeline background;
   WorldPipeline world;
@@ -968,7 +971,8 @@ class PipelineModule {
   bool has_raycast = false;
 
   PipelineModule(Instance &inst, PipelineInfoData &data)
-      : background(inst),
+      : inst_(inst),
+        background(inst),
         world(inst),
         world_volume(inst),
         probe(inst),
@@ -1008,88 +1012,7 @@ class PipelineModule {
                               blender::Material *blender_mat,
                               GPUMaterial *gpumat,
                               eMaterialPipeline pipeline_type,
-                              eMaterialProbe probe_capture)
-  {
-    if (GPU_material_flag_get(gpumat, GPU_MATFLAG_RAYCAST)) {
-      has_raycast = true;
-    }
-
-    if (probe_capture == MAT_PROBE_REFLECTION) {
-      switch (pipeline_type) {
-        case MAT_PIPE_PREPASS_DEFERRED:
-          return probe.prepass_add(blender_mat, gpumat);
-        case MAT_PIPE_DEFERRED:
-          return probe.material_add(blender_mat, gpumat);
-        case MAT_PIPE_DEFERRED_NPR:
-          return probe.npr_add(blender_mat, gpumat);
-        default:
-          BLI_assert_unreachable();
-          break;
-      }
-    }
-    if (probe_capture == MAT_PROBE_PLANAR) {
-      switch (pipeline_type) {
-        case MAT_PIPE_PREPASS_PLANAR:
-          return planar.prepass_add(blender_mat, gpumat);
-        case MAT_PIPE_DEFERRED:
-          return planar.material_add(blender_mat, gpumat);
-        case MAT_PIPE_DEFERRED_NPR:
-          return planar.npr_add(blender_mat, gpumat);
-        default:
-          BLI_assert_unreachable();
-          break;
-      }
-    }
-
-    switch (pipeline_type) {
-      case MAT_PIPE_PREPASS_DEFERRED:
-        return deferred.prepass_add(blender_mat, gpumat, false, ob->refraction_layer_index);
-      case MAT_PIPE_PREPASS_FORWARD:
-        return forward.prepass_opaque_add(blender_mat, gpumat, false);
-      case MAT_PIPE_PREPASS_OVERLAP:
-        BLI_assert_msg(0, "Overlap prepass should register to the forward pipeline directly.");
-        return nullptr;
-
-      case MAT_PIPE_PREPASS_DEFERRED_VELOCITY:
-        return deferred.prepass_add(blender_mat, gpumat, true, ob->refraction_layer_index);
-      case MAT_PIPE_PREPASS_FORWARD_VELOCITY:
-        return forward.prepass_opaque_add(blender_mat, gpumat, true);
-
-      case MAT_PIPE_DEFERRED:
-        return deferred.material_add(blender_mat, gpumat, ob->refraction_layer_index);
-      case MAT_PIPE_DEFERRED_NPR:
-        return deferred.npr_add(blender_mat, gpumat, ob->refraction_layer_index);
-      case MAT_PIPE_FORWARD:
-        if (!material_color_write_get(*blender_mat)) {
-          return nullptr;
-        }
-        if (!material_depth_write_get(*blender_mat)) {
-          return forward.material_no_depth_add(ob, blender_mat, gpumat);
-        }
-        return forward.material_opaque_add(ob, blender_mat, gpumat);
-      case MAT_PIPE_SHADOW:
-        return shadow.surface_material_add(blender_mat, gpumat);
-      case MAT_PIPE_CAPTURE:
-        return capture.surface_material_add(blender_mat, gpumat);
-      case MAT_PIPE_FILTER:
-        BLI_assert_msg(0, "Filter shaders are evaluated by the filter material module.");
-        return nullptr;
-      case MAT_PIPE_BAKE_COLOR:
-        BLI_assert_msg(0, "Bake shaders are evaluated by the Eevee bake callback.");
-        return nullptr;
-
-      case MAT_PIPE_VOLUME_OCCUPANCY:
-      case MAT_PIPE_VOLUME_MATERIAL:
-        BLI_assert_msg(0, "Volume shaders must register to the volume pipeline directly.");
-        return nullptr;
-
-      case MAT_PIPE_PREPASS_PLANAR:
-        /* Should be handled by the `probe_capture == MAT_PROBE_PLANAR` case. */
-        BLI_assert_unreachable();
-        return nullptr;
-    }
-    return nullptr;
-  }
+                              eMaterialProbe probe_capture);
 };
 
 /** \} */

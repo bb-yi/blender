@@ -284,6 +284,7 @@
 #define OUTLINE_JFA_TEX_SLOT 46
 #define OUTLINE_VECTOR_TEX_SLOT 47
 #define OUTLINE_OCCLUSION_DEPTH_TEX_SLOT 48
+#define SHADOW_CASTER_ATLAS_TEX_SLOT OUTLINE_DEPTH_TEX_SLOT
 
 /* Images. */
 #define RBUFS_COLOR_SLOT 0
@@ -309,6 +310,7 @@
 #define VOLUME_HIT_COUNT_SLOT 1
 /* Only during shadow rendering. */
 #define SHADOW_ATLAS_IMG_SLOT 4
+#define SHADOW_CASTER_ATLAS_IMG_SLOT 5
 
 /* Uniform Buffers. */
 /* Slot 0 is GPU_NODE_TREE_UBO_SLOT. */

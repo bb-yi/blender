@@ -27,3 +27,8 @@ TYPEDEF_SOURCE("eevee_shadow_shared.hh")
 SAMPLER(SHADOW_ATLAS_TEX_SLOT, usampler2DArray, shadow_atlas_tx)
 SAMPLER(SHADOW_TILEMAPS_TEX_SLOT, usampler2D, shadow_tilemaps_tx)
 GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(eevee_shadow_caster_data)
+DEFINE("SHADOW_CASTER_CLASSIFY")
+SAMPLER(SHADOW_CASTER_ATLAS_TEX_SLOT, usampler2DArray, shadow_caster_atlas_tx)
+GPU_SHADER_CREATE_END()

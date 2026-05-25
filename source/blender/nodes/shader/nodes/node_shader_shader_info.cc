@@ -34,6 +34,8 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.add_output<decl::Color>("Ambient Lighting");
   b.add_output<decl::Float>("Half-Lambert Factor");
   b.add_output<decl::Float>("Blinn-Phong Factor");
+  b.add_output<decl::Float>("Self Shadow");
+  b.add_output<decl::Float>("Cast Shadow");
 }
 
 static void node_shader_init_shader_info(bNodeTree * /*ntree*/, bNode *node)
@@ -75,6 +77,9 @@ static int node_shader_gpu_shader_info(GPUMaterial *mat,
   const float lightgroup_id_value = float(storage != nullptr ? max_ii(storage->lightgroup_id, 0) : 0);
 
   GPU_material_flag_set(mat, GPU_MATFLAG_DIFFUSE | GPU_MATFLAG_SHADER_INFO);
+  if (out[5].hasoutput || out[6].hasoutput) {
+    GPU_material_shader_info_shadow_classification_set(mat);
+  }
   if (node->custom1 == SHD_SHADER_INFO_SHADOW_SOFT_FILTERED) {
     GPU_material_flag_set(mat, GPU_MATFLAG_RAYCAST);
   }

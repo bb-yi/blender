@@ -112,6 +112,7 @@ struct GPUMaterial {
   bool has_filter_output = false;
   bool has_light_shader_output = false;
   bool has_glsl_light_shader_eval = false;
+  bool has_shader_info_shadow_classification = false;
 
   std::string name;
 
@@ -426,6 +427,11 @@ bool GPU_material_has_light_shader_output(GPUMaterial *mat)
 bool GPU_material_has_glsl_light_shader_eval(const GPUMaterial *mat)
 {
   return mat != nullptr && mat->has_glsl_light_shader_eval;
+}
+
+bool GPU_material_has_shader_info_shadow_classification(const GPUMaterial *mat)
+{
+  return mat != nullptr && mat->has_shader_info_shadow_classification;
 }
 
 int GPU_material_filter_object_info_ensure(GPUMaterial *material, Object *object)
@@ -842,6 +848,13 @@ void GPU_material_glsl_light_shader_eval_set(GPUMaterial *material)
 {
   if (material != nullptr) {
     material->has_glsl_light_shader_eval = true;
+  }
+}
+
+void GPU_material_shader_info_shadow_classification_set(GPUMaterial *material)
+{
+  if (material != nullptr) {
+    material->has_shader_info_shadow_classification = true;
   }
 }
 
