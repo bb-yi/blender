@@ -16,4 +16,6 @@ assert [socket.name for socket in node.outputs] == [
     "Ambient Lighting",
     "Half-Lambert Factor",
     "Blinn-Phong Factor",
+    "Self Shadow",
+    "Cast Shadow",
 ]
