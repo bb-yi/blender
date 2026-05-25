@@ -2946,7 +2946,7 @@ class ExperimentalPanel:
 
     @classmethod
     def poll(cls, _context):
-        return bpy.app.version_cycle == "alpha"
+        return True
 
 
 """

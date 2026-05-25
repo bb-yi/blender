@@ -18,8 +18,8 @@ namespace ed::asset {
 
 bool id_type_is_non_experimental(const ID *id);
 #define ED_ASSET_TYPE_IDS_NON_EXPERIMENTAL_FLAGS \
-  (FILTER_ID_BR | FILTER_ID_MA | FILTER_ID_GR | FILTER_ID_OB | FILTER_ID_AC | FILTER_ID_WO | \
-   FILTER_ID_NT | FILTER_ID_SCE)
+  (FILTER_ID_BR | FILTER_ID_MA | FILTER_ID_GR | FILTER_ID_IM | FILTER_ID_OB | FILTER_ID_AC | \
+   FILTER_ID_WO | FILTER_ID_NT | FILTER_ID_SCE)
 
 /**
  * Check if the asset type for \a id (which doesn't need to be an asset right now) can be an asset,
