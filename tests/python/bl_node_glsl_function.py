@@ -53,6 +53,35 @@ def refresh_glsl_node(node):
     bpy.context.view_layer.update()
 
 
+def refresh_glsl_node_with_operator(node, tree):
+    screen = bpy.context.screen
+    if screen is None or not screen.areas:
+        raise RuntimeError("No screen area available for node refresh operator context")
+
+    area = screen.areas[0]
+    area.type = 'NODE_EDITOR'
+    region = next((region for region in area.regions if region.type == 'WINDOW'), None)
+    if region is None:
+        raise RuntimeError("No window region available for node refresh operator context")
+
+    space = area.spaces.active
+    space.tree_type = 'ShaderNodeTree'
+    space.node_tree = tree
+    tree.nodes.active = node
+    node.select = True
+
+    with bpy.context.temp_override(
+        area=area,
+        region=region,
+        space_data=space,
+        node=node,
+        active_node=node,
+        edit_tree=tree,
+        node_tree=tree,
+    ):
+        return bpy.ops.node.glsl_function_refresh()
+
+
 def relink_and_update(tree, from_socket, to_socket):
     tree.links.new(from_socket, to_socket)
     tree.interface_update(bpy.context)
@@ -162,6 +191,48 @@ class GLSLFunctionNodeTest(unittest.TestCase):
         refresh_glsl_node(glsl_node)
 
         self.assertEqual(glsl_node.parse_status, 'READY')
+
+    def test_group_input_sample2d_defers_source_validation(self):
+        group = bpy.data.node_groups.new("GLSLGroupInputSamplerTest", "ShaderNodeTree")
+        group_input = group.nodes.new("NodeGroupInput")
+        glsl_node = group.nodes.new("ShaderNodeGLSLFunction")
+        group.interface.new_socket(name="tex", in_out='INPUT', socket_type="NodeSocketClosure")
+        group.interface_update(bpy.context)
+
+        source = "vec4 sample_group_input(sampler2D tex, vec2 uv){\n" "  return texture(tex, uv);\n" "}\n"
+        make_text_block("glsl_group_input_sampler.glsl", source)
+        self.configure_glsl_node(glsl_node, "glsl_group_input_sampler.glsl", "sample_group_input")
+
+        relink_and_update(
+            group,
+            find_socket(group_input.outputs, "tex"),
+            find_socket(glsl_node.inputs, "tex"),
+        )
+        refresh_glsl_node(glsl_node)
+
+        self.assertEqual(glsl_node.parse_status, 'READY')
+
+    def test_node_group_refresh_operator_updates_glsl_sockets(self):
+        group = bpy.data.node_groups.new("GLSLGroupRefreshOperatorTest", "ShaderNodeTree")
+        glsl_node = group.nodes.new("ShaderNodeGLSLFunction")
+        source = "vec4 refresh_probe(vec4 color){\n" "  return color;\n" "}\n"
+        text = make_text_block("glsl_group_refresh_probe.glsl", source)
+        self.configure_glsl_node(glsl_node, "glsl_group_refresh_probe.glsl", "refresh_probe")
+
+        self.assertEqual(glsl_node.parse_status, 'READY')
+        self.assertIsNotNone(find_socket(glsl_node.inputs, "color"))
+
+        text.clear()
+        text.write(
+            "vec4 refresh_probe(vec4 color, float strength){\n"
+            "  return color * strength;\n"
+            "}\n"
+        )
+        result = refresh_glsl_node_with_operator(glsl_node, group)
+
+        self.assertEqual(result, {'FINISHED'})
+        self.assertEqual(glsl_node.parse_status, 'READY')
+        self.assertIsNotNone(find_socket(glsl_node.inputs, "strength"))
 
     def test_meta_description_preserves_existing_socket_values(self):
         _, tree = self.make_material_tree()

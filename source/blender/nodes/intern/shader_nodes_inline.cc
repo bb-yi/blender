@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
 #include <fmt/format.h>
+#include <type_traits>
 #include <variant>
 
 #include "DNA_material_types.h"
@@ -42,12 +43,28 @@ struct NodeAndSocket {
   bNodeSocket *socket = nullptr;
 };
 
+struct VectorPrimitiveSocketValue {
+  float3 xyz = float3(0.0f);
+  float w = 0.0f;
+  int dimensions = 3;
+};
+
 struct PrimitiveSocketValue {
-  std::variant<int, float, bool, ColorGeometry4f, float3, MenuValue> value;
+  std::variant<int, float, bool, ColorGeometry4f, VectorPrimitiveSocketValue, MenuValue> value;
 
   const void *buffer() const
   {
-    return std::visit([](auto &&value) -> const void * { return &value; }, value);
+    return std::visit(
+        [](auto &&value) -> const void * {
+          using T = std::decay_t<decltype(value)>;
+          if constexpr (std::is_same_v<T, VectorPrimitiveSocketValue>) {
+            return &value.xyz;
+          }
+          else {
+            return &value;
+          }
+        },
+        value);
   }
 
   void *buffer()
@@ -71,7 +88,7 @@ struct PrimitiveSocketValue {
       return {*static_cast<const ColorGeometry4f *>(value.get())};
     }
     if (type.is<float3>()) {
-      return {*static_cast<const float3 *>(value.get())};
+      return {VectorPrimitiveSocketValue{*static_cast<const float3 *>(value.get()), 0.0f, 3}};
     }
     if (type.is<MenuValue>()) {
       return {*static_cast<const MenuValue *>(value.get())};
@@ -140,9 +157,14 @@ struct SocketValue {
         case SOCK_BOOLEAN:
           return PrimitiveSocketValue{
               bool(socket.default_value_typed<bNodeSocketValueBoolean>()->value)};
-        case SOCK_VECTOR:
+        case SOCK_VECTOR: {
+          const bNodeSocketValueVector &value =
+              *socket.default_value_typed<bNodeSocketValueVector>();
           return PrimitiveSocketValue{
-              float3(socket.default_value_typed<bNodeSocketValueVector>()->value)};
+              VectorPrimitiveSocketValue{float3(value.value),
+                                         value.value[3],
+                                         value.dimensions > 0 ? value.dimensions : 3}};
+        }
         case SOCK_RGBA:
           return PrimitiveSocketValue{
               ColorGeometry4f(socket.default_value_typed<bNodeSocketValueRGBA>()->value)};
@@ -1383,8 +1405,7 @@ class ShaderNodesInliner {
           *from_socket_type.base_cpp_type, CPPType::get<ColorGeometry4f>(), src_buffer, &color);
       bNodeSocket *output_socket = static_cast<bNodeSocket *>(color_node->outputs.first);
       auto *socket_storage = static_cast<bNodeSocketValueRGBA *>(output_socket->default_value);
-      copy_v3_v3(socket_storage->value, color);
-      socket_storage->value[3] = 1.0f;
+      copy_v4_v4(socket_storage->value, color);
       return {LinkedSocketValue{color_node, output_socket}};
     }
 
@@ -1502,23 +1523,24 @@ class ShaderNodesInliner {
       socket->default_value_typed<bNodeSocketValueFloat>()->value = *value_bool;
       return {node, socket};
     }
-    if (const float3 *value_float3 = std::get_if<float3>(&value.value)) {
+    if (const VectorPrimitiveSocketValue *value_vector =
+            std::get_if<VectorPrimitiveSocketValue>(&value.value))
+    {
       bNode *node = this->add_node("ShaderNodeCombineXYZ");
       bNodeSocket *output_socket = static_cast<bNodeSocket *>(node->outputs.first);
       bNodeSocket *input_x = static_cast<bNodeSocket *>(node->inputs.first);
       bNodeSocket *input_y = input_x->next;
       bNodeSocket *input_z = input_y->next;
-      input_x->default_value_typed<bNodeSocketValueFloat>()->value = value_float3->x;
-      input_y->default_value_typed<bNodeSocketValueFloat>()->value = value_float3->y;
-      input_z->default_value_typed<bNodeSocketValueFloat>()->value = value_float3->z;
+      input_x->default_value_typed<bNodeSocketValueFloat>()->value = value_vector->xyz.x;
+      input_y->default_value_typed<bNodeSocketValueFloat>()->value = value_vector->xyz.y;
+      input_z->default_value_typed<bNodeSocketValueFloat>()->value = value_vector->xyz.z;
       return {node, output_socket};
     }
     if (const ColorGeometry4f *value_color = std::get_if<ColorGeometry4f>(&value.value)) {
       bNode *node = this->add_node("ShaderNodeRGB");
       bNodeSocket *output_socket = static_cast<bNodeSocket *>(node->outputs.first);
       auto *socket_storage = static_cast<bNodeSocketValueRGBA *>(output_socket->default_value);
-      copy_v3_v3(socket_storage->value, *value_color);
-      socket_storage->value[3] = 1.0f;
+      copy_v4_v4(socket_storage->value, *value_color);
       return {node, output_socket};
     }
     BLI_assert_unreachable();
@@ -1551,8 +1573,14 @@ class ShaderNodesInliner {
         break;
       }
       case SOCK_VECTOR: {
-        copy_v3_v3(socket.default_value_typed<bNodeSocketValueVector>()->value,
-                   std::get<float3>(value.value));
+        const VectorPrimitiveSocketValue &vector_value = std::get<VectorPrimitiveSocketValue>(
+            value.value);
+        bNodeSocketValueVector *socket_value = socket.default_value_typed<bNodeSocketValueVector>();
+        copy_v3_v3(socket_value->value, vector_value.xyz);
+        socket_value->value[3] = vector_value.w;
+        if (socket_value->dimensions == 0) {
+          socket_value->dimensions = vector_value.dimensions;
+        }
         break;
       }
       case SOCK_RGBA: {

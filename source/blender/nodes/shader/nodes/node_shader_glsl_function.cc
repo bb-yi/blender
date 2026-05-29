@@ -248,8 +248,14 @@ namespace blender
       ImageToClosure,
       ClosureOutput,
       GLSLFunction,
+      GroupInput,
       Unsupported,
     };
+
+    static bool node_is_group_input(const bNode& node)
+    {
+      return node.is_group_input() || node.is_type("NodeGroupInput");
+    }
 
     struct GLSLRawParamMeta
     {
@@ -507,6 +513,15 @@ namespace blender
       }
 
       r_link = find_used_direct_link(*sample_socket);
+      if (r_link == nullptr)
+      {
+        const bNodeLink* direct_link = find_any_direct_link(*sample_socket);
+        if (direct_link != nullptr && direct_link->fromnode != nullptr &&
+            node_is_group_input(*direct_link->fromnode))
+        {
+          r_link = direct_link;
+        }
+      }
       if (r_link == nullptr || r_link->fromnode == nullptr)
       {
         return GLSLSample2DSourceKind::None;
@@ -522,6 +537,10 @@ namespace blender
       if (r_link->fromnode->is_type("ShaderNodeGLSLFunction"))
       {
         return GLSLSample2DSourceKind::GLSLFunction;
+      }
+      if (node_is_group_input(*r_link->fromnode))
+      {
+        return GLSLSample2DSourceKind::GroupInput;
       }
       return GLSLSample2DSourceKind::Unsupported;
     }
@@ -1459,6 +1478,14 @@ namespace blender
         }
         if (socket != nullptr)
         {
+          if (const bNodeLink* direct_link = find_any_direct_link(*socket))
+          {
+            if (direct_link->fromnode != nullptr && node_is_group_input(*direct_link->fromnode))
+            {
+              continue;
+            }
+          }
+
           const bNodeLink* used_link = nullptr;
           const bNode* logical_node = node.runtime->original ? node.runtime->original : &node;
           GLSLSample2DSourceKind source_kind = resolve_sample2d_source_kind(
@@ -1466,6 +1493,10 @@ namespace blender
           if (source_kind == GLSLSample2DSourceKind::GLSLFunction && used_link != nullptr)
           {
             source_kind = resolve_nested_sample2d_source_kind(param, *used_link, used_link);
+          }
+          if (source_kind == GLSLSample2DSourceKind::GroupInput)
+          {
+            continue;
           }
           if (source_kind == GLSLSample2DSourceKind::ClosureOutput)
           {

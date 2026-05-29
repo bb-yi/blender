@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <optional>
+#include <string>
 
 #include "MEM_guardedalloc.h"
 
@@ -2127,6 +2128,47 @@ void NODE_OT_shader_script_update(wmOperatorType *ot)
 /** \name GLSL Function Refresh
  * \{ */
 
+static bool node_tree_contains_node(const bNodeTree &ntree, const bNode &node)
+{
+  for (const bNode *tree_node = static_cast<const bNode *>(ntree.nodes.first);
+       tree_node != nullptr;
+       tree_node = tree_node->next)
+  {
+    if (tree_node == &node) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static std::string node_glsl_function_socket_signature(const bNode &node)
+{
+  std::string signature;
+  auto append_sockets = [&](const ListBase &sockets, const char direction) {
+    for (const bNodeSocket *socket = static_cast<const bNodeSocket *>(sockets.first);
+         socket != nullptr;
+         socket = socket->next)
+    {
+      signature.push_back(direction);
+      signature.push_back(':');
+      signature.append(socket->identifier);
+      signature.push_back(':');
+      signature.append(socket->idname);
+      signature.push_back(':');
+      signature.append(socket->name);
+      signature.push_back(':');
+      signature.append(std::to_string(socket->type));
+      signature.push_back(':');
+      signature.append(std::to_string(socket->flag & SOCK_HIDE_VALUE));
+      signature.push_back(';');
+    }
+  };
+
+  append_sockets(node.inputs, 'I');
+  append_sockets(node.outputs, 'O');
+  return signature;
+}
+
 static bool node_glsl_function_context_get(bContext *C,
                                            bNodeTree **r_ntree,
                                            PointerRNA *r_nodeptr,
@@ -2140,6 +2182,9 @@ static bool node_glsl_function_context_get(bContext *C,
   if (nodeptr.data) {
     ntree = id_cast<bNodeTree *>(nodeptr.owner_id);
     node = static_cast<bNode *>(nodeptr.data);
+    if (snode && snode->edittree && node_tree_contains_node(*snode->edittree, *node)) {
+      ntree = snode->edittree;
+    }
   }
   else if (snode && snode->edittree) {
     ntree = snode->edittree;
@@ -2176,12 +2221,20 @@ static wmOperatorStatus node_glsl_function_refresh_exec(bContext *C, wmOperator 
     return OPERATOR_CANCELLED;
   }
 
+  const std::string old_socket_signature = node_glsl_function_socket_signature(*node);
+
   if (NodeShaderGLSLFunction *data = static_cast<NodeShaderGLSLFunction *>(node->storage)) {
     data->parse_status = SHD_GLSL_FUNCTION_PARSE_DIRTY;
     data->signature_hash = 0;
   }
 
   BKE_ntree_update_tag_node_property(ntree, node);
+  nodes::update_node_declaration_and_sockets(*ntree, *node);
+  if (old_socket_signature != node_glsl_function_socket_signature(*node) &&
+      GS(ntree->id.name) == ID_NT)
+  {
+    ntree->tree_interface.tag_items_changed_generic();
+  }
   BKE_main_ensure_invariants(*CTX_data_main(C), ntree->id);
   WM_event_add_notifier(C, NC_NODE | NA_EDITED, &ntree->id);
 
