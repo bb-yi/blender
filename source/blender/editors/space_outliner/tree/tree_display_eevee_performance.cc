@@ -51,7 +51,18 @@ struct ParsedReport {
   std::vector<std::string> metadata;
   std::unique_ptr<PerfNode> features = std::make_unique<PerfNode>("Features", true);
   std::unique_ptr<PerfNode> stages = std::make_unique<PerfNode>("Stages", true);
+  std::unique_ptr<PerfNode> shadow_contexts = std::make_unique<PerfNode>("Shadow Contexts", true);
+  std::unique_ptr<PerfNode> shadow_lights = std::make_unique<PerfNode>("Shadow Lights", true);
+  std::unique_ptr<PerfNode> probe_costs = std::make_unique<PerfNode>("Probe Costs", true);
   std::unique_ptr<PerfNode> hints = std::make_unique<PerfNode>("Hints", true);
+};
+
+enum class ReportSection {
+  Main,
+  ShadowContexts,
+  ShadowLights,
+  ProbeCosts,
+  Hints,
 };
 
 std::string trim_copy(const std::string &value)
@@ -259,6 +270,15 @@ void add_feature_items(PerfNode &features_root, const std::string &line)
   }
 }
 
+void add_detail_line(PerfNode &root, const std::string &line)
+{
+  if (startswith(line, "... ")) {
+    ensure_child(root, line, false);
+    return;
+  }
+  ensure_child(root, line, false);
+}
+
 ParsedReport parse_report(const std::string &root_title,
                          const char *report,
                          const char *empty_message,
@@ -274,6 +294,7 @@ ParsedReport parse_report(const std::string &root_title,
 
   populate_stage_skeleton(*parsed.stages);
 
+  ReportSection section = ReportSection::Main;
   const char *line_start = report;
   while (*line_start != '\0') {
     const char *line_end = std::strchr(line_start, '\n');
@@ -304,15 +325,37 @@ ParsedReport parse_report(const std::string &root_title,
         parsed.metadata.push_back(line);
       }
       else if (startswith(line, "Features:")) {
+        section = ReportSection::Main;
         add_feature_items(*parsed.features, line.substr(std::strlen("Features:")));
       }
-      else if (startswith(raw_line, "  - ")) {
+      else if (line == "Shadow Lights:") {
+        section = ReportSection::ShadowLights;
+      }
+      else if (line == "Shadow Contexts:") {
+        section = ReportSection::ShadowContexts;
+      }
+      else if (line == "Probe Costs:") {
+        section = ReportSection::ProbeCosts;
+      }
+      else if (startswith(raw_line, "    - ") && section == ReportSection::ShadowLights) {
+        add_detail_line(*parsed.shadow_lights, trim_copy(raw_line.substr(6)));
+      }
+      else if (startswith(raw_line, "    - ") && section == ReportSection::ShadowContexts) {
+        add_detail_line(*parsed.shadow_contexts, trim_copy(raw_line.substr(6)));
+      }
+      else if (startswith(raw_line, "    - ") && section == ReportSection::ProbeCosts) {
+        add_detail_line(*parsed.probe_costs, trim_copy(raw_line.substr(6)));
+      }
+      else if (startswith(raw_line, "  - ") &&
+               (section == ReportSection::Main || section == ReportSection::Hints))
+      {
+        section = ReportSection::Main;
         add_stage_line(*parsed.stages, trim_copy(raw_line.substr(4)));
       }
       else if (line == "Hints:") {
-        /* handled by next lines */
+        section = ReportSection::Hints;
       }
-      else if (startswith(line, "* ")) {
+      else if (startswith(line, "* ") && section == ReportSection::Hints) {
         ensure_child(*parsed.hints, line.substr(2), false);
       }
     }
@@ -365,6 +408,15 @@ void collect_report_keys(const ParsedReport &report, std::vector<std::string> &r
     for (const std::unique_ptr<PerfNode> &child : report.stages->children) {
       collect_node_keys(*child, stages_key, r_keys);
     }
+  }
+  if (!report.shadow_contexts->children.empty()) {
+    collect_node_keys(*report.shadow_contexts, root_key, r_keys);
+  }
+  if (!report.shadow_lights->children.empty()) {
+    collect_node_keys(*report.shadow_lights, root_key, r_keys);
+  }
+  if (!report.probe_costs->children.empty()) {
+    collect_node_keys(*report.probe_costs, root_key, r_keys);
   }
   if (!report.hints->children.empty()) {
     collect_node_keys(*report.hints, root_key, r_keys);
@@ -465,6 +517,15 @@ void append_parsed_report(PerformanceTreeBuilder &builder, ListBaseT<TreeElement
     for (const std::unique_ptr<PerfNode> &child : report.stages->children) {
       append_node_tree(builder, stages, *child, stages_key);
     }
+  }
+  if (!report.shadow_contexts->children.empty()) {
+    append_node_tree(builder, root, *report.shadow_contexts, root_key);
+  }
+  if (!report.shadow_lights->children.empty()) {
+    append_node_tree(builder, root, *report.shadow_lights, root_key);
+  }
+  if (!report.probe_costs->children.empty()) {
+    append_node_tree(builder, root, *report.probe_costs, root_key);
   }
   if (!report.hints->children.empty()) {
     append_node_tree(builder, root, *report.hints, root_key);

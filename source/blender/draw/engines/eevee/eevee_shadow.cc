@@ -9,6 +9,8 @@
  */
 
 #include "BLI_math_matrix.hh"
+#include "BLI_time.h"
+
 #include "GPU_batch_utils.hh"
 #include "GPU_capabilities.hh"
 #include "GPU_compute.hh"
@@ -1146,6 +1148,7 @@ void ShadowModule::end_sync()
     }
   }
   tilemap_pool.end_sync(*this);
+  inst_.lights.update_shadow_light_costs();
 
   /* Search for deleted or updated shadow casters */
   auto it_end = objects_.items().end();
@@ -1613,12 +1616,15 @@ void ShadowModule::ShadowView::compute_visibility(ObjectBoundsBuf &bounds,
   GPU_debug_group_end();
 }
 
-void ShadowModule::set_view(View &view, int2 extent)
+void ShadowModule::set_view(View &view, int2 extent, const TelemetryShadowContext context)
 {
   if (enabled_ == false) {
     /* All lights have been tagged to have no shadow. */
     return;
   }
+
+  const bool record_shadow_context = inst_.telemetry.enabled() && inst_.telemetry.frame_active();
+  const double context_start_time = record_shadow_context ? BLI_time_now_seconds() : 0.0;
 
   input_depth_extent_ = extent;
 
@@ -1663,27 +1669,43 @@ void ShadowModule::set_view(View &view, int2 extent)
   do {
     GPU_debug_group_begin("Shadow");
     {
-      GPU_uniformbuf_clear_to_zero(shadow_multi_view_.matrices_ubo_get());
-
-      inst_.manager->submit(tilemap_setup_ps_, view);
+      {
+        ScopedTelemetrySample telemetry_sample(inst_.telemetry,
+                                               TelemetryStageId::ShadowTilemapSetup);
+        GPU_uniformbuf_clear_to_zero(shadow_multi_view_.matrices_ubo_get());
+        inst_.manager->submit(tilemap_setup_ps_, view);
+      }
       if (assign_if_different(update_casters_, false)) {
         /* Run caster update only once. */
         /* TODO(fclem): There is an optimization opportunity here where we can
          * test casters only against the static tile-maps instead of all of them. */
+        ScopedTelemetrySample telemetry_sample(inst_.telemetry,
+                                               TelemetryStageId::ShadowCasterUpdate);
         inst_.manager->submit(caster_update_ps_, view);
       }
       if (loop_count == 0) {
+        ScopedTelemetrySample telemetry_sample(
+            inst_.telemetry, TelemetryStageId::ShadowTransparentCasterUpdate);
         inst_.manager->submit(jittered_transparent_caster_update_ps_, view);
       }
-      if (inst_.is_color_bake) {
-        inst_.manager->submit(tilemap_usage_bake_receiver_ps_, view);
+      {
+        ScopedTelemetrySample telemetry_sample(inst_.telemetry,
+                                               TelemetryStageId::ShadowUsageMarking);
+        if (inst_.is_color_bake) {
+          inst_.manager->submit(tilemap_usage_bake_receiver_ps_, view);
+        }
+        inst_.manager->submit(tilemap_usage_ps_, view);
       }
-      inst_.manager->submit(tilemap_usage_ps_, view);
-      inst_.manager->submit(tilemap_update_ps_, view);
 
-      shadow_multi_view_.compute_procedural_bounds();
+      {
+        ScopedTelemetrySample telemetry_sample(inst_.telemetry,
+                                               TelemetryStageId::ShadowTilemapUpdate);
+        inst_.manager->submit(tilemap_update_ps_, view);
 
-      statistics_buf_.current().async_flush_to_host();
+        shadow_multi_view_.compute_procedural_bounds();
+
+        statistics_buf_.current().async_flush_to_host();
+      }
 
       /* Isolate shadow update into its own command buffer.
        * If parameter buffer exceeds limits, then other work will not be impacted. */
@@ -1692,50 +1714,64 @@ void ShadowModule::set_view(View &view, int2 extent)
       /* Flush every loop as these passes are very heavy. */
       use_flush |= loop_count != 0;
 
-      if (use_flush) {
-        GPU_flush();
-      }
+      {
+        ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::ShadowSurface);
+        if (use_flush) {
+          GPU_flush();
+        }
 
-      /* TODO(fclem): Move all of this to the draw::PassMain. */
-      if (shadow_depth_fb_tx_.is_valid() && shadow_depth_accum_tx_.is_valid()) {
-        GPU_framebuffer_bind_ex(
-            render_fb_,
-            {
-                /* Depth is cleared to 0 for TBDR optimization. */
-                {GPU_LOADACTION_CLEAR, GPU_STOREACTION_DONT_CARE, {0.0f, 0.0f, 0.0f, 0.0f}},
-                {GPU_LOADACTION_CLEAR,
-                 GPU_STOREACTION_DONT_CARE,
-                 {FLT_MAX, FLT_MAX, FLT_MAX, FLT_MAX}},
-            });
-      }
-      else if (shadow_depth_fb_tx_.is_valid()) {
-        GPU_framebuffer_bind_ex(render_fb_,
-                                {
-                                    {GPU_LOADACTION_CLEAR,
-                                     GPU_STOREACTION_DONT_CARE,
-                                     {FLT_MAX, FLT_MAX, FLT_MAX, FLT_MAX}},
-                                });
-      }
-      else {
-        GPU_framebuffer_bind(render_fb_);
-      }
+        /* TODO(fclem): Move all of this to the draw::PassMain. */
+        if (shadow_depth_fb_tx_.is_valid() && shadow_depth_accum_tx_.is_valid()) {
+          GPU_framebuffer_bind_ex(
+              render_fb_,
+              {
+                  /* Depth is cleared to 0 for TBDR optimization. */
+                  {GPU_LOADACTION_CLEAR, GPU_STOREACTION_DONT_CARE, {0.0f, 0.0f, 0.0f, 0.0f}},
+                  {GPU_LOADACTION_CLEAR,
+                   GPU_STOREACTION_DONT_CARE,
+                   {FLT_MAX, FLT_MAX, FLT_MAX, FLT_MAX}},
+              });
+        }
+        else if (shadow_depth_fb_tx_.is_valid()) {
+          GPU_framebuffer_bind_ex(render_fb_,
+                                  {
+                                      {GPU_LOADACTION_CLEAR,
+                                       GPU_STOREACTION_DONT_CARE,
+                                       {FLT_MAX, FLT_MAX, FLT_MAX, FLT_MAX}},
+                                  });
+        }
+        else {
+          GPU_framebuffer_bind(render_fb_);
+        }
 
-      GPU_framebuffer_multi_viewports_set(render_fb_,
-                                          reinterpret_cast<int (*)[4]>(multi_viewports_.data()));
+        GPU_framebuffer_multi_viewports_set(render_fb_,
+                                            reinterpret_cast<int (*)[4]>(multi_viewports_.data()));
 
-      inst_.pipelines.shadow.render(shadow_multi_view_);
+        inst_.pipelines.shadow.render(shadow_multi_view_);
 
-      if (use_flush) {
-        GPU_flush();
+        if (use_flush) {
+          GPU_flush();
+        }
+
+        GPU_memory_barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS | GPU_BARRIER_TEXTURE_FETCH);
       }
-
-      GPU_memory_barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS | GPU_BARRIER_TEXTURE_FETCH);
     }
     GPU_debug_group_end();
 
     loop_count++;
 
-  } while (!shadow_update_finished(loop_count));
+    {
+      ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::ShadowUpdateFinish);
+      if (shadow_update_finished(loop_count)) {
+        break;
+      }
+    }
+  } while (true);
+
+  if (record_shadow_context) {
+    inst_.telemetry.shadow_context_add(
+        context, BLI_time_now_seconds() - context_start_time, loop_count);
+  }
 
   if (prev_fb) {
     GPU_framebuffer_bind(prev_fb);

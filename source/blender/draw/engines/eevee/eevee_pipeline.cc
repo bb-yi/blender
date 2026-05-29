@@ -1127,7 +1127,7 @@ void ForwardPipeline::render(View &view,
   {
     ScopedTelemetrySample telemetry_sample(inst_.telemetry,
                                            TelemetryStageId::MainForwardShadowSetup);
-    inst_.shadows.set_view(view, extent);
+    inst_.shadows.set_view(view, extent, TelemetryShadowContext::MainView);
   }
   {
     ScopedTelemetrySample telemetry_sample(inst_.telemetry,
@@ -1798,7 +1798,7 @@ gpu::Texture *DeferredLayer::render(View &main_view,
   {
     ScopedTelemetrySample telemetry_sample(inst_.telemetry,
                                            TelemetryStageId::MainDeferredShadowSetup);
-    inst_.shadows.set_view(render_view, extent);
+    inst_.shadows.set_view(render_view, extent, TelemetryShadowContext::MainView);
   }
   inst_.lights.eval_uniform_light_shaders(render_view);
   inst_.lights.eval_front_light_shaders(render_view, extent);
@@ -2551,7 +2551,7 @@ void DeferredProbePipeline::render(View &view,
   inst_.hiz_buffer.set_source(&inst_.render_buffers.depth_tx);
   inst_.hiz_buffer.update();
 
-  inst_.shadows.set_view(view, extent);
+  inst_.shadows.set_view(view, extent, TelemetryShadowContext::CaptureProbe);
   inst_.volume_probes.set_view(view);
   inst_.sphere_probes.set_view(view);
   inst_.lights.eval_uniform_light_shaders(view);
@@ -2759,7 +2759,7 @@ void PlanarProbePipeline::render(View &view,
   inst_.hiz_buffer.set_source(&depth_layer_tx, 0);
   inst_.hiz_buffer.update();
 
-  inst_.shadows.set_view(view, extent);
+  inst_.shadows.set_view(view, extent, TelemetryShadowContext::PlanarProbe);
   inst_.volume_probes.set_view(view);
   inst_.sphere_probes.set_view(view);
   inst_.lights.eval_uniform_light_shaders(view);

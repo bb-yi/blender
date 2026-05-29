@@ -31,6 +31,7 @@
 namespace blender::eevee {
 
 static constexpr int stage_count = int(TelemetryStageId::Count);
+static constexpr int shadow_context_count = int(TelemetryShadowContext::Count);
 
 static bke::SceneEeveePerformanceRuntime *scene_eevee_performance_runtime(Scene *scene)
 {
@@ -176,22 +177,23 @@ static constexpr std::array<TelemetryStageInfo, stage_count> telemetry_stage_inf
     {TelemetryStageId::ReadResult, "ReadResult", "Read Result"},
     {TelemetryStageId::ShadowTilemapSetup,
      "Shadow.TilemapSetup",
-     "Main View/Shadow/Tilemap Setup"},
+     "Shadow/Tilemap Setup"},
     {TelemetryStageId::ShadowCasterUpdate,
      "Shadow.CasterUpdate",
-     "Main View/Shadow/Caster Update"},
+     "Shadow/Caster Update"},
     {TelemetryStageId::ShadowTransparentCasterUpdate,
      "Shadow.TransparentCasterUpdate",
-     "Main View/Shadow/Transparent Caster Update"},
+     "Shadow/Transparent Caster Update"},
     {TelemetryStageId::ShadowUsageMarking,
      "Shadow.UsageMarking",
-     "Main View/Shadow/Usage Marking"},
+     "Shadow/Usage Marking"},
     {TelemetryStageId::ShadowTilemapUpdate,
      "Shadow.TilemapUpdate",
-     "Main View/Shadow/Tilemap Update"},
-    {TelemetryStageId::ShadowSurface,
-     "Shadow.Surface",
-     "Main View/Shadow/Surface"},
+     "Shadow/Tilemap Update"},
+    {TelemetryStageId::ShadowUpdateFinish,
+     "Shadow.UpdateFinish",
+     "Shadow/Update Finish"},
+    {TelemetryStageId::ShadowSurface, "Shadow.Surface", "Shadow/Surface"},
 }};
 
 bool TelemetryModule::enabled() const
@@ -240,6 +242,7 @@ void TelemetryModule::frame_begin(const TelemetryRuntimeMode mode)
   }
 
   current_frame_ = {};
+  inst_.light_probes.probe_costs_reset();
   current_frame_.runtime_mode = mode;
   current_frame_.frame = (inst_.scene != nullptr) ? inst_.scene->r.cfra : 0;
   current_frame_.sample_index = ELEM(mode,
@@ -300,6 +303,31 @@ void TelemetryModule::frame_end()
   const double frame_end_time = BLI_time_now_seconds();
   current_frame_.total_cpu_ms = (frame_end_time - frame_start_time_) * 1000.0;
   snapshot_features();
+  current_frame_.shadow_light_costs.clear();
+  for (const TelemetryShadowLightCost &cost : inst_.lights.shadow_light_costs()) {
+    current_frame_.shadow_light_costs.append(cost);
+  }
+  current_frame_.probe_costs.clear();
+  for (const TelemetryProbeCost &cost : inst_.light_probes.probe_costs()) {
+    current_frame_.probe_costs.append(cost);
+  }
+  std::sort(current_frame_.probe_costs.begin(),
+            current_frame_.probe_costs.end(),
+            [](const TelemetryProbeCost &a, const TelemetryProbeCost &b) {
+              return a.estimated_work > b.estimated_work;
+            });
+  double total_probe_work = 0.0;
+  for (const TelemetryProbeCost &cost : current_frame_.probe_costs) {
+    total_probe_work += cost.estimated_work;
+  }
+  if (total_probe_work > 0.0) {
+    for (TelemetryProbeCost &cost : current_frame_.probe_costs) {
+      const double share_percent = (cost.estimated_work / total_probe_work) * 100.0;
+      cost.level = share_percent >= 50.0 ? "HIGH" :
+                   share_percent >= 20.0 ? "MEDIUM" :
+                                           "LOW";
+    }
+  }
 
   const bool is_viewport_mode = ELEM(current_frame_.runtime_mode,
                                      TelemetryRuntimeMode::Viewport,
@@ -488,6 +516,19 @@ void TelemetryModule::stage_add(const TelemetryStageId stage, const double elaps
   sample.call_count += 1;
 }
 
+void TelemetryModule::shadow_context_add(const TelemetryShadowContext context,
+                                         const double elapsed_seconds,
+                                         const int loop_count)
+{
+  if (!enabled() || !frame_active_ || context == TelemetryShadowContext::Count) {
+    return;
+  }
+  TelemetryShadowContextSample &sample = current_frame_.shadow_contexts[int(context)];
+  sample.cpu_ms += elapsed_seconds * 1000.0;
+  sample.call_count += 1;
+  sample.loop_count += loop_count;
+}
+
 const TelemetryFrameRecord *TelemetryModule::last_record(const TelemetryRuntimeMode mode) const
 {
   const int mode_index = int(mode);
@@ -534,6 +575,25 @@ std::array<double, stage_count> TelemetryModule::averaged_stage_values(
 const char *TelemetryModule::stage_label(const TelemetryStageId stage)
 {
   return (stage == TelemetryStageId::Count) ? "Unknown" : stage_info(stage).label;
+}
+
+const char *TelemetryModule::shadow_context_label(const TelemetryShadowContext context)
+{
+  switch (context) {
+    case TelemetryShadowContext::MainView:
+      return "MainView";
+    case TelemetryShadowContext::PlanarProbe:
+      return "PlanarProbe";
+    case TelemetryShadowContext::CaptureProbe:
+      return "CaptureProbe";
+    case TelemetryShadowContext::Bake:
+      return "Bake";
+    case TelemetryShadowContext::Other:
+      return "Other";
+    case TelemetryShadowContext::Count:
+      break;
+  }
+  return "Unknown";
 }
 
 const TelemetryStageInfo &TelemetryModule::stage_info(const TelemetryStageId stage)
@@ -594,6 +654,103 @@ Vector<int> TelemetryModule::sorted_stage_indices(const TelemetryFrameRecord &re
     });
   }
   return indices;
+}
+
+std::string TelemetryModule::format_shadow_lights_report(const TelemetryFrameRecord &record) const
+{
+  static constexpr int shadow_light_report_limit = 16;
+  if (record.shadow_light_costs.is_empty()) {
+    return "";
+  }
+
+  std::string result = "  Shadow Lights:\n";
+  const int light_count = min_ii(shadow_light_report_limit, record.shadow_light_costs.size());
+  for (const int index : IndexRange(light_count)) {
+    const TelemetryShadowLightCost &cost = record.shadow_light_costs[index];
+    result += fmt::format(
+        "    - {} type={} tilemaps={} estimated_views={} sync_dirty_tilemaps={} "
+        "tilemap_view_share={:.1f}% level={}\n",
+        cost.name,
+        cost.type,
+        cost.tilemaps,
+        cost.estimated_views,
+        cost.sync_dirty_tilemaps,
+        cost.estimated_share_percent,
+        cost.level);
+  }
+  if (record.shadow_light_costs.size() > shadow_light_report_limit) {
+    result += fmt::format("    - ... {} more shadow lights\n",
+                          record.shadow_light_costs.size() - shadow_light_report_limit);
+  }
+  return result;
+}
+
+std::string TelemetryModule::format_shadow_contexts_report(const TelemetryFrameRecord &record) const
+{
+  double total_context_cpu_ms = 0.0;
+  int active_contexts = 0;
+  for (const TelemetryShadowContextSample &sample : record.shadow_contexts) {
+    total_context_cpu_ms += sample.cpu_ms;
+    active_contexts += int(sample.call_count > 0);
+  }
+  if (active_contexts == 0) {
+    return "";
+  }
+
+  std::string result = "  Shadow Contexts:\n";
+  for (int context_index = 0; context_index < shadow_context_count; context_index++) {
+    const TelemetryShadowContextSample &sample = record.shadow_contexts[context_index];
+    const double ms_per_call = (sample.call_count > 0) ?
+                                   sample.cpu_ms / double(sample.call_count) :
+                                   0.0;
+    const double ms_per_loop = (sample.loop_count > 0) ? sample.cpu_ms / double(sample.loop_count) :
+                                                        0.0;
+    const double share_percent = (total_context_cpu_ms > 0.0) ?
+                                     (sample.cpu_ms / total_context_cpu_ms) * 100.0 :
+                                     0.0;
+    result += fmt::format(
+        "    - {} cpu={:.3f} ms calls={} loops={} ms/call={:.3f} ms/loop={:.3f} share={:.1f}%\n",
+        shadow_context_label(TelemetryShadowContext(context_index)),
+        sample.cpu_ms,
+        sample.call_count,
+        sample.loop_count,
+        ms_per_call,
+        ms_per_loop,
+        share_percent);
+  }
+  return result;
+}
+
+std::string TelemetryModule::format_probe_costs_report(const TelemetryFrameRecord &record) const
+{
+  if (record.probe_costs.is_empty()) {
+    return "";
+  }
+
+  double total_work = 0.0;
+  for (const TelemetryProbeCost &cost : record.probe_costs) {
+    total_work += cost.estimated_work;
+  }
+
+  std::string result = "  Probe Costs:\n";
+  for (const TelemetryProbeCost &cost : record.probe_costs) {
+    const double share_percent = (total_work > 0.0) ?
+                                     (cost.estimated_work / total_work) * 100.0 :
+                                     0.0;
+    result += fmt::format(
+        "    - {} type={} updated={} total={} rendered_views={} resolution={} "
+        "estimated_work={:.3f}M work_share={:.1f}% level={}\n",
+        cost.name,
+        cost.type,
+        cost.updated,
+        cost.total,
+        cost.rendered_views,
+        cost.resolution,
+        cost.estimated_work,
+        share_percent,
+        cost.level);
+  }
+  return result;
 }
 
 Vector<std::string> TelemetryModule::viewport_overlay_lines(const bool include_stage_list) const
@@ -695,12 +852,19 @@ std::string TelemetryModule::viewport_report() const
   for (const int stage_index : sorted_stage_indices(*record)) {
     const TelemetryStageSample &stage = record->stages[stage_index];
     const double avg_ms = averages[stage_index];
-    result += fmt::format("  - {:<26} {:>8.3f} ms | avg {:>8.3f} | calls {}\n",
+    const double ms_per_call = (stage.call_count > 0) ? stage.cpu_ms / double(stage.call_count) :
+                                                        0.0;
+    result += fmt::format(
+        "  - {:<26} {:>8.3f} ms | avg {:>8.3f} | calls {} | {:.3f} ms/call\n",
                           stage_label(TelemetryStageId(stage_index)),
                           stage.cpu_ms,
                           avg_ms,
-                          stage.call_count);
+        stage.call_count,
+        ms_per_call);
   }
+  result += format_shadow_contexts_report(*record);
+  result += format_shadow_lights_report(*record);
+  result += format_probe_costs_report(*record);
   return result;
 }
 
@@ -740,13 +904,22 @@ std::string TelemetryModule::render_report() const
   for (const int stage_index : sorted_stage_indices(*record)) {
     const TelemetryStageSample &stage = record->stages[stage_index];
     const double value = stage.cpu_ms;
+    const double ms_per_call = (stage.call_count > 0) ? value / double(stage.call_count) : 0.0;
+    const double ms_per_sample = (record->sample_count > 0) ?
+                                     value / double(record->sample_count) :
+                                     0.0;
     result += fmt::format(
-        "  - {:<26} {:>8.3f} ms ({} call{})\n",
+        "  - {:<26} {:>8.3f} ms ({} call{}, {:.3f} ms/call, {:.3f} ms/sample)\n",
         stage_label(TelemetryStageId(stage_index)),
         value,
         stage.call_count,
-        stage.call_count == 1 ? "" : "s");
+        stage.call_count == 1 ? "" : "s",
+        ms_per_call,
+        ms_per_sample);
   }
+  result += format_shadow_contexts_report(*record);
+  result += format_shadow_lights_report(*record);
+  result += format_probe_costs_report(*record);
 
   const Vector<std::string> hints = build_hints(*record);
   if (!hints.is_empty()) {
@@ -783,6 +956,67 @@ Vector<std::string> TelemetryModule::build_hints(const TelemetryFrameRecord &rec
   }
   if (record.features.has_volume && stage_percent(TelemetryStageId::MainVolumeCompute) > 8.0) {
     hints.append("Volume computation is contributing noticeable cost");
+  }
+  if (stage_percent(TelemetryStageId::MainPlanarProbesSetView) > 20.0) {
+    hints.append(
+        "Planar probe rendering is a dominant cost and may trigger repeated shadow updates");
+  }
+  const double shadow_setup_ms =
+      record.stages[int(TelemetryStageId::MainDeferredShadowSetup)].cpu_ms +
+      record.stages[int(TelemetryStageId::MainForwardShadowSetup)].cpu_ms;
+  const double shadow_stage_ms =
+      record.stages[int(TelemetryStageId::ShadowTilemapSetup)].cpu_ms +
+      record.stages[int(TelemetryStageId::ShadowCasterUpdate)].cpu_ms +
+      record.stages[int(TelemetryStageId::ShadowTransparentCasterUpdate)].cpu_ms +
+      record.stages[int(TelemetryStageId::ShadowUsageMarking)].cpu_ms +
+      record.stages[int(TelemetryStageId::ShadowTilemapUpdate)].cpu_ms +
+      record.stages[int(TelemetryStageId::ShadowUpdateFinish)].cpu_ms +
+      record.stages[int(TelemetryStageId::ShadowSurface)].cpu_ms;
+  if ((shadow_setup_ms > record.total_cpu_ms * 0.35 ||
+       shadow_stage_ms > record.total_cpu_ms * 0.35) &&
+      !record.shadow_light_costs.is_empty())
+  {
+    const TelemetryShadowLightCost &top_light = record.shadow_light_costs.first();
+    if (top_light.estimated_share_percent >= 10.0) {
+      hints.append(fmt::format(
+          "Shadow update work is a dominant cost; top estimated shadow tilemap share is {} ({} {:.1f}%)",
+          top_light.name,
+          top_light.type,
+          top_light.estimated_share_percent));
+    }
+    else {
+      hints.append(
+          "Shadow update work is a dominant cost; no single light dominates by estimated tilemap share");
+    }
+    double total_shadow_context_ms = 0.0;
+    int top_context_index = -1;
+    double top_context_ms = 0.0;
+    for (int context_index = 0; context_index < shadow_context_count; context_index++) {
+      const double context_ms = record.shadow_contexts[context_index].cpu_ms;
+      total_shadow_context_ms += context_ms;
+      if (context_ms > top_context_ms) {
+        top_context_ms = context_ms;
+        top_context_index = context_index;
+      }
+    }
+    if (top_context_index >= 0 && total_shadow_context_ms > 0.0) {
+      const double top_share = (top_context_ms / total_shadow_context_ms) * 100.0;
+      const TelemetryShadowContext top_context = TelemetryShadowContext(top_context_index);
+      if (top_context == TelemetryShadowContext::PlanarProbe && top_share >= 45.0) {
+        hints.append(fmt::format(
+            "Planar probe shadow updates dominate shadow context cost ({:.1f}% of shadow contexts)",
+            top_share));
+      }
+      else if (top_context == TelemetryShadowContext::CaptureProbe && top_share >= 45.0) {
+        hints.append(fmt::format(
+            "Capture probe shadow updates dominate shadow context cost ({:.1f}% of shadow contexts)",
+            top_share));
+      }
+      else {
+        hints.append(fmt::format("Shadow stages include {} shadow updates",
+                                 shadow_context_label(top_context)));
+      }
+    }
   }
   if (record.stages[int(TelemetryStageId::CaptureProbes)].cpu_ms > 1.0) {
     hints.append("Probe capture updated during this frame");

@@ -70,6 +70,48 @@ void LightProbeModule::begin_sync()
                        (inst_.scene->eevee.flag & SCE_EEVEE_GI_AUTOBAKE) != 0;
 }
 
+void LightProbeModule::probe_costs_reset()
+{
+  probe_costs_.clear();
+}
+
+void LightProbeModule::probe_cost_accumulate(const char *name,
+                                             const char *type,
+                                             const int updated,
+                                             const int total,
+                                             const int rendered_views,
+                                             const int resolution,
+                                             const double estimated_work)
+{
+  if (!inst_.telemetry.enabled()) {
+    return;
+  }
+  if (updated <= 0 && rendered_views <= 0 && estimated_work <= 0.0) {
+    return;
+  }
+
+  for (TelemetryProbeCost &cost : probe_costs_) {
+    if (cost.name == name && cost.type == type && cost.resolution == resolution) {
+      cost.updated += updated;
+      cost.total = max_ii(cost.total, total);
+      cost.rendered_views += rendered_views;
+      cost.estimated_work += estimated_work;
+      return;
+    }
+  }
+
+  TelemetryProbeCost cost;
+  cost.name = name;
+  cost.type = type;
+  cost.updated = updated;
+  cost.total = total;
+  cost.rendered_views = rendered_views;
+  cost.resolution = resolution;
+  cost.estimated_work = estimated_work;
+  cost.level = "LOW";
+  probe_costs_.append(cost);
+}
+
 void LightProbeModule::sync_volume(const Object *ob, ObjectHandle &handle)
 {
   VolumeProbe &grid = volume_map_.lookup_or_add_default(handle.object_key);

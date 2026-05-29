@@ -22,6 +22,7 @@
 #include "eevee_defines.hh"
 #include "eevee_lightprobe_shared.hh"
 #include "eevee_sync.hh"
+#include "eevee_telemetry.hh"
 
 namespace blender::eevee {
 
@@ -228,6 +229,7 @@ class LightProbeModule {
   bool auto_bake_enabled_;
 
   eLightProbeResolution sphere_object_resolution_ = LIGHT_PROBE_RESOLUTION_128;
+  Vector<TelemetryProbeCost> probe_costs_;
 
  public:
   LightProbeModule(Instance &inst);
@@ -243,6 +245,34 @@ class LightProbeModule {
   int probe_count() const
   {
     return int(volume_map_.size() + sphere_map_.size() + planar_map_.size());
+  }
+
+  int volume_probe_count() const
+  {
+    return int(volume_map_.size());
+  }
+
+  int sphere_probe_count() const
+  {
+    return int(sphere_map_.size());
+  }
+
+  int planar_probe_count() const
+  {
+    return int(planar_map_.size());
+  }
+
+  void probe_costs_reset();
+  void probe_cost_accumulate(const char *name,
+                             const char *type,
+                             int updated,
+                             int total,
+                             int rendered_views,
+                             int resolution,
+                             double estimated_work);
+  Span<const TelemetryProbeCost> probe_costs() const
+  {
+    return Span<const TelemetryProbeCost>(probe_costs_.data(), probe_costs_.size());
   }
 
  private:

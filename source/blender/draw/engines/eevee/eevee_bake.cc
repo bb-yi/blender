@@ -1632,7 +1632,7 @@ static bool draw_bake_groups(RenderEngine *engine,
     inst.volume_probes.set_view(view);
     inst.sphere_probes.set_view(view);
     inst.lights.set_view(view, int2(width, height));
-    inst.shadows.set_view(view, int2(width, height));
+    inst.shadows.set_view(view, int2(width, height), TelemetryShadowContext::Bake);
     inst.lights.eval_uniform_light_shaders(view);
     if (inst.lights.needs_bake_light_shader()) {
       draw_bake_light_shader_surface_context(inst,

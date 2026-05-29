@@ -154,6 +154,16 @@ void PlanarProbeModule::set_view(const draw::View &main_view, int2 main_view_ext
     resource_index++;
   }
 
+  inst_.light_probes.probe_cost_accumulate("Planar Probes",
+                                           "PLANAR",
+                                           resource_index,
+                                           int(num_probes),
+                                           resource_index,
+                                           max_ii(extent.x, extent.y),
+                                           (double(resource_index) * double(extent.x) *
+                                            double(extent.y)) /
+                                               1000000.0);
+
   gbuf.release();
 
   if (resource_index < PLANAR_PROBE_MAX) {

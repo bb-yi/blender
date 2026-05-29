@@ -19,6 +19,7 @@
 #include "eevee_material.hh"
 #include "eevee_shadow_shared.hh"
 #include "eevee_sync.hh"
+#include "eevee_telemetry.hh"
 #include "eevee_uniform_shared.hh"
 
 namespace blender::eevee
@@ -405,7 +406,9 @@ namespace blender::eevee
      * to check any new opaque surfaces.
      * Expect the HiZ buffer to be up to date.
      * Needs to be called after `LightModule::set_view();`. */
-    void set_view(View& view, int2 extent);
+    void set_view(View& view,
+      int2 extent,
+      TelemetryShadowContext context = TelemetryShadowContext::MainView);
 
     void debug_end_sync();
     void debug_draw(View& view, gpu::FrameBuffer* view_fb);

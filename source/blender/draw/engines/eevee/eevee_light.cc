@@ -722,6 +722,10 @@ void LightModule::add_world_sun_light(const ObjectKey &key, bool use_diffuse, bo
   SET_FLAG_FROM_TEST(visibility_flag, !use_glossy, OB_HIDE_GLOSSY);
 
   Light &light = light_map_.lookup_or_add_default(key);
+  light_names_.add_overwrite(key,
+                             use_diffuse && use_glossy ?
+                                 "World Sun" :
+                                 (use_diffuse ? "World Sun Diffuse" : "World Sun Glossy"));
   light.used = true;
   light.sync(inst_.shadows,
              float4x4::identity(),
@@ -803,6 +807,7 @@ void LightModule::sync_light(const Object *ob, ObjectHandle &handle)
   }
 
   Light &light = light_map_.lookup_or_add_default(handle.object_key);
+  light_names_.add_overwrite(handle.object_key, ob->id.name + 2);
   light.used = true;
   const float light_shader_range_scale = light_nodetree_eevee_light_shader_range_scale_get(
       la.nodetree);
@@ -897,6 +902,88 @@ void LightModule::sync_light(const Object *ob, ObjectHandle &handle)
   local_lights_len_ += int(!is_sun_light(light.type));
 }
 
+static const char *light_type_name_get(const eLightType type)
+{
+  switch (type) {
+    case LIGHT_SUN:
+    case LIGHT_SUN_ORTHO:
+      return "SUN";
+    case LIGHT_RECT:
+    case LIGHT_ELLIPSE:
+      return "AREA";
+    case LIGHT_SPOT_SPHERE:
+    case LIGHT_SPOT_DISK:
+      return "SPOT";
+    case LIGHT_OMNI_SPHERE:
+    case LIGHT_OMNI_DISK:
+      return "POINT";
+  }
+  return "UNKNOWN";
+}
+
+void LightModule::update_shadow_light_costs()
+{
+  shadow_light_costs_.clear();
+  if (!inst_.telemetry.enabled()) {
+    return;
+  }
+
+  double total_score = 0.0;
+  for (const auto item : light_map_.items()) {
+    const Light &light = item.value;
+    if (light.tilemap_index == LIGHT_NO_SHADOW) {
+      continue;
+    }
+
+    const int tilemap_max = light_tilemap_max_get(light);
+    const int tilemaps = max_ii(0, tilemap_max - light.tilemap_index + 1);
+    if (tilemaps == 0) {
+      continue;
+    }
+
+    int sync_dirty_tilemaps = 0;
+    int estimated_views = 0;
+    for (const int tilemap_index : IndexRange(light.tilemap_index, tilemaps)) {
+      if (tilemap_index < 0 || tilemap_index >= inst_.shadows.tilemap_pool.tilemaps_data.size()) {
+        continue;
+      }
+      const ShadowTileMapData &tilemap = inst_.shadows.tilemap_pool.tilemaps_data[tilemap_index];
+      sync_dirty_tilemaps += int(tilemap.is_dirty);
+      estimated_views += 1;
+    }
+
+    TelemetryShadowLightCost cost;
+    if (const std::string *name = light_names_.lookup_ptr(item.key)) {
+      cost.name = *name;
+    }
+    else {
+      cost.name = "Light";
+    }
+    cost.type = light_type_name_get(light.type);
+    cost.tilemaps = tilemaps;
+    cost.estimated_views = estimated_views;
+    cost.sync_dirty_tilemaps = sync_dirty_tilemaps;
+    cost.estimated_share_percent = double(estimated_views);
+    shadow_light_costs_.append(cost);
+    total_score += cost.estimated_share_percent;
+  }
+
+  if (total_score > 0.0) {
+    for (TelemetryShadowLightCost &cost : shadow_light_costs_) {
+      cost.estimated_share_percent = (cost.estimated_share_percent / total_score) * 100.0;
+      cost.level = cost.estimated_share_percent >= 25.0 ? "HIGH" :
+                   cost.estimated_share_percent >= 10.0 ? "MEDIUM" :
+                                                           "LOW";
+    }
+  }
+
+  std::sort(shadow_light_costs_.begin(),
+            shadow_light_costs_.end(),
+            [](const TelemetryShadowLightCost &a, const TelemetryShadowLightCost &b) {
+              return a.estimated_share_percent > b.estimated_share_percent;
+            });
+}
+
 void LightModule::end_sync()
 {
   /** IMPORTANT: We cannot add new lights here since the shadow module already executed its
@@ -922,6 +1009,7 @@ void LightModule::end_sync()
     Light &light = (*it).value;
     /* Do not discard casters in baking mode. See WORKAROUND in `surfels_create`. */
     if (!light.used && !inst_.is_baking()) {
+      light_names_.remove((*it).key);
       light_map_.remove(it);
       continue;
     }

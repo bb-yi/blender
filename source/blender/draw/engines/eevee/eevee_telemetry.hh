@@ -26,6 +26,15 @@ enum class TelemetryRuntimeMode : uint8_t {
   Count,
 };
 
+enum class TelemetryShadowContext : uint8_t {
+  MainView = 0,
+  PlanarProbe = 1,
+  CaptureProbe = 2,
+  Bake = 3,
+  Other = 4,
+  Count,
+};
+
 enum class TelemetryStageId : uint8_t {
   SyncBegin = 0,
   SyncObjects = 1,
@@ -92,7 +101,8 @@ enum class TelemetryStageId : uint8_t {
   ShadowTransparentCasterUpdate = 62,
   ShadowUsageMarking = 63,
   ShadowTilemapUpdate = 64,
-  ShadowSurface = 65,
+  ShadowUpdateFinish = 65,
+  ShadowSurface = 66,
   Count,
 };
 
@@ -116,6 +126,33 @@ struct TelemetryStageSample {
   int call_count = 0;
 };
 
+struct TelemetryShadowLightCost {
+  std::string name;
+  std::string type;
+  int tilemaps = 0;
+  int estimated_views = 0;
+  int sync_dirty_tilemaps = 0;
+  double estimated_share_percent = 0.0;
+  std::string level;
+};
+
+struct TelemetryShadowContextSample {
+  double cpu_ms = 0.0;
+  int call_count = 0;
+  int loop_count = 0;
+};
+
+struct TelemetryProbeCost {
+  std::string name;
+  std::string type;
+  int updated = 0;
+  int total = 0;
+  int rendered_views = 0;
+  int resolution = 0;
+  double estimated_work = 0.0;
+  std::string level;
+};
+
 struct TelemetryFrameRecord {
   TelemetryRuntimeMode runtime_mode = TelemetryRuntimeMode::Viewport;
   int frame = 0;
@@ -123,7 +160,10 @@ struct TelemetryFrameRecord {
   uint64_t sample_count = 0;
   double total_cpu_ms = 0.0;
   std::array<TelemetryStageSample, int(TelemetryStageId::Count)> stages = {};
+  std::array<TelemetryShadowContextSample, int(TelemetryShadowContext::Count)> shadow_contexts = {};
   TelemetryFeatureSnapshot features;
+  Vector<TelemetryShadowLightCost> shadow_light_costs;
+  Vector<TelemetryProbeCost> probe_costs;
 };
 
 struct TelemetryStageInfo {
@@ -170,6 +210,7 @@ class TelemetryModule {
   void reset();
 
   void stage_add(TelemetryStageId stage, double elapsed_seconds);
+  void shadow_context_add(TelemetryShadowContext context, double elapsed_seconds, int loop_count);
 
   std::string viewport_summary_line() const;
   Vector<std::string> viewport_overlay_lines(bool include_stage_list) const;
@@ -177,6 +218,7 @@ class TelemetryModule {
   std::string render_report() const;
 
   static const char *stage_label(TelemetryStageId stage);
+  static const char *shadow_context_label(TelemetryShadowContext context);
   static const TelemetryStageInfo &stage_info(TelemetryStageId stage);
   static Span<const TelemetryStageInfo> stage_infos();
 
@@ -190,6 +232,9 @@ class TelemetryModule {
   bool use_time_sort() const;
   bool viewport_publish_paused() const;
   Vector<int> sorted_stage_indices(const TelemetryFrameRecord &record) const;
+  std::string format_shadow_lights_report(const TelemetryFrameRecord &record) const;
+  std::string format_shadow_contexts_report(const TelemetryFrameRecord &record) const;
+  std::string format_probe_costs_report(const TelemetryFrameRecord &record) const;
   Vector<std::string> build_hints(const TelemetryFrameRecord &record) const;
 };
 

@@ -531,6 +531,15 @@ namespace blender::eevee
 
       /* All volume probe that needs to composite the world probe need to be updated. */
       inst_.volume_probes.update_world_irradiance();
+      inst_.light_probes.probe_cost_accumulate("World Sphere Probe",
+                                               "SPHERE_WORLD",
+                                               1,
+                                               1,
+                                               6,
+                                               update_info->cube_target_extent,
+                                               (6.0 * double(update_info->cube_target_extent) *
+                                                double(update_info->cube_target_extent)) /
+                                                   1000000.0);
     }
 
     if (assign_if_different(inst_.pipelines.data.ray_type, RAY_TYPE_CAMERA))
@@ -546,9 +555,19 @@ namespace blender::eevee
     ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::CaptureProbes);
     Framebuffer prepass_fb;
     View view = { "Capture.View" };
+    int updated_probe_count = 0;
+    int rendered_view_count = 0;
+    int max_resolution = 0;
+    double estimated_work = 0.0;
     while (const auto update_info = inst_.sphere_probes.probe_update_info_pop())
     {
       GPU_debug_group_begin("Probe.Capture");
+      updated_probe_count++;
+      rendered_view_count += 6;
+      max_resolution = max_ii(max_resolution, update_info->cube_target_extent);
+      estimated_work += (6.0 * double(update_info->cube_target_extent) *
+                         double(update_info->cube_target_extent)) /
+                        1000000.0;
 
       if (assign_if_different(inst_.pipelines.data.ray_type, RAY_TYPE_GLOSSY))
       {
@@ -620,6 +639,14 @@ namespace blender::eevee
       GPU_debug_group_end();
       inst_.sphere_probes.remap_to_octahedral_projection(update_info->atlas_coord, true, false);
     }
+
+    inst_.light_probes.probe_cost_accumulate("Sphere Probes",
+                                             "SPHERE",
+                                             updated_probe_count,
+                                             inst_.light_probes.sphere_probe_count(),
+                                             rendered_view_count,
+                                             max_resolution,
+                                             estimated_work);
 
     if (assign_if_different(inst_.pipelines.data.ray_type, RAY_TYPE_CAMERA))
     {

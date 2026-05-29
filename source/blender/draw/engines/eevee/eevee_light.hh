@@ -22,11 +22,14 @@
 #pragma once
 
 #include <memory>
+#include <string>
 
 #include "DNA_light_types.h"
 
 #include "DRW_gpu_wrapper.hh"
 
+#include "BLI_map.hh"
+#include "BLI_span.hh"
 #include "BLI_vector.hh"
 
 #include "eevee_camera.hh"
@@ -34,6 +37,7 @@
 #include "eevee_lightprobe_shared.hh"
 #include "eevee_sampling.hh"
 #include "eevee_sync.hh"
+#include "eevee_telemetry.hh"
 
 namespace blender::eevee {
 
@@ -170,6 +174,8 @@ class LightModule {
   int local_lights_len_ = 0;
   /** Sun plus local lights count for convenience. */
   int lights_len_ = 0;
+  Map<ObjectKey, std::string> light_names_;
+  Vector<TelemetryShadowLightCost> shadow_light_costs_;
 
   /**
    * Light Culling
@@ -274,6 +280,12 @@ class LightModule {
     return lights_len_;
   }
 
+  Span<const TelemetryShadowLightCost> shadow_light_costs() const
+  {
+    return Span<const TelemetryShadowLightCost>(shadow_light_costs_.data(),
+                                                shadow_light_costs_.size());
+  }
+
   bool has_time_dependent_light_shaders() const
   {
     return has_time_dependent_light_shaders_;
@@ -355,6 +367,7 @@ class LightModule {
   void culling_extent_sync(const int2 render_extent);
 
   void add_world_sun_light(const ObjectKey &key, bool use_diffuse, bool use_glossy);
+  void update_shadow_light_costs();
   void disable_point_dependent_front_light_shader_indices();
 };
 
