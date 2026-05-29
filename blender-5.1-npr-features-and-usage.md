@@ -639,10 +639,11 @@ struct GLSLLight {
 - `sampler2D` 可连接 `Image to Closure` 或符合约定的 `Closure Output`
 - `Closure Output -> sampler2D` 当前只保证 `texture(tex, uv)` 这种直接采样形式
 - 如果函数依赖 `textureLod`、`textureGrad`、`textureSize`、`texelFetch` 这类图像专用能力，应优先配合 `Image to Closure`
-- `@glsl_meta` 支持 `default`、`min`、`max`、`hide_value`、`subtype`、`description` 和一级折叠面板分组
+- `@glsl_meta` 支持 `default`、`min`、`max`、`hide_value`、`subtype`、`label`、`description` 和一级折叠面板分组
 - `@glsl_meta default=` 除了 literal 以外，也支持 `glsl_position()`、`normalize(glsl_normal())`、`glsl_ambient_lighting()` 这类表达式默认值
 - 当 `@glsl_meta default=` 使用表达式时，socket 未连接就取表达式，连接后就取连线值，并自动隐藏这个输入的数值编辑框
 - 表达式默认值当前只建议用于输入参数 `float / vec2 / vec3 / vec4`，并且不要直接引用同函数其他参数名
+- `label="..."` 可以给 socket 设置节点界面的显示名，支持中文和带空格的单行引号字符串；它不改变 GLSL 参数名或 socket identifier
 - `description="..."` 可以给输入 socket 写 tooltip 注释，支持带空格的单行引号字符串
 - `@panel "Name" closed=true|false` 可以把后续输入放到面板内，必须用 `@end_panel` 显式关闭
 - 面板只支持一级，不支持嵌套；面板内可以写 `param:` 空属性行，只做分组不改默认值
@@ -681,20 +682,20 @@ struct GLSLLight {
 
 #### 示例：带注释和面板的参数 Meta
 
-`description="..."` 会显示为输入 socket 的 tooltip；`@panel` 可以把大量输入分组到节点上的一级折叠面板里。
+`label="..."` 会显示为 socket 名称；`description="..."` 会显示为输入 socket 的 tooltip；`@panel` 可以把大量输入分组到节点上的一级折叠面板里。
 
 ```glsl
 /* @glsl_meta v1
-base_color: default=vec3(1.0) subtype=color description="Base surface color"
+base_color: label="基础色" default=vec3(1.0) subtype=color description="Base surface color"
 
 @panel Specular closed=true
-specular: default=0.5 min=0.0 max=1.0 subtype=factor description="Specular strength"
-roughness: default=0.45 min=0.0 max=1.0 subtype=factor description="Highlight roughness"
+specular: label="高光强度" default=0.5 min=0.0 max=1.0 subtype=factor description="Specular strength"
+roughness: label="粗糙度" default=0.45 min=0.0 max=1.0 subtype=factor description="Highlight roughness"
 @end_panel
 
 @panel Texture closed=true
-tex: description="Texture closure used by texture(tex, uv)"
-uv: default=vec2(0.0) description="Texture coordinates"
+tex: label="贴图" description="Texture closure used by texture(tex, uv)"
+uv: label="坐标" default=vec2(0.0) description="Texture coordinates"
 @end_panel
 */
 vec4 annotated_shader(vec3 base_color, float specular, float roughness, sampler2D tex, vec2 uv)
@@ -705,8 +706,9 @@ vec4 annotated_shader(vec3 base_color, float specular, float roughness, sampler2
 }
 ```
 
-- `description` 只影响 UI，不改变 socket identifier、默认值同步规则或 GLSL 调用方式
-- `sampler2D` 可写 `description` 并放进 panel，但不支持 `default / min / max / hide_value / subtype`
+- `label` 和 `description` 只影响 UI，不改变 socket identifier、默认值同步规则或 GLSL 调用方式
+- `out` 参数只支持 `label`；其他 Meta 仍只支持输入参数
+- `sampler2D` 可写 `label`、`description` 并放进 panel，但不支持 `default / min / max / hide_value / subtype`
 - 面板只支持一级，不支持嵌套，且必须用 `@end_panel` 显式关闭
 
 

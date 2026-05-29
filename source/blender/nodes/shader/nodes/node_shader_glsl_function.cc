@@ -162,6 +162,7 @@ namespace blender
         std::optional<std::string> default_expression;
         std::optional<std::string> panel_name;
         std::optional<std::string> description;
+        std::optional<std::string> label;
         bool has_min = false;
         float min_value = 0.0f;
         bool has_max = false;
@@ -172,7 +173,8 @@ namespace blender
         bool has_any() const
         {
           return has_default_value || default_expression.has_value() || panel_name.has_value() ||
-            description.has_value() || has_min || has_max || hide_value || subtype.has_value();
+            description.has_value() || label.has_value() || has_min || has_max || hide_value ||
+            subtype.has_value();
         }
       };
 
@@ -266,18 +268,26 @@ namespace blender
       std::optional<std::string> subtype;
       std::optional<std::string> panel_name;
       std::optional<std::string> description;
+      std::optional<std::string> label;
 
       bool has_any() const
       {
         return default_value.has_value() || min_value.has_value() || max_value.has_value() ||
           hide_value.has_value() || subtype.has_value() || panel_name.has_value() ||
-          description.has_value();
+          description.has_value() || label.has_value();
       }
 
       bool has_sampler_unsupported_meta() const
       {
         return default_value.has_value() || min_value.has_value() || max_value.has_value() ||
           hide_value.has_value() || subtype.has_value();
+      }
+
+      bool has_only_output_supported_meta() const
+      {
+        return label.has_value() && !default_value.has_value() && !min_value.has_value() &&
+          !max_value.has_value() && !hide_value.has_value() && !subtype.has_value() &&
+          !panel_name.has_value() && !description.has_value();
       }
     };
 
@@ -2033,6 +2043,13 @@ namespace blender
             return false;
           }
         }
+        else if (key == "label")
+        {
+          if (!assign_once(r_meta.label, key, value))
+          {
+            return false;
+          }
+        }
         else
         {
           r_error = "Unsupported GLSL meta attribute '" + std::string(key) + "'";
@@ -2589,7 +2606,12 @@ namespace blender
       }
       if (!glsl_param_has_input_socket(r_param))
       {
-        r_error = "GLSL meta only supports input parameters";
+        if (glsl_param_has_output_socket(r_param) && raw_meta.has_only_output_supported_meta())
+        {
+          r_param.meta.label = *raw_meta.label;
+          return true;
+        }
+        r_error = "GLSL meta only supports input parameters, except label on output parameters";
         return false;
       }
       if (glsl_boundary_type_is_sampler(r_param.type))
@@ -2604,6 +2626,10 @@ namespace blender
         if (raw_meta.description.has_value())
         {
           r_param.meta.description = *raw_meta.description;
+        }
+        if (raw_meta.label.has_value())
+        {
+          r_param.meta.label = *raw_meta.label;
         }
         if (raw_meta.panel_name.has_value())
         {
@@ -2747,6 +2773,11 @@ namespace blender
         r_param.meta.description = *raw_meta.description;
       }
 
+      if (raw_meta.label.has_value())
+      {
+        r_param.meta.label = *raw_meta.label;
+      }
+
       if (raw_meta.panel_name.has_value())
       {
         r_param.meta.panel_name = *raw_meta.panel_name;
@@ -2793,6 +2824,10 @@ namespace blender
         if (param.meta.description.has_value())
         {
           ss << "description=" << *param.meta.description << ';';
+        }
+        if (param.meta.label.has_value())
+        {
+          ss << "label=" << *param.meta.label << ';';
         }
         if (param.meta.has_min)
         {
@@ -4982,6 +5017,11 @@ vec3 glsl_ambient_lighting()
       }
     }
 
+    static std::string glsl_socket_display_name(const GLSLFunctionParam& param)
+    {
+      return param.meta.label.value_or(param.name);
+    }
+
     static void add_glsl_socket_declaration(DeclarationListBuilder& b,
       const GLSLFunctionParam& param,
       const bool is_output,
@@ -5206,8 +5246,9 @@ vec3 glsl_ambient_lighting()
         {
           if (glsl_param_has_output_socket(param))
           {
+            const std::string socket_name = glsl_socket_display_name(param);
             add_glsl_socket_declaration(
-              b, param, true, param.name, make_socket_identifier("Out", param.name));
+              b, param, true, socket_name, make_socket_identifier("Out", param.name));
           }
         }
       };
@@ -5247,17 +5288,18 @@ vec3 glsl_ambient_lighting()
       {
         if (glsl_param_has_input_socket(param))
         {
+          const std::string socket_name = glsl_socket_display_name(param);
           if (param.meta.panel_name.has_value())
           {
             if (PanelDeclarationBuilder* panel_builder = ensure_panel_builder(
                   *param.meta.panel_name))
             {
               add_glsl_socket_declaration(
-                *panel_builder, param, false, param.name, param.identifier);
+                *panel_builder, param, false, socket_name, param.identifier);
               continue;
             }
           }
-          add_glsl_socket_declaration(b, param, false, param.name, param.identifier);
+          add_glsl_socket_declaration(b, param, false, socket_name, param.identifier);
         }
       }
 

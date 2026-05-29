@@ -212,6 +212,40 @@ class GLSLFunctionNodeTest(unittest.TestCase):
 
         self.assertEqual(glsl_node.parse_status, 'READY')
 
+    def test_meta_label_sets_socket_display_name(self):
+        _, tree = self.make_material_tree()
+        glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        color_label = "\u57fa\u7840\u8272"
+        texture_label = "\u8d34\u56fe"
+        output_label = "\u8f93\u51fa\u8272"
+        source = (
+            "/* @glsl_meta v1\n"
+            f"color: label=\"{color_label}\" default=vec4(0.1, 0.2, 0.3, 0.4)\n"
+            f"tex: label=\"{texture_label}\" description=\"Texture input\"\n"
+            f"out_color: label=\"{output_label}\"\n"
+            "*/\n"
+            "vec4 localized_labels(vec4 color, sampler2D tex, vec2 uv, out vec4 out_color){\n"
+            "  out_color = color;\n"
+            "  return color;\n"
+            "}\n"
+        )
+        make_text_block("glsl_meta_label.glsl", source)
+        self.configure_glsl_node(glsl_node, "glsl_meta_label.glsl", "localized_labels")
+
+        self.assertEqual(glsl_node.parse_status, 'READY')
+        color_socket = find_socket(glsl_node.inputs, "In_color")
+        tex_socket = find_socket(glsl_node.inputs, "In_tex")
+        out_socket = find_socket(glsl_node.outputs, "Out_out_color")
+        self.assertEqual(color_socket.name, color_label)
+        self.assertEqual(tex_socket.name, texture_label)
+        self.assertEqual(out_socket.name, output_label)
+        self.assertEqual(color_socket.identifier, "In_color")
+        self.assertEqual(tex_socket.identifier, "In_tex")
+        self.assertEqual(out_socket.identifier, "Out_out_color")
+        self.assertEqual(color_socket.bl_idname, "NodeSocketVector4D")
+        self.assertEqual(tex_socket.bl_idname, "NodeSocketClosure")
+        self.assertEqual(out_socket.bl_idname, "NodeSocketVector")
+
     def test_node_group_refresh_operator_updates_glsl_sockets(self):
         group = bpy.data.node_groups.new("GLSLGroupRefreshOperatorTest", "ShaderNodeTree")
         glsl_node = group.nodes.new("ShaderNodeGLSLFunction")
@@ -273,13 +307,14 @@ class GLSLFunctionNodeTest(unittest.TestCase):
         self.assertEqual(node.parse_status, 'READY')
         self.assertAlmostEqual(find_socket(node.inputs, "strength").default_value, 0.75)
 
-    def test_sampler2d_meta_allows_description_and_panel_only(self):
+    def test_sampler2d_meta_allows_label_description_and_panel_only(self):
         _, tree = self.make_material_tree()
         node = tree.nodes.new("ShaderNodeGLSLFunction")
+        texture_label = "\u8d34\u56fe"
         source = (
             "/* @glsl_meta v1\n"
             "@panel Texture closed=true\n"
-            "tex: description=\"Texture closure used by texture(tex, uv)\"\n"
+            f"tex: label=\"{texture_label}\" description=\"Texture closure used by texture(tex, uv)\"\n"
             "uv: default=vec2(0.0) description=\"Texture coordinates\"\n"
             "@end_panel\n"
             "*/\n"
@@ -292,7 +327,8 @@ class GLSLFunctionNodeTest(unittest.TestCase):
         self.configure_glsl_node(node, "glsl_sampler_description.glsl", "sample_it")
 
         self.assertEqual(node.parse_status, 'READY')
-        self.assertIsNotNone(find_socket(node.inputs, "tex"))
+        tex_socket = find_socket(node.inputs, "In_tex")
+        self.assertEqual(tex_socket.name, texture_label)
 
         bad_node = tree.nodes.new("ShaderNodeGLSLFunction")
         bad_source = (

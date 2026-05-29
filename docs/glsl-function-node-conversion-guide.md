@@ -1308,6 +1308,7 @@ vec2 triangle_unproject(vec3 v)
 - 最大值
 - 隐藏数值输入控件
 - socket subtype
+- socket 显示名
 - socket 注释 / tooltip
 - 一级折叠面板分组
 
@@ -1317,8 +1318,8 @@ Meta 必须写在函数正上方的块注释里，并以 `@glsl_meta` 开头：
 
 ```glsl
 /* @glsl_meta v1
-strength: default=0.5 min=0.0 max=1.0 subtype=factor description="Blend amount"
-tint: default=vec3(1.0, 0.8, 0.2) description="Target tint color"
+strength: label="强度" default=0.5 min=0.0 max=1.0 subtype=factor description="Blend amount"
+tint: label="目标颜色" default=vec3(1.0, 0.8, 0.2) description="Target tint color"
 */
 vec3 stylize(vec3 base_color, float strength, vec3 tint)
 {
@@ -1496,7 +1497,30 @@ strength: default=0.5 hide_value=true
 - `yes` / `no`
 - `on` / `off`
 
-#### 3.6 `description`
+#### 3.6 `label`
+
+用于给 socket 设置节点界面上的显示名。它只改变节点 UI 文本，不改变 GLSL 参数名，也不改变 socket identifier。
+
+这适合把必须保持合法 GLSL 标识符的参数名显示成中文或更易读的名称：
+
+```glsl
+base_color: label="基础色" default=vec4(1.0, 1.0, 1.0, 1.0) subtype=color
+tex: label="贴图"
+out_color: label="输出色"
+```
+
+规则：
+
+- `label="..."` 支持空格和中文
+- 如果文本里需要写引号，使用 `\"`
+- 如果文本里需要写反斜杠，使用 `\\`
+- V1 只支持单行显示名，不支持跨行文本
+- `label` 不改变 socket identifier；例如参数 `base_color` 的输入仍然是 `In_base_color`
+- 输入参数都支持 `label`
+- `out` 参数只支持 `label`，不支持默认值、范围、隐藏值、subtype、description 或 panel
+- `sampler2D` 支持 `label`
+
+#### 3.7 `description`
 
 用于给输入 socket 写描述文本。这个文本会进入 socket declaration 的 `description`，在 Blender 节点 tooltip 中显示。
 
@@ -1505,7 +1529,7 @@ strength: default=0.5 hide_value=true
 ```glsl
 strength: default=0.5 min=0.0 max=1.0 subtype=factor description="Blend amount for the effect"
 tint: default=vec3(1.0, 0.8, 0.2) subtype=color description="Main tint color"
-tex: description="Source texture closure"
+tex: label="贴图" description="Source texture closure"
 ```
 
 规则：
@@ -1515,9 +1539,9 @@ tex: description="Source texture closure"
 - 如果文本里需要写反斜杠，使用 `\\`
 - V1 只支持单行描述，不支持跨行文本
 - `description` 只影响 UI，不改变 socket identifier、默认值、范围或 GLSL 函数调用方式
-- `sampler2D` 只支持 `description` 和 panel 分组，不支持 `default/min/max/hide_value/subtype`
+- `sampler2D` 只支持 `label`、`description` 和 panel 分组，不支持 `default/min/max/hide_value/subtype`
 
-#### 3.7 `@panel` / `@end_panel`
+#### 3.8 `@panel` / `@end_panel`
 
 用于把大量输入参数分组到节点上的一级折叠面板里。面板只影响 UI 排列，不改变 socket identifier，也不改变 GLSL 函数调用方式。
 
@@ -1574,7 +1598,7 @@ vec3 shader(
 
 这意味着它更适合作为“函数作者建议值”，而不是强制锁死值。
 
-#### 4.2 `min/max/subtype/description` 的作用
+#### 4.2 `min/max/subtype/label/description` 的作用
 
 这些项属于 socket 声明的一部分，会直接影响 Blender 节点界面、socket 类型或 tooltip。
 
@@ -1586,17 +1610,17 @@ vec3 shader(
 - `subtype=color` 会让 `vec3/vec4` 输入变成 `NodeSocketColor`
 - `vec3 + subtype=color` 进入 GLSL 函数时只使用 `rgb`
 - `vec4 + subtype=color` 进入 GLSL 函数时会保留 `rgba`
+- `label="..."` 会显示为 socket 名称，不影响 GLSL 参数名、identifier 或计算
 - `description="..."` 会显示在 socket tooltip 中，不影响计算
 
 ### 5. 当前限制
 
 当前版本有这些限制：
 
-- 只支持输入参数
+- 除 `out` 参数的 `label` 以外，Meta 只支持输入参数
 - 不支持返回值 Meta
-- 不支持 `out` 参数 Meta
 - 不支持 `inout`
-- `sampler2D` 只支持 `description` 和 panel 分组，不支持默认值、范围、隐藏值或 subtype
+- `sampler2D` 只支持 `label`、`description` 和 panel 分组，不支持默认值、范围、隐藏值或 subtype
 - 不支持 `mat*` / `struct` / `array` 边界参数 Meta
 - panel 只支持一级，不支持嵌套
 - panel 必须显式 `@end_panel` 关闭
@@ -1609,9 +1633,9 @@ vec3 shader(
 
 ```glsl
 /* @glsl_meta v1
-threshold: default=0.35 min=0.0 max=1.0 subtype=factor description="Mask cutoff"
-edge_width: default=0.08 min=0.0 max=1.0 subtype=factor description="Soft edge width"
-edge_color: default=vec3(1.0, 0.5, 0.1) subtype=color description="Edge highlight color"
+threshold: label="阈值" default=0.35 min=0.0 max=1.0 subtype=factor description="Mask cutoff"
+edge_width: label="边缘宽度" default=0.08 min=0.0 max=1.0 subtype=factor description="Soft edge width"
+edge_color: label="边缘颜色" default=vec3(1.0, 0.5, 0.1) subtype=color description="Edge highlight color"
 */
 vec3 dissolve_mask(vec3 base_color, float threshold, float edge_width, vec3 edge_color)
 {
@@ -1668,13 +1692,13 @@ vec4 sample_it(sampler2D tex, vec2 uv)
 
 `sampler2D` 当前通过 `Image to Closure` 或 `Closure Output` 接入来源，不支持默认值、范围、隐藏值或 subtype。
 
-可以写 `description`，也可以放进 panel：
+可以写 `label`、`description`，也可以放进 panel：
 
 ```glsl
 /* @glsl_meta v1
 @panel Texture closed=true
-tex: description="Texture closure used by texture(tex, uv)"
-uv: default=vec2(0.0) description="Texture coordinates"
+tex: label="贴图" description="Texture closure used by texture(tex, uv)"
+uv: label="坐标" default=vec2(0.0) description="Texture coordinates"
 @end_panel
 */
 vec4 sample_it(sampler2D tex, vec2 uv)
