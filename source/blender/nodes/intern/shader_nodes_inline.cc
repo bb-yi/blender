@@ -1383,6 +1383,16 @@ class ShaderNodesInliner {
     const std::optional<PrimitiveSocketValue> src_primitive_value = src_value.to_primitive(
         from_socket_type);
     if (src_primitive_value && to_socket_type.base_cpp_type) {
+      if (from_socket_type.type == SOCK_RGBA && to_socket_type.type == SOCK_VECTOR &&
+          to_socket_type.idname == "NodeSocketVector4D")
+      {
+        if (const ColorGeometry4f *color =
+                std::get_if<ColorGeometry4f>(&src_primitive_value->value))
+        {
+          return {PrimitiveSocketValue{
+              VectorPrimitiveSocketValue{float3(color->r, color->g, color->b), color->a, 4}}};
+        }
+      }
       if (data_type_conversions_.is_convertible(*from_socket_type.base_cpp_type,
                                                 *to_socket_type.base_cpp_type))
       {
