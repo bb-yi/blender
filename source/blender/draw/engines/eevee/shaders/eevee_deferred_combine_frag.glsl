@@ -18,7 +18,6 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_deferred_combine)
 void main()
 {
   int2 texel = int2(gl_FragCoord.xy);
-  float2 screen_uv = (float2(texel) + 0.5f) / float2(textureSize(hiz_tx, 0));
 
   DeferredCombine dc = deferred_combine(texel);
 
