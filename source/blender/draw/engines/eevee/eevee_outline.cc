@@ -4,6 +4,9 @@
 
 #include "BLI_math_base.h"
 
+#include "DNA_layer_types.h"
+#include "DNA_object_types.h"
+
 #include "GPU_capabilities.hh"
 #include "GPU_texture.hh"
 
@@ -28,6 +31,9 @@ void OutlineModule::begin_sync()
 void OutlineModule::sync_object(Object *ob, ResourceHandleRange res_handle)
 {
   if (inst_.scene->eevee.use_outline == 0) {
+    return;
+  }
+  if ((ob->base_flag & BASE_HOLDOUT) || (ob->visibility_flag & OB_HOLDOUT)) {
     return;
   }
 

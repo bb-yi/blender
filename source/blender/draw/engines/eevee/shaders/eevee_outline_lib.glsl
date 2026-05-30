@@ -132,6 +132,10 @@ void output_outline(float4 line_color,
                     bool freestyle_edge)
 {
 #if defined(MAT_OUTLINE_SUPPORT) && defined(GPU_FRAGMENT_SHADER)
+  if (flag_test(drw_object_infos().flag, OBJECT_HOLDOUT)) {
+    return;
+  }
+
   if (line_width <= 0.0f || line_color.a <= 0.0f) {
     return;
   }
