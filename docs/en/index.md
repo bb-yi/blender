@@ -13,9 +13,14 @@ This document describes the NPR / Eevee extension features that have been added 
 ## 5.1.2 Highlights
 
 - Merged official `Blender 5.1.2` fixes and version updates
+- Added `GLSL Script Expression` for quick custom scalar, vector, or color outputs from a single GLSL expression
+- Added `label` support to `GLSL Function` `@glsl_meta v1`, allowing input, output, and `sampler2D` sockets to use custom UI display names
+- Added shadow and probe attribution groups to the `Eevee Performance` view: `Shadow Contexts`, `Shadow Lights`, and `Probe Costs`
 - Added `Native Camera FX Outputs`, allowing Eevee native `Motion Blur` and `Depth of Field` to be applied to selected View Layer channels
 - Restored the standalone `OKLab Color Ramp` node; regular `Color Ramp` keeps the existing RGB / HSV / HSL workflow
 - Fixed `GLSL Function` `vec4` inputs losing the `w` component during refresh or compile paths
+- Fixed `Scene Color` `Position` source offset sampling so it matches the other scene-buffer sources
+- Fixed transparent / `Blended` Forward layers overwriting behind-surface AOVs when they do not explicitly write an AOV
 - Updated the NPR Port splash screen
 
 ## Node Overview
@@ -99,6 +104,7 @@ This document describes the NPR / Eevee extension features that have been added 
 - `Light Probe Color`
 - `World To Tangent`
 - `GLSL Function`
+- `GLSL Script Expression`
 - `Image to Closure`
 - `Light Shader Info`
 - `Light Shader Output`
@@ -126,6 +132,7 @@ This document describes the NPR / Eevee extension features that have been added 
 ### 4. Interface & Settings
 
 - `Eevee Performance` Outliner view
+- Shadow / probe cost attribution in `Eevee Performance`
 - Material preview control
 - Material face culling
 - Material `ZTest / Stencil / Color Write / Depth Write`

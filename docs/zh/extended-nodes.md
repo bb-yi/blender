@@ -108,6 +108,7 @@
 - `Normal`：读取场景法线
 - `Position`：读取世界空间位置
 - 不连接 `Vector` 时，默认按 `Texture Coordinate` 的 `Window` 坐标采样
+- 连接 `Vector` 时，`Color / Depth / Normal / Position` 都按同一套屏幕 UV 偏移采样；`Position` 会从偏移后的深度和屏幕坐标重建对应像素的世界坐标
 
 ## 2. Eevee 通用辅助节点
 
@@ -248,6 +249,7 @@
 - `Outline ID = 0` 时，系统会按对象资源 ID 自动分配描边分组
 - `Outline ID > 0` 时，可以手动把多个对象或多个材质表面并到同一个描边分组里
 - `Depth Threshold` 更偏向控制深度断层轮廓，`Normal Threshold` 更偏向控制法线夹角造成的内部边
+- 位于 Holdout 集合中的物体不会继续写出 `Outline Control` 参数，也不会贡献 Freestyle / marked-edge 描边种子
 
 #### 建议补图
 
@@ -382,7 +384,7 @@
 在 `Eevee` 物体材质和 `NPR Tree` 中可用。
 
 <div align="center">
-	<img src="images/placeholder_glsl_function.png" alt="GLSL Function" style="border-radius: 10px;">
+	<img src="images/glsl_function_label.png" alt="GLSL Function label metadata" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -417,15 +419,18 @@
 - `sampler2D` 可连接 `Image to Closure` 或符合约定的 `Closure Output`
 - `Closure Output -> sampler2D` 当前只保证 `texture(tex, uv)` 这种直接采样形式
 - 如果函数依赖 `textureLod`、`textureGrad`、`textureSize`、`texelFetch` 这类图像专用能力，应优先配合 `Image to Closure`
-- `@glsl_meta` 支持 `default`、`min`、`max`、`hide_value`、`subtype`、`description` 和一级折叠面板分组
+- `@glsl_meta` 支持 `default`、`min`、`max`、`hide_value`、`subtype`、`label`、`description` 和一级折叠面板分组
 - `float` 当前支持的 `subtype`：`none`、`unsigned`、`percentage`、`factor`、`mass`、`angle`、`time`、`time_absolute`、`distance`、`wavelength`
 - `vec2 / vec3 / vec4` 当前支持的 `subtype`：`none`、`factor`、`percentage`、`translation`、`direction`、`velocity`、`acceleration`、`euler`、`xyz`
 - `subtype=color` 额外只支持 `vec3` 和 `vec4`
 - `@glsl_meta default=` 除了 literal 以外，也支持 `glsl_position()`、`normalize(glsl_normal())`、`glsl_ambient_lighting()` 这类表达式默认值
+- 当 `@glsl_meta default=` 使用表达式时，socket 未连接就取表达式，连接后就取连线值，并自动隐藏这个输入的数值编辑框
 - 表达式默认值当前只建议用于输入参数 `float / vec2 / vec3 / vec4`，并且不要直接引用同函数其他参数名
+- `label="..."` 可以给 socket 设置节点界面的显示名，支持中文和带空格的单行引号字符串；它不改变 GLSL 参数名或 socket identifier
 - `description="..."` 可以给输入 socket 写 tooltip 注释，支持带空格的单行引号字符串
 - `@panel "Name" closed=true|false` 可以把后续输入放到节点上的一级折叠面板里，必须用 `@end_panel` 显式关闭
-- `sampler2D` 可写 `description` 并放进 panel，但不支持 `default / min / max / hide_value / subtype`
+- 面板只支持一级，不支持嵌套；面板内可以写 `param:` 空属性行，只做分组不改默认值
+- `sampler2D` 可写 `label`、`description` 并放进 panel，但不支持 `default / min / max / hide_value / subtype`
 - 只有显式写了 `subtype=color` 的 `vec3 / vec4` 输入，才会显示成颜色插口
 - `vec3 + subtype=color` 进入 GLSL 时按 `rgb` 使用，`alpha` 固定为 `1.0`
 - `vec4 + subtype=color` 会保留完整 `rgba`
@@ -446,20 +451,20 @@
 
 #### 示例：带注释和面板的参数 Meta
 
-`description="..."` 会显示为输入 socket 的 tooltip；`@panel` 可以把大量输入分组到节点上的一级折叠面板里。
+`label="..."` 会显示为 socket 名称；`description="..."` 会显示为输入 socket 的 tooltip；`@panel` 可以把大量输入分组到节点上的一级折叠面板里。
 
 ```glsl
 /* @glsl_meta v1
-base_color: default=vec3(1.0) subtype=color description="Base surface color"
+base_color: label="基础色" default=vec3(1.0) subtype=color description="Base surface color"
 
 @panel Specular closed=true
-specular: default=0.5 min=0.0 max=1.0 subtype=factor description="Specular strength"
-roughness: default=0.45 min=0.0 max=1.0 subtype=factor description="Highlight roughness"
+specular: label="高光强度" default=0.5 min=0.0 max=1.0 subtype=factor description="Specular strength"
+roughness: label="粗糙度" default=0.45 min=0.0 max=1.0 subtype=factor description="Highlight roughness"
 @end_panel
 
 @panel Texture closed=true
-tex: description="Texture closure used by texture(tex, uv)"
-uv: default=vec2(0.0) description="Texture coordinates"
+tex: label="贴图" description="Texture closure used by texture(tex, uv)"
+uv: label="坐标" default=vec2(0.0) description="Texture coordinates"
 @end_panel
 */
 vec4 annotated_shader(vec3 base_color, float specular, float roughness, sampler2D tex, vec2 uv)
@@ -470,7 +475,9 @@ vec4 annotated_shader(vec3 base_color, float specular, float roughness, sampler2
 }
 ```
 
-- `description` 只影响 UI，不改变 socket identifier、默认值同步规则或 GLSL 调用方式
+- `label` 和 `description` 只影响 UI，不改变 socket identifier、默认值同步规则或 GLSL 调用方式
+- `out` 参数只支持 `label`；其他 Meta 仍只支持输入参数
+- `sampler2D` 可写 `label`、`description` 并放进 panel，但不支持 `default / min / max / hide_value / subtype`
 - 面板只支持一级，不支持嵌套，且必须用 `@end_panel` 显式关闭
 
 #### 示例：`mode` 对照调试 helper
@@ -680,6 +687,63 @@ vec4 pbr_lit(vec3 base_color,
 - `normal_ws`、`view_ws`、`ambient_light` 都有表达式默认值；socket 未连接时会自动调用对应内置 helper，连接后则使用外部输入
 - `hide_value=true` 用于这类 helper 覆盖输入，避免节点上显示一个容易误解的静态默认数值
 
+### GLSL Script Expression
+
+#### 入口
+
+`Add > Script > GLSL Script Expression`
+
+在 `Eevee` 物体材质和 `NPR Tree` 中可用。
+
+<div align="center">
+	<img src="images/glsl_script_expression.png" alt="GLSL Script Expression" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### 作用
+
+用一条单行 GLSL 表达式生成一个 `Result` 输出，适合把简单数学、颜色混合、向量重组和调试公式直接放进节点树，而不必创建单独的 Text 数据块或外部 `.glsl` 文件。
+
+#### 节点设置
+
+- `Output Type`
+  - `Float`
+  - `Vector`
+  - `Color`
+- `Expression`：赋值给 `Result` 的单条 GLSL 表达式
+- `Variables`：手动维护输入变量列表，每个变量都会生成同名输入 socket
+- 每个变量的类型支持 `Float`、`Vector`、`Color`
+
+#### 使用方法
+
+1. 添加 `GLSL Script Expression` 节点。
+2. 设置 `Output Type`。
+3. 在 `Variables` 面板中添加需要暴露到节点树的变量，并设置变量名与类型。
+4. 在 `Expression` 中直接引用这些变量名。
+5. 把 `Result` 接到后续节点。
+
+#### 示例
+
+```glsl
+mix(base_color, tint_color, clamp(mask, 0.0, 1.0))
+```
+
+对应变量：
+
+- `base_color`：`Color`
+- `tint_color`：`Color`
+- `mask`：`Float`
+- `Output Type`：`Color`
+
+#### 限制
+
+- 只允许单条表达式，不允许 `;`、`{}`、预处理指令或多语句代码块
+- 不允许赋值、递增递减、控制流、声明语句和注释
+- 表达式只面向数值 GLSL；不支持字符串、采样器、贴图采样函数、image load/store
+- 不能直接调用 `glsl_position()`、`glsl_normal()`、`glsl_light_get()` 这类 `GLSL Function` helper
+- 变量名会被整理成合法 GLSL 标识符；保留字、`gl_` 前缀和内部 helper 名称会被自动避让
+- 如果需要函数、纹理、直接光 helper、`sampler2D` 或复杂控制流，应改用 `GLSL Function`
+
 ### Image to Closure
 
 #### 入口
@@ -699,7 +763,7 @@ vec4 pbr_lit(vec3 base_color,
 
 #### 作用
 
-把一张普通图片包装成 `sample2D` 可消费的 `Closure` 源。
+把一张普通图片包装成 `sampler2D` 可消费的 `Closure` 源，主要用于给 `GLSL Function(sampler2D)` 提供图像输入，同时保持和程序化 `Closure Output` 相同的接线形式。
 
 #### 节点设置
 

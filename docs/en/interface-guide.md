@@ -7,7 +7,7 @@
 Shows Eevee viewport / final-render performance statistics, stage breakdowns, and hints directly in the `Outliner`, making it easier to locate heavy parts of the pipeline.
 
 <div align="center">
-	<img src="images/placeholder_eevee_performance.png" alt="Eevee Performance" style="border-radius: 10px;">
+	<img src="images/eevee_performance_shadow_probe.png" alt="Eevee Performance shadow and probe attribution" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -23,7 +23,15 @@ Shows Eevee viewport / final-render performance statistics, stage breakdowns, an
 - `Pause` freezes live updates so the current result can be inspected
 - `Sort by Time` sorts the stage list by CPU cost instead of fixed pipeline order
 - `Average Window` sets the frame window used for smoothing statistics
-- The tree currently includes groups such as `Viewport`, `Final Render`, `Metadata`, `Features`, `Stages`, and `Hints`
+- The tree currently includes groups such as `Viewport`, `Final Render`, `Metadata`, `Features`, `Stages`, `Shadow Contexts`, `Shadow Lights`, `Probe Costs`, and `Hints`
+
+### Shadow and Probe Attribution
+
+- `Shadow Contexts` breaks shadow CPU cost down by render context, such as `MainView`, `PlanarProbe`, `CaptureProbe`, `Bake`, and `Other`
+- `Shadow Contexts` shows `cpu`, `calls`, `loops`, `ms/call`, `ms/loop`, and `share`, making it easier to tell whether shadow cost comes from the main view, probe updates, baking, or other paths
+- `Shadow Lights` lists shadow tilemap load per light, including `type`, `tilemaps`, `estimated_views`, `sync_dirty_tilemaps`, `tilemap_view_share`, and `level`
+- `Probe Costs` lists per-probe update cost, including `updated`, `total`, `rendered_views`, `resolution`, `estimated_work`, `work_share`, and `level`
+- These groups are attribution aids, not a per-GPU-draw-call profiler; sorting and shares are meant for hotspot discovery, and exact values change with viewport state, sampling, and probe update frequency
 
 ### Current Scope
 

@@ -84,6 +84,7 @@ Node-tree entry: Shader Editor > Shader Type > `Filter`
 #### Important Notes
 
 - The default sampling coordinate for `Scene Color` is the `Window` output of the `Texture Coordinate` node
+- `Scene Color` uses consistent screen-UV sampling for `Color / Depth / Normal / Position`; when `Vector` is connected for offset sampling, `Position` reconstructs the world position for the offset pixel
 - `AOV Input` is supported
 - `AOV Output` is supported, so a filter can write to a named AOV before sending the final result into `Filter Output`
 - `Execution Stage` currently provides three insertion points:
@@ -173,6 +174,9 @@ Outline render-pass entry:
 - If the `Outline` render pass is not enabled, outlines are composited into `Combined`
 - If the `Outline` render pass is enabled, outline data can be read as a separate pass in compositing or later processing
 - No outlines are generated unless a material actually writes outline parameters through `Outline Control`
+- Objects in Holdout collections no longer write `Outline Control` parameters and no longer contribute Freestyle / marked-edge outline seeds
+- `Blended` foreground materials participate in behind-outline occlusion: fully opaque foreground blocks behind outlines, fully transparent foreground leaves them unchanged
+- Semi-transparent `Blended` foreground attenuates behind-outline intensity by material transmittance without tinting the outline with the foreground material color
 
 #### Suggested Images
 

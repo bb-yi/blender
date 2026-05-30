@@ -108,6 +108,7 @@ Reads the current Eevee scene buffer. The `Source` can be switched in the node p
 - `Normal`: read scene normals
 - `Position`: read the world-space position pass
 - If `Vector` is not connected, the node samples with the `Window` output of the `Texture Coordinate` node
+- When `Vector` is connected, `Color / Depth / Normal / Position` use the same screen-UV offset sampling semantics; `Position` reconstructs the world position for the offset pixel from its depth and screen coordinate
 
 ## 2. General Eevee Utility Nodes
 
@@ -248,6 +249,7 @@ Writes outline parameters for Eevee's built-in screen-space outline pass.
 - `Outline ID = 0` uses automatic grouping from the object resource ID
 - `Outline ID > 0` can be used to force multiple objects or surfaces into the same outline group
 - `Depth Threshold` is more related to depth discontinuity edges, while `Normal Threshold` is more related to internal edges from normal variation
+- Objects in Holdout collections no longer write `Outline Control` parameters and no longer contribute Freestyle / marked-edge outline seeds
 
 #### Suggested Images
 
@@ -376,7 +378,7 @@ Converts a world-space direction vector into the tangent space of the current su
 Available in both `Eevee` object materials and `NPR Tree`.
 
 <div align="center">
-	<img src="images/placeholder_glsl_function.png" alt="GLSL Function" style="border-radius: 10px;">
+	<img src="images/glsl_function_label.png" alt="GLSL Function label metadata" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -411,15 +413,18 @@ Injects a user-authored GLSL function into the current `Eevee / NPR` material co
 - `sampler2D` can be connected to `Image to Closure` or a compatible `Closure Output`
 - `Closure Output -> sampler2D` currently guarantees only the direct `texture(tex, uv)` path
 - If the function depends on `textureLod`, `textureGrad`, `textureSize`, or `texelFetch`, prefer driving it with `Image to Closure`
-- `@glsl_meta` supports `default`, `min`, `max`, `hide_value`, `subtype`, `description`, and one-level panel groups
+- `@glsl_meta` supports `default`, `min`, `max`, `hide_value`, `subtype`, `label`, `description`, and one-level panel groups
 - Supported `subtype` values for `float`: `none`, `unsigned`, `percentage`, `factor`, `mass`, `angle`, `time`, `time_absolute`, `distance`, `wavelength`
 - Supported `subtype` values for `vec2 / vec3 / vec4`: `none`, `factor`, `percentage`, `translation`, `direction`, `velocity`, `acceleration`, `euler`, `xyz`
 - `subtype=color` is additionally supported for `vec3` and `vec4`
 - `@glsl_meta default=` also accepts expressions such as `glsl_position()`, `normalize(glsl_normal())`, or `glsl_ambient_lighting()`
+- When `@glsl_meta default=` uses an expression, an unconnected socket evaluates that expression, while a connected socket uses the link value and hides the static value field automatically
 - Expression defaults are recommended only for `float / vec2 / vec3 / vec4` inputs and should not directly reference other exported parameters
+- `label="..."` sets the socket display name in the node UI, supports quoted single-line text with spaces, and does not change the GLSL parameter name or socket identifier
 - `description="..."` adds a tooltip description to an input socket and supports quoted single-line text with spaces
 - `@panel "Name" closed=true|false` groups following inputs into one-level collapsible panels and must be closed with `@end_panel`
-- `sampler2D` can use `description` and panel grouping, but does not support `default / min / max / hide_value / subtype`
+- Panels support one level only; empty `param:` rows can be used inside a panel for grouping without changing defaults
+- `sampler2D` can use `label`, `description`, and panel grouping, but does not support `default / min / max / hide_value / subtype`
 - Only `vec3 / vec4` inputs explicitly marked with `subtype=color` become color sockets
 - `vec3 + subtype=color` enters GLSL as `rgb` with `alpha = 1.0`
 - `vec4 + subtype=color` keeps full `rgba`
@@ -440,20 +445,20 @@ Injects a user-authored GLSL function into the current `Eevee / NPR` material co
 
 #### Example: Parameter Meta with Descriptions and Panels
 
-`description="..."` is shown as the input socket tooltip. `@panel` groups many inputs into one-level collapsible panels on the node.
+`label="..."` is shown as the socket name. `description="..."` is shown as the input socket tooltip. `@panel` groups many inputs into one-level collapsible panels on the node.
 
 ```glsl
 /* @glsl_meta v1
-base_color: default=vec3(1.0) subtype=color description="Base surface color"
+base_color: label="Base Color" default=vec3(1.0) subtype=color description="Base surface color"
 
 @panel Specular closed=true
-specular: default=0.5 min=0.0 max=1.0 subtype=factor description="Specular strength"
-roughness: default=0.45 min=0.0 max=1.0 subtype=factor description="Highlight roughness"
+specular: label="Specular Strength" default=0.5 min=0.0 max=1.0 subtype=factor description="Specular strength"
+roughness: label="Roughness" default=0.45 min=0.0 max=1.0 subtype=factor description="Highlight roughness"
 @end_panel
 
 @panel Texture closed=true
-tex: description="Texture closure used by texture(tex, uv)"
-uv: default=vec2(0.0) description="Texture coordinates"
+tex: label="Texture" description="Texture closure used by texture(tex, uv)"
+uv: label="Coordinates" default=vec2(0.0) description="Texture coordinates"
 @end_panel
 */
 vec4 annotated_shader(vec3 base_color, float specular, float roughness, sampler2D tex, vec2 uv)
@@ -464,7 +469,9 @@ vec4 annotated_shader(vec3 base_color, float specular, float roughness, sampler2
 }
 ```
 
-- `description` affects UI only and does not change socket identifiers, default synchronization, or GLSL calls
+- `label` and `description` affect UI only and do not change socket identifiers, default synchronization, or GLSL calls
+- `out` parameters support `label` only; other meta properties are still input-only
+- `sampler2D` can use `label`, `description`, and panel grouping, but does not support `default / min / max / hide_value / subtype`
 - Panels support one level only, cannot be nested, and must be closed explicitly with `@end_panel`
 
 #### Example: `mode` Debug Mapping
@@ -690,6 +697,63 @@ Notes:
 - `normal_ws`, `view_ws`, and `ambient_light` use expression defaults; unconnected sockets call the built-in helpers, while connected sockets use the external override
 - `hide_value=true` is useful for helper override inputs so the node does not show a misleading static default value
 
+### GLSL Script Expression
+
+#### Entry
+
+`Add > Script > GLSL Script Expression`
+
+Available in both `Eevee` object materials and `NPR Tree`.
+
+<div align="center">
+	<img src="images/glsl_script_expression.png" alt="GLSL Script Expression" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### Purpose
+
+Evaluates one single-line GLSL expression and publishes it as a `Result` output. This is useful for simple math, color mixing, vector recomposition, and debugging formulas without creating a separate Text data-block or external `.glsl` file.
+
+#### Node Settings
+
+- `Output Type`
+  - `Float`
+  - `Vector`
+  - `Color`
+- `Expression`: the single GLSL expression assigned to `Result`
+- `Variables`: a manually maintained list of input variables; each variable becomes a node input socket
+- Each variable can be `Float`, `Vector`, or `Color`
+
+#### Basic Workflow
+
+1. Add a `GLSL Script Expression` node.
+2. Set `Output Type`.
+3. Add variables in the `Variables` panel, then set each variable name and type.
+4. Reference those variable names directly from `Expression`.
+5. Connect `Result` to the downstream node chain.
+
+#### Example
+
+```glsl
+mix(base_color, tint_color, clamp(mask, 0.0, 1.0))
+```
+
+Matching variables:
+
+- `base_color`: `Color`
+- `tint_color`: `Color`
+- `mask`: `Float`
+- `Output Type`: `Color`
+
+#### Limits
+
+- Only one expression is allowed; `;`, `{}`, preprocessor directives, and multi-statement blocks are rejected
+- Assignment, increment / decrement, control flow, declarations, and comments are rejected
+- The expression is numeric GLSL only; strings, samplers, texture sampling functions, and image load/store are not supported
+- `GLSL Function` helpers such as `glsl_position()`, `glsl_normal()`, and `glsl_light_get()` cannot be called directly
+- Variable names are normalized to valid GLSL identifiers; reserved words, `gl_` prefixes, and internal helper names are avoided automatically
+- Use `GLSL Function` instead when a node needs functions, textures, direct-light helpers, `sampler2D`, or complex control flow
+
 ### Image to Closure
 
 #### Entry
@@ -709,7 +773,7 @@ Available in both `Eevee` object materials and `NPR Tree`.
 
 #### Purpose
 
-Wraps a regular image as a closure-backed source for `sample2D` workflows.
+Wraps a regular image as a closure-backed source for `sampler2D`, mainly for feeding `GLSL Function(sampler2D)` inputs while keeping the same wiring style as procedural `Closure Output` sources.
 
 #### Node Settings
 

@@ -13,9 +13,14 @@
 ## 5.1.2 更新重点
 
 - 合并官方 `Blender 5.1.2` 修复与版本更新
+- 新增 `GLSL Script Expression` 节点，可用单行 GLSL 表达式快速生成自定义标量、向量或颜色输出
+- `GLSL Function` 的 `@glsl_meta v1` 新增 `label`，可为输入、输出和 `sampler2D` 插口设置节点界面显示名
+- `Eevee Performance` 视图新增阴影和探针归因分组：`Shadow Contexts`、`Shadow Lights`、`Probe Costs`
 - 新增 `Native Camera FX Outputs`，可在 `View Layer` 中把 Eevee 原生 `Motion Blur` 和 `Depth of Field` 应用到指定通道
 - 恢复独立 `OKLab Color Ramp` 节点，普通 `Color Ramp` 保持原有 RGB / HSV / HSL 工作流
 - 修复 `GLSL Function` 的 `vec4` 输入在刷新或编译路径中丢失 `w` 分量的问题
+- 修复 `Scene Color` 的 `Position` 源在偏移采样时和其他场景缓冲不一致的问题
+- 修复透明 / `Blended` Forward 层在未显式写入 AOV 时覆盖后方 AOV 的问题
 - 更新 NPR Port 启动画面
 
 ## 节点一览
@@ -99,6 +104,7 @@
 - `Light Probe Color`
 - `World To Tangent`
 - `GLSL Function`
+- `GLSL Script Expression`
 - `Image to Closure`
 - `Light Shader Info`
 - `Light Shader Output`
@@ -126,6 +132,7 @@
 ### 4. 界面与设置
 
 - `Eevee Performance` Outliner 视图
+- `Eevee Performance` 的阴影 / 探针成本归因
 - 材质预览控制
 - 材质剔除模式
 - 材质 `ZTest / Stencil / Color Write / Depth Write`

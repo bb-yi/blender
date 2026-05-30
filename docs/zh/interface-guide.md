@@ -7,7 +7,7 @@
 在 `Outliner` 中查看 Eevee 当前视口 / 最终渲染的性能统计、阶段拆分和功能提示，用来快速定位性能热点。
 
 <div align="center">
-	<img src="images/placeholder_eevee_performance.png" alt="Eevee Performance" style="border-radius: 10px;">
+	<img src="images/eevee_performance_shadow_probe.png" alt="Eevee Performance shadow and probe attribution" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -23,7 +23,15 @@
 - `Pause` 会暂停视口性能数据的继续刷新，方便查看当前结果
 - `Sort by Time` 会按当前 CPU 开销排序阶段列表，而不是固定的管线顺序
 - `Average Window` 用于设置平滑统计时使用的帧窗口大小
-- 当前树结构会显示 `Viewport`、`Final Render`、`Metadata`、`Features`、`Stages`、`Hints` 等分组
+- 当前树结构会显示 `Viewport`、`Final Render`、`Metadata`、`Features`、`Stages`、`Shadow Contexts`、`Shadow Lights`、`Probe Costs`、`Hints` 等分组
+
+### 阴影与探针归因
+
+- `Shadow Contexts` 按渲染上下文拆分阴影 CPU 开销，例如 `MainView`、`PlanarProbe`、`CaptureProbe`、`Bake`、`Other`
+- `Shadow Contexts` 会显示 `cpu`、`calls`、`loops`、`ms/call`、`ms/loop` 和 `share`，用于判断阴影开销来自主视图、探针更新还是烘焙 / 其他路径
+- `Shadow Lights` 按灯光列出阴影 tilemap 负载，包含 `type`、`tilemaps`、`estimated_views`、`sync_dirty_tilemaps`、`tilemap_view_share` 和 `level`
+- `Probe Costs` 按探针列出更新成本，包含 `updated`、`total`、`rendered_views`、`resolution`、`estimated_work`、`work_share` 和 `level`
+- 这些分组是成本定位信息，不等同于逐 GPU draw call profiler；排序和占比用于找热点，具体数值会随视口状态、采样和探针更新频率变化
 
 ### 当前范围
 

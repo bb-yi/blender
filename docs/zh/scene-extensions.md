@@ -84,6 +84,7 @@
 #### 重要说明
 
 - `Scene Color` 节点的默认采样坐标为 `Texture Coordinate` 节点的 `Window` 输出
+- `Scene Color` 的 `Color / Depth / Normal / Position` 源使用一致的屏幕 UV 采样语义；连接 `Vector` 做偏移采样时，`Position` 会重建偏移像素对应的世界坐标
 - 支持 `AOV Input`
 - 支持 `AOV Output`，可以先写出命名 AOV，再继续把结果送到 `Filter Output`
 - `Execution Stage` 目前提供三个位置：
@@ -173,6 +174,9 @@
 - 当 `Outline` Render Pass 未开启时，描边结果会直接合成进 `Combined`
 - 当 `Outline` Render Pass 开启时，可在合成器或后续流程中单独读取描边结果
 - 该功能依赖材质中的 `Outline Control` 节点实际写入描边参数；没有节点输出时不会自动生成描边
+- 位于 Holdout 集合中的物体不会继续写出 `Outline Control` 参数，也不会贡献 Freestyle / marked-edge 描边种子
+- 渲染方式为 `Blended` 的前景材质会参与后方描边遮挡：完全不透明时遮挡后方描边，完全透明时不影响后方描边
+- 半透明 `Blended` 前景会按材质透射率衰减后方描边强度，不会用前景材质颜色染色后方描边
 
 #### 建议补图
 

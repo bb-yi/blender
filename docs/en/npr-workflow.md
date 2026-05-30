@@ -37,7 +37,7 @@ The regular object material still handles the base surface shading, while the `N
 
 ## 4. Main NPR Nodes
 
-In addition to the dedicated NPR nodes below, `Curvature`, `Raycast`, and `GLSL Function` can also be used directly inside `NPR Tree`.
+In addition to the dedicated NPR nodes below, `Curvature`, `Raycast`, `GLSL Function`, and `GLSL Script Expression` can also be used directly inside `NPR Tree`.
 
 ### NPR Input
 
