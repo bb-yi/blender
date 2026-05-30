@@ -7701,6 +7701,22 @@ static void def_sh_script_expression(BlenderRNA *brna, StructRNA *srna)
   RNA_def_property_update(prop, NC_NODE, nullptr);
 
   RNA_def_struct_sdna_from(srna, "bNode", nullptr);
+
+  prop = RNA_def_property(srna, "expression_panel_open", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "custom1", 1);
+  RNA_def_property_boolean_default(prop, true);
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_flag(prop, PROP_NO_DEG_UPDATE);
+  RNA_def_property_ui_text(prop, "Expression Panel Open", "Whether the node expression panel is open");
+  RNA_def_property_update(prop, NC_NODE, nullptr);
+
+  prop = RNA_def_property(srna, "variables_panel_open", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "custom2", 1);
+  RNA_def_property_boolean_default(prop, false);
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_flag(prop, PROP_NO_DEG_UPDATE);
+  RNA_def_property_ui_text(prop, "Variables Panel Open", "Whether the node variables panel is open");
+  RNA_def_property_update(prop, NC_NODE, nullptr);
 }
 
 /* -- Compositor Nodes ------------------------------------------------------ */

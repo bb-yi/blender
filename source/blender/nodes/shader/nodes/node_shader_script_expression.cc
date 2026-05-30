@@ -439,13 +439,11 @@ static void draw_variables_settings(ui::Layout &layout, bContext *C, PointerRNA 
 
 static void node_layout(ui::Layout &layout, bContext *C, PointerRNA *ptr)
 {
-  if (ui::Layout *panel = layout.panel(
-          C, "script_expression_node_expression", false, IFACE_("Expression")))
+  if (ui::Layout *panel = layout.panel_prop(C, ptr, "expression_panel_open", IFACE_("Expression")))
   {
     draw_expression_settings(*panel, ptr);
   }
-  if (ui::Layout *panel = layout.panel(
-          C, "script_expression_node_variables", true, IFACE_("Variables")))
+  if (ui::Layout *panel = layout.panel_prop(C, ptr, "variables_panel_open", IFACE_("Variables")))
   {
     draw_variables_settings(*panel, C, ptr);
   }
@@ -477,6 +475,8 @@ static void node_init(bNodeTree * /*ntree*/, bNode *node)
   storage->output_socket_type = SOCK_FLOAT;
   storage->next_identifier = 0;
   node->storage = storage;
+  node->custom1 = true;
+  node->custom2 = false;
   node->flag |= NODE_OPTIONS;
 }
 
