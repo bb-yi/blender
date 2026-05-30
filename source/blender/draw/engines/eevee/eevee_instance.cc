@@ -627,6 +627,17 @@ namespace blender::eevee
     manager->end_sync();
   }
 
+  void Instance::wait_for_material_passes()
+  {
+    const int64_t queued_shaders = materials.queued_shaders_count;
+    const int64_t queued_textures = materials.queued_textures_count;
+    const double wait_start_time = BLI_time_now_seconds();
+    GPU_pass_cache_wait_for_all();
+    telemetry.shader_wait_add(queued_shaders,
+                              queued_textures,
+                              BLI_time_now_seconds() - wait_start_time);
+  }
+
   bool Instance::needs_lightprobe_sphere_passes() const
   {
     return sphere_probes.update_probes_this_sample_;
@@ -676,7 +687,7 @@ namespace blender::eevee
       render_sync();
       while (materials.queued_shaders_count > 0 || materials.queued_textures_count > 0)
       {
-        GPU_pass_cache_wait_for_all();
+        wait_for_material_passes();
         /** WORKAROUND: Re-sync now that all shaders are compiled. */
         /* This may need to happen more than once, since actual materials may require more passes
          * (eg. volume ones) than the fallback material used for queued passes. */
@@ -716,6 +727,21 @@ namespace blender::eevee
     ScopedTelemetrySample telemetry_sample(telemetry, TelemetryStageId::ReadResult);
     eViewLayerEEVEEPassType pass_bits = film.enabled_passes_get();
 
+    const auto record_readback = [&](const TelemetryPassReadbackType type,
+                                     const char *name,
+                                     const RenderPass *rp,
+                                     const double readback_start_time) {
+      if (rp == nullptr) {
+        return;
+      }
+      telemetry.pass_readback_add(type,
+                                  name,
+                                  rp->rectx,
+                                  rp->recty,
+                                  rp->channels,
+                                  BLI_time_now_seconds() - readback_start_time);
+    };
+
     for (auto i : IndexRange(EEVEE_RENDER_PASS_MAX_BIT + 1))
     {
       eViewLayerEEVEEPassType pass_type = eViewLayerEEVEEPassType(pass_bits & (1 << i));
@@ -733,10 +759,15 @@ namespace blender::eevee
         {
           continue;
         }
+        const double readback_start_time = BLI_time_now_seconds();
         float* result = film.read_pass(pass_type, pass_offset);
 
         if (result)
         {
+          record_readback(TelemetryPassReadbackType::RenderPass,
+                          pass_names[pass_offset].c_str(),
+                          rp,
+                          readback_start_time);
           BLI_mutex_lock(&render->update_render_passes_mutex);
           /* WORKAROUND: We use texture read to avoid using a frame-buffer to get the render result.
            * However, on some implementation, we need a buffer with a few extra bytes for the read to
@@ -760,10 +791,12 @@ namespace blender::eevee
       {
         continue;
       }
+      const double readback_start_time = BLI_time_now_seconds();
       float* result = film.read_aov(&aov);
 
       if (result)
       {
+        record_readback(TelemetryPassReadbackType::AOV, aov.name, rp, readback_start_time);
         BLI_mutex_lock(&render->update_render_passes_mutex);
         /* WORKAROUND: We use texture read to avoid using a frame-buffer to get the render result.
          * However, on some implementation, we need a buffer with a few extra bytes for the read to
@@ -788,10 +821,13 @@ namespace blender::eevee
       {
         continue;
       }
+      const double readback_start_time = BLI_time_now_seconds();
       float* result = film.read_native_postfx_output(&output);
 
       if (result)
       {
+        record_readback(
+            TelemetryPassReadbackType::NativePostFX, output.name, rp, readback_start_time);
         BLI_mutex_lock(&render->update_render_passes_mutex);
         RE_pass_set_buffer_data(rp, result);
         BLI_mutex_unlock(&render->update_render_passes_mutex);
@@ -977,21 +1013,19 @@ namespace blender::eevee
         nullptr;
       const bool viewport_paused = scene != nullptr &&
         scene->eevee.performance_profiler_viewport_pause != 0;
-      if (scene != nullptr &&
-        (scene->eevee.flag & SCE_EEVEE_PERFORMANCE_PROFILER_STAGE_LIST) != 0)
+      const bool include_stage_list = scene != nullptr &&
+        (scene->eevee.flag & SCE_EEVEE_PERFORMANCE_PROFILER_STAGE_LIST) != 0;
+      if (viewport_paused && perf_runtime != nullptr)
       {
-        const std::string report = (viewport_paused && perf_runtime != nullptr &&
-          !perf_runtime->viewport_report.empty()) ?
-          perf_runtime->viewport_report :
-          telemetry.viewport_report();
-        if (!report.empty())
+        const std::string text = include_stage_list ? perf_runtime->viewport_report :
+          perf_runtime->viewport_summary;
+        if (!text.empty())
         {
-          std::stringstream stream(report);
+          std::stringstream stream(text);
           std::string line;
           while (std::getline(stream, line))
           {
-            if (!line.empty())
-            {
+            if (!line.empty()) {
               info_append("{}", line);
             }
           }
@@ -999,13 +1033,10 @@ namespace blender::eevee
       }
       else
       {
-        const std::string summary = (viewport_paused && perf_runtime != nullptr &&
-          !perf_runtime->viewport_summary.empty()) ?
-          perf_runtime->viewport_summary :
-          telemetry.viewport_summary_line();
-        if (!summary.empty())
-        {
-          info_append("{}", summary);
+        for (const std::string& line : telemetry.viewport_overlay_lines(include_stage_list)) {
+          if (!line.empty()) {
+            info_append("{}", line);
+          }
         }
       }
     }
@@ -1189,7 +1220,7 @@ namespace blender::eevee
         this->render_sync();
         while ((materials.queued_shaders_count > 0) || (materials.queued_textures_count > 0))
         {
-          GPU_pass_cache_wait_for_all();
+          wait_for_material_passes();
           /** WORKAROUND: Re-sync now that all shaders are compiled. */
           /* This may need to happen more than once, since actual materials may require more passes
            * (eg. volume ones) than the fallback material used for queued passes. */

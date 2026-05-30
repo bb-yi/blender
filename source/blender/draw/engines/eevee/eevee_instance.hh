@@ -286,6 +286,7 @@ namespace blender::eevee
     /* Render. */
 
     void render_sync();
+    void wait_for_material_passes();
     void render_frame(RenderEngine* engine, RenderLayer* render_layer, const char* view_name);
     void store_metadata(RenderResult* render_result);
 

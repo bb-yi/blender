@@ -20,8 +20,6 @@
 
 #include "DNA_scene_types.h"
 
-#include "GPU_material.hh"
-
 #include "WM_api.hh"
 
 #include "eevee_instance.hh"
@@ -32,6 +30,9 @@ namespace blender::eevee {
 
 static constexpr int stage_count = int(TelemetryStageId::Count);
 static constexpr int shadow_context_count = int(TelemetryShadowContext::Count);
+static constexpr int pass_readback_type_count = int(TelemetryPassReadbackType::Count);
+static constexpr int material_hotspot_report_limit = 8;
+static constexpr int pass_readback_name_limit = 8;
 
 static bke::SceneEeveePerformanceRuntime *scene_eevee_performance_runtime(Scene *scene)
 {
@@ -328,7 +329,6 @@ void TelemetryModule::frame_end()
                                            "LOW";
     }
   }
-
   const bool is_viewport_mode = ELEM(current_frame_.runtime_mode,
                                      TelemetryRuntimeMode::Viewport,
                                      TelemetryRuntimeMode::ViewportImageRender,
@@ -529,6 +529,88 @@ void TelemetryModule::shadow_context_add(const TelemetryShadowContext context,
   sample.loop_count += loop_count;
 }
 
+void TelemetryModule::material_sync_add(const bool shader_queued,
+                                        const bool optimize_queued,
+                                        const bool fallback,
+                                        const bool failed,
+                                        const char *material_name)
+{
+  if (!enabled() || !frame_active_) {
+    return;
+  }
+  const auto add_sample = [&](TelemetryMaterialSyncSample &sample) {
+    sample.request_count += 1;
+    sample.shader_queued_count += int64_t(shader_queued);
+    sample.optimize_queued_count += int64_t(optimize_queued);
+    sample.fallback_count += int64_t(fallback);
+    sample.failed_count += int64_t(failed);
+  };
+  add_sample(current_frame_.material_sync);
+  const std::string hotspot_name = (material_name != nullptr && material_name[0] != '\0') ?
+                                       material_name :
+                                       "<None>";
+  for (TelemetryMaterialHotspot &hotspot : current_frame_.material_hotspots) {
+    if (hotspot.name != hotspot_name) {
+      continue;
+    }
+    hotspot.request_count += 1;
+    hotspot.shader_queued_count += int64_t(shader_queued);
+    hotspot.optimize_queued_count += int64_t(optimize_queued);
+    hotspot.fallback_count += int64_t(fallback);
+    hotspot.failed_count += int64_t(failed);
+    return;
+  }
+  TelemetryMaterialHotspot hotspot;
+  hotspot.name = hotspot_name;
+  hotspot.request_count = 1;
+  hotspot.shader_queued_count = int64_t(shader_queued);
+  hotspot.optimize_queued_count = int64_t(optimize_queued);
+  hotspot.fallback_count = int64_t(fallback);
+  hotspot.failed_count = int64_t(failed);
+  current_frame_.material_hotspots.append(hotspot);
+}
+
+void TelemetryModule::shader_wait_add(const int64_t queued_shaders,
+                                      const int64_t queued_textures,
+                                      const double elapsed_seconds)
+{
+  if (!enabled() || !frame_active_) {
+    return;
+  }
+
+  TelemetryShaderWaitSample &sample = current_frame_.shader_waits;
+  sample.wait_count += 1;
+  sample.queued_shader_count += queued_shaders;
+  sample.queued_texture_count += queued_textures;
+  sample.cpu_ms += elapsed_seconds * 1000.0;
+}
+
+void TelemetryModule::pass_readback_add(const TelemetryPassReadbackType type,
+                                        const char *name,
+                                        const int width,
+                                        const int height,
+                                        const int channels,
+                                        const double elapsed_seconds)
+{
+  if (!enabled() || !frame_active_ || type == TelemetryPassReadbackType::Count || width <= 0 ||
+      height <= 0 || channels <= 0)
+  {
+    return;
+  }
+
+  TelemetryPassReadbackSample &sample = current_frame_.pass_readbacks[int(type)];
+  sample.pass_count += 1;
+  sample.pixel_count += int64_t(width) * int64_t(height);
+  sample.output_value_count += int64_t(width) * int64_t(height) * int64_t(channels);
+  sample.cpu_ms += elapsed_seconds * 1000.0;
+  if (name != nullptr && name[0] != '\0' && sample.pass_count <= pass_readback_name_limit) {
+    if (!sample.names.empty()) {
+      sample.names += ", ";
+    }
+    sample.names += name;
+  }
+}
+
 const TelemetryFrameRecord *TelemetryModule::last_record(const TelemetryRuntimeMode mode) const
 {
   const int mode_index = int(mode);
@@ -591,6 +673,21 @@ const char *TelemetryModule::shadow_context_label(const TelemetryShadowContext c
     case TelemetryShadowContext::Other:
       return "Other";
     case TelemetryShadowContext::Count:
+      break;
+  }
+  return "Unknown";
+}
+
+const char *TelemetryModule::pass_readback_type_label(const TelemetryPassReadbackType type)
+{
+  switch (type) {
+    case TelemetryPassReadbackType::RenderPass:
+      return "RenderPass";
+    case TelemetryPassReadbackType::AOV:
+      return "AOV";
+    case TelemetryPassReadbackType::NativePostFX:
+      return "NativePostFX";
+    case TelemetryPassReadbackType::Count:
       break;
   }
   return "Unknown";
@@ -718,6 +815,136 @@ std::string TelemetryModule::format_shadow_contexts_report(const TelemetryFrameR
         ms_per_loop,
         share_percent);
   }
+  return result;
+}
+
+std::string TelemetryModule::format_shader_waits_report(const TelemetryFrameRecord &record) const
+{
+  const TelemetryShaderWaitSample &sample = record.shader_waits;
+  if (sample.wait_count == 0) {
+    return "";
+  }
+
+  const double sync_end_cpu = record.stages[int(TelemetryStageId::SyncEnd)].cpu_ms;
+  const double sync_end_share = (sync_end_cpu > 0.0) ? (sample.cpu_ms / sync_end_cpu) * 100.0 :
+                                                       0.0;
+  return fmt::format(
+      "  Shader Waits:\n"
+      "    - waits={} cpu={:.3f} ms sync_end_share={:.1f}% queued_shaders={} queued_textures={}\n",
+      sample.wait_count,
+      sample.cpu_ms,
+      sync_end_share,
+      sample.queued_shader_count,
+      sample.queued_texture_count);
+}
+
+std::string TelemetryModule::format_pass_readbacks_report(const TelemetryFrameRecord &record) const
+{
+  int64_t total_passes = 0;
+  int64_t total_pixels = 0;
+  int64_t total_output_values = 0;
+  double total_cpu_ms = 0.0;
+  for (const TelemetryPassReadbackSample &sample : record.pass_readbacks) {
+    total_passes += sample.pass_count;
+    total_pixels += sample.pixel_count;
+    total_output_values += sample.output_value_count;
+    total_cpu_ms += sample.cpu_ms;
+  }
+  if (total_passes == 0) {
+    return "";
+  }
+
+  std::string result = "  Pass Readback:\n";
+  const double total_data_mb = double(total_output_values) * double(sizeof(float)) / 1000000.0;
+  result += fmt::format(
+      "    - Total passes={} pixels={:.3f}M values={:.3f}M data={:.3f}MB cpu={:.3f} ms\n",
+      total_passes,
+      double(total_pixels) / 1000000.0,
+      double(total_output_values) / 1000000.0,
+      total_data_mb,
+      total_cpu_ms);
+  for (int type_index = 0; type_index < pass_readback_type_count; type_index++) {
+    const TelemetryPassReadbackSample &sample = record.pass_readbacks[type_index];
+    if (sample.pass_count == 0) {
+      continue;
+    }
+    const double share_percent = (total_cpu_ms > 0.0) ? (sample.cpu_ms / total_cpu_ms) * 100.0 :
+                                                        0.0;
+    const double pixels_m = double(sample.pixel_count) / 1000000.0;
+    const double values_m = double(sample.output_value_count) / 1000000.0;
+    const double data_mb = double(sample.output_value_count) * double(sizeof(float)) / 1000000.0;
+    std::string names = sample.names;
+    if (!names.empty() && sample.pass_count > pass_readback_name_limit) {
+      names += fmt::format(", ... {} more", sample.pass_count - pass_readback_name_limit);
+    }
+    result += fmt::format(
+        "    - {} passes={} cpu={:.3f} ms readback_share={:.1f}% pixels={:.3f}M values={:.3f}M data={:.3f}MB names=[{}]\n",
+        pass_readback_type_label(TelemetryPassReadbackType(type_index)),
+        sample.pass_count,
+        sample.cpu_ms,
+        share_percent,
+        pixels_m,
+        values_m,
+        data_mb,
+        names);
+  }
+  return result;
+}
+
+std::string TelemetryModule::format_material_sync_report(const TelemetryFrameRecord &record) const
+{
+  const TelemetryMaterialSyncSample &total = record.material_sync;
+  const int64_t total_requests = total.request_count;
+  if (total_requests == 0) {
+    return "";
+  }
+  Vector<TelemetryMaterialHotspot> hotspots = record.material_hotspots;
+  std::sort(hotspots.begin(),
+            hotspots.end(),
+            [](const TelemetryMaterialHotspot &a, const TelemetryMaterialHotspot &b) {
+              const int64_t a_penalty = a.failed_count * 1000000 + a.fallback_count * 10000 +
+                                        a.shader_queued_count * 100 + a.optimize_queued_count * 10;
+              const int64_t b_penalty = b.failed_count * 1000000 + b.fallback_count * 10000 +
+                                        b.shader_queued_count * 100 + b.optimize_queued_count * 10;
+              if (a_penalty != b_penalty) {
+                return a_penalty > b_penalty;
+              }
+              return a.request_count > b.request_count;
+            });
+
+  std::string result = "  Material Sync:\n";
+  result += fmt::format(
+      "    - Total requests={} shader_queued={} optimize_queued={} fallbacks={} failed={}\n",
+      total_requests,
+      total.shader_queued_count,
+      total.optimize_queued_count,
+      total.fallback_count,
+      total.failed_count);
+
+  if (!hotspots.is_empty()) {
+    const int hotspot_count = min_ii(material_hotspot_report_limit, hotspots.size());
+    for (const int index : IndexRange(hotspot_count)) {
+      const TelemetryMaterialHotspot &hotspot = hotspots[index];
+      const double share_percent = (total_requests > 0) ?
+                                       (double(hotspot.request_count) / double(total_requests)) *
+                                           100.0 :
+                                       0.0;
+      result += fmt::format(
+          "    - Material {} requests={} request_share={:.1f}% shader_queued={} optimize_queued={} fallbacks={} failed={}\n",
+          hotspot.name,
+          hotspot.request_count,
+          share_percent,
+          hotspot.shader_queued_count,
+          hotspot.optimize_queued_count,
+          hotspot.fallback_count,
+          hotspot.failed_count);
+    }
+    if (hotspots.size() > material_hotspot_report_limit) {
+      result += fmt::format("    - ... {} more materials\n",
+                            hotspots.size() - material_hotspot_report_limit);
+    }
+  }
+
   return result;
 }
 
@@ -863,6 +1090,9 @@ std::string TelemetryModule::viewport_report() const
         ms_per_call);
   }
   result += format_shadow_contexts_report(*record);
+  result += format_shader_waits_report(*record);
+  result += format_pass_readbacks_report(*record);
+  result += format_material_sync_report(*record);
   result += format_shadow_lights_report(*record);
   result += format_probe_costs_report(*record);
   return result;
@@ -918,122 +1148,12 @@ std::string TelemetryModule::render_report() const
         ms_per_sample);
   }
   result += format_shadow_contexts_report(*record);
+  result += format_shader_waits_report(*record);
+  result += format_pass_readbacks_report(*record);
+  result += format_material_sync_report(*record);
   result += format_shadow_lights_report(*record);
   result += format_probe_costs_report(*record);
-
-  const Vector<std::string> hints = build_hints(*record);
-  if (!hints.is_empty()) {
-    result += "  Hints:\n";
-    for (const std::string &hint : hints) {
-      result += fmt::format("  * {}\n", hint);
-    }
-  }
   return result;
-}
-
-Vector<std::string> TelemetryModule::build_hints(const TelemetryFrameRecord &record) const
-{
-  Vector<std::string> hints;
-  if (record.total_cpu_ms <= 0.0) {
-    return hints;
-  }
-
-  const auto stage_percent = [&](const TelemetryStageId stage) -> double {
-    return (record.stages[int(stage)].cpu_ms / record.total_cpu_ms) * 100.0;
-  };
-
-  if (record.features.has_dof && stage_percent(TelemetryStageId::PostDepthOfField) > 10.0) {
-    hints.append("Depth of Field is a major cost in this frame");
-  }
-  const double filter_ms = record.stages[int(TelemetryStageId::MainFilterBeforeVolumeFog)].cpu_ms +
-                           record.stages[int(TelemetryStageId::MainFilterBeforePostFX)].cpu_ms +
-                           record.stages[int(TelemetryStageId::PostFilterBeforeDepthOfField)].cpu_ms +
-                           record.stages[int(TelemetryStageId::PostFilterBeforeComposite)].cpu_ms;
-  if (record.features.filter_material_count > 0 &&
-      ((filter_ms / record.total_cpu_ms) * 100.0) > 8.0)
-  {
-    hints.append("Filter Materials are a visible part of the frame cost");
-  }
-  if (record.features.has_volume && stage_percent(TelemetryStageId::MainVolumeCompute) > 8.0) {
-    hints.append("Volume computation is contributing noticeable cost");
-  }
-  if (stage_percent(TelemetryStageId::MainPlanarProbesSetView) > 20.0) {
-    hints.append(
-        "Planar probe rendering is a dominant cost and may trigger repeated shadow updates");
-  }
-  const double shadow_setup_ms =
-      record.stages[int(TelemetryStageId::MainDeferredShadowSetup)].cpu_ms +
-      record.stages[int(TelemetryStageId::MainForwardShadowSetup)].cpu_ms;
-  const double shadow_stage_ms =
-      record.stages[int(TelemetryStageId::ShadowTilemapSetup)].cpu_ms +
-      record.stages[int(TelemetryStageId::ShadowCasterUpdate)].cpu_ms +
-      record.stages[int(TelemetryStageId::ShadowTransparentCasterUpdate)].cpu_ms +
-      record.stages[int(TelemetryStageId::ShadowUsageMarking)].cpu_ms +
-      record.stages[int(TelemetryStageId::ShadowTilemapUpdate)].cpu_ms +
-      record.stages[int(TelemetryStageId::ShadowUpdateFinish)].cpu_ms +
-      record.stages[int(TelemetryStageId::ShadowSurface)].cpu_ms;
-  if ((shadow_setup_ms > record.total_cpu_ms * 0.35 ||
-       shadow_stage_ms > record.total_cpu_ms * 0.35) &&
-      !record.shadow_light_costs.is_empty())
-  {
-    const TelemetryShadowLightCost &top_light = record.shadow_light_costs.first();
-    if (top_light.estimated_share_percent >= 10.0) {
-      hints.append(fmt::format(
-          "Shadow update work is a dominant cost; top estimated shadow tilemap share is {} ({} {:.1f}%)",
-          top_light.name,
-          top_light.type,
-          top_light.estimated_share_percent));
-    }
-    else {
-      hints.append(
-          "Shadow update work is a dominant cost; no single light dominates by estimated tilemap share");
-    }
-    double total_shadow_context_ms = 0.0;
-    int top_context_index = -1;
-    double top_context_ms = 0.0;
-    for (int context_index = 0; context_index < shadow_context_count; context_index++) {
-      const double context_ms = record.shadow_contexts[context_index].cpu_ms;
-      total_shadow_context_ms += context_ms;
-      if (context_ms > top_context_ms) {
-        top_context_ms = context_ms;
-        top_context_index = context_index;
-      }
-    }
-    if (top_context_index >= 0 && total_shadow_context_ms > 0.0) {
-      const double top_share = (top_context_ms / total_shadow_context_ms) * 100.0;
-      const TelemetryShadowContext top_context = TelemetryShadowContext(top_context_index);
-      if (top_context == TelemetryShadowContext::PlanarProbe && top_share >= 45.0) {
-        hints.append(fmt::format(
-            "Planar probe shadow updates dominate shadow context cost ({:.1f}% of shadow contexts)",
-            top_share));
-      }
-      else if (top_context == TelemetryShadowContext::CaptureProbe && top_share >= 45.0) {
-        hints.append(fmt::format(
-            "Capture probe shadow updates dominate shadow context cost ({:.1f}% of shadow contexts)",
-            top_share));
-      }
-      else {
-        hints.append(fmt::format("Shadow stages include {} shadow updates",
-                                 shadow_context_label(top_context)));
-      }
-    }
-  }
-  if (record.stages[int(TelemetryStageId::CaptureProbes)].cpu_ms > 1.0) {
-    hints.append("Probe capture updated during this frame");
-  }
-  if (record.features.raycast_material_count > 0 &&
-      stage_percent(TelemetryStageId::MainDeferred) > 20.0)
-  {
-    hints.append("Raycast-enabled materials may be increasing deferred and prepass cost");
-  }
-  if (record.stages[int(TelemetryStageId::SyncBegin)].cpu_ms +
-          record.stages[int(TelemetryStageId::SyncObjects)].cpu_ms +
-          record.stages[int(TelemetryStageId::SyncEnd)].cpu_ms >
-      record.total_cpu_ms * 0.35)
-  {
-    hints.append("CPU sync work is a large part of this frame");
-  }
-  return hints;
 }
 
 ScopedTelemetrySample::ScopedTelemetrySample(TelemetryModule &telemetry, const TelemetryStageId stage)

@@ -14,9 +14,12 @@
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "BKE_scene_runtime.hh"
+
+#include "BLI_hash.h"
 
 #include "DNA_outliner_types.h"
 #include "DNA_scene_types.h"
@@ -33,13 +36,14 @@ namespace {
 
 struct PerfNode {
   std::string label;
+  std::string key;
   bool default_open = false;
   bool has_time = false;
   double time_ms = 0.0;
   std::vector<std::unique_ptr<PerfNode>> children;
 
-  PerfNode(std::string label, bool default_open = false)
-      : label(std::move(label)), default_open(default_open)
+  PerfNode(std::string label, bool default_open = false, std::string key = "")
+      : label(std::move(label)), key(std::move(key)), default_open(default_open)
   {
   }
 };
@@ -51,18 +55,22 @@ struct ParsedReport {
   std::vector<std::string> metadata;
   std::unique_ptr<PerfNode> features = std::make_unique<PerfNode>("Features", true);
   std::unique_ptr<PerfNode> stages = std::make_unique<PerfNode>("Stages", true);
+  std::unique_ptr<PerfNode> shader_waits = std::make_unique<PerfNode>("Shader Waits", true);
+  std::unique_ptr<PerfNode> pass_readback = std::make_unique<PerfNode>("Pass Readback", true);
+  std::unique_ptr<PerfNode> material_sync = std::make_unique<PerfNode>("Material Sync", true);
   std::unique_ptr<PerfNode> shadow_contexts = std::make_unique<PerfNode>("Shadow Contexts", true);
   std::unique_ptr<PerfNode> shadow_lights = std::make_unique<PerfNode>("Shadow Lights", true);
   std::unique_ptr<PerfNode> probe_costs = std::make_unique<PerfNode>("Probe Costs", true);
-  std::unique_ptr<PerfNode> hints = std::make_unique<PerfNode>("Hints", true);
 };
 
 enum class ReportSection {
   Main,
+  ShaderWaits,
+  PassReadback,
+  MaterialSync,
   ShadowContexts,
   ShadowLights,
   ProbeCosts,
-  Hints,
 };
 
 std::string trim_copy(const std::string &value)
@@ -90,9 +98,60 @@ bool startswith(const std::string &value, const char *prefix)
   return value.rfind(prefix, 0) == 0;
 }
 
+const std::string &node_key(const PerfNode &node)
+{
+  return node.key.empty() ? node.label : node.key;
+}
+
+std::string metadata_key_from_line(const std::string &line)
+{
+  const size_t colon_pos = line.find(':');
+  return (colon_pos == std::string::npos) ? line : line.substr(0, colon_pos);
+}
+
+std::string detail_key_from_line(const std::string &line)
+{
+  if (startswith(line, "... ")) {
+    return line;
+  }
+
+  static const char *metric_tokens[] = {
+      " type=",
+      " requests=",
+      " passes=",
+      " cpu=",
+      " waits=",
+      " updated=",
+  };
+
+  size_t token_pos = std::string::npos;
+  for (const char *token : metric_tokens) {
+    const size_t pos = line.find(token);
+    if (pos != std::string::npos) {
+      token_pos = (token_pos == std::string::npos) ? pos : std::min(token_pos, pos);
+    }
+  }
+  if (token_pos != std::string::npos) {
+    const std::string key = trim_copy(line.substr(0, token_pos));
+    if (!key.empty()) {
+      return key;
+    }
+  }
+
+  const size_t equal_pos = line.find('=');
+  if (equal_pos != std::string::npos) {
+    return trim_copy(line.substr(0, equal_pos));
+  }
+  const size_t colon_pos = line.find(':');
+  if (colon_pos != std::string::npos) {
+    return trim_copy(line.substr(0, colon_pos));
+  }
+  return line;
+}
+
 bool parse_double_from_suffix(const std::string &value, double &r_value)
 {
-  size_t ms_pos = value.find(" ms");
+  const size_t ms_pos = value.find(" ms");
   if (ms_pos == std::string::npos) {
     return false;
   }
@@ -112,17 +171,22 @@ bool parse_double_from_suffix(const std::string &value, double &r_value)
   return true;
 }
 
-PerfNode &ensure_child(PerfNode &parent, const std::string &label, const bool default_open = false)
+PerfNode &ensure_child(PerfNode &parent,
+                       const std::string &label,
+                       const bool default_open = false,
+                       const std::string &key = "")
 {
+  const std::string child_key = key.empty() ? label : key;
   for (std::unique_ptr<PerfNode> &child : parent.children) {
-    if (child->label == label) {
+    if (node_key(*child) == child_key) {
+      child->label = label;
       if (default_open) {
         child->default_open = true;
       }
       return *child;
     }
   }
-  parent.children.push_back(std::make_unique<PerfNode>(label, default_open));
+  parent.children.push_back(std::make_unique<PerfNode>(label, default_open, child_key));
   return *parent.children.back();
 }
 
@@ -266,17 +330,14 @@ void add_feature_items(PerfNode &features_root, const std::string &line)
 
     const std::string value = trim_copy(line.substr(start + needle.size(), end - (start + needle.size())));
     PerfNode &group = ensure_child(features_root, key.group, true);
-    ensure_child(group, std::string(key.label) + ": " + value, false);
+    ensure_child(group, std::string(key.label) + ": " + value, false, key.label);
   }
 }
 
 void add_detail_line(PerfNode &root, const std::string &line)
 {
-  if (startswith(line, "... ")) {
-    ensure_child(root, line, false);
-    return;
-  }
-  ensure_child(root, line, false);
+  std::string key = detail_key_from_line(line);
+  ensure_child(root, line, false, key);
 }
 
 ParsedReport parse_report(const std::string &root_title,
@@ -331,6 +392,15 @@ ParsedReport parse_report(const std::string &root_title,
       else if (line == "Shadow Lights:") {
         section = ReportSection::ShadowLights;
       }
+      else if (line == "Shader Waits:") {
+        section = ReportSection::ShaderWaits;
+      }
+      else if (line == "Pass Readback:") {
+        section = ReportSection::PassReadback;
+      }
+      else if (line == "Material Sync:") {
+        section = ReportSection::MaterialSync;
+      }
       else if (line == "Shadow Contexts:") {
         section = ReportSection::ShadowContexts;
       }
@@ -340,23 +410,24 @@ ParsedReport parse_report(const std::string &root_title,
       else if (startswith(raw_line, "    - ") && section == ReportSection::ShadowLights) {
         add_detail_line(*parsed.shadow_lights, trim_copy(raw_line.substr(6)));
       }
+      else if (startswith(raw_line, "    - ") && section == ReportSection::ShaderWaits) {
+        add_detail_line(*parsed.shader_waits, trim_copy(raw_line.substr(6)));
+      }
+      else if (startswith(raw_line, "    - ") && section == ReportSection::PassReadback) {
+        add_detail_line(*parsed.pass_readback, trim_copy(raw_line.substr(6)));
+      }
+      else if (startswith(raw_line, "    - ") && section == ReportSection::MaterialSync) {
+        add_detail_line(*parsed.material_sync, trim_copy(raw_line.substr(6)));
+      }
       else if (startswith(raw_line, "    - ") && section == ReportSection::ShadowContexts) {
         add_detail_line(*parsed.shadow_contexts, trim_copy(raw_line.substr(6)));
       }
       else if (startswith(raw_line, "    - ") && section == ReportSection::ProbeCosts) {
         add_detail_line(*parsed.probe_costs, trim_copy(raw_line.substr(6)));
       }
-      else if (startswith(raw_line, "  - ") &&
-               (section == ReportSection::Main || section == ReportSection::Hints))
-      {
+      else if (startswith(raw_line, "  - ")) {
         section = ReportSection::Main;
         add_stage_line(*parsed.stages, trim_copy(raw_line.substr(4)));
-      }
-      else if (line == "Hints:") {
-        section = ReportSection::Hints;
-      }
-      else if (startswith(line, "* ") && section == ReportSection::Hints) {
-        ensure_child(*parsed.hints, line.substr(2), false);
       }
     }
 
@@ -379,7 +450,7 @@ void collect_node_keys(const PerfNode &node,
                        const std::string &persistent_prefix,
                        std::vector<std::string> &r_keys)
 {
-  const std::string persistent_key = persistent_prefix + "/" + node.label;
+  const std::string persistent_key = persistent_prefix + "/" + node_key(node);
   r_keys.push_back(persistent_key);
   for (const std::unique_ptr<PerfNode> &child : node.children) {
     collect_node_keys(*child, persistent_key, r_keys);
@@ -395,7 +466,7 @@ void collect_report_keys(const ParsedReport &report, std::vector<std::string> &r
     const std::string meta_key = root_key + "/Metadata";
     r_keys.push_back(meta_key);
     for (const std::string &line : report.metadata) {
-      r_keys.push_back(meta_key + "/" + line);
+      r_keys.push_back(meta_key + "/" + metadata_key_from_line(line));
     }
   }
 
@@ -409,6 +480,15 @@ void collect_report_keys(const ParsedReport &report, std::vector<std::string> &r
       collect_node_keys(*child, stages_key, r_keys);
     }
   }
+  if (!report.shader_waits->children.empty()) {
+    collect_node_keys(*report.shader_waits, root_key, r_keys);
+  }
+  if (!report.pass_readback->children.empty()) {
+    collect_node_keys(*report.pass_readback, root_key, r_keys);
+  }
+  if (!report.material_sync->children.empty()) {
+    collect_node_keys(*report.material_sync, root_key, r_keys);
+  }
   if (!report.shadow_contexts->children.empty()) {
     collect_node_keys(*report.shadow_contexts, root_key, r_keys);
   }
@@ -417,9 +497,6 @@ void collect_report_keys(const ParsedReport &report, std::vector<std::string> &r
   }
   if (!report.probe_costs->children.empty()) {
     collect_node_keys(*report.probe_costs, root_key, r_keys);
-  }
-  if (!report.hints->children.empty()) {
-    collect_node_keys(*report.hints, root_key, r_keys);
   }
 }
 
@@ -436,9 +513,25 @@ struct PerformanceTreeBuilder {
     std::sort(persistent_keys.begin(), persistent_keys.end());
     persistent_keys.erase(
         std::unique(persistent_keys.begin(), persistent_keys.end()), persistent_keys.end());
-    for (size_t index = 0; index < persistent_keys.size(); index++) {
-      key_indices.emplace(persistent_keys[index], short(index + 1));
+    std::unordered_set<short> used_indices;
+    for (const std::string &key : persistent_keys) {
+      short index = hash_index_for_key(key);
+      while (used_indices.find(index) != used_indices.end()) {
+        index = next_index(index);
+      }
+      used_indices.insert(index);
+      key_indices.emplace(key, index);
     }
+  }
+
+  static short hash_index_for_key(const std::string &persistent_key)
+  {
+    return short((BLI_hash_string(persistent_key.c_str()) % 30000u) + 1u);
+  }
+
+  static short next_index(const short index)
+  {
+    return (index >= 30000) ? 1 : short(index + 1);
   }
 
   short stable_index_for_key(const std::string &persistent_key) const
@@ -483,7 +576,7 @@ void append_node_tree(PerformanceTreeBuilder &builder,
                       const PerfNode &node,
                       const std::string &persistent_prefix)
 {
-  const std::string persistent_key = persistent_prefix + "/" + node.label;
+  const std::string persistent_key = persistent_prefix + "/" + node_key(node);
   TreeElement &te = builder.add_label(
       parent.subtree, &parent, label_with_time(node), persistent_key, node.default_open);
   for (const std::unique_ptr<PerfNode> &child : node.children) {
@@ -504,7 +597,8 @@ void append_parsed_report(PerformanceTreeBuilder &builder, ListBaseT<TreeElement
     const std::string meta_key = root_key + "/Metadata";
     TreeElement &meta = builder.add_label(root.subtree, &root, "Metadata", meta_key, true);
     for (const std::string &line : report.metadata) {
-      builder.add_label(meta.subtree, &meta, line, meta_key + "/" + line, false);
+      builder.add_label(
+          meta.subtree, &meta, line, meta_key + "/" + metadata_key_from_line(line), false);
     }
   }
 
@@ -518,6 +612,15 @@ void append_parsed_report(PerformanceTreeBuilder &builder, ListBaseT<TreeElement
       append_node_tree(builder, stages, *child, stages_key);
     }
   }
+  if (!report.shader_waits->children.empty()) {
+    append_node_tree(builder, root, *report.shader_waits, root_key);
+  }
+  if (!report.pass_readback->children.empty()) {
+    append_node_tree(builder, root, *report.pass_readback, root_key);
+  }
+  if (!report.material_sync->children.empty()) {
+    append_node_tree(builder, root, *report.material_sync, root_key);
+  }
   if (!report.shadow_contexts->children.empty()) {
     append_node_tree(builder, root, *report.shadow_contexts, root_key);
   }
@@ -526,9 +629,6 @@ void append_parsed_report(PerformanceTreeBuilder &builder, ListBaseT<TreeElement
   }
   if (!report.probe_costs->children.empty()) {
     append_node_tree(builder, root, *report.probe_costs, root_key);
-  }
-  if (!report.hints->children.empty()) {
-    append_node_tree(builder, root, *report.hints, root_key);
   }
 }
 

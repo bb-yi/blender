@@ -246,7 +246,10 @@ void MaterialModule::queue_texture_loading(GPUMaterial *material)
                                      BKE_image_get_gpu_material_texture_try(
                                          tex->ima, iuser, use_tile_mapping);
       if (*gputex.texture == nullptr) {
-        texture_loading_queue_.append(tex);
+        if (!texture_loading_queue_.contains(tex)) {
+          texture_loading_queue_.append(tex);
+          queued_textures_count = texture_loading_queue_.size();
+        }
       }
     }
   }
@@ -255,6 +258,7 @@ void MaterialModule::queue_texture_loading(GPUMaterial *material)
 void MaterialModule::end_sync()
 {
   if (texture_loading_queue_.is_empty()) {
+    queued_textures_count = 0;
     return;
   }
 
@@ -310,6 +314,7 @@ void MaterialModule::end_sync()
   }
   GPU_debug_group_end();
   texture_loading_queue_.clear();
+  queued_textures_count = 0;
 }
 
 int MaterialModule::npr_material_count() const
@@ -430,26 +435,40 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
 
   queue_texture_loading(matpass.gpumat);
 
+  const GPUMaterialStatus material_status = GPU_material_status(matpass.gpumat);
+  bool shader_queued = false;
+  bool optimize_queued = false;
+  bool fallback_used = false;
+  bool material_failed = false;
+
   const bool is_forward = ELEM(pipeline_type,
                                MAT_PIPE_FORWARD,
                                MAT_PIPE_PREPASS_FORWARD,
                                MAT_PIPE_PREPASS_FORWARD_VELOCITY,
                                MAT_PIPE_PREPASS_OVERLAP);
 
-  switch (GPU_material_status(matpass.gpumat)) {
+  switch (material_status) {
     case GPU_MAT_SUCCESS: {
       /* Determine optimization status for remaining compilations counter. */
       int optimization_status = GPU_material_optimization_status(matpass.gpumat);
       if (optimization_status == GPU_MAT_OPTIMIZATION_QUEUED) {
         queued_optimize_shaders_count++;
+        optimize_queued = true;
       }
       break;
     }
     case GPU_MAT_QUEUED:
       queued_shaders_count++;
+      shader_queued = true;
       if (pipeline_type == MAT_PIPE_DEFERRED_NPR) {
+        inst_.telemetry.material_sync_add(shader_queued,
+                                          optimize_queued,
+                                          false,
+                                          false,
+                                          blender_mat->id.name + 2);
         return MaterialPass();
       }
+      fallback_used = true;
       matpass.gpumat = inst_.shaders.material_shader_get(
           default_mat,
           default_mat->nodetree,
@@ -462,9 +481,16 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
       break;
     case GPU_MAT_FAILED:
     default:
+      material_failed = true;
       if (pipeline_type == MAT_PIPE_DEFERRED_NPR) {
+        inst_.telemetry.material_sync_add(shader_queued,
+                                          optimize_queued,
+                                          false,
+                                          material_failed,
+                                          blender_mat->id.name + 2);
         return MaterialPass();
       }
+      fallback_used = true;
       matpass.gpumat = inst_.shaders.material_shader_get(
           error_mat_,
           error_mat_->nodetree,
@@ -476,6 +502,11 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
           inst_.scene->eevee.use_outline != 0);
       break;
   }
+  inst_.telemetry.material_sync_add(shader_queued,
+                                    optimize_queued,
+                                    fallback_used,
+                                    material_failed,
+                                    blender_mat->id.name + 2);
   /* Returned material should be ready to be drawn. */
   BLI_assert(GPU_material_status(matpass.gpumat) == GPU_MAT_SUCCESS);
 

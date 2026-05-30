@@ -35,6 +35,13 @@ enum class TelemetryShadowContext : uint8_t {
   Count,
 };
 
+enum class TelemetryPassReadbackType : uint8_t {
+  RenderPass = 0,
+  AOV = 1,
+  NativePostFX = 2,
+  Count,
+};
+
 enum class TelemetryStageId : uint8_t {
   SyncBegin = 0,
   SyncObjects = 1,
@@ -142,6 +149,38 @@ struct TelemetryShadowContextSample {
   int loop_count = 0;
 };
 
+struct TelemetryMaterialSyncSample {
+  int64_t request_count = 0;
+  int64_t shader_queued_count = 0;
+  int64_t optimize_queued_count = 0;
+  int64_t fallback_count = 0;
+  int64_t failed_count = 0;
+};
+
+struct TelemetryMaterialHotspot {
+  std::string name;
+  int64_t request_count = 0;
+  int64_t shader_queued_count = 0;
+  int64_t optimize_queued_count = 0;
+  int64_t fallback_count = 0;
+  int64_t failed_count = 0;
+};
+
+struct TelemetryShaderWaitSample {
+  int64_t wait_count = 0;
+  int64_t queued_shader_count = 0;
+  int64_t queued_texture_count = 0;
+  double cpu_ms = 0.0;
+};
+
+struct TelemetryPassReadbackSample {
+  int64_t pass_count = 0;
+  int64_t pixel_count = 0;
+  int64_t output_value_count = 0;
+  double cpu_ms = 0.0;
+  std::string names;
+};
+
 struct TelemetryProbeCost {
   std::string name;
   std::string type;
@@ -161,6 +200,11 @@ struct TelemetryFrameRecord {
   double total_cpu_ms = 0.0;
   std::array<TelemetryStageSample, int(TelemetryStageId::Count)> stages = {};
   std::array<TelemetryShadowContextSample, int(TelemetryShadowContext::Count)> shadow_contexts = {};
+  TelemetryShaderWaitSample shader_waits;
+  std::array<TelemetryPassReadbackSample, int(TelemetryPassReadbackType::Count)> pass_readbacks =
+      {};
+  TelemetryMaterialSyncSample material_sync;
+  Vector<TelemetryMaterialHotspot> material_hotspots;
   TelemetryFeatureSnapshot features;
   Vector<TelemetryShadowLightCost> shadow_light_costs;
   Vector<TelemetryProbeCost> probe_costs;
@@ -211,6 +255,18 @@ class TelemetryModule {
 
   void stage_add(TelemetryStageId stage, double elapsed_seconds);
   void shadow_context_add(TelemetryShadowContext context, double elapsed_seconds, int loop_count);
+  void material_sync_add(bool shader_queued,
+                         bool optimize_queued,
+                         bool fallback,
+                         bool failed,
+                         const char *material_name);
+  void shader_wait_add(int64_t queued_shaders, int64_t queued_textures, double elapsed_seconds);
+  void pass_readback_add(TelemetryPassReadbackType type,
+                         const char *name,
+                         int width,
+                         int height,
+                         int channels,
+                         double elapsed_seconds);
 
   std::string viewport_summary_line() const;
   Vector<std::string> viewport_overlay_lines(bool include_stage_list) const;
@@ -219,6 +275,7 @@ class TelemetryModule {
 
   static const char *stage_label(TelemetryStageId stage);
   static const char *shadow_context_label(TelemetryShadowContext context);
+  static const char *pass_readback_type_label(TelemetryPassReadbackType type);
   static const TelemetryStageInfo &stage_info(TelemetryStageId stage);
   static Span<const TelemetryStageInfo> stage_infos();
 
@@ -234,8 +291,10 @@ class TelemetryModule {
   Vector<int> sorted_stage_indices(const TelemetryFrameRecord &record) const;
   std::string format_shadow_lights_report(const TelemetryFrameRecord &record) const;
   std::string format_shadow_contexts_report(const TelemetryFrameRecord &record) const;
+  std::string format_shader_waits_report(const TelemetryFrameRecord &record) const;
+  std::string format_pass_readbacks_report(const TelemetryFrameRecord &record) const;
+  std::string format_material_sync_report(const TelemetryFrameRecord &record) const;
   std::string format_probe_costs_report(const TelemetryFrameRecord &record) const;
-  Vector<std::string> build_hints(const TelemetryFrameRecord &record) const;
 };
 
 class ScopedTelemetrySample {
