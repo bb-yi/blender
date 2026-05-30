@@ -60,13 +60,6 @@ float4 closure_to_rgba(Closure cl_unused)
 
 void main()
 {
-#ifndef MAT_TRANSPARENT
-  /* Opaque forward materials replace the visible surface, so reset stale AOV data first.
-   * Transparent forward materials must keep the AOVs from surfaces behind them unless they
-   * explicitly write an AOV themselves. */
-  clear_aovs();
-#endif
-
   material_surface_cull_discard();
   outline_output_reset();
   init_globals();
