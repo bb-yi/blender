@@ -801,6 +801,11 @@ class NODE_MT_shader_node_utilities_base(node_add_menu.NodeMenu):
             "ShaderNodeGLSLFunction",
             poll=object_filter_or_npr_eevee_shader_nodes_poll(context),
         )
+        self.node_operator(
+            layout,
+            "ShaderNodeScriptExpression",
+            poll=object_filter_or_npr_eevee_shader_nodes_poll(context),
+        )
 
         self.draw_assets_for_catalog(layout, self.bl_label)
 

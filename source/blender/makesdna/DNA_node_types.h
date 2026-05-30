@@ -3085,6 +3085,35 @@ struct NodeShaderScript {
   char *bytecode = nullptr;
 };
 
+struct NodeShaderScriptExpressionVariable {
+  char *name = nullptr;
+  /** #eNodeSocketDatatype. */
+  short socket_type = 0;
+  char _pad[2] = {};
+  /** Generated unique identifier for sockets which stays stable when names or order change. */
+  int identifier = 0;
+};
+
+struct NodeShaderScriptExpression {
+  DNA_DEFINE_CXX_METHODS(NodeShaderScriptExpression)
+
+  char expression[512] = "";
+  NodeShaderScriptExpressionVariable *variables = nullptr;
+  /** #eNodeSocketDatatype. */
+  short output_socket_type = SOCK_FLOAT;
+  short _pad = 0;
+  int variables_num = 0;
+  int active_variable_index = 0;
+  int next_identifier = 0;
+  int _pad2 = 0;
+  int _pad3 = 0;
+
+#ifdef __cplusplus
+  Span<NodeShaderScriptExpressionVariable> variables_span() const;
+  MutableSpan<NodeShaderScriptExpressionVariable> variables_span();
+#endif
+};
+
 struct NodeShaderGLSLFunction {
   DNA_DEFINE_CXX_METHODS(NodeShaderGLSLFunction)
 

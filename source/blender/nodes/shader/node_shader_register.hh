@@ -109,6 +109,7 @@ void register_node_type_sh_rgb();
 void register_node_type_sh_rgbtobw();
 void register_node_type_sh_screen_derivative();
 void register_node_type_sh_script();
+void register_node_type_sh_script_expression();
 void register_node_type_sh_sepcolor();
 void register_node_type_sh_sepxyz();
 void register_node_type_sh_shadertorgb();
