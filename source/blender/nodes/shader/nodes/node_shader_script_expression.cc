@@ -374,17 +374,37 @@ static void set_zero_output(GPUNodeStack *out)
   }
 }
 
+static void draw_expression_settings(ui::Layout &layout, PointerRNA *ptr);
+static void draw_variables_settings(ui::Layout &layout, bContext *C, PointerRNA *ptr);
+
 static void node_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
   b.use_custom_socket_order();
   b.allow_any_socket_order();
 
+  auto add_expression_panel = [&]() -> PanelDeclarationBuilder & {
+    PanelDeclarationBuilder &panel = b.add_panel("Expression", 0);
+    panel.add_layout([](ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr) {
+      draw_expression_settings(layout, ptr);
+    });
+    return panel;
+  };
+
+  auto add_variables_panel = [&]() -> PanelDeclarationBuilder & {
+    PanelDeclarationBuilder &panel = b.add_panel("Variables", 1).default_closed(true);
+    panel.add_layout([](ui::Layout &layout, bContext *C, PointerRNA *ptr) {
+      draw_variables_settings(layout, C, ptr);
+    });
+    return panel;
+  };
+
   const bNode *node = b.node_or_null();
   const bNodeTree *tree = b.tree_or_null();
   if (!node || !tree || !node->storage) {
     b.add_output<decl::Float>("Result", script_expr_output_identifier);
-    b.add_default_layout();
+    add_expression_panel();
+    add_variables_panel();
     return;
   }
 
@@ -392,14 +412,15 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.add_output(safe_socket_type(storage.output_socket_type),
                "Result",
                script_expr_output_identifier);
-  b.add_default_layout();
+  add_expression_panel();
+  PanelDeclarationBuilder &variables_panel = add_variables_panel();
 
   for (const NodeShaderScriptExpressionVariable &item : storage.variables_span()) {
     const eNodeSocketDatatype socket_type = safe_socket_type(item.socket_type);
     const StringRefNull name = item.name ? item.name : "";
     const std::string identifier = ShScriptExpressionVariablesAccessor::socket_identifier_for_item(
         item);
-    auto &input_decl = b.add_input(socket_type, name, identifier)
+    auto &input_decl = variables_panel.add_input(socket_type, name, identifier)
                            .socket_name_ptr(&tree->id,
                                             *ShScriptExpressionVariablesAccessor::item_srna,
                                             &item,
@@ -427,8 +448,6 @@ static void draw_variables_settings(ui::Layout &layout, bContext *C, PointerRNA 
   bNodeTree &ntree = *reinterpret_cast<bNodeTree *>(ptr->owner_id);
   bNode &node = *ptr->data_as<bNode>();
 
-  layout.separator();
-  layout.label(IFACE_("Variables"), ICON_NONE);
   socket_items::ui::draw_items_list_with_operators<ShScriptExpressionVariablesAccessor>(
       C, &layout, ntree, node);
   socket_items::ui::draw_active_item_props<ShScriptExpressionVariablesAccessor>(
@@ -689,7 +708,7 @@ void register_node_type_sh_script_expression()
   static bke::bNodeType ntype;
 
   sh_node_type_base(&ntype, "ShaderNodeScriptExpression", SH_NODE_SCRIPT_EXPRESSION);
-  ntype.ui_name = "Script Expression";
+  ntype.ui_name = "GLSL Script Expression";
   ntype.ui_description = "Evaluate a single GLSL expression with manually defined inputs";
   ntype.enum_name_legacy = "SCRIPT_EXPRESSION";
   ntype.nclass = NODE_CLASS_SCRIPT;
