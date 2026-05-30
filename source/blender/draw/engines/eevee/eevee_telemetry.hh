@@ -235,7 +235,6 @@ class TelemetryModule {
   std::string format_shadow_lights_report(const TelemetryFrameRecord &record) const;
   std::string format_shadow_contexts_report(const TelemetryFrameRecord &record) const;
   std::string format_probe_costs_report(const TelemetryFrameRecord &record) const;
-  Vector<std::string> build_hints(const TelemetryFrameRecord &record) const;
 };
 
 class ScopedTelemetrySample {
