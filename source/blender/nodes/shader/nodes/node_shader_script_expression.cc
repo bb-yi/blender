@@ -382,30 +382,33 @@ static void node_declare(NodeDeclarationBuilder &b)
 
   const bNode *node = b.node_or_null();
   const bNodeTree *tree = b.tree_or_null();
-  if (node && tree) {
-    const NodeShaderScriptExpression &storage = node_storage(*node);
-    for (const NodeShaderScriptExpressionVariable &item : storage.variables_span()) {
-      const eNodeSocketDatatype socket_type = safe_socket_type(item.socket_type);
-      const StringRefNull name = item.name ? item.name : "";
-      const std::string identifier = ShScriptExpressionVariablesAccessor::socket_identifier_for_item(
-          item);
-      auto &input_decl = b.add_input(socket_type, name, identifier)
-                             .socket_name_ptr(&tree->id,
-                                              *ShScriptExpressionVariablesAccessor::item_srna,
-                                              &item,
-                                              "name");
-      input_decl.structure_type(StructureType::Dynamic);
-    }
-    b.add_output(safe_socket_type(storage.output_socket_type),
-                 "Result",
-                 script_expr_output_identifier);
-  }
-  else {
+  if (!node || !tree || !node->storage) {
     b.add_output<decl::Float>("Result", script_expr_output_identifier);
+    b.add_default_layout();
+    return;
+  }
+
+  const NodeShaderScriptExpression &storage = node_storage(*node);
+  b.add_output(safe_socket_type(storage.output_socket_type),
+               "Result",
+               script_expr_output_identifier);
+  b.add_default_layout();
+
+  for (const NodeShaderScriptExpressionVariable &item : storage.variables_span()) {
+    const eNodeSocketDatatype socket_type = safe_socket_type(item.socket_type);
+    const StringRefNull name = item.name ? item.name : "";
+    const std::string identifier = ShScriptExpressionVariablesAccessor::socket_identifier_for_item(
+        item);
+    auto &input_decl = b.add_input(socket_type, name, identifier)
+                           .socket_name_ptr(&tree->id,
+                                            *ShScriptExpressionVariablesAccessor::item_srna,
+                                            &item,
+                                            "name");
+    input_decl.structure_type(StructureType::Dynamic);
   }
 }
 
-static void node_layout(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
+static void draw_expression_settings(ui::Layout &layout, PointerRNA *ptr)
 {
   layout.use_property_split_set(true);
   layout.use_property_decorate_set(false);
@@ -419,9 +422,32 @@ static void node_layout(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
   }
 }
 
+static void draw_variables_settings(ui::Layout &layout, bContext *C, PointerRNA *ptr)
+{
+  bNodeTree &ntree = *reinterpret_cast<bNodeTree *>(ptr->owner_id);
+  bNode &node = *ptr->data_as<bNode>();
+
+  layout.separator();
+  layout.label(IFACE_("Variables"), ICON_NONE);
+  socket_items::ui::draw_items_list_with_operators<ShScriptExpressionVariablesAccessor>(
+      C, &layout, ntree, node);
+  socket_items::ui::draw_active_item_props<ShScriptExpressionVariablesAccessor>(
+      ntree, node, [&](PointerRNA *item_ptr) {
+        layout.use_property_split_set(true);
+        layout.use_property_decorate_set(false);
+        layout.prop(item_ptr, "socket_type", UI_ITEM_NONE, std::nullopt, ICON_NONE);
+      });
+}
+
+static void node_layout(ui::Layout &layout, bContext *C, PointerRNA *ptr)
+{
+  draw_expression_settings(layout, ptr);
+  draw_variables_settings(layout, C, ptr);
+}
+
 static void node_layout_ex(ui::Layout &layout, bContext *C, PointerRNA *ptr)
 {
-  node_layout(layout, C, ptr);
+  draw_expression_settings(layout, ptr);
 
   bNodeTree &ntree = *reinterpret_cast<bNodeTree *>(ptr->owner_id);
   bNode &node = *ptr->data_as<bNode>();
@@ -445,6 +471,7 @@ static void node_init(bNodeTree * /*ntree*/, bNode *node)
   storage->output_socket_type = SOCK_FLOAT;
   storage->next_identifier = 0;
   node->storage = storage;
+  node->flag |= NODE_OPTIONS;
 }
 
 static void node_free_storage(bNode *node)
@@ -676,6 +703,7 @@ void register_node_type_sh_script_expression()
   ntype.register_operators = file_ns::node_operators;
   ntype.blend_write_storage_content = file_ns::node_blend_write;
   ntype.blend_data_read_storage_content = file_ns::node_blend_read;
+  bke::node_type_size_preset(ntype, bke::eNodeSizePreset::Large);
   bke::node_type_storage(
       ntype, "NodeShaderScriptExpression", file_ns::node_free_storage, file_ns::node_copy_storage);
 

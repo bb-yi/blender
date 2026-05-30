@@ -85,14 +85,18 @@ static void draw_items_list_with_operators(const bContext *C,
   blender::ui::Layout *ops_col = &row->column(false);
   {
     blender::ui::Layout *add_remove_col = &ops_col->column(true);
-    add_remove_col->op(Accessor::operator_idnames::add_item, "", ICON_ADD);
-    add_remove_col->op(Accessor::operator_idnames::remove_item, "", ICON_REMOVE);
+    PointerRNA op_ptr = add_remove_col->op(Accessor::operator_idnames::add_item, "", ICON_ADD);
+    RNA_int_set(&op_ptr, "node_identifier", node.identifier);
+    op_ptr = add_remove_col->op(Accessor::operator_idnames::remove_item, "", ICON_REMOVE);
+    RNA_int_set(&op_ptr, "node_identifier", node.identifier);
   }
   {
     blender::ui::Layout *up_down_col = &ops_col->column(true);
     PointerRNA op_ptr = up_down_col->op(Accessor::operator_idnames::move_item, "", ICON_TRIA_UP);
+    RNA_int_set(&op_ptr, "node_identifier", node.identifier);
     RNA_enum_set(&op_ptr, "direction", 0);
     op_ptr = up_down_col->op(Accessor::operator_idnames::move_item, "", ICON_TRIA_DOWN);
+    RNA_int_set(&op_ptr, "node_identifier", node.identifier);
     RNA_enum_set(&op_ptr, "direction", 1);
   }
 }
