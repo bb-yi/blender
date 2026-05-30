@@ -374,6 +374,9 @@ static void set_zero_output(GPUNodeStack *out)
   }
 }
 
+static void draw_expression_settings(ui::Layout &layout, PointerRNA *ptr);
+static void draw_variables_settings(ui::Layout &layout, bContext *C, PointerRNA *ptr);
+
 static void node_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
@@ -383,23 +386,35 @@ static void node_declare(NodeDeclarationBuilder &b)
   const bNode *node = b.node_or_null();
   const bNodeTree *tree = b.tree_or_null();
   if (!node || !tree || !node->storage) {
-    b.add_output<decl::Float>("Result", script_expr_output_identifier);
-    b.add_default_layout();
+    PanelDeclarationBuilder &expression_panel = b.add_panel("Expression", 0);
+    expression_panel.add_output<decl::Float>("Result", script_expr_output_identifier);
+    expression_panel.add_layout([](ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr) {
+      draw_expression_settings(layout, ptr);
+    });
     return;
   }
 
   const NodeShaderScriptExpression &storage = node_storage(*node);
-  b.add_output(safe_socket_type(storage.output_socket_type),
-               "Result",
-               script_expr_output_identifier);
-  b.add_default_layout();
+  PanelDeclarationBuilder &expression_panel = b.add_panel("Expression", 0);
+  expression_panel.add_output(safe_socket_type(storage.output_socket_type),
+                              "Result",
+                              script_expr_output_identifier);
+  expression_panel.add_layout([](ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr) {
+    draw_expression_settings(layout, ptr);
+  });
 
+  PanelDeclarationBuilder &variables_panel = b.add_panel("Variables", 1).default_closed(true);
+  variables_panel.add_layout([](ui::Layout &layout, bContext *C, PointerRNA *ptr) {
+    draw_variables_settings(layout, C, ptr);
+  });
+
+  PanelDeclarationBuilder &inputs_panel = b.add_panel("Inputs", 2).default_closed(false);
   for (const NodeShaderScriptExpressionVariable &item : storage.variables_span()) {
     const eNodeSocketDatatype socket_type = safe_socket_type(item.socket_type);
     const StringRefNull name = item.name ? item.name : "";
     const std::string identifier = ShScriptExpressionVariablesAccessor::socket_identifier_for_item(
         item);
-    auto &input_decl = b.add_input(socket_type, name, identifier)
+    auto &input_decl = inputs_panel.add_input(socket_type, name, identifier)
                            .socket_name_ptr(&tree->id,
                                             *ShScriptExpressionVariablesAccessor::item_srna,
                                             &item,
@@ -437,16 +452,9 @@ static void draw_variables_settings(ui::Layout &layout, bContext *C, PointerRNA 
       });
 }
 
-static void node_layout(ui::Layout &layout, bContext *C, PointerRNA *ptr)
+static void node_layout(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
 {
-  if (ui::Layout *panel = layout.panel_prop(C, ptr, "expression_panel_open", IFACE_("Expression")))
-  {
-    draw_expression_settings(*panel, ptr);
-  }
-  if (ui::Layout *panel = layout.panel_prop(C, ptr, "variables_panel_open", IFACE_("Variables")))
-  {
-    draw_variables_settings(*panel, C, ptr);
-  }
+  draw_expression_settings(layout, ptr);
 }
 
 static void node_layout_ex(ui::Layout &layout, bContext *C, PointerRNA *ptr)
@@ -475,8 +483,6 @@ static void node_init(bNodeTree * /*ntree*/, bNode *node)
   storage->output_socket_type = SOCK_FLOAT;
   storage->next_identifier = 0;
   node->storage = storage;
-  node->custom1 = true;
-  node->custom2 = false;
   node->flag |= NODE_OPTIONS;
 }
 

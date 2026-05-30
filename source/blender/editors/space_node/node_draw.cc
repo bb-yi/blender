@@ -629,22 +629,33 @@ static void determine_potentially_visible_panels_recursive(
     const bNode &node, const nodes::PanelDeclaration &panel_decl, MutableSpan<bool> r_result)
 {
   bool potentially_visible = false;
+  bool has_socket_or_subpanel = false;
+  bool has_layout = false;
   for (const nodes::ItemDeclaration *item_decl : panel_decl.items) {
     if (const auto *socket_decl = dynamic_cast<const nodes::SocketDeclaration *>(item_decl)) {
+      has_socket_or_subpanel = true;
       const bNodeSocket &socket = node.socket_by_decl(*socket_decl);
       potentially_visible |= socket.is_visible();
     }
     else if (const auto *sub_panel_decl = dynamic_cast<const nodes::PanelDeclaration *>(item_decl))
     {
+      has_socket_or_subpanel = true;
       determine_potentially_visible_panels_recursive(node, *sub_panel_decl, r_result);
       potentially_visible |= r_result[sub_panel_decl->index];
     }
+    else if (dynamic_cast<const nodes::LayoutDeclaration *>(item_decl)) {
+      has_layout = true;
+    }
+  }
+  if (!has_socket_or_subpanel && has_layout && (node.flag & NODE_OPTIONS)) {
+    potentially_visible = true;
   }
   r_result[panel_decl.index] = potentially_visible;
 }
 
 /**
- * A panel is potentially visible if it contains any socket that is available and not hidden.
+ * A panel is potentially visible if it contains any socket that is available and not hidden, or
+ * if it is a layout-only panel and custom node options are visible.
  */
 static void determine_potentially_visible_panels(const bNode &node, MutableSpan<bool> r_result)
 {
@@ -1961,8 +1972,11 @@ static void node_draw_panels_background(const bNode &node)
 static bool panel_has_only_inactive_inputs(const bNode &node,
                                            const nodes::PanelDeclaration &panel_decl)
 {
+  bool has_socket_or_subpanel = false;
+  bool has_layout = false;
   for (const nodes::ItemDeclaration *item_decl : panel_decl.items) {
     if (const auto *socket_decl = dynamic_cast<const nodes::SocketDeclaration *>(item_decl)) {
+      has_socket_or_subpanel = true;
       if (socket_decl->in_out == SOCK_OUT) {
         return false;
       }
@@ -1973,10 +1987,17 @@ static bool panel_has_only_inactive_inputs(const bNode &node,
     }
     else if (const auto *sub_panel_decl = dynamic_cast<const nodes::PanelDeclaration *>(item_decl))
     {
+      has_socket_or_subpanel = true;
       if (!panel_has_only_inactive_inputs(node, *sub_panel_decl)) {
         return false;
       }
     }
+    else if (dynamic_cast<const nodes::LayoutDeclaration *>(item_decl)) {
+      has_layout = true;
+    }
+  }
+  if (!has_socket_or_subpanel && has_layout && (node.flag & NODE_OPTIONS)) {
+    return false;
   }
   return true;
 }
