@@ -109,6 +109,7 @@ void register_shader_nodes()
   register_node_type_sh_rgbtobw();
   register_node_type_sh_screen_derivative();
   register_node_type_sh_script();
+  register_node_type_sh_script_expression();
   register_node_type_sh_sepcolor();
   register_node_type_sh_sepxyz();
   register_node_type_sh_shadertorgb();

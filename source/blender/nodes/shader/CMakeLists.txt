@@ -114,6 +114,7 @@ set(SRC
   nodes/node_shader_rgb_to_bw.cc
   nodes/node_shader_screen_derivative.cc
   nodes/node_shader_script.cc
+  nodes/node_shader_script_expression.cc
   nodes/node_shader_sepcomb_color.cc
   nodes/node_shader_sepcomb_xyz.cc
   nodes/node_shader_shader_to_rgb.cc
@@ -158,6 +159,7 @@ set(SRC
 
   node_shader_register.hh
   node_shader_util.hh
+  include/NOD_sh_script_expression.hh
 )
 
 set(LIB
