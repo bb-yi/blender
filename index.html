@@ -632,9 +632,14 @@
 <h2 id="512">5.1.2 更新重点<a class="headerlink" href="#512" title="Permanent link">&para;</a></h2>
 <ul>
 <li>合并官方 <code>Blender 5.1.2</code> 修复与版本更新</li>
+<li>新增 <code>GLSL Script Expression</code> 节点，可用单行 GLSL 表达式快速生成自定义标量、向量或颜色输出</li>
+<li><code>GLSL Function</code> 的 <code>@glsl_meta v1</code> 新增 <code>label</code>，可为输入、输出和 <code>sampler2D</code> 插口设置节点界面显示名</li>
+<li><code>Eevee Performance</code> 视图新增阴影和探针归因分组：<code>Shadow Contexts</code>、<code>Shadow Lights</code>、<code>Probe Costs</code></li>
 <li>新增 <code>Native Camera FX Outputs</code>，可在 <code>View Layer</code> 中把 Eevee 原生 <code>Motion Blur</code> 和 <code>Depth of Field</code> 应用到指定通道</li>
 <li>恢复独立 <code>OKLab Color Ramp</code> 节点，普通 <code>Color Ramp</code> 保持原有 RGB / HSV / HSL 工作流</li>
 <li>修复 <code>GLSL Function</code> 的 <code>vec4</code> 输入在刷新或编译路径中丢失 <code>w</code> 分量的问题</li>
+<li>修复 <code>Scene Color</code> 的 <code>Position</code> 源在偏移采样时和其他场景缓冲不一致的问题</li>
+<li>修复透明 / <code>Blended</code> Forward 层在未显式写入 AOV 时覆盖后方 AOV 的问题</li>
 <li>更新 NPR Port 启动画面</li>
 </ul>
 <h2 id="_3">节点一览<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
@@ -708,6 +713,7 @@
 <li><code>Light Probe Color</code></li>
 <li><code>World To Tangent</code></li>
 <li><code>GLSL Function</code></li>
+<li><code>GLSL Script Expression</code></li>
 <li><code>Image to Closure</code></li>
 <li><code>Light Shader Info</code></li>
 <li><code>Light Shader Output</code></li>
@@ -735,6 +741,7 @@
 <h3 id="4">4. 界面与设置<a class="headerlink" href="#4" title="Permanent link">&para;</a></h3>
 <ul>
 <li><code>Eevee Performance</code> Outliner 视图</li>
+<li><code>Eevee Performance</code> 的阴影 / 探针成本归因</li>
 <li>材质预览控制</li>
 <li>材质剔除模式</li>
 <li>材质 <code>ZTest / Stencil / Color Write / Depth Write</code></li>

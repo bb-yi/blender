@@ -965,6 +965,7 @@
 <h4 id="important-notes">Important Notes<a class="headerlink" href="#important-notes" title="Permanent link">&para;</a></h4>
 <ul>
 <li>The default sampling coordinate for <code>Scene Color</code> is the <code>Window</code> output of the <code>Texture Coordinate</code> node</li>
+<li><code>Scene Color</code> uses consistent screen-UV sampling for <code>Color / Depth / Normal / Position</code>; when <code>Vector</code> is connected for offset sampling, <code>Position</code> reconstructs the world position for the offset pixel</li>
 <li><code>AOV Input</code> is supported</li>
 <li><code>AOV Output</code> is supported, so a filter can write to a named AOV before sending the final result into <code>Filter Output</code></li>
 <li><code>Execution Stage</code> currently provides three insertion points:</li>
@@ -1040,6 +1041,9 @@
 <li>If the <code>Outline</code> render pass is not enabled, outlines are composited into <code>Combined</code></li>
 <li>If the <code>Outline</code> render pass is enabled, outline data can be read as a separate pass in compositing or later processing</li>
 <li>No outlines are generated unless a material actually writes outline parameters through <code>Outline Control</code></li>
+<li>Objects in Holdout collections no longer write <code>Outline Control</code> parameters and no longer contribute Freestyle / marked-edge outline seeds</li>
+<li><code>Blended</code> foreground materials participate in behind-outline occlusion: fully opaque foreground blocks behind outlines, fully transparent foreground leaves them unchanged</li>
+<li>Semi-transparent <code>Blended</code> foreground attenuates behind-outline intensity by material transmittance without tinting the outline with the foreground material color</li>
 </ul>
 <h4 id="suggested-images">Suggested Images<a class="headerlink" href="#suggested-images" title="Permanent link">&para;</a></h4>
 <ul>

@@ -417,6 +417,15 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#shadow-and-probe-attribution" class="md-nav__link">
+    <span class="md-ellipsis">
+      Shadow and Probe Attribution
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#current-scope" class="md-nav__link">
     <span class="md-ellipsis">
       Current Scope
@@ -863,6 +872,15 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#shadow-and-probe-attribution" class="md-nav__link">
+    <span class="md-ellipsis">
+      Shadow and Probe Attribution
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#current-scope" class="md-nav__link">
     <span class="md-ellipsis">
       Current Scope
@@ -1236,7 +1254,7 @@
 <h3 id="purpose">Purpose<a class="headerlink" href="#purpose" title="Permanent link">&para;</a></h3>
 <p>Shows Eevee viewport / final-render performance statistics, stage breakdowns, and hints directly in the <code>Outliner</code>, making it easier to locate heavy parts of the pipeline.</p>
 <div align="center">
-    <img src="images/placeholder_eevee_performance.png" alt="Eevee Performance" style="border-radius: 10px;">
+    <img src="images/eevee_performance_shadow_probe.png" alt="Eevee Performance shadow and probe attribution" style="border-radius: 10px;">
     <br>
 </div>
 
@@ -1252,7 +1270,15 @@
 <li><code>Pause</code> freezes live updates so the current result can be inspected</li>
 <li><code>Sort by Time</code> sorts the stage list by CPU cost instead of fixed pipeline order</li>
 <li><code>Average Window</code> sets the frame window used for smoothing statistics</li>
-<li>The tree currently includes groups such as <code>Viewport</code>, <code>Final Render</code>, <code>Metadata</code>, <code>Features</code>, <code>Stages</code>, and <code>Hints</code></li>
+<li>The tree currently includes groups such as <code>Viewport</code>, <code>Final Render</code>, <code>Metadata</code>, <code>Features</code>, <code>Stages</code>, <code>Shadow Contexts</code>, <code>Shadow Lights</code>, <code>Probe Costs</code>, and <code>Hints</code></li>
+</ul>
+<h3 id="shadow-and-probe-attribution">Shadow and Probe Attribution<a class="headerlink" href="#shadow-and-probe-attribution" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>Shadow Contexts</code> breaks shadow CPU cost down by render context, such as <code>MainView</code>, <code>PlanarProbe</code>, <code>CaptureProbe</code>, <code>Bake</code>, and <code>Other</code></li>
+<li><code>Shadow Contexts</code> shows <code>cpu</code>, <code>calls</code>, <code>loops</code>, <code>ms/call</code>, <code>ms/loop</code>, and <code>share</code>, making it easier to tell whether shadow cost comes from the main view, probe updates, baking, or other paths</li>
+<li><code>Shadow Lights</code> lists shadow tilemap load per light, including <code>type</code>, <code>tilemaps</code>, <code>estimated_views</code>, <code>sync_dirty_tilemaps</code>, <code>tilemap_view_share</code>, and <code>level</code></li>
+<li><code>Probe Costs</code> lists per-probe update cost, including <code>updated</code>, <code>total</code>, <code>rendered_views</code>, <code>resolution</code>, <code>estimated_work</code>, <code>work_share</code>, and <code>level</code></li>
+<li>These groups are attribution aids, not a per-GPU-draw-call profiler; sorting and shares are meant for hotspot discovery, and exact values change with viewport state, sampling, and probe update frequency</li>
 </ul>
 <h3 id="current-scope">Current Scope<a class="headerlink" href="#current-scope" title="Permanent link">&para;</a></h3>
 <ul>

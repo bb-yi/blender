@@ -632,9 +632,14 @@
 <h2 id="512-highlights">5.1.2 Highlights<a class="headerlink" href="#512-highlights" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Merged official <code>Blender 5.1.2</code> fixes and version updates</li>
+<li>Added <code>GLSL Script Expression</code> for quick custom scalar, vector, or color outputs from a single GLSL expression</li>
+<li>Added <code>label</code> support to <code>GLSL Function</code> <code>@glsl_meta v1</code>, allowing input, output, and <code>sampler2D</code> sockets to use custom UI display names</li>
+<li>Added shadow and probe attribution groups to the <code>Eevee Performance</code> view: <code>Shadow Contexts</code>, <code>Shadow Lights</code>, and <code>Probe Costs</code></li>
 <li>Added <code>Native Camera FX Outputs</code>, allowing Eevee native <code>Motion Blur</code> and <code>Depth of Field</code> to be applied to selected View Layer channels</li>
 <li>Restored the standalone <code>OKLab Color Ramp</code> node; regular <code>Color Ramp</code> keeps the existing RGB / HSV / HSL workflow</li>
 <li>Fixed <code>GLSL Function</code> <code>vec4</code> inputs losing the <code>w</code> component during refresh or compile paths</li>
+<li>Fixed <code>Scene Color</code> <code>Position</code> source offset sampling so it matches the other scene-buffer sources</li>
+<li>Fixed transparent / <code>Blended</code> Forward layers overwriting behind-surface AOVs when they do not explicitly write an AOV</li>
 <li>Updated the NPR Port splash screen</li>
 </ul>
 <h2 id="node-overview">Node Overview<a class="headerlink" href="#node-overview" title="Permanent link">&para;</a></h2>
@@ -708,6 +713,7 @@
 <li><code>Light Probe Color</code></li>
 <li><code>World To Tangent</code></li>
 <li><code>GLSL Function</code></li>
+<li><code>GLSL Script Expression</code></li>
 <li><code>Image to Closure</code></li>
 <li><code>Light Shader Info</code></li>
 <li><code>Light Shader Output</code></li>
@@ -735,6 +741,7 @@
 <h3 id="4-interface-settings">4. Interface &amp; Settings<a class="headerlink" href="#4-interface-settings" title="Permanent link">&para;</a></h3>
 <ul>
 <li><code>Eevee Performance</code> Outliner view</li>
+<li>Shadow / probe cost attribution in <code>Eevee Performance</code></li>
 <li>Material preview control</li>
 <li>Material face culling</li>
 <li>Material <code>ZTest / Stencil / Color Write / Depth Write</code></li>

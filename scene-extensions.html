@@ -965,6 +965,7 @@
 <h4 id="_8">重要说明<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h4>
 <ul>
 <li><code>Scene Color</code> 节点的默认采样坐标为 <code>Texture Coordinate</code> 节点的 <code>Window</code> 输出</li>
+<li><code>Scene Color</code> 的 <code>Color / Depth / Normal / Position</code> 源使用一致的屏幕 UV 采样语义；连接 <code>Vector</code> 做偏移采样时，<code>Position</code> 会重建偏移像素对应的世界坐标</li>
 <li>支持 <code>AOV Input</code></li>
 <li>支持 <code>AOV Output</code>，可以先写出命名 AOV，再继续把结果送到 <code>Filter Output</code></li>
 <li><code>Execution Stage</code> 目前提供三个位置：</li>
@@ -1040,6 +1041,9 @@
 <li>当 <code>Outline</code> Render Pass 未开启时，描边结果会直接合成进 <code>Combined</code></li>
 <li>当 <code>Outline</code> Render Pass 开启时，可在合成器或后续流程中单独读取描边结果</li>
 <li>该功能依赖材质中的 <code>Outline Control</code> 节点实际写入描边参数；没有节点输出时不会自动生成描边</li>
+<li>位于 Holdout 集合中的物体不会继续写出 <code>Outline Control</code> 参数，也不会贡献 Freestyle / marked-edge 描边种子</li>
+<li>渲染方式为 <code>Blended</code> 的前景材质会参与后方描边遮挡：完全不透明时遮挡后方描边，完全透明时不影响后方描边</li>
+<li>半透明 <code>Blended</code> 前景会按材质透射率衰减后方描边强度，不会用前景材质颜色染色后方描边</li>
 </ul>
 <h4 id="_17">建议补图<a class="headerlink" href="#_17" title="Permanent link">&para;</a></h4>
 <ul>
