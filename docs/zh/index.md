@@ -83,63 +83,63 @@
 
 ### 1. Scene 级 Eevee 扩展
 
-- `Render Textures`
-- `Filter Materials`
-- `Eevee Outline`
-- `Native Camera FX Outputs`
-- `Filter` 域下可用的 `AOV Input / AOV Output`
+- [`Render Textures`](scene-extensions.md#1-render-textures)
+- [`Filter Materials`](scene-extensions.md#2-filter-materials)
+- [`Eevee Outline`](scene-extensions.md#4-eevee-outline)
+- [`Native Camera FX Outputs`](scene-extensions.md#3-native-camera-fx-outputs)
+- [`Filter` 域下可用的 `AOV Input / AOV Output`](scene-extensions.md#2-filter-materials)
 
 ### 2. 着色器节点
 
-- `Filter Object Info`
-- `Filter Mask`
-- `Scene Color`
-- `Render Info`
-- `Scene Time`
-- `Screen Derivative`
-- `Portal In / Portal Out`
-- `Outline Control`
-- `Screenspace Info`
-- `World Environment`
-- `Light Probe Color`
-- `World To Tangent`
-- `GLSL Function`
-- `GLSL Script Expression`
-- `Image to Closure`
-- `Light Shader Info`
-- `Light Shader Output`
-- `Basis Transform`
-- `Twirl`
-- `Water Ripples`
-- `Hex Grid Texture`
-- `SDF Primitive`
-- `SDF Operator`
-- `SDF Vector Operator`
-- `Bevel`
-- `Curvature`
-- `Shader Info`
-- `Light Info`
-- `OKLab Color Ramp`
+- [`Filter Object Info`](extended-nodes.md#filter-object-info)
+- [`Filter Mask`](extended-nodes.md#filter-mask)
+- [`Scene Color`](extended-nodes.md#scene-color)
+- [`Render Info`](extended-nodes.md#render-info)
+- [`Scene Time`](extended-nodes.md#scene-time)
+- [`Screen Derivative`](extended-nodes.md#screen-derivative)
+- [`Portal In / Portal Out`](extended-nodes.md#portal-in-portal-out)
+- [`Outline Control`](extended-nodes.md#outline-control)
+- [`Screenspace Info`](extended-nodes.md#screenspace-info)
+- [`World Environment`](extended-nodes.md#world-environment)
+- [`Light Probe Color`](extended-nodes.md#light-probe-color)
+- [`World To Tangent`](extended-nodes.md#world-to-tangent)
+- [`GLSL Function`](extended-nodes.md#glsl-function)
+- [`GLSL Script Expression`](extended-nodes.md#glsl-script-expression)
+- [`Image to Closure`](extended-nodes.md#image-to-closure)
+- [`Light Shader Info`](extended-nodes.md#light-shader-info-light-shader-output)
+- [`Light Shader Output`](extended-nodes.md#light-shader-info-light-shader-output)
+- [`Basis Transform`](extended-nodes.md#basis-transform)
+- [`Twirl`](extended-nodes.md#twirl)
+- [`Water Ripples`](extended-nodes.md#water-ripples)
+- [`Hex Grid Texture`](extended-nodes.md#hex-grid-texture)
+- [`SDF Primitive`](extended-nodes.md#sdf-primitive)
+- [`SDF Operator`](extended-nodes.md#sdf-operator)
+- [`SDF Vector Operator`](extended-nodes.md#sdf-vector-operator)
+- [`Bevel`](extended-nodes.md#bevel)
+- [`Curvature`](extended-nodes.md#curvature)
+- [`Shader Info`](extended-nodes.md#shader-info)
+- [`Light Info`](extended-nodes.md#light-info)
+- [`OKLab Color Ramp`](extended-nodes.md#oklab-color-ramp)
 
 ### 3. NPR Tree 工作流
 
-- `NPR Input`
-- `NPR Refraction`
-- `Image Sample`
-- `For Each Light`
-- 内置节点组资产
+- [`NPR Input`](npr-workflow.md#npr-input)
+- [`NPR Refraction`](npr-workflow.md#npr-refraction)
+- [`Image Sample`](npr-workflow.md#image-sample)
+- [`For Each Light`](npr-workflow.md#for-each-light)
+- [内置节点组资产](npr-workflow.md#5-npr)
 
 ### 4. 界面与设置
 
-- `Eevee Performance` Outliner 视图
-- `Eevee Performance` 的阴影 / 探针成本归因
-- 材质预览控制
-- 材质剔除模式
-- 材质 `ZTest / Stencil / Color Write / Depth Write`
-- 灯光组管理
-- 太阳光 `Shadow Map Scale`
-- 启动图版本标识
-- 骨骼 Outliner 显示控制
+- [`Eevee Performance` Outliner 视图](interface-guide.md#1-eevee-performance)
+- [`Eevee Performance` 的阴影 / 探针成本归因](interface-guide.md#1-eevee-performance)
+- [材质预览控制](interface-guide.md#2)
+- [材质剔除模式](interface-guide.md#3)
+- [材质 `ZTest / Stencil / Color Write / Depth Write`](interface-guide.md#4-surface)
+- [灯光组管理](interface-guide.md#5-eevee-lightgroup-id)
+- [太阳光 `Shadow Map Scale`](interface-guide.md#6-shadow-map-scale)
+- [启动图版本标识](interface-guide.md#7)
+- [骨骼 Outliner 显示控制](interface-guide.md#8-outliner)
 
 !!! warning "Eevee 专用"
     所有 NPR Port 功能都需要 **Eevee 渲染引擎**。不支持 `Cycles`。
