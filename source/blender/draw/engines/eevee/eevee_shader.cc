@@ -940,6 +940,48 @@ class SlotAllocator {
   }
 };
 
+static void add_create_info_and_reserve(gpu::shader::ShaderCreateInfo &info,
+                                        SlotAllocator &slots,
+                                        StringRefNull create_info_name)
+{
+  using namespace blender::gpu::shader;
+
+  if (create_info_name.is_empty()) {
+    return;
+  }
+
+  info.additional_info(create_info_name);
+  const ShaderCreateInfo *create_info = reinterpret_cast<const ShaderCreateInfo *>(
+      GPU_shader_create_info_get(create_info_name.c_str()));
+  slots.reserve_slots(*create_info);
+}
+
+static void reserve_deferred_npr_pass_samplers(SlotAllocator &slots)
+{
+  /* Keep this in sync with DeferredLayerBase::npr_pass_sync(). These pass-level bindings can
+   * collide with material image textures even when the active material create-info does not
+   * declare the corresponding sampler. */
+  slots.reserve_sampler(RBUFS_UTILITY_TEX_SLOT);
+  slots.reserve_sampler(HIZ_TEX_SLOT);
+  slots.reserve_sampler(SHADOW_TILEMAPS_TEX_SLOT);
+  slots.reserve_sampler(SHADOW_ATLAS_TEX_SLOT);
+  slots.reserve_sampler(VOLUME_PROBE_TEX_SLOT);
+  slots.reserve_sampler(SPHERE_PROBE_TEX_SLOT);
+  slots.reserve_sampler(OBJECT_ID_TEX_SLOT);
+  slots.reserve_sampler(PREPASS_NORMAL_TEX_SLOT);
+  slots.reserve_sampler_range(GBUF_CLOSURE_TEX_SLOT, GBUF_HEADER_TEX_SLOT);
+  slots.reserve_sampler(NPR_RADIANCE_TEX_SLOT);
+  slots.reserve_sampler_range(DIRECT_RADIANCE_NPR_TX_SLOT_1, DIRECT_RADIANCE_NPR_TX_SLOT_1 + 2);
+  slots.reserve_sampler_range(INDIRECT_RADIANCE_NPR_TX_SLOT_1,
+                              INDIRECT_RADIANCE_NPR_TX_SLOT_1 + 2);
+  slots.reserve_sampler(BACK_HIZ_TX_SLOT);
+  slots.reserve_sampler(BACK_RADIANCE_TX_SLOT);
+  slots.reserve_sampler_range(RENDER_TEXTURE_COLOR_TX_SLOT_0, RENDER_TEXTURE_HISTORY_TX_SLOT_3);
+  slots.reserve_sampler(LIGHT_SHADER_NPR_TEX_SLOT);
+  slots.reserve_sampler(SCENE_SHADOW_TEX_SLOT);
+  slots.reserve_sampler(SHADOW_CASTER_ATLAS_TEX_SLOT);
+}
+
 static int material_texture_reserved_slot_last(const eMaterialPipeline pipeline_type,
                                                const eMaterialGeometry geometry_type)
 {
@@ -1116,22 +1158,13 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
   SlotAllocator available_slots;
 
   if (!pipeline_info_name.is_empty()) {
-    info.additional_info(pipeline_info_name);
-    const ShaderCreateInfo *info = reinterpret_cast<const ShaderCreateInfo *>(
-        GPU_shader_create_info_get(pipeline_info_name.c_str()));
-    available_slots.reserve_slots(*info);
+    add_create_info_and_reserve(info, available_slots, pipeline_info_name);
   }
   if (!additional_info_name.is_empty()) {
-    info.additional_info(additional_info_name);
-    const ShaderCreateInfo *info = reinterpret_cast<const ShaderCreateInfo *>(
-        GPU_shader_create_info_get(additional_info_name.c_str()));
-    available_slots.reserve_slots(*info);
+    add_create_info_and_reserve(info, available_slots, additional_info_name);
   }
   if (!geometry_info_name.is_empty()) {
-    info.additional_info(geometry_info_name);
-    const ShaderCreateInfo *info = reinterpret_cast<const ShaderCreateInfo *>(
-        GPU_shader_create_info_get(geometry_info_name.c_str()));
-    available_slots.reserve_slots(*info);
+    add_create_info_and_reserve(info, available_slots, geometry_info_name);
   }
   return available_slots;
 }
@@ -1226,15 +1259,12 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     }
   }
 
-  if (GPU_material_flag_get(gpumat, GPU_MATFLAG_RAYCAST) &&
-      ELEM(pipeline_type,
-           MAT_PIPE_DEFERRED,
-           MAT_PIPE_DEFERRED_NPR,
-           MAT_PIPE_FORWARD,
-           MAT_PIPE_BAKE_COLOR))
-  {
-    info.additional_info("eevee_raycast");
-  }
+  const bool use_raycast = GPU_material_flag_get(gpumat, GPU_MATFLAG_RAYCAST) &&
+                           ELEM(pipeline_type,
+                                MAT_PIPE_DEFERRED,
+                                MAT_PIPE_DEFERRED_NPR,
+                                MAT_PIPE_FORWARD,
+                                MAT_PIPE_BAKE_COLOR);
 
   if (probe_capture != MAT_PROBE_NONE) {
     info.define("MAT_PROBE_CAPTURE");
@@ -1297,16 +1327,18 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
 
   SlotAllocator slots = add_pipeline_create_info(
       info, pipeline_type, geometry_type, use_front_light_shader_in_surface_pass, has_depth_offset);
-  slots.reserve_sampler_range(MATERIAL_TEXTURE_RESERVED_SLOT_FIRST,
-                              material_texture_reserved_slot_last(pipeline_type, geometry_type));
+  if (pipeline_type == MAT_PIPE_DEFERRED_NPR) {
+    reserve_deferred_npr_pass_samplers(slots);
+  }
+  else {
+    slots.reserve_sampler_range(MATERIAL_TEXTURE_RESERVED_SLOT_FIRST,
+                                material_texture_reserved_slot_last(pipeline_type, geometry_type));
+  }
   if (ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD)) {
     slots.reserve_sampler(LIGHT_SHADER_TEX_SLOT);
   }
   else if (pipeline_type == MAT_PIPE_BAKE_COLOR) {
     slots.reserve_sampler(LIGHT_SHADER_TEX_SLOT);
-  }
-  else if (pipeline_type == MAT_PIPE_DEFERRED_NPR) {
-    slots.reserve_sampler(LIGHT_SHADER_NPR_TEX_SLOT);
   }
   if (use_shader_info_shadow_classification) {
     slots.reserve_sampler(SHADOW_CASTER_ATLAS_TEX_SLOT);
@@ -1324,10 +1356,8 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     }
   }
 
-  for (auto &resource : info.batch_resources_) {
-    if (resource.bind_type == ShaderCreateInfo::Resource::BindType::SAMPLER) {
-      resource.slot = slots.get_next_sampler();
-    }
+  if (use_raycast) {
+    add_create_info_and_reserve(info, slots, "eevee_raycast");
   }
 
   /* Deferred and forward materials write render passes here. NPR binds the in/out variant in its
@@ -1370,21 +1400,21 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_RENDER_TEXTURE) &&
       pipeline_type == MAT_PIPE_DEFERRED_NPR)
   {
-    info.additional_info("eevee_render_texture_data");
+    add_create_info_and_reserve(info, slots, "eevee_render_texture_data");
   }
 
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR_REFRACTION) &&
       pipeline_type == MAT_PIPE_DEFERRED_NPR)
   {
     info.define("MAT_NPR_REFRACTION");
-    info.additional_info("eevee_surf_npr_refraction_data");
+    add_create_info_and_reserve(info, slots, "eevee_surf_npr_refraction_data");
   }
 
   if (ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD) &&
       (use_shader_to_rgba || GPU_material_flag_get(gpumat, GPU_MATFLAG_SCREENSPACE_INFO)))
   {
-    info.additional_info("eevee_hiz_prev_data");
-    info.additional_info("eevee_previous_layer_radiance");
+    add_create_info_and_reserve(info, slots, "eevee_hiz_prev_data");
+    add_create_info_and_reserve(info, slots, "eevee_previous_layer_radiance");
   }
 
   if ((GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
@@ -1395,11 +1425,11 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
            MAT_PIPE_FORWARD,
            MAT_PIPE_BAKE_COLOR))
   {
-    info.additional_info("eevee_light_data");
-    info.additional_info("eevee_shadow_data");
+    add_create_info_and_reserve(info, slots, "eevee_light_data");
+    add_create_info_and_reserve(info, slots, "eevee_shadow_data");
     if (use_shader_info_shadow_classification) {
       info.define("SHADOW_CASTER_CLASSIFY");
-      info.additional_info("eevee_shadow_caster_data");
+      add_create_info_and_reserve(info, slots, "eevee_shadow_caster_data");
     }
   }
   if (pipeline_type == MAT_PIPE_BAKE_COLOR) {
@@ -1410,10 +1440,10 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     if (depth_offset_uses_light_access && pipeline_type != MAT_PIPE_BAKE_COLOR) {
       info.define("LIGHT_ITER_FORCE_NO_CULLING");
     }
-    info.additional_info("eevee_light_data");
+    add_create_info_and_reserve(info, slots, "eevee_light_data");
     if (material_pass_uses_glsl_light_access) {
       info.define("MAT_GLSL_LIGHT_SHADOW_ACCESS");
-      info.additional_info("eevee_shadow_data");
+      add_create_info_and_reserve(info, slots, "eevee_shadow_data");
     }
     if (surface_pass_uses_glsl_light_access) {
       info.define("MAT_GLSL_LIGHT_SHADER_EVAL");
@@ -1430,7 +1460,13 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
            MAT_PIPE_FORWARD,
            MAT_PIPE_BAKE_COLOR))
   {
-    info.additional_info("eevee_lightprobe_data");
+    add_create_info_and_reserve(info, slots, "eevee_lightprobe_data");
+  }
+
+  for (auto &resource : info.batch_resources_) {
+    if (resource.bind_type == ShaderCreateInfo::Resource::BindType::SAMPLER) {
+      resource.slot = slots.get_next_sampler();
+    }
   }
 
   if ((GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
