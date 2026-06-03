@@ -441,10 +441,20 @@
 ## 暂存
 
 #### 新增功能
-- 无
+- Eevee `Performance` 视图新增阴影与光照探头耗时归因，可展开查看 Shadow Contexts、Shadow Lights、Probe Costs 等细分统计，便于定位阴影图集、灯光与 probe 更新开销。
+- `GLSL Function` 的 `@glsl_meta v1` 支持 `label` 元数据，可为输入/输出 socket 设置本地化或自定义显示名称。
+- 新增 `GLSL Script Expression` 节点，可在 Shader 节点树中直接编写单行 GLSL 表达式，并手动定义输入变量。
+- `GLSL Script Expression` 节点补充节点内控件与侧栏面板，变量、表达式和输出类型等设置会分组显示，节点 UI 更易整理。
 
 #### 修复与改进
-- 无
+- 修复 `GLSL Function` 放入节点组后部分路径无法正确内联或编译的问题，并补充节点组回归测试。
+- 修复 `GLSL Function` 经过节点组内联后颜色 alpha 分量丢失的问题。
+- 修复混合 Forward 材质会清掉或丢失背后 AOV 数据的问题，保留透明/混合表面后的 AOV 读取结果。
+- 修复 `Scene Color` 的 `Position` 输出在 filter pass 中采样 UV 偏移的问题，使位置通道读取与屏幕像素对齐。
+- 改进 Eevee 性能分析器归因逻辑，减少材质、阴影和 probe 统计被错误归入其他阶段的情况。
+- 修复 `GLSL Script Expression` 节点面板绘制时的崩溃问题，并调整控件折叠与节点内显示逻辑。
+- 修复 View Layer 集合开启 Holdout 后，集合内带 `Outline Control` 的材质仍会产生 NPR 描边的问题；Holdout 对象仍参与深度/遮挡，但不再写入材质描边或 marked-edge 描边。
+- 修复 World / World NPR 中普通 `Image Texture` 未连接 `Vector` 时固定采样同一 texel 的问题，默认改为使用窗口坐标，避免多张 2D 贴图混合退化为常量颜色。
 
 # TODO
 
