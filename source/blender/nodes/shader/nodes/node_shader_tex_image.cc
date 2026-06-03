@@ -58,8 +58,13 @@ static int node_shader_gpu_tex_image(GPUMaterial *mat,
 
   GPUNodeLink **texco = &in[0].link;
   if (!*texco) {
-    *texco = GPU_attribute(mat, CD_AUTO_FROM_NAME, "");
-    node_shader_gpu_bump_tex_coord(mat, node, texco);
+    if (GPU_material_is_world(mat)) {
+      *texco = GPU_function_call("$OUT = coordinate_screen(g_data.P)");
+    }
+    else {
+      *texco = GPU_attribute(mat, CD_AUTO_FROM_NAME, "");
+      node_shader_gpu_bump_tex_coord(mat, node, texco);
+    }
   }
 
   node_shader_gpu_tex_mapping(mat, node, in, out);

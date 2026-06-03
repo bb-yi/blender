@@ -188,9 +188,10 @@ gpu::Shader *GPU_material_get_shader(GPUMaterial *material);
 const char *GPU_material_get_name(GPUMaterial *material);
 
 /**
- * Return can be null if it's a world material.
+ * Return can be null if the GPU material was not compiled from a Material ID.
  */
 Material *GPU_material_get_material(GPUMaterial *material);
+bool GPU_material_is_world(const GPUMaterial *material);
 /**
  * Return true if the material compilation has not yet begin or begin.
  */

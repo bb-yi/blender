@@ -85,8 +85,9 @@ struct GPUMaterial {
   /* Number of generated function. */
   int generated_function_len = 0;
 
-  /* Source material, might be null. */
+  /* Source material, might be null for worlds and lights. */
   Material *source_material = nullptr;
+  bool is_world = false;
   /* 1D Texture array containing all color bands. */
   gpu::Texture *coba_tex = nullptr;
   /* Builder for coba_tex. */
@@ -176,6 +177,7 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
 
   GPUMaterial *mat = MEM_new<GPUMaterial>(__func__, engine);
   mat->source_material = ma;
+  mat->is_world = (ma == nullptr) && compile_surface_graph && !compile_light_shader_graph;
   mat->uuid = shader_uuid;
   mat->name = name;
   result.material = mat;
@@ -344,6 +346,11 @@ uint64_t GPU_material_uuid_get(GPUMaterial *mat)
 Material *GPU_material_get_material(GPUMaterial *material)
 {
   return material->source_material;
+}
+
+bool GPU_material_is_world(const GPUMaterial *material)
+{
+  return material->is_world;
 }
 
 GPUPass *GPU_material_get_pass(GPUMaterial *material)
