@@ -129,6 +129,13 @@ def object_filter_or_npr_eevee_shader_nodes_poll(context):
             snode.shader_type in {'OBJECT', 'FILTER', 'NPR'})
 
 
+def glsl_eevee_shader_nodes_poll(context):
+    snode = context.space_data
+    return (eevee_shader_nodes_poll(context) and
+            snode.tree_type == 'ShaderNodeTree' and
+            snode.shader_type in {'OBJECT', 'WORLD', 'FILTER', 'NPR'})
+
+
 def filter_eevee_shader_nodes_poll(context):
     snode = context.space_data
     return (eevee_shader_nodes_poll(context) and
@@ -799,12 +806,12 @@ class NODE_MT_shader_node_utilities_base(node_add_menu.NodeMenu):
         self.node_operator(
             layout,
             "ShaderNodeGLSLFunction",
-            poll=object_filter_or_npr_eevee_shader_nodes_poll(context),
+            poll=glsl_eevee_shader_nodes_poll(context),
         )
         self.node_operator(
             layout,
             "ShaderNodeScriptExpression",
-            poll=object_filter_or_npr_eevee_shader_nodes_poll(context),
+            poll=glsl_eevee_shader_nodes_poll(context),
         )
 
         self.draw_assets_for_catalog(layout, self.bl_label)
