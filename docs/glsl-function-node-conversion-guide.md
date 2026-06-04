@@ -140,6 +140,26 @@
 Function: your_function_name
 ```
 
+### 规则 2A：导出函数必须补全 `@glsl_meta v1`
+
+只要最终导出函数有输入参数或 `out` 参数，AI 输出的代码就必须在导出函数正上方补一块完整的 `@glsl_meta v1`。
+
+不要等用户额外提醒才写 Meta。Meta 是默认输出的一部分，不是可选装饰。
+
+Meta 必须覆盖导出函数的公开接口：
+
+- 每个输入参数都应有一行 Meta，说明 `label` 和必要的 `description`
+- 数值调节参数应尽量写 `default`，并在语义明确时写 `min` / `max`
+- `0..1` 混合、阈值、强度、柔和度等参数应优先写 `subtype=factor`
+- 颜色参数 `vec3` / `vec4` 应写 `subtype=color`
+- 坐标、方向、比例等向量参数应写清楚语义，必要时用合适的 vector subtype
+- `sampler2D` 只能写 `label`、`description`，以及放进 panel；不要写 `default/min/max/hide_value/subtype`
+- `out` 参数只能写 `label`，不要写默认值、范围、subtype 或 description
+- 返回值不支持 Meta，必须在 `Outputs` 和结果说明里写清楚
+- 参数超过 4 个，或语义能自然分组时，应使用一级 `@panel` / `@end_panel` 分组
+
+如果导出函数确实没有任何输入参数和 `out` 参数，可以省略 Meta，但结果说明里要写明“无可标注接口”。
+
 ### 规则 3：所有外部输入都改成函数参数
 
 不要依赖下面这些外部名字直接存在：
@@ -526,6 +546,13 @@ Inputs:
 Outputs:
 - return: vec3
 
+Meta Checklist:
+- @glsl_meta v1 已写在导出函数正上方
+- 每个输入参数都有 label/description 和必要的 default/min/max/subtype
+- sampler2D 只使用 label/description/panel
+- out 参数只使用 label
+- 参数分组 panel 已闭合
+
 Code:
 ```glsl
 ...最终代码...
@@ -538,6 +565,7 @@ Code:
 - 不支持或已删除: ...
 - 已近似或已替代: ...
 - Alpha 处理: 已保留 / 已拆分 / 原始 alpha 恒定 / 已省略
+- Meta 情况: 已补全 / 无可标注接口 / 未补全并说明原因
 - 验证情况: 已解析 / 已渲染 / 未验证
 ````
 
@@ -548,6 +576,8 @@ Outputs:
 - return: float
 - out color: vec3
 ```
+
+如果函数有可调参数、贴图输入或 `out` 参数，`Code` 中应直接包含对应的 `@glsl_meta v1` 块，而不是只在文字说明里建议用户自己补。
 
 ### 转换结果说明建议
 
@@ -569,6 +599,10 @@ Outputs:
 - `Alpha 处理`
   - 如果原 shader 的 `fragColor.a` 有意义，要明确写出它是保留为 `vec4.a`、拆成单独 `out float alpha`，还是被省略
   - 如果原始 alpha 本来恒定为 `1.0`，也建议直接写明，避免用户误以为漏转
+- `Meta 情况`
+  - 明确写出 `@glsl_meta v1` 是否已补全
+  - 如果没有写 Meta，必须说明导出函数没有输入参数和 `out` 参数，或说明当前限制导致无法标注
+  - 不要把“用户可自行补 Meta”当作完成状态
 - `验证情况`
   - 如果只做了静态转换，写 `未验证`
   - 如果通过节点解析，写 `已解析`
@@ -1263,19 +1297,23 @@ vec2 triangle_unproject(vec3 v)
 必须遵守这些规则：
 1. 最终结果只能是普通 GLSL 函数源码，不要输出完整 shader 文件。
 2. 明确给出 Function 应设置的函数名。
-3. 把所有外部 uniform / 时间 / 分辨率 / 鼠标 / 贴图输入改成函数参数。
-4. 导出函数的参数和返回值只允许使用 float、int、bool、vec2、vec3、vec4、sampler2D，以及 out float/int/bool/vec2/vec3/vec4。
-5. 不允许使用 inout，也不允许 out sampler2D。
-6. 如果来源是 HLSL 或 ShaderLab，去掉语义、Pass、Properties、pragma 和引擎包装层。
-7. 贴图采样优先改成 `texture(tex, uv)`；如果原算法明确依赖显式 `LOD`，可以保留为 `textureLod(tex, uv, lod)`，并说明这更适合配合 `Image to Closure`。
-8. 如果存在宏开关、死代码、未使用辅助函数、反向 `smoothstep`、运行时别名宏、共享可变全局状态、布尔到数值隐式转换、非方阵矩阵双向乘法这类不稳定写法，要收敛成稳定版本。
-9. 如果需要多个输出，用 out 参数，不要用 struct 返回。
-10. 如果原 shader 的 alpha 有意义，要明确说明是保留、拆分还是省略。
-11. 在结果最后明确说明转换是 success / partial / failed，并列出不支持、删除、近似、替代、alpha 处理、验证情况。
-12. 输出格式为：
+3. 只要导出函数有输入参数或 out 参数，代码里必须在导出函数正上方写完整的 `@glsl_meta v1`，不要让用户后续自己补。
+4. Meta 要覆盖每个输入参数和 out 参数：输入参数写 label/description 和必要的 default/min/max/subtype；sampler2D 只写 label/description/panel；out 参数只写 label；返回值不支持 Meta，必须在 Outputs 中说明。
+5. 参数超过 4 个或语义能自然分组时，使用一级 `@panel` / `@end_panel` 分组，panel 必须闭合。
+6. 把所有外部 uniform / 时间 / 分辨率 / 鼠标 / 贴图输入改成函数参数。
+7. 导出函数的参数和返回值只允许使用 float、int、bool、vec2、vec3、vec4、sampler2D，以及 out float/int/bool/vec2/vec3/vec4。
+8. 不允许使用 inout，也不允许 out sampler2D。
+9. 如果来源是 HLSL 或 ShaderLab，去掉语义、Pass、Properties、pragma 和引擎包装层。
+10. 贴图采样优先改成 `texture(tex, uv)`；如果原算法明确依赖显式 `LOD`，可以保留为 `textureLod(tex, uv, lod)`，并说明这更适合配合 `Image to Closure`。
+11. 如果存在宏开关、死代码、未使用辅助函数、反向 `smoothstep`、运行时别名宏、共享可变全局状态、布尔到数值隐式转换、非方阵矩阵双向乘法这类不稳定写法，要收敛成稳定版本。
+12. 如果需要多个输出，用 out 参数，不要用 struct 返回。
+13. 如果原 shader 的 alpha 有意义，要明确说明是保留、拆分还是省略。
+14. 在结果最后明确说明转换是 success / partial / failed，并列出不支持、删除、近似、替代、alpha 处理、Meta 情况、验证情况。
+15. 输出格式为：
    Function: ...
    Inputs: ...
    Outputs: ...
+   Meta Checklist: ...
    Code: ```glsl ... ```
    Conversion Result: ...
    其中要再次明确 function_to_call: ...
@@ -1292,7 +1330,7 @@ vec2 triangle_unproject(vec3 v)
 2. 去掉引擎壳
 3. 把外部依赖参数化
 4. 把接口压缩到节点支持的那几种边界类型
-5. 输出一个明确可选的导出函数
+5. 输出一个明确可选的导出函数，并给公开接口补全 Meta
 
 只要严格遵守这份文档，绝大多数数学类 GLSL、很多 HLSL 片段逻辑、以及相当一部分 ShaderLab 片段逻辑，都可以被稳定改写为当前 Blender 节点可直接使用的版本。
 ## 附录：GLSL Function Meta 语法
@@ -1312,14 +1350,17 @@ vec2 triangle_unproject(vec3 v)
 - socket 注释 / tooltip
 - 一级折叠面板分组
 
+AI 生成最终 GLSL Function 代码时，Meta 的默认要求是“补全”，不是“可选”。除非导出函数没有任何输入参数和 `out` 参数，否则最终代码块里必须直接包含 `@glsl_meta v1`。
+
 ### 1. 基本格式
 
 Meta 必须写在函数正上方的块注释里，并以 `@glsl_meta` 开头：
 
 ```glsl
 /* @glsl_meta v1
+base_color: label="基础色" default=vec3(1.0) subtype=color description="Base color before stylization"
 strength: label="强度" default=0.5 min=0.0 max=1.0 subtype=factor description="Blend amount"
-tint: label="目标颜色" default=vec3(1.0, 0.8, 0.2) description="Target tint color"
+tint: label="目标颜色" default=vec3(1.0, 0.8, 0.2) subtype=color description="Target tint color"
 */
 vec3 stylize(vec3 base_color, float strength, vec3 tint)
 {
@@ -1341,12 +1382,30 @@ Meta 只会作用到它正下方那个函数。
 
 如果 `@glsl_meta` 后面不是紧接着一个函数定义，而是夹了别的顶层代码，当前实现会报错。
 
+#### 2.0 AI 补全清单
+
+当你生成或转换一个导出函数时，先按函数签名逐项检查 Meta：
+
+- `float` 调节项：写 `label`、`default`、`description`；能确定范围时写 `min/max`
+- `float` 的强度、混合、遮罩、阈值、柔和度、概率类参数：优先写 `subtype=factor`
+- `int` / `bool` 开关：写清楚 `label`、`default` 和 `description`
+- `vec2` 坐标、偏移、比例：写 `label`、`default=vec2(...)` 和 `description`
+- `vec3` / `vec4` 颜色：写 `subtype=color`，并给出颜色默认值
+- `vec3` 方向、法线、位置：不要误标为颜色；用 `description` 写清楚空间语义
+- `sampler2D`：只写 `label` 和 `description`，必要时放进 `@panel`
+- `out` 参数：只写 `label`；不要写 `default/min/max/subtype/description`
+- 返回值：不写 Meta；在 `Outputs` 中说明返回类型和含义
+- 参数较多时：用一级 `@panel "分组名" closed=true/false` 分组，并用 `@end_panel` 闭合
+
+如果某个参数是内部常量更合适，就不要暴露成函数参数；一旦暴露成函数参数，就要给它写对应 Meta。
+
 #### 2.1 推荐结构
 
 ```glsl
 /* @glsl_meta v1
-strength: default=0.5
-tint: default=vec3(1.0, 0.8, 0.2)
+base_color: label="基础色" default=vec3(1.0) subtype=color description="Input color"
+strength: label="强度" default=0.5 min=0.0 max=1.0 subtype=factor description="Blend amount"
+tint: label="目标颜色" default=vec3(1.0, 0.8, 0.2) subtype=color description="Target color"
 */
 vec3 stylize(vec3 base_color, float strength, vec3 tint)
 {
@@ -1547,17 +1606,17 @@ tex: label="贴图" description="Source texture closure"
 
 ```glsl
 /* @glsl_meta v1
-base_color: default=vec3(1.0) subtype=color
+base_color: label="基础色" default=vec3(1.0) subtype=color description="Base color before shading"
 
 @panel "Specular" closed=true
-specular: default=0.5 min=0.0 max=1.0 subtype=factor
-roughness: default=0.5 min=0.0 max=1.0 subtype=factor
-anisotropy:
+specular: label="高光强度" default=0.5 min=0.0 max=1.0 subtype=factor description="Specular contribution"
+roughness: label="粗糙度" default=0.5 min=0.0 max=1.0 subtype=factor description="Microfacet roughness"
+anisotropy: label="各向异性" default=0.0 min=-1.0 max=1.0 description="Anisotropic highlight direction bias"
 @end_panel
 
 @panel "Thin Film" closed=false
-film_thickness: default=0.0 min=0.0
-film_ior: default=1.5 min=1.0
+film_thickness: label="薄膜厚度" default=0.0 min=0.0 description="Thin-film thickness control"
+film_ior: label="薄膜 IOR" default=1.5 min=1.0 description="Thin-film index of refraction"
 @end_panel
 */
 vec3 shader(
@@ -1633,6 +1692,7 @@ vec3 shader(
 
 ```glsl
 /* @glsl_meta v1
+base_color: label="基础色" default=vec3(1.0) subtype=color description="Base color before dissolve"
 threshold: label="阈值" default=0.35 min=0.0 max=1.0 subtype=factor description="Mask cutoff"
 edge_width: label="边缘宽度" default=0.08 min=0.0 max=1.0 subtype=factor description="Soft edge width"
 edge_color: label="边缘颜色" default=vec3(1.0, 0.5, 0.1) subtype=color description="Edge highlight color"
@@ -1727,9 +1787,12 @@ vec3 stylize(vec3 base_color, float strength)
 
 如果你是另一个 AI，要把外部 GLSL / HLSL / ShaderLab 片段转换成 `GLSL Function` 节点可用代码：
 
-- 可以把“建议默认值”写进 Meta，而不是只写在说明文字里
-- 可以把“参数范围”写进 Meta，减少手动调节点的成本
-- 可以把 Blender 语义明确的参数标为合适 subtype
+- 默认必须给导出函数补全 `@glsl_meta v1`，除非导出函数没有任何输入参数和 `out` 参数
+- 必须把“建议默认值”写进 Meta，而不是只写在说明文字里
+- 必须把语义明确的参数范围写进 Meta，减少手动调节点的成本
+- 必须把 Blender 语义明确的参数标为合适 subtype
+- 必须给 `sampler2D`、坐标、颜色、强度、阈值、输出参数写清楚可读 label
+- 必须在输出前检查 Meta 是否只引用真实存在的函数参数或 `out` 参数
 - 不要把运行时资源、贴图选择、函数逻辑分支控制错误地塞进 Meta
 
 最稳妥的理解是：
