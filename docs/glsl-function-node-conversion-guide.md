@@ -1819,9 +1819,13 @@ vec3 stylize(vec3 base_color, float strength)
 - 头部支持 `closed=true|false`，控制 `Defines` 面板首次出现时是否默认折叠；省略时默认为 `closed=false`。
 - `@define NAME bool default=true|false` 会显示为布尔开关；关闭时不会生成对应 `#define`。
 - `@define NAME int default=... min=... max=...` 会显示为整数输入，并生成 `#define NAME value`。
-- `label` 和 `description` 只影响面板显示，不改变宏名。
+- 宏名必须是合法 GLSL 标识符，最长 63 个字符；更长的宏名会报 parse error，避免保存到节点 DNA 时被截断。
+- `label` 和 `description` 只影响面板显示，不改变宏名；`description` 会显示在对应宏控件下方。
 - 同一份源码可以有多个 `@glsl_defines` 块，但宏名不能重复；如果多个块都写了 `closed`，取值必须一致。
 - 宏名是整份 GLSL 源码级别的编译开关，辅助函数也能通过 `#ifdef` / `#if` 看到这些宏，不是只作用于导出函数。
+- `#ifdef` / `#if` 可以放在函数体或辅助函数体内部，用来切换局部逻辑。
+- 顶层 GLSL 函数、全局变量、struct 等声明不能包在 `#ifdef` / `#if` 里；节点解析器需要稳定的顶层 API。需要可选 helper 时，把 helper 保持为顶层固定函数，把条件分支移进函数体。
+- 顶层只包含预处理器指令的条件块可以保留，例如按宏切换 `#define` 常量。
 
 示例：
 

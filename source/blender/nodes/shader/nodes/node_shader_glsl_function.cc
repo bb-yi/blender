@@ -246,6 +246,12 @@ namespace blender
       int value = 0;
     };
 
+    struct GLSLSourceRange
+    {
+      int64_t start = 0;
+      int64_t end = 0;
+    };
+
     struct GLSLFunctionDefinition
     {
       std::string name;
@@ -2462,6 +2468,12 @@ namespace blender
         i++;
       }
       r_define.name = std::string(text.substr(name_start, i - name_start));
+      if (r_define.name.size() >= sizeof(NodeShaderGLSLDefineValue::name))
+      {
+        r_error = "GLSL define name '" + r_define.name + "' exceeds the " +
+          std::to_string(sizeof(NodeShaderGLSLDefineValue::name) - 1) + " character limit";
+        return false;
+      }
       if (StringRef(r_define.name).startswith("gl_"))
       {
         r_error = "GLSL define name '" + r_define.name + "' uses the reserved 'gl_' prefix";
@@ -3580,6 +3592,152 @@ namespace blender
       }
 
       return tokens;
+    }
+
+    static bool parse_glsl_preprocessor_directive_name(const StringRef line,
+      std::string& r_directive)
+    {
+      int64_t i = 0;
+      while (i < line.size() && std::isspace(uchar(line[i])))
+      {
+        i++;
+      }
+      if (i >= line.size() || line[i] != '#')
+      {
+        return false;
+      }
+      i++;
+      while (i < line.size() && std::isspace(uchar(line[i])))
+      {
+        i++;
+      }
+      const int64_t directive_start = i;
+      while (i < line.size() && is_identifier_continue(line[i]))
+      {
+        i++;
+      }
+      if (i == directive_start)
+      {
+        return false;
+      }
+      r_directive = std::string(line.substr(directive_start, i - directive_start));
+      return true;
+    }
+
+    static bool glsl_preprocessor_directive_starts_conditional(const StringRef directive)
+    {
+      return directive == "if" || directive == "ifdef" || directive == "ifndef";
+    }
+
+    static Vector<GLSLSourceRange> find_top_level_conditional_preprocessor_ranges(
+      const StringRef source)
+    {
+      Vector<GLSLSourceRange> ranges;
+      Vector<int64_t> conditional_starts;
+      int brace_depth = 0;
+
+      for (int64_t line_start = 0; line_start < source.size();)
+      {
+        int64_t line_end = line_start;
+        while (line_end < source.size() && source[line_end] != '\n')
+        {
+          line_end++;
+        }
+
+        const StringRef line = source.substr(line_start, line_end - line_start);
+        std::string directive;
+        const bool is_preprocessor_line = parse_glsl_preprocessor_directive_name(line, directive);
+        if (is_preprocessor_line)
+        {
+          if (glsl_preprocessor_directive_starts_conditional(directive))
+          {
+            if (brace_depth == 0)
+            {
+              conditional_starts.append(line_start);
+            }
+          }
+          else if (directive == "endif")
+          {
+            if (brace_depth == 0 && !conditional_starts.is_empty())
+            {
+              ranges.append({ conditional_starts.pop_last(), line_end });
+            }
+          }
+        }
+        else
+        {
+          for (int64_t i = line_start; i < line_end; i++)
+          {
+            if (source[i] == '{')
+            {
+              brace_depth++;
+            }
+            else if (source[i] == '}')
+            {
+              brace_depth = max_ii(0, brace_depth - 1);
+            }
+          }
+        }
+
+        line_start = line_end < source.size() ? line_end + 1 : line_end;
+      }
+
+      for (const int64_t start : conditional_starts)
+      {
+        ranges.append({ start, source.size() });
+      }
+      return ranges;
+    }
+
+    static bool glsl_source_position_is_in_ranges(const int64_t position,
+      const Span<GLSLSourceRange> ranges)
+    {
+      for (const GLSLSourceRange& range : ranges)
+      {
+        if (position >= range.start && position < range.end)
+        {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    static bool validate_no_top_level_conditional_glsl_code(const StringRef source,
+      const Vector<GLSLToken>& tokens,
+      std::string& r_error)
+    {
+      const Vector<GLSLSourceRange> conditional_ranges =
+        find_top_level_conditional_preprocessor_ranges(source);
+      if (conditional_ranges.is_empty())
+      {
+        return true;
+      }
+
+      int brace_depth = 0;
+      for (const GLSLToken& token : tokens)
+      {
+        if (brace_depth == 0 && glsl_source_position_is_in_ranges(token.source_start, conditional_ranges))
+        {
+          r_error =
+            "Top-level GLSL declarations cannot be wrapped in #if/#ifdef blocks; move the macro "
+            "branch inside a function body";
+          return false;
+        }
+        if (token.kind != GLSLToken::Kind::Punctuation)
+        {
+          continue;
+        }
+        if (token.punctuation == '{')
+        {
+          brace_depth++;
+        }
+        else if (token.punctuation == '}')
+        {
+          brace_depth = max_ii(0, brace_depth - 1);
+        }
+      }
+
+      return true;
     }
 
     static bool parse_glsl_parameter_tokens(const Span<GLSLToken> tokens,
@@ -5564,6 +5722,10 @@ vec3 glsl_ambient_lighting()
       result.uses_geometry_access = glsl_source_uses_geometry_access(tokens);
       result.uses_lightprobe_access = glsl_source_uses_lightprobe_access(tokens);
       result.uses_eevee_light_access = glsl_source_uses_eevee_light_access(tokens);
+      if (!validate_no_top_level_conditional_glsl_code(stripped_source, tokens, result.error))
+      {
+        return result;
+      }
       result.function_names = find_top_level_glsl_function_names(tokens);
       if (result.function_names.is_empty())
       {
@@ -6128,8 +6290,15 @@ vec3 glsl_ambient_lighting()
           ptr->owner_id, RNA_ShaderNodeGLSLDefineValue, value);
         const std::string label = define.label.value_or(define.name);
         const char* prop_name = define.type == SHD_GLSL_FUNCTION_DEFINE_BOOL ? "bool_value" :
-                                                                               "int_value";
+                                                                                "int_value";
         layout.prop(&value_ptr, prop_name, UI_ITEM_NONE, label.c_str(), ICON_NONE);
+        if (define.description.has_value() && !define.description->empty())
+        {
+          ui::Layout& description_row = layout.row(false);
+          description_row.use_property_split_set(false);
+          description_row.active_set(false);
+          description_row.label(define.description->c_str(), ICON_NONE);
+        }
       }
     }
 

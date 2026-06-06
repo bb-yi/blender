@@ -307,6 +307,60 @@ class GLSLFunctionNodeTest(unittest.TestCase):
         self.assertEqual([value.name for value in glsl_node.define_values], ["USE_RIM"])
         self.assertTrue(find_define_value(glsl_node, "USE_RIM").bool_value)
 
+    def test_define_name_too_long_errors(self):
+        _, tree = self.make_material_tree()
+        glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        long_define_name = "A" * 64
+        source = (
+            "/* @glsl_defines v1\n"
+            f"@define {long_define_name} bool default=true\n"
+            "*/\n"
+            "vec4 define_long_name(vec4 color){return color;}\n"
+        )
+        make_text_block("glsl_define_long_name.glsl", source)
+
+        self.configure_glsl_node(glsl_node, "glsl_define_long_name.glsl", "define_long_name")
+
+        self.assertEqual(glsl_node.parse_status, 'ERROR')
+
+    def test_top_level_conditional_function_errors(self):
+        _, tree = self.make_material_tree()
+        glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        source = (
+            "/* @glsl_defines v1\n"
+            "@define USE_ALT bool default=true\n"
+            "*/\n"
+            "#ifdef USE_ALT\n"
+            "vec4 conditional_helper(vec4 color){return color + vec4(0.1);}\n"
+            "#endif\n"
+            "vec4 conditional_export(vec4 color){return color;}\n"
+        )
+        make_text_block("glsl_conditional_top_level_function.glsl", source)
+
+        self.configure_glsl_node(
+            glsl_node, "glsl_conditional_top_level_function.glsl", "conditional_export")
+
+        self.assertEqual(glsl_node.parse_status, 'ERROR')
+
+    def test_top_level_preprocessor_only_conditional_parses(self):
+        _, tree = self.make_material_tree()
+        glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        source = (
+            "/* @glsl_defines v1\n"
+            "@define USE_CONST bool default=true\n"
+            "*/\n"
+            "#ifdef USE_CONST\n"
+            "#define GLSL_CONST_VALUE 0.25\n"
+            "#endif\n"
+            "vec4 conditional_define_only(vec4 color){return color + vec4(GLSL_CONST_VALUE);}\n"
+        )
+        make_text_block("glsl_conditional_define_only.glsl", source)
+
+        self.configure_glsl_node(
+            glsl_node, "glsl_conditional_define_only.glsl", "conditional_define_only")
+
+        self.assertEqual(glsl_node.parse_status, 'READY')
+
     def test_define_header_unknown_attribute_errors(self):
         _, tree = self.make_material_tree()
         glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
