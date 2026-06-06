@@ -1799,3 +1799,51 @@ vec3 stylize(vec3 base_color, float strength)
 
 - GLSL 函数体负责算法
 - Meta 注释负责节点 UI 语义
+
+## 附录：GLSL Function Defines 语法
+
+`@glsl_defines` 用来声明编译期宏开关。它和 `@glsl_meta` 是两套独立信息：Meta 只描述函数参数和 socket UI，Defines 会生成独立的 `Defines` 面板，并在编译 wrapper 前写入 `#define`。
+
+基本写法：
+
+```glsl
+/* @glsl_defines v1 closed=true
+@define USE_RIM bool default=true label="Rim Lighting" description="Compile rim lighting branch"
+@define EFFECT_MODE int default=2 min=0 max=3 label="Effect Mode" description="Compile-time effect variant"
+*/
+```
+
+规则：
+
+- `@glsl_defines v1` 可以写成单独块，不需要紧贴某个函数。
+- 头部支持 `closed=true|false`，控制 `Defines` 面板首次出现时是否默认折叠；省略时默认为 `closed=false`。
+- `@define NAME bool default=true|false` 会显示为布尔开关；关闭时不会生成对应 `#define`。
+- `@define NAME int default=... min=... max=...` 会显示为整数输入，并生成 `#define NAME value`。
+- `label` 和 `description` 只影响面板显示，不改变宏名。
+- 同一份源码可以有多个 `@glsl_defines` 块，但宏名不能重复；如果多个块都写了 `closed`，取值必须一致。
+- 宏名是整份 GLSL 源码级别的编译开关，辅助函数也能通过 `#ifdef` / `#if` 看到这些宏，不是只作用于导出函数。
+
+示例：
+
+```glsl
+/* @glsl_defines v1 closed=true
+@define USE_RIM bool default=true label="Rim" description="Compile rim highlight"
+@define MODE int default=1 min=0 max=2 label="Mode" description="Compile-time branch mode"
+*/
+
+vec3 rim_helper(vec3 color)
+{
+#ifdef USE_RIM
+  color += vec3(0.1);
+#endif
+  return color;
+}
+
+vec3 stylize_with_defines(vec3 color)
+{
+#if MODE == 2
+  color *= 0.5;
+#endif
+  return rim_helper(color);
+}
+```

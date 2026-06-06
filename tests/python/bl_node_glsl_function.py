@@ -290,6 +290,57 @@ class GLSLFunctionNodeTest(unittest.TestCase):
         self.assertNotIn("USE_RIM", input_keys)
         self.assertNotIn("EFFECT_MODE", input_keys)
 
+    def test_defines_panel_default_closed_option_parses(self):
+        _, tree = self.make_material_tree()
+        glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        source = (
+            "/* @glsl_defines v1 closed=true\n"
+            "@define USE_RIM bool default=true label=\"Rim\"\n"
+            "*/\n"
+            "vec4 define_closed(vec4 color){return color;}\n"
+        )
+        make_text_block("glsl_defines_closed.glsl", source)
+
+        self.configure_glsl_node(glsl_node, "glsl_defines_closed.glsl", "define_closed")
+
+        self.assertEqual(glsl_node.parse_status, 'READY')
+        self.assertEqual([value.name for value in glsl_node.define_values], ["USE_RIM"])
+        self.assertTrue(find_define_value(glsl_node, "USE_RIM").bool_value)
+
+    def test_define_header_unknown_attribute_errors(self):
+        _, tree = self.make_material_tree()
+        glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        source = (
+            "/* @glsl_defines v1 open=true\n"
+            "@define USE_RIM bool default=true\n"
+            "*/\n"
+            "vec4 define_bad_header(vec4 color){return color;}\n"
+        )
+        make_text_block("glsl_defines_bad_header.glsl", source)
+
+        self.configure_glsl_node(glsl_node, "glsl_defines_bad_header.glsl", "define_bad_header")
+
+        self.assertEqual(glsl_node.parse_status, 'ERROR')
+
+    def test_conflicting_define_panel_default_closed_values_error(self):
+        _, tree = self.make_material_tree()
+        glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        source = (
+            "/* @glsl_defines v1 closed=true\n"
+            "@define USE_RIM bool default=true\n"
+            "*/\n"
+            "/* @glsl_defines v1 closed=false\n"
+            "@define EFFECT_MODE int default=1\n"
+            "*/\n"
+            "vec4 define_conflicting_panels(vec4 color){return color;}\n"
+        )
+        make_text_block("glsl_defines_conflicting_panels.glsl", source)
+
+        self.configure_glsl_node(
+            glsl_node, "glsl_defines_conflicting_panels.glsl", "define_conflicting_panels")
+
+        self.assertEqual(glsl_node.parse_status, 'ERROR')
+
     def test_define_values_preserve_and_drop_stale_entries(self):
         _, tree = self.make_material_tree()
         glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")

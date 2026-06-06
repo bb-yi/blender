@@ -282,6 +282,7 @@ namespace blender
       Vector<std::string> global_names;
       Vector<GLSLDefineMeta> defines;
       GLSLFunctionDefinition function;
+      bool defines_panel_default_closed = false;
       int signature_hash = 0;
       int meta_hash = 0;
       int define_hash = 0;
@@ -1417,9 +1418,10 @@ namespace blender
       return int(BLI_ghashutil_strhash_p(key.c_str()) & 0x7fffffff);
     }
 
-    static int make_defines_panel_identifier()
+    static int make_defines_panel_identifier(const bool default_closed)
     {
-      return int(BLI_ghashutil_strhash_p("glsl_defines_panel") & 0x7fffffff);
+      const char* key = default_closed ? "glsl_defines_panel_closed" : "glsl_defines_panel";
+      return int(BLI_ghashutil_strhash_p(key) & 0x7fffffff);
     }
 
     static std::string make_wrapper_argument_name(const StringRef prefix, const StringRef name)
@@ -2606,12 +2608,77 @@ namespace blender
       return true;
     }
 
+    static bool parse_glsl_defines_header_options(const StringRef text,
+      bool& r_panel_default_closed,
+      bool& r_has_panel_default_closed,
+      std::string& r_error)
+    {
+      const std::string header_text = trim_copy(text);
+      if (header_text.empty())
+      {
+        return true;
+      }
+
+      std::string options_text = header_text;
+      int64_t first_token_end = 0;
+      while (first_token_end < options_text.size() &&
+             !std::isspace(uchar(options_text[first_token_end])))
+      {
+        first_token_end++;
+      }
+
+      const StringRef first_token = StringRef(options_text).substr(0, first_token_end);
+      if (first_token.startswith("v"))
+      {
+        const std::string version_text = std::string(first_token);
+        if (version_text != "v1")
+        {
+          r_error = "Unsupported GLSL defines metadata version '" + version_text + "'";
+          return false;
+        }
+        options_text = trim_copy(StringRef(options_text).substr(first_token_end));
+      }
+
+      if (options_text.empty())
+      {
+        return true;
+      }
+
+      Map<std::string, std::string> assignments;
+      if (!parse_glsl_meta_assignment_list(options_text, assignments, r_error))
+      {
+        return false;
+      }
+
+      for (const auto& item : assignments.items())
+      {
+        const StringRef key = item.key;
+        const StringRef value = item.value;
+        if (key != "closed")
+        {
+          r_error = "Unsupported GLSL defines attribute '" + std::string(key) + "'";
+          return false;
+        }
+        if (!parse_glsl_meta_bool_literal(value, r_panel_default_closed, r_error))
+        {
+          return false;
+        }
+        r_has_panel_default_closed = true;
+      }
+
+      return true;
+    }
+
     static bool parse_glsl_defines_block(const StringRef comment,
       Vector<GLSLDefineMeta>& r_defines,
       bool& r_is_defines_block,
+      bool& r_panel_default_closed,
+      bool& r_has_panel_default_closed,
       std::string& r_error)
     {
       r_is_defines_block = false;
+      r_panel_default_closed = false;
+      r_has_panel_default_closed = false;
       std::stringstream stream{ std::string(comment) };
       std::string line;
       bool header_seen = false;
@@ -2630,14 +2697,16 @@ namespace blender
 
         if (!header_seen)
         {
-          if (!StringRef(normalized).startswith("@glsl_defines"))
+          if (!StringRef(normalized).startswith("@glsl_defines") ||
+              (normalized.size() > 13 && !std::isspace(uchar(normalized[13]))))
           {
             return true;
           }
-          const std::string version_text = trim_copy(StringRef(normalized).drop_prefix(13));
-          if (!version_text.empty() && version_text != "v1")
+          if (!parse_glsl_defines_header_options(StringRef(normalized).drop_prefix(13),
+                r_panel_default_closed,
+                r_has_panel_default_closed,
+                r_error))
           {
-            r_error = "Unsupported GLSL defines metadata version '" + version_text + "'";
             return false;
           }
           header_seen = true;
@@ -2672,9 +2741,12 @@ namespace blender
 
     static bool extract_glsl_defines(const StringRef source,
       Vector<GLSLDefineMeta>& r_defines,
+      bool& r_panel_default_closed,
       std::string& r_error)
     {
       Set<std::string> define_names;
+      r_panel_default_closed = false;
+      std::optional<bool> explicit_panel_default_closed;
       for (int64_t i = 0; (i + 1) < source.size();)
       {
         if (source[i] == '/' && source[i + 1] == '*')
@@ -2700,14 +2772,32 @@ namespace blender
 
           Vector<GLSLDefineMeta> block_defines;
           bool is_defines_block = false;
+          bool block_panel_default_closed = false;
+          bool block_has_panel_default_closed = false;
           if (!parse_glsl_defines_block(
-            source.substr(body_start, body_end - body_start), block_defines, is_defines_block, r_error))
+                source.substr(body_start, body_end - body_start),
+                block_defines,
+                is_defines_block,
+                block_panel_default_closed,
+                block_has_panel_default_closed,
+                r_error))
           {
             return false;
           }
           if (!is_defines_block)
           {
             continue;
+          }
+          if (block_has_panel_default_closed)
+          {
+            if (explicit_panel_default_closed.has_value() &&
+                *explicit_panel_default_closed != block_panel_default_closed)
+            {
+              r_error = "Conflicting GLSL defines panel 'closed' values";
+              return false;
+            }
+            explicit_panel_default_closed = block_panel_default_closed;
+            r_panel_default_closed = block_panel_default_closed;
           }
           for (const GLSLDefineMeta& define : block_defines)
           {
@@ -5453,7 +5543,8 @@ vec3 glsl_ambient_lighting()
       {
         return result;
       }
-      if (!extract_glsl_defines(source, result.defines, result.error))
+      if (!extract_glsl_defines(
+            source, result.defines, result.defines_panel_default_closed, result.error))
       {
         return result;
       }
@@ -5846,7 +5937,9 @@ vec3 glsl_ambient_lighting()
       if (has_define_panel)
       {
         PanelDeclarationBuilder& defines_panel =
-          b.add_panel("Defines", make_defines_panel_identifier()).default_closed(false);
+          b.add_panel("Defines",
+                      make_defines_panel_identifier(parse_result.defines_panel_default_closed))
+            .default_closed(parse_result.defines_panel_default_closed);
         defines_panel.add_layout([parse_result](ui::Layout& layout,
                                                 bContext* /*C*/,
                                                 PointerRNA* ptr) {
@@ -6050,7 +6143,8 @@ vec3 glsl_ambient_lighting()
       {
         return;
       }
-      if (ui::Layout* panel = layout.panel(C, panel_id, false, IFACE_("Defines")))
+      if (ui::Layout* panel = layout.panel(
+            C, panel_id, parse_result.defines_panel_default_closed, IFACE_("Defines")))
       {
         draw_glsl_define_settings(*panel, ptr, parse_result);
       }
@@ -6064,7 +6158,13 @@ vec3 glsl_ambient_lighting()
     static void node_layout_ex(ui::Layout& layout, bContext* C, PointerRNA* ptr)
     {
       const GLSLParseResult parse_result = draw_node_layout_content(layout, C, ptr);
-      draw_glsl_define_panel(layout, C, ptr, parse_result, "glsl_function_defines");
+      draw_glsl_define_panel(layout,
+                             C,
+                             ptr,
+                             parse_result,
+                             parse_result.defines_panel_default_closed ?
+                               "glsl_function_defines_closed" :
+                               "glsl_function_defines");
     }
 
     static void node_init(bNodeTree* /*ntree*/, bNode* node)
