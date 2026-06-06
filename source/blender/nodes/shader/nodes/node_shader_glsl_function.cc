@@ -1417,6 +1417,11 @@ namespace blender
       return int(BLI_ghashutil_strhash_p(key.c_str()) & 0x7fffffff);
     }
 
+    static int make_defines_panel_identifier()
+    {
+      return int(BLI_ghashutil_strhash_p("glsl_defines_panel") & 0x7fffffff);
+    }
+
     static std::string make_wrapper_argument_name(const StringRef prefix, const StringRef name)
     {
       std::string identifier = make_socket_identifier(prefix, name);
@@ -5783,6 +5788,10 @@ vec3 glsl_ambient_lighting()
       storage.meta_hash = parse_result.meta_hash;
     }
 
+    static void draw_glsl_define_settings(ui::Layout& layout,
+                                          PointerRNA* ptr,
+                                          const GLSLParseResult& parse_result);
+
     static void node_declare(NodeDeclarationBuilder& b)
     {
       const bNode* node = b.node_or_null();
@@ -5798,8 +5807,10 @@ vec3 glsl_ambient_lighting()
         return;
       }
 
-      const bool has_panels = !parse_result.function.panels.is_empty();
-      if (has_panels)
+      const bool has_parameter_panels = !parse_result.function.panels.is_empty();
+      const bool has_define_panel = !parse_result.defines.is_empty();
+      const bool use_declaration_panels = has_parameter_panels || has_define_panel;
+      if (use_declaration_panels)
       {
         b.use_custom_socket_order();
       }
@@ -5826,10 +5837,21 @@ vec3 glsl_ambient_lighting()
         }
       };
 
-      if (has_panels)
+      if (use_declaration_panels)
       {
         add_output_declarations();
         b.add_default_layout();
+      }
+
+      if (has_define_panel)
+      {
+        PanelDeclarationBuilder& defines_panel =
+          b.add_panel("Defines", make_defines_panel_identifier()).default_closed(false);
+        defines_panel.add_layout([parse_result](ui::Layout& layout,
+                                                bContext* /*C*/,
+                                                PointerRNA* ptr) {
+          draw_glsl_define_settings(layout, ptr, parse_result);
+        });
       }
 
       Map<std::string, int> panel_indices;
@@ -5876,7 +5898,7 @@ vec3 glsl_ambient_lighting()
         }
       }
 
-      if (!has_panels)
+      if (!use_declaration_panels)
       {
         add_output_declarations();
       }
@@ -6036,8 +6058,7 @@ vec3 glsl_ambient_lighting()
 
     static void node_layout(ui::Layout& layout, bContext* C, PointerRNA* ptr)
     {
-      const GLSLParseResult parse_result = draw_node_layout_content(layout, C, ptr);
-      draw_glsl_define_panel(layout, C, ptr, parse_result, "glsl_function_defines_node");
+      draw_node_layout_content(layout, C, ptr);
     }
 
     static void node_layout_ex(ui::Layout& layout, bContext* C, PointerRNA* ptr)
