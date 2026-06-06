@@ -48,11 +48,11 @@ void register_node_type_sh_npr_image_sample()
   sh_node_type_base(&ntype, "ShaderNodeNPR_ImageSample", SH_NODE_NPR_IMAGE_SAMPLE);
   ntype.enum_name_legacy = "NPR_IMAGE_SAMPLE";
   ntype.ui_name = "Image Sample";
-  ntype.ui_description = "Sample a TextureHandle within the NPR shader tree";
+  ntype.ui_description = "Sample an NPR or Filter image handle with an optional offset";
   ntype.nclass = NODE_CLASS_INPUT;
   ntype.declare = file_ns::node_declare;
   ntype.draw_buttons = file_ns::node_shader_buts;
-  ntype.add_ui_poll = npr_shader_nodes_poll;
+  ntype.add_ui_poll = filter_or_npr_eevee_shader_nodes_poll;
   ntype.gpu_fn = file_ns::node_shader_gpu_npr_image_sample;
 
   bke::node_register_type(ntype);

@@ -785,7 +785,7 @@ class NODE_MT_shader_node_utilities_base(node_add_menu.NodeMenu):
             layout,
             "ShaderNodeNPR_ImageSample",
             label="Image Sample",
-            poll=npr_shader_nodes_poll(context),
+            poll=filter_or_npr_eevee_shader_nodes_poll(context),
         )
         self.node_operator(
             layout,
