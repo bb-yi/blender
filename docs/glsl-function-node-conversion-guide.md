@@ -1344,6 +1344,7 @@ vec2 triangle_unproject(vec3 v)
 - 默认值
 - 最小值
 - 最大值
+- `int` 选择列表
 - 隐藏数值输入控件
 - socket subtype
 - socket 显示名
@@ -1388,7 +1389,7 @@ Meta 只会作用到它正下方那个函数。
 
 - `float` 调节项：写 `label`、`default`、`description`；能确定范围时写 `min/max`
 - `float` 的强度、混合、遮罩、阈值、柔和度、概率类参数：优先写 `subtype=factor`
-- `int` / `bool` 开关：写清楚 `label`、`default` 和 `description`
+- `int` / `bool` 开关：写清楚 `label`、`default` 和 `description`；如果 `int` 是固定模式枚举，优先写 `items`
 - `vec2` 坐标、偏移、比例：写 `label`、`default=vec2(...)` 和 `description`
 - `vec3` / `vec4` 颜色：写 `subtype=color`，并给出颜色默认值
 - `vec3` 方向、法线、位置：不要误标为颜色；用 `description` 写清楚空间语义
@@ -1493,7 +1494,33 @@ strength: min=0.0
 strength: max=1.0
 ```
 
-#### 3.4 `subtype`
+#### 3.4 `items`
+
+用于给 `int` 输入参数声明固定选择列表。它只改变未连接时默认值的 UI 表现：socket 类型仍然是 `int`，仍然可以连线，函数调用也仍然传入整数。
+
+```glsl
+/* @glsl_meta v1
+method: label="方法" default=1 items="0:Christensen-Burley;1:Random Walk;2:Random Walk Skin"
+*/
+vec4 subsurface_mode(vec4 color, int method)
+{
+  if (method == 2) {
+    return color * vec4(1.0, 0.9, 0.85, 1.0);
+  }
+  return color;
+}
+```
+
+规则：
+
+- 只允许用于 `int` 输入参数。
+- 格式固定为 `整数:显示名`，多个项用 `;` 分隔。
+- `default` 必须是整数字面量，并且必须等于列表中的某个值。
+- 列表值不能重复；显示名不能为空。
+- `items` 不能和 `min` / `max` 混用。需要连续范围时用普通整数输入框；需要固定模式时用 `items`。
+- 显示名只影响 UI，不参与 GLSL 参数名、socket identifier 或函数调用。
+
+#### 3.5 `subtype`
 
 用于设置 Blender socket subtype。
 
@@ -1533,7 +1560,7 @@ tint: default=vec3(1.0, 0.8, 0.2) subtype=color
 overlay: default=vec4(1.0, 0.8, 0.2, 0.5) subtype=color
 ```
 
-#### 3.5 `hide_value`
+#### 3.6 `hide_value`
 
 用于隐藏输入 socket 的数值输入框，但保留 socket 本身。
 
@@ -1556,7 +1583,7 @@ strength: default=0.5 hide_value=true
 - `yes` / `no`
 - `on` / `off`
 
-#### 3.6 `label`
+#### 3.7 `label`
 
 用于给 socket 设置节点界面上的显示名。它只改变节点 UI 文本，不改变 GLSL 参数名，也不改变 socket identifier。
 
@@ -1579,7 +1606,7 @@ out_color: label="输出色"
 - `out` 参数只支持 `label`，不支持默认值、范围、隐藏值、subtype、description 或 panel
 - `sampler2D` 支持 `label`
 
-#### 3.7 `description`
+#### 3.8 `description`
 
 用于给输入 socket 写描述文本。这个文本会进入 socket declaration 的 `description`，在 Blender 节点 tooltip 中显示。
 
@@ -1600,7 +1627,7 @@ tex: label="贴图" description="Source texture closure"
 - `description` 只影响 UI，不改变 socket identifier、默认值、范围或 GLSL 函数调用方式
 - `sampler2D` 只支持 `label`、`description` 和 panel 分组，不支持 `default/min/max/hide_value/subtype`
 
-#### 3.8 `@panel` / `@end_panel`
+#### 3.9 `@panel` / `@end_panel`
 
 用于把大量输入参数分组到节点上的一级折叠面板里。面板只影响 UI 排列，不改变 socket identifier，也不改变 GLSL 函数调用方式。
 
@@ -1810,6 +1837,7 @@ vec3 stylize(vec3 base_color, float strength)
 /* @glsl_defines v1 closed=true
 @define USE_RIM bool default=true label="Rim Lighting" description="Compile rim lighting branch"
 @define EFFECT_MODE int default=2 min=0 max=3 label="Effect Mode" description="Compile-time effect variant"
+@define METHOD int default=1 label="Method" items="0:Christensen-Burley;1:Random Walk;2:Random Walk Skin"
 */
 ```
 
@@ -1819,6 +1847,9 @@ vec3 stylize(vec3 base_color, float strength)
 - 头部支持 `closed=true|false`，控制 `Defines` 面板首次出现时是否默认折叠；省略时默认为 `closed=false`。
 - `@define NAME bool default=true|false` 会显示为布尔开关；关闭时不会生成对应 `#define`。
 - `@define NAME int default=... min=... max=...` 会显示为整数输入，并生成 `#define NAME value`。
+- `@define NAME int default=... items="0:Label;1:Other"` 会显示为下拉菜单，并生成 `#define NAME value`。
+- `items` 只允许用于 `int` 宏，不能用于 `bool` 宏，也不能和 `min/max` 混用。
+- `items` 的值不能重复，显示名不能为空；`default` 必须是列表中的某个整数值。
 - 宏名必须是合法 GLSL 标识符，最长 63 个字符；更长的宏名会报 parse error，避免保存到节点 DNA 时被截断。
 - `label` 和 `description` 只影响面板显示，不改变宏名；`description` 会显示在对应宏控件下方。
 - 同一份源码可以有多个 `@glsl_defines` 块，但宏名不能重复；如果多个块都写了 `closed`，取值必须一致。
@@ -1832,7 +1863,7 @@ vec3 stylize(vec3 base_color, float strength)
 ```glsl
 /* @glsl_defines v1 closed=true
 @define USE_RIM bool default=true label="Rim" description="Compile rim highlight"
-@define MODE int default=1 min=0 max=2 label="Mode" description="Compile-time branch mode"
+@define MODE int default=1 items="0:Base;1:Half;2:Boost" label="Mode" description="Compile-time branch mode"
 */
 
 vec3 rim_helper(vec3 color)

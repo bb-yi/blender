@@ -429,6 +429,49 @@ class GLSLFunctionNodeTest(unittest.TestCase):
         self.assertEqual([value.name for value in glsl_node.define_values], ["USE_RIM"])
         self.assertFalse(find_define_value(glsl_node, "USE_RIM").bool_value)
 
+    def test_int_define_choice_items_preserve_and_fallback(self):
+        _, tree = self.make_material_tree()
+        glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        text = make_text_block(
+            "glsl_define_int_choices.glsl",
+            "/* @glsl_defines v1\n"
+            "@define METHOD int default=1 label=\"Method\" "
+            "items=\"0:Burley;1:Random Walk;2:Skin\"\n"
+            "*/\n"
+            "vec4 define_int_choices(vec4 color){\n"
+            "#if METHOD == 2\n"
+            "  return color * 0.5;\n"
+            "#else\n"
+            "  return color;\n"
+            "#endif\n"
+            "}\n",
+        )
+        self.configure_glsl_node(glsl_node, "glsl_define_int_choices.glsl", "define_int_choices")
+
+        self.assertEqual(glsl_node.parse_status, 'READY')
+        method = find_define_value(glsl_node, "METHOD")
+        self.assertEqual(method.type, 'INT')
+        self.assertEqual(method.int_value, 1)
+
+        method.int_value = 2
+        refresh_glsl_node(glsl_node)
+
+        self.assertEqual(glsl_node.parse_status, 'READY')
+        self.assertEqual(find_define_value(glsl_node, "METHOD").int_value, 2)
+
+        text.clear()
+        text.write(
+            "/* @glsl_defines v1\n"
+            "@define METHOD int default=0 label=\"Method\" "
+            "items=\"0:Burley;1:Random Walk\"\n"
+            "*/\n"
+            "vec4 define_int_choices(vec4 color){return color;}\n"
+        )
+        refresh_glsl_node(glsl_node)
+
+        self.assertEqual(glsl_node.parse_status, 'READY')
+        self.assertEqual(find_define_value(glsl_node, "METHOD").int_value, 0)
+
     def test_define_values_do_not_change_signature_hash(self):
         _, tree = self.make_material_tree()
         glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
@@ -449,6 +492,66 @@ class GLSLFunctionNodeTest(unittest.TestCase):
 
         self.assertEqual(glsl_node.parse_status, 'READY')
         self.assertEqual(glsl_node.signature_hash, signature_hash)
+
+    def test_invalid_int_choice_items_error(self):
+        cases = [
+            (
+                "glsl_bad_items_float_param.glsl",
+                "bad_items_float_param",
+                "/* @glsl_meta v1\n"
+                "mode: default=0.0 items=\"0:Zero;1:One\"\n"
+                "*/\n"
+                "float bad_items_float_param(float mode){return mode;}\n",
+            ),
+            (
+                "glsl_bad_items_bool_define.glsl",
+                "bad_items_bool_define",
+                "/* @glsl_defines v1\n"
+                "@define USE_RIM bool default=true items=\"0:Off;1:On\"\n"
+                "*/\n"
+                "vec4 bad_items_bool_define(vec4 color){return color;}\n",
+            ),
+            (
+                "glsl_bad_items_duplicate.glsl",
+                "bad_items_duplicate",
+                "/* @glsl_defines v1\n"
+                "@define METHOD int default=1 items=\"1:One;1:Duplicate\"\n"
+                "*/\n"
+                "vec4 bad_items_duplicate(vec4 color){return color;}\n",
+            ),
+            (
+                "glsl_bad_items_empty_label.glsl",
+                "bad_items_empty_label",
+                "/* @glsl_defines v1\n"
+                "@define METHOD int default=1 items=\"0:;1:One\"\n"
+                "*/\n"
+                "vec4 bad_items_empty_label(vec4 color){return color;}\n",
+            ),
+            (
+                "glsl_bad_items_default.glsl",
+                "bad_items_default",
+                "/* @glsl_defines v1\n"
+                "@define METHOD int default=2 items=\"0:Zero;1:One\"\n"
+                "*/\n"
+                "vec4 bad_items_default(vec4 color){return color;}\n",
+            ),
+            (
+                "glsl_bad_items_minmax.glsl",
+                "bad_items_minmax",
+                "/* @glsl_meta v1\n"
+                "mode: default=1 min=0 items=\"0:Zero;1:One\"\n"
+                "*/\n"
+                "float bad_items_minmax(int mode){return float(mode);}\n",
+            ),
+        ]
+
+        for text_name, function_name, source in cases:
+            with self.subTest(text_name=text_name):
+                _, tree = self.make_material_tree()
+                glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+                make_text_block(text_name, source)
+                self.configure_glsl_node(glsl_node, text_name, function_name)
+                self.assertEqual(glsl_node.parse_status, 'ERROR')
 
     def test_duplicate_define_name_errors(self):
         _, tree = self.make_material_tree()
@@ -526,6 +629,44 @@ class GLSLFunctionNodeTest(unittest.TestCase):
 
         self.assertEqual(node.parse_status, 'READY')
         self.assertAlmostEqual(find_socket(node.inputs, "strength").default_value, 0.75)
+
+    def test_int_param_choice_items_preserve_and_fallback(self):
+        _, tree = self.make_material_tree()
+        node = tree.nodes.new("ShaderNodeGLSLFunction")
+        text = make_text_block(
+            "glsl_param_int_choices.glsl",
+            "/* @glsl_meta v1\n"
+            "method: label=\"Method\" default=1 "
+            "items=\"0:Burley;1:Random Walk;2:Skin\"\n"
+            "*/\n"
+            "vec4 param_int_choices(vec4 color, int method){\n"
+            "  return color * float(method + 1);\n"
+            "}\n",
+        )
+
+        self.configure_glsl_node(node, "glsl_param_int_choices.glsl", "param_int_choices")
+        self.assertEqual(node.parse_status, 'READY')
+        self.assertEqual(find_socket(node.inputs, "In_method").default_value, 1)
+
+        find_socket(node.inputs, "In_method").default_value = 2
+        refresh_glsl_node(node)
+
+        self.assertEqual(node.parse_status, 'READY')
+        self.assertEqual(find_socket(node.inputs, "In_method").default_value, 2)
+
+        text.clear()
+        text.write(
+            "/* @glsl_meta v1\n"
+            "method: label=\"Method\" default=0 items=\"0:Burley;1:Random Walk\"\n"
+            "*/\n"
+            "vec4 param_int_choices(vec4 color, int method){\n"
+            "  return color * float(method + 1);\n"
+            "}\n"
+        )
+        refresh_glsl_node(node)
+
+        self.assertEqual(node.parse_status, 'READY')
+        self.assertEqual(find_socket(node.inputs, "In_method").default_value, 0)
 
     def test_sampler2d_meta_allows_label_description_and_panel_only(self):
         _, tree = self.make_material_tree()

@@ -18,7 +18,9 @@
 #include "BLO_read_write.hh"
 
 #include "BKE_image.hh"
+#include "BKE_main_invariants.hh"
 #include "BKE_node_runtime.hh"
+#include "BKE_node_tree_update.hh"
 #include "BKE_text.h"
 
 #include "DNA_material_types.h"
@@ -30,11 +32,14 @@
 #include "BLI_path_utils.hh"
 #include "BLI_set.hh"
 #include "BLI_string.h"
+#include "BLI_string_utf8.h"
 #include "CLG_log.h"
 
 #include "GPU_capabilities.hh"
 
 #include "IMB_imbuf_types.hh"
+
+#include "MEM_guardedalloc.h"
 
 #include "intern/gpu_node_graph.hh"
 
@@ -43,9 +48,13 @@
 #include "RNA_access.hh"
 #include "RNA_prototypes.hh"
 
+#include "BKE_context.hh"
+
 #include "UI_interface_layout.hh"
 #include "UI_interface_c.hh"
 #include "UI_resources.hh"
+
+#include "WM_api.hh"
 
 namespace blender
 {
@@ -188,6 +197,12 @@ namespace blender
         InOut,
       };
 
+      struct IntChoiceItem
+      {
+        int value = 0;
+        std::string label;
+      };
+
       struct Meta
       {
         bool has_default_value = false;
@@ -202,12 +217,13 @@ namespace blender
         float max_value = 0.0f;
         bool hide_value = false;
         std::optional<PropertySubType> subtype;
+        Vector<IntChoiceItem> int_choices;
 
         bool has_any() const
         {
           return has_default_value || default_expression.has_value() || panel_name.has_value() ||
             description.has_value() || label.has_value() || has_min || has_max || hide_value ||
-            subtype.has_value();
+            subtype.has_value() || !int_choices.is_empty();
         }
       };
 
@@ -237,6 +253,7 @@ namespace blender
       std::optional<int> max_value;
       std::optional<std::string> label;
       std::optional<std::string> description;
+      Vector<GLSLFunctionParam::IntChoiceItem> int_choices;
     };
 
     struct GLSLDefineValueState
@@ -327,6 +344,7 @@ namespace blender
       std::optional<std::string> max_value;
       std::optional<std::string> hide_value;
       std::optional<std::string> subtype;
+      std::optional<std::string> items;
       std::optional<std::string> panel_name;
       std::optional<std::string> description;
       std::optional<std::string> label;
@@ -334,21 +352,21 @@ namespace blender
       bool has_any() const
       {
         return default_value.has_value() || min_value.has_value() || max_value.has_value() ||
-          hide_value.has_value() || subtype.has_value() || panel_name.has_value() ||
+          hide_value.has_value() || subtype.has_value() || items.has_value() || panel_name.has_value() ||
           description.has_value() || label.has_value();
       }
 
       bool has_sampler_unsupported_meta() const
       {
         return default_value.has_value() || min_value.has_value() || max_value.has_value() ||
-          hide_value.has_value() || subtype.has_value();
+          hide_value.has_value() || subtype.has_value() || items.has_value();
       }
 
       bool has_only_output_supported_meta() const
       {
         return label.has_value() && !default_value.has_value() && !min_value.has_value() &&
           !max_value.has_value() && !hide_value.has_value() && !subtype.has_value() &&
-          !panel_name.has_value() && !description.has_value();
+          !items.has_value() && !panel_name.has_value() && !description.has_value();
       }
     };
 
@@ -1800,6 +1818,89 @@ namespace blender
       return true;
     }
 
+    static bool glsl_int_choice_contains_value(
+      const Span<GLSLFunctionParam::IntChoiceItem> choices,
+      const int value)
+    {
+      for (const GLSLFunctionParam::IntChoiceItem& item : choices)
+      {
+        if (item.value == value)
+        {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    static bool parse_glsl_int_choice_items(const StringRef text,
+      Vector<GLSLFunctionParam::IntChoiceItem>& r_items,
+      std::string& r_error)
+    {
+      const std::string trimmed = trim_copy(text);
+      if (trimmed.empty())
+      {
+        r_error = "GLSL int items list cannot be empty";
+        return false;
+      }
+
+      r_items.clear();
+      Set<int> values;
+      int64_t item_start = 0;
+      while (item_start <= trimmed.size())
+      {
+        const int64_t separator = StringRef(trimmed).find(';', item_start);
+        const int64_t item_end = separator == StringRef::not_found ? trimmed.size() : separator;
+        const std::string item_text = trim_copy(StringRef(trimmed).substr(item_start,
+          item_end - item_start));
+        if (item_text.empty())
+        {
+          r_error = "GLSL int items list contains an empty item";
+          return false;
+        }
+
+        const int64_t label_separator = StringRef(item_text).find(':');
+        if (label_separator == StringRef::not_found)
+        {
+          r_error = "GLSL int items must use 'value:Label' entries";
+          return false;
+        }
+
+        int value = 0;
+        if (!parse_glsl_meta_int_literal(StringRef(item_text).substr(0, label_separator),
+              value,
+              r_error))
+        {
+          return false;
+        }
+
+        std::string label = trim_copy(StringRef(item_text).substr(label_separator + 1));
+        if (label.empty())
+        {
+          r_error = "GLSL int item label cannot be empty";
+          return false;
+        }
+        if (!values.add(value))
+        {
+          r_error = "GLSL int items list contains duplicate value '" + std::to_string(value) + "'";
+          return false;
+        }
+
+        r_items.append({ value, std::move(label) });
+        if (separator == StringRef::not_found)
+        {
+          break;
+        }
+        item_start = separator + 1;
+      }
+
+      if (r_items.is_empty())
+      {
+        r_error = "GLSL int items list cannot be empty";
+        return false;
+      }
+      return true;
+    }
+
     static bool parse_glsl_meta_quoted_string(const StringRef text,
       int64_t& r_index,
       std::string& r_value,
@@ -2099,6 +2200,13 @@ namespace blender
         else if (key == "subtype")
         {
           if (!assign_once(r_meta.subtype, key, value))
+          {
+            return false;
+          }
+        }
+        else if (key == "items")
+        {
+          if (!assign_once(r_meta.items, key, value))
           {
             return false;
           }
@@ -2576,6 +2684,18 @@ namespace blender
           }
           r_define.max_value = value_int;
         }
+        else if (key == "items")
+        {
+          if (r_define.type != SHD_GLSL_FUNCTION_DEFINE_INT)
+          {
+            r_error = "GLSL bool define '" + r_define.name + "' does not support items";
+            return false;
+          }
+          if (!parse_glsl_int_choice_items(value, r_define.int_choices, r_error))
+          {
+            return false;
+          }
+        }
         else if (key == "label")
         {
           r_define.label = std::string(value);
@@ -2602,17 +2722,32 @@ namespace blender
       }
       else
       {
-        if (r_define.min_value.has_value() && r_define.max_value.has_value() &&
+        if (!r_define.int_choices.is_empty())
+        {
+          if (r_define.min_value.has_value() || r_define.max_value.has_value())
+          {
+            r_error = "GLSL int define '" + r_define.name +
+              "' cannot combine items with min or max";
+            return false;
+          }
+          if (!glsl_int_choice_contains_value(r_define.int_choices, r_define.default_value))
+          {
+            r_error = "GLSL int define '" + r_define.name +
+              "' default must be one of its items";
+            return false;
+          }
+        }
+        else if (r_define.min_value.has_value() && r_define.max_value.has_value() &&
           *r_define.min_value > *r_define.max_value)
         {
           r_error = "GLSL define '" + r_define.name + "' has min greater than max";
           return false;
         }
-        if (r_define.min_value.has_value())
+        if (r_define.int_choices.is_empty() && r_define.min_value.has_value())
         {
           r_define.default_value = std::max(r_define.default_value, *r_define.min_value);
         }
-        if (r_define.max_value.has_value())
+        if (r_define.int_choices.is_empty() && r_define.max_value.has_value())
         {
           r_define.default_value = std::min(r_define.default_value, *r_define.max_value);
         }
@@ -2833,6 +2968,11 @@ namespace blender
       {
         return value != 0 ? 1 : 0;
       }
+      if (!define.int_choices.is_empty())
+      {
+        return glsl_int_choice_contains_value(define.int_choices, value) ? value :
+                                                                           define.default_value;
+      }
       int result = value;
       if (define.min_value.has_value())
       {
@@ -2958,6 +3098,50 @@ namespace blender
       {
         ss << define.name << ':' << define.type << '=' << glsl_define_value_or_default(node, define)
           << ';';
+      }
+      return ss.str();
+    }
+
+    static std::string build_glsl_define_meta_signature_key(
+      const Span<GLSLDefineMeta> defines,
+      const bool defines_panel_default_closed)
+    {
+      std::stringstream ss;
+      if (!defines.is_empty())
+      {
+        ss << "defines_panel_closed=" << int(defines_panel_default_closed) << ';';
+      }
+      for (const GLSLDefineMeta& define : defines)
+      {
+        ss << define.name << '{';
+        ss << "type=" << define.type << ';';
+        ss << "default=" << define.default_value << ';';
+        if (define.min_value.has_value())
+        {
+          ss << "min=" << *define.min_value << ';';
+        }
+        if (define.max_value.has_value())
+        {
+          ss << "max=" << *define.max_value << ';';
+        }
+        if (define.label.has_value())
+        {
+          ss << "label=" << *define.label << ';';
+        }
+        if (define.description.has_value())
+        {
+          ss << "description=" << *define.description << ';';
+        }
+        if (!define.int_choices.is_empty())
+        {
+          ss << "items=";
+          for (const GLSLFunctionParam::IntChoiceItem& item : define.int_choices)
+          {
+            ss << item.value << ':' << item.label << '|';
+          }
+          ss << ';';
+        }
+        ss << '}';
       }
       return ss.str();
     }
@@ -3273,6 +3457,24 @@ namespace blender
         return true;
       }
 
+      if (raw_meta.items.has_value())
+      {
+        if (r_param.type != GLSLBoundaryType::Int)
+        {
+          r_error = "GLSL meta items is only supported for int inputs";
+          return false;
+        }
+        if (raw_meta.min_value.has_value() || raw_meta.max_value.has_value())
+        {
+          r_error = "GLSL meta int items cannot be combined with min or max";
+          return false;
+        }
+        if (!parse_glsl_int_choice_items(*raw_meta.items, r_param.meta.int_choices, r_error))
+        {
+          return false;
+        }
+      }
+
       if (raw_meta.default_value.has_value())
       {
         bool parsed_literal_default = false;
@@ -3319,6 +3521,11 @@ namespace blender
         }
         if (!parsed_literal_default)
         {
+          if (raw_meta.items.has_value())
+          {
+            r_error = "GLSL meta int items require an integer literal default";
+            return false;
+          }
           r_param.meta.default_expression = trim_copy(*raw_meta.default_value);
           if (r_param.meta.default_expression->empty())
           {
@@ -3329,6 +3536,21 @@ namespace blender
            * and the wrapper injects the expression only when the input socket is not linked. */
           r_param.meta.hide_value = true;
           r_error.clear();
+        }
+      }
+
+      if (raw_meta.items.has_value())
+      {
+        if (!r_param.meta.has_default_value)
+        {
+          r_error = "GLSL meta int items require default=...";
+          return false;
+        }
+        if (!glsl_int_choice_contains_value(r_param.meta.int_choices,
+              int(r_param.meta.default_value.x)))
+        {
+          r_error = "GLSL meta int default must be one of its items";
+          return false;
         }
       }
 
@@ -3479,6 +3701,15 @@ namespace blender
         if (param.meta.subtype.has_value())
         {
           ss << "subtype=" << int(*param.meta.subtype) << ';';
+        }
+        if (!param.meta.int_choices.is_empty())
+        {
+          ss << "items=";
+          for (const GLSLFunctionParam::IntChoiceItem& item : param.meta.int_choices)
+          {
+            ss << item.value << ':' << item.label << '|';
+          }
+          ss << ';';
         }
         ss << '}';
       }
@@ -5758,6 +5989,14 @@ vec3 glsl_ambient_lighting()
       {
         return result;
       }
+      const std::string define_meta_signature_key = build_glsl_define_meta_signature_key(
+        result.defines, result.defines_panel_default_closed);
+      if (!define_meta_signature_key.empty())
+      {
+        const std::string meta_hash_key = std::to_string(result.meta_hash) +
+          "\n\x1fglsl_define_meta\x1f" + define_meta_signature_key;
+        result.meta_hash = int(BLI_ghashutil_strhash_p(meta_hash_key.c_str()));
+      }
       if (glsl_function_meta_uses_deprecated_eevee_light_access(result.function, deprecated_identifier))
       {
         result.error = "Deprecated Eevee light helper '" + deprecated_identifier +
@@ -5853,6 +6092,136 @@ vec3 glsl_ambient_lighting()
       return param.meta.label.value_or(param.name);
     }
 
+    struct GLSLIntChoiceMenuItem
+    {
+      int value = 0;
+      char label[UI_MAX_NAME_STR] = "";
+    };
+
+    struct GLSLIntChoiceMenuData
+    {
+      bNodeTree* tree = nullptr;
+      bNode* node = nullptr;
+      int* value_ptr = nullptr;
+      bool mark_parse_dirty = false;
+      int items_num = 0;
+      GLSLIntChoiceMenuItem items[1];
+    };
+
+    static const char* glsl_int_choice_label_for_value(
+      const Span<GLSLFunctionParam::IntChoiceItem> choices,
+      const int value,
+      const std::string& fallback)
+    {
+      for (const GLSLFunctionParam::IntChoiceItem& item : choices)
+      {
+        if (item.value == value)
+        {
+          return item.label.c_str();
+        }
+      }
+      return fallback.c_str();
+    }
+
+    static GLSLIntChoiceMenuData* glsl_int_choice_menu_data_create(
+      bNodeTree& tree,
+      bNode& node,
+      int& value,
+      const bool mark_parse_dirty,
+      const Span<GLSLFunctionParam::IntChoiceItem> choices)
+    {
+      BLI_assert(!choices.is_empty());
+      const size_t alloc_size = sizeof(GLSLIntChoiceMenuData) +
+        sizeof(GLSLIntChoiceMenuItem) * size_t(choices.size() - 1);
+      GLSLIntChoiceMenuData* data = static_cast<GLSLIntChoiceMenuData*>(
+        MEM_new_zeroed(alloc_size, __func__));
+      data->tree = &tree;
+      data->node = &node;
+      data->value_ptr = &value;
+      data->mark_parse_dirty = mark_parse_dirty;
+      data->items_num = choices.size();
+      for (const int i : choices.index_range())
+      {
+        data->items[i].value = choices[i].value;
+        STRNCPY_UTF8(data->items[i].label, choices[i].label.c_str());
+      }
+      return data;
+    }
+
+    static void glsl_int_choice_value_changed(bContext* C, void* arg1, void* /*arg2*/)
+    {
+      GLSLIntChoiceMenuData* data = static_cast<GLSLIntChoiceMenuData*>(arg1);
+      if (data == nullptr || data->tree == nullptr || data->node == nullptr)
+      {
+        return;
+      }
+      if (data->mark_parse_dirty)
+      {
+        NodeShaderGLSLFunction& storage = node_storage(*data->node);
+        storage.parse_status = SHD_GLSL_FUNCTION_PARSE_DIRTY;
+        storage.signature_hash = 0;
+      }
+      BKE_ntree_update_tag_node_property(data->tree, data->node);
+      if (Main* bmain = CTX_data_main(C))
+      {
+        BKE_main_ensure_invariants(*bmain, data->tree->id);
+      }
+      WM_main_add_notifier(NC_NODE | NA_EDITED, data->tree);
+    }
+
+    static void glsl_int_choice_menu_draw(bContext* /*C*/, ui::Layout* layout, void* arg)
+    {
+      GLSLIntChoiceMenuData* data = static_cast<GLSLIntChoiceMenuData*>(arg);
+      if (data == nullptr || data->value_ptr == nullptr)
+      {
+        return;
+      }
+
+      ui::Block* block = layout->block();
+      for (const int i : IndexRange(data->items_num))
+      {
+        const GLSLIntChoiceMenuItem& item = data->items[i];
+        ui::Button* but = ui::uiDefButI(block,
+                                        ui::ButtonType::Row,
+                                        item.label,
+                                        0,
+                                        0,
+                                        UI_UNIT_X * 8,
+                                        UI_UNIT_Y,
+                                        data->value_ptr,
+                                        0.0f,
+                                        item.value,
+                                        "");
+        ui::button_func_set(but, glsl_int_choice_value_changed, data, nullptr);
+      }
+    }
+
+    static void draw_glsl_int_choice_menu(ui::Layout& layout,
+                                          bNodeTree& tree,
+                                          bNode& node,
+                                          int& value,
+                                          const Span<GLSLFunctionParam::IntChoiceItem> choices,
+                                          const StringRefNull label,
+                                          const bool mark_parse_dirty)
+    {
+      if (choices.is_empty())
+      {
+        return;
+      }
+      const std::string fallback = std::to_string(value);
+      const char* active_label = glsl_int_choice_label_for_value(choices, value, fallback);
+      ui::Layout& row = layout.row(true);
+      if (!label.is_empty())
+      {
+        row.label(label, ICON_NONE);
+      }
+      row.menu_fn_argN_free(active_label,
+                            ICON_NONE,
+                            glsl_int_choice_menu_draw,
+                            glsl_int_choice_menu_data_create(
+                              tree, node, value, mark_parse_dirty, choices));
+    }
+
     static void add_glsl_socket_declaration(DeclarationListBuilder& b,
       const GLSLFunctionParam& param,
       const bool is_output,
@@ -5920,6 +6289,31 @@ vec3 glsl_ambient_lighting()
           if (param.meta.hide_value)
           {
             decl.hide_value();
+          }
+          if (!param.meta.int_choices.is_empty())
+          {
+            Vector<GLSLFunctionParam::IntChoiceItem> choices = param.meta.int_choices;
+            decl.custom_draw([choices](CustomSocketDrawParams& params) {
+              if (params.socket.is_logically_linked() || (params.socket.flag & SOCK_HIDE_VALUE))
+              {
+                params.draw_standard(params.layout);
+                return;
+              }
+              if (params.socket.default_value == nullptr)
+              {
+                params.draw_standard(params.layout);
+                return;
+              }
+              bNodeSocketValueInt& value =
+                *static_cast<bNodeSocketValueInt*>(params.socket.default_value);
+              draw_glsl_int_choice_menu(params.layout,
+                                        params.tree,
+                                        params.node,
+                                        value.value,
+                                        choices,
+                                        params.label,
+                                        false);
+            });
           }
           apply_input_description(decl);
         }
@@ -6038,6 +6432,23 @@ vec3 glsl_ambient_lighting()
       /* Socket declarations already initialize defaults for newly created sockets. Re-applying
        * GLSL meta defaults here would overwrite user-edited values on refresh for unchanged
        * parameters with the same identifier. */
+      for (const GLSLFunctionParam& param : parse_result.function.params)
+      {
+        if (param.type != GLSLBoundaryType::Int || param.meta.int_choices.is_empty())
+        {
+          continue;
+        }
+        bNodeSocket* socket = find_node_input_socket_by_identifier(node, param.identifier);
+        if (socket == nullptr || socket->type != SOCK_INT || socket->default_value == nullptr)
+        {
+          continue;
+        }
+        bNodeSocketValueInt& value = *static_cast<bNodeSocketValueInt*>(socket->default_value);
+        if (!glsl_int_choice_contains_value(param.meta.int_choices, value.value))
+        {
+          value.value = int(param.meta.default_value.x);
+        }
+      }
       storage.meta_hash = parse_result.meta_hash;
     }
 
@@ -6289,9 +6700,22 @@ vec3 glsl_ambient_lighting()
         PointerRNA value_ptr = RNA_pointer_create_discrete(
           ptr->owner_id, RNA_ShaderNodeGLSLDefineValue, value);
         const std::string label = define.label.value_or(define.name);
-        const char* prop_name = define.type == SHD_GLSL_FUNCTION_DEFINE_BOOL ? "bool_value" :
-                                                                                "int_value";
-        layout.prop(&value_ptr, prop_name, UI_ITEM_NONE, label.c_str(), ICON_NONE);
+        if (define.type == SHD_GLSL_FUNCTION_DEFINE_INT && !define.int_choices.is_empty())
+        {
+          draw_glsl_int_choice_menu(layout,
+                                    *reinterpret_cast<bNodeTree*>(ptr->owner_id),
+                                    node,
+                                    value->value,
+                                    define.int_choices,
+                                    label,
+                                    true);
+        }
+        else
+        {
+          const char* prop_name = define.type == SHD_GLSL_FUNCTION_DEFINE_BOOL ? "bool_value" :
+                                                                                  "int_value";
+          layout.prop(&value_ptr, prop_name, UI_ITEM_NONE, label.c_str(), ICON_NONE);
+        }
         if (define.description.has_value() && !define.description->empty())
         {
           ui::Layout& description_row = layout.row(false);
