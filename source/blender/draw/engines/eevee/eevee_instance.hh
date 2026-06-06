@@ -356,7 +356,12 @@ namespace blender::eevee
 
     bool is_viewport() const
     {
-      return render == nullptr && !is_baking();
+      return render == nullptr && !is_baking() && draw_ctx != nullptr &&
+             ELEM(draw_ctx->mode,
+                  DRWContext::VIEWPORT,
+                  DRWContext::VIEWPORT_XR,
+                  DRWContext::VIEWPORT_OFFSCREEN,
+                  DRWContext::VIEWPORT_RENDER);
     }
 
     bool is_baking() const
