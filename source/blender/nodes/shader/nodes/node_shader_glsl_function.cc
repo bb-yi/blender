@@ -5882,7 +5882,7 @@ vec3 glsl_ambient_lighting()
       }
     }
 
-    static void draw_node_layout_content(ui::Layout& layout, bContext* C, PointerRNA* ptr)
+    static GLSLParseResult draw_node_layout_content(ui::Layout& layout, bContext* C, PointerRNA* ptr)
     {
       layout.use_property_split_set(true);
       layout.use_property_decorate_set(false);
@@ -5969,6 +5969,8 @@ vec3 glsl_ambient_lighting()
       {
         layout.label(parse_result.error.c_str(), ICON_ERROR);
       }
+
+      return parse_result;
     }
 
     static void draw_glsl_define_settings(ui::Layout& layout,
@@ -6016,28 +6018,32 @@ vec3 glsl_ambient_lighting()
       }
     }
 
+    static void draw_glsl_define_panel(ui::Layout& layout,
+                                       bContext* C,
+                                       PointerRNA* ptr,
+                                       const GLSLParseResult& parse_result,
+                                       const char* panel_id)
+    {
+      if (C == nullptr || !parse_result.ok || parse_result.defines.is_empty())
+      {
+        return;
+      }
+      if (ui::Layout* panel = layout.panel(C, panel_id, false, IFACE_("Defines")))
+      {
+        draw_glsl_define_settings(*panel, ptr, parse_result);
+      }
+    }
+
     static void node_layout(ui::Layout& layout, bContext* C, PointerRNA* ptr)
     {
-      draw_node_layout_content(layout, C, ptr);
+      const GLSLParseResult parse_result = draw_node_layout_content(layout, C, ptr);
+      draw_glsl_define_panel(layout, C, ptr, parse_result, "glsl_function_defines_node");
     }
 
     static void node_layout_ex(ui::Layout& layout, bContext* C, PointerRNA* ptr)
     {
-      draw_node_layout_content(layout, C, ptr);
-      bNode& node = *static_cast<bNode*>(ptr->data);
-      const GLSLParseResult parse_result = parse_glsl_for_node(node);
-      cache_parse_status(node, parse_result);
-      sync_glsl_define_values(node, parse_result);
-      sync_glsl_meta_defaults(node, parse_result);
-
-      if (!parse_result.ok || parse_result.defines.is_empty())
-      {
-        return;
-      }
-      if (ui::Layout* panel = layout.panel(C, "glsl_function_defines", false, IFACE_("Defines")))
-      {
-        draw_glsl_define_settings(*panel, ptr, parse_result);
-      }
+      const GLSLParseResult parse_result = draw_node_layout_content(layout, C, ptr);
+      draw_glsl_define_panel(layout, C, ptr, parse_result, "glsl_function_defines");
     }
 
     static void node_init(bNodeTree* /*ntree*/, bNode* node)
