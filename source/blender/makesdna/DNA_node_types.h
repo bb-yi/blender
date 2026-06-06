@@ -1333,6 +1333,11 @@ enum NodeGLSLFunctionParseStatus {
   SHD_GLSL_FUNCTION_PARSE_ERROR = 2,
 };
 
+enum NodeGLSLFunctionDefineType {
+  SHD_GLSL_FUNCTION_DEFINE_BOOL = 0,
+  SHD_GLSL_FUNCTION_DEFINE_INT = 1,
+};
+
 enum NodeFilterMaskMode {
   SHD_FILTER_MASK_SINGLE_OBJECT = 0,
   SHD_FILTER_MASK_OBJECT_LIST = 1,
@@ -3114,6 +3119,15 @@ struct NodeShaderScriptExpression {
 #endif
 };
 
+struct NodeShaderGLSLDefineValue {
+  DNA_DEFINE_CXX_METHODS(NodeShaderGLSLDefineValue)
+
+  char name[64] = "";
+  /** #NodeGLSLFunctionDefineType. */
+  int type = SHD_GLSL_FUNCTION_DEFINE_BOOL;
+  int value = 0;
+};
+
 struct NodeShaderGLSLFunction {
   DNA_DEFINE_CXX_METHODS(NodeShaderGLSLFunction)
 
@@ -3127,8 +3141,9 @@ struct NodeShaderGLSLFunction {
 
   char function_name[64] = "";
   char filepath[/*FILE_MAX*/ 1024] = "";
-  char _pad[4] = {};
+  int define_values_num = 0;
   char *packed_source = nullptr;
+  NodeShaderGLSLDefineValue *define_values = nullptr;
 };
 
 struct NodeShaderTangent {
