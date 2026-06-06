@@ -44,6 +44,13 @@ def find_socket(sockets, name):
     raise AssertionError(f"Socket {name!r} not found")
 
 
+def find_define_value(node, name):
+    for value in node.define_values:
+        if value.name == name:
+            return value
+    raise AssertionError(f"Define {name!r} not found")
+
+
 def refresh_glsl_node(node):
     current_name = node.function_name
     node.function_name = ""
@@ -245,6 +252,219 @@ class GLSLFunctionNodeTest(unittest.TestCase):
         self.assertEqual(color_socket.bl_idname, "NodeSocketVector4D")
         self.assertEqual(tex_socket.bl_idname, "NodeSocketClosure")
         self.assertEqual(out_socket.bl_idname, "NodeSocketVector")
+
+    def test_defines_are_parsed_and_not_sockets(self):
+        _, tree = self.make_material_tree()
+        glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        source = (
+            "/* @glsl_defines v1\n"
+            "@define USE_RIM bool default=true label=\"Rim\" description=\"Compile rim branch\"\n"
+            "@define EFFECT_MODE int default=1 min=0 max=3 label=\"Mode\"\n"
+            "*/\n"
+            "vec4 define_probe(vec4 color){\n"
+            "#ifdef USE_RIM\n"
+            "  color.rgb += vec3(0.1);\n"
+            "#endif\n"
+            "#if EFFECT_MODE == 2\n"
+            "  color.rgb *= 0.5;\n"
+            "#endif\n"
+            "  return color;\n"
+            "}\n"
+        )
+        make_text_block("glsl_defines_probe.glsl", source)
+
+        self.configure_glsl_node(glsl_node, "glsl_defines_probe.glsl", "define_probe")
+
+        self.assertEqual(glsl_node.parse_status, 'READY')
+        self.assertEqual([value.name for value in glsl_node.define_values], ["USE_RIM", "EFFECT_MODE"])
+
+        use_rim = find_define_value(glsl_node, "USE_RIM")
+        effect_mode = find_define_value(glsl_node, "EFFECT_MODE")
+        self.assertEqual(use_rim.type, 'BOOL')
+        self.assertTrue(use_rim.bool_value)
+        self.assertEqual(effect_mode.type, 'INT')
+        self.assertEqual(effect_mode.int_value, 1)
+
+        input_keys = {socket.name for socket in glsl_node.inputs}
+        input_keys.update(socket.identifier for socket in glsl_node.inputs)
+        self.assertNotIn("USE_RIM", input_keys)
+        self.assertNotIn("EFFECT_MODE", input_keys)
+
+    def test_defines_panel_default_closed_option_parses(self):
+        _, tree = self.make_material_tree()
+        glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        source = (
+            "/* @glsl_defines v1 closed=true\n"
+            "@define USE_RIM bool default=true label=\"Rim\"\n"
+            "*/\n"
+            "vec4 define_closed(vec4 color){return color;}\n"
+        )
+        make_text_block("glsl_defines_closed.glsl", source)
+
+        self.configure_glsl_node(glsl_node, "glsl_defines_closed.glsl", "define_closed")
+
+        self.assertEqual(glsl_node.parse_status, 'READY')
+        self.assertEqual([value.name for value in glsl_node.define_values], ["USE_RIM"])
+        self.assertTrue(find_define_value(glsl_node, "USE_RIM").bool_value)
+
+    def test_define_name_too_long_errors(self):
+        _, tree = self.make_material_tree()
+        glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        long_define_name = "A" * 64
+        source = (
+            "/* @glsl_defines v1\n"
+            f"@define {long_define_name} bool default=true\n"
+            "*/\n"
+            "vec4 define_long_name(vec4 color){return color;}\n"
+        )
+        make_text_block("glsl_define_long_name.glsl", source)
+
+        self.configure_glsl_node(glsl_node, "glsl_define_long_name.glsl", "define_long_name")
+
+        self.assertEqual(glsl_node.parse_status, 'ERROR')
+
+    def test_top_level_conditional_function_errors(self):
+        _, tree = self.make_material_tree()
+        glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        source = (
+            "/* @glsl_defines v1\n"
+            "@define USE_ALT bool default=true\n"
+            "*/\n"
+            "#ifdef USE_ALT\n"
+            "vec4 conditional_helper(vec4 color){return color + vec4(0.1);}\n"
+            "#endif\n"
+            "vec4 conditional_export(vec4 color){return color;}\n"
+        )
+        make_text_block("glsl_conditional_top_level_function.glsl", source)
+
+        self.configure_glsl_node(
+            glsl_node, "glsl_conditional_top_level_function.glsl", "conditional_export")
+
+        self.assertEqual(glsl_node.parse_status, 'ERROR')
+
+    def test_top_level_preprocessor_only_conditional_parses(self):
+        _, tree = self.make_material_tree()
+        glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        source = (
+            "/* @glsl_defines v1\n"
+            "@define USE_CONST bool default=true\n"
+            "*/\n"
+            "#ifdef USE_CONST\n"
+            "#define GLSL_CONST_VALUE 0.25\n"
+            "#endif\n"
+            "vec4 conditional_define_only(vec4 color){return color + vec4(GLSL_CONST_VALUE);}\n"
+        )
+        make_text_block("glsl_conditional_define_only.glsl", source)
+
+        self.configure_glsl_node(
+            glsl_node, "glsl_conditional_define_only.glsl", "conditional_define_only")
+
+        self.assertEqual(glsl_node.parse_status, 'READY')
+
+    def test_define_header_unknown_attribute_errors(self):
+        _, tree = self.make_material_tree()
+        glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        source = (
+            "/* @glsl_defines v1 open=true\n"
+            "@define USE_RIM bool default=true\n"
+            "*/\n"
+            "vec4 define_bad_header(vec4 color){return color;}\n"
+        )
+        make_text_block("glsl_defines_bad_header.glsl", source)
+
+        self.configure_glsl_node(glsl_node, "glsl_defines_bad_header.glsl", "define_bad_header")
+
+        self.assertEqual(glsl_node.parse_status, 'ERROR')
+
+    def test_conflicting_define_panel_default_closed_values_error(self):
+        _, tree = self.make_material_tree()
+        glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        source = (
+            "/* @glsl_defines v1 closed=true\n"
+            "@define USE_RIM bool default=true\n"
+            "*/\n"
+            "/* @glsl_defines v1 closed=false\n"
+            "@define EFFECT_MODE int default=1\n"
+            "*/\n"
+            "vec4 define_conflicting_panels(vec4 color){return color;}\n"
+        )
+        make_text_block("glsl_defines_conflicting_panels.glsl", source)
+
+        self.configure_glsl_node(
+            glsl_node, "glsl_defines_conflicting_panels.glsl", "define_conflicting_panels")
+
+        self.assertEqual(glsl_node.parse_status, 'ERROR')
+
+    def test_define_values_preserve_and_drop_stale_entries(self):
+        _, tree = self.make_material_tree()
+        glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        text = make_text_block(
+            "glsl_defines_preserve.glsl",
+            "/* @glsl_defines v1\n"
+            "@define USE_RIM bool default=true\n"
+            "@define EFFECT_MODE int default=1 min=0 max=3\n"
+            "*/\n"
+            "vec4 define_preserve(vec4 color){return color;}\n",
+        )
+        self.configure_glsl_node(glsl_node, "glsl_defines_preserve.glsl", "define_preserve")
+
+        find_define_value(glsl_node, "USE_RIM").bool_value = False
+        find_define_value(glsl_node, "EFFECT_MODE").int_value = 2
+        refresh_glsl_node(glsl_node)
+
+        self.assertEqual(glsl_node.parse_status, 'READY')
+        self.assertFalse(find_define_value(glsl_node, "USE_RIM").bool_value)
+        self.assertEqual(find_define_value(glsl_node, "EFFECT_MODE").int_value, 2)
+
+        text.clear()
+        text.write(
+            "/* @glsl_defines v1\n"
+            "@define USE_RIM bool default=true\n"
+            "*/\n"
+            "vec4 define_preserve(vec4 color){return color;}\n"
+        )
+        refresh_glsl_node(glsl_node)
+
+        self.assertEqual(glsl_node.parse_status, 'READY')
+        self.assertEqual([value.name for value in glsl_node.define_values], ["USE_RIM"])
+        self.assertFalse(find_define_value(glsl_node, "USE_RIM").bool_value)
+
+    def test_define_values_do_not_change_signature_hash(self):
+        _, tree = self.make_material_tree()
+        glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        source = (
+            "/* @glsl_defines v1\n"
+            "@define USE_RIM bool default=true\n"
+            "*/\n"
+            "vec4 define_signature(vec4 color){return color;}\n"
+        )
+        make_text_block("glsl_defines_signature.glsl", source)
+        self.configure_glsl_node(glsl_node, "glsl_defines_signature.glsl", "define_signature")
+
+        self.assertEqual(glsl_node.parse_status, 'READY')
+        signature_hash = glsl_node.signature_hash
+
+        find_define_value(glsl_node, "USE_RIM").bool_value = False
+        refresh_glsl_node(glsl_node)
+
+        self.assertEqual(glsl_node.parse_status, 'READY')
+        self.assertEqual(glsl_node.signature_hash, signature_hash)
+
+    def test_duplicate_define_name_errors(self):
+        _, tree = self.make_material_tree()
+        glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        source = (
+            "/* @glsl_defines v1\n"
+            "@define USE_RIM bool default=true\n"
+            "@define USE_RIM bool default=false\n"
+            "*/\n"
+            "vec4 duplicate_define(vec4 color){return color;}\n"
+        )
+        make_text_block("glsl_duplicate_define.glsl", source)
+
+        self.configure_glsl_node(glsl_node, "glsl_duplicate_define.glsl", "duplicate_define")
+
+        self.assertEqual(glsl_node.parse_status, 'ERROR')
 
     def test_node_group_refresh_operator_updates_glsl_sockets(self):
         group = bpy.data.node_groups.new("GLSLGroupRefreshOperatorTest", "ShaderNodeTree")

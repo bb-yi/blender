@@ -12,6 +12,7 @@
 #include <type_traits>
 
 #include "BLI_linear_allocator.hh"
+#include "BLI_index_range.hh"
 #include "BLI_math_base.h"
 #include "BLI_math_rotation.h"
 #include "BLI_string.h"
@@ -4653,6 +4654,62 @@ static NodeShaderGLSLFunction *rna_ShaderNodeGLSLFunction_ensure_parsed(PointerR
   return data;
 }
 
+static void rna_ShaderNodeGLSLFunction_define_values_begin(CollectionPropertyIterator *iter,
+                                                           PointerRNA *ptr)
+{
+  NodeShaderGLSLFunction *data = rna_ShaderNodeGLSLFunction_ensure_parsed(ptr);
+  if (data == nullptr) {
+    rna_iterator_array_begin(iter, ptr, nullptr, sizeof(NodeShaderGLSLDefineValue), 0, false, nullptr);
+    return;
+  }
+  rna_iterator_array_begin(iter,
+                           ptr,
+                           data->define_values,
+                           sizeof(NodeShaderGLSLDefineValue),
+                           data->define_values_num,
+                           false,
+                           nullptr);
+}
+
+static int rna_ShaderNodeGLSLFunction_define_values_length(PointerRNA *ptr)
+{
+  NodeShaderGLSLFunction *data = rna_ShaderNodeGLSLFunction_ensure_parsed(ptr);
+  return data != nullptr ? data->define_values_num : 0;
+}
+
+static bool rna_ShaderNodeGLSLFunction_define_values_lookup_int(PointerRNA *ptr,
+                                                                int index,
+                                                                PointerRNA *r_ptr)
+{
+  NodeShaderGLSLFunction *data = rna_ShaderNodeGLSLFunction_ensure_parsed(ptr);
+  if (data == nullptr || index < 0 || index >= data->define_values_num ||
+      data->define_values == nullptr)
+  {
+    return false;
+  }
+  rna_pointer_create_with_ancestors(
+      *ptr, RNA_ShaderNodeGLSLDefineValue, &data->define_values[index], *r_ptr);
+  return true;
+}
+
+static bool rna_ShaderNodeGLSLFunction_define_values_lookup_string(PointerRNA *ptr,
+                                                                   const char *key,
+                                                                   PointerRNA *r_ptr)
+{
+  NodeShaderGLSLFunction *data = rna_ShaderNodeGLSLFunction_ensure_parsed(ptr);
+  if (data == nullptr || data->define_values == nullptr) {
+    return false;
+  }
+  for (const int i : IndexRange(data->define_values_num)) {
+    NodeShaderGLSLDefineValue &value = data->define_values[i];
+    if (STREQ(value.name, key)) {
+      rna_pointer_create_with_ancestors(*ptr, RNA_ShaderNodeGLSLDefineValue, &value, *r_ptr);
+      return true;
+    }
+  }
+  return false;
+}
+
 static int rna_ShaderNodeGLSLFunction_parse_status_get(PointerRNA *ptr)
 {
   NodeShaderGLSLFunction *data = rna_ShaderNodeGLSLFunction_ensure_parsed(ptr);
@@ -4697,6 +4754,80 @@ static void rna_ShaderNodeGLSLFunction_source_mode_set(PointerRNA *ptr, int valu
       node->id = nullptr;
     }
   }
+}
+
+static bNode *rna_ShaderNodeGLSLDefineValue_find_node(bNodeTree &ntree,
+                                                      NodeShaderGLSLDefineValue &define_value)
+{
+  for (bNode *node = static_cast<bNode *>(ntree.nodes.first); node != nullptr; node = node->next) {
+    if (node->type_legacy != SH_NODE_GLSL_FUNCTION || node->storage == nullptr) {
+      continue;
+    }
+    NodeShaderGLSLFunction *data = static_cast<NodeShaderGLSLFunction *>(node->storage);
+    if (data->define_values == nullptr || data->define_values_num <= 0) {
+      continue;
+    }
+    if (&define_value >= data->define_values &&
+        &define_value < (data->define_values + data->define_values_num))
+    {
+      return node;
+    }
+  }
+  return nullptr;
+}
+
+static void rna_ShaderNodeGLSLDefineValue_update(Main *bmain, Scene * /*scene*/, PointerRNA *ptr)
+{
+  bNodeTree &ntree = *reinterpret_cast<bNodeTree *>(ptr->owner_id);
+  NodeShaderGLSLDefineValue &define_value = *static_cast<NodeShaderGLSLDefineValue *>(ptr->data);
+  bNode *owner_node = rna_ShaderNodeGLSLDefineValue_find_node(ntree, define_value);
+  if (owner_node == nullptr) {
+    return;
+  }
+
+  NodeShaderGLSLFunction *data = static_cast<NodeShaderGLSLFunction *>(owner_node->storage);
+  if (data != nullptr) {
+    data->parse_status = SHD_GLSL_FUNCTION_PARSE_DIRTY;
+  }
+
+  BKE_ntree_update_tag_node_property(&ntree, owner_node);
+  BKE_main_ensure_invariants(*bmain, ntree.id);
+}
+
+static void rna_ShaderNodeGLSLDefineValue_name_get(PointerRNA *ptr, char *value)
+{
+  NodeShaderGLSLDefineValue *define_value = static_cast<NodeShaderGLSLDefineValue *>(ptr->data);
+  strcpy(value, define_value->name);
+}
+
+static int rna_ShaderNodeGLSLDefineValue_name_length(PointerRNA *ptr)
+{
+  NodeShaderGLSLDefineValue *define_value = static_cast<NodeShaderGLSLDefineValue *>(ptr->data);
+  return int(strlen(define_value->name));
+}
+
+static bool rna_ShaderNodeGLSLDefineValue_bool_get(PointerRNA *ptr)
+{
+  NodeShaderGLSLDefineValue *define_value = static_cast<NodeShaderGLSLDefineValue *>(ptr->data);
+  return define_value->value != 0;
+}
+
+static void rna_ShaderNodeGLSLDefineValue_bool_set(PointerRNA *ptr, bool value)
+{
+  NodeShaderGLSLDefineValue *define_value = static_cast<NodeShaderGLSLDefineValue *>(ptr->data);
+  define_value->value = value ? 1 : 0;
+}
+
+static int rna_ShaderNodeGLSLDefineValue_int_get(PointerRNA *ptr)
+{
+  NodeShaderGLSLDefineValue *define_value = static_cast<NodeShaderGLSLDefineValue *>(ptr->data);
+  return define_value->value;
+}
+
+static void rna_ShaderNodeGLSLDefineValue_int_set(PointerRNA *ptr, int value)
+{
+  NodeShaderGLSLDefineValue *define_value = static_cast<NodeShaderGLSLDefineValue *>(ptr->data);
+  define_value->value = value;
 }
 
 static int rna_ShaderNodeShaderInfo_lightgroup_id_get(PointerRNA *ptr)
@@ -5152,6 +5283,12 @@ static const EnumPropertyItem node_glsl_function_parse_status_items[] = {
      0,
      "Error",
      "The GLSL function metadata failed to parse"},
+    {0, nullptr, 0, nullptr, nullptr},
+};
+
+static const EnumPropertyItem node_glsl_function_define_type_items[] = {
+    {SHD_GLSL_FUNCTION_DEFINE_BOOL, "BOOL", 0, "Boolean", "Boolean compile define"},
+    {SHD_GLSL_FUNCTION_DEFINE_INT, "INT", 0, "Integer", "Integer compile define"},
     {0, nullptr, 0, nullptr, nullptr},
 };
 
@@ -7585,9 +7722,54 @@ static void def_sh_script(BlenderRNA * /*brna*/, StructRNA *srna)
 #  endif
 }
 
-static void def_sh_glsl_function(BlenderRNA * /*brna*/, StructRNA *srna)
+static void rna_def_sh_glsl_define_value(BlenderRNA *brna)
+{
+  StructRNA *srna = RNA_def_struct(brna, "ShaderNodeGLSLDefineValue", nullptr);
+  RNA_def_struct_ui_text(srna, "GLSL Function Define Value", "");
+  RNA_def_struct_sdna(srna, "NodeShaderGLSLDefineValue");
+
+  PropertyRNA *prop = RNA_def_property(srna, "name", PROP_STRING, PROP_NONE);
+  RNA_def_property_string_funcs(prop,
+                                "rna_ShaderNodeGLSLDefineValue_name_get",
+                                "rna_ShaderNodeGLSLDefineValue_name_length",
+                                nullptr);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_ui_text(prop, "Name", "GLSL preprocessor define name");
+  RNA_def_struct_name_property(srna, prop);
+
+  prop = RNA_def_property(srna, "type", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "type");
+  RNA_def_property_enum_items(prop, node_glsl_function_define_type_items);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_ui_text(prop, "Type", "GLSL preprocessor define value type");
+
+  prop = RNA_def_property(srna, "value", PROP_INT, PROP_NONE);
+  RNA_def_property_int_sdna(prop, nullptr, "value");
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_ui_text(prop, "Raw Value", "Stored integer value for the GLSL define");
+
+  prop = RNA_def_property(srna, "bool_value", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_funcs(prop,
+                                 "rna_ShaderNodeGLSLDefineValue_bool_get",
+                                 "rna_ShaderNodeGLSLDefineValue_bool_set");
+  RNA_def_property_ui_text(prop, "Value", "Boolean value for the GLSL define");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_ShaderNodeGLSLDefineValue_update");
+
+  prop = RNA_def_property(srna, "int_value", PROP_INT, PROP_NONE);
+  RNA_def_property_int_funcs(prop,
+                             "rna_ShaderNodeGLSLDefineValue_int_get",
+                             "rna_ShaderNodeGLSLDefineValue_int_set",
+                             nullptr);
+  RNA_def_property_range(prop, INT_MIN, INT_MAX);
+  RNA_def_property_ui_text(prop, "Value", "Integer value for the GLSL define");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_ShaderNodeGLSLDefineValue_update");
+}
+
+static void def_sh_glsl_function(BlenderRNA *brna, StructRNA *srna)
 {
   PropertyRNA *prop;
+
+  rna_def_sh_glsl_define_value(brna);
 
   prop = RNA_def_property(srna, "script", PROP_POINTER, PROP_NONE);
   RNA_def_property_pointer_sdna(prop, nullptr, "id");
@@ -7630,6 +7812,21 @@ static void def_sh_glsl_function(BlenderRNA * /*brna*/, StructRNA *srna)
   RNA_def_property_clear_flag(prop, PROP_EDITABLE);
   RNA_def_property_ui_text(
       prop, "Signature Hash", "Cached hash for the parsed GLSL function signature");
+
+  prop = RNA_def_property(srna, "define_values", PROP_COLLECTION, PROP_NONE);
+  RNA_def_property_collection_sdna(prop, nullptr, "define_values", "define_values_num");
+  RNA_def_property_struct_type(prop, "ShaderNodeGLSLDefineValue");
+  RNA_def_property_collection_funcs(prop,
+                                    "rna_ShaderNodeGLSLFunction_define_values_begin",
+                                    "rna_iterator_array_next",
+                                    "rna_iterator_array_end",
+                                    "rna_iterator_array_get",
+                                    "rna_ShaderNodeGLSLFunction_define_values_length",
+                                    "rna_ShaderNodeGLSLFunction_define_values_lookup_int",
+                                    "rna_ShaderNodeGLSLFunction_define_values_lookup_string",
+                                    nullptr);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_ui_text(prop, "Defines", "Compile-time GLSL define values");
 
   RNA_def_struct_sdna_from(srna, "bNode", nullptr);
 }
