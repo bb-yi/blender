@@ -14,6 +14,7 @@
 
 #include "BLI_hash.h"
 #include "BLI_listbase.h"
+#include "BLI_map.hh"
 #include "BLI_math_matrix.hh"
 #include "BLI_set.hh"
 #include "BLI_vector.hh"
@@ -21,6 +22,7 @@
 #include "BKE_collection.hh"
 #include "BKE_cryptomatte.hh"
 #include "BKE_node_legacy_types.hh"
+#include "BKE_node_runtime.hh"
 #include "BKE_node.hh"
 
 #include "DEG_depsgraph_query.hh"
@@ -185,45 +187,287 @@ static Vector<std::string> filter_material_collect_conflicting_aov_names(
   return conflicts;
 }
 
+static bool filter_material_scene_sources_complete(const bool uses_scene_depth,
+                                                   const bool uses_scene_normal,
+                                                   const bool uses_scene_position,
+                                                   const bool uses_cryptomatte_object)
+{
+  return uses_scene_depth && uses_scene_normal && uses_scene_position && uses_cryptomatte_object;
+}
+
+static const bNode *filter_material_active_output_node(const bNodeTree &ntree,
+                                                       const int output_type)
+{
+  for (const bNode *node : ntree.all_nodes()) {
+    if (node->type_legacy == output_type && (node->flag & NODE_DO_OUTPUT) && !node->is_muted()) {
+      return node;
+    }
+  }
+  for (const bNode *node : ntree.all_nodes()) {
+    if (node->type_legacy == output_type && !node->is_muted()) {
+      return node;
+    }
+  }
+  return nullptr;
+}
+
+static void filter_material_collect_scene_sources_from_socket(
+    const bNodeTree &ntree,
+    const bNodeSocket *root_socket,
+    Set<const bNodeTree *> &active_trees,
+    Map<const bNodeTree *, const bNode *> &group_node_by_tree,
+    bool &r_uses_scene_depth,
+    bool &r_uses_scene_normal,
+    bool &r_uses_scene_position,
+    bool &r_uses_cryptomatte_object);
+
+static void filter_material_collect_scene_source_node(const bNode &node,
+                                                      bool &r_uses_scene_depth,
+                                                      bool &r_uses_scene_normal,
+                                                      bool &r_uses_scene_position,
+                                                      bool &r_uses_cryptomatte_object)
+{
+  if (node.type_legacy == SH_NODE_SCENE_COLOR) {
+    const int source = node.custom1;
+    r_uses_scene_depth |= (source == SHD_SCENE_SOURCE_DEPTH);
+    r_uses_scene_normal |= (source == SHD_SCENE_SOURCE_NORMAL);
+    r_uses_scene_position |= (source == SHD_SCENE_SOURCE_POSITION);
+  }
+  else if (node.type_legacy == SH_NODE_FILTER_OBJECT_MASK) {
+    r_uses_cryptomatte_object = true;
+  }
+}
+
+static void filter_material_collect_scene_sources_from_node(
+    const bNodeTree &ntree,
+    const bNode *node,
+    const bNodeSocket *output_socket,
+    Set<const bNodeTree *> &active_trees,
+    Map<const bNodeTree *, const bNode *> &group_node_by_tree,
+    bool &r_uses_scene_depth,
+    bool &r_uses_scene_normal,
+    bool &r_uses_scene_position,
+    bool &r_uses_cryptomatte_object)
+{
+  if (node == nullptr || node->is_muted() ||
+      filter_material_scene_sources_complete(r_uses_scene_depth,
+                                             r_uses_scene_normal,
+                                             r_uses_scene_position,
+                                             r_uses_cryptomatte_object))
+  {
+    return;
+  }
+
+  if (node->type_legacy == NODE_GROUP) {
+    const bNodeTree *group_tree = reinterpret_cast<const bNodeTree *>(node->id);
+    if (group_tree == nullptr || output_socket == nullptr) {
+      return;
+    }
+
+    const bNode *group_output_node = filter_material_active_output_node(*group_tree,
+                                                                        NODE_GROUP_OUTPUT);
+    if (group_output_node == nullptr) {
+      return;
+    }
+
+    const bNodeSocket *group_output_input = group_output_node->input_by_identifier(
+        output_socket->identifier);
+    const bNode *previous_group_node = group_node_by_tree.lookup_default(group_tree, nullptr);
+    group_node_by_tree.add_overwrite(group_tree, node);
+    filter_material_collect_scene_sources_from_socket(*group_tree,
+                                                      group_output_input,
+                                                      active_trees,
+                                                      group_node_by_tree,
+                                                      r_uses_scene_depth,
+                                                      r_uses_scene_normal,
+                                                      r_uses_scene_position,
+                                                      r_uses_cryptomatte_object);
+    if (previous_group_node != nullptr) {
+      group_node_by_tree.add_overwrite(group_tree, previous_group_node);
+    }
+    else {
+      group_node_by_tree.remove(group_tree);
+    }
+    return;
+  }
+
+  if (node->type_legacy == NODE_GROUP_INPUT) {
+    const bNode *group_node = group_node_by_tree.lookup_default(&ntree, nullptr);
+    if (group_node == nullptr || output_socket == nullptr) {
+      return;
+    }
+
+    if (const bNodeSocket *group_input = group_node->input_by_identifier(output_socket->identifier))
+    {
+      const bNodeTree &owner_tree = group_node->owner_tree();
+      owner_tree.ensure_topology_cache();
+      for (const bNodeLink *link : group_input->directly_linked_links()) {
+        if (!link->is_used()) {
+          continue;
+        }
+        filter_material_collect_scene_sources_from_node(owner_tree,
+                                                        link->fromnode,
+                                                        link->fromsock,
+                                                        active_trees,
+                                                        group_node_by_tree,
+                                                        r_uses_scene_depth,
+                                                        r_uses_scene_normal,
+                                                        r_uses_scene_position,
+                                                        r_uses_cryptomatte_object);
+        if (filter_material_scene_sources_complete(r_uses_scene_depth,
+                                                   r_uses_scene_normal,
+                                                   r_uses_scene_position,
+                                                   r_uses_cryptomatte_object))
+        {
+          break;
+        }
+      }
+    }
+    return;
+  }
+
+  filter_material_collect_scene_source_node(
+      *node, r_uses_scene_depth, r_uses_scene_normal, r_uses_scene_position, r_uses_cryptomatte_object);
+
+  for (const bNodeSocket *socket : node->input_sockets()) {
+    for (const bNodeLink *link : socket->directly_linked_links()) {
+      if (!link->is_used()) {
+        continue;
+      }
+      filter_material_collect_scene_sources_from_node(ntree,
+                                                      link->fromnode,
+                                                      link->fromsock,
+                                                      active_trees,
+                                                      group_node_by_tree,
+                                                      r_uses_scene_depth,
+                                                      r_uses_scene_normal,
+                                                      r_uses_scene_position,
+                                                      r_uses_cryptomatte_object);
+      if (filter_material_scene_sources_complete(r_uses_scene_depth,
+                                                 r_uses_scene_normal,
+                                                 r_uses_scene_position,
+                                                 r_uses_cryptomatte_object))
+      {
+        return;
+      }
+    }
+  }
+}
+
+static void filter_material_collect_scene_sources_from_socket(
+    const bNodeTree &ntree,
+    const bNodeSocket *root_socket,
+    Set<const bNodeTree *> &active_trees,
+    Map<const bNodeTree *, const bNode *> &group_node_by_tree,
+    bool &r_uses_scene_depth,
+    bool &r_uses_scene_normal,
+    bool &r_uses_scene_position,
+    bool &r_uses_cryptomatte_object)
+{
+  if (root_socket == nullptr || active_trees.contains(&ntree)) {
+    return;
+  }
+
+  ntree.ensure_topology_cache();
+  active_trees.add(&ntree);
+  for (const bNodeLink *link : root_socket->directly_linked_links()) {
+    if (!link->is_used()) {
+      continue;
+    }
+    filter_material_collect_scene_sources_from_node(ntree,
+                                                    link->fromnode,
+                                                    link->fromsock,
+                                                    active_trees,
+                                                    group_node_by_tree,
+                                                    r_uses_scene_depth,
+                                                    r_uses_scene_normal,
+                                                    r_uses_scene_position,
+                                                    r_uses_cryptomatte_object);
+    if (filter_material_scene_sources_complete(r_uses_scene_depth,
+                                               r_uses_scene_normal,
+                                               r_uses_scene_position,
+                                               r_uses_cryptomatte_object))
+    {
+      break;
+    }
+  }
+  active_trees.remove(&ntree);
+}
+
+static void filter_material_collect_scene_sources_from_output(
+    const bNodeTree &ntree,
+    const bNode &output_node,
+    Set<const bNodeTree *> &active_trees,
+    Map<const bNodeTree *, const bNode *> &group_node_by_tree,
+    bool &r_uses_scene_depth,
+    bool &r_uses_scene_normal,
+    bool &r_uses_scene_position,
+    bool &r_uses_cryptomatte_object)
+{
+  for (const bNodeSocket *socket : output_node.input_sockets()) {
+    filter_material_collect_scene_sources_from_socket(ntree,
+                                                      socket,
+                                                      active_trees,
+                                                      group_node_by_tree,
+                                                      r_uses_scene_depth,
+                                                      r_uses_scene_normal,
+                                                      r_uses_scene_position,
+                                                      r_uses_cryptomatte_object);
+    if (filter_material_scene_sources_complete(r_uses_scene_depth,
+                                               r_uses_scene_normal,
+                                               r_uses_scene_position,
+                                               r_uses_cryptomatte_object))
+    {
+      return;
+    }
+  }
+}
+
 static void filter_material_collect_scene_sources(const bNodeTree &ntree,
-                                                  Set<const bNodeTree *> &visited,
                                                   bool &r_uses_scene_depth,
                                                   bool &r_uses_scene_normal,
                                                   bool &r_uses_scene_position,
                                                   bool &r_uses_cryptomatte_object)
 {
-  if (visited.contains(&ntree)) {
-    return;
-  }
-  visited.add(&ntree);
+  Set<const bNodeTree *> active_trees;
+  Map<const bNodeTree *, const bNode *> group_node_by_tree;
 
-  for (bNode *node = static_cast<bNode *>(ntree.nodes.first); node != nullptr; node = node->next) {
-    if (node->type_legacy == SH_NODE_SCENE_COLOR) {
-      const int source = node->custom1;
-      r_uses_scene_depth |= (source == SHD_SCENE_SOURCE_DEPTH);
-      r_uses_scene_normal |= (source == SHD_SCENE_SOURCE_NORMAL);
-      r_uses_scene_position |= (source == SHD_SCENE_SOURCE_POSITION);
-    }
-    else if (node->type_legacy == SH_NODE_FILTER_OBJECT_MASK) {
-      r_uses_cryptomatte_object = true;
-    }
-    if (r_uses_scene_depth && r_uses_scene_normal && r_uses_scene_position &&
-        r_uses_cryptomatte_object)
+  if (const bNode *output_node = filter_material_active_output_node(ntree, SH_NODE_OUTPUT_FILTER)) {
+    filter_material_collect_scene_sources_from_output(ntree,
+                                                      *output_node,
+                                                      active_trees,
+                                                      group_node_by_tree,
+                                                      r_uses_scene_depth,
+                                                      r_uses_scene_normal,
+                                                      r_uses_scene_position,
+                                                      r_uses_cryptomatte_object);
+    if (filter_material_scene_sources_complete(r_uses_scene_depth,
+                                               r_uses_scene_normal,
+                                               r_uses_scene_position,
+                                               r_uses_cryptomatte_object))
     {
       return;
     }
-    if (node->type_legacy == NODE_GROUP && node->id != nullptr) {
-      filter_material_collect_scene_sources(*reinterpret_cast<bNodeTree *>(node->id),
-                                            visited,
-                                            r_uses_scene_depth,
-                                            r_uses_scene_normal,
-                                            r_uses_scene_position,
-                                            r_uses_cryptomatte_object);
-      if (r_uses_scene_depth && r_uses_scene_normal && r_uses_scene_position &&
-          r_uses_cryptomatte_object)
-      {
-        return;
-      }
+  }
+
+  for (const bNode *node : ntree.all_nodes()) {
+    if (!ELEM(node->type_legacy, SH_NODE_OUTPUT_AOV, SH_NODE_OUTLINE_CONTROL) || node->is_muted()) {
+      continue;
+    }
+    filter_material_collect_scene_sources_from_output(ntree,
+                                                      *node,
+                                                      active_trees,
+                                                      group_node_by_tree,
+                                                      r_uses_scene_depth,
+                                                      r_uses_scene_normal,
+                                                      r_uses_scene_position,
+                                                      r_uses_cryptomatte_object);
+    if (filter_material_scene_sources_complete(r_uses_scene_depth,
+                                               r_uses_scene_normal,
+                                               r_uses_scene_position,
+                                               r_uses_cryptomatte_object))
+    {
+      return;
     }
   }
 }
@@ -235,7 +479,6 @@ void FilterMaterialModule::init()
   uses_scene_position_ = false;
   uses_cryptomatte_object_ = false;
 
-  Set<const bNodeTree *> visited;
   for (SceneFilterMaterial *filter_entry = static_cast<SceneFilterMaterial *>(
            inst_.scene->eevee.filter_materials.first);
        filter_entry != nullptr;
@@ -245,7 +488,6 @@ void FilterMaterialModule::init()
       continue;
     }
     filter_material_collect_scene_sources(*filter_entry->material->nodetree,
-                                          visited,
                                           uses_scene_depth_,
                                           uses_scene_normal_,
                                           uses_scene_position_,
