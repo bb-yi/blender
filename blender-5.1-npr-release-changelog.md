@@ -445,6 +445,10 @@
 - `GLSL Function` 的 `@glsl_meta v1` 支持 `label` 元数据，可为输入/输出 socket 设置本地化或自定义显示名称。
 - 新增 `GLSL Script Expression` 节点，可在 Shader 节点树中直接编写单行 GLSL 表达式，并手动定义输入变量。
 - `GLSL Script Expression` 节点补充节点内控件与侧栏面板，变量、表达式和输出类型等设置会分组显示，节点 UI 更易整理。
+- World / World NPR 节点树现在可以从添加菜单中直接使用 `GLSL Function` 与 `GLSL Script Expression`。
+- `GLSL Function` 新增 Define 控制面板，可在节点 UI 中维护编译期开关，并支持默认折叠显示。
+- `GLSL Function` 的 `@glsl_meta v1` 新增 `int_choice` 元数据，整数参数可显示为可交互下拉选项。
+- `Image Sample` 节点现在可以在 `Filter Materials` 中添加和使用，便于滤镜材质直接采样图像或 AOV 链路。
 
 #### 修复与改进
 - 修复 `GLSL Function` 放入节点组后部分路径无法正确内联或编译的问题，并补充节点组回归测试。
@@ -455,6 +459,13 @@
 - 修复 `GLSL Script Expression` 节点面板绘制时的崩溃问题，并调整控件折叠与节点内显示逻辑。
 - 修复 View Layer 集合开启 Holdout 后，集合内带 `Outline Control` 的材质仍会产生 NPR 描边的问题；Holdout 对象仍参与深度/遮挡，但不再写入材质描边或 marked-edge 描边。
 - 修复 World / World NPR 中普通 `Image Texture` 未连接 `Vector` 时固定采样同一 texel 的问题，默认改为使用窗口坐标，避免多张 2D 贴图混合退化为常量颜色。
+- 修复 NPR 材质与多贴图混合场景下 texture sampler 槽位重复占用的问题，降低 shader 编译失败和错误采样概率。
+- `GLSL Function` 转换指南补充 metadata 要求，减少缺少参数声明时的解析歧义。
+- 修复 `GLSL Function` Define 解析边界、面板可见性和节点刷新后 UI 状态不一致的问题。
+- 修复 `GLSL Function` 整数下拉选项的交互、RNA 缓存和节点 socket 缓存更新问题。
+- 修复最终渲染与视口渲染模式判断混用的问题，避免 filter / NPR 路径按错误上下文执行。
+- 修复 `Image Sample` 在滤镜材质中不能从添加菜单使用的问题，并补充 AOV 偏移采样回归测试。
+- 修复 Eevee filter material pass 依赖不稳定的问题，减少滤镜材质读取上一阶段结果时的错序、漏同步和 stale resource 风险。
 
 # TODO
 
