@@ -3131,12 +3131,14 @@ namespace blender
 
     static void sync_glsl_define_values(bNode& node, const GLSLParseResult& parse_result)
     {
+      NodeShaderGLSLFunction& storage = node_storage(node);
       if (!parse_result.defines_parsed)
       {
+        RNA_shader_node_glsl_define_value_choices_unregister(storage.define_values,
+                                                             storage.define_values_num);
         return;
       }
 
-      NodeShaderGLSLFunction& storage = node_storage(node);
       Vector<GLSLDefineValueState> new_values;
       new_values.reserve(parse_result.defines.size());
       for (const GLSLDefineMeta& define : parse_result.defines)

@@ -153,10 +153,13 @@ Meta 必须覆盖导出函数的公开接口：
 - `0..1` 混合、阈值、强度、柔和度等参数应优先写 `subtype=factor`
 - 颜色参数 `vec3` / `vec4` 应写 `subtype=color`
 - 坐标、方向、比例等向量参数应写清楚语义，必要时用合适的 vector subtype
+- 固定模式类 `int` 参数应优先写 `items="0:Label;1:Other"`，让默认值显示成下拉菜单；只有连续数值范围才用普通 `min/max` 整数框
+- `items` 下拉默认隐藏前置参数名，只显示当前选项；当同一行没有足够上下文或面板里有多个相似下拉时，再写 `show_label=true`
 - `sampler2D` 只能写 `label`、`description`，以及放进 panel；不要写 `default/min/max/hide_value/subtype`
 - `out` 参数只能写 `label`，不要写默认值、范围、subtype 或 description
 - 返回值不支持 Meta，必须在 `Outputs` 和结果说明里写清楚
-- 参数超过 4 个，或语义能自然分组时，应使用一级 `@panel` / `@end_panel` 分组
+- 参数超过 4 个，或语义能自然分组时，应使用一级 `@panel` / `@end_panel` 分组；高级/很少调节的参数默认 `closed=true`，主要工作流参数可以 `closed=false`
+- 编译期开关、会影响 helper 函数或需要 `#if/#ifdef` 裁剪的选项，应写进独立 `@glsl_defines` 块，而不是混进函数参数 Meta
 
 如果导出函数确实没有任何输入参数和 `out` 参数，可以省略 Meta，但结果说明里要写明“无可标注接口”。
 
@@ -1390,6 +1393,7 @@ Meta 只会作用到它正下方那个函数。
 - `float` 调节项：写 `label`、`default`、`description`；能确定范围时写 `min/max`
 - `float` 的强度、混合、遮罩、阈值、柔和度、概率类参数：优先写 `subtype=factor`
 - `int` / `bool` 开关：写清楚 `label`、`default` 和 `description`；如果 `int` 是固定模式枚举，优先写 `items`
+- `int items` 下拉：默认不写 `show_label`，让控件只显示当前选项；当下拉项离开上下文会难以理解时写 `show_label=true`
 - `vec2` 坐标、偏移、比例：写 `label`、`default=vec2(...)` 和 `description`
 - `vec3` / `vec4` 颜色：写 `subtype=color`，并给出颜色默认值
 - `vec3` 方向、法线、位置：不要误标为颜色；用 `description` 写清楚空间语义
@@ -1399,6 +1403,14 @@ Meta 只会作用到它正下方那个函数。
 - 参数较多时：用一级 `@panel "分组名" closed=true/false` 分组，并用 `@end_panel` 闭合
 
 如果某个参数是内部常量更合适，就不要暴露成函数参数；一旦暴露成函数参数，就要给它写对应 Meta。
+
+布局建议：
+
+- 主要输入（颜色、UV、主强度、模式）放在默认区域或 `closed=false` 面板里
+- 高级调节、调试输出、很少改的阈值放进 `closed=true` 面板
+- 固定模式选择用 `int items`，不要用多个 bool 互斥开关
+- 需要连线驱动的模式选择仍然用普通函数 `int` 参数；需要编译期裁剪或让辅助函数看到的模式选择用 `@glsl_defines`
+- 一个面板里只有一个下拉时通常不需要 `show_label=true`；多个相邻下拉或没有清晰分组标题时再显示 label
 
 #### 2.1 推荐结构
 
@@ -1522,6 +1534,14 @@ vec4 subsurface_mode(vec4 color, int method)
 - `items` 不能和 `min` / `max` 混用。需要连续范围时用普通整数输入框；需要固定模式时用 `items`。
 - `show_label=true|false` 只能和 `int items` 一起使用；省略时默认不显示下拉菜单前的参数名。
 - 显示名只影响 UI，不参与 GLSL 参数名、socket identifier 或函数调用。
+
+使用建议：
+
+- 当一个 `int` 参数只是固定算法/混合/采样模式时，用 `items`，不要让用户手输整数。
+- 当参数需要连续整数范围（例如采样数量、迭代次数）时，用普通 `min/max`，不要写 `items`。
+- 当模式值需要从其他节点连线控制时，用函数参数 `int items`；下拉只影响未连接时的默认值，连线后仍按 int socket 工作。
+- 当模式会改变编译期代码路径、需要影响辅助函数，或希望 wrapper 生成 `#define` 时，用 `@glsl_defines` 的 int `items`，不要把它伪装成函数参数。
+- 默认让下拉控件隐藏前置 label，使节点更紧凑；只有多个下拉靠在一起且标题不清楚时写 `show_label=true`。
 
 #### 3.5 `subtype`
 
@@ -1862,6 +1882,15 @@ vec3 stylize(vec3 base_color, float strength)
 - `#ifdef` / `#if` 可以放在函数体或辅助函数体内部，用来切换局部逻辑。
 - 顶层 GLSL 函数、全局变量、struct 等声明不能包在 `#ifdef` / `#if` 里；节点解析器需要稳定的顶层 API。需要可选 helper 时，把 helper 保持为顶层固定函数，把条件分支移进函数体。
 - 顶层只包含预处理器指令的条件块可以保留，例如按宏切换 `#define` 常量。
+
+使用和布局建议：
+
+- 影响 shader 编译结构、helper 函数、采样路径或较重效果开关的选项，优先放进 `@glsl_defines`。
+- 需要被其他节点连线驱动、每个像素可能变化的值，仍然用普通函数参数，不要放进宏。
+- `Defines` 面板默认可以 `closed=true`，适合放编译期开关、性能档位、调试模式；如果它是日常必须调的主模式，可以写 `closed=false`。
+- 互斥编译模式用 `int items` 下拉，不要暴露多个互相冲突的 bool 宏。
+- 宏下拉默认隐藏前置 label，让面板更紧凑；多个下拉连续出现或没有清楚分组语义时，再给该宏写 `show_label=true`。
+- `label` 应写给用户看的短名称；`description` 用来说明性能、视觉影响或编译期开关的代价，不要把这些解释写进宏名。
 
 示例：
 

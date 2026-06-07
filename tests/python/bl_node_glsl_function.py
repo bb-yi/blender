@@ -705,6 +705,22 @@ class GLSLFunctionNodeTest(unittest.TestCase):
         self.assertEqual(node.parse_status, 'READY')
         self.assertEqual(find_socket(node.inputs, "In_method").default_value, 0)
 
+        text.clear()
+        text.write(
+            "/* @glsl_meta v1\n"
+            "method: label=\"Method\" default=1\n"
+            "*/\n"
+            "vec4 param_int_choices(vec4 color, int method){\n"
+            "  return color * float(method + 1);\n"
+            "}\n"
+        )
+        refresh_glsl_node(node)
+
+        self.assertEqual(node.parse_status, 'READY')
+        plain_method_socket = find_socket(node.inputs, "In_method")
+        self.assertEqual(plain_method_socket.default_value, 0)
+        self.assertEqual(plain_method_socket.glsl_int_choice_value, '')
+
     def test_sampler2d_meta_allows_label_description_and_panel_only(self):
         _, tree = self.make_material_tree()
         node = tree.nodes.new("ShaderNodeGLSLFunction")

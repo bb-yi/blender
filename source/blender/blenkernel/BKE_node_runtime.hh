@@ -74,6 +74,12 @@ struct NodeLinkError {
   std::string tooltip;
 };
 
+struct GLSLIntChoiceItem {
+  int value = 0;
+  std::string label;
+  std::string identifier;
+};
+
 /**
  * Utility to weakly reference a link. Weak references are safer because they avoid dangling
  * references which can easily happen temporarily when editing the node tree.
@@ -308,6 +314,7 @@ class bNodeSocketRuntime : NonCopyable, NonMovable {
   Vector<bNodeSocket *> directly_linked_sockets;
   Vector<bNodeSocket *> logically_linked_sockets;
   Vector<bNodeSocket *> logically_linked_skipped_sockets;
+  Vector<GLSLIntChoiceItem> glsl_int_choices;
   bNode *owner_node = nullptr;
   bNodeSocket *internal_link_input = nullptr;
   int index_in_node = -1;

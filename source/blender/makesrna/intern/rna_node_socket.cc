@@ -61,7 +61,6 @@ const EnumPropertyItem rna_enum_node_socket_type_items[] = {
 #  include "DNA_material_types.h"
 
 #  include "BLI_listbase.h"
-#  include "BLI_map.hh"
 #  include "BLI_math_vector.h"
 #  include "BLI_string.h"
 #  include "BLI_string_ref.hh"
@@ -90,19 +89,6 @@ extern FunctionRNA *rna_NodeSocket_draw_color_simple_func;
 
 /* ******** Node Socket ******** */
 
-struct GLSLIntChoiceRNAItem {
-  int value = 0;
-  std::string label;
-  std::string identifier;
-};
-
-static RawMap<bNodeSocket *, RawVector<GLSLIntChoiceRNAItem>>
-    &rna_NodeSocket_glsl_int_choice_items()
-{
-  static RawMap<bNodeSocket *, RawVector<GLSLIntChoiceRNAItem>> items_by_socket;
-  return items_by_socket;
-}
-
 static std::string rna_glsl_int_choice_identifier(const int value)
 {
   std::string value_text = std::to_string(value);
@@ -112,36 +98,59 @@ static std::string rna_glsl_int_choice_identifier(const int value)
   return "VALUE_" + value_text;
 }
 
+static bool rna_glsl_int_choice_items_equal(const Vector<bke::GLSLIntChoiceItem> &items,
+                                            const int *values,
+                                            const char *const *labels,
+                                            const int choices_num)
+{
+  if (items.size() != choices_num) {
+    return false;
+  }
+  for (const int i : IndexRange(choices_num)) {
+    if (items[i].value != values[i]) {
+      return false;
+    }
+    if (items[i].label != StringRefNull(labels[i] != nullptr ? labels[i] : "")) {
+      return false;
+    }
+  }
+  return true;
+}
+
 void RNA_node_socket_glsl_int_choices_register(bNodeSocket *socket,
                                                const int *values,
                                                const char *const *labels,
                                                const int choices_num)
 {
-  if (socket == nullptr || values == nullptr || labels == nullptr || choices_num <= 0) {
-    if (socket != nullptr) {
-      rna_NodeSocket_glsl_int_choice_items().remove(socket);
-    }
+  if (socket == nullptr || socket->runtime == nullptr) {
+    return;
+  }
+  Vector<bke::GLSLIntChoiceItem> &items = socket->runtime->glsl_int_choices;
+  if (values == nullptr || labels == nullptr || choices_num <= 0) {
+    items.clear();
+    return;
+  }
+  if (rna_glsl_int_choice_items_equal(items, values, labels, choices_num)) {
     return;
   }
 
-  RawVector<GLSLIntChoiceRNAItem> items;
+  items.clear();
   items.reserve(choices_num);
   for (const int i : IndexRange(choices_num)) {
-    GLSLIntChoiceRNAItem item;
+    bke::GLSLIntChoiceItem item;
     item.value = values[i];
     item.label = labels[i] != nullptr ? labels[i] : "";
     item.identifier = rna_glsl_int_choice_identifier(item.value);
     items.append(std::move(item));
   }
-  rna_NodeSocket_glsl_int_choice_items().add_overwrite(socket, std::move(items));
 }
 
 void RNA_node_socket_glsl_int_choices_unregister(bNodeSocket *socket)
 {
-  if (socket == nullptr) {
+  if (socket == nullptr || socket->runtime == nullptr) {
     return;
   }
-  rna_NodeSocket_glsl_int_choice_items().remove(socket);
+  socket->runtime->glsl_int_choices.clear();
 }
 
 static void rna_NodeSocket_draw(
@@ -837,17 +846,16 @@ const EnumPropertyItem *RNA_node_socket_glsl_int_choice_itemf(bContext * /*C*/,
   }
 
   bNodeSocket *socket = static_cast<bNodeSocket *>(ptr->data);
-  const RawVector<GLSLIntChoiceRNAItem> *choices =
-      rna_NodeSocket_glsl_int_choice_items().lookup_ptr(socket);
-  if (choices == nullptr || choices->is_empty()) {
+  if (socket->runtime == nullptr || socket->runtime->glsl_int_choices.is_empty()) {
     *r_free = false;
     return rna_enum_dummy_NULL_items;
   }
+  const Vector<bke::GLSLIntChoiceItem> &choices = socket->runtime->glsl_int_choices;
 
   EnumPropertyItem tmp = {0};
   EnumPropertyItem *result = nullptr;
   int totitem = 0;
-  for (const GLSLIntChoiceRNAItem &choice : *choices) {
+  for (const bke::GLSLIntChoiceItem &choice : choices) {
     tmp.value = choice.value;
     tmp.identifier = choice.identifier.c_str();
     tmp.icon = ICON_NONE;

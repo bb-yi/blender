@@ -1051,16 +1051,10 @@ using nodes::ShForeachLightItemsAccessor;
 using nodes::ShScriptExpressionVariablesAccessor;
 using nodes::SimulationItemsAccessor;
 
-struct GLSLDefineChoiceItem {
-  int value = 0;
-  std::string label;
-  std::string identifier;
-};
-
-static RawMap<NodeShaderGLSLDefineValue *, RawVector<GLSLDefineChoiceItem>>
+static RawMap<NodeShaderGLSLDefineValue *, RawVector<bke::GLSLIntChoiceItem>>
     &rna_ShaderNodeGLSLDefineValue_choice_items()
 {
-  static RawMap<NodeShaderGLSLDefineValue *, RawVector<GLSLDefineChoiceItem>>
+  static RawMap<NodeShaderGLSLDefineValue *, RawVector<bke::GLSLIntChoiceItem>>
       items_by_define_value;
   return items_by_define_value;
 }
@@ -1072,6 +1066,25 @@ static std::string rna_glsl_int_choice_identifier(const int value)
     value_text.replace(0, 1, "NEG_");
   }
   return "VALUE_" + value_text;
+}
+
+static bool rna_glsl_int_choice_items_equal(const RawVector<bke::GLSLIntChoiceItem> &items,
+                                            const int *values,
+                                            const char *const *labels,
+                                            const int choices_num)
+{
+  if (items.size() != choices_num) {
+    return false;
+  }
+  for (const int i : IndexRange(choices_num)) {
+    if (items[i].value != values[i]) {
+      return false;
+    }
+    if (items[i].label != StringRefNull(labels[i] != nullptr ? labels[i] : "")) {
+      return false;
+    }
+  }
+  return true;
 }
 
 void RNA_shader_node_glsl_define_value_choices_register(NodeShaderGLSLDefineValue *define_value,
@@ -1086,10 +1099,18 @@ void RNA_shader_node_glsl_define_value_choices_register(NodeShaderGLSLDefineValu
     return;
   }
 
-  RawVector<GLSLDefineChoiceItem> items;
+  RawVector<bke::GLSLIntChoiceItem> *existing_items =
+      rna_ShaderNodeGLSLDefineValue_choice_items().lookup_ptr(define_value);
+  if (existing_items != nullptr &&
+      rna_glsl_int_choice_items_equal(*existing_items, values, labels, choices_num))
+  {
+    return;
+  }
+
+  RawVector<bke::GLSLIntChoiceItem> items;
   items.reserve(choices_num);
   for (const int i : IndexRange(choices_num)) {
-    GLSLDefineChoiceItem item;
+    bke::GLSLIntChoiceItem item;
     item.value = values[i];
     item.label = labels[i] != nullptr ? labels[i] : "";
     item.identifier = rna_glsl_int_choice_identifier(item.value);
@@ -4901,7 +4922,7 @@ static const EnumPropertyItem *rna_ShaderNodeGLSLDefineValue_choice_itemf(bConte
   }
 
   NodeShaderGLSLDefineValue *define_value = static_cast<NodeShaderGLSLDefineValue *>(ptr->data);
-  const RawVector<GLSLDefineChoiceItem> *choices =
+  const RawVector<bke::GLSLIntChoiceItem> *choices =
       rna_ShaderNodeGLSLDefineValue_choice_items().lookup_ptr(define_value);
   if (choices == nullptr || choices->is_empty()) {
     *r_free = false;
@@ -4911,7 +4932,7 @@ static const EnumPropertyItem *rna_ShaderNodeGLSLDefineValue_choice_itemf(bConte
   EnumPropertyItem tmp = {0};
   EnumPropertyItem *result = nullptr;
   int totitem = 0;
-  for (const GLSLDefineChoiceItem &choice : *choices) {
+  for (const bke::GLSLIntChoiceItem &choice : *choices) {
     tmp.value = choice.value;
     tmp.identifier = choice.identifier.c_str();
     tmp.icon = ICON_NONE;
