@@ -427,36 +427,48 @@
 - 修复 Shader Info 对 Light Shader 评估结果的读取与缓存更新。
 - 加强 Eevee TAA soft shadow history reset release test 的视口就绪判定，避免把未渲染的灰色相机框误判为有效画面。
 
-## 2026-05-25  17f03f01909
+## 2026-05-26  84bf15f74761
 
 #### 新增功能
 - Eevee `Shadow Pool` 最高可选值扩展到 `8192 MB`，默认值保持 `512 MB`，可支持更大规模多灯阴影场景。
 - `Shadow Pool` 设置新增 `2048 MB`、`4096 MB`、`8192 MB` 选项，`GI Irradiance Pool` 仍保持原有上限。
+- `Shader Info` 补充阴影可见性分类，用于区分不同阴影来源与可见性路径。
+- 发布构建中开放实验性资产入口，便于正式包中验证新节点资产。
 
 #### 修复与改进
 - Eevee 阴影图集会按 GPU texture array layer 能力和实际分配结果自动降级，避免旧显卡、Vulkan/OpenGL 后端限制或显存碎片导致崩溃。
 - 改进 OpenGL 纹理真实分配失败检测，让阴影池分配失败可以触发 Eevee 的逐级降级 fallback。
+- 修复 `Shader Info` 阴影 caster atlas 保护与阴影分类回归测试，减少阴影分类错误。
+- 稳定 Parallax Closure 高度来源，避免高度输入路径不一致。
 - 增加 Eevee Shadow Pool 压力 release test，覆盖 257 灯场景下 `2048 MB` 负例与 `4096/8192 MB` 通过路径。
 
-## 暂存
+## 2026-05-31  523671f87353
 
 #### 新增功能
 - Eevee `Performance` 视图新增阴影与光照探头耗时归因，可展开查看 Shadow Contexts、Shadow Lights、Probe Costs 等细分统计，便于定位阴影图集、灯光与 probe 更新开销。
 - `GLSL Function` 的 `@glsl_meta v1` 支持 `label` 元数据，可为输入/输出 socket 设置本地化或自定义显示名称。
 - 新增 `GLSL Script Expression` 节点，可在 Shader 节点树中直接编写单行 GLSL 表达式，并手动定义输入变量。
 - `GLSL Script Expression` 节点补充节点内控件与侧栏面板，变量、表达式和输出类型等设置会分组显示，节点 UI 更易整理。
-- World / World NPR 节点树现在可以从添加菜单中直接使用 `GLSL Function` 与 `GLSL Script Expression`。
-- `GLSL Function` 新增 Define 控制面板，可在节点 UI 中维护编译期开关，并支持默认折叠显示。
-- `GLSL Function` 的 `@glsl_meta v1` 新增 `int_choice` 元数据，整数参数可显示为可交互下拉选项。
-- `Image Sample` 节点现在可以在 `Filter Materials` 中添加和使用，便于滤镜材质直接采样图像或 AOV 链路。
 
 #### 修复与改进
 - 修复 `GLSL Function` 放入节点组后部分路径无法正确内联或编译的问题，并补充节点组回归测试。
 - 修复 `GLSL Function` 经过节点组内联后颜色 alpha 分量丢失的问题。
 - 修复混合 Forward 材质会清掉或丢失背后 AOV 数据的问题，保留透明/混合表面后的 AOV 读取结果。
 - 修复 `Scene Color` 的 `Position` 输出在 filter pass 中采样 UV 偏移的问题，使位置通道读取与屏幕像素对齐。
-- 改进 Eevee 性能分析器归因逻辑，减少材质、阴影和 probe 统计被错误归入其他阶段的情况。
 - 修复 `GLSL Script Expression` 节点面板绘制时的崩溃问题，并调整控件折叠与节点内显示逻辑。
+- 修复 Eevee 性能分析器 release 报告契约，移除不稳定的细分字段，避免发布测试覆盖非稳定输出。
+
+## 暂存
+
+#### 新增功能
+- World / World NPR 节点树现在可以从添加菜单中直接使用 `GLSL Function` 与 `GLSL Script Expression`。
+- `GLSL Function` 新增 Define 控制面板，可在节点 UI 中维护编译期开关，并支持默认折叠显示。
+- `GLSL Function` 的 `@glsl_meta v1` 新增 `int_choice` 元数据，整数参数可显示为可交互下拉选项。
+- `Image Sample` 节点现在可以在 `Filter Materials` 中添加和使用，便于滤镜材质直接采样图像或 AOV 链路。
+
+#### 修复与改进
+- 继续改进 Eevee 性能分析器归因逻辑，减少材质、阴影和 probe 统计被错误归入其他阶段的情况。
+- 继续精简 Eevee 性能分析器 release 报告输出，保持发布测试只覆盖稳定的核心归因。
 - 修复 View Layer 集合开启 Holdout 后，集合内带 `Outline Control` 的材质仍会产生 NPR 描边的问题；Holdout 对象仍参与深度/遮挡，但不再写入材质描边或 marked-edge 描边。
 - 修复 World / World NPR 中普通 `Image Texture` 未连接 `Vector` 时固定采样同一 texel 的问题，默认改为使用窗口坐标，避免多张 2D 贴图混合退化为常量颜色。
 - 修复 NPR 材质与多贴图混合场景下 texture sampler 槽位重复占用的问题，降低 shader 编译失败和错误采样概率。
