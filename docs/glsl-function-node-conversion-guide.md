@@ -1498,6 +1498,8 @@ strength: max=1.0
 
 用于给 `int` 输入参数声明固定选择列表。它只改变未连接时默认值的 UI 表现：socket 类型仍然是 `int`，仍然可以连线，函数调用也仍然传入整数。
 
+带 `items` 的下拉菜单默认只显示当前选项，不显示前置参数名；需要保留前置名称时写 `show_label=true`。
+
 ```glsl
 /* @glsl_meta v1
 method: label="方法" default=1 items="0:Christensen-Burley;1:Random Walk;2:Random Walk Skin"
@@ -1518,6 +1520,7 @@ vec4 subsurface_mode(vec4 color, int method)
 - `default` 必须是整数字面量，并且必须等于列表中的某个值。
 - 列表值不能重复；显示名不能为空。
 - `items` 不能和 `min` / `max` 混用。需要连续范围时用普通整数输入框；需要固定模式时用 `items`。
+- `show_label=true|false` 只能和 `int items` 一起使用；省略时默认不显示下拉菜单前的参数名。
 - 显示名只影响 UI，不参与 GLSL 参数名、socket identifier 或函数调用。
 
 #### 3.5 `subtype`
@@ -1848,8 +1851,10 @@ vec3 stylize(vec3 base_color, float strength)
 - `@define NAME bool default=true|false` 会显示为布尔开关；关闭时不会生成对应 `#define`。
 - `@define NAME int default=... min=... max=...` 会显示为整数输入，并生成 `#define NAME value`。
 - `@define NAME int default=... items="0:Label;1:Other"` 会显示为下拉菜单，并生成 `#define NAME value`。
+- 带 `items` 的宏下拉菜单默认只显示当前选项；需要保留前置宏名时写 `show_label=true`。
 - `items` 只允许用于 `int` 宏，不能用于 `bool` 宏，也不能和 `min/max` 混用。
 - `items` 的值不能重复，显示名不能为空；`default` 必须是列表中的某个整数值。
+- `show_label=true|false` 只能和 `int items` 一起使用。
 - 宏名必须是合法 GLSL 标识符，最长 63 个字符；更长的宏名会报 parse error，避免保存到节点 DNA 时被截断。
 - `label` 和 `description` 只影响面板显示，不改变宏名；`description` 会显示在对应宏控件下方。
 - 同一份源码可以有多个 `@glsl_defines` 块，但宏名不能重复；如果多个块都写了 `closed`，取值必须一致。

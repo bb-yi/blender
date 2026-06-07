@@ -34,9 +34,24 @@ struct Main;
 struct ReportList;
 struct Scene;
 struct bContext;
+struct bNodeSocket;
+struct NodeShaderGLSLDefineValue;
 
 /* Types */
 BlenderRNA &RNA_blender_rna_get();
+
+void RNA_node_socket_glsl_int_choices_register(bNodeSocket *socket,
+                                               const int *values,
+                                               const char *const *labels,
+                                               int choices_num);
+void RNA_node_socket_glsl_int_choices_unregister(bNodeSocket *socket);
+void RNA_shader_node_glsl_define_value_choices_register(
+    NodeShaderGLSLDefineValue *define_value,
+    const int *values,
+    const char *const *labels,
+    int choices_num);
+void RNA_shader_node_glsl_define_value_choices_unregister(NodeShaderGLSLDefineValue *define_values,
+                                                          int define_values_num);
 
 /* Pointer
  *

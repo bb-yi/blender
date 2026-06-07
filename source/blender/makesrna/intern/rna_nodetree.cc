@@ -966,8 +966,10 @@ static const EnumPropertyItem node_cryptomatte_layer_name_items[] = {
 
 #  include <fmt/format.h>
 
+#  include "BLI_map.hh"
 #  include "BLI_string.h"
 #  include "BLI_string_utf8.h"
+#  include "BLI_vector.hh"
 
 #  include "BKE_context.hh"
 #  include "BKE_cryptomatte.hh"
@@ -1048,6 +1050,64 @@ using nodes::SeparateBundleItemsAccessor;
 using nodes::ShForeachLightItemsAccessor;
 using nodes::ShScriptExpressionVariablesAccessor;
 using nodes::SimulationItemsAccessor;
+
+struct GLSLDefineChoiceItem {
+  int value = 0;
+  std::string label;
+  std::string identifier;
+};
+
+static RawMap<NodeShaderGLSLDefineValue *, RawVector<GLSLDefineChoiceItem>>
+    &rna_ShaderNodeGLSLDefineValue_choice_items()
+{
+  static RawMap<NodeShaderGLSLDefineValue *, RawVector<GLSLDefineChoiceItem>>
+      items_by_define_value;
+  return items_by_define_value;
+}
+
+static std::string rna_glsl_int_choice_identifier(const int value)
+{
+  std::string value_text = std::to_string(value);
+  if (!value_text.empty() && value_text[0] == '-') {
+    value_text.replace(0, 1, "NEG_");
+  }
+  return "VALUE_" + value_text;
+}
+
+void RNA_shader_node_glsl_define_value_choices_register(NodeShaderGLSLDefineValue *define_value,
+                                                        const int *values,
+                                                        const char *const *labels,
+                                                        const int choices_num)
+{
+  if (define_value == nullptr || values == nullptr || labels == nullptr || choices_num <= 0) {
+    if (define_value != nullptr) {
+      rna_ShaderNodeGLSLDefineValue_choice_items().remove(define_value);
+    }
+    return;
+  }
+
+  RawVector<GLSLDefineChoiceItem> items;
+  items.reserve(choices_num);
+  for (const int i : IndexRange(choices_num)) {
+    GLSLDefineChoiceItem item;
+    item.value = values[i];
+    item.label = labels[i] != nullptr ? labels[i] : "";
+    item.identifier = rna_glsl_int_choice_identifier(item.value);
+    items.append(std::move(item));
+  }
+  rna_ShaderNodeGLSLDefineValue_choice_items().add_overwrite(define_value, std::move(items));
+}
+
+void RNA_shader_node_glsl_define_value_choices_unregister(NodeShaderGLSLDefineValue *define_values,
+                                                          const int define_values_num)
+{
+  if (define_values == nullptr || define_values_num <= 0) {
+    return;
+  }
+  for (const int i : IndexRange(define_values_num)) {
+    rna_ShaderNodeGLSLDefineValue_choice_items().remove(&define_values[i]);
+  }
+}
 
 extern FunctionRNA *rna_NodeTree_poll_func;
 extern FunctionRNA *rna_NodeTree_update_func;
@@ -4830,6 +4890,41 @@ static void rna_ShaderNodeGLSLDefineValue_int_set(PointerRNA *ptr, int value)
   define_value->value = value;
 }
 
+static const EnumPropertyItem *rna_ShaderNodeGLSLDefineValue_choice_itemf(bContext * /*C*/,
+                                                                          PointerRNA *ptr,
+                                                                          PropertyRNA * /*prop*/,
+                                                                          bool *r_free)
+{
+  if (ptr == nullptr || ptr->data == nullptr) {
+    *r_free = false;
+    return rna_enum_dummy_NULL_items;
+  }
+
+  NodeShaderGLSLDefineValue *define_value = static_cast<NodeShaderGLSLDefineValue *>(ptr->data);
+  const RawVector<GLSLDefineChoiceItem> *choices =
+      rna_ShaderNodeGLSLDefineValue_choice_items().lookup_ptr(define_value);
+  if (choices == nullptr || choices->is_empty()) {
+    *r_free = false;
+    return rna_enum_dummy_NULL_items;
+  }
+
+  EnumPropertyItem tmp = {0};
+  EnumPropertyItem *result = nullptr;
+  int totitem = 0;
+  for (const GLSLDefineChoiceItem &choice : *choices) {
+    tmp.value = choice.value;
+    tmp.identifier = choice.identifier.c_str();
+    tmp.icon = ICON_NONE;
+    tmp.name = choice.label.c_str();
+    tmp.description = choice.label.c_str();
+    RNA_enum_item_add(&result, &totitem, &tmp);
+  }
+
+  RNA_enum_item_end(&result, &totitem);
+  *r_free = true;
+  return result;
+}
+
 static int rna_ShaderNodeShaderInfo_lightgroup_id_get(PointerRNA *ptr)
 {
   bNode *node = ptr->data_as<bNode>();
@@ -7763,6 +7858,16 @@ static void rna_def_sh_glsl_define_value(BlenderRNA *brna)
   RNA_def_property_range(prop, INT_MIN, INT_MAX);
   RNA_def_property_ui_text(prop, "Value", "Integer value for the GLSL define");
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_ShaderNodeGLSLDefineValue_update");
+
+  prop = RNA_def_property(srna, "choice_value", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, rna_enum_dummy_NULL_items);
+  RNA_def_property_enum_funcs(prop,
+                              "rna_ShaderNodeGLSLDefineValue_int_get",
+                              "rna_ShaderNodeGLSLDefineValue_int_set",
+                              "rna_ShaderNodeGLSLDefineValue_choice_itemf");
+  RNA_def_property_ui_text(prop, "Value", "Choice value for the GLSL define");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_ShaderNodeGLSLDefineValue_update");
+  RNA_def_property_flag(prop, PROP_ENUM_NO_CONTEXT);
 }
 
 static void def_sh_glsl_function(BlenderRNA *brna, StructRNA *srna)

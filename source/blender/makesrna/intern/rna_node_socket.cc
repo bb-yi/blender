@@ -56,12 +56,16 @@ const EnumPropertyItem rna_enum_node_socket_type_items[] = {
 
 #  include <fmt/format.h>
 
+#  include <string>
+
 #  include "DNA_material_types.h"
 
 #  include "BLI_listbase.h"
+#  include "BLI_map.hh"
 #  include "BLI_math_vector.h"
 #  include "BLI_string.h"
 #  include "BLI_string_ref.hh"
+#  include "BLI_vector.hh"
 
 #  include "BKE_context.hh"
 #  include "BKE_main_invariants.hh"
@@ -85,6 +89,60 @@ extern FunctionRNA *rna_NodeSocket_draw_color_func;
 extern FunctionRNA *rna_NodeSocket_draw_color_simple_func;
 
 /* ******** Node Socket ******** */
+
+struct GLSLIntChoiceRNAItem {
+  int value = 0;
+  std::string label;
+  std::string identifier;
+};
+
+static RawMap<bNodeSocket *, RawVector<GLSLIntChoiceRNAItem>>
+    &rna_NodeSocket_glsl_int_choice_items()
+{
+  static RawMap<bNodeSocket *, RawVector<GLSLIntChoiceRNAItem>> items_by_socket;
+  return items_by_socket;
+}
+
+static std::string rna_glsl_int_choice_identifier(const int value)
+{
+  std::string value_text = std::to_string(value);
+  if (!value_text.empty() && value_text[0] == '-') {
+    value_text.replace(0, 1, "NEG_");
+  }
+  return "VALUE_" + value_text;
+}
+
+void RNA_node_socket_glsl_int_choices_register(bNodeSocket *socket,
+                                               const int *values,
+                                               const char *const *labels,
+                                               const int choices_num)
+{
+  if (socket == nullptr || values == nullptr || labels == nullptr || choices_num <= 0) {
+    if (socket != nullptr) {
+      rna_NodeSocket_glsl_int_choice_items().remove(socket);
+    }
+    return;
+  }
+
+  RawVector<GLSLIntChoiceRNAItem> items;
+  items.reserve(choices_num);
+  for (const int i : IndexRange(choices_num)) {
+    GLSLIntChoiceRNAItem item;
+    item.value = values[i];
+    item.label = labels[i] != nullptr ? labels[i] : "";
+    item.identifier = rna_glsl_int_choice_identifier(item.value);
+    items.append(std::move(item));
+  }
+  rna_NodeSocket_glsl_int_choice_items().add_overwrite(socket, std::move(items));
+}
+
+void RNA_node_socket_glsl_int_choices_unregister(bNodeSocket *socket)
+{
+  if (socket == nullptr) {
+    return;
+  }
+  rna_NodeSocket_glsl_int_choice_items().remove(socket);
+}
 
 static void rna_NodeSocket_draw(
     bContext *C, ui::Layout *layout, PointerRNA *ptr, PointerRNA *node_ptr, const StringRef text)
@@ -620,6 +678,24 @@ int rna_NodeSocketStandard_int_default(PointerRNA *ptr, PropertyRNA * /*prop*/)
   return decl->default_value;
 }
 
+int rna_NodeSocketStandard_int_value_get(PointerRNA *ptr)
+{
+  const bNodeSocket *sock = static_cast<const bNodeSocket *>(ptr->data);
+  if (sock == nullptr || sock->default_value == nullptr) {
+    return 0;
+  }
+  return static_cast<const bNodeSocketValueInt *>(sock->default_value)->value;
+}
+
+void rna_NodeSocketStandard_int_value_set(PointerRNA *ptr, const int value)
+{
+  bNodeSocket *sock = static_cast<bNodeSocket *>(ptr->data);
+  if (sock == nullptr || sock->default_value == nullptr) {
+    return;
+  }
+  static_cast<bNodeSocketValueInt *>(sock->default_value)->value = value;
+}
+
 bool rna_NodeSocketStandard_boolean_default(PointerRNA *ptr, PropertyRNA * /*prop*/)
 {
   bNodeSocket *sock = static_cast<bNodeSocket *>(ptr->data);
@@ -748,6 +824,41 @@ const EnumPropertyItem *RNA_node_socket_menu_itemf(bContext * /*C*/,
   const char *socket_translation_context = bke::node_socket_translation_context(*socket);
   RNA_def_property_translation_context(prop, socket_translation_context);
   return RNA_node_enum_definition_itemf(*data->enum_items, r_free);
+}
+
+const EnumPropertyItem *RNA_node_socket_glsl_int_choice_itemf(bContext * /*C*/,
+                                                              PointerRNA *ptr,
+                                                              PropertyRNA * /*prop*/,
+                                                              bool *r_free)
+{
+  if (ptr == nullptr || ptr->data == nullptr) {
+    *r_free = false;
+    return rna_enum_dummy_NULL_items;
+  }
+
+  bNodeSocket *socket = static_cast<bNodeSocket *>(ptr->data);
+  const RawVector<GLSLIntChoiceRNAItem> *choices =
+      rna_NodeSocket_glsl_int_choice_items().lookup_ptr(socket);
+  if (choices == nullptr || choices->is_empty()) {
+    *r_free = false;
+    return rna_enum_dummy_NULL_items;
+  }
+
+  EnumPropertyItem tmp = {0};
+  EnumPropertyItem *result = nullptr;
+  int totitem = 0;
+  for (const GLSLIntChoiceRNAItem &choice : *choices) {
+    tmp.value = choice.value;
+    tmp.identifier = choice.identifier.c_str();
+    tmp.icon = ICON_NONE;
+    tmp.name = choice.label.c_str();
+    tmp.description = choice.label.c_str();
+    RNA_enum_item_add(&result, &totitem, &tmp);
+  }
+
+  RNA_enum_item_end(&result, &totitem);
+  *r_free = true;
+  return result;
 }
 
 std::optional<std::string> rna_NodeSocketString_filepath_filter(const bContext * /*C*/,
@@ -1234,6 +1345,18 @@ static void rna_def_node_socket_int(BlenderRNA *brna,
   RNA_def_property_ui_description_func(prop, "rna_NodeSocketStandard_description_func");
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_NodeSocketStandard_value_update");
   RNA_def_property_flag(prop, PROP_CONTEXT_UPDATE);
+
+  prop = RNA_def_property(srna, "glsl_int_choice_value", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, rna_enum_dummy_NULL_items);
+  RNA_def_property_enum_funcs(prop,
+                              "rna_NodeSocketStandard_int_value_get",
+                              "rna_NodeSocketStandard_int_value_set",
+                              "RNA_node_socket_glsl_int_choice_itemf");
+  RNA_def_property_enum_default_func(prop, "rna_NodeSocketStandard_int_default");
+  RNA_def_property_ui_name_func(prop, "rna_NodeSocketStandard_name_func");
+  RNA_def_property_ui_description_func(prop, "rna_NodeSocketStandard_description_func");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_NodeSocketStandard_value_update");
+  RNA_def_property_flag(prop, PROP_ENUM_NO_CONTEXT | PROP_CONTEXT_UPDATE);
 
   RNA_def_struct_sdna_from(srna, "bNodeSocket", nullptr);
 }

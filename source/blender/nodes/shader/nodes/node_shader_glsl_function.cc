@@ -51,10 +51,7 @@
 #include "BKE_context.hh"
 
 #include "UI_interface_layout.hh"
-#include "UI_interface_c.hh"
 #include "UI_resources.hh"
-
-#include "WM_api.hh"
 
 namespace blender
 {
@@ -97,7 +94,13 @@ namespace blender
       {
         return;
       }
+      for (bNodeSocket* socket : node->input_sockets())
+      {
+        RNA_node_socket_glsl_int_choices_unregister(socket);
+      }
       MEM_SAFE_DELETE(storage->packed_source);
+      RNA_shader_node_glsl_define_value_choices_unregister(storage->define_values,
+                                                           storage->define_values_num);
       MEM_SAFE_DELETE(storage->define_values);
       MEM_delete(storage);
       node->storage = nullptr;
@@ -218,12 +221,13 @@ namespace blender
         bool hide_value = false;
         std::optional<PropertySubType> subtype;
         Vector<IntChoiceItem> int_choices;
+        bool int_choices_show_label = false;
 
         bool has_any() const
         {
           return has_default_value || default_expression.has_value() || panel_name.has_value() ||
             description.has_value() || label.has_value() || has_min || has_max || hide_value ||
-            subtype.has_value() || !int_choices.is_empty();
+            subtype.has_value() || !int_choices.is_empty() || int_choices_show_label;
         }
       };
 
@@ -254,6 +258,7 @@ namespace blender
       std::optional<std::string> label;
       std::optional<std::string> description;
       Vector<GLSLFunctionParam::IntChoiceItem> int_choices;
+      bool int_choices_show_label = false;
     };
 
     struct GLSLDefineValueState
@@ -345,6 +350,7 @@ namespace blender
       std::optional<std::string> hide_value;
       std::optional<std::string> subtype;
       std::optional<std::string> items;
+      std::optional<std::string> show_label;
       std::optional<std::string> panel_name;
       std::optional<std::string> description;
       std::optional<std::string> label;
@@ -352,21 +358,24 @@ namespace blender
       bool has_any() const
       {
         return default_value.has_value() || min_value.has_value() || max_value.has_value() ||
-          hide_value.has_value() || subtype.has_value() || items.has_value() || panel_name.has_value() ||
-          description.has_value() || label.has_value();
+          hide_value.has_value() || subtype.has_value() || items.has_value() ||
+          show_label.has_value() || panel_name.has_value() || description.has_value() ||
+          label.has_value();
       }
 
       bool has_sampler_unsupported_meta() const
       {
         return default_value.has_value() || min_value.has_value() || max_value.has_value() ||
-          hide_value.has_value() || subtype.has_value() || items.has_value();
+          hide_value.has_value() || subtype.has_value() || items.has_value() ||
+          show_label.has_value();
       }
 
       bool has_only_output_supported_meta() const
       {
         return label.has_value() && !default_value.has_value() && !min_value.has_value() &&
           !max_value.has_value() && !hide_value.has_value() && !subtype.has_value() &&
-          !items.has_value() && !panel_name.has_value() && !description.has_value();
+          !items.has_value() && !show_label.has_value() && !panel_name.has_value() &&
+          !description.has_value();
       }
     };
 
@@ -2211,6 +2220,13 @@ namespace blender
             return false;
           }
         }
+        else if (key == "show_label")
+        {
+          if (!assign_once(r_meta.show_label, key, value))
+          {
+            return false;
+          }
+        }
         else if (key == "description")
         {
           if (!assign_once(r_meta.description, key, value))
@@ -2632,6 +2648,7 @@ namespace blender
       }
 
       bool has_default = false;
+      bool has_show_label = false;
       for (const auto& item : assignments.items())
       {
         const StringRef key = item.key;
@@ -2696,6 +2713,19 @@ namespace blender
             return false;
           }
         }
+        else if (key == "show_label")
+        {
+          has_show_label = true;
+          if (r_define.type != SHD_GLSL_FUNCTION_DEFINE_INT)
+          {
+            r_error = "GLSL bool define '" + r_define.name + "' does not support show_label";
+            return false;
+          }
+          if (!parse_glsl_meta_bool_literal(value, r_define.int_choices_show_label, r_error))
+          {
+            return false;
+          }
+        }
         else if (key == "label")
         {
           r_define.label = std::string(value);
@@ -2722,6 +2752,11 @@ namespace blender
       }
       else
       {
+        if (has_show_label && r_define.int_choices.is_empty())
+        {
+          r_error = "GLSL int define '" + r_define.name + "' show_label requires items";
+          return false;
+        }
         if (!r_define.int_choices.is_empty())
         {
           if (r_define.min_value.has_value() || r_define.max_value.has_value())
@@ -3037,6 +3072,63 @@ namespace blender
       return true;
     }
 
+    static void register_glsl_define_int_choices(
+      NodeShaderGLSLDefineValue& value,
+      const Span<GLSLFunctionParam::IntChoiceItem> choices)
+    {
+      if (choices.is_empty())
+      {
+        RNA_shader_node_glsl_define_value_choices_unregister(&value, 1);
+        return;
+      }
+
+      Vector<int> values;
+      Vector<const char*> labels;
+      values.reserve(choices.size());
+      labels.reserve(choices.size());
+      for (const GLSLFunctionParam::IntChoiceItem& choice : choices)
+      {
+        values.append(choice.value);
+        labels.append(choice.label.c_str());
+      }
+      RNA_shader_node_glsl_define_value_choices_register(
+        &value, values.data(), labels.data(), int(choices.size()));
+    }
+
+    static void sync_glsl_define_choice_items(NodeShaderGLSLFunction& storage,
+                                              const GLSLParseResult& parse_result)
+    {
+      if (storage.define_values == nullptr)
+      {
+        return;
+      }
+      for (const GLSLDefineMeta& define : parse_result.defines)
+      {
+        NodeShaderGLSLDefineValue* value = nullptr;
+        for (const int i : IndexRange(storage.define_values_num))
+        {
+          NodeShaderGLSLDefineValue& candidate = storage.define_values[i];
+          if (candidate.type == define.type && define.name == candidate.name)
+          {
+            value = &candidate;
+            break;
+          }
+        }
+        if (value == nullptr)
+        {
+          continue;
+        }
+        if (define.type == SHD_GLSL_FUNCTION_DEFINE_INT)
+        {
+          register_glsl_define_int_choices(*value, define.int_choices);
+        }
+        else
+        {
+          RNA_shader_node_glsl_define_value_choices_unregister(value, 1);
+        }
+      }
+    }
+
     static void sync_glsl_define_values(bNode& node, const GLSLParseResult& parse_result)
     {
       if (!parse_result.defines_parsed)
@@ -3066,9 +3158,12 @@ namespace blender
 
       if (glsl_define_values_equal(storage, new_values))
       {
+        sync_glsl_define_choice_items(storage, parse_result);
         return;
       }
 
+      RNA_shader_node_glsl_define_value_choices_unregister(storage.define_values,
+                                                           storage.define_values_num);
       MEM_SAFE_DELETE(storage.define_values);
       storage.define_values_num = new_values.size();
       if (!new_values.is_empty())
@@ -3088,6 +3183,7 @@ namespace blender
       {
         storage.define_values = nullptr;
       }
+      sync_glsl_define_choice_items(storage, parse_result);
     }
 
     static std::string build_glsl_define_signature_key(const bNode& node,
@@ -3140,6 +3236,7 @@ namespace blender
             ss << item.value << ':' << item.label << '|';
           }
           ss << ';';
+          ss << "show_label=" << int(define.int_choices_show_label) << ';';
         }
         ss << '}';
       }
@@ -3475,6 +3572,25 @@ namespace blender
         }
       }
 
+      if (raw_meta.show_label.has_value())
+      {
+        if (!raw_meta.items.has_value())
+        {
+          r_error = "GLSL meta show_label requires int items";
+          return false;
+        }
+        if (r_param.type != GLSLBoundaryType::Int)
+        {
+          r_error = "GLSL meta show_label is only supported for int items";
+          return false;
+        }
+        if (!parse_glsl_meta_bool_literal(
+              *raw_meta.show_label, r_param.meta.int_choices_show_label, r_error))
+        {
+          return false;
+        }
+      }
+
       if (raw_meta.default_value.has_value())
       {
         bool parsed_literal_default = false;
@@ -3710,6 +3826,7 @@ namespace blender
             ss << item.value << ':' << item.label << '|';
           }
           ss << ';';
+          ss << "show_label=" << int(param.meta.int_choices_show_label) << ';';
         }
         ss << '}';
       }
@@ -6092,135 +6209,9 @@ vec3 glsl_ambient_lighting()
       return param.meta.label.value_or(param.name);
     }
 
-    struct GLSLIntChoiceMenuItem
-    {
-      int value = 0;
-      char label[UI_MAX_NAME_STR] = "";
-    };
-
-    struct GLSLIntChoiceMenuData
-    {
-      bNodeTree* tree = nullptr;
-      bNode* node = nullptr;
-      int* value_ptr = nullptr;
-      bool mark_parse_dirty = false;
-      int items_num = 0;
-      GLSLIntChoiceMenuItem items[1];
-    };
-
-    static const char* glsl_int_choice_label_for_value(
-      const Span<GLSLFunctionParam::IntChoiceItem> choices,
-      const int value,
-      const std::string& fallback)
-    {
-      for (const GLSLFunctionParam::IntChoiceItem& item : choices)
-      {
-        if (item.value == value)
-        {
-          return item.label.c_str();
-        }
-      }
-      return fallback.c_str();
-    }
-
-    static GLSLIntChoiceMenuData* glsl_int_choice_menu_data_create(
-      bNodeTree& tree,
-      bNode& node,
-      int& value,
-      const bool mark_parse_dirty,
-      const Span<GLSLFunctionParam::IntChoiceItem> choices)
-    {
-      BLI_assert(!choices.is_empty());
-      const size_t alloc_size = sizeof(GLSLIntChoiceMenuData) +
-        sizeof(GLSLIntChoiceMenuItem) * size_t(choices.size() - 1);
-      GLSLIntChoiceMenuData* data = static_cast<GLSLIntChoiceMenuData*>(
-        MEM_new_zeroed(alloc_size, __func__));
-      data->tree = &tree;
-      data->node = &node;
-      data->value_ptr = &value;
-      data->mark_parse_dirty = mark_parse_dirty;
-      data->items_num = choices.size();
-      for (const int i : choices.index_range())
-      {
-        data->items[i].value = choices[i].value;
-        STRNCPY_UTF8(data->items[i].label, choices[i].label.c_str());
-      }
-      return data;
-    }
-
-    static void glsl_int_choice_value_changed(bContext* C, void* arg1, void* /*arg2*/)
-    {
-      GLSLIntChoiceMenuData* data = static_cast<GLSLIntChoiceMenuData*>(arg1);
-      if (data == nullptr || data->tree == nullptr || data->node == nullptr)
-      {
-        return;
-      }
-      if (data->mark_parse_dirty)
-      {
-        NodeShaderGLSLFunction& storage = node_storage(*data->node);
-        storage.parse_status = SHD_GLSL_FUNCTION_PARSE_DIRTY;
-        storage.signature_hash = 0;
-      }
-      BKE_ntree_update_tag_node_property(data->tree, data->node);
-      if (Main* bmain = CTX_data_main(C))
-      {
-        BKE_main_ensure_invariants(*bmain, data->tree->id);
-      }
-      WM_main_add_notifier(NC_NODE | NA_EDITED, data->tree);
-    }
-
-    static void glsl_int_choice_menu_draw(bContext* /*C*/, ui::Layout* layout, void* arg)
-    {
-      GLSLIntChoiceMenuData* data = static_cast<GLSLIntChoiceMenuData*>(arg);
-      if (data == nullptr || data->value_ptr == nullptr)
-      {
-        return;
-      }
-
-      ui::Block* block = layout->block();
-      for (const int i : IndexRange(data->items_num))
-      {
-        const GLSLIntChoiceMenuItem& item = data->items[i];
-        ui::Button* but = ui::uiDefButI(block,
-                                        ui::ButtonType::Row,
-                                        item.label,
-                                        0,
-                                        0,
-                                        UI_UNIT_X * 8,
-                                        UI_UNIT_Y,
-                                        data->value_ptr,
-                                        0.0f,
-                                        item.value,
-                                        "");
-        ui::button_func_set(but, glsl_int_choice_value_changed, data, nullptr);
-      }
-    }
-
-    static void draw_glsl_int_choice_menu(ui::Layout& layout,
-                                          bNodeTree& tree,
-                                          bNode& node,
-                                          int& value,
-                                          const Span<GLSLFunctionParam::IntChoiceItem> choices,
-                                          const StringRefNull label,
-                                          const bool mark_parse_dirty)
-    {
-      if (choices.is_empty())
-      {
-        return;
-      }
-      const std::string fallback = std::to_string(value);
-      const char* active_label = glsl_int_choice_label_for_value(choices, value, fallback);
-      ui::Layout& row = layout.row(true);
-      if (!label.is_empty())
-      {
-        row.label(label, ICON_NONE);
-      }
-      row.menu_fn_argN_free(active_label,
-                            ICON_NONE,
-                            glsl_int_choice_menu_draw,
-                            glsl_int_choice_menu_data_create(
-                              tree, node, value, mark_parse_dirty, choices));
-    }
+    static void register_glsl_param_int_choices(
+      bNodeSocket& socket,
+      const Span<GLSLFunctionParam::IntChoiceItem> choices);
 
     static void add_glsl_socket_declaration(DeclarationListBuilder& b,
       const GLSLFunctionParam& param,
@@ -6293,26 +6284,19 @@ vec3 glsl_ambient_lighting()
           if (!param.meta.int_choices.is_empty())
           {
             Vector<GLSLFunctionParam::IntChoiceItem> choices = param.meta.int_choices;
-            decl.custom_draw([choices](CustomSocketDrawParams& params) {
+            const bool show_label = param.meta.int_choices_show_label;
+            decl.custom_draw([choices, show_label](CustomSocketDrawParams& params) {
               if (params.socket.is_logically_linked() || (params.socket.flag & SOCK_HIDE_VALUE))
               {
                 params.draw_standard(params.layout);
                 return;
               }
-              if (params.socket.default_value == nullptr)
-              {
-                params.draw_standard(params.layout);
-                return;
-              }
-              bNodeSocketValueInt& value =
-                *static_cast<bNodeSocketValueInt*>(params.socket.default_value);
-              draw_glsl_int_choice_menu(params.layout,
-                                        params.tree,
-                                        params.node,
-                                        value.value,
-                                        choices,
-                                        params.label,
-                                        false);
+              register_glsl_param_int_choices(params.socket, choices);
+              params.layout.prop(&params.socket_ptr,
+                                 "glsl_int_choice_value",
+                                 UI_ITEM_NONE,
+                                 show_label ? params.label : "",
+                                 ICON_NONE);
             });
           }
           apply_input_description(decl);
@@ -6416,14 +6400,70 @@ vec3 glsl_ambient_lighting()
       }
     }
 
+    static void unregister_glsl_param_int_choices(bNode& node)
+    {
+      for (bNodeSocket* socket : node.input_sockets())
+      {
+        RNA_node_socket_glsl_int_choices_unregister(socket);
+      }
+    }
+
+    static void register_glsl_param_int_choices(
+      bNodeSocket& socket,
+      const Span<GLSLFunctionParam::IntChoiceItem> choices)
+    {
+      if (choices.is_empty())
+      {
+        RNA_node_socket_glsl_int_choices_unregister(&socket);
+        return;
+      }
+
+      Vector<int> values;
+      Vector<const char*> labels;
+      values.reserve(choices.size());
+      labels.reserve(choices.size());
+      for (const GLSLFunctionParam::IntChoiceItem& choice : choices)
+      {
+        values.append(choice.value);
+        labels.append(choice.label.c_str());
+      }
+      RNA_node_socket_glsl_int_choices_register(
+        &socket, values.data(), labels.data(), int(choices.size()));
+    }
+
+    static void sync_glsl_param_int_choices(bNode& node, const GLSLParseResult& parse_result)
+    {
+      unregister_glsl_param_int_choices(node);
+      if (!parse_result.ok)
+      {
+        return;
+      }
+
+      for (const GLSLFunctionParam& param : parse_result.function.params)
+      {
+        if (param.type != GLSLBoundaryType::Int || param.meta.int_choices.is_empty())
+        {
+          continue;
+        }
+        bNodeSocket* socket = find_node_input_socket_by_identifier(node, param.identifier);
+        if (socket == nullptr || socket->type != SOCK_INT)
+        {
+          continue;
+        }
+        register_glsl_param_int_choices(*socket, param.meta.int_choices);
+      }
+    }
+
     static void sync_glsl_meta_defaults(bNode& node, const GLSLParseResult& parse_result)
     {
       NodeShaderGLSLFunction& storage = node_storage(node);
       if (!parse_result.ok)
       {
+        unregister_glsl_param_int_choices(node);
         storage.meta_hash = 0;
         return;
       }
+      sync_glsl_param_int_choices(node, parse_result);
       if (storage.meta_hash == parse_result.meta_hash)
       {
         return;
@@ -6702,16 +6742,16 @@ vec3 glsl_ambient_lighting()
         const std::string label = define.label.value_or(define.name);
         if (define.type == SHD_GLSL_FUNCTION_DEFINE_INT && !define.int_choices.is_empty())
         {
-          draw_glsl_int_choice_menu(layout,
-                                    *reinterpret_cast<bNodeTree*>(ptr->owner_id),
-                                    node,
-                                    value->value,
-                                    define.int_choices,
-                                    label,
-                                    true);
+          register_glsl_define_int_choices(*value, define.int_choices);
+          layout.prop(&value_ptr,
+                      "choice_value",
+                      UI_ITEM_NONE,
+                      define.int_choices_show_label ? label.c_str() : "",
+                      ICON_NONE);
         }
         else
         {
+          RNA_shader_node_glsl_define_value_choices_unregister(value, 1);
           const char* prop_name = define.type == SHD_GLSL_FUNCTION_DEFINE_BOOL ? "bool_value" :
                                                                                   "int_value";
           layout.prop(&value_ptr, prop_name, UI_ITEM_NONE, label.c_str(), ICON_NONE);

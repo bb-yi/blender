@@ -436,7 +436,7 @@ class GLSLFunctionNodeTest(unittest.TestCase):
             "glsl_define_int_choices.glsl",
             "/* @glsl_defines v1\n"
             "@define METHOD int default=1 label=\"Method\" "
-            "items=\"0:Burley;1:Random Walk;2:Skin\"\n"
+            "items=\"0:Burley;1:Random Walk;2:Skin\" show_label=true\n"
             "*/\n"
             "vec4 define_int_choices(vec4 color){\n"
             "#if METHOD == 2\n"
@@ -452,12 +452,14 @@ class GLSLFunctionNodeTest(unittest.TestCase):
         method = find_define_value(glsl_node, "METHOD")
         self.assertEqual(method.type, 'INT')
         self.assertEqual(method.int_value, 1)
+        self.assertEqual(method.choice_value, 'VALUE_1')
 
-        method.int_value = 2
+        method.choice_value = 'VALUE_2'
         refresh_glsl_node(glsl_node)
 
         self.assertEqual(glsl_node.parse_status, 'READY')
         self.assertEqual(find_define_value(glsl_node, "METHOD").int_value, 2)
+        self.assertEqual(find_define_value(glsl_node, "METHOD").choice_value, 'VALUE_2')
 
         text.clear()
         text.write(
@@ -542,6 +544,38 @@ class GLSLFunctionNodeTest(unittest.TestCase):
                 "mode: default=1 min=0 items=\"0:Zero;1:One\"\n"
                 "*/\n"
                 "float bad_items_minmax(int mode){return float(mode);}\n",
+            ),
+            (
+                "glsl_bad_show_label_without_items_param.glsl",
+                "bad_show_label_without_items_param",
+                "/* @glsl_meta v1\n"
+                "mode: default=1 show_label=true\n"
+                "*/\n"
+                "float bad_show_label_without_items_param(int mode){return float(mode);}\n",
+            ),
+            (
+                "glsl_bad_show_label_float_param.glsl",
+                "bad_show_label_float_param",
+                "/* @glsl_meta v1\n"
+                "mode: default=0.0 items=\"0:Zero;1:One\" show_label=true\n"
+                "*/\n"
+                "float bad_show_label_float_param(float mode){return mode;}\n",
+            ),
+            (
+                "glsl_bad_show_label_bool_define.glsl",
+                "bad_show_label_bool_define",
+                "/* @glsl_defines v1\n"
+                "@define USE_RIM bool default=true show_label=true\n"
+                "*/\n"
+                "vec4 bad_show_label_bool_define(vec4 color){return color;}\n",
+            ),
+            (
+                "glsl_bad_show_label_without_items_define.glsl",
+                "bad_show_label_without_items_define",
+                "/* @glsl_defines v1\n"
+                "@define METHOD int default=1 show_label=true\n"
+                "*/\n"
+                "vec4 bad_show_label_without_items_define(vec4 color){return color;}\n",
             ),
         ]
 
@@ -637,7 +671,7 @@ class GLSLFunctionNodeTest(unittest.TestCase):
             "glsl_param_int_choices.glsl",
             "/* @glsl_meta v1\n"
             "method: label=\"Method\" default=1 "
-            "items=\"0:Burley;1:Random Walk;2:Skin\"\n"
+            "items=\"0:Burley;1:Random Walk;2:Skin\" show_label=true\n"
             "*/\n"
             "vec4 param_int_choices(vec4 color, int method){\n"
             "  return color * float(method + 1);\n"
@@ -646,13 +680,16 @@ class GLSLFunctionNodeTest(unittest.TestCase):
 
         self.configure_glsl_node(node, "glsl_param_int_choices.glsl", "param_int_choices")
         self.assertEqual(node.parse_status, 'READY')
-        self.assertEqual(find_socket(node.inputs, "In_method").default_value, 1)
+        method_socket = find_socket(node.inputs, "In_method")
+        self.assertEqual(method_socket.default_value, 1)
+        self.assertEqual(method_socket.glsl_int_choice_value, 'VALUE_1')
 
-        find_socket(node.inputs, "In_method").default_value = 2
+        method_socket.glsl_int_choice_value = 'VALUE_2'
         refresh_glsl_node(node)
 
         self.assertEqual(node.parse_status, 'READY')
         self.assertEqual(find_socket(node.inputs, "In_method").default_value, 2)
+        self.assertEqual(find_socket(node.inputs, "In_method").glsl_int_choice_value, 'VALUE_2')
 
         text.clear()
         text.write(
