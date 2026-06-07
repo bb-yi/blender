@@ -1090,9 +1090,6 @@ std::string TelemetryModule::viewport_report() const
         ms_per_call);
   }
   result += format_shadow_contexts_report(*record);
-  result += format_shader_waits_report(*record);
-  result += format_pass_readbacks_report(*record);
-  result += format_material_sync_report(*record);
   result += format_shadow_lights_report(*record);
   result += format_probe_costs_report(*record);
   return result;
@@ -1148,9 +1145,6 @@ std::string TelemetryModule::render_report() const
         ms_per_sample);
   }
   result += format_shadow_contexts_report(*record);
-  result += format_shader_waits_report(*record);
-  result += format_pass_readbacks_report(*record);
-  result += format_material_sync_report(*record);
   result += format_shadow_lights_report(*record);
   result += format_probe_costs_report(*record);
   return result;
