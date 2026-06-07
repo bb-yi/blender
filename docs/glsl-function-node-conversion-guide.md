@@ -152,7 +152,7 @@ Meta 必须覆盖导出函数的公开接口：
 - 数值调节参数应尽量写 `default`，并在语义明确时写 `min` / `max`
 - `0..1` 混合、阈值、强度、柔和度等参数应优先写 `subtype=factor`
 - 颜色参数 `vec3` / `vec4` 应写 `subtype=color`
-- 坐标、方向、比例等向量参数应写清楚语义，必要时用合适的 vector subtype
+- 坐标、方向、比例等向量参数应写清楚语义；不要给方向/法线参数写 `subtype=direction`，这个 subtype 会触发不友好的球形方向控件；需要普通三轴向量 UI 时用 `subtype=xyz` 或省略 subtype
 - 固定模式类 `int` 参数应优先写 `items="0:Label;1:Other"`，让默认值显示成下拉菜单；只有连续数值范围才用普通 `min/max` 整数框
 - `items` 下拉默认隐藏前置参数名，只显示当前选项；当同一行没有足够上下文或面板里有多个相似下拉时，再写 `show_label=true`
 - `sampler2D` 只能写 `label`、`description`，以及放进 panel；不要写 `default/min/max/hide_value/subtype`
@@ -1396,7 +1396,7 @@ Meta 只会作用到它正下方那个函数。
 - `int items` 下拉：默认不写 `show_label`，让控件只显示当前选项；当下拉项离开上下文会难以理解时写 `show_label=true`
 - `vec2` 坐标、偏移、比例：写 `label`、`default=vec2(...)` 和 `description`
 - `vec3` / `vec4` 颜色：写 `subtype=color`，并给出颜色默认值
-- `vec3` 方向、法线、位置：不要误标为颜色；用 `description` 写清楚空间语义
+- `vec3` 方向、法线、位置：不要误标为颜色；用 `description` 写清楚空间语义；不要使用 `subtype=direction`，需要普通三轴输入时用 `subtype=xyz` 或省略 subtype
 - `sampler2D`：只写 `label` 和 `description`，必要时放进 `@panel`
 - `out` 参数：只写 `label`；不要写 `default/min/max/subtype/description`
 - 返回值：不写 Meta；在 `Outputs` 中说明返回类型和含义
@@ -1566,7 +1566,6 @@ vec4 subsurface_mode(vec4 color, int method)
 - `factor`
 - `percentage`
 - `translation`
-- `direction`
 - `velocity`
 - `acceleration`
 - `euler`
@@ -1578,10 +1577,12 @@ vec4 subsurface_mode(vec4 color, int method)
 ```glsl
 strength: default=0.5 min=0.0 max=1.0 subtype=factor
 offset: default=vec3(0.0) subtype=translation
-normal_dir: default=vec3(0.0, 0.0, 1.0) subtype=direction
+normal_dir: default=vec3(0.0, 0.0, 1.0) subtype=xyz
 tint: default=vec3(1.0, 0.8, 0.2) subtype=color
 overlay: default=vec4(1.0, 0.8, 0.2, 0.5) subtype=color
 ```
+
+`direction` 虽然是 Blender 的向量 subtype，但它会在节点 UI 中显示成球形方向控件，不适合 GLSL Function 自动生成的方向、法线、视线、切线参数；这类参数应靠 `label` / `description` 写清楚坐标空间，并使用 `subtype=xyz` 或不写 subtype。
 
 #### 3.6 `hide_value`
 
