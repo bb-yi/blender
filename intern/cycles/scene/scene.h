@@ -9,6 +9,7 @@
 #include "scene/devicescene.h"
 #include "scene/film.h"
 #include "scene/image.h"
+#include "scene/scene_attributes.h"
 #include "scene/shader.h"
 
 #include "util/param.h"
@@ -27,6 +28,12 @@ class Device;
 class DeviceInfo;
 class Film;
 class Integrator;
+class SceneAttributes;
+class PointLight;
+class SpotLight;
+class AreaLight;
+class SunLight;
+class BackgroundLight;
 class Light;
 class LightManager;
 class LookupTables;
@@ -71,7 +78,15 @@ class SceneParams {
   int num_bvh_time_steps;
   int hair_subdivisions;
   CurveShapeType hair_shape;
+  float texture_resolution;
   int texture_limit;
+
+  /* Use tx files if they exist. */
+  bool use_texture_cache = true;
+  /* Auto generate tx files. */
+  bool auto_texture_cache = false;
+  /* Relative (to the image file) or absolute directory for auto generating tx files. */
+  std::string texture_cache_path;
 
   bool background;
 
@@ -86,20 +101,24 @@ class SceneParams {
     num_bvh_time_steps = 0;
     hair_subdivisions = 3;
     hair_shape = CURVE_RIBBON;
+    texture_resolution = 1.0f;
     texture_limit = 0;
     background = true;
   }
 
   bool modified(const SceneParams &params) const
   {
-    return !(shadingsystem == params.shadingsystem && bvh_layout == params.bvh_layout &&
-             bvh_type == params.bvh_type &&
-             use_bvh_spatial_split == params.use_bvh_spatial_split &&
-             use_bvh_compact_structure == params.use_bvh_compact_structure &&
-             use_bvh_unaligned_nodes == params.use_bvh_unaligned_nodes &&
-             num_bvh_time_steps == params.num_bvh_time_steps &&
-             hair_subdivisions == params.hair_subdivisions && hair_shape == params.hair_shape &&
-             texture_limit == params.texture_limit);
+    return !(
+        shadingsystem == params.shadingsystem && bvh_layout == params.bvh_layout &&
+        bvh_type == params.bvh_type && use_bvh_spatial_split == params.use_bvh_spatial_split &&
+        use_bvh_compact_structure == params.use_bvh_compact_structure &&
+        use_bvh_unaligned_nodes == params.use_bvh_unaligned_nodes &&
+        num_bvh_time_steps == params.num_bvh_time_steps &&
+        hair_subdivisions == params.hair_subdivisions && hair_shape == params.hair_shape &&
+        texture_resolution == params.texture_resolution && texture_limit == params.texture_limit &&
+        use_texture_cache == params.use_texture_cache &&
+        auto_texture_cache == params.auto_texture_cache &&
+        texture_cache_path == params.texture_cache_path);
   }
 
   int curve_subdivisions()
@@ -128,11 +147,13 @@ class Scene : public NodeOwner {
   Film *film;
   Background *background;
   Integrator *integrator;
+  SceneAttributes *scene_attribute;
 
   /* data lists */
   unique_ptr_vector<Background> backgrounds;
   unique_ptr_vector<Film> films;
   unique_ptr_vector<Integrator> integrators;
+  unique_ptr_vector<SceneAttributes> scene_attributes;
   unique_ptr_vector<Camera> cameras;
   unique_ptr_vector<Shader> shaders;
   unique_ptr_vector<Pass> passes;
@@ -179,10 +200,10 @@ class Scene : public NodeOwner {
 
   void device_update(Device *device, Progress &progress);
 
-  bool need_global_attribute(AttributeStandard std);
+  bool need_global_attribute(AttributeStandard std) const;
   void need_global_attributes(AttributeRequestSet &attributes);
 
-  enum MotionType { MOTION_NONE = 0, MOTION_PASS, MOTION_BLUR };
+  enum MotionType { MOTION_NONE = 0, MOTION_PASS, MOTION_BLUR, MOTION_PASS_INTERACTIVE };
   MotionType need_motion() const;
   float motion_shutter_time();
 
@@ -204,6 +225,8 @@ class Scene : public NodeOwner {
   bool has_volume();
   bool has_volume_modified() const;
   void tag_has_volume_modified();
+  /* Check if we use multiple importance sampling for any light in the scene. */
+  bool use_light_mis() const;
 
   /* This function is used to create a node of a specified type instead of
    * calling 'new', and sets the scene as the owner of the node.
@@ -232,6 +255,8 @@ class Scene : public NodeOwner {
   /* Same as above, but specify the actual owner of all the nodes in the set.
    */
   template<typename T> void delete_nodes(const set<T *> &nodes, const NodeOwner *owner);
+
+  template<class T> T *create_light_node();
 
  protected:
   /* Check if some heavy data worth logging was updated.
@@ -262,7 +287,11 @@ class Scene : public NodeOwner {
   bool load_kernels(Progress &progress);
 };
 
-template<> Light *Scene::create_node<Light>();
+template<> PointLight *Scene::create_node<PointLight>();
+template<> SpotLight *Scene::create_node<SpotLight>();
+template<> AreaLight *Scene::create_node<AreaLight>();
+template<> SunLight *Scene::create_node<SunLight>();
+template<> BackgroundLight *Scene::create_node<BackgroundLight>();
 template<> Mesh *Scene::create_node<Mesh>();
 template<> Object *Scene::create_node<Object>();
 template<> Hair *Scene::create_node<Hair>();
@@ -275,6 +304,7 @@ template<> Camera *Scene::create_node<Camera>();
 template<> Background *Scene::create_node<Background>();
 template<> Film *Scene::create_node<Film>();
 template<> Integrator *Scene::create_node<Integrator>();
+template<> SceneAttributes *Scene::create_node<SceneAttributes>();
 
 template<> void Scene::delete_node(Light *node);
 template<> void Scene::delete_node(Mesh *node);

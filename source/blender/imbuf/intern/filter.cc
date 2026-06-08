@@ -64,8 +64,8 @@ static void filtcolumf(float *point, int y, int skip)
 
 void IMB_filtery(ImBuf *ibuf)
 {
-  uchar *point = ibuf->byte_buffer.data;
-  float *pointf = ibuf->float_buffer.data;
+  uchar *point = ibuf->byte_data_for_write();
+  float *pointf = ibuf->float_data_for_write();
 
   int x = ibuf->x;
   int y = ibuf->y;
@@ -73,7 +73,7 @@ void IMB_filtery(ImBuf *ibuf)
 
   for (; x > 0; x--) {
     if (point) {
-      if (ibuf->planes > 24) {
+      if (ibuf->color_mode == ImColorMode::RGBA) {
         filtcolum(point, y, skip);
       }
       point++;
@@ -85,7 +85,7 @@ void IMB_filtery(ImBuf *ibuf)
       point++;
     }
     if (pointf) {
-      if (ibuf->planes > 24) {
+      if (ibuf->color_mode == ImColorMode::RGBA) {
         filtcolumf(pointf, y, skip);
       }
       pointf++;
@@ -146,22 +146,23 @@ void IMB_mask_filter_extend(char *mask, int width, int height)
 void IMB_mask_clear(ImBuf *ibuf, const char *mask, int val)
 {
   int x, y;
-  if (ibuf->float_buffer.data) {
+  if (float *float_data = ibuf->float_data_for_write()) {
     for (x = 0; x < ibuf->x; x++) {
       for (y = 0; y < ibuf->y; y++) {
         if (mask[ibuf->x * y + x] == val) {
-          float *col = ibuf->float_buffer.data + 4 * (ibuf->x * y + x);
+          float *col = float_data + 4 * (ibuf->x * y + x);
           col[0] = col[1] = col[2] = col[3] = 0.0f;
         }
       }
     }
   }
   else {
+    uchar *byte_data = ibuf->byte_data_for_write();
     /* char buffer */
     for (x = 0; x < ibuf->x; x++) {
       for (y = 0; y < ibuf->y; y++) {
         if (mask[ibuf->x * y + x] == val) {
-          char *col = reinterpret_cast<char *>(ibuf->byte_buffer.data + 4 * ibuf->x * y + x);
+          char *col = reinterpret_cast<char *>(byte_data + 4 * ibuf->x * y + x);
           col[0] = col[1] = col[2] = col[3] = 0;
         }
       }
@@ -204,15 +205,14 @@ void IMB_filter_extend(ImBuf *ibuf, char *mask, int filter)
   const int width = ibuf->x;
   const int height = ibuf->y;
   const int depth = 4; /* always 4 channels */
-  const int chsize = ibuf->float_buffer.data ? sizeof(float) : sizeof(uchar);
+  const int chsize = ibuf->float_data() ? sizeof(float) : sizeof(uchar);
   const size_t bsize = size_t(width) * height * depth * chsize;
-  const bool is_float = (ibuf->float_buffer.data != nullptr);
-  void *dstbuf = MEM_dupalloc_void(ibuf->float_buffer.data ?
-                                       static_cast<void *>(ibuf->float_buffer.data) :
-                                       static_cast<void *>(ibuf->byte_buffer.data));
+  const bool is_float = (ibuf->float_data() != nullptr);
+  void *dstbuf = ibuf->float_data() ? static_cast<void *>(MEM_dupalloc(ibuf->float_data())) :
+                                      static_cast<void *>(MEM_dupalloc(ibuf->byte_data()));
   char *dstmask = mask == nullptr ? nullptr : MEM_dupalloc(mask);
-  void *srcbuf = ibuf->float_buffer.data ? static_cast<void *>(ibuf->float_buffer.data) :
-                                           static_cast<void *>(ibuf->byte_buffer.data);
+  void *srcbuf = ibuf->float_data() ? static_cast<void *>(ibuf->float_data_for_write()) :
+                                      static_cast<void *>(ibuf->byte_data_for_write());
   char *srcmask = mask;
   int cannot_early_out = 1, r, n, k, i, j, c;
   float weight[25];
@@ -333,12 +333,12 @@ void IMB_filter_extend(ImBuf *ibuf, char *mask, int filter)
   }
 }
 
-void IMB_premultiply_rect(uint8_t *rect, char planes, int w, int h)
+void IMB_premultiply_rect(uint8_t *rect, ImColorMode color_mode, int w, int h)
 {
   uint8_t *cp;
   int x, y, val;
 
-  if (planes == 24) { /* put alpha at 255 */
+  if (color_mode == ImColorMode::RGB) { /* put alpha at 255 */
     cp = rect;
 
     for (y = 0; y < h; y++) {
@@ -385,22 +385,22 @@ void IMB_premultiply_alpha(ImBuf *ibuf)
     return;
   }
 
-  if (ibuf->byte_buffer.data) {
-    IMB_premultiply_rect(ibuf->byte_buffer.data, ibuf->planes, ibuf->x, ibuf->y);
+  if (uchar *byte_data = ibuf->byte_data_for_write()) {
+    IMB_premultiply_rect(byte_data, ibuf->color_mode, ibuf->x, ibuf->y);
   }
 
-  if (ibuf->float_buffer.data) {
-    IMB_premultiply_rect_float(ibuf->float_buffer.data, ibuf->channels, ibuf->x, ibuf->y);
+  if (float *float_data = ibuf->float_data_for_write()) {
+    IMB_premultiply_rect_float(float_data, ibuf->channels, ibuf->x, ibuf->y);
   }
 }
 
-void IMB_unpremultiply_rect(uint8_t *rect, char planes, int w, int h)
+void IMB_unpremultiply_rect(uint8_t *rect, ImColorMode color_mode, int w, int h)
 {
   uchar *cp;
   int x, y;
   float val;
 
-  if (planes == 24) { /* put alpha at 255 */
+  if (color_mode == ImColorMode::RGB) { /* put alpha at 255 */
     cp = rect;
 
     for (y = 0; y < h; y++) {
@@ -447,12 +447,12 @@ void IMB_unpremultiply_alpha(ImBuf *ibuf)
     return;
   }
 
-  if (ibuf->byte_buffer.data) {
-    IMB_unpremultiply_rect(ibuf->byte_buffer.data, ibuf->planes, ibuf->x, ibuf->y);
+  if (uchar *byte_data = ibuf->byte_data_for_write()) {
+    IMB_unpremultiply_rect(byte_data, ibuf->color_mode, ibuf->x, ibuf->y);
   }
 
-  if (ibuf->float_buffer.data) {
-    IMB_unpremultiply_rect_float(ibuf->float_buffer.data, ibuf->channels, ibuf->x, ibuf->y);
+  if (float *float_data = ibuf->float_data_for_write()) {
+    IMB_unpremultiply_rect_float(float_data, ibuf->channels, ibuf->x, ibuf->y);
   }
 }
 

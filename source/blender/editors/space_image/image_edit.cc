@@ -66,6 +66,12 @@ void ED_space_image_set(Main *bmain, SpaceImage *sima, Image *ima, bool automati
 
   id_us_ensure_real(id_cast<ID *>(sima->image));
 
+  if (ima) {
+    sima->xof = ima->runtime->view_offset[0];
+    sima->yof = ima->runtime->view_offset[1];
+    sima->zoom = ima->runtime->view_zoom;
+  }
+
   WM_main_add_notifier(NC_SPACE | ND_SPACE_IMAGE, nullptr);
 }
 
@@ -144,7 +150,10 @@ void ED_space_image_set_mask(bContext *C, SpaceImage *sima, Mask *mask)
   }
 }
 
-ImBuf *ED_space_image_acquire_buffer(SpaceImage *sima, void **r_lock, int tile)
+ImBuf *ED_space_image_acquire_buffer(SpaceImage *sima,
+                                     void **r_lock,
+                                     int tile,
+                                     const bool ensure_host_buffer)
 {
   ImBuf *ibuf;
 
@@ -159,7 +168,12 @@ ImBuf *ED_space_image_acquire_buffer(SpaceImage *sima, void **r_lock, int tile)
 #endif
     {
       sima->iuser.tile = tile;
-      ibuf = BKE_image_acquire_ibuf(sima->image, &sima->iuser, r_lock);
+      if (ensure_host_buffer) {
+        ibuf = BKE_image_acquire_ibuf(sima->image, &sima->iuser, r_lock);
+      }
+      else {
+        ibuf = BKE_image_acquire_ibuf_gpu(sima->image, &sima->iuser, r_lock);
+      }
       sima->iuser.tile = 0;
     }
 
@@ -170,7 +184,7 @@ ImBuf *ED_space_image_acquire_buffer(SpaceImage *sima, void **r_lock, int tile)
         return ibuf;
       }
 
-      if (ibuf->byte_buffer.data || ibuf->float_buffer.data) {
+      if (ibuf->byte_data() || ibuf->float_data() || ibuf->gpu.texture) {
         return ibuf;
       }
       BKE_image_release_ibuf(sima->image, ibuf, *r_lock);
@@ -220,7 +234,7 @@ bool ED_space_image_has_buffer(SpaceImage *sima)
   void *lock;
   bool has_buffer;
 
-  ibuf = ED_space_image_acquire_buffer(sima, &lock, 0);
+  ibuf = ED_space_image_acquire_buffer(sima, &lock, 0, false);
   has_buffer = (ibuf != nullptr);
   ED_space_image_release_buffer(sima, ibuf, lock);
 
@@ -234,7 +248,7 @@ void ED_space_image_get_size(SpaceImage *sima, int *r_width, int *r_height)
   void *lock;
 
   /* TODO(lukas): Support tiled images with different sizes */
-  ibuf = ED_space_image_acquire_buffer(sima, &lock, 0);
+  ibuf = ED_space_image_acquire_buffer(sima, &lock, 0, false);
 
   if (ibuf && ibuf->x > 0 && ibuf->y > 0) {
     *r_width = ibuf->x;
@@ -390,7 +404,7 @@ bool ED_image_slot_cycle(Image *image, int direction)
 
   BLI_assert(ELEM(direction, -1, 1));
 
-  int num_slots = BLI_listbase_count(&image->renderslots);
+  int num_slots = image->renderslots.count();
   for (i = 1; i < num_slots; i++) {
     slot = (cur + ((direction == -1) ? -i : i)) % num_slots;
     if (slot < 0) {
@@ -504,9 +518,10 @@ bool ED_space_image_maskedit_poll(bContext *C)
   SpaceImage *sima = CTX_wm_space_image(C);
 
   if (sima) {
+    const Main *bmain = CTX_data_main(C);
     Scene *scene = CTX_data_scene(C);
     ViewLayer *view_layer = CTX_data_view_layer(C);
-    BKE_view_layer_synced_ensure(scene, view_layer);
+    BKE_view_layer_synced_ensure(*bmain, scene, view_layer);
     Object *obedit = BKE_view_layer_edit_object_get(view_layer);
     return ED_space_image_check_show_maskedit(sima, obedit);
   }

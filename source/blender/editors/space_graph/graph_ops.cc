@@ -16,6 +16,7 @@
 
 #include "BKE_context.hh"
 #include "BKE_global.hh"
+#include "BKE_scene.hh"
 
 #include "UI_view2d.hh"
 
@@ -80,7 +81,8 @@ static void graphview_cursor_apply(bContext *C, wmOperator *op)
        * NOTE: Preview range won't go into negative values,
        *       so only clamping once should be fine.
        */
-      CLAMP(scene->r.cfra, PSFRA, PEFRA);
+      const ScenePlaybackRange playback_range = BKE_scene_get_playback_range(scene);
+      CLAMP(scene->r.cfra, playback_range.start_frame, playback_range.end_frame);
     }
     else {
       /* Prevent negative frames */
@@ -277,7 +279,7 @@ static wmOperatorStatus graphview_curves_hide_exec(bContext *C, wmOperator *op)
 
   /* cleanup */
   ANIM_animdata_freelist(&anim_data);
-  BLI_freelistN(&all_data);
+  all_data.free_no_destruct();
 
   /* unhide selected */
   if (unselected) {
@@ -391,7 +393,7 @@ static wmOperatorStatus graphview_curves_reveal_exec(bContext *C, wmOperator *op
 
   /* cleanup */
   ANIM_animdata_freelist(&anim_data);
-  BLI_freelistN(&all_data);
+  all_data.free_no_destruct();
 
   /* send notifier that things have changed */
   WM_event_add_notifier(C, NC_ANIMATION | ND_ANIMCHAN | NA_EDITED, nullptr);
@@ -437,6 +439,7 @@ void graphedit_operatortypes()
 
   WM_operatortype_append(GRAPH_OT_hide);
   WM_operatortype_append(GRAPH_OT_reveal);
+  WM_operatortype_append(GRAPH_OT_local_view);
 
   /* keyframes */
   /* selection */
@@ -496,6 +499,7 @@ void graphedit_operatortypes()
 
   /* F-Curve Modifiers */
   WM_operatortype_append(GRAPH_OT_fmodifier_add);
+  WM_operatortype_append(GRAPH_OT_fmodifier_delete);
   WM_operatortype_append(GRAPH_OT_fmodifier_copy);
   WM_operatortype_append(GRAPH_OT_fmodifier_paste);
 

@@ -77,7 +77,7 @@ void register_node_type_tex_texture()
 {
   static bke::bNodeType ntype;
 
-  tex_node_type_base(&ntype, "TextureNodeTexture", TEX_NODE_TEXTURE);
+  tex_node_type_base(&ntype, "TextureNodeTexture"_ustr, TEX_NODE_TEXTURE);
   ntype.ui_name = "Texture";
   ntype.enum_name_legacy = "TEXTURE";
   ntype.nclass = NODE_CLASS_INPUT;

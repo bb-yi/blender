@@ -10,6 +10,7 @@
  */
 
 #include <algorithm>
+#include <cstddef>
 
 #include "MEM_guardedalloc.h"
 
@@ -39,6 +40,8 @@
 #include "BLI_string_utf8.h"
 #include "BLI_string_utils.hh"
 #include "BLI_utildefines.h"
+
+#include "PRF_profile.hh"
 
 #ifndef NDEBUG
 #  include "BLI_dynstr.h"
@@ -1075,7 +1078,7 @@ static void layerDefault_mcol(void *data, const int count)
 
 static void layerDefault_origindex(void *data, const int count)
 {
-  copy_vn_i(static_cast<int *>(data), count, ORIGINDEX_NONE);
+  std::fill_n(static_cast<int *>(data), count, ORIGINDEX_NONE);
 }
 
 static void layerInterp_shapekey(const void **sources, const float *weights, int count, void *dest)
@@ -1110,7 +1113,7 @@ static void layerDefault_mvert_skin(void *data, const int count)
 
   for (int i = 0; i < count; i++) {
     copy_v3_fl(vs[i].radius, 0.25f);
-    vs[i].flag = 0;
+    vs[i].flag = eMVertSkinFlag{};
   }
 }
 
@@ -1276,6 +1279,45 @@ static void layerInterp_propcol(const void **sources, const float *weights, int 
     madd_v4_v4fl(col, src->color, interp_weight);
   }
   copy_v4_v4(mc->color, col);
+}
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Callbacks for (#float4, #CD_PROP_FLOAT4)
+ * \{ */
+
+static void layerInterp_propfloat4(const void **sources,
+                                   const float *weights,
+                                   int count,
+                                   void *dest)
+{
+  vec4f result = {0.0f, 0.0f, 0.0f, 0.0f};
+  for (int i = 0; i < count; i++) {
+    const float interp_weight = weights[i];
+    const vec4f *src = static_cast<const vec4f *>(sources[i]);
+    madd_v4_v4fl(&result.x, &src->x, interp_weight);
+  }
+  copy_v4_v4(static_cast<float *>(dest), &result.x);
+}
+
+static void layerMultiply_propfloat4(void *data, const float fac)
+{
+  vec4f *vec = static_cast<vec4f *>(data);
+  vec->x *= fac;
+  vec->y *= fac;
+  vec->z *= fac;
+  vec->w *= fac;
+}
+
+static void layerAdd_propfloat4(void *data1, const void *data2)
+{
+  vec4f *vec1 = static_cast<vec4f *>(data1);
+  const vec4f *vec2 = static_cast<const vec4f *>(data2);
+  vec1->x += vec2->x;
+  vec1->y += vec2->y;
+  vec1->z += vec2->z;
+  vec1->w += vec2->w;
 }
 
 /** \} */
@@ -1465,6 +1507,8 @@ static void layerInterp_propquaternion(const void **sources,
   mixer.finalize();
   *static_cast<Quaternion *>(dest) = result;
 }
+
+/** \} */
 
 /* -------------------------------------------------------------------- */
 /** \name Callbacks for (#math::Quaternion, #CD_PROP_FLOAT4X4)
@@ -1704,13 +1748,16 @@ static const LayerTypeInfo LAYERTYPEINFO[CD_NUMTYPES] = {
         .structname = "",
         .structnum = 0,
     },
-    /* 24: CD_RECAST */
+    /* 24: CD_PROP_FLOAT4 */
     {
-        .size = sizeof(MRecast),
-        .alignment = alignof(MRecast),
-        .structname = "MRecast",
+        .size = sizeof(float4),
+        .alignment = alignof(float4),
+        .structname = "vec4f",
         .structnum = 1,
-        .defaultname = N_("Recast"),
+        .defaultname = N_("Float4"),
+        .interp = layerInterp_propfloat4,
+        .multiply = layerMultiply_propfloat4,
+        .add = layerAdd_propfloat4,
     },
     /* 25: CD_MPOLY */ /* DEPRECATED */
     {
@@ -2215,7 +2262,7 @@ static bool customdata_merge_internal(const CustomData *source,
   for (int i = 0; i < source->totlayer; i++) {
     const CustomDataLayer &src_layer = source->layers[i];
     const eCustomDataType type = eCustomDataType(src_layer.type);
-    const int src_layer_flag = src_layer.flag;
+    const eCustomDataLayer_Flag src_layer_flag = src_layer.flag;
 
     if (type != last_type) {
       /* Don't exceed layer count on destination. */
@@ -2390,6 +2437,7 @@ void CustomData_realloc(CustomData *data,
                         const int new_size,
                         const eCDAllocType alloctype)
 {
+  PRF_scope(ProfileCategory::Default);
   BLI_assert(new_size >= 0);
   for (int i = 0; i < data->totlayer; i++) {
     CustomDataLayer *layer = &data->layers[i];
@@ -2497,7 +2545,7 @@ static void CustomData_external_free(CustomData *data)
 void CustomData_reset(CustomData *data)
 {
   *data = CustomData{};
-  copy_vn_i(data->typemap, CD_NUMTYPES, -1);
+  std::fill_n(data->typemap, CD_NUMTYPES, -1);
 }
 
 void CustomData_free(CustomData *data)
@@ -2712,7 +2760,9 @@ void CustomData_set_layer_render_index(CustomData *data, const eCustomDataType t
   }
 }
 
-void CustomData_set_layer_flag(CustomData *data, const eCustomDataType type, const int flag)
+void CustomData_set_layer_flag(CustomData *data,
+                               const eCustomDataType type,
+                               const eCustomDataLayer_Flag flag)
 {
   for (int i = 0; i < data->totlayer; i++) {
     if (data->layers[i].type == type) {
@@ -2738,7 +2788,7 @@ static CustomDataLayer *customData_add_layer__internal(
     StringRef name)
 {
   const LayerTypeInfo &type_info = *layerType_getInfo(type);
-  int flag = 0;
+  eCustomDataLayer_Flag flag = {};
 
   /* Some layer types only support a single layer. */
   if (!type_info.defaultname && CustomData_has_layer(data, type)) {
@@ -3213,7 +3263,7 @@ void CustomData_interp(const CustomData *source,
     default_weights = (count > SOURCE_BUF_SIZE) ?
                           MEM_new_array_uninitialized<float>(size_t(count), __func__) :
                           default_weights_buf;
-    copy_vn_fl(default_weights, count, 1.0f / count);
+    std::fill_n(default_weights, count, 1.0f / count);
     weights = default_weights;
   }
 
@@ -3973,7 +4023,7 @@ void CustomData_bmesh_interp(
     default_weights = (count > SOURCE_BUF_SIZE) ?
                           MEM_new_array_uninitialized<float>(size_t(count), __func__) :
                           default_weights_buf;
-    copy_vn_fl(default_weights, count, 1.0f / count);
+    std::fill_n(default_weights, count, 1.0f / count);
     weights = default_weights;
   }
 
@@ -4701,46 +4751,16 @@ static void get_type_file_write_info(const eCustomDataType type,
   *r_struct_num = typeInfo->structnum;
 }
 
-void CustomData_blend_write_prepare(CustomData &data,
-                                    const bke::AttrDomain domain,
-                                    const int domain_size,
-                                    Vector<CustomDataLayer, 16> &layers_to_write,
-                                    bke::AttributeStorage::BlendWriteData &write_data)
+void CustomData_blend_write_prepare(CustomData &data, Vector<CustomDataLayer, 16> &layers_to_write)
 {
   using namespace blender::bke;
   for (const CustomDataLayer &layer : Span(data.layers, data.totlayer)) {
     if (layer.flag & CD_FLAG_NOCOPY) {
       continue;
     }
-    const StringRef name = layer.name;
-    if (attribute_name_is_anonymous(name)) {
-      continue;
-    }
-
-    /* We always write the data in the new #AttributeStorage format, even though it's not yet used
-     * at runtime. This block should be removed when the new format is used at runtime. */
-    const eCustomDataType data_type = eCustomDataType(layer.type);
-    if (const std::optional<AttrType> type = custom_data_type_to_attr_type(data_type)) {
-      blender::Attribute attribute_dna{};
-      attribute_dna.name = layer.name;
-      attribute_dna.data_type = int16_t(*type);
-      attribute_dna.domain = int8_t(domain);
-      attribute_dna.storage_type = int8_t(AttrStorageType::Array);
-
-      /* Do not increase the user count; #::AttributeArray does not act as an owner of the
-       * attribute data, since it's only used temporarily for writing files. Changing the user
-       * count would be okay too, but it's unnecessary because none of this data should be
-       * modified while it's being written anyway. */
-      auto &array_dna = write_data.scope.construct<blender::AttributeArray>();
-      array_dna.data = layer.data;
-      array_dna.sharing_info = layer.sharing_info;
-      array_dna.size = domain_size;
-      attribute_dna.data = &array_dna;
-
-      write_data.attributes.append(attribute_dna);
-      continue;
-    }
-
+    /* Generic attribute types are stored in #AttributeStorage (except for BMesh but that is
+     * runtime only). */
+    BLI_assert((CD_TYPE_AS_MASK(eCustomDataType(layer.type)) & CD_MASK_PROP_ALL) == 0);
     layers_to_write.append(layer);
   }
   data.totlayer = layers_to_write.size();
@@ -4772,14 +4792,13 @@ static void write_mdisps(BlendWriter *writer,
       const MDisps *md = &mdlist[i];
       if (md->disps) {
         if (!external) {
-          BLO_write_float3_array(writer, md->totdisp, &md->disps[0][0]);
+          writer->write_float3_array(md->totdisp, &md->disps[0][0]);
         }
       }
 
       if (md->hidden) {
-        BLO_write_int8_array(writer,
-                             BLI_BITMAP_SIZE(md->totdisp) * sizeof(BLI_bitmap),
-                             reinterpret_cast<const int8_t *>(md->hidden));
+        writer->write_int8_array(BLI_BITMAP_SIZE(md->totdisp) * sizeof(BLI_bitmap),
+                                 reinterpret_cast<const int8_t *>(md->hidden));
       }
     }
   }
@@ -4795,7 +4814,7 @@ static void write_grid_paint_mask(BlendWriter *writer,
       const GridPaintMask *gpm = &grid_paint_mask[i];
       if (gpm->data) {
         const uint32_t gridsize = uint32_t(CCG_grid_size(gpm->level));
-        BLO_write_float_array(writer, gridsize * gridsize, gpm->data);
+        writer->write_float_array(gridsize * gridsize, gpm->data);
       }
     }
   }
@@ -4814,7 +4833,7 @@ static void blend_write_layer_data(BlendWriter *writer,
           writer, count, static_cast<const MDisps *>(layer.data), layer.flag & CD_FLAG_EXTERNAL);
       break;
     case CD_PAINT_MASK:
-      BLO_write_float_array(writer, count, static_cast<const float *>(layer.data));
+      writer->write_float_array(count, static_cast<const float *>(layer.data));
       break;
     case CD_GRID_PAINT_MASK:
       write_grid_paint_mask(writer, count, static_cast<const GridPaintMask *>(layer.data));
@@ -4822,7 +4841,7 @@ static void blend_write_layer_data(BlendWriter *writer,
     case CD_PROP_BOOL:
       BLI_STATIC_ASSERT(sizeof(bool) == sizeof(uint8_t),
                         "bool type is expected to have the same size as uint8_t")
-      BLO_write_uint8_array(writer, count, static_cast<const uint8_t *>(layer.data));
+      writer->write_uint8_array(count, static_cast<const uint8_t *>(layer.data));
       break;
     default: {
       const char *structname;
@@ -4877,10 +4896,18 @@ static void blend_read_mdisps(BlendDataReader *reader,
     for (int i = 0; i < count; i++) {
       MDisps &md = mdisps[i];
 
-      BLO_read_float3_array(reader, md.totdisp, reinterpret_cast<float **>(&md.disps));
-      BLO_read_int8_array(reader,
-                          BLI_BITMAP_SIZE(md.totdisp) * sizeof(BLI_bitmap),
-                          reinterpret_cast<int8_t **>(&md.hidden));
+      bool ok = true;
+      if (md.disps) {
+        ok &= BLO_read_array(reader, reinterpret_cast<float **>(&md.disps), md.totdisp, 3);
+      }
+      if (md.hidden) {
+        ok &= BLO_read_array(reader,
+                             reinterpret_cast<int8_t **>(&md.hidden),
+                             BLI_BITMAP_SIZE(md.totdisp) * sizeof(BLI_bitmap));
+      }
+      if (!ok) {
+        md.totdisp = 0;
+      }
 
       if (md.totdisp && !md.level) {
         /* this calculation is only correct for loop mdisps;
@@ -4907,7 +4934,7 @@ static void blend_read_paint_mask(BlendDataReader *reader,
       GridPaintMask *gpm = &grid_paint_mask[i];
       if (gpm->data) {
         const int gridsize = CCG_grid_size(gpm->level);
-        BLO_read_float_array(reader, gridsize * gridsize, &gpm->data);
+        (void)BLO_read_array(reader, &gpm->data, int64_t(gridsize) * gridsize);
       }
     }
   }
@@ -4915,27 +4942,32 @@ static void blend_read_paint_mask(BlendDataReader *reader,
 
 static void blend_read_layer_data(BlendDataReader *reader, CustomDataLayer &layer, const int count)
 {
+  /* Note: result of #BLO_read_array can be discarded because
+   * #CustomData_layer_ensure_data_exists allocates the array if missing. */
   switch (layer.type) {
     case CD_MDEFORMVERT:
-      BLO_read_struct_array(reader, MDeformVert, count, &layer.data);
-      BKE_defvert_blend_read(reader, count, static_cast<MDeformVert *>(layer.data));
+      if (BLO_read_array(reader, reinterpret_cast<MDeformVert **>(&layer.data), count)) {
+        BKE_defvert_blend_read(reader, count, static_cast<MDeformVert *>(layer.data));
+      }
       break;
     case CD_MDISPS:
-      BLO_read_struct_array(reader, MDisps, count, &layer.data);
-      blend_read_mdisps(
-          reader, count, static_cast<MDisps *>(layer.data), layer.flag & CD_FLAG_EXTERNAL);
+      if (BLO_read_array(reader, reinterpret_cast<MDisps **>(&layer.data), count)) {
+        blend_read_mdisps(
+            reader, count, static_cast<MDisps *>(layer.data), layer.flag & CD_FLAG_EXTERNAL);
+      }
       break;
     case CD_PAINT_MASK:
-      BLO_read_float_array(reader, count, reinterpret_cast<float **>(&layer.data));
+      (void)BLO_read_array(reader, reinterpret_cast<float **>(&layer.data), count);
       break;
     case CD_GRID_PAINT_MASK:
-      BLO_read_struct_array(reader, GridPaintMask, count, &layer.data);
-      blend_read_paint_mask(reader, count, static_cast<GridPaintMask *>(layer.data));
+      if (BLO_read_array(reader, reinterpret_cast<GridPaintMask **>(&layer.data), count)) {
+        blend_read_paint_mask(reader, count, static_cast<GridPaintMask *>(layer.data));
+      }
       break;
     case CD_PROP_BOOL:
       BLI_STATIC_ASSERT(sizeof(bool) == sizeof(uint8_t),
                         "bool type is expected to have the same size as uint8_t")
-      BLO_read_uint8_array(reader, count, reinterpret_cast<uint8_t **>(&layer.data));
+      (void)BLO_read_array(reader, reinterpret_cast<uint8_t **>(&layer.data), count);
       break;
     default: {
       const char *structname;
@@ -4948,7 +4980,8 @@ static void blend_read_layer_data(BlendDataReader *reader, CustomDataLayer &laye
       else {
         /* Can happen with deprecated types of customdata. */
         const size_t elem_size = CustomData_sizeof(eCustomDataType(layer.type));
-        BLO_read_struct_array(reader, char, elem_size *count, &layer.data);
+        (void)BLO_read_array(
+            reader, reinterpret_cast<std::byte **>(&layer.data), count, elem_size);
       }
     }
   }
@@ -4965,7 +4998,7 @@ static void blend_read_layer_data(BlendDataReader *reader, CustomDataLayer &laye
 
 void CustomData_blend_read(BlendDataReader *reader, CustomData *data, const int count)
 {
-  BLO_read_struct_array(reader, CustomDataLayer, data->totlayer, &data->layers);
+  BLO_read_array_and_validate_size(reader, &data->layers, &data->totlayer);
 
   /* Annoying workaround for bug #31079 loading legacy files with
    * no polygons _but_ have stale custom-data. */
@@ -5024,7 +5057,7 @@ void CustomData_blend_read(BlendDataReader *reader, CustomData *data, const int 
 
 void CustomData_debug_info_from_layers(const CustomData *data, const char *indent, DynStr *dynstr)
 {
-  for (eCustomDataType type = eCustomDataType(0); type < CD_NUMTYPES;
+  for (eCustomDataType type = eCustomDataType{}; type < CD_NUMTYPES;
        type = eCustomDataType(type + 1))
   {
     if (CustomData_has_layer(data, type)) {

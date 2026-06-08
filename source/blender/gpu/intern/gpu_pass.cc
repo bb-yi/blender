@@ -342,11 +342,7 @@ static bool gpu_pass_validate(GPUCodegenCreateInfo *create_info)
   }
 
   /* Validate against GPU limit. */
-  if ((samplers_len > GPU_max_textures_frag()) || (samplers_len > GPU_max_textures_vert())) {
-    return false;
-  }
-
-  return (samplers_len * 2 <= GPU_max_textures());
+  return samplers_len <= GPU_max_textures();
 }
 
 GPUPass *GPU_generate_pass(GPUMaterial *material,

@@ -14,7 +14,8 @@
 
 #include "NOD_geometry_nodes_bundle_fwd.hh"
 #include "NOD_geometry_nodes_closure_fwd.hh"
-#include "NOD_geometry_nodes_list_fwd.hh"
+
+#include "NOD_geometry_nodes_list.hh"
 
 #include "spreadsheet_data_source.hh"
 
@@ -61,7 +62,7 @@ class GeometryDataSource : public DataSource {
   }
 
   bool has_selection_filter() const override;
-  IndexMask apply_selection_filter(IndexMaskMemory &memory) const;
+  IndexMask apply_selection_filter(LinearAllocator<> &memory) const;
 
   void foreach_default_column_ids(
       FunctionRef<void(const SpreadsheetColumnID &, bool is_extra)> fn) const override;
@@ -117,10 +118,10 @@ class VolumeGridDataSource : public DataSource {
 #endif
 
 class ListDataSource : public DataSource {
-  nodes::ListPtr list_;
+  nodes::GListPtr list_;
 
  public:
-  ListDataSource(nodes::ListPtr list);
+  ListDataSource(nodes::GListPtr list);
 
   void foreach_default_column_ids(
       FunctionRef<void(const SpreadsheetColumnID &, bool is_extra)> fn) const override;

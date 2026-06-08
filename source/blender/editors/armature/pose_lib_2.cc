@@ -153,7 +153,7 @@ static void poselib_keytag_pose(bContext *C, Scene *scene, PoseBlendData *pbd)
         return;
       }
       if (BKE_pose_backup_is_selection_relevant(pbd->pose_backup) &&
-          !animrig::bone_is_selected(armature, pchan))
+          !animrig::bone_is_selected(armature, {pchan, pchan->bone_get(*ob)}))
       {
         return;
       }
@@ -165,7 +165,7 @@ static void poselib_keytag_pose(bContext *C, Scene *scene, PoseBlendData *pbd)
       PointerRNA pose_bone_pointer = RNA_pointer_create_discrete(&ob->id, RNA_PoseBone, pchan);
       Vector<RNAPath> rna_paths = animrig::get_keyable_id_property_paths(pose_bone_pointer);
       rna_paths.append({"location"});
-      const StringRef rotation_mode_path = animrig::get_rotation_mode_path(
+      const StringRefNull rotation_mode_path = animrig::get_rotation_mode_path(
           eRotationModes(pchan->rotmode));
       rna_paths.append({rotation_mode_path});
       rna_paths.append({"scale"});
@@ -366,6 +366,14 @@ static bAction *poselib_blend_init_get_action(bContext *C, wmOperator *op)
     return nullptr;
   }
 
+  if (asset->is_online_only()) {
+    BKE_reportf(op->reports,
+                RPT_ERROR,
+                "Pose '%s' needs downloading before it can be applied (check context menu)",
+                asset->get_name().c_str());
+    return nullptr;
+  }
+
   PoseBlendData *pbd = static_cast<PoseBlendData *>(op->customdata);
 
   pbd->temp_id_consumer = asset::temp_id_consumer_create(asset);
@@ -469,12 +477,6 @@ static bool poselib_blend_init_data(bContext *C, wmOperator *op, const wmEvent *
   /* Make backups for blending and restoring the pose. */
   poselib_backup_posecopy(pbd);
 
-  /* Set pose flags to ensure the depsgraph evaluation doesn't overwrite it. */
-  for (Object *ob : selected_pose_objects) {
-    ob->pose->flag &= ~POSE_DO_UNLOCK;
-    ob->pose->flag |= POSE_LOCKED;
-  }
-
   return true;
 }
 
@@ -489,12 +491,6 @@ static void poselib_blend_cleanup(bContext *C, wmOperator *op)
 
   if (pbd->slider) {
     ED_slider_destroy(C, pbd->slider);
-  }
-
-  /* This signals the depsgraph to unlock and reevaluate the pose on the next evaluation. */
-  for (Object *ob : pbd->objects) {
-    bPose *pose = ob->pose;
-    pose->flag |= POSE_DO_UNLOCK;
   }
 
   switch (pbd->state) {

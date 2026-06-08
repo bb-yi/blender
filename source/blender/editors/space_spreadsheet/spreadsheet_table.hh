@@ -4,9 +4,13 @@
 
 #pragma once
 
+#include "BLI_ustring.hh"
+
 #include "BKE_lib_remap.hh"
 
 #include "DNA_space_types.h"
+
+#include "NOD_geometry_nodes_bundle.hh"
 
 namespace blender::ed::spreadsheet {
 
@@ -26,7 +30,7 @@ void spreadsheet_table_id_foreach_id(SpreadsheetTableID &table_id, LibraryForeac
 
 void spreadsheet_bundle_path_clear(SpreadsheetBundleTreeViewPath &bundle_path);
 void spreadsheet_bundle_path_init_from(
-    Span<StringRef> keys,
+    Span<nodes::BundleKey> keys,
     std::optional<SpreadsheetClosureInputOutput> closure_input_output,
     SpreadsheetBundleTreeViewPath &r_bundle_path);
 

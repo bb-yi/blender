@@ -49,7 +49,7 @@ void register_node_type_tex_translate()
 {
   static bke::bNodeType ntype;
 
-  tex_node_type_base(&ntype, "TextureNodeTranslate", TEX_NODE_TRANSLATE);
+  tex_node_type_base(&ntype, "TextureNodeTranslate"_ustr, TEX_NODE_TRANSLATE);
   ntype.ui_name = "Translate";
   ntype.enum_name_legacy = "TRANSLATE";
   ntype.nclass = NODE_CLASS_DISTORT;

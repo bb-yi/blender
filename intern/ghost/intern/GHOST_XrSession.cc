@@ -124,8 +124,7 @@ void GHOST_XrSession::initSystem()
  * \{ */
 
 static void create_main_reference_space(OpenXRSessionData &oxr,
-                                        const blender::Span<XrReferenceSpaceType> supported_spaces,
-                                        const bool isDebugMode)
+                                        const blender::Span<XrReferenceSpaceType> supported_spaces)
 {
   XrReferenceSpaceCreateInfo create_info = {XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
   create_info.poseInReferenceSpace.orientation.w = 1.0f;
@@ -158,21 +157,16 @@ static void create_main_reference_space(OpenXRSessionData &oxr,
       CHECK_XR(xrDestroySpace(oxr.reference_space), "Failed to destroy stage reference space.");
     }
 
-    if (isDebugMode) {
-      printf(
-          "Warning: Invalid stage reference space bounds, falling back to local floor reference "
-          "space. To use the stage reference space, please define a tracking space via the XR "
-          "runtime.\n");
-    }
+    CLOG_WARN(LOG_GHOST_XR,
+              "Invalid stage reference space bounds, falling back to local floor reference "
+              "space. To use the stage reference space, please define a tracking space via the "
+              "XR runtime.");
   }
 
   /* Local Floor Reference Space. */
   if (supported_spaces.contains(XR_REFERENCE_SPACE_TYPE_LOCAL_FLOOR_EXT)) {
-    if (isDebugMode) {
-      printf(
-          "Warning: Stage reference space unavailable, falling back to local floor reference "
-          "space.\n");
-    }
+    CLOG_WARN(LOG_GHOST_XR,
+              "Stage reference space unavailable, falling back to local floor reference space.");
     create_info.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL_FLOOR_EXT;
     CHECK_XR(xrCreateReferenceSpace(oxr.session, &create_info, &oxr.reference_space),
              "Failed to create local floor reference space.");
@@ -180,17 +174,15 @@ static void create_main_reference_space(OpenXRSessionData &oxr,
   }
 
   /* Local Reference Space. */
-  if (isDebugMode) {
-    printf(
-        "Warning: Stage and local floor reference space unavailable, falling back to local "
-        "reference space.\n");
-  }
+  CLOG_WARN(LOG_GHOST_XR,
+            "Stage and local floor reference space unavailable, falling back to local "
+            "reference space.");
   create_info.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
   CHECK_XR(xrCreateReferenceSpace(oxr.session, &create_info, &oxr.reference_space),
            "Failed to create local reference space.");
 }
 
-static void create_reference_spaces(OpenXRSessionData &oxr, bool isDebugMode)
+static void create_reference_spaces(OpenXRSessionData &oxr)
 {
   XrReferenceSpaceCreateInfo create_info = {XR_TYPE_REFERENCE_SPACE_CREATE_INFO};
   create_info.poseInReferenceSpace.orientation.w = 1.0f;
@@ -207,7 +199,7 @@ static void create_reference_spaces(OpenXRSessionData &oxr, bool isDebugMode)
 
   const blender::Span supported_spaces(supported_spaces_vec);
 
-  create_main_reference_space(oxr, supported_spaces, isDebugMode);
+  create_main_reference_space(oxr, supported_spaces);
 
   /* View reference space. */
   create_info.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
@@ -273,7 +265,7 @@ void GHOST_XrSession::start()
            "detailed error information to the command line.");
 
   prepareDrawing();
-  create_reference_spaces(*oxr_, context_->isDebugMode());
+  create_reference_spaces(*oxr_);
 
   /* Create and bind actions here. */
   context_->getCustomFuncs().session_create_fn();
@@ -446,10 +438,11 @@ static void print_debug_timings(GHOST_XrDrawInfo &draw_info)
     avg_ms_tot += ms_iter;
   }
 
-  printf("VR frame render time: %.0fms - %.2f FPS (%.2f FPS 8 frames average)\n",
-         duration_ms,
-         1000.0 / duration_ms,
-         1000.0 / (avg_ms_tot / draw_info.last_frame_times.size()));
+  CLOG_INFO(LOG_GHOST_XR,
+            "VR frame render time: %.0fms - %.2f FPS (%.2f FPS 8 frames average)",
+            duration_ms,
+            1000.0 / duration_ms,
+            1000.0 / (avg_ms_tot / draw_info.last_frame_times.size()));
 }
 
 void GHOST_XrSession::endFrameDrawing(std::vector<XrCompositionLayerBaseHeader *> &layers)
@@ -1099,7 +1092,7 @@ void GHOST_XrSession::enablePassthrough()
   oxr_->passthrough_layer.type = XR_TYPE_COMPOSITION_LAYER_PASSTHROUGH_FB;
   oxr_->passthrough_layer.next = nullptr;
   oxr_->passthrough_layer.flags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
-  oxr_->passthrough_layer.space = nullptr;
+  oxr_->passthrough_layer.space = XR_NULL_HANDLE;
   oxr_->passthrough_layer.layerHandle = passthrough_layer_handle;
 
   oxr_->passthrough_supported = (result == XR_SUCCESS);

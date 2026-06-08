@@ -53,7 +53,7 @@ void RenderBuffers::init()
   data.aovs = inst_.film.aovs_info;
 }
 
-void RenderBuffers::acquire(int2 extent)
+void RenderBuffers::acquire(int2 extent, gpu::TextureFormat raycast_depth_format)
 {
   const eViewLayerEEVEEPassType enabled_passes = inst_.film.render_buffer_passes_get();
 
@@ -68,34 +68,34 @@ void RenderBuffers::acquire(int2 extent)
                                            GPU_TEXTURE_USAGE_ATTACHMENT;
 
   /* Depth and combined are always needed. */
-  depth_tx.ensure_2d(gpu::TextureFormat::SFLOAT_32_DEPTH_UINT_8, extent, usage_attachment_read);
+  depth_tx.ensure_2d(depth_format, extent, usage_attachment_read);
   /* TODO(fclem): depth_tx should ideally be a texture from pool but we need stencil_view
    * which is currently unsupported by pool textures. */
-  // depth_tx.acquire(extent, gpu::TextureFormat::SFLOAT_32_DEPTH_UINT_8);
-  combined_tx.acquire(extent, color_format);
+  // depth_tx.acquire(extent, depth_format);
+  combined_tx.acquire_2d(extent, color_format);
 
   eGPUTextureUsage usage_attachment_read_write = GPU_TEXTURE_USAGE_ATTACHMENT |
                                                  GPU_TEXTURE_USAGE_SHADER_READ |
                                                  GPU_TEXTURE_USAGE_SHADER_WRITE;
 
   /* TODO(fclem): Make vector pass allocation optional if no TAA or motion blur is needed. */
-  vector_tx.acquire(extent, vector_tx_format(), usage_attachment_read_write);
+  vector_tx.acquire_2d(extent, vector_tx_format(), usage_attachment_read_write);
   const bool use_prepass_normal = inst_.pipelines.has_raycast || inst_.outline.enabled() ||
                                   inst_.lights.needs_front_light_shader();
   if (inst_.pipelines.has_raycast) {
-    object_id_tx.acquire(extent, gpu::TextureFormat::UINT_16, usage_attachment_read);
+    raycast_depth_tx.acquire_2d(extent, raycast_depth_format, GPU_TEXTURE_USAGE_SHADER_READ);
+    object_id_tx.acquire_2d(extent, object_id_format, usage_attachment_read);
   }
   else {
-    /* Still acquire it, since the passes can't conditionally bind textures. */
-    object_id_tx.acquire(int2(1), gpu::TextureFormat::UINT_16, GPU_TEXTURE_USAGE_SHADER_READ);
+    /* Still acquire them, since the passes can't conditionally bind textures. */
+    raycast_depth_tx.acquire_2d(int2(1), raycast_depth_format, GPU_TEXTURE_USAGE_SHADER_READ);
+    object_id_tx.acquire_2d(int2(1), object_id_format, GPU_TEXTURE_USAGE_SHADER_READ);
   }
   if (use_prepass_normal) {
-    prepass_normal_tx.acquire(extent, gpu::TextureFormat::UNORM_10_10_10_2, usage_attachment_read);
+    prepass_normal_tx.acquire_2d(extent, prepass_normal_format, usage_attachment_read);
   }
   else {
-    /* Still acquire it, since the passes can't conditionally bind textures. */
-    prepass_normal_tx.acquire(
-        int2(1), gpu::TextureFormat::UNORM_10_10_10_2, GPU_TEXTURE_USAGE_SHADER_READ);
+    prepass_normal_tx.acquire_2d(int2(1), prepass_normal_format, GPU_TEXTURE_USAGE_SHADER_READ);
   }
 
   const bool do_motion_vectors_swizzle = vector_tx_format() == gpu::TextureFormat::SFLOAT_16_16;
@@ -119,18 +119,19 @@ void RenderBuffers::acquire(int2 extent)
                               usage_attachment_read_write);
 
   const gpu::TextureFormat cryptomatte_format = gpu::TextureFormat::SFLOAT_32_32_32_32;
-  cryptomatte_tx.acquire(pass_extent(EEVEE_RENDER_PASS_CRYPTOMATTE_OBJECT |
-                                     EEVEE_RENDER_PASS_CRYPTOMATTE_ASSET |
-                                     EEVEE_RENDER_PASS_CRYPTOMATTE_MATERIAL),
-                         cryptomatte_format,
-                         GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE);
+  cryptomatte_tx.acquire_2d(pass_extent(EEVEE_RENDER_PASS_CRYPTOMATTE_OBJECT |
+                                        EEVEE_RENDER_PASS_CRYPTOMATTE_ASSET |
+                                        EEVEE_RENDER_PASS_CRYPTOMATTE_MATERIAL),
+                            cryptomatte_format,
+                            GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE);
 
   const eGPUTextureUsage outline_usage = GPU_TEXTURE_USAGE_SHADER_READ |
                                          GPU_TEXTURE_USAGE_SHADER_WRITE;
   const bool use_outline_buffers = inst_.scene->eevee.use_outline != 0;
   const int2 outline_extent = use_outline_buffers ? extent : int2(1);
-  outline_color_tx.acquire(outline_extent, gpu::TextureFormat::SFLOAT_16_16_16_16, outline_usage);
-  outline_info_tx.acquire(outline_extent, gpu::TextureFormat::UNORM_16_16_16_16, outline_usage);
+  outline_color_tx.acquire_2d(
+      outline_extent, gpu::TextureFormat::SFLOAT_16_16_16_16, outline_usage);
+  outline_info_tx.acquire_2d(outline_extent, gpu::TextureFormat::UNORM_16_16_16_16, outline_usage);
   outline_color_tx.clear(float4(0.0f));
   outline_info_tx.clear(float4(0.0f));
 }
@@ -148,6 +149,7 @@ void RenderBuffers::release()
     GPU_texture_swizzle_set(vector_tx, "rgba");
   }
   vector_tx.release();
+  raycast_depth_tx.release();
   object_id_tx.release();
   prepass_normal_tx.release();
 

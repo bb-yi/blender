@@ -203,18 +203,17 @@ bool BKE_appdir_folder_documents(char *dir)
   return true;
 }
 
-bool BKE_appdir_folder_caches(char *path, const size_t path_maxncpy)
+void BKE_appdir_folder_caches(char *path, const size_t path_maxncpy)
 {
   path[0] = '\0';
 
   const GHOST_ISystemPaths *ghost_system_paths = GHOST_ISystemPaths::get();
   std::optional<std::string> caches_root_path = ghost_system_paths->getUserSpecialDir(
       GHOST_kUserSpecialDirCaches);
-  if (!caches_root_path || !BLI_is_dir(caches_root_path->c_str())) {
-    caches_root_path = BKE_tempdir_base();
-  }
-  if (!caches_root_path || !BLI_is_dir(caches_root_path->c_str())) {
-    return false;
+  if (!caches_root_path || caches_root_path->empty()) [[unlikely]] {
+    const char *tempdir = BKE_tempdir_session();
+    BLI_path_join(path, path_maxncpy, tempdir, ".cache", SEP_STR);
+    return;
   }
 
 #ifdef WIN32
@@ -230,8 +229,6 @@ bool BKE_appdir_folder_caches(char *path, const size_t path_maxncpy)
 #else /* __linux__ */
   BLI_path_join(path, path_maxncpy, caches_root_path->c_str(), "blender", SEP_STR);
 #endif
-
-  return true;
 }
 
 bool BKE_appdir_font_folder_default(char *dir, size_t dir_maxncpy)
@@ -269,10 +266,10 @@ bool BKE_appdir_font_folder_default(char *dir, size_t dir_maxncpy)
  * Concatenates paths into \a targetpath,
  * returning true if result points to a directory.
  *
+ * \param check_is_dir: When false, return true even if the path doesn't exist.
  * \param path_base: Path base, never nullptr.
  * \param folder_name: First sub-directory (optional).
  * \param subfolder_name: Second sub-directory (optional).
- * \param check_is_dir: When false, return true even if the path doesn't exist.
  *
  * \note The names for optional paths only follow other usage in this file,
  * the names don't matter for this function.
@@ -864,7 +861,7 @@ std::optional<std::string> BKE_appdir_resource_path_id(const int folder_id,
  *
  * \param program_filepath: The full path and full name of the executable
  * (must be #FILE_MAX minimum)
- * \param name: The name of the executable (usually `argv[0]`) to be checked
+ * \param program_name: The name of the executable (usually `argv[0]`) to be checked
  */
 static void where_am_i(char *program_filepath,
                        const size_t program_filepath_maxncpy,
@@ -1124,7 +1121,7 @@ bool BKE_appdir_app_template_has_userpref(const char *app_template)
 
 void BKE_appdir_app_templates(ListBaseT<LinkData> *templates)
 {
-  BLI_listbase_clear(templates);
+  templates->clear_no_delete();
 
   const Vector<std::string> directories = appdir_app_template_directories();
 

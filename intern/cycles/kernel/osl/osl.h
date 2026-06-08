@@ -25,6 +25,7 @@
 CCL_NAMESPACE_BEGIN
 
 ccl_device_inline void shaderdata_to_shaderglobals(ccl_private ShaderData *sd,
+                                                   const PathRayVisibility path_visibility,
                                                    const uint32_t path_flag,
                                                    ccl_private ShaderGlobals *globals)
 {
@@ -51,7 +52,7 @@ ccl_device_inline void shaderdata_to_shaderglobals(ccl_private ShaderData *sd,
   globals->time = sd->time;
   globals->dtime = 1.0f;
   globals->surfacearea = 1.0f;
-  globals->raytype = path_flag;
+  globals->raytype = OSL_RAYTYPE_PACK(path_visibility, path_flag);
   globals->flipHandedness = 0;
   globals->backfacing = (sd->flag & SD_BACKFACING);
 
@@ -71,6 +72,7 @@ ccl_device_inline void shaderdata_to_shaderglobals(ccl_private ShaderData *sd,
 
 ccl_device void flatten_closure_tree(KernelGlobals kg,
                                      ccl_private ShaderData *sd,
+                                     const PathRayVisibility ray_visibility,
                                      const uint32_t path_flag,
                                      const ccl_private OSLClosure *closure)
 {
@@ -134,6 +136,7 @@ ccl_device void flatten_closure_tree(KernelGlobals kg,
     float3 albedo = one_float3(); \
     osl_closure_##lower##_setup(kg, \
                                 sd, \
+                                ray_visibility, \
                                 path_flag, \
                                 weight * comp->weight, \
                                 reinterpret_cast<ccl_private const Upper##Closure *>(comp + 1), \
@@ -144,6 +147,7 @@ ccl_device void flatten_closure_tree(KernelGlobals kg,
     break; \
   }
 #include "closures_template.h"
+
       default:
         break;
     }
@@ -177,6 +181,7 @@ template<ShaderType type, typename ConstIntegratorGenericState>
 void osl_eval_nodes(const ThreadKernelGlobalsCPU *kg,
                     ConstIntegratorGenericState state,
                     ShaderData *sd,
+                    PathRayVisibility path_visibility,
                     uint32_t path_flag);
 
 #else
@@ -185,17 +190,21 @@ template<ShaderType type, typename ConstIntegratorGenericState>
 ccl_device_inline void osl_eval_nodes(KernelGlobals kg,
                                       ConstIntegratorGenericState state,
                                       ccl_private ShaderData *sd,
+                                      const PathRayVisibility path_visibility,
                                       const uint32_t path_flag)
 {
   ShaderGlobals globals;
-  shaderdata_to_shaderglobals(sd, path_flag, &globals);
+  shaderdata_to_shaderglobals(sd, path_visibility, path_flag, &globals);
 
   const int shader = sd->shader & SHADER_MASK;
 
 #  ifdef __KERNEL_OPTIX__
   uint8_t closure_pool[1024];
   globals.closure_pool = closure_pool;
-  if constexpr (std::is_same_v<ConstIntegratorGenericState, ConstIntegratorShadowState>) {
+  if constexpr (std::is_same_v<ConstIntegratorGenericState, ConstIntegratorBakeState>) {
+    globals.shade_index = 0;
+  }
+  else if constexpr (std::is_same_v<ConstIntegratorGenericState, ConstIntegratorShadowState>) {
     globals.shade_index = -state - 1;
   }
   else {
@@ -215,9 +224,9 @@ ccl_device_inline void osl_eval_nodes(KernelGlobals kg,
       /* Set position state as if undisplaced. */
       if (sd->flag & SD_HAS_DISPLACEMENT) {
         const AttributeDescriptor desc = find_attribute(kg, sd, ATTR_STD_POSITION_UNDISPLACED);
-        kernel_assert(desc.offset != ATTR_STD_NOT_FOUND);
+        kernel_assert(is_attribute_found(desc));
 
-        dual3 P = primitive_surface_attribute<float3>(kg, sd, desc, true, true);
+        dual3 P = primitive_surface_attribute<dual3>(kg, sd, desc);
 
         object_position_transform(kg, sd, &P);
 
@@ -272,7 +281,7 @@ ccl_device_inline void osl_eval_nodes(KernelGlobals kg,
     sd->P = globals.P;
   }
   else if (globals.Ci) {
-    flatten_closure_tree(kg, sd, path_flag, globals.Ci);
+    flatten_closure_tree(kg, sd, path_visibility, path_flag, globals.Ci);
   }
 }
 

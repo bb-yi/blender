@@ -165,9 +165,6 @@ Camera::Camera() : Node(get_node_type())
 {
   shutter_table_offset = TABLE_OFFSET_INVALID;
 
-  width = 1024;
-  height = 512;
-
   use_perspective_motion = false;
 
   shutter_curve.resize(RAMP_TABLE_SIZE);
@@ -364,31 +361,38 @@ void Camera::update(Scene *scene)
     have_motion = have_motion || motion[i] != matrix;
   }
 
-  if (need_motion == Scene::MOTION_PASS) {
-    if (camera_type == CAMERA_PANORAMA || camera_type == CAMERA_CUSTOM) {
-      if (have_motion) {
-        kcam->motion_pass_pre = transform_inverse(motion[0]);
-        kcam->motion_pass_post = transform_inverse(motion[motion.size() - 1]);
-      }
-      else {
-        kcam->motion_pass_pre = kcam->worldtocamera;
-        kcam->motion_pass_post = kcam->worldtocamera;
-      }
+  if (need_motion == Scene::MOTION_PASS || need_motion == Scene::MOTION_PASS_INTERACTIVE) {
+    if (have_motion) {
+      kcam->motion_pass_pre = transform_inverse(motion[0]);
+      kcam->motion_pass_post = transform_inverse(motion[motion.size() - 1]);
     }
     else {
+      kcam->motion_pass_pre = kcam->worldtocamera;
+      kcam->motion_pass_post = kcam->worldtocamera;
+    }
+    if (camera_type != CAMERA_PANORAMA && camera_type != CAMERA_CUSTOM) {
       if (have_motion || fov != fov_pre || fov != fov_post) {
         /* Note the values for perspective_pre/perspective_post calculated for MOTION_PASS are
          * different to those calculated for MOTION_BLUR below, so the code has not been combined.
          */
-        const ProjectionTransform cameratoscreen_pre = projection_perspective(
-            fov_pre, nearclip, farclip);
-        const ProjectionTransform cameratoscreen_post = projection_perspective(
-            fov_post, nearclip, farclip);
+        ProjectionTransform cameratoscreen_pre = cameratoscreen;
+        ProjectionTransform cameratoscreen_post = cameratoscreen;
+        if (camera_type == CAMERA_PERSPECTIVE) {
+          cameratoscreen_pre = projection_perspective(fov_pre, nearclip, farclip);
+          cameratoscreen_post = projection_perspective(fov_post, nearclip, farclip);
+        }
+
         const ProjectionTransform cameratoraster_pre = screentoraster * cameratoscreen_pre;
         const ProjectionTransform cameratoraster_post = screentoraster * cameratoscreen_post;
-        kcam->perspective_pre = cameratoraster_pre * transform_inverse(motion[0]);
-        kcam->perspective_post = cameratoraster_post *
-                                 transform_inverse(motion[motion.size() - 1]);
+        if (have_motion) {
+          kcam->perspective_pre = cameratoraster_pre * transform_inverse(motion[0]);
+          kcam->perspective_post = cameratoraster_post *
+                                   transform_inverse(motion[motion.size() - 1]);
+        }
+        else {
+          kcam->perspective_pre = cameratoraster_pre * worldtocamera;
+          kcam->perspective_post = cameratoraster_post * worldtocamera;
+        }
       }
       else {
         kcam->perspective_pre = worldtoraster;
@@ -483,6 +487,10 @@ void Camera::update(Scene *scene)
   kcam->dx = make_float4(dx);
   kcam->dy = make_float4(dy);
 
+  /* Compensation for progressive rendering, so we use the same texture cache tiles
+   * as for the full render resolution rather. */
+  kcam->differential_scale = 0.5f * (width / float(full_width) + height / float(full_height));
+
   /* clipping */
   kcam->nearclip = nearclip;
   kcam->cliplength = (farclip == FLT_MAX) ? FLT_MAX : farclip - nearclip;
@@ -496,6 +504,20 @@ void Camera::update(Scene *scene)
   need_device_update = true;
   need_flags_update = true;
   previous_need_motion = need_motion;
+}
+
+void Camera::update_interactive_motion()
+{
+  array<Transform> motion = get_motion();
+  if (!motion.empty()) {
+    motion[0] = matrix;
+
+    /* Trigger another update if there was motion compared to previous frame, so that last viewport
+     * camera movement does not stick around. */
+    set_motion(motion);
+  }
+
+  set_fov_pre(fov);
 }
 
 void Camera::device_update(Device * /*device*/, DeviceScene *dscene, Scene *scene)
@@ -818,12 +840,14 @@ float Camera::world_to_raster_size(const float3 P)
      * may be a better way to do this, but calculating differentials from the
      * point directly ahead seems to produce good enough results. */
     if (camera_type == CAMERA_CUSTOM) {
+      int cache_miss = 0;
       camera_sample_custom(nullptr,
                            &kernel_camera,
                            kernel_camera_motion.data(),
                            0.5f * make_float2(full_width, full_height),
                            zero_float2(),
-                           &ray);
+                           &ray,
+                           cache_miss);
     }
     else {
 #if 0
@@ -862,7 +886,7 @@ bool Camera::use_motion() const
   return motion.size() > 1;
 }
 
-bool Camera::set_screen_size(const int width_, int height_)
+bool Camera::set_screen_size(const int width_, const int height_)
 {
   if (width_ != width || height_ != height) {
     width = width_;
@@ -936,7 +960,9 @@ void Camera::set_osl_camera(Scene *scene,
       /* Skip unsupported types. */
       if (param->varlenarray || param->isstruct || param->type.arraylen > 1 || param->isoutput ||
           param->isclosure)
+      {
         continue;
+      }
 
       vector<uint8_t> raw_data;
       int vec_size = (int)param->type.aggregate;
@@ -964,8 +990,9 @@ void Camera::set_osl_camera(Scene *scene,
         raw_data.resize(data.length() + 1);
         memcpy(raw_data.data(), data.c_str(), data.length() + 1);
       }
-      else
+      else {
         continue;
+      }
 
       auto entry = std::make_pair(raw_data, param->type);
       auto it = script_params.find(param->name);
@@ -983,7 +1010,7 @@ void Camera::set_osl_camera(Scene *scene,
 
     /* Remove unused parameters. */
     for (auto it = script_params.begin(); it != script_params.end();) {
-      if (used_params.count(it->first)) {
+      if (used_params.contains(it->first)) {
         it++;
       }
       else {

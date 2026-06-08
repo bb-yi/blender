@@ -13,22 +13,19 @@ namespace blender::nodes::node_geo_input_mesh_island_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_output<decl::Int>("Island Index")
-      .field_source()
+  b.add_output<decl::Int>("Island Index"_ustr)
+      .structure_type(StructureType::Field)
       .description(
           "The index of the each vertex's island. Indices are based on the "
           "lowest vertex index contained in each island");
-  b.add_output<decl::Int>("Island Count")
-      .field_source()
+  b.add_output<decl::Int>("Island Count"_ustr)
+      .structure_type(StructureType::Field)
       .description("The total number of mesh islands");
 }
 
 class IslandFieldInput final : public bke::MeshFieldInput {
  public:
-  IslandFieldInput() : bke::MeshFieldInput(CPPType::get<int>(), "Island Index")
-  {
-    category_ = Category::Generated;
-  }
+  IslandFieldInput() : bke::MeshFieldInput(CPPType::get<int>(), "Island Index") {}
 
   GVArray get_varray_for_context(const Mesh &mesh,
                                  const AttrDomain domain,
@@ -50,29 +47,27 @@ class IslandFieldInput final : public bke::MeshFieldInput {
         VArray<int>::from_container(std::move(output)), AttrDomain::Point, domain);
   }
 
-  uint64_t hash() const override
+  void hash_unique(UniqueHashBytes &hash, fn::FieldHashDeep & /*deep_hash_cache*/) const override
   {
-    /* Some random constant hash. */
-    return 635467354;
-  }
-
-  bool is_equal_to(const fn::FieldNode &other) const override
-  {
-    return dynamic_cast<const IslandFieldInput *>(&other) != nullptr;
+    static constexpr int8_t id = 0;
+    hash.add(&id);
   }
 
   std::optional<AttrDomain> preferred_domain(const Mesh & /*mesh*/) const override
   {
     return AttrDomain::Point;
   }
+
+  bke::NativeFieldDomain native_domain_info(const Mesh & /*mesh*/) const override
+  {
+    /* Domain interpolation will not mix values for separate islands. */
+    return bke::NativeFieldDomain::Constant();
+  }
 };
 
 class IslandCountFieldInput final : public bke::MeshFieldInput {
  public:
-  IslandCountFieldInput() : bke::MeshFieldInput(CPPType::get<int>(), "Island Count")
-  {
-    category_ = Category::Generated;
-  }
+  IslandCountFieldInput() : bke::MeshFieldInput(CPPType::get<int>(), "Island Count") {}
 
   GVArray get_varray_for_context(const Mesh &mesh,
                                  const AttrDomain domain,
@@ -91,39 +86,37 @@ class IslandCountFieldInput final : public bke::MeshFieldInput {
     return VArray<int>::from_single(islands_num, mesh.attributes().domain_size(domain));
   }
 
-  uint64_t hash() const override
+  void hash_unique(UniqueHashBytes &hash, fn::FieldHashDeep & /*deep_hash_cache*/) const override
   {
-    /* Some random hash. */
-    return 45634572457;
-  }
-
-  bool is_equal_to(const fn::FieldNode &other) const override
-  {
-    return dynamic_cast<const IslandCountFieldInput *>(&other) != nullptr;
+    static constexpr int8_t id = 0;
+    hash.add(&id);
   }
 
   std::optional<AttrDomain> preferred_domain(const Mesh & /*mesh*/) const override
   {
     return AttrDomain::Point;
   }
+
+  bke::NativeFieldDomain native_domain_info(const Mesh & /*mesh*/) const override
+  {
+    return bke::NativeFieldDomain::Constant();
+  }
 };
 
 static void node_geo_exec(GeoNodeExecParams params)
 {
-  if (params.output_is_required("Island Index")) {
-    Field<int> field{std::make_shared<IslandFieldInput>()};
-    params.set_output("Island Index", std::move(field));
+  if (params.output_is_required("Island Index"_ustr)) {
+    params.set_output("Island Index"_ustr, Field<int>::from_input<IslandFieldInput>());
   }
-  if (params.output_is_required("Island Count")) {
-    Field<int> field{std::make_shared<IslandCountFieldInput>()};
-    params.set_output("Island Count", std::move(field));
+  if (params.output_is_required("Island Count"_ustr)) {
+    params.set_output("Island Count"_ustr, Field<int>::from_input<IslandCountFieldInput>());
   }
 }
 
 static void node_register()
 {
   static bke::bNodeType ntype;
-  geo_node_type_base(&ntype, "GeometryNodeInputMeshIsland", GEO_NODE_INPUT_MESH_ISLAND);
+  geo_node_type_base(&ntype, "GeometryNodeInputMeshIsland"_ustr, GEO_NODE_INPUT_MESH_ISLAND);
   ntype.ui_name = "Mesh Island";
   ntype.ui_description = "Retrieve information about separate connected regions in a mesh";
   ntype.enum_name_legacy = "MESH_ISLAND";

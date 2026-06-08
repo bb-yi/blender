@@ -6,6 +6,7 @@
 
 #include <cfloat>
 
+#include "NOD_bundle_type.hh"
 #include "NOD_menu_value.hh"
 #include "NOD_node_declaration.hh"
 
@@ -17,6 +18,10 @@
 #include "BLI_implicit_sharing_ptr.hh"
 #include "BLI_math_euler_types.hh"
 #include "BLI_math_vector_types.hh"
+
+namespace blender::nodes {
+class ClosureSignature;
+}
 
 namespace blender::nodes::decl {
 
@@ -47,6 +52,7 @@ class FloatBuilder : public SocketDeclarationBuilder<Float> {
   FloatBuilder &max(float value);
   FloatBuilder &default_value(float value);
   FloatBuilder &subtype(PropertySubType subtype);
+  FloatBuilder &try_copy_ui_data(const SocketDeclaration &other_decl) override;
 };
 
 class IntBuilder;
@@ -76,6 +82,7 @@ class IntBuilder : public SocketDeclarationBuilder<Int> {
   IntBuilder &max(int value);
   IntBuilder &default_value(int value);
   IntBuilder &subtype(PropertySubType subtype);
+  IntBuilder &try_copy_ui_data(const SocketDeclaration &other_decl) override;
 };
 
 class VectorBuilder;
@@ -110,6 +117,40 @@ class VectorBuilder : public SocketDeclarationBuilder<Vector> {
   VectorBuilder &min(float min);
   VectorBuilder &max(float max);
   VectorBuilder &compact();
+  VectorBuilder &try_copy_ui_data(const SocketDeclaration &other_decl) override;
+};
+
+class IntVectorBuilder;
+
+class IntVector : public SocketDeclaration {
+ public:
+  static constexpr eNodeSocketDatatype static_socket_type = SOCK_INT_VECTOR;
+
+  int3 default_value = {0, 0, 0};
+  int soft_min_value = INT_MIN;
+  int soft_max_value = INT_MAX;
+  int dimensions = 3;
+  PropertySubType subtype = PROP_NONE;
+
+  friend IntVectorBuilder;
+
+  using Builder = IntVectorBuilder;
+
+  bNodeSocket &build(bNodeTree &ntree, bNode &node) const override;
+  bool matches(const bNodeSocket &socket) const override;
+  bNodeSocket &update_or_build(bNodeTree &ntree, bNode &node, bNodeSocket &socket) const override;
+  bool can_connect(const bNodeSocket &socket) const override;
+};
+
+class IntVectorBuilder : public SocketDeclarationBuilder<IntVector> {
+ public:
+  IntVectorBuilder &default_value(const int2 value);
+  IntVectorBuilder &default_value(const int3 value);
+  IntVectorBuilder &subtype(PropertySubType subtype);
+  IntVectorBuilder &dimensions(int dimensions);
+  IntVectorBuilder &min(int min);
+  IntVectorBuilder &max(int max);
+  IntVectorBuilder &compact();
 };
 
 class BoolBuilder;
@@ -132,6 +173,7 @@ class Bool : public SocketDeclaration {
 class BoolBuilder : public SocketDeclarationBuilder<Bool> {
  public:
   BoolBuilder &default_value(bool value);
+  BoolBuilder &try_copy_ui_data(const SocketDeclaration &other_decl) override;
 };
 
 class ColorBuilder;
@@ -155,6 +197,7 @@ class Color : public SocketDeclaration {
 class ColorBuilder : public SocketDeclarationBuilder<Color> {
  public:
   ColorBuilder &default_value(const ColorGeometry4f value);
+  ColorBuilder &try_copy_ui_data(const SocketDeclaration &other_decl) override;
 };
 
 class RotationBuilder;
@@ -178,6 +221,7 @@ class Rotation : public SocketDeclaration {
 class RotationBuilder : public SocketDeclarationBuilder<Rotation> {
  public:
   RotationBuilder &default_value(const math::EulerXYZ &value);
+  RotationBuilder &try_copy_ui_data(const SocketDeclaration &other_decl) override;
 };
 
 class MatrixBuilder;
@@ -223,6 +267,7 @@ class StringBuilder : public SocketDeclarationBuilder<String> {
   StringBuilder &default_value(const std::string value);
   StringBuilder &subtype(PropertySubType subtype);
   StringBuilder &path_filter(std::optional<std::string> filter);
+  StringBuilder &try_copy_ui_data(const SocketDeclaration &other_decl) override;
 };
 
 class MenuBuilder;
@@ -252,8 +297,10 @@ class MenuBuilder : public SocketDeclarationBuilder<Menu> {
   /** Draw the menu items next to each other instead of as a drop-down menu. */
   MenuBuilder &expanded(bool value = true);
 
+  using StaticItemFilterFn = bool (*)(const EnumPropertyItem &item);
   /** Set the available items in the menu. The items array must have static lifetime. */
-  MenuBuilder &static_items(const EnumPropertyItem *items);
+  MenuBuilder &static_items(const EnumPropertyItem *items,
+                            const StaticItemFilterFn filter_fn = nullptr);
 };
 
 class BundleBuilder;
@@ -267,6 +314,8 @@ class Bundle : public SocketDeclaration {
    */
   std::optional<int> pass_through_input_index;
 
+  std::optional<BundleType> bundle_type;
+
   friend BundleBuilder;
 
   using Builder = BundleBuilder;
@@ -279,6 +328,8 @@ class Bundle : public SocketDeclaration {
 
 class BundleBuilder : public SocketDeclarationBuilder<Bundle> {
  public:
+  BundleBuilder &bundle_type(BundleType bundle_type);
+
   /** On output sockets, indicate that the bundle structure is passed through from an input. */
   BundleBuilder &pass_through_input_index(std::optional<int> index);
 };
@@ -287,6 +338,11 @@ class ClosureBuilder;
 
 class Closure : public SocketDeclaration {
  public:
+  std::unique_ptr<std::function<ClosureSignature(const bNode &)>> create_signature;
+
+  Closure();
+  ~Closure() override;
+
   static constexpr eNodeSocketDatatype static_socket_type = SOCK_CLOSURE;
 
   friend ClosureBuilder;
@@ -299,7 +355,10 @@ class Closure : public SocketDeclaration {
   bool can_connect(const bNodeSocket &socket) const override;
 };
 
-class ClosureBuilder : public SocketDeclarationBuilder<Closure> {};
+class ClosureBuilder : public SocketDeclarationBuilder<Closure> {
+ public:
+  void create_signature(std::function<ClosureSignature(const bNode &)> create_signature);
+};
 
 class IDSocketDeclaration : public SocketDeclaration {
  public:
@@ -593,6 +652,55 @@ inline VectorBuilder &VectorBuilder::max(const float max)
 }
 
 inline VectorBuilder &VectorBuilder::compact()
+{
+  decl_->compact = true;
+  return *this;
+}
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name #IntVectorBuilder Inline Methods
+ * \{ */
+
+inline IntVectorBuilder &IntVectorBuilder::default_value(const int2 value)
+{
+  decl_->default_value = int3(value, 0);
+  return *this;
+}
+
+inline IntVectorBuilder &IntVectorBuilder::default_value(const int3 value)
+{
+  decl_->default_value = value;
+  return *this;
+}
+
+inline IntVectorBuilder &IntVectorBuilder::subtype(PropertySubType subtype)
+{
+  decl_->subtype = subtype;
+  return *this;
+}
+
+inline IntVectorBuilder &IntVectorBuilder::dimensions(int dimensions)
+{
+  BLI_assert(dimensions >= 2 && dimensions <= 3);
+  decl_->dimensions = dimensions;
+  return *this;
+}
+
+inline IntVectorBuilder &IntVectorBuilder::min(const int min)
+{
+  decl_->soft_min_value = min;
+  return *this;
+}
+
+inline IntVectorBuilder &IntVectorBuilder::max(const int max)
+{
+  decl_->soft_max_value = max;
+  return *this;
+}
+
+inline IntVectorBuilder &IntVectorBuilder::compact()
 {
   decl_->compact = true;
   return *this;

@@ -221,6 +221,7 @@ class GRAPH_MT_view(Menu):
 
         layout.operator("graph.view_selected")
         layout.operator("graph.view_all")
+        layout.operator("graph.local_view")
         if context.scene.use_preview_range:
             layout.operator("anim.scene_range_frame", text="Frame Preview Range")
         else:
@@ -353,7 +354,7 @@ class GRAPH_MT_channel(Menu):
         # To get it to display the hotkey.
         layout.operator_context = operator_context
         layout.operator_menu_enum("graph.fmodifier_add", "type").only_active = False
-        layout.operator_context = 'INVOKE_REGION_CHANNELS'
+        layout.operator("graph.fmodifier_delete", text="Delete F-Curve Modifiers")
 
         layout.separator()
         layout.operator("graph.hide", text="Hide Selected Curves").unselected = False
@@ -448,6 +449,7 @@ class GRAPH_MT_key(Menu):
 
         layout.separator()
         layout.operator_menu_enum("graph.keyframe_insert", "type", text="Insert")
+
         layout.operator("graph.copy", text="Copy")
         layout.operator("graph.paste", text="Paste")
         layout.operator("graph.paste", text="Paste Flipped").flipped = True

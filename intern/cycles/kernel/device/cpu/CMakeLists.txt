@@ -27,7 +27,7 @@ set(SRC_KERNEL_DEVICE_CPU_HEADERS
 )
 
 set(LIB
-
+  PUBLIC cycles_util
 )
 
 # -----------------------------------------------------------------------------
@@ -57,7 +57,7 @@ endif()
 
 if(WITH_CYCLES_OSL)
   list(APPEND LIB
-    cycles_kernel_osl
+    PUBLIC cycles_kernel_osl
   )
 endif()
 

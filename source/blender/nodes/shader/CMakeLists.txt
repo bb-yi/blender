@@ -5,14 +5,14 @@
 set(INC
   .
   ..
-  include
-  ../intern
-  ../../blenloader
-  ../../editors/include
-  ../../makesrna
-  ../../../../intern/sky/include
+  PUBLIC include
+  PRIVATE ../intern
+  PRIVATE ../../blenloader
+  PRIVATE ../../editors/include
+  PRIVATE ../../makesrna
+  PRIVATE ../../../../intern/sky/include
   # RNA_prototypes.hh
-  ${CMAKE_BINARY_DIR}/source/blender/makesrna
+  PRIVATE ${CMAKE_BINARY_DIR}/source/blender/makesrna
 )
 
 set(INC_SYS
@@ -160,11 +160,13 @@ set(SRC
   node_shader_register.hh
   node_shader_util.hh
   include/NOD_sh_script_expression.hh
+  include/NOD_shader_raycast.hh
 )
 
 set(LIB
   PRIVATE bf::blenkernel
   PRIVATE bf::blenlib
+  PRIVATE bf::blenloader
   PRIVATE bf::blentranslation
   PRIVATE bf::depsgraph
   PRIVATE bf::dna
@@ -173,6 +175,7 @@ set(LIB
   PRIVATE bf::imbuf
   PRIVATE bf::intern::clog
   PRIVATE bf::intern::guardedalloc
+  PRIVATE bf::extern::xxhash
   bf_intern_sky
   bf_nodes
   PRIVATE bf::render
@@ -211,15 +214,8 @@ if(WITH_FREESTYLE)
   add_definitions(-DWITH_FREESTYLE)
 endif()
 
-if(WITH_TBB)
-  if(WIN32)
-    # TBB includes Windows.h which will define min/max macros
-    # that will collide with the STL versions.
-    add_definitions(-DNOMINMAX)
-  endif()
-endif()
-
 blender_add_lib(bf_nodes_shader "${SRC}" "${INC}" "${INC_SYS}" "${LIB}")
+add_library(bf::nodes::shader ALIAS bf_nodes_shader)
 
 blender_set_target_unity_build(bf_nodes_shader 10)
 

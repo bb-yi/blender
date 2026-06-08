@@ -368,7 +368,8 @@ class Cameras : Overlay {
     else {
       /* Stereo cameras, volumes, plane drawing. */
       if (is_stereo3d_display_extra) {
-        sync_stereoscopy_extra(data, select_id, scene, v3d, res, ob);
+        sync_stereoscopy_extra(
+            *DEG_get_bmain(state.depsgraph), data, select_id, scene, v3d, res, ob);
       }
       else {
         call_buffers_.frame_buf.append(data, select_id);
@@ -565,8 +566,7 @@ class Cameras : Overlay {
 
     const bool is_active = ob_ref.object == camera_object;
     const bool is_camera_view = (is_active && (state.rv3d->persp == RV3D_CAMOB));
-    const bool show_image = (cam.flag & CAM_SHOW_BG_IMAGE) &&
-                            !BLI_listbase_is_empty(&cam.bg_images);
+    const bool show_image = (cam.flag & CAM_SHOW_BG_IMAGE) && !cam.bg_images.is_empty();
     const bool show_frame = BKE_object_empty_image_frame_is_visible_in_view3d(ob, state.rv3d);
 
     if (!images_enabled_ || !is_camera_view || !show_image || !show_frame) {
@@ -775,7 +775,8 @@ class Cameras : Overlay {
    * Draw the stereo 3d support elements (cameras, plane, volume).
    * They are only visible when not looking through the camera:
    */
-  void sync_stereoscopy_extra(const CameraInstanceData &instdata,
+  void sync_stereoscopy_extra(const Main &bmain,
+                              const CameraInstanceData &instdata,
                               const select::ID cam_select_id,
                               const Scene *scene,
                               const View3D *v3d,
@@ -798,7 +799,7 @@ class Cameras : Overlay {
     }
 
     for (const int eye : IndexRange(2)) {
-      ob = BKE_camera_multiview_render(scene, ob, viewnames[eye]);
+      ob = BKE_camera_multiview_render(bmain, scene, ob, viewnames[eye]);
       BKE_camera_multiview_model_matrix(&scene->r, ob, viewnames[eye], stereodata.matrix.ptr());
 
       stereodata.corner_x = instdata.corner_x;

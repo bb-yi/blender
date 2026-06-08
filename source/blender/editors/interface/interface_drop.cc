@@ -9,6 +9,7 @@
 #include "BLI_listbase.h"
 
 #include "UI_interface.hh"
+#include "UI_tree_view.hh"
 
 namespace blender::ui {
 
@@ -35,10 +36,33 @@ bool drop_target_apply_drop(bContext &C,
       return false;
     }
 
-    const std::optional<DropLocation> drop_location = drop_target.choose_drop_location(region,
-                                                                                       event);
+    std::optional<DropLocation> drop_location = drop_target.choose_drop_location(region, event);
     if (!drop_location) {
       return false;
+    }
+
+    AbstractView *view = region_view_find_at(&region, event.xy, 0);
+    if (AbstractTreeView *tree_view = dynamic_cast<AbstractTreeView *>(view)) {
+      TreeViewSortOrder sortorder = tree_view->invert_sort_type_get();
+      if (sortorder != TreeViewSortOrder::None) {
+        AbstractTreeViewItem *dropitem = dynamic_cast<AbstractTreeViewItem *>(
+            region_views_find_item_at(region, event.xy));
+
+        bool change_drop_order = (sortorder == TreeViewSortOrder::InvertNested);
+        if (sortorder == TreeViewSortOrder::InvertRoot) {
+          tree_view->foreach_root_item(
+              [&](AbstractTreeViewItem &item) { change_drop_order |= (dropitem == &item); });
+        }
+        if (change_drop_order) {
+          /* Switch drop location when invert sorting is enabled. */
+          if (*drop_location == DropLocation::After) {
+            *drop_location = DropLocation::Before;
+          }
+          else if (*drop_location == DropLocation::Before) {
+            *drop_location = DropLocation::After;
+          }
+        }
+      }
     }
 
     const DragInfo drag_info{drag, event, *drop_location};

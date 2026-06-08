@@ -126,7 +126,8 @@ bool BLF_character_to_curves(int fontid,
                              ListBaseT<Nurb> *nurbsbase,
                              const float scale,
                              bool use_fallback,
-                             float *r_advance);
+                             float *r_advance,
+                             rctf *r_bounds);
 
 /**
  * Check if font supports a particular glyph.
@@ -225,6 +226,12 @@ void BLF_boundbox_foreach_glyph(int fontid,
                                 size_t str_len,
                                 BLF_GlyphBoundsFn user_fn,
                                 void *user_data) ATTR_NONNULL(2);
+
+void BLF_info_foreach_glyph(
+    int fontid,
+    const char *str,
+    size_t str_len,
+    FunctionRef<void(int index, size_t byte_offset, int byte_len, int advance_x)> callback);
 
 /**
  * Get the byte offset within a string, selected by mouse at a horizontal location.
@@ -366,11 +373,16 @@ void BLF_shadow_offset(int fontid, int x, int y);
 
 /**
  * Make font be rasterized into a given memory image/buffer.
- * The image is assumed to have 4 color channels (RGBA) per pixel.
+ * The image is assumed to have either 4 color channels (RGBA) or 1 gray-scale channel per pixel.
  * When done, call this function with null buffer pointers.
  */
-void BLF_buffer(
-    int fontid, float *fbuf, unsigned char *cbuf, int w, int h, const ColorSpace *colorspace);
+void BLF_buffer(int fontid,
+                float *fbuf,
+                unsigned char *cbuf,
+                int w,
+                int h,
+                int channel_count,
+                const ColorSpace *colorspace);
 
 /**
  * Opaque structure used to push/pop values set by the #BLF_buffer function.
@@ -392,7 +404,8 @@ void BLF_buffer_state_pop(BLFBufferState *buffer_state);
 void BLF_buffer_state_free(BLFBufferState *buffer_state);
 
 /**
- * Set the color to be used for text.
+ * Set the color to be used for text. The red channel of the color is used in case of a grayscale
+ * buffer.
  */
 void BLF_buffer_col(int fontid, const float srgb_color[4]) ATTR_NONNULL(2);
 

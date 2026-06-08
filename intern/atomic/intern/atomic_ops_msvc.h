@@ -36,10 +36,9 @@
 #include "atomic_ops_utils.h"
 
 #define NOGDI
-#ifndef NOMINMAX
-#  define NOMINMAX
+#ifndef WIN32_LEAN_AND_MEAN
+#  define WIN32_LEAN_AND_MEAN
 #endif
-#define WIN32_LEAN_AND_MEAN
 
 #include <intrin.h>
 #include <windows.h>

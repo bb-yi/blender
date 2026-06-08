@@ -57,20 +57,24 @@ static void calc_straight_curve_positions(const float3 &a,
   }
 }
 
-static Array<NeighborCurves> find_curve_neighbors(const Span<float3> root_positions,
-                                                  const KDTree_3d &old_roots_kdtree)
+static void find_curve_neighbors(const Span<float3> root_positions,
+                                 const KDTree<float3> &old_roots_kdtree,
+                                 Vector<int> &offset_data,
+                                 Vector<int> &index_data,
+                                 Vector<float> &weight_data)
 {
+  PRF_scope(ProfileCategory::Default);
   const int tot_added_curves = root_positions.size();
   Array<NeighborCurves> neighbors_per_curve(tot_added_curves);
   threading::parallel_for(IndexRange(tot_added_curves), 128, [&](const IndexRange range) {
     for (const int i : range) {
       const float3 root = root_positions[i];
-      std::array<KDTreeNearest_3d, max_neighbors> nearest_n;
-      const int found_neighbors = kdtree_3d_find_nearest_n(
+      std::array<KDTreeNearest<float3>, max_neighbors> nearest_n;
+      const int found_neighbors = kdtree_find_nearest_n<float3>(
           &old_roots_kdtree, root, nearest_n.data(), max_neighbors);
       float tot_weight = 0.0f;
       for (const int neighbor_i : IndexRange(found_neighbors)) {
-        KDTreeNearest_3d &nearest = nearest_n[neighbor_i];
+        KDTreeNearest<float3> &nearest = nearest_n[neighbor_i];
         const float weight = 1.0f / std::max(nearest.dist, 0.00001f);
         tot_weight += weight;
         neighbors_per_curve[i].append({nearest.index, weight});
@@ -81,30 +85,23 @@ static Array<NeighborCurves> find_curve_neighbors(const Span<float3> root_positi
       }
     }
   });
-  return neighbors_per_curve;
-}
-
-template<typename T, typename GetValueF>
-void interpolate_from_neighbor_curves(const Span<NeighborCurves> neighbors_per_curve,
-                                      const T &fallback,
-                                      const GetValueF &get_value_from_neighbor,
-                                      MutableSpan<T> r_interpolated_values)
-{
-  bke::attribute_math::DefaultMixer<T> mixer{r_interpolated_values};
-  threading::parallel_for(r_interpolated_values.index_range(), 512, [&](const IndexRange range) {
+  offset_data.resize(tot_added_curves + 1);
+  threading::parallel_for(neighbors_per_curve.index_range(), 4096, [&](const IndexRange range) {
     for (const int i : range) {
-      const NeighborCurves &neighbors = neighbors_per_curve[i];
-      if (neighbors.is_empty()) {
-        mixer.mix_in(i, fallback, 1.0f);
-      }
-      else {
-        for (const NeighborCurve &neighbor : neighbors) {
-          const T neighbor_value = get_value_from_neighbor(neighbor.index);
-          mixer.mix_in(i, neighbor_value, neighbor.weight);
-        }
+      offset_data[i] = neighbors_per_curve[i].size();
+    }
+  });
+  const OffsetIndices offsets = offset_indices::accumulate_counts_to_offsets(offset_data);
+  index_data.resize(offsets.total_size());
+  weight_data.resize(offsets.total_size());
+  threading::parallel_for(offsets.index_range(), 2048, [&](const IndexRange range) {
+    for (const int dst_i : range) {
+      const IndexRange neighbor_range = offsets[dst_i];
+      for (const int i : neighbor_range.index_range()) {
+        index_data[neighbor_range[i]] = neighbors_per_curve[dst_i][i].index;
+        weight_data[neighbor_range[i]] = neighbors_per_curve[dst_i][i].weight;
       }
     }
-    mixer.finalize(range);
   });
 }
 
@@ -115,6 +112,7 @@ static void calc_position_without_interpolation(CurvesGeometry &curves,
                                                 const Span<float3> new_normals_su,
                                                 const float4x4 &surface_to_curves_normal_mat)
 {
+  PRF_scope(ProfileCategory::Default);
   const int added_curves_num = root_positions_cu.size();
   const OffsetIndices points_by_curve = curves.points_by_curve();
   MutableSpan<float3> positions_cu = curves.positions_for_write();
@@ -136,7 +134,9 @@ static void calc_position_without_interpolation(CurvesGeometry &curves,
 
 static void calc_position_with_interpolation(CurvesGeometry &curves,
                                              const Span<float3> root_positions_cu,
-                                             const Span<NeighborCurves> neighbors_per_curve,
+                                             const OffsetIndices<int> neighbor_offsets,
+                                             const Span<int> neighbor_indices,
+                                             const Span<float> neighbor_weights,
                                              const int old_curves_num,
                                              const Span<float> new_lengths_cu,
                                              const Span<float3> new_normals_su,
@@ -145,6 +145,7 @@ static void calc_position_with_interpolation(CurvesGeometry &curves,
                                              const ReverseUVSampler &reverse_uv_sampler,
                                              const Span<float3> corner_normals_su)
 {
+  PRF_scope(ProfileCategory::Default);
   MutableSpan<float3> positions_cu = curves.positions_for_write();
   const int added_curves_num = root_positions_cu.size();
 
@@ -153,7 +154,7 @@ static void calc_position_with_interpolation(CurvesGeometry &curves,
 
   threading::parallel_for(IndexRange(added_curves_num), 256, [&](const IndexRange range) {
     for (const int added_curve_i : range) {
-      const NeighborCurves &neighbors = neighbors_per_curve[added_curve_i];
+      const IndexRange neighbors = neighbor_offsets[added_curve_i];
       const int curve_i = old_curves_num + added_curve_i;
       const IndexRange points = points_by_curve[curve_i];
 
@@ -173,8 +174,9 @@ static void calc_position_with_interpolation(CurvesGeometry &curves,
 
       positions_cu.slice(points).fill(root_cu);
 
-      for (const NeighborCurve &neighbor : neighbors) {
-        const int neighbor_curve_i = neighbor.index;
+      for (const int neighbor_i : neighbors) {
+        const int neighbor_curve_i = neighbor_indices[neighbor_i];
+        const float neighbor_weight = neighbor_weights[neighbor_i];
         const float2 neighbor_uv = uv_coords[neighbor_curve_i];
         const ReverseUVSampler::Result result = reverse_uv_sampler.sample(neighbor_uv);
         if (result.type != ReverseUVSampler::ResultType::Ok) {
@@ -228,7 +230,7 @@ static void calc_position_with_interpolation(CurvesGeometry &curves,
           const float3 relative_to_root_cu = sample_cu - neighbor_root_cu;
           float3 rotated_relative_coord = relative_to_root_cu;
           mul_m3_v3(normal_rotation_cu, rotated_relative_coord);
-          positions_cu[points[i]] += neighbor.weight * rotated_relative_coord;
+          positions_cu[points[i]] += neighbor_weight * rotated_relative_coord;
         }
       }
     }
@@ -239,6 +241,12 @@ static void calc_radius_without_interpolation(CurvesGeometry &curves,
                                               const IndexRange new_points_range,
                                               const float radius)
 {
+  const VArray<float> radii = curves.radius();
+  if (const std::optional<float> single = radii.get_if_single()) {
+    if (compare_ff_relative(*single, radius, FLT_EPSILON, 16)) {
+      return;
+    }
+  }
   curves.radius_for_write().slice(new_points_range).fill(radius);
   curves.tag_radii_changed();
 }
@@ -247,7 +255,9 @@ static void calc_radius_with_interpolation(CurvesGeometry &curves,
                                            const int old_curves_num,
                                            const float radius,
                                            const Span<float> new_lengths_cu,
-                                           const Span<NeighborCurves> neighbors_per_curve)
+                                           const OffsetIndices<int> neighbor_offsets,
+                                           const Span<int> neighbor_indices,
+                                           const Span<float> neighbor_weights)
 {
   const int added_curves_num = new_lengths_cu.size();
   const OffsetIndices points_by_curve = curves.points_by_curve();
@@ -262,7 +272,7 @@ static void calc_radius_with_interpolation(CurvesGeometry &curves,
 
   threading::parallel_for(IndexRange(added_curves_num), 256, [&](const IndexRange range) {
     for (const int i : range) {
-      const NeighborCurves &neighbors = neighbors_per_curve[i];
+      const IndexRange neighbors = neighbor_offsets[i];
       const float length_cu = new_lengths_cu[i];
       const int curve_i = old_curves_num + i;
       const IndexRange points = points_by_curve[curve_i];
@@ -275,8 +285,9 @@ static void calc_radius_with_interpolation(CurvesGeometry &curves,
 
       radii_cu.slice(points).fill(0.0f);
 
-      for (const NeighborCurve &neighbor : neighbors) {
-        const int neighbor_curve_i = neighbor.index;
+      for (const int neighbor_i : neighbors) {
+        const int neighbor_curve_i = neighbor_indices[neighbor_i];
+        const float neighbor_weight = neighbor_weights[neighbor_i];
         const IndexRange neighbor_points = points_by_curve[neighbor_curve_i];
         const Span<float3> neighbor_positions_cu = positions_cu.slice(neighbor_points);
         const Span<float> neighbor_radii_cu = radius_attr.span.slice(neighbor_points);
@@ -301,7 +312,7 @@ static void calc_radius_with_interpolation(CurvesGeometry &curves,
           const float sample_cu = math::interpolate(
               neighbor_radii_cu[indices[i]], neighbor_radii_cu[indices[i] + 1], factors[i]);
 
-          radii_cu[points[i]] += neighbor.weight * sample_cu;
+          radii_cu[points[i]] += neighbor_weight * sample_cu;
         }
       }
     }
@@ -312,6 +323,7 @@ static void calc_radius_with_interpolation(CurvesGeometry &curves,
 AddCurvesOnMeshOutputs add_curves_on_mesh(CurvesGeometry &curves,
                                           const AddCurvesOnMeshInputs &inputs)
 {
+  PRF_scope(ProfileCategory::Default);
   AddCurvesOnMeshOutputs outputs;
 
   const bool use_interpolation = inputs.interpolate_length || inputs.interpolate_point_count ||
@@ -346,10 +358,16 @@ AddCurvesOnMeshOutputs add_curves_on_mesh(CurvesGeometry &curves,
     used_uvs.append(uv);
   }
 
-  Array<NeighborCurves> neighbors_per_curve;
+  Vector<int> curve_neighbor_offset_data;
+  Vector<int> curve_neighbor_index_data;
+  Vector<float> curve_neighbor_weight_data;
   if (use_interpolation) {
     BLI_assert(inputs.old_roots_kdtree != nullptr);
-    neighbors_per_curve = find_curve_neighbors(root_positions_cu, *inputs.old_roots_kdtree);
+    find_curve_neighbors(root_positions_cu,
+                         *inputs.old_roots_kdtree,
+                         curve_neighbor_offset_data,
+                         curve_neighbor_index_data,
+                         curve_neighbor_weight_data);
   }
 
   const int added_curves_num = root_positions_cu.size();
@@ -368,11 +386,13 @@ AddCurvesOnMeshOutputs add_curves_on_mesh(CurvesGeometry &curves,
   Array<int> new_point_counts_per_curve(added_curves_num);
   if (inputs.interpolate_point_count && old_curves_num > 0) {
     const OffsetIndices<int> old_points_by_curve{curve_offsets.take_front(old_curves_num + 1)};
-    interpolate_from_neighbor_curves<int>(
-        neighbors_per_curve,
-        inputs.fallback_point_count,
-        [&](const int curve_i) { return old_points_by_curve[curve_i].size(); },
-        new_point_counts_per_curve);
+    Array<int> sizes(old_curves_num);
+    offset_indices::copy_group_sizes(old_points_by_curve, sizes.index_range(), sizes);
+    bke::attribute_math::mix_groups(sizes.as_span(),
+                                    OffsetIndices(curve_neighbor_offset_data.as_span()),
+                                    curve_neighbor_index_data.as_span(),
+                                    curve_neighbor_weight_data.as_span(),
+                                    new_point_counts_per_curve.as_mutable_span());
   }
   else {
     new_point_counts_per_curve.fill(inputs.fallback_point_count);
@@ -401,20 +421,24 @@ AddCurvesOnMeshOutputs add_curves_on_mesh(CurvesGeometry &curves,
   Span<float3> positions_cu = curves.positions();
   Array<float> new_lengths_cu(added_curves_num);
   if (inputs.interpolate_length) {
-    interpolate_from_neighbor_curves<float>(
-        neighbors_per_curve,
-        inputs.fallback_curve_length,
-        [&](const int curve_i) {
-          const IndexRange points = points_by_curve[curve_i];
-          float length = 0.0f;
-          for (const int segment_i : points.drop_back(1)) {
-            const float3 &p1 = positions_cu[segment_i];
-            const float3 &p2 = positions_cu[segment_i + 1];
-            length += math::distance(p1, p2);
-          }
-          return length;
-        },
-        new_lengths_cu);
+    Array<float> lengths(old_curves_num);
+    threading::parallel_for(IndexRange(old_curves_num), 256, [&](const IndexRange range) {
+      for (const int curve_i : range) {
+        const IndexRange points = points_by_curve[curve_i];
+        float length = 0.0f;
+        for (const int segment_i : points.drop_back(1)) {
+          const float3 &p1 = positions_cu[segment_i];
+          const float3 &p2 = positions_cu[segment_i + 1];
+          length += math::distance(p1, p2);
+        }
+        lengths[curve_i] = length;
+      }
+    });
+    bke::attribute_math::mix_groups(lengths.as_span(),
+                                    OffsetIndices(curve_neighbor_offset_data.as_span()),
+                                    curve_neighbor_index_data.as_span(),
+                                    curve_neighbor_weight_data.as_span(),
+                                    new_lengths_cu.as_mutable_span());
   }
   else {
     new_lengths_cu.fill(inputs.fallback_curve_length);
@@ -433,7 +457,9 @@ AddCurvesOnMeshOutputs add_curves_on_mesh(CurvesGeometry &curves,
   if (inputs.interpolate_shape) {
     calc_position_with_interpolation(curves,
                                      root_positions_cu,
-                                     neighbors_per_curve,
+                                     OffsetIndices(curve_neighbor_offset_data.as_span()),
+                                     curve_neighbor_index_data.as_span(),
+                                     curve_neighbor_weight_data.as_span(),
                                      old_curves_num,
                                      new_lengths_cu,
                                      new_normals_su,
@@ -453,8 +479,13 @@ AddCurvesOnMeshOutputs add_curves_on_mesh(CurvesGeometry &curves,
 
   /* Initialize radius attribute */
   if (inputs.interpolate_radius) {
-    calc_radius_with_interpolation(
-        curves, old_curves_num, inputs.fallback_curve_radius, new_lengths_cu, neighbors_per_curve);
+    calc_radius_with_interpolation(curves,
+                                   old_curves_num,
+                                   inputs.fallback_curve_radius,
+                                   new_lengths_cu,
+                                   OffsetIndices(curve_neighbor_offset_data.as_span()),
+                                   curve_neighbor_index_data.as_span(),
+                                   curve_neighbor_weight_data.as_span());
   }
   else {
     calc_radius_without_interpolation(
@@ -469,11 +500,11 @@ AddCurvesOnMeshOutputs add_curves_on_mesh(CurvesGeometry &curves,
           "resolution"))
   {
     if (inputs.interpolate_resolution) {
-      interpolate_from_neighbor_curves(
-          neighbors_per_curve,
-          12,
-          [&](const int curve_i) { return resolution.span[curve_i]; },
-          resolution.span.take_back(added_curves_num));
+      bke::attribute_math::mix_groups(resolution.span,
+                                      OffsetIndices(curve_neighbor_offset_data.as_span()),
+                                      curve_neighbor_index_data.as_span(),
+                                      curve_neighbor_weight_data.as_span(),
+                                      resolution.span.take_back(added_curves_num));
       resolution.finish();
     }
     else {

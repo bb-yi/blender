@@ -10,9 +10,9 @@ namespace blender::nodes::node_geo_input_mesh_face_area_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_output<decl::Float>("Area")
+  b.add_output<decl::Float>("Area"_ustr)
       .translation_context(BLT_I18NCONTEXT_AMOUNT)
-      .field_source()
+      .structure_type(StructureType::Field)
       .description("The surface area of each of the mesh's faces");
 }
 
@@ -32,10 +32,7 @@ static VArray<float> construct_face_area_varray(const Mesh &mesh, const AttrDoma
 
 class FaceAreaFieldInput final : public bke::MeshFieldInput {
  public:
-  FaceAreaFieldInput() : bke::MeshFieldInput(CPPType::get<float>(), "Face Area Field")
-  {
-    category_ = Category::Generated;
-  }
+  FaceAreaFieldInput() : bke::MeshFieldInput(CPPType::get<float>(), "Face Area Field") {}
 
   GVArray get_varray_for_context(const Mesh &mesh,
                                  const AttrDomain domain,
@@ -44,32 +41,32 @@ class FaceAreaFieldInput final : public bke::MeshFieldInput {
     return construct_face_area_varray(mesh, domain);
   }
 
-  uint64_t hash() const override
+  void hash_unique(UniqueHashBytes &hash, fn::FieldHashDeep & /*deep_hash_cache*/) const override
   {
-    /* Some random constant hash. */
-    return 1346334523;
-  }
-
-  bool is_equal_to(const fn::FieldNode &other) const override
-  {
-    return dynamic_cast<const FaceAreaFieldInput *>(&other) != nullptr;
+    static constexpr int8_t id = 0;
+    hash.add(&id);
   }
 
   std::optional<AttrDomain> preferred_domain(const Mesh & /*mesh*/) const override
   {
     return AttrDomain::Face;
   }
+
+  bke::NativeFieldDomain native_domain_info(const Mesh & /*mesh*/) const override
+  {
+    return bke::NativeFieldDomain::Domain{AttrDomain::Face};
+  }
 };
 
 static void node_geo_exec(GeoNodeExecParams params)
 {
-  params.set_output("Area", Field<float>(std::make_shared<FaceAreaFieldInput>()));
+  params.set_output("Area"_ustr, Field<float>::from_input<FaceAreaFieldInput>());
 }
 
 static void node_register()
 {
   static bke::bNodeType ntype;
-  geo_node_type_base(&ntype, "GeometryNodeInputMeshFaceArea", GEO_NODE_INPUT_MESH_FACE_AREA);
+  geo_node_type_base(&ntype, "GeometryNodeInputMeshFaceArea"_ustr, GEO_NODE_INPUT_MESH_FACE_AREA);
   ntype.ui_name = "Face Area";
   ntype.ui_description = "Calculate the surface area of a mesh's faces";
   ntype.enum_name_legacy = "MESH_FACE_AREA";

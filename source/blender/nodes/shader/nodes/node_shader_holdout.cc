@@ -10,8 +10,11 @@ namespace nodes::node_shader_holdout_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Float>("Weight").available(false);
-  b.add_output<decl::Shader>("Holdout");
+  const bNodeTree *ntree = b.tree_or_null();
+  const bool is_gpu_internal = ntree && (ntree->flag & NTREE_IS_GPU_SHADER_INTERNAL);
+
+  b.add_input<decl::Float>("Weight"_ustr).available(is_gpu_internal);
+  b.add_output<decl::Shader>("Holdout"_ustr);
 }
 
 static int gpu_shader_rgb(GPUMaterial *mat,
@@ -33,7 +36,7 @@ void register_node_type_sh_holdout()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeHoldout", SH_NODE_HOLDOUT);
+  sh_node_type_base(&ntype, "ShaderNodeHoldout"_ustr, SH_NODE_HOLDOUT);
   ntype.ui_name = "Holdout";
   ntype.ui_description =
       "Create a \"hole\" in the image with zero alpha transparency, which is useful for "

@@ -20,10 +20,6 @@
 #include "device/oneapi/device.h"
 #include "device/optix/device.h"
 
-#ifdef WITH_HIPRT
-#  include <hiprtew.h>
-#endif
-
 #include "util/log.h"
 #include "util/math.h"
 #include "util/string.h"
@@ -248,9 +244,7 @@ vector<DeviceType> Device::available_types()
   types.push_back(DEVICE_ONEAPI);
 #endif
 #ifdef WITH_HIPRT
-  if (hiprtewInit()) {
-    types.push_back(DEVICE_HIPRT);
-  }
+  types.push_back(DEVICE_HIPRT);
 #endif
   return types;
 }
@@ -525,10 +519,15 @@ const CPUKernels &Device::get_cpu_kernels()
   return kernels;
 }
 
-void Device::get_cpu_kernel_thread_globals(
-    vector<ThreadKernelGlobalsCPU> & /*kernel_thread_globals*/)
+vector<ThreadKernelGlobalsCPU> *Device::acquire_cpu_kernel_thread_globals()
 {
   LOG_FATAL << "Device does not support CPU kernels.";
+  return nullptr;
+}
+
+void Device::release_cpu_kernel_thread_globals()
+{
+  /* No-op for non-CPU devices. */
 }
 
 OSLGlobals *Device::get_cpu_osl_memory()
@@ -552,14 +551,48 @@ void Device::host_free(const MemoryType /*type*/, void *host_pointer, const size
   util_aligned_free(host_pointer, size);
 }
 
+void Device::mem_or_from_device(device_memory &mem)
+{
+  /* Note that we always accumulate into the host buffer without zeroing, as CPU and unified
+   * memory write into the host buffer and we need to combine with those flags. */
+  const size_t size = mem.memory_size();
+  vector<uint8_t> tmp(size);
+  uint8_t *combined = static_cast<uint8_t *>(mem.host_pointer);
+  mem.host_pointer = tmp.data();
+  mem_copy_from(
+      mem, 0, mem.data_width, (mem.data_height == 0) ? 1 : mem.data_height, sizeof(uint8_t));
+  const uint8_t *src = (const uint8_t *)mem.host_pointer;
+  for (size_t i = 0; i < size; i++) {
+    combined[i] |= src[i];
+  }
+  mem.host_pointer = combined;
+}
+
+device_ptr Device::mem_device_ptr(const device_memory &mem, Device *sub_device)
+{
+  assert(sub_device == this);
+  (void)sub_device;
+  return mem.device_pointer;
+}
+
 GPUDevice::~GPUDevice() noexcept(false) = default;
 
-bool GPUDevice::load_image_info()
+bool GPUDevice::load_image_info(DeviceQueue *queue)
 {
   /* Note image_info is never host mapped, and load_image_info() should only
    * be called right before kernel enqueue when all memory operations have completed. */
   if (need_image_info) {
-    image_info.copy_to_device();
+    /* If the host buffer was grown with host_only_resize() while a kernel was reading the old
+     * device buffer, we now free and reallocate it. */
+    if (image_info.device_size < image_info.memory_size()) {
+      generic_free(image_info);
+    }
+    if (queue) {
+      queue->copy_to_device(image_info);
+    }
+    else {
+      image_info.copy_to_device();
+    }
     need_image_info = false;
     return true;
   }
@@ -659,7 +692,7 @@ void GPUDevice::move_textures_to_host(size_t size, const size_t headroom, const 
      * multiple backend devices could be moving the memory. The
      * first one will do it, and the rest will adopt the pointer. */
     if (max_mem) {
-      LOG_DEBUG << "Move memory from device to host: " << max_mem->name;
+      LOG_DEBUG << "Move memory from device to host: " << max_mem->log_name();
 
       /* Potentially need to call back into multi device, so pointer mapping
        * and peer devices are updated. This is also necessary since the device
@@ -757,11 +790,9 @@ GPUDevice::Mem *GPUDevice::generic_alloc(device_memory &mem, const size_t pitch_
     }
   }
 
-  if (mem.name) {
-    LOG_DEBUG << "Buffer allocate: " << mem.name << ", "
-              << string_human_readable_number(mem.memory_size()) << " bytes. ("
-              << string_human_readable_size(mem.memory_size()) << ")" << status;
-  }
+  LOG_DEBUG << "Buffer allocate: " << mem.log_name() << ", "
+            << string_human_readable_number(mem.memory_size()) << " bytes. ("
+            << string_human_readable_size(mem.memory_size()) << ")" << status;
 
   mem.device_pointer = (device_ptr)device_pointer;
   mem.device_size = size;
@@ -802,7 +833,7 @@ void GPUDevice::generic_free(device_memory &mem)
 
   /* Host pointer should already have been freed at this point. If not we might
    * end up freeing shared memory and can't recover original host memory. */
-  assert(mem.host_pointer == nullptr || mem.move_to_host);
+  assert(mem.host_pointer == nullptr || mem.move_to_host || !mem.is_shared(this));
 
   const thread_scoped_lock lock(device_mem_map_mutex);
   DCHECK(device_mem_map.find(&mem) != device_mem_map.end());

@@ -248,7 +248,7 @@ void ANIM_set_active_channel(bAnimContext *ac,
 
   /* try to build list of filtered items */
   ANIM_animdata_filter(ac, &anim_data, filter, data, datatype);
-  if (BLI_listbase_is_empty(&anim_data)) {
+  if (anim_data.is_empty()) {
     return;
   }
 
@@ -1388,7 +1388,7 @@ static void rearrange_animchannel_flatten_islands(ListBaseT<tReorderChannelIslan
   tReorderChannelIsland *island, *isn = nullptr;
 
   /* make sure srcList is empty now */
-  BLI_assert(BLI_listbase_is_empty(srcList));
+  BLI_assert(srcList->is_empty());
 
   /* go through merging islands */
   for (island = static_cast<tReorderChannelIsland *>(islands->first); island; island = isn) {
@@ -1407,7 +1407,7 @@ static void rearrange_animchannels_filter_visible(
     ListBaseT<bAnimListElem> *anim_data_visible,
     bAnimContext *ac,
     const eAnim_ChannelType type,
-    const eAnimFilter_Flags additional_filters = eAnimFilter_Flags(0))
+    const eAnimFilter_Flags additional_filters = eAnimFilter_Flags{})
 {
   ListBaseT<bAnimListElem> anim_data = {nullptr, nullptr};
   eAnimFilter_Flags filter = (ANIMFILTER_DATA_VISIBLE | ANIMFILTER_LIST_VISIBLE |
@@ -1451,7 +1451,7 @@ static bool rearrange_animchannel_islands(ListBaseT<T> *list,
   bool done = false;
 
   /* don't waste effort on an empty list */
-  if (BLI_listbase_is_empty(list)) {
+  if (list->is_empty()) {
     return false;
   }
 
@@ -1548,7 +1548,7 @@ static void rearrange_nla_tracks(bAnimContext *ac, AnimData *adt, eRearrangeAnim
       &adt->nla_tracks, rearrange_func, mode, ANIMTYPE_NLATRACK, &anim_data_visible);
 
   /* Add back non-local NLA tracks at the beginning of the animation data's list. */
-  if (!BLI_listbase_is_empty(&extracted_nonlocal_nla_tracks)) {
+  if (!extracted_nonlocal_nla_tracks.is_empty()) {
     BLI_assert(is_liboverride);
     static_cast<NlaTrack *>(extracted_nonlocal_nla_tracks.last)->next = static_cast<NlaTrack *>(
         adt->nla_tracks.first);
@@ -1558,7 +1558,7 @@ static void rearrange_nla_tracks(bAnimContext *ac, AnimData *adt, eRearrangeAnim
   }
 
   /* free temp data */
-  BLI_freelistN(&anim_data_visible);
+  anim_data_visible.free_no_destruct();
 }
 
 /* Drivers Specific Stuff ------------------------------------------------- */
@@ -1591,7 +1591,7 @@ static void rearrange_driver_channels(bAnimContext *ac,
       &adt->drivers, rearrange_func, mode, ANIMTYPE_FCURVE, &anim_data_visible);
 
   /* free temp data */
-  BLI_freelistN(&anim_data_visible);
+  anim_data_visible.free_no_destruct();
 }
 
 /* Action Specific Stuff ------------------------------------------------- */
@@ -1696,7 +1696,7 @@ static bool rearrange_layered_action_slots(bAnimContext *ac, const eRearrangeAni
     }
   }
 
-  BLI_freelistN(&anim_data_selected_visible);
+  anim_data_selected_visible.free_no_destruct();
 
   return total_moved > 0;
 }
@@ -1822,7 +1822,7 @@ static void rearrange_layered_action_channel_groups(bAnimContext *ac,
     }
   }
 
-  BLI_freelistN(&anim_data_visible);
+  anim_data_visible.free_no_destruct();
 }
 
 /**
@@ -1994,7 +1994,7 @@ static void rearrange_layered_action_fcurves(bAnimContext *ac,
       break;
     }
   }
-  BLI_freelistN(&anim_data_visible);
+  anim_data_visible.free_no_destruct();
 }
 
 /* Change the order of anim-channels within action
@@ -2044,7 +2044,7 @@ static void rearrange_nla_control_channels(bAnimContext *ac,
   }
 
   /* free temp data */
-  BLI_freelistN(&anim_data_visible);
+  anim_data_visible.free_no_destruct();
 }
 
 /* ------------------- */
@@ -2099,7 +2099,7 @@ static void rearrange_grease_pencil_channels(bAnimContext *ac, eRearrangeAnimCha
     }
   }
 
-  BLI_freelistN(&anim_data);
+  anim_data.free_no_destruct();
 }
 
 static void rearrange_gpencil_channels(bAnimContext *ac, eRearrangeAnimChan_Mode mode)
@@ -2142,7 +2142,7 @@ static void rearrange_gpencil_channels(bAnimContext *ac, eRearrangeAnimChan_Mode
         &gpd->layers, rearrange_func, mode, ANIMTYPE_GPLAYER, &anim_data_visible);
 
     /* free visible layers data */
-    BLI_freelistN(&anim_data_visible);
+    anim_data_visible.free_no_destruct();
 
     /* Tag to recalc geometry */
     DEG_id_tag_update(&gpd->id, ID_RECALC_TRANSFORM | ID_RECALC_GEOMETRY);
@@ -2997,7 +2997,7 @@ static void setflag_anim_channels(bAnimContext *ac,
   }
 
   ANIM_animdata_freelist(&anim_data);
-  BLI_freelistN(&all_data);
+  all_data.free_no_destruct();
 }
 
 /* ------------------- */
@@ -4030,6 +4030,7 @@ static int click_select_channel_object(bContext *C,
                                        const short /* eEditKeyframes_Select or -1 */ selectmode)
 {
   using namespace blender::ed;
+  const Main *bmain = CTX_data_main(C);
   Scene *scene = ac->scene;
   ViewLayer *view_layer = ac->view_layer;
   Base *base = static_cast<Base *>(ale->data);
@@ -4055,7 +4056,7 @@ static int click_select_channel_object(bContext *C,
   else {
     /* deselect all */
     ANIM_anim_channels_select_set(ac, ACHANNEL_SETFLAG_CLEAR);
-    BKE_view_layer_synced_ensure(scene, view_layer);
+    BKE_view_layer_synced_ensure(*bmain, scene, view_layer);
     /* TODO: should this deselect all other types of channels too? */
     for (Base &b : *BKE_view_layer_object_bases_get(view_layer)) {
       object::base_select(&b, object::BA_DESELECT);
@@ -4756,7 +4757,7 @@ static bool select_anim_channel_keys(bAnimContext *ac, int channel_index, bool e
 
         if (fcu_inner != nullptr && fcu_inner->bezt != nullptr) {
           for (i = 0, bezt = fcu_inner->bezt; i < fcu_inner->totvert; i++, bezt++) {
-            bezt->f2 = bezt->f1 = bezt->f3 = 0;
+            bezt->f2 = bezt->f1 = bezt->f3 = eBezTriple_Flag{};
           }
         }
       }
@@ -4765,7 +4766,7 @@ static bool select_anim_channel_keys(bAnimContext *ac, int channel_index, bool e
     }
 
     for (i = 0, bezt = fcu->bezt; i < fcu->totvert; i++, bezt++) {
-      bezt->f2 = bezt->f1 = bezt->f3 = SELECT;
+      bezt->f2 = bezt->f1 = bezt->f3 = BEZT_FLAG_SELECT;
     }
   }
 
@@ -5077,7 +5078,8 @@ static wmOperatorStatus channels_bake_exec(bContext *C, wmOperator *op)
   const bool remove_outside_range = RNA_boolean_get(op->ptr, "remove_outside_range");
   const BakeCurveRemove remove_existing = remove_outside_range ? BakeCurveRemove::ALL :
                                                                  BakeCurveRemove::IN_RANGE;
-  const int interpolation_type = RNA_enum_get(op->ptr, "interpolation_type");
+  const eBezTriple_Interpolation interpolation_type = eBezTriple_Interpolation(
+      RNA_enum_get(op->ptr, "interpolation_type"));
   const bool bake_modifiers = RNA_boolean_get(op->ptr, "bake_modifiers");
 
   for (bAnimListElem &ale : anim_data) {
@@ -5090,7 +5092,7 @@ static wmOperatorStatus channels_bake_exec(bContext *C, wmOperator *op)
         int(ANIM_nla_tweakedit_remap(&ale, frame_range[1], NLATIME_CONVERT_UNMAP)),
     };
     /* Save current state of modifier flags so they can be reapplied after baking. */
-    Vector<short> modifier_flags;
+    Vector<eFModifier_Flags> modifier_flags;
     if (!bake_modifiers) {
       for (FModifier &modifier : fcu->modifiers) {
         modifier_flags.append(modifier.flag);
@@ -5105,7 +5107,8 @@ static wmOperatorStatus channels_bake_exec(bContext *C, wmOperator *op)
     /* Since the interpolation of a key defines the curve following it, the last key in the baked
      * segment needs to keep the interpolation mode that existed previously so the curve isn't
      * changed. */
-    const char segment_end_interpolation = fcu->bezt[min_ii(last_index, fcu->totvert - 1)].ipo;
+    const eBezTriple_Interpolation segment_end_interpolation =
+        fcu->bezt[min_ii(last_index, fcu->totvert - 1)].ipo;
 
     const float step = RNA_float_get(op->ptr, "step");
     bake_fcurve(fcu, nla_mapped_range, step, remove_existing);
@@ -5282,10 +5285,11 @@ static wmOperatorStatus slot_channels_move_to_new_action_exec(bContext *C, wmOpe
 
 static bool slot_channels_move_to_new_action_poll(bContext *C)
 {
+  const Main *bmain = CTX_data_main(C);
   Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
   ScrArea *area = CTX_wm_area(C);
-  bAction *action = ANIM_active_action_from_area(scene, view_layer, area);
+  bAction *action = ANIM_active_action_from_area(*bmain, scene, view_layer, area);
 
   if (!action) {
     CTX_wm_operator_poll_msg_set(C, "No active action to operate on");

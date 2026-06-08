@@ -45,7 +45,6 @@
 #include "BKE_object.hh"
 #include "BKE_scene.hh"
 
-#include "BLI_ghash.h"
 #include "BLI_listbase.h"
 #include "BLI_math_color.h"
 #include "BLI_math_vector.h"
@@ -112,7 +111,7 @@ BlenderStrokeRenderer::BlenderStrokeRenderer(blender::Render *re, int render_cou
   if (blender::G.debug & blender::G_DEBUG_FREESTYLE) {
     cout << "Stroke rendering engine : " << freestyle_scene->r.engine << endl;
   }
-  freestyle_scene->r.im_format.planes = R_IMF_PLANES_RGBA;
+  freestyle_scene->r.im_format.color_mode = ImColorMode::RGBA;
   freestyle_scene->r.im_format.imtype = R_IMF_IMTYPE_PNG;
 
   // Copy ID properties, including Cycles render properties
@@ -178,7 +177,7 @@ BlenderStrokeRenderer::~BlenderStrokeRenderer()
   /* detach the window manager from freestyle bmain (see comments
    * in add_freestyle() for more detail)
    */
-  BLI_listbase_clear(&freestyle_bmain->wm);
+  freestyle_bmain->wm.clear_no_delete();
 
   BKE_main_free(freestyle_bmain);
 }
@@ -234,6 +233,7 @@ Material *BlenderStrokeRenderer::GetStrokeShader(blender::Main *bmain,
       }
     }
     ma->nodetree = ntree;
+    ntree->owner_id = &ma->id;
   }
   else {
     ntree = ma->nodetree;
@@ -867,7 +867,7 @@ blender::Object *BlenderStrokeRenderer::NewMesh() const
   return ob;
 }
 
-blender::Render *BlenderStrokeRenderer::RenderScene(blender::Render * /*re*/, bool render)
+blender::Render *BlenderStrokeRenderer::RenderScene(blender::Render *re, bool render)
 {
   using namespace blender;
   Camera *camera = (Camera *)freestyle_scene->camera->data;
@@ -883,8 +883,14 @@ blender::Render *BlenderStrokeRenderer::RenderScene(blender::Render * /*re*/, bo
   Render *freestyle_render = RE_NewSceneRender(freestyle_scene);
   DEG_graph_relations_update(freestyle_depsgraph);
 
+  freestyle_render->pipeline_depsgraph = re->pipeline_depsgraph;
+  freestyle_render->pipeline_scene_eval = re->pipeline_scene_eval;
+
   RE_RenderFreestyleStrokes(
       freestyle_render, freestyle_bmain, freestyle_scene, render && get_stroke_count() > 0);
+
+  freestyle_render->pipeline_depsgraph = nullptr;
+  freestyle_render->pipeline_scene_eval = nullptr;
 
   return freestyle_render;
 }

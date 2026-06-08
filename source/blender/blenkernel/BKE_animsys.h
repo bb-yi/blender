@@ -36,6 +36,11 @@ struct TimeMarker;
 struct bAction;
 struct bActionGroup;
 
+enum eInsertKeyFlags : short;
+enum eKSP_Grouping : short;
+enum eKSP_Settings : short;
+enum eKS_Settings : short;
+
 /** Container for data required to do FCurve and Driver evaluation. */
 struct AnimationEvalContext {
   /* For drivers, so that they have access to the dependency graph and the current view layer. See
@@ -63,8 +68,8 @@ AnimationEvalContext BKE_animsys_eval_context_construct_at(
 struct KeyingSet *BKE_keyingset_add(ListBaseT<KeyingSet> *list,
                                     const char idname[],
                                     const char name[],
-                                    short flag,
-                                    short keyingflag);
+                                    eKS_Settings flag,
+                                    eInsertKeyFlags keyingflag);
 
 /**
  * Add a path to a KeyingSet. Nothing is returned for now.
@@ -75,8 +80,8 @@ struct KS_Path *BKE_keyingset_add_path(struct KeyingSet *ks,
                                        const char group_name[],
                                        const char rna_path[],
                                        int array_index,
-                                       short flag,
-                                       short groupmode);
+                                       eKSP_Settings flag,
+                                       eKSP_Grouping groupmode);
 
 /**
  * Find the destination matching the criteria given.
@@ -154,33 +159,43 @@ void BKE_action_fix_paths_rename(struct ID *owner_id,
 /**
  * Fix all the paths for the given ID+AnimData
  *
- * \note it is assumed that the structure we're replacing is `<prefix><["><name><"]>`
- * i.e. `pose.bones["Bone"]`.
+ * \param old_infix, new_infix: The path section immediately following the `prefix`. If
+ * `infix_is_name` is true, this is processed as a name..
+ *
+ * \param infix_is_name: If true, old_infix and new_infix are treated as names and padded with
+ * [""] so that only exact matches are made. For example, the structure we're replacing is
+ * `<prefix><["><name><"]>` i.e. `pose.bones["Bone"]`.
  */
 void BKE_animdata_fix_paths_rename(struct ID *owner_id,
                                    struct AnimData *adt,
                                    struct ID *ref_id,
                                    const char *prefix,
-                                   const char *oldName,
-                                   const char *newName,
+                                   const char *old_infix,
+                                   const char *new_infix,
                                    int oldSubscript,
                                    int newSubscript,
-                                   bool verify_paths);
+                                   bool verify_paths,
+                                   bool infix_is_name);
 
 /**
  * Fix all RNA-Paths throughout the database (directly access the #Global.main version).
  *
- * \note it is assumed that the structure we're replacing is `<prefix><["><name><"]>`
- * i.e. `pose.bones["Bone"]`
+ * \param old_infix, new_infix: The path section immediately following the `prefix`. If
+ * `infix_is_name` is true, this is processed as a name.
+ *
+ * \param infix_is_name: If true, old_infix and new_infix are treated as names and padded with
+ * [""] so that only exact matches are made. For example, the structure we're replacing is
+ * `<prefix><["><name><"]>` i.e. `pose.bones["Bone"]`
  */
 void BKE_animdata_fix_paths_rename_all_ex(struct Main *bmain,
                                           struct ID *ref_id,
                                           const char *prefix,
-                                          const char *oldName,
-                                          const char *newName,
+                                          const char *old_infix,
+                                          const char *new_infix,
                                           int oldSubscript,
                                           int newSubscript,
-                                          bool verify_paths);
+                                          bool verify_paths,
+                                          bool infix_is_name);
 
 /** See #BKE_animdata_fix_paths_rename_all_ex */
 void BKE_animdata_fix_paths_rename_all(struct ID *ref_id,
@@ -232,20 +247,6 @@ struct AnimationBasePathChange {
  */
 void BKE_animdata_copy_by_basepath(Main &bmain,
                                    const ID &src_id,
-                                   ID &dst_id,
-                                   Span<AnimationBasePathChange> basepaths);
-
-/**
- * Move any animation data under the base paths from the #src_id animation data to the #dst_id
- * animation data. Animation data in #dst_id is created if necessary. If #dst_id has an assigned
- * action it may be modified or an empty action is assigned if none exists. F-Curves are removed
- * from the action assigned to #src_id and added to the action assigned to #dst_id. Drivers are
- * removed from the animation data in #src_id and moved to animation data in #dst_id.
- *
- * \param basepaths: List of base path pairs to transfer.
- */
-void BKE_animdata_move_by_basepath(Main &bmain,
-                                   ID &src_id,
                                    ID &dst_id,
                                    Span<AnimationBasePathChange> basepaths);
 

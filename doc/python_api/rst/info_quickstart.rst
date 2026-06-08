@@ -268,7 +268,7 @@ For example, calling ``bpy.ops.view3d.render_border()`` from the console raises 
 
 In this case the context must be the 3D Viewport with an active camera.
 
-To avoid using try-except clauses wherever operators are called, you can call the operators
+To avoid using try-except clauses wherever operators are called, you can call the operator's
 own ``poll()`` function to check if it can run the operator in the current context.
 
 .. code-block:: python
@@ -293,7 +293,7 @@ In Python, this is done by defining a class, which is a subclass of an existing 
 Example Operator
 ----------------
 
-.. literalinclude:: __/__/__/scripts/templates_py/operator_simple.py
+.. literalinclude:: __/__/__/scripts/templates_py/Operator/simple.py
 
 Once this script runs, ``SimpleOperator`` is registered with Blender
 and can be called from Operator Search or added to the toolbar.
@@ -325,7 +325,7 @@ Example Panel
 Panels are registered as a class, like an operator.
 Notice the extra ``bl_`` variables used to set the context they display in.
 
-.. literalinclude:: __/__/__/scripts/templates_py/ui_panel_simple.py
+.. literalinclude:: __/__/__/scripts/templates_py/UI/panel_simple.py
 
 To run the script:
 

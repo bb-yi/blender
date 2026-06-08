@@ -130,8 +130,8 @@ static void node_reroute_add_storage(bNodeTree &tree)
        * identifiers were sometimes all lower case. Fixing those wrong socket identifiers is
        * important because otherwise they loose links now that the reroute node also uses node
        * declarations. */
-      STRNCPY_UTF8(input.identifier, "Input");
-      STRNCPY_UTF8(output.identifier, "Output");
+      version_node_socket_identifier_set(input, "Input");
+      version_node_socket_identifier_set(output, "Output");
 
       NodeReroute *data = MEM_new<NodeReroute>(__func__);
       STRNCPY_UTF8(data->type_idname, input.idname);
@@ -319,7 +319,7 @@ void blo_do_versions_430(FileData * /*fd*/, Library * /*lib*/, Main *bmain)
           BKE_image_format_update_color_space_for_type(&storage->format);
         }
 
-        if (BLI_listbase_is_empty(&node.inputs)) {
+        if (node.inputs.is_empty()) {
           continue;
         }
 
@@ -400,7 +400,7 @@ void blo_do_versions_430(FileData * /*fd*/, Library * /*lib*/, Main *bmain)
   if (!MAIN_VERSION_FILE_ATLEAST(bmain, 403, 17)) {
     FOREACH_NODETREE_BEGIN (bmain, tree, id) {
       if (tree->default_group_node_width == 0) {
-        tree->default_group_node_width = GROUP_NODE_DEFAULT_WIDTH;
+        tree->default_group_node_width = bke::NodeWidth::Default;
       }
     }
     FOREACH_NODETREE_END;

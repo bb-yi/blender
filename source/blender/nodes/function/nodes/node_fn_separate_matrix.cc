@@ -5,6 +5,8 @@
 #include "NOD_inverse_eval_params.hh"
 #include "NOD_value_elem_eval.hh"
 
+#include "GPU_material.hh"
+
 #include "node_function_util.hh"
 
 namespace blender::nodes::node_fn_separate_matrix_cc {
@@ -15,31 +17,31 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.use_custom_socket_order();
   b.allow_any_socket_order();
 
-  PanelDeclarationBuilder &column_a = b.add_panel("Column 1").default_closed(true);
-  column_a.add_output<decl::Float>("Column 1 Row 1");
-  column_a.add_output<decl::Float>("Column 1 Row 2");
-  column_a.add_output<decl::Float>("Column 1 Row 3");
-  column_a.add_output<decl::Float>("Column 1 Row 4");
+  PanelDeclarationBuilder &column_a = b.add_panel("Column 1"_ustr).default_closed(true);
+  column_a.add_output<decl::Float>("Column 1 Row 1"_ustr);
+  column_a.add_output<decl::Float>("Column 1 Row 2"_ustr);
+  column_a.add_output<decl::Float>("Column 1 Row 3"_ustr);
+  column_a.add_output<decl::Float>("Column 1 Row 4"_ustr);
 
-  PanelDeclarationBuilder &column_b = b.add_panel("Column 2").default_closed(true);
-  column_b.add_output<decl::Float>("Column 2 Row 1");
-  column_b.add_output<decl::Float>("Column 2 Row 2");
-  column_b.add_output<decl::Float>("Column 2 Row 3");
-  column_b.add_output<decl::Float>("Column 2 Row 4");
+  PanelDeclarationBuilder &column_b = b.add_panel("Column 2"_ustr).default_closed(true);
+  column_b.add_output<decl::Float>("Column 2 Row 1"_ustr);
+  column_b.add_output<decl::Float>("Column 2 Row 2"_ustr);
+  column_b.add_output<decl::Float>("Column 2 Row 3"_ustr);
+  column_b.add_output<decl::Float>("Column 2 Row 4"_ustr);
 
-  PanelDeclarationBuilder &column_c = b.add_panel("Column 3").default_closed(true);
-  column_c.add_output<decl::Float>("Column 3 Row 1");
-  column_c.add_output<decl::Float>("Column 3 Row 2");
-  column_c.add_output<decl::Float>("Column 3 Row 3");
-  column_c.add_output<decl::Float>("Column 3 Row 4");
+  PanelDeclarationBuilder &column_c = b.add_panel("Column 3"_ustr).default_closed(true);
+  column_c.add_output<decl::Float>("Column 3 Row 1"_ustr);
+  column_c.add_output<decl::Float>("Column 3 Row 2"_ustr);
+  column_c.add_output<decl::Float>("Column 3 Row 3"_ustr);
+  column_c.add_output<decl::Float>("Column 3 Row 4"_ustr);
 
-  PanelDeclarationBuilder &column_d = b.add_panel("Column 4").default_closed(true);
-  column_d.add_output<decl::Float>("Column 4 Row 1");
-  column_d.add_output<decl::Float>("Column 4 Row 2");
-  column_d.add_output<decl::Float>("Column 4 Row 3");
-  column_d.add_output<decl::Float>("Column 4 Row 4");
+  PanelDeclarationBuilder &column_d = b.add_panel("Column 4"_ustr).default_closed(true);
+  column_d.add_output<decl::Float>("Column 4 Row 1"_ustr);
+  column_d.add_output<decl::Float>("Column 4 Row 2"_ustr);
+  column_d.add_output<decl::Float>("Column 4 Row 3"_ustr);
+  column_d.add_output<decl::Float>("Column 4 Row 4"_ustr);
 
-  b.add_input<decl::Matrix>("Matrix");
+  b.add_input<decl::Matrix>("Matrix"_ustr);
 }
 
 static void copy_with_stride(const IndexMask &mask,
@@ -191,7 +193,7 @@ static void node_build_multi_function(NodeMultiFunctionBuilder &builder)
 static void node_eval_elem(value_elem::ElemEvalParams &params)
 {
   using namespace value_elem;
-  const MatrixElem matrix_elem = params.get_input_elem<MatrixElem>("Matrix");
+  const MatrixElem matrix_elem = params.get_input_elem<MatrixElem>("Matrix"_ustr);
   std::array<std::array<FloatElem, 4>, 4> output_elems;
 
   output_elems[3][0] = matrix_elem.translation.x;
@@ -215,7 +217,7 @@ static void node_eval_elem(value_elem::ElemEvalParams &params)
   for (const int col : IndexRange(4)) {
     for (const int row : IndexRange(4)) {
       const bNodeSocket &socket = params.node.output_socket(col * 4 + row);
-      params.set_output_elem(socket.identifier, output_elems[col][row]);
+      params.set_output_elem(socket.identifier_ustr(), output_elems[col][row]);
     }
   }
 }
@@ -228,7 +230,7 @@ static void node_eval_inverse_elem(value_elem::InverseElemEvalParams &params)
   for (const int col : IndexRange(4)) {
     for (const int row : IndexRange(4)) {
       const bNodeSocket &socket = params.node.output_socket(col * 4 + row);
-      output_elems[col][row] = params.get_output_elem<FloatElem>(socket.identifier);
+      output_elems[col][row] = params.get_output_elem<FloatElem>(socket.identifier_ustr());
     }
   }
 
@@ -255,7 +257,7 @@ static void node_eval_inverse_elem(value_elem::InverseElemEvalParams &params)
     matrix_elem.any_non_transform = FloatElem::all();
   }
 
-  params.set_input_elem("Matrix", matrix_elem);
+  params.set_input_elem("Matrix"_ustr, matrix_elem);
 }
 
 static void node_eval_inverse(inverse_eval::InverseEvalParams &params)
@@ -264,16 +266,25 @@ static void node_eval_inverse(inverse_eval::InverseEvalParams &params)
   for (const int col : IndexRange(4)) {
     for (const int row : IndexRange(4)) {
       const bNodeSocket &socket = params.node.output_socket(col * 4 + row);
-      matrix[col][row] = params.get_output<float>(socket.identifier);
+      matrix[col][row] = params.get_output<float>(socket.identifier_ustr());
     }
   }
-  params.set_input("Matrix", matrix);
+  params.set_input("Matrix"_ustr, matrix);
+}
+
+static int node_gpu_material(GPUMaterial *material,
+                             bNode *node,
+                             bNodeExecData * /*execdata*/,
+                             GPUNodeStack *inputs,
+                             GPUNodeStack *outputs)
+{
+  return GPU_stack_link(material, node, "node_function_separate_matrix", inputs, outputs);
 }
 
 static void node_register()
 {
   static bke::bNodeType ntype;
-  fn_node_type_base(&ntype, "FunctionNodeSeparateMatrix", FN_NODE_SEPARATE_MATRIX);
+  fn_cmp_node_type_base(&ntype, "FunctionNodeSeparateMatrix"_ustr, FN_NODE_SEPARATE_MATRIX);
   ntype.ui_name = "Separate Matrix";
   ntype.ui_description = "Split a 4x4 matrix into its individual values";
   ntype.enum_name_legacy = "SEPARATE_MATRIX";
@@ -283,6 +294,7 @@ static void node_register()
   ntype.eval_elem = node_eval_elem;
   ntype.eval_inverse_elem = node_eval_inverse_elem;
   ntype.eval_inverse = node_eval_inverse;
+  ntype.gpu_fn = node_gpu_material;
   bke::node_register_type(ntype);
 }
 NOD_REGISTER_NODE(node_register)

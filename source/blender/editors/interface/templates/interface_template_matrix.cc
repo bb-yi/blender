@@ -39,6 +39,7 @@ static std::string format_unit_value(float value, PropertySubType subtype, Layou
                            RNA_TRANSLATION_PREC_DEFAULT,
                            RNA_SUBTYPE_UNIT_VALUE(unit_type),
                            *unit,
+                           true,
                            true);
   return std::string(new_str);
 }
@@ -63,7 +64,7 @@ static void rotation_mode_menu_callback(bContext *, Layout *layout, void *)
     const EnumPropertyItem &mode_info = rna_enum_object_rotation_mode_items[i];
     const int yco = -1.5f * UI_UNIT_Y;
     const int width = 9 * UI_UNIT_X;
-    Button *but = uiDefButI(layout->block(),
+    Button *but = uiDefButV(layout->block(),
                             ButtonType::Row,
                             IFACE_(mode_info.name),
                             0,

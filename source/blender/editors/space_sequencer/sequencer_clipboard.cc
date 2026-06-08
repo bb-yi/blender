@@ -30,6 +30,7 @@
 
 #include "BKE_anim_data.hh"
 #include "BKE_appdir.hh"
+#include "BKE_blender_copybuffer.hh"
 #include "BKE_blendfile.hh"
 #include "BKE_context.hh"
 #include "BKE_fcurve.hh"
@@ -231,7 +232,7 @@ static bool sequencer_write_copy_paste_file(Main *bmain_src,
    * All other indirect dependencies will then be handled automatically by the partial write
    * context code.
    */
-#define VSE_COPYBUFFER_IDTYPES ID_SO, ID_MC, ID_IM, ID_TXT, ID_VF, ID_AC
+#define VSE_COPYBUFFER_IDTYPES ID_SO, ID_MC, ID_IM, ID_TXT, ID_VF, ID_AC, ID_NT
   auto add_scene_ids_dependencies_cb = [&copy_buffer,
                                         scene_dst](LibraryIDLinkCallbackData *cb_data) -> int {
     ID *id_src = *cb_data->id_pointer;
@@ -258,7 +259,7 @@ static bool sequencer_write_copy_paste_file(Main *bmain_src,
     ID *id_dst = nullptr;
     const ID_Type id_type = GS((id_src)->name);
     /* Only add (and follow) IDs which usage is marked as 'never null', or are from following
-     * types: #bSound, #MovieClip, #Image, #Text, #VFont, #bAction. */
+     * types: #bSound, #MovieClip, #Image, #Text, #VFont, #bAction, #bNodeTree. */
     if (ELEM(id_type, VSE_COPYBUFFER_IDTYPES) || (cb_data->cb_flag & IDWALK_CB_NEVER_NULL)) {
       /* The partial write context handle dependencies of ID added to it. This callback will tell
        * it whether a given dependency ID should be skipped/cleared, or also added in the context.
@@ -288,7 +289,7 @@ static bool sequencer_write_copy_paste_file(Main *bmain_src,
 
   BLI_assert(copy_buffer.is_valid());
 
-  const bool retval = copy_buffer.write(filepath, reports);
+  const bool retval = copy_buffer.write_as_copypaste_buffer(filepath, reports);
 
   return retval;
 }
@@ -307,8 +308,7 @@ wmOperatorStatus sequencer_clipboard_copy_exec(bContext *C, wmOperator *op)
 
   VectorSet<Strip *> effect_chain;
   effect_chain.add_multiple(selected);
-  seq::iterator_set_expand(
-      scene, ed->current_strips(), effect_chain, seq::query_strip_effect_chain);
+  seq::iterator_set_expand(ed->current_strips(), effect_chain, seq::query_strip_effect_chain);
 
   VectorSet<Strip *> expanded;
   for (Strip *strip : effect_chain) {
@@ -390,9 +390,13 @@ wmOperatorStatus sequencer_clipboard_paste_exec(bContext *C, wmOperator *op)
 {
   char filepath[FILE_MAX];
   sequencer_copybuffer_filepath_get(filepath, sizeof(filepath));
-  const BlendFileReadParams params{};
-  BlendFileReadReport bf_reports{};
-  BlendFileData *bfd = BKE_blendfile_read(filepath, &params, &bf_reports);
+  Main *bmain_src = BKE_main_new();
+  if (!BKE_copybuffer_read(bmain_src, filepath, op->reports, FILTER_ID_SCE)) {
+    BKE_report(op->reports, RPT_ERROR, "No data to paste");
+    BKE_main_free(bmain_src);
+    return OPERATOR_CANCELLED;
+  }
+
   const int mval[2] = {RNA_int_get(op->ptr, "x"), RNA_int_get(op->ptr, "y")};
   float2 view_mval;
   View2D *v2d = ui::view2d_fromcontext(C);
@@ -401,15 +405,6 @@ wmOperatorStatus sequencer_clipboard_paste_exec(bContext *C, wmOperator *op)
 
   /* For checking if region type is Preview. */
   ARegion *region = CTX_wm_region(C);
-
-  if (bfd == nullptr) {
-    BKE_report(op->reports, RPT_INFO, "No data to paste");
-    return OPERATOR_CANCELLED;
-  }
-
-  Main *bmain_src = bfd->main;
-  bfd->main = nullptr;
-  BLO_blendfiledata_free(bfd);
 
   Scene *scene_src = nullptr;
   /* Find the scene we pasted that contains the strips. It should be tagged. */
@@ -426,7 +421,7 @@ wmOperatorStatus sequencer_clipboard_paste_exec(bContext *C, wmOperator *op)
     return OPERATOR_CANCELLED;
   }
 
-  const int num_strips_to_paste = BLI_listbase_count(&scene_src->ed->seqbase);
+  const int num_strips_to_paste = scene_src->ed->seqbase.count();
   if (num_strips_to_paste == 0) {
     BKE_report(op->reports, RPT_INFO, "No strips to paste");
     BKE_main_free(bmain_src);
@@ -461,8 +456,12 @@ wmOperatorStatus sequencer_clipboard_paste_exec(bContext *C, wmOperator *op)
    * correct otherwise. */
   Main *bmain_dst = CTX_data_main(C);
   MainMergeReport merge_reports = {};
+  /* We need to ensure that the source 'clipboard marked' main Scene is always merged into
+   * destination Main, even in case there would be a name collision with an existing ID (see also
+   * #158049). */
+  Set<ID *> force_merge_ids = {id_cast<ID *>(scene_src)};
   /* NOTE: BKE_main_merge will free bmain_src! */
-  BKE_main_merge(bmain_dst, &bmain_src, merge_reports);
+  BKE_main_merge(bmain_dst, &force_merge_ids, &bmain_src, merge_reports);
 
   /* Paste animation.
    * NOTE: Only fcurves and drivers are copied. NLA action strips are not copied.
@@ -470,7 +469,7 @@ wmOperatorStatus sequencer_clipboard_paste_exec(bContext *C, wmOperator *op)
    * when pasted strips are renamed, pasted fcurves are renamed with them. Finally restore original
    * curves from backup.
    */
-  seq::AnimationBackup animation_backup = {{nullptr}};
+  seq::AnimationBackup animation_backup = {};
   seq::animation_backup_original(scene_dst, &animation_backup);
   bool has_animation = sequencer_paste_animation(bmain_dst, scene_dst, scene_src);
 
@@ -512,7 +511,7 @@ wmOperatorStatus sequencer_clipboard_paste_exec(bContext *C, wmOperator *op)
         seq::must_render_strip(seq::query_all_strips(&nseqbase), &istrip))
     {
       strip_mean_pos += static_cast<int2>(
-          seq::image_transform_origin_offset_pixelspace_get(scene, &istrip));
+          seq::image_transform_origin_preview_offset_get(scene, &istrip));
       image_strip_count++;
     }
   }
@@ -529,7 +528,7 @@ wmOperatorStatus sequencer_clipboard_paste_exec(bContext *C, wmOperator *op)
     {
       StripTransform *transform = istrip.data->transform;
       const float2 mirror = seq::image_transform_mirror_factor_get(&istrip);
-      const float2 origin = seq::image_transform_origin_offset_pixelspace_get(scene, &istrip);
+      const float2 origin = seq::image_transform_origin_preview_offset_get(scene, &istrip);
       transform->xofs = (view_mval[0] - (strip_mean_pos[0] - origin[0])) * mirror[0];
       transform->yofs = (view_mval[1] - (strip_mean_pos[1] - origin[1])) * mirror[1];
       seq::relations_invalidate_cache(scene, &istrip);

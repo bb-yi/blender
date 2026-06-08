@@ -9,6 +9,10 @@
 #include "node_shader_util.hh"
 #include "node_util.hh"
 
+#include "BLI_math_vector.hh"
+
+#include "FN_multi_function_registry.hh"
+
 #include "NOD_inverse_eval_params.hh"
 #include "NOD_math_functions.hh"
 #include "NOD_multi_function.hh"
@@ -27,7 +31,7 @@ namespace nodes::node_shader_vector_math_cc {
 static void sh_node_vector_math_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
-  b.add_input<decl::Vector>("Vector").min(-10000.0f).max(10000.0f).label_fn([](bNode node) {
+  b.add_input<decl::Vector>("Vector"_ustr).min(-10000.0f).max(10000.0f).label_fn([](bNode node) {
     switch (node.custom1) {
       case NODE_VECTOR_MATH_POWER:
         return IFACE_("Base");
@@ -35,7 +39,7 @@ static void sh_node_vector_math_declare(NodeDeclarationBuilder &b)
         return IFACE_("Vector");
     }
   });
-  b.add_input<decl::Vector>("Vector", "Vector_001")
+  b.add_input<decl::Vector>("Vector"_ustr, "Vector_001"_ustr)
       .min(-10000.0f)
       .max(10000.0f)
       .label_fn([](bNode node) {
@@ -54,7 +58,7 @@ static void sh_node_vector_math_declare(NodeDeclarationBuilder &b)
             return IFACE_("Vector");
         }
       });
-  b.add_input<decl::Vector>("Vector", "Vector_002")
+  b.add_input<decl::Vector>("Vector"_ustr, "Vector_002"_ustr)
       .min(-10000.0f)
       .max(10000.0f)
       .label_fn([](bNode node) {
@@ -69,8 +73,11 @@ static void sh_node_vector_math_declare(NodeDeclarationBuilder &b)
             return IFACE_("Vector");
         }
       });
-  b.add_input<decl::Float>("Scale").default_value(1.0f).min(-10000.0f).max(10000.0f).label_fn(
-      [](bNode node) {
+  b.add_input<decl::Float>("Scale"_ustr)
+      .default_value(1.0f)
+      .min(-10000.0f)
+      .max(10000.0f)
+      .label_fn([](bNode node) {
         switch (node.custom1) {
           case NODE_VECTOR_MATH_SCALE:
           default:
@@ -79,8 +86,8 @@ static void sh_node_vector_math_declare(NodeDeclarationBuilder &b)
             return IFACE_("IOR");
         }
       });
-  b.add_output<decl::Vector>("Vector");
-  b.add_output<decl::Float>("Value");
+  b.add_output<decl::Vector>("Vector"_ustr);
+  b.add_output<decl::Float>("Value"_ustr);
 }
 
 static void node_shader_buts_vect_math(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
@@ -88,23 +95,57 @@ static void node_shader_buts_vect_math(ui::Layout &layout, bContext * /*C*/, Poi
   layout.prop(ptr, "operation", ui::ITEM_R_SPLIT_EMPTY_NAME, "", ICON_NONE);
 }
 
+static void vector_math_input_defaults(bNode &node, const NodeVectorMathOperation mode)
+{
+  bNodeSocket *socket_2 = bke::node_find_socket(node, SOCK_IN, "Vector_001"_ustr);
+  BLI_assert(socket_2 != nullptr);
+  bNodeSocketValueVector *in_vector_2 = socket_2->default_value_typed<bNodeSocketValueVector>();
+
+  bNodeSocket *socket_3 = bke::node_find_socket(node, SOCK_IN, "Vector_002"_ustr);
+  BLI_assert(socket_3 != nullptr);
+  bNodeSocketValueVector *in_vector_3 = socket_3->default_value_typed<bNodeSocketValueVector>();
+
+  switch (mode) {
+    case NODE_VECTOR_MATH_MULTIPLY:
+    case NODE_VECTOR_MATH_DIVIDE:
+    case NODE_VECTOR_MATH_POWER:
+    case NODE_VECTOR_MATH_MODULO: {
+      for (int i = 0; i < in_vector_2->dimensions; i++) {
+        in_vector_2->value[i] = 1.0f;
+      }
+      break;
+    }
+    case NODE_VECTOR_MATH_MULTIPLY_ADD: {
+      BLI_assert(in_vector_2->dimensions == in_vector_3->dimensions);
+      for (int i = 0; i < in_vector_3->dimensions; i++) {
+        in_vector_2->value[i] = 1.0f;
+        in_vector_3->value[i] = 0.0f;
+      }
+      break;
+    }
+
+    default:
+      /* Use the default defined in the node declaration otherwise. */
+      break;
+  }
+}
+
 class SocketSearchOp {
  public:
-  std::string socket_name;
+  UString socket_name;
   NodeVectorMathOperation mode = NODE_VECTOR_MATH_ADD;
   void operator()(LinkSearchOpParams &params)
   {
-    bNode &node = params.add_node("ShaderNodeVectorMath");
+    bNode &node = params.add_node("ShaderNodeVectorMath"_ustr);
     node.custom1 = mode;
+    vector_math_input_defaults(node, mode);
     params.update_and_connect_available_socket(node, socket_name);
   }
 };
 
 static void sh_node_vector_math_gather_link_searches(GatherLinkSearchOpParams &params)
 {
-  if (!params.node_tree().typeinfo->validate_link(eNodeSocketDatatype(params.other_socket().type),
-                                                  SOCK_VECTOR))
-  {
+  if (!params.node_tree().typeinfo->validate_link(params.other_socket().type, SOCK_VECTOR)) {
     return;
   }
 
@@ -120,12 +161,12 @@ static void sh_node_vector_math_gather_link_searches(GatherLinkSearchOpParams &p
                                                 NODE_VECTOR_MATH_DOT_PRODUCT))
       {
         params.add_item(CTX_IFACE_(BLT_I18NCONTEXT_ID_NODETREE, item->name),
-                        SocketSearchOp{"Value", NodeVectorMathOperation(item->value)},
+                        SocketSearchOp{"Value"_ustr, NodeVectorMathOperation(item->value)},
                         weight);
       }
       else {
         params.add_item(CTX_IFACE_(BLT_I18NCONTEXT_ID_NODETREE, item->name),
-                        SocketSearchOp{"Vector", NodeVectorMathOperation(item->value)},
+                        SocketSearchOp{"Vector"_ustr, NodeVectorMathOperation(item->value)},
                         weight);
       }
     }
@@ -221,10 +262,10 @@ static void node_shader_update_vector_math(bNodeTree *ntree, bNode *node)
 {
   bNodeSocket *sockB = static_cast<bNodeSocket *>(BLI_findlink(&node->inputs, 1));
   bNodeSocket *sockC = static_cast<bNodeSocket *>(BLI_findlink(&node->inputs, 2));
-  bNodeSocket *sockScale = bke::node_find_socket(*node, SOCK_IN, "Scale");
+  bNodeSocket *sockScale = bke::node_find_socket(*node, SOCK_IN, "Scale"_ustr);
 
-  bNodeSocket *sockVector = bke::node_find_socket(*node, SOCK_OUT, "Vector");
-  bNodeSocket *sockValue = bke::node_find_socket(*node, SOCK_OUT, "Value");
+  bNodeSocket *sockVector = bke::node_find_socket(*node, SOCK_OUT, "Vector"_ustr);
+  bNodeSocket *sockValue = bke::node_find_socket(*node, SOCK_OUT, "Value"_ustr);
 
   bke::node_set_socket_availability(*ntree,
                                     *sockB,
@@ -265,81 +306,12 @@ static void node_shader_update_vector_math(bNodeTree *ntree, bNode *node)
 
 static const mf::MultiFunction *get_multi_function(const bNode &node)
 {
-  NodeVectorMathOperation operation = NodeVectorMathOperation(node.custom1);
-
-  const mf::MultiFunction *multi_fn = nullptr;
-
-  try_dispatch_float_math_fl3_fl3_to_fl3(
-      operation, [&](auto exec_preset, auto function, const FloatMathOperationInfo &info) {
-        static auto fn = mf::build::SI2_SO<float3, float3, float3>(
-            info.title_case_name.c_str(), function, exec_preset);
-        multi_fn = &fn;
-      });
-  if (multi_fn != nullptr) {
-    return multi_fn;
+  const NodeVectorMathOperation operation = NodeVectorMathOperation(node.custom1);
+  const FloatMathOperationInfo *info = get_float3_math_operation_info(operation);
+  if (!info) {
+    return nullptr;
   }
-
-  try_dispatch_float_math_fl3_fl3_fl3_to_fl3(
-      operation, [&](auto exec_preset, auto function, const FloatMathOperationInfo &info) {
-        static auto fn = mf::build::SI3_SO<float3, float3, float3, float3>(
-            info.title_case_name.c_str(), function, exec_preset);
-        multi_fn = &fn;
-      });
-  if (multi_fn != nullptr) {
-    return multi_fn;
-  }
-
-  try_dispatch_float_math_fl3_fl3_fl_to_fl3(
-      operation, [&](auto exec_preset, auto function, const FloatMathOperationInfo &info) {
-        static auto fn = mf::build::SI3_SO<float3, float3, float, float3>(
-            info.title_case_name.c_str(), function, exec_preset);
-        multi_fn = &fn;
-      });
-  if (multi_fn != nullptr) {
-    return multi_fn;
-  }
-
-  try_dispatch_float_math_fl3_fl3_to_fl(
-      operation, [&](auto exec_preset, auto function, const FloatMathOperationInfo &info) {
-        static auto fn = mf::build::SI2_SO<float3, float3, float>(
-            info.title_case_name.c_str(), function, exec_preset);
-        multi_fn = &fn;
-      });
-  if (multi_fn != nullptr) {
-    return multi_fn;
-  }
-
-  try_dispatch_float_math_fl3_fl_to_fl3(
-      operation, [&](auto exec_preset, auto function, const FloatMathOperationInfo &info) {
-        static auto fn = mf::build::SI2_SO<float3, float, float3>(
-            info.title_case_name.c_str(), function, exec_preset);
-        multi_fn = &fn;
-      });
-  if (multi_fn != nullptr) {
-    return multi_fn;
-  }
-
-  try_dispatch_float_math_fl3_to_fl3(
-      operation, [&](auto exec_preset, auto function, const FloatMathOperationInfo &info) {
-        static auto fn = mf::build::SI1_SO<float3, float3>(
-            info.title_case_name.c_str(), function, exec_preset);
-        multi_fn = &fn;
-      });
-  if (multi_fn != nullptr) {
-    return multi_fn;
-  }
-
-  try_dispatch_float_math_fl3_to_fl(
-      operation, [&](auto exec_preset, auto function, const FloatMathOperationInfo &info) {
-        static auto fn = mf::build::SI1_SO<float3, float>(
-            info.title_case_name.c_str(), function, exec_preset);
-        multi_fn = &fn;
-      });
-  if (multi_fn != nullptr) {
-    return multi_fn;
-  }
-
-  return nullptr;
+  return &fn::multi_function::registry::lookup(info->multi_function_name);
 }
 
 static void sh_node_vector_math_build_multi_function(NodeMultiFunctionBuilder &builder)
@@ -358,18 +330,18 @@ static void node_eval_elem(value_elem::ElemEvalParams &params)
     case NODE_VECTOR_MATH_MULTIPLY:
     case NODE_VECTOR_MATH_DIVIDE: {
       VectorElem output_elem;
-      output_elem.merge(params.get_input_elem<VectorElem>("Vector"));
-      output_elem.merge(params.get_input_elem<VectorElem>("Vector_001"));
-      params.set_output_elem("Vector", output_elem);
+      output_elem.merge(params.get_input_elem<VectorElem>("Vector"_ustr));
+      output_elem.merge(params.get_input_elem<VectorElem>("Vector_001"_ustr));
+      params.set_output_elem("Vector"_ustr, output_elem);
       break;
     }
     case NODE_VECTOR_MATH_SCALE: {
       VectorElem output_elem;
-      output_elem.merge(params.get_input_elem<VectorElem>("Vector"));
-      if (params.get_input_elem<FloatElem>("Scale")) {
+      output_elem.merge(params.get_input_elem<VectorElem>("Vector"_ustr));
+      if (params.get_input_elem<FloatElem>("Scale"_ustr)) {
         output_elem = VectorElem::all();
       }
-      params.set_output_elem("Vector", output_elem);
+      params.set_output_elem("Vector"_ustr, output_elem);
     }
     default:
       break;
@@ -385,7 +357,8 @@ static void node_eval_inverse_elem(value_elem::InverseElemEvalParams &params)
     case NODE_VECTOR_MATH_MULTIPLY:
     case NODE_VECTOR_MATH_DIVIDE:
     case NODE_VECTOR_MATH_SCALE: {
-      params.set_input_elem("Vector", params.get_output_elem<value_elem::VectorElem>("Vector"));
+      params.set_input_elem("Vector"_ustr,
+                            params.get_output_elem<value_elem::VectorElem>("Vector"_ustr));
       break;
     }
     default:
@@ -396,10 +369,10 @@ static void node_eval_inverse_elem(value_elem::InverseElemEvalParams &params)
 static void node_eval_inverse(inverse_eval::InverseEvalParams &params)
 {
   const NodeVectorMathOperation op = NodeVectorMathOperation(params.node.custom1);
-  const StringRef first_input_id = "Vector";
-  const StringRef second_input_id = "Vector_001";
-  const StringRef scale_input_id = "Scale";
-  const StringRef output_vector_id = "Vector";
+  const UString first_input_id = "Vector"_ustr;
+  const UString second_input_id = "Vector_001"_ustr;
+  const UString scale_input_id = "Scale"_ustr;
+  const UString output_vector_id = "Vector"_ustr;
   switch (op) {
     case NODE_VECTOR_MATH_ADD: {
       params.set_input(first_input_id,
@@ -589,7 +562,7 @@ void register_node_type_sh_vect_math()
 
   static bke::bNodeType ntype;
 
-  common_node_type_base(&ntype, "ShaderNodeVectorMath", SH_NODE_VECTOR_MATH);
+  common_node_type_base(&ntype, "ShaderNodeVectorMath"_ustr, SH_NODE_VECTOR_MATH);
   ntype.ui_name = "Vector Math";
   ntype.ui_description = "Perform vector math operation";
   ntype.enum_name_legacy = "VECT_MATH";

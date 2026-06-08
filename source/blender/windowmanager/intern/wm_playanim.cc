@@ -272,7 +272,7 @@ struct PlayState {
   ListBaseT<PlayAnimPict> picsbase;
 
   /** Current frame (picture). */
-  struct PlayAnimPict *picture;
+  PlayAnimPict *picture;
 
   /** Image size in pixels, set once at the start. */
   int2 ibuf_size;
@@ -436,7 +436,6 @@ struct PlayAnimPict {
   ImBuf *ibuf;
   MovieReader *anim;
   int frame;
-  int IB_flags;
 
 #ifdef USE_FRAME_CACHE_LIMIT
   /** Back pointer to the #LinkData node for this struct in the #g_frame_cache.pics list. */
@@ -551,16 +550,16 @@ static ImBuf *ibuf_from_picture(PlayAnimPict *pic)
     ibuf = pic->ibuf;
   }
   else if (pic->anim) {
-    ibuf = MOV_decode_frame(pic->anim, pic->frame, IMB_TC_NONE, IMB_PROXY_NONE);
+    ibuf = MOV_decode_frame(pic->anim, pic->frame, IMB_PROXY_NONE);
   }
   else if (pic->mem) {
     /* Use correct color-space here. */
     ibuf = IMB_load_image_from_memory(
-        pic->mem, pic->size, pic->IB_flags, pic->filepath, pic->filepath);
+        pic->mem, pic->size, ImBufFlags::ByteData, pic->filepath, pic->filepath);
   }
   else {
     /* Use correct color-space here. */
-    ibuf = IMB_load_image_from_filepath(pic->filepath, pic->IB_flags);
+    ibuf = IMB_load_image_from_filepath(pic->filepath, ImBufFlags::ByteData);
   }
 
   return ibuf;
@@ -592,111 +591,76 @@ static int pupdate_time()
   return (g_playanim.total_time < 0.0);
 }
 
-static void *ocio_transform_ibuf(const PlayDisplayContext &display_ctx,
-                                 ImBuf *ibuf,
-                                 bool *r_glsl_used,
-                                 gpu::TextureFormat *r_format,
-                                 eGPUDataFormat *r_data,
-                                 void **r_buffer_cache_handle)
+static const void *setup_draw_ocio_transform(const PlayDisplayContext &display_ctx,
+                                             const ImBuf *ibuf,
+                                             gpu::TextureFormat &r_texture_format,
+                                             eGPUDataFormat &r_data_format)
 {
-  void *display_buffer;
-  bool force_fallback = false;
-  *r_glsl_used = false;
-  force_fallback |= (ED_draw_imbuf_method(ibuf) != IMAGE_DRAW_METHOD_GLSL);
-  force_fallback |= (ibuf->dither != 0.0f);
-
-  /* Default. */
-  *r_format = gpu::TextureFormat::UNORM_8_8_8_8;
-  *r_data = GPU_DATA_UBYTE;
-
-  /* Fallback to CPU based color space conversion. */
-  if (force_fallback) {
-    *r_glsl_used = false;
-    display_buffer = nullptr;
+  r_texture_format = gpu::TextureFormat::Invalid;
+  r_data_format = GPU_DATA_FLOAT;
+  if (ibuf == nullptr || (ibuf->float_data() == nullptr && ibuf->byte_data() == nullptr)) {
+    return nullptr;
   }
-  else if (ibuf->float_buffer.data) {
-    display_buffer = ibuf->float_buffer.data;
 
-    *r_data = GPU_DATA_FLOAT;
+  const ColorSpace *colorspace = ibuf->float_data() ? ibuf->float_buffer.colorspace :
+                                                      ibuf->byte_buffer.colorspace;
+  if (!IMB_colormanagement_setup_glsl_draw_from_space(&display_ctx.view_settings,
+                                                      &display_ctx.display_settings,
+                                                      colorspace,
+                                                      ibuf->dither,
+                                                      false,
+                                                      false))
+  {
+    return nullptr;
+  }
+
+  if (ibuf->float_data()) {
+    r_data_format = GPU_DATA_FLOAT;
     if (ibuf->channels == 4) {
-      *r_format = gpu::TextureFormat::SFLOAT_16_16_16_16;
+      r_texture_format = gpu::TextureFormat::SFLOAT_16_16_16_16;
     }
     else if (ibuf->channels == 3) {
-      /* Alpha is implicitly 1. */
-      *r_format = gpu::TextureFormat::SFLOAT_16_16_16;
+      r_texture_format = gpu::TextureFormat::SFLOAT_16_16_16;
     }
-
-    if (ibuf->float_buffer.colorspace) {
-      *r_glsl_used = IMB_colormanagement_setup_glsl_draw_from_space(&display_ctx.view_settings,
-                                                                    &display_ctx.display_settings,
-                                                                    ibuf->float_buffer.colorspace,
-                                                                    ibuf->dither,
-                                                                    false,
-                                                                    false);
+    else if (ibuf->channels == 1) {
+      r_texture_format = gpu::TextureFormat::SFLOAT_16;
     }
-    else {
-      *r_glsl_used = IMB_colormanagement_setup_glsl_draw(
-          &display_ctx.view_settings, &display_ctx.display_settings, ibuf->dither, false);
-    }
-  }
-  else if (ibuf->byte_buffer.data) {
-    display_buffer = ibuf->byte_buffer.data;
-    *r_glsl_used = IMB_colormanagement_setup_glsl_draw_from_space(&display_ctx.view_settings,
-                                                                  &display_ctx.display_settings,
-                                                                  ibuf->byte_buffer.colorspace,
-                                                                  ibuf->dither,
-                                                                  false,
-                                                                  false);
-  }
-  else {
-    display_buffer = nullptr;
+    return ibuf->float_data();
   }
 
-  /* There is data to be displayed, but GLSL is not initialized
-   * properly, in this case we fallback to CPU-based display transform. */
-  if ((ibuf->byte_buffer.data || ibuf->float_buffer.data) && !*r_glsl_used) {
-    display_buffer = IMB_display_buffer_acquire(
-        ibuf, &display_ctx.view_settings, &display_ctx.display_settings, r_buffer_cache_handle);
-    *r_format = gpu::TextureFormat::UNORM_8_8_8_8;
-    *r_data = GPU_DATA_UBYTE;
-  }
-
-  return display_buffer;
+  r_data_format = GPU_DATA_UBYTE;
+  r_texture_format = gpu::TextureFormat::UNORM_8_8_8_8;
+  return ibuf->byte_data();
 }
 
 static void draw_display_buffer(const PlayDisplayContext &display_ctx,
-                                ImBuf *ibuf,
+                                const ImBuf *ibuf,
                                 const rctf *canvas,
                                 const bool draw_flip[2])
 {
   /* Format needs to be created prior to any #immBindShader call.
    * Do it here because OCIO binds its own shader. */
-  gpu::TextureFormat format;
-  eGPUDataFormat data;
-  bool glsl_used = false;
   GPUVertFormat *imm_format = immVertexFormat();
   uint pos = GPU_vertformat_attr_add(imm_format, "pos", gpu::VertAttrType::SFLOAT_32_32);
   uint texCoord = GPU_vertformat_attr_add(imm_format, "texCoord", gpu::VertAttrType::SFLOAT_32_32);
 
-  void *buffer_cache_handle = nullptr;
-  void *display_buffer = ocio_transform_ibuf(
-      display_ctx, ibuf, &glsl_used, &format, &data, &buffer_cache_handle);
+  gpu::TextureFormat texture_format;
+  eGPUDataFormat data_format;
+  const void *texture_data = setup_draw_ocio_transform(
+      display_ctx, ibuf, texture_format, data_format);
+  if (texture_data == nullptr) {
+    return;
+  }
 
   /* NOTE: This may fail, especially for large images that exceed the GPU's texture size limit.
    * Large images could be supported although this isn't so common for animation playback. */
   gpu::Texture *texture = GPU_texture_create_2d(
-      "display_buf", ibuf->x, ibuf->y, 1, format, GPU_TEXTURE_USAGE_SHADER_READ, nullptr);
+      "display_buf", ibuf->x, ibuf->y, 1, texture_format, GPU_TEXTURE_USAGE_SHADER_READ, nullptr);
 
   if (texture) {
-    GPU_texture_update(texture, data, display_buffer);
+    GPU_texture_update(texture, data_format, texture_data);
     GPU_texture_filter_mode(texture, false);
-
     GPU_texture_bind(texture, 0);
-  }
-
-  if (!glsl_used) {
-    immBindBuiltinProgram(GPU_SHADER_3D_IMAGE_COLOR);
-    immUniformColor3f(1.0f, 1.0f, 1.0f);
   }
 
   immBegin(GPU_PRIM_TRI_FAN, 4);
@@ -729,16 +693,7 @@ static void draw_display_buffer(const PlayDisplayContext &display_ctx,
     GPU_texture_free(texture);
   }
 
-  if (!glsl_used) {
-    immUnbindProgram();
-  }
-  else {
-    IMB_colormanagement_finish_glsl_draw();
-  }
-
-  if (buffer_cache_handle) {
-    IMB_display_buffer_release(buffer_cache_handle);
-  }
+  IMB_colormanagement_finish_glsl_draw();
 }
 
 /**
@@ -752,7 +707,7 @@ static void draw_display_buffer(const PlayDisplayContext &display_ctx,
 static void playanim_toscreen_ex(GhostData &ghost_data,
                                  const PlayDisplayContext &display_ctx,
                                  const PlayAnimPict *picture,
-                                 ImBuf *ibuf,
+                                 const ImBuf *ibuf,
                                  /* Run-time drawing arguments (not used on-load). */
                                  const bool show_status,
                                  const int font_id,
@@ -787,7 +742,7 @@ static void playanim_toscreen_ex(GhostData &ghost_data,
     CLAMP(offs_y, 0.0f, 1.0f);
 
     /* Checkerboard for case alpha. */
-    if (ibuf->planes == 32) {
+    if (ibuf->can_contain_alpha()) {
       GPU_blend(GPU_BLEND_ALPHA);
 
       imm_draw_box_checker_2d_ex(offs_x,
@@ -918,7 +873,7 @@ static void playanim_toscreen_ex(GhostData &ghost_data,
 static void playanim_toscreen_on_load(GhostData &ghost_data,
                                       const PlayDisplayContext &display_ctx,
                                       const PlayAnimPict *picture,
-                                      ImBuf *ibuf)
+                                      const ImBuf *ibuf)
 {
   const bool show_status = false;
   const int font_id = -1; /* Don't draw text. */
@@ -939,7 +894,7 @@ static void playanim_toscreen_on_load(GhostData &ghost_data,
                        frame_indicator_factor);
 }
 
-static void playanim_toscreen(PlayState &ps, const PlayAnimPict *picture, ImBuf *ibuf)
+static void playanim_toscreen(PlayState &ps, const PlayAnimPict *picture, const ImBuf *ibuf)
 {
   float frame_indicator_factor = -1.0f;
   if (ps.show_frame_indicator) {
@@ -949,8 +904,7 @@ static void playanim_toscreen(PlayState &ps, const PlayAnimPict *picture, ImBuf 
       frame_indicator_factor = float(double(picture->frame) / double(frame_range));
     }
     else {
-      BLI_assert_msg(BLI_listbase_is_single(&ps.picsbase),
-                     "Multiple frames without a valid range!");
+      BLI_assert_msg(ps.picsbase.is_single(), "Multiple frames without a valid range!");
     }
   }
 
@@ -982,23 +936,22 @@ static void build_pict_list_from_anim(ListBaseT<PlayAnimPict> &picsbase,
                                       const int frame_offset)
 {
   /* OCIO_TODO: support different input color space. */
-  MovieReader *anim = MOV_open_file(filepath_first, IB_byte_data, 0, false, nullptr);
+  MovieReader *anim = MOV_open_file(filepath_first, ImBufFlags::Zero, 0, false, nullptr);
   if (anim == nullptr) {
     CLOG_WARN(&LOG, "couldn't open anim '%s'", filepath_first);
     return;
   }
 
-  ImBuf *ibuf = MOV_decode_frame(anim, 0, IMB_TC_NONE, IMB_PROXY_NONE);
+  ImBuf *ibuf = MOV_decode_frame(anim, 0, IMB_PROXY_NONE);
   if (ibuf) {
     playanim_toscreen_on_load(ghost_data, display_ctx, nullptr, ibuf);
     IMB_freeImBuf(ibuf);
   }
 
-  for (int pic = 0; pic < MOV_get_duration_frames(anim, IMB_TC_NONE); pic++) {
+  for (int pic = 0; pic < MOV_get_duration_frames(anim); pic++) {
     PlayAnimPict *picture = MEM_new_zeroed<PlayAnimPict>("Pict");
     picture->anim = anim;
     picture->frame = pic + frame_offset;
-    picture->IB_flags = IB_byte_data;
     picture->filepath = BLI_sprintfN("%s : %4.d", filepath_first, pic + 1);
     BLI_addtail(&picsbase, picture);
   }
@@ -1065,7 +1018,6 @@ static void build_pict_list_from_image_sequence(ListBaseT<PlayAnimPict> &picsbas
 
     PlayAnimPict *picture = MEM_new_zeroed<PlayAnimPict>("picture");
     picture->size = size;
-    picture->IB_flags = IB_byte_data;
     picture->mem = static_cast<uchar *>(mem);
     picture->filepath = BLI_strdup(filepath);
     picture->error_message = error_message;
@@ -1487,7 +1439,7 @@ static bool ghost_event_proc(const GHOST_IEvent *ghost_event, GHOST_TUserDataPtr
             if (ps.ghost_data.qual & WS_QUAL_SHIFT) {
               if (ps.picture && ps.picture->ibuf) {
                 printf(" Name: %s | Speed: %.2f frames/s\n",
-                       ps.picture->ibuf->filepath,
+                       ps.picture->ibuf->filepath.c_str(),
                        ps.frame_step / g_playanim.swap_time);
               }
             }
@@ -1754,9 +1706,7 @@ static GHOST_IWindow *playanim_window_open(
   GHOST_GPUSettings gpu_settings = {0};
   const GPUBackendType gpu_backend = GPU_backend_type_selection_get();
   gpu_settings.context_type = wm_ghost_drawing_context_type(gpu_backend);
-  gpu_settings.preferred_device.index = U.gpu_preferred_index;
-  gpu_settings.preferred_device.vendor_id = U.gpu_preferred_vendor_id;
-  gpu_settings.preferred_device.device_id = U.gpu_preferred_device_id;
+  gpu_settings.preferred_device = GPU_backend_preferred_device_get();
   if (GPU_backend_vsync_is_overridden()) {
     gpu_settings.flags |= GHOST_gpuVSyncIsOverridden;
     gpu_settings.vsync = GHOST_TVSyncModes(GPU_backend_vsync_get());
@@ -1987,9 +1937,9 @@ static std::optional<int> wm_main_playanim_intern(int argc, const char **argv, P
         /* OCIO_TODO: support different input color spaces. */
         /* Image buffer is used for display, which does support displaying any buffer from any
          * colorspace. Skip colorspace conversions in the movie module to improve performance. */
-        MovieReader *anim = MOV_open_file(filepath, IB_byte_data, 0, true, nullptr);
+        MovieReader *anim = MOV_open_file(filepath, ImBufFlags::Zero, 0, true, nullptr);
         if (anim) {
-          ibuf = MOV_decode_frame(anim, 0, IMB_TC_NONE, IMB_PROXY_NONE);
+          ibuf = MOV_decode_frame(anim, 0, IMB_PROXY_NONE);
           MOV_close(anim);
           anim = nullptr;
         }
@@ -2004,7 +1954,7 @@ static std::optional<int> wm_main_playanim_intern(int argc, const char **argv, P
 
       if (ibuf == nullptr) {
         /* OCIO_TODO: support different input color space. */
-        ibuf = IMB_load_image_from_filepath(filepath, IB_byte_data);
+        ibuf = IMB_load_image_from_filepath(filepath, ImBufFlags::ByteData);
       }
 
       if (ibuf == nullptr) {
@@ -2217,7 +2167,7 @@ static std::optional<int> wm_main_playanim_intern(int argc, const char **argv, P
           frame_cache_limit_apply(ibuf);
 #endif /* USE_FRAME_CACHE_LIMIT */
 
-          STRNCPY(ibuf->filepath, ps.picture->filepath);
+          ibuf->filepath = ps.picture->filepath;
           ibuf->fileframe = ps.picture->frame;
         }
 
@@ -2324,7 +2274,7 @@ static std::optional<int> wm_main_playanim_intern(int argc, const char **argv, P
 #endif
 
 #ifdef USE_FRAME_CACHE_LIMIT
-  BLI_freelistN(&g_frame_cache.pics);
+  g_frame_cache.pics.free_no_destruct();
   g_frame_cache.pics_len = 0;
   g_frame_cache.pics_size_in_memory = 0;
 #endif

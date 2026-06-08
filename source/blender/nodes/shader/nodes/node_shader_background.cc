@@ -10,17 +10,20 @@ namespace nodes::node_shader_background_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Color>("Color")
+  const bNodeTree *ntree = b.tree_or_null();
+  const bool is_gpu_internal = ntree && (ntree->flag & NTREE_IS_GPU_SHADER_INTERNAL);
+
+  b.add_input<decl::Color>("Color"_ustr)
       .default_value({0.8f, 0.8f, 0.8f, 1.0f})
       .description("Color of the emitted light");
-  b.add_input<decl::Float>("Strength")
+  b.add_input<decl::Float>("Strength"_ustr)
       .default_value(1.0f)
       .min(0.0f)
       .max(1000000.0f)
       .description("Strength of the emitted light")
       .translation_context(BLT_I18NCONTEXT_AMOUNT);
-  b.add_input<decl::Float>("Weight").available(false);
-  b.add_output<decl::Shader>("Background");
+  b.add_input<decl::Float>("Weight"_ustr).available(is_gpu_internal);
+  b.add_output<decl::Shader>("Background"_ustr);
 }
 
 static int node_shader_gpu_background(GPUMaterial *mat,
@@ -41,7 +44,7 @@ void register_node_type_sh_background()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeBackground", SH_NODE_BACKGROUND);
+  sh_node_type_base(&ntype, "ShaderNodeBackground"_ustr, SH_NODE_BACKGROUND);
   ntype.ui_name = "Background";
   ntype.ui_description =
       "Add background light emission.\nNote: This node should only be used for the world surface "

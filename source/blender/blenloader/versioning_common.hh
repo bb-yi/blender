@@ -197,6 +197,8 @@ void version_node_id(bNodeTree *ntree, int node_type, const char *new_name);
  */
 void version_node_socket_id_delim(bNodeSocket *socket);
 
+void version_node_socket_identifier_set(bNodeSocket &socket, StringRefNull identifier);
+
 bNodeSocket *version_node_add_socket_if_not_exist(bNodeTree *ntree,
                                                   bNode *node,
                                                   int in_out,
@@ -206,6 +208,15 @@ bNodeSocket *version_node_add_socket_if_not_exist(bNodeTree *ntree,
                                                   const char *name);
 
 void version_node_tree_clear_interface(bNodeTree &ntree);
+
+/**
+ * Change socket identifiers so that everything after the separator is removed for available
+ * sockets.
+ */
+void version_socket_identifier_suffixes_for_dynamic_types(
+    const ListBaseT<bNodeSocket> &sockets,
+    const char *separator,
+    const std::optional<int> total = std::nullopt);
 
 /**
  * The versioning code generally expects `SOCK_IS_LINKED` to be set correctly. This function

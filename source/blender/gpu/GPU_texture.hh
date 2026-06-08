@@ -16,6 +16,7 @@
 
 #include "BLI_assert.h"
 #include "BLI_enum_flags.hh"
+#include "BLI_index_range.hh"
 
 #include "GPU_format.hh"
 
@@ -127,7 +128,7 @@ enum class TextureFormat : uint8_t {
 #undef DECLARE
 };
 
-inline constexpr DataFormat to_data_format(TextureFormat format)
+constexpr DataFormat to_data_format(TextureFormat format)
 {
   return DataFormat(int(format));
 }
@@ -198,7 +199,7 @@ enum class TextureTargetFormat : uint8_t {
 #undef DECLARE
 };
 
-inline constexpr TextureFormat to_texture_format(TextureTargetFormat format)
+constexpr TextureFormat to_texture_format(TextureTargetFormat format)
 {
   return TextureFormat(int(format));
 }
@@ -263,7 +264,7 @@ enum class TextureWriteFormat : uint8_t {
 #undef DECLARE
 };
 
-inline constexpr TextureFormat to_texture_format(TextureWriteFormat format)
+constexpr TextureFormat to_texture_format(TextureWriteFormat format)
 {
   return TextureFormat(int(format));
 }
@@ -306,10 +307,13 @@ enum GPUSamplerFiltering {
    * Enable Anisotropic filtering. This only has effect if `GPU_SAMPLER_FILTERING_MIPMAP` is set.
    * The filtered result is implementation dependent.
    *
-   * The maximum amount of samples is always set to its maximum possible value and can't be
-   * changed, except by the user through the user preferences, see the use of U.anisotropic_filter.
+   * 3 bits are reserved to store the anisotropic option. When all bits are 0 it means that
+   * anisotropic filtering is off.
    */
-  GPU_SAMPLER_FILTERING_ANISOTROPIC = (1 << 2),
+  GPU_SAMPLER_FILTERING_ANISOTROPIC_2 = (2 << 2),
+  GPU_SAMPLER_FILTERING_ANISOTROPIC_4 = (3 << 2),
+  GPU_SAMPLER_FILTERING_ANISOTROPIC_8 = (4 << 2),
+  GPU_SAMPLER_FILTERING_ANISOTROPIC_16 = (5 << 2),
 };
 
 ENUM_OPERATORS(GPUSamplerFiltering)
@@ -317,8 +321,58 @@ ENUM_OPERATORS(GPUSamplerFiltering)
 /** The number of every possible filtering configuration. */
 static const int GPU_SAMPLER_FILTERING_TYPES_COUNT = (GPU_SAMPLER_FILTERING_LINEAR |
                                                       GPU_SAMPLER_FILTERING_MIPMAP |
-                                                      GPU_SAMPLER_FILTERING_ANISOTROPIC) +
+                                                      GPU_SAMPLER_FILTERING_ANISOTROPIC_16) +
                                                      1;
+/** Bit mask for selecting the GPU_SAMPLER_FILTERING_ANISOTROPIC_* bits. */
+static constexpr GPUSamplerFiltering GPU_SAMPLER_FILTERING_ANISOTROPIC_MASK =
+    (GPU_SAMPLER_FILTERING_ANISOTROPIC_2 | GPU_SAMPLER_FILTERING_ANISOTROPIC_4 |
+     GPU_SAMPLER_FILTERING_ANISOTROPIC_8 | GPU_SAMPLER_FILTERING_ANISOTROPIC_16);
+/** Special flag where materials can request the desire to turn on/off anisotropic filtering. */
+static constexpr GPUSamplerFiltering GPU_SAMPLER_FILTERING_ANISOTROPIC_ENABLE =
+    (GPU_SAMPLER_FILTERING_ANISOTROPIC_2 | GPU_SAMPLER_FILTERING_ANISOTROPIC_4 |
+     GPU_SAMPLER_FILTERING_ANISOTROPIC_8 | GPU_SAMPLER_FILTERING_ANISOTROPIC_16);
+
+/**
+ * Convenience function to create a GPUSamplerFiltering with only the anisotropic filtering flags
+ * set that represents the given samples.
+ */
+static inline GPUSamplerFiltering GPU_anisotropic_filtering_flags(int anisotropic_samples)
+{
+  if (anisotropic_samples <= 1) {
+    return GPU_SAMPLER_FILTERING_DEFAULT;
+  }
+
+  if (IndexRange::from_begin_end_inclusive(2, 3).contains(anisotropic_samples)) {
+    return GPU_SAMPLER_FILTERING_ANISOTROPIC_2;
+  }
+  else if (IndexRange::from_begin_end_inclusive(4, 7).contains(anisotropic_samples)) {
+    return GPU_SAMPLER_FILTERING_ANISOTROPIC_4;
+  }
+  else if (IndexRange::from_begin_end_inclusive(8, 15).contains(anisotropic_samples)) {
+    return GPU_SAMPLER_FILTERING_ANISOTROPIC_8;
+  }
+
+  /* 16 or higher. */
+  return GPU_SAMPLER_FILTERING_ANISOTROPIC_16;
+}
+
+static inline int GPU_anisotropic_samples_get(GPUSamplerFiltering filtering_flags)
+{
+  switch (filtering_flags & GPU_SAMPLER_FILTERING_ANISOTROPIC_MASK) {
+    case GPU_SAMPLER_FILTERING_ANISOTROPIC_2:
+      return 2;
+    case GPU_SAMPLER_FILTERING_ANISOTROPIC_4:
+      return 4;
+    case GPU_SAMPLER_FILTERING_ANISOTROPIC_8:
+      return 8;
+    case GPU_SAMPLER_FILTERING_ANISOTROPIC_16:
+      return 16;
+    default:
+      return 1;
+  }
+  BLI_assert_unreachable();
+  return 1;
+}
 
 /**
  * The `GPUSamplerExtendMode` specifies how the texture will be extrapolated for out-of-bound
@@ -569,8 +623,25 @@ struct GPUSamplerState {
       serialized_parameters += "mipmap_";
     }
 
-    if (this->filtering & GPU_SAMPLER_FILTERING_ANISOTROPIC) {
-      serialized_parameters += "anisotropic_";
+    if ((this->filtering & GPU_SAMPLER_FILTERING_ANISOTROPIC_MASK) ==
+        GPU_SAMPLER_FILTERING_ANISOTROPIC_2)
+    {
+      serialized_parameters += "anisotropic2x_";
+    }
+    else if ((this->filtering & GPU_SAMPLER_FILTERING_ANISOTROPIC_MASK) ==
+             GPU_SAMPLER_FILTERING_ANISOTROPIC_4)
+    {
+      serialized_parameters += "anisotropic4x_";
+    }
+    else if ((this->filtering & GPU_SAMPLER_FILTERING_ANISOTROPIC_MASK) ==
+             GPU_SAMPLER_FILTERING_ANISOTROPIC_8)
+    {
+      serialized_parameters += "anisotropic8x_";
+    }
+    else if ((this->filtering & GPU_SAMPLER_FILTERING_ANISOTROPIC_MASK) ==
+             GPU_SAMPLER_FILTERING_ANISOTROPIC_16)
+    {
+      serialized_parameters += "anisotropic16x_";
     }
 
     switch (this->extend_x) {
@@ -943,17 +1014,33 @@ void GPU_texture_copy(gpu::Texture *dst, gpu::Texture *src);
 
 /**
  * Update the mip-map levels using the mip 0 data.
+ *
  * \note this doesn't work on depth or compressed textures.
+ * \note post-condition: All bound images could be unbound.
  */
 void GPU_texture_update_mipmap_chain(gpu::Texture *texture);
 
 /**
- * Read the content of a \a mip_level from a \a tex and returns a copy of its data.
+ * Read the content of a \a mip_level from a \a texture and returns a copy of its data.
+ * Use #MEM_delete to free the data.
+ *
  * \warning the texture must have been created using GPU_TEXTURE_USAGE_HOST_READ.
  * \note synchronization of shader writes via `imageStore()` needs to be explicitly done using
  * `GPU_memory_barrier(GPU_BARRIER_TEXTURE_FETCH)`.
  */
 void *GPU_texture_read(gpu::Texture *texture, eGPUDataFormat data_format, int mip_level);
+
+/**
+ * Read the content of a \a mip_level from a \a texture into user-provided memory buffer \a dst.
+ */
+void GPU_texture_read(gpu::Texture *texture, eGPUDataFormat data_format, int mip_level, void *dst);
+
+/**
+ * Calculate memory size in bytes needed to read a \a mip_level from a \a texture.
+ */
+size_t GPU_texture_read_size_get(const gpu::Texture *texture,
+                                 eGPUDataFormat data_format,
+                                 int mip_level);
 
 /** \} */
 
@@ -1025,7 +1112,7 @@ void GPU_texture_mipmap_mode(gpu::Texture *texture, bool use_mipmap, bool use_fi
 
 /**
  * Set anisotropic filter usage. Filter sample count is determined globally by
- * `U.anisotropic_filter` and updated when `GPU_samplers_update` is called.
+ * `U.anisotropic_filter`.
  */
 void GPU_texture_anisotropic_filter(gpu::Texture *texture, bool use_aniso);
 
@@ -1124,6 +1211,11 @@ bool GPU_texture_is_array(const gpu::Texture *texture);
 bool GPU_texture_is_cube(const gpu::Texture *texture);
 
 /**
+ * Return true if the texture was created with GPU_texture_create_view.
+ */
+bool GPU_texture_is_view(const gpu::Texture *texture);
+
+/**
  * Return true if the texture format has a depth component.
  */
 bool GPU_texture_has_depth_format(const gpu::Texture *texture);
@@ -1216,11 +1308,6 @@ const char *GPU_texture_format_name(gpu::TextureFormat format);
  * memory back and forth depending on usage.
  */
 unsigned int GPU_texture_memory_usage_get();
-
-/**
- * Update sampler states depending on user settings.
- */
-void GPU_samplers_update();
 
 /** \} */
 

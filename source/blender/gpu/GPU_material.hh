@@ -108,6 +108,9 @@ enum eGPUMaterialFlag {
   GPU_MATFLAG_SCENE_COLOR = (1 << 27),
   GPU_MATFLAG_SCREENSPACE_INFO = (1 << 28),
 
+  /* Signals scene time use. */
+  GPU_MATFLAG_SCENE_TIME = (1 << 25),
+
   /* Tells the render engine the material was just compiled or updated. */
   GPU_MATFLAG_UPDATED = (1 << 29),
   /* Signals the material needs Eevee light-probe resources without enabling full lighting. */
@@ -384,17 +387,32 @@ struct GPUNodeStack {
 
   bool socket_not_zero() const
   {
-    return this->link || (clamp_f(this->vec[0], 0.0f, 1.0f) > 1e-5f);
+    return this->link || (saturate_f(this->vec[0]) > near_zero);
   }
 
   bool socket_not_one() const
   {
-    return this->link || (clamp_f(this->vec[0], 0.0f, 1.0f) < 1.0f - 1e-5f);
+    return this->link || (saturate_f(this->vec[0]) < near_one);
   }
 
-  bool socket_is_one() const
+  bool socket_not_black() const
   {
-    return !this->link && (clamp_f(this->vec[0], 0.0f, 1.0f) > 0.9999f);
+    return this->link || saturate_f(this->vec[0]) > near_zero ||
+           saturate_f(this->vec[1]) > near_zero || saturate_f(this->vec[2]) > near_zero;
+  }
+
+  bool socket_not_white() const
+  {
+    return this->link || saturate_f(this->vec[0]) < near_one ||
+           saturate_f(this->vec[1]) < near_one || saturate_f(this->vec[2]) < near_one;
+  }
+
+ private:
+  static constexpr float near_zero = 1e-5f;
+  static constexpr float near_one = 1.0f - 1e-5f;
+  float saturate_f(const float f) const
+  {
+    return clamp_f(f, 0.0f, 1.0f);
   }
 };
 
@@ -562,5 +580,21 @@ bool GPU_material_is_time_dependent(const GPUMaterial *mat);
 GHash *GPU_uniform_attr_list_hash_new(const char *info);
 void GPU_uniform_attr_list_copy(GPUUniformAttrList *dest, const GPUUniformAttrList *src);
 void GPU_uniform_attr_list_free(GPUUniformAttrList *set);
+
+/* Returns the GPU node stack of the input with the given identifier in the given node within the
+ * given inputs stack array. */
+GPUNodeStack &GPU_node_get_input(const bNode &node, GPUNodeStack inputs[], StringRef identifier);
+
+/* Returns the GPU node stack of the output with the given identifier in the given node within the
+ * given output stack array. */
+GPUNodeStack &GPU_node_get_output(const bNode &node, GPUNodeStack outputs[], StringRef identifier);
+
+/* Returns the GPU node link of the input with the given identifier in the given node within the
+ * given inputs stack array, if the input is not linked, a uniform link carrying the value of the
+ * input will be created and returned. It is expected that the caller will use the returned link in
+ * a GPU material, otherwise, the link may not be properly freed. */
+GPUNodeLink *GPU_node_get_input_link(const bNode &node,
+                                     GPUNodeStack inputs[],
+                                     StringRef identifier);
 
 }  // namespace blender

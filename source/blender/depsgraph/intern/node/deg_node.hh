@@ -73,6 +73,8 @@ enum class NodeType {
   GEOMETRY,
   /* Sequencer Component (Scene Only) */
   SEQUENCER,
+  /* Compositor Component (Scene Only) */
+  COMPOSITOR,
   /* Component which contains all operations needed for layer collections
    * evaluation. */
   LAYER_COLLECTIONS,

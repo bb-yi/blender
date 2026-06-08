@@ -15,20 +15,20 @@ namespace blender::nodes::node_geo_import_vdb {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::String>("Path")
+  b.add_input<decl::String>("Path"_ustr)
       .subtype(PROP_FILEPATH)
       .path_filter("*.vdb")
       .optional_label()
       .description("Path to a OpenVDB file");
 
-  b.add_output<decl::Geometry>("Volume");
+  b.add_output<decl::Geometry>("Volume"_ustr);
 }
 
 static void node_geo_exec(GeoNodeExecParams params)
 {
 #ifdef WITH_OPENVDB
   const std::optional<std::string> path = params.ensure_absolute_path(
-      params.extract_input<std::string>("Path"));
+      params.extract_input<std::string>("Path"_ustr));
   if (!path) {
     params.set_default_remaining_outputs();
     return;
@@ -49,7 +49,7 @@ static void node_geo_exec(GeoNodeExecParams params)
     BKE_volume_grid_add(volume, grid.get());
   }
 
-  params.set_output("Volume", GeometrySet::from_volume(volume));
+  params.set_output("Volume"_ustr, GeometrySet::from_volume(volume));
 #else
   node_geo_exec_with_missing_openvdb(params);
 #endif
@@ -59,7 +59,7 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  geo_node_type_base(&ntype, "GeometryNodeImportVDB");
+  geo_node_type_base(&ntype, "GeometryNodeImportVDB"_ustr);
   ntype.ui_name = "Import VDB";
   ntype.ui_description = "Import volume data from a .vdb file";
   ntype.nclass = NODE_CLASS_INPUT;

@@ -2,6 +2,8 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+#pragma once
+
 #define WB_RESOLVE_GROUP_SIZE 8
 
 /* Resources bind slots. */

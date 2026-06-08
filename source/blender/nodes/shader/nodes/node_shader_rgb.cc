@@ -18,7 +18,7 @@ namespace nodes::node_shader_rgb_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_output<decl::Color>("Color")
+  b.add_output<decl::Color>("Color"_ustr)
       .default_value({0.5f, 0.5f, 0.5f, 1.0f})
       .custom_draw([](CustomSocketDrawParams &params) {
         params.layout.alignment_set(ui::LayoutAlign::Expand);
@@ -57,7 +57,7 @@ void register_node_type_sh_rgb()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeRGB", SH_NODE_RGB);
+  sh_node_type_base(&ntype, "ShaderNodeRGB"_ustr, SH_NODE_RGB);
   ntype.ui_name = "Color";
   ntype.ui_description = "A color picker";
   ntype.enum_name_legacy = "RGB";

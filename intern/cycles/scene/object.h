@@ -114,7 +114,7 @@ class Object : public Node {
   int get_device_index() const;
 
   /* Compute step size from attributes, shaders, transforms. */
-  float compute_volume_step_size() const;
+  float compute_volume_step_size(Progress &progress) const;
 
   /* Check whether this object can be used as light-emissive. */
   bool usable_as_light() const;
@@ -166,6 +166,8 @@ class ObjectManager {
 
   ObjectManager();
   ~ObjectManager();
+
+  void update_interactive_motion(Scene *scene);
 
   void device_update(Device *device, DeviceScene *dscene, Scene *scene, Progress &progress);
   void device_update_transforms(DeviceScene *dscene, Scene *scene, Progress &progress);

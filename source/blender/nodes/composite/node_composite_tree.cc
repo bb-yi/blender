@@ -44,35 +44,35 @@ static void composite_get_from_context(const bContext *C,
 {
   const SpaceNode *snode = CTX_wm_space_node(C);
   if (snode->node_tree_sub_type == SNODE_COMPOSITOR_SEQUENCER) {
+    *r_ntree = nullptr;
     Scene *sequencer_scene = CTX_data_sequencer_scene(C);
     if (!sequencer_scene) {
-      *r_ntree = nullptr;
-      return;
-    }
-    Editing *ed = seq::editing_get(sequencer_scene);
-    if (!ed) {
-      *r_ntree = nullptr;
       return;
     }
     Strip *strip = seq::select_active_get(sequencer_scene);
     if (!strip) {
-      *r_ntree = nullptr;
       return;
     }
-    StripModifierData *smd = seq::modifier_get_active(strip);
-    if (!smd) {
-      *r_ntree = nullptr;
-      return;
+
+    bNodeTree *node_group = nullptr;
+    if (strip->type == STRIP_TYPE_COMPOSITOR && strip->effectdata) {
+      CompositorEffectVars *comp_data = static_cast<CompositorEffectVars *>(strip->effectdata);
+      node_group = comp_data->node_group;
     }
-    if (smd->type != eSeqModifierType_Compositor) {
-      *r_ntree = nullptr;
-      return;
+    else {
+      StripModifierData *smd = seq::modifier_get_active(strip);
+      if (smd && smd->type == eSeqModifierType_Compositor) {
+        SequencerCompositorModifierData *scmd =
+            reinterpret_cast<SequencerCompositorModifierData *>(smd);
+        node_group = scmd->node_group;
+      }
     }
-    SequencerCompositorModifierData *scmd = reinterpret_cast<SequencerCompositorModifierData *>(
-        smd);
-    *r_from = nullptr;
-    *r_id = &sequencer_scene->id;
-    *r_ntree = scmd->node_group;
+
+    if (node_group) {
+      *r_from = nullptr;
+      *r_id = &sequencer_scene->id;
+      *r_ntree = node_group;
+    }
     return;
   }
 
@@ -113,9 +113,14 @@ static bool composite_node_tree_socket_type_valid(bke::bNodeTreeType * /*ntreety
                                                                SOCK_INT,
                                                                SOCK_BOOLEAN,
                                                                SOCK_VECTOR,
+                                                               SOCK_INT_VECTOR,
                                                                SOCK_RGBA,
+                                                               SOCK_MATRIX,
                                                                SOCK_MENU,
-                                                               SOCK_STRING);
+                                                               SOCK_ROTATION,
+                                                               SOCK_STRING,
+                                                               SOCK_OBJECT,
+                                                               SOCK_FONT);
 }
 
 /**
@@ -125,9 +130,30 @@ static bool composite_node_tree_socket_type_valid(bke::bNodeTreeType * /*ntreety
 static bool composite_validate_link(eNodeSocketDatatype from_type, eNodeSocketDatatype to_type)
 {
   /* Basic math types can be implicitly converted to each other. */
-  if (ELEM(from_type, SOCK_FLOAT, SOCK_VECTOR, SOCK_RGBA, SOCK_BOOLEAN, SOCK_INT) &&
-      ELEM(to_type, SOCK_FLOAT, SOCK_VECTOR, SOCK_RGBA, SOCK_BOOLEAN, SOCK_INT))
+  if (ELEM(from_type,
+           SOCK_FLOAT,
+           SOCK_VECTOR,
+           SOCK_INT_VECTOR,
+           SOCK_RGBA,
+           SOCK_BOOLEAN,
+           SOCK_INT) &&
+      ELEM(to_type, SOCK_FLOAT, SOCK_VECTOR, SOCK_INT_VECTOR, SOCK_RGBA, SOCK_BOOLEAN, SOCK_INT))
   {
+    return true;
+  }
+
+  if (ELEM(from_type, SOCK_FLOAT, SOCK_VECTOR) && to_type == SOCK_ROTATION) {
+    return true;
+  }
+
+  if (from_type == SOCK_MATRIX && to_type == SOCK_ROTATION) {
+    return true;
+  }
+  if (from_type == SOCK_ROTATION && to_type == SOCK_MATRIX) {
+    return true;
+  }
+
+  if (from_type == SOCK_ROTATION && to_type == SOCK_VECTOR) {
     return true;
   }
 
@@ -141,11 +167,12 @@ void register_node_tree_type_cmp()
   bke::bNodeTreeType *tt = ntreeType_Composite = MEM_new<bke::bNodeTreeType>(__func__);
 
   tt->type = NTREE_COMPOSIT;
-  tt->idname = "CompositorNodeTree";
-  tt->group_idname = "CompositorNodeGroup";
+  tt->idname = "CompositorNodeTree"_ustr;
+  tt->group_idname = "CompositorNodeGroup"_ustr;
   tt->ui_name = N_("Compositor");
   tt->ui_icon = ICON_NODE_COMPOSITING;
   tt->ui_description = N_("Create effects and post-process renders, images, and the 3D Viewport");
+  tt->asset_catalog_path_prefix = "Compositing";
 
   tt->foreach_nodeclass = foreach_nodeclass;
   tt->update = update;

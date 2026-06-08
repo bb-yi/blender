@@ -33,7 +33,7 @@ blender::World *World::default_world_get()
   if (default_world_ == nullptr) {
     default_world_ = BKE_id_new_nomain<blender::World>("EEVEE default world");
 
-    BLI_listbase_clear(&default_world_->gpumaterial);
+    default_world_->gpumaterial.clear_no_delete();
   }
   return default_world_;
 }
@@ -68,12 +68,9 @@ void World::sync()
   bool has_update = false;
   uses_scene_time_ = false;
 
-  WorldHandle wo_handle = {0};
-  if (inst_.scene->world != nullptr) {
-    /* Detect world update before overriding it. */
-    wo_handle = inst_.sync.sync_world(*inst_.scene->world);
-    has_update = wo_handle.recalc != 0;
-  }
+  WorldHandle wo_handle = {inst_.scene->world ? inst_.get_recalc_flags(*inst_.scene->world) : 0};
+  /* Detect world update before overriding it. */
+  has_update = wo_handle.recalc != 0;
 
   bool wait_ready = true;  // TODO !inst_.is_image_render;
 

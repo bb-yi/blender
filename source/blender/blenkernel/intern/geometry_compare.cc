@@ -13,15 +13,20 @@
 #include "BKE_anonymous_attribute_id.hh"
 #include "BKE_attribute.hh"
 #include "BKE_attribute_math.hh"
+#include "BKE_grease_pencil.hh"
 #include "BKE_mesh.hh"
 #include "BKE_mesh_mapping.hh"
 
 #include "BKE_geometry_compare.hh"
 
+#include "CLG_log.h"
+
 #include "DNA_curve_types.h"
 #include "DNA_lattice_types.h"
 
 namespace blender::bke::compare_geometry {
+
+static CLG_LogRef LOG = {"geometry.compare"};
 
 enum class GeoMismatch : int8_t {
   NumPoints,        /* The number of points is different. */
@@ -34,12 +39,17 @@ enum class GeoMismatch : int8_t {
   CornerAttributes, /* Some values of the corner attributes are different. */
   FaceAttributes,   /* Some values of the face attributes are different. */
   CurveAttributes,  /* Some values of the curve attributes are different. */
+  LayerAttributes,  /* Some values of the Grease Pencil layer attributes are different. */
   EdgeTopology,     /* The edge topology is different. */
   FaceTopology,     /* The face topology is different. */
   CurveTopology,    /* The curve topology is different. */
   Attributes,       /* The sets of attribute ids are different. */
   AttributeTypes,   /* Some attributes with the same name have different types. */
   Indices,          /* The geometries are the same up to a change of indices. */
+  NumLayers,        /* The number of Grease Pencil layers is different. */
+  NumFrames,        /* The number of Grease Pencil frames on some layer is different. */
+  LayerOrder,       /* The Grease Pencil layer order is different. */
+  Frames,           /* The Grease Pencil keyframes on some layer are different. */
 };
 
 const char *mismatch_to_string(const GeoMismatch &mismatch)
@@ -65,6 +75,8 @@ const char *mismatch_to_string(const GeoMismatch &mismatch)
       return "Some values of the face attributes are different";
     case GeoMismatch::CurveAttributes:
       return "Some values of the curve attributes are different";
+    case GeoMismatch::LayerAttributes:
+      return "Some values of the layer attributes are different";
     case GeoMismatch::EdgeTopology:
       return "The edge topology is different";
     case GeoMismatch::FaceTopology:
@@ -77,6 +89,14 @@ const char *mismatch_to_string(const GeoMismatch &mismatch)
       return "Some attributes with the same name have different types";
     case GeoMismatch::Indices:
       return "The geometries are the same up to a change of indices";
+    case GeoMismatch::NumLayers:
+      return "The number of Grease Pencil layers is different";
+    case GeoMismatch::NumFrames:
+      return "The number of Grease Pencil frames on some layer is different";
+    case GeoMismatch::LayerOrder:
+      return "The Grease Pencil layer order is different";
+    case GeoMismatch::Frames:
+      return "The Grease Pencil keyframes on some layer are different";
   }
   BLI_assert_unreachable();
   return "";
@@ -275,6 +295,10 @@ static bool values_different(const T value1,
   }
   if constexpr (is_same_any_v<T, float3>) {
     ASSERT_AND_ASSUME(component_i >= 0 && component_i < 3);
+    return compare_threshold_relative(value1[component_i], value2[component_i], threshold);
+  }
+  if constexpr (is_same_any_v<T, float4>) {
+    ASSERT_AND_ASSUME(component_i >= 0 && component_i < 4);
     return compare_threshold_relative(value1[component_i], value2[component_i], threshold);
   }
   if constexpr (is_same_any_v<T, ColorGeometry4f>) {
@@ -533,10 +557,10 @@ static bool sort_faces_based_on_corners(const IndexMapping &corners,
  * test files to compare these layers. For now it has been decided to
  * skip them.
  */
-static bool ignored_attribute(const StringRef id)
+static bool ignored_attribute(const StringRef name)
 {
-  return attribute_name_is_anonymous(id) || id.startswith(".pn.") ||
-         ELEM(id, ".uv_select_vert", ".uv_select_edge", ".uv_select_face");
+  return attribute_name_is_anonymous(name) || name.startswith(".pn.") ||
+         ELEM(name, ".uv_select_vert", ".uv_select_edge", ".uv_select_face");
 }
 
 /**
@@ -554,12 +578,29 @@ static std::optional<GeoMismatch> verify_attributes_compatible(
   names_2.remove_if(ignored_attribute);
 
   if (names_1 != names_2) {
-    /* Disabled for now due to tests not being up to date. */
-    // return GeoMismatch::Attributes;
+    std::string mismatched_names;
+    for (const StringRefNull name : names_1) {
+      if (!names_2.contains(name)) {
+        if (!mismatched_names.empty()) {
+          mismatched_names.append(", ");
+        }
+        mismatched_names.append(name);
+      }
+    }
+    for (const StringRefNull name : names_2) {
+      if (!names_1.contains(name)) {
+        if (!mismatched_names.empty()) {
+          mismatched_names.append(", ");
+        }
+        mismatched_names.append(name);
+      }
+    }
+    CLOG_WARN(&LOG, "Attribute names not the same: %s", mismatched_names.c_str());
+    return GeoMismatch::Attributes;
   }
-  for (const StringRef id : names_1) {
-    GAttributeReader reader1 = attributes1.lookup(id);
-    GAttributeReader reader2 = attributes2.lookup(id);
+  for (const StringRef name : names_1) {
+    GAttributeReader reader1 = attributes1.lookup(name);
+    GAttributeReader reader2 = attributes2.lookup(name);
     if (!reader1 || !reader2) {
       /* Necessary because of previous disabled return. */
       continue;
@@ -592,13 +633,9 @@ static std::optional<GeoMismatch> sort_domain_using_attributes(
   }
   names.remove_if(ignored_attribute);
 
-  for (const StringRef id : names) {
-    if (!attributes2.contains(id)) {
-      /* Only needed right now since some test meshes don't have the same attributes. */
-      return GeoMismatch::Attributes;
-    }
-    GAttributeReader reader1 = attributes1.lookup(id);
-    GAttributeReader reader2 = attributes2.lookup(id);
+  for (const StringRef name : names) {
+    GAttributeReader reader1 = attributes1.lookup(name);
+    GAttributeReader reader2 = attributes2.lookup(name);
 
     if (reader1.domain != domain) {
       /* We only look at attributes of the given domain. */
@@ -652,6 +689,9 @@ static std::optional<GeoMismatch> sort_domain_using_attributes(
               return;
             case AttrDomain::Curve:
               mismatch = GeoMismatch::CurveAttributes;
+              return;
+            case AttrDomain::Layer:
+              mismatch = GeoMismatch::LayerAttributes;
               return;
             default:
               BLI_assert_unreachable();
@@ -944,7 +984,7 @@ std::optional<GeoMismatch> compare_meshes(const Mesh &mesh1,
     }
   }
   /* Skip the test for edges, since a lot of tests actually have different edge indices.
-   *TODO: remove this once those tests have been updated. */
+   * TODO: remove this once those tests have been updated. */
   for (const int sorted_i : corners.from_sorted1.index_range()) {
     if (corners.from_sorted1[sorted_i] != corners.from_sorted2[sorted_i]) {
       return GeoMismatch::Indices;
@@ -1072,6 +1112,105 @@ std::optional<GeoMismatch> compare_lattices(const Lattice &lattice1,
       if (values_different(co1, co2, threshold, component)) {
         return GeoMismatch::PointAttributes;
       }
+    }
+  }
+
+  /* No mismatches found. */
+  return std::nullopt;
+}
+
+static std::optional<GeoMismatch> compare_grease_pencil_layer(const GreasePencil &grease_pencil_1,
+                                                              const GreasePencil &grease_pencil_2,
+                                                              const greasepencil::Layer &layer_1,
+                                                              const greasepencil::Layer &layer_2,
+                                                              const float threshold)
+{
+  if (layer_1.name() != layer_2.name()) {
+    return GeoMismatch::LayerOrder;
+  }
+  if (layer_1.frames().size() != layer_2.frames().size()) {
+    return GeoMismatch::NumFrames;
+  }
+
+  const Span<greasepencil::FramesMapKeyT> sorted_keys_1 = layer_1.sorted_keys();
+  const Span<greasepencil::FramesMapKeyT> sorted_keys_2 = layer_2.sorted_keys();
+  for (const int i : sorted_keys_1.index_range()) {
+    if (sorted_keys_1[i] != sorted_keys_2[i]) {
+      return GeoMismatch::Frames;
+    }
+  }
+
+  std::optional<GeoMismatch> mismatch = {};
+  for (const greasepencil::FramesMapKeyT key : layer_1.frames().keys()) {
+    const GreasePencilFrame *frame_1 = layer_1.frame_at(key);
+    const GreasePencilFrame *frame_2 = layer_2.frame_at(key);
+    if ((frame_1 == nullptr) != (frame_2 == nullptr)) {
+      return GeoMismatch::Frames;
+    }
+    if (frame_1 == nullptr) {
+      continue;
+    }
+    const bke::greasepencil::Drawing *drawing_1 = grease_pencil_1.get_drawing_at(layer_1, key);
+    const bke::greasepencil::Drawing *drawing_2 = grease_pencil_2.get_drawing_at(layer_2, key);
+    if ((drawing_1 == nullptr) != (drawing_2 == nullptr)) {
+      return GeoMismatch::Frames;
+    }
+    if (drawing_1 == nullptr) {
+      continue;
+    }
+
+    mismatch = compare_curves(drawing_1->strokes(), drawing_2->strokes(), threshold);
+    if (mismatch) {
+      return mismatch;
+    }
+  }
+
+  /* No mismatches found. */
+  return std::nullopt;
+}
+
+std::optional<GeoMismatch> compare_grease_pencil(const GreasePencil &grease_pencil_1,
+                                                 const GreasePencil &grease_pencil_2,
+                                                 const float threshold)
+{
+  const Span<const greasepencil::Layer *> layers_1 = grease_pencil_1.layers();
+  const Span<const greasepencil::Layer *> layers_2 = grease_pencil_2.layers();
+  if (layers_1.size() != layers_2.size()) {
+    return GeoMismatch::NumLayers;
+  }
+
+  std::optional<GeoMismatch> mismatch = {};
+
+  const AttributeAccessor grease_pencil_1_attributes = grease_pencil_1.attributes();
+  const AttributeAccessor grease_pencil_2_attributes = grease_pencil_2.attributes();
+  mismatch = verify_attributes_compatible(grease_pencil_1_attributes, grease_pencil_2_attributes);
+  if (mismatch) {
+    return mismatch;
+  }
+
+  IndexMapping layers(layers_1.size());
+  mismatch = sort_domain_using_attributes(grease_pencil_1_attributes,
+                                          grease_pencil_2_attributes,
+                                          AttrDomain::Layer,
+                                          {},
+                                          layers,
+                                          threshold);
+  if (mismatch) {
+    return mismatch;
+  }
+
+  for (const int sorted_i : layers.from_sorted1.index_range()) {
+    if (layers.from_sorted1[sorted_i] != layers.from_sorted2[sorted_i]) {
+      /* Layers are out of order. */
+      return GeoMismatch::LayerOrder;
+    }
+  }
+
+  for (const int layer : layers_1.index_range()) {
+    mismatch = compare_grease_pencil_layer(
+        grease_pencil_1, grease_pencil_2, *layers_1[layer], *layers_2[layer], threshold);
+    if (mismatch) {
+      return mismatch;
     }
   }
 

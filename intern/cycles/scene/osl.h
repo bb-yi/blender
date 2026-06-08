@@ -9,6 +9,7 @@
 #include "device/device.h"
 
 #include "util/array.h"
+#include "util/map.h"
 #include "util/set.h"
 #include "util/string.h"
 
@@ -27,7 +28,9 @@ CCL_NAMESPACE_BEGIN
 
 class Device;
 class DeviceScene;
+class ImageHandle;
 class ImageManager;
+class ImageSingle;
 class OSLRenderServices;
 struct OSLGlobals;
 class Scene;
@@ -92,9 +95,6 @@ class OSLManager {
 
  private:
 #ifdef WITH_OSL
-  void texture_system_init();
-  void texture_system_free();
-
   void shading_system_free();
 
   void foreach_shading_system(const std::function<void(OSL::ShadingSystem *)> &callback);
@@ -103,7 +103,6 @@ class OSLManager {
   Device *device_;
   map<string, OSLShaderInfo> loaded_shaders;
 
-  std::shared_ptr<OSL::TextureSystem> ts;
   map<DeviceType, std::shared_ptr<OSL::ShadingSystem>> ss_map;
 
   bool need_update_;
@@ -140,8 +139,10 @@ class OSLShaderManager : public ShaderManager {
                            const std::string &bytecode_hash = "",
                            const std::string &bytecode = "");
 
-  /* Get image slots used by OSL services on device. */
-  static void osl_image_slots(Device *device, ImageManager *image_manager, set<int> &image_slots);
+  /* Get image handles used by OSL services on device. */
+  static void osl_image_handles(Device *device,
+                                ImageManager *image_manager,
+                                set<const ImageSingle *> &image_handles);
 };
 
 #endif
@@ -151,11 +152,23 @@ class OSLShaderManager : public ShaderManager {
 class OSLCompiler {
  public:
 #ifdef WITH_OSL
-  OSLCompiler(OSL::ShadingSystem *ss, Scene *scene, Device *device);
+  OSLCompiler(OSL::ShadingSystem *ss, Scene *scene, Progress &progress, Device *device);
 #endif
   void compile(Shader *shader);
 
   void add(ShaderNode *node, const char *name, bool isfilepath = false);
+
+  /* Add a converter between the "main" node OSL implementation and the shader node output socket.
+   *
+   * The converter uses the `converter_name` shader, and its `converter_input_parameter` is
+   * connected to the "main" node's `node_output_parameter`. The shader's output parameter
+   * `shader_output_parameter` is connected to the converter's `converter_output_parameter`. */
+  void add_output_converter(const ShaderNode *node,
+                            string_view converter_name,
+                            string_view node_output_parameter,
+                            string_view converter_input_parameter,
+                            string_view converter_output_parameter,
+                            string_view shader_output_parameter);
 
   void parameter(ShaderNode *node, const char *name);
 
@@ -170,11 +183,11 @@ class OSLCompiler {
   void parameter(const char *name, const Transform &tfm);
 
   void parameter_array(const char *name, const float f[], int arraylen);
-  void parameter_color_array(const char *name, const array<float3> &f);
+  void parameter_color_array(const char *name, const array<packed_float3> &f);
+  void parameter_string_array(const char *name, const array<ustring> &a);
 
   void parameter_attribute(const char *name, ustring s);
 
-  void parameter_texture(const char *name, ustring filename, ustring colorspace);
   void parameter_texture(const char *name, const ImageHandle &handle);
   void parameter_texture_ies(const char *name, const int svm_slot);
 
@@ -185,10 +198,21 @@ class OSLCompiler {
 
   bool background;
   Scene *scene;
+  Progress &progress;
+  ShaderGraph *current_graph = nullptr;
 
  private:
 #ifdef WITH_OSL
-  string id(ShaderNode *node);
+  struct LayerParam {
+    string layer;
+    string param;
+
+    friend auto operator<=>(const LayerParam &lhs, const LayerParam &rhs) = default;
+  };
+
+  string id(const ShaderNode *node);
+  string_view get_shader_usage() const;
+  LayerParam get_output_layer_param(string_view layer, string_view param) const;
   OSL::ShaderGroupRef compile_type(Shader *shader, ShaderGraph *graph, ShaderType type);
   bool node_skip_input(ShaderNode *node, ShaderInput *input);
   string compatible_name(ShaderNode *node, ShaderInput *input);
@@ -200,6 +224,8 @@ class OSLCompiler {
   OSLRenderServices *services;
   OSL::ShadingSystem *ss;
   OSL::ShaderGroupRef current_group;
+
+  map<LayerParam, LayerParam> remapped_outputs_;
 #endif
 
   Device *device;

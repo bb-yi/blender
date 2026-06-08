@@ -10,8 +10,8 @@ namespace nodes::node_shader_output_world_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Shader>("Surface");
-  b.add_input<decl::Shader>("Volume").translation_context(BLT_I18NCONTEXT_ID_ID);
+  b.add_input<decl::Shader>("Surface"_ustr);
+  b.add_input<decl::Shader>("Volume"_ustr).translation_context(BLT_I18NCONTEXT_ID_ID);
 }
 
 static int node_shader_gpu_output_world(GPUMaterial *mat,
@@ -41,7 +41,7 @@ void register_node_type_sh_output_world()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeOutputWorld", SH_NODE_OUTPUT_WORLD);
+  sh_node_type_base(&ntype, "ShaderNodeOutputWorld"_ustr, SH_NODE_OUTPUT_WORLD);
   ntype.ui_name = "World Output";
   ntype.ui_description = "Output light color information to the scene's World";
   ntype.enum_name_legacy = "OUTPUT_WORLD";

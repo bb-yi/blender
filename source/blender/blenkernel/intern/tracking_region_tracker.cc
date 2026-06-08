@@ -79,13 +79,13 @@ static float *track_get_search_floatbuf(ImBuf *ibuf,
 
   gray_pixels = MEM_new_array_zeroed<float>(width * height, "tracking floatBuf");
 
-  if (searchibuf->float_buffer.data) {
+  if (searchibuf->float_data()) {
     float_rgba_to_gray(
-        searchibuf->float_buffer.data, gray_pixels, width * height, 0.2126f, 0.7152f, 0.0722f);
+        searchibuf->float_data(), gray_pixels, width * height, 0.2126f, 0.7152f, 0.0722f);
   }
   else {
     uint8_rgba_to_float_gray(
-        searchibuf->byte_buffer.data, gray_pixels, width * height, 0.2126f, 0.7152f, 0.0722f);
+        searchibuf->byte_data(), gray_pixels, width * height, 0.2126f, 0.7152f, 0.0722f);
   }
 
   IMB_freeImBuf(searchibuf);
@@ -305,7 +305,7 @@ void BKE_tracking_refine_marker(MovieClip *clip,
   float *search_area, *mask = nullptr;
   int frame_width, frame_height;
   int search_area_height, search_area_width;
-  MovieClipFlag clip_flag = MovieClipFlag(clip->flag & MCLIP_TIMECODE_FLAGS);
+  MovieClipFlag clip_flag = MovieClipFlag(clip->flag & MCLIP_PROXY_FLAGS);
   int reference_framenr;
   MovieClipUser user = {};
   double dst_pixel_x[5], dst_pixel_y[5];

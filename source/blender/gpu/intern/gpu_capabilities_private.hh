@@ -25,10 +25,6 @@ struct GPUCapabilities {
   uint32_t max_buffer_texture_size = 0;
   int max_texture_layers = 0;
   int max_textures = 0;
-  int max_textures_vert = 0;
-  int max_textures_geom = 0;
-  int max_textures_frag = 0;
-  int max_samplers = 0;
   int max_images = 0;
   int max_work_group_count[3] = {0, 0, 0};
   int max_work_group_size[3] = {0, 0, 0};
@@ -58,6 +54,7 @@ struct GPUCapabilities {
   bool use_main_context_workaround = false;
   bool use_hq_normals_workaround = false;
   bool stencil_clasify_buffer_workaround = false;
+  bool texture_pool_workaround = false;
 
   bool use_subprocess_shader_compilations = false;
 

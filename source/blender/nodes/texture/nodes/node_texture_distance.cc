@@ -46,7 +46,7 @@ void register_node_type_tex_distance()
 {
   static bke::bNodeType ntype;
 
-  tex_node_type_base(&ntype, "TextureNodeDistance", TEX_NODE_DISTANCE);
+  tex_node_type_base(&ntype, "TextureNodeDistance"_ustr, TEX_NODE_DISTANCE);
   ntype.ui_name = "Distance";
   ntype.enum_name_legacy = "DISTANCE";
   ntype.nclass = NODE_CLASS_CONVERTER;

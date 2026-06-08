@@ -120,9 +120,12 @@ int BKE_copybuffer_paste(bContext *C,
     return 0;
   }
 
-  BKE_view_layer_base_deselect_all(scene, view_layer);
+  BKE_view_layer_base_deselect_all(*bmain, scene, view_layer);
 
   copybuffer_append(lapp_context, bmain, reports);
+
+  /* When doing regular, basic pasting of IDs, clear the CLIPBOARD_MARK flag. */
+  BKE_main_id_flag_all(bmain, ID_FLAG_CLIPBOARD_MARK, false);
 
   BKE_blendfile_link_append_context_free(lapp_context);
   return num_pasted;

@@ -90,14 +90,7 @@ endif()
 # -----------------------------------------------------------------------------
 # Configure OpenColorIO
 
-add_library(bf_deps_optional_opencolorio INTERFACE)
-add_library(bf::dependencies::optional::opencolorio ALIAS bf_deps_optional_opencolorio)
-
-if(WITH_OPENCOLORIO)
-  target_compile_definitions(bf_deps_optional_opencolorio INTERFACE WITH_OPENCOLORIO)
-  target_include_directories(bf_deps_optional_opencolorio SYSTEM INTERFACE ${OPENCOLORIO_INCLUDE_DIRS})
-  target_link_libraries(bf_deps_optional_opencolorio INTERFACE ${OPENCOLORIO_LIBRARIES})
-endif()
+add_library(bf::dependencies::opencolorio ALIAS OpenColorIO::OpenColorIO)
 
 # -----------------------------------------------------------------------------
 # Configure Zlib
@@ -189,13 +182,7 @@ endif()
 # -----------------------------------------------------------------------------
 # Configure OpenEXR
 
-add_library(bf_deps_optional_openexr INTERFACE)
-add_library(bf::dependencies::optional::openexr ALIAS bf_deps_optional_openexr)
-
-if(WITH_IMAGE_OPENEXR)
-  target_compile_definitions(bf_deps_optional_openexr INTERFACE WITH_IMAGE_OPENEXR)
-  target_link_libraries(bf_deps_optional_openexr INTERFACE OpenEXR::OpenEXR)
-endif()
+add_library(bf::dependencies::openexr ALIAS OpenEXR::OpenEXR)
 
 # -----------------------------------------------------------------------------
 # Configure WebP
@@ -229,9 +216,7 @@ add_library(bf_deps_optional_sdl INTERFACE)
 add_library(bf::dependencies::optional::sdl ALIAS bf_deps_optional_sdl)
 
 if(WITH_SDL)
-  target_compile_definitions(bf_deps_optional_sdl INTERFACE WITH_SDL)
-  target_include_directories(bf_deps_optional_sdl SYSTEM INTERFACE ${SDL_INCLUDE_DIR})
-  target_link_libraries(bf_deps_optional_sdl INTERFACE ${SDL_LIBRARY})
+  target_link_libraries(bf_deps_optional_sdl INTERFACE SDL3::SDL3)
 endif()
 
 # -----------------------------------------------------------------------------
@@ -326,13 +311,45 @@ if(WITH_VULKAN_BACKEND)
 endif()
 
 # -----------------------------------------------------------------------------
+# Configure Embree
+
+add_library(bf_deps_optional_embree INTERFACE)
+add_library(bf::dependencies::optional::embree ALIAS bf_deps_optional_embree)
+
+if(WITH_CYCLES_EMBREE)
+  target_include_directories(bf_deps_optional_embree SYSTEM INTERFACE ${EMBREE_INCLUDE_DIRS})
+  target_link_libraries(bf_deps_optional_embree INTERFACE ${EMBREE_LIBRARIES})
+endif()
+
+# -----------------------------------------------------------------------------
+# Configure OpenPGL
+
+add_library(bf_deps_optional_openpgl INTERFACE)
+add_library(bf::dependencies::optional::openpgl ALIAS bf_deps_optional_openpgl)
+
+if(WITH_CYCLES_PATH_GUIDING)
+  target_include_directories(bf_deps_optional_openpgl SYSTEM INTERFACE ${OPENPGL_INCLUDE_DIR})
+  target_link_libraries(bf_deps_optional_openpgl INTERFACE ${OPENPGL_LIBRARIES})
+endif()
+
+# -----------------------------------------------------------------------------
+# Configure NanoVDB
+
+add_library(bf_deps_optional_nanovdb INTERFACE)
+add_library(bf::dependencies::optional::nanovdb ALIAS bf_deps_optional_nanovdb)
+
+if(WITH_NANOVDB)
+  target_include_directories(bf_deps_optional_nanovdb SYSTEM INTERFACE ${NANOVDB_INCLUDE_DIR})
+endif()
+
+# -----------------------------------------------------------------------------
 # Configure Epoxy
 
 add_library(bf_deps_epoxy INTERFACE)
 add_library(bf::dependencies::epoxy ALIAS bf_deps_epoxy)
 
-target_include_directories(bf_deps_epoxy SYSTEM INTERFACE ${Epoxy_INCLUDE_DIRS})
-target_link_libraries(bf_deps_epoxy INTERFACE ${Epoxy_LIBRARIES})
+target_include_directories(bf_deps_epoxy SYSTEM INTERFACE ${EPOXY_INCLUDE_DIRS})
+target_link_libraries(bf_deps_epoxy INTERFACE ${EPOXY_LIBRARIES})
 
 # -----------------------------------------------------------------------------
 # Configure Gflags
@@ -408,7 +425,7 @@ if(WITH_AUDASPACE)
   endif()
   target_include_directories(bf_deps_optional_audaspace SYSTEM INTERFACE ${AUDASPACE_C_INCLUDE_DIRS} ${AUDASPACE_PY_INCLUDE_DIRS})
   if(WITH_SYSTEM_AUDASPACE)
-    target_link_libraries(bf_deps_optional_audaspace INTERFACE ${AUDASPACE_C_LIBRARIES} ${AUDASPACE_PY_LIBRARIES})
+    target_link_libraries(bf_deps_optional_audaspace INTERFACE ${AUDASPACE_LIBRARIES} ${AUDASPACE_PY_LIBRARIES})
   else()
     target_link_libraries(bf_deps_optional_audaspace INTERFACE audaspace audaspace-py)
   endif()
@@ -463,4 +480,37 @@ if(WITH_CYCLES_OSL)
 else()
   add_library(bf_deps_optional_osl INTERFACE)
   add_library(bf::dependencies::optional::osl ALIAS bf_deps_optional_osl)
+endif()
+
+# -----------------------------------------------------------------------------
+# Configure Draco
+
+add_library(bf_deps_optional_draco INTERFACE)
+add_library(bf::dependencies::optional::draco ALIAS bf_deps_optional_draco)
+
+if(TARGET draco::draco)
+  target_compile_definitions(bf_deps_optional_draco INTERFACE WITH_DRACO)
+  target_link_libraries(bf_deps_optional_draco INTERFACE draco::draco)
+endif()
+
+# -----------------------------------------------------------------------------
+# Configure meshoptimizer
+
+add_library(bf_deps_optional_meshoptimizer INTERFACE)
+add_library(bf::dependencies::optional::meshoptimizer ALIAS bf_deps_optional_meshoptimizer)
+
+if(TARGET meshoptimizer::meshoptimizer)
+  target_compile_definitions(bf_deps_optional_meshoptimizer INTERFACE WITH_MESHOPTIMIZER)
+  target_link_libraries(bf_deps_optional_meshoptimizer INTERFACE meshoptimizer::meshoptimizer)
+endif()
+
+# -----------------------------------------------------------------------------
+# Configure TracyClient
+
+add_library(bf_deps_optional_tracy_client INTERFACE)
+add_library(bf::dependencies::optional::tracy_client ALIAS bf_deps_optional_tracy_client)
+
+if(WITH_TRACY)
+  target_compile_definitions(bf_deps_optional_tracy_client INTERFACE WITH_TRACY)
+  target_link_libraries(bf_deps_optional_tracy_client INTERFACE Tracy::TracyClient)
 endif()

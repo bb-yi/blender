@@ -6,6 +6,8 @@
  * \ingroup edmesh
  */
 
+#include <algorithm>
+
 #include "MEM_guardedalloc.h"
 
 #include "DNA_key_types.h"
@@ -197,22 +199,18 @@ bool EDBM_op_callf(BMEditMesh *em, wmOperator *op, const char *fmt, ...)
   return EDBM_op_finish(em, &bmop, op, true);
 }
 
-bool EDBM_op_call_and_selectf(BMEditMesh *em,
-                              wmOperator *op,
-                              const char *select_slot_out,
-                              const bool select_extend,
-                              const char *fmt,
-                              ...)
+bool EDBM_op_vcall_and_selectf(BMEditMesh *em,
+                               wmOperator *op,
+                               const char *select_slot_out,
+                               const bool select_extend,
+                               const char *fmt,
+                               va_list list)
 {
   BMesh *bm = em->bm;
   BMOperator bmop;
-  va_list list;
-
-  va_start(list, fmt);
 
   if (!BMO_op_vinitf(bm, &bmop, BMO_FLAG_DEFAULTS, fmt, list)) {
     BKE_reportf(op->reports, RPT_ERROR, "Parse error in %s", __func__);
-    va_end(list);
     return false;
   }
 
@@ -229,8 +227,21 @@ bool EDBM_op_call_and_selectf(BMEditMesh *em,
   BMO_slot_buffer_hflag_enable(
       em->bm, bmop.slots_out, select_slot_out, hflag, BM_ELEM_SELECT, true);
 
-  va_end(list);
   return EDBM_op_finish(em, &bmop, op, true);
+}
+
+bool EDBM_op_call_and_selectf(BMEditMesh *em,
+                              wmOperator *op,
+                              const char *select_slot_out,
+                              const bool select_extend,
+                              const char *fmt,
+                              ...)
+{
+  va_list list;
+  va_start(list, fmt);
+  const bool result = EDBM_op_vcall_and_selectf(em, op, select_slot_out, select_extend, fmt, list);
+  va_end(list);
+  return result;
 }
 
 bool EDBM_op_call_silentf(BMEditMesh *em, const char *fmt, ...)
@@ -273,7 +284,7 @@ bool EDBM_op_call_silentf(BMEditMesh *em, const char *fmt, ...)
 static int object_shapenr_basis_index_ensured(const Object *ob)
 {
   const Mesh *mesh = id_cast<const Mesh *>(ob->data);
-  if (UNLIKELY((ob->shapenr == 0) && (mesh->key && !BLI_listbase_is_empty(&mesh->key->block)))) {
+  if (UNLIKELY((ob->shapenr == 0) && (mesh->key && !mesh->key->block.is_empty()))) {
     return 1;
   }
   return ob->shapenr;
@@ -781,7 +792,7 @@ static void bm_uv_build_islands(UvElementMap *element_map,
   UvElement *islandbuf = MEM_new_array_zeroed<UvElement>(totuv, __func__);
   /* Island number for BMFaces. */
   int *island_number = MEM_new_array_zeroed<int>(bm->totface, __func__);
-  copy_vn_i(island_number, bm->totface, INVALID_ISLAND);
+  std::fill_n(island_number, bm->totface, INVALID_ISLAND);
 
   const BMUVOffsets uv_offsets = BM_uv_map_offsets_get(bm);
 
@@ -1319,7 +1330,7 @@ void EDBM_verts_mirror_cache_begin_ex(BMEditMesh *em,
   const float maxdist_sq = square_f(maxdist);
 
   /* one or the other is used depending if topo is enabled */
-  KDTree_3d *tree = nullptr;
+  KDTree<float3> *tree = nullptr;
   MirrTopoStore_t mesh_topo_store = {nullptr, -1, -1, false};
 
   BM_mesh_elem_table_ensure(bm, BM_VERT);
@@ -1346,15 +1357,15 @@ void EDBM_verts_mirror_cache_begin_ex(BMEditMesh *em,
     ED_mesh_mirrtopo_init(em, nullptr, &mesh_topo_store, true);
   }
   else {
-    tree = kdtree_3d_new(bm->totvert);
+    tree = kdtree_new<float3>(bm->totvert);
     BM_ITER_MESH_INDEX (v, &iter, bm, BM_VERTS_OF_MESH, i) {
       if (respecthide && BM_elem_flag_test(v, BM_ELEM_HIDDEN)) {
         continue;
       }
 
-      kdtree_3d_insert(tree, i, v->co);
+      kdtree_insert<float3>(tree, i, v->co);
     }
-    kdtree_3d_balance(tree);
+    kdtree_balance<float3>(tree);
   }
 
 #define VERT_INTPTR(_v, _i) \
@@ -1388,7 +1399,7 @@ void EDBM_verts_mirror_cache_begin_ex(BMEditMesh *em,
       co[axis] *= -1.0f;
 
       v_mirr = nullptr;
-      i_mirr = kdtree_3d_find_nearest(tree, co, nullptr);
+      i_mirr = kdtree_find_nearest<float3>(tree, co, nullptr);
       if (i_mirr != -1) {
         BMVert *v_test = BM_vert_at_index(bm, i_mirr);
         if (len_squared_v3v3(co, v_test->co) < maxdist_sq) {
@@ -1414,7 +1425,7 @@ void EDBM_verts_mirror_cache_begin_ex(BMEditMesh *em,
     ED_mesh_mirrtopo_free(&mesh_topo_store);
   }
   else {
-    kdtree_3d_free(tree);
+    kdtree_free<float3>(tree);
   }
 }
 
@@ -1891,12 +1902,17 @@ BMElem *EDBM_elem_from_index_any(BMEditMesh *em, uint index)
   return nullptr;
 }
 
-int EDBM_elem_to_index_any_multi(
-    const Scene *scene, ViewLayer *view_layer, BMEditMesh *em, BMElem *ele, int *r_object_index)
+int EDBM_elem_to_index_any_multi(const Main &bmain,
+                                 const Scene *scene,
+                                 ViewLayer *view_layer,
+                                 BMEditMesh *em,
+                                 BMElem *ele,
+                                 int *r_object_index)
 {
   int elem_index = -1;
   *r_object_index = -1;
-  Vector<Base *> bases = BKE_view_layer_array_from_bases_in_edit_mode(scene, view_layer, nullptr);
+  Vector<Base *> bases = BKE_view_layer_array_from_bases_in_edit_mode(
+      bmain, scene, view_layer, nullptr);
   for (const int base_index : bases.index_range()) {
     Base *base_iter = bases[base_index];
     if (BKE_editmesh_from_object(base_iter->object) == em) {
@@ -1908,13 +1924,15 @@ int EDBM_elem_to_index_any_multi(
   return elem_index;
 }
 
-BMElem *EDBM_elem_from_index_any_multi(const Scene *scene,
+BMElem *EDBM_elem_from_index_any_multi(const Main &bmain,
+                                       const Scene *scene,
                                        ViewLayer *view_layer,
                                        uint object_index,
                                        uint elem_index,
                                        Object **r_obedit)
 {
-  Vector<Base *> bases = BKE_view_layer_array_from_bases_in_edit_mode(scene, view_layer, nullptr);
+  Vector<Base *> bases = BKE_view_layer_array_from_bases_in_edit_mode(
+      bmain, scene, view_layer, nullptr);
   *r_obedit = nullptr;
   Object *obedit = (object_index < bases.size()) ? bases[object_index]->object : nullptr;
   if (obedit != nullptr) {

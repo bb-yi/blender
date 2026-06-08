@@ -9,9 +9,7 @@
  * dragging larger headers into the createInfo pipeline which would cause problems.
  */
 
-#ifndef GPU_SHADER
-#  pragma once
-#endif
+#pragma once
 
 #ifndef SQUARE
 #  define SQUARE(x) ((x) * (x))
@@ -22,8 +20,10 @@
 
 /* Hierarchical Z down-sampling. */
 #define HIZ_MIP_COUNT 7
-/* NOTE: The shader is written to update 5 mipmaps using LDS. */
-#define HIZ_GROUP_SIZE 32
+/* NOTE: The shader is written to update 5 mipmaps using LDS.
+ * Each thread actually update 4 LOD_0 pixels, which means the number of MIPLVL we cover is:
+ * `(log2(HIZ_GROUP_SIZE) + 1) + LOD_0 + LAST_GROUP_LVL = HIZ_MIP_COUNT` */
+#define HIZ_GROUP_SIZE 16
 
 /* Avoid too much overhead caused by resizing the light buffers too many time. */
 #define LIGHT_CHUNK 256
@@ -118,8 +118,9 @@
 #define SHADOW_VIEW_MAX 64 /* Must match DRW_VIEW_MAX. */
 #define SHADOW_RENDER_MAP_SIZE (SHADOW_VIEW_MAX * SHADOW_TILEMAP_LOD0_LEN)
 #define SHADOW_ATOMIC 1
-#define SHADOW_PAGE_PER_ROW 4
-#define SHADOW_PAGE_PER_COL 4
+#define SHADOW_PAGE_PER_ROW 8
+#define SHADOW_PAGE_PER_COL 8
+#define SHADOW_PAGE_MAX_LAYER 128
 #define SHADOW_PAGE_PER_LAYER (SHADOW_PAGE_PER_ROW * SHADOW_PAGE_PER_COL)
 #define SHADOW_MAX_STEP 16
 #define SHADOW_MAX_RAY 4
@@ -194,7 +195,7 @@
 
 /* Utility Texture. */
 #define UTIL_TEX_SIZE 64
-#define UTIL_BTDF_LAYER_COUNT 16
+#define UTIL_BSDF_LAYER_COUNT 16
 /* Scale and bias to avoid interpolation of the border pixel.
  * Remap UVs to the border pixels centers. */
 #define UTIL_TEX_UV_SCALE ((UTIL_TEX_SIZE - 1.0f) / UTIL_TEX_SIZE)
@@ -203,23 +204,10 @@
 #define UTIL_BLUE_NOISE_LAYER 0
 #define UTIL_SSS_TRANSMITTANCE_PROFILE_LAYER 1
 #define UTIL_LTC_MAT_LAYER 2
-#define UTIL_BSDF_LAYER 3
-#define UTIL_BTDF_LAYER 4
+#define UTIL_BRDF_LAYER 3
+#define UTIL_BSDF_LAYER 4
 #define UTIL_DISK_INTEGRAL_LAYER UTIL_SSS_TRANSMITTANCE_PROFILE_LAYER
 #define UTIL_DISK_INTEGRAL_COMP 3
-
-/* Could be somewhere else. */
-#ifdef GPU_SHADER
-#  if defined(GPU_FRAGMENT_SHADER)
-#    define UTIL_TEXEL float2(gl_FragCoord.xy)
-#  elif defined(GPU_COMPUTE_SHADER)
-#    define UTIL_TEXEL float2(gl_GlobalInvocationID.xy)
-#  elif defined(GPU_VERTEX_SHADER)
-#    define UTIL_TEXEL float2(gl_VertexID, 0)
-#  elif defined(GPU_LIBRARY_SHADER)
-#    define UTIL_TEXEL float2(0)
-#  endif
-#endif
 
 #define PREPASS_FRAG_OUT_NORMAL 0
 #define PREPASS_FRAG_OUT_OB_ID 1
@@ -241,49 +229,50 @@
 #define VOLUME_TRANSMITTANCE_TEX_SLOT 9
 #define HIZ_PREVIOUS_LAYER_TEX_SLOT 10
 #define RADIANCE_PREVIOUS_LAYER_TEX_SLOT 11
-#define OBJECT_ID_TEX_SLOT 12
-#define PREPASS_NORMAL_TEX_SLOT 13
+#define RAYCAST_DEPTH_TEX_SLOT 12
+#define OBJECT_ID_TEX_SLOT 13
+#define PREPASS_NORMAL_TEX_SLOT 14
 /* Currently only used by ray-tracing, but might become used by forward too. */
-#define PLANAR_PROBE_DEPTH_TEX_SLOT 14
-#define PLANAR_PROBE_RADIANCE_TEX_SLOT 15
+#define PLANAR_PROBE_DEPTH_TEX_SLOT 15
+#define PLANAR_PROBE_RADIANCE_TEX_SLOT 16
 
-#define GBUF_CLOSURE_TEX_SLOT 16
-#define GBUF_NORMAL_TEX_SLOT 17
-#define GBUF_HEADER_TEX_SLOT 18
-#define NPR_RADIANCE_TEX_SLOT 19
-#define LIGHT_SHADER_TEX_SLOT 19
-#define DIRECT_RADIANCE_NPR_TX_SLOT_1 20
-#define INDIRECT_RADIANCE_NPR_TX_SLOT_1 23
-#define BACK_HIZ_TX_SLOT 26
-#define BACK_RADIANCE_TX_SLOT 27
+#define GBUF_CLOSURE_TEX_SLOT 17
+#define GBUF_NORMAL_TEX_SLOT 18
+#define GBUF_HEADER_TEX_SLOT 19
+#define NPR_RADIANCE_TEX_SLOT 20
+#define LIGHT_SHADER_TEX_SLOT 20
+#define DIRECT_RADIANCE_NPR_TX_SLOT_1 21
+#define INDIRECT_RADIANCE_NPR_TX_SLOT_1 24
+#define BACK_HIZ_TX_SLOT 27
+#define BACK_RADIANCE_TX_SLOT 28
 /* Eevee render texture sampling. */
-#define RENDER_TEXTURE_COLOR_TX_SLOT_0 28
-#define RENDER_TEXTURE_COLOR_TX_SLOT_1 29
-#define RENDER_TEXTURE_COLOR_TX_SLOT_2 30
-#define RENDER_TEXTURE_COLOR_TX_SLOT_3 31
-#define RENDER_TEXTURE_HISTORY_TX_SLOT_0 32
-#define RENDER_TEXTURE_HISTORY_TX_SLOT_1 33
-#define RENDER_TEXTURE_HISTORY_TX_SLOT_2 34
-#define RENDER_TEXTURE_HISTORY_TX_SLOT_3 35
+#define RENDER_TEXTURE_COLOR_TX_SLOT_0 29
+#define RENDER_TEXTURE_COLOR_TX_SLOT_1 30
+#define RENDER_TEXTURE_COLOR_TX_SLOT_2 31
+#define RENDER_TEXTURE_COLOR_TX_SLOT_3 32
+#define RENDER_TEXTURE_HISTORY_TX_SLOT_0 33
+#define RENDER_TEXTURE_HISTORY_TX_SLOT_1 34
+#define RENDER_TEXTURE_HISTORY_TX_SLOT_2 35
+#define RENDER_TEXTURE_HISTORY_TX_SLOT_3 36
 /* Only during filter material evaluation. */
-#define FILTER_SCENE_COLOR_TEX_SLOT 36
-#define FILTER_AOV_COLOR_TEX_SLOT 37
-#define FILTER_AOV_VALUE_TEX_SLOT 38
-#define FILTER_DEPTH_TEX_SLOT 39
-#define FILTER_CRYPTOMATTE_TEX_SLOT 40
-#define SCENE_SHADOW_TEX_SLOT 41
-/* NPR material passes already use slot 19 for their radiance input. Reuse a filter-only slot
+#define FILTER_SCENE_COLOR_TEX_SLOT 37
+#define FILTER_AOV_COLOR_TEX_SLOT 38
+#define FILTER_AOV_VALUE_TEX_SLOT 39
+#define FILTER_DEPTH_TEX_SLOT 40
+#define FILTER_CRYPTOMATTE_TEX_SLOT 41
+#define SCENE_SHADOW_TEX_SLOT 42
+/* NPR material passes already use their radiance input slot. Reuse a filter-only slot
  * already reserved away from material texture allocation. */
 #define LIGHT_SHADER_NPR_TEX_SLOT FILTER_SCENE_COLOR_TEX_SLOT
 /* Outline post-process shaders can include GBuffer/draw resources, so keep their texture slots
  * out of the common low range. */
-#define OUTLINE_DEPTH_TEX_SLOT 42
-#define OUTLINE_COLOR_TEX_SLOT 43
-#define OUTLINE_INFO_TEX_SLOT 44
-#define OUTLINE_SEED_TEX_SLOT 45
-#define OUTLINE_JFA_TEX_SLOT 46
-#define OUTLINE_VECTOR_TEX_SLOT 47
-#define OUTLINE_OCCLUSION_DEPTH_TEX_SLOT 48
+#define OUTLINE_DEPTH_TEX_SLOT 43
+#define OUTLINE_COLOR_TEX_SLOT 44
+#define OUTLINE_INFO_TEX_SLOT 45
+#define OUTLINE_SEED_TEX_SLOT 46
+#define OUTLINE_JFA_TEX_SLOT 47
+#define OUTLINE_VECTOR_TEX_SLOT 48
+#define OUTLINE_OCCLUSION_DEPTH_TEX_SLOT 49
 #define SHADOW_CASTER_ATLAS_TEX_SLOT OUTLINE_DEPTH_TEX_SLOT
 
 /* Images. */
@@ -315,19 +304,24 @@
 /* Uniform Buffers. */
 /* Slot 0 is GPU_NODE_TREE_UBO_SLOT. */
 #define UNIFORM_BUF_SLOT 1
+/* Split from the main uniform buffer since they're updated multiple times per frame. */
+#define PIPELINE_BUF_SLOT 2
+#define RAYTRACE_BUF_SLOT 3
 /* Only during surface shading (forward and deferred eval). */
-#define IRRADIANCE_GRID_BUF_SLOT 2
-#define SPHERE_PROBE_BUF_SLOT 3
-#define PLANAR_PROBE_BUF_SLOT 4
-#define WORLD_SUNLIGHT_BUF_SLOT 6
-#define FILTER_OBJECT_INFO_BUF_SLOT 7
+#define IRRADIANCE_GRID_BUF_SLOT 4
+#define SPHERE_PROBE_BUF_SLOT 5
+#define PLANAR_PROBE_BUF_SLOT 6
+#define WORLD_SUNLIGHT_BUF_SLOT 7
+#define FILTER_OBJECT_INFO_BUF_SLOT 8
 #define FILTER_MASK_HASH_BUF_SLOT 9
 /* Only during pre-pass. */
-#define VELOCITY_CAMERA_PREV_BUF 2
-#define VELOCITY_CAMERA_CURR_BUF 3
-#define VELOCITY_CAMERA_NEXT_BUF 4
-#define CLIP_PLANE_BUF 5
+#define VELOCITY_CAMERA_PREV_BUF 4
+#define VELOCITY_CAMERA_CURR_BUF 5
+#define VELOCITY_CAMERA_NEXT_BUF 6
+#define CLIP_PLANE_BUF 7
 #define RENDER_TEXTURE_BUF_SLOT 12
+/* Only during subsurface scattering */
+#define SUBSURFACE_BUF_SLOT 4
 
 /* Storage Buffers. */
 #define LIGHT_CULL_BUF_SLOT 0

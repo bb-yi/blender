@@ -188,6 +188,7 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
     /* Localize tree to create links for reroute and mute. */
     localtree = bke::node_tree_add_tree(
         nullptr, (StringRef(ntree->id.name) + " Inlined").c_str(), ntree->idname);
+    localtree->flag |= NTREE_IS_GPU_SHADER_INTERNAL;
     nodes::InlineShaderNodeTreeParams inline_params;
     inline_params.allow_preserving_repeat_zones = true;
     inline_params.target_engine_ = engine == GPU_MAT_EEVEE ? SHD_OUTPUT_EEVEE : SHD_OUTPUT_ALL;
@@ -313,7 +314,7 @@ void GPU_material_free(ListBaseT<LinkData> *gpumaterial)
     GPUMaterial *material = static_cast<GPUMaterial *>(link.data);
     GPU_material_free_single(material);
   }
-  BLI_freelistN(gpumaterial);
+  gpumaterial->free_no_destruct();
 }
 
 void GPU_materials_free(Main *bmain)
@@ -599,7 +600,7 @@ const GPUUniformAttrList *GPU_material_uniform_attributes(const GPUMaterial *mat
 const ListBaseT<GPULayerAttr> *GPU_material_layer_attributes(const GPUMaterial *material)
 {
   const ListBaseT<GPULayerAttr> *attrs = &material->graph.layer_attrs;
-  return !BLI_listbase_is_empty(attrs) ? attrs : nullptr;
+  return !attrs->is_empty() ? attrs : nullptr;
 }
 
 GPUNodeGraph *gpu_material_node_graph(GPUMaterial *material)

@@ -144,6 +144,21 @@ enum {
   FACE_STRENGTH_STRONG = 16384,
 };
 
+/** Interpolation method used for spacing vertices. */
+enum SpaceInterpolationMethod {
+  SPACE_EDGE_LOOPS_EVENLY_INTERP_CUBIC = 0,
+  SPACE_EDGE_LOOPS_EVENLY_INTERP_LINEAR = 1,
+};
+
+/**
+ * Methods for determining the orientation of flattening the plane.
+ */
+enum FlattenMethod {
+  FLATTEN_BEST_FIT = 0,
+  FLATTEN_NORMAL = 1,
+  FLATTEN_VIEW = 2,
+};
+
 extern const BMOpDefine *bmo_opdefines[];
 extern const int bmo_opdefines_total;
 

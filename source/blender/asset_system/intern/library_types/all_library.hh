@@ -20,7 +20,10 @@ class AllAssetLibrary : public AssetLibrary {
  public:
   AllAssetLibrary();
 
+  void force_remote_listing_download() const override;
+
   std::optional<AssetLibraryReference> library_reference() const override;
+  std::optional<eAssetImportMethod> import_method() const override;
   void refresh_catalogs() override;
 
   /**

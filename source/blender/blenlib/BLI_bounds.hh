@@ -18,6 +18,8 @@
 #include "BLI_task.hh"
 #include "BLI_virtual_array.hh"
 
+#include "PRF_profile.hh"
+
 namespace blender {
 
 namespace bounds {
@@ -68,6 +70,7 @@ template<typename T> [[nodiscard]] inline std::optional<Bounds<T>> min_max(const
   if (values.is_empty()) {
     return std::nullopt;
   }
+  PRF_scope_with_name("bounds::min_max_with_radii", ProfileCategory::Default);
   const Bounds<T> init{values.first(), values.first()};
   return threading::parallel_reduce(
       values.index_range(),
@@ -93,6 +96,7 @@ template<typename T>
     /* To avoid mask slice/lookup. */
     return min_max(values);
   }
+  PRF_scope_with_name("bounds::min_max_with_radii", ProfileCategory::Default);
   const Bounds<T> init{values[mask.first()], values[mask.first()]};
   return threading::parallel_reduce(
       mask.index_range().drop_front(1),
@@ -119,6 +123,7 @@ template<typename T, typename RadiusT>
   if (values.is_empty()) {
     return std::nullopt;
   }
+  PRF_scope_with_name("bounds::min_max_with_radii", ProfileCategory::Default);
   const Bounds<T> init{values.first(), values.first()};
   return threading::parallel_reduce(
       values.index_range(),
@@ -166,6 +171,7 @@ template<typename T> inline std::optional<T> max(const VArray<T> &values)
   if (values.is_empty()) {
     return std::nullopt;
   }
+  PRF_scope_with_name("bounds::max", ProfileCategory::Default);
   if (const std::optional<T> value = values.get_if_single()) {
     return value;
   }
@@ -218,6 +224,34 @@ inline std::array<VecBase<T, 3>, 8> corners(const Bounds<VecBase<T, 3>> &bounds)
 }
 
 /**
+ * Return the four corners of a 2D bounding box.
+ * <pre>
+ *
+ * Y
+ * |
+ * |
+ * .-----X
+ *
+ *  3----------2
+ *  |          |
+ *  |          |
+ *  |          |
+ *  |          |
+ *  0----------1
+ * </pre>
+ */
+template<typename T>
+inline std::array<VecBase<T, 2>, 4> corners(const Bounds<VecBase<T, 2>> &bounds)
+{
+  return {
+      bounds.min,
+      VecBase<T, 2>{bounds.max.x, bounds.min.y},
+      bounds.max,
+      VecBase<T, 2>{bounds.min.x, bounds.max.y},
+  };
+}
+
+/**
  * Transform a 3D bounding box.
  *
  * Note: this necessarily grows the bounding box, to ensure that the transformed
@@ -233,6 +267,22 @@ inline Bounds<VecBase<T, 3>> transform_bounds(const MatBase<T, D, D> &matrix,
 {
   std::array<VecBase<T, 3>, 8> points = corners(bounds);
   for (VecBase<T, 3> &p : points) {
+    p = math::transform_point(matrix, p);
+  }
+  return {math::min(Span(points)), math::max(Span(points))};
+}
+
+/**
+ * Transform a 2D bounding box.
+ *
+ * See the note on the 3D variant.
+ */
+template<typename T, int D>
+inline Bounds<VecBase<T, 2>> transform_bounds(const MatBase<T, D, D> &matrix,
+                                              const Bounds<VecBase<T, 2>> &bounds)
+{
+  std::array<VecBase<T, 2>, 4> points = corners(bounds);
+  for (VecBase<T, 2> &p : points) {
     p = math::transform_point(matrix, p);
   }
   return {math::min(Span(points)), math::max(Span(points))};
@@ -430,7 +480,7 @@ inline void Bounds<T>::pad(const PaddingT &padding)
   this->max = this->max + padding;
 }
 
-template<typename T> inline bool Bounds<T>::contains(const T &point)
+template<typename T> inline bool Bounds<T>::contains(const T &point) const
 {
   if (bounds::detail::any_less_than(point, this->min)) {
     return false;
@@ -441,7 +491,7 @@ template<typename T> inline bool Bounds<T>::contains(const T &point)
   return true;
 }
 
-template<typename T> inline bool Bounds<T>::intersects(const Bounds<T> &other)
+template<typename T> inline bool Bounds<T>::intersects(const Bounds<T> &other) const
 {
   if (bounds::intersect(*this, other)) {
     return true;
@@ -449,18 +499,14 @@ template<typename T> inline bool Bounds<T>::intersects(const Bounds<T> &other)
   return false;
 }
 
-template<typename T> inline bool Bounds<T>::intersects_segment(const T &start, const T &end)
+template<typename T> inline bool Bounds<T>::intersects_segment(const T &start, const T &end) const
 {
   /* Check end points first to properly handle degenerate case where the segment is a point. */
   if (this->contains(start) || this->contains(end)) {
     return true;
   }
-  if (!this->intersects(bounds::detail::segment_bounds(start, end))) {
-    return false;
-  }
   if constexpr (std::is_integral_v<T> || std::is_floating_point_v<T>) {
-    /* In the 1-dimensional case, the bounding box check above covers the intersection check. */
-    return true;
+    return this->intersects(bounds::detail::segment_bounds(start, end));
   }
   else {
     /* Check if the segment is entering and exiting the bounds. */

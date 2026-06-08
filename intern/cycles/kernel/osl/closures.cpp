@@ -72,6 +72,7 @@ void OSLRenderServices::register_closures(OSL::ShadingSystem *ss)
       #lower, OSL_CLOSURE_##Upper##_ID, osl_closure_##lower##_params(), nullptr, nullptr);
 
 #include "closures_template.h"
+
   ss->register_closure(
       "layer", OSL_CLOSURE_LAYER_ID, osl_closure_layer_params(), nullptr, nullptr);
 }
@@ -82,10 +83,11 @@ template<typename IntegratorGenericState>
 void osl_eval_nodes_surface(const ThreadKernelGlobalsCPU *kg,
                             IntegratorGenericState state,
                             ShaderData *sd,
+                            const PathRayVisibility path_visibility,
                             const uint32_t path_flag)
 {
   /* setup shader globals from shader data */
-  shaderdata_to_shaderglobals(sd, path_flag, &kg->osl.shader_globals);
+  shaderdata_to_shaderglobals(sd, path_visibility, path_flag, &kg->osl.shader_globals);
 
   /* clear trace data */
   kg->osl.tracedata.init = false;
@@ -95,6 +97,10 @@ void osl_eval_nodes_surface(const ThreadKernelGlobalsCPU *kg,
   if constexpr (std::is_same_v<IntegratorGenericState, IntegratorShadowState>) {
     kg->osl.shader_globals.path_state = nullptr;
     kg->osl.shader_globals.shadow_path_state = (const IntegratorShadowStateCPU *)state;
+  }
+  else if constexpr (std::is_same_v<IntegratorGenericState, IntegratorBakeState>) {
+    kg->osl.shader_globals.path_state = nullptr;
+    kg->osl.shader_globals.shadow_path_state = nullptr;
   }
   else {
     kg->osl.shader_globals.path_state = (const IntegratorStateCPU *)state;
@@ -131,9 +137,9 @@ void osl_eval_nodes_surface(const ThreadKernelGlobalsCPU *kg,
       /* set state as if undisplaced */
       if (sd->flag & SD_HAS_DISPLACEMENT) {
         const AttributeDescriptor desc = find_attribute(kg, sd, ATTR_STD_POSITION_UNDISPLACED);
-        kernel_assert(desc.offset != ATTR_STD_NOT_FOUND);
+        kernel_assert(is_attribute_found(desc));
 
-        dual3 P = primitive_surface_attribute<float3>(kg, sd, desc, true, true);
+        dual3 P = primitive_surface_attribute<dual3>(kg, sd, desc);
         object_position_transform(kg, sd, &P);
 
         sd->P = P.val;
@@ -183,35 +189,40 @@ void osl_eval_nodes_surface(const ThreadKernelGlobalsCPU *kg,
 
   /* flatten closure tree */
   if (kg->osl.shader_globals.Ci) {
-    flatten_closure_tree(kg, sd, path_flag, kg->osl.shader_globals.Ci);
+    flatten_closure_tree(kg, sd, path_visibility, path_flag, kg->osl.shader_globals.Ci);
   }
 }
 
 template<>
-void osl_eval_nodes<SHADER_TYPE_SURFACE, IntegratorShadowState>(const ThreadKernelGlobalsCPU *kg,
-                                                                IntegratorShadowState state,
-                                                                ShaderData *sd,
-                                                                const uint32_t path_flag)
+void osl_eval_nodes<SHADER_TYPE_SURFACE, IntegratorShadowState>(
+    const ThreadKernelGlobalsCPU *kg,
+    IntegratorShadowState state,
+    ShaderData *sd,
+    const PathRayVisibility path_visibility,
+    const uint32_t path_flag)
 {
-  osl_eval_nodes_surface(kg, state, sd, path_flag);
+  osl_eval_nodes_surface(kg, state, sd, path_visibility, path_flag);
 }
 
 template<>
 void osl_eval_nodes<SHADER_TYPE_SURFACE, IntegratorState>(const ThreadKernelGlobalsCPU *kg,
                                                           IntegratorState state,
                                                           ShaderData *sd,
+                                                          const PathRayVisibility path_visibility,
                                                           const uint32_t path_flag)
 {
-  osl_eval_nodes_surface(kg, state, sd, path_flag);
+  osl_eval_nodes_surface(kg, state, sd, path_visibility, path_flag);
 }
 
 template<>
-void osl_eval_nodes<SHADER_TYPE_SURFACE, std::nullptr_t>(const ThreadKernelGlobalsCPU *kg,
-                                                         std::nullptr_t state,
-                                                         ShaderData *sd,
-                                                         const uint32_t path_flag)
+void osl_eval_nodes<SHADER_TYPE_SURFACE, IntegratorBakeState>(
+    const ThreadKernelGlobalsCPU *kg,
+    IntegratorBakeState state,
+    ShaderData *sd,
+    const PathRayVisibility path_visibility,
+    const uint32_t path_flag)
 {
-  osl_eval_nodes_surface(kg, state, sd, path_flag);
+  osl_eval_nodes_surface(kg, state, sd, path_visibility, path_flag);
 }
 
 /* Volume */
@@ -220,10 +231,11 @@ template<typename IntegratorGenericState>
 void osl_eval_nodes_volume(const ThreadKernelGlobalsCPU *kg,
                            IntegratorGenericState state,
                            ShaderData *sd,
+                           const PathRayVisibility path_visibility,
                            const uint32_t path_flag)
 {
   /* setup shader globals from shader data */
-  shaderdata_to_shaderglobals(sd, path_flag, &kg->osl.shader_globals);
+  shaderdata_to_shaderglobals(sd, path_visibility, path_flag, &kg->osl.shader_globals);
 
   /* clear trace data */
   kg->osl.tracedata.init = false;
@@ -233,6 +245,10 @@ void osl_eval_nodes_volume(const ThreadKernelGlobalsCPU *kg,
   if constexpr (std::is_same_v<IntegratorGenericState, IntegratorShadowState>) {
     kg->osl.shader_globals.path_state = nullptr;
     kg->osl.shader_globals.shadow_path_state = (const IntegratorShadowStateCPU *)state;
+  }
+  else if constexpr (std::is_same_v<IntegratorGenericState, IntegratorBakeState>) {
+    kg->osl.shader_globals.path_state = nullptr;
+    kg->osl.shader_globals.shadow_path_state = nullptr;
   }
   else {
     kg->osl.shader_globals.path_state = (const IntegratorStateCPU *)state;
@@ -257,35 +273,40 @@ void osl_eval_nodes_volume(const ThreadKernelGlobalsCPU *kg,
 
   /* flatten closure tree */
   if (kg->osl.shader_globals.Ci) {
-    flatten_closure_tree(kg, sd, path_flag, kg->osl.shader_globals.Ci);
+    flatten_closure_tree(kg, sd, path_visibility, path_flag, kg->osl.shader_globals.Ci);
   }
 }
 
 template<>
-void osl_eval_nodes<SHADER_TYPE_VOLUME, IntegratorShadowState>(const ThreadKernelGlobalsCPU *kg,
-                                                               IntegratorShadowState state,
-                                                               ShaderData *sd,
-                                                               const uint32_t path_flag)
+void osl_eval_nodes<SHADER_TYPE_VOLUME, IntegratorShadowState>(
+    const ThreadKernelGlobalsCPU *kg,
+    IntegratorShadowState state,
+    ShaderData *sd,
+    const PathRayVisibility path_visibility,
+    const uint32_t path_flag)
 {
-  osl_eval_nodes_volume(kg, state, sd, path_flag);
+  osl_eval_nodes_volume(kg, state, sd, path_visibility, path_flag);
 }
 
 template<>
 void osl_eval_nodes<SHADER_TYPE_VOLUME, IntegratorState>(const ThreadKernelGlobalsCPU *kg,
                                                          IntegratorState state,
                                                          ShaderData *sd,
+                                                         const PathRayVisibility path_visibility,
                                                          const uint32_t path_flag)
 {
-  osl_eval_nodes_volume(kg, state, sd, path_flag);
+  osl_eval_nodes_volume(kg, state, sd, path_visibility, path_flag);
 }
 
 template<>
-void osl_eval_nodes<SHADER_TYPE_VOLUME, std::nullptr_t>(const ThreadKernelGlobalsCPU *kg,
-                                                        std::nullptr_t state,
-                                                        ShaderData *sd,
-                                                        const uint32_t path_flag)
+void osl_eval_nodes<SHADER_TYPE_VOLUME, IntegratorBakeState>(
+    const ThreadKernelGlobalsCPU *kg,
+    IntegratorBakeState state,
+    ShaderData *sd,
+    const PathRayVisibility path_visibility,
+    const uint32_t path_flag)
 {
-  osl_eval_nodes_volume(kg, state, sd, path_flag);
+  osl_eval_nodes_volume(kg, state, sd, path_visibility, path_flag);
 }
 
 /* Displacement */
@@ -294,18 +315,26 @@ template<typename IntegratorGenericState>
 void osl_eval_nodes_displacement(const ThreadKernelGlobalsCPU *kg,
                                  IntegratorGenericState state,
                                  ShaderData *sd,
+                                 const PathRayVisibility path_visibility,
                                  const uint32_t path_flag)
 {
   /* setup shader globals from shader data */
-  shaderdata_to_shaderglobals(sd, path_flag, &kg->osl.shader_globals);
+  shaderdata_to_shaderglobals(sd, path_visibility, path_flag, &kg->osl.shader_globals);
 
   /* clear trace data */
   kg->osl.tracedata.init = false;
 
   /* Used by render-services. */
   kg->osl.shader_globals.kg = kg;
-  kg->osl.shader_globals.path_state = (const IntegratorStateCPU *)state;
-  kg->osl.shader_globals.shadow_path_state = nullptr;
+
+  if constexpr (std::is_same_v<IntegratorGenericState, IntegratorBakeState>) {
+    kg->osl.shader_globals.path_state = nullptr;
+    kg->osl.shader_globals.shadow_path_state = nullptr;
+  }
+  else {
+    kg->osl.shader_globals.path_state = (const IntegratorStateCPU *)state;
+    kg->osl.shader_globals.shadow_path_state = nullptr;
+  }
 
   /* execute shader */
   OSL::ShadingSystem *ss = (OSL::ShadingSystem *)kg->osl.ss;
@@ -332,32 +361,38 @@ void osl_eval_nodes<SHADER_TYPE_DISPLACEMENT, IntegratorShadowState>(
     const ThreadKernelGlobalsCPU *kg,
     IntegratorShadowState state,
     ShaderData *sd,
+    const PathRayVisibility path_visibility,
     const uint32_t path_flag)
 {
-  osl_eval_nodes_displacement(kg, state, sd, path_flag);
+  osl_eval_nodes_displacement(kg, state, sd, path_visibility, path_flag);
 }
 
 template<>
-void osl_eval_nodes<SHADER_TYPE_DISPLACEMENT, IntegratorState>(const ThreadKernelGlobalsCPU *kg,
-                                                               IntegratorState state,
-                                                               ShaderData *sd,
-                                                               const uint32_t path_flag)
+void osl_eval_nodes<SHADER_TYPE_DISPLACEMENT, IntegratorState>(
+    const ThreadKernelGlobalsCPU *kg,
+    IntegratorState state,
+    ShaderData *sd,
+    const PathRayVisibility path_visibility,
+    const uint32_t path_flag)
 {
-  osl_eval_nodes_displacement(kg, state, sd, path_flag);
+  osl_eval_nodes_displacement(kg, state, sd, path_visibility, path_flag);
 }
 
 template<>
-void osl_eval_nodes<SHADER_TYPE_DISPLACEMENT, std::nullptr_t>(const ThreadKernelGlobalsCPU *kg,
-                                                              std::nullptr_t state,
-                                                              ShaderData *sd,
-                                                              const uint32_t path_flag)
+void osl_eval_nodes<SHADER_TYPE_DISPLACEMENT, IntegratorBakeState>(
+    const ThreadKernelGlobalsCPU *kg,
+    IntegratorBakeState state,
+    ShaderData *sd,
+    const PathRayVisibility path_visibility,
+    const uint32_t path_flag)
 {
-  osl_eval_nodes_displacement(kg, state, sd, path_flag);
+  osl_eval_nodes_displacement(kg, state, sd, path_visibility, path_flag);
 }
 
 /* Camera */
 
 packed_float3 osl_eval_camera(const ThreadKernelGlobalsCPU *kg,
+                              ccl_private ShaderData *sd,
                               const packed_float3 sensor,
                               const packed_float3 dSdx,
                               const packed_float3 dSdy,
@@ -369,12 +404,12 @@ packed_float3 osl_eval_camera(const ThreadKernelGlobalsCPU *kg,
                               packed_float3 &dDdx,
                               packed_float3 &dDdy)
 {
-  if (!kg->osl.globals->camera_state) {
+  if (!kg || !kg->osl.globals->camera_state) {
     return zero_spectrum();
   }
 
   /* Setup shader globals from the sensor position. */
-  cameradata_to_shaderglobals(sensor, dSdx, dSdy, rand_lens, &kg->osl.shader_globals);
+  cameradata_to_shaderglobals(sd, sensor, dSdx, dSdy, rand_lens, &kg->osl.shader_globals);
 
   /* Clear trace data. */
   kg->osl.tracedata.init = false;

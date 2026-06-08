@@ -171,12 +171,14 @@ class GHOST_Wintab {
    */
   GHOST_TabletData getLastTabletData();
 
-  /* Sets Wintab debugging.
+  /**
+   * Sets Wintab debugging.
    * \param debug: True to enable Wintab debugging.
    */
   static void setDebug(bool debug);
 
-  /* Returns whether Wintab logging should occur.
+  /**
+   * Returns whether Wintab logging should occur.
    * \return True if Wintab logging should occur.
    */
   static bool getDebug();
@@ -186,7 +188,7 @@ class GHOST_Wintab {
   unique_hmodule handle_;
   /** Wintab API functions. */
   GHOST_WIN32_WTInfo fp_info_ = nullptr;
-  GHOST_WIN32_WTGet fp_get_ = nullptr;
+  [[maybe_unused]] GHOST_WIN32_WTGet fp_get_ = nullptr;
   GHOST_WIN32_WTSet fp_set_ = nullptr;
   GHOST_WIN32_WTPacketsGet fp_packets_get_ = nullptr;
   GHOST_WIN32_WTEnable fp_enable_ = nullptr;

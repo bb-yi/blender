@@ -2,10 +2,6 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-/**
- * Common public resources to use the light-probes.
- */
-
 #ifdef GPU_SHADER
 #  pragma once
 #  include "gpu_shader_compat.hh"
@@ -26,8 +22,6 @@ GPU_SHADER_CREATE_END()
 GPU_SHADER_CREATE_INFO(eevee_volume_probe_data)
 TYPEDEF_SOURCE("eevee_lightprobe_shared.hh")
 UNIFORM_BUF(IRRADIANCE_GRID_BUF_SLOT, VolumeProbeData, grids_infos_buf[IRRADIANCE_GRID_MAX])
-/* NOTE: Use uint instead of IrradianceBrickPacked because Metal needs to know the exact type.
- */
 STORAGE_BUF(IRRADIANCE_BRICK_BUF_SLOT, read, uint, bricks_infos_buf[])
 SAMPLER(VOLUME_PROBE_TEX_SLOT, sampler3D, irradiance_atlas_tx)
 DEFINE("IRRADIANCE_GRID_SAMPLING")

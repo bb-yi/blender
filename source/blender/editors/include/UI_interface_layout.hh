@@ -30,6 +30,11 @@ struct PointerRNA;
 struct PropertyRNA;
 struct StructRNA;
 struct wmOperatorType;
+struct TextboxState;
+
+namespace wm {
+enum class OpCallContext : int8_t;
+}
 
 /* Layout
  *
@@ -54,13 +59,6 @@ struct ItemInternal;
 struct LayoutInternal;
 struct Layout;
 struct LayoutRoot;
-}  // namespace ui
-
-namespace wm {
-enum class OpCallContext : int8_t;
-}
-
-namespace ui {
 
 struct PanelLayout {
   Layout *header;
@@ -330,10 +328,10 @@ struct Layout : public Item, NonCopyable, NonMovable {
    * The open-state of the panel is defined by an RNA property which is passed in as a pointer +
    * property name pair. This gives the caller flexibility to decide who should own the open-state.
    *
+   * \note Only layouts that span the full width of the region are supported for now.
+   *
    * \param C: The context is necessary because sometimes the panel may be forced to be open by the
    * context even of the open-property is `false`. This can happen with e.g. property search.
-   * \param layout: The `Layout` that should contain the sub-panel.
-   * Only layouts that span the full width of the region are supported for now.
    * \param open_prop_owner: Data that contains the open-property.
    * \param open_prop_name: Name of the open-property in `open_prop_owner`.
    *
@@ -384,7 +382,7 @@ struct Layout : public Item, NonCopyable, NonMovable {
 
   /**
    * Add a new split sub-layout, items placed in this sub-layout are added horizontally next to
-   * each other in row, but width is splitted between the first item and remaining items.
+   * each other in row, but width is split between the first item and remaining items.
    * \param percentage: Width percent to split.
    */
   Layout &split(float percentage, bool align);
@@ -405,6 +403,11 @@ struct Layout : public Item, NonCopyable, NonMovable {
 
   /** Adds a label item that will display text and/or icon in the layout. */
   void label(StringRef name, int icon);
+
+  /**
+   * Adds link item, displays a url that can be clicked in the layout.
+   */
+  void link(StringRef url, StringRef name, int icon);
 
   /**
    * Adds a menu item, which is a button that when active will display a menu.
@@ -630,9 +633,9 @@ struct Layout : public Item, NonCopyable, NonMovable {
    * Adds a RNA enum/pointer/string/ property item, and exposes it into the layout. Button input
    * would suggest values from the search property collection.
    * \param searchprop: Collection property in \a searchptr from where to take input values.
-   * \param results_are_suggestions: Allow inputs that not match any suggested value.
    * \param item_searchpropname: The name of the string property in the collection items to use for
-   *        searching (if unset, code will use RNA_struc.
+   *        searching (if unset, code will use RNA_struct).
+   * \param results_are_suggestions: Allow inputs that not match any suggested value.
    */
   void prop_search(PointerRNA *ptr,
                    PropertyRNA *prop,
@@ -645,7 +648,7 @@ struct Layout : public Item, NonCopyable, NonMovable {
   /**
    * Adds a RNA enum/pointer/string/ property item, and exposes it into the layout. Button input
    * would suggest values from the search property collection, input must match a suggested value.
-   * \param searchprop: Collection property in \a searchptr from where to take input values.
+   * \param searchpropname: Collection property in \a searchptr from where to take input values.
    */
   void prop_search(PointerRNA *ptr,
                    StringRefNull propname,
@@ -653,6 +656,23 @@ struct Layout : public Item, NonCopyable, NonMovable {
                    StringRefNull searchpropname,
                    std::optional<StringRefNull> name,
                    int icon);
+
+  /**
+   * Adds a string property item as textbox, this will let multi-line text editing, textbox state
+   * will be persistent at runtime.
+   */
+  void textbox(const bContext *C,
+               PointerRNA *ptr,
+               StringRefNull propname,
+               std::optional<StringRefNull> placeholder = std::nullopt);
+  /**
+   * Adds a string property item as textbox, this will let multi-line text editing.
+   * \param textbox_state: custom allocation for persistent textbox state.
+   */
+  void textbox_with_state(PointerRNA *ptr,
+                          StringRefNull propname,
+                          TextboxState *textbox_state,
+                          std::optional<StringRefNull> placeholder = std::nullopt);
 
   /**
    * Adds a RNA property item, and sets a custom popover to expose its value.
@@ -666,6 +686,15 @@ struct Layout : public Item, NonCopyable, NonMovable {
                          int icon,
                          const char *panel_type);
 
+  /**
+   * Adds a RNA property item, and sets a custom menu to expose its value.
+   */
+  void prop_with_menu(PointerRNA *ptr,
+                      blender::StringRefNull propname,
+                      eUI_Item_Flag flag,
+                      std::optional<blender::StringRefNull> name,
+                      int icon,
+                      const char *menu_type);
   /**
    * Adds a RNA property item, and sets a custom menu to expose its value.
    */
@@ -867,7 +896,8 @@ bool block_layout_needs_resolving(const Block *block);
 void block_layout_free(Block *block);
 
 enum eUI_Item_Flag : uint16_t {
-  /* ITEM_O_RETURN_PROPS = 1 << 0, */ /* UNUSED */
+  /** Align text input to the right. */
+  ITEM_R_TEXT_RIGHT = 1 << 0,
   ITEM_R_EXPAND = 1 << 1,
   ITEM_R_SLIDER = 1 << 2,
   /**
@@ -918,10 +948,10 @@ bool block_apply_search_filter(Block *block, const char *search_filter);
  *
  * \param func: The callback function that gets called to get tooltip content
  * \param arg: An optional opaque pointer that gets passed to func
- * \param free_arg: An optional callback for freeing arg (can be set to e.g. MEM_delete)
  * \param copy_arg: An optional callback for duplicating arg in case button_func_tooltip_set
  * is being called on multiple buttons (can be set to e.g. MEM_dupalloc). If set to NULL, arg will
  * be passed as-is to all buttons.
+ * \param free_arg: An optional callback for freeing arg (can be set to e.g. MEM_delete)
  */
 void uiLayoutSetTooltipFunc(
     Layout *layout, ButtonToolTipFunc func, void *arg, CopyArgFunc copy_arg, FreeArgFunc free_arg);

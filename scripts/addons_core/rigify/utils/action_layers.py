@@ -77,7 +77,7 @@ class ActionSlotBase:
         return get_name_side(self.subtarget)
 
     def get_min_max(self, side=Side.MIDDLE) -> Tuple[float, float]:
-        if side == -self.default_side:
+        if side == -self.default_side and side != Side.MIDDLE:
             # Flip min/max in some cases - based on code of Paste Pose Flipped
             if self.transform_channel in ['LOCATION_X', 'ROTATION_Z', 'ROTATION_Y']:
                 return -self.trans_min, -self.trans_max

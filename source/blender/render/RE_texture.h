@@ -38,7 +38,6 @@ bool RE_texture_evaluate(const struct MTex *mtex,
                          float r_rgba[4]) ATTR_NONNULL(1, 2, 7, 8);
 
 /**
- * \param in: Destination
  * \param tex: Texture.
  * \param out: Previous color.
  * \param fact: Texture strength.
@@ -46,12 +45,8 @@ bool RE_texture_evaluate(const struct MTex *mtex,
  */
 float texture_value_blend(float tex, float out, float fact, float facg, int blendtype);
 
-void RE_texture_rng_init(void);
-void RE_texture_rng_exit(void);
-
-/* `texture_image.cc` */
-
-void ibuf_sample(struct ImBuf *ibuf, float fx, float fy, float dx, float dy, float result[4]);
+void RE_texture_rng_init();
+void RE_texture_rng_exit();
 
 /* `texture_procedural.cc` */
 

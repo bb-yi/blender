@@ -27,10 +27,13 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.use_custom_socket_order();
   b.allow_any_socket_order();
 
-  b.add_input<decl::Int>("Count").default_value(1).min(1).description(
-      "The number of elements in the list");
+  b.add_input<decl::Int>("Count"_ustr)
+      .default_value(1)
+      .min(1)
+      .description("The number of elements in the list");
 
   const bNode *node = b.node_or_null();
+  const bNodeTree *tree = b.tree_or_null();
   if (!node) {
     return;
   }
@@ -39,19 +42,24 @@ static void node_declare(NodeDeclarationBuilder &b)
 
   for (const int i : items.index_range()) {
     const GeometryNodeFieldToListItem &item = items[i];
-    const auto type = eNodeSocketDatatype(item.socket_type);
+    const eNodeSocketDatatype type = item.socket_type;
     const std::string input_identifier = ItemsAccessor::input_socket_identifier_for_item(item);
     const std::string output_identifier = ItemsAccessor::output_socket_identifier_for_item(item);
+    const UString name(item.name);
 
-    b.add_input(type, item.name, input_identifier).supports_field();
-    b.add_output(type, item.name, output_identifier)
+    b.add_input(type, name, UString(input_identifier))
+        .structure_type(StructureType::Field)
+        .socket_name_ptr(&tree->id, *ItemsAccessor::item_srna, &item, "name");
+    b.add_output(type, name, UString(output_identifier))
         .structure_type(StructureType::List)
         .align_with_previous()
         .description("Output list with evaluated field values");
   }
 
-  b.add_input<decl::Extend>("", "__extend__").structure_type(StructureType::Field);
-  b.add_output<decl::Extend>("", "__extend__")
+  b.add_input<decl::Extend>(""_ustr, "__extend__"_ustr)
+      .structure_type(StructureType::Field)
+      .custom_draw(socket_items::ui::draw_extend_socket_fn<FieldToListItemsAccessor>());
+  b.add_output<decl::Extend>(""_ustr, "__extend__"_ustr)
       .structure_type(StructureType::List)
       .align_with_previous();
 }
@@ -72,37 +80,38 @@ static void node_layout_ex(ui::Layout &layout, bContext *C, PointerRNA *ptr)
 
 static void node_gather_link_search_ops(GatherLinkSearchOpParams &params)
 {
-  if (!U.experimental.use_geometry_nodes_lists) {
-    return;
-  }
-  const eNodeSocketDatatype data_type = eNodeSocketDatatype(params.other_socket().type);
+  const eNodeSocketDatatype data_type = params.other_socket().type;
   if (params.in_out() == SOCK_IN) {
     if (params.node_tree().typeinfo->validate_link(data_type, SOCK_INT)) {
       params.add_item(IFACE_("Count"), [](LinkSearchOpParams &params) {
-        bNode &node = params.add_node("GeometryNodeFieldToList");
-        params.update_and_connect_available_socket(node, "Count");
+        bNode &node = params.add_node("GeometryNodeFieldToList"_ustr);
+        params.update_and_connect_available_socket(node, "Count"_ustr);
       });
     }
-    params.add_item(IFACE_("Field"), [data_type](LinkSearchOpParams &params) {
-      bNode &node = params.add_node("GeometryNodeFieldToList");
-      socket_items::add_item_with_socket_type_and_name<ItemsAccessor>(
-          params.node_tree, node, data_type, params.socket.name);
-      params.update_and_connect_available_socket(node, params.socket.name);
-    });
+    if (ItemsAccessor::supports_socket_type(data_type, NTREE_GEOMETRY)) {
+      params.add_item(IFACE_("Field"), [data_type](LinkSearchOpParams &params) {
+        bNode &node = params.add_node("GeometryNodeFieldToList"_ustr);
+        socket_items::add_item_with_socket_type_and_name<ItemsAccessor>(
+            params.node_tree, node, data_type, params.socket.name);
+        params.update_and_connect_available_socket(node, UString(params.socket.name));
+      });
+    }
   }
   else {
-    params.add_item(IFACE_("List"), [data_type](LinkSearchOpParams &params) {
-      bNode &node = params.add_node("GeometryNodeFieldToList");
-      socket_items::add_item_with_socket_type_and_name<ItemsAccessor>(
-          params.node_tree, node, data_type, params.socket.name);
-      params.update_and_connect_available_socket(node, params.socket.name);
-    });
+    if (ItemsAccessor::supports_socket_type(data_type, NTREE_GEOMETRY)) {
+      params.add_item(IFACE_("List"), [data_type](LinkSearchOpParams &params) {
+        bNode &node = params.add_node("GeometryNodeFieldToList"_ustr);
+        socket_items::add_item_with_socket_type_and_name<ItemsAccessor>(
+            params.node_tree, node, data_type, params.socket.name);
+        params.update_and_connect_available_socket(node, UString(params.socket.name));
+      });
+    }
   }
 }
 
 static void node_geo_exec(GeoNodeExecParams params)
 {
-  const int count = params.extract_input<int>("Count");
+  const int count = params.extract_input<int>("Count"_ustr);
   if (count < 0) {
     params.error_message_add(NodeWarningType::Error, "Count must not be negative");
     params.set_default_remaining_outputs();
@@ -113,30 +122,33 @@ static void node_geo_exec(GeoNodeExecParams params)
 
   Vector<int> required_items;
   for (const int i : items.index_range()) {
-    if (params.output_is_required(ItemsAccessor::output_socket_identifier_for_item(items[i]))) {
+    if (params.output_is_required(
+            UString(ItemsAccessor::output_socket_identifier_for_item(items[i]))))
+    {
       required_items.append(i);
     }
   }
 
-  Vector<fn::GField> fields(required_items.size());
+  Vector<fn::GField> fields;
+  fields.reserve(required_items.size());
   for (const int i : required_items.index_range()) {
     const int item_i = required_items[i];
     const std::string identifier = ItemsAccessor::input_socket_identifier_for_item(items[item_i]);
-    fields[i] = params.extract_input<fn::GField>(identifier);
+    fields.append(params.extract_input<fn::GField>(UString(identifier)));
   }
 
-  Vector<ListPtr> lists(required_items.size());
+  Vector<GListPtr> lists(required_items.size());
   for (const int i : required_items.index_range()) {
     const int item_i = required_items[i];
-    const auto type = eNodeSocketDatatype(items[item_i].socket_type);
+    const eNodeSocketDatatype type = items[item_i].socket_type;
     const CPPType &cpp_type = *bke::socket_type_to_geo_nodes_base_cpp_type(type);
-    lists[i] = List::create(cpp_type, List::ArrayData::ForUninitialized(cpp_type, count), count);
+    lists[i] = GList::create(cpp_type, GList::ArrayData::ForUninitialized(cpp_type, count), count);
   }
 
   Array<GMutableSpan> list_values(lists.size());
   for (const int i : lists.index_range()) {
     list_values[i] = {lists[i]->cpp_type(),
-                      const_cast<void *>(std::get<List::ArrayData>(lists[i]->data()).data),
+                      const_cast<void *>(std::get<GList::ArrayData>(lists[i]->data()).data),
                       count};
   }
 
@@ -144,7 +156,7 @@ static void node_geo_exec(GeoNodeExecParams params)
   fn::FieldEvaluator evaluator{context, count};
   for (const int i : fields.index_range()) {
     GMutableSpan values(lists[i]->cpp_type(),
-                        const_cast<void *>(std::get<List::ArrayData>(lists[i]->data()).data),
+                        const_cast<void *>(std::get<GList::ArrayData>(lists[i]->data()).data),
                         count);
     evaluator.add_with_destination(std::move(fields[i]), values);
   }
@@ -154,7 +166,7 @@ static void node_geo_exec(GeoNodeExecParams params)
   for (const int i : required_items.index_range()) {
     const int item_i = required_items[i];
     const std::string identifier = ItemsAccessor::output_socket_identifier_for_item(items[item_i]);
-    params.set_output(identifier, std::move(lists[i]));
+    params.set_output(UString(identifier), std::move(lists[i]));
   }
 }
 
@@ -203,13 +215,13 @@ static const bNodeSocket *node_internally_linked_input(const bNodeTree & /*tree*
                                                        const bNode &node,
                                                        const bNodeSocket &output_socket)
 {
-  return node.input_by_identifier(output_socket.identifier);
+  return node.input_by_identifier(output_socket.identifier_ustr());
 }
 
 static void node_register()
 {
   static blender::bke::bNodeType ntype;
-  geo_node_type_base(&ntype, "GeometryNodeFieldToList");
+  geo_node_type_base(&ntype, "GeometryNodeFieldToList"_ustr);
   ntype.ui_name = "Field to List";
   ntype.ui_description = "Create a list of values";
   ntype.nclass = NODE_CLASS_CONVERTER;
@@ -238,7 +250,7 @@ StructRNA **FieldToListItemsAccessor::item_srna = &RNA_GeometryNodeFieldToListIt
 
 void FieldToListItemsAccessor::blend_write_item(BlendWriter *writer, const ItemT &item)
 {
-  BLO_write_string(writer, item.name);
+  writer->write_string(item.name);
 }
 
 void FieldToListItemsAccessor::blend_read_data_item(BlendDataReader *reader, ItemT &item)

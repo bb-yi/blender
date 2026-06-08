@@ -22,16 +22,14 @@ CCL_NAMESPACE_BEGIN
 /* Reading attributes on various point elements */
 
 template<typename T>
-ccl_device dual<T> point_attribute(KernelGlobals kg,
-                                   const ccl_private ShaderData *sd,
-                                   const AttributeDescriptor desc,
-                                   const bool /* dx */ = false,
-                                   const bool /* dy */ = false)
+ccl_device T point_attribute(KernelGlobals kg,
+                             const ccl_private ShaderData *sd,
+                             const AttributeDescriptor desc)
 {
   if (desc.element & ATTR_ELEMENT_VERTEX) {
-    return dual<T>(attribute_data_fetch<T>(kg, desc.element, desc.offset + sd->prim));
+    return T(attribute_data_fetch<dual_base_t<T>>(kg, desc.element, desc.offset + sd->prim));
   }
-  return make_zero<dual<T>>();
+  return make_zero<T>();
 }
 
 /* Point position */
@@ -40,9 +38,10 @@ ccl_device float3 point_position(KernelGlobals kg, const ccl_private ShaderData 
 {
   if (sd->type & PRIMITIVE_POINT) {
     /* World space center. */
+    const int position_offset = kernel_data_fetch(objects, sd->object).position_offset;
     float3 P = (sd->type & PRIMITIVE_MOTION) ?
                    make_float3(motion_point(kg, sd->object, sd->prim, sd->time)) :
-                   make_float3(kernel_data_fetch(points, sd->prim));
+                   make_float3(kernel_data_fetch(attributes_float4, position_offset + sd->prim));
 
     if (!(sd->object_flag & SD_OBJECT_TRANSFORM_APPLIED)) {
       object_position_transform(kg, sd, &P);
@@ -60,7 +59,8 @@ ccl_device float point_radius(KernelGlobals kg, const ccl_private ShaderData *sd
 {
   if (sd->type & PRIMITIVE_POINT) {
     /* World space radius. */
-    const float r = kernel_data_fetch(points, sd->prim).w;
+    const int position_offset = kernel_data_fetch(objects, sd->object).position_offset;
+    const float r = kernel_data_fetch(attributes_float4, position_offset + sd->prim).w;
 
     if (sd->object_flag & SD_OBJECT_TRANSFORM_APPLIED) {
       return r;
@@ -81,7 +81,7 @@ ccl_device float point_random(KernelGlobals kg, const ccl_private ShaderData *sd
 {
   if (sd->type & PRIMITIVE_POINT) {
     const AttributeDescriptor desc = find_attribute(kg, sd, ATTR_STD_POINT_RANDOM);
-    return (desc.offset != ATTR_STD_NOT_FOUND) ? point_attribute<float>(kg, sd, desc).val : 0.0f;
+    return is_attribute_found(desc) ? point_attribute<float>(kg, sd, desc) : 0.0f;
   }
   return 0.0f;
 }
@@ -91,7 +91,8 @@ ccl_device float point_random(KernelGlobals kg, const ccl_private ShaderData *sd
 
 ccl_device float3 point_motion_center_location(KernelGlobals kg, const ccl_private ShaderData *sd)
 {
-  return make_float3(kernel_data_fetch(points, sd->prim));
+  const int position_offset = kernel_data_fetch(objects, sd->object).position_offset;
+  return make_float3(kernel_data_fetch(attributes_float4, position_offset + sd->prim));
 }
 
 #endif /* __POINTCLOUD__ */

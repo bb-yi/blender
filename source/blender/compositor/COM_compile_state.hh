@@ -17,6 +17,8 @@
 
 namespace blender::compositor {
 
+struct Schedule;
+
 /* ------------------------------------------------------------------------------------------------
  * Compile State
  *
@@ -120,7 +122,7 @@ class CompileState {
   /* A reference to the compositor context. */
   const Context &context_;
   /* A reference to the node execution schedule that is being compiled. */
-  const VectorSet<const bNode *> &schedule_;
+  const Schedule &schedule_;
   /* Those two maps associate each node with the operation it was compiled into. Each node is
    * either compiled into a node operation and added to node_operations, or compiled into a pixel
    * operation and added to pixel_operations. Those maps are used to retrieve the results of
@@ -141,10 +143,10 @@ class CompileState {
 
  public:
   /* Construct a compile state from the node group execution schedule being compiled. */
-  CompileState(const Context &context, const VectorSet<const bNode *> &schedule);
+  CompileState(const Context &context, const Schedule &schedule);
 
   /* Get a reference to the node execution schedule being compiled. */
-  const VectorSet<const bNode *> &get_schedule();
+  const Schedule &get_schedule();
 
   /* Add an association between the given node and the give node operation that the node was
    * compiled into in the node_operations_ map. */

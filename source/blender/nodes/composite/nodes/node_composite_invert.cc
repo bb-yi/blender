@@ -22,16 +22,16 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.use_custom_socket_order();
   b.allow_any_socket_order();
   b.is_function_node();
-  b.add_input<decl::Color>("Color").default_value({1.0f, 1.0f, 1.0f, 1.0f}).hide_value();
-  b.add_output<decl::Color>("Color").align_with_previous();
+  b.add_input<decl::Color>("Color"_ustr).default_value({1.0f, 1.0f, 1.0f, 1.0f}).hide_value();
+  b.add_output<decl::Color>("Color"_ustr).align_with_previous();
 
-  b.add_input<decl::Float>("Factor", "Fac")
+  b.add_input<decl::Float>("Factor"_ustr, "Fac"_ustr)
       .default_value(1.0f)
       .min(0.0f)
       .max(1.0f)
       .subtype(PROP_FACTOR);
-  b.add_input<decl::Bool>("Invert Color").default_value(true);
-  b.add_input<decl::Bool>("Invert Alpha").default_value(false);
+  b.add_input<decl::Bool>("Invert Color"_ustr).default_value(true);
+  b.add_input<decl::Bool>("Invert Alpha"_ustr).default_value(false);
 }
 
 using namespace blender::compositor;
@@ -76,7 +76,7 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, "CompositorNodeInvert", CMP_NODE_INVERT);
+  cmp_node_type_base(&ntype, "CompositorNodeInvert"_ustr, CMP_NODE_INVERT);
   ntype.ui_name = "Invert Color";
   ntype.ui_description = "Invert colors, producing a negative";
   ntype.enum_name_legacy = "INVERT";

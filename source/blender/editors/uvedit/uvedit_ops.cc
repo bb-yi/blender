@@ -52,6 +52,7 @@
 
 #include "RNA_access.hh"
 #include "RNA_define.hh"
+#include "RNA_enum_types.hh"
 
 #include "WM_api.hh"
 #include "WM_message.hh"
@@ -295,7 +296,8 @@ bool ED_uvedit_center_multi(const Scene *scene,
   return changed;
 }
 
-bool ED_uvedit_center_from_pivot_ex(const SpaceImage *sima,
+bool ED_uvedit_center_from_pivot_ex(const Main &bmain,
+                                    const SpaceImage *sima,
                                     Scene *scene,
                                     ViewLayer *view_layer,
                                     float r_center[2],
@@ -310,7 +312,7 @@ bool ED_uvedit_center_from_pivot_ex(const SpaceImage *sima,
       if (r_has_select != nullptr) {
         Vector<Object *> objects =
             BKE_view_layer_array_from_objects_in_edit_mode_unique_data_with_uvs(
-                scene, view_layer, nullptr);
+                bmain, scene, view_layer, nullptr);
         *r_has_select = uvedit_select_is_any_selected_multi(scene, objects);
       }
       break;
@@ -318,7 +320,7 @@ bool ED_uvedit_center_from_pivot_ex(const SpaceImage *sima,
     default: {
       Vector<Object *> objects =
           BKE_view_layer_array_from_objects_in_edit_mode_unique_data_with_uvs(
-              scene, view_layer, nullptr);
+              bmain, scene, view_layer, nullptr);
       changed = ED_uvedit_center_multi(scene, objects, r_center, mode);
       if (r_has_select != nullptr) {
         *r_has_select = changed;
@@ -342,11 +344,12 @@ enum class UVMoveDirection {
 static wmOperatorStatus uv_move_on_axis_exec(bContext *C, wmOperator *op)
 
 {
+  const Main *bmain = CTX_data_main(C);
   Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
   SpaceImage *sima = CTX_wm_space_image(C);
   Vector<Object *> objects = BKE_view_layer_array_from_objects_in_edit_mode_unique_data_with_uvs(
-      scene, view_layer, nullptr);
+      *bmain, scene, view_layer, nullptr);
   UVMoveType type = UVMoveType(RNA_enum_get(op->ptr, "type"));
   UVMoveDirection axis = UVMoveDirection(RNA_enum_get(op->ptr, "axis"));
   int distance = RNA_int_get(op->ptr, "distance");
@@ -408,7 +411,7 @@ static void UV_OT_move_on_axis(wmOperatorType *ot)
 
   /* API callbacks. */
   ot->exec = uv_move_on_axis_exec;
-  ot->poll = ED_operator_uvedit;
+  ot->poll = ED_operator_uvedit_space_image;
 
   /* properties */
   RNA_def_enum(ot->srna, "type", shift_items, int(UVMoveType::Udim), "Type", "Move Type");
@@ -716,12 +719,13 @@ static bool uvedit_uv_islands_arrange(const Scene *scene,
 
 static wmOperatorStatus uv_arrange_islands_exec(bContext *C, wmOperator *op)
 {
+  const Main *bmain = CTX_data_main(C);
   Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
   SpaceImage *sima = CTX_wm_space_image(C);
 
   Vector<Object *> objects = BKE_view_layer_array_from_objects_in_edit_mode_unique_data_with_uvs(
-      scene, view_layer, nullptr);
+      *bmain, scene, view_layer, nullptr);
 
   const UVAlignInitialPosition initial_position = UVAlignInitialPosition(
       RNA_enum_get(op->ptr, "initial_position"));
@@ -896,13 +900,14 @@ static void UV_OT_arrange_islands(wmOperatorType *ot)
 
 static void uv_weld(bContext *C)
 {
+  const Main *bmain = CTX_data_main(C);
   Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
   SpaceImage *sima = CTX_wm_space_image(C);
   float cent[2];
 
   Vector<Object *> objects = BKE_view_layer_array_from_objects_in_edit_mode_unique_data_with_uvs(
-      scene, view_layer, nullptr);
+      *bmain, scene, view_layer, nullptr);
 
   ED_uvedit_center_multi(scene, objects, cent, 0);
 
@@ -926,6 +931,7 @@ static void uv_weld(bContext *C)
 
 static void uv_align(bContext *C, eUVWeldAlign tool, UVAlignPositionMode position_mode)
 {
+  const Main *bmain = CTX_data_main(C);
   Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
   SpaceImage *sima = CTX_wm_space_image(C);
@@ -934,7 +940,7 @@ static void uv_align(bContext *C, eUVWeldAlign tool, UVAlignPositionMode positio
   INIT_MINMAX2(min, max);
 
   Vector<Object *> objects = BKE_view_layer_array_from_objects_in_edit_mode_unique_data_with_uvs(
-      scene, view_layer, nullptr);
+      *bmain, scene, view_layer, nullptr);
 
   if (tool == UV_ALIGN_AUTO) {
     ED_uvedit_foreach_uv_multi(
@@ -1070,6 +1076,7 @@ static void UV_OT_align(wmOperatorType *ot)
 
 static wmOperatorStatus uv_remove_doubles_to_selected(bContext *C, wmOperator *op)
 {
+  const Main *bmain = CTX_data_main(C);
   Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
   SpaceImage *sima = CTX_wm_space_image(C);
@@ -1077,7 +1084,7 @@ static wmOperatorStatus uv_remove_doubles_to_selected(bContext *C, wmOperator *o
   const float threshold = RNA_float_get(op->ptr, "threshold");
 
   Vector<Object *> objects = BKE_view_layer_array_from_objects_in_edit_mode_unique_data_with_uvs(
-      scene, view_layer, nullptr);
+      *bmain, scene, view_layer, nullptr);
 
   bool *changed = MEM_new_array_zeroed<bool>(objects.size(), __func__);
 
@@ -1097,7 +1104,7 @@ static wmOperatorStatus uv_remove_doubles_to_selected(bContext *C, wmOperator *o
     uv_maxlen += em->bm->totloop;
   }
 
-  KDTree_2d *tree = kdtree_2d_new(uv_maxlen);
+  KDTree<float2> *tree = kdtree_new<float2>(uv_maxlen);
 
   Vector<int> duplicates;
   Vector<float *> uv_map_arr;
@@ -1108,7 +1115,7 @@ static wmOperatorStatus uv_remove_doubles_to_selected(bContext *C, wmOperator *o
     Object *obedit = objects[ob_index];
     BMEditMesh *em = BKE_editmesh_from_object(obedit);
     ED_uvedit_foreach_uv(scene, em->bm, true, true, [&](float luv[2]) {
-      kdtree_2d_insert(tree, uv_map_count, luv);
+      kdtree_insert<float2>(tree, uv_map_count, luv);
       duplicates.append(-1);
       uv_map_arr.append(luv);
       uv_map_count++;
@@ -1117,8 +1124,9 @@ static wmOperatorStatus uv_remove_doubles_to_selected(bContext *C, wmOperator *o
     ob_uv_map_max_idx[ob_index] = uv_map_count - 1;
   }
 
-  kdtree_2d_balance(tree);
-  int found_duplicates = kdtree_2d_calc_duplicates_fast(tree, threshold, false, duplicates.data());
+  kdtree_balance<float2>(tree);
+  int found_duplicates = kdtree_calc_duplicates_fast<float2>(
+      tree, threshold, false, duplicates.data());
 
   if (found_duplicates > 0) {
     /* Calculate average uv for duplicates. */
@@ -1174,7 +1182,7 @@ static wmOperatorStatus uv_remove_doubles_to_selected(bContext *C, wmOperator *o
     }
   }
 
-  kdtree_2d_free(tree);
+  kdtree_free<float2>(tree);
   MEM_delete(changed);
   MEM_delete(ob_uv_map_max_idx);
 
@@ -1183,13 +1191,14 @@ static wmOperatorStatus uv_remove_doubles_to_selected(bContext *C, wmOperator *o
 
 static wmOperatorStatus uv_remove_doubles_to_unselected(bContext *C, wmOperator *op)
 {
+  const Main *bmain = CTX_data_main(C);
   Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
   SpaceImage *sima = CTX_wm_space_image(C);
   const float threshold = RNA_float_get(op->ptr, "threshold");
 
   Vector<Object *> objects = BKE_view_layer_array_from_objects_in_edit_mode_unique_data_with_uvs(
-      scene, view_layer, nullptr);
+      *bmain, scene, view_layer, nullptr);
 
   /* Calculate max possible number of kdtree nodes. */
   int uv_maxlen = 0;
@@ -1198,7 +1207,7 @@ static wmOperatorStatus uv_remove_doubles_to_unselected(bContext *C, wmOperator 
     uv_maxlen += em->bm->totloop;
   }
 
-  KDTree_2d *tree = kdtree_2d_new(uv_maxlen);
+  KDTree<float2> *tree = kdtree_new<float2>(uv_maxlen);
 
   Vector<float *> uv_map_arr;
 
@@ -1206,20 +1215,20 @@ static wmOperatorStatus uv_remove_doubles_to_unselected(bContext *C, wmOperator 
 
   /* Add visible non-selected uvs to tree */
   ED_uvedit_foreach_uv_multi(scene, objects, true, false, [&](float luv[2]) {
-    kdtree_2d_insert(tree, uv_map_count, luv);
+    kdtree_insert<float2>(tree, uv_map_count, luv);
     uv_map_arr.append(luv);
     uv_map_count++;
   });
 
-  kdtree_2d_balance(tree);
+  kdtree_balance<float2>(tree);
 
   /* For each selected uv, find duplicate non selected uv. */
   for (Object *obedit : objects) {
     bool changed = false;
     BMEditMesh *em = BKE_editmesh_from_object(obedit);
     ED_uvedit_foreach_uv(scene, em->bm, true, true, [&](float luv[2]) {
-      KDTreeNearest_2d nearest;
-      const int i = kdtree_2d_find_nearest(tree, luv, &nearest);
+      KDTreeNearest<float2> nearest;
+      const int i = kdtree_find_nearest<float2>(tree, luv, &nearest);
 
       if (i != -1 && nearest.dist < threshold) {
         copy_v2_v2(luv, uv_map_arr[i]);
@@ -1234,7 +1243,7 @@ static wmOperatorStatus uv_remove_doubles_to_unselected(bContext *C, wmOperator 
     }
   }
 
-  kdtree_2d_free(tree);
+  kdtree_free<float2>(tree);
 
   return OPERATOR_FINISHED;
 }
@@ -1244,11 +1253,12 @@ static wmOperatorStatus uv_remove_doubles_to_selected_shared_vertex(bContext *C,
   /* NOTE: The calculation for the center-point of loops belonging to a vertex will be skewed
    * if one UV coordinate holds more loops than the others. */
 
+  const Main *bmain = CTX_data_main(C);
   Scene *scene = CTX_data_scene(C);
   SpaceImage *sima = CTX_wm_space_image(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
   Vector<Object *> objects = BKE_view_layer_array_from_objects_in_edit_mode_unique_data_with_uvs(
-      scene, view_layer, nullptr);
+      *bmain, scene, view_layer, nullptr);
 
   /* Only use the squared distance, to avoid a square-root. */
   const float threshold_sq = math::square(RNA_float_get(op->ptr, "threshold"));
@@ -1462,12 +1472,13 @@ static wmOperatorStatus uv_snap_cursor_exec(bContext *C, wmOperator *op)
       changed = true;
       break;
     case 1: {
+      const Main *bmain = CTX_data_main(C);
       Scene *scene = CTX_data_scene(C);
       ViewLayer *view_layer = CTX_data_view_layer(C);
 
       Vector<Object *> objects =
           BKE_view_layer_array_from_objects_in_edit_mode_unique_data_with_uvs(
-              scene, view_layer, nullptr);
+              *bmain, scene, view_layer, nullptr);
       changed = uv_snap_cursor_to_selection(scene, objects, sima);
       break;
     }
@@ -1618,6 +1629,7 @@ static bool uv_snap_uvs_to_pixels(SpaceImage *sima, Scene *scene, Object *obedit
 
 static wmOperatorStatus uv_snap_selection_exec(bContext *C, wmOperator *op)
 {
+  const Main *bmain = CTX_data_main(C);
   Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
   SpaceImage *sima = CTX_wm_space_image(C);
@@ -1625,7 +1637,7 @@ static wmOperatorStatus uv_snap_selection_exec(bContext *C, wmOperator *op)
   float offset[2] = {0};
 
   Vector<Object *> objects = BKE_view_layer_array_from_objects_in_edit_mode_unique_data_with_uvs(
-      scene, view_layer, nullptr);
+      *bmain, scene, view_layer, nullptr);
 
   if (target == 2) {
     float center[2];
@@ -1703,6 +1715,7 @@ static void UV_OT_snap_selected(wmOperatorType *ot)
 
 static wmOperatorStatus uv_pin_exec(bContext *C, wmOperator *op)
 {
+  const Main *bmain = CTX_data_main(C);
   Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
   BMFace *efa;
@@ -1712,7 +1725,7 @@ static wmOperatorStatus uv_pin_exec(bContext *C, wmOperator *op)
   const bool invert = RNA_boolean_get(op->ptr, "invert");
 
   Vector<Object *> objects = BKE_view_layer_array_from_objects_in_edit_mode_unique_data_with_uvs(
-      scene, view_layer, nullptr);
+      *bmain, scene, view_layer, nullptr);
 
   for (Object *obedit : objects) {
     Mesh &mesh = *id_cast<Mesh *>(obedit->data);
@@ -1801,6 +1814,51 @@ static void UV_OT_pin(wmOperatorType *ot)
 #define UV_EDGE_SEL_TEST(ts, bm, l, bool_test) \
   (uvedit_edge_select_get_no_sync(ts, bm, l) == bool_test)
 
+static bool bm_face_is_any_sel(const ToolSettings *ts,
+                               const BMesh *bm,
+                               BMFace *f,
+                               bool select_test)
+{
+  BMIter liter;
+  BMLoop *l;
+  BM_ITER_ELEM (l, &liter, f, BM_LOOPS_OF_FACE) {
+    if (UV_VERT_SEL_TEST(ts, bm, l, select_test) || UV_EDGE_SEL_TEST(ts, bm, l, select_test)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool bm_face_is_any_vert_sel(const ToolSettings *ts,
+                                    const BMesh *bm,
+                                    BMFace *f,
+                                    bool select_test)
+{
+  BMIter liter;
+  BMLoop *l;
+  BM_ITER_ELEM (l, &liter, f, BM_LOOPS_OF_FACE) {
+    if (UV_VERT_SEL_TEST(ts, bm, l, select_test)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool bm_face_is_any_edge_sel(const ToolSettings *ts,
+                                    const BMesh *bm,
+                                    BMFace *f,
+                                    bool select_test)
+{
+  BMIter liter;
+  BMLoop *l;
+  BM_ITER_ELEM (l, &liter, f, BM_LOOPS_OF_FACE) {
+    if (UV_EDGE_SEL_TEST(ts, bm, l, select_test)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /* is every UV vert selected or unselected depending on bool_test */
 static bool bm_face_is_all_uv_sel(const ToolSettings *ts,
                                   const BMesh *bm,
@@ -1820,7 +1878,7 @@ static bool bm_face_is_all_uv_sel(const ToolSettings *ts,
   return true;
 }
 
-static bool uv_mesh_hide_sync_select(const ToolSettings *ts, Object *ob, BMEditMesh *em, bool swap)
+static bool uv_mesh_hide_select_sync(const ToolSettings *ts, Object *ob, BMEditMesh *em, bool swap)
 {
   const bool select_to_hide = !swap;
   BMesh *bm = em->bm;
@@ -1941,135 +1999,267 @@ static bool uv_mesh_hide_sync_select(const ToolSettings *ts, Object *ob, BMEditM
   return changed;
 }
 
+/**
+ * \return true when a change was made to the geometry or UV selection.
+ */
+static bool uv_mesh_hide_no_sync(const Scene *scene, Object *ob, BMEditMesh *em, bool swap)
+{
+  const ToolSettings *ts = scene->toolsettings;
+  BLI_assert(!(ts->uv_flag & UV_FLAG_SELECT_SYNC));
+
+  BMesh *bm = em->bm;
+  BMFace *efa;
+  BMLoop *l;
+  const bool use_face_center = (ts->uv_selectmode == UV_SELECT_FACE);
+
+  /* Track mesh selection changes. */
+  bool changed = false;
+  bool changed_uv = false;
+
+  const auto bm_vert_deselect_for_pass_fn = [&scene, &bm, &swap](BMVert *v, int pass) -> bool {
+    if (pass == 0) {
+      BMIter liter;
+      BMLoop *l_iter;
+      BM_ITER_ELEM (l_iter, &liter, v, BM_LOOPS_OF_VERT) {
+        if (uvedit_face_visible_test(scene, l_iter->f)) {
+          if (!UV_VERT_SEL_TEST(scene->toolsettings, bm, l_iter, !swap)) {
+            /* Part of a mixed selection, bail out. */
+            return false;
+          }
+        }
+      }
+    }
+    BM_vert_select_set(bm, v, false);
+    return true;
+  };
+
+  const auto bm_edge_deselect_for_pass_fn = [&scene, &bm, &swap](BMEdge *e, int pass) -> bool {
+    if (pass == 0) {
+      BMLoop *l_iter, *l_first;
+      l_iter = l_first = e->l;
+      do {
+        if (uvedit_face_visible_test(scene, l_iter->f)) {
+          if (!UV_EDGE_SEL_TEST(scene->toolsettings, bm, l_iter, !swap)) {
+            /* Part of a mixed selection, bail out. */
+            return false;
+          }
+        }
+      } while ((l_iter = l_iter->radial_next) != l_first);
+    }
+    BM_edge_select_set(bm, e, false);
+    return true;
+  };
+
+  /* Hiding in Vertex/Edge Mode
+   * ==========================
+   *
+   * Hiding in the UV editor works by de-selecting faces,
+   * which can only be reliably done in face selection mode.
+   *
+   * The crux of the problem: To achieve the desired result of "hide"
+   * we need to de-select individual *faces* in vertex/edge selection mode.
+   * This isn't always possible because vertex/edge selection will flush up to faces.
+   * *But* an approximation can work, sometimes achieving matching results... read on.
+   *
+   * Multi-Pass Hide
+   * ===============
+   *
+   * Multi-pass hiding solves the following problem: in vertex/edge mesh selection modes,
+   * too many UVs are hidden (hiding in this case de-selects).
+   * It's not needed for face-only selection.
+   *
+   * The most common example is when the user hides a selected island,
+   * and faces on the boundaries of neighboring islands are hidden too. See #153464.
+   *
+   * This makes some sense; in vertex selections mode we can't guarantee a single face
+   * can be de-selected, so the simple "hide" implementation just de-selects vertices
+   * (in vertex selection mode), and we have to accept this operation can't represent
+   * the face selection state we would like. ... or do we?
+   *
+   * De-selecting vertices that aren't at the island boundaries will often
+   * de-select the faces we would need to hide the island *without* touching the other islands.
+   * While it's not a guarantee for all topologies, it often works (quad-grids work for e.g.).
+   *
+   * Take the following example:
+   *
+   * \code{.unparsed}
+   *     A        B
+   * +---+---+  +---+---+
+   * |   |   |  | x |   |
+   * +---+---+  +---+---+
+   * |   |   |  | x |   |
+   * +---+---+  +---+---+
+   *        L1  L2
+   * \endcode
+   *
+   * Consider:
+   * - "A" is a selected island to be hidden.
+   * - "B" is an unselected island.
+   * - Loops L1 and L2 share underlying vertices (the mesh is a grid of 8 connected quads).
+   *
+   * De-selecting all "A" vertices would hide faces on "B" (marked with an "x").
+   *
+   * In vertex selection mode it is only necessary to de-select the center vertex of island A,
+   * which de-selects all faces that make the "A" UV island,
+   * causing it to be hidden and "B" to be left untouched.
+   *
+   * The multi-pass hide does this:
+   * - First it only de-selects verts where every visible connected face is selected (i.e. verts
+   *   interior to the region being hidden, not on a boundary with another visible island).
+   * - The second pass uses the simple hide-all-connected-vertices.
+   *
+   * This works because the second pass only de-selects vertices still connected to visible faces,
+   * which (if the topology allows), will have become hidden in the first pass.
+   *
+   * Note that this explanation uses vertices, the same kind of problem applies to edge-selection.
+   * Where the solution for hiding "A" is to de-select the edges connected to the center vertex.
+   */
+
+  /* Use multi-pass for vertex & edge selection only. */
+  BMIter iter, liter;
+  const int pass_end = (em->selectmode == SCE_SELECT_FACE) ? 0 : 1;
+  for (int pass = 0; pass <= pass_end; pass++) {
+    BM_ITER_MESH (efa, &iter, bm, BM_FACES_OF_MESH) {
+      if (!uvedit_face_visible_test(scene, efa) || !bm_face_is_any_sel(ts, bm, efa, !swap)) {
+        continue;
+      }
+
+      if (em->selectmode & SCE_SELECT_VERTEX) {
+        if (use_face_center) {
+          if (bm_face_is_all_uv_sel(ts, bm, efa, true) == !swap) {
+            BM_ITER_ELEM (l, &liter, efa, BM_LOOPS_OF_FACE) {
+              /* For both edge & vertex selection rely on edge selection tests,
+               * since all vert selection tests are invalid in case of sticky selections. */
+              if (UV_EDGE_SEL_TEST(ts, bm, l, !swap)) {
+                changed |= bm_vert_deselect_for_pass_fn(l->v, pass);
+              }
+            }
+          }
+        }
+        else {
+          if (ts->uv_selectmode == UV_SELECT_EDGE) {
+            bool e_select_prev = UV_EDGE_SEL_TEST(ts, bm, BM_FACE_FIRST_LOOP(efa)->prev, !swap);
+            BM_ITER_ELEM (l, &liter, efa, BM_LOOPS_OF_FACE) {
+              const bool e_select_curr = UV_EDGE_SEL_TEST(ts, bm, l, !swap);
+              if (e_select_prev || e_select_curr) {
+                changed |= bm_vert_deselect_for_pass_fn(l->v, pass);
+              }
+              e_select_prev = e_select_curr;
+            }
+          }
+          else {
+            BM_ITER_ELEM (l, &liter, efa, BM_LOOPS_OF_FACE) {
+              if (UV_VERT_SEL_TEST(ts, bm, l, !swap)) {
+                changed |= bm_vert_deselect_for_pass_fn(l->v, pass);
+              }
+            }
+          }
+        }
+        if (pass == pass_end) {
+          if (!swap) {
+            uvedit_face_select_disable(scene, bm, efa);
+            changed_uv = true;
+          }
+        }
+      }
+      else if (em->selectmode & SCE_SELECT_EDGE) {
+        if (use_face_center) {
+          if (bm_face_is_all_uv_sel(ts, bm, efa, true) == !swap) {
+            BM_ITER_ELEM (l, &liter, efa, BM_LOOPS_OF_FACE) {
+              if (UV_EDGE_SEL_TEST(ts, bm, l, !swap)) {
+                changed |= bm_edge_deselect_for_pass_fn(l->e, pass);
+              }
+            }
+          }
+        }
+        else {
+          BM_ITER_ELEM (l, &liter, efa, BM_LOOPS_OF_FACE) {
+            if (ts->uv_selectmode == UV_SELECT_EDGE) {
+              if (UV_EDGE_SEL_TEST(ts, bm, l, !swap)) {
+                changed |= bm_edge_deselect_for_pass_fn(l->e, pass);
+              }
+            }
+            else {
+              if (UV_VERT_SEL_TEST(ts, bm, l, !swap)) {
+                changed |= bm_edge_deselect_for_pass_fn(l->e, pass);
+              }
+            }
+          }
+        }
+        if (pass == pass_end) {
+          if (!swap) {
+            uvedit_face_select_disable(scene, bm, efa);
+            changed_uv = true;
+          }
+        }
+      }
+      else { /* `em->selectmode == SCE_SELECT_FACE` */
+        if (use_face_center) {
+          /* Deselect BMesh face if UV face is (de)selected depending on #swap. */
+          if (bm_face_is_all_uv_sel(ts, bm, efa, !swap)) {
+            BM_face_select_set(bm, efa, false);
+            changed = true;
+          }
+        }
+        else {
+          /* Deselect BMesh face depending on the type of UV select-mode
+           * and the type of UV element being considered. */
+          const bool has_select = (ts->uv_selectmode == UV_SELECT_EDGE) ?
+                                      bm_face_is_any_edge_sel(ts, bm, efa, !swap) :
+                                      bm_face_is_any_vert_sel(ts, bm, efa, !swap);
+          if (has_select) {
+            BM_face_select_set(bm, efa, false);
+            changed = true;
+          }
+        }
+        uvedit_face_select_disable(scene, bm, efa);
+        changed_uv = true;
+      }
+    }
+    /* End face loop. */
+
+    if (changed) {
+      /* Flush edit-mesh selections to ensure valid selection states.
+       * In face-select mode, rely on #ID_RECALC_SELECT to flush. */
+      if (em->selectmode & (SCE_SELECT_VERTEX | SCE_SELECT_EDGE)) {
+        /* NOTE: Make sure correct flags are used.
+         * Previously this was done by passing `SCE_SELECT_VERTEX | SCE_SELECT_EDGE`,
+         * which doesn't work now that we support proper UV edge selection. */
+        BM_mesh_select_mode_flush(bm);
+      }
+    }
+  }
+
+  if (changed) {
+    BM_select_history_validate(bm);
+
+    DEG_id_tag_update(ob->data, ID_RECALC_SELECT);
+    WM_main_add_notifier(NC_GEOM | ND_SELECT, ob->data);
+  }
+
+  return changed || changed_uv;
+}
+
 static wmOperatorStatus uv_hide_exec(bContext *C, wmOperator *op)
 {
+  const Main *bmain = CTX_data_main(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
   Scene *scene = CTX_data_scene(C);
   const ToolSettings *ts = scene->toolsettings;
   const bool swap = RNA_boolean_get(op->ptr, "unselected");
-  const bool use_face_center = (ts->uv_selectmode == UV_SELECT_FACE);
-  const bool use_select_linked = ED_uvedit_select_island_check(ts);
 
   Vector<Object *> objects = BKE_view_layer_array_from_objects_in_edit_mode_unique_data_with_uvs(
-      scene, view_layer, nullptr);
+      *bmain, scene, view_layer, nullptr);
 
   for (Object *ob : objects) {
     BMEditMesh *em = BKE_editmesh_from_object(ob);
-    BMFace *efa;
-    BMLoop *l;
-    BMIter iter, liter;
 
     if (ts->uv_flag & UV_FLAG_SELECT_SYNC) {
-      uv_mesh_hide_sync_select(ts, ob, em, swap);
-      continue;
+      uv_mesh_hide_select_sync(ts, ob, em, swap);
     }
-
-    BM_ITER_MESH (efa, &iter, em->bm, BM_FACES_OF_MESH) {
-      int hide = 0;
-
-      if (!uvedit_face_visible_test(scene, efa)) {
-        continue;
-      }
-
-      BM_ITER_ELEM (l, &liter, efa, BM_LOOPS_OF_FACE) {
-
-        if (UV_VERT_SEL_TEST(ts, em->bm, l, !swap) || UV_EDGE_SEL_TEST(ts, em->bm, l, !swap)) {
-          hide = 1;
-          break;
-        }
-      }
-
-      if (hide) {
-        if (use_face_center) {
-          if (em->selectmode == SCE_SELECT_FACE) {
-            /* Deselect BMesh face if UV face is (de)selected depending on #swap. */
-            if (bm_face_is_all_uv_sel(ts, em->bm, efa, !swap)) {
-              BM_face_select_set(em->bm, efa, false);
-            }
-            uvedit_face_select_disable(scene, em->bm, efa);
-          }
-          else {
-            if (bm_face_is_all_uv_sel(ts, em->bm, efa, true) == !swap) {
-              BM_ITER_ELEM (l, &liter, efa, BM_LOOPS_OF_FACE) {
-                /* For both cases rely on edge sel tests, since all vert sel tests are invalid in
-                 * case of sticky selections. */
-                if (UV_EDGE_SEL_TEST(ts, em->bm, l, !swap) && (em->selectmode == SCE_SELECT_EDGE))
-                {
-                  BM_edge_select_set(em->bm, l->e, false);
-                }
-                else if (UV_EDGE_SEL_TEST(ts, em->bm, l, !swap) &&
-                         (em->selectmode == SCE_SELECT_VERTEX))
-                {
-                  BM_vert_select_set(em->bm, l->v, false);
-                }
-              }
-            }
-            if (!swap) {
-              uvedit_face_select_disable(scene, em->bm, efa);
-            }
-          }
-        }
-        else if (em->selectmode == SCE_SELECT_FACE) {
-          /* Deselect BMesh face depending on the type of UV selectmode and the type of UV element
-           * being considered. */
-          BM_ITER_ELEM (l, &liter, efa, BM_LOOPS_OF_FACE) {
-            if (UV_EDGE_SEL_TEST(ts, em->bm, l, !swap) && (ts->uv_selectmode == UV_SELECT_EDGE)) {
-              BM_face_select_set(em->bm, efa, false);
-              break;
-            }
-            if (UV_VERT_SEL_TEST(ts, em->bm, l, !swap) && (ts->uv_selectmode == UV_SELECT_VERT)) {
-              BM_face_select_set(em->bm, efa, false);
-              break;
-            }
-            if (use_select_linked) {
-              BM_face_select_set(em->bm, efa, false);
-              break;
-            }
-          }
-          uvedit_face_select_disable(scene, em->bm, efa);
-        }
-        else {
-          BM_ITER_ELEM (l, &liter, efa, BM_LOOPS_OF_FACE) {
-            if (UV_EDGE_SEL_TEST(ts, em->bm, l, !swap) && (ts->uv_selectmode == UV_SELECT_EDGE)) {
-              if (em->selectmode == SCE_SELECT_EDGE) {
-                BM_edge_select_set(em->bm, l->e, false);
-              }
-              else {
-                BM_vert_select_set(em->bm, l->v, false);
-                BM_vert_select_set(em->bm, l->next->v, false);
-              }
-            }
-            else if (UV_VERT_SEL_TEST(ts, em->bm, l, !swap) &&
-                     (ts->uv_selectmode != UV_SELECT_EDGE))
-            {
-              if (em->selectmode == SCE_SELECT_EDGE) {
-                BM_edge_select_set(em->bm, l->e, false);
-              }
-              else {
-                BM_vert_select_set(em->bm, l->v, false);
-              }
-            }
-          }
-          if (!swap) {
-            uvedit_face_select_disable(scene, em->bm, efa);
-          }
-        }
-      }
+    else {
+      uv_mesh_hide_no_sync(scene, ob, em, swap);
     }
-
-    /* Flush editmesh selections to ensure valid selection states. */
-    if (em->selectmode != SCE_SELECT_FACE) {
-      /* NOTE: Make sure correct flags are used. Previously this was done by passing
-       * (SCE_SELECT_VERTEX | SCE_SELECT_EDGE), which doesn't work now that we support proper UV
-       * edge selection. */
-
-      BM_mesh_select_mode_flush(em->bm);
-    }
-
-    BM_select_history_validate(em->bm);
-
-    DEG_id_tag_update(ob->data, ID_RECALC_SELECT);
-    WM_event_add_notifier(C, NC_GEOM | ND_SELECT, ob->data);
   }
 
   return OPERATOR_FINISHED;
@@ -2103,6 +2293,7 @@ static void UV_OT_hide(wmOperatorType *ot)
 
 static wmOperatorStatus uv_reveal_exec(bContext *C, wmOperator *op)
 {
+  const Main *bmain = CTX_data_main(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
   Scene *scene = CTX_data_scene(C);
   const ToolSettings *ts = scene->toolsettings;
@@ -2111,7 +2302,7 @@ static wmOperatorStatus uv_reveal_exec(bContext *C, wmOperator *op)
   const bool select = RNA_boolean_get(op->ptr, "select");
 
   Vector<Object *> objects = BKE_view_layer_array_from_objects_in_edit_mode_unique_data_with_uvs(
-      scene, view_layer, nullptr);
+      *bmain, scene, view_layer, nullptr);
 
   for (Object *ob : objects) {
     BMEditMesh *em = BKE_editmesh_from_object(ob);
@@ -2318,6 +2509,7 @@ static void UV_OT_cursor_set(wmOperatorType *ot)
 
 static wmOperatorStatus uv_seams_from_islands_exec(bContext *C, wmOperator *op)
 {
+  const Main *bmain = CTX_data_main(C);
   Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
   const bool mark_seams = RNA_boolean_get(op->ptr, "mark_seams");
@@ -2325,7 +2517,7 @@ static wmOperatorStatus uv_seams_from_islands_exec(bContext *C, wmOperator *op)
   bool changed_multi = false;
 
   Vector<Object *> objects = BKE_view_layer_array_from_objects_in_edit_mode_unique_data_with_uvs(
-      scene, view_layer, nullptr);
+      *bmain, scene, view_layer, nullptr);
 
   for (Object *ob : objects) {
     Mesh *mesh = id_cast<Mesh *>(ob->data);
@@ -2415,6 +2607,7 @@ static void UV_OT_seams_from_islands(wmOperatorType *ot)
 
 static wmOperatorStatus uv_mark_seam_exec(bContext *C, wmOperator *op)
 {
+  const Main *bmain = CTX_data_main(C);
   Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
   const ToolSettings *ts = scene->toolsettings;
@@ -2427,7 +2620,7 @@ static wmOperatorStatus uv_mark_seam_exec(bContext *C, wmOperator *op)
   const bool synced_selection = (ts->uv_flag & UV_FLAG_SELECT_SYNC) != 0;
 
   Vector<Object *> objects = BKE_view_layer_array_from_objects_in_edit_mode_unique_data_with_uvs(
-      scene, view_layer, nullptr);
+      *bmain, scene, view_layer, nullptr);
 
   bool changed = false;
 
@@ -2506,8 +2699,12 @@ static void UV_OT_mark_seam(wmOperatorType *ot)
   RNA_def_boolean(ot->srna, "clear", false, "Clear Seams", "Clear instead of marking seams");
 }
 
-static bool uv_copy_mirrored_faces(
-    const Scene *scene, BMesh *bm, int direction, int precision, int *r_double_warn)
+static bool uv_copy_mirrored_faces(const Scene *scene,
+                                   BMesh *bm,
+                                   const int mesh_axis,
+                                   const int uv_axis,
+                                   const int precision,
+                                   int *r_double_warn)
 {
   *r_double_warn = 0;
   const float precision_scale = powf(10.0f, precision);
@@ -2521,14 +2718,15 @@ static bool uv_copy_mirrored_faces(
   BMVert *v;
   BMIter iter;
 
+  const int axis = mesh_axis % 3;
   BM_ITER_MESH (v, &iter, bm, BM_VERTS_OF_MESH) {
     float3 pos = math::round(float3(v->co) * precision_scale);
-    if (pos.x >= 0.0f) {
+    if (pos[axis] >= 0.0f) {
       if (!mirror_gt.add_overwrite(pos, v)) {
         (*r_double_warn)++;
       }
     }
-    if (pos.x <= 0.0f) {
+    if (pos[axis] <= 0.0f) {
       if (!mirror_lt.add_overwrite(pos, v)) {
         (*r_double_warn)++;
       }
@@ -2537,7 +2735,7 @@ static bool uv_copy_mirrored_faces(
 
   for (const auto &[pos, v] : mirror_gt.items()) {
     float3 mirror_pos = pos;
-    mirror_pos[0] = -mirror_pos[0];
+    mirror_pos[axis] = -mirror_pos[axis];
     BMVert *v_mirror = mirror_lt.lookup_default(mirror_pos, nullptr);
     if (v_mirror) {
       vmap.add(v, v_mirror);
@@ -2545,7 +2743,7 @@ static bool uv_copy_mirrored_faces(
   }
   for (const auto &[pos, v] : mirror_lt.items()) {
     float3 mirror_pos = pos;
-    mirror_pos[0] = -mirror_pos[0];
+    mirror_pos[axis] = -mirror_pos[axis];
     BMVert *v_mirror = mirror_gt.lookup_default(mirror_pos, nullptr);
     if (v_mirror) {
       vmap.add(v, v_mirror);
@@ -2594,6 +2792,8 @@ static bool uv_copy_mirrored_faces(
   const int cd_loop_uv_offset = CustomData_get_offset(&bm->ldata, CD_PROP_FLOAT2);
 
   bool changed = false;
+  const int other_uv_axis = 1 - uv_axis;
+  const bool is_negative = mesh_axis >= OB_NEGX;
   for (const auto &[f_dst, f_src] : face_map.items()) {
 
     /* Skip unless both faces have all their UVs selected. */
@@ -2604,7 +2804,7 @@ static bool uv_copy_mirrored_faces(
     {
       float f_dst_center[3];
       BM_face_calc_center_median(f_dst, f_dst_center);
-      if (direction ? (f_dst_center[0] > 0.0f) : (f_dst_center[0] < 0.0f)) {
+      if (is_negative ? (f_dst_center[axis] > 0.0f) : (f_dst_center[axis] < 0.0f)) {
         continue;
       }
     }
@@ -2625,8 +2825,8 @@ static bool uv_copy_mirrored_faces(
       const float *uv_src = BM_ELEM_CD_GET_FLOAT_P(l_src, cd_loop_uv_offset);
       float *uv_dst = BM_ELEM_CD_GET_FLOAT_P(l_dst, cd_loop_uv_offset);
 
-      uv_dst[0] = -(uv_src[0] - 0.5f) + 0.5f;
-      uv_dst[1] = uv_src[1];
+      uv_dst[uv_axis] = -(uv_src[uv_axis] - 0.5f) + 0.5f;
+      uv_dst[other_uv_axis] = uv_src[other_uv_axis];
       changed = true;
     }
   }
@@ -2636,12 +2836,15 @@ static bool uv_copy_mirrored_faces(
 
 static wmOperatorStatus uv_copy_mirrored_faces_exec(bContext *C, wmOperator *op)
 {
+  const Main *bmain = CTX_data_main(C);
   Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
   Vector<Object *> objects = BKE_view_layer_array_from_objects_in_edit_mode_unique_data_with_uvs(
-      scene, view_layer, nullptr);
-  const int direction = RNA_enum_get(op->ptr, "direction");
+      *bmain, scene, view_layer, nullptr);
   const int precision = RNA_int_get(op->ptr, "precision");
+
+  const int mesh_axis = RNA_enum_get(op->ptr, "mesh_axis");
+  const int uv_axis = RNA_enum_get(op->ptr, "uv_axis");
 
   int total_duplicates = 0;
   int meshes_with_duplicates = 0;
@@ -2651,7 +2854,8 @@ static wmOperatorStatus uv_copy_mirrored_faces_exec(bContext *C, wmOperator *op)
 
     int double_warn = 0;
 
-    bool changed = uv_copy_mirrored_faces(scene, em->bm, direction, precision, &double_warn);
+    bool changed = uv_copy_mirrored_faces(
+        scene, em->bm, mesh_axis, uv_axis, precision, &double_warn);
 
     if (double_warn) {
       total_duplicates += double_warn;
@@ -2676,14 +2880,8 @@ static wmOperatorStatus uv_copy_mirrored_faces_exec(bContext *C, wmOperator *op)
 }
 void UV_OT_copy_mirrored_faces(wmOperatorType *ot)
 {
-  static const EnumPropertyItem direction_items[] = {
-      {0, "POSITIVE", 0, "Positive", ""},
-      {1, "NEGATIVE", 0, "Negative", ""},
-      {0, nullptr, 0, nullptr, nullptr},
-  };
-
   ot->name = "Copy Mirrored UV Coords";
-  ot->description = "Copy mirror UV coordinates on the X axis based on a mirrored mesh";
+  ot->description = "Copy mirror UV coordinates based on a mirrored mesh";
   ot->idname = "UV_OT_copy_mirrored_faces";
 
   ot->exec = uv_copy_mirrored_faces_exec;
@@ -2691,7 +2889,14 @@ void UV_OT_copy_mirrored_faces(wmOperatorType *ot)
 
   ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
 
-  RNA_def_enum(ot->srna, "direction", direction_items, 0, "Axis Direction", "");
+  RNA_def_enum(ot->srna,
+               "mesh_axis",
+               rna_enum_object_axis_flip_items,
+               OB_POSX,
+               "Mesh Axis",
+               "Mirror vertices based on mesh axis");
+  RNA_def_enum(
+      ot->srna, "uv_axis", rna_enum_axis_xy_items, 0, "UV Axis", "Axis to mirror UV coordinates");
   RNA_def_int(ot->srna,
               "precision",
               3,
@@ -2727,6 +2932,7 @@ void ED_operatortypes_uvedit()
   WM_operatortype_append(UV_OT_select_more);
   WM_operatortype_append(UV_OT_select_less);
   WM_operatortype_append(UV_OT_select_overlap);
+  WM_operatortype_append(UV_OT_select_by_winding);
   WM_operatortype_append(UV_OT_select_mode);
   WM_operatortype_append(UV_OT_select_tile);
 
@@ -2776,7 +2982,7 @@ void ED_operatormacros_uvedit()
   wmOperatorTypeMacro *otmacro;
 
   ot = WM_operatortype_append_macro("UV_OT_rip_move",
-                                    "UV Rip Move",
+                                    "Rip Move UVs",
                                     "Unstitch UVs and move the result",
                                     OPTYPE_UNDO | OPTYPE_REGISTER);
   WM_operatortype_macro_define(ot, "UV_OT_rip");

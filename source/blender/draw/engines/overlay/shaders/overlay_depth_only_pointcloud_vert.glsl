@@ -16,10 +16,12 @@ void main()
 {
   select_id_set(drw_custom_id());
 
+  const eObjectInfoFlag ob_flag = buffer_get(draw_object_infos, drw_infos)[drw_resource_id()].flag;
+
   const pointcloud::Point ls_pt = pointcloud::point_get(uint(gl_VertexID));
   const pointcloud::Point ws_pt = pointcloud::object_to_world(ls_pt, drw_modelmat());
   const pointcloud::ShapePoint pt = pointcloud::shape_point_get(
-      ws_pt, drw_world_incident_vector(ws_pt.P), drw_view_up());
+      ws_pt, drw_world_incident_vector(ws_pt.P), drw_view_up(), ob_flag);
 
   gl_Position = drw_point_world_to_homogenous(pt.P);
 

@@ -16,15 +16,17 @@ def gather_sampler(blender_shader_node: bpy.types.Node, group_path_str, export_s
     sep_item = "##~~gltf-sep~~##"
     sep_inside_item = "##~~gltf-inside-sep~~##"
     group_path = []
-    tab = group_path_str.split(sep_item)
-    if len(tab) > 0:
-        group_path.append(bpy.data.materials[tab[0]])
-    for idx, i in enumerate(tab[1:]):
-        subtab = i.split(sep_inside_item)
-        if idx == 0:
-            group_path.append(bpy.data.materials[tab[0]].node_tree.nodes[subtab[1]])
-        else:
-            group_path.append(bpy.data.node_groups[subtab[0]].nodes[subtab[1]])
+
+    if group_path_str != "":
+        tab = group_path_str.split(sep_item)
+        if len(tab) > 0:
+            group_path.append(bpy.data.materials[tab[0]])
+        for idx, i in enumerate(tab[1:]):
+            subtab = i.split(sep_inside_item)
+            if idx == 0:
+                group_path.append(bpy.data.materials[tab[0]].node_tree.nodes[subtab[1]])
+            else:
+                group_path.append(bpy.data.node_groups[subtab[0]].nodes[subtab[1]])
 
     wrap_s, wrap_t = __gather_wrap(blender_shader_node, group_path, export_settings)
 
@@ -173,7 +175,7 @@ def detect_manual_uv_wrapping(blender_shader_node, group_path):
         if prev_node.type != 'SEPXYZ':
             return None
         # Make sure X goes to X, etc.
-        if prev_socket.socket.name != soc:
+        if prev_socket.socket.identifier != soc:
             return None
         # Make sure both attach to the same SeparateXYZ node
         if soc == 'X':

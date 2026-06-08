@@ -15,6 +15,7 @@ namespace blender {
 
 struct Base;
 struct ID;
+struct Main;
 struct MemFile;
 struct PointerRNA;
 struct Object;
@@ -26,7 +27,7 @@ struct wmOperator;
 struct wmOperatorType;
 struct wmWindowManager;
 
-/* undo.c */
+/* ed_undo.cc */
 
 /**
  * Run from the main event loop, basic checks that undo is left in a correct state.
@@ -63,6 +64,10 @@ void ED_undo_operator_repeat_cb_evt(bContext *C, void *arg_op, int arg_unused);
  * Name optionally, function used to check for operator redo panel.
  */
 bool ED_undo_is_valid(const bContext *C, const char *undoname);
+/**
+ * Returns true if there are redo steps available.
+ */
+bool ED_undo_has_redo_step(const bContext *C);
 
 bool ED_undo_is_memfile_compatible(const bContext *C);
 
@@ -106,9 +111,12 @@ void ED_undo_object_editmode_restore_helper(Scene *scene,
                                             uint object_array_len,
                                             uint object_array_stride);
 
-Vector<Object *> ED_undo_editmode_objects_from_view_layer(const Scene *scene,
+Vector<Object *> ED_undo_editmode_objects_from_view_layer(const Main &bmain,
+                                                          const Scene *scene,
                                                           ViewLayer *view_layer);
-Vector<Base *> ED_undo_editmode_bases_from_view_layer(const Scene *scene, ViewLayer *view_layer);
+Vector<Base *> ED_undo_editmode_bases_from_view_layer(const Main &bmain,
+                                                      const Scene *scene,
+                                                      ViewLayer *view_layer);
 
 /**
  * Ideally we won't access the stack directly,
@@ -121,8 +129,12 @@ UndoStack *ED_undo_stack_get();
 
 /* Helpers. */
 
-void ED_undo_object_set_active_or_warn(
-    Scene *scene, ViewLayer *view_layer, Object *ob, const char *info, CLG_LogRef *log);
+void ED_undo_object_set_active_or_warn(const Main &bmain,
+                                       Scene *scene,
+                                       ViewLayer *view_layer,
+                                       Object *ob,
+                                       const char *info,
+                                       CLG_LogRef *log);
 
 /* `undo_system_types.cc` */
 
@@ -131,7 +143,8 @@ void ED_undosys_type_free();
 
 /* `memfile_undo.cc` */
 
-MemFile *ED_undosys_stack_memfile_get_if_active(UndoStack *ustack);
+bool ED_undosys_autosave_compatible(UndoStack *ustack);
+
 /**
  * If the last undo step is a memfile one, find the first #MemFileChunk matching given ID
  * (using its session UUID), and tag it as "changed in the future".

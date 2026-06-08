@@ -96,15 +96,13 @@ MINLINE void linearrgb_to_srgb_v4(float srgb[4], const float linear[4]);
 MINLINE void srgb_to_linearrgb_predivide_v4(float linear[4], const float srgb[4]);
 MINLINE void linearrgb_to_srgb_predivide_v4(float srgb[4], const float linear[4]);
 
-MINLINE unsigned short to_srgb_table_lookup(float f);
-MINLINE void linearrgb_to_srgb_ushort4(unsigned short srgb[4], const float linear[4]);
 MINLINE void srgb_to_linearrgb_uchar4(float linear[4], const unsigned char srgb[4]);
 MINLINE void srgb_to_linearrgb_uchar4_predivide(float linear[4], const unsigned char srgb[4]);
 
 MINLINE void linearrgb_to_srgb_uchar3(unsigned char srgb[3], const float linear[3]);
 MINLINE void linearrgb_to_srgb_uchar4(unsigned char srgb[4], const float linear[4]);
 
-void BLI_init_srgb_conversion(void);
+void BLI_init_srgb_conversion();
 
 /** \} */
 

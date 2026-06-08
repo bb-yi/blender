@@ -31,32 +31,39 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.use_custom_socket_order();
   b.allow_any_socket_order();
 
-  b.add_input<decl::Color>("Image")
+  b.add_input<decl::Color>("Image"_ustr)
       .default_value({0.8f, 0.8f, 0.8f, 1.0f})
       .hide_value()
       .compositor_realization_mode(CompositorInputRealizationMode::None)
       .structure_type(StructureType::Dynamic);
-  b.add_output<decl::Color>("Image").structure_type(StructureType::Dynamic).align_with_previous();
+  b.add_output<decl::Color>("Image"_ustr)
+      .structure_type(StructureType::Dynamic)
+      .align_with_previous();
 
   b.add_layout([](ui::Layout &layout, bContext *context, PointerRNA *node_pointer) {
     template_id(&layout, context, node_pointer, "clip", nullptr, "CLIP_OT_open", nullptr);
   });
 
-  b.add_input<decl::Bool>("Invert").default_value(false).description(
-      "Invert stabilization to reintroduce motion to the image");
+  b.add_input<decl::Int>("Frame"_ustr)
+      .default_input_type(NodeDefaultInputType::NODE_DEFAULT_INPUT_SCENE_FRAME)
+      .description("The frame to get the stabilization data at");
 
-  PanelDeclarationBuilder &sampling_panel = b.add_panel("Sampling").default_closed(true);
-  sampling_panel.add_input<decl::Menu>("Interpolation")
+  b.add_input<decl::Bool>("Invert"_ustr)
+      .default_value(false)
+      .description("Invert stabilization to reintroduce motion to the image");
+
+  PanelDeclarationBuilder &sampling_panel = b.add_panel("Sampling"_ustr).default_closed(true);
+  sampling_panel.add_input<decl::Menu>("Interpolation"_ustr)
       .default_value(CMP_NODE_INTERPOLATION_BILINEAR)
       .static_items(rna_enum_node_compositor_interpolation_items)
       .optional_label()
       .description("Interpolation method");
-  sampling_panel.add_input<decl::Menu>("Extension X")
+  sampling_panel.add_input<decl::Menu>("Extension X"_ustr)
       .default_value(CMP_NODE_EXTENSION_MODE_CLIP)
       .static_items(rna_enum_node_compositor_extension_items)
       .optional_label()
       .description("The extension mode applied to the X axis");
-  sampling_panel.add_input<decl::Menu>("Extension Y")
+  sampling_panel.add_input<decl::Menu>("Extension Y"_ustr)
       .default_value(CMP_NODE_EXTENSION_MODE_CLIP)
       .static_items(rna_enum_node_compositor_extension_items)
       .optional_label()
@@ -91,8 +98,8 @@ class Stabilize2DOperation : public NodeOperation {
 
     const int width = input.domain().data_size.x;
     const int height = input.domain().data_size.y;
-    const int frame_number = BKE_movieclip_remap_scene_to_clip_frame(movie_clip,
-                                                                     context().get_frame_number());
+    const int frame = this->get_input("Frame").get_single_value_default<int>();
+    const int frame_number = BKE_movieclip_remap_scene_to_clip_frame(movie_clip, frame);
 
     float2 translation;
     float scale, rotation;
@@ -121,9 +128,10 @@ class Stabilize2DOperation : public NodeOperation {
         return Interpolation::Nearest;
       case CMP_NODE_INTERPOLATION_BILINEAR:
         return Interpolation::Bilinear;
-      case CMP_NODE_INTERPOLATION_ANISOTROPIC:
       case CMP_NODE_INTERPOLATION_BICUBIC:
         return Interpolation::Bicubic;
+      case CMP_NODE_INTERPOLATION_ANISOTROPIC:
+        return Interpolation::Anisotropic;
     }
 
     return Interpolation::Nearest;
@@ -181,7 +189,7 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, "CompositorNodeStabilize", CMP_NODE_STABILIZE2D);
+  cmp_node_type_base(&ntype, "CompositorNodeStabilize"_ustr, CMP_NODE_STABILIZE2D);
   ntype.ui_name = "Stabilize 2D";
   ntype.ui_description = "Stabilize footage using 2D stabilization motion tracking settings";
   ntype.enum_name_legacy = "STABILIZE2D";

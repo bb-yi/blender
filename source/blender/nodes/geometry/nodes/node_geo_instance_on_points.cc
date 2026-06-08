@@ -20,27 +20,34 @@ namespace blender::nodes::node_geo_instance_on_points_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Geometry>("Points").description("Points to instance on");
-  b.add_input<decl::Bool>("Selection").default_value(true).field_on({0}).hide_value();
-  b.add_input<decl::Geometry>("Instance").description("Geometry that is instanced on the points");
-  b.add_input<decl::Bool>("Pick Instance")
-      .field_on({0})
+  b.add_input<decl::Geometry>("Points"_ustr).description("Points to instance on");
+  b.add_input<decl::Bool>("Selection"_ustr)
+      .default_value(true)
+      .evaluated_geometry_field({0})
+      .hide_value();
+  b.add_input<decl::Geometry>("Instance"_ustr)
+      .description("Geometry that is instanced on the points");
+  b.add_input<decl::Bool>("Pick Instance"_ustr)
+      .evaluated_geometry_field({0})
       .description(
           "Choose instances from the \"Instance\" input at each point instead of instancing the "
           "entire geometry");
-  b.add_input<decl::Int>("Instance Index")
-      .implicit_field_on(NODE_DEFAULT_INPUT_ID_INDEX_FIELD, {0})
+  b.add_input<decl::Int>("Instance Index"_ustr)
+      .evaluated_geometry_field({0})
+      .default_input_type(NODE_DEFAULT_INPUT_ID_INDEX_FIELD)
       .description(
           "Index of the instance used for each point. This is only used when Pick Instances "
           "is on. By default the point index is used");
-  b.add_input<decl::Rotation>("Rotation").field_on({0}).description("Rotation of the instances");
-  b.add_input<decl::Vector>("Scale")
+  b.add_input<decl::Rotation>("Rotation"_ustr)
+      .evaluated_geometry_field({0})
+      .description("Rotation of the instances");
+  b.add_input<decl::Vector>("Scale"_ustr)
       .default_value({1.0f, 1.0f, 1.0f})
       .subtype(PROP_XYZ)
-      .field_on({0})
+      .evaluated_geometry_field({0})
       .description("Scale of the instances");
 
-  b.add_output<decl::Geometry>("Instances").propagate_all();
+  b.add_output<decl::Geometry>("Instances"_ustr).propagate_all_geometry();
 }
 
 static std::unique_ptr<bke::Instances> add_instances_from_component(
@@ -58,15 +65,15 @@ static std::unique_ptr<bke::Instances> add_instances_from_component(
   VArray<math::Quaternion> rotations;
   VArray<float3> scales;
 
-  const Field<bool> selection_field = params.get_input<Field<bool>>("Selection");
+  const Field<bool> selection_field = params.get_input<Field<bool>>("Selection"_ustr);
   fn::FieldEvaluator evaluator{field_context, domain_num};
   evaluator.set_selection(selection_field);
   /* The evaluator could use the component's stable IDs as a destination directly, but only the
    * selected indices should be copied. */
-  evaluator.add(params.get_input<Field<bool>>("Pick Instance"), &pick_instance);
-  evaluator.add(params.get_input<Field<int>>("Instance Index"), &indices);
-  evaluator.add(params.get_input<Field<math::Quaternion>>("Rotation"), &rotations);
-  evaluator.add(params.get_input<Field<float3>>("Scale"), &scales);
+  evaluator.add(params.get_input<Field<bool>>("Pick Instance"_ustr), &pick_instance);
+  evaluator.add(params.get_input<Field<int>>("Instance Index"_ustr), &indices);
+  evaluator.add(params.get_input<Field<math::Quaternion>>("Rotation"_ustr), &rotations);
+  evaluator.add(params.get_input<Field<float3>>("Scale"_ustr), &scales);
   evaluator.evaluate();
 
   const IndexMask selection = evaluator.get_evaluated_selection_as_mask();
@@ -102,39 +109,41 @@ static std::unique_ptr<bke::Instances> add_instances_from_component(
   /* Add this reference last, because it is the most likely one to be removed later on. */
   const int empty_reference_handle = dst_component->add_reference(bke::InstanceReference());
 
-  selection.foreach_index(GrainSize(1024), [&](const int64_t i, const int64_t range_i) {
-    /* Compute base transform for every instances. */
-    float4x4 &dst_transform = dst_transforms[range_i];
-    dst_transform = math::from_loc_rot_scale<float4x4>(positions[i], rotations[i], scales[i]);
+  selection.foreach_index(
+      [&](const int64_t i, const int64_t range_i) {
+        /* Compute base transform for every instances. */
+        float4x4 &dst_transform = dst_transforms[range_i];
+        dst_transform = math::from_loc_rot_scale<float4x4>(positions[i], rotations[i], scales[i]);
 
-    /* Reference that will be used by this new instance. */
-    int dst_handle = empty_reference_handle;
+        /* Reference that will be used by this new instance. */
+        int dst_handle = empty_reference_handle;
 
-    const bool use_individual_instance = pick_instance[i];
-    if (use_individual_instance) {
-      if (src_instances != nullptr) {
-        const int src_instances_num = src_instances->instances_num();
-        const int original_index = indices[i];
-        /* Use #mod_i instead of `%` to get the desirable wrap around behavior where -1
-         * refers to the last element. */
-        const int index = mod_i(original_index, std::max(src_instances_num, 1));
-        if (index < src_instances_num) {
-          /* Get the reference to the source instance. */
-          const int src_handle = src_instances->reference_handles()[index];
-          dst_handle = handle_mapping[src_handle];
+        const bool use_individual_instance = pick_instance[i];
+        if (use_individual_instance) {
+          if (src_instances != nullptr) {
+            const int src_instances_num = src_instances->instances_num();
+            const int original_index = indices[i];
+            /* Use #mod_i instead of `%` to get the desirable wrap around behavior where -1
+             * refers to the last element. */
+            const int index = mod_i(original_index, std::max(src_instances_num, 1));
+            if (index < src_instances_num) {
+              /* Get the reference to the source instance. */
+              const int src_handle = src_instances->reference_handles()[index];
+              dst_handle = handle_mapping[src_handle];
 
-          /* Take transforms of the source instance into account. */
-          mul_m4_m4_post(dst_transform.ptr(), src_instances->transforms()[index].ptr());
+              /* Take transforms of the source instance into account. */
+              mul_m4_m4_post(dst_transform.ptr(), src_instances->transforms()[index].ptr());
+            }
+          }
         }
-      }
-    }
-    else {
-      /* Use entire source geometry as instance. */
-      dst_handle = full_instance_handle;
-    }
-    /* Set properties of new instance. */
-    dst_handles[range_i] = dst_handle;
-  });
+        else {
+          /* Use entire source geometry as instance. */
+          dst_handle = full_instance_handle;
+        }
+        /* Set properties of new instance. */
+        dst_handles[range_i] = dst_handle;
+      },
+      exec_mode::grain_size(1024));
 
   if (pick_instance.is_single()) {
     if (pick_instance.get_internal_single()) {
@@ -188,10 +197,10 @@ static std::unique_ptr<bke::Instances> add_instances_from_component(
 
 static void node_geo_exec(GeoNodeExecParams params)
 {
-  GeometrySet geometry_set = params.extract_input<GeometrySet>("Points");
-  GeometrySet instance = params.get_input<GeometrySet>("Instance");
+  GeometrySet geometry_set = params.extract_input<GeometrySet>("Points"_ustr);
+  GeometrySet instance = params.get_input<GeometrySet>("Instance"_ustr);
   instance.ensure_owns_direct_data();
-  const NodeAttributeFilter &attribute_filter = params.get_attribute_filter("Instances");
+  const NodeAttributeFilter &attribute_filter = params.get_attribute_filter("Instances"_ustr);
 
   geometry::foreach_real_geometry(geometry_set, [&](GeometrySet &geometry_set) {
     Vector<bke::GeometrySet> component_instances;
@@ -272,14 +281,14 @@ static void node_geo_exec(GeoNodeExecParams params)
     instances->remove_unused_references();
   }
 
-  params.set_output("Instances", std::move(geometry_set));
+  params.set_output("Instances"_ustr, std::move(geometry_set));
 }
 
 static void node_register()
 {
   static bke::bNodeType ntype;
 
-  geo_node_type_base(&ntype, "GeometryNodeInstanceOnPoints", GEO_NODE_INSTANCE_ON_POINTS);
+  geo_node_type_base(&ntype, "GeometryNodeInstanceOnPoints"_ustr, GEO_NODE_INSTANCE_ON_POINTS);
   ntype.ui_name = "Instance on Points";
   ntype.ui_description =
       "Generate a reference to geometry at each of the input points, without duplicating its "

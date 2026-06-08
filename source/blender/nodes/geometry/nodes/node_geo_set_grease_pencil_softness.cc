@@ -15,20 +15,29 @@ static void node_declare(NodeDeclarationBuilder &b)
 {
   b.use_custom_socket_order();
   b.allow_any_socket_order();
-  b.add_input<decl::Geometry>("Grease Pencil")
+  b.add_input<decl::Geometry>("Grease Pencil"_ustr)
       .supported_type(GeometryComponent::Type::GreasePencil)
       .align_with_previous()
       .description("Grease Pencil to set the softness of");
-  b.add_output<decl::Geometry>("Grease Pencil").propagate_all().align_with_previous();
-  b.add_input<decl::Bool>("Selection").default_value(true).hide_value().field_on_all();
-  b.add_input<decl::Float>("Softness").default_value(0.0f).min(0.0f).max(1.0f).field_on_all();
+  b.add_output<decl::Geometry>("Grease Pencil"_ustr)
+      .propagate_all_geometry()
+      .align_with_previous();
+  b.add_input<decl::Bool>("Selection"_ustr)
+      .default_value(true)
+      .hide_value()
+      .evaluated_geometry_field();
+  b.add_input<decl::Float>("Softness"_ustr)
+      .default_value(0.0f)
+      .min(0.0f)
+      .max(1.0f)
+      .evaluated_geometry_field();
 }
 
 static void node_geo_exec(GeoNodeExecParams params)
 {
-  GeometrySet geometry_set = params.extract_input<GeometrySet>("Grease Pencil");
-  const Field<bool> selection = params.extract_input<Field<bool>>("Selection");
-  const Field<float> softness = params.extract_input<Field<float>>("Softness");
+  GeometrySet geometry_set = params.extract_input<GeometrySet>("Grease Pencil"_ustr);
+  const Field<bool> selection = params.extract_input<Field<bool>>("Selection"_ustr);
+  const Field<float> softness = params.extract_input<Field<float>>("Softness"_ustr);
 
   geometry::foreach_real_geometry(geometry_set, [&](GeometrySet &geometry) {
     if (GreasePencil *grease_pencil = geometry.get_grease_pencil_for_write()) {
@@ -53,20 +62,20 @@ static void node_geo_exec(GeoNodeExecParams params)
     }
   });
 
-  params.set_output("Grease Pencil", std::move(geometry_set));
+  params.set_output("Grease Pencil"_ustr, std::move(geometry_set));
 }
 
 static void node_register()
 {
   static bke::bNodeType ntype;
 
-  geo_node_type_base(&ntype, "GeometryNodeSetGreasePencilSoftness");
+  geo_node_type_base(&ntype, "GeometryNodeSetGreasePencilSoftness"_ustr);
   ntype.ui_name = "Set Grease Pencil Softness";
   ntype.ui_description = "Set softness attribute on Grease Pencil geometry";
   ntype.nclass = NODE_CLASS_GEOMETRY;
   ntype.geometry_node_execute = node_geo_exec;
   ntype.declare = node_declare;
-  bke::node_type_size(ntype, 180, 120, NODE_DEFAULT_MAX_WIDTH);
+  ntype.default_width = bke::NodeWidth::_180;
   bke::node_register_type(ntype);
 }
 NOD_REGISTER_NODE(node_register)

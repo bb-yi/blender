@@ -107,13 +107,11 @@ class FrameBuffer {
   virtual void bind(bool enabled_srgb) = 0;
   virtual bool check(char err_out[256]) = 0;
   virtual void clear(GPUFrameBufferBits buffers,
-                     const float clear_col[4],
+                     const double4 clear_color,
                      float clear_depth,
                      uint clear_stencil) = 0;
-  virtual void clear_multi(const float (*clear_col)[4]) = 0;
-  virtual void clear_attachment(GPUAttachmentType type,
-                                eGPUDataFormat data_format,
-                                const void *clear_value) = 0;
+  virtual void clear_multi(Span<double4> clear_cols) = 0;
+  virtual void clear_attachment(GPUAttachmentType type, const double4 clear_value) = 0;
 
   virtual void attachment_set_loadstore_op(GPUAttachmentType type, GPULoadStore ls) = 0;
 
@@ -238,7 +236,7 @@ class FrameBuffer {
     scissor_set(scissor_rect);
   }
 
-  inline const GPUAttachment &depth_attachment() const
+  const GPUAttachment &depth_attachment() const
   {
     if (attachments_[GPU_FB_DEPTH_ATTACHMENT].tex) {
       return attachments_[GPU_FB_DEPTH_ATTACHMENT];

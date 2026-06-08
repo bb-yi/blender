@@ -64,7 +64,7 @@ bool edit_strip_swap(Scene *scene, Strip *strip_a, Strip *strip_b, const char **
     }
 
     if (strip_a->is_effect() && strip_b->is_effect()) {
-      if (effect_get_num_inputs(strip_a->type) != effect_get_num_inputs(strip_b->type)) {
+      if (strip_a->effect_num_inputs_get() != strip_b->effect_num_inputs_get()) {
         *r_error_str = N_("Strips must have the same number of inputs");
         return false;
       }
@@ -248,7 +248,7 @@ bool edit_move_strip_to_meta(Scene *scene,
 
   VectorSet<Strip *> strips;
   strips.add(src_strip);
-  iterator_set_expand(scene, seqbase, strips, query_strip_effect_chain);
+  iterator_set_expand(seqbase, strips, query_strip_effect_chain);
 
   for (Strip *strip : strips) {
     /* Move to meta. */
@@ -391,10 +391,10 @@ static bool seq_edit_split_operation_permitted_check(const Scene *scene,
     if (!seq_edit_split_intersect_check(scene, strip, timeline_frame)) {
       continue;
     }
-    if (effect_get_num_inputs(strip->type) <= 1) {
+    if (strip->effect_num_inputs_get() <= 1) {
       continue;
     }
-    if (effect_is_transition(StripType(strip->type))) {
+    if (effect_is_transition(strip->type)) {
       *r_error = "Splitting transition effect is not permitted.";
       return false;
     }
@@ -422,8 +422,7 @@ Strip *edit_strip_split(Main *bmain,
   /* Whole strip effect chain must be duplicated in order to preserve relationships. */
   VectorSet<Strip *> strips;
   strips.add(strip);
-  iterator_set_expand(scene,
-                      seqbase,
+  iterator_set_expand(seqbase,
                       strips,
                       ignore_connections ? query_strip_effect_chain :
                                            query_strip_connected_and_effect_chain);

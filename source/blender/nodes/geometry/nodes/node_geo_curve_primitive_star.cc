@@ -10,28 +10,28 @@ namespace blender::nodes::node_geo_curve_primitive_star_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Int>("Points")
+  b.add_input<decl::Int>("Points"_ustr)
       .default_value(8)
       .min(3)
       .max(256)
       .subtype(PROP_UNSIGNED)
       .description("Number of points on each of the circles");
-  b.add_input<decl::Float>("Inner Radius")
+  b.add_input<decl::Float>("Inner Radius"_ustr)
       .default_value(1.0f)
       .min(0.0f)
       .subtype(PROP_DISTANCE)
       .description("Radius of the inner circle; can be larger than outer radius");
-  b.add_input<decl::Float>("Outer Radius")
+  b.add_input<decl::Float>("Outer Radius"_ustr)
       .default_value(2.0f)
       .min(0.0f)
       .subtype(PROP_DISTANCE)
       .description("Radius of the outer circle; can be smaller than inner radius");
-  b.add_input<decl::Float>("Twist")
+  b.add_input<decl::Float>("Twist"_ustr)
       .subtype(PROP_ANGLE)
       .description("The counterclockwise rotation of the inner set of points");
-  b.add_output<decl::Geometry>("Curve");
-  b.add_output<decl::Bool>("Outer Points")
-      .field_on_all()
+  b.add_output<decl::Geometry>("Curve"_ustr);
+  b.add_output<decl::Bool>("Outer Points"_ustr)
+      .anonymous_attribute_output()
       .description("An attribute field with a selection of the outer points");
 }
 
@@ -73,24 +73,25 @@ static void create_selection_output(CurveComponent &component, const StringRef &
 
 static void node_geo_exec(GeoNodeExecParams params)
 {
-  Curves *curves = create_star_curve(std::max(params.extract_input<float>("Inner Radius"), 0.0f),
-                                     std::max(params.extract_input<float>("Outer Radius"), 0.0f),
-                                     params.extract_input<float>("Twist"),
-                                     std::max(params.extract_input<int>("Points"), 3));
+  Curves *curves = create_star_curve(
+      std::max(params.extract_input<float>("Inner Radius"_ustr), 0.0f),
+      std::max(params.extract_input<float>("Outer Radius"_ustr), 0.0f),
+      params.extract_input<float>("Twist"_ustr),
+      std::max(params.extract_input<int>("Points"_ustr), 3));
   GeometrySet output = GeometrySet::from_curves(curves);
 
   if (std::optional<std::string> outer_points_id =
-          params.get_output_anonymous_attribute_id_if_needed("Outer Points"))
+          params.get_output_anonymous_attribute_id_if_needed("Outer Points"_ustr))
   {
     create_selection_output(output.get_component_for_write<CurveComponent>(), *outer_points_id);
   }
-  params.set_output("Curve", std::move(output));
+  params.set_output("Curve"_ustr, std::move(output));
 }
 
 static void node_register()
 {
   static bke::bNodeType ntype;
-  geo_node_type_base(&ntype, "GeometryNodeCurveStar", GEO_NODE_CURVE_PRIMITIVE_STAR);
+  geo_node_type_base(&ntype, "GeometryNodeCurveStar"_ustr, GEO_NODE_CURVE_PRIMITIVE_STAR);
   ntype.ui_name = "Star";
   ntype.ui_description =
       "Generate a poly spline in a star pattern by connecting alternating points of two circles";

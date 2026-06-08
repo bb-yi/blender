@@ -661,6 +661,8 @@ dict_custom = {
     "decrefing",
     "diff",
     "diffs",
+    "docstring",
+    "docstrings",
     "endian",
     "endianness",
     "env",
@@ -922,6 +924,9 @@ files_ignore = {
     "source/blender/blenlib/intern/fnmatch.c",
     "source/blender/draw/intern/shaders/common_fxaa_lib.glsl",
     "source/blender/gpu/shaders/common/gpu_shader_smaa_lib.glsl",
+
+    # Contains `Lorem Ipsum`.
+    "source/blender/blenlib/tests/BLI_resource_strings.h",
 }
 
 # These contain many typos that could be resolved, then removed from this list.

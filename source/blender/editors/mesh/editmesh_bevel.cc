@@ -147,8 +147,14 @@ static void edbm_bevel_update_status_text(bContext *C, wmOperator *op)
   else {
     double offset_val = double(RNA_float_get(op->ptr, "offset"));
     const int precision = opdata->shift_value[opdata->value_mode] == -1.0f ? 4 : 7;
-    BKE_unit_value_as_string_scaled(
-        offset_str, NUM_STR_REP_LEN, offset_val, precision * -1, B_UNIT_LENGTH, sce->unit, true);
+    BKE_unit_value_as_string_scaled(offset_str,
+                                    NUM_STR_REP_LEN,
+                                    offset_val,
+                                    precision * -1,
+                                    B_UNIT_LENGTH,
+                                    sce->unit,
+                                    true,
+                                    true);
   }
 
   PropertyRNA *prop;
@@ -241,6 +247,7 @@ static void edbm_bevel_update_status_text(bContext *C, wmOperator *op)
 
 static bool edbm_bevel_init(bContext *C, wmOperator *op, const bool is_modal)
 {
+  const Main *bmain = CTX_data_main(C);
   Scene *scene = CTX_data_scene(C);
   View3D *v3d = CTX_wm_view3d(C);
   ToolSettings *ts = CTX_data_tool_settings(C);
@@ -263,7 +270,7 @@ static bool edbm_bevel_init(bContext *C, wmOperator *op, const bool is_modal)
 
   {
     const Vector<Object *> objects = BKE_view_layer_array_from_objects_in_edit_mode_unique_data(
-        scene, view_layer, v3d);
+        *bmain, scene, view_layer, v3d);
     for (Object *obedit : objects) {
       float scale = mat4_to_scale(obedit->object_to_world().ptr());
       opdata->max_obj_scale = max_ff(opdata->max_obj_scale, scale);

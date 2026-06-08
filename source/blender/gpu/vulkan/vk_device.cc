@@ -23,6 +23,7 @@
 #include "gpu_shader_dependency_private.hh"
 
 #include "GPU_capabilities.hh"
+#include "gpu_capabilities_private.hh"
 
 #include "BLI_math_matrix_types.hh"
 
@@ -75,11 +76,10 @@ void VKWorkarounds::log() const
 {
   CLOG_DEBUG(&LOG,
              "Activated workarounds\n"
-             " - [%c] Not 16/32 bit aligned image formats",
              " - [%c] Not 16/32 bit aligned image formats\n"
              " - [%c] No texture pool",
              not_aligned_pixel_formats ? 'X' : ' ',
-             no_texture_pool ? 'X' : ' ');
+             GCaps.texture_pool_workaround ? 'X' : ' ');
 }
 
 void VKDevice::reinit()
@@ -306,8 +306,9 @@ void VKDevice::init_dummy_buffer()
                       VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                       VMA_MEMORY_USAGE_AUTO_PREFER_HOST,
                       VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
-                      1.0f);
-  debug::object_label(dummy_buffer.vk_handle(), "DummyBuffer");
+                      1.0f,
+                      false,
+                      "DummyBuffer");
   /* Default dummy buffer. Set the 4th element to 1 to fix missing orcos. */
   float data[16] = {
       0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
@@ -326,6 +327,7 @@ shader::GeneratedSource VKDevice::extensions_define(StringRefNull stage_define) 
     ss << "#define gpu_BaseInstance (gl_BaseInstanceARB)\n";
   }
   ss << "#define GPU_ARB_clip_control\n";
+  ss << "#define GPU_ARB_derivative_control\n";
 
   ss << "#define gl_VertexID gl_VertexIndex\n";
   ss << "#define gpu_InstanceIndex (gl_InstanceIndex)\n";

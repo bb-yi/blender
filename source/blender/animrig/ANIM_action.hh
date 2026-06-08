@@ -1079,6 +1079,16 @@ class Channelbag : public ActionChannelbag {
   Vector<FCurve *> fcurve_create_many(Main *bmain, Span<FCurveDescriptor> fcurve_descriptors);
 
   /**
+   * Duplicates the FCurve and changes the data of the duplicate to the given `new_...` values.
+   * In case an FCurve with `new_path` and `new_array_index` already exists, the keys in it are
+   * replaced with the keys of old_fcurve and it is moved to `new_group_name`.
+   */
+  FCurve &fcurve_clone(const FCurve &old_fcurve,
+                       StringRefNull new_path,
+                       int new_array_index,
+                       StringRef new_group_name);
+
+  /**
    * Append an F-Curve to this Channelbag.
    *
    * This transfers ownership of the F-Curve to this Channelbag, and it is up to
@@ -1589,7 +1599,7 @@ Span<const FCurve *> fcurves_for_action_slot(const Action &action, slot_handle_t
  * This function also ensures that there is a layer and a keyframe strip for the
  * channelbag to exist on.
  *
- * \param action: MUST already be assigned to the animated ID.
+ * \param dna_action: MUST already be assigned to the animated ID.
  *
  * \param animated_id: The ID that is animated by this Action. It is used to
  * create and assign an appropriate slot if needed when creating the fcurve, and

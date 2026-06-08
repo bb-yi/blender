@@ -10,12 +10,13 @@ namespace blender::nodes::node_fn_replace_string_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
+  b.is_function_node();
   b.use_custom_socket_order();
   b.allow_any_socket_order();
-  b.add_input<decl::String>("String").optional_label();
-  b.add_output<decl::String>("String").align_with_previous();
-  b.add_input<decl::String>("Find").description("The string to find in the input string");
-  b.add_input<decl::String>("Replace").description("The string to replace each match with");
+  b.add_input<decl::String>("String"_ustr).optional_label();
+  b.add_output<decl::String>("String"_ustr).align_with_previous();
+  b.add_input<decl::String>("Find"_ustr).description("The string to find in the input string");
+  b.add_input<decl::String>("Replace"_ustr).description("The string to replace each match with");
 }
 
 static std::string replace_all(const StringRefNull str,
@@ -44,7 +45,7 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  fn_node_type_base(&ntype, "FunctionNodeReplaceString", FN_NODE_REPLACE_STRING);
+  fn_cmp_node_type_base(&ntype, "FunctionNodeReplaceString"_ustr, FN_NODE_REPLACE_STRING);
   ntype.ui_name = "Replace String";
   ntype.ui_description = "Replace a given string segment with another";
   ntype.enum_name_legacy = "REPLACE_STRING";

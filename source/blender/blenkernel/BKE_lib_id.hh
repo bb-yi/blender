@@ -586,27 +586,42 @@ void BKE_id_free(Main *bmain, void *idv);
 void BKE_id_free_us(Main *bmain, void *idv) ATTR_NONNULL();
 
 /**
- * Properly delete a single ID from given \a bmain database.
+ * Helper struct to pass advanced control options to #BKE_id_delete and related APIs.
  */
-void BKE_id_delete(Main *bmain, void *idv) ATTR_NONNULL();
+struct BKEIDDeleteOptions {
+  /**
+   * Additional `ID_REMAP_` flags to pass to remapping code when ensuring that deleted IDs are not
+   * used by any other ID in given `bmain`. Typical example would be e.g.
+   * `ID_REMAP_FORCE_UI_POINTERS`, required when default UI-handling callbacks of remapping code
+   * won't be working (e.g. from readfile code).
+   */
+  int extra_remapping_flags = 0;
+
+  /**
+   * If `true`, do not validate and update liboverride hierarchy root pointers after deleting some
+   * IDs. Useful e.g. for ID deletion within liboverride resync process and the like.
+   */
+  bool prevent_liboverride_hierarchy_root_ensure = false;
+};
+
 /**
- * Like BKE_id_delete, but with extra corner-case options.
+ * Properly delete a single ID from given \a bmain database.
  *
- * \param extra_remapping_flags: Additional `ID_REMAP_` flags to pass to remapping code when
- * ensuring that deleted IDs are not used by any other ID in given `bmain`. Typical example would
- * be e.g. `ID_REMAP_FORCE_UI_POINTERS`, required when default UI-handling callbacks of remapping
- * code won't be working (e.g. from readfile code).
+ * \param options: A set of more advanced options for when complex/unusual behaviors are necessary.
  */
-void BKE_id_delete_ex(Main *bmain, void *idv, const int extra_remapping_flags) ATTR_NONNULL(1, 2);
+void BKE_id_delete(Main *bmain, void *idv, const BKEIDDeleteOptions &options = {}) ATTR_NONNULL();
 /**
  * Properly delete all IDs tagged with \a ID_TAG_DOIT, in given \a bmain database.
  *
  * This is more efficient than calling #BKE_id_delete repetitively on a large set of IDs
  * (several times faster when deleting most of the IDs at once).
  *
+ * \param options: A set of more advanced options for when complex/unusual behaviors are necessary.
+ *
  * \return Number of deleted data-blocks.
  */
-size_t BKE_id_multi_tagged_delete(Main *bmain) ATTR_NONNULL();
+size_t BKE_id_multi_tagged_delete(Main *bmain, const BKEIDDeleteOptions &options = {})
+    ATTR_NONNULL();
 /**
  * Properly delete all IDs from \a ids_to_delete, from given \a bmain database.
  *
@@ -618,9 +633,13 @@ size_t BKE_id_multi_tagged_delete(Main *bmain) ATTR_NONNULL();
  * of IDs). They are all freed though, so these pointers are all invalid after calling this
  * function.
  *
+ * \param options: A set of more advanced options for when complex/unusual behaviors are necessary.
+ *
  * \return Number of deleted data-blocks.
  */
-size_t BKE_id_multi_delete(Main *bmain, Set<ID *> &ids_to_delete);
+size_t BKE_id_multi_delete(Main *bmain,
+                           Set<ID *> &ids_to_delete,
+                           const BKEIDDeleteOptions &options = {});
 
 /**
  * Add a 'NO_MAIN' data-block to given main (also sets user-counts of its IDs if needed).
@@ -908,6 +927,15 @@ void BKE_main_id_flag_all(Main *bmain, int flag, bool value);
 void BKE_main_id_newptr_and_tag_clear(Main *bmain);
 
 void BKE_main_id_refcount_recompute(Main *bmain, bool do_linked_only);
+
+/**
+ * Update the ID_TAG_INDIRECT flag for all non-local IDs.
+ *
+ * \param local_ids: Optionally, provide a list of IDs that are considered local. If not provided,
+ * all local IDs from the given main are used.
+ */
+void BKE_main_id_indirect_linked_update(Main &bmain,
+                                        std::optional<Span<ID *>> local_ids = std::nullopt);
 
 void BKE_main_lib_objects_recalc_all(Main *bmain);
 

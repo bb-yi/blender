@@ -41,19 +41,21 @@ static void node_declare(NodeDeclarationBuilder &b)
 {
   b.use_custom_socket_order();
   b.allow_any_socket_order();
-  b.add_input<decl::Color>("Image")
+  b.add_input<decl::Color>("Image"_ustr)
       .default_value({1.0f, 1.0f, 1.0f, 1.0f})
       .hide_value()
       .structure_type(StructureType::Dynamic);
-  b.add_output<decl::Color>("Image").structure_type(StructureType::Dynamic).align_with_previous();
+  b.add_output<decl::Color>("Image"_ustr)
+      .structure_type(StructureType::Dynamic)
+      .align_with_previous();
 
-  b.add_input<decl::Float>("Factor", "Fac")
+  b.add_input<decl::Float>("Factor"_ustr, "Fac"_ustr)
       .default_value(1.0f)
       .min(0.0f)
       .max(1.0f)
       .subtype(PROP_FACTOR)
       .structure_type(StructureType::Dynamic);
-  b.add_input<decl::Menu>("Type")
+  b.add_input<decl::Menu>("Type"_ustr)
       .default_value(CMP_NODE_FILTER_SOFT)
       .static_items(type_items)
       .optional_label();
@@ -64,16 +66,16 @@ class SocketSearchOp {
   CMPNodeFilterMethod filter_type = CMP_NODE_FILTER_SOFT;
   void operator()(LinkSearchOpParams &params)
   {
-    bNode &node = params.add_node("CompositorNodeFilter");
-    bNodeSocket &type_socket = *bke::node_find_socket(node, SOCK_IN, "Type");
+    bNode &node = params.add_node("CompositorNodeFilter"_ustr);
+    bNodeSocket &type_socket = *bke::node_find_socket(node, SOCK_IN, "Type"_ustr);
     type_socket.default_value_typed<bNodeSocketValueMenu>()->value = this->filter_type;
-    params.update_and_connect_available_socket(node, "Image");
+    params.update_and_connect_available_socket(node, "Image"_ustr);
   }
 };
 
 static void gather_link_searches(GatherLinkSearchOpParams &params)
 {
-  const eNodeSocketDatatype from_socket_type = eNodeSocketDatatype(params.other_socket().type);
+  const eNodeSocketDatatype from_socket_type = params.other_socket().type;
   if (!params.node_tree().typeinfo->validate_link(from_socket_type, SOCK_RGBA)) {
     return;
   }
@@ -292,7 +294,7 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, "CompositorNodeFilter", CMP_NODE_FILTER);
+  cmp_node_type_base(&ntype, "CompositorNodeFilter"_ustr, CMP_NODE_FILTER);
   ntype.ui_name = "Filter";
   ntype.ui_description = "Apply common image enhancement filters";
   ntype.enum_name_legacy = "FILTER";

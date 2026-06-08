@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include "BLI_enum_flags.hh"
+
 #include "DNA_ID.h"
 #include "DNA_color_types.h"
 #include "DNA_tracking_types.h"
@@ -27,7 +29,7 @@ class Texture;
 
 /** #MovieClipProxy.build_size_flag
  * NOTE: Keep in sync with #IMB_Proxy_Size. */
-enum {
+enum eMovieClipProxy_Size : short {
   MCLIP_PROXY_SIZE_25 = (1 << 0),
   MCLIP_PROXY_SIZE_50 = (1 << 1),
   MCLIP_PROXY_SIZE_75 = (1 << 2),
@@ -37,30 +39,25 @@ enum {
   MCLIP_PROXY_UNDISTORTED_SIZE_75 = (1 << 6),
   MCLIP_PROXY_UNDISTORTED_SIZE_100 = (1 << 7),
 };
+ENUM_OPERATORS(eMovieClipProxy_Size)
 
-/** #MovieClipProxy.build_tc_flag
- * NOTE: Keep in sync with #IMB_Timecode_Type. */
-enum {
-  MCLIP_TC_RECORD_RUN = 1,
-  MCLIP_TC_RECORD_RUN_NO_GAPS = 8,
-};
-
-enum MovieClipSource {
+enum MovieClipSource : int {
   MCLIP_SRC_SEQUENCE = 1,
   MCLIP_SRC_MOVIE = 2,
 };
 
-enum MovieClipFlag {
+enum MovieClipFlag : int {
   MCLIP_USE_PROXY = (1 << 0),
   MCLIP_USE_PROXY_CUSTOM_DIR = (1 << 1),
   /* MCLIP_CUSTOM_START_FRAME    = (1 << 2), */ /* UNUSED */
   MCLIP_DATA_EXPAND = (1 << 3),
 
-  MCLIP_TIMECODE_FLAGS = (MCLIP_USE_PROXY | MCLIP_USE_PROXY_CUSTOM_DIR),
+  MCLIP_PROXY_FLAGS = (MCLIP_USE_PROXY | MCLIP_USE_PROXY_CUSTOM_DIR),
 };
+ENUM_OPERATORS(MovieClipFlag)
 
-/** #MovieClip.render_size */
-enum {
+/** #MovieClipUser.render_size */
+enum eMovieClipProxy_RenderSize : short {
   MCLIP_PROXY_RENDER_SIZE_FULL = 0,
   MCLIP_PROXY_RENDER_SIZE_25 = 1,
   MCLIP_PROXY_RENDER_SIZE_50 = 2,
@@ -68,32 +65,30 @@ enum {
   MCLIP_PROXY_RENDER_SIZE_100 = 4,
 };
 
-/** #MovieClip.render_flag */
-enum {
+/** #MovieClipUser.render_flag */
+enum eMovieClipProxy_RenderFlag : short {
   MCLIP_PROXY_RENDER_UNDISTORT = 1,
   /** Use original, if proxy is not found. */
   MCLIP_PROXY_RENDER_USE_FALLBACK_RENDER = 2,
 };
+ENUM_OPERATORS(eMovieClipProxy_RenderFlag)
 
 struct MovieClipUser {
   /** Current frame number. */
   int framenr = 1;
   /** Proxy render size. */
-  short render_size = MCLIP_PROXY_RENDER_SIZE_FULL, render_flag = 0;
+  eMovieClipProxy_RenderSize render_size = MCLIP_PROXY_RENDER_SIZE_FULL;
+  eMovieClipProxy_RenderFlag render_flag = {};
 };
 
 struct MovieClipProxy {
   /** Custom directory for index and proxy files (defaults to "BL_proxy"). */
   char dir[/*FILE_MAXDIR*/ 768] = "";
 
-  /** Time code in use. */
-  short tc = 0;
   /** Proxy build quality. */
   short quality = 50;
   /** Size flags (see below) of all proxies to build. */
-  short build_size_flag = MCLIP_PROXY_SIZE_25;
-  /** Time code flags (see below) of all tc indices to build. */
-  short build_tc_flag = MCLIP_TC_RECORD_RUN | MCLIP_TC_RECORD_RUN_NO_GAPS;
+  eMovieClipProxy_Size build_size_flag = MCLIP_PROXY_SIZE_25;
 };
 
 struct MovieClip_RuntimeGPUTexture {
@@ -121,14 +116,14 @@ struct MovieClip {
 
   char filepath[/*FILE_MAX*/ 1024] = "";
 
-  int source = 0; /* MovieClipSource */
-  int _pad = {};
+  MovieClipSource source = {};
   /** Size of last accessed frame. */
   int lastsize[2] = {};
 
   /** Display aspect. */
   float aspx = 1.0f, aspy = 1.0f;
 
+  int _pad = 0;
   /** Movie source data. */
   struct MovieReader *anim = nullptr;
   /** Cache for different stuff, not in file. */
@@ -145,8 +140,8 @@ struct MovieClip {
   void *tracking_context = nullptr;
 
   /** Proxy to clip data. */
-  struct MovieClipProxy proxy;
-  int flag = 0; /* MovieClipFlag */
+  MovieClipProxy proxy;
+  MovieClipFlag flag = {};
 
   /** Length of movie. */
   int len = 0;
@@ -163,10 +158,9 @@ struct MovieClip {
    * touches other data associated with a clip. */
   int frame_offset = 0;
 
-  /* color management */
+  int _pad1 = 0;
   ColorManagedColorspaceSettings colorspace_settings;
-
-  struct MovieClip_Runtime runtime;
+  MovieClip_Runtime runtime;
 };
 
 struct MovieClipScopes {

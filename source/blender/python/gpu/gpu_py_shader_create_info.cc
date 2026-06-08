@@ -442,12 +442,14 @@ static void pygpu_interface_info__tp_dealloc(PyObject *self)
 PyDoc_STRVAR(
     /* Wrap. */
     pygpu_interface_info__tp_doc,
-    ".. class:: GPUStageInterfaceInfo(name)\n"
+    ".. class:: GPUStageInterfaceInfo\n"
     "\n"
     "   List of varyings between shader stages.\n"
     "\n"
-    "   :param name: Name of the interface block.\n"
-    "   :type name: str\n");
+    "   .. method:: __init__(name)\n"
+    "\n"
+    "      :param name: Name of the interface block.\n"
+    "      :type name: str\n");
 PyTypeObject BPyGPUStageInterfaceInfo_Type = {
     /*ob_base*/ PyVarObject_HEAD_INIT(nullptr, 0)
     /*tp_name*/ "GPUStageInterfaceInfo",
@@ -1323,6 +1325,7 @@ static int pygpu_shader_info__tp_traverse(PyObject *self, visitproc visit, void 
   Py_VISIT(py_info->vertex_source);
   Py_VISIT(py_info->fragment_source);
   Py_VISIT(py_info->compute_source);
+  Py_VISIT(py_info->typedef_source);
   Py_VISIT(py_info->references);
   return 0;
 }
@@ -1333,6 +1336,7 @@ static int pygpu_shader_info__tp_clear(PyObject *self)
   Py_CLEAR(py_info->vertex_source);
   Py_CLEAR(py_info->fragment_source);
   Py_CLEAR(py_info->compute_source);
+  Py_CLEAR(py_info->typedef_source);
   Py_CLEAR(py_info->references);
   return 0;
 }
@@ -1347,14 +1351,7 @@ static void pygpu_shader_info__tp_dealloc(PyObject *self)
 
 #ifdef USE_GPU_PY_REFERENCES
   PyObject_GC_UnTrack(self);
-  if (py_info->references || py_info->vertex_source || py_info->fragment_source) {
-    pygpu_shader_info__tp_clear(self);
-    Py_XDECREF(py_info->vertex_source);
-    Py_XDECREF(py_info->fragment_source);
-    Py_XDECREF(py_info->compute_source);
-    Py_XDECREF(py_info->references);
-  }
-
+  pygpu_shader_info__tp_clear(self);
 #endif
 
   Py_TYPE(self)->tp_free(self);

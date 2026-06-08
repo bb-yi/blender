@@ -10,6 +10,7 @@
 
 #pragma once
 
+#include "BLI_enum_flags.hh"
 #include "BLI_sys_types.h"
 
 #include "BLI_implicit_sharing.h"
@@ -17,7 +18,7 @@
 namespace blender {
 
 /** #CustomDataLayer.type */
-enum eCustomDataType {
+enum eCustomDataType : int {
   /**
    * Used by GPU attributes in the cases when we don't know which layer
    * we are addressing in advance.
@@ -64,7 +65,7 @@ enum eCustomDataType {
   /* CD_ID_MCOL = 21, */
   CD_PROP_INT16_2D = 22,
   CD_CLOTH_ORCO = 23,
-/* CD_RECAST = 24, */ /* UNUSED */
+  CD_PROP_FLOAT4 = 24,
 
 #ifdef DNA_DEPRECATED_ALLOW
   CD_MPOLY = 25,
@@ -141,6 +142,7 @@ enum eCustomDataType {
 #define CD_MASK_MLOOPTANGENT (1LL << CD_MLOOPTANGENT)
 #define CD_MASK_TESSLOOPNORMAL (1LL << CD_TESSLOOPNORMAL)
 #define CD_MASK_PROP_COLOR (1ULL << CD_PROP_COLOR)
+#define CD_MASK_PROP_FLOAT4 (1ULL << CD_PROP_FLOAT4)
 #define CD_MASK_PROP_FLOAT3 (1ULL << CD_PROP_FLOAT3)
 #define CD_MASK_PROP_FLOAT2 (1ULL << CD_PROP_FLOAT2)
 #define CD_MASK_PROP_BOOL (1ULL << CD_PROP_BOOL)
@@ -158,10 +160,10 @@ enum eCustomDataType {
 
 /** All generic attributes. */
 #define CD_MASK_PROP_ALL \
-  (CD_MASK_PROP_FLOAT | CD_MASK_PROP_FLOAT2 | CD_MASK_PROP_FLOAT3 | CD_MASK_PROP_INT32 | \
-   CD_MASK_PROP_COLOR | CD_MASK_PROP_STRING | CD_MASK_PROP_BYTE_COLOR | CD_MASK_PROP_BOOL | \
-   CD_MASK_PROP_INT8 | CD_MASK_PROP_INT16_2D | CD_MASK_PROP_INT32_2D | CD_MASK_PROP_QUATERNION | \
-   CD_MASK_PROP_FLOAT4X4)
+  (CD_MASK_PROP_FLOAT | CD_MASK_PROP_FLOAT2 | CD_MASK_PROP_FLOAT3 | CD_MASK_PROP_FLOAT4 | \
+   CD_MASK_PROP_INT32 | CD_MASK_PROP_COLOR | CD_MASK_PROP_STRING | CD_MASK_PROP_BYTE_COLOR | \
+   CD_MASK_PROP_BOOL | CD_MASK_PROP_INT8 | CD_MASK_PROP_INT16_2D | CD_MASK_PROP_INT32_2D | \
+   CD_MASK_PROP_QUATERNION | CD_MASK_PROP_FLOAT4X4)
 
 /** All color attributes */
 #define CD_MASK_COLOR_ALL (CD_MASK_PROP_COLOR | CD_MASK_PROP_BYTE_COLOR)
@@ -172,8 +174,8 @@ enum eCustomDataType {
 #define MAX_CUSTOMDATA_LAYER_NAME 68
 #define MAX_CUSTOMDATA_LAYER_NAME_NO_PREFIX 64
 
-/** #CustomData.flag */
-enum {
+/** #CustomDataLayer.flag */
+enum eCustomDataLayer_Flag : int {
   /**
    * Indicates layer should not be copied by #CustomData_from_template or #CustomData_copy_data.
    */
@@ -190,15 +192,16 @@ enum {
   CD_FLAG_COLOR_RENDER = (1 << 6)
 #endif
 };
+ENUM_OPERATORS(eCustomDataLayer_Flag)
 
 /** Descriptor and storage for a custom data layer. */
 struct CustomDataLayer {
   /** Type of data in layer. */
-  int type = 0;
+  eCustomDataType type = {};
   /** In editmode, offset of layer in block. */
   int offset = 0;
   /** General purpose flag. */
-  int flag = 0;
+  eCustomDataLayer_Flag flag = {};
   /** Number of the active layer of this type. */
   int active = 0;
   /** Number of the layer to render. */

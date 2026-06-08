@@ -13,14 +13,19 @@ namespace blender::nodes::node_geo_curve_spline_parameter_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_output<decl::Float>("Factor").field_source().description(
-      "For points, the portion of the spline's total length at the control point. For "
-      "Splines, the factor of that spline within the entire curve");
-  b.add_output<decl::Float>("Length").field_source().description(
-      "For points, the distance along the control point's spline, For splines, the "
-      "distance along the entire curve");
-  b.add_output<decl::Int>("Index").field_source().description(
-      "Each control point's index on its spline");
+  b.add_output<decl::Float>("Factor"_ustr)
+      .structure_type(StructureType::Field)
+      .description(
+          "For points, the portion of the spline's total length at the control point. For "
+          "Splines, the factor of that spline within the entire curve");
+  b.add_output<decl::Float>("Length"_ustr)
+      .structure_type(StructureType::Field)
+      .description(
+          "For points, the distance along the control point's spline, For splines, the "
+          "distance along the entire curve");
+  b.add_output<decl::Int>("Index"_ustr)
+      .structure_type(StructureType::Field)
+      .description("Each control point's index on its spline");
 }
 
 /**
@@ -175,7 +180,6 @@ class CurveParameterFieldInput final : public bke::CurvesFieldInput {
   CurveParameterFieldInput()
       : bke::CurvesFieldInput(CPPType::get<float>(), "Spline Parameter node")
   {
-    category_ = Category::Generated;
   }
 
   GVArray get_varray_for_context(const bke::CurvesGeometry &curves,
@@ -193,14 +197,10 @@ class CurveParameterFieldInput final : public bke::CurvesFieldInput {
     }
   }
 
-  uint64_t hash() const override
+  void hash_unique(UniqueHashBytes &hash, fn::FieldHashDeep & /*deep_hash_cache*/) const override
   {
-    return 29837456298;
-  }
-
-  bool is_equal_to(const fn::FieldNode &other) const override
-  {
-    return dynamic_cast<const CurveParameterFieldInput *>(&other) != nullptr;
+    static constexpr int8_t id = 0;
+    hash.add(&id);
   }
 };
 
@@ -209,7 +209,6 @@ class CurveLengthParameterFieldInput final : public bke::CurvesFieldInput {
   CurveLengthParameterFieldInput()
       : bke::CurvesFieldInput(CPPType::get<float>(), "Curve Length node")
   {
-    category_ = Category::Generated;
   }
 
   GVArray get_varray_for_context(const bke::CurvesGeometry &curves,
@@ -228,23 +227,16 @@ class CurveLengthParameterFieldInput final : public bke::CurvesFieldInput {
     }
   }
 
-  uint64_t hash() const override
+  void hash_unique(UniqueHashBytes &hash, fn::FieldHashDeep & /*deep_hash_cache*/) const override
   {
-    return 345634563454;
-  }
-
-  bool is_equal_to(const fn::FieldNode &other) const override
-  {
-    return dynamic_cast<const CurveLengthParameterFieldInput *>(&other) != nullptr;
+    static constexpr int8_t id = 0;
+    hash.add(&id);
   }
 };
 
 class IndexOnSplineFieldInput final : public bke::CurvesFieldInput {
  public:
-  IndexOnSplineFieldInput() : bke::CurvesFieldInput(CPPType::get<int>(), "Spline Index")
-  {
-    category_ = Category::Generated;
-  }
+  IndexOnSplineFieldInput() : bke::CurvesFieldInput(CPPType::get<int>(), "Spline Index") {}
 
   GVArray get_varray_for_context(const bke::CurvesGeometry &curves,
                                  const AttrDomain domain,
@@ -264,14 +256,10 @@ class IndexOnSplineFieldInput final : public bke::CurvesFieldInput {
     return VArray<int>::from_container(std::move(result));
   }
 
-  uint64_t hash() const final
+  void hash_unique(UniqueHashBytes &hash, fn::FieldHashDeep & /*deep_hash_cache*/) const override
   {
-    return 4536246522;
-  }
-
-  bool is_equal_to(const fn::FieldNode &other) const final
-  {
-    return dynamic_cast<const IndexOnSplineFieldInput *>(&other) != nullptr;
+    static constexpr int8_t id = 0;
+    hash.add(&id);
   }
 
   std::optional<AttrDomain> preferred_domain(const bke::CurvesGeometry & /*curves*/) const final
@@ -282,18 +270,15 @@ class IndexOnSplineFieldInput final : public bke::CurvesFieldInput {
 
 static void node_geo_exec(GeoNodeExecParams params)
 {
-  Field<float> parameter_field{std::make_shared<CurveParameterFieldInput>()};
-  Field<float> length_field{std::make_shared<CurveLengthParameterFieldInput>()};
-  Field<int> index_on_spline_field{std::make_shared<IndexOnSplineFieldInput>()};
-  params.set_output("Factor", std::move(parameter_field));
-  params.set_output("Length", std::move(length_field));
-  params.set_output("Index", std::move(index_on_spline_field));
+  params.set_output("Factor"_ustr, Field<float>::from_input<CurveParameterFieldInput>());
+  params.set_output("Length"_ustr, Field<float>::from_input<CurveLengthParameterFieldInput>());
+  params.set_output("Index"_ustr, Field<int>::from_input<IndexOnSplineFieldInput>());
 }
 
 static void node_register()
 {
   static bke::bNodeType ntype;
-  geo_node_type_base(&ntype, "GeometryNodeSplineParameter", GEO_NODE_CURVE_SPLINE_PARAMETER);
+  geo_node_type_base(&ntype, "GeometryNodeSplineParameter"_ustr, GEO_NODE_CURVE_SPLINE_PARAMETER);
   ntype.ui_name = "Spline Parameter";
   ntype.ui_description = "Retrieve how far along each spline a control point is";
   ntype.enum_name_legacy = "SPLINE_PARAMETER";

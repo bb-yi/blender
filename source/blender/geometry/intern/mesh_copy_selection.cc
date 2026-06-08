@@ -7,6 +7,7 @@
 #include "BLI_enumerable_thread_specific.hh"
 #include "BLI_index_mask.hh"
 #include "BLI_listbase.h"
+#include "PRF_profile.hh"
 
 #include "BKE_attribute.hh"
 #include "BKE_deform.hh"
@@ -33,19 +34,23 @@ static void remap_verts(const OffsetIndices<int> src_faces,
   threading::parallel_invoke(
       vert_mask.size() > 1024,
       [&]() {
-        face_mask.foreach_index(GrainSize(512), [&](const int64_t src_i, const int64_t dst_i) {
-          const IndexRange src_face = src_faces[src_i];
-          const IndexRange dst_face = dst_faces[dst_i];
-          for (const int i : src_face.index_range()) {
-            dst_corner_verts[dst_face[i]] = map[src_corner_verts[src_face[i]]];
-          }
-        });
+        face_mask.foreach_index(
+            [&](const int64_t src_i, const int64_t dst_i) {
+              const IndexRange src_face = src_faces[src_i];
+              const IndexRange dst_face = dst_faces[dst_i];
+              for (const int i : src_face.index_range()) {
+                dst_corner_verts[dst_face[i]] = map[src_corner_verts[src_face[i]]];
+              }
+            },
+            exec_mode::grain_size(512));
       },
       [&]() {
-        edge_mask.foreach_index(GrainSize(512), [&](const int64_t src_i, const int64_t dst_i) {
-          dst_edges[dst_i][0] = map[src_edges[src_i][0]];
-          dst_edges[dst_i][1] = map[src_edges[src_i][1]];
-        });
+        edge_mask.foreach_index(
+            [&](const int64_t src_i, const int64_t dst_i) {
+              dst_edges[dst_i][0] = map[src_edges[src_i][0]];
+              dst_edges[dst_i][1] = map[src_edges[src_i][1]];
+            },
+            exec_mode::grain_size(512));
       });
 }
 
@@ -59,19 +64,21 @@ static void remap_edges(const OffsetIndices<int> src_faces,
 {
   Array<int> map(src_edges_num);
   index_mask::build_reverse_map<int>(edge_mask, map);
-  face_mask.foreach_index(GrainSize(512), [&](const int64_t src_i, const int64_t dst_i) {
-    const IndexRange src_face = src_faces[src_i];
-    const IndexRange dst_face = dst_faces[dst_i];
-    for (const int i : src_face.index_range()) {
-      dst_corner_edges[dst_face[i]] = map[src_corner_edges[src_face[i]]];
-    }
-  });
+  face_mask.foreach_index(
+      [&](const int64_t src_i, const int64_t dst_i) {
+        const IndexRange src_face = src_faces[src_i];
+        const IndexRange dst_face = dst_faces[dst_i];
+        for (const int i : src_face.index_range()) {
+          dst_corner_edges[dst_face[i]] = map[src_corner_edges[src_face[i]]];
+        }
+      },
+      exec_mode::grain_size(512));
 }
 
 static void copy_loose_vert_hint(const Mesh &src, Mesh &dst)
 {
   const auto &src_cache = src.runtime->loose_verts_cache;
-  if (src_cache.is_cached() && src_cache.data().count == 0) {
+  if (src_cache.is_cached() && src_cache.data().mask.is_empty()) {
     dst.tag_loose_verts_none();
   }
 }
@@ -79,7 +86,7 @@ static void copy_loose_vert_hint(const Mesh &src, Mesh &dst)
 static void copy_loose_edge_hint(const Mesh &src, Mesh &dst)
 {
   const auto &src_cache = src.runtime->loose_edges_cache;
-  if (src_cache.is_cached() && src_cache.data().count == 0) {
+  if (src_cache.is_cached() && src_cache.data().mask.is_empty()) {
     dst.tag_loose_edges_none();
   }
 }
@@ -121,6 +128,7 @@ std::optional<Mesh *> mesh_copy_selection(const Mesh &src_mesh,
                                           const bke::AttrDomain selection_domain,
                                           const bke::AttributeFilter &attribute_filter)
 {
+  PRF_scope(ProfileCategory::Default);
   const Span<int2> src_edges = src_mesh.edges();
   const OffsetIndices src_faces = src_mesh.faces();
   const Span<int> src_corner_verts = src_mesh.corner_verts();

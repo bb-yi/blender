@@ -18,15 +18,31 @@ using wmXrSessionExitFn = void (*)(const wmXrData *xr_data);
 
 /* `wm_xr.cc` */
 
-bool wm_xr_init(wmWindowManager *wm);
+bool wm_xr_init(bContext *C);
 void wm_xr_exit(wmWindowManager *wm);
-void wm_xr_session_toggle(wmWindowManager *wm,
-                          wmWindow *session_root_win,
-                          wmXrSessionExitFn session_exit_fn);
+void wm_xr_session_toggle(wmWindowManager *wm, wmXrSessionExitFn session_exit_fn);
 bool wm_xr_events_handle(wmWindowManager *wm);
 
 /* `wm_xr_operators.cc` */
 
 void wm_xr_operatortypes_register();
+
+/* `wm_xr_location_scouting.cc` */
+
+/* NOTE: Keep in sync with the Python VR Scene Inspection add-on VRCapture class.
+ *       See comment in #wm_xr_location_scouting_get_active_capture. */
+struct XrLocationScoutingCapture {
+  float3 position;
+  float4 orientation_quat;
+
+  float lens_focal;
+
+  bool dof_enabled;
+  float dof_distance;
+  float dof_fstop;
+};
+
+bool wm_xr_location_scouting_is_captures_empty(Scene *scene);
+std::optional<XrLocationScoutingCapture> wm_xr_location_scouting_get_active_capture(Scene *scene);
 
 }  // namespace blender

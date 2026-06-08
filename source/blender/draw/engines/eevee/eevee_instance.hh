@@ -64,20 +64,28 @@ namespace blender::eevee
 {
 
   using UniformDataBuf = draw::UniformBuffer<UniformData>;
+  using PipelineInfoBuf = draw::UniformBuffer<PipelineInfoData>;
+  using RaytraceDataBuf = draw::UniformBuffer<RayTraceData>;
 
   /* Combines data from several modules to avoid wasting binding slots. */
   struct UniformDataModule
   {
     UniformDataBuf data = { "UniformDataBuf" };
+    PipelineInfoBuf pipeline = { "PipelineInfoBuf" };
+    RaytraceDataBuf raytrace = { "RaytraceDataBuf" };
 
     void push_update()
     {
       data.push_update();
+      pipeline.push_update();
+      raytrace.push_update();
     }
 
     template<typename PassType> void bind_resources(PassType& pass)
     {
       pass.bind_ubo(UNIFORM_BUF_SLOT, &data);
+      pass.bind_ubo(PIPELINE_BUF_SLOT, &pipeline);
+      pass.bind_ubo(RAYTRACE_BUF_SLOT, &raytrace);
     }
   };
 
@@ -195,6 +203,8 @@ namespace blender::eevee
     bool use_curves = true;
     bool use_volumes = true;
 
+    GPUSamplerFiltering anisotropic_filtering = GPU_SAMPLER_FILTERING_DEFAULT;
+
     /** Debug mode from debug value. */
     eDebugMode debug_mode = eDebugMode::DEBUG_NONE;
 
@@ -203,12 +213,12 @@ namespace blender::eevee
       : shaders(*ShaderModule::module_get()),
       sync(*this),
       materials(*this),
-      subsurface(*this, uniform_data.data.subsurface),
-      pipelines(*this, uniform_data.data.pipeline),
+      subsurface(*this),
+      pipelines(*this, uniform_data.pipeline),
       shadows(*this, uniform_data.data.shadow),
       lights(*this),
       ambient_occlusion(*this, uniform_data.data.ao),
-      raytracing(*this, uniform_data.data.raytrace),
+      raytracing(*this, uniform_data.raytrace),
       velocity(*this),
       motion_blur(*this),
       depth_of_field(*this),
@@ -234,7 +244,7 @@ namespace blender::eevee
       volume(*this, uniform_data.data.volumes),
       telemetry(*this)
     {};
-    ~Instance() {};
+    ~Instance() override {};
 
     StringRefNull name_get() final
     {
@@ -410,14 +420,14 @@ namespace blender::eevee
         ((v3d->shading.type == OB_MATERIAL) && (v3d->overlay.flag & V3D_OVERLAY_LOOK_DEV));
     }
 
-    int get_recalc_flags(const ObjectRef& ob_ref)
+    uint get_recalc_flags(const ObjectRef& ob_ref)
     {
       return ob_ref.recalc_flags(depsgraph_last_update_);
     }
 
-    int get_recalc_flags(const blender::World& world)
+    uint get_recalc_flags(const blender::World& world)
     {
-      return world.last_update > depsgraph_last_update_ ? int(ID_RECALC_SHADING) : 0;
+      return world.last_update > depsgraph_last_update_ ? uint(ID_RECALC_SHADING) : 0;
     }
 
   private:

@@ -45,6 +45,7 @@
 
 #include "RNA_access.hh"
 #include "RNA_prototypes.hh"
+#include "RNA_types.hh"
 
 #include "CLG_log.h"
 
@@ -628,9 +629,10 @@ static bool ctx_data_base_collection_get(const bContext *C,
 
   bContextDataResult result{};
 
+  const Main *bmain = CTX_data_main(C);
   Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
-  BKE_view_layer_synced_ensure(scene, view_layer);
+  BKE_view_layer_synced_ensure(*bmain, scene, view_layer);
 
   bool ok = false;
 
@@ -1421,6 +1423,8 @@ enum eContextObjectMode CTX_data_mode_enum_ex(const Object *obedit,
         return CTX_MODE_EDIT_GREASE_PENCIL;
       case OB_POINTCLOUD:
         return CTX_MODE_EDIT_POINTCLOUD;
+      default:
+        break;
     }
   }
   else {
@@ -1480,7 +1484,7 @@ enum eContextObjectMode CTX_data_mode_enum(const bContext *C)
 {
   Object *obedit = CTX_data_edit_object(C);
   Object *obact = obedit ? nullptr : CTX_data_active_object(C);
-  return CTX_data_mode_enum_ex(obedit, obact, obact ? eObjectMode(obact->mode) : OB_MODE_OBJECT);
+  return CTX_data_mode_enum_ex(obedit, obact, obact ? obact->mode : OB_MODE_OBJECT);
 }
 
 /**
@@ -1624,9 +1628,11 @@ Base *CTX_data_active_base(const bContext *C)
   if (ob == nullptr) {
     return nullptr;
   }
+
+  const Main *bmain = CTX_data_main(C);
   const Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
-  BKE_view_layer_synced_ensure(scene, view_layer);
+  BKE_view_layer_synced_ensure(*bmain, scene, view_layer);
   return BKE_view_layer_base_find(view_layer, ob);
 }
 
@@ -1688,6 +1694,11 @@ bool CTX_data_editable_bones(const bContext *C, Vector<PointerRNA> *list)
 bPoseChannel *CTX_data_active_pose_bone(const bContext *C)
 {
   return static_cast<bPoseChannel *>(ctx_data_pointer_get(C, "active_pose_bone"));
+}
+
+PointerRNA CTX_data_active_pose_bone_ptr(const bContext *C)
+{
+  return CTX_data_pointer_get(C, "active_pose_bone");
 }
 
 bool CTX_data_selected_pose_bones(const bContext *C, Vector<PointerRNA> *list)

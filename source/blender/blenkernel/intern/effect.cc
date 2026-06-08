@@ -71,7 +71,7 @@ EffectorWeights *BKE_effector_add_weights(Collection *collection)
 
   return weights;
 }
-PartDeflect *BKE_partdeflect_new(int type)
+PartDeflect *BKE_partdeflect_new(ePFieldType type)
 {
   PartDeflect *pd;
 
@@ -101,6 +101,8 @@ PartDeflect *BKE_partdeflect_new(int type)
       break;
     case PFIELD_FLUIDFLOW:
       pd->f_flow = 1.0f;
+      break;
+    default:
       break;
   }
   pd->flag = PFIELD_DO_LOCATION | PFIELD_DO_ROTATION | PFIELD_CLOTH_USE_CULLING;
@@ -206,7 +208,8 @@ ListBaseT<EffectorRelation> *BKE_effector_relations_create(Depsgraph *depsgraph,
                                                            ViewLayer *view_layer,
                                                            Collection *collection)
 {
-  Base *base = BKE_collection_or_layer_objects(scene, view_layer, collection);
+  Base *base = BKE_collection_or_layer_objects(
+      *DEG_get_bmain(depsgraph), scene, view_layer, collection);
   const bool for_render = (DEG_get_mode(depsgraph) == DAG_EVAL_RENDER);
   const int base_flag = (for_render) ? BASE_ENABLED_RENDER : BASE_ENABLED_VIEWPORT;
 
@@ -244,7 +247,7 @@ ListBaseT<EffectorRelation> *BKE_effector_relations_create(Depsgraph *depsgraph,
 void BKE_effector_relations_free(ListBaseT<EffectorRelation> *lb)
 {
   if (lb) {
-    BLI_freelistN(lb);
+    lb->free_no_destruct();
     MEM_delete(lb);
   }
 }
@@ -375,7 +378,7 @@ void BKE_effectors_free(ListBaseT<EffectorCache> *lb)
       }
     }
 
-    BLI_freelistN(lb);
+    lb->free_no_destruct();
     MEM_delete(lb);
   }
 }
@@ -1085,6 +1088,8 @@ static void do_physical_effector(EffectorCache *eff,
         }
       }
 #endif
+      break;
+    default:
       break;
   }
 

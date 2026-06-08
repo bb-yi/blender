@@ -126,7 +126,7 @@ static int mouse_nla_tracks(bContext *C, bAnimContext *ac, int track_index, shor
         else {
           /* deselect all */
           /* TODO: should this deselect all other types of tracks too? */
-          BKE_view_layer_synced_ensure(ac->scene, view_layer);
+          BKE_view_layer_synced_ensure(*ac->bmain, ac->scene, view_layer);
           for (Base &b : *BKE_view_layer_object_bases_get(view_layer)) {
             ed::object::base_select(&b, ed::object::BA_DESELECT);
             if (b.object->adt) {
@@ -626,7 +626,7 @@ bool nlaedit_add_tracks_empty(bAnimContext *ac)
     BLI_assert(adt->flag & ADT_UI_SELECTED);
 
     /* ensure it is empty */
-    if (BLI_listbase_is_empty(&adt->nla_tracks)) {
+    if (adt->nla_tracks.is_empty()) {
       /* add new track to this AnimData block then */
       new_track = BKE_nlatrack_new_tail(&adt->nla_tracks, ID_IS_OVERRIDE_LIBRARY(ale.id));
       BKE_nlatrack_set_active(&adt->nla_tracks, new_track);

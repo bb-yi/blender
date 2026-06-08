@@ -6,6 +6,7 @@
  * \ingroup edasset
  */
 
+#include <optional>
 #include <string>
 
 #include "AS_asset_library.hh"
@@ -14,8 +15,10 @@
 #include "BKE_preferences.h"
 #include "BKE_preview_image.hh"
 
+#include "BLI_assert.h"
 #include "BLI_listbase.h"
 #include "BLI_path_utils.hh"
+#include "BLI_string.h"
 
 #include "BLT_translation.hh"
 
@@ -47,6 +50,11 @@ void asset_tooltip(const asset_system::AssetRepresentation &asset,
 
   switch (asset.owner_asset_library().library_type()) {
     case ASSET_LIBRARY_CUSTOM: {
+      if (asset.is_online_only()) {
+        /* Don't show file path or .blend name. Data on disk is just a cache. */
+        break;
+      }
+
       tooltip_text_field_add(tip, {}, {}, ui::TIP_STYLE_SPACER, ui::TIP_LC_NORMAL, false);
 
       const std::string full_blend_path = asset.full_library_path();
@@ -68,6 +76,7 @@ void asset_tooltip(const asset_system::AssetRepresentation &asset,
           tip, TIP_("Asset Library: Current File"), {}, ui::TIP_STYLE_NORMAL, ui::TIP_LC_VALUE);
       break;
     case ASSET_LIBRARY_ESSENTIALS:
+    case ASSET_LIBRARY_ONLINE_ESSENTIALS:
       tooltip_text_field_add(tip, {}, {}, ui::TIP_STYLE_SPACER, ui::TIP_LC_NORMAL, false);
       tooltip_text_field_add(
           tip, TIP_("Asset Library: Essentials"), {}, ui::TIP_STYLE_NORMAL, ui::TIP_LC_VALUE);
@@ -75,6 +84,20 @@ void asset_tooltip(const asset_system::AssetRepresentation &asset,
     default:
       /* Intentionally empty. */
       break;
+  }
+
+  if (asset.is_online_only()) {
+    if (std::optional<int64_t> combined_size = asset.online_asset_files_combined_size_in_bytes()) {
+      tooltip_text_field_add(tip, {}, {}, ui::TIP_STYLE_SPACER, ui::TIP_LC_NORMAL, false);
+
+      char size_ui_str[BLI_STR_FORMAT_INT64_BYTE_UNIT_SIZE];
+      BLI_str_format_byte_unit(size_ui_str, *combined_size, true);
+      tooltip_text_field_add(tip,
+                             fmt::format(fmt::runtime(TIP_("Download Size: {}")), size_ui_str),
+                             {},
+                             ui::TIP_STYLE_NORMAL,
+                             ui::TIP_LC_VALUE);
+    }
   }
 }
 
@@ -116,19 +139,18 @@ AssetLibraryReference get_asset_library_ref_from_opptr(PointerRNA &ptr)
 std::optional<AssetLibraryReference> get_user_library_ref_for_save(
     const asset_system::AssetLibrary *preferred_library)
 {
-  std::optional<AssetLibraryReference> preferred_library_ref =
-      preferred_library ? preferred_library->library_reference() : std::nullopt;
-  BLI_assert(!preferred_library || bool(preferred_library_ref));
-
-  if (preferred_library_ref &&
-      !ELEM(preferred_library_ref->type, ASSET_LIBRARY_ALL, ASSET_LIBRARY_ESSENTIALS))
-  {
-    return preferred_library_ref;
+  if (preferred_library && !preferred_library->is_read_only()) {
+    if (std::optional<AssetLibraryReference> preferred_library_ref =
+            preferred_library->library_reference())
+    {
+      return preferred_library_ref;
+    }
+    BLI_assert_unreachable();
   }
 
-  /* Fallback to the first enabled user library. */
+  /* Fallback to the first enabled on-disk user library. */
   for (const bUserAssetLibrary &asset_library : U.asset_libraries) {
-    if (asset_library.flag & ASSET_LIBRARY_DISABLED) {
+    if (asset_library.flag & (ASSET_LIBRARY_DISABLED | ASSET_LIBRARY_USE_REMOTE_URL)) {
       continue;
     }
     return asset::user_library_to_library_ref(asset_library);

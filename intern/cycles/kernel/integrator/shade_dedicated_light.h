@@ -4,9 +4,10 @@
 
 #pragma once
 
-#include "kernel/light/distant.h"
+#include "kernel/integrator/state_flow.h"
 #include "kernel/light/light.h"
 #include "kernel/light/sample.h"
+#include "kernel/light/sun.h"
 
 #include "kernel/integrator/shade_surface.h"
 
@@ -24,24 +25,28 @@ shadow_linking_light_eval_from_intersection(KernelGlobals kg,
   const ccl_global KernelLight *klight = &kernel_data_fetch(lights, isect.prim);
   const LightType type = LightType(klight->type);
 
-  return (type == LIGHT_DISTANT) ?
-             distant_light_eval_from_intersection(klight, ray.D) :
+  return (type == LIGHT_SUN) ?
+             sun_light_eval_from_intersection(klight, ray.D) :
              light_eval_from_intersection(kg, &isect, ray.P, ray.D, N, path_flag);
 }
 
-ccl_device_inline float shadow_linking_light_sample_mis_weight(KernelGlobals kg,
-                                                               IntegratorState state,
-                                                               const uint32_t path_flag,
-                                                               const int light_id,
-                                                               const float light_sample_pdf,
-                                                               const float3 P)
+ccl_device_inline float shadow_linking_light_sample_mis_weight(
+    KernelGlobals kg,
+    IntegratorState state,
+    const PathRayVisibility path_visibility,
+    const uint32_t path_flag,
+    const int light_id,
+    const int object_id,
+    const float light_sample_pdf,
+    const float3 P)
 {
-  if (kernel_data_fetch(lights, light_id).type == LIGHT_DISTANT) {
+  if (kernel_data_fetch(lights, light_id).type == LIGHT_SUN) {
     return light_sample_mis_weight_forward_distant(
-        kg, state, path_flag, light_id, light_sample_pdf);
+        kg, state, path_visibility, path_flag, object_id, light_sample_pdf);
   }
 
-  return light_sample_mis_weight_forward_lamp(kg, state, path_flag, light_id, light_sample_pdf, P);
+  return light_sample_mis_weight_forward_lamp(
+      kg, state, path_visibility, path_flag, object_id, light_sample_pdf, P);
 }
 
 /* Setup ray for the shadow path.
@@ -77,31 +82,32 @@ ccl_device bool shadow_linking_shade_light(KernelGlobals kg,
                                            ccl_private int &ccl_restrict light_group,
                                            ccl_private int &ccl_restrict shader_id)
 {
+  const PathRayVisibility path_visibility = INTEGRATOR_STATE(state, path, visibility);
   const uint32_t path_flag = INTEGRATOR_STATE(state, path, flag);
   const float3 N = INTEGRATOR_STATE(state, path, mis_origin_n);
   const LightEval light_eval = shadow_linking_light_eval_from_intersection(
       kg, isect, ray, N, path_flag);
   if (light_eval.eval_fac == 0.0f) {
     /* No light to be sampled, so no direct light contribution either. */
-    return false;
+    return SHADER_EVAL_EMPTY;
   }
 
   const ccl_global KernelLight *klight = &kernel_data_fetch(lights, isect.prim);
 
-  if (!is_light_shader_visible_to_path(klight->shader_id, path_flag)) {
+  if (!is_light_shader_visible_to_path(klight->shader_id, path_visibility, path_flag)) {
     return false;
   }
 
   /* MIS weighting. */
   mis_weight = shadow_linking_light_sample_mis_weight(
-      kg, state, path_flag, isect.prim, light_eval.pdf, ray.P);
+      kg, state, path_visibility, path_flag, isect.prim, isect.object, light_eval.pdf, ray.P);
 
   light_weight = light_eval.eval_fac * mis_weight *
                  INTEGRATOR_STATE(state, shadow_link, dedicated_light_weight);
   light_group = object_lightgroup(kg, klight->object_id);
   shader_id = klight->shader_id;
 
-  return true;
+  return SHADER_EVAL_OK;
 }
 
 ccl_device bool shadow_linking_shade_surface_emission(KernelGlobals kg,
@@ -114,23 +120,25 @@ ccl_device bool shadow_linking_shade_surface_emission(KernelGlobals kg,
   ShaderDataTinyStorage emission_sd_storage;
   ccl_private ShaderData *emission_sd = AS_SHADER_DATA(&emission_sd_storage);
 
+  const PathRayVisibility path_visibility = INTEGRATOR_STATE(state, path, visibility);
   const uint32_t path_flag = INTEGRATOR_STATE(state, path, flag);
 
   integrate_surface_shader_setup(kg, state, emission_sd);
 
 #  ifdef __VOLUME__
   if (emission_sd->flag & SD_HAS_ONLY_VOLUME) {
-    return false;
+    return SHADER_EVAL_EMPTY;
   }
 #  endif
 
-  mis_weight = light_sample_mis_weight_forward_surface(kg, state, path_flag, emission_sd);
+  mis_weight = light_sample_mis_weight_forward_surface(
+      kg, state, path_visibility, path_flag, emission_sd);
 
   light_weight = mis_weight * INTEGRATOR_STATE(state, shadow_link, dedicated_light_weight);
   light_group = object_lightgroup(kg, emission_sd->object);
   shader_id = emission_sd->shader;
 
-  return true;
+  return SHADER_EVAL_OK;
 }
 
 ccl_device void shadow_linking_shade(KernelGlobals kg, IntegratorState state)
@@ -199,6 +207,8 @@ ccl_device void shadow_linking_shade(KernelGlobals kg, IntegratorState state)
         state, path, pass_glossy_weight);
   }
 
+  INTEGRATOR_STATE_WRITE(shadow_state, shadow_path, visibility) = INTEGRATOR_STATE(
+      state, path, visibility);
   INTEGRATOR_STATE_WRITE(shadow_state, shadow_path, flag) = shadow_flag;
 
 #  if defined(__PATH_GUIDING__)

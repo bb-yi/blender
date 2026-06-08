@@ -100,7 +100,13 @@ class DepsgraphRelationBuilder : public DepsgraphBuilder {
                          int flags = 0);
 
   template<typename KeyType>
+    requires(!std::is_same_v<KeyType, TimeSourceKey>)
   Relation *add_node_handle_relation(const KeyType &key_from,
+                                     const DepsNodeHandle *handle,
+                                     const char *description,
+                                     int flags = 0);
+
+  Relation *add_node_handle_relation(const TimeSourceKey &key_from,
                                      const DepsNodeHandle *handle,
                                      const char *description,
                                      int flags = 0);
@@ -146,6 +152,7 @@ class DepsgraphRelationBuilder : public DepsgraphBuilder {
   virtual void build_object_data_camera(Object *object);
   virtual void build_object_data_geometry(Object *object);
   virtual void build_object_data_geometry_datablock(ID *obdata);
+  virtual void build_object_data_empty(Object *object);
   virtual void build_object_data_light(Object *object);
   virtual void build_object_data_lightprobe(Object *object);
   virtual void build_object_data_speaker(Object *object);

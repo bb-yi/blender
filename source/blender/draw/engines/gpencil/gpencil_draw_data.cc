@@ -218,6 +218,19 @@ MaterialPool *gpencil_material_pool_create(Instance *inst,
       if (gp_style->mode == GP_MATERIAL_MODE_DOT) {
         mat_data->flag |= GP_STROKE_DOTS;
       }
+
+      switch (gp_style->placement_mode) {
+        case GP_MATERIAL_PLACEMENT_RADIUS:
+          mat_data->flag |= GP_DOTS_PLACEMENT_MODE_RADIUS;
+          break;
+        case GP_MATERIAL_PLACEMENT_DENSITY:
+          mat_data->flag |= GP_DOTS_PLACEMENT_MODE_DENSITY;
+          break;
+        default:
+        case GP_MATERIAL_PLACEMENT_COUNT:
+          mat_data->flag |= GP_DOTS_PLACEMENT_MODE_COUNT;
+          break;
+      }
     }
 
     if ((gp_style->mode != GP_MATERIAL_MODE_LINE) ||
@@ -234,11 +247,52 @@ MaterialPool *gpencil_material_pool_create(Instance *inst,
       mat_data->flag |= GP_FILL_HOLDOUT;
     }
 
-    gp_style = gpencil_viewport_material_overrides(inst, ob, color_type, gp_style, lighting_mode);
-
     /* Dots or Squares rotation. */
     mat_data->alignment_rot[0] = cosf(gp_style->alignment_rotation);
     mat_data->alignment_rot[1] = sinf(gp_style->alignment_rotation);
+    if (gp_style->mode == GP_MATERIAL_MODE_LINE) {
+      /* Convert pixel size to stroke u, the factor of `500` is from legacy Grease Pencil. */
+      mat_data->stroke_u_scale = 500.0f / gp_style->texture_pixsize;
+    }
+    else {
+      switch (gp_style->placement_mode) {
+        case GP_MATERIAL_PLACEMENT_RADIUS:
+          /* The radius spacing is a percentage and inverse, so it as a factor of `100` */
+          mat_data->stroke_u_scale = 100.0f / gp_style->placement_radius_spacing;
+          /* Divide by two, to convert diameter to radius. */
+          mat_data->stroke_u_scale *= 0.5f;
+          break;
+        case GP_MATERIAL_PLACEMENT_DENSITY:
+          mat_data->stroke_u_scale = gp_style->placement_density;
+          break;
+        default:
+        case GP_MATERIAL_PLACEMENT_COUNT:
+          mat_data->stroke_u_scale = gp_style->placement_count;
+          break;
+      }
+    }
+
+    if (gp_style->flag & GP_MATERIAL_USE_DOTS_RANDOMIZATION) {
+      mat_data->flag |= GP_DOTS_USE_RANDOMIZATION;
+
+      mat_data->random_packed.x = (unit_float_to_ushort_clamp(gp_style->random_size_factor));
+      mat_data->random_packed.x |= (unit_float_to_ushort_clamp(gp_style->random_strength_factor))
+                                   << 16;
+
+      mat_data->random_packed.y = (unit_float_to_ushort_clamp(gp_style->random_rotation_factor));
+      mat_data->random_packed.y |= (unit_float_to_ushort_clamp(gp_style->random_hue_factor)) << 16;
+
+      mat_data->random_packed.z = (unit_float_to_ushort_clamp(gp_style->random_saturation_factor));
+      mat_data->random_packed.z |= (unit_float_to_ushort_clamp(gp_style->random_value_factor))
+                                   << 16;
+
+      mat_data->random_packed.w = float_as_uint(gp_style->random_noise_scale);
+    }
+    else {
+      mat_data->random_packed = uint4(0);
+    }
+
+    gp_style = gpencil_viewport_material_overrides(inst, ob, color_type, gp_style, lighting_mode);
 
     /* Stroke Style */
     if ((gp_style->stroke_style == GP_MATERIAL_STROKE_STYLE_TEXTURE) && (gp_style->sima)) {
@@ -248,7 +302,6 @@ MaterialPool *gpencil_material_pool_create(Instance *inst,
       mat_data->flag |= premul ? GP_STROKE_TEXTURE_PREMUL : GP_FLAG_NONE;
       copy_v4_v4(mat_data->stroke_color, gp_style->stroke_rgba);
       mat_data->stroke_texture_mix = 1.0f - gp_style->mix_stroke_factor;
-      mat_data->stroke_u_scale = 500.0f / gp_style->texture_pixsize;
     }
     else /* if (gp_style->stroke_style == GP_MATERIAL_STROKE_STYLE_SOLID) */ {
       pool->tex_stroke[mat_id] = nullptr;
@@ -333,7 +386,7 @@ LightPool *gpencil_light_pool_add(Instance *inst)
   LightPool *lightpool = static_cast<LightPool *>(BLI_memblock_alloc(inst->gp_light_pool));
   lightpool->light_used = 0;
   /* Tag light list end. */
-  lightpool->light_data[0].color[0] = -1.0;
+  lightpool->light_data[0].light_color[0] = -1.0;
   if (lightpool->ubo == nullptr) {
     lightpool->ubo = GPU_uniformbuf_create(sizeof(lightpool->light_data));
   }
@@ -349,12 +402,12 @@ void gpencil_light_ambient_add(LightPool *lightpool, const float color[3])
 
   gpLight *gp_light = &lightpool->light_data[lightpool->light_used];
   gp_light->type = GP_LIGHT_TYPE_AMBIENT;
-  copy_v3_v3(gp_light->color, color);
+  copy_v3_v3(gp_light->light_color, color);
   lightpool->light_used++;
 
   if (lightpool->light_used < GPENCIL_LIGHT_BUFFER_LEN) {
     /* Tag light list end. */
-    gp_light[1].color[0] = -1.0f;
+    gp_light[1].light_color[0] = -1.0f;
   }
 }
 
@@ -403,14 +456,14 @@ void gpencil_light_pool_populate(LightPool *lightpool, Object *ob)
     gp_light->type = GP_LIGHT_TYPE_POINT;
   }
   copy_v4_v4(gp_light->position, ob->object_to_world().location());
-  copy_v3_v3(gp_light->color, &light.r);
-  mul_v3_fl(gp_light->color, light.energy * light_power_get(&light));
+  copy_v3_v3(gp_light->light_color, &light.r);
+  mul_v3_fl(gp_light->light_color, light.energy * light_power_get(&light));
 
   lightpool->light_used++;
 
   if (lightpool->light_used < GPENCIL_LIGHT_BUFFER_LEN) {
     /* Tag light list end. */
-    gp_light[1].color[0] = -1.0f;
+    gp_light[1].light_color[0] = -1.0f;
   }
 }
 

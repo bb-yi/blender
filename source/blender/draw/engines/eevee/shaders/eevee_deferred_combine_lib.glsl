@@ -109,7 +109,7 @@ DeferredCombine deferred_combine(int2 texel)
 
     if ((cl.type == CLOSURE_BSDF_TRANSLUCENT_ID ||
          cl.type == CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID) &&
-        (gbuffer::read_thickness(gbuf.header, texel) != 0.0f))
+        (gbuffer::read_thickness(gbuf.header, texel).value() != 0.0f))
     {
       /* We model two transmission events, so the surface color needs to be applied twice. */
       cl.color *= cl.color;

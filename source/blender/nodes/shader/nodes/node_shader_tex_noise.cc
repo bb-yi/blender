@@ -25,17 +25,39 @@ NODE_STORAGE_FUNCS(NodeTexNoise)
 static void sh_node_tex_noise_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
-  b.add_input<decl::Vector>("Vector").implicit_field(NODE_DEFAULT_INPUT_POSITION_FIELD);
-  b.add_input<decl::Float>("W").min(-1000.0f).max(1000.0f).make_available([](bNode &node) {
-    /* Default to 1 instead of 4, because it is much faster. */
-    node_storage(node).dimensions = 1;
-  });
-  b.add_input<decl::Float>("Scale").min(-1000.0f).max(1000.0f).default_value(5.0f).description(
-      "Scale of the base noise octave");
-  b.add_input<decl::Float>("Detail").min(0.0f).max(15.0f).default_value(2.0f).description(
-      "The number of noise octaves. Higher values give more detailed noise but increase render "
-      "time");
-  b.add_input<decl::Float>("Roughness")
+
+  const int dimensions = b.node_or_null() ? node_storage(*b.node_or_null()).dimensions : 3;
+  const bool is_compositor = b.tree_or_null() && b.tree_or_null()->type == NTREE_COMPOSIT;
+  const NodeDefaultInputType default_input_type =
+      is_compositor ? NODE_DEFAULT_INPUT_UNIFORM_IMAGE_COORDINATES :
+                      NODE_DEFAULT_INPUT_POSITION_FIELD;
+  b.add_input<decl::Vector>("Vector"_ustr)
+      .default_input_type(default_input_type)
+      .available(dimensions != 1);
+
+  b.add_input<decl::Float>("W"_ustr)
+      .min(-1000.0f)
+      .max(1000.0f)
+      .available(dimensions == 1 || dimensions == 4)
+      .make_available([](bNode &node) {
+        /* Default to 1 instead of 4, because it is much faster. */
+        node_storage(node).dimensions = 1;
+      });
+
+  b.add_input<decl::Float>("Scale"_ustr)
+      .min(-1000.0f)
+      .max(1000.0f)
+      .default_value(5.0f)
+      .description("Scale of the base noise octave");
+  b.add_input<decl::Float>("Detail"_ustr)
+      .min(0.0f)
+      .max(15.0f)
+      .default_value(2.0f)
+      .description(
+          "The number of noise octaves. Higher values give more detailed noise but increase "
+          "render "
+          "time");
+  b.add_input<decl::Float>("Roughness"_ustr)
       .min(0.0f)
       .max(1.0f)
       .default_value(0.5f)
@@ -43,34 +65,41 @@ static void sh_node_tex_noise_declare(NodeDeclarationBuilder &b)
       .description(
           "Blend factor between an octave and its previous one. A value of zero corresponds to "
           "zero detail");
-  b.add_input<decl::Float>("Lacunarity")
+  b.add_input<decl::Float>("Lacunarity"_ustr)
       .min(0.0f)
       .max(1000.0f)
       .default_value(2.0f)
       .description(
           "The difference between the scale of each two consecutive octaves. Larger values "
           "corresponds to larger scale for higher octaves");
-  b.add_input<decl::Float>("Offset")
+
+  const eNodeNoiseTexture_Type noise_type = eNodeNoiseTexture_Type(
+      b.node_or_null() ? eNodeNoiseTexture_Type(node_storage(*b.node_or_null()).type) :
+                         SHD_NOISE_FBM);
+  b.add_input<decl::Float>("Offset"_ustr)
       .min(-1000.0f)
       .max(1000.0f)
       .default_value(0.0f)
+      .available(noise_type != SHD_NOISE_MULTIFRACTAL && noise_type != SHD_NOISE_FBM)
       .make_available([](bNode &node) { node_storage(node).type = SHD_NOISE_RIDGED_MULTIFRACTAL; })
       .description(
           "An added offset to each octave, determines the level where the highest octave will "
           "appear");
-  b.add_input<decl::Float>("Gain")
+  b.add_input<decl::Float>("Gain"_ustr)
       .min(0.0f)
       .max(1000.0f)
       .default_value(1.0f)
+      .available(noise_type == SHD_NOISE_HYBRID_MULTIFRACTAL ||
+                 noise_type == SHD_NOISE_RIDGED_MULTIFRACTAL)
       .make_available([](bNode &node) { node_storage(node).type = SHD_NOISE_RIDGED_MULTIFRACTAL; })
       .description("An extra multiplier to tune the magnitude of octaves");
-  b.add_input<decl::Float>("Distortion")
+  b.add_input<decl::Float>("Distortion"_ustr)
       .min(-1000.0f)
       .max(1000.0f)
       .default_value(0.0f)
       .description("Amount of distortion");
-  b.add_output<decl::Float>("Factor", "Fac").no_muted_links();
-  b.add_output<decl::Color>("Color").no_muted_links();
+  b.add_output<decl::Float>("Factor"_ustr, "Fac"_ustr).no_muted_links();
+  b.add_output<decl::Color>("Color"_ustr).no_muted_links();
 }
 
 static void node_shader_buts_tex_noise(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
@@ -82,12 +111,12 @@ static void node_shader_buts_tex_noise(ui::Layout &layout, bContext * /*C*/, Poi
   }
 }
 
-static void node_shader_init_tex_noise(bNodeTree * /*ntree*/, bNode *node)
+static void node_shader_init_tex_noise(bNodeTree *node_tree, bNode *node)
 {
   NodeTexNoise *tex = MEM_new<NodeTexNoise>(__func__);
   BKE_texture_mapping_default(&tex->base.tex_mapping, TEXMAP_TYPE_POINT);
   BKE_texture_colormapping_default(&tex->base.color_mapping);
-  tex->dimensions = 3;
+  tex->dimensions = node_tree->type == NTREE_COMPOSIT ? 2 : 3;
   tex->type = SHD_NOISE_FBM;
   tex->normalize = true;
 
@@ -140,30 +169,11 @@ static int node_shader_gpu_tex_noise(GPUMaterial *mat,
 
   const NodeTexNoise &storage = node_storage(*node);
   float normalize = storage.normalize;
+  float compute_color = out[1].hasoutput;
 
   const char *name = gpu_shader_get_name(storage.dimensions, storage.type);
-  return GPU_stack_link(mat, node, name, in, out, GPU_constant(&normalize));
-}
-
-static void node_shader_update_tex_noise(bNodeTree *ntree, bNode *node)
-{
-  bNodeSocket *sockVector = bke::node_find_socket(*node, SOCK_IN, "Vector");
-  bNodeSocket *sockW = bke::node_find_socket(*node, SOCK_IN, "W");
-  bNodeSocket *inOffsetSock = bke::node_find_socket(*node, SOCK_IN, "Offset");
-  bNodeSocket *inGainSock = bke::node_find_socket(*node, SOCK_IN, "Gain");
-
-  const NodeTexNoise &storage = node_storage(*node);
-  bke::node_set_socket_availability(*ntree, *sockVector, storage.dimensions != 1);
-  bke::node_set_socket_availability(
-      *ntree, *sockW, storage.dimensions == 1 || storage.dimensions == 4);
-  bke::node_set_socket_availability(*ntree,
-                                    *inOffsetSock,
-                                    storage.type != SHD_NOISE_MULTIFRACTAL &&
-                                        storage.type != SHD_NOISE_FBM);
-  bke::node_set_socket_availability(*ntree,
-                                    *inGainSock,
-                                    storage.type == SHD_NOISE_HYBRID_MULTIFRACTAL ||
-                                        storage.type == SHD_NOISE_RIDGED_MULTIFRACTAL);
+  return GPU_stack_link(
+      mat, node, name, in, out, GPU_constant(&normalize), GPU_constant(&compute_color));
 }
 
 class NoiseFunction : public mf::MultiFunction {
@@ -274,20 +284,6 @@ class NoiseFunction : public mf::MultiFunction {
     switch (dimensions_) {
       case 1: {
         const VArray<float> &w = params.readonly_single_input<float>(0, "W");
-        if (compute_factor) {
-          mask.foreach_index([&](const int64_t i) {
-            const float position = w[i] * scale[i];
-            r_factor[i] = noise::perlin_fractal_distorted(position,
-                                                          math::clamp(detail[i], 0.0f, 15.0f),
-                                                          math::max(roughness[i], 0.0f),
-                                                          lacunarity[i],
-                                                          offset[i],
-                                                          gain[i],
-                                                          distortion[i],
-                                                          type_,
-                                                          normalize_);
-          });
-        }
         if (compute_color) {
           mask.foreach_index([&](const int64_t i) {
             const float position = w[i] * scale[i];
@@ -302,26 +298,29 @@ class NoiseFunction : public mf::MultiFunction {
                 type_,
                 normalize_);
             r_color[i] = ColorGeometry4f(c[0], c[1], c[2], 1.0f);
+            if (compute_factor) {
+              r_factor[i] = c[0];
+            }
+          });
+        }
+        else if (compute_factor) {
+          mask.foreach_index([&](const int64_t i) {
+            const float position = w[i] * scale[i];
+            r_factor[i] = noise::perlin_fractal_distorted(position,
+                                                          math::clamp(detail[i], 0.0f, 15.0f),
+                                                          math::max(roughness[i], 0.0f),
+                                                          lacunarity[i],
+                                                          offset[i],
+                                                          gain[i],
+                                                          distortion[i],
+                                                          type_,
+                                                          normalize_);
           });
         }
         break;
       }
       case 2: {
         const VArray<float3> &vector = params.readonly_single_input<float3>(0, "Vector");
-        if (compute_factor) {
-          mask.foreach_index([&](const int64_t i) {
-            const float2 position = float2(vector[i] * scale[i]);
-            r_factor[i] = noise::perlin_fractal_distorted(position,
-                                                          math::clamp(detail[i], 0.0f, 15.0f),
-                                                          math::max(roughness[i], 0.0f),
-                                                          lacunarity[i],
-                                                          offset[i],
-                                                          gain[i],
-                                                          distortion[i],
-                                                          type_,
-                                                          normalize_);
-          });
-        }
         if (compute_color) {
           mask.foreach_index([&](const int64_t i) {
             const float2 position = float2(vector[i] * scale[i]);
@@ -336,26 +335,29 @@ class NoiseFunction : public mf::MultiFunction {
                 type_,
                 normalize_);
             r_color[i] = ColorGeometry4f(c[0], c[1], c[2], 1.0f);
+            if (compute_factor) {
+              r_factor[i] = c[0];
+            }
+          });
+        }
+        else if (compute_factor) {
+          mask.foreach_index([&](const int64_t i) {
+            const float2 position = float2(vector[i] * scale[i]);
+            r_factor[i] = noise::perlin_fractal_distorted(position,
+                                                          math::clamp(detail[i], 0.0f, 15.0f),
+                                                          math::max(roughness[i], 0.0f),
+                                                          lacunarity[i],
+                                                          offset[i],
+                                                          gain[i],
+                                                          distortion[i],
+                                                          type_,
+                                                          normalize_);
           });
         }
         break;
       }
       case 3: {
         const VArray<float3> &vector = params.readonly_single_input<float3>(0, "Vector");
-        if (compute_factor) {
-          mask.foreach_index([&](const int64_t i) {
-            const float3 position = vector[i] * scale[i];
-            r_factor[i] = noise::perlin_fractal_distorted(position,
-                                                          math::clamp(detail[i], 0.0f, 15.0f),
-                                                          math::max(roughness[i], 0.0f),
-                                                          lacunarity[i],
-                                                          offset[i],
-                                                          gain[i],
-                                                          distortion[i],
-                                                          type_,
-                                                          normalize_);
-          });
-        }
         if (compute_color) {
           mask.foreach_index([&](const int64_t i) {
             const float3 position = vector[i] * scale[i];
@@ -370,6 +372,23 @@ class NoiseFunction : public mf::MultiFunction {
                 type_,
                 normalize_);
             r_color[i] = ColorGeometry4f(c[0], c[1], c[2], 1.0f);
+            if (compute_factor) {
+              r_factor[i] = c[0];
+            }
+          });
+        }
+        else if (compute_factor) {
+          mask.foreach_index([&](const int64_t i) {
+            const float3 position = vector[i] * scale[i];
+            r_factor[i] = noise::perlin_fractal_distorted(position,
+                                                          math::clamp(detail[i], 0.0f, 15.0f),
+                                                          math::max(roughness[i], 0.0f),
+                                                          lacunarity[i],
+                                                          offset[i],
+                                                          gain[i],
+                                                          distortion[i],
+                                                          type_,
+                                                          normalize_);
           });
         }
         break;
@@ -377,23 +396,6 @@ class NoiseFunction : public mf::MultiFunction {
       case 4: {
         const VArray<float3> &vector = params.readonly_single_input<float3>(0, "Vector");
         const VArray<float> &w = params.readonly_single_input<float>(1, "W");
-        if (compute_factor) {
-          mask.foreach_index([&](const int64_t i) {
-            const float3 position_vector = vector[i] * scale[i];
-            const float position_w = w[i] * scale[i];
-            const float4 position{
-                position_vector[0], position_vector[1], position_vector[2], position_w};
-            r_factor[i] = noise::perlin_fractal_distorted(position,
-                                                          math::clamp(detail[i], 0.0f, 15.0f),
-                                                          math::max(roughness[i], 0.0f),
-                                                          lacunarity[i],
-                                                          offset[i],
-                                                          gain[i],
-                                                          distortion[i],
-                                                          type_,
-                                                          normalize_);
-          });
-        }
         if (compute_color) {
           mask.foreach_index([&](const int64_t i) {
             const float3 position_vector = vector[i] * scale[i];
@@ -411,6 +413,26 @@ class NoiseFunction : public mf::MultiFunction {
                 type_,
                 normalize_);
             r_color[i] = ColorGeometry4f(c[0], c[1], c[2], 1.0f);
+            if (compute_factor) {
+              r_factor[i] = c[0];
+            }
+          });
+        }
+        else if (compute_factor) {
+          mask.foreach_index([&](const int64_t i) {
+            const float3 position_vector = vector[i] * scale[i];
+            const float position_w = w[i] * scale[i];
+            const float4 position{
+                position_vector[0], position_vector[1], position_vector[2], position_w};
+            r_factor[i] = noise::perlin_fractal_distorted(position,
+                                                          math::clamp(detail[i], 0.0f, 15.0f),
+                                                          math::max(roughness[i], 0.0f),
+                                                          lacunarity[i],
+                                                          offset[i],
+                                                          gain[i],
+                                                          distortion[i],
+                                                          type_,
+                                                          normalize_);
           });
         }
         break;
@@ -424,6 +446,15 @@ class NoiseFunction : public mf::MultiFunction {
     hints.allocates_array = false;
     hints.min_grain_size = 100;
     return hints;
+  }
+
+  void hash_unique(UniqueHashBytes &hash) const override
+  {
+    static constexpr int8_t id = 0;
+    hash.add(&id);
+    hash.add(dimensions_);
+    hash.add(type_);
+    hash.add(normalize_);
   }
 };
 
@@ -463,7 +494,7 @@ void register_node_type_sh_tex_noise()
 
   static bke::bNodeType ntype;
 
-  common_node_type_base(&ntype, "ShaderNodeTexNoise", SH_NODE_TEX_NOISE);
+  common_node_type_base(&ntype, "ShaderNodeTexNoise"_ustr, SH_NODE_TEX_NOISE);
   ntype.ui_name = "Noise Texture";
   ntype.ui_description = "Generate fractal Perlin noise";
   ntype.enum_name_legacy = "TEX_NOISE";
@@ -474,10 +505,9 @@ void register_node_type_sh_tex_noise()
   bke::node_type_storage(
       ntype, "NodeTexNoise", node_free_standard_storage, node_copy_standard_storage);
   ntype.gpu_fn = file_ns::node_shader_gpu_tex_noise;
-  ntype.updatefunc = file_ns::node_shader_update_tex_noise;
   ntype.build_multi_function = file_ns::sh_node_noise_build_multi_function;
   ntype.materialx_fn = file_ns::node_shader_materialx;
-  bke::node_type_size(ntype, 145, 140, NODE_DEFAULT_MAX_WIDTH);
+  ntype.default_width = bke::NodeWidth::_160;
 
   bke::node_register_type(ntype);
 }

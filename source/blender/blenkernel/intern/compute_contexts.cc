@@ -152,7 +152,7 @@ ComputeContextHash RepeatZoneComputeContext::compute_hash() const
 
 void RepeatZoneComputeContext::print_current_in_line(std::ostream &stream) const
 {
-  stream << "Repeat Zone ID: " << output_node_id_;
+  stream << "Repeat Zone ID: " << output_node_id_ << ", Iteration: " << iteration_;
 }
 
 ForeachGeometryElementZoneComputeContext::ForeachGeometryElementZoneComputeContext(
@@ -209,6 +209,23 @@ bool EvaluateClosureComputeContext::is_recursive() const
     }
   }
   return false;
+}
+
+ClosureToListComputeContext::ClosureToListComputeContext(const ComputeContext *parent,
+                                                         const int32_t node_id,
+                                                         const int list_index)
+    : NodeComputeContext(parent, node_id, nullptr), list_index_(list_index)
+{
+}
+
+ComputeContextHash ClosureToListComputeContext::compute_hash() const
+{
+  return ComputeContextHash::from(parent_, "CLOSURE_TO_LIST", node_id_, list_index_);
+}
+
+void ClosureToListComputeContext::print_current_in_line(std::ostream &stream) const
+{
+  stream << "Closure to List ID: " << node_id_ << ", List Index: " << list_index_;
 }
 
 OperatorComputeContext::OperatorComputeContext() : OperatorComputeContext(nullptr) {}

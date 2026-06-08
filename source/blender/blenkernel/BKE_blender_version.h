@@ -20,18 +20,17 @@ namespace blender {
  */
 
 /** Blender major and minor version. */
-#define BLENDER_VERSION 501
+#define BLENDER_VERSION 502
 /** Blender patch version for bug-fix releases. */
-#define BLENDER_VERSION_PATCH 2
+#define BLENDER_VERSION_PATCH 0
 /** Blender release cycle stage: alpha/beta/rc/release. */
-#define BLENDER_VERSION_CYCLE release
+#define BLENDER_VERSION_CYCLE beta
 /** Blender release type suffix. LTS or blank. */
-#define BLENDER_VERSION_SUFFIX
+#define BLENDER_VERSION_SUFFIX LTS
 
 /* Blender file format version. */
 #define BLENDER_FILE_VERSION BLENDER_VERSION
-
-#define BLENDER_FILE_SUBVERSION 50
+#define BLENDER_FILE_SUBVERSION 42
 
 /* Minimum Blender version that supports reading file written with the current
  * version. Older Blender versions will test this and cancel loading the file, showing a warning to
@@ -44,16 +43,16 @@ namespace blender {
 #define BLENDER_FILE_MIN_SUBVERSION 85
 
 /** User readable version string. */
-const char *BKE_blender_version_string(void);
+const char *BKE_blender_version_string();
 
 /** As above but does not show patch version. */
-const char *BKE_blender_version_string_compact(void);
+const char *BKE_blender_version_string_compact();
 
 /** Returns true when version cycle is alpha, otherwise (beta, rc) returns false. */
-bool BKE_blender_version_is_alpha(void);
+bool BKE_blender_version_is_alpha();
 
 /** Returns true when version suffix is LTS, otherwise returns false. */
-bool BKE_blender_version_is_lts(void);
+bool BKE_blender_version_is_lts();
 
 /**
  * Fill in given string buffer with user-readable formatted file version and subversion (if

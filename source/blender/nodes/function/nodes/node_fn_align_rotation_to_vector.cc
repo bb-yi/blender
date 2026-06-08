@@ -13,6 +13,7 @@
 #include "NOD_rna_define.hh"
 
 #include "node_function_util.hh"
+#include "node_shader_util.hh"
 
 namespace blender::nodes::node_fn_align_rotation_to_vector_cc {
 
@@ -22,10 +23,14 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.allow_any_socket_order();
   b.add_default_layout();
   b.is_function_node();
-  b.add_input<decl::Rotation>("Rotation").hide_value();
-  b.add_output<decl::Rotation>("Rotation").align_with_previous();
-  b.add_input<decl::Float>("Factor").default_value(1.0f).min(0.0f).max(1.0f).subtype(PROP_FACTOR);
-  b.add_input<decl::Vector>("Vector").default_value({0.0, 0.0, 1.0}).subtype(PROP_XYZ);
+  b.add_input<decl::Rotation>("Rotation"_ustr).hide_value();
+  b.add_output<decl::Rotation>("Rotation"_ustr).align_with_previous();
+  b.add_input<decl::Float>("Factor"_ustr)
+      .default_value(1.0f)
+      .min(0.0f)
+      .max(1.0f)
+      .subtype(PROP_FACTOR);
+  b.add_input<decl::Vector>("Vector"_ustr).default_value({0.0, 0.0, 1.0}).subtype(PROP_XYZ);
 }
 
 static void node_layout(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
@@ -170,6 +175,14 @@ class AlignRotationToVectorFunction : public mf::MultiFunction {
     hints.min_grain_size = 512;
     return hints;
   }
+
+  void hash_unique(UniqueHashBytes &hash) const override
+  {
+    static constexpr int8_t id = 0;
+    hash.add(&id);
+    hash.add(main_axis_mode_);
+    hash.add(pivot_axis_mode_);
+  }
 };
 
 static void node_build_multi_function(NodeMultiFunctionBuilder &builder)
@@ -177,6 +190,35 @@ static void node_build_multi_function(NodeMultiFunctionBuilder &builder)
   const bNode &node = builder.node();
   builder.construct_and_set_matching_fn<AlignRotationToVectorFunction>(
       math::Axis::from_int(node.custom1), NodeAlignEulerToVectorPivotAxis(node.custom2));
+}
+
+static int node_gpu_material(GPUMaterial *mat,
+                             bNode *node,
+                             bNodeExecData * /*execdata*/,
+                             GPUNodeStack *in,
+                             GPUNodeStack *out)
+{
+  const math::Axis main_axis_mode = math::Axis::from_int(node->custom1);
+  const NodeAlignEulerToVectorPivotAxis pivot_axis_mode = NodeAlignEulerToVectorPivotAxis(
+      node->custom2);
+
+  float3 local_main_axis = {0.0f, 0.0f, 0.0f};
+  local_main_axis[main_axis_mode.as_int()] = 1.0f;
+
+  if (pivot_axis_mode == FN_NODE_ALIGN_EULER_TO_VECTOR_PIVOT_AXIS_AUTO) {
+    return GPU_stack_link(
+        mat, node, "align_rotation_to_vector_auto_pivot", in, out, GPU_constant(local_main_axis));
+  }
+
+  float3 local_pivot_axis = {0.0f, 0.0f, 0.0f};
+  local_pivot_axis[pivot_axis_mode - 1] = 1.0f;
+  return GPU_stack_link(mat,
+                        node,
+                        "align_rotation_to_vector_fixed_pivot",
+                        in,
+                        out,
+                        GPU_constant(local_main_axis),
+                        GPU_constant(local_pivot_axis));
 }
 
 static void node_rna(StructRNA *srna)
@@ -231,7 +273,8 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  fn_node_type_base(&ntype, "FunctionNodeAlignRotationToVector", FN_NODE_ALIGN_ROTATION_TO_VECTOR);
+  fn_cmp_node_type_base(
+      &ntype, "FunctionNodeAlignRotationToVector"_ustr, FN_NODE_ALIGN_ROTATION_TO_VECTOR);
   ntype.ui_name = "Align Rotation to Vector";
   ntype.ui_description = "Orient a rotation along the given direction";
   ntype.enum_name_legacy = "ALIGN_ROTATION_TO_VECTOR";
@@ -240,6 +283,7 @@ static void node_register()
   ntype.initfunc = node_init;
   ntype.draw_buttons = node_layout;
   ntype.build_multi_function = node_build_multi_function;
+  ntype.gpu_fn = node_gpu_material;
   bke::node_register_type(ntype);
 
   node_rna(ntype.rna_ext.srna);

@@ -23,11 +23,11 @@ NODE_STORAGE_FUNCS(NodeConvertColorSpace)
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Color>("Image")
+  b.add_input<decl::Color>("Image"_ustr)
       .default_value({1.0f, 1.0f, 1.0f, 1.0f})
       .structure_type(StructureType::Dynamic);
 
-  b.add_output<decl::Color>("Image").structure_type(StructureType::Dynamic);
+  b.add_output<decl::Color>("Image"_ustr).structure_type(StructureType::Dynamic);
 }
 
 static void node_init(bNodeTree * /*ntree*/, bNode *node)
@@ -40,12 +40,18 @@ static void node_init(bNodeTree * /*ntree*/, bNode *node)
 
 static void node_draw_buttons(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
 {
-#ifndef WITH_OPENCOLORIO
-  layout.label(RPT_("Disabled, built without OpenColorIO"), ICON_ERROR);
-#endif
-
-  layout.prop(ptr, "from_color_space", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
-  layout.prop(ptr, "to_color_space", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+  layout.prop_with_menu(ptr,
+                        "from_color_space",
+                        ui::ITEM_R_SPLIT_EMPTY_NAME,
+                        std::nullopt,
+                        ICON_NONE,
+                        "UI_MT_color_space_select");
+  layout.prop_with_menu(ptr,
+                        "to_color_space",
+                        ui::ITEM_R_SPLIT_EMPTY_NAME,
+                        std::nullopt,
+                        ICON_NONE,
+                        "UI_MT_color_space_select");
 }
 
 using namespace blender::compositor;
@@ -95,6 +101,8 @@ class ConvertColorSpaceOperation : public NodeOperation {
       return;
     }
 
+    GPU_shader_uniform_1b(shader, "premultiply_output", false);
+
     input_image.bind_as_texture(shader, ocio_shader.input_sampler_name());
 
     const Domain domain = compute_domain();
@@ -112,8 +120,8 @@ class ConvertColorSpaceOperation : public NodeOperation {
   {
     const char *source = node_storage(node()).from_color_space;
     const char *target = node_storage(node()).to_color_space;
-    ColormanageProcessor *color_processor = IMB_colormanagement_colorspace_processor_new(source,
-                                                                                         target);
+    ColormanageProcessor color_processor = ColormanageProcessor::colorspace_processor_new(source,
+                                                                                          target);
 
     Result &input_image = get_input("Image");
 
@@ -125,27 +133,24 @@ class ConvertColorSpaceOperation : public NodeOperation {
       output_image.store_pixel(texel, input_image.load_pixel<Color>(texel));
     });
 
-    IMB_colormanagement_processor_apply(color_processor,
-                                        static_cast<float *>(output_image.cpu_data().data()),
-                                        domain.data_size.x,
-                                        domain.data_size.y,
-                                        input_image.channels_count(),
-                                        false);
-    IMB_colormanagement_processor_free(color_processor);
+    color_processor.apply(static_cast<float *>(output_image.cpu_data_for_write().data()),
+                          domain.data_size.x,
+                          domain.data_size.y,
+                          input_image.channels_count(),
+                          false);
   }
 
   void execute_single()
   {
     const char *source = node_storage(node()).from_color_space;
     const char *target = node_storage(node()).to_color_space;
-    ColormanageProcessor *color_processor = IMB_colormanagement_colorspace_processor_new(source,
-                                                                                         target);
+    ColormanageProcessor color_processor = ColormanageProcessor::colorspace_processor_new(source,
+                                                                                          target);
 
     Result &input_image = get_input("Image");
     Color color = input_image.get_single_value<Color>();
 
-    IMB_colormanagement_processor_apply_pixel(color_processor, color, 3);
-    IMB_colormanagement_processor_free(color_processor);
+    color_processor.apply_pixel(color, 3);
 
     Result &output_image = get_result("Image");
     output_image.allocate_single_value();
@@ -179,19 +184,19 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, "CompositorNodeConvertColorSpace", CMP_NODE_CONVERT_COLOR_SPACE);
+  cmp_node_type_base(&ntype, "CompositorNodeConvertColorSpace"_ustr, CMP_NODE_CONVERT_COLOR_SPACE);
   ntype.ui_name = "Convert Colorspace";
   ntype.ui_description = "Convert between color spaces";
   ntype.enum_name_legacy = "CONVERT_COLORSPACE";
   ntype.nclass = NODE_CLASS_CONVERTER;
   ntype.declare = node_declare;
   ntype.draw_buttons = node_draw_buttons;
-  bke::node_type_size_preset(ntype, bke::eNodeSizePreset::Middle);
+  ntype.default_width = bke::NodeWidth::_160;
   ntype.initfunc = node_init;
   bke::node_type_storage(
       ntype, "NodeConvertColorSpace", node_free_standard_storage, node_copy_standard_storage);
   ntype.get_compositor_operation = get_compositor_operation;
-  bke::node_type_size(ntype, 160, 150, NODE_DEFAULT_MAX_WIDTH);
+  ntype.default_width = bke::NodeWidth::_160;
 
   bke::node_register_type(ntype);
 }

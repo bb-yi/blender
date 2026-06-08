@@ -33,7 +33,7 @@ class SpaceNodeAccessor : public AbstractSpaceAccessor {
 
   ImBuf *acquire_image_buffer(blender::Image *image, void **lock) override
   {
-    return BKE_image_acquire_ibuf(image, nullptr, lock);
+    return BKE_image_acquire_ibuf_gpu(image, nullptr, lock);
   }
 
   void release_buffer(blender::Image *image, ImBuf *ibuf, void *lock) override
@@ -45,36 +45,36 @@ class SpaceNodeAccessor : public AbstractSpaceAccessor {
   {
     if ((snode->flag & SNODE_USE_ALPHA) != 0) {
       /* Show RGBA */
-      r_shader_parameters.flags |= ImageDrawFlags::SHOW_ALPHA | ImageDrawFlags::APPLY_ALPHA;
+      r_shader_parameters.flags |= IMAGE_DRAW_FLAG_SHOW_ALPHA | IMAGE_DRAW_FLAG_APPLY_ALPHA;
     }
     else if ((snode->flag & SNODE_SHOW_ALPHA) != 0) {
-      r_shader_parameters.flags |= ImageDrawFlags::SHUFFLING;
+      r_shader_parameters.flags |= IMAGE_DRAW_FLAG_SHUFFLING;
       r_shader_parameters.shuffle = float4(0.0f, 0.0f, 0.0f, 1.0f);
     }
     else if ((snode->flag & SNODE_SHOW_R) != 0) {
-      r_shader_parameters.flags |= ImageDrawFlags::SHUFFLING;
+      r_shader_parameters.flags |= IMAGE_DRAW_FLAG_SHUFFLING;
       if (IMB_alpha_affects_rgb(ibuf)) {
-        r_shader_parameters.flags |= ImageDrawFlags::APPLY_ALPHA;
+        r_shader_parameters.flags |= IMAGE_DRAW_FLAG_APPLY_ALPHA;
       }
       r_shader_parameters.shuffle = float4(1.0f, 0.0f, 0.0f, 0.0f);
     }
     else if ((snode->flag & SNODE_SHOW_G) != 0) {
-      r_shader_parameters.flags |= ImageDrawFlags::SHUFFLING;
+      r_shader_parameters.flags |= IMAGE_DRAW_FLAG_SHUFFLING;
       if (IMB_alpha_affects_rgb(ibuf)) {
-        r_shader_parameters.flags |= ImageDrawFlags::APPLY_ALPHA;
+        r_shader_parameters.flags |= IMAGE_DRAW_FLAG_APPLY_ALPHA;
       }
       r_shader_parameters.shuffle = float4(0.0f, 1.0f, 0.0f, 0.0f);
     }
     else if ((snode->flag & SNODE_SHOW_B) != 0) {
-      r_shader_parameters.flags |= ImageDrawFlags::SHUFFLING;
+      r_shader_parameters.flags |= IMAGE_DRAW_FLAG_SHUFFLING;
       if (IMB_alpha_affects_rgb(ibuf)) {
-        r_shader_parameters.flags |= ImageDrawFlags::APPLY_ALPHA;
+        r_shader_parameters.flags |= IMAGE_DRAW_FLAG_APPLY_ALPHA;
       }
       r_shader_parameters.shuffle = float4(0.0f, 0.0f, 1.0f, 0.0f);
     }
     else /* RGB */ {
       if (IMB_alpha_affects_rgb(ibuf)) {
-        r_shader_parameters.flags |= ImageDrawFlags::APPLY_ALPHA;
+        r_shader_parameters.flags |= IMAGE_DRAW_FLAG_APPLY_ALPHA;
       }
     }
   }
@@ -89,33 +89,19 @@ class SpaceNodeAccessor : public AbstractSpaceAccessor {
     return true;
   }
 
-  /**
-   * The backdrop of the node editor isn't drawn in screen space UV space. But is locked with the
-   * screen.
-   */
-  void init_ss_to_texture_matrix(const ARegion *region,
-                                 const float image_offset[2],
-                                 const float image_resolution[2],
-                                 float r_uv_to_texture[4][4]) const override
+  float get_zoom() const override
   {
-    unit_m4(r_uv_to_texture);
-    float display_resolution[2];
-    float image_display_offset[2];
-    mul_v2_v2fl(display_resolution, image_resolution, snode->zoom);
-    mul_v2_v2fl(image_display_offset, image_offset, snode->zoom);
-    const float scale_x = display_resolution[0] / region->winx;
-    const float scale_y = display_resolution[1] / region->winy;
-    const float translate_x = ((region->winx - display_resolution[0]) * 0.5f + snode->xof +
-                               image_display_offset[0]) /
-                              region->winx;
-    const float translate_y = ((region->winy - display_resolution[1]) * 0.5f + snode->yof +
-                               image_display_offset[1]) /
-                              region->winy;
+    return this->snode->zoom;
+  }
 
-    r_uv_to_texture[0][0] = scale_x;
-    r_uv_to_texture[1][1] = scale_y;
-    r_uv_to_texture[3][0] = translate_x;
-    r_uv_to_texture[3][1] = translate_y;
+  float get_aspect_ratio() const override
+  {
+    return 1.0f;
+  }
+
+  float2 get_pan_offset() const override
+  {
+    return float2(snode->xof, snode->yof);
   }
 };
 

@@ -13,9 +13,12 @@
 #include "DNA_scene_types.h"
 #include "DNA_sequence_types.h"
 
+#include "BKE_scene.hh"
+
 #include "IMB_imbuf.hh"
 
 #include "SEQ_relations.hh"
+#include "SEQ_sequencer.hh"
 
 #include "final_image_cache.hh"
 #include "prefetch.hh"
@@ -60,7 +63,7 @@ struct FinalImageCache {
 
 static FinalImageCache *ensure_final_image_cache(Scene *scene)
 {
-  FinalImageCache **cache = &scene->ed->runtime.final_image_cache;
+  FinalImageCache **cache = &scene->ed->runtime->final_image_cache;
   if (*cache == nullptr) {
     *cache = MEM_new<FinalImageCache>(__func__);
   }
@@ -72,12 +75,20 @@ static FinalImageCache *query_final_image_cache(const Scene *scene)
   if (scene == nullptr || scene->ed == nullptr) {
     return nullptr;
   }
-  return scene->ed->runtime.final_image_cache;
+  return scene->ed->runtime->final_image_cache;
 }
 
-ImBuf *final_image_cache_get(
-    Scene *scene, float timeline_frame, int view_id, int display_channel, int2 image_size)
+ImBuf *final_image_cache_get(Scene *scene,
+                             float timeline_frame,
+                             int view_id,
+                             int display_channel,
+                             int2 image_size,
+                             bool is_render)
 {
+  if (is_render) {
+    return nullptr;
+  }
+
   const FinalImageCache::Key key = {
       int(math::round(timeline_frame)), view_id, display_channel, image_size};
 
@@ -102,8 +113,13 @@ void final_image_cache_put(Scene *scene,
                            int view_id,
                            int display_channel,
                            int2 image_size,
+                           bool is_render,
                            ImBuf *image)
 {
+  if (is_render) {
+    return;
+  }
+
   const FinalImageCache::Key key = {
       int(math::round(timeline_frame)), view_id, display_channel, image_size};
 
@@ -150,7 +166,7 @@ void final_image_cache_clear(Scene *scene)
   std::lock_guard lock(final_image_cache_mutex);
   FinalImageCache *cache = query_final_image_cache(scene);
   if (cache != nullptr) {
-    scene->ed->runtime.final_image_cache->clear();
+    scene->ed->runtime->final_image_cache->clear();
   }
 }
 
@@ -159,9 +175,9 @@ void final_image_cache_destroy(Scene *scene)
   std::lock_guard lock(final_image_cache_mutex);
   FinalImageCache *cache = query_final_image_cache(scene);
   if (cache != nullptr) {
-    BLI_assert(cache == scene->ed->runtime.final_image_cache);
-    MEM_delete(scene->ed->runtime.final_image_cache);
-    scene->ed->runtime.final_image_cache = nullptr;
+    BLI_assert(cache == scene->ed->runtime->final_image_cache);
+    MEM_delete(scene->ed->runtime->final_image_cache);
+    scene->ed->runtime->final_image_cache = nullptr;
   }
 }
 
@@ -225,8 +241,8 @@ bool final_image_cache_evict(Scene *scene)
   }
   const bool prefetch_loops_around = cur_prefetch_start > cur_prefetch_end;
 
-  const int timeline_start = PSFRA;
-  const int timeline_end = PEFRA;
+  const int timeline_start = scene->playback_start();
+  const int timeline_end = scene->playback_end();
   /* If we wrap around, treat the timeline start as the playback head position.
    * This is to try to mitigate un-needed cache evictions. */
   const int cur_frame = prefetch_loops_around ? timeline_start : scene->r.cfra;

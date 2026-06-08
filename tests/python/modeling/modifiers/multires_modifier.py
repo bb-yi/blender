@@ -17,7 +17,7 @@ blender -b --factory-startup tests/files/modeling/modifiers/multires_modifier --
 
 BASE_DIR = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(os.path.join(BASE_DIR, "..", ".."))
-from modules.mesh_test import RunTest, ModifierSpec, SpecMeshTest, OperatorSpec
+from modules.mesh_test import RunTest, ModifierSpec, SpecMeshTest, OperatorSpec, SelectObjectSpec
 
 
 def main():
@@ -26,6 +26,18 @@ def main():
                      [
                          ModifierSpec('multires', 'MULTIRES', {}),
                          OperatorSpec('OBJECT', 'object.multires_subdivide', {'modifier': 'multires'}),
+                         OperatorSpec('OBJECT', 'object.modifier_apply', {'modifier': 'multires'})
+                     ], apply_modifier=False),
+        SpecMeshTest("SimpleSubdivideCube", "testCubeMultiresSimple", "expectedCubeMultiresSimple",
+                     [
+                         ModifierSpec('multires', 'MULTIRES', {}),
+                         OperatorSpec('OBJECT', 'object.multires_subdivide', {'modifier': 'multires', 'mode': 'SIMPLE'}),
+                         OperatorSpec('OBJECT', 'object.modifier_apply', {'modifier': 'multires'})
+                     ], apply_modifier=False),
+        SpecMeshTest("LinearSubdivideCube", "testCubeMultiresLinear", "expectedCubeMultiresLinear",
+                     [
+                         ModifierSpec('multires', 'MULTIRES', {}),
+                         OperatorSpec('OBJECT', 'object.multires_subdivide', {'modifier': 'multires', 'mode': 'LINEAR'}),
                          OperatorSpec('OBJECT', 'object.modifier_apply', {'modifier': 'multires'})
                      ], apply_modifier=False),
         SpecMeshTest("SimpleSubdivide", "testSuzanneSimple", "expectedSuzanneSimple",
@@ -40,6 +52,15 @@ def main():
                          OperatorSpec('OBJECT', 'object.multires_subdivide', {'modifier': 'multires', 'mode': 'LINEAR'}),
                          OperatorSpec('OBJECT', 'object.modifier_apply', {'modifier': 'multires'})
                      ], apply_modifier=False),
+        SpecMeshTest("Reshape", "testReshapeSuzanne", "expectedReshapeSuzanne",
+                     [
+                         SelectObjectSpec("reshapeTargetSuzanne"),
+                         OperatorSpec('OBJECT', 'object.multires_reshape', {'modifier': 'Multires'})
+                     ], apply_modifier=False),
+        SpecMeshTest("DeleteHigher", "testDeleteHigherSuzanne", "expectedDeleteHigherSuzanne",
+                     [
+                         OperatorSpec('OBJECT', 'object.multires_higher_levels_delete', {'modifier': 'Multires'})
+                     ], apply_modifier=False)
     ]
 
     modifiers_test = RunTest(tests)

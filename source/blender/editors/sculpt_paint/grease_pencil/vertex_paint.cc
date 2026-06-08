@@ -2,7 +2,11 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include "BLI_color.hh"
+#include "BLI_color_mix.hh"
 #include "BLI_math_color.hh"
+
+#include "DNA_brush_types.h"
 
 #include "BKE_brush.hh"
 #include "BKE_context.hh"
@@ -37,6 +41,8 @@ void VertexPaintOperation::on_stroke_extended(const bContext &C,
   const Brush &brush = *BKE_paint_brush(&paint);
   const bool invert = this->is_inverted(brush);
 
+  const IMB_BlendMode blend_mode = IMB_BlendMode(brush.blend);
+
   const bool use_selection_masking = ED_grease_pencil_any_vertex_mask_selection(
       scene.toolsettings);
 
@@ -45,9 +51,9 @@ void VertexPaintOperation::on_stroke_extended(const bContext &C,
 
   float color_linear[3];
   copy_v3_v3(color_linear, BKE_brush_color_get(&paint, &brush));
-  const ColorGeometry4f mix_color(color_linear[0], color_linear[1], color_linear[2], 1.0f);
+  const ColorPaint4f mix_color(color_linear[0], color_linear[1], color_linear[2], 1.0f);
 
-  this->foreach_editable_drawing(C, GrainSize(1), [&](const GreasePencilStrokeParams &params) {
+  this->foreach_editable_drawing(C, [&](const GreasePencilStrokeParams &params) {
     IndexMaskMemory memory;
     const IndexMask point_selection = point_mask_for_stroke_operation(
         params, use_selection_masking, memory);
@@ -57,56 +63,113 @@ void VertexPaintOperation::on_stroke_extended(const bContext &C,
 
       if (invert) {
         /* Erase vertex colors. */
-        point_selection.foreach_index(GrainSize(4096), [&](const int64_t point_i) {
-          const float influence = brush_point_influence(
-              paint, brush, view_positions[point_i], extension_sample, params.multi_frame_falloff);
+        point_selection.foreach_index(
+            [&](const int64_t point_i) {
+              const float influence = brush_point_influence(paint,
+                                                            brush,
+                                                            view_positions[point_i],
+                                                            extension_sample,
+                                                            params.multi_frame_falloff);
 
-          ColorGeometry4f &color = vertex_colors[point_i];
-          color.a -= influence;
-          color.a = math::max(color.a, 0.0f);
-        });
+              ColorGeometry4f &color = vertex_colors[point_i];
+              color.a -= influence;
+              color.a = math::max(color.a, 0.0f);
+            },
+            exec_mode::grain_size(4096));
       }
       else {
-        /* Mix brush color into vertex colors by influence using alpha over. */
-        point_selection.foreach_index(GrainSize(4096), [&](const int64_t point_i) {
-          const float influence = brush_point_influence(
-              paint, brush, view_positions[point_i], extension_sample, params.multi_frame_falloff);
+        /* Mix brush color into vertex colors by influence. */
+        point_selection.foreach_index(
+            [&](const int64_t point_i) {
+              const float influence = brush_point_influence(paint,
+                                                            brush,
+                                                            view_positions[point_i],
+                                                            extension_sample,
+                                                            params.multi_frame_falloff);
 
-          ColorGeometry4f &color = vertex_colors[point_i];
-          color = math::interpolate(color, mix_color, influence);
-        });
+              ColorGeometry4f &color = vertex_colors[point_i];
+
+              using Color = ColorPaint4f;
+              using Traits = color::Traits<Color>;
+
+              const Color linearrgb_color = color::unpremultiply_alpha(color);
+
+              color = color::premultiply_alpha(color::BLI_mix_colors<Color, Traits>(
+                  blend_mode, linearrgb_color, mix_color, Traits::range * influence));
+            },
+            exec_mode::grain_size(4096));
       }
     }
 
     const IndexMask fill_selection = fill_mask_for_stroke_operation(
         params, use_selection_masking, memory);
     if (!fill_selection.is_empty() && do_fill) {
-      const OffsetIndices<int> points_by_curve = params.drawing.strokes().points_by_curve();
-      const Array<float2> view_positions = view_positions_from_curve_mask(params, fill_selection);
+      BLI_assert(params.drawing.fills().has_value());
+      const GroupedSpan<int> fills = *params.drawing.fills();
+      const bke::CurvesGeometry &curves = params.drawing.strokes();
+      const OffsetIndices<int> points_by_curve = curves.points_by_curve();
       MutableSpan<ColorGeometry4f> fill_colors = params.drawing.fill_colors_for_write();
+      /* TODO. Only calculate needed positions. */
+      const Array<float2> view_positions = view_positions_from_curve_mask(params,
+                                                                          curves.curves_range());
 
       if (invert) {
-        fill_selection.foreach_index(GrainSize(1024), [&](const int64_t curve_i) {
-          const IndexRange points = points_by_curve[curve_i];
-          const Span<float2> curve_view_positions = view_positions.as_span().slice(points);
-          const float influence = brush_fill_influence(
-              paint, brush, curve_view_positions, extension_sample, params.multi_frame_falloff);
+        fill_selection.foreach_index(
+            [&](const int64_t fill_i) {
+              const Span<int> fill_curves = fills[fill_i];
+              const IndexMask fill_curve_mask = IndexMask::from_indices(fill_curves, memory);
 
-          ColorGeometry4f &color = fill_colors[curve_i];
-          color.a -= influence;
-          color.a = math::max(color.a, 0.0f);
-        });
+              float influence = 0.0f;
+              fill_curve_mask.foreach_index([&](const int64_t curve) {
+                const IndexRange points = points_by_curve[curve];
+                const Span<float2> curve_view_positions = view_positions.as_span().slice(points);
+                influence = math::max(influence,
+                                      brush_fill_influence(paint,
+                                                           brush,
+                                                           curve_view_positions,
+                                                           extension_sample,
+                                                           params.multi_frame_falloff));
+              });
+
+              ColorGeometry4f color = fill_colors[fill_curves.first()];
+              color.a -= influence;
+              color.a = math::max(color.a, 0.0f);
+
+              index_mask::masked_fill(fill_colors, color, fill_curve_mask);
+            },
+            exec_mode::grain_size(1024));
       }
       else {
-        fill_selection.foreach_index(GrainSize(1024), [&](const int64_t curve_i) {
-          const IndexRange points = points_by_curve[curve_i];
-          const Span<float2> curve_view_positions = view_positions.as_span().slice(points);
-          const float influence = brush_fill_influence(
-              paint, brush, curve_view_positions, extension_sample, params.multi_frame_falloff);
+        fill_selection.foreach_index(
+            [&](const int64_t fill_i) {
+              const Span<int> fill_curves = fills[fill_i];
+              const IndexMask fill_curve_mask = IndexMask::from_indices(fill_curves, memory);
 
-          ColorGeometry4f &color = fill_colors[curve_i];
-          color = math::interpolate(color, mix_color, influence);
-        });
+              float influence = 0.0f;
+              fill_curve_mask.foreach_index([&](const int64_t curve) {
+                const IndexRange points = points_by_curve[curve];
+                const Span<float2> curve_view_positions = view_positions.as_span().slice(points);
+                influence = math::max(influence,
+                                      brush_fill_influence(paint,
+                                                           brush,
+                                                           curve_view_positions,
+                                                           extension_sample,
+                                                           params.multi_frame_falloff));
+              });
+
+              ColorGeometry4f color = fill_colors[fill_curves.first()];
+
+              using Color = ColorPaint4f;
+              using Traits = color::Traits<Color>;
+
+              const Color linearrgb_color = color::unpremultiply_alpha(color);
+
+              color = color::premultiply_alpha(color::BLI_mix_colors<Color, Traits>(
+                  blend_mode, linearrgb_color, mix_color, Traits::range * influence));
+
+              index_mask::masked_fill(fill_colors, color, fill_curve_mask);
+            },
+            exec_mode::grain_size(1024));
       }
     }
 

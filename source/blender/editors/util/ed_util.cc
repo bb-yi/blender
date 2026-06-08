@@ -67,7 +67,7 @@ void ED_editors_init_for_undo(Main *bmain)
   for (wmWindow &win : wm->windows) {
     Scene *scene = WM_window_get_active_scene(&win);
     ViewLayer *view_layer = WM_window_get_active_view_layer(&win);
-    BKE_view_layer_synced_ensure(scene, view_layer);
+    BKE_view_layer_synced_ensure(*bmain, scene, view_layer);
     Object *ob = BKE_view_layer_active_object_get(view_layer);
     if (ob && (ob->mode & OB_MODE_TEXTURE_PAINT)) {
       BKE_texpaint_slots_refresh_object(scene, ob);
@@ -122,11 +122,11 @@ void ED_editors_init(bContext *C)
    * active object in this scene. */
   Object *obact = CTX_data_active_object(C);
   for (Object &ob : bmain->objects) {
-    int mode = ob.mode;
+    eObjectMode mode = ob.mode;
     if (mode == OB_MODE_OBJECT) {
       continue;
     }
-    if (BKE_object_has_mode_data(&ob, eObjectMode(mode))) {
+    if (BKE_object_has_mode_data(&ob, mode)) {
       /* For multi-edit mode we may already have mode data. */
       continue;
     }
@@ -160,7 +160,7 @@ void ED_editors_init(bContext *C)
      * modes like Sculpt.
      * Ref. #98225. */
     if (!BKE_collection_has_object_recursive(scene->master_collection, &ob) ||
-        !BKE_scene_has_object(scene, &ob) || (ob.visibility_flag & OB_HIDE_VIEWPORT) != 0)
+        !BKE_scene_has_object(*bmain, scene, &ob) || (ob.visibility_flag & OB_HIDE_VIEWPORT) != 0)
     {
       continue;
     }
@@ -196,7 +196,7 @@ void ED_editors_init(bContext *C)
     else {
       /* TODO(@ideasman42): avoid operator calls. */
       if (obact == &ob) {
-        object::mode_set(C, eObjectMode(mode));
+        object::mode_set(C, mode);
       }
     }
   }

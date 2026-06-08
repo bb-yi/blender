@@ -18,6 +18,7 @@ struct bContext;
 struct ModifierData;
 struct Object;
 struct StructRNA;
+struct wmKeyConfig;
 struct wmOperator;
 struct wmOperatorType;
 
@@ -42,6 +43,7 @@ void OBJECT_OT_visual_transform_apply(wmOperatorType *ot);
 void OBJECT_OT_transform_apply(wmOperatorType *ot);
 void OBJECT_OT_parent_inverse_apply(wmOperatorType *ot);
 void OBJECT_OT_transform_axis_target(wmOperatorType *ot);
+void object_transform_axis_target_modal_keymap(wmKeyConfig *keyconf);
 void OBJECT_OT_origin_set(wmOperatorType *ot);
 
 /* `object_relations.cc` */
@@ -369,7 +371,7 @@ void OBJECT_OT_voxel_remesh(wmOperatorType *ot);
 void OBJECT_OT_voxel_size_edit(wmOperatorType *ot);
 void OBJECT_OT_quadriflow_remesh(wmOperatorType *ot);
 
-/* object_transfer_data.c */
+/* object_data_transfer.cc */
 
 /**
  * Transfer mesh data from active to selected objects.
@@ -379,6 +381,7 @@ void OBJECT_OT_datalayout_transfer(wmOperatorType *ot);
 
 void object_modifier_add_asset_register();
 
+void collection_importer_register();
 void collection_exporter_register();
 
 Vector<PointerRNA> modifier_get_edit_objects(const bContext &C, const wmOperator &op);

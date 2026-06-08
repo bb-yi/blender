@@ -23,6 +23,8 @@
 
 namespace blender::compositor {
 
+struct Schedule;
+
 /* ------------------------------------------------------------------------------------------------
  * Multi-Function Procedure Operation
  *
@@ -43,7 +45,7 @@ class MultiFunctionProcedureOperation : public PixelOperation {
    * them. */
   Map<const bNodeSocket *, mf::Variable *> output_to_variable_map_;
   /* A map that associates implicit inputs to the variables that were created for them. */
-  Map<ImplicitInput, mf::Variable *> implicit_input_to_variable_map_;
+  Map<ImplicitInputType, mf::Variable *> implicit_input_to_variable_map_;
   /* A vector that stores the intermediate variables that were implicitly created for the procedure
    * but are not associated with a node output. Those variables are for such multi-functions like
    * constant inputs and implicit conversion. */
@@ -55,9 +57,6 @@ class MultiFunctionProcedureOperation : public PixelOperation {
    * output results for each of the parameters in the procedure. Note that parameters have no
    * identifiers and are identified solely by their order. */
   Vector<std::string> parameter_identifiers_;
-  /* True if the operation operates on single values, that is, all of its inputs and outputs are
-   * single values. */
-  const bool is_single_value_;
 
  public:
   /* Build a multi-function procedure as well as an executor for it from the given pixel compile
@@ -65,8 +64,9 @@ class MultiFunctionProcedureOperation : public PixelOperation {
    * should be true. */
   MultiFunctionProcedureOperation(Context &context,
                                   PixelCompileUnit &compile_unit,
-                                  const VectorSet<const bNode *> &schedule,
-                                  const bool is_single_value);
+                                  const Schedule &schedule,
+                                  const bool is_single_value,
+                                  const ComputeContext &compute_context);
 
   /* Calls the multi-function procedure executor on the domain of the operator passing in the
    * inputs and outputs as parameters. */
@@ -115,6 +115,9 @@ class MultiFunctionProcedureOperation : public PixelOperation {
    * given variable is returned as is. If conversion is not possible, a fallback default variable
    * will b returned. */
   mf::Variable *convert_variable(mf::Variable *variable, const mf::DataType expected_type);
+
+  /* Creates and returns a variable that carries the default value of the given type. */
+  mf::Variable *get_default_value_variable(const mf::DataType type);
 };
 
 }  // namespace blender::compositor

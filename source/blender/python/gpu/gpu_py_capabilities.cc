@@ -86,7 +86,7 @@ static PyObject *pygpu_max_textures_vert_get(PyObject * /*self*/)
 {
   BPYGPU_IS_INIT_OR_ERROR_OBJ;
 
-  return PyLong_FromLong(GPU_max_textures_vert());
+  return PyLong_FromLong(GPU_max_textures());
 }
 
 PyDoc_STRVAR(
@@ -103,7 +103,7 @@ static PyObject *pygpu_max_textures_geom_get(PyObject * /*self*/)
 {
   BPYGPU_IS_INIT_OR_ERROR_OBJ;
 
-  return PyLong_FromLong(GPU_max_textures_geom());
+  return PyLong_FromLong(GPU_max_textures());
 }
 
 PyDoc_STRVAR(
@@ -120,7 +120,7 @@ static PyObject *pygpu_max_textures_frag_get(PyObject * /*self*/)
 {
   BPYGPU_IS_INIT_OR_ERROR_OBJ;
 
-  return PyLong_FromLong(GPU_max_textures_frag());
+  return PyLong_FromLong(GPU_max_textures());
 }
 
 PyDoc_STRVAR(

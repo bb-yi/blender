@@ -24,8 +24,8 @@ namespace nodes::node_shader_tex_sky_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Vector>("Vector").hide_value();
-  b.add_output<decl::Color>("Color").no_muted_links();
+  b.add_input<decl::Vector>("Vector"_ustr).hide_value();
+  b.add_output<decl::Color>("Color"_ustr).no_muted_links();
 }
 
 static void node_shader_buts_tex_sky(ui::Layout &layout, bContext *C, PointerRNA *ptr)
@@ -326,7 +326,7 @@ static int node_shader_gpu_tex_sky(GPUMaterial *mat,
 
 static void node_shader_update_sky(bNodeTree *ntree, bNode *node)
 {
-  bNodeSocket *sockVector = bke::node_find_socket(*node, SOCK_IN, "Vector");
+  bNodeSocket *sockVector = bke::node_find_socket(*node, SOCK_IN, "Vector"_ustr);
 
   NodeTexSky *tex = static_cast<NodeTexSky *>(node->storage);
   bke::node_set_socket_availability(
@@ -343,14 +343,12 @@ static void node_gather_link_searches(GatherLinkSearchOpParams &params)
     search_link_ops_for_declarations(params, declaration.outputs);
     return;
   }
-  if (params.node_tree().typeinfo->validate_link(eNodeSocketDatatype(params.other_socket().type),
-                                                 SOCK_FLOAT))
-  {
+  if (params.node_tree().typeinfo->validate_link(params.other_socket().type, SOCK_FLOAT)) {
     params.add_item(IFACE_("Vector"), [](LinkSearchOpParams &params) {
-      bNode &node = params.add_node("ShaderNodeTexSky");
+      bNode &node = params.add_node("ShaderNodeTexSky"_ustr);
       NodeTexSky *tex = static_cast<NodeTexSky *>(node.storage);
       tex->sun_disc = false;
-      params.update_and_connect_available_socket(node, "Vector");
+      params.update_and_connect_available_socket(node, "Vector"_ustr);
     });
   }
 }
@@ -364,14 +362,14 @@ void register_node_type_sh_tex_sky()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeTexSky", SH_NODE_TEX_SKY);
+  sh_node_type_base(&ntype, "ShaderNodeTexSky"_ustr, SH_NODE_TEX_SKY);
   ntype.ui_name = "Sky Texture";
   ntype.ui_description = "Generate a procedural sky texture";
   ntype.enum_name_legacy = "TEX_SKY";
   ntype.nclass = NODE_CLASS_TEXTURE;
   ntype.declare = file_ns::node_declare;
   ntype.draw_buttons = file_ns::node_shader_buts_tex_sky;
-  bke::node_type_size_preset(ntype, bke::eNodeSizePreset::Default);
+  ntype.default_width = bke::NodeWidth::_160;
   ntype.initfunc = file_ns::node_shader_init_tex_sky;
   bke::node_type_storage(
       ntype, "NodeTexSky", node_free_standard_storage, node_copy_standard_storage);

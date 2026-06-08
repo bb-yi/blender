@@ -145,12 +145,8 @@ class VelocityModule {
   void step_sync(eVelocityStep step, float time);
 
   /* Gather motion data. Returns true if the object **can** have motion. */
-  bool step_object_sync(ObjectKey &object_key,
-                        const ObjectRef &object_ref,
-                        int recalc,
-                        ResourceHandleRange resource_handle,
-                        ModifierData *modifier_data = nullptr,
-                        ParticleSystem *particle_sys = nullptr);
+  bool step_object_sync(const ObjectHandle &ob_handle,
+                        HairParticleInfo const *hair_particle = nullptr);
 
   /**
    * In Render, moves the next frame data to previous frame data. Nullify next frame data.

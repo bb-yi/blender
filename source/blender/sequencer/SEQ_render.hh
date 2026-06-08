@@ -10,6 +10,7 @@
 
 #include "DNA_listBase.h"
 #include "DNA_space_enums.h"
+#include "GPU_context.hh"
 
 namespace blender {
 
@@ -51,6 +52,11 @@ struct RenderData {
   GPUViewport *gpu_viewport = nullptr;
   // int gpu_samples;
   // bool gpu_full_samples;
+
+  /* If GPU access is needed and this is set, use it
+   * instead of regular GPU context. Primary case: prefetch job;
+   * it is on another thread and can't use regular GPU context. */
+  gpu::GPUSecondaryContextData gpu_context;
 };
 
 /**
@@ -70,8 +76,10 @@ void render_new_render_data(Main *bmain,
                             RenderData *r_context);
 StripElem *render_give_stripelem(const Scene *scene, const Strip *strip, int timeline_frame);
 
-void render_imbuf_from_sequencer_space(const Scene *scene, ImBuf *ibuf);
-void render_pixel_from_sequencer_space_v4(const Scene *scene, float pixel[4]);
+/* Converts image into scene linear, if needed.
+ * Note: if make_float is false and input image contains byte pixels, it is *NOT* modified. */
+void ensure_ibuf_is_linear_space(ImBuf *ibuf, bool make_float);
+
 /**
  * Check if `strip` is muted for rendering.
  * This function also checks `SeqTimelineChannel` flag.
@@ -84,6 +92,11 @@ bool render_is_muted(const ListBaseT<SeqTimelineChannel> *channels, const Strip 
  */
 float get_render_scale_factor(eSpaceSeq_Proxy_RenderSize render_size, short scene_render_scale);
 float get_render_scale_factor(const RenderData &context);
+
+/* Enables an appropriate GPU context if possible, if GPU rendering is not possible, the functions
+ * returns false. The render_end_gpu function should be called to disable the context. */
+bool render_begin_gpu(const RenderData &rd);
+void render_end_gpu(const RenderData &rd);
 
 }  // namespace seq
 }  // namespace blender

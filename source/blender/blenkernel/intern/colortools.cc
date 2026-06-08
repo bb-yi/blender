@@ -18,7 +18,10 @@
 #include "DNA_curve_types.h"
 
 #include "BLI_math_base.hh"
+#include "BLI_math_color.h"
+#include "BLI_math_matrix_types.hh"
 #include "BLI_math_vector.hh"
+#include "BLI_math_vector_types.hh"
 #include "BLI_rect.h"
 #include "BLI_string_utf8.h"
 #include "BLI_task.h"
@@ -30,6 +33,8 @@
 
 #include "IMB_colormanagement.hh"
 #include "IMB_imbuf_types.hh"
+
+#include "OCIO_scope.hh"
 
 #include "BLO_read_write.hh"
 
@@ -45,7 +50,7 @@ void BKE_curvemapping_set_defaults(CurveMapping *cumap,
                                    float miny,
                                    float maxx,
                                    float maxy,
-                                   short default_handle_type)
+                                   eBezTriple_Handle default_handle_type)
 {
   int a;
   float clipminx, clipminy, clipmaxx, clipmaxy;
@@ -73,16 +78,19 @@ void BKE_curvemapping_set_defaults(CurveMapping *cumap,
     else if (default_handle_type == HD_AUTO_ANIM) {
       cumap->cm[a].default_handle_type = CUMA_HANDLE_AUTO_ANIM;
     }
+    else {
+      cumap->cm[a].default_handle_type = {};
+    }
 
     cumap->cm[a].totpoint = 2;
     cumap->cm[a].curve = MEM_new_array<CurveMapPoint>(2, "curve points");
 
     cumap->cm[a].curve[0].x = minx;
     cumap->cm[a].curve[0].y = miny;
-    cumap->cm[a].curve[0].flag |= default_handle_type;
+    cumap->cm[a].curve[0].flag |= cumap->cm[a].default_handle_type;
     cumap->cm[a].curve[1].x = maxx;
     cumap->cm[a].curve[1].y = maxy;
-    cumap->cm[a].curve[1].flag |= default_handle_type;
+    cumap->cm[a].curve[1].flag |= cumap->cm[a].default_handle_type;
   }
 
   cumap->changed_timestamp = 0;
@@ -258,37 +266,36 @@ void BKE_curvemap_remove(CurveMap *cuma, const short flag)
 
 CurveMapPoint *BKE_curvemap_insert(CurveMap *cuma, float x, float y)
 {
-  CurveMapPoint *cmp = MEM_new_array<CurveMapPoint>(size_t(cuma->totpoint) + 1, "curve points");
-  CurveMapPoint *newcmp = nullptr;
-  int a, b;
-  bool foundloc = false;
-
-  /* insert fragments of the old one and the new point to the new curve */
   cuma->totpoint++;
-  for (a = 0, b = 0; a < cuma->totpoint; a++) {
-    if ((foundloc == false) && ((a + 1 == cuma->totpoint) || (x < cuma->curve[a].x))) {
-      cmp[a].x = x;
-      cmp[a].y = y;
-      cmp[a].flag = CUMA_SELECT;
-      cmp[a].flag |= cuma->default_handle_type;
+  CurveMapPoint *new_path = MEM_new_array<CurveMapPoint>(size_t(cuma->totpoint), "curve points");
+  CurveMapPoint *new_pt = nullptr;
+
+  /* Insert fragments of the old one and the new point to the new curve. */
+  bool foundloc = false;
+  for (int i_new = 0, i_old = 0; i_new < cuma->totpoint; i_new++) {
+    if ((foundloc == false) && ((i_new + 1 == cuma->totpoint) || (x < cuma->curve[i_new].x))) {
+      new_path[i_new].x = x;
+      new_path[i_new].y = y;
+      new_path[i_new].flag = CUMA_SELECT;
+      new_path[i_new].flag |= cuma->default_handle_type;
       foundloc = true;
-      newcmp = &cmp[a];
+      new_pt = &new_path[i_new];
     }
     else {
-      cmp[a].x = cuma->curve[b].x;
-      cmp[a].y = cuma->curve[b].y;
-      /* make sure old points don't remain selected */
-      cmp[a].flag = cuma->curve[b].flag & ~CUMA_SELECT;
-      cmp[a].shorty = cuma->curve[b].shorty;
-      b++;
+      new_path[i_new].x = cuma->curve[i_old].x;
+      new_path[i_new].y = cuma->curve[i_old].y;
+      /* Make sure old points don't remain selected and active. */
+      new_path[i_new].flag = cuma->curve[i_old].flag & ~(CUMA_SELECT | CUMA_ACTIVE);
+      new_path[i_new].shorty = cuma->curve[i_old].shorty;
+      i_old++;
     }
   }
 
-  /* free old curve and replace it with new one */
+  /* Free old curve and replace it with new one. */
   MEM_delete(cuma->curve);
-  cuma->curve = cmp;
+  cuma->curve = new_path;
 
-  return newcmp;
+  return new_pt;
 }
 
 void BKE_curvemap_reset(CurveMap *cuma, const rctf *clipr, int preset, CurveMapSlopeType slope)
@@ -513,6 +520,27 @@ void BKE_curvemap_reset(CurveMap *cuma, const rctf *clipr, int preset, CurveMapS
   if (cuma->table) {
     MEM_delete(cuma->table);
     cuma->table = nullptr;
+  }
+}
+
+void BKE_curvemap_activate_nearest_point(CurveMap *cuma, const int i_last)
+{
+  CurveMapPoint *pts = cuma->curve;
+  for (int i = 1;; i++) {
+    int k = (i + 1) / 2;
+    int idx = (i & 1) ? (i_last - k) : (i_last + k);
+
+    if (idx < 0 || idx >= cuma->totpoint) {
+      if (i_last - k < 0 && i_last + k >= cuma->totpoint) {
+        return;
+      }
+      continue;
+    }
+
+    if (pts[idx].flag & CUMA_SELECT) {
+      pts[idx].flag |= CUMA_ACTIVE;
+      return;
+    }
   }
 }
 
@@ -992,6 +1020,31 @@ void BKE_curvemapping_premultiply(CurveMapping *cumap, bool restore)
 }
 
 /* ************************ more CurveMapping calls *************** */
+CurveMapPoint *BKE_curvemap_active_get(CurveMap *cuma)
+{
+  CurveMapPoint *active_pt = nullptr;
+  for (int i = 0; i < cuma->totpoint; i++) {
+    CurveMapPoint *pt = &cuma->curve[i];
+    if (pt->flag & CUMA_SELECT) {
+      active_pt = pt;
+      if (pt->flag & CUMA_ACTIVE) {
+        break;
+      }
+    }
+  }
+  return active_pt;
+}
+
+void BKE_curvemap_translate_selection(CurveMap *cuma, const blender::float2 &offset)
+{
+  for (int i = 0; i < cuma->totpoint; i++) {
+    CurveMapPoint *pt = &cuma->curve[i];
+    if (pt->flag & CUMA_SELECT) {
+      pt->x += offset.x;
+      pt->y += offset.y;
+    }
+  }
+}
 
 void BKE_curvemapping_changed(CurveMapping *cumap, const bool rem_doubles)
 {
@@ -1055,11 +1108,17 @@ void BKE_curvemapping_changed(CurveMapping *cumap, const bool rem_doubles)
           if (cmp[a + 1].flag & CUMA_SELECT) {
             cmp[a].flag |= CUMA_SELECT;
           }
+          if (cmp[a + 1].flag & CUMA_ACTIVE) {
+            cmp[a].flag |= CUMA_ACTIVE;
+          }
         }
         else {
           cmp[a].flag |= CUMA_REMOVE;
           if (cmp[a].flag & CUMA_SELECT) {
             cmp[a + 1].flag |= CUMA_SELECT;
+          }
+          if (cmp[a].flag & CUMA_ACTIVE) {
+            cmp[a + 1].flag |= CUMA_ACTIVE;
           }
         }
         break; /* we assume 1 deletion per edit is ok */
@@ -1093,6 +1152,8 @@ void BKE_curvemapping_reset_view(CurveMapping *cumap)
 
 float BKE_curvemap_evaluateF(const CurveMapping *cumap, const CurveMap *cuma, float value)
 {
+  BLI_assert_msg(cuma->table, "Table must be initialized, see 'BKE_curvemapping_init'");
+
   /* index in table */
   float fi = (value - cuma->mintable) * cuma->range;
   int i = int(fi);
@@ -1463,7 +1524,7 @@ void BKE_curvemapping_blend_read(BlendDataReader *reader, CurveMapping *cumap)
   cumap->flag &= ~CUMA_PREMULLED;
 
   for (int a = 0; a < CM_TOT; a++) {
-    BLO_read_struct_array(reader, CurveMapPoint, cumap->cm[a].totpoint, &cumap->cm[a].curve);
+    BLO_read_array_and_validate_size(reader, &cumap->cm[a].curve, &cumap->cm[a].totpoint);
     cumap->cm[a].table = nullptr;
     cumap->cm[a].premultable = nullptr;
   }
@@ -1483,45 +1544,62 @@ BLI_INLINE int get_bin_float(float f)
   return bin;
 }
 
-static void save_sample_line(
-    Scopes *scopes, const int idx, const float fx, const float rgb[3], const float ycc[3])
+static void save_sample_line(Scopes *scopes,
+                             ColormanageProcessor *cm_processor_colors,
+                             const float3x3 &yuv_matrix,
+                             const int idx,
+                             const float fx,
+                             const float position_rgb[3],
+                             const float position_ycc[3],
+                             const float color_rgb[3])
 {
-  float yuv[3];
-
-  /* Vector-scope. */
-  rgb_to_yuv(rgb[0], rgb[1], rgb[2], &yuv[0], &yuv[1], &yuv[2], BLI_YUV_ITU_BT709);
-  scopes->vecscope[idx + 0] = yuv[1] * SCOPES_VEC_U_SCALE;
-  scopes->vecscope[idx + 1] = yuv[2] * SCOPES_VEC_V_SCALE;
+  const float3 clamped = float3(std::min(position_rgb[0], 1.0f),
+                                std::min(position_rgb[1], 1.0f),
+                                std::min(position_rgb[2], 1.0f));
+  const float3 yuv = yuv_matrix * clamped;
+  scopes->vecscope[idx + 0] = yuv.y;
+  scopes->vecscope[idx + 1] = yuv.z;
 
   int color_idx = (idx / 2) * 3;
-  scopes->vecscope_rgb[color_idx + 0] = rgb[0];
-  scopes->vecscope_rgb[color_idx + 1] = rgb[1];
-  scopes->vecscope_rgb[color_idx + 2] = rgb[2];
+  float hsv[3];
+  rgb_to_hsv(color_rgb[0], color_rgb[1], color_rgb[2], &hsv[0], &hsv[1], &hsv[2]);
+  hsv[1] *= 0.5f;
+  hsv[2] = 1.0f;
+  hsv_to_rgb(hsv[0],
+             hsv[1],
+             hsv[2],
+             &scopes->vecscope_rgb[color_idx + 0],
+             &scopes->vecscope_rgb[color_idx + 1],
+             &scopes->vecscope_rgb[color_idx + 2]);
 
-  /* Waveform. */
+  /* Compute color in frame-buffer color-space. */
+  if (cm_processor_colors) {
+    cm_processor_colors->apply_v3(&scopes->vecscope_rgb[color_idx + 0]);
+  }
+
   switch (scopes->wavefrm_mode) {
     case SCOPES_WAVEFRM_RGB:
     case SCOPES_WAVEFRM_RGB_PARADE:
       scopes->waveform_1[idx + 0] = fx;
-      scopes->waveform_1[idx + 1] = rgb[0];
+      scopes->waveform_1[idx + 1] = std::min(position_rgb[0], 1.0f);
       scopes->waveform_2[idx + 0] = fx;
-      scopes->waveform_2[idx + 1] = rgb[1];
+      scopes->waveform_2[idx + 1] = std::min(position_rgb[1], 1.0f);
       scopes->waveform_3[idx + 0] = fx;
-      scopes->waveform_3[idx + 1] = rgb[2];
+      scopes->waveform_3[idx + 1] = std::min(position_rgb[2], 1.0f);
       break;
     case SCOPES_WAVEFRM_LUMA:
       scopes->waveform_1[idx + 0] = fx;
-      scopes->waveform_1[idx + 1] = ycc[0];
+      scopes->waveform_1[idx + 1] = std::min(position_ycc[0], 1.0f);
       break;
     case SCOPES_WAVEFRM_YCC_JPEG:
     case SCOPES_WAVEFRM_YCC_709:
     case SCOPES_WAVEFRM_YCC_601:
       scopes->waveform_1[idx + 0] = fx;
-      scopes->waveform_1[idx + 1] = ycc[0];
+      scopes->waveform_1[idx + 1] = std::min(position_ycc[0], 1.0f);
       scopes->waveform_2[idx + 0] = fx;
-      scopes->waveform_2[idx + 1] = ycc[1];
+      scopes->waveform_2[idx + 1] = std::min(position_ycc[1], 1.0f);
       scopes->waveform_3[idx + 0] = fx;
-      scopes->waveform_3[idx + 1] = ycc[2];
+      scopes->waveform_3[idx + 1] = std::min(position_ycc[2], 1.0f);
       break;
   }
 }
@@ -1532,27 +1610,26 @@ void BKE_histogram_update_sample_line(Histogram *hist,
                                       const ColorManagedDisplaySettings *display_settings)
 {
   int i, x, y;
-  const float *fp;
-  uchar *cp;
 
   int x1 = roundf(hist->co[0][0] * ibuf->x);
   int x2 = roundf(hist->co[1][0] * ibuf->x);
   int y1 = roundf(hist->co[0][1] * ibuf->y);
   int y2 = roundf(hist->co[1][1] * ibuf->y);
 
-  ColormanageProcessor *cm_processor = nullptr;
+  std::optional<ColormanageProcessor> cm_processor;
 
   hist->channels = 3;
   hist->x_resolution = 256;
   hist->xmax = 1.0f;
   // hist->ymax = 1.0f; /* now do this on the operator _only_ */
 
-  if (ibuf->byte_buffer.data == nullptr && ibuf->float_buffer.data == nullptr) {
+  if (ibuf->byte_data() == nullptr && ibuf->float_data() == nullptr) {
     return;
   }
 
-  if (ibuf->float_buffer.data) {
-    cm_processor = IMB_colormanagement_display_processor_new(view_settings, display_settings);
+  if (ibuf->float_data()) {
+    cm_processor = ColormanageProcessor::display_processor_new(
+        view_settings, display_settings, DISPLAY_SPACE_SCOPE);
   }
 
   for (i = 0; i < 256; i++) {
@@ -1564,18 +1641,18 @@ void BKE_histogram_update_sample_line(Histogram *hist,
           0.0f;
     }
     else {
-      if (ibuf->float_buffer.data) {
+      if (float *fp = ibuf->float_data_for_write()) {
         float rgba[4];
-        fp = (ibuf->float_buffer.data + (ibuf->channels) * (y * ibuf->x + x));
+        fp = (fp + (ibuf->channels) * (y * ibuf->x + x));
 
         switch (ibuf->channels) {
           case 4:
             copy_v4_v4(rgba, fp);
-            IMB_colormanagement_processor_apply_v4(cm_processor, rgba);
+            cm_processor->apply_v4(rgba);
             break;
           case 3:
             copy_v3_v3(rgba, fp);
-            IMB_colormanagement_processor_apply_v3(cm_processor, rgba);
+            cm_processor->apply_v3(rgba);
             rgba[3] = 1.0f;
             break;
           case 2:
@@ -1596,8 +1673,8 @@ void BKE_histogram_update_sample_line(Histogram *hist,
         hist->data_b[i] = rgba[2];
         hist->data_a[i] = rgba[3];
       }
-      else if (ibuf->byte_buffer.data) {
-        cp = ibuf->byte_buffer.data + 4 * (y * ibuf->x + x);
+      else if (uchar *cp = ibuf->byte_data_for_write()) {
+        cp = cp + 4 * (y * ibuf->x + x);
         hist->data_luma[i] = float(IMB_colormanagement_get_luminance_byte(cp)) / 255.0f;
         hist->data_r[i] = float(cp[0]) / 255.0f;
         hist->data_g[i] = float(cp[1]) / 255.0f;
@@ -1606,18 +1683,21 @@ void BKE_histogram_update_sample_line(Histogram *hist,
       }
     }
   }
-
-  if (cm_processor) {
-    IMB_colormanagement_processor_free(cm_processor);
-  }
 }
 
-/* if view_settings, it also applies this to byte buffers */
 struct ScopesUpdateData {
   Scopes *scopes;
   const ImBuf *ibuf;
-  ColormanageProcessor *cm_processor;
-  const uchar *display_buffer;
+  /** Processor for scope positions (scope space). */
+  ColormanageProcessor *cm_processor_positions;
+  /** Processor for scope display colors (frame-buffer color space). */
+  ColormanageProcessor *cm_processor_colors;
+  /** Luminance coefficients matching the scope display gamut. */
+  float3 luma_coefficients;
+  /** RGB to YCbCr matrix for the vector-scope. */
+  float3x3 yuv_matrix;
+  const float *float_data;
+  const uchar *byte_data;
   int ycc_mode;
 };
 
@@ -1638,8 +1718,8 @@ static void scopes_update_cb(void *__restrict userdata,
 
   Scopes *scopes = data->scopes;
   const ImBuf *ibuf = data->ibuf;
-  ColormanageProcessor *cm_processor = data->cm_processor;
-  const uchar *display_buffer = data->display_buffer;
+  ColormanageProcessor *cm_processor_positions = data->cm_processor_positions;
+  ColormanageProcessor *cm_processor_colors = data->cm_processor_colors;
   const int ycc_mode = data->ycc_mode;
 
   ScopesUpdateDataChunk *data_chunk = static_cast<ScopesUpdateDataChunk *>(tls->userdata_chunk);
@@ -1657,27 +1737,25 @@ static void scopes_update_cb(void *__restrict userdata,
   const int savedlines = y / rows_per_sample_line;
   const bool do_sample_line = (savedlines < scopes->sample_lines) &&
                               (y % rows_per_sample_line) == 0;
-  const bool is_float = (ibuf->float_buffer.data != nullptr);
+  const int channels = (data->float_data) ? ibuf->channels : 4;
 
-  if (is_float) {
-    rf = ibuf->float_buffer.data + size_t(y) * ibuf->x * ibuf->channels;
+  if (data->float_data) {
+    rf = data->float_data + size_t(y) * ibuf->x * channels;
   }
   else {
-    rc = display_buffer + size_t(y) * ibuf->x * ibuf->channels;
+    rc = data->byte_data + size_t(y) * ibuf->x * channels;
   }
 
   for (int x = 0; x < ibuf->x; x++) {
-    float rgba[4], ycc[3], luma;
+    float rgba[4], luma;
 
-    if (is_float) {
+    if (data->float_data) {
       switch (ibuf->channels) {
         case 4:
           copy_v4_v4(rgba, rf);
-          IMB_colormanagement_processor_apply_v4(cm_processor, rgba);
           break;
         case 3:
           copy_v3_v3(rgba, rf);
-          IMB_colormanagement_processor_apply_v3(cm_processor, rgba);
           rgba[3] = 1.0f;
           break;
         case 2:
@@ -1691,41 +1769,60 @@ static void scopes_update_cb(void *__restrict userdata,
         default:
           BLI_assert_unreachable();
       }
+      rf += channels;
     }
     else {
-      for (int c = 4; c--;) {
-        rgba[c] = rc[c] * INV_255;
-      }
+      rgba_uchar_to_float(rgba, rc);
+      rc += channels;
+    }
+
+    /* Compute position in scope colorspace. */
+    float position_rgba[4];
+    copy_v4_v4(position_rgba, rgba);
+    if (cm_processor_positions) {
+      cm_processor_positions->apply_v4(position_rgba);
     }
 
     /* we still need luma for histogram */
-    luma = IMB_colormanagement_get_luminance(rgba);
+    luma = math::dot(data->luma_coefficients, float3(position_rgba));
 
     /* check for min max */
+    float position_ycc[3];
     if (ycc_mode == -1) {
-      minmax_v3v3_v3(min, max, rgba);
+      minmax_v3v3_v3(min, max, position_rgba);
     }
     else {
-      rgb_to_ycc(rgba[0], rgba[1], rgba[2], &ycc[0], &ycc[1], &ycc[2], ycc_mode);
-      mul_v3_fl(ycc, INV_255);
-      minmax_v3v3_v3(min, max, ycc);
+      rgb_to_ycc(position_rgba[0],
+                 position_rgba[1],
+                 position_rgba[2],
+                 &position_ycc[0],
+                 &position_ycc[1],
+                 &position_ycc[2],
+                 ycc_mode);
+      mul_v3_fl(position_ycc, INV_255);
+      minmax_v3v3_v3(min, max, position_ycc);
     }
     /* Increment count for histogram. */
     bin_lum[get_bin_float(luma)]++;
-    bin_r[get_bin_float(rgba[0])]++;
-    bin_g[get_bin_float(rgba[1])]++;
-    bin_b[get_bin_float(rgba[2])]++;
-    bin_a[get_bin_float(rgba[3])]++;
+    bin_r[get_bin_float(position_rgba[0])]++;
+    bin_g[get_bin_float(position_rgba[1])]++;
+    bin_b[get_bin_float(position_rgba[2])]++;
+    bin_a[get_bin_float(position_rgba[3])]++;
 
     /* save sample if needed */
     if (do_sample_line) {
       const float fx = float(x) / float(ibuf->x);
       const int idx = 2 * (ibuf->x * savedlines + x);
-      save_sample_line(scopes, idx, fx, rgba, ycc);
-    }
 
-    rf += ibuf->channels;
-    rc += ibuf->channels;
+      save_sample_line(scopes,
+                       cm_processor_colors,
+                       data->yuv_matrix,
+                       idx,
+                       fx,
+                       position_rgba,
+                       position_ycc,
+                       rgba);
+    }
   }
 }
 
@@ -1772,12 +1869,11 @@ void BKE_scopes_update(Scopes *scopes,
   int a;
   uint nl, na, nr, ng, nb;
   double divl, diva, divr, divg, divb;
-  const uchar *display_buffer = nullptr;
   int ycc_mode = -1;
-  void *cache_handle = nullptr;
-  ColormanageProcessor *cm_processor = nullptr;
+  std::optional<ColormanageProcessor> cm_processor_positions;
+  std::optional<ColormanageProcessor> cm_processor_colors;
 
-  if (ibuf->byte_buffer.data == nullptr && ibuf->float_buffer.data == nullptr) {
+  if (!ibuf->byte_data() && !ibuf->float_data()) {
     return;
   }
 
@@ -1858,20 +1954,25 @@ void BKE_scopes_update(Scopes *scopes,
   scopes->vecscope_rgb = MEM_new_array_zeroed<float>(3 * size_t(scopes->waveform_tot),
                                                      "vectorscope color channel");
 
-  if (ibuf->float_buffer.data) {
-    cm_processor = IMB_colormanagement_display_processor_new(view_settings, display_settings);
-  }
-  else {
-    display_buffer = const_cast<const uchar *>(
-        IMB_display_buffer_acquire(ibuf, view_settings, display_settings, &cache_handle));
-  }
+  cm_processor_positions = ColormanageProcessor::display_processor_for_imbuf(
+      ibuf, view_settings, display_settings, DISPLAY_SPACE_SCOPE);
+  cm_processor_colors = ColormanageProcessor::display_processor_for_imbuf(
+      ibuf, view_settings, display_settings, DISPLAY_SPACE_DRAW);
+
+  const ocio::ScopeInfo scope_info = IMB_colormanagement_get_scope_info(display_settings,
+                                                                        view_settings);
 
   /* Keep number of threads in sync with the merge parts below. */
   ScopesUpdateData data{};
   data.scopes = scopes;
   data.ibuf = ibuf;
-  data.cm_processor = cm_processor;
-  data.display_buffer = display_buffer;
+  data.cm_processor_positions = (cm_processor_positions) ? &cm_processor_positions.value() :
+                                                           nullptr;
+  data.cm_processor_colors = (cm_processor_colors) ? &cm_processor_colors.value() : nullptr;
+  data.luma_coefficients = scope_info.luma_coefficients;
+  data.yuv_matrix = scope_info.yuv_matrix;
+  data.float_data = ibuf->float_data();
+  data.byte_data = ibuf->byte_data();
   data.ycc_mode = ycc_mode;
 
   ScopesUpdateDataChunk data_chunk = {{0}};
@@ -1906,13 +2007,6 @@ void BKE_scopes_update(Scopes *scopes,
     scopes->hist.data_g[a] = data_chunk.bin_g[a] * divg;
     scopes->hist.data_b[a] = data_chunk.bin_b[a] * divb;
     scopes->hist.data_a[a] = data_chunk.bin_a[a] * diva;
-  }
-
-  if (cm_processor) {
-    IMB_colormanagement_processor_free(cm_processor);
-  }
-  if (cache_handle) {
-    IMB_display_buffer_release(cache_handle);
   }
 
   scopes->ok = 1;
@@ -1976,7 +2070,7 @@ void BKE_color_managed_view_settings_init(ColorManagedViewSettings *view_setting
   STRNCPY_UTF8(view_settings->view_transform, view_transform);
   STRNCPY_UTF8(view_settings->look, "None");
 
-  view_settings->flag = 0;
+  view_settings->flag = eColorManageView_Flag{};
   view_settings->gamma = 1.0f;
   view_settings->exposure = 0.0f;
   view_settings->temperature = 6500.0f;

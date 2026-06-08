@@ -433,8 +433,8 @@ void Light::sync(ShadowModule &shadows,
   this->filter_radius = la->shadow_filter_radius;
   this->shadow_jitter = (la->mode & LA_SHADOW_JITTER) != 0;
   this->lightgroup_id = max_ii(lightgroup_id, 0);
-
   this->shadow_map_scale = max_ff(la->shadow_map_scale, 0.0001f);
+  this->visible_camera = (visibility_flag & OB_HIDE_CAMERA) == 0;
 
   if (la->mode & LA_SHADOW) {
     shadow_ensure(shadows);
@@ -674,7 +674,7 @@ float Light::point_radiance_get()
 
 void Light::debug_draw()
 {
-  drw_debug_sphere(transform_location(this->object_to_world),
+  drw_debug_sphere(this->object_to_world.location(),
                    this->local().local.influence_radius_max,
                    float4(0.8f, 0.3f, 0.0f, 1.0f));
 }
@@ -720,6 +720,7 @@ void LightModule::add_world_sun_light(const ObjectKey &key, bool use_diffuse, bo
   int visibility_flag = 0;
   SET_FLAG_FROM_TEST(visibility_flag, !use_diffuse, OB_HIDE_DIFFUSE);
   SET_FLAG_FROM_TEST(visibility_flag, !use_glossy, OB_HIDE_GLOSSY);
+  visibility_flag |= OB_HIDE_CAMERA;
 
   Light &light = light_map_.lookup_or_add_default(key);
   light_names_.add_overwrite(key,
@@ -793,9 +794,9 @@ void LightModule::begin_sync()
   }
 }
 
-void LightModule::sync_light(const Object *ob, ObjectHandle &handle)
+void LightModule::sync_light(const ObjectRef &ob_ref)
 {
-  const blender::Light &la = DRW_object_get_data_for_drawing<const blender::Light>(*ob);
+  const blender::Light &la = DRW_object_get_data_for_drawing<const blender::Light>(*ob_ref.object);
   if (use_scene_lights_ == false) {
     return;
   }
@@ -806,20 +807,20 @@ void LightModule::sync_light(const Object *ob, ObjectHandle &handle)
     }
   }
 
-  Light &light = light_map_.lookup_or_add_default(handle.object_key);
-  light_names_.add_overwrite(handle.object_key, ob->id.name + 2);
+  Light &light = light_map_.lookup_or_add_default(ObjectKey(ob_ref));
+  light_names_.add_overwrite(ObjectKey(ob_ref), ob_ref.object->id.name + 2);
   light.used = true;
   const float light_shader_range_scale = light_nodetree_eevee_light_shader_range_scale_get(
       la.nodetree);
-  if (handle.recalc != 0 || !light.initialized ||
+  if (inst_.get_recalc_flags(ob_ref) != 0 || !light.initialized ||
       (is_local_light(light.type) && light.light_shader_range_scale != light_shader_range_scale))
   {
     light.initialized = true;
     light.sync(inst_.shadows,
-               ob->object_to_world(),
-               ob->visibility_flag,
+               ob_ref.object_to_world(),
+               ob_ref.object->visibility_flag,
                &la,
-               ob->light_linking,
+               ob_ref.light_linking(),
                light_shader_range_scale,
                light_threshold_,
                la.lightgroup_id);
@@ -827,7 +828,7 @@ void LightModule::sync_light(const Object *ob, ObjectHandle &handle)
   else if (is_sun_light(light.type)) {
     /* Directional shadow sync stores view-dependent clipmap offsets in the matrix translation.
      * Restore the source object transform before exposing it to light shader nodes this frame. */
-    light.object_to_world = light_object_to_world_normalized_get(ob->object_to_world());
+    light.object_to_world = light_object_to_world_normalized_get(ob_ref.object_to_world());
     light.sun().direction = light_z_axis(light);
   }
   light.light_shader_index = -1;
@@ -1130,7 +1131,25 @@ void LightModule::culling_extent_sync(const int2 render_extent)
 
   culling_pass_sync();
   update_pass_sync();
+  shape_display_pass_sync();
   debug_pass_sync();
+}
+
+void LightModule::shape_display_pass_sync()
+{
+  shape_display_ps_.init();
+
+  if (lights_len_ == 0) {
+    return;
+  }
+
+  shape_display_ps_.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_BLEND_ADD |
+                              DRW_STATE_CLIP_CONTROL_UNIT_RANGE | inst_.film.depth.test_state);
+  shape_display_ps_.shader_set(inst_.shaders.static_shader_get(LIGHT_SHAPE_DISPLAY));
+  shape_display_ps_.bind_resources(inst_.uniform_data);
+  shape_display_ps_.bind_resources(inst_.volume.result);
+  shape_display_ps_.bind_resources(inst_.lights);
+  shape_display_ps_.draw_procedural(GPU_PRIM_TRIS, 1, lights_len_ * 6);
 }
 
 void LightModule::culling_pass_sync()
@@ -1746,6 +1765,12 @@ void LightModule::debug_draw(View &view, gpu::FrameBuffer *view_fb)
     GPU_framebuffer_bind(view_fb);
     inst_.manager->submit(debug_draw_ps_, view);
   }
+}
+
+void LightModule::shape_display_draw(View &view, gpu::FrameBuffer *view_fb)
+{
+  GPU_framebuffer_bind(view_fb);
+  inst_.manager->submit(shape_display_ps_, view);
 }
 
 /** \} */

@@ -8,7 +8,9 @@
  */
 
 #ifdef WIN32
-
+#  ifdef WIN32_LEAN_AND_MEAN
+#    undef WIN32_LEAN_AND_MEAN
+#  endif
 #  include <conio.h>
 #  include <shlwapi.h>
 #  include <stdio.h>
@@ -585,8 +587,9 @@ void BLI_windows_process_set_qos(QoSMode qos_mode, QoSPrecedence qos_precedence)
                              &processPowerThrottlingState,
                              sizeof(PROCESS_POWER_THROTTLING_STATE)))
   {
-    fprintf(
-        stderr, "BLI_windows_set_process_qos: SetProcessInformation failed: %d\n", GetLastError());
+    fprintf(stderr,
+            "BLI_windows_set_process_qos: SetProcessInformation failed: %lx\n",
+            GetLastError());
     return;
   }
   qos_precedence_last = qos_precedence;

@@ -24,10 +24,10 @@ namespace nodes::node_shader_clamp_cc {
 static void sh_node_clamp_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
-  b.add_input<decl::Float>("Value").default_value(1.0f);
-  b.add_input<decl::Float>("Min").default_value(0.0f).min(-10000.0f).max(10000.0f);
-  b.add_input<decl::Float>("Max").default_value(1.0f).min(-10000.0f).max(10000.0f);
-  b.add_output<decl::Float>("Result");
+  b.add_input<decl::Float>("Value"_ustr).default_value(1.0f);
+  b.add_input<decl::Float>("Min"_ustr).default_value(0.0f).min(-10000.0f).max(10000.0f);
+  b.add_input<decl::Float>("Max"_ustr).default_value(1.0f).min(-10000.0f).max(10000.0f);
+  b.add_output<decl::Float>("Result"_ustr);
 }
 
 static void node_shader_buts_clamp(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
@@ -103,7 +103,7 @@ void register_node_type_sh_clamp()
 
   static bke::bNodeType ntype;
 
-  common_node_type_base(&ntype, "ShaderNodeClamp", SH_NODE_CLAMP);
+  common_node_type_base(&ntype, "ShaderNodeClamp"_ustr, SH_NODE_CLAMP);
   ntype.ui_name = "Clamp";
   ntype.ui_description = "Clamp a value between a minimum and a maximum";
   ntype.enum_name_legacy = "CLAMP";

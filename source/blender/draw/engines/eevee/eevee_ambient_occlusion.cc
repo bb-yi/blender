@@ -37,26 +37,34 @@ void AmbientOcclusion::init()
   render_pass_enabled_ = inst_.film.render_buffer_passes_get() & EEVEE_RENDER_PASS_AO;
 
   const SceneEEVEE &sce_eevee = inst_.scene->eevee;
-  const ViewLayerEEVEE &view_layer_eevee = inst_.view_layer->eevee;
 
-  data_.distance = view_layer_eevee.ambient_occlusion_distance;
-  data_.gi_distance = (sce_eevee.fast_gi_distance > 0.0f) ? sce_eevee.fast_gi_distance : 1e16f;
   /* AO node uses its own number of samples. */
   data_.lod_factor_ao = 1.0f / (1.0f + sce_eevee.fast_gi_quality * 4.0f);
-  data_.lod_factor = (4.0f / sce_eevee.fast_gi_step_count) /
-                     (1.0f + sce_eevee.fast_gi_quality * 4.0f);
+  /* Scale up to LOD 5 at the end of the ray. */
+  data_.lod_factor = (1.0f - sce_eevee.fast_gi_quality) * 0.2f;
   data_.angle_bias = 1.0 / max_ff(1e-8f, 1.0 - sce_eevee.fast_gi_bias);
   data_.thickness_near = sce_eevee.fast_gi_thickness_near;
-  data_.thickness_far = sce_eevee.fast_gi_thickness_far;
   /* Size is multiplied by 2 because it is applied in NDC [-1..1] range. */
   data_.pixel_size = float2(2.0f) / float2(inst_.film.render_extent_get());
 
   ray_count_ = sce_eevee.fast_gi_ray_count;
   step_count_ = sce_eevee.fast_gi_step_count;
+
+  dummy_tx_.ensure_2d(gpu::TextureFormat::SFLOAT_16, int2(1), GPU_TEXTURE_USAGE_SHADER_READ);
 }
 
 void AmbientOcclusion::sync()
 {
+  const SceneEEVEE &sce_eevee = inst_.scene->eevee;
+  const ViewLayerEEVEE &view_layer_eevee = inst_.view_layer->eevee;
+  /* Needs camera to be synced first. */
+  float max_distance = inst_.camera.bound_radius() * 2.0f;
+
+  data_.distance = (view_layer_eevee.ambient_occlusion_distance > 0.0f) ?
+                       view_layer_eevee.ambient_occlusion_distance :
+                       max_distance;
+  data_.gi_distance = (sce_eevee.fast_gi_distance > 0.0f) ? sce_eevee.fast_gi_distance :
+                                                            max_distance;
   if (!render_pass_enabled_) {
     return;
   }
@@ -72,6 +80,7 @@ void AmbientOcclusion::sync()
   render_pass_ps_.bind_resources(inst_.sampling);
   render_pass_ps_.bind_resources(inst_.hiz_buffer.front);
 
+  render_pass_ps_.bind_texture("dummy_tx", &dummy_tx_);
   render_pass_ps_.bind_image("in_normal_img", &inst_.render_buffers.rp_color_tx);
   render_pass_ps_.push_constant("in_normal_img_layer_index", &inst_.render_buffers.data.normal_id);
   render_pass_ps_.bind_image("out_ao_img", &inst_.render_buffers.rp_value_tx);
@@ -92,5 +101,7 @@ void AmbientOcclusion::render_pass(View &view)
   inst_.hiz_buffer.update();
   inst_.manager->submit(render_pass_ps_, view);
 }
+
+/** \} */
 
 }  // namespace blender::eevee

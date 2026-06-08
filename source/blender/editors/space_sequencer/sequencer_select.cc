@@ -6,6 +6,7 @@
  * \ingroup spseq
  */
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -38,7 +39,6 @@
 
 #include "SEQ_channels.hh"
 #include "SEQ_connect.hh"
-#include "SEQ_effects.hh"
 #include "SEQ_iterator.hh"
 #include "SEQ_relations.hh"
 #include "SEQ_retiming.hh"
@@ -250,7 +250,7 @@ static void select_linked_time_strip(const Scene *scene,
       if (left_match && right_match) {
         /* Direct match, copy all selection settings. */
         strip_dest.flag &= ~STRIP_ALLSEL;
-        strip_dest.flag |= strip_source->flag & (STRIP_ALLSEL);
+        strip_dest.flag |= strip_source->flag & STRIP_ALLSEL;
         recurs_sel_strip(&strip_dest);
       }
       else if (left_match && handle_clicked == STRIP_HANDLE_LEFT) {
@@ -396,7 +396,7 @@ void recurs_sel_strip(Strip *strip_meta)
 
 bool strip_point_image_isect(const Scene *scene, const Strip *strip, float point_view[2])
 {
-  const Array<float2> strip_image_quad = seq::image_transform_final_quad_get(scene, strip);
+  const Array<float2> strip_image_quad = seq::image_transform_quad_get(scene, strip);
   return isect_point_quad_v2(point_view,
                              strip_image_quad[0],
                              strip_image_quad[1],
@@ -507,7 +507,7 @@ static wmOperatorStatus sequencer_select_inverse_exec(bContext *C, wmOperator * 
       strip->flag &= ~STRIP_ALLSEL;
     }
     else {
-      strip->flag &= ~(SEQ_LEFTSEL + SEQ_RIGHTSEL);
+      strip->flag &= ~(SEQ_LEFTSEL | SEQ_RIGHTSEL);
       strip->flag |= SEQ_SELECT;
     }
   }
@@ -725,7 +725,7 @@ static Strip *strip_select_from_preview(
     float center_dist_sq_test = 0.0f;
     if (center) {
       /* Detect overlapping center points (scaled by the zoom level). */
-      float2 co = seq::image_transform_origin_offset_pixelspace_get(scene, strip);
+      float2 co = seq::image_transform_origin_preview_offset_get(scene, strip);
       sub_v2_v2(co, mouseco_view);
       mul_v2_v2(co, center_scale_px);
       center_dist_sq_test = len_squared_v2(co);
@@ -775,7 +775,7 @@ static Strip *strip_select_from_preview(
     strip_select = slink_select->strip;
   }
 
-  BLI_freelistN(&strips_ordered);
+  strips_ordered.free_no_destruct();
 
   return strip_select;
 }
@@ -828,7 +828,7 @@ static void sequencer_select_connected_strips(const StripSelection &selection)
     for (Strip *connection : connections) {
       /* Copy selection settings exactly for connected strips. */
       connection->flag &= ~STRIP_ALLSEL;
-      connection->flag |= source->flag & (STRIP_ALLSEL);
+      connection->flag |= source->flag & STRIP_ALLSEL;
     }
   }
 }
@@ -969,7 +969,7 @@ static float inner_clickable_handle_size_get(const Scene *scene,
 
 bool can_select_handle(const Scene *scene, const Strip *strip, const View2D *v2d)
 {
-  if (seq::effect_get_num_inputs(strip->type) > 0) {
+  if (strip->is_effect_with_inputs()) {
     return false;
   }
 
@@ -1597,7 +1597,7 @@ static bool select_more_less_impl(Scene *scene, bool select_more)
 
   Set<Strip *> neighbors;
   const int neighbor_selection_filter = select_more ? 0 : 1;
-  const eStripFlag selection_filter = select_more ? SEQ_SELECT : eStripFlag(0);
+  const eStripFlag selection_filter = select_more ? SEQ_SELECT : SEQ_FLAG_NONE;
 
   for (Strip &strip : *seq::active_seqbase_get(ed)) {
     if ((strip.flag & SEQ_SELECT) != selection_filter) {
@@ -1983,7 +1983,13 @@ void SEQUENCER_OT_select_side_of_frame(wmOperatorType *ot)
   PropertyRNA *prop;
   prop = RNA_def_boolean(ot->srna, "extend", false, "Extend", "Extend the selection");
   RNA_def_property_flag(prop, PROP_SKIP_SAVE);
-  ot->prop = RNA_def_enum(ot->srna, "side", sequencer_select_left_right_types, 0, "Side", "");
+  ot->prop = RNA_def_enum(ot->srna,
+                          "side",
+                          sequencer_select_left_right_types,
+                          0,
+                          "Side",
+                          "Whether to select all strips to the left or right of the current "
+                          "frame, or just those intersecting with it");
 }
 
 /** \} */
@@ -2002,7 +2008,7 @@ static wmOperatorStatus sequencer_select_side_exec(bContext *C, wmOperator *op)
   int frame_ranges[seq::MAX_CHANNELS];
   bool selected = false;
 
-  copy_vn_i(frame_ranges, ARRAY_SIZE(frame_ranges), frame_init);
+  std::fill_n(frame_ranges, ARRAY_SIZE(frame_ranges), frame_init);
 
   for (Strip &strip : *ed->current_strips()) {
     if (UNLIKELY(strip.channel >= seq::MAX_CHANNELS)) {
@@ -2066,7 +2072,7 @@ static bool strip_box_select_rect_image_isect(const Scene *scene,
                                               const Strip *strip,
                                               const rctf *rect)
 {
-  const Array<float2> strip_image_quad = seq::image_transform_final_quad_get(scene, strip);
+  const Array<float2> strip_image_quad = seq::image_transform_quad_get(scene, strip);
   float rect_quad[4][2] = {{rect->xmax, rect->ymax},
                            {rect->xmax, rect->ymin},
                            {rect->xmin, rect->ymin},
@@ -2380,7 +2386,7 @@ static bool do_lasso_select_preview(bContext *C,
   VectorSet strips = seq::query_rendered_strips(
       scene, channels, seqbase, scene->r.cfra, sseq->chanshown);
   for (Strip *strip : strips) {
-    float2 origin = seq::image_transform_origin_offset_pixelspace_get(scene, strip);
+    float2 origin = seq::image_transform_origin_preview_offset_get(scene, strip);
     if (do_lasso_select_is_origin_inside(region, &rect, mcoords, origin)) {
       changed = true;
       if (ELEM(sel_op, SEL_OP_ADD, SEL_OP_SET)) {
@@ -2463,7 +2469,7 @@ static bool strip_circle_select_radius_image_isect(const Scene *scene,
                                                    const int *radius,
                                                    const float2 mval)
 {
-  float2 origin = seq::image_transform_origin_offset_pixelspace_get(scene, strip);
+  float2 origin = seq::image_transform_origin_preview_offset_get(scene, strip);
 
   float dx = origin.x - float(mval[0]);
   float dy = origin.y - float(mval[1]);
@@ -2795,12 +2801,12 @@ static bool select_grouped_effect(Span<Strip *> strips,
     if (STRIP_CHANNEL_CHECK(strip, channel) && strip->is_effect() &&
         seq::relation_is_effect_of_strip(strip, act_strip))
     {
-      effects.add(StripType(strip->type));
+      effects.add(strip->type);
     }
   }
 
   for (Strip *strip : strips) {
-    if (STRIP_CHANNEL_CHECK(strip, channel) && effects.contains(StripType(strip->type))) {
+    if (STRIP_CHANNEL_CHECK(strip, channel) && effects.contains(strip->type)) {
       if (strip->input1) {
         strip->input1->flag |= SEQ_SELECT;
       }
@@ -2833,47 +2839,36 @@ static bool select_grouped_time_overlap(const Scene *scene,
   return changed;
 }
 
-/* Query strips that are in lower channel and intersect in time with strip_reference. */
-static void query_lower_channel_strips(const Scene *scene,
-                                       Strip *strip_reference,
-                                       ListBaseT<Strip> *seqbase,
-                                       VectorSet<Strip *> &strips)
-{
-  for (Strip &strip_test : *seqbase) {
-    if (strip_test.channel > strip_reference->channel) {
-      continue; /* Not lower channel. */
-    }
-    if (strip_test.right_handle(scene) <= strip_reference->left_handle() ||
-        strip_test.left_handle() >= strip_reference->right_handle(scene))
-    {
-      continue; /* Not intersecting in time. */
-    }
-    strips.add(&strip_test);
-  }
-}
-
-/* Select all strips within time range and with lower channel of initial selection. Then select
- * effect chains of these strips. */
+/* Select all strips overlapping in time and occupying a channel below the `act_strip`. Then
+ * additionally select the entire effect chain of the result. */
 static bool select_grouped_effect_link(const Scene *scene,
                                        VectorSet<Strip *> strips,
                                        ListBaseT<Strip> *seqbase,
-                                       Strip * /*act_strip*/,
+                                       Strip *act_strip,
                                        const int /*channel*/)
 {
-  /* Get collection of strips. */
-  strips.remove_if([&](Strip *strip) { return (strip->flag & SEQ_SELECT) == 0; });
-  const int selected_strip_count = strips.size();
-  /* XXX: this uses scene as arg, so it does not work with iterator :( I had thought about this,
-   * but expand function is just so useful... I can just add scene and inject it I guess. */
-  seq::iterator_set_expand(scene, seqbase, strips, query_lower_channel_strips);
-  seq::iterator_set_expand(scene, seqbase, strips, seq::query_strip_effect_chain);
+  VectorSet<Strip *> strips_to_select;
 
-  /* Check if other strips will be affected. */
-  const bool changed = strips.size() > selected_strip_count;
-
-  /* Actual logic. */
+  /* Get all strips intersecting in time below the given channel. */
   for (Strip *strip : strips) {
-    strip->flag |= SEQ_SELECT;
+    if (strip->channel > act_strip->channel) {
+      continue; /* Not lower channel. */
+    }
+    if (act_strip->right_handle(scene) <= strip->left_handle() ||
+        act_strip->left_handle() >= strip->right_handle(scene))
+    {
+      continue; /* Not intersecting in time. */
+    }
+    strips_to_select.add(strip);
+  }
+
+  seq::iterator_set_expand(seqbase, strips_to_select, seq::query_strip_effect_chain);
+
+  const bool changed = !strips_to_select.is_empty();
+  if (changed) {
+    for (Strip *strip : strips_to_select) {
+      strip->flag |= SEQ_SELECT;
+    }
   }
 
   return changed;

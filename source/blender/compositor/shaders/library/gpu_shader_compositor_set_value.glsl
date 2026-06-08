@@ -2,6 +2,8 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include "gpu_shader_math_matrix_construct_lib.glsl"
+
 [[node]]
 void set_float(float input_value, float &output_value)
 {
@@ -27,7 +29,25 @@ void set_float4(float4 input_value, float4 &output_value)
 }
 
 [[node]]
+void set_quaternion(float4 input_value, float4 &output_value)
+{
+  output_value = input_value;
+}
+
+[[node]]
 void set_color(float4 input_value, float4 &output_value)
 {
   output_value = input_value;
+}
+
+[[node]]
+void set_float4x4(float4x4 input_value, float4x4 &output_value)
+{
+  output_value = input_value;
+}
+
+[[node]]
+void set_float4x4_default(float4x4 &output_value)
+{
+  output_value = mat4x4_identity();
 }

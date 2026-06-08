@@ -20,8 +20,8 @@ namespace nodes::node_shader_vertex_color_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_output<decl::Color>("Color");
-  b.add_output<decl::Float>("Alpha");
+  b.add_output<decl::Color>("Color"_ustr);
+  b.add_output<decl::Float>("Alpha"_ustr);
 }
 
 static void node_shader_buts_vertex_color(ui::Layout &layout, bContext *C, PointerRNA *ptr)
@@ -91,7 +91,7 @@ void register_node_type_sh_vertex_color()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeVertexColor", SH_NODE_VERTEX_COLOR);
+  sh_node_type_base(&ntype, "ShaderNodeVertexColor"_ustr, SH_NODE_VERTEX_COLOR);
   ntype.ui_name = "Color Attribute";
   ntype.ui_description =
       "Retrieve a color attribute, or the default fallback if none is specified";

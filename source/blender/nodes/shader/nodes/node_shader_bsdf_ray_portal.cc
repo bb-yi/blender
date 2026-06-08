@@ -12,11 +12,14 @@ namespace nodes::node_shader_bsdf_ray_portal_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Color>("Color").default_value({1.0f, 1.0f, 1.0f, 1.0f});
-  b.add_input<decl::Vector>("Position").hide_value();
-  b.add_input<decl::Vector>("Direction").hide_value();
-  b.add_input<decl::Float>("Weight").available(false);
-  b.add_output<decl::Shader>("BSDF");
+  const bNodeTree *ntree = b.tree_or_null();
+  const bool is_gpu_internal = ntree && (ntree->flag & NTREE_IS_GPU_SHADER_INTERNAL);
+
+  b.add_input<decl::Color>("Color"_ustr).default_value({1.0f, 1.0f, 1.0f, 1.0f});
+  b.add_input<decl::Vector>("Position"_ustr).hide_value();
+  b.add_input<decl::Vector>("Direction"_ustr).hide_value();
+  b.add_input<decl::Float>("Weight"_ustr).available(is_gpu_internal);
+  b.add_output<decl::Shader>("BSDF"_ustr);
 }
 
 static int node_shader_gpu_bsdf_ray_portal(GPUMaterial *mat,
@@ -62,12 +65,12 @@ void register_node_type_sh_bsdf_ray_portal()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeBsdfRayPortal", SH_NODE_BSDF_RAY_PORTAL);
+  sh_node_type_base(&ntype, "ShaderNodeBsdfRayPortal"_ustr, SH_NODE_BSDF_RAY_PORTAL);
   ntype.ui_name = "Ray Portal BSDF";
   ntype.ui_description = "Continue tracing from an arbitrary new position and in a new direction";
   ntype.enum_name_legacy = "BSDF_RAY_PORTAL";
   ntype.nclass = NODE_CLASS_SHADER;
-  ntype.add_ui_poll = object_shader_nodes_poll;
+  ntype.add_ui_poll = object_cycles_shader_nodes_poll;
   ntype.declare = file_ns::node_declare;
   ntype.gather_link_search_ops = search_link_ops_for_shader_bsdf_node;
   ntype.gpu_fn = file_ns::node_shader_gpu_bsdf_ray_portal;

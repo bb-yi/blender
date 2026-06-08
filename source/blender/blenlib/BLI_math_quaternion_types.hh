@@ -79,6 +79,18 @@ template<typename T> struct QuaternionBase {
     return {this->w, this->x, this->y, this->z};
   }
 
+  /** C-style pointer dereference. */
+
+  operator const T *() const
+  {
+    return reinterpret_cast<const T *>(this);
+  }
+
+  operator T *()
+  {
+    return reinterpret_cast<T *>(this);
+  }
+
   /**
    * Create an exponential map representation of this quaternion.
    * An exponential map is basically the rotation axis multiplied by the rotation angle.
@@ -159,9 +171,14 @@ template<typename T> struct QuaternionBase {
 
   friend bool operator==(const QuaternionBase &a, const QuaternionBase &b) = default;
 
-  uint64_t hash() const
+  constexpr uint64_t hash() const
   {
     return VecBase<T, 4>(*this).hash();
+  }
+
+  void hash_unique(UniqueHashBytes &hash) const
+  {
+    return VecBase<T, 4>(*this).hash_unique(hash);
   }
 
   friend std::ostream &operator<<(std::ostream &stream, const QuaternionBase &rot)

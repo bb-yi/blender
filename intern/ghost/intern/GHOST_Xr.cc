@@ -14,6 +14,8 @@
 
 #include "GHOST_Xr-api.hh"
 
+CLG_LOGREF_DECLARE_GLOBAL(LOG_GHOST_XR, "ghost.xr");
+
 #define GHOST_XR_CAPI_CALL(call, ctx) \
   try { \
     call; \

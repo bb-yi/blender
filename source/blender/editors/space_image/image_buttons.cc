@@ -141,10 +141,10 @@ static const char *ui_imageuser_layer_fake_name(RenderResult *rr)
   if (!ibuf) {
     return nullptr;
   }
-  if (ibuf->float_buffer.data) {
+  if (ibuf->float_data()) {
     return IFACE_("Composite");
   }
-  if (ibuf->byte_buffer.data) {
+  if (ibuf->byte_data()) {
     return IFACE_("Sequence");
   }
   return nullptr;
@@ -183,7 +183,7 @@ static void ui_imageuser_layer_menu(bContext * /*C*/, ui::Layout *layout, void *
 
   const char *fake_name = ui_imageuser_layer_fake_name(rr);
   if (fake_name) {
-    ui::Button *but = uiDefButS(block,
+    ui::Button *but = uiDefButV(block,
                                 ui::ButtonType::ButMenu,
                                 fake_name,
                                 0,
@@ -194,12 +194,12 @@ static void ui_imageuser_layer_menu(bContext * /*C*/, ui::Layout *layout, void *
                                 0.0,
                                 0.0,
                                 "");
-    button_retval_set(but, B_NOP);
+    button_enum_prop_value_set(but, 0);
   }
 
   int nr = fake_name ? 1 : 0;
   for (RenderLayer *rl = static_cast<RenderLayer *>(rr->layers.first); rl; rl = rl->next, nr++) {
-    ui::Button *but = uiDefButS(block,
+    ui::Button *but = uiDefButV(block,
                                 ui::ButtonType::ButMenu,
                                 rl->name,
                                 0,
@@ -207,10 +207,10 @@ static void ui_imageuser_layer_menu(bContext * /*C*/, ui::Layout *layout, void *
                                 UI_UNIT_X * 5,
                                 UI_UNIT_X,
                                 &iuser->layer,
-                                float(nr),
+                                0.0,
                                 0.0,
                                 "");
-    button_retval_set(but, B_NOP);
+    button_enum_prop_value_set(but, nr);
   }
 
   layout->separator();
@@ -257,7 +257,7 @@ static void ui_imageuser_pass_menu(bContext * /*C*/, ui::Layout *layout, void *r
   nr = (rl == nullptr) ? 1 : 0;
 
   ListBaseT<LinkData> added_passes;
-  BLI_listbase_clear(&added_passes);
+  added_passes.clear_no_delete();
 
   /* rendered results don't have a Combined pass */
   /* multiview: the ordering must be ascending, so the left-most pass is always the one picked */
@@ -270,7 +270,7 @@ static void ui_imageuser_pass_menu(bContext * /*C*/, ui::Layout *layout, void *r
     }
     BLI_addtail(&added_passes, BLI_genericNodeN(rpass->name));
 
-    ui::Button *but = uiDefButS(block,
+    ui::Button *but = uiDefButV(block,
                                 ui::ButtonType::ButMenu,
                                 IFACE_(rpass->name),
                                 0,
@@ -278,10 +278,10 @@ static void ui_imageuser_pass_menu(bContext * /*C*/, ui::Layout *layout, void *r
                                 UI_UNIT_X * 5,
                                 UI_UNIT_X,
                                 &iuser->pass,
-                                float(nr),
+                                0.0,
                                 0.0,
                                 "");
-    button_retval_set(but, B_NOP);
+    button_enum_prop_value_set(but, nr);
   }
 
   layout->separator();
@@ -297,7 +297,7 @@ static void ui_imageuser_pass_menu(bContext * /*C*/, ui::Layout *layout, void *r
            0.0,
            "");
 
-  BLI_freelistN(&added_passes);
+  added_passes.free_no_destruct();
 
   BKE_image_release_renderresult(scene, image, rr);
 }
@@ -337,11 +337,11 @@ static void ui_imageuser_view_menu_rr(bContext * /*C*/, ui::Layout *layout, void
 
   layout->separator();
 
-  nr = (rr ? BLI_listbase_count(&rr->views) : 0) - 1;
+  nr = (rr ? rr->views.count() : 0) - 1;
   for (rview = static_cast<RenderView *>(rr ? rr->views.last : nullptr); rview;
        rview = rview->prev, nr--)
   {
-    ui::Button *but = uiDefButS(block,
+    ui::Button *but = uiDefButV(block,
                                 ui::ButtonType::ButMenu,
                                 IFACE_(rview->name),
                                 0,
@@ -349,10 +349,10 @@ static void ui_imageuser_view_menu_rr(bContext * /*C*/, ui::Layout *layout, void
                                 UI_UNIT_X * 5,
                                 UI_UNIT_X,
                                 &iuser->view,
-                                float(nr),
+                                0.0,
                                 0.0,
                                 "");
-    button_retval_set(but, B_NOP);
+    button_enum_prop_value_set(but, nr);
   }
 
   BKE_image_release_renderresult(scene, image, rr);
@@ -383,9 +383,9 @@ static void ui_imageuser_view_menu_multiview(bContext * /*C*/, ui::Layout *layou
 
   layout->separator();
 
-  nr = BLI_listbase_count(&image->views) - 1;
+  nr = image->views.count() - 1;
   for (iv = static_cast<ImageView *>(image->views.last); iv; iv = iv->prev, nr--) {
-    ui::Button *but = uiDefButS(block,
+    ui::Button *but = uiDefButV(block,
                                 ui::ButtonType::ButMenu,
                                 IFACE_(iv->name),
                                 0,
@@ -393,10 +393,10 @@ static void ui_imageuser_view_menu_multiview(bContext * /*C*/, ui::Layout *layou
                                 UI_UNIT_X * 5,
                                 UI_UNIT_X,
                                 &iuser->view,
-                                float(nr),
+                                0.0,
                                 0.0,
                                 "");
-    button_retval_set(but, B_NOP);
+    button_enum_prop_value_set(but, nr);
   }
 }
 
@@ -432,7 +432,7 @@ static bool ui_imageuser_layer_menu_step(bContext *C, int direction, void *rnd_p
     }
   }
   else if (direction == 1) {
-    int tot = BLI_listbase_count(&rr->layers);
+    int tot = rr->layers.count();
 
     if (RE_HasCombinedLayer(rr)) {
       tot++; /* fake compo/sequencer layer */
@@ -943,7 +943,7 @@ void uiTemplateImage(ui::Layout *layout,
           void *lock;
           ImBuf *ibuf = BKE_image_acquire_ibuf(ima, iuser, &lock);
 
-          if (ibuf && ibuf->float_buffer.data && (ibuf->foptions.flag & OPENEXR_HALF) == 0) {
+          if (ibuf && ibuf->float_data() && (ibuf->foptions.flag & OPENEXR_HALF) == 0) {
             col.prop(&imaptr, "use_half_precision", UI_ITEM_NONE, std::nullopt, ICON_NONE);
           }
           BKE_image_release_ibuf(ima, ibuf, lock);
@@ -969,7 +969,7 @@ void uiTemplateImageSettings(ui::Layout *layout,
   /* Note: this excludes any video formats; for them the image template does
    * not show the color depth. Color depth instead is shown as part of encoding UI block,
    * which is less confusing. */
-  const int depth_ok = BKE_imtype_valid_depths(imf->imtype);
+  const eImageFormatDepth depth_ok = BKE_imtype_valid_depths(imf->imtype);
   /* some settings depend on this being a scene that's rendered */
   const bool is_render_out = (id && GS(id->name) == ID_SCE);
 
@@ -997,12 +997,10 @@ void uiTemplateImageSettings(ui::Layout *layout,
 
   /* only display depth setting if multiple depths can be used */
   if (ELEM(depth_ok,
-           R_IMF_CHAN_DEPTH_1,
            R_IMF_CHAN_DEPTH_8,
            R_IMF_CHAN_DEPTH_10,
            R_IMF_CHAN_DEPTH_12,
            R_IMF_CHAN_DEPTH_16,
-           R_IMF_CHAN_DEPTH_24,
            R_IMF_CHAN_DEPTH_32) == 0)
   {
     col.row(true).prop(imfptr, "color_depth", ui::ITEM_R_EXPAND, std::nullopt, ICON_NONE);
@@ -1069,8 +1067,12 @@ void uiTemplateImageSettings(ui::Layout *layout,
       if (BKE_imtype_requires_linear_float(imf->imtype)) {
         if (imf->color_management == R_IMF_COLOR_MANAGEMENT_OVERRIDE) {
           PointerRNA linear_settings_ptr = RNA_pointer_get(imfptr, "linear_colorspace_settings");
-          color_settings.prop(
-              &linear_settings_ptr, "name", UI_ITEM_NONE, IFACE_("Color Space"), ICON_NONE);
+          color_settings.prop_with_menu(&linear_settings_ptr,
+                                        "name",
+                                        UI_ITEM_NONE,
+                                        IFACE_("Color Space"),
+                                        ICON_NONE,
+                                        "UI_MT_color_space_select");
         }
       }
       else {
@@ -1110,6 +1112,8 @@ void uiTemplateImageStereo3d(ui::Layout *layout, PointerRNA *stereo3d_format_ptr
       col.prop(stereo3d_format_ptr, "use_squeezed_frame", UI_ITEM_NONE, std::nullopt, ICON_NONE);
       break;
     }
+    case S3D_DISPLAY_PAGEFLIP:
+      break;
   }
 }
 
@@ -1199,7 +1203,7 @@ void uiTemplateImageInfo(ui::Layout *layout, bContext *C, Image *ima, ImageUser 
 
   /* Acquire image buffer. */
   void *lock;
-  ImBuf *ibuf = BKE_image_acquire_ibuf(ima, iuser, &lock);
+  ImBuf *ibuf = BKE_image_acquire_ibuf_gpu(ima, iuser, &lock);
 
   ui::Layout &col = layout->column(true);
   col.alignment_set(ui::LayoutAlign::Right);
@@ -1214,12 +1218,12 @@ void uiTemplateImageInfo(ui::Layout *layout, bContext *C, Image *ima, ImageUser 
 
     ofs += BLI_snprintf_utf8_rlen(str + ofs, len - ofs, RPT_("%d \u00D7 %d, "), ibuf->x, ibuf->y);
 
-    if (ibuf->float_buffer.data) {
+    if (ibuf->float_data() || ibuf->gpu.texture) {
       if (ibuf->channels != 4) {
         ofs += BLI_snprintf_utf8_rlen(
             str + ofs, len - ofs, RPT_("%d float channel(s)"), ibuf->channels);
       }
-      else if (ibuf->planes == R_IMF_PLANES_RGBA) {
+      else if (ibuf->color_mode == ImColorMode::RGBA) {
         ofs += BLI_strncpy_utf8_rlen(str + ofs, RPT_(" RGBA float"), len - ofs);
       }
       else {
@@ -1227,7 +1231,7 @@ void uiTemplateImageInfo(ui::Layout *layout, bContext *C, Image *ima, ImageUser 
       }
     }
     else {
-      if (ibuf->planes == R_IMF_PLANES_RGBA) {
+      if (ibuf->color_mode == ImColorMode::RGBA) {
         ofs += BLI_strncpy_utf8_rlen(str + ofs, RPT_(" RGBA byte"), len - ofs);
       }
       else {
@@ -1240,7 +1244,7 @@ void uiTemplateImageInfo(ui::Layout *layout, bContext *C, Image *ima, ImageUser 
     /* Try to see if this texture is a compressed format, if not, get the generic format. */
     if (!IMB_gpu_get_compressed_format(ibuf, &texture_format)) {
       texture_format = IMB_gpu_get_texture_format(
-          ibuf, ima->flag & IMA_HIGH_BITDEPTH, ibuf->planes >= 8);
+          ibuf, ima->flag & IMA_HIGH_BITDEPTH, ibuf->color_mode == ImColorMode::BW);
     }
 
     const char *texture_format_description = GPU_texture_format_name(texture_format);
@@ -1260,7 +1264,7 @@ void uiTemplateImageInfo(ui::Layout *layout, bContext *C, Image *ima, ImageUser 
     if (ima->source == IMA_SRC_MOVIE && BKE_image_has_anim(ima)) {
       MovieReader *anim = (static_cast<ImageAnim *>(ima->anims.first))->anim;
       if (anim) {
-        duration = MOV_get_duration_frames(anim, IMB_TC_RECORD_RUN);
+        duration = MOV_get_duration_frames(anim);
       }
     }
 
@@ -1270,7 +1274,7 @@ void uiTemplateImageInfo(ui::Layout *layout, bContext *C, Image *ima, ImageUser 
     }
     else if (ima->source == IMA_SRC_SEQUENCE && ibuf) {
       /* Image sequence frame number + filename */
-      const char *filename = BLI_path_basename(ibuf->filepath);
+      const char *filename = BLI_path_basename(ibuf->filepath.c_str());
       SNPRINTF_UTF8(str, RPT_("Frame %d: %s"), framenr, filename);
     }
     else {

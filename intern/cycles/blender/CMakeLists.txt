@@ -17,6 +17,7 @@ set(SRC
   device.cpp
   display_driver.cpp
   image.cpp
+  implicit_sharing.cpp
   geometry.cpp
   light.cpp
   light_linking.cpp
@@ -32,6 +33,7 @@ set(SRC
   session.cpp
   shader.cpp
   sync.cpp
+  texture_cache.cpp
   viewport.cpp
   volume.cpp
 
@@ -61,26 +63,29 @@ set(LIB
   PRIVATE bf::intern::guardedalloc
   PRIVATE bf::intern::clog
   PRIVATE bf::nodes
+  PRIVATE bf::nodes::shader
   PRIVATE bf::render
-  cycles_bvh
-  cycles_device
-  cycles_graph
-  cycles_kernel
-  cycles_scene
-  cycles_session
-  cycles_subd
-  cycles_util
+  PRIVATE cycles_bvh
+  PRIVATE cycles_device
+  PRIVATE cycles_graph
+  PRIVATE cycles_kernel
+  PRIVATE cycles_scene
+  PRIVATE cycles_session
+  PRIVATE cycles_subd
+  PRIVATE cycles_util
 
-  bf::dependencies::epoxy
-  bf::dependencies::optional::python
-  bf::dependencies::optional::openimagedenoise
-  bf::dependencies::optional::openvdb
+  PRIVATE bf::dependencies::epoxy
+  PRIVATE bf::dependencies::optional::python
+  PRIVATE bf::dependencies::optional::openimagedenoise
+  PRIVATE bf::dependencies::optional::openvdb
+  PRIVATE bf::dependencies::optional::osl
 )
 
 set(ADDON_FILES
   addon/__init__.py
   addon/camera.py
   addon/engine.py
+  addon/maketx.py
   addon/operators.py
   addon/osl.py
   addon/presets.py
@@ -99,16 +104,6 @@ endif()
 
 if(WITH_MOD_FLUID)
   add_definitions(-DWITH_FLUID)
-endif()
-
-if(WITH_TBB)
-  add_definitions(-DWITH_TBB)
-endif()
-
-if(WITH_CYCLES_OSL)
-  list(APPEND LIB
-    bf::dependencies::optional::osl
-  )
 endif()
 
 blender_add_lib(bf_intern_cycles "${SRC}" "${INC}" "${INC_SYS}" "${LIB}")

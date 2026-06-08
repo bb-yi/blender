@@ -340,7 +340,7 @@ void ED_transverts_create_from_obedit(TransVertStore *tvs, const Object *obedit,
   }
   else if (obedit->type == OB_ARMATURE) {
     bArmature *arm = id_cast<bArmature *>(obedit->data);
-    int totmalloc = BLI_listbase_count(arm->edbo);
+    int totmalloc = arm->edbo->count();
 
     totmalloc *= 2; /* probably overkill but bones can have 2 trans verts each */
 
@@ -476,7 +476,7 @@ void ED_transverts_create_from_obedit(TransVertStore *tvs, const Object *obedit,
   }
   else if (obedit->type == OB_MBALL) {
     MetaBall *mb = id_cast<MetaBall *>(obedit->data);
-    int totmalloc = BLI_listbase_count(mb->editelems);
+    int totmalloc = mb->editelems->count();
 
     tv = tvs->transverts = MEM_new_array_zeroed<TransVert>(totmalloc, __func__);
 
@@ -529,12 +529,14 @@ void ED_transverts_create_from_obedit(TransVertStore *tvs, const Object *obedit,
     tvs->transverts = MEM_new_array_zeroed<TransVert>(selection.size(), __func__);
     tvs->transverts_tot = selection.size();
 
-    selection.foreach_index(GrainSize(1024), [&](const int64_t i, const int64_t pos) {
-      TransVert &tv = tvs->transverts[pos];
-      tv.loc = positions[i];
-      tv.flag = SELECT;
-      copy_v3_v3(tv.oldloc, tv.loc);
-    });
+    selection.foreach_index(
+        [&](const int64_t i, const int64_t pos) {
+          TransVert &tv = tvs->transverts[pos];
+          tv.loc = positions[i];
+          tv.flag = SELECT;
+          copy_v3_v3(tv.oldloc, tv.loc);
+        },
+        exec_mode::grain_size(1024));
   }
 
   if (!tvs->transverts_tot && tvs->transverts) {

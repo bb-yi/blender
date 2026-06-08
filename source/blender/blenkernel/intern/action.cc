@@ -12,17 +12,18 @@
 #include <cstring>
 #include <optional>
 
-#include "MEM_guardedalloc.h"
-
 /* Allow using deprecated functionality for .blend file I/O. */
 #define DNA_DEPRECATED_ALLOW
 
+#include "DNA_ID.h"
+#include "DNA_action_types.h"
 #include "DNA_anim_types.h"
 #include "DNA_armature_types.h"
 #include "DNA_constraint_types.h"
 #include "DNA_object_types.h"
 #include "DNA_scene_types.h"
 
+#include "BLI_assert.h"
 #include "BLI_ghash.h"
 #include "BLI_listbase.h"
 #include "BLI_math_color.h"
@@ -53,6 +54,7 @@
 #include "BKE_main.hh"
 #include "BKE_object.hh"
 #include "BKE_object_types.hh"
+#include "BKE_pose.hh"
 #include "BKE_preview_image.hh"
 
 #include "DEG_depsgraph.hh"
@@ -64,6 +66,8 @@
 #include "RNA_path.hh"
 
 #include "BLO_read_write.hh"
+
+#include "MEM_guardedalloc.h"
 
 #include "ANIM_action.hh"
 #include "ANIM_action_legacy.hh"
@@ -134,7 +138,7 @@ static void action_copy_data(Main * /*bmain*/,
   BKE_copy_time_markers(action_dst.markers, action_src.markers, flag);
 
   /* Copy F-Curves, fixing up the links as we go. */
-  BLI_listbase_clear(&action_dst.curves);
+  action_dst.curves.clear_no_delete();
 
   for (fcurve_src = static_cast<FCurve *>(action_src.curves.first); fcurve_src;
        fcurve_src = fcurve_src->next)
@@ -230,10 +234,10 @@ static void action_free_data(ID *id)
 
   /* Free legacy F-Curves & groups. */
   BKE_fcurves_free(&action.curves);
-  BLI_freelistN(&action.groups);
+  action.groups.free_no_destruct();
 
   /* Free markers & preview. */
-  BLI_freelistN(&action.markers);
+  action.markers.free_no_destruct();
   BKE_previewimg_id_free(&action.id);
 
   BLI_assert(action.is_empty());
@@ -312,13 +316,13 @@ static void write_channelbag(BlendWriter *writer, animrig::Channelbag &channelba
   writer->write_struct_cast<ActionChannelbag>(&channelbag);
 
   Span<bActionGroup *> groups = channelbag.channel_groups();
-  BLO_write_pointer_array(writer, groups.size(), groups.data());
+  writer->write_pointer_array(groups.size(), groups.data());
   for (const bActionGroup *group : groups) {
     writer->write_struct(group);
   }
 
   Span<FCurve *> fcurves = channelbag.fcurves();
-  BLO_write_pointer_array(writer, fcurves.size(), fcurves.data());
+  writer->write_pointer_array(fcurves.size(), fcurves.data());
   for (FCurve *fcurve : fcurves) {
     writer->write_struct(fcurve);
     BKE_fcurve_blend_write_data(writer, fcurve);
@@ -331,7 +335,7 @@ static void write_strip_keyframe_data(BlendWriter *writer,
   writer->write_struct_cast<ActionStripKeyframeData>(&strip_keyframe_data);
 
   auto channelbags = strip_keyframe_data.channelbags();
-  BLO_write_pointer_array(writer, channelbags.size(), channelbags.data());
+  writer->write_pointer_array(channelbags.size(), channelbags.data());
 
   for (animrig::Channelbag *channelbag : channelbags) {
     write_channelbag(writer, *channelbag);
@@ -341,8 +345,7 @@ static void write_strip_keyframe_data(BlendWriter *writer,
 static void write_strip_keyframe_data_array(
     BlendWriter *writer, Span<animrig::StripKeyframeData *> strip_keyframe_data_array)
 {
-  BLO_write_pointer_array(
-      writer, strip_keyframe_data_array.size(), strip_keyframe_data_array.data());
+  writer->write_pointer_array(strip_keyframe_data_array.size(), strip_keyframe_data_array.data());
 
   for (animrig::StripKeyframeData *keyframe_data : strip_keyframe_data_array) {
     write_strip_keyframe_data(writer, *keyframe_data);
@@ -351,7 +354,7 @@ static void write_strip_keyframe_data_array(
 
 static void write_strips(BlendWriter *writer, Span<animrig::Strip *> strips)
 {
-  BLO_write_pointer_array(writer, strips.size(), strips.data());
+  writer->write_pointer_array(strips.size(), strips.data());
 
   for (animrig::Strip *strip : strips) {
     writer->write_struct_cast<ActionStrip>(strip);
@@ -360,7 +363,7 @@ static void write_strips(BlendWriter *writer, Span<animrig::Strip *> strips)
 
 static void write_layers(BlendWriter *writer, Span<animrig::Layer *> layers)
 {
-  BLO_write_pointer_array(writer, layers.size(), layers.data());
+  writer->write_pointer_array(layers.size(), layers.data());
 
   for (animrig::Layer *layer : layers) {
     writer->write_struct_cast<ActionLayer>(layer);
@@ -370,7 +373,7 @@ static void write_layers(BlendWriter *writer, Span<animrig::Layer *> layers)
 
 static void write_slots(BlendWriter *writer, Span<animrig::Slot *> slots)
 {
-  BLO_write_pointer_array(writer, slots.size(), slots.data());
+  writer->write_pointer_array(slots.size(), slots.data());
   for (animrig::Slot *slot : slots) {
     /* Make a shallow copy using the C type, so that no new runtime struct is
      * allocated for the copy. */
@@ -400,7 +403,7 @@ static void action_blend_write_make_legacy_channel_groups_listbase(
     ListBaseT<bActionGroup> &listbase, const Span<bActionGroup *> channel_groups)
 {
   if (channel_groups.is_empty()) {
-    BLI_listbase_clear(&listbase);
+    listbase.clear_no_delete();
     return;
   }
 
@@ -439,7 +442,7 @@ static void action_blend_write_clear_legacy_channel_groups_listbase(
     group.channels = {nullptr, nullptr};
   }
 
-  BLI_listbase_clear(&listbase);
+  listbase.clear_no_delete();
 }
 
 /**
@@ -460,7 +463,7 @@ static void action_blend_write_make_legacy_fcurves_listbase(ListBaseT<FCurve> &l
                                                             const Span<FCurve *> fcurves)
 {
   if (fcurves.is_empty()) {
-    BLI_listbase_clear(&listbase);
+    listbase.clear_no_delete();
     return;
   }
 
@@ -482,7 +485,7 @@ static void action_blend_write_clear_legacy_fcurves_listbase(ListBaseT<FCurve> &
     fcurve.next = nullptr;
   }
 
-  BLI_listbase_clear(&listbase);
+  listbase.clear_no_delete();
 }
 
 static void action_blend_write(BlendWriter *writer, ID *id, const void *id_address)
@@ -494,10 +497,8 @@ static void action_blend_write(BlendWriter *writer, ID *id, const void *id_addre
   const bool do_write_forward_compat = !BLO_write_is_undo(writer) && action.slot_array_num > 0;
   if (do_write_forward_compat) {
     animrig::assert_baklava_phase_1_invariants(action);
-    BLI_assert_msg(BLI_listbase_is_empty(&action.curves),
-                   "Layered Action should not have legacy data");
-    BLI_assert_msg(BLI_listbase_is_empty(&action.groups),
-                   "Layered Action should not have legacy data");
+    BLI_assert_msg(action.curves.is_empty(), "Layered Action should not have legacy data");
+    BLI_assert_msg(action.groups.is_empty(), "Layered Action should not have legacy data");
 
     const animrig::Slot &first_slot = *action.slot(0);
 
@@ -568,8 +569,8 @@ static void action_blend_write(BlendWriter *writer, ID *id, const void *id_addre
 
 static void read_channelbag(BlendDataReader *reader, animrig::Channelbag &channelbag)
 {
-  BLO_read_pointer_array(
-      reader, channelbag.group_array_num, reinterpret_cast<void **>(&channelbag.group_array));
+  BLO_read_pointer_array_and_validate_size(
+      reader, &channelbag.group_array, &channelbag.group_array_num);
   for (int i = 0; i < channelbag.group_array_num; i++) {
     BLO_read_struct(reader, bActionGroup, &channelbag.group_array[i]);
     channelbag.group_array[i]->channelbag = &channelbag;
@@ -580,8 +581,8 @@ static void read_channelbag(BlendDataReader *reader, animrig::Channelbag &channe
     channelbag.group_array[i]->channels = {nullptr, nullptr};
   }
 
-  BLO_read_pointer_array(
-      reader, channelbag.fcurve_array_num, reinterpret_cast<void **>(&channelbag.fcurve_array));
+  BLO_read_pointer_array_and_validate_size(
+      reader, &channelbag.fcurve_array, &channelbag.fcurve_array_num);
   for (int i = 0; i < channelbag.fcurve_array_num; i++) {
     BLO_read_struct(reader, FCurve, &channelbag.fcurve_array[i]);
     FCurve *fcurve = channelbag.fcurve_array[i];
@@ -598,9 +599,8 @@ static void read_channelbag(BlendDataReader *reader, animrig::Channelbag &channe
 static void read_strip_keyframe_data(BlendDataReader *reader,
                                      animrig::StripKeyframeData &strip_keyframe_data)
 {
-  BLO_read_pointer_array(reader,
-                         strip_keyframe_data.channelbag_array_num,
-                         reinterpret_cast<void **>(&strip_keyframe_data.channelbag_array));
+  BLO_read_pointer_array_and_validate_size(
+      reader, &strip_keyframe_data.channelbag_array, &strip_keyframe_data.channelbag_array_num);
 
   for (int i = 0; i < strip_keyframe_data.channelbag_array_num; i++) {
     BLO_read_struct(reader, ActionChannelbag, &strip_keyframe_data.channelbag_array[i]);
@@ -611,9 +611,8 @@ static void read_strip_keyframe_data(BlendDataReader *reader,
 
 static void read_strip_keyframe_data_array(BlendDataReader *reader, animrig::Action &action)
 {
-  BLO_read_pointer_array(reader,
-                         action.strip_keyframe_data_array_num,
-                         reinterpret_cast<void **>(&action.strip_keyframe_data_array));
+  BLO_read_pointer_array_and_validate_size(
+      reader, &action.strip_keyframe_data_array, &action.strip_keyframe_data_array_num);
 
   for (int i = 0; i < action.strip_keyframe_data_array_num; i++) {
     BLO_read_struct(reader, ActionStripKeyframeData, &action.strip_keyframe_data_array[i]);
@@ -624,15 +623,13 @@ static void read_strip_keyframe_data_array(BlendDataReader *reader, animrig::Act
 
 static void read_layers(BlendDataReader *reader, animrig::Action &action)
 {
-  BLO_read_pointer_array(
-      reader, action.layer_array_num, reinterpret_cast<void **>(&action.layer_array));
+  BLO_read_pointer_array_and_validate_size(reader, &action.layer_array, &action.layer_array_num);
 
   for (int layer_idx = 0; layer_idx < action.layer_array_num; layer_idx++) {
     BLO_read_struct(reader, ActionLayer, &action.layer_array[layer_idx]);
     ActionLayer *layer = action.layer_array[layer_idx];
 
-    BLO_read_pointer_array(
-        reader, layer->strip_array_num, reinterpret_cast<void **>(&layer->strip_array));
+    BLO_read_pointer_array_and_validate_size(reader, &layer->strip_array, &layer->strip_array_num);
     for (int strip_idx = 0; strip_idx < layer->strip_array_num; strip_idx++) {
       BLO_read_struct(reader, ActionStrip, &layer->strip_array[strip_idx]);
 
@@ -653,8 +650,7 @@ static void read_layers(BlendDataReader *reader, animrig::Action &action)
 
 static void read_slots(BlendDataReader *reader, animrig::Action &action)
 {
-  BLO_read_pointer_array(
-      reader, action.slot_array_num, reinterpret_cast<void **>(&action.slot_array));
+  BLO_read_pointer_array_and_validate_size(reader, &action.slot_array, &action.slot_array_num);
 
   for (int i = 0; i < action.slot_array_num; i++) {
     BLO_read_struct(reader, ActionSlot, &action.slot_array[i]);
@@ -684,8 +680,8 @@ static void action_blend_read_data(BlendDataReader *reader, ID *id)
 
   if (animrig::versioning::action_is_layered(action)) {
     /* Clear the forward-compatible storage (see action_blend_write_data()). */
-    BLI_listbase_clear(&action.curves);
-    BLI_listbase_clear(&action.groups);
+    action.curves.clear_no_delete();
+    action.groups.clear_no_delete();
 
     /* Layered actions should always have `idroot == 0`, but when writing an
      * action to a blend file `idroot` is typically set otherwise for forward
@@ -738,38 +734,38 @@ static AssetTypeInfo AssetType_AC = {
 }  // namespace bke
 
 IDTypeInfo IDType_ID_AC = {
-    /*id_code*/ bAction::id_type,
-    /*id_filter*/ FILTER_ID_AC,
+    .id_code = bAction::id_type,
+    .id_filter = FILTER_ID_AC,
 
     /* This value will be set dynamically in `BKE_idtype_init()` to only include
      * animatable ID types (see `animrig::Slot::users()`). */
-    /*dependencies_id_types*/ FILTER_ID_ALL,
+    .dependencies_id_types = FILTER_ID_ALL,
 
-    /*main_listbase_index*/ INDEX_ID_AC,
-    /*struct_size*/ sizeof(bAction),
-    /*name*/ "Action",
-    /*name_plural*/ "actions",
-    /*translation_context*/ BLT_I18NCONTEXT_ID_ACTION,
-    /*flags*/ IDTYPE_FLAGS_NO_ANIMDATA,
-    /*asset_type_info*/ &bke::AssetType_AC,
+    .main_listbase_index = INDEX_ID_AC,
+    .struct_size = sizeof(bAction),
+    .name = "Action",
+    .name_plural = "actions",
+    .translation_context = BLT_I18NCONTEXT_ID_ACTION,
+    .flags = IDTYPE_FLAGS_NO_ANIMDATA,
+    .asset_type_info = &bke::AssetType_AC,
 
-    /*init_data*/ bke::action_init_data,
-    /*copy_data*/ bke::action_copy_data,
-    /*free_data*/ bke::action_free_data,
-    /*make_local*/ nullptr,
-    /*foreach_id*/ bke::action_foreach_id,
-    /*foreach_cache*/ nullptr,
-    /*foreach_path*/ nullptr,
-    /*foreach_working_space_color*/ nullptr,
-    /*owner_pointer_get*/ nullptr,
+    .init_data = bke::action_init_data,
+    .copy_data = bke::action_copy_data,
+    .free_data = bke::action_free_data,
+    .make_local = nullptr,
+    .foreach_id = bke::action_foreach_id,
+    .foreach_cache = nullptr,
+    .foreach_path = nullptr,
+    .foreach_working_space_color = nullptr,
+    .owner_pointer_get = nullptr,
 
-    /*blend_write*/ bke::action_blend_write,
-    /*blend_read_data*/ bke::action_blend_read_data,
-    /*blend_read_after_liblink*/ nullptr,
+    .blend_write = bke::action_blend_write,
+    .blend_read_data = bke::action_blend_read_data,
+    .blend_read_after_liblink = nullptr,
 
-    /*blend_read_undo_preserve*/ nullptr,
+    .blend_read_undo_preserve = nullptr,
 
-    /*lib_override_apply_post*/ nullptr,
+    .lib_override_apply_post = nullptr,
 };
 
 /* ***************** Library data level operations on action ************** */
@@ -813,15 +809,11 @@ void action_group_colors_sync(bActionGroup *grp)
   }
 }
 
-void action_group_colors_set_from_posebone(bActionGroup *grp, const bPoseChannel *pchan)
+void action_group_colors_set_from_posebone(bActionGroup *grp, const bke::PChanBoneConst pchanbone)
 {
-  BLI_assert_msg(pchan, "cannot 'set action group colors from posebone' without a posebone");
-  if (!pchan->bone) {
-    /* pchan->bone is only set after leaving editmode. */
-    return;
-  }
-
-  const BoneColor &color = animrig::ANIM_bonecolor_posebone_get(pchan);
+  BLI_assert_msg(pchanbone.pchan,
+                 "cannot 'set action group colors from posebone' without a posebone");
+  const BoneColor &color = animrig::ANIM_bonecolor_posebone_get(pchanbone);
   action_group_colors_set(grp, &color);
 }
 
@@ -842,6 +834,51 @@ void action_group_colors_set(bActionGroup *grp, const BoneColor *color)
 }
 
 /* *************** Pose channels *************** */
+
+/* -------------------------------------------------------------------- */
+/** \name bPoseChannel member functions
+ */
+
+const Bone *bPoseChannel::bone_get(const bArmature &armature) const
+{
+  if (this->runtime.bone_index == BONE_INDEX_UNKNOWN) {
+    /* This is a valid use case, as the nullptr is used to determine whether the bone exists. See
+     * BKE_pose_channels_clear_with_null_bone().
+     *
+     * In the future, this could be handled by another function (like `bool bone_exists(...)`)
+     * while this one can then return a reference instead of a pointer. Currently that is not yet
+     * done, to keep the introduction of this function semantically close to the bPoseChannel::bone
+     * pointer it replaces. */
+    return nullptr;
+  }
+  return armature.bone_get_indexed(this->runtime.bone_index);
+}
+
+const Bone *bPoseChannel::bone_get(const Object &owner) const
+{
+  BLI_assert(owner.type == OB_ARMATURE);
+  BLI_assert(GS(owner.data->name) == ID_AR);
+  bArmature *armature = id_cast<bArmature *>(owner.data);
+
+  /* Check that the Object's pose bone index generation counter is the same as the Armature's, and
+   * rebuild when necessary. */
+  BKE_pose_ensure_bone_indices(owner);
+
+  return this->bone_get(*armature);
+}
+
+Bone *bPoseChannel::bone_get(bArmature &armature)
+{
+  const bPoseChannel *const_this = this;
+  const Bone *const_bone = const_this->bone_get(armature);
+  return const_cast<Bone *>(const_bone);
+}
+Bone *bPoseChannel::bone_get(Object &owner)
+{
+  const bPoseChannel *const_this = this;
+  const Bone *const_bone = const_this->bone_get(owner);
+  return const_cast<Bone *>(const_bone);
+}
 
 void BKE_pose_channel_session_uid_generate(bPoseChannel *pchan)
 {
@@ -932,20 +969,25 @@ bool BKE_pose_channels_is_valid(const bPose *pose)
 
 bool BKE_pose_is_bonecoll_visible(const bArmature *arm, const bPoseChannel *pchan)
 {
-  return pchan->bone && ANIM_bone_in_visible_collection(arm, pchan->bone);
+  const Bone *bone = pchan->bone_get(*arm);
+  return bone && ANIM_bone_in_visible_collection(arm, bone);
 }
 
 bPoseChannel *BKE_pose_channel_active(Object *ob, const bool check_bonecoll)
 {
-  bArmature *arm = id_cast<bArmature *>((ob) ? ob->data : nullptr);
-  if (ELEM(nullptr, ob, ob->pose, arm)) {
+  if (!ob || !ob->data || ob->type != OB_ARMATURE) {
+    return nullptr;
+  }
+  bArmature *arm = id_cast<bArmature *>(ob->data);
+  if (ELEM(nullptr, ob->pose, arm)) {
     return nullptr;
   }
 
   /* find active */
   for (bPoseChannel &pchan : ob->pose->chanbase) {
-    if ((pchan.bone) && (pchan.bone == arm->act_bone)) {
-      if (!check_bonecoll || ANIM_bone_in_visible_collection(arm, pchan.bone)) {
+    const Bone *bone = pchan.bone_get(*ob);
+    if (bone && bone == arm->act_bone) {
+      if (!check_bonecoll || ANIM_bone_in_visible_collection(arm, bone)) {
         return &pchan;
       }
     }
@@ -968,13 +1010,14 @@ bPoseChannel *BKE_pose_channel_active_or_first_selected(Object *ob)
   }
 
   bPoseChannel *pchan = BKE_pose_channel_active_if_bonecoll_visible(ob);
-  if (pchan && animrig::bone_is_selected(arm, pchan)) {
+  if (pchan && animrig::bone_is_selected(arm, {pchan, pchan->bone_get(*ob)})) {
     return pchan;
   }
 
   for (bPoseChannel &pchan : ob->pose->chanbase) {
-    if (pchan.bone != nullptr) {
-      if (animrig::bone_is_selected(arm, &pchan)) {
+    Bone *bone = pchan.bone_get(*ob);
+    if (bone != nullptr) {
+      if (animrig::bone_is_selected(arm, {&pchan, bone})) {
         return &pchan;
       }
     }
@@ -1138,7 +1181,7 @@ static bool pose_channel_in_IK_chain(Object *ob, bPoseChannel *pchan, int level)
       }
     }
   }
-  for (Bone &bone : pchan->bone->childbase) {
+  for (Bone &bone : pchan->bone_get(*ob)->childbase) {
     pchan = BKE_pose_channel_find_name(ob->pose, bone.name);
     if (pchan && pose_channel_in_IK_chain(ob, pchan, level + 1)) {
       return true;
@@ -1353,12 +1396,12 @@ void BKE_pose_channel_free(bPoseChannel *pchan)
 
 void BKE_pose_channels_free_ex(bPose *pose, bool do_id_user)
 {
-  if (!BLI_listbase_is_empty(&pose->chanbase)) {
+  if (!pose->chanbase.is_empty()) {
     for (bPoseChannel &pchan : pose->chanbase) {
       BKE_pose_channel_free_ex(&pchan, do_id_user);
     }
 
-    BLI_freelistN(&pose->chanbase);
+    pose->chanbase.free_no_destruct();
   }
 
   BKE_pose_channels_hash_free(pose);
@@ -1378,7 +1421,7 @@ void BKE_pose_free_data_ex(bPose *pose, bool do_id_user)
 
   /* free pose-groups */
   if (pose->agroups.first) {
-    BLI_freelistN(&pose->agroups);
+    pose->agroups.free_no_destruct();
   }
 
   /* free IK solver state */
@@ -1473,12 +1516,13 @@ void BKE_pose_channel_copy_data(bPoseChannel *pchan, const bPoseChannel *pchan_f
   pchan->drawflag = pchan_from->drawflag;
 }
 
-void BKE_pose_update_constraint_flags(bPose *pose)
+void BKE_pose_update_constraint_flags(Object &pose_ob)
 {
+  bPose *pose = pose_ob.pose;
   pose->flag &= ~POSE_CONSTRAINTS_TIMEDEPEND;
 
-  for (bPoseChannel &pchan : pose->chanbase) {
-    pchan.constflag = 0;
+  for (bPoseChannel &pchan : pose_ob.pose->chanbase) {
+    pchan.constflag = ePchan_ConstFlag{};
 
     for (bConstraint &con : pchan.constraints) {
       pchan.constflag |= PCHAN_HAS_CONST;
@@ -1500,13 +1544,17 @@ void BKE_pose_update_constraint_flags(bPose *pose)
           if (data->rootbone < 0) {
             data->rootbone = 0;
 
-            bPoseChannel *parchan = chain_tip;
-            while (parchan) {
+            /* TODO(Sybren): call the yet-to-be-written 'assert the bone indices are up to date'
+             * function. This walk uses the armature bone hierarchy (via parbone->parent) rather
+             * than the pose channel hierarchy, which is only safe when the pose is consistent
+             * with the armature. The assert function will make that precondition explicit. */
+            Bone *parbone = chain_tip->bone_get(pose_ob);
+            while (parbone) {
               data->rootbone++;
-              if ((parchan->bone->flag & BONE_CONNECTED) == 0) {
+              if ((parbone->flag & BONE_CONNECTED) == 0) {
                 break;
               }
-              parchan = parchan->parent;
+              parbone = parbone->parent;
             }
           }
 
@@ -1568,7 +1616,7 @@ bActionGroup *BKE_pose_add_group(bPose *pose, const char *name)
   BLI_addtail(&pose->agroups, grp);
   BLI_uniquename(&pose->agroups, grp, name, '.', offsetof(bActionGroup, name), sizeof(grp->name));
 
-  pose->active_group = BLI_listbase_count(&pose->agroups);
+  pose->active_group = pose->agroups.count();
 
   return grp;
 }
@@ -1599,7 +1647,7 @@ void BKE_pose_remove_group(bPose *pose, bActionGroup *grp, const int index)
   /* now, remove it from the pose */
   BLI_freelinkN(&pose->agroups, grp);
   if (pose->active_group >= idx) {
-    const bool has_groups = !BLI_listbase_is_empty(&pose->agroups);
+    const bool has_groups = !pose->agroups.is_empty();
     pose->active_group--;
     if (pose->active_group == 0 && has_groups) {
       pose->active_group = 1;
@@ -1623,8 +1671,9 @@ void BKE_pose_remove_group_index(bPose *pose, const int index)
 
 /* ************** Pose Management Tools ****************** */
 
-void BKE_pose_rest(bPose *pose, bool selected_bones_only)
+void BKE_pose_rest(Object &pose_ob, bool selected_bones_only)
 {
+  bPose *pose = pose_ob.pose;
   if (!pose) {
     return;
   }
@@ -1633,7 +1682,9 @@ void BKE_pose_rest(bPose *pose, bool selected_bones_only)
   memset(pose->cyclic_offset, 0, sizeof(pose->cyclic_offset));
 
   for (bPoseChannel &pchan : pose->chanbase) {
-    if (selected_bones_only && pchan.bone != nullptr && (pchan.flag & POSE_SELECTED) == 0) {
+    if (selected_bones_only && pchan.bone_get(pose_ob) != nullptr &&
+        (pchan.flag & POSE_SELECTED) == 0)
+    {
       continue;
     }
     zero_v3(pchan.loc);
@@ -1649,8 +1700,6 @@ void BKE_pose_rest(bPose *pose, bool selected_bones_only)
 
     copy_v3_fl(pchan.scale_in, 1.0f);
     copy_v3_fl(pchan.scale_out, 1.0f);
-
-    pchan.flag &= ~(POSE_LOC | POSE_ROT | POSE_SCALE | POSE_BBONE_SHAPE);
   }
 }
 
@@ -1770,7 +1819,7 @@ void what_does_obaction(Object *ob,
       BKE_pose_channels_hash_ensure(pose);
     }
     if (pose->flag & POSE_CONSTRAINTS_NEED_UPDATE_FLAGS) {
-      BKE_pose_update_constraint_flags(pose);
+      BKE_pose_update_constraint_flags(*workob);
     }
   }
 
@@ -1888,7 +1937,6 @@ void BKE_pose_blend_read_data(BlendDataReader *reader, ID *id_owner, bPose *pose
     BKE_pose_channel_runtime_reset(&pchan.runtime);
     BKE_pose_channel_session_uid_generate(&pchan);
 
-    pchan.bone = nullptr;
     BLO_read_struct(reader, bPoseChannel, &pchan.parent);
     BLO_read_struct(reader, bPoseChannel, &pchan.child);
     BLO_read_struct(reader, bPoseChannel, &pchan.custom_tx);
@@ -1908,8 +1956,8 @@ void BKE_pose_blend_read_data(BlendDataReader *reader, ID *id_owner, bPose *pose
       animviz_motionpath_blend_read_data(reader, pchan.mpath);
     }
 
-    BLI_listbase_clear(&pchan.iktree);
-    BLI_listbase_clear(&pchan.siktree);
+    pchan.iktree.clear_no_delete();
+    pchan.siktree.clear_no_delete();
 
     /* in case this value changes in future, clamp else we get undefined behavior */
     CLAMP(pchan.rotmode, ROT_MODE_MIN, ROT_MODE_MAX);
@@ -1947,12 +1995,6 @@ void BKE_pose_blend_read_after_liblink(BlendLibReader *reader, Object *ob, bPose
   }
 
   for (bPoseChannel &pchan : pose->chanbase) {
-    pchan.bone = BKE_armature_find_bone_name(arm, pchan.name);
-
-    if (UNLIKELY(pchan.bone == nullptr)) {
-      rebuild = true;
-    }
-
     /* At some point in history, bones could have an armature object as custom shape, which caused
      * all kinds of wonderful issues. This is now avoided in RNA, but through the magic of linking
      * and editing the library file, the situation can still occur. Better to just reset the

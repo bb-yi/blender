@@ -35,6 +35,18 @@ else()
       ${OIDN_EXTRA_ARGS}
       -DOIDN_DEVICE_CUDA=ON)
   endif()
+
+
+  if(BLENDER_PLATFORM_ARM AND UNIX)
+    # Target ARMv8.2-A with dot product and half float.
+    # There is no -march=armv8.2-a+dotprod+fp16+lse flag for ISPC, so we target
+    # a CPU with the same features. Otherwise ISPC will do something similar to
+    # -march=native and results depend on the current processor.
+    set(OIDN_EXTRA_ARGS
+      ${OIDN_EXTRA_ARGS}
+      "-DISPC_FLAGS_RELEASE:STRING=-O3 --cpu=cortex-a78"
+    )
+  endif()
 endif()
 
 if(WIN32 AND NOT BLENDER_PLATFORM_ARM)

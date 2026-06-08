@@ -27,16 +27,18 @@ static const EnumPropertyItem channel_items[] = {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Color>("Image")
+  b.add_input<decl::Color>("Image"_ustr)
       .default_value({0.0f, 0.0f, 0.0f, 1.0f})
       .structure_type(StructureType::Dynamic);
-  b.add_input<decl::Menu>("Channel")
+  b.add_input<decl::Menu>("Channel"_ustr)
       .default_value(CMP_NODE_LEVLES_LUMINANCE)
       .static_items(channel_items)
       .optional_label();
 
-  b.add_output<decl::Float>("Mean");
-  b.add_output<decl::Float>("Standard Deviation");
+  b.add_output<decl::Float>("Mean"_ustr);
+  b.add_output<decl::Float>("Standard Deviation"_ustr);
+  b.add_output<decl::Float>("Minimum"_ustr);
+  b.add_output<decl::Float>("Maximum"_ustr);
 }
 
 using namespace blender::compositor;
@@ -69,10 +71,36 @@ class LevelsOperation : public NodeOperation {
       standard_deviation_result.allocate_single_value();
       this->set_output(standard_deviation, standard_deviation_result);
     }
+
+    const Color minimum = minimum_color(this->context(), this->get_input("Image"));
+    Result &minimum_result = this->get_result("Minimum");
+    if (minimum_result.should_compute()) {
+      minimum_result.allocate_single_value();
+      this->set_output(float4(minimum), minimum_result);
+    }
+
+    const Color maximum = maximum_color(this->context(), this->get_input("Image"));
+    Result &maximum_result = this->get_result("Maximum");
+    if (maximum_result.should_compute()) {
+      maximum_result.allocate_single_value();
+      this->set_output(float4(maximum), maximum_result);
+    }
   }
 
   void execute_single_value()
   {
+    Result &minimum_result = this->get_result("Minimum");
+    if (minimum_result.should_compute()) {
+      minimum_result.allocate_single_value();
+      this->set_output(float4(this->get_input("Image").get_single_value<Color>()), minimum_result);
+    }
+
+    Result &maximum_result = this->get_result("Maximum");
+    if (maximum_result.should_compute()) {
+      maximum_result.allocate_single_value();
+      this->set_output(float4(this->get_input("Image").get_single_value<Color>()), maximum_result);
+    }
+
     Result &standard_deviation_result = this->get_result("Standard Deviation");
     if (standard_deviation_result.should_compute()) {
       standard_deviation_result.allocate_single_value();
@@ -144,7 +172,7 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, "CompositorNodeLevels", CMP_NODE_VIEW_LEVELS);
+  cmp_node_type_base(&ntype, "CompositorNodeLevels"_ustr, CMP_NODE_VIEW_LEVELS);
   ntype.ui_name = "Levels";
   ntype.ui_description = "Compute average and standard deviation of pixel values";
   ntype.enum_name_legacy = "LEVELS";

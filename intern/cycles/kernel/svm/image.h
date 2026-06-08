@@ -11,6 +11,7 @@
 
 #include "kernel/geom/object.h"
 
+#include "kernel/svm/node_types.h"
 #include "kernel/svm/util.h"
 
 #include "util/color.h"
@@ -18,14 +19,10 @@
 
 CCL_NAMESPACE_BEGIN
 
-ccl_device float4
-svm_image_texture(KernelGlobals kg, const int id, const float x, float y, const uint flags)
+ccl_device float4 svm_image_texture(
+    KernelGlobals kg, ccl_private ShaderData *sd, const int id, const dual2 uv, const uint flags)
 {
-  if (id == -1) {
-    return IMAGE_MISSING_RGBA;
-  }
-
-  float4 r = kernel_image_interp(kg, id, x, y);
+  float4 r = kernel_image_interp_with_udim(kg, sd, id, uv);
   const float alpha = r.w;
 
   if ((flags & NODE_IMAGE_ALPHA_UNASSOCIATE) && alpha != 1.0f && alpha != 0.0f) {
@@ -41,96 +38,49 @@ svm_image_texture(KernelGlobals kg, const int id, const float x, float y, const 
 }
 
 /* Remap coordinate from 0..1 box to -1..-1 */
-ccl_device_inline float3 texco_remap_square(const float3 co)
+template<class Float3Type> ccl_device_inline Float3Type texco_remap_square(const Float3Type co)
 {
   return (co - make_float3(0.5f, 0.5f, 0.5f)) * 2.0f;
 }
 
-ccl_device_noinline int svm_node_tex_image(KernelGlobals kg,
-                                           ccl_private ShaderData * /*sd*/,
-                                           ccl_private float *stack,
-                                           const uint4 node,
-                                           int offset)
+template<class Float3Type>
+ccl_device_inline auto svm_node_tex_image_mapping(const Float3Type co, const uint proj)
 {
-  uint co_offset;
-  uint out_offset;
-  uint alpha_offset;
-  uint flags;
-
-  svm_unpack_node_uchar4(node.z, &co_offset, &out_offset, &alpha_offset, &flags);
-
-  float3 co = stack_load_float3(stack, co_offset);
-  float2 tex_co;
-  if (node.w == NODE_IMAGE_PROJ_SPHERE) {
-    co = texco_remap_square(co);
-    tex_co = map_to_sphere(co);
+  if (proj == NODE_IMAGE_PROJ_SPHERE) {
+    return map_to_sphere(texco_remap_square(co));
   }
-  else if (node.w == NODE_IMAGE_PROJ_TUBE) {
-    co = texco_remap_square(co);
-    tex_co = map_to_tube(co);
-  }
-  else {
-    tex_co = make_float2(co.x, co.y);
+  if (proj == NODE_IMAGE_PROJ_TUBE) {
+    return map_to_tube(texco_remap_square(co));
   }
 
-  /* TODO(lukas): Consider moving tile information out of the SVM node.
-   * KernelImageInfo seems a reasonable candidate. */
-  int id = -1;
-  const int num_nodes = (int)node.y;
-  if (num_nodes > 0) {
-    /* Remember the offset of the node following the tile nodes. */
-    const int next_offset = offset + num_nodes;
-
-    /* Find the tile that the UV lies in. */
-    const int tx = (int)tex_co.x;
-    const int ty = (int)tex_co.y;
-
-    /* Check that we're within a legitimate tile. */
-    if (tx >= 0 && ty >= 0 && tx < 10) {
-      const int tile = 1001 + 10 * ty + tx;
-
-      /* Find the index of the tile. */
-      for (int i = 0; i < num_nodes; i++) {
-        const uint4 tile_node = read_node(kg, &offset);
-        if (tile_node.x == tile) {
-          id = tile_node.y;
-          break;
-        }
-        if (tile_node.z == tile) {
-          id = tile_node.w;
-          break;
-        }
-      }
-
-      /* If we found the tile, offset the UVs to be relative to it. */
-      if (id != -1) {
-        tex_co.x -= tx;
-        tex_co.y -= ty;
-      }
-    }
-
-    /* Skip over the remaining nodes. */
-    offset = next_offset;
-  }
-  else {
-    id = -num_nodes;
-  }
-
-  const float4 f = svm_image_texture(kg, id, tex_co.x, tex_co.y, flags);
-
-  if (stack_valid(out_offset)) {
-    stack_store_float3(stack, out_offset, make_float3(f.x, f.y, f.z));
-  }
-  if (stack_valid(alpha_offset)) {
-    stack_store_float(stack, alpha_offset, f.w);
-  }
-  return offset;
+  return make_float2(co);
 }
 
+template<class Float3Type>
+ccl_device_noinline void svm_node_tex_image(KernelGlobals kg,
+                                            ccl_private ShaderData *sd,
+                                            ccl_private float *ccl_restrict stack,
+                                            const ccl_global SVMNodeTexImage &ccl_restrict node)
+{
+  const Float3Type co = stack_load<Float3Type>(stack, node.co);
+  const dual2 tex_co(svm_node_tex_image_mapping(co, node.projection));
+
+  const float4 f = svm_image_texture(kg, sd, node.id, tex_co, node.flags);
+
+  if (stack_valid(node.out_offset)) {
+    stack_store_float3(stack, node.out_offset, make_float3(f));
+  }
+  if (stack_valid(node.alpha_offset)) {
+    stack_store_float(stack, node.alpha_offset, f.w);
+  }
+}
+
+template<class Float3Type>
 ccl_device_noinline void svm_node_tex_image_box(KernelGlobals kg,
                                                 ccl_private ShaderData *sd,
-                                                ccl_private float *stack,
-                                                const uint4 node)
+                                                ccl_private float *ccl_restrict stack,
+                                                const ccl_global SVMNodeTexImageBox &ccl_restrict
+                                                    node)
 {
   /* get object space normal */
   float3 N = sd->N;
@@ -155,7 +105,7 @@ ccl_device_noinline void svm_node_tex_image_box(KernelGlobals kg,
    * 7 zones, with an `if()` test for each zone. */
 
   float3 weight = make_float3(0.0f, 0.0f, 0.0f);
-  const float blend = __int_as_float(node.w);
+  const float blend = node.blend;
   const float limit = 0.5f * (1.0f + blend);
 
   /* first test for corners with single texture */
@@ -198,72 +148,59 @@ ccl_device_noinline void svm_node_tex_image_box(KernelGlobals kg,
   }
 
   /* now fetch textures */
-  uint co_offset;
-  uint out_offset;
-  uint alpha_offset;
-  uint flags;
-  svm_unpack_node_uchar4(node.z, &co_offset, &out_offset, &alpha_offset, &flags);
-
-  const float3 co = stack_load_float3(stack, co_offset);
-  const uint id = node.y;
-
   float4 f = zero_float4();
+
+  const dual3 co = dual3(stack_load<Float3Type>(stack, node.co));
 
   /* Map so that no textures are flipped, rotation is somewhat arbitrary. */
   if (weight.x > 0.0f) {
-    const float2 uv = make_float2((signed_N.x < 0.0f) ? 1.0f - co.y : co.y, co.z);
-    f += weight.x * svm_image_texture(kg, id, uv.x, uv.y, flags);
+    const dual2 uv = make_float2((signed_N.x < 0.0f) ? 1.0f - co.y() : co.y(), co.z());
+    f += weight.x * svm_image_texture(kg, sd, node.id, uv, node.flags);
   }
   if (weight.y > 0.0f) {
-    const float2 uv = make_float2((signed_N.y > 0.0f) ? 1.0f - co.x : co.x, co.z);
-    f += weight.y * svm_image_texture(kg, id, uv.x, uv.y, flags);
+    const dual2 uv = make_float2((signed_N.y > 0.0f) ? 1.0f - co.x() : co.x(), co.z());
+    f += weight.y * svm_image_texture(kg, sd, node.id, uv, node.flags);
   }
   if (weight.z > 0.0f) {
-    const float2 uv = make_float2((signed_N.z > 0.0f) ? 1.0f - co.y : co.y, co.x);
-    f += weight.z * svm_image_texture(kg, id, uv.x, uv.y, flags);
+    const dual2 uv = make_float2((signed_N.z > 0.0f) ? 1.0f - co.y() : co.y(), co.x());
+    f += weight.z * svm_image_texture(kg, sd, node.id, uv, node.flags);
   }
 
-  if (stack_valid(out_offset)) {
-    stack_store_float3(stack, out_offset, make_float3(f.x, f.y, f.z));
+  if (stack_valid(node.out_offset)) {
+    stack_store_float3(stack, node.out_offset, make_float3(f.x, f.y, f.z));
   }
-  if (stack_valid(alpha_offset)) {
-    stack_store_float(stack, alpha_offset, f.w);
+  if (stack_valid(node.alpha_offset)) {
+    stack_store_float(stack, node.alpha_offset, f.w);
   }
 }
 
-ccl_device_noinline void svm_node_tex_environment(KernelGlobals kg,
-                                                  ccl_private ShaderData * /*sd*/,
-                                                  ccl_private float *stack,
-                                                  const uint4 node)
+template<class Float3Type>
+ccl_device_inline auto svm_node_tex_environment_projection(Float3Type co, const uint proj)
 {
-  const uint id = node.y;
-  uint co_offset;
-  uint out_offset;
-  uint alpha_offset;
-  uint flags;
-  const uint projection = node.w;
-
-  svm_unpack_node_uchar4(node.z, &co_offset, &out_offset, &alpha_offset, &flags);
-
-  float3 co = stack_load_float3(stack, co_offset);
-  float2 uv;
-
   co = safe_normalize(co);
-
-  if (projection == 0) {
-    uv = direction_to_equirectangular(co);
+  if (proj == 0) {
+    return direction_to_equirectangular(co);
   }
-  else {
-    uv = direction_to_mirrorball(co);
-  }
+  return direction_to_mirrorball(co);
+}
 
-  const float4 f = svm_image_texture(kg, id, uv.x, uv.y, flags);
+template<class Float3Type>
+ccl_device_noinline void svm_node_tex_environment(
+    KernelGlobals kg,
+    ccl_private ShaderData *sd,
+    ccl_private float *ccl_restrict stack,
+    const ccl_global SVMNodeTexEnvironment &ccl_restrict node)
+{
+  const Float3Type co = stack_load<Float3Type>(stack, node.co);
+  const dual2 uv(svm_node_tex_environment_projection(co, node.projection));
 
-  if (stack_valid(out_offset)) {
-    stack_store_float3(stack, out_offset, make_float3(f.x, f.y, f.z));
+  const float4 f = svm_image_texture(kg, sd, node.id, uv, node.flags);
+
+  if (stack_valid(node.out_offset)) {
+    stack_store_float3(stack, node.out_offset, make_float3(f.x, f.y, f.z));
   }
-  if (stack_valid(alpha_offset)) {
-    stack_store_float(stack, alpha_offset, f.w);
+  if (stack_valid(node.alpha_offset)) {
+    stack_store_float(stack, node.alpha_offset, f.w);
   }
 }
 

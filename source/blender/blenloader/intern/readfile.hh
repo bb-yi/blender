@@ -121,11 +121,19 @@ struct FileData {
 
   /** Used to retrieve ID names from (bhead+1). */
   int id_name_offset = 0;
-  /** Used to retrieve asset data from (bhead+1). NOTE: This may not be available in old files,
-   * will be -1 then! */
+  /**
+   * Used to retrieve asset data from (bhead+1). NOTE: This may not be available in old files,
+   * will be -1 then!
+   */
   int id_asset_data_offset = 0;
   int id_flag_offset = 0;
   int id_deep_hash_offset = 0;
+  /**
+   * Gives access to libraries' filepath and flag, useful for introspection of blendfiles'
+   * dependencies _without_ having to fully read them.
+   */
+  int library_filepath_offset = 0;
+  int library_flag_offset = 0;
   /** For do_versions patching. */
   int globalf = 0;
   int fileflags = 0;
@@ -236,7 +244,7 @@ FileData *blo_filedata_from_memfile(MemFile *memfile,
 
 /**
  * Build a #IDNameLib_Map of old main (we only care about local data here,
- * so we can do that after #blo_split_main() call.
+ * so we can do that after #blo_split_main() call).
  */
 void blo_make_old_idmap_from_main(FileData *fd, Main *bmain) ATTR_NONNULL(1, 2);
 
@@ -271,6 +279,19 @@ short blo_bhead_id_flag(const FileData *fd, const BHead *bhead);
  * Warning! Caller's responsibility to ensure given bhead **is** an ID one!
  */
 AssetMetaData *blo_bhead_id_asset_data_address(const FileData *fd, const BHead *bhead);
+
+/**
+ * Return the stored filepath (may be relative) of a library ID.
+ *
+ * Warning! Caller's responsibility to ensure that the given bhead **is** a Library ID one!
+ */
+const char *blo_bhead_library_filepath(const FileData *fd, const BHead *bhead);
+/**
+ * Return the stored flags of a library ID.
+ *
+ * Warning! Caller's responsibility to ensure that the given bhead **is** a Library ID one!
+ */
+LibraryFlag blo_bhead_library_flag(const FileData *fd, const BHead *bhead);
 
 /* do versions stuff */
 
@@ -321,6 +342,7 @@ void blo_do_versions_440(FileData *fd, Library *lib, Main *bmain);
 void blo_do_versions_450(FileData *fd, Library *lib, Main *bmain);
 void blo_do_versions_500(FileData *fd, Library *lib, Main *bmain);
 void blo_do_versions_510(FileData *fd, Library *lib, Main *bmain);
+void blo_do_versions_520(FileData *fd, Library *lib, Main *bmain);
 
 void do_versions_after_linking_250(Main *bmain);
 void do_versions_after_linking_260(Main *bmain);
@@ -336,6 +358,7 @@ void do_versions_after_linking_440(FileData *fd, Main *bmain);
 void do_versions_after_linking_450(FileData *fd, Main *bmain);
 void do_versions_after_linking_500(FileData *fd, Main *bmain);
 void do_versions_after_linking_510(FileData *fd, Main *bmain);
+void do_versions_after_linking_520(FileData *fd, Main *bmain);
 
 void do_versions_after_setup(Main *new_bmain,
                              BlendfileLinkAppendContext *lapp_context,

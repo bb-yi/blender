@@ -18,10 +18,14 @@ namespace blender::nodes::node_fn_align_euler_to_vector_cc {
 static void node_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
-  b.add_input<decl::Vector>("Rotation").subtype(PROP_EULER).hide_value();
-  b.add_input<decl::Float>("Factor").default_value(1.0f).min(0.0f).max(1.0f).subtype(PROP_FACTOR);
-  b.add_input<decl::Vector>("Vector").default_value({0.0, 0.0, 1.0});
-  b.add_output<decl::Vector>("Rotation").subtype(PROP_EULER);
+  b.add_input<decl::Vector>("Rotation"_ustr).subtype(PROP_EULER).hide_value();
+  b.add_input<decl::Float>("Factor"_ustr)
+      .default_value(1.0f)
+      .min(0.0f)
+      .max(1.0f)
+      .subtype(PROP_FACTOR);
+  b.add_input<decl::Vector>("Vector"_ustr).default_value({0.0, 0.0, 1.0});
+  b.add_output<decl::Vector>("Rotation"_ustr).subtype(PROP_EULER);
 }
 
 static void node_layout(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
@@ -259,7 +263,7 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  fn_node_type_base(&ntype, "FunctionNodeAlignEulerToVector", FN_NODE_ALIGN_EULER_TO_VECTOR);
+  fn_node_type_base(&ntype, "FunctionNodeAlignEulerToVector"_ustr, FN_NODE_ALIGN_EULER_TO_VECTOR);
   ntype.ui_name = "Align Euler to Vector";
   ntype.ui_description = "Orient an Euler rotation along the given direction";
   ntype.enum_name_legacy = "ALIGN_EULER_TO_VECTOR";

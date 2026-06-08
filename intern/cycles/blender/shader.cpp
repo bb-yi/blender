@@ -16,6 +16,7 @@
 #include "blender/sync.h"
 #include "blender/util.h"
 
+#include "util/log.h"
 #include "util/set.h"
 #include "util/string.h"
 #include "util/task.h"
@@ -28,6 +29,7 @@
 
 #include "NOD_shader.h"
 #include "NOD_shader_nodes_inline.hh"
+#include "NOD_shader_raycast.hh"
 
 #include "DEG_depsgraph_query.hh"
 
@@ -164,9 +166,17 @@ int blender_attribute_name_split_type(ustring name, string *r_real_name)
 
 /* Graph */
 
+static ustring get_node_input_string(const blender::bNode &b_node, const string &name)
+{
+  const blender::bNodeSocket *b_sock = b_node.input_by_identifier(blender::UString(name));
+  BLI_assert(b_sock->type == blender::SOCK_STRING);
+  const auto &default_value = *b_sock->default_value_typed<blender::bNodeSocketValueString>();
+  return ustring(default_value.value);
+}
+
 static float3 get_node_output_rgba(blender::bNode &b_node, const string &name)
 {
-  blender::bNodeSocket *b_sock = b_node.output_by_identifier(name);
+  blender::bNodeSocket *b_sock = b_node.output_by_identifier(blender::UString(name));
   BLI_assert(b_sock->type == blender::SOCK_RGBA);
   const auto &default_value = *b_sock->default_value_typed<blender::bNodeSocketValueRGBA>();
   return make_float3(default_value.value[0], default_value.value[1], default_value.value[2]);
@@ -174,7 +184,7 @@ static float3 get_node_output_rgba(blender::bNode &b_node, const string &name)
 
 static float get_node_output_value(blender::bNode &b_node, const string &name)
 {
-  blender::bNodeSocket *b_sock = b_node.output_by_identifier(name);
+  blender::bNodeSocket *b_sock = b_node.output_by_identifier(blender::UString(name));
   BLI_assert(b_sock->type == blender::SOCK_FLOAT);
   const auto &default_value = *b_sock->default_value_typed<blender::bNodeSocketValueFloat>();
   return default_value.value;
@@ -182,15 +192,15 @@ static float get_node_output_value(blender::bNode &b_node, const string &name)
 
 static float3 get_node_output_vector(blender::bNode &b_node, const string &name)
 {
-  blender::bNodeSocket *b_sock = b_node.output_by_identifier(name);
+  blender::bNodeSocket *b_sock = b_node.output_by_identifier(blender::UString(name));
   BLI_assert(b_sock->type == blender::SOCK_VECTOR);
   const auto &default_value = *b_sock->default_value_typed<blender::bNodeSocketValueVector>();
   return make_float3(default_value.value[0], default_value.value[1], default_value.value[2]);
 }
 
-static SocketType::Type convert_socket_type(blender::bNodeSocket &b_socket)
+static SocketType::Type convert_socket_type(const blender::bNodeSocket &b_socket)
 {
-  switch (blender::eNodeSocketDatatype(b_socket.type)) {
+  switch (b_socket.type) {
     case blender::SOCK_FLOAT:
       return SocketType::FLOAT;
     case blender::SOCK_BOOLEAN:
@@ -255,7 +265,8 @@ static void set_default_value(ShaderInput *input,
     }
     case SocketType::STRING: {
       const auto &default_value = *b_sock.default_value_typed<blender::bNodeSocketValueString>();
-      node->set(socket, (ustring)blender_absolute_path(b_data, b_id, default_value.value).c_str());
+      node->set(socket,
+                (ustring)blender_absolute_path(b_data, &b_id, default_value.value).c_str());
       break;
     }
     default:
@@ -290,6 +301,58 @@ static bool is_image_animated(blender::eImageSource b_image_source,
          (b_image_user.flag & blender::IMA_ANIM_ALWAYS) != 0;
 }
 
+static std::optional<RaycastNode::AttributeOutputType> raycast_get_attribute_output_type(
+    const blender::eCustomDataType data_type)
+{
+  switch (data_type) {
+    case blender::CD_PROP_FLOAT:
+      return RaycastNode::ATTR_OUTPUT_FLOAT;
+    case blender::CD_PROP_FLOAT3:
+    case blender::CD_PROP_COLOR:
+      return RaycastNode::ATTR_OUTPUT_FLOAT3;
+    default:
+      break;
+  }
+  LOG_DFATAL << "Unhandled data type " << int(data_type);
+  return std::nullopt;
+}
+
+static void raycast_add_output_attribute_sockets(RaycastNode *raycast,
+                                                 const blender::bNode &b_node)
+{
+  auto *storage = static_cast<blender::NodeShaderRaycast *>(b_node.storage);
+  for (const blender::NodeRaycastSampleAttributeItem &item :
+       blender::Span(storage->sample_attribute_items, storage->sample_attribute_items_num))
+  {
+    using blender::nodes::RaycastSampleAttributeItemsAccessor;
+
+    const std::optional<RaycastNode::AttributeOutputType> attribute_output_type =
+        raycast_get_attribute_output_type(blender::eCustomDataType(item.data_type));
+    if (!attribute_output_type) {
+      continue;
+    }
+
+    const string input_identifier(
+        RaycastSampleAttributeItemsAccessor::input_socket_identifier_for_item(item));
+    const ustring output_identifier(
+        RaycastSampleAttributeItemsAccessor::output_socket_identifier_for_item(item));
+
+    const ustring attribute_name = get_node_input_string(b_node, input_identifier);
+
+    raycast->add_output_attribute_socket(
+        attribute_name, *attribute_output_type, output_identifier);
+
+    /* For color attributes additionally add the corresponding Alpha socket.
+     * This is because colors are RGB, access to Alpha needs special handling. */
+    if (item.data_type == blender::CD_PROP_COLOR) {
+      const ustring alpha_output_identifier(
+          RaycastSampleAttributeItemsAccessor::output_socket_identifier_for_item_alpha(item));
+      raycast->add_output_attribute_socket(
+          attribute_name, RaycastNode::ATTR_OUTPUT_FLOAT_ALPHA, alpha_output_identifier);
+    }
+  }
+}
+
 static ShaderNode *add_node(Scene *scene,
                             blender::RenderEngine &b_engine,
                             blender::Main &b_data,
@@ -298,13 +361,14 @@ static ShaderNode *add_node(Scene *scene,
                             blender::bNodeTree &b_ntree,
                             blender::bNode &b_node)
 {
+  using blender::operator""_ustr;
   ShaderNode *node = nullptr;
 
   /* existing blender nodes */
-  if (b_node.is_type("ShaderNodeRGBCurve")) {
+  if (b_node.is_type("ShaderNodeRGBCurve"_ustr)) {
     const auto &mapping = *static_cast<blender::CurveMapping *>(b_node.storage);
     RGBCurvesNode *curves = graph->create_node<RGBCurvesNode>();
-    array<float3> curve_mapping_curves;
+    array<packed_float3> curve_mapping_curves;
     float min_x;
     float max_x;
     curvemapping_color_to_array(mapping, curve_mapping_curves, RAMP_TABLE_SIZE, true);
@@ -315,10 +379,10 @@ static ShaderNode *add_node(Scene *scene,
     curves->set_extrapolate((mapping.flag & blender::CUMA_EXTEND_EXTRAPOLATE) != 0);
     node = curves;
   }
-  if (b_node.is_type("ShaderNodeVectorCurve")) {
+  if (b_node.is_type("ShaderNodeVectorCurve"_ustr)) {
     const auto &mapping = *static_cast<blender::CurveMapping *>(b_node.storage);
     VectorCurvesNode *curves = graph->create_node<VectorCurvesNode>();
-    array<float3> curve_mapping_curves;
+    array<packed_float3> curve_mapping_curves;
     float min_x;
     float max_x;
     curvemapping_color_to_array(mapping, curve_mapping_curves, RAMP_TABLE_SIZE, false);
@@ -329,7 +393,7 @@ static ShaderNode *add_node(Scene *scene,
     curves->set_extrapolate((mapping.flag & blender::CUMA_EXTEND_EXTRAPOLATE) != 0);
     node = curves;
   }
-  else if (b_node.is_type("ShaderNodeFloatCurve")) {
+  else if (b_node.is_type("ShaderNodeFloatCurve"_ustr)) {
     const auto &mapping = *static_cast<blender::CurveMapping *>(b_node.storage);
     FloatCurveNode *curve = graph->create_node<FloatCurveNode>();
     array<float> curve_mapping_curve;
@@ -343,10 +407,10 @@ static ShaderNode *add_node(Scene *scene,
     curve->set_extrapolate((mapping.flag & blender::CUMA_EXTEND_EXTRAPOLATE) != 0);
     node = curve;
   }
-  else if (b_node.is_type("ShaderNodeValToRGB")) {
+  else if (b_node.is_type("ShaderNodeValToRGB"_ustr)) {
     RGBRampNode *ramp = graph->create_node<RGBRampNode>();
     const auto &b_color_ramp = *static_cast<blender::ColorBand *>(b_node.storage);
-    array<float3> ramp_values;
+    array<packed_float3> ramp_values;
     array<float> ramp_alpha;
     colorramp_to_array(b_color_ramp, ramp_values, ramp_alpha, RAMP_TABLE_SIZE);
     ramp->set_ramp(ramp_values);
@@ -354,35 +418,53 @@ static ShaderNode *add_node(Scene *scene,
     ramp->set_interpolate(b_color_ramp.ipotype != blender::COLBAND_INTERP_CONSTANT);
     node = ramp;
   }
-  else if (b_node.is_type("ShaderNodeRGB")) {
+  else if (b_node.is_type("ShaderNodeRGB"_ustr)) {
     ColorNode *color = graph->create_node<ColorNode>();
     color->set_value(get_node_output_rgba(b_node, "Color"));
     node = color;
   }
-  else if (b_node.is_type("ShaderNodeValue")) {
+  else if (b_node.is_type("FunctionNodeInputVector"_ustr)) {
+    ColorNode *value = graph->create_node<ColorNode>();
+    const auto &storage = *static_cast<const blender::NodeInputVector *>(b_node.storage);
+    value->set_value(make_float3(storage.vector[0], storage.vector[1], storage.vector[2]));
+    node = value;
+  }
+  else if (b_node.is_type("ShaderNodeValue"_ustr)) {
     ValueNode *value = graph->create_node<ValueNode>();
     value->set_value(get_node_output_value(b_node, "Value"));
     node = value;
   }
-  else if (b_node.is_type("ShaderNodeCameraData")) {
+  else if (b_node.is_type("FunctionNodeInputBool"_ustr)) {
+    ValueNode *value = graph->create_node<ValueNode>();
+    const auto &storage = *static_cast<const blender::NodeInputBool *>(b_node.storage);
+    value->set_value(bool(storage.boolean));
+    node = value;
+  }
+  else if (b_node.is_type("FunctionNodeInputInt"_ustr)) {
+    ValueNode *value = graph->create_node<ValueNode>();
+    const auto &storage = *static_cast<const blender::NodeInputInt *>(b_node.storage);
+    value->set_value(storage.integer);
+    node = value;
+  }
+  else if (b_node.is_type("ShaderNodeCameraData"_ustr)) {
     node = graph->create_node<CameraNode>();
   }
-  else if (b_node.is_type("ShaderNodeInvert")) {
+  else if (b_node.is_type("ShaderNodeInvert"_ustr)) {
     node = graph->create_node<InvertNode>();
   }
-  else if (b_node.is_type("ShaderNodeGamma")) {
+  else if (b_node.is_type("ShaderNodeGamma"_ustr)) {
     node = graph->create_node<GammaNode>();
   }
-  else if (b_node.is_type("ShaderNodeBrightContrast")) {
+  else if (b_node.is_type("ShaderNodeBrightContrast"_ustr)) {
     node = graph->create_node<BrightContrastNode>();
   }
-  else if (b_node.is_type("ShaderNodeMixRGB")) {
+  else if (b_node.is_type("ShaderNodeMixRGB"_ustr)) {
     MixNode *mix = graph->create_node<MixNode>();
     mix->set_mix_type((NodeMix)b_node.custom1);
     mix->set_use_clamp(b_node.custom2 & blender::SHD_MIXRGB_CLAMP);
     node = mix;
   }
-  else if (b_node.is_type("ShaderNodeMix")) {
+  else if (b_node.is_type("ShaderNodeMix"_ustr)) {
     const auto &storage = *static_cast<blender::NodeShaderMix *>(b_node.storage);
     if (storage.data_type == blender::SOCK_VECTOR) {
       if (storage.factor_mode == blender::NODE_MIX_MODE_UNIFORM) {
@@ -409,31 +491,31 @@ static ShaderNode *add_node(Scene *scene,
       node = mix_node;
     }
   }
-  else if (b_node.is_type("ShaderNodeSeparateColor")) {
+  else if (b_node.is_type("ShaderNodeSeparateColor"_ustr)) {
     const auto &storage = *static_cast<blender::NodeCombSepColor *>(b_node.storage);
     SeparateColorNode *separate_node = graph->create_node<SeparateColorNode>();
     separate_node->set_color_type((NodeCombSepColorType)storage.mode);
     node = separate_node;
   }
-  else if (b_node.is_type("ShaderNodeCombineColor")) {
+  else if (b_node.is_type("ShaderNodeCombineColor"_ustr)) {
     const auto &storage = *static_cast<blender::NodeCombSepColor *>(b_node.storage);
     CombineColorNode *combine_node = graph->create_node<CombineColorNode>();
     combine_node->set_color_type((NodeCombSepColorType)storage.mode);
     node = combine_node;
   }
-  else if (b_node.is_type("ShaderNodeSeparateXYZ")) {
+  else if (b_node.is_type("ShaderNodeSeparateXYZ"_ustr)) {
     node = graph->create_node<SeparateXYZNode>();
   }
-  else if (b_node.is_type("ShaderNodeCombineXYZ")) {
+  else if (b_node.is_type("ShaderNodeCombineXYZ"_ustr)) {
     node = graph->create_node<CombineXYZNode>();
   }
-  else if (b_node.is_type("ShaderNodeHueSaturation")) {
+  else if (b_node.is_type("ShaderNodeHueSaturation"_ustr)) {
     node = graph->create_node<HSVNode>();
   }
-  else if (b_node.is_type("ShaderNodeRGBToBW")) {
+  else if (b_node.is_type("ShaderNodeRGBToBW"_ustr)) {
     node = graph->create_node<RGBToBWNode>();
   }
-  else if (b_node.is_type("ShaderNodeMapRange")) {
+  else if (b_node.is_type("ShaderNodeMapRange"_ustr)) {
     const auto &storage = *static_cast<blender::NodeMapRange *>(b_node.storage);
     if (storage.data_type == blender::CD_PROP_FLOAT3) {
       VectorMapRangeNode *vector_map_range_node = graph->create_node<VectorMapRangeNode>();
@@ -448,29 +530,29 @@ static ShaderNode *add_node(Scene *scene,
       node = map_range_node;
     }
   }
-  else if (b_node.is_type("ShaderNodeClamp")) {
+  else if (b_node.is_type("ShaderNodeClamp"_ustr)) {
     ClampNode *clamp_node = graph->create_node<ClampNode>();
     clamp_node->set_clamp_type((NodeClampType)b_node.custom1);
     node = clamp_node;
   }
-  else if (b_node.is_type("ShaderNodeMath")) {
+  else if (b_node.is_type("ShaderNodeMath"_ustr)) {
     MathNode *math_node = graph->create_node<MathNode>();
     math_node->set_math_type((NodeMathType)b_node.custom1);
     math_node->set_use_clamp(b_node.custom2);
     node = math_node;
   }
-  else if (b_node.is_type("ShaderNodeVectorMath")) {
+  else if (b_node.is_type("ShaderNodeVectorMath"_ustr)) {
     VectorMathNode *vector_math_node = graph->create_node<VectorMathNode>();
     vector_math_node->set_math_type((NodeVectorMathType)b_node.custom1);
     node = vector_math_node;
   }
-  else if (b_node.is_type("ShaderNodeVectorRotate")) {
+  else if (b_node.is_type("ShaderNodeVectorRotate"_ustr)) {
     VectorRotateNode *vector_rotate_node = graph->create_node<VectorRotateNode>();
     vector_rotate_node->set_rotate_type((NodeVectorRotateType)b_node.custom1);
     vector_rotate_node->set_invert(b_node.custom2);
     node = vector_rotate_node;
   }
-  else if (b_node.is_type("ShaderNodeVectorTransform")) {
+  else if (b_node.is_type("ShaderNodeVectorTransform"_ustr)) {
     const auto &storage = *static_cast<blender::NodeShaderVectTransform *>(b_node.storage);
     VectorTransformNode *vtransform = graph->create_node<VectorTransformNode>();
     vtransform->set_transform_type((NodeVectorTransformType)storage.type);
@@ -478,44 +560,44 @@ static ShaderNode *add_node(Scene *scene,
     vtransform->set_convert_to((NodeVectorTransformConvertSpace)storage.convert_to);
     node = vtransform;
   }
-  else if (b_node.is_type("ShaderNodeNormal")) {
+  else if (b_node.is_type("ShaderNodeNormal"_ustr)) {
     NormalNode *norm = graph->create_node<NormalNode>();
     norm->set_direction(get_node_output_vector(b_node, "Normal"));
     node = norm;
   }
-  else if (b_node.is_type("ShaderNodeMapping")) {
+  else if (b_node.is_type("ShaderNodeMapping"_ustr)) {
     MappingNode *mapping = graph->create_node<MappingNode>();
     mapping->set_mapping_type((NodeMappingType)b_node.custom1);
     node = mapping;
   }
-  else if (b_node.is_type("ShaderNodeFresnel")) {
+  else if (b_node.is_type("ShaderNodeFresnel"_ustr)) {
     node = graph->create_node<FresnelNode>();
   }
-  else if (b_node.is_type("ShaderNodeLayerWeight")) {
+  else if (b_node.is_type("ShaderNodeLayerWeight"_ustr)) {
     node = graph->create_node<LayerWeightNode>();
   }
-  else if (b_node.is_type("ShaderNodeAddShader")) {
+  else if (b_node.is_type("ShaderNodeAddShader"_ustr)) {
     node = graph->create_node<AddClosureNode>();
   }
-  else if (b_node.is_type("ShaderNodeMixShader")) {
+  else if (b_node.is_type("ShaderNodeMixShader"_ustr)) {
     node = graph->create_node<MixClosureNode>();
   }
-  else if (b_node.is_type("ShaderNodeAttribute")) {
+  else if (b_node.is_type("ShaderNodeAttribute"_ustr)) {
     const auto &storage = *static_cast<blender::NodeShaderAttribute *>(b_node.storage);
     AttributeNode *attr = graph->create_node<AttributeNode>();
     attr->set_attribute(blender_attribute_name_add_type(storage.name, storage.type));
     node = attr;
   }
-  else if (b_node.is_type("ShaderNodeBackground")) {
+  else if (b_node.is_type("ShaderNodeBackground"_ustr)) {
     node = graph->create_node<BackgroundNode>();
   }
-  else if (b_node.is_type("ShaderNodeHoldout")) {
+  else if (b_node.is_type("ShaderNodeHoldout"_ustr)) {
     node = graph->create_node<HoldoutNode>();
   }
-  else if (b_node.is_type("ShaderNodeBsdfDiffuse")) {
+  else if (b_node.is_type("ShaderNodeBsdfDiffuse"_ustr)) {
     node = graph->create_node<DiffuseBsdfNode>();
   }
-  else if (b_node.is_type("ShaderNodeSubsurfaceScattering")) {
+  else if (b_node.is_type("ShaderNodeSubsurfaceScattering"_ustr)) {
     SubsurfaceScatteringNode *subsurface = graph->create_node<SubsurfaceScatteringNode>();
 
     switch (b_node.custom1) {
@@ -528,11 +610,14 @@ static ShaderNode *add_node(Scene *scene,
       case blender::SHD_SUBSURFACE_RANDOM_WALK_SKIN:
         subsurface->set_method(CLOSURE_BSSRDF_RANDOM_WALK_SKIN_ID);
         break;
+      case blender::SHD_SUBSURFACE_RANDOM_WALK_LEGACY:
+        subsurface->set_method(CLOSURE_BSSRDF_RANDOM_WALK_LEGACY_ID);
+        break;
     }
 
     node = subsurface;
   }
-  else if (b_node.is_type("ShaderNodeBsdfMetallic")) {
+  else if (b_node.is_type("ShaderNodeBsdfMetallic"_ustr)) {
     MetallicBsdfNode *metal = graph->create_node<MetallicBsdfNode>();
 
     switch (b_node.custom1) {
@@ -557,7 +642,7 @@ static ShaderNode *add_node(Scene *scene,
     }
     node = metal;
   }
-  else if (b_node.is_type("ShaderNodeBsdfAnisotropic")) {
+  else if (b_node.is_type("ShaderNodeBsdfAnisotropic"_ustr)) {
     GlossyBsdfNode *glossy = graph->create_node<GlossyBsdfNode>();
 
     switch (b_node.custom1) {
@@ -576,7 +661,7 @@ static ShaderNode *add_node(Scene *scene,
     }
     node = glossy;
   }
-  else if (b_node.is_type("ShaderNodeBsdfGlass")) {
+  else if (b_node.is_type("ShaderNodeBsdfGlass"_ustr)) {
     GlassBsdfNode *glass = graph->create_node<GlassBsdfNode>();
     switch (b_node.custom1) {
       case blender::SHD_GLOSSY_BECKMANN:
@@ -591,7 +676,7 @@ static ShaderNode *add_node(Scene *scene,
     }
     node = glass;
   }
-  else if (b_node.is_type("ShaderNodeBsdfRefraction")) {
+  else if (b_node.is_type("ShaderNodeBsdfRefraction"_ustr)) {
     RefractionBsdfNode *refraction = graph->create_node<RefractionBsdfNode>();
     switch (b_node.custom1) {
       case blender::SHD_GLOSSY_BECKMANN:
@@ -603,7 +688,7 @@ static ShaderNode *add_node(Scene *scene,
     }
     node = refraction;
   }
-  else if (b_node.is_type("ShaderNodeBsdfToon")) {
+  else if (b_node.is_type("ShaderNodeBsdfToon"_ustr)) {
     ToonBsdfNode *toon = graph->create_node<ToonBsdfNode>();
     switch (b_node.custom1) {
       case blender::SHD_TOON_DIFFUSE:
@@ -615,7 +700,7 @@ static ShaderNode *add_node(Scene *scene,
     }
     node = toon;
   }
-  else if (b_node.is_type("ShaderNodeBsdfHair")) {
+  else if (b_node.is_type("ShaderNodeBsdfHair"_ustr)) {
     HairBsdfNode *hair = graph->create_node<HairBsdfNode>();
     switch (b_node.custom1) {
       case blender::SHD_HAIR_REFLECTION:
@@ -627,7 +712,7 @@ static ShaderNode *add_node(Scene *scene,
     }
     node = hair;
   }
-  else if (b_node.is_type("ShaderNodeBsdfHairPrincipled")) {
+  else if (b_node.is_type("ShaderNodeBsdfHairPrincipled"_ustr)) {
     const auto &storage = *static_cast<blender::NodeShaderHairPrincipled *>(b_node.storage);
     PrincipledHairBsdfNode *principled_hair = graph->create_node<PrincipledHairBsdfNode>();
     principled_hair->set_model((NodePrincipledHairModel)validate_enum_value(
@@ -638,7 +723,7 @@ static ShaderNode *add_node(Scene *scene,
         NODE_PRINCIPLED_HAIR_REFLECTANCE));
     node = principled_hair;
   }
-  else if (b_node.is_type("ShaderNodeBsdfPrincipled")) {
+  else if (b_node.is_type("ShaderNodeBsdfPrincipled"_ustr)) {
     PrincipledBsdfNode *principled = graph->create_node<PrincipledBsdfNode>();
     switch (b_node.custom1) {
       case blender::SHD_GLOSSY_GGX:
@@ -658,19 +743,22 @@ static ShaderNode *add_node(Scene *scene,
       case blender::SHD_SUBSURFACE_RANDOM_WALK_SKIN:
         principled->set_subsurface_method(CLOSURE_BSSRDF_RANDOM_WALK_SKIN_ID);
         break;
+      case blender::SHD_SUBSURFACE_RANDOM_WALK_LEGACY:
+        principled->set_subsurface_method(CLOSURE_BSSRDF_RANDOM_WALK_LEGACY_ID);
+        break;
     }
     node = principled;
   }
-  else if (b_node.is_type("ShaderNodeBsdfTranslucent")) {
+  else if (b_node.is_type("ShaderNodeBsdfTranslucent"_ustr)) {
     node = graph->create_node<TranslucentBsdfNode>();
   }
-  else if (b_node.is_type("ShaderNodeBsdfTransparent")) {
+  else if (b_node.is_type("ShaderNodeBsdfTransparent"_ustr)) {
     node = graph->create_node<TransparentBsdfNode>();
   }
-  else if (b_node.is_type("ShaderNodeBsdfRayPortal")) {
+  else if (b_node.is_type("ShaderNodeBsdfRayPortal"_ustr)) {
     node = graph->create_node<RayPortalBsdfNode>();
   }
-  else if (b_node.is_type("ShaderNodeBsdfSheen")) {
+  else if (b_node.is_type("ShaderNodeBsdfSheen"_ustr)) {
     SheenBsdfNode *sheen = graph->create_node<SheenBsdfNode>();
     switch (b_node.custom1) {
       case SHD_SHEEN_ASHIKHMIN:
@@ -682,17 +770,17 @@ static ShaderNode *add_node(Scene *scene,
     }
     node = sheen;
   }
-  else if (b_node.is_type("ShaderNodeEmission")) {
+  else if (b_node.is_type("ShaderNodeEmission"_ustr)) {
     node = graph->create_node<EmissionNode>();
   }
-  else if (b_node.is_type("ShaderNodeAmbientOcclusion")) {
+  else if (b_node.is_type("ShaderNodeAmbientOcclusion"_ustr)) {
     AmbientOcclusionNode *ao = graph->create_node<AmbientOcclusionNode>();
     ao->set_samples(b_node.custom1);
     ao->set_inside(b_node.custom2 & blender::SHD_AO_INSIDE);
     ao->set_only_local(b_node.custom2 & blender::SHD_AO_LOCAL);
     node = ao;
   }
-  else if (b_node.is_type("ShaderNodeVolumeScatter")) {
+  else if (b_node.is_type("ShaderNodeVolumeScatter"_ustr)) {
     ScatterVolumeNode *scatter = graph->create_node<ScatterVolumeNode>();
     switch (b_node.custom1) {
       case blender::SHD_PHASE_HENYEY_GREENSTEIN:
@@ -713,10 +801,10 @@ static ShaderNode *add_node(Scene *scene,
     }
     node = scatter;
   }
-  else if (b_node.is_type("ShaderNodeVolumeAbsorption")) {
+  else if (b_node.is_type("ShaderNodeVolumeAbsorption"_ustr)) {
     node = graph->create_node<AbsorptionVolumeNode>();
   }
-  else if (b_node.is_type("ShaderNodeVolumeCoefficients")) {
+  else if (b_node.is_type("ShaderNodeVolumeCoefficients"_ustr)) {
     VolumeCoefficientsNode *coeffs = graph->create_node<VolumeCoefficientsNode>();
     switch (b_node.custom1) {
       case blender::SHD_PHASE_HENYEY_GREENSTEIN:
@@ -737,57 +825,57 @@ static ShaderNode *add_node(Scene *scene,
     }
     node = coeffs;
   }
-  else if (b_node.is_type("ShaderNodeVolumePrincipled")) {
+  else if (b_node.is_type("ShaderNodeVolumePrincipled"_ustr)) {
     PrincipledVolumeNode *principled = graph->create_node<PrincipledVolumeNode>();
     node = principled;
   }
-  else if (b_node.is_type("ShaderNodeNewGeometry")) {
+  else if (b_node.is_type("ShaderNodeNewGeometry"_ustr)) {
     node = graph->create_node<GeometryNode>();
   }
-  else if (b_node.is_type("ShaderNodeWireframe")) {
+  else if (b_node.is_type("ShaderNodeWireframe"_ustr)) {
     WireframeNode *wire = graph->create_node<WireframeNode>();
     wire->set_use_pixel_size(b_node.custom1);
     node = wire;
   }
-  else if (b_node.is_type("ShaderNodeWavelength")) {
+  else if (b_node.is_type("ShaderNodeWavelength"_ustr)) {
     node = graph->create_node<WavelengthNode>();
   }
-  else if (b_node.is_type("ShaderNodeBlackbody")) {
+  else if (b_node.is_type("ShaderNodeBlackbody"_ustr)) {
     node = graph->create_node<BlackbodyNode>();
   }
-  else if (b_node.is_type("ShaderNodeLightPath")) {
+  else if (b_node.is_type("ShaderNodeLightPath"_ustr)) {
     node = graph->create_node<LightPathNode>();
   }
-  else if (b_node.is_type("ShaderNodeLightFalloff")) {
+  else if (b_node.is_type("ShaderNodeLightFalloff"_ustr)) {
     node = graph->create_node<LightFalloffNode>();
   }
-  else if (b_node.is_type("ShaderNodeObjectInfo")) {
+  else if (b_node.is_type("ShaderNodeObjectInfo"_ustr)) {
     node = graph->create_node<ObjectInfoNode>();
   }
-  else if (b_node.is_type("ShaderNodeParticleInfo")) {
+  else if (b_node.is_type("ShaderNodeParticleInfo"_ustr)) {
     node = graph->create_node<ParticleInfoNode>();
   }
-  else if (b_node.is_type("ShaderNodeHairInfo")) {
+  else if (b_node.is_type("ShaderNodeHairInfo"_ustr)) {
     node = graph->create_node<HairInfoNode>();
   }
-  else if (b_node.is_type("ShaderNodePointInfo")) {
+  else if (b_node.is_type("ShaderNodePointInfo"_ustr)) {
     node = graph->create_node<PointInfoNode>();
   }
-  else if (b_node.is_type("ShaderNodeVolumeInfo")) {
+  else if (b_node.is_type("ShaderNodeVolumeInfo"_ustr)) {
     node = graph->create_node<VolumeInfoNode>();
   }
-  else if (b_node.is_type("ShaderNodeVertexColor")) {
+  else if (b_node.is_type("ShaderNodeVertexColor"_ustr)) {
     const auto &storage = *static_cast<blender::NodeShaderVertexColor *>(b_node.storage);
     VertexColorNode *vertex_color_node = graph->create_node<VertexColorNode>();
     vertex_color_node->set_layer_name(ustring(storage.layer_name));
     node = vertex_color_node;
   }
-  else if (b_node.is_type("ShaderNodeBump")) {
+  else if (b_node.is_type("ShaderNodeBump"_ustr)) {
     BumpNode *bump = graph->create_node<BumpNode>();
     bump->set_invert(b_node.custom1);
     node = bump;
   }
-  else if (b_node.is_type("ShaderNodeScript")) {
+  else if (b_node.is_type("ShaderNodeScript"_ustr)) {
 #ifdef WITH_OSL
     const auto &storage = *static_cast<blender::NodeShaderScript *>(b_node.storage);
     if (scene->shader_manager->use_osl()) {
@@ -797,7 +885,7 @@ static ShaderNode *add_node(Scene *scene,
       }
       else {
         const string absolute_filepath = blender_absolute_path(
-            b_data, b_ntree.id, storage.filepath);
+            b_data, &b_ntree.id, storage.filepath);
         node = OSLShaderManager::osl_node(graph, scene, absolute_filepath, "");
       }
     }
@@ -806,7 +894,7 @@ static ShaderNode *add_node(Scene *scene,
     (void)b_ntree;
 #endif
   }
-  else if (b_node.is_type("ShaderNodeTexImage")) {
+  else if (b_node.is_type("ShaderNodeTexImage"_ustr)) {
     const auto &storage = *static_cast<blender::NodeTexImage *>(b_node.storage);
     blender::Image *b_image = blender::id_cast<blender::Image *>(b_node.id);
     blender::ImageUser &b_image_user = const_cast<blender::ImageUser &>(storage.iuser);
@@ -822,9 +910,7 @@ static ShaderNode *add_node(Scene *scene,
     if (b_image) {
       const blender::eImageSource b_image_source = blender::eImageSource(b_image->source);
       blender::PointerRNA image_rna_ptr = RNA_id_pointer_create(&b_image->id);
-      blender::PointerRNA colorspace_ptr = RNA_pointer_get(&image_rna_ptr, "colorspace_settings");
-      image->set_colorspace(ustring(get_enum_identifier(colorspace_ptr, "name")));
-
+      image->set_colorspace(ustring(b_image->colorspace_settings.name));
       image->set_animated(is_image_animated(b_image_source, b_image_user));
       image->set_alpha_type(get_image_alpha_type(*b_image));
 
@@ -883,7 +969,7 @@ static ShaderNode *add_node(Scene *scene,
     }
     node = image;
   }
-  else if (b_node.is_type("ShaderNodeTexEnvironment")) {
+  else if (b_node.is_type("ShaderNodeTexEnvironment"_ustr)) {
     const auto &storage = *static_cast<blender::NodeTexEnvironment *>(b_node.storage);
     blender::Image *b_image = blender::id_cast<blender::Image *>(b_node.id);
     blender::ImageUser &b_image_user = const_cast<blender::ImageUser &>(storage.iuser);
@@ -897,8 +983,7 @@ static ShaderNode *add_node(Scene *scene,
     if (b_image) {
       const blender::eImageSource b_image_source = blender::eImageSource(b_image->source);
       blender::PointerRNA image_rna_ptr = RNA_id_pointer_create(&b_image->id);
-      blender::PointerRNA colorspace_ptr = RNA_pointer_get(&image_rna_ptr, "colorspace_settings");
-      env->set_colorspace(ustring(get_enum_identifier(colorspace_ptr, "name")));
+      env->set_colorspace(ustring(b_image->colorspace_settings.name));
       env->set_animated(is_image_animated(b_image_source, b_image_user));
       env->set_alpha_type(get_image_alpha_type(*b_image));
 
@@ -922,7 +1007,7 @@ static ShaderNode *add_node(Scene *scene,
     }
     node = env;
   }
-  else if (b_node.is_type("ShaderNodeTexGradient")) {
+  else if (b_node.is_type("ShaderNodeTexGradient"_ustr)) {
     const auto &storage = *static_cast<blender::NodeTexGradient *>(b_node.storage);
     GradientTextureNode *gradient = graph->create_node<GradientTextureNode>();
     gradient->set_gradient_type((NodeGradientType)storage.gradient_type);
@@ -930,7 +1015,7 @@ static ShaderNode *add_node(Scene *scene,
     get_tex_mapping(gradient, &b_texture_mapping);
     node = gradient;
   }
-  else if (b_node.is_type("ShaderNodeTexVoronoi")) {
+  else if (b_node.is_type("ShaderNodeTexVoronoi"_ustr)) {
     const auto &storage = *static_cast<blender::NodeTexVoronoi *>(b_node.storage);
     VoronoiTextureNode *voronoi = graph->create_node<VoronoiTextureNode>();
     voronoi->set_dimensions(storage.dimensions);
@@ -941,7 +1026,7 @@ static ShaderNode *add_node(Scene *scene,
     get_tex_mapping(voronoi, &b_texture_mapping);
     node = voronoi;
   }
-  else if (b_node.is_type("ShaderNodeTexMagic")) {
+  else if (b_node.is_type("ShaderNodeTexMagic"_ustr)) {
     const auto &storage = *static_cast<blender::NodeTexMagic *>(b_node.storage);
     MagicTextureNode *magic = graph->create_node<MagicTextureNode>();
     magic->set_depth(storage.depth);
@@ -949,7 +1034,7 @@ static ShaderNode *add_node(Scene *scene,
     get_tex_mapping(magic, &b_texture_mapping);
     node = magic;
   }
-  else if (b_node.is_type("ShaderNodeTexWave")) {
+  else if (b_node.is_type("ShaderNodeTexWave"_ustr)) {
     const auto &storage = *static_cast<blender::NodeTexWave *>(b_node.storage);
     WaveTextureNode *wave = graph->create_node<WaveTextureNode>();
     wave->set_wave_type((NodeWaveType)storage.wave_type);
@@ -960,14 +1045,14 @@ static ShaderNode *add_node(Scene *scene,
     get_tex_mapping(wave, &b_texture_mapping);
     node = wave;
   }
-  else if (b_node.is_type("ShaderNodeTexChecker")) {
+  else if (b_node.is_type("ShaderNodeTexChecker"_ustr)) {
     const auto &storage = *static_cast<blender::NodeTexChecker *>(b_node.storage);
     CheckerTextureNode *checker = graph->create_node<CheckerTextureNode>();
     const blender::TexMapping &b_texture_mapping = storage.base.tex_mapping;
     get_tex_mapping(checker, &b_texture_mapping);
     node = checker;
   }
-  else if (b_node.is_type("ShaderNodeTexBrick")) {
+  else if (b_node.is_type("ShaderNodeTexBrick"_ustr)) {
     const auto &storage = *static_cast<blender::NodeTexBrick *>(b_node.storage);
     BrickTextureNode *brick = graph->create_node<BrickTextureNode>();
     brick->set_offset(storage.offset);
@@ -978,7 +1063,7 @@ static ShaderNode *add_node(Scene *scene,
     get_tex_mapping(brick, &b_texture_mapping);
     node = brick;
   }
-  else if (b_node.is_type("ShaderNodeTexNoise")) {
+  else if (b_node.is_type("ShaderNodeTexNoise"_ustr)) {
     const auto &storage = *static_cast<blender::NodeTexNoise *>(b_node.storage);
     NoiseTextureNode *noise = graph->create_node<NoiseTextureNode>();
     noise->set_dimensions(storage.dimensions);
@@ -988,7 +1073,7 @@ static ShaderNode *add_node(Scene *scene,
     get_tex_mapping(noise, &b_texture_mapping);
     node = noise;
   }
-  else if (b_node.is_type("ShaderNodeTexGabor")) {
+  else if (b_node.is_type("ShaderNodeTexGabor"_ustr)) {
     const auto &storage = *static_cast<blender::NodeTexGabor *>(b_node.storage);
     GaborTextureNode *gabor = graph->create_node<GaborTextureNode>();
     gabor->set_type((NodeGaborType)storage.type);
@@ -996,7 +1081,7 @@ static ShaderNode *add_node(Scene *scene,
     get_tex_mapping(gabor, &b_texture_mapping);
     node = gabor;
   }
-  else if (b_node.is_type("ShaderNodeTexCoord")) {
+  else if (b_node.is_type("ShaderNodeTexCoord"_ustr)) {
     TextureCoordinateNode *tex_coord = graph->create_node<TextureCoordinateNode>();
     tex_coord->set_from_dupli(b_node.custom1);
     if (const blender::ID *b_object = b_node.id) {
@@ -1006,7 +1091,7 @@ static ShaderNode *add_node(Scene *scene,
     }
     node = tex_coord;
   }
-  else if (b_node.is_type("ShaderNodeTexSky")) {
+  else if (b_node.is_type("ShaderNodeTexSky"_ustr)) {
     const auto &storage = *static_cast<blender::NodeTexSky *>(b_node.storage);
     SkyTextureNode *sky = graph->create_node<SkyTextureNode>();
     sky->set_sky_type((NodeSkyType)storage.sky_model);
@@ -1027,29 +1112,26 @@ static ShaderNode *add_node(Scene *scene,
     get_tex_mapping(sky, &b_texture_mapping);
     node = sky;
   }
-  else if (b_node.is_type("ShaderNodeTexIES")) {
+  else if (b_node.is_type("ShaderNodeTexIES"_ustr)) {
     const auto &storage = *static_cast<blender::NodeShaderTexIES *>(b_node.storage);
     IESLightNode *ies = graph->create_node<IESLightNode>();
     switch (storage.mode) {
       case blender::NODE_IES_EXTERNAL:
-        ies->set_filename(ustring(blender_absolute_path(b_data, b_ntree.id, storage.filepath)));
+        ies->set_filename(ustring(blender_absolute_path(b_data, &b_ntree.id, storage.filepath)));
         break;
       case blender::NODE_IES_INTERNAL:
         ustring ies_content = ustring(get_text_datablock_content(b_node.id));
-        if (ies_content.empty()) {
-          ies_content = "\n";
-        }
         ies->set_ies(ies_content);
         break;
     }
     node = ies;
   }
-  else if (b_node.is_type("ShaderNodeTexWhiteNoise")) {
+  else if (b_node.is_type("ShaderNodeTexWhiteNoise"_ustr)) {
     WhiteNoiseTextureNode *white_noise_node = graph->create_node<WhiteNoiseTextureNode>();
     white_noise_node->set_dimensions(b_node.custom1);
     node = white_noise_node;
   }
-  else if (b_node.is_type("ShaderNodeNormalMap")) {
+  else if (b_node.is_type("ShaderNodeNormalMap"_ustr)) {
     const auto &storage = *static_cast<blender::NodeShaderNormalMap *>(b_node.storage);
     NormalMapNode *nmap = graph->create_node<NormalMapNode>();
     nmap->set_space(NodeNormalMapSpace(storage.space));
@@ -1058,13 +1140,13 @@ static ShaderNode *add_node(Scene *scene,
     nmap->set_base(NodeNormalMapBase(storage.base));
     node = nmap;
   }
-  else if (b_node.is_type("ShaderNodeRadialTiling")) {
+  else if (b_node.is_type("ShaderNodeRadialTiling"_ustr)) {
     const auto &storage = *static_cast<blender::NodeRadialTiling *>(b_node.storage);
     RadialTilingNode *radial_tiling = graph->create_node<RadialTilingNode>();
     radial_tiling->set_use_normalize(storage.normalize);
     node = radial_tiling;
   }
-  else if (b_node.is_type("ShaderNodeTangent")) {
+  else if (b_node.is_type("ShaderNodeTangent"_ustr)) {
     const auto &storage = *static_cast<blender::NodeShaderTangent *>(b_node.storage);
     TangentNode *tangent = graph->create_node<TangentNode>();
     tangent->set_direction_type((NodeTangentDirectionType)storage.direction_type);
@@ -1072,39 +1154,43 @@ static ShaderNode *add_node(Scene *scene,
     tangent->set_attribute(ustring(storage.uv_map));
     node = tangent;
   }
-  else if (b_node.is_type("ShaderNodeUVMap")) {
+  else if (b_node.is_type("ShaderNodeUVMap"_ustr)) {
     const auto &storage = *static_cast<blender::NodeShaderUVMap *>(b_node.storage);
     UVMapNode *uvm = graph->create_node<UVMapNode>();
     uvm->set_attribute(ustring(storage.uv_map));
     uvm->set_from_dupli(b_node.custom1);
     node = uvm;
   }
-  else if (b_node.is_type("ShaderNodeBevel")) {
+  else if (b_node.is_type("ShaderNodeBevel"_ustr)) {
     BevelNode *bevel = graph->create_node<BevelNode>();
     bevel->set_samples(b_node.custom1);
     node = bevel;
   }
-  else if (b_node.is_type("ShaderNodeDisplacement")) {
+  else if (b_node.is_type("ShaderNodeDisplacement"_ustr)) {
     DisplacementNode *disp = graph->create_node<DisplacementNode>();
     disp->set_space((NodeNormalMapSpace)b_node.custom1);
     node = disp;
   }
-  else if (b_node.is_type("ShaderNodeVectorDisplacement")) {
+  else if (b_node.is_type("ShaderNodeVectorDisplacement"_ustr)) {
     VectorDisplacementNode *disp = graph->create_node<VectorDisplacementNode>();
     disp->set_space((NodeNormalMapSpace)b_node.custom1);
     disp->set_attribute(ustring(""));
     node = disp;
   }
-  else if (b_node.is_type("ShaderNodeOutputAOV")) {
+  else if (b_node.is_type("ShaderNodeOutputAOV"_ustr)) {
     const auto &storage = *static_cast<blender::NodeShaderOutputAOV *>(b_node.storage);
     OutputAOVNode *aov = graph->create_node<OutputAOVNode>();
     aov->set_name(ustring(storage.name));
     node = aov;
   }
-  else if (b_node.is_type("ShaderNodeRaycast")) {
+  else if (b_node.is_type("ShaderNodeRaycast"_ustr)) {
     RaycastNode *raycast = graph->create_node<RaycastNode>();
     raycast->set_only_local(b_node.custom1);
+    raycast_add_output_attribute_sockets(raycast, b_node);
     node = raycast;
+  }
+  else if (b_node.is_type("GeometryNodeInputSceneTime"_ustr)) {
+    node = graph->create_node<SceneTimeNode>();
   }
 
   if (node) {
@@ -1127,6 +1213,7 @@ static ShaderInput *node_find_input_by_name(const blender::bNode &b_node,
                                             ShaderNode *node,
                                             blender::bNodeSocket &b_socket)
 {
+  using blender::operator""_ustr;
   string name = b_socket.identifier;
   ShaderInput *input = node->input(name.c_str());
 
@@ -1137,7 +1224,7 @@ static ShaderInput *node_find_input_by_name(const blender::bNode &b_node,
     }
 
     /* Map mix node internal name for shader. */
-    if (b_node.is_type("ShaderNodeMix")) {
+    if (b_node.is_type("ShaderNodeMix"_ustr)) {
       if (string_endswith(name, "Factor_Float")) {
         string_replace(name, "Factor_Float", "Factor");
       }
@@ -1197,6 +1284,7 @@ static ShaderOutput *node_find_output_by_name(blender::bNode &b_node,
                                               ShaderNode *node,
                                               blender::bNodeSocket &b_socket)
 {
+  using blender::operator""_ustr;
   string name = b_socket.identifier;
   ShaderOutput *output = node->output(name.c_str());
 
@@ -1207,7 +1295,7 @@ static ShaderOutput *node_find_output_by_name(blender::bNode &b_node,
       output = node->output(name.c_str());
     }
     /* Map internal name for shader. */
-    if (b_node.is_type("ShaderNodeMix")) {
+    if (b_node.is_type("ShaderNodeMix"_ustr)) {
       if (string_endswith(name, "Result_Float")) {
         string_replace(name, "Result_Float", "Result");
         output = node->output(name.c_str());
@@ -1218,6 +1306,14 @@ static ShaderOutput *node_find_output_by_name(blender::bNode &b_node,
       }
       else if (string_endswith(name, "Result_Vector")) {
         string_replace(name, "Result_Vector", "Result");
+        output = node->output(name.c_str());
+      }
+    }
+    else if (b_node.is_type("FunctionNodeInputVector"_ustr)) {
+      /* FunctionNodeInputVector has an output called "Vector", and it uses ColorNode Cycles node
+       * that has an output called "Color". */
+      if (name == "Vector") {
+        name = "Color";
         output = node->output(name.c_str());
       }
     }
@@ -1244,6 +1340,7 @@ static void add_nodes_inlined(Scene *scene,
                               const ProxyMap &proxy_input_map,
                               const ProxyMap &proxy_output_map)
 {
+  using blender::operator""_ustr;
   /* add nodes */
   PtrInputMap input_map;
   PtrOutputMap output_map;
@@ -1320,7 +1417,7 @@ static void add_nodes_inlined(Scene *scene,
                   group_proxy_output_map);
       }
     }
-    else if (b_node->is_type("NodeGroupInput")) {
+    else if (b_node->is_type("NodeGroupInput"_ustr)) {
       /* map each socket to a proxy node */
       for (blender::bNodeSocket *b_output : b_node->output_sockets()) {
         const ProxyMap::const_iterator proxy_it = proxy_input_map.find(b_output->identifier);
@@ -1331,7 +1428,7 @@ static void add_nodes_inlined(Scene *scene,
         }
       }
     }
-    else if (b_node->is_type("NodeGroupOutput")) {
+    else if (b_node->is_type("NodeGroupOutput"_ustr)) {
       /* only the active group output is used */
       if (b_node->flag & blender::NODE_DO_OUTPUT) {
         /* map each socket to a proxy node */
@@ -1568,12 +1665,35 @@ bool BlenderSync::scene_attr_needs_recalc(Shader *shader, blender::Depsgraph &b_
 
 /* Sync Materials */
 
-void BlenderSync::sync_materials(blender::Depsgraph &b_depsgraph, bool update_all)
+void BlenderSync::sync_materials(blender::Depsgraph &b_depsgraph,
+                                 bool update_all,
+                                 bool update_time)
 {
   shader_map.set_default(scene->default_surface);
 
   TaskPool pool;
   set<Shader *> updated_shaders;
+
+  /* When consecutive view layers to be rendered have different AOVs or if those AOVs are merely
+   * reordered, the AOV offsets in the shaders that have AOV output nodes must be updated via
+   * OutputAOVNode::simplify_settings() further down the line.
+   * This tracking ensures that the inputs of the AOV output nodes are connected when needed,
+   * disconnected when not, and that the offsets, which also depend on the data types, are correct.
+   * Storing the new AOV data must take place even if no shaders are affected so the new data
+   * is available as the old data when the next view layer is rendered, but the check could be
+   * deferred.
+   */
+  blender::Vector<std::pair<std::string, int>> new_shader_view_layer_aovs;
+  /* Store info on the new AOVs. */
+  blender::ViewLayer *const b_view_layer = DEG_get_evaluated_view_layer(&b_depsgraph);
+  for (blender::ViewLayerAOV &b_aov : b_view_layer->aovs) {
+    if ((b_aov.flag & blender::AOV_CONFLICT) != 0) {
+      continue;
+    }
+    new_shader_view_layer_aovs.append({b_aov.name, b_aov.type});
+  }
+  const bool aovs_changed_between_view_layers = new_shader_view_layer_aovs !=
+                                                shader_view_layer_aovs;
 
   blender::DEGIDIterData data{};
   data.graph = &b_depsgraph;
@@ -1593,7 +1713,8 @@ void BlenderSync::sync_materials(blender::Depsgraph &b_depsgraph, bool update_al
 
     /* test if we need to sync */
     if (shader_map.add_or_update(&shader, &b_mat.id) || update_all ||
-        scene_attr_needs_recalc(shader, b_depsgraph))
+        scene_attr_needs_recalc(shader, b_depsgraph) || aovs_changed_between_view_layers ||
+        (shader->has_time_dependency && update_time))
     {
       unique_ptr<ShaderGraph> graph = make_unique<ShaderGraph>();
 
@@ -1655,6 +1776,9 @@ void BlenderSync::sync_materials(blender::Depsgraph &b_depsgraph, bool update_al
 
   pool.wait_work();
 
+  /* Info on the new AOVs becomes info on the old AOVs. */
+  shader_view_layer_aovs = std::move(new_shader_view_layer_aovs);
+
   for (Shader *shader : updated_shaders) {
     shader->tag_update(scene);
   }
@@ -1665,7 +1789,8 @@ void BlenderSync::sync_materials(blender::Depsgraph &b_depsgraph, bool update_al
 void BlenderSync::sync_world(blender::Depsgraph &b_depsgraph,
                              blender::bScreen *b_screen,
                              blender::View3D *b_v3d,
-                             bool update_all)
+                             bool update_all,
+                             bool update_time)
 {
   Background *background = scene->background;
   Integrator *integrator = scene->integrator;
@@ -1680,7 +1805,7 @@ void BlenderSync::sync_world(blender::Depsgraph &b_depsgraph,
 
   if (world_recalc || update_all || b_world != world_map ||
       viewport_parameters.shader_modified(new_viewport_parameters) ||
-      scene_attr_needs_recalc(shader, b_depsgraph))
+      scene_attr_needs_recalc(shader, b_depsgraph) || (shader->has_time_dependency && update_time))
   {
     unique_ptr<ShaderGraph> graph = make_unique<ShaderGraph>();
 
@@ -1757,13 +1882,18 @@ void BlenderSync::sync_world(blender::Depsgraph &b_depsgraph,
     if (b_world) {
       blender::PointerRNA world_rna_ptr = RNA_id_pointer_create(&b_world->id);
       blender::PointerRNA cvisibility = RNA_pointer_get(&world_rna_ptr, "cycles_visibility");
-      uint visibility = 0;
+      PathRayVisibility visibility = PATH_RAY_VISIBILITY_NONE;
 
-      visibility |= get_boolean(cvisibility, "camera") ? PATH_RAY_CAMERA : PathRayFlag(0);
-      visibility |= get_boolean(cvisibility, "diffuse") ? PATH_RAY_DIFFUSE : PathRayFlag(0);
-      visibility |= get_boolean(cvisibility, "glossy") ? PATH_RAY_GLOSSY : PathRayFlag(0);
-      visibility |= get_boolean(cvisibility, "transmission") ? PATH_RAY_TRANSMIT : PathRayFlag(0);
-      visibility |= get_boolean(cvisibility, "scatter") ? PATH_RAY_VOLUME_SCATTER : PathRayFlag(0);
+      visibility |= get_boolean(cvisibility, "camera") ? PATH_RAY_VISIBILITY_CAMERA :
+                                                         PATH_RAY_VISIBILITY_NONE;
+      visibility |= get_boolean(cvisibility, "diffuse") ? PATH_RAY_VISIBILITY_DIFFUSE :
+                                                          PATH_RAY_VISIBILITY_NONE;
+      visibility |= get_boolean(cvisibility, "glossy") ? PATH_RAY_VISIBILITY_GLOSSY :
+                                                         PATH_RAY_VISIBILITY_NONE;
+      visibility |= get_boolean(cvisibility, "transmission") ? PATH_RAY_VISIBILITY_TRANSMIT :
+                                                               PATH_RAY_VISIBILITY_NONE;
+      visibility |= get_boolean(cvisibility, "scatter") ? PATH_RAY_VISIBILITY_VOLUME_SCATTER :
+                                                          PATH_RAY_VISIBILITY_NONE;
 
       background->set_visibility(visibility);
     }
@@ -1823,7 +1953,7 @@ void BlenderSync::sync_world(blender::Depsgraph &b_depsgraph,
 
 /* Sync Lights */
 
-void BlenderSync::sync_lights(blender::Depsgraph &b_depsgraph, bool update_all)
+void BlenderSync::sync_lights(blender::Depsgraph &b_depsgraph, bool update_all, bool update_time)
 {
   shader_map.set_default(scene->default_light);
 
@@ -1845,7 +1975,8 @@ void BlenderSync::sync_lights(blender::Depsgraph &b_depsgraph, bool update_all)
 
     /* test if we need to sync */
     if (shader_map.add_or_update(&shader, &b_light.id) || update_all ||
-        scene_attr_needs_recalc(shader, b_depsgraph))
+        scene_attr_needs_recalc(shader, b_depsgraph) ||
+        (shader->has_time_dependency && update_time))
     {
       unique_ptr<ShaderGraph> graph = make_unique<ShaderGraph>();
 
@@ -1876,13 +2007,14 @@ void BlenderSync::sync_lights(blender::Depsgraph &b_depsgraph, bool update_all)
 void BlenderSync::sync_shaders(blender::Depsgraph &b_depsgraph,
                                blender::bScreen *b_screen,
                                blender::View3D *b_v3d,
-                               bool update_all)
+                               bool update_all,
+                               bool update_time)
 {
   shader_map.pre_sync();
 
-  sync_world(b_depsgraph, b_screen, b_v3d, update_all);
-  sync_lights(b_depsgraph, update_all);
-  sync_materials(b_depsgraph, update_all);
+  sync_world(b_depsgraph, b_screen, b_v3d, update_all, update_time);
+  sync_lights(b_depsgraph, update_all, update_time);
+  sync_materials(b_depsgraph, update_all, update_time);
 }
 
 CCL_NAMESPACE_END

@@ -185,7 +185,7 @@ struct SculptCurvesBrushStroke final : public PaintStroke {
   void redraw(bool final) override;
   bool test_cancel() override;
   void update_step(wmOperator *op, PointerRNA *itemptr) override;
-  void done(bool is_cancel) override;
+  void done(bool is_cancel, bool stroke_started) override;
 
  private:
   std::unique_ptr<CurvesSculptStrokeOperation> operation_;
@@ -238,7 +238,7 @@ bool SculptCurvesBrushStroke::test_cancel()
   return false;
 }
 
-void SculptCurvesBrushStroke::done(const bool /*is_cancel*/) {}
+void SculptCurvesBrushStroke::done(const bool /*is_cancel*/, bool /*stroke_started*/) {}
 
 static wmOperatorStatus sculpt_curves_stroke_invoke(bContext *C,
                                                     wmOperator *op,
@@ -260,7 +260,7 @@ static wmOperatorStatus sculpt_curves_stroke_invoke(bContext *C,
 
   if (retval == OPERATOR_FINISHED) {
     if (op->customdata != nullptr) {
-      op_data->free(C, op);
+      op_data->finish(C);
       MEM_delete(op_data);
     }
     return OPERATOR_FINISHED;
@@ -287,7 +287,7 @@ static void sculpt_curves_stroke_cancel(bContext *C, wmOperator *op)
 {
   if (op->customdata != nullptr) {
     SculptCurvesBrushStroke *op_data = static_cast<SculptCurvesBrushStroke *>(op->customdata);
-    op_data->cancel(C, op);
+    op_data->cancel(C);
     MEM_delete(op_data);
   }
 }
@@ -578,23 +578,25 @@ static void update_points_selection(const GrowOperatorDataPerCurve &data,
 {
   if (distance > 0.0f) {
     data.unselected_points.foreach_index(
-        GrainSize(256), [&](const int point_i, const int index_pos) {
+        [&](const int point_i, const int index_pos) {
           const float distance_to_selected = data.distances_to_selected[index_pos];
           const float selection = distance_to_selected <= distance ? 1.0f : 0.0f;
           points_selection[point_i] = selection;
-        });
+        },
+        exec_mode::grain_size(256));
     data.selected_points.foreach_index(
-        GrainSize(512), [&](const int point_i) { points_selection[point_i] = 1.0f; });
+        [&](const int point_i) { points_selection[point_i] = 1.0f; }, exec_mode::grain_size(512));
   }
   else {
     data.selected_points.foreach_index(
-        GrainSize(256), [&](const int point_i, const int index_pos) {
+        [&](const int point_i, const int index_pos) {
           const float distance_to_unselected = data.distances_to_unselected[index_pos];
           const float selection = distance_to_unselected <= -distance ? 0.0f : 1.0f;
           points_selection[point_i] = selection;
-        });
+        },
+        exec_mode::grain_size(256));
     data.unselected_points.foreach_index(
-        GrainSize(512), [&](const int point_i) { points_selection[point_i] = 0.0f; });
+        [&](const int point_i) { points_selection[point_i] = 0.0f; }, exec_mode::grain_size(512));
   }
 }
 
@@ -671,13 +673,13 @@ static void select_grow_invoke_per_curve(const Curves &curves_id,
       1024 < curve_op_data.selected_points.size() + curve_op_data.unselected_points.size(),
       [&]() {
         /* Build KD-tree for the selected points. */
-        KDTree_3d *kdtree = kdtree_3d_new(curve_op_data.selected_points.size());
-        BLI_SCOPED_DEFER([&]() { kdtree_3d_free(kdtree); });
+        KDTree<float3> *kdtree = kdtree_new<float3>(curve_op_data.selected_points.size());
+        BLI_SCOPED_DEFER([&]() { kdtree_free<float3>(kdtree); });
         curve_op_data.selected_points.foreach_index([&](const int point_i) {
           const float3 &position = positions[point_i];
-          kdtree_3d_insert(kdtree, point_i, position);
+          kdtree_insert<float3>(kdtree, point_i, position);
         });
-        kdtree_3d_balance(kdtree);
+        kdtree_balance<float3>(kdtree);
 
         /* For each unselected point, compute the distance to the closest selected point. */
         curve_op_data.distances_to_selected.reinitialize(curve_op_data.unselected_points.size());
@@ -686,21 +688,21 @@ static void select_grow_invoke_per_curve(const Curves &curves_id,
               for (const int i : range) {
                 const int point_i = curve_op_data.unselected_points[i];
                 const float3 &position = positions[point_i];
-                KDTreeNearest_3d nearest;
-                kdtree_3d_find_nearest(kdtree, position, &nearest);
+                KDTreeNearest<float3> nearest;
+                kdtree_find_nearest<float3>(kdtree, position, &nearest);
                 curve_op_data.distances_to_selected[i] = nearest.dist;
               }
             });
       },
       [&]() {
         /* Build KD-tree for the unselected points. */
-        KDTree_3d *kdtree = kdtree_3d_new(curve_op_data.unselected_points.size());
-        BLI_SCOPED_DEFER([&]() { kdtree_3d_free(kdtree); });
+        KDTree<float3> *kdtree = kdtree_new<float3>(curve_op_data.unselected_points.size());
+        BLI_SCOPED_DEFER([&]() { kdtree_free<float3>(kdtree); });
         curve_op_data.unselected_points.foreach_index([&](const int point_i) {
           const float3 &position = positions[point_i];
-          kdtree_3d_insert(kdtree, point_i, position);
+          kdtree_insert<float3>(kdtree, point_i, position);
         });
-        kdtree_3d_balance(kdtree);
+        kdtree_balance<float3>(kdtree);
 
         /* For each selected point, compute the distance to the closest unselected point. */
         curve_op_data.distances_to_unselected.reinitialize(curve_op_data.selected_points.size());
@@ -709,8 +711,8 @@ static void select_grow_invoke_per_curve(const Curves &curves_id,
               for (const int i : range) {
                 const int point_i = curve_op_data.selected_points[i];
                 const float3 &position = positions[point_i];
-                KDTreeNearest_3d nearest;
-                kdtree_3d_find_nearest(kdtree, position, &nearest);
+                KDTreeNearest<float3> nearest;
+                kdtree_find_nearest<float3>(kdtree, position, &nearest);
                 curve_op_data.distances_to_unselected[i] = nearest.dist;
               }
             });
@@ -1116,7 +1118,7 @@ static wmOperatorStatus min_distance_edit_invoke(bContext *C, wmOperator *op, co
   /* Temporarily disable other paint cursors. */
   wmWindowManager *wm = CTX_wm_manager(C);
   op_data->orig_paintcursors = wm->runtime->paintcursors;
-  BLI_listbase_clear(&wm->runtime->paintcursors);
+  wm->runtime->paintcursors.clear_no_delete();
 
   /* Add minimum distance paint cursor. */
   op_data->cursor = WM_paint_cursor_activate(

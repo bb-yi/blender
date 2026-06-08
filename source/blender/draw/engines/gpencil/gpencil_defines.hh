@@ -2,12 +2,14 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#define GPENCIL_MATERIAL_BUFFER_LEN 256
+#pragma once
+
+#define GPENCIL_MATERIAL_BUFFER_LEN 255
 
 #define GPENCIL_LIGHT_BUFFER_LEN 128
 
 /* High bits are used to pass material ID to fragment shader. */
-#define GPENCIl_MATID_SHIFT 16u
+#define GPENCIL_MATID_SHIFT 19u
 
 /* Textures */
 #define GPENCIL_SCENE_DEPTH_TEX_SLOT 2

@@ -8,20 +8,19 @@ namespace blender::nodes::node_geo_input_index_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_output<decl::Int>("Index").field_source();
+  b.add_output<decl::Int>("Index"_ustr).structure_type(StructureType::Field);
 }
 
 static void node_geo_exec(GeoNodeExecParams params)
 {
-  Field<int> index_field{std::make_shared<fn::IndexFieldInput>()};
-  params.set_output("Index", std::move(index_field));
+  params.set_output("Index"_ustr, fn::IndexFieldInput::get_field());
 }
 
 static void node_register()
 {
   static bke::bNodeType ntype;
 
-  geo_node_type_base(&ntype, "GeometryNodeInputIndex", GEO_NODE_INPUT_INDEX);
+  geo_node_type_base(&ntype, "GeometryNodeInputIndex"_ustr, GEO_NODE_INPUT_INDEX);
   ntype.ui_name = "Index";
   ntype.ui_description =
       "Retrieve an integer value indicating the position of each element in the list, starting at "

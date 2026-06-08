@@ -65,12 +65,12 @@ ccl_device float bssrdf_dipole_compute_alpha_prime(const float rd, const float f
 
 ccl_device void bssrdf_setup_radius(ccl_private Bssrdf *bssrdf, const ClosureType type)
 {
-  if (type == CLOSURE_BSSRDF_BURLEY_ID || type == CLOSURE_BSSRDF_RANDOM_WALK_ID) {
-    /* Scale mean free path length so it gives similar looking result to older
-     * Cubic, Gaussian and Burley models. */
+
+  if (type == CLOSURE_BSSRDF_BURLEY_ID || type == CLOSURE_BSSRDF_RANDOM_WALK_LEGACY_ID) {
+    /* Scale mean free path length so that Burley and Random Walk Legacy look similar to before. */
     bssrdf->radius *= 0.25f * M_1_PI_F;
   }
-  else {
+  else if (type == CLOSURE_BSSRDF_RANDOM_WALK_SKIN_ID) {
     /* Adjust radius based on IOR and albedo. */
     const float inv_eta = 1.0f / bssrdf->ior;
     const float F_dr = inv_eta * (-1.440f * inv_eta + 0.710f) + 0.668f + 0.0636f * bssrdf->ior;
@@ -290,8 +290,14 @@ ccl_device int bssrdf_setup(ccl_private ShaderData *sd,
                             const uint32_t path_flag,
                             ClosureType type)
 {
-  /* Clamps protecting against bad/extreme and non physical values. */
-  bssrdf->anisotropy = clamp(bssrdf->anisotropy, 0.0f, 0.9f);
+  /* Clamp anisotropy to avoid delta function. */
+  if (type == CLOSURE_BSSRDF_RANDOM_WALK_ID) {
+    bssrdf->anisotropy = clamp(bssrdf->anisotropy, -0.99f, 0.99f);
+  }
+  else {
+    bssrdf->anisotropy = clamp(bssrdf->anisotropy, -0.99f, 0.9f);
+  }
+
   bssrdf->ior = clamp(bssrdf->ior, 1.01f, 3.8f);
 
   int flag = 0;
@@ -326,13 +332,7 @@ ccl_device int bssrdf_setup(ccl_private ShaderData *sd,
 
   if (bssrdf_channels < SPECTRUM_CHANNELS) {
     /* Add diffuse BSDF if any radius too small. */
-    ccl_private DiffuseBsdf *bsdf = (ccl_private DiffuseBsdf *)bsdf_alloc(
-        sd, sizeof(DiffuseBsdf), diffuse_weight);
-
-    if (bsdf) {
-      bsdf->N = bssrdf->N;
-      flag |= bsdf_diffuse_setup(bsdf);
-    }
+    bsdf_diffuse_setup(sd, bssrdf->N, diffuse_weight);
   }
 
   /* Setup BSSRDF if radius is large enough. */

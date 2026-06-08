@@ -19,9 +19,11 @@
 #include "DNA_pointcloud_types.h"
 
 #include "BLI_array_utils.hh"
-#include "BLI_color.hh"
+#include "BLI_color_types.hh"
 #include "BLI_math_vector_types.hh"
 #include "BLI_span.hh"
+
+#include "PRF_profile.hh"
 
 #include "BLT_translation.hh"
 
@@ -62,6 +64,8 @@ const CPPType &attribute_type_to_cpp_type(const AttrType type)
       return CPPType::get<math::Quaternion>();
     case AttrType::String:
       return CPPType::get<MStringProperty>();
+    case AttrType::Float4:
+      return CPPType::get<float4>();
   }
   BLI_assert_unreachable();
   return CPPType::get<bool>();
@@ -77,6 +81,9 @@ AttrType cpp_type_to_attribute_type(const CPPType &type)
   }
   if (type.is<float3>()) {
     return AttrType::Float3;
+  }
+  if (type.is<float4>()) {
+    return AttrType::Float4;
   }
   if (type.is<int>()) {
     return AttrType::Int32;
@@ -121,6 +128,8 @@ const CPPType *custom_data_type_to_cpp_type(const eCustomDataType type)
       return &CPPType::get<float2>();
     case CD_PROP_FLOAT3:
       return &CPPType::get<float3>();
+    case CD_PROP_FLOAT4:
+      return &CPPType::get<float4>();
     case CD_PROP_INT32:
       return &CPPType::get<int>();
     case CD_PROP_INT32_2D:
@@ -146,7 +155,7 @@ const CPPType *custom_data_type_to_cpp_type(const eCustomDataType type)
   }
 }
 
-eCustomDataType cpp_type_to_custom_data_type(const CPPType &type)
+std::optional<eCustomDataType> cpp_type_to_custom_data_type(const CPPType &type)
 {
   if (type.is<float>()) {
     return CD_PROP_FLOAT;
@@ -156,6 +165,9 @@ eCustomDataType cpp_type_to_custom_data_type(const CPPType &type)
   }
   if (type.is<float3>()) {
     return CD_PROP_FLOAT3;
+  }
+  if (type.is<float4>()) {
+    return CD_PROP_FLOAT4;
   }
   if (type.is<int>()) {
     return CD_PROP_INT32;
@@ -187,8 +199,7 @@ eCustomDataType cpp_type_to_custom_data_type(const CPPType &type)
   if (type.is<MStringProperty>()) {
     return CD_PROP_STRING;
   }
-  BLI_assert_unreachable();
-  return CD_PROP_FLOAT;
+  return std::nullopt;
 }
 
 const char *no_procedural_access_message = N_(
@@ -242,17 +253,19 @@ static int attribute_data_type_complexity(const AttrType data_type)
       return 6;
     case AttrType::Float3:
       return 7;
-    case AttrType::ColorByte:
+    case AttrType::Float4:
       return 8;
-    case AttrType::Quaternion:
+    case AttrType::ColorByte:
       return 9;
-    case AttrType::ColorFloat:
+    case AttrType::Quaternion:
       return 10;
-    case AttrType::Float4x4:
+    case AttrType::ColorFloat:
       return 11;
+    case AttrType::Float4x4:
+      return 12;
 #if 0 /* These attribute types are not supported yet. */
     case AttrType::String:
-      return 12;
+      return 13;
 #endif
     default:
       /* Only accept "generic" custom data types used by the attribute system. */
@@ -412,17 +425,30 @@ GAttributeReader AttributeAccessor::lookup_or_default(const StringRef name,
 
 Set<StringRefNull> AttributeAccessor::all_names() const
 {
-  Set<StringRefNull> ids;
-  this->foreach_attribute([&](const AttributeIter &iter) { ids.add(iter.name); });
-  return ids;
+  Set<StringRefNull> names;
+  this->foreach_attribute([&](const AttributeIter &iter) { names.add(iter.name); });
+  return names;
+}
+
+/** True if there are any anonymous attributes. */
+bool AttributeAccessor::has_anonymous() const
+{
+  bool found_anonymous = false;
+  this->foreach_attribute([&](const AttributeIter &iter) {
+    if (attribute_name_is_anonymous(iter.name)) {
+      found_anonymous = true;
+      iter.stop();
+    }
+  });
+  return found_anonymous;
 }
 
 void MutableAttributeAccessor::remove_anonymous()
 {
   Vector<std::string> anonymous_ids;
-  for (const StringRef id : this->all_names()) {
-    if (attribute_name_is_anonymous(id)) {
-      anonymous_ids.append(id);
+  for (const StringRef name : this->all_names()) {
+    if (attribute_name_is_anonymous(name)) {
+      anonymous_ids.append(name);
     }
   }
 
@@ -444,6 +470,7 @@ struct FinishCallChecker {
   {
     if (!this->finish_called) {
       std::cerr << "Forgot to call `finish()` for '" << this->name << "'.\n";
+      BLI_assert_unreachable();
     }
   }
 };
@@ -521,38 +548,19 @@ GSpanAttributeWriter MutableAttributeAccessor::lookup_or_add_for_write_only_span
   return {};
 }
 
-bool MutableAttributeAccessor::rename(const StringRef old_name, const StringRef new_name)
+bool MutableAttributeAccessor::rename(const StringRef old_name,
+                                      const StringRef new_name,
+                                      const bool overwrite)
 {
-  if (old_name == new_name) {
-    return true;
-  }
-  if (this->contains(new_name)) {
-    return false;
-  }
-  const GAttributeReader old_attribute = this->lookup(old_name);
-  if (!old_attribute) {
-    return false;
-  }
-  const AttrType type = cpp_type_to_attribute_type(old_attribute.varray.type());
-  if (old_attribute.sharing_info != nullptr && old_attribute.varray.is_span()) {
-    if (!this->add(new_name,
-                   old_attribute.domain,
-                   type,
-                   AttributeInitShared{old_attribute.varray.get_internal_span().data(),
-                                       *old_attribute.sharing_info}))
-    {
-      return false;
-    }
-  }
-  else {
-    if (!this->add(
-            new_name, old_attribute.domain, type, AttributeInitVArray{old_attribute.varray}))
-    {
-      return false;
-    }
-  }
-  this->remove(old_name);
-  return true;
+  Map<StringRef, StringRef> map;
+  map.add_new(old_name, new_name);
+  return fn_->rename(owner_, map, overwrite).is_empty();
+}
+
+Set<StringRef> MutableAttributeAccessor::rename(const Map<StringRef, StringRef> &map,
+                                                const bool overwrite)
+{
+  return fn_->rename(owner_, map, overwrite);
 }
 
 fn::GField AttributeValidator::validate_field_if_necessary(const fn::GField &field) const
@@ -623,6 +631,7 @@ void gather_attributes(const AttributeAccessor src_attributes,
                        const IndexMask &selection,
                        MutableAttributeAccessor dst_attributes)
 {
+  PRF_scope(ProfileCategory::Default);
   const int src_size = src_attributes.domain_size(src_domain);
   src_attributes.foreach_attribute([&](const AttributeIter &iter) {
     if (iter.domain != src_domain) {
@@ -663,6 +672,7 @@ void gather_attributes(const AttributeAccessor src_attributes,
                        const Span<int> indices,
                        MutableAttributeAccessor dst_attributes)
 {
+  PRF_scope(ProfileCategory::Default);
   if (array_utils::indices_are_range(indices, IndexRange(src_attributes.domain_size(src_domain))))
   {
     copy_attributes(src_attributes, src_domain, dst_domain, attribute_filter, dst_attributes);
@@ -704,6 +714,7 @@ void gather_attributes_group_to_group(const AttributeAccessor src_attributes,
                                       const IndexMask &selection,
                                       MutableAttributeAccessor dst_attributes)
 {
+  PRF_scope(ProfileCategory::Default);
   if (selection.size() == src_offsets.size()) {
     if (src_attributes.domain_size(src_domain) == dst_attributes.domain_size(src_domain)) {
       /* When all groups are selected and the domains are the same size, all values are copied,
@@ -746,6 +757,7 @@ void gather_attributes_to_groups(const AttributeAccessor src_attributes,
                                  const IndexMask &src_selection,
                                  MutableAttributeAccessor dst_attributes)
 {
+  PRF_scope(ProfileCategory::Default);
   src_attributes.foreach_attribute([&](const AttributeIter &iter) {
     if (iter.domain != src_domain) {
       return;
@@ -778,6 +790,7 @@ void copy_attributes(const AttributeAccessor src_attributes,
                      const AttributeFilter &attribute_filter,
                      MutableAttributeAccessor dst_attributes)
 {
+  PRF_scope(ProfileCategory::Default);
   BLI_assert(src_attributes.domain_size(src_domain) == dst_attributes.domain_size(dst_domain));
   gather_attributes(src_attributes,
                     src_domain,
@@ -808,6 +821,7 @@ void copy_attributes_group_to_group(const AttributeAccessor src_attributes,
                                     const IndexMask &selection,
                                     MutableAttributeAccessor dst_attributes)
 {
+  PRF_scope(ProfileCategory::Default);
   if (selection.is_empty()) {
     return;
   }
@@ -852,6 +866,7 @@ void fill_attribute_range_default(MutableAttributeAccessor attributes,
                                   const AttributeFilter &attribute_filter,
                                   const IndexRange range)
 {
+  PRF_scope(ProfileCategory::Default);
   /* While it is valid to call this function for any valid range which can be placed in target
    * domain, it is computationally costly to perform this loop. This check is COW elision and not
    * just loop skip. */
@@ -888,6 +903,7 @@ void fill_attribute_range_default(MutableAttributeAccessor attributes,
 void transform_custom_normal_attribute(const float4x4 &transform,
                                        MutableAttributeAccessor &attributes)
 {
+  PRF_scope(ProfileCategory::Default);
   const GAttributeReader normals = attributes.lookup("custom_normal");
   if (!normals) {
     return;

@@ -14,10 +14,10 @@ namespace nodes::node_shader_squeeze_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Float>("Value").default_value(0.0f).min(-100.0f).max(100.0f);
-  b.add_input<decl::Float>("Width").default_value(1.0f).min(-100.0f).max(100.0f);
-  b.add_input<decl::Float>("Center").default_value(0.0f).min(-100.0f).max(100.0f);
-  b.add_output<decl::Float>("Value");
+  b.add_input<decl::Float>("Value"_ustr).default_value(0.0f).min(-100.0f).max(100.0f);
+  b.add_input<decl::Float>("Width"_ustr).default_value(1.0f).min(-100.0f).max(100.0f);
+  b.add_input<decl::Float>("Center"_ustr).default_value(0.0f).min(-100.0f).max(100.0f);
+  b.add_output<decl::Float>("Value"_ustr);
 }
 
 static int gpu_shader_squeeze(GPUMaterial *mat,
@@ -37,7 +37,7 @@ void register_node_type_sh_squeeze()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeSqueeze", SH_NODE_SQUEEZE);
+  sh_node_type_base(&ntype, "ShaderNodeSqueeze"_ustr, SH_NODE_SQUEEZE);
   ntype.ui_name = "Squeeze Value (Legacy)";
   ntype.ui_description = "Deprecated";
   ntype.enum_name_legacy = "SQUEEZE";

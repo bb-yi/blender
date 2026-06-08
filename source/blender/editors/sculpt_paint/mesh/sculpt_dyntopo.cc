@@ -172,7 +172,7 @@ void disable_with_undo(Main &bmain, Depsgraph &depsgraph, Scene &scene, Object &
     }
     disable(bmain, depsgraph, scene, ob, nullptr);
     if (use_undo) {
-      undo::push_end(ob);
+      undo::push_end_ex(ob, true);
     }
   }
 }
@@ -189,7 +189,7 @@ static void enable_with_undo(Main &bmain, Depsgraph &depsgraph, const Scene &sce
     enable_ex(bmain, depsgraph, ob);
     if (use_undo) {
       undo::push_node(depsgraph, ob, nullptr, undo::Type::DyntopoBegin);
-      undo::push_end(ob);
+      undo::push_end_ex(ob, true);
     }
   }
 }
@@ -248,7 +248,7 @@ WarnFlag check_attribute_warning(Scene &scene, Object &ob)
 
     /* Exception for shape keys because we can edit those. */
     for (; md; md = md->next) {
-      const ModifierTypeInfo *mti = BKE_modifier_get_info(ModifierType(md->type));
+      const ModifierTypeInfo *mti = BKE_modifier_get_info(md->type);
       if (!BKE_modifier_is_enabled(&scene, md, eModifierMode_Realtime)) {
         continue;
       }
@@ -275,14 +275,9 @@ static wmOperatorStatus sculpt_dynamic_topology_toggle_invoke(bContext *C,
     const WarnFlag flag = check_attribute_warning(scene, ob);
 
     if (flag & ATTRIBUTES) {
-      return WM_operator_confirm_ex(
-          C,
-          op,
-          RPT_("Attribute Data Detected"),
-          RPT_("Dyntopo will not preserve colors, UVs, or other attributes"),
-          IFACE_("Enable"),
-          ui::AlertIcon::Warning,
-          false);
+      BKE_report(op->reports,
+                 RPT_WARNING,
+                 "Dyntopo will not preserve face sets, colors, UVs, or other attributes");
     }
 
     if (flag & MODIFIER) {
@@ -310,9 +305,9 @@ void SCULPT_OT_dynamic_topology_toggle(wmOperatorType *ot)
   /* API callbacks. */
   ot->invoke = sculpt_dynamic_topology_toggle_invoke;
   ot->exec = sculpt_dynamic_topology_toggle_exec;
-  ot->poll = SCULPT_mode_poll;
+  ot->poll = sculpt_mode_poll;
 
-  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+  ot->flag = OPTYPE_REGISTER;
 }
 
 }  // namespace blender::ed::sculpt_paint::dyntopo

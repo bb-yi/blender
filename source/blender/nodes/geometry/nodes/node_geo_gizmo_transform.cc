@@ -15,13 +15,13 @@ NODE_STORAGE_FUNCS(NodeGeometryTransformGizmo)
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Matrix>("Value").multi_input();
-  b.add_input<decl::Vector>("Position").subtype(PROP_TRANSLATION);
-  b.add_input<decl::Rotation>("Rotation")
+  b.add_input<decl::Matrix>("Value"_ustr).multi_input();
+  b.add_input<decl::Vector>("Position"_ustr).subtype(PROP_TRANSLATION);
+  b.add_input<decl::Rotation>("Rotation"_ustr)
       .description(
           "Local rotation of the gizmo. Only used if the local transforms are used in the 3D "
           "view");
-  b.add_output<decl::Geometry>("Transform");
+  b.add_output<decl::Geometry>("Transform"_ustr);
 }
 
 static void node_init(bNodeTree * /*tree*/, bNode *node)
@@ -65,7 +65,7 @@ static void node_layout_ex(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr
 static void node_register()
 {
   static bke::bNodeType ntype;
-  geo_node_type_base(&ntype, "GeometryNodeGizmoTransform", GEO_NODE_GIZMO_TRANSFORM);
+  geo_node_type_base(&ntype, "GeometryNodeGizmoTransform"_ustr, GEO_NODE_GIZMO_TRANSFORM);
   ntype.ui_name = "Transform Gizmo";
   ntype.ui_description = "Show a transform gizmo in the viewport";
   ntype.enum_name_legacy = "GIZMO_TRANSFORM";

@@ -8,10 +8,6 @@
  * Interactive editmesh knife tool.
  */
 
-#ifdef _MSC_VER
-#  define _USE_MATH_DEFINES
-#endif
-
 #include <fmt/format.h>
 
 #include "MEM_guardedalloc.h"
@@ -458,7 +454,7 @@ static void knifetool_draw_visible_distances(const KnifeTool_OpData *kcd)
   }
   else {
     BKE_unit_value_as_string_scaled(
-        numstr, sizeof(numstr), cut_len, distance_precision, B_UNIT_LENGTH, unit, false);
+        numstr, sizeof(numstr), cut_len, distance_precision, B_UNIT_LENGTH, unit, false, true);
   }
 
   BLF_enable(blf_mono_font, BLF_ROTATION);
@@ -539,7 +535,7 @@ static void knifetool_draw_angle(const KnifeTool_OpData *kcd,
     const float px_scale =
         3.0f * inverse_average_scale *
         (ED_view3d_pixel_size_no_ui_scale(rv3d, mid) *
-         min_fff(arc_size, len_v2v2(start_ss, mid_ss) / 2.0f, len_v2v2(end_ss, mid_ss) / 2.0f));
+         std::min({arc_size, len_v2v2(start_ss, mid_ss) / 2.0f, len_v2v2(end_ss, mid_ss) / 2.0f}));
 
     sub_v3_v3v3(dir_a, start, mid);
     sub_v3_v3v3(dir_b, end, mid);
@@ -587,8 +583,14 @@ static void knifetool_draw_angle(const KnifeTool_OpData *kcd,
     SNPRINTF_UTF8(numstr, "%.*f" BLI_STR_UTF8_DEGREE_SIGN, angle_precision, RAD2DEGF(angle));
   }
   else {
-    BKE_unit_value_as_string(
-        numstr, sizeof(numstr), double(angle), angle_precision, B_UNIT_ROTATION, unit, false);
+    BKE_unit_value_as_string(numstr,
+                             sizeof(numstr),
+                             double(angle),
+                             angle_precision,
+                             B_UNIT_ROTATION,
+                             unit,
+                             false,
+                             true);
   }
 
   BLF_enable(blf_mono_font, BLF_ROTATION);
@@ -1512,7 +1514,7 @@ static BMElem *bm_elem_from_knife_vert(KnifeVert *kfv, KnifeEdge **r_kfe)
 
   /* face? */
   if (ele_test == nullptr) {
-    if (BLI_listbase_is_single(&kfe->faces)) {
+    if (kfe->faces.is_single()) {
       ele_test = static_cast<BMElem *>((static_cast<LinkData *>(kfe->faces.first))->data);
     }
   }
@@ -1545,7 +1547,7 @@ static ListBaseT<LinkData> *knife_empty_list(KnifeTool_OpData *kcd)
 
   list = static_cast<ListBaseT<LinkData> *>(
       BLI_memarena_alloc(kcd->arena, sizeof(ListBaseT<LinkData>)));
-  BLI_listbase_clear(list);
+  list->clear_no_delete();
   return list;
 }
 
@@ -2071,7 +2073,7 @@ static void knife_make_face_cuts(KnifeTool_OpData *kcd,
                                  ListBaseT<LinkData> *kfedges)
 {
   KnifeEdge *kfe;
-  int edge_array_len = BLI_listbase_count(kfedges);
+  int edge_array_len = kfedges->count();
   int i;
 
   blender::Array<BMEdge *, BM_DEFAULT_TOPOLOGY_STACK_SIZE> edge_array_buf(edge_array_len);
@@ -2429,7 +2431,7 @@ static int get_lowest_face_tri(KnifeTool_OpData *kcd, BMFace *f)
  * Find intersection of v1-v2 with face f.
  * Only take intersections that are at least \a face_tol_sq (in screen space) away
  * from other intersection elements.
- * If v1-v2 is coplanar with f, call that "no intersection though
+ * If v1-v2 is coplanar with f, call that "no intersection" though
  * it really means "infinite number of intersections".
  * In such a case we should have gotten hits on edges or verts of the face.
  */
@@ -2999,9 +3001,13 @@ static void knife_find_line_hits(KnifeTool_OpData *kcd)
     }
   }
 
-  /* Now face hits; don't add if a vertex or edge in face should have hit. */
-  const bool use_hit_prev = (kcd->prev.vert == nullptr) && (kcd->prev.edge == nullptr);
-  const bool use_hit_curr = (kcd->curr.vert == nullptr) && (kcd->curr.edge == nullptr) &&
+  /* Now face hits; don't add if a vertex or edge in face should have hit, except
+   * in the case where cut through is enabled since skipping face hits at vertex or edge
+   * cuts would result in incomplete cuts. See #158104. */
+  const bool use_hit_prev = (kcd->prev.vert == nullptr && kcd->prev.edge == nullptr) ||
+                            kcd->cut_through;
+  const bool use_hit_curr = ((kcd->curr.vert == nullptr && kcd->curr.edge == nullptr) ||
+                             kcd->cut_through) &&
                             !kcd->is_drag_hold;
   if (use_hit_prev || use_hit_curr) {
     float3 v3, v4;
@@ -3432,8 +3438,8 @@ static bool knife_snap_angle_screen(const KnifeTool_OpData *kcd,
                                     float3 &r_cage,
                                     float &r_angle)
 {
-  const float3 &vec_x = kcd->vc.rv3d->viewinv[0];
-  const float3 &vec_z = kcd->vc.rv3d->viewinv[2];
+  const float3 vec_x = kcd->vc.rv3d->viewinv[0];
+  const float3 vec_z = kcd->vc.rv3d->viewinv[2];
   return knife_snap_angle_impl(kcd, vec_x, vec_z, ray_orig, ray_dir, r_cage, r_angle);
 }
 
@@ -3600,8 +3606,16 @@ static void knife_constrain_axis(const KnifeTool_OpData *kcd,
                                                        kcd->constrain_axis_mode - 1;
     const int pivot_point = scene->toolsettings->transform_pivot_point;
     float mat[3][3];
-    ed::transform::calc_orientation_from_type_ex(
-        scene, view_layer, kcd->vc.v3d, rv3d, obedit, obedit, orientation_type, pivot_point, mat);
+    ed::transform::calc_orientation_from_type_ex(*kcd->vc.bmain,
+                                                 scene,
+                                                 view_layer,
+                                                 kcd->vc.v3d,
+                                                 rv3d,
+                                                 obedit,
+                                                 obedit,
+                                                 orientation_type,
+                                                 pivot_point,
+                                                 mat);
 
     constrain_dir = mat[kcd->constrain_axis - 1];
   }
@@ -4578,17 +4592,17 @@ static wmOperatorStatus knifetool_invoke(bContext *C, wmOperator *op, const wmEv
   /* alloc new customdata */
   KnifeTool_OpData *kcd = MEM_new<KnifeTool_OpData>(__func__);
   op->customdata = kcd;
-  knifetool_init(
-      &vc,
-      kcd,
-      BKE_view_layer_array_from_objects_in_edit_mode_unique_data(vc.scene, vc.view_layer, vc.v3d),
-      only_select,
-      cut_through,
-      xray,
-      visible_measurements,
-      angle_snapping,
-      angle_snapping_increment,
-      true);
+  knifetool_init(&vc,
+                 kcd,
+                 BKE_view_layer_array_from_objects_in_edit_mode_unique_data(
+                     *vc.bmain, vc.scene, vc.view_layer, vc.v3d),
+                 only_select,
+                 cut_through,
+                 xray,
+                 visible_measurements,
+                 angle_snapping,
+                 angle_snapping_increment,
+                 true);
 
   if (only_select) {
     bool faces_selected = false;
@@ -4904,7 +4918,7 @@ void EDBM_mesh_knife(
 
     for (Object *ob : kcd->objects) {
       /* Defer freeing data until the BVH tree is finished with, see: #point_is_visible and
-       * the doc-string for #knifetool_finish_single_post. */
+       * the docstring for #knifetool_finish_single_post. */
       knifetool_finish_single_post(kcd, ob);
     }
 

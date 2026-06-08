@@ -22,13 +22,20 @@ NODE_STORAGE_FUNCS(NodeGeometryImageTexture)
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Image>("Image").optional_label();
-  b.add_input<decl::Vector>("Vector")
-      .implicit_field(NODE_DEFAULT_INPUT_POSITION_FIELD)
+  b.add_input<decl::Image>("Image"_ustr).optional_label();
+  b.add_input<decl::Vector>("Vector"_ustr)
+      .structure_type(StructureType::Dynamic)
+      .default_input_type(NODE_DEFAULT_INPUT_POSITION_FIELD)
       .description("Texture coordinates from 0 to 1");
-  b.add_input<decl::Int>("Frame").min(0).max(MAXFRAMEF);
-  b.add_output<decl::Color>("Color").no_muted_links().dependent_field().reference_pass_all();
-  b.add_output<decl::Float>("Alpha").no_muted_links().dependent_field().reference_pass_all();
+  b.add_input<decl::Int>("Frame"_ustr).min(0).max(MAXFRAMEF);
+  b.add_output<decl::Color>("Color"_ustr)
+      .no_muted_links()
+      .inferred_structure_type()
+      .propagate_references();
+  b.add_output<decl::Float>("Alpha"_ustr)
+      .no_muted_links()
+      .inferred_structure_type()
+      .propagate_references();
 }
 
 static void node_layout(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
@@ -79,16 +86,16 @@ class ImageFieldsFunction : public mf::MultiFunction {
       throw std::runtime_error("cannot acquire image buffer");
     }
 
-    if (image_buffer_->float_buffer.data == nullptr) {
+    if (image_buffer_->float_data() == nullptr) {
       BLI_thread_lock(LOCK_IMAGE);
       /* Isolate because we are holding a lock. */
-      if (!image_buffer_->float_buffer.data) {
+      if (!image_buffer_->float_data()) {
         threading::isolate_task([&]() { IMB_float_from_byte(image_buffer_); });
       }
       BLI_thread_unlock(LOCK_IMAGE);
     }
 
-    if (image_buffer_->float_buffer.data == nullptr) {
+    if (image_buffer_->float_data() == nullptr) {
       BKE_image_release_ibuf(&image_, image_buffer_, image_lock_);
       throw std::runtime_error("cannot get float buffer");
     }
@@ -127,7 +134,7 @@ class ImageFieldsFunction : public mf::MultiFunction {
     if (px < 0 || py < 0 || px >= ibuf.x || py >= ibuf.y) {
       return float4(0.0f, 0.0f, 0.0f, 0.0f);
     }
-    return ((const float4 *)ibuf.float_buffer.data)[size_t(px) + size_t(py) * size_t(ibuf.x)];
+    return ((const float4 *)ibuf.float_data())[size_t(px) + size_t(py) * size_t(ibuf.x)];
   }
 
   static float frac(const float x, int *ix)
@@ -383,7 +390,7 @@ class ImageFieldsFunction : public mf::MultiFunction {
 
 static void node_geo_exec(GeoNodeExecParams params)
 {
-  Image *image = params.extract_input<Image *>("Image");
+  Image *image = params.extract_input<Image *>("Image"_ustr);
   if (image == nullptr) {
     params.set_default_remaining_outputs();
     return;
@@ -396,7 +403,7 @@ static void node_geo_exec(GeoNodeExecParams params)
   image_user.cycl = false;
   image_user.frames = INT_MAX;
   image_user.sfra = 1;
-  image_user.framenr = BKE_image_is_animated(image) ? params.extract_input<int>("Frame") : 0;
+  image_user.framenr = BKE_image_is_animated(image) ? params.extract_input<int>("Frame"_ustr) : 0;
 
   std::unique_ptr<ImageFieldsFunction> image_fn;
   try {
@@ -408,7 +415,7 @@ static void node_geo_exec(GeoNodeExecParams params)
     return;
   }
 
-  auto sample_uv = params.extract_input<bke::SocketValueVariant>("Vector");
+  auto sample_uv = params.extract_input<bke::SocketValueVariant>("Vector"_ustr);
 
   std::string error_message;
   bke::SocketValueVariant color;
@@ -421,15 +428,15 @@ static void node_geo_exec(GeoNodeExecParams params)
     return;
   }
 
-  params.set_output("Color", std::move(color));
-  params.set_output("Alpha", std::move(alpha));
+  params.set_output("Color"_ustr, std::move(color));
+  params.set_output("Alpha"_ustr, std::move(alpha));
 }
 
 static void node_register()
 {
   static bke::bNodeType ntype;
 
-  geo_node_type_base(&ntype, "GeometryNodeImageTexture", GEO_NODE_IMAGE_TEXTURE);
+  geo_node_type_base(&ntype, "GeometryNodeImageTexture"_ustr, GEO_NODE_IMAGE_TEXTURE);
   ntype.ui_name = "Image Texture";
   ntype.ui_description = "Sample values from an image texture";
   ntype.enum_name_legacy = "IMAGE_TEXTURE";
@@ -439,7 +446,7 @@ static void node_register()
   ntype.initfunc = node_init;
   bke::node_type_storage(
       ntype, "NodeGeometryImageTexture", node_free_standard_storage, node_copy_standard_storage);
-  bke::node_type_size_preset(ntype, bke::eNodeSizePreset::Large);
+  ntype.default_width = bke::NodeWidth::_240;
   ntype.geometry_node_execute = node_geo_exec;
 
   bke::node_register_type(ntype);

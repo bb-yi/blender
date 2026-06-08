@@ -77,6 +77,11 @@ void ED_operatortypes_render()
   WM_operatortype_append(TEXTURE_OT_slot_paste);
   WM_operatortype_append(TEXTURE_OT_slot_move);
 
+#ifdef WITH_CYCLES
+  WM_operatortype_append(RENDER_OT_generate_texture_cache);
+  WM_operatortype_append(RENDER_OT_clear_texture_cache);
+#endif
+
   /* `render_internal.cc` */
   WM_operatortype_append(RENDER_OT_view_show);
   WM_operatortype_append(RENDER_OT_render);

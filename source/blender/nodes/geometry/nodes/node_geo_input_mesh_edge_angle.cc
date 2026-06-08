@@ -14,14 +14,14 @@ namespace blender::nodes::node_geo_input_mesh_edge_angle_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_output<decl::Float>("Unsigned Angle")
-      .field_source()
+  b.add_output<decl::Float>("Unsigned Angle"_ustr)
+      .structure_type(StructureType::Field)
       .description(
           "The shortest angle in radians between two faces where they meet at an edge. Flat edges "
           "and Non-manifold edges have an angle of zero. Computing this value is faster than the "
           "signed angle");
-  b.add_output<decl::Float>("Signed Angle")
-      .field_source()
+  b.add_output<decl::Float>("Signed Angle"_ustr)
+      .structure_type(StructureType::Field)
       .description(
           "The signed angle in radians between two faces where they meet at an edge. Flat edges "
           "and Non-manifold edges have an angle of zero. Concave angles are positive and convex "
@@ -53,10 +53,7 @@ static Array<int2> create_edge_map(const OffsetIndices<int> faces,
 
 class AngleFieldInput final : public bke::MeshFieldInput {
  public:
-  AngleFieldInput() : bke::MeshFieldInput(CPPType::get<float>(), "Unsigned Angle Field")
-  {
-    category_ = Category::Generated;
-  }
+  AngleFieldInput() : bke::MeshFieldInput(CPPType::get<float>(), "Unsigned Angle Field") {}
 
   GVArray get_varray_for_context(const Mesh &mesh,
                                  const AttrDomain domain,
@@ -84,15 +81,10 @@ class AngleFieldInput final : public bke::MeshFieldInput {
     return mesh.attributes().adapt_domain<float>(std::move(angles), AttrDomain::Edge, domain);
   }
 
-  uint64_t hash() const override
+  void hash_unique(UniqueHashBytes &hash, fn::FieldHashDeep & /*deep_hash_cache*/) const override
   {
-    /* Some random constant hash. */
-    return 32426725235;
-  }
-
-  bool is_equal_to(const fn::FieldNode &other) const override
-  {
-    return dynamic_cast<const AngleFieldInput *>(&other) != nullptr;
+    static constexpr int8_t id = 0;
+    hash.add(&id);
   }
 
   std::optional<AttrDomain> preferred_domain(const Mesh & /*mesh*/) const override
@@ -127,10 +119,7 @@ static int find_other_vert_of_edge_triangle(const OffsetIndices<int> faces,
 
 class SignedAngleFieldInput final : public bke::MeshFieldInput {
  public:
-  SignedAngleFieldInput() : bke::MeshFieldInput(CPPType::get<float>(), "Signed Angle Field")
-  {
-    category_ = Category::Generated;
-  }
+  SignedAngleFieldInput() : bke::MeshFieldInput(CPPType::get<float>(), "Signed Angle Field") {}
 
   GVArray get_varray_for_context(const Mesh &mesh,
                                  const AttrDomain domain,
@@ -185,15 +174,10 @@ class SignedAngleFieldInput final : public bke::MeshFieldInput {
     return mesh.attributes().adapt_domain<float>(std::move(angles), AttrDomain::Edge, domain);
   }
 
-  uint64_t hash() const override
+  void hash_unique(UniqueHashBytes &hash, fn::FieldHashDeep & /*deep_hash_cache*/) const override
   {
-    /* Some random constant hash. */
-    return 68465416863;
-  }
-
-  bool is_equal_to(const fn::FieldNode &other) const override
-  {
-    return dynamic_cast<const SignedAngleFieldInput *>(&other) != nullptr;
+    static constexpr int8_t id = 0;
+    hash.add(&id);
   }
 
   std::optional<AttrDomain> preferred_domain(const Mesh & /*mesh*/) const override
@@ -204,20 +188,19 @@ class SignedAngleFieldInput final : public bke::MeshFieldInput {
 
 static void node_geo_exec(GeoNodeExecParams params)
 {
-  if (params.output_is_required("Unsigned Angle")) {
-    Field<float> angle_field{std::make_shared<AngleFieldInput>()};
-    params.set_output("Unsigned Angle", std::move(angle_field));
+  if (params.output_is_required("Unsigned Angle"_ustr)) {
+    params.set_output("Unsigned Angle"_ustr, Field<float>::from_input<AngleFieldInput>());
   }
-  if (params.output_is_required("Signed Angle")) {
-    Field<float> angle_field{std::make_shared<SignedAngleFieldInput>()};
-    params.set_output("Signed Angle", std::move(angle_field));
+  if (params.output_is_required("Signed Angle"_ustr)) {
+    params.set_output("Signed Angle"_ustr, Field<float>::from_input<SignedAngleFieldInput>());
   }
 }
 
 static void node_register()
 {
   static bke::bNodeType ntype;
-  geo_node_type_base(&ntype, "GeometryNodeInputMeshEdgeAngle", GEO_NODE_INPUT_MESH_EDGE_ANGLE);
+  geo_node_type_base(
+      &ntype, "GeometryNodeInputMeshEdgeAngle"_ustr, GEO_NODE_INPUT_MESH_EDGE_ANGLE);
   ntype.ui_name = "Edge Angle";
   ntype.ui_description = "The angle between the normals of connected manifold faces";
   ntype.enum_name_legacy = "MESH_EDGE_ANGLE";

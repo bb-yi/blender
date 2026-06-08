@@ -26,10 +26,7 @@ namespace blender {
 
 /* #AssetWeakReference -------------------------------------------- */
 
-AssetWeakReference::AssetWeakReference()
-    : asset_library_type(0), asset_library_identifier(nullptr), relative_asset_identifier(nullptr)
-{
-}
+AssetWeakReference::AssetWeakReference() = default;
 
 AssetWeakReference::AssetWeakReference(const AssetWeakReference &other)
     : asset_library_type(other.asset_library_type),
@@ -43,7 +40,7 @@ AssetWeakReference::AssetWeakReference(AssetWeakReference &&other)
       asset_library_identifier(other.asset_library_identifier),
       relative_asset_identifier(other.relative_asset_identifier)
 {
-  other.asset_library_type = 0; /* Not a valid type. */
+  other.asset_library_type = eAssetLibraryType{}; /* Not a valid type. */
   other.asset_library_identifier = nullptr;
   other.relative_asset_identifier = nullptr;
 }
@@ -98,6 +95,10 @@ AssetWeakReference AssetWeakReference::make_reference(const asset_system::AssetL
 {
   AssetWeakReference weak_ref{};
 
+  BLI_assert_msg(
+      !(library.library_type() == ASSET_LIBRARY_CUSTOM && library.name().is_empty()),
+      "Custom asset libraries should have a name set, otherwise weak references will not work");
+
   weak_ref.asset_library_type = library.library_type();
   StringRefNull name = library.name();
   if (!name.is_empty()) {
@@ -113,8 +114,8 @@ AssetWeakReference AssetWeakReference::make_reference(const asset_system::AssetL
 void BKE_asset_weak_reference_write(BlendWriter *writer, const AssetWeakReference *weak_ref)
 {
   writer->write_struct(weak_ref);
-  BLO_write_string(writer, weak_ref->asset_library_identifier);
-  BLO_write_string(writer, weak_ref->relative_asset_identifier);
+  writer->write_string(weak_ref->asset_library_identifier);
+  writer->write_string(weak_ref->relative_asset_identifier);
 }
 
 void BKE_asset_weak_reference_read(BlendDataReader *reader, AssetWeakReference *weak_ref)
@@ -129,7 +130,7 @@ void BKE_asset_catalog_path_list_free(ListBaseT<AssetCatalogPathLink> &catalog_p
     MEM_delete(catalog_path.path);
     BLI_freelinkN(&catalog_path_list, &catalog_path);
   }
-  BLI_assert(BLI_listbase_is_empty(&catalog_path_list));
+  BLI_assert(catalog_path_list.is_empty());
 }
 
 ListBaseT<AssetCatalogPathLink> BKE_asset_catalog_path_list_duplicate(
@@ -152,7 +153,7 @@ void BKE_asset_catalog_path_list_blend_write(
 {
   for (const AssetCatalogPathLink &catalog_path : catalog_path_list) {
     writer->write_struct(&catalog_path);
-    BLO_write_string(writer, catalog_path.path);
+    writer->write_string(catalog_path.path);
   }
 }
 

@@ -9,6 +9,7 @@
  */
 
 #include "AS_asset_catalog_path.hh"
+#include "AS_asset_library.hh"
 
 #include "DNA_defs.h"
 #include "DNA_screen_types.h"
@@ -79,13 +80,30 @@ void settings_blend_write(BlendWriter *writer, const AssetShelfSettings &setting
   writer->write_struct(&settings);
 
   BKE_asset_catalog_path_list_blend_write(writer, settings.enabled_catalog_paths);
-  BLO_write_string(writer, settings.active_catalog_path);
+  writer->write_string(settings.active_catalog_path);
 }
 
 void settings_blend_read_data(BlendDataReader *reader, AssetShelfSettings &settings)
 {
   BKE_asset_catalog_path_list_blend_read_data(reader, settings.enabled_catalog_paths);
   BLO_read_string(reader, &settings.active_catalog_path);
+}
+
+AssetLibraryReference &settings_ensure_valid_library_ref(AssetShelfSettings &settings)
+{
+  if (settings.asset_library_reference.type != ASSET_LIBRARY_CUSTOM) {
+    /* Nothing to validate, all good. */
+    return settings.asset_library_reference;
+  }
+
+  const bUserAssetLibrary *user_library = BKE_preferences_asset_library_find_index(
+      &U, settings.asset_library_reference.custom_library_index);
+
+  /* If the library wasn't found, fall back to the "All" library. */
+  if (!user_library) {
+    settings.asset_library_reference = asset_system::all_library_reference();
+  }
+  return settings.asset_library_reference;
 }
 
 void settings_set_active_catalog(AssetShelfSettings &settings,
@@ -139,7 +157,7 @@ void settings_clear_enabled_catalogs(AssetShelf &shelf)
   ListBaseT<AssetCatalogPathLink> *enabled_catalog_paths = get_enabled_catalog_path_list(shelf);
   if (enabled_catalog_paths) {
     BKE_asset_catalog_path_list_free(*enabled_catalog_paths);
-    BLI_assert(BLI_listbase_is_empty(enabled_catalog_paths));
+    BLI_assert(enabled_catalog_paths->is_empty());
   }
 }
 

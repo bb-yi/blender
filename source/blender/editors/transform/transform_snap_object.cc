@@ -44,7 +44,10 @@ static timeit::Nanoseconds duration_;
 
 namespace blender::ed::transform {
 
-static float4 occlusion_plane_create(float3 ray_dir, float3 ray_co, float3 ray_no)
+static float4 occlusion_plane_create(float3 ray_start,
+                                     float3 ray_dir,
+                                     float3 ray_co,
+                                     float3 ray_no)
 {
   float4 plane;
   plane_from_point_normal_v3(plane, ray_co, ray_no);
@@ -53,8 +56,15 @@ static float4 occlusion_plane_create(float3 ray_dir, float3 ray_co, float3 ray_n
     negate_v4(plane);
   }
 
-  /* Small offset to simulate a kind of volume for edges and vertices. */
-  plane[3] += 0.01f;
+  /* Small offset to simulate a kind of volume for edges and vertices.
+   * NOTE: The offset added to plane[3] was previously hardcoded as 0.01f
+   * but that caused snapping to pass through occluding geometry at small
+   * scales, so scale it by the view depth instead. Values of 1e-6f and
+   * above work for the scale factor, 1e-7f or smaller are lost to float
+   * precision. See: #154426. */
+  const float depth = math::dot(ray_co - ray_start, ray_dir);
+  const float scale_factor = 1e-5f;
+  plane[3] += std::max(depth * scale_factor, FLT_EPSILON);
 
   return plane;
 }
@@ -308,7 +318,8 @@ void SnapData::register_result(SnapObjectContext *sctx,
 
   /* Global space. */
   sctx->ret.loc = math::transform_point(obmat, sctx->ret.loc);
-  sctx->ret.no = math::normalize(math::transform_direction(obmat, sctx->ret.no));
+  const float3x3 normal_transform = math::transpose(math::invert(float3x3(obmat)));
+  sctx->ret.no = math::normalize(math::transform_direction(normal_transform, sctx->ret.no));
 
 #ifndef NDEBUG
   /* Make sure this is only called once. */
@@ -331,7 +342,8 @@ void SnapData::register_result_raycast(SnapObjectContext *sctx,
   const float depth_max = is_in_front ? sctx->ret.ray_depth_max_in_front : sctx->ret.ray_depth_max;
   if (hit->dist <= depth_max) {
     float3 co = math::transform_point(obmat, float3(hit->co));
-    float3 no = math::normalize(math::transform_direction(obmat, float3(hit->no)));
+    const float3x3 normal_transform = math::transpose(math::invert(float3x3(obmat)));
+    float3 no = math::normalize(math::transform_direction(normal_transform, float3(hit->no)));
 
     sctx->ret.loc = co;
     sctx->ret.no = no;
@@ -343,7 +355,7 @@ void SnapData::register_result_raycast(SnapObjectContext *sctx,
 
     if (is_in_front) {
       sctx->runtime.occlusion_plane_in_front = occlusion_plane_create(
-          sctx->runtime.ray_dir, co, no);
+          sctx->runtime.ray_start, sctx->runtime.ray_dir, co, no);
       sctx->runtime.has_occlusion_plane_in_front = true;
     }
   }
@@ -497,7 +509,7 @@ static eSnapMode iter_snap_objects(SnapObjectContext *sctx, IterSnapObjsCallback
   Scene *scene = DEG_get_input_scene(sctx->runtime.depsgraph);
   ViewLayer *view_layer = DEG_get_input_view_layer(sctx->runtime.depsgraph);
   const eSnapTargetOP snap_target_select = sctx->runtime.params.snap_target_select;
-  BKE_view_layer_synced_ensure(scene, view_layer);
+  BKE_view_layer_synced_ensure(*DEG_get_bmain(sctx->runtime.depsgraph), scene, view_layer);
   Base *base_act = BKE_view_layer_active_base_get(view_layer);
 
   DupliList duplilist;
@@ -669,8 +681,8 @@ static eSnapMode raycast_obj_fn(SnapObjectContext *sctx,
  * Read/Write Args
  * ---------------
  *
- * \param ray_depth: maximum depth allowed for r_co,
- * elements deeper than this value will be ignored.
+ * - `ray_depth`: maximum depth allowed for r_co,
+ *   elements deeper than this value will be ignored.
  */
 static bool raycastObjects(SnapObjectContext *sctx)
 {
@@ -797,10 +809,10 @@ static eSnapMode nearest_world_object_fn(SnapObjectContext *sctx,
  *
  * Walks through all objects in the scene to find the nearest location on target surface.
  *
- * \param sctx: Snap context to store data.
- * \param params: Settings for snapping.
- * \param init_co: Initial location of source point.
- * \param prev_co: Current location of source point after transformation but before snapping.
+ * - `sctx`: Snap context to store data.
+ * - `params`: Settings for snapping.
+ * - `init_co`: Initial location of source point.
+ * - `prev_co`: Current location of source point after transformation but before snapping.
  */
 static bool nearestWorldObjects(SnapObjectContext *sctx)
 {
@@ -973,6 +985,9 @@ static eSnapMode snap_obj_fn(SnapObjectContext *sctx,
     case OB_ARMATURE:
       retval = snapArmature(sctx, ob_eval, obmat, is_object_active);
       break;
+    case OB_LATTICE:
+      retval = snapLattice(sctx, ob_eval, obmat);
+      break;
     case OB_CURVES_LEGACY:
     case OB_SURF:
       if (ob_eval->type == OB_CURVES_LEGACY || BKE_object_is_in_editmode(ob_eval)) {
@@ -988,6 +1003,8 @@ static eSnapMode snap_obj_fn(SnapObjectContext *sctx,
       break;
     case OB_CAMERA:
       retval = snapCamera(sctx, ob_eval, obmat, sctx->runtime.snap_to_flag);
+      break;
+    default:
       break;
   }
 
@@ -1005,7 +1022,7 @@ static eSnapMode snap_obj_fn(SnapObjectContext *sctx,
  * Read/Write Args
  * ---------------
  *
- * \param dist_px: Maximum threshold distance (in pixels).
+ * - `dist_px`: Maximum threshold distance (in pixels).
  */
 static eSnapMode snapObjectsRay(SnapObjectContext *sctx)
 {
@@ -1485,7 +1502,7 @@ eSnapMode snap_object_project_view3d_ex(SnapObjectContext *sctx,
       /* Compute the new clip plane but do not add it yet. */
       BLI_ASSERT_UNIT_V3(sctx->ret.no);
       sctx->runtime.occlusion_plane = occlusion_plane_create(
-          sctx->runtime.ray_dir, sctx->ret.loc, sctx->ret.no);
+          sctx->runtime.ray_start, sctx->runtime.ray_dir, sctx->ret.loc, sctx->ret.no);
 
       /* First, snap to the geometry of the polygon obtained via raycast.
        * This is necessary because the occlusion plane may "occlude" part of the polygon's

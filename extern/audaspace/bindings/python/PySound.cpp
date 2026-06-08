@@ -133,25 +133,30 @@ PyDoc_STRVAR(M_aud_Sound_data_doc,
 static PyObject *
 Sound_data(Sound* self)
 {
-	std::shared_ptr<ISound> sound = *reinterpret_cast<std::shared_ptr<ISound>*>(self->sound);
+    try {
+        std::shared_ptr<ISound> sound = *reinterpret_cast<std::shared_ptr<ISound>*>(self->sound);
 
-	auto stream_buffer = std::dynamic_pointer_cast<StreamBuffer>(sound);
-	if(!stream_buffer)
-		stream_buffer = std::make_shared<StreamBuffer>(sound);
-	Specs specs = stream_buffer->getSpecs();
-	auto buffer = stream_buffer->getBuffer();
+        auto stream_buffer = std::dynamic_pointer_cast<StreamBuffer>(sound);
+        if(!stream_buffer)
+            stream_buffer = std::make_shared<StreamBuffer>(sound);
+        Specs specs = stream_buffer->getSpecs();
+        auto buffer = stream_buffer->getBuffer();
 
-	npy_intp dimensions[2];
-	dimensions[0] = buffer->getSize() / AUD_SAMPLE_SIZE(specs);
-	dimensions[1] = specs.channels;
+        npy_intp dimensions[2];
+        dimensions[0] = buffer->getSize() / AUD_SAMPLE_SIZE(specs);
+        dimensions[1] = specs.channels;
 
-	PyArrayObject* array = reinterpret_cast<PyArrayObject*>(PyArray_SimpleNew(2, dimensions, NPY_FLOAT));
+        PyArrayObject* array = reinterpret_cast<PyArrayObject*>(PyArray_SimpleNew(2, dimensions, NPY_FLOAT));
 
-	sample_t* data = reinterpret_cast<sample_t*>(PyArray_DATA(array));
+        sample_t* data = reinterpret_cast<sample_t*>(PyArray_DATA(array));
 
-	std::memcpy(data, buffer->getBuffer(), buffer->getSize());
+        std::memcpy(data, buffer->getBuffer(), buffer->getSize());
 
-	return reinterpret_cast<PyObject*>(array);
+        return reinterpret_cast<PyObject*>(array);
+    } catch (Exception& e) {
+        PyErr_SetString(AUDError, e.what());
+        return nullptr;
+    }
 }
 
 PyDoc_STRVAR(M_aud_Sound_write_doc,
@@ -2171,10 +2176,16 @@ static PyGetSetDef Sound_properties[] = {
 };
 
 PyDoc_STRVAR(M_aud_Sound_doc,
-			 "Sound objects are immutable and represent a sound that can be "
+			 ".. class:: Sound(filename, stream=0)\n\n"
+			 "   Sound objects are immutable and represent a sound that can be "
 			 "played simultaneously multiple times. They are called factories "
 			 "because they create reader objects internally that are used for "
-			 "playback.");
+			 "playback.\n\n"
+			 "   :arg filename: Path of the file.\n"
+			 "   :type filename: string\n"
+			 "   :arg stream: The index of the audio stream within the file if it\n"
+			 "      contains multiple audio streams, 0 by default.\n"
+			 "   :type stream: int\n");
 
 PyTypeObject SoundType = {
 	PyVarObject_HEAD_INIT(nullptr, 0)

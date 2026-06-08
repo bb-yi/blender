@@ -19,7 +19,6 @@
 #include "BLI_math_matrix.h"
 #include "BLI_math_vector_types.hh"
 #include "BLI_span.hh"
-#include "BLI_string.h"
 #include "BLI_task.hh"
 #include "BLI_utildefines.h"
 #include "BLI_vector.hh"
@@ -197,19 +196,6 @@ static void add_orco_mesh(Object &ob,
 }
 
 /**
- * Does final touches to the final evaluated mesh, making sure it is perfectly usable.
- *
- * This is needed because certain information is not passed along intermediate meshes allocated
- * during stack evaluation.
- */
-static void mesh_calc_finalize(const Mesh &mesh_input, Mesh &mesh_eval)
-{
-  /* Make sure the name is the same. This is because mesh allocation from template does not
-   * take care of naming. */
-  STRNCPY(mesh_eval.id.name, mesh_input.id.name);
-}
-
-/**
  * Modifies the given mesh and geometry set. The mesh is not passed as part of the mesh component
  * in the \a geometry_set input, it is only passed in \a input_mesh and returned in the return
  * value.
@@ -223,7 +209,7 @@ static Mesh *modifier_modify_mesh_and_geometry_set(ModifierData *md,
                                                    GeometrySet &geometry_set)
 {
   Mesh *mesh_output = nullptr;
-  const ModifierTypeInfo *mti = BKE_modifier_get_info(ModifierType(md->type));
+  const ModifierTypeInfo *mti = BKE_modifier_get_info(md->type);
   if (mti->modify_geometry_set == nullptr) {
     mesh_output = BKE_modifier_modify_mesh(md, &mectx, input_mesh);
   }
@@ -359,7 +345,7 @@ static void mesh_calc_modifiers(Depsgraph &depsgraph,
   /* Apply all leading deform modifiers. */
   if (use_deform) {
     for (; md; md = md->next, md_datamask = md_datamask->next) {
-      const ModifierTypeInfo *mti = BKE_modifier_get_info(ModifierType(md->type));
+      const ModifierTypeInfo *mti = BKE_modifier_get_info(md->type);
 
       if (!BKE_modifier_is_enabled(&scene, md, required_mode)) {
         continue;
@@ -399,7 +385,7 @@ static void mesh_calc_modifiers(Depsgraph &depsgraph,
   /* Apply all remaining constructive and deforming modifiers. */
   bool have_non_onlydeform_modifiers_applied = false;
   for (; md; md = md->next, md_datamask = md_datamask->next) {
-    const ModifierTypeInfo *mti = BKE_modifier_get_info(ModifierType(md->type));
+    const ModifierTypeInfo *mti = BKE_modifier_get_info(md->type);
 
     if (!BKE_modifier_is_enabled(&scene, md, required_mode)) {
       continue;
@@ -432,8 +418,12 @@ static void mesh_calc_modifiers(Depsgraph &depsgraph,
         unsupported = true;
       }
 
-      if (scene.toolsettings->sculpt->flags & SCULPT_ONLY_DEFORM) {
-        unsupported |= (mti->type != ModifierTypeType::OnlyDeform);
+      /* While rare, it's possible for a sculpt object to be loaded into a scene
+       * that doesn't have sculpt tool-settings initialized, see #159457. */
+      if (Sculpt *sculpt = scene.toolsettings->sculpt) {
+        if (sculpt->flags & SCULPT_ONLY_DEFORM) {
+          unsupported |= (mti->type != ModifierTypeType::OnlyDeform);
+        }
       }
 
       unsupported |= multires_applied;
@@ -677,20 +667,14 @@ static void mesh_calc_modifiers(Depsgraph &depsgraph,
    * Save some memory, and ensure GPU subdivision does not need to deal with this. */
   CustomData_free_layers(&mesh->vert_data, CD_CLOTH_ORCO);
 
-  /* Compute normals. */
-  if (is_own_mesh) {
-    mesh_calc_finalize(mesh_input, *mesh);
-  }
-  else {
+  if (!is_own_mesh) {
     MeshRuntime *runtime = mesh_input.runtime;
     if (runtime->mesh_eval == nullptr) {
       std::lock_guard lock{mesh_input.runtime->eval_mutex};
       if (runtime->mesh_eval == nullptr) {
-        /* Not yet finalized by any instance, do it now
-         * Isolate since computing normals is multithreaded and we are holding a lock. */
+        /* Not yet finalized by any instance, do it now. */
         threading::isolate_task([&] {
           mesh = BKE_mesh_copy_for_eval(mesh_input);
-          mesh_calc_finalize(mesh_input, *mesh);
           runtime->mesh_eval = mesh;
         });
       }
@@ -720,7 +704,7 @@ bool editbmesh_modifier_is_enabled(const Scene *scene,
                                    ModifierData *md,
                                    bool has_prev_mesh)
 {
-  const ModifierTypeInfo *mti = BKE_modifier_get_info(ModifierType(md->type));
+  const ModifierTypeInfo *mti = BKE_modifier_get_info(md->type);
   const int required_mode = eModifierMode_Realtime | eModifierMode_Editmode;
 
   if (!BKE_modifier_is_enabled(scene, md, required_mode)) {
@@ -820,7 +804,7 @@ static void editbmesh_calc_modifiers(Depsgraph &depsgraph,
 
   bool non_deform_modifier_applied = false;
   for (int i = 0; md; i++, md = md->next, md_datamask = md_datamask->next) {
-    const ModifierTypeInfo *mti = BKE_modifier_get_info(ModifierType(md->type));
+    const ModifierTypeInfo *mti = BKE_modifier_get_info(md->type);
     if (!editbmesh_modifier_is_enabled(&scene, &ob, md, non_deform_modifier_applied)) {
       continue;
     }
@@ -1079,7 +1063,7 @@ static void object_get_datamask(const Depsgraph &depsgraph,
     return;
   }
 
-  BKE_view_layer_synced_ensure(scene, view_layer);
+  BKE_view_layer_synced_ensure(*DEG_get_bmain(&depsgraph), scene, view_layer);
   Object *actob = BKE_view_layer_active_object_get(view_layer);
   if (actob) {
     actob = DEG_get_original(actob);

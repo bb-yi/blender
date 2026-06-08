@@ -7,6 +7,7 @@
 
 #include "BKE_action.hh"
 #include "BKE_anim_data.hh"
+#include "BKE_gtest_base.hh"
 #include "BKE_idtype.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_main.hh"
@@ -18,30 +19,15 @@
 
 #include "BLI_listbase.h"
 
-#include "CLG_log.h"
 #include "testing/testing.h"
 
 namespace blender::animrig::nla::tests {
 
-class NLASlottedActionTest : public testing::Test {
+class NLASlottedActionTest : public bke::BlenderGTestBase {
  public:
   Main *bmain;
   Action *action;
   Object *cube;
-
-  static void SetUpTestSuite()
-  {
-    /* BKE_id_free() hits a code path that uses CLOG, which crashes if not initialized properly. */
-    CLG_init();
-
-    /* To make id_can_have_animdata() and friends work, the `id_types` array needs to be set up. */
-    BKE_idtype_init();
-  }
-
-  static void TearDownTestSuite()
-  {
-    CLG_exit();
-  }
 
   void SetUp() override
   {
@@ -134,8 +120,8 @@ TEST_F(NLASlottedActionTest, assign_slot_to_multiple_strips)
   strip1->end = 327;
   ASSERT_TRUE(BKE_nlatrack_add_strip(track, strip1, false));
   ASSERT_TRUE(BKE_nlatrack_add_strip(track, strip2, false));
-  ASSERT_EQ(1, BLI_listbase_count(&adt->nla_tracks));
-  ASSERT_EQ(2, BLI_listbase_count(&track->strips));
+  ASSERT_EQ(1, adt->nla_tracks.count());
+  ASSERT_EQ(2, track->strips.count());
 
   nla::unassign_action(*strip1, cube->id);
   nla::unassign_action(*strip2, cube->id);

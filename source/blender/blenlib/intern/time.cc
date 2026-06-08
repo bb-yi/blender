@@ -13,7 +13,6 @@
 #  include <cmath>
 #  include <cstdio>
 
-#  define WIN32_LEAN_AND_MEAN
 #  include <windows.h>
 
 /* timeapi.h needs to be included after windows.h. */
@@ -80,7 +79,7 @@ void BLI_time_sleep_precise_us(int us)
     }
     else {
       fprintf(stderr,
-              "BLI_time_sleep_precise_us: CreateWaitableTimerExW failed: %d\n",
+              "BLI_time_sleep_precise_us: CreateWaitableTimerExW failed: %lx\n",
               GetLastError());
     }
     return;
@@ -90,13 +89,14 @@ void BLI_time_sleep_precise_us(int us)
   LARGE_INTEGER wait_time;
   wait_time.QuadPart = -us * 10;
   if (!SetWaitableTimer(timerHandle, &wait_time, 0, nullptr, nullptr, 0)) {
-    fprintf(stderr, "BLI_time_sleep_precise_us: SetWaitableTimer failed: %d\n", GetLastError());
+    fprintf(stderr, "BLI_time_sleep_precise_us: SetWaitableTimer failed: %lx\n", GetLastError());
     CloseHandle(timerHandle);
     return;
   }
 
   if (WaitForSingleObject(timerHandle, INFINITE) != WAIT_OBJECT_0) {
-    fprintf(stderr, "BLI_time_sleep_precise_us: WaitForSingleObject failed: %d\n", GetLastError());
+    fprintf(
+        stderr, "BLI_time_sleep_precise_us: WaitForSingleObject failed: %lx\n", GetLastError());
     CloseHandle(timerHandle);
     return;
   }
@@ -111,29 +111,23 @@ void BLI_time_sleep_precise_us(int us)
 #  include <chrono>
 #  include <thread>
 
-#  include <sys/time.h>
 #  include <unistd.h>
 
 namespace blender {
 
 double BLI_time_now_seconds()
 {
-  timeval tv;
-  struct timezone tz;
-
-  gettimeofday(&tv, &tz);
-
-  return (double(tv.tv_sec) + tv.tv_usec / 1000000.0);
+  timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return double(ts.tv_sec) + (ts.tv_nsec / 1000000000.0);
 }
 
 long int BLI_time_now_seconds_i()
 {
-  timeval tv;
-  struct timezone tz;
-
-  gettimeofday(&tv, &tz);
-
-  return tv.tv_sec;
+  timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  /* `tv_nsec` is in [0, 999999999], always less than one second, so it never carries. */
+  return ts.tv_sec;
 }
 
 void BLI_time_sleep_ms(int ms)

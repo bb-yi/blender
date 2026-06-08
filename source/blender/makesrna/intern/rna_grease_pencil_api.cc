@@ -36,6 +36,7 @@ const EnumPropertyItem rna_enum_tree_node_move_type_items[] = {
 #  include "BKE_context.hh"
 #  include "BKE_curves.hh"
 #  include "BKE_deform.hh"
+#  include "BKE_geometry_compare.hh"
 #  include "BKE_grease_pencil.hh"
 #  include "BKE_grease_pencil_vertex_groups.hh"
 #  include "BKE_report.hh"
@@ -655,11 +656,135 @@ static void rna_GreasePencil_layer_group_move_to_layer_group(GreasePencil *greas
   WM_main_add_notifier(NC_GPENCIL | NA_EDITED, grease_pencil);
 }
 
+static GreasePencilLayerMask *rna_grease_pencil_layer_mask_add(GreasePencilLayer *layer,
+                                                               ReportList *reports,
+                                                               GreasePencilLayer *mask_layer)
+{
+  if (layer == nullptr) {
+    BKE_report(reports, RPT_ERROR, "Layer doesn't exist");
+    return nullptr;
+  }
+
+  if (mask_layer == nullptr) {
+    BKE_report(reports, RPT_ERROR, "Mask layer doesn't exist");
+    return nullptr;
+  }
+
+  /* Get the mask layer's name */
+  const std::string mask_layer_name = mask_layer->wrap().name();
+
+  /* Check if this layer is already in the masks list */
+  for (GreasePencilLayerMask &existing_mask : layer->masks) {
+    if (existing_mask.layer_name && STREQ(existing_mask.layer_name, mask_layer_name.c_str())) {
+      BKE_reportf(reports, RPT_WARNING, "Layer '%s' is already masked", mask_layer_name.c_str());
+      return &existing_mask;
+    }
+  }
+
+  GreasePencilLayerMask *new_mask = MEM_new<bke::greasepencil::LayerMask>(__func__,
+                                                                          mask_layer_name);
+
+  /* Add the mask to this layer's mask list */
+  BLI_addtail(&layer->masks, new_mask);
+
+  WM_main_add_notifier(NC_GPENCIL | ND_DATA | NA_SELECTED, nullptr);
+
+  return new_mask;
+}
+
+static void rna_grease_pencil_layer_mask_remove(GreasePencilLayer *layer,
+                                                ReportList *reports,
+                                                PointerRNA *mask_ptr)
+{
+  if (layer == nullptr) {
+    BKE_report(reports, RPT_ERROR, "Layer doesn't exist");
+    return;
+  }
+
+  GreasePencilLayerMask *mask = static_cast<GreasePencilLayerMask *>(mask_ptr->data);
+  if (mask == nullptr) {
+    BKE_report(reports, RPT_ERROR, "Mask pointer doesn't exist");
+    return;
+  }
+
+  /* Verify the mask belongs to this layer. */
+  if (BLI_findindex(&layer->masks, mask) == -1) {
+    BKE_reportf(reports, RPT_ERROR, "Mask not found in layer");
+    return;
+  }
+
+  BLI_remlink(&layer->masks, mask);
+
+  MEM_delete(&mask->wrap());
+
+  /* Clear the RNA pointer. */
+  mask_ptr->invalidate();
+
+  WM_main_add_notifier(NC_GPENCIL | ND_DATA | NA_SELECTED, nullptr);
+}
+
+static const char *rna_GreasePencil_unit_test_compare(GreasePencil *grease_pencil_1,
+                                                      GreasePencil *grease_pencil_2,
+                                                      float threshold)
+{
+  using namespace bke::compare_geometry;
+  const std::optional<GeoMismatch> mismatch = compare_grease_pencil(
+      *grease_pencil_1, *grease_pencil_2, threshold);
+
+  if (!mismatch) {
+    return "Same";
+  }
+
+  return mismatch_to_string(mismatch.value());
+}
+
 }  // namespace blender
 
 #else
 
 namespace blender {
+
+void RNA_api_grease_pencil(StructRNA *srna)
+{
+  FunctionRNA *func;
+  PropertyRNA *parm;
+
+  func = RNA_def_function(srna, "unit_test_compare", "rna_GreasePencil_unit_test_compare");
+  RNA_def_pointer(func, "grease_pencil", "GreasePencil", "", "Grease Pencil to compare to");
+  RNA_def_float_factor(func,
+                       "threshold",
+                       FLT_EPSILON * 60,
+                       0.0f,
+                       FLT_MAX,
+                       "Threshold",
+                       "Comparison tolerance threshold",
+                       0.0f,
+                       FLT_MAX);
+  parm = RNA_def_string(
+      func, "result", "nothing", 64, "Return value", "String description of result of comparison");
+  RNA_def_function_return(func, parm);
+}
+
+void RNA_api_grease_pencil_layer_masks(StructRNA *srna)
+{
+  FunctionRNA *func;
+  PropertyRNA *parm;
+
+  func = RNA_def_function(srna, "add", "rna_grease_pencil_layer_mask_add");
+  RNA_def_function_ui_description(func, "Add an existing layer as a mask to this layer");
+  RNA_def_function_flag(func, FUNC_USE_REPORTS);
+  parm = RNA_def_pointer(func, "layer", "GreasePencilLayer", "", "Layer to add as a mask");
+  RNA_def_parameter_flags(parm, PROP_NEVER_NULL, PARM_REQUIRED);
+  parm = RNA_def_pointer(
+      func, "mask", "GreasePencilLayerMask", "", "The mask entry referencing the layer");
+  RNA_def_function_return(func, parm);
+
+  func = RNA_def_function(srna, "remove", "rna_grease_pencil_layer_mask_remove");
+  RNA_def_function_ui_description(func, "Remove a mask from the layer");
+  RNA_def_function_flag(func, FUNC_USE_REPORTS);
+  parm = RNA_def_pointer(func, "mask", "GreasePencilLayerMask", "", "Mask to remove");
+  RNA_def_parameter_flags(parm, PROP_NEVER_NULL, PARM_REQUIRED | PARM_RNAPTR);
+}
 
 void RNA_api_grease_pencil_drawing(StructRNA *srna)
 {

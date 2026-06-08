@@ -87,7 +87,7 @@ static void freeSeqData(TransInfo *t, TransDataContainer *tc, TransCustomData *c
   }
 
   ListBaseT<Strip> *seqbasep = seq::active_seqbase_get(ed);
-  seq::iterator_set_expand(scene, seqbasep, transformed_strips, seq::query_strip_effect_chain);
+  seq::iterator_set_expand(seqbasep, transformed_strips, seq::query_strip_effect_chain);
 
   VectorSet<Strip *> dependant;
   dependant.add_multiple(transformed_strips);
@@ -114,7 +114,7 @@ static void create_trans_seq_clamp_data(TransInfo *t, const Scene *scene)
   const Editing *ed = seq::editing_get(scene);
 
   /* Prevent snaps and change in `values` past `offset_clamp` for all selected retiming keys. */
-  BLI_rcti_init(&ts->offset_clamp, -INT_MAX, INT_MAX, 0, 0);
+  BLI_rcti_init(&ts->offset_clamp, INT_MIN, INT_MAX, 0, 0);
 
   Map selection = seq::retiming_selection_get(ed);
   for (auto item : selection.items()) {
@@ -210,12 +210,11 @@ static void recalcData_sequencer_retiming(TransInfo *t)
 {
   const TransDataContainer *tc = TRANS_DATA_CONTAINER_FIRST_SINGLE(t);
   const TransData *td = nullptr;
-  const TransData2D *td2d = nullptr;
   int i;
 
   VectorSet<Strip *> transformed_strips;
 
-  for (i = 0, td = tc->data, td2d = tc->data_2d; i < tc->data_len; i++, td++, td2d++) {
+  for (i = 0, td = tc->data; i < tc->data_len; i++, td++) {
     const TransDataSeq *tdseq = static_cast<TransDataSeq *>(td->extra);
     Strip *strip = tdseq->strip;
 
@@ -253,7 +252,7 @@ static void recalcData_sequencer_retiming(TransInfo *t)
   /* Test overlap, displays red outline. */
   Editing *ed = seq::editing_get(t->scene);
   seq::iterator_set_expand(
-      t->scene, seq::active_seqbase_get(ed), transformed_strips, seq::query_strip_effect_chain);
+      seq::active_seqbase_get(ed), transformed_strips, seq::query_strip_effect_chain);
   for (Strip *strip : transformed_strips) {
     strip->runtime->flag &= ~seq::StripRuntimeFlag::Overlap;
     if (seq::transform_test_overlap(t->scene, seq::active_seqbase_get(ed), strip)) {

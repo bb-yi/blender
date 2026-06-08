@@ -261,6 +261,13 @@ GHOST_WindowX11::GHOST_WindowX11(GHOST_SystemX11 *system,
   /* XClassHint, title */
   {
     XClassHint *xclasshint = XAllocClassHint();
+/* See `GHOST_X11_RES_NAME` definition in GHOST_SystemX11.hh */
+#if defined(WITH_X11_XINPUT) && defined(X_HAVE_UTF8_STRING)
+    /* Safe as these are logically `const` (the values aren't manipulated). */
+    xclasshint->res_name = const_cast<char *>(GHOST_X11_RES_NAME);
+    xclasshint->res_class = const_cast<char *>(GHOST_X11_RES_CLASS);
+    XSetClassHint(display_, window_, xclasshint);
+#else
     const int len = strlen(title) + 1;
     char *wmclass = (char *)malloc(sizeof(char) * len);
     memcpy(wmclass, title, len * sizeof(char));
@@ -268,6 +275,7 @@ GHOST_WindowX11::GHOST_WindowX11(GHOST_SystemX11 *system,
     xclasshint->res_class = wmclass;
     XSetClassHint(display_, window_, xclasshint);
     free(wmclass);
+#endif
     XFree(xclasshint);
   }
 
@@ -353,14 +361,20 @@ GHOST_WindowX11::GHOST_WindowX11(GHOST_SystemX11 *system,
     GHOST_PRINT("Created window\n");
   }
   else {
-    const char *text =
-        "A graphics card and driver with support for OpenGL 4.3 or higher is "
-        "required.\n\nInstalling the latest driver for your graphics card might resolve the "
-        "issue.";
-    const char *help = "https://www.blender.org/download/requirements/";
-    system->showMessageBox(
-        "Unsupported hardware", text, "Learn More", "Close", help, GHOST_DialogError);
-    exit(0);
+#ifdef WITH_OPENGL_BACKEND
+    if (type == GHOST_kDrawingContextTypeOpenGL) {
+      const char *text =
+          "A graphics card and driver with support for OpenGL 4.3 or higher is "
+          "required.\n\nInstalling the latest driver for your graphics card might resolve the "
+          "issue.";
+      const char *help = "https://www.blender.org/download/requirements/";
+      system->showMessageBox(
+          "Unsupported hardware", text, "Learn More", "Close", help, GHOST_DialogError);
+    }
+#endif /* WITH_OPENGL_BACKEND */
+    XDestroyWindow(display_, window_);
+    window_ = None;
+    return;
   }
 
   setTitle(title);

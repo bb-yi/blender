@@ -208,6 +208,7 @@ string HIPDevice::compile_kernel_get_common_cflags(const uint kernel_features)
   const string source_path = path_get("source");
   const string include_path = source_path;
   string cflags = string_printf(
+      "-std=c++17 "
       "-m%d "
       "-DHIPCC "
       "-I\"%s\"",
@@ -430,8 +431,6 @@ void HIPDevice::reserve_local_memory(const uint kernel_features)
     /* Use the biggest kernel for estimation. */
     const DeviceKernel test_kernel = (kernel_features & KERNEL_FEATURE_NODE_RAYTRACE) ?
                                          DEVICE_KERNEL_INTEGRATOR_SHADE_SURFACE_RAYTRACE :
-                                     (kernel_features & KERNEL_FEATURE_MNEE) ?
-                                         DEVICE_KERNEL_INTEGRATOR_SHADE_SURFACE_MNEE :
                                          DEVICE_KERNEL_INTEGRATOR_SHADE_SURFACE;
 
     /* Launch kernel, using just 1 block appears sufficient to reserve memory for all
@@ -656,7 +655,7 @@ void HIPDevice::global_alloc(device_memory &mem)
     generic_copy_to(mem);
   }
 
-  const_copy_to(mem.name, &mem.device_pointer, sizeof(mem.device_pointer));
+  const_copy_to(mem.global_name(), &mem.device_pointer, sizeof(mem.device_pointer));
 }
 
 void HIPDevice::global_copy_to(device_memory &mem)
@@ -669,7 +668,7 @@ void HIPDevice::global_copy_to(device_memory &mem)
     generic_copy_to(mem);
   }
 
-  const_copy_to(mem.name, &mem.device_pointer, sizeof(mem.device_pointer));
+  const_copy_to(mem.global_name(), &mem.device_pointer, sizeof(mem.device_pointer));
 }
 
 void HIPDevice::global_free(device_memory &mem)
@@ -844,12 +843,13 @@ void HIPDevice::image_alloc(device_image &mem)
   {
     /* Update image info. */
     thread_scoped_lock lock(image_info_mutex);
-    const uint slot = mem.slot;
-    if (slot >= image_info.size()) {
-      /* Allocate some slots in advance, to reduce amount of re-allocations. */
-      image_info.resize(slot + 128);
+    const uint image_info_id = mem.image_info_id;
+    if (image_info_id >= image_info.size()) {
+      /* Geometric growth to amortize reallocation cost. */
+      const size_t new_size = max(size_t(image_info_id) + 128, image_info.size() * 2);
+      image_info.host_only_resize(new_size);
     }
-    image_info[slot] = tex_info;
+    image_info[image_info_id] = tex_info;
     need_image_info = true;
   }
 }
@@ -865,7 +865,8 @@ void HIPDevice::image_copy_to(device_image &mem)
     bool image_allocated = false;
     {
       thread_scoped_lock lock(image_info_mutex);
-      image_allocated = mem.slot < image_info.size() && image_info[mem.slot].data != 0;
+      image_allocated = mem.image_info_id < image_info.size() &&
+                        image_info[mem.image_info_id].data != 0;
     }
     if (!image_allocated) {
       image_alloc(mem);
@@ -900,7 +901,7 @@ void HIPDevice::image_free(device_image &mem)
   /* Always clear image info and texture object, regardless of residency. */
   {
     thread_scoped_lock lock(image_info_mutex);
-    image_info[mem.slot] = KernelImageInfo();
+    image_info[mem.image_info_id] = KernelImageInfo();
   }
 
   if (cmem.texobject) {

@@ -29,6 +29,7 @@
 #include "BKE_context.hh"
 #include "BKE_fcurve.hh"
 #include "BKE_global.hh"
+#include "BKE_layer.hh"
 #include "BKE_screen.hh"
 #include "BKE_sound.hh"
 
@@ -42,6 +43,8 @@
 #include "GPU_immediate.hh"
 #include "GPU_matrix.hh"
 #include "GPU_state.hh"
+
+#include "PRF_profile.hh"
 
 #include "RNA_prototypes.hh"
 
@@ -344,6 +347,7 @@ static void color3ubv_from_seq(const Scene *curscene,
     case STRIP_TYPE_CROSS:
     case STRIP_TYPE_GAMCROSS:
     case STRIP_TYPE_WIPE:
+    case STRIP_TYPE_COMPOSITOR:
       ui::theme::get_color_3ubv(TH_SEQ_TRANSITION, r_col);
 
       /* Slightly offset hue to distinguish different transition types. */
@@ -352,6 +356,9 @@ static void color3ubv_from_seq(const Scene *curscene,
       }
       else if (strip->type == STRIP_TYPE_WIPE) {
         rgb_byte_set_hue_float_offset(r_col, 0.06);
+      }
+      else if (strip->type == STRIP_TYPE_COMPOSITOR) {
+        rgb_byte_set_hue_float_offset(r_col, -0.03f);
       }
       break;
 
@@ -449,6 +456,8 @@ static void draw_seq_waveform_overlay(const TimelineDrawContext &ctx,
   if (!seq_draw_waveforms_poll(ctx.sseq, strip_ctx.strip) || strip_ctx.strip_is_too_small) {
     return;
   }
+
+  PRF_scope_with_name("SeqTimelineWaveform", ProfileCategory::Draw);
 
   const View2D *v2d = ctx.v2d;
   Scene *scene = ctx.scene;
@@ -633,7 +642,7 @@ static void drawmeta_contents(const TimelineDrawContext &ctx,
 
   ListBaseT<Strip> *meta_seqbase = get_seqbase_from_strip(strip_meta, &meta_channels, &offset);
 
-  if (!meta_seqbase || BLI_listbase_is_empty(meta_seqbase)) {
+  if (!meta_seqbase || meta_seqbase->is_empty()) {
     return;
   }
 
@@ -772,7 +781,13 @@ static void draw_seq_text_get_source(const Strip *strip, char *r_source, size_t 
     }
     case STRIP_TYPE_SOUND: {
       if (strip->sound != nullptr) {
-        BLI_strncpy_utf8(r_source, strip->sound->filepath, source_maxncpy);
+        if (strip->sound->packedfile != nullptr) {
+          /* The sound data has been packed, don't display the path. */
+          BLI_strncpy_utf8(r_source, "<Packed File>", source_maxncpy);
+        }
+        else {
+          BLI_strncpy_utf8(r_source, strip->sound->filepath, source_maxncpy);
+        }
       }
       break;
     }
@@ -812,6 +827,8 @@ static void draw_seq_text_get_source(const Strip *strip, char *r_source, size_t 
       }
       break;
     }
+    default:
+      break;
   }
 }
 
@@ -823,7 +840,7 @@ static size_t draw_seq_text_get_overlay_string(const TimelineDrawContext &ctx,
   const Strip *strip = strip_ctx.strip;
 
   const char *text_sep = " | ";
-  const char *text_array[5];
+  const char *text_array[7];
   int i = 0;
 
   if (ctx.sseq->timeline_overlay.flag & SEQ_TIMELINE_SHOW_STRIP_NAME) {
@@ -838,6 +855,16 @@ static size_t draw_seq_text_get_overlay_string(const TimelineDrawContext &ctx,
         text_array[i++] = text_sep;
       }
       text_array[i++] = source;
+    }
+
+    if (strip->type == STRIP_TYPE_SCENE && strip->scene != nullptr &&
+        (strip->flag & SEQ_SCENE_STRIPS) == 0)
+    {
+      BLI_assert(strip->scene_view_layer_name != nullptr);
+      if (i != 0) {
+        text_array[i++] = text_sep;
+      }
+      text_array[i++] = strip->scene_view_layer_name;
     }
   }
 
@@ -1110,6 +1137,8 @@ static void draw_seq_fcurve_overlay(const TimelineDrawContext &ctx,
     return;
   }
 
+  PRF_scope_with_name("SeqTimelineFCurve", ProfileCategory::Draw);
+
   const int eval_step = max_ii(1, floor(ctx.pixelx));
   uchar color[4] = {0, 0, 0, 38};
 
@@ -1195,7 +1224,7 @@ static void draw_multicam_highlight(const TimelineDrawContext &ctx,
 static void seq_prefetch_wm_notify(const bContext *C, Scene *scene)
 {
   if (seq::prefetch_need_redraw(C, scene)) {
-    WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, nullptr);
+    WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER_PREFETCH, nullptr);
   }
 }
 
@@ -1292,6 +1321,27 @@ static void draw_strips_background(const TimelineDrawContext &ctx,
     }
     data.col_background = color_pack(col);
 
+    const bool show_thumbnails = (ctx.sseq->timeline_overlay.flag &
+                                  SEQ_TIMELINE_STRIP_END_THUMBNAILS) ||
+                                 (ctx.sseq->timeline_overlay.flag &
+                                  SEQ_TIMELINE_CONTINUOUS_THUMBNAILS);
+    /* Darker color band for thumbnail strips. */
+    if (show_overlay && seq::strip_can_have_thumbnail(scene, strip.strip) && show_thumbnails) {
+      /* The more negative the offset, darker the color. */
+      const int color_offset = -20;
+      uchar col_in[3] = {col[0], col[1], col[2]};
+      uchar col_out[3];
+
+      ui::theme::get_color_shade_3ubv(col_in, color_offset, col_out);
+
+      col[0] = col_out[0];
+      col[1] = col_out[1];
+      col[2] = col_out[2];
+
+      data.flags |= GPU_SEQ_FLAG_COLOR_BAND;
+      data.col_color_band = color_pack(col);
+    }
+
     /* Color band state. */
     if (show_overlay && (strip.strip->type == STRIP_TYPE_COLOR)) {
       data.flags |= GPU_SEQ_FLAG_COLOR_BAND;
@@ -1302,7 +1352,7 @@ static void draw_strips_background(const TimelineDrawContext &ctx,
 
     /* Transition state. */
     if (show_overlay && strip.can_draw_strip_content &&
-        seq::effect_is_transition(StripType(strip.strip->type)))
+        seq::effect_is_transition(strip.strip->type) && strip.strip->input1 && strip.strip->input2)
     {
       data.flags |= GPU_SEQ_FLAG_TRANSITION;
 
@@ -1503,6 +1553,8 @@ static void draw_seq_strips(const TimelineDrawContext &ctx,
     return;
   }
 
+  PRF_scope_with_name("SeqTimelineStrips", ProfileCategory::Draw);
+
   ui::view2d_view_ortho(ctx.v2d);
 
   /* Draw parts of strips below thumbnails. */
@@ -1603,7 +1655,7 @@ static void draw_timeline_sfra_efra(const TimelineDrawContext &ctx)
   ctx.quads->draw();
 
   /* While in meta strip, draw a checkerboard overlay outside of frame range. */
-  if (ed && !BLI_listbase_is_empty(&ed->metastack)) {
+  if (ed && !ed->metastack.is_empty()) {
     const MetaStack *ms = static_cast<const MetaStack *>(ed->metastack.last);
 
     uint pos = GPU_vertformat_attr_add(immVertexFormat(), "pos", gpu::VertAttrType::SFLOAT_32_32);
@@ -1834,6 +1886,8 @@ static void draw_timeline_post_view_callbacks(const TimelineDrawContext &ctx)
 
 void draw_timeline_seq(const bContext *C, const ARegion *region)
 {
+  PRF_scope_with_name("SeqTimelineDraw", ProfileCategory::Draw);
+
   SeqQuadsBatch quads_batch;
   TimelineDrawContext ctx = timeline_draw_context_get(C, &quads_batch);
   StripsDrawBatch strips_batch(ctx.v2d);

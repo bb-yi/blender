@@ -40,25 +40,6 @@ static void scale_input_assign(const Span<T> src,
   }
 }
 
-/**
- * The Bezier control point and its handles become three control points on the NURBS curve,
- * so each attribute value is duplicated three times.
- */
-template<typename T> static void bezier_generic_to_nurbs(const Span<T> src, MutableSpan<T> dst)
-{
-  for (const int i : src.index_range()) {
-    dst[i * 3] = src[i];
-    dst[i * 3 + 1] = src[i];
-    dst[i * 3 + 2] = src[i];
-  }
-}
-
-static void bezier_generic_to_nurbs(const GSpan src, GMutableSpan dst)
-{
-  bke::attribute_math::to_static_type(
-      src.type(), [&]<typename T>() { bezier_generic_to_nurbs(src.typed<T>(), dst.typed<T>()); });
-}
-
 static void bezier_positions_to_nurbs(const Span<float3> src_positions,
                                       const Span<float3> src_handles_l,
                                       const Span<float3> src_handles_r,
@@ -116,38 +97,6 @@ static void catmull_rom_to_nurbs_positions(const Span<float3> src_positions,
   Array<float3, 32> bezier_handles_r(src_positions.size());
   catmull_rom_to_bezier_handles(src_positions, cyclic, bezier_handles_l, bezier_handles_r);
   bezier_positions_to_nurbs(src_positions, bezier_handles_l, bezier_handles_r, dst_positions);
-}
-
-template<typename T>
-static void nurbs_to_bezier_assign(const Span<T> src,
-                                   const MutableSpan<T> dst,
-                                   const KnotsMode knots_mode)
-{
-  switch (knots_mode) {
-    case NURBS_KNOT_MODE_NORMAL:
-      for (const int i : dst.index_range()) {
-        dst[i] = src[(i + 1) % src.size()];
-      }
-      break;
-    case NURBS_KNOT_MODE_ENDPOINT:
-      for (const int i : dst.index_range().drop_back(1).drop_front(1)) {
-        dst[i] = src[i + 1];
-      }
-      dst.first() = src.first();
-      dst.last() = src.last();
-      break;
-    default:
-      /* Every 3rd NURBS position (starting from index 1) should have its attributes transferred.
-       */
-      scale_input_assign<T>(src, 3, 1, dst);
-  }
-}
-
-static void nurbs_to_bezier_assign(const GSpan src, const KnotsMode knots_mode, GMutableSpan dst)
-{
-  bke::attribute_math::to_static_type(src.type(), [&]<typename T>() {
-    nurbs_to_bezier_assign(src.typed<T>(), dst.typed<T>(), knots_mode);
-  });
 }
 
 static Vector<float3> create_nurbs_to_bezier_handles(const Span<float3> nurbs_positions,
@@ -283,12 +232,14 @@ static bke::CurvesGeometry convert_curves_to_bezier(const bke::CurvesGeometry &s
 
   MutableSpan<int> dst_offsets = dst_curves.offsets_for_write();
   offset_indices::copy_group_sizes(src_points_by_curve, unselected, dst_offsets);
-  selection.foreach_index(GrainSize(1024), [&](const int i) {
-    dst_offsets[i] = to_bezier_size(CurveType(src_types[i]),
-                                    src_cyclic[i],
-                                    KnotsMode(src_knot_modes[i]),
-                                    src_points_by_curve[i].size());
-  });
+  selection.foreach_index(
+      [&](const int i) {
+        dst_offsets[i] = to_bezier_size(CurveType(src_types[i]),
+                                        src_cyclic[i],
+                                        KnotsMode(src_knot_modes[i]),
+                                        src_points_by_curve[i].size());
+      },
+      exec_mode::grain_size(1024));
   offset_indices::accumulate_counts_to_offsets(dst_offsets);
   dst_curves.resize(dst_offsets.last(), dst_curves.curves_num());
   const OffsetIndices dst_points_by_curve = dst_curves.points_by_curve();
@@ -315,14 +266,16 @@ static bke::CurvesGeometry convert_curves_to_bezier(const bke::CurvesGeometry &s
     array_utils::copy_group_to_group(
         src_points_by_curve, dst_points_by_curve, selection, src_positions, dst_positions);
 
-    selection.foreach_index(GrainSize(512), [&](const int i) {
-      const IndexRange src_points = src_points_by_curve[i];
-      const IndexRange dst_points = dst_points_by_curve[i];
-      catmull_rom_to_bezier_handles(src_positions.slice(src_points),
-                                    src_cyclic[i],
-                                    dst_handles_l.slice(dst_points),
-                                    dst_handles_r.slice(dst_points));
-    });
+    selection.foreach_index(
+        [&](const int i) {
+          const IndexRange src_points = src_points_by_curve[i];
+          const IndexRange dst_points = dst_points_by_curve[i];
+          catmull_rom_to_bezier_handles(src_positions.slice(src_points),
+                                        src_cyclic[i],
+                                        dst_handles_l.slice(dst_points),
+                                        dst_handles_r.slice(dst_points));
+        },
+        exec_mode::grain_size(512));
 
     for (bke::AttributeTransferData &attribute : generic_attributes) {
       if (attributes_to_skip.contains(attribute.name)) {
@@ -384,52 +337,80 @@ static bke::CurvesGeometry convert_curves_to_bezier(const bke::CurvesGeometry &s
     bke::curves::fill_points<int8_t>(
         dst_points_by_curve, selection, BEZIER_HANDLE_ALIGN, dst_types_r);
 
-    selection.foreach_index(GrainSize(64), [&](const int i) {
-      const IndexRange src_points = src_points_by_curve[i];
-      const IndexRange dst_points = dst_points_by_curve[i];
-      const Span<float3> src_curve_positions = src_positions.slice(src_points);
-      if (dst_points.size() == 1) {
-        const float3 &position = src_positions[src_points.first()];
-        dst_positions[dst_points.first()] = position;
-        dst_handles_l[dst_points.first()] = position;
-        dst_handles_r[dst_points.first()] = position;
-        return;
-      }
+    selection.foreach_index(
+        [&](const int i) {
+          const IndexRange src_points = src_points_by_curve[i];
+          const IndexRange dst_points = dst_points_by_curve[i];
+          const Span<float3> src_curve_positions = src_positions.slice(src_points);
+          if (dst_points.size() == 1) {
+            const float3 &position = src_positions[src_points.first()];
+            dst_positions[dst_points.first()] = position;
+            dst_handles_l[dst_points.first()] = position;
+            dst_handles_r[dst_points.first()] = position;
+            return;
+          }
 
-      KnotsMode knots_mode = KnotsMode(src_knot_modes[i]);
-      Span<float3> nurbs_positions = src_curve_positions;
-      Vector<float3> nurbs_positions_vector;
-      if (src_cyclic[i] && is_nurbs_to_bezier_one_to_one(knots_mode)) {
-        /* For conversion treat this as periodic closed curve. Extend NURBS hull to first and
-         * second point which will act as a skeleton for placing Bezier handles. */
-        nurbs_positions_vector.extend(src_curve_positions);
-        nurbs_positions_vector.append(src_curve_positions[0]);
-        nurbs_positions_vector.append(src_curve_positions[1]);
-        nurbs_positions = nurbs_positions_vector;
-        knots_mode = NURBS_KNOT_MODE_NORMAL;
-      }
+          KnotsMode knots_mode = KnotsMode(src_knot_modes[i]);
+          Span<float3> nurbs_positions = src_curve_positions;
+          Vector<float3> nurbs_positions_vector;
+          if (src_cyclic[i] && is_nurbs_to_bezier_one_to_one(knots_mode)) {
+            /* For conversion treat this as periodic closed curve. Extend NURBS hull to first and
+             * second point which will act as a skeleton for placing Bezier handles. */
+            nurbs_positions_vector.extend(src_curve_positions);
+            nurbs_positions_vector.append(src_curve_positions[0]);
+            nurbs_positions_vector.append(src_curve_positions[1]);
+            nurbs_positions = nurbs_positions_vector;
+            knots_mode = NURBS_KNOT_MODE_NORMAL;
+          }
 
-      const Vector<float3> handle_positions = create_nurbs_to_bezier_handles(nurbs_positions,
-                                                                             knots_mode);
+          const Vector<float3> handle_positions = create_nurbs_to_bezier_handles(nurbs_positions,
+                                                                                 knots_mode);
 
-      scale_input_assign(handle_positions.as_span(), 2, 0, dst_handles_l.slice(dst_points));
-      scale_input_assign(handle_positions.as_span(), 2, 1, dst_handles_r.slice(dst_points));
+          scale_input_assign(handle_positions.as_span(), 2, 0, dst_handles_l.slice(dst_points));
+          scale_input_assign(handle_positions.as_span(), 2, 1, dst_handles_r.slice(dst_points));
 
-      create_nurbs_to_bezier_positions(
-          nurbs_positions, handle_positions, knots_mode, dst_positions.slice(dst_points));
-    });
+          create_nurbs_to_bezier_positions(
+              nurbs_positions, handle_positions, knots_mode, dst_positions.slice(dst_points));
+        },
+        exec_mode::grain_size(64));
+
+    const IndexMask selection_points = bke::curves::curve_to_point_selection(
+        dst_points_by_curve, selection, memory);
+    Array<int> src_point_by_dst_point(selection_points.min_array_size());
+    selection.foreach_index(
+        [&](const int curve) {
+          const IndexRange src_points = src_points_by_curve[curve];
+          const IndexRange dst_points = dst_points_by_curve[curve];
+          MutableSpan<int> dst = src_point_by_dst_point.as_mutable_span().slice(dst_points);
+          switch (KnotsMode(src_knot_modes[curve])) {
+            case NURBS_KNOT_MODE_NORMAL:
+              for (const int i : dst.index_range()) {
+                dst[i] = src_points[(i + 1) % src_points.size()];
+              }
+              break;
+            case NURBS_KNOT_MODE_ENDPOINT:
+              for (const int i : dst.index_range().drop_back(1).drop_front(1)) {
+                dst[i] = src_points[i + 1];
+              }
+              dst.first() = src_points.first();
+              dst.last() = src_points.last();
+              break;
+            default:
+              /* Every 3rd NURBS position (starting from index 1) should have data transferred. */
+              for (const int i : dst.index_range()) {
+                dst[i] = src_points[i * 3 + 1];
+              }
+              break;
+          }
+        },
+        exec_mode::grain_size(512));
 
     for (bke::AttributeTransferData &attribute : generic_attributes) {
       if (attributes_to_skip.contains(attribute.name)) {
         continue;
       }
-      selection.foreach_index(GrainSize(512), [&](const int i) {
-        const IndexRange src_points = src_points_by_curve[i];
-        const IndexRange dst_points = dst_points_by_curve[i];
-        nurbs_to_bezier_assign(attribute.src.slice(src_points),
-                               KnotsMode(src_knot_modes[i]),
-                               attribute.dst.span.slice(dst_points));
-      });
+      bke::attribute_math::gather(
+          attribute.src, src_point_by_dst_point, selection_points, attribute.dst.span);
     }
   };
 
@@ -470,9 +451,11 @@ static bke::CurvesGeometry convert_curves_to_nurbs(const bke::CurvesGeometry &sr
 
   MutableSpan<int> dst_offsets = dst_curves.offsets_for_write();
   offset_indices::copy_group_sizes(src_points_by_curve, unselected, dst_offsets);
-  selection.foreach_index(GrainSize(1024), [&](const int i) {
-    dst_offsets[i] = to_nurbs_size(CurveType(src_types[i]), src_points_by_curve[i].size());
-  });
+  selection.foreach_index(
+      [&](const int i) {
+        dst_offsets[i] = to_nurbs_size(CurveType(src_types[i]), src_points_by_curve[i].size());
+      },
+      exec_mode::grain_size(1024));
   offset_indices::accumulate_counts_to_offsets(dst_offsets);
   dst_curves.resize(dst_offsets.last(), dst_curves.curves_num());
   const OffsetIndices dst_points_by_curve = dst_curves.points_by_curve();
@@ -495,32 +478,52 @@ static bke::CurvesGeometry convert_curves_to_nurbs(const bke::CurvesGeometry &sr
     }
   };
 
+  auto bezier_to_nurbs_copy_attributes = [&](const IndexMask &selection) {
+    const IndexMask selection_points = bke::curves::curve_to_point_selection(
+        dst_points_by_curve, selection, memory);
+    Array<int> src_point_by_dst_point(selection_points.min_array_size());
+    selection.foreach_index(
+        [&](const int curve) {
+          const IndexRange src_points = src_points_by_curve[curve];
+          const IndexRange dst_points = dst_points_by_curve[curve];
+          MutableSpan<int> dst = src_point_by_dst_point.as_mutable_span().slice(dst_points);
+          /* The Bezier control point and its handles become three control points on the NURBS
+           * curve, so each attribute value is duplicated three times. */
+          for (const int i : src_points.index_range()) {
+            dst[i * 3] = src_points[i];
+            dst[i * 3 + 1] = src_points[i];
+            dst[i * 3 + 2] = src_points[i];
+          }
+        },
+        exec_mode::grain_size(512));
+
+    for (bke::AttributeTransferData &attribute : generic_attributes) {
+      if (attributes_to_skip.contains(attribute.name)) {
+        continue;
+      }
+      bke::attribute_math::gather(
+          attribute.src, src_point_by_dst_point, selection_points, attribute.dst.span);
+    }
+  };
+
   auto catmull_rom_to_nurbs = [&](const IndexMask &selection) {
     index_mask::masked_fill<int8_t>(dst_curves.nurbs_orders_for_write(), 4, selection);
     index_mask::masked_fill<int8_t>(
         dst_curves.nurbs_knots_modes_for_write(), NURBS_KNOT_MODE_BEZIER, selection);
     fill_weights_if_necessary(selection);
 
-    selection.foreach_segment(GrainSize(512), [&](const IndexMaskSegment segment) {
-      for (const int i : segment) {
-        const IndexRange src_points = src_points_by_curve[i];
-        const IndexRange dst_points = dst_points_by_curve[i];
-        catmull_rom_to_nurbs_positions(
-            src_positions.slice(src_points), src_cyclic[i], dst_positions.slice(dst_points));
-      }
-    });
+    selection.foreach_segment(
+        [&](const IndexMaskSegment segment) {
+          for (const int i : segment) {
+            const IndexRange src_points = src_points_by_curve[i];
+            const IndexRange dst_points = dst_points_by_curve[i];
+            catmull_rom_to_nurbs_positions(
+                src_positions.slice(src_points), src_cyclic[i], dst_positions.slice(dst_points));
+          }
+        },
+        exec_mode::grain_size(512));
 
-    for (bke::AttributeTransferData &attribute : generic_attributes) {
-      if (attributes_to_skip.contains(attribute.name)) {
-        continue;
-      }
-      selection.foreach_index(GrainSize(512), [&](const int i) {
-        const IndexRange src_points = src_points_by_curve[i];
-        const IndexRange dst_points = dst_points_by_curve[i];
-        bezier_generic_to_nurbs(attribute.src.slice(src_points),
-                                attribute.dst.span.slice(dst_points));
-      });
-    }
+    bezier_to_nurbs_copy_attributes(selection);
   };
 
   auto poly_to_nurbs = [&](const IndexMask &selection) {
@@ -540,9 +543,11 @@ static bke::CurvesGeometry convert_curves_to_nurbs(const bke::CurvesGeometry &sr
     else {
       VArraySpan<bool> cyclic{src_cyclic};
       MutableSpan<int8_t> knots_modes = dst_curves.nurbs_knots_modes_for_write();
-      selection.foreach_index_optimized<int>(GrainSize(1024), [&](const int i) {
-        knots_modes[i] = cyclic[i] ? NURBS_KNOT_MODE_NORMAL : NURBS_KNOT_MODE_ENDPOINT;
-      });
+      selection.foreach_index_optimized<int>(
+          [&](const int i) {
+            knots_modes[i] = cyclic[i] ? NURBS_KNOT_MODE_NORMAL : NURBS_KNOT_MODE_ENDPOINT;
+          },
+          exec_mode::grain_size(4096));
     }
 
     for (bke::AttributeTransferData &attribute : generic_attributes) {
@@ -563,26 +568,18 @@ static bke::CurvesGeometry convert_curves_to_nurbs(const bke::CurvesGeometry &sr
         dst_curves.nurbs_knots_modes_for_write(), NURBS_KNOT_MODE_BEZIER, selection);
     fill_weights_if_necessary(selection);
 
-    selection.foreach_index(GrainSize(512), [&](const int i) {
-      const IndexRange src_points = src_points_by_curve[i];
-      const IndexRange dst_points = dst_points_by_curve[i];
-      bezier_positions_to_nurbs(src_positions.slice(src_points),
-                                src_handles_l.slice(src_points),
-                                src_handles_r.slice(src_points),
-                                dst_positions.slice(dst_points));
-    });
+    selection.foreach_index(
+        [&](const int i) {
+          const IndexRange src_points = src_points_by_curve[i];
+          const IndexRange dst_points = dst_points_by_curve[i];
+          bezier_positions_to_nurbs(src_positions.slice(src_points),
+                                    src_handles_l.slice(src_points),
+                                    src_handles_r.slice(src_points),
+                                    dst_positions.slice(dst_points));
+        },
+        exec_mode::grain_size(512));
 
-    for (bke::AttributeTransferData &attribute : generic_attributes) {
-      if (attributes_to_skip.contains(attribute.name)) {
-        continue;
-      }
-      selection.foreach_index(GrainSize(512), [&](const int i) {
-        const IndexRange src_points = src_points_by_curve[i];
-        const IndexRange dst_points = dst_points_by_curve[i];
-        bezier_generic_to_nurbs(attribute.src.slice(src_points),
-                                attribute.dst.span.slice(dst_points));
-      });
-    }
+    bezier_to_nurbs_copy_attributes(selection);
   };
 
   auto nurbs_to_nurbs = [&](const IndexMask &selection) {
@@ -663,17 +660,19 @@ static bke::CurvesGeometry convert_curves_to_catmull_rom_or_poly(
 
   MutableSpan<int> dst_offsets = dst_curves.offsets_for_write();
   offset_indices::copy_group_sizes(src_points_by_curve, unselected, dst_offsets);
-  selection.foreach_index(GrainSize(1024), [&](const int i) {
-    const IndexRange src_points = src_points_by_curve[i];
-    const CurveType src_curve_type = CurveType(src_types[i]);
-    int &size = dst_offsets[i];
-    if (src_curve_type == CURVE_TYPE_BEZIER) {
-      size = src_points.size() * 3;
-    }
-    else {
-      size = src_points.size();
-    }
-  });
+  selection.foreach_index(
+      [&](const int i) {
+        const IndexRange src_points = src_points_by_curve[i];
+        const CurveType src_curve_type = CurveType(src_types[i]);
+        int &size = dst_offsets[i];
+        if (src_curve_type == CURVE_TYPE_BEZIER) {
+          size = src_points.size() * 3;
+        }
+        else {
+          size = src_points.size();
+        }
+      },
+      exec_mode::grain_size(1024));
   offset_indices::accumulate_counts_to_offsets(dst_offsets);
   dst_curves.resize(dst_offsets.last(), dst_curves.curves_num());
   const OffsetIndices dst_points_by_curve = dst_curves.points_by_curve();
@@ -766,17 +765,16 @@ static bke::CurvesGeometry convert_bezier_or_catmull_rom_to_poly_before_conversi
 {
   const VArray<int8_t> src_curve_types = src_curves.curve_types();
   IndexMaskMemory memory;
-  const IndexMask mask = IndexMask::from_predicate(
-      selection, GrainSize(4096), memory, [&](const int curve_i) {
-        const CurveType type = CurveType(src_curve_types[curve_i]);
-        if (!options.keep_bezier_shape_as_nurbs && type == CURVE_TYPE_BEZIER) {
-          return true;
-        }
-        if (!options.keep_catmull_rom_shape_as_nurbs && type == CURVE_TYPE_CATMULL_ROM) {
-          return true;
-        }
-        return false;
-      });
+  const IndexMask mask = IndexMask::from_predicate(selection, memory, [&](const int curve_i) {
+    const CurveType type = CurveType(src_curve_types[curve_i]);
+    if (!options.keep_bezier_shape_as_nurbs && type == CURVE_TYPE_BEZIER) {
+      return true;
+    }
+    if (!options.keep_catmull_rom_shape_as_nurbs && type == CURVE_TYPE_CATMULL_ROM) {
+      return true;
+    }
+    return false;
+  });
   return convert_curves_trivial(src_curves, mask, CURVE_TYPE_POLY);
 }
 

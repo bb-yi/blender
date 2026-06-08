@@ -101,9 +101,9 @@ static void detect_retrieve_libmv_features(MovieTracking *tracking,
     if (ok) {
       MovieTrackingTrack *track = BKE_tracking_track_add(
           tracking, tracksbase, xu, yu, framenr, width, height);
-      track->flag |= SELECT;
-      track->pat_flag |= SELECT;
-      track->search_flag |= SELECT;
+      track->flag |= TRACK_SELECT;
+      track->pat_flag |= TRACK_SELECT;
+      track->search_flag |= TRACK_SELECT;
     }
   }
 }
@@ -118,11 +118,11 @@ static void run_configured_detector(MovieTracking *tracking,
 {
   libmv_Features *features = nullptr;
 
-  if (ibuf->float_buffer.data) {
-    features = libmv_detectFeaturesFloat(ibuf->float_buffer.data, ibuf->x, ibuf->y, 4, options);
+  if (ibuf->float_data()) {
+    features = libmv_detectFeaturesFloat(ibuf->float_data(), ibuf->x, ibuf->y, 4, options);
   }
-  else if (ibuf->byte_buffer.data) {
-    features = libmv_detectFeaturesByte(ibuf->byte_buffer.data, ibuf->x, ibuf->y, 4, options);
+  else if (ibuf->byte_data()) {
+    features = libmv_detectFeaturesByte(ibuf->byte_data(), ibuf->x, ibuf->y, 4, options);
   }
 
   if (features != nullptr) {

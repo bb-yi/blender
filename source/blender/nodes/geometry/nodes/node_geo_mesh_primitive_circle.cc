@@ -24,16 +24,16 @@ NODE_STORAGE_FUNCS(NodeGeometryMeshCircle)
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Int>("Vertices")
+  b.add_input<decl::Int>("Vertices"_ustr)
       .default_value(32)
       .min(3)
       .description("Number of vertices on the circle");
-  b.add_input<decl::Float>("Radius")
+  b.add_input<decl::Float>("Radius"_ustr)
       .default_value(1.0f)
       .min(0.0f)
       .subtype(PROP_DISTANCE)
       .description("Distance of the vertices from the origin");
-  b.add_output<decl::Geometry>("Mesh");
+  b.add_output<decl::Geometry>("Mesh"_ustr);
 }
 
 static void node_layout(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
@@ -125,7 +125,9 @@ static Mesh *create_circle_mesh(const float radius,
   MutableSpan<int> face_offsets = mesh->face_offsets_for_write();
   MutableSpan<int> corner_verts = mesh->corner_verts_for_write();
   MutableSpan<int> corner_edges = mesh->corner_edges_for_write();
-  bke::mesh_smooth_set(*mesh, false);
+  if (fill_type != GEO_NODE_MESH_CIRCLE_FILL_NONE) {
+    bke::mesh_smooth_set(*mesh, false);
+  }
 
   /* Assign vertex coordinates. */
   const float angle_delta = 2.0f * (M_PI / float(verts_num));
@@ -191,8 +193,8 @@ static void node_geo_exec(GeoNodeExecParams params)
   const NodeGeometryMeshCircle &storage = node_storage(params.node());
   const GeometryNodeMeshCircleFillType fill = GeometryNodeMeshCircleFillType(storage.fill_type);
 
-  const float radius = params.extract_input<float>("Radius");
-  const int verts_num = params.extract_input<int>("Vertices");
+  const float radius = params.extract_input<float>("Radius"_ustr);
+  const int verts_num = params.extract_input<int>("Vertices"_ustr);
   if (verts_num < 3) {
     params.error_message_add(NodeWarningType::Info, TIP_("Vertices must be at least 3"));
     params.set_default_remaining_outputs();
@@ -201,7 +203,7 @@ static void node_geo_exec(GeoNodeExecParams params)
 
   Mesh *mesh = create_circle_mesh(radius, verts_num, fill);
 
-  params.set_output("Mesh", GeometrySet::from_mesh(mesh));
+  params.set_output("Mesh"_ustr, GeometrySet::from_mesh(mesh));
 }
 
 static void node_rna(StructRNA *srna)
@@ -221,7 +223,7 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  geo_node_type_base(&ntype, "GeometryNodeMeshCircle", GEO_NODE_MESH_PRIMITIVE_CIRCLE);
+  geo_node_type_base(&ntype, "GeometryNodeMeshCircle"_ustr, GEO_NODE_MESH_PRIMITIVE_CIRCLE);
   ntype.ui_name = "Mesh Circle";
   ntype.ui_description = "Generate a circular ring of edges";
   ntype.enum_name_legacy = "MESH_PRIMITIVE_CIRCLE";

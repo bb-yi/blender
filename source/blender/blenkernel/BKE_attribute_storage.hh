@@ -6,12 +6,15 @@
 
 #include <variant>
 
-#include "BLI_function_ref.hh"
 #include "BLI_implicit_sharing_ptr.hh"
+#include "BLI_map.hh"
 #include "BLI_memory_counter_fwd.hh"
 #include "BLI_random_access_iterator_mixin.hh"
+#include "BLI_set.hh"
 #include "BLI_string_ref.hh"
 #include "BLI_vector_set.hh"
+
+#include "BKE_attribute_enums.hh"
 
 #include "DNA_attribute_types.h"
 
@@ -161,6 +164,8 @@ class AttributeStorage : public blender::AttributeStorage {
    * not be called while iterating over attributes.
    */
   bool remove(StringRef name);
+  bool remove(const Set<StringRef> &names);
+  bool remove(const Set<const Attribute *> &attributes);
 
   /**
    * Add an attribute with the given name, which must not already be used by an existing attribute
@@ -176,6 +181,8 @@ class AttributeStorage : public blender::AttributeStorage {
 
   /** Change the name of a single existing attribute. */
   void rename(StringRef old_name, std::string new_name);
+  void rename(Attribute &attr, std::string new_name);
+  void rename(const Map<Attribute *, StringRef> &renames);
 
   /**
    * Resize the data for a given domain. New values will be default initialized (meaning no zero
@@ -193,9 +200,10 @@ class AttributeStorage : public blender::AttributeStorage {
    * #attribute_storage_blend_write_prepare for more information.
    */
   struct BlendWriteData {
+    BlendWriter *writer;
     ResourceScope &scope;
     Vector<blender::Attribute, 16> &attributes;
-    explicit BlendWriteData(ResourceScope &scope);
+    explicit BlendWriteData(BlendWriter *writer, ResourceScope &scope);
   };
   /**
    * Write the prepared data and the data stored in the DNA fields in
@@ -284,6 +292,17 @@ inline AttrType Attribute::data_type() const
 inline const Attribute::DataVariant &Attribute::data() const
 {
   return data_;
+}
+
+inline AttrStorageType Attribute::storage_type() const
+{
+  static_assert(std::is_same_v<
+                std::variant_alternative_t<int(AttrStorageType::Array), Attribute::DataVariant>,
+                Attribute::ArrayData>);
+  static_assert(std::is_same_v<
+                std::variant_alternative_t<int(AttrStorageType::Single), Attribute::DataVariant>,
+                Attribute::SingleData>);
+  return AttrStorageType(data_.index());
 }
 
 inline void Attribute::assign_data(DataVariant &&data)

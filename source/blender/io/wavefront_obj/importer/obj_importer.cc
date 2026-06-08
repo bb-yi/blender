@@ -107,7 +107,7 @@ static void geometry_to_blender_geometry_set(const OBJImportParams &import_param
       geometry_set = bke::GeometrySet::from_curves(curves_id);
     }
 
-    geometry_set.name = geometry->geometry_name_;
+    geometry_set.set_name(geometry->geometry_name_);
     geometries.append(std::move(geometry_set));
   }
 }
@@ -177,7 +177,7 @@ static void geometry_to_blender_objects(Main *bmain,
   }
 
   /* Do object selections in a separate loop (allows just one view layer sync). */
-  BKE_view_layer_synced_ensure(scene, view_layer);
+  BKE_view_layer_synced_ensure(*bmain, scene, view_layer);
   bool has_instantiated_object = false;
   bool has_uninstantiated_object = false;
   for (Object *obj : objects) {
@@ -206,16 +206,14 @@ static void geometry_to_blender_objects(Main *bmain,
   DEG_relations_tag_update(bmain);
 }
 
-void importer_geometry(const OBJImportParams &import_params,
-                       Vector<bke::GeometrySet> &geometries,
-                       size_t read_buffer_size)
+void importer_geometry(const OBJImportParams &import_params, Vector<bke::GeometrySet> &geometries)
 {
   /* List of geometries to be parsed from OBJ file. */
   Vector<std::unique_ptr<Geometry>> all_geometries;
   /* Container for vertex and UV vertex coordinates. */
   GlobalVertices global_vertices;
 
-  OBJParser obj_parser{import_params, read_buffer_size};
+  OBJParser obj_parser{import_params};
   obj_parser.parse(all_geometries, global_vertices);
 
   geometry_to_blender_geometry_set(import_params, all_geometries, global_vertices, geometries);
@@ -226,15 +224,7 @@ void importer_main(bContext *C, const OBJImportParams &import_params)
   Main *bmain = CTX_data_main(C);
   Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
-  importer_main(bmain, scene, view_layer, import_params);
-}
 
-void importer_main(Main *bmain,
-                   Scene *scene,
-                   ViewLayer *view_layer,
-                   const OBJImportParams &import_params,
-                   size_t read_buffer_size)
-{
   /* List of geometries to be parsed from OBJ file. */
   Vector<std::unique_ptr<Geometry>> all_geometries;
   /* Container for vertex and UV vertex coordinates. */
@@ -243,7 +233,7 @@ void importer_main(Main *bmain,
   Map<std::string, std::unique_ptr<MTLMaterial>> materials;
   Map<std::string, Material *> created_materials;
 
-  OBJParser obj_parser{import_params, read_buffer_size};
+  OBJParser obj_parser{import_params};
   obj_parser.parse(all_geometries, global_vertices);
 
   /* Parse all referenced MTL files */
@@ -253,7 +243,7 @@ void importer_main(Main *bmain,
   }
 
   if (import_params.clear_selection) {
-    BKE_view_layer_base_deselect_all(scene, view_layer);
+    BKE_view_layer_base_deselect_all(*bmain, scene, view_layer);
   }
 
   LayerCollection *lc = BKE_layer_collection_get_active_editable(view_layer);

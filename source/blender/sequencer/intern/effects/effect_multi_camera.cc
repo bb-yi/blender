@@ -1,0 +1,65 @@
+/* SPDX-FileCopyrightText: 2024 Blender Authors
+ *
+ * SPDX-License-Identifier: GPL-2.0-or-later */
+
+/** \file
+ * \ingroup sequencer
+ */
+
+#include "DNA_scene_types.h"
+#include "DNA_sequence_types.h"
+
+#include "PRF_profile.hh"
+
+#include "SEQ_channels.hh"
+#include "SEQ_render.hh"
+#include "SEQ_utils.hh"
+
+#include "effects.hh"
+#include "render.hh"
+
+namespace blender::seq {
+
+static StripEarlyOut early_out_multicam(const Strip * /*strip*/, float /*fac*/)
+{
+  return StripEarlyOut::NoInput;
+}
+
+static SeqResult do_multicam(const RenderData *context,
+                             SeqRenderState *state,
+                             Strip *strip,
+                             float timeline_frame,
+                             float /*fac*/,
+                             const SeqResult & /*ibuf1*/,
+                             const SeqResult & /*ibuf2*/)
+{
+  PRF_scope_with_name("SeqFxMultiCam", ProfileCategory::Draw);
+  if (strip->multicam_source == 0 || strip->multicam_source >= strip->channel) {
+    return {};
+  }
+
+  Editing *ed = context->scene->ed;
+  if (!ed || state->strips_in_progress.contains(strip)) {
+    return {};
+  }
+  ListBaseT<Strip> *seqbasep = get_seqbase_by_strip(context->scene, strip);
+  ListBaseT<SeqTimelineChannel> *channels = get_channels_by_strip(ed, strip);
+  if (!seqbasep) {
+    return {};
+  }
+
+  state->strips_in_progress.add(strip);
+  SeqResult out = seq_render_give_ibuf_seqbase(
+      context, state, timeline_frame, strip->multicam_source, channels, seqbasep);
+  state->strips_in_progress.remove(strip);
+
+  return out;
+}
+
+void multi_camera_effect_get_handle(EffectHandle &rval)
+{
+  rval.early_out = early_out_multicam;
+  rval.execute = do_multicam;
+}
+
+}  // namespace blender::seq

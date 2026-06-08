@@ -39,30 +39,33 @@ static void node_declare(NodeDeclarationBuilder &b)
 {
   b.use_custom_socket_order();
   b.allow_any_socket_order();
-  b.add_input<decl::Color>("Image")
+  b.add_input<decl::Color>("Image"_ustr)
       .default_value({1.0f, 1.0f, 1.0f, 1.0f})
       .hide_value()
       .structure_type(StructureType::Dynamic);
-  b.add_output<decl::Color>("Image").structure_type(StructureType::Dynamic).align_with_previous();
+  b.add_output<decl::Color>("Image"_ustr)
+      .structure_type(StructureType::Dynamic)
+      .align_with_previous();
 
-  b.add_input<decl::Float>("Size")
+  b.add_input<decl::Float>("Size"_ustr)
       .default_value(6.0f)
+      .subtype(PROP_PIXEL)
       .min(0.0f)
       .description("The size of the filter in pixels")
       .structure_type(StructureType::Dynamic);
-  b.add_input<decl::Menu>("Type")
+  b.add_input<decl::Menu>("Type"_ustr)
       .default_value(CMP_NODE_KUWAHARA_ANISOTROPIC)
       .static_items(type_items)
       .optional_label();
 
-  b.add_input<decl::Int>("Uniformity")
+  b.add_input<decl::Int>("Uniformity"_ustr)
       .default_value(4)
       .min(0)
       .usage_by_single_menu(CMP_NODE_KUWAHARA_ANISOTROPIC)
       .description(
           "Controls the uniformity of the direction of the filter. Higher values produces more "
           "uniform directions");
-  b.add_input<decl::Float>("Sharpness")
+  b.add_input<decl::Float>("Sharpness"_ustr)
       .default_value(1.0f)
       .subtype(PROP_FACTOR)
       .min(0.0f)
@@ -71,7 +74,7 @@ static void node_declare(NodeDeclarationBuilder &b)
       .description(
           "Controls the sharpness of the filter. 0 means completely smooth while 1 means "
           "completely sharp");
-  b.add_input<decl::Float>("Eccentricity")
+  b.add_input<decl::Float>("Eccentricity"_ustr)
       .default_value(1.0f)
       .subtype(PROP_FACTOR)
       .min(0.0f)
@@ -80,7 +83,7 @@ static void node_declare(NodeDeclarationBuilder &b)
       .description(
           "Controls how directional the filter is. 0 means the filter is completely "
           "omnidirectional while 2 means it is maximally directed along the edges of the image");
-  b.add_input<decl::Bool>("High Precision")
+  b.add_input<decl::Bool>("High Precision"_ustr)
       .default_value(false)
       .usage_by_single_menu(CMP_NODE_KUWAHARA_CLASSIC)
       .description(
@@ -831,7 +834,7 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, "CompositorNodeKuwahara", CMP_NODE_KUWAHARA);
+  cmp_node_type_base(&ntype, "CompositorNodeKuwahara"_ustr, CMP_NODE_KUWAHARA);
   ntype.ui_name = "Kuwahara";
   ntype.ui_description =
       "Apply smoothing filter that preserves edges, for stylized and painterly effects";
@@ -842,7 +845,7 @@ static void node_register()
   bke::node_type_storage(
       ntype, "NodeKuwaharaData", node_free_standard_storage, node_copy_standard_storage);
   ntype.get_compositor_operation = get_compositor_operation;
-  bke::node_type_size(ntype, 150, 140, NODE_DEFAULT_MAX_WIDTH);
+  ntype.default_width = bke::NodeWidth::_160;
 
   bke::node_register_type(ntype);
 }

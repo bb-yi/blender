@@ -11,6 +11,8 @@
 #include <optional>
 
 #include "BKE_brush.hh"
+#include "BKE_bvhutils.hh"
+#include "BKE_image_wrappers.hh"
 #include "BKE_paint.hh"
 #include "BKE_paint_bvh.hh"
 #include "BKE_subdiv_ccg.hh"
@@ -22,6 +24,8 @@
 #include "BLI_set.hh"
 #include "BLI_span.hh"
 #include "BLI_vector.hh"
+
+#include "IMB_colormanagement.hh"
 
 #include "DNA_brush_enums.h"
 #include "DNA_brush_types.h"
@@ -128,8 +132,6 @@ enum class UpdateType {
 
 static constexpr int face_set_none_id = 0;
 
-}  // namespace ed::sculpt_paint
-
 /* Factor of brush to have rake point following behind
  * (could be configurable but this is reasonable default). */
 #define SCULPT_RAKE_BRUSH_FACTOR 0.25f
@@ -140,19 +142,71 @@ struct SculptRakeData {
   float angle = 0.0f;
 };
 
-namespace ed::sculpt_paint {
 enum class TransformDisplacementMode {
   /* Displaces the elements from their original coordinates. */
   Original = 0,
   /* Displaces the elements incrementally from their previous position. */
   Incremental = 1,
 };
-}
 /* Defines how transform tools are going to apply its displacement. */
 
-namespace ed::sculpt_paint {
-
 static constexpr int plane_brush_max_rolling_average_num = 20;
+
+struct ProjectBrushTarget {
+  bke::BVHTreeFromMesh tree_data;
+  float4x4 active_to_target_matrix;
+};
+
+namespace paint::image {
+
+struct TileColorspaceProcessor : NonCopyable {
+  ColormanageProcessor buffer_to_linear_processor = {};
+  ColormanageProcessor linear_to_buffer_processor = {};
+  bool is_noop = true;
+};
+
+struct ImageData : NonCopyable {
+  Image *image = nullptr;
+  ImageUser *image_user = nullptr;
+
+  Map<bke::image::TileNumber, ImBuf *> buffers = {};
+  Map<bke::image::TileNumber, TileColorspaceProcessor> processors = {};
+
+  ~ImageData();
+
+  static std::unique_ptr<ImageData> init_active_image(Object &ob,
+                                                      PaintModeSettings &paint_mode_settings);
+};
+
+}  // namespace paint::image
+
+struct StrokeToggleSettings {
+  /**
+   * Whether the modifier key that controls inverting brush behavior is active currently.
+   *
+   * \see BrushStrokeMode::Invert.
+   */
+  bool invert = false;
+
+  /**
+   * Whether the modifier key that controls smoothing is active currently.
+   *
+   * \see BrushSwitchMode::Smooth.
+   */
+  bool alt_smooth = false;
+
+  /**
+   * Whether the modifier key that controls masking is active currently.
+   * Switches the active brush to the mask brush during the stroke.
+   *
+   * \see BrushSwitchMode::Mask.
+   */
+  bool alt_mask = false;
+
+  Brush *original_active_brush = nullptr;
+  BrushMaskTool original_brush_mask_tool = BRUSH_MASK_DRAW;
+  int original_brush_size = 0;
+};
 
 /**
  * This structure contains all the temporary data
@@ -179,6 +233,8 @@ struct StrokeCache {
    */
   bool initial_direction_flipped = false;
 
+  StrokeToggleSettings toggle_settings = {};
+
   /* Variants */
   float radius = 0.0f;
   float radius_squared = 0.0f;
@@ -199,15 +255,6 @@ struct StrokeCache {
 
   bool is_last_valid = false;
 
-  bool pen_flip = false;
-
-  /**
-   * Whether the modifier key that controls inverting brush behavior is active currently.
-   * Generally signals a change in behavior for brushes.
-   *
-   * \see BrushStrokeMode::Invert.
-   */
-  bool invert = false;
   float pressure = 0.0f;
   float hardness = 0.0f;
   /**
@@ -217,7 +264,6 @@ struct StrokeCache {
    * \see #brush_strength for Sculpt Mode.
    */
   float bstrength = 0.0f;
-  float normal_weight = 0.0f; /* from brush (with optional override) */
   float2 tilt = float2(0);
 
   /**
@@ -263,16 +309,12 @@ struct StrokeCache {
   /* The face set being painted. */
   int paint_face_set = face_set_none_id;
 
-  /**
-   * Symmetry index between 0 and 7 bit combo.
-   *
-   * 0 is Brush only; 1 is X mirror; 2 is Y mirror; 3 is XY; 4 is Z; 5 is XZ; 6 is YZ; 7 is XYZ.
-   */
-  int symmetry = 0;
   /* The symmetry pass we are currently on between 0 and 7. */
   ePaintSymmetryFlags mirror_symmetry_pass = ePaintSymmetryFlags(0);
   float3 view_normal = float3(0);
   float3 view_normal_symm = float3(0);
+  float3 view_origin = float3(0);
+  float3 view_origin_symm = float3(0);
 
   /**
    * The primary direction of influence for a brush stroke.
@@ -367,6 +409,9 @@ struct StrokeCache {
     bool first_time = false;
   } plane_brush;
 
+  /* Scene Project brush */
+  Vector<ProjectBrushTarget> project_targets;
+
   /* Cloth brush */
   std::unique_ptr<cloth::SimulationData> cloth_sim;
   float3 initial_location_symm = float3(0);
@@ -388,27 +433,6 @@ struct StrokeCache {
   float vertex_rotation = 0.0f;
   Dial *dial = nullptr;
 
-  Brush *saved_active_brush = nullptr;
-  char saved_mask_brush_tool = 0;
-  /* Smooth tool copies the size of the current tool. */
-  int saved_smooth_size = 0;
-
-  /**
-   * Whether the modifier key that controls smoothing is active currently.
-   * Generally signals a change in behavior for different brushes.
-   *
-   * \see BrushSwitchMode::Smooth.
-   */
-  bool alt_smooth = false;
-
-  /**
-   * Whether the modifier key that controls masking is active currently.
-   * Switches the active brush to the mask brush during the stroke.
-   *
-   * \see BrushSwitchMode::Mask.
-   */
-  bool alt_mask = false;
-
   float plane_trim_squared = 0.0f;
 
   bool supports_gravity = false;
@@ -420,11 +444,11 @@ struct StrokeCache {
   float4x4 stroke_local_mat = float4x4::identity();
   float multiplane_scrape_angle = 0.0f;
 
+  std::unique_ptr<paint::image::ImageData> image_data;
+
   StrokeCache();
   ~StrokeCache();
 };
-
-}  // namespace ed::sculpt_paint
 
 /** \} */
 
@@ -432,19 +456,18 @@ struct StrokeCache {
 /** \name Sculpt Poll Functions
  * \{ */
 
-bool SCULPT_mode_poll(bContext *C);
-bool SCULPT_mode_poll_view3d(bContext *C);
+bool sculpt_mode_poll(bContext *C);
+bool sculpt_mode_poll_view3d(bContext *C);
 /**
  * Checks for a brush, not just sculpt mode.
  */
-bool SCULPT_poll(bContext *C);
+bool sculpt_mode_and_brush_poll(bContext *C);
 
 /**
  * Determines whether or not the brush cursor should be shown in the viewport
  */
-bool SCULPT_brush_cursor_poll(bContext *C);
+bool brush_cursor_poll(bContext *C);
 
-namespace ed::sculpt_paint {
 /**
  * Returns true if the current Mesh type can handle color attributes. If false an error message
  * will be shown to the user.  Operators should return OPERATOR_CANCELLED in this case.
@@ -453,15 +476,12 @@ namespace ed::sculpt_paint {
  * in most cases a call to BKE_sculpt_color_layer_create_if_needed() is sufficient.
  */
 bool color_supported_check(const Scene &scene, Object &object, ReportList *reports);
-}  // namespace ed::sculpt_paint
 
 /** \} */
 
 /* -------------------------------------------------------------------- */
 /** \name Sculpt Update Functions
  * \{ */
-
-namespace ed::sculpt_paint {
 
 /**
  * Triggers redraws, updates, and dependency graph tags as necessary after each brush calculation.
@@ -477,19 +497,16 @@ void flush_update_done(ViewContext &vc,
                        Object &ob,
                        UpdateType update_type);
 
-}  // namespace ed::sculpt_paint
-
 /**
  * Should be used after modifying the mask or face set IDs.
  */
-void SCULPT_tag_update_overlays(bContext *C);
+void tag_update_overlays(bContext *C);
 /** \} */
 
 /* -------------------------------------------------------------------- */
 /** \name Stroke Functions
  * \{ */
 
-namespace ed::sculpt_paint {
 /**
  * Do a ray-cast in the tree to find the 3d brush location
  * (This allows us to ignore the GL depth buffer)
@@ -525,55 +542,47 @@ struct ActiveElementInfo {
 std::optional<ActiveElementInfo> active_element_info_get(ViewContext &vc, const float2 &mval);
 
 struct CursorGeometryInfo {
-  float3 location;
-  float3 normal;
+  float3 location = float3(0);
+  float3 normal = float3(0);
 };
 
 /**
  * Gets the normal, location and active vertex location of the geometry under the cursor. This also
  * updates the active vertex and cursor related data of the SculptSession using the mouse position
- *
- * TODO: This should be updated to return `std::optional<CursorGeometryInfo>`
  */
-bool cursor_geometry_info_update(bContext *C,
-                                 CursorGeometryInfo *out,
-                                 const float2 &mval,
-                                 bool use_sampled_normal);
-bool cursor_geometry_info_update(Depsgraph &depsgraph,
-                                 const Sculpt &sd,
-                                 ViewContext &vc,
-                                 const Base *base,
-                                 CursorGeometryInfo *out,
-                                 const float2 &mval,
-                                 bool use_sampled_normal);
+std::optional<CursorGeometryInfo> cursor_geometry_info_update(bContext *C,
+                                                              const float2 &mval,
+                                                              bool use_sampled_normal);
+std::optional<CursorGeometryInfo> cursor_geometry_info_update(Depsgraph &depsgraph,
+                                                              const Paint &paint,
+                                                              const Sculpt *sd,
+                                                              ViewContext &vc,
+                                                              const Base *base,
+                                                              const float2 &mval,
+                                                              bool use_sampled_normal);
 
 void geometry_preview_lines_update(Depsgraph &depsgraph,
                                    Object &object,
                                    SculptSession &ss,
                                    float radius);
 
-}  // namespace ed::sculpt_paint
-
-void SCULPT_stroke_modifiers_check(
+void stroke_modifiers_check(
     Depsgraph &depsgraph, RegionView3D *rv3d, const Sculpt &sd, Object &ob, const Brush *brush);
-void SCULPT_stroke_modifiers_check(const bContext *C, Object &ob, const Brush *brush);
-namespace ed::sculpt_paint {
+void stroke_modifiers_check(const bContext *C, Object &ob, const Brush *brush);
 float raycast_init(ViewContext *vc,
                    const float2 &mval,
                    float3 &ray_start,
                    float3 &ray_end,
                    float3 &ray_normal,
                    bool original);
-}
-
 /* Symmetry */
-ePaintSymmetryFlags SCULPT_mesh_symmetry_xyz_get(const Object &object);
+ePaintSymmetryFlags mesh_symmetry_xyz_get(const Object &object);
 
 /**
  * Returns true when the step belongs to the stroke that is directly performed by the brush and
  * not by one of the symmetry passes.
  */
-bool SCULPT_stroke_is_main_symmetry_pass(const ed::sculpt_paint::StrokeCache &cache);
+bool stroke_is_main_symmetry_pass(const ed::sculpt_paint::StrokeCache &cache);
 /**
  * Return true only once per stroke on the first symmetry pass, regardless of the symmetry passes
  * enabled.
@@ -581,21 +590,13 @@ bool SCULPT_stroke_is_main_symmetry_pass(const ed::sculpt_paint::StrokeCache &ca
  * This should be used for functionality that needs to be computed once per stroke of a particular
  * tool (allocating memory, updating random seeds...).
  */
-bool SCULPT_stroke_is_first_brush_step(const ed::sculpt_paint::StrokeCache &cache);
+bool stroke_is_first_brush_step(const ed::sculpt_paint::StrokeCache &cache);
 /**
  * Returns true on the first brush step of each symmetry pass.
  */
-bool SCULPT_stroke_is_first_brush_step_of_symmetry_pass(
-    const ed::sculpt_paint::StrokeCache &cache);
+bool stroke_is_first_brush_step_of_symmetry_pass(const ed::sculpt_paint::StrokeCache &cache);
 
-/**
- * Align the grab delta to the brush normal.
- *
- * \param grab_delta: Typically from `ss.cache->grab_delta_symmetry`.
- */
-void sculpt_project_v3_normal_align(const SculptSession &ss,
-                                    float normal_weight,
-                                    float grab_delta[3]);
+float3 grab_delta_get(const Brush &brush, const StrokeCache &cache);
 
 /** \} */
 
@@ -603,14 +604,11 @@ void sculpt_project_v3_normal_align(const SculptSession &ss,
 /** \name Sculpt mesh accessor API
  * \{ */
 
-namespace ed::sculpt_paint {
 /** Ensure random access; required for bke::pbvh::Type::BMesh */
 void vert_random_access_ensure(Object &object);
-}  // namespace ed::sculpt_paint
 
-int SCULPT_vertex_count_get(const Object &object);
+int vertex_count_get(const Object &object);
 
-namespace ed::sculpt_paint {
 bool vertex_is_occluded(const Depsgraph &depsgraph,
                         const Object &object,
                         const float3 &position,
@@ -631,7 +629,6 @@ Span<int> vert_neighbors_get_mesh(OffsetIndices<int> faces,
                                   Span<bool> hide_poly,
                                   int vert,
                                   Vector<int> &r_neighbors);
-}  // namespace ed::sculpt_paint
 
 /* Fake Neighbors */
 
@@ -642,16 +639,14 @@ Span<int> vert_neighbors_get_mesh(OffsetIndices<int> faces,
  * had only one connected component. These neighbors are calculated for each vertex using the
  * minimum distance to a vertex that is in a different connected component.
  */
-Span<int> SCULPT_fake_neighbors_ensure(const Depsgraph &depsgraph, Object &ob, float max_dist);
-void SCULPT_fake_neighbors_free(Object &ob);
+Span<int> fake_neighbors_ensure(const Depsgraph &depsgraph, Object &ob, float max_dist);
+void fake_neighbors_free(Object &ob);
 
 /** \} */
 
 /* -------------------------------------------------------------------- */
 /** \name Brush Utilities.
  * \{ */
-
-namespace ed::sculpt_paint {
 
 float brush_plane_offset_get(const Brush &brush, const SculptSession &ss);
 
@@ -704,27 +699,24 @@ std::optional<BMVert *> nearest_vert_calc_bmesh(const bke::pbvh::Tree &pbvh,
                                                 const float3 &location,
                                                 float max_distance,
                                                 bool use_original);
-}  // namespace ed::sculpt_paint
 
-ePaintSymmetryAreas SCULPT_get_vertex_symm_area(const float co[3]);
-bool SCULPT_check_vertex_pivot_symmetry(const float vco[3], const float pco[3], char symm);
+ePaintSymmetryAreas get_vertex_symm_area(const float co[3]);
+bool check_vertex_pivot_symmetry(const float vco[3], const float pco[3], char symm);
 /**
  * Checks if a vertex is inside the brush radius from any of its mirrored axis.
  */
-bool SCULPT_is_vertex_inside_brush_radius_symm(const float vertex[3],
-                                               const float br_co[3],
-                                               float radius,
-                                               char symm);
-float3 SCULPT_flip_v3_by_symm_area(const float3 &vector,
-                                   ePaintSymmetryFlags symm,
-                                   ePaintSymmetryAreas symmarea,
-                                   const float3 &pivot);
-void SCULPT_flip_quat_by_symm_area(float quat[4],
-                                   ePaintSymmetryFlags symm,
-                                   ePaintSymmetryAreas symmarea,
-                                   const float pivot[3]);
-
-namespace ed::sculpt_paint {
+bool is_vertex_inside_brush_radius_symm(const float vertex[3],
+                                        const float br_co[3],
+                                        float radius,
+                                        char symm);
+float3 flip_v3_by_symm_area(const float3 &vector,
+                            ePaintSymmetryFlags symm,
+                            ePaintSymmetryAreas symmarea,
+                            const float3 &pivot);
+void flip_quat_by_symm_area(float quat[4],
+                            ePaintSymmetryFlags symm,
+                            ePaintSymmetryAreas symmarea,
+                            const float pivot[3]);
 
 /**
  * Utility functions to get the closest vertices after flipping an original vertex position for
@@ -745,6 +737,30 @@ Vector<int> find_symm_verts(const Depsgraph &depsgraph,
                             int original_vert,
                             float max_distance = std::numeric_limits<float>::max());
 
+/**
+ * Similar to `find_symm_verts`, but returns an unsorted set of all vertex indices.
+ *
+ * \note If a symmetry pass is invalid, the corresponding vertex index is set to -1
+ */
+std::array<int, PAINT_SYMM_AREAS> find_all_symm_verts_mesh(
+    const Depsgraph &depsgraph,
+    const Object &object,
+    int original_vert,
+    float max_distance = std::numeric_limits<float>::max());
+std::array<int, PAINT_SYMM_AREAS> find_all_symm_verts_grids(
+    const Object &object,
+    int original_vert,
+    float max_distance = std::numeric_limits<float>::max());
+std::array<int, PAINT_SYMM_AREAS> find_all_symm_verts_bmesh(
+    const Object &object,
+    int original_vert,
+    float max_distance = std::numeric_limits<float>::max());
+std::array<int, PAINT_SYMM_AREAS> find_all_symm_verts(
+    const Depsgraph &depsgraph,
+    const Object &object,
+    int original_vert,
+    float max_distance = std::numeric_limits<float>::max());
+
 bool node_fully_masked_or_hidden(const bke::pbvh::Node &node);
 bool node_in_sphere(const bke::pbvh::Node &node,
                     const float3 &location,
@@ -762,11 +778,9 @@ IndexMask gather_nodes(const bke::pbvh::Tree &pbvh,
                        const std::optional<float3> &ray_direction,
                        IndexMaskMemory &memory);
 
-}  // namespace ed::sculpt_paint
-
-const float *SCULPT_brush_frontface_normal_from_falloff_shape(const SculptSession &ss,
-                                                              char falloff_shape);
-void SCULPT_cube_tip_init(const Sculpt &sd, const Object &ob, const Brush &brush, float mat[4][4]);
+const float *brush_frontface_normal_from_falloff_shape(const SculptSession &ss,
+                                                       char falloff_shape);
+void cube_tip_init(const Sculpt &sd, const Object &ob, const Brush &brush, float mat[4][4]);
 
 /** Sample the brush's texture value. */
 void sculpt_apply_texture(const SculptSession &ss,
@@ -774,17 +788,14 @@ void sculpt_apply_texture(const SculptSession &ss,
                           const float brush_point[3],
                           int thread_id,
                           float *r_value,
-                          float r_rgba[4]);
+                          float4 &r_rgba);
 
 /**
  * Calculates the vertex offset for a single vertex depending on the brush setting rgb as vector
  * displacement.
  */
-void SCULPT_calc_vertex_displacement(const SculptSession &ss,
-                                     const Brush &brush,
-                                     float translation[3]);
+void calc_vertex_displacement(const SculptSession &ss, const Brush &brush, float translation[3]);
 
-namespace ed::sculpt_paint {
 /**
  * Tilts a normal by the x and y tilt values using the view axis.
  */
@@ -799,9 +810,7 @@ float3 tilt_apply_to_normal(const float3 &normal, const StrokeCache &cache, floa
  * Get effective surface normal with pen tilt and tilt strength applied to it.
  */
 float3 tilt_effective_normal_get(const SculptSession &ss, const Brush &brush);
-}  // namespace ed::sculpt_paint
 
-namespace ed::sculpt_paint {
 /**
  * The brush uses translations calculated at the beginning of the stroke. They can't be calculated
  * dynamically because changing positions will influence neighboring translations. However we can
@@ -813,18 +822,14 @@ void calc_smooth_translations(const Depsgraph &depsgraph,
                               const IndexMask &node_mask,
                               MutableSpan<float3> translations);
 
-}  // namespace ed::sculpt_paint
-
 /**
  * Flip all the edit-data across the axis/axes specified by \a symm.
  * Used to calculate multiple modifications to the mesh when symmetry is enabled.
  */
-void SCULPT_cache_calc_brushdata_symm(ed::sculpt_paint::StrokeCache &cache,
-                                      ePaintSymmetryFlags symm,
-                                      char axis,
-                                      float angle);
-
-namespace ed::sculpt_paint {
+void cache_calc_brushdata_symm(ed::sculpt_paint::StrokeCache &cache,
+                               ePaintSymmetryFlags symm,
+                               char axis,
+                               float angle);
 
 struct OrigPositionData {
   Span<float3> positions;
@@ -919,19 +924,7 @@ float object_space_radius_get(const ViewContext &vc,
 /** \name 3D Texture Paint (Experimental)
  * \{ */
 
-/**
- * \brief Get the image canvas for painting on the given object.
- *
- * \return #true if an image is found. The #r_image and #r_image_user fields are filled with
- * the image and image user. Returns false when the image isn't found. In the later case the
- * r_image and r_image_user are set to NULL.
- */
-bool SCULPT_paint_image_canvas_get(PaintModeSettings &paint_mode_settings,
-                                   Object &ob,
-                                   Image **r_image,
-                                   ImageUser **r_image_user) ATTR_NONNULL();
 void SCULPT_do_paint_brush_image(const Depsgraph &depsgraph,
-                                 PaintModeSettings &paint_mode_settings,
                                  const Sculpt &sd,
                                  Object &ob,
                                  const IndexMask &node_mask);

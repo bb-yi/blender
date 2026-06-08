@@ -99,6 +99,8 @@ wmOperatorType *WM_operatortype_find(const char *idname, bool quiet)
   return nullptr;
 }
 
+/** \} */
+
 /* -------------------------------------------------------------------- */
 /** \name Operator Type Append
  * \{ */
@@ -161,6 +163,10 @@ void WM_operatortype_append_ptr(void (*opfunc)(wmOperatorType *, void *), void *
 }
 
 /** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Operator Type Removal & Property Search
+ * \{ */
 
 void WM_operatortype_remove_ptr(wmOperatorType *ot)
 {
@@ -331,7 +337,7 @@ static wmOperatorStatus wm_macro_end(wmOperator *op, wmOperatorStatus retval)
 static wmOperatorStatus wm_macro_exec(bContext *C, wmOperator *op)
 {
   wmOperatorStatus retval = OPERATOR_FINISHED;
-  const int op_inherited_flag = op->flag & (OP_IS_REPEAT | OP_IS_REPEAT_LAST);
+  const eOperator_Flag op_inherited_flag = op->flag & (OP_IS_REPEAT | OP_IS_REPEAT_LAST);
 
   wm_macro_start(op);
 
@@ -365,7 +371,7 @@ static wmOperatorStatus wm_macro_invoke_internal(bContext *C,
                                                  wmOperator *opm)
 {
   wmOperatorStatus retval = OPERATOR_FINISHED;
-  const int op_inherited_flag = op->flag & (OP_IS_REPEAT | OP_IS_REPEAT_LAST);
+  const eOperator_Flag op_inherited_flag = op->flag & (OP_IS_REPEAT | OP_IS_REPEAT_LAST);
 
   /* Start from operator received as argument. */
   for (; opm; opm = opm->next) {
@@ -586,7 +592,7 @@ static void wm_operatortype_free_macro(wmOperatorType *ot)
       MEM_delete(otmacro.ptr);
     }
   }
-  BLI_freelistN(&ot->macro);
+  ot->macro.free_no_destruct();
 }
 
 std::string WM_operatortype_name(wmOperatorType *ot, PointerRNA *properties)

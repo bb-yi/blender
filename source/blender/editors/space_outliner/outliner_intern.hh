@@ -45,6 +45,8 @@ namespace bke::outliner::treehash {
 class TreeHash;
 }
 
+enum eTreeStoreElem_Flag : short;
+
 namespace ed::outliner {
 
 class AbstractTreeDisplay;
@@ -61,6 +63,8 @@ struct SpaceOutliner_Runtime {
 
   /* Hash table for tree-store elements, using `(id, type, index)` as key. */
   std::unique_ptr<treehash::TreeHash> tree_hash;
+
+  ListBaseT<ed::outliner::TreeElement> tree = {nullptr, nullptr};
 
   SpaceOutliner_Runtime() = default;
   /** Used for copying runtime data to a duplicated space. */
@@ -241,6 +245,8 @@ struct TreeViewContext {
   /* Workspace. */
   WorkSpace *workspace;
 
+  Main *bmain;
+
   /* Scene level. */
   Scene *scene;
   ViewLayer *view_layer;
@@ -311,7 +317,8 @@ void outliner_tree_dimensions(SpaceOutliner *space_outliner, int *r_width, int *
 
 TreeElementIcon tree_element_get_icon(TreeStoreElem *tselem, TreeElement *te);
 
-void outliner_collection_isolate_flag(Scene *scene,
+void outliner_collection_isolate_flag(const Main &bmain,
+                                      Scene *scene,
                                       ViewLayer *view_layer,
                                       LayerCollection *layer_collection,
                                       Collection *collection,
@@ -414,15 +421,15 @@ void outliner_do_object_operation(bContext *C,
                                   ListBaseT<TreeElement> *lb,
                                   outliner_operation_fn operation_fn);
 
-int outliner_flag_is_any_test(ListBaseT<TreeElement> *lb, short flag, int curlevel);
+int outliner_flag_is_any_test(ListBaseT<TreeElement> *lb, eTreeStoreElem_Flag flag, int curlevel);
 /**
  * Set or unset \a flag for all outliner elements in \a lb and sub-trees.
  * \return if any flag was modified.
  */
-bool outliner_flag_set(SpaceOutliner &space_outliner, short flag, short set);
-bool outliner_flag_set(ListBaseT<TreeElement> &lb, short flag, short set);
-bool outliner_flag_flip(SpaceOutliner &space_outliner, short flag);
-bool outliner_flag_flip(ListBaseT<TreeElement> &lb, short flag);
+bool outliner_flag_set(SpaceOutliner &space_outliner, eTreeStoreElem_Flag flag, short set);
+bool outliner_flag_set(ListBaseT<TreeElement> &lb, eTreeStoreElem_Flag flag, short set);
+bool outliner_flag_flip(SpaceOutliner &space_outliner, eTreeStoreElem_Flag flag);
+bool outliner_flag_flip(ListBaseT<TreeElement> &lb, eTreeStoreElem_Flag flag);
 
 void item_rename_fn(bContext *C,
                     ReportList *reports,
@@ -460,6 +467,11 @@ void outliner_set_coordinates(const ARegion *region, SpaceOutliner *space_outlin
  * Open or close a tree element, optionally toggling all children recursively.
  */
 void outliner_item_openclose(TreeElement *te, bool open, bool toggle_all);
+
+void outliner_scroll_to_active(const bContext *C,
+                               SpaceOutliner *space_outliner,
+                               ARegion *region,
+                               TreeViewContext *tvc);
 
 /* `outliner_dragdrop.cc` */
 
@@ -535,6 +547,7 @@ void OUTLINER_OT_object_operation(wmOperatorType *ot);
 void OUTLINER_OT_lib_operation(wmOperatorType *ot);
 void OUTLINER_OT_liboverride_operation(wmOperatorType *ot);
 void OUTLINER_OT_liboverride_troubleshoot_operation(wmOperatorType *ot);
+void OUTLINER_OT_liboverride_property_remove(wmOperatorType *ot);
 void OUTLINER_OT_id_operation(wmOperatorType *ot);
 void OUTLINER_OT_id_remap(wmOperatorType *ot);
 void OUTLINER_OT_id_copy(wmOperatorType *ot);
@@ -676,8 +689,9 @@ void outliner_tag_redraw_avoid_rebuild_on_open_change(const SpaceOutliner *space
 
 /**
  * If outliner is dirty sync selection from view layer and sequencer.
+ * \return true if active is changed.
  */
-void outliner_sync_selection(const bContext *C,
+bool outliner_sync_selection(const bContext *C,
                              const TreeViewContext &tvc,
                              SpaceOutliner *space_outliner);
 

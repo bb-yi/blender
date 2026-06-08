@@ -81,22 +81,23 @@ static void node_declare(NodeDeclarationBuilder &b)
 
   for (const int i : IndexRange(storage.items_count)) {
     const NodeCompositorFileOutputItem &item = storage.items[i];
-    const eNodeSocketDatatype socket_type = eNodeSocketDatatype(item.socket_type);
+    const eNodeSocketDatatype socket_type = item.socket_type;
     const std::string identifier = FileOutputItemsAccessor::socket_identifier_for_item(item);
     BaseSocketDeclarationBuilder *declaration = nullptr;
     if (socket_type == SOCK_VECTOR) {
-      declaration = &b.add_input<decl::Vector>(item.name, identifier)
+      declaration = &b.add_input<decl::Vector>(UString(item.name), UString(identifier))
                          .dimensions(item.vector_socket_dimensions);
     }
     else {
-      declaration = &b.add_input(socket_type, item.name, identifier);
+      declaration = &b.add_input(socket_type, UString(item.name), UString(identifier));
     }
     declaration->structure_type(StructureType::Dynamic)
         .compositor_realization_mode(realization_mode)
         .socket_name_ptr(&node_tree->id, *FileOutputItemsAccessor::item_srna, &item, "name");
   }
 
-  b.add_input<decl::Extend>("", "__extend__");
+  b.add_input<decl::Extend>(""_ustr, "__extend__"_ustr)
+      .custom_draw(socket_items::ui::draw_extend_socket_fn<FileOutputItemsAccessor>());
 }
 
 static void node_init(const bContext *C, PointerRNA *node_pointer)
@@ -105,7 +106,8 @@ static void node_init(const bContext *C, PointerRNA *node_pointer)
   NodeCompositorFileOutput *data = MEM_new<NodeCompositorFileOutput>(__func__);
   node->storage = data;
   data->save_as_render = true;
-  data->file_name = BLI_strdup("file_name");
+  data->use_file_extension = true;
+  data->file_name = BLI_strdup("{blend_name}");
 
   BKE_image_format_init(&data->format);
   BKE_image_format_media_type_set(
@@ -189,7 +191,7 @@ static Vector<bke::path_templates::Error> compute_image_path(const StringRefNull
                                       &template_variables,
                                       frame_number,
                                       &format,
-                                      scene.r.scemode & R_EXTENSION,
+                                      bool(node_storage(node).use_file_extension),
                                       is_animation_render,
                                       BKE_scene_multiview_view_suffix_get(&scene.r, view));
 }
@@ -275,7 +277,7 @@ static void output_paths_layout(ui::Layout &layout,
   const std::string file_name = storage.file_name ? storage.file_name : "";
   const Scene &scene = *CTX_data_scene(context);
 
-  if (bool(scene.r.scemode & R_MULTIVIEW) && format.views_format == R_IMF_VIEWS_MULTIVIEW) {
+  if (bool(scene.r.scemode & R_MULTIVIEW) && format.views_format == R_IMF_VIEWS_INDIVIDUAL) {
     for (SceneRenderView &view : scene.r.views) {
       if (!BKE_scene_multiview_is_render_view_active(&scene.r, &view)) {
         continue;
@@ -352,6 +354,9 @@ static void node_draw_buttons_extended(ui::Layout &layout,
     const bNode &node = *node_pointer->data_as<bNode>();
     const ImageFormatData &node_format = *format_pointer.data_as<ImageFormatData>();
 
+    panel->prop(
+        node_pointer, "use_file_extension", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+
     if (is_multi_layer) {
       output_paths_layout(*panel, context, "", node, node_format);
     }
@@ -369,7 +374,7 @@ static void node_draw_buttons_extended(ui::Layout &layout,
 static void node_blend_write(const bNodeTree & /*tree*/, const bNode &node, BlendWriter &writer)
 {
   const NodeCompositorFileOutput &data = node_storage(node);
-  BLO_write_string(&writer, data.file_name);
+  writer.write_string(data.file_name);
   BKE_image_format_blend_write(&writer, const_cast<ImageFormatData *>(&data.format));
   socket_items::blend_write<FileOutputItemsAccessor>(&writer, node);
 }
@@ -400,13 +405,13 @@ static void node_gather_link_searches(GatherLinkSearchOpParams &params)
   if (origin_socket.in_out != SOCK_OUT) {
     return;
   }
-  const eNodeSocketDatatype origin_socket_type = eNodeSocketDatatype(origin_socket.type);
+  const eNodeSocketDatatype origin_socket_type = origin_socket.type;
   if (!FileOutputItemsAccessor::supports_socket_type(origin_socket_type, NTREE_COMPOSIT)) {
     return;
   }
   params.add_item("File Output", [](LinkSearchOpParams &params) {
-    bNode &node = params.add_node("CompositorNodeOutputFile");
-    const eNodeSocketDatatype socket_type = eNodeSocketDatatype(params.socket.type);
+    bNode &node = params.add_node("CompositorNodeOutputFile"_ustr);
+    const eNodeSocketDatatype socket_type = params.socket.type;
     if (socket_type == SOCK_VECTOR) {
       socket_items::add_item_with_socket_type_and_name<FileOutputItemsAccessor>(
           params.node_tree,
@@ -419,7 +424,7 @@ static void node_gather_link_searches(GatherLinkSearchOpParams &params)
       socket_items::add_item_with_socket_type_and_name<FileOutputItemsAccessor>(
           params.node_tree, node, socket_type, params.socket.name);
     }
-    params.update_and_connect_available_socket(node, params.socket.name);
+    params.update_and_connect_available_socket(node, UString(params.socket.name));
   });
 }
 
@@ -576,26 +581,23 @@ class FileOutputOperation : public NodeOperation {
                            const char *pass_name,
                            const char *view_name)
   {
-    /* For single values, we fill a buffer that covers the domain of the operation with the value
-     * of the result. */
-    const int2 size = result.is_single_value() ? this->compute_domain().data_size :
-                                                 result.domain().data_size;
-
-    /* The image buffer in the file output will take ownership of this buffer and freeing it will
-     * be its responsibility. */
-    float *buffer = nullptr;
+    Result data = this->context().create_result(result.type());
     if (result.is_single_value()) {
-      buffer = this->inflate_result(result, size);
+      /* For single values, we fill a buffer that covers the domain of the operation with the value
+       * of the result. */
+      data.allocate_texture(this->compute_domain(), true, ResultStorageType::CPU);
+      const GPointer single_value = result.single_value();
+      const int64_t pixel_count = int64_t(data.domain().data_size.x) * data.domain().data_size.y;
+      single_value.type()->fill_assign_n(
+          single_value.get(), data.cpu_data_for_write().data(), pixel_count);
+    }
+    else if (this->context().use_gpu()) {
+      Result result_cpu = result.download_to_cpu();
+      data.share_data(result_cpu);
+      result_cpu.release();
     }
     else {
-      if (this->context().use_gpu()) {
-        GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE);
-        buffer = static_cast<float *>(GPU_texture_read(result, GPU_DATA_FLOAT, 0));
-      }
-      else {
-        /* Copy the result into a new buffer. */
-        buffer = MEM_dupalloc(static_cast<const float *>(result.cpu_data().data()));
-      }
+      data.share_data(result);
     }
 
     switch (result.type()) {
@@ -604,145 +606,95 @@ class FileOutputOperation : public NodeOperation {
          * specify that all uppercase RGBA channels will be compressed, and Cryptomatte should not
          * be compressed. */
         if (result.meta_data.is_cryptomatte_layer()) {
-          file_output.add_pass(pass_name, view_name, "rgba", buffer);
+          file_output.add_pass(pass_name, view_name, "rgba", data);
         }
         else {
-          file_output.add_pass(pass_name, view_name, "RGBA", buffer);
+          file_output.add_pass(pass_name, view_name, "RGBA", data);
         }
         break;
       case ResultType::Float3:
-        /* Float3 results might be stored in 4-component textures due to hardware limitations, so
-         * we need to convert the buffer to a 3-component buffer on the host. */
-        if (!result.is_single_value() && this->context().use_gpu() &&
-            GPU_texture_component_len(GPU_texture_format(result)) == 4)
-        {
-          file_output.add_pass(pass_name, view_name, "XYZ", float4_to_float3_image(size, buffer));
-        }
-        else {
-          file_output.add_pass(pass_name, view_name, "XYZ", buffer);
-        }
+        file_output.add_pass(pass_name, view_name, "XYZ", data);
         break;
       case ResultType::Float4:
-        file_output.add_pass(pass_name, view_name, "XYZW", buffer);
+        file_output.add_pass(pass_name, view_name, "XYZW", data);
         break;
       case ResultType::Float:
-        file_output.add_pass(pass_name, view_name, "V", buffer);
+        file_output.add_pass(pass_name, view_name, "V", data);
         break;
       case ResultType::Float2:
-        file_output.add_pass(pass_name, view_name, "XY", buffer);
+        file_output.add_pass(pass_name, view_name, "XY", data);
         break;
       case ResultType::Int2:
+      case ResultType::Int3:
+      case ResultType::Int4:
       case ResultType::Int:
       case ResultType::Bool:
+      case ResultType::Float4x4:
       case ResultType::Menu:
+      case ResultType::Quaternion:
       case ResultType::String:
+      case ResultType::Object:
+      case ResultType::Image:
+      case ResultType::Font:
+      case ResultType::Scene:
+      case ResultType::Text:
+      case ResultType::Mask:
         /* Not supported. */
         BLI_assert_unreachable();
         break;
     }
-  }
 
-  /* Allocates and fills an image buffer of the specified size with the value of the given single
-   * value result. */
-  float *inflate_result(const Result &result, const int2 size)
-  {
-    BLI_assert(result.is_single_value());
-
-    const int64_t length = int64_t(size.x) * size.y;
-    const int64_t buffer_size = length * result.channels_count();
-    float *buffer = MEM_new_array_uninitialized<float>(buffer_size,
-                                                       "File Output Inflated Buffer.");
-
-    switch (result.type()) {
-      case ResultType::Float:
-      case ResultType::Float2:
-      case ResultType::Float3:
-      case ResultType::Float4:
-      case ResultType::Color: {
-        const GPointer single_value = result.single_value();
-        single_value.type()->fill_assign_n(single_value.get(), buffer, length);
-        return buffer;
-      }
-      case ResultType::Int:
-      case ResultType::Int2:
-      case ResultType::Bool:
-      case ResultType::Menu:
-      case ResultType::String:
-        /* Not supported. */
-        BLI_assert_unreachable();
-        return nullptr;
-    }
-
-    BLI_assert_unreachable();
-    return nullptr;
+    data.release();
   }
 
   /* Read the data stored the given result and add a view of the given name and read buffer. */
   void add_view_for_result(FileOutput &file_output, const Result &result, const char *view_name)
   {
-    /* The image buffer in the file output will take ownership of this buffer and freeing it will
-     * be its responsibility. */
-    float *buffer = nullptr;
+    Result data = this->context().create_result(result.type());
     if (this->context().use_gpu()) {
-      GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE);
-      buffer = static_cast<float *>(GPU_texture_read(result, GPU_DATA_FLOAT, 0));
+      Result result_cpu = result.download_to_cpu();
+      data.share_data(result_cpu);
+      result_cpu.release();
     }
     else {
-      /* Copy the result into a new buffer. */
-      buffer = MEM_dupalloc(static_cast<const float *>(result.cpu_data().data()));
+      data.share_data(result);
     }
 
-    const int2 size = result.domain().data_size;
     switch (result.type()) {
       case ResultType::Color:
-        file_output.add_view(view_name, 4, buffer);
+        file_output.add_view(view_name, data);
         break;
       case ResultType::Float4:
-        file_output.add_view(view_name, 4, buffer);
+        file_output.add_view(view_name, data);
         break;
       case ResultType::Float3:
-        /* Float3 results might be stored in 4-component textures due to hardware limitations, so
-         * we need to convert the buffer to a 3-component buffer on the host. */
-        if (!result.is_single_value() && this->context().use_gpu() &&
-            GPU_texture_component_len(GPU_texture_format(result)) == 4)
-        {
-          file_output.add_view(view_name, 3, float4_to_float3_image(size, buffer));
-        }
-        else {
-          file_output.add_view(view_name, 3, buffer);
-        }
+        file_output.add_view(view_name, data);
         break;
       case ResultType::Float:
-        file_output.add_view(view_name, 1, buffer);
+        file_output.add_view(view_name, data);
         break;
       case ResultType::Float2:
       case ResultType::Int2:
       case ResultType::Int:
+      case ResultType::Int3:
+      case ResultType::Int4:
       case ResultType::Bool:
+      case ResultType::Float4x4:
       case ResultType::Menu:
+      case ResultType::Quaternion:
       case ResultType::String:
+      case ResultType::Object:
+      case ResultType::Image:
+      case ResultType::Font:
+      case ResultType::Scene:
+      case ResultType::Text:
+      case ResultType::Mask:
         /* Not supported. */
         BLI_assert_unreachable();
         break;
     }
-  }
 
-  /* Given a float4 image, return a newly allocated float3 image that ignores the last channel. The
-   * input image is freed. */
-  float *float4_to_float3_image(int2 size, float *float4_image)
-  {
-    float *float3_image = MEM_new_array_uninitialized<float>(3 * size_t(size.x) * size_t(size.y),
-                                                             "File Output Vector Buffer.");
-
-    parallel_for(size, [&](const int2 texel) {
-      for (int i = 0; i < 3; i++) {
-        const int64_t pixel_index = int64_t(texel.y) * size.x + texel.x;
-        float3_image[pixel_index * 3 + i] = float4_image[pixel_index * 4 + i];
-      }
-    });
-
-    MEM_delete(float4_image);
-    return float3_image;
+    data.release();
   }
 
   /* Add Cryptomatte meta data to the file if they exist for the given result of the given layer
@@ -867,7 +819,7 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, "CompositorNodeOutputFile", CMP_NODE_OUTPUT_FILE);
+  cmp_node_type_base(&ntype, "CompositorNodeOutputFile"_ustr, CMP_NODE_OUTPUT_FILE);
   ntype.ui_name = "File Output";
   ntype.ui_description = "Write image file to disk";
   ntype.enum_name_legacy = "OUTPUT_FILE";
@@ -897,7 +849,7 @@ StructRNA **FileOutputItemsAccessor::item_srna = &RNA_NodeCompositorFileOutputIt
 
 void FileOutputItemsAccessor::blend_write_item(BlendWriter *writer, const ItemT &item)
 {
-  BLO_write_string(writer, item.name);
+  writer->write_string(item.name);
   BKE_image_format_blend_write(writer, const_cast<ImageFormatData *>(&item.format));
 }
 

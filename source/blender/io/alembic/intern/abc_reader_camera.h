@@ -17,7 +17,7 @@ class AbcCameraReader final : public AbcObjectReader {
   Alembic::AbcGeom::ICameraSchema m_schema;
 
  public:
-  AbcCameraReader(const Alembic::Abc::IObject &object, ImportSettings &settings);
+  AbcCameraReader(const AbcReaderConstructorArgs &args);
 
   bool valid() const override;
   bool accepts_object_type(const Alembic::AbcCoreAbstract::ObjectHeader &alembic_header,
@@ -25,6 +25,8 @@ class AbcCameraReader final : public AbcObjectReader {
                            const char **r_err_str) const override;
 
   void readObjectData(Main *bmain, const Alembic::Abc::ISampleSelector &sample_sel) override;
+
+  std::unique_ptr<FCurveCreationHelper> getKeyFramingHelper() override;
 };
 
 }  // namespace blender::io::alembic

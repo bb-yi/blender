@@ -19,7 +19,6 @@
 
 #include "BKE_anonymous_attribute_make.hh"
 #include "BKE_bake_geometry_nodes_modifier.hh"
-#include "BKE_bake_items_socket.hh"
 #include "BKE_context.hh"
 #include "BKE_global.hh"
 #include "BKE_library.hh"
@@ -38,6 +37,8 @@
 #include "WM_api.hh"
 
 #include "BLO_read_write.hh"
+
+#include "GEO_mix_geometries.hh"
 
 #include "node_geometry_util.hh"
 
@@ -65,20 +66,16 @@ static void node_declare(NodeDeclarationBuilder &b)
 
   for (const int i : IndexRange(storage.items_num)) {
     const NodeGeometryBakeItem &item = storage.items[i];
-    const eNodeSocketDatatype socket_type = eNodeSocketDatatype(item.socket_type);
-    const StringRef name = item.name;
-    const std::string identifier = BakeItemsAccessor::socket_identifier_for_item(item);
+    const eNodeSocketDatatype socket_type = item.socket_type;
+    const UString name(item.name);
+    const UString identifier(BakeItemsAccessor::socket_identifier_for_item(item));
     auto &input_decl = b.add_input(socket_type, name, identifier)
                            .socket_name_ptr(
                                &ntree->id, *BakeItemsAccessor::item_srna, &item, "name");
     auto &output_decl = b.add_output(socket_type, name, identifier).align_with_previous();
-    if (socket_type_supports_fields(socket_type)) {
-      input_decl.supports_field();
-      if (item.flag & GEO_NODE_BAKE_ITEM_IS_ATTRIBUTE) {
-        output_decl.field_source();
-      }
-      else {
-        output_decl.dependent_field({input_decl.index()});
+    if (socket_type_supports_attributes(socket_type)) {
+      if (!(item.flag & GEO_NODE_BAKE_ITEM_IS_ATTRIBUTE)) {
+        output_decl.inferred_structure_type({input_decl.index()});
       }
     }
     input_decl.structure_type(StructureType::Dynamic);
@@ -88,8 +85,10 @@ static void node_declare(NodeDeclarationBuilder &b)
           .pass_through_input_index(input_decl.index());
     }
   }
-  b.add_input<decl::Extend>("", "__extend__").structure_type(StructureType::Dynamic);
-  b.add_output<decl::Extend>("", "__extend__")
+  b.add_input<decl::Extend>(""_ustr, "__extend__"_ustr)
+      .structure_type(StructureType::Dynamic)
+      .custom_draw(socket_items::ui::draw_extend_socket_fn<BakeItemsAccessor>());
+  b.add_output<decl::Extend>(""_ustr, "__extend__"_ustr)
       .structure_type(StructureType::Dynamic)
       .align_with_previous();
 }
@@ -132,10 +131,11 @@ static void draw_bake_items(const bContext *C, ui::Layout &layout, PointerRNA no
     socket_items::ui::draw_active_item_props<BakeItemsAccessor>(
         tree, node, [&](PointerRNA *item_ptr) {
           const NodeGeometryBakeItem &active_item = storage.items[storage.active_index];
+          const eNodeSocketDatatype socket_type = active_item.socket_type;
           panel->use_property_split_set(true);
           panel->use_property_decorate_set(false);
           panel->prop(item_ptr, "socket_type", UI_ITEM_NONE, std::nullopt, ICON_NONE);
-          if (socket_type_supports_fields(eNodeSocketDatatype(active_item.socket_type))) {
+          if (socket_type_supports_attributes(socket_type)) {
             panel->prop(item_ptr, "attribute_domain", UI_ITEM_NONE, std::nullopt, ICON_NONE);
             panel->prop(item_ptr, "is_attribute", UI_ITEM_NONE, std::nullopt, ICON_NONE);
           }
@@ -146,31 +146,6 @@ static void draw_bake_items(const bContext *C, ui::Layout &layout, PointerRNA no
 static void node_operators()
 {
   socket_items::ops::make_common_operators<BakeItemsAccessor>();
-}
-
-static bake::BakeSocketConfig make_bake_socket_config(const Span<NodeGeometryBakeItem> bake_items)
-{
-  bake::BakeSocketConfig config;
-  const int items_num = bake_items.size();
-  config.domains.resize(items_num);
-  config.names.resize(items_num);
-  config.types.resize(items_num);
-  config.geometries_by_attribute.resize(items_num);
-
-  int last_geometry_index = -1;
-  for (const int item_i : bake_items.index_range()) {
-    const NodeGeometryBakeItem &item = bake_items[item_i];
-    config.types[item_i] = eNodeSocketDatatype(item.socket_type);
-    config.names[item_i] = item.name;
-    config.domains[item_i] = AttrDomain(item.attribute_domain);
-    if (item.socket_type == SOCK_GEOMETRY) {
-      last_geometry_index = item_i;
-    }
-    else if (last_geometry_index != -1) {
-      config.geometries_by_attribute[item_i].append(last_geometry_index);
-    }
-  }
-  return config;
 }
 
 /**
@@ -199,7 +174,6 @@ struct DummyDataBlockMap : public bake::BakeDataBlockMap {
 class LazyFunctionForBakeNode final : public LazyFunction {
   const bNode &node_;
   Span<NodeGeometryBakeItem> bake_items_;
-  bake::BakeSocketConfig bake_socket_config_;
 
  public:
   LazyFunctionForBakeNode(const bNode &node, GeometryNodesLazyFunctionGraphInfo &lf_graph_info)
@@ -220,8 +194,6 @@ class LazyFunctionForBakeNode final : public LazyFunction {
       lf_index_by_bsocket[output_bsocket.index_in_tree()] = outputs_.append_and_get_index_as(
           item.name, CPPType::get<SocketValueVariant>());
     }
-
-    bake_socket_config_ = make_bake_socket_config(bake_items_);
   }
 
   void execute_impl(lf::Params &params, const lf::Context &context) const final
@@ -254,15 +226,14 @@ class LazyFunctionForBakeNode final : public LazyFunction {
       return;
     }
     if (auto *info = std::get_if<sim_output::ReadSingle>(&behavior->behavior)) {
-      this->output_cached_state(params, user_data, behavior->data_block_map, info->state);
+      this->output_cached_state(params, user_data, behavior->data_block_map, info->values);
     }
     else if (auto *info = std::get_if<sim_output::ReadInterpolated>(&behavior->behavior)) {
       this->output_mixed_cached_state(params,
                                       behavior->data_block_map,
-                                      *user_data.call_data->self_object(),
                                       *user_data.compute_context,
-                                      info->prev_state,
-                                      info->next_state,
+                                      info->prev_values,
+                                      info->next_values,
                                       info->mix_factor);
     }
     else if (std::get_if<sim_output::PassThrough>(&behavior->behavior)) {
@@ -272,9 +243,7 @@ class LazyFunctionForBakeNode final : public LazyFunction {
       this->store(params, user_data, behavior->data_block_map, *info);
     }
     else if (auto *info = std::get_if<sim_output::ReadError>(&behavior->behavior)) {
-      if (geo_eval_log::GeoTreeLogger *tree_logger = local_user_data.try_get_tree_logger(
-              user_data))
-      {
+      if (eval_log::NodeTreeLogger *tree_logger = local_user_data.try_get_tree_logger(user_data)) {
         tree_logger->node_warnings.append(
             *tree_logger->allocator, {node_.identifier, {NodeWarningType::Error, info->message}});
       }
@@ -294,17 +263,14 @@ class LazyFunctionForBakeNode final : public LazyFunction {
                     GeoNodesUserData &user_data,
                     bke::bake::BakeDataBlockMap *data_block_map) const
   {
-    std::optional<bake::BakeState> bake_state = this->get_bake_state_from_inputs(params,
-                                                                                 data_block_map);
-    if (!bake_state) {
+    std::optional<bake::BakeValues> bake_values = this->get_bake_values_from_inputs(
+        params, data_block_map);
+    if (!bake_values) {
       /* Wait for inputs to be computed. */
       return;
     }
-    Vector<SocketValueVariant> output_values = this->move_bake_state_to_values(
-        std::move(*bake_state),
-        data_block_map,
-        *user_data.call_data->self_object(),
-        *user_data.compute_context);
+    Vector<SocketValueVariant> output_values = this->bake_to_output_values(
+        std::move(*bake_values), data_block_map, *user_data.compute_context);
     for (const int i : bake_items_.index_range()) {
       params.set_output(i, std::move(output_values[i]));
     }
@@ -315,26 +281,23 @@ class LazyFunctionForBakeNode final : public LazyFunction {
              bke::bake::BakeDataBlockMap *data_block_map,
              const sim_output::StoreNewState &info) const
   {
-    std::optional<bake::BakeState> bake_state = this->get_bake_state_from_inputs(params,
-                                                                                 data_block_map);
-    if (!bake_state) {
+    std::optional<bake::BakeValues> bake_values = this->get_bake_values_from_inputs(
+        params, data_block_map);
+    if (!bake_values) {
       /* Wait for inputs to be computed. */
       return;
     }
-    this->output_cached_state(params, user_data, data_block_map, *bake_state);
-    info.store_fn(std::move(*bake_state));
+    this->output_cached_state(params, user_data, data_block_map, *bake_values);
+    info.store_fn(std::move(*bake_values));
   }
 
   void output_cached_state(lf::Params &params,
                            GeoNodesUserData &user_data,
                            bke::bake::BakeDataBlockMap *data_block_map,
-                           const bake::BakeStateRef &bake_state) const
+                           const bake::BakeValues &bake_values) const
   {
-    Vector<SocketValueVariant> values = this->copy_bake_state_to_values(
-        bake_state,
-        data_block_map,
-        *user_data.call_data->self_object(),
-        *user_data.compute_context);
+    Vector<SocketValueVariant> values = this->bake_to_output_values(
+        bake_values, data_block_map, *user_data.compute_context);
     for (const int i : bake_items_.index_range()) {
       params.set_output(i, std::move(values[i]));
     }
@@ -342,28 +305,24 @@ class LazyFunctionForBakeNode final : public LazyFunction {
 
   void output_mixed_cached_state(lf::Params &params,
                                  bke::bake::BakeDataBlockMap *data_block_map,
-                                 const Object &self_object,
                                  const ComputeContext &compute_context,
-                                 const bake::BakeStateRef &prev_state,
-                                 const bake::BakeStateRef &next_state,
+                                 const bake::BakeValues &prev_bake_values,
+                                 const bake::BakeValues &next_bake_values,
                                  const float mix_factor) const
   {
-    Vector<SocketValueVariant> output_values = this->copy_bake_state_to_values(
-        prev_state, data_block_map, self_object, compute_context);
-    Vector<SocketValueVariant> next_values = this->copy_bake_state_to_values(
-        next_state, data_block_map, self_object, compute_context);
+    Vector<SocketValueVariant> output_values = this->bake_to_output_values(
+        prev_bake_values, data_block_map, compute_context);
+    Vector<SocketValueVariant> next_values = this->bake_to_output_values(
+        next_bake_values, data_block_map, compute_context);
     for (const int i : bake_items_.index_range()) {
-      mix_baked_data_item(eNodeSocketDatatype(bake_items_[i].socket_type),
-                          output_values[i],
-                          next_values[i],
-                          mix_factor);
+      geometry::mix_socket_values(output_values[i], next_values[i], mix_factor);
     }
     for (const int i : bake_items_.index_range()) {
       params.set_output(i, std::move(output_values[i]));
     }
   }
 
-  std::optional<bake::BakeState> get_bake_state_from_inputs(
+  std::optional<bake::BakeValues> get_bake_values_from_inputs(
       lf::Params &params, bke::bake::BakeDataBlockMap *data_block_map) const
   {
     Array<bke::SocketValueVariant *> input_value_pointers(bake_items_.size());
@@ -376,69 +335,42 @@ class LazyFunctionForBakeNode final : public LazyFunction {
       return std::nullopt;
     }
 
-    Array<bke::SocketValueVariant> input_values(bake_items_.size());
-    for (const int i : bake_items_.index_range()) {
-      input_values[i] = std::move(*input_value_pointers[i]);
-    }
-
-    Array<std::unique_ptr<bake::BakeItem>> bake_items = bake::move_socket_values_to_bake_items(
-        input_values, bake_socket_config_, data_block_map);
-
-    bake::BakeState bake_state;
+    Vector<bake::BakeValues::InputValue> bake_input_values(bake_items_.size());
     for (const int i : bake_items_.index_range()) {
       const NodeGeometryBakeItem &item = bake_items_[i];
-      std::unique_ptr<bake::BakeItem> &bake_item = bake_items[i];
-      if (bake_item) {
-        bake_state.items_by_id.add_new(item.identifier, std::move(bake_item));
-      }
+      bake::BakeValues::InputValue &bake_input_value = bake_input_values[i];
+      bake_input_value.id = item.identifier;
+      bake_input_value.name = item.name;
+      bake_input_value.field_domain = AttrDomain(item.attribute_domain);
+      bake_input_value.value = std::move(*input_value_pointers[i]);
     }
-    return bake_state;
+
+    return bake::BakeValues::from_runtime_values(std::move(bake_input_values), data_block_map);
   }
 
-  Vector<SocketValueVariant> move_bake_state_to_values(bake::BakeState bake_state,
-                                                       bke::bake::BakeDataBlockMap *data_block_map,
-                                                       const Object &self_object,
-                                                       const ComputeContext &compute_context) const
+  Vector<SocketValueVariant> bake_to_output_values(const bake::BakeValues &bake_values,
+                                                   bke::bake::BakeDataBlockMap *data_block_map,
+                                                   const ComputeContext &compute_context) const
   {
-    Vector<bake::BakeItem *> bake_items;
+    Vector<bake::BakeValues::OutputKey> keys;
     for (const NodeGeometryBakeItem &item : bake_items_) {
-      std::unique_ptr<bake::BakeItem> *bake_item = bake_state.items_by_id.lookup_ptr(
-          item.identifier);
-      bake_items.append(bake_item ? bake_item->get() : nullptr);
+      keys.append({item.identifier, item.socket_type});
     }
-    return bake::move_bake_items_to_socket_values(
-        bake_items, bake_socket_config_, data_block_map, [&](const int i, const CPPType &type) {
-          return this->make_attribute_field(self_object, compute_context, bake_items_[i], type);
-        });
+    return bake_values.to_runtime_values(keys, compute_context, data_block_map);
   }
 
-  Vector<SocketValueVariant> copy_bake_state_to_values(const bake::BakeStateRef &bake_state,
-                                                       bke::bake::BakeDataBlockMap *data_block_map,
-                                                       const Object &self_object,
-                                                       const ComputeContext &compute_context) const
-  {
-    Vector<const bake::BakeItem *> bake_items;
-    for (const NodeGeometryBakeItem &item : bake_items_) {
-      const bake::BakeItem *const *bake_item = bake_state.items_by_id.lookup_ptr(item.identifier);
-      bake_items.append(bake_item ? *bake_item : nullptr);
-    }
-    return bake::copy_bake_items_to_socket_values(
-        bake_items, bake_socket_config_, data_block_map, [&](const int i, const CPPType &type) {
-          return this->make_attribute_field(self_object, compute_context, bake_items_[i], type);
-        });
-  }
-
-  std::shared_ptr<AttributeFieldInput> make_attribute_field(const Object &self_object,
-                                                            const ComputeContext &compute_context,
-                                                            const NodeGeometryBakeItem &item,
-                                                            const CPPType &type) const
+  ImplicitSharingPtr<AttributeFieldInput> make_attribute_field(
+      const Object &self_object,
+      const ComputeContext &compute_context,
+      const NodeGeometryBakeItem &item,
+      const CPPType &type) const
   {
     std::string attribute_name = bke::hash_to_anonymous_attribute_name(
         compute_context.hash(), self_object.id.name, node_.identifier, item.identifier);
     std::string socket_inspection_name = make_anonymous_attribute_socket_inspection_string(
         node_.label_or_name(), item.name);
-    return std::make_shared<AttributeFieldInput>(
-        std::move(attribute_name), type, std::move(socket_inspection_name));
+    return ImplicitSharingPtr<AttributeFieldInput>(MEM_new<AttributeFieldInput>(
+        __func__, std::move(attribute_name), type, std::move(socket_inspection_name)));
   }
 };
 
@@ -513,17 +445,17 @@ static void node_layout_ex(ui::Layout &layout, bContext *C, PointerRNA *ptr)
 
 static void node_gather_link_searches(GatherLinkSearchOpParams &params)
 {
-  const eNodeSocketDatatype type = eNodeSocketDatatype(params.other_socket().type);
+  const eNodeSocketDatatype type = params.other_socket().type;
   if (!BakeItemsAccessor::supports_socket_type(type, params.node_tree().type)) {
     return;
   }
   params.add_item(
       IFACE_("Value"),
       [type](LinkSearchOpParams &params) {
-        bNode &node = params.add_node("GeometryNodeBake");
+        bNode &node = params.add_node("GeometryNodeBake"_ustr);
         socket_items::add_item_with_socket_type_and_name<BakeItemsAccessor>(
             params.node_tree, node, type, params.socket.name);
-        params.update_and_connect_available_socket(node, params.socket.name);
+        params.update_and_connect_available_socket(node, UString(params.socket.name));
       },
       -1);
 }
@@ -533,7 +465,7 @@ static const bNodeSocket *node_internally_linked_input(const bNodeTree & /*tree*
                                                        const bNodeSocket &output_socket)
 {
   /* Internal links should always map corresponding input and output sockets. */
-  return node.input_by_identifier(output_socket.identifier);
+  return node.input_by_identifier(output_socket.identifier_ustr());
 }
 
 static void node_blend_write(const bNodeTree & /*tree*/, const bNode &node, BlendWriter &writer)
@@ -549,7 +481,7 @@ static void node_blend_read(bNodeTree & /*tree*/, bNode &node, BlendDataReader &
 static void node_register()
 {
   static bke::bNodeType ntype;
-  geo_node_type_base(&ntype, "GeometryNodeBake", GEO_NODE_BAKE);
+  geo_node_type_base(&ntype, "GeometryNodeBake"_ustr, GEO_NODE_BAKE);
   ntype.ui_name = "Bake";
   ntype.ui_description = "Cache the incoming data so that it can be used without recomputation";
   ntype.enum_name_legacy = "BAKE";
@@ -606,8 +538,12 @@ bool get_bake_draw_context(const bContext *C, const bNode &node, BakeDrawContext
     return false;
   }
 
-  r_ctx.bake_rna = RNA_pointer_create_discrete(
-      const_cast<ID *>(&r_ctx.object->id), RNA_NodesModifierBake, (void *)r_ctx.bake);
+  PointerRNA modifier_ptr = RNA_pointer_create_id_subdata(
+      const_cast<ID &>(r_ctx.object->id),
+      RNA_NodesModifier,
+      const_cast<NodesModifierData *>(r_ctx.nmd));
+  r_ctx.bake_rna = RNA_pointer_create_with_parent(
+      modifier_ptr, RNA_NodesModifierBake, const_cast<NodesModifierBake *>(r_ctx.bake));
   if (r_ctx.nmd->runtime->cache) {
     const bke::bake::ModifierCache &cache = *r_ctx.nmd->runtime->cache;
     std::lock_guard lock{cache.mutex};
@@ -842,19 +778,19 @@ void draw_data_blocks(const bContext *C, ui::Layout &layout, PointerRNA &bake_rn
   if (ui::Layout *panel = layout.panel(
           C, "data_block_references", true, IFACE_("Data-Block References")))
   {
-    ui::template_list(panel,
-                      C,
-                      data_block_list->idname,
-                      "",
-                      &bake_rna,
-                      "data_blocks",
-                      &data_blocks_ptr,
-                      "active_index",
-                      nullptr,
-                      3,
-                      5,
-                      UILST_LAYOUT_DEFAULT,
-                      ui::TEMPLATE_LIST_FLAG_NONE);
+    ui::template_uilist(panel,
+                        C,
+                        data_block_list->idname,
+                        "",
+                        &bake_rna,
+                        "data_blocks",
+                        &data_blocks_ptr,
+                        "active_index",
+                        nullptr,
+                        3,
+                        5,
+                        UILST_LAYOUT_DEFAULT,
+                        ui::TEMPLATE_LIST_FLAG_NONE);
   }
 }
 
@@ -870,7 +806,7 @@ StructRNA **BakeItemsAccessor::item_srna = &RNA_NodeGeometryBakeItem;
 
 void BakeItemsAccessor::blend_write_item(BlendWriter *writer, const ItemT &item)
 {
-  BLO_write_string(writer, item.name);
+  writer->write_string(item.name);
 }
 
 void BakeItemsAccessor::blend_read_data_item(BlendDataReader *reader, ItemT &item)

@@ -50,7 +50,7 @@ namespace blender {
 // #define USE_ENUM_COPY_STRINGS
 
 /* -------------------------------------------------------------------- */
-/** \name Shared Enums & Doc-Strings
+/** \name Shared Enums & Docstrings
  * \{ */
 
 #define BPY_PROPDEF_OPTIONS_DOC \
@@ -270,6 +270,12 @@ static PyObject *bpy_prop_deferred_call(BPy_PropDeferred * /*self*/,
 
 /* Get/Set Items. */
 
+PyDoc_STRVAR(
+    /* Wrap. */
+    bpy_prop_deferred_function_doc,
+    "The property registration function (e.g. :func:`bpy.props.IntProperty`).\n"
+    "\n"
+    ":type: Callable\n");
 /**
  * Expose the function in case scripts need to introspect this information
  * (not currently used by Blender itself).
@@ -280,6 +286,13 @@ static PyObject *bpy_prop_deferred_function_get(BPy_PropDeferred *self, void * /
   Py_IncRef(ret);
   return ret;
 }
+
+PyDoc_STRVAR(
+    /* Wrap. */
+    bpy_prop_deferred_keywords_doc,
+    "The keyword arguments passed to the property registration function.\n"
+    "\n"
+    ":type: dict[str, Any]\n");
 
 /**
  * Expose keywords in case scripts need to introspect this information
@@ -300,12 +313,12 @@ static PyGetSetDef bpy_prop_deferred_getset[] = {
     {"function",
      reinterpret_cast<getter>(bpy_prop_deferred_function_get),
      static_cast<setter>(nullptr),
-     nullptr,
+     bpy_prop_deferred_function_doc,
      nullptr},
     {"keywords",
      reinterpret_cast<getter>(bpy_prop_deferred_keywords_get),
      static_cast<setter>(nullptr),
-     nullptr,
+     bpy_prop_deferred_keywords_doc,
      nullptr},
     {nullptr, nullptr, nullptr, nullptr, nullptr} /* Sentinel */
 };
@@ -2447,10 +2460,9 @@ static size_t strswapbufcpy(char *buf, const char **orig)
 static int icon_id_from_name(const char *name)
 {
   const EnumPropertyItem *item;
-  int id;
 
   if (name[0]) {
-    for (item = rna_enum_icon_items, id = 0; item->identifier; item++, id++) {
+    for (item = rna_enum_icon_items; item->identifier; item++) {
       if (STREQ(item->name, name)) {
         return item->value;
       }
@@ -3347,7 +3359,7 @@ static int bpy_prop_arg_parse_tag_defines(PyObject *o, void *p)
 /** \} */
 
 /* -------------------------------------------------------------------- */
-/** \name Shared Method Doc-Strings
+/** \name Shared Method Docstrings
  * \{ */
 
 #define BPY_PROPDEF_NAME_DOC \
@@ -5917,7 +5929,7 @@ void BPY_rna_props_clear_all()
   RNA_def_property_free_pointers_set_py_data_callback(nullptr);
 
   /* Include as it's correct, in practice this should never be used again. */
-  BLI_listbase_clear(&g_bpy_prop_store_list);
+  g_bpy_prop_store_list.clear_no_delete();
 }
 
 /** \} */

@@ -109,12 +109,12 @@ void register_node_type_tex_bricks()
 {
   static bke::bNodeType ntype;
 
-  tex_node_type_base(&ntype, "TextureNodeBricks", TEX_NODE_BRICKS);
+  tex_node_type_base(&ntype, "TextureNodeBricks"_ustr, TEX_NODE_BRICKS);
   ntype.ui_name = "Bricks";
   ntype.enum_name_legacy = "BRICKS";
   ntype.nclass = NODE_CLASS_PATTERN;
   bke::node_type_socket_templates(&ntype, inputs, outputs);
-  bke::node_type_size_preset(ntype, bke::eNodeSizePreset::Middle);
+  ntype.default_width = bke::NodeWidth::_160;
   ntype.initfunc = init;
   ntype.exec_fn = exec;
   ntype.flag |= NODE_PREVIEW;

@@ -8,6 +8,9 @@ set(INC
   ../../mikktspace
 )
 
+set(INC_SYS
+)
+
 set(SRC
   attribute.cpp
   background.cpp
@@ -22,10 +25,13 @@ set(SRC
   geometry_mesh.cpp
   hair.cpp
   image.cpp
+  image_cache.cpp
+  image_loader.cpp
   image_oiio.cpp
   image_sky.cpp
   image_vdb.cpp
   integrator.cpp
+  scene_attributes.cpp
   light.cpp
   light_tree.cpp
   light_tree_debug.cpp
@@ -61,6 +67,8 @@ set(SRC_HEADERS
   geometry.h
   hair.h
   image.h
+  image_cache.h
+  image_loader.h
   image_oiio.h
   image_sky.h
   image_vdb.h
@@ -88,34 +96,24 @@ set(SRC_HEADERS
 )
 
 set(LIB
-  cycles_bvh
-  cycles_device
-  cycles_integrator
-  cycles_subd
-  cycles_util
+  PUBLIC cycles_bvh
+  PUBLIC cycles_device
+  PUBLIC cycles_integrator
+  PUBLIC cycles_subd
+  PUBLIC cycles_util
+  PRIVATE bf::dependencies::optional::openvdb
+  PRIVATE bf::dependencies::optional::nanovdb
 )
 
 if(CYCLES_STANDALONE_REPOSITORY)
-  list(APPEND LIB extern_sky)
+  list(APPEND LIB PRIVATE extern_sky)
 else()
-  list(APPEND LIB bf_intern_sky)
+  list(APPEND LIB PRIVATE bf_intern_sky)
 endif()
 
 if(WITH_CYCLES_OSL)
   list(APPEND LIB
-    cycles_kernel_osl
-  )
-endif()
-
-if(WITH_OPENVDB)
-  list(APPEND LIB
-    bf::dependencies::optional::openvdb
-  )
-endif()
-
-if(WITH_NANOVDB)
-  list(APPEND INC_SYS
-    ${NANOVDB_INCLUDE_DIRS}
+    PRIVATE cycles_kernel_osl
   )
 endif()
 

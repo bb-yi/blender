@@ -412,6 +412,9 @@ struct wmNotifier {
 /* Changes to the active viewer path. */
 #define NC_VIEWER_PATH (28 << 24)
 
+/* Changes that affects UI drawing. */
+#define NC_UI (29 << 24)
+
 /* Data type, 256 entries is enough, it can overlap. */
 #define NOTE_DATA 0x00FF0000
 
@@ -434,6 +437,8 @@ struct wmNotifier {
 #define ND_SKETCH (7 << 16)
 #define ND_WORKSPACE_SET (8 << 16)
 #define ND_WORKSPACE_DELETE (9 << 16)
+/* Notifies if frames changes as part of animation playback. */
+#define ND_ANIMATION_PLAYBACK (10 << 16)
 
 /* NC_SCENE Scene. */
 #define ND_SCENEBROWSE (1 << 16)
@@ -462,14 +467,17 @@ struct wmNotifier {
 /* NC_OBJECT Object. */
 #define ND_TRANSFORM (18 << 16)
 #define ND_OB_SHADING (19 << 16)
-/** For non-structural posemode changes like transforms. Note: renaming, selecting, bone
- * collections have their own dedicated notifiers, also see #ND_BONE_SELECT. */
+/**
+ * For non-structural pose-mode changes like transforms.
+ * \note renaming, selecting, bone collections have their own dedicated notifiers,
+ * also see #ND_BONE_SELECT.
+ */
 #define ND_POSE (20 << 16)
 #define ND_BONE_ACTIVE (21 << 16)
 /** Intended for selection and visibility changes in pose/armature edit modes.
- * Historically this was also used for most editmode changes (also "structural" like adding,
- * deleting, subdividing, filling, ..., bones). Also covers hiding/revealing (in posemode and
- * editmode). Note this causes a full (possibly slow) rebuild of the Outliner tree. For such
+ * Historically this was also used for most edit-mode changes (also "structural" like adding,
+ * deleting, subdividing, filling, ..., bones). Also covers hiding/revealing (in pose-mode and
+ * edit-mode). Note this causes a full (possibly slow) rebuild of the Outliner tree. For such
  * changes, new code should use #ND_ARMATURE_STRUCTURE. */
 #define ND_BONE_SELECT (22 << 16)
 /** Indicate a change to the structure of the armature; this has implications for both the armature
@@ -477,7 +485,7 @@ struct wmNotifier {
  *
  * The value is set to #ND_BONE_SELECT as a transitional state, as currently that notifier is
  * already used to signify such structural changes. In the future, those uses of #ND_BONE_SELECT
- * should be replaced with #ND_ARMATURE_STRUCTURE, making the selction notifier only relevant for
+ * should be replaced with #ND_ARMATURE_STRUCTURE, making the selection notifier only relevant for
  * selection again. See #153774. */
 #define ND_ARMATURE_STRUCTURE ND_BONE_SELECT
 #define ND_DRAW (23 << 16)
@@ -494,6 +502,8 @@ struct wmNotifier {
 /* For updating motion paths in 3dview. */
 #define ND_DRAW_ANIMVIZ (33 << 16)
 #define ND_BONE_COLLECTION (34 << 16)
+/* For sequencer prefetch indicator redraw. */
+#define ND_SEQUENCER_PREFETCH (35 << 16)
 
 /* NC_MATERIAL Material. */
 #define ND_SHADING (30 << 16)
@@ -577,6 +587,11 @@ struct wmNotifier {
  */
 #define ND_ASSET_CATALOGS (4 << 16)
 
+/* Changes in theme preferences that affects UI text drawing. */
+#define ND_UI_FONT (1 << 16)
+
+#define ND_UI_LANG (2 << 16)
+
 /* Subtype, 256 entries too. */
 #define NOTE_SUBTYPE 0x0000FF00
 
@@ -614,6 +629,7 @@ struct wmNotifier {
 #define NA_ACTIVATED 7
 #define NA_PAINTING 8
 #define NA_JOB_FINISHED 9
+#define NA_DOWNLOAD_FINISHED 10
 
 /* ************** Gesture Manager data ************** */
 
@@ -1439,6 +1455,13 @@ struct wmDropBox {
    */
   void (*draw_in_view)(bContext *C, wmWindow *win, wmDrag *drag, const int xy[2]);
 
+  /**
+   * Used by tree views to scroll when the mouse is near the edge.
+   * Called for every event while the dropbox is active (hovered and poll succeeds).
+   * For #wmEventType::TIMER events, only the ones created from this #wmDropBox.timer are passed to
+   * it.
+   */
+  void (*on_event_while_hover)(bContext *C, wmDropBox &dropbox, const wmEvent *event);
   /** Custom data for drawing. */
   void *draw_data;
 
@@ -1459,6 +1482,7 @@ struct wmDropBox {
   IDProperty *properties;
   /** RNA pointer to access properties. */
   PointerRNA *ptr;
+  wmTimer *timer;
 };
 
 /**

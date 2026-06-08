@@ -16,14 +16,19 @@ static void node_declare(NodeDeclarationBuilder &b)
 {
   b.use_custom_socket_order();
   b.allow_any_socket_order();
-  b.add_input<decl::Geometry>("Instances")
+  b.add_input<decl::Geometry>("Instances"_ustr)
       .only_instances()
       .description("Instances to rotate individually");
-  b.add_output<decl::Geometry>("Instances").propagate_all().align_with_previous();
-  b.add_input<decl::Bool>("Selection").default_value(true).hide_value().field_on_all();
-  b.add_input<decl::Rotation>("Rotation").field_on_all();
-  b.add_input<decl::Vector>("Pivot Point").subtype(PROP_TRANSLATION).field_on_all();
-  b.add_input<decl::Bool>("Local Space").default_value(true).field_on_all();
+  b.add_output<decl::Geometry>("Instances"_ustr).propagate_all_geometry().align_with_previous();
+  b.add_input<decl::Bool>("Selection"_ustr)
+      .default_value(true)
+      .hide_value()
+      .evaluated_geometry_field();
+  b.add_input<decl::Rotation>("Rotation"_ustr).evaluated_geometry_field();
+  b.add_input<decl::Vector>("Pivot Point"_ustr)
+      .subtype(PROP_TRANSLATION)
+      .evaluated_geometry_field();
+  b.add_input<decl::Bool>("Local Space"_ustr).default_value(true).evaluated_geometry_field();
 }
 
 static void rotate_instances(GeoNodeExecParams &params, bke::Instances &instances)
@@ -32,10 +37,10 @@ static void rotate_instances(GeoNodeExecParams &params, bke::Instances &instance
 
   const bke::InstancesFieldContext context{instances};
   fn::FieldEvaluator evaluator{context, instances.instances_num()};
-  evaluator.set_selection(params.extract_input<Field<bool>>("Selection"));
-  evaluator.add(params.extract_input<Field<math::Quaternion>>("Rotation"));
-  evaluator.add(params.extract_input<Field<float3>>("Pivot Point"));
-  evaluator.add(params.extract_input<Field<bool>>("Local Space"));
+  evaluator.set_selection(params.extract_input<Field<bool>>("Selection"_ustr));
+  evaluator.add(params.extract_input<Field<math::Quaternion>>("Rotation"_ustr));
+  evaluator.add(params.extract_input<Field<float3>>("Pivot Point"_ustr));
+  evaluator.add(params.extract_input<Field<bool>>("Local Space"_ustr));
   evaluator.evaluate();
 
   const IndexMask selection = evaluator.get_evaluated_selection_as_mask();
@@ -45,59 +50,62 @@ static void rotate_instances(GeoNodeExecParams &params, bke::Instances &instance
 
   MutableSpan<float4x4> transforms = instances.transforms_for_write();
 
-  selection.foreach_index(GrainSize(512), [&](const int64_t i) {
-    const float3 pivot = pivots[i];
-    const math::Quaternion rotation = rotations[i];
-    float4x4 &instance_transform = transforms[i];
+  selection.foreach_index(
+      [&](const int64_t i) {
+        const float3 pivot = pivots[i];
+        const math::Quaternion rotation = rotations[i];
+        float4x4 &instance_transform = transforms[i];
 
-    float4x4 rotation_matrix;
-    float3 used_pivot;
+        float4x4 rotation_matrix;
+        float3 used_pivot;
 
-    if (local_spaces[i]) {
-      /* Find rotation axis from the matrix. This should work even if the instance is skewed. */
-      /* Create rotations around the individual axis. This could be optimized to skip some axis
-       * when the angle is zero. */
-      const EulerXYZ euler = math::to_euler(rotation);
-      const float3x3 rotation_x = from_rotation<float3x3>(
-          AxisAngle(normalize(instance_transform.x_axis()), euler.x()));
-      const float3x3 rotation_y = from_rotation<float3x3>(
-          AxisAngle(normalize(instance_transform.y_axis()), euler.y()));
-      const float3x3 rotation_z = from_rotation<float3x3>(
-          AxisAngle(normalize(instance_transform.z_axis()), euler.z()));
+        if (local_spaces[i]) {
+          /* Find rotation axis from the matrix. This should work even if the instance is skewed.
+           */
+          /* Create rotations around the individual axis. This could be optimized to skip some axis
+           * when the angle is zero. */
+          const EulerXYZ euler = math::to_euler(rotation);
+          const float3x3 rotation_x = from_rotation<float3x3>(
+              AxisAngle(normalize(instance_transform.x_axis()), euler.x()));
+          const float3x3 rotation_y = from_rotation<float3x3>(
+              AxisAngle(normalize(instance_transform.y_axis()), euler.y()));
+          const float3x3 rotation_z = from_rotation<float3x3>(
+              AxisAngle(normalize(instance_transform.z_axis()), euler.z()));
 
-      /* Combine the previously computed rotations into the final rotation matrix. */
-      rotation_matrix = float4x4(rotation_z * rotation_y * rotation_x);
+          /* Combine the previously computed rotations into the final rotation matrix. */
+          rotation_matrix = float4x4(rotation_z * rotation_y * rotation_x);
 
-      /* Transform the passed in pivot into the local space of the instance. */
-      used_pivot = transform_point(instance_transform, pivot);
-    }
-    else {
-      used_pivot = pivot;
-      rotation_matrix = from_rotation<float4x4>(rotation);
-    }
-    /* Move the pivot to the origin so that we can rotate around it. */
-    instance_transform.location() -= used_pivot;
-    /* Perform the actual rotation. */
-    instance_transform = rotation_matrix * instance_transform;
-    /* Undo the pivot shifting done before. */
-    instance_transform.location() += used_pivot;
-  });
+          /* Transform the passed in pivot into the local space of the instance. */
+          used_pivot = transform_point(instance_transform, pivot);
+        }
+        else {
+          used_pivot = pivot;
+          rotation_matrix = from_rotation<float4x4>(rotation);
+        }
+        /* Move the pivot to the origin so that we can rotate around it. */
+        instance_transform.location() -= used_pivot;
+        /* Perform the actual rotation. */
+        instance_transform = rotation_matrix * instance_transform;
+        /* Undo the pivot shifting done before. */
+        instance_transform.location() += used_pivot;
+      },
+      exec_mode::grain_size(512));
 }
 
 static void node_geo_exec(GeoNodeExecParams params)
 {
-  GeometrySet geometry_set = params.extract_input<GeometrySet>("Instances");
+  GeometrySet geometry_set = params.extract_input<GeometrySet>("Instances"_ustr);
   if (bke::Instances *instances = geometry_set.get_instances_for_write()) {
     rotate_instances(params, *instances);
   }
-  params.set_output("Instances", std::move(geometry_set));
+  params.set_output("Instances"_ustr, std::move(geometry_set));
 }
 
 static void node_register()
 {
   static bke::bNodeType ntype;
 
-  geo_node_type_base(&ntype, "GeometryNodeRotateInstances", GEO_NODE_ROTATE_INSTANCES);
+  geo_node_type_base(&ntype, "GeometryNodeRotateInstances"_ustr, GEO_NODE_ROTATE_INSTANCES);
   ntype.ui_name = "Rotate Instances";
   ntype.ui_description = "Rotate geometry instances in local or global space";
   ntype.enum_name_legacy = "ROTATE_INSTANCES";

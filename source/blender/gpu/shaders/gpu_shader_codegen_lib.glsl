@@ -85,7 +85,6 @@ float4 TextureHandle_eval(TextureHandle tex)
 #  define FrontFacing true
 #endif
 
-/* Can't use enum here because not a header file. But would be great to do. */
 enum ClosureType : uchar {
   CLOSURE_NONE_ID = 0u,
   /* Diffuse */
@@ -104,12 +103,13 @@ enum ClosureType : uchar {
 
   /* Transmission */
   CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID = 12u,
+  CLOSURE_BSDF_THIN_GLASS_TRANSMISSION_ID = 13u,
 
   /* Glass */
-  // CLOSURE_BSDF_HAIR_HUANG_ID = 13u, /* TODO */
+  // CLOSURE_BSDF_HAIR_HUANG_ID = 14u, /* TODO */
 
   /* BSSRDF */
-  CLOSURE_BSSRDF_BURLEY_ID = 14u,
+  CLOSURE_BSSRDF_BURLEY_ID = 15u,
 };
 
 struct ClosureUndetermined {
@@ -120,6 +120,13 @@ struct ClosureUndetermined {
   /* Additional data different for each closure type. */
   packed_float4 data;
 };
+
+bool closure_has_transmission(const ClosureType closure)
+{
+  return closure == CLOSURE_BSDF_TRANSLUCENT_ID ||
+         closure == CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID ||
+         closure == CLOSURE_BSDF_THIN_GLASS_TRANSMISSION_ID;
+}
 
 ClosureUndetermined closure_new(ClosureType type)
 {
@@ -196,6 +203,13 @@ struct ClosureTransparency {
   float holdout;
 };
 
+struct ClosureThinRefraction {
+  packed_float3 color;
+  float weight;
+  packed_float3 N;
+  float roughness;
+};
+
 ClosureDiffuse to_closure_diffuse(ClosureUndetermined cl)
 {
   ClosureDiffuse closure;
@@ -237,6 +251,15 @@ ClosureRefraction to_closure_refraction(ClosureUndetermined cl)
   closure.color = cl.color;
   closure.roughness = cl.data.x;
   closure.ior = cl.data.y;
+  return closure;
+}
+
+ClosureThinRefraction to_closure_thin_refraction(ClosureUndetermined cl)
+{
+  ClosureThinRefraction closure;
+  closure.N = cl.N;
+  closure.color = cl.color;
+  closure.roughness = cl.data.x;
   return closure;
 }
 
@@ -330,6 +353,3 @@ float3 dF_impl(float3 v)
       g_derivative_flag = 0; \
     }
 #endif
-
-/* TODO(fclem): Remove. */
-#define CODEGEN_LIB

@@ -27,28 +27,31 @@ static void node_declare(NodeDeclarationBuilder &b)
 {
   const bNode *node = b.node_or_null();
 
-  b.add_input<decl::Geometry>("Mesh")
+  b.add_input<decl::Geometry>("Mesh"_ustr)
       .supported_type(GeometryComponent::Type::Mesh)
       .description("Mesh whose UV map is used");
   if (node != nullptr) {
     const eCustomDataType data_type = eCustomDataType(node->custom1);
-    b.add_input(data_type, "Value").hide_value().field_on_all();
+    b.add_input(data_type, "Value"_ustr).hide_value().evaluated_geometry_field();
   }
-  b.add_input<decl::Vector>("UV Map", "Source UV Map")
+  b.add_input<decl::Vector>("UV Map"_ustr, "Source UV Map"_ustr)
       .hide_value()
-      .field_on_all()
+      .evaluated_geometry_field()
       .description("The mesh UV map to sample. Should not have overlapping faces");
-  b.add_input<decl::Vector>("Sample UV")
-      .supports_field()
-      .description("The coordinates to sample within the UV map")
-      .structure_type(StructureType::Dynamic);
+  auto &sample_uv = b.add_input<decl::Vector>("Sample UV"_ustr)
+                        .description("The coordinates to sample within the UV map")
+                        .structure_type(StructureType::Dynamic);
 
+  std::array<int, 1> dynamic_inputs = {sample_uv.index()};
   if (node != nullptr) {
     const eCustomDataType data_type = eCustomDataType(node->custom1);
-    b.add_output(data_type, "Value").dependent_field({3});
+    b.add_output(data_type, "Value"_ustr)
+        .inferred_structure_type(dynamic_inputs)
+        .propagate_references(dynamic_inputs);
   }
-  b.add_output<decl::Bool>("Is Valid")
-      .dependent_field({3})
+  b.add_output<decl::Bool>("Is Valid"_ustr)
+      .inferred_structure_type(dynamic_inputs)
+      .propagate_references(dynamic_inputs)
       .description("Whether the node could find a single face to sample at the UV coordinate");
 }
 
@@ -69,13 +72,13 @@ static void node_gather_link_searches(GatherLinkSearchOpParams &params)
   search_link_ops_for_declarations(params, declaration.outputs);
 
   const std::optional<eCustomDataType> type = bke::socket_type_to_custom_data_type(
-      eNodeSocketDatatype(params.other_socket().type));
+      params.other_socket().type);
   if (type && *type != CD_PROP_STRING) {
     /* The input and output sockets have the same name. */
     params.add_item(IFACE_("Value"), [type](LinkSearchOpParams &params) {
-      bNode &node = params.add_node("GeometryNodeSampleUVSurface");
+      bNode &node = params.add_node("GeometryNodeSampleUVSurface"_ustr);
       node.custom1 = *type;
-      params.update_and_connect_available_socket(node, "Value");
+      params.update_and_connect_available_socket(node, "Value"_ustr);
     });
   }
 }
@@ -84,18 +87,17 @@ class ReverseUVSampleFunction : public mf::MultiFunction {
   GeometrySet source_;
   Field<float2> src_uv_map_field_;
 
-  std::optional<bke::MeshFieldContext> source_context_;
-  std::unique_ptr<FieldEvaluator> source_evaluator_;
-  VArraySpan<float2> source_uv_map_;
-
-  std::optional<ReverseUVSampler> reverse_uv_sampler_;
+  mutable CacheMutex mutex_;
+  mutable std::optional<bke::MeshFieldContext> source_context_;
+  mutable std::unique_ptr<FieldEvaluator> source_evaluator_;
+  mutable VArraySpan<float2> source_uv_map_;
+  mutable std::optional<ReverseUVSampler> reverse_uv_sampler_;
 
  public:
   ReverseUVSampleFunction(GeometrySet geometry, Field<float2> src_uv_map_field)
       : source_(std::move(geometry)), src_uv_map_field_(std::move(src_uv_map_field))
   {
     source_.ensure_owns_direct_data();
-    this->evaluate_source();
 
     static const mf::Signature signature = []() {
       mf::Signature signature;
@@ -133,23 +135,33 @@ class ReverseUVSampleFunction : public mf::MultiFunction {
     });
   }
 
- private:
-  void evaluate_source()
+  void hash_unique(UniqueHashBytes &hash) const override
   {
-    const Mesh &mesh = *source_.get_mesh();
-    source_context_.emplace(bke::MeshFieldContext{mesh, AttrDomain::Corner});
-    source_evaluator_ = std::make_unique<FieldEvaluator>(*source_context_, mesh.corners_num);
-    source_evaluator_->add(src_uv_map_field_);
-    source_evaluator_->evaluate();
-    source_uv_map_ = source_evaluator_->get_evaluated<float2>(0);
+    static constexpr int8_t id = 0;
+    hash.add(&id);
+    hash.add(source_.get_mesh());
+    fn::FieldHashDeep field_hash;
+    hash.add(field_hash.ensure(src_uv_map_field_));
+  }
 
-    reverse_uv_sampler_.emplace(source_uv_map_, mesh.corner_tris());
+  void prepare_for_execution() const override
+  {
+    mutex_.ensure([&]() {
+      const Mesh &mesh = *source_.get_mesh();
+      source_context_.emplace(bke::MeshFieldContext{mesh, AttrDomain::Corner});
+      source_evaluator_ = std::make_unique<FieldEvaluator>(*source_context_, mesh.corners_num);
+      source_evaluator_->add(src_uv_map_field_);
+      source_evaluator_->evaluate();
+      source_uv_map_ = source_evaluator_->get_evaluated<float2>(0);
+
+      reverse_uv_sampler_.emplace(source_uv_map_, mesh.corner_tris());
+    });
   }
 };
 
 static void node_geo_exec(GeoNodeExecParams params)
 {
-  GeometrySet geometry = params.extract_input<GeometrySet>("Mesh");
+  GeometrySet geometry = params.extract_input<GeometrySet>("Mesh"_ustr);
   const Mesh *mesh = geometry.get_mesh();
   if (mesh == nullptr) {
     params.set_default_remaining_outputs();
@@ -163,11 +175,10 @@ static void node_geo_exec(GeoNodeExecParams params)
 
   /* Do reverse sampling of the UV map first. */
   const bke::DataTypeConversions &conversions = bke::get_implicit_type_conversions();
-  const CPPType &float2_type = CPPType::get<float2>();
-  Field<float2> source_uv_map = conversions.try_convert(
-      params.extract_input<Field<float3>>("Source UV Map"), float2_type);
+  Field<float2> source_uv_map = *conversions.try_convert<float2>(
+      params.extract_input<Field<float3>>("Source UV Map"_ustr));
 
-  auto sample_uv_value = params.extract_input<bke::SocketValueVariant>("Sample UV");
+  auto sample_uv_value = params.extract_input<bke::SocketValueVariant>("Sample UV"_ustr);
   if (sample_uv_value.is_list()) {
     params.error_message_add(NodeWarningType::Error,
                              "Lists are not supported for \"Sample UV\" input");
@@ -176,22 +187,22 @@ static void node_geo_exec(GeoNodeExecParams params)
     params.error_message_add(NodeWarningType::Error,
                              "Volume grids are not supported for \"Sample UV\" input");
   }
-  Field<float2> sample_uvs = conversions.try_convert(sample_uv_value.extract<Field<float3>>(),
-                                                     float2_type);
+  Field<float2> sample_uvs = *conversions.try_convert<float2>(
+      sample_uv_value.extract<Field<float3>>());
 
   auto uv_op = FieldOperation::from(
       std::make_shared<ReverseUVSampleFunction>(geometry, std::move(source_uv_map)),
       {std::move(sample_uvs)});
-  params.set_output("Is Valid", Field<bool>(uv_op, 0));
+  params.set_output("Is Valid"_ustr, Field<bool>(uv_op, 0));
 
   /* Use the output of the UV sampling to interpolate the mesh attribute. */
-  GField field = params.extract_input<GField>("Value");
+  GField field = params.extract_input<GField>("Value"_ustr);
 
   auto sample_op = FieldOperation::from(
       std::make_shared<bke::mesh_surface_sample::BaryWeightSampleFn>(std::move(geometry),
                                                                      std::move(field)),
       {Field<int>(uv_op, 1), Field<float3>(uv_op, 2)});
-  params.set_output("Value", GField(sample_op, 0));
+  params.set_output("Value"_ustr, GField(sample_op, 0));
 }
 
 static void node_rna(StructRNA *srna)
@@ -210,7 +221,7 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  geo_node_type_base(&ntype, "GeometryNodeSampleUVSurface", GEO_NODE_SAMPLE_UV_SURFACE);
+  geo_node_type_base(&ntype, "GeometryNodeSampleUVSurface"_ustr, GEO_NODE_SAMPLE_UV_SURFACE);
   ntype.ui_name = "Sample UV Surface";
   ntype.ui_description =
       "Calculate the interpolated values of a mesh attribute at a UV coordinate";

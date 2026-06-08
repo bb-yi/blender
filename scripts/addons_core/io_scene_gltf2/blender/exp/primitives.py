@@ -6,9 +6,11 @@ import bpy
 from typing import List, Optional, Tuple
 import numpy as np
 from ...io.com import gltf2_io, constants as gltf2_io_constants, gltf2_io_extensions
+from ...io.exp.meshopt import MeshoptEncoder
 from ...blender.com.data_path import get_sk_exported
 from ...io.exp import binary_data as gltf2_io_binary_data
 from .cache import cached, cached_by_key
+from . import pointcloud
 from . import primitive_extract as gltf2_blender_gather_primitives_extract
 from . import primitive_attributes as gltf2_blender_gather_primitive_attributes
 from .accessors import gather_accessor, array_to_accessor
@@ -140,8 +142,17 @@ def __gather_cache_primitives(
     """
     primitives = []
 
-    blender_primitives, additional_materials_udim, shared_attributes = gltf2_blender_gather_primitives_extract.extract_primitives(
-        materials, blender_data, uuid_for_skined_data, vertex_groups, modifiers, export_settings)
+    if type(blender_data).__name__ == "PointCloud":
+        # Point clouds
+        blender_primitives = pointcloud.gather_point_cloud(blender_data, export_settings)
+        additional_materials_udim = [None] * len(blender_primitives)
+        shared_attributes = None
+
+    else:
+        # Mesh
+
+        blender_primitives, additional_materials_udim, shared_attributes = gltf2_blender_gather_primitives_extract.extract_primitives(
+            materials, blender_data, uuid_for_skined_data, vertex_groups, modifiers, export_settings)
 
     if shared_attributes is not None:
 
@@ -217,9 +228,28 @@ def __gather_indices(blender_primitive, blender_data, modifiers, export_settings
             ') and needs to be split before export.')
         return None
 
+    if export_settings['gltf_meshopt_compression']:
+
+        byteStride = 4 if component_type == gltf2_io_constants.ComponentType.UnsignedInt else 2
+
+        compressed_indices, filter = MeshoptEncoder.encode_indices(
+            blender_primitive.get('mode'), indices, export_settings)
+
     element_type = gltf2_io_constants.DataType.Scalar
     binary_data = gltf2_io_binary_data.BinaryData(
         indices.tobytes(), bufferViewTarget=gltf2_io_constants.BufferViewTarget.ELEMENT_ARRAY_BUFFER)
+
+    if export_settings['gltf_meshopt_compression']:
+        mode = 'TRIANGLES' if blender_primitive.get('mode') in [4, None] else 'INDICES'
+        binary_data.set_extension(export_settings['gltf_meshopt_extension'], {
+            'buffer': compressed_indices,  # to be filled in later by the exporter, use data in placeholder for now
+            'byteOffset': None,  # to be filled in later by the exporter
+            'byteLength': len(compressed_indices),
+            'byteStride': byteStride,
+            'count': len(indices),
+            'mode': mode,
+            'filter': filter
+        })
     return gather_accessor(
         binary_data,
         component_type,
@@ -227,6 +257,7 @@ def __gather_indices(blender_primitive, blender_data, modifiers, export_settings
         None,
         None,
         element_type,
+        None,
         export_settings
     )
 
@@ -237,6 +268,11 @@ def __gather_attributes(blender_primitive, blender_data, modifiers, export_setti
 
 def __gather_targets(blender_primitive, blender_data, modifiers, export_settings):
     if export_settings['gltf_morph']:
+
+        # Not for Point Clouds
+        if type(blender_data).__name__ == "PointCloud":
+            return None
+
         targets = []
         if blender_data.shape_keys is not None:
             morph_index = 0
@@ -250,6 +286,7 @@ def __gather_targets(blender_primitive, blender_data, modifiers, export_settings
                     target = {}
                     internal_target_position = blender_primitive["attributes"][target_position_id]["data"]
                     target["POSITION"] = array_to_accessor(
+                        'SK_POSITION',
                         internal_target_position,
                         export_settings,
                         component_type=gltf2_io_constants.ComponentType.Float,
@@ -264,6 +301,7 @@ def __gather_targets(blender_primitive, blender_data, modifiers, export_settings
 
                         internal_target_normal = blender_primitive["attributes"][target_normal_id]["data"]
                         target['NORMAL'] = array_to_accessor(
+                            'SK_NORMAL',
                             internal_target_normal,
                             export_settings,
                             component_type=gltf2_io_constants.ComponentType.Float,
@@ -276,6 +314,7 @@ def __gather_targets(blender_primitive, blender_data, modifiers, export_settings
                             and blender_primitive["attributes"].get(target_tangent_id) is not None:
                         internal_target_tangent = blender_primitive["attributes"][target_tangent_id]["data"]
                         target['TANGENT'] = array_to_accessor(
+                            'SK_TANGENT',
                             internal_target_tangent,
                             export_settings,
                             component_type=gltf2_io_constants.ComponentType.Float,

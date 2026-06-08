@@ -83,6 +83,11 @@ struct alignas(Alignment) MatBase : public vec_struct_base<VecBase<T, NumRow>, N
   static constexpr int col_len = NumCol;
   static constexpr int row_len = NumRow;
 
+  /**
+   * Construct a matrix with uninitialized values.
+   *
+   * To zero-initialize the matrix, use `MatBase<T, NumCol, NumRow> matrix = {}`.
+   */
   MatBase() = default;
 
   MatBase(col_type _x, col_type _y)
@@ -461,9 +466,17 @@ struct alignas(Alignment) MatBase : public vec_struct_base<VecBase<T, NumRow>, N
     uint64_t h = 435109;
     unroll<NumCol * NumRow>([&](auto i) {
       T value = (reinterpret_cast<const T *>(this))[i];
-      h = h * 33 + *reinterpret_cast<const as_uint_type<T> *>(&value);
+      h = h * 33 + get_default_hash(value);
     });
     return h;
+  }
+
+  void hash_unique(UniqueHashBytes &hash) const
+  {
+    unroll<NumCol * NumRow>([&](auto i) {
+      const T &value = (reinterpret_cast<const T *>(this))[i];
+      hash_unique_default(value, hash);
+    });
   }
 
   friend std::ostream &operator<<(std::ostream &stream, const MatBase &mat)

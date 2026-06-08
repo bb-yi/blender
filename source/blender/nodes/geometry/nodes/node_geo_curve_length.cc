@@ -11,10 +11,10 @@ namespace blender::nodes::node_geo_curve_length_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Geometry>("Curve")
+  b.add_input<decl::Geometry>("Curve"_ustr)
       .supported_type({GeometryComponent::Type::Curve, GeometryComponent::Type::GreasePencil})
       .description("Curve to compute the length of");
-  b.add_output<decl::Float>("Length");
+  b.add_output<decl::Float>("Length"_ustr);
 }
 
 static float curves_total_length(const bke::CurvesGeometry &curves)
@@ -31,7 +31,7 @@ static float curves_total_length(const bke::CurvesGeometry &curves)
 
 static void node_geo_exec(GeoNodeExecParams params)
 {
-  GeometrySet geometry_set = params.extract_input<GeometrySet>("Curve");
+  GeometrySet geometry_set = params.extract_input<GeometrySet>("Curve"_ustr);
   float length = 0.0f;
   if (geometry_set.has_curves()) {
     const Curves &curves_id = *geometry_set.get_curves();
@@ -55,14 +55,14 @@ static void node_geo_exec(GeoNodeExecParams params)
     return;
   }
 
-  params.set_output("Length", length);
+  params.set_output("Length"_ustr, length);
 }
 
 static void node_register()
 {
   static bke::bNodeType ntype;
 
-  geo_node_type_base(&ntype, "GeometryNodeCurveLength", GEO_NODE_CURVE_LENGTH);
+  geo_node_type_base(&ntype, "GeometryNodeCurveLength"_ustr, GEO_NODE_CURVE_LENGTH);
   ntype.ui_name = "Curve Length";
   ntype.ui_description = "Retrieve the length of all splines added together";
   ntype.enum_name_legacy = "CURVE_LENGTH";

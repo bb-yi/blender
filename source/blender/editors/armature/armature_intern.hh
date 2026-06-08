@@ -8,9 +8,14 @@
 
 #pragma once
 
+#include "DNA_armature_types.h"
 #include "DNA_listBase.h"
 
+#include "RNA_types.hh"
+
 #include "BLI_span.hh"
+
+#include "ED_anim_transformable.hh"
 
 namespace blender {
 
@@ -56,6 +61,7 @@ void ARMATURE_OT_shortest_path_pick(wmOperatorType *ot);
 void ARMATURE_OT_delete(wmOperatorType *ot);
 void ARMATURE_OT_dissolve(wmOperatorType *ot);
 void ARMATURE_OT_duplicate(wmOperatorType *ot);
+void ARMATURE_OT_duplicate_rename(wmOperatorType *ot);
 void ARMATURE_OT_symmetrize(wmOperatorType *ot);
 void ARMATURE_OT_extrude(wmOperatorType *ot);
 void ARMATURE_OT_hide(wmOperatorType *ot);
@@ -131,77 +137,82 @@ void POSE_OT_quaternions_flip(wmOperatorType *ot);
 
 /* `pose_utils.cc` */
 
-/* Temporary data linking PoseChannels with the F-Curves they affect */
-struct tPChanFCurveLink {
-  tPChanFCurveLink *next, *prev;
+/**
+ * Types of transforms to apply to a tPchanFCurveLink.
+ */
+enum eAction_TransformFlags {
+  ACT_TRANS_LOC = (1 << 0),
+  ACT_TRANS_ROT = (1 << 1),
+  ACT_TRANS_SCALE = (1 << 2),
 
-  /** Object this Pose Channel belongs to. */
-  Object *ob;
+  /* BBone shape - for all the parameters, provided one is set. */
+  ACT_TRANS_BBONE = (1 << 3),
+  ACT_TRANS_PROP = (1 << 4),
+
+  ACT_TRANS_ONLY = (ACT_TRANS_LOC | ACT_TRANS_ROT | ACT_TRANS_SCALE),
+  ACT_TRANS_ALL = (ACT_TRANS_ONLY | ACT_TRANS_PROP),
+};
+
+/* Stores values of an RNA property for use at a later date. */
+struct PropertySnapshot {
+  PropertyRNA *property;
+  /* Non-float properties are also stored as float. The length of the array matches the length of
+   * the property. */
+  Array<float> values;
+};
+
+/* Temporary struct wrapping data used for pose sliding. */
+struct SlideSubject {
+  SlideSubject *next, *prev;
 
   /** F-Curves for this PoseChannel (wrapped with LinkData) */
-  ListBaseT<LinkData> fcurves;
-  /** Pose Channel which data is attached to */
-  bPoseChannel *pchan;
+  /** The AnimTransformable which the data is attached to */
+  ed::AnimTransformable *transformable;
+  /* A pointer to the data represented by this link. */
+  PointerRNA ptr;
+  /** F-Curves for this AnimTransformable. */
+  Vector<FCurve *> fcurves;
+  /* This is used as an optimization to only do blending on transform types that actually have
+   * animation. */
+  eAction_TransformFlags transform_flag;
 
-  /** RNA Path to this Pose Channel (needs to be freed when we're done) */
-  char *pchan_path;
+  /** Transform values at start of operator (to be restored before each modal step). */
+  ed::TransformFloats old_loc;
+  ed::Rotation old_rot;
+  ed::TransformFloats old_scale;
 
-  /** transform values at start of operator (to be restored before each modal step) */
-  float oldloc[3];
-  float oldrot[3];
-  float oldscale[3];
-  float oldquat[4];
-  float oldangle;
-  float oldaxis[3];
+  /* Additional properties of the transformable to affect which are not custom properties. Bones
+   * use this to store bbone data, e.g. `bbone_rollin`. */
+  Vector<PropertySnapshot> additional_properties;
 
-  /** old bbone values (to be restored along with the transform properties) */
-  float roll1, roll2;
-  /** (NOTE: we haven't renamed these this time, as their names are already long enough) */
-  float curve_in_x, curve_in_z;
-  float curve_out_x, curve_out_z;
-  float ease1, ease2;
-  float scale_in[3];
-  float scale_out[3];
-
-  /** copy of custom properties at start of operator (to be restored before each modal step) */
-  IDProperty *oldprops;
-  IDProperty *old_system_properties;
+  /* Custom properties defined via the UI. See ID::properties. */
+  Vector<PropertySnapshot> properties;
+  /* User defined properties through addons. See ID::system_properties. */
+  Vector<PropertySnapshot> system_properties;
 };
 
 /* ----------- */
 
-/** Returns a valid pose armature for this object, else returns NULL. */
-Object *poseAnim_object_get(Object *ob_);
 /**
- * Build up a list of tPChanFCurveLink. First only selected, and if that yields no result, all
- * visible.
+ * Build up a list of SlideSubject. The items put into the list depend on the mode of
+ * the context.
  */
-void poseAnim_mapping_get(bContext *C, ListBaseT<tPChanFCurveLink> *pfLinks);
-/** Free F-Curve <-> PoseChannel links. */
-void poseAnim_mapping_free(ListBaseT<tPChanFCurveLink> *pfLinks);
+void slide_subjects_get(bContext *C, ListBaseT<SlideSubject> *slide_subjects);
+/** Free all slide subjects. */
+void slide_subjects_free(ListBaseT<SlideSubject> *slide_subjects);
 
 /**
  * Helper for apply() / reset() - refresh the data.
  */
-void poseAnim_mapping_refresh(bContext *C, Scene *scene, Object *ob);
+void slide_subjects_refresh(bContext *C, ID *id);
 /**
- * Reset changes made to current pose.
+ * Reset changes made to current slide subjects back to their stored values.
  */
-void poseAnim_mapping_reset(ListBaseT<tPChanFCurveLink> *pfLinks);
+void slide_subjects_reset(ListBaseT<SlideSubject> *slide_subjects);
 /** Perform auto-key-framing after changes were made + confirmed. */
-void poseAnim_mapping_autoKeyframe(bContext *C,
-                                   Scene *scene,
-                                   ListBaseT<tPChanFCurveLink> *pfLinks,
-                                   float cframe);
-
-/**
- * Find the next F-Curve for a PoseChannel with matching path.
- * - `path` is not just the #tPChanFCurveLink (`pfl`) rna_path,
- *   since that path doesn't have property info yet.
- */
-LinkData *poseAnim_mapping_getNextFCurve(ListBaseT<LinkData> *fcuLinks,
-                                         LinkData *prev,
-                                         const char *path);
+void slide_subjects_autokey(bContext *C,
+                            Scene *scene,
+                            const ListBaseT<SlideSubject> *slide_subjects);
 
 /** \} */
 
@@ -270,7 +281,7 @@ void armature_tag_select_mirrored(bArmature *arm);
  * Helper function for tools to work on mirrored parts.
  * it leaves mirrored bones selected then too, which is a good indication of what happened.
  */
-void armature_select_mirrored_ex(bArmature *arm, int flag);
+void armature_select_mirrored_ex(bArmature *arm, eBone_Flag flag);
 void armature_select_mirrored(bArmature *arm);
 /** Only works when tagged. */
 void armature_tag_unselect(bArmature *arm);

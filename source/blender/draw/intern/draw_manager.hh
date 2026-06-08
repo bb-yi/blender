@@ -20,6 +20,7 @@
 
 #include "GPU_material.hh"
 
+#include "draw_handle.hh"
 #include "draw_resource.hh"
 #include "draw_view.hh"
 
@@ -165,10 +166,10 @@ class Manager {
    * Populate additional per resource data on demand.
    * IMPORTANT: Should be called only **once** per object.
    */
-  void extract_object_attributes(ResourceHandle handle,
+  void extract_object_attributes(ResourceHandleRange handle,
                                  const ObjectRef &ref,
                                  const GPUMaterial *material);
-  void extract_object_attributes(ResourceHandle handle,
+  void extract_object_attributes(ResourceHandleRange handle,
                                  const ObjectRef &ref,
                                  Span<GPUMaterial *> materials);
 
@@ -425,59 +426,59 @@ inline void Manager::update_handle_bounds(ResourceHandle handle,
                                           const ObjectRef &ref,
                                           float inflate_bounds)
 {
-  bounds_buf.current()[handle.resource_index()].sync(*ref.object, inflate_bounds);
+  bounds_buf.current()[handle.index()].sync(*ref.object, inflate_bounds);
 }
 
-inline void Manager::extract_object_attributes(ResourceHandle handle,
+inline void Manager::extract_object_attributes(ResourceHandleRange handle,
                                                const ObjectRef &ref,
                                                const GPUMaterial *material)
 {
-  const uint resource_index = handle.resource_index();
-  ObjectInfos &infos = infos_buf.current().get_or_resize(resource_index);
-  infos.object_attrs_offset = attribute_len_;
-
   const GPUUniformAttrList *attr_list = GPU_material_uniform_attributes(material);
-  if (attr_list == nullptr) {
+  if (attr_list == nullptr || attr_list->count == 0) {
     return;
   }
 
-  for (const GPUUniformAttr &attr : attr_list->list) {
-    if (attributes_buf.get_or_resize(attribute_len_).sync(ref, *&attr)) {
-      infos.object_attrs_len++;
-      attribute_len_++;
+  int instance_index = 0;
+  for (ResourceID resource_id : handle.id_range()) {
+    ObjectInfos &infos = infos_buf.current().get_or_resize(resource_id.index());
+    infos.object_attrs_offset = attribute_len_;
+    for (const GPUUniformAttr &attr : attr_list->list) {
+      if (attributes_buf.get_or_resize(attribute_len_).sync(ref, *&attr, instance_index)) {
+        infos.object_attrs_len++;
+        attribute_len_++;
+      }
     }
+    instance_index++;
   }
 }
 
-inline void Manager::extract_object_attributes(ResourceHandle handle,
+inline void Manager::extract_object_attributes(ResourceHandleRange handle,
                                                const ObjectRef &ref,
                                                Span<GPUMaterial *> materials)
 {
-  const uint resource_index = handle.resource_index();
-  ObjectInfos &infos = infos_buf.current().get_or_resize(resource_index);
-  infos.object_attrs_offset = attribute_len_;
-
-  /* Simple cache solution to avoid duplicates. */
-  Vector<uint32_t, 4> hash_cache;
+  Map<uint32_t, const GPUUniformAttr *, 4> attributes;
 
   for (const GPUMaterial *mat : materials) {
     const GPUUniformAttrList *attr_list = GPU_material_uniform_attributes(mat);
     if (attr_list == nullptr) {
       continue;
     }
-
     for (const GPUUniformAttr &attr : attr_list->list) {
-      /** WATCH: Linear Search. Avoid duplicate attributes across materials. */
-      if ((mat != materials.first()) && (hash_cache.first_index_of_try(attr.hash_code) != -1)) {
-        /* Attribute has already been added to the attribute buffer by another material. */
-        continue;
-      }
-      hash_cache.append(attr.hash_code);
-      if (attributes_buf.get_or_resize(attribute_len_).sync(ref, *&attr)) {
+      attributes.add(attr.hash_code, &attr);
+    }
+  }
+
+  int instance_index = 0;
+  for (ResourceID resource_id : handle.id_range()) {
+    ObjectInfos &infos = infos_buf.current().get_or_resize(resource_id.index());
+    infos.object_attrs_offset = attribute_len_;
+    for (const GPUUniformAttr *attr : attributes.values()) {
+      if (attributes_buf.get_or_resize(attribute_len_).sync(ref, *attr, instance_index)) {
         infos.object_attrs_len++;
         attribute_len_++;
       }
     }
+    instance_index++;
   }
 }
 

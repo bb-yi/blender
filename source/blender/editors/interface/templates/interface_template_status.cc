@@ -374,9 +374,7 @@ void uiTemplateInputStatus(Layout *layout, bContext *C)
   }
 }
 
-static std::string ui_template_status_tooltip(bContext *C,
-                                              void * /*argN*/,
-                                              const StringRef /*tip*/)
+static std::string template_status_tooltip(bContext *C, void * /*argN*/, const StringRef /*tip*/)
 {
   Main *bmain = CTX_data_main(C);
   std::string tooltip_message;
@@ -437,7 +435,7 @@ void uiTemplateStatusInfo(Layout *layout, bContext *C)
       row.emboss_set(EmbossType::None);
       /* This operator also works fine for blocked extensions. */
       row.op("EXTENSIONS_OT_userpref_show_for_update", "", ICON_ERROR);
-      Button *but = layout->block()->buttons.last().get();
+      Button *but = layout->block()->buttons_ptrs.last().get();
       uchar color[4];
       theme::get_color_4ubv(TH_TEXT, color);
       copy_v4_v4_uchar(but->col, color);
@@ -462,7 +460,7 @@ void uiTemplateStatusInfo(Layout *layout, bContext *C)
       else {
         row.emboss_set(EmbossType::None);
         row.op("EXTENSIONS_OT_userpref_show_online", "", ICON_INTERNET_OFFLINE);
-        Button *but = layout->block()->buttons.last().get();
+        Button *but = layout->block()->buttons_ptrs.last().get();
         uchar color[4];
         theme::get_color_4ubv(TH_TEXT, color);
         copy_v4_v4_uchar(but->col, color);
@@ -486,7 +484,7 @@ void uiTemplateStatusInfo(Layout *layout, bContext *C)
       }
       row.emboss_set(EmbossType::None);
       row.op("EXTENSIONS_OT_userpref_show_for_update", "", icon);
-      Button *but = layout->block()->buttons.last().get();
+      Button *but = layout->block()->buttons_ptrs.last().get();
       uchar color[4];
       theme::get_color_4ubv(TH_TEXT, color);
       copy_v4_v4_uchar(but->col, color);
@@ -563,7 +561,7 @@ void uiTemplateStatusInfo(Layout *layout, bContext *C)
                          0.0f,
                          0.0f,
                          "");
-  /*# ButtonType::Roundbox's background color is set in `but->col`. */
+  /* #ButtonType::Roundbox's background color is set in `but->col`. */
   theme::get_color_4ubv(TH_WARNING, but->col);
 
   if (!warning_message.empty()) {
@@ -600,7 +598,7 @@ void uiTemplateStatusInfo(Layout *layout, bContext *C)
                      0.0f,
                      0.0f,
                      std::nullopt);
-  button_func_tooltip_set(but, ui_template_status_tooltip, nullptr, nullptr);
+  button_func_tooltip_set(but, template_status_tooltip, nullptr, nullptr);
   theme::get_color_type_4ubv(TH_INFO_WARNING_TEXT, SPACE_INFO, but->col);
   but->col[3] = 255; /* This theme color is RBG only, so have to set alpha here. */
 
@@ -617,7 +615,7 @@ void uiTemplateStatusInfo(Layout *layout, bContext *C)
                    0.0f,
                    0.0f,
                    std::nullopt);
-    button_func_tooltip_set(but, ui_template_status_tooltip, nullptr, nullptr);
+    button_func_tooltip_set(but, template_status_tooltip, nullptr, nullptr);
   }
 
   block_emboss_set(block, previous_emboss);

@@ -277,6 +277,7 @@ static const EnumPropertyItem prop_calc_roll_types[] = {
 
 static wmOperatorStatus armature_calc_roll_exec(bContext *C, wmOperator *op)
 {
+  const Main *bmain = CTX_data_main(C);
   const Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
   Object *ob_active = CTX_data_edit_object(C);
@@ -289,7 +290,7 @@ static wmOperatorStatus armature_calc_roll_exec(bContext *C, wmOperator *op)
                                                     false);
 
   Vector<Object *> objects = BKE_view_layer_array_from_objects_in_edit_mode_unique_data(
-      scene, view_layer, CTX_wm_view3d(C));
+      *bmain, scene, view_layer, CTX_wm_view3d(C));
   for (Object *ob : objects) {
     bArmature *arm = id_cast<bArmature *>(ob->data);
     bool changed = false;
@@ -485,12 +486,13 @@ void ARMATURE_OT_calculate_roll(wmOperatorType *ot)
 
 static wmOperatorStatus armature_roll_clear_exec(bContext *C, wmOperator *op)
 {
+  const Main *bmain = CTX_data_main(C);
   const Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
   const float roll = RNA_float_get(op->ptr, "roll");
 
   Vector<Object *> objects = BKE_view_layer_array_from_objects_in_edit_mode_unique_data(
-      scene, view_layer, CTX_wm_view3d(C));
+      *bmain, scene, view_layer, CTX_wm_view3d(C));
   for (Object *ob : objects) {
     bArmature *arm = id_cast<bArmature *>(ob->data);
     bool changed = false;
@@ -716,9 +718,9 @@ static wmOperatorStatus armature_fill_bones_exec(bContext *C, wmOperator *op)
   /* the number of joints determines how we fill:
    *  1) between joint and cursor (joint=head, cursor=tail)
    *  2) between the two joints (order is dependent on active-bone/hierarchy)
-   *  3+) error (a smarter method involving finding chains needs to be worked out
+   *  3+) error (a smarter method involving finding chains needs to be worked out)
    */
-  count = BLI_listbase_count(&points);
+  count = points.count();
 
   if (count == 0) {
     BKE_report(op->reports, RPT_ERROR, "No joints selected");
@@ -727,14 +729,15 @@ static wmOperatorStatus armature_fill_bones_exec(bContext *C, wmOperator *op)
 
   if (mixed_object_error) {
     BKE_report(op->reports, RPT_ERROR, "Bones for different objects selected");
-    BLI_freelistN(&points);
+    points.free_no_destruct();
     return OPERATOR_CANCELLED;
   }
 
   Object *obedit = nullptr;
   {
+    const Main *bmain = CTX_data_main(C);
     ViewLayer *view_layer = CTX_data_view_layer(C);
-    FOREACH_OBJECT_IN_EDIT_MODE_BEGIN (scene, view_layer, v3d, ob_iter) {
+    FOREACH_OBJECT_IN_EDIT_MODE_BEGIN (bmain, scene, view_layer, v3d, ob_iter) {
       if (ob_iter->data == id_cast<const ID *>(arm)) {
         obedit = ob_iter;
       }
@@ -778,7 +781,7 @@ static wmOperatorStatus armature_fill_bones_exec(bContext *C, wmOperator *op)
         ((ebp_a->tail_owner == ebp_b->head_owner) && (ebp_a->tail_owner != nullptr)))
     {
       BKE_report(op->reports, RPT_ERROR, "Same bone selected...");
-      BLI_freelistN(&points);
+      points.free_no_destruct();
       return OPERATOR_CANCELLED;
     }
 
@@ -871,7 +874,7 @@ static wmOperatorStatus armature_fill_bones_exec(bContext *C, wmOperator *op)
   }
   else {
     BKE_reportf(op->reports, RPT_ERROR, "Too many points selected: %d", count);
-    BLI_freelistN(&points);
+    points.free_no_destruct();
     return OPERATOR_CANCELLED;
   }
 
@@ -886,7 +889,7 @@ static wmOperatorStatus armature_fill_bones_exec(bContext *C, wmOperator *op)
   DEG_id_tag_update(&arm->id, ID_RECALC_SYNC_TO_EVAL);
 
   /* free points */
-  BLI_freelistN(&points);
+  points.free_no_destruct();
 
   return OPERATOR_FINISHED;
 }
@@ -926,10 +929,11 @@ static void armature_clear_swap_done_flags(bArmature *arm)
 
 static wmOperatorStatus armature_switch_direction_exec(bContext *C, wmOperator * /*op*/)
 {
+  const Main *bmain = CTX_data_main(C);
   const Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
   Vector<Object *> objects = BKE_view_layer_array_from_objects_in_edit_mode_unique_data(
-      scene, view_layer, CTX_wm_view3d(C));
+      *bmain, scene, view_layer, CTX_wm_view3d(C));
 
   for (Object *ob : objects) {
     bArmature *arm = id_cast<bArmature *>(ob->data);
@@ -938,7 +942,7 @@ static wmOperatorStatus armature_switch_direction_exec(bContext *C, wmOperator *
 
     /* get chains of bones (ends on chains) */
     chains_find_tips(arm->edbo, &chains);
-    if (BLI_listbase_is_empty(&chains)) {
+    if (chains.is_empty()) {
       continue;
     }
 
@@ -1010,7 +1014,7 @@ static wmOperatorStatus armature_switch_direction_exec(bContext *C, wmOperator *
     }
 
     /* free chains */
-    BLI_freelistN(&chains);
+    chains.free_no_destruct();
 
     /* clear temp flags */
     armature_clear_swap_done_flags(arm);
@@ -1197,11 +1201,12 @@ void ARMATURE_OT_align(wmOperatorType *ot)
 
 static wmOperatorStatus armature_split_exec(bContext *C, wmOperator * /*op*/)
 {
+  const Main *bmain = CTX_data_main(C);
   const Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
 
   Vector<Object *> objects = BKE_view_layer_array_from_objects_in_edit_mode_unique_data(
-      scene, view_layer, CTX_wm_view3d(C));
+      *bmain, scene, view_layer, CTX_wm_view3d(C));
   for (Object *ob : objects) {
     bArmature *arm = id_cast<bArmature *>(ob->data);
 
@@ -1264,10 +1269,11 @@ static wmOperatorStatus armature_delete_selected_exec(bContext *C, wmOperator * 
     return OPERATOR_CANCELLED;
   }
 
+  const Main *bmain = CTX_data_main(C);
   const Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
   Vector<Object *> objects = BKE_view_layer_array_from_objects_in_edit_mode_unique_data(
-      scene, view_layer, CTX_wm_view3d(C));
+      *bmain, scene, view_layer, CTX_wm_view3d(C));
   for (Object *obedit : objects) {
     bArmature *arm = id_cast<bArmature *>(obedit->data);
     bool changed = false;
@@ -1349,19 +1355,20 @@ static bool armature_dissolve_ebone_cb(const char *bone_name, void *arm_p)
 
 static wmOperatorStatus armature_dissolve_selected_exec(bContext *C, wmOperator * /*op*/)
 {
+  const Main *bmain = CTX_data_main(C);
   const Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
   EditBone *ebone, *ebone_next;
   bool changed_multi = false;
 
   Vector<Object *> objects = BKE_view_layer_array_from_objects_in_edit_mode_unique_data(
-      scene, view_layer, CTX_wm_view3d(C));
+      *bmain, scene, view_layer, CTX_wm_view3d(C));
   for (Object *obedit : objects) {
     bArmature *arm = id_cast<bArmature *>(obedit->data);
     bool changed = false;
 
     /* store for mirror */
-    Map<EditBone *, int> ebone_flag_orig;
+    Map<EditBone *, eBone_Flag> ebone_flag_orig;
     int ebone_num = 0;
 
     for (EditBone &ebone : *arm->edbo) {
@@ -1380,7 +1387,7 @@ static wmOperatorStatus armature_dissolve_selected_exec(bContext *C, wmOperator 
 
       for (const auto &item : ebone_flag_orig.items()) {
         ebone = item.key;
-        int &flag = item.value;
+        eBone_Flag &flag = item.value;
         flag = ebone->flag & ~flag;
       }
     }
@@ -1456,7 +1463,7 @@ static wmOperatorStatus armature_dissolve_selected_exec(bContext *C, wmOperator 
 
       if (arm->flag & ARM_MIRROR_EDIT) {
         for (EditBone &ebone : *arm->edbo) {
-          if (const int *flag_p = ebone_flag_orig.lookup_ptr(&ebone)) {
+          if (const eBone_Flag *flag_p = ebone_flag_orig.lookup_ptr(&ebone)) {
             ebone.flag &= ~*flag_p;
           }
         }
@@ -1502,6 +1509,7 @@ void ARMATURE_OT_dissolve(wmOperatorType *ot)
 
 static wmOperatorStatus armature_hide_exec(bContext *C, wmOperator *op)
 {
+  const Main *bmain = CTX_data_main(C);
   const Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
   const int invert = RNA_boolean_get(op->ptr, "unselected") ? BONE_SELECTED : 0;
@@ -1512,7 +1520,7 @@ static wmOperatorStatus armature_hide_exec(bContext *C, wmOperator *op)
   }
 
   Vector<Object *> objects = BKE_view_layer_array_from_objects_in_edit_mode_unique_data(
-      scene, view_layer, CTX_wm_view3d(C));
+      *bmain, scene, view_layer, CTX_wm_view3d(C));
   for (Object *obedit : objects) {
     bArmature *arm = id_cast<bArmature *>(obedit->data);
     bool changed = false;
@@ -1565,11 +1573,12 @@ void ARMATURE_OT_hide(wmOperatorType *ot)
 
 static wmOperatorStatus armature_reveal_exec(bContext *C, wmOperator *op)
 {
+  const Main *bmain = CTX_data_main(C);
   const Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
   const bool select = RNA_boolean_get(op->ptr, "select");
   Vector<Object *> objects = BKE_view_layer_array_from_objects_in_edit_mode_unique_data(
-      scene, view_layer, CTX_wm_view3d(C));
+      *bmain, scene, view_layer, CTX_wm_view3d(C));
   for (Object *obedit : objects) {
     bArmature *arm = id_cast<bArmature *>(obedit->data);
     bool changed = false;

@@ -6,8 +6,6 @@
  * \ingroup GHOST
  */
 
-#include <iostream>
-
 #include "GHOST_Xr-api.hh"
 #include "GHOST_XrContext.hh"
 #include "GHOST_Xr_intern.hh"
@@ -41,9 +39,10 @@ GHOST_TSuccess GHOST_XrEventsHandle(GHOST_IXrContext *xr_contexthandle)
         GHOST_XrContextDestroy(xr_contexthandle);
         return GHOST_kSuccess;
       default:
-        if (xr_context.isDebugMode()) {
-          printf("Unhandled event: %i\n", event->type);
-        }
+        char event_string_buf[XR_MAX_STRUCTURE_NAME_SIZE];
+        xrStructureTypeToString(xr_context.getInstance(), event->type, event_string_buf);
+        CLOG_INFO(
+            LOG_GHOST_XR, "Unhandled OpenXR event: %s (value: %i)", event_string_buf, event->type);
         return GHOST_kFailure;
     }
   }

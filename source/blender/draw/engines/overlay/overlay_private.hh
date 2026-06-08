@@ -451,7 +451,7 @@ class ShaderModule {
 
  public:
   /** Shaders */
-  StaticShader anti_aliasing = {"overlay_antialiasing"};
+  StaticShader anti_aliasing = {"overlay_antialiasing_pipeline"};
   StaticShader armature_degrees_of_freedom = shader_clippable("overlay_armature_dof");
   StaticShader attribute_viewer_mesh = shader_clippable("overlay_viewer_attribute_mesh");
   StaticShader attribute_viewer_pointcloud = shader_clippable(
@@ -520,7 +520,7 @@ class ShaderModule {
   StaticShader uv_image_borders = {"overlay_edit_uv_tiled_image_borders"};
   StaticShader uv_paint_mask = {"overlay_edit_uv_mask_image"};
   StaticShader uv_wireframe = {"overlay_wireframe_uv"};
-  StaticShader xray_fade = {"overlay_xray_fade"};
+  StaticShader xray_fade = {"overlay_xray_fade_pipeline"};
 
   /** Selectable Shaders */
   StaticShader armature_envelope_fill = shader_selectable("overlay_armature_envelope_solid");
@@ -588,7 +588,7 @@ struct GreasePencilDepthPlane {
   /* Center and size of the bounding box of the Grease Pencil object. */
   Bounds<float3> bounds;
   /* Grease-pencil object resource handle. */
-  ResourceHandleRange handle;
+  ResourceHandle handle;
 };
 
 struct Resources : public select::SelectMap {
@@ -785,18 +785,18 @@ struct Resources : public select::SelectMap {
 
     if (state.xray_enabled) {
       /* For X-ray we render the scene to a separate depth buffer. */
-      this->xray_depth_tx.acquire(render_size, gpu::TextureFormat::SFLOAT_32_DEPTH_UINT_8);
+      this->xray_depth_tx.acquire_2d(render_size, gpu::TextureFormat::SFLOAT_32_DEPTH_UINT_8);
       this->depth_target_tx.wrap(this->xray_depth_tx);
       /* TODO(fclem): Remove mandatory allocation. */
-      this->xray_depth_in_front_tx.acquire(render_size,
-                                           gpu::TextureFormat::SFLOAT_32_DEPTH_UINT_8);
+      this->xray_depth_in_front_tx.acquire_2d(render_size,
+                                              gpu::TextureFormat::SFLOAT_32_DEPTH_UINT_8);
       this->depth_target_in_front_tx.wrap(this->xray_depth_in_front_tx);
     }
     else {
       /* TODO(fclem): Remove mandatory allocation. */
       if (!this->depth_in_front_tx.is_valid()) {
-        this->depth_in_front_alloc_tx.acquire(render_size,
-                                              gpu::TextureFormat::SFLOAT_32_DEPTH_UINT_8);
+        this->depth_in_front_alloc_tx.acquire_2d(render_size,
+                                                 gpu::TextureFormat::SFLOAT_32_DEPTH_UINT_8);
         this->depth_in_front_tx.wrap(this->depth_in_front_alloc_tx);
       }
       this->depth_target_tx.wrap(this->depth_tx);
@@ -806,14 +806,14 @@ struct Resources : public select::SelectMap {
     /* TODO: Better semantics using a switch? */
     if (!this->color_overlay_tx.is_valid()) {
       /* Likely to be the selection case. Allocate dummy texture and bind only depth buffer. */
-      this->color_overlay_alloc_tx.acquire(int2(1, 1), gpu::TextureFormat::SRGBA_8_8_8_8);
-      this->color_render_alloc_tx.acquire(int2(1, 1), gpu::TextureFormat::SRGBA_8_8_8_8);
+      this->color_overlay_alloc_tx.acquire_2d(int2(1, 1), gpu::TextureFormat::SRGBA_8_8_8_8);
+      this->color_render_alloc_tx.acquire_2d(int2(1, 1), gpu::TextureFormat::SRGBA_8_8_8_8);
 
       this->color_overlay_tx.wrap(this->color_overlay_alloc_tx);
       this->color_render_tx.wrap(this->color_render_alloc_tx);
 
-      this->line_tx.acquire(int2(1, 1), gpu::TextureFormat::UNORM_8_8_8_8);
-      this->overlay_tx.acquire(int2(1, 1), gpu::TextureFormat::SRGBA_8_8_8_8);
+      this->line_tx.acquire_2d(int2(1, 1), gpu::TextureFormat::UNORM_8_8_8_8);
+      this->overlay_tx.acquire_2d(int2(1, 1), gpu::TextureFormat::SRGBA_8_8_8_8);
 
       this->overlay_fb.ensure(GPU_ATTACHMENT_TEXTURE(this->depth_target_tx));
       this->overlay_line_fb.ensure(GPU_ATTACHMENT_TEXTURE(this->depth_target_tx));
@@ -823,8 +823,8 @@ struct Resources : public select::SelectMap {
     else {
       eGPUTextureUsage usage = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE |
                                GPU_TEXTURE_USAGE_ATTACHMENT;
-      this->line_tx.acquire(render_size, gpu::TextureFormat::UNORM_8_8_8_8, usage);
-      this->overlay_tx.acquire(render_size, gpu::TextureFormat::SRGBA_8_8_8_8, usage);
+      this->line_tx.acquire_2d(render_size, gpu::TextureFormat::UNORM_8_8_8_8, usage);
+      this->overlay_tx.acquire_2d(render_size, gpu::TextureFormat::SRGBA_8_8_8_8, usage);
 
       this->overlay_fb.ensure(GPU_ATTACHMENT_TEXTURE(this->depth_target_tx),
                               GPU_ATTACHMENT_TEXTURE(this->overlay_tx));
@@ -1026,15 +1026,15 @@ struct FlatObjectRef {
     return -1;
   }
 
-  using Callback = FunctionRef<void(gpu::Batch *geom, ResourceIndex handle)>;
+  using Callback = FunctionRef<void(gpu::Batch *geom, ResourceID handle)>;
 
   /* Execute callback for every handles that is orthogonal to the view.
    * Note: Only works in orthogonal view. */
   void if_flat_axis_orthogonal_to_view(Manager &manager, const View &view, Callback callback) const
   {
-    for (ResourceIndex resource_index : handle.index_range()) {
+    for (ResourceID resource_id : handle.id_range()) {
       const float4x4 &object_to_world =
-          manager.matrix_buf.current().get_or_resize(resource_index.resource_index()).model;
+          manager.matrix_buf.current().get_or_resize(resource_id.index()).model;
 
       float3 view_forward = view.forward();
       float3 axis_not_flat_a = (flattened_axis_id == 0) ? object_to_world.y_axis() :
@@ -1044,7 +1044,7 @@ struct FlatObjectRef {
       float3 axis_flat = math::cross(axis_not_flat_a, axis_not_flat_b);
 
       if (math::abs(math::dot(view_forward, axis_flat)) < 1e-3f) {
-        callback(geom, resource_index);
+        callback(geom, resource_id);
       }
     }
   }

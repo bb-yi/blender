@@ -173,11 +173,11 @@ void SpecializeConstant::execute(command::RecordingState &state) const
 
 void Draw::execute(RecordingState &state) const
 {
-  state.front_facing_set(res_index.has_inverted_handedness());
+  state.front_facing_set(res_id.has_inverted_handedness());
 
   /* Use same logic as in `finalize_commands`. */
   uint instance_first = 0;
-  if (res_index.raw > 0) {
+  if (res_id.raw > 0) {
     instance_first = state.instance_offset;
     state.instance_offset += instance_len;
   }
@@ -255,7 +255,7 @@ void DrawMulti::execute(RecordingState &state) const
 
 void DrawIndirect::execute(RecordingState &state) const
 {
-  state.front_facing_set(res_index.has_inverted_handedness());
+  state.front_facing_set(res_id.has_inverted_handedness());
 
   GPU_batch_draw_indirect(batch, *indirect_buf, 0);
 }
@@ -285,13 +285,13 @@ void Barrier::execute() const
 void Clear::execute() const
 {
   gpu::FrameBuffer *fb = GPU_framebuffer_active_get();
-  GPU_framebuffer_clear(fb, GPUFrameBufferBits(clear_channels), color, depth, stencil);
+  GPU_framebuffer_clear(fb, GPUFrameBufferBits(clear_channels), double4(color), depth, stencil);
 }
 
 void ClearMulti::execute() const
 {
   gpu::FrameBuffer *fb = GPU_framebuffer_active_get();
-  GPU_framebuffer_multi_clear(fb, reinterpret_cast<const float (*)[4]>(colors));
+  GPU_framebuffer_multi_clear(fb, Span<double4>(colors, colors_len));
 }
 
 void StateSet::execute(RecordingState &recording_state) const
@@ -371,6 +371,29 @@ void StencilOpSet::execute(RecordingState &state) const
   if (assign_if_different(state.stencil_op, operation)) {
     GPU_stencil_operation_set(operation);
   }
+}
+
+void TextureCopy::execute() const
+{
+  gpu::Texture *exec_src = src_is_ref ? *src_ref : src;
+  gpu::Texture *exec_dst = dst_is_ref ? *dst_ref : dst;
+
+  if (!GPU_texture_is_view(exec_src) && !GPU_texture_is_view(exec_dst)) {
+    GPU_texture_copy(exec_dst, exec_src);
+    return;
+  }
+
+  /* WORKAROUND: There are some issues with copies involving texture views.
+   * Needed for the EEVEE Prepass depth copy. */
+  /* TODO(@pragma37): This path should be removed in 5.3 once #158607 lands. */
+  BLI_assert(GPU_texture_has_depth_format(exec_src));
+  gpu::FrameBuffer *src_fb = GPU_framebuffer_create("TextureCopy-tmp-src");
+  gpu::FrameBuffer *dst_fb = GPU_framebuffer_create("TextureCopy-tmp-dst");
+  GPU_framebuffer_ensure_config(&src_fb, {GPU_ATTACHMENT_TEXTURE(exec_src)});
+  GPU_framebuffer_ensure_config(&dst_fb, {GPU_ATTACHMENT_TEXTURE(exec_dst)});
+  GPU_framebuffer_blit(src_fb, 0, dst_fb, 0, GPUFrameBufferBits::GPU_DEPTH_BIT);
+  GPU_framebuffer_free(src_fb);
+  GPU_framebuffer_free(dst_fb);
 }
 
 /** \} */
@@ -576,8 +599,7 @@ std::string Draw::serialize() const
   std::string vert_first = (vertex_first == uint(-1)) ? "from_batch" :
                                                         std::to_string(vertex_first);
   return std::string(".draw(inst_len=") + inst_len + ", vert_len=" + vert_len +
-         ", vert_first=" + vert_first + ", res_id=" + std::to_string(res_index.resource_index()) +
-         ")";
+         ", vert_first=" + vert_first + ", res_id=" + std::to_string(res_id.index()) + ")";
 }
 
 std::string DrawMulti::serialize(const std::string &line_prefix) const
@@ -589,7 +611,7 @@ std::string DrawMulti::serialize(const std::string &line_prefix) const
 
   /* This emulates the GPU sorting but without the unstable draw order. */
   std::ranges::sort(prototypes, [](const DrawPrototype &a, const DrawPrototype &b) {
-    return (a.group_id < b.group_id) || (a.group_id == b.group_id && a.res_index > b.res_index);
+    return (a.group_id < b.group_id) || (a.group_id == b.group_id && a.res_id > b.res_id);
   });
 
   /* Compute prefix sum to have correct offsets. */
@@ -613,11 +635,11 @@ std::string DrawMulti::serialize(const std::string &line_prefix) const
     if (grp.back_facing_counter > 0) {
       for (DrawPrototype &proto : prototypes.slice_safe({offset, grp.back_facing_counter})) {
         BLI_assert(proto.group_id == group_index);
-        ResourceIndex res_index(proto.res_index);
-        BLI_assert(res_index.has_inverted_handedness());
+        ResourceID res_id(proto.res_id);
+        BLI_assert(res_id.has_inverted_handedness());
         ss << std::endl
            << line_prefix << "    .proto(instance_len=" << std::to_string(proto.instance_len)
-           << ", resource_id=" << std::to_string(res_index.resource_index()) << ", back_face)";
+           << ", resource_id=" << std::to_string(res_id.index()) << ", back_face)";
       }
       offset += grp.back_facing_counter;
     }
@@ -625,11 +647,11 @@ std::string DrawMulti::serialize(const std::string &line_prefix) const
     if (grp.front_facing_counter > 0) {
       for (DrawPrototype &proto : prototypes.slice_safe({offset, grp.front_facing_counter})) {
         BLI_assert(proto.group_id == group_index);
-        ResourceIndex res_index(proto.res_index);
-        BLI_assert(!res_index.has_inverted_handedness());
+        ResourceID res_id(proto.res_id);
+        BLI_assert(!res_id.has_inverted_handedness());
         ss << std::endl
            << line_prefix << "    .proto(instance_len=" << std::to_string(proto.instance_len)
-           << ", resource_id=" << std::to_string(res_index.resource_index()) << ", front_face)";
+           << ", resource_id=" << std::to_string(res_id.index()) << ", front_face)";
       }
     }
 
@@ -689,7 +711,7 @@ std::string Clear::serialize() const
 std::string ClearMulti::serialize() const
 {
   std::stringstream ss;
-  for (float4 color : Span<float4>(colors, colors_len)) {
+  for (double4 color : Span<double4>(colors, colors_len)) {
     ss << color << ", ";
   }
   return std::string(".clear_multi(colors={") + ss.str() + "})";
@@ -721,6 +743,11 @@ std::string StencilOpSet::serialize() const
      << ", zfail=" << GPU_stencil_op_depth_fail(operation)
      << ", pass=" << GPU_stencil_op_depth_pass(operation) << ")";
   return ss.str();
+}
+
+std::string TextureCopy::serialize() const
+{
+  return ".texture_copy()";
 }
 
 /** \} */
@@ -766,7 +793,7 @@ void DrawCommandBuf::finalize_commands(Vector<Header, 0> &headers,
      * instanced draw-calls with lots of instances with no overhead. */
     /* TODO(fclem): Think about either fixing this feature or removing support for instancing all
      * together. */
-    if (cmd.res_index.raw > 0) {
+    if (cmd.res_id.raw > 0) {
       /* Save correct offset to start of resource_id buffer region for this draw. */
       uint instance_first = resource_id_count;
       resource_id_count += cmd.instance_len;
@@ -774,7 +801,7 @@ void DrawCommandBuf::finalize_commands(Vector<Header, 0> &headers,
       resource_id_buf.get_or_resize(resource_id_count - 1);
 
       /* Copy the resource id for all instances. */
-      uint index = cmd.res_index.resource_index();
+      uint index = cmd.res_id.index();
       for (int i = instance_first; i < (instance_first + cmd.instance_len); i++) {
         resource_id_buf[i] = index;
       }

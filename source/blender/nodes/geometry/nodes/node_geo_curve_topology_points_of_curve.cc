@@ -12,20 +12,25 @@ namespace blender::nodes::node_geo_curve_topology_points_of_curve_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Int>("Curve Index")
-      .implicit_field(NODE_DEFAULT_INPUT_INDEX_FIELD)
+  b.add_input<decl::Int>("Curve Index"_ustr)
+      .default_input_type(NODE_DEFAULT_INPUT_INDEX_FIELD)
       .description("The curve to retrieve data from. Defaults to the curve from the context")
       .structure_type(StructureType::Field);
-  b.add_input<decl::Float>("Weights").supports_field().hide_value().description(
-      "Values used to sort the curve's points. Uses indices by default");
-  b.add_input<decl::Int>("Sort Index")
-      .supports_field()
+  b.add_input<decl::Float>("Weights"_ustr)
+      .structure_type(StructureType::Field)
+      .hide_value()
+      .description("Values used to sort the curve's points. Uses indices by default");
+  b.add_input<decl::Int>("Sort Index"_ustr)
+      .structure_type(StructureType::Field)
       .description("Which of the sorted points to output. Negative indexing is supported");
-  b.add_output<decl::Int>("Point Index")
-      .field_source_reference_all()
+  b.add_output<decl::Int>("Point Index"_ustr)
+      .structure_type(StructureType::Field)
+      .propagate_references()
       .description("A point of the curve, chosen by the sort index");
-  b.add_output<decl::Int>("Total").field_source().reference_pass({0}).description(
-      "The number of points in the curve");
+  b.add_output<decl::Int>("Total"_ustr)
+      .structure_type(StructureType::Field)
+      .propagate_references({0})
+      .description("The number of points in the curve");
 }
 
 /**
@@ -37,10 +42,10 @@ static bool use_start_point_special_case(const Field<int> &curve_index,
                                          const Field<int> &sort_index,
                                          const Field<float> &sort_weights)
 {
-  if (!dynamic_cast<const fn::IndexFieldInput *>(&curve_index.node())) {
+  if (!curve_index.get_input_if<fn::IndexFieldInput>()) {
     return false;
   }
-  if (sort_index.node().depends_on_input() || sort_weights.node().depends_on_input()) {
+  if (sort_index.depends_on_input() || sort_weights.depends_on_input()) {
     return false;
   }
   return fn::evaluate_constant_field(sort_index) == 0;
@@ -58,7 +63,6 @@ class PointsOfCurveInput final : public bke::GeometryFieldInput {
         sort_index_(std::move(sort_index)),
         sort_weight_(std::move(sort_weight))
   {
-    category_ = Category::Generated;
   }
 
   GVArray get_varray_for_context(const bke::GeometryFieldContext &context,
@@ -92,66 +96,63 @@ class PointsOfCurveInput final : public bke::GeometryFieldInput {
     const bool use_sorting = !all_sort_weights.is_single();
 
     Array<int> point_of_curve(mask.min_array_size());
-    mask.foreach_segment(GrainSize(256), [&](const IndexMaskSegment segment) {
-      /* Reuse arrays to avoid allocation. */
-      Array<float> sort_weights;
-      Array<int> sort_indices;
+    mask.foreach_segment(
+        [&](const IndexMaskSegment segment) {
+          /* Reuse arrays to avoid allocation. */
+          Array<float> sort_weights;
+          Array<int> sort_indices;
 
-      for (const int selection_i : segment) {
-        const int curve_i = curve_indices[selection_i];
-        const int index_in_sort = indices_in_sort[selection_i];
-        if (!curves.curves_range().contains(curve_i)) {
-          point_of_curve[selection_i] = 0;
-          continue;
-        }
-        const IndexRange points = points_by_curve[curve_i];
+          for (const int selection_i : segment) {
+            const int curve_i = curve_indices[selection_i];
+            const int index_in_sort = indices_in_sort[selection_i];
+            if (!curves.curves_range().contains(curve_i)) {
+              point_of_curve[selection_i] = 0;
+              continue;
+            }
+            const IndexRange points = points_by_curve[curve_i];
 
-        const int index_in_sort_wrapped = mod_i(index_in_sort, points.size());
-        if (use_sorting) {
-          /* Retrieve the weights for each point. */
-          sort_weights.reinitialize(points.size());
-          all_sort_weights.materialize_compressed(IndexMask(points),
-                                                  sort_weights.as_mutable_span());
+            const int index_in_sort_wrapped = mod_i(index_in_sort, points.size());
+            if (use_sorting) {
+              /* Retrieve the weights for each point. */
+              sort_weights.reinitialize(points.size());
+              all_sort_weights.materialize_compressed(IndexMask(points),
+                                                      sort_weights.as_mutable_span());
 
-          /* Sort a separate array of compressed indices corresponding to the compressed weights.
-           * This allows using `materialize_compressed` to avoid virtual function call overhead
-           * when accessing values in the sort weights. However, it means a separate array of
-           * indices within the compressed array is necessary for sorting. */
-          sort_indices.reinitialize(points.size());
-          array_utils::fill_index_range<int>(sort_indices);
-          std::stable_sort(sort_indices.begin(), sort_indices.end(), [&](int a, int b) {
-            return sort_weights[a] < sort_weights[b];
-          });
-          point_of_curve[selection_i] = points[sort_indices[index_in_sort_wrapped]];
-        }
-        else {
-          point_of_curve[selection_i] = points[index_in_sort_wrapped];
-        }
-      }
-    });
+              /* Sort a separate array of compressed indices corresponding to the compressed
+               * weights. This allows using `materialize_compressed` to avoid virtual function call
+               * overhead when accessing values in the sort weights. However, it means a separate
+               * array of indices within the compressed array is necessary for sorting. */
+              sort_indices.reinitialize(points.size());
+              array_utils::fill_index_range<int>(sort_indices);
+              std::stable_sort(sort_indices.begin(), sort_indices.end(), [&](int a, int b) {
+                return sort_weights[a] < sort_weights[b];
+              });
+              point_of_curve[selection_i] = points[sort_indices[index_in_sort_wrapped]];
+            }
+            else {
+              point_of_curve[selection_i] = points[index_in_sort_wrapped];
+            }
+          }
+        },
+        exec_mode::grain_size(256));
 
     return VArray<int>::from_container(std::move(point_of_curve));
   }
 
-  void for_each_field_input_recursive(FunctionRef<void(const FieldInput &)> fn) const override
+  void foreach_recursive_field(FunctionRef<void(const GField &)> fn) const override
   {
-    curve_index_.node().for_each_field_input_recursive(fn);
-    sort_index_.node().for_each_field_input_recursive(fn);
-    sort_weight_.node().for_each_field_input_recursive(fn);
+    fn(curve_index_);
+    fn(sort_index_);
+    fn(sort_weight_);
   }
 
-  uint64_t hash() const override
+  void hash_unique(UniqueHashBytes &hash, fn::FieldHashDeep &deep_hash_cache) const override
   {
-    return 26978695677882;
-  }
-
-  bool is_equal_to(const fn::FieldNode &other) const override
-  {
-    if (const auto *typed = dynamic_cast<const PointsOfCurveInput *>(&other)) {
-      return typed->curve_index_ == curve_index_ && typed->sort_index_ == sort_index_ &&
-             typed->sort_weight_ == sort_weight_;
-    }
-    return false;
+    static constexpr int8_t id = 0;
+    hash.add(&id);
+    hash.add(deep_hash_cache.ensure(curve_index_));
+    hash.add(deep_hash_cache.ensure(sort_index_));
+    hash.add(deep_hash_cache.ensure(sort_weight_));
   }
 
   std::optional<AttrDomain> preferred_domain(const GeometryComponent & /*component*/) const final
@@ -162,10 +163,7 @@ class PointsOfCurveInput final : public bke::GeometryFieldInput {
 
 class CurvePointCountInput final : public bke::CurvesFieldInput {
  public:
-  CurvePointCountInput() : bke::CurvesFieldInput(CPPType::get<int>(), "Curve Point Count")
-  {
-    category_ = Category::Generated;
-  }
+  CurvePointCountInput() : bke::CurvesFieldInput(CPPType::get<int>(), "Curve Point Count") {}
 
   GVArray get_varray_for_context(const bke::CurvesGeometry &curves,
                                  const AttrDomain domain,
@@ -180,14 +178,10 @@ class CurvePointCountInput final : public bke::CurvesFieldInput {
     });
   }
 
-  uint64_t hash() const final
+  void hash_unique(UniqueHashBytes &hash, fn::FieldHashDeep & /*deep_hash_cache*/) const override
   {
-    return 903847569873762;
-  }
-
-  bool is_equal_to(const fn::FieldNode &other) const final
-  {
-    return dynamic_cast<const CurvePointCountInput *>(&other) != nullptr;
+    static constexpr int8_t id = 0;
+    hash.add(&id);
   }
 
   std::optional<AttrDomain> preferred_domain(const bke::CurvesGeometry & /*curves*/) const final
@@ -198,27 +192,27 @@ class CurvePointCountInput final : public bke::CurvesFieldInput {
 
 static void node_geo_exec(GeoNodeExecParams params)
 {
-  const Field<int> curve_index = params.extract_input<Field<int>>("Curve Index");
-  if (params.output_is_required("Total")) {
-    params.set_output("Total",
-                      Field<int>(std::make_shared<bke::EvaluateAtIndexInput>(
-                          curve_index,
-                          Field<int>(std::make_shared<CurvePointCountInput>()),
-                          AttrDomain::Curve)));
+  const Field<int> curve_index = params.extract_input<Field<int>>("Curve Index"_ustr);
+  if (params.output_is_required("Total"_ustr)) {
+    params.set_output(
+        "Total"_ustr,
+        Field<int>::from_input<bke::EvaluateAtIndexInput>(
+            curve_index, Field<int>::from_input<CurvePointCountInput>(), AttrDomain::Curve));
   }
-  if (params.output_is_required("Point Index")) {
-    params.set_output("Point Index",
-                      Field<int>(std::make_shared<PointsOfCurveInput>(
+  if (params.output_is_required("Point Index"_ustr)) {
+    params.set_output("Point Index"_ustr,
+                      Field<int>::from_input<PointsOfCurveInput>(
                           curve_index,
-                          params.extract_input<Field<int>>("Sort Index"),
-                          params.extract_input<Field<float>>("Weights"))));
+                          params.extract_input<Field<int>>("Sort Index"_ustr),
+                          params.extract_input<Field<float>>("Weights"_ustr)));
   }
 }
 
 static void node_register()
 {
   static bke::bNodeType ntype;
-  geo_node_type_base(&ntype, "GeometryNodePointsOfCurve", GEO_NODE_CURVE_TOPOLOGY_POINTS_OF_CURVE);
+  geo_node_type_base(
+      &ntype, "GeometryNodePointsOfCurve"_ustr, GEO_NODE_CURVE_TOPOLOGY_POINTS_OF_CURVE);
   ntype.ui_name = "Points of Curve";
   ntype.ui_description = "Retrieve a point index within a curve";
   ntype.enum_name_legacy = "POINTS_OF_CURVE";

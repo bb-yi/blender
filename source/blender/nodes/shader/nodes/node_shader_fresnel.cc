@@ -10,9 +10,9 @@ namespace nodes::node_shader_fresnel_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Float>("IOR").default_value(1.5f).min(0.0f).max(1000.0f);
-  b.add_input<decl::Vector>("Normal").hide_value();
-  b.add_output<decl::Float>("Factor", "Fac");
+  b.add_input<decl::Float>("IOR"_ustr).default_value(1.5f).min(0.0f).max(1000.0f);
+  b.add_input<decl::Vector>("Normal"_ustr).hide_value();
+  b.add_output<decl::Float>("Factor"_ustr, "Fac"_ustr);
 }
 
 static int node_shader_gpu_fresnel(GPUMaterial *mat,
@@ -47,7 +47,7 @@ void register_node_type_sh_fresnel()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeFresnel", SH_NODE_FRESNEL);
+  sh_node_type_base(&ntype, "ShaderNodeFresnel"_ustr, SH_NODE_FRESNEL);
   ntype.ui_name = "Fresnel";
   ntype.ui_description =
       "Produce a blending factor depending on the angle between the surface normal and the view "

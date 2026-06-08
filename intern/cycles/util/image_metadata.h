@@ -32,6 +32,16 @@ class ImageMetaData {
   string colorspace_file_hint;
   const char *colorspace_file_format = "";
 
+  /* Input tile info. */
+  bool has_tiles_and_mipmaps = false;
+  uint32_t tile_size = 0;
+  float4 average_color = zero_float4();
+  bool tile_need_conform = true;
+
+  /* File is a valid tx file, but does not necessarily have mipmaps and tiles if it's
+   * small enough not to need them. */
+  bool is_tx_file = false;
+
   /* Input NanoVDB data. */
   int64_t nanovdb_byte_size = 0;
   bool use_transform_3d = false;
@@ -57,6 +67,10 @@ class ImageMetaData {
   bool is_rgba() const;
   TypeDesc typedesc() const;
 
+  /* Memory stats. */
+  size_t memory_size() const;
+  size_t pixel_memory_size() const;
+
   /* OpenImageIO metadata and pixel loading. */
   bool oiio_load_metadata(OIIO::string_view filepath, OIIO::ImageSpec *r_spec = nullptr);
   bool oiio_load_pixels(OIIO::string_view filepath, void *pixels, const bool flip_y = true) const;
@@ -73,6 +87,11 @@ class ImageMetaData {
                       const int64_t x_stride,
                       const int64_t in_y_stride,
                       const int64_t out_y_stride) const;
+
+ protected:
+  void detect_tiles(OIIO::ImageInput &input,
+                    const OIIO::ImageSpec &spec,
+                    OIIO::string_view filepath);
 };
 
 CCL_NAMESPACE_END

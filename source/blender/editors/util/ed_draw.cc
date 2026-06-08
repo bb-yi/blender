@@ -27,6 +27,8 @@
 
 #include "BLF_api.hh"
 
+#include "DNA_camera_types.h"
+
 #include "IMB_imbuf_types.hh"
 #include "IMB_metadata.hh"
 
@@ -52,7 +54,7 @@ namespace blender {
  * The generic slider is supposed to be called during modal operations. It calculates a factor
  * value based on mouse position and draws a visual representation. In order to use it, you need to
  * store a reference to a #tSlider in your operator which you get by calling #ED_slider_create.
- * Then you need to update it during modal operations by calling #ED_slider_modal", which will
+ * Then you need to update it during modal operations by calling #ED_slider_modal, which will
  * update #tSlider.factor for you to use. To remove drawing and free the memory, call
  * #ED_slider_destroy.
  * \{ */
@@ -938,7 +940,7 @@ static void text_info_row(const char *text,
   BLF_shadow(font_id, FontShadowType::Outline, shadow_color);
 
   BLF_position(font_id, col1, row, 0.0f);
-  BLF_draw(font_id, IFACE_(text), text_len);
+  BLF_draw(font_id, text, text_len);
   BLF_position(font_id, col2, row, 0.0f);
   char draw_text[MAX_NAME];
   SNPRINTF_UTF8(draw_text, "%d x %d", size_x, size_y);
@@ -960,26 +962,26 @@ void ED_region_image_overlay_info_text_draw(const int render_size_x,
   const int font_id = BLF_default();
   int overlay_lineheight = (ui::style_get()->widget.points * UI_SCALE_FAC * 1.6f);
 
-  const char render_size_name[MAX_NAME] = "Render Size";
-  const char viewer_size_name[MAX_NAME] = "Image Size";
+  const StringRef render_size_name = IFACE_("Render Size");
+  const StringRef viewer_size_name = IFACE_("Image Size");
 
-  const int render_size_width = BLF_width(font_id, render_size_name, sizeof(render_size_name));
-  const int viewer_size_width = BLF_width(font_id, viewer_size_name, sizeof(viewer_size_name));
+  const int render_size_width = BLF_width(font_id, render_size_name.data(), MAX_NAME);
+  const int viewer_size_width = BLF_width(font_id, viewer_size_name.data(), MAX_NAME);
   int longest_label = max_ii(render_size_width, viewer_size_width);
 
   int col1 = draw_offset_x;
   int col2 = draw_offset_x + longest_label + (0.5 * U.widget_unit);
 
-  text_info_row(render_size_name,
-                sizeof(render_size_name),
+  text_info_row(render_size_name.data(),
+                render_size_name.size(),
                 col1,
                 col2,
                 draw_offset_y - overlay_lineheight,
                 render_size_x,
                 render_size_y);
 
-  text_info_row(viewer_size_name,
-                sizeof(viewer_size_name),
+  text_info_row(viewer_size_name.data(),
+                viewer_size_name.size(),
                 col1,
                 col2,
                 draw_offset_y - overlay_lineheight * 2,
@@ -987,7 +989,7 @@ void ED_region_image_overlay_info_text_draw(const int render_size_x,
                 viewer_size_y);
 }
 
-void ED_region_image_render_region_draw(
+void ED_region_render_region_draw(
     int x, int y, const rcti *frame, float zoomx, float zoomy, float passepartout_alpha)
 {
   GPU_matrix_push();
@@ -1022,7 +1024,7 @@ void ED_region_image_render_region_draw(
   }
 
   float wire_color[3];
-  ui::theme::get_color_3fv(TH_WIRE_EDIT, wire_color);
+  ui::theme::get_color_3fv(TH_TEXT, wire_color);
   immUniformColor4f(wire_color[0], wire_color[1], wire_color[2], 1);
 
   /* The bounding box must be drawn last to ensure it remains visible
@@ -1106,6 +1108,154 @@ void ED_region_image_metadata_draw(
 
   GPU_matrix_pop();
 }
+
+/* -------------------------------------------------------------------- */
+/** \name Composition Guides
+ * \{ */
+
+#define M_GOLDEN_RATIO_CONJUGATE 0.618033988749895f
+
+static void drawviewborder_grid3(uint shdr_pos, rctf rect, float fac)
+{
+  float x3, y3, x4, y4;
+
+  x3 = rect.xmin + fac * (rect.xmax - rect.xmin);
+  y3 = rect.ymin + fac * (rect.ymax - rect.ymin);
+  x4 = rect.xmin + (1.0f - fac) * (rect.xmax - rect.xmin);
+  y4 = rect.ymin + (1.0f - fac) * (rect.ymax - rect.ymin);
+
+  immBegin(GPU_PRIM_LINES, 8);
+
+  immVertex2f(shdr_pos, rect.xmin, y3);
+  immVertex2f(shdr_pos, rect.xmax, y3);
+
+  immVertex2f(shdr_pos, rect.xmin, y4);
+  immVertex2f(shdr_pos, rect.xmax, y4);
+
+  immVertex2f(shdr_pos, x3, rect.ymin);
+  immVertex2f(shdr_pos, x3, rect.ymax);
+
+  immVertex2f(shdr_pos, x4, rect.ymin);
+  immVertex2f(shdr_pos, x4, rect.ymax);
+
+  immEnd();
+}
+
+/** harmonious triangle */
+static void drawviewborder_triangle(uint shdr_pos, rctf rect, const bool golden, const char dir)
+{
+  float ofs;
+  float w = rect.xmax - rect.xmin;
+  float h = rect.ymax - rect.ymin;
+
+  immBegin(GPU_PRIM_LINES, 6);
+
+  if (w > h) {
+    if (golden) {
+      ofs = w * (1.0f - M_GOLDEN_RATIO_CONJUGATE);
+    }
+    else {
+      ofs = h * (h / w);
+    }
+    if (dir == 'B') {
+      std::swap(rect.ymin, rect.ymax);
+    }
+
+    immVertex2f(shdr_pos, rect.xmin, rect.ymin);
+    immVertex2f(shdr_pos, rect.xmax, rect.ymax);
+
+    immVertex2f(shdr_pos, rect.xmax, rect.ymin);
+    immVertex2f(shdr_pos, rect.xmin + (w - ofs), rect.ymax);
+
+    immVertex2f(shdr_pos, rect.xmin, rect.ymax);
+    immVertex2f(shdr_pos, rect.xmin + ofs, rect.ymin);
+  }
+  else {
+    if (golden) {
+      ofs = h * (1.0f - M_GOLDEN_RATIO_CONJUGATE);
+    }
+    else {
+      ofs = w * (w / h);
+    }
+    if (dir == 'B') {
+      std::swap(rect.xmin, rect.xmax);
+    }
+
+    immVertex2f(shdr_pos, rect.xmin, rect.ymin);
+    immVertex2f(shdr_pos, rect.xmax, rect.ymax);
+
+    immVertex2f(shdr_pos, rect.xmax, rect.ymin);
+    immVertex2f(shdr_pos, rect.xmin, rect.ymin + ofs);
+
+    immVertex2f(shdr_pos, rect.xmin, rect.ymax);
+    immVertex2f(shdr_pos, rect.xmax, rect.ymin + (h - ofs));
+  }
+
+  immEnd();
+}
+
+void ED_draw_composition_guides(uint shdr_pos,
+                                eCompositionGuideFlags flag,
+                                const rctf *rect,
+                                const float color[4])
+{
+  immUniformColor4fv(color);
+
+  if (flag & COMPOSITION_GUIDES_CENTER) {
+    float xmid, ymid;
+
+    xmid = rect->xmin + 0.5f * (rect->xmax - rect->xmin);
+    ymid = rect->ymin + 0.5f * (rect->ymax - rect->ymin);
+
+    immBegin(GPU_PRIM_LINES, 4);
+
+    immVertex2f(shdr_pos, rect->xmin, ymid);
+    immVertex2f(shdr_pos, rect->xmax, ymid);
+
+    immVertex2f(shdr_pos, xmid, rect->ymin);
+    immVertex2f(shdr_pos, xmid, rect->ymax);
+
+    immEnd();
+  }
+
+  if (flag & COMPOSITION_GUIDES_CENTER_DIAG) {
+    immBegin(GPU_PRIM_LINES, 4);
+
+    immVertex2f(shdr_pos, rect->xmin, rect->ymin);
+    immVertex2f(shdr_pos, rect->xmax, rect->ymax);
+
+    immVertex2f(shdr_pos, rect->xmin, rect->ymax);
+    immVertex2f(shdr_pos, rect->xmax, rect->ymin);
+
+    immEnd();
+  }
+
+  if (flag & COMPOSITION_GUIDES_THIRDS) {
+    drawviewborder_grid3(shdr_pos, *rect, 1.0f / 3.0f);
+  }
+
+  if (flag & COMPOSITION_GUIDES_GOLDEN) {
+    drawviewborder_grid3(shdr_pos, *rect, 1.0f - M_GOLDEN_RATIO_CONJUGATE);
+  }
+
+  if (flag & COMPOSITION_GUIDES_GOLDEN_TRI_A) {
+    drawviewborder_triangle(shdr_pos, *rect, false, 'A');
+  }
+
+  if (flag & COMPOSITION_GUIDES_GOLDEN_TRI_B) {
+    drawviewborder_triangle(shdr_pos, *rect, false, 'B');
+  }
+
+  if (flag & COMPOSITION_GUIDES_HARMONY_TRI_A) {
+    drawviewborder_triangle(shdr_pos, *rect, true, 'A');
+  }
+
+  if (flag & COMPOSITION_GUIDES_HARMONY_TRI_B) {
+    drawviewborder_triangle(shdr_pos, *rect, true, 'B');
+  }
+}
+
+/** \} */
 
 #undef MAX_METADATA_STR
 

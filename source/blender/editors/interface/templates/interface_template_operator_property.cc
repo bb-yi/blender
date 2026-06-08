@@ -40,15 +40,15 @@ struct uiTemplateOperatorPropertyPollParam {
 };
 
 #ifdef USE_OP_RESET_BUT
-static void ui_layout_operator_buts__reset_cb(bContext * /*C*/, void *op_pt, void * /*arg_dummy2*/)
+static void layout_operator_buts__reset_cb(bContext * /*C*/, void *op_pt, void * /*arg_dummy2*/)
 {
   WM_operator_properties_reset((wmOperator *)op_pt);
 }
 #endif
 
-static bool ui_layout_operator_buts_poll_property(PointerRNA * /*ptr*/,
-                                                  PropertyRNA *prop,
-                                                  void *user_data)
+static bool layout_operator_buts_poll_property(PointerRNA * /*ptr*/,
+                                               PropertyRNA *prop,
+                                               void *user_data)
 {
   uiTemplateOperatorPropertyPollParam *params = static_cast<uiTemplateOperatorPropertyPollParam *>(
       user_data);
@@ -131,14 +131,14 @@ static AutoPropButsReturn template_operator_property_buts_draw_single(
     layout.use_property_decorate_set(false);
 
     /* main draw call */
-    return_info = uiDefAutoButsRNA(
-        &layout,
-        &ptr,
-        op->type->poll_property ? ui_layout_operator_buts_poll_property : nullptr,
-        op->type->poll_property ? &user_data : nullptr,
-        op->type->prop,
-        label_align,
-        (layout_flags & TEMPLATE_OP_PROPS_COMPACT));
+    return_info = uiDefAutoButsRNA(&layout,
+                                   &ptr,
+                                   op->type->poll_property ? layout_operator_buts_poll_property :
+                                                             nullptr,
+                                   op->type->poll_property ? &user_data : nullptr,
+                                   op->type->prop,
+                                   label_align,
+                                   (layout_flags & TEMPLATE_OP_PROPS_COMPACT));
 
     if ((return_info & PROP_BUTS_NONE_ADDED) && (layout_flags & TEMPLATE_OP_PROPS_SHOW_EMPTY)) {
       layout.label(IFACE_("No Properties"), ICON_NONE);
@@ -167,7 +167,7 @@ static AutoPropButsReturn template_operator_property_buts_draw_single(
                            0.0,
                            0.0,
                            TIP_("Reset operator defaults"));
-    button_func_set(but, ui_layout_operator_buts__reset_cb, op, nullptr);
+    button_func_set(but, layout_operator_buts__reset_cb, op, nullptr);
   }
 #endif
 
@@ -175,10 +175,10 @@ static AutoPropButsReturn template_operator_property_buts_draw_single(
 
   const bool is_popup = (block->flag & BLOCK_KEEP_OPEN) != 0;
 
-  for (const std::unique_ptr<Button> &but : block->buttons) {
+  for (Button &but : block->buttons()) {
     /* no undo for buttons for operator redo panels */
     if (!(layout_flags & TEMPLATE_OP_PROPS_ALLOW_UNDO_PUSH)) {
-      button_flag_disable(but.get(), BUT_UNDO);
+      button_flag_disable(&but, BUT_UNDO);
     }
 
     /* Only do this if we're not refreshing an existing UI. */
@@ -189,9 +189,8 @@ static AutoPropButsReturn template_operator_property_buts_draw_single(
        * - this is used for allowing operators with popups to rename stuff with fewer clicks
        */
       if (is_popup) {
-        if ((but->rnaprop == op->type->prop) && ELEM(but->type, ButtonType::Text, ButtonType::Num))
-        {
-          button_focus_on_enter_event(CTX_wm_window(C), but.get());
+        if ((but.rnaprop == op->type->prop) && ELEM(but.type, ButtonType::Text, ButtonType::Num)) {
+          button_focus_on_enter_event(CTX_wm_window(C), &but);
         }
       }
     }
@@ -225,14 +224,14 @@ static void template_operator_property_buts_draw_recursive(const bContext *C,
   }
 }
 
-static bool ui_layout_operator_properties_only_booleans(const bContext *C,
-                                                        wmWindowManager *wm,
-                                                        wmOperator *op,
-                                                        int layout_flags)
+static bool layout_operator_properties_only_booleans(const bContext *C,
+                                                     wmWindowManager *wm,
+                                                     wmOperator *op,
+                                                     int layout_flags)
 {
   if (op->type->flag & OPTYPE_MACRO) {
     for (wmOperator &macro_op : op->macro) {
-      if (!ui_layout_operator_properties_only_booleans(C, wm, &macro_op, layout_flags)) {
+      if (!layout_operator_properties_only_booleans(C, wm, &macro_op, layout_flags)) {
         return false;
       }
     }
@@ -250,9 +249,7 @@ static bool ui_layout_operator_properties_only_booleans(const bContext *C,
       if (RNA_property_flag(prop) & PROP_HIDDEN) {
         continue;
       }
-      if (op->type->poll_property &&
-          !ui_layout_operator_buts_poll_property(&ptr, prop, &user_data))
-      {
+      if (op->type->poll_property && !layout_operator_buts_poll_property(&ptr, prop, &user_data)) {
         continue;
       }
       if (RNA_property_type(prop) != PROP_BOOLEAN) {
@@ -276,7 +273,7 @@ void uiTemplateOperatorPropertyButs(
 
   /* If there are only checkbox items, don't use split layout by default. It looks weird if the
    * check-boxes only use half the width. */
-  if (ui_layout_operator_properties_only_booleans(C, wm, op, flag)) {
+  if (layout_operator_properties_only_booleans(C, wm, op, flag)) {
     flag |= TEMPLATE_OP_PROPS_NO_SPLIT_LAYOUT;
   }
 
@@ -339,6 +336,81 @@ static wmOperator *minimal_operator_create(wmOperatorType *ot, PointerRNA *prope
   *op->ptr = *properties;
 
   return op;
+}
+
+static void draw_import_controls(bContext *, Layout &layout, const std::string &label, bool valid)
+{
+  layout.label(label, ICON_NONE);
+  if (valid) {
+    Layout &row = layout.row(false);
+    row.emboss_set(EmbossType::None);
+    /* TODO: Provide control for actual import operator and, potentially, presets. */
+  }
+}
+
+static void draw_import_properties(bContext *C, Layout &layout, wmOperator *op)
+{
+  Layout &col = layout.column(false);
+
+  col.separator();
+  col.use_property_decorate_set(false);
+
+  PropertyRNA *prop = RNA_struct_find_property(op->ptr, "filepath");
+  col.prop(op->ptr, prop, RNA_NO_INDEX, 0, UI_ITEM_NONE, std::nullopt, ICON_NONE, "");
+
+  template_operator_property_buts_draw_single(
+      C, op, layout, BUT_LABEL_ALIGN_NONE, TEMPLATE_OP_PROPS_HIDE_PRESETS);
+}
+
+void template_collection_importer(Layout *layout, bContext *C)
+{
+  if (!U.experimental.use_collection_importer) {
+    return;
+  }
+
+  Collection *collection = CTX_data_collection(C);
+  CollectionImport *data = collection->importer;
+
+  Layout &row = layout->row(false);
+  Layout &col = row.column(false);
+  if (data == nullptr) {
+    col.menu("COLLECTION_MT_importer_add", "Add Importer", ICON_ADD);
+    return;
+  }
+
+  col.op("COLLECTION_OT_importer_remove", std::nullopt, ICON_REMOVE);
+
+  /* Draw the importer. */
+  PointerRNA importer_ptr = RNA_pointer_create_discrete(
+      &collection->id, RNA_CollectionImport, data);
+  PanelLayout panel = layout->panel_prop(C, &importer_ptr, "is_open");
+
+  const bke::FileHandlerType *fh = bke::file_handler_find(data->fh_idname);
+  if (!fh) {
+    std::string label = std::string(IFACE_("Undefined")) + " " + data->fh_idname;
+    draw_import_controls(C, *panel.header, label, false);
+    return;
+  }
+
+  wmOperatorType *ot = WM_operatortype_find(fh->import_operator, false);
+  if (!ot) {
+    std::string label = std::string(IFACE_("Undefined")) + " " + fh->import_operator;
+    draw_import_controls(C, *panel.header, label, false);
+    return;
+  }
+
+  /* Assign temporary operator to uiBlock, which takes ownership. */
+  PointerRNA properties = RNA_pointer_create_discrete(
+      &collection->id, ot->srna, data->import_properties);
+  wmOperator *op = minimal_operator_create(ot, &properties);
+  block_set_active_operator(panel.header->block(), op, true);
+
+  /* Draw panel header and contents. */
+  std::string label(fh->label);
+  draw_import_controls(C, *panel.header, label, true);
+  if (panel.body) {
+    draw_import_properties(C, *panel.body, op);
+  }
 }
 
 static void draw_export_controls(
@@ -422,19 +494,19 @@ void template_collection_exporters(Layout *layout, bContext *C)
   /* Draw exporter list and controls. */
   PointerRNA collection_ptr = RNA_id_pointer_create(&collection->id);
   Layout &row = layout->row(false);
-  ui::template_list(&row,
-                    C,
-                    exporter_item_list->idname,
-                    "",
-                    &collection_ptr,
-                    "exporters",
-                    &collection_ptr,
-                    "active_exporter_index",
-                    nullptr,
-                    3,
-                    5,
-                    UILST_LAYOUT_DEFAULT,
-                    TEMPLATE_LIST_FLAG_NONE);
+  ui::template_uilist(&row,
+                      C,
+                      exporter_item_list->idname,
+                      "",
+                      &collection_ptr,
+                      "exporters",
+                      &collection_ptr,
+                      "active_exporter_index",
+                      nullptr,
+                      3,
+                      5,
+                      UILST_LAYOUT_DEFAULT,
+                      TEMPLATE_LIST_FLAG_NONE);
 
   Layout *col = &row.column(true);
   col->menu("COLLECTION_MT_exporter_add", "", ICON_ADD);
@@ -449,7 +521,7 @@ void template_collection_exporters(Layout *layout, bContext *C)
 
   col = &layout->column(true);
   col->op("COLLECTION_OT_export_all", std::nullopt, ICON_EXPORT);
-  col->enabled_set(!BLI_listbase_is_empty(exporters));
+  col->enabled_set(!exporters->is_empty());
 
   /* Draw the active exporter. */
   CollectionExport *data = static_cast<CollectionExport *>(BLI_findlink(exporters, index));
@@ -484,10 +556,14 @@ void template_collection_exporters(Layout *layout, bContext *C)
   /* Draw panel header and contents. */
   std::string label(fh->label);
   draw_export_controls(C, *panel.header, label, index, true);
+  ListBaseT<LayoutPanelState> *prev_layout_panel_states_storage =
+      layout->block()->panel->runtime->layout_panel_states_storage;
+  layout->block()->panel->runtime->layout_panel_states_storage = &data->layout_panel_states;
   if (panel.body) {
     draw_export_properties(
         C, *panel.body, exporter_ptr, op, fh->get_default_filename(collection->id.name + 2));
   }
+  layout->block()->panel->runtime->layout_panel_states_storage = prev_layout_panel_states_storage;
 }
 
 }  // namespace blender::ui

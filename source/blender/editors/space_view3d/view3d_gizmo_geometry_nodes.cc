@@ -34,8 +34,8 @@
 
 #include "MOD_nodes.hh"
 
+#include "NOD_eval_log.hh"
 #include "NOD_geometry_nodes_gizmos.hh"
-#include "NOD_geometry_nodes_log.hh"
 
 #include "UI_resources.hh"
 
@@ -50,8 +50,8 @@
 namespace blender {
 
 namespace ed::view3d::geometry_nodes_gizmos {
-namespace geo_eval_log = nodes::geo_eval_log;
-using geo_eval_log::GeoTreeLog;
+namespace eval_log = nodes::eval_log;
+using eval_log::NodeTreeLog;
 
 static bool gizmo_is_interacting(const wmGizmo &gizmo)
 {
@@ -117,18 +117,18 @@ struct UpdateReport {
 };
 
 using ApplyChangeFn = std::function<void(
-    StringRef socket_identifier, FunctionRef<void(bke::SocketValueVariant &value)> modify_value)>;
+    UString socket_identifier, FunctionRef<void(bke::SocketValueVariant &value)> modify_value)>;
 
 struct GizmosUpdateParams {
   const bContext &C;
   /* Transform of the object and geometry that the gizmo belongs to. */
   float4x4 parent_transform;
   const bNode &gizmo_node;
-  GeoTreeLog &tree_log;
+  NodeTreeLog &tree_log;
   UpdateReport &r_report;
   nodes::inverse_eval::ElemVariant elem;
 
-  template<typename T> [[nodiscard]] bool get_input_value(const StringRef identifier, T &r_value)
+  template<typename T> [[nodiscard]] bool get_input_value(const UString identifier, T &r_value)
   {
     const bNodeSocket &socket = *this->gizmo_node.input_by_identifier(identifier);
     const std::optional<T> value_opt = this->tree_log.find_primitive_socket_value<T>(socket);
@@ -249,8 +249,8 @@ class LinearGizmo : public NodeGizmos {
   {
     float3 position;
     float3 direction;
-    if (!params.get_input_value("Position", position) ||
-        !params.get_input_value("Direction", direction))
+    if (!params.get_input_value("Position"_ustr, position) ||
+        !params.get_input_value("Direction"_ustr, direction))
     {
       params.r_report.missing_socket_logs = true;
       return false;
@@ -284,7 +284,7 @@ class LinearGizmo : public NodeGizmos {
           const float new_gizmo_value = *static_cast<const float *>(value_ptr);
           self.edit_data_.current_value = new_gizmo_value;
           const float offset = new_gizmo_value * self.edit_data_.factor_from_transform;
-          self.apply_change("Value", [&](bke::SocketValueVariant &value_variant) {
+          self.apply_change("Value"_ustr, [&](bke::SocketValueVariant &value_variant) {
             value_variant.set(value_variant.get<float>() + offset);
           });
         };
@@ -355,9 +355,10 @@ class DialGizmo : public NodeGizmos {
     float3 up;
     bool screen_space;
     float radius;
-    if (!params.get_input_value("Position", position) || !params.get_input_value("Up", up) ||
-        !params.get_input_value("Screen Space", screen_space) ||
-        !params.get_input_value("Radius", radius))
+    if (!params.get_input_value("Position"_ustr, position) ||
+        !params.get_input_value("Up"_ustr, up) ||
+        !params.get_input_value("Screen Space"_ustr, screen_space) ||
+        !params.get_input_value("Radius"_ustr, radius))
     {
       params.r_report.missing_socket_logs = true;
       return false;
@@ -404,7 +405,7 @@ class DialGizmo : public NodeGizmos {
           if (self.edit_data_.is_negative_transform) {
             offset = -offset;
           }
-          self.apply_change("Value", [&](bke::SocketValueVariant &value_variant) {
+          self.apply_change("Value"_ustr, [&](bke::SocketValueVariant &value_variant) {
             value_variant.set(value_variant.get<float>() + offset);
           });
         };
@@ -480,8 +481,8 @@ class TransformGizmos : public NodeGizmos {
 
     float3 position;
     math::Quaternion rotation;
-    if (!params.get_input_value("Position", position) ||
-        !params.get_input_value("Rotation", rotation))
+    if (!params.get_input_value("Position"_ustr, position) ||
+        !params.get_input_value("Rotation"_ustr, rotation))
     {
       params.r_report.missing_socket_logs = true;
       return;
@@ -615,7 +616,7 @@ class TransformGizmos : public NodeGizmos {
         self.edit_data_.current_translation[axis_i] = new_gizmo_value;
         float3 translation{};
         translation[axis_i] = new_gizmo_value;
-        self.apply_change("Value", [&](bke::SocketValueVariant &value_variant) {
+        self.apply_change("Value"_ustr, [&](bke::SocketValueVariant &value_variant) {
           float4x4 value = value_variant.get<float4x4>();
           const float3x3 orientation = float3x3(value);
           float3 offset{};
@@ -666,7 +667,7 @@ class TransformGizmos : public NodeGizmos {
         const math::Axis axis = math::Axis::from_int(axis_i);
         const float new_gizmo_value = *static_cast<const float *>(value_ptr);
         self.edit_data_.current_rotation[axis_i] = new_gizmo_value;
-        self.apply_change("Value", [&](bke::SocketValueVariant &value_variant) {
+        self.apply_change("Value"_ustr, [&](bke::SocketValueVariant &value_variant) {
           float4x4 value = value_variant.get<float4x4>();
           float3 local_rotation_axis;
           if (self.transform_orientation_ == V3D_ORIENT_GLOBAL) {
@@ -720,7 +721,7 @@ class TransformGizmos : public NodeGizmos {
         self.edit_data_.current_scale[axis_i] = new_gizmo_value;
         float3 scale{1.0f, 1.0f, 1.0f};
         scale[axis_i] += new_gizmo_value;
-        self.apply_change("Value", [&](bke::SocketValueVariant &value_variant) {
+        self.apply_change("Value"_ustr, [&](bke::SocketValueVariant &value_variant) {
           float4x4 value = value_variant.get<float4x4>();
           float3 local_scale_axis;
           if (self.transform_orientation_ == V3D_ORIENT_GLOBAL) {
@@ -732,9 +733,20 @@ class TransformGizmos : public NodeGizmos {
           }
           const float3x3 rotation_matrix = math::from_rotation<float3x3>(
               math::AxisAngle(local_scale_axis, math::to_vector<float3>(axis)));
-          const float3x3 scale_matrix = math::invert(rotation_matrix) *
-                                        math::from_scale<float3x3>(scale) * rotation_matrix;
-          value.view<3, 3>() = scale_matrix * value.view<3, 3>();
+          const float3x3 scaled = math::invert(rotation_matrix) *
+                                  math::from_scale<float3x3>(scale) * rotation_matrix *
+                                  value.view<3, 3>();
+
+          /* Apply only the new column lengths to the original directions to avoid
+           * rotation drift when repeatedly applying the scale transform, see #155866. */
+          for (int i = 0; i < 3; i++) {
+            const float3 col = float3(value[i]);
+            const float len_sq = math::length_squared(col);
+            if (len_sq > math::square(1e-6f)) {
+              const float len = math::sqrt(len_sq);
+              value[i] = float4(col * (math::length(float3(scaled[i])) / len), 0.0f);
+            }
+          }
           value_variant.set(value);
         });
       };
@@ -887,7 +899,7 @@ static bke::GeometrySet find_geometry_for_gizmo(const Object &object_eval,
 {
   if (v3d.flag2 & V3D_SHOW_VIEWER) {
     const ViewerPath &viewer_path = v3d.viewer_path;
-    if (const geo_eval_log::ViewerNodeLog *viewer_log =
+    if (const eval_log::ViewerNodeLog *viewer_log =
             nmd_orig.runtime->eval_log->find_viewer_node_log_for_path(viewer_path))
     {
       if (const bke::GeometrySet *viewer_geometry = viewer_log->main_geometry()) {
@@ -1006,7 +1018,7 @@ static void WIDGETGROUP_geometry_nodes_refresh(const bContext *C, wmGizmoGroup *
         /* Initially show all gizmos. They may be hidden as part of the update again. */
         node_gizmos->show_all();
 
-        GeoTreeLog &tree_log = nmd_orig.runtime->eval_log->get_tree_log(compute_context.hash());
+        NodeTreeLog &tree_log = nmd_orig.runtime->eval_log->get_tree_log(compute_context.hash());
         tree_log.ensure_socket_values();
         tree_log.ensure_evaluated_gizmo_nodes();
 
@@ -1057,7 +1069,7 @@ static void WIDGETGROUP_geometry_nodes_refresh(const bContext *C, wmGizmoGroup *
                object_orig = &object_orig,
                nmd = &nmd_orig,
                eval_log = nmd_orig.runtime->eval_log](
-                  const StringRef socket_identifier,
+                  const UString socket_identifier,
                   const FunctionRef<void(bke::SocketValueVariant &)> modify_value) {
                 gizmo_node_tree->ensure_topology_cache();
                 const bNodeSocket &socket = *gizmo_node->input_by_identifier(socket_identifier);

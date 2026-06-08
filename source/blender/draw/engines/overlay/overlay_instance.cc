@@ -89,7 +89,7 @@ void Instance::init()
   /* TODO(fclem): Remove DRW global usage. */
   const DRWContext *ctx = DRW_context_get();
   /* Was needed by `object_wire_theme_id()` when doing the port. Not sure if needed nowadays. */
-  BKE_view_layer_synced_ensure(ctx->scene, ctx->view_layer);
+  BKE_view_layer_synced_ensure(*DEG_get_bmain(ctx->depsgraph), ctx->scene, ctx->view_layer);
 
   clipping_enabled_ = RV3D_CLIPPING_ENABLED(ctx->v3d, ctx->rv3d);
 
@@ -189,6 +189,7 @@ void Instance::init()
     state.use_in_front = false;
     state.is_wireframe_mode = false;
     state.hide_overlays = (space_image->overlay.flag & SI_OVERLAY_SHOW_OVERLAYS) == 0;
+    state.show_text = !state.hide_overlays;
     state.xray_enabled = false;
     /* Avoid triggering the depth prepass. */
     state.is_render_depth_available = true;
@@ -441,10 +442,16 @@ void Resources::update_theme_settings(const DRWContext *ctx, const State &state)
   ui::theme::get_color_shade_4fv(
       state.rv3d ? TH_GRID_MAJOR : TH_GRID, is_bg_darker ? 20 : -10, gb.colors.grid_emphasis);
 
-  /* Grid Axis */
-  ui::theme::get_color_blend_shade_4fv(TH_GRID, TH_AXIS_X, 0.85f, -20, gb.colors.grid_axis_x);
-  ui::theme::get_color_blend_shade_4fv(TH_GRID, TH_AXIS_Y, 0.85f, -20, gb.colors.grid_axis_y);
-  ui::theme::get_color_blend_shade_4fv(TH_GRID, TH_AXIS_Z, 0.85f, -20, gb.colors.grid_axis_z);
+  /* Grid axes */
+  bTheme *btheme = ui::theme::theme_get();
+  const float grid_axis_brightness = btheme->space_view3d.grid_axis_brightness;
+  const int grid_axis_offset_i = static_cast<int>((grid_axis_brightness * 2.0f - 1.0f) * 255.0f);
+  ui::theme::get_color_blend_shade_4fv(
+      TH_GRID, TH_AXIS_X, 0.85, grid_axis_offset_i, gb.colors.grid_axis_x);
+  ui::theme::get_color_blend_shade_4fv(
+      TH_GRID, TH_AXIS_Y, 0.85, grid_axis_offset_i, gb.colors.grid_axis_y);
+  ui::theme::get_color_blend_shade_4fv(
+      TH_GRID, TH_AXIS_Z, 0.85, grid_axis_offset_i, gb.colors.grid_axis_z);
 
   ui::theme::get_color_shade_alpha_4fv(TH_TRANSFORM, 0, -80, gb.colors.deselect);
   ui::theme::get_color_shade_alpha_4fv(TH_WIRE, 0, -30, gb.colors.outline);
@@ -675,6 +682,8 @@ void Instance::object_sync(ObjectRef &ob_ref, Manager &manager)
       case OB_GREASE_PENCIL:
         layer.grease_pencil.edit_object_sync(manager, ob_ref, resources, state);
         break;
+      default:
+        break;
     }
   }
 
@@ -717,6 +726,8 @@ void Instance::object_sync(ObjectRef &ob_ref, Manager &manager)
         break;
       case OB_SPEAKER:
         layer.speakers.object_sync(manager, ob_ref, resources, state);
+        break;
+      default:
         break;
     }
     layer.attribute_viewer.object_sync(manager, ob_ref, resources, state);
@@ -891,18 +902,20 @@ void Instance::draw_v2d(Manager &manager, View &view)
   regular.mesh_uvs.draw_on_render(resources.render_fb, manager, view);
 
   GPU_framebuffer_bind(resources.overlay_output_color_only_fb);
-  GPU_framebuffer_clear_color(resources.overlay_output_color_only_fb, float4(0.0));
+  GPU_framebuffer_clear_color(resources.overlay_output_color_only_fb, double4(0.0));
 
   background.draw_output(resources.overlay_output_color_only_fb, manager, view);
   grid.draw_line(resources.overlay_output_fb, manager, view);
   regular.mesh_uvs.draw(resources.overlay_output_fb, manager, view);
+
+  draw_text(resources.overlay_output_color_only_fb);
 
   cursor.draw_output(resources.overlay_output_color_only_fb, manager, view);
 }
 
 void Instance::draw_v3d(Manager &manager, View &view)
 {
-  float4 clear_color(0.0f);
+  double4 clear_color(0.0f);
 
   auto draw = [&](OverlayLayer &layer, Framebuffer &framebuffer) {
     /* TODO(fclem): Depth aware outlines (see #130751). */
@@ -1161,6 +1174,8 @@ bool Instance::object_is_edit_mode(const Object *object)
       case OB_VOLUME:
         /* No edit mode yet. */
         return false;
+      default:
+        break;
     }
   }
   return false;

@@ -19,6 +19,8 @@
 #include "BLI_math_vector.hh"
 #include "BLI_offset_indices.hh"
 
+#include "PRF_profile.hh"
+
 #include "BKE_attribute.hh"
 
 namespace blender {
@@ -35,6 +37,7 @@ template<typename Fn> inline void to_static_type(const CPPType &cpp_type, Fn &&f
   cpp_type.to_static_type<float,
                           float2,
                           float3,
+                          float4,
                           int,
                           int2,
                           bool,
@@ -96,6 +99,11 @@ template<> inline float2 mix2(const float factor, const float2 &a, const float2 
 }
 
 template<> inline float3 mix2(const float factor, const float3 &a, const float3 &b)
+{
+  return math::interpolate(a, b, factor);
+}
+
+template<> inline float4 mix2(const float factor, const float4 &a, const float4 &b)
 {
   return math::interpolate(a, b, factor);
 }
@@ -163,6 +171,12 @@ inline float2 mix3(const float3 &weights, const float2 &v0, const float2 &v1, co
 
 template<>
 inline float3 mix3(const float3 &weights, const float3 &v0, const float3 &v1, const float3 &v2)
+{
+  return weights.x * v0 + weights.y * v1 + weights.z * v2;
+}
+
+template<>
+inline float4 mix3(const float3 &weights, const float4 &v0, const float4 &v1, const float4 &v2)
 {
   return weights.x * v0 + weights.y * v1 + weights.z * v2;
 }
@@ -260,6 +274,13 @@ inline float3 mix4(
 }
 
 template<>
+inline float4 mix4(
+    const float4 &weights, const float4 &v0, const float4 &v1, const float4 &v2, const float4 &v3)
+{
+  return weights.x * v0 + weights.y * v1 + weights.z * v2 + weights.w * v3;
+}
+
+template<>
 inline ColorGeometry4f mix4(const float4 &weights,
                             const ColorGeometry4f &v0,
                             const ColorGeometry4f &v1,
@@ -297,6 +318,220 @@ inline ColorGeometry4b mix4(const float4 &weights,
  * how different types should be mixed. Usually #DefaultMixer<T> should be used to get a mixer for
  * a specific type.
  * \{ */
+
+namespace detail {
+
+static double int_to_double(const int &value)
+{
+  return double(value);
+}
+static int double_to_int(const double &value)
+{
+  return int(std::round(value));
+}
+
+static double2 int2_to_double2(const int2 &value)
+{
+  return double2(value);
+}
+static int2 double2_to_int2(const double2 &value)
+{
+  return int2(math::round(value));
+}
+
+static float int8_t_to_float(const int8_t &value)
+{
+  return float(value);
+}
+static int8_t float_to_int8_t(const float &value)
+{
+  return int8_t(std::round(value));
+}
+
+static float2 short2_to_float2(const short2 &value)
+{
+  return float2(value);
+}
+static short2 float2_to_short2(const float2 &value)
+{
+  return short2(math::round(value));
+}
+
+static float3 quat_to_expmap(const math::Quaternion &value)
+{
+  return value.expmap();
+}
+static math::Quaternion expmap_to_quat(const float3 &value)
+{
+  return math::Quaternion::expmap(value);
+}
+
+static float4 byte_color_to_float4(const ColorGeometry4b &value)
+{
+  return float4(value.r, value.g, value.b, value.a);
+}
+static ColorGeometry4b float4_to_byte_color(const float4 &value)
+{
+  return ColorGeometry4b(value.x, value.y, value.z, value.w);
+}
+
+}  // namespace detail
+
+template<typename T> inline T mix_indices(const Span<T> src, const Span<int> indices)
+{
+  T accum(0);
+  const float weight = math::rcp(float(indices.size()));
+  for (const int i : indices) {
+    accum += src[i] * weight;
+  }
+  return accum;
+}
+
+template<typename T, typename ToAccumFn, typename ToFinalFn>
+inline T mix_indices(const Span<T> src,
+                     const Span<int> indices,
+                     const ToAccumFn &to_accum_fn,
+                     const ToFinalFn &to_final_fn)
+{
+  using AccumT = std::invoke_result_t<ToAccumFn, T>;
+  static_assert(std::is_same_v<std::invoke_result_t<ToFinalFn, AccumT>, T>);
+  const float weight = math::rcp(float(indices.size()));
+  AccumT accum(0);
+  for (const int i : indices) {
+    accum += to_accum_fn(src[i]) * weight;
+  }
+  return to_final_fn(accum);
+}
+
+inline bool mix_indices(const Span<bool> src, const Span<int> indices)
+{
+  return std::ranges::any_of(indices, [&](const int i) { return src[i]; });
+}
+
+inline int mix_indices(const Span<int> src, const Span<int> indices)
+{
+  return mix_indices(src, indices, detail::int_to_double, detail::double_to_int);
+}
+
+inline int2 mix_indices(const Span<int2> src, const Span<int> indices)
+{
+  return mix_indices(src, indices, detail::int2_to_double2, detail::double2_to_int2);
+}
+
+inline int8_t mix_indices(const Span<int8_t> src, const Span<int> indices)
+{
+  return mix_indices(src, indices, detail::int8_t_to_float, detail::float_to_int8_t);
+}
+
+inline short2 mix_indices(const Span<short2> src, const Span<int> indices)
+{
+  return mix_indices(src, indices, detail::short2_to_float2, detail::float2_to_short2);
+}
+
+inline math::Quaternion mix_indices(const Span<math::Quaternion> src, const Span<int> indices)
+{
+  return mix_indices(src, indices, detail::quat_to_expmap, detail::expmap_to_quat);
+}
+
+inline ColorGeometry4b mix_indices(const Span<ColorGeometry4b> src, const Span<int> indices)
+{
+  return mix_indices(src, indices, detail::byte_color_to_float4, detail::float4_to_byte_color);
+}
+
+inline ColorGeometry4f mix_indices(const Span<ColorGeometry4f> src, const Span<int> indices)
+{
+  return ColorGeometry4f(mix_indices(src.cast<float4>(), indices));
+}
+
+float4x4 mix_indices(Span<float4x4> src, Span<int> indices);
+
+template<typename T>
+inline T mix_indices(const Span<T> src, const Span<int> indices, const Span<float> weights)
+{
+  T accum(0);
+  float weight_accum = 0.0f;
+  for (const int i : indices.index_range()) {
+    accum += src[indices[i]] * weights[i];
+    weight_accum += weights[i];
+  }
+  return accum * math::safe_rcp(weight_accum);
+}
+
+template<typename T, typename ToAccumFn, typename ToFinalFn>
+inline T mix_indices(const Span<T> src,
+                     const Span<int> indices,
+                     const Span<float> weights,
+                     const ToAccumFn &to_accum_fn,
+                     const ToFinalFn &to_final_fn)
+{
+  using AccumT = std::invoke_result_t<ToAccumFn, T>;
+  static_assert(std::is_same_v<std::invoke_result_t<ToFinalFn, AccumT>, T>);
+  AccumT accum(0);
+  float weight_accum = 0.0f;
+  for (const int i : indices.index_range()) {
+    accum += to_accum_fn(src[indices[i]]) * weights[i];
+    weight_accum += weights[i];
+  }
+  return to_final_fn(accum * math::safe_rcp(weight_accum));
+}
+
+inline bool mix_indices(const Span<bool> src, const Span<int> indices, const Span<float> weights)
+{
+  for (const int i : indices.index_range()) {
+    if (src[indices[i]] && weights[i] > 0.0f) {
+      return true;
+    }
+  }
+  return false;
+}
+
+inline int mix_indices(const Span<int> src, const Span<int> indices, const Span<float> weights)
+{
+  return mix_indices(src, indices, weights, detail::int_to_double, detail::double_to_int);
+}
+
+inline int2 mix_indices(const Span<int2> src, const Span<int> indices, const Span<float> weights)
+{
+  return mix_indices(src, indices, weights, detail::int2_to_double2, detail::double2_to_int2);
+}
+
+inline int8_t mix_indices(const Span<int8_t> src,
+                          const Span<int> indices,
+                          const Span<float> weights)
+{
+  return mix_indices(src, indices, weights, detail::int8_t_to_float, detail::float_to_int8_t);
+}
+
+inline short2 mix_indices(const Span<short2> src,
+                          const Span<int> indices,
+                          const Span<float> weights)
+{
+  return mix_indices(src, indices, weights, detail::short2_to_float2, detail::float2_to_short2);
+}
+
+inline math::Quaternion mix_indices(const Span<math::Quaternion> src,
+                                    const Span<int> indices,
+                                    const Span<float> weights)
+{
+  return mix_indices(src, indices, weights, detail::quat_to_expmap, detail::expmap_to_quat);
+}
+
+inline ColorGeometry4b mix_indices(const Span<ColorGeometry4b> src,
+                                   const Span<int> indices,
+                                   const Span<float> weights)
+{
+  return mix_indices(
+      src, indices, weights, detail::byte_color_to_float4, detail::float4_to_byte_color);
+}
+
+inline ColorGeometry4f mix_indices(const Span<ColorGeometry4f> src,
+                                   const Span<int> indices,
+                                   const Span<float> weights)
+{
+  return ColorGeometry4f(mix_indices(src.cast<float4>(), indices, weights));
+}
+
+float4x4 mix_indices(Span<float4x4> src, Span<int> indices, Span<float> weights);
 
 template<typename T> class SimpleMixer {
  private:
@@ -352,6 +587,7 @@ template<typename T> class SimpleMixer {
 
   void finalize(const IndexMask &mask)
   {
+    PRF_scope_with_name("SimpleMixer::finalize", ProfileCategory::Default);
     mask.foreach_index([&](const int64_t i) {
       const float weight = total_weights_[i];
       if (weight > 0.0f) {
@@ -477,6 +713,7 @@ class SimpleMixerWithAccumulationType {
 
   void finalize(const IndexMask &mask)
   {
+    PRF_scope_with_name("SimpleMixerWithAccumulationType::finalize", ProfileCategory::Default);
     mask.foreach_index([&](const int64_t i) {
       const Item &item = accumulation_buffer_[i];
       if (item.weight > 0.0f) {
@@ -567,6 +804,9 @@ template<> struct DefaultMixerStruct<float2> {
 template<> struct DefaultMixerStruct<float3> {
   using type = SimpleMixer<float3>;
 };
+template<> struct DefaultMixerStruct<float4> {
+  using type = SimpleMixer<float4>;
+};
 template<> struct DefaultMixerStruct<ColorGeometry4f> {
   /* Use a special mixer for colors. ColorGeometry4f can't be added/multiplied, because this is not
    * something one should usually do with colors. */
@@ -579,41 +819,24 @@ template<> struct DefaultMixerStruct<float4x4> {
   using type = float4x4Mixer;
 };
 template<> struct DefaultMixerStruct<int> {
-  static double int_to_double(const int &value)
-  {
-    return double(value);
-  }
-  static int double_to_int(const double &value)
-  {
-    return int(std::round(value));
-  }
   /* Store interpolated ints in a double temporarily, so that weights are handled correctly. It
    * uses double instead of float so that it is accurate for all 32 bit integers. */
-  using type = SimpleMixerWithAccumulationType<int, double, int_to_double, double_to_int>;
+  using type =
+      SimpleMixerWithAccumulationType<int, double, detail::int_to_double, detail::double_to_int>;
 };
 template<> struct DefaultMixerStruct<short2> {
-  static float2 int_to_float(const short2 &value)
-  {
-    return float2(value);
-  }
-  static short2 float_to_int(const float2 &value)
-  {
-    return short2(math::round(value));
-  }
-  using type = SimpleMixerWithAccumulationType<short2, float2, int_to_float, float_to_int>;
+  using type = SimpleMixerWithAccumulationType<short2,
+                                               float2,
+                                               detail::short2_to_float2,
+                                               detail::float2_to_short2>;
 };
 template<> struct DefaultMixerStruct<int2> {
-  static double2 int_to_double(const int2 &value)
-  {
-    return double2(value);
-  }
-  static int2 double_to_int(const double2 &value)
-  {
-    return int2(math::round(value));
-  }
   /* Store interpolated ints in a double temporarily, so that weights are handled correctly. It
    * uses double instead of float so that it is accurate for all 32 bit integers. */
-  using type = SimpleMixerWithAccumulationType<int2, double2, int_to_double, double_to_int>;
+  using type = SimpleMixerWithAccumulationType<int2,
+                                               double2,
+                                               detail::int2_to_double2,
+                                               detail::double2_to_int2>;
 };
 template<> struct DefaultMixerStruct<bool> {
   static float bool_to_float(const bool &value)
@@ -630,28 +853,17 @@ template<> struct DefaultMixerStruct<bool> {
 };
 
 template<> struct DefaultMixerStruct<int8_t> {
-  static float int8_t_to_float(const int8_t &value)
-  {
-    return float(value);
-  }
-  static int8_t float_to_int8_t(const float &value)
-  {
-    return int8_t(std::round(value));
-  }
   /* Store interpolated 8 bit integers in a float temporarily to increase accuracy. */
-  using type = SimpleMixerWithAccumulationType<int8_t, float, int8_t_to_float, float_to_int8_t>;
+  using type = SimpleMixerWithAccumulationType<int8_t,
+                                               float,
+                                               detail::int8_t_to_float,
+                                               detail::float_to_int8_t>;
 };
 template<> struct DefaultMixerStruct<math::Quaternion> {
-  static float3 quat_to_expmap(const math::Quaternion &value)
-  {
-    return value.expmap();
-  }
-  static math::Quaternion expmap_to_quat(const float3 &value)
-  {
-    return math::Quaternion::expmap(value);
-  }
-  using type =
-      SimpleMixerWithAccumulationType<math::Quaternion, float3, quat_to_expmap, expmap_to_quat>;
+  using type = SimpleMixerWithAccumulationType<math::Quaternion,
+                                               float3,
+                                               detail::quat_to_expmap,
+                                               detail::expmap_to_quat>;
 };
 
 template<typename T> struct DefaultPropagationMixerStruct {
@@ -675,6 +887,23 @@ using DefaultPropagationMixer = typename DefaultPropagationMixerStruct<T>::type;
  * mixer for the given type. */
 template<typename T> using DefaultMixer = typename DefaultMixerStruct<T>::type;
 
+void mix_groups(GSpan src,
+                OffsetIndices<int> groups,
+                Span<int> all_indices,
+                std::optional<Span<float>> all_weights,
+                GMutableSpan dst);
+inline void mix_groups(GSpan src,
+                       OffsetIndices<int> groups,
+                       Span<int> all_indices,
+                       GMutableSpan dst)
+{
+  mix_groups(src, groups, all_indices, std::nullopt, dst);
+}
+inline void mix_groups(GSpan src, GroupedSpan<int> indices, GMutableSpan dst)
+{
+  mix_groups(src, indices.offsets, indices.data, dst);
+}
+
 /** \} */
 
 /* -------------------------------------------------------------------- */
@@ -684,8 +913,22 @@ template<typename T> using DefaultMixer = typename DefaultMixerStruct<T>::type;
  * used to avoid templating the same logic for each type in many places.
  * \{ */
 
+/**
+ * Move elements from [src_begin, src_end) to dest_begin.
+ * dest_begin must be <= src_begin.
+ */
+void shift_left(GMutableSpan data, int src_begin, int src_end, int dst_begin);
+
+/**
+ * Move elements from [src_begin, src_end) to a range ending at dst_end.
+ * dst_end must be >= src_end.
+ */
+void shift_right(GMutableSpan data, int src_begin, int src_end, int dst_begin);
+
 void gather(GSpan src, Span<int> map, GMutableSpan dst);
 void gather(const GVArray &src, Span<int> map, GMutableSpan dst);
+void gather(GSpan src, Span<int> map, const IndexMask &dst_mask, GMutableSpan dst);
+void gather(const GVArray &src, Span<int> map, const IndexMask &dst_mask, GMutableSpan dst);
 void gather_group_to_group(OffsetIndices<int> src_offsets,
                            OffsetIndices<int> dst_offsets,
                            const IndexMask &selection,

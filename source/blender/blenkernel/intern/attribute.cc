@@ -367,7 +367,11 @@ std::string BKE_attribute_calc_unique_name(const AttributeOwner &owner, const St
       add_names(bm.pdata);
       add_names(bm.ldata);
       return BLI_uniquename_cb(
-          [&](const StringRef new_name) { return names.contains(new_name); }, '.', name_final);
+          [&](const StringRef new_name) {
+            return names.contains(new_name) || BM_attribute_stored_in_bmesh_builtin(new_name);
+          },
+          '.',
+          name_final);
     }
   }
 

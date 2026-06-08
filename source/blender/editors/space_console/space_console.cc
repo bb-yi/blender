@@ -101,8 +101,8 @@ static SpaceLink *console_duplicate(SpaceLink *sl)
   /* clear or remove stuff from old */
 
   /* TODO: duplicate?, then we also need to duplicate the py namespace. */
-  BLI_listbase_clear(&sconsolen->scrollback);
-  BLI_listbase_clear(&sconsolen->history);
+  sconsolen->scrollback.clear_no_delete();
+  sconsolen->history.clear_no_delete();
 
   return reinterpret_cast<SpaceLink *>(sconsolen);
 }
@@ -218,7 +218,7 @@ static void console_main_region_draw(const bContext *C, ARegion *region)
   SpaceConsole *sc = CTX_wm_space_console(C);
   View2D *v2d = &region->v2d;
 
-  if (BLI_listbase_is_empty(&sc->scrollback)) {
+  if (sc->scrollback.is_empty()) {
     WM_operator_name_call(const_cast<bContext *>(C),
                           "CONSOLE_OT_banner",
                           wm::OpCallContext::ExecDefault,
@@ -325,8 +325,7 @@ static void console_blend_read_data(BlendDataReader *reader, SpaceLink *sl)
    * from left to right.  the right-most expression sets the result of the comma
    * expression as a whole. */
   for (ConsoleLine &cl : sconsole->history.items_mutable()) {
-    BLO_read_char_array(reader, size_t(cl.len) + 1, &cl.line);
-    if (cl.line) {
+    if (BLO_read_array(reader, &cl.line, size_t(cl.len) + 1) && cl.line) {
       /* The allocated length is not written, so reset here. */
       cl.len_alloc = cl.len + 1;
     }
@@ -344,7 +343,7 @@ static void console_space_blend_write(BlendWriter *writer, SpaceLink *sl)
   for (ConsoleLine &cl : con->history) {
     /* 'len_alloc' is invalid on write, set from 'len' on read */
     writer->write_struct(&cl);
-    BLO_write_char_array(writer, size_t(cl.len) + 1, cl.line);
+    writer->write_char_array(size_t(cl.len) + 1, cl.line);
   }
   writer->write_struct_cast<SpaceConsole>(sl);
 }

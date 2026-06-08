@@ -86,7 +86,8 @@ static void compute_vertex_mask__armature_mode(const MDeformVert *dvert,
 
   for (bDeformGroup &def : mesh->vertex_group_names) {
     bPoseChannel *pchan = BKE_pose_channel_find_name(armature_ob->pose, def.name);
-    bool bone_for_group_exists = pchan && pchan->bone && (pchan->flag & POSE_SELECTED);
+    const bool bone_for_group_exists = pchan && pchan->bone_get(*armature_ob) &&
+                                       (pchan->flag & POSE_SELECTED);
     selected_bone_uses_group.append(bone_for_group_exists);
   }
   const int64_t total_size = selected_bone_uses_group.size();
@@ -601,7 +602,7 @@ static Mesh *modify_mesh(ModifierData *md, const ModifierEvalContext * /*ctx*/, 
 
   /* Quick test to see if we can return early. */
   if (!ELEM(mmd->mode, MOD_MASK_MODE_ARM, MOD_MASK_MODE_VGROUP) || (mesh->verts_num == 0) ||
-      BLI_listbase_is_empty(&mesh->vertex_group_names))
+      mesh->vertex_group_names.is_empty())
   {
     return mesh;
   }

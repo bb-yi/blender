@@ -148,9 +148,10 @@ ccl_device_inline void object_position_transform(KernelGlobals kg,
 
 /* Transform position from world to object space */
 
+template<class T>
 ccl_device_inline void object_inverse_position_transform(KernelGlobals kg,
                                                          const ccl_private ShaderData *sd,
-                                                         ccl_private float3 *P)
+                                                         ccl_private T *P)
 {
 #ifdef __OBJECT_MOTION__
   if (sd->object_flag & SD_OBJECT_MOTION) {
@@ -161,6 +162,17 @@ ccl_device_inline void object_inverse_position_transform(KernelGlobals kg,
 
   const Transform tfm = object_fetch_transform(kg, sd->object, OBJECT_INVERSE_TRANSFORM);
   *P = transform_point(&tfm, *P);
+}
+
+/* Convenience wrapper that checks for OBJECT_NONE before transforming.
+ * Works with both plain types (float3) and dual types (dual3). */
+template<class Float3Type>
+ccl_device_inline void object_inverse_position_transform_if_object(
+    KernelGlobals kg, const ccl_private ShaderData *sd, ccl_private Float3Type *P)
+{
+  if (sd->object != OBJECT_NONE) {
+    object_inverse_position_transform(kg, sd, P);
+  }
 }
 
 /* Transform normal from world to object space */
@@ -185,10 +197,10 @@ ccl_device_inline void object_inverse_normal_transform(KernelGlobals kg,
 }
 
 /* Transform normal from object to world space */
-
+template<class T>
 ccl_device_inline void object_normal_transform(KernelGlobals kg,
                                                const ccl_private ShaderData *sd,
-                                               ccl_private float3 *N)
+                                               ccl_private T *N)
 {
 #ifdef __OBJECT_MOTION__
   if (sd->object_flag & SD_OBJECT_MOTION) {
@@ -496,12 +508,5 @@ ccl_device_inline void bvh_instance_pop(const ccl_private Ray *ray,
   *dir = bvh_clamp_direction(ray->D);
   *idir = bvh_inverse_direction(*dir);
 }
-
-/* TODO: This can be removed when we know if no devices will require explicit
- * address space qualifiers for this case. */
-
-#define object_position_transform_auto object_position_transform
-#define object_dir_transform_auto object_dir_transform
-#define object_normal_transform_auto object_normal_transform
 
 CCL_NAMESPACE_END

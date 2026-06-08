@@ -47,6 +47,7 @@ class ClosureSignature {
                                                              const bNodeSocket &socket);
   static ClosureSignature from_parallax_height_source_socket(const bNode &node,
                                                              const bNodeSocket &socket);
+  static ClosureSignature from_closure_to_list_node(const bNode &node);
 
   void set_auto_structure_types();
 };

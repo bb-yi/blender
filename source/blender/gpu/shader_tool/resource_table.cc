@@ -26,7 +26,8 @@ using namespace metadata;
  */
 void SourceProcessor::lower_srt_accessor_templates(Parser &parser)
 {
-  parser().foreach_struct([&](Token, Scope, Token, Scope body) {
+  parser().foreach_token(Struct, [&](Token tok) {
+    Scope body = tok.find_next(lexit::BracketOpen).scope();
     body.foreach_declaration([&](Scope attributes,
                                  Token,
                                  Token type,
@@ -36,22 +37,24 @@ void SourceProcessor::lower_srt_accessor_templates(Parser &parser)
                                  Token) {
       if (attributes[1].str() != "resource_table") {
         if (type.str() == "srt_t") {
-          report_error_(ERROR_TOK(name),
-                        "The srt_t<T> template is only to be used with members declared with the "
-                        "[[resource_table]] attribute.");
+          report_error(name,
+                       "The srt_t<T> template is only to be used with members declared with the "
+                       "[[resource_table]] attribute.");
         }
         return;
       }
 
       if (type.str() != "srt_t") {
-        report_error_(
-            ERROR_TOK(type),
-            "Members declared with the [[resource_table]] attribute must wrap their type "
-            "with the srt_t<T> template.");
+        report_error(type,
+                     "Members declared with the [[resource_table]] attribute must wrap their type "
+                     "with the srt_t<T> template.");
       }
 
       if (array.is_valid()) {
-        report_error_(ERROR_TOK(name), "[[resource_table]] members cannot be arrays.");
+        report_error(name, "[[resource_table]] members cannot be arrays.");
+      }
+      if (name.prev() == '&') {
+        report_error(name.prev(), "[[resource_table]] members cannot be references.");
       }
 
       /* Remove the template but not the wrapped type. */
@@ -91,42 +94,41 @@ void SourceProcessor::lower_srt_member_access(Parser &parser)
       parser.erase(var.prev());
     }
 
-    string srt_type = type.str();
-    string srt_var = var.str();
+    string srt_type(type.str());
+    string srt_var(var.str());
 
     body_scope.foreach_match("A.A", [&](const vector<Token> toks) {
-      if (toks[0].str() != srt_var) {
+      if (toks[0].str() != srt_var || toks[0].prev() == '.') {
         return;
       }
       parser.replace(
-          toks[0], toks[2], "srt_access(" + srt_type + ", " + toks[2].str() + ")", true);
+          toks[0], toks[2], "srt_access(" + srt_type + ", " + string(toks[2].str()) + ")", true);
     });
   };
 
   parser().foreach_scope(ScopeType::FunctionArgs, [&](const Scope fn_args) {
     /* Parse both function and prototypes. */
-    Scope fn_body = fn_args.next().type() == ScopeType::Function ? fn_args.next() :
-                                                                   Scope::invalid();
+    Scope fn_body = fn_args.next().type() == ScopeType::Function ? fn_args.next() : Scope(parser);
     /* Function arguments. */
-    fn_args.foreach_match("[[A]]c?A&A", [&](const vector<Token> toks) {
-      memher_access_mutation(toks[0].scope(), toks[7], toks[9], fn_body);
+    fn_args.foreach_match("[[..]]c?A&A", [&](const vector<Token> toks) {
+      memher_access_mutation(toks[0].scope(), toks[8], toks[10], fn_body);
     });
-    fn_args.foreach_match("[[A]]c?AA", [&](const vector<Token> toks) {
-      if (toks[2].str() == srt_attribute) {
+    fn_args.foreach_match("[[..]]c?AA", [&](const vector<Token> toks) {
+      if (toks[1].next().str() == srt_attribute) {
         parser.erase(toks[0].scope());
-        report_error_(ERROR_TOK(toks[8]), "Shader Resource Table arguments must be references.");
+        report_error(toks[9], "Shader Resource Table arguments must be references.");
       }
     });
   });
 
   parser().foreach_scope(ScopeType::Function, [&](const Scope fn_body) {
     /* Local references. */
-    fn_body.foreach_match("[[A]]c?A&A", [&](const vector<Token> toks) {
-      memher_access_mutation(toks[0].scope(), toks[7], toks[9], toks[9].scope());
+    fn_body.foreach_match("[[..]]c?A&A", [&](const vector<Token> toks) {
+      memher_access_mutation(toks[0].scope(), toks[8], toks[10], toks[10].scope());
     });
     /* Local variables. */
-    fn_body.foreach_match("[[A]]c?AA", [&](const vector<Token> toks) {
-      memher_access_mutation(toks[0].scope(), toks[7], toks[8], toks[8].scope());
+    fn_body.foreach_match("[[..]]c?AA", [&](const vector<Token> toks) {
+      memher_access_mutation(toks[0].scope(), toks[8], toks[9], toks[9].scope());
     });
   });
 
@@ -140,11 +142,26 @@ void SourceProcessor::lower_srt_arguments(Parser &parser)
   /* SRT arguments. */
   parser().foreach_function([&](bool, Token fn_type, Token, Scope fn_args, bool, Scope fn_body) {
     string condition;
-    fn_args.foreach_match("[[A]]c?A", [&](const vector<Token> &tokens) {
-      if (tokens[2].str() != "resource_table") {
+    fn_args.foreach_match("[[..]]c?A", [&](const vector<Token> &tokens) {
+      if (tokens[1].next().str() != "resource_table") {
         return;
       }
-      condition += " && defined(CREATE_INFO_" + tokens[7].str() + ")";
+      string srt_cond;
+      tokens[1].scope().foreach_attribute([&](Token attribute_name, Scope attribute_parameters) {
+        if (attribute_name.str() == "condition") {
+          srt_cond = "SRT_CONSTANT_" + string(attribute_parameters.str_exclusive());
+        }
+      });
+
+      condition += " && ";
+      if (!srt_cond.empty()) {
+        /* If condition exists, ensure the function will be available if the condition is false */
+        condition += "(!(" + srt_cond + ") ||";
+      }
+      condition += "defined(CREATE_INFO_" + string(tokens[8].str()) + ")";
+      if (!srt_cond.empty()) {
+        condition += ")";
+      }
       parser.replace(tokens[0].scope(), "");
     });
 
@@ -164,16 +181,22 @@ void SourceProcessor::lower_resource_access_functions(Parser &parser)
 {
   /* Legacy access macros. */
   parser().foreach_function([&](bool, Token fn_type, Token, Scope, bool, Scope fn_body) {
-    fn_body.foreach_match("A(A,", [&](const vector<Token> &tokens) {
-      string func_name = tokens[0].str();
+    fn_body.foreach_match("A(", [&](const vector<Token> &tokens) {
+      string_view func_name = tokens[0].str();
       if (func_name != "specialization_constant_get" && func_name != "shared_variable_get" &&
           func_name != "push_constant_get" && func_name != "interface_get" &&
-          func_name != "attribute_get" && func_name != "buffer_get" &&
-          func_name != "sampler_get" && func_name != "image_get")
+          func_name != "resource_table_get" && func_name != "attribute_get" &&
+          func_name != "buffer_get" && func_name != "sampler_get" && func_name != "image_get")
       {
         return;
       }
-      string info_name = tokens[2].str();
+
+      if (tokens[1].next() != Word) {
+        report_error(tokens[1].next(), "Expecting symbol name");
+        return;
+      }
+
+      string info_name(tokens[1].next().str());
       Scope scope = tokens[0].scope();
       /* We can be in expression scope. Take parent scope until we find a local scope. */
       while (scope.type() != ScopeType::Function && scope.type() != ScopeType::Local) {
@@ -186,7 +209,7 @@ void SourceProcessor::lower_resource_access_functions(Parser &parser)
         guarded_scope_mutation(parser, scope, condition, fn_type);
       }
       else {
-        guarded_scope_mutation(parser, scope, condition);
+        guarded_scope_mutation(parser, scope, condition, Token(parser));
       }
     });
   });
@@ -213,9 +236,9 @@ void SourceProcessor::lower_resource_access_functions(Parser &parser)
 void SourceProcessor::lower_using(Parser &parser)
 {
   parser().foreach_match("un", [&](const vector<Token> &tokens) {
-    report_error_(ERROR_TOK(tokens[0]),
-                  "Unsupported `using namespace`. "
-                  "Add individual `using` directives for each needed symbol.");
+    report_error(tokens[0],
+                 "Unsupported `using namespace`. "
+                 "Add individual `using` directives for each needed symbol.");
   });
 
   auto process_using = [&](const Token &using_tok,
@@ -229,7 +252,7 @@ void SourceProcessor::lower_using(Parser &parser)
 
     /* Using the keyword in global or at namespace scope. */
     if (scope.type() == ScopeType::Global) {
-      report_error_(ERROR_TOK(using_tok), "The `using` keyword is not allowed in global scope.");
+      report_error(using_tok, "The `using` keyword is not allowed in global scope.");
       return;
     }
     if (scope.type() == ScopeType::Namespace) {
@@ -237,8 +260,8 @@ void SourceProcessor::lower_using(Parser &parser)
        * Otherwise we can have different shadowing outcome between shader and C++. */
       string namespace_name = scope.front().prev().full_symbol_name();
       if (namespace_name != namespace_prefix) {
-        report_error_(
-            ERROR_TOK(using_tok),
+        report_error(
+            using_tok,
             "The `using` keyword is only allowed in namespace scope to make visible symbols "
             "from the same namespace declared in another scope, potentially from another "
             "file.");
@@ -256,7 +279,7 @@ void SourceProcessor::lower_using(Parser &parser)
     /* Replace all occurrences of the non-namespace specified symbol. */
     scope.foreach_token(Word, [&](const Token &token) {
       /* Do not replace symbols before the using statement. */
-      if (token.index <= to_end.index) {
+      if (token.index_ <= to_end.index_) {
         return;
       }
       /* Reject symbols that contain the target symbol name. */
@@ -289,26 +312,8 @@ void SourceProcessor::lower_using(Parser &parser)
 
   /* Verify all using were processed. */
   parser().foreach_token(Using, [&](const Token &token) {
-    report_error_(ERROR_TOK(token), "Unsupported `using` keyword usage.");
+    report_error(token, "Unsupported `using` keyword usage.");
   });
-}
-
-void SourceProcessor::lower_scope_resolution_operators(Parser &parser)
-{
-  parser().foreach_match("::", [&](const vector<Token> &tokens) {
-    if (tokens[0].scope().type() == ScopeType::Attribute) {
-      return;
-    }
-    if (tokens[0].prev() != Word) {
-      /* Global namespace reference. */
-      parser.erase(tokens.front(), tokens.back());
-    }
-    else {
-      /* Specific namespace reference. */
-      parser.replace(tokens.front(), tokens.back(), namespace_separator);
-    }
-  });
-  parser.apply_mutations();
 }
 
 /* Parse SRT and interfaces, remove their attributes and create init function for SRT structs. */
@@ -321,13 +326,25 @@ void SourceProcessor::lower_resource_table(Parser &parser)
     vertex_input,
     vertex_output,
     fragment_output,
+    fragment_input,
   };
 
   auto parse_resource = [&](Scope attributes, Token type, Token name, Scope array) {
+    /* FIXME(fclem): This is a hotfix to support multi dimensional array.
+     * Ideally, array should already contain all dimensions */
+    Scope array_end = array;
+    while (array_end.next().type() == ScopeType::Subscript) {
+      array_end = array_end.next();
+    }
+    string_view array_str;
+    if (array.is_valid()) {
+      array_str = parser.substr(array.front(), array_end.back(), true);
+    }
+
     metadata::ParsedResource resource{
-        type.line_number(), type.str(), name.str(), array.str_with_whitespace()};
+        type.line_number(), string(type.str()), string(name.str()), string(array_str)};
     attributes.foreach_scope(ScopeType::Attribute, [&](const Scope &attribute) {
-      string type = attribute[0].str();
+      string_view type = attribute[0].str();
       if (type == "sampler") {
         resource.res_type = type;
         resource.res_slot = attribute[2].str();
@@ -347,6 +364,9 @@ void SourceProcessor::lower_resource_table(Parser &parser)
         resource.res_slot = attribute[2].str();
         resource.res_qualifier = attribute[4].str();
       }
+      else if (type == "shared") {
+        resource.res_type = type;
+      }
       else if (type == "push_constant") {
         resource.res_type = type;
       }
@@ -355,15 +375,15 @@ void SourceProcessor::lower_resource_table(Parser &parser)
       }
       else if (type == "specialization_constant") {
         resource.res_type = type;
-        resource.res_value = attribute[2].str();
+        resource.res_value = attribute[1].scope().str_exclusive();
       }
       else if (type == "condition") {
         attribute[1].scope().foreach_token(Word, [&](const Token tok) {
-          resource.res_condition += "int " + tok.str() + " = ";
-          resource.res_condition += "ShaderCreateInfo::find_constant(constants, \"" + tok.str() +
-                                    "\"); ";
+          resource.res_condition += "int " + string(tok.str()) + " = ";
+          resource.res_condition += "ShaderCreateInfo::find_constant(constants, \"" +
+                                    string(tok.str()) + "\"); ";
         });
-        resource.res_condition += "return " + attribute[1].scope().str() + ";";
+        resource.res_condition += "return " + string(attribute[1].scope().str()) + ";";
       }
       else if (type == "frequency") {
         resource.res_frequency = attribute[2].str();
@@ -375,7 +395,7 @@ void SourceProcessor::lower_resource_table(Parser &parser)
         resource.res_type = type;
       }
       else {
-        report_error_(ERROR_TOK(attribute[0]), "Invalid attribute in resource table");
+        report_error(attribute[0], "Invalid attribute in resource table");
       }
     });
     return resource;
@@ -383,24 +403,24 @@ void SourceProcessor::lower_resource_table(Parser &parser)
 
   auto parse_vertex_input = [&](Scope attributes, Token type, Token name, Scope array) {
     if (array.is_valid()) {
-      report_error_(ERROR_TOK(array[0]), "Array are not supported as vertex attributes");
+      report_error(array[0], "Array are not supported as vertex attributes");
     }
 
-    metadata::ParsedVertInput vert_in{type.line_number(), type.str(), name.str()};
+    metadata::ParsedVertInput vert_in{type.line_number(), string(type.str()), string(name.str())};
 
     if (vert_in.var_type == "float3x3" || vert_in.var_type == "float2x2" ||
         vert_in.var_type == "float4x4" || vert_in.var_type == "float3x4")
     {
-      report_error_(ERROR_TOK(name), "Matrices are not supported as vertex attributes");
+      report_error(name, "Matrices are not supported as vertex attributes");
     }
 
     attributes.foreach_scope(ScopeType::Attribute, [&](const Scope &attribute) {
-      string type = attribute[0].str();
+      string_view type = attribute[0].str();
       if (type == "attribute") {
         vert_in.slot = attribute[2].str();
       }
       else {
-        report_error_(ERROR_TOK(attribute[0]), "Invalid attribute in vertex input interface");
+        report_error(attribute[0], "Invalid attribute in vertex input interface");
       }
     });
     return vert_in;
@@ -409,37 +429,38 @@ void SourceProcessor::lower_resource_table(Parser &parser)
   auto parse_vertex_output =
       [&](Token struct_name, Scope attributes, Token type, Token name, Scope array) {
         if (array.is_valid()) {
-          report_error_(ERROR_TOK(array[0]), "Array are not supported in stage interface");
+          report_error(array[0], "Array are not supported in stage interface");
         }
 
         Token interpolation_mode = attributes[1];
 
         metadata::ParsedAttribute attr{type.line_number(),
-                                       type.str(),
-                                       struct_name.str() + "_" + name.str(),
-                                       interpolation_mode.str()};
+                                       string(type.str()),
+                                       string(struct_name.str()) + "_" + string(name.str()),
+                                       string(interpolation_mode.str())};
 
         if (attr.var_type == "float3x3" || attr.var_type == "float2x2" ||
             attr.var_type == "float4x4" || attr.var_type == "float3x4")
         {
-          report_error_(ERROR_TOK(name), "Matrices are not supported in stage interface");
+          report_error(name, "Matrices are not supported in stage interface");
         }
 
         if (attr.interpolation_mode != "smooth" && attr.interpolation_mode != "flat" &&
             attr.interpolation_mode != "no_perspective")
         {
-          report_error_(ERROR_TOK(attributes[0]), "Invalid attribute in shader stage interface");
+          report_error(attributes[0], "Invalid attribute in shader stage interface");
         }
         return attr;
       };
 
   auto parse_fragment_output =
       [&](Token struct_name, Scope attributes, Token tok_type, Token name, Scope) {
-        metadata::ParsedFragOuput frag_out{
-            tok_type.line_number(), tok_type.str(), struct_name.str() + "_" + name.str()};
+        metadata::ParsedFragOuput frag_out{tok_type.line_number(),
+                                           string(tok_type.str()),
+                                           string(struct_name.str()) + "_" + string(name.str())};
 
         attributes.foreach_scope(ScopeType::Attribute, [&](const Scope &attribute) {
-          string type = attribute[0].str();
+          string_view type = attribute[0].str();
           if (type == "frag_color") {
             frag_out.slot = attribute[2].str();
           }
@@ -450,30 +471,56 @@ void SourceProcessor::lower_resource_table(Parser &parser)
             frag_out.dual_source = attribute[2].str();
           }
           else {
-            report_error_(ERROR_TOK(attributes[0]),
-                          "Invalid attribute in fragment output interface");
+            report_error(attributes[0], "Invalid attribute in fragment output interface");
           }
         });
         return frag_out;
       };
 
+  auto parse_fragment_input =
+      [&](Token struct_name, Scope attributes, Token tok_type, Token name, Scope) {
+        metadata::ParsedFragInput frag_in{tok_type.line_number(),
+                                          string(tok_type.str()),
+                                          string(struct_name.str()) + "_" + string(name.str())};
+
+        attributes.foreach_scope(ScopeType::Attribute, [&](const Scope &attribute) {
+          string_view type = attribute[0].str();
+          if (type == "subpass_input") {
+            frag_in.slot = attribute[2].str();
+            frag_in.image_type = attribute[4].str();
+          }
+          else if (type == "raster_order_group") {
+            frag_in.raster_order_group = attribute[2].str();
+          }
+          else {
+            report_error(attributes[0], "Invalid attribute in fragment output interface");
+          }
+        });
+        return frag_in;
+      };
+
   auto is_resource_table_attribute = [](Token attr) {
-    string type = attr.str();
+    string_view type = attr.str();
     return (type == "sampler" || type == "image" || type == "uniform" || type == "storage" ||
-            type == "push_constant" || type == "compilation_constant" ||
-            type == "compilation_constant" || type == "legacy_info" || type == "resource_table");
+            type == "shared" || type == "push_constant" || type == "compilation_constant" ||
+            type == "specialization_constant" || type == "legacy_info" ||
+            type == "resource_table");
   };
   auto is_vertex_input_attribute = [](Token attr) {
-    string type = attr.str();
+    string_view type = attr.str();
     return (type == "attribute");
   };
   auto is_vertex_output_attribute = [](Token attr) {
-    string type = attr.str();
+    string_view type = attr.str();
     return (type == "flat" || type == "smooth" || type == "no_perspective");
   };
   auto is_fragment_output_attribute = [](Token attr) {
-    string type = attr.str();
+    string_view type = attr.str();
     return (type == "frag_color" || type == "frag_depth" || type == "frag_stencil_ref");
+  };
+  auto is_fragment_input_attribute = [](Token attr) {
+    string_view type = attr.str();
+    return (type == "subpass_input");
   };
 
   parser().foreach_struct([&](Token struct_tok, Scope, Token struct_name, Scope body) {
@@ -484,15 +531,17 @@ void SourceProcessor::lower_resource_table(Parser &parser)
     metadata::VertexInputs vertex_in;
     metadata::StageInterface vertex_out;
     metadata::FragmentOutputs fragment_out;
+    metadata::FragmentInputs fragment_in;
     srt.name = struct_name.str();
     vertex_in.name = struct_name.str();
     vertex_out.name = struct_name.str();
     fragment_out.name = struct_name.str();
+    fragment_in.name = struct_name.str();
 
     body.foreach_declaration([&](Scope attributes,
                                  Token const_tok,
                                  Token type,
-                                 Scope /*template_scope TODO */,
+                                 Scope /*template_scope*/, /* TODO */
                                  Token name,
                                  Scope array,
                                  Token decl_end) {
@@ -512,6 +561,9 @@ void SourceProcessor::lower_resource_table(Parser &parser)
       else if (is_fragment_output_attribute(attributes[1])) {
         decl_type = SrtType::fragment_output;
       }
+      else if (is_fragment_input_attribute(attributes[1])) {
+        decl_type = SrtType::fragment_input;
+      }
       else {
         return;
       }
@@ -522,22 +574,22 @@ void SourceProcessor::lower_resource_table(Parser &parser)
       else if (srt_type != decl_type) {
         switch (srt_type) {
           case SrtType::resource_table:
-            report_error_(ERROR_TOK(struct_name), "Structure expected to contain resources...");
+            report_error(struct_name, "Structure expected to contain resources...");
             break;
           case SrtType::vertex_input:
-            report_error_(ERROR_TOK(struct_name),
-                          "Structure expected to contain vertex inputs...");
+            report_error(struct_name, "Structure expected to contain vertex inputs...");
             break;
           case SrtType::vertex_output:
-            report_error_(ERROR_TOK(struct_name),
-                          "Structure expected to contain vertex outputs...");
+            report_error(struct_name, "Structure expected to contain vertex outputs...");
             break;
           case SrtType::fragment_output:
-            report_error_(ERROR_TOK(struct_name),
-                          "Structure expected to contain fragment inputs...");
+            report_error(struct_name, "Structure expected to contain fragment outputs...");
+            break;
+          case SrtType::fragment_input:
+            report_error(struct_name, "Structure expected to contain fragment inputs...");
             break;
           case SrtType::none:
-            report_error_(ERROR_TOK(struct_name), "Structure expected to contain plain data...");
+            report_error(struct_name, "Structure expected to contain plain data...");
             break;
           case SrtType::undefined:
             break;
@@ -545,19 +597,22 @@ void SourceProcessor::lower_resource_table(Parser &parser)
 
         switch (decl_type) {
           case SrtType::resource_table:
-            report_error_(ERROR_TOK(attributes[1]), "...but member declared as resource.");
+            report_error(attributes[1], "...but member declared as resource.");
             break;
           case SrtType::vertex_input:
-            report_error_(ERROR_TOK(attributes[1]), "...but member declared as vertex input.");
+            report_error(attributes[1], "...but member declared as vertex input.");
             break;
           case SrtType::vertex_output:
-            report_error_(ERROR_TOK(attributes[1]), "...but member declared as vertex output.");
+            report_error(attributes[1], "...but member declared as vertex output.");
             break;
           case SrtType::fragment_output:
-            report_error_(ERROR_TOK(attributes[1]), "...but member declared as fragment output.");
+            report_error(attributes[1], "...but member declared as fragment output.");
+            break;
+          case SrtType::fragment_input:
+            report_error(attributes[1], "...but member declared as fragment input.");
             break;
           case SrtType::none:
-            report_error_(ERROR_TOK(name), "...but member declared as plain data.");
+            report_error(name, "...but member declared as plain data.");
             break;
           case SrtType::undefined:
             break;
@@ -589,6 +644,11 @@ void SourceProcessor::lower_resource_table(Parser &parser)
               parse_fragment_output(struct_name, attributes, type, name, array));
           parser.erase(attributes.scope());
           break;
+        case SrtType::fragment_input:
+          fragment_in.emplace_back(
+              parse_fragment_input(struct_name, attributes, type, name, array));
+          parser.erase(attributes.scope());
+          break;
         case SrtType::undefined:
         case SrtType::none:
           break;
@@ -607,6 +667,9 @@ void SourceProcessor::lower_resource_table(Parser &parser)
         break;
       case SrtType::fragment_output:
         metadata_.fragment_outputs.emplace_back(fragment_out);
+        break;
+      case SrtType::fragment_input:
+        metadata_.fragment_inputs.emplace_back(fragment_in);
         break;
       case SrtType::undefined:
       case SrtType::none:

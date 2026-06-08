@@ -19,14 +19,19 @@ static void node_declare(NodeDeclarationBuilder &b)
 {
   b.use_custom_socket_order();
   b.allow_any_socket_order();
-  b.add_input<decl::Color>("Image")
+  b.add_input<decl::Color>("Image"_ustr)
       .default_value({1.0f, 1.0f, 1.0f, 1.0f})
       .hide_value()
       .structure_type(StructureType::Dynamic);
-  b.add_output<decl::Color>("Image").structure_type(StructureType::Dynamic).align_with_previous();
+  b.add_output<decl::Color>("Image"_ustr)
+      .structure_type(StructureType::Dynamic)
+      .align_with_previous();
 
-  b.add_input<decl::Int>("Size").default_value(0).min(0).description(
-      "The size of the inpaint in pixels");
+  b.add_input<decl::Int>("Size"_ustr)
+      .default_value(0)
+      .subtype(PROP_PIXEL)
+      .min(0)
+      .description("The size of the inpaint in pixels");
 }
 
 using namespace blender::compositor;
@@ -349,7 +354,7 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, "CompositorNodeInpaint", CMP_NODE_INPAINT);
+  cmp_node_type_base(&ntype, "CompositorNodeInpaint"_ustr, CMP_NODE_INPAINT);
   ntype.ui_name = "Inpaint";
   ntype.ui_description = "Extend borders of an image into transparent or masked regions";
   ntype.enum_name_legacy = "INPAINT";

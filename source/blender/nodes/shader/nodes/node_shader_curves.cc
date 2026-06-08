@@ -23,7 +23,7 @@ namespace nodes::node_shader_curves_cc::vec {
 static void sh_node_curve_vec_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
-  b.add_input<decl::Float>("Factor", "Fac")
+  b.add_input<decl::Float>("Factor"_ustr, "Fac"_ustr)
       .min(0.0f)
       .max(1.0f)
       .default_value(1.0f)
@@ -31,12 +31,12 @@ static void sh_node_curve_vec_declare(NodeDeclarationBuilder &b)
       .no_muted_links()
       .description("Amount of influence the node exerts on the output vector")
       .compositor_domain_priority(1);
-  b.add_input<decl::Vector>("Vector")
+  b.add_input<decl::Vector>("Vector"_ustr)
       .min(-1.0f)
       .max(1.0f)
       .description("Vector which would be mapped to the curve")
       .compositor_domain_priority(0);
-  b.add_output<decl::Vector>("Vector");
+  b.add_output<decl::Vector>("Vector"_ustr);
 }
 
 static void node_shader_init_curve_vec(bNodeTree * /*ntree*/, bNode *node)
@@ -114,6 +114,13 @@ class CurveVecFunction : public mf::MultiFunction {
       }
     });
   }
+
+  void hash_unique(UniqueHashBytes &hash) const override
+  {
+    static constexpr int8_t id = 0;
+    hash.add(&id);
+    hash.add(&cumap_);
+  }
 };
 
 static void sh_node_curve_vec_build_multi_function(NodeMultiFunctionBuilder &builder)
@@ -141,14 +148,14 @@ void register_node_type_sh_curve_vec()
 
   static bke::bNodeType ntype;
 
-  common_node_type_base(&ntype, "ShaderNodeVectorCurve", SH_NODE_CURVE_VEC);
+  common_node_type_base(&ntype, "ShaderNodeVectorCurve"_ustr, SH_NODE_CURVE_VEC);
   ntype.ui_name = "Vector Curves";
   ntype.ui_description = "Map input vector components with curves";
   ntype.enum_name_legacy = "CURVE_VEC";
   ntype.nclass = NODE_CLASS_OP_VECTOR;
   ntype.declare = file_ns::sh_node_curve_vec_declare;
   ntype.initfunc = file_ns::node_shader_init_curve_vec;
-  bke::node_type_size_preset(ntype, bke::eNodeSizePreset::Large);
+  ntype.default_width = bke::NodeWidth::_240;
   bke::node_type_storage(ntype, "CurveMapping", node_free_curves, node_copy_curves);
   ntype.gpu_fn = file_ns::gpu_shader_curve_vec;
   ntype.build_multi_function = file_ns::sh_node_curve_vec_build_multi_function;
@@ -164,7 +171,7 @@ namespace nodes::node_shader_curves_cc::rgb {
 static void sh_node_curve_rgb_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
-  b.add_input<decl::Float>("Factor", "Fac")
+  b.add_input<decl::Float>("Factor"_ustr, "Fac"_ustr)
       .min(0.0f)
       .max(1.0f)
       .default_value(1.0f)
@@ -172,11 +179,11 @@ static void sh_node_curve_rgb_declare(NodeDeclarationBuilder &b)
       .no_muted_links()
       .description("Amount of influence the node exerts on the output color")
       .compositor_domain_priority(1);
-  b.add_input<decl::Color>("Color")
+  b.add_input<decl::Color>("Color"_ustr)
       .default_value({1.0f, 1.0f, 1.0f, 1.0f})
       .description("Color input on which correction will be applied")
       .compositor_domain_priority(0);
-  b.add_output<decl::Color>("Color");
+  b.add_output<decl::Color>("Color"_ustr);
 }
 
 static void node_shader_init_curve_rgb(bNodeTree * /*ntree*/, bNode *node)
@@ -283,6 +290,13 @@ class CurveRGBFunction : public mf::MultiFunction {
       col_out[i].a = 1.0f;
     });
   }
+
+  void hash_unique(UniqueHashBytes &hash) const override
+  {
+    static constexpr int8_t id = 0;
+    hash.add(&id);
+    hash.add(&cumap_);
+  }
 };
 
 static void sh_node_curve_rgb_build_multi_function(NodeMultiFunctionBuilder &builder)
@@ -310,14 +324,14 @@ void register_node_type_sh_curve_rgb()
 
   static bke::bNodeType ntype;
 
-  common_node_type_base(&ntype, "ShaderNodeRGBCurve", SH_NODE_CURVE_RGB);
+  common_node_type_base(&ntype, "ShaderNodeRGBCurve"_ustr, SH_NODE_CURVE_RGB);
   ntype.ui_name = "RGB Curves";
   ntype.ui_description = "Apply color corrections for each color channel";
   ntype.enum_name_legacy = "CURVE_RGB";
   ntype.nclass = NODE_CLASS_OP_COLOR;
   ntype.declare = file_ns::sh_node_curve_rgb_declare;
   ntype.initfunc = file_ns::node_shader_init_curve_rgb;
-  bke::node_type_size_preset(ntype, bke::eNodeSizePreset::Large);
+  ntype.default_width = bke::NodeWidth::_240;
   bke::node_type_storage(ntype, "CurveMapping", node_free_curves, node_copy_curves);
   ntype.gpu_fn = file_ns::gpu_shader_curve_rgb;
   ntype.build_multi_function = file_ns::sh_node_curve_rgb_build_multi_function;
@@ -333,18 +347,18 @@ namespace nodes::node_shader_curves_cc::flt {
 static void sh_node_curve_float_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
-  b.add_input<decl::Float>("Factor")
+  b.add_input<decl::Float>("Factor"_ustr)
       .min(0.0f)
       .max(1.0f)
       .default_value(1.0f)
       .subtype(PROP_FACTOR)
       .no_muted_links()
       .compositor_domain_priority(1);
-  b.add_input<decl::Float>("Value")
+  b.add_input<decl::Float>("Value"_ustr)
       .default_value(1.0f)
       .is_default_link_socket()
       .compositor_domain_priority(0);
-  b.add_output<decl::Float>("Value");
+  b.add_output<decl::Float>("Value"_ustr);
 }
 
 static void node_shader_init_curve_float(bNodeTree * /*ntree*/, bNode *node)
@@ -422,6 +436,13 @@ class CurveFloatFunction : public mf::MultiFunction {
       }
     });
   }
+
+  void hash_unique(UniqueHashBytes &hash) const override
+  {
+    static constexpr int8_t id = 0;
+    hash.add(&id);
+    hash.add(&cumap_);
+  }
 };
 
 static void sh_node_curve_float_build_multi_function(NodeMultiFunctionBuilder &builder)
@@ -449,14 +470,14 @@ void register_node_type_sh_curve_float()
 
   static bke::bNodeType ntype;
 
-  common_node_type_base(&ntype, "ShaderNodeFloatCurve", SH_NODE_CURVE_FLOAT);
+  common_node_type_base(&ntype, "ShaderNodeFloatCurve"_ustr, SH_NODE_CURVE_FLOAT);
   ntype.ui_name = "Float Curve";
   ntype.ui_description = "Map an input float to a curve and outputs a float value";
   ntype.enum_name_legacy = "CURVE_FLOAT";
   ntype.nclass = NODE_CLASS_CONVERTER;
   ntype.declare = file_ns::sh_node_curve_float_declare;
   ntype.initfunc = file_ns::node_shader_init_curve_float;
-  bke::node_type_size_preset(ntype, bke::eNodeSizePreset::Large);
+  ntype.default_width = bke::NodeWidth::_240;
   bke::node_type_storage(ntype, "CurveMapping", node_free_curves, node_copy_curves);
   ntype.gpu_fn = file_ns::gpu_shader_curve_float;
   ntype.build_multi_function = file_ns::sh_node_curve_float_build_multi_function;

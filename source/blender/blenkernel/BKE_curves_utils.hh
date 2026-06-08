@@ -118,7 +118,7 @@ class IndexRangeCyclic {
   /**
    * Create a cyclical iterator of the specified size.
    *
-   * \param start_point: Point on the curve that define the starting point of the interval.
+   * \param start_index: Point on the curve that define the starting point of the interval.
    * \param iterator_size: Number of elements to iterate (size of the iterated cyclical range).
    * \param iterable_range_size: Size of the underlying range (superset to the cyclical range).
    */
@@ -467,11 +467,18 @@ class IndexRangeCyclic {
 
 IndexMask curve_to_point_selection(OffsetIndices<int> points_by_curve,
                                    const IndexMask &curve_selection,
-                                   IndexMaskMemory &memory);
+                                   LinearAllocator<> &memory);
+
+/**
+ * Create a mask for all curves that have at least one point in the point mask.
+ */
+IndexMask point_to_curve_selection(OffsetIndices<int> points_by_curve,
+                                   const IndexMask &point_mask,
+                                   LinearAllocator<> &memory);
 
 IndexMask curve_type_point_selection(const bke::CurvesGeometry &curves,
                                      CurveType curve_type,
-                                     IndexMaskMemory &memory);
+                                     LinearAllocator<> &memory);
 
 void fill_points(OffsetIndices<int> points_by_curve,
                  const IndexMask &curve_selection,
@@ -502,7 +509,7 @@ IndexMask indices_for_type(const VArray<int8_t> &types,
                            const std::array<int, CURVE_TYPES_NUM> &type_counts,
                            const CurveType type,
                            const IndexMask &selection,
-                           IndexMaskMemory &memory);
+                           LinearAllocator<> &memory);
 
 void foreach_curve_by_type(const VArray<int8_t> &types,
                            const std::array<int, CURVE_TYPES_NUM> &type_counts,

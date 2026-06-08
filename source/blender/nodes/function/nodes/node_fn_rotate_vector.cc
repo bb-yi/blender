@@ -5,6 +5,7 @@
 #include "BLI_math_quaternion.hh"
 
 #include "node_function_util.hh"
+#include "node_shader_util.hh"
 
 namespace blender::nodes::node_fn_rotate_vector_cc {
 
@@ -13,10 +14,19 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.use_custom_socket_order();
   b.allow_any_socket_order();
   b.is_function_node();
-  b.add_input<decl::Vector>("Vector").is_default_link_socket();
-  b.add_output<decl::Vector>("Vector").align_with_previous();
-  b.add_input<decl::Rotation>("Rotation");
+  b.add_input<decl::Vector>("Vector"_ustr).is_default_link_socket();
+  b.add_output<decl::Vector>("Vector"_ustr).align_with_previous();
+  b.add_input<decl::Rotation>("Rotation"_ustr);
 };
+
+static int node_gpu_material(GPUMaterial *mat,
+                             bNode *node,
+                             bNodeExecData * /*execdata*/,
+                             GPUNodeStack *in,
+                             GPUNodeStack *out)
+{
+  return GPU_stack_link(mat, node, "rotate_vector", in, out);
+}
 
 static void node_build_multi_function(NodeMultiFunctionBuilder &builder)
 {
@@ -29,12 +39,13 @@ static void node_build_multi_function(NodeMultiFunctionBuilder &builder)
 static void node_register()
 {
   static bke::bNodeType ntype;
-  fn_node_type_base(&ntype, "FunctionNodeRotateVector", FN_NODE_ROTATE_VECTOR);
+  fn_cmp_node_type_base(&ntype, "FunctionNodeRotateVector"_ustr, FN_NODE_ROTATE_VECTOR);
   ntype.ui_name = "Rotate Vector";
   ntype.ui_description = "Apply a rotation to a given vector";
   ntype.enum_name_legacy = "ROTATE_VECTOR";
   ntype.nclass = NODE_CLASS_CONVERTER;
   ntype.declare = node_declare;
+  ntype.gpu_fn = node_gpu_material;
   ntype.build_multi_function = node_build_multi_function;
   bke::node_register_type(ntype);
 }

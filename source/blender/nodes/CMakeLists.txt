@@ -55,6 +55,8 @@ set(INC
   texture
   geometry/include
   ../animrig
+  ../compositor
+  ../compositor/cached_resources
   ../editors/include
   ../depsgraph
   ../makesrna
@@ -68,22 +70,29 @@ set(INC_SYS
 )
 
 set(SRC
+  intern/bundle_type.cc
+  intern/compositor_gizmos.cc
+  intern/compositor_nodes_caller_ui.cc
+  intern/compositor_nodes_srna.cc
+  intern/dependencies.cc
+  intern/eval_log.cc
   intern/geometry_nodes_bundle.cc
   intern/geometry_nodes_caller_ui.cc
   intern/geometry_nodes_closure.cc
   intern/geometry_nodes_closure_zone.cc
-  intern/geometry_nodes_dependencies.cc
   intern/geometry_nodes_execute.cc
   intern/geometry_nodes_foreach_geometry_element_zone.cc
   intern/geometry_nodes_gizmos.cc
   intern/geometry_nodes_lazy_function.cc
   intern/geometry_nodes_list.cc
-  intern/geometry_nodes_log.cc
   intern/geometry_nodes_repeat_zone.cc
+  intern/geometry_nodes_physics_bundles.cc
+  intern/geometry_nodes_srna.cc
   intern/geometry_nodes_warning.cc
   intern/inverse_eval.cc
   intern/list_function_eval.cc
   intern/math_functions.cc
+  intern/node_caller_ui.cc
   intern/node_common.cc
   intern/node_declaration.cc
   intern/node_exec.cc
@@ -101,14 +110,22 @@ set(SRC
   intern/socket_search_link.cc
   intern/socket_usage_inference.cc
   intern/socket_value_inference.cc
+  intern/string_pattern.cc
   intern/sync_sockets.cc
   intern/trace_values.cc
   intern/value_elem.cc
   intern/volume_grid_function_eval.cc
 
+  NOD_bundle_type.hh
+  NOD_caller_ui.hh
   NOD_common.hh
   NOD_composite.hh
+  NOD_compositor_gizmos.hh
+  NOD_compositor_nodes_caller_ui.hh
+  NOD_compositor_nodes_srna.hh
   NOD_defaults.hh
+  NOD_dependencies.hh
+  NOD_eval_log.hh
   NOD_geometry.hh
   NOD_geometry_exec.hh
   NOD_geometry_nodes_bundle.hh
@@ -120,13 +137,13 @@ set(SRC
   NOD_geometry_nodes_closure_fwd.hh
   NOD_geometry_nodes_closure_location.hh
   NOD_geometry_nodes_closure_signature.hh
-  NOD_geometry_nodes_dependencies.hh
   NOD_geometry_nodes_execute.hh
   NOD_geometry_nodes_gizmos.hh
   NOD_geometry_nodes_lazy_function.hh
   NOD_geometry_nodes_list.hh
   NOD_geometry_nodes_list_fwd.hh
-  NOD_geometry_nodes_log.hh
+  NOD_geometry_nodes_physics_bundles.hh
+  NOD_geometry_nodes_srna.hh
   NOD_geometry_nodes_values.hh
   NOD_geometry_nodes_warning.hh
   NOD_inverse_eval_params.hh
@@ -139,6 +156,7 @@ set(SRC
   NOD_node_declaration.hh
   NOD_node_extra_info.hh
   NOD_node_in_compute_context.hh
+  NOD_nodes_srna.hh
   NOD_partial_eval.hh
   NOD_register.hh
   NOD_rna_define.hh
@@ -156,6 +174,7 @@ set(SRC
   NOD_socket_usage_inference.hh
   NOD_socket_usage_inference_fwd.hh
   NOD_socket_value_inference.hh
+  NOD_string_pattern.hh
   NOD_sync_sockets.hh
   NOD_texture.h
   NOD_trace_values.hh
@@ -188,23 +207,12 @@ set(LIB
   bf_nodes_texture
   PRIVATE bf::extern::xxhash
   PRIVATE bf::render
+  PRIVATE bf::sequencer
   PRIVATE bf::windowmanager
   PRIVATE bf::intern::clog
   PRIVATE bf::dependencies::optional::gmp
   PRIVATE bf::dependencies::optional::bullet
 )
-
-if(WITH_TBB)
-  if(WIN32)
-    # TBB includes Windows.h which will define min/max macros
-    # that will collide with the STL versions.
-    add_definitions(-DNOMINMAX)
-  endif()
-endif()
-
-if(WITH_IMAGE_OPENEXR)
-  add_definitions(-DWITH_IMAGE_OPENEXR)
-endif()
 
 if(WITH_FREESTYLE)
   add_definitions(-DWITH_FREESTYLE)

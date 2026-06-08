@@ -52,11 +52,11 @@ static wmOperatorStatus create_plane_track_tracks_exec(bContext *C, wmOperator *
 
   BKE_tracking_tracks_deselect_all(&tracking_object->tracks);
 
-  plane_track->flag |= SELECT;
+  plane_track->flag |= PLANE_TRACK_SELECT;
   tracking_object->active_track = nullptr;
   tracking_object->active_plane_track = plane_track;
 
-  /* Compute homoraphies and apply them on marker's corner, so we've got
+  /* Compute homographies and apply them on marker's corner, so we've got
    * quite nice motion from the very beginning.
    */
   BKE_tracking_track_plane_from_existing_motion(plane_track, framenr);

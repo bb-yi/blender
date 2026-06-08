@@ -16,23 +16,23 @@ namespace blender::nodes::node_geo_grease_pencil_to_curves_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Geometry>("Grease Pencil")
+  b.add_input<decl::Geometry>("Grease Pencil"_ustr)
       .supported_type(bke::GeometryComponent::Type::GreasePencil)
       .description("Grease Pencil data to convert to curves");
-  b.add_input<decl::Bool>("Selection")
+  b.add_input<decl::Bool>("Selection"_ustr)
       .default_value(true)
       .hide_value()
-      .field_on_all()
+      .evaluated_geometry_field()
       .description("Select the layers to convert");
-  b.add_input<decl::Bool>("Layers as Instances")
+  b.add_input<decl::Bool>("Layers as Instances"_ustr)
       .default_value(true)
       .description("Create a separate curve instance for every layer");
-  b.add_output<decl::Geometry>("Curves").propagate_all();
+  b.add_output<decl::Geometry>("Curves"_ustr).propagate_all_geometry();
 }
 
 static void node_geo_exec(GeoNodeExecParams params)
 {
-  GeometrySet grease_pencil_geometry = params.extract_input<GeometrySet>("Grease Pencil");
+  GeometrySet grease_pencil_geometry = params.extract_input<GeometrySet>("Grease Pencil"_ustr);
   const GreasePencil *grease_pencil = grease_pencil_geometry.get_grease_pencil();
   if (!grease_pencil) {
     params.set_default_remaining_outputs();
@@ -43,7 +43,7 @@ static void node_geo_exec(GeoNodeExecParams params)
   const int layers_num = layers.size();
 
   const bke::GreasePencilFieldContext field_context{*grease_pencil};
-  const Field<bool> selection_field = params.extract_input<Field<bool>>("Selection");
+  const Field<bool> selection_field = params.extract_input<Field<bool>>("Selection"_ustr);
   FieldEvaluator evaluator{field_context, layers_num};
   evaluator.set_selection(selection_field);
   evaluator.evaluate();
@@ -78,7 +78,7 @@ static void node_geo_exec(GeoNodeExecParams params)
     curves_id->mat = MEM_dupalloc(grease_pencil->material_array);
     curves_id->totcol = grease_pencil->material_array_num;
     GeometrySet curves_geometry = GeometrySet::from_curves(curves_id);
-    curves_geometry.name = layer.name();
+    curves_geometry.set_name(layer.name());
     handles[pos] = instances->add_reference(std::move(curves_geometry));
     transforms[pos] = transform;
   });
@@ -132,31 +132,32 @@ static void node_geo_exec(GeoNodeExecParams params)
   }
 
   GeometrySet curves_geometry = GeometrySet::from_instances(std::move(instances));
-  curves_geometry.name = std::move(grease_pencil_geometry.name);
+  curves_geometry.set_name(grease_pencil_geometry.name());
   curves_geometry.copy_bundle_from(grease_pencil_geometry);
 
-  const bool layers_as_instances = params.extract_input<bool>("Layers as Instances");
+  const bool layers_as_instances = params.extract_input<bool>("Layers as Instances"_ustr);
   if (!layers_as_instances) {
     geometry::RealizeInstancesOptions options;
-    const NodeAttributeFilter attribute_filter = params.get_attribute_filter("Curves");
+    const NodeAttributeFilter attribute_filter = params.get_attribute_filter("Curves"_ustr);
     options.attribute_filter = attribute_filter;
     curves_geometry = geometry::realize_instances(curves_geometry, options).geometry;
   }
 
-  params.set_output("Curves", std::move(curves_geometry));
+  params.set_output("Curves"_ustr, std::move(curves_geometry));
 }
 
 static void node_register()
 {
   static bke::bNodeType ntype;
-  geo_node_type_base(&ntype, "GeometryNodeGreasePencilToCurves", GEO_NODE_GREASE_PENCIL_TO_CURVES);
+  geo_node_type_base(
+      &ntype, "GeometryNodeGreasePencilToCurves"_ustr, GEO_NODE_GREASE_PENCIL_TO_CURVES);
   ntype.ui_name = "Grease Pencil to Curves";
   ntype.ui_description = "Convert Grease Pencil layers into curve instances";
   ntype.enum_name_legacy = "GREASE_PENCIL_TO_CURVES";
   ntype.nclass = NODE_CLASS_GEOMETRY;
   ntype.geometry_node_execute = node_geo_exec;
   ntype.declare = node_declare;
-  bke::node_type_size(ntype, 160, 100, 320);
+  ntype.default_width = bke::NodeWidth::_180;
 
   bke::node_register_type(ntype);
 }

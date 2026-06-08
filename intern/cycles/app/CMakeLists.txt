@@ -34,12 +34,9 @@ else()
 endif()
 
 if(WITH_CYCLES_STANDALONE AND WITH_CYCLES_STANDALONE_GUI)
-  list(APPEND INC_SYS
-    ${SDL2_INCLUDE_DIRS}
-  )
   list(APPEND LIB
     bf::dependencies::epoxy
-    ${SDL2_LIBRARIES}
+    bf::dependencies::optional::sdl
   )
 endif()
 
@@ -137,7 +134,7 @@ if(WITH_CYCLES_STANDALONE)
     TARGETS cycles
     DESTINATION ${app_install_dir})
 
-  if (DEFINED app_output_dir)
+  if(DEFINED app_output_dir)
     set_target_properties(cycles
       PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${app_output_dir}")
   endif()
@@ -166,7 +163,7 @@ if(WITH_CYCLES_PRECOMPUTE)
       PRIVATE bf::intern::guardedalloc)
   endif()
 
-  if (DEFINED app_output_dir)
+  if(DEFINED app_output_dir)
     set_target_properties(cycles_precompute
       PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${app_output_dir}")
   endif()

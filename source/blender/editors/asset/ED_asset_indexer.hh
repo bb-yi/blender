@@ -8,7 +8,20 @@
 
 #pragma once
 
+#include <filesystem>
+#include <optional>
+
+#include "BLI_function_ref.hh"
+#include "BLI_utility_mixins.hh"
+
+#include "AS_asset_file_status.hh"
+#include "AS_remote_library.hh"
+
 #include "ED_file_indexer.hh"
+
+namespace blender {
+class StringRefNull;
+}  // namespace blender
 
 namespace blender::ed::asset::index {
 
@@ -30,5 +43,70 @@ namespace blender::ed::asset::index {
  *   additional performance.
  */
 extern const FileIndexerType file_indexer_asset;
+
+struct RemoteListingAssetEntry : NonCopyable {
+  BLODataBlockInfo datablock_info = {};
+  short idcode = 0;
+
+  /** The status of the asset's on-disk file(s). */
+  asset_system::RemoteAssetFileStatus remote_file_status =
+      asset_system::RemoteAssetFileStatus::UNSET;
+
+  asset_system::OnlineAssetInfo online_info;
+
+  RemoteListingAssetEntry() = default;
+  RemoteListingAssetEntry(RemoteListingAssetEntry &&);
+  RemoteListingAssetEntry &operator=(RemoteListingAssetEntry &&);
+  ~RemoteListingAssetEntry();
+
+  /**
+   * Empty entries are used to skip assets when the Blender version doesn't match.
+   */
+  bool is_empty() const
+  {
+    return idcode == 0;
+  }
+};
+
+/**
+ * Representation of the FileV1 type in the OpenAPI definition.
+ * See blender_asset_library_openapi.yaml.
+ *
+ * Not all fields are included here, just the ones that are used by Blender.
+ */
+struct RemoteListingFileEntry : NonCopyable {
+  std::string local_path;
+  asset_system::URLWithHash download_url;
+  int64_t size_in_bytes;
+
+  /**
+   * Status of the file on disk, compared to the information in the fields above.
+   *
+   * \see asset_system::OnlineAssetInfo::file_status for the per-asset status that may be more
+   * convenient to use.
+   *
+   * \see blender::ed::asset::index::FileStatusChecker. */
+  std::optional<asset_system::RemoteAssetFileStatus> file_status;
+};
+
+using RemoteListingEntryProcessFn = FunctionRef<bool(RemoteListingAssetEntry &)>;
+using RemoteListingWaitForPagesFn = FunctionRef<bool()>;
+/* Uses #std::filesystem::file_time_type because it needs to be compared against file time-stamps,
+ * which may have low precision (often just 1 sec). */
+using Timestamp = std::filesystem::file_time_type;
+/**
+ * \param process_fn: Called for each asset entry read from the listing. It's fine to move out the
+ *   passed #RemoteListingAssetEntry. Returning false will cancel the whole reading process and not
+ *   read any further entries.
+ * \param wait_fn: If this is set, reading will keep retrying to load unavailable pages, and call
+ *   this wait function for each try. The wait function can block until it thinks new pages might
+ *   be available. If this returns false the whole reading process will be cancelled.
+ */
+bool read_remote_listing(StringRefNull root_dirpath,
+                         StringRefNull asset_library_name,
+                         ReportList &reports,
+                         RemoteListingEntryProcessFn process_fn,
+                         RemoteListingWaitForPagesFn wait_fn = nullptr,
+                         std::optional<Timestamp> ignore_before_timestamp = std::nullopt);
 
 }  // namespace blender::ed::asset::index

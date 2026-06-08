@@ -8,9 +8,11 @@
 
 #pragma once
 
+#include <bit>
 #include <functional>
 #include <optional>
 #include <string>
+#include <type_traits>
 
 #include "BLI_compiler_attrs.h"
 #include "BLI_enum_flags.hh"
@@ -78,6 +80,7 @@ struct wmWindow;
 namespace ed::asset {
 struct AssetFilterSettings;
 }
+
 namespace ui {
 class AbstractView;
 class AbstractViewItem;
@@ -88,16 +91,11 @@ struct ButtonExtraOpIcon;
 struct TooltipData;
 struct PopupBlockHandle;
 struct Block;
-}  // namespace ui
-
-/* Defines */
-
-namespace ui {
 
 /**
  * Character used for splitting labels (right align text after this character).
  * Users should never see this character.
- * Only applied when #BUT_HAS_SEP_CHAR flag is enabled, see it's doc-string for details.
+ * Only applied when #BUT_HAS_SEP_CHAR flag is enabled, see it's docstring for details.
  */
 #define UI_SEP_CHAR '|'
 #define UI_SEP_CHAR_S "|"
@@ -157,38 +155,172 @@ enum {
 
 /** #Block.flag (controls) */
 enum {
+  /**
+   * Run this block as a modal popup with its own event loop.
+   * Only for popups/menus.
+   * - When enabled: handles keyboard navigation, click-outside dismissal,
+   *   arrow-key sub-menu traversal, and shortcut display.
+   * - When disabled: non-modal. Some popups (e.g. redo panels, alert dialogs)
+   *   explicitly clear this flag.
+   *
+   * \note For popups this is always enabled after initialization (set by #popup_block_open_ex).
+   * Clearing this flag during block construction is used to suppress menu-specific
+   * behavior in #block_end (e.g. left-aligned text, accelerator keys, shortcut labels),
+   * although we may choose to leave this disabled in the future.
+   */
   BLOCK_LOOP = 1 << 0,
+  /**
+   * Allow selecting menu items by pressing number/letter keys.
+   *
+   * Also triggers automatic accelerator key assignment
+   * when combined with #BLOCK_LOOP.
+   */
   BLOCK_NUMSELECT = 1 << 1,
-  /** Don't apply window clipping. */
+  /**
+   * Don't apply window clipping.
+   *
+   * Skips the logic that shifts popups to stay within window edges.
+   */
   BLOCK_NO_WIN_CLIP = 1 << 2,
+  /**
+   * Popup content extends below the visible area, enable downward scrolling.
+   *
+   * Set dynamically, shows an "arrow" hint, scroll down with cursor-motion/arrow keys.
+   */
   BLOCK_CLIPBOTTOM = 1 << 3,
+  /**
+   * Popup content extends above the visible area, enable upward scrolling.
+   *
+   * Set dynamically, shows an "arrow" hint, scroll up with cursor-motion/arrow keys.
+   */
   BLOCK_CLIPTOP = 1 << 4,
+  /**
+   * Close the popup when the mouse moves away from the block.
+   *
+   * Uses a "towards" mechanism with a grace period so the user can move
+   * toward sub-menus without accidentally closing the popup.
+   * Set by default for regular menus and most popups.
+   *
+   * \note This is not used for menus by default, see: #USER_MENU_CLOSE_LEAVE.
+   */
   BLOCK_MOVEMOUSE_QUIT = 1 << 5,
+  /**
+   * Prevent the popup from closing when a button is activated or a sub-menu returns.
+   * Used by popovers, dialogs, redo panels, and other popups where the user
+   * interacts with multiple controls before explicitly dismissing.
+   *
+   * - Without this flag: activating a button or returning from a sub-menu sets the
+   *   menu return value, causing the popup handler to close and free the popup.
+   * - With this flag: the popup stays open, dismissal is left to other flags
+   *   (e.g. #BLOCK_LOOP for escape/click-outside, #BLOCK_MOVEMOUSE_QUIT for mouse-leave).
+   *
+   * Also used by #block_is_menu to distinguish menus from other popups.
+   */
   BLOCK_KEEP_OPEN = 1 << 6,
+  /**
+   * Identifies a generic popup (not a menu, popover, or pie).
+   *
+   * Used by redo panels, alert dialogs, and other non-categorized popups.
+   * Also set automatically for popups not spawned from a button.
+   */
   BLOCK_POPUP = 1 << 7,
+  /**
+   * Treat clicking outside as confirmation rather than cancellation.
+   *
+   * For popups like the color picker where leaving implies acceptance.
+   */
   BLOCK_OUT_1 = 1 << 8,
+  /**
+   * Block is a search menu with live filtering.
+   *
+   * When embedded inside another menu, reuses the parent region's size
+   * for positioning and skips drawing its own backdrop (the parent provides one).
+   */
   BLOCK_SEARCH_MENU = 1 << 9,
+  /**
+   * Remember the last selected item and offset the menu so it appears under
+   * the mouse cursor when reopened.
+   *
+   * So users can quickly repeat a previous selection.
+   * Set for regular menus, not pie menus or other popups (popovers etc).
+   */
   BLOCK_POPUP_MEMORY = 1 << 10,
-  /** Stop handling mouse events. */
+  /**
+   * Prevent mouse events from passing through to blocks behind this one.
+   *
+   * For overlapping UI where click-through is undesirable, such as nodes in the
+   * node editor and the animation timeline search drawn on top of channels.
+   */
   BLOCK_CLIP_EVENTS = 1 << 11,
 
   /* #Block::flags bits 14-17 are identical to #Button::drawflag bits. */
 
+  /**
+   * Cancel the popup when the mouse button is released outside the block.
+   *
+   * For menus opened by holding the mouse button down (e.g. toolbar hold-menus):
+   * the user holds to browse, releases on an item to select, or releases outside
+   * to cancel.
+   */
   BLOCK_POPUP_HOLD = 1 << 18,
+  /**
+   * Buttons in this block are list items, applying list-item theme colors.
+   *
+   * Used by tree views and template lists.
+   */
   BLOCK_LIST_ITEM = 1 << 19,
+  /**
+   * Block is a pie menu, enabling radial layout and directional navigation.
+   *
+   * Pie menus have fundamentally different interaction from regular menus:
+   * radial positioning, directional key activation, and a dedicated event handler.
+   */
   BLOCK_PIE_MENU = 1 << 20,
+  /**
+   * Block is a popover, enabling popover-specific backdrop drawing
+   * and the mouse-towards-submenu behavior (shared with #BLOCK_MOVEMOUSE_QUIT).
+   *
+   * Positioning is offset so the triangular arrow, visually connecting the popover
+   * to its anchor button has room to draw.
+   */
   BLOCK_POPOVER = 1 << 21,
+  /**
+   * Single-click popover: clicking a compatible button immediately closes the popover.
+   *
+   * Activated when the popover was opened via a left-click press, cleared after
+   * the first click so the popover reverts to normal stay-open behavior.
+   */
   BLOCK_POPOVER_ONCE = 1 << 22,
-  /** Always show key-maps, even for non-menus. */
+  /**
+   * Always show key-maps, even for non-menus.
+   *
+   * Used by popovers that have key-maps and the menu search template.
+   * When set, shortcuts are shown directly in the block and suppressed from tool-tips.
+   */
   BLOCK_SHOW_SHORTCUT_ALWAYS = 1 << 23,
-  /** Don't show library override state for buttons in this block. */
+  /**
+   * Don't show library override state for buttons in this block.
+   */
   BLOCK_NO_DRAW_OVERRIDDEN_STATE = 1 << 24,
-  /** The block is only used during the search process and will not be drawn.
-   * Currently just for the case of a closed panel's sub-panel (and its sub-panels). */
+  /**
+   * The block is only used during the search process and will not be drawn.
+   *
+   * Set on closed panel's sub-panels so their content is searchable but not visible,
+   * and also used when building blocks for panel search filtering.
+   */
   BLOCK_SEARCH_ONLY = 1 << 25,
-  /** Hack for quick setup (splash screen) to draw text centered. */
+  /**
+   * Hack for quick setup (splash screen) to draw text centered.
+   *
+   * Prevents #BLOCK_LOOP from forcing left-aligned button text.
+   */
   BLOCK_QUICK_SETUP = 1 << 26,
-  /** Don't accelerator keys for the items in the block. */
+  /**
+   * Don't assign accelerator keys for items in this block.
+   *
+   * Set when search-on-key-press is active (to avoid conflicting with search input)
+   * and inherited by sub-menus from their parent.
+   */
   BLOCK_NO_ACCELERATOR_KEYS = 1 << 27,
 };
 
@@ -218,6 +350,8 @@ enum ButtonFlag {
   BUT_NODE_LINK = 1 << 10,
   BUT_NODE_ACTIVE = 1 << 11,
   BUT_DRAG_LOCK = 1 << 12,
+  BUT_DRAG_LOCK_X = BUT_DRAG_LOCK | 1 << 21,
+
   /** Grayed out and un-editable. */
   BUT_DISABLED = 1 << 13,
 
@@ -229,7 +363,6 @@ enum ButtonFlag {
   BUT_INACTIVE = 1 << 18,
   BUT_LAST_ACTIVE = 1 << 19,
   BUT_UNDO = 1 << 20,
-  /* UNUSED = 1 << 21, */
   BUT_NO_UTF8 = 1 << 22,
 
   /** For popups, pressing return activates this button, overriding the highlighted button.
@@ -310,10 +443,11 @@ enum {
 /** Total width of Toolbar showing one icon column. */
 #define UI_TOOLBAR_WIDTH UI_TOOLBAR_MARGIN + UI_TOOLBAR_COLUMN
 
-#define UI_PANEL_CATEGORY_MARGIN_WIDTH (U.widget_unit * 1.0f)
+#define UI_PANEL_CATEGORY_MARGIN_WIDTH \
+  (((U.uiflag2 & USER_UIFLAG2_PANEL_TABS_COMPACT) ? 1.4f : 1.0f) * U.widget_unit)
 
 /* Minimum width for a panel showing only category tabs. */
-#define UI_PANEL_CATEGORY_MIN_WIDTH 26.0f
+#define UI_PANEL_CATEGORY_MIN_WIDTH ((U.uiflag2 & USER_UIFLAG2_PANEL_TABS_COMPACT) ? 32.0f : 26.0f)
 /* Minimum width for a panel showing content and category tabs. */
 #define UI_PANEL_CATEGORY_MIN_SNAP_WIDTH 90.0f
 
@@ -404,6 +538,8 @@ enum class ButtonType : int8_t {
   But = 1,
   Row,
   Text,
+  /** A multi-line text button */
+  TextBox,
   /** Drop-down list. */
   Menu,
   ButMenu,
@@ -480,6 +616,21 @@ inline char but_pointer_bit_max_index(ButPointerType pointer_type)
       break;
   }
   return 0;
+}
+
+/** Deduce the #ButPointerType matching \a T. */
+template<typename T> constexpr ButPointerType but_pointer_type_for()
+{
+  constexpr ButPointerType ptr_type = (std::is_floating_point_v<T>) ?
+                                          ButPointerType::Float :
+                                      (std::is_integral_v<T> || std::is_enum_v<T>) ?
+                                          (sizeof(T) == 1) ? ButPointerType::Char :
+                                          (sizeof(T) == 2) ? ButPointerType::Short :
+                                          (sizeof(T) == 4) ? ButPointerType::Int :
+                                                             ButPointerType::None :
+                                          ButPointerType::None;
+  static_assert(ptr_type != ButPointerType::None, "Incompatible uiDefBut pointer type");
+  return ptr_type;
 }
 
 struct ButtonTypeWithPointerType {
@@ -620,7 +771,6 @@ Vector<StringRef> text_clip_multiline_middle(const uiFontStyle *fstyle,
 struct SearchItems;
 
 using ButtonHandleFunc = void (*)(bContext *C, void *arg1, void *arg2);
-using ButtonHandleRenameFunc = void (*)(bContext *C, void *arg, char *origstr);
 using ButtonHandleNFunc = void (*)(bContext *C, void *argN, void *arg2);
 using ButtonHandleHoldFunc = void (*)(bContext *C, ARegion *butregion, Button *but);
 using ButtonCompleteFunc = int (*)(bContext *C, char *str, void *arg);
@@ -731,7 +881,7 @@ bool block_has_active_default_button(const Block *block);
  */
 Button *but_find_mouse_over(const ARegion *region, const wmEvent *event) ATTR_WARN_UNUSED_RESULT;
 
-uiList *list_find_mouse_over(const ARegion *region, const wmEvent *event);
+uiList *uilist_find_mouse_over(const ARegion *region, const wmEvent *event);
 
 /* `interface_region_menu_popup.cc` */
 
@@ -1081,6 +1231,11 @@ const ColorManagedDisplay *button_cm_display_get(Button &but);
 void button_placeholder_set(Button *but, StringRef placeholder_text);
 
 /**
+ * Unselect any text selection in the button's text field.
+ */
+void button_clear_selection(Button *but);
+
+/**
  * Special button case, only draw it when used actively, for outliner etc.
  *
  * Needed for temporarily rename buttons, such as in outliner or file-select,
@@ -1106,13 +1261,17 @@ std::optional<std::string> button_online_manual_id_from_active(const bContext *C
     ATTR_WARN_UNUSED_RESULT;
 bool button_is_userdef(const Button *but);
 
+void *button_func_argN_get(const Button *but);
+void button_poin_menu_argN_set(Button *but,
+                               void *poin,
+                               void *argN,
+                               ButtonArgNFree func_argN_free_fn,
+                               ButtonArgNCopy func_argN_copy_fn);
+
 /* Buttons
  *
  * Functions to define various types of buttons in a block. Postfixes:
- * - F: float
- * - I: int
- * - S: short
- * - C: char
+ * - V: Value
  * - R: RNA
  * - O: operator */
 
@@ -1127,86 +1286,52 @@ Button *uiDefBut(Block *block,
                  float min,
                  float max,
                  std::optional<StringRef> tip);
-Button *uiDefButF(Block *block,
+template<typename T>
+Button *uiDefButV(Block *block,
                   ButtonType type,
                   StringRef str,
                   int x,
                   int y,
                   short width,
                   short height,
-                  float *poin,
+                  T *poin,
                   float min,
                   float max,
-                  std::optional<StringRef> tip);
-Button *uiDefButI(Block *block,
-                  ButtonType type,
-                  StringRef str,
-                  int x,
-                  int y,
-                  short width,
-                  short height,
-                  int *poin,
-                  float min,
-                  float max,
-                  std::optional<StringRef> tip);
-Button *uiDefButBitI(Block *block,
-                     ButtonType type,
-                     int bit,
-                     StringRef str,
-                     int x,
-                     int y,
-                     short width,
-                     short height,
-                     int *poin,
-                     float min,
-                     float max,
-                     std::optional<StringRef> tip);
-Button *uiDefButS(Block *block,
-                  ButtonType type,
-                  StringRef str,
-                  int x,
-                  int y,
-                  short width,
-                  short height,
-                  short *poin,
-                  float min,
-                  float max,
-                  std::optional<StringRef> tip);
-Button *uiDefButBitS(Block *block,
-                     ButtonType type,
-                     int bit,
-                     StringRef str,
-                     int x,
-                     int y,
-                     short width,
-                     short height,
-                     short *poin,
-                     float min,
-                     float max,
-                     std::optional<StringRef> tip);
-Button *uiDefButC(Block *block,
-                  ButtonType type,
-                  StringRef str,
-                  int x,
-                  int y,
-                  short width,
-                  short height,
-                  char *poin,
-                  float min,
-                  float max,
-                  std::optional<StringRef> tip);
-Button *uiDefButBitC(Block *block,
-                     ButtonType type,
-                     int bit,
-                     StringRef str,
-                     int x,
-                     int y,
-                     short width,
-                     short height,
-                     char *poin,
-                     float min,
-                     float max,
-                     std::optional<StringRef> tip);
+                  std::optional<StringRef> tip)
+{
+  return uiDefBut(
+      block, {type, but_pointer_type_for<T>()}, str, x, y, width, height, poin, min, max, tip);
+}
+template<typename T>
+Button *uiDefButBit(Block *block,
+                    ButtonType type,
+                    int bit,
+                    StringRef str,
+                    int x,
+                    int y,
+                    short width,
+                    short height,
+                    T *poin,
+                    float min,
+                    float max,
+                    std::optional<StringRef> tip)
+{
+  const int bit_idx = std::has_single_bit(uint(bit)) ? std::countr_zero(uint(bit)) : -1;
+  if (bit_idx == -1) {
+    return nullptr;
+  }
+  return uiDefBut(block,
+                  {type, but_pointer_type_for<T>() | ButPointerType::Bit, bit_idx},
+                  str,
+                  x,
+                  y,
+                  width,
+                  height,
+                  poin,
+                  min,
+                  max,
+                  tip);
+}
 Button *uiDefButR(Block *block,
                   ButtonType type,
                   std::optional<StringRef> str,
@@ -1265,64 +1390,52 @@ Button *uiDefIconBut(Block *block,
                      float min,
                      float max,
                      std::optional<StringRef> tip);
-Button *uiDefIconButI(Block *block,
+template<typename T>
+Button *uiDefIconButV(Block *block,
                       ButtonType type,
                       int icon,
                       int x,
                       int y,
                       short width,
                       short height,
-                      int *poin,
+                      T *poin,
                       float min,
                       float max,
-                      std::optional<StringRef> tip);
-Button *uiDefIconButBitI(Block *block,
-                         ButtonType type,
-                         int bit,
-                         int icon,
-                         int x,
-                         int y,
-                         short width,
-                         short height,
-                         int *poin,
-                         float min,
-                         float max,
-                         std::optional<StringRef> tip);
-Button *uiDefIconButS(Block *block,
-                      ButtonType type,
-                      int icon,
-                      int x,
-                      int y,
-                      short width,
-                      short height,
-                      short *poin,
-                      float min,
-                      float max,
-                      std::optional<StringRef> tip);
-Button *uiDefIconButBitS(Block *block,
-                         ButtonType type,
-                         int bit,
-                         int icon,
-                         int x,
-                         int y,
-                         short width,
-                         short height,
-                         short *poin,
-                         float min,
-                         float max,
-                         std::optional<StringRef> tip);
-Button *uiDefIconButBitC(Block *block,
-                         ButtonType type,
-                         int bit,
-                         int icon,
-                         int x,
-                         int y,
-                         short width,
-                         short height,
-                         char *poin,
-                         float min,
-                         float max,
-                         std::optional<StringRef> tip);
+                      std::optional<StringRef> tip)
+{
+  return uiDefIconBut(
+      block, {type, but_pointer_type_for<T>()}, icon, x, y, width, height, poin, min, max, tip);
+}
+template<typename T>
+Button *uiDefIconButBit(Block *block,
+                        ButtonType type,
+                        int bit,
+                        int icon,
+                        int x,
+                        int y,
+                        short width,
+                        short height,
+                        T *poin,
+                        float min,
+                        float max,
+                        std::optional<StringRef> tip)
+{
+  const int bit_idx = std::has_single_bit(uint(bit)) ? std::countr_zero(uint(bit)) : -1;
+  if (bit_idx == -1) {
+    return nullptr;
+  }
+  return uiDefIconBut(block,
+                      {type, but_pointer_type_for<T>() | ButPointerType::Bit, bit_idx},
+                      icon,
+                      x,
+                      y,
+                      width,
+                      height,
+                      poin,
+                      min,
+                      max,
+                      tip);
+}
 Button *uiDefIconButR(Block *block,
                       ButtonType type,
                       int icon,
@@ -1394,26 +1507,21 @@ Button *uiDefIconTextBut(Block *block,
                          short height,
                          void *poin,
                          std::optional<StringRef> tip);
-Button *uiDefIconTextButI(Block *block,
-                          ButtonType type,
-                          int icon,
-                          StringRef str,
-                          int x,
-                          int y,
-                          short width,
-                          short height,
-                          int *poin,
-                          std::optional<StringRef> tip);
-Button *uiDefIconTextButS(Block *block,
-                          ButtonType type,
-                          int icon,
-                          StringRef str,
-                          int x,
-                          int y,
-                          short width,
-                          short height,
-                          short *poin,
-                          std::optional<StringRef> tip);
+template<typename T>
+Button *uiDefIconTextBut(Block *block,
+                         ButtonType type,
+                         int icon,
+                         StringRef str,
+                         int x,
+                         int y,
+                         short width,
+                         short height,
+                         T *poin,
+                         std::optional<StringRef> tip)
+{
+  return uiDefIconTextBut(
+      block, {type, but_pointer_type_for<T>()}, icon, str, x, y, width, height, poin, tip);
+}
 Button *uiDefIconTextButR(Block *block,
                           ButtonType type,
                           int icon,
@@ -1463,6 +1571,7 @@ Button *uiDefIconTextButO_ptr(Block *block,
                               short height,
                               std::optional<StringRef> tip);
 
+void button_enum_prop_value_set(Button *but, int retval);
 void button_retval_set(Button *but, int retval);
 
 void button_operator_set(Button *but,
@@ -1528,23 +1637,6 @@ std::string button_extra_icon_string_get_operator_keymap(const bContext &C,
  * - PickerButtons: buttons like the color picker (for code sharing).
  * - AutoButR: RNA property button with type automatically defined.
  */
-enum {
-  UI_ID_NOP = 0,
-  UI_ID_RENAME = 1 << 0,
-  UI_ID_BROWSE = 1 << 1,
-  UI_ID_ADD_NEW = 1 << 2,
-  UI_ID_ALONE = 1 << 4,
-  UI_ID_OPEN = 1 << 3,
-  UI_ID_DELETE = 1 << 5,
-  UI_ID_LOCAL = 1 << 6,
-  UI_ID_AUTO_NAME = 1 << 7,
-  UI_ID_FAKE_USER = 1 << 8,
-  UI_ID_PIN = 1 << 9,
-  UI_ID_PREVIEWS = 1 << 10,
-  UI_ID_OVERRIDE = 1 << 11,
-  UI_ID_FULL = UI_ID_RENAME | UI_ID_BROWSE | UI_ID_ADD_NEW | UI_ID_OPEN | UI_ID_ALONE |
-               UI_ID_DELETE | UI_ID_LOCAL,
-};
 
 /**
  * Ways to limit what is displayed in ID-search popup.
@@ -1678,7 +1770,8 @@ enum AutoPropButsReturn {
 ENUM_OPERATORS(AutoPropButsReturn);
 
 /**
- * \param button_type_override \parblock
+ * \param button_type_override:
+ * \parblock
  * Overrides the default button type defined for some properties:
  * - Int/Float properties allows #ButtonType::Num or #ButtonType::NumSlider.
  * - Enum properties allows #ButtonType::Menu or #ButtonType::SearchMenu.
@@ -1824,6 +1917,7 @@ void button_number_slider_step_size_set(Button *but, float step_size);
 void button_number_slider_precision_set(Button *but, float precision);
 
 void button_label_alpha_factor_set(Button *but, float alpha_factor);
+void button_label_draw_icon_border_set(Button *but, bool use_icon_border);
 
 void button_search_preview_grid_size_set(Button *but, int rows, int cols);
 
@@ -1840,9 +1934,10 @@ void block_funcN_set(Block *block,
                      ButtonArgNFree func_argN_free_fn = MEM_delete_void,
                      ButtonArgNCopy func_argN_copy_fn = MEM_dupalloc_void);
 
-void button_func_rename_set(Button *but, ButtonHandleRenameFunc func, void *arg1);
-void button_func_rename_full_set(Button *but,
-                                 std::function<void(std::string &new_name)> rename_full_func);
+void text_button_func_rename_set(
+    Button *but, std::function<void(bContext &C, StringRefNull oldname)> rename_func);
+void text_button_func_rename_full_set(
+    Button *but, std::function<void(StringRefNull new_name)> rename_full_func);
 void button_func_set(Button *but, ButtonHandleFunc func, void *arg1, void *arg2);
 void button_funcN_set(Button *but,
                       ButtonHandleNFunc funcN,
@@ -1891,7 +1986,7 @@ enum TooltipColorID {
   TIP_LC_VALUE,    /* Color for the value of buttons (also shortcuts). */
   TIP_LC_ACTIVE,   /* Color of titles of active enum values. */
   TIP_LC_NORMAL,   /* Color of regular text. */
-  TIP_LC_PYTHON,   /* Color of python snippets. */
+  TIP_LC_DIMMED,   /* Color for dimmed text. Use for Python snippets and other details. */
   TIP_LC_ALERT,    /* Warning text color, eg: why operator can't run. */
   TIP_LC_MAX
 };
@@ -1917,6 +2012,19 @@ void button_func_tooltip_custom_set(Button *but,
                                     void *arg,
                                     FreeArgFunc free_arg);
 
+template<typename Func> void button_func_tooltip_custom_set_cpp(Button &but, Func &&func)
+{
+  Func *allocated = MEM_new<Func>(__func__, std::forward<Func>(func));
+  button_func_tooltip_custom_set(
+      &but,
+      [](bContext &C, ui::TooltipData &data, ui::Button * /*but*/, void *argN) {
+        const Func &func = *static_cast<Func *>(argN);
+        func(C, data);
+      },
+      allocated,
+      [](void *arg) { MEM_delete<Func>(static_cast<Func *>(arg)); });
+}
+
 /**
  * \param text: Allocated text (transfer ownership to `data`) or null.
  * \param suffix: Allocated text (transfer ownership to `data`) or null.
@@ -1929,8 +2037,7 @@ void tooltip_text_field_add(TooltipData &data,
                             const bool is_pad = false);
 
 /**
- * \param image: Image buffer (duplicated, ownership is *not* transferred to `data`).
- * \param image_size: Display size for the image (pixels without UI scale applied).
+ * \param image_data: Image buffer (duplicated, ownership is *not* transferred to `data`).
  */
 void tooltip_image_field_add(TooltipData &data, const TooltipImage &image_data);
 
@@ -2113,7 +2220,7 @@ bool panel_can_be_pinned(const Panel *panel);
 
 bool panel_category_is_visible(const ARegion *region);
 bool panel_category_tabs_is_visible(const ARegion *region);
-void panel_category_add(ARegion *region, const char *name);
+void panel_category_add(ARegion *region, const char *name, int icon = 0);
 PanelCategoryDyn *panel_category_find(const ARegion *region, const char *idname);
 int panel_category_index_find(ARegion *region, const char *idname);
 PanelCategoryStack *panel_category_active_find(ARegion *region, const char *idname);
@@ -2126,7 +2233,9 @@ void panel_category_clear_all(ARegion *region);
 /**
  * Draw vertical tabs on the left side of the region, one tab per category.
  */
-void panel_category_tabs_draw_all(ARegion *region, const char *category_id_active);
+void panel_category_tabs_draw_all(const bContext *C,
+                                  ARegion *region,
+                                  const char *category_id_active);
 
 void panel_stop_animation(const bContext *C, Panel *panel);
 
@@ -2197,11 +2306,13 @@ void init();
 /* after reading userdef file */
 void init_userdef();
 void reinit_font();
-void ui_exit();
+void exit();
 
 /* When changing UI font, update text style weights with default font weight
  * if non-variable. Therefore fixed weight bold font will look bold. */
 void update_text_styles();
+
+void invalidate_text_wrap_cache(const ARegion &region);
 
 #define UI_UNIT_X ((void)0, U.widget_unit)
 #define UI_UNIT_Y ((void)0, U.widget_unit)
@@ -2456,7 +2567,7 @@ void template_color_picker(Layout *layout,
                            bool lock,
                            bool lock_luminosity,
                            bool cubic);
-void template_palette(Layout *layout, PointerRNA *ptr, StringRefNull propname, bool colors);
+void template_palette(Layout *layout, PointerRNA *ptr, StringRefNull propname);
 void template_crypto_picker(Layout *layout, PointerRNA *ptr, StringRefNull propname, int icon);
 /**
  * TODO: for now, grouping of layers is determined by dividing up the length of
@@ -2560,7 +2671,7 @@ void template_cache_file_time_settings(Layout *layout, PointerRNA *fileptr);
 /**
  * Draw the override layers related properties of the CacheFile.
  */
-void template_list_flags(Layout *layout, const bContext *C, PointerRNA *fileptr);
+void template_uilist_flags(Layout *layout, const bContext *C, PointerRNA *fileptr);
 
 /** Default UIList class name, keep in sync with its declaration in `bl_ui/__init__.py`. */
 #define UI_UL_DEFAULT_CLASS_NAME "UI_UL_list"
@@ -2573,19 +2684,19 @@ enum TemplateListFlags {
 };
 ENUM_OPERATORS(TemplateListFlags);
 
-void template_list(Layout *layout,
-                   const bContext *C,
-                   const char *listtype_name,
-                   const char *list_id,
-                   PointerRNA *dataptr,
-                   StringRefNull propname,
-                   PointerRNA *active_dataptr,
-                   StringRefNull active_propname,
-                   const char *item_dyntip_propname,
-                   int rows,
-                   int maxrows,
-                   int layout_type,
-                   enum TemplateListFlags flags);
+void template_uilist(Layout *layout,
+                     const bContext *C,
+                     const char *listtype_name,
+                     const char *list_id,
+                     PointerRNA *dataptr,
+                     StringRefNull propname,
+                     PointerRNA *active_dataptr,
+                     StringRefNull active_propname,
+                     const char *item_dyntip_propname,
+                     int rows,
+                     int maxrows,
+                     int layout_type,
+                     enum TemplateListFlags flags);
 }  // namespace ui
 
 void uiTemplateNodeLink(
@@ -2642,8 +2753,8 @@ void template_tree_interface(Layout *layout, const bContext *C, PointerRNA *ptr)
  */
 void template_node_inputs(Layout *layout, bContext *C, PointerRNA *ptr);
 
+void template_collection_importer(Layout *layout, bContext *C);
 void template_collection_exporters(Layout *layout, bContext *C);
-
 }  // namespace ui
 
 namespace ed::object::shapekey {
@@ -2655,7 +2766,7 @@ namespace ui {
  * \return: True if the list item with unfiltered, unordered index \a item_idx is visible given the
  *          current filter settings.
  */
-bool list_item_index_is_filtered_visible(const struct uiList *ui_list, int item_idx);
+bool uilist_item_index_is_filtered_visible(const struct uiList *ui_list, int item_idx);
 
 /* UI Operators */
 struct DragColorHandle {
@@ -2758,6 +2869,7 @@ enum FontStyleAlign {
 struct FontStyleDrawParams {
   FontStyleAlign align;
   uint word_wrap : 1;
+  bool word_clip = true;
 };
 
 /* Styled text draw */
@@ -2893,7 +3005,7 @@ void butstore_register(ButStore *bs_handle, Button **but_p);
 bool butstore_register_update(Block *block, Button *but_dst, const Button *but_src);
 void butstore_unregister(ButStore *bs_handle, Button **but_p);
 
-/* ui_interface_region_tooltip.c */
+/* interface_region_tooltip.cc */
 
 /**
  * \param is_quick_tip: See #button_func_quick_tooltip_set for what a quick tooltip is.
@@ -2908,6 +3020,7 @@ ARegion *tooltip_create_from_button_or_extra_icon(bContext *C,
                                                   ButtonExtraOpIcon *extra_icon,
                                                   bool is_quick_tip);
 ARegion *tooltip_create_from_gizmo(bContext *C, wmGizmo *gz);
+
 void tooltip_free(bContext *C, bScreen *screen, ARegion *region);
 
 /**
@@ -3005,12 +3118,16 @@ bool view_item_drag_start(bContext &C, AbstractViewItem &item);
  * \param xy: Coordinate to find a view item at, in window space.
  * \param pad: Extra padding added to the bounding box of the view.
  */
-AbstractView *region_view_find_at(const ARegion *region, const int xy[2], int pad);
+AbstractView *region_view_find_at(const ARegion *region,
+                                  const int xy[2],
+                                  int pad,
+                                  Block **r_block = nullptr);
+void region_view_scroll_at_borders(bContext *C, wmDropBox &dropbox, const wmEvent *event);
 /**
  * \param xy: Coordinate to find a view item at, in window space.
  */
 AbstractViewItem *region_views_find_item_at(const ARegion &region, const int xy[2]);
-AbstractViewItem *region_views_find_active_item(const ARegion *region);
+AbstractViewItem *region_views_find_active_item(const ARegion *region, const AbstractView *view);
 Button *region_views_find_active_item_but(const ARegion *region);
 void region_views_clear_search_highlight(const ARegion *region);
 

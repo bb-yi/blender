@@ -101,7 +101,7 @@ def do_versions(self):
         library_versions.setdefault(library.version, []).append(library)
 
     # Do versioning per library, since they might have different versions.
-    max_need_versioning = (5, 0, 77)
+    max_need_versioning = (5, 2, 8)
     for version, libraries in library_versions.items():
         if version > max_need_versioning:
             continue

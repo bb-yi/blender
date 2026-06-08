@@ -4,40 +4,60 @@
 
 #pragma once
 
+#include "kernel/svm/node_types.h"
 #include "kernel/svm/util.h"
 
 CCL_NAMESPACE_BEGIN
 
 /* Vector combine / separate, used for the RGB and XYZ nodes */
 
-ccl_device void svm_node_combine_vector(ccl_private float *stack,
-                                        const uint in_offset,
-                                        const uint vector_index,
-                                        const uint out_offset)
+template<typename Float3Type>
+ccl_device void svm_node_combine_vector(ccl_private float *ccl_restrict stack,
+                                        const ccl_global SVMNodeCombineVector &ccl_restrict node)
 {
-  const float vector = stack_load_float(stack, in_offset);
+  using FloatType = dual_scalar_t<Float3Type>;
+  const FloatType value = stack_load<FloatType>(stack, node.in);
 
-  if (stack_valid(out_offset)) {
-    stack_store_float(stack, out_offset + vector_index, vector);
+  if (stack_valid(node.out_offset)) {
+    if constexpr (is_dual_v<Float3Type>) {
+      stack_store_float(stack, node.out_offset + node.vector_index, value.val);
+      stack_store_float(stack, node.out_offset + node.vector_index + 3, value.dx);
+      stack_store_float(stack, node.out_offset + node.vector_index + 6, value.dy);
+    }
+    else {
+      stack_store_float(stack, node.out_offset + node.vector_index, value);
+    }
   }
 }
 
-ccl_device void svm_node_separate_vector(ccl_private float *stack,
-                                         const uint ivector_offset,
-                                         const uint vector_index,
-                                         const uint out_offset)
+template<typename Float3Type>
+ccl_device void svm_node_separate_vector(ccl_private float *ccl_restrict stack,
+                                         const ccl_global SVMNodeSeparateVector &ccl_restrict node)
 {
-  const float3 vector = stack_load_float3(stack, ivector_offset);
+  const Float3Type vector = stack_load<Float3Type>(stack, node.vector);
 
-  if (stack_valid(out_offset)) {
-    if (vector_index == 0) {
-      stack_store_float(stack, out_offset, vector.x);
-    }
-    else if (vector_index == 1) {
-      stack_store_float(stack, out_offset, vector.y);
+  if (stack_valid(node.out_offset)) {
+    if constexpr (is_dual_v<Float3Type>) {
+      if (node.vector_index == 0) {
+        stack_store(stack, node.out_offset, vector.x());
+      }
+      else if (node.vector_index == 1) {
+        stack_store(stack, node.out_offset, vector.y());
+      }
+      else {
+        stack_store(stack, node.out_offset, vector.z());
+      }
     }
     else {
-      stack_store_float(stack, out_offset, vector.z);
+      if (node.vector_index == 0) {
+        stack_store(stack, node.out_offset, vector.x);
+      }
+      else if (node.vector_index == 1) {
+        stack_store(stack, node.out_offset, vector.y);
+      }
+      else {
+        stack_store(stack, node.out_offset, vector.z);
+      }
     }
   }
 }

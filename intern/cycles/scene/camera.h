@@ -196,8 +196,8 @@ class Camera : public Node {
   map<ustring, pair<vector<uint8_t>, TypeDesc>> script_params;
 
  private:
-  int width;
-  int height;
+  int width = 1024;
+  int height = 512;
 
  public:
   /* functions */
@@ -207,6 +207,8 @@ class Camera : public Node {
   void compute_auto_viewplane();
 
   void update(Scene *scene);
+
+  void update_interactive_motion();
 
   void device_update(Device *device, DeviceScene *dscene, Scene *scene);
   void device_update_volume(Device *device, DeviceScene *dscene, Scene *scene);
@@ -225,7 +227,7 @@ class Camera : public Node {
 
   uint get_kernel_features() const;
 
-  bool set_screen_size(const int width_, int height_);
+  bool set_screen_size(int width, int height);
 
   void set_osl_camera(Scene *scene,
                       OSLCameraParamQuery &params,

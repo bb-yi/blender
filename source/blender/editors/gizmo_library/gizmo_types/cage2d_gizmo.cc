@@ -1259,7 +1259,7 @@ static wmOperatorStatus gizmo_cage2d_modal(bContext *C,
       mul_v2_v2(pivot, dims);
     }
     else {
-      zero_v2(pivot);
+      RNA_float_get_array(gz->ptr, "pivot", pivot);
     }
 
     float curr_mouse[2];
@@ -1326,7 +1326,9 @@ static wmOperatorStatus gizmo_cage2d_modal(bContext *C,
 
     if (transform_flag & ED_GIZMO_CAGE_XFORM_FLAG_SCALE_UNIFORM) {
       if (constrain_axis[0] == false && constrain_axis[1] == false) {
-        if (draw_style == ED_GIZMO_CAGE2D_STYLE_CIRCLE) {
+        if (draw_style == ED_GIZMO_CAGE2D_STYLE_CIRCLE &&
+            !is_corner_highlighted(gz->highlight_part))
+        {
           /* So that the cursor lies on the circle. */
           scale[1] = scale[0] = len_v2(scale);
         }
@@ -1449,8 +1451,11 @@ static void GIZMO_GT_cage_2d(wmGizmoType *gzt)
       {0, nullptr, 0, nullptr, nullptr},
   };
   static const float unit_v2[2] = {1.0f, 1.0f};
+  static const float zero_v2[2] = {0.0f, 0.0f};
   RNA_def_float_vector(
       gzt->srna, "dimensions", 2, unit_v2, 0, FLT_MAX, "Dimensions", "", 0.0f, FLT_MAX);
+  RNA_def_float_vector(
+      gzt->srna, "pivot", 2, zero_v2, FLT_MIN, FLT_MAX, "Pivot", "", FLT_MIN, FLT_MAX);
   RNA_def_enum_flag(gzt->srna, "transform", rna_enum_transform, 0, "Transform Options", "");
   RNA_def_enum(gzt->srna,
                "draw_style",

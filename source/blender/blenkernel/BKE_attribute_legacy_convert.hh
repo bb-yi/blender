@@ -25,7 +25,7 @@ struct Mesh;
 namespace bke {
 
 const CPPType *custom_data_type_to_cpp_type(eCustomDataType type);
-eCustomDataType cpp_type_to_custom_data_type(const CPPType &type);
+std::optional<eCustomDataType> cpp_type_to_custom_data_type(const CPPType &type);
 
 /**
  * Convert a custom data type to an attribute type. May return `std::nullopt` if the custom data
@@ -56,7 +56,7 @@ void grease_pencil_convert_customdata_to_storage(GreasePencil &grease_pencil);
 
 /** Abstraction for copying #CustomData layers and #AttributeStorage attributes. */
 class LegacyMeshInterpolator {
-  Vector<GVArray> attrs_src_;
+  Vector<GVArraySpan> attrs_src_;
   Vector<GMutableSpan> attrs_dst_;
 
   const CustomData &cd_src_;

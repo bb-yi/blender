@@ -8,8 +8,10 @@
 #include "BKE_node_socket_value.hh"
 
 #include "BLI_memory_counter_fwd.hh"
+#include "BLI_ustring.hh"
 
 #include "NOD_geometry_nodes_bundle_fwd.hh"
+#include "NOD_geometry_nodes_list.hh"
 #include "NOD_geometry_nodes_values.hh"
 
 #include "DNA_node_types.h"
@@ -41,6 +43,8 @@ struct BundleItemValue {
   /**
    * Attempts to cast the stored value to the given type. This may do implicit conversions.
    */
+  std::optional<bke::SocketValueVariant> as_socket_value(
+      const bke::bNodeSocketType &dst_socket_type) const;
   template<typename T>
   std::optional<T> as_socket_value(const bke::bNodeSocketType &socket_type) const;
   template<typename T> std::optional<T> as() const;
@@ -52,6 +56,28 @@ struct BundleItemValue {
   template<typename T> const T *as_pointer() const;
 };
 
+class BundleKey {
+ private:
+  UString key_;
+
+  BundleKey(UString key);
+
+ public:
+  static std::optional<BundleKey> from_ustr(UString key);
+  static std::optional<BundleKey> from_str(StringRef key);
+
+  uint64_t hash() const;
+  bool operator==(const BundleKey &other) const = default;
+
+  UString ustr() const;
+
+  /* Disallow certain characters so that we can use them to e.g. build a bundle path or
+   * expressions referencing multiple bundle items. We might not need all of them in the future,
+   * but better reserve them now while we still can. */
+  static constexpr StringRefNull forbidden_key_chars = "/*&|\"^~!,{}()+$#@[];:?<>.-%\\=";
+  static bool is_valid_key(StringRef key);
+};
+
 /**
  * A bundle is a map containing keys and their corresponding values.
  *
@@ -59,48 +85,66 @@ struct BundleItemValue {
  */
 class Bundle : public ImplicitSharingMixin {
  public:
-  using BundleItemMap = Map<std::string, BundleItemValue>;
+  using BundleItemMap = Map<BundleKey, BundleItemValue>;
 
  private:
   BundleItemMap items_;
 
  public:
+  static inline BundleKey type_item_name = *BundleKey::from_str("Type");
   static BundlePtr create();
 
-  bool add(StringRef key, const BundleItemValue &value);
-  void add_new(StringRef key, const BundleItemValue &value);
-  void add_override(StringRef key, const BundleItemValue &value);
+  bool add(BundleKey key, const BundleItemValue &value);
+  bool add(BundleKey key, BundleItemValue &&value);
+  void add_new(BundleKey key, const BundleItemValue &value);
+  void add_new(BundleKey key, BundleItemValue &&value);
+  void add_override(BundleKey key, const BundleItemValue &value);
   bool add_path(StringRef path, const BundleItemValue &value);
   void add_path_new(StringRef path, const BundleItemValue &value);
   void add_path_override(StringRef path, const BundleItemValue &value);
+  void add_path_override(Span<BundleKey> path, const BundleItemValue &value);
 
-  template<typename T> void add(StringRef key, T value);
-  template<typename T> void add_override(StringRef key, T value);
-  template<typename T> void add_path(StringRef path, T value);
-  template<typename T> void add_path_override(StringRef path, T value);
+  template<typename T>
+    requires(!std::is_same_v<std::decay_t<T>, BundleItemValue>)
+  void add(BundleKey key, T &&value);
+  template<typename T>
+    requires(!std::is_same_v<std::decay_t<T>, BundleItemValue>)
+  void add_new(BundleKey key, T &&value);
+  template<typename T>
+    requires(!std::is_same_v<std::decay_t<T>, BundleItemValue>)
+  void add_override(BundleKey key, T &&value);
+  template<typename T>
+    requires(!std::is_same_v<std::decay_t<T>, BundleItemValue>)
+  void add_path(StringRef path, T &&value);
+  template<typename T>
+    requires(!std::is_same_v<std::decay_t<T>, BundleItemValue>)
+  void add_path_override(Span<BundleKey> path, T &&value);
+  template<typename T>
+    requires(!std::is_same_v<std::decay_t<T>, BundleItemValue>)
+  void add_path_override(StringRef path, T &&value);
 
-  bool remove(StringRef key);
+  bool remove(BundleKey key);
   bool remove_path(StringRef path);
-  bool remove_path(Span<StringRef> path);
-  bool contains(StringRef key) const;
+  bool remove_path(Span<BundleKey> path);
+  bool contains(BundleKey key) const;
   bool contains_path(StringRef path) const;
-  bool contains_path(Span<StringRef> path) const;
+  bool contains_path(Span<BundleKey> path) const;
 
-  const BundleItemValue *lookup(StringRef key) const;
-  BundleItemValue *lookup(StringRef key);
-  const BundleItemValue *lookup_path(Span<StringRef> path) const;
+  const BundleItemValue *lookup(BundleKey key) const;
+  BundleItemValue *lookup(BundleKey key);
+  const BundleItemValue *lookup_path(Span<BundleKey> path) const;
   const BundleItemValue *lookup_path(StringRef path) const;
-  BundleItemValue *lookup_path_for_write(Span<StringRef> path);
+  BundleItemValue *lookup_path_for_write(Span<BundleKey> path);
   BundleItemValue *lookup_path_for_write(StringRef path);
-  template<typename T> std::optional<T> lookup(StringRef key) const;
-  template<typename T> std::optional<T> lookup_path(Span<StringRef> path) const;
+  template<typename T> std::optional<T> lookup(BundleKey key) const;
+  template<typename T> std::optional<T> lookup_path(Span<BundleKey> path) const;
   template<typename T> std::optional<T> lookup_path(StringRef path) const;
-  template<typename T> T *lookup_ptr(StringRef key);
-  template<typename T> const T *lookup_ptr(StringRef key) const;
+  template<typename T> T *lookup_ptr(BundleKey key);
+  template<typename T> const T *lookup_ptr(BundleKey key) const;
   template<typename T> const T *lookup_path_ptr(StringRef path) const;
-  template<typename T> const T *lookup_path_ptr(Span<StringRef> path) const;
+  template<typename T> const T *lookup_path_ptr(Span<BundleKey> path) const;
   template<typename T> T *lookup_path_for_write_ptr(StringRef path);
-  template<typename T> T *lookup_path_for_write_ptr(Span<StringRef> path);
+  template<typename T> T *lookup_path_for_write_ptr(Span<BundleKey> path);
 
   Bundle &ensure_nested_bundle(StringRef path);
 
@@ -111,6 +155,8 @@ class Bundle : public ImplicitSharingMixin {
   int64_t size() const;
 
   void clear();
+
+  std::optional<StringRef> type() const;
 
   /** Also see #GeometrySet.ensure_owns_direct_data. */
   void ensure_owns_direct_data();
@@ -125,33 +171,38 @@ class Bundle : public ImplicitSharingMixin {
 
   void count_memory(MemoryCounter &memory) const;
 
-  /** Create the combined path by inserting '/' between each element. */
-  static std::string combine_path(const Span<StringRef> path);
+  Vector<std::string> gather_paths(FunctionRef<bool(const Bundle &bundle)> fn) const;
 
-  /* Disallow certain characters so that we can use them to e.g. build a bundle path or
-   * expressions referencing multiple bundle items. We might not need all of them in the future,
-   * but better reserve them now while we still can. */
-  static constexpr StringRefNull forbidden_key_chars = "/*&|\"^~!,{}()+$#@[];:?<>.-%\\=";
-  static bool is_valid_key(const StringRef key);
-  static bool is_valid_path(const StringRef path);
-  static std::optional<Vector<StringRef>> split_path(const StringRef path);
+  /** Create the combined path by inserting '/' between each element. */
+  static std::string combine_path(Span<StringRef> path);
+  static std::string combine_path(Span<BundleKey> path);
+
+  static bool is_valid_path(StringRef path);
+  static std::optional<Vector<BundleKey>> split_path(StringRef path);
 };
+
+enum class BundlePathsGatherFilterResult {
+  None,
+  Recurse,
+  Take,
+};
+
+Vector<std::string> gather_bundle_paths_by_bundle_type(
+    const Bundle &bundle, FunctionRef<bool(StringRef type)> type_filter_fn);
+Vector<std::string> gather_bundle_paths_by_data_type(const Bundle &bundle,
+                                                     eNodeSocketDatatype data_type);
+
+void foreach_nested_bundle_item(
+    const Bundle &bundle,
+    FunctionRef<void(Span<BundleKey> path, const BundleItemValue &value)> fn);
 
 template<typename T>
 inline std::optional<T> BundleItemValue::as_socket_value(
     const bke::bNodeSocketType &dst_socket_type) const
 {
-  const BundleItemSocketValue *socket_value = std::get_if<BundleItemSocketValue>(&this->value);
-  if (!socket_value) {
-    return std::nullopt;
-  }
-  if (socket_value->type->type == dst_socket_type.type) {
-    return socket_value->value.get<T>();
-  }
-  if (std::optional<bke::SocketValueVariant> converted_value = implicitly_convert_socket_value(
-          *socket_value->type, socket_value->value, dst_socket_type))
+  if (const std::optional<bke::SocketValueVariant> value = this->as_socket_value(dst_socket_type))
   {
-    return converted_value->get<T>();
+    return value->get<T>();
   }
   return std::nullopt;
 }
@@ -230,13 +281,13 @@ template<typename T> inline std::optional<T> BundleItemValue::as() const
     }
     return std::nullopt;
   }
-  else if constexpr (std::is_same_v<T, ListPtr>) {
+  else if constexpr (std::is_same_v<T, GListPtr>) {
     const BundleItemSocketValue *socket_value = std::get_if<BundleItemSocketValue>(&this->value);
     if (!socket_value) {
       return std::nullopt;
     }
     if (socket_value->value.is_list()) {
-      return socket_value->value.get<ListPtr>();
+      return socket_value->value.get<GListPtr>();
     }
     return std::nullopt;
   }
@@ -248,7 +299,7 @@ template<typename T> inline std::optional<T> BundleItemValue::as() const
   return std::nullopt;
 }
 
-template<typename T> inline std::optional<T> Bundle::lookup(const StringRef key) const
+template<typename T> inline std::optional<T> Bundle::lookup(const BundleKey key) const
 {
   const BundleItemValue *item = this->lookup(key);
   if (!item) {
@@ -257,7 +308,7 @@ template<typename T> inline std::optional<T> Bundle::lookup(const StringRef key)
   return item->as<T>();
 }
 
-template<typename T> inline T *Bundle::lookup_ptr(const StringRef key)
+template<typename T> inline T *Bundle::lookup_ptr(const BundleKey key)
 {
   BundleItemValue *item = this->lookup(key);
   return item ? item->as_pointer<T>() : nullptr;
@@ -269,19 +320,19 @@ template<typename T> inline const T *Bundle::lookup_path_ptr(const StringRef pat
   return item ? item->as_pointer<T>() : nullptr;
 }
 
-template<typename T> inline const T *Bundle::lookup_path_ptr(const Span<StringRef> path) const
+template<typename T> inline const T *Bundle::lookup_path_ptr(const Span<BundleKey> path) const
 {
   const BundleItemValue *item = this->lookup_path(path);
   return item ? item->as_pointer<T>() : nullptr;
 }
 
-template<typename T> inline const T *Bundle::lookup_ptr(const StringRef key) const
+template<typename T> inline const T *Bundle::lookup_ptr(const BundleKey key) const
 {
   const BundleItemValue *item = this->lookup(key);
   return item ? item->as_pointer<T>() : nullptr;
 }
 
-template<typename T> inline T *Bundle::lookup_path_for_write_ptr(const Span<StringRef> path)
+template<typename T> inline T *Bundle::lookup_path_for_write_ptr(const Span<BundleKey> path)
 {
   BundleItemValue *item = this->lookup_path_for_write(path);
   return item ? item->as_pointer<T>() : nullptr;
@@ -293,7 +344,7 @@ template<typename T> inline T *Bundle::lookup_path_for_write_ptr(const StringRef
   return item ? item->as_pointer<T>() : nullptr;
 }
 
-template<typename T> inline std::optional<T> Bundle::lookup_path(const Span<StringRef> path) const
+template<typename T> inline std::optional<T> Bundle::lookup_path(const Span<BundleKey> path) const
 {
   const BundleItemValue *item = this->lookup_path(path);
   if (!item) {
@@ -323,6 +374,11 @@ template<typename T, typename Fn> inline void to_stored_type(T &&value, Fn &&fn)
   else if constexpr (std::is_same_v<DecayT, BundleItemInternalValue>) {
     fn(BundleItemValue{std::forward<T>(value)});
   }
+  else if constexpr (std::is_same_v<DecayT, bke::SocketValueVariant>) {
+    const eNodeSocketDatatype socket_type = value.socket_type();
+    const bke::bNodeSocketType *socket_type_info = bke::node_socket_type_find_static(socket_type);
+    fn(BundleItemValue{BundleItemSocketValue{socket_type_info, std::forward<T>(value)}});
+  }
   else if constexpr (is_valid_internal_bundle_item_type<DecayT>()) {
     const BundleItemInternalValueMixin *sharing_info = value.get();
     if (sharing_info) {
@@ -340,27 +396,56 @@ template<typename T, typename Fn> inline void to_stored_type(T &&value, Fn &&fn)
   }
 }
 
-template<typename T> inline void Bundle::add(const StringRef key, T value)
+template<typename T>
+  requires(!std::is_same_v<std::decay_t<T>, BundleItemValue>)
+inline void Bundle::add(const BundleKey key, T &&value)
 {
-  to_stored_type(value, [&](const BundleItemValue &item_value) { this->add(key, item_value); });
+  to_stored_type(std::forward<T>(value),
+                 [&]<typename U>(U &&item_value) { this->add(key, std::forward<U>(item_value)); });
 }
 
-template<typename T> inline void Bundle::add_path(const StringRef path, T value)
+template<typename T>
+  requires(!std::is_same_v<std::decay_t<T>, BundleItemValue>)
+inline void Bundle::add_new(const BundleKey key, T &&value)
 {
-  to_stored_type(value,
-                 [&](const BundleItemValue &item_value) { this->add_path(path, item_value); });
+  to_stored_type(std::forward<T>(value), [&]<typename U>(U &&item_value) {
+    this->add_new(key, std::forward<U>(item_value));
+  });
 }
 
-template<typename T> inline void Bundle::add_override(const StringRef key, T value)
+template<typename T>
+  requires(!std::is_same_v<std::decay_t<T>, BundleItemValue>)
+inline void Bundle::add_path(const StringRef path, T &&value)
 {
-  to_stored_type(value,
-                 [&](const BundleItemValue &item_value) { this->add_override(key, item_value); });
+  to_stored_type(std::forward<T>(value), [&]<typename U>(U &&item_value) {
+    this->add_path(path, std::forward<U>(item_value));
+  });
 }
 
-template<typename T> inline void Bundle::add_path_override(const StringRef path, T value)
+template<typename T>
+  requires(!std::is_same_v<std::decay_t<T>, BundleItemValue>)
+inline void Bundle::add_override(const BundleKey key, T &&value)
 {
-  to_stored_type(value, [&](const BundleItemValue &item_value) {
-    this->add_path_override(path, item_value);
+  to_stored_type(std::forward<T>(value), [&]<typename U>(U &&item_value) {
+    this->add_override(key, std::forward<U>(item_value));
+  });
+}
+
+template<typename T>
+  requires(!std::is_same_v<std::decay_t<T>, BundleItemValue>)
+inline void Bundle::add_path_override(const StringRef path, T &&value)
+{
+  to_stored_type(std::forward<T>(value), [&]<typename U>(U &&item_value) {
+    this->add_path_override(path, std::forward<U>(item_value));
+  });
+}
+
+template<typename T>
+  requires(!std::is_same_v<std::decay_t<T>, BundleItemValue>)
+inline void Bundle::add_path_override(Span<BundleKey> path, T &&value)
+{
+  to_stored_type(std::forward<T>(value), [&]<typename U>(U &&item_value) {
+    this->add_path_override(path, std::forward<U>(item_value));
   });
 }
 
@@ -382,6 +467,40 @@ inline bool Bundle::is_empty() const
 inline int64_t Bundle::size() const
 {
   return items_.size();
+}
+
+inline BundleKey::BundleKey(const UString key) : key_(key) {}
+
+inline uint64_t BundleKey::hash() const
+{
+  return get_default_hash(key_);
+}
+
+std::optional<BundleKey> inline BundleKey::from_ustr(const UString key)
+{
+  if (is_valid_key(key.ref())) {
+    return BundleKey(key);
+  }
+  return std::nullopt;
+}
+
+std::optional<BundleKey> inline BundleKey::from_str(const StringRef key)
+{
+  /* Check validity before converting to UString. */
+  if (is_valid_key(key)) {
+    return BundleKey(UString(key));
+  }
+  return std::nullopt;
+}
+
+inline UString BundleKey::ustr() const
+{
+  return key_;
+}
+
+inline std::string_view format_as(const BundleKey key)
+{
+  return key.ustr().ref();
 }
 
 }  // namespace blender::nodes

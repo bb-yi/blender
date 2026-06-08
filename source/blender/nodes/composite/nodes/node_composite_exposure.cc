@@ -23,10 +23,10 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.use_custom_socket_order();
   b.allow_any_socket_order();
   b.is_function_node();
-  b.add_input<decl::Color>("Image").default_value({1.0f, 1.0f, 1.0f, 1.0f}).hide_value();
-  b.add_output<decl::Color>("Image").align_with_previous();
+  b.add_input<decl::Color>("Image"_ustr).default_value({1.0f, 1.0f, 1.0f, 1.0f}).hide_value();
+  b.add_output<decl::Color>("Image"_ustr).align_with_previous();
 
-  b.add_input<decl::Float>("Exposure").min(-10.0f).max(10.0f);
+  b.add_input<decl::Float>("Exposure"_ustr).min(-10.0f).max(10.0f);
 }
 
 using namespace blender::compositor;
@@ -62,7 +62,7 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, "CompositorNodeExposure", CMP_NODE_EXPOSURE);
+  cmp_node_type_base(&ntype, "CompositorNodeExposure"_ustr, CMP_NODE_EXPOSURE);
   ntype.ui_name = "Exposure";
   ntype.ui_description = "Adjust brightness using a camera exposure parameter";
   ntype.enum_name_legacy = "EXPOSURE";

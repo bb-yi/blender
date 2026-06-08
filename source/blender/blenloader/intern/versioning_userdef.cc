@@ -431,6 +431,18 @@ static void do_versions_theme(const UserDef *userdef, bTheme *btheme)
     FROM_DEFAULT_V4_UCHAR(space_view3d.gp_wire_edit);
   }
 
+  if (!USER_VERSION_ATLEAST(502, 8)) {
+    FROM_DEFAULT_V4_UCHAR(tui.link);
+  }
+
+  if (!USER_VERSION_ATLEAST(502, 32)) {
+    btheme->space_view3d.grid_axis_brightness = U_theme_default.space_view3d.grid_axis_brightness;
+  }
+
+  if (!USER_VERSION_ATLEAST(502, 42)) {
+    FROM_DEFAULT_V4_UCHAR(tui.wcol_state.error);
+  }
+
   /**
    * Always bump subversion in BKE_blender_version.h when adding versioning
    * code here, and wrap it inside a USER_VERSION_ATLEAST check.
@@ -819,7 +831,7 @@ void blo_do_versions_userdef(UserDef *userdef)
   }
   if (userdef->autokey_mode == 0) {
     /* 'add/replace' but not on */
-    userdef->autokey_mode = 2;
+    userdef->autokey_mode = eAutokey_Mode(2);
   }
   if (userdef->savetime <= 0) {
     userdef->savetime = 1;
@@ -836,12 +848,14 @@ void blo_do_versions_userdef(UserDef *userdef)
   /* If the userdef was created on a different platform, it may have an
    * unsupported GPU backend selected.  If so, pick a supported default. */
 #ifdef __APPLE__
-  if (userdef->gpu_backend == GPU_BACKEND_OPENGL || userdef->gpu_backend == GPU_BACKEND_VULKAN) {
-    userdef->gpu_backend = GPU_BACKEND_METAL;
+  if (userdef->gpu_backend == USER_GPU_BACKEND_OPENGL ||
+      userdef->gpu_backend == USER_GPU_BACKEND_VULKAN)
+  {
+    userdef->gpu_backend = USER_GPU_BACKEND_METAL;
   }
 #else
-  if (userdef->gpu_backend == GPU_BACKEND_METAL) {
-    userdef->gpu_backend = GPU_BACKEND_OPENGL;
+  if (userdef->gpu_backend == USER_GPU_BACKEND_METAL) {
+    userdef->gpu_backend = USER_GPU_BACKEND_OPENGL;
   }
 #endif
 
@@ -1061,9 +1075,9 @@ void blo_do_versions_userdef(UserDef *userdef)
 
   if (!USER_VERSION_ATLEAST(278, 6)) {
     /* Clear preference flags for re-use. */
-    userdef->flag &= ~(USER_FLAG_NUMINPUT_ADVANCED | (1 << 2) | USER_MENU_CLOSE_LEAVE |
-                       USER_FLAG_UNUSED_6 | USER_FLAG_UNUSED_7 | USER_INTERNET_ALLOW |
-                       USER_DEVELOPER_UI);
+    userdef->flag &= ~eUserPref_Flag(USER_FLAG_NUMINPUT_ADVANCED | (1 << 2) |
+                                     USER_MENU_CLOSE_LEAVE | USER_FLAG_UNUSED_6 |
+                                     USER_FLAG_UNUSED_7 | USER_INTERNET_ALLOW | USER_DEVELOPER_UI);
     userdef->uiflag &= ~USER_HEADER_BOTTOM;
     userdef->transopts &= ~(USER_TR_UNUSED_3 | USER_TR_UNUSED_4 | USER_TR_UNUSED_6 |
                             USER_TR_UNUSED_7);
@@ -1122,7 +1136,7 @@ void blo_do_versions_userdef(UserDef *userdef)
       BKE_keyconfig_pref_set_select_mouse(userdef, 1, false);
     }
 
-    userdef->flag &= ~USER_LMOUSESELECT;
+    userdef->flag &= ~eUserPref_Flag(USER_LMOUSESELECT);
   }
 
   if (!USER_VERSION_ATLEAST(280, 38)) {
@@ -1176,12 +1190,6 @@ void blo_do_versions_userdef(UserDef *userdef)
 
   if (!USER_VERSION_ATLEAST(280, 51)) {
     userdef->move_threshold = 2;
-  }
-
-  if (!USER_VERSION_ATLEAST(280, 58)) {
-    if (userdef->image_draw_method != IMAGE_DRAW_METHOD_GLSL) {
-      userdef->image_draw_method = IMAGE_DRAW_METHOD_AUTO;
-    }
   }
 
   /* Patch to set dupli light-probes and grease-pencil. */
@@ -1304,7 +1312,7 @@ void blo_do_versions_userdef(UserDef *userdef)
   }
 
   if (!USER_VERSION_ATLEAST(292, 9)) {
-    if (BLI_listbase_is_empty(&userdef->asset_libraries)) {
+    if (userdef->asset_libraries.is_empty()) {
       BKE_preferences_asset_library_default_add(userdef);
     }
   }
@@ -1391,9 +1399,9 @@ void blo_do_versions_userdef(UserDef *userdef)
   /* Set GPU backend to OpenGL. */
   if (!USER_VERSION_ATLEAST(305, 5)) {
 #ifdef __APPLE__
-    userdef->gpu_backend = GPU_BACKEND_METAL;
+    userdef->gpu_backend = USER_GPU_BACKEND_METAL;
 #else
-    userdef->gpu_backend = GPU_BACKEND_OPENGL;
+    userdef->gpu_backend = USER_GPU_BACKEND_OPENGL;
 #endif
   }
 
@@ -1451,7 +1459,7 @@ void blo_do_versions_userdef(UserDef *userdef)
 
   if (!USER_VERSION_ATLEAST(400, 24)) {
     /* Clear deprecated USER_MENUFIXEDORDER user flag for reuse. */
-    userdef->uiflag &= ~(1 << 23);
+    userdef->uiflag &= ~eUserpref_UI_Flag(1 << 23);
   }
 
   if (!USER_VERSION_ATLEAST(400, 26)) {
@@ -1493,7 +1501,7 @@ void blo_do_versions_userdef(UserDef *userdef)
 
   if (!USER_VERSION_ATLEAST(402, 36)) {
     /* Reset repositories. */
-    while (!BLI_listbase_is_empty(&userdef->extension_repos)) {
+    while (!userdef->extension_repos.is_empty()) {
       BKE_preferences_extension_repo_remove(
           userdef, static_cast<bUserExtensionRepo *>(userdef->extension_repos.first));
     }
@@ -1752,15 +1760,31 @@ void blo_do_versions_userdef(UserDef *userdef)
     /* Increase the base XR vignette value to match the previous default after logic refactor. */
     /* Can be either 50 or 60 due to an oversight in the original feature (dde9d21b91) where
      * the DNA default was set 60, but the versioning_userdef set it to 50. */
-    if (userdef->xr_navigation.vignette_intensity == 50 ||
-        userdef->xr_navigation.vignette_intensity == 60)
-    {
+    if (ELEM(userdef->xr_navigation.vignette_intensity, 50, 60)) {
       userdef->xr_navigation.vignette_intensity = 70;
     }
   }
 
   if (!USER_VERSION_ATLEAST(501, 34)) {
     userdef->uiflag |= USER_MATERIAL_SELECTOR_PREVIEWS;
+  }
+
+  if (!USER_VERSION_ATLEAST(502, 13)) {
+    userdef->geometry_nodes_stack_limit = 100;
+  }
+
+  if (!USER_VERSION_ATLEAST(502, 35)) {
+    /* Instead of removing the flag entirely, it is forced to be on. Once it is 100% certain the
+     * Remote Asset Libraries feature will be shipped with 5.2 (which depends on other factors than
+     * just code), the flag can be removed. */
+    userdef->experimental.use_remote_asset_libraries = true;
+  }
+
+  if (!USER_VERSION_ATLEAST(502, 42)) {
+    /* Instead of removing the flag entirely, it is forced to be on. Once it is 100% certain the
+     * Remote Asset Libraries feature will be shipped with 5.2 (which depends on other factors than
+     * just code), the flag can be removed. */
+    userdef->asset_flag |= USER_ASSETS_USE_ONLINE_ESSENTIALS;
   }
 
   /**
@@ -1801,6 +1825,11 @@ void BLO_sanitize_experimental_features_userpref_blend(UserDef *userdef)
 
   userdef->experimental.use_geometry_nodes_lists = use_geometry_nodes_lists;
   userdef->experimental.use_geometry_bundle = use_geometry_bundle;
+
+  /* Instead of removing the flag entirely, it is forced to be on. Once it is 100% certain the
+   * Remote Asset Libraries feature will be shipped with 5.2 (which depends on other factors than
+   * just code), the flag can be removed. */
+  userdef->experimental.use_remote_asset_libraries = true;
 }
 
 #undef USER_LMOUSESELECT

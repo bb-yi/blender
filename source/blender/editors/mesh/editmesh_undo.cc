@@ -182,6 +182,8 @@ struct UndoMesh {
   size_t undo_size;
 };
 
+/** \} */
+
 #ifdef USE_ARRAY_STORE
 
 /* -------------------------------------------------------------------- */
@@ -912,6 +914,10 @@ static UndoMesh **mesh_undostep_reference_elems_from_objects(Object **object, in
 
 #endif /* USE_ARRAY_STORE */
 
+/* -------------------------------------------------------------------- */
+/** \name Undo/Redo Helper Functions
+ * \{ */
+
 /* for callbacks */
 /* undo simply makes copies of a bmesh */
 /**
@@ -1060,7 +1066,7 @@ static void undomesh_to_editmesh(UndoMesh *um,
   convert_params.calc_vert_normal = false;
   convert_params.active_shapekey = um->shapenr;
   BM_mesh_bm_from_me(bm, um->mesh, &convert_params);
-  BLI_freelistN(vertex_group_names);
+  vertex_group_names->free_no_destruct();
   BKE_defgroup_copy_list(vertex_group_names, &um->mesh->vertex_group_names);
   *vertex_group_active_index = um->mesh->vertex_group_active_index;
 
@@ -1113,9 +1119,10 @@ static void undomesh_free_data(UndoMesh *um)
 
 static Object *editmesh_object_from_context(bContext *C)
 {
+  const Main *bmain = CTX_data_main(C);
   Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
-  BKE_view_layer_synced_ensure(scene, view_layer);
+  BKE_view_layer_synced_ensure(*bmain, scene, view_layer);
   Object *obedit = BKE_view_layer_edit_object_get(view_layer);
   if (obedit && obedit->type == OB_MESH) {
     const Mesh *mesh = id_cast<Mesh *>(obedit->data);
@@ -1145,9 +1152,9 @@ struct MeshUndoStep_Elem {
  */
 struct MeshUndoStep_SceneData {
   char selectmode;
-  char uv_selectmode;
-  char uv_sticky;
-  char uv_flag;
+  eTool_UvSelectMode uv_selectmode;
+  eTool_UvSticky uv_sticky;
+  eTool_UvFlag uv_flag;
 };
 
 struct MeshUndoStep {
@@ -1174,7 +1181,7 @@ static bool mesh_undosys_step_encode(bContext *C, Main *bmain, UndoStep *us_p)
   Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
   const ToolSettings *ts = scene->toolsettings;
-  Vector<Object *> objects = ED_undo_editmode_objects_from_view_layer(scene, view_layer);
+  Vector<Object *> objects = ED_undo_editmode_objects_from_view_layer(*bmain, scene, view_layer);
 
   us->scene_ref.ptr = scene;
   us->elems = MEM_new_array_zeroed<MeshUndoStep_Elem>(objects.size(), __func__);
@@ -1267,7 +1274,7 @@ static void mesh_undosys_step_decode(
 
   /* The first element is always active */
   ED_undo_object_set_active_or_warn(
-      scene, view_layer, us->elems[0].obedit_ref.ptr, us_p->name, &LOG);
+      *bmain, scene, view_layer, us->elems[0].obedit_ref.ptr, us_p->name, &LOG);
 
   /* Check after setting active (unless undoing into another scene). */
   BLI_assert(mesh_undosys_poll(C) || (scene != CTX_data_scene(C)));
@@ -1277,7 +1284,7 @@ static void mesh_undosys_step_decode(
      * While other flags could be included too: it's important the user doesn't
      * undo into a state where the scene settings would show a different selection
      * to the selection the user was previously editing. */
-    constexpr char uv_flag_undo = UV_FLAG_SELECT_SYNC | UV_FLAG_SELECT_ISLAND;
+    constexpr eTool_UvFlag uv_flag_undo = UV_FLAG_SELECT_SYNC | UV_FLAG_SELECT_ISLAND;
 
     ToolSettings *ts = scene->toolsettings;
     const MeshUndoStep_SceneData &scene_data = us->scene_data;

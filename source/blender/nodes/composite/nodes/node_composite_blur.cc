@@ -25,14 +25,23 @@
 namespace blender::nodes::node_composite_blur_cc {
 
 static const EnumPropertyItem type_items[] = {
-    {CMP_NODE_BLUR_TYPE_BOX, "FLAT", 0, N_("Flat"), ""},
-    {CMP_NODE_BLUR_TYPE_TENT, "TENT", 0, N_("Tent"), ""},
-    {CMP_NODE_BLUR_TYPE_QUAD, "QUAD", 0, N_("Quadratic"), ""},
-    {CMP_NODE_BLUR_TYPE_CUBIC, "CUBIC", 0, N_("Cubic"), ""},
-    {CMP_NODE_BLUR_TYPE_GAUSS, "GAUSS", 0, N_("Gaussian"), ""},
-    {CMP_NODE_BLUR_TYPE_FAST_GAUSS, "FAST_GAUSS", 0, N_("Fast Gaussian"), ""},
-    {CMP_NODE_BLUR_TYPE_CATROM, "CATROM", 0, N_("Catrom"), ""},
-    {CMP_NODE_BLUR_TYPE_MITCH, "MITCH", 0, N_("Mitch"), ""},
+    {CMP_NODE_BLUR_TYPE_BOX, "FLAT", 0, N_("Flat"), "Applies a box blur filter"},
+    {CMP_NODE_BLUR_TYPE_TENT, "TENT", 0, N_("Tent"), "Applies a triangle blur filter"},
+    {CMP_NODE_BLUR_TYPE_QUAD, "QUAD", 0, N_("Quadratic"), "Applies a quadratic blur filter"},
+    {CMP_NODE_BLUR_TYPE_CUBIC, "CUBIC", 0, N_("Cubic"), "Applies a cubic blur filter"},
+    {CMP_NODE_BLUR_TYPE_GAUSS, "GAUSS", 0, N_("Gaussian"), "Applies a Gaussian blur"},
+    {CMP_NODE_BLUR_TYPE_FAST_GAUSS,
+     "FAST_GAUSS",
+     0,
+     N_("Fast Gaussian"),
+     "Applies a recursive Gaussian blur that can be faster and more accurate in some cases, but "
+     "less accurate in other cases"},
+    {CMP_NODE_BLUR_TYPE_CATROM, "CATROM", 0, N_("Catrom"), "Applies a cubic Catmull-Rom filter"},
+    {CMP_NODE_BLUR_TYPE_MITCH,
+     "MITCH",
+     0,
+     N_("Mitch"),
+     "Applies a cubic Mitchell-Netravali filter"},
     {0, nullptr, 0, nullptr, nullptr},
 };
 
@@ -40,23 +49,26 @@ static void node_declare(NodeDeclarationBuilder &b)
 {
   b.use_custom_socket_order();
   b.allow_any_socket_order();
-  b.add_input<decl::Color>("Image")
+  b.add_input<decl::Color>("Image"_ustr)
       .default_value({1.0f, 1.0f, 1.0f, 1.0f})
       .hide_value()
       .structure_type(StructureType::Dynamic);
-  b.add_output<decl::Color>("Image").structure_type(StructureType::Dynamic).align_with_previous();
+  b.add_output<decl::Color>("Image"_ustr)
+      .structure_type(StructureType::Dynamic)
+      .align_with_previous();
 
-  b.add_input<decl::Vector>("Size")
+  b.add_input<decl::Vector>("Size"_ustr)
       .dimensions(2)
       .default_value({0.0f, 0.0f})
+      .subtype(PROP_PIXEL)
       .min(0.0f)
       .structure_type(StructureType::Dynamic);
-  b.add_input<decl::Menu>("Type")
+  b.add_input<decl::Menu>("Type"_ustr)
       .default_value(CMP_NODE_BLUR_TYPE_GAUSS)
       .static_items(type_items)
       .optional_label();
-  b.add_input<decl::Bool>("Extend Bounds").default_value(false);
-  b.add_input<decl::Bool>("Separable")
+  b.add_input<decl::Bool>("Extend Bounds"_ustr).default_value(false);
+  b.add_input<decl::Bool>("Separable"_ustr)
       .default_value(true)
       .description(
           "Use faster approximation by blurring along the horizontal and vertical directions "
@@ -89,10 +101,10 @@ static math::FilterKernel blur_type_to_kernel(CMPNodeBlurType type)
       return math::FilterKernel::Mitch;
     case CMP_NODE_BLUR_TYPE_FAST_GAUSS:
       return math::FilterKernel::Gauss;
-    default:
-      BLI_assert_unreachable();
-      return math::FilterKernel::Box;
   }
+
+  BLI_assert_unreachable();
+  return math::FilterKernel::Box;
 }
 
 using namespace blender::compositor;
@@ -111,54 +123,22 @@ class BlurOperation : public NodeOperation {
     }
 
     const Result &size = this->get_input("Size");
-    if (this->get_extend_bounds()) {
-      Result padded_input = this->context().create_result(ResultType::Color);
-      Result padded_size = this->context().create_result(ResultType::Float2);
-
-      const int2 padding_size = this->compute_extended_boundary_size(size);
-
-      pad(this->context(), input, padded_input, padding_size, PaddingMethod::Zero);
-      pad(this->context(), size, padded_size, padding_size, PaddingMethod::Extend);
-
-      this->execute_blur(padded_input, padded_size);
-      padded_input.release();
-      padded_size.release();
-    }
-    else {
-      this->execute_blur(input, size);
-    }
-  }
-
-  /* Computes the number of pixels that the image should be extended by if Extend Bounds is
-   * enabled. */
-  int2 compute_extended_boundary_size(const Result &size)
-  {
-    BLI_assert(this->get_extend_bounds());
-
-    /* For constant sized blur, the extension should just be the blur radius. */
-    if (size.is_single_value()) {
-      return int2(math::ceil(this->get_blur_size()));
-    }
-
-    /* For variable sized blur, the extension should be the maximum size. */
-    return int2(math::ceil(this->compute_maximum_blur_size()));
-  }
-
-  void execute_blur(const Result &input, const Result &size)
-  {
-    Result &output = this->get_result("Image");
     if (!size.is_single_value()) {
       this->execute_variable_size(input, size, output);
+      return;
     }
-    else if (this->get_type() == CMP_NODE_BLUR_TYPE_FAST_GAUSS) {
-      recursive_gaussian_blur(this->context(), input, output, this->get_blur_size());
+
+    if (this->get_type() == CMP_NODE_BLUR_TYPE_FAST_GAUSS) {
+      recursive_gaussian_blur(
+          this->context(), input, output, this->get_blur_size(), this->get_extend_bounds());
     }
     else if (use_separable_filter()) {
       symmetric_separable_blur(this->context(),
                                input,
                                output,
                                this->get_blur_size(),
-                               blur_type_to_kernel(this->get_type()));
+                               blur_type_to_kernel(this->get_type()),
+                               this->get_extend_bounds());
     }
     else {
       this->execute_constant_size(input, output);
@@ -167,11 +147,29 @@ class BlurOperation : public NodeOperation {
 
   void execute_constant_size(const Result &input, Result &output)
   {
-    if (this->context().use_gpu()) {
-      this->execute_constant_size_gpu(input, output);
+    if (this->get_extend_bounds()) {
+      Result padded_input = this->context().create_result(input.type());
+
+      const int2 padding_size = int2(math::ceil(this->get_blur_size()));
+
+      pad(this->context(), input, padded_input, padding_size, PaddingMethod::Zero);
+
+      if (this->context().use_gpu()) {
+        this->execute_constant_size_gpu(padded_input, output);
+      }
+      else {
+        this->execute_constant_size_cpu(padded_input, output);
+      }
+
+      padded_input.release();
     }
     else {
-      this->execute_constant_size_cpu(input, output);
+      if (this->context().use_gpu()) {
+        this->execute_constant_size_gpu(input, output);
+      }
+      else {
+        this->execute_constant_size_cpu(input, output);
+      }
     }
   }
 
@@ -264,11 +262,32 @@ class BlurOperation : public NodeOperation {
 
   void execute_variable_size(const Result &input, const Result &size, Result &output)
   {
-    if (this->context().use_gpu()) {
-      this->execute_variable_size_gpu(input, size, output);
+    if (this->get_extend_bounds()) {
+      Result padded_input = this->context().create_result(input.type());
+      Result padded_size = this->context().create_result(ResultType::Float2);
+
+      const int2 padding_size = int2(math::ceil(this->compute_maximum_blur_size()));
+
+      pad(this->context(), input, padded_input, padding_size, PaddingMethod::Zero);
+      pad(this->context(), size, padded_size, padding_size, PaddingMethod::Extend);
+
+      if (this->context().use_gpu()) {
+        this->execute_variable_size_gpu(padded_input, padded_size, output);
+      }
+      else {
+        this->execute_variable_size_cpu(padded_input, padded_size, output);
+      }
+
+      padded_input.release();
+      padded_size.release();
     }
     else {
-      this->execute_variable_size_cpu(input, size, output);
+      if (this->context().use_gpu()) {
+        this->execute_variable_size_gpu(input, size, output);
+      }
+      else {
+        this->execute_variable_size_cpu(input, size, output);
+      }
     }
   }
 
@@ -450,7 +469,7 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, "CompositorNodeBlur", CMP_NODE_BLUR);
+  cmp_node_type_base(&ntype, "CompositorNodeBlur"_ustr, CMP_NODE_BLUR);
   ntype.ui_name = "Blur";
   ntype.ui_description = "Blur an image, using several blur modes";
   ntype.enum_name_legacy = "BLUR";

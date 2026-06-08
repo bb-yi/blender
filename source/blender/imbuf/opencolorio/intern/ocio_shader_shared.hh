@@ -2,6 +2,8 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+#pragma once
+
 #include "GPU_shader_shared_utils.hh"
 
 struct OCIO_GPUCurveMappingParameters {
@@ -31,11 +33,11 @@ struct OCIO_GPUCurveMappingParameters {
 struct OCIO_GPUParameters {
   float dither;
   float exponent;
+  float opacity;
   bool32_t use_predivide;
   bool32_t do_overlay_merge;
   bool32_t use_hdr_display;
   int _pad0;
   int _pad1;
-  int _pad2;
   float4x4 scene_linear_matrix;
 };

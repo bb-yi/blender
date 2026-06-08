@@ -69,8 +69,8 @@ GPU_TEST(texture_read)
 
 static void test_texture_1d()
 {
-  if (GPU_backend_get_type() == GPU_BACKEND_OPENGL) {
-    GTEST_SKIP() << "OpenGL texture clearing doesn't support 1d textures.";
+  if (ELEM(GPU_backend_get_type(), GPU_BACKEND_METAL, GPU_BACKEND_OPENGL)) {
+    GTEST_SKIP() << "Clearing 1d textures not supported by OpenGL & Metal";
   }
   const int SIZE = 32;
   GPU_render_begin();
@@ -98,8 +98,8 @@ GPU_TEST(texture_1d)
 
 static void test_texture_1d_array()
 {
-  if (GPU_backend_get_type() == GPU_BACKEND_OPENGL) {
-    GTEST_SKIP() << "Read back of 1d texture arrays not supported by OpenGL";
+  if (ELEM(GPU_backend_get_type(), GPU_BACKEND_METAL, GPU_BACKEND_OPENGL)) {
+    GTEST_SKIP() << "Clearing 1d textures not supported by OpenGL & Metal";
   }
   const int LAYERS = 8;
   const int SIZE = 32;
@@ -740,13 +740,11 @@ static void test_texture_roundtrip__GPU_DATA_INT__GPU_RG8I()
 }
 GPU_TEST(texture_roundtrip__GPU_DATA_INT__GPU_RG8I);
 
-#if RUN_UNSUPPORTED
 static void test_texture_roundtrip__GPU_DATA_INT__GPU_RG16I()
 {
   texture_create_upload_read<TextureFormat::SINT_16_16, GPU_DATA_INT, int32_t>();
 }
 GPU_TEST(texture_roundtrip__GPU_DATA_INT__GPU_RG16I);
-#endif
 
 static void test_texture_roundtrip__GPU_DATA_INT__GPU_RG32I()
 {
@@ -1161,7 +1159,7 @@ static void test_texture_pool()
 
   auto test_acquire =
       [&](int2 size, TextureFormat format, eGPUTextureUsage usage) -> blender::gpu::Texture * {
-    gpu::Texture *tex = pool.acquire_texture(size, format, usage);
+    gpu::Texture *tex = pool.acquire_texture_2d(size, 1, format, usage);
     EXPECT_EQ(GPU_texture_format(tex), format);
     EXPECT_EQ(GPU_texture_width(tex), size.x);
     EXPECT_EQ(GPU_texture_height(tex), size.y);

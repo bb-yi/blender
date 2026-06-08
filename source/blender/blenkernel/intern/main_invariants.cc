@@ -42,7 +42,11 @@ static void send_notifiers_after_node_tree_change(ID *id, bNodeTree *ntree)
     }
   }
   else if (ntree->type == NTREE_COMPOSIT) {
-    WM_main_add_notifier(NC_SCENE | ND_NODES, id);
+    /* The notifier category `NC_SCENE` has some special handling in #wm_event_do_notifiers. When
+     * the id that is passed as the reference is not a scene or not the active scene/sequencer
+     * scene, then the notifier is dropped. So we need to pass `nullptr` here to make sure the
+     * notifier is sent. */
+    WM_main_add_notifier(NC_SCENE | ND_NODES, nullptr);
   }
   else if (ntree->type == NTREE_TEXTURE) {
     WM_main_add_notifier(NC_TEXTURE | ND_NODES, id);

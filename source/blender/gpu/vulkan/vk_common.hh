@@ -19,6 +19,7 @@
 #  include <vulkan/vulkan_win32.h>
 #endif
 
+#define VMA_VULKAN_VERSION 1002000  // Vulkan 1.2
 #if !defined(_WIN32) or defined(_M_ARM64)
 /* Silence compilation warning on non-windows x64 systems. */
 #  define VMA_EXTERNAL_MEMORY_WIN32 0
@@ -82,7 +83,7 @@ VkImageViewType to_vk_image_view_type(const GPUTextureType type,
                                       eImageViewUsage view_type,
                                       VKImageViewArrayed arrayed);
 VkImageType to_vk_image_type(const GPUTextureType type);
-VkClearColorValue to_vk_clear_color_value(const eGPUDataFormat format, const void *data);
+VkClearColorValue to_vk_clear_color_value(const eGPUDataFormat format, const double4 data);
 VkIndexType to_vk_index_type(const GPUIndexBufType index_type);
 VkPrimitiveTopology to_vk_primitive_topology(const GPUPrimType prim_type);
 VkCullModeFlags to_vk_cull_mode_flags(const GPUFaceCullTest cull_test);

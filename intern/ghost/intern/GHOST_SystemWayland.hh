@@ -73,7 +73,26 @@ wl_fixed_t gwl_window_scale_wl_fixed_from(const GWL_WindowScaleParams &scale_par
 int gwl_window_scale_int_to(const GWL_WindowScaleParams &scale_params, int value);
 int gwl_window_scale_int_from(const GWL_WindowScaleParams &scale_params, int value);
 
+/**
+ * Scale a logical buffer size to physical pixels, returning an integer buffer scale.
+ * The buffer scale is rounded up so `result / *r_buffer_scale == logical_size`.
+ */
+int gwl_window_scale_buffer_size_to(const GWL_WindowScaleParams &scale_params,
+                                    int logical_size,
+                                    int *r_buffer_scale);
+
 #define FRACTIONAL_DENOMINATOR 120
+
+/**
+ * The current desktop (Gnome, KDE etc..).
+ *
+ * \note Use this as a last resort, ideally wayland integration would *not* depend on this.
+ */
+enum class GWL_CurrentDesktopType {
+  Other = 0,
+  Gnome,
+  KDE,
+};
 
 #ifdef WITH_GHOST_WAYLAND_DYNLOAD
 /**
@@ -100,7 +119,7 @@ struct GWL_Output {
   /**
    * Dimensions in pixels.
    *
-   * \note Rotation (from the `transform` flag has *not* been applied.
+   * \note Rotation (from the `transform` flag) has *not* been applied.
    * So a vertical monitor will still have a larger width.
    */
   int32_t size_native[2] = {0, 0};
@@ -113,7 +132,7 @@ struct GWL_Output {
    * \note A 2x Hi-DPI monitor with a `size_native` of 1600x1200
    * would have a `size_logical` of 800x600.
    *
-   * \note Rotation (from the `transform` flag *has* been applied.
+   * \note Rotation (from the `transform` flag) *has* been applied.
    */
   int32_t size_logical[2] = {0, 0};
   bool has_size_logical = false;
@@ -238,9 +257,11 @@ class GHOST_SystemWayland : public GHOST_System {
    * Return a separate WAYLAND local timer manager to #GHOST_System::getTimerManager
    * Manipulation & access must lock with #GHOST_WaylandSystem::server_mutex.
    *
-   * See #GWL_Display::key_repeat_timer_manager doc-string for details on why this is needed.
+   * See #GWL_Display::key_repeat_timer_manager docstring for details on why this is needed.
    */
   GHOST_TimerManager *key_repeat_timer_manager();
+
+  void xdg_toplevel_icon_update(GHOST_WindowWayland *window, struct xdg_toplevel *toplevel);
 
   /* WAYLAND direct-data access. */
 
@@ -251,6 +272,11 @@ class GHOST_SystemWayland : public GHOST_System {
   struct zwp_pointer_gestures_v1 *wp_pointer_gestures_get();
   struct wp_fractional_scale_manager_v1 *wp_fractional_scale_manager_get();
   struct wp_viewporter *wp_viewporter_get();
+  struct wp_color_manager_v1 *wp_color_manager_get();
+  struct wl_event_queue *wp_color_manager_queue_get();
+
+  bool supports_color_manager_feature_windows_scrgb() const;
+  bool supports_color_manager_extended_srgb_linear() const;
 
   struct xdg_wm_base *xdg_decor_shell_get();
   struct zxdg_decoration_manager_v1 *xdg_decor_manager_get();

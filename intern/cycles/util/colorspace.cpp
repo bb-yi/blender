@@ -28,6 +28,9 @@ ustring u_colorspace_scene_linear_srgb("scene_linear_srgb");
 ustring u_colorspace_srgb("__builtin_srgb");
 
 /* Cached data. */
+static thread_mutex cache_xyz_to_scene_linear_mutex;
+static string cache_xyz_to_scene_linear_hash;
+
 #ifdef WITH_OCIO
 static thread_mutex cache_processors_mutex;
 static unordered_map<ustring, OCIO::ConstProcessorRcPtr> cache_processors;
@@ -75,12 +78,13 @@ static void check_invalidate_caches()
       cache_scene_linear_interop_id = "";
       cache_scene_linear_srgb_interop_id = "";
     }
+    {
+      const thread_scoped_lock cache_lock(cache_xyz_to_scene_linear_mutex);
+      cache_xyz_to_scene_linear_hash.clear();
+    }
   }
 }
 #endif
-
-static thread_mutex cache_xyz_to_scene_linear_mutex;
-static string cache_xyz_to_scene_linear_hash;
 
 ColorSpaceProcessor *ColorSpaceManager::get_processor(ustring colorspace)
 {
@@ -112,7 +116,7 @@ ColorSpaceProcessor *ColorSpaceManager::get_processor(ustring colorspace)
   /* Cache processor until free_memory(), memory overhead is expected to be
    * small and the processor is likely to be reused. */
   const thread_scoped_lock cache_processors_lock(cache_processors_mutex);
-  if (cache_processors.find(colorspace) == cache_processors.end()) {
+  if (!cache_processors.contains(colorspace)) {
     try {
       if (colorspace == u_colorspace_srgb) {
         /* Linear Rec.709 to sRGB is handled separately in to_scene_linear, here
@@ -305,7 +309,7 @@ ustring ColorSpaceManager::detect_known_colorspace(ustring colorspace,
   }
 #endif
 
-  /* Fall back to simple guess if we don't have OpenColorIO .*/
+  /* Fall back to simple guess if we don't have OpenColorIO. */
   if (colorspace == u_colorspace_auto) {
     colorspace = (is_float && !(strcmp(file_colorspace, "srgb_rec709_scene") == 0 ||
                                 strcmp(file_colorspace, "srgb_rec709_display") == 0)) ?
@@ -331,7 +335,7 @@ ustring ColorSpaceManager::detect_known_colorspace(ustring colorspace,
   {
     const thread_scoped_lock cache_lock(cache_colorspaces_mutex);
     /* Cached lookup. */
-    if (cached_colorspaces.find(colorspace) != cached_colorspaces.end()) {
+    if (cached_colorspaces.contains(colorspace)) {
       return cached_colorspaces[colorspace];
     }
   }
@@ -343,12 +347,12 @@ ustring ColorSpaceManager::detect_known_colorspace(ustring colorspace,
 
   const thread_scoped_lock cache_lock(cache_colorspaces_mutex);
   if (is_scene_linear) {
-    LOG_INFO << "Colorspace " << colorspace.string() << " is no-op";
+    LOG_DEBUG << "Colorspace " << colorspace.string() << " is no-op";
     cached_colorspaces[colorspace] = u_colorspace_scene_linear;
     return u_colorspace_scene_linear;
   }
   if (is_scene_linear_srgb) {
-    LOG_INFO << "Colorspace " << colorspace.string() << " is scene linear sRGB";
+    LOG_DEBUG << "Colorspace " << colorspace.string() << " is scene linear sRGB";
     cached_colorspaces[colorspace] = u_colorspace_scene_linear_srgb;
     return u_colorspace_scene_linear_srgb;
   }
@@ -368,7 +372,7 @@ ustring ColorSpaceManager::detect_known_colorspace(ustring colorspace,
   }
 
   /* Convert to/from colorspace with OpenColorIO. */
-  LOG_INFO << "Colorspace " << colorspace.string() << " handled through OpenColorIO";
+  LOG_DEBUG << "Colorspace " << colorspace.string() << " handled through OpenColorIO";
   cached_colorspaces[colorspace] = colorspace;
   return colorspace;
 #else
@@ -633,53 +637,6 @@ void ColorSpaceManager::to_scene_linear(ustring colorspace,
 #endif
 }
 
-void ColorSpaceManager::to_scene_linear(ColorSpaceProcessor *processor_,
-                                        float *pixel,
-                                        const int channels)
-{
-#ifdef WITH_OCIO
-  const OCIO::Processor *processor = (const OCIO::Processor *)processor_;
-
-  if (processor) {
-    const OCIO::ConstCPUProcessorRcPtr device_processor = processor->getDefaultCPUProcessor();
-    if (channels == 1) {
-      float3 rgb = make_float3(pixel[0], pixel[0], pixel[0]);
-      device_processor->applyRGB(&rgb.x);
-      pixel[0] = average(rgb);
-    }
-    if (channels == 3) {
-      device_processor->applyRGB(pixel);
-    }
-    else if (channels == 4) {
-      if (pixel[3] == 1.0f || pixel[3] == 0.0f) {
-        /* Fast path for RGBA. */
-        device_processor->applyRGB(pixel);
-      }
-      else {
-        /* Un-associate and associate alpha since color management should not
-         * be affected by transparency. */
-        const float alpha = pixel[3];
-        const float inv_alpha = 1.0f / alpha;
-
-        pixel[0] *= inv_alpha;
-        pixel[1] *= inv_alpha;
-        pixel[2] *= inv_alpha;
-
-        device_processor->applyRGB(pixel);
-
-        pixel[0] *= alpha;
-        pixel[1] *= alpha;
-        pixel[2] *= alpha;
-      }
-    }
-  }
-#else
-  (void)processor_;
-  (void)pixel;
-  (void)channels;
-#endif
-}
-
 void ColorSpaceManager::free_memory()
 {
 #ifdef WITH_OCIO
@@ -836,6 +793,11 @@ Transform ColorSpaceManager::get_xyz_to_scene_linear_rgb()
 
 const std::string &ColorSpaceManager::get_xyz_to_scene_linear_rgb_string()
 {
+#ifdef WITH_OCIO
+  /* Clear the cached hash if the scene linear colorspace changed. */
+  check_invalidate_caches();
+#endif
+
   /* NOTE: Be careful not to change existing hashes if at all possible, as this
    * will cause all texture files to be regenerated with significantly increased
    * disk usage. */

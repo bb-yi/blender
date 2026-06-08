@@ -11,13 +11,16 @@
  * Image buffer types.
  */
 
-#include "DNA_vec_types.h" /* for rcti */
+#include "BLI_assert.h"
+#include "BLI_implicit_sharing_ptr.hh"
 
+#include "DNA_image_enums.h"
 #include "IMB_imbuf_enums.h"
+
+#include <string>
 
 namespace blender {
 
-struct ColormanageCache;
 struct ExrHandle;
 namespace gpu {
 class Texture;
@@ -28,8 +31,6 @@ namespace ocio {
 class ColorSpace;
 }
 using ColorSpace = ocio::ColorSpace;
-
-#define IMB_FILEPATH_SIZE 1024
 
 /**
  * \ingroup imbuf
@@ -78,105 +79,38 @@ using ColorSpace = ocio::ColorSpace;
 #define AVIF_10BIT (1 << 8)
 #define AVIF_12BIT (1 << 9)
 
+#define DDS_COMPRESSED_DXT1 (1 << 8)
+#define DDS_COMPRESSED_DXT3 (1 << 9)
+#define DDS_COMPRESSED_DXT5 (1 << 10)
+
 struct ImbFormatOptions {
   short flag = 0;
-  /** Quality serves dual purpose as quality number for JPEG or compression amount for PNG. */
-  char quality = 0;
+  /** Quality for JPEG, WebP, AVIF. */
+  char quality = 90;
+  /* Compression amount for PNG.
+   * Default to low compression ratio that is not time consuming. */
+  char compress = 15;
 };
-
-/* -------------------------------------------------------------------- */
-/** \name ImBuf Component flags
- * \brief These flags determine the components of an ImBuf struct.
- * \{ */
-
-enum eImBufFlags {
-  /** Image has byte data (unsigned 0..1 range in a byte, always 4 channels). */
-  IB_byte_data = 1 << 0,
-  IB_test = 1 << 1,
-  IB_mem = 1 << 4,
-  /** Image has float data (usually 1..4 channels, 32 bit float per channel). */
-  IB_float_data = 1 << 5,
-  IB_multilayer = 1 << 7,
-  IB_metadata = 1 << 8,
-  IB_animdeinterlace = 1 << 9,
-  /** Do not clear image pixel buffer to zero. Without this flag, allocating
-   * a new ImBuf does clear the pixel data to zero (transparent black). If
-   * whole pixel data is overwritten after allocation, then this flag can be
-   * faster since it avoids a memory clear. */
-  IB_uninitialized_pixels = 1 << 10,
-
-  /** Indicates whether image on disk have pre-multiplied alpha. */
-  IB_alphamode_premul = 1 << 12,
-  /** If this flag is set, alpha mode would be guessed from file. */
-  IB_alphamode_detect = 1 << 13,
-  /** Alpha channel is unrelated to RGB and should not affect it. */
-  IB_alphamode_channel_packed = 1 << 14,
-  /** Ignore alpha on load and substitute it with 1.0f. */
-  IB_alphamode_ignore = 1 << 15,
-  IB_thumbnail = 1 << 16,
-  /**
-   * The image contains display window information. See ImbBuf.display_size and other members for
-   * more information. */
-  IB_has_display_window = 1 << 17,
-
-  /** Perform no color space conversions when reading, leave the image in the file colorspace. */
-  IB_no_colorspace_convert = 1 << 18,
-};
-
-/** \} */
 
 /* -------------------------------------------------------------------- */
 /** \name ImBuf buffer storage
  * \{ */
 
-/**
- * Specialization of an ownership whenever a bare pointer is provided to the ImBuf buffers
- * assignment API.
- */
-enum ImBufOwnership {
-  /**
-   * The ImBuf simply shares pointer with data owned by someone else, and will not perform any
-   * memory management when the ImBuf frees the buffer.
-   */
-  IB_DO_NOT_TAKE_OWNERSHIP = 0,
-
-  /**
-   * The ImBuf takes ownership of the buffer data, and will use MEM_delete() to free this memory
-   * when the ImBuf needs to free the data.
-   */
-  IB_TAKE_OWNERSHIP = 1,
-};
-
-struct DDSData {
-  /** DDS fourcc info */
-  unsigned int fourcc = 0;
-  /** The number of mipmaps in the dds file */
-  unsigned int nummipmaps = 0;
-  /** The compressed image data */
-  unsigned char *data = nullptr;
-  /** The size of the compressed data */
-  unsigned int size = 0;
-  /** Who owns the data buffer. */
-  ImBufOwnership ownership = IB_DO_NOT_TAKE_OWNERSHIP;
-};
-
 /* Different storage specialization.
  *
- * NOTE: Avoid direct assignments and allocations, use the buffer utilities from the IMB_imbuf.hh
- * instead.
- *
- * Accessing the data pointer directly is fine and is an expected way of accessing it. */
+ * NOTE: Avoid direct access. Use the buffer utilities from the IMB_imbuf.hh  instead
+ */
 
 struct ImBufByteBuffer {
-  uint8_t *data = nullptr;
-  ImBufOwnership ownership = IB_DO_NOT_TAKE_OWNERSHIP;
+  const uint8_t *data = nullptr;
+  ImplicitSharingPtr<> sharing_info;
 
   const ColorSpace *colorspace = nullptr;
 };
 
 struct ImBufFloatBuffer {
-  float *data = nullptr;
-  ImBufOwnership ownership = IB_DO_NOT_TAKE_OWNERSHIP;
+  const float *data = nullptr;
+  ImplicitSharingPtr<> sharing_info;
 
   const ColorSpace *colorspace = nullptr;
 };
@@ -211,27 +145,34 @@ struct ImBuf {
 
   /**
    * Stores the Data and Display Window information. Those are only initialized if the image buffer
-   * has the IB_has_display_window flag active, otherwise, they should be ignored as the image has
-   * no display window.
+   * has the #ImBufFlags::HasDisplayWindow flag active, otherwise, they should be ignored as the
+   * image has no display window.
    *
    * The data size is already stored in the x and y members. The data_offset member stores the
    * offset from the display window to the data window, if positive, then only part of the display
    * window has data, while if negative, it means the image has over-scan.
    * The display_offset member is the offset from the origin,
-   * can can be interpreted as a global translation.
+   * can be interpreted as a global translation.
    */
   int display_size[2];
   int data_offset[2];
   int display_offset[2];
 
-  /** Active amount of bits/bit-planes. */
-  unsigned char planes = 0;
-  /** Number of channels in `rect_float` (0 = 4 channel default) */
+  /**
+   * Number of channels in `float_buffer` (0 = 4 channel default).
+   * Note that `byte_buffer` always has 4 channels.
+   */
   int channels = 0;
 
-  /* flags */
-  /** Controls which components should exist. */
-  int flags = 0;
+  /**
+   * How to interpret pixel color values in the data that is present.
+   * For example, byte buffer always contains 4 channels, but if code
+   * knows that the alpha channel is fully opaque, it should set color mode
+   * to RGB.
+   */
+  ImColorMode color_mode = ImColorMode::RGBA;
+
+  ImBufFlags flags = ImBufFlags::Zero;
 
   /* pixels */
 
@@ -244,8 +185,8 @@ struct ImBuf {
 
   /**
    * Image pixel buffer (float representation):
-   * - color space defaults to 'linear' (`rec709`).
-   * - alpha defaults to 'premul'.
+   * - color space defaults to `linear` (`rec709`).
+   * - alpha defaults to `premul`.
    * \note May need gamma correction to `sRGB` when generating 8bit representations.
    * \note Formats that support higher more than 8 but channels load as floats.
    */
@@ -272,35 +213,53 @@ struct ImBuf {
 
   /* file information */
   /** file type we are going to save as */
-  enum eImbFileType ftype = IMB_FTYPE_NONE;
+  eImbFileType ftype = IMB_FTYPE_NONE;
   /** file format specific flags */
   ImbFormatOptions foptions;
   /** The absolute file path associated with this image. */
-  char filepath[IMB_FILEPATH_SIZE] = "";
+  std::string filepath;
   /** For movie files, the frame number loaded from the file. */
   int fileframe = 0;
 
   /** reference counter for multiple users */
   int32_t refcounter = 0;
 
-  /* some parameters to pass along for packing images */
-  /** Compressed image only used with PNG and EXR currently. */
-  ImBufByteBuffer encoded_buffer;
-  /** Size of data written to `encoded_buffer`. */
-  unsigned int encoded_size = 0;
-  /** Size of `encoded_buffer` */
-  unsigned int encoded_buffer_size = 0;
+  const uint8_t *byte_data() const;
+  uint8_t *byte_data_for_write();
 
-  /* color management */
-  /** array of per-display display buffers dirty flags */
-  unsigned int *display_buffer_flags = nullptr;
-  /** cache used by color management */
-  ColormanageCache *colormanage_cache = nullptr;
-  int colormanage_flag = 0;
-  rcti invalid_rect;
+  const float *float_data() const;
+  float *float_data_for_write();
 
-  /** Information for compressed textures. */
-  DDSData dds_data;
+  /** Take sole ownership of a buffer allocated with the guarded allocator. */
+  void assign_byte_data(uint8_t *data);
+  void assign_float_data(float *data);
+
+  /** Share ownership with the implicit sharing referenced by the pointer. */
+  void assign_byte_data(const uint8_t *data, ImplicitSharingPtr<> sharing_ptr);
+  void assign_float_data(const float *data, ImplicitSharingPtr<> sharing_ptr);
+
+  [[nodiscard]] bool colorspace_is_data() const;
+
+  [[nodiscard]] bool can_contain_alpha() const
+  {
+    return color_mode == ImColorMode::RGBA || color_mode == ImColorMode::BW_A;
+  }
+
+  [[nodiscard]] int color_mode_channels_get() const
+  {
+    switch (this->color_mode) {
+      case ImColorMode::BW:
+        return 1;
+      case ImColorMode::BW_A:
+        return 2;
+      case ImColorMode::RGB:
+        return 3;
+      case ImColorMode::RGBA:
+        return 4;
+    }
+    BLI_assert_unreachable();
+    return 0;
+  }
 };
 
 /**
@@ -311,45 +270,16 @@ enum {
   IB_BITMAPDIRTY = (1 << 1),
   /** float buffer changed, needs recreation of byte rect */
   IB_RECT_INVALID = (1 << 3),
-  /** either float or byte buffer changed, need to re-calculate display buffers */
+  /** either float or byte buffer changed */
   IB_DISPLAY_BUFFER_INVALID = (1 << 4),
   /** image buffer is persistent in the memory and should never be removed from the cache */
   IB_PERSISTENT = (1 << 5),
+  /** The image buffer is backed by a GPU texture storage but the host buffers either do not exist
+   * or are out-dated and needs to read from the GPU texture. */
+  IB_HOST_BUFFER_INVALID = (1 << 6),
 };
 
 /** \} */
-
-/* -------------------------------------------------------------------- */
-/** \name ImBuf Preset Profile Tags
- *
- * \brief Some predefined color space profiles that 8 bit imbufs can represent.
- * \{ */
-
-#define IB_PROFILE_NONE 0
-#define IB_PROFILE_LINEAR_RGB 1
-#define IB_PROFILE_SRGB 2
-#define IB_PROFILE_CUSTOM 3
-
-/** \} */
-
-/* dds */
-#ifndef DDS_MAKEFOURCC
-#  define DDS_MAKEFOURCC(ch0, ch1, ch2, ch3) \
-    ((unsigned long)(unsigned char)(ch0) | ((unsigned long)(unsigned char)(ch1) << 8) | \
-     ((unsigned long)(unsigned char)(ch2) << 16) | ((unsigned long)(unsigned char)(ch3) << 24))
-#endif /* DDS_MAKEFOURCC */
-
-/*
- * FOURCC codes for DX compressed-texture pixel formats.
- */
-
-#define FOURCC_DDS (DDS_MAKEFOURCC('D', 'D', 'S', ' '))
-#define FOURCC_DX10 (DDS_MAKEFOURCC('D', 'X', '1', '0'))
-#define FOURCC_DXT1 (DDS_MAKEFOURCC('D', 'X', 'T', '1'))
-#define FOURCC_DXT2 (DDS_MAKEFOURCC('D', 'X', 'T', '2'))
-#define FOURCC_DXT3 (DDS_MAKEFOURCC('D', 'X', 'T', '3'))
-#define FOURCC_DXT4 (DDS_MAKEFOURCC('D', 'X', 'T', '4'))
-#define FOURCC_DXT5 (DDS_MAKEFOURCC('D', 'X', 'T', '5'))
 
 /**
  * Known image extensions, in most cases these match values
@@ -361,16 +291,14 @@ extern const char *imb_ext_image[];
 extern const char *imb_ext_movie[];
 extern const char *imb_ext_audio[];
 
-/* -------------------------------------------------------------------- */
-/** \name ImBuf Color Management Flag
- *
- * \brief Used with #ImBuf.colormanage_flag
- * \{ */
+inline const uint8_t *ImBuf::byte_data() const
+{
+  return this->byte_buffer.data;
+}
 
-enum {
-  IMB_COLORMANAGE_IS_DATA = (1 << 0),
-};
-
-/** \} */
+inline const float *ImBuf::float_data() const
+{
+  return this->float_buffer.data;
+}
 
 }  // namespace blender

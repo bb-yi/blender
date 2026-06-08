@@ -19,6 +19,7 @@
 #include "BLI_offset_indices.hh"
 #include "BLI_set.hh"
 
+#include "BKE_attribute_enums.hh"
 #include "BKE_attribute_filters.hh"
 
 namespace blender {
@@ -38,52 +39,8 @@ namespace bke {
 class AttributeAccessor;
 class MutableAttributeAccessor;
 
-/** Some storage types are only relevant for certain attribute types. */
-enum class AttrStorageType : int8_t {
-  /** #AttributeDataArray. */
-  Array = 0,
-  /** A single value for the whole attribute. */
-  Single = 1,
-};
-
-enum class AttrType : int16_t {
-  Bool = 0,
-  Int8 = 1,
-  Int16_2D = 2,
-  Int32 = 3,
-  Int32_2D = 4,
-  Float = 5,
-  Float2 = 6,
-  Float3 = 7,
-  Float4x4 = 8,
-  ColorByte = 9,
-  ColorFloat = 10,
-  Quaternion = 11,
-  String = 12,
-};
-
 const CPPType &attribute_type_to_cpp_type(AttrType type);
 AttrType cpp_type_to_attribute_type(const CPPType &type);
-
-enum class AttrDomain : int8_t {
-  /* Used to choose automatically based on other data. */
-  Auto = -1,
-  /* Mesh, Curve or Point Cloud Point. */
-  Point = 0,
-  /* Mesh Edge. */
-  Edge = 1,
-  /* Mesh Face. */
-  Face = 2,
-  /* Mesh Corner. */
-  Corner = 3,
-  /* A single curve in a larger curve data-block. */
-  Curve = 4,
-  /* Instance. */
-  Instance = 5,
-  /* A layer in a grease pencil data-block. */
-  Layer = 6,
-};
-#define ATTR_DOMAIN_NUM 7
 
 /**
  * Contains information about an attribute in a geometry component.
@@ -539,6 +496,7 @@ struct AttributeAccessorFunctions {
               AttrDomain domain,
               AttrType data_type,
               const AttributeInit &initializer);
+  Set<StringRef> (*rename)(void *owner, const Map<StringRef, StringRef> &map, bool overwrite);
   bool (*assign_data)(void *owner, StringRef name, const AttributeInit &initializer);
 };
 
@@ -753,6 +711,9 @@ class AttributeAccessor {
    * Get a set of all attributes.
    */
   Set<StringRefNull> all_names() const;
+
+  /** True if there are any anonymous attributes. */
+  bool has_anonymous() const;
 };
 
 /**
@@ -806,9 +767,15 @@ class MutableAttributeAccessor : public AttributeAccessor {
   }
 
   /**
-   * Replace the existing attribute with a new one with a different name.
+   * Replace the name of an attribute, optionally replacing existing use of the new name.
+   * \return True if the rename was successful.
    */
-  bool rename(StringRef old_name, StringRef new_name);
+  bool rename(StringRef old_name, StringRef new_name, bool overwrite = false);
+  /**
+   * Replace the names of attributes, optionally replacing existing use of the new names.
+   * \return A set of failed renames.
+   */
+  Set<StringRef> rename(const Map<StringRef, StringRef> &map, bool overwrite = false);
 
   /**
    * Create a new attribute.
@@ -826,6 +793,9 @@ class MutableAttributeAccessor : public AttributeAccessor {
     if (this->contains(name)) {
       return false;
     }
+    if (name.is_empty()) {
+      return false;
+    }
     return fn_->add(owner_, name, domain, data_type, initializer);
   }
   template<typename T>
@@ -833,6 +803,29 @@ class MutableAttributeAccessor : public AttributeAccessor {
   {
     const CPPType &cpp_type = CPPType::get<T>();
     const AttrType data_type = cpp_type_to_attribute_type(cpp_type);
+    return this->add(name, domain, data_type, initializer);
+  }
+
+  bool add_override(const StringRef name,
+                    const AttrDomain domain,
+                    const AttrType data_type,
+                    const AttributeInit &initializer)
+  {
+    if (name.is_empty()) {
+      return false;
+    }
+    if (!this->domain_supported(domain)) {
+      return false;
+    }
+    const std::optional<AttributeMetaData> old_meta = this->lookup_meta_data(name);
+    if (old_meta.has_value()) {
+      if (old_meta->domain == domain && old_meta->data_type == data_type) {
+        return this->assign_data(name, initializer);
+      }
+      if (!this->remove(name)) {
+        return false;
+      }
+    }
     return this->add(name, domain, data_type, initializer);
   }
 

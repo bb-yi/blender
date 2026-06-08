@@ -64,10 +64,7 @@ void popup_translate(ARegion *region, const int mdiff[2])
 }
 
 /* position block relative to but, result is in window space */
-static void ui_popup_block_position(wmWindow *window,
-                                    ARegion *butregion,
-                                    Button *but,
-                                    Block *block)
+static void popup_block_position(wmWindow *window, ARegion *butregion, Button *but, Block *block)
 {
   PopupBlockHandle *handle = block->handle;
 
@@ -96,14 +93,14 @@ static void ui_popup_block_position(wmWindow *window,
 
   /* Compute block size in window space, based on buttons contained in it. */
   if (block->rect.xmin == 0.0f && block->rect.xmax == 0.0f) {
-    if (!block->buttons.is_empty()) {
+    if (!block->buttons_ptrs.is_empty()) {
       BLI_rctf_init_minmax(&block->rect);
 
-      for (const std::unique_ptr<Button> &bt : block->buttons) {
+      for (Button &bt : block->buttons()) {
         if (block->content_hints & BLOCK_CONTAINS_SUBMENU_BUT) {
-          bt->rect.xmax += UI_MENU_SUBMENU_PADDING;
+          bt.rect.xmax += UI_MENU_SUBMENU_PADDING;
         }
-        BLI_rctf_union(&block->rect, &bt->rect);
+        BLI_rctf_union(&block->rect, &bt.rect);
       }
     }
     else {
@@ -119,10 +116,10 @@ static void ui_popup_block_position(wmWindow *window,
   const float max_radius = (0.5f * U.widget_unit);
 
   if (delta >= 0 && delta < max_radius) {
-    for (const std::unique_ptr<Button> &bt : block->buttons) {
+    for (Button &bt : block->buttons()) {
       /* Only trim the right most buttons in multi-column popovers. */
-      if (bt->rect.xmax == block->rect.xmax) {
-        bt->rect.xmax -= delta;
+      if (bt.rect.xmax == block->rect.xmax) {
+        bt.rect.xmax -= delta;
       }
     }
     block->rect.xmax -= delta;
@@ -314,13 +311,13 @@ static void ui_popup_block_position(wmWindow *window,
   }
 
   /* Apply offset, buttons in window coords. */
-  for (const std::unique_ptr<Button> &bt : block->buttons) {
-    block_to_window_rctf(butregion, but->block, &bt->rect, &bt->rect);
+  for (Button &bt : block->buttons()) {
+    block_to_window_rctf(butregion, but->block, &bt.rect, &bt.rect);
 
-    BLI_rctf_translate(&bt->rect, offset_x, offset_y);
+    BLI_rctf_translate(&bt.rect, offset_x, offset_y);
 
     /* ui_but_update recalculates drawstring size in pixels */
-    button_update(bt.get());
+    button_update(&bt);
   }
 
   BLI_rctf_translate(&block->rect, offset_x, offset_y);
@@ -401,7 +398,7 @@ static void ui_popup_block_position(wmWindow *window,
   SafetyRect *saferct = MEM_new<SafetyRect>(__func__);
   saferct->parent = butrct;
   saferct->safety = block->safety;
-  BLI_freelistN(&block->saferct);
+  block->saferct.free_no_destruct();
   BLI_duplicatelist(&block->saferct, &but->block->saferct);
   BLI_addhead(&block->saferct, saferct);
 }
@@ -478,7 +475,7 @@ static void block_region_popup_window_listener(const wmRegionListenerParams *par
   }
 }
 
-static void ui_popup_block_clip(wmWindow *window, Block *block)
+static void popup_block_clip(wmWindow *window, Block *block)
 {
   const float xmin_orig = block->rect.xmin;
   const int margin = UI_SCREEN_MARGIN;
@@ -507,9 +504,9 @@ static void ui_popup_block_clip(wmWindow *window, Block *block)
 
   /* ensure menu items draw inside left/right boundary */
   const float xofs = block->rect.xmin - xmin_orig;
-  for (const std::unique_ptr<Button> &bt : block->buttons) {
-    bt->rect.xmin += xofs;
-    bt->rect.xmax += xofs;
+  for (Button &bt : block->buttons()) {
+    bt.rect.xmin += xofs;
+    bt.rect.xmax += xofs;
   }
 }
 
@@ -517,46 +514,43 @@ void popup_block_scrolltest(Block *block)
 {
   block->flag &= ~(BLOCK_CLIPBOTTOM | BLOCK_CLIPTOP);
 
-  for (const std::unique_ptr<Button> &bt : block->buttons) {
-    bt->flag &= ~UI_SCROLLED;
+  for (Button &bt : block->buttons()) {
+    bt.flag &= ~UI_SCROLLED;
   }
 
-  if (block->buttons.size() < 2) {
+  if (block->buttons_ptrs.size() < 2) {
     return;
   }
-
-  /* mark buttons that are outside boundary */
-  for (const std::unique_ptr<Button> &bt : block->buttons) {
-    if (bt->rect.ymax < block->rect.ymin) {
-      bt->flag |= UI_SCROLLED;
-    }
-    if (bt->rect.ymin > block->rect.ymax) {
-      bt->flag |= UI_SCROLLED;
-    }
-    if (bt->rect.ymin < block->rect.ymin) {
-      block->flag |= BLOCK_CLIPBOTTOM;
-    }
-    if (bt->rect.ymax > block->rect.ymax) {
-      block->flag |= BLOCK_CLIPTOP;
-    }
+  if (block->handle->scrolloffset != block->handle->scrollmin) {
+    block->flag |= BLOCK_CLIPTOP;
+  }
+  if (block->handle->scrolloffset != block->handle->scrollmax) {
+    block->flag |= BLOCK_CLIPBOTTOM;
   }
 
-  /* mark buttons overlapping arrows, if we have them */
-  for (const std::unique_ptr<Button> &bt : block->buttons) {
+  for (Button &bt : block->buttons()) {
+    /* Tag buttons that are outside boundary */
+    if (bt.rect.ymax < block->rect.ymin) {
+      bt.flag |= UI_SCROLLED;
+    }
+    if (bt.rect.ymin > block->rect.ymax) {
+      bt.flag |= UI_SCROLLED;
+    }
+    /* Tag buttons overlapping arrows, if we have them */
     if (block->flag & BLOCK_CLIPBOTTOM) {
-      if (bt->rect.ymax < block->rect.ymin + UI_MENU_SCROLL_MOUSE / block->aspect) {
-        bt->flag |= UI_SCROLLED;
+      if (bt.rect.ymax < block->rect.ymin + UI_MENU_SCROLL_MOUSE / block->aspect) {
+        bt.flag |= UI_SCROLLED;
       }
     }
     if (block->flag & BLOCK_CLIPTOP) {
-      if (bt->rect.ymin > block->rect.ymax - UI_MENU_SCROLL_MOUSE / block->aspect) {
-        bt->flag |= UI_SCROLLED;
+      if (bt.rect.ymin > block->rect.ymax - UI_MENU_SCROLL_MOUSE / block->aspect) {
+        bt.flag |= UI_SCROLLED;
       }
     }
   }
 }
 
-static void ui_popup_block_remove(bContext *C, PopupBlockHandle *handle)
+static void popup_block_remove(bContext *C, PopupBlockHandle *handle)
 {
   wmWindow *ctx_win = CTX_wm_window(C);
   ScrArea *ctx_area = CTX_wm_area(C);
@@ -589,12 +583,19 @@ static void ui_popup_block_remove(bContext *C, PopupBlockHandle *handle)
   CTX_wm_region_set(C, ctx_region);
 
   /* reset to region cursor (only if there's not another menu open) */
-  if (BLI_listbase_is_empty(&screen->regionbase)) {
+  if (screen->regionbase.is_empty()) {
     win->tag_cursor_refresh = true;
   }
 
   if (handle->scrolltimer) {
     WM_event_timer_remove(wm, win, handle->scrolltimer);
+  }
+  if (handle->keep_open_timer) {
+    WM_event_timer_remove(wm, win, handle->keep_open_timer);
+  }
+  if (handle->mmb_panning) {
+    WM_cursor_set(win, WM_CURSOR_DEFAULT);
+    WM_cursor_grab_disable(win, nullptr);
   }
 }
 
@@ -668,7 +669,7 @@ void popup_dummy_panel_set(ARegion *region, Block *block, StringRef idname)
     panel = BKE_panel_new(&panel_type);
   }
   panel->runtime->layout_panels.clear();
-  panel->runtime->popup_layout_panel_states = &popup_persistent_layout_panel_states(idname);
+  panel->runtime->layout_panel_states_storage = &popup_persistent_layout_panel_states(idname);
   block->panel = panel;
   panel->runtime->block = block;
 }
@@ -765,7 +766,7 @@ Block *popup_block_refresh(bContext *C, PopupBlockHandle *handle, ARegion *butre
   /* if this is being created from a button */
   if (but) {
     block->aspect = but->block->aspect;
-    ui_popup_block_position(window, butregion, but, block);
+    popup_block_position(window, butregion, but, block);
     handle->direction = block->direction;
   }
   else {
@@ -780,7 +781,7 @@ Block *popup_block_refresh(bContext *C, PopupBlockHandle *handle, ARegion *butre
 
     const int2 win_size = WM_window_native_pixel_size(window);
 
-    copy_v2_v2(block->pie_data.pie_center_init, block->pie_data.pie_center_spawned);
+    copy_v2_v2(block->pie_data->pie_center_init, block->pie_data->pie_center_spawned);
 
     /* only try translation if area is large enough */
     int x_offset = 0;
@@ -805,13 +806,13 @@ Block *popup_block_refresh(bContext *C, PopupBlockHandle *handle, ARegion *butre
     /* if we are offsetting set up initial data for timeout functionality */
 
     if ((x_offset != 0) || (y_offset != 0)) {
-      block->pie_data.pie_center_spawned[0] += x_offset;
-      block->pie_data.pie_center_spawned[1] += y_offset;
+      block->pie_data->pie_center_spawned[0] += x_offset;
+      block->pie_data->pie_center_spawned[1] += y_offset;
 
       block_translate(block, x_offset, y_offset);
 
       if (U.pie_initial_timeout > 0) {
-        block->pie_data.flags |= PIE_INITIAL_DIRECTION;
+        block->pie_data->flags |= PIE_INITIAL_DIRECTION;
       }
     }
 
@@ -820,13 +821,13 @@ Block *popup_block_refresh(bContext *C, PopupBlockHandle *handle, ARegion *butre
     region->winrct.ymin = 0;
     region->winrct.ymax = win_size[1];
 
-    block_calc_pie_segment(block, block->pie_data.pie_center_init);
+    block_calc_pie_segment(block, block->pie_data->pie_center_init);
 
     /* lastly set the buttons at the center of the pie menu, ready for animation */
     if (U.pie_animation_timeout > 0) {
-      for (const std::unique_ptr<Button> &but_iter : block->buttons) {
-        if (but_iter->pie_dir != UI_RADIAL_NONE) {
-          BLI_rctf_recenter(&but_iter->rect, UNPACK2(block->pie_data.pie_center_spawned));
+      for (Button &but_iter : block->buttons()) {
+        if (but_iter.pie_dir != UI_RADIAL_NONE) {
+          BLI_rctf_recenter(&but_iter.rect, UNPACK2(block->pie_data->pie_center_spawned));
         }
       }
     }
@@ -842,7 +843,7 @@ Block *popup_block_refresh(bContext *C, PopupBlockHandle *handle, ARegion *butre
     }
 
     /* clip block with window boundary */
-    ui_popup_block_clip(window, block);
+    popup_block_clip(window, block);
 
     /* Avoid menu moving down and losing cursor focus by keeping it at the same height when the
      * popup is displaced down by at least one window unit. */
@@ -868,25 +869,26 @@ Block *popup_block_refresh(bContext *C, PopupBlockHandle *handle, ARegion *butre
     /* Popups can change size, fix scroll offset if a panel was closed. */
     float ymin = FLT_MAX;
     float ymax = -FLT_MAX;
-    for (const std::unique_ptr<Button> &bt : block->buttons) {
-      ymin = min_ff(ymin, bt->rect.ymin);
-      ymax = max_ff(ymax, bt->rect.ymax);
+    for (const Button &bt : block->buttons()) {
+      ymin = min_ff(ymin, bt.rect.ymin);
+      ymax = max_ff(ymax, bt.rect.ymax);
     }
-    const float scroll_pad = (block_is_menu(block) ? UI_MENU_SCROLL_PAD : UI_UNIT_Y * 0.5f) /
-                             block->aspect;
-    const float scroll_min = std::min(block->rect.ymax - ymax - scroll_pad, 0.0f);
-    const float scroll_max = std::max(block->rect.ymin - ymin + scroll_pad, 0.0f);
-    handle->scrolloffset = std::clamp(handle->scrolloffset, scroll_min, scroll_max);
+    const float bounds = block->bounds / block->aspect;
+
+    handle->scrollmin = std::round(std::min(block->rect.ymax - (ymax + bounds), 0.0f));
+    handle->scrollmax = std::round(std::max(block->rect.ymin - (ymin - bounds), 0.0f));
+    handle->scrolloffset = std::clamp(handle->scrolloffset, handle->scrollmin, handle->scrollmax);
+
     /* apply scroll offset */
     if (handle->scrolloffset != 0.0f) {
-      for (const std::unique_ptr<Button> &bt : block->buttons) {
-        bt->rect.ymin += handle->scrolloffset;
-        bt->rect.ymax += handle->scrolloffset;
+      for (Button &bt : block->buttons()) {
+        bt.rect.ymin += handle->scrolloffset;
+        bt.rect.ymax += handle->scrolloffset;
       }
     }
     /* Layout panels are relative to `block->rect.ymax`. Rather than a
      * scroll, this is a offset applied due to the overflow at the top. */
-    layout_panel_popup_scroll_apply(block->panel, -scroll_min - scroll_pad);
+    layout_panel_popup_scroll_apply(block->panel, -handle->scrollmin - bounds);
   }
   /* Apply popup scroll offset to layout panels. */
   layout_panel_popup_scroll_apply(block->panel, handle->scrolloffset);
@@ -1044,7 +1046,7 @@ void popup_block_free(bContext *C, PopupBlockHandle *handle)
     BKE_panel_free(handle->region->runtime->popup_block_panel);
   }
 
-  ui_popup_block_remove(C, handle);
+  popup_block_remove(C, handle);
 
   MEM_delete(handle);
 }
@@ -1058,7 +1060,7 @@ struct AlertData {
   bool mouse_move_quit;
 };
 
-static void ui_alert_ok_cb(bContext *C, void *arg1, void *arg2)
+static void alert_ok_cb(bContext *C, void *arg1, void *arg2)
 {
   AlertData *data = static_cast<AlertData *>(arg1);
   MEM_delete(data);
@@ -1068,19 +1070,19 @@ static void ui_alert_ok_cb(bContext *C, void *arg1, void *arg2)
   popup_block_close(C, win, block);
 }
 
-static void ui_alert_ok(bContext * /*C*/, void *arg, int /*retval*/)
+static void alert_ok(bContext * /*C*/, void *arg, int /*retval*/)
 {
   AlertData *data = static_cast<AlertData *>(arg);
   MEM_delete(data);
 }
 
-static void ui_alert_cancel(bContext * /*C*/, void *user_data)
+static void alert_cancel(bContext * /*C*/, void *user_data)
 {
   AlertData *data = static_cast<AlertData *>(user_data);
   MEM_delete(data);
 }
 
-static Block *ui_alert_create(bContext *C, ARegion *region, void *user_data)
+static Block *alert_create(bContext *C, ARegion *region, void *user_data)
 {
   AlertData *data = static_cast<AlertData *>(user_data);
 
@@ -1149,7 +1151,7 @@ static Block *ui_alert_create(bContext *C, ARegion *region, void *user_data)
     Block *buttons_block = layout.block();
     Button *okay_but = uiDefBut(
         buttons_block, ButtonType::But, "OK", 0, 0, 0, UI_UNIT_Y, nullptr, 0, 0, "");
-    button_func_set(okay_but, ui_alert_ok_cb, user_data, block);
+    button_func_set(okay_but, alert_ok_cb, user_data, block);
     button_flag_enable(okay_but, BUT_ACTIVE_DEFAULT);
   }
 
@@ -1183,7 +1185,7 @@ void alert(bContext *C,
   data->okay_button = true;
   data->mouse_move_quit = compact;
 
-  popup_block_ex(C, ui_alert_create, ui_alert_ok, ui_alert_cancel, data, nullptr);
+  popup_block_ex(C, alert_create, alert_ok, alert_cancel, data, nullptr);
 }
 
 /** \} */

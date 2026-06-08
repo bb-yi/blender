@@ -26,10 +26,10 @@ struct [[host_shared]] VelocityObjectIndex {
   /** Offset inside #VelocityObjectBuf for each time-step. Indexed using eVelocityStep. */
   packed_int3 ofs;
   /** Temporary index to copy this to the #VelocityIndexBuf. */
-  uint resource_id;
+  uint resource_index;
 
 #ifndef GPU_SHADER
-  VelocityObjectIndex() : ofs(-1, -1, -1), resource_id(-1) {};
+  VelocityObjectIndex() : ofs(-1, -1, -1), resource_index(-1) {};
 #endif
 };
 

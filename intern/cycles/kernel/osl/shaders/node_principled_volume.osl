@@ -2,6 +2,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0 */
 
+#include "node_math.h"
 #include "stdcycles.h"
 
 shader node_principled_volume(color Color = color(0.5, 0.5, 0.5),
@@ -22,13 +23,13 @@ shader node_principled_volume(color Color = color(0.5, 0.5, 0.5),
   float primitive_density = 1.0;
   float density = max(Density, 0.0);
 
-  if (density > 1e-5) {
+  if (density > 0.0) {
     if (getattribute(DensityAttribute, primitive_density)) {
       density = max(density * primitive_density, 0.0);
     }
   }
 
-  if (density > 1e-5) {
+  if (density > 0.0) {
     /* Compute scattering color. */
     color scatter_color = Color;
     color primitive_color;
@@ -37,22 +38,22 @@ shader node_principled_volume(color Color = color(0.5, 0.5, 0.5),
     }
 
     /* Add scattering and absorption closures. */
-    color scatter_coeff = scatter_color;
     color absorption_color = sqrt(max(AbsorptionColor, 0.0));
     color absorption_coeff = max(1.0 - scatter_color, 0.0) * max(1.0 - absorption_color, 0.0);
-    Volume = scatter_coeff * density * henyey_greenstein(Anisotropy) +
-             absorption_coeff * density * absorption();
+    color extinction = scatter_color + absorption_coeff;
+    color albedo = safe_divide(scatter_color, extinction);
+    Volume = density * anisotropic_vdf(albedo, extinction, Anisotropy);
   }
 
   /* Compute emission. */
   float emission_strength = max(EmissionStrength, 0.0);
   float blackbody_intensity = BlackbodyIntensity;
 
-  if (emission_strength > 1e-5) {
+  if (emission_strength > 0.0) {
     Volume += emission_strength * EmissionColor * emission();
   }
 
-  if (blackbody_intensity > 1e-3) {
+  if (blackbody_intensity > 0.0) {
     float T = Temperature;
 
     /* Add temperature from attribute if available. */
@@ -63,12 +64,12 @@ shader node_principled_volume(color Color = color(0.5, 0.5, 0.5),
 
     T = max(T, 0.0);
 
-    /* Stefan-Boltzman law. */
+    /* Stefan-Boltzmann law. */
     float T4 = (T * T) * (T * T);
     float sigma = 5.670373e-8 * 1e-6 / M_PI;
     float intensity = sigma * mix(1.0, T4, blackbody_intensity);
 
-    if (intensity > 1e-5) {
+    if (intensity > 0.0) {
       color bb = blackbody(T);
       float l = luminance(bb);
 

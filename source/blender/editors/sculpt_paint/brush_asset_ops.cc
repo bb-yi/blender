@@ -70,6 +70,18 @@ static wmOperatorStatus brush_asset_activate_exec(bContext *C, wmOperator *op)
     return OPERATOR_CANCELLED;
   }
 
+  if (asset->get_id_type() != ID_BR) {
+    BKE_reportf(op->reports, RPT_ERROR, "Asset '%s' is not a brush", asset->get_name().c_str());
+    return OPERATOR_CANCELLED;
+  }
+  if (asset->is_online_only()) {
+    BKE_reportf(op->reports,
+                RPT_ERROR,
+                "Brush '%s' needs downloading before it can be used (check context menu)",
+                asset->get_name().c_str());
+    return OPERATOR_CANCELLED;
+  }
+
   const bool use_toggle = RNA_boolean_get(op->ptr, "use_toggle");
   AssetWeakReference brush_asset_reference = asset->make_weak_reference();
   Paint *paint = BKE_paint_get_active_from_context(C);
@@ -221,7 +233,8 @@ static wmOperatorStatus brush_asset_save_as_exec(bContext *C, wmOperator *op)
 
   AssetMetaData &meta_data = *brush->id.asset_data;
   if (catalog_path_c[0]) {
-    const asset_system::AssetCatalogPath catalog_path(catalog_path_c);
+    const asset_system::AssetCatalogPath catalog_path =
+        asset_system::AssetCatalogPath::from_user_input(catalog_path_c);
     const asset_system::AssetCatalog &catalog = asset::library_ensure_catalogs_in_path(
         *library, catalog_path);
     BKE_asset_metadata_catalog_id_set(&meta_data, catalog.catalog_id, catalog.simple_name.c_str());
@@ -259,14 +272,6 @@ static wmOperatorStatus brush_asset_save_as_exec(bContext *C, wmOperator *op)
   }
 
   return OPERATOR_FINISHED;
-}
-
-static bool library_is_editable(const AssetLibraryReference &library)
-{
-  if (library.type == ASSET_LIBRARY_ESSENTIALS) {
-    return false;
-  }
-  return true;
 }
 
 static wmOperatorStatus brush_asset_save_as_invoke(bContext *C,
@@ -318,7 +323,9 @@ static const EnumPropertyItem *rna_asset_library_reference_itemf(bContext * /*C*
   const EnumPropertyItem *items = asset::library_reference_to_rna_enum_itemf(
       /* Only get writable libraries. */
       /*include_readonly=*/false,
-      /*include_current_file=*/true);
+      /*include_current_file=*/true,
+      /*include_remote_libraries=*/false,
+      /*include_separate_online_essentials=*/false);
   if (!items) {
     *r_free = false;
     return nullptr;
@@ -389,7 +396,8 @@ static wmOperatorStatus brush_asset_edit_metadata_exec(bContext *C, wmOperator *
   meta_data.description = RNA_string_get_alloc(op->ptr, "description", nullptr, 0, nullptr);
 
   if (catalog_path_c[0]) {
-    const asset_system::AssetCatalogPath catalog_path(catalog_path_c);
+    const asset_system::AssetCatalogPath catalog_path =
+        asset_system::AssetCatalogPath::from_user_input(catalog_path_c);
     const asset_system::AssetCatalog &catalog = asset::library_ensure_catalogs_in_path(
         library, catalog_path);
     BKE_asset_metadata_catalog_id_set(&meta_data, catalog.catalog_id, catalog.simple_name.c_str());
@@ -487,7 +495,7 @@ static bool brush_asset_edit_metadata_poll(bContext *C)
     BLI_assert_unreachable();
     return false;
   }
-  if (!library_is_editable(*library_ref)) {
+  if (asset->owner_asset_library().is_read_only()) {
     CTX_wm_operator_poll_msg_set(C, "Asset library is not editable");
     return false;
   }

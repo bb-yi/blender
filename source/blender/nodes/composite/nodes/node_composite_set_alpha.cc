@@ -35,11 +35,11 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.use_custom_socket_order();
   b.allow_any_socket_order();
   b.is_function_node();
-  b.add_input<decl::Color>("Image").default_value({1.0f, 1.0f, 1.0f, 1.0f}).hide_value();
-  b.add_output<decl::Color>("Image").align_with_previous();
+  b.add_input<decl::Color>("Image"_ustr).default_value({1.0f, 1.0f, 1.0f, 1.0f}).hide_value();
+  b.add_output<decl::Color>("Image"_ustr).align_with_previous();
 
-  b.add_input<decl::Float>("Alpha").default_value(1.0f).min(0.0f).max(1.0f);
-  b.add_input<decl::Menu>("Type")
+  b.add_input<decl::Float>("Alpha"_ustr).default_value(1.0f).min(0.0f).max(1.0f);
+  b.add_input<decl::Menu>("Type"_ustr)
       .default_value(CMP_NODE_SETALPHA_MODE_APPLY)
       .static_items(type_items)
       .optional_label();
@@ -92,7 +92,7 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, "CompositorNodeSetAlpha", CMP_NODE_SETALPHA);
+  cmp_node_type_base(&ntype, "CompositorNodeSetAlpha"_ustr, CMP_NODE_SETALPHA);
   ntype.ui_name = "Set Alpha";
   ntype.ui_description = "Add an alpha channel to an image";
   ntype.enum_name_legacy = "SETALPHA";

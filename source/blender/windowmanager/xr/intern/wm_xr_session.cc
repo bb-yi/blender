@@ -10,7 +10,9 @@
 #include "BKE_context.hh"
 #include "BKE_global.hh"
 #include "BKE_idprop.hh"
+#include "BKE_lib_id.hh"
 #include "BKE_main.hh"
+#include "BKE_object.hh"
 #include "BKE_scene.hh"
 #include "BKE_screen.hh"
 
@@ -37,6 +39,11 @@
 #include "GPU_batch.hh"
 #include "GPU_viewport.hh"
 
+#include "IMB_imbuf.hh"
+
+#include "UI_interface_icons.hh"
+#include "UI_resources.hh"
+
 #include "MEM_guardedalloc.h"
 
 #include "WM_api.hh"
@@ -50,9 +57,14 @@
 namespace blender {
 
 static wmSurface *g_xr_surface = nullptr;
-static CLG_LogRef LOG = {"xr"};
+static CLG_LogRef LOG = {"wm.xr"};
 
 /* -------------------------------------------------------------------- */
+
+static void wm_xr_session_base_pose_calc(const Scene *scene,
+                                         const XrSessionSettings *settings,
+                                         GHOST_XrPose *r_base_pose,
+                                         float *r_base_scale);
 
 static void wm_xr_session_create_cb()
 {
@@ -67,8 +79,13 @@ static void wm_xr_session_create_cb()
 
   wm_xr_session_actions_init(xr_data);
 
+  const bContext *xr_context = WM_xr_session_context_ensure(xr_data, wm);
+  const Scene *scene = CTX_data_scene(xr_context);
+  wm_xr_session_base_pose_calc(scene, settings, &state->base_pose, &state->base_scale);
+
   /* Initialize navigation. */
   WM_xr_session_state_navigation_reset(state);
+  WM_xr_session_state_viewfinder_reset(state);
   if (settings->base_scale < FLT_EPSILON) {
     settings->base_scale = 1.0f;
   }
@@ -90,9 +107,18 @@ static void wm_xr_session_controller_data_free(wmXrSessionState *state)
   }
 }
 
+static void wm_xr_session_viewfinder_data_free(wmXrSessionState *state)
+{
+  BKE_id_free(nullptr, id_cast<ID *>(state->viewfinder.render_cam_data_id));
+  GPU_TEXTURE_FREE_SAFE(state->viewfinder.backside_logo_texture);
+  GPU_offscreen_free(state->viewfinder.offscreen);
+  GPU_viewport_free(state->viewfinder.viewport);
+}
+
 void wm_xr_session_data_free(wmXrSessionState *state)
 {
   wm_xr_session_controller_data_free(state);
+  wm_xr_session_viewfinder_data_free(state);
 }
 
 static void wm_xr_session_exit_cb(void *customdata)
@@ -125,9 +151,7 @@ static void wm_xr_session_begin_info_create(wmXrData *xr_data,
   r_begin_info->exit_customdata = xr_data;
 }
 
-void wm_xr_session_toggle(wmWindowManager *wm,
-                          wmWindow *session_root_win,
-                          wmXrSessionExitFn session_exit_fn)
+void wm_xr_session_toggle(wmWindowManager *wm, wmXrSessionExitFn session_exit_fn)
 {
   wmXrData *xr_data = &wm->xr;
 
@@ -140,7 +164,6 @@ void wm_xr_session_toggle(wmWindowManager *wm,
   else {
     GHOST_XrSessionBeginInfo begin_info;
 
-    xr_data->runtime->session_root_win = session_root_win;
     xr_data->runtime->session_state.is_started = true;
     xr_data->runtime->exit_fn = session_exit_fn;
 
@@ -202,57 +225,24 @@ static void wm_xr_session_base_pose_calc(const Scene *scene,
   *r_base_scale = settings->base_scale;
 }
 
-static void wm_xr_session_draw_data_populate(wmXrData *xr_data,
-                                             Scene *scene,
-                                             Depsgraph *depsgraph,
-                                             wmXrDrawData *r_draw_data)
+static void wm_xr_session_draw_data_populate(wmXrData *xr_data, wmXrDrawData *r_draw_data)
 {
-  const XrSessionSettings *settings = &xr_data->session_settings;
-
   memset(r_draw_data, 0, sizeof(*r_draw_data));
-  r_draw_data->scene = scene;
-  r_draw_data->depsgraph = depsgraph;
   r_draw_data->xr_data = xr_data;
   r_draw_data->surface_data = static_cast<wmXrSurfaceData *>(g_xr_surface->customdata);
-
-  wm_xr_session_base_pose_calc(
-      r_draw_data->scene, settings, &r_draw_data->base_pose, &r_draw_data->base_scale);
 }
 
 wmWindow *wm_xr_session_root_window_or_fallback_get(const wmWindowManager *wm,
                                                     const wmXrRuntimeData *runtime_data)
 {
-  if (runtime_data->session_root_win &&
-      BLI_findindex(&wm->windows, runtime_data->session_root_win) != -1)
-  {
-    /* Root window is still valid, use it. */
-    return runtime_data->session_root_win;
+  /* Try to obtain the XR root window (the window the XR session was started in). */
+  wmWindow *xr_win = CTX_wm_window(runtime_data->b_context);
+  if (xr_win && BLI_findindex(&wm->windows, xr_win) != -1) {
+    /* Root XR window is still valid, use it. */
+    return xr_win;
   }
   /* Otherwise, fall back. */
   return static_cast<wmWindow *>(wm->windows.first);
-}
-
-/**
- * Get the scene and depsgraph shown in the VR session's root window (the window the session was
- * started from) if still available. If it's not available, use some fallback window.
- *
- * It's important that the VR session follows some existing window, otherwise it would need to have
- * its own depsgraph, which is an expense we should avoid.
- */
-static void wm_xr_session_scene_and_depsgraph_get(const wmWindowManager *wm,
-                                                  Scene **r_scene,
-                                                  Depsgraph **r_depsgraph)
-{
-  const wmWindow *root_win = wm_xr_session_root_window_or_fallback_get(wm, wm->xr.runtime);
-
-  /* Follow the scene & view layer shown in the root 3D View. */
-  Scene *scene = WM_window_get_active_scene(root_win);
-  ViewLayer *view_layer = WM_window_get_active_view_layer(root_win);
-
-  Depsgraph *depsgraph = BKE_scene_get_depsgraph(scene, view_layer);
-  BLI_assert(scene && view_layer && depsgraph);
-  *r_scene = scene;
-  *r_depsgraph = depsgraph;
 }
 
 enum wmXrSessionStateEvent {
@@ -323,6 +313,7 @@ void wm_xr_session_draw_data_update(wmXrSessionState *state,
       }
       /* Reset navigation. */
       WM_xr_session_state_navigation_reset(state);
+      WM_xr_session_state_viewfinder_reset(state);
       break;
     case SESSION_STATE_EVENT_POSITION_TRACKING_TOGGLE:
       if (use_position_tracking) {
@@ -376,7 +367,7 @@ static void wm_xr_session_state_viewer_scale_update(wmXrSessionState *state,
   }
 
   /* Unlike Scene and Navigation Scale changes, View Scale setting changes result in viewer
-   * location adjustements to keep the viewer at the same relative world position after scaling. */
+   * location adjustments to keep the viewer at the same relative world position after scaling. */
   if (settings->view_scale != state->prev_view_scale_setting) {
     wm_xr_session_scale_maintain_viewer_pos(
         state, settings->view_scale, state->prev_view_scale_setting);
@@ -415,7 +406,7 @@ void wm_xr_session_state_update(const XrSessionSettings *settings,
   wm_xr_pose_to_mat(&viewer_pose, viewer_mat);
 
   /* Apply base pose and navigation. */
-  wm_xr_pose_scale_to_mat(&draw_data->base_pose, draw_data->base_scale, base_mat);
+  wm_xr_pose_scale_to_mat(&state->base_pose, state->base_scale, base_mat);
   wm_xr_pose_scale_to_mat(&state->nav_pose_last_actions_sync, state->viewer_scale, nav_mat);
   mul_m4_m4m4(state->viewer_mat_base, base_mat, viewer_mat);
   mul_m4_m4m4(viewer_mat, nav_mat, state->viewer_mat_base);
@@ -423,7 +414,7 @@ void wm_xr_session_state_update(const XrSessionSettings *settings,
   /* Save final viewer pose and viewmat. */
   mat4_to_loc_quat(state->viewer_pose.position, state->viewer_pose.orientation_quat, viewer_mat);
   wm_xr_pose_scale_to_imat(&state->viewer_pose,
-                           draw_data->base_scale * state->viewer_scale_last_actions_sync,
+                           state->base_scale * state->viewer_scale_last_actions_sync,
                            state->viewer_viewmat);
 
   /* No idea why, but multiplying by two seems to make it match the VR view more. */
@@ -432,8 +423,8 @@ void wm_xr_session_state_update(const XrSessionSettings *settings,
                                         DEFAULT_SENSOR_WIDTH);
 
   copy_v3_v3(state->prev_eye_position_ofs, draw_data->eye_position_ofs);
-  memcpy(&state->prev_base_pose, &draw_data->base_pose, sizeof(state->prev_base_pose));
-  state->prev_base_scale = draw_data->base_scale;
+  memcpy(&state->prev_base_pose, &state->base_pose, sizeof(state->prev_base_pose));
+  state->prev_base_scale = state->base_scale;
   memcpy(&state->prev_local_pose, &draw_view->local_pose, sizeof(state->prev_local_pose));
   copy_v3_v3(state->prev_eye_position_ofs, draw_data->eye_position_ofs);
 
@@ -444,8 +435,10 @@ void wm_xr_session_state_update(const XrSessionSettings *settings,
   /* Assume this was already done through wm_xr_session_draw_data_update(). */
   state->force_reset_to_base_pose = false;
 
+  const bContext *xr_context = WM_xr_session_context_get(draw_data->xr_data);
+
   WM_xr_session_state_vignette_update(state);
-  wm_xr_session_state_viewer_scale_update(state, settings, draw_data->scene);
+  wm_xr_session_state_viewer_scale_update(state, settings, CTX_data_scene(xr_context));
 }
 
 wmXrSessionState *WM_xr_session_state_handle_get(const wmXrData *xr)
@@ -453,9 +446,35 @@ wmXrSessionState *WM_xr_session_state_handle_get(const wmXrData *xr)
   return xr->runtime ? &xr->runtime->session_state : nullptr;
 }
 
-ScrArea *WM_xr_session_area_get(const wmXrData *xr)
+wmXrViewfinderState *WM_xr_session_state_viewfinder_handle_get(const wmXrData *xr)
 {
-  return xr->runtime ? xr->runtime->area : nullptr;
+  return xr->runtime ? &xr->runtime->session_state.viewfinder : nullptr;
+}
+
+bContext *WM_xr_session_context_ensure(wmXrData *xr, const wmWindowManager *wm)
+{
+  if (xr->runtime == nullptr) {
+    return nullptr;
+  }
+
+  /* XR session root window. Also sets the context scene. */
+  wmWindow *xr_win = wm_xr_session_root_window_or_fallback_get(wm, xr->runtime);
+  CTX_wm_window_set(xr->runtime->b_context, xr_win);
+
+  /* Unique offscreen XR area. */
+  CTX_wm_area_set(xr->runtime->b_context, xr->runtime->offscreen_area);
+
+  /* Region for XR operator execution and modal handling. */
+  ARegion *xr_region = BKE_area_find_region_type(xr->runtime->offscreen_area, RGN_TYPE_WINDOW);
+  CTX_wm_region_set(xr->runtime->b_context, xr_region);
+
+  /* Return for convenience. */
+  return xr->runtime->b_context;
+}
+
+bContext *WM_xr_session_context_get(const wmXrData *xr)
+{
+  return xr->runtime ? xr->runtime->b_context : nullptr;
 }
 
 bool WM_xr_session_state_viewer_pose_location_get(const wmXrData *xr, float r_location[3])
@@ -480,6 +499,220 @@ bool WM_xr_session_state_viewer_pose_rotation_get(const wmXrData *xr, float r_ro
   return true;
 }
 
+bool WM_xr_session_state_viewfinder_location_get(const wmXrData *xr, float r_location[3])
+{
+  if (!WM_xr_session_is_ready(xr) || !xr->runtime->session_state.is_view_data_set) {
+    zero_v3(r_location);
+    return false;
+  }
+
+  copy_v3_v3(r_location, xr->runtime->session_state.viewfinder.capture_position);
+  return true;
+}
+
+bool WM_xr_session_state_viewfinder_orientation_get(const wmXrData *xr, float r_rotation[4])
+{
+  if (!WM_xr_session_is_ready(xr) || !xr->runtime->session_state.is_view_data_set) {
+    unit_qt(r_rotation);
+    return false;
+  }
+
+  copy_v4_v4(r_rotation, xr->runtime->session_state.viewfinder.capture_orientation_quat);
+  return true;
+}
+
+void WM_xr_session_state_viewfinder_trigger_flash(wmXrData *xr)
+{
+  if (WM_xr_session_exists(xr)) {
+    xr->runtime->session_state.viewfinder.last_flash_trigger_time = BLI_time_now_seconds();
+  }
+}
+
+void WM_xr_session_state_viewfinder_trigger_focus_indicator(wmXrData *xr, bool hit_success)
+{
+  if (WM_xr_session_exists(xr)) {
+    xr->runtime->session_state.viewfinder.last_focus_hit_time = BLI_time_now_seconds();
+    xr->runtime->session_state.viewfinder.last_focus_hit_success = hit_success;
+  }
+}
+
+void WM_xr_session_state_viewfinder_reset_view_smoothing(wmXrData *xr)
+{
+  if (WM_xr_session_exists(xr)) {
+    xr->runtime->session_state.viewfinder.smoothing_delta_t = 0.0;
+  }
+}
+
+bool WM_xr_session_state_viewfinder_capture_dof_enabled_get(const wmXrData *xr,
+                                                            bool *r_dof_enabled)
+{
+  if (!WM_xr_session_is_ready(xr) || !xr->runtime->session_state.is_view_data_set) {
+    *r_dof_enabled = 0.0f;
+    return false;
+  }
+
+  *r_dof_enabled = xr->runtime->session_state.viewfinder.capture_dof_enabled;
+  return true;
+}
+
+void WM_xr_session_state_viewfinder_capture_dof_enabled_set(wmXrData *xr, bool dof_enabled)
+{
+  if (WM_xr_session_exists(xr)) {
+    xr->runtime->session_state.viewfinder.capture_dof_enabled = dof_enabled;
+  }
+}
+
+bool WM_xr_session_state_viewfinder_capture_lens_focal_get(const wmXrData *xr, float *r_lens_focal)
+{
+  if (!WM_xr_session_is_ready(xr) || !xr->runtime->session_state.is_view_data_set) {
+    *r_lens_focal = 1.0f;
+    return false;
+  }
+
+  *r_lens_focal = xr->runtime->session_state.viewfinder.capture_lens_focal;
+  return true;
+}
+
+void WM_xr_session_state_viewfinder_capture_lens_focal_set(wmXrData *xr, float lens_focal)
+{
+  if (WM_xr_session_exists(xr)) {
+    xr->runtime->session_state.viewfinder.capture_lens_focal = lens_focal;
+  }
+}
+
+bool WM_xr_session_state_viewfinder_capture_dof_distance_get(const wmXrData *xr,
+                                                             float *r_dof_distance)
+{
+  if (!WM_xr_session_is_ready(xr) || !xr->runtime->session_state.is_view_data_set) {
+    *r_dof_distance = 1.0f;
+    return false;
+  }
+
+  *r_dof_distance = xr->runtime->session_state.viewfinder.capture_dof_distance;
+  return true;
+}
+
+void WM_xr_session_state_viewfinder_capture_dof_distance_set(wmXrData *xr, float dof_distance)
+{
+  if (WM_xr_session_exists(xr)) {
+    xr->runtime->session_state.viewfinder.capture_dof_distance = dof_distance;
+  }
+}
+
+bool WM_xr_session_state_viewfinder_capture_dof_fstop_get(const wmXrData *xr, float *r_dof_fstop)
+{
+  if (!WM_xr_session_is_ready(xr) || !xr->runtime->session_state.is_view_data_set) {
+    *r_dof_fstop = 1.0f;
+    return false;
+  }
+
+  *r_dof_fstop = xr->runtime->session_state.viewfinder.capture_dof_fstop;
+  return true;
+}
+
+void WM_xr_session_state_viewfinder_capture_dof_fstop_set(wmXrData *xr, float dof_fstop)
+{
+  if (WM_xr_session_exists(xr)) {
+    xr->runtime->session_state.viewfinder.capture_dof_fstop = dof_fstop;
+  }
+}
+
+bool WM_xr_session_state_viewfinder_playback_show_active_capture_in_space_enabled_get(
+    const wmXrData *xr, bool *r_enabled)
+{
+  if (!WM_xr_session_is_ready(xr) || !xr->runtime->session_state.is_view_data_set) {
+    *r_enabled = 0.0f;
+    return false;
+  }
+
+  *r_enabled = xr->runtime->session_state.viewfinder.playback_show_active_capture_in_space_enabled;
+  return true;
+}
+
+void WM_xr_session_state_viewfinder_playback_show_active_capture_in_space_enabled_set(wmXrData *xr,
+                                                                                      bool enabled)
+{
+  if (WM_xr_session_exists(xr)) {
+    xr->runtime->session_state.viewfinder.playback_show_active_capture_in_space_enabled = enabled;
+  }
+}
+
+bool WM_xr_session_state_viewfinder_active_mode_get(const wmXrData *xr, eXrViewfinderMode *r_mode)
+{
+  if (!WM_xr_session_is_ready(xr) || !xr->runtime->session_state.is_view_data_set) {
+    *r_mode = static_cast<eXrViewfinderMode>(0);
+    return false;
+  }
+
+  *r_mode = xr->runtime->session_state.viewfinder.active_mode;
+  return true;
+}
+
+void WM_xr_session_state_viewfinder_active_mode_set(wmXrData *xr, eXrViewfinderMode mode)
+{
+  if (WM_xr_session_exists(xr)) {
+    xr->runtime->session_state.viewfinder.active_mode = mode;
+  }
+}
+
+bool WM_xr_session_state_viewfinder_active_action_live_get(const wmXrData *xr,
+                                                           eXrViewfinderLiveAction *r_action)
+{
+  if (!WM_xr_session_is_ready(xr) || !xr->runtime->session_state.is_view_data_set) {
+    *r_action = static_cast<eXrViewfinderLiveAction>(0);
+    return false;
+  }
+
+  *r_action = xr->runtime->session_state.viewfinder.active_action_live;
+  return true;
+}
+
+void WM_xr_session_state_viewfinder_active_action_live_set(wmXrData *xr,
+                                                           eXrViewfinderLiveAction action)
+{
+  if (WM_xr_session_exists(xr)) {
+    xr->runtime->session_state.viewfinder.active_action_live = action;
+  }
+}
+bool WM_xr_session_state_viewfinder_active_action_playback_get(
+    const wmXrData *xr, eXrViewfinderPlaybackAction *r_action)
+{
+  if (!WM_xr_session_is_ready(xr) || !xr->runtime->session_state.is_view_data_set) {
+    *r_action = static_cast<eXrViewfinderPlaybackAction>(0);
+    return false;
+  }
+
+  *r_action = xr->runtime->session_state.viewfinder.active_action_playback;
+  return true;
+}
+void WM_xr_session_state_viewfinder_active_action_playback_set(wmXrData *xr,
+                                                               eXrViewfinderPlaybackAction action)
+{
+  if (WM_xr_session_exists(xr)) {
+    xr->runtime->session_state.viewfinder.active_action_playback = action;
+  }
+}
+
+bool WM_xr_session_state_viewfinder_active_action_confirm_get(const wmXrData *xr,
+                                                              eXrViewfinderConfirmAction *r_action)
+{
+  if (!WM_xr_session_is_ready(xr) || !xr->runtime->session_state.is_view_data_set) {
+    *r_action = static_cast<eXrViewfinderConfirmAction>(0);
+    return false;
+  }
+
+  *r_action = xr->runtime->session_state.viewfinder.active_action_confirm;
+  return true;
+}
+
+void WM_xr_session_state_viewfinder_active_action_confirm_set(wmXrData *xr,
+                                                              eXrViewfinderConfirmAction action)
+{
+  if (WM_xr_session_exists(xr)) {
+    xr->runtime->session_state.viewfinder.active_action_confirm = action;
+  }
+}
+
 bool WM_xr_session_state_viewer_pose_matrix_info_get(const wmXrData *xr,
                                                      float r_viewmat[4][4],
                                                      float *r_focal_len)
@@ -501,7 +734,7 @@ bool WM_xr_session_state_controller_grip_location_get(const wmXrData *xr,
                                                       float r_location[3])
 {
   if (!WM_xr_session_is_ready(xr) || !xr->runtime->session_state.is_view_data_set ||
-      (subaction_idx >= BLI_listbase_count(&xr->runtime->session_state.controllers)))
+      (subaction_idx >= xr->runtime->session_state.controllers.count()))
   {
     zero_v3(r_location);
     return false;
@@ -519,7 +752,7 @@ bool WM_xr_session_state_controller_grip_rotation_get(const wmXrData *xr,
                                                       float r_rotation[4])
 {
   if (!WM_xr_session_is_ready(xr) || !xr->runtime->session_state.is_view_data_set ||
-      (subaction_idx >= BLI_listbase_count(&xr->runtime->session_state.controllers)))
+      (subaction_idx >= xr->runtime->session_state.controllers.count()))
   {
     unit_qt(r_rotation);
     return false;
@@ -537,7 +770,7 @@ bool WM_xr_session_state_controller_aim_location_get(const wmXrData *xr,
                                                      float r_location[3])
 {
   if (!WM_xr_session_is_ready(xr) || !xr->runtime->session_state.is_view_data_set ||
-      (subaction_idx >= BLI_listbase_count(&xr->runtime->session_state.controllers)))
+      (subaction_idx >= xr->runtime->session_state.controllers.count()))
   {
     zero_v3(r_location);
     return false;
@@ -555,7 +788,7 @@ bool WM_xr_session_state_controller_aim_rotation_get(const wmXrData *xr,
                                                      float r_rotation[4])
 {
   if (!WM_xr_session_is_ready(xr) || !xr->runtime->session_state.is_view_data_set ||
-      (subaction_idx >= BLI_listbase_count(&xr->runtime->session_state.controllers)))
+      (subaction_idx >= xr->runtime->session_state.controllers.count()))
   {
     unit_qt(r_rotation);
     return false;
@@ -649,6 +882,60 @@ void WM_xr_session_state_navigation_reset(wmXrSessionState *state)
   state->swap_hands = false;
 }
 
+void WM_xr_session_state_viewfinder_reset(wmXrSessionState *state)
+{
+  /* Runtime values. */
+  state->viewfinder.smoothing_delta_t = 0.0;
+  state->viewfinder.last_flash_trigger_time = 0.0;
+  state->viewfinder.last_focus_hit_time = 0.0;
+  state->viewfinder.last_focus_hit_success = false;
+
+  /* Create a Camera data ID to override the View3D camera (for setting parameters such as DoF).
+   * This ID is freed in #wm_xr_session_data_free. */
+  if (state->viewfinder.render_cam_data_id == nullptr) {
+    state->viewfinder.render_cam_data_id = BKE_id_new_nomain<Camera>("ViewfinderCamera");
+  }
+
+  /* Create a Camera logo texture to draw on the backside of the viewfinder. */
+  if (state->viewfinder.backside_logo_texture == nullptr) {
+    ImBuf *ibuf = ui::svg_icon_bitmap(ICON_RESTRICT_RENDER_OFF, 256.0f, false);
+    if (ibuf) {
+      state->viewfinder.backside_logo_texture = IMB_create_gpu_texture(
+          "viewfinder_backside_logo", ibuf, false, true, true);
+      IMB_freeImBuf(ibuf);
+    }
+  }
+
+  /* Create the offscreen framebuffer and viewport used to draw the Viewfinder view texture. */
+  if (state->viewfinder.offscreen == nullptr) {
+    state->viewfinder.offscreen = GPU_offscreen_create(
+        blender::wmXrViewfinderState::view_resolution,
+        blender::wmXrViewfinderState::view_resolution,
+        true,
+        gpu::TextureFormat::UNORM_8_8_8_8,
+        GPU_TEXTURE_USAGE_SHADER_READ,
+        false,
+        nullptr);
+  }
+  if (state->viewfinder.viewport == nullptr) {
+    state->viewfinder.viewport = GPU_viewport_create();
+  }
+
+  /* Capture settings. */
+  state->viewfinder.capture_dof_enabled = false;
+  state->viewfinder.capture_lens_focal = 50.0f;
+  state->viewfinder.capture_dof_fstop = 2.8f;
+  state->viewfinder.capture_dof_distance = 10.0f;
+
+  /* Playback settings. */
+  state->viewfinder.playback_show_active_capture_in_space_enabled = true;
+
+  /* Active modes. */
+  state->viewfinder.active_mode = XR_VIEWFINDER_MODE_LIVE;
+  state->viewfinder.active_action_live = XR_VIEWFINDER_ACTION_LIVE_LENS;
+  state->viewfinder.active_action_playback = XR_VIEWFINDER_ACTION_PB_BROWSE;
+}
+
 void WM_xr_session_state_vignette_activate(wmXrData *xr)
 {
   if (WM_xr_session_exists(xr)) {
@@ -722,7 +1009,7 @@ static void wm_xr_session_controller_data_update(const XrSessionSettings *settin
                                                  wmXrSessionState *state)
 {
   BLI_assert(grip_action->count_subaction_paths == aim_action->count_subaction_paths);
-  BLI_assert(grip_action->count_subaction_paths == BLI_listbase_count(&state->controllers));
+  BLI_assert(grip_action->count_subaction_paths == state->controllers.count());
 
   float view_ofs[3], base_mat[4][4], nav_mat[4][4];
 
@@ -1300,7 +1587,7 @@ void wm_xr_session_actions_update(wmWindowManager *wm)
   }
 
   XrSessionSettings *settings = &xr->session_settings;
-  GHOST_IXrContext *xr_context = xr->runtime->ghost_context;
+  GHOST_IXrContext *ghost_xr_context = xr->runtime->ghost_context;
   wmXrSessionState *state = &xr->runtime->session_state;
 
   if (state->is_navigation_dirty) {
@@ -1325,7 +1612,7 @@ void wm_xr_session_actions_update(wmWindowManager *wm)
   }
   wmXrActionSet *active_action_set = state->active_action_set;
 
-  const bool synced = GHOST_XrSyncActions(xr_context,
+  const bool synced = GHOST_XrSyncActions(ghost_xr_context,
                                           active_action_set ? active_action_set->name : nullptr);
   if (!synced) {
     return;
@@ -1333,29 +1620,24 @@ void wm_xr_session_actions_update(wmWindowManager *wm)
 
   /* Only update controller data and dispatch events for active action set. */
   if (active_action_set) {
-    wmWindow *win = wm_xr_session_root_window_or_fallback_get(wm, xr->runtime);
-
     if (active_action_set->controller_grip_action && active_action_set->controller_aim_action) {
       wm_xr_session_controller_data_update(settings,
                                            active_action_set->controller_grip_action,
                                            active_action_set->controller_aim_action,
-                                           xr_context,
+                                           ghost_xr_context,
                                            state);
     }
 
-    if (win) {
-      /* Ensure an XR area exists for events. */
-      if (!xr->runtime->area) {
-        xr->runtime->area = ED_area_offscreen_create(win, SPACE_VIEW3D);
-      }
+    /* Set XR offscreen area View3D object type flags for operators. */
+    bContext *xr_context = WM_xr_session_context_ensure(xr, wm);
+    ScrArea *xr_offscreen_area = CTX_wm_area(xr_context);
 
-      /* Set XR area object type flags for operators. */
-      View3D *v3d = static_cast<View3D *>(xr->runtime->area->spacedata.first);
-      v3d->object_type_exclude_viewport = settings->object_type_exclude_viewport;
-      v3d->object_type_exclude_select = settings->object_type_exclude_select;
+    View3D *v3d = static_cast<View3D *>(xr_offscreen_area->spacedata.first);
+    v3d->object_type_exclude_viewport = settings->object_type_exclude_viewport;
+    v3d->object_type_exclude_select = settings->object_type_exclude_select;
 
-      wm_xr_session_events_dispatch(xr, xr_context, active_action_set, state, win);
-    }
+    wmWindow *xr_win = wm_xr_session_root_window_or_fallback_get(wm, xr->runtime);
+    wm_xr_session_events_dispatch(xr, ghost_xr_context, active_action_set, state, xr_win);
   }
 }
 
@@ -1436,13 +1718,8 @@ static void wm_xr_session_surface_draw(bContext *C)
     return;
   }
 
-  Scene *scene;
-  Depsgraph *depsgraph;
-  wm_xr_session_scene_and_depsgraph_get(wm, &scene, &depsgraph);
-  /* Might fail when force-redrawing windows with #WM_redraw_windows(), which is done on file
-   * writing for example. */
-  // BLI_assert(DEG_is_fully_evaluated(depsgraph));
-  wm_xr_session_draw_data_populate(&wm->xr, scene, depsgraph, &draw_data);
+  WM_xr_session_context_ensure(&wm->xr, wm);
+  wm_xr_session_draw_data_populate(&wm->xr, &draw_data);
 
   GHOST_XrSessionDrawViews(wm->xr.runtime->ghost_context, &draw_data);
 
@@ -1460,17 +1737,15 @@ static void wm_xr_session_do_depsgraph(bContext *C)
     return;
   }
 
-  Scene *scene;
-  Depsgraph *depsgraph;
-  wm_xr_session_scene_and_depsgraph_get(wm, &scene, &depsgraph);
-  BKE_scene_graph_evaluated_ensure(depsgraph, CTX_data_main(C));
+  bContext *xr_context = WM_xr_session_context_ensure(&wm->xr, wm);
+  CTX_data_ensure_evaluated_depsgraph(xr_context);
 }
 
 bool wm_xr_session_surface_offscreen_ensure(wmXrSurfaceData *surface_data,
                                             const GHOST_XrDrawViewInfo *draw_view)
 {
   wmXrViewportPair *vp = nullptr;
-  if (draw_view->view_idx >= BLI_listbase_count(&surface_data->viewports)) {
+  if (draw_view->view_idx >= surface_data->viewports.count()) {
     vp = MEM_new_zeroed<wmXrViewportPair>(__func__);
     BLI_addtail(&surface_data->viewports, vp);
   }
@@ -1560,7 +1835,7 @@ static void wm_xr_session_surface_free_data(wmSurface *surface)
   }
 
   if (data->controller_art) {
-    BLI_freelistN(&data->controller_art->drawcalls);
+    data->controller_art->drawcalls.free_no_destruct();
     MEM_delete(data->controller_art);
   }
 

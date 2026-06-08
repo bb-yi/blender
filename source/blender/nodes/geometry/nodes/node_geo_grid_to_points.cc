@@ -42,24 +42,30 @@ static void node_declare(NodeDeclarationBuilder &b)
 
   b.add_default_layout();
 
-  b.add_output<decl::Geometry>("Points").description(
-      "A point for each active voxel or tile in the grid");
-  b.add_output(data_type, "Value").field_on_all().description("The grid's value at each voxel");
+  b.add_output<decl::Geometry>("Points"_ustr)
+      .description("A point for each active voxel or tile in the grid");
+  b.add_output(data_type, "Value"_ustr)
+      .anonymous_attribute_output()
+      .description("The grid's value at each voxel");
 
-  auto &panel = b.add_panel("Voxel Index").default_closed(true);
-  panel.add_output<decl::Int>("X").field_on_all().description(
+  auto &panel = b.add_panel("Voxel Index"_ustr).default_closed(true);
+  panel.add_output<decl::Int>("X"_ustr).anonymous_attribute_output().description(
       "X coordinate of the voxel in index space, or the minimum X coordinate of a tile");
-  panel.add_output<decl::Int>("Y").field_on_all().description(
+  panel.add_output<decl::Int>("Y"_ustr).anonymous_attribute_output().description(
       "Y coordinate of the voxel in index space, or the minimum Y coordinate of a tile");
-  panel.add_output<decl::Int>("Z").field_on_all().description(
+  panel.add_output<decl::Int>("Z"_ustr).anonymous_attribute_output().description(
       "Z coordinate of the voxel in index space, or the minimum Z coordinate of a tile");
-  panel.add_output<decl::Bool>("Is Tile").field_on_all().description(
-      "The point represents a tile (multiple voxels) rather than a single voxel");
-  panel.add_output<decl::Int>("Extent").field_on_all().description(
-      "The size of the tile or voxel. For individual voxels this is 1, for tiles this represents "
-      "the cubic size of the tile");
+  panel.add_output<decl::Bool>("Is Tile"_ustr)
+      .anonymous_attribute_output()
+      .description("The point represents a tile (multiple voxels) rather than a single voxel");
+  panel.add_output<decl::Int>("Extent"_ustr)
+      .anonymous_attribute_output()
+      .description(
+          "The size of the tile or voxel. For individual voxels this is 1, for tiles this "
+          "represents "
+          "the cubic size of the tile");
 
-  b.add_input(data_type, "Grid").hide_value().structure_type(StructureType::Grid);
+  b.add_input(data_type, "Grid"_ustr).hide_value().structure_type(StructureType::Grid);
 }
 
 static void node_layout(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
@@ -90,16 +96,16 @@ static void node_gather_link_search_ops(GatherLinkSearchOpParams &params)
 {
   const bNodeSocket &other_socket = params.other_socket();
   const StructureType structure_type = other_socket.runtime->inferred_structure_type;
-  const eNodeSocketDatatype other_type = eNodeSocketDatatype(other_socket.type);
+  const eNodeSocketDatatype other_type = other_socket.type;
 
   if (params.in_out() == SOCK_IN) {
     if (ELEM(structure_type, StructureType::Grid, StructureType::Dynamic)) {
       const std::optional<eNodeSocketDatatype> data_type = node_type_for_socket_type(other_socket);
       if (data_type) {
         params.add_item(IFACE_("Grid"), [data_type](LinkSearchOpParams &params) {
-          bNode &node = params.add_node("GeometryNodeGridToPoints");
+          bNode &node = params.add_node("GeometryNodeGridToPoints"_ustr);
           node.custom1 = *data_type;
-          params.update_and_connect_available_socket(node, "Grid");
+          params.update_and_connect_available_socket(node, "Grid"_ustr);
         });
       }
     }
@@ -107,16 +113,16 @@ static void node_gather_link_search_ops(GatherLinkSearchOpParams &params)
   else {
     if (params.node_tree().typeinfo->validate_link(SOCK_GEOMETRY, other_type)) {
       params.add_item(IFACE_("Points"), [](LinkSearchOpParams &params) {
-        bNode &node = params.add_node("GeometryNodeGridToPoints");
-        params.update_and_connect_available_socket(node, "Points");
+        bNode &node = params.add_node("GeometryNodeGridToPoints"_ustr);
+        params.update_and_connect_available_socket(node, "Points"_ustr);
       });
     }
     const std::optional<eNodeSocketDatatype> data_type = node_type_for_socket_type(other_socket);
     if (data_type) {
       params.add_item(IFACE_("Value"), [data_type](LinkSearchOpParams &params) {
-        bNode &node = params.add_node("GeometryNodeGridToPoints");
+        bNode &node = params.add_node("GeometryNodeGridToPoints"_ustr);
         node.custom1 = *data_type;
-        params.update_and_connect_available_socket(node, "Value");
+        params.update_and_connect_available_socket(node, "Value"_ustr);
       });
     }
   }
@@ -323,7 +329,7 @@ static void process_tree(const TreeT &tree,
 static void node_geo_exec(GeoNodeExecParams params)
 {
 #ifdef WITH_OPENVDB
-  const bke::GVolumeGrid grid = params.extract_input<bke::GVolumeGrid>("Grid");
+  const bke::GVolumeGrid grid = params.extract_input<bke::GVolumeGrid>("Grid"_ustr);
   if (!grid) {
     params.set_default_remaining_outputs();
     return;
@@ -341,15 +347,18 @@ static void node_geo_exec(GeoNodeExecParams params)
 
   const float4x4 grid_transform = BKE_volume_transform_to_blender(grid_base.transform());
 
-  std::optional<std::string> coord_x_id = params.get_output_anonymous_attribute_id_if_needed("X");
-  std::optional<std::string> coord_y_id = params.get_output_anonymous_attribute_id_if_needed("Y");
-  std::optional<std::string> coord_z_id = params.get_output_anonymous_attribute_id_if_needed("Z");
+  std::optional<std::string> coord_x_id = params.get_output_anonymous_attribute_id_if_needed(
+      "X"_ustr);
+  std::optional<std::string> coord_y_id = params.get_output_anonymous_attribute_id_if_needed(
+      "Y"_ustr);
+  std::optional<std::string> coord_z_id = params.get_output_anonymous_attribute_id_if_needed(
+      "Z"_ustr);
   std::optional<std::string> is_tile_id = params.get_output_anonymous_attribute_id_if_needed(
-      "Is Tile");
+      "Is Tile"_ustr);
   std::optional<std::string> extent_id = params.get_output_anonymous_attribute_id_if_needed(
-      "Extent");
+      "Extent"_ustr);
   std::optional<std::string> value_id = params.get_output_anonymous_attribute_id_if_needed(
-      "Value");
+      "Value"_ustr);
 
   Array<float3> position_array;
   std::optional<Array<bool>> is_tile_array;
@@ -460,7 +469,7 @@ static void node_geo_exec(GeoNodeExecParams params)
   }
 
   geometry::debug_randomize_point_order(pointcloud);
-  params.set_output("Points", GeometrySet::from_pointcloud(pointcloud));
+  params.set_output("Points"_ustr, GeometrySet::from_pointcloud(pointcloud));
 
 #else
   node_geo_exec_with_missing_openvdb(params);
@@ -488,7 +497,7 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  geo_node_type_base(&ntype, "GeometryNodeGridToPoints");
+  geo_node_type_base(&ntype, "GeometryNodeGridToPoints"_ustr);
   ntype.ui_name = "Grid to Points";
   ntype.ui_description = "Generate a point cloud from a volume grid's active voxels";
   ntype.nclass = NODE_CLASS_GEOMETRY;

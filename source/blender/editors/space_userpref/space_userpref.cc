@@ -36,7 +36,9 @@
 
 namespace blender {
 
-/* ******************** default callbacks for userpref space ***************** */
+/* -------------------------------------------------------------------- */
+/** \name Default Callbacks for User Preferences Space
+ * \{ */
 
 static SpaceLink *userpref_create(const ScrArea *area, const Scene * /*scene*/)
 {
@@ -194,14 +196,14 @@ static void userpref_search_move_to_next_tab_with_results(SpaceUserPref *sbuts,
   /* Try the tabs after the current tab. */
   for (int i = current_tab_index + 1; i < context_tabs_array.size(); i++) {
     if (sbuts->runtime->tab_search_results[i]) {
-      U.space_data.section_active = context_tabs_array[i];
+      U.space_data.section_active = eUserPref_Section(context_tabs_array[i]);
       return;
     }
   }
   /* Try the tabs before the current tab. */
   for (int i = 0; i < current_tab_index; i++) {
     if (sbuts->runtime->tab_search_results[i]) {
-      U.space_data.section_active = context_tabs_array[i];
+      U.space_data.section_active = eUserPref_Section(context_tabs_array[i]);
       return;
     }
   }
@@ -225,7 +227,7 @@ static void userpref_search_all_tabs(const bContext *C,
   SpaceUserPref sprefs_copy = dna::shallow_copy(*sprefs);
   sprefs_copy.runtime = MEM_new<SpaceUserPref_Runtime>(__func__, *sprefs->runtime);
   sprefs_copy.runtime->tab_search_results.fill(false);
-  BLI_listbase_clear(&area_copy.spacedata);
+  area_copy.spacedata.clear_no_delete();
   BLI_addtail(&area_copy.spacedata, &sprefs_copy);
   /* Loop through the tabs. */
   for (const int i : context_tabs_array.index_range()) {
@@ -416,6 +418,7 @@ void ED_spacetype_userpref()
   art->draw = ED_region_panels_draw;
   art->listener = userpref_main_region_listener;
   art->keymapflag = ED_KEYMAP_UI;
+  userpref_panels_register(*art);
 
   BLI_addhead(&st->regiontypes, art);
 
@@ -433,6 +436,7 @@ void ED_spacetype_userpref()
   /* regions: navigation window */
   art = MEM_new_zeroed<ARegionType>("spacetype userpref region");
   art->regionid = RGN_TYPE_UI;
+  art->flag = ARegionTypeFlag::HideSinglePanelCategories;
   art->prefsizex = UI_NAVIGATION_REGION_WIDTH;
   art->init = userpref_navigation_region_init;
   art->draw = userpref_navigation_region_draw;

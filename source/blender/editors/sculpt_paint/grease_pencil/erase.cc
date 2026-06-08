@@ -10,6 +10,7 @@
 #include "BLI_math_geom.h"
 #include "BLI_task.hh"
 
+#include "BKE_asset_edit.hh"
 #include "BKE_attribute.hh"
 #include "BKE_brush.hh"
 #include "BKE_colortools.hh"
@@ -32,6 +33,7 @@
 #include "GEO_curves_remove_and_split.hh"
 
 #include "WM_api.hh"
+#include "WM_toolsystem.hh"
 #include "WM_types.hh"
 
 #include "grease_pencil_intern.hh"
@@ -42,11 +44,12 @@ class EraseOperation : public GreasePencilStrokeOperation {
   friend struct EraseOperationExecutor;
 
  private:
+  Brush *eraser_brush_;
   /* Eraser is used by the draw tool temporarily. */
   bool temp_eraser_ = false;
 
   bool keep_caps_ = false;
-  float radius_ = 50.0f;
+  float radius_ = 0.0f;
   float strength_ = 0.1f;
   eGP_BrushEraserMode eraser_mode_ = GP_BRUSH_ERASER_HARD;
   bool active_layer_only_ = false;
@@ -192,12 +195,14 @@ struct EraseOperationExecutor {
    *
    * \param squared_radius: squared radius of the brush in pixels.
    *
-   * \param r_mu0, r_mu0: (output) factor of the two intersections if they exists, otherwise (-1).
+   * \param r_mu0, r_mu1: (output) factor of the two intersections if they exists, otherwise (-1).
    *
-   * \param point_side, point_after_side: (output) enum describing where the first (resp. second)
-   * endpoint lies relatively to the eraser: inside, outside or at the boundary of the eraser.
+   * \param r_point_side, r_point_after_side: (output) enum describing where the first
+   * (resp. second) endpoint lies relatively to the eraser: inside,
+   * outside or at the boundary of the eraser.
    *
-   * \returns total number of intersections lying inside the segment (ie whose factor is in ]0,1[).
+   * \returns total number of intersections lying inside the segment
+   * (ie whose factor is in (0, 1)).
    *
    * Note that the eraser is represented as a circle, and thus there can be only 0, 1 or 2
    * intersections with a segment.
@@ -302,15 +307,13 @@ struct EraseOperationExecutor {
    *
    * \param screen_space_positions: 2D positions of the geometry in screen space.
    *
-   * \param intersections_max_per_segment: maximum number of intersections per-segment.
-   *
-   * \param r_point_side: (output) for each point in the source, enum describing where the point
-   * lies relatively to the eraser: inside, outside or at the boundary of the eraser.
+   * \param r_point_ring: (output) for each point in the source, a pair of (ring index, side)
+   * TODO: document this fully.
    *
    * \param r_intersections: (output) array containing all the intersections found in the curves
-   * geometry. The size of the array should be `src.points_num*intersections_max_per_segment`.
+   * geometry. The size of the array should be `src.points_num * intersections_max_per_segment`.
    * Initially all intersections are set as invalid, and the function fills valid intersections at
-   * an offset of `src_point*intersections_max_per_segment`.
+   * an offset of `src_point * intersections_max_per_segment`.
    *
    * \returns total number of intersections found.
    */
@@ -321,7 +324,8 @@ struct EraseOperationExecutor {
       MutableSpan<std::pair<int, PointCircleSide>> r_point_ring,
       MutableSpan<SegmentCircleIntersection> r_intersections) const
   {
-    /* Each ring can generate zero, one or two intersections per segment. */
+    /* Each ring can generate zero, one or two intersections per segment.
+     * Maximum number of intersections per-segment. */
     const int intersections_max_per_segment = rings.size() * 2;
     const OffsetIndices<int> src_points_by_curve = src.points_by_curve();
     const VArray<bool> src_cyclic = src.cyclic();
@@ -816,13 +820,23 @@ struct EraseOperationExecutor {
             dst_attributes.lookup_or_add_for_write_span<float>(opacity_attr,
                                                                bke::AttrDomain::Point))
     {
+      SpanAttributeWriter<bool> opacity_modified =
+          dst_attributes.lookup_or_add_for_write_span<bool>(
+              "_eraser_opacity_modified", bke::AttrDomain::Point, bke::AttributeInitValue(false));
+      BLI_assert(opacity_modified);
+
       threading::parallel_for(dst.points_range(), 4096, [&](const IndexRange dst_points_range) {
         for (const int dst_point_index : dst_points_range) {
           const ed::greasepencil::PointTransferData &dst_point = dst_points[dst_point_index];
           dst_opacity.span[dst_point_index] = dst_point.opacity;
+
+          if (!dst_point.is_src_point || dst_point.opacity != src_opacity[dst_point.src_point]) {
+            opacity_modified.span[dst_point_index] = true;
+          }
         }
       });
       dst_opacity.finish();
+      opacity_modified.finish();
     }
 
     SpanAttributeWriter<bool> dst_inserted = dst_attributes.lookup_or_add_for_write_span<bool>(
@@ -863,7 +877,7 @@ struct EraseOperationExecutor {
     const VArray<int> &stroke_materials = *src.attributes().lookup_or_default<int>(
         "material_index", bke::AttrDomain::Curve, 0);
     const IndexMask strokes_to_keep = IndexMask::from_predicate(
-        src.curves_range(), GrainSize(256), memory, [&](const int src_curve) {
+        src.curves_range(), memory, [&](const int src_curve) {
           const MaterialGPencilStyle *mat = BKE_gpencil_material_settings(
               &ob, stroke_materials[src_curve] + 1);
           /* Keep strokes with locked material. */
@@ -922,27 +936,20 @@ struct EraseOperationExecutor {
     Object *obact = CTX_data_active_object(&C);
     Object *ob_eval = DEG_get_evaluated(depsgraph, obact);
 
-    Paint *paint = &scene->toolsettings->gp_paint->paint;
-    Brush *brush = BKE_paint_brush(paint);
-
-    if (brush->gpencil_brush_type == GPAINT_BRUSH_TYPE_DRAW) {
-      brush = BKE_paint_eraser_brush(paint);
-    }
-
     /* Get the brush data. */
     this->mouse_position = extension_sample.mouse_position;
     this->eraser_radius = self.radius_;
     this->eraser_strength = self.strength_;
 
-    if (BKE_brush_use_size_pressure(brush)) {
+    if (BKE_brush_use_size_pressure(self.eraser_brush_)) {
       this->eraser_radius *= BKE_curvemapping_evaluateF(
-          brush->gpencil_settings->curve_strength, 0, extension_sample.pressure);
+          self.eraser_brush_->gpencil_settings->curve_strength, 0, extension_sample.pressure);
     }
-    if (BKE_brush_use_alpha_pressure(brush)) {
+    if (BKE_brush_use_alpha_pressure(self.eraser_brush_)) {
       this->eraser_strength *= BKE_curvemapping_evaluateF(
-          brush->gpencil_settings->curve_strength, 0, extension_sample.pressure);
+          self.eraser_brush_->gpencil_settings->curve_strength, 0, extension_sample.pressure);
     }
-    this->brush_ = brush;
+    this->brush_ = self.eraser_brush_;
 
     this->mouse_position_pixels = int2(round_fl_to_int(this->mouse_position.x),
                                        round_fl_to_int(this->mouse_position.y));
@@ -1040,34 +1047,43 @@ void EraseOperation::on_stroke_begin(const bContext &C, const InputSample & /*st
   Paint *paint = BKE_paint_get_active_from_context(&C);
   Brush *brush = BKE_paint_brush(paint);
 
+  eraser_brush_ = brush;
+  radius_ = BKE_brush_radius_get(paint, brush);
+
   /* If we're using the draw tool to erase (e.g. while holding ctrl), then we should use the
-   * eraser brush instead. */
+   * eraser brush instead. Find the last used eraser for this. */
   if (temp_eraser_) {
+    Main *bmain = CTX_data_main(&C);
+    Scene *scene = CTX_data_scene(&C);
     Object *object = CTX_data_active_object(&C);
     GreasePencil *grease_pencil = id_cast<GreasePencil *>(object->data);
 
-    radius_ = paint->eraser_brush->size / 2.0f;
-    grease_pencil->runtime->temp_eraser_size = radius_;
+    std::optional<AssetWeakReference> asset_reference =
+        WM_toolsystem_last_brush_asset_from_brush_type(
+            scene, GPAINT_BRUSH_TYPE_ERASE, PaintMode::GPencil);
+    /* This should only fail in the case where the essential assets are not found. */
+    if (asset_reference) {
+      eraser_brush_ = reinterpret_cast<Brush *>(
+          bke::asset_edit_id_from_weak_reference(*bmain, ID_BR, *asset_reference));
+      radius_ = BKE_brush_radius_get(paint, eraser_brush_);
+    }
+
+    grease_pencil->runtime->temp_eraser_radius = radius_;
     grease_pencil->runtime->temp_use_eraser = true;
-
-    brush = BKE_paint_eraser_brush(paint);
-  }
-  else {
-    radius_ = brush->size / 2.0f;
   }
 
-  if (brush->gpencil_settings == nullptr) {
-    BKE_brush_init_gpencil_settings(brush);
+  if (eraser_brush_->gpencil_settings == nullptr) {
+    BKE_brush_init_gpencil_settings(eraser_brush_);
   }
-  BLI_assert(brush->gpencil_settings != nullptr);
+  BLI_assert(eraser_brush_->gpencil_settings != nullptr);
 
-  BKE_curvemapping_init(brush->curve_distance_falloff);
-  BKE_curvemapping_init(brush->gpencil_settings->curve_strength);
+  BKE_curvemapping_init(eraser_brush_->curve_distance_falloff);
+  BKE_curvemapping_init(eraser_brush_->gpencil_settings->curve_strength);
 
-  eraser_mode_ = eGP_BrushEraserMode(brush->gpencil_settings->eraser_mode);
-  keep_caps_ = ((brush->gpencil_settings->flag & GP_BRUSH_ERASER_KEEP_CAPS) != 0);
-  active_layer_only_ = ((brush->gpencil_settings->flag & GP_BRUSH_ACTIVE_LAYER_ONLY) != 0);
-  strength_ = brush->alpha;
+  eraser_mode_ = eGP_BrushEraserMode(eraser_brush_->gpencil_settings->eraser_mode);
+  keep_caps_ = ((eraser_brush_->gpencil_settings->flag & GP_BRUSH_ERASER_KEEP_CAPS) != 0);
+  active_layer_only_ = ((eraser_brush_->gpencil_settings->flag & GP_BRUSH_ACTIVE_LAYER_ONLY) != 0);
+  strength_ = eraser_brush_->alpha;
 }
 
 void EraseOperation::on_stroke_extended(const bContext &C, const InputSample &extension_sample)
@@ -1120,10 +1136,16 @@ static void remove_points_with_low_opacity(bke::CurvesGeometry &curves,
                                            const VArray<float> &opacities,
                                            const float epsilon)
 {
+  const VArray<bool> point_was_modified = *curves.attributes().lookup<bool>(
+      "_eraser_opacity_modified", bke::AttrDomain::Point);
+  if (!point_was_modified) {
+    return;
+  }
+
   IndexMaskMemory memory;
   const IndexMask points_to_remove_and_split = IndexMask::from_predicate(
-      curves.points_range(), GrainSize(4096), memory, [&](const int64_t point) {
-        return opacities[point] < epsilon;
+      curves.points_range(), memory, [&](const int64_t point) {
+        return opacities[point] < epsilon && point_was_modified[point];
       });
   curves = geometry::remove_points_and_split(curves, points_to_remove_and_split);
 }
@@ -1136,7 +1158,7 @@ void EraseOperation::on_stroke_done(const bContext &C)
     /* If we're using the draw tool to temporarily erase, then we need to reset the
      * `temp_use_eraser` flag here. */
     grease_pencil.runtime->temp_use_eraser = false;
-    grease_pencil.runtime->temp_eraser_size = 0.0f;
+    grease_pencil.runtime->temp_eraser_radius = 0.0f;
   }
 
   for (GreasePencilDrawing *drawing_ : affected_drawings_) {
@@ -1145,7 +1167,11 @@ void EraseOperation::on_stroke_done(const bContext &C)
     if (drawing.strokes().attributes().contains("_eraser_inserted")) {
       simplify_opacities(drawing.strokes_for_write(), drawing.opacities(), 0.01f);
     }
-    remove_points_with_low_opacity(drawing.strokes_for_write(), drawing.opacities(), 0.0001f);
+
+    if (this->eraser_mode_ == GP_BRUSH_ERASER_SOFT) {
+      remove_points_with_low_opacity(drawing.strokes_for_write(), drawing.opacities(), 0.0001f);
+      drawing.strokes_for_write().attributes_for_write().remove("_eraser_opacity_modified");
+    }
 
     drawing.strokes_for_write().attributes_for_write().remove("_eraser_inserted");
     drawing.tag_topology_changed();

@@ -8,20 +8,37 @@
 
 namespace blender::nodes::node_fn_find_in_string_cc {
 
+enum class Mode {
+  FirstFromStart = 0,
+  FirstFromEnd = 1,
+};
+
+static const EnumPropertyItem mode_items[] = {
+    {int(Mode::FirstFromStart),
+     "FROM_START",
+     0,
+     "From Start",
+     "Find the first occurrence of the string"},
+    {int(Mode::FirstFromEnd), "FROM_END", 0, "From End", "Find the last occurrence of the string"},
+    {},
+};
+
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::String>("String").optional_label();
-  b.add_input<decl::String>("Search");
-  b.add_output<decl::Int>("First Found");
-  b.add_output<decl::Int>("Count");
+  b.is_function_node();
+  b.add_input<decl::String>("String"_ustr).optional_label();
+  b.add_input<decl::String>("Search"_ustr);
+  b.add_input<decl::Menu>("Mode"_ustr).static_items(mode_items).optional_label();
+  b.add_output<decl::Int>("First Found"_ustr);
+  b.add_output<decl::Int>("Count"_ustr);
 }
 
-static int string_find(const StringRef text, const StringRef token)
+static int string_find(const StringRef text, const StringRef token, const bool from_end)
 {
   if (text.is_empty() || token.is_empty()) {
     return 0;
   }
-  const int pos = text.find(token, 0);
+  const int pos = from_end ? text.rfind(token) : text.find(token, 0);
   size_t r_len_bytes;
   const int pos_n = BLI_strnlen_utf8_ex(text.data(), pos, &r_len_bytes);
   return pos_n;
@@ -44,12 +61,17 @@ static int string_count(const StringRef text, const StringRef token)
 
 static void node_build_multi_function(NodeMultiFunctionBuilder &builder)
 {
-  static auto token_position_count = mf::build::SI2_SO2<std::string, std::string, int, int>(
-      "Find in String",
-      [](const std::string &text, const std::string &token, int &first, int &count) -> void {
-        first = string_find(text, token);
-        count = string_count(text, token);
-      });
+  static auto token_position_count =
+      mf::build::SI3_SO2<std::string, std::string, MenuValue, int, int>(
+          "Find in String",
+          [](const std::string &text,
+             const std::string &token,
+             const MenuValue mode,
+             int &first,
+             int &count) -> void {
+            first = string_find(text, token, mode == Mode::FirstFromEnd);
+            count = string_count(text, token);
+          });
 
   builder.set_matching_fn(&token_position_count);
 }
@@ -58,7 +80,7 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  fn_node_type_base(&ntype, "FunctionNodeFindInString", FN_NODE_FIND_IN_STRING);
+  fn_cmp_node_type_base(&ntype, "FunctionNodeFindInString"_ustr, FN_NODE_FIND_IN_STRING);
   ntype.ui_name = "Find in String";
   ntype.ui_description =
       "Find the number of times a given string occurs in another string and the position of the "

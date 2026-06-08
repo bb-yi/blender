@@ -105,20 +105,23 @@ def applyVertexDirt(me, blur_iterations, blur_strength, clamp_dirt, clamp_clean,
 
     use_paint_mask = me.use_paint_mask
     for i, p in enumerate(me.polygons):
-        if not use_paint_mask or p.select:
-            for loop_index in p.loop_indices:
-                loop = me.loops[loop_index]
-                v = loop.vertex_index
-                col = attribute_data[v if point_domain else loop_index].color
-                tone = vert_tone[v]
-                tone = (tone - min_tone) * tone_range
+        if p.hide:
+            continue
+        if use_paint_mask and not p.select:
+            continue
+        for loop_index in p.loop_indices:
+            loop = me.loops[loop_index]
+            v = loop.vertex_index
+            col = attribute_data[v if point_domain else loop_index].color
+            tone = vert_tone[v]
+            tone = (tone - min_tone) * tone_range
 
-                if dirt_only:
-                    tone = min(tone, 0.5) * 2.0
+            if dirt_only:
+                tone = min(tone, 0.5) * 2.0
 
-                col[0] = tone * col[0]
-                col[1] = tone * col[1]
-                col[2] = tone * col[2]
+            col[0] = tone * col[0]
+            col[1] = tone * col[1]
+            col[2] = tone * col[2]
     me.update()
     return {'FINISHED'}
 

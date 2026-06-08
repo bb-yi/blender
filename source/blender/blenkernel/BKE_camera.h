@@ -134,7 +134,8 @@ bool BKE_camera_view_frame_fit_to_coords(const struct Depsgraph *depsgraph,
 /**
  * Returns the camera to be used for render.
  */
-struct Object *BKE_camera_multiview_render(const struct Scene *scene,
+struct Object *BKE_camera_multiview_render(const Main &bmain,
+                                           const struct Scene *scene,
                                            struct Object *camera,
                                            const char *viewname);
 /**
@@ -173,7 +174,7 @@ struct CameraBGImage *BKE_camera_background_image_new(struct Camera *cam);
 /**
  * Duplicate a background image, in a ID management compatible way.
  *
- * \param copy_flag: The usual ID copying flags, see `LIB_ID_CREATE_`/`LIB_ID_COPY_` enums in
+ * \param flag: The usual ID copying flags, see `LIB_ID_CREATE_`/`LIB_ID_COPY_` enums in
  * `BKE_lib_id.hh`.
  */
 struct CameraBGImage *BKE_camera_background_image_copy(const struct CameraBGImage *bgpic_src,

@@ -10,12 +10,14 @@
 #include "BKE_lib_id.hh"
 #include "BKE_main.hh"
 
+#if defined(WIN32)
+#  include "BLI_string.h"
+#endif
+
 #include "DNA_asset_types.h"
 #include "DNA_object_types.h"
 
 #include "ED_asset_mark_clear.hh"
-
-#include "BLI_string.h"
 
 #include "../intern/utils.hh"
 
@@ -42,7 +44,8 @@ class AssetRepresentationTest : public AssetLibraryTestBase {
   {
     std::unique_ptr<AssetMetaData> dummy_metadata = std::make_unique<AssetMetaData>();
     return *library
-                .add_external_asset(relative_path, "Some asset name", 0, std::move(dummy_metadata))
+                .add_external_on_disk_asset(
+                    relative_path, "Some asset name", 0, std::move(dummy_metadata))
                 .lock();
   }
 

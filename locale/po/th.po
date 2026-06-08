@@ -1,10 +1,10 @@
 
 msgid ""
 msgstr ""
-"Project-Id-Version: Blender 5.1.0 Beta (b'5a04f1d246f1')\n"
+"Project-Id-Version: Blender 5.2.0 Alpha (b'8764d33c658b')\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-03-11 11:01+0000\n"
-"PO-Revision-Date: 2026-02-01 08:12+0000\n"
+"POT-Creation-Date: 2026-06-01 07:36+0000\n"
+"PO-Revision-Date: 2026-03-19 12:41+0000\n"
 "Last-Translator: Banditer1483 <pleum.wongvarit@gmail.com>\n"
 "Language-Team: Thai <https://translate.blender.org/projects/blender-ui/ui/th/>\n"
 "Language: th\n"
@@ -12,7 +12,7 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
-"X-Generator: Weblate 5.14.3"
+"X-Generator: Weblate 5.16.2"
 
 
 msgid "Shader AOV"
@@ -668,22 +668,6 @@ msgstr "ด้านล่าง"
 
 msgid "Place the Mix node at the same height as the lowest node"
 msgstr "วางโหนดผสมไว้ที่ความสูงเดียวกับโหนดที่อยู่ต่ำที่สุด"
-
-
-msgid "Show Hotkey List"
-msgstr "แสดงรายการปุ่มลัด"
-
-
-msgid "Expand this box into a list of all the hotkeys for functions in this addon"
-msgstr "ขยายกล่องนี้เพื่อแสดงรายการปุ่มลัดทั้งหมดสำหรับฟังก์ชันต่างๆ ในส่วนเสริมนี้"
-
-
-msgid "Show Principled Naming Tags"
-msgstr "แสดงป้ายระบุการตั้งชื่อตามหลักการ"
-
-
-msgid "Expand this box into a list of all naming tags for Principled Texture setup"
-msgstr "ขยายกล่องนี้ให้เป็นรายการป้ายระบุชื่อทั้งหมดสำหรับการตั้งค่าพื้นผิวตามหลักการ"
 
 
 msgid "Fribidi Library"
@@ -1726,6 +1710,10 @@ msgid "The type of license this asset is distributed under. An empty license nam
 msgstr "ประเภทของใบอนุญาตที่ใช้ในการเผยแพร่สินทรัพย์นี้ ชื่อใบอนุญาตที่ว่างเปล่าไม่ได้หมายความว่าสินทรัพย์นี้ปราศจากข้อกำหนดด้านใบอนุญาตเสมอไป โปรดติดต่อผู้สร้างหากต้องการคำชี้แจงเพิ่มเติม"
 
 
+msgid "Link"
+msgstr "เชื่อมโยง"
+
+
 msgid "Tags"
 msgstr "ป้ายระบุ"
 
@@ -1813,10 +1801,6 @@ msgstr "แสดงสินทรัพย์ที่มีอยู่ใน
 
 msgid "Essentials"
 msgstr "รากแก่น"
-
-
-msgid "Show the basic building blocks and utilities coming with Blender"
-msgstr "แสดงส่วนประกอบพื้นฐานและเครื่องมือต่างๆ ที่มาพร้อมกับเบลนเดอร์"
 
 
 msgid "Custom"
@@ -3706,6 +3690,10 @@ msgid "Options for this blendfile import operation"
 msgstr "ตัวเลือกสำหรับการนำเข้าไฟล์ Blendfile นี้"
 
 
+msgid "Only link data, instead of appending it"
+msgstr "เพียงแค่เชื่อมโยงข้อมูล ไม่ใช่เพิ่มข้อมูลต่อท้าย"
+
+
 msgid "Speed"
 msgstr "ความเร็ว"
 
@@ -4173,10 +4161,6 @@ msgstr "แสดงไฟล์ .blend"
 
 msgid "Show .blend files items (objects, materials, etc.)"
 msgstr "แสดงรายการในไฟล์ .blend (วัตถุ วัสดุ อื่น ๆ)"
-
-
-msgid "Link"
-msgstr "เชื่อมโยง"
 
 
 msgid "Matrix"
@@ -4730,6 +4714,10 @@ msgid "Final frame of the playback/rendering range"
 msgstr "เฟรมสุดท้ายของความยาวการเล่น/เรนเดอร์"
 
 
+msgid "Restore Frame"
+msgstr "คืนค่าเฟรม"
+
+
 msgid "Render Data"
 msgstr "เรนเดอร์ข้อมูล"
 
@@ -4949,36 +4937,12 @@ msgid "Mix Color"
 msgstr "ผสมสี"
 
 
-msgid "UV"
-msgstr "UV"
-
-
-msgid "Metaball"
-msgstr "เมตาบอล"
-
-
-msgid "Names"
-msgstr "ชื่อ"
-
-
-msgid "Pivot Point"
-msgstr "จุดหมุน"
+msgid "Mirror"
+msgstr "กระจกสะท้อน"
 
 
 msgid "Snap"
 msgstr "ยึดติด"
-
-
-msgid "Proportional Editing Falloff"
-msgstr "แก้ไข"
-
-
-msgid "Mask Edit"
-msgstr "การแก้ไขหน้ากาก"
-
-
-msgid "Mirror"
-msgstr "กระจกสะท้อน"
 
 
 msgid "Local View"
@@ -5005,16 +4969,12 @@ msgid "View Regions"
 msgstr "ขอบเขตมุมมอง"
 
 
-msgid "Layout"
-msgstr "เค้าโครง"
-
-
-msgid "Keying"
-msgstr "คีย์"
-
-
 msgid "Math"
 msgstr "คณิตศาสตร์"
+
+
+msgid "Metaball"
+msgstr "เมตาบอล"
 
 
 msgid "Light"
@@ -5023,6 +4983,10 @@ msgstr "แสง"
 
 msgid "Add Image"
 msgstr "เพิ่มภาพ"
+
+
+msgid "Import"
+msgstr "นำเข้า"
 
 
 msgid "Apply"
@@ -5037,16 +5001,40 @@ msgid "Hooks"
 msgstr "ตะขอ"
 
 
+msgid "UV"
+msgstr "UV"
+
+
+msgid "Names"
+msgstr "ชื่อ"
+
+
 msgid "Face Data"
 msgstr "ข้อมูลด้าน"
 
 
-msgid "Import"
-msgstr "นำเข้า"
-
-
 msgid "Merge"
 msgstr "ผสาน"
+
+
+msgid "Layout"
+msgstr "เค้าโครง"
+
+
+msgid "Keying"
+msgstr "คีย์"
+
+
+msgid "Pivot Point"
+msgstr "จุดหมุน"
+
+
+msgid "Proportional Editing Falloff"
+msgstr "แก้ไข"
+
+
+msgid "Mask Edit"
+msgstr "การแก้ไขหน้ากาก"
 
 
 msgid "Zoom"
@@ -5452,6 +5440,10 @@ msgstr "แกนมุมมอง"
 
 msgid "Move"
 msgstr "เคลื่อนที่"
+
+
+msgid "Search"
+msgstr "ค้นหา"
 
 
 msgctxt "Operator"
@@ -6068,10 +6060,6 @@ msgstr "มน"
 msgctxt "Scene"
 msgid "New"
 msgstr "ใหม่"
-
-
-msgid "Restore Frame"
-msgstr "คืนค่าเฟรม"
 
 
 msgctxt "Operator"
@@ -6848,10 +6836,6 @@ msgid "Error Message"
 msgstr "ข้อความแสดงข้อผิดพลาด"
 
 
-msgid "Search"
-msgstr "ค้นหา"
-
-
 msgctxt "WindowManager"
 msgid "User Interface"
 msgstr "อินเตอร์เฟสผู้ใช้"
@@ -7344,6 +7328,11 @@ msgstr "ติดตั้งแม่แบบแอปพลิเคชั่
 
 
 msgctxt "Operator"
+msgid "Save Copy..."
+msgstr "บันทึกเป็น..."
+
+
+msgctxt "Operator"
 msgid "Quit"
 msgstr "ออก"
 
@@ -7411,11 +7400,6 @@ msgstr "พื้นที่ใช้งานถัดไป"
 msgctxt "Operator"
 msgid "Back to Previous"
 msgstr "กลับไปยังก่อนหน้านี้"
-
-
-msgctxt "Operator"
-msgid "Save Copy..."
-msgstr "บันทึกเป็น..."
 
 
 msgctxt "Operator"

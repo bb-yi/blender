@@ -40,6 +40,10 @@ namespace blender {
 
 namespace draw::edit_select {
 
+/* -------------------------------------------------------------------- */
+/** \name Select Engine
+ * \{ */
+
 #define USE_CAGE_OCCLUSION
 
 struct Instance : public DrawEngine {
@@ -129,6 +133,12 @@ struct Instance : public DrawEngine {
     DRWState state = DRW_STATE_DEFAULT;
     if (RV3D_CLIPPING_ENABLED(draw_ctx->v3d, draw_ctx->rv3d)) {
       state |= DRW_STATE_CLIP_PLANES;
+    }
+
+    if (draw_ctx->v3d->shading.flag & V3D_SHADING_BACKFACE_CULLING &&
+        draw_ctx->v3d->shading.type == OB_SOLID)
+    {
+      state |= DRW_STATE_CULL_BACK;
     }
 
     bool retopology_occlusion = RETOPOLOGY_ENABLED(draw_ctx->v3d) && !XRAY_ENABLED(draw_ctx->v3d);
@@ -223,7 +233,7 @@ struct Instance : public DrawEngine {
     e_data.context.max_index_drawn_len = 1;
     framebuffer_setup();
     GPU_framebuffer_bind(e_data.framebuffer_select_id);
-    GPU_framebuffer_clear_color_depth(e_data.framebuffer_select_id, float4{0.0f}, 1.0f);
+    GPU_framebuffer_clear_color_depth(e_data.framebuffer_select_id, {0.0, 0.0, 0.0, 0.0}, 1.0f);
   }
 
   ElemIndexRanges edit_mesh_sync(Object *ob,
@@ -349,6 +359,8 @@ struct Instance : public DrawEngine {
       }
       case OB_CURVES_LEGACY:
       case OB_SURF:
+        break;
+      default:
         break;
     }
     BLI_assert_unreachable();

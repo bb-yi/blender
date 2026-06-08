@@ -22,7 +22,7 @@
 #include "BLI_array_utils.hh"
 #include "BLI_assert.h"
 #include "BLI_bounds.hh"
-#include "BLI_color.hh"
+#include "BLI_color_types.hh"
 #include "BLI_index_mask.hh"
 #include "BLI_kdopbvh.hh"
 #include "BLI_kdtree.hh"
@@ -91,7 +91,7 @@ struct GreasePencilPaintStroke final : public PaintStroke {
   void update_step(wmOperator *op, PointerRNA *itemptr) override;
   void redraw(bool final) override;
   bool test_cancel() override;
-  void done(bool is_cancel) override;
+  void done(bool is_cancel, bool stroke_started) override;
 };
 
 bool GreasePencilPaintStroke::get_location(float out[3],
@@ -229,7 +229,7 @@ bool GreasePencilPaintStroke::test_cancel()
   return false;
 }
 
-void GreasePencilPaintStroke::done(bool /*is_cancel*/)
+void GreasePencilPaintStroke::done(bool /*is_cancel*/, bool /*stroke_started*/)
 {
   GreasePencilStrokeOperation *operation = static_cast<GreasePencilStrokeOperation *>(
       mode_data_.get());
@@ -325,7 +325,7 @@ static wmOperatorStatus grease_pencil_brush_stroke_modal(bContext *C,
 static void grease_pencil_brush_stroke_cancel(bContext *C, wmOperator *op)
 {
   GreasePencilPaintStroke *stroke = static_cast<GreasePencilPaintStroke *>(op->customdata);
-  stroke->cancel(C, op);
+  stroke->cancel(C);
 }
 
 static void GREASE_PENCIL_OT_brush_stroke(wmOperatorType *ot)
@@ -409,7 +409,10 @@ static wmOperatorStatus grease_pencil_sculpt_paint_invoke(bContext *C,
   OPERATOR_RETVAL_CHECK(retval);
 
   if (retval == OPERATOR_FINISHED) {
-    MEM_delete(stroke);
+    GreasePencilPaintStroke *stroke = static_cast<GreasePencilPaintStroke *>(op->customdata);
+    if (stroke) {
+      MEM_delete(stroke);
+    }
     return OPERATOR_FINISHED;
   }
 
@@ -426,6 +429,7 @@ static wmOperatorStatus grease_pencil_sculpt_paint_modal(bContext *C,
 
   if (ELEM(retval, OPERATOR_FINISHED, OPERATOR_CANCELLED)) {
     MEM_delete(stroke);
+    op->customdata = nullptr;
   }
 
   return retval;
@@ -434,7 +438,7 @@ static wmOperatorStatus grease_pencil_sculpt_paint_modal(bContext *C,
 static void grease_pencil_sculpt_paint_cancel(bContext *C, wmOperator *op)
 {
   GreasePencilPaintStroke *stroke = static_cast<GreasePencilPaintStroke *>(op->customdata);
-  stroke->cancel(C, op);
+  stroke->cancel(C);
 }
 
 static void GREASE_PENCIL_OT_sculpt_paint(wmOperatorType *ot)
@@ -532,7 +536,7 @@ static wmOperatorStatus grease_pencil_weight_brush_stroke_modal(bContext *C,
 static void grease_pencil_weight_brush_stroke_cancel(bContext *C, wmOperator *op)
 {
   GreasePencilPaintStroke *stroke = static_cast<GreasePencilPaintStroke *>(op->customdata);
-  stroke->cancel(C, op);
+  stroke->cancel(C);
 }
 
 static void GREASE_PENCIL_OT_weight_brush_stroke(wmOperatorType *ot)
@@ -641,7 +645,7 @@ static wmOperatorStatus grease_pencil_vertex_brush_stroke_modal(bContext *C,
 static void grease_pencil_vertex_brush_stroke_cancel(bContext *C, wmOperator *op)
 {
   GreasePencilPaintStroke *stroke = static_cast<GreasePencilPaintStroke *>(op->customdata);
-  stroke->cancel(C, op);
+  stroke->cancel(C);
 }
 
 static void GREASE_PENCIL_OT_vertex_brush_stroke(wmOperatorType *ot)
@@ -710,8 +714,12 @@ struct GreasePencilFillOpData {
     const Brush &brush = *BKE_paint_brush(&ts.gp_paint->paint);
     const eGP_FillExtendModes extension_mode = eGP_FillExtendModes(
         brush.gpencil_settings->fill_extend_mode);
-    const bool show_boundaries = brush.gpencil_settings->flag & GP_BRUSH_FILL_SHOW_HELPLINES;
-    const bool show_extension = brush.gpencil_settings->flag & GP_BRUSH_FILL_SHOW_EXTENDLINES;
+
+    const bool is_delaunay = brush.gpencil_settings->fill_solver == GP_FILL_SOLVER_DELAUNAY;
+    const bool show_boundaries = (brush.gpencil_settings->flag & GP_BRUSH_FILL_SHOW_HELPLINES) &&
+                                 !is_delaunay;
+    const bool show_extension = (brush.gpencil_settings->flag & GP_BRUSH_FILL_SHOW_EXTENDLINES) &&
+                                !is_delaunay;
     const float extension_length = brush.gpencil_settings->fill_extend_fac *
                                    bke::greasepencil::LEGACY_RADIUS_CONVERSION_FACTOR;
     const bool extension_cut = brush.gpencil_settings->flag & GP_BRUSH_FILL_STROKE_COLLIDE;
@@ -828,13 +836,14 @@ static void grease_pencil_fill_extension_cut(const bContext &C,
     /* Indices that may need to be ignored to avoid self-intersection. */
     int ignore_index1;
     int ignore_index2;
+    int ignore_index3;
   };
   BVHTree_RayCastCallback callback =
       [](void *userdata, int index, const BVHTreeRay *ray, BVHTreeRayHit *hit) {
         using Result = math::isect_result<float2>;
 
         const RaycastArgs &args = *static_cast<const RaycastArgs *>(userdata);
-        if (ELEM(index, args.ignore_index1, args.ignore_index2)) {
+        if (ELEM(index, args.ignore_index1, args.ignore_index2, args.ignore_index3)) {
           return;
         }
 
@@ -872,7 +881,14 @@ static void grease_pencil_fill_extension_cut(const bContext &C,
     const int origin_point = origin_points[i_line];
     const int bvh_origin_index = bvh_curve_offsets[origin_drawing][origin_point];
 
-    RaycastArgs args = {view_starts, view_ends, bvh_index, bvh_origin_index};
+    /* For curvature extensions (mid-stroke), also exclude the adjacent segment. */
+    int bvh_adjacent_index = -1;
+    if (origin_point > 0 && origin_point < bvh_curve_offsets[origin_drawing].size() - 1) {
+      /* This is a curvature extension, exclude the previous segment. */
+      bvh_adjacent_index = bvh_curve_offsets[origin_drawing][origin_point - 1];
+    }
+
+    RaycastArgs args = {view_starts, view_ends, bvh_index, bvh_origin_index, bvh_adjacent_index};
     BVHTreeRayHit hit;
     hit.index = -1;
     hit.dist = FLT_MAX;
@@ -922,7 +938,7 @@ static void grease_pencil_fill_extension_lines_from_circles(
   Array<float2> view_centers(max_kd_entries);
   Array<float> view_radii(max_kd_entries);
 
-  KDTree_2d *kdtree = kdtree_2d_new(max_kd_entries);
+  KDTree<float2> *kdtree = kdtree_new<float2>(max_kd_entries);
 
   /* Insert points for overlap tests. */
   for (const int point_i : circles_range.index_range()) {
@@ -935,13 +951,13 @@ static void grease_pencil_fill_extension_lines_from_circles(
     view_centers[kd_index] = center;
     view_radii[kd_index] = radius;
 
-    kdtree_2d_insert(kdtree, kd_index, center);
+    kdtree_insert<float2>(kdtree, kd_index, center);
   }
   for (const int i_point : feature_points_range.index_range()) {
     /* TODO Insert feature points into the KDTree. */
     UNUSED_VARS(i_point);
   }
-  kdtree_2d_balance(kdtree);
+  kdtree_balance<float2>(kdtree);
 
   struct {
     Vector<float3> starts;
@@ -957,7 +973,7 @@ static void grease_pencil_fill_extension_lines_from_circles(
     const float radius = view_radii[kd_index];
 
     bool found = false;
-    kdtree_range_search_cb_cpp<float2>(
+    kdtree_range_search_cb<float2>(
         kdtree,
         center,
         radius,
@@ -986,7 +1002,7 @@ static void grease_pencil_fill_extension_lines_from_circles(
     }
   }
 
-  kdtree_2d_free(kdtree);
+  kdtree_free<float2>(kdtree);
 
   /* Add new extension lines. */
   extension_data.lines.starts.extend(connection_lines.starts);
@@ -1022,6 +1038,7 @@ static ed::greasepencil::ExtensionData grease_pencil_fill_get_extension_data(
     const bke::CurvesGeometry &curves = info.drawing.strokes();
     const OffsetIndices points_by_curve = curves.points_by_curve();
     const Span<float3> positions = curves.positions();
+    const VArray<float> radii = info.drawing.radii();
     const VArray<bool> cyclic = curves.cyclic();
     const float4x4 layer_to_world = grease_pencil.layer(info.layer_index).to_world_space(object);
 
@@ -1047,7 +1064,7 @@ static ed::greasepencil::ExtensionData grease_pencil_fill_get_extension_data(
       const float length = op_data.extension_length;
 
       switch (op_data.extension_mode) {
-        case GP_FILL_EMODE_EXTEND:
+        case GP_FILL_EMODE_EXTEND: {
           extension_data.lines.starts.append(pos_head);
           extension_data.lines.ends.append(pos_head + dir_head * length);
           origin_drawings.append(i_drawing);
@@ -1058,7 +1075,48 @@ static ed::greasepencil::ExtensionData grease_pencil_fill_get_extension_data(
           origin_drawings.append(i_drawing);
           /* Segment index is the start point. */
           origin_points.append(points.last() - 1);
+
+          /* Find points of high curvature and extend them. */
+          float3 pos_prev = math::transform_point(layer_to_world, positions[points[0]]);
+          float3 pos_next = math::transform_point(layer_to_world, positions[points[1]]);
+          float distance_prev;
+          float distance_next;
+          float3 tangent_prev;
+          float3 tangent_next = math::normalize_and_get_length(pos_next - pos_prev, distance_next);
+          for (const int i : points.index_range().drop_front(2)) {
+            tangent_prev = tangent_next;
+            distance_prev = distance_next;
+            pos_prev = pos_next;
+
+            pos_next = math::transform_point(layer_to_world, positions[points[i]]);
+            tangent_next = math::normalize_and_get_length(pos_next - pos_prev, distance_next);
+
+            float curvature_length;
+            const float3 curvature = math::normalize_and_get_length(tangent_next - tangent_prev,
+                                                                    curvature_length);
+
+            /*
+             * The smaller the radius of curvature, the sharper the corner.
+             * The thicker the line, the larger the radius of curvature it
+             * takes to be visually indistinguishable from an endpoint.
+             */
+            const float stroke_radius = radii[points[i - 1]];
+            const float min_radius = stroke_radius;
+
+            /*
+             * Is the radius of curvature (1 / curvature_length) smaller than the
+             * minimum radius? Rearranged algebraically to avoid division by zero.
+             */
+            if (distance_prev + distance_next < 2.0f * curvature_length * min_radius) {
+              /* Extend along direction of curvature. */
+              extension_data.lines.starts.append(pos_prev);
+              extension_data.lines.ends.append(pos_prev + (-curvature * length));
+              origin_drawings.append(i_drawing);
+              origin_points.append(points[i - 1]);
+            }
+          }
           break;
+        }
         case GP_FILL_EMODE_RADIUS:
           extension_data.circles.centers.append(pos_head);
           extension_data.circles.radii.append(length);
@@ -1366,7 +1424,7 @@ static bke::CurvesGeometry simplify_fixed(bke::CurvesGeometry &curves, const int
 
   IndexMaskMemory memory;
   IndexMask points_to_keep = IndexMask::from_predicate(
-      curves.points_range(), GrainSize(2048), memory, [&](const int64_t i) {
+      curves.points_range(), memory, [&](const int64_t i) {
         const int curve_i = point_to_curve_map[i];
         const IndexRange points = points_by_curve[curve_i];
         if (points.size() <= 2) {
@@ -1377,6 +1435,87 @@ static bke::CurvesGeometry simplify_fixed(bke::CurvesGeometry &curves, const int
       });
 
   return bke::curves_copy_point_selection(curves, points_to_keep, {});
+}
+
+static void set_fill_attributes(bke::CurvesGeometry &fill_curves,
+                                const ViewContext &view_context,
+                                const Brush &brush,
+                                const Scene &scene,
+                                const float4x4 &to_world,
+                                const int material_index,
+                                const float hardness)
+{
+  /* Attributes that are defined explicitly and should not be set to default values. */
+  Set<std::string> skip_curve_attributes = {
+      "curve_type", "material_index", "cyclic", "hardness", "fill_opacity"};
+  Set<std::string> skip_point_attributes = {"position", "radius", "opacity"};
+
+  bke::MutableAttributeAccessor attributes = fill_curves.attributes_for_write();
+  const Span<float3> positions = fill_curves.positions();
+  bke::SpanAttributeWriter<float> radii = attributes.lookup_or_add_for_write_span<float>(
+      "radius", bke::AttrDomain::Point, bke::AttributeInitValue(0.01f));
+  bke::SpanAttributeWriter<float> opacities = attributes.lookup_or_add_for_write_span<float>(
+      "opacity", bke::AttrDomain::Point, bke::AttributeInitValue(1.0f));
+
+  for (const int point_i : fill_curves.points_range()) {
+    /* Calculate radius and opacity for the outline as if it was a user stroke with full
+     * pressure. */
+    const float pressure = 1.0f;
+    radii.span[point_i] = ed::greasepencil::radius_from_input_sample(view_context.rv3d,
+                                                                     view_context.region,
+                                                                     &brush,
+                                                                     pressure,
+                                                                     positions[point_i],
+                                                                     to_world,
+                                                                     brush.gpencil_settings);
+    opacities.span[point_i] = ed::greasepencil::opacity_from_input_sample(
+        pressure, &brush, brush.gpencil_settings);
+  }
+
+  radii.finish();
+  opacities.finish();
+
+  attributes.add<int>(
+      "material_index", bke::AttrDomain::Curve, bke::AttributeInitValue(material_index));
+  attributes.add<bool>("cyclic", bke::AttrDomain::Curve, bke::AttributeInitValue(true));
+  attributes.add<float>("hardness", bke::AttrDomain::Curve, bke::AttributeInitValue(hardness));
+  /* TODO: `fill_opacities` are currently always 1.0f for the new strokes. Maybe this should be a
+   * parameter. */
+  attributes.add<float>("fill_opacity", bke::AttrDomain::Curve, bke::AttributeInitValue(1.0f));
+
+  const bool use_vertex_color = ed::sculpt_paint::greasepencil::brush_using_vertex_color(
+      scene.toolsettings->gp_paint, &brush);
+  if (use_vertex_color) {
+    ColorGeometry4f vertex_color;
+    copy_v3_v3(vertex_color, brush.color);
+    vertex_color.a = brush.gpencil_settings->vertex_factor;
+
+    skip_curve_attributes.add("fill_color");
+    bke::SpanAttributeWriter<ColorGeometry4f> fill_colors =
+        attributes.lookup_or_add_for_write_span<ColorGeometry4f>("fill_color",
+                                                                 bke::AttrDomain::Curve);
+    fill_colors.span.fill(vertex_color);
+    fill_colors.finish();
+
+    if (brush.gpencil_settings->flag2 & GP_BRUSH_USE_STROKE) {
+      skip_point_attributes.add("vertex_color");
+      bke::SpanAttributeWriter<ColorGeometry4f> vertex_colors =
+          attributes.lookup_or_add_for_write_span<ColorGeometry4f>("vertex_color",
+                                                                   bke::AttrDomain::Point);
+      vertex_colors.span.fill(vertex_color);
+      vertex_colors.finish();
+    }
+  }
+
+  /* Initialize the rest of the attributes with default values. */
+  bke::fill_attribute_range_default(attributes,
+                                    bke::AttrDomain::Curve,
+                                    bke::attribute_filter_from_skip_ref(skip_curve_attributes),
+                                    fill_curves.curves_range());
+  bke::fill_attribute_range_default(attributes,
+                                    bke::AttrDomain::Point,
+                                    bke::attribute_filter_from_skip_ref(skip_point_attributes),
+                                    fill_curves.points_range());
 }
 
 static bool grease_pencil_apply_fill(bContext &C, wmOperator &op, const wmEvent &event)
@@ -1407,13 +1546,14 @@ static bool grease_pencil_apply_fill(bContext &C, wmOperator &op, const wmEvent 
   Brush &brush = *BKE_paint_brush(&ts.gp_paint->paint);
   const float2 mouse_position = float2(event.mval);
   const int simplify_levels = brush.gpencil_settings->fill_simplylvl;
-  const std::optional<float> alpha_threshold =
+  const std::optional<float> opacity_threshold =
       (brush.gpencil_settings->flag & GP_BRUSH_FILL_HIDE) ?
           std::nullopt :
           std::make_optional(brush.gpencil_settings->fill_threshold);
   const bool on_back = (ts.gpencil_flags & GP_TOOL_FLAG_PAINT_ONBACK);
   const bool auto_remove_fill_guides = (brush.gpencil_settings->flag &
                                         GP_BRUSH_FILL_AUTO_REMOVE_FILL_GUIDES) != 0;
+  const bool is_delaunay = brush.gpencil_settings->fill_solver == GP_FILL_SOLVER_DELAUNAY;
 
   if (!grease_pencil.has_active_layer()) {
     return false;
@@ -1429,36 +1569,83 @@ static bool grease_pencil_apply_fill(bContext &C, wmOperator &op, const wmEvent 
   for (const FillToolTargetInfo &info : target_drawings) {
     const Layer &layer = *grease_pencil.layers()[info.target.layer_index];
 
-    const ed::greasepencil::ExtensionData extensions = grease_pencil_fill_get_extension_data(
-        C, op_data);
+    std::optional<bke::CurvesGeometry> op_fill_curves;
 
-    bke::CurvesGeometry fill_curves = fill_strokes(view_context,
-                                                   brush,
-                                                   scene,
-                                                   layer,
-                                                   boundary_layers,
-                                                   info.sources,
-                                                   op_data.invert,
-                                                   alpha_threshold,
-                                                   mouse_position,
-                                                   extensions,
-                                                   fit_method,
-                                                   op_data.material_index,
-                                                   keep_images);
+    if (!is_delaunay) {
+      const ed::greasepencil::ExtensionData extensions = grease_pencil_fill_get_extension_data(
+          C, op_data);
+
+      op_fill_curves = std::make_optional(pixel_fill_strokes(view_context,
+                                                             brush,
+                                                             scene,
+                                                             layer,
+                                                             boundary_layers,
+                                                             info.sources,
+                                                             op_data.invert,
+                                                             opacity_threshold,
+                                                             mouse_position,
+                                                             extensions,
+                                                             fit_method,
+                                                             keep_images));
+    }
+    else {
+      /* TODO: For now only create a single point for the source of the fill algorithm. This should
+       * take multiple points in the future. */
+      const Array<int> fill_point_offset = {0, 1};
+      const Array<float2> fill_point_data = {mouse_position};
+      const GroupedSpan<float2> fill_points = GroupedSpan<float2>(
+          OffsetIndices<int>(fill_point_offset), fill_point_data);
+
+      const bool internal_gaps = (brush.gpencil_settings->flag & GP_BRUSH_FILL_INTERNAL_GAPS) != 0;
+      const float gap_factor = brush.gpencil_settings->fill_gap_factor;
+
+      op_fill_curves = delaunay_fill_strokes(view_context,
+                                             scene,
+                                             layer,
+                                             boundary_layers,
+                                             info.sources,
+                                             op_data.invert,
+                                             opacity_threshold,
+                                             internal_gaps,
+                                             gap_factor,
+                                             fill_points);
+    }
+
+    if (!op_fill_curves) {
+      continue;
+    }
+
+    bke::CurvesGeometry &fill_curves = *op_fill_curves;
+
+    /* TODO should use the same hardness as the paint brush. */
+    const float stroke_hardness = 1.0f;
+
+    set_fill_attributes(fill_curves,
+                        view_context,
+                        brush,
+                        scene,
+                        layer.to_world_space(object),
+                        op_data.material_index,
+                        stroke_hardness);
+
     if (fill_curves.is_empty()) {
       continue;
     }
 
-    /* Combine the strokes into a single fill with the same fill ID. */
-    bke::SpanAttributeWriter<int> fill_ids =
-        fill_curves.attributes_for_write().lookup_or_add_for_write_span<int>(
-            "fill_id", bke::AttrDomain::Curve, bke::AttributeInitValue(1));
-    fill_ids.finish();
+    bke::MutableAttributeAccessor attributes = fill_curves.attributes_for_write();
 
-    smooth_fill_strokes(fill_curves, fill_curves.curves_range());
+    /* Combine strokes into a single fill with the same fill ID. */
+    attributes.add<int>("fill_id", bke::AttrDomain::Curve, bke::AttributeInitValue(1));
 
-    if (simplify_levels > 0) {
-      fill_curves = simplify_fixed(fill_curves, brush.gpencil_settings->fill_simplylvl);
+    /* Only create fills. Users can change the appearance however they please afterwards. */
+    attributes.add<bool>("hide_stroke", bke::AttrDomain::Curve, bke::AttributeInitValue(true));
+
+    if (!is_delaunay) {
+      smooth_fill_strokes(fill_curves, fill_curves.curves_range());
+
+      if (simplify_levels > 0) {
+        fill_curves = simplify_fixed(fill_curves, brush.gpencil_settings->fill_simplylvl);
+      }
     }
 
     bke::CurvesGeometry &dst_curves = info.target.drawing.strokes_for_write();
@@ -1956,7 +2143,7 @@ static wmOperatorStatus grease_pencil_erase_lasso_exec(bContext *C, wmOperator *
 
       IndexMaskMemory &memory = memories[drawing_i];
       const IndexMask curve_selection = IndexMask::from_predicate(
-          curves.curves_range(), GrainSize(512), memory, [&](const int64_t index) {
+          curves.curves_range(), memory, [&](const int64_t index) {
             /* For a single point curve, its screen_space_curve_bounds Bounds will be empty (by
              * definition), so intersecting will fail. Check if the single point is in the bounds
              * instead. */
@@ -1974,12 +2161,14 @@ static wmOperatorStatus grease_pencil_erase_lasso_exec(bContext *C, wmOperator *
       }
 
       Array<bool> points_to_remove(curves.points_num(), false);
-      curve_selection.foreach_index(GrainSize(512), [&](const int64_t curve_i) {
-        for (const int point : points_by_curve[curve_i]) {
-          points_to_remove[point] = is_point_inside_lasso(lasso,
-                                                          int2(screen_space_positions[point]));
-        }
-      });
+      curve_selection.foreach_index(
+          [&](const int64_t curve_i) {
+            for (const int point : points_by_curve[curve_i]) {
+              points_to_remove[point] = is_point_inside_lasso(lasso,
+                                                              int2(screen_space_positions[point]));
+            }
+          },
+          exec_mode::grain_size(512));
       points_to_remove_per_drawing[drawing_i] = IndexMask::from_bools(points_to_remove, memory);
     }
   });
@@ -2055,7 +2244,7 @@ static wmOperatorStatus grease_pencil_erase_box_exec(bContext *C, wmOperator *op
 
       IndexMaskMemory &memory = memories[drawing_i];
       points_to_remove_per_drawing[drawing_i] = IndexMask::from_predicate(
-          curves.points_range(), GrainSize(4096), memory, [&](const int64_t index) {
+          curves.points_range(), memory, [&](const int64_t index) {
             return is_point_inside_bounds(box_bounds, int2(screen_space_positions[index]));
           });
     }

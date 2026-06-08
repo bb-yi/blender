@@ -50,7 +50,7 @@ RegionAssetShelf *regiondata_duplicate(const RegionAssetShelf *shelf_regiondata)
   RegionAssetShelf *new_shelf_regiondata = MEM_new<RegionAssetShelf>(__func__);
   *new_shelf_regiondata = *shelf_regiondata;
 
-  BLI_listbase_clear(&new_shelf_regiondata->shelves);
+  new_shelf_regiondata->shelves.clear_no_delete();
   for (const AssetShelf &shelf : shelf_regiondata->shelves) {
     AssetShelf *new_shelf = MEM_new<AssetShelf>("duplicate asset shelf", dna::shallow_copy(shelf));
     new_shelf->settings = shelf.settings;
@@ -82,13 +82,11 @@ void regiondata_blend_write(BlendWriter *writer, const RegionAssetShelf *shelf_r
 
 void regiondata_blend_read_data(BlendDataReader *reader, RegionAssetShelf **shelf_regiondata)
 {
-  if (!*shelf_regiondata) {
+  if (!BLO_read_struct_nonnull(reader, RegionAssetShelf, shelf_regiondata)) {
     return;
   }
-
-  BLO_read_struct(reader, RegionAssetShelf, shelf_regiondata);
   if ((*shelf_regiondata)->active_shelf) {
-    BLO_read_struct(reader, AssetShelf, &(*shelf_regiondata)->active_shelf);
+    BLO_read_struct_nonnull(reader, AssetShelf, &(*shelf_regiondata)->active_shelf);
   }
 
   BLO_read_struct_list(reader, AssetShelf, &(*shelf_regiondata)->shelves);

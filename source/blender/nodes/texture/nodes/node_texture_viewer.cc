@@ -37,7 +37,7 @@ void register_node_type_tex_viewer()
 {
   static bke::bNodeType ntype;
 
-  tex_node_type_base(&ntype, "TextureNodeViewer", TEX_NODE_VIEWER);
+  tex_node_type_base(&ntype, "TextureNodeViewer"_ustr, TEX_NODE_VIEWER);
   ntype.ui_name = "Viewer";
   ntype.enum_name_legacy = "VIEWER";
   ntype.nclass = NODE_CLASS_OUTPUT;

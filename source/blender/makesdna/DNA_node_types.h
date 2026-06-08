@@ -12,11 +12,13 @@
 #include "DNA_defs.h"
 #include "DNA_listBase.h"
 #include "DNA_node_tree_interface_types.h"
-#include "DNA_scene_types.h" /* for #ImageFormatData */
+#include "DNA_scene_types.h"  /* for #ImageFormatData */
+#include "DNA_screen_types.h" /* For #TextboxState. */
 #include "DNA_texture_types.h"
 #include "DNA_vec_types.h" /* for #rctf */
 
 #include "BLI_enum_flags.hh"
+#include "BLI_ustring.hh"
 
 /** Workaround to forward-declare C++ type in C header. */
 #include "BLI_vector.hh"
@@ -65,13 +67,13 @@ struct NodeEnumDefinition;
 #define NODE_MAXSTR 64
 
 /** #bNodeStack.datatype (shade-tree only). */
-enum {
+enum eNodeStack_Datatype : short {
   NS_OSA_VECTORS = 1,
   NS_OSA_VALUES = 2,
 };
 
 /* node socket/node socket type -b conversion rules */
-enum {
+enum eNodeSocket_ConversionRule : short {
   NS_CR_CENTER = 0,
   NS_CR_NONE = 1,
   NS_CR_FIT_WIDTH = 2,
@@ -81,7 +83,7 @@ enum {
 };
 
 /** #bNodeSocket.type & #bNodeSocketType.type */
-enum eNodeSocketDatatype {
+enum eNodeSocketDatatype : short {
   SOCK_CUSTOM = -1, /* socket has no integer type */
   SOCK_FLOAT = 0,
   SOCK_VECTOR = 1,
@@ -107,10 +109,11 @@ enum eNodeSocketDatatype {
   SOCK_TEXT_ID = 21,
   SOCK_MASK = 22,
   SOCK_SOUND = 23,
+  SOCK_INT_VECTOR = 24,
 };
 
 /** Socket shape. */
-enum eNodeSocketDisplayShape {
+enum eNodeSocketDisplayShape : char {
   SOCK_DISPLAY_SHAPE_CIRCLE = 0,
   SOCK_DISPLAY_SHAPE_SQUARE = 1,
   SOCK_DISPLAY_SHAPE_DIAMOND = 2,
@@ -123,14 +126,15 @@ enum eNodeSocketDisplayShape {
 };
 
 /** Socket side (input/output). */
-enum eNodeSocketInOut {
+enum eNodeSocketInOut : short {
   SOCK_IN = 1 << 0,
   SOCK_OUT = 1 << 1,
 };
 ENUM_OPERATORS(eNodeSocketInOut);
 
 /** #bNodeSocket.flag, first bit is selection. */
-enum eNodeSocketFlag {
+enum eNodeSocketFlag : short {
+  SOCK_SELECT = (1 << 0),
   /** Hidden is user defined, to hide unused sockets. */
   SOCK_HIDDEN = (1 << 1),
   /** For quick check if socket is linked. */
@@ -161,8 +165,9 @@ enum eNodeSocketFlag {
   /** The panel containing the socket is collapsed. */
   SOCK_PANEL_COLLAPSED = (1 << 14),
 };
+ENUM_OPERATORS(eNodeSocketFlag)
 
-enum eNodePanelFlag {
+enum eNodePanelFlag : char {
   /* Panel is collapsed (user setting). */
   NODE_PANEL_COLLAPSED = (1 << 0),
   /* The parent panel is collapsed. */
@@ -170,6 +175,7 @@ enum eNodePanelFlag {
   /* The panel has visible content. */
   NODE_PANEL_CONTENT_VISIBLE = (1 << 2),
 };
+ENUM_OPERATORS(eNodePanelFlag)
 
 enum eViewerNodeShortcut {
   NODE_VIEWER_SHORTCUT_NONE = 0,
@@ -186,7 +192,7 @@ enum eViewerNodeShortcut {
   NODE_VIEWER_SHORCTUT_SLOT_9 = 9
 };
 
-enum NodeWarningPropagation {
+enum NodeWarningPropagation : int8_t {
   NODE_WARNING_PROPAGATION_ALL = 0,
   NODE_WARNING_PROPAGATION_NONE = 1,
   NODE_WARNING_PROPAGATION_ONLY_ERRORS = 2,
@@ -194,7 +200,7 @@ enum NodeWarningPropagation {
 };
 
 /** #bNode::flag */
-enum {
+enum eNode_Flag : int {
   NODE_SELECT = 1 << 0,
   NODE_OPTIONS = 1 << 1,
   NODE_PREVIEW = 1 << 2,
@@ -236,15 +242,16 @@ enum {
   /** Active node that is used to paint on. */
   NODE_ACTIVE_PAINT_CANVAS = 1 << 19,
 };
+ENUM_OPERATORS(eNode_Flag)
 
 /** bNode::update */
-enum {
+enum eNode_Update : short {
   /** Associated id data block has changed. */
   NODE_UPDATE_ID = 1,
 };
 
 /** #bNodeLink::flag */
-enum {
+enum eNodeLink_Flag : int {
   /** Node should be inserted on this link on drop. */
   NODE_LINK_INSERT_TARGET = 1 << 0,
   /** Link has been successfully validated. */
@@ -261,10 +268,10 @@ enum {
    */
   NODE_LINK_INSERT_TARGET_INVALID = 1 << 5,
 };
+ENUM_OPERATORS(eNodeLink_Flag)
 
 /** #NodeTree.type, index */
-
-enum {
+enum eNodeTree_Type : int {
   /** Represents #NodeTreeTypeUndefined type. */
   NTREE_UNDEFINED = -2,
   /** For dynamically registered custom types. */
@@ -276,7 +283,7 @@ enum {
 };
 
 /** #NodeTree.flag */
-enum {
+enum eNodeTree_Flag : int {
   /** For animation editors. */
   NTREE_DS_EXPAND = 1 << 0,
   /** Two pass. */
@@ -288,9 +295,15 @@ enum {
    * NOTE: DEPRECATED, use (id->tag & ID_TAG_LOCALIZED) instead.
    */
   // NTREE_IS_LOCALIZED = 1 << 5,
+  /**
+   * Internal tree for building gpu shaders. This enables context-dependent node declarations for
+   * adding "Weight" input sockets.
+   */
+  NTREE_IS_GPU_SHADER_INTERNAL = 1 << 6,
 };
+ENUM_OPERATORS(eNodeTree_Flag)
 
-enum eNodeTreeRuntimeFlag {
+enum eNodeTreeRuntimeFlag : int {
   /** There is a node that references an image with animation. */
   NTREE_RUNTIME_FLAG_HAS_IMAGE_ANIMATION = 1 << 0,
   /** There is a material output node in the group. */
@@ -298,6 +311,7 @@ enum eNodeTreeRuntimeFlag {
   /** There is a simulation zone in the group. */
   NTREE_RUNTIME_FLAG_HAS_SIMULATION_ZONE = 1 << 2,
 };
+ENUM_OPERATORS(eNodeTreeRuntimeFlag)
 
 enum GeometryNodeAssetTraitFlag {
   GEO_NODE_ASSET_TOOL = (1 << 0),
@@ -316,6 +330,11 @@ enum GeometryNodeAssetTraitFlag {
 };
 ENUM_OPERATORS(GeometryNodeAssetTraitFlag);
 
+enum CompositorNodeAssetTraitFlag {
+  COMPOSIT_NODE_ASSET_STRIP_MODIFIER = (1 << 0),
+};
+ENUM_OPERATORS(CompositorNodeAssetTraitFlag);
+
 /* Data structs, for `node->storage`. */
 
 enum CMPNodeMaskType {
@@ -332,7 +351,8 @@ enum CMPNodeDilateErodeMethod {
   CMP_NODE_DILATE_ERODE_DISTANCE_FEATHER = 3,
 };
 
-enum {
+/** #NodeInpaint.type */
+enum eNodeInpaint_Type : short {
   CMP_NODE_INPAINT_SIMPLE = 0,
 };
 
@@ -365,15 +385,15 @@ enum NodeGeometryViewerItemFlag {
   NODE_GEO_VIEWER_ITEM_FLAG_AUTO_REMOVE = (1 << 0),
 };
 
-enum NodeClosureFlag {
+enum NodeClosureFlag : uint8_t {
   NODE_CLOSURE_FLAG_DEFINE_SIGNATURE = (1 << 0),
 };
 
-enum NodeEvaluateClosureFlag {
+enum NodeEvaluateClosureFlag : uint8_t {
   NODE_EVALUATE_CLOSURE_FLAG_DEFINE_SIGNATURE = (1 << 0),
 };
 
-enum NodeGeometryTransformGizmoFlag {
+enum NodeGeometryTransformGizmoFlag : uint32_t {
   GEO_NODE_TRANSFORM_GIZMO_USE_TRANSLATION_X = 1 << 0,
   GEO_NODE_TRANSFORM_GIZMO_USE_TRANSLATION_Y = 1 << 1,
   GEO_NODE_TRANSFORM_GIZMO_USE_TRANSLATION_Z = 1 << 2,
@@ -384,6 +404,7 @@ enum NodeGeometryTransformGizmoFlag {
   GEO_NODE_TRANSFORM_GIZMO_USE_SCALE_Y = 1 << 7,
   GEO_NODE_TRANSFORM_GIZMO_USE_SCALE_Z = 1 << 8,
 };
+ENUM_OPERATORS(NodeGeometryTransformGizmoFlag)
 
 #define GEO_NODE_TRANSFORM_GIZMO_USE_TRANSLATION_ALL \
   (GEO_NODE_TRANSFORM_GIZMO_USE_TRANSLATION_X | GEO_NODE_TRANSFORM_GIZMO_USE_TRANSLATION_Y | \
@@ -401,34 +422,34 @@ enum NodeGeometryBakeItemFlag {
   GEO_NODE_BAKE_ITEM_IS_ATTRIBUTE = (1 << 0),
 };
 
-enum NodeCombineBundleFlag {
+enum NodeCombineBundleFlag : uint8_t {
   NODE_COMBINE_BUNDLE_FLAG_DEFINE_SIGNATURE = (1 << 0),
 };
 
-enum NodeSeparateBundleFlag {
+enum NodeSeparateBundleFlag : uint8_t {
   NODE_SEPARATE_BUNDLE_FLAG_DEFINE_SIGNATURE = (1 << 0),
 };
 
 /* script node mode */
-enum {
+enum eNodeScript_Mode : char {
   NODE_SCRIPT_INTERNAL = 0,
   NODE_SCRIPT_EXTERNAL = 1,
 };
 
 /* script node flag */
-enum {
+enum eNodeScript_Flag : char {
   NODE_SCRIPT_AUTO_UPDATE = 1,
 };
 
 /* IES node mode. */
-enum {
+enum eNodeIES_Mode : char {
   NODE_IES_INTERNAL = 0,
   NODE_IES_EXTERNAL = 1,
 };
 
 /* Frame node flags. */
 
-enum {
+enum eNodeFrame_Flag : char {
   /** Keep the bounding box minimal. */
   NODE_FRAME_SHRINK = 1,
   /** Test flag, if frame can be resized by user. */
@@ -437,19 +458,19 @@ enum {
 
 /* Proxy node flags. */
 
-enum {
+enum eNodeProxy_Flag : char {
   /** Automatically change output type based on link. */
   NODE_PROXY_AUTOTYPE = 1,
 };
 
 /* Conductive fresnel types */
-enum {
+enum eNodeConducetiveFresnel_Type : short {
   SHD_PHYSICAL_CONDUCTOR = 0,
   SHD_CONDUCTOR_F82 = 1,
 };
 
 /* glossy distributions */
-enum {
+enum eNodeGlossy_Dist : short {
   SHD_GLOSSY_BECKMANN = 0,
   SHD_GLOSSY_SHARP_DEPRECATED = 1, /* deprecated */
   SHD_GLOSSY_GGX = 2,
@@ -462,13 +483,13 @@ enum {
 #define SHD_SHEEN_MICROFIBER 1
 
 /* vector transform */
-enum {
+enum eNodeVectorTransform_Type : short {
   SHD_VECT_TRANSFORM_TYPE_VECTOR = 0,
   SHD_VECT_TRANSFORM_TYPE_POINT = 1,
   SHD_VECT_TRANSFORM_TYPE_NORMAL = 2,
 };
 
-enum {
+enum eNodeVectorTransform_Space : short {
   SHD_VECT_TRANSFORM_SPACE_WORLD = 0,
   SHD_VECT_TRANSFORM_SPACE_OBJECT = 1,
   SHD_VECT_TRANSFORM_SPACE_CAMERA = 2,
@@ -492,7 +513,7 @@ enum {
 };
 
 /** #NodeShaderAttribute.type */
-enum {
+enum eNodeShader_AttributeType : short {
   SHD_ATTRIBUTE_GEOMETRY = 0,
   SHD_ATTRIBUTE_OBJECT = 1,
   SHD_ATTRIBUTE_INSTANCER = 2,
@@ -500,32 +521,32 @@ enum {
 };
 
 /* toon modes */
-enum {
+enum eNodeToon_Mode : short {
   SHD_TOON_DIFFUSE = 0,
   SHD_TOON_GLOSSY = 1,
 };
 
 /* hair components */
-enum {
+enum eNodeHair_Component : short {
   SHD_HAIR_REFLECTION = 0,
   SHD_HAIR_TRANSMISSION = 1,
 };
 
 /* principled hair models */
-enum {
+enum eNodePrincipledHair_Model : short {
   SHD_PRINCIPLED_HAIR_CHIANG = 0,
   SHD_PRINCIPLED_HAIR_HUANG = 1,
 };
 
 /* principled hair color parametrization */
-enum {
+enum eNodePrincipledHair_Param : short {
   SHD_PRINCIPLED_HAIR_REFLECTANCE = 0,
   SHD_PRINCIPLED_HAIR_PIGMENT_CONCENTRATION = 1,
   SHD_PRINCIPLED_HAIR_DIRECT_ABSORPTION = 2,
 };
 
 /* blend texture */
-enum {
+enum eNodeBlend_Type : short {
   SHD_BLEND_LINEAR = 0,
   SHD_BLEND_QUADRATIC = 1,
   SHD_BLEND_EASING = 2,
@@ -536,7 +557,7 @@ enum {
 };
 
 /* noise basis for textures */
-enum {
+enum eNodeNoise_Basis : short {
   SHD_NOISE_PERLIN = 0,
   SHD_NOISE_VORONOI_F1 = 1,
   SHD_NOISE_VORONOI_F2 = 2,
@@ -547,21 +568,21 @@ enum {
   SHD_NOISE_CELL_NOISE = 7,
 };
 
-enum {
+enum eNodeNoise_Type : short {
   SHD_NOISE_SOFT = 0,
   SHD_NOISE_HARD = 1,
 };
 
 /* Voronoi Texture */
 
-enum {
+enum eNodeVoronoi_Dist : short {
   SHD_VORONOI_EUCLIDEAN = 0,
   SHD_VORONOI_MANHATTAN = 1,
   SHD_VORONOI_CHEBYCHEV = 2,
   SHD_VORONOI_MINKOWSKI = 3,
 };
 
-enum {
+enum eNodeVoronoi_Type : short {
   SHD_VORONOI_F1 = 0,
   SHD_VORONOI_F2 = 1,
   SHD_VORONOI_SMOOTH_F1 = 2,
@@ -570,7 +591,7 @@ enum {
 };
 
 /* Deprecated Musgrave Texture. Keep for Versioning */
-enum {
+enum eNodeMusgrave_Type : short {
   SHD_MUSGRAVE_MULTIFRACTAL = 0,
   SHD_MUSGRAVE_FBM = 1,
   SHD_MUSGRAVE_HYBRID_MULTIFRACTAL = 2,
@@ -579,7 +600,7 @@ enum {
 };
 
 /* Noise Texture */
-enum {
+enum eNodeNoiseTexture_Type : short {
   SHD_NOISE_MULTIFRACTAL = 0,
   SHD_NOISE_FBM = 1,
   SHD_NOISE_HYBRID_MULTIFRACTAL = 2,
@@ -588,33 +609,33 @@ enum {
 };
 
 /* wave texture */
-enum {
+enum eNodeWave_Type : short {
   SHD_WAVE_BANDS = 0,
   SHD_WAVE_RINGS = 1,
 };
 
-enum {
+enum eNodeWave_BandsDir : short {
   SHD_WAVE_BANDS_DIRECTION_X = 0,
   SHD_WAVE_BANDS_DIRECTION_Y = 1,
   SHD_WAVE_BANDS_DIRECTION_Z = 2,
   SHD_WAVE_BANDS_DIRECTION_DIAGONAL = 3,
 };
 
-enum {
+enum eNodeWave_RingsDir : short {
   SHD_WAVE_RINGS_DIRECTION_X = 0,
   SHD_WAVE_RINGS_DIRECTION_Y = 1,
   SHD_WAVE_RINGS_DIRECTION_Z = 2,
   SHD_WAVE_RINGS_DIRECTION_SPHERICAL = 3,
 };
 
-enum {
+enum eNodeWave_Profile : short {
   SHD_WAVE_PROFILE_SIN = 0,
   SHD_WAVE_PROFILE_SAW = 1,
   SHD_WAVE_PROFILE_TRI = 2,
 };
 
 /* sky texture */
-enum {
+enum eNodeSky_Type : short {
   SHD_SKY_PREETHAM = 0,
   SHD_SKY_HOSEK = 1,
   SHD_SKY_SINGLE_SCATTERING = 2,
@@ -622,17 +643,17 @@ enum {
 };
 
 /* environment texture */
-enum {
+enum eNodeProj_Env : short {
   SHD_PROJ_EQUIRECTANGULAR = 0,
   SHD_PROJ_MIRROR_BALL = 1,
 };
 
-enum NodeGaborType {
+enum NodeGaborType : char {
   SHD_GABOR_TYPE_2D = 0,
   SHD_GABOR_TYPE_3D = 1,
 };
 
-enum {
+enum eNodeImage_Extension : short {
   SHD_IMAGE_EXTENSION_REPEAT = 0,
   SHD_IMAGE_EXTENSION_EXTEND = 1,
   SHD_IMAGE_EXTENSION_CLIP = 2,
@@ -652,7 +673,7 @@ enum {
 };
 
 /* image texture */
-enum {
+enum eNodeProj_Image : short {
   SHD_PROJ_FLAT = 0,
   SHD_PROJ_BOX = 1,
   SHD_PROJ_SPHERE = 2,
@@ -660,7 +681,7 @@ enum {
 };
 
 /* image texture interpolation */
-enum {
+enum eNodeInterp_Image : short {
   SHD_INTERP_LINEAR = 0,
   SHD_INTERP_CLOSEST = 1,
   SHD_INTERP_CUBIC = 2,
@@ -668,20 +689,20 @@ enum {
 };
 
 /* tangent */
-enum {
+enum eNodeTangent_Type : short {
   SHD_TANGENT_RADIAL = 0,
   SHD_TANGENT_UVMAP = 1,
 };
 
 /* tangent */
-enum {
+enum eNodeTangent_Axis : short {
   SHD_TANGENT_AXIS_X = 0,
   SHD_TANGENT_AXIS_Y = 1,
   SHD_TANGENT_AXIS_Z = 2,
 };
 
 /* normal map, displacement space */
-enum {
+enum eNodeSpace_Normal : short {
   SHD_SPACE_TANGENT = 0,
   SHD_SPACE_OBJECT = 1,
   SHD_SPACE_WORLD = 2,
@@ -690,24 +711,25 @@ enum {
 };
 
 /* normal map, convention */
-enum {
+enum eNodeNormalMap_Convention : short {
   SHD_NORMAL_MAP_CONVENTION_OPENGL = 0,
   SHD_NORMAL_MAP_CONVENTION_DIRECTX = 1,
 };
 
 /* normal map, base */
-enum {
+enum eNodeNormalMap_Base : short {
   SHD_NORMAL_MAP_BASE_ORIGINAL = 0,
   SHD_NORMAL_MAP_BASE_DISPLACED = 1,
 };
 
-enum {
+enum eNodeAO_Flag : short {
   SHD_AO_INSIDE = 1,
   SHD_AO_LOCAL = 2,
 };
+ENUM_OPERATORS(eNodeAO_Flag)
 
 /** Mapping node vector types. */
-enum {
+enum eNodeMapping_VectorType : short {
   NODE_MAPPING_TYPE_POINT = 0,
   NODE_MAPPING_TYPE_TEXTURE = 1,
   NODE_MAPPING_TYPE_VECTOR = 2,
@@ -715,7 +737,7 @@ enum {
 };
 
 /** Rotation node vector types. */
-enum {
+enum eNodeVectorRotate_Type : short {
   NODE_VECTOR_ROTATE_TYPE_AXIS = 0,
   NODE_VECTOR_ROTATE_TYPE_AXIS_X = 1,
   NODE_VECTOR_ROTATE_TYPE_AXIS_Y = 2,
@@ -724,7 +746,7 @@ enum {
 };
 
 /* math node clamp */
-enum {
+enum eNodeShader_MathClamp : char {
   SHD_MATH_CLAMP = 1,
 };
 
@@ -822,7 +844,7 @@ enum NodeBooleanMathOperation {
   NODE_BOOLEAN_MATH_NIMPLY = 8,
 };
 
-enum NodeShaderMixMode {
+enum NodeShaderMixMode : int8_t {
   NODE_MIX_MODE_UNIFORM = 0,
   NODE_MIX_MODE_NON_UNIFORM = 1,
 };
@@ -859,7 +881,7 @@ enum NodeParallaxMode {
   SHD_PARALLAX_SECANT_RELIEF = 4,
 };
 
-enum NodeCompareMode {
+enum NodeCompareMode : int8_t {
   NODE_COMPARE_MODE_ELEMENT = 0,
   NODE_COMPARE_MODE_LENGTH = 1,
   NODE_COMPARE_MODE_AVERAGE = 2,
@@ -867,7 +889,7 @@ enum NodeCompareMode {
   NODE_COMPARE_MODE_DIRECTION = 4
 };
 
-enum NodeCompareOperation {
+enum NodeCompareOperation : int8_t {
   NODE_COMPARE_LESS_THAN = 0,
   NODE_COMPARE_LESS_EQUAL = 1,
   NODE_COMPARE_GREATER_THAN = 2,
@@ -907,13 +929,13 @@ enum FloatToIntRoundingMode {
 };
 
 /** Clamp node types. */
-enum {
+enum eNodeClamp_Type : char {
   NODE_CLAMP_MINMAX = 0,
   NODE_CLAMP_RANGE = 1,
 };
 
 /** Map range node types. */
-enum {
+enum eNodeMapRange_Type : char {
   NODE_MAP_RANGE_LINEAR = 0,
   NODE_MAP_RANGE_STEPPED = 1,
   NODE_MAP_RANGE_SMOOTHSTEP = 2,
@@ -921,26 +943,28 @@ enum {
 };
 
 /* mix rgb node flags */
-enum {
+enum eNodeShader_MixRgbFlag : char {
   SHD_MIXRGB_USE_ALPHA = 1,
   SHD_MIXRGB_CLAMP = 2,
 };
+ENUM_OPERATORS(eNodeShader_MixRgbFlag)
 
 /* Subsurface. */
 
-enum {
+enum eNodeSubsurface_Type : short {
 #ifdef DNA_DEPRECATED_ALLOW
   SHD_SUBSURFACE_COMPATIBLE = 0, /* Deprecated */
   SHD_SUBSURFACE_CUBIC = 1,
   SHD_SUBSURFACE_GAUSSIAN = 2,
 #endif
   SHD_SUBSURFACE_BURLEY = 3,
-  SHD_SUBSURFACE_RANDOM_WALK = 4,
+  SHD_SUBSURFACE_RANDOM_WALK_LEGACY = 4,
   SHD_SUBSURFACE_RANDOM_WALK_SKIN = 5,
+  SHD_SUBSURFACE_RANDOM_WALK = 6,
 };
 
 /* blur node */
-enum {
+enum eNodeBlur_Aspect : short {
   CMP_NODE_BLUR_ASPECT_NONE = 0,
   CMP_NODE_BLUR_ASPECT_Y = 1,
   CMP_NODE_BLUR_ASPECT_X = 2,
@@ -962,9 +986,10 @@ enum CMPExtensionMode {
 #define CMP_NODE_MASK_MBLUR_SAMPLES_MAX 64
 
 /* viewer and composite output. */
-enum {
+enum eNodeCompositor_OutputFlag : char {
   CMP_NODE_OUTPUT_IGNORE_ALPHA = 1,
 };
+ENUM_OPERATORS(eNodeCompositor_OutputFlag)
 
 /** Color Balance Node. Stored in `custom1`. */
 enum CMPNodeColorBalanceMethod {
@@ -1114,7 +1139,7 @@ enum CMPNodeDenoiseQuality {
 
 /* Color combine/separate modes */
 
-enum CMPNodeCombSepColorMode {
+enum CMPNodeCombSepColorMode : uint8_t {
   CMP_NODE_COMBSEP_COLOR_RGB = 0,
   CMP_NODE_COMBSEP_COLOR_HSV = 1,
   CMP_NODE_COMBSEP_COLOR_HSL = 2,
@@ -1165,8 +1190,22 @@ enum CMPNodeRelativeToPixelReferenceDimension {
   CMP_NODE_RELATIVE_TO_PIXEL_REFERENCE_DIMENSION_DIAGONAL = 5,
 };
 
+enum CMPNodeStringToImageHorizontalAlignment {
+  CMP_NODE_STRING_TO_IMAGE_HORIZONTAL_ALIGNMENT_LEFT = 0,
+  CMP_NODE_STRING_TO_IMAGE_HORIZONTAL_ALIGNMENT_CENTER = 1,
+  CMP_NODE_STRING_TO_IMAGE_HORIZONTAL_ALIGNMENT_RIGHT = 2,
+};
+
+enum CMPNodeStringToImageVerticalAlignment {
+  CMP_NODE_STRING_TO_IMAGE_VERTICAL_ALIGNMENT_TOP = 0,
+  CMP_NODE_STRING_TO_IMAGE_VERTICAL_ALIGNMENT_TOP_BASELINE = 1,
+  CMP_NODE_STRING_TO_IMAGE_VERTICAL_ALIGNMENT_MIDDLE = 2,
+  CMP_NODE_STRING_TO_IMAGE_VERTICAL_ALIGNMENT_BOTTOM_BASELINE = 3,
+  CMP_NODE_STRING_TO_IMAGE_VERTICAL_ALIGNMENT_BOTTOM = 4,
+};
+
 /* Scattering phase functions */
-enum {
+enum eNodeScattering_PhaseFunc : short {
   SHD_PHASE_HENYEY_GREENSTEIN = 0,
   SHD_PHASE_FOURNIER_FORAND = 1,
   SHD_PHASE_DRAINE = 2,
@@ -1346,7 +1385,7 @@ enum NodeFilterMaskMode {
 
 /* Geometry Nodes */
 
-enum GeometryNodeProximityTargetType {
+enum GeometryNodeProximityTargetType : uint8_t {
   GEO_NODE_PROX_TARGET_POINTS = 0,
   GEO_NODE_PROX_TARGET_EDGES = 1,
   GEO_NODE_PROX_TARGET_FACES = 2,
@@ -1357,17 +1396,18 @@ enum GeometryNodeCurvePrimitiveCircleMode {
   GEO_NODE_CURVE_PRIMITIVE_CIRCLE_TYPE_RADIUS = 1
 };
 
-enum GeometryNodeCurveHandleType {
+enum GeometryNodeCurveHandleType : uint8_t {
   GEO_NODE_CURVE_HANDLE_FREE = 0,
   GEO_NODE_CURVE_HANDLE_AUTO = 1,
   GEO_NODE_CURVE_HANDLE_VECTOR = 2,
   GEO_NODE_CURVE_HANDLE_ALIGN = 3
 };
 
-enum GeometryNodeCurveHandleMode {
+enum GeometryNodeCurveHandleMode : uint8_t {
   GEO_NODE_CURVE_HANDLE_LEFT = (1 << 0),
   GEO_NODE_CURVE_HANDLE_RIGHT = (1 << 1)
 };
+ENUM_OPERATORS(GeometryNodeCurveHandleMode)
 
 enum GeometryNodeDistributePointsInVolumeMode {
   GEO_NODE_DISTRIBUTE_POINTS_IN_VOLUME_DENSITY_RANDOM = 0,
@@ -1379,7 +1419,7 @@ enum GeometryNodeDistributePointsOnFacesMode {
   GEO_NODE_POINT_DISTRIBUTE_POINTS_ON_FACES_POISSON = 1,
 };
 
-enum GeometryNodeExtrudeMeshMode {
+enum GeometryNodeExtrudeMeshMode : uint8_t {
   GEO_NODE_EXTRUDE_MESH_VERTICES = 0,
   GEO_NODE_EXTRUDE_MESH_EDGES = 1,
   GEO_NODE_EXTRUDE_MESH_FACES = 2,
@@ -1408,28 +1448,28 @@ enum NodeAlignEulerToVectorPivotAxis {
   FN_NODE_ALIGN_EULER_TO_VECTOR_PIVOT_AXIS_Z = 3,
 };
 
-enum GeometryNodeTransformSpace {
+enum GeometryNodeTransformSpace : uint8_t {
   GEO_NODE_TRANSFORM_SPACE_ORIGINAL = 0,
   GEO_NODE_TRANSFORM_SPACE_RELATIVE = 1,
 };
 
-enum GeometryNodePointsToVolumeResolutionMode {
+enum GeometryNodePointsToVolumeResolutionMode : uint8_t {
   GEO_NODE_POINTS_TO_VOLUME_RESOLUTION_MODE_AMOUNT = 0,
   GEO_NODE_POINTS_TO_VOLUME_RESOLUTION_MODE_SIZE = 1,
 };
 
-enum GeometryNodeMeshCircleFillType {
+enum GeometryNodeMeshCircleFillType : uint8_t {
   GEO_NODE_MESH_CIRCLE_FILL_NONE = 0,
   GEO_NODE_MESH_CIRCLE_FILL_NGON = 1,
   GEO_NODE_MESH_CIRCLE_FILL_TRIANGLE_FAN = 2,
 };
 
-enum GeometryNodeMergeByDistanceMode {
+enum GeometryNodeMergeByDistanceMode : uint8_t {
   GEO_NODE_MERGE_BY_DISTANCE_MODE_ALL = 0,
   GEO_NODE_MERGE_BY_DISTANCE_MODE_CONNECTED = 1,
 };
 
-enum GeometryNodeUVUnwrapMethod {
+enum GeometryNodeUVUnwrapMethod : uint8_t {
   GEO_NODE_UV_UNWRAP_METHOD_ANGLE_BASED = 0,
   GEO_NODE_UV_UNWRAP_METHOD_CONFORMAL = 1,
   GEO_NODE_UV_UNWRAP_METHOD_MINIMUM_STRETCH = 2,
@@ -1439,27 +1479,27 @@ enum GeometryNodeRealizeInstanceFlag {
   GEO_NODE_REALIZE_TO_POINT_DOMAIN = (1 << 0),
 };
 
-enum GeometryNodeMeshLineMode {
+enum GeometryNodeMeshLineMode : uint8_t {
   GEO_NODE_MESH_LINE_MODE_END_POINTS = 0,
   GEO_NODE_MESH_LINE_MODE_OFFSET = 1,
 };
 
-enum GeometryNodeMeshLineCountMode {
+enum GeometryNodeMeshLineCountMode : uint8_t {
   GEO_NODE_MESH_LINE_COUNT_TOTAL = 0,
   GEO_NODE_MESH_LINE_COUNT_RESOLUTION = 1,
 };
 
-enum GeometryNodeCurvePrimitiveArcMode {
+enum GeometryNodeCurvePrimitiveArcMode : uint8_t {
   GEO_NODE_CURVE_PRIMITIVE_ARC_TYPE_POINTS = 0,
   GEO_NODE_CURVE_PRIMITIVE_ARC_TYPE_RADIUS = 1,
 };
 
-enum GeometryNodeCurvePrimitiveLineMode {
+enum GeometryNodeCurvePrimitiveLineMode : uint8_t {
   GEO_NODE_CURVE_PRIMITIVE_LINE_MODE_POINTS = 0,
   GEO_NODE_CURVE_PRIMITIVE_LINE_MODE_DIRECTION = 1
 };
 
-enum GeometryNodeCurvePrimitiveQuadMode {
+enum GeometryNodeCurvePrimitiveQuadMode : uint8_t {
   GEO_NODE_CURVE_PRIMITIVE_QUAD_MODE_RECTANGLE = 0,
   GEO_NODE_CURVE_PRIMITIVE_QUAD_MODE_PARALLELOGRAM = 1,
   GEO_NODE_CURVE_PRIMITIVE_QUAD_MODE_TRAPEZOID = 2,
@@ -1467,65 +1507,65 @@ enum GeometryNodeCurvePrimitiveQuadMode {
   GEO_NODE_CURVE_PRIMITIVE_QUAD_MODE_POINTS = 4,
 };
 
-enum GeometryNodeCurvePrimitiveBezierSegmentMode {
+enum GeometryNodeCurvePrimitiveBezierSegmentMode : uint8_t {
   GEO_NODE_CURVE_PRIMITIVE_BEZIER_SEGMENT_POSITION = 0,
   GEO_NODE_CURVE_PRIMITIVE_BEZIER_SEGMENT_OFFSET = 1,
 };
 
-enum GeometryNodeCurveResampleMode {
+enum GeometryNodeCurveResampleMode : uint8_t {
   GEO_NODE_CURVE_RESAMPLE_COUNT = 0,
   GEO_NODE_CURVE_RESAMPLE_LENGTH = 1,
   GEO_NODE_CURVE_RESAMPLE_EVALUATED = 2,
 };
 
-enum GeometryNodeCurveSampleMode {
+enum GeometryNodeCurveSampleMode : uint8_t {
   GEO_NODE_CURVE_SAMPLE_FACTOR = 0,
   GEO_NODE_CURVE_SAMPLE_LENGTH = 1,
 };
 
-enum GeometryNodeCurveFilletMode {
+enum GeometryNodeCurveFilletMode : uint8_t {
   GEO_NODE_CURVE_FILLET_BEZIER = 0,
   GEO_NODE_CURVE_FILLET_POLY = 1,
 };
 
-enum GeometryNodeAttributeTransferMode {
+enum GeometryNodeAttributeTransferMode : uint8_t {
   GEO_NODE_ATTRIBUTE_TRANSFER_NEAREST_FACE_INTERPOLATED = 0,
   GEO_NODE_ATTRIBUTE_TRANSFER_NEAREST = 1,
   GEO_NODE_ATTRIBUTE_TRANSFER_INDEX = 2,
 };
 
-enum GeometryNodeRaycastMapMode {
+enum GeometryNodeRaycastMapMode : uint8_t {
   GEO_NODE_RAYCAST_INTERPOLATED = 0,
   GEO_NODE_RAYCAST_NEAREST = 1,
 };
 
-enum GeometryNodeCurveFillMode {
+enum GeometryNodeCurveFillMode : uint8_t {
   GEO_NODE_CURVE_FILL_MODE_TRIANGULATED = 0,
   GEO_NODE_CURVE_FILL_MODE_NGONS = 1,
 };
 
 /** See #CDT_output_type in BLI_delaunay_2d.hh for winding rule details. */
-enum GeometryNodeCurveFillRule {
+enum GeometryNodeCurveFillRule : uint8_t {
   /** Even-odd winding rule for hole detection. */
   GEO_NODE_CURVE_FILL_RULE_EVEN_ODD = 0,
   /** Non-zero winding rule. */
   GEO_NODE_CURVE_FILL_RULE_NON_ZERO = 1,
 };
 
-enum GeometryNodeMeshToPointsMode {
+enum GeometryNodeMeshToPointsMode : uint8_t {
   GEO_NODE_MESH_TO_POINTS_VERTICES = 0,
   GEO_NODE_MESH_TO_POINTS_EDGES = 1,
   GEO_NODE_MESH_TO_POINTS_FACES = 2,
   GEO_NODE_MESH_TO_POINTS_CORNERS = 3,
 };
 
-enum GeometryNodeStringToCurvesOverflowMode {
+enum GeometryNodeStringToCurvesOverflowMode : uint8_t {
   GEO_NODE_STRING_TO_CURVES_MODE_OVERFLOW = 0,
   GEO_NODE_STRING_TO_CURVES_MODE_SCALE_TO_FIT = 1,
   GEO_NODE_STRING_TO_CURVES_MODE_TRUNCATE = 2,
 };
 
-enum GeometryNodeStringToCurvesAlignXMode {
+enum GeometryNodeStringToCurvesAlignXMode : uint8_t {
   GEO_NODE_STRING_TO_CURVES_ALIGN_X_LEFT = 0,
   GEO_NODE_STRING_TO_CURVES_ALIGN_X_CENTER = 1,
   GEO_NODE_STRING_TO_CURVES_ALIGN_X_RIGHT = 2,
@@ -1533,7 +1573,7 @@ enum GeometryNodeStringToCurvesAlignXMode {
   GEO_NODE_STRING_TO_CURVES_ALIGN_X_FLUSH = 4,
 };
 
-enum GeometryNodeStringToCurvesAlignYMode {
+enum GeometryNodeStringToCurvesAlignYMode : uint8_t {
   GEO_NODE_STRING_TO_CURVES_ALIGN_Y_TOP_BASELINE = 0,
   GEO_NODE_STRING_TO_CURVES_ALIGN_Y_TOP = 1,
   GEO_NODE_STRING_TO_CURVES_ALIGN_Y_MIDDLE = 2,
@@ -1541,7 +1581,7 @@ enum GeometryNodeStringToCurvesAlignYMode {
   GEO_NODE_STRING_TO_CURVES_ALIGN_Y_BOTTOM = 4,
 };
 
-enum GeometryNodeStringToCurvesPivotMode {
+enum GeometryNodeStringToCurvesPivotMode : uint8_t {
   GEO_NODE_STRING_TO_CURVES_PIVOT_MODE_MIDPOINT = 0,
   GEO_NODE_STRING_TO_CURVES_PIVOT_MODE_TOP_LEFT = 1,
   GEO_NODE_STRING_TO_CURVES_PIVOT_MODE_TOP_CENTER = 2,
@@ -1551,7 +1591,7 @@ enum GeometryNodeStringToCurvesPivotMode {
   GEO_NODE_STRING_TO_CURVES_PIVOT_MODE_BOTTOM_RIGHT = 6,
 };
 
-enum GeometryNodeDeleteGeometryMode {
+enum GeometryNodeDeleteGeometryMode : int8_t {
   GEO_NODE_DELETE_GEOMETRY_MODE_ALL = 0,
   GEO_NODE_DELETE_GEOMETRY_MODE_EDGE_FACE = 1,
   GEO_NODE_DELETE_GEOMETRY_MODE_ONLY_FACE = 2,
@@ -1562,13 +1602,13 @@ enum GeometryNodeScaleElementsMode {
   GEO_NODE_SCALE_ELEMENTS_SINGLE_AXIS = 1,
 };
 
-enum NodeCombSepColorMode {
+enum NodeCombSepColorMode : int8_t {
   NODE_COMBSEP_COLOR_RGB = 0,
   NODE_COMBSEP_COLOR_HSV = 1,
   NODE_COMBSEP_COLOR_HSL = 2,
 };
 
-enum GeometryNodeGizmoColor {
+enum GeometryNodeGizmoColor : int {
   GEO_NODE_GIZMO_COLOR_PRIMARY = 0,
   GEO_NODE_GIZMO_COLOR_SECONDARY = 1,
   GEO_NODE_GIZMO_COLOR_X = 2,
@@ -1576,7 +1616,7 @@ enum GeometryNodeGizmoColor {
   GEO_NODE_GIZMO_COLOR_Z = 4,
 };
 
-enum GeometryNodeLinearGizmoDrawStyle {
+enum GeometryNodeLinearGizmoDrawStyle : int {
   GEO_NODE_LINEAR_GIZMO_DRAW_STYLE_ARROW = 0,
   GEO_NODE_LINEAR_GIZMO_DRAW_STYLE_CROSS = 1,
   GEO_NODE_LINEAR_GIZMO_DRAW_STYLE_BOX = 2,
@@ -1596,7 +1636,7 @@ struct bNodeStack {
   /** When output is linked, tagged before executing. */
   short hasoutput = 0;
   /** Type of data pointer. */
-  short datatype = 0;
+  eNodeStack_Datatype datatype = {};
   /** Type of socket stack comes from, to remap linking different sockets. */
   short sockettype = 0;
   /** Data is a copy of external data (no freeing). */
@@ -1621,11 +1661,10 @@ struct bNodeSocket {
   void *storage = nullptr;
 
   /**
-   * The socket's data type. #eNodeSocketDatatype.
+   * The socket's data type.
    */
-  short type = 0;
-  /** #eNodeSocketFlag */
-  short flag = 0;
+  eNodeSocketDatatype type = {};
+  eNodeSocketFlag flag = {};
   /**
    * Maximum number of links that can connect to the socket. Read via #nodeSocketLinkLimit, because
    * the limit might be defined on the socket type, in which case this value does not have any
@@ -1634,7 +1673,7 @@ struct bNodeSocket {
    */
   short limit = 0;
   /** Input/output type. */
-  short in_out = 0;
+  eNodeSocketInOut in_out = {};
   /** Runtime type information. */
   bke::bNodeSocketType *typeinfo = nullptr;
   /** Runtime type identifier. */
@@ -1645,7 +1684,7 @@ struct bNodeSocket {
 
   /** Local stack index for "node_exec". */
   int stack_index = 0;
-  char display_shape = 0;
+  eNodeSocketDisplayShape display_shape = SOCK_DISPLAY_SHAPE_CIRCLE;
 
   /* #AttrDomain used when the geometry nodes modifier creates an attribute for a group
    * output. */
@@ -1684,6 +1723,9 @@ struct bNodeSocket {
   bke::bNodeSocketRuntime *runtime = nullptr;
 
 #ifdef __cplusplus
+  /** The cached #UString that matches the socket identifier. */
+  UString identifier_ustr() const;
+
   /**
    * Whether the socket is hidden in a way that the user can control.
    *
@@ -1788,8 +1830,7 @@ struct bNodeSocket {
 struct bNodePanelState {
   /* Unique identifier for validating state against panels in node declaration. */
   int identifier = 0;
-  /* eNodePanelFlag */
-  char flag = 0;
+  eNodePanelFlag flag = {};
   char _pad[3] = {};
 
 #ifdef __cplusplus
@@ -1817,7 +1858,7 @@ struct bNode {
    */
   int32_t identifier = 0;
 
-  int flag = 0;
+  eNode_Flag flag = {};
 
   /**
    * String identifier of the type like "FunctionNodeCompare". Stored in files to allow retrieving
@@ -1859,10 +1900,7 @@ struct bNode {
   int16_t custom1 = 0, custom2 = 0;
   float custom3 = 0, custom4 = 0;
 
-  /**
-   * #NodeWarningPropagation.
-   */
-  int8_t warning_propagation = 0;
+  NodeWarningPropagation warning_propagation = NODE_WARNING_PROPAGATION_ALL;
   char _pad[7] = {};
 
   /**
@@ -1931,7 +1969,7 @@ struct bNode {
    * to catch typos earlier. One can compare with `bNodeType::idname` directly if the idname might
    * not be registered.
    */
-  bool is_type(StringRef query_idname) const;
+  bool is_type(UString query_idname) const;
 
   const nodes::NodeDeclaration *declaration() const;
   /** A span containing all internal links when the node is muted. */
@@ -1960,10 +1998,10 @@ struct bNode {
   bNodeSocket &output_socket(int index);
   const bNodeSocket &output_socket(int index) const;
   /** Lookup socket of this node by its identifier. */
-  const bNodeSocket *input_by_identifier(StringRef identifier) const;
-  const bNodeSocket *output_by_identifier(StringRef identifier) const;
-  bNodeSocket *input_by_identifier(StringRef identifier);
-  bNodeSocket *output_by_identifier(StringRef identifier);
+  const bNodeSocket *input_by_identifier(UString identifier) const;
+  const bNodeSocket *output_by_identifier(UString identifier) const;
+  bNodeSocket *input_by_identifier(UString identifier);
+  bNodeSocket *output_by_identifier(UString identifier);
   /** Lookup socket by its declaration. */
   const bNodeSocket &socket_by_decl(const nodes::SocketDeclaration &decl) const;
   bNodeSocket &socket_by_decl(const nodes::SocketDeclaration &decl);
@@ -1985,35 +2023,20 @@ struct bNodeInstanceKey {
   unsigned int value = 0;
 
 #ifdef __cplusplus
-  inline bool operator==(const bNodeInstanceKey &other) const
+  bool operator==(const bNodeInstanceKey &other) const
   {
     return value == other.value;
   }
-  inline bool operator!=(const bNodeInstanceKey &other) const
+  bool operator!=(const bNodeInstanceKey &other) const
   {
     return !(*this == other);
   }
 
-  inline uint64_t hash() const
+  uint64_t hash() const
   {
     return value;
   }
 #endif
-};
-
-/**
- * Base struct for entries in node instance hash.
- *
- * \warning pointers are cast to this struct internally,
- * it must be first member in hash entry structs!
- */
-#
-#
-struct bNodeInstanceHashEntry {
-  bNodeInstanceKey key;
-
-  /** Tags for cleaning the cache. */
-  short tag = 0;
 };
 
 struct bNodeLink {
@@ -2022,7 +2045,7 @@ struct bNodeLink {
   bNode *fromnode = nullptr, *tonode = nullptr;
   bNodeSocket *fromsock = nullptr, *tosock = nullptr;
 
-  int flag = 0;
+  eNodeLink_Flag flag = {};
   /**
    * Determines the order in which links are connected to a multi-input socket.
    * For historical reasons, larger ids come before lower ids.
@@ -2090,18 +2113,22 @@ struct bNodeTree {
   struct bGPdata *gpd = nullptr;
   /** Node tree stores its own offset for consistent editor view. */
   float view_center[2] = {};
+  /** Width of the current view. Used to store and set zoom level. */
+  float view_width = 0.0f;
+
+  char _pad[4];
 
   ListBaseT<bNode> nodes;
   ListBaseT<bNodeLink> links;
 
-  int type = 0;
+  eNodeTree_Type type = {};
 
   /**
    * Sockets in groups have unique identifiers, adding new sockets always
    * will increase this counter.
    */
   int cur_index = 0;
-  int flag = 0;
+  eNodeTree_Flag flag = {};
 
   /** Tile size for compositor engine. */
   DNA_DEPRECATED int chunksize = 0;
@@ -2145,6 +2172,7 @@ struct bNodeTree {
   bNestedNodeRef *nested_node_refs = nullptr;
 
   struct GeometryNodeAssetTraits *geometry_node_asset_traits = nullptr;
+  struct CompositorNodeAssetTraits *compositor_node_asset_traits = nullptr;
 
   /** Image representing what the node group does. */
   struct PreviewImage *preview = nullptr;
@@ -2193,8 +2221,8 @@ struct bNodeTree {
   Span<bNodeSocket *> all_sockets();
   Span<const bNodeSocket *> all_sockets() const;
   /** Efficient lookup of all nodes with a specific type. */
-  Span<bNode *> nodes_by_type(StringRefNull type_idname);
-  Span<const bNode *> nodes_by_type(StringRefNull type_idname) const;
+  Span<bNode *> nodes_by_type(UString type_idname);
+  Span<const bNode *> nodes_by_type(UString type_idname) const;
   /** Frame nodes without any parents. */
   Span<bNode *> root_frames() const;
   /** A span containing all links in the node tree. */
@@ -2244,6 +2272,9 @@ struct bNodeTree {
   int interface_input_index(const bNodeTreeInterfaceSocket &io_socket) const;
   int interface_output_index(const bNodeTreeInterfaceSocket &io_socket) const;
   int interface_item_index(const bNodeTreeInterfaceItem &io_item) const;
+
+  int interface_input_index_by_identifier(StringRef identifier) const;
+  int interface_output_index_by_identifier(StringRef identifier) const;
 #endif
 };
 
@@ -2276,6 +2307,16 @@ struct bNodeSocketValueVector {
   float value[4] = {};
   float min = 0, max = 0;
   /* The number of dimensions of the vector. Can be 2, 3, or 4. */
+  int dimensions = 0;
+};
+
+struct bNodeSocketValueIntVector {
+  /** RNA subtype. */
+  int subtype = 0;
+  /* Only some of the values might be used depending on the dimensions. */
+  int value[3] = {};
+  int min = 0, max = 0;
+  /* The number of dimensions of the vector. Can be 2 or 3. */
   int dimensions = 0;
 };
 
@@ -2352,6 +2393,12 @@ struct GeometryNodeAssetTraits {
   char *node_tool_idname = nullptr;
 };
 
+struct CompositorNodeAssetTraits {
+  /* #CompositorNodeAssetTraitFlag. */
+  int flag = 0;
+  char _pad[4] = {};
+};
+
 struct NodeFrame {
   DNA_DEFINE_CXX_METHODS(NodeFrame)
 
@@ -2361,6 +2408,13 @@ struct NodeFrame {
 
 struct NodeReroute {
   DNA_DEFINE_CXX_METHODS(NodeReroute)
+
+  /** Name of the socket type (e.g. `NodeSocketFloat`). */
+  char type_idname[64] = "";
+};
+
+struct NodeImplicitConversion {
+  DNA_DEFINE_CXX_METHODS(NodeImplicitConversion)
 
   /** Name of the socket type (e.g. `NodeSocketFloat`). */
   char type_idname[64] = "";
@@ -2526,7 +2580,7 @@ struct NodeCompositorFileOutputItem {
   int identifier = 0;
   /* The type of socket for the item, which is limited to the types listed in the
    * FileOutputItemsAccessor::supports_socket_type. */
-  int16_t socket_type = 0;
+  eNodeSocketDatatype socket_type = {};
   /* The number of dimensions in the vector socket if the socket type is vector, otherwise, it is
    * unused, */
   char vector_socket_dimensions = 0;
@@ -2562,7 +2616,9 @@ struct NodeCompositorFileOutput {
   int active_item_index = 0;
   /* Apply the render part of the display transform when saving non-linear images. */
   char save_as_render = 0;
-  char _pad[7] = {};
+  /* Add a file extension to the file name. */
+  char use_file_extension = 0;
+  char _pad[6] = {};
 };
 
 struct NodeImageMultiFileSocket {
@@ -2626,8 +2682,7 @@ struct NodeVertexCol {
 struct NodeCMPCombSepColor {
   DNA_DEFINE_CXX_METHODS(NodeCMPCombSepColor)
 
-  /* CMPNodeCombSepColorMode */
-  uint8_t mode = 0;
+  CMPNodeCombSepColorMode mode = CMP_NODE_COMBSEP_COLOR_RGB;
   uint8_t ycc_mode = 0;
 };
 
@@ -2867,8 +2922,7 @@ struct NodeTexGabor {
   DNA_DEFINE_CXX_METHODS(NodeTexGabor)
 
   NodeTexBase base;
-  /* Stores NodeGaborType. */
-  char type = 0;
+  NodeGaborType type = SHD_GABOR_TYPE_2D;
   char _pad[7] = {};
 };
 
@@ -3362,6 +3416,13 @@ struct NodeInputInt {
   int integer = 0;
 };
 
+struct NodeInputMenu {
+  DNA_DEFINE_CXX_METHODS(NodeInputMenu)
+
+  /* Note: enum items are determined by the node output socket. */
+  int value = 0;
+};
+
 struct NodeInputRotation {
   DNA_DEFINE_CXX_METHODS(NodeInputRotation)
 
@@ -3371,7 +3432,15 @@ struct NodeInputRotation {
 struct NodeInputVector {
   DNA_DEFINE_CXX_METHODS(NodeInputVector)
 
-  float vector[3] = {};
+  float vector[4] = {};
+  int dimensions = 3;
+};
+
+struct NodeInputIntVector {
+  DNA_DEFINE_CXX_METHODS(NodeInputIntVector)
+
+  int vector[3] = {};
+  int dimensions = 3;
 };
 
 struct NodeInputColor {
@@ -3384,41 +3453,38 @@ struct NodeInputString {
   DNA_DEFINE_CXX_METHODS(NodeInputString)
 
   char *string = nullptr;
+  TextboxState textbox_state;
 };
 
 struct NodeGeometryExtrudeMesh {
   DNA_DEFINE_CXX_METHODS(NodeGeometryExtrudeMesh)
 
-  /** #GeometryNodeExtrudeMeshMode */
-  uint8_t mode = 0;
+  GeometryNodeExtrudeMeshMode mode = GEO_NODE_EXTRUDE_MESH_VERTICES;
 };
 
 struct NodeGeometryObjectInfo {
   DNA_DEFINE_CXX_METHODS(NodeGeometryObjectInfo)
 
-  /** #GeometryNodeTransformSpace. */
-  uint8_t transform_space = 0;
+  GeometryNodeTransformSpace transform_space = GEO_NODE_TRANSFORM_SPACE_ORIGINAL;
 };
 
 struct NodeGeometryPointsToVolume {
   DNA_DEFINE_CXX_METHODS(NodeGeometryPointsToVolume)
 
-  /** #GeometryNodePointsToVolumeResolutionMode */
-  uint8_t resolution_mode = 0;
+  GeometryNodePointsToVolumeResolutionMode resolution_mode =
+      GEO_NODE_POINTS_TO_VOLUME_RESOLUTION_MODE_AMOUNT;
 };
 
 struct NodeGeometryCollectionInfo {
   DNA_DEFINE_CXX_METHODS(NodeGeometryCollectionInfo)
 
-  /** #GeometryNodeTransformSpace. */
-  uint8_t transform_space = 0;
+  GeometryNodeTransformSpace transform_space = GEO_NODE_TRANSFORM_SPACE_ORIGINAL;
 };
 
 struct NodeGeometryProximity {
   DNA_DEFINE_CXX_METHODS(NodeGeometryProximity)
 
-  /** #GeometryNodeProximityTargetType. */
-  uint8_t target_element = 0;
+  GeometryNodeProximityTargetType target_element = GEO_NODE_PROX_TARGET_POINTS;
 };
 
 struct NodeGeometryVolumeToMesh {
@@ -3447,45 +3513,38 @@ struct NodeGeometrySubdivisionSurface {
 struct NodeGeometryMeshCircle {
   DNA_DEFINE_CXX_METHODS(NodeGeometryMeshCircle)
 
-  /** #GeometryNodeMeshCircleFillType. */
-  uint8_t fill_type = 0;
+  GeometryNodeMeshCircleFillType fill_type = GEO_NODE_MESH_CIRCLE_FILL_NONE;
 };
 
 struct NodeGeometryMeshCylinder {
   DNA_DEFINE_CXX_METHODS(NodeGeometryMeshCylinder)
 
-  /** #GeometryNodeMeshCircleFillType. */
-  uint8_t fill_type = 0;
+  GeometryNodeMeshCircleFillType fill_type = GEO_NODE_MESH_CIRCLE_FILL_NONE;
 };
 
 struct NodeGeometryMeshCone {
   DNA_DEFINE_CXX_METHODS(NodeGeometryMeshCone)
 
-  /** #GeometryNodeMeshCircleFillType. */
-  uint8_t fill_type = 0;
+  GeometryNodeMeshCircleFillType fill_type = GEO_NODE_MESH_CIRCLE_FILL_NONE;
 };
 
 struct NodeGeometryMergeByDistance {
   DNA_DEFINE_CXX_METHODS(NodeGeometryMergeByDistance)
 
-  /** #GeometryNodeMergeByDistanceMode. */
-  uint8_t mode = 0;
+  GeometryNodeMergeByDistanceMode mode = GEO_NODE_MERGE_BY_DISTANCE_MODE_ALL;
 };
 
 struct NodeGeometryMeshLine {
   DNA_DEFINE_CXX_METHODS(NodeGeometryMeshLine)
 
-  /** #GeometryNodeMeshLineMode. */
-  uint8_t mode = 0;
-  /** #GeometryNodeMeshLineCountMode. */
-  uint8_t count_mode = 0;
+  GeometryNodeMeshLineMode mode = GEO_NODE_MESH_LINE_MODE_END_POINTS;
+  GeometryNodeMeshLineCountMode count_mode = GEO_NODE_MESH_LINE_COUNT_TOTAL;
 };
 
 struct NodeSwitch {
   DNA_DEFINE_CXX_METHODS(NodeSwitch)
 
-  /** #eNodeSocketDatatype. */
-  uint8_t input_type = 0;
+  eNodeSocketDatatype input_type = {};
 };
 
 struct NodeEnumItem {
@@ -3517,9 +3576,8 @@ struct NodeMenuSwitch {
 
   NodeEnumDefinition enum_definition;
 
-  /** #eNodeSocketDatatype. */
-  uint8_t data_type = 0;
-  char _pad[7] = {};
+  eNodeSocketDatatype data_type = {};
+  char _pad[6] = {};
 };
 
 struct NodeGeometryCurveSplineType {
@@ -3532,47 +3590,40 @@ struct NodeGeometryCurveSplineType {
 struct NodeGeometrySetCurveHandlePositions {
   DNA_DEFINE_CXX_METHODS(NodeGeometrySetCurveHandlePositions)
 
-  /** #GeometryNodeCurveHandleMode. */
-  uint8_t mode = 0;
+  GeometryNodeCurveHandleMode mode = {};
 };
 
 struct NodeGeometryCurveSetHandles {
   DNA_DEFINE_CXX_METHODS(NodeGeometryCurveSetHandles)
 
-  /** #GeometryNodeCurveHandleType. */
-  uint8_t handle_type = 0;
-  /** #GeometryNodeCurveHandleMode. */
-  uint8_t mode = 0;
+  GeometryNodeCurveHandleType handle_type = GEO_NODE_CURVE_HANDLE_FREE;
+  GeometryNodeCurveHandleMode mode = {};
 };
 
 struct NodeGeometryCurveSelectHandles {
   DNA_DEFINE_CXX_METHODS(NodeGeometryCurveSelectHandles)
 
-  /** #GeometryNodeCurveHandleType. */
-  uint8_t handle_type = 0;
-  /** #GeometryNodeCurveHandleMode. */
-  uint8_t mode = 0;
+  GeometryNodeCurveHandleType handle_type = GEO_NODE_CURVE_HANDLE_FREE;
+  GeometryNodeCurveHandleMode mode = {};
 };
 
 struct NodeGeometryCurvePrimitiveArc {
   DNA_DEFINE_CXX_METHODS(NodeGeometryCurvePrimitiveArc)
 
-  /** #GeometryNodeCurvePrimitiveArcMode. */
-  uint8_t mode = 0;
+  GeometryNodeCurvePrimitiveArcMode mode = GEO_NODE_CURVE_PRIMITIVE_ARC_TYPE_POINTS;
 };
 
 struct NodeGeometryCurvePrimitiveLine {
   DNA_DEFINE_CXX_METHODS(NodeGeometryCurvePrimitiveLine)
 
-  /** #GeometryNodeCurvePrimitiveLineMode. */
-  uint8_t mode = 0;
+  GeometryNodeCurvePrimitiveLineMode mode = GEO_NODE_CURVE_PRIMITIVE_LINE_MODE_POINTS;
 };
 
 struct NodeGeometryCurvePrimitiveBezierSegment {
   DNA_DEFINE_CXX_METHODS(NodeGeometryCurvePrimitiveBezierSegment)
 
-  /** #GeometryNodeCurvePrimitiveBezierSegmentMode. */
-  uint8_t mode = 0;
+  GeometryNodeCurvePrimitiveBezierSegmentMode mode =
+      GEO_NODE_CURVE_PRIMITIVE_BEZIER_SEGMENT_POSITION;
 };
 
 struct NodeGeometryCurvePrimitiveCircle {
@@ -3585,15 +3636,13 @@ struct NodeGeometryCurvePrimitiveCircle {
 struct NodeGeometryCurvePrimitiveQuad {
   DNA_DEFINE_CXX_METHODS(NodeGeometryCurvePrimitiveQuad)
 
-  /** #GeometryNodeCurvePrimitiveQuadMode. */
-  uint8_t mode = 0;
+  GeometryNodeCurvePrimitiveQuadMode mode = GEO_NODE_CURVE_PRIMITIVE_QUAD_MODE_RECTANGLE;
 };
 
 struct NodeGeometryCurveResample {
   DNA_DEFINE_CXX_METHODS(NodeGeometryCurveResample)
 
-  /** #GeometryNodeCurveResampleMode. */
-  uint8_t mode = 0;
+  GeometryNodeCurveResampleMode mode = GEO_NODE_CURVE_RESAMPLE_COUNT;
   /**
    * If false, curves may be collapsed to a single point. This is unexpected and is only supported
    * for compatibility reasons (#102598).
@@ -3604,29 +3653,25 @@ struct NodeGeometryCurveResample {
 struct NodeGeometryCurveFillet {
   DNA_DEFINE_CXX_METHODS(NodeGeometryCurveFillet)
 
-  /** #GeometryNodeCurveFilletMode. */
-  uint8_t mode = 0;
+  GeometryNodeCurveFilletMode mode = GEO_NODE_CURVE_FILLET_BEZIER;
 };
 
 struct NodeGeometryCurveTrim {
   DNA_DEFINE_CXX_METHODS(NodeGeometryCurveTrim)
 
-  /** #GeometryNodeCurveSampleMode. */
-  uint8_t mode = 0;
+  GeometryNodeCurveSampleMode mode = GEO_NODE_CURVE_SAMPLE_FACTOR;
 };
 
 struct NodeGeometryCurveToPoints {
   DNA_DEFINE_CXX_METHODS(NodeGeometryCurveToPoints)
 
-  /** #GeometryNodeCurveResampleMode. */
-  uint8_t mode = 0;
+  GeometryNodeCurveResampleMode mode = GEO_NODE_CURVE_RESAMPLE_COUNT;
 };
 
 struct NodeGeometryCurveSample {
   DNA_DEFINE_CXX_METHODS(NodeGeometryCurveSample)
 
-  /** #GeometryNodeCurveSampleMode. */
-  uint8_t mode = 0;
+  GeometryNodeCurveSampleMode mode = GEO_NODE_CURVE_SAMPLE_FACTOR;
   int8_t use_all_curves = 0;
   /** #eCustomDataType. */
   int8_t data_type = 0;
@@ -3640,8 +3685,7 @@ struct NodeGeometryTransferAttribute {
   int8_t data_type = 0;
   /** #AttrDomain. */
   int8_t domain = 0;
-  /** #GeometryNodeAttributeTransferMode. */
-  uint8_t mode = 0;
+  GeometryNodeAttributeTransferMode mode = GEO_NODE_ATTRIBUTE_TRANSFER_NEAREST_FACE_INTERPOLATED;
   char _pad[1] = {};
 };
 
@@ -3656,30 +3700,43 @@ struct NodeGeometrySampleIndex {
   char _pad[1] = {};
 };
 
+struct NodeRaycastSampleAttributeItem {
+  int8_t data_type = 0; /** #eCustomDataType. */
+  char _pad[3] = {};
+  int identifier;
+  char *name = nullptr;
+};
+
 struct NodeGeometryRaycast {
   DNA_DEFINE_CXX_METHODS(NodeGeometryRaycast)
 
-  /** #GeometryNodeRaycastMapMode. */
-  uint8_t mapping = 0;
+  GeometryNodeRaycastMapMode mapping = GEO_NODE_RAYCAST_INTERPOLATED;
 
   /** #eCustomDataType. */
   int8_t data_type = 0;
 };
 
+struct NodeShaderRaycast {
+  DNA_DEFINE_CXX_METHODS(NodeShaderRaycast)
+
+  int _pad0;
+  int next_identifier = 0;
+  NodeRaycastSampleAttributeItem *sample_attribute_items = nullptr;
+  int sample_attribute_items_num = 0;
+  int active_index = 0;
+};
+
 struct NodeGeometryCurveFill {
   DNA_DEFINE_CXX_METHODS(NodeGeometryCurveFill)
 
-  /** #GeometryNodeCurveFillMode. */
-  uint8_t mode = 0;
-  /** #GeometryNodeCurveFillRule. */
-  uint8_t fill_rule = 0;
+  GeometryNodeCurveFillMode mode = GEO_NODE_CURVE_FILL_MODE_TRIANGULATED;
+  GeometryNodeCurveFillRule fill_rule = GEO_NODE_CURVE_FILL_RULE_EVEN_ODD;
 };
 
 struct NodeGeometryMeshToPoints {
   DNA_DEFINE_CXX_METHODS(NodeGeometryMeshToPoints)
 
-  /** #GeometryNodeMeshToPointsMode */
-  uint8_t mode = 0;
+  GeometryNodeMeshToPointsMode mode = GEO_NODE_MESH_TO_POINTS_VERTICES;
 };
 
 struct NodeGeometryAttributeCaptureItem {
@@ -3727,14 +3784,10 @@ struct NodeGeometryInputNamedAttribute {
 struct NodeGeometryStringToCurves {
   DNA_DEFINE_CXX_METHODS(NodeGeometryStringToCurves)
 
-  /** #GeometryNodeStringToCurvesOverflowMode */
-  uint8_t overflow = 0;
-  /** #GeometryNodeStringToCurvesAlignXMode */
-  uint8_t align_x = 0;
-  /** #GeometryNodeStringToCurvesAlignYMode */
-  uint8_t align_y = 0;
-  /** #GeometryNodeStringToCurvesPivotMode */
-  uint8_t pivot_mode = 0;
+  GeometryNodeStringToCurvesOverflowMode overflow = GEO_NODE_STRING_TO_CURVES_MODE_OVERFLOW;
+  GeometryNodeStringToCurvesAlignXMode align_x = GEO_NODE_STRING_TO_CURVES_ALIGN_X_LEFT;
+  GeometryNodeStringToCurvesAlignYMode align_y = GEO_NODE_STRING_TO_CURVES_ALIGN_Y_TOP_BASELINE;
+  GeometryNodeStringToCurvesPivotMode pivot_mode = GEO_NODE_STRING_TO_CURVES_PIVOT_MODE_MIDPOINT;
 };
 
 struct NodeGeometryDeleteGeometry {
@@ -3742,8 +3795,7 @@ struct NodeGeometryDeleteGeometry {
 
   /** #AttrDomain. */
   int8_t domain = 0;
-  /** #GeometryNodeDeleteGeometryMode. */
-  int8_t mode = 0;
+  GeometryNodeDeleteGeometryMode mode = GEO_NODE_DELETE_GEOMETRY_MODE_ALL;
 };
 
 struct NodeGeometryDuplicateElements {
@@ -3776,8 +3828,7 @@ struct NodeGeometryImageTexture {
 
 struct NodeGeometryViewerItem {
   char *name = nullptr;
-  /** #eNodeSocketDatatype. */
-  short socket_type = 0;
+  eNodeSocketDatatype socket_type = {};
   uint8_t flag = 0;
   char _pad[1] = {};
   /**
@@ -3806,14 +3857,12 @@ struct NodeGeometryViewer {
 struct NodeGeometryUVUnwrap {
   DNA_DEFINE_CXX_METHODS(NodeGeometryUVUnwrap)
 
-  /** #GeometryNodeUVUnwrapMethod. */
-  uint8_t method = 0;
+  GeometryNodeUVUnwrapMethod method = GEO_NODE_UV_UNWRAP_METHOD_ANGLE_BASED;
 };
 
 struct NodeSimulationItem {
   char *name = nullptr;
-  /** #eNodeSocketDatatype. */
-  short socket_type = 0;
+  eNodeSocketDatatype socket_type = {};
   /** #AttrDomain. */
   short attribute_domain = 0;
   /**
@@ -3848,8 +3897,7 @@ struct NodeGeometrySimulationOutput {
 
 struct NodeRepeatItem {
   char *name = nullptr;
-  /** #eNodeSocketDatatype. */
-  short socket_type = 0;
+  eNodeSocketDatatype socket_type = {};
   char _pad[2] = {};
   /**
    * Generated unique identifier for sockets which stays the same even when the item order or
@@ -3925,8 +3973,7 @@ struct NodeGeometryForeachGeometryElementInput {
 
 struct NodeForeachGeometryElementInputItem {
   char *name = nullptr;
-  /** #eNodeSocketDatatype. */
-  short socket_type = 0;
+  eNodeSocketDatatype socket_type = {};
   char _pad[2] = {};
   /** Generated identifier that stays the same even when the name or order changes. */
   int identifier = 0;
@@ -3934,8 +3981,7 @@ struct NodeForeachGeometryElementInputItem {
 
 struct NodeForeachGeometryElementMainItem {
   char *name = nullptr;
-  /** #eNodeSocketDatatype. */
-  short socket_type = 0;
+  eNodeSocketDatatype socket_type = {};
   char _pad[2] = {};
   /** Generated identifier that stays the same even when the name or order changes. */
   int identifier = 0;
@@ -3943,8 +3989,7 @@ struct NodeForeachGeometryElementMainItem {
 
 struct NodeForeachGeometryElementGenerationItem {
   char *name = nullptr;
-  /** #eNodeSocketDatatype. */
-  short socket_type = 0;
+  eNodeSocketDatatype socket_type = {};
   /** #AttrDomain. */
   uint8_t domain = 0;
   char _pad[1] = {};
@@ -4009,20 +4054,16 @@ struct NodeClosureInput {
 
 struct NodeClosureInputItem {
   char *name = nullptr;
-  /** #eNodeSocketDatatype. */
-  short socket_type = 0;
-  /** #NodeSocketInterfaceStructureType. */
-  int8_t structure_type = 0;
+  eNodeSocketDatatype socket_type = {};
+  NodeSocketInterfaceStructureType structure_type = NodeSocketInterfaceStructureType::Auto;
   char _pad[1] = {};
   int identifier = 0;
 };
 
 struct NodeClosureOutputItem {
   char *name = nullptr;
-  /** #eNodeSocketDatatype. */
-  short socket_type = 0;
-  /** #NodeSocketInterfaceStructureType. */
-  int8_t structure_type = 0;
+  eNodeSocketDatatype socket_type = {};
+  NodeSocketInterfaceStructureType structure_type = NodeSocketInterfaceStructureType::Auto;
   char _pad[1] = {};
   int identifier = 0;
 };
@@ -4052,27 +4093,22 @@ struct NodeClosureOutput {
 
   NodeClosureInputItems input_items;
   NodeClosureOutputItems output_items;
-  /** #NodeClosureFlag. */
-  uint8_t flag = 0;
+  NodeClosureFlag flag = {};
   char _pad[7] = {};
 };
 
 struct NodeEvaluateClosureInputItem {
   char *name = nullptr;
-  /** #eNodeSocketDatatype */
-  short socket_type = 0;
-  /** #NodeSocketInterfaceStructureType. */
-  int8_t structure_type = 0;
+  eNodeSocketDatatype socket_type = {};
+  NodeSocketInterfaceStructureType structure_type = NodeSocketInterfaceStructureType::Auto;
   char _pad[1] = {};
   int identifier = 0;
 };
 
 struct NodeEvaluateClosureOutputItem {
   char *name = nullptr;
-  /** #eNodeSocketDatatype */
-  short socket_type = 0;
-  /** #NodeSocketInterfaceStructureType. */
-  int8_t structure_type = 0;
+  eNodeSocketDatatype socket_type = {};
+  NodeSocketInterfaceStructureType structure_type = NodeSocketInterfaceStructureType::Auto;
   char _pad[1] = {};
   int identifier = 0;
 };
@@ -4102,8 +4138,7 @@ struct NodeEvaluateClosure {
 
   NodeEvaluateClosureInputItems input_items;
   NodeEvaluateClosureOutputItems output_items;
-  /** #NodeEvaluateClosureFlag. */
-  uint8_t flag = 0;
+  NodeEvaluateClosureFlag flag = {};
   char _pad[7] = {};
 };
 
@@ -4118,12 +4153,11 @@ struct NodeIndexSwitch {
   IndexSwitchItem *items = nullptr;
   int items_num = 0;
 
-  /* #eNodeSocketDataType. */
-  int data_type = 0;
   /** Identifier to give to the next item. */
   int next_identifier = 0;
+  eNodeSocketDatatype data_type = {};
 
-  char _pad[4] = {};
+  char _pad[6] = {};
 #ifdef __cplusplus
   Span<IndexSwitchItem> items_span() const;
   MutableSpan<IndexSwitchItem> items_span();
@@ -4131,9 +4165,8 @@ struct NodeIndexSwitch {
 };
 
 struct GeometryNodeFieldToGridItem {
-  /** #eNodeSocketDatatype. */
-  int8_t data_type = 0;
-  char _pad[3] = {};
+  eNodeSocketDatatype data_type = {};
+  char _pad[2] = {};
   int identifier = 0;
   char *name = nullptr;
 };
@@ -4141,9 +4174,8 @@ struct GeometryNodeFieldToGridItem {
 struct GeometryNodeFieldToGrid {
   DNA_DEFINE_CXX_METHODS(GeometryNodeFieldToGrid)
 
-  /** #eNodeSocketDatatype. */
-  int8_t data_type = 0;
-  char _pad[3] = {};
+  eNodeSocketDatatype data_type = {};
+  char _pad[2] = {};
   int next_identifier = 0;
   GeometryNodeFieldToGridItem *items = nullptr;
   int items_num = 0;
@@ -4151,9 +4183,8 @@ struct GeometryNodeFieldToGrid {
 };
 
 struct GeometryNodeFieldToListItem {
-  /** #eNodeSocketDatatype. */
-  int8_t socket_type = SOCK_FLOAT;
-  char _pad[3] = {};
+  eNodeSocketDatatype socket_type = SOCK_FLOAT;
+  char _pad[2] = {};
   int identifier = 0;
   char *name = nullptr;
 };
@@ -4162,6 +4193,22 @@ struct GeometryNodeFieldToList {
   char _pad[4] = {};
   int next_identifier = 0;
   GeometryNodeFieldToListItem *items = nullptr;
+  int items_num = 0;
+  int active_index = 0;
+};
+
+struct GeometryNodeClosureToListItem {
+  eNodeSocketDatatype socket_type = SOCK_FLOAT;
+  NodeSocketInterfaceStructureType structure_type = NodeSocketInterfaceStructureType::Auto;
+  char _pad[1] = {};
+  int identifier = 0;
+  char *name = nullptr;
+};
+
+struct GeometryNodeClosureToList {
+  char _pad[4] = {};
+  int next_identifier = 0;
+  GeometryNodeClosureToListItem *items = nullptr;
   int items_num = 0;
   int active_index = 0;
 };
@@ -4176,61 +4223,50 @@ struct NodeGeometryDistributePointsInVolume {
 struct NodeFunctionCompare {
   DNA_DEFINE_CXX_METHODS(NodeFunctionCompare)
 
-  /** #NodeCompareOperation */
-  int8_t operation = 0;
-  /** #eNodeSocketDatatype */
-  int8_t data_type = 0;
-  /** #NodeCompareMode */
-  int8_t mode = 0;
-  char _pad[1] = {};
+  NodeCompareOperation operation = NODE_COMPARE_LESS_THAN;
+  NodeCompareMode mode = NODE_COMPARE_MODE_ELEMENT;
+  eNodeSocketDatatype data_type = {};
 };
 
 struct NodeCombSepColor {
   DNA_DEFINE_CXX_METHODS(NodeCombSepColor)
 
-  /** #NodeCombSepColorMode */
-  int8_t mode = 0;
+  NodeCombSepColorMode mode = NODE_COMBSEP_COLOR_RGB;
 };
 
 struct NodeShaderMix {
   DNA_DEFINE_CXX_METHODS(NodeShaderMix)
 
-  /** #eNodeSocketDatatype */
-  int8_t data_type = 0;
-  /** #NodeShaderMixMode */
-  int8_t factor_mode = 0;
+  eNodeSocketDatatype data_type = {};
+  NodeShaderMixMode factor_mode = NODE_MIX_MODE_UNIFORM;
   int8_t clamp_factor = 0;
   int8_t clamp_result = 0;
   int8_t blend_type = 0;
-  char _pad[3] = {};
+  char _pad[2] = {};
 };
 
 struct NodeGeometryLinearGizmo {
   DNA_DEFINE_CXX_METHODS(NodeGeometryLinearGizmo)
 
-  /** #GeometryNodeGizmoColor. */
-  int color_id = 0;
-  /** #GeometryNodeLinearGizmoDrawStyle. */
-  int draw_style = 0;
+  GeometryNodeGizmoColor color_id = GEO_NODE_GIZMO_COLOR_PRIMARY;
+  GeometryNodeLinearGizmoDrawStyle draw_style = GEO_NODE_LINEAR_GIZMO_DRAW_STYLE_ARROW;
 };
 
 struct NodeGeometryDialGizmo {
   DNA_DEFINE_CXX_METHODS(NodeGeometryDialGizmo)
 
-  /** #GeometryNodeGizmoColor. */
-  int color_id = 0;
+  GeometryNodeGizmoColor color_id = GEO_NODE_GIZMO_COLOR_PRIMARY;
 };
 
 struct NodeGeometryTransformGizmo {
   DNA_DEFINE_CXX_METHODS(NodeGeometryTransformGizmo)
 
-  /** #NodeGeometryTransformGizmoFlag. */
-  uint32_t flag = 0;
+  NodeGeometryTransformGizmoFlag flag = {};
 };
 
 struct NodeGeometryBakeItem {
   char *name = nullptr;
-  int16_t socket_type = 0;
+  eNodeSocketDatatype socket_type = {};
   int16_t attribute_domain = 0;
   int identifier = 0;
   int32_t flag = 0;
@@ -4250,9 +4286,8 @@ struct NodeGeometryBake {
 struct NodeCombineBundleItem {
   char *name = nullptr;
   int identifier = 0;
-  int16_t socket_type = 0;
-  /** #NodeSocketInterfaceStructureType. */
-  int8_t structure_type = 0;
+  eNodeSocketDatatype socket_type = {};
+  NodeSocketInterfaceStructureType structure_type = NodeSocketInterfaceStructureType::Auto;
   char _pad[1] = {};
 };
 
@@ -4263,17 +4298,15 @@ struct NodeCombineBundle {
   int items_num = 0;
   int next_identifier = 0;
   int active_index = 0;
-  /** #NodeCombineBundleFlag. */
-  uint8_t flag = 0;
+  NodeCombineBundleFlag flag = {};
   char _pad[3] = {};
 };
 
 struct NodeSeparateBundleItem {
   char *name = nullptr;
   int identifier = 0;
-  int16_t socket_type = 0;
-  /** #NodeSocketInterfaceStructureType. */
-  int8_t structure_type = 0;
+  eNodeSocketDatatype socket_type = {};
+  NodeSocketInterfaceStructureType structure_type = NodeSocketInterfaceStructureType::Auto;
   char _pad[1] = {};
 };
 
@@ -4284,15 +4317,14 @@ struct NodeSeparateBundle {
   int items_num = 0;
   int next_identifier = 0;
   int active_index = 0;
-  /** #NodeSeparateBundleFlag. */
-  uint8_t flag = 0;
+  NodeSeparateBundleFlag flag = {};
   char _pad[3] = {};
 };
 
 struct NodeFunctionFormatStringItem {
   char *name = nullptr;
   int identifier = 0;
-  int16_t socket_type = 0;
+  eNodeSocketDatatype socket_type = {};
   char _pad[2] = {};
 };
 
@@ -4307,26 +4339,20 @@ struct NodeFunctionFormatString {
 };
 
 struct NodeGeometryListGetItem {
-  /** #eNodeSocketDatatype. */
-  int16_t socket_type = SOCK_FLOAT;
-  /** #NodeSocketInterfaceStructureType. */
-  int8_t structure_type = NODE_INTERFACE_SOCKET_STRUCTURE_TYPE_AUTO;
+  eNodeSocketDatatype socket_type = SOCK_FLOAT;
+  NodeSocketInterfaceStructureType structure_type = NodeSocketInterfaceStructureType::Auto;
   char _pad = {};
 };
 
 struct NodeGetBundleItem {
-  /** #eNodeSocketDatatype. */
-  int16_t socket_type = 0;
-  /** #NodeSocketInterfaceStructureType. */
-  int8_t structure_type = 0;
+  eNodeSocketDatatype socket_type = {};
+  NodeSocketInterfaceStructureType structure_type = NodeSocketInterfaceStructureType::Auto;
   char _pad = {};
 };
 
 struct NodeStoreBundleItem {
-  /** #eNodeSocketDatatype. */
-  int16_t socket_type = 0;
-  /** #NodeSocketInterfaceStructureType. */
-  int8_t structure_type = 0;
+  eNodeSocketDatatype socket_type = {};
+  NodeSocketInterfaceStructureType structure_type = NodeSocketInterfaceStructureType::Auto;
   char _pad = {};
 };
 

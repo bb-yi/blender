@@ -4,6 +4,8 @@
 
 #include "BLI_math_matrix.hh"
 
+#include "GPU_material.hh"
+
 #include "node_function_util.hh"
 
 namespace blender::nodes::node_fn_project_point_cc {
@@ -13,9 +15,9 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.use_custom_socket_order();
   b.allow_any_socket_order();
   b.is_function_node();
-  b.add_input<decl::Vector>("Vector").subtype(PROP_XYZ);
-  b.add_output<decl::Vector>("Vector").subtype(PROP_XYZ).align_with_previous();
-  b.add_input<decl::Matrix>("Transform");
+  b.add_input<decl::Vector>("Vector"_ustr).subtype(PROP_XYZ);
+  b.add_output<decl::Vector>("Vector"_ustr).subtype(PROP_XYZ).align_with_previous();
+  b.add_input<decl::Matrix>("Transform"_ustr);
 }
 
 static void node_build_multi_function(NodeMultiFunctionBuilder &builder)
@@ -26,10 +28,19 @@ static void node_build_multi_function(NodeMultiFunctionBuilder &builder)
   builder.set_matching_fn(fn);
 }
 
+static int node_gpu_material(GPUMaterial *material,
+                             bNode *node,
+                             bNodeExecData * /*execdata*/,
+                             GPUNodeStack *inputs,
+                             GPUNodeStack *outputs)
+{
+  return GPU_stack_link(material, node, "node_function_project_point", inputs, outputs);
+}
+
 static void node_register()
 {
   static bke::bNodeType ntype;
-  fn_node_type_base(&ntype, "FunctionNodeProjectPoint", FN_NODE_PROJECT_POINT);
+  fn_cmp_node_type_base(&ntype, "FunctionNodeProjectPoint"_ustr, FN_NODE_PROJECT_POINT);
   ntype.ui_name = "Project Point";
   ntype.ui_description =
       "Project a point using a matrix, using location, rotation, scale, and perspective divide";
@@ -37,6 +48,7 @@ static void node_register()
   ntype.nclass = NODE_CLASS_CONVERTER;
   ntype.declare = node_declare;
   ntype.build_multi_function = node_build_multi_function;
+  ntype.gpu_fn = node_gpu_material;
   bke::node_register_type(ntype);
 }
 NOD_REGISTER_NODE(node_register)

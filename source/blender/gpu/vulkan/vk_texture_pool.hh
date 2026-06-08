@@ -67,7 +67,7 @@ class VKImageCache {
   }
 };
 
-class VKTexturePool : public TexturePool {
+class VKTexturePool : public TexturePoolBase {
   /* Performed allocation size, current is 64mb. */
   static constexpr VkDeviceSize allocation_size = 1 << 26;
 
@@ -97,7 +97,7 @@ class VKTexturePool : public TexturePool {
     /* Return a segment to the allocation for reuse. */
     void release(VKMemorySegment segment);
 
-    /* Check if no part of the allocation is acuired. */
+    /* Check if no part of the allocation is acquired. */
     bool is_unused() const
     {
       return !segments.empty() && segments.front().size == allocation_info.size;
@@ -166,20 +166,23 @@ class VKTexturePool : public TexturePool {
   /* Output usage data to debug log. Called on `--debug-gpu` */
   void log_usage_data();
 
+ protected:
+  Texture *acquire_texture_impl(int3 extent,
+                                int mip_len,
+                                GPUTextureType type,
+                                TextureFormat format,
+                                eGPUTextureUsage usage = GPU_TEXTURE_USAGE_GENERAL,
+                                const char *name = nullptr) override;
+
  public:
   VKTexturePool();
   ~VKTexturePool();
 
-  Texture *acquire_texture(int2 extent,
-                           TextureFormat format,
-                           eGPUTextureUsage usage = GPU_TEXTURE_USAGE_GENERAL,
-                           const char *name = nullptr) override;
-
-  void release_texture(Texture *tex) override;
+  void release_texture(Texture *texture) override;
 
   void reset(bool force_free = false) override;
 
-  void offset_users_count(Texture *tex, int offset) override;
+  void offset_users_count(Texture *texture, int offset) override;
 };
 
 }  // namespace blender::gpu

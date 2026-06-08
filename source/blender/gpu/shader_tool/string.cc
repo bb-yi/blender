@@ -19,8 +19,8 @@ void SourceProcessor::lower_strings_sequences(Parser &parser)
 {
   do {
     parser().foreach_match("\"\"", [&](const vector<Token> &tokens) {
-      string first = tokens[0].str();
-      string second = tokens[1].str();
+      string first(tokens[0].str());
+      string second(tokens[1].str());
       string between = parser.substr_range_inclusive(tokens[0].str_index_last_no_whitespace() + 1,
                                                      tokens[1].str_index_start() - 1);
       string trailing = parser.substr_range_inclusive(tokens[1].str_index_last_no_whitespace() + 1,
@@ -32,7 +32,7 @@ void SourceProcessor::lower_strings_sequences(Parser &parser)
 }
 
 /* Turn assert into a printf. */
-void SourceProcessor::lower_assert(Parser &parser, const string &filename)
+void SourceProcessor::lower_assert(Parser &parser, [[maybe_unused]] const string &filename)
 {
   /* Example: `assert(i < 0)` > `if (!(i < 0)) { printf(...); }` */
   parser().foreach_match("A(..)", [&](const vector<Token> &tokens) {
@@ -41,24 +41,40 @@ void SourceProcessor::lower_assert(Parser &parser, const string &filename)
     }
     string replacement;
 #ifdef WITH_GPU_SHADER_ASSERT
-    string condition = tokens[1].scope().str();
+    string condition = string(tokens[1].scope().str());
+
+    auto escape = [](string s) {
+      string result;
+      for (char c : s) {
+        if (c == '%') {
+          result += "%%";
+        }
+        else if (c == '\\') {
+          result += "\\\\";
+        }
+        else if (c == '\"') {
+          result += "\\\"";
+        }
+        else {
+          result += c;
+        }
+      }
+      return result;
+    };
+
     replacement += "if (!" + condition + ") ";
     replacement += "{";
     replacement += " printf(\"";
-    replacement += "Assertion failed: " + condition + ", ";
+    replacement += "Assertion failed: " + escape(condition) + ", ";
     replacement += "file " + filename + ", ";
-    replacement += "line %d, ";
+    replacement += "line " + to_string(tokens[1].line_number()) + ", ";
     replacement += "thread (%u,%u,%u).\\n";
     replacement += "\"";
-    replacement += ", __LINE__, GPU_THREAD.x, GPU_THREAD.y, GPU_THREAD.z); ";
+    replacement += ", GPU_THREAD.x, GPU_THREAD.y, GPU_THREAD.z); ";
     replacement += "}";
 #endif
     parser.replace(tokens[0], tokens[4], replacement);
   });
-#ifndef WITH_GPU_SHADER_ASSERT
-  (void)filename;
-  (void)report_error_;
-#endif
   parser.apply_mutations();
 }
 
@@ -66,8 +82,11 @@ void SourceProcessor::lower_assert(Parser &parser, const string &filename)
 void SourceProcessor::lower_strings(Parser &parser)
 {
   parser().foreach_token(String, [&](const Token &token) {
-    uint32_t hash = hash_string(token.str());
-    metadata::PrintfFormat format = {hash, token.str()};
+    if (token.scope().type() == ScopeType::Preprocessor) {
+      return;
+    }
+    uint32_t hash = hash_string(string(token.str()));
+    metadata::PrintfFormat format = {hash, string(token.str())};
     metadata_.printf_formats.emplace_back(format);
     parser.replace(token, "string_t(" + to_string(hash) + "u)", true);
   });
@@ -86,9 +105,9 @@ void SourceProcessor::lower_printf(Parser &parser)
     int arg_count = 0;
     tokens[1].scope().foreach_scope(ScopeType::FunctionParam, [&](const Scope &) { arg_count++; });
 
-    string unrolled = "print_start(" + to_string(arg_count) + ")";
+    string unrolled = "print_start(" + to_string(arg_count) + "u)";
     tokens[1].scope().foreach_scope(ScopeType::FunctionParam, [&](const Scope &attribute) {
-      unrolled = "print_data(" + unrolled + ", " + attribute.str() + ")";
+      unrolled = "print_data(" + unrolled + ", " + string(attribute.str()) + ")";
     });
 
     parser.replace(tokens.front(), tokens.back(), unrolled);

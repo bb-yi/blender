@@ -297,8 +297,6 @@ void OneapiDevice::reserve_private_memory(const uint kernel_features)
   /* Use the biggest kernel for estimation. */
   const DeviceKernel test_kernel = (kernel_features & KERNEL_FEATURE_NODE_RAYTRACE) ?
                                        DEVICE_KERNEL_INTEGRATOR_SHADE_SURFACE_RAYTRACE :
-                                   (kernel_features & KERNEL_FEATURE_MNEE) ?
-                                       DEVICE_KERNEL_INTEGRATOR_SHADE_SURFACE_MNEE :
                                        DEVICE_KERNEL_INTEGRATOR_SHADE_SURFACE;
 
   {
@@ -448,22 +446,18 @@ void OneapiDevice::mem_alloc(device_memory &mem)
     assert(!"mem_alloc not supported for global memory.");
   }
   else {
-    if (mem.name) {
-      LOG_TRACE << "OneapiDevice::mem_alloc: \"" << mem.name << "\", "
-                << string_human_readable_number(mem.memory_size()) << " bytes. ("
-                << string_human_readable_size(mem.memory_size()) << ")";
-    }
+    LOG_TRACE << "OneapiDevice::mem_alloc: \"" << mem.log_name() << "\", "
+              << string_human_readable_number(mem.memory_size()) << " bytes. ("
+              << string_human_readable_size(mem.memory_size()) << ")";
     generic_alloc(mem);
   }
 }
 
 void OneapiDevice::mem_copy_to(device_memory &mem)
 {
-  if (mem.name) {
-    LOG_TRACE << "OneapiDevice::mem_copy_to: \"" << mem.name << "\", "
-              << string_human_readable_number(mem.memory_size()) << " bytes. ("
-              << string_human_readable_size(mem.memory_size()) << ")";
-  }
+  LOG_TRACE << "OneapiDevice::mem_copy_to: \"" << mem.log_name() << "\", "
+            << string_human_readable_number(mem.memory_size()) << " bytes. ("
+            << string_human_readable_size(mem.memory_size()) << ")";
 
   /* After getting runtime errors we need to avoid performing oneAPI runtime operations
    * because the associated GPU context may be in an invalid state at this point. */
@@ -487,11 +481,9 @@ void OneapiDevice::mem_copy_to(device_memory &mem)
 
 void OneapiDevice::mem_move_to_host(device_memory &mem)
 {
-  if (mem.name) {
-    LOG_TRACE << "OneapiDevice::mem_move_to_host: \"" << mem.name << "\", "
-              << string_human_readable_number(mem.memory_size()) << " bytes. ("
-              << string_human_readable_size(mem.memory_size()) << ")";
-  }
+  LOG_TRACE << "OneapiDevice::mem_move_to_host: \"" << mem.log_name() << "\", "
+            << string_human_readable_number(mem.memory_size()) << " bytes. ("
+            << string_human_readable_size(mem.memory_size()) << ")";
 
   /* After getting runtime errors we need to avoid performing oneAPI runtime operations
    * because the associated GPU context may be in an invalid state at this point. */
@@ -513,21 +505,19 @@ void OneapiDevice::mem_move_to_host(device_memory &mem)
 }
 
 void OneapiDevice::mem_copy_from(
-    device_memory &mem, const size_t y, size_t w, const size_t h, size_t elem)
+    device_memory &mem, const size_t y, size_t w, const size_t h, size_t elem, void *host_pointer)
 {
   if (mem.type == MEM_IMAGE_TEXTURE) {
     assert(!"mem_copy_from not supported for images.");
   }
-  else if (mem.host_pointer) {
+  else if (host_pointer) {
     const size_t size = (w > 0 || h > 0 || elem > 0) ? (elem * w * h) : mem.memory_size();
     const size_t offset = elem * y * w;
 
-    if (mem.name) {
-      LOG_TRACE << "OneapiDevice::mem_copy_from: \"" << mem.name << "\" object of "
-                << string_human_readable_number(mem.memory_size()) << " bytes. ("
-                << string_human_readable_size(mem.memory_size()) << ") from offset " << offset
-                << " data " << size << " bytes";
-    }
+    LOG_TRACE << "OneapiDevice::mem_copy_from: \"" << mem.log_name() << "\" object of "
+              << string_human_readable_number(mem.memory_size()) << " bytes. ("
+              << string_human_readable_size(mem.memory_size()) << ") from offset " << offset
+              << " data " << size << " bytes";
 
     /* After getting runtime errors we need to avoid performing oneAPI runtime operations
      * because the associated GPU context may be in an invalid state at this point. */
@@ -539,7 +529,7 @@ void OneapiDevice::mem_copy_from(
 
     assert(size != 0);
     if (mem.device_pointer) {
-      char *shifted_host = reinterpret_cast<char *>(mem.host_pointer) + offset;
+      char *shifted_host = reinterpret_cast<char *>(host_pointer) + offset;
       char *shifted_device = reinterpret_cast<char *>(mem.device_pointer) + offset;
       bool is_finished_ok = usm_memcpy(device_queue_, shifted_host, shifted_device, size);
       if (is_finished_ok == false) {
@@ -550,13 +540,22 @@ void OneapiDevice::mem_copy_from(
   }
 }
 
+void OneapiDevice::mem_copy_from(
+    device_memory &mem, const size_t y, size_t w, const size_t h, size_t elem)
+{
+  mem_copy_from(mem, y, w, h, elem, mem.host_pointer);
+}
+
+void OneapiDevice::mem_copy_from(device_memory &mem)
+{
+  mem_copy_from(mem, 0, 0, 0, 0);
+}
+
 void OneapiDevice::mem_zero(device_memory &mem)
 {
-  if (mem.name) {
-    LOG_TRACE << "OneapiDevice::mem_zero: \"" << mem.name << "\", "
-              << string_human_readable_number(mem.memory_size()) << " bytes. ("
-              << string_human_readable_size(mem.memory_size()) << ")\n";
-  }
+  LOG_TRACE << "OneapiDevice::mem_zero: \"" << mem.log_name() << "\", "
+            << string_human_readable_number(mem.memory_size()) << " bytes. ("
+            << string_human_readable_size(mem.memory_size()) << ")";
 
   /* After getting runtime errors we need to avoid performing oneAPI runtime operations
    * because the associated GPU context may be in an invalid state at this point. */
@@ -582,11 +581,9 @@ void OneapiDevice::mem_zero(device_memory &mem)
 
 void OneapiDevice::mem_free(device_memory &mem)
 {
-  if (mem.name) {
-    LOG_TRACE << "OneapiDevice::mem_free: \"" << mem.name << "\", "
-              << string_human_readable_number(mem.device_size) << " bytes. ("
-              << string_human_readable_size(mem.device_size) << ")\n";
-  }
+  LOG_TRACE << "OneapiDevice::mem_free: \"" << mem.log_name() << "\", "
+            << string_human_readable_number(mem.device_size) << " bytes. ("
+            << string_human_readable_size(mem.device_size) << ")";
 
   if (mem.type == MEM_GLOBAL) {
     global_free(mem);
@@ -658,17 +655,15 @@ void OneapiDevice::const_copy_to(const char *name, void *host, const size_t size
 
 void OneapiDevice::global_alloc(device_memory &mem)
 {
-  assert(mem.name);
-
   size_t size = mem.memory_size();
-  LOG_TRACE << "OneapiDevice::global_alloc \"" << mem.name << "\" object "
+  LOG_TRACE << "OneapiDevice::global_alloc \"" << mem.log_name() << "\" object "
             << string_human_readable_number(size) << " bytes. ("
             << string_human_readable_size(size) << ")";
 
   generic_alloc(mem);
   generic_copy_to(mem);
 
-  set_global_memory(device_queue_, kg_memory_, mem.name, (void *)mem.device_pointer);
+  set_global_memory(device_queue_, kg_memory_, mem.global_name(), (void *)mem.device_pointer);
 
   usm_memcpy(device_queue_, kg_memory_device_, kg_memory_, kg_memory_size_);
 }
@@ -806,7 +801,7 @@ void OneapiDevice::image_alloc(device_image &mem)
       desc = sycl::ext::oneapi::experimental::image_descriptor(
           {mem.data_width, mem.data_height, 0}, mem.data_elements, channel_type);
 
-      LOG_DEBUG << "Array 2D/3D allocate: " << mem.name << ", "
+      LOG_DEBUG << "Array 2D/3D allocate: " << mem.log_name() << ", "
                 << string_human_readable_number(mem.memory_size()) << " bytes. ("
                 << string_human_readable_size(mem.memory_size()) << ")";
 
@@ -875,12 +870,13 @@ void OneapiDevice::image_alloc(device_image &mem)
     {
       /* Update image info. */
       thread_scoped_lock lock(image_info_mutex);
-      const uint slot = mem.slot;
-      if (slot >= image_info.size()) {
-        /* Allocate some slots in advance, to reduce amount of re-allocations. */
-        image_info.resize(slot + 128);
+      const uint image_info_id = mem.image_info_id;
+      if (image_info_id >= image_info.size()) {
+        /* Geometric growth to amortize reallocation cost. */
+        const size_t new_size = max(size_t(image_info_id) + 128, image_info.size() * 2);
+        image_info.host_only_resize(new_size);
       }
-      image_info[slot] = tex_info;
+      image_info[image_info_id] = tex_info;
       need_image_info = true;
     }
   }
@@ -1318,6 +1314,7 @@ void OneapiDevice::get_adjusted_global_and_local_sizes(SyclQueue *queue,
     case DEVICE_KERNEL_INTEGRATOR_INTERSECT_SUBSURFACE:
     case DEVICE_KERNEL_INTEGRATOR_INTERSECT_VOLUME_STACK:
     case DEVICE_KERNEL_INTEGRATOR_INTERSECT_DEDICATED_LIGHT:
+    case DEVICE_KERNEL_INTEGRATOR_INTERSECT_MNEE:
       preferred_work_group_size = preferred_work_group_size_intersect;
       break;
 
@@ -1326,7 +1323,6 @@ void OneapiDevice::get_adjusted_global_and_local_sizes(SyclQueue *queue,
     case DEVICE_KERNEL_INTEGRATOR_SHADE_LIGHT_FORWARD:
     case DEVICE_KERNEL_INTEGRATOR_SHADE_SURFACE:
     case DEVICE_KERNEL_INTEGRATOR_SHADE_SURFACE_RAYTRACE:
-    case DEVICE_KERNEL_INTEGRATOR_SHADE_SURFACE_MNEE:
     case DEVICE_KERNEL_INTEGRATOR_SHADE_VOLUME:
     case DEVICE_KERNEL_INTEGRATOR_SHADE_VOLUME_RAY_MARCHING:
     case DEVICE_KERNEL_INTEGRATOR_SHADE_SHADOW:
@@ -1388,7 +1384,15 @@ static const int lowest_supported_driver_version_win = 1018306;
  * This information is returned by `ocloc query OCL_DRIVER_VERSION`. */
 static const int lowest_supported_driver_version_neo = 35716;
 #  else
-static const int lowest_supported_driver_version_neo = 34666;
+/* For Linux, according to Blender version file
+ * build_files\build_environment\cmake\versions.cmake we
+ * at the moment are using Intel Graphics Compiler v2.30.1.
+ * According to the Intel Linux Driver releases page:
+ * https://github.com/intel/compute-runtime/releases the first driver
+ * which supports this IGC version is 26.09.37435.1, which you can
+ * confirm by checking "Additional components revisions used in build"
+ * section. Thus, this version is our minimal one. */
+static const int lowest_supported_driver_version_neo = 37435;
 #  endif
 
 int parse_driver_build_version(const sycl::device &device)

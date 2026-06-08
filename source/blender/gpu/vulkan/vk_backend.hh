@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include <cstdio>
+
 #include "gpu_backend.hh"
 
 #ifdef WITH_RENDERDOC
@@ -53,10 +55,16 @@ class VKBackend : public GPUBackend {
    */
   static bool is_supported();
 
+  /**
+   * Print one line per Vulkan device that meets minimum requirements, in the format used by
+   * `--gpu-device help`. Each line is `<vendor-hex>/<device-hex>/<index>  <name>`.
+   * Operates without an active backend (creates a temporary Vulkan instance).
+   */
+  static void supported_devices_print(FILE *fp);
+
   void init_resources() override;
   void delete_resources() override;
 
-  void samplers_update() override;
   void compute_dispatch(int groups_x_len, int groups_y_len, int groups_z_len) override;
   void compute_dispatch_indirect(StorageBuf *indirect_buf) override;
 

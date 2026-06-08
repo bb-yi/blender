@@ -12,12 +12,12 @@ namespace nodes::node_shader_wavelength_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Float>("Wavelength")
+  b.add_input<decl::Float>("Wavelength"_ustr)
       .default_value(500.0f)
       .min(380.0f)
       .max(780.0f)
       .subtype(PROP_WAVELENGTH);
-  b.add_output<decl::Color>("Color");
+  b.add_output<decl::Color>("Color"_ustr);
 }
 
 static int node_shader_gpu_wavelength(GPUMaterial *mat,
@@ -45,13 +45,13 @@ void register_node_type_sh_wavelength()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeWavelength", SH_NODE_WAVELENGTH);
+  sh_node_type_base(&ntype, "ShaderNodeWavelength"_ustr, SH_NODE_WAVELENGTH);
   ntype.ui_name = "Wavelength";
   ntype.ui_description = "Convert a wavelength value to an RGB value";
   ntype.enum_name_legacy = "WAVELENGTH";
   ntype.nclass = NODE_CLASS_CONVERTER;
   ntype.declare = file_ns::node_declare;
-  bke::node_type_size_preset(ntype, bke::eNodeSizePreset::Middle);
+  ntype.default_width = bke::NodeWidth::_160;
   ntype.gpu_fn = file_ns::node_shader_gpu_wavelength;
 
   bke::node_register_type(ntype);

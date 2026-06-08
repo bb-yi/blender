@@ -13,6 +13,7 @@
 #include "BLI_math_vector.h"
 #include "BLI_math_vector.hh"
 
+#include "BKE_attribute_math.hh"
 #include "BKE_mesh.hh"
 #include "BKE_object_types.hh"
 #include "BKE_paint.hh"
@@ -33,22 +34,13 @@
 
 namespace blender::ed::sculpt_paint::smooth {
 
-template<typename T> T calc_average(const Span<T> values, const Span<int> indices)
-{
-  const float factor = math::safe_rcp(float(indices.size()));
-  T result{};
-  for (const int i : indices) {
-    result += values[i] * factor;
-  }
-  return result;
-}
-
 template<typename T>
 void neighbor_data_average_mesh_check_loose(const Span<T> src,
                                             const Span<int> verts,
                                             const GroupedSpan<int> vert_neighbors,
                                             const MutableSpan<T> dst)
 {
+  PRF_scope(ProfileCategory::Editor);
   BLI_assert(verts.size() == dst.size());
   BLI_assert(vert_neighbors.size() == dst.size());
 
@@ -58,7 +50,7 @@ void neighbor_data_average_mesh_check_loose(const Span<T> src,
       dst[i] = src[verts[i]];
     }
     else {
-      dst[i] = calc_average(src, neighbors);
+      dst[i] = bke::attribute_math::mix_indices(src, neighbors);
     }
   }
 }
@@ -77,10 +69,12 @@ void neighbor_data_average_mesh(const Span<T> src,
                                 const GroupedSpan<int> vert_neighbors,
                                 const MutableSpan<T> dst)
 {
+  PRF_scope(ProfileCategory::Editor);
+  /* TODO: Use #bke::attribute_math::mix_groups when we can control the internal threading. */
   BLI_assert(vert_neighbors.size() == dst.size());
 
   for (const int i : vert_neighbors.index_range()) {
-    dst[i] = calc_average(src, vert_neighbors[i]);
+    dst[i] = bke::attribute_math::mix_indices(src, vert_neighbors[i]);
   }
 }
 
@@ -96,6 +90,7 @@ static float3 average_positions(const CCGKey &key,
                                 const Span<float3> positions,
                                 const Span<SubdivCCGCoord> coords)
 {
+  PRF_scope(ProfileCategory::Editor);
   const float factor = math::rcp(float(coords.size()));
   float3 result(0);
   for (const SubdivCCGCoord coord : coords) {
@@ -114,6 +109,7 @@ static void neighbor_position_average_interior_grids_impl(const OffsetIndices<in
                                                           const Span<float> factors,
                                                           const MutableSpan<float3> new_positions)
 {
+  PRF_scope(ProfileCategory::Editor);
   const CCGKey key = BKE_subdiv_ccg_key_top_level(subdiv_ccg);
   const Span<float3> positions = subdiv_ccg.positions;
 
@@ -214,6 +210,7 @@ void average_data_grids(const SubdivCCG &subdiv_ccg,
                         const Span<int> grids,
                         const MutableSpan<T> dst)
 {
+  PRF_scope(ProfileCategory::Editor);
   const CCGKey key = BKE_subdiv_ccg_key_top_level(subdiv_ccg);
 
   BLI_assert(grids.size() * key.grid_area == dst.size());
@@ -250,6 +247,7 @@ void average_data_grids(const SubdivCCG &subdiv_ccg,
 template<typename T>
 void average_data_bmesh(const Span<T> src, const Set<BMVert *, 0> &verts, const MutableSpan<T> dst)
 {
+  PRF_scope(ProfileCategory::Editor);
   BMeshNeighborVerts neighbor_data;
 
   int i = 0;
@@ -281,6 +279,7 @@ template void average_data_bmesh<float3>(Span<float3> src,
 
 static float3 average_positions(const Span<const BMVert *> verts)
 {
+  PRF_scope(ProfileCategory::Editor);
   const float factor = math::safe_rcp(float(verts.size()));
   float3 result(0);
   for (const BMVert *vert : verts) {
@@ -292,6 +291,7 @@ static float3 average_positions(const Span<const BMVert *> verts)
 void neighbor_position_average_bmesh(const Set<BMVert *, 0> &verts,
                                      const MutableSpan<float3> new_positions)
 {
+  PRF_scope(ProfileCategory::Editor);
   BLI_assert(verts.size() == new_positions.size());
   BMeshNeighborVerts neighbor_data;
 
@@ -308,6 +308,7 @@ static void neighbor_position_average_interior_bmesh_impl(const Set<BMVert *, 0>
                                                           const Span<float> factors,
                                                           const MutableSpan<float3> new_positions)
 {
+  PRF_scope(ProfileCategory::Editor);
   BLI_assert(verts.size() == new_positions.size());
   if constexpr (use_factors) {
     BLI_assert(new_positions.size() == factors.size());
@@ -399,6 +400,7 @@ void neighbor_color_average(const OffsetIndices<int> faces,
                             const GroupedSpan<int> vert_neighbors,
                             const MutableSpan<float4> smooth_colors)
 {
+  PRF_scope(ProfileCategory::Editor);
   BLI_assert(vert_neighbors.size() == smooth_colors.size());
 
   for (const int i : vert_neighbors.index_range()) {
@@ -422,6 +424,7 @@ void surface_smooth_laplacian_step(const Span<float3> positions,
                                    MutableSpan<float3> laplacian_disp,
                                    MutableSpan<float3> translations)
 {
+  PRF_scope(ProfileCategory::Editor);
   BLI_assert(positions.size() == orig_positions.size());
   BLI_assert(positions.size() == average_positions.size());
   BLI_assert(positions.size() == laplacian_disp.size());
@@ -441,6 +444,7 @@ void surface_smooth_displace_step(const Span<float3> laplacian_disp,
                                   const float beta,
                                   const MutableSpan<float3> translations)
 {
+  PRF_scope(ProfileCategory::Editor);
   BLI_assert(laplacian_disp.size() == average_laplacian_disp.size());
   BLI_assert(laplacian_disp.size() == translations.size());
 
@@ -468,6 +472,7 @@ static float3 calc_boundary_normal_corner(const float3 &current_position,
                                           const Span<float3> vert_positions,
                                           const Span<int> neighbors)
 {
+  PRF_scope(ProfileCategory::Editor);
   float3 normal(0);
   for (const int vert : neighbors) {
     const float3 to_neighbor = vert_positions[vert] - current_position;
@@ -481,6 +486,7 @@ static float3 calc_boundary_normal_corner(const CCGKey &key,
                                           const float3 &current_position,
                                           const Span<SubdivCCGCoord> neighbors)
 {
+  PRF_scope(ProfileCategory::Editor);
   float3 normal(0);
   for (const SubdivCCGCoord &coord : neighbors) {
     const float3 to_neighbor = positions[coord.to_index(key)] - current_position;
@@ -492,6 +498,7 @@ static float3 calc_boundary_normal_corner(const CCGKey &key,
 static float3 calc_boundary_normal_corner(const float3 &current_position,
                                           const Span<BMVert *> neighbors)
 {
+  PRF_scope(ProfileCategory::Editor);
   float3 normal(0);
   for (BMVert *vert : neighbors) {
     const float3 neighbor_pos = vert->co;
@@ -515,6 +522,7 @@ void calc_relaxed_translations_faces(const Span<float3> vert_positions,
                                      const Span<float> factors,
                                      const MutableSpan<float3> translations)
 {
+  PRF_scope(ProfileCategory::Editor);
   BLI_assert(verts.size() == factors.size());
   BLI_assert(verts.size() == translations.size());
 
@@ -551,7 +559,7 @@ void calc_relaxed_translations_faces(const Span<float3> vert_positions,
       continue;
     }
 
-    const float3 smoothed_position = calc_average(vert_positions, neighbors);
+    const float3 smoothed_position = bke::attribute_math::mix_indices(vert_positions, neighbors);
 
     /* Normal Calculation */
     float3 normal;
@@ -585,6 +593,7 @@ void calc_relaxed_translations_grids(const SubdivCCG &subdiv_ccg,
                                      const Span<float> factors,
                                      const MutableSpan<float3> translations)
 {
+  PRF_scope(ProfileCategory::Editor);
   const Span<float3> positions = subdiv_ccg.positions;
   const Span<float3> normals = subdiv_ccg.normals;
   const CCGKey key = BKE_subdiv_ccg_key_top_level(subdiv_ccg);
@@ -670,6 +679,7 @@ void calc_relaxed_translations_bmesh(const Set<BMVert *, 0> &verts,
                                      const Span<float> factors,
                                      const MutableSpan<float3> translations)
 {
+  PRF_scope(ProfileCategory::Editor);
   BLI_assert(verts.size() == factors.size());
   BLI_assert(verts.size() == translations.size());
 
@@ -736,6 +746,7 @@ void blur_geometry_data_array(const Object &object,
                               const int iterations,
                               const MutableSpan<float> data)
 {
+  PRF_scope(ProfileCategory::Editor);
   struct LocalData {
     Vector<int> vert_indices;
     Vector<int> neighbor_offsets;
@@ -762,24 +773,27 @@ void blur_geometry_data_array(const Object &object,
       const VArraySpan<bool> hide_poly = *attributes.lookup<bool>(".hide_poly",
                                                                   bke::AttrDomain::Face);
       for ([[maybe_unused]] const int _ : IndexRange(iterations)) {
-        node_mask.foreach_index(GrainSize(1), [&](const int i) {
-          LocalData &tls = all_tls.local();
-          const Span<int> verts = hide::node_visible_verts(nodes[i], hide_vert, tls.vert_indices);
+        node_mask.foreach_index(
+            [&](const int i) {
+              LocalData &tls = all_tls.local();
+              const Span<int> verts = hide::node_visible_verts(
+                  nodes[i], hide_vert, tls.vert_indices);
 
-          const GroupedSpan<int> neighbors = calc_vert_neighbors(faces,
-                                                                 corner_verts,
-                                                                 vert_to_face_map,
-                                                                 hide_poly,
-                                                                 verts,
-                                                                 tls.neighbor_offsets,
-                                                                 tls.neighbor_data);
+              const GroupedSpan<int> neighbors = calc_vert_neighbors(faces,
+                                                                     corner_verts,
+                                                                     vert_to_face_map,
+                                                                     hide_poly,
+                                                                     verts,
+                                                                     tls.neighbor_offsets,
+                                                                     tls.neighbor_data);
 
-          tls.new_factors.resize(verts.size());
-          const MutableSpan<float> new_factors = tls.new_factors;
-          smooth::neighbor_data_average_mesh(data.as_span(), neighbors, new_factors);
+              tls.new_factors.resize(verts.size());
+              const MutableSpan<float> new_factors = tls.new_factors;
+              smooth::neighbor_data_average_mesh(data.as_span(), neighbors, new_factors);
 
-          scatter_data_mesh(new_factors.as_span(), verts, data);
-        });
+              scatter_data_mesh(new_factors.as_span(), verts, data);
+            },
+            exec_mode::grain_size(1));
       }
       break;
     }
@@ -789,53 +803,57 @@ void blur_geometry_data_array(const Object &object,
       const CCGKey key = BKE_subdiv_ccg_key_top_level(subdiv_ccg);
       const BitGroupVector<> &grid_hidden = subdiv_ccg.grid_hidden;
       for ([[maybe_unused]] const int _ : IndexRange(iterations)) {
-        node_mask.foreach_index(GrainSize(1), [&](const int node_index) {
-          LocalData &tls = all_tls.local();
-          const Span<int> grids = nodes[node_index].grids();
-          const int grid_verts_num = key.grid_area * grids.size();
+        node_mask.foreach_index(
+            [&](const int node_index) {
+              LocalData &tls = all_tls.local();
+              const Span<int> grids = nodes[node_index].grids();
+              const int grid_verts_num = key.grid_area * grids.size();
 
-          tls.new_factors.resize(grid_verts_num);
-          const MutableSpan<float> new_factors = tls.new_factors;
-          smooth::average_data_grids(subdiv_ccg, data.as_span(), grids, new_factors);
+              tls.new_factors.resize(grid_verts_num);
+              const MutableSpan<float> new_factors = tls.new_factors;
+              smooth::average_data_grids(subdiv_ccg, data.as_span(), grids, new_factors);
 
-          if (grid_hidden.is_empty()) {
-            scatter_data_grids(subdiv_ccg, new_factors.as_span(), grids, data);
-          }
-          else {
-            for (const int i : grids.index_range()) {
-              const int node_start = i * key.grid_area;
-              BKE_subdiv_ccg_foreach_visible_grid_vert(
-                  key, grid_hidden, grids[i], [&](const int offset) {
-                    data[i] = new_factors[node_start + offset];
-                  });
-            }
-          }
-        });
+              if (grid_hidden.is_empty()) {
+                scatter_data_grids(subdiv_ccg, new_factors.as_span(), grids, data);
+              }
+              else {
+                for (const int i : grids.index_range()) {
+                  const int node_start = i * key.grid_area;
+                  BKE_subdiv_ccg_foreach_visible_grid_vert(
+                      key, grid_hidden, grids[i], [&](const int offset) {
+                        data[i] = new_factors[node_start + offset];
+                      });
+                }
+              }
+            },
+            exec_mode::grain_size(1));
       }
       break;
     }
     case bke::pbvh::Type::BMesh: {
       const Span<bke::pbvh::BMeshNode> nodes = pbvh.nodes<bke::pbvh::BMeshNode>();
       for ([[maybe_unused]] const int _ : IndexRange(iterations)) {
-        node_mask.foreach_index(GrainSize(1), [&](const int node_index) {
-          LocalData &tls = all_tls.local();
-          const Set<BMVert *, 0> &verts = BKE_pbvh_bmesh_node_unique_verts(
-              const_cast<bke::pbvh::BMeshNode *>(&nodes[node_index]));
+        node_mask.foreach_index(
+            [&](const int node_index) {
+              LocalData &tls = all_tls.local();
+              const Set<BMVert *, 0> &verts = BKE_pbvh_bmesh_node_unique_verts(
+                  const_cast<bke::pbvh::BMeshNode *>(&nodes[node_index]));
 
-          tls.new_factors.resize(verts.size());
-          const MutableSpan<float> new_factors = tls.new_factors;
-          smooth::average_data_bmesh(data.as_span(), verts, new_factors);
+              tls.new_factors.resize(verts.size());
+              const MutableSpan<float> new_factors = tls.new_factors;
+              smooth::average_data_bmesh(data.as_span(), verts, new_factors);
 
-          int i = 0;
-          for (const BMVert *vert : verts) {
-            if (BM_elem_flag_test(vert, BM_ELEM_HIDDEN)) {
-              i++;
-              continue;
-            }
-            data[BM_elem_index_get(vert)] = new_factors[i];
-            i++;
-          }
-        });
+              int i = 0;
+              for (const BMVert *vert : verts) {
+                if (BM_elem_flag_test(vert, BM_ELEM_HIDDEN)) {
+                  i++;
+                  continue;
+                }
+                data[BM_elem_index_get(vert)] = new_factors[i];
+                i++;
+              }
+            },
+            exec_mode::grain_size(1));
       }
       break;
     }

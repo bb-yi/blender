@@ -85,7 +85,6 @@ struct View3D;
 struct ViewLayer;
 struct bContext;
 struct bToolRef;
-struct tPaletteColorHSV;
 
 /* overlay invalidation */
 enum ePaintOverlayControlFlags {
@@ -118,8 +117,14 @@ ENUM_OPERATORS(ePaintSymmetryAreas);
 
 #define PAINT_SYMM_AREAS 8
 
-void BKE_paint_invalidate_overlay_tex(Scene *scene, ViewLayer *view_layer, const Tex *tex);
-void BKE_paint_invalidate_cursor_overlay(Scene *scene, ViewLayer *view_layer, CurveMapping *curve);
+void BKE_paint_invalidate_overlay_tex(const Main &bmain,
+                                      Scene *scene,
+                                      ViewLayer *view_layer,
+                                      const Tex *tex);
+void BKE_paint_invalidate_cursor_overlay(const Main &bmain,
+                                         Scene *scene,
+                                         ViewLayer *view_layer,
+                                         CurveMapping *curve);
 void BKE_paint_invalidate_overlay_all();
 ePaintOverlayControlFlags BKE_paint_get_overlay_flags();
 void BKE_paint_reset_overlay_invalid(ePaintOverlayControlFlags flag);
@@ -138,12 +143,6 @@ void BKE_palette_clear(Palette *palette);
 
 void BKE_palette_color_set(PaletteColor *color, const float rgb[3]);
 void BKE_palette_color_sync_legacy(PaletteColor *color);
-
-void BKE_palette_sort_hsv(tPaletteColorHSV *color_array, int totcol);
-void BKE_palette_sort_svh(tPaletteColorHSV *color_array, int totcol);
-void BKE_palette_sort_vhs(tPaletteColorHSV *color_array, int totcol);
-void BKE_palette_sort_luminance(tPaletteColorHSV *color_array, int totcol);
-bool BKE_palette_from_hash(Main *bmain, GHash *color_table, const char *name);
 
 /* Paint curves. */
 
@@ -172,6 +171,8 @@ void BKE_paint_settings_foreach_mode(ToolSettings *ts, FunctionRef<void(Paint *p
 
 void BKE_paint_cavity_curve_preset(Paint *paint, int preset);
 
+void BKE_paint_mesh_automasking_settings_ensure(Paint &paint);
+
 eObjectMode BKE_paint_object_mode_from_paintmode(PaintMode mode);
 bool BKE_paint_ensure_from_paintmode(Scene *sce, PaintMode mode);
 Paint *BKE_paint_get_active_from_paintmode(Scene *sce, PaintMode mode);
@@ -179,10 +180,12 @@ const EnumPropertyItem *BKE_paint_get_tool_enum_from_paintmode(PaintMode mode);
 uint BKE_paint_get_brush_type_offset_from_paintmode(PaintMode mode);
 std::optional<int> BKE_paint_get_brush_type_from_obmode(const Brush *brush, eObjectMode ob_mode);
 std::optional<int> BKE_paint_get_brush_type_from_paintmode(const Brush *brush, PaintMode mode);
-Paint *BKE_paint_get_active(Scene *sce, ViewLayer *view_layer);
+Paint *BKE_paint_get_active(const Main &bmain, Scene *sce, ViewLayer *view_layer);
 Paint *BKE_paint_get_active_from_context(const bContext *C);
 PaintMode BKE_paintmode_get_active_from_context(const bContext *C);
 PaintMode BKE_paintmode_get_from_tool(const bToolRef *tref);
+bool BKE_paint_use_unified_size(const Paint *paint);
+bool BKE_paint_use_unified_strength(const Paint *paint);
 bool BKE_paint_use_unified_color(const Paint *paint);
 
 /* Paint brush retrieval and assignment. */
@@ -300,6 +303,11 @@ void BKE_paint_face_set_overlay_color_get(int face_set, int seed, uchar r_color[
 
 /* Stroke related. */
 
+namespace bke::paint {
+bool supports_scene_size(PaintMode paint_mode);
+bool supports_symmetry_tiling(PaintMode paint_mode);
+}  // namespace bke::paint
+
 /* Random values are generated on each new stroke so each stroke
  * gets a different starting point in the perlin noise. */
 float3 seed_hsv_jitter();
@@ -372,6 +380,7 @@ struct PersistentMultiresData {
 };
 
 struct SculptSession : NonCopyable, NonMovable {
+  /* The current active shapekey for the mesh. Only non-null for Type::Mesh */
   KeyBlock *shapekey_active = nullptr;
 
   /* Edges to adjacent faces. */
@@ -637,7 +646,6 @@ bool BKE_paint_canvas_image_get(PaintModeSettings *settings,
                                 ImageUser **r_image_user);
 std::optional<StringRef> BKE_paint_canvas_uvmap_name_get(const PaintModeSettings *settings,
                                                          Object *ob);
-void BKE_sculpt_cavity_curves_ensure(Sculpt *sd);
 CurveMapping *BKE_sculpt_default_cavity_curve();
 CurveMapping *BKE_paint_default_curve();
 

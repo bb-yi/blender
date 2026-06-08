@@ -32,7 +32,7 @@ bool cmp_node_poll_default(const bke::bNodeType *ntype,
                            const bNodeTree *ntree,
                            const char **r_disabled_hint);
 void cmp_node_type_base(bke::bNodeType *ntype,
-                        std::string idname,
+                        UString idname,
                         std::optional<int16_t> legacy_type = std::nullopt);
 
 }  // namespace blender

@@ -25,13 +25,13 @@ Precompute::Precompute(draw::Manager &manager, PrecomputeType type, int3 table_e
   Texture table_tx = {"Precompute"};
   table_tx.ensure_3d(gpu::TextureFormat::SFLOAT_32_32_32_32, table_extent, usage);
 
-  gpu::Shader *shader = GPU_shader_create_from_info_name("eevee_lut");
+  gpu::Shader *shader = GPU_shader_create_from_info_name("eevee_lut_comp");
 
   PassSimple lut_ps = {"Precompute"};
   lut_ps.shader_set(shader);
-  lut_ps.push_constant("table_type", int(type));
-  lut_ps.push_constant("table_extent", table_extent);
-  lut_ps.bind_image("table_img", table_tx);
+  lut_ps.push_constant("type", int(type));
+  lut_ps.push_constant("extent", table_extent);
+  lut_ps.bind_image("image", table_tx);
   lut_ps.dispatch(math::divide_ceil(table_extent, int3(int2(LUT_WORKGROUP_SIZE), 1)));
   lut_ps.barrier(GPU_BARRIER_TEXTURE_UPDATE);
 

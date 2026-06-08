@@ -8,7 +8,8 @@
  * \ingroup bke
  */
 
-#include "BLI_ghash.h"
+#include <string>
+
 #include "BLI_iterator.h"
 #include "BLI_map.hh"
 #include "BLI_set.hh"
@@ -29,8 +30,8 @@ struct BlendWriter;
 struct Collection;
 struct ID;
 struct CollectionChild;
+struct CollectionImport;
 struct CollectionExport;
-struct GHash;
 struct Main;
 struct Object;
 struct Scene;
@@ -119,6 +120,18 @@ void BKE_collection_add_from_collection(Main *bmain,
 void BKE_collection_free_data(Collection *collection);
 
 /**
+ * Can the collection contents be modified. Returns an optional reason if the content is not
+ * editable.
+ */
+bool BKE_collection_is_content_editable(const Collection *collection,
+                                        std::string *reason = nullptr);
+
+/**
+ * Add a new collection importer to the collection.
+ */
+CollectionImport *BKE_collection_importer_add(Collection *collection, const char *idname);
+
+/**
  * Add a new collection exporter to the collection.
  */
 CollectionExport *BKE_collection_exporter_add(Collection *collection, char *idname, char *label);
@@ -141,8 +154,9 @@ void BKE_collection_exporter_name_set(const ListBaseT<CollectionExport> *exporte
                                       const char *newname);
 
 /**
- * Free all data owned by the collection exporter.
+ * Free all data owned by the collection importers/exporters.
  */
+void BKE_collection_importer_free_data(CollectionImport *data);
 void BKE_collection_exporter_free_data(CollectionExport *data);
 
 /**
@@ -154,7 +168,7 @@ bool BKE_collection_delete(Main *bmain, Collection *collection, bool hierarchy);
 /**
  * Make a deep copy (aka duplicate) of the given collection and all of its children, recursively.
  *
- * \param dupflag: Controls which sub-data are also duplicated
+ * \param duplicate_flags: Controls which sub-data are also duplicated
  * (see #eDupli_ID_Flags in DNA_userdef_types.h).
  * \param duplicate_options: Additional context information about current duplicate call (e.g. if
  * it's part of a higher-level duplication or not, etc.). (see #eLibIDDuplicateFlags in
@@ -317,7 +331,8 @@ void BKE_collection_object_cache_free(const Main *bmain,
  */
 void BKE_main_collections_object_cache_free(const Main *bmain);
 
-Base *BKE_collection_or_layer_objects(const Scene *scene,
+Base *BKE_collection_or_layer_objects(const Main &bmain,
+                                      const Scene *scene,
                                       ViewLayer *view_layer,
                                       Collection *collection);
 
@@ -423,7 +438,7 @@ using BKE_scene_collections_Cb = void (*)(Collection *ob, void *data);
     int _base_flag = (_mode == DAG_EVAL_VIEWPORT) ? BASE_ENABLED_VIEWPORT : BASE_ENABLED_RENDER; \
     int _object_visibility_flag = (_mode == DAG_EVAL_VIEWPORT) ? OB_HIDE_VIEWPORT : \
                                                                  OB_HIDE_RENDER; \
-    int _base_id = 0; \
+    [[maybe_unused]] int _base_id = 0; \
     for (Base *_base = static_cast<Base *>(BKE_collection_object_cache_get(_collection).first); \
          _base; \
          _base = _base->next, _base_id++) \
@@ -470,6 +485,7 @@ void BKE_scene_objects_iterator_end(BLI_Iterator *iter);
  * \note The object->flag is tested against flag.
  */
 struct SceneObjectsIteratorExData {
+  Main *bmain;
   Scene *scene;
   int flag;
   void *iter_data;

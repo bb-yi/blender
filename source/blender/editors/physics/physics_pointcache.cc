@@ -277,7 +277,7 @@ static wmOperatorStatus ptcache_free_bake_all_exec(bContext *C, wmOperator * /*o
       ptcache_free_bake(pid.cache);
     }
 
-    BLI_freelistN(&pidlist);
+    pidlist.free_no_destruct();
 
     WM_event_add_notifier(C, NC_OBJECT | ND_POINTCACHE, ob);
   }
@@ -292,7 +292,7 @@ void PTCACHE_OT_bake_all(wmOperatorType *ot)
 {
   /* identifiers */
   ot->name = "Bake All Physics";
-  ot->description = "Bake all physics";
+  ot->description = "Bake all physics simulations in the current scene";
   ot->idname = "PTCACHE_OT_bake_all";
 
   /* API callbacks. */

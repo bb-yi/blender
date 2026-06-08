@@ -12,6 +12,7 @@
 #include <optional>
 
 #include "ED_asset_indexer.hh"
+#include "asset_index.hh"
 
 #include "DNA_ID.h"
 #include "DNA_asset_types.h"
@@ -31,6 +32,11 @@
 #include "BKE_appdir.hh"
 #include "BKE_asset.hh"
 #include "BKE_idprop.hh"
+#include "BKE_preferences.h"
+
+/* For converting enum values to/from identifiers. */
+#include "RNA_access.hh"
+#include "RNA_enum_types.hh"
 
 #include "CLG_log.h"
 
@@ -67,13 +73,15 @@ using namespace blender::bke::idprop;
  *     "copyright": "<copyright>",
  *     "license": "<license>",
  *     "tags": ["<tag>"],
+ *     "preferred_import_method": eAssetImportMethod,
  *     "properties": [..]
  *   }]
  * }
  * \endcode
  *
  * NOTE: entries, author, description, copyright, license, tags and properties are optional
- * attributes.
+ * attributes. If preferred_import_method is set, the #ASSETDATA_USE_OWN_IMPORT_METHOD flag will be
+ * set on the asset metadata. Otherwise, it will not be set.
  *
  * NOTE: File browser uses name and idcode separate. Inside the index they are joined together like
  * #ID.name.
@@ -90,6 +98,7 @@ constexpr StringRef ATTRIBUTE_ENTRIES_COPYRIGHT("copyright");
 constexpr StringRef ATTRIBUTE_ENTRIES_LICENSE("license");
 constexpr StringRef ATTRIBUTE_ENTRIES_TAGS("tags");
 constexpr StringRef ATTRIBUTE_ENTRIES_PROPERTIES("properties");
+constexpr StringRef ATTRIBUTE_ENTRIES_PREFERRED_IMPORT_METHOD("preferred_import_method");
 
 /** Abstract class for #BlendFile and #AssetIndexFile. */
 class AbstractFile {
@@ -176,10 +185,19 @@ static void init_value_from_file_indexer_entry(DictionaryValue &result,
     result.append_str(ATTRIBUTE_ENTRIES_LICENSE, license);
   }
 
-  if (!BLI_listbase_is_empty(&asset_data.tags)) {
+  if (!asset_data.tags.is_empty()) {
     ArrayValue &tags = *result.append_array(ATTRIBUTE_ENTRIES_TAGS);
     for (AssetTag &tag : asset_data.tags) {
       tags.append_str(tag.name);
+    }
+  }
+
+  if (asset_data.flag & ASSETDATA_USE_OWN_IMPORT_METHOD) {
+    const char *identifier = nullptr;
+    RNA_enum_identifier(
+        rna_enum_asset_import_method_items, asset_data.preferred_import_method, &identifier);
+    if (identifier) {
+      result.append_str(ATTRIBUTE_ENTRIES_PREFERRED_IMPORT_METHOD, identifier);
     }
   }
 
@@ -214,18 +232,9 @@ static void init_value_from_file_indexer_entries(DictionaryValue &result,
   result.append(ATTRIBUTE_ENTRIES, entries);
 }
 
-static void init_indexer_entry_from_value(FileIndexerEntry &indexer_entry,
-                                          const DictionaryValue &entry)
+AssetMetaData *asset_metadata_from_dictionary(const DictionaryValue &entry)
 {
-  const StringRef idcode_name = *entry.lookup_str(ATTRIBUTE_ENTRIES_NAME);
-
-  indexer_entry.idcode = GS(idcode_name.data());
-
-  idcode_name.substr(2).copy_utf8_truncated(indexer_entry.datablock_info.name);
-
   AssetMetaData *asset_data = BKE_asset_metadata_create();
-  indexer_entry.datablock_info.asset_data = asset_data;
-  indexer_entry.datablock_info.free_asset_data = true;
 
   if (const std::optional<StringRef> value = entry.lookup_str(ATTRIBUTE_ENTRIES_DESCRIPTION)) {
     asset_data->description = BLI_strdupn(value->data(), value->size());
@@ -240,11 +249,17 @@ static void init_indexer_entry_from_value(FileIndexerEntry &indexer_entry,
     asset_data->license = BLI_strdupn(value->data(), value->size());
   }
 
-  const StringRefNull catalog_name = *entry.lookup_str(ATTRIBUTE_ENTRIES_CATALOG_NAME);
-  STRNCPY_UTF8(asset_data->catalog_simple_name, catalog_name.c_str());
+  if (const std::optional<StringRefNull> catalog_name = entry.lookup_str(
+          ATTRIBUTE_ENTRIES_CATALOG_NAME))
+  {
+    STRNCPY_UTF8(asset_data->catalog_simple_name, catalog_name->c_str());
+  }
 
-  const StringRefNull catalog_id = *entry.lookup_str(ATTRIBUTE_ENTRIES_CATALOG_ID);
-  asset_data->catalog_id = CatalogID(catalog_id);
+  if (const std::optional<StringRefNull> catalog_id = entry.lookup_str(
+          ATTRIBUTE_ENTRIES_CATALOG_ID))
+  {
+    asset_data->catalog_id = CatalogID(*catalog_id);
+  }
 
   if (const ArrayValue *array_value = entry.lookup_array(ATTRIBUTE_ENTRIES_TAGS)) {
     for (const std::shared_ptr<Value> &item : array_value->elements()) {
@@ -252,9 +267,52 @@ static void init_indexer_entry_from_value(FileIndexerEntry &indexer_entry,
     }
   }
 
-  if (const std::shared_ptr<Value> *value = entry.lookup(ATTRIBUTE_ENTRIES_PROPERTIES)) {
-    asset_data->properties = convert_from_serialize_value(**value);
+  if (const std::optional<StringRefNull> import_method_identifier = entry.lookup_str(
+          ATTRIBUTE_ENTRIES_PREFERRED_IMPORT_METHOD))
+  {
+    int preferred_import_method = 0;
+    if (RNA_enum_value_from_identifier(rna_enum_asset_import_method_items,
+                                       import_method_identifier->c_str(),
+                                       &preferred_import_method))
+    {
+      asset_data->preferred_import_method = eAssetImportMethod(preferred_import_method);
+      asset_data->flag |= ASSETDATA_USE_OWN_IMPORT_METHOD;
+    }
   }
+
+  if (const std::shared_ptr<Value> *value = entry.lookup(ATTRIBUTE_ENTRIES_PROPERTIES)) {
+    IDProperty *properties = convert_from_serialize_value(**value);
+
+    /* The top level property must be a group, further asset metadata property lookups assume
+     * that. This is also the only way to support more than a single property. */
+    if (properties && (properties->next || properties->type != IDP_GROUP)) {
+      asset_data->properties = bke::idprop::create_group("AssetMetaData.properties").release();
+      for (IDProperty *property = properties; property != nullptr;) {
+        /* Save next before IDP_AddToGroup (via BLI_addtail) overwrites property->next. */
+        IDProperty *next = property->next;
+        IDP_AddToGroup(asset_data->properties, property);
+        property = next;
+      }
+    }
+    else {
+      asset_data->properties = properties;
+    }
+  }
+
+  return asset_data;
+}
+
+static void init_indexer_entry_from_value(FileIndexerEntry &indexer_entry,
+                                          const DictionaryValue &entry)
+{
+  const StringRef idcode_name = *entry.lookup_str(ATTRIBUTE_ENTRIES_NAME);
+
+  indexer_entry.idcode = GS(idcode_name.data());
+
+  idcode_name.substr(2).copy_utf8_truncated(indexer_entry.datablock_info.name);
+
+  indexer_entry.datablock_info.asset_data = asset_metadata_from_dictionary(entry);
+  indexer_entry.datablock_info.free_asset_data = true;
 }
 
 static int init_indexer_entries_from_value(FileIndexerEntries &indexer_entries,
@@ -268,7 +326,7 @@ static int init_indexer_entries_from_value(FileIndexerEntries &indexer_entries,
 
   int num_entries_read = 0;
   for (const std::shared_ptr<Value> &element : entries->elements()) {
-    FileIndexerEntry *entry = MEM_new_zeroed<FileIndexerEntry>(__func__);
+    FileIndexerEntry *entry = MEM_new<FileIndexerEntry>(__func__);
     init_indexer_entry_from_value(*entry, *element->as_dictionary_value());
 
     BLI_linklist_prepend(&indexer_entries.entries, entry);
@@ -697,9 +755,11 @@ static eFileIndexerResult read_index(const char *filename,
     return FILE_INDEXER_NEEDS_UPDATE;
   }
 
-  const int read_entries_len = contents->extract_into(*entries);
-  CLOG_INFO(&LOG, "Read %d entries for \"%s\".", read_entries_len, filename);
-  *r_read_entries_len = read_entries_len;
+  if (entries) {
+    const int read_entries_len = contents->extract_into(*entries);
+    CLOG_INFO(&LOG, "Read %d entries for \"%s\".", read_entries_len, filename);
+    *r_read_entries_len = read_entries_len;
+  }
 
   return FILE_INDEXER_ENTRIES_LOADED;
 }

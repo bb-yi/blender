@@ -44,7 +44,7 @@
 
 namespace blender::ui {
 
-static void ui_view2d_curRect_validate_resize(View2D *v2d, bool resize);
+static void view2d_curRect_validate_resize(View2D *v2d, bool resize);
 
 /* -------------------------------------------------------------------- */
 /** \name Internal Utilities
@@ -315,7 +315,7 @@ void view2d_region_reinit(View2D *v2d, short type, int winx, int winy)
       v2d->keepofs = V2D_LOCKOFS_Y;
 
       /* absolutely no scrollers allowed */
-      v2d->scroll = 0;
+      v2d->scroll = eView2D_Scroll{};
       break;
     }
     /* panels view, with horizontal/vertical align */
@@ -377,7 +377,7 @@ void view2d_region_reinit(View2D *v2d, short type, int winx, int winy)
     view2d_totRect_set_resize(v2d, winx, winy, !do_init);
   }
   else {
-    ui_view2d_curRect_validate_resize(v2d, !do_init);
+    view2d_curRect_validate_resize(v2d, !do_init);
   }
 }
 
@@ -385,7 +385,7 @@ void view2d_region_reinit(View2D *v2d, short type, int winx, int winy)
  * Ensure View2D rects remain in a viable configuration
  * 'cur' is not allowed to be: larger than max, smaller than min, or outside of 'tot'
  */
-static void ui_view2d_curRect_validate_resize(View2D *v2d, bool resize)
+static void view2d_curRect_validate_resize(View2D *v2d, bool resize)
 {
   /* NOTE: #calculateZfac uses this logic, keep in sync. */
   float curwidth, curheight, width, height;
@@ -563,28 +563,8 @@ static void ui_view2d_curRect_validate_resize(View2D *v2d, bool resize)
       }
     }
     else {
-      if ((v2d->keeptot == V2D_KEEPTOT_STRICT) && (winy != v2d->oldwiny)) {
-        /* special exception for Outliner (and later channel-lists):
-         * - Currently, no actions need to be taken here...
-         */
-
-        if (winy < v2d->oldwiny) {
-          const float temp = v2d->oldwiny - winy;
-
-          if (v2d->align & V2D_ALIGN_NO_NEG_Y) {
-            cur->ymin -= temp;
-            cur->ymax -= temp;
-          }
-          else { /* Assume V2D_ALIGN_NO_POS_Y or combination */
-            cur->ymin += temp;
-            cur->ymax += temp;
-          }
-        }
-      }
-      else {
-        /* landscape window: correct for y */
-        height = width * winRatio;
-      }
+      /* landscape window: correct for y */
+      height = width * winRatio;
     }
   }
 
@@ -829,7 +809,7 @@ static void ui_view2d_curRect_validate_resize(View2D *v2d, bool resize)
 
 void view2d_curRect_validate(View2D *v2d)
 {
-  ui_view2d_curRect_validate_resize(v2d, false);
+  view2d_curRect_validate_resize(v2d, false);
 }
 
 void view2d_curRect_changed(const bContext *C, View2D *v2d)
@@ -1032,7 +1012,7 @@ void view2d_totRect_set_resize(View2D *v2d, int width, int height, bool resize)
   }
 
   /* make sure that 'cur' rect is in a valid state as a result of these changes */
-  ui_view2d_curRect_validate_resize(v2d, resize);
+  view2d_curRect_validate_resize(v2d, resize);
 }
 
 void view2d_totRect_set(View2D *v2d, int width, int height)
@@ -1950,6 +1930,13 @@ void view2d_center_set(View2D *v2d, float x, float y)
 
   /* make sure that 'cur' rect is in a valid state as a result of these changes */
   view2d_curRect_validate(v2d);
+}
+
+void view2d_size_x_set(View2D *v2d, float size_x)
+{
+  BLI_assert(BLI_rctf_size_y(&v2d->cur) != 0.0f);
+  const float aspect = BLI_rctf_size_x(&v2d->cur) / BLI_rctf_size_y(&v2d->cur);
+  BLI_rctf_resize(&v2d->cur, size_x, size_x / aspect);
 }
 
 void view2d_offset(View2D *v2d, float xfac, float yfac)

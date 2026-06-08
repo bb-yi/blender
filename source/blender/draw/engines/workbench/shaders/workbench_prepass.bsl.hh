@@ -3,17 +3,16 @@
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
 #pragma once
-#pragma create_info
 
 #include "draw_view_infos.hh"  // IWYU pragma: export
 
 VERTEX_SHADER_CREATE_INFO(draw_modelmat_with_custom_id)
 
 #include "draw_curves_lib.glsl"
-#include "draw_model_lib.glsl"
+#include "draw_model.bsl.hh"
 #include "draw_pointcloud_lib.glsl"
+#include "draw_view.bsl.hh"
 #include "draw_view_clipping_lib.glsl"
-#include "draw_view_lib.glsl"
 #include "gpu_shader_math_base_lib.glsl"
 #include "workbench_common.bsl.hh"
 #include "workbench_image.bsl.hh"
@@ -44,9 +43,9 @@ float linear_zdepth(float depth, float4x4 proj_mat)
  * McGuire and Bavoil, Weighted Blended Order-Independent Transparency, Journal of
  * Computer Graphics Techniques (JCGT), vol. 2, no. 2, 122–141, 2013
  */
-float calculate_transparent_weight(float frag_z)
+float calculate_transparent_weight(float frag_z, float4x4 proj_mat)
 {
-  float z = linear_zdepth(frag_z, drw_view().winmat);
+  float z = linear_zdepth(frag_z, proj_mat);
 #if 0
   /* Eq 10 : Good for surfaces with varying opacity (like particles) */
   float a = min(1.0f, alpha * 10.0f) + 0.01f;
@@ -116,8 +115,6 @@ struct MeshIn {
 };
 
 struct Mesh {
-  [[legacy_info]] ShaderCreateInfo draw_view;
-  [[legacy_info]] ShaderCreateInfo draw_modelmat_with_custom_id;
   [[legacy_info]] ShaderCreateInfo drw_clipped;
 
   /** WORKAROUND: This exact compilation constant is checked in Metal backend to enable clip
@@ -127,12 +124,22 @@ struct Mesh {
 
 [[vertex]] void vert_mesh([[resource_table]] Mesh &mesh,
                           [[resource_table]] color::Materials &materials,
+                          [[resource_table]] draw::View &views,
+                          [[resource_table]] draw::Model &models,
+                          [[resource_table]] draw::ResourceCustomID &resources,
+                          [[instance_index]] const int inst_id,
                           [[in]] const MeshIn &v_in,
                           [[out]] VertOut &v_out,
                           [[position]] float4 &out_position)
 {
-  float3 world_pos = drw_point_object_to_world(v_in.pos);
-  out_position = drw_point_world_to_homogenous(world_pos);
+  int custom_id = int(resources.get_custom_id(inst_id));
+
+  draw::ID id = resources.get(inst_id);
+  ViewMatrices view = views.get(id.view_id<1>());
+  ObjectMatrices obj = models.get(id.resource_id<1>());
+
+  float3 world_pos = obj.point_object_to_world(v_in.pos);
+  out_position = view.point_world_to_homogenous(world_pos);
 
   if (mesh.use_clipping) [[static_branch]] {
     view_clipping_distances(world_pos);
@@ -140,21 +147,15 @@ struct Mesh {
 
   v_out.uv = v_in.au;
 
-  v_out.normal = normalize(drw_normal_object_to_view(v_in.nor));
+  v_out.normal = normalize(obj.normal_object_to_view(view, v_in.nor));
 
-  v_out.object_id = int(drw_resource_id() & 0xFFFFu) + 1;
+  v_out.object_id = int(id.resource_id<1>() & 0xFFFFu) + 1;
 
-  materials.material_data_get(int(drw_custom_id()),
-                              v_in.ac.rgb,
-                              v_out.color,
-                              v_out.alpha,
-                              v_out.roughness,
-                              v_out.metallic);
+  materials.material_data_get(
+      custom_id, v_in.ac.rgb, v_out.color, v_out.alpha, v_out.roughness, v_out.metallic);
 }
 
 struct Curves {
-  [[legacy_info]] ShaderCreateInfo draw_view;
-  [[legacy_info]] ShaderCreateInfo draw_modelmat_with_custom_id;
   [[legacy_info]] ShaderCreateInfo draw_curves;
   [[legacy_info]] ShaderCreateInfo draw_curves_infos;
   [[legacy_info]] ShaderCreateInfo drw_clipped;
@@ -170,18 +171,29 @@ struct Curves {
 
 [[vertex]] void vert_curves([[resource_table]] Curves &curves,
                             [[resource_table]] color::Materials &materials,
+                            [[resource_table]] draw::View &views,
+                            [[resource_table]] draw::Model &models,
+                            [[resource_table]] draw::ResourceCustomID &resources,
+                            [[instance_index]] const int inst_id,
                             [[vertex_id]] const int vert_id,
                             [[out]] VertOut &v_out,
                             [[position]] float4 &out_position)
 {
+  int custom_id = int(resources.get_custom_id(inst_id));
+
+  draw::ID id = resources.get(inst_id);
+  ViewMatrices view = views.get(id.view_id<1>());
+  ObjectMatrices obj = models.get(id.resource_id<1>());
+
   const auto &drw_curves = buffer_get(draw_curves_infos, drw_curves);
 
   const curves::Point ls_pt = curves::point_get(uint(vert_id));
-  const curves::Point ws_pt = curves::object_to_world(ls_pt, drw_modelmat());
-  const curves::ShapePoint pt = curves::shape_point_get(ws_pt, drw_world_incident_vector(ws_pt.P));
+  const curves::Point ws_pt = curves::object_to_world(ls_pt, obj.model);
+  const curves::ShapePoint pt = curves::shape_point_get(ws_pt,
+                                                        view.world_incident_vector(ws_pt.P));
   float3 world_pos = pt.P;
 
-  out_position = drw_point_world_to_homogenous(world_pos);
+  out_position = view.point_world_to_homogenous(world_pos);
 
   float hair_rand = integer_noise(ws_pt.curve_id);
 
@@ -203,14 +215,11 @@ struct Curves {
 
   v_out.uv = curves::get_customdata_vec2(ws_pt.curve_id, curves.au);
 
-  v_out.normal = normalize(drw_normal_world_to_view(nor));
+  v_out.normal = normalize(view.normal_world_to_view(nor));
 
-  materials.material_data_get(int(drw_custom_id()),
-                              curves::get_customdata_vec3(ws_pt.curve_id, curves.ac),
-                              v_out.color,
-                              v_out.alpha,
-                              v_out.roughness,
-                              v_out.metallic);
+  float3 vert_col = curves::get_customdata_vec3(ws_pt.curve_id, curves.ac);
+  materials.material_data_get(
+      custom_id, vert_col, v_out.color, v_out.alpha, v_out.roughness, v_out.metallic);
 
   /* Hairs have lots of layer and can rapidly become the most prominent surface.
    * So we lower their alpha artificially. */
@@ -218,7 +227,7 @@ struct Curves {
 
   hair_random_material(hair_rand, v_out.color, v_out.roughness, v_out.metallic);
 
-  v_out.object_id = int(drw_resource_id() & 0xFFFFu) + 1;
+  v_out.object_id = int(id.resource_id<1>() & 0xFFFFu) + 1;
 
   if (curves.emitter_object_id != 0) {
     v_out.object_id = int(uint(curves.emitter_object_id) & 0xFFFFu) + 1;
@@ -226,8 +235,6 @@ struct Curves {
 }
 
 struct PointCloud {
-  [[legacy_info]] ShaderCreateInfo draw_view;
-  [[legacy_info]] ShaderCreateInfo draw_modelmat_with_custom_id;
   [[legacy_info]] ShaderCreateInfo draw_pointcloud;
   [[legacy_info]] ShaderCreateInfo drw_clipped;
 
@@ -238,18 +245,32 @@ struct PointCloud {
 
 [[vertex]] void vert_pointcloud([[resource_table]] PointCloud &point_cloud,
                                 [[resource_table]] color::Materials &materials,
+                                [[resource_table]] draw::View &views,
+                                [[resource_table]] draw::Model &models,
+                                [[resource_table]] draw::ResourceCustomID &resources,
+                                [[instance_index]] const int inst_id,
                                 [[vertex_id]] const int vert_id,
                                 [[out]] VertOut &v_out,
                                 [[position]] float4 &out_position)
 {
-  const pointcloud::Point ls_pt = pointcloud::point_get(uint(gl_VertexID));
-  const pointcloud::Point ws_pt = pointcloud::object_to_world(ls_pt, drw_modelmat());
+  int custom_id = int(resources.get_custom_id(inst_id));
+
+  draw::ID id = resources.get(inst_id);
+  uint res_id = id.resource_id<1>();
+
+  ViewMatrices view = views.get(id.view_id<1>());
+  ObjectMatrices obj = models.get(res_id);
+
+  const eObjectInfoFlag ob_flag = buffer_get(draw_object_infos, drw_infos)[res_id].flag;
+
+  const pointcloud::Point ls_pt = pointcloud::point_get(uint(vert_id));
+  const pointcloud::Point ws_pt = pointcloud::object_to_world(ls_pt, obj.model);
   const pointcloud::ShapePoint pt = pointcloud::shape_point_get(
-      ws_pt, drw_world_incident_vector(ws_pt.P), drw_view_up());
+      ws_pt, view.world_incident_vector(ws_pt.P), view.up(), ob_flag);
 
-  v_out.normal = normalize(drw_normal_world_to_view(pt.N));
+  v_out.normal = normalize(view.normal_world_to_view(pt.N));
 
-  out_position = drw_point_world_to_homogenous(pt.P);
+  out_position = view.point_world_to_homogenous(pt.P);
 
   if (point_cloud.use_clipping) [[static_branch]] {
     view_clipping_distances(pt.P);
@@ -257,18 +278,13 @@ struct PointCloud {
 
   v_out.uv = float2(0.0f);
 
-  materials.material_data_get(int(drw_custom_id()),
-                              float3(1.0f),
-                              v_out.color,
-                              v_out.alpha,
-                              v_out.roughness,
-                              v_out.metallic);
+  materials.material_data_get(
+      custom_id, float3(1.0f), v_out.color, v_out.alpha, v_out.roughness, v_out.metallic);
 
-  v_out.object_id = int(drw_resource_id() & 0xFFFFu) + 1;
+  v_out.object_id = int(id.resource_id<1>() & 0xFFFFu) + 1;
 }
 
 struct Resources {
-  [[legacy_info]] ShaderCreateInfo draw_view;
 
   [[compilation_constant]] const int lighting_mode;
   [[compilation_constant]] const bool use_texture;
@@ -289,10 +305,11 @@ struct OpaqueOut {
 
 [[fragment]] void frag_opaque([[resource_table]] Resources &srt,
                               [[in]] const VertOut &v_out,
+                              [[front_facing]] const bool facing,
                               [[out]] OpaqueOut &frag_out)
 {
   frag_out.object_id = uint(v_out.object_id);
-  frag_out.normal = normal_encode(gl_FrontFacing, v_out.normal);
+  frag_out.normal = normal_encode(facing, v_out.normal);
 
   frag_out.material = float4(v_out.color, float_pair_encode(v_out.roughness, v_out.metallic));
 
@@ -302,7 +319,7 @@ struct OpaqueOut {
 
   if (srt.lighting_mode == WORKBENCH_LIGHTING_MATCAP) [[static_branch]] {
     /* For matcaps, save front facing in alpha channel. */
-    frag_out.material.a = float(gl_FrontFacing);
+    frag_out.material.a = float(facing);
   }
 }
 
@@ -314,14 +331,16 @@ struct TransparentOut {
 
 [[fragment]] void frag_transparent([[resource_table]] Resources &srt,
                                    [[resource_table]] World &world,
+                                   [[resource_table]] draw::View &views,
                                    [[frag_coord]] const float4 frag_co,
                                    [[in]] const VertOut &v_out,
                                    [[out]] TransparentOut &frag_out)
 {
+  const ViewMatrices view = views.get(0);
   /* Normal and Incident vector are in view-space. Lighting is evaluated in view-space. */
   float2 uv_viewport = frag_co.xy * world.world_data.viewport_size_inv;
-  float3 vP = drw_point_screen_to_view(float3(uv_viewport, 0.5f));
-  float3 I = drw_view_incident_vector(vP);
+  float3 vP = view.point_screen_to_view(float3(uv_viewport, 0.5f));
+  float3 I = view.view_incident_vector(vP);
   float3 N = normalize(v_out.normal);
 
   float3 color = v_out.color;
@@ -345,7 +364,7 @@ struct TransparentOut {
 
   /* Listing 4 */
   float alpha = v_out.alpha * world.world_data.xray_alpha;
-  float weight = calculate_transparent_weight(frag_co.z) * alpha;
+  float weight = calculate_transparent_weight(frag_co.z, view.winmat) * alpha;
   frag_out.transparent_accum = float4(shaded_color * weight, alpha);
   frag_out.revealage_accum = float4(weight);
 

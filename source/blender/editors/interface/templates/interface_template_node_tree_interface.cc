@@ -47,13 +47,10 @@ class NodeTreeInterfaceView;
 
 class NodeTreeInterfaceDragController : public AbstractViewItemDragController {
  private:
-  bNodeTreeInterfaceItem &item_;
   bNodeTree &tree_;
 
  public:
-  explicit NodeTreeInterfaceDragController(NodeTreeInterfaceView &view,
-                                           bNodeTreeInterfaceItem &item,
-                                           bNodeTree &tree);
+  explicit NodeTreeInterfaceDragController(NodeTreeInterfaceView &view, bNodeTree &tree);
   ~NodeTreeInterfaceDragController() override = default;
 
   std::optional<eWM_DragDataType> get_drag_type() const override;
@@ -334,8 +331,8 @@ class NodeTreeInterfaceView : public AbstractTreeView {
       if (item == skip_item) {
         continue;
       }
-      switch (eNodeTreeInterfaceItemType(item->item_type)) {
-        case NODE_INTERFACE_SOCKET: {
+      switch (item->item_type) {
+        case NodeTreeInterfaceItemType::Socket: {
           bNodeTreeInterfaceSocket *socket = node_interface::get_item_as<bNodeTreeInterfaceSocket>(
               item);
           NodeSocketViewItem &socket_item = parent_item.add_tree_item<NodeSocketViewItem>(
@@ -343,7 +340,7 @@ class NodeTreeInterfaceView : public AbstractTreeView {
           socket_item.uncollapse_by_default();
           break;
         }
-        case NODE_INTERFACE_PANEL: {
+        case NodeTreeInterfaceItemType::Panel: {
           bNodeTreeInterfacePanel *panel = node_interface::get_item_as<bNodeTreeInterfacePanel>(
               item);
           NodePanelViewItem &panel_item = parent_item.add_tree_item<NodePanelViewItem>(
@@ -366,7 +363,7 @@ std::unique_ptr<AbstractViewItemDragController> NodeSocketViewItem::create_drag_
     return nullptr;
   }
   return std::make_unique<NodeTreeInterfaceDragController>(
-      static_cast<NodeTreeInterfaceView &>(this->get_tree_view()), socket_.item, nodetree_);
+      static_cast<NodeTreeInterfaceView &>(this->get_tree_view()), nodetree_);
 }
 
 std::unique_ptr<TreeViewItemDropTarget> NodeSocketViewItem::create_drop_target()
@@ -380,7 +377,7 @@ std::unique_ptr<AbstractViewItemDragController> NodePanelViewItem::create_drag_c
     return nullptr;
   }
   return std::make_unique<NodeTreeInterfaceDragController>(
-      static_cast<NodeTreeInterfaceView &>(this->get_tree_view()), panel_.item, nodetree_);
+      static_cast<NodeTreeInterfaceView &>(this->get_tree_view()), nodetree_);
 }
 
 std::unique_ptr<TreeViewItemDropTarget> NodePanelViewItem::create_drop_target()
@@ -389,9 +386,8 @@ std::unique_ptr<TreeViewItemDropTarget> NodePanelViewItem::create_drop_target()
 }
 
 NodeTreeInterfaceDragController::NodeTreeInterfaceDragController(NodeTreeInterfaceView &view,
-                                                                 bNodeTreeInterfaceItem &item,
                                                                  bNodeTree &tree)
-    : AbstractViewItemDragController(view), item_(item), tree_(tree)
+    : AbstractViewItemDragController(view), tree_(tree)
 {
 }
 
@@ -411,15 +407,15 @@ void gather_drag_items_recursive(bNodeTreeInterfacePanel &panel,
     }
 
     bool is_selected = false;
-    switch (eNodeTreeInterfaceItemType(item->item_type)) {
-      case NODE_INTERFACE_PANEL: {
+    switch (item->item_type) {
+      case NodeTreeInterfaceItemType::Panel: {
         bNodeTreeInterfacePanel *panel = node_interface::get_item_as<bNodeTreeInterfacePanel>(
             item);
         is_selected = (panel->flag & NODE_INTERFACE_PANEL_SELECT);
         gather_drag_items_recursive(*panel, r_items, is_selected);
         break;
       }
-      case NODE_INTERFACE_SOCKET: {
+      case NodeTreeInterfaceItemType::Socket: {
         bNodeTreeInterfaceSocket *socket = node_interface::get_item_as<bNodeTreeInterfaceSocket>(
             item);
         is_selected = (socket->flag & NODE_INTERFACE_SOCKET_SELECT);
@@ -440,7 +436,6 @@ void *NodeTreeInterfaceDragController::create_drag_data() const
 
   bNodeTreeInterfaceItemReference *drag_data = MEM_new_zeroed<bNodeTreeInterfaceItemReference>(
       __func__);
-  drag_data->item = &item_;
   drag_data->tree = &tree_;
   drag_data->items_count = drag_items.size();
   drag_data->items = MEM_new_array_zeroed<bNodeTreeInterfaceItem *>(drag_data->items_count,
@@ -523,7 +518,7 @@ bool on_drop_interface_items(bContext *C,
   switch (drag_info.drop_location) {
     case DropLocation::Into: {
       /* Insert into target */
-      if (drop_target_item.item_type != NODE_INTERFACE_PANEL) {
+      if (drop_target_item.item_type != NodeTreeInterfaceItemType::Panel) {
         return false;
       }
       parent = node_interface::get_item_as<bNodeTreeInterfacePanel>(&drop_target_item);

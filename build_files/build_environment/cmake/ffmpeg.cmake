@@ -178,7 +178,6 @@ ExternalProject_Add(external_ffmpeg
       --disable-vaapi
       --disable-nonfree
       --enable-gpl
-      --disable-postproc
       --enable-libmp3lame
       --disable-librtmp
       --enable-libx264
@@ -253,7 +252,7 @@ if(WIN32)
   if(BLENDER_PLATFORM_ARM)
     add_dependencies(
       external_ffmpeg
-      ll
+      external_llvm
     )
   endif()
 endif()

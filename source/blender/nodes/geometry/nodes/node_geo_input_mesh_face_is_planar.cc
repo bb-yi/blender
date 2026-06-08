@@ -14,17 +14,17 @@ namespace blender::nodes::node_geo_input_mesh_face_is_planar_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Float>("Threshold")
+  b.add_input<decl::Float>("Threshold"_ustr)
       .default_value(0.01f)
       .min(0.0f)
       .subtype(PROP_DISTANCE)
-      .supports_field()
+      .structure_type(StructureType::Field)
       .description(
           "The distance a point can be from the surface before the face is no longer "
           "considered planar");
-  b.add_output<decl::Bool>("Planar")
+  b.add_output<decl::Bool>("Planar"_ustr)
       .translation_context(BLT_I18NCONTEXT_ID_NODETREE)
-      .field_source();
+      .structure_type(StructureType::Field);
 }
 
 class PlanarFieldInput final : public bke::MeshFieldInput {
@@ -35,7 +35,6 @@ class PlanarFieldInput final : public bke::MeshFieldInput {
   PlanarFieldInput(Field<float> threshold)
       : bke::MeshFieldInput(CPPType::get<bool>(), "Planar"), threshold_(threshold)
   {
-    category_ = Category::Generated;
   }
 
   GVArray get_varray_for_context(const Mesh &mesh,
@@ -76,33 +75,33 @@ class PlanarFieldInput final : public bke::MeshFieldInput {
         VArray<bool>::from_func(faces.size(), planar_fn), AttrDomain::Face, domain);
   }
 
-  void for_each_field_input_recursive(FunctionRef<void(const FieldInput &)> fn) const override
+  void foreach_recursive_field(FunctionRef<void(const GField &)> fn) const override
   {
-    threshold_.node().for_each_field_input_recursive(fn);
+    fn(threshold_);
   }
 
-  uint64_t hash() const override
+  void hash_unique(UniqueHashBytes &hash, fn::FieldHashDeep &deep_hash_cache) const override
   {
-    /* Some random constant hash. */
-    return 2356235652;
-  }
-
-  bool is_equal_to(const fn::FieldNode &other) const override
-  {
-    return dynamic_cast<const PlanarFieldInput *>(&other) != nullptr;
+    static constexpr int8_t id = 0;
+    hash.add(&id);
+    hash.add(deep_hash_cache.ensure(threshold_));
   }
 
   std::optional<AttrDomain> preferred_domain(const Mesh & /*mesh*/) const override
   {
     return AttrDomain::Face;
   }
+
+  bke::NativeFieldDomain native_domain_info(const Mesh & /*mesh*/) const override
+  {
+    return bke::NativeFieldDomain::Domain{AttrDomain::Face};
+  }
 };
 
 static void geo_node_exec(GeoNodeExecParams params)
 {
-  Field<float> threshold = params.extract_input<Field<float>>("Threshold");
-  Field<bool> planar_field{std::make_shared<PlanarFieldInput>(threshold)};
-  params.set_output("Planar", std::move(planar_field));
+  Field<float> threshold = params.extract_input<Field<float>>("Threshold"_ustr);
+  params.set_output("Planar"_ustr, Field<bool>::from_input<PlanarFieldInput>(threshold));
 }
 
 static void node_register()
@@ -110,7 +109,7 @@ static void node_register()
   static bke::bNodeType ntype;
 
   geo_node_type_base(
-      &ntype, "GeometryNodeInputMeshFaceIsPlanar", GEO_NODE_INPUT_MESH_FACE_IS_PLANAR);
+      &ntype, "GeometryNodeInputMeshFaceIsPlanar"_ustr, GEO_NODE_INPUT_MESH_FACE_IS_PLANAR);
   ntype.ui_name = "Is Face Planar";
   ntype.ui_description =
       "Retrieve whether all triangles in a face are on the same plane, i.e. whether they have the "

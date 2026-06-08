@@ -6,6 +6,7 @@
 
 #include "IO_subdiv_disabler.hh"
 #include "usd.hh"
+#include "usd_colorspace_utils.hh"
 #include "usd_hierarchy_iterator.hh"
 #include "usd_hook.hh"
 #include "usd_instancing_utils.hh"
@@ -53,6 +54,8 @@
 #include "BLI_path_utils.hh"
 #include "BLI_string.h"
 #include "BLI_timeit.hh"
+
+#include "ED_util.hh"
 
 #include <IMB_imbuf.hh>
 #include <IMB_imbuf_types.hh>
@@ -187,6 +190,10 @@ static void ensure_root_prim(pxr::UsdStageRefPtr stage, const USDExportParams &p
     const math::EulerXYZ eul = math::to_euler(math::transpose(mrot));
     xf_api.SetRotate(pxr::GfVec3f(eul.x().degree(), eul.y().degree(), eul.z().degree()));
   }
+
+  /* Color-space on the root prim. It's also applied on all individual prims that need
+   * it, but perhaps this is useful to signal the overall color-space of the file. */
+  colorspace_apply_to_prim(root_xf.GetPrim());
 
   for (const auto &path : pxr::SdfPath(params.root_prim_path).GetPrefixes()) {
     auto xform = pxr::UsdGeomXform::Define(stage, path);
@@ -397,12 +404,12 @@ std::string cache_image_color(const float color[4])
     return file_path;
   }
 
-  ImBuf *ibuf = IMB_allocImBuf(1, 1, 32, IB_float_data);
+  ImBuf *ibuf = IMB_allocImBuf(1, 1, ImBufFlags::FloatData);
   IMB_rectfill(ibuf, color);
   ibuf->ftype = IMB_FTYPE_OPENEXR;
   ibuf->foptions.flag = R_IMF_EXR_CODEC_RLE;
 
-  if (IMB_save_image(ibuf, file_path.c_str(), IB_float_data)) {
+  if (IMB_save_image(ibuf, file_path.c_str(), ImBufFlags::FloatData)) {
     CLOG_INFO(&LOG, "%s", file_path.c_str());
   }
   else {
@@ -567,6 +574,7 @@ pxr::UsdStageRefPtr export_to_stage(const USDExportParams &params,
   if (params.export_animation) {
     /* Writing the animated frames is not 100% of the work, here it's assumed to be 75% of it. */
     float progress_per_frame = 0.75f / std::max(1, (scene->r.efra - scene->r.sfra + 1));
+    int exported_frame_count = 0;
 
     for (float frame = scene->r.sfra; frame <= scene->r.efra; frame++) {
       if (G.is_break || worker_status->stop) {
@@ -580,6 +588,13 @@ pxr::UsdStageRefPtr export_to_stage(const USDExportParams &params,
 
       iter.set_export_frame(frame);
       iter.iterate_and_write();
+
+      /* Check if we need to perform an incremental save. A value of 0 will never trigger. */
+      exported_frame_count++;
+      if (exported_frame_count == params.incremental_frames) {
+        usd_stage->GetRootLayer()->Save();
+        exported_frame_count = 0;
+      }
 
       worker_status->progress += progress_per_frame;
       worker_status->do_update = true;
@@ -813,6 +828,8 @@ bool USD_export(const bContext *C,
   job->scene = scene;
   job->export_ok = false;
   set_job_filepath(job, filepath);
+
+  ED_editors_flush_edits(job->bmain);
 
   job->depsgraph = DEG_graph_new(job->bmain, scene, view_layer, params->evaluation_mode);
   job->params = *params;

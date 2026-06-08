@@ -79,8 +79,8 @@ static void cache_file_free_data(ID *id)
 {
   CacheFile *cache_file = id_cast<CacheFile *>(id);
   cachefile_handle_free(cache_file);
-  BLI_freelistN(&cache_file->object_paths);
-  BLI_freelistN(&cache_file->layers);
+  cache_file->object_paths.free_no_destruct();
+  cache_file->layers.free_no_destruct();
 }
 
 static void cache_file_foreach_path(ID *id, BPathForeachPathData *bpath_data)
@@ -95,7 +95,7 @@ static void cache_file_blend_write(BlendWriter *writer, ID *id, const void *id_a
   CacheFile *cache_file = id_cast<CacheFile *>(id);
 
   /* Clean up, important in undo case to reduce false detection of changed datablocks. */
-  BLI_listbase_clear(&cache_file->object_paths);
+  cache_file->object_paths.clear_no_delete();
   cache_file->handle = nullptr;
   memset(cache_file->handle_filepath, 0, sizeof(cache_file->handle_filepath));
   cache_file->handle_readers = nullptr;
@@ -112,7 +112,7 @@ static void cache_file_blend_write(BlendWriter *writer, ID *id, const void *id_a
 static void cache_file_blend_read_data(BlendDataReader *reader, ID *id)
 {
   CacheFile *cache_file = id_cast<CacheFile *>(id);
-  BLI_listbase_clear(&cache_file->object_paths);
+  cache_file->object_paths.clear_no_delete();
   cache_file->handle = nullptr;
   cache_file->handle_filepath[0] = '\0';
   cache_file->handle_readers = nullptr;
@@ -122,34 +122,34 @@ static void cache_file_blend_read_data(BlendDataReader *reader, ID *id)
 }
 
 IDTypeInfo IDType_ID_CF = {
-    /*id_code*/ CacheFile::id_type,
-    /*id_filter*/ FILTER_ID_CF,
-    /*dependencies_id_types*/ 0,
-    /*main_listbase_index*/ INDEX_ID_CF,
-    /*struct_size*/ sizeof(CacheFile),
-    /*name*/ "CacheFile",
-    /*name_plural*/ N_("cache_files"),
-    /*translation_context*/ BLT_I18NCONTEXT_ID_CACHEFILE,
-    /*flags*/ IDTYPE_FLAGS_APPEND_IS_REUSABLE,
-    /*asset_type_info*/ nullptr,
+    .id_code = CacheFile::id_type,
+    .id_filter = FILTER_ID_CF,
+    .dependencies_id_types = 0,
+    .main_listbase_index = INDEX_ID_CF,
+    .struct_size = sizeof(CacheFile),
+    .name = "CacheFile",
+    .name_plural = N_("cache_files"),
+    .translation_context = BLT_I18NCONTEXT_ID_CACHEFILE,
+    .flags = IDTYPE_FLAGS_APPEND_IS_REUSABLE,
+    .asset_type_info = nullptr,
 
-    /*init_data*/ cache_file_init_data,
-    /*copy_data*/ cache_file_copy_data,
-    /*free_data*/ cache_file_free_data,
-    /*make_local*/ nullptr,
-    /*foreach_id*/ nullptr,
-    /*foreach_cache*/ nullptr,
-    /*foreach_path*/ cache_file_foreach_path,
-    /*foreach_working_space_color*/ nullptr,
-    /*owner_pointer_get*/ nullptr,
+    .init_data = cache_file_init_data,
+    .copy_data = cache_file_copy_data,
+    .free_data = cache_file_free_data,
+    .make_local = nullptr,
+    .foreach_id = nullptr,
+    .foreach_cache = nullptr,
+    .foreach_path = cache_file_foreach_path,
+    .foreach_working_space_color = nullptr,
+    .owner_pointer_get = nullptr,
 
-    /*blend_write*/ cache_file_blend_write,
-    /*blend_read_data*/ cache_file_blend_read_data,
-    /*blend_read_after_liblink*/ nullptr,
+    .blend_write = cache_file_blend_write,
+    .blend_read_data = cache_file_blend_read_data,
+    .blend_read_after_liblink = nullptr,
 
-    /*blend_read_undo_preserve*/ nullptr,
+    .blend_read_undo_preserve = nullptr,
 
-    /*lib_override_apply_post*/ nullptr,
+    .lib_override_apply_post = nullptr,
 };
 
 #if defined(WITH_ALEMBIC) || defined(WITH_USD)
@@ -340,7 +340,7 @@ void BKE_cachefile_eval(Main *bmain, Depsgraph *depsgraph, CacheFile *cache_file
   }
 
   cachefile_handle_free(cache_file);
-  BLI_freelistN(&cache_file->object_paths);
+  cache_file->object_paths.free_no_destruct();
 
 #ifdef WITH_ALEMBIC
   if (BLI_path_extension_check_glob(filepath, "*.abc")) {
@@ -364,7 +364,7 @@ void BKE_cachefile_eval(Main *bmain, Depsgraph *depsgraph, CacheFile *cache_file
   if (DEG_is_active(depsgraph)) {
     /* Flush object paths back to original data-block for UI. */
     CacheFile *cache_file_orig = DEG_get_original(cache_file);
-    BLI_freelistN(&cache_file_orig->object_paths);
+    cache_file_orig->object_paths.free_no_destruct();
     BLI_duplicatelist(&cache_file_orig->object_paths, &cache_file->object_paths);
   }
 }
@@ -412,7 +412,7 @@ double BKE_cachefile_frame_offset(const CacheFile *cache_file, const double time
   return cache_file->is_sequence ? frame : frame - time_offset;
 }
 
-CacheFileLayer *BKE_cachefile_add_layer(CacheFile *cache_file, const char filepath[1024])
+CacheFileLayer *BKE_cachefile_add_layer(CacheFile *cache_file, const char filepath[FILE_MAX])
 {
   for (CacheFileLayer &layer : cache_file->layers) {
     if (STREQ(layer.filepath, filepath)) {
@@ -420,7 +420,7 @@ CacheFileLayer *BKE_cachefile_add_layer(CacheFile *cache_file, const char filepa
     }
   }
 
-  const int num_layers = BLI_listbase_count(&cache_file->layers);
+  const int num_layers = cache_file->layers.count();
 
   CacheFileLayer *layer = MEM_new<CacheFileLayer>("CacheFileLayer");
   STRNCPY(layer->filepath, filepath);

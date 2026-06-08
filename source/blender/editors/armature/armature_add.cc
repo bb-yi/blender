@@ -20,6 +20,7 @@
 #include "BLI_math_matrix.h"
 #include "BLI_math_rotation.h"
 #include "BLI_math_vector.h"
+#include "BLI_math_vector.hh"
 #include "BLI_string.h"
 #include "BLI_string_utf8.h"
 #include "BLI_string_utils.hh"
@@ -121,8 +122,8 @@ EditBone *ED_armature_ebone_add_primitive(Object *obedit_arm,
 
   bone->tail[view_aligned ? 1 : 2] = length;
 
-  if (arm->runtime.active_collection) {
-    ANIM_armature_bonecoll_assign_editbone(arm->runtime.active_collection, bone);
+  if (arm->runtime->active_collection) {
+    ANIM_armature_bonecoll_assign_editbone(arm->runtime->active_collection, bone);
   }
 
   return bone;
@@ -535,45 +536,42 @@ static void update_duplicate_action_constraint_settings(
     animrig::Action &action = act->wrap();
     animrig::Channelbag *cbag = animrig::channelbag_for_action_slot(action,
                                                                     act_con->action_slot_handle);
-
-    /* Create a copy and mirror the animation */
-    auto bone_name_filter = [&](const FCurve &fcurve) -> bool {
-      return animrig::fcurve_matches_collection_path(fcurve, "pose.bones[", orig_bone->name);
-    };
-    Vector<FCurve *> fcurves = animrig::fcurves_in_action_slot_filtered(
-        act, act_con->action_slot_handle, bone_name_filter);
-    for (const FCurve *old_curve : fcurves) {
-      FCurve *new_curve = BKE_fcurve_copy(old_curve);
-      char *old_path = new_curve->rna_path;
-
-      new_curve->rna_path = BLI_string_replaceN(old_path, orig_bone->name, dup_bone->name);
-      MEM_delete(old_path);
-
-      /* FIXME: deal with the case where this F-Curve already exists. */
-
+    Span<FCurve *> fcurves = {};
+    if (cbag) {
+      fcurves = cbag->fcurves();
+    }
+    for (const FCurve *old_fcurve : fcurves) {
+      if (!animrig::fcurve_matches_collection_path(*old_fcurve, "pose.bones[", orig_bone->name)) {
+        continue;
+      }
+      const char *new_path = BLI_string_replaceN(
+          old_fcurve->rna_path, orig_bone->name, dup_bone->name);
+      FCurve &new_curve = cbag->fcurve_clone(
+          *old_fcurve, new_path, old_fcurve->array_index, dup_bone->name);
+      MEM_delete(new_path);
       /* Flip the animation */
       int i;
       BezTriple *bezt;
-      for (i = 0, bezt = new_curve->bezt; i < new_curve->totvert; i++, bezt++) {
-        const size_t slength = strlen(new_curve->rna_path);
+      for (i = 0, bezt = new_curve.bezt; i < new_curve.totvert; i++, bezt++) {
+        const size_t slength = strlen(new_curve.rna_path);
         bool flip = false;
-        if (BLI_strn_endswith(new_curve->rna_path, "location", slength) &&
-            new_curve->array_index == 0)
+        if (BLI_strn_endswith(new_curve.rna_path, "location", slength) &&
+            new_curve.array_index == 0)
         {
           flip = true;
         }
-        else if (BLI_strn_endswith(new_curve->rna_path, "rotation_quaternion", slength) &&
-                 ELEM(new_curve->array_index, 2, 3))
+        else if (BLI_strn_endswith(new_curve.rna_path, "rotation_quaternion", slength) &&
+                 ELEM(new_curve.array_index, 2, 3))
         {
           flip = true;
         }
-        else if (BLI_strn_endswith(new_curve->rna_path, "rotation_euler", slength) &&
-                 ELEM(new_curve->array_index, 1, 2))
+        else if (BLI_strn_endswith(new_curve.rna_path, "rotation_euler", slength) &&
+                 ELEM(new_curve.array_index, 1, 2))
         {
           flip = true;
         }
-        else if (BLI_strn_endswith(new_curve->rna_path, "rotation_axis_angle", slength) &&
-                 ELEM(new_curve->array_index, 2, 3))
+        else if (BLI_strn_endswith(new_curve.rna_path, "rotation_axis_angle", slength) &&
+                 ELEM(new_curve.array_index, 2, 3))
         {
           flip = true;
         }
@@ -584,10 +582,6 @@ static void update_duplicate_action_constraint_settings(
           bezt->vec[2][1] *= -1;
         }
       }
-      BLI_assert_msg(cbag, "If there are F-Curves for this slot, there should be a channelbag");
-      bActionGroup &agrp = cbag->channel_group_ensure(dup_bone->name);
-      cbag->fcurve_append(*new_curve);
-      cbag->fcurve_assign_to_channel_group(*new_curve, agrp);
     }
   }
 
@@ -610,7 +604,7 @@ static void update_duplicate_loc_rot_constraint_settings(Object *ob,
 {
   /* This code assumes that bRotLimitConstraint and bLocLimitConstraint have the same fields in
    * the same memory locations. */
-  bRotLimitConstraint *limit = static_cast<bRotLimitConstraint *>(curcon->data);
+  bLocLimitConstraint *limit = static_cast<bLocLimitConstraint *>(curcon->data);
   float local_mat[4][4], imat[4][4];
 
   float min_vec[3], max_vec[3];
@@ -663,12 +657,9 @@ static void update_duplicate_loc_rot_constraint_settings(Object *ob,
     max_vec[0] = min_x_copy * -1;
 
     /* Also flip the enabled axis check-boxes accordingly. */
-    const bool use_max_x = (limit->flag & LIMIT_XMAX);
-    const bool use_min_x = (limit->flag & LIMIT_XMIN);
-    limit->flag |= use_max_x ? LIMIT_XMIN : 0;
-    limit->flag &= (use_max_x && !use_min_x) ? ~LIMIT_XMAX : limit->flag;
-    limit->flag |= use_min_x ? LIMIT_XMAX : 0;
-    limit->flag &= (use_min_x && !use_max_x) ? ~LIMIT_XMIN : limit->flag;
+    if (bool(limit->flag & LIMIT_XMIN) != bool(limit->flag & LIMIT_XMAX)) {
+      limit->flag ^= (LIMIT_XMIN | LIMIT_XMAX);
+    }
   }
 
   /* convert back to the settings space */
@@ -863,7 +854,7 @@ static void update_duplicate_transform_constraint_settings(Object *ob,
   mul_m4_v3(imat, trans->to_max_scale);
 }
 
-static void track_axis_x_swap(int &value)
+static void track_axis_x_swap(eTrackToAxis_Modes &value)
 {
   /* Swap track axis X <> -X. */
   if (value == TRACK_X) {
@@ -951,6 +942,8 @@ static void update_duplicate_constraint_settings(EditBone *dup_bone,
         break;
       case CONSTRAINT_TYPE_SHRINKWRAP:
         update_duplicate_constraint_shrinkwrap_settings(&curcon);
+        break;
+      default:
         break;
     }
   }
@@ -1115,11 +1108,14 @@ EditBone *duplicateEditBone(EditBone *cur_bone,
   return duplicateEditBoneObjects(cur_bone, name, editbones, ob, ob);
 }
 
-static wmOperatorStatus armature_duplicate_selected_exec(bContext *C, wmOperator *op)
+static wmOperatorStatus armature_duplicate_selected(bContext *C,
+                                                    const bool do_flip_names,
+                                                    StringRefNull search,
+                                                    StringRefNull replace)
 {
+  const Main *bmain = CTX_data_main(C);
   const Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
-  const bool do_flip_names = RNA_boolean_get(op->ptr, "do_flip_names");
 
   /* cancel if nothing selected */
   if (CTX_DATA_COUNT(C, selected_bones) == 0) {
@@ -1127,7 +1123,7 @@ static wmOperatorStatus armature_duplicate_selected_exec(bContext *C, wmOperator
   }
 
   Vector<Object *> objects = BKE_view_layer_array_from_objects_in_edit_mode_unique_data(
-      scene, view_layer, CTX_wm_view3d(C));
+      *bmain, scene, view_layer, CTX_wm_view3d(C));
   for (Object *ob : objects) {
     EditBone *ebone_iter;
     /* The beginning of the duplicated bones in the edbo list */
@@ -1172,6 +1168,11 @@ static wmOperatorStatus armature_duplicate_selected_exec(bContext *C, wmOperator
           if (ED_armature_ebone_find_name(arm->edbo, new_bone_name_buff) == nullptr) {
             new_bone_name = new_bone_name_buff;
           }
+        }
+        std::string buffer(new_bone_name);
+        if (!search.is_empty()) {
+          BLI_string_replace(buffer, search, replace);
+          new_bone_name = buffer.data();
         }
 
         ebone = duplicateEditBone(ebone_iter, new_bone_name, arm->edbo, ob);
@@ -1249,6 +1250,12 @@ static wmOperatorStatus armature_duplicate_selected_exec(bContext *C, wmOperator
   return OPERATOR_FINISHED;
 }
 
+static wmOperatorStatus armature_duplicate_selected_exec(bContext *C, wmOperator *op)
+{
+  const bool do_flip_names = RNA_boolean_get(op->ptr, "do_flip_names");
+  return armature_duplicate_selected(C, do_flip_names, "", "");
+}
+
 void ARMATURE_OT_duplicate(wmOperatorType *ot)
 {
   /* identifiers */
@@ -1271,6 +1278,64 @@ void ARMATURE_OT_duplicate(wmOperatorType *ot)
       "Try to flip names of the bones, if possible, instead of adding a number extension");
 }
 
+static wmOperatorStatus armature_duplicate_rename_exec(bContext *C, wmOperator *op)
+{
+  const bool do_flip_names = RNA_boolean_get(op->ptr, "do_flip_names");
+  std::string search = RNA_string_get(op->ptr, "search");
+  std::string replace = RNA_string_get(op->ptr, "replace");
+  if (search.empty()) {
+    BKE_report(op->reports, RPT_ERROR, "No search term defined");
+    return OPERATOR_CANCELLED;
+  }
+  return armature_duplicate_selected(C, do_flip_names, search, replace);
+}
+
+static wmOperatorStatus armature_duplicate_rename_invoke(bContext *C,
+                                                         wmOperator *op,
+                                                         const wmEvent *event)
+{
+  return WM_operator_props_popup_confirm(C, op, event);
+}
+
+void ARMATURE_OT_duplicate_rename(wmOperatorType *ot)
+{
+  /* identifiers */
+  ot->name = "Duplicate and Rename";
+  ot->idname = "ARMATURE_OT_duplicate_rename";
+  ot->description =
+      "Make copies of the selected bones within the same armature and replace a part of their "
+      "name";
+
+  /* API callbacks. */
+  ot->invoke = armature_duplicate_rename_invoke;
+  ot->exec = armature_duplicate_rename_exec;
+  ot->poll = ED_operator_editarmature;
+
+  /* flags */
+  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+
+  RNA_def_boolean(
+      ot->srna,
+      "do_flip_names",
+      false,
+      "Flip Names",
+      "Try to flip names of the bones, if possible, instead of adding a number extension");
+
+  RNA_def_string(ot->srna,
+                 "search",
+                 nullptr,
+                 MAXBONENAME,
+                 "Search",
+                 "A part of the current bone name that will be replaced");
+  RNA_def_string(ot->srna,
+                 "replace",
+                 nullptr,
+                 MAXBONENAME,
+                 "Replace",
+                 "The substitute to be inserted into the place of the given search term. If left "
+                 "empty the search term will be removed");
+}
+
 /* Get the duplicated or existing mirrored copy of the bone. */
 static EditBone *get_symmetrized_bone(bArmature *arm, EditBone *bone)
 {
@@ -1291,6 +1356,7 @@ static EditBone *get_symmetrized_bone(bArmature *arm, EditBone *bone)
  */
 static wmOperatorStatus armature_symmetrize_exec(bContext *C, wmOperator *op)
 {
+  const Main *bmain = CTX_data_main(C);
   const Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
   const int direction = RNA_enum_get(op->ptr, "direction");
@@ -1303,7 +1369,7 @@ static wmOperatorStatus armature_symmetrize_exec(bContext *C, wmOperator *op)
   }
 
   Vector<Object *> objects = BKE_view_layer_array_from_objects_in_edit_mode_unique_data(
-      scene, view_layer, CTX_wm_view3d(C));
+      *bmain, scene, view_layer, CTX_wm_view3d(C));
   for (Object *obedit : objects) {
     EditBone *ebone_iter;
     /* The beginning of the duplicated mirrored bones in the edbo list */
@@ -1421,7 +1487,8 @@ static wmOperatorStatus armature_symmetrize_exec(bContext *C, wmOperator *op)
     {
       if (ebone_iter->temp.ebone) {
         /* copy all flags except for ... */
-        const int flag_copy = (~0) & ~(BONE_SELECTED | BONE_ROOTSEL | BONE_TIPSEL);
+        const eBone_Flag flag_copy = eBone_Flag(~0) &
+                                     ~(BONE_SELECTED | BONE_ROOTSEL | BONE_TIPSEL);
 
         EditBone *ebone = ebone_iter->temp.ebone;
 
@@ -1571,12 +1638,13 @@ void ARMATURE_OT_symmetrize(wmOperatorType *ot)
 /* if forked && mirror-edit: makes two bones with flipped names */
 static wmOperatorStatus armature_extrude_exec(bContext *C, wmOperator *op)
 {
+  const Main *bmain = CTX_data_main(C);
   const Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
   const bool forked = RNA_boolean_get(op->ptr, "forked");
   bool changed_multi = false;
   Vector<Object *> objects = BKE_view_layer_array_from_objects_in_edit_mode_unique_data(
-      scene, view_layer, CTX_wm_view3d(C));
+      *bmain, scene, view_layer, CTX_wm_view3d(C));
 
   enum ExtrudePoint {
     SKIP_EXTRUDE,
@@ -1784,41 +1852,105 @@ void ARMATURE_OT_extrude(wmOperatorType *ot)
 
 /* Op makes a new bone and returns it with its tip selected. */
 
+enum class BoneAlign { UP = 0, AXES = 1, CURSOR_3D = 2, VIEW_3D = 3 };
+enum class BoneSpace { OBJECT = 0, WORLD = 1 };
+
 static wmOperatorStatus armature_bone_primitive_add_exec(bContext *C, wmOperator *op)
 {
-  RegionView3D *rv3d = CTX_wm_region_view3d(C);
   Object *obedit = CTX_data_edit_object(C);
-  EditBone *bone;
-  float obmat[3][3], curs[3], viewmat[3][3], totmat[3][3], imat[3][3];
-  char name[MAXBONENAME];
 
+  invert_m4_m4(obedit->runtime->world_to_object.ptr(), obedit->object_to_world().ptr());
+  const float3x3 imat = float3x3(obedit->world_to_object());
+
+  float3x3 bone_orient_mat = float3x3::zero();
+  float3 roll_vector;
+
+  /* Apply user pref only for view aligned if the property wasn't set. */
+  if (!RNA_property_is_set(op->ptr, RNA_struct_find_property(op->ptr, "align")) &&
+      (U.flag & USER_ADD_VIEWALIGNED))
+  {
+    RNA_enum_set(op->ptr, "align", int(BoneAlign::VIEW_3D));
+  }
+
+  const BoneAlign align = BoneAlign(RNA_enum_get(op->ptr, "align"));
+  const BoneSpace space = BoneSpace(RNA_enum_get(op->ptr, "space"));
+
+  switch (align) {
+    case BoneAlign::VIEW_3D: {
+      const RegionView3D *rv3d = CTX_wm_region_view3d(C);
+      const float3x3 view_mat = rv3d ? float3x3(float4x4(rv3d->viewinv)) : float3x3::identity();
+      bone_orient_mat = imat * view_mat;
+      roll_vector = bone_orient_mat.z_axis();
+      break;
+    }
+
+    case BoneAlign::CURSOR_3D: {
+      const Scene *scene = CTX_data_scene(C);
+      const View3DCursor &cursor = scene->cursor;
+      const float3x3 cursor_mat = cursor.matrix<float3x3>();
+      bone_orient_mat = imat * cursor_mat;
+      roll_vector = bone_orient_mat.z_axis();
+      break;
+    }
+
+    case BoneAlign::AXES: {
+      switch (space) {
+        case BoneSpace::WORLD:
+          bone_orient_mat = imat;
+          roll_vector = imat.z_axis();
+          break;
+        case BoneSpace::OBJECT:
+          /* Assumes Z=up for objects and Y=up for bones. */
+          bone_orient_mat = float3x3({1.0f, 0.0f, 0.0f}, {0.0f, 0.0f, -1.0f}, {0.0f, 1.0f, 0.0f});
+          break;
+      }
+      break;
+    }
+
+    case BoneAlign::UP: {
+      switch (space) {
+        case BoneSpace::WORLD:
+          /* Construct a matrix that points Y up, Z Forward and X left-right. */
+          bone_orient_mat = imat *
+                            float3x3({1.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, -1.0f, 0.0f});
+
+          /* Set roll reference for ED_armature_ebone_roll_to_vector. */
+          roll_vector = -imat.y_axis();
+          break;
+        case BoneSpace::OBJECT:
+          bone_orient_mat = float3x3::identity();
+          break;
+      }
+      break;
+    }
+  }
+
+  char name[MAXBONENAME];
   RNA_string_get(op->ptr, "name", name);
 
-  copy_v3_v3(curs, CTX_data_scene(C)->cursor.location);
-
-  /* Get inverse point for head and orientation for tail */
-  invert_m4_m4(obedit->runtime->world_to_object.ptr(), obedit->object_to_world().ptr());
-  mul_m4_v3(obedit->world_to_object().ptr(), curs);
-
-  if (rv3d && (U.flag & USER_ADD_VIEWALIGNED)) {
-    copy_m3_m4(obmat, rv3d->viewmat);
-  }
-  else {
-    unit_m3(obmat);
-  }
-
-  copy_m3_m4(viewmat, obedit->object_to_world().ptr());
-  mul_m3_m3m3(totmat, obmat, viewmat);
-  invert_m3_m3(imat, totmat);
+  /* Get inverse point for head and orientation for tail. */
+  const float3 curs_worldspace = CTX_data_scene(C)->cursor.location;
+  const float3 curs_objectspace =
+      (obedit->world_to_object() * float4(curs_worldspace, 1.0f)).xyz();
 
   ED_armature_edit_deselect_all(obedit);
 
   /* Create a bone. */
-  bone = ED_armature_ebone_add(id_cast<bArmature *>(obedit->data), name);
+  EditBone *bone = ED_armature_ebone_add(id_cast<bArmature *>(obedit->data), name);
   ANIM_armature_bonecoll_assign_active(id_cast<bArmature *>(obedit->data), bone);
 
+  /* Scale B-Bone display width and Bone Envelope based on length. */
+  const float length = RNA_float_get(op->ptr, "length");
+  BLI_assert(length > 0.0f);
+
+  bone->xwidth = 0.1f * length;
+  bone->zwidth = 0.1f * length;
+  bone->rad_head = 0.1f * length;
+  bone->rad_tail = 0.05f * length;
+  bone->dist = 0.25f * length;
+
   bArmature *arm = id_cast<bArmature *>(obedit->data);
-  if (BLI_listbase_is_empty(&bone->bone_collections) && (arm->flag & ARM_BCOLL_SOLO_ACTIVE)) {
+  if (bone->bone_collections.is_empty() && (arm->flag & ARM_BCOLL_SOLO_ACTIVE)) {
     BKE_report(op->reports,
                RPT_WARNING,
                "Bone not added to a collection and hidden because solo bone collection(s) exist.");
@@ -1835,13 +1967,27 @@ static wmOperatorStatus armature_bone_primitive_add_exec(bContext *C, wmOperator
                 bcoll_ref->bcoll->name);
   }
 
-  copy_v3_v3(bone->head, curs);
+  /* Bone head to cursor position. */
+  copy_v3_v3(bone->head, curs_objectspace);
 
-  if (rv3d && (U.flag & USER_ADD_VIEWALIGNED)) {
-    add_v3_v3v3(bone->tail, bone->head, imat[1]); /* bone with unit length 1 */
+  const float3 tail_vector = bone_orient_mat * float3(0.0f, 0.0f, length);
+  add_v3_v3v3(bone->tail, bone->head, tail_vector);
+
+  const bool needs_bone_roll = (ELEM(align, BoneAlign::CURSOR_3D, BoneAlign::VIEW_3D) ||
+                                space == BoneSpace::WORLD);
+
+  if (needs_bone_roll) {
+    const float3 tail_vector_normalized = math::normalize(bone_orient_mat[1]) * length;
+    add_v3_v3v3(bone->tail, bone->head, tail_vector_normalized);
+
+    /* Compute bone roll so its local Z aligns with desired Z axis. */
+    bone->roll = ED_armature_ebone_roll_to_vector(bone, roll_vector, false);
   }
-  else {
-    add_v3_v3v3(bone->tail, bone->head, imat[2]); /* bone with unit length 1, pointing up Z */
+
+  /* Disable Deform if applicable. */
+  const bool use_deform = RNA_boolean_get(op->ptr, "use_deform");
+  if (!use_deform) {
+    bone->flag |= BONE_NO_DEFORM;
   }
 
   /* NOTE: notifier might evolve. */
@@ -1872,6 +2018,68 @@ void ARMATURE_OT_bone_primitive_add(wmOperatorType *ot)
                  MAXBONENAME,
                  "Name",
                  "Name of the newly created bone");
+
+  static const EnumPropertyItem space_items[] = {
+      {int(BoneSpace::OBJECT),
+       "OBJECT",
+       0,
+       "Object",
+       "The newly created bone will use Object Space co-ordinate system"},
+      {int(BoneSpace::WORLD),
+       "WORLD",
+       0,
+       "World",
+       "The newly created bone will use World Space co-ordinate system"},
+      {0, nullptr, 0, nullptr, nullptr}};
+
+  RNA_def_enum(ot->srna,
+               "space",
+               space_items,
+               int(BoneSpace::OBJECT),
+               "Space",
+               "Co-ordinate system the new bone will be created in");
+
+  static const EnumPropertyItem align_items[] = {
+      {int(BoneAlign::UP),
+       "UP",
+       0,
+       "Up",
+       "Make the bone visually point upwards so the long axis is aligned with the World/Object "
+       "positive Z axis (depending on the choice above)"},
+      {int(BoneAlign::AXES),
+       "AXES",
+       0,
+       "Axes",
+       "Align the new bone to match the axes of the World/Object (depending on the choice above)"},
+      {int(BoneAlign::CURSOR_3D),
+       "3D_CURSOR",
+       0,
+       "3D Cursor",
+       "Align new bone to match the axes of the 3D cursor"},
+      {int(BoneAlign::VIEW_3D),
+       "3D_VIEW",
+       0,
+       "Viewport",
+       "Align new bone to match the axes of the 3D viewport"},
+      {0, nullptr, 0, nullptr, nullptr}};
+
+  RNA_def_enum(ot->srna,
+               "align",
+               align_items,
+               int(BoneAlign::UP),
+               "Align",
+               "Initial orientation of the new bone");
+
+  RNA_def_float(ot->srna,
+                "length",
+                1.0f,
+                0.001f,
+                FLT_MAX,
+                "Length",
+                "Length of the new bone",
+                0.001f,
+                100.0f);
+  RNA_def_boolean(ot->srna, "use_deform", true, "Deform", "Enable bone to deform geometry");
 }
 
 /* ********************** Subdivide *******************************/

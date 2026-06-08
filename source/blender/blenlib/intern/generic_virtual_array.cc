@@ -545,31 +545,9 @@ class GVArrayImpl_For_SlicedGVArray : public GVArrayImpl {
 /** \name #GVArrayCommon
  * \{ */
 
-GVArrayCommon::GVArrayCommon(const GVArrayCommon &other) : storage_(other.storage_)
-{
-  impl_ = this->impl_from_storage();
-}
+GVArrayCommon::GVArrayCommon(const GVArrayImpl *impl) : impl_(impl) {}
 
-GVArrayCommon::GVArrayCommon(GVArrayCommon &&other) noexcept : storage_(std::move(other.storage_))
-{
-  impl_ = this->impl_from_storage();
-  other.storage_.reset();
-  other.impl_ = nullptr;
-}
-
-GVArrayCommon::GVArrayCommon(const GVArrayImpl *impl) : impl_(impl)
-{
-  storage_ = impl_;
-}
-
-GVArrayCommon::GVArrayCommon(std::shared_ptr<const GVArrayImpl> impl) : impl_(impl.get())
-{
-  if (impl) {
-    storage_ = std::move(impl);
-  }
-}
-
-GVArrayCommon::~GVArrayCommon() = default;
+GVArrayCommon::GVArrayCommon(std::shared_ptr<const GVArrayImpl> impl) : impl_(std::move(impl)) {}
 
 void GVArrayCommon::materialize(void *dst) const
 {
@@ -600,26 +578,6 @@ void GVArrayCommon::materialize_compressed(const IndexMask &mask, void *dst) con
 void GVArrayCommon::materialize_compressed_to_uninitialized(const IndexMask &mask, void *dst) const
 {
   impl_->materialize_compressed(mask, dst, true);
-}
-
-void GVArrayCommon::copy_from(const GVArrayCommon &other)
-{
-  if (this == &other) {
-    return;
-  }
-  storage_ = other.storage_;
-  impl_ = this->impl_from_storage();
-}
-
-void GVArrayCommon::move_from(GVArrayCommon &&other) noexcept
-{
-  if (this == &other) {
-    return;
-  }
-  storage_ = std::move(other.storage_);
-  impl_ = this->impl_from_storage();
-  other.storage_.reset();
-  other.impl_ = nullptr;
 }
 
 bool GVArrayCommon::is_span() const
@@ -654,14 +612,6 @@ void GVArrayCommon::get_internal_single_to_uninitialized(void *r_value) const
   this->get_internal_single(r_value);
 }
 
-const GVArrayImpl *GVArrayCommon::impl_from_storage() const
-{
-  if (!storage_.has_value()) {
-    return nullptr;
-  }
-  return storage_.extra_info().get_varray(storage_.get());
-}
-
 IndexRange GVArrayCommon::index_range() const
 {
   return IndexRange(this->size());
@@ -673,14 +623,6 @@ IndexRange GVArrayCommon::index_range() const
 /** \name #GVArray
  * \{ */
 
-GVArray::GVArray(const GVArray &other) = default;
-
-GVArray::GVArray(GVArray &&other) noexcept = default;
-
-GVArray::GVArray(const GVArrayImpl *impl) : GVArrayCommon(impl) {}
-
-GVArray::GVArray(std::shared_ptr<const GVArrayImpl> impl) : GVArrayCommon(std::move(impl)) {}
-
 GVArray::GVArray(varray_tag::single /*tag*/, const CPPType &type, int64_t size, const void *value)
 {
   if (type.is_trivial && type.size <= 16 && type.alignment <= 8) {
@@ -689,26 +631,6 @@ GVArray::GVArray(varray_tag::single /*tag*/, const CPPType &type, int64_t size, 
   else {
     this->emplace<GVArrayImpl_For_SingleValue>(type, size, value);
   }
-}
-
-GVArray GVArray::from_single(const CPPType &type, const int64_t size, const void *value)
-{
-  return GVArray(varray_tag::single{}, type, size, value);
-}
-
-GVArray GVArray::from_single_ref(const CPPType &type, const int64_t size, const void *value)
-{
-  return GVArray(varray_tag::single_ref{}, type, size, value);
-}
-
-GVArray GVArray::from_single_default(const CPPType &type, const int64_t size)
-{
-  return GVArray::from_single_ref(type, size, type.default_value());
-}
-
-GVArray GVArray::from_span(GSpan span)
-{
-  return GVArray(varray_tag::span{}, span);
 }
 
 class GVArrayImpl_For_GArray : public GVArrayImpl_For_GSpan {
@@ -727,18 +649,6 @@ GVArray GVArray::from_garray(GArray<> array)
   return GVArray::from<GVArrayImpl_For_GArray>(std::move(array));
 }
 
-GVArray GVArray::from_empty(const CPPType &type)
-{
-  return GVArray::from_span(GSpan(type));
-}
-
-GVArray GVArray::from_std_func(const CPPType &type,
-                               int64_t size,
-                               std::function<void(int64_t index, void *r_value)> get_to_uninit)
-{
-  return GVArray::from_func(type, size, std::move(get_to_uninit));
-}
-
 GVArray GVArray::slice(IndexRange slice) const
 {
   const CommonVArrayInfo info = this->common_info();
@@ -753,26 +663,11 @@ GVArray GVArray::slice(IndexRange slice) const
   return GVArray::from<GVArrayImpl_For_SlicedGVArray>(*this, slice);
 }
 
-GVArray &GVArray::operator=(const GVArray &other)
-{
-  this->copy_from(other);
-  return *this;
-}
-
-GVArray &GVArray::operator=(GVArray &&other) noexcept
-{
-  this->move_from(std::move(other));
-  return *this;
-}
-
 /** \} */
 
 /* -------------------------------------------------------------------- */
 /** \name #GVMutableArray
  * \{ */
-
-GVMutableArray::GVMutableArray(const GVMutableArray &other) = default;
-GVMutableArray::GVMutableArray(GVMutableArray &&other) noexcept = default;
 
 GVMutableArray::GVMutableArray(GVMutableArrayImpl *impl) : GVArrayCommon(impl) {}
 
@@ -789,32 +684,15 @@ GVMutableArray GVMutableArray::from_span(GMutableSpan span)
 GVMutableArray::operator GVArray() const &
 {
   GVArray varray;
-  varray.copy_from(*this);
+  *static_cast<GVArrayCommon *>(&varray) = *this;
   return varray;
 }
 
 GVMutableArray::operator GVArray() && noexcept
 {
   GVArray varray;
-  varray.move_from(std::move(*this));
+  *static_cast<GVArrayCommon *>(&varray) = std::move(*this);
   return varray;
-}
-
-GVMutableArray &GVMutableArray::operator=(const GVMutableArray &other)
-{
-  this->copy_from(other);
-  return *this;
-}
-
-GVMutableArray &GVMutableArray::operator=(GVMutableArray &&other) noexcept
-{
-  this->move_from(std::move(other));
-  return *this;
-}
-
-GVMutableArrayImpl *GVMutableArray::get_implementation() const
-{
-  return this->get_impl();
 }
 
 void GVMutableArray::set_all(const void *src)

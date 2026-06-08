@@ -19,6 +19,8 @@
 
 #include "BKE_context.hh"
 #include "BKE_lib_id.hh"
+#include "BKE_modifier.hh"
+#include "BKE_paint.hh"
 #include "BKE_screen.hh"
 
 #include "BLT_translation.hh"
@@ -164,7 +166,7 @@ struct InteractivePlaceData {
   bool wait_for_input;
 
   /* WORKAROUND: We need to remove #SCE_SNAP_TO_GRID temporarily. */
-  short *snap_to_ptr;
+  eSnapMode *snap_to_ptr;
   eSnapMode snap_to_restore;
 };
 
@@ -771,10 +773,10 @@ static void view3d_interactive_add_begin(bContext *C, wmOperator *op, const wmEv
   ipd->step_index = STEP_BASE;
 
   ipd->snap_to_ptr = &tool_settings->snap_mode_tools;
-  if (eSnapMode(*ipd->snap_to_ptr) == SCE_SNAP_TO_NONE) {
+  if (*ipd->snap_to_ptr == SCE_SNAP_TO_NONE) {
     ipd->snap_to_ptr = &tool_settings->snap_mode;
   }
-  ipd->snap_to_restore = eSnapMode(*ipd->snap_to_ptr);
+  ipd->snap_to_restore = *ipd->snap_to_ptr;
 
   plane_from_point_normal_v3(ipd->step[0].plane, ipd->co_src, ipd->matrix_orient[plane_axis]);
 
@@ -1304,6 +1306,13 @@ static wmOperatorStatus view3d_interactive_add_modal(bContext *C,
 static bool view3d_interactive_add_poll(bContext *C)
 {
   const enum eContextObjectMode mode = CTX_data_mode_enum(C);
+
+  if (mode == CTX_MODE_SCULPT) {
+    Object *ob = CTX_data_active_object(C);
+    return !BKE_sculpt_multires_active(CTX_data_scene(C), ob) &&
+           !BKE_object_sculpt_use_dyntopo(ob);
+  }
+
   return ELEM(mode, CTX_MODE_OBJECT, CTX_MODE_EDIT_MESH);
 }
 

@@ -15,14 +15,14 @@ namespace blender::nodes::node_composite_mask_to_sdf_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Bool>("Mask").hide_value().structure_type(StructureType::Dynamic);
+  b.add_input<decl::Bool>("Mask"_ustr).hide_value().structure_type(StructureType::Dynamic);
 
-  b.add_output<decl::Float>("SDF")
+  b.add_output<decl::Float>("SDF"_ustr)
       .structure_type(StructureType::Dynamic)
       .description(
           "The distance in pixel to the nearest pixel at the boundary of the mask. The distance "
           "is negative inside the mask");
-  b.add_output<decl::Vector>("Nearest Pixel")
+  b.add_output<decl::IntVector>("Nearest Pixel"_ustr)
       .dimensions(2)
       .structure_type(StructureType::Dynamic)
       .description("The integer coordinates of the nearest pixel at the boundary of the mask");
@@ -40,7 +40,6 @@ class MaskToSDFOperation : public NodeOperation {
     Result &distance_output = this->get_result("SDF");
 
     Result &nearest_pixel_output = this->get_result("Nearest Pixel");
-    nearest_pixel_output.set_type(ResultType::Int2);
     nearest_pixel_output.set_precision(ResultPrecision::Half);
 
     if (input_mask.is_single_value()) {
@@ -67,13 +66,10 @@ class MaskToSDFOperation : public NodeOperation {
     }
 
     if (nearest_pixel_output.should_compute()) {
-      nearest_pixel_output.set_type(ResultType::Int2);
-      nearest_pixel_output.set_precision(ResultPrecision::Half);
-      nearest_pixel_output.steal_data(flooded_boundary);
+      nearest_pixel_output.share_data(flooded_boundary);
     }
-    else {
-      flooded_boundary.release();
-    }
+
+    flooded_boundary.release();
   }
 
   /* Compute an image that marks the boundary pixels of the mask region as seed pixels for
@@ -220,7 +216,7 @@ static void node_register()
 {
   static blender::bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, "CompositorNodeMaskToSDF");
+  cmp_node_type_base(&ntype, "CompositorNodeMaskToSDF"_ustr);
   ntype.ui_name = "Mask To SDF";
   ntype.ui_description = "Computes a signed distance field from the given mask";
   ntype.nclass = NODE_CLASS_OP_FILTER;

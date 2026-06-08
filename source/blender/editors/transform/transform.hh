@@ -16,6 +16,7 @@
 #include "ED_transform.hh"
 #include "ED_view3d.hh"
 
+#include "DNA_curve_enums.h"
 #include "DNA_listBase.h"
 #include "DNA_windowmanager_enums.h"
 
@@ -501,8 +502,8 @@ struct TransData2D {
  * Also to unset temporary flags.
  */
 struct TransDataCurveHandleFlags {
-  uint8_t ih1, ih2;
-  uint8_t *h1, *h2;
+  eBezTriple_Handle ih1, ih2;
+  eBezTriple_Handle *h1, *h2;
 };
 
 struct TransData : public TransDataBasic {
@@ -525,6 +526,8 @@ struct TransData : public TransDataBasic {
   /** If set, copy of Object or #bPoseChannel protection. */
   short protectflag;
 };
+
+/** \} */
 
 /* -------------------------------------------------------------------- */
 /** \name Transform Types
@@ -824,7 +827,7 @@ struct TransInfo {
   eTFlag flag;
   /** Special modifiers, by function, not key. */
   eTModifier modifiers;
-  /** Current state (running, canceled. */
+  /** Current state (running, canceled, ...). */
   eTState state;
   /** Redraw flag. */
   eRedrawFlag redraw;
@@ -953,6 +956,7 @@ struct TransInfo {
   ScrArea *area;
   ARegion *region;
   Depsgraph *depsgraph;
+  Main *bmain;
   Scene *scene;
   ViewLayer *view_layer;
   ToolSettings *settings;

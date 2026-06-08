@@ -82,9 +82,6 @@ ExternalProject_Add(external_osl
       ${PATCH_DIR}/osl_ptx_version.diff &&
     ${PATCH_CMD} -p 1 -d
       ${BUILD_DIR}/osl/src/external_osl <
-      ${PATCH_DIR}/osl_supports_isa_thread.diff &&
-    ${PATCH_CMD} -p 1 -d
-      ${BUILD_DIR}/osl/src/external_osl <
       ${PATCH_DIR}/osl_relative_inc_cmake.diff
 
   CMAKE_ARGS
@@ -98,7 +95,7 @@ ExternalProject_Add(external_osl
 
 add_dependencies(
   external_osl
-  ll
+  external_llvm
   external_openexr
   external_zlib
   external_openimageio

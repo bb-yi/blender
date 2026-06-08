@@ -10,7 +10,11 @@
 #include "DNA_listBase.h"
 
 #include "BLI_compiler_attrs.h"
+#include "BLI_function_ref.hh"
 #include "BLI_mutex.hh"
+#include "BLI_string_ref.hh"
+
+#include "IMB_imbuf_enums.h"
 
 #include <cstdint>
 #include <limits>
@@ -30,6 +34,7 @@ struct rcti;
 struct Depsgraph;
 struct ID;
 struct ImBuf;
+struct ImBufCache;
 struct MovieReader;
 struct Image;
 struct ImageFormatData;
@@ -38,7 +43,6 @@ struct ImageTile;
 struct ImbFormatOptions;
 struct Library;
 struct Main;
-struct MovieCache;
 struct Object;
 struct PartialUpdateRegister;
 struct PartialUpdateUser;
@@ -47,6 +51,7 @@ struct RenderSlot;
 struct ReportList;
 struct Scene;
 struct StampData;
+enum eImbFileType : int8_t;
 
 #define IMA_MAX_SPACE 64
 #define IMA_UDIM_MAX 2000
@@ -73,7 +78,7 @@ struct ImageRuntime {
    */
   Mutex cache_mutex;
 
-  MovieCache *cache = nullptr;
+  ImBufCache *cache = nullptr;
 
   /* The 2 is for the left/right stereo eyes. */
   gpu::Texture *gputexture[/*TEXTARGET_COUNT*/ 3][2] = {};
@@ -95,9 +100,18 @@ struct ImageRuntime {
 
   /* The image's current update count. See deg::set_id_update_count for more information. */
   uint64_t update_count = 0;
+
+  float view_offset[2] = {};
+  float view_zoom = 1.0f;
 };
 
 }  // namespace bke
+/**
+ * Clear the autosave information.
+ *
+ * \note At minimum, this should be called anytime the `packedfiles` list would be written to.
+ */
+void BKE_image_clear_autosave(Image *image);
 
 void BKE_image_free_packedfiles(Image *image);
 void BKE_image_free_views(Image *image);
@@ -172,12 +186,12 @@ bool BKE_imbuf_write_as(ImBuf *ibuf,
  * Used by sequencer too.
  */
 MovieReader *openanim(const char *filepath,
-                      int ibuf_flags,
+                      ImBufFlags ibuf_flags,
                       int streamindex,
                       bool keep_original_colorspace,
                       char colorspace[IMA_MAX_SPACE]);
 MovieReader *openanim_noload(const char *filepath,
-                             int flags,
+                             ImBufFlags flags,
                              int streamindex,
                              bool keep_original_colorspace,
                              char colorspace[IMA_MAX_SPACE]);
@@ -216,6 +230,13 @@ bool BKE_image_has_ibuf(Image *ima, ImageUser *iuser);
  * References the result, #BKE_image_release_ibuf should be used to de-reference.
  */
 ImBuf *BKE_image_acquire_ibuf(Image *ima, ImageUser *iuser, void **r_lock);
+
+/**
+ * Identical to BKE_image_acquire_ibuf but assumes the caller will use the GPU data of the image
+ * buffer if it exists without the need to make it available on the host. This essentially skips
+ * GPU data reading to the host and is thus more performant.
+ */
+ImBuf *BKE_image_acquire_ibuf_gpu(Image *ima, ImageUser *iuser, void **r_lock);
 
 /**
  * Return image buffer for given image, user, pass, and view.
@@ -437,6 +458,18 @@ void BKE_image_packfile_ensure(
     Main *bmain, Image *image, ReportList *reports, const char *data, int data_len);
 
 /**
+ * Populate the runtime cache for an image based on the autosave information.
+ */
+void BKE_image_populate_cache_from_autosave(Image *ima);
+
+/**
+ * Pack the current buffer data as part of the autosave process.
+ *
+ * \see BKE_image_memorypack
+ */
+bool BKE_image_autosave_memorypack(Image *ima);
+
+/**
  * Prints memory statistics for images.
  */
 void BKE_image_print_memlist(Main *bmain);
@@ -452,14 +485,14 @@ void BKE_image_merge(Main *bmain, Image *dest, Image *source);
 bool BKE_image_scale(Image *image, int width, int height, ImageUser *iuser);
 
 /**
- * Check if texture has alpha `planes == 32 || planes == 16`.
+ * Check if image might contain alpha.
  */
 bool BKE_image_has_alpha(Image *image);
 
 /**
- * Check if texture has GPU texture code.
+ * Check if image has an associated GPU texture.
  */
-bool BKE_image_has_opengl_texture(Image *ima);
+bool BKE_image_has_gpu_texture(Image *ima);
 
 /**
  * Get tile index for tiled images.
@@ -545,6 +578,15 @@ int BKE_image_find_nearest_tile_with_offset(const Image *image,
 int BKE_image_find_nearest_tile(const Image *image, const float co[2])
     ATTR_NONNULL(2) ATTR_WARN_UNUSED_RESULT;
 
+/**
+ * Iterate over Cycles texture cache associated with #source_filepath_abs, in
+ * texture cache directory #cache_dir.
+ */
+void BKE_image_texture_cache_filepaths_foreach(
+    const char *source_filepath_abs,
+    const char *cache_dir,
+    blender::FunctionRef<void(blender::StringRef cache_filepath)> callback);
+
 void BKE_image_get_size(Image *image, ImageUser *iuser, int *r_width, int *r_height);
 void BKE_image_get_size_fl(Image *image, ImageUser *iuser, float r_size[2]);
 void BKE_image_get_aspect(Image *image, float *r_aspx, float *r_aspy);
@@ -587,7 +629,7 @@ bool BKE_image_is_animated(Image *image);
  * Checks whether the image consists of multiple buffers.
  */
 bool BKE_image_has_multiple_ibufs(Image *image);
-void BKE_image_file_format_set(Image *image, int ftype, const ImbFormatOptions *options);
+void BKE_image_file_format_set(Image *image, eImbFileType ftype, const ImbFormatOptions *options);
 bool BKE_image_has_loaded_ibuf(Image *image);
 /**
  * References the result, #BKE_image_release_ibuf is to be called to de-reference.
@@ -644,6 +686,13 @@ gpu::Texture *BKE_image_get_gpu_texture(Image *image, ImageUser *iuser);
  * Like BKE_image_get_gpu_texture, but can also get render or compositing result.
  */
 gpu::Texture *BKE_image_get_gpu_viewer_texture(Image *image, ImageUser *iuser);
+
+/*
+ * Like BKE_image_get_gpu_viewer_texture, but the image buffer is provided explicitly.
+ */
+gpu::Texture *BKE_image_get_gpu_viewer_texture(Image *image,
+                                               ImageUser *iuser,
+                                               ImBuf *image_buffer);
 
 /*
  * Like BKE_image_get_gpu_texture, but can also return array and tile mapping texture for UDIM

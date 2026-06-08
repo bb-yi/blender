@@ -5,6 +5,7 @@
 from ...io.com.path import uri_to_path
 from ..com.gltf2_io import gltf_from_dict
 from ..com.debug import Log
+from .user_extensions import MutatingArgument, import_user_extensions as import_user_extensions_fn
 import logging
 import json
 import struct
@@ -44,6 +45,8 @@ class glTFImporter():
             'KHR_texture_transform',
             'KHR_materials_clearcoat',
             'KHR_mesh_quantization',
+            'EXT_meshopt_compression',
+            'KHR_meshopt_compression',
             'EXT_mesh_gpu_instancing',
             'KHR_draco_mesh_compression',
             'KHR_materials_variants',
@@ -55,7 +58,9 @@ class glTFImporter():
             'KHR_animation_pointer',
             'KHR_materials_volume',
             'EXT_texture_webp',
-            'KHR_materials_anisotropy'
+            'KHR_materials_anisotropy',
+            'KHR_materials_dispersion',
+            'KHR_materials_iridescence',
         ]
 
         # Add extensions required supported by custom import extensions
@@ -169,16 +174,21 @@ class glTFImporter():
         """Load buffer."""
         buffer = self.data.buffers[buffer_idx]
 
-        if buffer.uri:
-            data = self.load_uri(buffer.uri)
-            if data is None:
-                raise ImportError("Missing resource, '" + buffer.uri + "'.")
-            self.buffers[buffer_idx] = data
+        data = MutatingArgument(None)
+        import_user_extensions_fn('load_buffer_before_hook', self, buffer, data)
 
-        else:
-            # GLB-stored buffer
-            if buffer_idx == 0 and self.glb_buffer is not None:
-                self.buffers[buffer_idx] = self.glb_buffer
+        if data.value is None:
+            if buffer.uri:
+                data.value = self.load_uri(buffer.uri)
+                if data.value is None:
+                    raise ImportError("Missing resource, '" + buffer.uri + "'.")
+            else:
+                # GLB-stored buffer
+                if buffer_idx == 0 and self.glb_buffer is not None:
+                    data.value = self.glb_buffer
+
+        import_user_extensions_fn('load_buffer_after_hook', self, buffer, data)
+        self.buffers[buffer_idx] = data.value
 
     def load_uri(self, uri):
         """Loads a URI."""

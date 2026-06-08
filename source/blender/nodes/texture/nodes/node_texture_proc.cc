@@ -71,7 +71,7 @@ static void texfn(
 
 static int count_outputs(bNode *node)
 {
-  return BLI_listbase_count(&node->outputs);
+  return node->outputs.count();
 }
 
 /* Boilerplate generators */
@@ -237,7 +237,7 @@ static void init(bNodeTree * /*ntree*/, bNode *node)
   node->storage = tex;
 
   BKE_texture_default(tex);
-  tex->type = node->type_legacy - TEX_NODE_PROC;
+  tex->type = eTex_Type(node->type_legacy - TEX_NODE_PROC);
 
   if (tex->type == TEX_WOOD) {
     tex->stype = TEX_BANDNOISE;
@@ -250,12 +250,12 @@ static void init(bNodeTree * /*ntree*/, bNode *node)
   { \
     static bke::bNodeType ntype; \
 \
-    tex_node_type_base(&ntype, idname, TEX_NODE_PROC + TEXTYPE); \
+    tex_node_type_base(&ntype, UString(idname), TEX_NODE_PROC + TEXTYPE); \
     ntype.ui_name = Name; \
     ntype.enum_name_legacy = EnumNameLegacy; \
     ntype.nclass = NODE_CLASS_TEXTURE; \
     bke::node_type_socket_templates(&ntype, name##_inputs, outputs); \
-    bke::node_type_size_preset(ntype, bke::eNodeSizePreset::Middle); \
+    ntype.default_width = bke::NodeWidth::_160; \
     ntype.initfunc = init; \
     bke::node_type_storage(ntype, "Tex", node_free_standard_storage, node_copy_standard_storage); \
     ntype.exec_fn = name##_exec; \

@@ -35,8 +35,8 @@ void VKPixelBuffer::create(bool memory_export)
                  VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
                  VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
                  0.8f,
-                 memory_export);
-  debug::object_label(buffer_.vk_handle(), "PixelBuffer");
+                 memory_export,
+                 "PixelBuffer");
 
   buffer_initialized_ = true;
   buffer_memory_export_ = memory_export;
@@ -71,7 +71,7 @@ GPUPixelBufferNativeHandle VKPixelBuffer::get_native_handle()
   /* Get device memory. */
   size_t memory_size = 0;
   VkDeviceMemory memory = buffer_.export_memory_get(memory_size);
-  if (memory == nullptr) {
+  if (memory == VK_NULL_HANDLE) {
     CLOG_ERROR(&LOG, "Failed to get device memory for Vulkan pixel buffer");
     return native_handle;
   }

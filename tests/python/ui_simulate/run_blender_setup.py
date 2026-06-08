@@ -95,16 +95,13 @@ def main():
     if os.getenv("BLENDER_TEST_IGNORE_BLOCKLIST") is None and os.getenv("BLENDER_TEST_IGNORE_VENDOR_BLOCKLIST") is None:
         if sys.platform == "win32" and gpu_device == "INTEL" and gpu_backend == "OPENGL":
             # See #149084 for the tracking issue
-            BLOCKLIST = ["test_workspace"]
-        if sys.platform == "linux" and gpu_device == "INTEL" and gpu_backend == "OPENGL":
-            # See #154228 for the tracking issue
-            BLOCKLIST = ["view3d_texture_paint_complex"]
-        if sys.platform == "linux" and gpu_device == "INTEL" and gpu_backend == "VULKAN":
-            # See #151410 for the tracking issue
-            BLOCKLIST = ["test_sculpt", "test_tools", "test_undo", "test_workspace"]
+            BLOCKLIST.append("test_workspace")
         if sys.platform == "win32" and gpu_device == "AMD" and gpu_backend == "VULKAN":
-            # See #151411 for the tracking issue
-            BLOCKLIST = ["test_sculpt", "test_tools", "test_undo", "test_workspace"]
+            # See #155536 for the tracking issue
+            BLOCKLIST.append("test_render")
+        if sys.platform == "win32" and gpu_device == "AMD":
+            # See #155536 for the tracking issue
+            BLOCKLIST.append("test_render.interactive_rendering_cycles")
 
     is_first = True
     for test_id in args.tests:

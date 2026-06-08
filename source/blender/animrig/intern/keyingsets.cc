@@ -42,7 +42,7 @@ void keyingset_info_register(KeyingSetInfo *keyingset_info)
   KeyingSet *keyingset = BKE_keyingset_add(&builtin_keyingsets,
                                            keyingset_info->idname,
                                            keyingset_info->name,
-                                           1,
+                                           eKS_Settings{},
                                            keyingset_info->keyingflag);
 
   /* Link this KeyingSet with its typeinfo. */
@@ -253,7 +253,7 @@ ModifyKeyReturn validate_keyingset(bContext *C, Vector<PointerRNA> *sources, Key
   /* If we don't have any paths now, then this still qualifies as invalid context. */
   /* FIXME: we need some error conditions (to be retrieved from the iterator why this failed!)
    */
-  if (BLI_listbase_is_empty(&keyingset->paths)) {
+  if (keyingset->paths.is_empty()) {
     return ModifyKeyReturn::INVALID_CONTEXT;
   }
 

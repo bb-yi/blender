@@ -21,6 +21,11 @@ CCL_NAMESPACE_BEGIN
  * Lookup of attributes is different between OSL and SVM, as OSL is ustring
  * based while for SVM we use integer ids. */
 
+ccl_device_forceinline bool is_attribute_found(const ccl_private AttributeDescriptor &desc)
+{
+  return desc.offset != ATTR_STD_NOT_FOUND;
+}
+
 ccl_device_inline AttributeDescriptor attribute_not_found()
 {
   const AttributeDescriptor desc = {ATTR_ELEMENT_NONE, (NodeAttributeType)0, ATTR_STD_NOT_FOUND};
@@ -34,7 +39,6 @@ ccl_device_inline uint object_attribute_map_offset(KernelGlobals kg, const int o
   return kernel_data_fetch(objects, object).attribute_map_offset;
 }
 
-#ifdef __KERNEL_METAL__
 ccl_device bool find_attr_offset(const ccl_global AttributeMap *attributes_map,
                                  ccl_private uint &attr_offset,
                                  const uint64_t id)
@@ -58,37 +62,17 @@ ccl_device bool find_attr_offset(const ccl_global AttributeMap *attributes_map,
 
   return true;
 }
-#endif
 
 ccl_device_inline AttributeDescriptor find_attribute(const ccl_global AttributeMap *attributes_map,
                                                      uint attr_offset,
                                                      const int prim,
                                                      const uint64_t id)
 {
-#ifdef __KERNEL_METAL__
   if (!find_attr_offset(attributes_map, attr_offset, id)) {
     return attribute_not_found();
   }
 
   const AttributeMap attr_map = attributes_map[attr_offset];
-#else
-  /* for SVM, find attribute by unique id */
-  AttributeMap attr_map = attributes_map[attr_offset];
-
-  while (attr_map.id != id) {
-    if (UNLIKELY(attr_map.id == ATTR_STD_NONE)) {
-      if (UNLIKELY(attr_map.element == 0)) {
-        return attribute_not_found();
-      }
-      /* Chain jump to a different part of the table. */
-      attr_offset = attr_map.offset;
-    }
-    else {
-      attr_offset += ATTR_PRIM_TYPES;
-    }
-    attr_map = attributes_map[attr_offset];
-  }
-#endif
 
   AttributeDescriptor desc;
   desc.element = (AttributeElement)attr_map.element;

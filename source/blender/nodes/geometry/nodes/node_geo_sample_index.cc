@@ -20,7 +20,7 @@ NODE_STORAGE_FUNCS(NodeGeometrySampleIndex);
 static void node_declare(NodeDeclarationBuilder &b)
 {
   const bNode *node = b.node_or_null();
-  b.add_input<decl::Geometry>("Geometry")
+  b.add_input<decl::Geometry>("Geometry"_ustr)
       .supported_type({GeometryComponent::Type::Mesh,
                        GeometryComponent::Type::PointCloud,
                        GeometryComponent::Type::Curve,
@@ -29,16 +29,18 @@ static void node_declare(NodeDeclarationBuilder &b)
       .description("Geometry to sample a value on");
   if (node != nullptr) {
     const eCustomDataType data_type = eCustomDataType(node_storage(*node).data_type);
-    b.add_input(data_type, "Value").hide_value().field_on_all();
+    b.add_input(data_type, "Value"_ustr).hide_value().evaluated_geometry_field();
   }
-  b.add_input<decl::Int>("Index")
-      .supports_field()
-      .description("Which element to retrieve a value from on the geometry")
-      .structure_type(StructureType::Dynamic);
+  auto &index = b.add_input<decl::Int>("Index"_ustr)
+                    .description("Which element to retrieve a value from on the geometry")
+                    .structure_type(StructureType::Dynamic);
 
   if (node != nullptr) {
     const eCustomDataType data_type = eCustomDataType(node_storage(*node).data_type);
-    b.add_output(data_type, "Value").dependent_field({2});
+    std::array<int, 1> dynamic_inputs = {index.index()};
+    b.add_output(data_type, "Value"_ustr)
+        .inferred_structure_type(dynamic_inputs)
+        .propagate_references(dynamic_inputs);
   }
 }
 
@@ -64,153 +66,35 @@ static void node_gather_link_searches(GatherLinkSearchOpParams &params)
   search_link_ops_for_declarations(params, declaration.inputs);
 
   const std::optional<eCustomDataType> type = bke::socket_type_to_custom_data_type(
-      eNodeSocketDatatype(params.other_socket().type));
+      params.other_socket().type);
   if (type && *type != CD_PROP_STRING) {
     /* The input and output sockets have the same name. */
     params.add_item(IFACE_("Value"), [type](LinkSearchOpParams &params) {
-      bNode &node = params.add_node("GeometryNodeSampleIndex");
+      bNode &node = params.add_node("GeometryNodeSampleIndex"_ustr);
       node_storage(node).data_type = *type;
-      params.update_and_connect_available_socket(node, "Value");
+      params.update_and_connect_available_socket(node, "Value"_ustr);
     });
   }
 }
-
-static bool component_is_available(const GeometrySet &geometry,
-                                   const GeometryComponent::Type type,
-                                   const AttrDomain domain)
-{
-  if (!geometry.has(type)) {
-    return false;
-  }
-  const GeometryComponent &component = *geometry.get_component(type);
-  return component.attribute_domain_size(domain) != 0;
-}
-
-static const GeometryComponent *find_source_component(const GeometrySet &geometry,
-                                                      const AttrDomain domain)
-{
-  /* Choose the other component based on a consistent order, rather than some more complicated
-   * heuristic. This is the same order visible in the spreadsheet and used in the ray-cast node. */
-  static const Array<GeometryComponent::Type> supported_types = {
-      GeometryComponent::Type::Mesh,
-      GeometryComponent::Type::PointCloud,
-      GeometryComponent::Type::Curve,
-      GeometryComponent::Type::Instance,
-      GeometryComponent::Type::GreasePencil};
-  for (const GeometryComponent::Type src_type : supported_types) {
-    if (component_is_available(geometry, src_type, domain)) {
-      return geometry.get_component(src_type);
-    }
-  }
-
-  return nullptr;
-}
-
-template<typename T>
-void copy_with_clamped_indices(const VArray<T> &src,
-                               const VArray<int> &indices,
-                               const IndexMask &mask,
-                               MutableSpan<T> dst)
-{
-  const int last_index = src.index_range().last();
-  devirtualize_varray2(src, indices, [&](const auto src, const auto indices) {
-    mask.foreach_index_optimized<int>(GrainSize(4096), [&](const int i) {
-      const int index = indices[i];
-      dst[i] = src[std::clamp(index, 0, last_index)];
-    });
-  });
-}
-
-/**
- * The index-based transfer theoretically does not need realized data when there is only one
- * instance geometry set in the source. A future optimization could be removing that limitation
- * internally.
- */
-class SampleIndexFunction : public mf::MultiFunction {
-  GeometrySet src_geometry_;
-  GField src_field_;
-  AttrDomain domain_;
-  bool clamp_;
-
-  mf::Signature signature_;
-
-  std::optional<bke::GeometryFieldContext> geometry_context_;
-  std::unique_ptr<FieldEvaluator> evaluator_;
-  const GVArray *src_data_ = nullptr;
-
- public:
-  SampleIndexFunction(GeometrySet geometry,
-                      GField src_field,
-                      const AttrDomain domain,
-                      const bool clamp)
-      : src_geometry_(std::move(geometry)),
-        src_field_(std::move(src_field)),
-        domain_(domain),
-        clamp_(clamp)
-  {
-    src_geometry_.ensure_owns_direct_data();
-
-    mf::SignatureBuilder builder{"Sample Index", signature_};
-    builder.single_input<int>("Index");
-    builder.single_output("Value", src_field_.cpp_type());
-    this->set_signature(&signature_);
-
-    this->evaluate_field();
-  }
-
-  void evaluate_field()
-  {
-    const GeometryComponent *component = find_source_component(src_geometry_, domain_);
-    if (component == nullptr) {
-      return;
-    }
-    const int domain_num = component->attribute_domain_size(domain_);
-    geometry_context_.emplace(bke::GeometryFieldContext(*component, domain_));
-    evaluator_ = std::make_unique<FieldEvaluator>(*geometry_context_, domain_num);
-    evaluator_->add(src_field_);
-    evaluator_->evaluate();
-    src_data_ = &evaluator_->get_evaluated(0);
-  }
-
-  void call(const IndexMask &mask, mf::Params params, mf::Context /*context*/) const override
-  {
-    const VArray<int> &indices = params.readonly_single_input<int>(0, "Index");
-    GMutableSpan dst = params.uninitialized_single_output(1, "Value");
-
-    const CPPType &type = dst.type();
-    if (src_data_ == nullptr) {
-      type.value_initialize_indices(dst.data(), mask);
-      return;
-    }
-
-    if (clamp_) {
-      bke::attribute_math::to_static_type(type, [&]<typename T>() {
-        copy_with_clamped_indices(src_data_->typed<T>(), indices, mask, dst.typed<T>());
-      });
-    }
-    else {
-      bke::copy_with_checked_indices(*src_data_, indices, mask, dst);
-    }
-  }
-};
 
 static void node_geo_exec(GeoNodeExecParams params)
 {
-  GeometrySet geometry = params.extract_input<GeometrySet>("Geometry");
+  GeometrySet geometry = params.extract_input<GeometrySet>("Geometry"_ustr);
   const NodeGeometrySampleIndex &storage = node_storage(params.node());
   const AttrDomain domain = AttrDomain(storage.domain);
   const bool use_clamp = bool(storage.clamp);
 
-  GField value_field = params.extract_input<GField>("Value");
-  SocketValueVariant index_value_variant = params.extract_input<SocketValueVariant>("Index");
+  GField value_field = params.extract_input<GField>("Value"_ustr);
+  SocketValueVariant index_value_variant = params.extract_input<SocketValueVariant>("Index"_ustr);
   const CPPType &cpp_type = value_field.cpp_type();
 
+  const GeometryComponent *component = bke::SampleIndexFunction::find_source_component(geometry,
+                                                                                       domain);
+  if (!component) {
+    params.set_default_remaining_outputs();
+    return;
+  }
   if (index_value_variant.is_single()) {
-    const GeometryComponent *component = find_source_component(geometry, domain);
-    if (!component) {
-      params.set_default_remaining_outputs();
-      return;
-    }
     /* Optimization for the case when the index is a single value. Here only that one index has to
      * be evaluated. */
     const int domain_size = component->attribute_domain_size(domain);
@@ -233,15 +117,38 @@ static void node_geo_exec(GeoNodeExecParams params)
     else {
       cpp_type.copy_construct(cpp_type.default_value(), buffer);
     }
-    params.set_output("Value", std::move(output_value));
+    params.set_output("Value"_ustr, std::move(output_value));
     return;
   }
 
-  bke::SocketValueVariant output_value;
   std::string error_message;
+
+  if (use_clamp) {
+    bke::SocketValueVariant index_value_variant_copy = index_value_variant;
+    static auto clamp_fn = mf::build::SI3_SO<int, int, int, int>(
+        "Clamp",
+        [](int value, int min, int max) { return std::clamp(value, min, max); },
+        mf::build::exec_presets::SomeSpanOrSingle<0>());
+    const int domain_size = component->attribute_domain_size(domain);
+    bke::SocketValueVariant min_value = bke::SocketValueVariant::From(0);
+    bke::SocketValueVariant max_value = bke::SocketValueVariant::From(domain_size - 1);
+    if (!execute_multi_function_on_value_variant(
+            clamp_fn,
+            {&index_value_variant_copy, &min_value, &max_value},
+            {&index_value_variant},
+            params.user_data(),
+            error_message))
+    {
+      params.set_default_remaining_outputs();
+      params.error_message_add(NodeWarningType::Error, std::move(error_message));
+      return;
+    }
+  }
+
+  bke::SocketValueVariant output_value;
   if (!execute_multi_function_on_value_variant(
-          std::make_shared<SampleIndexFunction>(
-              std::move(geometry), std::move(value_field), domain, use_clamp),
+          std::make_shared<bke::SampleIndexFunction>(
+              std::move(geometry), std::move(value_field), domain),
           {&index_value_variant},
           {&output_value},
           params.user_data(),
@@ -252,14 +159,14 @@ static void node_geo_exec(GeoNodeExecParams params)
     return;
   }
 
-  params.set_output("Value", std::move(output_value));
+  params.set_output("Value"_ustr, std::move(output_value));
 }
 
 static void node_register()
 {
   static bke::bNodeType ntype;
 
-  geo_node_type_base(&ntype, "GeometryNodeSampleIndex", GEO_NODE_SAMPLE_INDEX);
+  geo_node_type_base(&ntype, "GeometryNodeSampleIndex"_ustr, GEO_NODE_SAMPLE_INDEX);
   ntype.ui_name = "Sample Index";
   ntype.ui_description = "Retrieve values from specific geometry elements";
   ntype.enum_name_legacy = "SAMPLE_INDEX";

@@ -834,7 +834,7 @@ static void blend_write(BlendWriter *writer, const ID *id_owner, const ModifierD
   if (lmd.vertexco != nullptr) {
     BLO_write_shared(
         writer, lmd.vertexco, sizeof(float[3]) * lmd.verts_num, lmd.vertexco_sharing_info, [&]() {
-          BLO_write_float3_array(writer, lmd.verts_num, lmd.vertexco);
+          writer->write_float3_array(lmd.verts_num, lmd.vertexco);
         });
   }
 
@@ -847,8 +847,8 @@ static void blend_read(BlendDataReader *reader, ModifierData *md)
 
   if (lmd->vertexco) {
     lmd->vertexco_sharing_info = BLO_read_shared(reader, &lmd->vertexco, [&]() {
-      BLO_read_float3_array(reader, lmd->verts_num, &lmd->vertexco);
-      return implicit_sharing::info_for_mem_free(lmd->vertexco);
+      BLO_read_array_and_validate_size(reader, &lmd->vertexco, &lmd->verts_num, 3);
+      return lmd->vertexco ? implicit_sharing::info_for_mem_free(lmd->vertexco) : nullptr;
     });
   }
   lmd->cache_system = nullptr;

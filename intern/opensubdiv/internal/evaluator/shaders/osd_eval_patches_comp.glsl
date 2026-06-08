@@ -24,6 +24,9 @@
 
 #include "gpu_shader_compat.hh"
 
+/* `osd_patch_defines.glsl` must be included before `osd_patch_basis.glsl` */
+#include "osd_patch_defines.glsl"
+
 #include "osd_patch_basis.glsl"
 
 /* Runtime create info. */
@@ -78,7 +81,7 @@ void writeVertex(int index, Vertex v)
   }
 }
 
-void addWithWeight(inout Vertex v, const Vertex src, float weight)
+void addWithWeight(Vertex &v, const Vertex src, float weight)
 {
   for (int i = 0; i < LENGTH; ++i) {
     v.vertexData[i] += weight * src.vertexData[i];

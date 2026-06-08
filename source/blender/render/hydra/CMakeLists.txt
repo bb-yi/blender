@@ -11,7 +11,7 @@ if(UNIX AND NOT APPLE)
 endif()
 if(WIN32)
   # We need to keep BOOST_DEBUG_PYTHON for the vendored copy of boost inside USD.
-  add_definitions(-DNOMINMAX -DWIN32_LEAN_AND_MEAN -DBOOST_DEBUG_PYTHON)
+  add_definitions(-DBOOST_DEBUG_PYTHON)
 endif()
 
 # Pre-compiled Linux libraries are made with GCC, and USD uses some extensions
@@ -32,11 +32,11 @@ if(WIN32)
   # Some USD library headers trigger the "unreferenced formal parameter"
   # warning alert.
   # Silence them by restore warn C4100 back to w4
-  remove_cc_flag("/w34100")
+  remove_c_and_cxx_flag("/w34100")
   if(CMAKE_SYSTEM_PROCESSOR STREQUAL "ARM64")
     # USD currently does not support the new preprocessor,
     # so we remove it here and disable sse2neon
-    remove_cc_flag("/Zc:preprocessor")
+    remove_c_and_cxx_flag("/Zc:preprocessor")
     add_definitions(-DDISABLE_SSE2NEON)
   endif()
 endif()

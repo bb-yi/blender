@@ -12,22 +12,19 @@ namespace blender::nodes::node_geo_input_mesh_vertex_neighbors_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_output<decl::Int>("Vertex Count")
-      .field_source()
+  b.add_output<decl::Int>("Vertex Count"_ustr)
+      .structure_type(StructureType::Field)
       .description(
           "The number of vertices connected to this vertex with an edge, "
           "equal to the number of connected edges");
-  b.add_output<decl::Int>("Face Count")
-      .field_source()
+  b.add_output<decl::Int>("Face Count"_ustr)
+      .structure_type(StructureType::Field)
       .description("Number of faces that contain the vertex");
 }
 
 class VertexCountFieldInput final : public bke::MeshFieldInput {
  public:
-  VertexCountFieldInput() : bke::MeshFieldInput(CPPType::get<int>(), "Vertex Count Field")
-  {
-    category_ = Category::Generated;
-  }
+  VertexCountFieldInput() : bke::MeshFieldInput(CPPType::get<int>(), "Vertex Count Field") {}
 
   GVArray get_varray_for_context(const Mesh &mesh,
                                  const AttrDomain domain,
@@ -41,15 +38,10 @@ class VertexCountFieldInput final : public bke::MeshFieldInput {
     return VArray<int>::from_container(std::move(counts));
   }
 
-  uint64_t hash() const override
+  void hash_unique(UniqueHashBytes &hash, fn::FieldHashDeep & /*deep_hash_cache*/) const override
   {
-    /* Some random constant hash. */
-    return 23574528465;
-  }
-
-  bool is_equal_to(const fn::FieldNode &other) const override
-  {
-    return dynamic_cast<const VertexCountFieldInput *>(&other) != nullptr;
+    static constexpr int8_t id = 0;
+    hash.add(&id);
   }
 
   std::optional<AttrDomain> preferred_domain(const Mesh & /*mesh*/) const override
@@ -62,7 +54,6 @@ class VertexFaceCountFieldInput final : public bke::MeshFieldInput {
  public:
   VertexFaceCountFieldInput() : bke::MeshFieldInput(CPPType::get<int>(), "Vertex Face Count Field")
   {
-    category_ = Category::Generated;
   }
 
   GVArray get_varray_for_context(const Mesh &mesh,
@@ -77,15 +68,10 @@ class VertexFaceCountFieldInput final : public bke::MeshFieldInput {
     return VArray<int>::from_container(std::move(counts));
   }
 
-  uint64_t hash() const override
+  void hash_unique(UniqueHashBytes &hash, fn::FieldHashDeep & /*deep_hash_cache*/) const override
   {
-    /* Some random constant hash. */
-    return 3462374322;
-  }
-
-  bool is_equal_to(const fn::FieldNode &other) const override
-  {
-    return dynamic_cast<const VertexFaceCountFieldInput *>(&other) != nullptr;
+    static constexpr int8_t id = 0;
+    hash.add(&id);
   }
 
   std::optional<AttrDomain> preferred_domain(const Mesh & /*mesh*/) const override
@@ -96,18 +82,15 @@ class VertexFaceCountFieldInput final : public bke::MeshFieldInput {
 
 static void node_geo_exec(GeoNodeExecParams params)
 {
-  Field<int> vertex_field{std::make_shared<VertexCountFieldInput>()};
-  Field<int> face_field{std::make_shared<VertexFaceCountFieldInput>()};
-
-  params.set_output("Vertex Count", std::move(vertex_field));
-  params.set_output("Face Count", std::move(face_field));
+  params.set_output("Vertex Count"_ustr, Field<int>::from_input<VertexCountFieldInput>());
+  params.set_output("Face Count"_ustr, Field<int>::from_input<VertexFaceCountFieldInput>());
 }
 
 static void node_register()
 {
   static bke::bNodeType ntype;
   geo_node_type_base(
-      &ntype, "GeometryNodeInputMeshVertexNeighbors", GEO_NODE_INPUT_MESH_VERTEX_NEIGHBORS);
+      &ntype, "GeometryNodeInputMeshVertexNeighbors"_ustr, GEO_NODE_INPUT_MESH_VERTEX_NEIGHBORS);
   ntype.ui_name = "Vertex Neighbors";
   ntype.ui_description = "Retrieve topology information relating to each vertex of a mesh";
   ntype.enum_name_legacy = "MESH_VERTEX_NEIGHBORS";

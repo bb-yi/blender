@@ -13,6 +13,7 @@ import api
 import argparse
 import fnmatch
 import glob
+import logging
 import pathlib
 import shutil
 import sys
@@ -41,36 +42,30 @@ def use_revision_columns(config: api.TestConfig) -> bool:
     )
 
 
-def print_header(config: api.TestConfig) -> None:
-    # Print header with revision columns headers.
+def init_table(config: api.TestConfig) -> api.MarkdownTable:
+    table = api.MarkdownTable()
+    table.add_column("Revision")
+    table.add_column("Category", is_visible=config.queue.has_multiple_categories)
+    table.add_column("Device", is_visible=config.queue.has_multiple_devices)
+    table.add_column("Test", width=40)
     if use_revision_columns(config):
-        header = ""
-        if config.queue.has_multiple_categories:
-            header += f"{'': <15} "
-        header += f"{'': <40} "
-
         for revision_name in config.revision_names():
-            header += f"{revision_name: <20} "
-        print(header)
+            table.add_column(revision_name, width=20, alignment='RIGHT')
+        table.columns[0].is_visible = False
+    else:
+        table.add_column("Result", width=20, alignment='RIGHT')
+    return table
 
 
-def print_row(config: api.TestConfig, entries: list, end='\n') -> None:
+def print_row(table: api.MarkdownTable, entries: list, end='\n') -> None:
     # Print one or more test entries on a row.
-    row = ""
+    row = []
 
-    # For time series, print revision first.
-    if not use_revision_columns(config):
-        revision = entries[0].revision
-        git_hash = entries[0].git_hash
-
-        row += f"{revision: <15} "
-
-    if config.queue.has_multiple_categories:
-        category_name = entries[0].category
-        if entries[0].device_type != "CPU":
-            category_name += " " + entries[0].device_type
-        row += f"{category_name: <15} "
-    row += f"{entries[0].test: <40} "
+    # For time series, revision is printed first.
+    row.append(entries[0].revision)
+    row.append(entries[0].category)
+    row.append(api.normalize_device_id(entries[0].device_id))
+    row.append(entries[0].test)
 
     for entry in entries:
         # Show time or status.
@@ -78,7 +73,10 @@ def print_row(config: api.TestConfig, entries: list, end='\n') -> None:
         output = entry.output
         result = ''
         if status in {'done', 'outdated'} and output:
-            result = '%7.4f s' % output['time']
+            if 'time' in output:
+                result = '%7.4f s' % output['time']
+            elif 'fps' in output:
+                result = '%8.3f fps' % output['fps']
 
             if status == 'outdated':
                 result += " (outdated)"
@@ -86,17 +84,16 @@ def print_row(config: api.TestConfig, entries: list, end='\n') -> None:
             result = "failed: " + entry.error_msg
         else:
             result = status
+        row.append(result)
 
-        row += f"{result: <20} "
-
-    print(row, end=end, flush=True)
+    table.print_row(row, end=end)
 
 
-def print_entry(config: api.TestConfig, entry: api.TestEntry) -> None:
+def print_entry(table: api.MarkdownTable, entry: api.TestEntry) -> None:
     # Print a single test entry, potentially on multiple lines, with more details than in `print_row`.
     # NOTE: Currently only used to print detailed error info.
 
-    print_row(config, [entry])
+    print_row(table, [entry])
 
     if entry.status != 'failed':
         return
@@ -117,15 +114,18 @@ def match_entry(entry: api.TestEntry, args: argparse.Namespace):
 
 def run_entry(env: api.TestEnvironment,
               config: api.TestConfig,
+              table: api.MarkdownTable,
               row: list,
               entry: api.TestEntry,
-              update_only: bool):
+              update_only: bool,
+              count: int,
+              update_submodules: bool = True):
     updated = False
     failed = False
 
     # Check if entry needs to be run.
     if update_only and entry.status not in {'queued', 'outdated'}:
-        print_row(config, row, end='\r')
+        print_row(table, row, end='\r')
         return updated, failed
 
     # Run test entry.
@@ -137,6 +137,12 @@ def run_entry(env: api.TestEnvironment,
     device_type = entry.device_type
     device_id = entry.device_id
 
+    gpu_backend = {
+        'VULKAN': 'vulkan',
+        'METAL': 'metal',
+        'OPENGL': 'opengl'
+    }.get(device_type, 'default')
+
     test = config.tests.find(testname, testcategory)
     if not test:
         return updated, failed
@@ -144,9 +150,7 @@ def run_entry(env: api.TestEnvironment,
     updated = True
 
     # Log all output to dedicated log file.
-    logname = testcategory + '_' + testname + '_' + revision
-    if device_id != 'CPU':
-        logname += '_' + device_id
+    logname = testcategory + '_' + testname + '_' + device_id + '_' + revision
     env.set_log_file(config.logs_dir / (logname + '.log'), clear=True)
 
     # Clear output
@@ -159,13 +163,13 @@ def run_entry(env: api.TestEnvironment,
         env.set_blender_executable(pathlib.Path(entry.executable), environment)
     else:
         entry.status = 'building'
-        print_row(config, row, end='\r')
+        print_row(table, row, end='\r')
 
         if config.benchmark_type == "comparison":
             install_dir = config.builds_dir / revision
         else:
             install_dir = env.install_dir
-        executable_ok = env.build(git_hash, install_dir)
+        executable_ok = env.build(git_hash, install_dir, update_submodules)
 
         if not executable_ok:
             entry.status = 'failed'
@@ -176,23 +180,47 @@ def run_entry(env: api.TestEnvironment,
 
     # Run test and update output and status.
     if executable_ok:
-        entry.status = 'running'
-        print_row(config, row, end='\r')
+        run_outputs = []
+        for run in range(count):
+            entry.status = 'running' if count == 1 else f'run [{run + 1}/{count}]'
+            print_row(table, row, end='\r')
 
-        try:
-            entry.output = test.run(env, device_id)
-            if not entry.output:
-                raise Exception("Test produced no output")
-            entry.status = 'done'
-        except KeyboardInterrupt as e:
-            raise e
-        except Exception as e:
-            failed = True
-            entry.status = 'failed'
-            entry.error_msg = 'Failed to run'
-            entry.exception_msg = str(e)
+            try:
+                output = test.run(env, device_id, gpu_backend)
+                if not output:
+                    raise Exception("Test produced no output")
+                run_outputs.append(output)
+                entry.status = 'done'
+            except KeyboardInterrupt as e:
+                raise e
+            except Exception as e:
+                failed = True
+                entry.status = 'failed'
+                entry.error_msg = 'Failed to run'
+                entry.exception_msg = str(e)
+                break
 
-    print_row(config, row, end='\r')
+        if entry.status == 'done' and run_outputs:
+            # Combine results from runs
+
+            keys = set()
+            for run_output in run_outputs:
+                keys |= run_output.keys()
+
+            output = {}
+            output_all_runs = {}
+            for key in keys:
+                values = []
+                for run_output in run_outputs:
+                    if key not in run_output:
+                        continue
+                    values.append(run_output[key])
+                output[key] = sum(values) / len(values)
+                output_all_runs[key] = values
+            entry.output = output
+            entry.output_all_runs = output_all_runs
+
+    print_row(table, row, end='\r')
 
     # Update device name in case the device changed since the entry was created.
     entry.device_name = config.device_name(device_id)
@@ -208,9 +236,10 @@ def cmd_init(env: api.TestEnvironment, argv: list):
     # Initialize benchmarks folder.
     parser = argparse.ArgumentParser()
     parser.add_argument('--build', default=False, action='store_true')
+    parser.add_argument('--blender')
     args = parser.parse_args(argv)
     env.set_log_file(env.base_dir / 'setup.log', clear=False)
-    env.init(args.build)
+    env.init(args.build, args.blender)
     env.unset_log_file()
 
 
@@ -252,10 +281,11 @@ def cmd_status(env: api.TestEnvironment, argv: list):
                 print("")
             print(config.name.upper())
 
-        print_header(config)
+        table = init_table(config)
+        table.print_header()
         for row in config.queue.rows(use_revision_columns(config)):
             if match_entry(row[0], args):
-                print_row(config, row)
+                print_row(table, row)
 
 
 def cmd_reset(env: api.TestEnvironment, argv: list):
@@ -267,13 +297,14 @@ def cmd_reset(env: api.TestEnvironment, argv: list):
 
     configs = env.get_configs(args.config)
     for config in configs:
-        print_header(config)
+        table = init_table(config)
+        table.print_header()
         for row in config.queue.rows(use_revision_columns(config)):
             if match_entry(row[0], args):
                 for entry in row:
                     entry.status = 'queued'
                     entry.result = {}
-                print_row(config, row)
+                print_row(table, row)
 
         config.queue.write()
 
@@ -286,6 +317,11 @@ def cmd_run(env: api.TestEnvironment, argv: list, update_only: bool):
     parser = argparse.ArgumentParser()
     parser.add_argument('config', nargs='?', default=None)
     parser.add_argument('test', nargs='?', default='*')
+    parser.add_argument('--count', default=1, type=int, help="Number of runs to perform (default=1)")
+    parser.add_argument(
+        '--no-submodules',
+        action='store_true',
+        help="Skip updating submodules when checking out revisions. Useful when testing performance regressions for library changes.")
     args = parser.parse_args(argv)
 
     exit_code = 0
@@ -294,12 +330,14 @@ def cmd_run(env: api.TestEnvironment, argv: list, update_only: bool):
     for config in configs:
         updated = False
         cancel = False
-        print_header(config)
+        table = init_table(config)
+        table.print_header()
         for row in config.queue.rows(use_revision_columns(config)):
             if match_entry(row[0], args):
                 for entry in row:
                     try:
-                        test_updated, test_failed = run_entry(env, config, row, entry, update_only)
+                        test_updated, test_failed = run_entry(
+                            env, config, table, row, entry, update_only, args.count, not args.no_submodules)
                         if test_updated:
                             updated = True
                             # Write queue every time in case running gets interrupted,
@@ -307,12 +345,12 @@ def cmd_run(env: api.TestEnvironment, argv: list, update_only: bool):
                             config.queue.write()
                         if test_failed:
                             exit_code = 1
-                            print_entry(config, entry)
+                            print_entry(table, entry)
                     except KeyboardInterrupt as e:
                         cancel = True
                         break
 
-                print_row(config, row)
+                print_row(table, row)
 
             if cancel:
                 break
@@ -327,6 +365,95 @@ def cmd_run(env: api.TestEnvironment, argv: list, update_only: bool):
             print("\nfile://" + str(html_filepath))
 
     sys.exit(exit_code)
+
+
+def cmd_bisect(env: api.TestEnvironment, argv: list):
+    import datetime
+    SECONDS_PER_DAY = 86400
+
+    parser = argparse.ArgumentParser(prog='benchmark.py bisect')
+    parser.add_argument('--device', required=True,
+                        help='Device type or ID to run tests on')
+    parser.add_argument('--category', required=True,
+                        help='Test category (e.g. eevee, cycles)')
+    parser.add_argument('--test', required=True,
+                        help='Test name (supports glob patterns)')
+    parser.add_argument('--attribute', required=True,
+                        help='Performance attribute to compare (e.g. fps, time)')
+    parser.add_argument('--threshold', required=True, type=float,
+                        help='Threshold value for pass/fail decision')
+    parser.add_argument('--success', required=True, choices=['greater_than', 'less_than'],
+                        help='Whether higher or lower values are considered a success')
+    parser.add_argument('--range', required=True,
+                        help='Date range in YYYYMMDD-YYYYMMDD format')
+    parser.add_argument('--count', default=1, type=int,
+                        help='Number of benchmark runs per commit (default=1)')
+    args = parser.parse_args(argv)
+
+    if not env.build_dir.exists() or not env.blender_dir.exists():
+        sys.stderr.write('Error: benchmark build not initialized. Run "benchmark.py init --build" first.\n')
+        sys.exit(1)
+
+    try:
+        start_str, end_str = args.range.split('-')
+        start_dt = datetime.datetime.strptime(start_str, '%Y%m%d').replace(tzinfo=datetime.timezone.utc)
+        end_dt = datetime.datetime.strptime(end_str, '%Y%m%d').replace(tzinfo=datetime.timezone.utc)
+    except:
+        sys.stderr.write('Error: invalid date range format. Use YYYYMMDD-YYYYMMDD\n')
+        sys.exit(1)
+    if start_dt >= end_dt:
+        sys.stderr.write(f'Error: invalid date range {start_str} must be before {end_str}\n')
+        sys.exit(1)
+
+    collection = api.TestCollection(env, [args.test], [args.category])
+    test = collection.find(args.test, args.category)
+    if not test:
+        sys.stderr.write(f'Error: test not found: {args.category}/{args.test}\n')
+        sys.exit(1)
+
+    device_id, gpu_backend = env.resolve_device(args.device)
+
+    print(f"Device: {args.device}")
+    print(f"Category: {args.category}")
+    print(f"Test: {args.test}")
+    print()
+
+    table = api.MarkdownTable()
+    table.add_column("Remaining", width=5, alignment='RIGHT')
+    table.add_column("Commit", width=14)
+    table.add_column("Date (UTC)", width=22)
+    table.add_column("Title", width=72)
+    table.add_column(args.attribute, width=14, alignment='RIGHT')
+    table.add_column("Status", width=8)
+    table.print_header()
+
+    tested = set()
+
+    def print_status(row_values, end='\n'):
+        table.print_row([str(progress.remaining)] + row_values, end=end)
+
+    def run_commit_wrapper(commit_hash, commit_ts):
+        return api.Bisect.run_commit(
+            env, test, device_id, gpu_backend, args.count, args.attribute,
+            args.success, args.threshold, tested,
+            print_status, commit_hash, commit_ts)
+
+    # Phase 1: Daily scan
+    start_ts = int(start_dt.timestamp())
+    end_ts = int(end_dt.timestamp()) + SECONDS_PER_DAY
+
+    progress = api.bisect.BisectProgress()
+    env.set_log_file(env.base_dir / 'bisect.log', clear=True)
+    bisect = api.bisect.Bisect(env, run_commit_wrapper, start_ts, end_ts)
+    bisect.run(progress=progress)
+    env.unset_log_file()
+
+    if bisect.first_bad is None:
+        print('\nNo regression found in the given date range.')
+        return
+
+    title = env.commit_title(bisect.first_bad).replace('`', '\'')
+    print(f'\nRegression introduced by commit `{bisect.first_bad}`: `{title}`')
 
 
 def cmd_graph(argv: list):
@@ -351,6 +478,7 @@ def cmd_graph(argv: list):
 
 
 def main():
+    logging.basicConfig()
     usage = ('benchmark <command> [<args>]\n'
              '\n'
              'Commands:\n'
@@ -364,7 +492,10 @@ def main():
              '  reset [<config>] [<test>]            Clear tests results in configuration\n'
              '  status [<config>] [<test>]           List configurations and their tests\n'
              '  \n'
-             '  graph a.json b.json... -o out.html   Create graph from results in JSON files\n')
+             '  graph a.json b.json... -o out.html   Create graph from results in JSON files\n'
+             '  \n'
+             '  bisect                                Find commit that introduced a regression'
+             ' between dates\n')
 
     parser = argparse.ArgumentParser(
         description='Blender performance testing',
@@ -403,6 +534,8 @@ def main():
         cmd_run(env, argv, update_only=True)
     elif args.command == 'reset':
         cmd_reset(env, argv)
+    elif args.command == 'bisect':
+        cmd_bisect(env, argv)
     elif args.command == 'status':
         cmd_status(env, argv)
     elif args.command == 'help':

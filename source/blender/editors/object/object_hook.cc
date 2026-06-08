@@ -376,21 +376,21 @@ static void select_editcurve_hook(Object *obedit, HookModifierData *hmd)
       a = nu.pntsu;
       while (a--) {
         if (nr == hmd->indexar[index]) {
-          bezt->f1 |= SELECT;
+          bezt->f1 |= BEZT_FLAG_SELECT;
           if (index < hmd->indexar_num - 1) {
             index++;
           }
         }
         nr++;
         if (nr == hmd->indexar[index]) {
-          bezt->f2 |= SELECT;
+          bezt->f2 |= BEZT_FLAG_SELECT;
           if (index < hmd->indexar_num - 1) {
             index++;
           }
         }
         nr++;
         if (nr == hmd->indexar[index]) {
-          bezt->f3 |= SELECT;
+          bezt->f3 |= BEZT_FLAG_SELECT;
           if (index < hmd->indexar_num - 1) {
             index++;
           }
@@ -490,7 +490,7 @@ static Object *add_hook_object_new(
   Base *basedit;
   Object *ob;
   ob = BKE_object_add(bmain, scene, view_layer, OB_EMPTY, nullptr);
-  BKE_view_layer_synced_ensure(scene, view_layer);
+  BKE_view_layer_synced_ensure(*bmain, scene, view_layer);
   Base *basact = BKE_view_layer_active_base_get(view_layer);
   BLI_assert(basact->object == ob);
   if (v3d && v3d->localvd) {

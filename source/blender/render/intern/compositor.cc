@@ -21,6 +21,7 @@
 #include "BKE_node.hh"
 #include "BKE_node_runtime.hh"
 #include "BKE_scene.hh"
+#include "BKE_scene_runtime.hh"
 
 #include "DRW_engine.hh"
 #include "DRW_render.hh"
@@ -34,6 +35,8 @@
 #include "COM_realize_on_domain_operation.hh"
 #include "COM_render_context.hh"
 #include "COM_result.hh"
+
+#include "NOD_eval_log.hh"
 
 #include "RE_compositor.hh"
 #include "RE_pipeline.h"
@@ -59,29 +62,29 @@ namespace render {
 class ContextInputData {
  public:
   const Render *render;
+  const Main *main;
   const Scene *scene;
   const RenderData *render_data;
   const bNodeTree *node_tree;
   std::string view_name;
   compositor::RenderContext *render_context;
-  compositor::Profiler *profiler;
   compositor::NodeGroupOutputTypes needed_outputs;
 
   ContextInputData(const Render *render,
+                   const Main &main,
                    const Scene &scene,
                    const RenderData &render_data,
                    const bNodeTree &node_tree,
                    const char *view_name,
                    compositor::RenderContext *render_context,
-                   compositor::Profiler *profiler,
                    compositor::NodeGroupOutputTypes needed_outputs)
       : render(render),
+        main(&main),
         scene(&scene),
         render_data(&render_data),
         node_tree(&node_tree),
         view_name(view_name),
         render_context(render_context),
-        profiler(profiler),
         needed_outputs(needed_outputs)
   {
   }
@@ -100,6 +103,9 @@ class Context : public compositor::Context {
   Vector<gpu::Texture *> cached_gpu_passes_;
   Vector<ImBuf *> cached_cpu_passes_;
 
+  /* True if GPU compute is supported and can be used, if false, we fallback to CPU. */
+  bool gpu_supported_ = true;
+
  public:
   Context(compositor::StaticCacheManager &cache_manager, const ContextInputData &input_data)
       : compositor::Context(cache_manager), input_data_(input_data)
@@ -116,14 +122,25 @@ class Context : public compositor::Context {
     }
   }
 
+  const Main &get_main() const override
+  {
+    return *input_data_.main;
+  }
+
   const Scene &get_scene() const override
   {
     return *input_data_.scene;
   }
 
+  void set_gpu_supported(const bool supported)
+  {
+    gpu_supported_ = supported;
+  }
+
   bool use_gpu() const override
   {
-    return this->get_render_data().compositor_device == SCE_COMPOSITOR_DEVICE_GPU;
+    return gpu_supported_ &&
+           this->get_render_data().compositor_device == SCE_COMPOSITOR_DEVICE_GPU;
   }
 
   compositor::NodeGroupOutputTypes needed_outputs() const
@@ -175,21 +192,29 @@ class Context : public compositor::Context {
       if (result.is_single_value()) {
         float *data = MEM_new_array_uninitialized<float>(
             4 * size_t(render_result->rectx) * size_t(render_result->recty), __func__);
-        IMB_assign_float_buffer(image_buffer, data, IB_TAKE_OWNERSHIP);
+        image_buffer->assign_float_data(data);
         IMB_rectfill(image_buffer, result.get_single_value<compositor::Color>());
       }
       else if (this->use_gpu()) {
         GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE);
         float *output_buffer = static_cast<float *>(GPU_texture_read(result, GPU_DATA_FLOAT, 0));
-        IMB_assign_float_buffer(image_buffer, output_buffer, IB_TAKE_OWNERSHIP);
+        image_buffer->assign_float_data(output_buffer);
       }
       else {
-        float *data = MEM_new_array_uninitialized<float>(
-            4 * size_t(render_result->rectx) * size_t(render_result->recty), __func__);
-        IMB_assign_float_buffer(image_buffer, data, IB_TAKE_OWNERSHIP);
-        std::memcpy(image_buffer->float_buffer.data,
-                    result.cpu_data().data(),
-                    render_result->rectx * render_result->recty * 4 * sizeof(float));
+        if (result.sharing_info()) {
+          image_buffer->float_buffer = ImBufFloatBuffer{
+              .data = static_cast<const float *>(result.cpu_data().data()),
+              .sharing_info = result.sharing_info(),
+              .colorspace = nullptr};
+        }
+        else {
+          float *data = MEM_new_array_uninitialized<float>(
+              4 * size_t(render_result->rectx) * size_t(render_result->recty), __func__);
+          std::memcpy(image_buffer->float_data_for_write(),
+                      result.cpu_data().data(),
+                      render_result->rectx * render_result->recty * 4 * sizeof(float));
+          image_buffer->assign_float_data(data);
+        }
       }
     }
     RE_ReleaseResult(render);
@@ -225,40 +250,82 @@ class Context : public compositor::Context {
     BLI_thread_lock(LOCK_DRAW_IMAGE);
 
     void *lock;
-    ImBuf *image_buffer = BKE_image_acquire_ibuf(image, &image_user, &lock);
+    ImBuf *image_buffer = BKE_image_acquire_ibuf_gpu(image, &image_user, &lock);
 
     const int2 size = viewer_result.is_single_value() ? this->get_render_size() :
                                                         viewer_result.domain().data_size;
-    if (image_buffer->x != size.x || image_buffer->y != size.y) {
+
+    /* The image buffer has a different size than the viewer result, set the new size and free all
+     * data to be reallocated later. */
+    if (int2(image_buffer->x, image_buffer->y) != size) {
       IMB_free_byte_pixels(image_buffer);
       IMB_free_float_pixels(image_buffer);
+      IMB_free_gpu_textures(image_buffer);
       image_buffer->x = size.x;
       image_buffer->y = size.y;
-      IMB_alloc_float_pixels(image_buffer, 4, false);
+    }
+
+    if (this->use_gpu()) {
+      /* If using GPU, free any potential previous CPU data. */
+      IMB_free_float_pixels(image_buffer);
+
+      /* Allocate a GPU texture if using GPU and no texture exists or one exists but with a
+       * different format. */
+      if (!image_buffer->gpu.texture ||
+          GPU_texture_format(image_buffer->gpu.texture) != viewer_result.get_gpu_texture_format())
+      {
+        gpu::TextureFormat format = viewer_result.get_gpu_texture_format();
+        gpu::Texture *texture = GPU_texture_create_2d(
+            __func__, size.x, size.y, 1, format, GPU_TEXTURE_USAGE_GENERAL, nullptr);
+        IMB_assign_gpu_texture(image_buffer, texture);
+      }
+    }
+    else {
+      /* If not using GPU, free any potential previous GPU data. */
+      IMB_free_gpu_textures(image_buffer);
+    }
+
+    if (this->use_gpu()) {
+      if (viewer_result.is_single_value()) {
+        GPU_texture_clear(image_buffer->gpu.texture,
+                          GPU_DATA_FLOAT,
+                          viewer_result.get_single_value<compositor::Color>());
+      }
+      else {
+        GPU_texture_copy(image_buffer->gpu.texture, viewer_result);
+      }
+      image_buffer->userflags |= IB_HOST_BUFFER_INVALID;
+    }
+    else {
+      if (viewer_result.is_single_value()) {
+        IMB_alloc_float_pixels(image_buffer, 4, false);
+        IMB_rectfill(image_buffer, viewer_result.get_single_value<compositor::Color>());
+      }
+      else if (viewer_result.sharing_info()) {
+        image_buffer->channels = 4;
+        image_buffer->float_buffer = ImBufFloatBuffer{
+            .data = static_cast<const float *>(viewer_result.cpu_data().data()),
+            .sharing_info = viewer_result.sharing_info(),
+            .colorspace = nullptr};
+      }
+      else if (viewer_result.cpu_data().data() != image_buffer->float_data()) {
+        IMB_alloc_float_pixels(image_buffer, 4, false);
+        std::memcpy(image_buffer->float_data_for_write(),
+                    viewer_result.cpu_data().data(),
+                    size.x * size.y * 4 * sizeof(float));
+      }
       image_buffer->userflags |= IB_DISPLAY_BUFFER_INVALID;
     }
 
     if (!viewer_result.is_single_value()) {
-      image_buffer->flags |= IB_has_display_window;
+      image_buffer->flags |= ImBufFlags::HasDisplayWindow;
       const int2 display_offset = int2(viewer_result.domain().transformation.location());
       copy_v2_v2_int(image_buffer->display_size, viewer_result.domain().display_size);
       copy_v2_v2_int(image_buffer->display_offset, display_offset);
       copy_v2_v2_int(image_buffer->data_offset, viewer_result.domain().data_offset);
     }
-
-    if (viewer_result.is_single_value()) {
-      IMB_rectfill(image_buffer, viewer_result.get_single_value<compositor::Color>());
-    }
-    else if (this->use_gpu()) {
-      GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE);
-      float *output_buffer = static_cast<float *>(
-          GPU_texture_read(viewer_result, GPU_DATA_FLOAT, 0));
-      IMB_assign_float_buffer(image_buffer, output_buffer, IB_TAKE_OWNERSHIP);
-    }
     else {
-      std::memcpy(image_buffer->float_buffer.data,
-                  viewer_result.cpu_data().data(),
-                  size.x * size.y * 4 * sizeof(float));
+      image_buffer->flags &= ~ImBufFlags::HasDisplayWindow;
     }
 
     BKE_image_partial_update_mark_full_update(image);
@@ -278,7 +345,7 @@ class Context : public compositor::Context {
 
     if (realization_operation) {
       Result realize_input = this->create_result(ResultType::Color, viewer_result.precision());
-      realize_input.wrap_external(viewer_result);
+      realize_input.share_data(viewer_result);
       realization_operation->map_input_to_result(&realize_input);
       realization_operation->evaluate();
 
@@ -391,7 +458,7 @@ class Context : public compositor::Context {
       return this->get_invalid_pass();
     }
 
-    if (!render_pass || !render_pass->ibuf || !render_pass->ibuf->float_buffer.data) {
+    if (!render_pass || !render_pass->ibuf || !render_pass->ibuf->float_data()) {
       return this->get_invalid_pass();
     }
 
@@ -402,14 +469,15 @@ class Context : public compositor::Context {
       gpu::Texture *pass_texture = RE_pass_ensure_gpu_texture_cache(render, render_pass);
       /* Don't assume render will keep pass data stored, add our own reference. */
       GPU_texture_ref(pass_texture);
-      pass_data.wrap_external(pass_texture);
+      pass_data.share_data(pass_texture);
       cached_gpu_passes_.append(pass_texture);
     }
     else {
       /* Don't assume render will keep pass data stored, add our own reference. */
       IMB_refImBuf(render_pass->ibuf);
-      pass_data.wrap_external(render_pass->ibuf->float_buffer.data,
-                              int2(render_pass->ibuf->x, render_pass->ibuf->y));
+      pass_data.share_data(render_pass->ibuf->float_buffer.data,
+                           int2(render_pass->ibuf->x, render_pass->ibuf->y),
+                           render_pass->ibuf->float_buffer.sharing_info);
       cached_cpu_passes_.append(render_pass->ibuf);
     }
 
@@ -419,14 +487,16 @@ class Context : public compositor::Context {
       compositor::ConversionOperation conversion_operation(*this, pass_data.type(), pass.type());
       conversion_operation.map_input_to_result(&pass_data);
       conversion_operation.evaluate();
-      pass.steal_data(conversion_operation.get_result());
+      pass.share_data(conversion_operation.get_result());
+      conversion_operation.get_result().release();
     }
     else {
-      pass.steal_data(pass_data);
+      pass.share_data(pass_data);
+      pass_data.release();
     }
 
     /* We assume the given pass is a Cryptomatte pass and retrieve its layer name. If it wasn't a
-     * Cryptomatte pass, the checks below will fail anyways. */
+     * Cryptomatte pass, the checks below will fail anyway. */
     const std::string combined_pass_name = std::string(view_layer->name) + "." + pass_name;
     StringRef cryptomatte_layer_name = bke::cryptomatte::BKE_cryptomatte_extract_layer_name(
         combined_pass_name);
@@ -476,7 +546,7 @@ class Context : public compositor::Context {
   {
     switch (input_data_.scene->r.compositor_precision) {
       case SCE_COMPOSITOR_PRECISION_AUTO:
-        /* Auto uses full precision for final renders and half procession otherwise. */
+        /* Auto uses full precision for final renders and half precision otherwise. */
         if (this->render_context()) {
           return compositor::ResultPrecision::Full;
         }
@@ -496,9 +566,9 @@ class Context : public compositor::Context {
     return input_data_.render_context;
   }
 
-  compositor::Profiler *profiler() const override
+  nodes::eval_log::NodesEvalLog *nodes_evaluation_log() const override
   {
-    return input_data_.profiler;
+    return this->get_scene().runtime->compositor.nodes_evaluation_log.get();
   }
 
   void evaluate_operation_post() const override
@@ -523,19 +593,20 @@ class Context : public compositor::Context {
 
   void evaluate()
   {
+    /* Reset log before evaluation. */
+    this->get_scene().runtime->compositor.nodes_evaluation_log =
+        std::make_unique<nodes::eval_log::NodesEvalLog>();
+
     using namespace compositor;
     const NodeGroupOutputTypes needed_outputs = this->needed_outputs();
     const bNodeTree &node_group = *input_data_.node_tree;
-    Map<bNodeInstanceKey, bke::bNodePreview> *node_previews =
-        flag_is_set(needed_outputs, NodeGroupOutputTypes::NodePreviews) ?
-            &node_group.runtime->previews :
-            nullptr;
+    const bke::DataBlockComputeContext compute_context(nullptr, this->get_scene().id);
     NodeGroupOperation node_group_operation(*this,
                                             node_group,
                                             needed_outputs,
-                                            node_previews,
                                             node_group.active_viewer_key,
-                                            bke::NODE_INSTANCE_KEY_BASE);
+                                            bke::NODE_INSTANCE_KEY_BASE,
+                                            compute_context);
 
     /* Set the reference count for the outputs, only the first color output is actually needed,
      * while the rest are ignored. */
@@ -543,10 +614,10 @@ class Context : public compositor::Context {
                                                     NodeGroupOutputTypes::GroupOutputNode);
     node_group.ensure_interface_cache();
     for (const bNodeTreeInterfaceSocket *output_socket : node_group.interface_outputs()) {
-      const bool is_fisrt_output = output_socket == node_group.interface_outputs().first();
+      const bool is_first_output = output_socket == node_group.interface_outputs().first();
       Result &output_result = node_group_operation.get_result(output_socket->identifier);
       const bool is_color = output_result.type() == ResultType::Color;
-      const bool is_needed = is_group_output_needed && is_fisrt_output && is_color;
+      const bool is_needed = is_group_output_needed && is_first_output && is_color;
       output_result.set_reference_count(is_needed ? 1 : 0);
     }
 
@@ -670,15 +741,18 @@ class Compositor {
       GHOST_IContext *re_system_gpu_context = RE_system_gpu_context_get(&render_);
       if (BLI_thread_is_main() || re_system_gpu_context == nullptr) {
         DRW_gpu_context_enable();
+        context.set_gpu_supported(DRW_gpu_context_is_enabled());
       }
-      else {
-        GHOST_IContext *re_system_gpu_context = RE_system_gpu_context_get(&render_);
+      else if (re_system_gpu_context) {
         WM_system_gpu_context_activate(re_system_gpu_context);
 
         void *re_blender_gpu_context = RE_blender_gpu_context_ensure(&render_);
 
         GPU_render_begin();
         GPU_context_active_set(static_cast<GPUContext *>(re_blender_gpu_context));
+      }
+      else {
+        context.set_gpu_supported(false);
       }
     }
 
@@ -705,8 +779,8 @@ class Compositor {
         DRW_gpu_context_disable();
       }
       else {
-        GPU_render_end();
         GPU_context_active_set(nullptr);
+        GPU_render_end();
         GHOST_IContext *re_system_gpu_context = RE_system_gpu_context_get(&render_);
         WM_system_gpu_context_release(re_system_gpu_context);
       }
@@ -729,18 +803,18 @@ class Compositor {
 
 }  // namespace render
 
-void Render::compositor_execute(const Scene &scene,
+void Render::compositor_execute(const Main &main,
+                                const Scene &scene,
                                 const RenderData &render_data,
                                 const bNodeTree &node_tree,
                                 const char *view_name,
                                 compositor::RenderContext *render_context,
-                                compositor::Profiler *profiler,
                                 compositor::NodeGroupOutputTypes needed_outputs)
 {
   std::unique_lock lock(this->compositor_mutex);
 
   render::ContextInputData input_data(
-      this, scene, render_data, node_tree, view_name, render_context, profiler, needed_outputs);
+      this, main, scene, render_data, node_tree, view_name, render_context, needed_outputs);
 
   if (this->compositor && this->compositor->needs_to_be_recreated(input_data)) {
     /* Free it here and it will be recreated in the check below. */
@@ -766,16 +840,16 @@ void Render::compositor_free()
 }
 
 void RE_compositor_execute(Render &render,
+                           const Main &main,
                            const Scene &scene,
                            const RenderData &render_data,
                            const bNodeTree &node_tree,
                            const char *view_name,
                            compositor::RenderContext *render_context,
-                           compositor::Profiler *profiler,
                            compositor::NodeGroupOutputTypes needed_outputs)
 {
   render.compositor_execute(
-      scene, render_data, node_tree, view_name, render_context, profiler, needed_outputs);
+      main, scene, render_data, node_tree, view_name, render_context, needed_outputs);
 }
 
 void RE_compositor_free(Render &render)

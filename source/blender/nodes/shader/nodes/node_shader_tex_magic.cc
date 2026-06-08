@@ -19,16 +19,25 @@ namespace nodes::node_shader_tex_magic_cc {
 static void sh_node_tex_magic_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
-  b.add_input<decl::Vector>("Vector").implicit_field(NODE_DEFAULT_INPUT_POSITION_FIELD);
-  b.add_input<decl::Float>("Scale").min(-1000.0f).max(1000.0f).default_value(5.0f).description(
-      "Scale of the texture");
-  b.add_input<decl::Float>("Distortion")
+
+  const bool is_compositor = b.tree_or_null() && b.tree_or_null()->type == NTREE_COMPOSIT;
+  const NodeDefaultInputType default_input_type =
+      is_compositor ? NODE_DEFAULT_INPUT_UNIFORM_IMAGE_COORDINATES :
+                      NODE_DEFAULT_INPUT_POSITION_FIELD;
+  b.add_input<decl::Vector>("Vector"_ustr).default_input_type(default_input_type);
+
+  b.add_input<decl::Float>("Scale"_ustr)
+      .min(-1000.0f)
+      .max(1000.0f)
+      .default_value(5.0f)
+      .description("Scale of the texture");
+  b.add_input<decl::Float>("Distortion"_ustr)
       .min(-1000.0f)
       .max(1000.0f)
       .default_value(1.0f)
       .description("Amount of distortion");
-  b.add_output<decl::Color>("Color").no_muted_links();
-  b.add_output<decl::Float>("Factor", "Fac").no_muted_links();
+  b.add_output<decl::Color>("Color"_ustr).no_muted_links();
+  b.add_output<decl::Float>("Factor"_ustr, "Fac"_ustr).no_muted_links();
 }
 
 static void node_shader_buts_tex_magic(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
@@ -168,6 +177,13 @@ class MagicFunction : public mf::MultiFunction {
       });
     }
   }
+
+  void hash_unique(UniqueHashBytes &hash) const override
+  {
+    static constexpr int8_t id = 0;
+    hash.add(&id);
+    hash.add(depth_);
+  }
 };
 
 static void sh_node_magic_tex_build_multi_function(NodeMultiFunctionBuilder &builder)
@@ -185,7 +201,7 @@ void register_node_type_sh_tex_magic()
 
   static bke::bNodeType ntype;
 
-  common_node_type_base(&ntype, "ShaderNodeTexMagic", SH_NODE_TEX_MAGIC);
+  common_node_type_base(&ntype, "ShaderNodeTexMagic"_ustr, SH_NODE_TEX_MAGIC);
   ntype.ui_name = "Magic Texture";
   ntype.ui_description = "Generate a psychedelic color texture";
   ntype.enum_name_legacy = "TEX_MAGIC";

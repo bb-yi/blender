@@ -10,7 +10,12 @@
 
 #pragma once
 
+#include <cstdint>
+#include <cstdio>
+
 #include "GPU_platform.hh"
+
+struct GHOST_GPUDevice;
 
 class GHOST_IContext;
 class GHOST_ISystem;
@@ -53,6 +58,30 @@ void GPU_backend_type_selection_set_override(GPUBackendType backend_type);
  * Check if the GPU_backend_type_selection_detect is overridden to only test a specific backend.
  */
 bool GPU_backend_type_selection_is_overridden();
+
+/**
+ * Override the user-preference GPU device to use the specified GPU.
+ *
+ * Device selection first tries the device with this (`vendor_id`, `device_id`, `index`),
+ * then falls back to the preferred device unless hard fail debugging is enabled. The
+ * values `vendor_id == uint32_t(-1)` and `device_id == uint32_t(-1)` are sentinels meaning
+ * "wildcard" (don't constrain that field), so passing both as the sentinel selects purely by
+ * enumeration `index`.
+ */
+void GPU_backend_preferred_device_set_override(int index, uint32_t vendor_id, uint32_t device_id);
+/**
+ * Return the preferred GPU device for new contexts.
+ */
+GHOST_GPUDevice GPU_backend_preferred_device_get();
+
+#ifdef WITH_VULKAN_BACKEND
+/**
+ * Print one line per Vulkan device that meets minimum requirements, matching the
+ * `<vendor-hex>/<device-hex>/<index>` identifier used in user preferences. Used by
+ * `--gpu-device help`.
+ */
+void GPU_vulkan_supported_devices_print(FILE *fp);
+#endif
 
 /**
  * Get the VSync value (when set).
@@ -129,6 +158,23 @@ GHOST_ISystem *GPU_backend_ghost_system_get();
 
 namespace gpu {
 
+struct GPUSecondaryContextData {
+  GHOST_IContext *ghost_context = nullptr;
+  GPUContext *gpu_context = nullptr;
+};
+
+/** Creates a secondary off-screen GHOST and GPU contexts. Must be called on the main thread. */
+GPUSecondaryContextData GPU_create_secondary_context();
+
+/** Activates the given secondary GPU context. */
+void GPU_activate_secondary_context(const GPUSecondaryContextData &data);
+
+/** Deactivates the given secondary GPU context. */
+void GPU_deactivate_secondary_context(const GPUSecondaryContextData &data);
+
+/** Destroys the given secondary GPU context. */
+void GPU_destroy_secondary_context(GPUSecondaryContextData &data);
+
 /**
  * Abstracts secondary GHOST and GPU context creation, activation and deletion.
  * Must be created from the main thread and destructed from the thread they where activated in.
@@ -136,8 +182,7 @@ namespace gpu {
  */
 class GPUSecondaryContext {
  private:
-  GHOST_IContext *ghost_context_;
-  GPUContext *gpu_context_;
+  GPUSecondaryContextData data_;
 
  public:
   GPUSecondaryContext();

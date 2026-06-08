@@ -8,6 +8,7 @@
  * \ingroup bke
  */
 
+#include "BLI_math_vector_types.hh"
 #include "DNA_curveprofile_types.h"
 
 namespace blender {
@@ -62,6 +63,9 @@ bool BKE_curveprofile_move_point(struct CurveProfile *profile,
                                  bool snap,
                                  const float delta[2]);
 
+void BKE_curveprofile_translate_selection(struct CurveProfile *profile,
+                                          const blender::float2 &offset);
+
 /**
  * Removes a specific point from the path of control points.
  * \note Requires #BKE_curveprofile_update call after.
@@ -88,7 +92,10 @@ struct CurveProfilePoint *BKE_curveprofile_insert(struct CurveProfile *profile, 
 
 /**
  * Sets the handle type of the selected control points.
- * \param type_1, type_2: Handle type for the first handle. HD_VECT, HD_AUTO, HD_FREE, or HD_ALIGN.
+ * \param type_1: Handle type for the left handle.
+ * \param type_2: Handle type for the right handle.
+ *
+ * \note Valid handle types are: #HD_VECT, #HD_AUTO, #HD_FREE, or #HD_ALIGN.
  * \note Requires #BKE_curveprofile_update call after.
  */
 void BKE_curveprofile_selected_handle_set(struct CurveProfile *profile, int type_1, int type_2);
@@ -111,6 +118,13 @@ void BKE_curveprofile_reset_view(struct CurveProfile *profile);
  * \note Requires #BKE_curveprofile_update call after.
  */
 void BKE_curveprofile_reset(struct CurveProfile *profile);
+
+/**
+ * When the current point is deselected, activate the closest remaining point
+ * by index. The function searches for the nearest valid index relative to the previously
+ * active index, not the nearest point by distance.
+ */
+void BKE_curveprofile_activate_nearest_point(struct CurveProfile *profile, const int i_last);
 
 int BKE_curveprofile_table_size(const struct CurveProfile *profile);
 
@@ -148,6 +162,12 @@ void BKE_curveprofile_evaluate_length_portion(const struct CurveProfile *profile
                                               float length_portion,
                                               float *x_out,
                                               float *y_out);
+CurveProfilePoint *BKE_curveprofile_active_get(CurveProfile *profile);
+
+/**
+ * Return a pointer to the location of the active point or handle associated with a selected point.
+ */
+float *BKE_curveprofile_active_location_get(struct CurveProfilePoint *point);
 
 void BKE_curveprofile_blend_write(struct BlendWriter *writer, const struct CurveProfile *profile);
 /**

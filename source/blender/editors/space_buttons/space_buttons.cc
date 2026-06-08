@@ -121,7 +121,7 @@ static void buttons_free(SpaceLink *sl)
     for (ButsTextureUser &user : ct->users.items_mutable()) {
       MEM_delete(&user);
     }
-    BLI_listbase_clear(&ct->users);
+    ct->users.clear_no_delete();
     MEM_delete(ct);
   }
 
@@ -419,7 +419,7 @@ static void property_search_all_tabs(const bContext *C,
   sbuts_copy.texuser = nullptr;
   sbuts_copy.runtime = MEM_new<SpaceProperties_Runtime>(__func__, *sbuts->runtime);
   sbuts_copy.runtime->tab_search_results = nullptr;
-  BLI_listbase_clear(&area_copy.spacedata);
+  area_copy.spacedata.clear_no_delete();
   BLI_addtail(&area_copy.spacedata, &sbuts_copy);
 
   /* Loop through the tabs added to the properties editor. */
@@ -757,6 +757,10 @@ static void buttons_area_listener(const wmSpaceTypeListenerParams *params)
           break;
         case ND_RENDER_RESULT:
           break;
+        case ND_NODES:
+          /* For the compositor strip modifier interface. */
+          buttons_area_redraw(area, BCONTEXT_STRIP_MODIFIER);
+          break;
         case ND_SEQUENCER:
           ED_area_tag_redraw(area);
           break;
@@ -1002,7 +1006,7 @@ static void buttons_id_remap(ScrArea * /*area*/,
     for (ButsTextureUser &user : ct->users.items_mutable()) {
       MEM_delete(&user);
     }
-    BLI_listbase_clear(&ct->users);
+    ct->users.clear_no_delete();
     ct->user = nullptr;
   }
 }
@@ -1034,7 +1038,7 @@ static void buttons_foreach_id(SpaceLink *space_link, LibraryForeachIDData *data
       for (ButsTextureUser &user : ct->users.items_mutable()) {
         MEM_delete(&user);
       }
-      BLI_listbase_clear(&ct->users);
+      ct->users.clear_no_delete();
       ct->user = nullptr;
     }
   }
@@ -1129,7 +1133,7 @@ void ED_spacetype_buttons()
   /* Register the panel types from strip modifiers. The actual panels are built per strip modifier
    * rather than per modifier type. */
   for (int i = 0; i < NUM_STRIP_MODIFIER_TYPES; i++) {
-    const seq::StripModifierTypeInfo *mti = seq::modifier_type_info_get(i);
+    const seq::StripModifierTypeInfo *mti = seq::modifier_type_info_get(eStripModifierType(i));
     if (mti != nullptr && mti->panel_register != nullptr) {
       mti->panel_register(art);
     }

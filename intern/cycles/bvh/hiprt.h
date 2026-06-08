@@ -8,14 +8,9 @@
 
 #  include "bvh/bvh.h"
 #  include "bvh/params.h"
-
-#  ifdef WITH_HIP_DYNLOAD
-#    include <hiprtew.h>
-#  else
-#    include <hiprt/hiprt_types.h>
-#  endif
-
 #  include "device/memory.h"
+
+#  include <hiprt/hiprt_types.h>
 
 CCL_NAMESPACE_BEGIN
 
@@ -40,6 +35,8 @@ class BVHHIPRT : public BVH {
   device_vector<BoundBox> custom_primitive_bound;
   device_vector<int> triangle_index;
   device_vector<float> vertex_data;
+
+  float aabb_overlap_ratio;
 
   BVHHIPRT(const BVHParams &params,
            const vector<Geometry *> &geometry,

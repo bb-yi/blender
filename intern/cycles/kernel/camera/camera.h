@@ -115,7 +115,7 @@ ccl_device Spectrum camera_sample_perspective(KernelGlobals kg,
     differential3 dD;
     dD.dx = normalize(Dcenter + make_float3(kernel_data.cam.dx)) - Dcenter_normalized;
     dD.dy = normalize(Dcenter + make_float3(kernel_data.cam.dy)) - Dcenter_normalized;
-    ray->dD = differential_make_compact(dD);
+    ray->dD = differential_make_compact(dD) * kernel_data.cam.differential_scale;
 #endif
   }
   else {
@@ -156,8 +156,8 @@ ccl_device Spectrum camera_sample_perspective(KernelGlobals kg,
 
     dP.dy = Py - Pcenter;
     dD.dy = Dy - Dcenter;
-    ray->dD = differential_make_compact(dD);
-    ray->dP = differential_make_compact(dP);
+    ray->dD = differential_make_compact(dD) * kernel_data.cam.differential_scale;
+    ray->dP = differential_make_compact(dP) * kernel_data.cam.differential_scale;
 #endif
   }
 
@@ -223,9 +223,9 @@ ccl_device Spectrum camera_sample_orthographic(KernelGlobals kg,
   /* ray differential */
   differential3 dP;
   dP.dx = make_float3(kernel_data.cam.dx);
-  dP.dy = make_float3(kernel_data.cam.dx);
+  dP.dy = make_float3(kernel_data.cam.dy);
 
-  ray->dP = differential_make_compact(dP);
+  ray->dP = differential_make_compact(dP) * kernel_data.cam.differential_scale;
   ray->dD = differential_zero_compact();
 #endif
 
@@ -282,7 +282,7 @@ ccl_device_inline void camera_sample_to_ray(ccl_constant KernelCamera *cam,
     Pcenter = transform_point(&cameratoworld, Pcenter);
     dP.dx = transform_point(&cameratoworld, Px) - Pcenter;
     dP.dy = transform_point(&cameratoworld, Py) - Pcenter;
-    ray->dP = differential_make_compact(dP);
+    ray->dP = differential_make_compact(dP) * cam->differential_scale;
   }
   else {
     ray->dP = differential_zero_compact();
@@ -292,7 +292,7 @@ ccl_device_inline void camera_sample_to_ray(ccl_constant KernelCamera *cam,
   Dcenter = normalize(transform_direction(&cameratoworld, Dcenter));
   dD.dx = normalize(transform_direction(&cameratoworld, Dx)) - Dcenter;
   dD.dy = normalize(transform_direction(&cameratoworld, Dy)) - Dcenter;
-  ray->dD = differential_make_compact(dD);
+  ray->dD = differential_make_compact(dD) * cam->differential_scale;
 #endif
 
   /* clipping */
@@ -308,7 +308,8 @@ ccl_device_inline Spectrum camera_sample_custom(KernelGlobals kg,
                                                 const ccl_global DecomposedTransform *cam_motion,
                                                 const float2 raster,
                                                 const float2 rand_lens,
-                                                ccl_private Ray *ray)
+                                                ccl_private Ray *ray,
+                                                ccl_private int &r_cache_miss)
 {
 #ifdef WITH_OSL
   /* Transform raster position to camera space. */
@@ -316,9 +317,24 @@ ccl_device_inline Spectrum camera_sample_custom(KernelGlobals kg,
   float3 sensor = transform_perspective(&rastertocamera, make_float3(raster.x, raster.y, 0.0f));
   float3 dSdx = transform_perspective_direction(&rastertocamera, make_float3(1.0f, 0.0f, 0.0f));
   float3 dSdy = transform_perspective_direction(&rastertocamera, make_float3(0.0f, 1.0f, 0.0f));
+
+  ShaderDataTinyStorage sd_storage = {};
+  ccl_private ShaderData *sd = AS_SHADER_DATA(&sd_storage);
+  sd->object = OBJECT_NONE;
+  sd->prim = PRIM_NONE;
+  sd->shader = SHADER_NONE;
+  sd->type = PRIMITIVE_NONE;
+  sd->flag = 0;
+
   /* Execute OSL shader to sample position, direction and transmission. */
   packed_float3 P, dPdx, dPdy, D, dDdx, dDdy, throughput;
-  throughput = osl_eval_camera(kg, sensor, dSdx, dSdy, rand_lens, P, dPdx, dPdy, D, dDdx, dDdy);
+  r_cache_miss = false;
+  throughput = osl_eval_camera(
+      kg, sd, sensor, dSdx, dSdy, rand_lens, P, dPdx, dPdy, D, dDdx, dDdy);
+  if (sd->flag & SD_CACHE_MISS) {
+    r_cache_miss = true;
+    return zero_spectrum();
+  }
   /* Zero throughput indicates failed sampling. */
   if (is_zero(throughput)) {
     return zero_spectrum();
@@ -435,13 +451,20 @@ ccl_device_inline Spectrum camera_sample(KernelGlobals kg,
                                          const float2 filter_uv,
                                          const float time,
                                          const float2 lens_uv,
-                                         ccl_private Ray *ray)
+                                         ccl_private Ray *ray,
+                                         ccl_private int &r_cache_miss)
 {
+  float2 raster = make_float2(x, y);
+
   /* pixel filter */
-  const int filter_table_offset = kernel_data.tables.filter_table_offset;
-  const float2 raster = make_float2(
-      x + lookup_table_read(kg, filter_uv.x, filter_table_offset, FILTER_TABLE_SIZE),
-      y + lookup_table_read(kg, filter_uv.y, filter_table_offset, FILTER_TABLE_SIZE));
+  if (kernel_data.integrator.pixel_jitter.x == FLT_MAX) {
+    const int filter_table_offset = kernel_data.tables.filter_table_offset;
+    raster.x += lookup_table_read(kg, filter_uv.x, filter_table_offset, FILTER_TABLE_SIZE);
+    raster.y += lookup_table_read(kg, filter_uv.y, filter_table_offset, FILTER_TABLE_SIZE);
+  }
+  else {
+    raster += -kernel_data.integrator.pixel_jitter;
+  }
 
   /* motion blur */
   if (kernel_data.cam.shuttertime == -1.0f) {
@@ -482,6 +505,7 @@ ccl_device_inline Spectrum camera_sample(KernelGlobals kg,
   }
 
   /* sample */
+  r_cache_miss = false;
   if (kernel_data.cam.type == CAMERA_PERSPECTIVE) {
     return camera_sample_perspective(kg, raster, lens_uv, ray);
   }
@@ -494,7 +518,8 @@ ccl_device_inline Spectrum camera_sample(KernelGlobals kg,
   }
   if (kernel_data.cam.type == CAMERA_CUSTOM) {
     const ccl_global DecomposedTransform *cam_motion = kernel_data_array(camera_motion);
-    return camera_sample_custom(kg, &kernel_data.cam, cam_motion, raster, lens_uv, ray);
+    return camera_sample_custom(
+        kg, &kernel_data.cam, cam_motion, raster, lens_uv, ray, r_cache_miss);
   }
   kernel_assert(false);
   return zero_spectrum();
@@ -571,6 +596,68 @@ ccl_device_inline float3 camera_world_to_ndc(KernelGlobals kg,
   }
   /* TODO: Fall back to camera coordinates until we have inverse mappings for custom cameras. */
   return P;
+}
+
+/* Motion vector for motion pass */
+
+ccl_device_forceinline float4 camera_motion_vector_direction(KernelGlobals kg, const float3 D)
+{
+  Transform tfm;
+  float3 motion_center;
+  float3 motion_pre;
+  float3 motion_post;
+
+  /* Camera motion, for perspective/orthographic motion.pre/post will be a
+   * world-to-raster matrix, for panorama it's world-to-camera, for custom
+   * we fall back to the world position until we have inverse mapping for it */
+  if (kernel_data.cam.type == CAMERA_CUSTOM) {
+    /* TODO: Custom cameras don't have inverse mappings yet, so we fall back to
+     * camera-space vectors here for now. */
+    tfm = kernel_data.cam.worldtocamera;
+    motion_center = normalize(transform_direction(&tfm, D));
+
+    tfm = kernel_data.cam.motion_pass_pre;
+    motion_pre = normalize(transform_direction(&tfm, D));
+
+    tfm = kernel_data.cam.motion_pass_post;
+    motion_post = normalize(transform_direction(&tfm, D));
+  }
+  else if (kernel_data.cam.type != CAMERA_PANORAMA) {
+    /* Perspective and orthographics camera use the world-to-raster matrix. */
+    ProjectionTransform projection = kernel_data.cam.worldtoraster;
+    motion_center = transform_perspective_direction(&projection, D);
+
+    projection = kernel_data.cam.perspective_pre;
+    motion_pre = transform_perspective_direction(&projection, D);
+
+    projection = kernel_data.cam.perspective_post;
+    motion_post = transform_perspective_direction(&projection, D);
+  }
+  else {
+    /* Panorama cameras have their own inverse mappings. */
+    tfm = kernel_data.cam.worldtocamera;
+    motion_center = normalize(transform_direction(&tfm, D));
+    motion_center = make_float3(direction_to_panorama(&kernel_data.cam, motion_center));
+    motion_center.x *= kernel_data.cam.width;
+    motion_center.y *= kernel_data.cam.height;
+
+    tfm = kernel_data.cam.motion_pass_pre;
+    motion_pre = normalize(transform_direction(&tfm, D));
+    motion_pre = make_float3(direction_to_panorama(&kernel_data.cam, motion_pre));
+    motion_pre.x *= kernel_data.cam.width;
+    motion_pre.y *= kernel_data.cam.height;
+
+    tfm = kernel_data.cam.motion_pass_post;
+    motion_post = normalize(transform_direction(&tfm, D));
+    motion_post = make_float3(direction_to_panorama(&kernel_data.cam, motion_post));
+    motion_post.x *= kernel_data.cam.width;
+    motion_post.y *= kernel_data.cam.height;
+  }
+
+  motion_pre = motion_pre - motion_center;
+  motion_post = motion_center - motion_post;
+
+  return make_float4(motion_pre.x, motion_pre.y, motion_post.x, motion_post.y);
 }
 
 CCL_NAMESPACE_END

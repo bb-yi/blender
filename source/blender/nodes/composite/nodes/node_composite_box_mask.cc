@@ -29,37 +29,37 @@ static const EnumPropertyItem operation_items[] = {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Menu>("Operation")
+  b.add_input<decl::Menu>("Operation"_ustr)
       .default_value(CMP_NODE_MASKTYPE_ADD)
       .static_items(operation_items)
       .optional_label();
-  b.add_input<decl::Float>("Mask")
+  b.add_input<decl::Float>("Mask"_ustr)
       .subtype(PROP_FACTOR)
       .default_value(0.0f)
       .min(0.0f)
       .max(1.0f)
       .structure_type(StructureType::Dynamic);
-  b.add_input<decl::Float>("Value")
+  b.add_input<decl::Float>("Value"_ustr)
       .subtype(PROP_FACTOR)
       .default_value(1.0f)
       .min(0.0f)
       .max(1.0f)
       .structure_type(StructureType::Dynamic);
-  b.add_input<decl::Vector>("Position")
+  b.add_input<decl::Vector>("Position"_ustr)
       .subtype(PROP_FACTOR)
       .dimensions(2)
       .default_value({0.5f, 0.5f})
       .min(-0.5f)
       .max(1.5f);
-  b.add_input<decl::Vector>("Size")
+  b.add_input<decl::Vector>("Size"_ustr)
       .subtype(PROP_FACTOR)
       .dimensions(2)
       .default_value({0.2f, 0.1f})
       .min(0.0f)
       .max(1.0f);
-  b.add_input<decl::Float>("Rotation").subtype(PROP_ANGLE);
+  b.add_input<decl::Float>("Rotation"_ustr).subtype(PROP_ANGLE);
 
-  b.add_output<decl::Float>("Mask").structure_type(StructureType::Dynamic);
+  b.add_output<decl::Float>("Mask"_ustr).structure_type(StructureType::Dynamic);
 }
 
 using namespace blender::compositor;
@@ -242,7 +242,7 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, "CompositorNodeBoxMask", CMP_NODE_MASK_BOX);
+  cmp_node_type_base(&ntype, "CompositorNodeBoxMask"_ustr, CMP_NODE_MASK_BOX);
   ntype.ui_name = "Box Mask";
   ntype.ui_description = "Create rectangular mask suitable for use as a simple matte";
   ntype.enum_name_legacy = "BOXMASK";

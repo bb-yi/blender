@@ -12,6 +12,7 @@ set(INC_SYS
 
 set(SRC_KERNEL_DEVICE_OPTIX
   kernel.cu
+  kernel_mnee.cu
   kernel_shader_raytrace.cu
 )
 
@@ -23,6 +24,9 @@ if(WITH_CYCLES_OSL)
     ../../osl/services_optix.cu
     kernel_osl.cu
     kernel_osl_camera.cu
+    kernel_osl_mnee.cu
+    kernel_osl_shader_raytrace.cu
+    kernel_osl_volume.cu
   )
 endif()
 
@@ -40,7 +44,9 @@ if(WITH_CYCLES_CUDA_BINARIES AND WITH_CYCLES_DEVICE_OPTIX)
   # CUDA version
   cuda_get_version(CUDA_VERSION)
 
-  macro(cycles_optix_kernel_add name input flags)
+  # Modifies in parent scope:
+  # - `optix_ptx`: appended with compressed ptx output.
+  function(cycles_optix_kernel_add name input flags)
     set(output "${CMAKE_CURRENT_BINARY_DIR}/${name}.ptx")
     set(output_compressed "${output}.zst")
 
@@ -94,13 +100,18 @@ if(WITH_CYCLES_CUDA_BINARIES AND WITH_CYCLES_DEVICE_OPTIX)
       DEPENDS ${output})
 
     list(APPEND optix_ptx ${output_compressed})
+    set(optix_ptx "${optix_ptx}" PARENT_SCOPE)
 
     delayed_install("${CMAKE_CURRENT_BINARY_DIR}" "${output_compressed}" ${CYCLES_INSTALL_PATH}/lib)
-  endmacro()
+  endfunction()
 
   cycles_optix_kernel_add(
     kernel_optix
     "kernel.cu"
+    "")
+  cycles_optix_kernel_add(
+    kernel_optix_mnee
+    "kernel_mnee.cu"
     "")
   cycles_optix_kernel_add(
     kernel_optix_shader_raytrace
@@ -110,6 +121,18 @@ if(WITH_CYCLES_CUDA_BINARIES AND WITH_CYCLES_DEVICE_OPTIX)
     cycles_optix_kernel_add(
       kernel_optix_osl
       "kernel_osl.cu"
+      "--relocatable-device-code=true")
+    cycles_optix_kernel_add(
+      kernel_optix_osl_shader_raytrace
+      "kernel_osl_shader_raytrace.cu"
+      "--relocatable-device-code=true")
+    cycles_optix_kernel_add(
+      kernel_optix_osl_mnee
+      "kernel_osl_mnee.cu"
+      "--relocatable-device-code=true")
+    cycles_optix_kernel_add(
+      kernel_optix_osl_volume
+      "kernel_osl_volume.cu"
       "--relocatable-device-code=true")
     cycles_optix_kernel_add(
       kernel_optix_osl_camera

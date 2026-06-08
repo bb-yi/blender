@@ -105,6 +105,20 @@ void ED_render_view3d_update(Depsgraph *depsgraph,
   }
 }
 
+static void update_compositor(const DEGEditorUpdateContext *update_context)
+{
+  const Scene *scene = DEG_get_evaluated(update_context->depsgraph, update_context->scene);
+  const bNodeTree *node_tree = scene->compositing_node_group;
+  if (!node_tree) {
+    return;
+  }
+
+  if (node_tree->id.recalc & ID_RECALC_NTREE_OUTPUT) {
+    ED_node_compositor_job(
+        update_context->bmain, update_context->scene, update_context->view_layer);
+  }
+}
+
 void ED_render_scene_update(const DEGEditorUpdateContext *update_ctx, const bool updated)
 {
   Main *bmain = update_ctx->bmain;
@@ -122,7 +136,7 @@ void ED_render_scene_update(const DEGEditorUpdateContext *update_ctx, const bool
   }
 
   /* Do not call if no WM available, see #42688. */
-  if (BLI_listbase_is_empty(&bmain->wm)) {
+  if (bmain->wm.is_empty()) {
     return;
   }
 
@@ -138,6 +152,8 @@ void ED_render_scene_update(const DEGEditorUpdateContext *update_ctx, const bool
       }
     }
   }
+
+  update_compositor(update_ctx);
 
   recursive_check = false;
 }
@@ -241,7 +257,7 @@ static void texture_changed(Main *bmain, Tex *tex)
   {
     /* paint overlays */
     for (ViewLayer &view_layer : scene->view_layers) {
-      BKE_paint_invalidate_overlay_tex(scene, &view_layer, tex);
+      BKE_paint_invalidate_overlay_tex(*bmain, scene, &view_layer, tex);
     }
   }
 
@@ -327,11 +343,11 @@ static void update_sequencer(const DEGEditorUpdateContext *update_ctx, Main *bma
     }
   }
 
-  /* Invalidate cache for strips that use this compositing tree as a modifier. */
+  /* Invalidate cache for strips that use this compositing tree. */
   if (GS(id->name) == ID_NT) {
     const bNodeTree *node_tree = reinterpret_cast<const bNodeTree *>(id);
     if (node_tree->type == NTREE_COMPOSIT) {
-      seq::relations_invalidate_compositor_modifiers(bmain, node_tree);
+      seq::relations_invalidate_compositor_users(bmain, node_tree);
     }
   }
 }

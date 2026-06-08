@@ -41,6 +41,8 @@ namespace draw {
 struct MeshBatchCache;
 }
 
+enum eMSelect_Type : int;
+
 /* TODO: Move to `BKE_mesh_types.hh` when possible. */
 enum eMeshBatchDirtyMode : int8_t {
   BKE_MESH_BATCH_DIRTY_ALL = 0,
@@ -220,12 +222,12 @@ void BKE_mesh_mselect_validate(Mesh *mesh);
 /**
  * \return the index within `me->mselect`, or -1
  */
-int BKE_mesh_mselect_find(const Mesh *mesh, int index, int type);
+int BKE_mesh_mselect_find(const Mesh *mesh, int index, eMSelect_Type type);
 /**
  * \return The index of the active element.
  */
-int BKE_mesh_mselect_active_get(const Mesh *mesh, int type);
-void BKE_mesh_mselect_active_set(Mesh *mesh, int index, int type);
+int BKE_mesh_mselect_active_get(const Mesh *mesh, eMSelect_Type type);
+void BKE_mesh_mselect_active_set(Mesh *mesh, int index, eMSelect_Type type);
 
 void BKE_mesh_count_selected_items(const Mesh *mesh, int r_count[3]);
 
@@ -254,7 +256,7 @@ struct MLoopNorSpace {
   /** Third vector, orthogonal to #vec_lnor and #vec_ref. */
   float vec_ortho[3];
   /**
-   * Reference angle around #vec_ortho, in ]0, pi] range, between #vec_lnor and the reference edge.
+   * Reference angle around #vec_ortho, in (0, pi] range, between #vec_lnor and the reference edge.
    *
    * A 0.0 value marks that space as invalid, as it can only happen in extremely degenerate
    * geometry cases (it would mean that the default normal is perfectly aligned with the reference
@@ -262,7 +264,7 @@ struct MLoopNorSpace {
    */
   float ref_alpha;
   /**
-   * Reference angle around #vec_lnor, in ]0, 2pi] range, between the reference edge and the other
+   * Reference angle around #vec_lnor, in (0, 2pi] range, between the reference edge and the other
    * border edge of the fan.
    *
    * A 0.0 value marks that space as invalid, as it can only happen in degenerate geometry cases

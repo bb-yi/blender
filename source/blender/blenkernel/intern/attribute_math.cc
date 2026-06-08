@@ -2,10 +2,14 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include <algorithm>
+
 #include "BLI_array_utils.hh"
 #include "BLI_math_euler.hh"
 #include "BLI_math_matrix.hh"
 #include "BLI_math_quaternion.hh"
+
+#include "PRF_profile.hh"
 
 #include "BKE_attribute_math.hh"
 
@@ -182,6 +186,7 @@ void ColorGeometry4bMixer::finalize()
 
 void ColorGeometry4bMixer::finalize(const IndexMask &mask)
 {
+  PRF_scope_with_name("ColorGeometry4bMixer::finalize", ProfileCategory::Default);
   mask.foreach_index([&](const int64_t i) {
     const float weight = total_weights_[i];
     const float4 &accum_value = accumulation_buffer_[i];
@@ -241,6 +246,7 @@ void float4x4Mixer::finalize()
 
 void float4x4Mixer::finalize(const IndexMask &mask)
 {
+  PRF_scope_with_name("float4x4Mixer::finalize", ProfileCategory::Default);
   mask.foreach_index([&](const int64_t i) {
     const float weight = total_weights_[i];
     if (weight > 0.0f) {
@@ -256,16 +262,162 @@ void float4x4Mixer::finalize(const IndexMask &mask)
   });
 }
 
+float4x4 mix_indices(const Span<float4x4> src, const Span<int> indices)
+{
+  float3 location_accum(0);
+  float3 expmap_accum(0);
+  float3 scale_accum(0);
+  for (const int i : indices) {
+    float3 location;
+    math::Quaternion rotation;
+    float3 scale;
+    math::to_loc_rot_scale_safe<true>(src[i], location, rotation, scale);
+    location_accum += location;
+    expmap_accum += rotation.expmap();
+    scale_accum += scale;
+  }
+
+  const float weight_inv = math::safe_rcp(float(indices.size()));
+  return math::from_loc_rot_scale<float4x4>(location_accum * weight_inv,
+                                            math::Quaternion::expmap(expmap_accum * weight_inv),
+                                            scale_accum * weight_inv);
+}
+
+template<typename T>
+void mix_groups(const Span<T> src,
+                const OffsetIndices<int> groups,
+                const Span<int> all_indices,
+                MutableSpan<T> dst)
+{
+  PRF_scope_with_name("attribute_math::mix_groups", ProfileCategory::Default);
+  for (const int dst_i : dst.index_range()) {
+    dst[dst_i] = mix_indices(src, all_indices.slice(groups[dst_i]));
+  }
+}
+
+float4x4 mix_indices(const Span<float4x4> src, const Span<int> indices, const Span<float> weights)
+{
+  float3 location_accum(0);
+  float3 expmap_accum(0);
+  float3 scale_accum(0);
+  float total_weight = 0.0f;
+  for (const int i : indices.index_range()) {
+    const float weight = weights[i];
+    float3 location;
+    math::Quaternion rotation;
+    float3 scale;
+    math::to_loc_rot_scale_safe<true>(src[indices[i]], location, rotation, scale);
+    location_accum += location * weight;
+    expmap_accum += rotation.expmap() * weight;
+    scale_accum += scale * weight;
+    total_weight += weight;
+  }
+
+  const float weight_inv = math::safe_rcp(total_weight);
+  return math::from_loc_rot_scale<float4x4>(location_accum * weight_inv,
+                                            math::Quaternion::expmap(expmap_accum * weight_inv),
+                                            scale_accum * weight_inv);
+}
+
+template<typename T>
+void mix_groups(const Span<T> src,
+                const OffsetIndices<int> groups,
+                const Span<int> all_indices,
+                const Span<float> all_weights,
+                MutableSpan<T> dst)
+{
+  PRF_scope_with_name("attribute_math::mix_groups", ProfileCategory::Default);
+  for (const int dst_i : groups.index_range()) {
+    dst[dst_i] = mix_indices(
+        src, all_indices.slice(groups[dst_i]), all_weights.slice(groups[dst_i]));
+  }
+}
+
+void mix_groups(const GSpan src,
+                const OffsetIndices<int> groups,
+                const Span<int> all_indices,
+                const std::optional<Span<float>> all_weights,
+                GMutableSpan dst)
+{
+  BLI_assert(groups.size() == dst.size());
+  BLI_assert(groups.total_size() == all_indices.size());
+  BLI_assert(!all_weights || groups.total_size() == all_weights->size());
+
+  to_static_type(src.type(), [&]<typename T>() {
+    if constexpr (!std::is_same_v<T, std::string>) {
+      threading::parallel_for(
+          groups.index_range(),
+          2048,
+          [&](const IndexRange range) {
+            if (all_weights) {
+              mix_groups(src.typed<T>(),
+                         groups.slice(range),
+                         all_indices,
+                         *all_weights,
+                         dst.typed<T>().slice(range));
+            }
+            else {
+              mix_groups(
+                  src.typed<T>(), groups.slice(range), all_indices, dst.typed<T>().slice(range));
+            }
+          },
+          threading::accumulated_task_sizes(
+              [&](const IndexRange range) { return groups[range].size(); }));
+    }
+  });
+}
+
+template<typename T>
+void shift_left(MutableSpan<T> data, int src_begin, int src_end, int dst_begin)
+{
+  if (ELEM(src_begin, dst_begin, src_end)) {
+    return;
+  }
+  std::move(data.data() + src_begin, data.data() + src_end, data.data() + dst_begin);
+}
+
+void shift_left(GMutableSpan data, int src_begin, int src_end, int dst_begin)
+{
+  to_static_type(data.type(), [&]<typename T>() {
+    shift_left(data.typed<T>(), src_begin, src_end, dst_begin);
+  });
+}
+
+template<typename T> void shift_right(MutableSpan<T> data, int src_begin, int src_end, int dst_end)
+{
+  if (src_end == dst_end || src_begin == src_end) {
+    return;
+  }
+  std::move_backward(data.data() + src_begin, data.data() + src_end, data.data() + dst_end);
+}
+
+void shift_right(GMutableSpan data, int src_begin, int src_end, int dst_begin)
+{
+  to_static_type(data.type(), [&]<typename T>() {
+    shift_right(data.typed<T>(), src_begin, src_end, dst_begin);
+  });
+}
+
 void gather(const GSpan src, const Span<int> map, GMutableSpan dst)
 {
-  attribute_math::to_static_type(
-      src.type(), [&]<typename T>() { array_utils::gather(src.typed<T>(), map, dst.typed<T>()); });
+  gather(GVArray::from_span(src), map, IndexRange(dst.size()), dst);
 }
 
 void gather(const GVArray &src, const Span<int> map, GMutableSpan dst)
 {
-  attribute_math::to_static_type(
-      src.type(), [&]<typename T>() { array_utils::gather(src.typed<T>(), map, dst.typed<T>()); });
+  gather(src, map, IndexRange(dst.size()), dst);
+}
+
+void gather(const GSpan src, const Span<int> map, const IndexMask &dst_mask, GMutableSpan dst)
+{
+  gather(GVArray::from_span(src), map, dst_mask, dst);
+}
+
+void gather(const GVArray &src, const Span<int> map, const IndexMask &dst_mask, GMutableSpan dst)
+{
+  to_static_type(src.type(), [&]<typename T>() {
+    array_utils::gather(src.typed<T>(), map, dst_mask, dst.typed<T>());
+  });
 }
 
 void gather_group_to_group(const OffsetIndices<int> src_offsets,
@@ -274,7 +426,7 @@ void gather_group_to_group(const OffsetIndices<int> src_offsets,
                            const GSpan src,
                            GMutableSpan dst)
 {
-  attribute_math::to_static_type(src.type(), [&]<typename T>() {
+  to_static_type(src.type(), [&]<typename T>() {
     array_utils::gather_group_to_group(
         src_offsets, dst_offsets, selection, src.typed<T>(), dst.typed<T>());
   });
@@ -285,7 +437,7 @@ void gather_ranges_to_groups(const Span<IndexRange> src_ranges,
                              const GSpan src,
                              GMutableSpan dst)
 {
-  attribute_math::to_static_type(src.type(), [&]<typename T>() {
+  to_static_type(src.type(), [&]<typename T>() {
     Span<T> src_span = src.typed<T>();
     MutableSpan<T> dst_span = dst.typed<T>();
 
@@ -302,7 +454,7 @@ void gather_to_groups(const OffsetIndices<int> dst_offsets,
                       const GSpan src,
                       GMutableSpan dst)
 {
-  attribute_math::to_static_type(src.type(), [&]<typename T>() {
+  to_static_type(src.type(), [&]<typename T>() {
     array_utils::gather_to_groups(dst_offsets, src_selection, src.typed<T>(), dst.typed<T>());
   });
 }

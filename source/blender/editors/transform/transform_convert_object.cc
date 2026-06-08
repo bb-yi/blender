@@ -305,7 +305,7 @@ static void trans_object_base_deps_flag_prepare(const TransInfo *t,
   if (t->options & CTX_OBMODE_XFORM_OBDATA) {
     return;
   }
-  BKE_view_layer_synced_ensure(scene, view_layer);
+  BKE_view_layer_synced_ensure(*t->bmain, scene, view_layer);
   for (Base &base : *BKE_view_layer_object_bases_get(view_layer)) {
     base.object->id.tag &= ~ID_TAG_DOIT;
   }
@@ -364,7 +364,7 @@ static void trans_object_base_deps_flag_finish(const TransInfo *t,
   if (t->options & CTX_OBMODE_XFORM_OBDATA) {
     return;
   }
-  BKE_view_layer_synced_ensure(scene, view_layer);
+  BKE_view_layer_synced_ensure(*t->bmain, scene, view_layer);
   for (Base &base : *BKE_view_layer_object_bases_get(view_layer)) {
     if (base.object->id.tag & ID_TAG_DOIT) {
       base.flag_legacy |= BA_SNAP_FIX_DEPS_FIASCO;
@@ -391,13 +391,13 @@ static void set_trans_object_base_flags(TransInfo *t)
     return;
   }
   /* Makes sure base flags and object flags are identical. */
-  BKE_scene_base_flag_to_objects(t->scene, t->view_layer);
+  BKE_scene_base_flag_to_objects(*t->bmain, t->scene, t->view_layer);
   /* Make sure depsgraph is here. */
   DEG_graph_relations_update(depsgraph);
   /* Clear all flags we need. It will be used to detect dependencies. */
   trans_object_base_deps_flag_prepare(t, scene, view_layer);
   /* Traverse all bases and set all possible flags. */
-  BKE_view_layer_synced_ensure(scene, view_layer);
+  BKE_view_layer_synced_ensure(*t->bmain, scene, view_layer);
   for (Base &base : *BKE_view_layer_object_bases_get(view_layer)) {
     base.flag_legacy &= ~(BA_WAS_SEL | BA_TRANSFORM_LOCKED_IN_PLACE);
     if (BASE_SELECTED_EDITABLE(v3d, &base)) {
@@ -509,7 +509,7 @@ static void clear_trans_object_base_flags(TransInfo *t)
   Scene *scene = t->scene;
   ViewLayer *view_layer = t->view_layer;
 
-  BKE_view_layer_synced_ensure(scene, view_layer);
+  BKE_view_layer_synced_ensure(*t->bmain, scene, view_layer);
   for (Base &base : *BKE_view_layer_object_bases_get(view_layer)) {
     if (base.flag_legacy & BA_WAS_SEL) {
       object::base_select(&base, object::BA_SELECT);
@@ -562,7 +562,7 @@ static void createTransObject(bContext *C, TransInfo *t)
     td->protectflag = ob->protectflag;
     tx->rotOrder = ob->rotmode;
 
-    if (base->flag & BA_TRANSFORM_CHILD) {
+    if (base->flag_legacy & BA_TRANSFORM_CHILD) {
       td->flag |= TD_NOCENTER;
       td->flag |= TD_NO_LOC;
     }
@@ -602,7 +602,7 @@ static void createTransObject(bContext *C, TransInfo *t)
     ViewLayer *view_layer = t->view_layer;
     View3D *v3d = static_cast<View3D *>(t->view);
 
-    BKE_view_layer_synced_ensure(scene, view_layer);
+    BKE_view_layer_synced_ensure(*t->bmain, scene, view_layer);
     for (Base &base : *BKE_view_layer_object_bases_get(view_layer)) {
       Object *ob = base.object;
 
@@ -636,7 +636,7 @@ static void createTransObject(bContext *C, TransInfo *t)
     ViewLayer *view_layer = t->view_layer;
     View3D *v3d = static_cast<View3D *>(t->view);
 
-    BKE_view_layer_synced_ensure(scene, view_layer);
+    BKE_view_layer_synced_ensure(*t->bmain, scene, view_layer);
     for (Base &base : *BKE_view_layer_object_bases_get(view_layer)) {
       Object *ob = base.object;
 
@@ -687,7 +687,7 @@ static void createTransObject(bContext *C, TransInfo *t)
     Scene *scene = t->scene;
     ViewLayer *view_layer = t->view_layer;
 
-    BKE_view_layer_synced_ensure(scene, view_layer);
+    BKE_view_layer_synced_ensure(*t->bmain, scene, view_layer);
     for (Base &base : *BKE_view_layer_object_bases_get(view_layer)) {
       Object *ob = base.object;
       if (ob->parent != nullptr) {
@@ -784,6 +784,7 @@ static bool motionpath_need_update_object(Scene *scene, Object *ob)
 /* Given the transform mode `tmode` return a Vector of RNA paths that were possibly modified during
  * that transformation. */
 static Vector<RNAPath> get_affected_rna_paths_from_transform_mode(
+    const Main &bmain,
     const eTfmMode tmode,
     Scene *scene,
     ViewLayer *view_layer,
@@ -796,7 +797,7 @@ static Vector<RNAPath> get_affected_rna_paths_from_transform_mode(
   /* Handle the cases where we always need to key location, regardless of
    * transform mode. */
   if (scene->toolsettings->transform_pivot_point == V3D_AROUND_ACTIVE) {
-    BKE_view_layer_synced_ensure(scene, view_layer);
+    BKE_view_layer_synced_ensure(bmain, scene, view_layer);
     if (ob != BKE_view_layer_active_object_get(view_layer)) {
       rna_paths.append({"location"});
     }
@@ -846,11 +847,12 @@ static void autokeyframe_object(bContext *C,
 {
   Vector<RNAPath> rna_paths;
   ViewLayer *view_layer = CTX_data_view_layer(C);
-  const StringRef rotation_path = animrig::get_rotation_mode_path(eRotationModes(ob->rotmode));
+  const StringRefNull rotation_path = animrig::get_rotation_mode_path(eRotationModes(ob->rotmode));
 
   if (animrig::is_keying_flag(scene, AUTOKEY_FLAG_INSERTNEEDED)) {
+    const Main *bmain = CTX_data_main(C);
     rna_paths = get_affected_rna_paths_from_transform_mode(
-        tmode, scene, view_layer, ob, rotation_path, transforming_more_than_one_object);
+        *bmain, tmode, scene, view_layer, ob, rotation_path, transforming_more_than_one_object);
   }
   else {
     rna_paths = {{"location"}, {rotation_path}, {"scale"}};
@@ -860,8 +862,6 @@ static void autokeyframe_object(bContext *C,
 
 static void recalcData_objects(TransInfo *t)
 {
-  bool motionpath_update = false;
-
   if (t->state != TRANS_CANCEL) {
     transform_snap_project_individual_apply(t);
   }
@@ -886,18 +886,12 @@ static void recalcData_objects(TransInfo *t)
         autokeyframe_object(t->context, t->scene, ob, t->mode, t->data_len_all > 1);
       }
 
-      motionpath_update |= motionpath_need_update_object(t->scene, ob);
+      motionpath_need_update_object(t->scene, ob);
 
       /* Sets recalc flags fully, instead of flushing existing ones
        * otherwise proxies don't function correctly. */
       DEG_id_tag_update(&ob->id, ID_RECALC_TRANSFORM);
     }
-  }
-
-  if (motionpath_update) {
-    /* Update motion paths once for all transformed objects. */
-    object::motion_paths_recalc_selected(
-        t->context, t->scene, object::OBJECT_PATH_CALC_RANGE_CURRENT_FRAME);
   }
 
   if (t->options & CTX_OBMODE_XFORM_SKIP_CHILDREN) {
@@ -947,7 +941,7 @@ static void special_aftertrans_update__object(bContext *C, TransInfo *t)
         pid.cache->flag |= PTCACHE_OUTDATED;
       }
     }
-    BLI_freelistN(&pidlist);
+    pidlist.free_no_destruct();
 
     /* Point-cache refresh. */
     if (BKE_ptcache_object_reset(t->scene, ob, PTCACHE_RESET_OUTDATED)) {
@@ -977,12 +971,9 @@ static void special_aftertrans_update__object(bContext *C, TransInfo *t)
     }
   }
 
-  if (motionpath_update) {
+  if (!canceled && motionpath_update) {
     /* Update motion paths once for all transformed objects. */
-    const object::eObjectPathCalcRange range = canceled ?
-                                                   object::OBJECT_PATH_CALC_RANGE_CURRENT_FRAME :
-                                                   object::OBJECT_PATH_CALC_RANGE_CHANGED;
-    object::motion_paths_recalc_selected(C, t->scene, range);
+    object::motion_paths_recalc_selected(C, t->scene, ANIMVIZ_CALC_RANGE_CHANGED);
   }
 
   clear_trans_object_base_flags(t);

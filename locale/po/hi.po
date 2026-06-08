@@ -1,9 +1,9 @@
 
 msgid ""
 msgstr ""
-"Project-Id-Version: Blender 5.1.0 Beta (b'5a04f1d246f1')\n"
+"Project-Id-Version: Blender 5.2.0 Alpha (b'8764d33c658b')\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-03-11 11:01+0000\n"
+"POT-Creation-Date: 2026-06-01 07:36+0000\n"
 "PO-Revision-Date: 2025-12-04 22:18+0000\n"
 "Last-Translator: Jackson Zheng <business.jackson.zheng@gmail.com>\n"
 "Language-Team: Hindi <https://translate.blender.org/projects/blender-ui/ui/hi/>\n"
@@ -300,6 +300,10 @@ msgid "Default"
 msgstr "मूलभूत"
 
 
+msgid "Display Mode"
+msgstr "प्रदर्शित रूप"
+
+
 msgid "Coordinates"
 msgstr "निर्देशांक"
 
@@ -366,6 +370,10 @@ msgstr "क्षेत्र चौड़ाई"
 
 msgid "X Position"
 msgstr "स्थिति x"
+
+
+msgid "Link"
+msgstr "संयुक्त"
 
 
 msgid "Brushes"
@@ -694,8 +702,17 @@ msgid "Vertex Color"
 msgstr "शिरोबिन्दु रंग"
 
 
+msgctxt "Operator"
+msgid "Poly"
+msgstr "बहु"
+
+
 msgid "All"
 msgstr "सभी"
+
+
+msgid "Pixel"
+msgstr "पिक्सेल"
 
 
 msgid "Iterations"
@@ -708,6 +725,10 @@ msgstr "छटा"
 
 msgid "Fill"
 msgstr "भरण"
+
+
+msgid "Both"
+msgstr "दोनों"
 
 
 msgid "Background Image"
@@ -1412,10 +1433,6 @@ msgid "Directory displayed in the file browser"
 msgstr "निर्देशिका संचिका विचरक में प्रदर्शित"
 
 
-msgid "Display Mode"
-msgstr "प्रदर्शित रूप"
-
-
 msgid "File Name"
 msgstr "संचिका का नाम"
 
@@ -1450,10 +1467,6 @@ msgstr "छवि संचिकाएँ दिखाएँ"
 
 msgid "Filter Text"
 msgstr "निस्पादक पाठ"
-
-
-msgid "Link"
-msgstr "संयुक्त"
 
 
 msgid "End"
@@ -1556,6 +1569,10 @@ msgid "Grid"
 msgstr "जालक"
 
 
+msgid "Dynamic"
+msgstr "गतिकी"
+
+
 msgid "Items"
 msgstr "वस्तु"
 
@@ -1646,10 +1663,6 @@ msgstr "स्थानीय"
 
 msgid "Global"
 msgstr "भूमंडलीय"
-
-
-msgid "Dynamic"
-msgstr "गतिकी"
 
 
 msgid "Add Color"
@@ -2120,10 +2133,6 @@ msgid "Rigid Body Constraint"
 msgstr "कठोर-पदार्थ प्रतिबंधी"
 
 
-msgid "Pixel"
-msgstr "पिक्सेल"
-
-
 msgid "Global X"
 msgstr "भूमंडलीय एक्स"
 
@@ -2573,32 +2582,16 @@ msgid "Dots"
 msgstr "बिन्दु्"
 
 
-msgid "UV"
-msgstr "यूवी"
-
-
-msgid "Show/Hide"
-msgstr "छुपाएँ / दिखाएँ"
-
-
-msgid "Names"
-msgstr "नाम"
-
-
-msgid "Bone Roll"
-msgstr "हड्डी पंजी"
-
-
-msgid "Snap"
-msgstr "स्नैप"
+msgid "Placement"
+msgstr "नियोजन"
 
 
 msgid "Mirror"
 msgstr "दर्पण"
 
 
-msgid "Keying"
-msgstr "कुंजीयन"
+msgid "Snap"
+msgstr "स्नैप"
 
 
 msgid "Math"
@@ -2613,6 +2606,10 @@ msgid "Rigid Body"
 msgstr "कठोर-पदार्थ"
 
 
+msgid "Import"
+msgstr "आयात करें"
+
+
 msgid "Apply"
 msgstr "लागू करें"
 
@@ -2625,12 +2622,24 @@ msgid "Quick Effects"
 msgstr "त्वरित प्रभाव"
 
 
+msgid "Show/Hide"
+msgstr "छुपाएँ / दिखाएँ"
+
+
 msgid "Make Single User"
 msgstr "एकल प्रयोक्ता बनाएँ"
 
 
 msgid "Hooks"
 msgstr "खूँटी"
+
+
+msgid "UV"
+msgstr "यूवी"
+
+
+msgid "Names"
+msgstr "नाम"
 
 
 msgid "Toggle Bone Options"
@@ -2641,12 +2650,16 @@ msgid "Enable Bone Options"
 msgstr "हड्डी विकल्प को सक्षम करें"
 
 
-msgid "Import"
-msgstr "आयात करें"
-
-
 msgid "Merge"
 msgstr "विलय करें"
+
+
+msgid "Bone Roll"
+msgstr "हड्डी पंजी"
+
+
+msgid "Keying"
+msgstr "कुंजीयन"
 
 
 msgid "Basic"
@@ -3022,10 +3035,6 @@ msgid "NLA Track is locked"
 msgstr "अरैखिक अनुप्राणन ट्रैक अवरोधित है"
 
 
-msgid "Height of the node"
-msgstr "ग्रन्थि की ऊंचाई"
-
-
 msgid "To"
 msgstr "करने के लिए"
 
@@ -3316,8 +3325,16 @@ msgid "Paste Driver"
 msgstr "चिपकाएँ यंत्र-संवादी"
 
 
+msgid "Axes"
+msgstr "अक्ष"
+
+
 msgid "Move"
 msgstr "विचलन"
+
+
+msgid "Search"
+msgstr "खोज"
 
 
 msgctxt "Operator"
@@ -3377,10 +3394,6 @@ msgstr "चिन्हक जोड़ें"
 msgctxt "Operator"
 msgid "Delete Marker"
 msgstr "चिन्हक मिटाएँ"
-
-
-msgid "Placement"
-msgstr "नियोजन"
 
 
 msgid "Whole Frame"
@@ -3600,10 +3613,6 @@ msgstr "समतल"
 
 msgid "Side"
 msgstr "किनारा"
-
-
-msgid "Both"
-msgstr "दोनों"
 
 
 msgid "Next Keyframe"
@@ -3941,10 +3950,6 @@ msgid "Bake All Physics"
 msgstr "सभी भौतिकी भर्जन"
 
 
-msgid "Bake all physics"
-msgstr "सभी भौतिकी भर्जन"
-
-
 msgctxt "Operator"
 msgid "Render"
 msgstr " प्रतिपादन"
@@ -4204,10 +4209,6 @@ msgstr "मान मूलभूत पर पूर्ववत करें"
 msgctxt "Operator"
 msgid "Align"
 msgstr "संरेखित करें"
-
-
-msgid "Axis Direction"
-msgstr "अक्ष दिशा"
 
 
 msgctxt "Operator"
@@ -4960,10 +4961,6 @@ msgid "Relationship Lines"
 msgstr "संबंध रेखाएँ"
 
 
-msgid "Search"
-msgstr "खोज"
-
-
 msgctxt "WindowManager"
 msgid "Object Mode"
 msgstr "वस्तु रूप"
@@ -5071,6 +5068,11 @@ msgstr "बाह्य shader स्क्रिप्ट .osl या .oso ए�
 
 
 msgctxt "Operator"
+msgid "Clear"
+msgstr "स्पष्ट"
+
+
+msgctxt "Operator"
 msgid "Assign"
 msgstr "निर्दिष्ट"
 
@@ -5169,10 +5171,6 @@ msgid "Shapes"
 msgstr "आकृतियाँ"
 
 
-msgid "Axes"
-msgstr "अक्ष"
-
-
 msgctxt "Operator"
 msgid "Add Image"
 msgstr "छवि जोड़ें"
@@ -5199,22 +5197,12 @@ msgstr "चित्रण:"
 
 
 msgctxt "Operator"
-msgid "Poly"
-msgstr "बहु"
-
-
-msgctxt "Operator"
 msgid "Selection to Cursor"
 msgstr "प्रसंकेतक के लिए चयन"
 
 
 msgid "Transform:"
 msgstr "संचनांतरण:"
-
-
-msgctxt "Operator"
-msgid "Clear"
-msgstr "स्पष्ट"
 
 
 msgid "Date"
@@ -5680,6 +5668,11 @@ msgstr "आधार"
 
 msgid "Key %d"
 msgstr "कुंजी %d"
+
+
+msgctxt "Key"
+msgid "Key"
+msgstr "कुंजी"
 
 
 msgid "No new files have been packed"
@@ -6445,11 +6438,6 @@ msgstr "लेखन के लिए संचिका को नहीं ख
 
 msgid "Flame"
 msgstr "लौ"
-
-
-msgctxt "Key"
-msgid "Key"
-msgstr "कुंजी"
 
 
 msgid "Soften"

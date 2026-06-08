@@ -121,7 +121,6 @@ ccl_device_noinline bool BVH_FUNCTION_FULL_NAME(BVH)(KernelGlobals kg,
 
           /* primitive intersection */
           for (; prim_addr < prim_addr2; prim_addr++) {
-            kernel_assert(kernel_data_fetch(prim_type, prim_addr) == type);
 
             const int prim_object = (object == OBJECT_NONE) ?
                                         kernel_data_fetch(prim_object, prim_addr) :
@@ -151,7 +150,7 @@ ccl_device_noinline bool BVH_FUNCTION_FULL_NAME(BVH)(KernelGlobals kg,
                                        prim_addr))
                 {
                   /* shadow ray early termination */
-                  if (visibility & PATH_RAY_SHADOW_OPAQUE) {
+                  if (visibility & PATH_RAY_VISIBILITY_SHADOW_OPAQUE) {
                     return true;
                   }
                 }
@@ -172,7 +171,7 @@ ccl_device_noinline bool BVH_FUNCTION_FULL_NAME(BVH)(KernelGlobals kg,
                                               prim_addr))
                 {
                   /* shadow ray early termination */
-                  if (visibility & PATH_RAY_SHADOW_OPAQUE)
+                  if (visibility & PATH_RAY_VISIBILITY_SHADOW_OPAQUE)
                     return true;
                 }
                 break;
@@ -197,7 +196,7 @@ ccl_device_noinline bool BVH_FUNCTION_FULL_NAME(BVH)(KernelGlobals kg,
                     kg, isect, P, dir, tmin, isect->t, prim_object, prim, ray->time, curve_type);
                 if (hit) {
                   /* shadow ray early termination */
-                  if (visibility & PATH_RAY_SHADOW_OPAQUE)
+                  if (visibility & PATH_RAY_VISIBILITY_SHADOW_OPAQUE)
                     return true;
                 }
                 break;
@@ -218,7 +217,7 @@ ccl_device_noinline bool BVH_FUNCTION_FULL_NAME(BVH)(KernelGlobals kg,
                     kg, isect, P, dir, tmin, isect->t, prim_object, prim, ray->time, point_type);
                 if (hit) {
                   /* shadow ray early termination */
-                  if (visibility & PATH_RAY_SHADOW_OPAQUE)
+                  if (visibility & PATH_RAY_VISIBILITY_SHADOW_OPAQUE)
                     return true;
                 }
                 break;

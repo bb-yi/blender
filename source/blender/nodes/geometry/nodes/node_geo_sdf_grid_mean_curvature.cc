@@ -16,9 +16,9 @@ static void node_declare(NodeDeclarationBuilder &b)
 {
   b.use_custom_socket_order();
   b.allow_any_socket_order();
-  b.add_input<decl::Float>("Grid").hide_value().structure_type(StructureType::Grid);
-  b.add_output<decl::Float>("Grid").structure_type(StructureType::Grid).align_with_previous();
-  b.add_input<decl::Int>("Iterations")
+  b.add_input<decl::Float>("Grid"_ustr).hide_value().structure_type(StructureType::Grid);
+  b.add_output<decl::Float>("Grid"_ustr).structure_type(StructureType::Grid).align_with_previous();
+  b.add_input<decl::Int>("Iterations"_ustr)
       .default_value(1)
       .min(0)
       .description("Number of iterations to apply the filter");
@@ -27,15 +27,15 @@ static void node_declare(NodeDeclarationBuilder &b)
 static void node_geo_exec(GeoNodeExecParams params)
 {
 #ifdef WITH_OPENVDB
-  auto grid = params.extract_input<bke::VolumeGrid<float>>("Grid");
+  auto grid = params.extract_input<bke::VolumeGrid<float>>("Grid"_ustr);
   if (!grid) {
     params.set_default_remaining_outputs();
     return;
   }
 
-  const int iterations = params.extract_input<int>("Iterations");
+  const int iterations = params.extract_input<int>("Iterations"_ustr);
   if (iterations <= 0) {
-    params.set_output("Grid", std::move(grid));
+    params.set_output("Grid"_ustr, std::move(grid));
     return;
   }
 
@@ -53,7 +53,7 @@ static void node_geo_exec(GeoNodeExecParams params)
     return;
   }
 
-  params.set_output("Grid", std::move(grid));
+  params.set_output("Grid"_ustr, std::move(grid));
 #else
   node_geo_exec_with_missing_openvdb(params);
 #endif
@@ -62,7 +62,7 @@ static void node_geo_exec(GeoNodeExecParams params)
 static void node_register()
 {
   static bke::bNodeType ntype;
-  geo_node_type_base(&ntype, "GeometryNodeSDFGridMeanCurvature");
+  geo_node_type_base(&ntype, "GeometryNodeSDFGridMeanCurvature"_ustr);
   ntype.ui_name = "SDF Grid Mean Curvature";
   ntype.ui_description =
       "Apply mean curvature flow smoothing to a signed distance field. Evolves the surface based "
@@ -70,6 +70,7 @@ static void node_register()
   ntype.nclass = NODE_CLASS_GEOMETRY;
   ntype.declare = node_declare;
   ntype.geometry_node_execute = node_geo_exec;
+  ntype.default_width = bke::NodeWidth::_180;
   bke::node_register_type(ntype);
 }
 NOD_REGISTER_NODE(node_register)

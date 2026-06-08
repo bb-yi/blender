@@ -392,10 +392,12 @@ static void update_sockets_by_identifier(const bNodeTree &ntree)
       node->runtime->inputs_by_identifier.clear();
       node->runtime->outputs_by_identifier.clear();
       for (bNodeSocket *socket : node->runtime->inputs) {
-        node->runtime->inputs_by_identifier.add_new(socket->identifier, socket);
+        BLI_assert(socket->identifier == socket->identifier_ustr());
+        node->runtime->inputs_by_identifier.add_new(socket->identifier_ustr(), socket);
       }
       for (bNodeSocket *socket : node->runtime->outputs) {
-        node->runtime->outputs_by_identifier.add_new(socket->identifier, socket);
+        BLI_assert(socket->identifier == socket->identifier_ustr());
+        node->runtime->outputs_by_identifier.add_new(socket->identifier_ustr(), socket);
       }
     }
   });
@@ -419,7 +421,7 @@ static Vector<const bNode *> get_implicit_origin_nodes(const bNodeTree &ntree, b
     /* Can't use #zone_type.get_corresponding_input because that expects the topology cache to be
      * build already, but we are still building it here. */
     for (const bNode *input_node :
-         ntree.runtime->nodes_by_type.lookup(bke::node_type_find(zone_type.input_idname.c_str())))
+         ntree.runtime->nodes_by_type.lookup(bke::node_type_find(zone_type.input_idname)))
     {
       if (zone_type.get_corresponding_output_id(*input_node) == node.identifier) {
         origin_nodes.append(input_node);
@@ -621,7 +623,7 @@ static void update_direct_frames_childrens(const bNodeTree &ntree)
 static void update_group_output_node(const bNodeTree &ntree)
 {
   bNodeTreeRuntime &tree_runtime = *ntree.runtime;
-  const bke::bNodeType *node_type = bke::node_type_find("NodeGroupOutput");
+  const bke::bNodeType *node_type = bke::node_type_find("NodeGroupOutput"_ustr);
   const Span<bNode *> group_output_nodes = tree_runtime.nodes_by_type.lookup(node_type);
   if (group_output_nodes.is_empty()) {
     tree_runtime.group_output_node = nullptr;

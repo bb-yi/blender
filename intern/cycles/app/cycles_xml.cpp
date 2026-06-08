@@ -2,9 +2,8 @@
  *
  * SPDX-License-Identifier: Apache-2.0 */
 
-#include <cstdio>
-
 #include <algorithm>
+#include <cstdio>
 
 #include "graph/node_xml.h"
 
@@ -123,7 +122,9 @@ static bool xml_read_float3(float3 *value, const xml_node node, const char *name
   return false;
 }
 
-static bool xml_read_float3_array(vector<float3> &value, const xml_node node, const char *name)
+static bool xml_read_float3_array(vector<packed_float3> &value,
+                                  const xml_node node,
+                                  const char *name)
 {
   vector<float> array;
 
@@ -228,7 +229,7 @@ static void xml_read_shader_graph(XMLReadState &state, Shader *shader, const xml
         ShaderOutput *output = nullptr;
         ShaderInput *input = nullptr;
 
-        if (graph_reader.node_map.find(from_node_name) != graph_reader.node_map.end()) {
+        if (graph_reader.node_map.contains(from_node_name)) {
           ShaderNode *fromnode = (ShaderNode *)graph_reader.node_map[from_node_name];
 
           for (ShaderOutput *out : fromnode->outputs) {
@@ -246,7 +247,7 @@ static void xml_read_shader_graph(XMLReadState &state, Shader *shader, const xml
           LOG_ERROR << "Unknown shader node name \"" << from_node_name << "\"";
         }
 
-        if (graph_reader.node_map.find(to_node_name) != graph_reader.node_map.end()) {
+        if (graph_reader.node_map.contains(to_node_name)) {
           ShaderNode *tonode = (ShaderNode *)graph_reader.node_map[to_node_name];
 
           for (ShaderInput *in : tonode->inputs) {
@@ -405,8 +406,8 @@ static void xml_read_mesh(const XMLReadState &state, const xml_node node)
   const bool smooth = state.smooth;
 
   /* read vertices and polygons */
-  vector<float3> P;
-  vector<float3> VN; /* Vertex normals */
+  vector<packed_float3> P;
+  vector<packed_float3> VN; /* Vertex normals */
   vector<float> UV;
   vector<float> T;  /* UV tangents */
   vector<float> TS; /* UV tangent signs */
@@ -424,21 +425,20 @@ static void xml_read_mesh(const XMLReadState &state, const xml_node node)
     mesh->set_subdivision_type(Mesh::SUBDIVISION_LINEAR);
   }
 
-  array<float3> P_array;
-  P_array = P;
-
   if (mesh->get_subdivision_type() == Mesh::SUBDIVISION_NONE) {
     /* create vertices */
-
-    mesh->set_verts(P_array);
 
     size_t num_triangles = 0;
     for (size_t i = 0; i < nverts.size(); i++) {
       num_triangles += nverts[i] - 2;
     }
-    mesh->reserve_mesh(mesh->get_verts().size(), num_triangles);
+    mesh->resize_mesh(P.size(), num_triangles);
+    std::copy_n(P.data(), P.size(), mesh->get_position_for_write());
+
+    int *triangles = mesh->get_triangles().data();
 
     /* create triangles */
+    int tri_index = 0;
     int index_offset = 0;
 
     for (size_t i = 0; i < nverts.size(); i++) {
@@ -451,16 +451,25 @@ static void xml_read_mesh(const XMLReadState &state, const xml_node node)
         assert(v1 < (int)P.size());
         assert(v2 < (int)P.size());
 
-        mesh->add_triangle(v0, v1, v2, shader, smooth);
+        triangles[tri_index * 3 + 0] = v0;
+        triangles[tri_index * 3 + 1] = v1;
+        triangles[tri_index * 3 + 2] = v2;
+        tri_index++;
       }
 
       index_offset += nverts[i];
     }
+    std::ranges::fill(mesh->get_smooth(), smooth);
+    std::ranges::fill(mesh->get_shader(), shader);
+
+    mesh->tag_triangles_modified();
+    mesh->tag_shader_modified();
+    mesh->tag_smooth_modified();
 
     /* Vertex normals */
     if (xml_read_float3_array(VN, node, Attribute::standard_name(ATTR_STD_VERTEX_NORMAL))) {
       Attribute *attr = mesh->attributes.add(ATTR_STD_VERTEX_NORMAL);
-      packed_normal *fdata = attr->data_normal();
+      packed_normal *fdata = attr->data_for_write<packed_normal>();
 
       /* Loop over the normals */
       for (auto n : VN) {
@@ -474,7 +483,7 @@ static void xml_read_mesh(const XMLReadState &state, const xml_node node)
         xml_read_float_array(UV, node, Attribute::standard_name(ATTR_STD_UV)))
     {
       Attribute *attr = mesh->attributes.add(ATTR_STD_UV);
-      float2 *fdata = attr->data_float2();
+      float2 *fdata = attr->data_for_write<float2>();
 
       /* Loop over the triangles */
       index_offset = 0;
@@ -501,7 +510,7 @@ static void xml_read_mesh(const XMLReadState &state, const xml_node node)
     /* Tangents */
     if (xml_read_float_array(T, node, Attribute::standard_name(ATTR_STD_UV_TANGENT))) {
       Attribute *attr = mesh->attributes.add(ATTR_STD_UV_TANGENT);
-      float3 *fdata = attr->data_float3();
+      packed_float3 *fdata = attr->data_for_write<packed_float3>();
 
       /* Loop over the triangles */
       index_offset = 0;
@@ -527,7 +536,7 @@ static void xml_read_mesh(const XMLReadState &state, const xml_node node)
     /* Tangent signs */
     if (xml_read_float_array(TS, node, Attribute::standard_name(ATTR_STD_UV_TANGENT_SIGN))) {
       Attribute *attr = mesh->attributes.add(ATTR_STD_UV_TANGENT_SIGN);
-      float *fdata = attr->data_float();
+      float *fdata = attr->data_for_write<float>();
 
       /* Loop over the triangles */
       index_offset = 0;
@@ -552,30 +561,57 @@ static void xml_read_mesh(const XMLReadState &state, const xml_node node)
   }
   else {
     /* create vertices */
-    mesh->set_verts(P_array);
+    mesh->resize_mesh(P.size(), 0);
 
     size_t num_corners = 0;
     for (size_t i = 0; i < nverts.size(); i++) {
       num_corners += nverts[i];
     }
-    mesh->reserve_subd_faces(nverts.size(), num_corners);
+    mesh->resize_subd_faces(nverts.size(), num_corners);
+
+    Attribute *subd_attr_P = mesh->subd_attributes.add(ATTR_STD_POSITION);
+    subd_attr_P->resize(P.size());
+    std::copy_n(P.data(), P.size(), subd_attr_P->data_for_write<packed_float3>());
+
+    int *subd_start_corner = mesh->get_subd_start_corner().data();
+    int *subd_num_corners = mesh->get_subd_num_corners().data();
+    int *subd_ptex_offset = mesh->get_subd_ptex_offset().data();
+    int *subd_face_corners = mesh->get_subd_face_corners().data();
+
+    std::ranges::fill(mesh->get_subd_shader(), shader);
+    std::ranges::fill(mesh->get_subd_smooth(), smooth);
+
+    std::ranges::copy(verts, subd_face_corners);
 
     /* create subd_faces */
-    int index_offset = 0;
+    int corner_index = 0;
+    int ptex_offset = 0;
 
     for (size_t i = 0; i < nverts.size(); i++) {
-      mesh->add_subd_face(&verts[index_offset], nverts[i], shader, smooth);
-      index_offset += nverts[i];
+      subd_start_corner[i] = corner_index;
+      subd_num_corners[i] = nverts[i];
+      corner_index += nverts[i];
+
+      subd_ptex_offset[i] = ptex_offset;
+      const int num_ptex = (nverts[i] == 4) ? 1 : nverts[i];
+      ptex_offset += num_ptex;
     }
+
+    mesh->tag_subd_face_corners_modified();
+    mesh->tag_subd_start_corner_modified();
+    mesh->tag_subd_num_corners_modified();
+    mesh->tag_subd_shader_modified();
+    mesh->tag_subd_smooth_modified();
+    mesh->tag_subd_ptex_offset_modified();
 
     /* UV map */
     if (xml_read_float_array(UV, node, "UV") ||
         xml_read_float_array(UV, node, Attribute::standard_name(ATTR_STD_UV)))
     {
       Attribute *attr = mesh->subd_attributes.add(ATTR_STD_UV);
-      float3 *fdata = attr->data_float3();
+      packed_float3 *fdata = attr->data_for_write<packed_float3>();
 
-      index_offset = 0;
+      int index_offset = 0;
       for (size_t i = 0; i < nverts.size(); i++) {
         for (int j = 0; j < nverts[i]; j++) {
           *(fdata++) = make_float3(UV[index_offset++]);
@@ -596,7 +632,7 @@ static void xml_read_mesh(const XMLReadState &state, const xml_node node)
    * coordinates as generated coordinates if requested */
   if (mesh->need_attribute(state.scene, ATTR_STD_GENERATED)) {
     Attribute *attr = mesh->attributes.add(ATTR_STD_GENERATED);
-    std::copy_n(mesh->get_verts().data(), mesh->get_verts().size(), attr->data_float3());
+    std::copy_n(mesh->get_position(), mesh->num_verts(), attr->data_for_write<packed_float3>());
   }
 }
 
@@ -607,7 +643,28 @@ static void xml_read_light(XMLReadState &state, const xml_node node)
   Scene *scene = state.scene;
 
   /* Create light. */
-  Light *light = scene->create_node<Light>();
+  string light_type;
+  if (!xml_read_string(&light_type, node, "light_type")) {
+    return;
+  }
+
+  Light *light;
+  if (light_type == "point") {
+    light = scene->create_node<PointLight>();
+  }
+  else if (light_type == "sun") {
+    light = scene->create_node<SunLight>();
+  }
+  else if (light_type == "background") {
+    light = scene->create_node<BackgroundLight>();
+  }
+  else if (light_type == "area") {
+    light = scene->create_node<AreaLight>();
+  }
+  else {
+    assert(light_type == "spot");
+    light = scene->create_node<SpotLight>();
+  }
 
   array<Node *> used_shaders;
   used_shaders.push_back_slow(state.shader);
@@ -616,7 +673,7 @@ static void xml_read_light(XMLReadState &state, const xml_node node)
   /* Create object. */
   Object *object = scene->create_node<Object>();
   object->set_tfm(state.tfm);
-  object->set_visibility(PATH_RAY_ALL_VISIBILITY & ~PATH_RAY_CAMERA);
+  object->set_visibility(PATH_RAY_VISIBILITY_ALL & ~PATH_RAY_VISIBILITY_CAMERA);
   object->set_geometry(light);
 
   xml_read_node(state, light, node);

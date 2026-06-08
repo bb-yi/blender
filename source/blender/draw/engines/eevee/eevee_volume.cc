@@ -88,7 +88,9 @@ void VolumeModule::world_sync(const WorldHandle &world_handle)
 
 void VolumeModule::object_sync(const ObjectHandle &ob_handle)
 {
-  current_objects_.add(ob_handle.object_key);
+  for (int i : IndexRange(ob_handle.instances_count())) {
+    current_objects_.add(ObjectKey(ob_handle, i));
+  }
 
   if (!use_reprojection_) {
     return;
@@ -285,6 +287,7 @@ void VolumeModule::end_sync()
   if (use_lights_) {
     inst_.lights.sync_volume_light_shaders(data_.tex_size);
   }
+  scatter_ps_.bind_resources(inst_.hiz_buffer.front);
   scatter_ps_.bind_resources(inst_.lights);
   if (use_lights_) {
     inst_.lights.bind_volume_light_shader_resources(scatter_ps_);
@@ -335,12 +338,8 @@ void VolumeModule::end_sync()
   resolve_ps_.draw_procedural(GPU_PRIM_TRIS, 1, 3);
 }
 
-void VolumeModule::draw_prepass(View &main_view)
+void VolumeModule::set_view(View &main_view)
 {
-  if (!enabled_) {
-    return;
-  }
-
   /* Number of frame to consider for blending with exponential (infinite) average. */
   int exponential_frame_count = 16;
   if (inst_.is_image_render) {
@@ -434,13 +433,19 @@ void VolumeModule::draw_prepass(View &main_view)
   /* Compute re-projection matrix. */
   data_.curr_view_to_past_view = history_viewmat_ * main_view.viewinv();
 
-  inst_.uniform_data.push_update();
+  volume_view.sync(main_view.viewmat(), winmat_infinite);
+}
+
+void VolumeModule::draw_prepass(View &main_view)
+{
+  if (!enabled_) {
+    return;
+  }
 
   GPU_debug_group_begin("Volumes");
   occupancy_fb_.bind();
   inst_.pipelines.world_volume.render(main_view);
 
-  volume_view.sync(main_view.viewmat(), winmat_infinite);
   /* TODO(fclem): The infinite projection matrix makes the culling test unreliable (see #115595).
    * We need custom culling for these but that's not implemented yet. */
   volume_view.visibility_test(false);
@@ -466,7 +471,7 @@ void VolumeModule::draw_compute(View &main_view, int2 extent)
       inst_.hiz_buffer.update();
       inst_.volume_probes.set_view(main_view);
       inst_.sphere_probes.set_view(main_view);
-      inst_.shadows.set_view(main_view, extent, TelemetryShadowContext::MainView);
+      inst_.shadows.render(main_view, extent);
     }
     inst_.lights.eval_uniform_light_shaders(main_view);
     inst_.lights.eval_volume_light_shaders(main_view, data_.tex_size);

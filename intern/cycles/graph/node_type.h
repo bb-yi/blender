@@ -4,12 +4,15 @@
 
 #pragma once
 
+#include <bitset>
+
 #include "graph/node_enum.h"
 
 #include "util/array.h"  // IWYU pragma: keep
 #include "util/map.h"
 #include "util/param.h"
 #include "util/thread.h"
+#include "util/types.h"
 #include "util/unique_ptr.h"
 #include "util/vector.h"
 
@@ -18,7 +21,7 @@ CCL_NAMESPACE_BEGIN
 struct Node;
 struct NodeType;
 
-using SocketModifiedFlags = uint64_t;
+using SocketModifiedFlags = std::bitset<128>;
 
 /* Socket Type */
 
@@ -79,14 +82,14 @@ struct SocketType {
   };
 
   ustring name;
-  Type type;
-  int struct_offset;
-  const void *default_value;
-  const NodeEnum *enum_values;
-  const NodeType *node_type;
-  int flags;
+  Type type = UNDEFINED;
+  int struct_offset = -1;
+  const void *default_value = nullptr;
+  const NodeEnum *enum_values = nullptr;
+  const NodeType *node_type = nullptr;
+  int flags = 0;
   ustring ui_name;
-  SocketModifiedFlags modified_flag_bit;
+  uint8_t modified_flag_bit = 0;
 
   size_t storage_size() const;
   size_t packed_size() const;
@@ -134,10 +137,9 @@ struct NodeType {
                        Type type = NONE,
                        const NodeType *base = nullptr);
   static const NodeType *find(ustring name);
+  static vector<ustring> type_names();
 
- private:
-  static unordered_map<ustring, NodeType> &types();
-  static thread_mutex types_mutex_;
+  static bool register_on_init(const NodeType *(*init_func)());
 };
 
 /* Node Definition Macros
@@ -155,6 +157,8 @@ struct NodeType {
 #define NODE_DEFINE(structname) \
   const NodeType *structname::node_type_ = nullptr; \
   thread_mutex structname::node_type_mutex_; \
+  static bool structname##_register_on_init = NodeType::register_on_init( \
+      structname::get_node_type); \
   unique_ptr<Node> structname::create(const NodeType *) \
   { \
     return make_unique<structname>(); \
@@ -264,17 +268,37 @@ struct NodeType {
   SOCKET_DEFINE( \
       name, ui_name, default_value, array<float>, SocketType::FLOAT_ARRAY, 0, ##__VA_ARGS__)
 #define SOCKET_COLOR_ARRAY(name, ui_name, default_value, ...) \
-  SOCKET_DEFINE( \
-      name, ui_name, default_value, array<float3>, SocketType::COLOR_ARRAY, 0, ##__VA_ARGS__)
+  SOCKET_DEFINE(name, \
+                ui_name, \
+                default_value, \
+                array<packed_float3>, \
+                SocketType::COLOR_ARRAY, \
+                0, \
+                ##__VA_ARGS__)
 #define SOCKET_VECTOR_ARRAY(name, ui_name, default_value, ...) \
-  SOCKET_DEFINE( \
-      name, ui_name, default_value, array<float3>, SocketType::VECTOR_ARRAY, 0, ##__VA_ARGS__)
+  SOCKET_DEFINE(name, \
+                ui_name, \
+                default_value, \
+                array<packed_float3>, \
+                SocketType::VECTOR_ARRAY, \
+                0, \
+                ##__VA_ARGS__)
 #define SOCKET_POINT_ARRAY(name, ui_name, default_value, ...) \
-  SOCKET_DEFINE( \
-      name, ui_name, default_value, array<float3>, SocketType::POINT_ARRAY, 0, ##__VA_ARGS__)
+  SOCKET_DEFINE(name, \
+                ui_name, \
+                default_value, \
+                array<packed_float3>, \
+                SocketType::POINT_ARRAY, \
+                0, \
+                ##__VA_ARGS__)
 #define SOCKET_NORMAL_ARRAY(name, ui_name, default_value, ...) \
-  SOCKET_DEFINE( \
-      name, ui_name, default_value, array<float3>, SocketType::NORMAL_ARRAY, 0, ##__VA_ARGS__)
+  SOCKET_DEFINE(name, \
+                ui_name, \
+                default_value, \
+                array<packed_float3>, \
+                SocketType::NORMAL_ARRAY, \
+                0, \
+                ##__VA_ARGS__)
 #define SOCKET_POINT2_ARRAY(name, ui_name, default_value, ...) \
   SOCKET_DEFINE( \
       name, ui_name, default_value, array<float2>, SocketType::POINT2_ARRAY, 0, ##__VA_ARGS__)

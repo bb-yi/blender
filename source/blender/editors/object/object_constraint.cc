@@ -171,7 +171,7 @@ static void set_constraint_nth_target(bConstraint *con,
   int targets_num, i;
 
   if (BKE_constraint_targets_get(con, &targets)) {
-    targets_num = BLI_listbase_count(&targets);
+    targets_num = targets.count();
 
     if (index < 0) {
       if (abs(index) < targets_num) {
@@ -300,20 +300,20 @@ static void test_constraint(
     bTrackToConstraint *data = static_cast<bTrackToConstraint *>(con->data);
 
     /* don't allow track/up axes to be the same */
-    if (data->reserved2 == data->reserved1) {
+    if (int(data->reserved2) == int(data->reserved1)) {
       con->flag |= CONSTRAINT_DISABLE;
     }
-    if (data->reserved2 + 3 == data->reserved1) {
+    if (int(data->reserved2) + 3 == int(data->reserved1)) {
       con->flag |= CONSTRAINT_DISABLE;
     }
   }
   else if (con->type == CONSTRAINT_TYPE_LOCKTRACK) {
     bLockTrackConstraint *data = static_cast<bLockTrackConstraint *>(con->data);
 
-    if (data->lockflag == data->trackflag) {
+    if (int(data->lockflag) == int(data->trackflag)) {
       con->flag |= CONSTRAINT_DISABLE;
     }
-    if (data->lockflag + 3 == data->trackflag) {
+    if (int(data->lockflag) + 3 == int(data->trackflag)) {
       con->flag |= CONSTRAINT_DISABLE;
     }
   }
@@ -334,7 +334,7 @@ static void test_constraint(
   else if (con->type == CONSTRAINT_TYPE_FOLLOWTRACK) {
     bFollowTrackConstraint *data = static_cast<bFollowTrackConstraint *>(con->data);
 
-    if ((data->flag & CAMERASOLVER_ACTIVECLIP) == 0) {
+    if ((data->flag & FOLLOWTRACK_ACTIVECLIP) == 0) {
       if (data->clip != nullptr && data->track[0]) {
         MovieTracking *tracking = &data->clip->tracking;
         MovieTrackingObject *tracking_object;
@@ -370,7 +370,7 @@ static void test_constraint(
   else if (con->type == CONSTRAINT_TYPE_OBJECTSOLVER) {
     bObjectSolverConstraint *data = static_cast<bObjectSolverConstraint *>(con->data);
 
-    if ((data->flag & CAMERASOLVER_ACTIVECLIP) == 0 && (data->clip == nullptr)) {
+    if ((data->flag & OBJECTSOLVER_ACTIVECLIP) == 0 && (data->clip == nullptr)) {
       con->flag |= CONSTRAINT_DISABLE;
     }
   }
@@ -854,7 +854,7 @@ static void force_evaluation_if_constraint_disabled(bContext *C, Object *ob, bCo
   Depsgraph *depsgraph = CTX_data_ensure_evaluated_depsgraph(C);
   Scene *scene = DEG_get_evaluated_scene(depsgraph);
 
-  short flag_backup = con->flag;
+  eBConstraint_Flags flag_backup = con->flag;
   con->flag &= ~(CONSTRAINT_DISABLE | CONSTRAINT_OFF);
   BKE_object_eval_constraints(depsgraph, scene, ob);
   con->flag = flag_backup;
@@ -1299,7 +1299,7 @@ void constraint_active_set(Object *ob, bConstraint *con)
 void constraint_update(Main *bmain, Object *ob)
 {
   if (ob->pose) {
-    BKE_pose_update_constraint_flags(ob->pose);
+    BKE_pose_update_constraint_flags(*ob);
   }
 
   object_test_constraints(bmain, ob);
@@ -2007,7 +2007,7 @@ static wmOperatorStatus pose_constraints_clear_exec(bContext *C, wmOperator * /*
   /* free constraints for all selected bones */
   CTX_DATA_BEGIN_WITH_ID (C, bPoseChannel *, pchan, selected_pose_bones, Object *, ob) {
     BKE_constraints_free(&pchan->constraints);
-    pchan->constflag = 0;
+    pchan->constflag = ePchan_ConstFlag{};
 
     if (prev_ob != ob) {
       DEG_id_tag_update(&ob->id, ID_RECALC_GEOMETRY);
@@ -2309,7 +2309,7 @@ static bool get_new_constraint_target(
     Main *bmain = CTX_data_main(C);
     Scene *scene = CTX_data_scene(C);
     ViewLayer *view_layer = CTX_data_view_layer(C);
-    BKE_view_layer_synced_ensure(scene, view_layer);
+    BKE_view_layer_synced_ensure(*bmain, scene, view_layer);
     Base *base = BKE_view_layer_active_base_get(view_layer);
     Object *obt;
 
@@ -2349,7 +2349,7 @@ static wmOperatorStatus constraint_add_exec(bContext *C,
                                             wmOperator *op,
                                             Object *ob,
                                             ListBaseT<bConstraint> *list,
-                                            int type,
+                                            eBConstraint_Types type,
                                             const bool setTarget)
 {
   Main *bmain = CTX_data_main(C);
@@ -2419,7 +2419,7 @@ static wmOperatorStatus constraint_add_exec(bContext *C,
   object_test_constraints(bmain, ob);
 
   if (pchan) {
-    BKE_pose_update_constraint_flags(ob->pose);
+    BKE_pose_update_constraint_flags(*ob);
   }
 
   /* force depsgraph to get recalculated since new relationships added */
@@ -2445,7 +2445,7 @@ static wmOperatorStatus constraint_add_exec(bContext *C,
 static wmOperatorStatus object_constraint_add_exec(bContext *C, wmOperator *op)
 {
   Object *ob = context_active_object(C);
-  int type = RNA_enum_get(op->ptr, "type");
+  eBConstraint_Types type = eBConstraint_Types(RNA_enum_get(op->ptr, "type"));
   short with_targets = 0;
 
   if (!ob) {
@@ -2467,7 +2467,7 @@ static wmOperatorStatus object_constraint_add_exec(bContext *C, wmOperator *op)
 static wmOperatorStatus pose_constraint_add_exec(bContext *C, wmOperator *op)
 {
   Object *ob = BKE_object_pose_armature_get(context_active_object(C));
-  int type = RNA_enum_get(op->ptr, "type");
+  eBConstraint_Types type = eBConstraint_Types(RNA_enum_get(op->ptr, "type"));
   short with_targets = 0;
 
   if (!ob) {

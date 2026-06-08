@@ -18,21 +18,29 @@ static void node_declare(NodeDeclarationBuilder &b)
 {
   b.use_custom_socket_order();
   b.allow_any_socket_order();
-  b.add_input<decl::Color>("Image")
+  b.add_input<decl::Color>("Image"_ustr)
       .default_value({0.8f, 0.8f, 0.8f, 1.0f})
       .hide_value()
       .structure_type(StructureType::Dynamic);
-  b.add_output<decl::Color>("Image").structure_type(StructureType::Dynamic).align_with_previous();
+  b.add_output<decl::Color>("Image"_ustr)
+      .structure_type(StructureType::Dynamic)
+      .align_with_previous();
 
-  b.add_input<decl::Color>("Bokeh")
+  b.add_input<decl::Color>("Bokeh"_ustr)
       .default_value({1.0f, 1.0f, 1.0f, 1.0f})
       .compositor_realization_mode(CompositorInputRealizationMode::Transforms)
       .structure_type(StructureType::Dynamic);
-  b.add_input<decl::Float>("Size").default_value(0.0f).min(0.0f).structure_type(
-      StructureType::Dynamic);
-  b.add_input<decl::Float>("Mask").default_value(1.0f).min(0.0f).max(1.0f).structure_type(
-      StructureType::Dynamic);
-  b.add_input<decl::Bool>("Extend Bounds").default_value(false);
+  b.add_input<decl::Float>("Size"_ustr)
+      .default_value(0.0f)
+      .subtype(PROP_PIXEL)
+      .min(0.0f)
+      .structure_type(StructureType::Dynamic);
+  b.add_input<decl::Float>("Mask"_ustr)
+      .default_value(1.0f)
+      .min(0.0f)
+      .max(1.0f)
+      .structure_type(StructureType::Dynamic);
+  b.add_input<decl::Bool>("Extend Bounds"_ustr).default_value(false);
 }
 
 using namespace blender::compositor;
@@ -373,7 +381,7 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, "CompositorNodeBokehBlur", CMP_NODE_BOKEHBLUR);
+  cmp_node_type_base(&ntype, "CompositorNodeBokehBlur"_ustr, CMP_NODE_BOKEHBLUR);
   ntype.ui_name = "Bokeh Blur";
   ntype.ui_description =
       "Generate a bokeh type blur similar to Defocus. Unlike defocus an in-focus region is "
@@ -382,7 +390,7 @@ static void node_register()
   ntype.nclass = NODE_CLASS_OP_FILTER;
   ntype.declare = node_declare;
   ntype.get_compositor_operation = get_compositor_operation;
-  bke::node_type_size(ntype, 160, 140, NODE_DEFAULT_MAX_WIDTH);
+  ntype.default_width = bke::NodeWidth::_160;
 
   bke::node_register_type(ntype);
 }

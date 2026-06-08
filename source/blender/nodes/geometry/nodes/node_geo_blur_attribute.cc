@@ -38,19 +38,25 @@ static void node_declare(NodeDeclarationBuilder &b)
 
   if (node != nullptr) {
     const eCustomDataType data_type = eCustomDataType(node->custom1);
-    b.add_input(data_type, "Value").supports_field().hide_value().is_default_link_socket();
-    b.add_output(data_type, "Value").field_source_reference_all().align_with_previous();
+    b.add_input(data_type, "Value"_ustr)
+        .structure_type(StructureType::Field)
+        .hide_value()
+        .is_default_link_socket();
+    b.add_output(data_type, "Value"_ustr)
+        .structure_type(StructureType::Field)
+        .propagate_references()
+        .align_with_previous();
   }
-  b.add_input<decl::Int>("Iterations")
+  b.add_input<decl::Int>("Iterations"_ustr)
       .default_value(1)
       .min(0)
       .description("How many times to blur the values for all elements");
-  b.add_input<decl::Float>("Weight")
+  b.add_input<decl::Float>("Weight"_ustr)
       .default_value(1.0f)
       .subtype(PROP_FACTOR)
       .min(0.0f)
       .max(1.0f)
-      .supports_field()
+      .structure_type(StructureType::Field)
       .description("Relative mix weight of neighboring elements");
 }
 
@@ -73,7 +79,7 @@ static void node_gather_link_searches(GatherLinkSearchOpParams &params)
   search_link_ops_for_declarations(params, declaration.inputs);
 
   const std::optional<eCustomDataType> new_node_type = bke::socket_type_to_custom_data_type(
-      eNodeSocketDatatype(params.other_socket().type));
+      params.other_socket().type);
   if (!new_node_type.has_value()) {
     return;
   }
@@ -95,7 +101,7 @@ static void node_gather_link_searches(GatherLinkSearchOpParams &params)
   params.add_item(IFACE_("Value"), [node_type, fixed_data_type](LinkSearchOpParams &params) {
     bNode &node = params.add_node(node_type);
     node.custom1 = fixed_data_type;
-    params.update_and_connect_available_socket(node, "Value");
+    params.update_and_connect_available_socket(node, "Value"_ustr);
   });
 }
 
@@ -421,26 +427,19 @@ class BlurAttributeFieldInput final : public bke::GeometryFieldInput {
     return GVArray::from_garray(std::move(buffer_b));
   }
 
-  void for_each_field_input_recursive(FunctionRef<void(const FieldInput &)> fn) const override
+  void foreach_recursive_field(FunctionRef<void(const GField &)> fn) const override
   {
-    weight_field_.node().for_each_field_input_recursive(fn);
-    value_field_.node().for_each_field_input_recursive(fn);
+    fn(weight_field_);
+    fn(value_field_);
   }
 
-  uint64_t hash() const override
+  void hash_unique(UniqueHashBytes &hash, fn::FieldHashDeep &deep_hash_cache) const override
   {
-    return get_default_hash(iterations_, weight_field_, value_field_);
-  }
-
-  bool is_equal_to(const fn::FieldNode &other) const override
-  {
-    if (const BlurAttributeFieldInput *other_blur = dynamic_cast<const BlurAttributeFieldInput *>(
-            &other))
-    {
-      return weight_field_ == other_blur->weight_field_ &&
-             value_field_ == other_blur->value_field_ && iterations_ == other_blur->iterations_;
-    }
-    return false;
+    static constexpr int8_t id = 0;
+    hash.add(&id);
+    hash.add(deep_hash_cache.ensure(weight_field_));
+    hash.add(deep_hash_cache.ensure(value_field_));
+    hash.add(iterations_);
   }
 
   std::optional<AttrDomain> preferred_domain(const GeometryComponent &component) const override
@@ -455,13 +454,13 @@ class BlurAttributeFieldInput final : public bke::GeometryFieldInput {
 
 static void node_geo_exec(GeoNodeExecParams params)
 {
-  const int iterations = params.extract_input<int>("Iterations");
-  Field<float> weight_field = params.extract_input<Field<float>>("Weight");
+  const int iterations = params.extract_input<int>("Iterations"_ustr);
+  Field<float> weight_field = params.extract_input<Field<float>>("Weight"_ustr);
 
-  GField value_field = params.extract_input<GField>("Value");
-  GField output_field{std::make_shared<BlurAttributeFieldInput>(
-      std::move(weight_field), std::move(value_field), iterations)};
-  params.set_output<GField>("Value", std::move(output_field));
+  GField value_field = params.extract_input<GField>("Value"_ustr);
+  params.set_output<GField>("Value"_ustr,
+                            GField::from_input<BlurAttributeFieldInput>(
+                                std::move(weight_field), std::move(value_field), iterations));
 }
 
 static void node_rna(StructRNA *srna)
@@ -485,7 +484,7 @@ static void node_rna(StructRNA *srna)
 static void node_register()
 {
   static bke::bNodeType ntype;
-  geo_node_type_base(&ntype, "GeometryNodeBlurAttribute", GEO_NODE_BLUR_ATTRIBUTE);
+  geo_node_type_base(&ntype, "GeometryNodeBlurAttribute"_ustr, GEO_NODE_BLUR_ATTRIBUTE);
   ntype.ui_name = "Blur Attribute";
   ntype.ui_description = "Mix attribute values of neighboring elements";
   ntype.enum_name_legacy = "BLUR_ATTRIBUTE";

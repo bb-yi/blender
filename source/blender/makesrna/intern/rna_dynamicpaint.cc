@@ -200,7 +200,7 @@ static void rna_Surface_active_point_range(
   DynamicPaintCanvasSettings *canvas = static_cast<DynamicPaintCanvasSettings *>(ptr->data);
 
   *min = 0;
-  *max = BLI_listbase_count(&canvas->surfaces) - 1;
+  *max = canvas->surfaces.count() - 1;
 }
 
 /* uvlayer */
@@ -359,9 +359,7 @@ static void rna_def_canvas_surface(BlenderRNA *brna)
   /* Displace-map file format. */
   static const EnumPropertyItem prop_dynamicpaint_image_fileformat[] = {
       {MOD_DPAINT_IMGFORMAT_PNG, "PNG", 0, "PNG", ""},
-#  ifdef WITH_IMAGE_OPENEXR
       {MOD_DPAINT_IMGFORMAT_OPENEXR, "OPENEXR", 0, "OpenEXR", ""},
-#  endif
       {0, nullptr, 0, nullptr, nullptr},
   };
 

@@ -4,12 +4,19 @@
  * SPDX-License-Identifier: Apache-2.0 */
 
 #include "hydra/mesh.h"
-#include "hydra/attribute.h"
 #include "hydra/geometry.inl"
+#include "hydra/util.h"
 #include "scene/mesh.h"
 
 #include <pxr/base/gf/vec2f.h>
-#include <pxr/imaging/hd/extComputationUtils.h>
+#include <pxr/imaging/hd/geomSubsetSchema.h>
+#include <pxr/imaging/hd/legacyDisplayStyleSchema.h>
+#include <pxr/imaging/hd/materialBindingSchema.h>
+#include <pxr/imaging/hd/materialBindingsSchema.h>
+#include <pxr/imaging/hd/meshSchema.h>
+#include <pxr/imaging/hd/meshTopologySchema.h>
+#include <pxr/imaging/hd/sceneIndex.h>
+#include <pxr/imaging/hd/subdivisionTagsSchema.h>
 
 HDCYCLES_NAMESPACE_OPEN_SCOPE
 
@@ -55,7 +62,11 @@ VtValue ComputeTriangulatedFaceVaryingPrimvar(VtValue value,
                                               HdMeshUtil &meshUtil)
 {
   if (meshUtil.ComputeTriangulatedFaceVaryingPrimvar(
-          HdGetValueData(value), value.GetArraySize(), valueType, &value))
+          HdGetValueData(value), value.GetArraySize(), valueType, &value)
+#if PXR_VERSION >= 2511
+      != HdMeshComputationResult::Error
+#endif
+  )
   {
     return value;
   }
@@ -81,19 +92,8 @@ Transform convert_transform(const GfMatrix4d &matrix)
                         matrix[3][2]);
 }
 
-HdCyclesMesh::HdCyclesMesh(const SdfPath &rprimId
-#if PXR_VERSION < 2102
-                           ,
-                           const SdfPath &instancerId
-#endif
-                           )
-    : HdCyclesGeometry(rprimId
-#if PXR_VERSION < 2102
-                       ,
-                       instancerId
-#endif
-                       ),
-      _util(&_topology, rprimId)
+HdCyclesMesh::HdCyclesMesh(const SdfPath &rprimId)
+    : HdCyclesGeometry(rprimId), _util(&_topology, rprimId)
 {
 }
 
@@ -160,24 +160,9 @@ void HdCyclesMesh::Populate(HdSceneDelegate *sceneDelegate, HdDirtyBits dirtyBit
 
 void HdCyclesMesh::PopulatePoints(HdSceneDelegate *sceneDelegate)
 {
-  VtValue value;
-
-  for (const HdExtComputationPrimvarDescriptor &desc :
-       sceneDelegate->GetExtComputationPrimvarDescriptors(GetId(), HdInterpolationVertex))
-  {
-    if (desc.name == HdTokens->points) {
-      auto valueStore = HdExtComputationUtils::GetComputedPrimvarValues({desc}, sceneDelegate);
-      const auto valueStoreIt = valueStore.find(desc.name);
-      if (valueStoreIt != valueStore.end()) {
-        value = std::move(valueStoreIt->second);
-      }
-      break;
-    }
-  }
-
-  if (value.IsEmpty()) {
-    value = GetPoints(sceneDelegate);
-  }
+  const HdSceneIndexPrim prim = GetPrim(sceneDelegate, GetId());
+  const HdPrimvarsSchema primvars = HdPrimvarsSchema::GetFromParent(prim.dataSource);
+  const VtValue value = ReadPrimvar(primvars, HdTokens->points);
 
   if (!value.IsHolding<VtVec3fArray>()) {
     TF_WARN("Invalid points data for %s", GetId().GetText());
@@ -188,13 +173,11 @@ void HdCyclesMesh::PopulatePoints(HdSceneDelegate *sceneDelegate)
 
   TF_VERIFY(points.size() >= static_cast<size_t>(_topology.GetNumPoints()));
 
-  array<float3> pointsDataCycles;
-  pointsDataCycles.reserve(points.size());
-  for (const GfVec3f &point : points) {
-    pointsDataCycles.push_back_reserved(make_float3(point[0], point[1], point[2]));
-  }
+  static_assert(sizeof(GfVec3f) == sizeof(packed_float3));
 
-  _geom->set_verts(pointsDataCycles);
+  std::copy_n(reinterpret_cast<const packed_float3 *>(points.data()),
+              _geom->num_verts(),
+              _geom->get_position_for_write());
 }
 
 void HdCyclesMesh::PopulateNormals(HdSceneDelegate *sceneDelegate)
@@ -206,34 +189,13 @@ void HdCyclesMesh::PopulateNormals(HdSceneDelegate *sceneDelegate)
     return;
   }
 
-  VtValue value;
-  HdInterpolation interpolation = HdInterpolationCount;
-
-  for (int i = 0; i < HdInterpolationCount && interpolation == HdInterpolationCount; ++i) {
-    for (const HdExtComputationPrimvarDescriptor &desc :
-         sceneDelegate->GetExtComputationPrimvarDescriptors(GetId(),
-                                                            static_cast<HdInterpolation>(i)))
-    {
-      if (desc.name == HdTokens->normals) {
-        auto valueStore = HdExtComputationUtils::GetComputedPrimvarValues({desc}, sceneDelegate);
-        const auto valueStoreIt = valueStore.find(desc.name);
-        if (valueStoreIt != valueStore.end()) {
-          value = std::move(valueStoreIt->second);
-          interpolation = static_cast<HdInterpolation>(i);
-        }
-        break;
-      }
-    }
+  const HdSceneIndexPrim prim = GetPrim(sceneDelegate, GetId());
+  const HdPrimvarsSchema primvars = HdPrimvarsSchema::GetFromParent(prim.dataSource);
+  const HdInterpolation interpolation = ReadPrimvarInterpolation(primvars, HdTokens->normals);
+  if (interpolation == HdInterpolationCount) {
+    return;  // Ignore missing normals
   }
-
-  if (value.IsEmpty()) {
-    interpolation = GetPrimvarInterpolation(sceneDelegate, HdTokens->normals);
-    if (interpolation == HdInterpolationCount) {
-      return;  // Ignore missing normals
-    }
-
-    value = GetNormals(sceneDelegate);
-  }
+  const VtValue value = ReadPrimvar(primvars, HdTokens->normals);
 
   if (!value.IsHolding<VtVec3fArray>()) {
     TF_WARN("Invalid normals data for %s", GetId().GetText());
@@ -247,8 +209,9 @@ void HdCyclesMesh::PopulateNormals(HdSceneDelegate *sceneDelegate)
 
     const GfVec3f constantNormal = normals[0];
 
-    packed_normal *const N = _geom->attributes.add(ATTR_STD_VERTEX_NORMAL)->data_normal();
-    for (size_t i = 0; i < _geom->get_verts().size(); ++i) {
+    packed_normal *const N =
+        _geom->attributes.add(ATTR_STD_VERTEX_NORMAL)->data_for_write<packed_normal>();
+    for (size_t i = 0; i < _geom->num_verts(); ++i) {
       N[i] = packed_normal(make_float3(constantNormal[0], constantNormal[1], constantNormal[2]));
     }
   }
@@ -258,10 +221,11 @@ void HdCyclesMesh::PopulateNormals(HdSceneDelegate *sceneDelegate)
   }
   else if (interpolation == HdInterpolationVertex || interpolation == HdInterpolationVarying) {
     TF_VERIFY(normals.size() == static_cast<size_t>(_topology.GetNumPoints()) &&
-              static_cast<size_t>(_topology.GetNumPoints()) == _geom->get_verts().size());
+              static_cast<size_t>(_topology.GetNumPoints()) == _geom->num_verts());
 
-    packed_normal *const N = _geom->attributes.add(ATTR_STD_VERTEX_NORMAL)->data_normal();
-    for (size_t i = 0; i < _geom->get_verts().size(); ++i) {
+    packed_normal *const N =
+        _geom->attributes.add(ATTR_STD_VERTEX_NORMAL)->data_for_write<packed_normal>();
+    for (size_t i = 0; i < _geom->num_verts(); ++i) {
       N[i] = packed_normal(make_float3(normals[i][0], normals[i][1], normals[i][2]));
     }
   }
@@ -288,6 +252,9 @@ void HdCyclesMesh::PopulatePrimvars(HdSceneDelegate *sceneDelegate)
   const bool subdivision = _geom->get_subdivision_type() != Mesh::SUBDIVISION_NONE;
   AttributeSet &attributes = subdivision ? _geom->subd_attributes : _geom->attributes;
 
+  const HdSceneIndexPrim prim = GetPrim(sceneDelegate, GetId());
+  const HdPrimvarsSchema primvars = HdPrimvarsSchema::GetFromParent(prim.dataSource);
+
   const std::pair<HdInterpolation, AttributeElement> interpolations[] = {
       std::make_pair(HdInterpolationFaceVarying, ATTR_ELEMENT_CORNER),
       std::make_pair(HdInterpolationUniform, ATTR_ELEMENT_FACE),
@@ -297,34 +264,33 @@ void HdCyclesMesh::PopulatePrimvars(HdSceneDelegate *sceneDelegate)
   };
 
   for (const auto &interpolation : interpolations) {
-    for (const HdPrimvarDescriptor &desc :
-         GetPrimvarDescriptors(sceneDelegate, interpolation.first))
-    {
+    for (const TfToken &primvarName : PrimvarNamesAtInterpolation(primvars, interpolation.first)) {
       // Skip special primvars that are handled separately
-      if (desc.name == HdTokens->points || desc.name == HdTokens->normals) {
+      if (primvarName == HdTokens->points || primvarName == HdTokens->normals) {
         continue;
       }
 
-      VtValue value = GetPrimvar(sceneDelegate, desc.name);
+      VtValue value = ReadPrimvar(primvars, primvarName);
       if (value.IsEmpty()) {
         continue;
       }
 
-      const ustring name(desc.name.GetString());
+      const TfToken role = ReadPrimvarRole(primvars, primvarName);
+      const ustring name(primvarName.GetString());
 
       AttributeStandard std = ATTR_STD_NONE;
-      if (desc.role == HdPrimvarRoleTokens->textureCoordinate) {
+      if (role == HdPrimvarRoleTokens->textureCoordinate) {
         std = ATTR_STD_UV;
       }
       else if (interpolation.first == HdInterpolationVertex) {
-        if (desc.name == HdTokens->displayColor || desc.role == HdPrimvarRoleTokens->color) {
+        if (primvarName == HdTokens->displayColor || role == HdPrimvarRoleTokens->color) {
           std = ATTR_STD_VERTEX_COLOR;
         }
-        else if (desc.name == HdTokens->normals) {
+        else if (primvarName == HdTokens->normals) {
           std = ATTR_STD_VERTEX_NORMAL;
         }
       }
-      else if (desc.name == HdTokens->displayColor &&
+      else if (primvarName == HdTokens->displayColor &&
                interpolation.first == HdInterpolationConstant)
       {
         if (value.IsHolding<VtVec3fArray>() && value.GetArraySize() == 1) {
@@ -366,8 +332,77 @@ void HdCyclesMesh::PopulateTopology(HdSceneDelegate *sceneDelegate)
   // Clear geometry before populating it again with updated topology
   _geom->clear(true);
 
-  const HdDisplayStyle displayStyle = GetDisplayStyle(sceneDelegate);
-  _topology = HdMeshTopology(GetMeshTopology(sceneDelegate), displayStyle.refineLevel);
+  const HdSceneIndexPrim prim = GetPrim(sceneDelegate, GetId());
+  const HdLegacyDisplayStyleSchema displayStyleSchema = HdLegacyDisplayStyleSchema::GetFromParent(
+      prim.dataSource);
+
+  int refineLevel = 0;
+  if (auto ds = displayStyleSchema.GetRefineLevel()) {
+    refineLevel = ds->GetTypedValue(0.0f);
+  }
+  bool flatShadingEnabled = false;
+  if (auto ds = displayStyleSchema.GetFlatShadingEnabled()) {
+    flatShadingEnabled = ds->GetTypedValue(0.0f);
+  }
+
+  const HdMeshSchema meshSchema = HdMeshSchema::GetFromParent(prim.dataSource);
+  const HdMeshTopologySchema topoSchema = meshSchema.GetTopology();
+
+  TfToken scheme = PxOsdOpenSubdivTokens->none;
+  if (auto ds = meshSchema.GetSubdivisionScheme()) {
+    scheme = ds->GetTypedValue(0.0f);
+  }
+  TfToken orientation = HdTokens->rightHanded;
+  if (auto ds = topoSchema.GetOrientation()) {
+    orientation = ds->GetTypedValue(0.0f);
+  }
+  VtIntArray faceVertexCounts;
+  if (auto ds = topoSchema.GetFaceVertexCounts()) {
+    faceVertexCounts = ds->GetTypedValue(0.0f);
+  }
+  VtIntArray faceVertexIndices;
+  if (auto ds = topoSchema.GetFaceVertexIndices()) {
+    faceVertexIndices = ds->GetTypedValue(0.0f);
+  }
+  VtIntArray holeIndices;
+  if (auto ds = topoSchema.GetHoleIndices()) {
+    holeIndices = ds->GetTypedValue(0.0f);
+  }
+
+  _topology = HdMeshTopology(
+      scheme, orientation, faceVertexCounts, faceVertexIndices, holeIndices, refineLevel);
+
+  /* Geom subsets are published as child prims of the mesh in the scene index. */
+  HdGeomSubsets geomSubsetsList;
+  if (HdSceneIndexBaseRefPtr si = sceneDelegate->GetRenderIndex().GetTerminalSceneIndex()) {
+    for (const SdfPath &childPath : si->GetChildPrimPaths(GetId())) {
+      const HdSceneIndexPrim childPrim = si->GetPrim(childPath);
+      if (childPrim.primType != HdPrimTypeTokens->geomSubset) {
+        continue;
+      }
+      const HdGeomSubsetSchema subsetSchema = HdGeomSubsetSchema::GetFromParent(
+          childPrim.dataSource);
+      /* Only face subsets supported here, not point or curve subsets. */
+      if (auto typeDs = subsetSchema.GetType()) {
+        if (typeDs->GetTypedValue(0.0f) != HdGeomSubsetSchemaTokens->typeFaceSet) {
+          continue;
+        }
+      }
+      HdGeomSubset subset;
+      subset.type = HdGeomSubset::TypeFaceSet;
+      if (auto ds = subsetSchema.GetIndices()) {
+        subset.indices = ds->GetTypedValue(0.0f);
+      }
+      if (auto pathDs = HdMaterialBindingsSchema::GetFromParent(childPrim.dataSource)
+                            .GetMaterialBinding()
+                            .GetPath())
+      {
+        subset.materialId = pathDs->GetTypedValue(0.0f);
+      }
+      geomSubsetsList.push_back(subset);
+    }
+  }
+  _topology.SetGeomSubsets(geomSubsetsList);
 
   const TfToken subdivScheme = _topology.GetScheme();
   if (subdivScheme == PxOsdOpenSubdivTokens->bilinear && _topology.GetRefineLevel() > 0) {
@@ -380,7 +415,7 @@ void HdCyclesMesh::PopulateTopology(HdSceneDelegate *sceneDelegate)
     _geom->set_subdivision_type(Mesh::SUBDIVISION_NONE);
   }
 
-  const bool smooth = !displayStyle.flatShadingEnabled;
+  const bool smooth = !flatShadingEnabled;
   const bool subdivision = _geom->get_subdivision_type() != Mesh::SUBDIVISION_NONE;
 
   // Initialize lookup table from polygon face to material shader index
@@ -430,17 +465,56 @@ void HdCyclesMesh::PopulateTopology(HdSceneDelegate *sceneDelegate)
     VtVec3iArray triangles;
     _util.ComputeTriangleIndices(&triangles, &_primitiveParams);
 
-    _geom->reserve_mesh(_topology.GetNumPoints(), triangles.size());
+    _geom->resize_mesh(_topology.GetNumPoints(), triangles.size());
 
+    int *geom_indices = _geom->get_triangles().data();
+    for (size_t i = 0; i < _primitiveParams.size(); ++i) {
+      const GfVec3i triangle = triangles[i];
+      geom_indices[i * 3 + 0] = triangle[0];
+      geom_indices[i * 3 + 1] = triangle[1];
+      geom_indices[i * 3 + 2] = triangle[2];
+    }
+
+    int *shader = _geom->get_shader().data();
     for (size_t i = 0; i < _primitiveParams.size(); ++i) {
       const int faceIndex = HdMeshUtil::DecodeFaceIndexFromCoarseFaceParam(_primitiveParams[i]);
-
-      const GfVec3i triangle = triangles[i];
-      _geom->add_triangle(triangle[0], triangle[1], triangle[2], faceShaders[faceIndex], smooth);
+      shader[i] = faceShaders[faceIndex];
     }
+
+    std::ranges::fill(_geom->get_smooth(), smooth);
+
+    _geom->tag_triangles_modified();
+    _geom->tag_shader_modified();
+    _geom->tag_smooth_modified();
   }
   else {
-    const PxOsdSubdivTags subdivTags = GetSubdivTags(sceneDelegate);
+    const HdSubdivisionTagsSchema subdivSchema = HdSubdivisionTagsSchema::GetFromParent(
+        prim.dataSource);
+    PxOsdSubdivTags subdivTags;
+    if (auto ds = subdivSchema.GetInterpolateBoundary()) {
+      subdivTags.SetVertexInterpolationRule(ds->GetTypedValue(0.0f));
+    }
+    if (auto ds = subdivSchema.GetFaceVaryingLinearInterpolation()) {
+      subdivTags.SetFaceVaryingInterpolationRule(ds->GetTypedValue(0.0f));
+    }
+    if (auto ds = subdivSchema.GetTriangleSubdivisionRule()) {
+      subdivTags.SetTriangleSubdivision(ds->GetTypedValue(0.0f));
+    }
+    if (auto ds = subdivSchema.GetCornerIndices()) {
+      subdivTags.SetCornerIndices(ds->GetTypedValue(0.0f));
+    }
+    if (auto ds = subdivSchema.GetCornerSharpnesses()) {
+      subdivTags.SetCornerWeights(ds->GetTypedValue(0.0f));
+    }
+    if (auto ds = subdivSchema.GetCreaseIndices()) {
+      subdivTags.SetCreaseIndices(ds->GetTypedValue(0.0f));
+    }
+    if (auto ds = subdivSchema.GetCreaseLengths()) {
+      subdivTags.SetCreaseLengths(ds->GetTypedValue(0.0f));
+    }
+    if (auto ds = subdivSchema.GetCreaseSharpnesses()) {
+      subdivTags.SetCreaseWeights(ds->GetTypedValue(0.0f));
+    }
     _topology.SetSubdivTags(subdivTags);
 
     size_t numCorners = 0;
@@ -448,17 +522,38 @@ void HdCyclesMesh::PopulateTopology(HdSceneDelegate *sceneDelegate)
       numCorners += vertCount;
     }
 
-    _geom->reserve_subd_faces(_topology.GetNumFaces(), numCorners);
+    _geom->resize_subd_faces(_topology.GetNumFaces(), numCorners);
+
+    std::copy_n(vertIndx.data(), vertIndx.size(), _geom->get_subd_face_corners().data());
+
+    int *subd_start_corner = _geom->get_subd_start_corner().data();
+    int *subd_num_corners = _geom->get_subd_num_corners().data();
+    int *subd_ptex_offset = _geom->get_subd_ptex_offset().data();
 
     // TODO: Handle hole indices
+    int ptex_offset = 0;
     size_t faceIndex = 0;
     size_t indexOffset = 0;
     for (const int vertCount : vertCounts) {
-      _geom->add_subd_face(&vertIndx[indexOffset], vertCount, faceShaders[faceIndex], smooth);
+      subd_start_corner[faceIndex] = indexOffset;
+      subd_num_corners[faceIndex] = vertCount;
+      subd_ptex_offset[faceIndex] = ptex_offset;
+      const int num_ptex = (vertCount == 4) ? 1 : vertCount;
+      ptex_offset += num_ptex;
 
       faceIndex++;
       indexOffset += vertCount;
     }
+
+    std::copy_n(faceShaders.data(), faceShaders.size(), _geom->get_subd_shader().data());
+    std::ranges::fill(_geom->get_subd_smooth(), smooth);
+
+    _geom->tag_subd_face_corners_modified();
+    _geom->tag_subd_start_corner_modified();
+    _geom->tag_subd_num_corners_modified();
+    _geom->tag_subd_shader_modified();
+    _geom->tag_subd_smooth_modified();
+    _geom->tag_subd_ptex_offset_modified();
 
     const VtIntArray creaseLengths = subdivTags.GetCreaseLengths();
     if (!creaseLengths.empty()) {

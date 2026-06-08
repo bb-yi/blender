@@ -10,7 +10,7 @@
 
 #include "MEM_guardedalloc.h"
 
-#include "BLI_color.hh"
+#include "BLI_color_types.hh"
 #include "BLI_listbase.h"
 #include "BLI_math_rotation.h"
 #include "BLI_math_vector_types.hh"
@@ -612,7 +612,7 @@ static void curve_create_edit_curves_nor(CurveRenderData *rdata,
       }
       vbo_len_used++;
 
-      /* Skip the other vertex (it does not need to be offsetted). */
+      /* Skip the other vertex (it does not need to be offset). */
       GPU_vertbuf_attr_set(&vbo_curves_nor, attr_id.pos, vbo_len_used, bevp->vec);
       vbo_len_used++;
 

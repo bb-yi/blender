@@ -78,8 +78,8 @@ static void version_composite_nodetree_null_id(bNodeTree *ntree, Scene *scene)
 /* Move bone-group color to the individual bones. */
 static void version_bonegroup_migrate_color(Main *bmain)
 {
-  using PoseSet = Set<bPose *>;
-  Map<bArmature *, PoseSet> armature_poses;
+  using PoseObSet = Set<Object *>;
+  Map<bArmature *, PoseObSet> armature_poses;
 
   /* Gather a mapping from armature to the poses that use it. */
   for (Object &ob : bmain->objects) {
@@ -96,19 +96,20 @@ static void version_bonegroup_migrate_color(Main *bmain)
      * NOTE: No need to handle user reference-counting in readfile code. */
     BKE_pose_ensure(bmain, &ob, arm, false);
 
-    PoseSet &pose_set = armature_poses.lookup_or_add_default(arm);
-    pose_set.add(ob.pose);
+    PoseObSet &pose_set = armature_poses.lookup_or_add_default(arm);
+    pose_set.add(&ob);
   }
 
   /* Move colors from the pose's bone-group to either the armature bones or the
    * pose bones, depending on how many poses use the Armature. */
-  for (const PoseSet &pose_set : armature_poses.values()) {
+  for (const PoseObSet &pose_set : armature_poses.values()) {
     /* If the Armature is shared, the bone group colors might be different, and thus they have to
      * be stored on the pose bones. If the Armature is NOT shared, the bone colors can be stored
      * directly on the Armature bones. */
     const bool store_on_armature = pose_set.size() == 1;
 
-    for (bPose *pose : pose_set) {
+    for (Object *pose_ob : pose_set) {
+      bPose *pose = pose_ob->pose;
       for (bPoseChannel &pchan : pose->chanbase) {
         const bActionGroup *bgrp = static_cast<const bActionGroup *>(
             BLI_findlink(&pose->agroups, (pchan.agrp_index - 1)));
@@ -116,7 +117,7 @@ static void version_bonegroup_migrate_color(Main *bmain)
           continue;
         }
 
-        BoneColor &bone_color = store_on_armature ? pchan.bone->color : pchan.color;
+        BoneColor &bone_color = store_on_armature ? pchan.bone_get(*pose_ob)->color : pchan.color;
         bone_color.palette_index = bgrp->customCol;
         memcpy(&bone_color.custom, &bgrp->cs, sizeof(bone_color.custom));
       }
@@ -220,7 +221,7 @@ static void version_bonegroups_to_bonecollections(Main *bmain)
 
       /* Assign the bone. */
       BoneCollection *bcoll = collections_by_group.lookup(bgrp);
-      ANIM_armature_bonecoll_assign(bcoll, pchan.bone);
+      ANIM_armature_bonecoll_assign(bcoll, pchan.bone_get(ob));
     }
 
     /* The list of bone groups (pose->agroups) is intentionally left alone here. This will allow
@@ -278,8 +279,16 @@ static void version_principled_bsdf_update_animdata(ID *owner_id, bNodeTree *ntr
         {21, 4}   /* Alpha */
     };
     for (const auto &entry : remap_table) {
-      BKE_animdata_fix_paths_rename(
-          id, adt, owner_id, prefix.c_str(), nullptr, nullptr, entry.first, entry.second, false);
+      BKE_animdata_fix_paths_rename(id,
+                                    adt,
+                                    owner_id,
+                                    prefix.c_str(),
+                                    nullptr,
+                                    nullptr,
+                                    entry.first,
+                                    entry.second,
+                                    /*verify_paths=*/false,
+                                    /*infix_is_name=*/true);
     }
   }
 }
@@ -430,12 +439,12 @@ static void version_motion_tracking_legacy_camera_object(MovieClip &movieclip)
 
   BLI_assert(tracking_camera_object != nullptr);
 
-  if (BLI_listbase_is_empty(&tracking_camera_object->tracks)) {
+  if (tracking_camera_object->tracks.is_empty()) {
     tracking_camera_object->tracks = tracking.tracks_legacy;
     active_tracking_object->active_track = tracking.act_track_legacy;
   }
 
-  if (BLI_listbase_is_empty(&tracking_camera_object->plane_tracks)) {
+  if (tracking_camera_object->plane_tracks.is_empty()) {
     tracking_camera_object->plane_tracks = tracking.plane_tracks_legacy;
     active_tracking_object->active_plane_track = tracking.act_plane_track_legacy;
   }
@@ -447,8 +456,8 @@ static void version_motion_tracking_legacy_camera_object(MovieClip &movieclip)
   /* Clear pointers in the legacy storage.
    * Always do it, in the case something got missed in the logic above, so that the legacy storage
    * is always ensured to be empty after load. */
-  BLI_listbase_clear(&tracking.tracks_legacy);
-  BLI_listbase_clear(&tracking.plane_tracks_legacy);
+  tracking.tracks_legacy.clear_no_delete();
+  tracking.plane_tracks_legacy.clear_no_delete();
   tracking.act_track_legacy = nullptr;
   tracking.act_plane_track_legacy = nullptr;
   tracking.reconstruction_legacy = MovieTrackingReconstruction{};
@@ -515,7 +524,7 @@ static void version_mesh_crease_generic(Main &bmain)
         if (STR_ELEM(
                 node.idname, "GeometryNodeStoreNamedAttribute", "GeometryNodeInputNamedAttribute"))
         {
-          bNodeSocket *socket = bke::node_find_socket(node, SOCK_IN, "Name");
+          bNodeSocket *socket = bke::node_find_socket(node, SOCK_IN, "Name"_ustr);
           if (STREQ(socket->default_value_typed<bNodeSocketValueString>()->value, "crease")) {
             STRNCPY_UTF8(socket->default_value_typed<bNodeSocketValueString>()->value,
                          "crease_edge");
@@ -530,7 +539,9 @@ static void version_mesh_crease_generic(Main &bmain)
       if (md.type != eModifierType_Nodes) {
         continue;
       }
-      if (IDProperty *settings = reinterpret_cast<NodesModifierData *>(&md)->settings.properties) {
+      if (IDProperty *settings =
+              reinterpret_cast<NodesModifierData *>(&md)->settings_legacy.properties)
+      {
         for (IDProperty &prop : settings->data.group) {
           if (StringRef(prop.name).endswith("_attribute_name")) {
             if (STREQ(IDP_string_get(&prop), "crease")) {
@@ -559,11 +570,11 @@ static void version_replace_texcoord_normal_socket(bNodeTree *ntree)
     {
       if (geometry_node == nullptr) {
         geometry_node = bke::node_add_static_node(nullptr, *ntree, SH_NODE_NEW_GEOMETRY);
-        incoming_socket = bke::node_find_socket(*geometry_node, SOCK_OUT, "Incoming");
+        incoming_socket = bke::node_find_socket(*geometry_node, SOCK_OUT, "Incoming"_ustr);
 
         transform_node = bke::node_add_static_node(nullptr, *ntree, SH_NODE_VECT_TRANSFORM);
-        vec_in_socket = bke::node_find_socket(*transform_node, SOCK_IN, "Vector");
-        vec_out_socket = bke::node_find_socket(*transform_node, SOCK_OUT, "Vector");
+        vec_in_socket = bke::node_find_socket(*transform_node, SOCK_IN, "Vector"_ustr);
+        vec_out_socket = bke::node_find_socket(*transform_node, SOCK_OUT, "Vector"_ustr);
 
         NodeShaderVectTransform *nodeprop = static_cast<NodeShaderVectTransform *>(
             transform_node->storage);
@@ -602,7 +613,7 @@ static void version_principled_transmission_roughness(bNodeTree *ntree)
     if (node.type_legacy != SH_NODE_BSDF_PRINCIPLED) {
       continue;
     }
-    bNodeSocket *sock = bke::node_find_socket(node, SOCK_IN, "Transmission Roughness");
+    bNodeSocket *sock = bke::node_find_socket(node, SOCK_IN, "Transmission Roughness"_ustr);
     if (sock != nullptr) {
       bke::node_remove_socket(*ntree, node, *sock);
     }
@@ -616,10 +627,10 @@ static void version_replace_velvet_sheen_node(bNodeTree *ntree)
     if (node.type_legacy == SH_NODE_BSDF_SHEEN) {
       STRNCPY_UTF8(node.idname, "ShaderNodeBsdfSheen");
 
-      bNodeSocket *sigmaInput = bke::node_find_socket(node, SOCK_IN, "Sigma");
+      bNodeSocket *sigmaInput = bke::node_find_socket(node, SOCK_IN, "Sigma"_ustr);
       if (sigmaInput != nullptr) {
         node.custom1 = SHD_SHEEN_ASHIKHMIN;
-        STRNCPY_UTF8(sigmaInput->identifier, "Roughness");
+        version_node_socket_identifier_set(*sigmaInput, "Roughness");
         STRNCPY_UTF8(sigmaInput->name, "Roughness");
       }
     }
@@ -631,7 +642,7 @@ static void version_principled_bsdf_sheen(bNodeTree *ntree)
 {
   auto check_node = [](const bNode *node) {
     return (node->type_legacy == SH_NODE_BSDF_PRINCIPLED) &&
-           (bke::node_find_socket(*node, SOCK_IN, "Sheen Roughness") == nullptr);
+           (bke::node_find_socket(*node, SOCK_IN, "Sheen Roughness"_ustr) == nullptr);
   };
   auto update_input = [ntree](bNode *node, bNodeSocket *input) {
     /* Change socket type to Color. */
@@ -640,7 +651,7 @@ static void version_principled_bsdf_sheen(bNodeTree *ntree)
     /* Account for the change in intensity between the old and new model.
      * If the Sheen input is set to a fixed value, adjust it and set the tint to white.
      * Otherwise, if it's connected, keep it as-is but set the tint to 0.2 instead. */
-    bNodeSocket *sheen = bke::node_find_socket(*node, SOCK_IN, "Sheen");
+    bNodeSocket *sheen = bke::node_find_socket(*node, SOCK_IN, "Sheen"_ustr);
     if (sheen != nullptr && sheen->link == nullptr) {
       *version_cycles_node_socket_float_value(sheen) *= 0.2f;
 
@@ -679,7 +690,7 @@ static bNodeTreeInterfaceItem *legacy_socket_move_to_interface(bNodeSocket &lega
                                                                const eNodeSocketInOut in_out)
 {
   bNodeTreeInterfaceSocket *new_socket = MEM_new<bNodeTreeInterfaceSocket>(__func__);
-  new_socket->item.item_type = NODE_INTERFACE_SOCKET;
+  new_socket->item.item_type = NodeTreeInterfaceItemType::Socket;
 
   /* Move reusable data. */
   new_socket->name = BLI_strdup(legacy_socket.name);
@@ -718,8 +729,8 @@ static void versioning_convert_node_tree_socket_lists_to_interface(bNodeTree *nt
 {
   bNodeTreeInterface &tree_interface = ntree->tree_interface;
 
-  const int num_inputs = BLI_listbase_count(&ntree->inputs_legacy);
-  const int num_outputs = BLI_listbase_count(&ntree->outputs_legacy);
+  const int num_inputs = ntree->inputs_legacy.count();
+  const int num_outputs = ntree->outputs_legacy.count();
   tree_interface.root_panel.items_num = num_inputs + num_outputs;
   tree_interface.root_panel.items_array = MEM_new_array_uninitialized<bNodeTreeInterfaceItem *>(
       size_t(tree_interface.root_panel.items_num), __func__);
@@ -743,14 +754,14 @@ static void version_principled_bsdf_coat(bNodeTree *ntree)
     if (node.type_legacy != SH_NODE_BSDF_PRINCIPLED) {
       continue;
     }
-    if (bke::node_find_socket(node, SOCK_IN, "Coat IOR") != nullptr) {
+    if (bke::node_find_socket(node, SOCK_IN, "Coat IOR"_ustr) != nullptr) {
       continue;
     }
     bNodeSocket *coat_ior_input = bke::node_add_static_socket(
         *ntree, node, SOCK_IN, SOCK_FLOAT, PROP_NONE, "Coat IOR", "Coat IOR");
 
     /* Adjust for 4x change in intensity. */
-    bNodeSocket *coat_input = bke::node_find_socket(node, SOCK_IN, "Clearcoat");
+    bNodeSocket *coat_input = bke::node_find_socket(node, SOCK_IN, "Clearcoat"_ustr);
     *version_cycles_node_socket_float_value(coat_input) *= 0.25f;
     /* When the coat input is dynamic, instead of inserting a *0.25 math node, set the Coat IOR
      * to 1.2 instead - this also roughly quarters reflectivity compared to the 1.5 default. */
@@ -780,7 +791,7 @@ static void version_principled_bsdf_subsurface(bNodeTree *ntree)
     if (node.type_legacy != SH_NODE_BSDF_PRINCIPLED) {
       continue;
     }
-    if (bke::node_find_socket(node, SOCK_IN, "Subsurface Scale")) {
+    if (bke::node_find_socket(node, SOCK_IN, "Subsurface Scale"_ustr)) {
       /* Node is already updated. */
       continue;
     }
@@ -789,7 +800,7 @@ static void version_principled_bsdf_subsurface(bNodeTree *ntree)
     bNodeSocket *scale_in = bke::node_add_static_socket(
         *ntree, node, SOCK_IN, SOCK_FLOAT, PROP_DISTANCE, "Subsurface Scale", "Subsurface Scale");
 
-    bNodeSocket *subsurf = bke::node_find_socket(node, SOCK_IN, "Subsurface");
+    bNodeSocket *subsurf = bke::node_find_socket(node, SOCK_IN, "Subsurface"_ustr);
     float *subsurf_val = version_cycles_node_socket_float_value(subsurf);
 
     if (!subsurf->link && *subsurf_val == 0.0f) {
@@ -805,8 +816,8 @@ static void version_principled_bsdf_subsurface(bNodeTree *ntree)
     }
 
     /* Fix up Subsurface Color input */
-    bNodeSocket *base_col = bke::node_find_socket(node, SOCK_IN, "Base Color");
-    bNodeSocket *subsurf_col = bke::node_find_socket(node, SOCK_IN, "Subsurface Color");
+    bNodeSocket *base_col = bke::node_find_socket(node, SOCK_IN, "Base Color"_ustr);
+    bNodeSocket *subsurf_col = bke::node_find_socket(node, SOCK_IN, "Subsurface Color"_ustr);
     float *base_col_val = version_cycles_node_socket_rgba_value(base_col);
     float *subsurf_col_val = version_cycles_node_socket_rgba_value(subsurf_col);
     /* If any of the three inputs is dynamic, we need a Mix node. */
@@ -816,10 +827,10 @@ static void version_principled_bsdf_subsurface(bNodeTree *ntree)
       mix->locx_legacy = node.locx_legacy - 170;
       mix->locy_legacy = node.locy_legacy - 120;
 
-      bNodeSocket *a_in = bke::node_find_socket(*mix, SOCK_IN, "A_Color");
-      bNodeSocket *b_in = bke::node_find_socket(*mix, SOCK_IN, "B_Color");
-      bNodeSocket *fac_in = bke::node_find_socket(*mix, SOCK_IN, "Factor_Float");
-      bNodeSocket *result_out = bke::node_find_socket(*mix, SOCK_OUT, "Result_Color");
+      bNodeSocket *a_in = bke::node_find_socket(*mix, SOCK_IN, "A_Color"_ustr);
+      bNodeSocket *b_in = bke::node_find_socket(*mix, SOCK_IN, "B_Color"_ustr);
+      bNodeSocket *fac_in = bke::node_find_socket(*mix, SOCK_IN, "Factor_Float"_ustr);
+      bNodeSocket *result_out = bke::node_find_socket(*mix, SOCK_OUT, "Result_Color"_ustr);
 
       copy_v4_v4(version_cycles_node_socket_rgba_value(a_in), base_col_val);
       copy_v4_v4(version_cycles_node_socket_rgba_value(b_in), subsurf_col_val);
@@ -868,11 +879,11 @@ static void version_principled_bsdf_emission(bNodeTree *ntree)
     if (node.type_legacy != SH_NODE_BSDF_PRINCIPLED) {
       continue;
     }
-    if (!bke::node_find_socket(node, SOCK_IN, "Emission")) {
+    if (!bke::node_find_socket(node, SOCK_IN, "Emission"_ustr)) {
       /* Old enough to have neither, new defaults are fine. */
       continue;
     }
-    if (bke::node_find_socket(node, SOCK_IN, "Emission Strength")) {
+    if (bke::node_find_socket(node, SOCK_IN, "Emission Strength"_ustr)) {
       /* New enough to have both, no need to do anything. */
       continue;
     }
@@ -912,14 +923,14 @@ static int version_nodes_find_valid_insert_position_for_item(const bNodeTreeInte
   int pos = initial_pos;
 
   if (sockets_above_panels) {
-    if (item.item_type == NODE_INTERFACE_PANEL) {
+    if (item.item_type == NodeTreeInterfaceItemType::Panel) {
       /* Find the closest valid position from the end, only panels at or after #position. */
       for (int test_pos = items.size() - 1; test_pos >= initial_pos; test_pos--) {
         if (test_pos < 0) {
           /* Initial position is out of range but valid. */
           break;
         }
-        if (items[test_pos]->item_type != NODE_INTERFACE_PANEL) {
+        if (items[test_pos]->item_type != NodeTreeInterfaceItemType::Panel) {
           /* Found valid position, insert after the last socket item. */
           pos = test_pos + 1;
           break;
@@ -933,7 +944,7 @@ static int version_nodes_find_valid_insert_position_for_item(const bNodeTreeInte
           /* Initial position is out of range but valid. */
           break;
         }
-        if (items[test_pos]->item_type == NODE_INTERFACE_PANEL) {
+        if (items[test_pos]->item_type == NodeTreeInterfaceItemType::Panel) {
           /* Found valid position, inserting moves the first panel. */
           pos = test_pos;
           break;
@@ -997,10 +1008,10 @@ static void versioning_node_group_sort_sockets_recursive(bNodeTreeInterfacePanel
                          const bNodeTreeInterfaceItem *b) -> bool {
     if (a->item_type != b->item_type) {
       /* Keep sockets above panels. */
-      return a->item_type == NODE_INTERFACE_SOCKET;
+      return a->item_type == NodeTreeInterfaceItemType::Socket;
     }
     /* Keep outputs above inputs. */
-    if (a->item_type == NODE_INTERFACE_SOCKET) {
+    if (a->item_type == NodeTreeInterfaceItemType::Socket) {
       const bNodeTreeInterfaceSocket *sa = reinterpret_cast<const bNodeTreeInterfaceSocket *>(a);
       const bNodeTreeInterfaceSocket *sb = reinterpret_cast<const bNodeTreeInterfaceSocket *>(b);
       const bool is_output_a = sa->flag & NODE_INTERFACE_SOCKET_OUTPUT;
@@ -1018,7 +1029,7 @@ static void versioning_node_group_sort_sockets_recursive(bNodeTreeInterfacePanel
 
   /* Sort any child panels too. */
   for (bNodeTreeInterfaceItem *item : panel.items()) {
-    if (item->item_type == NODE_INTERFACE_PANEL) {
+    if (item->item_type == NodeTreeInterfaceItemType::Panel) {
       versioning_node_group_sort_sockets_recursive(
           *reinterpret_cast<bNodeTreeInterfacePanel *>(item));
     }
@@ -1032,14 +1043,14 @@ static void version_principled_bsdf_specular_tint(bNodeTree *ntree)
     if (node.type_legacy != SH_NODE_BSDF_PRINCIPLED) {
       continue;
     }
-    bNodeSocket *specular_tint_sock = bke::node_find_socket(node, SOCK_IN, "Specular Tint");
+    bNodeSocket *specular_tint_sock = bke::node_find_socket(node, SOCK_IN, "Specular Tint"_ustr);
     if (specular_tint_sock->type == SOCK_RGBA) {
       /* Node is already updated. */
       continue;
     }
 
-    bNodeSocket *base_color_sock = bke::node_find_socket(node, SOCK_IN, "Base Color");
-    bNodeSocket *metallic_sock = bke::node_find_socket(node, SOCK_IN, "Metallic");
+    bNodeSocket *base_color_sock = bke::node_find_socket(node, SOCK_IN, "Base Color"_ustr);
+    bNodeSocket *metallic_sock = bke::node_find_socket(node, SOCK_IN, "Metallic"_ustr);
     float specular_tint_old = *version_cycles_node_socket_float_value(specular_tint_sock);
     float *base_color = version_cycles_node_socket_rgba_value(base_color_sock);
     float metallic = *version_cycles_node_socket_float_value(metallic_sock);
@@ -1078,10 +1089,10 @@ static void version_principled_bsdf_specular_tint(bNodeTree *ntree)
       mix->locx_legacy = node.locx_legacy - 270;
       mix->locy_legacy = node.locy_legacy - 120;
 
-      bNodeSocket *a_in = bke::node_find_socket(*mix, SOCK_IN, "A_Color");
-      bNodeSocket *b_in = bke::node_find_socket(*mix, SOCK_IN, "B_Color");
-      bNodeSocket *fac_in = bke::node_find_socket(*mix, SOCK_IN, "Factor_Float");
-      metallic_mix_out = bke::node_find_socket(*mix, SOCK_OUT, "Result_Color");
+      bNodeSocket *a_in = bke::node_find_socket(*mix, SOCK_IN, "A_Color"_ustr);
+      bNodeSocket *b_in = bke::node_find_socket(*mix, SOCK_IN, "B_Color"_ustr);
+      bNodeSocket *fac_in = bke::node_find_socket(*mix, SOCK_IN, "Factor_Float"_ustr);
+      metallic_mix_out = bke::node_find_socket(*mix, SOCK_OUT, "Result_Color"_ustr);
       metallic_mix_node = mix;
 
       copy_v4_v4(version_cycles_node_socket_rgba_value(a_in), base_color);
@@ -1113,10 +1124,10 @@ static void version_principled_bsdf_specular_tint(bNodeTree *ntree)
       mix->locx_legacy = node.locx_legacy - 170;
       mix->locy_legacy = node.locy_legacy - 120;
 
-      bNodeSocket *a_in = bke::node_find_socket(*mix, SOCK_IN, "A_Color");
-      bNodeSocket *b_in = bke::node_find_socket(*mix, SOCK_IN, "B_Color");
-      bNodeSocket *fac_in = bke::node_find_socket(*mix, SOCK_IN, "Factor_Float");
-      bNodeSocket *result_out = bke::node_find_socket(*mix, SOCK_OUT, "Result_Color");
+      bNodeSocket *a_in = bke::node_find_socket(*mix, SOCK_IN, "A_Color"_ustr);
+      bNodeSocket *b_in = bke::node_find_socket(*mix, SOCK_IN, "B_Color"_ustr);
+      bNodeSocket *fac_in = bke::node_find_socket(*mix, SOCK_IN, "Factor_Float"_ustr);
+      bNodeSocket *result_out = bke::node_find_socket(*mix, SOCK_OUT, "Result_Color"_ustr);
 
       copy_v4_v4(version_cycles_node_socket_rgba_value(a_in), one);
       copy_v4_v4(version_cycles_node_socket_rgba_value(b_in), metallic_mix);
@@ -1159,7 +1170,7 @@ static void enable_geometry_nodes_is_modifier(Main &bmain)
       continue;
     }
     group.tree_interface.foreach_item([&](const bNodeTreeInterfaceItem &item) {
-      if (item.item_type != NODE_INTERFACE_SOCKET) {
+      if (item.item_type != NodeTreeInterfaceItemType::Socket) {
         return true;
       }
       const auto &socket = reinterpret_cast<const bNodeTreeInterfaceSocket &>(item);
@@ -1202,8 +1213,8 @@ void blo_do_versions_400(FileData *fd, Library * /*lib*/, Main *bmain)
 
 #define SCE_SNAP_PROJECT (1 << 3)
       if (ts->snap_flag & SCE_SNAP_PROJECT) {
-        ts->snap_mode &= ~(1 << 2); /* SCE_SNAP_TO_FACE */
-        ts->snap_mode |= (1 << 8);  /* SCE_SNAP_INDIVIDUAL_PROJECT */
+        ts->snap_mode &= ~eSnapMode(1 << 2); /* SCE_SNAP_TO_FACE */
+        ts->snap_mode |= eSnapMode(1 << 8);  /* SCE_SNAP_INDIVIDUAL_PROJECT */
       }
 #undef SCE_SNAP_PROJECT
     }
@@ -1417,8 +1428,8 @@ void blo_do_versions_400(FileData *fd, Library * /*lib*/, Main *bmain)
       for (Camera &camera : bmain->cameras) {
         IDProperty *ccam = version_cycles_properties_from_ID(&camera.id);
         if (ccam) {
-          camera.panorama_type = version_cycles_property_int(
-              ccam, "panorama_type", default_cam.panorama_type);
+          camera.panorama_type = eCamera_PanoType(
+              version_cycles_property_int(ccam, "panorama_type", default_cam.panorama_type));
           camera.fisheye_fov = version_cycles_property_float(
               ccam, "fisheye_fov", default_cam.fisheye_fov);
           camera.fisheye_lens = version_cycles_property_float(
@@ -1477,7 +1488,7 @@ void blo_do_versions_400(FileData *fd, Library * /*lib*/, Main *bmain)
 
     for (Scene &scene : bmain->scenes) {
       scene.toolsettings->snap_flag_anim |= SCE_SNAP;
-      scene.toolsettings->snap_anim_mode |= (1 << 10); /* SCE_SNAP_TO_FRAME */
+      scene.toolsettings->snap_anim_mode |= eSnapMode(1 << 10); /* SCE_SNAP_TO_FRAME */
     }
   }
 
@@ -1487,8 +1498,8 @@ void blo_do_versions_400(FileData *fd, Library * /*lib*/, Main *bmain)
       versioning_convert_node_tree_socket_lists_to_interface(ntree);
       /* Clear legacy sockets after conversion.
        * Internal data pointers have been moved or freed already. */
-      BLI_freelistN(&ntree->inputs_legacy);
-      BLI_freelistN(&ntree->outputs_legacy);
+      ntree->inputs_legacy.free_no_destruct();
+      ntree->outputs_legacy.free_no_destruct();
     }
     FOREACH_NODETREE_END;
   }
@@ -1514,8 +1525,8 @@ void blo_do_versions_400(FileData *fd, Library * /*lib*/, Main *bmain)
         MEM_delete(legacy_socket.runtime);
         MEM_delete(&legacy_socket);
       }
-      BLI_listbase_clear(&ntree->inputs_legacy);
-      BLI_listbase_clear(&ntree->outputs_legacy);
+      ntree->inputs_legacy.clear_no_delete();
+      ntree->outputs_legacy.clear_no_delete();
     }
     FOREACH_NODETREE_END;
   }
@@ -1581,7 +1592,7 @@ void blo_do_versions_400(FileData *fd, Library * /*lib*/, Main *bmain)
     FOREACH_NODETREE_BEGIN (bmain, ntree, id) {
       Vector<bNodeTreeInterfaceSocket *> sockets_to_split;
       ntree->tree_interface.foreach_item([&](bNodeTreeInterfaceItem &item) {
-        if (item.item_type == NODE_INTERFACE_SOCKET) {
+        if (item.item_type == NodeTreeInterfaceItemType::Socket) {
           bNodeTreeInterfaceSocket &socket = reinterpret_cast<bNodeTreeInterfaceSocket &>(item);
           if ((socket.flag & NODE_INTERFACE_SOCKET_INPUT) &&
               (socket.flag & NODE_INTERFACE_SOCKET_OUTPUT))

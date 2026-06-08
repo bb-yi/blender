@@ -14,13 +14,14 @@ namespace blender::nodes::node_geo_edges_to_face_groups_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Bool>("Boundary Edges")
+  b.add_input<decl::Bool>("Boundary Edges"_ustr)
       .default_value(true)
       .hide_value()
-      .supports_field()
+      .structure_type(StructureType::Field)
       .description("Edges used to split faces into separate groups");
-  b.add_output<decl::Int>("Face Group ID")
-      .field_source_reference_all()
+  b.add_output<decl::Int>("Face Group ID"_ustr)
+      .structure_type(StructureType::Field)
+      .propagate_references()
       .description("Index of the face group inside each boundary edge region");
 }
 
@@ -62,7 +63,8 @@ class FaceSetFromBoundariesInput final : public bke::MeshFieldInput {
 
     AtomicDisjointSet islands(faces.size());
     non_boundary_edges.foreach_index(
-        GrainSize(2048), [&](const int edge) { join_indices(islands, edge_to_face_map[edge]); });
+        [&](const int edge) { join_indices(islands, edge_to_face_map[edge]); },
+        exec_mode::grain_size(2048));
 
     Array<int> output(faces.size());
     islands.calc_reduced_ids(output);
@@ -71,17 +73,11 @@ class FaceSetFromBoundariesInput final : public bke::MeshFieldInput {
         VArray<int>::from_container(std::move(output)), AttrDomain::Face, domain);
   }
 
-  uint64_t hash() const override
+  void hash_unique(UniqueHashBytes &hash, fn::FieldHashDeep &deep_hash_cache) const override
   {
-    return non_boundary_edge_field_.hash();
-  }
-
-  bool is_equal_to(const fn::FieldNode &other) const override
-  {
-    if (const auto *other_field = dynamic_cast<const FaceSetFromBoundariesInput *>(&other)) {
-      return other_field->non_boundary_edge_field_ == non_boundary_edge_field_;
-    }
-    return false;
+    static constexpr int8_t id = 0;
+    hash.add(&id);
+    hash.add(deep_hash_cache.ensure(non_boundary_edge_field_));
   }
 
   std::optional<AttrDomain> preferred_domain(const Mesh & /*mesh*/) const final
@@ -92,24 +88,25 @@ class FaceSetFromBoundariesInput final : public bke::MeshFieldInput {
 
 static void geo_node_exec(GeoNodeExecParams params)
 {
-  Field<bool> boundary_edges = params.extract_input<Field<bool>>("Boundary Edges");
+  Field<bool> boundary_edges = params.extract_input<Field<bool>>("Boundary Edges"_ustr);
   Field<bool> non_boundary_edges = fn::invert_boolean_field(std::move(boundary_edges));
   params.set_output(
-      "Face Group ID",
-      Field<int>(std::make_shared<FaceSetFromBoundariesInput>(std::move(non_boundary_edges))));
+      "Face Group ID"_ustr,
+      Field<int>::from_input<FaceSetFromBoundariesInput>(std::move(non_boundary_edges)));
 }
 
 static void node_register()
 {
   static bke::bNodeType ntype;
 
-  geo_node_type_base(&ntype, "GeometryNodeEdgesToFaceGroups", GEO_NODE_EDGES_TO_FACE_GROUPS);
+  geo_node_type_base(&ntype, "GeometryNodeEdgesToFaceGroups"_ustr, GEO_NODE_EDGES_TO_FACE_GROUPS);
   ntype.ui_name = "Edges to Face Groups";
   ntype.ui_description = "Group faces into regions surrounded by the selected boundary edges";
   ntype.enum_name_legacy = "EDGES_TO_FACE_GROUPS";
   ntype.nclass = NODE_CLASS_INPUT;
   ntype.geometry_node_execute = geo_node_exec;
   ntype.declare = node_declare;
+  ntype.default_width = bke::NodeWidth::_160;
 
   bke::node_register_type(ntype);
 }

@@ -45,9 +45,10 @@ static void geometry_node_tree_get_from_context(const bContext *C,
     return;
   }
 
+  const Main *bmain = CTX_data_main(C);
   const Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
-  BKE_view_layer_synced_ensure(scene, view_layer);
+  BKE_view_layer_synced_ensure(*bmain, scene, view_layer);
   Object *ob = BKE_view_layer_active_object_get(view_layer);
 
   if (ob == nullptr) {
@@ -138,18 +139,19 @@ static bool geometry_node_tree_socket_type_valid(bke::bNodeTreeType * /*treetype
                SOCK_IMAGE,
                SOCK_MATERIAL,
                SOCK_MENU) ||
-          ELEM(socket_type->type, SOCK_BUNDLE, SOCK_CLOSURE, SOCK_FONT));
+          ELEM(socket_type->type, SOCK_BUNDLE, SOCK_CLOSURE, SOCK_FONT, SOCK_SOUND));
 }
 
 void register_node_tree_type_geo()
 {
   bke::bNodeTreeType *tt = ntreeType_Geometry = MEM_new<bke::bNodeTreeType>(__func__);
   tt->type = NTREE_GEOMETRY;
-  tt->idname = "GeometryNodeTree";
-  tt->group_idname = "GeometryNodeGroup";
+  tt->idname = "GeometryNodeTree"_ustr;
+  tt->group_idname = "GeometryNodeGroup"_ustr;
   tt->ui_name = N_("Geometry Node Editor");
   tt->ui_icon = ICON_GEOMETRY_NODES;
   tt->ui_description = N_("Advanced geometry editing and tools creation using nodes");
+  tt->asset_catalog_path_prefix = "Geometry Nodes";
   tt->rna_ext.srna = RNA_GeometryNodeTree;
   tt->update = geometry_node_tree_update;
   tt->get_from_context = geometry_node_tree_get_from_context;

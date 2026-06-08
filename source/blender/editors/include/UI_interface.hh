@@ -21,7 +21,7 @@
 
 namespace blender {
 
-namespace nodes::geo_eval_log {
+namespace nodes::eval_log {
 struct GeometryAttributeInfo;
 }
 
@@ -38,9 +38,6 @@ class AbstractView;
 class AbstractViewItem;
 struct Layout;
 struct SearchItems;
-}  // namespace ui
-
-namespace ui {
 
 void button_func_set(Button *but, std::function<void(bContext &)> func);
 void button_func_pushed_state_set(Button *but, std::function<bool(const Button &)> func);
@@ -91,7 +88,7 @@ void template_breadcrumbs(Layout &layout, Span<ContextPathItem> context_path);
 
 void attribute_search_add_items(StringRef str,
                                 bool can_create_attribute,
-                                Span<const nodes::geo_eval_log::GeometryAttributeInfo *> infos,
+                                Span<const nodes::eval_log::GeometryAttributeInfo *> infos,
                                 SearchItems *items,
                                 bool is_first);
 void grease_pencil_layer_search_add_items(StringRef str,
@@ -232,7 +229,7 @@ enum eUIListFilterResult {
 
 /**
  * Function object for UI list item filtering that does the default name comparison with '*'
- * wildcards. Create an instance of this once and pass it to #list_filter_and_sort_items(), do
+ * wildcards. Create an instance of this once and pass it to #uilist_filter_and_sort_items(), do
  * NOT create an instance for every item, this would be costly.
  */
 class uiListNameFilter {
@@ -269,12 +266,12 @@ using uiListItemGetNameFn = FunctionRef<std::string(const PointerRNA &itemptr, i
  * \param get_name_fn: In some cases the name cannot be retrieved via RNA. This function can be set
  *                     to provide the name still.
  */
-void list_filter_and_sort_items(uiList *ui_list,
-                                const bContext *C,
-                                uiListItemFilterFn item_filter_fn,
-                                PointerRNA *dataptr,
-                                const char *propname,
-                                uiListItemGetNameFn get_name_fn = nullptr);
+void uilist_filter_and_sort_items(uiList *ui_list,
+                                  const bContext *C,
+                                  uiListItemFilterFn item_filter_fn,
+                                  PointerRNA *dataptr,
+                                  const char *propname,
+                                  uiListItemGetNameFn get_name_fn = nullptr);
 
 /**
  * Override this for all available view types.

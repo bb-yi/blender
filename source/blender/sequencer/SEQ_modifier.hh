@@ -19,7 +19,6 @@ namespace blender {
 struct ARegionType;
 struct BlendDataReader;
 struct BlendWriter;
-struct ImBuf;
 struct Strip;
 struct StripModifierData;
 struct ID;
@@ -57,7 +56,7 @@ struct StripModifierTypeInfo {
   void (*copy_data)(StripModifierData *smd, StripModifierData *target);
 
   /* Apply modifier on an image buffer. */
-  void (*apply)(ModifierApplyContext &context, StripModifierData *smd, ImBuf *mask);
+  void (*apply)(ModifierApplyContext &context, StripModifierData *smd);
 
   /** Register the panel types for the modifier's UI. */
   void (*panel_register)(ARegionType *region_type);
@@ -86,16 +85,20 @@ struct StripModifierDataRuntime {
 
 void modifiers_init();
 
-const StripModifierTypeInfo *modifier_type_info_get(int type);
-StripModifierData *modifier_new(Strip *strip, const char *name, int type);
+const StripModifierTypeInfo *modifier_type_info_get(eStripModifierType type);
+StripModifierData *modifier_new(Strip *strip, const char *name, eStripModifierType type);
 bool modifier_remove(Strip *strip, StripModifierData *smd);
 void modifier_clear(Strip *strip);
 void modifier_free(StripModifierData *smd);
 void modifier_unique_name(Strip *strip, StripModifierData *smd);
 StripModifierData *modifier_find_by_name(Strip *strip, const char *name);
-StripModifierData *modifier_copy(Strip &strip_dst, StripModifierData *mod_src);
-void modifier_list_copy(Strip *strip_new, Strip *strip);
-int sequence_supports_modifiers(Strip *strip);
+/**
+ * Copy the `mod_src` modifier and add it to `strip_dst`.
+ * \param flag: The flag used for copying the system ID properties.
+ */
+StripModifierData *modifier_copy(Strip &strip_dst, StripModifierData *mod_src, int flag);
+void modifier_list_copy(Strip *strip_new, Strip *strip, int flag);
+bool strip_supports_modifiers(const Strip *strip);
 
 void modifier_blend_write(BlendWriter *writer, ListBaseT<StripModifierData> *modbase);
 void modifier_blend_read_data(BlendDataReader *reader, ListBaseT<StripModifierData> *lb);
@@ -111,6 +114,9 @@ void modifier_type_panel_id(eStripModifierType type, char *r_idname);
 
 /* Iterate over all the modifiers and call the callback function for every referenced ID. */
 void foreach_strip_modifier_id(Strip *strip, const FunctionRef<void(ID *)> fn);
+
+void compositor_nodes_update_interface(Scene &sequencer_scene,
+                                       SequencerCompositorModifierData &cmd);
 
 }  // namespace seq
 }  // namespace blender

@@ -61,7 +61,7 @@ bool tex_node_poll_default(const bke::bNodeType *ntype,
                            const bNodeTree *ntree,
                            const char **r_disabled_hint);
 void tex_node_type_base(bke::bNodeType *ntype,
-                        std::string idname,
+                        UString idname,
                         std::optional<int16_t> legacy_type = std::nullopt);
 
 void tex_input_rgba(float *out, bNodeStack *in, TexParams *params, short thread);

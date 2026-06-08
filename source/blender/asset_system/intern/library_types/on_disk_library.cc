@@ -10,12 +10,11 @@
 
 namespace blender::asset_system {
 
-OnDiskAssetLibrary::OnDiskAssetLibrary(
-    eAssetLibraryType library_type,
-    StringRef name,
-    StringRef root_path,
-    std::optional<AssetCatalogService::read_only_tag> catalogs_read_only_tag)
-    : AssetLibrary(library_type, name, root_path, catalogs_read_only_tag)
+OnDiskAssetLibrary::OnDiskAssetLibrary(eAssetLibraryType library_type,
+                                       StringRef name,
+                                       StringRef root_path,
+                                       const bool is_read_only)
+    : AssetLibrary(library_type, /*is_read_only=*/is_read_only, name, root_path)
 {
   this->on_blend_save_handler_register();
 }
@@ -32,6 +31,11 @@ std::optional<AssetLibraryReference> OnDiskAssetLibrary::library_reference() con
   BLI_assert_msg(false,
                  "Library references are only available for built-in libraries and libraries "
                  "configured in the Preferences");
+  return {};
+}
+
+std::optional<eAssetImportMethod> OnDiskAssetLibrary::import_method() const
+{
   return {};
 }
 

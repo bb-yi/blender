@@ -7,11 +7,6 @@ if(NOT HIP_FOUND)
   return()
 endif()
 
-if(NOT HIP_VERSION MATCHES "${RELEASE_HIP_VERSION}.*")
-  message(STATUS "Wrong HIP compiler version (expected ${RELEASE_HIP_VERSION}), skipping HIPRT build")
-  return()
-endif()
-
 # Note the utility apps may use png/tiff/gif system libraries, but the
 # library itself does not depend on them, so should give no problems.
 
@@ -58,26 +53,16 @@ add_dependencies(
 )
 
 if(WIN32)
-  # Strip version from shared library name.
-  ExternalProject_Add_Step(external_hiprt after_install
-    COMMAND ${CMAKE_COMMAND} -E rename
-      ${LIBDIR}/hiprt/bin/hiprt${HIPRT_LIBRARY_VERSION}64.dll ${LIBDIR}/hiprt/bin/hiprt64.dll
+  if(BUILD_MODE STREQUAL Release)
+    ExternalProject_Add_Step(external_hiprt after_install
+      COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${LIBDIR}/hiprt
+        ${HARVEST_TARGET}/hiprt
 
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-      ${LIBDIR}/hiprt
-      ${HARVEST_TARGET}/hiprt
-
-    DEPENDEES install
-  )
+      DEPENDEES install
+    )
+  endif()
 else()
-  # Strip version from shared library name.
-  ExternalProject_Add_Step(external_hiprt after_install
-    COMMAND ${CMAKE_COMMAND} -E rename
-      ${LIBDIR}/hiprt/bin/${LIBPREFIX}hiprt${HIPRT_LIBRARY_VERSION}64.so ${LIBDIR}/hiprt/bin/${LIBPREFIX}hiprt64.so
-
-
-    DEPENDEES install
-  )
   harvest(external_hiprt hiprt/include hiprt/include "*.h")
   harvest(external_hiprt hiprt/bin hiprt/lib "*${SHAREDLIBEXT}*")
   harvest(external_hiprt hiprt/bin hiprt/lib "*.hipfb")

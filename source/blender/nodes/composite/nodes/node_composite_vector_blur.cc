@@ -27,27 +27,34 @@ static void node_declare(NodeDeclarationBuilder &b)
 {
   b.use_custom_socket_order();
   b.allow_any_socket_order();
-  b.add_input<decl::Color>("Image")
+  b.add_input<decl::Color>("Image"_ustr)
       .default_value({1.0f, 1.0f, 1.0f, 1.0f})
       .hide_value()
       .structure_type(StructureType::Dynamic);
-  b.add_output<decl::Color>("Image").structure_type(StructureType::Dynamic).align_with_previous();
+  b.add_output<decl::Color>("Image"_ustr)
+      .structure_type(StructureType::Dynamic)
+      .align_with_previous();
 
-  b.add_input<decl::Vector>("Speed")
+  b.add_input<decl::Vector>("Speed"_ustr)
       .dimensions(4)
       .default_value({0.0f, 0.0f, 0.0f})
       .min(0.0f)
       .max(1.0f)
       .subtype(PROP_VELOCITY)
       .structure_type(StructureType::Dynamic);
-  b.add_input<decl::Float>("Depth", "Z")
+  b.add_input<decl::Float>("Depth"_ustr, "Z"_ustr)
       .default_value(0.0f)
       .min(0.0f)
       .structure_type(StructureType::Dynamic);
-  b.add_input<decl::Int>("Samples").default_value(32).min(1).max(256).description(
-      "The number of samples used to approximate the motion blur");
-  b.add_input<decl::Float>("Shutter").default_value(0.5f).min(0.0f).description(
-      "Time between shutter opening and closing in frames");
+  b.add_input<decl::Int>("Samples"_ustr)
+      .default_value(32)
+      .min(1)
+      .max(256)
+      .description("The number of samples used to approximate the motion blur");
+  b.add_input<decl::Float>("Shutter"_ustr)
+      .default_value(0.5f)
+      .min(0.0f)
+      .description("Time between shutter opening and closing in frames");
 }
 
 using namespace blender::compositor;
@@ -183,7 +190,8 @@ static Result dilate_max_velocity_cpu(Context &context,
   if (max_tile_velocity.is_single_value()) {
     Result output = context.create_result(ResultType::Float4);
     output.allocate_single_value();
-    output.set_single_value(max_tile_velocity.get_single_value<float4>());
+    output.set_single_value(max_tile_velocity.get_single_value<float4>() *
+                            float4(float2(shutter_speed), float2(-shutter_speed)));
     return output;
   }
 
@@ -671,7 +679,7 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, "CompositorNodeVecBlur", CMP_NODE_VECBLUR);
+  cmp_node_type_base(&ntype, "CompositorNodeVecBlur"_ustr, CMP_NODE_VECBLUR);
   ntype.ui_name = "Vector Blur";
   ntype.ui_description = "Uses the vector speed render pass to blur the image pixels in 2D";
   ntype.enum_name_legacy = "VECBLUR";

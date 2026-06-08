@@ -112,7 +112,7 @@ void BKE_fcurves_free(ListBaseT<FCurve> *list)
   }
 
   /* Clear pointers just in case. */
-  BLI_listbase_clear(list);
+  list->clear_no_delete();
 }
 
 /** \} */
@@ -159,7 +159,7 @@ void BKE_fcurves_copy(ListBaseT<FCurve> *dst, ListBaseT<FCurve> *src)
   }
 
   /* Clear destination list first. */
-  BLI_listbase_clear(dst);
+  dst->clear_no_delete();
 
   /* Copy one-by-one. */
   for (FCurve &sfcu : *src) {
@@ -189,6 +189,16 @@ void BKE_fmodifier_name_set(FModifier *fcm, const char *name)
                  '.',
                  offsetof(FModifier, name),
                  sizeof(fcm->name));
+}
+
+void BKE_fmodifier_ensure_flag(ListBaseT<FModifier> *modifiers)
+{
+  for (FModifier &fcm : *modifiers) {
+    const FModifierTypeInfo *fmi = get_fmodifier_typeinfo(fcm.type);
+    if (fmi && fmi->requires_flag & FMI_REQUIRES_ORIGINAL_DATA) {
+      SET_FLAG_FROM_TEST(fcm.flag, &fcm != modifiers->first, FMODIFIER_FLAG_DISABLED);
+    }
+  }
 }
 
 void BKE_fcurve_foreach_id(FCurve *fcu, LibraryForeachIDData *data)
@@ -318,7 +328,7 @@ FCurve *BKE_animadata_fcurve_find_by_rna_path(
   }
 
   /* If not animated, check if driven. */
-  const bool has_drivers = !BLI_listbase_is_empty(&animdata->drivers);
+  const bool has_drivers = !animdata->drivers.is_empty();
   if (has_drivers) {
     FCurve *fcu = BKE_fcurve_find(&animdata->drivers, rna_path, rna_index);
 
@@ -591,8 +601,8 @@ static void calculate_bezt_bounds_x(BezTriple *bezt_array,
     /* Need to check all handles because they might extend beyond their neighboring keys. */
     for (int i = index_range[0]; i <= index_range[1]; i++) {
       const BezTriple *bezt = &bezt_array[i];
-      *r_min = min_fff(*r_min, bezt->vec[0][0], bezt->vec[1][0]);
-      *r_max = max_fff(*r_max, bezt->vec[1][0], bezt->vec[2][0]);
+      *r_min = std::min({*r_min, bezt->vec[0][0], bezt->vec[1][0]});
+      *r_max = std::max({*r_max, bezt->vec[1][0], bezt->vec[2][0]});
     }
   }
 }
@@ -618,8 +628,8 @@ static void calculate_bezt_bounds_y(BezTriple *bezt_array,
     *r_max = max_ff(*r_max, bezt->vec[1][1]);
 
     if (include_handles) {
-      *r_min = min_fff(*r_min, bezt->vec[0][1], bezt->vec[2][1]);
-      *r_max = max_fff(*r_max, bezt->vec[0][1], bezt->vec[2][1]);
+      *r_min = std::min({*r_min, bezt->vec[0][1], bezt->vec[2][1]});
+      *r_max = std::max({*r_max, bezt->vec[0][1], bezt->vec[2][1]});
     }
   }
 }
@@ -1003,7 +1013,7 @@ void fcurve_store_samples(FCurve *fcu, void *data, int start, int end, FcuSample
 
 static void init_unbaked_bezt_data(BezTriple *bezt)
 {
-  bezt->f1 = bezt->f2 = bezt->f3 = SELECT;
+  bezt->f1 = bezt->f2 = bezt->f3 = BEZT_FLAG_SELECT;
   /* Baked FCurve points always use linear interpolation. */
   bezt->ipo = BEZT_IPO_LIN;
   bezt->h1 = bezt->h2 = HD_AUTO_ANIM;
@@ -1154,7 +1164,7 @@ void BKE_fcurve_handles_recalc_ex(FCurve &fcu, const eBezTriple_Flag handle_sel_
    * - Only bezier-interpolation has handles (for now).
    */
   if (fcu.bezt == nullptr ||
-      (fcu.totvert < 2) /*|| ELEM(fcu->ipo, BEZT_IPO_CONST, BEZT_IPO_LIN) */)
+      (fcu.totvert < 2) /* || ELEM(fcu->ipo, BEZT_IPO_CONST, BEZT_IPO_LIN) */)
   {
     return;
   }
@@ -1233,7 +1243,7 @@ void BKE_fcurve_handles_recalc_ex(FCurve &fcu, const eBezTriple_Flag handle_sel_
 void BKE_fcurve_update_handle_flag_from_opposite(BezTriple &key, const HandleSide source_side)
 {
   eBezTriple_Handle source;
-  uint8_t *target;
+  eBezTriple_Handle *target;
   switch (source_side) {
     case HandleSide::LEFT: {
       source = eBezTriple_Handle(key.h1);
@@ -1268,7 +1278,7 @@ void BKE_fcurve_update_handle_flag_from_opposite(BezTriple &key, const HandleSid
 
 void BKE_fcurve_handles_recalc(FCurve &fcu)
 {
-  BKE_fcurve_handles_recalc_ex(fcu, eBezTriple_Flag(SELECT));
+  BKE_fcurve_handles_recalc_ex(fcu, BEZT_FLAG_SELECT);
 }
 
 void testhandles_fcurve(FCurve *fcu, eBezTriple_Flag sel_flag, const bool use_handle)
@@ -1848,7 +1858,7 @@ void BKE_fcurve_merge_duplicate_keys(FCurve *fcu, const int sel_flag, const bool
     }
   }
 
-  if (BLI_listbase_is_empty(&retained_keys)) {
+  if (retained_keys.is_empty()) {
     /* This may happen if none of the points were selected... */
     if (G.debug & G_DEBUG) {
       printf("%s: nothing to do for FCurve %p (rna_path = '%s')\n", __func__, fcu, fcu->rna_path);
@@ -1912,7 +1922,7 @@ void BKE_fcurve_merge_duplicate_keys(FCurve *fcu, const int sel_flag, const bool
   testhandles_fcurve(fcu, eBezTriple_Flag(sel_flag), use_handle);
 
   /* cleanup */
-  BLI_freelistN(&retained_keys);
+  retained_keys.free_no_destruct();
 }
 
 void BKE_fcurve_deduplicate_keys(FCurve *fcu)
@@ -2350,7 +2360,7 @@ static float evaluate_fcurve_ex(const FCurve *fcu, float evaltime, float cvalue)
 {
   /* Evaluate modifiers which modify time to evaluate the base curve at. */
   FModifiersStackStorage storage;
-  storage.modifier_count = BLI_listbase_count(&fcu->modifiers);
+  storage.modifier_count = fcu->modifiers.count();
   storage.size_per_modifier = evaluate_fmodifiers_storage_size_per_modifier(&fcu->modifiers);
   storage.buffer = alloca(storage.modifier_count * storage.size_per_modifier);
 
@@ -2513,7 +2523,7 @@ void BKE_fmodifiers_blend_write(BlendWriter *writer, ListBaseT<FModifier> *fmodi
 
           /* write coefficients array */
           if (data->coefficients) {
-            BLO_write_float_array(writer, data->arraysize, data->coefficients);
+            writer->write_float_array(data->arraysize, data->coefficients);
           }
 
           break;
@@ -2528,6 +2538,8 @@ void BKE_fmodifiers_blend_write(BlendWriter *writer, ListBaseT<FModifier> *fmodi
 
           break;
         }
+        default:
+          break;
       }
     }
   }
@@ -2560,16 +2572,18 @@ void BKE_fmodifiers_blend_read_data(BlendDataReader *reader,
     switch (fcm.type) {
       case FMODIFIER_TYPE_GENERATOR: {
         FMod_Generator *data = static_cast<FMod_Generator *>(fcm.data);
-        BLO_read_float_array(reader, data->arraysize, &data->coefficients);
+        BLO_read_array_and_validate_size(reader, &data->coefficients, &data->arraysize);
         break;
       }
       case FMODIFIER_TYPE_ENVELOPE: {
         FMod_Envelope *data = static_cast<FMod_Envelope *>(fcm.data);
 
-        BLO_read_struct_array(reader, FCM_EnvelopeData, data->totvert, &data->data);
+        BLO_read_array_and_validate_size(reader, &data->data, &data->totvert);
 
         break;
       }
+      default:
+        break;
     }
   }
 }
@@ -2585,7 +2599,7 @@ void BKE_fcurve_blend_write_data(BlendWriter *writer, FCurve *fcu)
   }
 
   if (fcu->rna_path) {
-    BLO_write_string(writer, fcu->rna_path);
+    writer->write_string(fcu->rna_path);
   }
 
   /* driver data */
@@ -2599,7 +2613,7 @@ void BKE_fcurve_blend_write_data(BlendWriter *writer, FCurve *fcu)
     for (DriverVar &dvar : driver->variables) {
       DRIVER_TARGETS_USED_LOOPER_BEGIN (&dvar) {
         if (dtar->rna_path) {
-          BLO_write_string(writer, dtar->rna_path);
+          writer->write_string(dtar->rna_path);
         }
       }
       DRIVER_TARGETS_LOOPER_END;
@@ -2620,9 +2634,14 @@ void BKE_fcurve_blend_write_listbase(BlendWriter *writer, ListBaseT<FCurve> *fcu
 
 void BKE_fcurve_blend_read_data(BlendDataReader *reader, FCurve *fcu)
 {
-  /* curve data */
-  BLO_read_struct_array(reader, BezTriple, fcu->totvert, &fcu->bezt);
-  BLO_read_struct_array(reader, FPoint, fcu->totvert, &fcu->fpt);
+  /* Curve data: only one of `bezt`/`fpt` is set, so guard validation to avoid clobbering
+   * `totvert` when reading the unset pointer. */
+  if (fcu->bezt) {
+    BLO_read_array_and_validate_size(reader, &fcu->bezt, &fcu->totvert);
+  }
+  if (fcu->fpt) {
+    BLO_read_array_and_validate_size(reader, &fcu->fpt, &fcu->totvert);
+  }
 
   /* rna path */
   BLO_read_string(reader, &fcu->rna_path);

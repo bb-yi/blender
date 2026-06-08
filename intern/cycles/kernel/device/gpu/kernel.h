@@ -29,6 +29,7 @@
 #include "kernel/integrator/init_from_camera.h"
 #include "kernel/integrator/intersect_closest.h"
 #include "kernel/integrator/intersect_dedicated_light.h"
+#include "kernel/integrator/intersect_mnee.h"
 #include "kernel/integrator/intersect_shadow.h"
 #include "kernel/integrator/intersect_subsurface.h"
 #include "kernel/integrator/intersect_volume_stack.h"
@@ -73,30 +74,44 @@ ccl_gpu_kernel(GPU_KERNEL_BLOCK_NUM_THREADS, GPU_KERNEL_MAX_REGISTERS)
                              ccl_global KernelWorkTile *tiles,
                              const int num_tiles,
                              ccl_global float *render_buffer,
-                             const int max_tile_work_size)
+                             const int max_tile_work_size,
+                             const ccl_global int *path_index_array,
+                             const int num_active_paths)
 {
   const int work_index = ccl_gpu_global_id_x();
 
-  if (work_index >= max_tile_work_size * num_tiles) {
-    return;
+  if (tiles) {
+    if (work_index >= max_tile_work_size * num_tiles) {
+      return;
+    }
+
+    const int tile_index = work_index / max_tile_work_size;
+    const int tile_work_index = work_index - tile_index * max_tile_work_size;
+
+    const ccl_global KernelWorkTile *tile = &tiles[tile_index];
+
+    if (tile_work_index >= tile->work_size) {
+      return;
+    }
+
+    const int state = tile->path_index_offset + tile_work_index;
+
+    uint x, y, sample;
+    ccl_gpu_kernel_call(get_work_pixel(tile, tile_work_index, &x, &y, &sample));
+
+    ccl_gpu_kernel_call(
+        integrator_init_from_camera(nullptr, state, tile, render_buffer, x, y, sample));
   }
+  else {
+    if (work_index >= num_active_paths) {
+      return;
+    }
 
-  const int tile_index = work_index / max_tile_work_size;
-  const int tile_work_index = work_index - tile_index * max_tile_work_size;
+    const int state = (path_index_array) ? path_index_array[work_index] : work_index;
 
-  const ccl_global KernelWorkTile *tile = &tiles[tile_index];
-
-  if (tile_work_index >= tile->work_size) {
-    return;
+    ccl_gpu_kernel_call(
+        integrator_init_from_camera(nullptr, state, nullptr, render_buffer, 0, 0, 0));
   }
-
-  const int state = tile->path_index_offset + tile_work_index;
-
-  uint x, y, sample;
-  ccl_gpu_kernel_call(get_work_pixel(tile, tile_work_index, &x, &y, &sample));
-
-  ccl_gpu_kernel_call(
-      integrator_init_from_camera(nullptr, state, tile, render_buffer, x, y, sample));
 }
 ccl_gpu_kernel_postfix
 
@@ -213,6 +228,22 @@ ccl_gpu_kernel(GPU_KERNEL_BLOCK_NUM_THREADS, GPU_KERNEL_MAX_REGISTERS)
 }
 ccl_gpu_kernel_postfix
 
+ccl_gpu_kernel(GPU_KERNEL_BLOCK_NUM_THREADS, GPU_KERNEL_MAX_REGISTERS)
+    ccl_gpu_kernel_signature(integrator_intersect_mnee,
+                             const ccl_global int *path_index_array,
+                             const int work_size)
+{
+#  ifdef __MNEE__
+  const int global_index = ccl_gpu_global_id_x();
+
+  if (ccl_gpu_kernel_within_bounds(global_index, work_size)) {
+    const int state = (path_index_array) ? path_index_array[global_index] : global_index;
+    ccl_gpu_kernel_call(integrator_intersect_mnee(nullptr, state));
+  }
+#  endif
+}
+ccl_gpu_kernel_postfix
+
 #  ifdef __KERNEL_ONEAPI__
 #    include "kernel/device/oneapi/context_intersect_end.h"
 #  endif
@@ -326,21 +357,6 @@ ccl_gpu_kernel(GPU_KERNEL_BLOCK_NUM_THREADS, GPU_KERNEL_MAX_REGISTERS)
 #  else
     ccl_gpu_kernel_call(integrator_shade_surface_raytrace(nullptr, state, render_buffer));
 #  endif
-  }
-}
-ccl_gpu_kernel_postfix
-
-ccl_gpu_kernel(GPU_KERNEL_BLOCK_NUM_THREADS, GPU_KERNEL_MAX_REGISTERS)
-    ccl_gpu_kernel_signature(integrator_shade_surface_mnee,
-                             const ccl_global int *path_index_array,
-                             ccl_global float *render_buffer,
-                             const int work_size)
-{
-  const int global_index = ccl_gpu_global_id_x();
-
-  if (ccl_gpu_kernel_within_bounds(global_index, work_size)) {
-    const int state = (path_index_array) ? path_index_array[global_index] : global_index;
-    ccl_gpu_kernel_call(integrator_shade_surface_mnee(nullptr, state, render_buffer));
   }
 }
 ccl_gpu_kernel_postfix
@@ -712,6 +728,7 @@ ccl_gpu_kernel(GPU_KERNEL_BLOCK_NUM_THREADS, GPU_KERNEL_MAX_REGISTERS)
   const int work_index = ccl_gpu_global_id_x();
   const int y = work_index / sw;
   const int x = work_index - y * sw;
+  const int lane_id = ccl_gpu_thread_idx_x % ccl_gpu_warp_size;
 
   bool converged = true;
 
@@ -720,12 +737,20 @@ ccl_gpu_kernel(GPU_KERNEL_BLOCK_NUM_THREADS, GPU_KERNEL_MAX_REGISTERS)
         nullptr, render_buffer, sx + x, sy + y, threshold, reset, offset, stride));
   }
 
+#ifdef __KERNEL_ONEAPI__
+  const sycl::nd_item<1> &item_id = sycl::ext::oneapi::this_work_item::get_nd_item<1>();
+  const uint num_active_pixels_in_warp = sycl::inclusive_scan_over_group(
+      item_id.get_sub_group(), static_cast<uint>(!converged), std::plus<>());
+  if (lane_id == item_id.get_sub_group().get_local_range()[0] - 1) {
+    atomic_fetch_and_add_uint32(num_active_pixels, num_active_pixels_in_warp);
+  }
+#else
   /* NOTE: All threads specified in the mask must execute the intrinsic. */
   const auto num_active_pixels_mask = ccl_gpu_ballot(!converged);
-  const int lane_id = ccl_gpu_thread_idx_x % ccl_gpu_warp_size;
   if (lane_id == 0) {
     atomic_fetch_and_add_uint32(num_active_pixels, popcount(num_active_pixels_mask));
   }
+#endif
 }
 ccl_gpu_kernel_postfix
 
@@ -942,12 +967,13 @@ ccl_gpu_kernel(GPU_KERNEL_BLOCK_NUM_THREADS, GPU_KERNEL_MAX_REGISTERS)
     ccl_gpu_kernel_signature(shader_eval_displace,
                              ccl_global KernelShaderEvalInput *input,
                              ccl_global float *output,
+                             ccl_global uint *cache_miss,
                              const int offset,
                              const int work_size)
 {
   int i = ccl_gpu_global_id_x();
   if (i < work_size) {
-    ccl_gpu_kernel_call(kernel_displace_evaluate(nullptr, input, output, offset + i));
+    ccl_gpu_kernel_call(kernel_displace_evaluate(nullptr, input, output, cache_miss, offset + i));
   }
 }
 ccl_gpu_kernel_postfix
@@ -958,12 +984,14 @@ ccl_gpu_kernel(GPU_KERNEL_BLOCK_NUM_THREADS, GPU_KERNEL_MAX_REGISTERS)
     ccl_gpu_kernel_signature(shader_eval_background,
                              ccl_global KernelShaderEvalInput *input,
                              ccl_global float *output,
+                             ccl_global uint *cache_miss,
                              const int offset,
                              const int work_size)
 {
   int i = ccl_gpu_global_id_x();
   if (i < work_size) {
-    ccl_gpu_kernel_call(kernel_background_evaluate(nullptr, input, output, offset + i));
+    ccl_gpu_kernel_call(
+        kernel_background_evaluate(nullptr, input, output, cache_miss, offset + i));
   }
 }
 ccl_gpu_kernel_postfix
@@ -974,13 +1002,14 @@ ccl_gpu_kernel(GPU_KERNEL_BLOCK_NUM_THREADS, GPU_KERNEL_MAX_REGISTERS)
     ccl_gpu_kernel_signature(shader_eval_curve_shadow_transparency,
                              ccl_global KernelShaderEvalInput *input,
                              ccl_global float *output,
+                             ccl_global uint *cache_miss,
                              const int offset,
                              const int work_size)
 {
   int i = ccl_gpu_global_id_x();
   if (i < work_size) {
     ccl_gpu_kernel_call(
-        kernel_curve_shadow_transparency_evaluate(nullptr, input, output, offset + i));
+        kernel_curve_shadow_transparency_evaluate(nullptr, input, output, cache_miss, offset + i));
   }
 }
 ccl_gpu_kernel_postfix
@@ -991,12 +1020,14 @@ ccl_gpu_kernel(GPU_KERNEL_BLOCK_NUM_THREADS, GPU_KERNEL_MAX_REGISTERS)
     ccl_gpu_kernel_signature(shader_eval_volume_density,
                              ccl_global KernelShaderEvalInput *input,
                              ccl_global float *output,
+                             ccl_global uint *cache_miss,
                              const int offset,
                              const int work_size)
 {
   int i = ccl_gpu_global_id_x();
   if (i < work_size) {
-    ccl_gpu_kernel_call(kernel_volume_density_evaluate(nullptr, input, output, offset + i));
+    ccl_gpu_kernel_call(
+        kernel_volume_density_evaluate(nullptr, input, output, cache_miss, offset + i));
   }
 }
 ccl_gpu_kernel_postfix
@@ -1153,13 +1184,18 @@ ccl_gpu_kernel(GPU_KERNEL_BLOCK_NUM_THREADS, GPU_KERNEL_MAX_REGISTERS)
                              const int height,
                              const int offset,
                              const int stride,
+                             const int render_full_x,
+                             const int render_full_y,
+                             const int render_offset,
+                             const int render_stride,
                              const int pass_stride,
                              const int num_samples,
                              const int pass_noisy,
                              const int pass_denoised,
                              const int pass_sample_count,
                              const int num_components,
-                             const int use_compositing)
+                             const int use_compositing,
+                             const float upscale_factor)
 {
   const int work_index = ccl_gpu_global_id_x();
   const int y = work_index / width;
@@ -1169,7 +1205,8 @@ ccl_gpu_kernel(GPU_KERNEL_BLOCK_NUM_THREADS, GPU_KERNEL_MAX_REGISTERS)
     return;
   }
 
-  const uint64_t render_pixel_index = offset + (x + full_x) + (y + full_y) * stride;
+  const uint64_t render_pixel_index = render_offset + (int(x / upscale_factor) + render_full_x) +
+                                      (int(y / upscale_factor) + render_full_y) * render_stride;
   ccl_global float *buffer = render_buffer + render_pixel_index * pass_stride;
 
   float pixel_scale;
@@ -1180,11 +1217,15 @@ ccl_gpu_kernel(GPU_KERNEL_BLOCK_NUM_THREADS, GPU_KERNEL_MAX_REGISTERS)
     pixel_scale = __float_as_uint(buffer[pass_sample_count]);
   }
 
-  ccl_global float *denoised_pixel = buffer + pass_denoised;
+  const uint64_t denoised_pixel_index = offset + (x + full_x) + (y + full_y) * stride;
+  ccl_global float *denoised_pixel = render_buffer + denoised_pixel_index * pass_stride +
+                                     pass_denoised;
 
-  denoised_pixel[0] *= pixel_scale;
-  denoised_pixel[1] *= pixel_scale;
-  denoised_pixel[2] *= pixel_scale;
+  if (pass_sample_count == PASS_UNUSED || upscale_factor == 1.0f) {
+    denoised_pixel[0] *= pixel_scale;
+    denoised_pixel[1] *= pixel_scale;
+    denoised_pixel[2] *= pixel_scale;
+  }
 
   if (num_components == 3) {
     /* Pass without alpha channel. */
@@ -1195,6 +1236,10 @@ ccl_gpu_kernel(GPU_KERNEL_BLOCK_NUM_THREADS, GPU_KERNEL_MAX_REGISTERS)
      * simplifies logic and avoids extra memory allocation. */
     const ccl_global float *noisy_pixel = buffer + pass_noisy;
     denoised_pixel[3] = noisy_pixel[3];
+
+    if (pass_sample_count != PASS_UNUSED && upscale_factor != 1.0f) {
+      denoised_pixel[3] /= pixel_scale;
+    }
   }
   else {
     /* Assigning to zero since this is a default alpha value for 3-component passes, and it
@@ -1251,6 +1296,7 @@ ccl_gpu_kernel(GPU_KERNEL_BLOCK_NUM_THREADS, GPU_KERNEL_MAX_REGISTERS)
                              ccl_global uint *num_possible_splits)
 {
   const int state = ccl_gpu_global_id_x();
+  const int lane_id = ccl_gpu_thread_idx_x % ccl_gpu_warp_size;
 
   bool can_split = false;
 
@@ -1258,12 +1304,20 @@ ccl_gpu_kernel(GPU_KERNEL_BLOCK_NUM_THREADS, GPU_KERNEL_MAX_REGISTERS)
     can_split = ccl_gpu_kernel_call(kernel_shadow_catcher_path_can_split(state));
   }
 
+#ifdef __KERNEL_ONEAPI__
+  const sycl::nd_item<1> &item_id = sycl::ext::oneapi::this_work_item::get_nd_item<1>();
+  const uint num_possible_splits_in_warp = sycl::inclusive_scan_over_group(
+      item_id.get_sub_group(), static_cast<uint>(can_split), std::plus<>());
+  if (lane_id == item_id.get_sub_group().get_local_range()[0] - 1) {
+    atomic_fetch_and_add_uint32(num_possible_splits, num_possible_splits_in_warp);
+  }
+#else
   /* NOTE: All threads specified in the mask must execute the intrinsic. */
   const auto can_split_mask = ccl_gpu_ballot(can_split);
-  const int lane_id = ccl_gpu_thread_idx_x % ccl_gpu_warp_size;
   if (lane_id == 0) {
     atomic_fetch_and_add_uint32(num_possible_splits, popcount(can_split_mask));
   }
+#endif
 }
 ccl_gpu_kernel_postfix
 

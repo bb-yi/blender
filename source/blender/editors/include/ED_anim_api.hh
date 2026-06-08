@@ -621,14 +621,15 @@ void ANIM_animdata_freelist(ListBaseT<bAnimListElem> *anim_data);
  */
 bool ANIM_animdata_can_have_greasepencil(const eAnimCont_Types type);
 
-bAction *ANIM_active_action_from_area(Scene *scene,
+bAction *ANIM_active_action_from_area(const Main &bmain,
+                                      Scene *scene,
                                       ViewLayer *view_layer,
                                       const ScrArea *area,
                                       ID **r_action_user = nullptr);
 
 /* ************************************************ */
 /* ANIMATION CHANNELS LIST */
-/* anim_channels_*.c */
+/* anim_channels_*.cc */
 
 /** \} */
 
@@ -1258,10 +1259,7 @@ void ED_anim_ale_fcurve_delete(bAnimContext &ac, bAnimListElem &ale);
 
 /* ************************************************ */
 
-enum eAnimvizCalcRange {
-  /** Update motion paths at the current frame only. */
-  ANIMVIZ_CALC_RANGE_CURRENT_FRAME,
-
+enum eAnimvizCalcRange : uint8_t {
   /** Try to limit updates to a close neighborhood of the current frame. */
   ANIMVIZ_CALC_RANGE_CHANGED,
 
@@ -1269,17 +1267,24 @@ enum eAnimvizCalcRange {
   ANIMVIZ_CALC_RANGE_FULL,
 };
 
+/**
+ * Build a partial depsgraph with only the IDs of the given `targets`.
+ */
 Depsgraph *animviz_depsgraph_build(Main *bmain,
                                    Scene *scene,
                                    ViewLayer *view_layer,
                                    Span<MPathTarget *> targets);
 
+/**
+ * Evaluated the given `depsgraph` for all targets.
+ *
+ * \param range: determines which frames the Depsgraph is evaluated for.
+ * This can have big performance implications.
+ */
 void animviz_calc_motionpaths(Depsgraph *depsgraph,
-                              Main *bmain,
                               Scene *scene,
                               MutableSpan<MPathTarget *> targets,
-                              eAnimvizCalcRange range,
-                              bool restore);
+                              eAnimvizCalcRange range);
 
 /**
  * Update motion path computation range (in `ob.avs` or `armature.avs`) from user choice in

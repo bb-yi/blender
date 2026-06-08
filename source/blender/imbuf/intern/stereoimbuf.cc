@@ -624,8 +624,8 @@ ImBuf *IMB_stereo3d_ImBuf(const ImageFormatData *im_format, ImBuf *ibuf_left, Im
   ImBuf *ibuf_stereo = nullptr;
   Stereo3DData s3d_data = {{nullptr}};
   size_t width, height;
-  const bool is_byte = ibuf_left->byte_buffer.data && ibuf_right->byte_buffer.data;
-  const bool is_float = ibuf_left->float_buffer.data && ibuf_right->float_buffer.data &&
+  const bool is_byte = ibuf_left->byte_data() && ibuf_right->byte_data();
+  const bool is_float = ibuf_left->float_data() && ibuf_right->float_data() &&
                         !(is_byte && im_format->depth <= 8);
 
   if (!(is_float || is_byte)) {
@@ -634,7 +634,8 @@ ImBuf *IMB_stereo3d_ImBuf(const ImageFormatData *im_format, ImBuf *ibuf_left, Im
 
   IMB_stereo3d_write_dimensions(
       im_format->stereo3d_format.display_mode, false, ibuf_left->x, ibuf_left->y, &width, &height);
-  ibuf_stereo = IMB_allocImBuf(width, height, ibuf_left->planes, 0);
+  ibuf_stereo = IMB_allocImBuf(width, height, ImBufFlags::Zero);
+  ibuf_stereo->color_mode = ibuf_left->color_mode;
 
   if (is_float) {
     IMB_alloc_float_pixels(ibuf_stereo, ibuf_left->channels);
@@ -652,12 +653,12 @@ ImBuf *IMB_stereo3d_ImBuf(const ImageFormatData *im_format, ImBuf *ibuf_left, Im
                          ibuf_left->x,
                          ibuf_left->y,
                          ibuf_left->channels,
-                         reinterpret_cast<int *>(ibuf_left->byte_buffer.data),
-                         reinterpret_cast<int *>(ibuf_right->byte_buffer.data),
-                         reinterpret_cast<int *>(ibuf_stereo->byte_buffer.data),
-                         ibuf_left->float_buffer.data,
-                         ibuf_right->float_buffer.data,
-                         ibuf_stereo->float_buffer.data);
+                         reinterpret_cast<int *>(ibuf_left->byte_data_for_write()),
+                         reinterpret_cast<int *>(ibuf_right->byte_data_for_write()),
+                         reinterpret_cast<int *>(ibuf_stereo->byte_data_for_write()),
+                         ibuf_left->float_data_for_write(),
+                         ibuf_right->float_data_for_write(),
+                         ibuf_stereo->float_data_for_write());
 
   imb_stereo3d_write_doit(&s3d_data, &im_format->stereo3d_format);
   imb_stereo3d_squeeze_ImBuf(ibuf_stereo, &im_format->stereo3d_format, ibuf_left->x, ibuf_left->y);
@@ -1156,7 +1157,7 @@ void IMB_ImBufFromStereo3d(const Stereo3dFormat *s3d,
   Stereo3DData s3d_data = {{nullptr}};
   ImBuf *ibuf_left, *ibuf_right;
   size_t width, height;
-  const bool is_float = (ibuf_stereo3d->float_buffer.data != nullptr);
+  const bool is_float = (ibuf_stereo3d->float_data() != nullptr);
 
   IMB_stereo3d_read_dimensions(s3d->display_mode,
                                ((s3d->flag & S3D_SQUEEZED_FRAME) == 0),
@@ -1165,8 +1166,9 @@ void IMB_ImBufFromStereo3d(const Stereo3dFormat *s3d,
                                &width,
                                &height);
 
-  ibuf_left = IMB_allocImBuf(width, height, ibuf_stereo3d->planes, 0);
-  ibuf_right = IMB_allocImBuf(width, height, ibuf_stereo3d->planes, 0);
+  ibuf_left = IMB_allocImBuf(width, height, ImBufFlags::Zero);
+  ibuf_right = IMB_allocImBuf(width, height, ImBufFlags::Zero);
+  ibuf_left->color_mode = ibuf_right->color_mode = ibuf_stereo3d->color_mode;
 
   if (is_float) {
     IMB_alloc_float_pixels(ibuf_left, ibuf_stereo3d->channels);
@@ -1194,12 +1196,12 @@ void IMB_ImBufFromStereo3d(const Stereo3dFormat *s3d,
                          ibuf_left->x,
                          ibuf_left->y,
                          ibuf_left->channels,
-                         reinterpret_cast<int *>(ibuf_left->byte_buffer.data),
-                         reinterpret_cast<int *>(ibuf_right->byte_buffer.data),
-                         reinterpret_cast<int *>(ibuf_stereo3d->byte_buffer.data),
-                         ibuf_left->float_buffer.data,
-                         ibuf_right->float_buffer.data,
-                         ibuf_stereo3d->float_buffer.data);
+                         reinterpret_cast<int *>(ibuf_left->byte_data_for_write()),
+                         reinterpret_cast<int *>(ibuf_right->byte_data_for_write()),
+                         reinterpret_cast<int *>(ibuf_stereo3d->byte_data_for_write()),
+                         ibuf_left->float_data_for_write(),
+                         ibuf_right->float_data_for_write(),
+                         ibuf_stereo3d->float_data_for_write());
 
   imb_stereo3d_read_doit(&s3d_data, s3d);
 

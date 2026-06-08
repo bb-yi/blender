@@ -121,6 +121,8 @@ class Shader : public Node {
   bool has_volume_spatial_varying;
   bool has_volume_attribute_dependency;
   bool has_light_path_node;
+  bool has_aov_output_node;
+  bool has_time_dependency;
 
   float3 emission_estimate;
   EmissionSampling emission_sampling;
@@ -128,6 +130,7 @@ class Shader : public Node {
 
   /* requested mesh attributes */
   AttributeRequestSet attributes;
+  AttributeRequestSet global_attributes;
 
   /* determined before compiling */
   uint id;
@@ -204,7 +207,7 @@ class ShaderManager {
   virtual uint64_t get_attribute_id(AttributeStandard std);
 
   /* get shader id for mesh faces */
-  int get_shader_id(Shader *shader, bool smooth = false);
+  int get_shader_id(const Shader *shader, bool smooth = false);
 
   /* add default shaders to scene, to use as default for things that don't
    * have any shader assigned explicitly */

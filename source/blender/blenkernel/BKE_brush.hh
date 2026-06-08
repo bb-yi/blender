@@ -12,6 +12,7 @@
 
 #include <optional>
 
+#include "BLI_math_vector_types.hh"
 #include "BLI_span.hh"
 
 #include "DNA_brush_enums.h"
@@ -75,6 +76,8 @@ Brush *BKE_brush_duplicate(Main *bmain,
  */
 void BKE_brush_init_gpencil_settings(Brush *brush);
 
+void BKE_brush_init_mesh_automasking_settings(Brush *brush);
+
 void BKE_brush_init_curves_sculpt_settings(Brush *brush);
 
 /**
@@ -90,12 +93,7 @@ void BKE_brush_init_curves_sculpt_settings(Brush *brush);
  */
 void BKE_brush_tag_unsaved_changes(Brush *brush);
 
-Brush *BKE_brush_first_search(Main *bmain, eObjectMode ob_mode);
-
-void BKE_brush_jitter_pos(const Paint &paint,
-                          const Brush &brush,
-                          const float pos[2],
-                          float jitterpos[2]);
+float2 BKE_brush_jitter_pos(const Paint &paint, const Brush &brush, const float2 &pos);
 void BKE_brush_randomize_texture_coords(Paint *paint, bool mask);
 
 /* Brush curve. */
@@ -142,12 +140,12 @@ float BKE_brush_curve_strength(const Brush *br, float p, float len);
 float BKE_brush_sample_tex_3d(const Paint *paint,
                               const Brush *br,
                               const MTex *mtex,
-                              const float point[3],
-                              float rgba[4],
+                              const float3 &point,
+                              float4 &rgba,
                               int thread,
                               ImagePool *pool);
 float BKE_brush_sample_masktex(
-    const Paint *paint, Brush *br, const float point[2], int thread, ImagePool *pool);
+    const Paint *paint, Brush *br, const float2 &point, int thread, ImagePool *pool);
 
 /**
  * Get the mask texture for this given object mode.
@@ -185,11 +183,11 @@ struct BrushColorJitterSettings {
   CurveMapping *curve_val_jitter;
 };
 
-const float *BKE_brush_color_get(const Paint *paint, const Brush *brush);
+float3 BKE_brush_color_get(const Paint *paint, const Brush *brush);
 std::optional<BrushColorJitterSettings> BKE_brush_color_jitter_get_settings(const Paint *paint,
                                                                             const Brush *brush);
-const float *BKE_brush_secondary_color_get(const Paint *paint, const Brush *brush);
-void BKE_brush_color_set(Paint *paint, Brush *brush, const float color[3]);
+float3 BKE_brush_secondary_color_get(const Paint *paint, const Brush *brush);
+void BKE_brush_color_set(Paint *paint, Brush *brush, const float3 &color);
 
 void BKE_brush_color_sync_legacy(Brush *brush);
 void BKE_brush_color_sync_legacy(UnifiedPaintSettings *ups);
@@ -232,6 +230,10 @@ void BKE_brush_scale_size(int *r_brush_size,
  * (often presented to the user as a square) tip inside a specific paint mode.
  */
 bool BKE_brush_has_cube_tip(const Brush *brush, PaintMode paint_mode);
+
+namespace bke::brush {
+float normal_weight_get(const Brush &brush, bool invert);
+}
 
 /* debugging only */
 void BKE_brush_debug_print_state(Brush *br);

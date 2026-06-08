@@ -2,30 +2,38 @@
 #
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-macro(list_insert_after
+# Insert `item_add` into the list after `item_check`.
+#
+# Modifies in parent scope:
+# - `${list_id}`: the modified list.
+function(list_insert_after
   list_id item_check item_add
   )
   set(_index "")
   list(FIND "${list_id}" "${item_check}" _index)
-  if("${_index}" MATCHES "-1")
+  if(${_index} EQUAL -1)
     message(FATAL_ERROR "'${list_id}' doesn't contain '${item_check}'")
   endif()
   math(EXPR _index "${_index} + 1")
   list(INSERT ${list_id} "${_index}" ${item_add})
-  unset(_index)
-endmacro()
+  set(${list_id} "${${list_id}}" PARENT_SCOPE)
+endfunction()
 
-macro(list_insert_before
+# Insert `item_add` into the list before `item_check`.
+#
+# Modifies in parent scope:
+# - `${list_id}`: the modified list.
+function(list_insert_before
   list_id item_check item_add
   )
   set(_index "")
   list(FIND "${list_id}" "${item_check}" _index)
-  if("${_index}" MATCHES "-1")
+  if(${_index} EQUAL -1)
     message(FATAL_ERROR "'${list_id}' doesn't contain '${item_check}'")
   endif()
   list(INSERT ${list_id} "${_index}" ${item_add})
-  unset(_index)
-endmacro()
+  set(${list_id} "${${list_id}}" PARENT_SCOPE)
+endfunction()
 
 function(list_assert_duplicates
   list_id
@@ -50,79 +58,69 @@ endfunction()
 # - 'example' -> 'example/'
 # - '/example///' -> '/example/'
 #
-macro(path_ensure_trailing_slash
+# Return values:
+# - `${path_new}`: the path with a trailing separator.
+function(path_ensure_trailing_slash
   path_new path_input
   )
   file(TO_NATIVE_PATH "/" _path_sep)
-  string(REGEX REPLACE "[${_path_sep}]+$" "" ${path_new} ${path_input})
-  set(${path_new} "${${path_new}}${_path_sep}")
-  unset(_path_sep)
-endmacro()
+  # Escape for use in regex (`string(REGEX QUOTE ...)` is only available in CMake 4.2+).
+  string(REPLACE "\\" "\\\\" _path_sep_escaped "${_path_sep}")
+  string(REGEX REPLACE "[${_path_sep_escaped}]+$" "" ${path_new} ${path_input})
+  set(${path_new} "${${path_new}}${_path_sep}" PARENT_SCOPE)
+endfunction()
 
-macro(path_strip_trailing_slash
+# Strip trailing path separators.
+#
+# Return values:
+# - `${path_new}`: the path without trailing separators.
+function(path_strip_trailing_slash
   path_new path_input
   )
   file(TO_NATIVE_PATH "/" _path_sep)
-  string(REGEX REPLACE "[${_path_sep}]+$" "" ${path_new} ${path_input})
-endmacro()
+  # Escape for use in regex (`string(REGEX QUOTE ...)` is only available in CMake 4.2+).
+  string(REPLACE "\\" "\\\\" _path_sep_escaped "${_path_sep}")
+  string(REGEX REPLACE "[${_path_sep_escaped}]+$" "" ${path_new} ${path_input})
+  set(${path_new} "${${path_new}}" PARENT_SCOPE)
+endfunction()
 
-# Our own version of `cmake_path(IS_PREFIX ..)`.
-# This can be removed when 3.20 or greater is the minimum supported version.
-macro(path_is_prefix
-  path_prefix path result_var
-  )
-  # Remove when CMAKE version is bumped to "3.20" or greater.
-  # `cmake_path(IS_PREFIX ${path_prefix} ${path} NORMALIZE result_var)`
-  # Get the normalized paths (needed to remove `..`).
-  get_filename_component(_abs_prefix "${${path_prefix}}" ABSOLUTE)
-  get_filename_component(_abs_suffix "${${path}}" ABSOLUTE)
-  string(LENGTH "${_abs_prefix}" _len)
-  string(SUBSTRING "${_abs_suffix}" 0 "${_len}" _substr)
-  string(COMPARE EQUAL "${_abs_prefix}" "${_substr}" "${result_var}")
-  unset(_abs_prefix)
-  unset(_abs_suffix)
-  unset(_len)
-  unset(_substr)
-endmacro()
 
 # foo_bar.spam --> foo_barMySuffix.spam
-macro(file_suffix
+#
+# Return values:
+# - `${file_name_new}`: the file name with the suffix inserted.
+function(file_suffix
   file_name_new file_name file_suffix
   )
 
   get_filename_component(_file_name_PATH ${file_name} PATH)
   get_filename_component(_file_name_NAME_WE ${file_name} NAME_WE)
   get_filename_component(_file_name_EXT ${file_name} EXT)
-  set(${file_name_new} "${_file_name_PATH}/${_file_name_NAME_WE}${file_suffix}${_file_name_EXT}")
-
-  unset(_file_name_PATH)
-  unset(_file_name_NAME_WE)
-  unset(_file_name_EXT)
-endmacro()
+  set(${file_name_new} "${_file_name_PATH}/${_file_name_NAME_WE}${file_suffix}${_file_name_EXT}" PARENT_SCOPE)
+endfunction()
 
 # useful for adding debug suffix to library lists:
 # /somepath/foo.lib --> /somepath/foo_d.lib
-macro(file_list_suffix
+#
+# Return values:
+# - `${fp_list_new}`: the list with suffixes applied to each entry.
+function(file_list_suffix
   fp_list_new fp_list fn_suffix
   )
 
-  # in case of empty list
-  set(_fp "")
-  set(_fp_suffixed "")
-
-  set(fp_list_new "")
+  set(_fp_list_new "")
 
   foreach(_fp ${fp_list})
     file_suffix(_fp_suffixed "${_fp}" "${fn_suffix}")
-    list(APPEND "${fp_list_new}" "${_fp_suffixed}")
+    list(APPEND _fp_list_new "${_fp_suffixed}")
   endforeach()
 
-  unset(_fp)
-  unset(_fp_suffixed)
-
-endmacro()
+  set(${fp_list_new} "${_fp_list_new}" PARENT_SCOPE)
+endfunction()
 
 if(UNIX AND NOT APPLE)
+  # NOTE: must be a macro, forwards `${ARGV}` to `find_package()`
+  # whose result variables must be visible in the caller's scope.
   macro(find_package_static)
     set(_cmake_find_library_suffixes_back ${CMAKE_FIND_LIBRARY_SUFFIXES})
     set(CMAKE_FIND_LIBRARY_SUFFIXES .a ${CMAKE_FIND_LIBRARY_SUFFIXES})
@@ -131,6 +129,8 @@ if(UNIX AND NOT APPLE)
     unset(_cmake_find_library_suffixes_back)
   endmacro()
 
+  # NOTE: must be a macro, forwards `${ARGV}` to `find_library()`
+  # whose result variables must be visible in the caller's scope.
   macro(find_library_static)
     set(_cmake_find_library_suffixes_back ${CMAKE_FIND_LIBRARY_SUFFIXES})
     set(CMAKE_FIND_LIBRARY_SUFFIXES .a ${CMAKE_FIND_LIBRARY_SUFFIXES})
@@ -271,7 +271,7 @@ function(blender_source_group
       # remove ../'s
       get_filename_component(_SRC_DIR ${_SRC} REALPATH)
       get_filename_component(_SRC_DIR ${_SRC_DIR} DIRECTORY)
-      string(FIND ${_SRC_DIR} "${CMAKE_CURRENT_SOURCE_DIR}/" _pos)
+      string(FIND "${_SRC_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}/" _pos)
       if(NOT _pos EQUAL -1)
         string(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/" "" GROUP_ID ${_SRC_DIR})
         string(REPLACE "/" "\\" GROUP_ID ${GROUP_ID})
@@ -284,12 +284,12 @@ function(blender_source_group
     source_group("Source Files" FILES CMakeLists.txt)
     foreach(_SRC ${sources})
       get_filename_component(_SRC_EXT ${_SRC} EXT)
-      if((${_SRC_EXT} MATCHES ".h") OR
-         (${_SRC_EXT} MATCHES ".hpp") OR
-         (${_SRC_EXT} MATCHES ".hh"))
+      if(("${_SRC_EXT}" STREQUAL ".h") OR
+         ("${_SRC_EXT}" STREQUAL ".hpp") OR
+         ("${_SRC_EXT}" STREQUAL ".hh"))
 
         set(GROUP_ID "Header Files")
-      elseif(${_SRC_EXT} MATCHES ".glsl$")
+      elseif("${_SRC_EXT}" STREQUAL ".glsl")
         set(GROUP_ID "Shaders")
       else()
         set(GROUP_ID "Source Files")
@@ -313,18 +313,26 @@ endfunction()
 # 'name' should always match the target name,
 # use this macro before add_library or add_executable.
 #
-# Optionally takes an arg passed to set(), eg PARENT_SCOPE.
-macro(add_cc_flags_custom_test
+# Optionally takes an ARGV1 passed to set(), eg `PARENT_SCOPE`.
+#
+# NOTE: must be a macro, modifies `CMAKE_C_FLAGS` and `CMAKE_CXX_FLAGS`
+# in the caller's scope.
+macro(add_c_and_cxx_flags_custom_test
   name
   )
 
+  # NOTE: When ARGV1 is PARENT_SCOPE, propagate to the caller's parent scope.
+  # `string(APPEND)` alone only modifies the local scope, and `set()` is
+  # needed because `string(APPEND)` does not support PARENT_SCOPE.
   string(TOUPPER ${name} _name_upper)
   if(DEFINED CMAKE_C_FLAGS_${_name_upper})
     message(
       STATUS
       "Using custom CFLAGS: "
       "CMAKE_C_FLAGS_${_name_upper} in \"${CMAKE_CURRENT_SOURCE_DIR}\"")
-    string(APPEND CMAKE_C_FLAGS " ${CMAKE_C_FLAGS_${_name_upper}}" ${ARGV1})
+    string(APPEND CMAKE_C_FLAGS " ${CMAKE_C_FLAGS_${_name_upper}}")
+    # Harmless if ARGV1 isn't set.
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS}" ${ARGV1})
   endif()
   if(DEFINED CMAKE_CXX_FLAGS_${_name_upper})
     message(
@@ -332,7 +340,9 @@ macro(add_cc_flags_custom_test
       "Using custom CXXFLAGS: "
       "CMAKE_CXX_FLAGS_${_name_upper} in \"${CMAKE_CURRENT_SOURCE_DIR}\""
     )
-    string(APPEND CMAKE_CXX_FLAGS " ${CMAKE_CXX_FLAGS_${_name_upper}}" ${ARGV1})
+    string(APPEND CMAKE_CXX_FLAGS " ${CMAKE_CXX_FLAGS_${_name_upper}}")
+    # Harmless if ARGV1 isn't set.
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}" ${ARGV1})
   endif()
   unset(_name_upper)
 
@@ -462,7 +472,7 @@ function(blender_add_lib_nolist
   library_deps
   )
 
-  add_cc_flags_custom_test(${name} PARENT_SCOPE)
+  add_c_and_cxx_flags_custom_test(${name} PARENT_SCOPE)
 
   blender_add_lib__impl(${name} "${sources}" "${includes}" "${includes_sys}" "${library_deps}")
 endfunction()
@@ -475,7 +485,7 @@ function(blender_add_lib
   library_deps
   )
 
-  add_cc_flags_custom_test(${name} PARENT_SCOPE)
+  add_c_and_cxx_flags_custom_test(${name} PARENT_SCOPE)
 
   blender_add_lib__impl(${name} "${sources}" "${includes}" "${includes_sys}" "${library_deps}")
 
@@ -547,6 +557,20 @@ function(setup_platform_linker_flags
   endif()
 endfunction()
 
+# Hide internal symbols for targets that might otherwise conflict with plugins.
+function(setup_platform_linker_symbol_hiding target)
+  if(DEFINED PLATFORM_LINKFLAGS_SYMBOL_HIDING)
+    set_property(
+      TARGET ${target} APPEND_STRING PROPERTY
+      LINK_FLAGS " ${PLATFORM_LINKFLAGS_SYMBOL_HIDING}"
+    )
+  endif()
+
+  if(DEFINED PLATFORM_SYMBOLS_MAP)
+    set_target_properties(${target} PROPERTIES LINK_DEPENDS ${PLATFORM_SYMBOLS_MAP})
+  endif()
+endfunction()
+
 # Platform specific libraries for targets.
 function(setup_platform_linker_libs
   target
@@ -569,36 +593,49 @@ function(setup_platform_linker_libs
   target_link_libraries(${target} PRIVATE ${PLATFORM_LINKLIBS})
 endfunction()
 
-macro(get_sse_flags
-  _sse42_flags)
+# Return values:
+# - `${_simd_flags}`: compiler flags to enable SIMD support.
+function(get_compiler_simd_flags
+  _simd_flags)
 
-  if (CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64)|(AMD64)" OR CMAKE_OSX_ARCHITECTURES MATCHES x86_64)
-    # message(STATUS "Detecting SSE support")
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64)|(AMD64)" OR CMAKE_OSX_ARCHITECTURES MATCHES x86_64)
+    # message(STATUS "Detecting SIMD support")
     if((CMAKE_C_COMPILER_ID STREQUAL "GNU") OR (CMAKE_C_COMPILER_ID MATCHES "Clang"))
-      set(${_sse42_flags} "-march=x86-64-v2")
+      set(${_simd_flags} "-march=x86-64-v2" PARENT_SCOPE)
     elseif(MSVC)
       # MSVC has no specific compile flags for SSE42 (only for AVX).
-      set(${_sse42_flags})
+      set(${_simd_flags} PARENT_SCOPE)
       # It also doesn't define __SSE__/__MMX__ flags and only does the AVX and higher flags.
       # For consistency we define these flags for MSVC.
       add_compile_definitions(__MMX__ __SSE__ __SSE2__ __SSE3__ __SSE4_1__ __SSE4_2__)
     elseif(CMAKE_C_COMPILER_ID STREQUAL "Intel")
       if(WIN32)
-        set(${_sse42_flags} "/QxSSE4.2")
+        set(${_simd_flags} "/QxSSE4.2" PARENT_SCOPE)
       else()
-        set(${_sse42_flags} "-xsse4.2")
+        set(${_simd_flags} "-xsse4.2" PARENT_SCOPE)
       endif()
     else()
-      message(WARNING "SSE flags for this compiler: '${CMAKE_C_COMPILER_ID}' not known")
-      set(${_sse42_flags})
+      message(WARNING "SIMD flags for this compiler: '${CMAKE_C_COMPILER_ID}' not known")
+      set(${_simd_flags} PARENT_SCOPE)
+    endif()
+  elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64|arm64" OR CMAKE_OSX_ARCHITECTURES MATCHES "arm64")
+    if((CMAKE_C_COMPILER_ID STREQUAL "GNU") OR (CMAKE_C_COMPILER_ID MATCHES "Clang"))
+      if(UNIX AND NOT APPLE)
+        # Target ARMv8.2-A with dot product and half float.
+        set(${_simd_flags} "-march=armv8.2-a+dotprod+fp16+lse" PARENT_SCOPE)
+      else()
+        set(${_simd_flags} PARENT_SCOPE)
+      endif()
+    else()
+      set(${_simd_flags} PARENT_SCOPE)
     endif()
   else()
-    # Not a 64bit x86 system, don't set any SSE x86 compiler flags.
-    set(${_sse42_flags})
+    # Not a supported system, don't set any SIMD compiler flags.
+    set(${_simd_flags} PARENT_SCOPE)
   endif()
-endmacro()
+endfunction()
 
-macro(test_neon_support)
+function(test_neon_support)
   if(NOT DEFINED SUPPORTS_NEON_BUILD)
     include(CheckCXXSourceCompiles)
     check_cxx_source_compiles(
@@ -606,19 +643,21 @@ macro(test_neon_support)
        int main() {return vaddvq_s32(vdupq_n_s32(1));}"
       SUPPORTS_NEON_BUILD)
   endif()
-endmacro()
+endfunction()
 
 # Only print message if running CMake first time
-macro(message_first_run)
+function(message_first_run)
   if(FIRST_RUN)
     message(${ARGV})
   endif()
-endmacro()
+endfunction()
 
 # when we have warnings as errors applied globally this
 # needs to be removed for some external libs which we don't maintain.
 
 
+# NOTE: must be a macro, modifies `CMAKE_C_FLAGS` and per-config
+# variants in the caller's scope.
 macro(remove_c_flag
   _flag)
 
@@ -632,6 +671,8 @@ macro(remove_c_flag
   unset(f)
 endmacro()
 
+# NOTE: must be a macro, modifies `CMAKE_CXX_FLAGS` and per-config
+# variants in the caller's scope.
 macro(remove_cxx_flag
   _flag)
 
@@ -645,29 +686,43 @@ macro(remove_cxx_flag
   unset(f)
 endmacro()
 
-# utility macro
-macro(remove_cc_flag
+# NOTE: must be a macro, calls `remove_c_flag`/`remove_cxx_flag`
+# which modify `CMAKE_*_FLAGS` in the caller's scope.
+macro(remove_c_and_cxx_flag
   _flag)
 
   remove_c_flag(${ARGV})
   remove_cxx_flag(${ARGV})
 endmacro()
 
+# NOTE: must be a macro, modifies `CMAKE_C_FLAGS` in the caller's scope.
 macro(add_c_flag
   flag)
 
   string(APPEND CMAKE_C_FLAGS " ${flag}")
-  string(APPEND CMAKE_CXX_FLAGS " ${flag}")
 endmacro()
 
+# NOTE: must be a macro, modifies `CMAKE_CXX_FLAGS` in the caller's scope.
 macro(add_cxx_flag
   flag)
 
   string(APPEND CMAKE_CXX_FLAGS " ${flag}")
 endmacro()
 
+# NOTE: must be a macro, calls `add_c_flag`/`add_cxx_flag`
+# which modify `CMAKE_*_FLAGS` in the caller's scope.
+macro(add_c_and_cxx_flag
+  flag)
+
+  add_c_flag("${flag}")
+  add_cxx_flag("${flag}")
+endmacro()
+
 # Needed to "negate" options: `-Wno-example`
 # as this doesn't work when added to `CMAKE_CXX_FLAGS`.
+#
+# NOTE: must be a macro, modifies per-config `CMAKE_C_FLAGS_*`
+# variants in the caller's scope.
 macro(add_c_flag_per_config
   flag)
 
@@ -676,6 +731,9 @@ macro(add_c_flag_per_config
   string(APPEND CMAKE_C_FLAGS_MINSIZEREL " ${flag}")
   string(APPEND CMAKE_C_FLAGS_RELWITHDEBINFO " ${flag}")
 endmacro()
+
+# NOTE: must be a macro, modifies per-config `CMAKE_CXX_FLAGS_*`
+# variants in the caller's scope.
 macro(add_cxx_flag_per_config
   flag)
 
@@ -685,10 +743,12 @@ macro(add_cxx_flag_per_config
   string(APPEND CMAKE_CXX_FLAGS_RELWITHDEBINFO " ${flag}")
 endmacro()
 
+# NOTE: must be a macro, calls `remove_cc_flag`/`add_c_flag`/`add_cxx_flag`/`add_cc_flag`
+# which modify `CMAKE_*_FLAGS` in the caller's scope.
 macro(remove_strict_flags)
 
   if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
-    remove_cc_flag(
+    remove_c_and_cxx_flag(
       "-Wstrict-prototypes"
       "-Wsuggest-attribute=format"
       "-Wmissing-prototypes"
@@ -711,10 +771,11 @@ macro(remove_strict_flags)
     # negate flags implied by '-Wall'
     add_c_flag("${C_REMOVE_STRICT_FLAGS}")
     add_cxx_flag("${CXX_REMOVE_STRICT_FLAGS}")
+    add_c_and_cxx_flag("${C_AND_CXX_REMOVE_STRICT_FLAGS}")
   endif()
 
   if(CMAKE_C_COMPILER_ID MATCHES "Clang")
-    remove_cc_flag(
+    remove_c_and_cxx_flag(
       "-Wunused-parameter"
       "-Wunused-variable"
       "-Werror=[^ ]+"
@@ -724,6 +785,7 @@ macro(remove_strict_flags)
     # negate flags implied by '-Wall'
     add_c_flag("${C_REMOVE_STRICT_FLAGS}")
     add_cxx_flag("${CXX_REMOVE_STRICT_FLAGS}")
+    add_c_and_cxx_flag("${C_AND_CXX_REMOVE_STRICT_FLAGS}")
   endif()
 
   if(MSVC)
@@ -731,7 +793,7 @@ macro(remove_strict_flags)
       # Warning C5038: data member 'foo' will be initialized after data member 'bar'.
       "/wd5038"
     )
-    remove_cc_flag(
+    remove_c_and_cxx_flag(
       # Restore warn C4100 (unreferenced formal parameter) back to w4.
       "/w34100"
       # Restore warn C4189 (unused variable) back to w4.
@@ -741,21 +803,23 @@ macro(remove_strict_flags)
 
 endmacro()
 
+# NOTE: must be a macro, calls `remove_cc_flag`
+# which modifies `CMAKE_*_FLAGS` in the caller's scope.
 macro(remove_extra_strict_flags)
   if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
-    remove_cc_flag(
+    remove_c_and_cxx_flag(
       "-Wunused-parameter"
     )
   endif()
 
   if(CMAKE_C_COMPILER_ID MATCHES "Clang")
-    remove_cc_flag(
+    remove_c_and_cxx_flag(
       "-Wunused-parameter"
     )
   endif()
 
   if(MSVC)
-    remove_cc_flag(
+    remove_c_and_cxx_flag(
       # Restore warn C4100 (unreferenced formal parameter) back to w4.
       "/w34100"
     )
@@ -765,49 +829,49 @@ endmacro()
 # note, we can only append flags on a single file so we need to negate the options.
 # at the moment we can't shut up ffmpeg deprecations, so use this, but will
 # probably add more removals here.
-macro(remove_strict_c_flags_file
+function(remove_strict_c_flags_file
   filenames)
   foreach(_SOURCE ${ARGV})
     if((CMAKE_C_COMPILER_ID STREQUAL "GNU") OR
        (CMAKE_C_COMPILER_ID MATCHES "Clang"))
       set_source_files_properties(
         ${_SOURCE} PROPERTIES
-        COMPILE_FLAGS "${C_REMOVE_STRICT_FLAGS}"
+        COMPILE_FLAGS "${C_REMOVE_STRICT_FLAGS} ${C_AND_CXX_REMOVE_STRICT_FLAGS}"
       )
     endif()
     if(MSVC)
       # TODO
     endif()
   endforeach()
-  unset(_SOURCE)
-endmacro()
+endfunction()
 
-macro(remove_strict_cxx_flags_file
+function(remove_strict_cxx_flags_file
   filenames)
-  remove_strict_c_flags_file(${filenames} ${ARGV})
   foreach(_SOURCE ${ARGV})
     if((CMAKE_CXX_COMPILER_ID STREQUAL "GNU") OR
        (CMAKE_CXX_COMPILER_ID MATCHES "Clang"))
       set_source_files_properties(
         ${_SOURCE} PROPERTIES
-        COMPILE_FLAGS "${CXX_REMOVE_STRICT_FLAGS}"
+        COMPILE_FLAGS "${CXX_REMOVE_STRICT_FLAGS} ${C_AND_CXX_REMOVE_STRICT_FLAGS}"
       )
     endif()
     if(MSVC)
       # TODO
     endif()
   endforeach()
-  unset(_SOURCE)
-endmacro()
+endfunction()
 
 # External libs may need 'signed char' to be default.
-macro(remove_cc_flag_unsigned_char)
+#
+# NOTE: must be a macro, calls `remove_c_and_cxx_flag`
+# which modifies `CMAKE_*_FLAGS` in the caller's scope.
+macro(remove_c_and_cxx_flag_unsigned_char)
   if((CMAKE_C_COMPILER_ID STREQUAL "GNU") OR
      (CMAKE_C_COMPILER_ID MATCHES "Clang") OR
      (CMAKE_C_COMPILER_ID STREQUAL "Intel"))
-    remove_cc_flag("-funsigned-char")
+    remove_c_and_cxx_flag("-funsigned-char")
   elseif(MSVC)
-    remove_cc_flag("/J")
+    remove_c_and_cxx_flag("/J")
   else()
     message(WARNING
       "Compiler '${CMAKE_C_COMPILER_ID}' failed to disable 'unsigned char' flag."
@@ -824,12 +888,19 @@ function(add_check_c_compiler_flag_impl
 
   include(CheckCCompilerFlag)
 
+  set(_is_new TRUE)
+  if(DEFINED CACHE{${_CACHE_VAR}})
+    set(_is_new FALSE)
+  endif()
+
   check_c_compiler_flag("${_FLAG}" "${_CACHE_VAR}")
   if(${_CACHE_VAR})
     # message(STATUS "Using CFLAG: ${_FLAG}")
     set(${_CFLAGS} "${${_CFLAGS}} ${_FLAG}" PARENT_SCOPE)
   else()
-    message(STATUS "Unsupported CFLAG: ${_FLAG}")
+    if(_is_new)
+      message(STATUS "Unsupported CFLAG: ${_FLAG}")
+    endif()
   endif()
 endfunction()
 
@@ -841,12 +912,19 @@ function(add_check_cxx_compiler_flag_impl
 
   include(CheckCXXCompilerFlag)
 
+  set(_is_new TRUE)
+  if(DEFINED CACHE{${_CACHE_VAR}})
+    set(_is_new FALSE)
+  endif()
+
   check_cxx_compiler_flag("${_FLAG}" "${_CACHE_VAR}")
   if(${_CACHE_VAR})
     # message(STATUS "Using CXXFLAG: ${_FLAG}")
     set(${_CXXFLAGS} "${${_CXXFLAGS}} ${_FLAG}" PARENT_SCOPE)
   else()
-    message(STATUS "Unsupported CXXFLAG: ${_FLAG}")
+    if(_is_new)
+      message(STATUS "Unsupported CXXFLAG: ${_FLAG}")
+    endif()
   endif()
 endfunction()
 
@@ -911,15 +989,15 @@ function(get_blender_version)
     _out_version_cycle "${_contents}"
   )
 
-  if(NOT ${_out_version} MATCHES "[0-9]+")
+  if(NOT ${_out_version} MATCHES "^[0-9]+$")
     message(FATAL_ERROR "Version parsing failed for BLENDER_VERSION")
   endif()
 
-  if(NOT ${_out_version_patch} MATCHES "[0-9]+")
+  if(NOT ${_out_version_patch} MATCHES "^[0-9]+$")
     message(FATAL_ERROR "Version parsing failed for BLENDER_VERSION_PATCH")
   endif()
 
-  if(NOT ${_out_version_cycle} MATCHES "[a-z]+")
+  if(NOT ${_out_version_cycle} MATCHES "^[a-z]+$")
     message(FATAL_ERROR "Version parsing failed for BLENDER_VERSION_CYCLE")
   endif()
 
@@ -938,6 +1016,10 @@ endfunction()
 
 # hacks to override initial project settings
 # these macros must be called directly before/after project(Blender)
+#
+# NOTE: must be a macro pair, `_pre` sets `_reset_standard_c*flags_rel`
+# variables that `_post` reads from the same scope, and `_post` modifies
+# `CMAKE_C/CXX_FLAGS_RELEASE` cache entries.
 macro(blender_project_hack_pre)
   # ------------------
   # GCC -O3 HACK START
@@ -1022,16 +1104,18 @@ endfunction()
 function(data_to_c
   file_from file_to
   list_to_add
+  # Optional 4th argument: override the symbol name used in the generated C file,
+  # useful when different files share the same basename and would produce conflicting symbols.
+  # When omitted the symbol name is derived from the filename.
+  symbol_name_override
   )
 
   list(APPEND ${list_to_add} ${file_to})
   set(${list_to_add} ${${list_to_add}} PARENT_SCOPE)
 
-  get_filename_component(_file_to_path ${file_to} PATH)
-
   add_custom_command(
     OUTPUT ${file_to}
-    COMMAND "$<TARGET_FILE:datatoc>" ${file_from} ${file_to}
+    COMMAND "$<TARGET_FILE:datatoc>" ${file_from} ${file_to} ${symbol_name_override}
     DEPENDS ${file_from} datatoc)
 
   set_source_files_properties(${file_to} PROPERTIES GENERATED TRUE)
@@ -1053,8 +1137,6 @@ function(data_to_c_simple
   list(APPEND ${list_to_add} ${file_from})
   set(${list_to_add} ${${list_to_add}} PARENT_SCOPE)
 
-  get_filename_component(_file_to_path ${_file_to} PATH)
-
   add_custom_command(
     OUTPUT  ${_file_to}
     COMMAND "$<TARGET_FILE:datatoc>" ${_file_from} ${_file_to}
@@ -1073,10 +1155,11 @@ function(glsl_to_c
 
   # remove ../'s
   get_filename_component(_file_from ${CMAKE_CURRENT_SOURCE_DIR}/${file_from}    REALPATH)
-  get_filename_component(_file_tmp  ${CMAKE_CURRENT_BINARY_DIR}/${file_from}    REALPATH)
+  get_filename_component(_file_tmp  ${CMAKE_CURRENT_BINARY_DIR}/${file_from}.tmp   REALPATH)
   get_filename_component(_file_meta ${CMAKE_CURRENT_BINARY_DIR}/${file_from}.hh REALPATH)
   get_filename_component(_file_info ${CMAKE_CURRENT_BINARY_DIR}/${file_from}.info  REALPATH)
   get_filename_component(_file_to   ${CMAKE_CURRENT_BINARY_DIR}/${file_from}.c  REALPATH)
+  get_filename_component(_file_dep  ${CMAKE_CURRENT_BINARY_DIR}/${file_from}.d  REALPATH)
 
   # Turn include directories into absolute paths
   set(_inc_list "")
@@ -1090,13 +1173,16 @@ function(glsl_to_c
   list(APPEND ${list_to_add} ${file_from})
   set(${list_to_add} ${${list_to_add}} PARENT_SCOPE)
 
-  get_filename_component(_file_to_path ${_file_to} PATH)
+  add_custom_command(
+    OUTPUT  ${_file_tmp} ${_file_meta} ${_file_info} ${_file_dep}
+    DEPFILE ${_file_dep}
+    COMMAND "$<TARGET_FILE:shader_tool>" ${_file_from} ${_file_tmp} ${_file_meta} ${_file_info} ${_file_dep} ${_inc_list}
+    DEPENDS ${_file_from} shader_tool)
 
   add_custom_command(
-    OUTPUT  ${_file_to} ${_file_meta} ${_file_info}
-    COMMAND "$<TARGET_FILE:shader_tool>" ${_file_from} ${_file_tmp} ${_file_meta} ${_file_info} ${_inc_list}
+    OUTPUT  ${_file_to}
     COMMAND "$<TARGET_FILE:datatoc>" ${_file_tmp} ${_file_to}
-    DEPENDS ${_file_from} datatoc shader_tool)
+    DEPENDS ${_file_tmp} datatoc)
 
   set_source_files_properties(${_file_tmp} PROPERTIES GENERATED TRUE)
   set_source_files_properties(${_file_to}  PROPERTIES GENERATED TRUE)
@@ -1249,9 +1335,11 @@ endfunction()
 
 # Find a file in Python's module path and cache it.
 # Re-generating cache upon changes to the Python installation.
-# `out_var_abs`: absolute path (cached).
-# `out_var_rel`: `PYTHON_ROOT` relative path (not cached).
-macro(find_python_module_file
+#
+# Return values:
+# - `${out_var_abs}`: absolute path (cached).
+# - `${out_var_rel}`: `PYTHON_ROOT` relative path (not cached).
+function(find_python_module_file
   module_file
   out_var_abs
   out_var_rel
@@ -1296,20 +1384,16 @@ macro(find_python_module_file
     )
     if(${out_var_abs})
       # Internal because this is only to track changes (users never need to manipulate it).
-      set(_${out_var_abs}_DEPS "${_python_mod_file_deps_test}" CACHE INTERNAL STRING "")
+      set(_${out_var_abs}_DEPS "${_python_mod_file_deps_test}" CACHE INTERNAL "")
     endif()
   endif()
 
   if(${out_var_abs})
     string(LENGTH "${_python_root}" _python_root_len)
     string(SUBSTRING ${${out_var_abs}} ${_python_root_len} -1 ${out_var_rel})
-    unset(_python_root_len)
+    set(${out_var_rel} "${${out_var_rel}}" PARENT_SCOPE)
   endif()
-
-  unset(_python_mod_file_deps_test)
-  unset(_python_base)
-  unset(_python_root)
-endmacro()
+endfunction()
 
 
 # like Python's 'print(dir())'
@@ -1320,23 +1404,29 @@ function(print_all_vars)
   endforeach()
 endfunction()
 
-macro(set_and_warn_dependency
+# When `_dependency` is disabled, force `_setting` to `_val`.
+#
+# Modifies in parent scope:
+# - `${_setting}`: set to `_val` when the dependency is disabled.
+function(set_and_warn_dependency
   _dependency _setting _val)
-  # when $_dependency is disabled, forces $_setting = $_val
   if(NOT ${${_dependency}} AND ${${_setting}})
     if(WITH_STRICT_BUILD_OPTIONS)
       message(SEND_ERROR "${_dependency} disabled but required by ${_setting}")
     else()
       message(STATUS "${_dependency} is disabled, setting ${_setting}=${_val}")
     endif()
-    set(${_setting} ${_val})
+    set(${_setting} ${_val} PARENT_SCOPE)
   endif()
-endmacro()
+endfunction()
 
-macro(set_and_warn_incompatible
+# When `_dependency` is enabled, force `_setting` to `_val`.
+# Both should be defined, warn if they're not.
+#
+# Modifies in parent scope:
+# - `${_setting}`: set to `_val` when the dependency is enabled.
+function(set_and_warn_incompatible
   _dependency _setting _val)
-  # when $_dependency is enabled, forces $_setting = $_val
-  # Both should be defined, warn if they're not.
   if(NOT DEFINED ${_dependency})
     message(STATUS "${_dependency} not defined!")
   elseif(NOT DEFINED ${_setting})
@@ -1347,11 +1437,15 @@ macro(set_and_warn_incompatible
     else()
       message(STATUS "${_dependency} is enabled but incompatible, setting ${_setting}=${_val}")
     endif()
-    set(${_setting} ${_val})
+    set(${_setting} ${_val} PARENT_SCOPE)
   endif()
-endmacro()
+endfunction()
 
-macro(set_and_warn_library_found
+# Disable `_setting` when the library is not found.
+#
+# Modifies in parent scope:
+# - `${_setting}`: set to `OFF` when the library is not found.
+function(set_and_warn_library_found
   _library_name _library_found _setting)
   if(((NOT ${_library_found}) OR (NOT ${${_library_found}})) AND ${${_setting}})
     if(WITH_STRICT_BUILD_OPTIONS)
@@ -1359,25 +1453,34 @@ macro(set_and_warn_library_found
     else()
       message(STATUS "${_library_name} not found, disabling ${_setting}")
     endif()
-    set(${_setting} OFF)
+    set(${_setting} OFF PARENT_SCOPE)
   endif()
-endmacro()
+endfunction()
 
-macro(without_system_libs_begin)
+# Modifies in parent scope:
+# - `CMAKE_IGNORE_PATH`: set to system implicit paths.
+function(without_system_libs_begin)
   set(CMAKE_IGNORE_PATH
     "${CMAKE_PLATFORM_IMPLICIT_LINK_DIRECTORIES}"
     "${CMAKE_SYSTEM_INCLUDE_PATH}"
     "${CMAKE_C_IMPLICIT_INCLUDE_DIRECTORIES}"
     "${CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES}"
+    PARENT_SCOPE
   )
-endmacro()
+endfunction()
 
-macro(without_system_libs_end)
-  unset(CMAKE_IGNORE_PATH)
-endmacro()
+# Modifies in parent scope:
+# - `CMAKE_IGNORE_PATH`: unset.
+function(without_system_libs_end)
+  unset(CMAKE_IGNORE_PATH PARENT_SCOPE)
+endfunction()
 
 # Utility to gather and install precompiled shared libraries.
-macro(add_bundled_libraries library_dir)
+#
+# Modifies in parent scope:
+# - `PLATFORM_BUNDLED_LIBRARIES`: appended with found libraries.
+# - `PLATFORM_BUNDLED_LIBRARY_DIRS`: appended with the library directory.
+function(add_bundled_libraries library_dir)
   if(DEFINED LIBDIR)
     set(_library_dir ${LIBDIR}/${library_dir})
     if(WIN32)
@@ -1389,12 +1492,15 @@ macro(add_bundled_libraries library_dir)
     endif()
     list(APPEND PLATFORM_BUNDLED_LIBRARIES ${_all_library_versions})
     list(APPEND PLATFORM_BUNDLED_LIBRARY_DIRS ${_library_dir})
-    unset(_all_library_versions)
-    unset(_library_dir)
+    set(PLATFORM_BUNDLED_LIBRARIES "${PLATFORM_BUNDLED_LIBRARIES}" PARENT_SCOPE)
+    set(PLATFORM_BUNDLED_LIBRARY_DIRS "${PLATFORM_BUNDLED_LIBRARY_DIRS}" PARENT_SCOPE)
   endif()
-endmacro()
+endfunction()
 
-macro(windows_install_shared_manifest)
+# Modifies in parent scope:
+# - `WINDOWS_SHARED_MANIFEST_DEBUG`: appended with files (when debug).
+# - `WINDOWS_SHARED_MANIFEST_RELEASE`: appended with files (when release).
+function(windows_install_shared_manifest)
   set(options OPTIONAL DEBUG RELEASE ALL)
   set(oneValueArgs "")
   set(multiValueArgs FILES)
@@ -1431,6 +1537,8 @@ macro(windows_install_shared_manifest)
     if(WINDOWS_INSTALL_RELEASE)
       list(APPEND WINDOWS_SHARED_MANIFEST_RELEASE ${WINDOWS_INSTALL_FILES})
     endif()
+    set(WINDOWS_SHARED_MANIFEST_DEBUG "${WINDOWS_SHARED_MANIFEST_DEBUG}" PARENT_SCOPE)
+    set(WINDOWS_SHARED_MANIFEST_RELEASE "${WINDOWS_SHARED_MANIFEST_RELEASE}" PARENT_SCOPE)
     install(
       FILES ${WINDOWS_INSTALL_FILES}
       DESTINATION "blender.shared"
@@ -1444,9 +1552,9 @@ macro(windows_install_shared_manifest)
       CONFIGURATIONS ${WINDOWS_CONFIGURATIONS}
     )
   endif()
-endmacro()
+endfunction()
 
-macro(windows_generate_manifest)
+function(windows_generate_manifest)
   set(options "")
   set(oneValueArgs OUTPUT NAME)
   set(multiValueArgs FILES)
@@ -1467,9 +1575,9 @@ macro(windows_generate_manifest)
     ${WINDOWS_MANIFEST_OUTPUT}
     @ONLY
   )
-endmacro()
+endfunction()
 
-macro(windows_generate_shared_manifest)
+function(windows_generate_shared_manifest)
   if(WINDOWS_SHARED_MANIFEST_DEBUG)
     windows_generate_manifest(
       FILES "${WINDOWS_SHARED_MANIFEST_DEBUG}"
@@ -1494,9 +1602,12 @@ macro(windows_generate_shared_manifest)
       CONFIGURATIONS Release;RelWithDebInfo;MinSizeRel
     )
   endif()
-endmacro()
+endfunction()
 
-macro(windows_process_platform_bundled_libraries library_deps)
+# Modifies in parent scope:
+# - `WINDOWS_SHARED_MANIFEST_DEBUG`: accumulated via `windows_install_shared_manifest`.
+# - `WINDOWS_SHARED_MANIFEST_RELEASE`: accumulated via `windows_install_shared_manifest`.
+function(windows_process_platform_bundled_libraries library_deps)
   if(NOT "${library_deps}" STREQUAL "")
     set(next_library_mode "ALL")
     foreach(library ${library_deps})
@@ -1513,51 +1624,74 @@ macro(windows_process_platform_bundled_libraries library_deps)
         set(next_library_mode "ALL")
       endif()
     endforeach()
+    set(WINDOWS_SHARED_MANIFEST_DEBUG "${WINDOWS_SHARED_MANIFEST_DEBUG}" PARENT_SCOPE)
+    set(WINDOWS_SHARED_MANIFEST_RELEASE "${WINDOWS_SHARED_MANIFEST_RELEASE}" PARENT_SCOPE)
   endif()
-endmacro()
-
-macro(with_shader_cpp_compilation_config)
-  # avoid noisy warnings
-  if((CMAKE_C_COMPILER_ID STREQUAL "GNU") OR (CMAKE_C_COMPILER_ID MATCHES "Clang"))
-    add_c_flag("-Wno-unused-result")
-    remove_cc_flag("-Wmissing-declarations")
-    # Would be nice to enable the warning once we support references.
-    add_cxx_flag("-Wno-uninitialized")
-    # Would be nice to enable the warning once we support nameless parameters.
-    add_cxx_flag("-Wno-unused-parameter")
-    # To compile libraries.
-    add_cxx_flag("-Wno-pragma-once-outside-header")
-  elseif(MSVC)
-    # Equivalent to "-Wno-uninitialized"
-    add_cxx_flag("/wd4700")
-    # Equivalent to "-Wno-unused-parameter"
-    add_cxx_flag("/wd4100")
-    # Disable "potential divide by 0" warning
-    add_cxx_flag("/wd4723")
-  endif()
-  add_definitions(-DGPU_SHADER)
-endmacro()
+endfunction()
 
 function(compile_sources_as_cpp
-  executable
+  library
   sources
   define
   )
 
-  foreach(glsl_file ${sources})
-    set_source_files_properties(${glsl_file} PROPERTIES LANGUAGE CXX)
-  endforeach()
+  # On Windows, MSVC/Clang echo the filename being compiled to the console.
+  # Ninja suppresses this only for recognized C++ extensions (.cc/.cpp etc.),
+  # not .glsl. Generate a .cc wrapper per source so Ninja suppresses the echo.
+  # On other platforms, just set LANGUAGE CXX directly on each source file.
 
-  add_library(${executable} OBJECT ${sources})
-  set_target_properties(${executable} PROPERTIES LINKER_LANGUAGE CXX)
-  target_include_directories(${executable} PUBLIC ${INC_GLSL})
-  target_compile_definitions(${executable} PRIVATE ${define})
+  if(WIN32)
+    foreach(glsl_file ${sources})
+      get_filename_component(_file_from ${CMAKE_CURRENT_SOURCE_DIR}/${glsl_file}   REALPATH)
+      get_filename_component(_file_to   ${CMAKE_CURRENT_BINARY_DIR}/${glsl_file}.cc REALPATH)
+      file(WRITE "${_file_to}" "#include \"${_file_from}\"\n")
+      list(APPEND sources ${_file_to})
+      # Mark the original file as header only, so no attempt will be made at compiling it
+      # regardless of extention.
+      set_source_files_properties(${glsl_file} PROPERTIES HEADER_FILE_ONLY TRUE)
+    endforeach()
+  else()
+    foreach(glsl_file ${sources})
+      set_source_files_properties(${glsl_file} PROPERTIES LANGUAGE CXX)
+    endforeach()
+  endif()
+
+  add_library(${library} OBJECT ${sources})
+  set_target_properties(${library} PROPERTIES LINKER_LANGUAGE CXX)
+  target_include_directories(${library} PUBLIC ${INC_GLSL})
+  target_compile_definitions(${library} PRIVATE ${define} -DGPU_SHADER)
+
+  # avoid noisy warnings
+  if((CMAKE_C_COMPILER_ID STREQUAL "GNU") OR (CMAKE_C_COMPILER_ID MATCHES "Clang"))
+    target_compile_options(${library} PRIVATE "-Wno-unused-result")
+    target_compile_options(${library} PRIVATE "-Wno-missing-declarations")
+    # Would be nice to enable the warning once we support references.
+    target_compile_options(${library} PRIVATE "-Wno-uninitialized")
+    # To compile libraries.
+    target_compile_options(${library} PRIVATE "-Wno-pragma-once-outside-header")
+    target_compile_options(${library} PRIVATE "-Wno-unknown-pragmas")
+  elseif(MSVC)
+    # Equivalent to "-Wno-uninitialized"
+    target_compile_options(${library} PRIVATE "/wd4700")
+    # Disable "potential divide by 0" warning
+    target_compile_options(${library} PRIVATE "/wd4723")
+    # Disable unkown pragma warning
+    target_compile_options(${library} PRIVATE "/wd4068")
+    # Disable unknown attribute warning
+    target_compile_options(${library} PRIVATE "/wd5030")
+    target_compile_options(${library} PRIVATE "/wd5222")
+  endif()
+  if(WIN32 AND NOT MSVC_CLANG)
+    set_target_properties(${library} PROPERTIES STATIC_LIBRARY_OPTIONS "-ignore:4006")
+  endif()
 endfunction()
 
+# NOTE: must be a macro, calls `remove_cc_flag` on Windows
+# which modifies `CMAKE_*_FLAGS` in the caller's scope.
 macro(optimize_debug_target executable)
   if(WITH_OPTIMIZED_BUILD_TOOLS)
     if(WIN32)
-      remove_cc_flag(${executable} "/Od" "/RTC1")
+      remove_c_and_cxx_flag("/Od" "/RTC1")
       target_compile_options(${executable} PRIVATE "/Ox")
       target_compile_definitions(${executable} PRIVATE "_ITERATOR_DEBUG_LEVEL=0")
     else()

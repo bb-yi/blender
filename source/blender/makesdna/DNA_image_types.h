@@ -11,6 +11,9 @@
 #include "DNA_ID.h"
 #include "DNA_color_types.h" /* for color management */
 #include "DNA_defs.h"
+#include "DNA_scene_enums.h"
+
+#include "BLI_enum_flags.hh"
 
 namespace blender {
 
@@ -18,24 +21,26 @@ namespace bke {
 struct ImageRuntime;
 }  // namespace bke
 
+struct ImBufCache;
 struct MovieReader;
-struct MovieCache;
 struct PackedFile;
 struct RenderResult;
 struct Scene;
 
 /** #ImageUser::flag */
-enum {
+enum eImageUser_Flag : short {
   IMA_ANIM_ALWAYS = 1 << 0,
   IMA_SHOW_SEQUENCER_SCENE = 1 << 1,
   // IMA_UNUSED_2 = 1 << 2,
   IMA_NEED_FRAME_RECALC = 1 << 3,
   IMA_SHOW_STEREO = 1 << 4,
   // IMA_UNUSED_5 = 1 << 5,
+  IMA_USER_FRAME_IN_RANGE = (1 << 10),
 };
+ENUM_OPERATORS(eImageUser_Flag)
 
 /* Used to get the correct gpu texture from an Image datablock. */
-enum eGPUTextureTarget {
+enum eGPUTextureTarget : int {
   TEXTARGET_2D = 0,
   TEXTARGET_2D_ARRAY = 1,
   TEXTARGET_TILE_MAPPING = 2,
@@ -45,7 +50,7 @@ enum eGPUTextureTarget {
 };
 
 /** #Image.flag */
-enum {
+enum eImage_Flag : int {
   IMA_HIGH_BITDEPTH = (1 << 0),
   IMA_FLAG_UNUSED_1 = (1 << 1), /* cleared */
 #ifdef DNA_DEPRECATED_ALLOW
@@ -58,23 +63,27 @@ enum {
   IMA_FLAG_UNUSED_8 = (1 << 8), /* cleared */
   IMA_USED_FOR_RENDER = (1 << 9),
   /** For image user, but these flags are mixed. */
-  IMA_USER_FRAME_IN_RANGE = (1 << 10),
+  // IMA_USER_FRAME_IN_RANGE = (1 << 10),
   IMA_VIEW_AS_RENDER = (1 << 11),
   IMA_FLAG_UNUSED_12 = (1 << 12), /* cleared */
   IMA_DEINTERLACE = (1 << 13),
   IMA_USE_VIEWS = (1 << 14),
   IMA_FLAG_UNUSED_15 = (1 << 15), /* cleared */
   IMA_FLAG_UNUSED_16 = (1 << 16), /* cleared */
+  /** Indicates that the image has autosave information */
+  IMA_AUTOSAVE_TEMPPACK = (1 << 17),
 };
+ENUM_OPERATORS(eImage_Flag)
 
 /** #Image.gpuflag */
-enum {
+enum eImage_GPUFlag : int {
   /** All mipmap levels in OpenGL texture set? */
   IMA_GPU_MIPMAP_COMPLETE = (1 << 0),
 };
+ENUM_OPERATORS(eImage_GPUFlag)
 
 /* Image.source, where the image comes from */
-enum eImageSource {
+enum eImageSource : short {
   /* IMA_SRC_CHECK = 0, */ /* UNUSED */
   IMA_SRC_FILE = 1,
   IMA_SRC_SEQUENCE = 2,
@@ -85,7 +94,7 @@ enum eImageSource {
 };
 
 /* Image.type, how to handle or generate the image */
-enum eImageType {
+enum eImageType : short {
   IMA_TYPE_IMAGE = 0,
   IMA_TYPE_MULTILAYER = 1,
   /* generated */
@@ -96,7 +105,7 @@ enum eImageType {
 };
 
 /** #Image.gen_type */
-enum {
+enum eImageGenType : char {
   IMA_GENTYPE_BLANK = 0,
   IMA_GENTYPE_GRID = 1,
   IMA_GENTYPE_GRID_COLOR = 2,
@@ -106,13 +115,14 @@ enum {
 #define IMA_MAX_RENDER_TEXT_SIZE 512
 
 /** #Image.gen_flag */
-enum {
+enum eImage_GenFlag : char {
   IMA_GEN_FLOAT = (1 << 0),
   IMA_GEN_TILE = (1 << 1),
 };
+ENUM_OPERATORS(eImage_GenFlag)
 
 /** #Image.alpha_mode */
-enum {
+enum eImageAlphaMode : char {
   IMA_ALPHA_STRAIGHT = 0,
   IMA_ALPHA_PREMUL = 1,
   IMA_ALPHA_CHANNEL_PACKED = 2,
@@ -144,7 +154,7 @@ struct ImageUser {
 
   /** Listbase indices, for menu browsing or retrieve buffer. */
   short multi_index = 0, view = 0, layer = 0;
-  short flag = 0;
+  eImageUser_Flag flag = {};
 };
 
 struct ImageAnim {
@@ -191,7 +201,8 @@ struct ImageTile {
 
   /* for generated images */
   int gen_x = 0, gen_y = 0;
-  char gen_type = 0, gen_flag = 0;
+  eImageGenType gen_type = IMA_GENTYPE_BLANK;
+  eImage_GenFlag gen_flag = {};
   short gen_depth = 0;
   float gen_color[4] = {};
 
@@ -217,8 +228,9 @@ struct Image {
   ListBaseT<RenderSlot> renderslots = {nullptr, nullptr};
   short render_slot = 0, last_render_slot = 0;
 
-  int flag = 0;
-  short source = 0, type = 0;
+  eImage_Flag flag = {};
+  eImageSource source = {};
+  eImageType type = IMA_TYPE_IMAGE;
   int lastframe = 0;
 
   /* Number of iterations to perform when extracting mask for uv seam fixing. */
@@ -231,13 +243,15 @@ struct Image {
   ListBaseT<ImagePackedFile> packedfiles = {nullptr, nullptr};
   struct PreviewImage *preview = nullptr;
 
+  ListBaseT<ImagePackedFile> autosave_packedfiles = {nullptr, nullptr};
+
   char _pad3[4] = {};
 
   /* for generated images */
   DNA_DEPRECATED int gen_x = 1024;
   DNA_DEPRECATED int gen_y = 1024;
-  DNA_DEPRECATED char gen_type = IMA_GENTYPE_GRID;
-  DNA_DEPRECATED char gen_flag = 0;
+  DNA_DEPRECATED eImageGenType gen_type = IMA_GENTYPE_GRID;
+  DNA_DEPRECATED eImage_GenFlag gen_flag = {};
   DNA_DEPRECATED short gen_depth = 0;
   DNA_DEPRECATED float gen_color[4] = {};
 
@@ -246,14 +260,14 @@ struct Image {
 
   /* color management */
   ColorManagedColorspaceSettings colorspace_settings;
-  char alpha_mode = 0;
+  eImageAlphaMode alpha_mode = IMA_ALPHA_STRAIGHT;
 
   char _pad = {};
 
   /* Multiview */
   /** For viewer node stereoscopy. */
   char eye = 0;
-  char views_format = 0;
+  eImageFormat_ViewsFormat views_format = {};
 
   /* ImageTile list for UDIMs. */
   int active_tile_index = 0;

@@ -14,6 +14,8 @@
 
 namespace blender {
 
+const char *imb_file_extensions_psd[] = {".psd", ".pdd", ".psb", nullptr};
+
 OIIO_NAMESPACE_USING
 using namespace blender::imbuf;
 
@@ -22,7 +24,10 @@ bool imb_is_a_psd(const uchar *mem, size_t size)
   return imb_oiio_check(mem, size, "psd");
 }
 
-ImBuf *imb_load_psd(const uchar *mem, size_t size, int flags, ImFileColorSpace &r_colorspace)
+ImBuf *imb_load_psd(const uchar *mem,
+                    size_t size,
+                    ImBufFlags flags,
+                    ImFileColorSpace &r_colorspace)
 {
   ImageSpec config, spec;
   config.attribute("oiio:UnassociatedAlpha", 1);

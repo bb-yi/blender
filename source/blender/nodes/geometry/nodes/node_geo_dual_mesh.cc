@@ -2,6 +2,8 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include <algorithm>
+
 #include "BLI_task.hh"
 
 #include "BKE_attribute_math.hh"
@@ -18,11 +20,11 @@ static void node_declare(NodeDeclarationBuilder &b)
 {
   b.use_custom_socket_order();
   b.allow_any_socket_order();
-  b.add_input<decl::Geometry>("Mesh")
+  b.add_input<decl::Geometry>("Mesh"_ustr)
       .supported_type(GeometryComponent::Type::Mesh)
       .description("Mesh to compute the dual of");
-  b.add_output<decl::Geometry>("Dual Mesh").propagate_all().align_with_previous();
-  b.add_input<decl::Bool>("Keep Boundaries")
+  b.add_output<decl::Geometry>("Dual Mesh"_ustr).propagate_all_geometry().align_with_previous();
+  b.add_input<decl::Bool>("Keep Boundaries"_ustr)
       .default_value(false)
       .description(
           "Keep non-manifold boundaries of the input mesh in place by avoiding the dual "
@@ -73,44 +75,6 @@ static VertexType get_vertex_type_with_added_neighbor(VertexType old_type)
   return VertexType::Loose;
 }
 
-/* Copy only where vertex_types is 'normal'. If keep boundaries is selected, also copy from
- * boundary vertices. */
-template<typename T>
-static void copy_data_based_on_vertex_types(Span<T> data,
-                                            MutableSpan<T> r_data,
-                                            const Span<VertexType> vertex_types,
-                                            const bool keep_boundaries)
-{
-  if (keep_boundaries) {
-    int out_i = 0;
-    for (const int i : data.index_range()) {
-      if (ELEM(vertex_types[i], VertexType::Normal, VertexType::Boundary)) {
-        r_data[out_i] = data[i];
-        out_i++;
-      }
-    }
-  }
-  else {
-    int out_i = 0;
-    for (const int i : data.index_range()) {
-      if (vertex_types[i] == VertexType::Normal) {
-        r_data[out_i] = data[i];
-        out_i++;
-      }
-    }
-  }
-}
-
-template<typename T>
-static void copy_data_based_on_pairs(Span<T> data,
-                                     MutableSpan<T> r_data,
-                                     const Span<std::pair<int, int>> new_to_old_map)
-{
-  for (const std::pair<int, int> &pair : new_to_old_map) {
-    r_data[pair.first] = data[pair.second];
-  }
-}
-
 /**
  * Transfers the attributes from the original mesh to the new mesh using the following logic:
  * - If the attribute was on the face domain it is now on the point domain, and this is true
@@ -148,10 +112,58 @@ static void transfer_attributes(
   names.remove(".corner_vert");
   names.remove(".corner_edge");
   names.remove("sharp_face");
-  names.remove_if([&](const StringRef id) { return attribute_filter.allow_skip(id); });
+  names.remove_if([&](const StringRef name) { return attribute_filter.allow_skip(name); });
 
-  for (const StringRef id : names) {
-    GAttributeReader src = src_attributes.lookup(id);
+  Array<int> new_face_to_old_vert;
+  const auto ensure_vert_map = [&]() {
+    if (!new_face_to_old_vert.is_empty()) {
+      return;
+    }
+    const int src_size = src_attributes.domain_size(bke::AttrDomain::Point);
+    const int dst_size = dst_attributes.domain_size(bke::AttrDomain::Face);
+    new_face_to_old_vert.reinitialize(dst_size);
+    if (keep_boundaries) {
+      int out_i = 0;
+      for (const int i : IndexRange(src_size)) {
+        if (ELEM(vertex_types[i], VertexType::Normal, VertexType::Boundary)) {
+          new_face_to_old_vert[out_i] = i;
+          out_i++;
+        }
+      }
+    }
+    else {
+      int out_i = 0;
+      for (const int i : IndexRange(src_size)) {
+        if (vertex_types[i] == VertexType::Normal) {
+          new_face_to_old_vert[out_i] = i;
+          out_i++;
+        }
+      }
+    }
+  };
+
+  IndexMaskMemory memory;
+  IndexMask boundary_vert_mask;
+  Array<int> boundary_vert_src_face;
+  const auto ensure_face_map = [&]() {
+    if (!boundary_vert_src_face.is_empty()) {
+      return;
+    }
+    Array<int> boundary_verts(boundary_vertex_to_relevant_face_map.size());
+    for (const int i : boundary_vertex_to_relevant_face_map.index_range()) {
+      boundary_verts[i] = boundary_vertex_to_relevant_face_map[i].first;
+    }
+    boundary_vert_mask = IndexMask::from_indices(boundary_verts.as_span(), memory);
+    boundary_vert_src_face.reinitialize(boundary_vert_mask.min_array_size());
+    boundary_vert_mask.foreach_index(
+        [&](const int i, const int pos) {
+          boundary_vert_src_face[i] = boundary_vertex_to_relevant_face_map[pos].second;
+        },
+        exec_mode::grain_size(8196));
+  };
+
+  for (const StringRef name : names) {
+    GAttributeReader src = src_attributes.lookup(name);
 
     AttrDomain out_domain;
     if (src.domain == AttrDomain::Face) {
@@ -169,38 +181,33 @@ static void transfer_attributes(
     const CommonVArrayInfo info = src.varray.common_info();
     if (info.type == CommonVArrayInfo::Type::Single) {
       const GPointer value(src.varray.type(), info.data);
-      if (dst_attributes.add(id, out_domain, data_type, bke::AttributeInitValue(value))) {
+      if (dst_attributes.add(name, out_domain, data_type, bke::AttributeInitValue(value))) {
         continue;
       }
     }
 
     GSpanAttributeWriter dst = dst_attributes.lookup_or_add_for_write_only_span(
-        id, out_domain, data_type);
+        name, out_domain, data_type);
     if (!dst) {
       continue;
     }
 
     switch (src.domain) {
-      case AttrDomain::Point: {
-        const GVArraySpan src_span(*src);
-        bke::attribute_math::to_static_type(data_type, [&]<typename T>() {
-          copy_data_based_on_vertex_types(
-              src_span.typed<T>(), dst.span.typed<T>(), vertex_types, keep_boundaries);
-        });
+      case AttrDomain::Point:
+        ensure_vert_map();
+        bke::attribute_math::gather(*src, new_face_to_old_vert, dst.span);
         break;
-      }
       case AttrDomain::Edge:
         bke::attribute_math::gather(*src, new_to_old_edges_map, dst.span);
         break;
       case AttrDomain::Face: {
         const GVArraySpan src_span(*src);
         dst.span.take_front(src_span.size()).copy_from(src_span);
-        bke::attribute_math::to_static_type(data_type, [&]<typename T>() {
-          if (keep_boundaries) {
-            copy_data_based_on_pairs(
-                src_span.typed<T>(), dst.span.typed<T>(), boundary_vertex_to_relevant_face_map);
-          }
-        });
+        if (keep_boundaries) {
+          ensure_face_map();
+          bke::attribute_math::gather(
+              src.varray, boundary_vert_src_face, boundary_vert_mask, dst.span);
+        }
         break;
       }
       case AttrDomain::Corner:
@@ -893,13 +900,14 @@ static Mesh *calc_dual_mesh(const Mesh &src_mesh,
     }
 
     face_sizes.append(corner_indices.size());
-    for (const int j : corner_indices) {
-      corner_verts.append(j);
-    }
+    corner_verts.extend(corner_indices);
   }
   Mesh *mesh_out = BKE_mesh_new_nomain(
       vert_positions.size(), new_edges.size(), face_sizes.size(), corner_verts.size());
   bke::mesh_smooth_set(*mesh_out, false);
+
+  std::ranges::sort(boundary_vertex_to_relevant_face_map,
+                    [](const auto &a, const auto &b) { return a.first < b.first; });
 
   transfer_attributes(vertex_types,
                       keep_boundaries,
@@ -926,23 +934,23 @@ static Mesh *calc_dual_mesh(const Mesh &src_mesh,
 
 static void node_geo_exec(GeoNodeExecParams params)
 {
-  GeometrySet geometry_set = params.extract_input<GeometrySet>("Mesh");
-  const bool keep_boundaries = params.extract_input<bool>("Keep Boundaries");
+  GeometrySet geometry_set = params.extract_input<GeometrySet>("Mesh"_ustr);
+  const bool keep_boundaries = params.extract_input<bool>("Keep Boundaries"_ustr);
   geometry::foreach_real_geometry(geometry_set, [&](GeometrySet &geometry_set) {
     if (const Mesh *mesh = geometry_set.get_mesh()) {
       Mesh *new_mesh = calc_dual_mesh(
-          *mesh, keep_boundaries, params.get_attribute_filter("Dual Mesh"));
+          *mesh, keep_boundaries, params.get_attribute_filter("Dual Mesh"_ustr));
       geometry::debug_randomize_mesh_order(new_mesh);
       geometry_set.replace_mesh(new_mesh);
     }
   });
-  params.set_output("Dual Mesh", std::move(geometry_set));
+  params.set_output("Dual Mesh"_ustr, std::move(geometry_set));
 }
 
 static void node_register()
 {
   static bke::bNodeType ntype;
-  geo_node_type_base(&ntype, "GeometryNodeDualMesh", GEO_NODE_DUAL_MESH);
+  geo_node_type_base(&ntype, "GeometryNodeDualMesh"_ustr, GEO_NODE_DUAL_MESH);
   ntype.ui_name = "Dual Mesh";
   ntype.ui_description = "Convert Faces into vertices and vertices into faces";
   ntype.enum_name_legacy = "DUAL_MESH";

@@ -139,8 +139,9 @@ class EEVEE_MATERIAL_PT_context_material(MaterialButtonsPanel, Panel):
             if ob.mode == 'EDIT':
                 row = layout.row(align=True)
                 row.operator("object.material_slot_assign", text="Assign")
-                row.operator("object.material_slot_select", text="Select")
-                row.operator("object.material_slot_deselect", text="Deselect")
+                if ob.type != 'FONT':
+                    row.operator("object.material_slot_select", text="Select")
+                    row.operator("object.material_slot_deselect", text="Deselect")
 
         elif mat:
             row.template_ID(space, "pin_id")

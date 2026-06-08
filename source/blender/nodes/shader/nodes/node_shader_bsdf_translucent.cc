@@ -10,10 +10,13 @@ namespace nodes::node_shader_bsdf_translucent_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Color>("Color").default_value({0.8f, 0.8f, 0.8f, 1.0f});
-  b.add_input<decl::Vector>("Normal").hide_value();
-  b.add_input<decl::Float>("Weight").available(false);
-  b.add_output<decl::Shader>("BSDF");
+  const bNodeTree *ntree = b.tree_or_null();
+  const bool is_gpu_internal = ntree && (ntree->flag & NTREE_IS_GPU_SHADER_INTERNAL);
+
+  b.add_input<decl::Color>("Color"_ustr).default_value({0.8f, 0.8f, 0.8f, 1.0f});
+  b.add_input<decl::Vector>("Normal"_ustr).hide_value();
+  b.add_input<decl::Float>("Weight"_ustr).available(is_gpu_internal);
+  b.add_output<decl::Shader>("BSDF"_ustr);
 }
 
 static int node_shader_gpu_bsdf_translucent(GPUMaterial *mat,
@@ -56,7 +59,7 @@ void register_node_type_sh_bsdf_translucent()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeBsdfTranslucent", SH_NODE_BSDF_TRANSLUCENT);
+  sh_node_type_base(&ntype, "ShaderNodeBsdfTranslucent"_ustr, SH_NODE_BSDF_TRANSLUCENT);
   ntype.ui_name = "Translucent BSDF";
   ntype.ui_description = "Lambertian diffuse transmission";
   ntype.enum_name_legacy = "BSDF_TRANSLUCENT";

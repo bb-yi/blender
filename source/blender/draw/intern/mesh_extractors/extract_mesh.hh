@@ -117,8 +117,8 @@ struct MeshRenderData {
   VArraySpan<bool> select_poly;
   VArraySpan<bool> sharp_faces;
 
-  Span<int> loose_verts;
-  Span<int> loose_edges;
+  IndexMask loose_verts;
+  IndexMask loose_edges;
 
   const char *active_color_name;
   const char *default_color_name;
@@ -194,7 +194,7 @@ BLI_INLINE const float *bm_face_no_get(const MeshRenderData &mr, const BMFace *e
 /* `draw_cache_extract_mesh_render_data.cc` */
 
 /**
- * \param edit_mode_active: When true, use the modifiers from the edit-data,
+ * \param is_editmode: When true, use the modifiers from the edit-data,
  * otherwise don't use modifiers as they are not from this object.
  */
 MeshRenderData mesh_render_data_create(Object &object,
@@ -246,16 +246,16 @@ inline uint2 edge_from_corners(const IndexRange face, const int corner)
 template<typename T>
 void extract_mesh_loose_edge_data(const Span<T> vert_data,
                                   const Span<int2> edges,
-                                  const Span<int> loose_edges,
+                                  const IndexMask &loose_edges,
                                   MutableSpan<T> gpu_data)
 {
-  threading::parallel_for(loose_edges.index_range(), 4096, [&](const IndexRange range) {
-    for (const int i : range) {
-      const int2 edge = edges[loose_edges[i]];
-      gpu_data[i * 2 + 0] = vert_data[edge[0]];
-      gpu_data[i * 2 + 1] = vert_data[edge[1]];
-    }
-  });
+  loose_edges.foreach_index_optimized<int>(
+      [&](const int i, const int pos) {
+        const int2 edge = edges[i];
+        gpu_data[pos * 2 + 0] = vert_data[edge[0]];
+        gpu_data[pos * 2 + 1] = vert_data[edge[1]];
+      },
+      exec_mode::grain_size(4096));
 }
 
 gpu::VertBufPtr extract_positions(const MeshRenderData &mr);

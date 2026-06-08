@@ -241,7 +241,7 @@ Mesh *MOD_solidify_extrude_modifyMesh(ModifierData *md, const ModifierEvalContex
 
     /* save doing 2 loops here... */
 #if 0
-    copy_vn_i(edge_users, edges_num, INVALID_UNUSED);
+    std::fill_n(edge_users, edges_num, INVALID_UNUSED);
 #endif
 
     for (eidx = 0; eidx < edges_num; eidx++) {
@@ -493,7 +493,7 @@ Mesh *MOD_solidify_extrude_modifyMesh(ModifierData *md, const ModifierEvalContex
 
     if (do_clamp) {
       vert_lens = MEM_new_array_uninitialized<float>(verts_num, "vert_lens");
-      copy_vn_fl(vert_lens, int(verts_num), FLT_MAX);
+      std::fill_n(vert_lens, int(verts_num), FLT_MAX);
       for (uint i = 0; i < edges_num; i++) {
         const float ed_len_sq = len_squared_v3v3(vert_positions[edges[i][0]],
                                                  vert_positions[edges[i][1]]);
@@ -506,7 +506,7 @@ Mesh *MOD_solidify_extrude_modifyMesh(ModifierData *md, const ModifierEvalContex
       uint eidx;
       if (do_angle_clamp) {
         vert_angs = MEM_new_array_uninitialized<float>(verts_num, "vert_angs");
-        copy_vn_fl(vert_angs, int(verts_num), 0.5f * M_PI);
+        std::fill_n(vert_angs, int(verts_num), 0.5f * M_PI);
       }
       if (do_bevel_convex) {
         edge_angs = MEM_new_array_uninitialized<float>(edges_num, "edge_angs");
@@ -706,7 +706,6 @@ Mesh *MOD_solidify_extrude_modifyMesh(ModifierData *md, const ModifierEvalContex
 #ifdef USE_NONMANIFOLD_WORKAROUND
     const bool check_non_manifold = (smd->flag & MOD_SOLIDIFY_NORMAL_CALC) != 0;
 #endif
-    /* same as EM_solidify() in editmesh_lib.c */
     float *vert_angles = MEM_new_array_zeroed<float>(2 * verts_num, "mod_solid_pair"); /* 2 in 1 */
     float *vert_accum = vert_angles + verts_num;
     uint vidx;
@@ -803,7 +802,7 @@ Mesh *MOD_solidify_extrude_modifyMesh(ModifierData *md, const ModifierEvalContex
       uint eidx;
       if (do_angle_clamp) {
         vert_angs = MEM_new_array_uninitialized<float>(verts_num, "vert_angs even");
-        copy_vn_fl(vert_angs, int(verts_num), 0.5f * M_PI);
+        std::fill_n(vert_angs, int(verts_num), 0.5f * M_PI);
       }
       if (do_bevel_convex) {
         edge_angs = MEM_new_array_uninitialized<float>(edges_num, "edge_angs even");
@@ -872,7 +871,7 @@ Mesh *MOD_solidify_extrude_modifyMesh(ModifierData *md, const ModifierEvalContex
       if (offset > FLT_EPSILON) {
         float *vert_lens_sq = MEM_new_array_uninitialized<float>(verts_num, "vert_lens_sq");
         const float offset_sq = offset * offset;
-        copy_vn_fl(vert_lens_sq, int(verts_num), FLT_MAX);
+        std::fill_n(vert_lens_sq, int(verts_num), FLT_MAX);
         for (i = 0; i < edges_num; i++) {
           const float ed_len = len_squared_v3v3(vert_positions[edges[i][0]],
                                                 vert_positions[edges[i][1]]);

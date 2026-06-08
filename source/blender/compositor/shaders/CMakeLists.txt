@@ -83,6 +83,7 @@ set(SRC_GLSL_COMP
   compositor_morphological_blur.glsl
   compositor_morphological_distance_feather.glsl
   compositor_morphological_distance_threshold.glsl
+  compositor_morphological_distance_threshold_seeds.glsl
   compositor_morphological_distance.glsl
   compositor_morphological_step.glsl
   compositor_motion_blur_max_velocity_dilate.glsl
@@ -136,10 +137,8 @@ set(SRC_GLSL_LIB
 
 # Compile shaders with shader code.
 if(WITH_GPU_SHADER_CPP_COMPILATION)
-  with_shader_cpp_compilation_config()
-
   compile_sources_as_cpp(compositor_cpp_shaders_comp "${SRC_GLSL_COMP}" "GPU_COMPUTE_SHADER")
   # Only enable to make sure they compile on their own.
   # Otherwise it creates a warning about `pragma once`.
-  compile_sources_as_cpp(compositor_cpp_shaders_lib "${SRC_GLSL_LIB}" "GPU_LIBRARY_SHADER")
+  # compile_sources_as_cpp(compositor_cpp_shaders_lib "${SRC_GLSL_LIB}" "GPU_LIBRARY_SHADER")
 endif()

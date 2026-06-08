@@ -21,6 +21,8 @@
 
 namespace blender::compositor {
 
+struct Schedule;
+
 /* ------------------------------------------------------------------------------------------------
  * Shader Operation
  *
@@ -62,7 +64,7 @@ class ShaderOperation : public PixelOperation {
    * inputs that are linked to the same output socket. */
   Map<const bNodeSocket *, GPUNodeLink *> output_to_material_attribute_map_;
   /* A map that associates implicit inputs to the attributes that were created for them. */
-  Map<ImplicitInput, GPUNodeLink *> implicit_input_to_material_attribute_map_;
+  Map<ImplicitInputType, GPUNodeLink *> implicit_input_to_material_attribute_map_;
 
  public:
   /* Shaders operations have a limit on how many outputs and inputs they can support. Inputs use
@@ -74,7 +76,8 @@ class ShaderOperation : public PixelOperation {
    * by calling GPU_material_from_callbacks with the appropriate callbacks. */
   ShaderOperation(Context &context,
                   PixelCompileUnit &compile_unit,
-                  const VectorSet<const bNode *> &schedule);
+                  const Schedule &schedule,
+                  const ComputeContext &compute_context);
 
   /* Free the GPU material. */
   ~ShaderOperation() override;
@@ -170,6 +173,10 @@ class ShaderOperation : public PixelOperation {
    * declared outputs. Additionally, code will be emitted to define the storer functions that store
    * the value in the appropriate image identified by the given index. */
   void populate_operation_result(const bNodeSocket &output_socket);
+
+  /* Inserts an implicit conversion function that converts from the type of the output to the type
+   * of the input if not already the same. We assume the input is already linked. */
+  void convert_input_link_type(const bNodeSocket &input, const bNodeSocket &output);
 
   /* A static callback method of interface GPUCodegenCallbackFn that is passed to
    * GPU_material_from_callbacks to create the shader create info of the GPU material. The thunk

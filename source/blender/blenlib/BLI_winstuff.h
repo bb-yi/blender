@@ -15,15 +15,7 @@
 
 #include "BLI_sys_types.h"
 
-#define WIN32_LEAN_AND_MEAN
-
-#ifndef NOMINMAX
-#  define NOMINMAX
-#  include <windows.h>
-#  undef NOMINMAX
-#else
-#  include <windows.h>
-#endif
+#include <windows.h>
 
 #undef rad
 #undef rad1

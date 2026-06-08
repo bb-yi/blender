@@ -228,6 +228,9 @@ class device_memory {
     return elements * data_elements * datatype_size(data_type);
   }
 
+  const char *global_name() const;
+  virtual string log_name() const;
+
   /* Data information. */
   DataType data_type;
   int data_elements;
@@ -236,8 +239,6 @@ class device_memory {
   size_t data_width;
   size_t data_height;
   MemoryType type;
-  const char *name;
-  string name_storage;
 
   /* Pointers. */
   Device *device;
@@ -289,13 +290,17 @@ class device_memory {
   void device_copy_to();
   void device_move_to_host();
   void device_copy_from(const size_t y, const size_t w, size_t h, const size_t elem);
+  void device_copy_merged_bitmap_from(const size_t y, const size_t w, size_t h);
   void device_zero();
 
   /* Memory can only be freed on host and device together. */
   void host_and_device_free();
+  /* Free only the host buffer, leaving any device allocation intact. */
+  void host_only_free();
 
   bool device_is_cpu();
 
+  const char *name_;
   device_ptr original_device_ptr;
   size_t original_device_size;
   Device *original_device;
@@ -425,12 +430,44 @@ template<typename T> class device_vector : public device_memory {
 
       host_and_device_free();
       host_pointer = new_ptr;
+      modified = true;
       assert(device_pointer == 0);
     }
 
     data_size = new_size;
     data_width = width;
     data_height = height;
+
+    return data();
+  }
+
+  /* Host-only resize: grows the host buffer while leaving any existing device allocation
+   * untouched. Use this when a kernel may be reading from device_pointer and freeing it
+   * would be unsafe. The device buffer will be reallocated on the next copy_to_device()
+   * call once the device is idle. Only valid when not shrinking. */
+  T *host_only_resize(const size_t new_count)
+  {
+    assert(new_count >= data_size);
+
+    if (new_count != data_size) {
+      void *new_ptr = host_alloc(sizeof(T) * new_count);
+
+      if (new_ptr) {
+        for (size_t i = 0; i < data_size; i++) {
+          ((T *)new_ptr)[i] = ((T *)host_pointer)[i];
+        }
+        for (size_t i = data_size; i < new_count; i++) {
+          ((T *)new_ptr)[i] = T();
+        }
+      }
+
+      host_only_free();
+      host_pointer = new_ptr;
+      modified = true;
+    }
+
+    data_size = new_count;
+    data_width = new_count;
 
     return data();
   }
@@ -444,6 +481,7 @@ template<typename T> class device_vector : public device_memory {
     data_width = 0;
     data_height = 0;
     host_pointer = from.steal_pointer();
+    modified = true;
     assert(device_pointer == 0);
   }
 
@@ -542,6 +580,12 @@ template<typename T> class device_vector : public device_memory {
     device_copy_from(y, w, h, sizeof(T));
   }
 
+  /* Copy from all devices and OR into host memory. */
+  void copy_merged_bitmap_from_device()
+  {
+    device_copy_merged_bitmap_from(0, data_size, 1);
+  }
+
   void zero_to_device()
   {
     device_zero();
@@ -589,11 +633,13 @@ class device_image : public device_memory {
  public:
   device_image(Device *device,
                const char *name,
-               const uint slot,
+               const uint image_info_id,
                ImageDataType image_data_type,
                InterpolationType interpolation,
                ExtensionType extension);
   ~device_image() override;
+
+  string log_name() const override;
 
   void *alloc(const size_t width, const size_t height);
 
@@ -604,7 +650,7 @@ class device_image : public device_memory {
 
   void copy_to_device();
 
-  uint slot = 0;
+  uint image_info_id = 0;
   KernelImageInfo info;
 
  protected:

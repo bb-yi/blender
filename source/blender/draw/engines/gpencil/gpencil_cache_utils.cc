@@ -242,7 +242,7 @@ static float4 grease_pencil_layer_final_tint_and_alpha_get(const Instance *inst,
     const float4 onion_col_custom = use_next_col ? float4(color_next, 1.0f) :
                                                    float4(color_prev, 1.0f);
 
-    *r_alpha = use_onion_fade ? (1.0f / abs(onion_id)) : 0.5f;
+    *r_alpha = use_onion_fade ? (1.0f / abs(onion_id)) : 1.0f;
     *r_alpha *= onion_factor;
     *r_alpha = (onion_factor > 0.0f) ? clamp_f(*r_alpha, 0.1f, 1.0f) :
                                        clamp_f(*r_alpha, 0.01f, 1.0f);
@@ -317,8 +317,7 @@ tLayer *grease_pencil_layer_cache_add(Instance *inst,
   const bool disable_masks_render = is_viewlayer_render &&
                                     (layer.base.flag &
                                      GP_LAYER_TREE_NODE_DISABLE_MASKS_IN_VIEWLAYER) != 0;
-  bool is_masked = !disable_masks_render && layer.use_masks() &&
-                   !BLI_listbase_is_empty(&layer.masks);
+  bool is_masked = !disable_masks_render && layer.use_masks() && !layer.masks.is_empty();
 
   const float vert_col_opacity = (override_vertcol) ?
                                      (is_vert_col_mode ? inst->vertex_paint_opacity : 0.0f) :

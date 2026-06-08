@@ -11,11 +11,7 @@
 #  include "device/hip/queue.h"
 #  include "device/hiprt/queue.h"
 
-#  ifdef WITH_HIP_DYNLOAD
-#    include <hiprtew.h>
-#  else
-#    include <hiprt/hiprt_types.h>
-#  endif
+#  include <hiprt/hiprt_types.h>
 
 CCL_NAMESPACE_BEGIN
 
@@ -29,6 +25,8 @@ class BVHHIPRT;
 class HIPRTDevice : public HIPDevice {
 
  public:
+  static bool is_supported();
+
   BVHLayoutMask get_bvh_layout_mask(const uint kernel_features) const override;
 
   HIPRTDevice(const DeviceInfo &info, Stats &stats, Profiler &profiler, bool headless);
@@ -61,6 +59,9 @@ class HIPRTDevice : public HIPDevice {
   hiprtGeometryBuildInput prepare_curve_blas(BVHHIPRT *bvh, Hair *hair);
   hiprtGeometryBuildInput prepare_point_blas(BVHHIPRT *bvh, PointCloud *pointcloud);
   void build_blas(BVHHIPRT *bvh, Geometry *geom, hiprtBuildOptions options);
+  hiprtBuildFlags select_blas_build_flags(BVHHIPRT *bvh,
+                                          Geometry *geom,
+                                          const hiprtGeometryBuildInput &geom_input);
   hiprtScene build_tlas(BVHHIPRT *bvh,
                         const vector<Object *> &objects,
                         hiprtBuildOptions options,

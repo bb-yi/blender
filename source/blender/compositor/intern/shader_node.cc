@@ -14,7 +14,6 @@
 
 #include "COM_shader_node.hh"
 #include "COM_utilities.hh"
-#include "COM_utilities_gpu_material.hh"
 
 namespace blender::compositor {
 
@@ -32,17 +31,17 @@ void ShaderNode::compile(GPUMaterial *material)
 
 GPUNodeStack &ShaderNode::get_input(const StringRef identifier)
 {
-  return get_shader_node_input(node_, inputs_.data(), identifier);
+  return GPU_node_get_input(node_, inputs_.data(), identifier);
 }
 
 GPUNodeStack &ShaderNode::get_output(const StringRef identifier)
 {
-  return get_shader_node_output(node_, outputs_.data(), identifier);
+  return GPU_node_get_output(node_, outputs_.data(), identifier);
 }
 
 static GPUType gpu_type_from_socket(const bNodeSocket &socket)
 {
-  switch (eNodeSocketDatatype(socket.type)) {
+  switch (socket.type) {
     case SOCK_FLOAT:
       return GPU_FLOAT;
     case SOCK_INT:
@@ -63,12 +62,32 @@ static GPUType gpu_type_from_socket(const bNodeSocket &socket)
           BLI_assert_unreachable();
           return GPU_NONE;
       }
+    case SOCK_INT_VECTOR:
+      /* GPUMaterial doesn't support int[23], so it is passed as a float[23]. */
+      switch (socket.default_value_typed<bNodeSocketValueIntVector>()->dimensions) {
+        case 2:
+          return GPU_VEC2;
+        case 3:
+          return GPU_VEC3;
+        default:
+          BLI_assert_unreachable();
+          return GPU_NONE;
+      }
     case SOCK_RGBA:
+    case SOCK_ROTATION:
       return GPU_VEC4;
+    case SOCK_MATRIX:
+      return GPU_MAT4;
     case SOCK_MENU:
       /* GPUMaterial doesn't support int, so it is passed as a float. */
       return GPU_FLOAT;
     case SOCK_STRING:
+    case SOCK_OBJECT:
+    case SOCK_IMAGE:
+    case SOCK_FONT:
+    case SOCK_SCENE:
+    case SOCK_TEXT_ID:
+    case SOCK_MASK:
       /* Single only types do not support GPU code path. */
       BLI_assert(Result::is_single_value_only_type(get_node_socket_result_type(&socket)));
       BLI_assert_unreachable();

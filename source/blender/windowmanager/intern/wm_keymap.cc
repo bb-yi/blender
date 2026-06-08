@@ -358,7 +358,7 @@ void WM_keyconfig_clear(wmKeyConfig *keyconf)
     MEM_delete(&km);
   }
 
-  BLI_listbase_clear(&keyconf->keymaps);
+  keyconf->keymaps.clear_no_delete();
 }
 
 void WM_keyconfig_free(wmKeyConfig *keyconf)
@@ -423,14 +423,20 @@ static wmKeyMap *wm_keymap_new(const char *idname, int spaceid, int regionid)
   return km;
 }
 
-static wmKeyMap *wm_keymap_copy(wmKeyMap *keymap)
+static void wm_keymap_copy_data(wmKeyMap *keymapn, wmKeyMap *keymap)
 {
-  wmKeyMap *keymapn = MEM_dupalloc(keymap);
+  /* Copy keymap data in place, preserving next/prev to keep its place in the list. */
+  wmKeyMap *prev = keymapn->prev;
+  wmKeyMap *next = keymapn->next;
+  *keymapn = *keymap;
+  keymapn->prev = prev;
+  keymapn->next = next;
 
   keymapn->modal_items = keymap->modal_items;
   keymapn->poll = keymap->poll;
   keymapn->poll_modal_item = keymap->poll_modal_item;
-  BLI_listbase_clear(&keymapn->items);
+  keymapn->diff_items.clear_no_delete();
+  keymapn->items.clear_no_delete();
   keymapn->flag &= ~(KEYMAP_UPDATE | KEYMAP_EXPANDED);
 
   for (wmKeyMapDiffItem &kmdi : keymap->diff_items) {
@@ -442,7 +448,12 @@ static wmKeyMap *wm_keymap_copy(wmKeyMap *keymap)
     wmKeyMapItem *kmi_new = wm_keymap_item_copy(&kmi);
     BLI_addtail(&keymapn->items, kmi_new);
   }
+}
 
+static wmKeyMap *wm_keymap_copy(wmKeyMap *keymap)
+{
+  wmKeyMap *keymapn = MEM_new<wmKeyMap>(__func__);
+  wm_keymap_copy_data(keymapn, keymap);
   return keymapn;
 }
 
@@ -458,8 +469,8 @@ void WM_keymap_clear(wmKeyMap *keymap)
     MEM_delete(&kmi);
   }
 
-  BLI_listbase_clear(&keymap->diff_items);
-  BLI_listbase_clear(&keymap->items);
+  keymap->diff_items.clear_no_delete();
+  keymap->items.clear_no_delete();
 }
 
 void WM_keymap_remove(wmKeyConfig *keyconf, wmKeyMap *keymap)
@@ -480,7 +491,7 @@ bool WM_keymap_poll(bContext *C, wmKeyMap *keymap)
     }
   }
 
-  if (UNLIKELY(BLI_listbase_is_empty(&keymap->items))) {
+  if (UNLIKELY(keymap->items.is_empty())) {
     /* Empty key-maps may be missing more there may be a typo in the name.
      * Warn early to avoid losing time investigating each case.
      * When developing a customized Blender though you may want empty keymaps. */
@@ -750,23 +761,25 @@ static wmKeyMap *wm_keymap_patch_update(ListBaseT<wmKeyMap> *lb,
                                         wmKeyMap *addonmap,
                                         wmKeyMap *usermap)
 {
-  int expanded = 0;
+  eKeyMap_Flag expanded = eKeyMap_Flag{};
 
-  /* Remove previous keymap in list, we will replace it. */
+  /* Get previous keymap in list, we will update it in place to keep iterators valid. */
   wmKeyMap *km = WM_keymap_list_find(
       lb, defaultmap->idname, defaultmap->spaceid, defaultmap->regionid);
   if (km) {
     expanded = (km->flag & (KEYMAP_EXPANDED | KEYMAP_CHILDREN_EXPANDED));
     WM_keymap_clear(km);
-    BLI_freelinkN(lb, km);
+  }
+  else {
+    km = MEM_new<wmKeyMap>(__func__);
+    BLI_addtail(lb, km);
   }
 
   /* Copy new keymap from an existing one. */
   if (usermap && !(usermap->flag & KEYMAP_DIFF)) {
     /* For compatibility with old user preferences with non-diff
      * keymaps we override the original entirely. */
-
-    km = wm_keymap_copy(usermap);
+    wm_keymap_copy_data(km, usermap);
 
     /* Try to find corresponding id's for items. */
     for (wmKeyMapItem &kmi : km->items) {
@@ -786,7 +799,7 @@ static wmKeyMap *wm_keymap_patch_update(ListBaseT<wmKeyMap> *lb,
     km->flag |= KEYMAP_UPDATE; /* Update again to create diff. */
   }
   else {
-    km = wm_keymap_copy(defaultmap);
+    wm_keymap_copy_data(km, defaultmap);
   }
 
   /* Add addon keymap items. */
@@ -804,9 +817,6 @@ static wmKeyMap *wm_keymap_patch_update(ListBaseT<wmKeyMap> *lb,
   if (usermap && (usermap->flag & KEYMAP_DIFF)) {
     wm_keymap_patch(km, usermap);
   }
-
-  /* Add to list. */
-  BLI_addtail(lb, km);
 
   return km;
 }

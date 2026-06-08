@@ -6,7 +6,7 @@
 #include "BKE_main.hh"
 #include "BLI_assert.h"
 #include "BLI_bounds.hh"
-#include "BLI_color.hh"
+#include "BLI_color_types.hh"
 #include "BLI_math_color.h"
 #include "BLI_math_euler_types.hh"
 #include "BLI_math_matrix.hh"
@@ -142,7 +142,8 @@ static IndexRange extend_curves_geometry(bke::CurvesGeometry &curves, const NSVG
     /* Extra points can be at the end of the path, so loop through until they are gone. */
     const float2 pos_first = svg_path_data.first();
     float2 pos_last = svg_path_data[(point_num - 1) * 3];
-    while (math::almost_equal_relative(pos_first, pos_last, 1e-6f)) {
+
+    while (math::almost_equal_relative(pos_first, pos_last, 1e-6f) && point_num > 1) {
       point_num--;
       pos_last = svg_path_data[(point_num - 1) * 3];
     }
@@ -225,16 +226,23 @@ static void shape_attributes_to_curves(bke::CurvesGeometry &curves,
 
   const bool use_stroke = bool(shape.stroke.type);
   const bool use_fill = bool(shape.fill.type);
+  /* Ensure stroke/fill attributes exist if non-zero values need to be written. */
   if (!use_stroke) {
-    bke::SpanAttributeWriter<bool> hide_stroke = attributes.lookup_or_add_for_write_span<bool>(
-        "hide_stroke", bke::AttrDomain::Curve);
-    hide_stroke.span.slice(curves_range).fill(true);
-    hide_stroke.finish();
+    attributes.add<bool>("hide_stroke", bke::AttrDomain::Curve, bke::AttributeInitDefaultValue());
   }
   if (use_fill) {
-    bke::SpanAttributeWriter<int> fill_ids = attributes.lookup_or_add_for_write_span<int>(
-        "fill_id", bke::AttrDomain::Curve);
-    fill_ids.span.slice(curves_range).fill(shape_index + 1);
+    attributes.add<int>("fill_id", bke::AttrDomain::Curve, bke::AttributeInitDefaultValue());
+  }
+
+  bke::SpanAttributeWriter<bool> hide_stroke = attributes.lookup_for_write_span<bool>(
+      "hide_stroke");
+  bke::SpanAttributeWriter<int> fill_ids = attributes.lookup_for_write_span<int>("fill_id");
+  if (hide_stroke) {
+    hide_stroke.span.slice(curves_range).fill(!use_stroke);
+    hide_stroke.finish();
+  }
+  if (fill_ids) {
+    fill_ids.span.slice(curves_range).fill(use_fill ? shape_index + 1 : 0);
     fill_ids.finish();
   }
 
@@ -243,13 +251,16 @@ static void shape_attributes_to_curves(bke::CurvesGeometry &curves,
     if (path->npts == 0) {
       continue;
     }
-    const bool closed = bool(path->closed);
+    const IndexRange points = points_by_curve[curve_index];
+
+    /* Close the curve if any points have been removed. An unmodified non-closed curve will have 3
+     * positions for every point (Center, Left, Right) except for the 2 ends which each remove 1
+     * (either Left or Right for the Start and End) */
+    const bool closed = bool(path->closed) || (points.size() * 3 - 2 != path->npts);
     cyclic[curve_index] = closed;
 
     /* 2D vectors in triplets: [control point, left handle, right handle]. */
     const Span<float2> svg_path_data = Span<float>(path->pts, 2 * path->npts).cast<float2>();
-
-    const IndexRange points = points_by_curve[curve_index];
     const ColorGeometry4f point_color = convert_svg_color(shape.stroke);
 
     /* Handle first point separately. */

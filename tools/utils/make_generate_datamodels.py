@@ -37,7 +37,7 @@ import time
 # the corresponding `.py`` file is automatically marked as 'generated' in
 # `.gitattributes`.
 YAML_PATHS = [
-    "scripts/modules/_bpy_internal/assets/remote_library_listing/blender_asset_library_openapi.yaml",
+    "scripts/modules/_bpy_internal/assets/remote_library/blender_asset_library_openapi.yaml",
 ]
 
 # Packages to install in the virtualenv. These are only necessary to run this
@@ -45,6 +45,7 @@ YAML_PATHS = [
 REQUIREMENTS = [
     "datamodel-code-generator ~= 0.53.0",
     "PyYAML ~= 6.0.2",
+    "docformatter ~= 1.7.8",
 ]
 
 # These arguments are quite likely to be used for all code generated with this
@@ -76,6 +77,9 @@ COMMON_ARGS = [
     # Remove the "generated on" timestamp from the output, so that running the
     # generator is idempotent.
     "--disable-timestamp",
+
+    "--use-inline-field-description",
+    "--use-schema-description",
 ]
 
 
@@ -91,9 +95,6 @@ CUSTOM_FILE_HEADER = """
 
 def main() -> None:
     """Run the datamodel code generator."""
-
-    # Late import, as this is only available once inside the virtualenv.
-    import yaml
 
     argparser = argparse.ArgumentParser(description="Run the datamodel code generator.")
     argparser.add_argument('source_root', type=Path, help="The root of Blender's source directory")
@@ -119,17 +120,6 @@ def main() -> None:
             out_path=py_path,
         )
 
-        # Append the OpenAPI specification as Python code. This is necessary to
-        # reference for runtime validation. Having it available as Python
-        # dictionary is easier than having to parse it from YAML or JSON later.
-        with yaml_path.open() as yamlfile:
-            openapi_spec = yaml.safe_load(yamlfile)
-        with py_path.open("a") as outfile:
-            print(file=outfile)
-            print("# This OpenAPI specification was used to generate the above code.", file=outfile)
-            print("# It is here so that Blender does not have to parse the YAML file.", file=outfile)
-            print("OPENAPI_SPEC = {!r}".format(openapi_spec), file=outfile)
-
     # Make sure that output from subprocesses is flushed, before outputting more
     # below. This prevents stderr and stdout going out of sync, ensuring things
     # are shown in chronological order (i.e. generating files before
@@ -137,16 +127,9 @@ def main() -> None:
     sys.stderr.flush()
     sys.stdout.flush()
 
-    # Format the generated Python code. Autopep8 (used by Blender) does not
-    # seem to re-wrap long lines, so that's why this script relies on running
-    # ruff first.
-    print("Formatting Python files")
-    py_paths_as_str = [str(path) for path in py_paths]
-    subprocess.run(
-        ["make", "format", "PATHS={}".format(" ".join(py_paths_as_str))],
-        cwd=root_path,
-        check=True,
-    )
+    # Format the generated Python code.
+    _docformatter(py_paths)
+    _make_format(root_path, py_paths)
 
     print("Done generating data model files!")
 
@@ -183,6 +166,45 @@ def _generate_datamodel(in_path: Path, in_type: str, out_path: Path) -> None:
             raise KeyboardInterrupt()
         case _:
             raise SystemExit(f"unknown result from code generation: {status}")
+
+
+def _docformatter(py_paths: list[Path]) -> None:
+    """Run 'docformatter' on generated Python files.
+
+    This is necessary because the generated docstrings are very long, and
+    'make format' doesn't automatically re-wrap them.
+    """
+    from docformatter import format
+    from docformatter import configuration
+
+    print("Formatting docstrings")
+
+    argv = ["docformatter", "--in-place", *(str(path) for path in py_paths)]
+    cfg = configuration.Configurater(argv)
+    cfg.do_parse_arguments()
+
+    formatter = format.Formatter(
+        cfg.args,
+        stderror=sys.stderr,
+        stdin=sys.stdin,
+        stdout=sys.stdout,
+    )
+    result = formatter.do_format_files()
+    if result not in {format.FormatResult.ok, format.FormatResult.format_required}:
+        raise RuntimeError(f"Error {result} running docformatter")
+
+
+def _make_format(root_path: Path, py_paths: list[Path]) -> None:
+    """Run 'make format' on generated Python files."""
+
+    print("Formatting Python files")
+
+    py_paths_as_str = [str(path) for path in py_paths]
+    subprocess.run(
+        ["make", "format", "PATHS={}".format(" ".join(py_paths_as_str))],
+        cwd=root_path,
+        check=True,
+    )
 
 
 # --------- Below this point is the self-bootstrapping logic ---------

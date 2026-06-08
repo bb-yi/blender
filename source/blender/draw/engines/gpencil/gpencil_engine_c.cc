@@ -247,6 +247,18 @@ void Instance::begin_sync()
     pass.draw_procedural(GPU_PRIM_TRIS, 1, 3);
   }
   {
+    /* Merges the object's depth to the viewport compositor depth pass. */
+    PassSimple &pass = this->merge_depth_pass_ps;
+    pass.init();
+    pass.state_set(DRW_STATE_WRITE_COLOR);
+    pass.shader_set(ShaderCache::get().depth_pass_merge.get());
+    pass.bind_texture("depth_buf", &this->depth_tx);
+    pass.bind_image("depth_pass_img", &this->depth_pass_img);
+    pass.push_constant("stroke_order3d", &this->is_stroke_order_3d);
+    pass.push_constant("gp_model_matrix", &this->object_bound_mat);
+    pass.draw_procedural(GPU_PRIM_TRIS, 1, 3);
+  }
+  {
     PassSimple &pass = this->mask_invert_ps;
     pass.init();
     pass.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_LOGIC_INVERT);
@@ -668,17 +680,17 @@ void Instance::acquire_resources()
                                                gpu::TextureFormat::SFLOAT_16_16_16_16 :
                                                gpu::TextureFormat::UNORM_10_10_10_2;
 
-  this->depth_tx.acquire(size, gpu::TextureFormat::SFLOAT_32_DEPTH_UINT_8);
-  this->color_tx.acquire(size, format_color);
-  this->reveal_tx.acquire(size, format_reveal);
+  this->depth_tx.acquire_2d(size, gpu::TextureFormat::SFLOAT_32_DEPTH_UINT_8);
+  this->color_tx.acquire_2d(size, format_color);
+  this->reveal_tx.acquire_2d(size, format_reveal);
 
   this->gpencil_fb.ensure(GPU_ATTACHMENT_TEXTURE(this->depth_tx),
                           GPU_ATTACHMENT_TEXTURE(this->color_tx),
                           GPU_ATTACHMENT_TEXTURE(this->reveal_tx));
 
   if (this->use_layer_fb) {
-    this->color_layer_tx.acquire(size, format_color);
-    this->reveal_layer_tx.acquire(size, format_reveal);
+    this->color_layer_tx.acquire_2d(size, format_color);
+    this->reveal_layer_tx.acquire_2d(size, format_reveal);
 
     this->layer_fb.ensure(GPU_ATTACHMENT_TEXTURE(this->depth_tx),
                           GPU_ATTACHMENT_TEXTURE(this->color_layer_tx),
@@ -686,8 +698,8 @@ void Instance::acquire_resources()
   }
 
   if (this->use_object_fb) {
-    this->color_object_tx.acquire(size, format_color);
-    this->reveal_object_tx.acquire(size, format_reveal);
+    this->color_object_tx.acquire_2d(size, format_color);
+    this->reveal_object_tx.acquire_2d(size, format_reveal);
 
     this->object_fb.ensure(GPU_ATTACHMENT_TEXTURE(this->depth_tx),
                            GPU_ATTACHMENT_TEXTURE(this->color_object_tx),
@@ -699,10 +711,10 @@ void Instance::acquire_resources()
     const gpu::TextureFormat mask_format = this->is_render ? gpu::TextureFormat::UNORM_16 :
                                                              gpu::TextureFormat::UNORM_8;
     /* We need an extra depth to not disturb the normal drawing. */
-    this->mask_depth_tx.acquire(size, gpu::TextureFormat::SFLOAT_32_DEPTH_UINT_8);
+    this->mask_depth_tx.acquire_2d(size, gpu::TextureFormat::SFLOAT_32_DEPTH_UINT_8);
     /* The mask_color_tx is needed for frame-buffer completeness. */
-    this->mask_color_tx.acquire(size, gpu::TextureFormat::UNORM_8);
-    this->mask_tx.acquire(size, mask_format);
+    this->mask_color_tx.acquire_2d(size, gpu::TextureFormat::UNORM_8);
+    this->mask_tx.acquire_2d(size, mask_format);
 
     this->mask_fb.ensure(GPU_ATTACHMENT_TEXTURE(this->mask_depth_tx),
                          GPU_ATTACHMENT_TEXTURE(this->mask_color_tx),
@@ -721,8 +733,13 @@ void Instance::acquire_resources()
     const int2 size = int2(draw_ctx->viewport_size_get());
     draw::TextureFromPool &grease_pencil_pass = DRW_viewport_pass_texture_get(
         RE_PASSNAME_GREASE_PENCIL);
-    grease_pencil_pass.acquire(size, gpu::TextureFormat::SFLOAT_16_16_16_16);
+    grease_pencil_pass.acquire_2d(size, gpu::TextureFormat::SFLOAT_16_16_16_16);
     this->gpencil_pass_fb.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(grease_pencil_pass));
+  }
+
+  if (DRW_viewport_pass_texture_exists(RE_PASSNAME_DEPTH)) {
+    draw::TextureFromPool &depth_pass = DRW_viewport_pass_texture_get(RE_PASSNAME_DEPTH);
+    this->depth_pass_img = depth_pass.gpu_texture();
   }
 }
 
@@ -746,8 +763,6 @@ void Instance::draw_mask(View &view, tObject *ob, tLayer *layer)
 {
   Manager *manager = DRW_manager_get();
 
-  const float clear_col[4] = {1.0f, 1.0f, 1.0f, 1.0f};
-  float clear_depth = ob->is_drawmode3d ? 1.0f : 0.0f;
   bool inverted = false;
   /* OPTI(@fclem): we could optimize by only clearing if the new mask_bits does not contain all
    * the masks already rendered in the buffer, and drawing only the layers not already drawn. */
@@ -771,7 +786,8 @@ void Instance::draw_mask(View &view, tObject *ob, tLayer *layer)
 
     if (!cleared) {
       cleared = true;
-      GPU_framebuffer_clear_color_depth(this->mask_fb, clear_col, clear_depth);
+      GPU_framebuffer_clear_color_depth(
+          this->mask_fb, {1.0, 1.0, 1.0, 1.0}, ob->is_drawmode3d ? 1.0f : 0.0f);
     }
 
     tLayer *mask_layer = grease_pencil_layer_cache_get(ob, i, true);
@@ -784,7 +800,7 @@ void Instance::draw_mask(View &view, tObject *ob, tLayer *layer)
   }
 
   if (!inverted) {
-    /* Blend shader expect an opacity mask not a reavealage buffer. */
+    /* Blend shader expect an opacity mask not a revealage buffer. */
     manager->submit(this->mask_invert_ps);
   }
 
@@ -795,7 +811,7 @@ void Instance::draw_object(View &view, tObject *ob)
 {
   Manager *manager = DRW_manager_get();
 
-  const float clear_cols[2][4] = {{0.0f, 0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 1.0f}};
+  const std::array<double4, 2> clear_cols = {double4{0, 0, 0, 0}, double4{1, 1, 1, 1}};
 
   GPU_debug_group_begin("GPencil Object");
 
@@ -842,6 +858,10 @@ void Instance::draw_object(View &view, tObject *ob)
     manager->submit(this->merge_depth_ps, view);
   }
 
+  if (DRW_viewport_pass_texture_exists(RE_PASSNAME_DEPTH)) {
+    manager->submit(this->merge_depth_pass_ps, view);
+  }
+
   GPU_debug_group_end();
 }
 
@@ -860,18 +880,21 @@ void Instance::draw(Manager &manager)
   }
   BLI_assert(this->scene_depth_tx);
 
-  float clear_cols[2][4] = {{0.0f, 0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 1.0f}};
+  std::array<double4, 2> clear_cols = {double4{0.0f, 0.0f, 0.0f, 0.0f},
+                                       double4{1.0f, 1.0f, 1.0f, 1.0f}};
 
   /* Fade 3D objects. */
   if ((!this->is_render) && (this->fade_3d_object_opacity > -1.0f) && (this->obact != nullptr) &&
       ELEM(this->obact->type, OB_GREASE_PENCIL))
   {
-    float background_color[3];
+    float3 background_color;
     ED_view3d_background_color_get(this->scene, this->v3d, background_color);
     /* Blend color. */
-    interp_v3_v3v3(clear_cols[0], background_color, clear_cols[0], this->fade_3d_object_opacity);
+    background_color = math::interpolate(
+        background_color, float3(clear_cols[0]), this->fade_3d_object_opacity);
 
-    mul_v4_fl(clear_cols[1], this->fade_3d_object_opacity);
+    clear_cols[0] = double4(background_color, 0.0f);
+    clear_cols[1] = double4(float4(clear_cols[1]) * this->fade_3d_object_opacity);
   }
 
   /* Sort object by decreasing Z to avoid most of alpha ordering issues. */

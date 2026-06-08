@@ -14,23 +14,20 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.use_custom_socket_order();
   b.allow_any_socket_order();
 
-  b.add_input<decl::Geometry>("Geometry").description("Geometry to get the bundle of");
-  b.add_output<decl::Geometry>("Geometry").propagate_all().align_with_previous();
-  b.add_output<decl::Bundle>("Bundle").propagate_all();
-  b.add_input<decl::Bool>("Remove").default_value(false).description(
-      "Removing the bundle from the geometry can be beneficial to avoid unnecessary data copies");
+  b.add_input<decl::Geometry>("Geometry"_ustr).description("Geometry to get the bundle of");
+  b.add_output<decl::Geometry>("Geometry"_ustr).propagate_all().align_with_previous();
+  b.add_output<decl::Bundle>("Bundle"_ustr).propagate_all();
+  b.add_input<decl::Bool>("Remove"_ustr)
+      .default_value(false)
+      .description(
+          "Removing the bundle from the geometry can be beneficial to avoid unnecessary data "
+          "copies");
 }
 
 static void node_geo_exec(GeoNodeExecParams params)
 {
-  if (!U.experimental.use_geometry_bundle) {
-    params.error_message_add(NodeWarningType::Error,
-                             TIP_("The experimental option for this node is disabled"));
-    params.set_default_remaining_outputs();
-    return;
-  }
-  GeometrySet geometry_set = params.extract_input<GeometrySet>("Geometry");
-  const bool remove = params.extract_input<bool>("Remove");
+  GeometrySet geometry_set = params.extract_input<GeometrySet>("Geometry"_ustr);
+  const bool remove = params.extract_input<bool>("Remove"_ustr);
   BundlePtr bundle;
   if (remove) {
     bundle = std::move(geometry_set.bundle_ptr());
@@ -38,29 +35,21 @@ static void node_geo_exec(GeoNodeExecParams params)
   else {
     bundle = geometry_set.bundle_ptr();
   }
-  params.set_output("Geometry", std::move(geometry_set));
-  params.set_output("Bundle", std::move(bundle));
-}
-
-static void node_gather_link_searches(GatherLinkSearchOpParams &params)
-{
-  if (!U.experimental.use_geometry_bundle) {
-    return;
-  }
-  search_link_ops_for_basic_node(params);
+  params.set_output("Geometry"_ustr, std::move(geometry_set));
+  params.set_output("Bundle"_ustr, std::move(bundle));
 }
 
 static void node_register()
 {
   static bke::bNodeType ntype;
 
-  geo_node_type_base(&ntype, "GeometryNodeGetGeometryBundle");
+  geo_node_type_base(&ntype, "GeometryNodeGetGeometryBundle"_ustr);
   ntype.ui_name = "Get Geometry Bundle";
   ntype.ui_description = "Get the bundle of a geometry";
   ntype.nclass = NODE_CLASS_GEOMETRY;
   ntype.geometry_node_execute = node_geo_exec;
   ntype.declare = node_declare;
-  ntype.gather_link_search_ops = node_gather_link_searches;
+  ntype.default_width = bke::NodeWidth::_160;
   bke::node_register_type(ntype);
 }
 NOD_REGISTER_NODE(node_register)

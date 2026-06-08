@@ -60,7 +60,7 @@ void register_node_type_tex_mix_rgb()
 {
   static bke::bNodeType ntype;
 
-  tex_node_type_base(&ntype, "TextureNodeMixRGB", TEX_NODE_MIX_RGB);
+  tex_node_type_base(&ntype, "TextureNodeMixRGB"_ustr, TEX_NODE_MIX_RGB);
   ntype.ui_name = "Mix";
   ntype.enum_name_legacy = "MIX_RGB";
   ntype.nclass = NODE_CLASS_OP_COLOR;

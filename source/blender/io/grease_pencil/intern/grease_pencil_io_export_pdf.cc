@@ -14,6 +14,9 @@
 #include "DNA_grease_pencil_types.h"
 #include "DNA_scene_types.h"
 
+#include "BKE_curves.hh"
+#include "GEO_resample_curves.hh"
+
 #include "grease_pencil_io.hh"
 #include "grease_pencil_io_intern.hh"
 
@@ -51,7 +54,8 @@ class PDFExporter : public GreasePencilExporter {
                   const VArray<int8_t> &types,
                   const ColorGeometry4f &color,
                   const float opacity,
-                  std::optional<float> width);
+                  std::optional<float> width,
+                  std::optional<float> miter_limit_angle);
   bool write_to_file(StringRefNull filepath);
 };
 
@@ -135,7 +139,22 @@ void PDFExporter::export_grease_pencil_objects(const int frame_number)
         continue;
       }
 
-      export_grease_pencil_layer(*ob_eval, *layer, *drawing);
+      const bke::CurvesGeometry &curves = drawing->strokes();
+      if (curves.has_curve_with_type(
+              {CURVE_TYPE_CATMULL_ROM, CURVE_TYPE_BEZIER, CURVE_TYPE_NURBS}))
+      {
+        IndexMaskMemory memory;
+        const IndexMask non_poly_selection = curves.indices_for_curve_type(CURVE_TYPE_POLY, memory)
+                                                 .complement(curves.curves_range(), memory);
+        Drawing export_drawing;
+        export_drawing.strokes_for_write() = geometry::resample_to_evaluated(curves,
+                                                                             non_poly_selection);
+        export_drawing.tag_topology_changed();
+        export_grease_pencil_layer(*ob_eval, *layer, export_drawing);
+      }
+      else {
+        export_grease_pencil_layer(*ob_eval, *layer, *drawing);
+      }
     }
   }
 }
@@ -158,10 +177,19 @@ void PDFExporter::export_grease_pencil_layer(const Object &object,
                          const ColorGeometry4f &color,
                          const float opacity,
                          const std::optional<float> width,
+                         const std::optional<float> miter_limit_angle,
                          const bool /*round_cap*/,
                          const bool /*is_outline*/) {
-    write_path(
-        layer_to_world, positions, points_by_curve, shape, cyclic, types, color, opacity, width);
+    write_path(layer_to_world,
+               positions,
+               points_by_curve,
+               shape,
+               cyclic,
+               types,
+               color,
+               opacity,
+               width,
+               miter_limit_angle);
   };
 
   foreach_shape_in_layer(object, layer, drawing, write_shape);
@@ -222,10 +250,26 @@ void PDFExporter::write_path(const float4x4 &transform,
                              const VArray<int8_t> & /*types*/,
                              const ColorGeometry4f &color,
                              const float opacity,
-                             std::optional<float> width)
+                             std::optional<float> width,
+                             std::optional<float> miter_limit_angle)
 {
+  if (miter_limit_angle) {
+    if (*miter_limit_angle <= GP_STROKE_MITER_ANGLE_ROUND) {
+      HPDF_Page_SetLineJoin(page_, HPDF_ROUND_JOIN);
+    }
+    else if (*miter_limit_angle >= GP_STROKE_MITER_ANGLE_BEVEL) {
+      HPDF_Page_SetLineJoin(page_, HPDF_BEVEL_JOIN);
+    }
+    else {
+      /* Convert the Miter angle to the Miter limit. */
+      const float miter_limit = 1.0f / math::sin(*miter_limit_angle / 2.0f);
+
+      HPDF_Page_SetLineJoin(page_, HPDF_MITER_JOIN);
+      HPDF_Page_SetMiterLimit(page_, miter_limit);
+    }
+  }
+
   if (width) {
-    HPDF_Page_SetLineJoin(page_, HPDF_ROUND_JOIN);
     HPDF_Page_SetLineWidth(page_, std::max(*width, 1.0f));
   }
 

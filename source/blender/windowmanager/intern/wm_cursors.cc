@@ -79,12 +79,12 @@ struct BCursor {
 };
 
 /**
- * A static array aligned with #WMCursorType for simple lookups.
+ * A static array aligned with #wmCursorType for simple lookups.
  */
 static BCursor g_cursors[WM_CURSOR_NUM] = {{nullptr}};
 
 /** Blender cursor to GHOST standard cursor conversion. */
-static GHOST_TStandardCursor convert_to_ghost_standard_cursor(WMCursorType curs)
+static GHOST_TStandardCursor convert_to_ghost_standard_cursor(wmCursorType curs)
 {
   switch (curs) {
     case WM_CURSOR_DEFAULT:
@@ -174,15 +174,10 @@ static int wm_cursor_size(const wmWindow *win)
     return std::lround(21.0f * UI_SCALE_FAC);
   }
 
-  if (OS_MAC) {
-    /* MacOS always scales up this type of cursor for high-dpi displays. */
-    return 21;
-  }
-
   /* The DPI as a scale without the UI scale preference. */
   const float system_scale = WM_window_dpi_get_scale(win);
 
-  return std::lround(WM_cursor_preferred_logical_size() * system_scale);
+  return std::lround(WM_cursor_preferred_logical_size(true) * system_scale);
 }
 
 /**
@@ -437,7 +432,7 @@ void WM_cursor_set(wmWindow *win, int curs)
     return;
   }
 
-  GHOST_TStandardCursor ghost_cursor = convert_to_ghost_standard_cursor(WMCursorType(curs));
+  GHOST_TStandardCursor ghost_cursor = convert_to_ghost_standard_cursor(wmCursorType(curs));
 
   if (!use_only_custom_cursors && ghost_cursor != GHOST_kStandardCursorCustom &&
       ghost_window->hasCursorShape(ghost_cursor))
@@ -803,10 +798,10 @@ static uint8_t *cursor_bitmap_from_text(const char *text,
   if (text_to_draw) {
     const float color[4] = {1.0f, 1.0f, 1.0f, 1.0f};
     BLF_buffer_col(font_id, color);
-    BLF_buffer(font_id, nullptr, bitmap_rgba, dest_size[0], dest_size[1], nullptr);
+    BLF_buffer(font_id, nullptr, bitmap_rgba, dest_size[0], dest_size[1], 4, nullptr);
     BLF_position(font_id, font_padding, font_padding + font_descender, 0.0f);
     BLF_draw_buffer(font_id, text, text_len);
-    BLF_buffer(font_id, nullptr, nullptr, 0, 0, nullptr);
+    BLF_buffer(font_id, nullptr, nullptr, 0, 0, 4, nullptr);
 
     cursor_bitmap_rgba_flip_y(bitmap_rgba, dest_size);
   }
@@ -819,7 +814,7 @@ static uint8_t *cursor_bitmap_from_text(const char *text,
 
 static bool wm_cursor_text_generator(wmWindow *win, const char *text, int font_id)
 {
-  struct WMCursorText {
+  struct wmCursorText {
     char text[CURSOR_TEXT_BUFFER_SIZE];
     int font_id;
   };
@@ -832,7 +827,7 @@ static bool wm_cursor_text_generator(wmWindow *win, const char *text, int font_i
                                      int r_bitmap_size[2],
                                      int r_hot_spot[2],
                                      bool *r_can_invert_color) -> uint8_t * {
-    const WMCursorText &cursor_text = *static_cast<const WMCursorText *>(
+    const wmCursorText &cursor_text = *static_cast<const wmCursorText *>(
         cursor_generator->user_data);
 
     int bitmap_size[2];
@@ -859,13 +854,13 @@ static bool wm_cursor_text_generator(wmWindow *win, const char *text, int font_i
     return bitmap_rgba;
   };
 
-  WMCursorText *cursor_text = MEM_new<WMCursorText>(__func__);
+  wmCursorText *cursor_text = MEM_new<wmCursorText>(__func__);
   STRNCPY_UTF8(cursor_text->text, text);
   cursor_text->font_id = font_id;
 
   cursor_generator->user_data = static_cast<void *>(cursor_text);
   cursor_generator->free_fn = [](GHOST_CursorGenerator *cursor_generator) {
-    const WMCursorText *cursor_text = static_cast<WMCursorText *>(cursor_generator->user_data);
+    const wmCursorText *cursor_text = static_cast<wmCursorText *>(cursor_generator->user_data);
     MEM_delete(cursor_text);
     MEM_delete(cursor_generator);
   };
@@ -970,7 +965,7 @@ void WM_cursor_progress(wmWindow *win, float progress_factor)
 }
 
 #ifndef WITH_HEADLESS
-static void wm_add_cursor(WMCursorType cursor,
+static void wm_add_cursor(wmCursorType cursor,
                           const char *svg_source,
                           const float2 &hotspot,
                           bool can_invert = false)

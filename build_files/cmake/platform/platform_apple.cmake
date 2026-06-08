@@ -4,9 +4,9 @@
 
 # Libraries configuration for Apple.
 
-macro(find_package_wrapper)
-  # do nothing, just satisfy the macro
-endmacro()
+function(find_package_wrapper)
+  # do nothing, just satisfy the function
+endfunction()
 
 function(print_found_status
   lib_name
@@ -218,16 +218,9 @@ if(WITH_VULKAN_BACKEND)
 endif()
 
 if(WITH_SDL)
-  find_package(SDL2)
-  set(SDL_INCLUDE_DIR ${SDL2_INCLUDE_DIRS})
-  set(SDL_LIBRARY ${SDL2_LIBRARIES})
-  string(APPEND PLATFORM_LINKFLAGS " -framework ForceFeedback -framework GameController")
-  if("${CMAKE_OSX_ARCHITECTURES}" STREQUAL "arm64")
-    # The minimum macOS version of the libraries makes it so this is included in SDL on arm64
-    # but not x86_64.
-    string(APPEND PLATFORM_LINKFLAGS " -framework CoreHaptics")
-  endif()
+  find_package(SDL3 REQUIRED CONFIG)
 endif()
+add_bundled_libraries(sdl/lib)
 
 set(EPOXY_ROOT_DIR ${LIBDIR}/epoxy)
 find_package(Epoxy REQUIRED)
@@ -237,9 +230,6 @@ find_package(PNG REQUIRED)
 
 set(JPEG_ROOT ${LIBDIR}/jpeg)
 find_package(JPEG REQUIRED)
-
-set(TIFF_ROOT ${LIBDIR}/tiff)
-find_package(TIFF REQUIRED)
 
 set(fmt_ROOT ${LIBDIR}/fmt)
 find_package(fmt REQUIRED)
@@ -260,9 +250,7 @@ endif()
 find_package(OpenImageIO REQUIRED)
 add_bundled_libraries(openimageio/lib)
 
-if(WITH_OPENCOLORIO)
-  find_package(OpenColorIO 2.0.0 REQUIRED)
-endif()
+find_package(OpenColorIO 2.0.0 REQUIRED CONFIG)
 add_bundled_libraries(opencolorio/lib)
 
 if(WITH_OPENVDB)
@@ -367,13 +355,28 @@ endif()
 
 find_package(Eigen3 REQUIRED CONFIG)
 
-if (WITH_LIBMV)
+if(WITH_LIBMV)
   find_package(Ceres REQUIRED CONFIG)
 endif()
 add_bundled_libraries(ceres/lib)
 
 set(ZSTD_ROOT_DIR ${LIBDIR}/zstd)
 find_package(Zstd REQUIRED)
+
+if(WITH_DRACO)
+  find_package(draco REQUIRED CONFIG)
+endif()
+add_bundled_libraries(draco/lib)
+
+if(WITH_MESHOPTIMIZER)
+  find_package(meshoptimizer REQUIRED CONFIG)
+endif()
+add_bundled_libraries(meshoptimizer/lib)
+
+if(WITH_TRACY)
+  set(Tracy_ROOT_DIR ${LIBDIR}/tracy)
+  find_package(Tracy REQUIRED CONFIG)
+endif()
 
 if(EXISTS ${LIBDIR})
   without_system_libs_end()
@@ -407,9 +410,7 @@ string(APPEND CMAKE_CXX_FLAGS " -ftemplate-depth=1024")
 # Avoid conflicts with Luxrender, and other plug-ins that may use the same
 # libraries as Blender with a different version or build options.
 set(PLATFORM_SYMBOLS_MAP ${CMAKE_SOURCE_DIR}/source/creator/symbols_apple.map)
-string(APPEND PLATFORM_LINKFLAGS
-  " -Wl,-unexported_symbols_list,'${PLATFORM_SYMBOLS_MAP}'"
-)
+set(PLATFORM_LINKFLAGS_SYMBOL_HIDING "-Wl,-unexported_symbols_list,'${PLATFORM_SYMBOLS_MAP}'")
 
 if(${XCODE_VERSION} VERSION_EQUAL 15.0)
   # V4.5 specific workaround: Enforce the legacy Xcode linker to avoid incorrect
@@ -433,6 +434,13 @@ elseif(${XCODE_VERSION} VERSION_GREATER_EQUAL 15.0)
     # it is corrected in CMake 3.29:
     #    https://gitlab.kitware.com/cmake/cmake/-/issues/25297
     string(APPEND PLATFORM_LINKFLAGS " -Xlinker -no_warn_duplicate_libraries")
+
+    # Silence: ld: warning: reducing alignment of section __DATA,__common from 0x8000
+    #          to 0x4000 because it exceeds segment maximum alignment
+    # The flag to silence this warning is only available on Xcode 26.4 and above.
+    if(${XCODE_VERSION} VERSION_GREATER_EQUAL 26.4)
+      string(APPEND PLATFORM_LINKFLAGS " -Xlinker -no_warn_reduced_section_align")
+    endif()
   endif()
 endif()
 

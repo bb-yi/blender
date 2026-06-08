@@ -6,11 +6,13 @@
 
 #include "device/memory.h"
 
+#include "scene/image_cache.h"
+#include "scene/image_loader.h"
+
 #include "util/colorspace.h"
 #include "util/image_metadata.h"
-#include "util/string.h"
+#include "util/set.h"
 #include "util/thread.h"
-#include "util/transform.h"
 #include "util/unique_ptr.h"
 #include "util/vector.h"
 
@@ -18,13 +20,17 @@ CCL_NAMESPACE_BEGIN
 
 class Device;
 class DeviceInfo;
+class ImageLoader;
+class ImageSingle;
 class ImageHandle;
 class ImageKey;
-class ImageMetaData;
 class ImageManager;
+class ImageUDIM;
+class ImageTexture;
 class Progress;
 class RenderStats;
 class Scene;
+class SceneParams;
 class ColorSpaceProcessor;
 class VDBImageLoader;
 
@@ -48,49 +54,20 @@ class ImageParams {
   }
 };
 
-/* Image loader base class, that can be subclassed to load image data
- * from custom sources (file, memory, procedurally generated, etc). */
-class ImageLoader {
- public:
-  ImageLoader();
-  virtual ~ImageLoader() = default;
-
-  /* Load metadata without actual image yet, should be fast. */
-  virtual bool load_metadata(ImageMetaData &metadata) = 0;
-
-  /* Load actual image contents. */
-  virtual bool load_pixels(const ImageMetaData &metadata, void *pixels) = 0;
-
-  /* Name for logs and stats. */
-  virtual string name() const = 0;
-
-  /* Optional for OSL texture cache. */
-  virtual ustring osl_filepath() const;
-
-  /* Optional for tiled textures loaded externally. */
-  virtual int get_tile_number() const;
-
-  /* Free any memory used for loading metadata and pixels. */
-  virtual void cleanup() {};
-
-  /* Compare avoid loading the same image multiple times. */
-  virtual bool equals(const ImageLoader &other) const = 0;
-  static bool equals(const ImageLoader *a, const ImageLoader *b);
-
-  virtual bool is_vdb_loader() const;
-
-  /* Work around for no RTTI. */
-};
-
 /* Image Handle
  *
  * Access handle for image in the image manager. Multiple shader nodes may
- * share the same image, and this class handles reference counting for that. */
+ * share the same image, and this class handles reference counting for that.
+ *
+ * This may reference a single image, or a UDIM with multiple images. */
 class ImageHandle {
  public:
   ImageHandle();
+  ImageHandle(ImageTexture *image_texture, ImageManager *manager);
   ImageHandle(const ImageHandle &other);
+  ImageHandle(ImageHandle &&other) noexcept;
   ImageHandle &operator=(const ImageHandle &other);
+  ImageHandle &operator=(ImageHandle &&other) noexcept;
   ~ImageHandle();
 
   bool operator==(const ImageHandle &other) const;
@@ -99,23 +76,70 @@ class ImageHandle {
 
   bool empty() const;
   int num_tiles() const;
-  int num_svm_slots() const;
 
-  ImageMetaData metadata();
-  int svm_slot(const int slot_index = 0) const;
-  vector<int4> get_svm_slots() const;
-  device_image *image_memory() const;
+  ImageMetaData metadata(Progress &progress);
+  bool all_udim_tiled(Progress &progress);
+  int kernel_id() const;
 
+  device_image *vdb_image_memory() const;
   VDBImageLoader *vdb_loader() const;
 
   ImageManager *get_manager() const;
 
+  void add_to_set(set<const ImageSingle *> &images) const;
+
  protected:
-  vector<size_t> slots;
-  bool is_tiled = false;
-  ImageManager *manager;
+  ImageTexture *image_texture = nullptr;
+  ImageManager *manager = nullptr;
 
   friend class ImageManager;
+};
+
+/* Image Texture
+ *
+ * Base class for an entry in the image manager, which can either be
+ * a single image or a UDIM. */
+class ImageTexture {
+ public:
+  std::atomic<int> users = 0;
+  enum { SINGLE, UDIM } type = SINGLE;
+  bool need_load = true;
+};
+
+/* Image Single
+ *
+ * Representation of single image texture in the image manager. */
+class ImageSingle : public ImageTexture {
+ public:
+  ~ImageSingle();
+
+  /* Index into ImageManager::images and DeviceScene::image_textures. */
+  int image_texture_id = KERNEL_IMAGE_NONE;
+
+  ImageParams params;
+  ImageMetaData metadata;
+  unique_ptr<ImageLoader> loader;
+
+  bool need_metadata = true;
+  bool builtin = false;
+
+  /* Number of top mip levels in the image file to discard. */
+  int miplevel_offset = 0;
+
+  thread_mutex mutex;
+
+  device_image *vdb_memory = nullptr;
+};
+
+/* Image UDIM
+ *
+ * Representation of an UDIM image in the image manager. */
+class ImageUDIM : public ImageTexture {
+ public:
+  /* Negative kernel ID encoding offset into DeviceScene::image_texture_udims. */
+  int id = KERNEL_IMAGE_NONE;
+
+  vector<std::pair<int, ImageHandle>> tiles;
 };
 
 /* Image Manager
@@ -124,7 +148,7 @@ class ImageHandle {
  * texture images and 3D volume images. */
 class ImageManager {
  public:
-  explicit ImageManager(const DeviceInfo &info);
+  explicit ImageManager(const DeviceInfo &info, const SceneParams &params);
   ~ImageManager();
 
   ImageHandle add_image(const string &filename, const ImageParams &params);
@@ -137,61 +161,77 @@ class ImageManager {
   ImageHandle add_image(vector<unique_ptr<ImageLoader>> &&loaders, const ImageParams &params);
 
   void device_update(Device *device, Scene *scene, Progress &progress);
-  void device_update_slot(Device *device, Scene *scene, const size_t slot, Progress &progress);
-  void device_free(Device *device);
+  void device_free(Scene *scene);
 
   void device_load_builtin(Device *device, Scene *scene, Progress &progress);
-  void device_free_builtin(Device *device);
+  void device_free_builtin(Scene *scene);
 
-  void set_osl_texture_system(void *texture_system);
+  void device_load_images(Device *device,
+                          Scene *scene,
+                          Progress &progress,
+                          const set<const ImageSingle *> &images);
+
   bool set_animation_frame_update(const int frame);
 
-  void collect_statistics(RenderStats *stats);
+  void evict_unused(Device *device, Scene *scene);
+
+  void collect_statistics(RenderStats *stats, Scene *scene);
 
   void tag_update();
 
   bool need_update() const;
 
-  struct Image {
-    ImageParams params;
-    ImageMetaData metadata;
-    unique_ptr<ImageLoader> loader;
-
-    bool need_metadata;
-    bool need_load;
-    bool builtin;
-
-    string mem_name;
-    unique_ptr<device_image> mem;
-
-    int users;
-    thread_mutex mutex;
-  };
+  bool get_use_texture_cache() const;
+  bool get_auto_texture_cache() const;
 
  private:
-  bool need_update_;
+  bool need_update_ = true;
 
   thread_mutex device_mutex;
   thread_mutex images_mutex;
-  int animation_frame;
+  int animation_frame = 0;
 
-  vector<unique_ptr<Image>> images;
-  void *osl_texture_system;
+  unique_ptr_vector<ImageSingle> images;
+  unique_ptr_vector<ImageUDIM> image_udims;
+  int num_udim_tiles = 0;
 
-  size_t add_image_slot(unique_ptr<ImageLoader> &&loader,
-                        const ImageParams &params,
-                        const bool builtin);
-  void add_image_user(const size_t slot);
-  void remove_image_user(const size_t slot);
-  Image *get_image_slot(const size_t slot);
+  ImageCache image_cache;
 
-  void load_image_metadata(Image *img);
+  bool use_texture_cache = true;
+  bool auto_texture_cache = false;
+  std::string texture_cache_path;
 
-  template<TypeDesc::BASETYPE FileFormat, typename StorageType>
-  bool file_load_image(Image *img, const int texture_limit);
+  std::atomic<int> load_failure_num = 0;
+  std::atomic<int> tx_failure_num = 0;
 
-  void device_load_image(Device *device, Scene *scene, const size_t slot, Progress &progress);
-  void device_free_image(Device *device, const size_t slot);
+  ImageSingle *add_image_texture(unique_ptr<ImageLoader> &&loader,
+                                 const ImageParams &params,
+                                 const bool builtin);
+  ImageUDIM *add_image_texture(vector<std::pair<int, ImageHandle>> &&tiles);
+
+  void load_image_metadata(ImageSingle *img, Progress &progress);
+
+  void device_gpu_load_requested(Device *device, DeviceQueue &queue, Scene *scene);
+  void device_cpu_load_requested(Device *device,
+                                 Scene *scene,
+                                 size_t image_texture_id,
+                                 int miplevel,
+                                 int x,
+                                 int y,
+                                 KernelTileDescriptor &tile_descriptor);
+
+  void device_load_image(Device *device,
+                         Scene *scene,
+                         const size_t image_texture_id,
+                         Progress &progress);
+  void device_free_image(Scene *scene, const size_t image_texture_id);
+
+  void device_update_udims(Device *device, Scene *scene);
+
+  void device_resize_image_textures(Scene *scene);
+  void device_copy_image_textures(Device *device, Scene *scene);
+
+  void report_failures();
 
   friend class ImageHandle;
 };

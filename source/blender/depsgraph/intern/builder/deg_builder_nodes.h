@@ -74,7 +74,7 @@ struct TimeSourceNode;
 class DepsgraphNodeBuilder : public DepsgraphBuilder {
  public:
   DepsgraphNodeBuilder(Main *bmain, Depsgraph *graph, DepsgraphBuilderCache *cache);
-  ~DepsgraphNodeBuilder();
+  ~DepsgraphNodeBuilder() override;
 
   /* For given original ID get ID which is created by copy-on-evaluation system. */
   ID *get_cow_id(const ID *id_orig) const;
@@ -177,6 +177,8 @@ class DepsgraphNodeBuilder : public DepsgraphBuilder {
   virtual void build_scene_camera(Scene *scene);
   virtual void build_scene_parameters(Scene *scene);
   virtual void build_scene_compositor(Scene *scene);
+
+  virtual void build_empty_object(Object *object);
 
   virtual void build_layer_collections(ListBaseT<LayerCollection> *lb);
   virtual void build_view_layer(Scene *scene,

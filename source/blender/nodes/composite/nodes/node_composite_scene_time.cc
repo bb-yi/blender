@@ -10,8 +10,8 @@ namespace blender::nodes::node_composite_scene_time_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_output<decl::Float>("Seconds");
-  b.add_output<decl::Float>("Frame");
+  b.add_output<decl::Float>("Seconds"_ustr);
+  b.add_output<decl::Float>("Frame"_ustr);
 }
 
 using namespace blender::compositor;
@@ -58,7 +58,7 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, "CompositorNodeSceneTime", CMP_NODE_SCENE_TIME);
+  cmp_node_type_base(&ntype, "CompositorNodeSceneTime"_ustr, CMP_NODE_SCENE_TIME);
   ntype.ui_name = "Scene Time";
   ntype.ui_description = "Input the current scene time in seconds or frames";
   ntype.enum_name_legacy = "SCENE_TIME";

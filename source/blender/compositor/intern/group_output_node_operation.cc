@@ -50,10 +50,10 @@ class GroupOutputNodeOperation : public NodeOperation {
         continue;
       }
 
-      const Result &input_result = this->get_input(input_socket->identifier);
       Result &node_group_operation_result = node_group_operation_.get_result(
           input_socket->identifier);
       if (node_group_operation_result.should_compute()) {
+        const Result &input_result = this->get_input(input_socket->identifier);
         node_group_operation_result.share_data(input_result);
       }
     }

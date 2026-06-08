@@ -61,11 +61,9 @@ struct BendSpringRef {
   ClothSpring *spring;
 };
 
-/******************************************************************************
- *
- * External interface called by modifier.cc clothModifier functions.
- *
- ******************************************************************************/
+/* -------------------------------------------------------------------- */
+/** \name BVH Tree
+ * \{ */
 
 static BVHTree *bvhtree_build_from_cloth(ClothModifierData *clmd, float epsilon)
 {
@@ -200,6 +198,12 @@ void bvhtree_update_from_cloth(ClothModifierData *clmd, bool moving, bool self)
   }
 }
 
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Modifier Simulation Entry Points
+ * \{ */
+
 void cloth_clear_cache(Object *ob, ClothModifierData *clmd, float framenr)
 {
   PTCacheID pid;
@@ -314,10 +318,11 @@ static int do_step_cloth(
   return ret;
 }
 
-/************************************************
- * clothModifier_do - main simulation function
- ************************************************/
-
+/**
+ * Main Simulation Function
+ *
+ * Advance the cloth state for one frame.
+ */
 void clothModifier_do(ClothModifierData *clmd,
                       Depsgraph *depsgraph,
                       Scene *scene,
@@ -429,6 +434,12 @@ void clothModifier_do(ClothModifierData *clmd,
   cloth_to_object(ob, clmd, vertexCos);
   clmd->clothObject->last_frame = framenr;
 }
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Free Modifier Data
+ * \{ */
 
 void cloth_free_modifier(ClothModifierData *clmd)
 {
@@ -559,11 +570,11 @@ void cloth_free_modifier_extern(ClothModifierData *clmd)
   }
 }
 
-/******************************************************************************
- *
- * Internal functions.
- *
- ******************************************************************************/
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Internal Functions
+ * \{ */
 
 /**
  * Copies the deformed vertices to the object.
@@ -867,6 +878,8 @@ static void cloth_from_mesh(ClothModifierData *clmd, const Object *ob, const Mes
     MEM_delete(clmd->clothObject->springs);
   }
 }
+
+/** \} */
 
 /* -------------------------------------------------------------------- */
 /** \name Spring Network Building Implementation
@@ -1582,15 +1595,14 @@ static bool cloth_build_springs(ClothModifierData *clmd, const Mesh *mesh)
   }
 
   /* Structural springs. */
-  const LooseEdgeCache &loose_edges = mesh->loose_edges();
+  BitVector<> loose_edges(edges.size());
+  mesh->loose_edges().to_bits(loose_edges);
   for (int i = 0; i < numedges; i++) {
     spring = MEM_new_zeroed<ClothSpring>("cloth spring");
 
     if (spring) {
       spring_verts_ordered_set(spring, edges[i][0], edges[i][1]);
-      if (clmd->sim_parms->flags & CLOTH_SIMSETTINGS_FLAG_SEW && loose_edges.count > 0 &&
-          loose_edges.is_loose_bits[i])
-      {
+      if (clmd->sim_parms->flags & CLOTH_SIMSETTINGS_FLAG_SEW && loose_edges[i]) {
         /* handle sewing (loose edges will be pulled together) */
         spring->restlen = 0.0f;
         spring->lin_stiffness = 1.0f;

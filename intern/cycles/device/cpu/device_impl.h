@@ -30,6 +30,7 @@
 // clang-format on
 
 #include "util/guiding.h"  // IWYU pragma: keep
+#include "util/list.h"
 #include "util/unique_ptr.h"
 
 CCL_NAMESPACE_BEGIN
@@ -37,9 +38,10 @@ CCL_NAMESPACE_BEGIN
 class CPUDevice : public Device {
  public:
   KernelGlobalsCPU kernel_globals;
+  vector<ThreadKernelGlobalsCPU> kernel_thread_globals_;
 
-  device_vector<KernelImageInfo> image_info;
-  bool need_image_info;
+  unique_ptr<device_vector<KernelImageInfo>> image_info;
+  list<unique_ptr<device_vector<KernelImageInfo>>> old_image_infos;
 
 #ifdef WITH_OSL
   OSLGlobals osl_globals;
@@ -61,10 +63,6 @@ class CPUDevice : public Device {
 
   BVHLayoutMask get_bvh_layout_mask(uint /*kernel_features*/) const override;
 
-  /* Returns true if the image info was copied to the device (meaning, some more
-   * re-initialization might be needed). */
-  bool load_image_info();
-
   void mem_alloc(device_memory &mem) override;
   void mem_copy_to(device_memory &mem) override;
   void mem_move_to_host(device_memory &mem) override;
@@ -72,6 +70,7 @@ class CPUDevice : public Device {
       device_memory &mem, const size_t y, size_t w, const size_t h, size_t elem) override;
   void mem_zero(device_memory &mem) override;
   void mem_free(device_memory &mem) override;
+  void mem_or_from_device(device_memory &mem) override;
   device_ptr mem_alloc_sub_ptr(device_memory &mem, const size_t offset, size_t /*size*/) override;
 
   void const_copy_to(const char *name, void *host, const size_t size) override;
@@ -82,13 +81,18 @@ class CPUDevice : public Device {
   void image_alloc(device_image &mem);
   void image_free(device_image &mem);
 
+  bool has_unified_memory() const override;
+  bool has_unified_image_memory() const override;
+
   void build_bvh(BVH *bvh, Progress &progress, bool refit) override;
 
   void *get_guiding_device() const override;
 
-  void get_cpu_kernel_thread_globals(
-      vector<ThreadKernelGlobalsCPU> &kernel_thread_globals) override;
+  vector<ThreadKernelGlobalsCPU> *acquire_cpu_kernel_thread_globals() override;
+  void release_cpu_kernel_thread_globals() override;
   OSLGlobals *get_cpu_osl_memory() override;
+  void set_image_cache_func(KernelImageLoadRequestedCPU image_load_requested_cpu,
+                            KernelImageLoadRequestedGPU image_load_requested_gpu) override;
 
  protected:
   bool load_kernels(uint /*kernel_features*/) override;

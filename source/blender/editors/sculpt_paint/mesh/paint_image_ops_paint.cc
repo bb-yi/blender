@@ -299,6 +299,7 @@ static std::unique_ptr<PaintOperation> texture_paint_init(bContext *C,
                                                           const float mouse[2])
 {
   Depsgraph *depsgraph = CTX_data_ensure_evaluated_depsgraph(C);
+  const Main *bmain = CTX_data_main(C);
   Scene *scene = CTX_data_scene(C);
   ToolSettings *settings = scene->toolsettings;
   std::unique_ptr<PaintOperation> pop = std::make_unique<PaintOperation>();
@@ -311,7 +312,7 @@ static std::unique_ptr<PaintOperation> texture_paint_init(bContext *C,
   copy_v2_v2(pop->startmouse, mouse);
 
   ViewLayer *view_layer = CTX_data_view_layer(C);
-  BKE_view_layer_synced_ensure(scene, view_layer);
+  BKE_view_layer_synced_ensure(*bmain, scene, view_layer);
   Object *ob = BKE_view_layer_active_object_get(view_layer);
 
   /* initialize from context */
@@ -361,7 +362,7 @@ struct ImagePaintStroke final : public PaintStroke {
   void update_step(wmOperator *op, PointerRNA *itemptr) override;
   void redraw(bool final) override;
   bool test_cancel() override;
-  void done(bool is_cancel) override;
+  void done(bool is_cancel, bool stroke_started) override;
 
   void update_for_exec(bContext *C,
                        const Brush &brush,
@@ -376,6 +377,11 @@ struct ImagePaintStroke final : public PaintStroke {
 void ImagePaintStroke::update_step(wmOperator *op, PointerRNA *itemptr)
 {
   PaintOperation *pop = static_cast<PaintOperation *>(mode_data_.get());
+  BLI_assert(pop != nullptr);
+  if (pop == nullptr) {
+    return;
+  }
+
   Paint *paint = BKE_paint_get_active_from_context(this->evil_C);
   bke::PaintRuntime *paint_runtime = paint->runtime;
   Brush *brush = BKE_paint_brush(paint);
@@ -427,14 +433,24 @@ void ImagePaintStroke::update_step(wmOperator *op, PointerRNA *itemptr)
 void ImagePaintStroke::redraw(bool final)
 {
   PaintOperation *pop = static_cast<PaintOperation *>(mode_data_.get());
+  BLI_assert(pop != nullptr);
+  if (pop == nullptr) {
+    return;
+  }
+
   pop->mode->paint_stroke_redraw(this->evil_C, pop->stroke_handle, final);
 }
 
-void ImagePaintStroke::done(const bool is_cancel)
+void ImagePaintStroke::done(const bool is_cancel, const bool /*stroke_started*/)
 {
   Scene *scene = CTX_data_scene(this->evil_C);
   ToolSettings *toolsettings = scene->toolsettings;
   PaintOperation *pop = static_cast<PaintOperation *>(mode_data_.get());
+
+  if (!pop) {
+    return;
+  }
+
   const Paint *paint = BKE_paint_get_active_from_context(this->evil_C);
   Brush *brush = BKE_paint_brush(&toolsettings->imapaint.paint);
 
@@ -512,7 +528,7 @@ static wmOperatorStatus paint_invoke(bContext *C, wmOperator *op, const wmEvent 
   if (retval == OPERATOR_FINISHED) {
     ImagePaintStroke *stroke = static_cast<ImagePaintStroke *>(op->customdata);
     if (stroke) {
-      stroke->free(C, op);
+      stroke->finish(C);
       MEM_delete(stroke);
     }
     return OPERATOR_FINISHED;
@@ -561,7 +577,6 @@ static wmOperatorStatus paint_exec(bContext *C, wmOperator *op)
   const Brush &brush = *BKE_paint_brush_for_read(&paint);
   float pressure;
   pressure = RNA_float_get(&firstpoint, "pressure");
-  float mouse_out[2];
   bool dummy;
   float dummy_location[3];
 
@@ -570,7 +585,8 @@ static wmOperatorStatus paint_exec(bContext *C, wmOperator *op)
   float zoomy;
   get_imapaint_zoom(C, &zoomx, &zoomy);
   float zoom_2d = std::max(zoomx, zoomy);
-  paint_stroke_jitter_pos(&paint, mode, brush, pressure, stroke_mode, zoom_2d, mouse, mouse_out);
+  float2 mouse_out = paint_stroke_jitter_pos(
+      &paint, mode, brush, pressure, stroke_mode, zoom_2d, mouse);
 
   stroke->update_for_exec(C, brush, mode, mouse, mouse_out, pressure, dummy_location, &dummy);
   wmOperatorStatus ret_val = stroke->exec(C, op);
@@ -602,7 +618,7 @@ static void paint_cancel(bContext *C, wmOperator *op)
     ED_image_undo_restore(ustack->step_init);
   }
 
-  stroke->cancel(C, op);
+  stroke->cancel(C);
 }
 }  // namespace ed::sculpt_paint::image::ops::paint
 

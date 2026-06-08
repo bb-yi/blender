@@ -10,17 +10,17 @@ namespace blender::nodes::node_composite_switch_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Bool>("Switch").default_value(false);
-  b.add_input<decl::Color>("Off")
+  b.add_input<decl::Bool>("Switch"_ustr).default_value(false);
+  b.add_input<decl::Color>("Off"_ustr)
       .default_value({0.8f, 0.8f, 0.8f, 1.0f})
       .compositor_realization_mode(CompositorInputRealizationMode::None)
       .structure_type(StructureType::Dynamic);
-  b.add_input<decl::Color>("On")
+  b.add_input<decl::Color>("On"_ustr)
       .default_value({0.8f, 0.8f, 0.8f, 1.0f})
       .compositor_realization_mode(CompositorInputRealizationMode::None)
       .structure_type(StructureType::Dynamic);
 
-  b.add_output<decl::Color>("Image");
+  b.add_output<decl::Color>("Image"_ustr);
 }
 
 using namespace blender::compositor;
@@ -51,14 +51,14 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, "CompositorNodeSwitch", CMP_NODE_SWITCH);
+  cmp_node_type_base(&ntype, "CompositorNodeSwitch"_ustr, CMP_NODE_SWITCH);
   ntype.ui_name = "Switch";
   ntype.ui_description = "Switch between two images using a checkbox";
   ntype.enum_name_legacy = "SWITCH";
   ntype.nclass = NODE_CLASS_CONVERTER;
   ntype.declare = node_declare;
-  bke::node_type_size_preset(ntype, bke::eNodeSizePreset::Default);
   ntype.get_compositor_operation = get_compositor_operation;
+  ntype.deprecation_notice = N_("Use Utilities \u25B8 Switch node instead");
 
   bke::node_register_type(ntype);
 }

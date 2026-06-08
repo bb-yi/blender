@@ -251,7 +251,7 @@ bAction *id_action_ensure(Main *bmain, ID *id)
 void animdata_fcurve_delete(AnimData *adt, FCurve *fcu)
 {
   /* - If no AnimData, we've got nowhere to remove the F-Curve from
-   *   (this doesn't guarantee that the F-Curve is in there, but at least we tried
+   *   (this doesn't guarantee that the F-Curve is in there, but at least we tried).
    * - If no F-Curve, there is nothing to remove
    */
   if (ELEM(nullptr, adt, fcu)) {
@@ -346,7 +346,7 @@ const FCurve *fcurve_find_by_rna_path(const AnimData &adt,
   return nullptr;
 }
 
-Vector<FCurve *> fcurves_for_assigned_action(AnimData *adt)
+Span<FCurve *> fcurves_for_assigned_action(AnimData *adt)
 {
   if (!adt || !adt->action) {
     return {};
@@ -354,7 +354,7 @@ Vector<FCurve *> fcurves_for_assigned_action(AnimData *adt)
   return fcurves_for_action_slot(adt->action->wrap(), adt->slot_handle);
 }
 
-Vector<const FCurve *> fcurves_for_assigned_action(const AnimData *adt)
+Span<const FCurve *> fcurves_for_assigned_action(const AnimData *adt)
 {
   if (!adt || !adt->action) {
     return {};

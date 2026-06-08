@@ -6,6 +6,7 @@
  * \ingroup edgreasepencil
  */
 
+#include "BLI_assert.h"
 #include "BLI_listbase.h"
 #include "BLI_math_matrix.h"
 #include "BLI_math_matrix.hh"
@@ -45,11 +46,17 @@ static float4x4 get_bone_mat(const Object *parent, const char *parsubstr)
   }
 
   const bPoseChannel *pchan = BKE_pose_channel_find_name(parent->pose, parsubstr);
-  if (!pchan || !pchan->bone) {
+  if (!pchan) {
     return float4x4::identity();
   }
 
-  if (pchan->bone->flag & BONE_RELATIVE_PARENTING) {
+  const Bone *bone = pchan->bone_get(*parent);
+  if (!bone) {
+    BLI_assert_unreachable();
+    return float4x4::identity();
+  }
+
+  if (bone->flag & BONE_RELATIVE_PARENTING) {
     return float4x4(pchan->chan_mat);
   }
   return float4x4(pchan->pose_mat);
@@ -895,7 +902,7 @@ static wmOperatorStatus grease_pencil_layer_mask_add_exec(bContext *C, wmOperato
     LayerMask *new_mask = MEM_new<LayerMask>(__func__, mask_name);
     BLI_addtail(&active_layer.masks, reinterpret_cast<GreasePencilLayerMask *>(new_mask));
     /* Make the newly added mask active. */
-    active_layer.active_mask_index = BLI_listbase_count(&active_layer.masks) - 1;
+    active_layer.active_mask_index = active_layer.masks.count() - 1;
   }
   else {
     BKE_report(op->reports, RPT_ERROR, "Unable to find layer to add");
@@ -935,7 +942,7 @@ static bool grease_pencil_layer_mask_poll(bContext *C)
   GreasePencil &grease_pencil = *ed::greasepencil::from_context(*C);
   Layer &active_layer = *grease_pencil.get_active_layer();
 
-  return !BLI_listbase_is_empty(&active_layer.masks);
+  return !active_layer.masks.is_empty();
 }
 
 static wmOperatorStatus grease_pencil_layer_mask_remove_exec(bContext *C, wmOperator * /*op*/)
@@ -989,7 +996,7 @@ static bool grease_pencil_layer_mask_reorder_poll(bContext *C)
   GreasePencil &grease_pencil = *ed::greasepencil::from_context(*C);
   Layer &active_layer = *grease_pencil.get_active_layer();
 
-  return BLI_listbase_count(&active_layer.masks) > 1;
+  return active_layer.masks.count() > 1;
 }
 
 static wmOperatorStatus grease_pencil_layer_mask_reorder_exec(bContext *C, wmOperator *op)
@@ -1059,7 +1066,7 @@ static wmOperatorStatus grease_pencil_layer_group_color_tag_exec(bContext *C, wm
   using namespace blender::bke::greasepencil;
   GreasePencil &grease_pencil = *ed::greasepencil::from_context(*C);
 
-  const int color_tag = RNA_enum_get(op->ptr, "color_tag");
+  const GroupColorTag color_tag = GroupColorTag(RNA_enum_get(op->ptr, "color_tag"));
   LayerGroup *active_group = grease_pencil.get_active_group();
   active_group->color_tag = color_tag;
 

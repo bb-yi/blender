@@ -50,7 +50,7 @@ void register_node_type_tex_invert()
 {
   static bke::bNodeType ntype;
 
-  tex_node_type_base(&ntype, "TextureNodeInvert", TEX_NODE_INVERT);
+  tex_node_type_base(&ntype, "TextureNodeInvert"_ustr, TEX_NODE_INVERT);
   ntype.ui_name = "Invert Color";
   ntype.enum_name_legacy = "INVERT";
   ntype.nclass = NODE_CLASS_OP_COLOR;

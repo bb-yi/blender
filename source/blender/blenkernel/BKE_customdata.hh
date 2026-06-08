@@ -19,7 +19,6 @@
 #include "BLI_sys_types.h"
 #include "BLI_vector.hh"
 
-#include "BKE_attribute_storage.hh"
 #include "BKE_volume_enums.hh"
 
 #include "DNA_customdata_types.h"
@@ -551,7 +550,7 @@ void CustomData_set_layer_render_index(CustomData *data, eCustomDataType type, i
 /**
  * Adds flag to the layer flags.
  */
-void CustomData_set_layer_flag(CustomData *data, eCustomDataType type, int flag);
+void CustomData_set_layer_flag(CustomData *data, eCustomDataType type, eCustomDataLayer_Flag flag);
 
 void CustomData_bmesh_set_default(CustomData *data, void **block);
 void CustomData_bmesh_free_block(CustomData *data, void **block);
@@ -672,18 +671,13 @@ void CustomData_data_transfer(const MeshPairRemap *me_remap, CustomDataTransferL
  *
  * \param data: The custom-data to tweak for .blend file writing (modified in place).
  * \param layers_to_write: A reduced set of layers to be written to file.
- * \param write_data: #AttributeStorage data to write, to support the option for writing the new
- * format even when it isn't used at runtime.
  *
  * \warning This function invalidates the custom data struct by changing the layer counts and the
  * #layers pointer, and by invalidating the type map. It expects to work on a shallow copy of
  * the struct.
  */
 void CustomData_blend_write_prepare(CustomData &data,
-                                    bke::AttrDomain domain,
-                                    int domain_size,
-                                    Vector<CustomDataLayer, 16> &layers_to_write,
-                                    bke::AttributeStorage::BlendWriteData &write_data);
+                                    Vector<CustomDataLayer, 16> &layers_to_write);
 
 /**
  * \param layers_to_write: Layers created by #CustomData_blend_write_prepare.

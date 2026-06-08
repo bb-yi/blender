@@ -224,6 +224,28 @@ static void volume_foreach_path(ID *id, BPathForeachPathData *bpath_data)
     return;
   }
 
+  if (volume->is_sequence && (bpath_data->flag & BKE_BPATH_FOREACH_PATH_EXPAND_SEQUENCES) != 0 &&
+      volume->filepath[0] != '\0')
+  {
+    char abs_filepath[FILE_MAX];
+    STRNCPY(abs_filepath, volume->filepath);
+    if (bpath_data->absolute_base_path) {
+      BLI_path_abs(abs_filepath, bpath_data->absolute_base_path);
+    }
+    else {
+      BLI_path_abs(abs_filepath, ID_BLEND_PATH(bpath_data->bmain, &volume->id));
+    }
+
+    bpath_data->is_expanded = true;
+    BKE_bpath_sequence_filepaths_foreach(abs_filepath, [&](StringRef frame_filepath) {
+      char frame_path[FILE_MAX];
+      frame_filepath.copy_utf8_truncated(frame_path);
+      BKE_bpath_foreach_path_readonly_process(bpath_data, frame_path);
+    });
+    bpath_data->is_expanded = false;
+    return;
+  }
+
   BKE_bpath_foreach_path_fixed_process(bpath_data, volume->filepath, sizeof(volume->filepath));
 }
 
@@ -242,7 +264,7 @@ static void volume_blend_write(BlendWriter *writer, ID *id, const void *id_addre
   BKE_id_blend_write(writer, &volume->id);
 
   /* direct data */
-  BLO_write_pointer_array(writer, volume->totcol, volume->mat);
+  writer->write_pointer_array(volume->totcol, volume->mat);
 
   BKE_packedfile_blend_write(writer, volume->packedfile);
 }
@@ -256,7 +278,7 @@ static void volume_blend_read_data(BlendDataReader *reader, ID *id)
   volume->runtime->frame = 0;
 
   /* materials */
-  BLO_read_pointer_array(reader, volume->totcol, reinterpret_cast<void **>(&volume->mat));
+  BLO_read_pointer_array_and_validate_size(reader, &volume->mat, &volume->totcol);
 }
 
 static void volume_blend_read_after_liblink(BlendLibReader * /*reader*/, ID *id)
@@ -270,34 +292,34 @@ static void volume_blend_read_after_liblink(BlendLibReader * /*reader*/, ID *id)
 }
 
 IDTypeInfo IDType_ID_VO = {
-    /*id_code*/ Volume::id_type,
-    /*id_filter*/ FILTER_ID_VO,
-    /*dependencies_id_types*/ FILTER_ID_MA,
-    /*main_listbase_index*/ INDEX_ID_VO,
-    /*struct_size*/ sizeof(Volume),
-    /*name*/ "Volume",
-    /*name_plural*/ N_("volumes"),
-    /*translation_context*/ BLT_I18NCONTEXT_ID_VOLUME,
-    /*flags*/ IDTYPE_FLAGS_APPEND_IS_REUSABLE,
-    /*asset_type_info*/ nullptr,
+    .id_code = Volume::id_type,
+    .id_filter = FILTER_ID_VO,
+    .dependencies_id_types = FILTER_ID_MA,
+    .main_listbase_index = INDEX_ID_VO,
+    .struct_size = sizeof(Volume),
+    .name = "Volume",
+    .name_plural = N_("volumes"),
+    .translation_context = BLT_I18NCONTEXT_ID_VOLUME,
+    .flags = IDTYPE_FLAGS_APPEND_IS_REUSABLE,
+    .asset_type_info = nullptr,
 
-    /*init_data*/ volume_init_data,
-    /*copy_data*/ volume_copy_data,
-    /*free_data*/ volume_free_data,
-    /*make_local*/ nullptr,
-    /*foreach_id*/ volume_foreach_id,
-    /*foreach_cache*/ volume_foreach_cache,
-    /*foreach_path*/ volume_foreach_path,
-    /*foreach_working_space_color*/ nullptr,
-    /*owner_pointer_get*/ nullptr,
+    .init_data = volume_init_data,
+    .copy_data = volume_copy_data,
+    .free_data = volume_free_data,
+    .make_local = nullptr,
+    .foreach_id = volume_foreach_id,
+    .foreach_cache = volume_foreach_cache,
+    .foreach_path = volume_foreach_path,
+    .foreach_working_space_color = nullptr,
+    .owner_pointer_get = nullptr,
 
-    /*blend_write*/ volume_blend_write,
-    /*blend_read_data*/ volume_blend_read_data,
-    /*blend_read_after_liblink*/ volume_blend_read_after_liblink,
+    .blend_write = volume_blend_write,
+    .blend_read_data = volume_blend_read_data,
+    .blend_read_after_liblink = volume_blend_read_after_liblink,
 
-    /*blend_read_undo_preserve*/ nullptr,
+    .blend_read_undo_preserve = nullptr,
 
-    /*lib_override_apply_post*/ nullptr,
+    .lib_override_apply_post = nullptr,
 };
 
 void BKE_volume_init_grids(Volume *volume)
@@ -633,7 +655,7 @@ bool BKE_volume_is_y_up(const Volume *volume)
     if (!creator) {
       creator = grids.metadata->getMetadata<openvdb::StringMetadata>("Creator");
     }
-    return (creator && creator->str().rfind("Houdini", 0) == 0);
+    return (creator && creator->str().starts_with("Houdini"));
   }
 #else
   UNUSED_VARS(volume);
@@ -703,7 +725,7 @@ static void volume_evaluate_modifiers(Depsgraph *depsgraph,
 
   /* Evaluate modifiers. */
   for (; md; md = md->next) {
-    const ModifierTypeInfo *mti = BKE_modifier_get_info(ModifierType(md->type));
+    const ModifierTypeInfo *mti = BKE_modifier_get_info(md->type);
 
     if (!BKE_modifier_is_enabled(scene, md, required_mode)) {
       continue;

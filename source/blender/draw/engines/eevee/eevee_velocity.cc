@@ -20,6 +20,7 @@
 #include "DNA_rigidbody_types.h"
 
 #include "DRW_engine.hh"
+#include "GPU_capabilities.hh"
 #include "draw_cache.hh"
 #include "draw_cache_impl.hh"
 
@@ -77,21 +78,18 @@ static void step_object_sync_render(Instance &inst, ObjectRef &ob_ref)
 
   /* NOTE: Dummy resource handle since this won't be used for drawing. */
   ResourceHandleRange resource_handle = {};
-  ObjectHandle &ob_handle = inst.sync.sync_object(ob_ref);
 
   if (partsys_is_visible) {
-    auto sync_hair = [&](ObjectHandle hair_handle,
-                         ModifierData &md,
-                         ParticleSystem &particle_sys) {
-      inst.velocity.step_object_sync(
-          hair_handle.object_key, ob_ref, hair_handle.recalc, resource_handle, &md, &particle_sys);
+    auto sync_hair = [&](const HairParticleInfo &info) {
+      ObjectHandle ob_handle(ob_ref, resource_handle, info.recalc_flags, info.sub_key);
+      inst.velocity.step_object_sync(ob_handle, &info);
     };
-    foreach_hair_particle_handle(inst, ob_ref, ob_handle, sync_hair);
+    foreach_hair_particle(inst, ob_ref, sync_hair);
   };
 
   if (object_is_visible) {
-    inst.velocity.step_object_sync(
-        ob_handle.object_key, ob_ref, ob_handle.recalc, resource_handle);
+    ObjectHandle ob_handle = inst.sync.sync_object(ob_ref, resource_handle);
+    inst.velocity.step_object_sync(ob_handle);
   }
 }
 
@@ -123,114 +121,113 @@ void VelocityModule::step_camera_sync()
   }
 }
 
-bool VelocityModule::step_object_sync(ObjectKey &object_key,
-                                      const ObjectRef &object_ref,
-                                      int /*IDRecalcFlag*/ recalc,
-                                      ResourceHandleRange resource_handle,
-                                      ModifierData *modifier_data /*=nullptr*/,
-                                      ParticleSystem *particle_sys /*=nullptr*/)
+bool VelocityModule::step_object_sync(const ObjectHandle &ob_handle,
+                                      HairParticleInfo const *hair_particle /*=nullptr*/)
 {
-  Object *ob = object_ref.object;
-  bool has_motion = object_has_velocity(ob) || (recalc & ID_RECALC_TRANSFORM);
+  bool has_motion = object_has_velocity(ob_handle.object) ||
+                    (ob_handle.recalc & ID_RECALC_TRANSFORM);
   /* NOTE: Fragile. This will only work with 1 frame of lag since we can't record every geometry
    * just in case there might be an update the next frame. */
-  bool has_deform = object_is_deform(ob) || (recalc & ID_RECALC_GEOMETRY);
+  bool has_deform = object_is_deform(ob_handle.object) || (ob_handle.recalc & ID_RECALC_GEOMETRY);
 
   if (!has_motion && !has_deform) {
     return false;
   }
 
-  /* Object motion. */
-  /* FIXME(fclem) As we are using original objects pointers, there is a chance the previous
-   * object key matches a totally different object if the scene was changed by user or python
-   * callback. In this case, we cannot correctly match objects between updates.
-   * What this means is that there will be incorrect motion vectors for these objects.
-   * We live with that until we have a correct way of identifying new objects. */
-  VelocityObjectData &vel = velocity_map.lookup_or_add_default(object_key);
-  vel.obj.ofs[step_] = object_steps_usage[step_]++;
-  vel.obj.resource_id = resource_handle.resource_index();
-  /* While VelocityObjectData is unique for each object/instance, multiple VelocityObjectDatas can
-   * point to the same offset in VelocityGeometryData, since geometry is stored local space. */
-  vel.id = particle_sys ? uint64_t(particle_sys) : uint64_t(ob->data);
-  object_steps[step_]->get_or_resize(vel.obj.ofs[step_]) = ob->object_to_world();
-  if (step_ == STEP_CURRENT) {
-    /* Replace invalid steps. Can happen if object was hidden in one of those steps. */
-    if (vel.obj.ofs[STEP_PREVIOUS] == -1) {
-      vel.obj.ofs[STEP_PREVIOUS] = object_steps_usage[STEP_PREVIOUS]++;
-      object_steps[STEP_PREVIOUS]->get_or_resize(
-          vel.obj.ofs[STEP_PREVIOUS]) = ob->object_to_world();
-    }
-    if (vel.obj.ofs[STEP_NEXT] == -1) {
-      if (inst_.is_viewport()) {
-        /* Just set it to 0. motion.next is not meant to be valid in the viewport. */
-        vel.obj.ofs[STEP_NEXT] = 0;
-      }
-      else {
-        vel.obj.ofs[STEP_NEXT] = object_steps_usage[STEP_NEXT]++;
-        object_steps[STEP_NEXT]->get_or_resize(vel.obj.ofs[STEP_NEXT]) = ob->object_to_world();
-      }
-    }
-  }
+  /* While VelocityObjectData is unique for each object/instance, multiple VelocityObjectDatas
+   * can point to the same offset in VelocityGeometryData, since geometry is stored local space. */
+  uint64_t velocity_id = hair_particle ? uint64_t(&hair_particle->psys) :
+                                         uint64_t(ob_handle.object->data);
 
   /* Geometry motion. */
   if (has_deform) {
     auto add_cb = [&]() {
       VelocityGeometryData data;
-      if (particle_sys) {
-        data.pos_buf = draw::hair_pos_buffer_get(inst_.scene, ob, particle_sys, modifier_data);
+      if (hair_particle) {
+        data.pos_buf = draw::hair_pos_buffer_get(
+            inst_.scene, ob_handle.object, &hair_particle->psys, &hair_particle->md);
         return data;
       }
-      switch (ob->type) {
+      switch (ob_handle.object->type) {
         case OB_CURVES:
-          data.pos_buf = draw::curves_pos_buffer_get(ob);
+          data.pos_buf = draw::curves_pos_buffer_get(ob_handle.object);
           break;
         case OB_POINTCLOUD:
-          data.pos_buf = DRW_pointcloud_position_and_radius_buffer_get(ob);
+          data.pos_buf = DRW_pointcloud_position_and_radius_buffer_get(ob_handle.object);
           break;
         case OB_MESH:
-          data.pos_buf = DRW_cache_mesh_surface_get(ob);
+          data.pos_buf = DRW_cache_mesh_surface_get(ob_handle.object);
+          break;
+        default:
           break;
       }
       return data;
     };
 
-    const VelocityGeometryData &data = geometry_map.lookup_or_add_cb(vel.id, add_cb);
-
-    if (!data.has_data()) {
-      has_deform = false;
-    }
+    const VelocityGeometryData &data = geometry_map.lookup_or_add_cb(velocity_id, add_cb);
+    has_deform = data.has_data();
   }
 
-  /* Avoid drawing object that has no motions but were tagged as such. */
-  if (step_ == STEP_CURRENT && has_motion == true && has_deform == false) {
-    const float4x4 &obmat_curr = (*object_steps[STEP_CURRENT])[vel.obj.ofs[STEP_CURRENT]];
-    const float4x4 &obmat_prev = (*object_steps[STEP_PREVIOUS])[vel.obj.ofs[STEP_PREVIOUS]];
-    if (inst_.is_viewport()) {
-      has_motion = (obmat_curr != obmat_prev);
+  bool any_instance_has_motion = false;
+  for (int i : IndexRange(ob_handle.instances_count())) {
+    /* Object motion. */
+    /* FIXME(fclem) As we are using original objects pointers, there is a chance the previous
+     * object key matches a totally different object if the scene was changed by user or python
+     * callback. In this case, we cannot correctly match objects between updates.
+     * What this means is that there will be incorrect motion vectors for these objects.
+     * We live with that until we have a correct way of identifying new objects. */
+    VelocityObjectData &vel = velocity_map.lookup_or_add_default(ObjectKey(ob_handle, i));
+    vel.obj.ofs[step_] = object_steps_usage[step_]++;
+    vel.obj.resource_index = ob_handle.res_handle.sub_handle(i).index();
+    vel.id = velocity_id;
+    object_steps[step_]->get_or_resize(vel.obj.ofs[step_]) = ob_handle.object_to_world(i);
+    if (step_ == STEP_CURRENT) {
+      /* Replace invalid steps. Can happen if object was hidden in one of those steps. */
+      if (vel.obj.ofs[STEP_PREVIOUS] == -1) {
+        vel.obj.ofs[STEP_PREVIOUS] = object_steps_usage[STEP_PREVIOUS]++;
+        object_steps[STEP_PREVIOUS]->get_or_resize(
+            vel.obj.ofs[STEP_PREVIOUS]) = ob_handle.object_to_world(i);
+      }
+      if (vel.obj.ofs[STEP_NEXT] == -1) {
+        if (inst_.is_viewport()) {
+          /* Just set it to 0. motion.next is not meant to be valid in the viewport. */
+          vel.obj.ofs[STEP_NEXT] = 0;
+        }
+        else {
+          vel.obj.ofs[STEP_NEXT] = object_steps_usage[STEP_NEXT]++;
+          object_steps[STEP_NEXT]->get_or_resize(
+              vel.obj.ofs[STEP_NEXT]) = ob_handle.object_to_world(i);
+        }
+      }
     }
-    else {
-      const float4x4 &obmat_next = (*object_steps[STEP_NEXT])[vel.obj.ofs[STEP_NEXT]];
-      has_motion = (obmat_curr != obmat_prev || obmat_curr != obmat_next);
+
+    /* Avoid drawing object that has no motions but were tagged as such. */
+    if (step_ == STEP_CURRENT && has_motion == true && has_deform == false) {
+      const float4x4 &obmat_curr = (*object_steps[STEP_CURRENT])[vel.obj.ofs[STEP_CURRENT]];
+      const float4x4 &obmat_prev = (*object_steps[STEP_PREVIOUS])[vel.obj.ofs[STEP_PREVIOUS]];
+      if (inst_.is_viewport()) {
+        any_instance_has_motion |= obmat_curr != obmat_prev;
+      }
+      else {
+        const float4x4 &obmat_next = (*object_steps[STEP_NEXT])[vel.obj.ofs[STEP_NEXT]];
+        any_instance_has_motion |= (obmat_curr != obmat_prev) || (obmat_curr != obmat_next);
+      }
     }
-  }
 
 #if 0
-  if (!has_motion && !has_deform) {
-    std::cout << "Detected no motion on " << ob->id.name << std::endl;
-  }
-  if (has_deform) {
-    std::cout << "Geometry Motion on " << ob->id.name << std::endl;
-  }
-  if (has_motion) {
-    std::cout << "Object Motion on " << ob->id.name << std::endl;
-  }
+    if (!has_motion && !has_deform) {
+      printf("Detected no motion on %s (%d)\n", ob_handle.object->id.name, i);
+    }
+    if (has_deform) {
+      printf("Geometry Motion on %s (%d)\n", ob_handle.object->id.name, i);
+    }
+    if (has_motion) {
+      printf("Object Motion on %s (%d)\n", ob_handle.object->id.name, i);
+    }
 #endif
-
-  if (!has_motion && !has_deform) {
-    return false;
   }
 
-  return true;
+  return has_deform || any_instance_has_motion;
 }
 
 void VelocityModule::geometry_steps_fill()
@@ -246,8 +243,19 @@ void VelocityModule::geometry_steps_fill()
     geom.ofs = dst_ofs;
     dst_ofs += src_len;
   }
-  /* TODO(@fclem): Fail gracefully (disable motion blur + warning print) if
-   * `tot_len * sizeof(float4)` is greater than max SSBO size. */
+
+  /* Fallback when velocity buffer could not be allocated.  */
+  if (GPU_max_storage_buffer_size() < dst_ofs * sizeof(float) * 4) {
+    inst_.info_append_i18n(
+        "Error: Could not allocate velocity geometry buffer. Only object and camera velocities "
+        "will be used.");
+    for (VelocityObjectData &vel : velocity_map.values()) {
+      vel.geo.len[step_] = -1;
+      vel.geo.ofs[step_] = -1;
+      vel.id = 0;
+    }
+    return;
+  }
   geometry_steps[step_]->resize(max_ii(16, dst_ofs));
 
   DRW_submission_start();
@@ -348,14 +356,14 @@ void VelocityModule::end_sync()
 {
   Vector<ObjectKey, 0> deleted_obj;
 
-  uint32_t max_resource_id_ = 0u;
+  uint32_t max_resource_index_ = 0u;
 
   for (MapItem<ObjectKey, VelocityObjectData> item : velocity_map.items()) {
-    if (item.value.obj.resource_id == uint32_t(-1)) {
+    if (item.value.obj.resource_index == uint32_t(-1)) {
       deleted_obj.append(item.key);
     }
     else {
-      max_resource_id_ = max_uu(max_resource_id_, item.value.obj.resource_id);
+      max_resource_index_ = max_uu(max_resource_index_, item.value.obj.resource_index);
     }
   }
 
@@ -363,7 +371,7 @@ void VelocityModule::end_sync()
     velocity_map.remove(key);
   }
 
-  indirection_buf.resize(ceil_to_multiple_u(max_resource_id_ + 1, 128));
+  indirection_buf.resize(ceil_to_multiple_u(max_resource_index_ + 1, 128));
 
   /* Avoid uploading more data to the GPU as well as an extra level of
    * indirection on the GPU by copying back offsets the to VelocityIndex. */
@@ -383,9 +391,9 @@ void VelocityModule::end_sync()
                           (vel.geo.len[STEP_CURRENT] == vel.geo.len[STEP_PREVIOUS]) &&
                           (vel.geo.len[STEP_CURRENT] == vel.geo.len[STEP_NEXT]);
     }
-    indirection_buf[vel.obj.resource_id] = vel;
+    indirection_buf[vel.obj.resource_index] = vel;
     /* Reset for next sync. */
-    vel.obj.resource_id = uint(-1);
+    vel.obj.resource_index = uint(-1);
   }
 
   object_steps[STEP_PREVIOUS]->push_update();

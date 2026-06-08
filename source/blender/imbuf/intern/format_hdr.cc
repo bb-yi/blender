@@ -13,6 +13,8 @@
 
 namespace blender {
 
+const char *imb_file_extensions_hdr[] = {".hdr", nullptr};
+
 OIIO_NAMESPACE_USING
 using namespace blender::imbuf;
 
@@ -21,7 +23,10 @@ bool imb_is_a_hdr(const uchar *mem, size_t size)
   return imb_oiio_check(mem, size, "hdr");
 }
 
-ImBuf *imb_load_hdr(const uchar *mem, size_t size, int flags, ImFileColorSpace &r_colorspace)
+ImBuf *imb_load_hdr(const uchar *mem,
+                    size_t size,
+                    ImBufFlags flags,
+                    ImFileColorSpace &r_colorspace)
 {
   ImageSpec config, spec;
 
@@ -32,10 +37,10 @@ ImBuf *imb_load_hdr(const uchar *mem, size_t size, int flags, ImFileColorSpace &
 
   ImBuf *ibuf = imb_oiio_read(ctx, config, r_colorspace, spec);
   if (ibuf) {
-    if (flags & IB_alphamode_detect) {
-      ibuf->flags |= IB_alphamode_premul;
+    if (flag_is_set(flags, ImBufFlags::AlphaDetect)) {
+      ibuf->flags |= ImBufFlags::AlphaPremul;
     }
-    if (flags & IB_byte_data) {
+    if (flag_is_set(flags, ImBufFlags::ByteData)) {
       IMB_byte_from_float(ibuf);
     }
   }
@@ -43,15 +48,25 @@ ImBuf *imb_load_hdr(const uchar *mem, size_t size, int flags, ImFileColorSpace &
   return ibuf;
 }
 
-bool imb_save_hdr(ImBuf *ibuf, const char *filepath, int flags)
+static std::tuple<WriteContext, ImageSpec> prepare_save_hdr(ImBuf *ibuf, ImBufFlags flags)
 {
   const int file_channels = 3;
   const TypeDesc data_format = TypeDesc::FLOAT;
-
   WriteContext ctx = imb_create_write_context("hdr", ibuf, flags);
   ImageSpec file_spec = imb_create_write_spec(ctx, file_channels, data_format);
+  return {ctx, file_spec};
+}
 
+bool imb_save_hdr(ImBuf *ibuf, const char *filepath, ImBufFlags flags)
+{
+  const auto [ctx, file_spec] = prepare_save_hdr(ibuf, flags);
   return imb_oiio_write(ctx, filepath, file_spec);
+}
+
+Vector<uint8_t> imb_save_buffer_hdr(ImBuf *ibuf, ImBufFlags flags)
+{
+  const auto [ctx, file_spec] = prepare_save_hdr(ibuf, flags);
+  return imb_oiio_write_buffer(ctx, file_spec);
 }
 
 }  // namespace blender

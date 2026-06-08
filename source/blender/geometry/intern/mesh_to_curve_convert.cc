@@ -38,6 +38,7 @@ BLI_NOINLINE bke::CurvesGeometry create_curve_from_vert_indices(
     const IndexRange cyclic_curves,
     const bke::AttributeFilter &attribute_filter)
 {
+  PRF_scope(ProfileCategory::Default);
   bke::CurvesGeometry curves(vert_indices.size(), curve_offsets.size());
   curves.offsets_for_write().drop_back(1).copy_from(curve_offsets);
   curves.offsets_for_write().last() = vert_indices.size();
@@ -113,10 +114,11 @@ struct CurveFromEdgesOutput {
 BLI_NOINLINE static CurveFromEdgesOutput edges_to_curve_point_indices(const int verts_num,
                                                                       const Span<int2> edges)
 {
+  PRF_scope(ProfileCategory::Default);
   /* Compute the number of edges connecting to each vertex. */
   Array<int> neighbor_offsets_data(verts_num + 1, 0);
-  offset_indices::build_reverse_offsets(edges.cast<int>(), neighbor_offsets_data);
-  const OffsetIndices<int> neighbor_offsets(neighbor_offsets_data);
+  const OffsetIndices<int> neighbor_offsets = offset_indices::build_reverse_offsets(
+      edges.cast<int>(), neighbor_offsets_data);
 
   /* Use as an index into the "neighbor group" for each vertex. */
   Array<int> used_slots(verts_num, 0);
@@ -234,6 +236,7 @@ bke::CurvesGeometry mesh_edges_to_curves_convert(const Mesh &mesh,
                                                  const IndexMask &selection,
                                                  const bke::AttributeFilter &attribute_filter)
 {
+  PRF_scope(ProfileCategory::Default);
   const Span<int2> edges = mesh.edges();
   if (selection.size() == edges.size()) {
     return edges_to_curves_convert(mesh, edges, attribute_filter);
@@ -288,6 +291,7 @@ bke::CurvesGeometry mesh_faces_to_curves_convert(const Mesh &mesh,
                                                  const IndexMask &selection,
                                                  const bke::AttributeFilter &attribute_filter)
 {
+  PRF_scope(ProfileCategory::Default);
   const OffsetIndices faces = mesh.faces();
   const bke::AttributeAccessor src_attributes = mesh.attributes();
 

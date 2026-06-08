@@ -147,6 +147,7 @@ class OBJECT_PT_relations(ObjectButtonsPanel, Panel):
         parent = ob.parent
         if parent and ob.parent_type == 'BONE' and parent.type == 'ARMATURE':
             sub.prop_search(ob, "parent_bone", parent.data, "bones")
+            sub.prop(ob, "parent_bone_head_tail_factor", text="Head/Tail")
         elif ob.parent_type == 'VERTEX':
             col.prop(ob, "parent_vertices", text="Parent Vertex", index=0)
             sub.prop(ob, "use_parent_final_indices")
@@ -204,7 +205,10 @@ class OBJECT_PT_collections(ObjectButtonsPanel, Panel):
             col.context_pointer_set("collection", collection)
 
             row = col.box().row()
-            row.prop(collection, "name", text="")
+            icon = 'OUTLINER_COLLECTION'
+            if collection.color_tag != 'NONE':
+                icon = 'COLLECTION_' + collection.color_tag
+            row.prop(collection, "name", text="", icon=icon)
             row.operator("object.collection_remove", text="", icon='X', emboss=False)
             row.menu("COLLECTION_MT_context_menu", icon='DOWNARROW_HLT', text="")
 
@@ -223,9 +227,19 @@ class OBJECT_PT_display(ObjectButtonsPanel, Panel):
 
         obj = context.object
         obj_type = obj.type
-        is_geometry = (obj_type in {'MESH', 'CURVE', 'SURFACE', 'META', 'FONT', 'VOLUME', 'CURVES', 'POINTCLOUD'})
+        # Empties can have evaluated geometry
+        is_geometry = (
+            obj_type in {
+                'EMPTY',
+                'MESH',
+                'CURVE',
+                'SURFACE',
+                'META',
+                'FONT',
+                'VOLUME',
+                'CURVES',
+                'POINTCLOUD'})
         has_bounds = (is_geometry or obj_type in {'LATTICE', 'ARMATURE'})
-        is_wire = (obj_type in {'CAMERA', 'EMPTY'})
         is_empty_image = (obj_type == 'EMPTY' and obj.empty_display_type == 'IMAGE')
         is_dupli = (obj.instance_type != 'NONE')
         is_gpencil = (obj_type == 'GREASEPENCIL')
@@ -247,9 +261,9 @@ class OBJECT_PT_display(ObjectButtonsPanel, Panel):
         # if obj_type == 'MESH' or is_empty_image:
         #    col.prop(obj, "show_transparent", text="Transparency")
         sub = layout.column()
-        if is_wire:
-            # wire objects only use the max. display type for duplis
-            sub.active = is_dupli
+        # wire objects only use the max. display type for duplis
+        # and empties with geometry nodes modifier
+        sub.active = obj_type != 'CAMERA'
         sub.prop(obj, "display_type", text="Display As")
 
         if is_geometry or is_dupli or is_empty_image or is_gpencil:
@@ -431,10 +445,12 @@ class OBJECT_PT_visibility(ObjectButtonsPanel, Panel):
                 col = layout.column(heading="Ray Visibility")
                 col.prop(ob, "visible_camera", text="Camera", toggle=False)
                 col.prop(ob, "visible_shadow", text="Shadow", toggle=False)
+                col.prop(ob, "visible_raycast", text="Raycast", toggle=False)
 
             if ob.type in {'LIGHT'}:
                 layout.separator()
                 col = layout.column(heading="Ray Visibility")
+                col.prop(ob, "visible_camera", text="Camera", toggle=False)
                 col.prop(ob, "visible_diffuse", text="Diffuse", toggle=False)
                 col.prop(ob, "visible_glossy", text="Glossy", toggle=False)
                 col.prop(ob, "visible_transmission", text="Transmission", toggle=False)

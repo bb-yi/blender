@@ -230,6 +230,15 @@ static int rna_iterator_bone_collections_roots_length(PointerRNA *ptr)
   return arm->collection_root_count;
 }
 
+static PointerRNA rna_BoneCollections_active_get(PointerRNA *ptr)
+{
+  bArmature *arm = static_cast<bArmature *>(ptr->data);
+  BoneCollection *bcoll = arm->runtime->active_collection;
+  /* Work around an issue in the RNA code generator. Or my (Sybren) understanding of it. In any
+   * case, without this hand-written getter, the generated getter will actually use &bcoll instead
+   * of bcoll, resulting in the wrong pointer value. */
+  return RNA_pointer_create_with_parent(*ptr, RNA_BoneCollection, bcoll);
+}
 static void rna_BoneCollections_active_set(PointerRNA *ptr,
                                            PointerRNA value,
                                            struct ReportList * /*reports*/)
@@ -312,7 +321,7 @@ static void rna_BoneCollection_parent_set(PointerRNA *ptr,
 static int rna_BoneCollections_active_index_get(PointerRNA *ptr)
 {
   bArmature *arm = static_cast<bArmature *>(ptr->data);
-  return arm->runtime.active_collection_index;
+  return arm->runtime->active_collection_index;
 }
 
 static void rna_BoneCollections_active_index_set(PointerRNA *ptr, const int bone_collection_index)
@@ -946,8 +955,8 @@ static void rna_Bone_bbone_handle_update(Main *bmain, Scene *scene, PointerRNA *
     if (obt->data == id_cast<ID *>(arm) && obt->pose) {
       bPoseChannel *pchan = BKE_pose_channel_find_name(obt->pose, bone->name);
 
-      if (pchan && pchan->bone == bone) {
-        BKE_pchan_rebuild_bbone_handles(obt->pose, pchan);
+      if (pchan && pchan->bone_get(*obt) == bone) {
+        BKE_pchan_rebuild_bbone_handles(obt->pose, {pchan, bone});
         DEG_id_tag_update(&obt->id, ID_RECALC_SYNC_TO_EVAL);
       }
     }
@@ -1271,6 +1280,7 @@ void rna_def_bone_curved_common(StructRNA *srna, bool is_posebone, bool is_editb
   RNA_def_property_array(prop, 3);
   RNA_def_property_flag(prop, PROP_PROPORTIONAL);
   RNA_def_property_ui_range(prop, 0.0f, FLT_MAX, 1, 3);
+  RNA_def_property_float_default(prop, 1.0f);
   RNA_def_property_ui_text(
       prop,
       "Scale In",
@@ -1282,6 +1292,7 @@ void rna_def_bone_curved_common(StructRNA *srna, bool is_posebone, bool is_editb
   RNA_def_property_array(prop, 3);
   RNA_def_property_flag(prop, PROP_PROPORTIONAL);
   RNA_def_property_ui_range(prop, 0.0f, FLT_MAX, 1, 3);
+  RNA_def_property_float_default(prop, 1.0f);
   RNA_def_property_ui_text(
       prop,
       "Scale Out",
@@ -2025,16 +2036,16 @@ static void rna_def_armature_collections(BlenderRNA *brna, PropertyRNA *cprop)
 
   prop = RNA_def_property(srna, "active", PROP_POINTER, PROP_NONE);
   RNA_def_property_struct_type(prop, "BoneCollection");
-  RNA_def_property_pointer_sdna(prop, nullptr, "runtime.active_collection");
+  RNA_def_property_pointer_sdna(prop, nullptr, "runtime->active_collection");
   RNA_def_property_override_flag(prop, PROPOVERRIDE_IGNORE);
   RNA_def_property_flag(prop, PROP_EDITABLE);
   RNA_def_property_pointer_funcs(
-      prop, nullptr, "rna_BoneCollections_active_set", nullptr, nullptr);
+      prop, "rna_BoneCollections_active_get", "rna_BoneCollections_active_set", nullptr, nullptr);
   RNA_def_property_ui_text(prop, "Active Collection", "Armature's active bone collection");
   RNA_def_property_update(prop, NC_OBJECT | ND_BONE_COLLECTION, nullptr);
 
   prop = RNA_def_property(srna, "active_index", PROP_INT, PROP_NONE);
-  RNA_def_property_int_sdna(prop, nullptr, "runtime.active_collection_index");
+  RNA_def_property_int_sdna(prop, nullptr, "runtime->active_collection_index");
   RNA_def_property_override_flag(prop, PROPOVERRIDE_IGNORE);
   RNA_def_property_flag(prop, PROP_LIB_EXCEPTION);
   RNA_def_property_ui_text(

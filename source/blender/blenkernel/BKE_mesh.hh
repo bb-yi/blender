@@ -132,7 +132,7 @@ struct CornerNormalSpace {
   /** Third vector, orthogonal to #vec_lnor and #vec_ref. */
   float3 vec_ortho;
   /**
-   * Reference angle around #vec_ortho, in ]0, pi] range, between #vec_lnor and the reference edge.
+   * Reference angle around #vec_ortho, in (0, pi] range, between #vec_lnor and the reference edge.
    *
    * A 0.0 value marks that space as invalid, as it can only happen in extremely degenerate
    * geometry cases (it would mean that the default normal is perfectly aligned with the reference
@@ -140,7 +140,7 @@ struct CornerNormalSpace {
    */
   float ref_alpha;
   /**
-   * Reference angle around #vec_lnor, in ]0, 2pi] range, between the reference edge and the other
+   * Reference angle around #vec_lnor, in (0, 2pi] range, between the reference edge and the other
    * border edge of the fan.
    *
    * A 0.0 value marks that space as invalid, as it can only happen in degenerate geometry cases
@@ -441,13 +441,18 @@ void mesh_select_face_flush(Mesh &mesh);
 
 /** Set the default name when adding a color attribute if there is no default yet. */
 void mesh_ensure_default_color_attribute_on_add(Mesh &mesh,
-                                                StringRef id,
+                                                StringRef name,
                                                 AttrDomain domain,
                                                 bke::AttrType data_type);
 void mesh_ensure_default_uv_attribute_on_add(Mesh &mesh,
-                                             StringRef id,
+                                             StringRef name,
                                              AttrDomain domain,
                                              bke::AttrType data_type);
+
+/** Make sure that if there are any uv maps, the active one is set. */
+void mesh_ensure_active_uv_map(Mesh &mesh);
+/** Make sure that if there are any uv maps, the default one is set. */
+void mesh_ensure_default_uv_map(Mesh &mesh);
 
 void mesh_data_update(Depsgraph &depsgraph,
                       const Scene &scene,
@@ -461,9 +466,13 @@ void mesh_remove_invalid_attribute_strings(Mesh &mesh);
  * Check whether the mesh upholds required invariants and fix errors by removing invalid elements
  * or correcting attribute values.
  *
+ * \param allow_missing_edges: When true, faces with missing edges are not treated as errors.
+ * Missing edges are still computed, but no error is printed and the return value is not affected.
+ * Useful for importers that produce faces without edges.
+ *
  * \return True if the mesh was valid (fixes were not applied).
  */
-bool mesh_validate(Mesh &mesh, bool verbose = false);
+bool mesh_validate(Mesh &mesh, bool verbose = false, bool allow_missing_edges = false);
 
 /**
  * Check whether the mesh upholds required invariants.

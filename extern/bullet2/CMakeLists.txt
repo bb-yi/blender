@@ -4,7 +4,7 @@
 
 # Suppress noisy warnings.
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  remove_cc_flag(
+  remove_c_and_cxx_flag(
     "-Warray-bounds=[^ ]+"
     "-Wunused-[^ ]+"
     "-Wunused"
@@ -12,7 +12,7 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     "-Wall"
   )
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  remove_cc_flag(
+  remove_c_and_cxx_flag(
     "-Wall"
   )
 endif()
@@ -422,8 +422,8 @@ if(MSVC)
   # bullet is responsible for quite a few silly warnings
   # suppress all of them. Not great, but they really needed
   # to sort that out themselves.
-  remove_cc_flag("/W3")
-  add_c_flag("/W0")
+  remove_cxx_flag("/W3")
+  add_cxx_flag("/W0")
 endif()
 
 blender_add_lib(extern_bullet "${SRC}" "${INC}" "${INC_SYS}" "${LIB}")

@@ -14,7 +14,7 @@ namespace blender::nodes::node_fn_input_color_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_output<decl::Color>("Color").custom_draw([](CustomSocketDrawParams &params) {
+  b.add_output<decl::Color>("Color"_ustr).custom_draw([](CustomSocketDrawParams &params) {
     params.layout.alignment_set(ui::LayoutAlign::Expand);
     ui::Layout &col = params.layout.column(false);
     template_color_picker(&col, &params.node_ptr, "value", true, false, false, false);
@@ -41,7 +41,7 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  fn_node_type_base(&ntype, "FunctionNodeInputColor", FN_NODE_INPUT_COLOR);
+  fn_node_type_base(&ntype, "FunctionNodeInputColor"_ustr, FN_NODE_INPUT_COLOR);
   ntype.ui_name = "Color";
   ntype.ui_description = "Output a color value chosen with the color picker widget";
   ntype.enum_name_legacy = "INPUT_COLOR";

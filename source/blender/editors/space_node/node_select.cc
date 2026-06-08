@@ -65,7 +65,7 @@
 
 #include "BLT_translation.hh"
 
-#include "NOD_geometry_nodes_log.hh"
+#include "NOD_eval_log.hh"
 
 #include "node_intern.hh" /* own include */
 
@@ -191,17 +191,17 @@ static bool is_event_over_node_or_socket(const bContext &C, const wmEvent &event
 
 void node_socket_select(bNode *node, bNodeSocket &sock)
 {
-  sock.flag |= SELECT;
+  sock.flag |= SOCK_SELECT;
 
   /* select node too */
   if (node) {
-    node->flag |= SELECT;
+    node->flag |= NODE_SELECT;
   }
 }
 
 void node_socket_deselect(bNode *node, bNodeSocket &sock, const bool deselect_node)
 {
-  sock.flag &= ~SELECT;
+  sock.flag &= ~SOCK_SELECT;
 
   if (node && deselect_node) {
     bool sel = false;
@@ -221,7 +221,7 @@ void node_socket_deselect(bNode *node, bNodeSocket &sock, const bool deselect_no
     }
 
     if (!sel) {
-      node->flag &= ~SELECT;
+      node->flag &= ~NODE_SELECT;
     }
   }
 }
@@ -256,7 +256,7 @@ void node_deselect_all_input_sockets(bNodeTree &node_tree, const bool deselect_n
     bool sel = false;
 
     for (bNodeSocket &socket : node->inputs) {
-      socket.flag &= ~SELECT;
+      socket.flag &= ~SOCK_SELECT;
     }
 
     /* If no selected sockets remain, also deselect the node. */
@@ -269,7 +269,7 @@ void node_deselect_all_input_sockets(bNodeTree &node_tree, const bool deselect_n
       }
 
       if (!sel) {
-        node->flag &= ~SELECT;
+        node->flag &= ~NODE_SELECT;
       }
     }
   }
@@ -286,7 +286,7 @@ void node_deselect_all_output_sockets(bNodeTree &node_tree, const bool deselect_
     bool sel = false;
 
     for (bNodeSocket &socket : node->outputs) {
-      socket.flag &= ~SELECT;
+      socket.flag &= ~SOCK_SELECT;
     }
 
     /* if no selected sockets remain, also deselect the node */
@@ -299,7 +299,7 @@ void node_deselect_all_output_sockets(bNodeTree &node_tree, const bool deselect_
       }
 
       if (!sel) {
-        node->flag &= ~SELECT;
+        node->flag &= ~NODE_SELECT;
       }
     }
   }
@@ -980,7 +980,7 @@ static wmOperatorStatus node_box_select_exec(bContext *C, wmOperator *op)
     switch (node->type_legacy) {
       case NODE_FRAME: {
         /* Frame nodes are selectable by their borders (including their whole rect - as for other
-         * nodes - would prevent selection of other nodes inside that frame. */
+         * nodes - would prevent selection of other nodes inside that frame). */
         const rctf frame_inside = node_frame_rect_inside(snode, *node);
         if (BLI_rctf_isect(&rectf, &node->runtime->draw_bounds, nullptr) &&
             !BLI_rctf_inside_rctf(&frame_inside, &rectf))
@@ -1085,7 +1085,7 @@ static wmOperatorStatus node_circleselect_exec(bContext *C, wmOperator *op)
     switch (node->type_legacy) {
       case NODE_FRAME: {
         /* Frame nodes are selectable by their borders (including their whole rect - as for other
-         * nodes - would prevent selection of _only_ other nodes inside that frame. */
+         * nodes - would prevent selection of _only_ other nodes inside that frame). */
         rctf frame_inside = node_frame_rect_inside(*snode, *node);
         const float radius_adjusted = float(radius) / zoom;
         BLI_rctf_pad(&frame_inside, -2.0f * radius_adjusted, -2.0f * radius_adjusted);
@@ -1177,7 +1177,7 @@ static bool do_lasso_select_node(bContext *C, const Span<int2> mcoords, eSelectO
     switch (node->type_legacy) {
       case NODE_FRAME: {
         /* Frame nodes are selectable by their borders (including their whole rect - as for other
-         * nodes - would prevent selection of other nodes inside that frame. */
+         * nodes - would prevent selection of other nodes inside that frame). */
         rctf rectf;
         BLI_rctf_rcti_copy(&rectf, &rect);
         ui::view2d_region_to_view_rctf(&region->v2d, &rectf, &rectf);
@@ -1533,7 +1533,7 @@ static std::string node_find_create_string_value(const bNode &node, const String
 }
 
 static std::string node_find_create_warning(const bNode &node,
-                                            const nodes::geo_eval_log::NodeWarning warning)
+                                            const nodes::eval_log::NodeWarning warning)
 {
   return fmt::format(
       "{}: \"{}\" ({})", nodes::node_warning_type_name(warning.type), warning.message, node.name);
@@ -1559,10 +1559,10 @@ static void node_find_update_fn(const bContext *C,
 {
   Main *bmain = CTX_data_main(C);
   SpaceNode *snode = CTX_wm_space_node(C);
-  nodes::geo_eval_log::ContextualGeoTreeLogs tree_logs =
-      nodes::geo_eval_log::GeoNodesLog::get_contextual_tree_logs(*snode);
+  nodes::eval_log::ContextualNodeTreeLogs tree_logs =
+      nodes::eval_log::NodesEvalLog::get_contextual_tree_logs(*snode);
   tree_logs.foreach_tree_log(
-      [&](nodes::geo_eval_log::GeoTreeLog &log) { log.ensure_node_warnings(*bmain); });
+      [&](nodes::eval_log::NodeTreeLog &log) { log.ensure_node_warnings(*bmain); });
 
   struct Item {
     bNode *node;
@@ -1586,7 +1586,7 @@ static void node_find_update_fn(const bContext *C,
     const StringRef name = scope.add_value(node_find_create_node_label(ntree, *node));
     search.add(name, &scope.construct<Item>(Item{node, name}));
 
-    if (node->is_type("FunctionNodeInputString")) {
+    if (node->is_type("FunctionNodeInputString"_ustr)) {
       const auto *storage = static_cast<const NodeInputString *>(node->storage);
       const StringRef value_str = storage->string;
       if (!value_str.is_empty()) {
@@ -1615,10 +1615,9 @@ static void node_find_update_fn(const bContext *C,
         add_data_block_item(*node, node->id);
       }
     }
-    if (nodes::geo_eval_log::GeoTreeLog *tree_log = tree_logs.get_main_tree_log(*node)) {
-      if (nodes::geo_eval_log::GeoNodeLog *node_log = tree_log->nodes.lookup_ptr(node->identifier))
-      {
-        for (const nodes::geo_eval_log::NodeWarning &warning : node_log->warnings) {
+    if (nodes::eval_log::NodeTreeLog *tree_log = tree_logs.get_main_tree_log(*node)) {
+      if (nodes::eval_log::NodeLog *node_log = tree_log->nodes.lookup_ptr(node->identifier)) {
+        for (const nodes::eval_log::NodeWarning &warning : node_log->warnings) {
           const StringRef search_str = scope.add_value(node_find_create_warning(*node, warning));
           search.add(search_str, &scope.construct<Item>(Item{node, search_str}));
         }
@@ -1688,6 +1687,8 @@ static void node_find_update_fn(const bContext *C,
               *node, id_cast<ID *>(socket->default_value_typed<bNodeSocketValueSound>()->value));
           break;
         }
+        default:
+          break;
       }
     }
   }

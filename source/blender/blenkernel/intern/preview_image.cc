@@ -396,8 +396,8 @@ void BKE_previewimg_ensure(PreviewImage *prv, const int size)
   if (do_preview) {
     prv->w[ICON_SIZE_PREVIEW] = thumb->x;
     prv->h[ICON_SIZE_PREVIEW] = thumb->y;
-    prv->rect[ICON_SIZE_PREVIEW] = reinterpret_cast<unsigned int *>(
-        MEM_dupalloc<uint8_t>(thumb->byte_buffer.data));
+    prv->rect[ICON_SIZE_PREVIEW] = reinterpret_cast<uint *>(
+        MEM_dupalloc<uint8_t>(thumb->byte_data()));
     prv->flag[ICON_SIZE_PREVIEW] &= ~(PRV_CHANGED | PRV_USER_EDITED | PRV_RENDERING);
   }
   if (do_icon) {
@@ -416,8 +416,8 @@ void BKE_previewimg_ensure(PreviewImage *prv, const int size)
     IMB_scale(thumb, icon_w, icon_h, IMBScaleFilter::Box, false);
     prv->w[ICON_SIZE_ICON] = icon_w;
     prv->h[ICON_SIZE_ICON] = icon_h;
-    prv->rect[ICON_SIZE_ICON] = reinterpret_cast<unsigned int *>(
-        MEM_dupalloc<uint8_t>(thumb->byte_buffer.data));
+    prv->rect[ICON_SIZE_ICON] = reinterpret_cast<uint *>(
+        MEM_dupalloc<uint8_t>(thumb->byte_data()));
     prv->flag[ICON_SIZE_ICON] &= ~(PRV_CHANGED | PRV_USER_EDITED | PRV_RENDERING);
   }
   IMB_freeImBuf(thumb);
@@ -460,8 +460,8 @@ ImBuf *BKE_previewimg_to_imbuf(const PreviewImage *prv, const int size)
 
   if (w > 0 && h > 0 && rect) {
     /* first allocate imbuf for copying preview into it */
-    ima = IMB_allocImBuf(w, h, 32, IB_byte_data);
-    memcpy(ima->byte_buffer.data, rect, w * h * sizeof(uint8_t) * 4);
+    ima = IMB_allocImBuf(w, h, ImBufFlags::ByteData);
+    memcpy(ima->byte_data_for_write(), rect, w * h * sizeof(uint8_t) * 4);
   }
 
   return ima;
@@ -564,10 +564,10 @@ void BKE_previewimg_blend_write(BlendWriter *writer, const PreviewImage *prv)
   prv_copy.runtime = nullptr;
   writer->write_struct_at_address(prv, &prv_copy);
   if (prv_copy.rect[0]) {
-    BLO_write_uint32_array(writer, prv_copy.w[0] * prv_copy.h[0], prv_copy.rect[0]);
+    writer->write_uint32_array(prv_copy.w[0] * prv_copy.h[0], prv_copy.rect[0]);
   }
   if (prv_copy.rect[1]) {
-    BLO_write_uint32_array(writer, prv_copy.w[1] * prv_copy.h[1], prv_copy.rect[1]);
+    writer->write_uint32_array(prv_copy.w[1] * prv_copy.h[1], prv_copy.rect[1]);
   }
 }
 
@@ -581,11 +581,14 @@ void BKE_previewimg_blend_read(BlendDataReader *reader, PreviewImage *prv)
 
   for (int i = 0; i < NUM_ICON_SIZES; i++) {
     if (prv->rect[i]) {
-      BLO_read_uint32_array(reader, prv->w[i] * prv->h[i], &prv->rect[i]);
+      if (!BLO_read_array(reader, &prv->rect[i], int64_t(prv->w[i]) * prv->h[i])) {
+        prv->w[i] = 0;
+        prv->h[i] = 0;
+      }
     }
 
     /* PRV_RENDERING is a runtime only flag currently, but for undo indicates that we need
-     * to restart prevew renders. See ED_preview_restart_work. */
+     * to restart preview renders. See ED_preview_restart_work. */
     if (BLO_read_data_is_undo(reader)) {
       if ((prv->flag[i] & PRV_RENDERING) && !(prv->flag[i] & PRV_USER_EDITED)) {
         prv->runtime->tag[i] |= PRV_TAG_RESTART_RENDERING;

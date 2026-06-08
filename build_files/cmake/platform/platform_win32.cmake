@@ -20,10 +20,6 @@ set(CMAKE_MAP_IMPORTED_CONFIG_RELEASE Release RelWithDebInfo MinSizeRel Debug)
 
 if(CMAKE_C_COMPILER_ID MATCHES "Clang")
   set(MSVC_CLANG ON)
-  if(NOT WITH_WINDOWS_EXTERNAL_MANIFEST)
-    message(WARNING "WITH_WINDOWS_EXTERNAL_MANIFEST is required for clang, turning ON")
-    set(WITH_WINDOWS_EXTERNAL_MANIFEST ON)
-  endif()
   set(VC_TOOLS_DIR $ENV{VCToolsRedistDir} CACHE STRING "Location of the msvc redistributables")
   set(MSVC_REDIST_DIR ${VC_TOOLS_DIR})
   if(DEFINED MSVC_REDIST_DIR)
@@ -34,6 +30,12 @@ if(CMAKE_C_COMPILER_ID MATCHES "Clang")
       "copying of the runtime dlls will not work, "
       "try running from the visual studio developer prompt."
     )
+  endif()
+  # if set, leave CUDA_HOST_COMPILER alone, if not set default it with
+  # the path to cl.exe since otherwise it will try to use clang-cl and
+  # the cuda build will fail due to a non-supported compiler.
+  if(NOT DEFINED CUDA_HOST_COMPILER)
+    find_program(CUDA_HOST_COMPILER cl.exe)
   endif()
 else()
   if(WITH_BLENDER)
@@ -72,18 +74,22 @@ if(WITH_BLENDER AND NOT WITH_PYTHON_MODULE)
   set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT blender)
 endif()
 
-macro(warn_hardcoded_paths package_name)
+function(warn_hardcoded_paths package_name)
   if(WITH_WINDOWS_FIND_MODULES)
     message(WARNING "Using HARDCODED ${package_name} locations")
   endif()
-endmacro()
+endfunction()
 
+# NOTE: must be a macro, forwards to `find_package()`
+# whose result variables must be visible in the caller's scope.
 macro(windows_find_package package_name)
   if(WITH_WINDOWS_FIND_MODULES)
     find_package(${package_name})
   endif()
 endmacro()
 
+# NOTE: must be a macro, forwards `${ARGV}` to `find_package()`
+# whose result variables must be visible in the caller's scope.
 macro(find_package_wrapper)
   if(WITH_WINDOWS_FIND_MODULES)
     find_package(${ARGV})
@@ -102,6 +108,16 @@ string(APPEND CMAKE_MODULE_LINKER_FLAGS " /SAFESEH:NO /ignore:4099")
 
 if(WITH_WINDOWS_EXTERNAL_MANIFEST)
   string(APPEND CMAKE_EXE_LINKER_FLAGS " /manifest:no")
+else()
+  if(MSVC_CLANG)
+    # lld-link.exe corrupts the manifest by supplying UAC information in the
+    # wrong namespace. Since we supply this our selves in our manifests already
+    # we can just disable this. See https://github.com/llvm/llvm-project/issues/120394
+    # for details.
+    string(APPEND CMAKE_EXE_LINKER_FLAGS " /manifestuac:no")
+    string(APPEND CMAKE_SHARED_LINKER_FLAGS " /manifestuac:no")
+    string(APPEND CMAKE_MODULE_LINKER_FLAGS " /manifestuac:no")
+  endif()
 endif()
 
 list(APPEND PLATFORM_LINKLIBS
@@ -120,6 +136,9 @@ add_definitions(
   -D_SCL_SECURE_NO_DEPRECATE
   -D_CONSOLE
   -D_LIB
+  -D_USE_MATH_DEFINES
+  -DWIN32_LEAN_AND_MEAN
+  -DNOMINMAX
 )
 
 # MSVC11 needs _ALLOW_KEYWORD_MACROS to build
@@ -130,7 +149,7 @@ add_definitions(-D_ALLOW_KEYWORD_MACROS)
 # to remove for individual files that want to disable it
 # using the /GR- flag without generating a build warning
 # that both /GR and /GR- are specified.
-remove_cc_flag("/GR")
+remove_c_and_cxx_flag("/GR")
 
 # Make the Windows 8.1 API available for use.
 add_definitions(-D_WIN32_WINNT=0x603)
@@ -151,7 +170,7 @@ if(WITH_WINDOWS_BUNDLE_CRT)
   # ucrtbase(d).dll cannot be in the manifest, due to the way windows 10 handles
   # redirects for this dll, for details see #88813.
   foreach(lib ${CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS})
-    string(FIND ${lib} "ucrtbase" pos)
+    string(FIND "${lib}" "ucrtbase" pos)
     if(NOT pos EQUAL -1)
       list(REMOVE_ITEM CMAKE_INSTALL_SYSTEM_RUNTIME_LIBS ${lib})
       install(FILES ${lib} DESTINATION . COMPONENT Libraries)
@@ -178,7 +197,7 @@ configure_file(
   @ONLY
 )
 
-remove_cc_flag(
+remove_c_and_cxx_flag(
   "/MDd"
   "/MD"
   "/Zi"
@@ -395,6 +414,14 @@ if(WITH_LIBMV)
   find_package(Ceres REQUIRED CONFIG)
 endif()
 
+if(WITH_DRACO)
+  find_package(draco REQUIRED CONFIG)
+endif()
+
+if(WITH_MESHOPTIMIZER)
+  find_package(meshoptimizer REQUIRED CONFIG)
+endif()
+
 windows_find_package(ZLIB) # We want to find before finding things that depend on it like PNG.
 windows_find_package(PNG)
 if(NOT PNG_FOUND)
@@ -417,8 +444,8 @@ endif()
 set(EPOXY_ROOT_DIR ${LIBDIR}/epoxy)
 windows_find_package(Epoxy REQUIRED)
 if(NOT EPOXY_FOUND)
-  set(Epoxy_INCLUDE_DIRS ${LIBDIR}/epoxy/include)
-  set(Epoxy_LIBRARIES ${LIBDIR}/epoxy/lib/epoxy.lib)
+  set(EPOXY_INCLUDE_DIRS ${LIBDIR}/epoxy/include)
+  set(EPOXY_LIBRARIES ${LIBDIR}/epoxy/lib/epoxy.lib)
 endif()
 
 set(PTHREADS_INCLUDE_DIRS ${LIBDIR}/pthreads/include)
@@ -512,20 +539,10 @@ endif()
 
 set(openjph_ROOT ${LIBDIR}/openjph)
 
-if(WITH_IMAGE_OPENEXR)
-  set(IMATH_ROOT ${LIBDIR}/imath)
-  find_package(IMATH REQUIRED CONFIG)
-  set(OpenEXR_ROOT ${LIBDIR}/openexr)
-  find_package(OpenEXR REQUIRED CONFIG)
-endif()
-
-# Try to find tiff first then complain and set static and maybe wrong paths
-windows_find_package(TIFF)
-if(NOT TIFF_FOUND)
-  warn_hardcoded_paths(libtiff)
-  set(TIFF_LIBRARY ${LIBDIR}/tiff/lib/libtiff.lib)
-  set(TIFF_INCLUDE_DIR ${LIBDIR}/tiff/include)
-endif()
+set(IMATH_ROOT ${LIBDIR}/imath)
+find_package(IMATH REQUIRED CONFIG)
+set(OpenEXR_ROOT ${LIBDIR}/openexr)
+find_package(OpenEXR REQUIRED CONFIG)
 
 if(WITH_JACK)
   set(JACK_INCLUDE_DIRS
@@ -611,32 +628,7 @@ if(WITH_LLVM)
 
 endif()
 
-if(WITH_OPENCOLORIO)
-  windows_find_package(OpenColorIO)
-  if(NOT OpenColorIO_FOUND)
-    set(OPENCOLORIO ${LIBDIR}/OpenColorIO)
-    set(OPENCOLORIO_INCLUDE_DIRS ${OPENCOLORIO}/include)
-    set(OPENCOLORIO_LIBPATH ${OPENCOLORIO}/lib)
-    if(EXISTS ${OPENCOLORIO_LIBPATH}/libexpatMD.lib) # 3.4
-      set(OPENCOLORIO_LIBRARIES
-        optimized ${OPENCOLORIO_LIBPATH}/OpenColorIO.lib
-        optimized ${OPENCOLORIO_LIBPATH}/libexpatMD.lib
-        optimized ${OPENCOLORIO_LIBPATH}/pystring.lib
-        optimized ${OPENCOLORIO_LIBPATH}/libyaml-cpp.lib
-        debug ${OPENCOLORIO_LIBPATH}/OpencolorIO_d.lib
-        debug ${OPENCOLORIO_LIBPATH}/libexpatdMD.lib
-        debug ${OPENCOLORIO_LIBPATH}/pystring_d.lib
-        debug ${OPENCOLORIO_LIBPATH}/libyaml-cpp_d.lib
-      )
-      set(OPENCOLORIO_DEFINITIONS "-DOpenColorIO_SKIP_IMPORTS")
-    else()
-      set(OPENCOLORIO_LIBRARIES
-        optimized ${OPENCOLORIO_LIBPATH}/OpenColorIO.lib
-        debug ${OPENCOLORIO_LIBPATH}/OpencolorIO_d.lib
-      )
-    endif()
-  endif()
-endif()
+find_package(OpenColorIO REQUIRED CONFIG)
 
 if(WITH_OPENVDB)
   windows_find_package(OpenVDB)
@@ -649,7 +641,7 @@ if(WITH_OPENVDB)
       debug ${OPENVDB_LIBPATH}/openvdb_d.lib
     )
   endif()
-  set(OPENVDB_DEFINITIONS -DNOMINMAX -D_USE_MATH_DEFINES)
+  set(OPENVDB_DEFINITIONS -DNOMINMAX)
 endif()
 
 if(WITH_NANOVDB)
@@ -769,10 +761,7 @@ if(WITH_RUBBERBAND)
 endif()
 
 if(WITH_SDL)
-  set(SDL ${LIBDIR}/sdl)
-  set(SDL_INCLUDE_DIR ${SDL}/include)
-  set(SDL_LIBPATH ${SDL}/lib)
-  set(SDL_LIBRARY ${SDL_LIBPATH}/SDL2.lib)
+  find_package(SDL3 REQUIRED CONFIG)
 endif()
 
 # Audio IO
@@ -859,8 +848,8 @@ endif()
 
 if(WITH_CYCLES AND WITH_CYCLES_OSL)
   set(CYCLES_OSL ${LIBDIR}/osl CACHE PATH "Path to OpenShadingLanguage installation")
-  set(OSL_ROOT ${CYCLES_OSL}) 
-  find_package(OSL REQUIRED CONFIG) 
+  set(OSL_ROOT ${CYCLES_OSL})
+  find_package(OSL REQUIRED CONFIG)
 endif()
 
 if(WITH_CYCLES AND WITH_CYCLES_EMBREE)
@@ -1172,18 +1161,18 @@ if(WITH_CYCLES AND (WITH_CYCLES_DEVICE_ONEAPI OR (WITH_CYCLES_EMBREE AND EMBREE_
     list(FIND _sycl_unified_runtime_libraries_glob ${sycl_unified_runtime_library_debug} debug_index)
     list(FIND _sycl_unified_runtime_libraries_glob ${sycl_unified_runtime_library_release} release_index)
     if(NOT debug_index EQUAL -1)
-      set (sycl_unified_runtime_library_release ${sycl_unified_runtime_library})
+      set(sycl_unified_runtime_library_release ${sycl_unified_runtime_library})
     elseif(NOT release_index EQUAL -1 AND NOT sycl_unified_runtime_library_release STREQUAL sycl_unified_runtime_library)
-      set (sycl_unified_runtime_library_debug ${sycl_unified_runtime_library})
+      set(sycl_unified_runtime_library_debug ${sycl_unified_runtime_library})
     else()
       # If there is no debug pair version of the library, then we are assuming
       # that this dll dependency is unique, and should be just added as both
       # release and debug dependency.
-      set (sycl_unified_runtime_library_release ${sycl_unified_runtime_library})
-      set (sycl_unified_runtime_library_debug ${sycl_unified_runtime_library})
+      set(sycl_unified_runtime_library_release ${sycl_unified_runtime_library})
+      set(sycl_unified_runtime_library_debug ${sycl_unified_runtime_library})
     endif()
     list(FIND _sycl_runtime_libraries ${sycl_unified_runtime_library_release} found_index)
-    if (found_index EQUAL -1)
+    if(found_index EQUAL -1)
       list(APPEND _sycl_runtime_libraries RELEASE ${sycl_unified_runtime_library_release})
       list(APPEND _sycl_runtime_libraries DEBUG ${sycl_unified_runtime_library_debug})
       # NOTE(Sirgienko) Due to a bug in DPC++ runtime, in versions 6.2 and 6.3
@@ -1201,6 +1190,11 @@ if(WITH_CYCLES AND (WITH_CYCLES_DEVICE_ONEAPI OR (WITH_CYCLES_EMBREE AND EMBREE_
     optimized ${SYCL_LIBRARY}
     debug ${SYCL_LIBRARY_DEBUG}
   )
+endif()
+
+if(WITH_TRACY)
+  set(Tracy_ROOT_DIR ${LIBDIR}/tracy)
+  find_package(Tracy REQUIRED CONFIG)
 endif()
 
 # Add the MSVC directory to the path so when building with ASAN enabled tools such as

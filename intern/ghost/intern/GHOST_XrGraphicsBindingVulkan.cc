@@ -18,10 +18,6 @@
 #include "BLI_string_ref.hh"
 #include "BLI_vector.hh"
 
-#include "CLG_log.h"
-
-static CLG_LogRef LOG = {"ghost.xr"};
-
 #ifdef _WIN32
 #  include <vulkan/vulkan_win32.h>
 #endif
@@ -114,7 +110,7 @@ bool GHOST_XrGraphicsBindingVulkan::loadExtensionFunctions(XrInstance instance)
 
 #undef LOAD_FUNCTION
 
-  CLOG_INFO(&LOG,
+  CLOG_INFO(LOG_GHOST_XR,
             "XR/Vulkan graphics extensions:\n"
             " - [%c] XR_KHR_vulkan_enable\n"
             " - [%c] XR_KHR_vulkan_enable2",
@@ -154,9 +150,9 @@ bool GHOST_XrGraphicsBindingVulkan::checkVersionRequirements(GHOST_Context &ghos
                 << XR_VERSION_MINOR(xr_graphics_requirements.minApiVersionSupported) << std::endl;
     }
     if (vk_version > xr_graphics_requirements.maxApiVersionSupported) {
-      CLOG_INFO(&LOG,
+      CLOG_INFO(LOG_GHOST_XR,
                 "OpenXR platform vulkan version requirements do not match with Blender. "
-                "This is known to happen when using Occulus/Meta Quest. A workaround for this is "
+                "This is known to happen when using Oculus/Meta Quest. A workaround for this is "
                 "already enabled by enabling extensions that are known to be in core vulkan. "
                 "(minimum vulkan version=%d.%d, maximum vulkan version=%d.%d).",
                 XR_VERSION_MAJOR(xr_graphics_requirements.minApiVersionSupported),
@@ -185,9 +181,9 @@ bool GHOST_XrGraphicsBindingVulkan::checkVersionRequirements(GHOST_Context &ghos
                 << XR_VERSION_MINOR(xr_graphics_requirements2.minApiVersionSupported) << std::endl;
     }
     if (vk_version > xr_graphics_requirements2.maxApiVersionSupported) {
-      CLOG_INFO(&LOG,
+      CLOG_INFO(LOG_GHOST_XR,
                 "OpenXR platform vulkan version requirements do not match with Blender. "
-                "This is known to happen when using Occulus/Meta Quest. A workaround for this is "
+                "This is known to happen when using Oculus/Meta Quest. A workaround for this is "
                 "already enabled by enabling extensions that are known to be in core vulkan. "
                 "(minimum vulkan version=%d.%d, maximum vulkan version=%d.%d).",
                 XR_VERSION_MAJOR(xr_graphics_requirements2.minApiVersionSupported),
@@ -342,7 +338,8 @@ bool GHOST_XrGraphicsBindingVulkan::tryReuseVulkanInstance(GHOST_ContextVK &ghos
                                                            XrSystemId system_id)
 {
   if (!extensions_.vulkan_enable) {
-    CLOG_INFO(&LOG, "Unable to reuse vulkan instance: XR_KHR_vulkan_enable isn't supported");
+    CLOG_INFO(LOG_GHOST_XR,
+              "Unable to reuse vulkan instance: XR_KHR_vulkan_enable isn't supported");
     return false;
   }
 
@@ -363,7 +360,7 @@ bool GHOST_XrGraphicsBindingVulkan::tryReuseVulkanInstance(GHOST_ContextVK &ghos
     return result;
   }
 
-  CLOG_INFO(&LOG, "Reusing vulkan instance.");
+  CLOG_INFO(LOG_GHOST_XR, "Reusing vulkan instance.");
   data_transfer_mode_ = GHOST_kVulkanXRModeRenderGraph;
 
   /* Initialize binding struct */
@@ -410,9 +407,9 @@ bool GHOST_XrGraphicsBindingVulkan::areRequiredInstanceExtensionsEnabled(
     log_ss << "\n - [" << (is_extension_enabled ? 'X' : ' ') << "] " << extension_name;
     all_extensions_enabled &= is_extension_enabled;
   }
-  CLOG_DEBUG(&LOG, "%s", log_ss.str().c_str());
+  CLOG_DEBUG(LOG_GHOST_XR, "%s", log_ss.str().c_str());
   if (!all_extensions_enabled) {
-    CLOG_INFO(&LOG,
+    CLOG_INFO(LOG_GHOST_XR,
               "Unable to reuse vulkan instance: not all required instance extensions are enabled");
     return false;
   }
@@ -438,9 +435,9 @@ bool GHOST_XrGraphicsBindingVulkan::areRequiredDeviceExtensionsEnabled(XrInstanc
     log_ss << "\n - [" << (is_extension_enabled ? 'X' : ' ') << "] " << extension_name;
     all_extensions_enabled &= is_extension_enabled;
   }
-  CLOG_DEBUG(&LOG, "%s", log_ss.str().c_str());
+  CLOG_DEBUG(LOG_GHOST_XR, "%s", log_ss.str().c_str());
   if (!all_extensions_enabled) {
-    CLOG_INFO(&LOG,
+    CLOG_INFO(LOG_GHOST_XR,
               "Unable to reuse vulkan instance: not all required device extensions are enabled");
     return false;
   }
@@ -460,7 +457,7 @@ bool GHOST_XrGraphicsBindingVulkan::isSamePhysicalDeviceSelected(
     VkPhysicalDeviceProperties context_physical_device_properties = {};
     vkGetPhysicalDeviceProperties(context_handles.physical_device,
                                   &context_physical_device_properties);
-    CLOG_INFO(&LOG,
+    CLOG_INFO(LOG_GHOST_XR,
               "Unable to reuse vulkan instance: OpenXR requires to use a different GPU [%s] than "
               "currently in used [%s].",
               openxr_physical_device_properties.deviceName,
@@ -512,7 +509,7 @@ GHOST_TVulkanXRModes GHOST_XrGraphicsBindingVulkan::choseDataTransferMode()
 
   auto has_extension = [=](const char *extension_name) {
     for (const auto &extension : available_device_extensions) {
-      if (strcmp(extension_name, extension.extensionName) == 0) {
+      if (STREQ(extension_name, extension.extensionName)) {
         return true;
       }
     }
@@ -656,8 +653,9 @@ void GHOST_XrGraphicsBindingVulkan::submitToSwapchainImageCpu(
 
   /* Import render result. */
   VkDeviceSize component_size = 4 * sizeof(uint8_t);
-  if (draw_info.swapchain_format == GHOST_kXrSwapchainFormatRGBA16F ||
-      draw_info.swapchain_format == GHOST_kXrSwapchainFormatRGBA16)
+  if (ELEM(draw_info.swapchain_format,
+           GHOST_kXrSwapchainFormatRGBA16F,
+           GHOST_kXrSwapchainFormatRGBA16))
   {
     component_size = 4 * sizeof(uint16_t);
   }
@@ -768,13 +766,15 @@ void GHOST_XrGraphicsBindingVulkan::submitToSwapchainImageCpu(
 void GHOST_XrGraphicsBindingVulkan::submitToSwapchainImageRenderGraph(
     XrSwapchainImageVulkan2KHR &swapchain_image, const GHOST_XrDrawViewInfo &draw_info)
 {
+  const bool is_last_view = draw_info.view_idx == image_cache_.size() - 1;
+
   GHOST_VulkanSwapChainData swap_chain_data = {};
   swap_chain_data.image = swapchain_image.image;
   swap_chain_data.extent = {uint32_t(draw_info.width), uint32_t(draw_info.height)};
   swap_chain_data.surface_format.format = VkFormat(draw_info.gpu_swapchain_format);
   swap_chain_data.surface_format.colorSpace = VK_COLORSPACE_SRGB_NONLINEAR_KHR;
 
-  ghost_ctx_.swap_buffer_draw_callback_(&swap_chain_data);
+  ghost_ctx_.swap_buffer_draw_callback_(&swap_chain_data, is_last_view);
 }
 
 /** \} */

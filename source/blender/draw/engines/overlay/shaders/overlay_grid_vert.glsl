@@ -114,11 +114,19 @@ void main()
 
   /* Compute per-level size, camera offset for lines. Offset is rounded to the nearest
    * level-dependent line position for grid, while axes simply move with the camera. */
-  /* TODO(not_mark): remove all this horrible axis-swapping BS in BSL port. */
-  float step_size = grid_buf.steps[level][line.axis];
-  float2 step_offs = flag_test(grid_flag, SHOW_GRID) ?
-                         round(grid_buf.offset / step_size) * step_size :
-                         float2(drw_view_position()[line.axis], 0.0f); /* Store value on X-axis. */
+  uint step_axis = flag_test(grid_flag, GRID_SIMA) ? 1u - line.axis : line.axis;
+  float step_size = grid_buf.steps[level][step_axis];
+
+  float2 step_offs;
+  if (flag_test(grid_flag, SHOW_GRID)) {
+    step_offs = flag_test(grid_flag, GRID_SIMA) ? grid_buf.offset :
+                                                  round(grid_buf.offset / step_size) * step_size;
+  }
+  else { /* SHOW_AXIS */
+    /* Store axis value on X-axis for now, it is swapped later. */
+    /* TODO(not_mark): remove all this horrible axis-swapping BS in BSL port. */
+    step_offs = float2(drw_view_position()[line.axis], 0.0f);
+  }
 
   /* Output vertex position in [-1,1], which we use to fade level boundaries. */
   vertex_out.coord = line.P / max(float(grid_buf.num_lines >> 1), 1.0f);
@@ -182,9 +190,9 @@ void main()
       vertex_out.pos.yz = line.P;
     }
     else { /* GRID_SIMA */
-      /* Set z to place the grid in front of/behind image, and always behind the UV mesh.
+      /* Set z to place the grid in front of/behind images/UDIMS, and always behind the UV mesh.
        * See `overlay_edit_uv_edges_vert.glsl` for the full z-order. */
-      float z = flag_test(grid_flag, GRID_OVER_IMAGE) ? 0.74f : 0.76f;
+      float z = flag_test(grid_flag, GRID_OVER_IMAGE) ? 0.45f : 0.76f;
       vertex_out.pos = float3(line.P * 0.5f + 0.5f, z);
     }
   }

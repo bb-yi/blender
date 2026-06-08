@@ -24,17 +24,6 @@ namespace blender {
 
 namespace nodes::node_geo_closure_cc {
 
-template<typename DeclarationBuilderT>
-static void apply_closure_structure_type(DeclarationBuilderT &decl, const int structure_type)
-{
-  if (structure_type != NODE_INTERFACE_SOCKET_STRUCTURE_TYPE_AUTO) {
-    decl.structure_type(StructureType(structure_type));
-  }
-  else {
-    decl.structure_type(StructureType::Dynamic);
-  }
-}
-
 /** Shared between closure input and output node. */
 static void node_layout_ex(ui::Layout &layout, bContext *C, PointerRNA *current_node_ptr)
 {
@@ -104,14 +93,21 @@ static void node_declare(NodeDeclarationBuilder &b)
       const auto &output_storage = *static_cast<const NodeClosureOutput *>(output_node->storage);
       for (const int i : IndexRange(output_storage.input_items.items_num)) {
         const NodeClosureInputItem &item = output_storage.input_items.items[i];
-        const eNodeSocketDatatype socket_type = eNodeSocketDatatype(item.socket_type);
-        const std::string identifier = ClosureInputItemsAccessor::socket_identifier_for_item(item);
-        auto &decl = b.add_output(socket_type, item.name, identifier);
-        apply_closure_structure_type(decl, item.structure_type);
+        const eNodeSocketDatatype socket_type = item.socket_type;
+        const UString identifier(ClosureInputItemsAccessor::socket_identifier_for_item(item));
+        auto &decl = b.add_output(socket_type, UString(item.name), identifier);
+        decl.socket_name_ptr(&tree->id, *ClosureInputItemsAccessor::item_srna, &item, "name");
+        if (item.structure_type != NodeSocketInterfaceStructureType::Auto) {
+          decl.structure_type(StructureType(item.structure_type));
+        }
+        else {
+          decl.structure_type(StructureType::Dynamic);
+        }
       }
     }
   }
-  b.add_output<decl::Extend>("", "__extend__");
+  b.add_output<decl::Extend>(""_ustr, "__extend__"_ustr)
+      .custom_draw(socket_items::ui::draw_extend_socket_fn<ClosureInputItemsAccessor>());
 }
 
 static void node_label(const bNodeTree * /*ntree*/,
@@ -184,7 +180,7 @@ static int gpu_shader_closure_input(GPUMaterial *mat,
 static void node_register()
 {
   static bke::bNodeType ntype;
-  sh_geo_node_type_base(&ntype, "NodeClosureInput", NODE_CLOSURE_INPUT);
+  sh_geo_node_type_base(&ntype, "NodeClosureInput"_ustr, NODE_CLOSURE_INPUT);
   ntype.ui_name = "Closure Input";
   ntype.nclass = NODE_CLASS_INTERFACE;
   ntype.declare = node_declare;
@@ -215,14 +211,21 @@ static void node_declare(NodeDeclarationBuilder &b)
     const NodeClosureOutput &storage = node_storage(*node);
     for (const int i : IndexRange(storage.output_items.items_num)) {
       const NodeClosureOutputItem &item = storage.output_items.items[i];
-      const eNodeSocketDatatype socket_type = eNodeSocketDatatype(item.socket_type);
-      const std::string identifier = ClosureOutputItemsAccessor::socket_identifier_for_item(item);
-      auto &decl = b.add_input(socket_type, item.name, identifier).supports_field();
-      apply_closure_structure_type(decl, item.structure_type);
+      const eNodeSocketDatatype socket_type = item.socket_type;
+      const UString identifier(ClosureOutputItemsAccessor::socket_identifier_for_item(item));
+      auto &decl = b.add_input(socket_type, UString(item.name), identifier);
+      decl.socket_name_ptr(&tree->id, *ClosureOutputItemsAccessor::item_srna, &item, "name");
+      if (item.structure_type != NodeSocketInterfaceStructureType::Auto) {
+        decl.structure_type(StructureType(item.structure_type));
+      }
+      else {
+        decl.structure_type(StructureType::Dynamic);
+      }
     }
   }
-  b.add_input<decl::Extend>("", "__extend__");
-  b.add_output<decl::Closure>("Closure");
+  b.add_input<decl::Extend>(""_ustr, "__extend__"_ustr)
+      .custom_draw(socket_items::ui::draw_extend_socket_fn<ClosureOutputItemsAccessor>());
+  b.add_output<decl::Closure>("Closure"_ustr);
 }
 
 static void node_init(bNodeTree * /*tree*/, bNode *node)
@@ -285,14 +288,14 @@ static void node_gather_link_searches(GatherLinkSearchOpParams &params)
     return;
   }
   params.add_item_full_name(IFACE_("Closure"), [](LinkSearchOpParams &params) {
-    bNode &input_node = params.add_node("NodeClosureInput");
-    bNode &output_node = params.add_node("NodeClosureOutput");
+    bNode &input_node = params.add_node("NodeClosureInput"_ustr);
+    bNode &output_node = params.add_node("NodeClosureOutput"_ustr);
     output_node.location[0] = 300;
 
     auto &input_storage = *static_cast<NodeClosureInput *>(input_node.storage);
     input_storage.output_node_id = output_node.identifier;
 
-    params.connect_available_socket(output_node, "Closure");
+    params.connect_available_socket(output_node, "Closure"_ustr);
 
     SpaceNode &snode = *CTX_wm_space_node(&params.C);
     sync_sockets_closure(snode, input_node, output_node, nullptr);
@@ -314,7 +317,7 @@ static void node_blend_read(bNodeTree & /*tree*/, bNode &node, BlendDataReader &
 static void node_register()
 {
   static bke::bNodeType ntype;
-  sh_geo_node_type_base(&ntype, "NodeClosureOutput", NODE_CLOSURE_OUTPUT);
+  sh_geo_node_type_base(&ntype, "NodeClosureOutput"_ustr, NODE_CLOSURE_OUTPUT);
   ntype.ui_name = "Closure Output";
   ntype.nclass = NODE_CLASS_INTERFACE;
   ntype.declare = node_declare;
@@ -342,7 +345,7 @@ StructRNA **ClosureInputItemsAccessor::item_srna = &RNA_NodeClosureInputItem;
 
 void ClosureInputItemsAccessor::blend_write_item(BlendWriter *writer, const ItemT &item)
 {
-  BLO_write_string(writer, item.name);
+  writer->write_string(item.name);
 }
 
 void ClosureInputItemsAccessor::blend_read_data_item(BlendDataReader *reader, ItemT &item)
@@ -354,7 +357,7 @@ StructRNA **ClosureOutputItemsAccessor::item_srna = &RNA_NodeClosureOutputItem;
 
 void ClosureOutputItemsAccessor::blend_write_item(BlendWriter *writer, const ItemT &item)
 {
-  BLO_write_string(writer, item.name);
+  writer->write_string(item.name);
 }
 
 void ClosureOutputItemsAccessor::blend_read_data_item(BlendDataReader *reader, ItemT &item)

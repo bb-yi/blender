@@ -25,6 +25,7 @@
 
 #include "RNA_access.hh"
 #include "RNA_define.hh"
+#include "RNA_enum_types.hh"
 
 #include "BKE_context.hh"
 #include "BKE_fcurve.hh"
@@ -684,7 +685,7 @@ void ACTION_OT_select_box(wmOperatorType *ot)
   ot->modal = WM_gesture_box_modal;
   ot->cancel = WM_gesture_box_cancel;
 
-  ot->poll = ED_operator_action_active;
+  ot->poll = ED_operator_region_action_active;
 
   /* flags */
   ot->flag = OPTYPE_UNDO;
@@ -950,7 +951,7 @@ void ACTION_OT_select_lasso(wmOperatorType *ot)
   ot->invoke = WM_gesture_lasso_invoke;
   ot->modal = WM_gesture_lasso_modal;
   ot->exec = actkeys_lassoselect_exec;
-  ot->poll = ED_operator_action_active;
+  ot->poll = ED_operator_region_action_active;
   ot->cancel = WM_gesture_lasso_cancel;
 
   /* flags */
@@ -1017,7 +1018,7 @@ void ACTION_OT_select_circle(wmOperatorType *ot)
   ot->invoke = WM_gesture_circle_invoke;
   ot->modal = WM_gesture_circle_modal;
   ot->exec = action_circle_select_exec;
-  ot->poll = ED_operator_action_active;
+  ot->poll = ED_operator_region_action_active;
   ot->cancel = WM_gesture_circle_cancel;
   ot->get_name = ED_select_circle_get_name;
 
@@ -1228,8 +1229,8 @@ static void columnselect_action_keys(bAnimContext *ac, short mode)
   }
 
   /* free elements */
-  BLI_freelistN(&ked.cfra_elem_list);
-  BLI_freelistN(&ked.time_marker_list);
+  ked.cfra_elem_list.free_no_destruct();
+  ked.time_marker_list.free_no_destruct();
 
   ANIM_animdata_update(ac, &anim_data);
   ANIM_animdata_freelist(&anim_data);
@@ -1833,8 +1834,8 @@ static void actkeys_mselect_column(bAnimContext *ac, eEditKeyframes_Select selec
   }
 
   /* free elements */
-  BLI_freelistN(&ked.cfra_elem_list);
-  BLI_freelistN(&ked.time_marker_list);
+  ked.cfra_elem_list.free_no_destruct();
+  ked.time_marker_list.free_no_destruct();
 
   ANIM_animdata_update(ac, &anim_data);
   ANIM_animdata_freelist(&anim_data);
@@ -2095,7 +2096,7 @@ void ACTION_OT_clickselect(wmOperatorType *ot)
   ot->description = "Select keyframes by clicking on them";
 
   /* callbacks */
-  ot->poll = ED_operator_action_active;
+  ot->poll = ED_operator_region_action_active;
   ot->exec = actkeys_clickselect_exec;
   ot->invoke = WM_generic_select_invoke;
   ot->modal = WM_generic_select_modal;
@@ -2137,6 +2138,81 @@ void ACTION_OT_clickselect(wmOperatorType *ot)
                          "Only Channel",
                          "Select all the keyframes in the channel under the mouse");
   RNA_def_property_flag(prop, PROP_SKIP_SAVE);
+}
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Select by Keyframe Type operator
+ * \{ */
+
+static wmOperatorStatus select_by_type_exec(bContext *C, wmOperator *op)
+{
+  bAnimContext ac;
+
+  if (ANIM_animdata_get_context(C, &ac) == 0) {
+    return OPERATOR_CANCELLED;
+  }
+
+  ListBaseT<bAnimListElem> anim_data = {nullptr, nullptr};
+  const eAnimFilter_Flags filter = (ANIMFILTER_DATA_VISIBLE | ANIMFILTER_LIST_VISIBLE |
+                                    ANIMFILTER_NODUPLIS | ANIMFILTER_FOREDIT |
+                                    ANIMFILTER_FCURVESONLY);
+  ANIM_animdata_filter(&ac, &anim_data, filter, ac.data, ac.datatype);
+  const eBezTriple_KeyframeType key_type = eBezTriple_KeyframeType(RNA_enum_get(op->ptr, "type"));
+  const bool extend = RNA_boolean_get(op->ptr, "extend");
+  for (bAnimListElem &elem : anim_data) {
+    FCurve *fcurve = static_cast<FCurve *>(elem.data);
+    if (!fcurve->bezt) {
+      continue;
+    }
+    for (int i = 0; i < fcurve->totvert; i++) {
+      BezTriple &key = fcurve->bezt[i];
+      if (BEZKEYTYPE(&key) == key_type) {
+        BEZT_SEL_ALL(&key);
+      }
+      else if (!extend) {
+        BEZT_DESEL_ALL(&key);
+      }
+    }
+  }
+
+  WM_event_add_notifier(C, NC_ANIMATION | ND_KEYFRAME | NA_SELECTED, nullptr);
+  ANIM_animdata_freelist(&anim_data);
+
+  return OPERATOR_FINISHED;
+}
+
+static bool select_by_type_poll(bContext *C)
+{
+  return ED_operator_graphedit_active(C) || ED_operator_action_active(C);
+}
+
+void ACTION_OT_select_by_type(wmOperatorType *ot)
+{
+  ot->name = "Select by Type";
+  ot->idname = "ACTION_OT_select_by_type";
+  ot->description = "Select all keyframes of the given type";
+
+  ot->exec = select_by_type_exec;
+  ot->poll = select_by_type_poll;
+
+  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+
+  PropertyRNA *prop = RNA_def_boolean(ot->srna,
+                                      "extend",
+                                      true,
+                                      "Extend Selection",
+                                      "Keeps the current selection and adds the given type to it. "
+                                      "If disabled, only keys of the type will be selected");
+  RNA_def_property_flag(prop, PROP_SKIP_SAVE);
+
+  RNA_def_enum(ot->srna,
+               "type",
+               rna_enum_beztriple_keyframe_type_items,
+               0,
+               "Type",
+               "The type of keyframe to select");
 }
 
 /** \} */

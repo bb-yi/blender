@@ -5,17 +5,18 @@
 #include "BLI_math_quaternion_types.hh"
 
 #include "node_function_util.hh"
+#include "node_shader_util.hh"
 
 namespace blender::nodes::node_fn_rotation_to_quaternion_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
-  b.add_input<decl::Rotation>("Rotation");
-  b.add_output<decl::Float>("W");
-  b.add_output<decl::Float>("X");
-  b.add_output<decl::Float>("Y");
-  b.add_output<decl::Float>("Z");
+  b.add_input<decl::Rotation>("Rotation"_ustr);
+  b.add_output<decl::Float>("W"_ustr);
+  b.add_output<decl::Float>("X"_ustr);
+  b.add_output<decl::Float>("Y"_ustr);
+  b.add_output<decl::Float>("Z"_ustr);
 };
 
 class SeparateQuaternionFunction : public mf::MultiFunction {
@@ -56,15 +57,26 @@ static void node_build_multi_function(NodeMultiFunctionBuilder &builder)
   builder.set_matching_fn(fn);
 }
 
+static int node_gpu_material(GPUMaterial *mat,
+                             bNode *node,
+                             bNodeExecData * /*execdata*/,
+                             GPUNodeStack *in,
+                             GPUNodeStack *out)
+{
+  return GPU_stack_link(mat, node, "rotation_to_quaternion", in, out);
+}
+
 static void node_register()
 {
   static bke::bNodeType ntype;
-  fn_node_type_base(&ntype, "FunctionNodeRotationToQuaternion", FN_NODE_ROTATION_TO_QUATERNION);
+  fn_cmp_node_type_base(
+      &ntype, "FunctionNodeRotationToQuaternion"_ustr, FN_NODE_ROTATION_TO_QUATERNION);
   ntype.ui_name = "Rotation to Quaternion";
   ntype.ui_description = "Retrieve the quaternion components representing a rotation";
   ntype.enum_name_legacy = "ROTATION_TO_QUATERNION";
   ntype.nclass = NODE_CLASS_CONVERTER;
   ntype.declare = node_declare;
+  ntype.gpu_fn = node_gpu_material;
   ntype.build_multi_function = node_build_multi_function;
   bke::node_register_type(ntype);
 }

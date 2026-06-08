@@ -31,15 +31,13 @@ function(unset_cached_variables_containing contents msg)
     if(NOT (_found EQUAL 0))
       string(FIND "${${_cache_variable}}" "${contents}" _found)
       if(NOT (_found EQUAL -1))
-        if(_found)
-          unset(${_cache_variable} CACHE)
-          set(_print_msg ON)
-        endif()
+        unset(${_cache_variable} CACHE)
+        set(_print_msg ON)
       endif()
     endif()
   endforeach()
   if(_print_msg)
-    message(STATUS ${msg})
+    message(STATUS "${msg}")
   endif()
 endfunction()
 
@@ -103,4 +101,13 @@ if(UNIX AND LIBDIR AND
    HARU_LIBRARY MATCHES "libhpdfs.a$")
   message(STATUS "Auto updating CMake configuration for Blender 5.0 libraries")
   unset_cache_variables("^HARU")
+endif()
+
+# Detect update to 5.2 libs
+if(DEFINED CACHE{WITH_SDL})
+  message(STATUS "Auto updating CMake configuration for Blender 5.2 libraries")
+  # Following the SDL3 migration (PR !157521), WITH_SDL was renamed to WITH_SDL_AUDIO, and WITH_SDL became an uncached
+  # variable depending on the value of WITH_SDL_AUDIO, WITH_GHOST_SDL, etc... Migrate value and unset old cache variable.
+  set(WITH_SDL_AUDIO $CACHE{WITH_SDL} CACHE BOOL "" FORCE)
+  unset(WITH_SDL CACHE)
 endif()

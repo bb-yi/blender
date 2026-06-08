@@ -29,7 +29,7 @@ class GaussianFilter {
   float _sigma;
   float *_mask;
   int _bound;
-  /* the real mask size (must be odd)(the size of the mask we store is:
+  /* The real mask size (must be odd), the size of the mask we store is:
    * `((_maskSize+1)/2)*((_maskSize+1)/2))`. */
   int _maskSize;
   int _storedMaskSize;  // (_maskSize+1)/2)
@@ -105,8 +105,8 @@ template<class Map> float GaussianFilter::getSmoothedPixel(Map *map, int x, int 
 {
   // float sum = 0.0f;
   float L = 0.0f;
-  int w = (int)map->width();   // soc
-  int h = (int)map->height();  // soc
+  int w = int(map->width());   // soc
+  int h = int(map->height());  // soc
 
   // Current pixel is x,y
   // Sum surrounding pixels L value:

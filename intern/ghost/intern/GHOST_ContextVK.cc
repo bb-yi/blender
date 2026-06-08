@@ -7,6 +7,8 @@
  */
 
 #include "GHOST_ContextVK.hh"
+#include "GHOST_Types.hh"
+#include <vulkan/vulkan_core.h>
 
 #ifdef _WIN32
 #  include <vulkan/vulkan_win32.h>
@@ -282,7 +284,7 @@ class GHOST_DeviceVK {
         vk_physical_device, &queue_family_count, queue_families.data());
 
     generic_queue_family = 0;
-    for (const auto &queue_family : queue_families) {
+    for (const VkQueueFamilyProperties &queue_family : queue_families) {
       /* Every VULKAN implementation by spec must have one queue family that support both graphics
        * and compute pipelines. We select this one; compute only queue family hints at asynchronous
        * compute implementations. */
@@ -383,7 +385,8 @@ struct GHOST_InstanceVK {
   bool select_physical_device(const GHOST_GPUDevice &preferred_device,
                               const blender::Span<const char *> required_extensions)
   {
-    VkPhysicalDevice best_physical_device = VK_NULL_HANDLE;
+    VkPhysicalDevice requested_physical_device = VK_NULL_HANDLE;
+    VkPhysicalDevice fallback_physical_device = VK_NULL_HANDLE;
 
     uint32_t device_count = 0;
     vkEnumeratePhysicalDevices(vk_instance, &device_count, nullptr);
@@ -392,8 +395,11 @@ struct GHOST_InstanceVK {
     vkEnumeratePhysicalDevices(vk_instance, &device_count, physical_devices.data());
 
     int best_device_score = -1;
+    /* Index of the device in the full physical-device enumeration. Matches the trailing
+     * `/index` component of `GPUDevice::identifier` (see `init_device_list` in `vk_backend.cc`).
+     */
     int device_index = -1;
-    for (const auto &physical_device : physical_devices) {
+    for (const VkPhysicalDevice &physical_device : physical_devices) {
       GHOST_DeviceVK device_vk(physical_device, false);
       device_index++;
 
@@ -420,6 +426,20 @@ struct GHOST_InstanceVK {
         continue;
       }
 
+      const VkPhysicalDeviceProperties &vk_props = device_vk.properties.properties;
+      if (preferred_device.is_override) {
+        /* Requested device: vendor/device IDs of `uint(-1)` act as wildcards for by-index form. */
+        const bool match = preferred_device.index == device_index &&
+                           (preferred_device.vendor_id == uint(-1) ||
+                            preferred_device.vendor_id == vk_props.vendorID) &&
+                           (preferred_device.device_id == uint(-1) ||
+                            preferred_device.device_id == vk_props.deviceID);
+        if (match) {
+          requested_physical_device = physical_device;
+          break;
+        }
+      }
+
       int device_score = 0;
       switch (device_vk.properties.properties.deviceType) {
         case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
@@ -441,26 +461,65 @@ struct GHOST_InstanceVK {
       /* User has configured a preferred device. Add bonus score when vendor and device match.
        * Driver id isn't considered as drivers update more frequently and can break the device
        * selection. */
-      if (device_vk.properties.properties.deviceID == preferred_device.device_id &&
-          device_vk.properties.properties.vendorID == preferred_device.vendor_id)
+      if (vk_props.deviceID == preferred_device.fallback_device_id &&
+          vk_props.vendorID == preferred_device.fallback_vendor_id)
       {
         device_score += 500;
-        if (preferred_device.index == device_index) {
+        if (preferred_device.fallback_index == device_index) {
           device_score += 10;
         }
       }
       if (device_score > best_device_score) {
-        best_physical_device = physical_device;
+        fallback_physical_device = physical_device;
         best_device_score = device_score;
       }
     }
 
-    if (best_physical_device == VK_NULL_HANDLE) {
+    if (requested_physical_device != VK_NULL_HANDLE) {
+      vk_physical_device = requested_physical_device;
+      return GHOST_kSuccess;
+    }
+
+    if (fallback_physical_device == VK_NULL_HANDLE) {
       CLOG_ERROR(&LOG, "No suitable Vulkan Device found!");
       return GHOST_kFailure;
     }
 
-    vk_physical_device = best_physical_device;
+    if (preferred_device.is_override) {
+      if (preferred_device.fail_on_invalid_override) {
+        if (preferred_device.vendor_id == uint(-1)) {
+          CLOG_ERROR(&LOG,
+                     "Requested Vulkan GPU '%d' is unavailable or unsupported. "
+                     "Run with '--gpu-device help' to list available devices.",
+                     preferred_device.index);
+        }
+        else {
+          CLOG_ERROR(&LOG,
+                     "Requested Vulkan GPU '%x/%x/%x' is unavailable or unsupported. "
+                     "Run with '--gpu-device help' to list available devices.",
+                     preferred_device.vendor_id,
+                     preferred_device.device_id,
+                     uint(preferred_device.index));
+        }
+        return GHOST_kFailure;
+      }
+      if (preferred_device.vendor_id == uint(-1)) {
+        CLOG_WARN(&LOG,
+                  "Requested Vulkan GPU '%d' is unavailable or unsupported. "
+                  "Falling back to the saved GPU preference.",
+                  preferred_device.index);
+      }
+      else {
+        CLOG_WARN(&LOG,
+                  "Requested Vulkan GPU '%x/%x/%x' is unavailable or unsupported. "
+                  "Falling back to the saved GPU preference.",
+                  preferred_device.vendor_id,
+                  preferred_device.device_id,
+                  uint(preferred_device.index));
+      }
+    }
+
+    vk_physical_device = fallback_physical_device;
 
     return GHOST_kSuccess;
   }
@@ -706,6 +765,10 @@ struct GHOST_InstanceVK {
 
 /** \} */
 
+/* -------------------------------------------------------------------- */
+/** \name Vulkan Instance Extensions Query
+ * \{ */
+
 /**
  * A shared device between multiple contexts.
  *
@@ -787,6 +850,15 @@ GHOST_ContextVK::~GHOST_ContextVK()
 {
   if (vulkan_instance.has_value()) {
     GHOST_InstanceVK &instance_vk = vulkan_instance.value();
+    if (!instance_vk.device.has_value() || instance_vk.device->vk_device == VK_NULL_HANDLE) {
+      if (surface_ != VK_NULL_HANDLE) {
+        vkDestroySurfaceKHR(instance_vk.vk_instance, surface_, nullptr);
+        surface_ = VK_NULL_HANDLE;
+      }
+      vulkan_instance.reset();
+      return;
+    }
+
     GHOST_DeviceVK &device_vk = instance_vk.device.value();
     device_vk.wait_idle();
     for (VkFence fence : fence_pile_) {
@@ -797,9 +869,12 @@ GHOST_ContextVK::~GHOST_ContextVK()
 
     if (surface_ != VK_NULL_HANDLE) {
       vkDestroySurfaceKHR(instance_vk.vk_instance, surface_, nullptr);
+      surface_ = VK_NULL_HANDLE;
     }
 
-    device_vk.users--;
+    if (device_vk.users > 0) {
+      device_vk.users--;
+    }
     if (device_vk.users == 0) {
       vulkan_instance.reset();
     }
@@ -874,7 +949,7 @@ GHOST_TSuccess GHOST_ContextVK::swapBufferAcquire()
     recreateSwapchain(use_hdr_swapchain);
   }
 
-  /* Acquiree next image, swapchain can be (or become) invalid when minimizing window.*/
+  /* Acquiree next image, swapchain can be (or become) invalid when minimizing window. */
   uint32_t image_index = 0;
   if (swapchain_ != VK_NULL_HANDLE) {
     /* Some platforms (NVIDIA/Wayland) can receive an out of date swapchain when acquiring the next
@@ -966,7 +1041,7 @@ GHOST_TSuccess GHOST_ContextVK::swapBufferRelease()
   if (swapchain_ == VK_NULL_HANDLE) {
     GHOST_VulkanSwapChainData swap_chain_data = {};
     if (swap_buffer_draw_callback_) {
-      swap_buffer_draw_callback_(&swap_chain_data);
+      swap_buffer_draw_callback_(&swap_chain_data, true);
     }
     return GHOST_kSuccess;
   }
@@ -981,7 +1056,8 @@ GHOST_TSuccess GHOST_ContextVK::swapBufferRelease()
   uint32_t image_index = acquired_swapchain_image_index_.value();
   GHOST_SwapchainImage &swapchain_image = swapchain_images_[image_index];
   GHOST_Frame &submission_frame_data = frame_data_[render_frame_];
-  const bool use_hdr_swapchain = hdr_info_ && hdr_info_->hdr_enabled &&
+  const bool use_hdr_swapchain = hdr_info_ &&
+                                 (hdr_info_->wide_gamut_enabled || hdr_info_->hdr_enabled) &&
                                  device_vk.use_vk_ext_swapchain_colorspace;
 
   GHOST_VulkanSwapChainData swap_chain_data;
@@ -995,7 +1071,7 @@ GHOST_TSuccess GHOST_ContextVK::swapBufferRelease()
 
   vkResetFences(vk_device, 1, &submission_frame_data.submission_fence);
   if (swap_buffer_draw_callback_) {
-    swap_buffer_draw_callback_(&swap_chain_data);
+    swap_buffer_draw_callback_(&swap_chain_data, true);
   }
 
   VkPresentInfoKHR present_info = {};
@@ -1080,7 +1156,7 @@ GHOST_TSuccess GHOST_ContextVK::getVulkanHandles(GHOST_VulkanHandles &r_handles)
 }
 
 GHOST_TSuccess GHOST_ContextVK::setVulkanSwapBuffersCallbacks(
-    std::function<void(const GHOST_VulkanSwapChainData *)> swap_buffer_draw_callback,
+    std::function<void(const GHOST_VulkanSwapChainData *, bool)> swap_buffer_draw_callback,
     std::function<void(void)> swap_buffer_acquired_callback,
     std::function<void(GHOST_VulkanOpenXRData *)> openxr_acquire_framebuffer_image_callback,
     std::function<void(GHOST_VulkanOpenXRData *)> openxr_release_framebuffer_image_callback)
@@ -1104,6 +1180,64 @@ GHOST_TSuccess GHOST_ContextVK::releaseDrawingContext()
   return GHOST_kSuccess;
 }
 
+static const char *to_string_vk_format(VkFormat format)
+{
+  switch (format) {
+    case VK_FORMAT_R8G8B8A8_UNORM:
+      return STRINGIFY(VK_FORMAT_R8G8B8A8_UNORM);
+    case VK_FORMAT_B8G8R8A8_UNORM:
+      return STRINGIFY(VK_FORMAT_B8G8R8A8_UNORM);
+    case VK_FORMAT_R16G16B16A16_SFLOAT:
+      return STRINGIFY(VK_FORMAT_R16G16B16A16_SFLOAT);
+    default:
+      return STRINGIFY_ARG(format);
+  }
+}
+
+static const char *to_string_vk_color_space(VkColorSpaceKHR color_space)
+{
+  switch (color_space) {
+    case VK_COLOR_SPACE_SRGB_NONLINEAR_KHR:
+      return STRINGIFY(VK_COLOR_SPACE_SRGB_NONLINEAR_KHR);
+    case VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT:
+      return STRINGIFY(VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT);
+    case VK_COLOR_SPACE_PASS_THROUGH_EXT:
+      return STRINGIFY(VK_COLOR_SPACE_PASS_THROUGH_EXT);
+    case VK_COLOR_SPACE_DISPLAY_P3_NONLINEAR_EXT:
+      return STRINGIFY(VK_COLOR_SPACE_DISPLAY_P3_NONLINEAR_EXT);
+    case VK_COLOR_SPACE_DISPLAY_P3_LINEAR_EXT:
+      return STRINGIFY(VK_COLOR_SPACE_DISPLAY_P3_LINEAR_EXT);
+    case VK_COLOR_SPACE_BT709_LINEAR_EXT:
+      return STRINGIFY(VK_COLOR_SPACE_BT709_LINEAR_EXT);
+    case VK_COLOR_SPACE_BT709_NONLINEAR_EXT:
+      return STRINGIFY(VK_COLOR_SPACE_BT709_NONLINEAR_EXT);
+    case VK_COLOR_SPACE_BT2020_LINEAR_EXT:
+      return STRINGIFY(VK_COLOR_SPACE_BT2020_LINEAR_EXT);
+    case VK_COLOR_SPACE_HDR10_ST2084_EXT:
+      return STRINGIFY(VK_COLOR_SPACE_HDR10_ST2084_EXT);
+    case VK_COLOR_SPACE_DISPLAY_NATIVE_AMD:
+      return STRINGIFY(VK_COLOR_SPACE_DISPLAY_NATIVE_AMD);
+    default:
+      return STRINGIFY_ARG(color_space);
+  }
+}
+
+static const char *to_string_vk_present_mode(VkPresentModeKHR present_mode)
+{
+  switch (present_mode) {
+    case VK_PRESENT_MODE_FIFO_KHR:
+      return STRINGIFY(VK_PRESENT_MODE_FIFO_KHR);
+    case VK_PRESENT_MODE_MAILBOX_KHR:
+      return STRINGIFY(VK_PRESENT_MODE_MAILBOX_KHR);
+    case VK_PRESENT_MODE_IMMEDIATE_KHR:
+      return STRINGIFY(VK_PRESENT_MODE_IMMEDIATE_KHR);
+    case VK_PRESENT_MODE_FIFO_RELAXED_KHR:
+      return STRINGIFY(VK_PRESENT_MODE_FIFO_RELAXED_KHR);
+    default:
+      return STRINGIFY_ARG(present_mode);
+  }
+}
+
 static GHOST_TSuccess selectPresentMode(const GHOST_TVSyncModes vsync,
                                         VkPhysicalDevice device,
                                         VkSurfaceKHR surface,
@@ -1117,7 +1251,7 @@ static GHOST_TSuccess selectPresentMode(const GHOST_TVSyncModes vsync,
   if (vsync != GHOST_kVSyncModeUnset) {
     const bool vsync_off = (vsync == GHOST_kVSyncModeOff);
     if (vsync_off) {
-      for (auto present_mode : presents) {
+      for (const VkPresentModeKHR present_mode : presents) {
         if (present_mode == VK_PRESENT_MODE_IMMEDIATE_KHR) {
           *r_presentMode = present_mode;
           return GHOST_kSuccess;
@@ -1134,7 +1268,7 @@ static GHOST_TSuccess selectPresentMode(const GHOST_TVSyncModes vsync,
   /* TODO: select the correct presentation mode based on the actual being performed by the user.
    * When low latency is required (paint cursor) we should select mailbox, otherwise we can do FIFO
    * to reduce CPU/GPU usage. */
-  for (auto present_mode : presents) {
+  for (const VkPresentModeKHR present_mode : presents) {
     if (present_mode == VK_PRESENT_MODE_MAILBOX_KHR) {
       *r_presentMode = present_mode;
       return GHOST_kSuccess;
@@ -1163,18 +1297,22 @@ static bool selectSurfaceFormat(const VkPhysicalDevice physical_device,
   vector<VkSurfaceFormatKHR> formats(format_count);
   vkGetPhysicalDeviceSurfaceFormatsKHR(physical_device, surface, &format_count, formats.data());
 
-  array<pair<VkColorSpaceKHR, VkFormat>, 4> selection_order = {
-      make_pair(VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT, VK_FORMAT_R16G16B16A16_SFLOAT),
-      make_pair(VK_COLOR_SPACE_SRGB_NONLINEAR_KHR, VK_FORMAT_R8G8B8A8_UNORM),
-      make_pair(VK_COLOR_SPACE_SRGB_NONLINEAR_KHR, VK_FORMAT_B8G8R8A8_UNORM),
-  };
+  array<VkSurfaceFormatKHR, 3> selection_order = {{
+#if defined(_WIN32) || defined(__APPLE__)
+      {VK_FORMAT_R16G16B16A16_SFLOAT, VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT},
+#else
+      {VK_FORMAT_R16G16B16A16_SFLOAT, VK_COLOR_SPACE_PASS_THROUGH_EXT},
+#endif
+      {VK_FORMAT_R8G8B8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR},
+      {VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR}}};
 
-  for (pair<VkColorSpaceKHR, VkFormat> &pair : selection_order) {
-    if (pair.second == VK_FORMAT_R16G16B16A16_SFLOAT && !use_hdr_swapchain) {
+  for (const VkSurfaceFormatKHR &config : selection_order) {
+    if (!use_hdr_swapchain && config.format == VK_FORMAT_R16G16B16A16_SFLOAT) {
       continue;
     }
+
     for (const VkSurfaceFormatKHR &format : formats) {
-      if (format.colorSpace == pair.first && format.format == pair.second) {
+      if (format.format == config.format && format.colorSpace == config.colorSpace) {
         r_surfaceFormat = format;
         return true;
       }
@@ -1407,14 +1545,14 @@ GHOST_TSuccess GHOST_ContextVK::recreateSwapchain(bool use_hdr_swapchain)
     swapchain_images_[index].vk_image = swapchain_images[index];
   }
   CLOG_DEBUG(&LOG,
-             "Vulkan: recreating swapchain: width=%u, height=%u, format=%d, colorSpace=%d, "
-             "present_mode=%d, image_count_requested=%u, image_count_acquired=%u, "
+             "Vulkan: recreating swapchain: width=%u, height=%u, format=%s, colorSpace=%s, "
+             "present_mode=%s, image_count_requested=%u, image_count_acquired=%u, "
              "swapchain=%" PRIx64 ", old_swapchain=%" PRIx64 "",
              render_extent_.width,
              render_extent_.height,
-             surface_format_.format,
-             surface_format_.colorSpace,
-             present_mode,
+             to_string_vk_format(surface_format_.format),
+             to_string_vk_color_space(surface_format_.colorSpace),
+             to_string_vk_present_mode(present_mode),
              image_count_requested,
              actual_image_count,
              uint64_t(swapchain_),
@@ -1542,7 +1680,7 @@ GHOST_TSuccess GHOST_ContextVK::initializeDrawingContext()
      * We work around this by requesting Vulkan promoted extensions.
      */
 #ifdef WITH_XR_OPENXR
-    /* Vulkan 1.1 promoted instance extensions, enabled for OpenXR usage.*/
+    /* Vulkan 1.1 promoted instance extensions, enabled for OpenXR usage. */
     instance_vk.extensions.enable(VK_KHR_EXTERNAL_FENCE_CAPABILITIES_EXTENSION_NAME);
     instance_vk.extensions.enable(VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME);
     instance_vk.extensions.enable(VK_KHR_EXTERNAL_SEMAPHORE_CAPABILITIES_EXTENSION_NAME);
@@ -1745,3 +1883,32 @@ GHOST_TSuccess GHOST_ContextVK::releaseNativeHandles()
 {
   return GHOST_kSuccess;
 }
+
+#ifdef WITH_GHOST_WAYLAND
+GHOST_TSuccess GHOST_ContextVK::supportsWaylandColorManagement()
+{
+  if (!vulkan_instance.has_value()) {
+    return GHOST_kFailure;
+  }
+  if (!vulkan_instance->device.has_value()) {
+    return GHOST_kFailure;
+  }
+
+  GHOST_DeviceVK &device_vk = vulkan_instance->device.value();
+  if (device_vk.properties_12.driverID != VK_DRIVER_ID_NVIDIA_PROPRIETARY) {
+    return GHOST_kSuccess;
+  }
+
+  uint32_t driver_version = device_vk.properties.properties.driverVersion;
+  uint32_t major_version = (driver_version >> 22) & 0x3ff;
+  /* NVIDIA has a well known implementation of wayland color management protocol since driver
+   * version 595. Using the color management protocol leads to very bright output when using on
+   * older driver. The output isn't influenced by surface configuration.
+   */
+  if (major_version < 595) {
+    return GHOST_kFailure;
+  }
+
+  return GHOST_kSuccess;
+}
+#endif

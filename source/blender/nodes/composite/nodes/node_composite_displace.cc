@@ -31,29 +31,31 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.use_custom_socket_order();
   b.allow_any_socket_order();
 
-  b.add_input<decl::Color>("Image")
+  b.add_input<decl::Color>("Image"_ustr)
       .default_value({1.0f, 1.0f, 1.0f, 1.0f})
       .hide_value()
       .structure_type(StructureType::Dynamic);
-  b.add_output<decl::Color>("Image").structure_type(StructureType::Dynamic).align_with_previous();
+  b.add_output<decl::Color>("Image"_ustr)
+      .structure_type(StructureType::Dynamic)
+      .align_with_previous();
 
-  b.add_input<decl::Vector>("Displacement")
+  b.add_input<decl::Vector>("Displacement"_ustr)
       .dimensions(2)
       .default_value({0.0f, 0.0f})
       .structure_type(StructureType::Dynamic);
 
-  PanelDeclarationBuilder &sampling_panel = b.add_panel("Sampling").default_closed(true);
-  sampling_panel.add_input<decl::Menu>("Interpolation")
+  PanelDeclarationBuilder &sampling_panel = b.add_panel("Sampling"_ustr).default_closed(true);
+  sampling_panel.add_input<decl::Menu>("Interpolation"_ustr)
       .default_value(CMP_NODE_INTERPOLATION_BILINEAR)
       .static_items(rna_enum_node_compositor_interpolation_items)
       .description("Interpolation method")
       .optional_label();
-  sampling_panel.add_input<decl::Menu>("Extension X")
+  sampling_panel.add_input<decl::Menu>("Extension X"_ustr)
       .default_value(CMP_NODE_EXTENSION_MODE_CLIP)
       .static_items(rna_enum_node_compositor_extension_items)
       .description("The extension mode applied to the X axis")
       .optional_label();
-  sampling_panel.add_input<decl::Menu>("Extension Y")
+  sampling_panel.add_input<decl::Menu>("Extension Y"_ustr)
       .default_value(CMP_NODE_EXTENSION_MODE_CLIP)
       .static_items(rna_enum_node_compositor_extension_items)
       .description("The extension mode applied to the Y axis")
@@ -210,12 +212,11 @@ class DisplaceOperation : public NodeOperation {
       const float2 upper_right_coordinates = this->compute_coordinates(
           upper_right_texel, size, displacement);
 
-      /* Compute the partial derivatives using finite difference. Divide by the input size since
-       * sample_ewa_zero assumes derivatives with respect to texel coordinates. */
-      const float2 lower_x_gradient = (lower_right_coordinates - lower_left_coordinates) / size.x;
-      const float2 left_y_gradient = (upper_left_coordinates - lower_left_coordinates) / size.y;
-      const float2 right_y_gradient = (upper_right_coordinates - lower_right_coordinates) / size.y;
-      const float2 upper_x_gradient = (upper_right_coordinates - upper_left_coordinates) / size.x;
+      /* Compute the partial derivatives using finite difference. */
+      const float2 lower_x_gradient = lower_right_coordinates - lower_left_coordinates;
+      const float2 left_y_gradient = upper_left_coordinates - lower_left_coordinates;
+      const float2 right_y_gradient = upper_right_coordinates - lower_right_coordinates;
+      const float2 upper_x_gradient = upper_right_coordinates - upper_left_coordinates;
 
       /* Computes one of the 2x2 pixels given its texel location, coordinates, and gradients. */
       auto compute_anisotropic_pixel = [&](const int2 &texel,
@@ -224,8 +225,13 @@ class DisplaceOperation : public NodeOperation {
                                            const float2 &y_gradient) {
         /* Sample the input using the displaced coordinates passing in the computed gradients in
          * order to utilize the anisotropic filtering capabilities of the sampler. */
+        const float2x2 jacobian = float2x2(x_gradient, y_gradient);
         output.store_pixel(texel,
-                           image.sample_ewa(coordinates, x_gradient, y_gradient, Extension::Clip));
+                           image.sample<Color>(coordinates,
+                                               Interpolation::Anisotropic,
+                                               Extension::Clip,
+                                               Extension::Clip,
+                                               jacobian));
       };
 
       compute_anisotropic_pixel(
@@ -328,7 +334,7 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, "CompositorNodeDisplace", CMP_NODE_DISPLACE);
+  cmp_node_type_base(&ntype, "CompositorNodeDisplace"_ustr, CMP_NODE_DISPLACE);
   ntype.ui_name = "Displace";
   ntype.ui_description = "Displace pixel position using an offset vector";
   ntype.enum_name_legacy = "DISPLACE";

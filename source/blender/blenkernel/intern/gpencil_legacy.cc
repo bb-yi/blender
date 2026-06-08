@@ -61,6 +61,10 @@
 
 namespace blender {
 
+/* -------------------------------------------------------------------- */
+/** \name Grease Pencil Data Block
+ * \{ */
+
 static CLG_LogRef LOG = {"geom.gpencil"};
 
 static void greasepencil_copy_data(Main * /*bmain*/,
@@ -80,7 +84,7 @@ static void greasepencil_copy_data(Main * /*bmain*/,
   BKE_defgroup_copy_list(&gpd_dst->vertex_group_names, &gpd_src->vertex_group_names);
 
   /* copy layers */
-  BLI_listbase_clear(&gpd_dst->layers);
+  gpd_dst->layers.clear_no_delete();
   for (bGPDlayer &gpl_src : gpd_src->layers) {
     /* make a copy of source layer and its data */
 
@@ -155,7 +159,7 @@ static void greasepencil_blend_write(BlendWriter *writer, ID *id, const void *id
 
   BKE_defbase_blend_write(writer, &gpd->vertex_group_names);
 
-  BLO_write_pointer_array(writer, gpd->totcol, gpd->mat);
+  writer->write_pointer_array(gpd->totcol, gpd->mat);
 
   /* write grease-pencil layers to file */
   writer->write_struct_list(&gpd->layers);
@@ -213,7 +217,7 @@ void BKE_gpencil_blend_read_data(BlendDataReader *reader, bGPdata *gpd)
   BLO_read_struct_list(reader, bDeformGroup, &gpd->vertex_group_names);
 
   /* Materials. */
-  BLO_read_pointer_array(reader, gpd->totcol, reinterpret_cast<void **>(&gpd->mat));
+  BLO_read_pointer_array_and_validate_size(reader, &gpd->mat, &gpd->totcol);
 
   /* Relink layers. */
   BLO_read_struct_list(reader, bGPDlayer, &gpd->layers);
@@ -235,22 +239,21 @@ void BKE_gpencil_blend_read_data(BlendDataReader *reader, bGPdata *gpd)
 
       for (bGPDstroke &gps : gpf.strokes) {
         /* Relink stroke points array. */
-        BLO_read_struct_array(reader, bGPDspoint, gps.totpoints, &gps.points);
+        BLO_read_array_and_validate_size(reader, &gps.points, &gps.totpoints);
         /* Relink geometry. */
-        BLO_read_struct_array(reader, bGPDtriangle, gps.tot_triangles, &gps.triangles);
+        BLO_read_array_and_validate_size(reader, &gps.triangles, &gps.tot_triangles);
 
         /* Relink stroke edit curve. */
         BLO_read_struct(reader, bGPDcurve, &gps.editcurve);
         if (gps.editcurve != nullptr) {
           /* Relink curve point array. */
           bGPDcurve *gpc = gps.editcurve;
-          BLO_read_struct_array(
-              reader, bGPDcurve_point, gpc->tot_curve_points, &gps.editcurve->curve_points);
+          BLO_read_array_and_validate_size(
+              reader, &gps.editcurve->curve_points, &gpc->tot_curve_points);
         }
 
         /* Relink weight data. */
-        if (gps.dvert) {
-          BLO_read_struct_array(reader, MDeformVert, gps.totpoints, &gps.dvert);
+        if (gps.dvert && BLO_read_array(reader, &gps.dvert, gps.totpoints)) {
           BKE_defvert_blend_read(reader, gps.totpoints, gps.dvert);
         }
       }
@@ -265,34 +268,34 @@ static void greasepencil_blend_read_data(BlendDataReader *reader, ID *id)
 }
 
 IDTypeInfo IDType_ID_GD_LEGACY = {
-    /*id_code*/ bGPdata::id_type,
-    /*id_filter*/ FILTER_ID_GD_LEGACY,
-    /*dependencies_id_types*/ FILTER_ID_MA,
-    /*main_listbase_index*/ INDEX_ID_GD_LEGACY,
-    /*struct_size*/ sizeof(bGPdata),
-    /*name*/ "Annotation",
-    /*name_plural*/ N_("annotations"),
-    /*translation_context*/ BLT_I18NCONTEXT_ID_GPENCIL,
-    /*flags*/ IDTYPE_FLAGS_APPEND_IS_REUSABLE,
-    /*asset_type_info*/ nullptr,
+    .id_code = bGPdata::id_type,
+    .id_filter = FILTER_ID_GD_LEGACY,
+    .dependencies_id_types = FILTER_ID_MA,
+    .main_listbase_index = INDEX_ID_GD_LEGACY,
+    .struct_size = sizeof(bGPdata),
+    .name = "Annotation",
+    .name_plural = N_("annotations"),
+    .translation_context = BLT_I18NCONTEXT_ID_GPENCIL,
+    .flags = IDTYPE_FLAGS_APPEND_IS_REUSABLE,
+    .asset_type_info = nullptr,
 
-    /*init_data*/ nullptr,
-    /*copy_data*/ greasepencil_copy_data,
-    /*free_data*/ greasepencil_free_data,
-    /*make_local*/ nullptr,
-    /*foreach_id*/ greasepencil_foreach_id,
-    /*foreach_cache*/ nullptr,
-    /*foreach_path*/ nullptr,
-    /*foreach_working_space_color*/ nullptr,
-    /*owner_pointer_get*/ nullptr,
+    .init_data = nullptr,
+    .copy_data = greasepencil_copy_data,
+    .free_data = greasepencil_free_data,
+    .make_local = nullptr,
+    .foreach_id = greasepencil_foreach_id,
+    .foreach_cache = nullptr,
+    .foreach_path = nullptr,
+    .foreach_working_space_color = nullptr,
+    .owner_pointer_get = nullptr,
 
-    /*blend_write*/ greasepencil_blend_write,
-    /*blend_read_data*/ greasepencil_blend_read_data,
-    /*blend_read_after_liblink*/ nullptr,
+    .blend_write = greasepencil_blend_write,
+    .blend_read_data = greasepencil_blend_read_data,
+    .blend_read_after_liblink = nullptr,
 
-    /*blend_read_undo_preserve*/ nullptr,
+    .blend_read_undo_preserve = nullptr,
 
-    /*lib_override_apply_post*/ nullptr,
+    .lib_override_apply_post = nullptr,
 };
 
 /* ************************************************** */
@@ -361,13 +364,13 @@ void BKE_gpencil_free_stroke(bGPDstroke *gps)
 
 bool BKE_gpencil_free_strokes(bGPDframe *gpf)
 {
-  bool changed = (BLI_listbase_is_empty(&gpf->strokes) == false);
+  bool changed = (gpf->strokes.is_empty() == false);
 
   /* free strokes */
   for (bGPDstroke &gps : gpf->strokes.items_mutable()) {
     BKE_gpencil_free_stroke(&gps);
   }
-  BLI_listbase_clear(&gpf->strokes);
+  gpf->strokes.clear_no_delete();
 
   return changed;
 }
@@ -429,10 +432,10 @@ void BKE_gpencil_free_layers(ListBaseT<bGPDlayer> *list)
 void BKE_gpencil_free_legacy_palette_data(ListBaseT<bGPDpalette> *list)
 {
   for (bGPDpalette &palette : list->items_mutable()) {
-    BLI_freelistN(&palette.colors);
+    palette.colors.free_no_destruct();
     MEM_delete(&palette);
   }
-  BLI_listbase_clear(list);
+  list->clear_no_delete();
 }
 
 void BKE_gpencil_free_data(bGPdata *gpd, bool /*free_all*/)
@@ -444,7 +447,7 @@ void BKE_gpencil_free_data(bGPdata *gpd, bool /*free_all*/)
   /* materials */
   MEM_SAFE_DELETE(gpd->mat);
 
-  BLI_freelistN(&gpd->vertex_group_names);
+  gpd->vertex_group_names.free_no_destruct();
 }
 
 void BKE_gpencil_tag(bGPdata *gpd)
@@ -755,7 +758,7 @@ bGPDframe *BKE_gpencil_frame_duplicate(const bGPDframe *gpf_src, const bool dup_
   gpf_dst->prev = gpf_dst->next = nullptr;
 
   /* Copy strokes. */
-  BLI_listbase_clear(&gpf_dst->strokes);
+  gpf_dst->strokes.clear_no_delete();
   if (dup_strokes) {
     for (bGPDstroke &gps_src : gpf_src->strokes) {
       /* make copy of source stroke */
@@ -785,7 +788,7 @@ bGPDlayer *BKE_gpencil_layer_duplicate(const bGPDlayer *gpl_src,
   gpl_dst->prev = gpl_dst->next = nullptr;
 
   /* copy frames */
-  BLI_listbase_clear(&gpl_dst->frames);
+  gpl_dst->frames.clear_no_delete();
   if (dup_frames) {
     for (bGPDframe &gpf_src : gpl_src->frames) {
       /* make a copy of source frame */

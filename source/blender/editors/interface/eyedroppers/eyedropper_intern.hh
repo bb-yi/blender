@@ -16,6 +16,7 @@ struct ScrArea;
 struct bContext;
 struct wmEvent;
 struct wmWindow;
+
 namespace ui {
 struct Button;
 

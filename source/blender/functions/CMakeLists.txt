@@ -11,24 +11,31 @@ set(INC_SYS
 
 set(SRC
   intern/field.cc
+  intern/field_evaluation.cc
   intern/lazy_function.cc
   intern/lazy_function_execute.cc
   intern/lazy_function_graph.cc
   intern/lazy_function_graph_executor.cc
+  intern/lazy_function_graph_executor_generic.hh
   intern/multi_function.cc
   intern/multi_function_builder.cc
+  intern/multi_function_common.cc
   intern/multi_function_params.cc
   intern/multi_function_procedure.cc
   intern/multi_function_procedure_builder.cc
   intern/multi_function_procedure_executor.cc
   intern/multi_function_procedure_optimization.cc
+  intern/multi_function_registry.cc
   intern/user_data.cc
 
   FN_field.hh
+  FN_field_evaluation.hh
+  FN_init.hh
   FN_lazy_function.hh
   FN_lazy_function_execute.hh
   FN_lazy_function_graph.hh
   FN_lazy_function_graph_executor.hh
+  FN_lazy_function_graph_executor_generic.hh
   FN_multi_function.hh
   FN_multi_function_builder.hh
   FN_multi_function_context.hh
@@ -39,6 +46,7 @@ set(SRC
   FN_multi_function_procedure_builder.hh
   FN_multi_function_procedure_executor.hh
   FN_multi_function_procedure_optimization.hh
+  FN_multi_function_registry.hh
   FN_multi_function_signature.hh
   FN_user_data.hh
 )
@@ -47,15 +55,10 @@ set(LIB
   PRIVATE bf::blenlib
   PRIVATE bf::dna
   PRIVATE bf::intern::guardedalloc
+  PRIVATE bf::intern::clog
+  PUBLIC bf::intern::profile
+  PRIVATE bf::extern::xxhash
 )
-
-if(WITH_TBB)
-  if(WIN32)
-    # TBB includes Windows.h which will define min/max macros
-    # that will collide with the STL versions.
-    add_definitions(-DNOMINMAX)
-  endif()
-endif()
 
 blender_add_lib(bf_functions "${SRC}" "${INC}" "${INC_SYS}" "${LIB}")
 add_library(bf::functions ALIAS bf_functions)
@@ -73,6 +76,7 @@ if(WITH_GTESTS)
   )
   set(TEST_LIB
     bf_functions
+    PRIVATE bf::blenkernel
   )
   blender_add_test_suite_lib(function "${TEST_SRC}" "${INC};${TEST_INC}" "${INC_SYS}" "${LIB};${TEST_LIB}")
 endif()

@@ -79,7 +79,7 @@ bool isnan(float) RET;
 template<int D> VecBase<bool, D> isnan(VecOp<float, D>) RET;
 template<typename T> constexpr T log(T) RET;
 template<typename T> constexpr T log2(T) RET;
-template<typename T> T modf(T, T);
+template<typename T> T modf(T, T &) RET;
 template<typename T, typename U> constexpr T pow(T, U) RET;
 template<typename T> constexpr T round(T) RET;
 template<typename T> constexpr T sqrt(T) RET;
@@ -221,14 +221,12 @@ float2 unpackSnorm2x16(uint) RET;
 float4 unpackUnorm4x8(uint) RET;
 float4 unpackSnorm4x8(uint) RET;
 
-namespace gl_ComputeShader {
 void barrier() {}
 void memoryBarrier() {}
 void memoryBarrierShared() {}
 void memoryBarrierImage() {}
 void memoryBarrierBuffer() {}
 void groupMemoryBarrier() {}
-}  // namespace gl_ComputeShader
 
 /** \} */
 

@@ -10,7 +10,6 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
-#include <regex>
 #include <string>
 
 #include "processor.hh"
@@ -35,11 +34,10 @@ static std::vector<std::string> list_files(const std::string &dir)
   return files;
 }
 
-static std::vector<metadata::Symbol> scan_external_symbols(
-    const std::vector<std::string> &file_list,
-    std::vector<std::string> &visited_files,
-    const std::string &file_buffer,
-    const std::string &file_name)
+static metadata::Source scan_external_symbols(const std::vector<std::string> &file_list,
+                                              std::vector<std::string> &visited_files,
+                                              const std::string &file_buffer,
+                                              const std::string &file_name)
 {
   Language language = language_from_filename(file_name);
   SourceProcessor processor(file_buffer, file_name, language);
@@ -72,17 +70,16 @@ static std::vector<metadata::Symbol> scan_external_symbols(
         std::stringstream buffer;
         buffer << input_file.rdbuf();
 
-        std::vector<blender::gpu::shader::metadata::Symbol> symbols = scan_external_symbols(
+        metadata::Source source = scan_external_symbols(
             file_list, visited_files, buffer.str(), file);
 
-        /* Set line number for each symbol to 0 as they are defined outside of the target file. */
-        for (auto &symbol : include_data.symbol_table) {
-          symbol.definition_line = 0;
-        }
-
         /* Extend list. */
-        include_data.symbol_table.insert(
-            include_data.symbol_table.end(), symbols.begin(), symbols.end());
+        include_data.symbol_table.insert(include_data.symbol_table.end(),
+                                         source.symbol_table.begin(),
+                                         source.symbol_table.end());
+        include_data.template_definitions.insert(include_data.template_definitions.end(),
+                                                 source.template_definitions.begin(),
+                                                 source.template_definitions.end());
       }
     }
   }
@@ -90,15 +87,15 @@ static std::vector<metadata::Symbol> scan_external_symbols(
   if (errors) {
     exit(1);
   }
-  return include_data.symbol_table;
+  return include_data;
 }
 
 int main(int argc, char **argv)
 {
   using namespace blender;
-  if (argc < 5) {
+  if (argc < 6) {
     std::cerr << "Usage: shader_tool <data_file_from> <data_file_to> <metadata_file_to> "
-                 "<infos_file_to> <include_dir1> <include_dir2> ..."
+                 "<infos_file_to> <dep_file_to> <include_dir1> <include_dir2> ..."
               << std::endl;
     exit(1);
   }
@@ -107,6 +104,7 @@ int main(int argc, char **argv)
   const char *output_file_name = argv[2];
   const char *metadata_file_name = argv[3];
   const char *infos_file_name = argv[4];
+  const char *dep_file_name = argv[5];
 
   /* Open the input file for reading */
   std::ifstream input_file(input_file_name);
@@ -138,7 +136,7 @@ int main(int argc, char **argv)
 
   /* Open the output file for writing */
   std::ofstream metadata_file(metadata_file_name, std::ofstream::out | std::ofstream::binary);
-  if (!output_file) {
+  if (!metadata_file) {
     std::cerr << "Error: Could not open output file " << metadata_file_name << std::endl;
     input_file.close();
     exit(1);
@@ -146,15 +144,23 @@ int main(int argc, char **argv)
 
   /* Open the output file for writing */
   std::ofstream infos_file(infos_file_name, std::ofstream::out | std::ofstream::binary);
-  if (!output_file) {
+  if (!infos_file) {
     std::cerr << "Error: Could not open output file " << infos_file_name << std::endl;
+    input_file.close();
+    exit(1);
+  }
+
+  /* Open the output file for writing */
+  std::ofstream dep_file(dep_file_name, std::ofstream::out | std::ofstream::binary);
+  if (!dep_file) {
+    std::cerr << "Error: Could not open output file " << dep_file_name << std::endl;
     input_file.close();
     exit(1);
   }
 
   /* List of files available for include. */
   std::vector<std::string> file_list;
-  for (int i = 5; i < argc; i++) {
+  for (int i = 6; i < argc; i++) {
     auto list = list_files(std::string(argv[i]));
     /* Extend list. */
     file_list.insert(file_list.end(), list.begin(), list.end());
@@ -163,22 +169,8 @@ int main(int argc, char **argv)
   std::stringstream buffer;
   buffer << input_file.rdbuf();
 
-  int error = 0;
-
-  auto report_error =
-      [&](int err_line, int err_char, const std::string &line, const char *err_msg) {
-        std::cerr << input_file_name;
-        std::cerr << ':' << std::to_string(err_line) << ':' << std::to_string(err_char + 1);
-        std::cerr << ": error: " << err_msg << std::endl;
-        std::cerr << line << std::endl;
-        std::cerr << std::string(err_char, ' ') << '^' << std::endl;
-
-        error++;
-      };
-
-  std::string filename(output_file_name);
-  const bool is_info = filename.find("infos.hh") != std::string::npos ||
-                       buffer.str().find("#pragma create_info") != std::string::npos;
+  std::string filename(input_file_name);
+  const bool is_info = filename.ends_with("infos.hh") || filename.ends_with(".bsl.hh");
 
   using namespace gpu::shader;
 
@@ -189,23 +181,40 @@ int main(int argc, char **argv)
     language = Language::BLENDER_GLSL;
   }
 
-  std::vector<metadata::Symbol> external_symbols;
+  metadata::Source external_symbols;
+  std::vector<std::string> visited_files{input_file_name};
   if (language == Language::BLENDER_GLSL) {
-    std::vector<std::string> visited_files{input_file_name};
     external_symbols = scan_external_symbols(file_list, visited_files, buffer.str(), filename);
   }
 
-  SourceProcessor processor(buffer.str(), input_file_name, language, report_error);
+  /* Escape path according to the depfile syntax. */
+  auto escape_path = [](std::string filepath) {
+    size_t pos = 0;
+    while ((pos = filepath.find(' ', pos)) != std::string::npos) {
+      filepath.replace(pos, 1, "\\ ");
+      pos += 2;
+    }
+    return filepath;
+  };
 
-  auto [result, metadata] = processor.convert(external_symbols);
+  dep_file << output_file_name << " : ";
+  for (const auto &file : visited_files) {
+    dep_file << escape_path(file) << " ";
+  }
+  dep_file << "\n";
+
+  SourceProcessor processor(buffer.str(), input_file_name, language);
+
+  auto [result, metadata, error] = processor.convert(external_symbols);
 
   output_file << result;
 
   /* TODO(fclem): Don't use regex for that. */
-  std::string metadata_function_name = "metadata_" +
-                                       std::regex_replace(
-                                           filename, std::regex(R"((?:.*)\/(.*))"), "$1");
-  std::replace(metadata_function_name.begin(), metadata_function_name.end(), '.', '_');
+  size_t last_slash = filename.find_last_of('/');
+  std::string name = (last_slash == std::string::npos) ? filename :
+                                                         filename.substr(last_slash + 1);
+  std::string metadata_function_name = "metadata_" + name + "_tmp";
+  std::ranges::replace(metadata_function_name, '.', '_');
 
   metadata_file << metadata.serialize(metadata_function_name);
   if (is_info) {
@@ -216,6 +225,11 @@ int main(int argc, char **argv)
   output_file.close();
   metadata_file.close();
   infos_file.close();
+  dep_file.close();
 
-  return error;
+  if (error) {
+    std::cerr << error.value().full_report << std::endl;
+  }
+
+  return error.has_value() ? 1 : 0;
 }

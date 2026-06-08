@@ -244,10 +244,11 @@ void SteerableViewMap::saveSteerableViewMap() const
     for (int j = 0; j < _imagesPyramids[i]->getNumberOfLevels(); ++j) {  // soc
       float coeff = 1.0f;  // 1 / 255.0f; // 100 * 255; // * pow(2, j);
       // soc QImage qtmp(ow, oh, QImage::Format_RGB32);
-      blender::ImBuf *ibuf = IMB_allocImBuf(ow, oh, 32, blender::IB_byte_data);
+      blender::ImBuf *ibuf = IMB_allocImBuf(ow, oh, blender::ImBufFlags::ByteData);
       int rowbytes = ow * 4;
       uchar *pix;
 
+      uchar *byte_data = ibuf->byte_data_for_write();
       for (int y = 0; y < oh; ++y) {    // soc
         for (int x = 0; x < ow; ++x) {  // soc
           int c = int(coeff * _imagesPyramids[i]->pixel(x, y, j));
@@ -257,7 +258,7 @@ void SteerableViewMap::saveSteerableViewMap() const
           // int c = int(_imagesPyramids[i]->pixel(x, y, j));
 
           // soc qtmp.setPixel(x, y, qRgb(c, c, c));
-          pix = ibuf->byte_buffer.data + y * rowbytes + x * 4;
+          pix = byte_data + y * rowbytes + x * 4;
           pix[0] = pix[1] = pix[2] = c;
         }
       }
@@ -266,7 +267,7 @@ void SteerableViewMap::saveSteerableViewMap() const
       filepath << base;
       filepath << i << "-" << j << ".png";
       ibuf->ftype = blender::IMB_FTYPE_PNG;
-      IMB_save_image(ibuf, const_cast<char *>(filepath.str().c_str()), 0);
+      IMB_save_image(ibuf, const_cast<char *>(filepath.str().c_str()), blender::ImBufFlags::Zero);
     }
 #if 0
     QString base("SteerableViewMap");

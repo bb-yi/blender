@@ -371,6 +371,37 @@ void region_message_subscribe(const wmRegionMessageSubscribeParams *params)
   msg_sub_value_region_tag_redraw.notify = ED_region_do_msg_notify_tag_redraw;
   WM_msg_subscribe_rna_prop(
       mbus, &workspace->id, workspace, WorkSpace, tools, &msg_sub_value_region_tag_redraw);
+
+  {
+    wmMsgSubscribeValue msg_sub_value_region_clear_remote_libraries{};
+    msg_sub_value_region_clear_remote_libraries.owner = region;
+    msg_sub_value_region_clear_remote_libraries.user_data = region;
+    msg_sub_value_region_clear_remote_libraries.notify = [](/* Follow wmMsgNotifyFn spec */
+                                                            bContext *C,
+                                                            wmMsgSubscribeKey * /*msg_key*/,
+                                                            wmMsgSubscribeValue *msg_val) {
+      ARegion *region = static_cast<ARegion *>(msg_val->owner);
+      RegionAssetShelf *shelf_regiondata = RegionAssetShelf::get_from_asset_shelf_region(*region);
+      AssetShelf *active_shelf = shelf_regiondata->active_shelf;
+      if (blender::asset_system::is_or_contains_remote_libraries(
+              active_shelf->settings.asset_library_reference))
+      {
+        asset::list::clear(&active_shelf->settings.asset_library_reference, C);
+      }
+    };
+    WM_msg_subscribe_rna_prop(mbus,
+                              nullptr,
+                              &U,
+                              PreferencesSystem,
+                              use_online_access,
+                              &msg_sub_value_region_clear_remote_libraries);
+    WM_msg_subscribe_rna_prop(mbus,
+                              nullptr,
+                              &U,
+                              PreferencesExperimental,
+                              use_remote_asset_libraries,
+                              &msg_sub_value_region_clear_remote_libraries);
+  }
 }
 
 void region_init(wmWindowManager *wm, ARegion *region)
@@ -392,7 +423,6 @@ void region_init(wmWindowManager *wm, ARegion *region)
   region->v2d.scroll = V2D_SCROLL_RIGHT | V2D_SCROLL_VERTICAL_HIDE;
   region->v2d.keepzoom |= V2D_LOCKZOOM_X | V2D_LOCKZOOM_Y;
   region->v2d.keepofs |= V2D_KEEPOFS_Y;
-  region->v2d.keeptot |= V2D_KEEPTOT_STRICT;
 
   region->v2d.flag |= V2D_SNAP_TO_PAGESIZE_Y;
   region->v2d.page_size_y = active_shelf ? tile_height(active_shelf->settings) :
@@ -537,10 +567,12 @@ void region_layout(const bContext *C, ARegion *region)
       shelf_regiondata,
       "Region-data should've been created by a previously called `region_on_poll_success()`.");
 
-  const AssetShelf *active_shelf = shelf_regiondata->active_shelf;
+  AssetShelf *active_shelf = shelf_regiondata->active_shelf;
   if (!active_shelf) {
     return;
   }
+
+  settings_ensure_valid_library_ref(active_shelf->settings);
 
   ui::Block *block = block_begin(C, region, __func__, ui::EmbossType::Emboss);
 
@@ -742,11 +774,8 @@ int context(const bContext *C, const char *member, bContextDataResult *result)
     if (!active_shelf) {
       return CTX_RESULT_NO_DATA;
     }
-
-    CTX_data_pointer_set(result,
-                         &screen->id,
-                         RNA_AssetLibraryReference,
-                         &active_shelf->settings.asset_library_reference);
+    AssetLibraryReference &library_ref = settings_ensure_valid_library_ref(active_shelf->settings);
+    CTX_data_pointer_set(result, &screen->id, RNA_AssetLibraryReference, &library_ref);
     return CTX_RESULT_OK;
   }
 

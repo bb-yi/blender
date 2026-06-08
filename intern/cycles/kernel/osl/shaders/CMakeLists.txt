@@ -40,6 +40,7 @@ set(SRC_OSL
   node_hair_info.osl
   node_point_info.osl
   node_scatter_volume.osl
+  node_scene_time.osl
   node_absorption_volume.osl
   node_volume_coefficients.osl
   node_principled_volume.osl
@@ -72,6 +73,8 @@ set(SRC_OSL
   node_particle_info.osl
   node_ray_portal_bsdf.osl
   node_raycast.osl
+  node_raycast_attr_float.osl
+  node_raycast_attr_vector.osl
   node_refraction_bsdf.osl
   node_rgb_curves.osl
   node_rgb_ramp.osl
@@ -108,20 +111,33 @@ set(SRC_OSL
 )
 
 get_filename_component(OSL_SHADER_HINT ${OSL_COMPILER} DIRECTORY)
+
+set(_osl_SEARCH_DIRS
+  ${OSL_SHADER_HINT}
+  ${OSL_SHADER_HINT}/../
+  /usr/share/OSL/
+  /usr/include/OSL/
+)
+
+if(DEFINED OSL_ROOT_DIR)
+  list(APPEND _osl_SEARCH_DIRS ${OSL_ROOT_DIR})
+endif()
+
+if(DEFINED OSL_HOME_DIR)
+  list(APPEND _osl_SEARCH_DIRS ${OSL_HOME_DIR})
+endif()
+
 find_path(OSL_SHADER_DIR
   NAMES
     stdosl.h
   HINTS
-    ${OSL_SHADER_HINT}
-    ${OSL_SHADER_HINT}/../
-    ${OSL_ROOT_DIR}
-    ${OSL_HOME_DIR}
-    /usr/share/OSL/
-    /usr/include/OSL/
+    ${_osl_SEARCH_DIRS}
   PATH_SUFFIXES
     share/OSL/shaders
     shaders
 )
+mark_as_advanced(OSL_SHADER_DIR)
+unset(_osl_SEARCH_DIRS)
 
 if(NOT EXISTS "${OSL_SHADER_DIR}")
   if(WITH_STRICT_BUILD_OPTIONS)
@@ -146,6 +162,7 @@ set(SRC_OSL_HEADERS
   node_noise.h
   node_ramp_util.h
   node_radial_tiling_shared.h
+  node_scatter.h
   node_voronoi.h
   stdcycles.h
   ${SRC_OSL_HEADER_DIST}

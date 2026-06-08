@@ -320,12 +320,14 @@ static Strip *rna_Strips_new_movie(ID *id,
                                    const char *file,
                                    int channel,
                                    int frame_start,
-                                   int fit_method)
+                                   int fit_method,
+                                   int stream)
 {
   Scene *scene = id_cast<Scene *>(id);
   seq::LoadData load_data;
   seq::add_load_data_init(&load_data, name, file, frame_start, channel);
   load_data.fit_method = eSeqImageFitMethod(fit_method);
+  load_data.stream_index = stream;
   load_data.allow_invalid_file = true;
 
   char vt_old[64];
@@ -365,10 +367,11 @@ static Strip *rna_Strips_editing_new_movie(ID *id,
                                            const char *file,
                                            int channel,
                                            int frame_start,
-                                           int fit_method)
+                                           int fit_method,
+                                           int stream)
 {
   return rna_Strips_new_movie(
-      id, &ed->seqbase, bmain, reports, name, file, channel, frame_start, fit_method);
+      id, &ed->seqbase, bmain, reports, name, file, channel, frame_start, fit_method, stream);
 }
 
 static Strip *rna_Strips_meta_new_movie(ID *id,
@@ -379,10 +382,11 @@ static Strip *rna_Strips_meta_new_movie(ID *id,
                                         const char *file,
                                         int channel,
                                         int frame_start,
-                                        int fit_method)
+                                        int fit_method,
+                                        int stream)
 {
   return rna_Strips_new_movie(
-      id, &strip->seqbase, bmain, reports, name, file, channel, frame_start, fit_method);
+      id, &strip->seqbase, bmain, reports, name, file, channel, frame_start, fit_method, stream);
 }
 
 #  ifdef WITH_AUDASPACE
@@ -393,12 +397,14 @@ static Strip *rna_Strips_new_sound(ID *id,
                                    const char *name,
                                    const char *file,
                                    int channel,
-                                   int frame_start)
+                                   int frame_start,
+                                   int stream)
 {
   Scene *scene = (Scene *)id;
   seq::LoadData load_data;
   seq::add_load_data_init(&load_data, name, file, frame_start, channel);
   load_data.allow_invalid_file = true;
+  load_data.stream_index = stream;
   Strip *strip = seq::add_sound_strip(bmain, scene, seqbase, &load_data);
 
   if (strip == nullptr) {
@@ -420,7 +426,8 @@ static Strip *rna_Strips_new_sound(ID * /*id*/,
                                    const char * /*name*/,
                                    const char * /*file*/,
                                    int /*channel*/,
-                                   int /*frame_start*/)
+                                   int /*frame_start*/,
+                                   int /*stream*/)
 {
   BKE_report(reports, RPT_ERROR, "Blender compiled without Audaspace support");
   return nullptr;
@@ -434,9 +441,11 @@ static Strip *rna_Strips_editing_new_sound(ID *id,
                                            const char *name,
                                            const char *file,
                                            int channel,
-                                           int frame_start)
+                                           int frame_start,
+                                           int stream)
 {
-  return rna_Strips_new_sound(id, &ed->seqbase, bmain, reports, name, file, channel, frame_start);
+  return rna_Strips_new_sound(
+      id, &ed->seqbase, bmain, reports, name, file, channel, frame_start, stream);
 }
 
 static Strip *rna_Strips_meta_new_sound(ID *id,
@@ -446,10 +455,11 @@ static Strip *rna_Strips_meta_new_sound(ID *id,
                                         const char *name,
                                         const char *file,
                                         int channel,
-                                        int frame_start)
+                                        int frame_start,
+                                        int stream)
 {
   return rna_Strips_new_sound(
-      id, &strip->seqbase, bmain, reports, name, file, channel, frame_start);
+      id, &strip->seqbase, bmain, reports, name, file, channel, frame_start, stream);
 }
 
 /* Meta strip
@@ -489,13 +499,11 @@ static Strip *rna_Strips_new_effect(ID *id,
                                     Strip *input1,
                                     Strip *input2)
 {
-  Scene *scene = id_cast<Scene *>(id);
-  Strip *strip;
-  const int num_inputs = seq::effect_get_num_inputs(type);
-
-  switch (num_inputs) {
+  const int min_inputs = blender::seq::effect_type_get_min_num_inputs(StripType(type));
+  const bool compositor_with_inputs = type == STRIP_TYPE_COMPOSITOR && input1 != nullptr;
+  switch (min_inputs) {
     case 0:
-      if (length <= 0) {
+      if (length <= 0 && !compositor_with_inputs) {
         BKE_report(reports, RPT_ERROR, "Strips.new_effect: invalid length");
         return nullptr;
       }
@@ -517,17 +525,17 @@ static Strip *rna_Strips_new_effect(ID *id,
           reports,
           RPT_ERROR,
           "Strips.new_effect: effect expects more than 2 inputs (%d, should never happen!)",
-          num_inputs);
+          min_inputs);
       return nullptr;
   }
-
   seq::LoadData load_data;
   seq::add_load_data_init(&load_data, name, nullptr, frame_start, channel);
   load_data.effect.length = length;
   load_data.effect.type = StripType(type);
   load_data.effect.input1 = input1;
   load_data.effect.input2 = input2;
-  strip = seq::add_effect_strip(scene, seqbase, &load_data);
+  Scene *scene = id_cast<Scene *>(id);
+  Strip *strip = seq::add_effect_strip(scene, seqbase, &load_data);
 
   DEG_id_tag_update(&scene->id, ID_RECALC_SEQUENCER_STRIPS);
   WM_main_add_notifier(NC_SCENE | ND_SEQUENCER, scene);
@@ -769,10 +777,16 @@ void RNA_api_strip(StructRNA *srna)
   parm = RNA_def_int(
       func, "frame", 0, INT_MIN, INT_MAX, "", "Frame where to split the strip", INT_MIN, INT_MAX);
   RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
-  parm = RNA_def_enum(func, "split_method", strip_split_method_items, 0, "", "");
+  parm = RNA_def_enum(func,
+                      "split_method",
+                      strip_split_method_items,
+                      0,
+                      "Split Method",
+                      "The type of split operation to perform on strips");
   RNA_def_parameter_flags(parm, PROP_NEVER_NULL, PARM_REQUIRED);
   parm = RNA_def_boolean(
       func, "ignore_connections", false, "", "Don't propagate split to connected strips");
+
   /* Return type. */
   parm = RNA_def_pointer(func, "sequence", "Strip", "", "Right side Strip");
   RNA_def_function_return(func, parm);
@@ -814,8 +828,15 @@ void RNA_api_strip_retiming_keys(BlenderRNA *brna)
 
   FunctionRNA *func = RNA_def_function(srna, "add", "rna_Strip_retiming_keys_add");
   RNA_def_function_flag(func, FUNC_USE_REPORTS | FUNC_USE_SELF_ID);
-  RNA_def_int(
-      func, "timeline_frame", 0, -MAXFRAME, MAXFRAME, "Timeline Frame", "", -MAXFRAME, MAXFRAME);
+  RNA_def_int(func,
+              "timeline_frame",
+              0,
+              -MAXFRAME,
+              MAXFRAME,
+              "Timeline Frame",
+              "Where to add the retiming key in the timeline",
+              -MAXFRAME,
+              MAXFRAME);
   RNA_def_function_ui_description(func, "Add retiming key");
   /* return type */
   PropertyRNA *parm = RNA_def_pointer(func, "retiming_key", "RetimingKey", "", "New RetimingKey");
@@ -842,6 +863,7 @@ void RNA_api_strips(StructRNA *srna, const bool metastrip)
        0,
        "Gamma Crossfade",
        "Crossfade with color correction"},
+      {STRIP_TYPE_COMPOSITOR, "COMPOSITOR", 0, "Compositor", "Compositor based effect"},
       {STRIP_TYPE_MUL, "MULTIPLY", 0, "Multiply", "Multiply color channels from two videos"},
       {STRIP_TYPE_WIPE, "WIPE", 0, "Wipe", "Sweep a transition line across the frame"},
       {STRIP_TYPE_GLOW, "GLOW", 0, "Glow", "Add blur and brightness to light areas"},
@@ -1002,7 +1024,7 @@ void RNA_api_strips(StructRNA *srna, const bool metastrip)
                       rna_enum_strip_scale_method_items,
                       SEQ_USE_ORIGINAL_SIZE,
                       "Image Fit Method",
-                      nullptr);
+                      "Mode for fitting the image to the canvas");
   /* return type */
   parm = RNA_def_pointer(func, "sequence", "Strip", "", "New Strip");
   RNA_def_function_return(func, parm);
@@ -1039,7 +1061,9 @@ void RNA_api_strips(StructRNA *srna, const bool metastrip)
                       rna_enum_strip_scale_method_items,
                       SEQ_USE_ORIGINAL_SIZE,
                       "Image Fit Method",
-                      nullptr);
+                      "Mode for fitting the image to the canvas");
+  RNA_def_int(
+      func, "stream", 0, 0, SHRT_MAX, "Stream", "Stream index for multi-stream files", 0, 20);
   /* return type */
   parm = RNA_def_pointer(func, "sequence", "Strip", "", "New Strip");
   RNA_def_function_return(func, parm);
@@ -1071,6 +1095,8 @@ void RNA_api_strips(StructRNA *srna, const bool metastrip)
                      -MAXFRAME,
                      MAXFRAME);
   RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
+  RNA_def_int(
+      func, "stream", 0, 0, SHRT_MAX, "Stream", "Stream index for multi-stream files", 0, 20);
   /* return type */
   parm = RNA_def_pointer(func, "sequence", "Strip", "", "New Strip");
   RNA_def_function_return(func, parm);

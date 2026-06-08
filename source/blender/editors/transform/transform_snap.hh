@@ -12,7 +12,11 @@
 
 #include "transform.hh"
 
-namespace blender::ed::transform {
+namespace blender {
+
+enum eSnapFlag : short;
+
+namespace ed::transform {
 
 bool peelObjectsTransform(TransInfo *t,
                           const float mval[2],
@@ -50,7 +54,8 @@ void drawSnapping(TransInfo *t);
 bool usingSnappingNormal(const TransInfo *t);
 bool validSnappingNormal(const TransInfo *t);
 
-short *transform_snap_flag_from_spacetype_ptr(TransInfo *t, const struct PropertyRNA **r_prop);
+blender::eSnapFlag *transform_snap_flag_from_spacetype_ptr(TransInfo *t,
+                                                           const struct PropertyRNA **r_prop);
 
 void getSnapPoint(const TransInfo *t, float vec[3]);
 void addSnapPoint(TransInfo *t);
@@ -61,7 +66,7 @@ float transform_snap_distance_len_squared_fn(TransInfo *t, const float p1[3], co
 
 /* `transform_snap_sequencer.cc` */
 
-TransSeqSnapData *snap_sequencer_data_alloc(const TransInfo *t);
+TransSeqSnapData *snap_sequencer_data_build(const TransInfo *t);
 void snap_sequencer_data_free(TransSeqSnapData *data);
 bool snap_sequencer_calc(TransInfo *t);
 void snap_sequencer_apply_seqslide(TransInfo *t, float *vec);
@@ -80,4 +85,5 @@ void transform_snap_anim_flush_data(TransInfo *t,
                                     float *r_val_final);
 bool transform_snap_nla_calc(TransInfo *t, float *vec);
 
-}  // namespace blender::ed::transform
+}  // namespace ed::transform
+}  // namespace blender

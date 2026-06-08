@@ -21,7 +21,7 @@ namespace blender::nodes::node_composite_relative_to_pixel_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Vector>("Value", "Vector Value")
+  b.add_input<decl::Vector>("Value"_ustr, "Vector Value"_ustr)
       .subtype(PROP_FACTOR)
       .dimensions(2)
       .default_value({0.0f, 0.0f})
@@ -30,7 +30,7 @@ static void node_declare(NodeDeclarationBuilder &b)
       .structure_type(StructureType::Dynamic)
       .description(
           "A value that is relative to the image size and needs to be converted to be in pixels");
-  b.add_input<decl::Float>("Value", "Float Value")
+  b.add_input<decl::Float>("Value"_ustr, "Float Value"_ustr)
       .default_value(0.0f)
       .subtype(PROP_FACTOR)
       .min(0.0f)
@@ -38,12 +38,13 @@ static void node_declare(NodeDeclarationBuilder &b)
       .structure_type(StructureType::Dynamic)
       .description(
           "A value that is relative to the image size and needs to be converted to be in pixels");
-  b.add_input<decl::Color>("Image")
+  b.add_input<decl::Color>("Image"_ustr)
       .compositor_realization_mode(CompositorInputRealizationMode::None)
       .structure_type(StructureType::Dynamic);
 
-  b.add_output<decl::Float>("Value", "Float Value").structure_type(StructureType::Dynamic);
-  b.add_output<decl::Vector>("Value", "Vector Value")
+  b.add_output<decl::Float>("Value"_ustr, "Float Value"_ustr)
+      .structure_type(StructureType::Dynamic);
+  b.add_output<decl::Vector>("Value"_ustr, "Vector Value"_ustr)
       .dimensions(2)
       .structure_type(StructureType::Dynamic);
 }
@@ -59,11 +60,11 @@ static void node_update(bNodeTree *ntree, bNode *node)
   const auto data_type = CMPNodeRelativeToPixelDataType(node->custom1);
   const auto reference_dimension = CMPNodeRelativeToPixelReferenceDimension(node->custom2);
 
-  bNodeSocket *float_input = bke::node_find_socket(*node, SOCK_IN, "Float Value");
+  bNodeSocket *float_input = bke::node_find_socket(*node, SOCK_IN, "Float Value"_ustr);
   bke::node_set_socket_availability(
       *ntree, *float_input, data_type == CMP_NODE_RELATIVE_TO_PIXEL_DATA_TYPE_FLOAT);
 
-  bNodeSocket *vector_input = bke::node_find_socket(*node, SOCK_IN, "Vector Value");
+  bNodeSocket *vector_input = bke::node_find_socket(*node, SOCK_IN, "Vector Value"_ustr);
   bke::node_set_socket_availability(
       *ntree, *vector_input, data_type == CMP_NODE_RELATIVE_TO_PIXEL_DATA_TYPE_VECTOR);
 
@@ -71,7 +72,7 @@ static void node_update(bNodeTree *ntree, bNode *node)
    * different. */
   const bool is_per_dimension = reference_dimension ==
                                 CMP_NODE_RELATIVE_TO_PIXEL_REFERENCE_DIMENSION_PER_DIMENSION;
-  bNodeSocket *float_output = bke::node_find_socket(*node, SOCK_OUT, "Float Value");
+  bNodeSocket *float_output = bke::node_find_socket(*node, SOCK_OUT, "Float Value"_ustr);
   bke::node_set_socket_availability(*ntree,
                                     *float_output,
                                     data_type == CMP_NODE_RELATIVE_TO_PIXEL_DATA_TYPE_FLOAT &&
@@ -79,7 +80,7 @@ static void node_update(bNodeTree *ntree, bNode *node)
 
   /* The vector output exist if the reference is per dimension even if the data type is float,
    * since each dimension can be different. */
-  bNodeSocket *vector_output = bke::node_find_socket(*node, SOCK_OUT, "Vector Value");
+  bNodeSocket *vector_output = bke::node_find_socket(*node, SOCK_OUT, "Vector Value"_ustr);
   bke::node_set_socket_availability(*ntree,
                                     *vector_output,
                                     data_type == CMP_NODE_RELATIVE_TO_PIXEL_DATA_TYPE_VECTOR ||
@@ -375,8 +376,7 @@ class RelativeToPixelOperation : public NodeOperation {
       return float2(1.0f);
     }
 
-    const Domain domain = RealizeOnDomainOperation::compute_realized_transformation_domain(
-        this->context(), input_image.domain());
+    const Domain domain = input_image.domain().realize_transformation();
     const float2 image_size = float2(domain.display_size);
     switch (this->get_reference_dimension()) {
       case CMP_NODE_RELATIVE_TO_PIXEL_REFERENCE_DIMENSION_PER_DIMENSION:
@@ -417,7 +417,7 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, "CompositorNodeRelativeToPixel");
+  cmp_node_type_base(&ntype, "CompositorNodeRelativeToPixel"_ustr);
   ntype.ui_name = "Relative To Pixel";
   ntype.ui_description =
       "Converts values that are relative to the image size to be in terms of pixels";

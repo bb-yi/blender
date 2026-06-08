@@ -376,7 +376,7 @@ static short bezt_nlamapping_apply(KeyframeEditData *ked, BezTriple *bezt)
 
 void ANIM_nla_mapping_apply_fcurve(AnimData *adt, FCurve *fcu, bool restore, bool only_keys)
 {
-  if (adt == nullptr || BLI_listbase_is_empty(&adt->nla_tracks)) {
+  if (adt == nullptr || adt->nla_tracks.is_empty()) {
     return;
   }
   KeyframeEditData ked = {{nullptr}};
@@ -609,9 +609,16 @@ static float normalization_factor_get(Scene *scene, FCurve *fcu, short flag, flo
     offset = -min_coord - range / 2.0f;
   }
   else {
-    /* Skip normalization. */
+    /* Skip normalization in 2 cases. Either the y difference of all keyframes is too small to
+     * normalize or there are no keys at all in the range. In the first case, the curve should be
+     * brought to the 0 line. In the second case we cannot do that since we have no information. */
     factor = 1.0f;
-    offset = 0.0f;
+    if (min_coord == FLT_MAX) {
+      offset = 0.0f;
+    }
+    else {
+      offset = -min_coord;
+    }
   }
 
   BLI_assert(factor != 0.0f);

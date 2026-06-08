@@ -139,7 +139,7 @@ static void material_copy_data(Main *bmain,
         MEM_dupalloc(material_src->gp_style));
   }
 
-  BLI_listbase_clear(&material_dst->gpumaterial);
+  material_dst->gpumaterial.clear_no_delete();
 
   /* TODO: Duplicate Engine Settings and set runtime to nullptr. */
 }
@@ -205,7 +205,7 @@ static void material_blend_write(BlendWriter *writer, ID *id, const void *id_add
 
   /* Clean up, important in undo case to reduce false detection of changed datablocks. */
   ma->texpaintslot = nullptr;
-  BLI_listbase_clear(&ma->gpumaterial);
+  ma->gpumaterial.clear_no_delete();
 
   /* Set deprecated #use_nodes for forward compatibility. */
   ma->use_nodes = true;
@@ -239,40 +239,40 @@ static void material_blend_read_data(BlendDataReader *reader, ID *id)
   BLO_read_struct(reader, PreviewImage, &ma->preview);
   BKE_previewimg_blend_read(reader, ma->preview);
 
-  BLI_listbase_clear(&ma->gpumaterial);
+  ma->gpumaterial.clear_no_delete();
 
   BLO_read_struct(reader, MaterialGPencilStyle, &ma->gp_style);
 }
 
 IDTypeInfo IDType_ID_MA = {
-    /*id_code*/ Material::id_type,
-    /*id_filter*/ FILTER_ID_MA,
-    /*dependencies_id_types*/ FILTER_ID_TE | FILTER_ID_GR,
-    /*main_listbase_index*/ INDEX_ID_MA,
-    /*struct_size*/ sizeof(Material),
-    /*name*/ "Material",
-    /*name_plural*/ N_("materials"),
-    /*translation_context*/ BLT_I18NCONTEXT_ID_MATERIAL,
-    /*flags*/ IDTYPE_FLAGS_APPEND_IS_REUSABLE,
-    /*asset_type_info*/ nullptr,
+    .id_code = Material::id_type,
+    .id_filter = FILTER_ID_MA,
+    .dependencies_id_types = FILTER_ID_TE | FILTER_ID_GR,
+    .main_listbase_index = INDEX_ID_MA,
+    .struct_size = sizeof(Material),
+    .name = "Material",
+    .name_plural = N_("materials"),
+    .translation_context = BLT_I18NCONTEXT_ID_MATERIAL,
+    .flags = IDTYPE_FLAGS_APPEND_IS_REUSABLE,
+    .asset_type_info = nullptr,
 
-    /*init_data*/ material_init_data,
-    /*copy_data*/ material_copy_data,
-    /*free_data*/ material_free_data,
-    /*make_local*/ nullptr,
-    /*foreach_id*/ material_foreach_id,
-    /*foreach_cache*/ nullptr,
-    /*foreach_path*/ nullptr,
-    /*foreach_working_space_color*/ material_foreach_working_space_color,
-    /*owner_pointer_get*/ nullptr,
+    .init_data = material_init_data,
+    .copy_data = material_copy_data,
+    .free_data = material_free_data,
+    .make_local = nullptr,
+    .foreach_id = material_foreach_id,
+    .foreach_cache = nullptr,
+    .foreach_path = nullptr,
+    .foreach_working_space_color = material_foreach_working_space_color,
+    .owner_pointer_get = nullptr,
 
-    /*blend_write*/ material_blend_write,
-    /*blend_read_data*/ material_blend_read_data,
-    /*blend_read_after_liblink*/ nullptr,
+    .blend_write = material_blend_write,
+    .blend_read_data = material_blend_read_data,
+    .blend_read_after_liblink = nullptr,
 
-    /*blend_read_undo_preserve*/ nullptr,
+    .blend_read_undo_preserve = nullptr,
 
-    /*lib_override_apply_post*/ nullptr,
+    .lib_override_apply_post = nullptr,
 };
 
 void BKE_gpencil_material_attr_init(Material *ma)
@@ -289,6 +289,17 @@ void BKE_gpencil_material_attr_init(Material *ma)
     gp_style->texture_offset[0] = -0.5f;
     gp_style->texture_pixsize = 100.0f;
     gp_style->mix_factor = 0.5f;
+    gp_style->placement_mode = GP_MATERIAL_PLACEMENT_RADIUS;
+    gp_style->placement_count = 1;
+    gp_style->placement_density = 10.0f;
+    gp_style->placement_radius_spacing = 100.0f;
+    gp_style->random_size_factor = 0.0f;
+    gp_style->random_strength_factor = 0.0f;
+    gp_style->random_rotation_factor = 0.0f;
+    gp_style->random_hue_factor = 0.0f;
+    gp_style->random_saturation_factor = 0.0f;
+    gp_style->random_value_factor = 0.0f;
+    gp_style->random_noise_scale = 1.0f;
   }
 }
 
@@ -1253,6 +1264,14 @@ void BKE_object_material_remap(Object *ob, const uint *remap)
   else if (ob->type == OB_GREASE_PENCIL) {
     BKE_grease_pencil_material_remap(id_cast<GreasePencil *>(ob->data), remap, ob->totcol);
   }
+  else if (ob->type == OB_VOLUME) {
+    /* Material support doesn't store "indices".
+     * The way "baked" materials are stored means they store ID's and don't need remapping. */
+  }
+  else if (ob->type == OB_MBALL) {
+    /* While meta-balls have a material array, they only use the first material slot
+     * (no support for mixing materials). */
+  }
   else {
     /* add support for this object data! */
     BLI_assert(matar == nullptr);
@@ -2086,16 +2105,16 @@ static void material_default_surface_init(Material **ma_p)
   bNodeTree *ntree = ma->nodetree;
 
   bNode *principled = bke::node_add_static_node(nullptr, *ntree, SH_NODE_BSDF_PRINCIPLED);
-  bNodeSocket *base_color = bke::node_find_socket(*principled, SOCK_IN, "Base Color");
+  bNodeSocket *base_color = bke::node_find_socket(*principled, SOCK_IN, "Base Color"_ustr);
   copy_v3_v3((static_cast<bNodeSocketValueRGBA *>(base_color->default_value))->value, &ma->r);
 
   bNode *output = bke::node_add_static_node(nullptr, *ntree, SH_NODE_OUTPUT_MATERIAL);
 
   bke::node_add_link(*ntree,
                      *principled,
-                     *bke::node_find_socket(*principled, SOCK_OUT, "BSDF"),
+                     *bke::node_find_socket(*principled, SOCK_OUT, "BSDF"_ustr),
                      *output,
-                     *bke::node_find_socket(*output, SOCK_IN, "Surface"));
+                     *bke::node_find_socket(*output, SOCK_IN, "Surface"_ustr));
 
   principled->location[0] = -200.0f;
   principled->location[1] = 100.0f;
@@ -2115,9 +2134,9 @@ static void material_default_volume_init(Material **ma_p)
 
   bke::node_add_link(*ntree,
                      *principled,
-                     *bke::node_find_socket(*principled, SOCK_OUT, "Volume"),
+                     *bke::node_find_socket(*principled, SOCK_OUT, "Volume"_ustr),
                      *output,
-                     *bke::node_find_socket(*output, SOCK_IN, "Volume"));
+                     *bke::node_find_socket(*output, SOCK_IN, "Volume"_ustr));
 
   principled->location[0] = -200.0f;
   principled->location[1] = 100.0f;
@@ -2137,9 +2156,9 @@ static void material_default_holdout_init(Material **ma_p)
 
   bke::node_add_link(*ntree,
                      *holdout,
-                     *bke::node_find_socket(*holdout, SOCK_OUT, "Holdout"),
+                     *bke::node_find_socket(*holdout, SOCK_OUT, "Holdout"_ustr),
                      *output,
-                     *bke::node_find_socket(*output, SOCK_IN, "Surface"));
+                     *bke::node_find_socket(*output, SOCK_IN, "Surface"_ustr));
 
   holdout->location[0] = 10.0f;
   holdout->location[1] = 300.0f;

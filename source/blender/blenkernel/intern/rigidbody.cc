@@ -566,11 +566,13 @@ void BKE_rigidbody_calc_volume(Object *ob, float *r_vol)
   }
   else if (rbo->shape == RB_SHAPE_SPHERE) {
     /* take radius to the largest dimension to try and encompass everything */
-    radius = max_fff(size[0], size[1], size[2]) * 0.5f;
+    radius = std::max({size[0], size[1], size[2]}) * 0.5f;
   }
 
   /* Calculate volume as appropriate. */
   switch (rbo->shape) {
+    case RB_SHAPE_COMPOUND:
+      break;
     case RB_SHAPE_BOX:
       volume = size[0] * size[1] * size[2];
       break;
@@ -648,6 +650,7 @@ void BKE_rigidbody_calc_center_of_mass(Object *ob, float r_center[3])
 
   /* Calculate volume as appropriate. */
   switch (rbo->shape) {
+    case RB_SHAPE_COMPOUND:
     case RB_SHAPE_BOX:
     case RB_SHAPE_SPHERE:
     case RB_SHAPE_CAPSULE:
@@ -1146,7 +1149,7 @@ RigidBodyWorld *BKE_rigidbody_create_world(Scene *scene)
   /* set default settings */
   rbw->effector_weights = BKE_effector_add_weights(nullptr);
 
-  rbw->ltime = PSFRA;
+  rbw->ltime = scene->playback_start();
 
   rbw->time_scale = 1.0f;
 
@@ -1202,7 +1205,7 @@ void BKE_rigidbody_world_groups_relink(RigidBodyWorld *rbw)
   ID_NEW_REMAP(rbw->effector_weights->group);
 }
 
-RigidBodyOb *BKE_rigidbody_create_object(Scene *scene, Object *ob, short type)
+RigidBodyOb *BKE_rigidbody_create_object(Scene *scene, Object *ob, eRigidBodyOb_Type type)
 {
   RigidBodyOb *rbo;
   RigidBodyWorld *rbw = scene->rigidbody_world;
@@ -1264,7 +1267,7 @@ RigidBodyOb *BKE_rigidbody_create_object(Scene *scene, Object *ob, short type)
   return rbo;
 }
 
-RigidBodyCon *BKE_rigidbody_create_constraint(Scene *scene, Object *ob, short type)
+RigidBodyCon *BKE_rigidbody_create_constraint(Scene *scene, Object *ob, eRigidBodyCon_Type type)
 {
   RigidBodyCon *rbc;
   RigidBodyWorld *rbw = scene->rigidbody_world;
@@ -1463,7 +1466,7 @@ void BKE_rigidbody_ensure_local_object(Main *bmain, Object *ob)
     for (Scene *scene = static_cast<Scene *>(bmain->scenes.first); scene;
          scene = static_cast<Scene *>(scene->id.next))
     {
-      if (BKE_scene_object_find(scene, ob)) {
+      if (BKE_scene_object_find(*bmain, scene, ob)) {
         rigidbody_add_object_to_scene(bmain, scene, ob);
       }
     }
@@ -1473,14 +1476,15 @@ void BKE_rigidbody_ensure_local_object(Main *bmain, Object *ob)
     for (Scene *scene = static_cast<Scene *>(bmain->scenes.first); scene;
          scene = static_cast<Scene *>(scene->id.next))
     {
-      if (BKE_scene_object_find(scene, ob)) {
+      if (BKE_scene_object_find(*bmain, scene, ob)) {
         rigidbody_add_constraint_to_scene(bmain, scene, ob);
       }
     }
   }
 }
 
-bool BKE_rigidbody_add_object(Main *bmain, Scene *scene, Object *ob, int type, ReportList *reports)
+bool BKE_rigidbody_add_object(
+    Main *bmain, Scene *scene, Object *ob, eRigidBodyOb_Type type, ReportList *reports)
 {
   if (ob->type != OB_MESH) {
     BKE_report(reports, RPT_ERROR, "Cannot add Rigid Body to non mesh object");
@@ -1672,7 +1676,7 @@ static void rigidbody_update_sim_ob(Depsgraph *depsgraph, Object *ob, RigidBodyO
 
   const Scene *scene = DEG_get_input_scene(depsgraph);
   ViewLayer *view_layer = DEG_get_input_view_layer(depsgraph);
-  BKE_view_layer_synced_ensure(scene, view_layer);
+  BKE_view_layer_synced_ensure(*DEG_get_bmain(depsgraph), scene, view_layer);
   Base *base = BKE_view_layer_base_find(view_layer, ob);
   const bool is_selected = base ? (base->flag & BASE_SELECTED) != 0 : false;
 
@@ -2024,13 +2028,13 @@ static void rigidbody_free_substep_data(ListBaseT<LinkData> *substep_targets)
     MEM_delete(data);
   }
 
-  BLI_freelistN(substep_targets);
+  substep_targets->free_no_destruct();
 }
 static void rigidbody_update_simulation_post_step(Depsgraph *depsgraph, RigidBodyWorld *rbw)
 {
   const Scene *scene = DEG_get_input_scene(depsgraph);
   ViewLayer *view_layer = DEG_get_input_view_layer(depsgraph);
-  BKE_view_layer_synced_ensure(scene, view_layer);
+  BKE_view_layer_synced_ensure(*DEG_get_bmain(depsgraph), scene, view_layer);
 
   FOREACH_COLLECTION_OBJECT_RECURSIVE_BEGIN (rbw->group, ob) {
     Base *base = BKE_view_layer_base_find(view_layer, ob);
@@ -2323,11 +2327,11 @@ RigidBodyWorld *BKE_rigidbody_world_copy(RigidBodyWorld *rbw, const int flag)
   return nullptr;
 }
 void BKE_rigidbody_world_groups_relink(RigidBodyWorld *rbw) {}
-RigidBodyOb *BKE_rigidbody_create_object(Scene *scene, Object *ob, short type)
+RigidBodyOb *BKE_rigidbody_create_object(Scene *scene, Object *ob, eRigidBodyOb_Type type)
 {
   return nullptr;
 }
-RigidBodyCon *BKE_rigidbody_create_constraint(Scene *scene, Object *ob, short type)
+RigidBodyCon *BKE_rigidbody_create_constraint(Scene *scene, Object *ob, eRigidBodyCon_Type type)
 {
   return nullptr;
 }
@@ -2338,7 +2342,8 @@ RigidBodyWorld *BKE_rigidbody_get_world(Scene *scene)
 
 void BKE_rigidbody_ensure_local_object(Main *bmain, Object *ob) {}
 
-bool BKE_rigidbody_add_object(Main *bmain, Scene *scene, Object *ob, int type, ReportList *reports)
+bool BKE_rigidbody_add_object(
+    Main *bmain, Scene *scene, Object *ob, eRigidBodyOb_Type type, ReportList *reports)
 {
   BKE_report(reports, RPT_ERROR, "Compiled without Bullet physics engine");
   return false;

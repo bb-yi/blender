@@ -14,9 +14,9 @@ namespace nodes::node_shader_camera_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_output<decl::Vector>("View Vector");
-  b.add_output<decl::Float>("View Z Depth");
-  b.add_output<decl::Float>("View Distance");
+  b.add_output<decl::Vector>("View Vector"_ustr);
+  b.add_output<decl::Float>("View Z Depth"_ustr);
+  b.add_output<decl::Float>("View Distance"_ustr);
 }
 
 static int gpu_shader_camera(GPUMaterial *mat,
@@ -45,7 +45,7 @@ void register_node_type_sh_camera()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeCameraData", SH_NODE_CAMERA);
+  sh_node_type_base(&ntype, "ShaderNodeCameraData"_ustr, SH_NODE_CAMERA);
   ntype.ui_name = "Camera Data";
   ntype.ui_description =
       "Retrieve information about the camera and how it relates to the current shading point's "

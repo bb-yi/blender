@@ -21,6 +21,10 @@
 
 #include "BLI_color_types.hh"
 
+#include "IO_validate.hh"
+
+#include "CLG_log.h"
+
 #include <algorithm>
 
 namespace blender {
@@ -29,12 +33,12 @@ using namespace Alembic::AbcGeom;
 
 namespace io::alembic {
 
-AbcPointsReader::AbcPointsReader(const Alembic::Abc::IObject &object, ImportSettings &settings)
-    : AbcObjectReader(object, settings)
+static CLG_LogRef LOG = {"io.alembic"};
+
+AbcPointsReader::AbcPointsReader(const AbcReaderConstructorArgs &args) : AbcObjectReader(args)
 {
   IPoints ipoints(m_iobject, kWrapExisting);
   m_schema = ipoints.getSchema();
-  get_min_max_time(m_iobject, m_schema, m_min_time, m_max_time);
 }
 
 bool AbcPointsReader::valid() const
@@ -68,7 +72,8 @@ void AbcPointsReader::readObjectData(Main *bmain, const Alembic::Abc::ISampleSel
 
   bke::GeometrySet geometry_set = bke::GeometrySet::from_pointcloud(
       pointcloud, bke::GeometryOwnershipType::Editable);
-  read_geometry(geometry_set, sample_sel, 0, "", 1.0f, nullptr);
+  AbcReadGeometryParams read_params{};
+  read_geometry(geometry_set, sample_sel, read_params, nullptr);
 
   PointCloud *read_pointcloud =
       geometry_set.get_component_for_write<bke::PointCloudComponent>().release();
@@ -198,9 +203,7 @@ static void read_point_arb_geom_params(const IPointsSchema &schema,
 
 void AbcPointsReader::read_geometry(bke::GeometrySet &geometry_set,
                                     const Alembic::Abc::ISampleSelector &sample_sel,
-                                    int /*read_flag*/,
-                                    const char *velocity_name,
-                                    const float velocity_scale,
+                                    const AbcReadGeometryParams &read_params,
                                     const char **r_err_str)
 {
   BLI_assert(geometry_set.has_pointcloud());
@@ -211,11 +214,12 @@ void AbcPointsReader::read_geometry(bke::GeometrySet &geometry_set,
   }
   catch (Alembic::Util::Exception &ex) {
     *r_err_str = RPT_("Error reading points sample; more detail on the console");
-    printf("Alembic: error reading points sample for '%s/%s' at time %f: %s\n",
-           m_iobject.getFullName().c_str(),
-           m_schema.getName().c_str(),
-           sample_sel.getRequestedTime(),
-           ex.what());
+    CLOG_WARN(&LOG,
+              "Error reading points sample for '%s/%s' at time %f: %s",
+              m_iobject.getFullName().c_str(),
+              m_schema.getName().c_str(),
+              sample_sel.getRequestedTime(),
+              ex.what());
     return;
   }
 
@@ -232,6 +236,15 @@ void AbcPointsReader::read_geometry(bke::GeometrySet &geometry_set,
     widths = wsample.getVals();
   }
 
+  if (!validate::size_fits_in_int(positions->size())) {
+    CLOG_WARN(&LOG,
+              "Point cloud too large to import for '%s/%s' at time %f, exceeds max int size",
+              m_iobject.getFullName().c_str(),
+              m_schema.getName().c_str(),
+              sample_sel.getRequestedTime());
+    return;
+  }
+
   if (pointcloud->totpoint != positions->size()) {
     pointcloud = BKE_pointcloud_new_nomain(positions->size());
   }
@@ -241,21 +254,23 @@ void AbcPointsReader::read_geometry(bke::GeometrySet &geometry_set,
   MutableSpan<float3> point_positions = pointcloud->positions_for_write();
   read_points_sample(m_schema, sample_sel, point_positions);
 
-  MutableSpan<float> point_radii = pointcloud->radius_for_write();
-
   if (widths) {
+    MutableSpan<float> point_radii = pointcloud->radius_for_write();
     for (const int64_t i : IndexRange(std::min(point_radii.size(), int64_t(widths->size())))) {
       point_radii[i] = (*widths)[i] / 2.0f;
     }
   }
   else {
-    point_radii.fill(0.01f);
+    attribute_accessor.remove("radius");
+    attribute_accessor.add<float>(
+        "radius", bke::AttrDomain::Point, bke::AttributeInitValue(0.01f));
   }
 
   read_point_arb_geom_params(m_schema, sample_sel, attribute_accessor);
 
-  if (velocity_name != nullptr && velocity_scale != 0.0f) {
-    V3fArraySamplePtr velocities = get_velocity_prop(m_schema, sample_sel, velocity_name);
+  if (read_params.velocity_name != "" && read_params.velocity_scale != 0.0f) {
+    V3fArraySamplePtr velocities = get_velocity_prop(
+        m_schema, sample_sel, read_params.velocity_name);
     if (velocities && pointcloud->totpoint == int(velocities->size())) {
       bke::SpanAttributeWriter<float3> velocity_writer =
           attribute_accessor.lookup_or_add_for_write_span<float3>("velocity",
@@ -266,7 +281,7 @@ void AbcPointsReader::read_geometry(bke::GeometrySet &geometry_set,
       {
         const Imath::V3f &vel_in = (*velocities)[i];
         copy_zup_from_yup(point_velocity[i], vel_in.getValue());
-        point_velocity[i] *= velocity_scale;
+        point_velocity[i] *= read_params.velocity_scale;
       }
       velocity_writer.finish();
     }

@@ -122,10 +122,11 @@ static bool change_frame_poll(bContext *C)
       if (!CTX_data_sequencer_scene(C)) {
         return false;
       }
-      /* Check the region type so tools (which are shared between preview/strip view)
-       * don't conflict with actions which can have the same key bound (2D cursor for example). */
+      /* In the combined sequencer/preview view, both window and preview regions share an active
+       * tool, so check the type to avoid conflicts with actions which can have the same key bound
+       * (2D cursor for example). */
       const ARegion *region = CTX_wm_region(C);
-      if (region && region->regiontype == RGN_TYPE_WINDOW) {
+      if (region && ELEM(region->regiontype, RGN_TYPE_WINDOW, RGN_TYPE_SCRUBBING)) {
         return true;
       }
     }
@@ -249,7 +250,7 @@ static void append_marker_snap_target(Scene *scene,
                                       const float timeline_frame,
                                       Vector<SnapTarget> &r_targets)
 {
-  if (BLI_listbase_is_empty(&scene->markers)) {
+  if (scene->markers.is_empty()) {
     /* This check needs to be here because #ED_markers_find_nearest_marker_time returns the
      * current frame if there are no markers. */
     return;
@@ -562,8 +563,11 @@ static void change_frame_apply(bContext *C, wmOperator *op, const bool always_up
   const float old_subframe = scene->r.subframe;
 
   if (do_snap) {
-    FrameChangeModalData *op_data = static_cast<FrameChangeModalData *>(op->customdata);
-    frame = apply_frame_snap(C, *op_data, frame);
+    /* Only valid when running modally, unlikely it's null
+     * but nothing prevents `snap` being enabled when running non-modally. */
+    if (FrameChangeModalData *op_data = static_cast<FrameChangeModalData *>(op->customdata)) {
+      frame = apply_frame_snap(C, *op_data, frame);
+    }
   }
 
   /* set the new frame number */
@@ -574,6 +578,13 @@ static void change_frame_apply(bContext *C, wmOperator *op, const bool always_up
   else {
     scene->r.cfra = round_fl_to_int(frame);
     scene->r.subframe = 0.0f;
+  }
+  if (bScreen *screen = ED_screen_animation_playing(CTX_wm_manager(C))) {
+    if (screen->animtimer) {
+      wmTimer *wt = screen->animtimer;
+      ScreenAnimData *sad = static_cast<ScreenAnimData *>(wt->customdata);
+      BKE_scene_frame_clamp_for_playback(scene, (sad->flag & ANIMPLAY_FLAG_REVERSE) == 0);
+    }
   }
   FRAMENUMBER_MIN_CLAMP(scene->r.cfra);
 
@@ -611,8 +622,9 @@ static float frame_from_event(bContext *C, const wmEvent *event)
   frame = ui::view2d_region_to_view_x(&region->v2d, event->mval[0]);
 
   /* respect preview range restrictions (if only allowed to move around within that range) */
-  if (scene->r.flag & SCER_LOCK_FRAME_SELECTION) {
-    CLAMP(frame, PSFRA, PEFRA);
+  if ((scene->r.flag & SCER_LOCK_FRAME_SELECTION) || (region->regiontype == RGN_TYPE_SCRUBBING)) {
+    const ScenePlaybackRange playback_range = BKE_scene_get_playback_range(scene);
+    CLAMP(frame, playback_range.start_frame, playback_range.end_frame);
   }
 
   return frame;
@@ -925,7 +937,7 @@ static wmOperatorStatus anim_set_sfra_exec(bContext *C, wmOperator *op)
     scene->r.sfra = frame;
   }
 
-  if (PEFRA < frame) {
+  if (scene->playback_end() < frame) {
     if (PRVRANGEON) {
       scene->r.pefra = frame;
     }
@@ -981,7 +993,7 @@ static wmOperatorStatus anim_set_efra_exec(bContext *C, wmOperator *op)
     scene->r.efra = frame;
   }
 
-  if (PSFRA > frame) {
+  if (scene->playback_start() > frame) {
     if (PRVRANGEON) {
       scene->r.psfra = frame;
     }
@@ -1065,7 +1077,7 @@ static void ANIM_OT_previewrange_set(wmOperatorType *ot)
   ot->modal = WM_gesture_box_modal;
   ot->cancel = WM_gesture_box_cancel;
 
-  ot->poll = ED_operator_animview_active;
+  ot->poll = ED_operator_region_animview_active;
 
   /* flags */
   ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
@@ -1188,11 +1200,10 @@ static wmOperatorStatus scene_range_frame_exec(bContext *C, wmOperator * /*op*/)
     return OPERATOR_CANCELLED;
   }
   ARegion *region = CTX_wm_region(C);
-  BLI_assert(region);
-
   View2D &v2d = region->v2d;
-  v2d.cur.xmin = PSFRA;
-  v2d.cur.xmax = PEFRA;
+  const ScenePlaybackRange playback_range = BKE_scene_get_playback_range(scene);
+  v2d.cur.xmin = playback_range.start_frame;
+  v2d.cur.xmax = playback_range.end_frame;
 
   v2d.cur = ANIM_frame_range_view2d_add_xmargin(v2d, v2d.cur);
 
@@ -1211,7 +1222,7 @@ static void ANIM_OT_scene_range_frame(wmOperatorType *ot)
       "account if it is active";
 
   ot->exec = scene_range_frame_exec;
-  ot->poll = ED_operator_animview_active;
+  ot->poll = ED_operator_region_animview_active;
 
   ot->flag = OPTYPE_REGISTER;
 }
@@ -1536,7 +1547,7 @@ static wmOperatorStatus replace_action_new_invoke(bContext *C,
  */
 static void ANIM_OT_replace_action_new(wmOperatorType *ot)
 {
-  ot->name = "Replace with new Action";
+  ot->name = "Replace with New Action";
   ot->idname = "ANIM_OT_replace_action_new";
   ot->description =
       "Swap all users of one action to a new action. This ignores the NLA and Action Constraints";

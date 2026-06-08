@@ -76,6 +76,7 @@ static wmOperatorStatus snap_sel_to_grid_exec(bContext *C, wmOperator *op)
   Depsgraph *depsgraph = CTX_data_ensure_evaluated_depsgraph(C);
   ViewLayer *view_layer_eval = DEG_get_evaluated_view_layer(depsgraph);
   Object *obact = CTX_data_active_object(C);
+  const Main *bmain = CTX_data_main(C);
   Scene *scene = CTX_data_scene(C);
   ARegion *region = CTX_wm_region(C);
   View3D *v3d = CTX_wm_view3d(C);
@@ -87,9 +88,10 @@ static wmOperatorStatus snap_sel_to_grid_exec(bContext *C, wmOperator *op)
   gridf = ED_view3d_grid_view_scale(scene, v3d, region, nullptr);
 
   if (OBEDIT_FROM_OBACT(obact)) {
+    const Main *bmain = CTX_data_main(C);
     ViewLayer *view_layer = CTX_data_view_layer(C);
     Vector<Object *> objects = BKE_view_layer_array_from_objects_in_edit_mode_unique_data(
-        scene, view_layer, CTX_wm_view3d(C));
+        *bmain, scene, view_layer, CTX_wm_view3d(C));
     for (Object *obedit : objects) {
       if (obedit->type == OB_MESH) {
         BMEditMesh *em = BKE_editmesh_from_object(obedit);
@@ -132,7 +134,7 @@ static wmOperatorStatus snap_sel_to_grid_exec(bContext *C, wmOperator *op)
   }
   else if (OBPOSE_FROM_OBACT(obact)) {
     KeyingSet *ks = animrig::get_keyingset_for_autokeying(scene, ANIM_KS_LOCATION_ID);
-    Vector<Object *> objects_eval = BKE_object_pose_array_get(scene, view_layer_eval, v3d);
+    Vector<Object *> objects_eval = BKE_object_pose_array_get(*bmain, scene, view_layer_eval, v3d);
     for (Object *ob_eval : objects_eval) {
       Object *ob = DEG_get_original(ob_eval);
       bArmature *arm_eval = id_cast<bArmature *>(ob_eval->data);
@@ -142,7 +144,8 @@ static wmOperatorStatus snap_sel_to_grid_exec(bContext *C, wmOperator *op)
       for (bPoseChannel &pchan_eval : ob_eval->pose->chanbase) {
         if (pchan_eval.flag & POSE_SELECTED) {
           if (ANIM_bonecoll_is_visible_pchan(arm_eval, &pchan_eval)) {
-            if ((pchan_eval.bone->flag & BONE_CONNECTED) == 0) {
+            const Bone *bone_eval = pchan_eval.bone_get(*ob_eval);
+            if ((bone_eval->flag & BONE_CONNECTED) == 0) {
               float nLoc[3];
 
               /* get nearest grid point to snap to */
@@ -156,7 +159,7 @@ static wmOperatorStatus snap_sel_to_grid_exec(bContext *C, wmOperator *op)
               mul_m4_v3(ob_eval->world_to_object().ptr(), vec);
 
               /* Get location of grid point in pose space. */
-              BKE_armature_loc_pose_to_bone(&pchan_eval, vec, vec);
+              BKE_armature_loc_pose_to_bone({&pchan_eval, bone_eval}, vec, vec);
 
               /* Adjust location on the original pchan. */
               bPoseChannel *pchan = BKE_pose_channel_find_name(ob->pose, pchan_eval.name);
@@ -171,7 +174,6 @@ static wmOperatorStatus snap_sel_to_grid_exec(bContext *C, wmOperator *op)
           }
         }
       }
-      ob->pose->flag |= (POSE_LOCKED | POSE_DO_UNLOCK);
 
       DEG_id_tag_update(&ob->id, ID_RECALC_GEOMETRY);
     }
@@ -210,7 +212,7 @@ static wmOperatorStatus snap_sel_to_grid_exec(bContext *C, wmOperator *op)
       BKE_scene_graph_evaluated_ensure(depsgraph, bmain);
       xcs = object::xform_skip_child_container_create();
       object::xform_skip_child_container_item_ensure_from_array(
-          xcs, scene, view_layer, objects.data(), objects.size());
+          xcs, *bmain, scene, view_layer, objects.data(), objects.size());
     }
     if (use_transform_data_origin) {
       BKE_scene_graph_evaluated_ensure(depsgraph, bmain);
@@ -352,9 +354,10 @@ static bool snap_selected_to_location_rotation(bContext *C,
 
   if (obedit) {
     float3 target_loc_local;
+    const Main *bmain = CTX_data_main(C);
     ViewLayer *view_layer = CTX_data_view_layer(C);
     Vector<Object *> objects = BKE_view_layer_array_from_objects_in_edit_mode_unique_data(
-        scene, view_layer, v3d);
+        *bmain, scene, view_layer, v3d);
     for (const int ob_index : objects.index_range()) {
       obedit = objects[ob_index];
 
@@ -406,9 +409,9 @@ static bool snap_selected_to_location_rotation(bContext *C,
   }
   else if (OBPOSE_FROM_OBACT(obact)) {
     KeyingSet *ks = animrig::get_keyingset_for_autokeying(scene, ANIM_KS_LOCATION_ID);
-    ViewLayer *view_layer = CTX_data_view_layer(C);
-    Vector<Object *> objects = BKE_object_pose_array_get(scene, view_layer, v3d);
     Main *bmain = CTX_data_main(C);
+    ViewLayer *view_layer = CTX_data_view_layer(C);
+    Vector<Object *> objects = BKE_object_pose_array_get(*bmain, scene, view_layer, v3d);
     Depsgraph *depsgraph = CTX_data_depsgraph_pointer(C);
     BKE_scene_graph_evaluated_ensure(depsgraph, bmain);
 
@@ -420,11 +423,12 @@ static bool snap_selected_to_location_rotation(bContext *C,
       mul_v3_m4v3(target_loc_local, ob->world_to_object().ptr(), target_loc_global);
 
       for (bPoseChannel &pchan : ob->pose->chanbase) {
-        if ((pchan.flag & POSE_SELECTED) && animrig::bone_is_visible(arm, &pchan) &&
+        const Bone *bone = pchan.bone_get(*ob);
+        if ((pchan.flag & POSE_SELECTED) && animrig::bone_is_visible(arm, {&pchan, bone}) &&
             /* if the bone has a parent and is connected to the parent,
              * don't do anything - will break chain unless we do auto-ik.
              */
-            (pchan.bone->flag & BONE_CONNECTED) == 0)
+            (bone->flag & BONE_CONNECTED) == 0)
         {
           pchan.runtime.flag |= POSE_RUNTIME_TRANSFORM;
         }
@@ -436,12 +440,13 @@ static bool snap_selected_to_location_rotation(bContext *C,
       for (bPoseChannel &pchan : ob->pose->chanbase) {
         if ((pchan.runtime.flag & POSE_RUNTIME_TRANSFORM) &&
             /* check that our parents not transformed (if we have one) */
-            ((pchan.bone->parent &&
+            ((pchan.parent &&
               pose_bone_runtime_flag_test_recursive(pchan.parent, POSE_RUNTIME_TRANSFORM)) == 0))
         {
           /* Get position in pchan (pose) space. */
           float3 target_loc_pose;
 
+          Bone *bone = pchan.bone_get(*ob);
           if (use_offset) {
             mul_v3_m4v3(target_loc_pose, ob->object_to_world().ptr(), pchan.pose_mat[3]);
             add_v3_v3(target_loc_pose, offset_global);
@@ -453,10 +458,10 @@ static bool snap_selected_to_location_rotation(bContext *C,
             }
 
             mul_m4_v3(ob->world_to_object().ptr(), target_loc_pose);
-            BKE_armature_loc_pose_to_bone(&pchan, target_loc_pose, target_loc_pose);
+            BKE_armature_loc_pose_to_bone({&pchan, bone}, target_loc_pose, target_loc_pose);
           }
           else {
-            BKE_armature_loc_pose_to_bone(&pchan, target_loc_local, target_loc_pose);
+            BKE_armature_loc_pose_to_bone({&pchan, bone}, target_loc_local, target_loc_pose);
           }
 
           if (use_rotation) {
@@ -516,8 +521,6 @@ static bool snap_selected_to_location_rotation(bContext *C,
         pchan.runtime.flag &= ~POSE_RUNTIME_TRANSFORM;
       }
 
-      ob->pose->flag |= (POSE_LOCKED | POSE_DO_UNLOCK);
-
       DEG_id_tag_update(&ob->id, ID_RECALC_GEOMETRY);
     }
   }
@@ -557,7 +560,7 @@ static bool snap_selected_to_location_rotation(bContext *C,
     if (use_transform_skip_children) {
       xcs = object::xform_skip_child_container_create();
       object::xform_skip_child_container_item_ensure_from_array(
-          xcs, scene, view_layer, objects.data(), objects.size());
+          xcs, *bmain, scene, view_layer, objects.data(), objects.size());
     }
     if (use_transform_data_origin) {
       xds = object::data_xform_container_create();
@@ -910,6 +913,7 @@ static bool snap_curs_to_sel_ex(bContext *C, const int pivot_point, float r_curs
   Depsgraph *depsgraph = CTX_data_ensure_evaluated_depsgraph(C);
   ViewLayer *view_layer_eval = DEG_get_evaluated_view_layer(depsgraph);
   Object *obedit = CTX_data_edit_object(C);
+  const Main *bmain = CTX_data_main(C);
   Scene *scene = CTX_data_scene(C);
   View3D *v3d = CTX_wm_view3d(C);
   TransVertStore tvs = {nullptr};
@@ -923,7 +927,7 @@ static bool snap_curs_to_sel_ex(bContext *C, const int pivot_point, float r_curs
   if (obedit) {
     ViewLayer *view_layer = CTX_data_view_layer(C);
     Vector<Object *> objects = BKE_view_layer_array_from_objects_in_edit_mode_unique_data(
-        scene, view_layer, CTX_wm_view3d(C));
+        *bmain, scene, view_layer, CTX_wm_view3d(C));
     for (const int ob_index : objects.index_range()) {
       obedit = objects[ob_index];
 

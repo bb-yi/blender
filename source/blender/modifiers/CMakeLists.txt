@@ -140,6 +140,7 @@ set(LIB
   PUBLIC bf::dna
   PRIVATE bf::functions
   PRIVATE bf::geometry
+  PRIVATE bf::imbuf
   PRIVATE bf::intern::guardedalloc
   PRIVATE bf::extern::xxhash
   PRIVATE bf::nodes
@@ -192,14 +193,6 @@ endif()
 # To disable adaptive subdivision test in subdivision-surface UI without cycles.
 if(WITH_CYCLES)
   add_definitions(-DWITH_CYCLES)
-endif()
-
-if(WITH_TBB)
-  if(WIN32)
-    # TBB includes Windows.h which will define min/max macros
-    # that will collide with the STL versions.
-    add_definitions(-DNOMINMAX)
-  endif()
 endif()
 
 if(WITH_EXPERIMENTAL_FEATURES)

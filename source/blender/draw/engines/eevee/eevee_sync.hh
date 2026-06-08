@@ -12,6 +12,7 @@
 #pragma once
 
 #include "BKE_duplilist.hh"
+#include "BLI_function_ref.hh"
 #include "BLI_map.hh"
 #include "DNA_modifier_types.h"
 #include "DNA_object_types.h"
@@ -31,47 +32,67 @@ class Instance;
  * \{ */
 
 struct BaseHandle {
-  unsigned int recalc;
+  const uint recalc = 0;
 };
 
-struct ObjectHandle : BaseHandle {
-  ObjectKey object_key;
+struct ObjectHandle : ObjectRef, BaseHandle {
+  const ResourceHandleRange res_handle;
+
+  ObjectHandle(const ObjectRef &ob_ref,
+               const ResourceHandleRange &res_handle,
+               uint recalc,
+               uint sub_key = 0)
+      : ObjectRef(ob_ref, sub_key), BaseHandle{recalc}, res_handle(res_handle) {};
 };
 
 struct WorldHandle : public BaseHandle {};
 
-struct SceneHandle : public BaseHandle {};
+struct Material;
+struct MaterialPass;
 
 class SyncModule {
  private:
   Instance &inst_;
 
-  Map<ObjectKey, ObjectHandle> ob_handles = {};
-
  public:
   SyncModule(Instance &inst) : inst_(inst) {};
   ~SyncModule() {};
 
-  ObjectHandle &sync_object(const ObjectRef &ob_ref);
-  WorldHandle sync_world(const blender::World &world);
+  ObjectHandle sync_object(const ObjectRef &ob_ref,
+                           const ResourceHandleRange &res_handle,
+                           uint sub_key = 0);
 
-  void sync_mesh(Object *ob, ObjectHandle &ob_handle, const ObjectRef &ob_ref);
-  bool sync_sculpt(Object *ob, ObjectHandle &ob_handle, const ObjectRef &ob_ref);
-  void sync_pointcloud(Object *ob, ObjectHandle &ob_handle, const ObjectRef &ob_ref);
-  void sync_volume(Object *ob, ObjectHandle &ob_handle, const ObjectRef &ob_ref);
-  void sync_curves(Object *ob,
-                   ObjectHandle &ob_handle,
-                   const ObjectRef &ob_ref,
-                   ResourceHandleRange res_handle = {},
-                   ModifierData *modifier_data = nullptr,
-                   ParticleSystem *particle_sys = nullptr);
+  void sync_mesh(const ObjectRef &ob_ref);
+  bool sync_sculpt(const ObjectRef &ob_ref);
+  void sync_pointcloud(const ObjectRef &ob_ref);
+  void sync_volume(const ObjectRef &ob_ref);
+  void sync_curves(const ObjectRef &ob_ref,
+                   struct HairParticleInfo const *hair_particle = nullptr);
+
+ private:
+  void sync_common_passes(const Material &material,
+                          FunctionRef<void(const MaterialPass &)> sync_cb);
+  void sync_volume_passes(const ObjectHandle &ob_handle,
+                          const Material &material,
+                          FunctionRef<void(const MaterialPass &, int)> sync_cb);
+  void sync_alpha_blended_passes(const ObjectHandle &ob_handle,
+                                 const Material &material,
+                                 FunctionRef<void(const MaterialPass &, int)> sync_cb);
+
+  void sync_common(const ObjectHandle &ob_handle,
+                   Span<Material *> materials,
+                   Span<GPUMaterial *> gpu_materials);
 };
 
-using HairHandleCallback = FunctionRef<void(ObjectHandle, ModifierData &, ParticleSystem &)>;
-void foreach_hair_particle_handle(Instance &inst,
-                                  ObjectRef &ob_ref,
-                                  ObjectHandle ob_handle,
-                                  HairHandleCallback callback);
+struct HairParticleInfo {
+  ModifierData &md;
+  ParticleSystem &psys;
+  uint recalc_flags;
+  uint sub_key;
+};
+
+using HairHandleCallback = FunctionRef<void(const HairParticleInfo &)>;
+void foreach_hair_particle(Instance &inst, ObjectRef &ob_ref, HairHandleCallback callback);
 
 /** \} */
 

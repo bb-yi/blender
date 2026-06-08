@@ -43,6 +43,7 @@ namespace blender::draw::compositor_engine {
 
 class Context : public compositor::Context {
  private:
+  const Main *main_;
   const Scene *scene_;
   /* A pointer to the info message of the compositor engine. This is a char array of size
    * GPU_INFO_SIZE. The message is cleared prior to updating or evaluating the compositor. */
@@ -51,10 +52,18 @@ class Context : public compositor::Context {
   bool viewer_was_written_ = false;
 
  public:
-  Context(compositor::StaticCacheManager &cache_manager, const Scene *scene, char *info_message)
-      : compositor::Context(cache_manager), scene_(scene), info_message_(info_message)
+  Context(compositor::StaticCacheManager &cache_manager,
+          const Main *main,
+          const Scene *scene,
+          char *info_message)
+      : compositor::Context(cache_manager), main_(main), scene_(scene), info_message_(info_message)
   {
     this->set_info_message("");
+  }
+
+  const Main &get_main() const override
+  {
+    return *main_;
   }
 
   const Scene &get_scene() const override
@@ -184,7 +193,7 @@ class Context : public compositor::Context {
 
     if (realization_operation) {
       Result realize_input = this->create_result(ResultType::Color, viewer_result.precision());
-      realize_input.wrap_external(viewer_result);
+      realize_input.share_data(viewer_result);
       realization_operation->map_input_to_result(&realize_input);
       realization_operation->evaluate();
 
@@ -215,7 +224,7 @@ class Context : public compositor::Context {
     if (DRW_viewport_pass_texture_exists(pass_name)) {
       gpu::Texture *pass_texture = DRW_viewport_pass_texture_get(pass_name).gpu_texture();
       compositor::Result pass = compositor::Result(*this, GPU_texture_format(pass_texture));
-      pass.wrap_external(pass_texture);
+      pass.share_data(pass_texture);
       return pass;
     }
 
@@ -224,7 +233,7 @@ class Context : public compositor::Context {
     if (STREQ(pass_name, RE_PASSNAME_COMBINED)) {
       gpu::Texture *combined_texture = DRW_context_get()->viewport_texture_list_get()->color;
       compositor::Result pass = compositor::Result(*this, GPU_texture_format(combined_texture));
-      pass.wrap_external(combined_texture);
+      pass.share_data(combined_texture);
       return pass;
     }
 
@@ -276,16 +285,18 @@ class Context : public compositor::Context {
       return this->get_invalid_pass();
     }
 
-    const compositor::Result pass = this->get_pass_result(pass_name);
+    compositor::Result pass = this->get_pass_result(pass_name);
     if (!pass.is_allocated()) {
       return this->get_invalid_pass();
     }
 
-    /* The pass matches the compositing domain, return it as is. */
+    /* The pass data window matches the compositing domain data window, so update its display
+     * window and return it as is. */
     const compositor::Domain compositing_domain = this->get_compositing_domain();
     if (this->get_camera_region().min == int2(0) &&
         compositing_domain.data_size == pass.domain().data_size)
     {
+      pass.domain() = compositing_domain;
       return pass;
     }
 
@@ -327,21 +338,22 @@ class Context : public compositor::Context {
   {
     using namespace compositor;
     const bNodeTree &node_group = *DRW_context_get()->scene->compositing_node_group;
+    const bke::DataBlockComputeContext compute_context(nullptr, this->get_scene().id);
     NodeGroupOperation node_group_operation(*this,
                                             node_group,
                                             this->needed_outputs(),
-                                            nullptr,
                                             node_group.active_viewer_key,
-                                            bke::NODE_INSTANCE_KEY_BASE);
+                                            bke::NODE_INSTANCE_KEY_BASE,
+                                            compute_context);
 
     /* Set the reference count for the outputs, only the first color output is actually needed,
      * while the rest are ignored. */
     node_group.ensure_interface_cache();
     for (const bNodeTreeInterfaceSocket *output_socket : node_group.interface_outputs()) {
-      const bool is_fisrt_output = output_socket == node_group.interface_outputs().first();
+      const bool is_first_output = output_socket == node_group.interface_outputs().first();
       Result &output_result = node_group_operation.get_result(output_socket->identifier);
       const bool is_color = output_result.type() == ResultType::Color;
-      output_result.set_reference_count(is_fisrt_output && is_color ? 1 : 0);
+      output_result.set_reference_count(is_first_output && is_color ? 1 : 0);
     }
 
     /* Map the inputs to the operation. */
@@ -415,7 +427,10 @@ class Instance : public DrawEngine {
 
   void draw(Manager & /*manager*/) final
   {
-    Context context(cache_manager_, DRW_context_get()->scene, this->info);
+    Context context(cache_manager_,
+                    DEG_get_bmain(DRW_context_get()->depsgraph),
+                    DRW_context_get()->scene,
+                    this->info);
     if (context.get_camera_region().is_empty()) {
       return;
     }

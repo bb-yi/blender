@@ -347,7 +347,7 @@
         </wcol_list_item>
         <wcol_state>
           <ThemeWidgetStateColors
-            error="#771111ff"
+            error="#D40000ff"
             warning="#ac8737ff"
             info="#28487dff"
             success="#188625ff"
@@ -429,7 +429,6 @@
             channel_group="#278c0e37"
             channel_group_active="#4eb33555"
             channel="#999999ff"
-            channels_selected="#60c04044"
             keyframe="#e8e8e8"
             keyframe_selected="#ffbe33"
             keyframe_extreme="#e8b3cc"
@@ -471,6 +470,7 @@
       <ThemeView3D
         grid="#00000033"
         grid_major="#00000066"
+        grid_axis_brightness="0.58"
         clipping_border_3d="#606060ff"
         wire="#000000"
         wire_edit="#000000"
@@ -730,7 +730,6 @@
     <properties>
       <ThemeProperties
         match="#5680c2"
-        active_modifier="#5680c2ff"
         >
         <space>
           <ThemeSpaceGeneric

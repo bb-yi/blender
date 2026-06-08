@@ -202,6 +202,11 @@ string to_string(const char *str)
   return string(str);
 }
 
+string to_string(const float2 &v)
+{
+  return string_printf("%f,%f", v.x, v.y);
+}
+
 string to_string(const float4 &v)
 {
   return string_printf("%f,%f,%f,%f", v.x, v.y, v.z, v.w);
@@ -288,7 +293,7 @@ string string_human_readable_size(size_t size)
   if (*suffix != 'B') {
     return string_printf("%.2f%c", double(size * 1024 + r) / 1024.0, *suffix);
   }
-  return string_printf("%zu", size);
+  return string_printf("%zuB", size);
 }
 
 string string_human_readable_number(size_t num)

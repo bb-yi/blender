@@ -17,6 +17,7 @@ set(SRC
   operators/bmo_bevel.cc
   operators/bmo_bisect_plane.cc
   operators/bmo_bridge.cc
+  operators/bmo_circularize.cc
   operators/bmo_connect.cc
   operators/bmo_connect_concave.cc
   operators/bmo_connect_nonplanar.cc
@@ -30,6 +31,7 @@ set(SRC
   operators/bmo_fill_edgeloop.cc
   operators/bmo_fill_grid.cc
   operators/bmo_fill_holes.cc
+  operators/bmo_flatten.cc
   operators/bmo_hull.cc
   operators/bmo_inset.cc
   operators/bmo_join_triangles.cc
@@ -43,6 +45,7 @@ set(SRC
   operators/bmo_removedoubles.cc
   operators/bmo_rotate_edges.cc
   operators/bmo_smooth_laplacian.cc
+  operators/bmo_space_edge_loops_evenly.cc
   operators/bmo_split_edges.cc
   operators/bmo_subdivide.cc
   operators/bmo_subdivide_edgering.cc
@@ -186,15 +189,6 @@ endif()
 if(WITH_FREESTYLE)
   add_definitions(-DWITH_FREESTYLE)
 endif()
-
-if(WITH_TBB)
-  if(WIN32)
-    # TBB includes Windows.h which will define min/max macros
-    # that will collide with the STL versions.
-    add_definitions(-DNOMINMAX)
-  endif()
-endif()
-
 
 blender_add_lib(bf_bmesh "${SRC}" "${INC}" "${INC_SYS}" "${LIB}")
 add_library(bf::bmesh ALIAS bf_bmesh)

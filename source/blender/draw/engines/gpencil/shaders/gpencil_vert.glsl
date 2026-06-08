@@ -43,6 +43,8 @@ void main()
   gpMaterial gp_mat = gp_materials[point_data1.mat + gp_material_offset];
   gpMaterialFlag gp_flag = gpMaterialFlag(floatBitsToUint(gp_mat._flag));
 
+  gp_interp_flat.point_length.z = gp_mat._stroke_u_scale;
+
   gl_Position = gpencil_vertex(float4(viewport_size, 1.0f / viewport_size),
                                gp_flag,
                                gp_mat._alignment_rot,
@@ -51,8 +53,11 @@ void main()
                                vert_color,
                                vert_strength,
                                gp_interp.uv,
-                               gp_interp_flat.sspos,
-                               gp_interp_flat.sspos_adj,
+                               gp_interp_flat.sspos_0,
+                               gp_interp_flat.sspos_1,
+                               gp_interp_flat.sspos_2,
+                               gp_interp_flat.sspos_3,
+                               gp_interp_flat.point_length,
                                gp_interp_flat.aspect,
                                gp_interp_noperspective.thickness,
                                gp_interp_noperspective.hardness);
@@ -71,6 +76,7 @@ void main()
         gp_mat.stroke_color, vert_color, vert_strength, gp_mat._stroke_texture_mix);
 
     gp_interp_flat.mat_flag = gp_flag & ~GP_FILL_FLAGS;
+    gp_interp_flat.mat_flag |= uint(point_data1.mat + gp_material_offset) << GPENCIL_MATID_SHIFT;
 
     if (gp_stroke_order3d) {
       /* Use the fragment depth (see fragment shader). */
@@ -123,7 +129,8 @@ void main()
     gpencil_color_output(fill_col, fcol_decode, 1.0f, gp_mat._fill_texture_mix);
 
     gp_interp_flat.mat_flag = gp_flag & GP_FILL_FLAGS;
-    gp_interp_flat.mat_flag |= uint(point_data1.mat + gp_material_offset) << GPENCIl_MATID_SHIFT;
+    gp_interp_flat.mat_flag |= GP_FILL;
+    gp_interp_flat.mat_flag |= uint(point_data1.mat + gp_material_offset) << GPENCIL_MATID_SHIFT;
 
     gp_interp.uv = float2x2(gp_mat.fill_uv_rot_scale.xy, gp_mat.fill_uv_rot_scale.zw) * uv1.xy +
                    gp_mat._fill_uv_offset;

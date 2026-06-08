@@ -83,7 +83,7 @@ static void file_panel_operator(const bContext *C, Panel *panel)
   }
   /* Operator file selector window is a kind of popup, use persistent layout panel states for the
    * active operator. */
-  panel->runtime->popup_layout_panel_states = &ui::popup_persistent_layout_panel_states(
+  panel->runtime->layout_panel_states_storage = &ui::popup_persistent_layout_panel_states(
       op->type->idname);
   uiTemplateOperatorPropertyButs(
       C, panel->layout, op, ui::BUT_LABEL_ALIGN_NONE, ui::TEMPLATE_OP_PROPS_SHOW_EMPTY);
@@ -182,7 +182,7 @@ static void file_panel_execution_buttons_draw(const bContext *C, Panel *panel)
 
   button_func_complete_set(but, autocomplete_file, nullptr);
   /* silly workaround calling NFunc to ensure this does not get called
-   * immediate ui_apply_but_func but only after button deactivates */
+   * immediate apply_but_func but only after button deactivates */
   button_funcN_set(but, file_filename_enter_handle, nullptr, but);
 
   if (params->flag & FILE_CHECK_EXISTING) {
@@ -258,7 +258,8 @@ static void file_panel_asset_catalog_buttons_draw(const bContext *C, Panel *pane
     CTX_free(mutable_ctx);
   }
   else {
-    row.op("ASSET_OT_library_refresh", "", ICON_FILE_REFRESH);
+    PointerRNA ptr = row.op("ASSET_OT_library_refresh", "", ICON_FILE_REFRESH);
+    RNA_boolean_set(&ptr, "use_shift_for_remote_listing", true);
   }
 
   col.separator();

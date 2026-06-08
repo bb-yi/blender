@@ -8,6 +8,8 @@
 
 #include <cstring>
 
+#include "MEM_safe_multiply.h"
+
 #include "DNA_collection_types.h"
 #include "DNA_lightprobe_types.h"
 #include "DNA_object_types.h"
@@ -49,37 +51,37 @@ static void lightprobe_blend_write(BlendWriter *writer, ID *id, const void *id_a
 }
 
 IDTypeInfo IDType_ID_LP = {
-    /*id_code*/ LightProbe::id_type,
-    /*id_filter*/ FILTER_ID_LP,
-    /*dependencies_id_types*/ FILTER_ID_IM,
-    /*main_listbase_index*/ INDEX_ID_LP,
-    /*struct_size*/ sizeof(LightProbe),
-    /*name*/ "LightProbe",
-    /*name_plural*/ N_("lightprobes"),
-    /*translation_context*/ BLT_I18NCONTEXT_ID_LIGHTPROBE,
-    /*flags*/ IDTYPE_FLAGS_APPEND_IS_REUSABLE,
-    /*asset_type_info*/ nullptr,
+    .id_code = LightProbe::id_type,
+    .id_filter = FILTER_ID_LP,
+    .dependencies_id_types = FILTER_ID_IM,
+    .main_listbase_index = INDEX_ID_LP,
+    .struct_size = sizeof(LightProbe),
+    .name = "LightProbe",
+    .name_plural = N_("lightprobes"),
+    .translation_context = BLT_I18NCONTEXT_ID_LIGHTPROBE,
+    .flags = IDTYPE_FLAGS_APPEND_IS_REUSABLE,
+    .asset_type_info = nullptr,
 
-    /*init_data*/ lightprobe_init_data,
-    /*copy_data*/ nullptr,
-    /*free_data*/ nullptr,
-    /*make_local*/ nullptr,
-    /*foreach_id*/ lightprobe_foreach_id,
-    /*foreach_cache*/ nullptr,
-    /*foreach_path*/ nullptr,
-    /*foreach_working_space_color*/ nullptr,
-    /*owner_pointer_get*/ nullptr,
+    .init_data = lightprobe_init_data,
+    .copy_data = nullptr,
+    .free_data = nullptr,
+    .make_local = nullptr,
+    .foreach_id = lightprobe_foreach_id,
+    .foreach_cache = nullptr,
+    .foreach_path = nullptr,
+    .foreach_working_space_color = nullptr,
+    .owner_pointer_get = nullptr,
 
-    /*blend_write*/ lightprobe_blend_write,
-    /*blend_read_data*/ nullptr,
-    /*blend_read_after_liblink*/ nullptr,
+    .blend_write = lightprobe_blend_write,
+    .blend_read_data = nullptr,
+    .blend_read_after_liblink = nullptr,
 
-    /*blend_read_undo_preserve*/ nullptr,
+    .blend_read_undo_preserve = nullptr,
 
-    /*lib_override_apply_post*/ nullptr,
+    .lib_override_apply_post = nullptr,
 };
 
-void BKE_lightprobe_type_set(LightProbe *probe, const short lightprobe_type)
+void BKE_lightprobe_type_set(LightProbe *probe, const eLightProbeType lightprobe_type)
 {
   probe->type = lightprobe_type;
 
@@ -119,18 +121,17 @@ static void lightprobe_grid_cache_frame_blend_write(BlendWriter *writer,
 
   int64_t sample_count = BKE_lightprobe_grid_cache_frame_sample_count(cache);
 
-  BLO_write_float3_array(writer, sample_count, reinterpret_cast<float *>(cache->irradiance.L0));
-  BLO_write_float3_array(writer, sample_count, reinterpret_cast<float *>(cache->irradiance.L1_a));
-  BLO_write_float3_array(writer, sample_count, reinterpret_cast<float *>(cache->irradiance.L1_b));
-  BLO_write_float3_array(writer, sample_count, reinterpret_cast<float *>(cache->irradiance.L1_c));
+  writer->write_float3_array(sample_count, reinterpret_cast<float *>(cache->irradiance.L0));
+  writer->write_float3_array(sample_count, reinterpret_cast<float *>(cache->irradiance.L1_a));
+  writer->write_float3_array(sample_count, reinterpret_cast<float *>(cache->irradiance.L1_b));
+  writer->write_float3_array(sample_count, reinterpret_cast<float *>(cache->irradiance.L1_c));
 
-  BLO_write_float_array(writer, sample_count, cache->visibility.L0);
-  BLO_write_float_array(writer, sample_count, cache->visibility.L1_a);
-  BLO_write_float_array(writer, sample_count, cache->visibility.L1_b);
-  BLO_write_float_array(writer, sample_count, cache->visibility.L1_c);
+  writer->write_float_array(sample_count, cache->visibility.L0);
+  writer->write_float_array(sample_count, cache->visibility.L1_a);
+  writer->write_float_array(sample_count, cache->visibility.L1_b);
+  writer->write_float_array(sample_count, cache->visibility.L1_c);
 
-  BLO_write_int8_array(
-      writer, sample_count, reinterpret_cast<int8_t *>(cache->connectivity.validity));
+  writer->write_int8_array(sample_count, reinterpret_cast<int8_t *>(cache->connectivity.validity));
 }
 
 static void lightprobe_grid_cache_frame_blend_read(BlendDataReader *reader,
@@ -144,7 +145,7 @@ static void lightprobe_grid_cache_frame_blend_read(BlendDataReader *reader,
     return;
   }
 
-  BLO_read_struct_array(reader, LightProbeGridCacheFrame, cache->block_len, &cache->block_infos);
+  BLO_read_array_and_validate_size(reader, &cache->block_infos, &cache->block_len);
 
   int64_t sample_count = BKE_lightprobe_grid_cache_frame_sample_count(cache);
 
@@ -158,18 +159,25 @@ static void lightprobe_grid_cache_frame_blend_read(BlendDataReader *reader,
   cache->surfels = nullptr;
   cache->surfels_len = 0;
 
-  BLO_read_float3_array(reader, sample_count, reinterpret_cast<float **>(&cache->irradiance.L0));
-  BLO_read_float3_array(reader, sample_count, reinterpret_cast<float **>(&cache->irradiance.L1_a));
-  BLO_read_float3_array(reader, sample_count, reinterpret_cast<float **>(&cache->irradiance.L1_b));
-  BLO_read_float3_array(reader, sample_count, reinterpret_cast<float **>(&cache->irradiance.L1_c));
+  bool ok = true;
+  ok &= BLO_read_array(reader, reinterpret_cast<float **>(&cache->irradiance.L0), sample_count, 3);
+  ok &= BLO_read_array(
+      reader, reinterpret_cast<float **>(&cache->irradiance.L1_a), sample_count, 3);
+  ok &= BLO_read_array(
+      reader, reinterpret_cast<float **>(&cache->irradiance.L1_b), sample_count, 3);
+  ok &= BLO_read_array(
+      reader, reinterpret_cast<float **>(&cache->irradiance.L1_c), sample_count, 3);
 
-  BLO_read_float_array(reader, sample_count, &cache->visibility.L0);
-  BLO_read_float_array(reader, sample_count, &cache->visibility.L1_a);
-  BLO_read_float_array(reader, sample_count, &cache->visibility.L1_b);
-  BLO_read_float_array(reader, sample_count, &cache->visibility.L1_c);
+  ok &= BLO_read_array(reader, &cache->visibility.L0, sample_count);
+  ok &= BLO_read_array(reader, &cache->visibility.L1_a, sample_count);
+  ok &= BLO_read_array(reader, &cache->visibility.L1_b, sample_count);
+  ok &= BLO_read_array(reader, &cache->visibility.L1_c, sample_count);
 
-  BLO_read_int8_array(
-      reader, sample_count, reinterpret_cast<int8_t **>(&cache->connectivity.validity));
+  ok &= BLO_read_array(reader, &cache->connectivity.validity, sample_count);
+
+  if (!ok) {
+    cache->block_len = 0;
+  }
 }
 
 void BKE_lightprobe_cache_blend_write(BlendWriter *writer, LightProbeObjectCache *cache)
@@ -281,11 +289,25 @@ void BKE_lightprobe_cache_free(Object *object)
 
 int64_t BKE_lightprobe_grid_cache_frame_sample_count(const LightProbeGridCacheFrame *cache)
 {
+  /* Overflow is checked to detect invalid file reads. */
+  int64_t result;
   if (cache->data_layout == LIGHTPROBE_CACHE_ADAPTIVE_RESOLUTION) {
-    return cache->block_len * cube_i(cache->block_size);
+    const int block_size = cache->block_size;
+    if (!MEM_size_safe_multiply(block_size, block_size, &result) ||
+        !MEM_size_safe_multiply(result, block_size, &result) ||
+        !MEM_size_safe_multiply(result, cache->block_len, &result))
+    {
+      return INT64_MAX;
+    }
+    return result;
   }
   /* LIGHTPROBE_CACHE_UNIFORM_GRID */
-  return int64_t(cache->size[0]) * cache->size[1] * cache->size[2];
+  if (!MEM_size_safe_multiply(cache->size[0], cache->size[1], &result) ||
+      !MEM_size_safe_multiply(result, cache->size[2], &result))
+  {
+    return INT64_MAX;
+  }
+  return result;
 }
 
 }  // namespace blender

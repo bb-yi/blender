@@ -14,16 +14,12 @@
 # limitations under the License.
 ################################################################################
 
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.21)
 include(CMakeDependentOption)
-
-if(POLICY CMP0054)
-	cmake_policy(SET CMP0054 NEW)
-endif()
 
 project(audaspace)
 
-set(AUDASPACE_VERSION 1.8)
+set(AUDASPACE_VERSION 1.9)
 set(AUDASPACE_LONG_VERSION ${AUDASPACE_VERSION}.0)
 
 if(DEFINED AUDASPACE_CMAKE_CFG)
@@ -146,6 +142,7 @@ set(PUBLIC_HDR
 	include/devices/DeviceManager.h
 	include/devices/I3DDevice.h
 	include/devices/I3DHandle.h
+	include/devices/ICaptureDeviceFactory.h
 	include/devices/IDeviceFactory.h
 	include/devices/IDevice.h
 	include/devices/IHandle.h
@@ -329,7 +326,7 @@ if(AUDASPACE_STANDALONE)
 	cmake_dependent_option(PLUGIN_SDL "Build SDL Plugin" TRUE "WITH_SDL;SHARED_LIBRARY" FALSE)
 	cmake_dependent_option(PLUGIN_WASAPI "Build WASAPI Plugin" TRUE "WITH_WASAPI;SHARED_LIBRARY" FALSE)
 	cmake_dependent_option(WITH_PYTHON_MODULE "Build Python Module" TRUE "WITH_PYTHON" FALSE)
-	cmake_dependent_option(USE_SDL2 "Use SDL2 instead of 1 if available" TRUE "WITH_SDL" FALSE)
+	cmake_dependent_option(USE_SDL3 "Use SDL3" TRUE "WITH_SDL" FALSE)
 	cmake_dependent_option(DYNLOAD_JACK "Dynamically load JACK" FALSE "WITH_JACK" FALSE)
 	cmake_dependent_option(DYNLOAD_PULSEAUDIO "Dynamically load PulseAudio" FALSE "WITH_PULSEAUDIO" FALSE)
 	cmake_dependent_option(DYNLOAD_PIPEWIRE "Dynamically load PipeWire" FALSE "WITH_PIPEWIRE" FALSE)
@@ -837,11 +834,11 @@ endif()
 # SDL
 if(WITH_SDL)
 	if(AUDASPACE_STANDALONE)
-		if(USE_SDL2)
-			find_package(SDL2)
-			if(SDL2_FOUND)
-				set(SDL_INCLUDE_DIR ${SDL2_INCLUDE_DIR})
-				set(SDL_LIBRARY ${SDL2_LIBRARY})
+		if(USE_SDL3)
+			find_package(SDL3 CONFIG)
+			if(SDL3_FOUND)
+				get_target_property(SDL_INCLUDE_DIR SDL3::Headers INTERFACE_INCLUDE_DIRECTORIES)
+				set(SDL_LIBRARY SDL3::SDL3)
 				set(SDL_FOUND TRUE)
 			else()
 				find_package(SDL ${PACKAGE_OPTION})

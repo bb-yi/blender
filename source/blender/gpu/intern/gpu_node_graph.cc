@@ -15,11 +15,15 @@
 
 #include "DNA_node_types.h"
 
+#include "BLI_assert.h"
 #include "BLI_ghash.h"
 #include "BLI_listbase.h"
 #include "BLI_stack.hh"
 #include "BLI_string.h"
 #include "BLI_utildefines.h"
+
+#include "BKE_node.hh"
+#include "BKE_node_runtime.hh"
 
 #include "GPU_texture.hh"
 #include "GPU_vertex_format.hh"
@@ -379,13 +383,13 @@ void GPU_uniform_attr_list_free(GPUUniformAttrList *set)
 {
   set->count = 0;
   set->hash_code = 0;
-  BLI_freelistN(&set->list);
+  set->list.free_no_destruct();
 }
 
 void gpu_node_graph_finalize_uniform_attrs(GPUNodeGraph *graph)
 {
   GPUUniformAttrList *attrs = &graph->uniform_attrs;
-  BLI_assert(attrs->count == BLI_listbase_count(&attrs->list));
+  BLI_assert(attrs->count == attrs->list.count());
 
   /* Sort the attributes by name to ensure a stable order. */
   BLI_listbase_sort(&attrs->list, uniform_attr_sort_cmp);
@@ -1106,7 +1110,7 @@ static void gpu_inputs_free(ListBaseT<GPUInput> *inputs)
     }
   }
 
-  BLI_freelistN(inputs);
+  inputs->free_no_destruct();
 }
 
 static void gpu_node_free(GPUNode *node)
@@ -1120,7 +1124,7 @@ static void gpu_node_free(GPUNode *node)
     }
   }
 
-  BLI_freelistN(&node->outputs);
+  node->outputs.free_no_destruct();
   MEM_delete(node);
 }
 
@@ -1142,16 +1146,16 @@ void gpu_node_graph_free_nodes(GPUNodeGraph *graph)
 
 void gpu_node_graph_free(GPUNodeGraph *graph)
 {
-  BLI_freelistN(&graph->outlink_aovs);
-  BLI_freelistN(&graph->outlink_outlines);
-  BLI_freelistN(&graph->material_functions);
-  BLI_freelistN(&graph->outlink_compositor);
+  graph->outlink_aovs.free_no_destruct();
+  graph->outlink_outlines.free_no_destruct();
+  graph->material_functions.free_no_destruct();
+  graph->outlink_compositor.free_no_destruct();
   gpu_node_graph_free_nodes(graph);
 
-  BLI_freelistN(&graph->textures);
-  BLI_freelistN(&graph->attributes);
+  graph->textures.free_no_destruct();
+  graph->attributes.free_no_destruct();
   GPU_uniform_attr_list_free(&graph->uniform_attrs);
-  BLI_freelistN(&graph->layer_attrs);
+  graph->layer_attrs.free_no_destruct();
 }
 
 /* Prune Unused Nodes */
@@ -1292,6 +1296,35 @@ void gpu_node_graph_optimize(GPUNodeGraph *graph)
   }
 
   /* TODO: Consider performing other node graph optimizations here. */
+}
+
+GPUNodeStack &GPU_node_get_input(const bNode &node,
+                                 GPUNodeStack inputs[],
+                                 const StringRef identifier)
+{
+  const bNodeSocket *input = node.input_by_identifier(UString(identifier));
+  BLI_assert(input);
+  return inputs[input->index()];
+}
+
+GPUNodeStack &GPU_node_get_output(const bNode &node,
+                                  GPUNodeStack outputs[],
+                                  const StringRef identifier)
+{
+  const bNodeSocket *output = node.output_by_identifier(UString(identifier));
+  BLI_assert(output);
+  return outputs[output->index()];
+}
+
+GPUNodeLink *GPU_node_get_input_link(const bNode &node,
+                                     GPUNodeStack inputs[],
+                                     const StringRef identifier)
+{
+  GPUNodeStack &input = GPU_node_get_input(node, inputs, identifier);
+  if (input.link) {
+    return input.link;
+  }
+  return GPU_uniform(input.vec);
 }
 
 }  // namespace blender

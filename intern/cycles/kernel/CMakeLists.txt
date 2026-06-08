@@ -85,6 +85,7 @@ set(SRC_KERNEL_SVM_HEADERS
   svm/math.h
   svm/math_util.h
   svm/mix.h
+  svm/node_types.h
   svm/node_types_template.h
   svm/noise.h
   svm/noisetex.h
@@ -94,6 +95,7 @@ set(SRC_KERNEL_SVM_HEADERS
   svm/radial_tiling.h
   svm/radial_tiling_shared.h
   svm/raycast.h
+  svm/scene_time.h
   svm/sepcomb_color.h
   svm/sepcomb_vector.h
   svm/sky.h
@@ -117,6 +119,7 @@ if(WITH_CYCLES_OSL)
     osl/closures_setup.h
     osl/closures_template.h
     osl/services_gpu.h
+    osl/strings.h
     osl/types.h
   )
 endif()
@@ -181,6 +184,7 @@ set(SRC_KERNEL_INTEGRATOR_HEADERS
   integrator/init_from_camera.h
   integrator/intersect_dedicated_light.h
   integrator/intersect_closest.h
+  integrator/intersect_mnee.h
   integrator/intersect_shadow.h
   integrator/intersect_subsurface.h
   integrator/intersect_volume_stack.h
@@ -213,12 +217,12 @@ set(SRC_KERNEL_LIGHT_HEADERS
   light/area.h
   light/background.h
   light/common.h
-  light/distant.h
   light/distribution.h
   light/light.h
   light/point.h
   light/sample.h
   light/spot.h
+  light/sun.h
   light/tree.h
   light/triangle.h
 )
@@ -237,6 +241,7 @@ set(SRC_KERNEL_UTIL_HEADERS
   util/colorspace.h
   util/differential.h
   util/ies.h
+  util/image_2d.h
   util/image_3d.h
   util/lookup_table.h
   util/nanovdb.h
@@ -422,18 +427,22 @@ add_subdirectory(device/metal)
 add_subdirectory(device/oneapi)
 add_subdirectory(device/optix)
 
-target_link_libraries(cycles_kernel INTERFACE cycles_kernel_cpu)
+target_link_libraries(cycles_kernel
+  INTERFACE cycles_kernel_cpu
+)
 
 if(NOT WITH_CYCLES_PARALLEL_DEVICE_KERNEL_BUILD)
   set(_cycles_prev_gpu_kernel_target "")
-  macro(cycles_add_gpu_kernel_dependencies GPU_KERNEL_TARGET)
+  # Modifies in parent scope:
+  # - `_cycles_prev_gpu_kernel_target`: updated to current target for chaining.
+  function(cycles_add_gpu_kernel_dependencies GPU_KERNEL_TARGET)
     if(TARGET ${GPU_KERNEL_TARGET})
       if(_cycles_prev_gpu_kernel_target)
         add_dependencies(${GPU_KERNEL_TARGET} ${_cycles_prev_gpu_kernel_target})
       endif()
-      set(_cycles_prev_gpu_kernel_target ${GPU_KERNEL_TARGET})
+      set(_cycles_prev_gpu_kernel_target ${GPU_KERNEL_TARGET} PARENT_SCOPE)
     endif()
-  endmacro()
+  endfunction()
 
   cycles_add_gpu_kernel_dependencies(cycles_kernel_cuda)
   cycles_add_gpu_kernel_dependencies(cycles_kernel_optix)

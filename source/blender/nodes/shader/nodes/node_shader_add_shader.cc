@@ -10,9 +10,9 @@ namespace nodes::node_shader_add_shader_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Shader>("Shader");
-  b.add_input<decl::Shader>("Shader", "Shader_001");
-  b.add_output<decl::Shader>("Shader");
+  b.add_input<decl::Shader>("Shader"_ustr);
+  b.add_input<decl::Shader>("Shader"_ustr, "Shader_001"_ustr);
+  b.add_output<decl::Shader>("Shader"_ustr);
 }
 
 static int node_shader_gpu_add_shader(GPUMaterial *mat,
@@ -60,7 +60,7 @@ void register_node_type_sh_add_shader()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeAddShader", SH_NODE_ADD_SHADER);
+  sh_node_type_base(&ntype, "ShaderNodeAddShader"_ustr, SH_NODE_ADD_SHADER);
   ntype.ui_name = "Add Shader";
   ntype.ui_description = "Add two Shaders together";
   ntype.enum_name_legacy = "ADD_SHADER";

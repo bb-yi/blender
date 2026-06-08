@@ -9,9 +9,7 @@
 #include "BKE_appdir.hh"
 
 #include "BLI_fileops.hh"
-#include "BLI_hash.hh"
 #include "BLI_path_utils.hh"
-#include "BLI_time.h"
 #ifdef _WIN32
 #  include "BLI_winstuff.h"
 #endif
@@ -19,8 +17,6 @@
 #include "vk_shader.hh"
 #include "vk_shader_compiler.hh"
 
-#include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <string>
 
@@ -35,9 +31,7 @@ static std::optional<std::string> cache_dir_get()
   static std::optional<std::string> result = []() -> std::optional<std::string> {
     static char tmp_dir_buffer[FILE_MAX];
     /* Shader builder doesn't return the correct appdir. */
-    if (!BKE_appdir_folder_caches(tmp_dir_buffer, sizeof(tmp_dir_buffer))) {
-      return std::nullopt;
-    }
+    BKE_appdir_folder_caches(tmp_dir_buffer, sizeof(tmp_dir_buffer));
 
     std::string cache_dir = std::string(tmp_dir_buffer) + "vk-spirv-cache" + SEP_STR;
     BLI_dir_create_recursive(cache_dir.c_str());
@@ -192,14 +186,20 @@ static bool compile_ex(shaderc::Compiler &compiler,
 {
   std::string full_name = shader.name_get() + "_" + to_stage_name(stage);
 
+  shader_module.original_sources = std::move(shader_module.combined_sources);
+
   Shader::dump_source_to_disk(
-      shader.name_get(), full_name, ".glsl", shader_module.combined_sources);
+      shader.name_get(), full_name, ".glsl", shader_module.original_sources);
 
   if (!shader.skip_preprocessor) {
-    shader_module.combined_sources = Shader::run_preprocessor(shader_module.combined_sources);
+    shader_module.combined_sources = Shader::run_preprocessor(shader_module.original_sources,
+                                                              G.debug & G_DEBUG_GPU_SHADER_NO_DCE);
 
     Shader::dump_source_to_disk(
         shader.name_get(), full_name + ".expanded", ".glsl", shader_module.combined_sources);
+  }
+  else {
+    shader_module.combined_sources = shader_module.original_sources;
   }
 
   if (read_spirv_from_disk(shader_module)) {

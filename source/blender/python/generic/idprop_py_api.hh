@@ -47,20 +47,20 @@ extern PyTypeObject BPy_IDGroup_IterItems_Type;
 #define BPy_IDGroup_IterItems_CheckExact(v) (Py_TYPE(v) == &BPy_IDGroup_IterItems_Type)
 
 struct BPy_IDProperty {
-  PyObject_VAR_HEAD
+  PyObject_HEAD
   struct ID *owner_id;     /* can be NULL */
   struct IDProperty *prop; /* must be second member */
   struct IDProperty *parent;
 };
 
 struct BPy_IDArray {
-  PyObject_VAR_HEAD
+  PyObject_HEAD
   struct ID *owner_id;     /* can be NULL */
   struct IDProperty *prop; /* must be second member */
 };
 
 struct BPy_IDGroup_Iter {
-  PyObject_VAR_HEAD
+  PyObject_HEAD
   BPy_IDProperty *group;
   struct IDProperty *cur;
   /** Use for detecting manipulation during iteration (which is not allowed). */
@@ -71,7 +71,7 @@ struct BPy_IDGroup_Iter {
 
 /** Use to implement `IDPropertyGroup.keys/values/items` */
 struct BPy_IDGroup_View {
-  PyObject_VAR_HEAD
+  PyObject_HEAD
   /** This will be NULL when accessing keys on data that has no ID properties. */
   BPy_IDProperty *group;
   bool reversed;
@@ -108,7 +108,7 @@ void IDProp_Init_Types();
 /**
  * Create an IDProperty from a Python object.
  *
- * \param prop_exists: pre-existing IDProperty to populate with the value. Can be `nullptr` to
+ * \param prop_exist: pre-existing IDProperty to populate with the value. Can be `nullptr` to
  * allocate a new IDProperty.
  * \param name: the name of the IDProperty. Only used when creating a new IDProperty.
  * \param ob: the Python object to convert.

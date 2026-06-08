@@ -18,8 +18,8 @@ namespace nodes::node_shader_rgb_to_bw_cc {
 
 static void sh_node_rgbtobw_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Color>("Color").default_value({0.5f, 0.5f, 0.5f, 1.0f});
-  b.add_output<decl::Float>("Val");
+  b.add_input<decl::Color>("Color"_ustr).default_value({0.5f, 0.5f, 0.5f, 1.0f});
+  b.add_output<decl::Float>("Val"_ustr);
 }
 
 static int gpu_shader_rgbtobw(GPUMaterial *mat,
@@ -50,7 +50,7 @@ void register_node_type_sh_rgbtobw()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeRGBToBW", SH_NODE_RGBTOBW);
+  sh_node_type_base(&ntype, "ShaderNodeRGBToBW"_ustr, SH_NODE_RGBTOBW);
   ntype.ui_name = "RGB to BW";
   ntype.ui_description = "Convert a color's luminance to a grayscale value";
   ntype.enum_name_legacy = "RGBTOBW";

@@ -16,6 +16,7 @@
 #include "BKE_mesh.hh"
 #include "BKE_mesh_wrapper.hh"
 #include "BKE_object.hh"
+#include "BLI_array_utils.hh"
 #include "BLI_color.hh"
 #include "BLI_hash.hh"
 #include "BLI_math_matrix.h"
@@ -111,10 +112,8 @@ static void generate_vertex_map(const Mesh *mesh,
   /* If we do not export or have UVs, then mapping of vertex indices is simple. */
   if (!export_uv) {
     r_ply_to_vertex.resize(mesh->verts_num);
-    for (int index = 0; index < mesh->verts_num; index++) {
-      r_vertex_to_ply[index] = index;
-      r_ply_to_vertex[index] = index;
-    }
+    array_utils::fill_index_range(r_vertex_to_ply.as_mutable_span());
+    array_utils::fill_index_range(r_ply_to_vertex.as_mutable_span());
     for (int index = 0; index < mesh->corners_num; index++) {
       r_loop_to_ply[index] = corner_verts[index];
     }
@@ -454,15 +453,10 @@ void load_plydata(PlyData &plyData, Depsgraph *depsgraph, const PLYExportParams 
     }
 
     /* Loose edges */
-    const bke::LooseEdgeCache &loose_edges = mesh->loose_edges();
-    if (loose_edges.count > 0) {
-      Span<int2> edges = mesh->edges();
-      for (int i = 0; i < edges.size(); ++i) {
-        if (loose_edges.is_loose_bits[i]) {
-          plyData.edges.append({vertex_to_ply[edges[i][0]], vertex_to_ply[edges[i][1]]});
-        }
-      }
-    }
+    Span<int2> edges = mesh->edges();
+    mesh->loose_edges().foreach_index([&](const int i) {
+      plyData.edges.append({vertex_to_ply[edges[i][0]], vertex_to_ply[edges[i][1]]});
+    });
 
     vertex_offset = int(plyData.vertices.size());
     if (manually_free_mesh) {

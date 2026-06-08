@@ -727,13 +727,14 @@ static void v3d_cursor_snap_update(V3DSnapCursorState *state,
       copy_m3_m4(omat, obmat);
     }
     else {
+      const Main *bmain = CTX_data_main(C);
       ViewLayer *view_layer = CTX_data_view_layer(C);
-      BKE_view_layer_synced_ensure(CTX_data_scene(C), view_layer);
+      BKE_view_layer_synced_ensure(*bmain, CTX_data_scene(C), view_layer);
       Object *ob = BKE_view_layer_active_object_get(view_layer);
       const int orient_index = BKE_scene_orientation_get_index(scene, SCE_ORIENT_DEFAULT);
       const int pivot_point = scene->toolsettings->transform_pivot_point;
       ed::transform::calc_orientation_from_type_ex(
-          scene, view_layer, v3d, rv3d, ob, nullptr, orient_index, pivot_point, omat);
+          *bmain, scene, view_layer, v3d, rv3d, ob, nullptr, orient_index, pivot_point, omat);
 
       if (tool_settings->use_plane_axis_auto) {
         mat3_align_axis_to_v3(omat, tool_settings->plane_axis, rv3d->viewinv[2]);
@@ -945,7 +946,7 @@ static void v3d_cursor_snap_draw_fn(bContext *C,
 V3DSnapCursorState *ED_view3d_cursor_snap_state_active_get()
 {
   SnapCursorDataIntern *data_intern = &g_data_intern;
-  if (BLI_listbase_is_empty(&data_intern->state_intern)) {
+  if (data_intern->state_intern.is_empty()) {
     return &g_data_intern.state_default;
   }
   return &(static_cast<SnapStateIntern *>(data_intern->state_intern.last))->snap_state;
@@ -1045,14 +1046,14 @@ V3DSnapCursorState *ED_view3d_cursor_snap_state_create()
 void ED_view3d_cursor_snap_state_free(V3DSnapCursorState *state)
 {
   SnapCursorDataIntern *data_intern = &g_data_intern;
-  if (BLI_listbase_is_empty(&data_intern->state_intern)) {
+  if (data_intern->state_intern.is_empty()) {
     return;
   }
 
   SnapStateIntern *state_intern = STATE_INTERN_GET(state);
   BLI_remlink(&data_intern->state_intern, state_intern);
   MEM_delete(state_intern);
-  if (BLI_listbase_is_empty(&data_intern->state_intern)) {
+  if (data_intern->state_intern.is_empty()) {
     v3d_cursor_snap_free();
   }
 }

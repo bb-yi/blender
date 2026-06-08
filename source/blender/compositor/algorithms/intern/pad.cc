@@ -18,7 +18,10 @@ static const char *get_shader_name(const ResultType type, const PaddingMethod pa
     case PaddingMethod::Zero:
       switch (type) {
         case ResultType::Color:
+        case ResultType::Float4:
           return "compositor_pad_zero_float4";
+        case ResultType::Float:
+          return "compositor_pad_zero_float";
         default:
           break;
       }
@@ -51,13 +54,9 @@ static void zero_pad_gpu(Context &context,
   GPU_shader_uniform_2iv(shader, "size", size);
 
   input.bind_as_texture(shader, "input_tx");
-
-  Domain extended_domain = input.domain();
-  extended_domain.data_size += size * 2;
-  output.allocate_texture(extended_domain);
   output.bind_as_image(shader, "output_img");
 
-  compute_dispatch_threads_at_least(shader, extended_domain.data_size);
+  compute_dispatch_threads_at_least(shader, output.domain().data_size);
 
   GPU_shader_unbind();
   input.unbind_as_texture();
@@ -69,16 +68,23 @@ static void zero_pad_cpu(const Result &input,
                          const int2 size,
                          const PaddingMethod padding_method)
 {
-  Domain extended_domain = input.domain();
-  extended_domain.data_size += size * 2;
-  output.allocate_texture(extended_domain);
-
+  const int2 output_size = output.domain().data_size;
   switch (padding_method) {
     case PaddingMethod::Zero:
       switch (input.type()) {
         case ResultType::Color:
-          parallel_for(extended_domain.data_size, [&](const int2 texel) {
+          parallel_for(output_size, [&](const int2 texel) {
             output.store_pixel(texel, input.load_pixel_zero<Color>(texel - size));
+          });
+          break;
+        case ResultType::Float4:
+          parallel_for(output_size, [&](const int2 texel) {
+            output.store_pixel(texel, input.load_pixel_zero<float4>(texel - size));
+          });
+          break;
+        case ResultType::Float:
+          parallel_for(output_size, [&](const int2 texel) {
+            output.store_pixel(texel, input.load_pixel_zero<float>(texel - size));
           });
           break;
         default:
@@ -88,12 +94,12 @@ static void zero_pad_cpu(const Result &input,
     case PaddingMethod::Extend:
       switch (input.type()) {
         case ResultType::Float:
-          parallel_for(extended_domain.data_size, [&](const int2 texel) {
+          parallel_for(output_size, [&](const int2 texel) {
             output.store_pixel(texel, input.load_pixel_extended<float>(texel - size));
           });
           break;
         case ResultType::Float2:
-          parallel_for(extended_domain.data_size, [&](const int2 texel) {
+          parallel_for(output_size, [&](const int2 texel) {
             output.store_pixel(texel, input.load_pixel_extended<float2>(texel - size));
           });
           break;
@@ -114,6 +120,11 @@ void pad(Context &context,
     output.share_data(input);
     return;
   }
+
+  Domain extended_domain = input.domain();
+  extended_domain.data_size += size * 2;
+  extended_domain.display_size += size * 2;
+  output.allocate_texture(extended_domain);
 
   if (context.use_gpu()) {
     zero_pad_gpu(context, input, output, size, padding_method);

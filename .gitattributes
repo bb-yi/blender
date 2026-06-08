@@ -106,7 +106,11 @@ docs/images/*.gif -filter -diff -merge -text
 *.icc filter=lfs diff=lfs merge=lfs -text
 *.avif filter=lfs diff=lfs merge=lfs -text
 *.heic filter=lfs diff=lfs merge=lfs -text
+*.car filter=lfs diff=lfs merge=lfs -text
+*.icns filter=lfs diff=lfs merge=lfs -text
 *.blob filter=lfs diff=lfs merge=lfs -text
+*.rgb filter=lfs diff=lfs merge=lfs -text
+scripts/modules/_bpy_internal/assets/remote_library/*_openapi.py linguist-generated=true
 scripts/modules/_bpy_internal/assets/remote_library_listing/*_openapi.py linguist-generated=true
 images/SnowShot_2026-03-28_06-55-43.png -filter -diff -merge text
 images/SnowShot_2026-03-28_07-50-39.png -filter -diff -merge text

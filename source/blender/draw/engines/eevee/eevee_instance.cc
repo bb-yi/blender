@@ -16,6 +16,7 @@
 
 #include "BKE_global.hh"
 #include "BKE_object.hh"
+#include "BKE_scene.hh"
 #include "BKE_scene_runtime.hh"
 
 #include "BLI_rect.h"
@@ -97,7 +98,7 @@ namespace blender::eevee
       if (camera)
       {
         if (scene->r.mode & R_BORDER) {
-          if (draw_ctx->is_viewport_image_render()) {
+          if (draw_ctx->is_viewport_image_render() || draw_ctx->is_viewport_xr()) {
             rect.xmin = scene->r.border.xmin * size[0];
             rect.ymin = scene->r.border.ymin * size[1];
             rect.xmax = scene->r.border.xmax * size[0];
@@ -129,7 +130,7 @@ namespace blender::eevee
         rect.ymax = v3d->render_border.ymax * size[1];
       }
 
-      if (draw_ctx->is_viewport_image_render())
+      if (draw_ctx->is_viewport_image_render() || draw_ctx->is_viewport_xr())
       {
         const float2 vp_size = draw_ctx->viewport_size_get();
         visible_rect.xmax = vp_size[0];
@@ -179,6 +180,10 @@ namespace blender::eevee
       is_painting = draw_ctx->is_painting();
       is_transforming = draw_ctx->is_transforming();
       draw_overlays = v3d && (v3d->flag2 & V3D_HIDE_OVERLAYS) == 0;
+
+      if (is_playback) {
+        sampling.reset();
+      }
 
       /* Note: Do not update the value here as we use it during sync for checking ID updates. */
       if (depsgraph_last_update_ != DEG_get_update_count(depsgraph))
@@ -231,6 +236,8 @@ namespace blender::eevee
       is_image_render = true;
     }
 
+    anisotropic_filtering = GPU_anisotropic_filtering_flags(scene->r.anisotropic_filter);
+
     sampling.init(scene);
     camera.init();
     filter_materials.init();
@@ -261,7 +268,7 @@ namespace blender::eevee
     SET_FLAG_FROM_TEST(shader_request, needs_planar_probe_passes(), DEFERRED_PLANAR_SHADERS);
     SET_FLAG_FROM_TEST(shader_request, needs_lightprobe_sphere_passes(), DEFERRED_CAPTURE_SHADERS);
     SET_FLAG_FROM_TEST(shader_request, motion_blur.postfx_enabled(), MOTION_BLUR_SHADERS);
-    SET_FLAG_FROM_TEST(shader_request, raytracing.use_fast_gi(), HORIZON_SCAN_SHADERS);
+    SET_FLAG_FROM_TEST(shader_request, raytracing.use_fast_gi(), FAST_GI_SHADERS);
     SET_FLAG_FROM_TEST(shader_request, raytracing.use_raytracing(), RAYTRACING_SHADERS);
 
     loaded_shaders = ShaderGroups::NONE;
@@ -391,12 +398,16 @@ namespace blender::eevee
       (float(scene->r.frs_sec) / scene->r.frs_sec_base) :
       24.0f;
 
+    const float seconds = (fps > 1e-8f) ? (frame / fps) : 0.0f;
+
     uniform_data.data.scene_time.frame = frame;
-    uniform_data.data.scene_time.seconds = (fps > 1e-8f) ? (frame / fps) : 0.0f;
+    uniform_data.data.scene_time.seconds = seconds;
     uniform_data.data.scene_time.timeline = (frame_range > 1e-8f) ?
       clamp_f((frame - frame_start) / frame_range, 0.0f, 1.0f) :
       0.0f;
     uniform_data.data.scene_time._pad0 = 0.0f;
+    uniform_data.data.scene.time = seconds;
+    uniform_data.data.scene.frame = frame;
   }
 
   /** \} */
@@ -725,7 +736,7 @@ namespace blender::eevee
   void Instance::render_read_result(RenderLayer* render_layer, const char* view_name)
   {
     ScopedTelemetrySample telemetry_sample(telemetry, TelemetryStageId::ReadResult);
-    eViewLayerEEVEEPassType pass_bits = film.enabled_passes_get();
+    eViewLayerEEVEEPassType pass_bits = film.render_buffer_passes_get();
 
     const auto record_readback = [&](const TelemetryPassReadbackType type,
                                      const char *name,
@@ -844,7 +855,7 @@ namespace blender::eevee
           render_layer, vector_pass_name.c_str(), view_name);
         if (vector_rp)
         {
-          memset(vector_rp->ibuf->float_buffer.data,
+          memset(vector_rp->ibuf->float_data_for_write(),
             0,
             sizeof(float) * 4 * vector_rp->rectx * vector_rp->recty);
         }

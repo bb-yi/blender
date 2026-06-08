@@ -274,7 +274,6 @@ static VArray<float> construct_curve_length_gvarray(const CurvesGeometry &curves
 CurveLengthFieldInput::CurveLengthFieldInput()
     : CurvesFieldInput(CPPType::get<float>(), "Spline Length node")
 {
-  category_ = Category::Generated;
 }
 
 GVArray CurveLengthFieldInput::get_varray_for_context(const CurvesGeometry &curves,
@@ -284,15 +283,11 @@ GVArray CurveLengthFieldInput::get_varray_for_context(const CurvesGeometry &curv
   return construct_curve_length_gvarray(curves, domain);
 }
 
-uint64_t CurveLengthFieldInput::hash() const
+void CurveLengthFieldInput::hash_unique(UniqueHashBytes &hash,
+                                        fn::FieldHashDeep & /*deep_hash_cache*/) const
 {
-  /* Some random constant hash. */
-  return 3549623580;
-}
-
-bool CurveLengthFieldInput::is_equal_to(const fn::FieldNode &other) const
-{
-  return dynamic_cast<const CurveLengthFieldInput *>(&other) != nullptr;
+  static constexpr int8_t id = 0;
+  hash.add(&id);
 }
 
 std::optional<AttrDomain> CurveLengthFieldInput::preferred_domain(
@@ -319,5 +314,7 @@ std::optional<MutableAttributeAccessor> CurveComponent::attributes_for_write()
   return MutableAttributeAccessor(curves ? &curves->geometry : nullptr,
                                   curves::get_attribute_accessor_functions());
 }
+
+/** \} */
 
 }  // namespace blender::bke

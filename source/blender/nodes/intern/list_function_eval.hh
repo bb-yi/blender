@@ -11,6 +11,7 @@
 #include "FN_multi_function.hh"
 
 #include "NOD_geometry_exec.hh"
+#include "NOD_geometry_nodes_list.hh"
 
 namespace blender::nodes {
 
@@ -23,11 +24,22 @@ class ListFieldContext : public FieldContext {
                                ResourceScope & /*scope*/) const override;
 };
 
+class SampleIndexFunction : public mf::MultiFunction {
+  GListPtr list_;
+  mf::Signature signature_;
+
+ public:
+  SampleIndexFunction(GListPtr list);
+
+  void call(const IndexMask &mask, mf::Params params, mf::Context /*context*/) const override;
+  void hash_unique(UniqueHashBytes &hash) const override;
+};
+
 void execute_multi_function_on_value_variant__list(const MultiFunction &fn,
                                                    const Span<SocketValueVariant *> input_values,
                                                    const Span<SocketValueVariant *> output_values,
                                                    GeoNodesUserData *user_data);
 
-ListPtr evaluate_field_to_list(GField field, const int64_t count);
+GListPtr evaluate_field_to_list(GField field, const int64_t count);
 
 }  // namespace blender::nodes

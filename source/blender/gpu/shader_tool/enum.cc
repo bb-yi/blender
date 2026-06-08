@@ -46,10 +46,7 @@ void SourceProcessor::lower_enums(Parser &parser)
    */
 
   auto missing_underlying_type = [&](vector<Token> tokens) {
-    report_error_(tokens[0].line_number(),
-                  tokens[0].char_number(),
-                  tokens[0].line_str(),
-                  "enum declaration must explicitly use an underlying type");
+    report_error(tokens[0], "enum declaration must explicitly use an underlying type");
   };
 
   parser().foreach_match("MA{", missing_underlying_type);
@@ -83,14 +80,14 @@ void SourceProcessor::lower_enums(Parser &parser)
                           Token enum_type,
                           Scope enum_scope,
                           const bool is_host_shared) {
-    const string type_str = enum_type.str();
-    const string enum_name_str = enum_name.str();
+    const string type_str(enum_type.str());
+    const string enum_name_str(enum_name.str());
 
     string previous_value = "error_invalid_first_value";
     enum_scope.foreach_scope(ScopeType::Assignment, [&](Scope scope) {
       Token name_tok = scope.front().prev();
-      string name = name_tok.str();
-      string value = scope.str();
+      string name(name_tok.str());
+      string value(scope.str());
       if (value == placeholder_value) {
         value = "= " + previous_value + " + 1" + (enum_type.str()[0] == 'u' ? "u" : "");
       }
@@ -104,13 +101,11 @@ void SourceProcessor::lower_enums(Parser &parser)
       previous_value = name;
     });
     parser.insert_directive(enum_tok.prev(),
-                            "#define " + enum_name_str + " " + enum_type.str() + "\n");
+                            "#define " + enum_name_str + " " + string(enum_type.str()) + "\n");
     if (is_host_shared) {
       if (type_str != "uint32_t" && type_str != "int32_t") {
-        report_error_(
-            ERROR_TOK(enum_type),
-            "enum declaration must use uint32_t or int32_t underlying type for interface "
-            "compatibility");
+        report_error(enum_type,
+                     "Host shared enum declaration must use uint32_t or int32_t underlying type");
         return;
       }
 
@@ -128,19 +123,20 @@ void SourceProcessor::lower_enums(Parser &parser)
     process_enum(tokens[0], tokens[1], tokens[2], tokens[4], tokens[5].scope(), false);
   });
   parser().foreach_match("MA:A{", [&](vector<Token> tokens) {
-    process_enum(tokens[0], Token::invalid(), tokens[1], tokens[3], tokens[4].scope(), false);
+    process_enum(tokens[0], Token(parser), tokens[1], tokens[3], tokens[4].scope(), false);
   });
   parser().foreach_match("MS[[A]]A:A{", [&](vector<Token> tokens) {
     process_enum(tokens[0], tokens[1], tokens[7], tokens[9], tokens[10].scope(), true);
   });
   parser().foreach_match("M[[A]]A:A{", [&](vector<Token> tokens) {
-    process_enum(tokens[0], Token::invalid(), tokens[6], tokens[8], tokens[9].scope(), true);
+    process_enum(tokens[0], Token(parser), tokens[6], tokens[8], tokens[9].scope(), true);
   });
 
   parser.apply_mutations();
 
-  parser().foreach_token(
-      Enum, [&](Token tok) { report_error_(ERROR_TOK(tok), "invalid enum declaration"); });
+  parser().foreach_token(Enum, [&](Token tok) {
+    report_error(tok, "invalid enum declaration, likely missing underlying type");
+  });
 }
 
 }  // namespace blender::gpu::shader

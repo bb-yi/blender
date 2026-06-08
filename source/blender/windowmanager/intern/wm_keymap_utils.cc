@@ -166,7 +166,7 @@ wmKeyMap *WM_keymap_guess_from_context(const bContext *C)
         km_id = "Sculpt Curves";
         break;
       case CTX_MODE_PAINT_GREASE_PENCIL:
-        km_id = "Grease Pencil Paint Mode";
+        km_id = "Grease Pencil Draw Mode";
         break;
       case CTX_MODE_SCULPT_GREASE_PENCIL:
         km_id = "Grease Pencil Sculpt Mode";

@@ -88,7 +88,7 @@ ccl_device_inline
                                        tmin,
                                        isect_t,
                                        node_addr,
-                                       PATH_RAY_ALL_VISIBILITY,
+                                       PATH_RAY_VISIBILITY_ALL,
                                        dist);
 
         node_addr = __float_as_int(cnodes.z);
@@ -137,7 +137,8 @@ ccl_device_inline
           case PRIMITIVE_TRIANGLE: {
             /* intersect ray against primitive */
             for (; prim_addr < prim_addr2; prim_addr++) {
-              kernel_assert(kernel_data_fetch(prim_type, prim_addr) == type);
+              kernel_assert((kernel_data_fetch(prim_type, prim_addr) & PRIMITIVE_ALL) ==
+                            (type & PRIMITIVE_ALL));
 
               /* Only intersect with matching object, for instanced objects we
                * already know we are only intersecting the right object. */
@@ -173,7 +174,8 @@ ccl_device_inline
           case PRIMITIVE_MOTION_TRIANGLE: {
             /* intersect ray against primitive */
             for (; prim_addr < prim_addr2; prim_addr++) {
-              kernel_assert(kernel_data_fetch(prim_type, prim_addr) == type);
+              kernel_assert((kernel_data_fetch(prim_type, prim_addr) & PRIMITIVE_ALL) ==
+                            (type & PRIMITIVE_ALL));
 
               /* Only intersect with matching object, for instanced objects we
                * already know we are only intersecting the right object. */

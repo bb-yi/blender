@@ -19,6 +19,7 @@
 #include "scene/stats.h"
 #include "scene/volume.h"
 
+#include "util/hash.h"
 #include "util/log.h"
 #include "util/map.h"
 #include "util/murmurhash.h"
@@ -77,7 +78,7 @@ NODE_DEFINE(Object)
 
   SOCKET_NODE(geometry, "Geometry", Geometry::get_node_base_type());
   SOCKET_TRANSFORM(tfm, "Transform", transform_identity());
-  SOCKET_UINT(visibility, "Visibility", ~0);
+  SOCKET_UINT(visibility, "Visibility", PATH_RAY_VISIBILITY_ALL);
   SOCKET_COLOR(color, "Color", zero_float3());
   SOCKET_FLOAT(alpha, "Alpha", 0.0f);
   SOCKET_UINT(random_id, "Random ID", 0);
@@ -142,6 +143,13 @@ void Object::update_motion()
         motion.clear();
         return;
       }
+
+      if (have_motion && i == (motion.size() - 1)) {
+        /* Remove last motion when it is not actually set. */
+        motion.resize(motion.size() - 1);
+        return;
+      }
+
       /* Otherwise just copy center motion. */
       motion[i] = tfm;
     }
@@ -231,7 +239,7 @@ void Object::tag_update(Scene *scene)
     if (tfm_is_modified() || motion_is_modified()) {
       flag |= ObjectManager::TRANSFORM_MODIFIED;
       if (geometry->has_volume) {
-        scene->volume_manager->tag_update(this, flag);
+        scene->volume_manager->tag_update({this}, flag);
       }
     }
 
@@ -290,14 +298,15 @@ bool Object::is_traceable() const
 
 uint Object::visibility_for_tracing() const
 {
-  return SHADOW_CATCHER_OBJECT_VISIBILITY(is_shadow_catcher, visibility & PATH_RAY_ALL_VISIBILITY);
+  assert((visibility & ~uint(PATH_RAY_VISIBILITY_ALL)) == 0);
+  return SHADOW_CATCHER_OBJECT_VISIBILITY(is_shadow_catcher, visibility);
 }
 
-float Object::compute_volume_step_size() const
+float Object::compute_volume_step_size(Progress &progress) const
 {
   if (geometry->is_light()) {
     /* World volume. */
-    assert(static_cast<const Light *>(geometry)->get_light_type() == LIGHT_BACKGROUND);
+    assert(static_cast<const Light *>(geometry)->is_background_light());
     for (const Node *node : geometry->get_used_shaders()) {
       const Shader *shader = static_cast<const Shader *>(node);
       if (shader->has_volume) {
@@ -342,8 +351,8 @@ float Object::compute_volume_step_size() const
 
     for (Attribute &attr : volume->attributes.attributes) {
       if (attr.element == ATTR_ELEMENT_VOXEL) {
-        ImageHandle &handle = attr.data_voxel();
-        const ImageMetaData &metadata = handle.metadata();
+        ImageHandle &handle = attr.data_voxel_for_write();
+        const ImageMetaData &metadata = handle.metadata(progress);
         if (metadata.nanovdb_byte_size == 0) {
           continue;
         }
@@ -400,8 +409,8 @@ bool Object::usable_as_light() const
     return false;
   }
   /* Skip if we are not visible for BSDFs. */
-  if (!(get_visibility() &
-        (PATH_RAY_DIFFUSE | PATH_RAY_GLOSSY | PATH_RAY_TRANSMIT | PATH_RAY_VOLUME_SCATTER)))
+  if (!(get_visibility() & (PATH_RAY_VISIBILITY_DIFFUSE | PATH_RAY_VISIBILITY_GLOSSY |
+                            PATH_RAY_VISIBILITY_TRANSMIT | PATH_RAY_VISIBILITY_VOLUME_SCATTER)))
   {
     return false;
   }
@@ -453,8 +462,12 @@ void Object::adjust_volume_tfm(Transform &tfm)
        * meshes. The proper solution would be to improve intersection in the kernel to support
        * robust handling of multiple overlapping faces or use an all-hit intersection similar to
        * shadows. */
-      const float3 offset = transform_direction(
-          &tfm, make_float3(hash_uint_to_float(hash_string(name.c_str())) * 0.001f));
+      const uint name_hash = hash_string(name.c_str());
+      const float3 offset = transform_direction(&tfm,
+                                                make_float3(hash_uint2_to_float(name_hash, 0),
+                                                            hash_uint2_to_float(name_hash, 1),
+                                                            hash_uint2_to_float(name_hash, 2)) *
+                                                    0.001f);
       transform_translate(tfm, offset);
     }
   }
@@ -491,6 +504,40 @@ ObjectManager::ObjectManager()
 
 ObjectManager::~ObjectManager() = default;
 
+void ObjectManager::update_interactive_motion(Scene *scene)
+{
+  bool update = false;
+
+  parallel_for(blocked_range<size_t>(0, scene->objects.size(), 32),
+               [&](const blocked_range<size_t> &r) {
+                 for (size_t i = r.begin(); i != r.end(); i++) {
+                   Object *ob = scene->objects[i];
+
+                   const bool use_motion = ob->use_motion();
+
+                   array<Transform> motion = ob->get_motion();
+                   if (motion.empty()) {
+                     /* Can always store current matrix in motion array with a single element,
+                      * since that still causes 'use_motion()' to return false. */
+                     motion.resize(1);
+                   }
+                   motion[0] = ob->tfm;
+
+                   /* Trigger another update if there was motion compared to previous frame, so
+                    * that last movement does not stick around. */
+                   ob->set_motion(motion);
+
+                   if (use_motion && ob->motion_is_modified()) {
+                     update = true;
+                   }
+                 }
+               });
+
+  if (update) {
+    tag_update(scene, TRANSFORM_MODIFIED);
+  }
+}
+
 static float object_volume_density(const Transform &tfm, Geometry *geom)
 {
   if (geom->is_volume()) {
@@ -506,10 +553,10 @@ static float object_volume_density(const Transform &tfm, Geometry *geom)
 
 static int object_num_motion_verts(Geometry *geom)
 {
-  return (geom->is_mesh() || geom->is_volume()) ? static_cast<Mesh *>(geom)->get_verts().size() :
-         geom->is_hair()       ? static_cast<Hair *>(geom)->get_curve_keys().size() :
-         geom->is_pointcloud() ? static_cast<PointCloud *>(geom)->num_points() :
-                                 0;
+  return (geom->is_mesh() || geom->is_volume()) ? static_cast<Mesh *>(geom)->num_verts() :
+         geom->is_hair()                        ? static_cast<Hair *>(geom)->num_keys() :
+         geom->is_pointcloud()                  ? static_cast<PointCloud *>(geom)->num_points() :
+                                                  0;
 }
 
 void ObjectManager::device_update_object_transform(UpdateObjectTransformState *state,
@@ -545,7 +592,8 @@ void ObjectManager::device_update_object_transform(UpdateObjectTransformState *s
   kobject.random_number = random_number;
   kobject.particle_index = particle_index;
   kobject.motion_offset = 0;
-  kobject.normal_attr_offset = ATTR_STD_NOT_FOUND;
+  kobject.position_offset = ATTR_STD_NOT_FOUND;
+  kobject.normal_offset = ATTR_STD_NOT_FOUND;
   kobject.ao_distance = ob->ao_distance;
   kobject.receiver_light_set = ob->receiver_light_set >= LIGHT_LINK_SET_MAX ?
                                    0 :
@@ -564,22 +612,16 @@ void ObjectManager::device_update_object_transform(UpdateObjectTransformState *s
     flag |= SD_OBJECT_NEGATIVE_SCALE;
   }
 
-  /* TODO: why not check hair? */
-  if (geom->is_pointcloud()) {
-    if (geom->attributes.find(ATTR_STD_MOTION_VERTEX_POSITION)) {
+  if (geom->is_hair()) {
+    const Attribute *attr_P = geom->attributes.find(ATTR_STD_POSITION);
+    if (attr_P->has_motion()) {
       flag |= SD_OBJECT_HAS_VERTEX_MOTION;
     }
   }
-  else if (geom->is_mesh()) {
-    Mesh *mesh = static_cast<Mesh *>(geom);
-    if (mesh->attributes.find(ATTR_STD_MOTION_VERTEX_POSITION) ||
-        (mesh->get_subdivision_type() != Mesh::SUBDIVISION_NONE &&
-         mesh->subd_attributes.find(ATTR_STD_MOTION_VERTEX_POSITION)))
-    {
+  else if (geom->is_pointcloud()) {
+    const Attribute *attr_P = geom->attributes.find(ATTR_STD_POSITION);
+    if (attr_P->has_motion()) {
       flag |= SD_OBJECT_HAS_VERTEX_MOTION;
-    }
-    else if (mesh->attributes.find(ATTR_STD_CORNER_NORMAL)) {
-      flag |= SD_OBJECT_HAS_CORNER_NORMALS;
     }
   }
   else if (geom->is_volume()) {
@@ -590,8 +632,23 @@ void ObjectManager::device_update_object_transform(UpdateObjectTransformState *s
       kobject.velocity_scale = volume->get_velocity_scale();
     }
   }
+  else if (geom->is_mesh()) {
+    Mesh *mesh = static_cast<Mesh *>(geom);
+    const Attribute *attr_P = mesh->attributes.find(ATTR_STD_POSITION);
+    const Attribute *subd_attr_P = (mesh->get_subdivision_type() != Mesh::SUBDIVISION_NONE) ?
+                                       mesh->subd_attributes.find(ATTR_STD_POSITION) :
+                                       nullptr;
+    if (attr_P->has_motion() || (subd_attr_P && subd_attr_P->has_motion())) {
+      flag |= SD_OBJECT_HAS_VERTEX_MOTION;
+    }
+    else if (mesh->attributes.find(ATTR_STD_CORNER_NORMAL)) {
+      flag |= SD_OBJECT_HAS_CORNER_NORMALS;
+    }
+  }
 
-  if (state->need_motion == Scene::MOTION_PASS) {
+  if (state->need_motion == Scene::MOTION_PASS ||
+      state->need_motion == Scene::MOTION_PASS_INTERACTIVE)
+  {
     /* Clear motion array if there is no actual motion. */
     ob->update_motion();
 
@@ -640,7 +697,7 @@ void ObjectManager::device_update_object_transform(UpdateObjectTransformState *s
   kobject.dupli_generated[2] = ob->dupli_generated[2];
   kobject.dupli_uv[0] = ob->dupli_uv[0];
   kobject.dupli_uv[1] = ob->dupli_uv[1];
-  kobject.num_geom_steps = (geom->get_motion_steps() - 1) / 2;
+  kobject.num_geom_steps = geom->get_motion_steps();
   kobject.num_tfm_steps = ob->motion.size();
   kobject.numverts = object_num_motion_verts(geom);
   kobject.numprims = (geom->is_mesh() || geom->is_volume()) ?
@@ -747,7 +804,9 @@ void ObjectManager::device_update_transforms(DeviceScene *dscene, Scene *scene, 
   state.object_motion = nullptr;
   state.object_motion_pass = nullptr;
 
-  if (state.need_motion == Scene::MOTION_PASS) {
+  if (state.need_motion == Scene::MOTION_PASS ||
+      state.need_motion == Scene::MOTION_PASS_INTERACTIVE)
+  {
     state.object_motion_pass = dscene->object_motion_pass.alloc(OBJECT_MOTION_PASS_SIZE *
                                                                 scene->objects.size());
   }
@@ -796,7 +855,9 @@ void ObjectManager::device_update_transforms(DeviceScene *dscene, Scene *scene, 
   }
 
   dscene->objects.copy_to_device_if_modified();
-  if (state.need_motion == Scene::MOTION_PASS) {
+  if (state.need_motion == Scene::MOTION_PASS ||
+      state.need_motion == Scene::MOTION_PASS_INTERACTIVE)
+  {
     dscene->object_motion_pass.copy_to_device();
   }
   else if (state.need_motion == Scene::MOTION_BLUR) {
@@ -878,7 +939,7 @@ void ObjectManager::device_update(Device *device,
       }
 
       const Light *light = static_cast<const Light *>(object->get_geometry());
-      if (light->get_light_type() == LIGHT_BACKGROUND) {
+      if (light->is_background_light()) {
         dscene->data.background.object_index = object->index;
       }
     }
@@ -1034,26 +1095,56 @@ void ObjectManager::device_update_geom_offsets(Device * /*unused*/,
       update = true;
     }
 
-    /* Cached normal offset for quick lookup. */
-    int normal_attr_offset = ATTR_STD_NOT_FOUND;
-    if (geom->is_mesh()) {
-      normal_attr_offset = find_attribute(dscene->attributes_map.data(),
-                                          attr_map_offset,
-                                          PRIMITIVE_TRIANGLE,
-                                          ATTR_STD_CORNER_NORMAL)
-                               .offset;
-      if (normal_attr_offset == ATTR_STD_NOT_FOUND) {
-        normal_attr_offset = find_attribute(dscene->attributes_map.data(),
-                                            attr_map_offset,
-                                            PRIMITIVE_TRIANGLE,
-                                            ATTR_STD_VERTEX_NORMAL)
-                                 .offset;
+    /* Cached attribute offsets for quick lookup. */
+    int position_offset = ATTR_STD_NOT_FOUND;
+    int normal_offset = ATTR_STD_NOT_FOUND;
+    if (geom->is_mesh() || geom->is_volume()) {
+      position_offset = find_attribute(dscene->attributes_map.data(),
+                                       attr_map_offset,
+                                       PRIMITIVE_TRIANGLE,
+                                       ATTR_STD_POSITION)
+                            .offset;
+
+      normal_offset = find_attribute(dscene->attributes_map.data(),
+                                     attr_map_offset,
+                                     PRIMITIVE_TRIANGLE,
+                                     ATTR_STD_CORNER_NORMAL)
+                          .offset;
+      if (normal_offset == ATTR_STD_NOT_FOUND) {
+        normal_offset = find_attribute(dscene->attributes_map.data(),
+                                       attr_map_offset,
+                                       PRIMITIVE_TRIANGLE,
+                                       ATTR_STD_VERTEX_NORMAL)
+                            .offset;
       }
-      assert(normal_attr_offset != ATTR_STD_NOT_FOUND ||
+      assert(position_offset != ATTR_STD_NOT_FOUND ||
+             static_cast<Mesh *>(geom)->num_triangles() == 0);
+      assert(normal_offset != ATTR_STD_NOT_FOUND ||
              static_cast<Mesh *>(geom)->num_triangles() == 0);
     }
-    if (kobject.normal_attr_offset != normal_attr_offset) {
-      kobject.normal_attr_offset = normal_attr_offset;
+    else if (geom->is_hair()) {
+      position_offset = find_attribute(dscene->attributes_map.data(),
+                                       attr_map_offset,
+                                       PRIMITIVE_CURVE_THICK,
+                                       ATTR_STD_POSITION)
+                            .offset;
+      assert(position_offset != ATTR_STD_NOT_FOUND || static_cast<Hair *>(geom)->num_keys() == 0);
+    }
+    else if (geom->is_pointcloud()) {
+      position_offset = find_attribute(dscene->attributes_map.data(),
+                                       attr_map_offset,
+                                       PRIMITIVE_POINT,
+                                       ATTR_STD_POSITION)
+                            .offset;
+      assert(position_offset != ATTR_STD_NOT_FOUND ||
+             static_cast<PointCloud *>(geom)->num_points() == 0);
+    }
+    if (kobject.position_offset != position_offset) {
+      kobject.position_offset = position_offset;
+      update = true;
+    }
+    if (kobject.normal_offset != normal_offset) {
+      kobject.normal_offset = normal_offset;
       update = true;
     }
 
@@ -1087,7 +1178,8 @@ void ObjectManager::apply_static_transforms(DeviceScene *dscene, Scene *scene, P
   map<Geometry *, int> geometry_users;
   const Scene::MotionType need_motion = scene->need_motion();
   const bool motion_blur = need_motion == Scene::MOTION_BLUR;
-  const bool apply_to_motion = need_motion != Scene::MOTION_PASS;
+  const bool apply_to_motion = need_motion != Scene::MOTION_PASS &&
+                               need_motion != Scene::MOTION_PASS_INTERACTIVE;
   int i = 0;
 
   for (Object *object : scene->objects) {
@@ -1192,7 +1284,7 @@ string ObjectManager::get_cryptomatte_objects(Scene *scene)
 
   unordered_set<ustring> objects;
   for (Object *object : scene->objects) {
-    if (objects.count(object->name)) {
+    if (objects.contains(object->name)) {
       continue;
     }
     objects.insert(object->name);
@@ -1208,7 +1300,7 @@ string ObjectManager::get_cryptomatte_assets(Scene *scene)
   string manifest = "{";
   unordered_set<ustring> assets;
   for (Object *ob : scene->objects) {
-    if (assets.count(ob->asset_name)) {
+    if (assets.contains(ob->asset_name)) {
       continue;
     }
     assets.insert(ob->asset_name);

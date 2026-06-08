@@ -24,19 +24,22 @@ namespace blender::nodes::node_geo_split_to_instances_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Geometry>("Geometry")
+  b.add_input<decl::Geometry>("Geometry"_ustr)
       .supported_type({GeometryComponent::Type::Mesh,
                        GeometryComponent::Type::PointCloud,
                        GeometryComponent::Type::Curve,
                        GeometryComponent::Type::Instance})
       .description("Geometry to split into instances");
-  b.add_input<decl::Bool>("Selection").default_value(true).field_on_all().hide_value();
-  b.add_input<decl::Int>("Group ID").field_on_all().hide_value();
-  b.add_output<decl::Geometry>("Instances")
-      .propagate_all()
+  b.add_input<decl::Bool>("Selection"_ustr)
+      .default_value(true)
+      .evaluated_geometry_field()
+      .hide_value();
+  b.add_input<decl::Int>("Group ID"_ustr).evaluated_geometry_field().hide_value();
+  b.add_output<decl::Geometry>("Instances"_ustr)
+      .propagate_all_geometry()
       .description("All geometry groups as separate instances");
-  b.add_output<decl::Int>("Group ID")
-      .field_on_all()
+  b.add_output<decl::Int>("Group ID"_ustr)
+      .anonymous_attribute_output()
       .description("The group ID of each group instance");
 }
 
@@ -269,11 +272,11 @@ static void node_geo_exec(GeoNodeExecParams params)
   const bNode &node = params.node();
   const AttrDomain domain = AttrDomain(node.custom1);
 
-  GeometrySet src_geometry = params.extract_input<GeometrySet>("Geometry");
-  const Field<bool> selection_field = params.extract_input<Field<bool>>("Selection");
-  const Field<int> group_id_field = params.extract_input<Field<int>>("Group ID");
+  GeometrySet src_geometry = params.extract_input<GeometrySet>("Geometry"_ustr);
+  const Field<bool> selection_field = params.extract_input<Field<bool>>("Selection"_ustr);
+  const Field<int> group_id_field = params.extract_input<Field<int>>("Group ID"_ustr);
 
-  const NodeAttributeFilter &attribute_filter = params.get_attribute_filter("Instances");
+  const NodeAttributeFilter &attribute_filter = params.get_attribute_filter("Instances"_ustr);
 
   Map<int, std::unique_ptr<GeometrySet>> geometry_by_group_id;
 
@@ -311,7 +314,7 @@ static void node_geo_exec(GeoNodeExecParams params)
   auto dst_instances = std::make_unique<bke::Instances>(geometry_by_group_id.size());
 
   std::optional<std::string> dst_group_id_attribute_id =
-      params.get_output_anonymous_attribute_id_if_needed("Group ID");
+      params.get_output_anonymous_attribute_id_if_needed("Group ID"_ustr);
   if (dst_group_id_attribute_id) {
     SpanAttributeWriter<int> dst_group_id =
         dst_instances->attributes_for_write().lookup_or_add_for_write_span<int>(
@@ -333,10 +336,10 @@ static void node_geo_exec(GeoNodeExecParams params)
   geometry::debug_randomize_instance_order(dst_instances.get());
 
   GeometrySet dst_geometry = GeometrySet::from_instances(std::move(dst_instances));
-  dst_geometry.name = src_geometry.name;
+  dst_geometry.set_name(src_geometry.name());
   dst_geometry.copy_bundle_from(src_geometry);
 
-  params.set_output("Instances", std::move(dst_geometry));
+  params.set_output("Instances"_ustr, std::move(dst_geometry));
 }
 
 static void node_rna(StructRNA *srna)
@@ -353,7 +356,7 @@ static void node_rna(StructRNA *srna)
 static void node_register()
 {
   static bke::bNodeType ntype;
-  geo_node_type_base(&ntype, "GeometryNodeSplitToInstances", GEO_NODE_SPLIT_TO_INSTANCES);
+  geo_node_type_base(&ntype, "GeometryNodeSplitToInstances"_ustr, GEO_NODE_SPLIT_TO_INSTANCES);
   ntype.ui_name = "Split to Instances";
   ntype.ui_description = "Create separate geometries containing the elements from the same group";
   ntype.enum_name_legacy = "Split to Instances";

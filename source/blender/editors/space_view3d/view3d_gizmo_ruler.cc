@@ -202,7 +202,7 @@ static void ruler_item_as_string(
     }
     else {
       BKE_unit_value_as_string(
-          numstr, numstr_size, double(ruler_angle), prec, B_UNIT_ROTATION, unit, false);
+          numstr, numstr_size, double(ruler_angle), prec, B_UNIT_ROTATION, unit, false, true);
     }
   }
   else {
@@ -213,7 +213,7 @@ static void ruler_item_as_string(
     }
     else {
       BKE_unit_value_as_string_scaled(
-          numstr, numstr_size, ruler_len, prec, B_UNIT_LENGTH, unit, false);
+          numstr, numstr_size, ruler_len, prec, B_UNIT_LENGTH, unit, false, true);
     }
   }
 }
@@ -253,7 +253,7 @@ static bool view3d_ruler_pick(wmGizmoGroup *gzgroup,
               math::distance_squared(co_ss[1], mval),
               math::distance_squared(co_ss[2], mval),
           };
-          if (min_fff(UNPACK3(dist_points)) < RULER_PICK_DIST_SQ) {
+          if (std::min({UNPACK3(dist_points)}) < RULER_PICK_DIST_SQ) {
             co_index_best = min_axis_v3(dist_points);
           }
           else {
@@ -424,10 +424,11 @@ static bool view3d_ruler_item_mousemove(const bContext *C,
           ruler_info->constrain_mode != CONSTRAIN_MODE_OFF)
       {
 
+        const Main *bmain = CTX_data_main(C);
         Scene *scene = DEG_get_input_scene(depsgraph);
         ViewLayer *view_layer = DEG_get_input_view_layer(depsgraph);
         RegionView3D *rv3d = static_cast<RegionView3D *>(ruler_info->region->regiondata);
-        BKE_view_layer_synced_ensure(scene, view_layer);
+        BKE_view_layer_synced_ensure(*bmain, scene, view_layer);
         Object *ob = BKE_view_layer_active_object_get(view_layer);
         Object *obedit = OBEDIT_FROM_OBACT(ob);
 
@@ -441,8 +442,16 @@ static bool view3d_ruler_item_mousemove(const bContext *C,
         const int pivot_point = scene->toolsettings->transform_pivot_point;
         float3x3 mat;
 
-        ed::transform::calc_orientation_from_type_ex(
-            scene, view_layer, v3d, rv3d, ob, obedit, orient_index, pivot_point, mat.ptr());
+        ed::transform::calc_orientation_from_type_ex(*bmain,
+                                                     scene,
+                                                     view_layer,
+                                                     v3d,
+                                                     rv3d,
+                                                     ob,
+                                                     obedit,
+                                                     orient_index,
+                                                     pivot_point,
+                                                     mat.ptr());
 
         ruler_item->co = math::invert(mat) * ruler_item->co;
 
@@ -776,9 +785,9 @@ static void gizmo_ruler_draw(const bContext *C, wmGizmo *gz)
       float3 axis;
       float angle;
       const float px_scale = (ED_view3d_pixel_size_no_ui_scale(rv3d, ruler_item->co[1]) *
-                              min_fff(arc_size,
-                                      math::distance(co_ss[0], co_ss[1]) / 2.0f,
-                                      math::distance(co_ss[2], co_ss[1]) / 2.0f));
+                              std::min({arc_size,
+                                        math::distance(co_ss[0], co_ss[1]) / 2.0f,
+                                        math::distance(co_ss[2], co_ss[1]) / 2.0f}));
 
       dir_a = math::normalize(ruler_item->co[0] - ruler_item->co[1]);
       dir_b = math::normalize(ruler_item->co[2] - ruler_item->co[1]);

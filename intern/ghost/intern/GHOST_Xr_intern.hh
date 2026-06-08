@@ -14,6 +14,11 @@
 #include "GHOST_Types.hh"
 #include "GHOST_Xr_openxr_includes.hh"
 
+#include "CLG_log.h"
+
+/** Shared log handle for all GHOST XR translation units. */
+extern CLG_LogRef *LOG_GHOST_XR;
+
 #define CHECK_XR(call, error_msg) \
   { \
     XrResult _res = call; \

@@ -394,6 +394,7 @@ static void deg_debug_graphviz_node(DotExportContext &ctx,
     case NodeType::TRANSFORM:
     case NodeType::GEOMETRY:
     case NodeType::SEQUENCER:
+    case NodeType::COMPOSITOR:
     case NodeType::EVAL_POSE:
     case NodeType::BONE:
     case NodeType::SHADING:

@@ -51,6 +51,34 @@ bool is_auto_resync_enabled();
 
 }  // namespace bke::liboverride
 
+enum eID_OverrideLib_Op : short;
+enum eID_OverrideLib_PropTag : short;
+
+/** Some runtime-only tags for IDOverrideLibrary struct. */
+enum class IDOverrideLibraryTag {
+  /** This override needs to be reloaded. */
+  TAG_NEEDS_RELOAD = 1 << 0,
+
+  /**
+   * This override contains properties with forbidden changes, which should be restored to their
+   * linked reference value.
+   */
+  TAG_NEEDS_RESTORE = 1 << 1,
+
+  /**
+   * This override is detected as being cut from its hierarchy root. Temporarily used during
+   * resync process.
+   */
+  TAG_RESYNC_ISOLATED_FROM_ROOT = 1 << 2,
+  /**
+   * This override was detected as needing resync outside of the resync process (it is a 'really
+   * need resync' case, not a 'need resync for hierarchy reasons' one). Temporarily used during
+   * resync process.
+   */
+  TAG_NEED_RESYNC_ORIGINAL = 1 << 3,
+};
+ENUM_OPERATORS(IDOverrideLibraryTag);
+
 /**
  * Initialize empty overriding of \a reference_id by \a local_id.
  */
@@ -67,6 +95,10 @@ void BKE_lib_override_library_clear(IDOverrideLibrary *liboverride, bool do_id_u
  * Free given \a liboverride.
  */
 void BKE_lib_override_library_free(IDOverrideLibrary **liboverride, bool do_id_user);
+/** Set or clear runtime-only tags in given \a liboverride. */
+void BKE_lib_override_library_tag_set(IDOverrideLibrary &liboverride,
+                                      IDOverrideLibraryTag tag,
+                                      bool value);
 
 /**
  * Return the actual #IDOverrideLibrary data 'controlling' the given `id`, and the actual ID owning
@@ -97,7 +129,7 @@ bool BKE_lib_override_library_is_system_defined(const Main *bmain, const ID *id)
  * Check if given Override Property for given ID is animated (through a F-Curve in an Action, or
  * from a driver).
  *
- * \param liboverride_rna_prop: if not NULL, the RNA property matching the given path in the
+ * \param override_rna_prop: if not NULL, the RNA property matching the given path in the
  * `liboverride_prop`.
  * \param rnaprop_index: Array in the RNA property, 0 if unknown or irrelevant.
  */
@@ -366,8 +398,8 @@ bool BKE_lib_override_library_property_search_and_delete(IDOverrideLibrary *libo
  *
  * No-op if the property override cannot be found.
  *
- * \param from_rna_path: The RNA path of the property to change.
- * \param to_rna_path: The new RNA path.
+ * \param old_rna_path: The RNA path of the property to change.
+ * \param new_rna_path: The new RNA path.
  * The library override system will copy the string to its own memory;
  * the caller will retain ownership of the passed pointer.
  * \return True if the property was found (and thus changed), false if it wasn't found.
@@ -413,7 +445,7 @@ IDOverrideLibraryPropertyOperation *BKE_lib_override_library_property_operation_
  */
 IDOverrideLibraryPropertyOperation *BKE_lib_override_library_property_operation_get(
     IDOverrideLibraryProperty *liboverride_property,
-    short operation,
+    eID_OverrideLib_Op operation,
     const char *subitem_refname,
     const char *subitem_locname,
     const std::optional<ID *> &subitem_refid,
@@ -441,6 +473,14 @@ bool BKE_lib_override_library_property_operation_operands_validate(
     PropertyRNA *prop_dst,
     PropertyRNA *prop_src,
     PropertyRNA *prop_storage);
+
+/**
+ * Set the label (UI-only 'name') of the given operation.
+ */
+void BKE_lib_override_library_property_operation_ui_info_set(
+    IDOverrideLibraryPropertyOperation &liboverride_property_operation,
+    StringRefNull label,
+    StringRefNull tooltip);
 
 /**
  * Check against potential \a bmain.
@@ -542,18 +582,18 @@ void BKE_lib_override_library_id_hierarchy_reset(Main *bmain,
  * Set or clear given tag in all operations in that override property data.
  */
 void BKE_lib_override_library_operations_tag(IDOverrideLibraryProperty *liboverride_property,
-                                             short tag,
+                                             eID_OverrideLib_PropTag tag,
                                              bool do_set);
 /**
  * Set or clear given tag in all properties and operations in that override data.
  */
 void BKE_lib_override_library_properties_tag(IDOverrideLibrary *liboverride,
-                                             short tag,
+                                             eID_OverrideLib_PropTag tag,
                                              bool do_set);
 /**
  * Set or clear given tag in all properties and operations in that Main's ID override data.
  */
-void BKE_lib_override_library_main_tag(Main *bmain, short tag, bool do_set);
+void BKE_lib_override_library_main_tag(Main *bmain, eID_OverrideLib_PropTag tag, bool do_set);
 
 /**
  * Remove all tagged-as-unused properties and operations from that ID override data.
@@ -577,6 +617,11 @@ void BKE_lib_override_library_main_update(Main *bmain);
  * In case an ID is used by another liboverride ID, user may not be allowed to delete it.
  */
 bool BKE_lib_override_library_id_is_user_deletable(Main *bmain, ID *id);
+
+/**
+ * Return a stringified version of the given liboverride operation.
+ */
+StringRefNull BKE_lib_override_operation_as_string(const eID_OverrideLib_Op operation);
 
 /**
  * Debugging helper to show content of given liboverride data.

@@ -89,7 +89,7 @@ void register_node_type_sh_script()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeScript", SH_NODE_SCRIPT);
+  sh_node_type_base(&ntype, "ShaderNodeScript"_ustr, SH_NODE_SCRIPT);
   ntype.ui_name = "Script";
   ntype.ui_description =
       "Generate an OSL shader from a file or text data-block.\nNote: OSL shaders are not "

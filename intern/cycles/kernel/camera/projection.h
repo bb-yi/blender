@@ -28,6 +28,18 @@ ccl_device float2 direction_to_equirectangular_range(const float3 dir, const flo
   return make_float2(u, v);
 }
 
+ccl_device dual2 direction_to_equirectangular_range(const dual3 dir, const float4 range)
+{
+  if (is_zero(dir)) {
+    return make_zero<dual2>();
+  }
+
+  const dual1 u = (atan2(dir.y(), dir.x()) - range.y) / range.x;
+  const dual1 v = (acos(dir.z() / len(dir)) - range.w) / range.z;
+
+  return make_float2(u, v);
+}
+
 ccl_device float3 equirectangular_range_to_direction(const float u,
                                                      const float v,
                                                      const float4 range)
@@ -38,6 +50,11 @@ ccl_device float3 equirectangular_range_to_direction(const float u,
 }
 
 ccl_device float2 direction_to_equirectangular(const float3 dir)
+{
+  return direction_to_equirectangular_range(dir, make_float4(-M_2PI_F, M_PI_F, -M_PI_F, M_PI_F));
+}
+
+ccl_device dual2 direction_to_equirectangular(const dual3 dir)
 {
   return direction_to_equirectangular_range(dir, make_float4(-M_2PI_F, M_PI_F, -M_PI_F, M_PI_F));
 }
@@ -168,16 +185,16 @@ ccl_device float2 direction_to_fisheye_lens_polynomial(
   const float4 diff_coeffs = make_float4(1.0f, 2.0f, 3.0f, 4.0f) * coeffs;
 
   for (int i = 0; i < 20; i++) {
-    /*  Newton's method for finding roots
+    /** \name Newton's Method for Finding Roots
      *
-     *  Given is the result theta = distortion_model(r),
-     *  we need to find r.
-     *  Let F(r) := theta - distortion_model(r).
-     *  Then F(r) = 0 <=> distortion_model(r) = theta
-     *  Therefore we apply Newton's method for finding a root of F(r).
-     *  Newton step for the function F:
-     *  r_n+1 = r_n - F(r_n) / F'(r_n)
-     *  The addition in the implementation is due to canceling of signs.
+     * Given is the result theta = distortion_model(r),
+     * we need to find r.
+     * Let F(r) := theta - distortion_model(r).
+     * Then F(r) = 0 <=> distortion_model(r) = theta
+     * Therefore we apply Newton's method for finding a root of F(r).
+     * Newton step for the function F:
+     * r_n+1 = r_n - F(r_n) / F'(r_n)
+     * The addition in the implementation is due to canceling of signs.
      * \{ */
     const float old_r = r;
     const float r2 = r * r;
@@ -196,7 +213,7 @@ ccl_device float2 direction_to_fisheye_lens_polynomial(
   return make_float2(0.5f - uv.x / width, uv.y / height + 0.5f);
 }
 
-/* Mirror Ball <-> Cartesion direction */
+/* Mirror Ball <-> Cartesian direction. */
 
 ccl_device float3 mirrorball_to_direction(const float u, const float v)
 {
@@ -230,6 +247,19 @@ ccl_device float2 direction_to_mirrorball(float3 dir)
 
   const float u = 0.5f * (dir.x + 1.0f);
   const float v = 0.5f * (dir.z + 1.0f);
+
+  return make_float2(u, v);
+}
+
+ccl_device dual2 direction_to_mirrorball(dual3 dir)
+{
+  /* inverse of mirrorball_to_direction */
+  dir.val.y -= 1.0f;
+
+  dir = dir * 0.5f * inversesqrt(-0.5f * dir.y());
+
+  const dual1 u = 0.5f * (dir.x() + 1.0f);
+  const dual1 v = 0.5f * (dir.z() + 1.0f);
 
   return make_float2(u, v);
 }

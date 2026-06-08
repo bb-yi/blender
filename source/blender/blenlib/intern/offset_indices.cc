@@ -8,7 +8,11 @@
 
 #include "BLI_array_utils.hh"
 #include "BLI_offset_indices.hh"
+#include "BLI_sort.hh"
 #include "BLI_task.hh"
+#include "BLI_task_size_hints.hh"
+
+#include "atomic_ops.h"
 
 namespace blender::offset_indices {
 
@@ -71,17 +75,17 @@ void copy_group_sizes(const OffsetIndices<int> offsets,
                       const IndexMask &mask,
                       MutableSpan<int> sizes)
 {
-  mask.foreach_index_optimized<int64_t>(GrainSize(4096),
-                                        [&](const int64_t i) { sizes[i] = offsets[i].size(); });
+  mask.foreach_index_optimized<int64_t>([&](const int64_t i) { sizes[i] = offsets[i].size(); },
+                                        exec_mode::grain_size(4096));
 }
 
 void gather_group_sizes(const OffsetIndices<int> offsets,
                         const IndexMask &mask,
                         MutableSpan<int> sizes)
 {
-  mask.foreach_index_optimized<int64_t>(GrainSize(4096), [&](const int64_t i, const int64_t pos) {
-    sizes[pos] = offsets[i].size();
-  });
+  mask.foreach_index_optimized<int64_t>(
+      [&](const int64_t i, const int64_t pos) { sizes[pos] = offsets[i].size(); },
+      exec_mode::grain_size(4096));
 }
 
 void gather_group_sizes(const OffsetIndices<int> offsets,
@@ -149,11 +153,68 @@ void build_reverse_map(OffsetIndices<int> offsets, MutableSpan<int> r_map)
   });
 }
 
-void build_reverse_offsets(const Span<int> indices, MutableSpan<int> offsets)
+OffsetIndices<int> build_reverse_offsets(const Span<int> indices, MutableSpan<int> offsets)
 {
   BLI_assert(std::all_of(offsets.begin(), offsets.end(), [](int value) { return value == 0; }));
   array_utils::count_indices(indices, offsets);
-  offset_indices::accumulate_counts_to_offsets(offsets);
+  return offset_indices::accumulate_counts_to_offsets(offsets);
+}
+
+void sort_groups(const OffsetIndices<int> groups, MutableSpan<int> indices)
+{
+  threading::parallel_for(
+      groups.index_range(),
+      1024,
+      [&](const IndexRange range) {
+        for (const int64_t index : range) {
+          MutableSpan<int> group = indices.slice(groups[index]);
+          parallel_sort(group);
+        }
+      },
+      threading::accumulated_task_sizes(
+          [&](const IndexRange range) { return groups[range].size(); }));
+}
+
+void reverse_indices_in_groups(const Span<int> group_indices,
+                               const OffsetIndices<int> offsets,
+                               MutableSpan<int> results,
+                               const bool sort)
+{
+  if (group_indices.is_empty()) {
+    return;
+  }
+  BLI_assert(results.size() == group_indices.size());
+  BLI_assert(results.size() == offsets.total_size());
+  BLI_assert(*std::max_element(group_indices.begin(), group_indices.end()) < offsets.size());
+  BLI_assert(*std::min_element(group_indices.begin(), group_indices.end()) >= 0);
+
+  /* `counts` keeps track of how many elements have been added to each group, and is incremented
+   * atomically by many threads in parallel. `calloc` can be measurably faster than a parallel fill
+   * of zero. Alternatively the offsets could be copied and incremented directly, but the cost of
+   * the copy is slightly higher than the cost of `calloc`. */
+  Array<int> counts(offsets.size(), 0);
+  threading::parallel_for(group_indices.index_range(), 1024, [&](const IndexRange range) {
+    for (const int64_t i : range) {
+      const int group_index = group_indices[i];
+      const int index_in_group = atomic_fetch_and_add_int32(&counts[group_index], 1);
+      results[offsets[group_index][index_in_group]] = int(i);
+    }
+  });
+  if (sort) {
+    sort_groups(offsets, results);
+  }
+}
+
+GroupedSpan<int> build_groups_from_indices(const Span<int> indices,
+                                           const int groups_num,
+                                           Array<int> &offset_data,
+                                           Array<int> &index_data)
+{
+  offset_data = Array<int>(groups_num + 1, 0);
+  const OffsetIndices offsets = build_reverse_offsets(indices, offset_data.as_mutable_span());
+  index_data.reinitialize(offsets.total_size());
+  reverse_indices_in_groups(indices, offsets, index_data);
+  return {OffsetIndices<int>(offsets), index_data};
 }
 
 }  // namespace blender::offset_indices

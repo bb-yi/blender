@@ -4,8 +4,10 @@
 
 import numpy as np
 
+from .user_extensions import import_user_extensions, MutatingArgument
 from ..com.gltf2_io import Accessor
 from ..com.constants import ComponentType, DataType
+from .gltf2_io_binary_meshopt import MeshoptDecoder
 
 
 class BinaryData():
@@ -31,22 +33,38 @@ class BinaryData():
         return data[accessor_offset:]
 
     @staticmethod
+    def get_buffer_slice(gltf, buffer_idx, byte_offset, byte_length):
+        """Get a binary slice from a buffer."""
+        if buffer_idx in gltf.buffers.keys():
+            buffer = gltf.buffers[buffer_idx]
+        else:
+            # load buffer
+            gltf.load_buffer(buffer_idx)
+            buffer = gltf.buffers[buffer_idx]
+        return buffer[byte_offset:byte_offset + byte_length]
+
+    @staticmethod
     def get_buffer_view(gltf, buffer_view_idx):
         """Get binary data for buffer view."""
         buffer_view = gltf.data.buffer_views[buffer_view_idx]
 
-        if buffer_view.buffer in gltf.buffers.keys():
-            buffer = gltf.buffers[buffer_view.buffer]
-        else:
-            # load buffer
-            gltf.load_buffer(buffer_view.buffer)
-            buffer = gltf.buffers[buffer_view.buffer]
+        # Check if this buffer view is compressed with meshopt
+        if 'EXT_meshopt_compression' in (
+                buffer_view.extensions or {}) or 'KHR_meshopt_compression' in (
+                buffer_view.extensions or {}):
+            return MeshoptDecoder.get_buffer_view(gltf, buffer_view_idx)
 
-        byte_offset = buffer_view.byte_offset
-        if byte_offset is None:
-            byte_offset = 0
+        buffer_slice = MutatingArgument(None)
+        import_user_extensions('get_buffer_view_before_hook', gltf, buffer_view, buffer_slice)
 
-        return buffer[byte_offset:byte_offset + buffer_view.byte_length]
+        if buffer_slice.value is None:
+            byte_offset = buffer_view.byte_offset or 0
+            buffer_slice.value = BinaryData.get_buffer_slice(
+                gltf, buffer_view.buffer, byte_offset, buffer_view.byte_length)
+
+        import_user_extensions('get_buffer_view_after_hook', gltf, buffer_view, buffer_slice)
+
+        return buffer_slice.value
 
     @staticmethod
     def get_data_from_accessor(gltf, accessor_idx, cache=False):
@@ -68,7 +86,15 @@ class BinaryData():
             return gltf.accessor_cache[accessor_idx]
 
         accessor = gltf.data.accessors[accessor_idx]
-        array = BinaryData.decode_accessor_obj(gltf, accessor)
+
+        array = MutatingArgument(None)
+        import_user_extensions('decode_accessor_before_hook', gltf, accessor, array)
+
+        if array.value is None:
+            array.value = BinaryData.decode_accessor_obj(gltf, accessor)
+
+        import_user_extensions('decode_accessor_after_hook', gltf, accessor, array)
+        array = array.value
 
         if cache:
             gltf.accessor_cache[accessor_idx] = array

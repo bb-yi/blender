@@ -44,9 +44,17 @@ struct [[host_shared]] ShadowSceneData {
   bool32_t use_jitter;
   /* True when the auxiliary caster-id atlas is valid for Shader Info shadow classification. */
   bool32_t use_caster_atlas;
+  /* Output atomic counter instead of depth. */
+  bool32_t use_debug_cost;
   int _pad0;
   int _pad1;
-  int _pad2;
+};
+
+struct [[host_shared]] SceneData {
+  float time;
+  float frame;
+  uint _pad0;
+  uint _pad1;
 };
 
 /* Light Clamping. */
@@ -82,7 +90,9 @@ struct [[host_shared]] PipelineInfoData {
   int gbuffer_additional_data_layer_id;
   /* Use monochromatic transmittance for the forward pipeline. */
   bool32_t use_monochromatic_transmittance;
-  bool32_t _pad0;
+  /* True if the pipeline can use the raycast node.
+   * The value is valid only if `MAT_RAYCAST` is defined. */
+  bool32_t can_raycast;
   bool32_t _pad1;
   bool32_t _pad2;
 };
@@ -101,13 +111,11 @@ struct [[host_shared]] UniformData {
   struct ClampData clamp;
   struct FilmData film;
   struct HiZData hiz;
-  struct RayTraceData raytrace;
   struct RenderBuffersInfoData render_pass;
   struct SceneTimeData scene_time;
   struct ShadowSceneData shadow;
-  struct SubsurfaceData subsurface;
   struct VolumesInfoData volumes;
-  struct PipelineInfoData pipeline;
+  struct SceneData scene;
 };
 
 /**

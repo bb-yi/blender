@@ -33,6 +33,11 @@ namespace blender {
 struct Scene;
 
 BlenderRNA *RNA_create();
+/**
+ * Create a container for RNA types that are defined at runtime (in contrast to the main global
+ * #BlenderRNA which contains RNA types defined at startup from static data).
+ */
+BlenderRNA *RNA_create_runtime();
 void RNA_define_free(BlenderRNA *brna);
 void RNA_free(BlenderRNA *brna);
 
@@ -75,7 +80,7 @@ void RNA_def_struct_sdna_from(StructRNA *srna, const char *structname, const cha
  * Define the struct's String property used to retrieve the name of a PointerRNA of that type.
  * Used e.g. in several UI widget displaying content of RNA collections.
  *
- * \param allow_replace If true, allow replacing an already defined struct name property.
+ * \param allow_replace: If true, allow replacing an already defined struct name property.
  */
 void RNA_def_struct_name_property(StructRNA *srna, PropertyRNA *prop, bool allow_replace = false);
 void RNA_def_struct_nested(BlenderRNA *brna, StructRNA *srna, const char *structname);
@@ -101,6 +106,7 @@ void RNA_def_struct_register_funcs(StructRNA *srna,
  * Paths must be compatible with #RNA_path_resolve & related functions.
  */
 void RNA_def_struct_path_func(StructRNA *srna, const char *path);
+void RNA_def_struct_path_func_runtime(StructRNA *srna, StructPathFunc path_fn);
 /**
  * Only used in one case when we name the struct for the purpose of useful error messages.
  */
@@ -510,7 +516,7 @@ void RNA_def_property_deprecated(PropertyRNA *prop,
                                  short removal_version);
 
 /**
- * The values hare are a little confusing:
+ * The values here are a little confusing:
  *
  * \param step: Used as the value to increase/decrease when clicking on number buttons,
  * as well as scaling mouse input for click-dragging number buttons.
@@ -654,6 +660,10 @@ void RNA_def_property_string_funcs_runtime(PropertyRNA *prop,
 void RNA_def_property_string_search_func_runtime(PropertyRNA *prop,
                                                  StringPropertySearchFunc search_fn,
                                                  eStringPropertySearchFlag search_flag);
+void RNA_def_property_pointer_funcs_runtime(PropertyRNA *prop,
+                                            PointerPropertyGetFunc getfunc,
+                                            PointerPropertySetFunc setfunc,
+                                            PointerPropertyTypeFunc typefunc);
 
 void RNA_def_property_translation_context(PropertyRNA *prop, const char *context);
 
@@ -711,14 +721,11 @@ void RNA_def_property_free_pointers_set_py_data_callback(
 /* Utilities. */
 
 const char *RNA_property_typename(PropertyType type);
-#define IS_DNATYPE_FLOAT_COMPAT(_str) (strcmp(_str, "float") == 0 || strcmp(_str, "double") == 0)
-#define IS_DNATYPE_INT_COMPAT(_str) \
-  (strcmp(_str, "int") == 0 || strcmp(_str, "short") == 0 || strcmp(_str, "char") == 0 || \
-   strcmp(_str, "uchar") == 0 || strcmp(_str, "ushort") == 0 || strcmp(_str, "int8_t") == 0)
-#define IS_DNATYPE_BOOLEAN_COMPAT(_str) \
-  (IS_DNATYPE_INT_COMPAT(_str) || strcmp(_str, "int64_t") == 0 || strcmp(_str, "uint64_t") == 0)
 
-void RNA_identifier_sanitize(char *identifier, int property);
+bool RNA_validate_identifier(const char *identifier,
+                             bool is_property,
+                             const char **r_error = nullptr);
+void RNA_identifier_sanitize(char *identifier, bool is_property);
 
 /* Common arguments for length. */
 

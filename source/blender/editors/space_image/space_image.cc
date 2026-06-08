@@ -6,6 +6,8 @@
  * \ingroup spimage
  */
 
+#include <limits>
+
 #include "DNA_gpencil_legacy_types.h"
 #include "DNA_image_types.h"
 #include "DNA_mask_types.h"
@@ -31,6 +33,7 @@
 #include "RNA_define.hh"
 #include "RNA_enum_types.hh"
 
+#include "IMB_imbuf.hh"
 #include "IMB_imbuf_types.hh"
 
 #include "ED_asset_shelf.hh"
@@ -43,6 +46,8 @@
 #include "ED_transform.hh"
 #include "ED_util.hh"
 #include "ED_uvedit.hh"
+
+#include "NOD_compositor_gizmos.hh"
 
 #include "WM_api.hh"
 #include "WM_types.hh"
@@ -275,10 +280,6 @@ static void image_keymap(wmKeyConfig *keyconf)
 /* area+region dropbox definition */
 static void image_dropboxes() {}
 
-/**
- * \note take care not to get into feedback loop here,
- *       calling composite job causes viewer to refresh.
- */
 static void image_refresh(const bContext *C, ScrArea *area)
 {
   Scene *scene = CTX_data_scene(C);
@@ -287,16 +288,6 @@ static void image_refresh(const bContext *C, ScrArea *area)
 
   ima = ED_space_image(sima);
   BKE_image_user_frame_calc(ima, &sima->iuser, scene->r.cfra);
-
-  /* Check if we have to set the image from the edit-mesh. */
-  if (ima && (ima->source == IMA_SRC_VIEWER && sima->mode == SI_MODE_MASK)) {
-    if (scene->compositing_node_group) {
-      Mask *mask = ED_space_image_get_mask(sima);
-      if (mask) {
-        ED_node_compositor_job(C);
-      }
-    }
-  }
 }
 
 static void image_listener(const wmSpaceTypeListenerParams *params)
@@ -341,6 +332,8 @@ static void image_listener(const wmSpaceTypeListenerParams *params)
             BKE_image_partial_update_mark_full_update(sima->image);
           }
           ED_area_tag_redraw(area);
+          const ARegion *region = BKE_area_find_region_type(area, RGN_TYPE_WINDOW);
+          WM_gizmomap_tag_refresh(region->runtime->gizmo_map);
           break;
       }
       break;
@@ -362,7 +355,7 @@ static void image_listener(const wmSpaceTypeListenerParams *params)
     case NC_MASK: {
       Scene *scene = WM_window_get_active_scene(win);
       ViewLayer *view_layer = WM_window_get_active_view_layer(win);
-      BKE_view_layer_synced_ensure(scene, view_layer);
+      BKE_view_layer_synced_ensure(*params->bmain, scene, view_layer);
       Object *obedit = BKE_view_layer_edit_object_get(view_layer);
       if (ED_space_image_check_show_maskedit(sima, obedit)) {
         switch (wmn->data) {
@@ -406,7 +399,7 @@ static void image_listener(const wmSpaceTypeListenerParams *params)
         case ND_MODIFIER: {
           const Scene *scene = WM_window_get_active_scene(win);
           ViewLayer *view_layer = WM_window_get_active_view_layer(win);
-          BKE_view_layer_synced_ensure(scene, view_layer);
+          BKE_view_layer_synced_ensure(*params->bmain, scene, view_layer);
           Object *ob = BKE_view_layer_active_object_get(view_layer);
           /* \note With a geometry nodes modifier, the UVs on `ob` can change in response to
            * any change on `wmn->reference`. If we could track the upstream dependencies,
@@ -533,6 +526,90 @@ static void IMAGE_GGT_navigate(wmGizmoGroupType *gzgt)
   ui::VIEW2D_GGT_navigate_impl(gzgt, "IMAGE_GGT_navigate");
 }
 
+static void IMAGE_GGT_compositor_box_mask(wmGizmoGroupType *gzgt)
+{
+  gzgt->name = "Box Mask Node Widget";
+  gzgt->idname = "IMAGE_GGT_compositor_box_mask";
+
+  gzgt->flag |= WM_GIZMOGROUPTYPE_PERSISTENT | WM_GIZMOGROUPTYPE_DRAW_MODAL_ALL;
+
+  gzgt->poll = nodes::gizmos::box_mask_poll_space_image;
+  gzgt->setup = nodes::gizmos::box_mask_setup;
+  gzgt->setup_keymap = WM_gizmogroup_setup_keymap_generic_maybe_drag;
+  gzgt->draw_prepare = nodes::gizmos::bbox_draw_prepare_space_image;
+  gzgt->refresh = nodes::gizmos::box_mask_refresh;
+}
+
+static void IMAGE_GGT_compositor_crop(wmGizmoGroupType *gzgt)
+{
+  gzgt->name = "Crop Node Widget";
+  gzgt->idname = "IMAGE_GGT_compositor_crop";
+
+  gzgt->flag |= WM_GIZMOGROUPTYPE_PERSISTENT | WM_GIZMOGROUPTYPE_DRAW_MODAL_ALL;
+
+  gzgt->poll = nodes::gizmos::crop_poll_space_image;
+  gzgt->setup = nodes::gizmos::crop_setup;
+  gzgt->setup_keymap = WM_gizmogroup_setup_keymap_generic_maybe_drag;
+  gzgt->draw_prepare = nodes::gizmos::bbox_draw_prepare_space_image;
+  gzgt->refresh = nodes::gizmos::crop_refresh;
+}
+
+static void IMAGE_GGT_compositor_glare(wmGizmoGroupType *gzgt)
+{
+  gzgt->name = "Glare Node Widget";
+  gzgt->idname = "IMAGE_GGT_compositor_glare";
+
+  gzgt->flag |= WM_GIZMOGROUPTYPE_PERSISTENT | WM_GIZMOGROUPTYPE_DRAW_MODAL_ALL;
+
+  gzgt->poll = nodes::gizmos::glare_poll_space_image;
+  gzgt->setup = nodes::gizmos::glare_setup;
+  gzgt->setup_keymap = WM_gizmogroup_setup_keymap_generic_maybe_drag;
+  gzgt->draw_prepare = nodes::gizmos::glare_draw_prepare_space_image;
+  gzgt->refresh = nodes::gizmos::glare_refresh;
+}
+
+static void IMAGE_GGT_compositor_corner_pin(wmGizmoGroupType *gzgt)
+{
+  gzgt->name = "Corner Pin Node Widget";
+  gzgt->idname = "IMAGE_GGT_compositor_corner_pin";
+
+  gzgt->flag |= WM_GIZMOGROUPTYPE_PERSISTENT | WM_GIZMOGROUPTYPE_DRAW_MODAL_ALL;
+
+  gzgt->poll = nodes::gizmos::corner_pin_poll_space_image;
+  gzgt->setup = nodes::gizmos::corner_pin_setup;
+  gzgt->setup_keymap = WM_gizmogroup_setup_keymap_generic_maybe_drag;
+  gzgt->draw_prepare = nodes::gizmos::corner_pin_draw_prepare_space_image;
+  gzgt->refresh = nodes::gizmos::corner_pin_refresh;
+}
+
+static void IMAGE_GGT_compositor_ellipse_mask(wmGizmoGroupType *gzgt)
+{
+  gzgt->name = "Ellipse Mask Node Widget";
+  gzgt->idname = "IMAGE_GGT_compositor_ellipse_mask";
+
+  gzgt->flag |= WM_GIZMOGROUPTYPE_PERSISTENT | WM_GIZMOGROUPTYPE_DRAW_MODAL_ALL;
+
+  gzgt->poll = nodes::gizmos::ellipse_mask_poll_space_image;
+  gzgt->setup = nodes::gizmos::ellipse_mask_setup;
+  gzgt->setup_keymap = WM_gizmogroup_setup_keymap_generic_maybe_drag;
+  gzgt->draw_prepare = nodes::gizmos::bbox_draw_prepare_space_image;
+  gzgt->refresh = nodes::gizmos::box_mask_refresh;
+}
+
+static void IMAGE_GGT_compositor_split(wmGizmoGroupType *gzgt)
+{
+  gzgt->name = "Split Node Widget";
+  gzgt->idname = "IMAGE_GGT_compositor_split";
+
+  gzgt->flag |= WM_GIZMOGROUPTYPE_PERSISTENT | WM_GIZMOGROUPTYPE_DRAW_MODAL_ALL;
+
+  gzgt->poll = nodes::gizmos::split_poll_space_image;
+  gzgt->setup = nodes::gizmos::split_setup;
+  gzgt->setup_keymap = WM_gizmogroup_setup_keymap_generic_maybe_drag;
+  gzgt->draw_prepare = nodes::gizmos::bbox_draw_prepare_space_image;
+  gzgt->refresh = nodes::gizmos::split_refresh;
+}
+
 static void image_widgets()
 {
   const wmGizmoMapType_Params params{SPACE_IMAGE, RGN_TYPE_WINDOW};
@@ -544,6 +621,13 @@ static void image_widgets()
   WM_gizmogrouptype_append(IMAGE_GGT_gizmo2d_rotate);
 
   WM_gizmogrouptype_append_and_link(gzmap_type, IMAGE_GGT_navigate);
+
+  WM_gizmogrouptype_append_and_link(gzmap_type, IMAGE_GGT_compositor_box_mask);
+  WM_gizmogrouptype_append_and_link(gzmap_type, IMAGE_GGT_compositor_crop);
+  WM_gizmogrouptype_append_and_link(gzmap_type, IMAGE_GGT_compositor_glare);
+  WM_gizmogrouptype_append_and_link(gzmap_type, IMAGE_GGT_compositor_corner_pin);
+  WM_gizmogrouptype_append_and_link(gzmap_type, IMAGE_GGT_compositor_ellipse_mask);
+  WM_gizmogrouptype_append_and_link(gzmap_type, IMAGE_GGT_compositor_split);
 }
 
 /************************** main region ***************************/
@@ -566,12 +650,6 @@ static void image_main_region_set_view2d(SpaceImage *sima, ARegion *region)
   int winx = BLI_rcti_size_x(&region->winrct) + 1;
   int winy = BLI_rcti_size_y(&region->winrct) + 1;
 
-  /* For region overlap, move center so image doesn't overlap header. */
-  const rcti *visible_rect = ED_region_visible_rect(region);
-  const int visible_winy = BLI_rcti_size_y(visible_rect) + 1;
-  int visible_centerx = 0;
-  int visible_centery = visible_rect->ymin + (visible_winy - winy) / 2;
-
   region->v2d.tot.xmin = 0;
   region->v2d.tot.ymin = 0;
   region->v2d.tot.xmax = w;
@@ -582,11 +660,14 @@ static void image_main_region_set_view2d(SpaceImage *sima, ARegion *region)
   region->v2d.mask.ymax = winy;
 
   /* which part of the image space do we see? */
-  float x1 = region->winrct.xmin + visible_centerx + (winx - sima->zoom * w) / 2.0f;
-  float y1 = region->winrct.ymin + visible_centery + (winy - sima->zoom * h) / 2.0f;
+  float x1 = region->winrct.xmin + (winx - sima->zoom * w) / 2.0f;
+  float y1 = region->winrct.ymin + (winy - sima->zoom * h) / 2.0f;
 
-  x1 -= sima->zoom * sima->xof;
-  y1 -= sima->zoom * sima->yof;
+  /* Add half pixel offsets and corrective translation to match image drawing logic exactly, see
+   * compute_screen_space_to_sampler_space_transformation for reference. */
+  const float2 corrective_translation = float2(std::numeric_limits<float>::epsilon() * 10e3f);
+  x1 -= sima->zoom * (sima->xof + 0.5f - corrective_translation.x);
+  y1 -= sima->zoom * (sima->yof + 0.5f - corrective_translation.y);
 
   /* relative display right */
   region->v2d.cur.xmin = ((region->winrct.xmin - x1) / sima->zoom);
@@ -700,7 +781,7 @@ static void image_main_region_draw(const bContext *C, ARegion *region)
         &render_region, center_x, render_size_x + center_x, center_y, render_size_y + center_y);
     ui::view2d_view_to_region(&region->v2d, 0.0f, 0.0f, &x, &y);
 
-    ED_region_image_render_region_draw(
+    ED_region_render_region_draw(
         x, y, &render_region, zoomx, zoomy, sima->overlay.passepartout_alpha);
   }
 
@@ -714,7 +795,7 @@ static void image_main_region_draw(const bContext *C, ARegion *region)
      * the image is locked when calling #ED_space_image_acquire_buffer. */
     float zoomx, zoomy;
     ED_space_image_get_zoom(sima, region, &zoomx, &zoomy);
-    ImBuf *ibuf = ED_space_image_acquire_buffer(sima, &lock, 0);
+    ImBuf *ibuf = ED_space_image_acquire_buffer(sima, &lock, 0, false);
     if (ibuf) {
       int x, y;
       rctf frame;
@@ -834,6 +915,12 @@ static void image_main_region_listener(const wmRegionListenerParams *params)
         }
       }
       break;
+    case NC_NODE:
+      if (ELEM(wmn->action, NA_EDITED, NA_SELECTED)) {
+        WM_gizmomap_tag_refresh(region->runtime->gizmo_map);
+        ED_region_tag_redraw(region);
+      }
+      break;
     case NC_SCREEN:
       if (ELEM(wmn->data, ND_LAYER)) {
         ED_region_tag_redraw(region);
@@ -895,14 +982,14 @@ static void image_buttons_region_draw(const bContext *C, ARegion *region)
 {
   SpaceImage *sima = CTX_wm_space_image(C);
   Scene *scene = CTX_data_scene(C);
-  void *lock;
-  /* TODO(lukas): Support tiles in scopes? */
-  ImBuf *ibuf = ED_space_image_acquire_buffer(sima, &lock, 0);
   /* XXX performance regression if name of scopes category changes! */
   PanelCategoryStack *category = ui::panel_category_active_find(region, "Scopes");
 
   /* only update scopes if scope category is active */
   if (category) {
+    /* TODO(lukas): Support tiles in scopes? */
+    void *lock;
+    ImBuf *ibuf = ED_space_image_acquire_buffer(sima, &lock, 0, true);
     if (ibuf) {
       if (!sima->scopes.ok) {
         BKE_histogram_update_sample_line(
@@ -915,8 +1002,8 @@ static void image_buttons_region_draw(const bContext *C, ARegion *region)
         ED_space_image_scopes_update(C, sima, ibuf, false);
       }
     }
+    ED_space_image_release_buffer(sima, ibuf, lock);
   }
-  ED_space_image_release_buffer(sima, ibuf, lock);
 
   /* Layout handles details. */
   ED_region_panels_draw(C, region);
@@ -1158,7 +1245,7 @@ static void image_space_subtype_set(ScrArea *area, int value)
     if (sima->mode != SI_MODE_UV) {
       sima->mode_prev = sima->mode;
     }
-    sima->mode = value;
+    sima->mode = eSpaceImage_Mode(value);
   }
   else {
     sima->mode = sima->mode_prev;

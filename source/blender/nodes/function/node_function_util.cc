@@ -26,7 +26,7 @@ static bool fn_node_poll_default(const bke::bNodeType * /*ntype*/,
 }
 
 void fn_node_type_base(bke::bNodeType *ntype,
-                       std::string idname,
+                       UString idname,
                        const std::optional<int16_t> legacy_type)
 {
   bke::node_type_base(*ntype, idname, legacy_type);
@@ -47,7 +47,7 @@ static bool fn_cmp_node_poll_default(const bke::bNodeType * /*ntype*/,
 }
 
 void fn_cmp_node_type_base(bke::bNodeType *ntype,
-                           std::string idname,
+                           UString idname,
                            const std::optional<int16_t> legacy_type)
 {
   bke::node_type_base(*ntype, idname, legacy_type);

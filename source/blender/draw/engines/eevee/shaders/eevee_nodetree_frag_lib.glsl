@@ -6,12 +6,15 @@
 /* This file must replaced at runtime. The following content is only a possible implementation. */
 #pragma runtime_generated
 
-#include "eevee_geom_types_lib.glsl"
-#include "eevee_nodetree_lib.glsl"
+#include "eevee_geom_types_lib.bsl.hh"
+#include "eevee_nodetree_lib.bsl.hh"
 
 /* Loading of the attributes into GlobalData. */
-void attrib_load(WorldPoint domain) {}
-void attrib_load(VolumePoint domain) {}
+void attrib_load(WorldPoint /*domain*/) {}
+void attrib_load(VolumePoint /*domain*/) {}
+
+#ifndef NODETREE_FUNCTIONS /* Needed for linting. */
+#  define NODETREE_FUNCTIONS
 
 /* Material graph connected to the displacement output. */
 float3 nodetree_displacement()
@@ -20,7 +23,7 @@ float3 nodetree_displacement()
 }
 
 /* Material graph connected to the surface output. */
-Closure nodetree_surface(float closure_rand)
+Closure nodetree_surface(float /*closure_rand*/)
 {
   return Closure(0);
 }
@@ -45,4 +48,6 @@ float nodetree_depth_offset()
 
 /* Replaced by define at runtime. */
 /* TODO(fclem): Find a way to pass material parameters inside the material UBO. */
-float thickness_mode = 1.0f;
+ThicknessMode thickness_mode = ThicknessMode::Slab;
+
+#endif

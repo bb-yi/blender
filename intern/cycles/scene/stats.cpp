@@ -8,6 +8,8 @@
 
 #include "util/string.h"
 
+#include <cinttypes>
+
 CCL_NAMESPACE_BEGIN
 
 static int kIndentNumSpaces = 2;
@@ -220,8 +222,110 @@ ImageStats::ImageStats() = default;
 string ImageStats::full_report(const int indent_level)
 {
   const string indent(indent_level * kIndentNumSpaces, ' ');
+  const string double_indent = indent + string(kIndentNumSpaces, ' ');
+  const string triple_indent = double_indent + string(kIndentNumSpaces, ' ');
   string result;
-  result += indent + "Textures:\n" + textures.full_report(indent_level + 1);
+
+  /* Full images (non-tiled). */
+  if (full_images.total_size > 0) {
+    result += indent + "Full Images:\n";
+    vector<NamedSizeEntry> sorted_entries = full_images.entries;
+    sort(sorted_entries.begin(), sorted_entries.end(), namedSizeEntryComparator);
+    for (const NamedSizeEntry &entry : sorted_entries) {
+      result += string_printf("%s%-32s %s (%s)\n",
+                              double_indent.c_str(),
+                              entry.name.c_str(),
+                              string_human_readable_size(entry.size).c_str(),
+                              string_human_readable_number(entry.size).c_str());
+    }
+  }
+
+  /* Tiled image statistics. */
+  if (!tiled_images.empty()) {
+    result += indent + "Tiled Images:\n";
+    for (const ImageTileStats &img : tiled_images) {
+      result += string_printf("%s%-32s %s (%s)\n",
+                              double_indent.c_str(),
+                              img.name.c_str(),
+                              string_human_readable_size(img.size).c_str(),
+                              string_human_readable_number(img.size).c_str());
+      for (const ImageMipLevelStats &mip : img.mip_levels) {
+        const double mip_percent = (mip.tiles_total > 0) ?
+                                       (100.0 * mip.tiles_loaded / mip.tiles_total) :
+                                       0.0;
+        result += string_printf("%s%dx%d: %d / %d tiles (%.1f%%)\n",
+                                triple_indent.c_str(),
+                                mip.width,
+                                mip.height,
+                                mip.tiles_loaded,
+                                mip.tiles_total,
+                                mip_percent);
+      }
+    }
+  }
+
+  /* Summary. */
+  if (full_images.total_size > 0) {
+    result += string_printf("%sFull image memory: %s (%s)\n",
+                            indent.c_str(),
+                            string_human_readable_size(full_images.total_size).c_str(),
+                            string_human_readable_number(full_images.total_size).c_str());
+  }
+  if (tiled_images_size > 0) {
+    result += string_printf("%sTiled image memory: %s (%s)\n",
+                            indent.c_str(),
+                            string_human_readable_size(tiled_images_size).c_str(),
+                            string_human_readable_number(tiled_images_size).c_str());
+  }
+  if (tiled_images_peak_size > 0) {
+    result += string_printf("%sPeak tiled image memory: %s (%s)\n",
+                            indent.c_str(),
+                            string_human_readable_size(tiled_images_peak_size).c_str(),
+                            string_human_readable_number(tiled_images_peak_size).c_str());
+  }
+  if (overhead_size > 0) {
+    result += string_printf("%sOverhead image memory: %s (%s)\n",
+                            indent.c_str(),
+                            string_human_readable_size(overhead_size).c_str(),
+                            string_human_readable_number(overhead_size).c_str());
+  }
+  const size_t total_memory = full_images.total_size + tiled_images_size + overhead_size;
+  result += string_printf("%sTotal image memory: %s (%s)\n",
+                          indent.c_str(),
+                          string_human_readable_size(total_memory).c_str(),
+                          string_human_readable_number(total_memory).c_str());
+  const size_t peak_total_memory = full_images.total_size + tiled_images_peak_size + overhead_size;
+  if (tiled_images_peak_size > 0) {
+    result += string_printf("%sPeak total image memory: %s (%s)\n",
+                            indent.c_str(),
+                            string_human_readable_size(peak_total_memory).c_str(),
+                            string_human_readable_number(peak_total_memory).c_str());
+  }
+
+  if (eviction.tiles_loaded > 0) {
+    result += string_printf(
+        "%sTiles:\n"
+        "%sLoaded: %" PRId64
+        "\n"
+        "%sPeak: %" PRId64
+        " (%.1f%%)\n"
+        "%sEvicted: %" PRId64
+        " (%.1f%%)\n"
+        "%sReloaded: %" PRId64 " (%.1f%%)\n",
+        indent.c_str(),
+        double_indent.c_str(),
+        eviction.tiles_loaded,
+        double_indent.c_str(),
+        eviction.peak_loaded,
+        100.0 * eviction.peak_loaded / eviction.tiles_loaded,
+        double_indent.c_str(),
+        eviction.tiles_evicted,
+        100.0 * eviction.tiles_evicted / eviction.tiles_loaded,
+        double_indent.c_str(),
+        eviction.tiles_reloaded,
+        100.0 * eviction.tiles_reloaded / eviction.tiles_loaded);
+  }
+
   return result;
 }
 

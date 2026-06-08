@@ -1,9 +1,9 @@
 
 msgid ""
 msgstr ""
-"Project-Id-Version: Blender 5.1.0 Beta (b'5a04f1d246f1')\n"
+"Project-Id-Version: Blender 5.2.0 Alpha (b'8764d33c658b')\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-03-11 11:01+0000\n"
+"POT-Creation-Date: 2026-06-01 07:36+0000\n"
 "PO-Revision-Date: 2025-07-23 15:20+0000\n"
 "Last-Translator: Anonymous <noreply@weblate.org>\n"
 "Language-Team: Kyrgyz <https://translate.blender.org/projects/blender-ui/ui/ky/>\n"
@@ -1089,6 +1089,10 @@ msgid "Display Settings"
 msgstr "Көрсөтүү ырастоолору"
 
 
+msgid "Restore Frame"
+msgstr "Кадрды калыбына келтирүү"
+
+
 msgid "Sync Mode"
 msgstr "Синхрондоштуруу режими"
 
@@ -1294,24 +1298,24 @@ msgid "Mask Layers"
 msgstr "Маска каттары"
 
 
-msgid "UV"
-msgstr "UV"
-
-
 msgid "Mirror"
 msgstr "Чагылтуу"
 
 
-msgid "Tracking"
-msgstr "Трекинг"
+msgid "Import"
+msgstr "Импорттоо"
 
 
 msgid "Apply"
 msgstr "Колдонуу"
 
 
-msgid "Import"
-msgstr "Импорттоо"
+msgid "UV"
+msgstr "UV"
+
+
+msgid "Tracking"
+msgstr "Трекинг"
 
 
 msgctxt "MovieClip"
@@ -1630,6 +1634,10 @@ msgstr "Каналдарды ташуу"
 
 msgid "Move"
 msgstr "Ташуу"
+
+
+msgid "Search"
+msgstr "Издөө"
 
 
 msgctxt "Operator"
@@ -2228,10 +2236,6 @@ msgid "Cancel Animation"
 msgstr "Анимацияны жокко чыгаруу"
 
 
-msgid "Restore Frame"
-msgstr "Кадрды калыбына келтирүү"
-
-
 msgctxt "Operator"
 msgid "Play Animation"
 msgstr "Анимацияны ойнотуу"
@@ -2601,10 +2605,6 @@ msgid "Development"
 msgstr "Иштетүү"
 
 
-msgid "Styles"
-msgstr "Стилдер"
-
-
 msgctxt "Operator"
 msgid "Draw"
 msgstr "Тартуу"
@@ -2618,6 +2618,10 @@ msgstr "Тегерек"
 msgctxt "Operator"
 msgid "Line"
 msgstr "Түз сызык"
+
+
+msgid "Styles"
+msgstr "Стилдер"
 
 
 msgid "Add/Replace"
@@ -2889,10 +2893,6 @@ msgid "Radians"
 msgstr "Радиандар"
 
 
-msgid "Search"
-msgstr "Издөө"
-
-
 msgctxt "WindowManager"
 msgid "Window"
 msgstr "Терезе"
@@ -3003,6 +3003,11 @@ msgid "Report a Bug"
 msgstr "Ката жөнүндө маалымдоо"
 
 
+msgctxt "Operator"
+msgid "Clear"
+msgstr "Тазалоо"
+
+
 msgid "Description:"
 msgstr "Баяндамасы:"
 
@@ -3072,11 +3077,6 @@ msgstr "Тартуу:"
 
 msgid "Transform:"
 msgstr "Өзгөртүү:"
-
-
-msgctxt "Operator"
-msgid "Clear"
-msgstr "Тазалоо"
 
 
 msgctxt "Operator"
@@ -3168,13 +3168,13 @@ msgstr "Астынан"
 
 
 msgctxt "Operator"
-msgid "Quit"
-msgstr "Чыгуу"
+msgid "Save Copy..."
+msgstr "Көчүрмөсүн сактоо..."
 
 
 msgctxt "Operator"
-msgid "Save Copy..."
-msgstr "Көчүрмөсүн сактоо..."
+msgid "Quit"
+msgstr "Чыгуу"
 
 
 msgctxt "Operator"
@@ -3300,6 +3300,11 @@ msgstr "Тез оңдоо"
 
 msgid "Untitled"
 msgstr "Аты жок"
+
+
+msgctxt "Key"
+msgid "Key"
+msgstr "Ачкыч"
 
 
 msgid "Cancel"
@@ -3626,11 +3631,6 @@ msgstr "FPS: %i"
 
 msgid "(Smooth)"
 msgstr "(тегиз)"
-
-
-msgctxt "Key"
-msgid "Key"
-msgstr "Ачкыч"
 
 
 msgid "Modify"

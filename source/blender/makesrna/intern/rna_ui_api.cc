@@ -29,6 +29,7 @@ namespace blender {
 
 const EnumPropertyItem rna_enum_icon_items[] = {
 #include "UI_icons.hh"
+
     {0, nullptr, 0, nullptr, nullptr},
 };
 
@@ -46,6 +47,11 @@ static const EnumPropertyItem popup_draw_direction_items[] = {
     {0, nullptr, 0, nullptr, nullptr},
 };
 }  // namespace blender
+
+enum class TextAlignAnchor : int {
+  Left = 0,
+  Right = 1,
+};
 
 #ifdef RNA_RUNTIME
 
@@ -105,6 +111,38 @@ std::optional<StringRefNull> rna_translate_ui_text(
   return BLT_pgettext(BLT_I18NCONTEXT_DEFAULT, text);
 }
 
+static void rna_uiItemTextBox(Layout *layout,
+                              bContext *C,
+                              PointerRNA *ptr,
+                              const char *propname,
+                              PointerRNA *state_ptr,
+                              const char *placeholder,
+                              const char *text_ctxt,
+                              bool translate)
+{
+  PropertyRNA *prop = RNA_struct_find_property(ptr, propname);
+
+  if (!prop) {
+    RNA_warning_bare("UILayout.textbox(): property not found: %s.%s",
+                     RNA_struct_identifier(ptr->type),
+                     propname);
+    return;
+  }
+
+  std::optional<StringRefNull> placeholder_opt = std::nullopt;
+
+  if (placeholder) {
+    placeholder_opt = rna_translate_ui_text(placeholder, text_ctxt, nullptr, prop, translate);
+  }
+
+  if (state_ptr && !RNA_pointer_is_null(state_ptr)) {
+    layout->textbox_with_state(ptr, propname, state_ptr->data_as<TextboxState>(), placeholder_opt);
+  }
+  else {
+    layout->textbox(C, ptr, propname, placeholder_opt);
+  }
+}
+
 static void rna_uiItemR(Layout *layout,
                         PointerRNA *ptr,
                         const char *propname,
@@ -122,7 +160,8 @@ static void rna_uiItemR(Layout *layout,
                         bool emboss,
                         int index,
                         int icon_value,
-                        bool invert_checkbox)
+                        bool invert_checkbox,
+                        int align)
 {
   PropertyRNA *prop = RNA_struct_find_property(ptr, propname);
   ui::eUI_Item_Flag flag = UI_ITEM_NONE;
@@ -171,6 +210,9 @@ static void rna_uiItemR(Layout *layout,
   }
   if (invert_checkbox) {
     flag |= ui::ITEM_R_CHECKBOX_INVERT;
+  }
+  if (align == int(TextAlignAnchor::Right)) {
+    flag |= ui::ITEM_R_TEXT_RIGHT;
   }
 
   layout->prop(ptr, prop, index, 0, flag, text, icon, placeholder_str);
@@ -536,6 +578,25 @@ static void rna_uiItemL(Layout *layout,
   layout->label(text.value_or(""), icon);
 }
 
+static void rna_layout_link(Layout *layout,
+                            const char *url,
+                            const char *name,
+                            const char *text_ctxt,
+                            bool translate,
+                            int icon,
+                            int icon_value)
+{
+  /* Get translated name (label). */
+  std::optional<StringRefNull> text = rna_translate_ui_text(
+      name, text_ctxt, nullptr, nullptr, translate);
+
+  if (icon_value && !icon) {
+    icon = icon_value;
+  }
+
+  layout->link(url, text.value_or(""), icon);
+}
+
 static void rna_uiItemM(Layout *layout,
                         const char *menuname,
                         const char *name,
@@ -782,19 +843,19 @@ void rna_template_list(Layout *layout,
     flags |= ui::TEMPLATE_LIST_SORT_LOCK;
   }
 
-  ui::template_list(layout,
-                    C,
-                    listtype_name,
-                    list_id,
-                    dataptr,
-                    propname,
-                    active_dataptr,
-                    active_propname,
-                    item_dyntip_propname,
-                    rows,
-                    maxrows,
-                    layout_type,
-                    flags);
+  ui::template_uilist(layout,
+                      C,
+                      listtype_name,
+                      list_id,
+                      dataptr,
+                      propname,
+                      active_dataptr,
+                      active_propname,
+                      item_dyntip_propname,
+                      rows,
+                      maxrows,
+                      layout_type,
+                      flags);
 }
 
 static void rna_template_cache_file(Layout *layout,
@@ -836,17 +897,17 @@ static void rna_template_cache_file_time_settings(Layout *layout,
   ui::template_cache_file_time_settings(layout, &fileptr);
 }
 
-static void rna_template_list_flags(Layout *layout,
-                                    bContext *C,
-                                    PointerRNA *ptr,
-                                    const char *propname)
+static void rna_template_uilist_flags(Layout *layout,
+                                      bContext *C,
+                                      PointerRNA *ptr,
+                                      const char *propname)
 {
   PointerRNA fileptr;
   if (!ui::template_cache_file_pointer(ptr, propname, &fileptr)) {
     return;
   }
 
-  ui::template_list_flags(layout, C, &fileptr);
+  ui::template_uilist_flags(layout, C, &fileptr);
 }
 
 static void rna_uiTemplatePathBuilder(Layout *layout,
@@ -1480,6 +1541,16 @@ void RNA_api_ui_layout(StructRNA *srna)
   RNA_def_function_ui_description(func, "Return the icon for this enum item");
 
   /* items */
+  func = RNA_def_function(srna, "textbox", "rna_uiItemTextBox");
+  RNA_def_function_flag(func, FUNC_USE_CONTEXT);
+  api_ui_item_rna_common(func);
+  parm = RNA_def_pointer(func, "textbox_state", "TextboxState", nullptr, "");
+  RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_RNAPTR);
+  parm = RNA_def_string(
+      func, "placeholder", nullptr, 0, "", "Hint describing the expected value when empty");
+  RNA_def_property_clear_flag(parm, PROP_NEVER_NULL);
+  api_ui_item_common_translation(func);
+
   func = RNA_def_function(srna, "prop", "rna_uiItemR");
   RNA_def_function_ui_description(func,
                                   "Item. Exposes an RNA item and places it into the layout.");
@@ -1525,6 +1596,12 @@ void RNA_api_ui_layout(StructRNA *srna)
   parm = RNA_def_property(func, "icon_value", PROP_INT, PROP_UNSIGNED);
   RNA_def_property_ui_text(parm, "Icon Value", "Override automatic icon of the item");
   RNA_def_boolean(func, "invert_checkbox", false, "", "Draw checkbox value inverted");
+  static const EnumPropertyItem rna_enum_prop_align[] = {
+      {int(TextAlignAnchor::Left), "LEFT", 0, "", ""},
+      {int(TextAlignAnchor::Right), "RIGHT", 0, "", ""},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  parm = RNA_def_enum(func, "text_align", rna_enum_prop_align, 0, "", "Text alignment");
 
   func = RNA_def_function(srna, "props_enum", "rna_uiItemsEnumR");
   api_ui_item_rna_common(func);
@@ -1664,6 +1741,19 @@ void RNA_api_ui_layout(StructRNA *srna)
   parm = RNA_def_property(func, "icon_value", PROP_INT, PROP_UNSIGNED);
   RNA_def_property_ui_text(parm, "Icon Value", "Override automatic icon of the item");
 
+  func = RNA_def_function(srna, "link", "rna_layout_link");
+  RNA_def_function_ui_description(func, "Item. Displays a url that can be clicked in the layout.");
+  prop = RNA_def_string(func, "url", nullptr, 0, "", "");
+  RNA_def_property_flag(prop, PROP_NEVER_NULL);
+  prop = RNA_def_string(func, "text", nullptr, 0, "", "Override automatic text of the item");
+  RNA_def_property_clear_flag(prop, PROP_NEVER_NULL);
+  api_ui_item_common_translation(func);
+  prop = RNA_def_property(func, "icon", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, rna_enum_icon_items);
+  RNA_def_property_ui_text(prop, "Icon", "Override automatic icon of the item");
+  parm = RNA_def_property(func, "icon_value", PROP_INT, PROP_UNSIGNED);
+  RNA_def_property_ui_text(parm, "Icon Value", "Override automatic icon of the item");
+
   func = RNA_def_function(srna, "menu", "rna_uiItemM");
   parm = RNA_def_string(func, "menu", nullptr, 0, "", "Identifier of the menu");
   api_ui_item_common(func);
@@ -1787,7 +1877,8 @@ void RNA_api_ui_layout(StructRNA *srna)
                                   "Template ID search menu button for session_uid Int properties");
   RNA_def_function_flag(func, FUNC_USE_CONTEXT);
   api_ui_item_rna_common(func);
-  parm = RNA_def_enum(func, "id_type", rna_enum_id_type_items, 0, "", "");
+  parm = RNA_def_enum(
+      func, "id_type", rna_enum_id_type_items, 0, "", "Type of ID to display in the search list");
   RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
   RNA_def_function_flag(func, FUNC_USE_CONTEXT);
 
@@ -1931,6 +2022,10 @@ void RNA_api_ui_layout(StructRNA *srna)
   func = RNA_def_function(srna, "template_strip_modifiers", "template_strip_modifiers");
   RNA_def_function_flag(func, FUNC_USE_CONTEXT);
   RNA_def_function_ui_description(func, "Generates the UI layout for the strip modifier stack");
+
+  func = RNA_def_function(srna, "template_collection_importer", "template_collection_importer");
+  RNA_def_function_flag(func, FUNC_USE_CONTEXT);
+  RNA_def_function_ui_description(func, "Generates the UI layout for the collection importer");
 
   func = RNA_def_function(srna, "template_collection_exporters", "template_collection_exporters");
   RNA_def_function_flag(func, FUNC_USE_CONTEXT);
@@ -2092,13 +2187,12 @@ void RNA_api_ui_layout(StructRNA *srna)
   func = RNA_def_function(srna, "template_palette", "template_palette");
   RNA_def_function_ui_description(func, "Item. A palette used to pick colors.");
   api_ui_item_rna_common(func);
-  RNA_def_boolean(func, "color", false, "", "Display the colors as colors or values");
 
   func = RNA_def_function(srna, "template_image_layers", "uiTemplateImageLayers");
   RNA_def_function_flag(func, FUNC_USE_CONTEXT);
-  parm = RNA_def_pointer(func, "image", "Image", "", "");
+  parm = RNA_def_pointer(func, "image", "Image", "", "Image data-block to display layers for");
   RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
-  parm = RNA_def_pointer(func, "image_user", "ImageUser", "", "");
+  parm = RNA_def_pointer(func, "image_user", "ImageUser", "", "Image user reading from the image");
   RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
 
   func = RNA_def_function(srna, "template_image", "uiTemplateImage");
@@ -2261,20 +2355,20 @@ void RNA_api_ui_layout(StructRNA *srna)
 
   func = RNA_def_function(srna, "template_node_link", "uiTemplateNodeLink");
   RNA_def_function_flag(func, FUNC_USE_CONTEXT);
-  parm = RNA_def_pointer(func, "ntree", "NodeTree", "", "");
+  parm = RNA_def_pointer(func, "ntree", "NodeTree", "", "Node tree containing the node");
   RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
-  parm = RNA_def_pointer(func, "node", "Node", "", "");
+  parm = RNA_def_pointer(func, "node", "Node", "", "Node owning the socket");
   RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
-  parm = RNA_def_pointer(func, "socket", "NodeSocket", "", "");
+  parm = RNA_def_pointer(func, "socket", "NodeSocket", "", "Socket to display the link for");
   RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
 
   func = RNA_def_function(srna, "template_node_view", "uiTemplateNodeView");
   RNA_def_function_flag(func, FUNC_USE_CONTEXT);
-  parm = RNA_def_pointer(func, "ntree", "NodeTree", "", "");
+  parm = RNA_def_pointer(func, "ntree", "NodeTree", "", "Node tree containing the node");
   RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
-  parm = RNA_def_pointer(func, "node", "Node", "", "");
+  parm = RNA_def_pointer(func, "node", "Node", "", "Node to display");
   RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
-  parm = RNA_def_pointer(func, "socket", "NodeSocket", "", "");
+  parm = RNA_def_pointer(func, "socket", "NodeSocket", "", "Socket to display");
   RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
 
   func = RNA_def_function(srna,
@@ -2367,7 +2461,7 @@ void RNA_api_ui_layout(StructRNA *srna)
   RNA_def_function_ui_description(func, "Show cache files time settings");
   api_ui_item_rna_common(func);
 
-  func = RNA_def_function(srna, "template_cache_file_layers", "rna_template_list_flags");
+  func = RNA_def_function(srna, "template_cache_file_layers", "rna_template_uilist_flags");
   RNA_def_function_ui_description(func, "Show cache files override layers properties");
   RNA_def_function_flag(func, FUNC_USE_CONTEXT);
   api_ui_item_rna_common(func);
@@ -2381,7 +2475,8 @@ void RNA_api_ui_layout(StructRNA *srna)
   func = RNA_def_function(srna, "template_file_select_path", "template_file_select_path");
   RNA_def_function_ui_description(func,
                                   "Item. A text button to set the active file browser path.");
-  parm = RNA_def_pointer(func, "params", "FileSelectParams", "", "");
+  parm = RNA_def_pointer(
+      func, "params", "FileSelectParams", "", "File browser parameters whose path is edited");
   RNA_def_parameter_flags(parm, PropertyFlag(0), PARM_REQUIRED);
   RNA_def_function_flag(func, FUNC_USE_CONTEXT);
 

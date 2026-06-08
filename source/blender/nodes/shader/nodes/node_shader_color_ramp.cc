@@ -12,7 +12,7 @@
 
 #include "BKE_colorband.hh"
 
-#include "BLI_color.hh"
+#include "BLI_color_types.hh"
 
 #include "NOD_multi_function.hh"
 
@@ -26,7 +26,7 @@ namespace nodes::node_shader_color_ramp_cc {
 static void sh_node_valtorgb_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
-  b.add_input<decl::Float>("Factor", "Fac")
+  b.add_input<decl::Float>("Factor"_ustr, "Fac"_ustr)
       .default_value(0.5f)
       .min(0.0f)
       .max(1.0f)
@@ -34,8 +34,8 @@ static void sh_node_valtorgb_declare(NodeDeclarationBuilder &b)
       .description(
           "The value used to map onto the color gradient. 0.0 results in the leftmost color, "
           "while 1.0 results in the rightmost");
-  b.add_output<decl::Color>("Color");
-  b.add_output<decl::Float>("Alpha");
+  b.add_output<decl::Color>("Color"_ustr);
+  b.add_output<decl::Float>("Alpha"_ustr);
 }
 
 static void node_shader_init_valtorgb(bNodeTree * /*ntree*/, bNode *node)
@@ -142,6 +142,13 @@ class ColorBandFunction : public mf::MultiFunction {
       alphas[i] = color.a;
     });
   }
+
+  void hash_unique(UniqueHashBytes &hash) const override
+  {
+    static constexpr int8_t id = 0;
+    hash.add(&id);
+    hash.add(&color_band_);
+  }
 };
 
 static void sh_node_valtorgb_build_multi_function(nodes::NodeMultiFunctionBuilder &builder)
@@ -169,14 +176,14 @@ void register_node_type_sh_valtorgb()
 
   static bke::bNodeType ntype;
 
-  common_node_type_base(&ntype, "ShaderNodeValToRGB", SH_NODE_VALTORGB);
+  common_node_type_base(&ntype, "ShaderNodeValToRGB"_ustr, SH_NODE_VALTORGB);
   ntype.ui_name = "Color Ramp";
   ntype.ui_description = "Map values to colors with the use of a gradient";
   ntype.enum_name_legacy = "VALTORGB";
   ntype.nclass = NODE_CLASS_CONVERTER;
   ntype.declare = file_ns::sh_node_valtorgb_declare;
   ntype.initfunc = file_ns::node_shader_init_valtorgb;
-  bke::node_type_size_preset(ntype, bke::eNodeSizePreset::Large);
+  ntype.default_width = bke::NodeWidth::_240;
   bke::node_type_storage(
       ntype, "ColorBand", node_free_standard_storage, node_copy_standard_storage);
   ntype.gpu_fn = file_ns::gpu_shader_valtorgb;

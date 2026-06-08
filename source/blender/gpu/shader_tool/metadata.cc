@@ -65,6 +65,9 @@ std::string ParsedResource::serialize() const
     ss << ", Frequency::" << res_frequency;
     ss << res_condition_lambda << ")";
   }
+  else if (res_type == "shared") {
+    ss << "GROUP_SHARED(" << var_type << ", " << var_name << var_array << ")";
+  }
   else if (res_type == "push_constant") {
     if (!var_array.empty()) {
       ss << "PUSH_CONSTANT_ARRAY(" << var_type << ", " << var_name << ", "
@@ -78,6 +81,8 @@ std::string ParsedResource::serialize() const
     /* Needs to be defined on the shader declaration. */
     /* TODO(fclem): Add check that shader sets an existing compilation constant. */
     // ss << "COMPILATION_CONSTANT(" << var_type << ", " << var_name << ", " << res_value << ")";
+    /* WORKAROUND: Avoid unused expression warning.  */
+    ss << ".noop()\n";
   }
   else if (res_type == "specialization_constant") {
     ss << "SPECIALIZATION_CONSTANT(" << var_type << ", " << var_name << ", " << res_value << ")";
@@ -118,7 +123,7 @@ std::string ParsedFragOuput::serialize() const
   std::stringstream ss;
   if (!dual_source.empty()) {
     ss << "FRAGMENT_OUT_DUAL(" << slot << ", " << var_type << ", " << var_name << ", "
-       << dual_source << ")";
+       << "SRC_" << dual_source << ")";
   }
   else if (!raster_order_group.empty()) {
     ss << "FRAGMENT_OUT_ROG(" << slot << ", " << var_type << ", " << var_name << ", "
@@ -130,7 +135,28 @@ std::string ParsedFragOuput::serialize() const
   return ss.str();
 }
 
+std::string ParsedFragInput::serialize() const
+{
+  std::stringstream ss;
+  ss << "SUBPASS_IN(" << slot << ", " << var_type << ", " << image_type << ", " << var_name << ", "
+     << raster_order_group << ")";
+  return ss.str();
+}
+
 std::string FragmentOutputs::serialize() const
+{
+  std::stringstream ss;
+  ss << "GPU_SHADER_CREATE_INFO(" << name << ")\n";
+
+  for (const auto &res : *this) {
+    ss << res.serialize() << "\n";
+  }
+
+  ss << "GPU_SHADER_CREATE_END()\n";
+  return ss.str();
+}
+
+std::string FragmentInputs::serialize() const
 {
   std::stringstream ss;
   ss << "GPU_SHADER_CREATE_INFO(" << name << ")\n";
@@ -222,6 +248,9 @@ std::string Source::serialize_infos() const
   for (auto frag_outputs : fragment_outputs) {
     ss << frag_outputs.serialize() << "\n";
   }
+  for (auto frag_inputs : fragment_inputs) {
+    ss << frag_inputs.serialize() << "\n";
+  }
   ss << "\n";
   for (auto iface : stage_interfaces) {
     ss << iface.serialize() << "\n";
@@ -229,6 +258,11 @@ std::string Source::serialize_infos() const
   ss << "\n";
   for (auto res_table : resource_tables) {
     ss << "GPU_SHADER_CREATE_INFO(" << res_table.name << ")\n";
+
+    if (res_table.empty()) {
+      /* Add unused define to avoid warning about unused expression. */
+      ss << "DEFINE(\"EMPTY_CREATE_INFO\")\n";
+    }
     for (const auto &res : res_table) {
       ss << res.serialize() << "\n";
     }

@@ -9,6 +9,7 @@
 #include "integrator/path_trace.h"
 #include "scene/background.h"
 #include "scene/camera.h"
+#include "scene/image.h"
 #include "scene/integrator.h"
 #include "scene/light.h"
 #include "scene/mesh.h"
@@ -28,7 +29,9 @@
 CCL_NAMESPACE_BEGIN
 
 Session::Session(const SessionParams &params_, const SceneParams &scene_params)
-    : params(params_), render_scheduler_(tile_manager_, params)
+    : params(params_),
+      eviction_manager_(params_.background),
+      render_scheduler_(tile_manager_, params)
 {
   TaskScheduler::init(params.threads);
 
@@ -164,13 +167,20 @@ void Session::run_main_render_loop()
   while (true) {
     RenderWork render_work = run_update_for_next_iteration();
 
+    const bool did_cancel = progress.get_cancel();
+
     if (!render_work) {
       if (LOG_IS_ON(LOG_LEVEL_INFO)) {
-        double total_time;
-        double render_time;
-        progress.get_time(total_time, render_time);
-        LOG_INFO << "Rendering in main loop is done in " << render_time << " seconds.";
-        LOG_INFO << path_trace_->full_report();
+        if (did_cancel) {
+          LOG_INFO << "Rendering was canceled.";
+        }
+        else {
+          double total_time;
+          double render_time;
+          progress.get_time(total_time, render_time);
+          LOG_INFO << "Rendering in main loop is done in " << render_time << " seconds.";
+          LOG_INFO << path_trace_->full_report();
+        }
       }
 
       if (params.background) {
@@ -180,7 +190,6 @@ void Session::run_main_render_loop()
       }
     }
 
-    const bool did_cancel = progress.get_cancel();
     if (did_cancel) {
       render_scheduler_.render_work_reschedule_on_cancel(render_work);
       if (!render_work) {
@@ -321,6 +330,8 @@ RenderWork Session::run_update_for_next_iteration()
     /* After reset make sure the tile manager is at the first big tile. */
     have_tiles = tile_manager_.next();
     switched_to_new_tile = true;
+
+    eviction_manager_.reset();
   }
 
   /* Update denoiser settings. */
@@ -363,6 +374,11 @@ RenderWork Session::run_update_for_next_iteration()
     }
   }
 
+  /* Evict unused image tiles periodically. */
+  if (eviction_manager_.need_eviction(!render_work, switched_to_new_tile)) {
+    scene->image_manager->evict_unused(device.get(), scene.get());
+  }
+
   if (render_work) {
     const scoped_timer update_timer;
 
@@ -392,9 +408,9 @@ RenderWork Session::run_update_for_next_iteration()
     /* Update camera if dimensions changed for progressive render. the camera
      * knows nothing about progressive or cropped rendering, it just gets the
      * image dimensions passed in. */
-    const int resolution = render_work.resolution_divider;
-    const int width = max(1, buffer_params_.full_width / resolution);
-    const int height = max(1, buffer_params_.full_height / resolution);
+    const float resolution = render_work.resolution_divider;
+    const int width = max(1, int(buffer_params_.full_width / resolution));
+    const int height = max(1, int(buffer_params_.full_height / resolution));
 
     scene->update_camera_resolution(progress, width, height);
 
@@ -447,8 +463,20 @@ bool Session::run_wait_for_work(const RenderWork &render_work)
       break;
     }
 
-    /* Wait for either pause state changed, or extra samples added to render. */
-    pause_cond_.wait(pause_lock);
+    const std::chrono::milliseconds wait_time = eviction_manager_.wait_time(!render_work);
+    if (wait_time == std::chrono::milliseconds::zero()) {
+      /* Break out of the loop for cache eviction. */
+      break;
+    }
+
+    /* Wait for either pause state changed, extra samples added to render, or idle
+     * timer before performing eviction. */
+    if (wait_time == std::chrono::milliseconds::max()) {
+      pause_cond_.wait(pause_lock);
+    }
+    else {
+      pause_cond_.wait_for(pause_lock, wait_time);
+    }
 
     if (pause_) {
       progress.add_skip_time(pause_timer, params.background);
@@ -625,6 +653,11 @@ void Session::set_pause(bool pause)
   else if (pause_) {
     update_status_time(pause_);
   }
+}
+
+void Session::set_navigating(bool navigating)
+{
+  eviction_manager_.set_navigating(navigating);
 }
 
 void Session::set_output_driver(unique_ptr<OutputDriver> driver)

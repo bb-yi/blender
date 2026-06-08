@@ -13,7 +13,6 @@
 #include "BLI_listbase.h"
 #include "BLI_math_vector.h"
 #include "BLI_math_vector_types.hh"
-#include "BLI_memory_utils.h"
 #include "BLI_string_ref.hh"
 #include "BLI_string_utf8.h"
 #include "BLI_utildefines.h"
@@ -178,7 +177,7 @@ void ntreeCompositCryptomatteUpdateLayerNames(bNode *node)
 {
   BLI_assert(node->type_legacy == CMP_NODE_CRYPTOMATTE);
   NodeCryptomatte *n = static_cast<NodeCryptomatte *>(node->storage);
-  BLI_freelistN(&n->runtime.layers);
+  n->runtime.layers.free_no_destruct();
 
   bke::cryptomatte::CryptomatteSessionPtr session = cryptomatte_init_from_node(*node, false);
 
@@ -230,8 +229,8 @@ static void node_free_cryptomatte(bNode *node)
 
   if (nc) {
     MEM_SAFE_DELETE(nc->matte_id);
-    BLI_freelistN(&nc->runtime.layers);
-    BLI_freelistN(&nc->entries);
+    nc->runtime.layers.free_no_destruct();
+    nc->entries.free_no_destruct();
     MEM_delete(nc);
   }
 }
@@ -244,7 +243,7 @@ static void node_copy_cryptomatte(bNodeTree * /*dst_ntree*/,
   NodeCryptomatte *dest_nc = static_cast<NodeCryptomatte *>(MEM_dupalloc(src_nc));
 
   BLI_duplicatelist(&dest_nc->entries, &src_nc->entries);
-  BLI_listbase_clear(&dest_nc->runtime.layers);
+  dest_nc->runtime.layers.clear_no_delete();
   dest_nc->matte_id = static_cast<char *>(MEM_dupalloc(src_nc->matte_id));
   dest_node->storage = dest_nc;
 }
@@ -268,7 +267,7 @@ class BaseCryptoMatteOperation : public NodeOperation {
   {
     Vector<Result> layers = get_layers();
     if (layers.is_empty()) {
-      allocate_invalid();
+      this->allocate_default_remaining_outputs();
       return;
     }
 
@@ -296,29 +295,10 @@ class BaseCryptoMatteOperation : public NodeOperation {
     }
 
     if (matte_output.should_compute()) {
-      matte_output.steal_data(matte);
-    }
-    else {
-      matte.release();
-    }
-  }
-
-  void allocate_invalid()
-  {
-    Result &pick = get_result("Pick");
-    if (pick.should_compute()) {
-      pick.allocate_invalid();
+      matte_output.share_data(matte);
     }
 
-    Result &matte = get_result("Matte");
-    if (matte.should_compute()) {
-      matte.allocate_invalid();
-    }
-
-    Result &image = get_result("Image");
-    if (image.should_compute()) {
-      image.allocate_invalid();
-    }
+    matte.release();
   }
 
   /* Computes the pick result, which is a special human-viewable image that the user can pick
@@ -604,13 +584,13 @@ NODE_STORAGE_FUNCS(NodeCryptomatte)
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Color>("Image")
+  b.add_input<decl::Color>("Image"_ustr)
       .default_value({0.0f, 0.0f, 0.0f, 1.0f})
       .structure_type(StructureType::Dynamic);
 
-  b.add_output<decl::Color>("Image").structure_type(StructureType::Dynamic);
-  b.add_output<decl::Float>("Matte").structure_type(StructureType::Dynamic);
-  b.add_output<decl::Color>("Pick").structure_type(StructureType::Dynamic);
+  b.add_output<decl::Color>("Image"_ustr).structure_type(StructureType::Dynamic);
+  b.add_output<decl::Float>("Matte"_ustr).structure_type(StructureType::Dynamic);
+  b.add_output<decl::Color>("Pick"_ustr).structure_type(StructureType::Dynamic);
 }
 
 static void node_init(bNodeTree * /*ntree*/, bNode *node)
@@ -739,7 +719,7 @@ class CryptoMatteOperation : public BaseCryptoMatteOperation {
           pass_result.release();
           return layers;
         }
-        layers.append(pass_result);
+        layers.append(std::move(pass_result));
       }
 
       /* The target view later was processed already, no need to check other view layers. */
@@ -813,16 +793,16 @@ class CryptoMatteOperation : public BaseCryptoMatteOperation {
 
     image_user_for_layer.layer = layer_index;
     for (const std::string &pass_name : pass_names) {
-      Result pass_result = context().cache_manager().cached_images.get(
-          context(), image, &image_user_for_layer, pass_name.c_str());
+      const Result &pass_result = context().cache_manager().cached_images.get(
+          context(), *image, image_user_for_layer, pass_name.c_str());
 
       /* The layers will be released by the caller, so return a wrapper around the cached image
        * instead. */
       Result layer_result = this->context().create_result(pass_result.type(),
                                                           pass_result.precision());
-      layer_result.wrap_external(pass_result);
+      layer_result.share_data(pass_result);
 
-      layers.append(layer_result);
+      layers.append(std::move(layer_result));
     }
 
     return layers;
@@ -927,14 +907,14 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, "CompositorNodeCryptomatteV2", CMP_NODE_CRYPTOMATTE);
+  cmp_node_type_base(&ntype, "CompositorNodeCryptomatteV2"_ustr, CMP_NODE_CRYPTOMATTE);
   ntype.ui_name = "Cryptomatte";
   ntype.ui_description =
       "Generate matte for individual objects and materials using Cryptomatte render passes";
   ntype.enum_name_legacy = "CRYPTOMATTE_V2";
   ntype.nclass = NODE_CLASS_MATTE;
   ntype.declare = node_declare;
-  bke::node_type_size(ntype, 240, 100, 700);
+  ntype.default_width = bke::NodeWidth::_240;
   ntype.initfunc = node_init;
   ntype.initfunc_api = node_init_api;
   ntype.get_extra_info = node_extra_info;
@@ -970,24 +950,24 @@ namespace nodes::node_composite_legacy_cryptomatte_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Color>("Image")
+  b.add_input<decl::Color>("Image"_ustr)
       .default_value({0.0f, 0.0f, 0.0f, 1.0f})
       .structure_type(StructureType::Dynamic);
 
-  b.add_output<decl::Color>("Image").structure_type(StructureType::Dynamic);
-  b.add_output<decl::Float>("Matte").structure_type(StructureType::Dynamic);
-  b.add_output<decl::Color>("Pick").structure_type(StructureType::Dynamic);
+  b.add_output<decl::Color>("Image"_ustr).structure_type(StructureType::Dynamic);
+  b.add_output<decl::Float>("Matte"_ustr).structure_type(StructureType::Dynamic);
+  b.add_output<decl::Color>("Pick"_ustr).structure_type(StructureType::Dynamic);
 
   const bNode *node = b.node_or_null();
   if (!node) {
-    b.add_input<decl::Color>("Crypto 00").structure_type(StructureType::Dynamic);
+    b.add_input<decl::Color>("Crypto 00"_ustr).structure_type(StructureType::Dynamic);
     return;
   }
 
   const int inputs_count = static_cast<NodeCryptomatte *>(node->storage)->inputs_num;
   for (int i = 0; i < inputs_count; i++) {
     const std::string name = fmt::format("Crypto {:02}", i);
-    b.add_input<decl::Color>(name).structure_type(StructureType::Dynamic);
+    b.add_input<decl::Color>(UString(name)).structure_type(StructureType::Dynamic);
   }
 }
 
@@ -1021,7 +1001,7 @@ class LegacyCryptoMatteOperation : public BaseCryptoMatteOperation {
         continue;
       }
 
-      const Result input = get_input(input_socket->identifier);
+      const Result &input = get_input(input_socket->identifier);
       if (input.is_single_value()) {
         /* If this Cryptomatte layer is not valid, because it is not an image, then all later
          * Cryptomatte layers can't be used even if they were valid. */
@@ -1031,9 +1011,9 @@ class LegacyCryptoMatteOperation : public BaseCryptoMatteOperation {
       /* The layers will be released by the caller, so return a wrapper around the input result
        * instead. */
       Result layer_result = this->context().create_result(input.type(), input.precision());
-      layer_result.wrap_external(input);
+      layer_result.share_data(input);
 
-      layers.append(layer_result);
+      layers.append(std::move(layer_result));
     }
     return layers;
   }
@@ -1048,7 +1028,7 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, "CompositorNodeCryptomatte", CMP_NODE_CRYPTOMATTE_LEGACY);
+  cmp_node_type_base(&ntype, "CompositorNodeCryptomatte"_ustr, CMP_NODE_CRYPTOMATTE_LEGACY);
   ntype.ui_name = "Cryptomatte (Legacy)";
   ntype.ui_description = "Deprecated. Use Cryptomatte Node instead";
   ntype.enum_name_legacy = "CRYPTOMATTE";

@@ -596,8 +596,8 @@ static void swap_old_bmain_data_for_blendfile(ReuseOldBMainData *reuse_data, con
 
   /* NOTE: Full swapping is only supported for ID types that are assumed to be only local
    * data-blocks (like UI-like ones). Otherwise, the swapping could fail in many funny ways. */
-  BLI_assert(BLI_listbase_is_empty(old_lb) || !ID_IS_LINKED(static_cast<ID *>(old_lb->last)));
-  BLI_assert(BLI_listbase_is_empty(new_lb) || !ID_IS_LINKED(static_cast<ID *>(new_lb->last)));
+  BLI_assert(old_lb->is_empty() || !ID_IS_LINKED(static_cast<ID *>(old_lb->last)));
+  BLI_assert(new_lb->is_empty() || !ID_IS_LINKED(static_cast<ID *>(new_lb->last)));
 
   std::swap(*new_lb, *old_lb);
 
@@ -1200,8 +1200,12 @@ static void setup_app_data(bContext *C,
      * and/or needs to operate over the whole Main data-base
      * (versioning done in file reading code only operates on a per-library basis). */
     BLO_read_do_version_after_setup(bmain, nullptr, reports);
-    BLO_readfile_id_runtime_data_free_all(*bmain);
   }
+
+  /* Always clear readfile runtime data, keeping this beyond the readfile scope can have unexpected
+   * side-effects, especially on next readfile call when considering IDs from the old Main
+   * data-base, see e.g. #157387. */
+  BLO_readfile_id_runtime_data_free_all(*bmain);
 
   bmain->recovered = false;
 
@@ -2280,10 +2284,10 @@ bool PartialWriteContext::is_valid()
   return is_valid;
 }
 
-bool PartialWriteContext::write(const char *write_filepath,
-                                const int write_flags,
-                                const int remap_mode,
-                                ReportList &reports)
+bool PartialWriteContext::write_impl(const char *write_filepath,
+                                     const int write_flags,
+                                     const BlendFileWriteParams &blend_file_write_params,
+                                     ReportList &reports)
 {
   BLI_assert_msg(write_filepath != reference_root_filepath_,
                  "A library blendfile should not overwrite currently edited blendfile");
@@ -2313,15 +2317,32 @@ bool PartialWriteContext::write(const char *write_filepath,
 
   BLI_assert(this->is_valid());
 
-  BlendFileWriteParams blend_file_write_params{};
-  blend_file_write_params.remap_mode = eBLO_WritePathRemap(remap_mode);
   return BLO_write_file(
       &this->bmain, write_filepath, write_flags, &blend_file_write_params, &reports);
+}
+
+bool PartialWriteContext::write(const char *write_filepath,
+                                const int write_flags,
+                                const int remap_mode,
+                                ReportList &reports)
+{
+  BlendFileWriteParams blend_file_write_params{};
+  blend_file_write_params.remap_mode = eBLO_WritePathRemap(remap_mode);
+  return this->write_impl(write_filepath, write_flags, blend_file_write_params, reports);
 }
 
 bool PartialWriteContext::write(const char *write_filepath, ReportList &reports)
 {
   return this->write(write_filepath, 0, BLO_WRITE_PATH_REMAP_RELATIVE, reports);
+}
+
+bool PartialWriteContext::write_as_copypaste_buffer(const char *write_filepath,
+                                                    ReportList &reports)
+{
+  BlendFileWriteParams blend_file_write_params{};
+  blend_file_write_params.remap_mode = BLO_WRITE_PATH_REMAP_RELATIVE;
+  blend_file_write_params.is_copypaste_buffer = true;
+  return this->write_impl(write_filepath, 0, blend_file_write_params, reports);
 }
 
 }  // namespace bke::blendfile

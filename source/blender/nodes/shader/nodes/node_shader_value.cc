@@ -22,7 +22,7 @@ namespace nodes::node_shader_value_cc {
 
 static void sh_node_value_declare(NodeDeclarationBuilder &b)
 {
-  b.add_output<decl::Float>("Value").custom_draw([](CustomSocketDrawParams &params) {
+  b.add_output<decl::Float>("Value"_ustr).custom_draw([](CustomSocketDrawParams &params) {
     params.layout.alignment_set(ui::LayoutAlign::Expand);
     ui::Layout &row = params.layout.row(true);
     row.prop(&params.socket_ptr, "default_value", ui::ITEM_R_SPLIT_EMPTY_NAME, "", ICON_NONE);
@@ -68,7 +68,7 @@ void register_node_type_sh_value()
 
   static bke::bNodeType ntype;
 
-  common_node_type_base(&ntype, "ShaderNodeValue", SH_NODE_VALUE);
+  common_node_type_base(&ntype, "ShaderNodeValue"_ustr, SH_NODE_VALUE);
   ntype.ui_name = "Value";
   ntype.ui_description = "Input numerical values to other nodes in the tree";
   ntype.enum_name_legacy = "VALUE";

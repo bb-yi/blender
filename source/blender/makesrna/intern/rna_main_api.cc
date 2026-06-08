@@ -128,6 +128,23 @@ static void rna_Main_ID_remove(Main *bmain,
                 id->name + 2);
     return;
   }
+
+  /* Volume light probes being baked cannot be removed. */
+  if (GS(id->name) == ID_OB) {
+    Object *ob = reinterpret_cast<Object *>(id);
+    if (ob->type == OB_LIGHTPROBE &&
+        (reinterpret_cast<LightProbe *>(ob->data))->type == LIGHTPROBE_TYPE_VOLUME)
+    {
+      wmWindowManager *wm = static_cast<wmWindowManager *>(bmain->wm.first);
+      if (wm && WM_jobs_test(wm, nullptr, WM_JOB_TYPE_LIGHT_BAKE)) {
+        BKE_reportf(reports,
+                    RPT_ERROR,
+                    "Cannot remove volume light probes while light probe baking is running");
+        return;
+      }
+    }
+  }
+
   if (do_unlink) {
     BKE_id_delete(bmain, id);
     id_ptr->invalidate();
@@ -256,7 +273,7 @@ static Object *rna_Main_objects_new(Main *bmain, ReportList *reports, const char
     id_us_plus(data);
   }
 
-  ob = BKE_object_add_only_object(bmain, type, safe_name);
+  ob = BKE_object_add_only_object(bmain, ObjectType(type), safe_name);
 
   ob->data = data;
   BKE_object_materials_sync_length(bmain, ob, ob->data);
@@ -311,7 +328,7 @@ static bNodeTree *rna_Main_nodetree_new(Main *bmain, const char *name, int type)
 
   bke::bNodeTreeType *typeinfo = rna_node_tree_type_from_enum(type);
   if (typeinfo) {
-    bNodeTree *ntree = bke::node_tree_add_tree(bmain, safe_name, typeinfo->idname);
+    bNodeTree *ntree = bke::node_tree_add_tree(bmain, safe_name, typeinfo->idname.ref());
     BKE_main_ensure_invariants(*bmain);
 
     id_us_min(&ntree->id);
@@ -368,7 +385,7 @@ static Light *rna_Main_lights_new(Main *bmain, const char *name, int type)
   rna_idname_validate(name, safe_name);
 
   Light *lamp = BKE_light_add(bmain, safe_name);
-  lamp->type = type;
+  lamp->type = eLightType(type);
   id_us_min(&lamp->id);
 
   WM_main_add_notifier(NC_ID | NA_ADDED, nullptr);
@@ -455,7 +472,7 @@ static Curve *rna_Main_curves_new(Main *bmain, const char *name, int type)
   char safe_name[MAX_ID_NAME - 2];
   rna_idname_validate(name, safe_name);
 
-  Curve *cu = BKE_curve_add(bmain, safe_name, type);
+  Curve *cu = BKE_curve_add(bmain, safe_name, ObjectType(type));
   id_us_min(&cu->id);
 
   WM_main_add_notifier(NC_ID | NA_ADDED, nullptr);
@@ -510,7 +527,7 @@ static Tex *rna_Main_textures_new(Main *bmain, const char *name, int type)
   rna_idname_validate(name, safe_name);
 
   Tex *tex = BKE_texture_add(bmain, safe_name);
-  BKE_texture_type_set(tex, type);
+  BKE_texture_type_set(tex, eTex_Type(type));
   id_us_min(&tex->id);
 
   WM_main_add_notifier(NC_ID | NA_ADDED, nullptr);
@@ -751,7 +768,7 @@ static LightProbe *rna_Main_lightprobe_new(Main *bmain, const char *name, int ty
 
   LightProbe *probe = BKE_lightprobe_add(bmain, safe_name);
 
-  BKE_lightprobe_type_set(probe, type);
+  BKE_lightprobe_type_set(probe, eLightProbeType(type));
 
   id_us_min(&probe->id);
 

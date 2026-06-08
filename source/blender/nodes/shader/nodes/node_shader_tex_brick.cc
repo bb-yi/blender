@@ -24,25 +24,33 @@ namespace nodes::node_shader_tex_brick_cc {
 static void sh_node_tex_brick_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
-  b.add_input<decl::Vector>("Vector").min(-10000.0f).max(10000.0f).implicit_field(
-      NODE_DEFAULT_INPUT_POSITION_FIELD);
-  b.add_input<decl::Color>("Color1")
+
+  const bool is_compositor = b.tree_or_null() && b.tree_or_null()->type == NTREE_COMPOSIT;
+  const NodeDefaultInputType default_input_type =
+      is_compositor ? NODE_DEFAULT_INPUT_UNIFORM_IMAGE_COORDINATES :
+                      NODE_DEFAULT_INPUT_POSITION_FIELD;
+  b.add_input<decl::Vector>("Vector"_ustr)
+      .min(-10000.0f)
+      .max(10000.0f)
+      .default_input_type(default_input_type);
+
+  b.add_input<decl::Color>("Color1"_ustr)
       .default_value({0.8f, 0.8f, 0.8f, 1.0f})
       .description("Color of the first reference brick");
-  b.add_input<decl::Color>("Color2")
+  b.add_input<decl::Color>("Color2"_ustr)
       .default_value({0.2f, 0.2f, 0.2f, 1.0f})
       .description("Color of the second reference brick");
-  b.add_input<decl::Color>("Mortar")
+  b.add_input<decl::Color>("Mortar"_ustr)
       .default_value({0.0f, 0.0f, 0.0f, 1.0f})
       .no_muted_links()
       .description("Color of the area between bricks");
-  b.add_input<decl::Float>("Scale")
+  b.add_input<decl::Float>("Scale"_ustr)
       .min(-1000.0f)
       .max(1000.0f)
       .default_value(5.0f)
       .no_muted_links()
       .description("Scale of the texture");
-  b.add_input<decl::Float>("Mortar Size")
+  b.add_input<decl::Float>("Mortar Size"_ustr)
       .min(0.0f)
       .max(0.125f)
       .default_value(0.02f)
@@ -50,7 +58,7 @@ static void sh_node_tex_brick_declare(NodeDeclarationBuilder &b)
       .description(
           "Size of the filling between the bricks (known as \"mortar\"). "
           "0 means no mortar");
-  b.add_input<decl::Float>("Mortar Smooth")
+  b.add_input<decl::Float>("Mortar Smooth"_ustr)
       .min(0.0f)
       .max(1.0f)
       .default_value(0.1f)
@@ -58,24 +66,28 @@ static void sh_node_tex_brick_declare(NodeDeclarationBuilder &b)
       .description(
           "Blurs/softens the edge between the mortar and the bricks. "
           "This can be useful with a texture and displacement textures");
-  b.add_input<decl::Float>("Bias").min(-1.0f).max(1.0f).no_muted_links().description(
-      "The color variation between Color1 and Color2. "
-      "Values of -1 and 1 only use one of the two colors. "
-      "Values in between mix the colors");
-  b.add_input<decl::Float>("Brick Width")
+  b.add_input<decl::Float>("Bias"_ustr)
+      .min(-1.0f)
+      .max(1.0f)
+      .no_muted_links()
+      .description(
+          "The color variation between Color1 and Color2. "
+          "Values of -1 and 1 only use one of the two colors. "
+          "Values in between mix the colors");
+  b.add_input<decl::Float>("Brick Width"_ustr)
       .min(0.01f)
       .max(100.0f)
       .default_value(0.5f)
       .no_muted_links()
       .description("Ratio of brick's width relative to the texture scale");
-  b.add_input<decl::Float>("Row Height")
+  b.add_input<decl::Float>("Row Height"_ustr)
       .min(0.01f)
       .max(100.0f)
       .default_value(0.25f)
       .no_muted_links()
       .description("Ratio of brick's row height relative to the texture scale");
-  b.add_output<decl::Color>("Color");
-  b.add_output<decl::Float>("Factor", "Fac");
+  b.add_output<decl::Color>("Color"_ustr);
+  b.add_output<decl::Float>("Factor"_ustr, "Fac"_ustr);
 }
 
 static void node_shader_buts_tex_brick(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
@@ -282,6 +294,16 @@ class BrickFunction : public mf::MultiFunction {
       }
     });
   }
+
+  void hash_unique(UniqueHashBytes &hash) const override
+  {
+    static constexpr int8_t id = 0;
+    hash.add(&id);
+    hash.add(offset_);
+    hash.add(offset_freq_);
+    hash.add(squash_);
+    hash.add(squash_freq_);
+  }
 };
 
 static void sh_node_brick_build_multi_function(NodeMultiFunctionBuilder &builder)
@@ -301,20 +323,20 @@ void register_node_type_sh_tex_brick()
 
   static bke::bNodeType ntype;
 
-  common_node_type_base(&ntype, "ShaderNodeTexBrick", SH_NODE_TEX_BRICK);
+  common_node_type_base(&ntype, "ShaderNodeTexBrick"_ustr, SH_NODE_TEX_BRICK);
   ntype.ui_name = "Brick Texture";
   ntype.ui_description = "Generate a procedural texture producing bricks";
   ntype.enum_name_legacy = "TEX_BRICK";
   ntype.nclass = NODE_CLASS_TEXTURE;
   ntype.declare = file_ns::sh_node_tex_brick_declare;
   ntype.draw_buttons = file_ns::node_shader_buts_tex_brick;
-  bke::node_type_size_preset(ntype, bke::eNodeSizePreset::Middle);
+  ntype.default_width = bke::NodeWidth::_160;
   ntype.initfunc = file_ns::node_shader_init_tex_brick;
   bke::node_type_storage(
       ntype, "NodeTexBrick", node_free_standard_storage, node_copy_standard_storage);
   ntype.gpu_fn = file_ns::node_shader_gpu_tex_brick;
   ntype.build_multi_function = file_ns::sh_node_brick_build_multi_function;
-  bke::node_type_size(ntype, 165, 140, NODE_DEFAULT_MAX_WIDTH);
+  ntype.default_width = bke::NodeWidth::_180;
 
   bke::node_register_type(ntype);
 }

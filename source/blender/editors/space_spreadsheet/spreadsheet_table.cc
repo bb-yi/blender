@@ -12,6 +12,7 @@
 
 #include "BLO_read_write.hh"
 
+#include "NOD_geometry_nodes_bundle.hh"
 #include "spreadsheet_column.hh"
 #include "spreadsheet_table.hh"
 
@@ -72,7 +73,7 @@ void spreadsheet_bundle_path_clear(SpreadsheetBundleTreeViewPath &bundle_path)
 }
 
 void spreadsheet_bundle_path_init_from(
-    const Span<StringRef> keys,
+    const Span<nodes::BundleKey> keys,
     const std::optional<SpreadsheetClosureInputOutput> closure_input_output,
     SpreadsheetBundleTreeViewPath &r_bundle_path)
 {
@@ -80,7 +81,7 @@ void spreadsheet_bundle_path_init_from(
   r_bundle_path.bundle_path = MEM_new_array<SpreadsheetBundlePathElem>(keys.size(), __func__);
   r_bundle_path.bundle_path_num = keys.size();
   for (const int i : keys.index_range()) {
-    const StringRef key = keys[i];
+    const StringRef key = keys[i].ustr().ref();
     r_bundle_path.bundle_path[i].identifier = BLI_strdupn(key.data(), key.size());
   }
   r_bundle_path.closure_input_output = closure_input_output.value_or(SPREADSHEET_CLOSURE_NONE);
@@ -116,7 +117,7 @@ static void write_bundle_path(BlendWriter *writer,
 {
   writer->write_struct_array(bundle_path.bundle_path_num, bundle_path.bundle_path);
   for (const int i : IndexRange(bundle_path.bundle_path_num)) {
-    BLO_write_string(writer, bundle_path.bundle_path[i].identifier);
+    writer->write_string(bundle_path.bundle_path[i].identifier);
   }
 }
 
@@ -143,8 +144,7 @@ void spreadsheet_table_id_blend_write(BlendWriter *writer, const SpreadsheetTabl
 
 static void read_bundle_path(BlendDataReader *reader, SpreadsheetBundleTreeViewPath &bundle_path)
 {
-  BLO_read_struct_array(
-      reader, SpreadsheetBundlePathElem, bundle_path.bundle_path_num, &bundle_path.bundle_path);
+  BLO_read_array_and_validate_size(reader, &bundle_path.bundle_path, &bundle_path.bundle_path_num);
   for (const int i : IndexRange(bundle_path.bundle_path_num)) {
     BLO_read_string(reader, &bundle_path.bundle_path[i].identifier);
   }
@@ -156,8 +156,8 @@ void spreadsheet_table_id_blend_read(BlendDataReader *reader, SpreadsheetTableID
     case SPREADSHEET_TABLE_ID_TYPE_GEOMETRY: {
       auto *table_id_ = reinterpret_cast<SpreadsheetTableIDGeometry *>(table_id);
       BKE_viewer_path_blend_read_data(reader, &table_id_->viewer_path);
-      BLO_read_struct_array(
-          reader, SpreadsheetInstanceID, table_id_->instance_ids_num, &table_id_->instance_ids);
+      BLO_read_array_and_validate_size(
+          reader, &table_id_->instance_ids, &table_id_->instance_ids_num);
       read_bundle_path(reader, table_id_->viewer_item_bundle_path);
       read_bundle_path(reader, table_id_->geometry_bundle_path);
       break;
@@ -251,7 +251,7 @@ void spreadsheet_table_blend_write(BlendWriter *writer, const SpreadsheetTable *
 {
   writer->write_struct(table);
   spreadsheet_table_id_blend_write(writer, table->id);
-  BLO_write_pointer_array(writer, table->num_columns, table->columns);
+  writer->write_pointer_array(table->num_columns, table->columns);
   for (const int i : IndexRange(table->num_columns)) {
     spreadsheet_column_blend_write(writer, table->columns[i]);
   }
@@ -261,7 +261,7 @@ void spreadsheet_table_blend_read(BlendDataReader *reader, SpreadsheetTable *tab
 {
   BLO_read_struct(reader, SpreadsheetTableID, &table->id);
   spreadsheet_table_id_blend_read(reader, table->id);
-  BLO_read_pointer_array(reader, table->num_columns, reinterpret_cast<void **>(&table->columns));
+  BLO_read_pointer_array_and_validate_size(reader, &table->columns, &table->num_columns);
   for (const int i : IndexRange(table->num_columns)) {
     BLO_read_struct(reader, SpreadsheetColumn, &table->columns[i]);
     spreadsheet_column_blend_read(reader, table->columns[i]);

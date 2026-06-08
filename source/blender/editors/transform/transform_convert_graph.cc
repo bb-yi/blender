@@ -223,7 +223,7 @@ static float graph_key_shortest_dist(
       graph_bezt_get_transform_selection(t, bezt, use_handle, &sel_left, &sel_key, &sel_right);
 
       if (sel_left || sel_key || sel_right) {
-        dist = min_fff(dist, td->dist, fabs(td_iter->center[0] - td->center[0]));
+        dist = std::min({dist, td->dist, fabs(td_iter->center[0] - td->center[0])});
       }
 
       td_iter += 3;
@@ -911,7 +911,7 @@ static void recalcData_graphedit(TransInfo *t)
   bAnimContext ac = {nullptr};
   int filter;
 
-  BKE_view_layer_synced_ensure(t->scene, t->view_layer);
+  BKE_view_layer_synced_ensure(*t->bmain, t->scene, t->view_layer);
 
   /* Initialize relevant anim-context 'context' data from TransInfo data. */
   /* NOTE: sync this with the code in #ANIM_animdata_get_context(). */

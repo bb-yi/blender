@@ -661,10 +661,14 @@ def get_backported_commits(issue_number: str) -> dict[str, list[str]]:
 
     dict_of_backports: dict[str, list[str]] = {}
 
-    blender_version_start = "## Blender "
     for line in lines:
-        if line.startswith(blender_version_start):
-            current_version = line.strip(blender_version_start)
+        if line.startswith("## Blender "):
+            version_match = re.search(r"(\d+.\d+.\d+)", line)
+            if version_match:
+                current_version = version_match[0]
+            else:
+                print(f"{line} from backport task {issue_number} did not follow the expected Blender version format.")
+                current_version = None
         if current_version is None:
             # We haven't got a Blender version yet.
             continue

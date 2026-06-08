@@ -21,6 +21,10 @@
 #  include <cmath>   // IWYU pragma: export
 #endif
 
+#if !defined(__KERNEL_GPU__)
+#  include <bit>
+#endif
+
 CCL_NAMESPACE_BEGIN
 
 /* Float Pi variations */
@@ -678,23 +682,20 @@ ccl_device float bits_to_01(const uint bits)
   return bits * (1.0f / (float)0xFFFFFFFF);
 }
 
+ccl_device_inline bool is_zero(const float a)
+{
+  return a == 0.0f;
+}
+
 #if !defined(__KERNEL_GPU__)
-#  if defined(__GNUC__)
 ccl_device_inline uint popcount(const uint x)
 {
-  return __builtin_popcount(x);
+  return std::popcount(x);
 }
-#  else
-ccl_device_inline uint popcount(const uint x)
+ccl_device_inline uint popcount(const uint64_t x)
 {
-  /* TODO(Stefan): pop-count intrinsic for Windows with fallback for older CPUs. */
-  uint i = x;
-  i = i - ((i >> 1) & 0x55555555);
-  i = (i & 0x33333333) + ((i >> 2) & 0x33333333);
-  i = (((i + (i >> 4)) & 0xF0F0F0F) * 0x1010101) >> 24;
-  return i;
+  return std::popcount(x);
 }
-#  endif
 #elif defined(__KERNEL_ONEAPI__)
 #  define popcount(x) sycl::popcount(x)
 #elif defined(__KERNEL_HIP__)

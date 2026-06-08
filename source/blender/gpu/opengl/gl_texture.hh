@@ -78,11 +78,11 @@ class GLTexture : public Texture {
    * \warning This resets the mipmap range.
    */
   void generate_mipmap() override;
-  void copy_to(Texture *dst) override;
-  void clear(eGPUDataFormat format, const void *data) override;
+  void copy_to(Texture *dst, IndexRange mip_levels) override;
+  void clear(const double4 data) override;
   void swizzle_set(const char swizzle_mask[4]) override;
   void mip_range_set(int min, int max) override;
-  void *read(int mip, eGPUDataFormat type) override;
+  void read(int mip, eGPUDataFormat type, void *data) override;
 
   void check_feedback_loop();
 
@@ -97,14 +97,6 @@ class GLTexture : public Texture {
    * Free the samplers cache generated in samplers_init() method.
    */
   static void samplers_free();
-
-  /**
-   * Updates the anisotropic filter parameters of samplers that enables anisotropic filtering. This
-   * is not done as a one time initialization in samplers_init() method because the user might
-   * change the anisotropic filtering samples in the user preferences. So it is called in
-   * samplers_init() method as well as every time the user preferences change.
-   */
-  static void samplers_update();
 
   /**
    * Get the handle of the OpenGL sampler that corresponds to the given sampler state.

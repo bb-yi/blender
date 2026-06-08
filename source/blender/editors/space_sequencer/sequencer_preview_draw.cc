@@ -18,7 +18,6 @@
 #include "BLI_math_rotation.h"
 #include "BLI_math_vector_types.hh"
 #include "BLI_rect.h"
-#include "BLI_string_utf8.h"
 #include "BLI_utildefines.h"
 #include "BLI_vector.hh"
 
@@ -37,6 +36,10 @@
 #include "IMB_imbuf.hh"
 #include "IMB_imbuf_types.hh"
 
+#include "OCIO_scope.hh"
+
+#include "PRF_profile.hh"
+
 #include "GPU_compute.hh"
 #include "GPU_debug.hh"
 #include "GPU_framebuffer.hh"
@@ -52,6 +55,7 @@
 #include "ED_screen.hh"
 #include "ED_sequencer.hh"
 #include "ED_space_api.hh"
+#include "ED_time_scrub_ui.hh"
 #include "ED_util.hh"
 #include "ED_view3d.hh"
 
@@ -227,20 +231,29 @@ static void sequencer_draw_borders_overlay(const SpaceSeq &sseq,
 
   imm_draw_box_wire_2d(shdr_pos, x1 - 0.5f, y1 - 0.5f, x2 + 0.5f, y2 + 0.5f);
 
+  rctf rect;
+  rect.xmin = x1;
+  rect.xmax = x2;
+  rect.ymin = y1;
+  rect.ymax = y2;
+
   /* Draw safety border. */
   if (sseq.preview_overlay.flag & SEQ_PREVIEW_SHOW_SAFE_MARGINS) {
     immUniformThemeColorBlend(TH_VIEW_OVERLAY, TH_BACK, 0.25f);
-    rctf rect;
-    rect.xmin = x1;
-    rect.xmax = x2;
-    rect.ymin = y1;
-    rect.ymax = y2;
     ui::draw_safe_areas(shdr_pos, &rect, scene->safe_areas.title, scene->safe_areas.action);
 
     if (sseq.preview_overlay.flag & SEQ_PREVIEW_SHOW_SAFE_CENTER) {
       ui::draw_safe_areas(
           shdr_pos, &rect, scene->safe_areas.title_center, scene->safe_areas.action_center);
     }
+  }
+
+  /* Draw composition guides. */
+  if (sseq.preview_overlay.flag & SEQ_PREVIEW_SHOW_COMPOSITION_GUIDES) {
+    ED_draw_composition_guides(shdr_pos,
+                               sseq.preview_overlay.composition_guide_flags,
+                               &rect,
+                               sseq.preview_overlay.composition_guide_color);
   }
 
   immUnbindProgram();
@@ -287,7 +300,7 @@ void sequencer_draw_maskedit(const bContext *C, Scene *scene, ARegion *region, S
 static void seq_prefetch_wm_notify(const bContext *C, Scene *scene)
 {
   if (seq::prefetch_need_redraw(C, scene)) {
-    WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER, nullptr);
+    WM_event_add_notifier(C, NC_SCENE | ND_SEQUENCER_PREFETCH, nullptr);
   }
 }
 
@@ -389,69 +402,59 @@ static rctf preview_get_reference_texture_coord(const SpaceSeq &space_sequencer,
   return texture_coord;
 }
 
-static void add_vertical_line(const float val,
-                              const uchar4 color,
-                              View2D &v2d,
-                              const float text_scale_x,
-                              const float text_scale_y,
-                              SeqQuadsBatch &quads,
-                              const rctf &area)
-{
-  const float x = area.xmin + (area.xmax - area.xmin) * val;
-
-  char buf[20];
-  const size_t buf_len = SNPRINTF_UTF8_RLEN(buf, "%.2f", val);
-  float text_width, text_height;
-  BLF_width_and_height(BLF_default(), buf, buf_len, &text_width, &text_height);
-  text_width *= text_scale_x;
-  text_height *= text_scale_y;
-  ui::view2d_text_cache_add(
-      &v2d, x - text_width / 2, area.ymax - text_height * 1.3f, buf, buf_len, color);
-
-  quads.add_line(x, area.ymin, x, area.ymax - text_height * 1.4f, color);
-}
-
 static void draw_histogram(ARegion &region,
                            const ScopeHistogram &hist,
                            SeqQuadsBatch &quads,
-                           const rctf &area)
+                           const rctf &area,
+                           const ColorManagedViewSettings *view_settings,
+                           const ColorManagedDisplaySettings *display_settings)
 {
   if (hist.data.is_empty()) {
     return;
   }
 
-  /* Grid lines and labels. */
-  View2D &v2d = region.v2d;
-  float text_scale_x, text_scale_y;
-  ui::view2d_scale_get_inverse(&v2d, &text_scale_x, &text_scale_y);
+  const ocio::ScopeInfo scope_info = IMB_colormanagement_get_scope_info(display_settings,
+                                                                        view_settings);
 
-  const bool hdr = ScopeHistogram::bin_to_float(math::reduce_max(hist.max_bin)) > 1.001f;
-  const float max_val = hdr ? 12.0f : 1.0f;
-
-  /* Grid lines covering 0..1 range, with 0.25 steps. */
+  /* Grid lines from scope info graticules, with labels centered on each line. */
   const uchar col_grid[4] = {128, 128, 128, 128};
-  for (float val = 0.0f; val <= 1.0f; val += 0.25f) {
-    add_vertical_line(val, col_grid, v2d, text_scale_x, text_scale_y, quads, area);
-  }
-  /* For HDR content, more lines every 1.0 step. */
-  if (hdr) {
-    for (float val = 2.0f; val <= max_val; val += 1.0f) {
-      add_vertical_line(val, col_grid, v2d, text_scale_x, text_scale_y, quads, area);
+  const float w = area.xmax - area.xmin;
+
+  /* Ensure font matches what view2d_text_cache_draw will use, so that text
+   * measurements are accurate. */
+  const int font_id = BLF_set_default();
+  float text_scale_x, text_scale_y;
+  ui::view2d_scale_get_inverse(&region.v2d, &text_scale_x, &text_scale_y);
+
+  float prev_label_right = -FLT_MAX;
+
+  for (const ocio::ScopeGraticule &graticule : scope_info.graticules) {
+    const float x = area.xmin + w * graticule.value;
+    const size_t buf_len = strlen(graticule.label);
+    float text_width, text_height;
+    BLF_width_and_height(font_id, graticule.label, buf_len, &text_width, &text_height);
+    text_width *= text_scale_x;
+    text_height *= text_scale_y;
+    const float gap = text_height * 1.5f;
+
+    const float label_left = x - text_width * 0.5f;
+    const bool show_label = label_left > prev_label_right;
+
+    quads.add_line(x, area.ymin, x, show_label ? area.ymax - gap : area.ymax, col_grid);
+    if (show_label) {
+      ui::view2d_text_cache_add(&region.v2d,
+                                label_left,
+                                area.ymax - gap * 0.5f - text_height * 0.5f,
+                                graticule.label,
+                                buf_len,
+                                col_grid);
+      prev_label_right = x + text_width * 0.5f + text_height;
     }
   }
-  /* Lines for maximum values. */
-  const float max_val_r = ScopeHistogram::bin_to_float(hist.max_bin.x);
-  const float max_val_g = ScopeHistogram::bin_to_float(hist.max_bin.y);
-  const float max_val_b = ScopeHistogram::bin_to_float(hist.max_bin.z);
-  add_vertical_line(max_val_r, {128, 0, 0, 128}, v2d, text_scale_x, text_scale_y, quads, area);
-  add_vertical_line(max_val_g, {0, 128, 0, 128}, v2d, text_scale_x, text_scale_y, quads, area);
-  add_vertical_line(max_val_b, {0, 0, 128, 128}, v2d, text_scale_x, text_scale_y, quads, area);
 
-  /* Horizontal lines. */
-  const float x_val_min = area.xmin;
-  const float x_val_max = area.xmin + (area.xmax - area.xmin) * max_val;
-  quads.add_line(x_val_min, area.ymin, x_val_max, area.ymin, col_grid);
-  quads.add_line(x_val_min, area.ymax, x_val_max, area.ymax, col_grid);
+  /* Border. */
+  const uchar col_border[4] = {64, 64, 64, 128};
+  quads.add_wire_quad(area.xmin, area.ymin, area.xmax, area.ymax, col_border);
 
   /* Histogram area for each R/G/B channels, additively blended. */
   quads.draw();
@@ -464,20 +467,19 @@ static void draw_histogram(ARegion &region,
     uchar col_area[4] = {64, 64, 64, 128};
     col_line[ch] = 224;
     col_area[ch] = 224;
-    float y_scale = (area.ymax - area.ymin) / hist.max_value[ch] * 0.95f;
-    float x_scale = (area.xmax - area.xmin);
-    float yb = area.ymin;
-    for (int bin = 0; bin <= hist.max_bin[ch]; bin++) {
-      uint bin_val = hist.data[bin][ch];
+    const float y_scale = (area.ymax - area.ymin) / hist.max_value[ch] * 0.95f;
+    const float yb = area.ymin;
+    for (int bin = 0; bin < ScopeHistogram::NUM_BINS; bin++) {
+      const uint bin_val = hist.data[bin][ch];
       if (bin_val == 0) {
         continue;
       }
-      float f0 = ScopeHistogram::bin_to_float(bin);
-      float f1 = ScopeHistogram::bin_to_float(bin + 1);
-      float x0 = area.xmin + f0 * x_scale;
-      float x1 = area.xmin + f1 * x_scale;
+      const float f0 = ScopeHistogram::bin_to_float(bin);
+      const float f1 = ScopeHistogram::bin_to_float(bin + 1);
+      const float x0 = area.xmin + f0 * w;
+      const float x1 = area.xmin + f1 * w;
 
-      float y = area.ymin + bin_val * y_scale;
+      const float y = area.ymin + bin_val * y_scale;
       quads.add_quad(x0, yb, x0, y, x1, yb, x1, y, col_area);
       quads.add_line(x0, y, x1, y, col_line);
     }
@@ -488,40 +490,65 @@ static void draw_histogram(ARegion &region,
   ui::view2d_text_cache_draw(&region);
 }
 
-static float2 rgb_to_uv_scaled(const float3 &rgb)
+static float2 rgb_to_cbcr(const float3x3 &yuv_matrix, const float3 &rgb)
 {
-  float y, u, v;
-  rgb_to_yuv(rgb.x, rgb.y, rgb.z, &y, &u, &v, BLI_YUV_ITU_BT709);
-  /* Scale to +-0.5 range. */
-  u *= SeqScopes::VECSCOPE_U_SCALE;
-  v *= SeqScopes::VECSCOPE_V_SCALE;
-  return float2(u, v);
+  const float3 yuv = yuv_matrix * rgb;
+  return float2(yuv.y, yuv.z);
 }
 
-static void draw_waveform_graticule(ARegion *region, SeqQuadsBatch &quads, const rctf &area)
+static void draw_waveform_graticule(ARegion *region,
+                                    SeqQuadsBatch &quads,
+                                    const rctf &area,
+                                    const ColorManagedViewSettings *view_settings,
+                                    const ColorManagedDisplaySettings *display_settings)
 {
-  /* Horizontal lines at 10%, 70%, 90%. */
-  const float lines[3] = {0.1f, 0.7f, 0.9f};
-  uchar col_grid[4] = {160, 64, 64, 128};
+  const ocio::ScopeInfo scope_info = IMB_colormanagement_get_scope_info(display_settings,
+                                                                        view_settings);
+
+  const uchar col_grid[4] = {128, 128, 128, 128};
   const float x0 = area.xmin;
   const float x1 = area.xmax;
+  const float h = area.ymax - area.ymin;
 
-  for (int i = 0; i < 3; i++) {
-    const float y = area.ymin + (area.ymax - area.ymin) * lines[i];
-    char buf[10];
-    const size_t buf_len = SNPRINTF_UTF8_RLEN(buf, "%.1f", lines[i]);
-    quads.add_line(x0, y, x1, y, col_grid);
-    ui::view2d_text_cache_add(&region->v2d, x0 + 8, y + 8, buf, buf_len, col_grid);
+  const int font_id = BLF_set_default();
+  float text_scale_x, text_scale_y;
+  ui::view2d_scale_get_inverse(&region->v2d, &text_scale_x, &text_scale_y);
+
+  float prev_label_top = -FLT_MAX;
+
+  for (const ocio::ScopeGraticule &graticule : scope_info.graticules) {
+    const float y = area.ymin + h * graticule.value;
+    const size_t buf_len = strlen(graticule.label);
+    float text_width_px, text_height_px;
+    BLF_width_and_height(font_id, graticule.label, buf_len, &text_width_px, &text_height_px);
+    const float text_width = text_width_px * text_scale_x;
+    const float text_height = text_height_px * text_scale_y;
+    const float pad_x = text_height_px * text_scale_x;
+    const float gap = text_width + pad_x;
+
+    const float label_bottom = y - text_height * 0.5f;
+    const bool show_label = label_bottom > prev_label_top;
+
+    quads.add_line(x0 + gap, y, x1, y, col_grid);
+    if (show_label) {
+      ui::view2d_text_cache_add(&region->v2d,
+                                x0 + (gap - text_width) * 0.5f,
+                                y - text_height * 0.5f,
+                                graticule.label,
+                                buf_len,
+                                col_grid);
+      prev_label_top = y + text_height * 0.5f + text_height;
+    }
   }
-  /* Border. */
-  uchar col_border[4] = {64, 64, 64, 128};
-  quads.add_wire_quad(x0, area.ymin, x1, area.ymax, col_border);
 
   quads.draw();
   ui::view2d_text_cache_draw(region);
 }
 
-static void draw_vectorscope_graticule(ARegion *region, SeqQuadsBatch &quads, const rctf &area)
+static void draw_vectorscope_graticule(ARegion *region,
+                                       SeqQuadsBatch &quads,
+                                       const rctf &area,
+                                       const ocio::ScopeInfo &scope_info)
 {
   const float skin_rad = DEG2RADF(123.0f); /* angle in radians of the skin tone line */
 
@@ -529,6 +556,9 @@ static void draw_vectorscope_graticule(ARegion *region, SeqQuadsBatch &quads, co
   const float h = BLI_rctf_size_y(&area);
   const float2 center{BLI_rctf_cent_x(&area), BLI_rctf_cent_y(&area)};
   const float radius = ((w < h) ? w : h) * 0.5f;
+
+  const float3x3 &yuv_matrix = scope_info.yuv_matrix;
+  const float3x3 inv_yuv_to_rec709 = scope_info.scope_gamut_to_rec709 * math::invert(yuv_matrix);
 
   /* Precalculate circle points/colors. */
   constexpr int circle_delta = 6;
@@ -540,11 +570,9 @@ static void draw_vectorscope_graticule(ARegion *region, SeqQuadsBatch &quads, co
     float x = cosf(a);
     float y = sinf(a);
     circle_pos[i] = float2(x, y);
-    float u = x / SeqScopes::VECSCOPE_U_SCALE;
-    float v = y / SeqScopes::VECSCOPE_V_SCALE;
 
-    float3 col;
-    yuv_to_rgb(0.5f, u, v, &col.x, &col.y, &col.z, BLI_YUV_ITU_BT709);
+    float3 yuv = float3(0.5f, x, y);
+    float3 col = inv_yuv_to_rec709 * yuv;
     circle_col[i] = col;
   }
 
@@ -653,7 +681,7 @@ static void draw_vectorscope_graticule(ARegion *region, SeqQuadsBatch &quads, co
   const float delta = radius * 0.01f;
   for (int i = 0; i < 6; i++) {
     float3 safe = primaries[i] * 0.75f;
-    float2 pos = center + rgb_to_uv_scaled(safe) * (radius * 2);
+    float2 pos = center + rgb_to_cbcr(yuv_matrix, safe) * (radius * 2);
     quads.add_wire_quad(pos.x - delta, pos.y - delta, pos.x + delta, pos.y + delta, col_target);
 
     buf[0] = names[i];
@@ -697,6 +725,8 @@ static const char *get_scope_debug_name(eSpaceSeq_RegionType type)
 
 static void sequencer_draw_scopes(Scene *scene,
                                   const SpaceSeq &space_sequencer,
+                                  const ColorManagedViewSettings &view_settings,
+                                  const ColorManagedDisplaySettings &display_settings,
                                   ARegion &region,
                                   int timeline_frame,
                                   int image_width,
@@ -705,10 +735,12 @@ static void sequencer_draw_scopes(Scene *scene,
 {
   GPU_debug_group_begin(get_scope_debug_name(eSpaceSeq_RegionType(space_sequencer.mainb)));
 
-  gpu::Texture *input_texture = seq::preview_cache_get_gpu_display_texture(
+  /* Get display-space texture for scope values (positions, histogram bins).
+   * Falls back to the raw input texture if no color management is needed. */
+  gpu::Texture *scope_texture = seq::preview_cache_get_gpu_scope_texture(
       scene, timeline_frame, 0, image_width, image_height);
-  if (input_texture == nullptr) {
-    input_texture = seq::preview_cache_get_gpu_texture(
+  if (scope_texture == nullptr) {
+    scope_texture = seq::preview_cache_get_gpu_texture(
         scene, timeline_frame, space_sequencer.chanshown, image_width, image_height);
   }
 
@@ -736,7 +768,7 @@ static void sequencer_draw_scopes(Scene *scene,
     GPU_blend(GPU_BLEND_ALPHA);
   }
 
-  if (input_texture) {
+  if (scope_texture) {
     if (space_sequencer.mainb == SEQ_DRAW_IMG_IMBUF) {
       /* Draw overexposed overlay. */
       GPU_blend(GPU_BLEND_NONE);
@@ -749,11 +781,11 @@ static void sequencer_draw_scopes(Scene *scene,
       immUniform1i("img_premultiplied", premultiplied ? 1 : 0);
       immUniform1f("zebra_limit", space_sequencer.zebra / 100.0f);
 
-      GPU_texture_bind(input_texture, 0);
+      GPU_texture_bind(scope_texture, 0);
       rctf uv;
       BLI_rctf_init(&uv, 0.0f, 1.0f, 0.0f, 1.0f);
       immRectf_with_texco(pos, tex_coord, preview, uv);
-      GPU_texture_unbind(input_texture);
+      GPU_texture_unbind(scope_texture);
       immUnbindProgram();
     }
     else if (space_sequencer.mainb != SEQ_DRAW_IMG_HISTOGRAM) {
@@ -766,8 +798,9 @@ static void sequencer_draw_scopes(Scene *scene,
        * final colors. */
       const float point_size = (BLI_rcti_size_x(&region.v2d.mask) + 1) /
                                BLI_rctf_size_x(&region.v2d.cur);
-      float3 coeffs;
-      IMB_colormanagement_get_luminance_coefficients(coeffs);
+
+      const ocio::ScopeInfo scope_info = IMB_colormanagement_get_scope_info(&display_settings,
+                                                                            &view_settings);
 
       int viewport_size_i[4];
       GPU_viewport_size_get_i(viewport_size_i);
@@ -792,11 +825,15 @@ static void sequencer_draw_scopes(Scene *scene,
         const int raster_ssbo_location = GPU_shader_get_ssbo_binding(shader, "raster_buf");
         GPU_storagebuf_bind(raster_ssbo, raster_ssbo_location);
         const int image_location = GPU_shader_get_sampler_binding(shader, "image");
-        GPU_texture_bind(input_texture, image_location);
+        GPU_texture_bind(scope_texture, image_location);
 
         GPU_shader_uniform_1i(shader, "view_width", viewport_size.x);
         GPU_shader_uniform_1i(shader, "view_height", viewport_size.y);
-        GPU_shader_uniform_3fv(shader, "luma_coeffs", coeffs);
+        GPU_shader_uniform_3fv(shader, "scope_luma_coeffs", scope_info.luma_coefficients);
+        GPU_shader_uniform_mat3(
+            shader, "scope_gamut_to_rec709", scope_info.scope_gamut_to_rec709.ptr());
+        GPU_shader_uniform_mat3(shader, "scope_yuv_matrix", scope_info.yuv_matrix.ptr());
+        GPU_shader_uniform_1b(shader, "scope_is_hdr", scope_info.is_hdr);
         GPU_shader_uniform_1f(shader, "scope_point_size", point_size);
         GPU_shader_uniform_1b(shader, "img_premultiplied", premultiplied);
         GPU_shader_uniform_1i(shader, "image_width", image_width);
@@ -855,15 +892,23 @@ static void sequencer_draw_scopes(Scene *scene,
   }
 
   if (space_sequencer.mainb == SEQ_DRAW_IMG_HISTOGRAM) {
-    draw_histogram(region, scopes->histogram, quads, preview);
+    draw_histogram(region,
+                   scopes->histogram,
+                   quads,
+                   preview,
+                   &scene->view_settings,
+                   &scene->display_settings);
   }
   if (ELEM(space_sequencer.mainb, SEQ_DRAW_IMG_WAVEFORM, SEQ_DRAW_IMG_RGBPARADE)) {
     use_blend = true;
-    draw_waveform_graticule(&region, quads, preview);
+    draw_waveform_graticule(
+        &region, quads, preview, &scene->view_settings, &scene->display_settings);
   }
   if (space_sequencer.mainb == SEQ_DRAW_IMG_VECTORSCOPE) {
     use_blend = true;
-    draw_vectorscope_graticule(&region, quads, preview);
+    const ocio::ScopeInfo scope_info = IMB_colormanagement_get_scope_info(&display_settings,
+                                                                          &view_settings);
+    draw_vectorscope_graticule(&region, quads, preview, scope_info);
   }
 
   quads.draw();
@@ -882,32 +927,27 @@ static void update_gpu_scopes(const ImBuf *input_ibuf,
                               Scene *scene,
                               int timeline_frame)
 {
+  PRF_scope_with_name("SeqUpdateGPUScopes", ProfileCategory::Draw);
   BLI_assert(input_ibuf && input_texture);
-
-  /* No need for GPU texture transformed to display space: can use input texture as-is. */
-  if (!IMB_colormanagement_display_processor_needed(input_ibuf, &view_settings, &display_settings))
-  {
-    return;
-  }
 
   /* Display space GPU texture is already calculated. */
   const int width = GPU_texture_width(input_texture);
   const int height = GPU_texture_height(input_texture);
-  gpu::Texture *display_texture = seq::preview_cache_get_gpu_display_texture(
+  gpu::Texture *scope_texture = seq::preview_cache_get_gpu_scope_texture(
       scene, timeline_frame, space_sequencer.chanshown, width, height);
-  if (display_texture != nullptr) {
+  if (scope_texture != nullptr) {
     return;
   }
 
   /* Create GPU texture. */
   const eGPUTextureUsage usage = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_ATTACHMENT;
   const gpu::TextureFormat format = gpu::TextureFormat::SFLOAT_16_16_16_16;
-  display_texture = GPU_texture_create_2d(
+  scope_texture = GPU_texture_create_2d(
       "seq_scope_display_buf", width, height, 1, format, usage, nullptr);
-  if (display_texture == nullptr) {
+  if (scope_texture == nullptr) {
     return;
   }
-  GPU_texture_filter_mode(display_texture, false);
+  GPU_texture_filter_mode(scope_texture, false);
 
   GPU_matrix_push();
   GPU_matrix_push_projection();
@@ -915,8 +955,7 @@ static void update_gpu_scopes(const ImBuf *input_ibuf,
   GPU_matrix_identity_set();
 
   gpu::FrameBuffer *fb = nullptr;
-  GPU_framebuffer_ensure_config(&fb,
-                                {GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(display_texture)});
+  GPU_framebuffer_ensure_config(&fb, {GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(scope_texture)});
   GPU_framebuffer_bind(fb);
 
   GPUVertFormat *imm_format = immVertexFormat();
@@ -924,12 +963,17 @@ static void update_gpu_scopes(const ImBuf *input_ibuf,
   const uint tex_coord = GPU_vertformat_attr_add(
       imm_format, "texCoord", gpu::VertAttrType::SFLOAT_32_32);
 
-  const ColorSpace *input_colorspace = input_ibuf->float_buffer.data ?
+  const ColorSpace *input_colorspace = input_ibuf->float_data() ?
                                            input_ibuf->float_buffer.colorspace :
                                            input_ibuf->byte_buffer.colorspace;
-  const bool predivide = input_ibuf->float_buffer.data != nullptr;
-  if (IMB_colormanagement_setup_glsl_draw_from_space(
-          &view_settings, &display_settings, input_colorspace, 0.0f, predivide, false))
+  const bool predivide = input_ibuf->float_data() != nullptr;
+  if (IMB_colormanagement_setup_glsl_draw_from_space(&view_settings,
+                                                     &display_settings,
+                                                     input_colorspace,
+                                                     0.0f,
+                                                     predivide,
+                                                     false,
+                                                     DISPLAY_SPACE_SCOPE))
   {
     GPU_texture_bind(input_texture, 0);
     const rctf position{0.0f, 1.0f, 0.0f, 1.0f};
@@ -944,8 +988,8 @@ static void update_gpu_scopes(const ImBuf *input_ibuf,
   GPU_matrix_pop();
   GPU_matrix_pop_projection();
 
-  seq::preview_cache_set_gpu_display_texture(
-      scene, timeline_frame, space_sequencer.chanshown, display_texture);
+  seq::preview_cache_set_gpu_scope_texture(
+      scene, timeline_frame, space_sequencer.chanshown, scope_texture);
 }
 
 static void update_cpu_scopes(const SpaceSeq &space_sequencer,
@@ -961,6 +1005,8 @@ static void update_cpu_scopes(const SpaceSeq &space_sequencer,
     return;
   }
 
+  PRF_scope_with_name("SeqUpdateCPUScopes", ProfileCategory::Draw);
+
   scopes.cleanup();
   if (space_sequencer.mainb == SEQ_DRAW_IMG_HISTOGRAM) {
     scopes.histogram.calc_from_ibuf(&ibuf, view_settings, display_settings);
@@ -971,9 +1017,7 @@ static void update_cpu_scopes(const SpaceSeq &space_sequencer,
 
 static bool sequencer_draw_get_transform_preview(const SpaceSeq &sseq, const Scene &scene)
 {
-  if ((scene.ed->runtime.flag & SEQ_SHOW_TRANSFORM_PREVIEW) &&
-      (sseq.draw_flag & SEQ_DRAW_TRANSFORM_PREVIEW))
-  {
+  if (scene.ed->runtime->show_transform_preview && (sseq.draw_flag & SEQ_DRAW_TRANSFORM_PREVIEW)) {
     return true;
   }
 
@@ -991,8 +1035,8 @@ static int sequencer_draw_get_transform_preview_frame(const Scene *scene)
 {
   int preview_frame;
 
-  if (scene->ed->runtime.flag & SEQ_SHOW_TRANSFORM_PREVIEW) {
-    preview_frame = scene->ed->runtime.transform_preview_frame;
+  if (scene->ed->runtime->show_transform_preview) {
+    preview_frame = scene->ed->runtime->transform_preview_frame;
     return preview_frame;
   }
 
@@ -1019,8 +1063,8 @@ static void strip_draw_image_origin_and_outline(const bContext *C,
     return;
   }
 
-  const float2 origin = seq::image_transform_origin_offset_pixelspace_get(
-      CTX_data_sequencer_scene(C), strip);
+  const float2 origin = seq::image_transform_origin_preview_offset_get(CTX_data_sequencer_scene(C),
+                                                                       strip);
 
   /* Origin. */
   GPU_program_point_size(true);
@@ -1038,8 +1082,8 @@ static void strip_draw_image_origin_and_outline(const bContext *C,
   GPU_program_point_size(false);
 
   /* Outline. */
-  const Array<float2> strip_image_quad = seq::image_transform_final_quad_get(
-      CTX_data_sequencer_scene(C), strip);
+  const Array<float2> strip_image_quad = seq::image_transform_quad_get(CTX_data_sequencer_scene(C),
+                                                                       strip);
 
   GPU_line_smooth(true);
   GPU_blend(GPU_BLEND_ALPHA);
@@ -1195,6 +1239,7 @@ static void text_edit_draw(const bContext *C)
   GPU_blend(GPU_BLEND_ALPHA);
   immBindBuiltinProgram(GPU_SHADER_3D_UNIFORM_COLOR);
 
+  std::scoped_lock runtime_lock(seq::text_runtime_mutex_get());
   text_selection_draw(C, strip, pos);
   text_edit_draw_cursor(C, strip, pos);
 
@@ -1272,8 +1317,7 @@ static void preview_draw_color_render_begin(ARegion &region)
   gpu::FrameBuffer *render_fb = GPU_viewport_framebuffer_render_get(viewport);
   GPU_framebuffer_bind(render_fb);
 
-  float col[4] = {0, 0, 0, 0};
-  GPU_framebuffer_clear_color(render_fb, col);
+  GPU_framebuffer_clear_color(render_fb, double4(0.0));
 }
 
 /* Configure current GPU state to draw on the overlay frame-buffer of the viewport. */
@@ -1505,12 +1549,13 @@ static int get_reference_frame_offset(const Editing &editing, const RenderData &
  * If channel configuration is incompatible with the texture nullptr is returned. */
 static gpu::Texture *create_texture(const ImBuf &ibuf)
 {
+  PRF_scope_with_name("SeqPreviewCreateTexture", ProfileCategory::Draw);
   const eGPUTextureUsage texture_usage = GPU_TEXTURE_USAGE_SHADER_READ |
                                          GPU_TEXTURE_USAGE_ATTACHMENT;
 
   gpu::Texture *texture = nullptr;
 
-  if (ibuf.float_buffer.data) {
+  if (ibuf.float_data()) {
     gpu::TextureFormat texture_format;
     switch (ibuf.channels) {
       case 1:
@@ -1530,10 +1575,10 @@ static gpu::Texture *create_texture(const ImBuf &ibuf)
     texture = GPU_texture_create_2d(
         "seq_display_buf", ibuf.x, ibuf.y, 1, texture_format, texture_usage, nullptr);
     if (texture) {
-      GPU_texture_update(texture, GPU_DATA_FLOAT, ibuf.float_buffer.data);
+      GPU_texture_update(texture, GPU_DATA_FLOAT, ibuf.float_data());
     }
   }
-  else if (ibuf.byte_buffer.data) {
+  else if (ibuf.byte_data()) {
     texture = GPU_texture_create_2d("seq_display_buf",
                                     ibuf.x,
                                     ibuf.y,
@@ -1542,7 +1587,7 @@ static gpu::Texture *create_texture(const ImBuf &ibuf)
                                     texture_usage,
                                     nullptr);
     if (texture) {
-      GPU_texture_update(texture, GPU_DATA_UBYTE, ibuf.byte_buffer.data);
+      GPU_texture_update(texture, GPU_DATA_UBYTE, ibuf.byte_data());
     }
   }
 
@@ -1562,18 +1607,12 @@ static gpu::Texture *create_texture(const ImBuf &ibuf)
  * If there are no buffers at all scene linear space is returned. */
 static const char *get_texture_colorspace_name(const ImBuf &ibuf)
 {
-  if (ibuf.float_buffer.data) {
-    if (ibuf.float_buffer.colorspace) {
-      return IMB_colormanagement_colorspace_get_name(ibuf.float_buffer.colorspace);
-    }
-    return IMB_colormanagement_role_colorspace_name_get(COLOR_ROLE_SCENE_LINEAR);
+  if (ibuf.float_data()) {
+    return IMB_colormanagement_get_float_colorspace(&ibuf);
   }
 
-  if (ibuf.byte_buffer.data) {
-    if (ibuf.byte_buffer.colorspace) {
-      return IMB_colormanagement_colorspace_get_name(ibuf.byte_buffer.colorspace);
-    }
-    return IMB_colormanagement_role_colorspace_name_get(COLOR_ROLE_DEFAULT_BYTE);
+  if (ibuf.byte_data()) {
+    return IMB_colormanagement_get_byte_colorspace(&ibuf);
   }
 
   /* Fail-safe fallback. */
@@ -1597,7 +1636,7 @@ static void sequencer_preview_draw_color_render(const SpaceSeq &space_sequencer,
     const rctf position = preview_get_full_position(region);
     const rctf texture_coord = preview_get_full_texture_coord();
     const char *texture_colorspace = get_texture_colorspace_name(*current_ibuf);
-    const bool predivide = (current_ibuf->float_buffer.data != nullptr);
+    const bool predivide = (current_ibuf->float_data() != nullptr);
     preview_draw_texture_to_linear(
         *current_texture, texture_colorspace, predivide, position, texture_coord);
   }
@@ -1607,7 +1646,7 @@ static void sequencer_preview_draw_color_render(const SpaceSeq &space_sequencer,
     const rctf position = preview_get_reference_position(space_sequencer, editing, region);
     const rctf texture_coord = preview_get_reference_texture_coord(space_sequencer, editing);
     const char *texture_colorspace = get_texture_colorspace_name(*reference_ibuf);
-    const bool predivide = (reference_ibuf->float_buffer.data != nullptr);
+    const bool predivide = (reference_ibuf->float_data() != nullptr);
     preview_draw_texture_to_linear(
         *reference_texture, texture_colorspace, predivide, position, texture_coord);
   }
@@ -1657,9 +1696,6 @@ static void sequencer_preview_draw_overlays(const bContext *C,
                                    SEQ_DRAW_IMG_RGBPARADE,
                                    SEQ_DRAW_IMG_VECTORSCOPE));
 
-  /* Update scopes before starting regular draw (GPU scopes update changes framebuffer, etc.). */
-  space_sequencer.runtime->scopes.last_ibuf_float = input_ibuf &&
-                                                    input_ibuf->float_buffer.data != nullptr;
   if (has_cpu_scope) {
     update_cpu_scopes(
         space_sequencer, view_settings, display_settings, *input_ibuf, timeline_frame);
@@ -1680,11 +1716,13 @@ static void sequencer_preview_draw_overlays(const bContext *C,
     /* Draw scope. */
     sequencer_draw_scopes(scene,
                           space_sequencer,
+                          view_settings,
+                          display_settings,
                           region,
                           timeline_frame,
                           input_ibuf->x,
                           input_ibuf->y,
-                          input_ibuf->float_buffer.data != nullptr);
+                          input_ibuf->float_data() != nullptr);
   }
   else if (space_sequencer.flag & SEQ_USE_ALPHA) {
     /* Draw checked-board. */
@@ -1803,6 +1841,8 @@ void sequencer_preview_region_draw(const bContext *C, ARegion *region)
     return;
   }
 
+  PRF_scope_with_name("SeqPreviewDraw", ProfileCategory::Draw);
+
   const Editing &editing = *scene->ed;
   const RenderData &render_data = scene->r;
 
@@ -1904,6 +1944,16 @@ void sequencer_preview_region_draw(const bContext *C, ARegion *region)
   IMB_freeImBuf(reference_ibuf);
 
   preview_draw_end(C);
+}
+
+void sequencer_scrubbing_region_draw(const bContext *C, ARegion *region)
+{
+  const Scene *scene = CTX_data_sequencer_scene(C);
+  const SpaceSeq *sseq = CTX_wm_space_seq(C);
+
+  const int fps = round_db_to_int(scene->frames_per_second());
+  ED_time_scrub_draw(region, scene, !(sseq->flag & SEQ_DRAWFRAMES), true, fps);
+  ED_time_scrub_draw_current_frame(region, scene, !(sseq->flag & SEQ_DRAWFRAMES), false, true);
 }
 
 }  // namespace blender::ed::vse

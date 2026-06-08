@@ -807,6 +807,20 @@ static wmOperatorStatus view3d_clipping_invoke(bContext *C, wmOperator *op, cons
   return WM_gesture_box_invoke(C, op, event);
 }
 
+static bool view3d_region_wire_or_solid_poll(bContext *C)
+{
+  if (const View3D *v3d = CTX_wm_view3d(C)) {
+    if (ELEM(v3d->shading.type, OB_WIRE, OB_SOLID)) {
+      if (CTX_wm_region_view3d(C)) {
+        return true;
+      }
+    }
+  }
+
+  CTX_wm_operator_poll_msg_set(C, "Clipping works in Wireframe and Solid viewport shading only");
+  return false;
+}
+
 void VIEW3D_OT_clip_border(wmOperatorType *ot)
 {
 
@@ -821,7 +835,7 @@ void VIEW3D_OT_clip_border(wmOperatorType *ot)
   ot->modal = WM_gesture_box_modal;
   ot->cancel = WM_gesture_box_cancel;
 
-  ot->poll = ED_operator_region_view3d_active;
+  ot->poll = view3d_region_wire_or_solid_poll;
 
   /* flags */
   ot->flag = 0;
@@ -1155,7 +1169,7 @@ static wmOperatorStatus toggle_shading_exec(bContext *C, wmOperator *op)
   Main *bmain = CTX_data_main(C);
   View3D *v3d = CTX_wm_view3d(C);
   ScrArea *area = CTX_wm_area(C);
-  int type = RNA_enum_get(op->ptr, "type");
+  const eDrawType type = eDrawType(RNA_enum_get(op->ptr, "type"));
 
   if (type == OB_SOLID) {
     if (v3d->shading.type != type) {
@@ -1169,7 +1183,8 @@ static wmOperatorStatus toggle_shading_exec(bContext *C, wmOperator *op)
     }
   }
   else {
-    char *prev_type = ((type == OB_WIRE) ? &v3d->shading.prev_type_wire : &v3d->shading.prev_type);
+    eDrawType *prev_type = ((type == OB_WIRE) ? &v3d->shading.prev_type_wire :
+                                                &v3d->shading.prev_type);
     if (v3d->shading.type == type) {
       if (*prev_type == type || !ELEM(*prev_type, OB_WIRE, OB_SOLID, OB_MATERIAL, OB_RENDER)) {
         *prev_type = OB_SOLID;

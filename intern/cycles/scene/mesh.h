@@ -43,29 +43,25 @@ class Mesh : public Geometry {
  public:
   NODE_DECLARE
 
+  /* Vertices. */
+  size_t num_verts() const;
+
   /* Mesh Triangle */
   struct Triangle {
     int v[3];
 
-    void bounds_grow(const float3 *verts, BoundBox &bounds) const;
+    void bounds_grow(const packed_float3 *verts, BoundBox &bounds) const;
 
-    void motion_verts(const float3 *verts,
-                      const float3 *vert_steps,
-                      const size_t num_verts,
+    void motion_verts(const Attribute *attr_P,
                       const size_t num_steps,
                       const float time,
                       float3 r_verts[3]) const;
 
-    void verts_for_step(const float3 *verts,
-                        const float3 *vert_steps,
-                        const size_t num_verts,
-                        const size_t num_steps,
-                        const size_t step,
-                        float3 r_verts[3]) const;
+    void verts_for_step(const Attribute *attr_P, const size_t step, float3 r_verts[3]) const;
 
-    float3 compute_normal(const float3 *verts) const;
+    float3 compute_normal(const packed_float3 *verts) const;
 
-    bool valid(const float3 *verts) const;
+    bool valid(const packed_float3 *verts) const;
   };
 
   Triangle get_triangle(const size_t i) const
@@ -146,7 +142,6 @@ class Mesh : public Geometry {
 
   /* Mesh Data */
   NODE_SOCKET_API_ARRAY(array<int>, triangles)
-  NODE_SOCKET_API_ARRAY(array<float3>, verts)
   NODE_SOCKET_API_ARRAY(array<int>, shader)
   NODE_SOCKET_API_ARRAY(array<bool>, smooth)
 
@@ -174,8 +169,6 @@ class Mesh : public Geometry {
   AttributeSet subd_attributes;
 
   /* BVH */
-  size_t vert_offset;
-
   size_t face_offset;
   size_t corner_offset;
 
@@ -198,16 +191,10 @@ class Mesh : public Geometry {
   Mesh();
 
   void resize_mesh(const int numverts, const int numtris);
-  void reserve_mesh(const int numverts, const int numtris);
   void resize_subd_faces(const int numfaces, const int numcorners);
-  void reserve_subd_faces(const int numfaces, const int numcorners);
   void reserve_subd_creases(const size_t num_creases);
   void clear_non_sockets();
   void clear(bool preserve_shaders = false) override;
-  void add_vertex(const float3 P);
-  void add_vertex_slow(const float3 P);
-  void add_triangle(const int v0, const int v1, const int v2, const int shader, bool smooth);
-  void add_subd_face(const int *corners, const int num_corners, const int shader_, bool smooth_);
   void add_edge_crease(const int v0, const int v1, const float weight);
   void add_vertex_crease(const int v, const float weight);
 
@@ -223,7 +210,7 @@ class Mesh : public Geometry {
   void get_uv_tiles(ustring map, unordered_set<int> &tiles) override;
 
   void pack_shaders(Scene *scene, uint *shader);
-  void pack_verts(packed_float3 *tri_verts, packed_uint3 *tri_vindex);
+  void pack_triangles(packed_uint3 *tri_vindex);
 
   bool has_motion_blur() const override;
   PrimitiveType primitive_type() const override;
@@ -241,11 +228,13 @@ class Mesh : public Geometry {
   }
   size_t get_num_subd_base_verts() const
   {
-    return verts.size() - num_subd_added_verts;
+    return num_verts() - num_subd_added_verts;
   }
 
  protected:
   void clear(bool preserve_shaders, bool preserve_voxel_data);
+
+  void add_builtin_attributes();
 };
 
 CCL_NAMESPACE_END

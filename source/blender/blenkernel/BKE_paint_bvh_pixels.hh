@@ -9,6 +9,7 @@
 #pragma once
 
 #include "BLI_array.hh"
+#include "BLI_map.hh"
 #include "BLI_math_vector.hh"
 #include "BLI_rect.h"
 #include "BLI_vector.hh"
@@ -23,30 +24,11 @@
 
 namespace blender::bke::pbvh::pixels {
 
-struct UVPrimitivePaintInput {
-  /** Corresponding index into triangles */
-  int tri_index;
-  /**
-   * Delta barycentric coordinates between 2 neighboring UVs in the U direction.
-   *
-   * Only the first two coordinates are stored. The third should be recalculated
-   */
-  float2 delta_barycentric_coord_u;
-
-  /**
-   * Initially only the vert indices are known.
-   *
-   * delta_barycentric_coord_u is initialized in a later stage as it requires image tile
-   * dimensions.
-   */
-  UVPrimitivePaintInput(int tri_index)
-      : tri_index(tri_index), delta_barycentric_coord_u(0.0f, 0.0f)
-  {
-  }
-};
-
 /**
  * Encode sequential pixels to reduce memory footprint.
+ * TODO: Can we pack an associated Bounds<float3> to improve coarse filtering?
+ * TODO: Experiment with adding an initial float3 and delta so calculating positions doesn't need
+ * to happen as frequently
  */
 struct PackedPixelRow {
   /** Barycentric coordinate of the first pixel. */
@@ -64,7 +46,7 @@ struct PackedPixelRow {
  */
 struct UDIMTilePixels {
   /** UDIM Tile number. */
-  short tile_number;
+  image::TileNumber tile_number;
 
   struct {
     bool dirty : 1;
@@ -81,11 +63,10 @@ struct UDIMTilePixels {
     BLI_rcti_init_minmax(&dirty_region);
   }
 
-  void mark_dirty(const PackedPixelRow &pixel_row)
+  void mark_dirty(const Bounds<int2> &bounds)
   {
-    int2 start_image_coord(pixel_row.start_image_coordinate.x, pixel_row.start_image_coordinate.y);
-    BLI_rcti_do_minmax_v(&dirty_region, start_image_coord);
-    BLI_rcti_do_minmax_v(&dirty_region, start_image_coord + int2(pixel_row.num_pixels + 1, 0));
+    BLI_rcti_do_minmax_v(&dirty_region, bounds.min);
+    BLI_rcti_do_minmax_v(&dirty_region, bounds.max);
     flags.dirty = true;
   }
 
@@ -106,18 +87,34 @@ struct UDIMTileUndo {
 /**
  * Contains triangle/pixel data used during texture painting.
  */
-struct NodeData {
+struct PixelNode {
   struct {
+    /* Indicates whether the node data was painted to */
     bool dirty : 1;
+
+    /* Indicates whether the node data should be rebuilt */
+    bool rebuild : 1;
   } flags;
 
-  Vector<UDIMTilePixels> tiles;
-  Vector<UDIMTileUndo> undo_regions;
-  Vector<UVPrimitivePaintInput> uv_primitives;
+  Vector<UDIMTilePixels, 0> tiles;
+  Vector<UDIMTileUndo, 0> undo_regions;
 
-  NodeData()
+  struct {
+    /** Corresponding index into triangles */
+    Vector<int, 0> tri_indices;
+
+    /**
+     * Delta barycentric coordinates between 2 neighboring UVs in the U direction.
+     *
+     * Only the first two coordinates are stored. The third should be recalculated
+     */
+    Vector<float2, 0> delta_barycentric_coords;
+  } uv_primitives;
+
+  PixelNode()
   {
     flags.dirty = false;
+    flags.rebuild = true;
   }
 
   UDIMTilePixels *find_tile_data(const image::ImageTileWrapper &image_tile)
@@ -151,19 +148,21 @@ struct NodeData {
     }
   }
 
-  void mark_region(Image &image, const image::ImageTileWrapper &image_tile, ImBuf &image_buffer)
+  void mark_region(UDIMTilePixels &tile,
+                   Image &image,
+                   const image::ImageTileWrapper &image_tile,
+                   ImBuf &image_buffer)
   {
-    UDIMTilePixels *tile = find_tile_data(image_tile);
-    if (tile && tile->flags.dirty) {
-      if (image_buffer.planes == 8) {
-        image_buffer.planes = 32;
+    if (tile.flags.dirty) {
+      if (image_buffer.color_mode == ImColorMode::BW) {
+        image_buffer.color_mode = ImColorMode::RGBA;
         BKE_image_partial_update_mark_full_update(&image);
       }
       else {
         BKE_image_partial_update_mark_region(
-            &image, image_tile.image_tile, &image_buffer, &tile->dirty_region);
+            &image, image_tile.image_tile, &image_buffer, &tile.dirty_region);
       }
-      tile->clear_dirty();
+      tile.clear_dirty();
     }
   }
 
@@ -179,13 +178,9 @@ struct NodeData {
   void clear_data()
   {
     tiles.clear();
-    uv_primitives.clear();
-  }
-
-  static void free_func(void *instance)
-  {
-    NodeData *node_data = static_cast<NodeData *>(instance);
-    MEM_delete(node_data);
+    uv_primitives.tri_indices.clear();
+    uv_primitives.delta_barycentric_coords.clear();
+    undo_regions.clear();
   }
 };
 
@@ -280,7 +275,7 @@ struct CopyPixelTile {
 
   void copy_pixels(ImBuf &tile_buffer, IndexRange group_range) const
   {
-    if (tile_buffer.float_buffer.data) {
+    if (tile_buffer.float_data()) {
       image::ImageBufferAccessor<float4> accessor(tile_buffer);
       copy_pixels<float4>(accessor, group_range);
     }
@@ -343,27 +338,29 @@ struct CopyPixelTiles {
 /**
  * Storage for texture painting on bke::pbvh::Tree level.
  */
-struct PBVHData {
+struct PixelData {
+  struct {
+    bool dirty : 1;
+  } flags;
+
   /* Per UVPRimitive contains the paint data. */
   Array<int3> vert_tris;
 
   /** Per ImageTile the pixels to copy to fix non-manifold bleeding. */
   CopyPixelTiles tiles_copy_pixels;
 
-  void clear_data()
-  {
-    this->vert_tris = {};
-  }
+  Vector<PixelNode> nodes;
 };
 
-NodeData &node_data_get(bke::pbvh::Node &node);
-void mark_image_dirty(bke::pbvh::Node &node, Image &image, ImageUser &image_user);
-PBVHData &data_get(bke::pbvh::Tree &pbvh);
-void collect_dirty_tiles(bke::pbvh::Node &node, Vector<image::TileNumber> &r_dirty_tiles);
+void mark_image_dirty(bke::pbvh::Node &node,
+                      PixelNode &pixel_node,
+                      Image &image,
+                      Map<image::TileNumber, ImBuf *> &buffers);
+PixelData &data_get(bke::pbvh::Tree &pbvh);
+void collect_dirty_tiles(PixelNode &pixel_node, Vector<image::TileNumber> &r_dirty_tiles);
 
 void copy_pixels(bke::pbvh::Tree &pbvh,
-                 Image &image,
-                 ImageUser &image_user,
+                 Map<image::TileNumber, ImBuf *> &buffers,
                  image::TileNumber tile_number);
 
 }  // namespace blender::bke::pbvh::pixels

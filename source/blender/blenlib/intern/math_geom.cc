@@ -23,7 +23,9 @@
 
 namespace blender {
 
-/********************************** Polygons *********************************/
+/* -------------------------------------------------------------------- */
+/** \name Polygons
+ * \{ */
 
 void cross_tri_v3(float n[3], const float v1[3], const float v2[3], const float v3[3])
 {
@@ -214,7 +216,11 @@ float cotangent_tri_weight_v3(const float v1[3], const float v2[3], const float 
   return 0.0f;
 }
 
-/********************************* Planes **********************************/
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Planes
+ * \{ */
 
 void plane_from_point_normal_v3(float r_plane[4], const float plane_co[3], const float plane_no[3])
 {
@@ -236,7 +242,11 @@ void plane_to_point_vector_v3_normalized(const float plane[4],
   mul_v3_v3fl(r_plane_co, r_plane_no, (-plane[3] / length));
 }
 
-/********************************* Volume **********************************/
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Volume
+ * \{ */
 
 float volume_tetrahedron_v3(const float v1[3],
                             const float v2[3],
@@ -275,7 +285,11 @@ float volume_tri_tetrahedron_signed_v3(const float v1[3], const float v2[3], con
   return volume_tri_tetrahedron_signed_v3_6x(v1, v2, v3) / 6.0f;
 }
 
-/********************************* Distance **********************************/
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Distance
+ * \{ */
 
 float dist_squared_to_line_v2(const float p[2], const float l1[2], const float l2[2])
 {
@@ -335,7 +349,7 @@ float closest_seg_seg_v2(float r_closest_a[2],
   const float dist_sq3 = len_squared_v2v2(p3, b1);
   const float dist_sq4 = len_squared_v2v2(p4, b2);
 
-  const float min_dist_sq = min_ffff(dist_sq1, dist_sq2, dist_sq3, dist_sq4);
+  const float min_dist_sq = std::min({dist_sq1, dist_sq2, dist_sq3, dist_sq4});
   if (min_dist_sq == dist_sq1) {
     copy_v2_v2(r_closest_a, a1);
     copy_v2_v2(r_closest_b, p1);
@@ -680,6 +694,8 @@ void aabb_get_near_far_from_plane(const float plane_no[3],
   }
 }
 
+/** \} */
+
 /* -------------------------------------------------------------------- */
 /** \name dist_squared_to_ray_to_aabb and helpers
  * \{ */
@@ -1002,6 +1018,10 @@ float dist_squared_to_projected_aabb_simple(const float projmat[4][4],
 
 /** \} */
 
+/* -------------------------------------------------------------------- */
+/** \name Distance Closest Point
+ * \{ */
+
 float dist_seg_seg_v2(const float a1[3], const float a2[3], const float b1[3], const float b2[3])
 {
   if (isect_seg_seg_v2_simple(a1, a2, b1, b2)) {
@@ -1011,7 +1031,7 @@ float dist_seg_seg_v2(const float a1[3], const float a2[3], const float b1[3], c
   const float d2 = dist_squared_to_line_segment_v2(a2, b1, b2);
   const float d3 = dist_squared_to_line_segment_v2(b1, a1, a2);
   const float d4 = dist_squared_to_line_segment_v2(b2, a1, a2);
-  return sqrtf(min_ffff(d1, d2, d3, d4));
+  return sqrtf(std::min({d1, d2, d3, d4}));
 }
 
 void closest_on_tri_to_point_v3(
@@ -1110,7 +1130,11 @@ void closest_on_tri_to_point_v3(
   add_v3_v3(r, ac);
 }
 
-/******************************* Intersection ********************************/
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Intersection
+ * \{ */
 
 int isect_seg_seg_v2_int(const int v1[2], const int v2[2], const int v3[2], const int v4[2])
 {
@@ -1631,6 +1655,52 @@ bool isect_line_segment_tri_v3(const float p1[3],
   if ((*r_lambda < 0.0f) || (*r_lambda > 1.0f)) {
     return false;
   }
+
+  if (r_uv) {
+    r_uv[0] = u;
+    r_uv[1] = v;
+  }
+
+  return true;
+}
+
+bool isect_line_tri_v3(const float p1[3],
+                       const float p2[3],
+                       const float v0[3],
+                       const float v1[3],
+                       const float v2[3],
+                       float *r_lambda,
+                       float r_uv[2])
+{
+  float p[3], s[3], d[3], e1[3], e2[3], q[3];
+  float a, f, u, v;
+
+  sub_v3_v3v3(e1, v1, v0);
+  sub_v3_v3v3(e2, v2, v0);
+  sub_v3_v3v3(d, p2, p1);
+
+  cross_v3_v3v3(p, d, e2);
+  a = dot_v3v3(e1, p);
+  if (a == 0.0f) {
+    return false;
+  }
+  f = 1.0f / a;
+
+  sub_v3_v3v3(s, p1, v0);
+
+  u = f * dot_v3v3(s, p);
+  if ((u < 0.0f) || (u > 1.0f)) {
+    return false;
+  }
+
+  cross_v3_v3v3(q, s, e1);
+
+  v = f * dot_v3v3(d, q);
+  if ((v < 0.0f) || ((u + v) > 1.0f)) {
+    return false;
+  }
+
+  *r_lambda = f * dot_v3v3(e2, q);
 
   if (r_uv) {
     r_uv[0] = u;
@@ -2430,6 +2500,8 @@ bool isect_tri_tri_v3(const float t_a0[3],
   return isect_tri_tri_v3_ex(tri_a, tri_b, r_i1, r_i2, &dummy);
 }
 
+/** \} */
+
 /* -------------------------------------------------------------------- */
 /** \name Tri-Tri Intersect 2D
  *
@@ -2607,6 +2679,10 @@ bool isect_tri_tri_v2(const float t_a0[2],
 }
 
 /** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Intersection Sphere Sweep / Ray
+ * \{ */
 
 /* Adapted from the paper by Kasper Fauerby */
 
@@ -3561,7 +3637,11 @@ bool clip_segment_v3_plane_n(const float p1[3],
   return true;
 }
 
-/****************************** Axis Utils ********************************/
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Axis Utils
+ * \{ */
 
 void axis_dominant_v3_to_m3(float r_mat[3][3], const float normal[3])
 {
@@ -3596,7 +3676,11 @@ void axis_dominant_v3_to_m3_negate(float r_mat[3][3], const float normal[3])
   BLI_assert((dot_m3_v3_row_z(r_mat, normal) < BLI_ASSERT_UNIT_EPSILON) || is_zero_v3(normal));
 }
 
-/****************************** Interpolation ********************************/
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Interpolation
+ * \{ */
 
 static float tri_signed_area(
     const float v1[3], const float v2[3], const float v3[3], const int i, const int j)
@@ -3813,16 +3897,6 @@ void barycentric_weights_v2_quad(const float v1[2],
                                  const float co[2],
                                  float w[4])
 {
-  /* NOTE(@ideasman42): fabsf() here is not needed for convex quads
-   * (and not used in #interp_weights_poly_v2).
-   * But in the case of concave/bow-tie quads for the mask rasterizer it
-   * gives unreliable results without adding `absf()`. If this becomes an issue for more general
-   * usage we could have this optional or use a different function. */
-#define MEAN_VALUE_HALF_TAN_V2(_area, i1, i2) \
-  ((_area = cross_v2v2(dirs[i1], dirs[i2])) != 0.0f ? \
-       fabsf(((lens[i1] * lens[i2]) - dot_v2v2(dirs[i1], dirs[i2])) / _area) : \
-       0.0f)
-
   const float dirs[4][2] = {
       {v1[0] - co[0], v1[1] - co[1]},
       {v2[0] - co[0], v2[1] - co[1]},
@@ -3855,27 +3929,53 @@ void barycentric_weights_v2_quad(const float v1[2],
     w[0] = w[1] = w[2] = 0.0f;
   }
   else {
-    float wtot, area;
 
-    /* variable 'area' is just for storage,
-     * the order its initialized doesn't matter */
-#ifdef __clang__
-#  pragma clang diagnostic push
-#  pragma clang diagnostic ignored "-Wunsequenced"
-#endif
-
-    /* inline mean_value_half_tan four times here */
-    const float t[4] = {
-        MEAN_VALUE_HALF_TAN_V2(area, 0, 1),
-        MEAN_VALUE_HALF_TAN_V2(area, 1, 2),
-        MEAN_VALUE_HALF_TAN_V2(area, 2, 3),
-        MEAN_VALUE_HALF_TAN_V2(area, 3, 0),
+    const float areas[4] = {
+        cross_v2v2(dirs[0], dirs[1]),
+        cross_v2v2(dirs[1], dirs[2]),
+        cross_v2v2(dirs[2], dirs[3]),
+        cross_v2v2(dirs[3], dirs[0]),
+    };
+    const float dots[4] = {
+        dot_v2v2(dirs[0], dirs[1]),
+        dot_v2v2(dirs[1], dirs[2]),
+        dot_v2v2(dirs[2], dirs[3]),
+        dot_v2v2(dirs[3], dirs[0]),
+    };
+    const float lens_prod[4] = {
+        lens[0] * lens[1],
+        lens[1] * lens[2],
+        lens[2] * lens[3],
+        lens[3] * lens[0],
     };
 
-#ifdef __clang__
-#  pragma clang diagnostic pop
-#endif
+    /* Handle cases where point lies exactly on the edge. */
+    for (int i = 0; i < 4; i++) {
+      const float area = areas[i];
+      /* Collinear with edge i-j and between the endpoints. */
+      if (fabsf(area) < 1.0e-12f * lens_prod[i] && dots[i] <= 0.0f) {
+        const int j = (i + 1) & 3;
+        const float sum = lens[i] + lens[j];
+        w[0] = w[1] = w[2] = w[3] = 0.0f;
+        w[i] = lens[j] / sum;
+        w[j] = lens[i] / sum;
+        return;
+      }
+    }
 
+    /* NOTE(@ideasman42): fabsf() here is not needed for convex quads
+     * (and not used in #interp_weights_poly_v2).
+     * But in the case of concave/bow-tie quads for the mask rasterizer it
+     * gives unreliable results without adding `absf()`. If this becomes an issue for more general
+     * usage we could have this optional or use a different function. */
+#define MEAN_VALUE_HALF_TAN_V2(i1) \
+  (areas[i1] != 0.0f ? fabsf((lens_prod[i1] - dots[i1]) / areas[i1]) : 0.0f)
+    const float t[4] = {
+        MEAN_VALUE_HALF_TAN_V2(0),
+        MEAN_VALUE_HALF_TAN_V2(1),
+        MEAN_VALUE_HALF_TAN_V2(2),
+        MEAN_VALUE_HALF_TAN_V2(3),
+    };
 #undef MEAN_VALUE_HALF_TAN_V2
 
     w[0] = (t[3] + t[0]) / lens[0];
@@ -3883,7 +3983,7 @@ void barycentric_weights_v2_quad(const float v1[2],
     w[2] = (t[1] + t[2]) / lens[2];
     w[3] = (t[2] + t[3]) / lens[3];
 
-    wtot = w[0] + w[1] + w[2] + w[3];
+    float wtot = w[0] + w[1] + w[2] + w[3];
 
 #ifndef NDEBUG /* Avoid floating point exception when debugging. */
     if (wtot != 0.0f)
@@ -4030,6 +4130,8 @@ int interp_sparse_array(float *array, const int list_size, const float skipval)
 
   return 1;
 }
+
+/** \} */
 
 /* -------------------------------------------------------------------- */
 /** \name interp_weights_poly_v2, v3
@@ -4281,6 +4383,10 @@ void interp_weights_poly_v2(float *w, float v[][2], const int n, const float co[
 #undef DIR_V2_SET
 
 /** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Interpolation Cubic / Misc
+ * \{ */
 
 void interp_cubic_v3(float x[3],
                      float v[3],
@@ -4541,7 +4647,11 @@ void interp_barycentric_tri_v3(float data[3][3], float u, float v, float res[3])
   add_v3_v3(res, vec);
 }
 
-/***************************** View & Projection *****************************/
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name View & Projection
+ * \{ */
 
 void orthographic_m4(float mat[4][4],
                      const float left,
@@ -4710,7 +4820,13 @@ void projmat_dimensions(const float winmat[4][4],
     *r_bottom = near * ((winmat[2][1] - 1.0f) / winmat[1][1]);
     *r_top = near * ((winmat[2][1] + 1.0f) / winmat[1][1]);
     *r_near = near;
-    *r_far = winmat[3][2] / (winmat[2][2] + 1.0f);
+    if (winmat[2][2] == -1.0f) {
+      /* Case of infinite projection matrix. Assume large clip end. */
+      *r_far = near + 1e9f;
+    }
+    else {
+      *r_far = winmat[3][2] / (winmat[2][2] + 1.0f);
+    }
   }
   else {
     *r_left = (-winmat[3][0] - 1.0f) / winmat[0][0];
@@ -4942,7 +5058,11 @@ void box_minmax_bounds_m4(float min[3], float max[3], float boundbox[2][3], floa
   copy_v3_v3(max, mx);
 }
 
-/********************************** Mapping **********************************/
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Mapping
+ * \{ */
 
 static float snap_coordinate(float u)
 {
@@ -5022,7 +5142,11 @@ void map_to_plane_axis_angle_v2_v3v3fl(float r_co[2],
   copy_v2_v2(r_co, tmp);
 }
 
-/********************************* Normals **********************************/
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Normals
+ * \{ */
 
 void accumulate_vertex_normals_tri_v3(float n1[3],
                                       float n2[3],
@@ -5140,7 +5264,11 @@ void accumulate_vertex_normals_poly_v3(float **vertnos,
   }
 }
 
-/********************************* Tangents **********************************/
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Tangents
+ * \{ */
 
 void tangent_from_uv_v3(const float uv1[2],
                         const float uv2[2],
@@ -5184,7 +5312,11 @@ void tangent_from_uv_v3(const float uv1[2],
   }
 }
 
-/****************************** Vector Clouds ********************************/
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Vector Clouds
+ * \{ */
 
 /* vector clouds */
 
@@ -5559,9 +5691,11 @@ float geodesic_distance_propagate_across_triangle(
     }
   }
 
-  /* Fall back to Dijsktra approximation in trivial case, or if no valid source
+  /* Fall back to Dijkstra approximation in trivial case, or if no valid source
    * point found that connects to v0 across the triangle. */
   return min_ff(dist1 + len_v3(v10), dist2 + len_v3v3(v0, v2));
 }
+
+/** \} */
 
 }  // namespace blender

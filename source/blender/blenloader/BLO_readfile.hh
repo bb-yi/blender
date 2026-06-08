@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: GPL-2.0-or-later */
 #pragma once
 
+#include "DNA_ID_enums.h"
 #include "DNA_listBase.h"
 
 #include "BLI_compiler_attrs.h"
@@ -231,18 +232,25 @@ void BLO_read_do_version_after_setup(Main *new_bmain,
  * \{ */
 
 struct BLODataBlockInfo {
-  char name[/*MAX_ID_NAME-2*/ 256];
-  AssetMetaData *asset_data;
+  struct Library {
+    const char *filepath = nullptr;
+    LibraryFlag flag = LibraryFlag(0);
+  };
+
+  char name[/*MAX_ID_NAME-2*/ 256] = "";
+  AssetMetaData *asset_data = nullptr;
+  /** For Library IDs only: specific info, like the stored blendfile path, flags. */
+  BLODataBlockInfo::Library library_data = {};
   /** Ownership over #asset_data above can be "stolen out" of this struct, for more permanent
    * storage. In that case, set this to false to avoid double freeing of the stolen data. */
-  bool free_asset_data;
+  bool free_asset_data = false;
   /**
    * Optimization: Tag data-blocks for which we know there is no preview.
    * Knowing this can be used to skip the (potentially expensive) preview loading process. If this
    * is set to true it means we looked for a preview and couldn't find one. False may mean that
    * either no preview was found, or that it wasn't looked for in the first place.
    */
-  bool no_preview_found;
+  bool no_preview_found = false;
 };
 
 /**
@@ -600,7 +608,7 @@ struct ID_Readfile_Data {
  * Return `id->runtime->readfile_data->tags` if the `readfile_data` is allocated,
  * otherwise return an all-zero set of tags.
  */
-ID_Readfile_Data::Tags BLO_readfile_id_runtime_tags(ID &id);
+ID_Readfile_Data::Tags BLO_readfile_id_runtime_tags(const ID &id);
 
 /**
  * Create the `readfile_data` if needed, and return `id->runtime->readfile_data->tags`.
@@ -622,6 +630,6 @@ void BLO_readfile_id_runtime_data_free_all(Main &bmain);
  */
 void BLO_readfile_id_runtime_data_free(ID &id);
 
-#define BLEN_THUMB_MEMSIZE_FILE(_x, _y) (sizeof(int) * (2 + (size_t)(_x) * (size_t)(_y)))
+#define BLEN_THUMB_MEMSIZE_FILE(_x, _y) (sizeof(int) * (2 + size_t(_x) * size_t(_y)))
 
 }  // namespace blender

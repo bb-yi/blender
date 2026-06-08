@@ -123,7 +123,7 @@ static bool is_disabled(const Scene * /*scene*/, ModifierData *md, bool /*use_re
     return true;
   }
   /* Preventing calculation in depsgraph when baking frames. */
-  if (lmd->flags & MOD_LINEART_IS_BAKED) {
+  if (int(lmd->flags) & int(MOD_LINEART_IS_BAKED)) {
     return true;
   }
 
@@ -260,6 +260,7 @@ static void panel_draw(const bContext * /*C*/, Panel *panel)
   col = &layout.column(false);
   col->prop(ptr, "radius", ui::ITEM_R_SLIDER, IFACE_("Line Radius"), ICON_NONE);
   col->prop(ptr, "opacity", ui::ITEM_R_SLIDER, std::nullopt, ICON_NONE);
+  col->prop(ptr, "fill_strokes", UI_ITEM_NONE, std::nullopt, ICON_NONE);
 
   modifier_error_message_draw(layout, ptr);
 }
@@ -755,7 +756,7 @@ static void generate_strokes(ModifierData &md,
   }
 
   const bool is_first_lineart = (&first_lineart == &lmd);
-  const bool use_cache = (lmd.flags & MOD_LINEART_USE_CACHE);
+  const bool use_cache = (int(lmd.flags) & int(MOD_LINEART_USE_CACHE));
   LineartCache *local_lc = (is_first_lineart || use_cache) ? first_lineart.shared_cache : nullptr;
 
   /* Only calculate strokes in these three conditions:
@@ -809,6 +810,7 @@ static void generate_strokes(ModifierData &md,
         lmd.intersection_mask,
         lmd.radius,
         lmd.opacity,
+        lmd.fill_strokes,
         lmd.shadow_selection,
         lmd.silhouette_selection,
         lmd.source_vertex_group,

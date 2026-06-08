@@ -495,7 +495,7 @@ struct ViewOpsData_Utility : ViewOpsData {
   MEM_CXX_CLASS_ALLOC_FUNCS("ViewOpsData_Utility")
 };
 
-static bool view3d_navigation_poll_impl(bContext *C, const char viewlock)
+static bool view3d_navigation_poll_impl(bContext *C, const eRegionView3D_ViewLock viewlock)
 {
   if (!ED_operator_region_view3d_active(C)) {
     return false;
@@ -817,11 +817,12 @@ bool view3d_orbit_calc_center(bContext *C, float r_dyn_ofs[3])
   bool is_set = false;
 
   const Depsgraph *depsgraph = CTX_data_ensure_evaluated_depsgraph(C);
-  Scene *scene_eval = DEG_get_evaluated_scene(depsgraph);
   Paint *paint = BKE_paint_get_active_from_context(C);
   ViewLayer *view_layer_eval = DEG_get_evaluated_view_layer(depsgraph);
   View3D *v3d = CTX_wm_view3d(C);
-  BKE_view_layer_synced_ensure(scene_eval, view_layer_eval);
+  /* Evaluated view layers should always be in sync with the evaluated scene and its collections.
+   */
+  BLI_assert(BKE_view_layer_is_synced(*view_layer_eval));
   Object *ob_act_eval = BKE_view_layer_active_object_get(view_layer_eval);
   Object *ob_act = DEG_get_original(ob_act_eval);
 
@@ -933,9 +934,9 @@ void axis_set_view(bContext *C,
                    View3D *v3d,
                    ARegion *region,
                    const float quat_[4],
-                   char view,
-                   char view_axis_roll,
-                   int perspo,
+                   eRegionView3D_View view,
+                   eRegionView3D_ViewAxisRoll view_axis_roll,
+                   eRegionView3D_Persp perspo,
                    const float *align_to_quat,
                    const int smooth_viewtx)
 {
@@ -943,9 +944,9 @@ void axis_set_view(bContext *C,
   RegionView3D *rv3d = static_cast<RegionView3D *>(region->regiondata);
 
   float quat[4];
-  const short orig_persp = rv3d->persp;
-  const char orig_view = rv3d->view;
-  const char orig_view_axis_roll = rv3d->view_axis_roll;
+  const eRegionView3D_Persp orig_persp = rv3d->persp;
+  const eRegionView3D_View orig_view = rv3d->view;
+  const eRegionView3D_ViewAxisRoll orig_view_axis_roll = rv3d->view_axis_roll;
 
   normalize_qt_qt(quat, quat_);
 

@@ -106,22 +106,22 @@ static void node_declare(NodeDeclarationBuilder &b)
   }
 
   const eNodeSocketDatatype data_type = eNodeSocketDatatype(node->custom1);
-  b.add_input(data_type, "Grid")
+  b.add_input(data_type, "Grid"_ustr)
       .hide_value()
       .structure_type(StructureType::Grid)
       .is_default_link_socket();
-  b.add_output(data_type, "Grid").structure_type(StructureType::Grid).align_with_previous();
-  b.add_input<decl::Vector>("Velocity").hide_value().structure_type(StructureType::Grid);
-  b.add_input<decl::Float>("Time Step")
+  b.add_output(data_type, "Grid"_ustr).structure_type(StructureType::Grid).align_with_previous();
+  b.add_input<decl::Vector>("Velocity"_ustr).hide_value().structure_type(StructureType::Grid);
+  b.add_input<decl::Float>("Time Step"_ustr)
       .subtype(PROP_TIME_ABSOLUTE)
       .default_value(1.0f)
       .description("Time step for advection in seconds");
-  b.add_input<decl::Menu>("Integration Scheme")
+  b.add_input<decl::Menu>("Integration Scheme"_ustr)
       .static_items(integration_scheme_items)
       .default_value(IntegrationScheme::RungeKutta3)
       .optional_label()
       .description("Numerical integration method for advection");
-  b.add_input<decl::Menu>("Limiter")
+  b.add_input<decl::Menu>("Limiter"_ustr)
       .static_items(limiter_type_items)
       .default_value(LimiterType::Clamp)
       .optional_label()
@@ -156,27 +156,23 @@ static void node_gather_link_search_ops(GatherLinkSearchOpParams &params)
     return;
   }
   if (params.in_out() == SOCK_IN) {
-    if (params.node_tree().typeinfo->validate_link(eNodeSocketDatatype(params.other_socket().type),
-                                                   SOCK_VECTOR))
-    {
+    if (params.node_tree().typeinfo->validate_link(params.other_socket().type, SOCK_VECTOR)) {
       params.add_item(IFACE_("Velocity"), [](LinkSearchOpParams &params) {
-        bNode &node = params.add_node("GeometryNodeGridAdvect");
-        params.update_and_connect_available_socket(node, "Velocity");
+        bNode &node = params.add_node("GeometryNodeGridAdvect"_ustr);
+        params.update_and_connect_available_socket(node, "Velocity"_ustr);
       });
     }
-    if (params.node_tree().typeinfo->validate_link(eNodeSocketDatatype(params.other_socket().type),
-                                                   SOCK_FLOAT))
-    {
+    if (params.node_tree().typeinfo->validate_link(params.other_socket().type, SOCK_FLOAT)) {
       params.add_item(IFACE_("Time Step"), [](LinkSearchOpParams &params) {
-        bNode &node = params.add_node("GeometryNodeGridAdvect");
-        params.update_and_connect_available_socket(node, "Time Step");
+        bNode &node = params.add_node("GeometryNodeGridAdvect"_ustr);
+        params.update_and_connect_available_socket(node, "Time Step"_ustr);
       });
     }
   }
   params.add_item(IFACE_("Grid"), [data_type](LinkSearchOpParams &params) {
-    bNode &node = params.add_node("GeometryNodeGridAdvect");
+    bNode &node = params.add_node("GeometryNodeGridAdvect"_ustr);
     node.custom1 = *data_type;
-    params.update_and_connect_available_socket(node, "Grid");
+    params.update_and_connect_available_socket(node, "Grid"_ustr);
   });
 }
 
@@ -231,22 +227,23 @@ static typename GridType::Ptr advect_grid(const GridType &grid,
 static void node_geo_exec(GeoNodeExecParams params)
 {
 #ifdef WITH_OPENVDB
-  bke::GVolumeGrid grid = params.extract_input<bke::GVolumeGrid>("Grid");
+  bke::GVolumeGrid grid = params.extract_input<bke::GVolumeGrid>("Grid"_ustr);
   if (!grid) {
     params.set_default_remaining_outputs();
     return;
   }
 
   const bke::VolumeGrid<float3> velocity_grid = params.extract_input<bke::VolumeGrid<float3>>(
-      "Velocity");
+      "Velocity"_ustr);
   if (!velocity_grid) {
-    params.set_output("Grid", std::move(grid));
+    params.set_output("Grid"_ustr, std::move(grid));
     return;
   }
 
-  const float time_step = params.extract_input<float>("Time Step");
-  const IntegrationScheme scheme = params.extract_input<IntegrationScheme>("Integration Scheme");
-  const LimiterType limiter = params.extract_input<LimiterType>("Limiter");
+  const float time_step = params.extract_input<float>("Time Step"_ustr);
+  const IntegrationScheme scheme = params.extract_input<IntegrationScheme>(
+      "Integration Scheme"_ustr);
+  const LimiterType limiter = params.extract_input<LimiterType>("Limiter"_ustr);
 
   bke::VolumeTreeAccessToken tree_token;
   bke::VolumeTreeAccessToken velocity_token;
@@ -259,7 +256,7 @@ static void node_geo_exec(GeoNodeExecParams params)
     params.error_message_add(
         NodeWarningType::Error,
         TIP_("The input grid must have a uniform voxel scale to be advected."));
-    params.set_output("Grid", std::move(grid));
+    params.set_output("Grid"_ustr, std::move(grid));
     return;
   }
 
@@ -277,7 +274,7 @@ static void node_geo_exec(GeoNodeExecParams params)
               time_step,
               scheme,
               limiter);
-          params.set_output("Grid", bke::GVolumeGrid(std::move(result)));
+          params.set_output("Grid"_ustr, bke::GVolumeGrid(std::move(result)));
         }
         else {
           params.error_message_add(NodeWarningType::Error, "Unsupported grid type for advection");
@@ -324,13 +321,13 @@ static const bNodeSocket *node_internally_linked_input(const bNodeTree & /*tree*
                                                        const bNode &node,
                                                        const bNodeSocket &output_socket)
 {
-  return node.input_by_identifier(output_socket.identifier);
+  return node.input_by_identifier(output_socket.identifier_ustr());
 }
 
 static void node_register()
 {
   static bke::bNodeType ntype;
-  geo_node_type_base(&ntype, "GeometryNodeGridAdvect");
+  geo_node_type_base(&ntype, "GeometryNodeGridAdvect"_ustr);
   ntype.ui_name = "Advect Grid";
   ntype.ui_description =
       "Move grid values through a velocity field using numerical integration. Supports multiple "

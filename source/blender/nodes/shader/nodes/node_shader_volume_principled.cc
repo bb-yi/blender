@@ -12,42 +12,45 @@ namespace nodes::node_shader_volume_principled_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Color>("Color").default_value({0.5f, 0.5f, 0.5f, 1.0f});
+  const bNodeTree *ntree = b.tree_or_null();
+  const bool is_gpu_internal = ntree && (ntree->flag & NTREE_IS_GPU_SHADER_INTERNAL);
+
+  b.add_input<decl::Color>("Color"_ustr).default_value({0.5f, 0.5f, 0.5f, 1.0f});
 #define SOCK_COLOR_ID 0
-  b.add_input<decl::String>("Color Attribute");
+  b.add_input<decl::String>("Color Attribute"_ustr);
 #define SOCK_COLOR_ATTR_ID 1
-  b.add_input<decl::Float>("Density").default_value(1.0f).min(0.0f).max(1000.0f);
+  b.add_input<decl::Float>("Density"_ustr).default_value(1.0f).min(0.0f).max(1000.0f);
 #define SOCK_DENSITY_ID 2
-  b.add_input<decl::String>("Density Attribute").default_value("density");
+  b.add_input<decl::String>("Density Attribute"_ustr).default_value("density");
 #define SOCK_DENSITY_ATTR_ID 3
-  b.add_input<decl::Float>("Anisotropy")
+  b.add_input<decl::Float>("Anisotropy"_ustr)
       .default_value(0.0f)
       .min(-1.0f)
       .max(1.0f)
       .subtype(PROP_FACTOR);
 #define SOCK_ANISOTROPY_ID 4
-  b.add_input<decl::Color>("Absorption Color").default_value({0.0f, 0.0f, 0.0f, 1.0f});
+  b.add_input<decl::Color>("Absorption Color"_ustr).default_value({0.0f, 0.0f, 0.0f, 1.0f});
 #define SOCK_ABSORPTION_COLOR_ID 5
-  b.add_input<decl::Float>("Emission Strength").default_value(0.0f).min(0.0f).max(1000.0f);
+  b.add_input<decl::Float>("Emission Strength"_ustr).default_value(0.0f).min(0.0f).max(1000.0f);
 #define SOCK_EMISSION_ID 6
-  b.add_input<decl::Color>("Emission Color").default_value({1.0f, 1.0f, 1.0f, 1.0f});
+  b.add_input<decl::Color>("Emission Color"_ustr).default_value({1.0f, 1.0f, 1.0f, 1.0f});
 #define SOCK_EMISSION_COLOR_ID 7
-  b.add_input<decl::Float>("Blackbody Intensity")
+  b.add_input<decl::Float>("Blackbody Intensity"_ustr)
       .default_value(0.0f)
       .min(0.0f)
       .max(1.0f)
       .subtype(PROP_FACTOR);
 #define SOCK_BLACKBODY_INTENSITY_ID 8
-  b.add_input<decl::Color>("Blackbody Tint").default_value({1.0f, 1.0f, 1.0f, 1.0f});
+  b.add_input<decl::Color>("Blackbody Tint"_ustr).default_value({1.0f, 1.0f, 1.0f, 1.0f});
 #define SOCK_BLACKBODY_TINT_ID 8
-  b.add_input<decl::Float>("Temperature")
+  b.add_input<decl::Float>("Temperature"_ustr)
       .default_value(1000.0f)
       .min(0.0f)
       .max(6500.0f)
       .subtype(PROP_COLOR_TEMPERATURE);
-  b.add_input<decl::String>("Temperature Attribute").default_value("temperature");
-  b.add_input<decl::Float>("Weight").available(false);
-  b.add_output<decl::Shader>("Volume").translation_context(BLT_I18NCONTEXT_ID_ID);
+  b.add_input<decl::String>("Temperature Attribute"_ustr).default_value("temperature");
+  b.add_input<decl::Float>("Weight"_ustr).available(is_gpu_internal);
+  b.add_output<decl::Shader>("Volume"_ustr).translation_context(BLT_I18NCONTEXT_ID_ID);
 }
 
 static void attribute_post_process(GPUMaterial *mat,
@@ -69,16 +72,14 @@ static int node_shader_gpu_volume_principled(GPUMaterial *mat,
                                              GPUNodeStack *out)
 {
   /* Test if blackbody intensity is enabled. */
-  bool use_blackbody = node_socket_not_zero(in[SOCK_BLACKBODY_INTENSITY_ID]);
+  bool use_blackbody = in[SOCK_BLACKBODY_INTENSITY_ID].socket_not_zero();
 
-  if (node_socket_not_zero(in[SOCK_DENSITY_ID]) && node_socket_not_black(in[SOCK_COLOR_ID])) {
+  if (in[SOCK_DENSITY_ID].socket_not_zero() && in[SOCK_COLOR_ID].socket_not_black()) {
     /* Consider there is absorption phenomenon when there is scattering since
      * `extinction = scattering + absorption`. */
     GPU_material_flag_set(mat, GPU_MATFLAG_VOLUME_SCATTER | GPU_MATFLAG_VOLUME_ABSORPTION);
   }
-  if (node_socket_not_zero(in[SOCK_DENSITY_ID]) &&
-      node_socket_not_white(in[SOCK_ABSORPTION_COLOR_ID]))
-  {
+  if (in[SOCK_DENSITY_ID].socket_not_zero() && in[SOCK_ABSORPTION_COLOR_ID].socket_not_white()) {
     GPU_material_flag_set(mat, GPU_MATFLAG_VOLUME_ABSORPTION);
   }
 
@@ -166,14 +167,14 @@ void register_node_type_sh_volume_principled()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeVolumePrincipled", SH_NODE_VOLUME_PRINCIPLED);
+  sh_node_type_base(&ntype, "ShaderNodeVolumePrincipled"_ustr, SH_NODE_VOLUME_PRINCIPLED);
   ntype.ui_name = "Principled Volume";
   ntype.ui_description = "Combine all volume shading components into a single easy to use node";
   ntype.enum_name_legacy = "PRINCIPLED_VOLUME";
   ntype.nclass = NODE_CLASS_SHADER;
   ntype.declare = file_ns::node_declare;
   ntype.gather_link_search_ops = search_link_ops_for_shader_bsdf_node;
-  bke::node_type_size_preset(ntype, bke::eNodeSizePreset::Large);
+  ntype.default_width = bke::NodeWidth::_240;
   ntype.gpu_fn = file_ns::node_shader_gpu_volume_principled;
 
   bke::node_register_type(ntype);

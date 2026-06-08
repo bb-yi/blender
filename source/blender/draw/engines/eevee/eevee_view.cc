@@ -113,7 +113,7 @@ namespace blender::eevee
 
     main_view_.sync(viewmat, winmat);
 
-    inst_.uniform_data.data.pipeline.is_main_view_inverted = main_view_.is_inverted();
+    inst_.uniform_data.pipeline.is_main_view_inverted = main_view_.is_inverted();
   }
 
   void ShadingView::render()
@@ -129,6 +129,14 @@ namespace blender::eevee
       ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainUpdateView);
       update_view();
     }
+
+    inst_.shadows.set_view(render_view_, extent_);
+    inst_.volume.set_view(main_view_);
+    inst_.uniform_data.data.push_update();
+    /* Need to be set early for planar probe rendering (if using ray-cast node) and ray-cast nodes
+     * in deferred / forward pipelines. */
+    inst_.raytracing.thickness_parameters_setup(render_view_.winmat(), extent_);
+    inst_.uniform_data.raytrace.push_update();
 
     GPU_debug_group_begin(name_);
 
@@ -286,6 +294,7 @@ namespace blender::eevee
     }
     inst_.native_postfx_outputs.render(render_view_);
 
+    inst_.lights.shape_display_draw(render_view_, combined_fb_);
     inst_.lights.debug_draw(render_view_, combined_fb_);
     inst_.hiz_buffer.debug_draw(render_view_, combined_fb_);
     inst_.shadows.debug_draw(render_view_, combined_fb_);
@@ -341,7 +350,7 @@ namespace blender::eevee
     }
     if (uses_postfx_passes)
     {
-      postfx_tx.acquire(extent_, gpu::TextureFormat::SFLOAT_16_16_16_16);
+      postfx_tx.acquire_2d(extent_, gpu::TextureFormat::SFLOAT_16_16_16_16);
     }
 
     /* Fix a sync bug on AMD + Mesa when volume + motion blur create artifacts
@@ -489,7 +498,7 @@ namespace blender::eevee
         {
           if (assign_if_different(inst_.pipelines.data.ray_type, ray_type))
           {
-            inst_.uniform_data.push_update();
+            inst_.uniform_data.pipeline.push_update();
           }
 
           for (int face : IndexRange(6))
@@ -544,7 +553,7 @@ namespace blender::eevee
 
     if (assign_if_different(inst_.pipelines.data.ray_type, RAY_TYPE_CAMERA))
     {
-      inst_.uniform_data.push_update();
+      inst_.uniform_data.pipeline.push_update();
     }
 
     GPU_debug_group_end();
@@ -559,6 +568,7 @@ namespace blender::eevee
     int rendered_view_count = 0;
     int max_resolution = 0;
     double estimated_work = 0.0;
+    int prev_extent = 0;
     while (const auto update_info = inst_.sphere_probes.probe_update_info_pop())
     {
       GPU_debug_group_begin("Probe.Capture");
@@ -569,10 +579,16 @@ namespace blender::eevee
                          double(update_info->cube_target_extent)) /
                         1000000.0;
 
-      if (assign_if_different(inst_.pipelines.data.ray_type, RAY_TYPE_GLOSSY))
+      if (assign_if_different(inst_.pipelines.data.ray_type, RAY_TYPE_GLOSSY) ||
+          prev_extent != update_info->cube_target_extent)
       {
-        inst_.uniform_data.push_update();
+        /* Set correct thickness for raycast node in probe pipelines. */
+        float4x4 win_m4 = math::projection::perspective(-0.1f, 0.1f, -0.1f, 0.1f, 0.1f, 10.0f);
+        inst_.raytracing.thickness_parameters_setup(win_m4, int2(update_info->cube_target_extent));
+        inst_.uniform_data.pipeline.push_update();
+        inst_.uniform_data.raytrace.push_update();
       }
+      prev_extent = update_info->cube_target_extent;
 
       int2 extent = int2(update_info->cube_target_extent);
       RenderBuffers& rbufs = inst_.render_buffers;
@@ -584,7 +600,7 @@ namespace blender::eevee
         GPU_ATTACHMENT_TEXTURE(rbufs.depth_tx),
         with_prepass_normal ? GPU_ATTACHMENT_TEXTURE(rbufs.prepass_normal_tx) : GPU_ATTACHMENT_NONE,
         with_raycast ? GPU_ATTACHMENT_TEXTURE(rbufs.object_id_tx) : GPU_ATTACHMENT_NONE,
-        GPU_ATTACHMENT_TEXTURE(rbufs.vector_tx));
+        GPU_ATTACHMENT_NONE /* Motion vectors not supported. */);
 
       rbufs.vector_tx.clear(float4(0.0f));
       if (with_raycast)
@@ -612,6 +628,10 @@ namespace blender::eevee
           update_info->clipping_distances.x,
           update_info->clipping_distances.y);
         view.sync(view_m4, win_m4);
+
+        inst_.shadows.set_view(view, extent);
+        inst_.volume.set_view(view);
+        inst_.uniform_data.data.push_update();
 
         combined_fb_.ensure(GPU_ATTACHMENT_TEXTURE(inst_.render_buffers.depth_tx),
           GPU_ATTACHMENT_TEXTURE_CUBEFACE(inst_.sphere_probes.cubemap_tx_, face));
@@ -650,7 +670,7 @@ namespace blender::eevee
 
     if (assign_if_different(inst_.pipelines.data.ray_type, RAY_TYPE_CAMERA))
     {
-      inst_.uniform_data.push_update();
+      inst_.uniform_data.pipeline.push_update();
     }
   }
 

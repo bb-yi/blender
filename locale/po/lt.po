@@ -1,9 +1,9 @@
 
 msgid ""
 msgstr ""
-"Project-Id-Version: Blender 5.1.0 Beta (b'5a04f1d246f1')\n"
+"Project-Id-Version: Blender 5.2.0 Alpha (b'8764d33c658b')\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-03-11 11:01+0000\n"
+"POT-Creation-Date: 2026-06-01 07:36+0000\n"
 "PO-Revision-Date: 2025-07-23 15:18+0000\n"
 "Last-Translator: Aras Pranckevičius <aras@nesnausk.org>\n"
 "Language-Team: Lithuanian <https://translate.blender.org/projects/blender-ui/ui/lt/>\n"
@@ -1199,6 +1199,10 @@ msgid "Flat"
 msgstr "Plokščia"
 
 
+msgid "Threshold"
+msgstr "Slenkstis"
+
+
 msgctxt "GPencil"
 msgid "Mode"
 msgstr "Veiksena"
@@ -1265,8 +1269,8 @@ msgid "Simplify"
 msgstr "Supaprastinti"
 
 
-msgid "Threshold"
-msgstr "Slenkstis"
+msgid "Pixel"
+msgstr "Pikselis"
 
 
 msgid "Hardness"
@@ -2683,10 +2687,6 @@ msgid "Degrees"
 msgstr "Laipsniai"
 
 
-msgid "Pixel"
-msgstr "Pikselis"
-
-
 msgid "RK4"
 msgstr "„RK4“"
 
@@ -3089,12 +3089,8 @@ msgid "Dots"
 msgstr "Taškai"
 
 
-msgid "Show/Hide"
-msgstr "Rodyti/Slėpti"
-
-
-msgid "Layout"
-msgstr "Išdėstymas/Maketas"
+msgid "Import"
+msgstr "Importuoti"
 
 
 msgid "Apply"
@@ -3105,8 +3101,12 @@ msgid "Track"
 msgstr "Sekti"
 
 
-msgid "Import"
-msgstr "Importuoti"
+msgid "Show/Hide"
+msgstr "Rodyti/Slėpti"
+
+
+msgid "Layout"
+msgstr "Išdėstymas/Maketas"
 
 
 msgid "Animals"
@@ -3378,11 +3378,6 @@ msgstr "Importuoti „BVH“"
 
 
 msgctxt "Operator"
-msgid "Import SVG"
-msgstr "Importuoti „SVG“"
-
-
-msgctxt "Operator"
 msgid "Import FBX"
 msgstr "Importuoti „FBX“"
 
@@ -3410,6 +3405,10 @@ msgstr "Atnaujinti „I18n Blender“ saugyklą"
 msgctxt "Operator"
 msgid "New Action"
 msgstr "Naujas veiksmas"
+
+
+msgid "Search"
+msgstr "Paieška"
 
 
 msgid "File Browser Mode"
@@ -3481,10 +3480,6 @@ msgstr "Kampas"
 msgctxt "Action"
 msgid "Object"
 msgstr "Objektas"
-
-
-msgid "Add Mode"
-msgstr "Pridėti veikseną"
 
 
 msgid "BMP"
@@ -3811,10 +3806,6 @@ msgstr "Rodyti šaltinį"
 
 msgid "Show Color Tags"
 msgstr "Rodyti spalvos žymes"
-
-
-msgid "Show Thumbnails"
-msgstr "Rodyti miniatiūras"
 
 
 msgid "Toolbar"
@@ -4236,10 +4227,6 @@ msgid "Vibration"
 msgstr "Vibracija"
 
 
-msgid "Search"
-msgstr "Paieška"
-
-
 msgctxt "WindowManager"
 msgid "Window"
 msgstr "Langas"
@@ -4422,6 +4409,11 @@ msgstr "Nauja/-s/-i"
 
 
 msgctxt "Operator"
+msgid "Save Copy..."
+msgstr "Išsaugoti kopiją..."
+
+
+msgctxt "Operator"
 msgid "Quit"
 msgstr "Išeiti"
 
@@ -4434,11 +4426,6 @@ msgstr "Automatiškai išsaugoti..."
 msgctxt "Operator"
 msgid "Preferences..."
 msgstr "Nuostatos..."
-
-
-msgctxt "Operator"
-msgid "Save Copy..."
-msgstr "Išsaugoti kopiją..."
 
 
 msgid "Auto-Save Preferences"

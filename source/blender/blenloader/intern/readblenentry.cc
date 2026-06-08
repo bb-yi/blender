@@ -91,13 +91,18 @@ static bool blendhandle_load_id_data_and_validate(FileData *fd,
                                                   bool use_assets_only,
                                                   const char *&r_idname,
                                                   short &r_idflag,
-                                                  AssetMetaData *&r_asset_meta_data)
+                                                  AssetMetaData *&r_asset_meta_data,
+                                                  BLODataBlockInfo::Library *r_library_data)
 {
   r_idname = blo_bhead_id_name(fd, bhead);
   if (!r_idname || r_idname[0] == '\0') {
     return false;
   }
   r_idflag = blo_bhead_id_flag(fd, bhead);
+  if (r_library_data) {
+    r_library_data->filepath = blo_bhead_library_filepath(fd, bhead);
+    r_library_data->flag = blo_bhead_library_flag(fd, bhead);
+  }
   /* Do not list (and therefore allow direct linking of) packed data.
    * While supporting this is conceptually possible, it would require significant changes in
    * the UI (file browser) and UX (link operation) to convey this concept and handle it
@@ -128,7 +133,7 @@ LinkNode *BLO_blendhandle_get_datablock_names(BlendHandle *bh,
       short idflag;
       AssetMetaData *asset_meta_data;
       if (!blendhandle_load_id_data_and_validate(
-              fd, bhead, use_assets_only, idname, idflag, asset_meta_data))
+              fd, bhead, use_assets_only, idname, idflag, asset_meta_data, nullptr))
       {
         continue;
       }
@@ -155,6 +160,8 @@ LinkNode *BLO_blendhandle_get_datablock_info(BlendHandle *bh,
   BHead *bhead;
   int tot = 0;
 
+  const bool is_library = (ofblocktype == ID_LI);
+
   const int sdna_nr_preview_image = DNA_struct_find_with_alias(fd->filesdna, "PreviewImage");
 
   for (bhead = blo_bhead_first(fd); bhead; bhead = blo_bhead_next(fd, bhead)) {
@@ -167,14 +174,24 @@ LinkNode *BLO_blendhandle_get_datablock_info(BlendHandle *bh,
       const char *idname;
       short idflag;
       AssetMetaData *asset_meta_data;
-      if (!blendhandle_load_id_data_and_validate(
-              fd, id_bhead, use_assets_only, idname, idflag, asset_meta_data))
+      BLODataBlockInfo::Library library_data;
+      if (!blendhandle_load_id_data_and_validate(fd,
+                                                 id_bhead,
+                                                 use_assets_only,
+                                                 idname,
+                                                 idflag,
+                                                 asset_meta_data,
+                                                 is_library ? &library_data : nullptr))
       {
         continue;
       }
 
       const char *name = idname + 2;
-      BLODataBlockInfo *info = MEM_new_uninitialized<BLODataBlockInfo>(__func__);
+      BLODataBlockInfo *info = MEM_new<BLODataBlockInfo>(__func__);
+
+      if (is_library) {
+        info->library_data = library_data;
+      }
 
       /* Lastly, read asset data from the following blocks. */
       if (asset_meta_data) {

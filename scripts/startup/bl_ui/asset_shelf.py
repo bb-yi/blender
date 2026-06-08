@@ -29,8 +29,29 @@ class ASSETSHELF_PT_display(Panel):
         return context.asset_shelf is not None
 
 
+class ASSETSHELF_PT_filter(Panel):
+    bl_label = "Filter"
+    # Doesn't actually matter. Panel is instanced through popover only.
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'HEADER'
+    bl_parent_id = "ASSETSHELF_PT_display"
+
+    def draw(self, context):
+        layout = self.layout
+        prefs = context.preferences
+        use_remote_asset_libraries = prefs.experimental.use_remote_asset_libraries
+
+        # Filter option stored in the Preferences.
+        if use_remote_asset_libraries:
+            col = layout.column()
+            col.use_property_split = True
+            col.use_property_decorate = False
+            col.prop(prefs.view, "asset_access", text="Access")
+
+
 classes = (
     ASSETSHELF_PT_display,
+    ASSETSHELF_PT_filter,
 )
 
 

@@ -27,30 +27,50 @@ NODE_STORAGE_FUNCS(NodeCombineBundle);
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
+  b.use_custom_socket_order();
+  b.allow_any_socket_order();
+
   const bNodeTree *tree = b.tree_or_null();
   const bNode *node = b.node_or_null();
+
+  b.add_output<decl::Bundle>("Bundle"_ustr).propagate_all().structure_type(StructureType::Single);
+
   if (tree && node) {
+    FlatBundleTypePtr flat_bundle_type;
+    if (const std::optional<StringRefNull> type = combine_bundle_node_type(*tree, *node)) {
+      flat_bundle_type = BundleTypeRegistry::try_find_single_flat(*type);
+    }
+
     const NodeCombineBundle &storage = node_storage(*node);
     for (const int i : IndexRange(storage.items_num)) {
       const NodeCombineBundleItem &item = storage.items[i];
-      const eNodeSocketDatatype socket_type = eNodeSocketDatatype(item.socket_type);
-      const StringRef name = item.name ? item.name : "";
-      const std::string identifier = CombineBundleItemsAccessor::socket_identifier_for_item(item);
+      const eNodeSocketDatatype socket_type = item.socket_type;
+      const UString name(item.name);
+      const UString identifier(CombineBundleItemsAccessor::socket_identifier_for_item(item));
       auto &decl = b.add_input(socket_type, name, identifier)
                        .socket_name_ptr(
-                           &tree->id, *CombineBundleItemsAccessor::item_srna, &item, "name")
-                       .supports_field();
-      if (item.structure_type != NODE_INTERFACE_SOCKET_STRUCTURE_TYPE_AUTO) {
+                           &tree->id, *CombineBundleItemsAccessor::item_srna, &item, "name");
+      if (item.structure_type != NodeSocketInterfaceStructureType::Auto) {
         decl.structure_type(StructureType(item.structure_type));
       }
       else {
         decl.structure_type(StructureType::Dynamic);
       }
+
+      if (flat_bundle_type) {
+        if (const SocketDeclaration *src_decl = flat_bundle_type->find_decl(name)) {
+          decl.try_copy_ui_data(*src_decl);
+        }
+      }
+
+      if (i == 0 && socket_type == SOCK_STRING && name == Bundle::type_item_name.ustr()) {
+        decl.optional_label();
+        b.add_separator();
+      }
     }
+    b.add_input<decl::Extend>(""_ustr, "__extend__"_ustr)
+        .custom_draw(socket_items::ui::draw_extend_socket_fn<CombineBundleItemsAccessor>());
   }
-  b.add_input<decl::Extend>("", "__extend__");
-  b.add_output<decl::Bundle>("Bundle").propagate_all().reference_pass_all().structure_type(
-      StructureType::Single);
 }
 
 static void node_init(bNodeTree * /*tree*/, bNode *node)
@@ -134,15 +154,16 @@ static void node_geo_exec(GeoNodeExecParams params)
       continue;
     }
     const StringRef name = item.name;
-    if (!Bundle::is_valid_key(name)) {
+    const std::optional<BundleKey> key = BundleKey::from_str(name);
+    if (!key) {
       continue;
     }
     bke::SocketValueVariant value = params.extract_input<bke::SocketValueVariant>(
-        node.input_socket(i).identifier);
-    bundle.add(name, BundleItemSocketValue{stype, std::move(value)});
+        node.input_socket(i).identifier_ustr());
+    bundle.add(*key, BundleItemSocketValue{stype, std::move(value)});
   }
 
-  params.set_output("Bundle", std::move(bundle_ptr));
+  params.set_output("Bundle"_ustr, std::move(bundle_ptr));
 }
 
 static void node_gather_link_searches(GatherLinkSearchOpParams &params)
@@ -155,11 +176,11 @@ static void node_gather_link_searches(GatherLinkSearchOpParams &params)
       return;
     }
     params.add_item(IFACE_("Item"), [](LinkSearchOpParams &params) {
-      bNode &node = params.add_node("NodeCombineBundle");
+      bNode &node = params.add_node("NodeCombineBundle"_ustr);
       const auto *item =
           socket_items::add_item_with_socket_type_and_name<CombineBundleItemsAccessor>(
               params.node_tree, node, params.socket.typeinfo->type, params.socket.name);
-      params.update_and_connect_available_socket(node, item->name);
+      params.update_and_connect_available_socket(node, UString(item->name));
     });
   }
   else {
@@ -167,8 +188,8 @@ static void node_gather_link_searches(GatherLinkSearchOpParams &params)
       return;
     }
     params.add_item(IFACE_("Bundle"), [](LinkSearchOpParams &params) {
-      bNode &node = params.add_node("NodeCombineBundle");
-      params.connect_available_socket(node, "Bundle");
+      bNode &node = params.add_node("NodeCombineBundle"_ustr);
+      params.connect_available_socket(node, "Bundle"_ustr);
 
       SpaceNode &snode = *CTX_wm_space_node(&params.C);
       sync_sockets_combine_bundle(snode, node, nullptr);
@@ -190,7 +211,7 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  sh_geo_node_type_base(&ntype, "NodeCombineBundle", NODE_COMBINE_BUNDLE);
+  sh_geo_node_type_base(&ntype, "NodeCombineBundle"_ustr, NODE_COMBINE_BUNDLE);
   ntype.ui_name = "Combine Bundle";
   ntype.ui_description = "Combine multiple socket values into one.";
   ntype.nclass = NODE_CLASS_CONVERTER;
@@ -216,7 +237,7 @@ StructRNA **CombineBundleItemsAccessor::item_srna = &RNA_NodeCombineBundleItem;
 
 void CombineBundleItemsAccessor::blend_write_item(BlendWriter *writer, const ItemT &item)
 {
-  BLO_write_string(writer, item.name);
+  writer->write_string(item.name);
 }
 
 void CombineBundleItemsAccessor::blend_read_data_item(BlendDataReader *reader, ItemT &item)
@@ -230,7 +251,7 @@ std::string CombineBundleItemsAccessor::validate_name(const StringRef name)
   if (name.is_empty()) {
     return result;
   }
-  const Span<char> forbidden_chars = Bundle::forbidden_key_chars;
+  const Span<char> forbidden_chars = BundleKey::forbidden_key_chars;
   for (const char c : name) {
     if (forbidden_chars.contains(c)) {
       result += '_';
@@ -250,9 +271,27 @@ std::string CombineBundleItemsAccessor::validate_name(const StringRef name)
       result[last_index] = '_';
     }
   }
-  BLI_assert(Bundle::is_valid_key(result));
+  BLI_assert(BundleKey::is_valid_key(result));
   return result;
 }
 
+std::optional<StringRefNull> combine_bundle_node_type(const bNodeTree & /*tree*/,
+                                                      const bNode &node)
+{
+  BLI_assert(node.is_type("NodeCombineBundle"_ustr));
+  /* Not using topology cache because this is called while building the node. */
+  for (const bNodeSocket &socket : node.inputs) {
+    if (socket.type != SOCK_STRING) {
+      continue;
+    }
+    if (socket.name != Bundle::type_item_name.ustr()) {
+      continue;
+    }
+    return socket.default_value_typed<bNodeSocketValueString>()->value;
+  }
+  return std::nullopt;
+}
+
 }  // namespace nodes
+
 }  // namespace blender

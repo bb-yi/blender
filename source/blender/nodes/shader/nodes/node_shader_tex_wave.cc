@@ -24,36 +24,48 @@ namespace nodes::node_shader_tex_wave_cc {
 static void sh_node_tex_wave_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
-  b.add_input<decl::Vector>("Vector").implicit_field(NODE_DEFAULT_INPUT_POSITION_FIELD);
-  b.add_input<decl::Float>("Scale").min(-1000.0f).max(1000.0f).default_value(5.0f).description(
-      "Overall texture scale");
-  b.add_input<decl::Float>("Distortion")
+
+  const bool is_compositor = b.tree_or_null() && b.tree_or_null()->type == NTREE_COMPOSIT;
+  const NodeDefaultInputType default_input_type =
+      is_compositor ? NODE_DEFAULT_INPUT_UNIFORM_IMAGE_COORDINATES :
+                      NODE_DEFAULT_INPUT_POSITION_FIELD;
+  b.add_input<decl::Vector>("Vector"_ustr).default_input_type(default_input_type);
+
+  b.add_input<decl::Float>("Scale"_ustr)
+      .min(-1000.0f)
+      .max(1000.0f)
+      .default_value(5.0f)
+      .description("Overall texture scale");
+  b.add_input<decl::Float>("Distortion"_ustr)
       .min(-1000.0f)
       .max(1000.0f)
       .default_value(0.0f)
       .description("Amount of distortion of the wave");
-  b.add_input<decl::Float>("Detail").min(0.0f).max(15.0f).default_value(2.0f).description(
-      "Amount of distortion noise detail");
-  b.add_input<decl::Float>("Detail Scale")
+  b.add_input<decl::Float>("Detail"_ustr)
+      .min(0.0f)
+      .max(15.0f)
+      .default_value(2.0f)
+      .description("Amount of distortion noise detail");
+  b.add_input<decl::Float>("Detail Scale"_ustr)
       .min(-1000.0f)
       .max(1000.0f)
       .default_value(1.0f)
       .description("Scale of distortion noise");
-  b.add_input<decl::Float>("Detail Roughness")
+  b.add_input<decl::Float>("Detail Roughness"_ustr)
       .min(0.0f)
       .max(1.0f)
       .default_value(0.5f)
       .subtype(PROP_FACTOR)
       .description("Blend between a smoother noise pattern, and rougher with sharper peaks");
-  b.add_input<decl::Float>("Phase Offset")
+  b.add_input<decl::Float>("Phase Offset"_ustr)
       .min(-1000.0f)
       .max(1000.0f)
       .default_value(0.0f)
       .description(
           "Position of the wave along the Bands Direction.\n"
           "This can be used as an input for more control over the distortion");
-  b.add_output<decl::Color>("Color").no_muted_links();
-  b.add_output<decl::Float>("Factor", "Fac").no_muted_links();
+  b.add_output<decl::Color>("Color"_ustr).no_muted_links();
+  b.add_output<decl::Float>("Factor"_ustr, "Fac"_ustr).no_muted_links();
 }
 
 static void node_shader_buts_tex_wave(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
@@ -229,6 +241,16 @@ class WaveFunction : public mf::MultiFunction {
       });
     }
   }
+
+  void hash_unique(UniqueHashBytes &hash) const override
+  {
+    static constexpr int8_t id = 0;
+    hash.add(&id);
+    hash.add(wave_type_);
+    hash.add(bands_direction_);
+    hash.add(rings_direction_);
+    hash.add(wave_profile_);
+  }
 };
 
 static void sh_node_wave_tex_build_multi_function(NodeMultiFunctionBuilder &builder)
@@ -337,21 +359,21 @@ void register_node_type_sh_tex_wave()
 
   static bke::bNodeType ntype;
 
-  common_node_type_base(&ntype, "ShaderNodeTexWave", SH_NODE_TEX_WAVE);
+  common_node_type_base(&ntype, "ShaderNodeTexWave"_ustr, SH_NODE_TEX_WAVE);
   ntype.ui_name = "Wave Texture";
   ntype.ui_description = "Generate procedural bands or rings with noise";
   ntype.enum_name_legacy = "TEX_WAVE";
   ntype.nclass = NODE_CLASS_TEXTURE;
   ntype.declare = file_ns::sh_node_tex_wave_declare;
   ntype.draw_buttons = file_ns::node_shader_buts_tex_wave;
-  bke::node_type_size_preset(ntype, bke::eNodeSizePreset::Middle);
+  ntype.default_width = bke::NodeWidth::_160;
   ntype.initfunc = file_ns::node_shader_init_tex_wave;
   bke::node_type_storage(
       ntype, "NodeTexWave", node_free_standard_storage, node_copy_standard_storage);
   ntype.gpu_fn = file_ns::node_shader_gpu_tex_wave;
   ntype.build_multi_function = file_ns::sh_node_wave_tex_build_multi_function;
   ntype.materialx_fn = file_ns::node_shader_materialx;
-  bke::node_type_size(ntype, 160, 140, NODE_DEFAULT_MAX_WIDTH);
+  ntype.default_width = bke::NodeWidth::_160;
 
   bke::node_register_type(ntype);
 }

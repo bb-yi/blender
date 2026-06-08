@@ -167,7 +167,7 @@ void UV_OT_shortest_path_select(wmOperatorType *ot);
 void uvedit_select_prepare_custom_data(const Scene *scene, BMesh *bm);
 void uvedit_select_prepare_sync_select(const Scene *scene, BMesh *bm);
 
-void uvedit_select_prepare_UNUSED(const Scene *scene, BMesh *bm);
+void uvedit_select_prepare(const Scene *scene, BMesh *bm);
 
 bool uvedit_select_is_any_selected(const Scene *scene, BMesh *bm);
 bool uvedit_select_is_any_selected_multi(const Scene *scene, Span<Object *> objects);
@@ -194,6 +194,7 @@ void UV_OT_select_circle(wmOperatorType *ot);
 void UV_OT_select_more(wmOperatorType *ot);
 void UV_OT_select_less(wmOperatorType *ot);
 void UV_OT_select_overlap(wmOperatorType *ot);
+void UV_OT_select_by_winding(wmOperatorType *ot);
 void UV_OT_select_similar(wmOperatorType *ot);
 void UV_OT_select_tile(wmOperatorType *ot);
 
@@ -201,5 +202,14 @@ void UV_OT_custom_region_set(wmOperatorType *ot);
 
 /* Used only when UV sync select is disabled. */
 void UV_OT_select_mode(wmOperatorType *ot);
+
+/**
+ * Stitch the selected UV islands together for the unwrap "Original Bounds" option.
+ * Uses a fixed configuration: vertex mode, snap islands, only selected UVs,
+ * ignore fully seam-bounded islands, no distance limit, and no draw preview.
+ *
+ * \return false if stitching could not be initialized.
+ */
+bool uv_stitch_selected_islands_for_original_bounds(const Scene *scene, Span<Object *> objects);
 
 }  // namespace blender

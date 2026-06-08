@@ -88,9 +88,18 @@ intern/guardedalloc.*        @mont29
 
 # --------------------------------------------------
 # BPY.
-source/python/[^/]+        @mont29
-source/python/intern/.*    @mont29
-source/python/generic/.*   @mont29
+source/python/[^/]+        @mont29 @ideasman42
+source/python/intern/.*    @mont29 @ideasman42
+source/python/generic/.*   @mont29 @ideasman42
+
+# --------------------------------------------------
+# BPY (Scripts).
+scripts/modules/.*     @ideasman42
+scripts/modules/_bpy_internal/assets/remote_library.*     @dr.sybren
+scripts/modules/_bpy_internal/disk_file_hash_service/.*   @dr.sybren
+scripts/modules/_bpy_internal/http/.*                     @dr.sybren
+tests/python/bl_disk_file_hash_service_test.py            @dr.sybren
+tests/python/bl_http_downloader.py                        @dr.sybren
 
 # --------------------------------------------------
 # Motion tracking and Libmv.
@@ -111,9 +120,10 @@ source/blender/imbuf/opencolorio/.*            @sergey @brecht
 
 # --------------------------------------------------
 # Grease Pencil.
-source/blender/editors/grease_pencil/.*           @filedescriptor
-source/blender/blenkernel/BKE_grease_pencil.*     @filedescriptor
-source/blender/blenkernel/intern/grease_pencil.*  @filedescriptor
+source/blender/editors/grease_pencil/.*                 @filedescriptor
+source/blender/editors/sculpt_paint/grease_pencil.*     @filedescriptor
+source/blender/blenkernel/BKE_grease_pencil.*           @filedescriptor
+source/blender/blenkernel/intern/grease_pencil.*        @filedescriptor
 
 # --------------------------------------------------
 # Geometry Nodes.
@@ -175,6 +185,18 @@ source/blender/blenlib/intern/memory_cache.*               @JacquesLucke
 source/blender/blenlib/intern/memory_counter.*             @JacquesLucke
 
 # --------------------------------------------------
+# UI: Themes/Icons/Templates.
+release/datafiles/userdef/.*                @pablovazquez
+scripts/presets/interface_theme/.*          @pablovazquez
+release/datafiles/icons/.*                  @pablovazquez
+release/datafiles/icons_svg/.*              @pablovazquez
+release/datafiles/icons_blend/.*            @pablovazquez
+release/datafiles/studiolights/.*           @pablovazquez
+release/datafiles/cursors/.*                @pablovazquez
+release/freedesktop/icons/.*                @pablovazquez
+scripts/startup/bl_app_templates_system/.*  @pablovazquez
+
+# --------------------------------------------------
 # Viewport & EEVEE Module.
 extern/renderdoc/.*                                     @Jeroen-Bakker
 extern/vulkan_memory_allocator/.*                       @Jeroen-Bakker
@@ -192,9 +214,36 @@ source/blender/gpu/shader_tool/.*                       @fclem
 source/blender/gpu/shaders/.*                           @fclem
 
 # --------------------------------------------------
+# Editors
+source/blender/editors/space_console/.*   @ideasman42
+source/blender/editors/space_outliner/.*  @JulianEisel
+source/blender/editors/space_text/.*      @ideasman42
+
+# --------------------------------------------------
 # VSE.
-source/blender/sequencer/.*                  @eliphaz 
+source/blender/sequencer/.*                  @eliphaz
 source/blender/editors/space_sequencer/.*    @eliphaz
+
+# --------------------------------------------------
+# Compositor.
+scripts/startup/bl_ui/node_add_menu_compositor.py                @zazizizou @OmarEmaraDev
+source/blender/compositor/.*                                     @OmarEmaraDev
+source/blender/nodes/composite/.*                                @OmarEmaraDev
+source/blender/draw/engines/compositor/.*                        @OmarEmaraDev
+source/blender/render/RE_compositor.hh                           @OmarEmaraDev
+source/blender/render/intern/compositor.cc                       @OmarEmaraDev
+source/blender/sequencer/intern/modifiers/MOD_compositor.cc      @OmarEmaraDev
+source/blender/sequencer/intern/effects/vse_effect_compositor.cc @OmarEmaraDev
+
+# --------------------------------------------------
+# Animation Player.
+source/blender/windowmanager/intern/wm_playanim.cc      @ideasman42
+
+# --------------------------------------------------
+# Gizmos.
+source/blender/windowmanager/gizmo/.*                  @ideasman42
+source/blender/editors/gizmo_library/.*                @ideasman42
+source/blender/editors/space_view3d/view3d_gizmo_.*    @ideasman42
 
 # --------------------------------------------------
 # XR
@@ -225,9 +274,52 @@ build_files/cmake/platform/platform_apple.*     @Brainzman
 ## macOS Objective-C code
 .*\\.mm                                         @Brainzman
 
+## Wayland Maintenance.
+intern/ghost/intern/GHOST_.*Wayland.*          @ideasman42
+intern/wayland_dynload/.*                      @ideasman42
+
 # --------------------------------------------------
 # DevOps & CI/CD
 build_files/buildbot/.*         @bartvdbraak
 build_files/config/.*           @bartvdbraak
 .gitea/workflows/.*             @bartvdbraak
 .github/.*                      @bartvdbraak
+
+# --------------------------------------------------
+# glTF
+scripts/addons_core/io_scene_gltf2/.*       @JulienDuroure
+intern/draco_bridge/.*                      @JulienDuroure
+intern/meshoptimizer_bridge/*               @JulienDuroure
+
+# --------------------------------------------------
+# Asset System
+source/blender/asset_system/.* @JulianEisel
+
+# --------------------------------------------------
+# Bundled Assets
+source/blender/assets/.* @zazizizou
+
+# --------------------------------------------------
+# Sculpt, Paint, Texture
+source/blender/makesdna/DNA_brush_types.h           @Sean-Kim
+source/blender/makesdna/DNA_brush_enums.h           @Sean-Kim
+source/blender/makesrna/intern/rna_brush.cc         @Sean-Kim
+source/blender/makesrna/intern/rna_sculpt_paint.cc  @Sean-Kim
+source/blender/blenkernel/BKE_paint.*               @Sean-Kim
+source/blender/blenkernel/intern/brush.*            @Sean-Kim
+source/blender/blenkernel/paint.*                   @Sean-Kim
+source/blender/blenkernel/pbvh.*                    @Sean-Kim
+source/blender/editors/sculpt_paint/paint_.*        @Sean-Kim
+source/blender/editors/sculpt_paint/mesh/.*         @Sean-Kim
+
+# --------------------------------------------------
+# Modeling.
+source/blender/bmesh/.*            @ideasman42
+source/blender/editors/curve/.*    @ideasman42
+source/blender/editors/mesh/.*     @ideasman42
+
+# --------------------------------------------------
+# Documentation.
+doc/.*                                          @ideasman42 @Blendify
+scripts/modules/_rna_manual_reference.py        @Blendify
+tools/utils_doc/.*                              @ideasman42 @Blendify

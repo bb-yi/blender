@@ -87,34 +87,34 @@ using namespace bke::id;
 static CLG_LogRef LOG = {"lib.id"};
 
 IDTypeInfo IDType_ID_LINK_PLACEHOLDER = {
-    /*id_code*/ ID_LINK_PLACEHOLDER,
-    /*id_filter*/ 0,
-    /*dependencies_id_types*/ 0,
-    /*main_listbase_index*/ INDEX_ID_NULL,
-    /*struct_size*/ sizeof(ID),
-    /*name*/ "LinkPlaceholder",
-    /*name_plural*/ N_("link_placeholders"),
-    /*translation_context*/ BLT_I18NCONTEXT_ID_ID,
-    /*flags*/ IDTYPE_FLAGS_NO_COPY | IDTYPE_FLAGS_NO_LIBLINKING,
-    /*asset_type_info*/ nullptr,
+    .id_code = ID_LINK_PLACEHOLDER,
+    .id_filter = 0,
+    .dependencies_id_types = 0,
+    .main_listbase_index = INDEX_ID_NULL,
+    .struct_size = sizeof(ID),
+    .name = "LinkPlaceholder",
+    .name_plural = N_("link_placeholders"),
+    .translation_context = BLT_I18NCONTEXT_ID_ID,
+    .flags = IDTYPE_FLAGS_NO_COPY | IDTYPE_FLAGS_NO_LIBLINKING,
+    .asset_type_info = nullptr,
 
-    /*init_data*/ nullptr,
-    /*copy_data*/ nullptr,
-    /*free_data*/ nullptr,
-    /*make_local*/ nullptr,
-    /*foreach_id*/ nullptr,
-    /*foreach_cache*/ nullptr,
-    /*foreach_path*/ nullptr,
-    /*foreach_working_space_color*/ nullptr,
-    /*owner_pointer_get*/ nullptr,
+    .init_data = nullptr,
+    .copy_data = nullptr,
+    .free_data = nullptr,
+    .make_local = nullptr,
+    .foreach_id = nullptr,
+    .foreach_cache = nullptr,
+    .foreach_path = nullptr,
+    .foreach_working_space_color = nullptr,
+    .owner_pointer_get = nullptr,
 
-    /*blend_write*/ nullptr,
-    /*blend_read_data*/ nullptr,
-    /*blend_read_after_liblink*/ nullptr,
+    .blend_write = nullptr,
+    .blend_read_data = nullptr,
+    .blend_read_after_liblink = nullptr,
 
-    /*blend_read_undo_preserve*/ nullptr,
+    .blend_read_undo_preserve = nullptr,
 
-    /*lib_override_apply_post*/ nullptr,
+    .lib_override_apply_post = nullptr,
 };
 
 /* GS reads the memory pointed at in a specific ordering.
@@ -166,8 +166,8 @@ static bool lib_id_library_local_paths_callback(BPathForeachPathData *bpath_data
  *
  * This function can be used to remap paths in both directions. Typically, an ID comes from a
  * library and is made local (`lib_to` is then `nullptr`). But an ID can also be moved from current
- * Main into a library (`lib_from is then `nullptr`), or between two libraries (both `lib_to` and
- * `lib_from` are provided then).
+ * Main into a library (`lib_from` is then `nullptr`), or between two libraries
+ * (both `lib_to` and `lib_from` are provided then).
  *
  * \param lib_to: The library into which the id is moved to
  * (used to get the destination root* path). If `nullptr`, the current #Main::filepath is used.
@@ -277,7 +277,7 @@ void BKE_lib_id_clear_library_data(Main *bmain, ID *id, const int flags)
 
   /* Internal shape key blocks inside data-blocks also stores id->lib,
    * make sure this stays in sync (note that we do not need any explicit handling for real EMBEDDED
-   * IDs here, this is down automatically in `lib_id_expand_local_cb()`. */
+   * IDs here, this is down automatically in `lib_id_expand_local_cb()`). */
   Key *key = BKE_key_from_id(id);
   if (key != nullptr) {
     BKE_lib_id_clear_library_data(bmain, &key->id, flags);
@@ -1078,8 +1078,12 @@ bool id_single_user(bContext *C, ID *id, PointerRNA *ptr, PropertyRNA *prop)
       newid = BKE_id_copy_ex(bmain, id, nullptr, LIB_ID_COPY_DEFAULT | LIB_ID_COPY_ACTIONS);
       if (newid != nullptr) {
         /* us is 1 by convention with new IDs, but RNA_property_pointer_set
-         * will also increment it, decrement it here. */
+         * will also increment it if it's a user-reference-counting usage, decrement it here. */
         id_us_min(newid);
+        /* 'Never unused' IDs types should always have an extra 'virtual' user ensured. */
+        if (BKE_idtype_get_info_from_id(newid)->flags & IDTYPE_FLAGS_NEVER_UNUSED) {
+          id_us_ensure_real(newid);
+        }
 
         /* assign copy */
         PointerRNA idptr = RNA_id_pointer_create(newid);
@@ -2075,6 +2079,96 @@ void BKE_main_id_refcount_recompute(Main *bmain, const bool do_linked_only)
   FOREACH_MAIN_ID_END;
 }
 
+static int id_indirect_linked_update_fn(LibraryIDLinkCallbackData *cb_data)
+{
+  ID *self_id = cb_data->self_id;
+  ID **id_pointer = cb_data->id_pointer;
+  ID *id = *id_pointer;
+  const LibraryForeachIDCallbackFlag cb_flag = cb_data->cb_flag;
+
+  if (!id) {
+    return IDWALK_RET_NOP;
+  }
+  if (!ID_IS_LINKED(id)) {
+    return IDWALK_RET_NOP;
+  }
+  BLI_assert((cb_flag & IDWALK_CB_INDIRECT_USAGE) == 0);
+  if (self_id->tag & ID_TAG_RUNTIME) {
+    return IDWALK_RET_NOP;
+  }
+  if (cb_flag & IDWALK_CB_WRITEFILE_IGNORE) {
+    /* Do not consider these ID usages (typically, from the Outliner e.g.) as making the ID
+     * directly linked. */
+    return IDWALK_RET_NOP;
+  }
+  if (!BKE_idtype_idcode_is_linkable(GS(id->name))) {
+    /* Usages of unlinkable IDs (aka ShapeKeys and some UI IDs) should never cause them to
+     * be considered as directly linked. This can often happen e.g. from UI data (the
+     * Outliner will have links to most IDs).
+     */
+    return IDWALK_RET_NOP;
+  }
+  if (cb_flag & IDWALK_CB_DIRECT_WEAK_LINK) {
+    id_lib_indirect_weak_link(id);
+  }
+  else {
+    id_lib_extern(id);
+  }
+  return IDWALK_RET_NOP;
+}
+
+void BKE_main_id_indirect_linked_update(Main &bmain, std::optional<Span<ID *>> local_ids)
+{
+  for (ID &id : MainAllIDsIterator(bmain)) {
+    if (ID_IS_LINKED(&id) && BKE_idtype_idcode_is_linkable(GS(id.name))) {
+      if (USER_DEVELOPER_TOOL_TEST(&U, use_all_linked_data_direct)) {
+        /* Forces all linked data to be considered as directly linked.
+         * FIXME: Workaround some BAT tool limitations for Heist production, should be removed
+         * asap afterward. */
+        id_lib_extern(&id);
+      }
+      else if (GS(id.name) == ID_SCE) {
+        /* For scenes, do not force them into 'indirectly linked' status.
+         * The main reason is that scenes typically have no users, so most linked scene would be
+         * systematically 'lost' on file save.
+         *
+         * While this change re-introduces the 'no-more-used data laying around in files for
+         * ever' issue when it comes to scenes, this solution seems to be the most sensible one
+         * for the time being, considering that:
+         *   - Scene are a top-level container.
+         *   - Linked scenes are typically explicitly linked by the user.
+         *   - Cases where scenes would be indirectly linked by other data (e.g. when linking a
+         *     collection or material) can be considered at the very least as not following sane
+         *     practice in data dependencies.
+         *   - There are typically not hundreds of scenes in a file, and they are always very
+         *     easily discoverable and browsable from the main UI. */
+      }
+      else {
+        id.tag |= ID_TAG_INDIRECT;
+        id.tag &= ~ID_TAG_EXTERN;
+      }
+    }
+  }
+
+  const LibraryForeachIDFlag foreach_id_flag = IDWALK_READONLY | IDWALK_INCLUDE_UI;
+  if (local_ids.has_value()) {
+    for (ID *id : *local_ids) {
+      BLI_assert(!ID_IS_LINKED(id));
+      BKE_library_foreach_ID_link(
+          &bmain, id, id_indirect_linked_update_fn, nullptr, foreach_id_flag);
+    }
+  }
+  else {
+    for (ID &id : MainAllIDsIterator(bmain)) {
+      if (ID_IS_LINKED(&id)) {
+        continue;
+      }
+      BKE_library_foreach_ID_link(
+          &bmain, &id, id_indirect_linked_update_fn, nullptr, foreach_id_flag);
+    }
+  }
+}
+
 static void library_make_local_copying_check(ID *id,
                                              Set<ID *> &loop_tags,
                                              MainIDRelations *id_relations,
@@ -2329,7 +2423,7 @@ void BKE_library_make_local(Main *bmain,
 
     /* Special hack for groups... Thing is, since we can't instantiate them here, we need to
      * ensure they remain 'alive' (only instantiation is a real group 'user'... *sigh* See
-     * #49722. */
+     * #49722). */
     if (GS(id->name) == ID_GR && (id->tag & ID_TAG_INDIRECT) != 0) {
       id_us_ensure_real(id->newid);
     }
@@ -2606,7 +2700,7 @@ void BKE_id_reorder(const ListBaseT<ID> *lb, ID *id, ID *relative, bool after)
     relative_order = *id_order_get(relative);
   }
   else {
-    relative_order = (after) ? BLI_listbase_count(lb) : 0;
+    relative_order = (after) ? lb->count() : 0;
   }
 
   if (after) {
@@ -2660,15 +2754,21 @@ void BKE_id_blend_write(BlendWriter *writer, ID *id)
 
     writer->write_struct_list(&id->override_library->properties);
     for (IDOverrideLibraryProperty &op : id->override_library->properties) {
-      BLO_write_string(writer, op.rna_path);
+      writer->write_string(op.rna_path);
 
       writer->write_struct_list(&op.operations);
       for (IDOverrideLibraryPropertyOperation &opop : op.operations) {
         if (opop.subitem_reference_name) {
-          BLO_write_string(writer, opop.subitem_reference_name);
+          writer->write_string(opop.subitem_reference_name);
         }
         if (opop.subitem_local_name) {
-          BLO_write_string(writer, opop.subitem_local_name);
+          writer->write_string(opop.subitem_local_name);
+        }
+        if (opop.label) {
+          writer->write_string(opop.label);
+        }
+        if (opop.tooltip) {
+          writer->write_string(opop.tooltip);
         }
       }
     }

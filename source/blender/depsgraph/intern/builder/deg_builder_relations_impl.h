@@ -10,6 +10,7 @@
 
 #include "intern/builder/deg_builder_relations.h"
 #include "intern/node/deg_node_id.hh"
+#include "intern/node/deg_node_time.hh"
 
 #include <iostream>
 
@@ -78,6 +79,7 @@ Relation *DepsgraphRelationBuilder::add_relation(const TimeSourceKey &key_from,
 }
 
 template<typename KeyType>
+  requires(!std::is_same_v<KeyType, TimeSourceKey>)
 Relation *DepsgraphRelationBuilder::add_node_handle_relation(const KeyType &key_from,
                                                              const DepsNodeHandle *handle,
                                                              const char *description,

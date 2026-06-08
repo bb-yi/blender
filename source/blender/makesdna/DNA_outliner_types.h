@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include "BLI_enum_flags.hh"
 #include "DNA_defs.h"
 
 namespace blender {
@@ -15,7 +16,7 @@ namespace blender {
 struct ID;
 
 /** #TreeStoreElem.flag */
-enum {
+enum eTreeStoreElem_Flag : short {
   TSE_CLOSED = (1 << 0),
   TSE_SELECTED = (1 << 1),
   TSE_TEXTBUT = (1 << 2),
@@ -32,9 +33,10 @@ enum {
   TSE_DRAG_ANY = (TSE_DRAG_INTO | TSE_DRAG_BEFORE | TSE_DRAG_AFTER),
   TSE_HIGHLIGHTED_ANY = (TSE_HIGHLIGHTED | TSE_HIGHLIGHTED_ICON),
 };
+ENUM_OPERATORS(eTreeStoreElem_Flag)
 
 /** #TreeStoreElem.types */
-enum eTreeStoreElemType {
+enum eTreeStoreElemType : short {
   /**
    * If an element is of this type, `TreeStoreElem.id` points to a valid ID and the ID-type can be
    * received through `TreeElement.idcode` (or `GS(TreeStoreElem.id->name)`). Note however that the
@@ -97,6 +99,8 @@ enum eTreeStoreElemType {
   TSE_GREASE_PENCIL_NODE = 48,
   TSE_LINKED_NODE_TREE = 49,
   TSE_ACTION_SLOT = 50,
+  TSE_SHAPE_KEY_BLOCK = 51,
+  TSE_SHAPE_KEY_BASE = 52,
 };
 
 /** Check whether given #TreeStoreElem should have a real ID in #TreeStoreElem.id member. */
@@ -116,7 +120,10 @@ enum eTreeStoreElemType {
          TSE_GENERIC_LABEL))
 
 struct TreeStoreElem {
-  short type = 0, nr = 0, flag = 0, used = 0;
+  eTreeStoreElemType type = TSE_SOME_ID;
+  short nr = 0;
+  eTreeStoreElem_Flag flag = {};
+  short used = 0;
 
   /* XXX We actually also store non-ID data in this pointer for identifying
    * the #TreeStoreElem for a #TreeElement when rebuilding the tree. Ugly! */

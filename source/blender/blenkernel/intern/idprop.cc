@@ -13,6 +13,8 @@
 #include <cstdlib>
 #include <cstring>
 
+#include <xxhash.h>
+
 #include <fmt/format.h>
 
 #include "BLI_listbase.h"
@@ -22,6 +24,7 @@
 #include "BLI_utildefines.h"
 
 #include "BKE_idprop.hh"
+#include "BKE_idprop_hash.hh"
 #include "BKE_lib_id.hh"
 
 #include "CLG_log.h"
@@ -392,7 +395,7 @@ IDProperty *IDP_NewStringMaxSize(const char *st,
 
   prop->type = IDP_STRING;
   name.copy_utf8_truncated(prop->name);
-  prop->flag = short(flags);
+  prop->flag = flags;
 
   return prop;
 }
@@ -790,7 +793,57 @@ static void IDP_FreeGroup(IDProperty *prop, const bool do_id_user)
   for (IDProperty &loop : prop->data.group) {
     IDP_FreePropertyContent_ex(&loop, do_id_user);
   }
-  BLI_freelistN(&prop->data.group);
+  prop->data.group.free_no_destruct();
+}
+
+std::optional<StringRefNull> IDP_group_lookup_string(const IDProperty &group, StringRef name)
+{
+  const IDProperty *prop = IDP_GetPropertyFromGroup(&group, name);
+  if (!prop || prop->type != IDP_STRING) {
+    return std::nullopt;
+  }
+  return IDP_string_get(prop);
+}
+
+std::optional<float> IDP_group_lookup_float(const IDProperty &group, StringRef name)
+{
+  const IDProperty *prop = IDP_GetPropertyFromGroup(&group, name);
+  if (!prop || prop->type != IDP_FLOAT) {
+    return std::nullopt;
+  }
+  return IDP_float_get(prop);
+}
+
+std::optional<int> IDP_group_lookup_int(const IDProperty &group, StringRef name)
+{
+  const IDProperty *prop = IDP_GetPropertyFromGroup(&group, name);
+  if (!prop || prop->type != IDP_INT) {
+    return std::nullopt;
+  }
+  return IDP_int_get(prop);
+}
+
+std::optional<bool> IDP_group_lookup_bool(const IDProperty &group, StringRef name)
+{
+  const IDProperty *prop = IDP_GetPropertyFromGroup(&group, name);
+  if (!prop || prop->type != IDP_BOOLEAN) {
+    return std::nullopt;
+  }
+  return IDP_bool_get(prop);
+}
+
+std::optional<Span<float>> IDP_group_lookup_float_array(const IDProperty &group,
+                                                        StringRef name,
+                                                        int required_size)
+{
+  const IDProperty *prop = IDP_GetPropertyFromGroup(&group, name);
+  if (!prop || prop->type != IDP_FLOAT) {
+    return std::nullopt;
+  }
+  if (prop->len != required_size) {
+    return std::nullopt;
+  }
+  return Span(IDP_array_float_get(prop), prop->len);
 }
 
 /** \} */
@@ -1112,9 +1165,9 @@ IDProperty *IDP_New(const char type,
     }
   }
 
-  prop->type = type;
+  prop->type = eIDPropertyType(type);
   name.copy_utf8_truncated(prop->name);
-  prop->flag = short(flags);
+  prop->flag = flags;
 
   return prop;
 }
@@ -1228,6 +1281,11 @@ void IDP_ui_data_free(IDProperty *prop)
 void IDP_FreePropertyContent_ex(IDProperty *prop, const bool do_id_user)
 {
   switch (prop->type) {
+    case IDP_INT:
+    case IDP_FLOAT:
+    case IDP_DOUBLE:
+    case IDP_BOOLEAN:
+      break;
     case IDP_ARRAY:
       IDP_FreeArray(prop);
       break;
@@ -1325,12 +1383,12 @@ static void write_ui_data(const IDProperty *prop, BlendWriter *writer)
 {
   IDPropertyUIData *ui_data = prop->ui_data;
 
-  BLO_write_string(writer, ui_data->description);
+  writer->write_string(ui_data->description);
 
   switch (IDP_ui_data_type(prop)) {
     case IDP_UI_DATA_TYPE_STRING: {
       IDPropertyUIDataString *ui_data_string = reinterpret_cast<IDPropertyUIDataString *>(ui_data);
-      BLO_write_string(writer, ui_data_string->default_value);
+      writer->write_string(ui_data_string->default_value);
       writer->write_struct_cast<IDPropertyUIDataString>(ui_data);
       break;
     }
@@ -1341,16 +1399,15 @@ static void write_ui_data(const IDProperty *prop, BlendWriter *writer)
     case IDP_UI_DATA_TYPE_INT: {
       IDPropertyUIDataInt *ui_data_int = reinterpret_cast<IDPropertyUIDataInt *>(ui_data);
       if (prop->type == IDP_ARRAY) {
-        BLO_write_int32_array(writer,
-                              uint(ui_data_int->default_array_len),
-                              static_cast<int32_t *>(ui_data_int->default_array));
+        writer->write_int32_array(uint(ui_data_int->default_array_len),
+                                  static_cast<int32_t *>(ui_data_int->default_array));
       }
       writer->write_struct_array(ui_data_int->enum_items_num, ui_data_int->enum_items);
       for (const int64_t i : IndexRange(ui_data_int->enum_items_num)) {
         IDPropertyUIDataEnumItem &item = ui_data_int->enum_items[i];
-        BLO_write_string(writer, item.identifier);
-        BLO_write_string(writer, item.name);
-        BLO_write_string(writer, item.description);
+        writer->write_string(item.identifier);
+        writer->write_string(item.name);
+        writer->write_string(item.description);
       }
       writer->write_struct_cast<IDPropertyUIDataInt>(ui_data);
       break;
@@ -1358,9 +1415,8 @@ static void write_ui_data(const IDProperty *prop, BlendWriter *writer)
     case IDP_UI_DATA_TYPE_BOOLEAN: {
       IDPropertyUIDataBool *ui_data_bool = reinterpret_cast<IDPropertyUIDataBool *>(ui_data);
       if (prop->type == IDP_ARRAY) {
-        BLO_write_int8_array(writer,
-                             uint(ui_data_bool->default_array_len),
-                             const_cast<const int8_t *>(ui_data_bool->default_array));
+        writer->write_int8_array(uint(ui_data_bool->default_array_len),
+                                 const_cast<const int8_t *>(ui_data_bool->default_array));
       }
       writer->write_struct_cast<IDPropertyUIDataBool>(ui_data);
       break;
@@ -1368,8 +1424,8 @@ static void write_ui_data(const IDProperty *prop, BlendWriter *writer)
     case IDP_UI_DATA_TYPE_FLOAT: {
       IDPropertyUIDataFloat *ui_data_float = reinterpret_cast<IDPropertyUIDataFloat *>(ui_data);
       if (prop->type == IDP_ARRAY) {
-        BLO_write_double_array(
-            writer, uint(ui_data_float->default_array_len), ui_data_float->default_array);
+        writer->write_double_array(uint(ui_data_float->default_array_len),
+                                   ui_data_float->default_array);
       }
       writer->write_struct_cast<IDPropertyUIDataFloat>(ui_data);
       break;
@@ -1389,7 +1445,7 @@ static void IDP_WriteArray(const IDProperty *prop, BlendWriter *writer)
      */
     switch (eIDPropertyType(prop->subtype)) {
       case IDP_GROUP: {
-        BLO_write_pointer_array(writer, uint32_t(prop->len), prop->data.pointer);
+        writer->write_pointer_array(uint32_t(prop->len), prop->data.pointer);
 
         IDProperty **array = static_cast<IDProperty **>(prop->data.pointer);
         for (int i = 0; i < prop->len; i++) {
@@ -1398,19 +1454,16 @@ static void IDP_WriteArray(const IDProperty *prop, BlendWriter *writer)
         break;
       }
       case IDP_DOUBLE:
-        BLO_write_double_array(
-            writer, uint32_t(prop->len), static_cast<double *>(prop->data.pointer));
+        writer->write_double_array(uint32_t(prop->len), static_cast<double *>(prop->data.pointer));
         break;
       case IDP_INT:
-        BLO_write_int32_array(writer, uint32_t(prop->len), static_cast<int *>(prop->data.pointer));
+        writer->write_int32_array(uint32_t(prop->len), static_cast<int *>(prop->data.pointer));
         break;
       case IDP_FLOAT:
-        BLO_write_float_array(
-            writer, uint32_t(prop->len), static_cast<float *>(prop->data.pointer));
+        writer->write_float_array(uint32_t(prop->len), static_cast<float *>(prop->data.pointer));
         break;
       case IDP_BOOLEAN:
-        BLO_write_int8_array(
-            writer, uint32_t(prop->len), static_cast<int8_t *>(prop->data.pointer));
+        writer->write_int8_array(uint32_t(prop->len), static_cast<int8_t *>(prop->data.pointer));
         break;
       case IDP_STRING:
       case IDP_ARRAY:
@@ -1439,9 +1492,9 @@ static void IDP_WriteIDPArray(const IDProperty *prop, BlendWriter *writer)
 static void IDP_WriteString(const IDProperty *prop, BlendWriter *writer)
 {
   /* Remember to set #IDProperty.totallen to len in the linking code! */
-  /* Do not use #BLO_write_string here, since 'bytes' sub-type of IDProperties may not be
+  /* Do not use #BlendWriter::write_string here, since 'bytes' sub-type of IDProperties may not be
    * null-terminated. */
-  BLO_write_char_array(writer, uint(prop->len), static_cast<char *>(prop->data.pointer));
+  writer->write_char_array(uint(prop->len), static_cast<char *>(prop->data.pointer));
 }
 
 static void IDP_WriteGroup(const IDProperty *prop, BlendWriter *writer)
@@ -1455,6 +1508,12 @@ static void IDP_WriteGroup(const IDProperty *prop, BlendWriter *writer)
 void IDP_WriteProperty_OnlyData(const IDProperty *prop, BlendWriter *writer)
 {
   switch (prop->type) {
+    case IDP_INT:
+    case IDP_FLOAT:
+    case IDP_DOUBLE:
+    case IDP_BOOLEAN:
+    case IDP_ID:
+      break;
     case IDP_GROUP:
       IDP_WriteGroup(prop, writer);
       break;
@@ -1504,17 +1563,15 @@ static void read_ui_data(IDProperty *prop, BlendDataReader *reader)
       BLO_read_struct(reader, IDPropertyUIDataInt, &prop->ui_data);
       IDPropertyUIDataInt *ui_data_int = reinterpret_cast<IDPropertyUIDataInt *>(prop->ui_data);
       if (prop->type == IDP_ARRAY) {
-        BLO_read_int32_array(
-            reader, ui_data_int->default_array_len, (&ui_data_int->default_array));
+        BLO_read_array_and_validate_size(
+            reader, &ui_data_int->default_array, &ui_data_int->default_array_len);
       }
       else {
         ui_data_int->default_array = nullptr;
         ui_data_int->default_array_len = 0;
       }
-      BLO_read_struct_array(reader,
-                            IDPropertyUIDataEnumItem,
-                            size_t(ui_data_int->enum_items_num),
-                            &ui_data_int->enum_items);
+      BLO_read_array_and_validate_size(
+          reader, &ui_data_int->enum_items, &ui_data_int->enum_items_num);
       for (const int64_t i : IndexRange(ui_data_int->enum_items_num)) {
         IDPropertyUIDataEnumItem &item = ui_data_int->enum_items[i];
         BLO_read_string(reader, &item.identifier);
@@ -1527,8 +1584,8 @@ static void read_ui_data(IDProperty *prop, BlendDataReader *reader)
       BLO_read_struct(reader, IDPropertyUIDataBool, &prop->ui_data);
       IDPropertyUIDataBool *ui_data_bool = reinterpret_cast<IDPropertyUIDataBool *>(prop->ui_data);
       if (prop->type == IDP_ARRAY) {
-        BLO_read_int8_array(
-            reader, ui_data_bool->default_array_len, (&ui_data_bool->default_array));
+        BLO_read_array_and_validate_size(
+            reader, &ui_data_bool->default_array, &ui_data_bool->default_array_len);
       }
       else {
         ui_data_bool->default_array = nullptr;
@@ -1541,8 +1598,8 @@ static void read_ui_data(IDProperty *prop, BlendDataReader *reader)
       IDPropertyUIDataFloat *ui_data_float = reinterpret_cast<IDPropertyUIDataFloat *>(
           prop->ui_data);
       if (prop->type == IDP_ARRAY) {
-        BLO_read_double_array(
-            reader, ui_data_float->default_array_len, (&ui_data_float->default_array));
+        BLO_read_array_and_validate_size(
+            reader, &ui_data_float->default_array, &ui_data_float->default_array_len);
       }
       else {
         ui_data_float->default_array = nullptr;
@@ -1567,7 +1624,8 @@ static void IDP_DirectLinkIDPArray(IDProperty *prop, BlendDataReader *reader)
 {
   /* since we didn't save the extra buffer, set totallen to len */
   prop->totallen = prop->len;
-  BLO_read_struct_array(reader, IDProperty, size_t(prop->len), &prop->data.pointer);
+  BLO_read_array_and_validate_size(
+      reader, reinterpret_cast<IDProperty **>(&prop->data.pointer), &prop->len);
 
   IDProperty *array = static_cast<IDProperty *>(prop->data.pointer);
 
@@ -1590,7 +1648,7 @@ static void IDP_DirectLinkArray(IDProperty *prop, BlendDataReader *reader)
 
   switch (eIDPropertyType(prop->subtype)) {
     case IDP_GROUP: {
-      BLO_read_pointer_array(reader, prop->len, &prop->data.pointer);
+      BLO_read_pointer_array_and_validate_size(reader, &prop->data.pointer, &prop->len);
       IDProperty **array = static_cast<IDProperty **>(prop->data.pointer);
       for (int i = 0; i < prop->len; i++) {
         IDP_DirectLinkProperty(array[i], reader);
@@ -1598,16 +1656,20 @@ static void IDP_DirectLinkArray(IDProperty *prop, BlendDataReader *reader)
       break;
     }
     case IDP_DOUBLE:
-      BLO_read_double_array(reader, prop->len, reinterpret_cast<double **>(&prop->data.pointer));
+      BLO_read_array_and_validate_size(
+          reader, reinterpret_cast<double **>(&prop->data.pointer), &prop->len);
       break;
     case IDP_INT:
-      BLO_read_int32_array(reader, prop->len, reinterpret_cast<int **>(&prop->data.pointer));
+      BLO_read_array_and_validate_size(
+          reader, reinterpret_cast<int **>(&prop->data.pointer), &prop->len);
       break;
     case IDP_FLOAT:
-      BLO_read_float_array(reader, prop->len, reinterpret_cast<float **>(&prop->data.pointer));
+      BLO_read_array_and_validate_size(
+          reader, reinterpret_cast<float **>(&prop->data.pointer), &prop->len);
       break;
     case IDP_BOOLEAN:
-      BLO_read_int8_array(reader, prop->len, reinterpret_cast<int8_t **>(&prop->data.pointer));
+      BLO_read_array_and_validate_size(
+          reader, reinterpret_cast<int8_t **>(&prop->data.pointer), &prop->len);
       break;
     case IDP_STRING:
     case IDP_ARRAY:
@@ -1616,13 +1678,19 @@ static void IDP_DirectLinkArray(IDProperty *prop, BlendDataReader *reader)
       BLI_assert_unreachable();
       break;
   }
+
+  if (prop->data.pointer == nullptr) {
+    prop->len = 0;
+    prop->totallen = 0;
+  }
 }
 
 static void IDP_DirectLinkString(IDProperty *prop, BlendDataReader *reader)
 {
+  BLO_read_array_and_validate_size(
+      reader, reinterpret_cast<char **>(&prop->data.pointer), &prop->len);
   /* Since we didn't save the extra string buffer, set totallen to len. */
   prop->totallen = prop->len;
-  BLO_read_char_array(reader, prop->len, reinterpret_cast<char **>(&prop->data.pointer));
 }
 
 static void IDP_DirectLinkGroup(IDProperty *prop, BlendDataReader *reader)
@@ -1632,7 +1700,7 @@ static void IDP_DirectLinkGroup(IDProperty *prop, BlendDataReader *reader)
 
   BLO_read_struct_list(reader, IDProperty, lb);
 
-  if (!BLI_listbase_is_empty(&prop->data.group)) {
+  if (!prop->data.group.is_empty()) {
     idp_group_children_map_ensure(*prop);
   }
 
@@ -1675,7 +1743,7 @@ static void IDP_DirectLinkProperty(IDProperty *prop, BlendDataReader *reader)
       break; /* Nothing special to do here. */
     default:
       /* Unknown IDP type, nuke it (we cannot handle unknown types everywhere in code,
-       * IDP are way too polymorphic to do it safely. */
+       * IDP are way too polymorphic to do it safely). */
       printf(
           "%s: found unknown IDProperty type %d, reset to Integer one !\n", __func__, prop->type);
       /* NOTE: we do not attempt to free unknown prop, we have no way to know how to do that! */
@@ -1989,6 +2057,59 @@ IDPropertyUIData *IDP_TryConvertUIData(IDPropertyUIData *src,
   ui_data_free(src, src_type);
   return nullptr;
 }
+
+namespace bke::idprop {
+
+void hash(const IDProperty &base_prop, XXH3_state_t *hash_state)
+{
+  IDP_foreach_property(&const_cast<IDProperty &>(base_prop), 0, [&](const IDProperty *prop) {
+    XXH3_64bits_update(hash_state, prop->name, strlen(prop->name));
+    XXH3_64bits_update(hash_state, &prop->type, sizeof(prop->type));
+
+    switch (eIDPropertyType(prop->type)) {
+      case IDP_INT:
+      case IDP_FLOAT:
+      case IDP_BOOLEAN: {
+        XXH3_64bits_update(hash_state, &prop->data.val, sizeof(prop->data.val));
+        break;
+      }
+      case IDP_DOUBLE: {
+        const double val = IDP_double_get(prop);
+        XXH3_64bits_update(hash_state, &val, sizeof(double));
+        break;
+      }
+      case IDP_STRING: {
+        if (prop->data.pointer) {
+          XXH3_64bits_update(hash_state, prop->data.pointer, size_t(prop->len));
+        }
+        break;
+      }
+      case IDP_ARRAY: {
+        if (prop->data.pointer) {
+          XXH3_64bits_update(hash_state, &prop->subtype, sizeof(prop->subtype));
+          const size_t elem_size = idp_size_table[int(prop->subtype)];
+          XXH3_64bits_update(hash_state, prop->data.pointer, elem_size * size_t(prop->len));
+        }
+        break;
+      }
+      case IDP_ID: {
+        /* NOTE: Hashing the session_uid of the ID makes the hash session-specific. An alternative
+         * hash wouldn't be complete though, because data-block names aren't necessarily unique. */
+        if (const ID *id = static_cast<const ID *>(prop->data.pointer)) {
+          XXH3_64bits_update(hash_state, &id->session_uid, sizeof(ID::session_uid));
+        }
+        break;
+      }
+      case IDP_GROUP:
+      case IDP_IDPARRAY: {
+        /* Handled by the recursion in #IDP_foreach_property. */
+        break;
+      }
+    }
+  });
+}
+
+}  // namespace bke::idprop
 
 /** \} */
 

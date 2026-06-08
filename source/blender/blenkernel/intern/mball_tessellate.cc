@@ -288,7 +288,7 @@ static void build_bvh_spatial(
 
 /**
  * the LBN corner of cube (i, j, k), corresponds with location
- * (i-0.5)*size, (j-0.5)*size, (k-0.5)*size)
+ * (i-0.5)*size, (j-0.5)*size, (k-0.5)*size
  */
 
 #define HASHBIT (5)
@@ -1296,6 +1296,9 @@ static void init_meta(Depsgraph *depsgraph, PROCESS *process, Scene *scene, Obje
 
       switch (ml.type) {
         case MB_BALL:
+        case MB_TUBEX:
+        case MB_TUBEY:
+        case MB_TUBEZ:
           break;
         case MB_CUBE: /* cube is "expanded" by expz, expy and expx */
           expz += ml.expz;

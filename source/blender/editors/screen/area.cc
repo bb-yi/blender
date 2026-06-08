@@ -108,6 +108,12 @@ void ED_region_do_listen(wmRegionListenerParams *params)
     case NC_WINDOW:
       ED_region_tag_redraw(region);
       break;
+    case NC_UI:
+      if (notifier->data == ND_UI_FONT) {
+        ui::invalidate_text_wrap_cache(*region);
+        ED_region_tag_redraw(region);
+      }
+      break;
   }
 
   if (region->runtime->type && region->runtime->type->listener) {
@@ -1041,7 +1047,7 @@ void ED_workspace_status_text(bContext *C, const char *str)
 static void area_azone_init(const wmWindow *win, const bScreen *screen, ScrArea *area)
 {
   /* reinitialize entirely, regions and full-screen add azones too */
-  BLI_freelistN(&area->actionzones);
+  area->actionzones.free_no_destruct();
 
   if (screen->state != SCREENNORMAL) {
     return;
@@ -1637,6 +1643,9 @@ static void region_rect_recursive(
   else if (region->regiontype == RGN_TYPE_FOOTER) {
     prefsizey = ED_area_footersize();
   }
+  else if (region->regiontype == RGN_TYPE_SCRUBBING) {
+    prefsizey = 0.9f * ED_area_footersize();
+  }
   else if (region->regiontype == RGN_TYPE_ASSET_SHELF) {
     prefsizey = region->sizey > 1 ? (UI_SCALE_FAC * (region->sizey + 0.5f)) :
                                     asset::shelf::region_prefsizey();
@@ -1971,7 +1980,7 @@ static void area_calc_totrct(const bScreen *screen, ScrArea *area, const rcti *w
 
   /* Scale down totrct by the border size on all sides not at window edges. */
   if (!ED_area_is_global(area) && screen->state != SCREENFULL && !(screen->temp) &&
-      !BLI_listbase_is_single(&screen->areabase))
+      !screen->areabase.is_single())
   {
     area->totrct.xmin += (area->totrct.xmin > window_rect->xmin) ? px : px_edge;
     area->totrct.xmax -= (area->totrct.xmax < (window_rect->xmax - 1)) ? px : px_edge;
@@ -1980,7 +1989,7 @@ static void area_calc_totrct(const bScreen *screen, ScrArea *area, const rcti *w
     if (area->totrct.ymax < (window_rect->ymax - 1)) {
       area->totrct.ymax -= px;
     }
-    else if (!BLI_listbase_is_single(&screen->areabase) || screen->state == SCREENMAXIMIZED) {
+    else if (!screen->areabase.is_single() || screen->state == SCREENMAXIMIZED) {
       /* Small gap below Top Bar. */
       area->totrct.ymax -= U.pixelsize;
     }
@@ -2202,7 +2211,7 @@ static void area_init_type_fallback(ScrArea *area, eSpace_Type space_type)
       /* swap regions */
       sl_old->regionbase = area->regionbase;
       area->regionbase = sl->regionbase;
-      BLI_listbase_clear(&sl->regionbase);
+      sl->regionbase.clear_no_delete();
     }
   }
   else {
@@ -2232,6 +2241,7 @@ void ED_area_init(bContext *C, const wmWindow *win, ScrArea *area)
   wmWindowManager *wm = CTX_wm_manager(C);
   WorkSpace *workspace = WM_window_get_active_workspace(win);
   const bScreen *screen = BKE_workspace_active_screen_get(win->workspace_hook);
+  const Main *bmain = CTX_data_main(C);
   const Scene *scene = WM_window_get_active_scene(win);
   ViewLayer *view_layer = WM_window_get_active_view_layer(win);
 
@@ -2291,7 +2301,7 @@ void ED_area_init(bContext *C, const wmWindow *win, ScrArea *area)
   /* Avoid re-initializing tools while resizing areas & regions. */
   if ((G.moving & G_TRANSFORM_WM) == 0) {
     if ((1 << area->spacetype) & WM_TOOLSYSTEM_SPACE_MASK) {
-      if (WM_toolsystem_refresh_screen_area(workspace, scene, view_layer, area) ||
+      if (WM_toolsystem_refresh_screen_area(*bmain, workspace, scene, view_layer, area) ||
           /* When the tool is null it may not be initialized.
            * This happens when switching to a new area, see: #126990.
            *
@@ -2451,7 +2461,9 @@ void region_toggle_hidden(bContext *C, ARegion *region, const bool do_fade)
 
   region->flag ^= RGN_FLAG_HIDDEN;
 
-  if (do_fade && region->overlap && !(U.uiflag & USER_REDUCE_MOTION)) {
+  if (do_fade && region->overlap && !(U.uiflag & USER_REDUCE_MOTION) &&
+      !region->runtime->regiontimer)
+  {
     /* starts a timer, and in end calls the stuff below itself (region_sblend_invoke()) */
     ED_region_visibility_change_update_animated(C, area, region);
   }
@@ -2676,7 +2688,7 @@ static void region_align_info_to_area_for_headers(const RegionTypeAlignInfo *reg
   if (header_alignment_sync != -1) {
     ARegion *region = region_by_type[RGN_TYPE_HEADER];
     if (region != nullptr) {
-      region->alignment = RGN_ALIGN_ENUM_FROM_MASK(header_alignment_sync) |
+      region->alignment = RGN_ALIGN_ENUM_FROM_MASK(eRegion_Alignment(header_alignment_sync)) |
                           RGN_ALIGN_FLAG_FROM_MASK(region->alignment);
     }
   }
@@ -2684,7 +2696,7 @@ static void region_align_info_to_area_for_headers(const RegionTypeAlignInfo *reg
   if (tool_header_alignment_sync != -1) {
     ARegion *region = region_by_type[RGN_TYPE_TOOL_HEADER];
     if (region != nullptr) {
-      region->alignment = RGN_ALIGN_ENUM_FROM_MASK(tool_header_alignment_sync) |
+      region->alignment = RGN_ALIGN_ENUM_FROM_MASK(eRegion_Alignment(tool_header_alignment_sync)) |
                           RGN_ALIGN_FLAG_FROM_MASK(region->alignment);
     }
   }
@@ -2692,7 +2704,7 @@ static void region_align_info_to_area_for_headers(const RegionTypeAlignInfo *reg
   if (footer_alignment_sync != -1) {
     ARegion *region = region_by_type[RGN_TYPE_FOOTER];
     if (region != nullptr) {
-      region->alignment = RGN_ALIGN_ENUM_FROM_MASK(footer_alignment_sync) |
+      region->alignment = RGN_ALIGN_ENUM_FROM_MASK(eRegion_Alignment(footer_alignment_sync)) |
                           RGN_ALIGN_FLAG_FROM_MASK(region->alignment);
     }
   }
@@ -2819,7 +2831,7 @@ void ED_area_newspace(bContext *C, ScrArea *area, int type, const bool skip_regi
     }
 
     /* old spacedata... happened during work on 2.50, remove */
-    if (sl && BLI_listbase_is_empty(&sl->regionbase)) {
+    if (sl && sl->regionbase.is_empty()) {
       st->free(sl);
       BLI_freelinkN(&area->spacedata, sl);
       if (slold == sl) {
@@ -2832,7 +2844,7 @@ void ED_area_newspace(bContext *C, ScrArea *area, int type, const bool skip_regi
       /* swap regions */
       slold->regionbase = area->regionbase;
       area->regionbase = sl->regionbase;
-      BLI_listbase_clear(&sl->regionbase);
+      sl->regionbase.clear_no_delete();
       /* SPACE_FLAG_TYPE_WAS_ACTIVE is only used to go back to a previously active space that is
        * overlapped by temporary ones. It's now properly activated, so the flag should be cleared
        * at this point. */
@@ -2855,7 +2867,7 @@ void ED_area_newspace(bContext *C, ScrArea *area, int type, const bool skip_regi
           slold->regionbase = area->regionbase;
         }
         area->regionbase = sl->regionbase;
-        BLI_listbase_clear(&sl->regionbase);
+        sl->regionbase.clear_no_delete();
       }
     }
 
@@ -3264,7 +3276,7 @@ static const char *region_panels_collect_categories(ARegion *region,
     PanelType *pt = static_cast<PanelType *>(pt_link->link);
     if (pt->category[0]) {
       if (!ui::panel_category_find(region, pt->category)) {
-        ui::panel_category_add(region, pt->category);
+        ui::panel_category_add(region, pt->category, pt->icon);
       }
     }
   }
@@ -3624,7 +3636,7 @@ void ED_region_panels_draw(const bContext *C, ARegion *region)
 
   /* Set in layout. */
   if (has_category_tabs && region->runtime->category) {
-    ui::panel_category_tabs_draw_all(region, region->runtime->category);
+    ui::panel_category_tabs_draw_all(C, region, region->runtime->category);
   }
 
   /* scrollers */
@@ -4432,7 +4444,7 @@ void ED_region_message_subscribe(wmRegionMessageSubscribeParams *params)
     WM_gizmomap_message_subscribe(C, region->runtime->gizmo_map, region, mbus);
   }
 
-  if (!BLI_listbase_is_empty(&region->runtime->uiblocks)) {
+  if (!region->runtime->uiblocks.is_empty()) {
     ui::region_message_subscribe(region, mbus);
   }
 

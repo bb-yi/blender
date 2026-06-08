@@ -55,7 +55,7 @@ static void copy_property_from_node(const eNodeSocketDatatype property_type,
     return;
   }
   const bNodeSocket *socket = bke::node_find_socket(
-      *const_cast<bNode *>(node), SOCK_IN, identifier);
+      *const_cast<bNode *>(node), SOCK_IN, UString(identifier));
   BLI_assert(socket && socket->type == property_type);
   if (!socket) {
     return;
@@ -102,7 +102,7 @@ static void linked_sockets_to_dest_id(const bNode *dest_node,
   if (!dest_node) {
     return;
   }
-  Span<const bNode *> object_dest_nodes = node_tree.nodes_by_type(dest_node->idname);
+  Span<const bNode *> object_dest_nodes = node_tree.nodes_by_type(UString(dest_node->idname));
   Span<const bNodeSocket *> dest_inputs = object_dest_nodes.first()->input_sockets();
   const bNodeSocket *dest_socket = nullptr;
   for (const bNodeSocket *curr_socket : dest_inputs) {
@@ -180,7 +180,7 @@ static const bNode *find_bsdf_node(const bNodeTree *nodetree)
   if (!nodetree) {
     return nullptr;
   }
-  for (const bNode *node : nodetree->nodes_by_type("ShaderNodeOutputMaterial")) {
+  for (const bNode *node : nodetree->nodes_by_type("ShaderNodeOutputMaterial"_ustr)) {
     const bNodeSocket &node_input_socket0 = node->input_socket(0);
     for (const bNodeSocket *out_sock : node_input_socket0.directly_linked_sockets()) {
       const bNode &in_node = out_sock->owner_node();

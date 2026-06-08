@@ -96,9 +96,12 @@ CREATE_INFO_VARIANT(overlay_outline_prepass_wire_clipped,
                     drw_clipped)
 
 GPU_SHADER_NAMED_INTERFACE_INFO(overlay_outline_prepass_gpencil_flat_iface, gp_interp_flat)
-FLAT(float2, aspect)
-FLAT(float4, sspos)
-FLAT(float4, sspos_adj)
+FLAT(float4, aspect)
+FLAT(float2, sspos_0)
+FLAT(float4, sspos_1)
+FLAT(float4, sspos_2)
+FLAT(float2, sspos_3)
+FLAT(float3, point_length)
 GPU_SHADER_NAMED_INTERFACE_END(gp_interp_flat)
 GPU_SHADER_NAMED_INTERFACE_INFO(overlay_outline_prepass_gpencil_noperspective_iface,
                                 gp_interp_noperspective)

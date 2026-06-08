@@ -2,7 +2,7 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "BLI_color.hh"
+#include "BLI_color_types.hh"
 #include "BLI_math_geom.h"
 #include "BLI_math_matrix.hh"
 #include "BLI_math_vector.hh"
@@ -111,17 +111,8 @@ Image *image_render_end(Main &bmain, GPUOffScreen *buffer)
   GPU_matrix_pop();
 
   const int2 win_size = {GPU_offscreen_width(buffer), GPU_offscreen_height(buffer)};
-  const uint imb_flag = IB_byte_data;
-  ImBuf *ibuf = IMB_allocImBuf(win_size.x, win_size.y, 32, imb_flag);
-  if (ibuf->float_buffer.data) {
-    GPU_offscreen_read_color(buffer, GPU_DATA_FLOAT, ibuf->float_buffer.data);
-  }
-  else if (ibuf->byte_buffer.data) {
-    GPU_offscreen_read_color(buffer, GPU_DATA_UBYTE, ibuf->byte_buffer.data);
-  }
-  if (ibuf->float_buffer.data && ibuf->byte_buffer.data) {
-    IMB_byte_from_float(ibuf);
-  }
+  ImBuf *ibuf = IMB_allocImBuf(win_size.x, win_size.y, ImBufFlags::ByteData);
+  GPU_offscreen_read_color(buffer, GPU_DATA_UBYTE, ibuf->byte_data_for_write());
 
   Image *ima = BKE_image_add_from_imbuf(&bmain, ibuf, "Grease Pencil Fill");
   ima->id.tag |= ID_TAG_DOIT;
@@ -608,7 +599,7 @@ void draw_grease_pencil_strokes(const RegionView3D &rv3d,
   const VArray<int> materials = *attributes.lookup_or_default<int>(
       "material_index", bke::AttrDomain::Curve, 0);
 
-  /* Note: Serial loop without GrainSize, since immediate mode drawing can't happen in worker
+  /* Note: Serial loop since immediate mode drawing can't happen in worker
    * threads, has to be from the main thread. */
   strokes_mask.foreach_index([&](const int stroke_i) {
     /* Check if the color is visible. */

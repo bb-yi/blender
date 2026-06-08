@@ -7,17 +7,15 @@
 #include "error_handling.hh"
 #include "intern/cpu_processor_cache.hh"
 
-#if defined(WITH_OPENCOLORIO)
+#include <cmath>
 
-#  include <cmath>
+#include "BLI_math_color.h"
 
-#  include "BLI_math_color.h"
+#include "CLG_log.h"
 
-#  include "CLG_log.h"
-
-#  include "../description.hh"
-#  include "libocio_cpu_processor.hh"
-#  include "libocio_processor.hh"
+#include "../description.hh"
+#include "libocio_cpu_processor.hh"
+#include "libocio_processor.hh"
 
 namespace blender {
 
@@ -40,30 +38,6 @@ static bool compare_floats(float a, float b, float abs_diff, int ulp_diff)
   }
 
   return (abs((*(int *)&a) - (*(int *)&b)) < ulp_diff);
-}
-
-static bool color_space_is_invertible(const OCIO_NAMESPACE::ConstColorSpaceRcPtr &ocio_color_space)
-{
-  const StringRefNull family = ocio_color_space->getFamily();
-
-  if (ELEM(family, "rrt", "display")) {
-    /* assume display and rrt transformations are not invertible in fact some of them could be,
-     * but it doesn't make much sense to allow use them as invertible. */
-    return false;
-  }
-
-  if (ocio_color_space->isData()) {
-    /* Data color spaces don't have transformation at all. */
-    return true;
-  }
-
-  if (ocio_color_space->getTransform(OCIO_NAMESPACE::COLORSPACE_DIR_TO_REFERENCE)) {
-    /* if there's defined transform to reference space, color space could be converted to scene
-     * linear. */
-    return true;
-  }
-
-  return true;
 }
 
 static void color_space_is_builtin(const OCIO_NAMESPACE::ConstConfigRcPtr &ocio_config,
@@ -136,13 +110,13 @@ LibOCIOColorSpace::LibOCIOColorSpace(const int index,
       ocio_color_space_(ocio_color_space),
       clean_description_(cleanup_description(ocio_color_space->getDescription()))
 {
+  const char *family = ocio_color_space->getFamily();
+  this->family_ = (family) ? family : "";
   this->index = index;
 
-  is_invertible_ = color_space_is_invertible(ocio_color_space);
-
-#  if OCIO_VERSION_HEX >= 0x02050000
+#if OCIO_VERSION_HEX >= 0x02050000
   interop_id_ = ocio_color_space->getInteropID();
-#  endif
+#endif
 
   if (interop_id_.is_empty()) {
     /* For older configs and older OpenColorIO versions, check the aliases as fallback.
@@ -230,7 +204,7 @@ bool LibOCIOColorSpace::is_primary_interop_id() const
 
 std::string LibOCIOColorSpace::icc_profile_path() const
 {
-#  if OCIO_VERSION_HEX >= 0x02050000
+#if OCIO_VERSION_HEX >= 0x02050000
   try {
     /* Both these methods can throw exceptions. */
     const char *profile_name = ocio_color_space_->getInterchangeAttribute("icc_profile_name");
@@ -242,7 +216,7 @@ std::string LibOCIOColorSpace::icc_profile_path() const
   catch (OCIO_NAMESPACE::Exception &exception) {
     report_exception(exception);
   }
-#  endif
+#endif
 
   return "";
 }
@@ -301,5 +275,3 @@ void LibOCIOColorSpace::clear_caches()
 
 }  // namespace ocio
 }  // namespace blender
-
-#endif

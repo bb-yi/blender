@@ -353,19 +353,11 @@ void OBJMesh::store_normal_coords_and_indices()
     case bke::MeshNormalDomain::Point: {
       const Span<float3> vert_normals = export_mesh_->vert_normals();
       Array<int> vert_normal_indices(vert_normals.size());
-      const bke::LooseVertCache &verts_no_face = export_mesh_->verts_no_face();
-      if (verts_no_face.count == 0) {
-        for (const int vert : vert_normals.index_range()) {
-          vert_normal_indices[vert] = add_normal(vert_normals[vert]);
-        }
-      }
-      else {
-        for (const int vert : vert_normals.index_range()) {
-          if (!verts_no_face.is_loose_bits[vert]) {
-            vert_normal_indices[vert] = add_normal(vert_normals[vert]);
-          }
-        }
-      }
+      const IndexMask &verts_no_face = export_mesh_->verts_no_face();
+      IndexMaskMemory memory;
+      const IndexMask verts = verts_no_face.complement(vert_normals.index_range(), memory);
+      verts.foreach_index(
+          [&](const int vert) { vert_normal_indices[vert] = add_normal(vert_normals[vert]); });
       array_utils::gather(vert_normal_indices.as_span(),
                           mesh_corner_verts_,
                           corner_to_normal_index_.as_mutable_span());
@@ -385,14 +377,14 @@ void OBJMesh::store_normal_coords_and_indices()
 
 int OBJMesh::tot_deform_groups() const
 {
-  return BLI_listbase_count(&export_mesh_->vertex_group_names);
+  return export_mesh_->vertex_group_names.count();
 }
 
 int16_t OBJMesh::get_face_deform_group_index(const int face_index,
                                              MutableSpan<float> group_weights) const
 {
   BLI_assert(face_index < export_mesh_->faces_num);
-  BLI_assert(group_weights.size() == BLI_listbase_count(&export_mesh_->vertex_group_names));
+  BLI_assert(group_weights.size() == export_mesh_->vertex_group_names.count());
   const Span<MDeformVert> dverts = export_mesh_->deform_verts();
   if (dverts.is_empty()) {
     return NOT_FOUND;

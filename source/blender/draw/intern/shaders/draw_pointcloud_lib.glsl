@@ -6,9 +6,9 @@
 
 #include "draw_object_infos_infos.hh"
 
+SHADER_LIBRARY_CREATE_INFO(draw_pointcloud)
+
 #include "draw_defines.hh"
-#include "draw_model_lib.glsl"
-#include "draw_view_lib.glsl"
 
 #include "gpu_shader_math_constants_lib.glsl"
 #include "gpu_shader_math_matrix_conversion_lib.glsl"
@@ -104,10 +104,16 @@ float3x3 facing_matrix(const float3 V, const float3 up_axis)
  * \arg pt : world space curve point.
  * \arg V : world space view vector (toward viewer) at `pt.P`.
  */
-ShapePoint shape_point_get(const Point pt, const float3 V, const float3 up_axis)
+ShapePoint shape_point_get(const Point pt,
+                           const float3 V,
+                           const float3 up_axis,
+                           const eObjectInfoFlag ob_flag)
 {
   ShapePoint shape;
   shape.N = facing_matrix(V, up_axis) * pt.shape_pos;
+  if (flag_test(ob_flag, OBJECT_NEGATIVE_SCALE)) {
+    shape.N = -shape.N;
+  }
   shape.P = pt.P + shape.N * pt.radius;
   return shape;
 }

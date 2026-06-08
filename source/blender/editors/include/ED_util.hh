@@ -86,7 +86,7 @@ void ED_region_image_overlay_info_text_draw(const int render_size_x,
                                             const int draw_offset_x,
                                             const int draw_offset_y);
 
-void ED_region_image_render_region_draw(
+void ED_region_render_region_draw(
     int x, int y, const rcti *frame, float zoomx, float zoomy, float passepartout_alpha);
 
 /* Slider */
@@ -144,6 +144,14 @@ void ED_slider_unit_set(tSlider *slider, const char *unit);
 /* Set a name that will show next to the slider to indicate which property is modified currently.
  * To clear, set to an empty string. */
 void ED_slider_property_label_set(tSlider *slider, const char *property_label);
+
+/* Composition Guides */
+enum eCompositionGuideFlags : short;
+
+void ED_draw_composition_guides(uint shdr_pos,
+                                eCompositionGuideFlags flag,
+                                const rctf *rect,
+                                const float color[4]);
 
 /* ************** XXX OLD CRUFT WARNING ************* */
 

@@ -30,7 +30,6 @@
 #include "BKE_viewer_path.hh"
 #include "BKE_workspace.hh"
 
-#include "DNA_listBase.h"
 #include "DNA_scene_types.h"
 #include "DNA_screen_types.h"
 #include "DNA_windowmanager_types.h"
@@ -59,10 +58,10 @@ static void workspace_free_data(ID *id)
 
   BKE_workspace_relations_free(&workspace->hook_layout_relations);
 
-  BLI_freelistN(&workspace->owner_ids);
-  BLI_freelistN(&workspace->layouts);
+  workspace->owner_ids.free_no_destruct();
+  workspace->layouts.free_no_destruct();
 
-  while (!BLI_listbase_is_empty(&workspace->tools)) {
+  while (!workspace->tools.is_empty()) {
     BKE_workspace_tool_remove(workspace, static_cast<bToolRef *>(workspace->tools.first));
   }
 
@@ -93,16 +92,16 @@ static void workspace_copy_data(
   BLI_duplicatelist(&workspace_dst->owner_ids, &workspace_src->owner_ids);
 
   /* TODO(@ideasman42): tools */
-  BLI_listbase_clear(&workspace_dst->tools);
+  workspace_dst->tools.clear_no_delete();
 
-  BLI_listbase_clear(&workspace_dst->hook_layout_relations);
+  workspace_dst->hook_layout_relations.clear_no_delete();
 
   /* WARNING! This is effectively duplicating other IDs (bScreen ones) inside the copying callback
    * of a workspace.
    *
    * This is similar to what is already done with ShapeKeys.
    */
-  BLI_listbase_clear(&workspace_dst->layouts);
+  workspace_dst->layouts.clear_no_delete();
   for (WorkSpaceLayout &layout_src : workspace_src->layouts) {
     if (flag & LIB_ID_COPY_SCREEN) {
       BKE_workspace_layout_add_from_layout(bmain, *workspace_dst, layout_src, flag);
@@ -160,11 +159,11 @@ static void workspace_blend_read_data(BlendDataReader *reader, ID *id)
   for (WorkSpaceDataRelation &relation : workspace->hook_layout_relations) {
     /* Parent pointer does not belong to workspace data and is therefore restored in lib_link step
      * of window manager. */
-    /* FIXME: Should not use that untyped #BLO_read_data_address call, especially since it's
+    /* FIXME: Should not use that untyped #BLO_read_raw_address call, especially since it's
      * reference-counting the matching data in readfile code. Problem currently is that there is no
      * type info available for this void pointer (_should_ be pointing to a #WorkSpaceLayout ?), so
-     * #BLO_read_get_new_data_address_no_us cannot be used here. */
-    BLO_read_data_address(reader, &relation.value);
+     * #BLO_read_struct_no_us cannot be used here. */
+    BLO_read_raw_address(reader, &relation.value);
   }
 
   for (bToolRef &tref : workspace->tools) {
@@ -225,35 +224,35 @@ static void workspace_blend_read_after_liblink(BlendLibReader *reader, ID *id)
 }
 
 IDTypeInfo IDType_ID_WS = {
-    /*id_code*/ WorkSpace::id_type,
-    /*id_filter*/ FILTER_ID_WS,
-    /*dependencies_id_types*/ FILTER_ID_SCE,
-    /*main_listbase_index*/ INDEX_ID_WS,
-    /*struct_size*/ sizeof(WorkSpace),
-    /*name*/ "WorkSpace",
-    /*name_plural*/ N_("workspaces"),
-    /*translation_context*/ BLT_I18NCONTEXT_ID_WORKSPACE,
-    /*flags*/ IDTYPE_FLAGS_ONLY_APPEND | IDTYPE_FLAGS_NO_ANIMDATA | IDTYPE_FLAGS_NO_MEMFILE_UNDO |
-        IDTYPE_FLAGS_NEVER_UNUSED,
-    /*asset_type_info*/ nullptr,
+    .id_code = WorkSpace::id_type,
+    .id_filter = FILTER_ID_WS,
+    .dependencies_id_types = FILTER_ID_SCE,
+    .main_listbase_index = INDEX_ID_WS,
+    .struct_size = sizeof(WorkSpace),
+    .name = "WorkSpace",
+    .name_plural = N_("workspaces"),
+    .translation_context = BLT_I18NCONTEXT_ID_WORKSPACE,
+    .flags = IDTYPE_FLAGS_ONLY_APPEND | IDTYPE_FLAGS_NO_ANIMDATA | IDTYPE_FLAGS_NO_MEMFILE_UNDO |
+             IDTYPE_FLAGS_NEVER_UNUSED,
+    .asset_type_info = nullptr,
 
-    /*init_data*/ workspace_init_data,
-    /*copy_data*/ workspace_copy_data,
-    /*free_data*/ workspace_free_data,
-    /*make_local*/ nullptr,
-    /*foreach_id*/ workspace_foreach_id,
-    /*foreach_cache*/ nullptr,
-    /*foreach_path*/ nullptr,
-    /*foreach_working_space_color*/ nullptr,
-    /*owner_pointer_get*/ nullptr,
+    .init_data = workspace_init_data,
+    .copy_data = workspace_copy_data,
+    .free_data = workspace_free_data,
+    .make_local = nullptr,
+    .foreach_id = workspace_foreach_id,
+    .foreach_cache = nullptr,
+    .foreach_path = nullptr,
+    .foreach_working_space_color = nullptr,
+    .owner_pointer_get = nullptr,
 
-    /*blend_write*/ workspace_blend_write,
-    /*blend_read_data*/ workspace_blend_read_data,
-    /*blend_read_after_liblink*/ workspace_blend_read_after_liblink,
+    .blend_write = workspace_blend_write,
+    .blend_read_data = workspace_blend_read_data,
+    .blend_read_after_liblink = workspace_blend_read_after_liblink,
 
-    /*blend_read_undo_preserve*/ nullptr,
+    .blend_read_undo_preserve = nullptr,
 
-    /*lib_override_apply_post*/ nullptr,
+    .lib_override_apply_post = nullptr,
 };
 
 /* -------------------------------------------------------------------- */
@@ -405,7 +404,7 @@ void BKE_workspace_instance_hook_free(const Main *bmain, WorkSpaceInstanceHook *
   /* workspaces should never be freed before wm (during which we call this function).
    * However, when running in background mode, loading a blend file may allocate windows (that need
    * to be freed) without creating workspaces. This happens in BlendfileLoadingBaseTest. */
-  BLI_assert(!BLI_listbase_is_empty(&bmain->workspaces) || G.background);
+  BLI_assert(!bmain->workspaces.is_empty() || G.background);
 
   /* Free relations for this hook */
   for (WorkSpace *workspace = static_cast<WorkSpace *>(bmain->workspaces.first); workspace;

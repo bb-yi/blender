@@ -18,7 +18,7 @@ CCL_NAMESPACE_BEGIN
 /* Visibility for the shadow ray. */
 ccl_device_forceinline uint integrate_intersect_shadow_visibility(ConstIntegratorShadowState state)
 {
-  uint visibility = PATH_RAY_SHADOW;
+  uint visibility = PATH_RAY_VISIBILITY_SHADOW;
 
 #ifdef __SHADOW_CATCHER__
   const uint32_t path_flag = INTEGRATOR_STATE(state, shadow_path, flag);
@@ -37,8 +37,9 @@ ccl_device bool integrate_intersect_shadow_opaque(KernelGlobals kg,
    * Calculate the mask at compile time: the visibility will either be a high bits for the shadow
    * catcher objects, or lower bits for the regular objects (there is no need to check the path
    * state here again). */
-  constexpr const uint opaque_mask = SHADOW_CATCHER_VISIBILITY_SHIFT(PATH_RAY_SHADOW_OPAQUE) |
-                                     PATH_RAY_SHADOW_OPAQUE;
+  constexpr const uint opaque_mask = SHADOW_CATCHER_VISIBILITY_SHIFT(
+                                         PATH_RAY_VISIBILITY_SHADOW_OPAQUE) |
+                                     PATH_RAY_VISIBILITY_SHADOW_OPAQUE;
 
   const bool opaque_hit = scene_intersect_shadow(kg, ray, visibility & opaque_mask);
 
@@ -46,7 +47,7 @@ ccl_device bool integrate_intersect_shadow_opaque(KernelGlobals kg,
    * consider any intersections. There is no need to write anything to the state if the hit is
    * opaque because in this case the path is terminated. */
   if (!opaque_hit) {
-    INTEGRATOR_STATE_WRITE(state, shadow_path, num_hits) = 0;
+    INTEGRATOR_STATE_WRITE(state, shadow_path, packed_num_hits) = 0;
   }
 
   return opaque_hit;
@@ -136,10 +137,10 @@ ccl_device bool integrate_intersect_shadow_transparent(KernelGlobals kg,
       sort_shadow_intersections(state, num_recorded_hits);
     }
 
-    INTEGRATOR_STATE_WRITE(state, shadow_path, num_hits) = num_hits;
+    INTEGRATOR_STATE_WRITE(state, shadow_path, packed_num_hits) = num_hits;
   }
   else {
-    INTEGRATOR_STATE_WRITE(state, shadow_path, num_hits) = 0;
+    INTEGRATOR_STATE_WRITE(state, shadow_path, packed_num_hits) = 0;
   }
 
   return opaque_hit;

@@ -11,8 +11,9 @@ set(INC_SYS
 
 set(SRC
   buffers.cpp
-  display_driver.cpp
+  cache_eviction.cpp
   denoising.cpp
+  display_driver.cpp
   merge.cpp
   session.cpp
   tile.cpp
@@ -20,8 +21,9 @@ set(SRC
 
 set(SRC_HEADERS
   buffers.h
-  display_driver.h
+  cache_eviction.h
   denoising.h
+  display_driver.h
   merge.h
   output_driver.h
   session.h
@@ -29,9 +31,9 @@ set(SRC_HEADERS
 )
 
 set(LIB
-  cycles_device
-  cycles_integrator
-  cycles_util
+  PUBLIC cycles_device
+  PUBLIC cycles_integrator
+  PUBLIC cycles_util
 )
 
 include_directories(${INC})

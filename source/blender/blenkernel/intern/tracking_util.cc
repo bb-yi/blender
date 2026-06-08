@@ -608,7 +608,7 @@ static ImBuf *accessor_get_preprocessed_ibuf(TrackingImageAccessor *accessor,
   scene_frame = BKE_movieclip_remap_clip_to_scene_frame(clip, frame);
   BKE_movieclip_user_set_frame(&user, scene_frame);
   user.render_size = MCLIP_PROXY_RENDER_SIZE_FULL;
-  user.render_flag = 0;
+  user.render_flag = eMovieClipProxy_RenderFlag{};
   ibuf = BKE_movieclip_get_ibuf(clip, &user);
 
   return ibuf;
@@ -616,7 +616,7 @@ static ImBuf *accessor_get_preprocessed_ibuf(TrackingImageAccessor *accessor,
 
 static ImBuf *make_grayscale_ibuf_copy(ImBuf *ibuf)
 {
-  ImBuf *grayscale = IMB_allocImBuf(ibuf->x, ibuf->y, 32, 0);
+  ImBuf *grayscale = IMB_allocImBuf(ibuf->x, ibuf->y, ImBufFlags::Zero);
 
   BLI_assert(ELEM(ibuf->channels, 3, 4));
 
@@ -629,10 +629,10 @@ static ImBuf *make_grayscale_ibuf_copy(ImBuf *ibuf)
   grayscale->channels = 1;
   float *rect_float = MEM_new_array_zeroed<float>(num_pixels, "tracking grayscale image");
   if (rect_float != nullptr) {
-    IMB_assign_float_buffer(grayscale, rect_float, IB_TAKE_OWNERSHIP);
+    grayscale->assign_float_data(rect_float);
 
     for (int i = 0; i < grayscale->x * grayscale->y; i++) {
-      const float *pixel = ibuf->float_buffer.data + ibuf->channels * i;
+      const float *pixel = ibuf->float_data() + ibuf->channels * i;
 
       rect_float[i] = 0.2126f * pixel[0] + 0.7152f * pixel[1] + 0.0722f * pixel[2];
     }
@@ -641,10 +641,10 @@ static ImBuf *make_grayscale_ibuf_copy(ImBuf *ibuf)
   return grayscale;
 }
 
-static void ibuf_to_float_image(const ImBuf *ibuf, libmv_FloatImage *float_image)
+static void ibuf_to_float_image(ImBuf *ibuf, libmv_FloatImage *float_image)
 {
-  BLI_assert(ibuf->float_buffer.data != nullptr);
-  float_image->buffer = ibuf->float_buffer.data;
+  BLI_assert(ibuf->float_data() != nullptr);
+  float_image->buffer = ibuf->float_data_for_write();
   float_image->width = ibuf->x;
   float_image->height = ibuf->y;
   float_image->channels = ibuf->channels;
@@ -652,12 +652,12 @@ static void ibuf_to_float_image(const ImBuf *ibuf, libmv_FloatImage *float_image
 
 static ImBuf *float_image_to_ibuf(libmv_FloatImage *float_image)
 {
-  ImBuf *ibuf = IMB_allocImBuf(float_image->width, float_image->height, 32, 0);
+  ImBuf *ibuf = IMB_allocImBuf(float_image->width, float_image->height, ImBufFlags::Zero);
   size_t num_total_channels = size_t(ibuf->x) * size_t(ibuf->y) * float_image->channels;
   ibuf->channels = float_image->channels;
   float *rect_float = MEM_new_array_zeroed<float>(num_total_channels, "tracking grayscale image");
   if (rect_float != nullptr) {
-    IMB_assign_float_buffer(ibuf, rect_float, IB_TAKE_OWNERSHIP);
+    ibuf->assign_float_data(rect_float);
 
     memcpy(rect_float, float_image->buffer, num_total_channels * sizeof(float));
   }
@@ -696,31 +696,32 @@ static ImBuf *accessor_get_ibuf(TrackingImageAccessor *accessor,
     clamped_width = min_ii(clamped_width, orig_ibuf->x - clamped_origin_x);
     clamped_height = min_ii(clamped_height, orig_ibuf->y - clamped_origin_y);
 
-    final_ibuf = IMB_allocImBuf(width, height, 32, IB_float_data);
+    final_ibuf = IMB_allocImBuf(width, height, ImBufFlags::FloatData);
 
-    if (orig_ibuf->float_buffer.data != nullptr) {
-      IMB_rectcpy(final_ibuf,
-                  orig_ibuf,
-                  dst_offset_x,
-                  dst_offset_y,
-                  clamped_origin_x,
-                  clamped_origin_y,
-                  clamped_width,
-                  clamped_height);
+    if (orig_ibuf->float_data() != nullptr) {
+      IMB_copy_rect(final_ibuf->float_data_for_write(),
+                    int2(final_ibuf->x, final_ibuf->y),
+                    orig_ibuf->float_data(),
+                    int2(orig_ibuf->x, orig_ibuf->y),
+                    orig_ibuf->channels,
+                    int2(clamped_origin_x, clamped_origin_y),
+                    int2(dst_offset_x, dst_offset_y),
+                    int2(clamped_width, clamped_height));
     }
     else {
       /* TODO(sergey): We don't do any color space or alpha conversion
        * here. Probably Libmv is better to work in the linear space,
        * but keep sRGB space here for compatibility for now.
        */
+      const uchar *data_src = orig_ibuf->byte_data();
+      float *data_dst = final_ibuf->float_data_for_write();
       for (int y = 0; y < clamped_height; y++) {
         for (int x = 0; x < clamped_width; x++) {
           int src_x = x + clamped_origin_x, src_y = y + clamped_origin_y;
           int dst_x = x + dst_offset_x, dst_y = y + dst_offset_y;
           int dst_index = (dst_y * width + dst_x) * 4,
               src_index = (src_y * orig_ibuf->x + src_x) * 4;
-          rgba_uchar_to_float(final_ibuf->float_buffer.data + dst_index,
-                              orig_ibuf->byte_buffer.data + src_index);
+          rgba_uchar_to_float(data_dst + dst_index, data_src + src_index);
         }
       }
     }
@@ -806,7 +807,7 @@ static libmv_CacheKey accessor_get_image_callback(libmv_FrameAccessorUserData *u
   ibuf = accessor_get_ibuf(accessor, clip_index, frame, input_mode, downscale, region, transform);
 
   if (ibuf) {
-    *destination = ibuf->float_buffer.data;
+    *destination = ibuf->float_data_for_write();
     *width = ibuf->x;
     *height = ibuf->y;
     *channels = ibuf->channels;
@@ -851,7 +852,7 @@ static libmv_CacheKey accessor_get_mask_for_track_callback(libmv_FrameAccessorUs
   int scene_frame = BKE_movieclip_remap_clip_to_scene_frame(clip, frame);
   BKE_movieclip_user_set_frame(&user, scene_frame);
   user.render_size = MCLIP_PROXY_RENDER_SIZE_FULL;
-  user.render_flag = 0;
+  user.render_flag = eMovieClipProxy_RenderFlag{};
   /* Get frame width and height so we can convert stroke coordinates
    * and other things from normalized to pixel space.
    */

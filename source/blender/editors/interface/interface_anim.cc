@@ -42,7 +42,7 @@
 
 namespace blender::ui {
 
-static FCurve *ui_but_get_fcurve(
+static FCurve *but_get_fcurve(
     Button *but, AnimData **adt, bAction **action, bool *r_driven, bool *r_special)
 {
   /* for entire array buttons we check the first component, it's not perfect
@@ -73,7 +73,7 @@ void button_anim_flag(Button *but, const AnimationEvalContext *anim_eval_context
   bAction *act;
   bool driven;
   bool special;
-  FCurve *fcu = ui_but_get_fcurve(but, &adt, &act, &driven, &special);
+  FCurve *fcu = but_get_fcurve(but, &adt, &act, &driven, &special);
 
   if (!fcu) {
     return;
@@ -123,27 +123,27 @@ void button_anim_flag(Button *but, const AnimationEvalContext *anim_eval_context
   }
 }
 
-static Button *ui_but_anim_decorate_find_attached_button(ButtonDecorator *but)
+static Button *but_anim_decorate_find_attached_button(ButtonDecorator *but)
 {
   Button *but_iter = nullptr;
 
   BLI_assert(button_is_decorator(but));
   BLI_assert(but->decorated_rnapoin.data && but->decorated_rnaprop);
-  if (but->block->buttons.is_empty()) {
+  if (but->block->buttons_ptrs.is_empty()) {
     return nullptr;
   }
   int i = but->block->but_index(but);
-  i = i > 0 ? i - 1 : but->block->buttons.size() - 1;
+  i = i > 0 ? i - 1 : but->block->buttons_ptrs.size() - 1;
   const int start = i;
   do {
-    but_iter = but->block->buttons[i].get();
+    but_iter = but->block->buttons_ptrs[i].get();
     if (but_iter != but &&
         button_rna_equals_ex(
             but_iter, &but->decorated_rnapoin, but->decorated_rnaprop, but->decorated_rnaindex))
     {
       return but_iter;
     }
-    i = i > 0 ? i - 1 : but->block->buttons.size() - 1;
+    i = i > 0 ? i - 1 : but->block->buttons_ptrs.size() - 1;
   } while (i != start);
 
   return nullptr;
@@ -156,7 +156,7 @@ void button_anim_decorate_update_from_flag(ButtonDecorator *but)
     return;
   }
 
-  const Button *but_anim = ui_but_anim_decorate_find_attached_button(but);
+  const Button *but_anim = but_anim_decorate_find_attached_button(but);
 
   if (!but_anim) {
     printf("Could not find button with matching property to decorate (%s.%s)\n",
@@ -198,7 +198,7 @@ bool button_anim_expression_get(Button *but, char *str, size_t str_maxncpy)
   ChannelDriver *driver;
   bool driven, special;
 
-  fcu = ui_but_get_fcurve(but, nullptr, nullptr, &driven, &special);
+  fcu = but_get_fcurve(but, nullptr, nullptr, &driven, &special);
 
   if (fcu && driven) {
     driver = fcu->driver;
@@ -220,7 +220,7 @@ bool button_anim_expression_set(Button *but, const char *str)
   ChannelDriver *driver;
   bool driven, special;
 
-  fcu = ui_but_get_fcurve(but, nullptr, nullptr, &driven, &special);
+  fcu = but_get_fcurve(but, nullptr, nullptr, &driven, &special);
 
   if (fcu && driven) {
     driver = fcu->driver;
@@ -342,7 +342,7 @@ void button_anim_decorate_cb(bContext *C, void *arg_but, void * /*arg_dummy*/)
     return;
   }
 
-  Button *but_anim = ui_but_anim_decorate_find_attached_button(but_decorate);
+  Button *but_anim = but_anim_decorate_find_attached_button(but_decorate);
   if (!but_anim) {
     return;
   }

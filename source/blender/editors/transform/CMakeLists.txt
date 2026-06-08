@@ -70,6 +70,8 @@ set(SRC
   transform_mode_push_pull.cc
   transform_mode_resize.cc
   transform_mode_rotate.cc
+  transform_mode_rotate_quadrants.cc
+  transform_mode_rotate_quadrants.hh
   transform_mode_shear.cc
   transform_mode_shrink_fatten.cc
   transform_mode_skin_resize.cc
@@ -91,6 +93,7 @@ set(SRC
   transform_snap_object_camera.cc
   transform_snap_object_curve.cc
   transform_snap_object_editmesh.cc
+  transform_snap_object_lattice.cc
   transform_snap_object_mesh.cc
   transform_snap_sequencer.cc
 
@@ -116,6 +119,7 @@ set(LIB
   PRIVATE bf::dna
   bf_editor_mask
   PRIVATE bf::gpu
+  PRIVATE bf::imbuf
   PRIVATE bf::intern::guardedalloc
   PRIVATE bf::nodes
   PRIVATE bf::render

@@ -26,8 +26,8 @@ NODE_STORAGE_FUNCS(NodeCombSepColor)
 
 static void sh_node_sepcolor_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Color>("Color").default_value({0.8f, 0.8f, 0.8f, 1.0f});
-  b.add_output<decl::Float>("Red").label_fn([](bNode node) {
+  b.add_input<decl::Color>("Color"_ustr).default_value({0.8f, 0.8f, 0.8f, 1.0f});
+  b.add_output<decl::Float>("Red"_ustr).label_fn([](bNode node) {
     switch (node_storage(node).mode) {
       case NODE_COMBSEP_COLOR_RGB:
       default:
@@ -37,7 +37,7 @@ static void sh_node_sepcolor_declare(NodeDeclarationBuilder &b)
         return IFACE_("Hue");
     }
   });
-  b.add_output<decl::Float>("Green").label_fn([](bNode node) {
+  b.add_output<decl::Float>("Green"_ustr).label_fn([](bNode node) {
     switch (node_storage(node).mode) {
       case NODE_COMBSEP_COLOR_RGB:
       default:
@@ -47,7 +47,7 @@ static void sh_node_sepcolor_declare(NodeDeclarationBuilder &b)
         return IFACE_("Saturation");
     }
   });
-  b.add_output<decl::Float>("Blue").label_fn([](bNode node) {
+  b.add_output<decl::Float>("Blue"_ustr).label_fn([](bNode node) {
     switch (node_storage(node).mode) {
       case NODE_COMBSEP_COLOR_RGB:
       default:
@@ -125,7 +125,7 @@ void register_node_type_sh_sepcolor()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeSeparateColor", SH_NODE_SEPARATE_COLOR);
+  sh_node_type_base(&ntype, "ShaderNodeSeparateColor"_ustr, SH_NODE_SEPARATE_COLOR);
   ntype.ui_name = "Separate Color";
   ntype.ui_description = "Split a color into its individual components using multiple models";
   ntype.enum_name_legacy = "SEPARATE_COLOR";
@@ -148,7 +148,7 @@ NODE_STORAGE_FUNCS(NodeCombSepColor)
 
 static void sh_node_combcolor_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Float>("Red")
+  b.add_input<decl::Float>("Red"_ustr)
       .default_value(0.0f)
       .min(0.0f)
       .max(1.0f)
@@ -163,7 +163,7 @@ static void sh_node_combcolor_declare(NodeDeclarationBuilder &b)
             return IFACE_("Hue");
         }
       });
-  b.add_input<decl::Float>("Green")
+  b.add_input<decl::Float>("Green"_ustr)
       .default_value(0.0f)
       .min(0.0f)
       .max(1.0f)
@@ -178,7 +178,7 @@ static void sh_node_combcolor_declare(NodeDeclarationBuilder &b)
             return IFACE_("Saturation");
         }
       });
-  b.add_input<decl::Float>("Blue")
+  b.add_input<decl::Float>("Blue"_ustr)
       .default_value(0.0f)
       .min(0.0f)
       .max(1.0f)
@@ -194,7 +194,7 @@ static void sh_node_combcolor_declare(NodeDeclarationBuilder &b)
             return CTX_IFACE_(BLT_I18NCONTEXT_COLOR, "Value");
         }
       });
-  b.add_output<decl::Color>("Color");
+  b.add_output<decl::Color>("Color"_ustr);
 }
 
 static const char *gpu_shader_get_name(int mode)
@@ -266,7 +266,7 @@ void register_node_type_sh_combcolor()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeCombineColor", SH_NODE_COMBINE_COLOR);
+  sh_node_type_base(&ntype, "ShaderNodeCombineColor"_ustr, SH_NODE_COMBINE_COLOR);
   ntype.ui_name = "Combine Color";
   ntype.ui_description = "Create a color from individual components using multiple models";
   ntype.enum_name_legacy = "COMBINE_COLOR";

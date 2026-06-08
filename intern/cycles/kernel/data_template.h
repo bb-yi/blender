@@ -38,8 +38,6 @@ KERNEL_STRUCT_MEMBER(background, int, map_res_y)
 KERNEL_STRUCT_MEMBER(background, int, use_mis)
 /* Light-group. */
 KERNEL_STRUCT_MEMBER(background, int, lightgroup)
-/* Light Index. */
-KERNEL_STRUCT_MEMBER(background, int, light_index)
 /* Object Index. */
 KERNEL_STRUCT_MEMBER(background, int, object_index)
 /* Padding. */
@@ -79,6 +77,7 @@ KERNEL_STRUCT_MEMBER(film, int, is_rec709)
 KERNEL_STRUCT_MEMBER(film, float, exposure)
 /* Passed used. */
 KERNEL_STRUCT_MEMBER(film, int, pass_flag)
+KERNEL_STRUCT_MEMBER(film, int, denoising_pass_flag)
 KERNEL_STRUCT_MEMBER(film, int, light_pass_flag)
 /* Pass offsets. */
 KERNEL_STRUCT_MEMBER(film, int, pass_stride)
@@ -131,8 +130,12 @@ KERNEL_STRUCT_MEMBER(film, float, mist_inv_depth)
 KERNEL_STRUCT_MEMBER(film, float, mist_falloff)
 /* Denoising. */
 KERNEL_STRUCT_MEMBER(film, int, pass_denoising_albedo)
+KERNEL_STRUCT_MEMBER(film, int, pass_denoising_specular_albedo)
 KERNEL_STRUCT_MEMBER(film, int, pass_denoising_normal)
+KERNEL_STRUCT_MEMBER(film, int, pass_denoising_roughness)
 KERNEL_STRUCT_MEMBER(film, int, pass_denoising_depth)
+KERNEL_STRUCT_MEMBER(film, int, pass_denoising_backward_motion)
+KERNEL_STRUCT_MEMBER(film, int, denoising_pass_options_flag)
 /* AOVs. */
 KERNEL_STRUCT_MEMBER(film, int, pass_aov_color)
 KERNEL_STRUCT_MEMBER(film, int, pass_aov_value)
@@ -148,6 +151,8 @@ KERNEL_STRUCT_MEMBER(film, int, use_approximate_shadow_catcher)
 KERNEL_STRUCT_MEMBER(film, int, pass_guiding_color)
 KERNEL_STRUCT_MEMBER(film, int, pass_guiding_probability)
 KERNEL_STRUCT_MEMBER(film, int, pass_guiding_avg_roughness)
+/* Padding. */
+KERNEL_STRUCT_MEMBER(film, int, pad1)
 KERNEL_STRUCT_END(KernelFilm)
 
 /* Integrator. */
@@ -229,15 +234,27 @@ KERNEL_STRUCT_MEMBER(integrator, int, use_volume_guiding)
 KERNEL_STRUCT_MEMBER(integrator, int, use_guiding_direct_light)
 KERNEL_STRUCT_MEMBER(integrator, int, use_guiding_mis_weights)
 
-/* Padding. */
-KERNEL_STRUCT_MEMBER(integrator, int, pad1)
-KERNEL_STRUCT_MEMBER(integrator, int, pad2)
+KERNEL_STRUCT_MEMBER(integrator, float2, pixel_jitter)
 KERNEL_STRUCT_END(KernelIntegrator)
+
+/* Image. */
+
+KERNEL_STRUCT_BEGIN(KernelImage, image)
+KERNEL_STRUCT_MEMBER(image, float, mip_bias)
+
+/* Padding. */
+KERNEL_STRUCT_MEMBER(image, int, pad1)
+KERNEL_STRUCT_MEMBER(image, int, pad2)
+KERNEL_STRUCT_MEMBER(image, int, pad3)
+KERNEL_STRUCT_END(KernelImage)
 
 /* SVM. For shader specialization. */
 
 KERNEL_STRUCT_BEGIN(KernelSVMUsage, svm_usage)
 #define SHADER_NODE_TYPE(type) KERNEL_STRUCT_MEMBER(svm_usage, int, type)
+#define SHADER_NODE_TYPE_DERIVATIVE(type) \
+  SHADER_NODE_TYPE(type) \
+  SHADER_NODE_TYPE(type##_DERIVATIVE)
 #include "kernel/svm/node_types_template.h"
 KERNEL_STRUCT_END(KernelSVMUsage)
 

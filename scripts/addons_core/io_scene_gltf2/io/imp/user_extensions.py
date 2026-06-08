@@ -2,6 +2,13 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
+class MutatingArgument:
+    """simple wrapper to pass a value by reference"""
+
+    def __init__(self, value):
+        self.value = value
+
+
 def import_user_extensions(hook_name, gltf, *args):
     for extension in gltf.import_user_extensions:
         hook = getattr(extension, hook_name, None)
@@ -9,5 +16,16 @@ def import_user_extensions(hook_name, gltf, *args):
             try:
                 hook(*args, gltf)
             except Exception as e:
-                gltf.log.error(hook_name, "fails on", extension)
-                gltf.log.error(str(e))
+                if getattr(extension, 'is_critical', False):
+                    gltf.log.error(
+                        "Critical extension hook " +
+                        hook_name +
+                        " fails on " +
+                        extension.__module__ +
+                        ": " +
+                        str(e),
+                        popup=True)
+                    raise RuntimeError("Import aborted due to critical extension failure") from e
+                else:
+                    gltf.log.error(hook_name, "fails on", extension)
+                    gltf.log.error(str(e))

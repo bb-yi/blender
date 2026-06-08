@@ -10,23 +10,24 @@ if(NOT WITH_LIBS_PRECOMPILED)
   unset(LIBDIR)
 else()
   if(NOT DEFINED LIBDIR)
-    # Path to a locally compiled libraries.
-    set(LIBDIR_NAME ${CMAKE_SYSTEM_NAME}_${CMAKE_SYSTEM_PROCESSOR})
-    string(TOLOWER ${LIBDIR_NAME} LIBDIR_NAME)
-    set(LIBDIR_NATIVE_ABI ${CMAKE_SOURCE_DIR}/../lib/${LIBDIR_NAME})
-
-    # Path to precompiled libraries with known glibc 2.28 ABI.
+    # Path to libraries with known glibc 2.28 ABI.
     if(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "aarch64")
       set(LIBDIR_GLIBC228_ABI ${CMAKE_SOURCE_DIR}/lib/linux_arm64)
-    else()
+    elseif(${CMAKE_SYSTEM_PROCESSOR} STREQUAL "x86_64")
       set(LIBDIR_GLIBC228_ABI ${CMAKE_SOURCE_DIR}/lib/linux_x64)
+    else()
+      set(LIBDIR_GLIBC228_ABI ${CMAKE_SOURCE_DIR}/lib/linux_${CMAKE_SYSTEM_PROCESSOR})
+      message(WARNING
+        "Architecture \"${CMAKE_SYSTEM_PROCESSOR}\" not supported by default."
+        "Using library directory \"${LIBDIR_GLIBC228_ABI}\"."
+      )
     endif()
 
-    # Choose the best suitable libraries.
-    if(EXISTS ${LIBDIR_NATIVE_ABI})
-      set(LIBDIR ${LIBDIR_NATIVE_ABI})
-      set(WITH_LIBC_MALLOC_HOOK_WORKAROUND TRUE)
-    elseif(EXISTS "${LIBDIR_GLIBC228_ABI}/.git")
+    # Check if library directory is empty
+    file(GLOB LIBDIR_RESULT ${LIBDIR_GLIBC228_ABI}/*)
+    list(LENGTH LIBDIR_RESULT LIBDIR_LEN)
+
+    if(NOT LIBDIR_LEN EQUAL 0)
       set(LIBDIR ${LIBDIR_GLIBC228_ABI})
       if(WITH_TBB_MALLOC_PROXY)
         # TBB MALLOC proxy provides malloc hooks.
@@ -34,10 +35,13 @@ else()
       else()
         set(WITH_LIBC_MALLOC_HOOK_WORKAROUND TRUE)
       endif()
+    else()
+      message(STATUS
+        "Library directory \"${LIBDIR_GLIBC228_ABI}\" is empty or does not exist."
+      )
     endif()
 
     # Avoid namespace pollution.
-    unset(LIBDIR_NATIVE_ABI)
     unset(LIBDIR_GLIBC228_ABI)
   endif()
 
@@ -79,10 +83,6 @@ if(DEFINED LIBDIR)
 
   file(GLOB LIB_SUBDIRS ${LIBDIR}/*)
 
-  # Ignore Mesa software OpenGL libraries, they are not intended to be
-  # linked against but to optionally override at runtime.
-  list(REMOVE_ITEM LIB_SUBDIRS ${LIBDIR}/mesa)
-
   # Ignore DPC++ as it contains its own copy of LLVM/CLang which we do
   # not need to be ever discovered for the Blender linking.
   list(REMOVE_ITEM LIB_SUBDIRS ${LIBDIR}/dpcpp)
@@ -99,6 +99,7 @@ if(DEFINED LIBDIR)
   set(fmt_ROOT ${LIBDIR}/fmt)
   set(OSL_ROOT ${LIBDIR}/osl)
   set(OpenImageIO_ROOT ${LIBDIR}/openimageio)
+  set(OpenColorIO_ROOT ${LIBDIR}/opencolorio)
   set(OpenEXR_ROOT ${LIBDIR}/openexr)
   # OpenEXR deps, used by the OpenEXR module scripts
   set(Imath_ROOT ${LIBDIR}/imath)
@@ -107,9 +108,14 @@ if(DEFINED LIBDIR)
   set(absl_ROOT ${LIBDIR}/abseil)
   set(Ceres_ROOT ${LIBDIR}/ceres)
   set(Eigen3_ROOT ${LIBDIR}/eigen)
+  set(meshoptimizer_ROOT ${LIBDIR}/meshoptimizer)
+  set(draco_ROOT ${LIBDIR}/draco)
 endif()
 
 # Wrapper to prefer static libraries
+#
+# NOTE: must be a macro, forwards `${ARGV}` to `find_package()`/`find_package_static()`
+# whose result variables must be visible in the caller's scope.
 macro(find_package_wrapper)
   if(WITH_STATIC_LIBS)
     find_package_static(${ARGV})
@@ -138,16 +144,6 @@ if(DEFINED fmt_DIR)
   # Hide the fmt_DIR from the standard user settings to be consistent with our
   # other "here is the library" settings.
   mark_as_advanced(fmt_DIR)
-endif()
-
-# XXX Linking errors with debian static tiff :/
-# find_package_wrapper(TIFF REQUIRED)
-find_package(TIFF)
-# CMake 3.28.1 defines this, it doesn't seem to be used, hide by default in the UI.
-# NOTE(@ideasman42): this doesn't seem to be important,
-# on my system it's not-found even when the TIFF library is.
-if(DEFINED Tiff_DIR)
-  mark_as_advanced(Tiff_DIR)
 endif()
 
 if(WITH_VULKAN_BACKEND)
@@ -241,7 +237,7 @@ if(WITH_PYTHON)
     # Installing into `site-packages`, warn when installing into `./../lib/`
     # which script authors almost certainly don't want.
     if(DEFINED LIBDIR)
-      path_is_prefix(LIBDIR PYTHON_SITE_PACKAGES _is_prefix)
+      cmake_path(IS_PREFIX LIBDIR "${PYTHON_SITE_PACKAGES}" NORMALIZE _is_prefix)
       if(_is_prefix)
         message(WARNING "
 Building Blender with the following configuration:
@@ -266,10 +262,8 @@ else()
   find_program(PYTHON_EXECUTABLE "python3")
 endif()
 
-if(WITH_IMAGE_OPENEXR)
-  find_package_wrapper(OpenEXR)
-  set_and_warn_library_found("OpenEXR" OpenEXR_FOUND WITH_IMAGE_OPENEXR)
-endif()
+find_package_wrapper(OpenEXR REQUIRED)
+
 if(DEFINED OpenEXR_DIR)
   mark_as_advanced(OpenEXR_DIR)
 endif()
@@ -294,22 +288,10 @@ if(WITH_OPENAL)
 endif()
 
 if(WITH_SDL)
-  find_package_wrapper(SDL2)
-  if(SDL2_FOUND)
-    # Use same names for both versions of SDL until we move to 2.x.
-    set(SDL_INCLUDE_DIR "${SDL2_INCLUDE_DIR}")
-    set(SDL_LIBRARY "${SDL2_LIBRARY}")
-    set(SDL_FOUND "${SDL2_FOUND}")
-  else()
-    find_package_wrapper(SDL)
-  endif()
-  mark_as_advanced(
-    SDL_INCLUDE_DIR
-    SDL_LIBRARY
-  )
-  # unset(SDLMAIN_LIBRARY CACHE)
-  set_and_warn_library_found("SDL" SDL_FOUND WITH_SDL)
+  find_package_wrapper(SDL3)
+  set_and_warn_library_found("SDL" SDL3_FOUND WITH_SDL)
 endif()
+add_bundled_libraries(sdl/lib)
 
 # Codecs
 if(WITH_CODEC_SNDFILE)
@@ -470,11 +452,9 @@ if(DEFINED OpenImageIO_DIR)
 endif()
 add_bundled_libraries(openimageio/lib)
 
-if(WITH_OPENCOLORIO)
-  find_package_wrapper(OpenColorIO 2.0.0)
-
-  set(OPENCOLORIO_DEFINITIONS "")
-  set_and_warn_library_found("OpenColorIO" OPENCOLORIO_FOUND WITH_OPENCOLORIO)
+find_package_wrapper(OpenColorIO 2.0.0 REQUIRED)
+if(DEFINED OpenColorIO_DIR)
+  mark_as_advanced(OpenColorIO_DIR)
 endif()
 add_bundled_libraries(opencolorio/lib)
 
@@ -508,7 +488,6 @@ endif()
 if(WITH_OPENSUBDIV)
   find_package(OpenSubdiv)
 
-  set(OPENSUBDIV_LIBRARIES ${OPENSUBDIV_LIBRARIES})
   set(OPENSUBDIV_LIBPATH "")  # TODO, remove and reference the absolute path everywhere
 
   set_and_warn_library_found("OpenSubdiv" OPENSUBDIV_FOUND WITH_OPENSUBDIV)
@@ -598,6 +577,14 @@ if(WITH_CYCLES AND WITH_CYCLES_PATH_GUIDING)
   endif()
 endif()
 
+if(WITH_TRACY)
+  if(DEFINED LIBDIR)
+    set(Tracy_ROOT_DIR ${LIBDIR}/tracy)
+  endif()
+  find_package_wrapper(Tracy REQUIRED)
+  mark_as_advanced(Tracy_DIR)
+endif()
+
 if(DEFINED LIBDIR)
   without_system_libs_end()
 endif()
@@ -663,11 +650,49 @@ if(WITH_SYSTEM_FREETYPE)
 endif()
 
 find_package_wrapper(Eigen3 REQUIRED)
+mark_as_advanced(Eigen3_DIR)
 
 if(WITH_LIBMV)
   find_package_wrapper(Ceres REQUIRED)
+  mark_as_advanced(Ceres_DIR)
+  # Dep of Ceres
+  mark_as_advanced(absl_DIR)
 endif()
 add_bundled_libraries(ceres/lib)
+
+if(WITH_DRACO)
+  if(WITH_LIBS_PRECOMPILED OR WITH_STRICT_BUILD_OPTIONS)
+    find_package_wrapper(draco REQUIRED)
+  else()
+    # This isn't a common system library, so disable if it's not found.
+    find_package_wrapper(draco)
+    if(TARGET draco::draco)
+      set(DRACO_FOUND TRUE)
+    endif()
+    set_and_warn_library_found("Draco" DRACO_FOUND WITH_DRACO)
+  endif()
+  if(DEFINED draco_DIR)
+    mark_as_advanced(draco_DIR)
+  endif()
+endif()
+add_bundled_libraries(draco/lib)
+
+if(WITH_MESHOPTIMIZER)
+  if(WITH_LIBS_PRECOMPILED OR WITH_STRICT_BUILD_OPTIONS)
+    find_package_wrapper(meshoptimizer REQUIRED)
+  else()
+    # This isn't a common system library, so disable if it's not found.
+    find_package_wrapper(meshoptimizer)
+    if(TARGET meshoptimizer::meshoptimizer)
+      set(MESHOPTIMIZER_FOUND TRUE)
+    endif()
+    set_and_warn_library_found("meshoptimizer" MESHOPTIMIZER_FOUND WITH_MESHOPTIMIZER)
+  endif()
+  if(DEFINED meshoptimizer_DIR)
+    mark_as_advanced(meshoptimizer_DIR)
+  endif()
+endif()
+add_bundled_libraries(meshoptimizer/lib)
 
 # Jack is intended to use the system library.
 if(WITH_JACK)
@@ -1011,19 +1036,7 @@ unset(_IS_LINKER_DEFAULT)
 # Avoid conflicts with Mesa llvmpipe, Luxrender, and other plug-ins that may
 # use the same libraries as Blender with a different version or build options.
 set(PLATFORM_SYMBOLS_MAP ${CMAKE_SOURCE_DIR}/source/creator/symbols_unix.map)
-set(PLATFORM_LINKFLAGS
-  "${PLATFORM_LINKFLAGS} -Wl,--version-script='${PLATFORM_SYMBOLS_MAP}'"
-)
-
-# We do not ensure transitive dependencies of dynamic libraries are available at
-# link time. This allows that for classic ld, which is more strict than gold, lld
-# or mold. The ideal solution would be to switch all dependencies to CMake configs
-# that fully specify transitive dependencies.
-if(NOT WITH_PYTHON_MODULE)
-  set(PLATFORM_LINKFLAGS
-    "${PLATFORM_LINKFLAGS} -Wl,--allow-shlib-undefined -Wl,--unresolved-symbols=ignore-in-shared-libs"
-  )
-endif()
+set(PLATFORM_LINKFLAGS_SYMBOL_HIDING "-Wl,--version-script='${PLATFORM_SYMBOLS_MAP}'")
 
 # Don't use position independent executable for portable install since file
 # browsers can't properly detect blender as an executable then. Still enabled

@@ -13,6 +13,7 @@
 #include "MEM_guardedalloc.h"
 
 #include "BLI_path_utils.hh"
+#include "BLI_rect.h"
 #include "BLI_string_utf8.h"
 #include "BLI_utildefines.h"
 
@@ -47,6 +48,7 @@
 namespace blender {
 
 struct ScreenshotData {
+  /* Ownership transferred to ImBuf in exec function. */
   uint8_t *dumprect = nullptr;
   int dumpsx = 0, dumpsy = 0;
   rcti crop = {};
@@ -89,15 +91,8 @@ static int screenshot_data_create(bContext *C, wmOperator *op, ScrArea *area)
 
 static void screenshot_data_free(wmOperator *op)
 {
-  ScreenshotData *scd = static_cast<ScreenshotData *>(op->customdata);
-
-  if (scd) {
-    if (scd->dumprect) {
-      MEM_delete(scd->dumprect);
-    }
-    MEM_delete(scd);
-    op->customdata = nullptr;
-  }
+  MEM_delete(static_cast<ScreenshotData *>(op->customdata));
+  op->customdata = nullptr;
 }
 
 static wmOperatorStatus screenshot_exec(bContext *C, wmOperator *op)
@@ -121,16 +116,19 @@ static wmOperatorStatus screenshot_exec(bContext *C, wmOperator *op)
       BLI_path_abs(filepath, BKE_main_blendfile_path_from_global());
 
       /* operator ensures the extension */
-      ibuf = IMB_allocImBuf(scd->dumpsx, scd->dumpsy, 24, 0);
-      IMB_assign_byte_buffer(ibuf, scd->dumprect, IB_DO_NOT_TAKE_OWNERSHIP);
+      ibuf = IMB_allocImBuf(scd->dumpsx, scd->dumpsy, ImBufFlags::Zero);
+      ibuf->color_mode = ImColorMode::RGB;
+      ibuf->assign_byte_data(scd->dumprect);
+      scd->dumprect = nullptr;
 
       /* crop to show only single editor */
       if (use_crop) {
-        IMB_rect_crop(ibuf, &scd->crop);
-        scd->dumprect = ibuf->byte_buffer.data;
+        IMB_crop(ibuf,
+                 int2(scd->crop.xmin, scd->crop.ymin),
+                 int2(BLI_rcti_size_x(&scd->crop) + 1, BLI_rcti_size_y(&scd->crop) + 1));
       }
 
-      if ((scd->im_format.planes == R_IMF_PLANES_BW) &&
+      if ((scd->im_format.color_mode == ImColorMode::BW) &&
           (scd->im_format.imtype != R_IMF_IMTYPE_MULTILAYER))
       {
         /* bw screenshot? - users will notice if it fails! */

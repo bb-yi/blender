@@ -273,20 +273,28 @@ static void modifier_ops_extra_draw(bContext *C, ui::Layout *layout, void *md_v)
   layout->separator();
 
   /* Move to first. */
-  op_ptr = layout->op("OBJECT_OT_modifier_move_to_index",
-                      IFACE_("Move to First"),
-                      ICON_TRIA_UP,
-                      wm::OpCallContext::InvokeDefault,
-                      UI_ITEM_NONE);
-  RNA_int_set(&op_ptr, "index", 0);
+  {
+    ui::Layout &row = layout->row(false);
+    op_ptr = row.op("OBJECT_OT_modifier_move_to_index",
+                    IFACE_("Move to First"),
+                    ICON_TRIA_UP,
+                    wm::OpCallContext::InvokeDefault,
+                    UI_ITEM_NONE);
+    RNA_int_set(&op_ptr, "index", 0);
+    row.enabled_set(md->prev != nullptr);
+  }
 
   /* Move to last. */
-  op_ptr = layout->op("OBJECT_OT_modifier_move_to_index",
-                      IFACE_("Move to Last"),
-                      ICON_TRIA_DOWN,
-                      wm::OpCallContext::InvokeDefault,
-                      UI_ITEM_NONE);
-  RNA_int_set(&op_ptr, "index", BLI_listbase_count(&ob->modifiers) - 1);
+  {
+    ui::Layout &row = layout->row(false);
+    op_ptr = row.op("OBJECT_OT_modifier_move_to_index",
+                    IFACE_("Move to Last"),
+                    ICON_TRIA_DOWN,
+                    wm::OpCallContext::InvokeDefault,
+                    UI_ITEM_NONE);
+    RNA_int_set(&op_ptr, "index", ob->modifiers.count() - 1);
+    row.enabled_set(md->next != nullptr);
+  }
 
   layout->separator();
 
@@ -316,7 +324,7 @@ static void modifier_panel_header(const bContext *C, Panel *panel)
 
   ui::panel_context_pointer_set(panel, "modifier", ptr);
 
-  const ModifierTypeInfo *mti = BKE_modifier_get_info(ModifierType(md->type));
+  const ModifierTypeInfo *mti = BKE_modifier_get_info(md->type);
   Scene *scene = CTX_data_scene(C);
   int index = BLI_findindex(&ob->modifiers, md);
 
@@ -356,18 +364,18 @@ static void modifier_panel_header(const bContext *C, Panel *panel)
       sub = &row.row(true);
       ui::Block *block = sub->block();
       static int apply_on_spline_always_off_hack = 0;
-      ui::Button *but = uiDefIconButBitI(block,
-                                         ui::ButtonType::Toggle,
-                                         eModifierMode_ApplyOnSpline,
-                                         ICON_SURFACE_DATA,
-                                         0,
-                                         0,
-                                         UI_UNIT_X - 2,
-                                         UI_UNIT_Y,
-                                         &apply_on_spline_always_off_hack,
-                                         0.0,
-                                         0.0,
-                                         RPT_("Apply on Spline"));
+      ui::Button *but = uiDefIconButBit(block,
+                                        ui::ButtonType::Toggle,
+                                        eModifierMode_ApplyOnSpline,
+                                        ICON_SURFACE_DATA,
+                                        0,
+                                        0,
+                                        UI_UNIT_X - 2,
+                                        UI_UNIT_Y,
+                                        &apply_on_spline_always_off_hack,
+                                        0.0,
+                                        0.0,
+                                        RPT_("Apply on Spline"));
       button_disable(but,
                      "This modifier can only deform filled curve/surface, not the control points");
       buttons_number++;
@@ -379,18 +387,18 @@ static void modifier_panel_header(const bContext *C, Panel *panel)
       sub = &row.row(true);
       ui::Block *block = sub->block();
       static int apply_on_spline_always_on_hack = eModifierMode_ApplyOnSpline;
-      ui::Button *but = uiDefIconButBitI(block,
-                                         ui::ButtonType::Toggle,
-                                         eModifierMode_ApplyOnSpline,
-                                         ICON_SURFACE_DATA,
-                                         0,
-                                         0,
-                                         UI_UNIT_X - 2,
-                                         UI_UNIT_Y,
-                                         &apply_on_spline_always_on_hack,
-                                         0.0,
-                                         0.0,
-                                         RPT_("Apply on Spline"));
+      ui::Button *but = uiDefIconButBit(block,
+                                        ui::ButtonType::Toggle,
+                                        eModifierMode_ApplyOnSpline,
+                                        ICON_SURFACE_DATA,
+                                        0,
+                                        0,
+                                        UI_UNIT_X - 2,
+                                        UI_UNIT_Y,
+                                        &apply_on_spline_always_on_hack,
+                                        0.0,
+                                        0.0,
+                                        RPT_("Apply on Spline"));
       button_disable(but,
                      "This modifier can only deform control points, not the filled curve/surface");
       buttons_number++;
@@ -403,7 +411,7 @@ static void modifier_panel_header(const bContext *C, Panel *panel)
   }
   /* Collision and Surface are always enabled, hide buttons. */
   if (!ELEM(md->type, eModifierType_Collision, eModifierType_Surface)) {
-    if (mti->flags & eModifierTypeFlag_SupportsEditmode) {
+    if (ob->type != OB_EMPTY && (mti->flags & eModifierTypeFlag_SupportsEditmode) != 0) {
       sub = &row.row(true);
       sub->active_set(md->mode & eModifierMode_Realtime);
       sub->prop(ptr, "show_in_editmode", UI_ITEM_NONE, "", ICON_NONE);

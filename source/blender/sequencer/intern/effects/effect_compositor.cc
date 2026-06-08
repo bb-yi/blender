@@ -1,0 +1,205 @@
+/* SPDX-FileCopyrightText: 2026 Blender Authors
+ *
+ * SPDX-License-Identifier: GPL-2.0-or-later */
+
+/** \file
+ * \ingroup sequencer
+ */
+
+#include "BKE_node_runtime.hh"
+
+#include "COM_domain.hh"
+
+#include "DEG_depsgraph_query.hh"
+
+#include "DNA_sequence_types.h"
+
+#include "IMB_colormanagement.hh"
+#include "IMB_imbuf.hh"
+
+#include "PRF_profile.hh"
+
+#include "SEQ_sequencer.hh"
+
+#include "cache/compositor_cache.hh"
+#include "compositor.hh"
+#include "effects.hh"
+
+namespace blender::seq {
+
+class CompositorEffectContext : public CompositorContext {
+  bNodeTree *node_group_;
+
+  ImBuf *input_1_;
+  ImBuf *input_2_;
+  ImBuf *output_;
+  float factor_;
+
+ public:
+  CompositorEffectContext(compositor::StaticCacheManager &cache_manager,
+                          const RenderData &render_data,
+                          bNodeTree *node_tree,
+                          ImBuf *input_1,
+                          ImBuf *input_2,
+                          ImBuf *output,
+                          float factor,
+                          const Strip &strip)
+      : CompositorContext(cache_manager, render_data, strip),
+        node_group_(node_tree),
+        input_1_(input_1),
+        input_2_(input_2),
+        output_(output),
+        factor_(factor)
+  {
+  }
+
+  compositor::Domain get_compositing_domain() const override
+  {
+    return compositor::Domain(int2(this->output_->x, this->output_->y));
+  }
+
+  void write_viewer(compositor::Result &result) override
+  {
+    /* Within compositor effect, output and viewer output function the same. */
+    this->write_output(result, *this->output_);
+    viewer_was_written_ = true;
+  }
+
+  void evaluate()
+  {
+    using namespace compositor;
+    const bNodeTree &node_group = *DEG_get_evaluated<bNodeTree>(render_data_.depsgraph,
+                                                                node_group_);
+    const bke::DataBlockComputeContext compute_context(nullptr, this->get_scene().id);
+    NodeGroupOperation node_group_operation(*this,
+                                            node_group,
+                                            this->needed_outputs(),
+                                            node_group.active_viewer_key,
+                                            bke::NODE_INSTANCE_KEY_BASE,
+                                            compute_context);
+    set_output_refcount(node_group, node_group_operation);
+
+    /* Map the inputs to the operation. */
+    Vector<std::unique_ptr<Result>> inputs;
+    int float_counter = 0;
+    int color_counter = 0;
+    for (const bNodeTreeInterfaceSocket *input_socket : node_group.interface_inputs()) {
+      const bke::bNodeSocketType *typeinfo = input_socket->socket_typeinfo();
+      Result *input_result = nullptr;
+      if (typeinfo && typeinfo->type == SOCK_FLOAT && float_counter == 0) {
+        /* First float input is factor. */
+        input_result = new Result(this->create_result(ResultType::Float, ResultPrecision::Full));
+        input_result->allocate_single_value();
+        input_result->set_single_value(this->factor_);
+        float_counter++;
+      }
+      else if (color_counter == 0 && this->input_1_) {
+        /* First input image. */
+        input_result = new Result(this->create_result(ResultType::Color, ResultPrecision::Full));
+        create_result_from_input(*input_result, *this->input_1_);
+        color_counter++;
+      }
+      else if (color_counter == 1 && this->input_2_) {
+        /* Second input image. */
+        input_result = new Result(this->create_result(ResultType::Color, ResultPrecision::Full));
+        create_result_from_input(*input_result, *this->input_2_);
+        color_counter++;
+      }
+      else {
+        /* Unsupported sockets. */
+        input_result = new Result(this->create_result(ResultType::Color, ResultPrecision::Full));
+        input_result->allocate_invalid();
+      }
+
+      node_group_operation.map_input_to_result(input_socket->identifier, input_result);
+      inputs.append(std::unique_ptr<Result>(input_result));
+    }
+
+    node_group_operation.evaluate();
+    this->write_outputs(node_group, node_group_operation, *this->output_);
+  }
+};
+
+static SeqResult do_compositor_effect(const RenderData *context,
+                                      SeqRenderState * /*state*/,
+                                      Strip *strip,
+                                      float /*timeline_frame*/,
+                                      float fac,
+                                      const SeqResult &src1,
+                                      const SeqResult &src2)
+{
+  PRF_scope_with_name("SeqFxCompositor", ProfileCategory::Draw);
+  const int x = context->rectx;
+  const int y = context->recty;
+  SeqResult out;
+  out.image = IMB_allocImBuf(x, y, ImBufFlags::FloatData | ImBufFlags::UninitializedPixels);
+  IMB_colormanagement_assign_float_colorspace(
+      out.image, IMB_colormanagement_role_colorspace_name_get(COLOR_ROLE_SCENE_LINEAR));
+
+  CompositorEffectVars *data = static_cast<CompositorEffectVars *>(strip->effectdata);
+  if (!data || !data->node_group) {
+    IMB_rectfill(out.image, float4(0, 0, 0, 1));
+    out.image->color_mode = ImColorMode::RGB;
+    out.is_opaque_before_transform = true;
+  }
+  else {
+    CompositorCache &com_cache = context->scene->ed->runtime->ensure_compositor_cache();
+    CompositorEffectContext com_context(com_cache.get_cache_manager(),
+                                        *context,
+                                        data->node_group,
+                                        src1.image,
+                                        src2.image,
+                                        out.image,
+                                        fac,
+                                        *strip);
+
+    if (com_context.use_gpu()) {
+      com_context.set_gpu_supported(render_begin_gpu(*context));
+    }
+    com_cache.recreate_if_needed(
+        com_context.use_gpu(), com_context.get_precision(), context->gpu_context);
+    com_context.evaluate();
+    com_context.cache_manager().reset();
+    if (com_context.use_gpu()) {
+      render_end_gpu(*context);
+    }
+    out.is_opaque_before_transform = !out.image->can_contain_alpha();
+  }
+  return out;
+}
+
+static void init_compositor_effect(Strip *strip)
+{
+  CompositorEffectVars *data = MEM_new<CompositorEffectVars>(__func__);
+  strip->effectdata = data;
+}
+
+static void free_compositor_effect(Strip *strip, const bool /*do_id_user*/)
+{
+  if (strip->effectdata) {
+    CompositorEffectVars *data = static_cast<CompositorEffectVars *>(strip->effectdata);
+    MEM_delete(data);
+    strip->effectdata = nullptr;
+  }
+}
+
+static StripEarlyOut early_out_compositor(const Strip *strip, float /*fac*/)
+{
+  /* No inputs: compositor generates the result. */
+  if (strip->input1 == nullptr) {
+    return StripEarlyOut::NoInput;
+  }
+
+  /* One or two inputs: do the effect. */
+  return StripEarlyOut::DoEffect;
+}
+
+void compositor_effect_get_handle(EffectHandle &rval)
+{
+  rval.init = init_compositor_effect;
+  rval.free = free_compositor_effect;
+  rval.execute = do_compositor_effect;
+  rval.early_out = early_out_compositor;
+}
+
+}  // namespace blender::seq

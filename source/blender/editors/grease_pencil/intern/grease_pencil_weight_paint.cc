@@ -67,7 +67,7 @@ Set<std::string> get_bone_deformed_vertex_group_names(const Object &object)
 
     bPose *pose = gamd->object->pose;
     for (bPoseChannel &channel : pose->chanbase) {
-      if (channel.bone->flag & BONE_NO_DEFORM) {
+      if (channel.bone_get(*gamd->object)->flag & BONE_NO_DEFORM) {
         continue;
       }
       /* When a vertex group name matches the bone name, it is bone-deformed. */
@@ -307,7 +307,7 @@ static int lookup_or_add_deform_group_index(CurvesGeometry &curves, const String
     bDeformGroup *defgroup = MEM_new<bDeformGroup>(__func__);
     name.copy_utf8_truncated(defgroup->name);
     BLI_addtail(&curves.vertex_group_names, defgroup);
-    def_nr = BLI_listbase_count(&curves.vertex_group_names) - 1;
+    def_nr = curves.vertex_group_names.count() - 1;
     BLI_assert(def_nr >= 0);
   }
 

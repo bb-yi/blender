@@ -22,6 +22,7 @@ struct ImageFormatData;
 struct ImBuf;
 struct Scene;
 struct RenderData;
+enum eImbFileType : int8_t;
 
 /* Init/Copy/Free */
 
@@ -101,8 +102,8 @@ int BKE_image_path_ext_from_imtype_ensure(char *filepath, size_t filepath_maxncp
 #define IMA_CHAN_FLAG_RGB 2
 #define IMA_CHAN_FLAG_RGBA 4
 
-char BKE_ftype_to_imtype(int ftype, const ImbFormatOptions *options);
-int BKE_imtype_to_ftype(char imtype, ImbFormatOptions *r_options);
+char BKE_ftype_to_imtype(eImbFileType ftype, const ImbFormatOptions *options);
+eImbFileType BKE_imtype_to_ftype(char imtype, ImbFormatOptions *r_options);
 
 /* Returns true if the given imtype represents an image. This excludes multi-layer images, use
  * BKE_imtype_is_multi_layer_image to detect those images. */
@@ -114,9 +115,9 @@ bool BKE_imtype_supports_compress(char imtype);
 bool BKE_imtype_supports_quality(char imtype);
 bool BKE_imtype_requires_linear_float(char imtype);
 char BKE_imtype_valid_channels(char imtype);
-char BKE_imtype_valid_depths(char imtype);
-char BKE_imtype_valid_depths_with_video(char imtype, const ID *owner_id);
-char BKE_imtype_first_valid_depth(const char valid_depths);
+eImageFormatDepth BKE_imtype_valid_depths(char imtype);
+eImageFormatDepth BKE_imtype_valid_depths_with_video(char imtype, const ID *owner_id);
+eImageFormatDepth BKE_imtype_first_valid_depth(eImageFormatDepth valid_depths);
 
 /**
  * String is from command line `--render-format` argument,

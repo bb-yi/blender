@@ -35,10 +35,13 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.use_custom_socket_order();
   b.allow_any_socket_order();
 
-  b.add_input<decl::String>("Format").optional_label().description(
-      "Format string using a Python and path template compatible syntax. For example, \"Count: "
-      "{}\" would replace the {} with the first input value.");
-  b.add_output<decl::String>("String").align_with_previous();
+  b.add_input<decl::String>("Format"_ustr)
+      .optional_label()
+      .description(
+          "Format string using a Python and path template compatible syntax. For example, "
+          "\"Count: "
+          "{}\" would replace the {} with the first input value.");
+  b.add_output<decl::String>("String"_ustr).align_with_previous();
 
   const bNodeTree *ntree = b.tree_or_null();
   const bNode *node = b.node_or_null();
@@ -49,14 +52,15 @@ static void node_declare(NodeDeclarationBuilder &b)
   const NodeFunctionFormatString &storage = node_storage(*node);
   for (const int i : IndexRange(storage.items_num)) {
     const NodeFunctionFormatStringItem &item = storage.items[i];
-    const eNodeSocketDatatype socket_type = eNodeSocketDatatype(item.socket_type);
-    const StringRef name = item.name;
+    const eNodeSocketDatatype socket_type = item.socket_type;
+    const UString name(item.name);
     const std::string identifier = FormatStringItemsAccessor::socket_identifier_for_item(item);
-    b.add_input(socket_type, name, identifier)
+    b.add_input(socket_type, name, UString(identifier))
         .socket_name_ptr(&ntree->id, *FormatStringItemsAccessor::item_srna, &item, "name");
   }
 
-  b.add_input<decl::Extend>("", "__extend__");
+  b.add_input<decl::Extend>(""_ustr, "__extend__"_ustr)
+      .custom_draw(socket_items::ui::draw_extend_socket_fn<FormatStringItemsAccessor>());
 }
 
 static void node_init(bNodeTree * /*tree*/, bNode *node)
@@ -192,18 +196,19 @@ static FormatPatternInfo get_pattern_by_type_impl(const CPPType &type)
     /* Sign-aware zero padding. */
     pattern += "0?";
   }
-  const std::string integer_or_identifier = "(\\d+|(\\{.*\\}))";
-  /* Width. */
-  pattern += integer_or_identifier;
+  /* A width cannot start with 0, as 0 is parsed as the padding flag. */
+  const std::string width_integer_or_identifier = "([1-9]\\d*|(\\{.*\\}))";
+  pattern += width_integer_or_identifier;
   pattern += "?";
   groups_num += 2;
   const int width_group = groups_num;
 
   std::optional<int> precision_group;
   if (type.is<float>() || type.is<std::string>()) {
-    /* Precision. */
+    /* Precision is allowed to be 0. */
+    const std::string precision_integer_or_identifier = "(\\d+|(\\{.*\\}))";
     pattern += "(\\.";
-    pattern += integer_or_identifier;
+    pattern += precision_integer_or_identifier;
     pattern += ")?";
     groups_num += 3;
     precision_group = groups_num;
@@ -718,7 +723,7 @@ class FormatStringMultiFunction : public mf::MultiFunction {
     builder.single_input<std::string>("Format");
     for (const int i : IndexRange(storage.items_num)) {
       const NodeFunctionFormatStringItem &item = storage.items[i];
-      const eNodeSocketDatatype socket_type = eNodeSocketDatatype(item.socket_type);
+      const eNodeSocketDatatype socket_type = item.socket_type;
       const CPPType &type = *bke::socket_type_to_geo_nodes_base_cpp_type(socket_type);
       builder.single_input(item.name, type);
       input_names_.add_new(StringRef(item.name));
@@ -750,14 +755,20 @@ class FormatStringMultiFunction : public mf::MultiFunction {
       }
     }
     else {
-      mask.foreach_index(GrainSize(256), [&](const int64_t i) {
-        const StringRef format = formats[i];
-        if (!format_strings(
-                format, inputs, input_names_, IndexRange::from_single(i), outputs, error_message))
-        {
-          outputs[i].clear();
-        }
-      });
+      mask.foreach_index(
+          [&](const int64_t i) {
+            const std::string format = formats[i];
+            if (!format_strings(format,
+                                inputs,
+                                input_names_,
+                                IndexRange::from_single(i),
+                                outputs,
+                                error_message))
+            {
+              outputs[i].clear();
+            }
+          },
+          exec_mode::grain_size(256));
     }
 
     if (error_message.has_value()) {
@@ -776,7 +787,7 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  fn_node_type_base(&ntype, "FunctionNodeFormatString");
+  fn_cmp_node_type_base(&ntype, "FunctionNodeFormatString"_ustr);
   ntype.ui_name = "Format String";
   ntype.ui_description =
       "Insert values into a string using a Python and path template compatible formatting syntax";
@@ -802,7 +813,7 @@ StructRNA **FormatStringItemsAccessor::item_srna = &RNA_NodeFunctionFormatString
 
 void FormatStringItemsAccessor::blend_write_item(BlendWriter *writer, const ItemT &item)
 {
-  BLO_write_string(writer, item.name);
+  writer->write_string(item.name);
 }
 
 void FormatStringItemsAccessor::blend_read_data_item(BlendDataReader *reader, ItemT &item)

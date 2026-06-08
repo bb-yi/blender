@@ -146,6 +146,8 @@ bool mode_compat_test(const Object *ob, eObjectMode mode)
         return true;
       }
       break;
+    default:
+      break;
   }
 
   return false;
@@ -155,7 +157,7 @@ bool mode_compat_set(bContext *C, Object *ob, eObjectMode mode, ReportList *repo
 {
   bool ok;
   if (!ELEM(ob->mode, mode, OB_MODE_OBJECT)) {
-    const char *opstring = object_mode_op_string(eObjectMode(ob->mode));
+    const char *opstring = object_mode_op_string(ob->mode);
 
     WM_operator_name_call(C, opstring, wm::OpCallContext::ExecRegionWin, nullptr, nullptr);
     ok = ELEM(ob->mode, mode, OB_MODE_OBJECT);
@@ -184,10 +186,11 @@ bool mode_compat_set(bContext *C, Object *ob, eObjectMode mode, ReportList *repo
 bool mode_set_ex(bContext *C, eObjectMode mode, bool use_undo, ReportList *reports)
 {
   wmWindowManager *wm = CTX_wm_manager(C);
+  const Main *bmain = CTX_data_main(C);
   const Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
 
-  BKE_view_layer_synced_ensure(scene, view_layer);
+  BKE_view_layer_synced_ensure(*bmain, scene, view_layer);
   Object *ob = BKE_view_layer_active_object_get(view_layer);
   if (ob == nullptr) {
     return (mode == OB_MODE_OBJECT);
@@ -201,8 +204,7 @@ bool mode_set_ex(bContext *C, eObjectMode mode, bool use_undo, ReportList *repor
     return false;
   }
 
-  const char *opstring = object_mode_op_string((mode == OB_MODE_OBJECT) ? eObjectMode(ob->mode) :
-                                                                          mode);
+  const char *opstring = object_mode_op_string((mode == OB_MODE_OBJECT) ? ob->mode : mode);
   wmOperatorType *ot = WM_operatortype_find(opstring, false);
 
   if (!use_undo) {
@@ -359,7 +361,7 @@ static void ed_object_posemode_set_for_weight_paint_ex(bContext *C,
   ViewLayer *view_layer = CTX_data_view_layer(C);
 
   if (ob_arm != nullptr) {
-    BKE_view_layer_synced_ensure(scene, view_layer);
+    BKE_view_layer_synced_ensure(*bmain, scene, view_layer);
     const Base *base_arm = BKE_view_layer_base_find(view_layer, ob_arm);
     if (base_arm && BASE_VISIBLE(v3d, base_arm)) {
       if (is_mode_set) {
@@ -499,6 +501,7 @@ static bool object_transfer_mode_to_base(bContext *C,
                                          Object *ob_dst,
                                          const eObjectMode mode_dst)
 {
+  const Main *bmain = CTX_data_main(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
 
   /* Undo is handled manually here, such that the entry in the user-visible undo history is named
@@ -511,9 +514,9 @@ static bool object_transfer_mode_to_base(bContext *C,
 
   const bool mode_transferred = mode_set_ex(C, OB_MODE_OBJECT, true, op->reports);
   if (mode_transferred) {
-    BKE_view_layer_synced_ensure(scene, view_layer);
+    BKE_view_layer_synced_ensure(*bmain, scene, view_layer);
     Base *base_dst = BKE_view_layer_base_find(view_layer, ob_dst);
-    BKE_view_layer_base_deselect_all(scene, view_layer);
+    BKE_view_layer_base_deselect_all(*bmain, scene, view_layer);
     BKE_view_layer_base_select_and_set_active(view_layer, base_dst);
 
     /* Not entirely clear why, but this extra undo step (the two calls to #mode_set_ex should
@@ -540,7 +543,7 @@ static wmOperatorStatus object_transfer_mode_invoke(bContext *C,
   Scene *scene = CTX_data_scene(C);
   ARegion *region = CTX_wm_region(C);
   Object *ob_src = CTX_data_active_object(C);
-  const eObjectMode mode_src = eObjectMode(ob_src->mode);
+  const eObjectMode mode_src = ob_src->mode;
 
   Base *base_dst = ED_view3d_give_base_under_cursor(C, event->mval);
   if (!base_dst) {

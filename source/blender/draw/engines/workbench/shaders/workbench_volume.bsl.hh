@@ -3,13 +3,13 @@
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
 #pragma once
-#pragma create_info
 
 #include "gpu_shader_compat.hh"
 
 #include "draw_object_infos_infos.hh"
 
 SHADER_LIBRARY_CREATE_INFO(draw_mesh)
+SHADER_LIBRARY_CREATE_INFO(draw_resource_id_varying)
 
 #include "draw_model_lib.glsl"
 #include "draw_object_infos_lib.glsl"
@@ -147,7 +147,7 @@ struct Resources {
     if (this->interpolation == 2) [[static_branch]] {
       return sample_tricubic(ima, co);
     }
-    /* Use hardware interpolation*/
+    /* Use hardware interpolation. */
     return texture(ima, co);
   }
 };
@@ -330,7 +330,7 @@ struct VertOut {
                                 [[out, condition(use_slice)]] VertOut &v_out,
                                 [[position]] float4 &out_position)
 {
-  drw_ResourceID_iface.resource_index = drw_resource_id_raw();
+  drw_ResourceID_iface.resource_id = drw_resource_id_raw();
 
   float3 final_pos;
 

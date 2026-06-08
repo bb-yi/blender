@@ -1,10 +1,10 @@
 
 msgid ""
 msgstr ""
-"Project-Id-Version: Blender 5.1.0 Beta (b'5a04f1d246f1')\n"
+"Project-Id-Version: Blender 5.2.0 Alpha (b'8764d33c658b')\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-03-11 11:01+0000\n"
-"PO-Revision-Date: 2025-09-04 22:59+0000\n"
+"POT-Creation-Date: 2026-06-01 07:36+0000\n"
+"PO-Revision-Date: 2026-04-13 10:12+0000\n"
 "Last-Translator: Dominic Iastrebschi <domjotebit@gmail.com>\n"
 "Language-Team: Romanian <https://translate.blender.org/projects/blender-ui/ui/ro/>\n"
 "Language: ro\n"
@@ -12,7 +12,7 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=3; plural=n==1 ? 0 : (n==0 || (n%100 > 0 && n%100 < 20)) ? 1 : 2;\n"
-"X-Generator: Weblate 5.12.1"
+"X-Generator: Weblate 5.16.2"
 
 
 msgid "Shader AOV"
@@ -1054,6 +1054,10 @@ msgid "Armatures active edit bone"
 msgstr "Osul activ de editare a Armăturii"
 
 
+msgid "Link"
+msgstr "Legătură"
+
+
 msgid "Options"
 msgstr "Opțiuni"
 
@@ -1784,6 +1788,10 @@ msgid "Saturation"
 msgstr "Saturație"
 
 
+msgid "Both"
+msgstr "Ambele"
+
+
 msgid "Object Path"
 msgstr "Calea Obiectului"
 
@@ -1947,10 +1955,6 @@ msgstr "Salvare"
 
 msgid "Operator"
 msgstr "Operator"
-
-
-msgid "Link"
-msgstr "Legătură"
 
 
 msgid "End"
@@ -2132,18 +2136,6 @@ msgid "Sampling"
 msgstr "Eșantionare"
 
 
-msgid "UV"
-msgstr "UV"
-
-
-msgid "Layout"
-msgstr "Aspect"
-
-
-msgid "Tracking"
-msgstr "Urmărire"
-
-
 msgid "Light"
 msgstr "Lumină"
 
@@ -2158,6 +2150,18 @@ msgstr "Aplicare"
 
 msgid "Convert"
 msgstr "Convertire"
+
+
+msgid "UV"
+msgstr "UV"
+
+
+msgid "Layout"
+msgstr "Aspect"
+
+
+msgid "Tracking"
+msgstr "Urmărire"
 
 
 msgid "Marker"
@@ -2356,6 +2360,10 @@ msgid "Delete"
 msgstr "Ștergere"
 
 
+msgid "Handles"
+msgstr "Mânere"
+
+
 msgid "Lamp"
 msgstr "Lampă"
 
@@ -2366,10 +2374,6 @@ msgstr "Proprietăți Personalizate"
 
 msgid "Open"
 msgstr "Deschidere"
-
-
-msgid "Both"
-msgstr "Ambele"
 
 
 msgctxt "Operator"

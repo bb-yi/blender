@@ -13,14 +13,18 @@ namespace nodes::node_shader_output_linestyle_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Color>("Color").default_value({1.0f, 0.0f, 1.0f, 1.0f});
-  b.add_input<decl::Float>("Color Fac")
+  b.add_input<decl::Color>("Color"_ustr).default_value({1.0f, 0.0f, 1.0f, 1.0f});
+  b.add_input<decl::Float>("Color Fac"_ustr)
       .default_value(1.0f)
       .min(0.0f)
       .max(1.0f)
       .subtype(PROP_FACTOR);
-  b.add_input<decl::Float>("Alpha").default_value(1.0f).min(0.0f).max(1.0f).subtype(PROP_FACTOR);
-  b.add_input<decl::Float>("Alpha Fac")
+  b.add_input<decl::Float>("Alpha"_ustr)
+      .default_value(1.0f)
+      .min(0.0f)
+      .max(1.0f)
+      .subtype(PROP_FACTOR);
+  b.add_input<decl::Float>("Alpha Fac"_ustr)
       .default_value(1.0f)
       .min(0.0f)
       .max(1.0f)
@@ -44,7 +48,7 @@ void register_node_type_sh_output_linestyle()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeOutputLineStyle", SH_NODE_OUTPUT_LINESTYLE);
+  sh_node_type_base(&ntype, "ShaderNodeOutputLineStyle"_ustr, SH_NODE_OUTPUT_LINESTYLE);
   ntype.ui_name = "Line Style Output";
   ntype.ui_description =
       "Control the mixing of texture information into the base color of line styles";

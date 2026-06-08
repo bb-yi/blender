@@ -33,14 +33,14 @@ NODE_STORAGE_FUNCS(NodeKeyingScreenData)
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Float>("Smoothness")
+  b.add_input<decl::Float>("Smoothness"_ustr)
       .default_value(0.0f)
       .subtype(PROP_FACTOR)
       .min(0.0f)
       .max(1.0f)
       .description("Specifies the smoothness of the keying screen");
 
-  b.add_output<decl::Color>("Screen")
+  b.add_output<decl::Color>("Screen"_ustr)
       .translation_context(BLT_I18NCONTEXT_ID_SCREEN)
       .structure_type(StructureType::Dynamic);
 }
@@ -68,7 +68,7 @@ static void node_draw_buttons(ui::Layout &layout, bContext *C, PointerRNA *ptr)
 {
   bNode *node = static_cast<bNode *>(ptr->data);
 
-  template_id(&layout, C, ptr, "clip", nullptr, nullptr, nullptr);
+  template_id(&layout, C, ptr, "clip", nullptr, "CLIP_OT_open", nullptr);
 
   if (node->id) {
     MovieClip *clip = id_cast<MovieClip *>(node->id);
@@ -88,10 +88,9 @@ class KeyingScreenOperation : public NodeOperation {
 
   void execute() override
   {
-    Result &keying_screen = get_result("Screen");
     MovieTrackingObject *movie_tracking_object = get_movie_tracking_object();
     if (!movie_tracking_object) {
-      keying_screen.allocate_invalid();
+      this->allocate_default_remaining_outputs();
       return;
     }
 
@@ -99,11 +98,12 @@ class KeyingScreenOperation : public NodeOperation {
         context(), get_movie_clip(), movie_tracking_object, get_smoothness());
 
     if (!cached_keying_screen.is_allocated()) {
-      keying_screen.allocate_invalid();
+      this->allocate_default_remaining_outputs();
       return;
     }
 
-    keying_screen.wrap_external(cached_keying_screen);
+    Result &keying_screen = get_result("Screen");
+    keying_screen.share_data(cached_keying_screen);
   }
 
   Domain compute_domain() override
@@ -172,7 +172,7 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, "CompositorNodeKeyingScreen", CMP_NODE_KEYINGSCREEN);
+  cmp_node_type_base(&ntype, "CompositorNodeKeyingScreen"_ustr, CMP_NODE_KEYINGSCREEN);
   ntype.ui_name = "Keying Screen";
   ntype.ui_description = "Create plates for use as a color reference for keying nodes";
   ntype.enum_name_legacy = "KEYINGSCREEN";

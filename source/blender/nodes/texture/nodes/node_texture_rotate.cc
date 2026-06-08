@@ -77,7 +77,7 @@ void register_node_type_tex_rotate()
 {
   static bke::bNodeType ntype;
 
-  tex_node_type_base(&ntype, "TextureNodeRotate", TEX_NODE_ROTATE);
+  tex_node_type_base(&ntype, "TextureNodeRotate"_ustr, TEX_NODE_ROTATE);
   ntype.ui_name = "Rotate";
   ntype.enum_name_legacy = "ROTATE";
   ntype.nclass = NODE_CLASS_DISTORT;

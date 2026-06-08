@@ -52,7 +52,7 @@ void register_node_type_tex_scale()
 {
   static bke::bNodeType ntype;
 
-  tex_node_type_base(&ntype, "TextureNodeScale", TEX_NODE_SCALE);
+  tex_node_type_base(&ntype, "TextureNodeScale"_ustr, TEX_NODE_SCALE);
   ntype.ui_name = "Scale";
   ntype.enum_name_legacy = "SCALE";
   ntype.nclass = NODE_CLASS_DISTORT;

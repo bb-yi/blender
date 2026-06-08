@@ -18,6 +18,7 @@ struct UserDef;
 struct bUserExtensionRepo;
 struct bUserAssetLibrary;
 struct bUserAssetShelfSettings;
+class StringRef;
 
 /* -------------------------------------------------------------------- */
 /** \name Preferences File
@@ -41,9 +42,31 @@ bool exists();
 /** Name of the asset library added by default. Needs translation with `DATA_()` still. */
 #define BKE_PREFS_ASSET_LIBRARY_DEFAULT_NAME N_("User Library")
 
+/**
+ * \note For remote asset libraries, use #BKE_preferences_remote_asset_library_add().
+ */
 struct bUserAssetLibrary *BKE_preferences_asset_library_add(struct UserDef *userdef,
                                                             const char *name,
                                                             const char *dirpath) ATTR_NONNULL(1);
+struct bUserAssetLibrary *BKE_preferences_remote_asset_library_add(struct UserDef *userdef,
+                                                                   const char *name,
+                                                                   const char *remote_url)
+    ATTR_NONNULL(1, 3);
+
+/**
+ * \brief Update the remote URL and the cache directory derived from the URL.
+ *
+ * - Copies \a remote_url into #bUserAssetLibrary.remote_url, shortening to #FILE_MAX bytes if
+ *   necessary.
+ * - Adds a trailing slash if not present, and if the URL doesn't point directly to the
+ *   `/_asset-library-meta.json` already.
+ * - Updates #bUserAssetLibrary.dirpath to the cache path derived from the new URL. See
+ *   #asset_system::remote_library_cache_directory_path_from_url() (or
+ *   #asset_system::online_essentials_cache_directory_path() in case of the online essentials URL).
+ */
+void BKE_preferences_remote_asset_library_url_set(bUserAssetLibrary *library,
+                                                  StringRef remote_url);
+
 /**
  * Unlink and free a library preference member.
  * \note Free's \a library itself.
@@ -86,6 +109,15 @@ struct bUserAssetLibrary *BKE_preferences_asset_library_containing_path(
 int BKE_preferences_asset_library_get_index(const struct UserDef *userdef,
                                             const struct bUserAssetLibrary *library)
     ATTR_NONNULL() ATTR_WARN_UNUSED_RESULT;
+
+/**
+ * Check if the asset library defined in \a library has enough data to be loadable.
+ * \param check_directory_exists: When true, a library is required to point to a valid path on disk
+ * as its root, otherwise the library is considered invalid.
+ */
+bool BKE_preferences_asset_library_is_valid(const UserDef *userdef,
+                                            const struct bUserAssetLibrary *library,
+                                            const bool check_directory_exists) ATTR_NONNULL();
 
 void BKE_preferences_asset_library_default_add(struct UserDef *userdef) ATTR_NONNULL();
 

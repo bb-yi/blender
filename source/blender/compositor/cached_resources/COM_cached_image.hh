@@ -28,10 +28,15 @@ class Context;
  */
 class CachedImageKey {
  public:
-  ImageUser image_user;
-  std::string pass_name;
+  const int layer_index;
+  const std::string pass_name;
+  const std::string view_name;
+  const int frame;
 
-  CachedImageKey(ImageUser image_user, std::string pass_name);
+  CachedImageKey(const int layer_index,
+                 const std::string pass_name,
+                 const std::string view_name,
+                 const int frame);
 
   uint64_t hash() const;
 };
@@ -53,7 +58,7 @@ class CachedImage : public CachedResource {
   gpu::Texture *texture_ = nullptr;
 
  public:
-  CachedImage(Context &context, Image *image, ImageUser *image_user, const char *pass_name);
+  CachedImage(Context &context, Image &image, ImageUser &image_user, const char *pass_name);
 
   ~CachedImage();
 
@@ -84,7 +89,7 @@ class CachedImageContainer : CachedResourceContainer {
    * user and pass_name in the container, if one exists, return it, otherwise, return a newly
    * created one and add it to the container. In both cases, tag the cached resource as needed to
    * keep it cached for the next evaluation. */
-  Result get(Context &context, Image *image, const ImageUser *image_user, const char *pass_name);
+  Result &get(Context &context, Image &image, const ImageUser &image_user, const char *pass_name);
 };
 
 }  // namespace blender::compositor

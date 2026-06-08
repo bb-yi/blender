@@ -240,7 +240,7 @@ static void grease_pencil_free_data(ID *id)
   free_drawing_array(*grease_pencil);
   MEM_delete(&grease_pencil->root_group());
 
-  BLI_freelistN(&grease_pencil->vertex_group_names);
+  grease_pencil->vertex_group_names.free_no_destruct();
 
   BKE_grease_pencil_batch_cache_free(grease_pencil);
 
@@ -291,7 +291,7 @@ static void grease_pencil_blend_write(BlendWriter *writer, ID *id, const void *i
   ResourceScope scope;
 
   Vector<CustomDataLayer, 16> layers_data_layers;
-  bke::AttributeStorage::BlendWriteData attribute_data{scope};
+  bke::AttributeStorage::BlendWriteData attribute_data{writer, scope};
   attribute_storage_blend_write_prepare(
       grease_pencil->attribute_storage.wrap(),
       !BLO_write_is_undo(writer),
@@ -299,6 +299,7 @@ static void grease_pencil_blend_write(BlendWriter *writer, ID *id, const void *i
       attribute_data);
   grease_pencil->attribute_storage.dna_attributes = attribute_data.attributes.data();
   grease_pencil->attribute_storage.dna_attributes_num = attribute_data.attributes.size();
+  BLO_write_generated_pointer_tag(writer, grease_pencil->attribute_storage.dna_attributes);
 
   CustomData_reset(&grease_pencil->layers_data_legacy);
 
@@ -314,8 +315,7 @@ static void grease_pencil_blend_write(BlendWriter *writer, ID *id, const void *i
   write_layer_tree(*grease_pencil, writer);
 
   /* Write materials. */
-  BLO_write_pointer_array(
-      writer, grease_pencil->material_array_num, grease_pencil->material_array);
+  writer->write_pointer_array(grease_pencil->material_array_num, grease_pencil->material_array);
   /* Write vertex group names. */
   BKE_defbase_blend_write(writer, &grease_pencil->vertex_group_names);
 }
@@ -337,9 +337,8 @@ static void grease_pencil_blend_read_data(BlendDataReader *reader, ID *id)
   grease_pencil->attribute_storage.wrap().blend_read(*reader);
 
   /* Read materials. */
-  BLO_read_pointer_array(reader,
-                         grease_pencil->material_array_num,
-                         reinterpret_cast<void **>(&grease_pencil->material_array));
+  BLO_read_pointer_array_and_validate_size(
+      reader, &grease_pencil->material_array, &grease_pencil->material_array_num);
   /* Read vertex group names. */
   BLO_read_struct_list(reader, bDeformGroup, &grease_pencil->vertex_group_names);
 
@@ -347,34 +346,34 @@ static void grease_pencil_blend_read_data(BlendDataReader *reader, ID *id)
 }
 
 IDTypeInfo IDType_ID_GP = {
-    /*id_code*/ GreasePencil::id_type,
-    /*id_filter*/ FILTER_ID_GP,
-    /*dependencies_id_types*/ FILTER_ID_GP | FILTER_ID_MA | FILTER_ID_OB,
-    /*main_listbase_index*/ INDEX_ID_GP,
-    /*struct_size*/ sizeof(GreasePencil),
-    /*name*/ "GreasePencil",
-    /*name_plural*/ N_("grease_pencils"),
-    /*translation_context*/ BLT_I18NCONTEXT_ID_GPENCIL,
-    /*flags*/ IDTYPE_FLAGS_APPEND_IS_REUSABLE,
-    /*asset_type_info*/ nullptr,
+    .id_code = GreasePencil::id_type,
+    .id_filter = FILTER_ID_GP,
+    .dependencies_id_types = FILTER_ID_GP | FILTER_ID_MA | FILTER_ID_OB,
+    .main_listbase_index = INDEX_ID_GP,
+    .struct_size = sizeof(GreasePencil),
+    .name = "GreasePencil",
+    .name_plural = N_("grease_pencils"),
+    .translation_context = BLT_I18NCONTEXT_ID_GPENCIL,
+    .flags = IDTYPE_FLAGS_APPEND_IS_REUSABLE,
+    .asset_type_info = nullptr,
 
-    /*init_data*/ grease_pencil_init_data,
-    /*copy_data*/ grease_pencil_copy_data,
-    /*free_data*/ grease_pencil_free_data,
-    /*make_local*/ nullptr,
-    /*foreach_id*/ grease_pencil_foreach_id,
-    /*foreach_cache*/ nullptr,
-    /*foreach_path*/ nullptr,
-    /*foreach_working_space_color*/ grease_pencil_foreach_working_space_color,
-    /*owner_pointer_get*/ nullptr,
+    .init_data = grease_pencil_init_data,
+    .copy_data = grease_pencil_copy_data,
+    .free_data = grease_pencil_free_data,
+    .make_local = nullptr,
+    .foreach_id = grease_pencil_foreach_id,
+    .foreach_cache = nullptr,
+    .foreach_path = nullptr,
+    .foreach_working_space_color = grease_pencil_foreach_working_space_color,
+    .owner_pointer_get = nullptr,
 
-    /*blend_write*/ grease_pencil_blend_write,
-    /*blend_read_data*/ grease_pencil_blend_read_data,
-    /*blend_read_after_liblink*/ nullptr,
+    .blend_write = grease_pencil_blend_write,
+    .blend_read_data = grease_pencil_blend_read_data,
+    .blend_read_after_liblink = nullptr,
 
-    /*blend_read_undo_preserve*/ nullptr,
+    .blend_read_undo_preserve = nullptr,
 
-    /*lib_override_apply_post*/ nullptr,
+    .lib_override_apply_post = nullptr,
 };
 
 namespace bke::greasepencil {
@@ -386,7 +385,7 @@ constexpr StringRef ATTR_FILL_COLOR = "fill_color";
 Drawing::Drawing()
 {
   this->base.type = GP_DRAWING;
-  this->base.flag = 0;
+  this->base.flag = GreasePencilDrawingBaseFlag{};
 
   new (&this->geometry) bke::CurvesGeometry();
   /* Initialize runtime data. */
@@ -413,7 +412,7 @@ Drawing::Drawing(Drawing &&other)
   this->base.type = GP_DRAWING;
   other.base.type = GP_DRAWING;
   this->base.flag = other.base.flag;
-  other.base.flag = 0;
+  other.base.flag = GreasePencilDrawingBaseFlag{};
 
   new (&this->geometry) bke::CurvesGeometry(std::move(other.geometry.wrap()));
 
@@ -493,7 +492,7 @@ static void update_triangle_and_offsets_cache(const Span<float3> positions,
 
   threading::EnumerableThreadSpecific<LocalMemArena> all_local_mem_arenas;
   fill_mask.foreach_segment(
-      GrainSize(32), [&](const IndexMaskSegment mask_segment, const int segment_pos) {
+      [&](const IndexMaskSegment mask_segment, const int segment_pos) {
         MemArena *pf_arena = all_local_mem_arenas.local().pf_arena;
         for (const int index : mask_segment.index_range()) {
           const int fill_index = mask_segment[index];
@@ -504,7 +503,7 @@ static void update_triangle_and_offsets_cache(const Span<float3> positions,
 
           /* Only get curves that are in the fill and valid. */
           const IndexMask fill = IndexMask::from_predicate(
-              base_fill, GrainSize(4096), memory, [&](const int64_t curve_i) {
+              base_fill, memory, [&](const int64_t curve_i) {
                 const IndexRange points = points_by_curve[curve_i];
                 return points.size() >= 3;
               });
@@ -522,25 +521,20 @@ static void update_triangle_and_offsets_cache(const Span<float3> positions,
 
           int *fill_points_by_curve_data = static_cast<int(*)>(BLI_memarena_alloc(
               pf_arena, sizeof(*fill_points_by_curve_data) * size_t(fill.size() + 1)));
-          const MutableSpan<int> fill_points_by_curve_data_span = MutableSpan(
-              fill_points_by_curve_data, fill.size() + 1);
+          const OffsetIndices<int> fill_points_by_curve = offset_indices::gather_selected_offsets(
+              points_by_curve, fill, MutableSpan(fill_points_by_curve_data, fill.size() + 1));
 
-          fill.foreach_index(GrainSize(256), [&](const int64_t curve_i, const int64_t pos) {
-            fill_points_by_curve_data[pos] = points_by_curve[curve_i].size();
-          });
-
-          OffsetIndices<int> fill_points_by_curve = offset_indices::accumulate_counts_to_offsets(
-              fill_points_by_curve_data_span);
-
-          fill.foreach_index(GrainSize(256), [&](const int64_t curve_i, const int64_t pos) {
-            const IndexRange fill_points = fill_points_by_curve[pos];
-            const IndexRange points = points_by_curve[curve_i];
-            for (const int i : points.index_range()) {
-              const int curve_p = points[i];
-              const int fill_p = fill_points[i];
-              mul_v2_m3v3(projverts[fill_p], axis_mat.ptr(), positions[curve_p]);
-            }
-          });
+          fill.foreach_index(
+              [&](const int64_t curve_i, const int64_t pos) {
+                const IndexRange fill_points = fill_points_by_curve[pos];
+                const IndexRange points = points_by_curve[curve_i];
+                for (const int i : points.index_range()) {
+                  const int curve_p = points[i];
+                  const int fill_p = fill_points[i];
+                  mul_v2_m3v3(projverts[fill_p], axis_mat.ptr(), positions[curve_p]);
+                }
+              },
+              exec_mode::grain_size(256));
 
           /* If there is only one stroke then simple poly fill will be used. */
           if (fill.size() == 1) {
@@ -571,22 +565,24 @@ static void update_triangle_and_offsets_cache(const Span<float3> positions,
           const Span<float2> projverts_span = Span(reinterpret_cast<float2 *>(projverts),
                                                    num_points);
 
-          fill.foreach_index(GrainSize(256), [&](const int64_t curve_i, const int64_t pos) {
-            const IndexRange fill_points = fill_points_by_curve[pos];
-            const IndexRange points = points_by_curve[curve_i];
-            input.face[pos].resize(points.size());
-            MutableSpan<int> face = input.face[pos].as_mutable_span();
+          fill.foreach_index(
+              [&](const int64_t curve_i, const int64_t pos) {
+                const IndexRange fill_points = fill_points_by_curve[pos];
+                const IndexRange points = points_by_curve[curve_i];
+                input.face[pos].resize(points.size());
+                MutableSpan<int> face = input.face[pos].as_mutable_span();
 
-            array_utils::fill_index_range<int>(face, fill_points.first());
-            const Span<float2> projpoints = projverts_span.slice(fill_points);
+                array_utils::fill_index_range<int>(face, fill_points.first());
+                const Span<float2> projpoints = projverts_span.slice(fill_points);
 
-            /* Curve have to be in a counterclockwise order, so check if a flip is need.*/
-            if (cross_poly_v2(reinterpret_cast<const float (*)[2]>(projpoints.data()),
-                              projpoints.size()) < 0.0)
-            {
-              face.reverse();
-            }
-          });
+                /* Curve have to be in a counterclockwise order, so check if a flip is need. */
+                if (cross_poly_v2(reinterpret_cast<const float (*)[2]>(projpoints.data()),
+                                  projpoints.size()) < 0.0)
+                {
+                  face.reverse();
+                }
+              },
+              exec_mode::grain_size(256));
 
           meshintersect::CDT_result<double> result = delaunay_2d_calc(input,
                                                                       CDT_INSIDE_WITH_HOLES);
@@ -613,7 +609,8 @@ static void update_triangle_and_offsets_cache(const Span<float3> positions,
 
           BLI_memarena_clear(pf_arena);
         }
-      });
+      },
+      exec_mode::grain_size(32));
 
   threading::parallel_for(triangle_results.index_range(), 512, [&](const IndexRange range) {
     for (const int i : range) {
@@ -675,37 +672,39 @@ static void update_curve_plane_normal_cache(const Span<float3> positions,
                                             const IndexMask &curve_mask,
                                             MutableSpan<float3> normals)
 {
-  curve_mask.foreach_index(GrainSize(512), [&](const int curve_i) {
-    const IndexRange points = points_by_curve[curve_i];
-    if (points.size() < 2) {
-      normals[curve_i] = float3(1.0f, 0.0f, 0.0f);
-      return;
-    }
-
-    /* Calculate normal using Newell's method. */
-    float3 normal(0.0f);
-    float3 prev_point = positions[points.last()];
-    for (const int point_i : points) {
-      const float3 curr_point = positions[point_i];
-      add_newell_cross_v3_v3v3(normal, prev_point, curr_point);
-      prev_point = curr_point;
-    }
-
-    float length;
-    normal = math::normalize_and_get_length(normal, length);
-    /* Check for degenerate case where the points are on a line. */
-    if (math::is_zero(length)) {
-      for (const int point_i : points.drop_back(1)) {
-        float3 segment_vec = positions[point_i] - positions[point_i + 1];
-        if (math::length_squared(segment_vec) != 0.0f) {
-          normal = math::normalize(float3(segment_vec.y, -segment_vec.x, 0.0f));
-          break;
+  curve_mask.foreach_index(
+      [&](const int curve_i) {
+        const IndexRange points = points_by_curve[curve_i];
+        if (points.size() < 2) {
+          normals[curve_i] = float3(1.0f, 0.0f, 0.0f);
+          return;
         }
-      }
-    }
 
-    normals[curve_i] = normal;
-  });
+        /* Calculate normal using Newell's method. */
+        float3 normal(0.0f);
+        float3 prev_point = positions[points.last()];
+        for (const int point_i : points) {
+          const float3 curr_point = positions[point_i];
+          add_newell_cross_v3_v3v3(normal, prev_point, curr_point);
+          prev_point = curr_point;
+        }
+
+        float length;
+        normal = math::normalize_and_get_length(normal, length);
+        /* Check for degenerate case where the points are on a line. */
+        if (math::is_zero(length)) {
+          for (const int point_i : points.drop_back(1)) {
+            float3 segment_vec = positions[point_i] - positions[point_i + 1];
+            if (math::length_squared(segment_vec) != 0.0f) {
+              normal = math::normalize(float3(segment_vec.y, -segment_vec.x, 0.0f));
+              break;
+            }
+          }
+        }
+
+        normals[curve_i] = normal;
+      },
+      exec_mode::grain_size(512));
 }
 
 Span<float3> Drawing::curve_plane_normals() const
@@ -867,57 +866,59 @@ void Drawing::set_texture_matrices(Span<float4x2> matrices, const IndexMask &sel
   const Span<float3> positions = curves.positions();
   const Span<float3> normals = this->curve_plane_normals();
 
-  selection.foreach_index(GrainSize(256), [&](const int64_t curve_i, const int64_t pos) {
-    const IndexRange points = points_by_curve[curve_i];
-    const float3 normal = normals[curve_i];
-    const float4x2 strokemat = get_local_to_stroke_matrix(positions.slice(points), normal);
-    const float4x2 texspace = matrices[pos];
+  selection.foreach_index(
+      [&](const int64_t curve_i, const int64_t pos) {
+        const IndexRange points = points_by_curve[curve_i];
+        const float3 normal = normals[curve_i];
+        const float4x2 strokemat = get_local_to_stroke_matrix(positions.slice(points), normal);
+        const float4x2 texspace = matrices[pos];
 
-    /* We do the computation using doubles to avoid numerical precision errors. */
-    const double4x3 strokemat4x3 = double4x3(expand_4x2_mat(strokemat));
+        /* We do the computation using doubles to avoid numerical precision errors. */
+        const double4x3 strokemat4x3 = double4x3(expand_4x2_mat(strokemat));
 
-    /*
-     * We want to solve for `texture_matrix` in the equation:
-     * `texspace = texture_matrix * strokemat4x3`
-     * Because these matrices are not square we can not use a standard inverse.
-     *
-     * Our problem has the form of: `X = A * Y`
-     * We can solve for `A` using: `A = X * B`
-     *
-     * Where `B` is the Right-sided inverse or Moore-Penrose pseudo inverse.
-     * Calculated as:
-     *
-     *  |--------------------------|
-     *  | B = T(Y) * (Y * T(Y))^-1 |
-     *  |--------------------------|
-     *
-     * And `T()` is transpose and `()^-1` is the inverse.
-     */
+        /*
+         * We want to solve for `texture_matrix` in the equation:
+         * `texspace = texture_matrix * strokemat4x3`
+         * Because these matrices are not square we can not use a standard inverse.
+         *
+         * Our problem has the form of: `X = A * Y`
+         * We can solve for `A` using: `A = X * B`
+         *
+         * Where `B` is the Right-sided inverse or Moore-Penrose pseudo inverse.
+         * Calculated as:
+         *
+         *  |--------------------------|
+         *  | B = T(Y) * (Y * T(Y))^-1 |
+         *  |--------------------------|
+         *
+         * And `T()` is transpose and `()^-1` is the inverse.
+         */
 
-    const double3x4 transpose_strokemat = math::transpose(strokemat4x3);
-    const double3x4 right_inverse = transpose_strokemat *
-                                    math::invert(strokemat4x3 * transpose_strokemat);
+        const double3x4 transpose_strokemat = math::transpose(strokemat4x3);
+        const double3x4 right_inverse = transpose_strokemat *
+                                        math::invert(strokemat4x3 * transpose_strokemat);
 
-    const float3x2 texture_matrix = float3x2(double4x2(texspace) * right_inverse);
+        const float3x2 texture_matrix = float3x2(double4x2(texspace) * right_inverse);
 
-    /* Solve for translation, the translation is simply the origin. */
-    const float2 uv_translation = texture_matrix[2];
+        /* Solve for translation, the translation is simply the origin. */
+        const float2 uv_translation = texture_matrix[2];
 
-    /* Solve rotation, the angle of the `u` basis is the rotation. */
-    const float uv_rotation = math::atan2(texture_matrix[0][1], texture_matrix[0][0]);
+        /* Solve rotation, the angle of the `u` basis is the rotation. */
+        const float uv_rotation = math::atan2(texture_matrix[0][1], texture_matrix[0][0]);
 
-    /* Calculate the determinant to check if the `v` scale is negative. */
-    const float det = math::determinant(float2x2(texture_matrix));
+        /* Calculate the determinant to check if the `v` scale is negative. */
+        const float det = math::determinant(float2x2(texture_matrix));
 
-    /* Solve scale, scaling is the only transformation that changes the length, so scale factor
-     * is simply the length. And flip the sign of `v` if the determinant is negative. */
-    const float2 uv_scale = math::safe_rcp(float2(
-        math::length(texture_matrix[0]), math::sign(det) * math::length(texture_matrix[1])));
+        /* Solve scale, scaling is the only transformation that changes the length, so scale factor
+         * is simply the length. And flip the sign of `v` if the determinant is negative. */
+        const float2 uv_scale = math::safe_rcp(float2(
+            math::length(texture_matrix[0]), math::sign(det) * math::length(texture_matrix[1])));
 
-    uv_rotations.span[curve_i] = uv_rotation;
-    uv_translations.span[curve_i] = uv_translation;
-    uv_scales.span[curve_i] = uv_scale;
-  });
+        uv_rotations.span[curve_i] = uv_rotation;
+        uv_translations.span[curve_i] = uv_translation;
+        uv_scales.span[curve_i] = uv_scale;
+      },
+      exec_mode::grain_size(256));
   uv_rotations.finish();
   uv_translations.finish();
   uv_scales.finish();
@@ -1033,12 +1034,11 @@ static IndexMask curves_to_fills_mask(const IndexMask &curve_mask,
   Array<bool> selected_curves(num_curves);
   curve_mask.to_bools(selected_curves);
 
-  return IndexMask::from_predicate(
-      fills->index_range(), GrainSize(4096), memory, [&](const int64_t fill_index) {
-        const Span<int> fill = (*fills)[fill_index];
-        return std::any_of(
-            fill.begin(), fill.end(), [&](const int curve_i) { return selected_curves[curve_i]; });
-      });
+  return IndexMask::from_predicate(fills->index_range(), memory, [&](const int64_t fill_index) {
+    const Span<int> fill = (*fills)[fill_index];
+    return std::any_of(
+        fill.begin(), fill.end(), [&](const int curve_i) { return selected_curves[curve_i]; });
+  });
 }
 
 static void update_triangle_and_offsets_changed(const Span<float3> positions,
@@ -1095,11 +1095,13 @@ static void update_triangle_and_offsets_changed(const Span<float3> positions,
                                    src_triangles.data,
                                    r_triangles.as_mutable_span());
 
-  changed_fills.foreach_index(GrainSize(512), [&](const int i, const int pos) {
-    r_triangles.as_mutable_span()
-        .slice(triangle_offsets[i])
-        .copy_from(changed_triangles.as_span().slice(changed_triangle_offsets[pos]));
-  });
+  changed_fills.foreach_index(
+      [&](const int i, const int pos) {
+        r_triangles.as_mutable_span()
+            .slice(triangle_offsets[i])
+            .copy_from(changed_triangles.as_span().slice(changed_triangle_offsets[pos]));
+      },
+      exec_mode::grain_size(512));
 }
 
 void Drawing::tag_positions_changed(const IndexMask &changed_curves)
@@ -1240,7 +1242,7 @@ void Drawing::tag_topology_changed(const IndexMask &changed_curves)
 DrawingReference::DrawingReference()
 {
   this->base.type = GP_DRAWING_REFERENCE;
-  this->base.flag = 0;
+  this->base.flag = GreasePencilDrawingBaseFlag{};
 
   this->id_reference = nullptr;
 }
@@ -1286,7 +1288,7 @@ TreeNode::TreeNode()
   this->parent = nullptr;
 
   this->GreasePencilLayerTreeNode::name = nullptr;
-  this->flag = 0;
+  this->flag = GreasePencilLayerTreeNodeFlag{};
   this->color[0] = this->color[1] = this->color[2] = 0;
 }
 
@@ -1369,7 +1371,7 @@ int64_t TreeNode::depth() const
 LayerMask::LayerMask()
 {
   this->layer_name = nullptr;
-  this->flag = 0;
+  this->flag = GreasePencilLayerMaskFlag{};
 }
 
 LayerMask::LayerMask(const StringRef name) : LayerMask()
@@ -1405,7 +1407,7 @@ Layer::Layer()
   this->frames_storage.num = 0;
   this->frames_storage.keys = nullptr;
   this->frames_storage.values = nullptr;
-  this->frames_storage.flag = 0;
+  this->frames_storage.flag = GreasePencilLayerFramesMapStorageFlag{};
 
   this->blend_mode = GP_LAYER_BLEND_NONE;
   this->opacity = 1.0f;
@@ -1420,7 +1422,7 @@ Layer::Layer()
 
   this->viewlayername = nullptr;
 
-  BLI_listbase_clear(&this->masks);
+  this->masks.clear_no_delete();
   this->active_mask_index = 0;
 
   this->runtime = MEM_new<LayerRuntime>(__func__);
@@ -1474,7 +1476,7 @@ Layer::~Layer()
   for (GreasePencilLayerMask &mask : this->masks.items_mutable()) {
     MEM_delete(reinterpret_cast<LayerMask *>(&mask));
   }
-  BLI_listbase_clear(&this->masks);
+  this->masks.clear_no_delete();
 
   MEM_SAFE_DELETE(this->parsubstr);
   MEM_SAFE_DELETE(this->viewlayername);
@@ -1867,7 +1869,7 @@ LayerGroup::LayerGroup()
 {
   new (&this->base) TreeNode(GP_LAYER_TREE_GROUP);
 
-  BLI_listbase_clear(&this->children);
+  this->children.clear_no_delete();
   this->color_tag = LAYERGROUP_COLOR_NONE;
 
   this->runtime = MEM_new<LayerGroupRuntime>(__func__);
@@ -1939,7 +1941,7 @@ LayerGroup &LayerGroup::operator=(const LayerGroup &other)
 
 bool LayerGroup::is_empty() const
 {
-  return BLI_listbase_is_empty(&this->children);
+  return this->children.is_empty();
 }
 
 TreeNode &LayerGroup::add_node(TreeNode &node)
@@ -1989,7 +1991,7 @@ void LayerGroup::move_node_bottom(TreeNode &node)
 
 int64_t LayerGroup::num_direct_nodes() const
 {
-  return BLI_listbase_count(&this->children);
+  return this->children.count();
 }
 
 int64_t LayerGroup::num_nodes_total() const
@@ -2434,10 +2436,10 @@ static void grease_pencil_evaluate_modifiers(Depsgraph *depsgraph,
    * for the current frame, so we run the time offset modifiers before all the other ones. */
   ModifierData *tmd = md;
   for (; tmd; tmd = tmd->next) {
-    const ModifierTypeInfo *mti = BKE_modifier_get_info(ModifierType(tmd->type));
+    const ModifierTypeInfo *mti = BKE_modifier_get_info(tmd->type);
 
     if (!BKE_modifier_is_enabled(scene, tmd, required_mode) ||
-        ModifierType(tmd->type) != eModifierType_GreasePencilTime)
+        tmd->type != eModifierType_GreasePencilTime)
     {
       continue;
     }
@@ -2451,10 +2453,10 @@ static void grease_pencil_evaluate_modifiers(Depsgraph *depsgraph,
 
   /* Evaluate drawing modifiers. */
   for (; md; md = md->next) {
-    const ModifierTypeInfo *mti = BKE_modifier_get_info(ModifierType(md->type));
+    const ModifierTypeInfo *mti = BKE_modifier_get_info(md->type);
 
     if (!BKE_modifier_is_enabled(scene, md, required_mode) ||
-        ModifierType(md->type) == eModifierType_GreasePencilTime)
+        md->type == eModifierType_GreasePencilTime)
     {
       continue;
     }
@@ -4512,7 +4514,7 @@ void GreasePencil::remove_group(bke::greasepencil::LayerGroup &group, const bool
           BLI_assert_unreachable();
       }
     }
-    BLI_assert(BLI_listbase_is_empty(&group.children));
+    BLI_assert(group.children.is_empty());
   }
 
   /* Unlink then delete active group node. */
@@ -4574,9 +4576,8 @@ bke::MutableAttributeAccessor GreasePencil::attributes_for_write()
 
 static void read_drawing_array(GreasePencil &grease_pencil, BlendDataReader *reader)
 {
-  BLO_read_pointer_array(reader,
-                         grease_pencil.drawing_array_num,
-                         reinterpret_cast<void **>(&grease_pencil.drawing_array));
+  BLO_read_pointer_array_and_validate_size(
+      reader, &grease_pencil.drawing_array, &grease_pencil.drawing_array_num);
   for (int i = 0; i < grease_pencil.drawing_array_num; i++) {
     BLO_read_struct(reader, GreasePencilDrawingBase, &grease_pencil.drawing_array[i]);
     GreasePencilDrawingBase *drawing_base = grease_pencil.drawing_array[i];
@@ -4599,7 +4600,7 @@ static void write_drawing_array(GreasePencil &grease_pencil,
                                 ResourceScope &scope,
                                 BlendWriter *writer)
 {
-  BLO_write_pointer_array(writer, grease_pencil.drawing_array_num, grease_pencil.drawing_array);
+  writer->write_pointer_array(grease_pencil.drawing_array_num, grease_pencil.drawing_array);
   for (int i = 0; i < grease_pencil.drawing_array_num; i++) {
     GreasePencilDrawingBase *drawing_base = grease_pencil.drawing_array[i];
     switch (GreasePencilDrawingType(drawing_base->type)) {
@@ -4608,12 +4609,9 @@ static void write_drawing_array(GreasePencil &grease_pencil,
         drawing_copy = *reinterpret_cast<GreasePencilDrawing *>(drawing_base);
         bke::CurvesGeometry &curves = drawing_copy.geometry.wrap();
 
-        bke::CurvesGeometry::BlendWriteData write_data(scope);
+        bke::CurvesGeometry::BlendWriteData write_data(writer, scope);
         curves.blend_write_prepare(write_data, !BLO_write_is_undo(writer));
         drawing_copy.runtime = nullptr;
-
-        BLO_write_shared_tag(writer, curves.curve_offsets);
-        BLO_write_shared_tag(writer, curves.custom_knots);
 
         writer->write_struct_at_address_cast<GreasePencilDrawing>(drawing_base, &drawing_copy);
         curves.blend_write(*writer, grease_pencil.id, write_data);
@@ -4650,9 +4648,14 @@ static void read_layer(BlendDataReader *reader,
   BLO_read_string(reader, &node->viewlayername);
 
   /* Read frames storage. */
-  BLO_read_int32_array(reader, node->frames_storage.num, &node->frames_storage.keys);
-  BLO_read_struct_array(
-      reader, GreasePencilFrame, node->frames_storage.num, &node->frames_storage.values);
+  {
+    bool ok = true;
+    ok &= BLO_read_array(reader, &node->frames_storage.keys, node->frames_storage.num);
+    ok &= BLO_read_array(reader, &node->frames_storage.values, node->frames_storage.num);
+    if (!ok) {
+      node->frames_storage.num = 0;
+    }
+  }
 
   /* Read layer masks. */
   BLO_read_struct_list(reader, GreasePencilLayerMask, &node->masks);
@@ -4715,23 +4718,23 @@ static void read_layer_tree(GreasePencil &grease_pencil, BlendDataReader *reader
 static void write_layer(BlendWriter *writer, GreasePencilLayer *node)
 {
   writer->write_struct(node);
-  BLO_write_string(writer, node->base.name);
-  BLO_write_string(writer, node->parsubstr);
-  BLO_write_string(writer, node->viewlayername);
+  writer->write_string(node->base.name);
+  writer->write_string(node->parsubstr);
+  writer->write_string(node->viewlayername);
 
-  BLO_write_int32_array(writer, node->frames_storage.num, node->frames_storage.keys);
+  writer->write_int32_array(node->frames_storage.num, node->frames_storage.keys);
   writer->write_struct_array(node->frames_storage.num, node->frames_storage.values);
 
   writer->write_struct_list(&node->masks);
   for (GreasePencilLayerMask &mask : node->masks) {
-    BLO_write_string(writer, mask.layer_name);
+    writer->write_string(mask.layer_name);
   }
 }
 
 static void write_layer_tree_group(BlendWriter *writer, GreasePencilLayerTreeGroup *node)
 {
   writer->write_struct(node);
-  BLO_write_string(writer, node->base.name);
+  writer->write_string(node->base.name);
   for (GreasePencilLayerTreeNode &child : node->children) {
     switch (child.type) {
       case GP_LAYER_TREE_LEAF: {
@@ -4753,5 +4756,7 @@ static void write_layer_tree(GreasePencil &grease_pencil, BlendWriter *writer)
   grease_pencil.root_group_ptr->wrap().prepare_for_dna_write();
   write_layer_tree_group(writer, grease_pencil.root_group_ptr);
 }
+
+/** \} */
 
 }  // namespace blender

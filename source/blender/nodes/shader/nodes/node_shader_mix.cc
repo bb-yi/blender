@@ -42,15 +42,15 @@ static void sh_node_mix_declare(NodeDeclarationBuilder &b)
   /* WARNING:
    * Input socket indices must be kept in sync with ntree_shader_disconnect_inactive_mix_branches
    */
-  b.add_input<decl::Float>("Factor", "Factor_Float")
-      .default_value(0.5f)
+  b.add_input<decl::Float>("Factor"_ustr, "Factor_Float"_ustr)
+      .default_value(1.0f)
       .min(0.0f)
       .max(1.0f)
       .subtype(PROP_FACTOR)
       .no_muted_links()
       .description("Amount of mixing between the A and B inputs")
       .compositor_domain_priority(2);
-  b.add_input<decl::Vector>("Factor", "Factor_Vector")
+  b.add_input<decl::Vector>("Factor"_ustr, "Factor_Vector"_ustr)
       .default_value(float3(0.5f))
       .min(0.0f)
       .max(1.0f)
@@ -59,54 +59,54 @@ static void sh_node_mix_declare(NodeDeclarationBuilder &b)
       .description("Amount of mixing between the A and B vector inputs")
       .compositor_domain_priority(2);
 
-  b.add_input<decl::Float>("A", "A_Float")
+  b.add_input<decl::Float>("A"_ustr, "A_Float"_ustr)
       .min(-10000.0f)
       .max(10000.0f)
       .is_default_link_socket()
       .translation_context(BLT_I18NCONTEXT_ID_NODETREE)
       .description("Value of the first floating number input")
       .compositor_domain_priority(0);
-  b.add_input<decl::Float>("B", "B_Float")
+  b.add_input<decl::Float>("B"_ustr, "B_Float"_ustr)
       .min(-10000.0f)
       .max(10000.0f)
       .translation_context(BLT_I18NCONTEXT_ID_NODETREE)
       .description("Value of the second floating number input")
       .compositor_domain_priority(1);
 
-  b.add_input<decl::Vector>("A", "A_Vector")
+  b.add_input<decl::Vector>("A"_ustr, "A_Vector"_ustr)
       .is_default_link_socket()
       .translation_context(BLT_I18NCONTEXT_ID_NODETREE)
       .description("Value of the first vector input")
       .compositor_domain_priority(0);
-  b.add_input<decl::Vector>("B", "B_Vector")
+  b.add_input<decl::Vector>("B"_ustr, "B_Vector"_ustr)
       .translation_context(BLT_I18NCONTEXT_ID_NODETREE)
       .description("Value of the second vector input")
       .compositor_domain_priority(1);
 
-  b.add_input<decl::Color>("A", "A_Color")
+  b.add_input<decl::Color>("A"_ustr, "A_Color"_ustr)
       .default_value({0.5f, 0.5f, 0.5f, 1.0f})
       .is_default_link_socket()
       .translation_context(BLT_I18NCONTEXT_ID_NODETREE)
       .description("Value of the first color input")
       .compositor_domain_priority(0);
-  b.add_input<decl::Color>("B", "B_Color")
+  b.add_input<decl::Color>("B"_ustr, "B_Color"_ustr)
       .default_value({0.5f, 0.5f, 0.5f, 1.0f})
       .translation_context(BLT_I18NCONTEXT_ID_NODETREE)
       .description("Value of the second color input")
       .compositor_domain_priority(1);
 
-  b.add_input<decl::Rotation>("A", "A_Rotation")
+  b.add_input<decl::Rotation>("A"_ustr, "A_Rotation"_ustr)
       .is_default_link_socket()
       .translation_context(BLT_I18NCONTEXT_ID_NODETREE)
       .compositor_domain_priority(0);
-  b.add_input<decl::Rotation>("B", "B_Rotation")
+  b.add_input<decl::Rotation>("B"_ustr, "B_Rotation"_ustr)
       .translation_context(BLT_I18NCONTEXT_ID_NODETREE)
       .compositor_domain_priority(1);
 
-  b.add_output<decl::Float>("Result", "Result_Float");
-  b.add_output<decl::Vector>("Result", "Result_Vector");
-  b.add_output<decl::Color>("Result", "Result_Color");
-  b.add_output<decl::Rotation>("Result", "Result_Rotation");
+  b.add_output<decl::Float>("Result"_ustr, "Result_Float"_ustr);
+  b.add_output<decl::Vector>("Result"_ustr, "Result_Vector"_ustr);
+  b.add_output<decl::Color>("Result"_ustr, "Result_Color"_ustr);
+  b.add_output<decl::Rotation>("Result"_ustr, "Result_Rotation"_ustr);
 };
 
 static void sh_node_mix_layout(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
@@ -152,7 +152,7 @@ static void sh_node_mix_label(const bNodeTree * /*ntree*/,
 static int sh_node_mix_ui_class(const bNode *node)
 {
   const NodeShaderMix &storage = node_storage(*node);
-  const eNodeSocketDatatype data_type = eNodeSocketDatatype(storage.data_type);
+  const eNodeSocketDatatype data_type = storage.data_type;
 
   switch (data_type) {
     case SOCK_VECTOR:
@@ -167,7 +167,7 @@ static int sh_node_mix_ui_class(const bNode *node)
 static void sh_node_mix_update(bNodeTree *ntree, bNode *node)
 {
   const NodeShaderMix &storage = node_storage(*node);
-  const eNodeSocketDatatype data_type = eNodeSocketDatatype(storage.data_type);
+  const eNodeSocketDatatype data_type = storage.data_type;
 
   bNodeSocket *sock_factor = static_cast<bNodeSocket *>(node->inputs.first);
   bNodeSocket *sock_factor_vec = static_cast<bNodeSocket *>(sock_factor->next);
@@ -190,11 +190,11 @@ static void sh_node_mix_update(bNodeTree *ntree, bNode *node)
 
 class SocketSearchOp {
  public:
-  std::string socket_name;
+  UString socket_name;
   int type = MA_RAMP_BLEND;
   void operator()(LinkSearchOpParams &params)
   {
-    bNode &node = params.add_node("ShaderNodeMix");
+    bNode &node = params.add_node("ShaderNodeMix"_ustr);
     node_storage(node).data_type = SOCK_RGBA;
     node_storage(node).blend_type = type;
     params.update_and_connect_available_socket(node, socket_name);
@@ -204,7 +204,7 @@ class SocketSearchOp {
 static void node_mix_gather_link_searches(GatherLinkSearchOpParams &params)
 {
   eNodeSocketDatatype type;
-  switch (eNodeSocketDatatype(params.other_socket().type)) {
+  switch (params.other_socket().type) {
     case SOCK_BOOLEAN:
     case SOCK_INT:
     case SOCK_FLOAT:
@@ -223,30 +223,31 @@ static void node_mix_gather_link_searches(GatherLinkSearchOpParams &params)
       return;
   }
 
-  int weight = 0;
+  /* Ensure color math operations have higher priority than vector or float math operations. */
+  int weight = type == SOCK_RGBA ? 4 : 0;
   if (params.in_out() == SOCK_OUT) {
     params.add_item(IFACE_("Result"), [type](LinkSearchOpParams &params) {
-      bNode &node = params.add_node("ShaderNodeMix");
+      bNode &node = params.add_node("ShaderNodeMix"_ustr);
       node_storage(node).data_type = type;
-      params.update_and_connect_available_socket(node, "Result");
+      params.update_and_connect_available_socket(node, "Result"_ustr);
     });
   }
   else {
     params.add_item(
         CTX_IFACE_(BLT_I18NCONTEXT_ID_NODETREE, "A"),
         [type](LinkSearchOpParams &params) {
-          bNode &node = params.add_node("ShaderNodeMix");
+          bNode &node = params.add_node("ShaderNodeMix"_ustr);
           node_storage(node).data_type = type;
-          params.update_and_connect_available_socket(node, "A");
+          params.update_and_connect_available_socket(node, "A"_ustr);
         },
         weight);
     weight--;
     params.add_item(
         CTX_IFACE_(BLT_I18NCONTEXT_ID_NODETREE, "B"),
         [type](LinkSearchOpParams &params) {
-          bNode &node = params.add_node("ShaderNodeMix");
+          bNode &node = params.add_node("ShaderNodeMix"_ustr);
           node_storage(node).data_type = type;
-          params.update_and_connect_available_socket(node, "B");
+          params.update_and_connect_available_socket(node, "B"_ustr);
         },
         weight);
     weight--;
@@ -254,10 +255,10 @@ static void node_mix_gather_link_searches(GatherLinkSearchOpParams &params)
       params.add_item(
           IFACE_("Factor (Non-Uniform)"),
           [](LinkSearchOpParams &params) {
-            bNode &node = params.add_node("ShaderNodeMix");
+            bNode &node = params.add_node("ShaderNodeMix"_ustr);
             node_storage(node).data_type = SOCK_VECTOR;
             node_storage(node).factor_mode = NODE_MIX_MODE_NON_UNIFORM;
-            params.update_and_connect_available_socket(node, "Factor");
+            params.update_and_connect_available_socket(node, "Factor"_ustr);
           },
           weight);
       weight--;
@@ -266,9 +267,9 @@ static void node_mix_gather_link_searches(GatherLinkSearchOpParams &params)
       params.add_item(
           IFACE_("Factor"),
           [type](LinkSearchOpParams &params) {
-            bNode &node = params.add_node("ShaderNodeMix");
+            bNode &node = params.add_node("ShaderNodeMix"_ustr);
             node_storage(node).data_type = type;
-            params.update_and_connect_available_socket(node, "Factor");
+            params.update_and_connect_available_socket(node, "Factor"_ustr);
           },
           weight);
       weight--;
@@ -282,7 +283,7 @@ static void node_mix_gather_link_searches(GatherLinkSearchOpParams &params)
   if (type != SOCK_RGBA) {
     weight--;
   }
-  const std::string socket_name = params.in_out() == SOCK_IN ? "A" : "Result";
+  const UString socket_name = params.in_out() == SOCK_IN ? "A"_ustr : "Result"_ustr;
   for (const EnumPropertyItem *item = rna_enum_ramp_blend_items; item->identifier != nullptr;
        item++)
   {
@@ -357,7 +358,7 @@ static const char *gpu_shader_get_name(eNodeSocketDatatype data_type,
           return nullptr;
       }
     case SOCK_ROTATION:
-      return nullptr;
+      return "node_mix_rotation";
     default:
       BLI_assert_unreachable();
       return nullptr;
@@ -375,8 +376,7 @@ static int gpu_shader_mix(GPUMaterial *mat,
   const bool is_color_mode = storage.data_type == SOCK_RGBA;
   const bool is_vector_mode = storage.data_type == SOCK_VECTOR;
   const int blend_type = storage.blend_type;
-  const char *name = gpu_shader_get_name(
-      eNodeSocketDatatype(storage.data_type), is_non_uniform, blend_type);
+  const char *name = gpu_shader_get_name(storage.data_type, is_non_uniform, blend_type);
 
   if (name == nullptr) {
     return 0;
@@ -470,6 +470,15 @@ class MixColorFunction : public mf::MultiFunction {
           [&](const int64_t i) { clamp_v4(results[i], 0.0f, 1.0f); });
     }
   }
+
+  void hash_unique(UniqueHashBytes &hash) const override
+  {
+    static constexpr int8_t id = 0;
+    hash.add(&id);
+    hash.add(clamp_factor_);
+    hash.add(clamp_result_);
+    hash.add(blend_type_);
+  }
 };
 
 static const mf::MultiFunction *get_multi_function(const bNode &node)
@@ -538,9 +547,11 @@ static const mf::MultiFunction *get_multi_function(const bNode &node)
               });
       return &fn;
     }
+    default: {
+      BLI_assert_unreachable();
+      return nullptr;
+    }
   }
-  BLI_assert_unreachable();
-  return nullptr;
 }
 
 static void sh_node_mix_build_multi_function(NodeMultiFunctionBuilder &builder)
@@ -616,7 +627,7 @@ void register_node_type_sh_mix()
   namespace file_ns = nodes::node_sh_mix_cc;
 
   static bke::bNodeType ntype;
-  common_node_type_base(&ntype, "ShaderNodeMix", SH_NODE_MIX);
+  common_node_type_base(&ntype, "ShaderNodeMix"_ustr, SH_NODE_MIX);
   ntype.ui_name = "Mix";
   ntype.ui_description = "Mix values by a factor";
   ntype.enum_name_legacy = "MIX";

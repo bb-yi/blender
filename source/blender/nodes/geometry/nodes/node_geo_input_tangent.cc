@@ -12,7 +12,7 @@ namespace blender::nodes::node_geo_input_tangent_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_output<decl::Vector>("Tangent").field_source();
+  b.add_output<decl::Vector>("Tangent"_ustr).structure_type(StructureType::Field);
 }
 
 static Array<float3> curve_tangent_point_domain(const bke::CurvesGeometry &curves)
@@ -92,10 +92,7 @@ static VArray<float3> construct_curve_tangent_gvarray(const bke::CurvesGeometry 
 
 class TangentFieldInput final : public bke::CurvesFieldInput {
  public:
-  TangentFieldInput() : bke::CurvesFieldInput(CPPType::get<float3>(), "Tangent node")
-  {
-    category_ = Category::Generated;
-  }
+  TangentFieldInput() : bke::CurvesFieldInput(CPPType::get<float3>(), "Tangent node") {}
 
   GVArray get_varray_for_context(const bke::CurvesGeometry &curves,
                                  const AttrDomain domain,
@@ -104,15 +101,10 @@ class TangentFieldInput final : public bke::CurvesFieldInput {
     return construct_curve_tangent_gvarray(curves, domain);
   }
 
-  uint64_t hash() const override
+  void hash_unique(UniqueHashBytes &hash, fn::FieldHashDeep & /*deep_hash_cache*/) const override
   {
-    /* Some random constant hash. */
-    return 91827364589;
-  }
-
-  bool is_equal_to(const fn::FieldNode &other) const override
-  {
-    return dynamic_cast<const TangentFieldInput *>(&other) != nullptr;
+    static constexpr int8_t id = 0;
+    hash.add(&id);
   }
 
   std::optional<AttrDomain> preferred_domain(const bke::CurvesGeometry & /*curves*/) const final
@@ -123,15 +115,14 @@ class TangentFieldInput final : public bke::CurvesFieldInput {
 
 static void node_geo_exec(GeoNodeExecParams params)
 {
-  Field<float3> tangent_field{std::make_shared<TangentFieldInput>()};
-  params.set_output("Tangent", std::move(tangent_field));
+  params.set_output("Tangent"_ustr, Field<float3>::from_input<TangentFieldInput>());
 }
 
 static void node_register()
 {
   static bke::bNodeType ntype;
 
-  geo_node_type_base(&ntype, "GeometryNodeInputTangent", GEO_NODE_INPUT_TANGENT);
+  geo_node_type_base(&ntype, "GeometryNodeInputTangent"_ustr, GEO_NODE_INPUT_TANGENT);
   ntype.ui_name = "Curve Tangent";
   ntype.ui_description = "Retrieve the direction of curves at each control point";
   ntype.enum_name_legacy = "INPUT_TANGENT";

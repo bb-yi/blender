@@ -44,7 +44,7 @@ LANGUAGES = (
     (13, "Chinese (Simplified) - 简体中文", "zh_HANS"),
     (14, "Chinese (Traditional) - 繁體中文", "zh_HANT"),
     (15, "Russian - Русский", "ru_RU"),
-    # 16 is free, used to be "Croatian - Hrvatski" ("hr_HR").
+    (16, "Croatian - Hrvatski", "hr"),
     (17, "Serbian (Cyrillic) - Српски", "sr_RS"),
     (18, "Ukrainian - Українська", "uk_UA"),
     (19, "Polish - Polski", "pl_PL"),
@@ -216,6 +216,7 @@ _str_base = (
             ".(?!(?P={_}2))"
         ")*.)"  # Don't forget the last char!
     "(?P={_}2)"  # And closing quote.
+    "(?:_ustr)?" # Optional trailing _ustr.
 )
 str_clean_re = _str_base.format(_="g", capt="P<clean>")
 _inbetween_str_re = (

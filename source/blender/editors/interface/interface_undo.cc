@@ -35,7 +35,7 @@ struct UndoStack_Text {
   UndoStack_Text_State *current;
 };
 
-static const char *ui_textedit_undo_impl(UndoStack_Text *stack, int *r_cursor_index)
+static const char *textedit_undo_impl(UndoStack_Text *stack, int *r_cursor_index)
 {
   /* Don't undo if no data has been pushed yet. */
   if (stack->current == nullptr) {
@@ -52,7 +52,7 @@ static const char *ui_textedit_undo_impl(UndoStack_Text *stack, int *r_cursor_in
   return nullptr;
 }
 
-static const char *ui_textedit_redo_impl(UndoStack_Text *stack, int *r_cursor_index)
+static const char *textedit_redo_impl(UndoStack_Text *stack, int *r_cursor_index)
 {
   /* Don't redo if no data has been pushed yet. */
   if (stack->current == nullptr) {
@@ -73,9 +73,9 @@ const char *textedit_undo(UndoStack_Text *stack, int direction, int *r_cursor_in
 {
   BLI_assert(ELEM(direction, -1, 1));
   if (direction < 0) {
-    return ui_textedit_undo_impl(stack, r_cursor_index);
+    return textedit_undo_impl(stack, r_cursor_index);
   }
-  return ui_textedit_redo_impl(stack, r_cursor_index);
+  return textedit_redo_impl(stack, r_cursor_index);
 }
 
 void textedit_undo_push(UndoStack_Text *stack, const char *text, int cursor_index)
@@ -102,14 +102,14 @@ UndoStack_Text *textedit_undo_stack_create()
 {
   UndoStack_Text *stack = MEM_new_zeroed<UndoStack_Text>(__func__);
   stack->current = nullptr;
-  BLI_listbase_clear(&stack->states);
+  stack->states.clear_no_delete();
 
   return stack;
 }
 
 void textedit_undo_stack_destroy(UndoStack_Text *stack)
 {
-  BLI_freelistN(&stack->states);
+  stack->states.free_no_destruct();
   MEM_delete(stack);
 }
 

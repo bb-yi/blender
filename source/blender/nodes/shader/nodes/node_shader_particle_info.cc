@@ -10,17 +10,17 @@ namespace nodes::node_shader_particle_info_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_output<decl::Float>("Index");
-  b.add_output<decl::Float>("Random");
-  b.add_output<decl::Float>("Age");
-  b.add_output<decl::Float>("Lifetime");
-  b.add_output<decl::Vector>("Location");
+  b.add_output<decl::Float>("Index"_ustr);
+  b.add_output<decl::Float>("Random"_ustr);
+  b.add_output<decl::Float>("Age"_ustr);
+  b.add_output<decl::Float>("Lifetime"_ustr);
+  b.add_output<decl::Vector>("Location"_ustr);
 #if 0 /* quaternion sockets not yet supported */
-  b.add_output<decl::Quaternion>("Rotation");
+  b.add_output<decl::Quaternion>("Rotation"_ustr);
 #endif
-  b.add_output<decl::Float>("Size");
-  b.add_output<decl::Vector>("Velocity");
-  b.add_output<decl::Vector>("Angular Velocity");
+  b.add_output<decl::Float>("Size"_ustr);
+  b.add_output<decl::Vector>("Velocity"_ustr);
+  b.add_output<decl::Vector>("Angular Velocity"_ustr);
 }
 
 static int gpu_shader_particle_info(GPUMaterial *mat,
@@ -52,7 +52,7 @@ void register_node_type_sh_particle_info()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeParticleInfo", SH_NODE_PARTICLE_INFO);
+  sh_node_type_base(&ntype, "ShaderNodeParticleInfo"_ustr, SH_NODE_PARTICLE_INFO);
   ntype.ui_name = "Particle Info";
   ntype.ui_description =
       "Retrieve the data of the particle that spawned the object instance, for example to give "

@@ -13,33 +13,36 @@ namespace nodes::node_shader_bsdf_metallic_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
+  const bNodeTree *ntree = b.tree_or_null();
+  const bool is_gpu_internal = ntree && (ntree->flag & NTREE_IS_GPU_SHADER_INTERNAL);
+
   b.use_custom_socket_order();
 
-  b.add_output<decl::Shader>("BSDF");
+  b.add_output<decl::Shader>("BSDF"_ustr);
   b.add_default_layout();
 
-  b.add_input<decl::Color>("Base Color")
+  b.add_input<decl::Color>("Base Color"_ustr)
       .default_value({0.617f, 0.577f, 0.540f, 1.0f})
       .description("Color of the material")
       .make_available([](bNode &node) { node.custom2 = SHD_CONDUCTOR_F82; });
-  b.add_input<decl::Color>("Edge Tint")
+  b.add_input<decl::Color>("Edge Tint"_ustr)
       .default_value({0.695f, 0.726f, 0.770f, 1.0f})
       .description(
           "Tint reflection at near-grazing incidence to simulate complex index of refraction")
       .make_available([](bNode &node) { node.custom2 = SHD_CONDUCTOR_F82; });
-  b.add_input<decl::Vector>("IOR")
+  b.add_input<decl::Vector>("IOR"_ustr)
       .default_value({2.757f, 2.513f, 2.231f})
       .min(0.0f)
       .max(100.0f)
       .description("Real part of the conductor's refractive index, often called n")
       .make_available([](bNode &node) { node.custom2 = SHD_PHYSICAL_CONDUCTOR; });
-  b.add_input<decl::Vector>("Extinction")
+  b.add_input<decl::Vector>("Extinction"_ustr)
       .default_value({3.867f, 3.404f, 3.009f})
       .min(0.0f)
       .max(100.0f)
       .description("Imaginary part of the conductor's refractive index, often called k")
       .make_available([](bNode &node) { node.custom2 = SHD_PHYSICAL_CONDUCTOR; });
-  b.add_input<decl::Float>("Roughness")
+  b.add_input<decl::Float>("Roughness"_ustr)
       .default_value(0.5f)
       .min(0.0f)
       .max(1.0f)
@@ -47,7 +50,7 @@ static void node_declare(NodeDeclarationBuilder &b)
       .description(
           "Microfacet roughness of the surface (0.0 is a perfect mirror reflection, 1.0 is "
           "completely rough)");
-  b.add_input<decl::Float>("Anisotropy")
+  b.add_input<decl::Float>("Anisotropy"_ustr)
       .default_value(0.0f)
       .min(0.0f)
       .max(1.0f)
@@ -55,24 +58,24 @@ static void node_declare(NodeDeclarationBuilder &b)
       .description(
           "Amount of anisotropy for reflection. Higher values give elongated highlights along the "
           "tangent direction");
-  b.add_input<decl::Float>("Rotation")
+  b.add_input<decl::Float>("Rotation"_ustr)
       .default_value(0.0f)
       .min(0.0f)
       .max(1.0f)
       .subtype(PROP_FACTOR)
       .description("Rotates the direction of anisotropy, with 1.0 going full circle");
-  b.add_input<decl::Vector>("Normal").hide_value();
-  b.add_input<decl::Vector>("Tangent").hide_value();
-  b.add_input<decl::Float>("Weight").available(false);
+  b.add_input<decl::Vector>("Normal"_ustr).hide_value();
+  b.add_input<decl::Vector>("Tangent"_ustr).hide_value();
+  b.add_input<decl::Float>("Weight"_ustr).available(is_gpu_internal);
 
-  PanelDeclarationBuilder &film = b.add_panel("Thin Film").default_closed(true);
-  film.add_input<decl::Float>("Thin Film Thickness")
+  PanelDeclarationBuilder &film = b.add_panel("Thin Film"_ustr).default_closed(true);
+  film.add_input<decl::Float>("Thin Film Thickness"_ustr)
       .default_value(0.0)
       .min(0.0f)
       .max(100000.0f)
       .subtype(PROP_WAVELENGTH)
       .description("Thickness of the film in nanometers");
-  film.add_input<decl::Float>("Thin Film IOR")
+  film.add_input<decl::Float>("Thin Film IOR"_ustr)
       .default_value(1.33f)
       .min(1.0f)
       .max(1000.0f)
@@ -130,13 +133,13 @@ static void node_shader_update_metallic(bNodeTree *ntree, bNode *node)
   const bool is_physical = (node->custom2 == SHD_PHYSICAL_CONDUCTOR);
 
   bke::node_set_socket_availability(
-      *ntree, *bke::node_find_socket(*node, SOCK_IN, "Base Color"), !is_physical);
+      *ntree, *bke::node_find_socket(*node, SOCK_IN, "Base Color"_ustr), !is_physical);
   bke::node_set_socket_availability(
-      *ntree, *bke::node_find_socket(*node, SOCK_IN, "Edge Tint"), !is_physical);
+      *ntree, *bke::node_find_socket(*node, SOCK_IN, "Edge Tint"_ustr), !is_physical);
   bke::node_set_socket_availability(
-      *ntree, *bke::node_find_socket(*node, SOCK_IN, "IOR"), is_physical);
+      *ntree, *bke::node_find_socket(*node, SOCK_IN, "IOR"_ustr), is_physical);
   bke::node_set_socket_availability(
-      *ntree, *bke::node_find_socket(*node, SOCK_IN, "Extinction"), is_physical);
+      *ntree, *bke::node_find_socket(*node, SOCK_IN, "Extinction"_ustr), is_physical);
 }
 
 NODE_SHADER_MATERIALX_BEGIN
@@ -190,7 +193,7 @@ void register_node_type_sh_bsdf_metallic()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeBsdfMetallic", SH_NODE_BSDF_METALLIC);
+  sh_node_type_base(&ntype, "ShaderNodeBsdfMetallic"_ustr, SH_NODE_BSDF_METALLIC);
   ntype.ui_name = "Metallic BSDF";
   ntype.ui_description = "Metallic reflection with microfacet distribution, and metallic fresnel";
   ntype.enum_name_legacy = "BSDF_METALLIC";
@@ -199,7 +202,7 @@ void register_node_type_sh_bsdf_metallic()
   ntype.gather_link_search_ops = search_link_ops_for_shader_bsdf_node;
   ntype.add_ui_poll = object_shader_nodes_poll;
   ntype.draw_buttons = file_ns::node_shader_buts_metallic;
-  bke::node_type_size_preset(ntype, bke::eNodeSizePreset::Large);
+  ntype.default_width = bke::NodeWidth::_240;
   ntype.initfunc = file_ns::node_shader_init_metallic;
   ntype.gpu_fn = file_ns::node_shader_gpu_bsdf_metallic;
   ntype.updatefunc = file_ns::node_shader_update_metallic;

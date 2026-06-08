@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include "BLI_math_vector_types.hh"
 #include "BLI_sys_types.h"
 
 namespace blender {
@@ -16,6 +17,7 @@ namespace blender {
 
 struct ARegion;
 struct bContext;
+struct Main;
 struct Scene;
 struct ReportList;
 struct TransformOrientation;
@@ -95,7 +97,8 @@ bool BIF_createTransformOrientation(bContext *C,
                                     bool overwrite);
 void BIF_selectTransformOrientation(bContext *C, TransformOrientation *target);
 
-void ED_getTransformOrientationMatrix(const Scene *scene,
+void ED_getTransformOrientationMatrix(const Main &bmain,
+                                      const Scene *scene,
                                       ViewLayer *view_layer,
                                       const View3D *v3d,
                                       Object *ob,
@@ -142,7 +145,8 @@ void calc_orientation_from_type(const bContext *C, float r_mat[3][3]);
  * - #V3D_ORIENT_LOCAL may contain shear from non-uniform scale in parent/child relationships.
  * - #V3D_ORIENT_CUSTOM may have been created from #V3D_ORIENT_LOCAL.
  */
-short calc_orientation_from_type_ex(const Scene *scene,
+short calc_orientation_from_type_ex(const Main &bmain,
+                                    const Scene *scene,
                                     ViewLayer *view_layer,
                                     const View3D *v3d,
                                     const RegionView3D *rv3d,
@@ -210,19 +214,21 @@ int calc_gizmo_stats(const bContext *C,
                      RegionView3D *rv3d);
 
 /**
- * Iterates over all the strips and finds the closest snapping candidate of either \a frame_1 or \a
- * frame_2. The closest snapping candidate will be the closest start or end frame of an existing
+ * Iterates over all the strips and finds the closest snapping candidate of either \a left_frame
+ * or \a right_frame, which might only be searched for on the given \a channel depending on snap
+ * settings. The closest snapping candidate will be the closest start or end frame of an existing
  * strip.
  * \returns True if there was anything to snap to.
  */
 bool snap_sequencer_calc_drag_drop(Scene *scene,
                                    ARegion *region,
-                                   int frame_1,
-                                   int frame_2,
+                                   const int left_frame,
+                                   const int right_frame,
+                                   const int channel,
                                    int *r_snap_distance,
-                                   float *r_snap_frame);
+                                   float2 *r_snap_point);
 
-void snap_sequencer_draw_drag_drop(ARegion *region, float snap_point);
+void snap_sequencer_draw_drag_drop(Scene *scene, ARegion *region, const float2 snap_point);
 
 }  // namespace ed::transform
 }  // namespace blender

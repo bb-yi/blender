@@ -26,6 +26,29 @@
 
 CCL_NAMESPACE_BEGIN
 
+/* Halton sequence generator using only integer numbers.
+ * See https://doi.org/10.1016/0010-4655(91)90064-R for details. */
+static float halton(int &a, int &b, int base)
+{
+  int x = b - a;
+  if (x == 1) {
+    a = 1;
+    b *= base;
+  }
+  else {
+    int y = b / base;
+    while (x <= y) {
+      y /= base;
+    }
+    a = (1 + base) * y - x;
+  }
+  return static_cast<float>(a) / static_cast<float>(b);
+}
+float2 HaltonSequence::next()
+{
+  return make_float2(halton(a2, b2, 2) - 0.5f, halton(a3, b3, 3) - 0.5f);
+}
+
 NODE_DEFINE(Integrator)
 {
   NodeType *type = NodeType::add("integrator", create);
@@ -105,6 +128,7 @@ NODE_DEFINE(Integrator)
   SOCKET_BOOLEAN(use_emission, "Use Emission", true);
 
   SOCKET_INT(seed, "Seed", 0);
+
   SOCKET_FLOAT(sample_clamp_direct, "Sample Clamp Direct", 0.0f);
   SOCKET_FLOAT(sample_clamp_indirect, "Sample Clamp Indirect", 10.0f);
   SOCKET_BOOLEAN(motion_blur, "Motion Blur", false);
@@ -133,6 +157,11 @@ NODE_DEFINE(Integrator)
               SAMPLING_PATTERN_TABULATED_SOBOL);
   SOCKET_FLOAT(scrambling_distance, "Scrambling Distance", 1.0f);
 
+  SOCKET_BOOLEAN(use_pixel_jitter, "Use Pixel Jitter", false);
+  SOCKET_BOOLEAN(use_custom_pixel_jitter_sample, "Use custom pixel jitter sample value", false);
+  SOCKET_FLOAT_ARRAY(
+      custom_pixel_jitter_sample, "Custom pixel jitter sample overwrite value", array<float>());
+
   static NodeEnum denoiser_type_enum;
   denoiser_type_enum.insert("none", DENOISER_NONE);
   denoiser_type_enum.insert("optix", DENOISER_OPTIX);
@@ -154,14 +183,14 @@ NODE_DEFINE(Integrator)
   SOCKET_BOOLEAN(use_denoise, "Use Denoiser", false);
   SOCKET_ENUM(denoiser_type, "Denoiser Type", denoiser_type_enum, DENOISER_OPENIMAGEDENOISE);
   SOCKET_INT(denoise_start_sample, "Start Sample to Denoise", 0);
-  SOCKET_BOOLEAN(use_denoise_pass_albedo, "Use Albedo Pass for Denoiser", true);
-  SOCKET_BOOLEAN(use_denoise_pass_normal, "Use Normal Pass for Denoiser", true);
+  SOCKET_INT(denoiser_passes, "Denoiser Passes", DENOISER_PASS_ALBEDO | DENOISER_PASS_NORMAL);
   SOCKET_ENUM(denoiser_prefilter,
               "Denoiser Prefilter",
               denoiser_prefilter_enum,
               DENOISER_PREFILTER_ACCURATE);
   SOCKET_BOOLEAN(denoise_use_gpu, "Denoise on GPU", true);
   SOCKET_ENUM(denoiser_quality, "Denoiser Quality", denoiser_quality_enum, DENOISER_QUALITY_HIGH);
+  SOCKET_FLOAT(denoiser_upscale_factor, "Denoiser Upscale Factor", 1.0f);
 
   return type;
 }
@@ -301,10 +330,19 @@ void Integrator::device_update(Device *device, DeviceScene *dscene, Scene *scene
     kintegrator->blue_noise_sequence_length -= 1;
   }
 
+  /* Randomize the seed every frame when applying pixel jitter. */
+  if (use_pixel_jitter) {
+    if (use_custom_pixel_jitter_sample) {
+      kintegrator->seed = hash_uint2(seed, pixel_jitter_frame);
+    }
+    else {
+      kintegrator->seed = hash_uint3(seed, pixel_jitter_state.a2, pixel_jitter_state.a3);
+    }
+  }
   /* The blue-noise sampler needs a randomized seed to scramble properly, providing e.g. 0 won't
    * work properly. Therefore, hash the seed in those cases. */
-  if (kintegrator->sampling_pattern == SAMPLING_PATTERN_BLUE_NOISE_FIRST ||
-      kintegrator->sampling_pattern == SAMPLING_PATTERN_BLUE_NOISE_PURE)
+  else if (kintegrator->sampling_pattern == SAMPLING_PATTERN_BLUE_NOISE_FIRST ||
+           kintegrator->sampling_pattern == SAMPLING_PATTERN_BLUE_NOISE_PURE)
   {
     kintegrator->seed = hash_uint(seed);
   }
@@ -348,6 +386,21 @@ void Integrator::device_update(Device *device, DeviceScene *dscene, Scene *scene
   }
 
   kintegrator->has_shadow_catcher = scene->has_shadow_catcher();
+
+  if (use_pixel_jitter) {
+    if (use_custom_pixel_jitter_sample) {
+      kintegrator->pixel_jitter = make_float2(custom_pixel_jitter_sample[0],
+                                              custom_pixel_jitter_sample[1]);
+      ++pixel_jitter_frame;
+    }
+    else {
+      kintegrator->pixel_jitter = pixel_jitter_state.next();
+    }
+  }
+  else {
+    kintegrator->pixel_jitter = make_float2(FLT_MAX);
+    pixel_jitter_state.reset();
+  }
 
   dscene->sample_pattern_lut.clear_modified();
   clear_modified();
@@ -417,6 +470,11 @@ AdaptiveSampling Integrator::get_adaptive_sampling() const
 
   adaptive_sampling.use = use_adaptive_sampling;
 
+  /* Disable sample count pass with upscaling. */
+  if (use_denoise && denoiser_upscale_factor != 1.0f) {
+    adaptive_sampling.use = false;
+  }
+
   if (!adaptive_sampling.use) {
     return adaptive_sampling;
   }
@@ -476,11 +534,11 @@ DenoiseParams Integrator::get_denoise_params() const
 
   denoise_params.start_sample = denoise_start_sample;
 
-  denoise_params.use_pass_albedo = use_denoise_pass_albedo;
-  denoise_params.use_pass_normal = use_denoise_pass_normal;
+  denoise_params.passes = denoiser_passes;
 
   denoise_params.prefilter = denoiser_prefilter;
   denoise_params.quality = denoiser_quality;
+  denoise_params.upscale_factor = denoiser_upscale_factor;
 
   return denoise_params;
 }

@@ -11,6 +11,7 @@
 #include <cfloat>
 #include <cstring>
 
+#include "DNA_anim_enums.h"
 #include "DNA_anim_types.h"
 #include "DNA_object_types.h"
 #include "DNA_scene_types.h"
@@ -325,11 +326,11 @@ static void graphedit_activekey_left_handle_coord_cb(bContext *C, void *fcu_ptr,
 {
   BezTriple *bezt = static_cast<BezTriple *>(bezt_ptr);
 
-  const char f1 = bezt->f1;
-  const char f3 = bezt->f3;
+  const eBezTriple_Flag f1 = bezt->f1;
+  const eBezTriple_Flag f3 = bezt->f3;
 
-  bezt->f1 |= SELECT;
-  bezt->f3 &= ~SELECT;
+  bezt->f1 |= BEZT_FLAG_SELECT;
+  bezt->f3 &= ~BEZT_FLAG_SELECT;
 
   /* perform normal updates NOW */
   graphedit_activekey_handles_cb(C, fcu_ptr, bezt_ptr);
@@ -344,14 +345,14 @@ static void graphedit_activekey_right_handle_coord_cb(bContext *C, void *fcu_ptr
   BezTriple *bezt = static_cast<BezTriple *>(bezt_ptr);
 
   /* original state of handle selection - to be restored after performing the recalculation */
-  const char f1 = bezt->f1;
-  const char f3 = bezt->f3;
+  const eBezTriple_Flag f1 = bezt->f1;
+  const eBezTriple_Flag f3 = bezt->f3;
 
   /* temporarily make it so that only the right handle is selected, so that updates go correctly
    * (i.e. it now acts as if we've just transforming the vert when it is selected by itself)
    */
-  bezt->f1 &= ~SELECT;
-  bezt->f3 |= SELECT;
+  bezt->f1 &= ~BEZT_FLAG_SELECT;
+  bezt->f3 |= BEZT_FLAG_SELECT;
 
   /* perform normal updates NOW */
   graphedit_activekey_handles_cb(C, fcu_ptr, bezt_ptr);
@@ -1057,10 +1058,10 @@ static void graph_draw_driver_settings_panel(ui::Layout &layout,
      *       primarily when users mistakenly try to use drivers for procedural
      *       property animation
      */
-    if (BLI_listbase_is_empty(&driver->variables)) {
+    if (driver->variables.is_empty()) {
       col.label(RPT_("ERROR: Driver is useless without any inputs"), ICON_ERROR);
 
-      if (!BLI_listbase_is_empty(&fcu->modifiers)) {
+      if (!fcu->modifiers.is_empty()) {
         col.label(RPT_("TIP: Use F-Curves for procedural animation instead"), ICON_INFO);
         col.label(RPT_("F-Modifiers can generate curves for those too"), ICON_INFO);
       }
@@ -1190,6 +1191,8 @@ static void graph_draw_driver_settings_panel(ui::Layout &layout,
         break;
       case DVAR_TYPE_CONTEXT_PROP: /* context property */
         graph_panel_driverVar__contextProp(box, id, &dvar);
+        break;
+      case MAX_DVAR_TYPES:
         break;
     }
 

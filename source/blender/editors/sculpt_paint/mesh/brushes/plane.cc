@@ -59,6 +59,7 @@ static void calc_local_positions(const float4x4 &mat,
                                  const Span<float3> positions,
                                  const MutableSpan<float3> local_positions)
 {
+  PRF_scope(ProfileCategory::Editor);
   for (const int i : verts.index_range()) {
     local_positions[i] = math::transform_point(mat, positions[verts[i]]);
   }
@@ -81,6 +82,7 @@ static void calc_local_distances(const float height,
                                  const MutableSpan<float3> local_positions,
                                  const MutableSpan<float> distances)
 {
+  PRF_scope(ProfileCategory::Editor);
   if (height != 0.0f) {
     const float height_rcp = math::rcp(height);
 
@@ -133,6 +135,7 @@ static void scale_factors_by_height_and_depth(const float height,
                                               const MutableSpan<float3> local_positions,
                                               const MutableSpan<float> factors)
 {
+  PRF_scope(ProfileCategory::Editor);
   if (!ELEM(height, 1.0f, 0.0f)) {
     for (const int i : factors.index_range()) {
       if (local_positions[i].z > 0.0f) {
@@ -179,6 +182,7 @@ static void calc_translations(const float3 &plane_normal,
                               const MutableSpan<float> factors,
                               const MutableSpan<float3> r_translations)
 {
+  PRF_scope(ProfileCategory::Editor);
   for (const int i : local_positions.index_range()) {
     factors[i] *= local_positions[i].z;
   }
@@ -366,6 +370,7 @@ void do_plane_brush(const Depsgraph &depsgraph,
                     const float3 &plane_normal,
                     const float3 &plane_center)
 {
+  PRF_scope(ProfileCategory::Editor);
   const SculptSession &ss = *object.runtime->sculpt_session;
   bke::pbvh::Tree &pbvh = *bke::object::pbvh_get(object);
   const Brush &brush = *BKE_paint_brush_for_read(&sd.paint);
@@ -421,46 +426,52 @@ void do_plane_brush(const Depsgraph &depsgraph,
       const PositionDeformData position_data(depsgraph, object);
       const Span<float3> vert_normals = bke::pbvh::vert_normals_eval(depsgraph, object);
       MutableSpan<bke::pbvh::MeshNode> nodes = pbvh.nodes<bke::pbvh::MeshNode>();
-      node_mask.foreach_index(GrainSize(1), [&](const int i) {
-        LocalData &tls = all_tls.local();
-        calc_faces(depsgraph,
-                   sd,
-                   brush,
-                   mat,
-                   normal,
-                   strength,
-                   height,
-                   depth,
-                   attribute_data,
-                   vert_normals,
-                   nodes[i],
-                   object,
-                   tls,
-                   position_data);
-        bke::pbvh::update_node_bounds_mesh(position_data.eval, nodes[i]);
-      });
+      node_mask.foreach_index(
+          [&](const int i) {
+            LocalData &tls = all_tls.local();
+            calc_faces(depsgraph,
+                       sd,
+                       brush,
+                       mat,
+                       normal,
+                       strength,
+                       height,
+                       depth,
+                       attribute_data,
+                       vert_normals,
+                       nodes[i],
+                       object,
+                       tls,
+                       position_data);
+            bke::pbvh::update_node_bounds_mesh(position_data.eval, nodes[i]);
+          },
+          exec_mode::grain_size(1));
       break;
     }
     case bke::pbvh::Type::Grids: {
       SubdivCCG &subdiv_ccg = *object.runtime->sculpt_session->subdiv_ccg;
       MutableSpan<float3> positions = subdiv_ccg.positions;
       MutableSpan<bke::pbvh::GridsNode> nodes = pbvh.nodes<bke::pbvh::GridsNode>();
-      node_mask.foreach_index(GrainSize(1), [&](const int i) {
-        LocalData &tls = all_tls.local();
-        calc_grids(
-            depsgraph, sd, object, brush, mat, normal, strength, height, depth, nodes[i], tls);
-        bke::pbvh::update_node_bounds_grids(subdiv_ccg.grid_area, positions, nodes[i]);
-      });
+      node_mask.foreach_index(
+          [&](const int i) {
+            LocalData &tls = all_tls.local();
+            calc_grids(
+                depsgraph, sd, object, brush, mat, normal, strength, height, depth, nodes[i], tls);
+            bke::pbvh::update_node_bounds_grids(subdiv_ccg.grid_area, positions, nodes[i]);
+          },
+          exec_mode::grain_size(1));
       break;
     }
     case bke::pbvh::Type::BMesh: {
       MutableSpan<bke::pbvh::BMeshNode> nodes = pbvh.nodes<bke::pbvh::BMeshNode>();
-      node_mask.foreach_index(GrainSize(1), [&](const int i) {
-        LocalData &tls = all_tls.local();
-        calc_bmesh(
-            depsgraph, sd, object, brush, mat, normal, strength, height, depth, nodes[i], tls);
-        bke::pbvh::update_node_bounds_bmesh(nodes[i]);
-      });
+      node_mask.foreach_index(
+          [&](const int i) {
+            LocalData &tls = all_tls.local();
+            calc_bmesh(
+                depsgraph, sd, object, brush, mat, normal, strength, height, depth, nodes[i], tls);
+            bke::pbvh::update_node_bounds_bmesh(nodes[i]);
+          },
+          exec_mode::grain_size(1));
       break;
     }
   }

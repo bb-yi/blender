@@ -105,7 +105,6 @@ set(SRC_GLSL_VERT
 )
 
 set(SRC_GLSL_FRAG
-  overlay_antialiasing_frag.glsl
   overlay_armature_dof_solid_frag.glsl
   overlay_armature_envelope_solid_frag.glsl
   overlay_armature_shape_solid_frag.glsl
@@ -144,7 +143,6 @@ set(SRC_GLSL_FRAG
   overlay_varying_color.glsl
   overlay_viewer_attribute_frag.glsl
   overlay_wireframe_frag.glsl
-  overlay_xray_fade_frag.glsl
 )
 
 
@@ -158,15 +156,19 @@ set(SRC_GLSL_LIB
   # overlay_edit_mesh_lib.glsl # TODO(fclem) Contains reference from the shader interface.
 )
 
+set(SRC_BSL
+  bsl_shader_linting.cc
+)
+
 # Compile shaders with shader code.
 if(WITH_GPU_SHADER_CPP_COMPILATION)
-  with_shader_cpp_compilation_config()
   # TODO Remove
   add_definitions(-DUSE_GPU_SHADER_CREATE_INFO)
 
   compile_sources_as_cpp(overlay_cpp_shaders_vert "${SRC_GLSL_VERT}" "GPU_VERTEX_SHADER")
   compile_sources_as_cpp(overlay_cpp_shaders_frag "${SRC_GLSL_FRAG}" "GPU_FRAGMENT_SHADER")
   # compile_sources_as_cpp(overlay_cpp_shaders_comp "${SRC_GLSL_COMP}" "GPU_COMPUTE_SHADER")
+  compile_sources_as_cpp(overlay_cpp_shaders_bsl  "${SRC_BSL}" "")
   # Only enable to make sure they compile on their own.
   # Otherwise it creates a warning about `pragma once`.
   # compile_sources_as_cpp(overlay_cpp_shaders_lib "${SRC_GLSL_LIB}" "GPU_LIBRARY_SHADER")

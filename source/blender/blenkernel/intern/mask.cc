@@ -65,7 +65,7 @@ static void mask_copy_data(Main * /*bmain*/,
   Mask *mask_dst = id_cast<Mask *>(id_dst);
   const Mask *mask_src = id_cast<const Mask *>(id_src);
 
-  BLI_listbase_clear(&mask_dst->masklayers);
+  mask_dst->masklayers.clear_no_delete();
 
   /* TODO: add unused flag to those as well. */
   BKE_mask_layer_copy_list(&mask_dst->masklayers, &mask_src->masklayers);
@@ -129,9 +129,9 @@ static void mask_blend_write(BlendWriter *writer, ID *id, const void *id_address
 
     for (MaskLayerShape &masklay_shape : masklay.splines_shapes) {
       writer->write_struct(&masklay_shape);
-      BLO_write_float_array(writer,
-                            masklay_shape.tot_vert * (sizeof(MaskLayerShapeElem) / sizeof(float)),
-                            masklay_shape.data);
+      writer->write_float_array(masklay_shape.tot_vert *
+                                    (sizeof(MaskLayerShapeElem) / sizeof(float)),
+                                masklay_shape.data);
     }
   }
 }
@@ -151,13 +151,13 @@ static void mask_blend_read_data(BlendDataReader *reader, ID *id)
     for (MaskSpline &spline : masklay.splines) {
       MaskSplinePoint *points_old = spline.points;
 
-      BLO_read_struct_array(reader, MaskSplinePoint, spline.tot_point, &spline.points);
+      BLO_read_array_and_validate_size(reader, &spline.points, &spline.tot_point);
 
       for (int i = 0; i < spline.tot_point; i++) {
         MaskSplinePoint *point = &spline.points[i];
 
         if (point->tot_uw) {
-          BLO_read_struct_array(reader, MaskSplinePointUW, point->tot_uw, &point->uw);
+          BLO_read_array_and_validate_size(reader, &point->uw, &point->tot_uw);
         }
       }
 
@@ -172,9 +172,13 @@ static void mask_blend_read_data(BlendDataReader *reader, ID *id)
     BLO_read_struct_list(reader, MaskLayerShape, &masklay.splines_shapes);
 
     for (MaskLayerShape &masklay_shape : masklay.splines_shapes) {
-      BLO_read_float_array(reader,
-                           masklay_shape.tot_vert * (sizeof(MaskLayerShapeElem) / sizeof(float)),
-                           &masklay_shape.data);
+      if (!BLO_read_array(reader,
+                          &masklay_shape.data,
+                          masklay_shape.tot_vert,
+                          sizeof(MaskLayerShapeElem) / sizeof(float)))
+      {
+        masklay_shape.tot_vert = 0;
+      }
     }
 
     BLO_read_struct(reader, MaskSpline, &masklay.act_spline);
@@ -185,34 +189,34 @@ static void mask_blend_read_data(BlendDataReader *reader, ID *id)
 }
 
 IDTypeInfo IDType_ID_MSK = {
-    /*id_code*/ Mask::id_type,
-    /*id_filter*/ FILTER_ID_MSK,
-    /*dependencies_id_types*/ FILTER_ID_MC, /* WARNING! mask->parent.id, not typed. */
-    /*main_listbase_index*/ INDEX_ID_MSK,
-    /*struct_size*/ sizeof(Mask),
-    /*name*/ "Mask",
-    /*name_plural*/ N_("masks"),
-    /*translation_context*/ BLT_I18NCONTEXT_ID_MASK,
-    /*flags*/ IDTYPE_FLAGS_APPEND_IS_REUSABLE,
-    /*asset_type_info*/ nullptr,
+    .id_code = Mask::id_type,
+    .id_filter = FILTER_ID_MSK,
+    .dependencies_id_types = FILTER_ID_MC, /* WARNING! mask->parent.id, not typed. */
+    .main_listbase_index = INDEX_ID_MSK,
+    .struct_size = sizeof(Mask),
+    .name = "Mask",
+    .name_plural = N_("masks"),
+    .translation_context = BLT_I18NCONTEXT_ID_MASK,
+    .flags = IDTYPE_FLAGS_APPEND_IS_REUSABLE,
+    .asset_type_info = nullptr,
 
-    /*init_data*/ nullptr,
-    /*copy_data*/ mask_copy_data,
-    /*free_data*/ mask_free_data,
-    /*make_local*/ nullptr,
-    /*foreach_id*/ mask_foreach_id,
-    /*foreach_cache*/ nullptr,
-    /*foreach_path*/ nullptr,
-    /*foreach_working_space_color*/ nullptr,
-    /*owner_pointer_get*/ nullptr,
+    .init_data = nullptr,
+    .copy_data = mask_copy_data,
+    .free_data = mask_free_data,
+    .make_local = nullptr,
+    .foreach_id = mask_foreach_id,
+    .foreach_cache = nullptr,
+    .foreach_path = nullptr,
+    .foreach_working_space_color = nullptr,
+    .owner_pointer_get = nullptr,
 
-    /*blend_write*/ mask_blend_write,
-    /*blend_read_data*/ mask_blend_read_data,
-    /*blend_read_after_liblink*/ nullptr,
+    .blend_write = mask_blend_write,
+    .blend_read_data = mask_blend_read_data,
+    .blend_read_after_liblink = nullptr,
 
-    /*blend_read_undo_preserve*/ nullptr,
+    .blend_read_undo_preserve = nullptr,
 
-    /*lib_override_apply_post*/ nullptr,
+    .lib_override_apply_post = nullptr,
 };
 
 struct MaskClipboard {
@@ -310,6 +314,7 @@ MaskLayer *BKE_mask_layer_new(Mask *mask, const char *name)
   masklay->blend = MASK_BLEND_MERGE_ADD;
   masklay->alpha = 1.0f;
   masklay->flag = MASK_LAYERFLAG_FILL_DISCRETE | MASK_LAYERFLAG_FILL_OVERLAP;
+  masklay->fill_solver = MASK_FILL_SOLVER_CDT;
 
   return masklay;
 }
@@ -317,6 +322,16 @@ MaskLayer *BKE_mask_layer_new(Mask *mask, const char *name)
 MaskLayer *BKE_mask_layer_active(Mask *mask)
 {
   return static_cast<MaskLayer *>(BLI_findlink(&mask->masklayers, mask->masklay_act));
+}
+
+MaskLayer *BKE_mask_layer_by_name(Mask *mask, const char *layer_name)
+{
+  for (MaskLayer &mask_layer : mask->masklayers) {
+    if (STREQ(mask_layer.name, layer_name)) {
+      return &mask_layer;
+    }
+  }
+  return nullptr;
 }
 
 void BKE_mask_layer_active_set(Mask *mask, MaskLayer *masklay)
@@ -370,6 +385,7 @@ MaskLayer *BKE_mask_layer_copy(const MaskLayer *masklay)
   masklay_new->blend_flag = masklay->blend_flag;
   masklay_new->flag = masklay->flag;
   masklay_new->falloff = masklay->falloff;
+  masklay_new->fill_solver = masklay->fill_solver;
   masklay_new->visibility_flag = masklay->visibility_flag;
 
   for (MaskSpline &spline : masklay->splines) {
@@ -439,6 +455,16 @@ MaskSpline *BKE_mask_spline_add(MaskLayer *masklay)
   BKE_mask_parent_init(&spline->parent);
 
   return spline;
+}
+
+void BKE_mask_spline_move_to_layer(MaskSpline *spline,
+                                   MaskLayer *src_mask_layer,
+                                   MaskLayer *dst_mask_layer)
+{
+  if (src_mask_layer != dst_mask_layer) {
+    BLI_remlink(&src_mask_layer->splines, spline);
+    BLI_addtail(&dst_mask_layer->splines, spline);
+  }
 }
 
 bool BKE_mask_spline_remove(MaskLayer *mask_layer, MaskSpline *spline)
@@ -928,14 +954,14 @@ void BKE_mask_point_select_set_handle(MaskSplinePoint *point,
 {
   if (do_select) {
     if (ELEM(which_handle, MASK_WHICH_HANDLE_STICK, MASK_WHICH_HANDLE_BOTH)) {
-      point->bezt.f1 |= SELECT;
-      point->bezt.f3 |= SELECT;
+      point->bezt.f1 |= BEZT_FLAG_SELECT;
+      point->bezt.f3 |= BEZT_FLAG_SELECT;
     }
     else if (which_handle == MASK_WHICH_HANDLE_LEFT) {
-      point->bezt.f1 |= SELECT;
+      point->bezt.f1 |= BEZT_FLAG_SELECT;
     }
     else if (which_handle == MASK_WHICH_HANDLE_RIGHT) {
-      point->bezt.f3 |= SELECT;
+      point->bezt.f3 |= BEZT_FLAG_SELECT;
     }
     else {
       BLI_assert_msg(0, "Wrong which_handle passed to BKE_mask_point_select_set_handle");
@@ -943,14 +969,14 @@ void BKE_mask_point_select_set_handle(MaskSplinePoint *point,
   }
   else {
     if (ELEM(which_handle, MASK_WHICH_HANDLE_STICK, MASK_WHICH_HANDLE_BOTH)) {
-      point->bezt.f1 &= ~SELECT;
-      point->bezt.f3 &= ~SELECT;
+      point->bezt.f1 &= ~BEZT_FLAG_SELECT;
+      point->bezt.f3 &= ~BEZT_FLAG_SELECT;
     }
     else if (which_handle == MASK_WHICH_HANDLE_LEFT) {
-      point->bezt.f1 &= ~SELECT;
+      point->bezt.f1 &= ~BEZT_FLAG_SELECT;
     }
     else if (which_handle == MASK_WHICH_HANDLE_RIGHT) {
-      point->bezt.f3 &= ~SELECT;
+      point->bezt.f3 &= ~BEZT_FLAG_SELECT;
     }
     else {
       BLI_assert_msg(0, "Wrong which_handle passed to BKE_mask_point_select_set_handle");
@@ -1441,7 +1467,7 @@ void BKE_mask_calc_handle_point_auto(MaskSpline *spline,
                                      const bool do_recalc_length)
 {
   MaskSplinePoint *point_prev, *point_next;
-  const uint8_t h_back[2] = {point->bezt.h1, point->bezt.h2};
+  const eBezTriple_Handle h_back[2] = {point->bezt.h1, point->bezt.h2};
   const float length_average = (do_recalc_length) ?
                                    0.0f /* dummy value */ :
                                    (len_v3v3(point->bezt.vec[0], point->bezt.vec[1]) +
@@ -1941,7 +1967,7 @@ static void mask_clipboard_clear()
 {
   MaskClipboard &mask_clipboard = get_mask_clipboard();
   BKE_mask_spline_free_list(&mask_clipboard.splines);
-  BLI_listbase_clear(&mask_clipboard.splines);
+  mask_clipboard.splines.clear_no_delete();
   mask_clipboard.id_hash.clear();
 }
 

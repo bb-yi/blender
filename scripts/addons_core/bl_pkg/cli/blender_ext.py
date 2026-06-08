@@ -1141,6 +1141,10 @@ class PathPatternMatch:
     def _pattern_match_as_regex_single(pattern: str) -> str:
         from fnmatch import translate
 
+        # `fnmatch.translate` appends an end-of-string anchor: `\Z` on Python 3.13 and earlier,
+        # `\z` on 3.14+. Both are equivalent.
+        translate_end_anchor = "\\z" if sys.version_info >= (3, 14) else "\\Z"
+
         # Special case: `!` literal prefix, needed to avoid this being handled as negation.
         if pattern.startswith("\\!"):
             pattern = pattern[1:]
@@ -1211,7 +1215,7 @@ class PathPatternMatch:
             #
             # - Always adds an "end-of-string" match which isn't desired here.
             #
-            elem_regex = translate(pattern_split[i]).removesuffix("\\Z")
+            elem_regex = translate(pattern_split[i]).removesuffix(translate_end_anchor)
             # Don't match newlines.
             if elem_regex.startswith("(?s:"):
                 elem_regex = "(?:" + elem_regex[4:]
@@ -1368,7 +1372,7 @@ def url_retrieve_to_data_iter(
         )
 
 
-# See `url_retrieve_to_data_iter` doc-string.
+# See `url_retrieve_to_data_iter` docstring.
 def url_retrieve_to_filepath_iter(
         url: str,
         filepath: str,
@@ -1393,7 +1397,7 @@ def url_retrieve_to_filepath_iter(
             yield len(block)
 
 
-# See `url_retrieve_to_data_iter` doc-string.
+# See `url_retrieve_to_data_iter` docstring.
 def filepath_retrieve_to_filepath_iter(
         filepath_src: str,
         filepath: str,
@@ -1438,7 +1442,7 @@ def url_retrieve_to_data_iter_or_filesystem(
         )
 
 
-# See `url_retrieve_to_data_iter` doc-string.
+# See `url_retrieve_to_data_iter` docstring.
 def url_retrieve_to_filepath_iter_or_filesystem(
         url: str,
         filepath: str,
@@ -1729,7 +1733,7 @@ def pkg_manifest_validate_field_type(value: str, strict: bool) -> str | None:
     # NOTE: add "keymap" in the future.
     value_expected = PKG_MANIFEST_TYPE_SUPPORTED
     if value not in value_expected:
-        return "Expected to be one of [{:s}], found {!r}".format(", ".join(value_expected), value)
+        return "Expected to be one of [{:s}], found {!r}".format(", ".join(sorted(value_expected)), value)
     return None
 
 

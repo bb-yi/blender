@@ -4,6 +4,8 @@
 
 #include "scene/image_sky.h"
 
+#include "util/image_metadata.h"
+
 #include "sky_nishita.h"
 
 CCL_NAMESPACE_BEGIN
@@ -25,7 +27,9 @@ SkyLoader::SkyLoader(const bool multiple_scattering,
 
 SkyLoader::~SkyLoader() = default;
 
-bool SkyLoader::load_metadata(ImageMetaData &metadata)
+bool SkyLoader::load_metadata(ImageMetaData &metadata,
+                              const ImageLoaderParams & /*params*/,
+                              Progress & /*progress*/)
 {
   metadata.width = 512;
   metadata.height = 256;

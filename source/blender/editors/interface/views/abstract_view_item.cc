@@ -32,6 +32,9 @@ void AbstractViewItem::update_from_old(const AbstractViewItem &old)
   is_renaming_ = old.is_renaming_;
   is_highlighted_search_ = old.is_highlighted_search_;
   is_selected_ = old.is_selected_;
+  if (old.view_item_but_ && old.view_item_but_->flag & UI_HOVER) {
+    is_hovered_ = true;
+  }
 }
 
 /** \} */
@@ -197,36 +200,6 @@ void AbstractViewItem::end_renaming()
   view.end_renaming();
 }
 
-static AbstractViewItem *find_item_from_rename_button(const Button &rename_but)
-{
-  /* A minimal sanity check, can't do much more here. */
-  BLI_assert(rename_but.type == ButtonType::Text && rename_but.poin);
-
-  for (const std::unique_ptr<Button> &but : rename_but.block->buttons) {
-    if (but->type != ButtonType::ViewItem) {
-      continue;
-    }
-
-    ButtonViewItem *view_item_but = static_cast<ButtonViewItem *>(but.get());
-    AbstractViewItem *item = view_item_but->view_item;
-    const AbstractView &view = item->get_view();
-
-    if (item->is_renaming() && (view.get_rename_buffer().data() == rename_but.poin)) {
-      return item;
-    }
-  }
-
-  return nullptr;
-}
-
-static void rename_button_fn(bContext *C, void *arg, char * /*origstr*/)
-{
-  const Button *rename_but = static_cast<Button *>(arg);
-  AbstractViewItem *item = find_item_from_rename_button(*rename_but);
-  BLI_assert(item);
-  item->rename_apply(*C);
-}
-
 void AbstractViewItem::add_rename_button(Block &block)
 {
   AbstractView &view = this->get_view();
@@ -244,7 +217,9 @@ void AbstractViewItem::add_rename_button(Block &block)
 
   /* Gotta be careful with what's passed to the `arg1` here. Any view data will be freed once the
    * callback is executed. */
-  button_func_rename_set(rename_but, rename_button_fn, rename_but);
+  text_button_func_rename_set(
+      rename_but,
+      [item = this](bContext &C, StringRefNull /*oldname*/) -> void { item->rename_apply(C); });
   button_flag_disable(rename_but, BUT_UNDO);
 
   const bContext *evil_C = reinterpret_cast<bContext *>(block.evil_C);
@@ -283,9 +258,9 @@ void AbstractViewItem::build_context_menu(bContext & /*C*/, Layout & /*column*/)
 /** \name Filtering
  * \{ */
 
-bool AbstractViewItem::should_be_filtered_visible(const StringRefNull filter_string) const
+bool AbstractViewItem::should_be_filtered_visible(StringRefNull filter_string) const
 {
-  StringRef name = this->get_rename_string();
+  const StringRef name = this->get_rename_string();
   return fnmatch(filter_string.c_str(), name.data(), FNM_CASEFOLD) == 0;
 }
 
@@ -378,6 +353,13 @@ void AbstractViewItem::disable_interaction()
 bool AbstractViewItem::is_interactive() const
 {
   return is_interactive_;
+}
+
+bool AbstractViewItem::is_hovered() const
+{
+  BLI_assert_msg(this->get_view().is_reconstructed(),
+                 "State cannot be queried until reconstruction is completed");
+  return is_hovered_;
 }
 
 bool AbstractViewItem::is_active() const

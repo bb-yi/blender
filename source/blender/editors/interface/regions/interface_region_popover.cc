@@ -38,6 +38,8 @@
 #include "BKE_report.hh"
 #include "BKE_screen.hh"
 
+#include "ED_screen.hh"
+
 #include "WM_api.hh"
 #include "WM_types.hh"
 
@@ -77,10 +79,10 @@ struct Popover {
  * \param region: Optional, the region the block will be placed in. Must be set if the popover is
  *                supposed to support refreshing.
  */
-static void ui_popover_create_block(bContext *C,
-                                    ARegion *region,
-                                    Popover *pup,
-                                    wm::OpCallContext opcontext)
+static void popover_create_block(bContext *C,
+                                 ARegion *region,
+                                 Popover *pup,
+                                 wm::OpCallContext opcontext)
 {
   BLI_assert(pup->ui_size_x != 0);
 
@@ -113,7 +115,7 @@ static Block *block_func_POPOVER(bContext *C, PopupBlockHandle *handle, void *ar
 
   /* Create UI block and layout now if it wasn't done between begin/end. */
   if (!pup->layout) {
-    ui_popover_create_block(C, handle->region, pup, wm::OpCallContext::InvokeRegionWin);
+    popover_create_block(C, handle->region, pup, wm::OpCallContext::InvokeRegionWin);
 
     if (pup->popover_func) {
       pup->block->handle = handle;
@@ -134,8 +136,11 @@ static Block *block_func_POPOVER(bContext *C, PopupBlockHandle *handle, void *ar
   }
 
   block_layout_resolve(block);
-  const int direction = (pup->panel_type && (pup->panel_type->popup_draw_direction ==
-                                             PopupAttachDirection::Horizontal)) ?
+  const ButtonMenu *popover_button = pup->but && pup->but->type == ButtonType::Popover ?
+                                         static_cast<ButtonMenu *>(pup->but) :
+                                         nullptr;
+  const int direction = (popover_button && (popover_button->popup_attach_direction ==
+                                            PopupAttachDirection::Horizontal)) ?
                             UI_DIR_LEFT :
                             UI_DIR_DOWN | UI_DIR_CENTER_X;
   block_direction_set(block, direction);
@@ -212,14 +217,14 @@ static Block *block_func_POPOVER(bContext *C, PopupBlockHandle *handle, void *ar
     block->minbounds = UI_MENU_WIDTH_MIN;
 
     if (!handle->refresh) {
-      Button *but = nullptr;
-      Button *but_first = nullptr;
-      for (const std::unique_ptr<Button> &but_iter : block->buttons) {
-        if ((but_first == nullptr) && button_is_editable(but_iter.get())) {
-          but_first = but_iter.get();
+      const Button *but = nullptr;
+      const Button *but_first = nullptr;
+      for (const Button &but_iter : block->buttons()) {
+        if ((but_first == nullptr) && button_is_editable(&but_iter)) {
+          but_first = &but_iter;
         }
-        if (but_iter->flag & (UI_SELECT | UI_SELECT_DRAW)) {
-          but = but_iter.get();
+        if (but_iter.flag & (UI_SELECT | UI_SELECT_DRAW)) {
+          but = &but_iter;
           break;
         }
       }
@@ -329,6 +334,14 @@ wmOperatorStatus popover_panel_invoke(bContext *C,
     PopupBlockHandle *handle = popover_panel_create(C, nullptr, nullptr, item_paneltype_func, pt);
     Popover *pup = static_cast<Popover *>(handle->popup_create_vars.arg);
     block = pup->block;
+
+    /* Refresh so the block is recreated with the region visible.
+     *
+     * Without this, `block_begin` sets #BLOCK_LOOP before the region is shown,
+     * causing `template_popup_confirm` to skip attaching its close callback
+     * (since it assumes #BLOCK_LOOP menus close via `menuretval`).
+     * With #BLOCK_KEEP_OPEN set this doesn't happen, see #151778. */
+    ED_region_tag_refresh_ui(handle->region);
   }
   else {
     Popover *pup = popover_begin(C, U.widget_unit * pt->ui_units_x, false);
@@ -374,7 +387,7 @@ Popover *popover_begin(bContext *C, int ui_menu_width, bool from_active_button)
   pup->butregion = butregion;
 
   /* Operator context default same as menus, change if needed. */
-  ui_popover_create_block(C, nullptr, pup, wm::OpCallContext::ExecRegionWin);
+  popover_create_block(C, nullptr, pup, wm::OpCallContext::ExecRegionWin);
 
   /* Create in advance so we can let buttons point to #PopupBlockHandle::retvalue
    * (and other return values) already. */

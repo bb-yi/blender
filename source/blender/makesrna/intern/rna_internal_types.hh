@@ -26,7 +26,6 @@ struct BlenderRNA;
 struct CollectionPropertyIterator;
 struct ContainerRNA;
 struct FunctionRNA;
-struct GHash;
 struct IDOverrideLibrary;
 struct IDOverrideLibraryPropertyOperation;
 struct IDProperty;
@@ -58,7 +57,6 @@ using EditableFunc = int (*)(const PointerRNA *ptr, const char **r_info);
 using ItemEditableFunc = int (*)(const PointerRNA *ptr, int index);
 using IDPropertiesFunc = IDProperty **(*)(PointerRNA * ptr);
 using StructRefineFunc = StructRNA *(*)(PointerRNA * ptr);
-using StructPathFunc = std::optional<std::string> (*)(const PointerRNA *ptr);
 using PropUINameFunc = const char *(*)(const PointerRNA *ptr,
                                        const PropertyRNA *prop,
                                        bool do_translate);
@@ -323,6 +321,12 @@ struct RNAPropertyOverrideApplyContext {
   IDOverrideLibrary *liboverride = nullptr;
   IDOverrideLibraryProperty *liboverride_property = nullptr;
   IDOverrideLibraryPropertyOperation *liboverride_operation = nullptr;
+  /**
+   * Previous liboverride property & operation. Only set when applying a generic 'REPLACE'
+   * operation to revert changes in the liboverride to the reference data, null otherwise.
+   */
+  IDOverrideLibraryProperty *liboverride_removed_property = nullptr;
+  IDOverrideLibraryPropertyOperation *liboverride_removed_operation = nullptr;
 
   /* TODO: Add more refined/descriptive result report? */
 };
@@ -746,8 +750,38 @@ struct BlenderRNA {
    * These are ensured to have unique names (with #STRUCT_PUBLIC_NAMESPACE enabled).
    */
   Map<StringRef, StructRNA *> structs_map;
+
+  /**
+   * This RNA container is created at runtime and is not the main static RNA. This is currently
+   * needed because we the main RNA static RNA container is cleared via #RNA_exit() rather than
+   * relying on static initialization order (and therefore the destructor), and we need some way to
+   * signal this.
+   */
+  bool runtime;
 };
 
 #define CONTAINER_RNA_ID(cont) (*(const char **)(((ContainerRNA *)(cont)) + 1))
+
+/* Check compatibility of DNA types with RNA types. */
+inline bool is_dnatype_float_compat(const StringRef dnatype)
+{
+  return ELEM(dnatype, "float", "double");
+}
+inline bool is_dnatype_int_compat(const StringRef dnatype)
+{
+  return ELEM(dnatype, "int", "short", "char", "uchar", "ushort", "int8_t");
+}
+inline bool is_dnatype_boolean_compat(const StringRef dnatype)
+{
+  return is_dnatype_int_compat(dnatype) || ELEM(dnatype, "int64_t", "uint64_t");
+}
+inline bool is_dnatype_boolean_bitshift_fullrange_compat(const StringRef dnatype)
+{
+  /* Several types cannot use all their bytes to store a bit-set (bit-shift operations on negative
+   * numbers are "arithmetic", i.e. preserve the sign, i.e. are not "pure" binary shifting).
+   *
+   * Currently, all signed types and `uint64_t` cannot use their left-most bit (i.e. sign bit). */
+  return ELEM(dnatype, "char", "uchar", "ushort", "uint", "uint8_t", "uint16_t", "uint32_t");
+}
 
 }  // namespace blender

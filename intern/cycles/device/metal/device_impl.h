@@ -37,7 +37,7 @@ class MetalDevice : public Device {
   id<MTLBuffer> launch_params_buffer = nil;
   KernelParamsMetal *launch_params = nullptr;
 
-  /* MetalRT members ----------------------------------*/
+  /* MetalRT members ---------------------------------- */
   bool use_metalrt = false;
   bool use_metalrt_extended_limits = false;
   bool motion_blur = false;
@@ -53,7 +53,25 @@ class MetalDevice : public Device {
 
   API_AVAILABLE(macos(11.0))
   id<MTLAccelerationStructure> accel_struct = nil;
-  /*---------------------------------------------------*/
+
+  /* Residency sets -----------------------------------*/
+  void prepare_residency();
+  void metal_mem_alloc(id<MTLResource> allocation);
+  void metal_mem_free(id<MTLResource> allocation);
+
+  /* For externally-owned resources (e.g. graphics interop buffers) which need to be resident for
+   * kernels to access them, but shouldn't be included in our stats. */
+  void add_to_residency_set(id<MTLResource> allocation);
+  void remove_from_residency_set(id<MTLResource> allocation);
+
+  bool mtlResidencySet_enabled = false;
+#  if defined(MAC_OS_VERSION_15_0)
+  API_AVAILABLE(macos(15.0), ios(18.0))
+  id<MTLResidencySet> mtlResidencySet = nil;
+  bool mtlResidencySet_dirty = false;
+  /* Guards mtlResidencySet mutations (may be reached from multiple threads). */
+  std::mutex mtlResidencySet_mutex;
+#  endif
 
   uint kernel_features = 0;
   bool using_nanovdb = false;
@@ -80,7 +98,7 @@ class MetalDevice : public Device {
   bool is_texture(const KernelImageInfo &info);
   device_vector<KernelImageInfo> image_info;
   id<MTLBuffer> image_bindings = nil;
-  std::vector<id<MTLResource>> image_slot_map;
+  std::vector<id<MTLResource>> image_info_id_map;
 
   MetalPipelineType kernel_specialization_level = PSO_GENERIC;
 
@@ -167,6 +185,8 @@ class MetalDevice : public Device {
   void mem_copy_from(
       device_memory &mem, const size_t y, size_t w, const size_t h, size_t elem) override;
 
+  void mem_or_from_device(device_memory &mem) override;
+
   void mem_zero(device_memory &mem) override;
 
   void mem_free(device_memory &mem) override;
@@ -182,6 +202,8 @@ class MetalDevice : public Device {
   void image_alloc_as_buffer(device_image &mem);
   void image_copy_to(device_image &mem);
   void image_free(device_image &mem);
+
+  bool has_unified_memory() const override;
 
   void flush_delayed_free_list();
 

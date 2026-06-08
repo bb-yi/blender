@@ -7,6 +7,7 @@ set(CERES_EXTRA_ARGS
   -DEigen3_DIR=${LIBDIR}/eigen/share/eigen3/cmake/
   -DTBB_DIR=${LIBDIR}/tbb/lib/cmake/TBB
   -DBUILD_TESTING=OFF
+  -DBUILD_BENCHMARKS=OFF
   -DUSE_CUDA=OFF
   -DBUILD_EXAMPLES=OFF
   -DBUILD_SHARED_LIBS=ON
@@ -33,9 +34,15 @@ add_dependencies(
   external_eigen
 )
 
-ExternalProject_Add_Step(external_ceres after_install
-  COMMAND ${CMAKE_COMMAND} -E copy_directory
-  ${LIBDIR}/ceres
-  ${HARVEST_TARGET}/ceres
-  DEPENDEES install
-)
+if(WIN32)
+  ExternalProject_Add_Step(external_ceres after_install
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${LIBDIR}/ceres
+    ${HARVEST_TARGET}/ceres
+    DEPENDEES install
+  )
+else()
+  harvest(external_ceres ceres/include ceres/include "*.h")
+  harvest(external_ceres ceres/lib/cmake/Ceres ceres/lib/cmake/Ceres "*.cmake")
+  harvest_rpath_lib(external_ceres ceres/lib ceres/lib "*${SHAREDLIBEXT}*")
+endif()

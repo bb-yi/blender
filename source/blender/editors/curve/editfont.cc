@@ -847,7 +847,7 @@ static void txt_add_object(bContext *C,
   const float rot[3] = {0.0f, 0.0f, 0.0f};
 
   obedit = BKE_object_add(bmain, scene, view_layer, OB_FONT, nullptr);
-  BKE_view_layer_synced_ensure(scene, view_layer);
+  BKE_view_layer_synced_ensure(*bmain, scene, view_layer);
   object = BKE_view_layer_active_object_get(view_layer);
 
   /* seems to assume view align ? TODO: look into this, could be an operator option. */
@@ -944,10 +944,8 @@ void ED_text_to_object(bContext *C, const Text *text, const bool split_lines)
     offset[1] = 0.0f;
     offset[2] = 0.0f;
 
-    txt_add_object(C,
-                   static_cast<const TextLine *>(text->lines.first),
-                   BLI_listbase_count(&text->lines),
-                   offset);
+    txt_add_object(
+        C, static_cast<const TextLine *>(text->lines.first), text->lines.count(), offset);
   }
 
   DEG_relations_tag_update(bmain);
@@ -968,7 +966,7 @@ static const EnumPropertyItem style_items[] = {
     {0, nullptr, 0, nullptr, nullptr},
 };
 
-static wmOperatorStatus set_style(bContext *C, const int style, const bool clear)
+static wmOperatorStatus set_style(bContext *C, const eCharInfoFlag style, const bool clear)
 {
   Object *obedit = CTX_data_edit_object(C);
   Curve *cu = id_cast<Curve *>(obedit->data);
@@ -996,7 +994,7 @@ static wmOperatorStatus set_style(bContext *C, const int style, const bool clear
 
 static wmOperatorStatus set_style_exec(bContext *C, wmOperator *op)
 {
-  const int style = RNA_enum_get(op->ptr, "style");
+  const eCharInfoFlag style = eCharInfoFlag(RNA_enum_get(op->ptr, "style"));
   const bool clear = RNA_boolean_get(op->ptr, "clear");
 
   return set_style(C, style, clear);
@@ -1032,12 +1030,12 @@ static wmOperatorStatus toggle_style_exec(bContext *C, wmOperator *op)
 {
   Object *obedit = CTX_data_edit_object(C);
   Curve *cu = id_cast<Curve *>(obedit->data);
-  int style, clear, selstart, selend;
+  int clear, selstart, selend;
 
-  style = RNA_enum_get(op->ptr, "style");
+  const eCharInfoFlag style = eCharInfoFlag(RNA_enum_get(op->ptr, "style"));
   cu->curinfo.flag ^= style;
   if (BKE_vfont_select_get(cu, &selstart, &selend)) {
-    clear = (cu->curinfo.flag & style) == 0;
+    clear = (cu->curinfo.flag & style) == eCharInfoFlag{};
     return set_style(C, style, clear);
   }
   return OPERATOR_CANCELLED;
@@ -2165,7 +2163,8 @@ void FONT_OT_select_word(wmOperatorType *ot)
 
 static wmOperatorStatus textbox_add_exec(bContext *C, wmOperator * /*op*/)
 {
-  Object *obedit = CTX_data_active_object(C);
+  Object *obedit = ed::object::context_active_object(C);
+
   Curve *cu = id_cast<Curve *>(obedit->data);
   int i;
 
@@ -2206,7 +2205,7 @@ void FONT_OT_textbox_add(wmOperatorType *ot)
 
 static wmOperatorStatus textbox_remove_exec(bContext *C, wmOperator *op)
 {
-  Object *obedit = CTX_data_active_object(C);
+  Object *obedit = ed::object::context_active_object(C);
   Curve *cu = id_cast<Curve *>(obedit->data);
   int i;
   int index = RNA_int_get(op->ptr, "index");

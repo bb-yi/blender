@@ -22,7 +22,7 @@ namespace nodes::node_shader_uvmap_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_output<decl::Vector>("UV");
+  b.add_output<decl::Vector>("UV"_ustr);
 }
 
 static void node_shader_buts_uvmap(ui::Layout &layout, bContext *C, PointerRNA *ptr)
@@ -94,7 +94,7 @@ void register_node_type_sh_uvmap()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeUVMap", SH_NODE_UVMAP);
+  sh_node_type_base(&ntype, "ShaderNodeUVMap"_ustr, SH_NODE_UVMAP);
   ntype.ui_name = "UV Map";
   ntype.ui_description =
       "Retrieve a UV map from the geometry, or the default fallback if none is specified";
@@ -102,7 +102,7 @@ void register_node_type_sh_uvmap()
   ntype.nclass = NODE_CLASS_INPUT;
   ntype.declare = file_ns::node_declare;
   ntype.draw_buttons = file_ns::node_shader_buts_uvmap;
-  bke::node_type_size_preset(ntype, bke::eNodeSizePreset::Middle);
+  ntype.default_width = bke::NodeWidth::_160;
   ntype.initfunc = file_ns::node_shader_init_uvmap;
   bke::node_type_storage(
       ntype, "NodeShaderUVMap", node_free_standard_storage, node_copy_standard_storage);

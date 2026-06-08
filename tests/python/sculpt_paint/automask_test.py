@@ -1,13 +1,15 @@
 # SPDX-FileCopyrightText: 2025 Blender Authors
 #
 # SPDX-License-Identifier: GPL-2.0-or-later */
+"""
+blender -b --factory-startup --python tests/python/sculpt_paint/automask_test.py -- --testdir tests/files/sculpting/
+"""
 
 __all__ = (
     "main",
 )
 
 import os
-import math
 import unittest
 import sys
 import pathlib
@@ -15,12 +17,8 @@ import numpy as np
 
 import bpy
 
-"""
-blender -b --factory-startup --python tests/python/sculpt_paint/sculpt_brushes_test.py -- --testdir tests/files/mesh_paint/
-"""
-
 sys.path.append(os.path.dirname(os.path.realpath(__file__)))
-from modules.test_helpers import AttributeType, BackendType, get_attribute_data, set_view3d_context_override, generate_stroke, generate_monkey
+from modules.test_helpers import AttributeType, BackendType, get_attribute_data, set_view3d_context_override, generate_stroke
 
 args = None
 
@@ -75,7 +73,7 @@ class BrushAutomaskTest(unittest.TestCase):
     def test_face_set_automasking_ignores_any_non_starting_face_set(self):
         # This test mesh has 3 face sets, 1 and 2 are used for the eyes, the rest of the monkey's head is 3
         ACTIVE_FACE_SET = 3
-        bpy.data.scenes[0].tool_settings.sculpt.use_automasking_face_sets = True
+        bpy.data.scenes[0].tool_settings.sculpt.mesh_automasking_settings.use_automasking_face_sets = True
 
         initial_data = get_attribute_data(BackendType.MESH, AttributeType.POSITION)
 
@@ -115,7 +113,7 @@ class BrushAutomaskTest(unittest.TestCase):
     def test_topology_automasking_ignores_any_non_starting_island(self):
         # This test mesh has 3 island ids, 0 and 1 are used for the eyes, the rest of the monkey's head is 2
         ACTIVE_ISLAND_ID = 2
-        bpy.data.scenes[0].tool_settings.sculpt.use_automasking_topology = True
+        bpy.data.scenes[0].tool_settings.sculpt.mesh_automasking_settings.use_automasking_topology = True
 
         initial_data = get_attribute_data(BackendType.MESH, AttributeType.POSITION)
 

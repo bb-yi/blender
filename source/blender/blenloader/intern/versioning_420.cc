@@ -222,7 +222,7 @@ static AlphaSource versioning_eevee_alpha_source_get(bNodeSocket *socket, int de
     }
 
     case SH_NODE_BSDF_TRANSPARENT: {
-      bNodeSocket *socket = bke::node_find_socket(*node, SOCK_IN, "Color");
+      bNodeSocket *socket = bke::node_find_socket(*node, SOCK_IN, "Color"_ustr);
       if (socket->link == nullptr) {
         float *socket_color_value = version_cycles_node_socket_rgba_value(socket);
         if ((socket_color_value[0] == 0.0f) && (socket_color_value[1] == 0.0f) &&
@@ -240,7 +240,7 @@ static AlphaSource versioning_eevee_alpha_source_get(bNodeSocket *socket, int de
     }
 
     case SH_NODE_MIX_SHADER: {
-      bNodeSocket *socket = bke::node_find_socket(*node, SOCK_IN, "Fac");
+      bNodeSocket *socket = bke::node_find_socket(*node, SOCK_IN, "Fac"_ustr);
       AlphaSource src0 = versioning_eevee_alpha_source_get(
           static_cast<bNodeSocket *>(BLI_findlink(&node->inputs, 1)), depth + 1);
       AlphaSource src1 = versioning_eevee_alpha_source_get(
@@ -267,7 +267,7 @@ static AlphaSource versioning_eevee_alpha_source_get(bNodeSocket *socket, int de
     }
 
     case SH_NODE_BSDF_PRINCIPLED: {
-      bNodeSocket *socket = bke::node_find_socket(*node, SOCK_IN, "Alpha");
+      bNodeSocket *socket = bke::node_find_socket(*node, SOCK_IN, "Alpha"_ustr);
       if (socket->link == nullptr) {
         float socket_value = *version_cycles_node_socket_float_value(socket);
         if (socket_value == 0.0f) {
@@ -281,7 +281,7 @@ static AlphaSource versioning_eevee_alpha_source_get(bNodeSocket *socket, int de
     }
 
     case SH_NODE_EEVEE_SPECULAR: {
-      bNodeSocket *socket = bke::node_find_socket(*node, SOCK_IN, "Transparency");
+      bNodeSocket *socket = bke::node_find_socket(*node, SOCK_IN, "Transparency"_ustr);
       if (socket->link == nullptr) {
         float socket_value = *version_cycles_node_socket_float_value(socket);
         if (socket_value == 0.0f) {
@@ -313,7 +313,7 @@ static bool versioning_eevee_material_blend_mode_settings(bNodeTree *ntree, floa
   if (output_node == nullptr) {
     return true;
   }
-  bNodeSocket *surface_socket = bke::node_find_socket(*output_node, SOCK_IN, "Surface");
+  bNodeSocket *surface_socket = bke::node_find_socket(*output_node, SOCK_IN, "Surface"_ustr);
 
   AlphaSource alpha = versioning_eevee_alpha_source_get(surface_socket);
 
@@ -350,7 +350,7 @@ static bool versioning_eevee_material_blend_mode_settings(bNodeTree *ntree, floa
       bNodeSocket *from_socket = alpha.socket->link->fromsock;
       bke::node_remove_link(ntree, *alpha.socket->link);
 
-      bNode *math_node = bke::node_add_node(nullptr, *ntree, "ShaderNodeMath");
+      bNode *math_node = bke::node_add_node(nullptr, *ntree, "ShaderNodeMath"_ustr);
       math_node->custom1 = NODE_MATH_GREATER_THAN;
       math_node->flag |= NODE_COLLAPSED;
       math_node->parent = to_node->parent;
@@ -405,8 +405,8 @@ static void versioning_eevee_material_shadow_none(Material *material)
     return;
   }
 
-  bNodeSocket *existing_out_sock = bke::node_find_socket(*output_node, SOCK_IN, "Surface");
-  bNodeSocket *volume_sock = bke::node_find_socket(*output_node, SOCK_IN, "Volume");
+  bNodeSocket *existing_out_sock = bke::node_find_socket(*output_node, SOCK_IN, "Surface"_ustr);
+  bNodeSocket *volume_sock = bke::node_find_socket(*output_node, SOCK_IN, "Volume"_ustr);
   if (existing_out_sock->link == nullptr && volume_sock->link) {
     /* Don't apply versioning to a material that only has a volumetric input as this makes the
      * object surface opaque to the camera, hiding the volume inside. */
@@ -417,17 +417,17 @@ static void versioning_eevee_material_shadow_none(Material *material)
     /* We do not want to affect Cycles. So we split the output into two specific outputs. */
     output_node->custom1 = SHD_OUTPUT_CYCLES;
 
-    bNode *new_output = bke::node_add_node(nullptr, *ntree, "ShaderNodeOutputMaterial");
+    bNode *new_output = bke::node_add_node(nullptr, *ntree, "ShaderNodeOutputMaterial"_ustr);
     new_output->custom1 = SHD_OUTPUT_EEVEE;
     new_output->parent = output_node->parent;
     new_output->locx_legacy = output_node->locx_legacy;
     new_output->locy_legacy = output_node->locy_legacy - output_node->height - 120;
 
     auto copy_link = [&](const char *socket_name) {
-      bNodeSocket *sock = bke::node_find_socket(*output_node, SOCK_IN, socket_name);
+      bNodeSocket *sock = bke::node_find_socket(*output_node, SOCK_IN, UString(socket_name));
       if (sock && sock->link) {
         bNodeLink *link = sock->link;
-        bNodeSocket *to_sock = bke::node_find_socket(*new_output, SOCK_IN, socket_name);
+        bNodeSocket *to_sock = bke::node_find_socket(*new_output, SOCK_IN, UString(socket_name));
         bke::node_add_link(*ntree, *link->fromnode, *link->fromsock, *new_output, *to_sock);
       }
     };
@@ -440,11 +440,11 @@ static void versioning_eevee_material_shadow_none(Material *material)
     output_node = new_output;
   }
 
-  bNodeSocket *out_sock = bke::node_find_socket(*output_node, SOCK_IN, "Surface");
-  bNodeSocket *old_out_sock = bke::node_find_socket(*old_output_node, SOCK_IN, "Surface");
+  bNodeSocket *out_sock = bke::node_find_socket(*output_node, SOCK_IN, "Surface"_ustr);
+  bNodeSocket *old_out_sock = bke::node_find_socket(*old_output_node, SOCK_IN, "Surface"_ustr);
 
   /* Add mix node for mixing between original material, and transparent BSDF for shadows */
-  bNode *mix_node = bke::node_add_node(nullptr, *ntree, "ShaderNodeMixShader");
+  bNode *mix_node = bke::node_add_node(nullptr, *ntree, "ShaderNodeMixShader"_ustr);
   STRNCPY(mix_node->label, "Disable Shadow");
   mix_node->flag |= NODE_COLLAPSED;
   mix_node->parent = output_node->parent;
@@ -467,12 +467,12 @@ static void versioning_eevee_material_shadow_none(Material *material)
   bke::node_add_link(*ntree, *mix_node, *mix_out, *output_node, *out_sock);
 
   /* Add light path node to control shadow visibility */
-  bNode *lp_node = bke::node_add_node(nullptr, *ntree, "ShaderNodeLightPath");
+  bNode *lp_node = bke::node_add_node(nullptr, *ntree, "ShaderNodeLightPath"_ustr);
   lp_node->flag |= NODE_COLLAPSED;
   lp_node->parent = output_node->parent;
   lp_node->locx_legacy = output_node->locx_legacy;
   lp_node->locy_legacy = mix_node->locy_legacy + 35;
-  bNodeSocket *is_shadow = bke::node_find_socket(*lp_node, SOCK_OUT, "Is Shadow Ray");
+  bNodeSocket *is_shadow = bke::node_find_socket(*lp_node, SOCK_OUT, "Is Shadow Ray"_ustr);
   bke::node_add_link(*ntree, *lp_node, *is_shadow, *mix_node, *mix_fac);
   /* Hide unconnected sockets for cleaner look. */
   for (bNodeSocket &sock : lp_node->outputs) {
@@ -482,12 +482,12 @@ static void versioning_eevee_material_shadow_none(Material *material)
   }
 
   /* Add transparent BSDF to make shadows transparent. */
-  bNode *bsdf_node = bke::node_add_node(nullptr, *ntree, "ShaderNodeBsdfTransparent");
+  bNode *bsdf_node = bke::node_add_node(nullptr, *ntree, "ShaderNodeBsdfTransparent"_ustr);
   bsdf_node->flag |= NODE_COLLAPSED;
   bsdf_node->parent = output_node->parent;
   bsdf_node->locx_legacy = output_node->locx_legacy;
   bsdf_node->locy_legacy = mix_node->locy_legacy - 35;
-  bNodeSocket *bsdf_out = bke::node_find_socket(*bsdf_node, SOCK_OUT, "BSDF");
+  bNodeSocket *bsdf_out = bke::node_find_socket(*bsdf_node, SOCK_OUT, "BSDF"_ustr);
   bke::node_add_link(*ntree, *bsdf_node, *bsdf_out, *mix_node, *mix_in_2);
 }
 
@@ -675,7 +675,7 @@ static void version_refraction_depth_to_thickness_value(bNodeTree *ntree, float 
       continue;
     }
 
-    bNodeSocket *thickness_socket = bke::node_find_socket(node, SOCK_IN, "Thickness");
+    bNodeSocket *thickness_socket = bke::node_find_socket(node, SOCK_IN, "Thickness"_ustr);
     if (thickness_socket == nullptr) {
       continue;
     }
@@ -695,7 +695,7 @@ static void version_refraction_depth_to_thickness_value(bNodeTree *ntree, float 
     value_node->parent = node.parent;
     value_node->locx_legacy = node.locx_legacy;
     value_node->locy_legacy = node.locy_legacy - 160.0f;
-    bNodeSocket *socket_value = bke::node_find_socket(*value_node, SOCK_OUT, "Value");
+    bNodeSocket *socket_value = bke::node_find_socket(*value_node, SOCK_OUT, "Value"_ustr);
 
     *version_cycles_node_socket_float_value(socket_value) = thickness;
 
@@ -703,24 +703,6 @@ static void version_refraction_depth_to_thickness_value(bNodeTree *ntree, float 
   }
 
   version_socket_update_is_used(ntree);
-}
-
-static void versioning_update_timecode(short int *tc)
-{
-  /* 2 = IMB_TC_FREE_RUN, 4 = IMB_TC_INTERPOLATED_REC_DATE_FREE_RUN. */
-  if (ELEM(*tc, 2, 4)) {
-    *tc = IMB_TC_RECORD_RUN;
-  }
-}
-
-static bool strip_proxies_timecode_update(Strip *strip, void * /*user_data*/)
-{
-  if (strip->data == nullptr || strip->data->proxy == nullptr) {
-    return true;
-  }
-  StripProxy *proxy = strip->data->proxy;
-  versioning_update_timecode(&proxy->tc);
-  return true;
 }
 
 static bool strip_text_data_update(Strip *strip, void * /*user_data*/)
@@ -812,8 +794,8 @@ void blo_do_versions_420(FileData *fd, Library * /*lib*/, Main *bmain)
     constexpr int NTREE_EXECUTION_MODE_CPU = 0;
     constexpr int NTREE_EXECUTION_MODE_FULL_FRAME = 1;
 
-    constexpr int NTREE_COM_GROUPNODE_BUFFER = 1 << 3;
-    constexpr int NTREE_COM_OPENCL = 1 << 1;
+    constexpr eNodeTree_Flag NTREE_COM_GROUPNODE_BUFFER = eNodeTree_Flag(1 << 3);
+    constexpr eNodeTree_Flag NTREE_COM_OPENCL = eNodeTree_Flag(1 << 1);
 
     FOREACH_NODETREE_BEGIN (bmain, ntree, id) {
       if (ntree->type != NTREE_COMPOSIT) {
@@ -1040,19 +1022,6 @@ void blo_do_versions_420(FileData *fd, Library * /*lib*/, Main *bmain)
     }
   }
 
-  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 402, 28)) {
-    for (Scene &scene : bmain->scenes) {
-      if (scene.ed != nullptr) {
-        seq::foreach_strip(&scene.ed->seqbase, strip_proxies_timecode_update, nullptr);
-      }
-    }
-
-    for (MovieClip &clip : bmain->movieclips) {
-      MovieClipProxy proxy = clip.proxy;
-      versioning_update_timecode(&proxy.tc);
-    }
-  }
-
   if (!MAIN_VERSION_FILE_ATLEAST(bmain, 402, 29)) {
     for (Scene &scene : bmain->scenes) {
       if (scene.ed) {
@@ -1074,9 +1043,9 @@ void blo_do_versions_420(FileData *fd, Library * /*lib*/, Main *bmain)
       /* Guess a somewhat correct density given the resolution. But very low resolution need
        * a decent enough density to work. */
       lightprobe.grid_surfel_density = max_ii(20,
-                                              2 * max_iii(lightprobe.grid_resolution_x,
-                                                          lightprobe.grid_resolution_y,
-                                                          lightprobe.grid_resolution_z));
+                                              2 * std::max({lightprobe.grid_resolution_x,
+                                                            lightprobe.grid_resolution_y,
+                                                            lightprobe.grid_resolution_z}));
     }
   }
 
@@ -1122,7 +1091,7 @@ void blo_do_versions_420(FileData *fd, Library * /*lib*/, Main *bmain)
         if (scene.nodetree->execution_mode == NTREE_EXECUTION_MODE_GPU) {
           scene.r.compositor_device = SCE_COMPOSITOR_DEVICE_GPU;
         }
-        scene.r.compositor_precision = scene.nodetree->precision;
+        scene.r.compositor_precision = eCompositorPrecision(scene.nodetree->precision);
       }
     }
   }
@@ -1247,7 +1216,6 @@ void blo_do_versions_420(FileData *fd, Library * /*lib*/, Main *bmain)
     const Scene default_scene;
     for (Scene &scene : bmain->scenes) {
       scene.eevee.fast_gi_thickness_near = default_scene.eevee.fast_gi_thickness_near;
-      scene.eevee.fast_gi_thickness_far = default_scene.eevee.fast_gi_thickness_far;
     }
   }
   if (!MAIN_VERSION_FILE_ATLEAST(bmain, 402, 48)) {

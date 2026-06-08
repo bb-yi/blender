@@ -1,10 +1,10 @@
 
 msgid ""
 msgstr ""
-"Project-Id-Version: Blender 5.1.0 Beta (b'5a04f1d246f1')\n"
+"Project-Id-Version: Blender 5.2.0 Alpha (b'8764d33c658b')\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-03-11 11:01+0000\n"
-"PO-Revision-Date: 2025-07-23 15:32+0000\n"
+"POT-Creation-Date: 2026-06-01 07:36+0000\n"
+"PO-Revision-Date: 2026-04-06 09:16+0000\n"
 "Last-Translator: Leevi Oksanen <laavi.oksanen@gmail.com>\n"
 "Language-Team: Finnish <https://translate.blender.org/projects/blender-ui/ui/fi/>\n"
 "Language: fi\n"
@@ -12,7 +12,7 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=n != 1;\n"
-"X-Generator: Weblate 5.12.1"
+"X-Generator: Weblate 5.16.2"
 
 
 msgid "Shader AOV"
@@ -912,6 +912,10 @@ msgstr "Omistaja"
 
 msgid "Description"
 msgstr "Kuvaus"
+
+
+msgid "Default Import Method"
+msgstr "Oletustuontitapa"
 
 
 msgid "Tags"
@@ -2893,6 +2897,10 @@ msgid "Flat"
 msgstr "Tasainen"
 
 
+msgid "Threshold"
+msgstr "Kynnysarvo"
+
+
 msgid "Random Curve"
 msgstr "Satunnainen käyrä"
 
@@ -3012,8 +3020,8 @@ msgid "Number of simplify steps (large values reduce fill accuracy)"
 msgstr "Yksinkertaistusaskelien määrä (suuret arvot vähentävät täytön tarkkuutta)"
 
 
-msgid "Threshold"
-msgstr "Kynnysarvo"
+msgid "Pixel"
+msgstr "Pikseli"
 
 
 msgid "Input Samples"
@@ -3181,24 +3189,8 @@ msgid "Stroke"
 msgstr "Piirto"
 
 
-msgid "Vertex Color affects to Stroke only"
-msgstr "Kärkiväri vaikuttaa ainoastaan viivaan"
-
-
 msgid "Fill"
 msgstr "Täytä"
-
-
-msgid "Vertex Color affects to Fill only"
-msgstr "Kärkiväri vaikuttaa ainoastaan täyttöön"
-
-
-msgid "Stroke & Fill"
-msgstr "Piirrä & täytä"
-
-
-msgid "Vertex Color affects to Stroke and Fill"
-msgstr "Kärkiväri vaikuttaa viivaan ja täyttöön"
 
 
 msgid "Byte Color Attribute Value"
@@ -6830,10 +6822,6 @@ msgid "Particle Settings"
 msgstr "Partikkeliasetukset"
 
 
-msgid "Pixel"
-msgstr "Pikseli"
-
-
 msgid "Global X"
 msgstr "Globaali X"
 
@@ -7248,36 +7236,20 @@ msgid "ID Type"
 msgstr "ID-tyyppi"
 
 
-msgid "UV"
-msgstr "UV"
-
-
-msgid "Metaball"
-msgstr "Metapallo"
-
-
-msgid "Show/Hide"
-msgstr "Näytä/Piilota"
-
-
-msgid "Read"
-msgstr "Lue"
-
-
-msgid "Write"
-msgstr "Kirjoita"
-
-
-msgid "Names"
-msgstr "Nimet"
-
-
 msgid "UV Mapping"
 msgstr "UV-kartoittaminen"
 
 
+msgid "Math"
+msgstr "Matematiikka"
+
+
 msgid "Select More/Less"
 msgstr "Valitse enemmän/vähemmän"
+
+
+msgid "Utilities"
+msgstr "Työkalut"
 
 
 msgid "Select Similar"
@@ -7292,12 +7264,16 @@ msgid "Select Loops"
 msgstr "Valitse silmukat"
 
 
-msgid "Utilities"
-msgstr "Työkalut"
+msgid "Read"
+msgstr "Lue"
 
 
-msgid "Math"
-msgstr "Matematiikka"
+msgid "Write"
+msgstr "Kirjoita"
+
+
+msgid "Metaball"
+msgstr "Metapallo"
 
 
 msgid "Light"
@@ -7308,32 +7284,48 @@ msgid "Light Probe"
 msgstr "Valoluotain"
 
 
+msgid "Instances"
+msgstr "Instanssit"
+
+
 msgid "Add Image"
 msgstr "Lisää kuva"
+
+
+msgid "Import"
+msgstr "Tuo"
 
 
 msgid "Track"
 msgstr "Raide"
 
 
+msgid "Show/Hide"
+msgstr "Näytä/Piilota"
+
+
 msgid "Hooks"
 msgstr "Koukut"
+
+
+msgid "UV"
+msgstr "UV"
 
 
 msgid "Random Mask"
 msgstr "Satunnainen maski"
 
 
+msgid "Names"
+msgstr "Nimet"
+
+
 msgid "Mesh Select Mode"
 msgstr "Muodon valintatila"
 
 
-msgid "Instances"
-msgstr "Instanssit"
-
-
-msgid "Import"
-msgstr "Tuo"
+msgid "Linked"
+msgstr "Linkitetyt"
 
 
 msgid "Basic"
@@ -7597,6 +7589,10 @@ msgstr "UV-partikkeli"
 
 msgid "Protect"
 msgstr "Suojaa"
+
+
+msgid "Stroke & Fill"
+msgstr "Piirrä & täytä"
 
 
 msgid "Read Data"
@@ -9395,10 +9391,6 @@ msgid "Hide Value"
 msgstr "Piilota arvo"
 
 
-msgid "Linked"
-msgstr "Linkitetyt"
-
-
 msgid "True if the socket is connected"
 msgstr "Tosi, jos pistoke on yhdistetty"
 
@@ -9467,6 +9459,14 @@ msgstr "Uusi"
 
 msgid "Only Channel"
 msgstr "Vain kanava"
+
+
+msgid "Axes"
+msgstr "Akselit"
+
+
+msgid "Search"
+msgstr "Etsi"
 
 
 msgid "Point 1"
@@ -11405,10 +11405,6 @@ msgid "Display units in pairs (e.g. 1m 0cm)"
 msgstr "Näytä yksiköt pareina (esim. 1 m 0 cm)"
 
 
-msgid "Default Import Method"
-msgstr "Oletustuontitapa"
-
-
 msgctxt "File browser"
 msgid "Custom Directory"
 msgstr "Mukautettu Luettelo"
@@ -11727,10 +11723,6 @@ msgstr "Näytä valinta"
 
 msgid "Select Mouse"
 msgstr "Valitse hiiri"
-
-
-msgid "Search"
-msgstr "Etsi"
 
 
 msgid "Navigate"
@@ -12158,6 +12150,15 @@ msgid "Downloading..."
 msgstr "Ladataan..."
 
 
+msgid "Object Index"
+msgstr "Objekti-indeksi"
+
+
+msgctxt "Operator"
+msgid "Clear"
+msgstr "Siivoa"
+
+
 msgid "Viewports"
 msgstr "Näkymät"
 
@@ -12534,10 +12535,6 @@ msgid "Shapes"
 msgstr "Muodot"
 
 
-msgid "Axes"
-msgstr "Akselit"
-
-
 msgid "Triangle A"
 msgstr "A-kolmio"
 
@@ -12670,11 +12667,6 @@ msgstr "Muutos:"
 
 msgid "Spline:"
 msgstr "Splini:"
-
-
-msgctxt "Operator"
-msgid "Clear"
-msgstr "Siivoa"
 
 
 msgid "Animation:"
@@ -13228,6 +13220,10 @@ msgid "Text"
 msgstr "Teksti"
 
 
+msgid "Workbench"
+msgstr "Työtila"
+
+
 msgid "Add Transition"
 msgstr "Lisää siirtymä"
 
@@ -13265,6 +13261,11 @@ msgstr "Uusi"
 
 
 msgctxt "Operator"
+msgid "Save Copy..."
+msgstr "Tallenna kopio..."
+
+
+msgctxt "Operator"
 msgid "Quit"
 msgstr "Poistu"
 
@@ -13297,11 +13298,6 @@ msgstr "Toista historia..."
 msgctxt "Operator"
 msgid "Preferences..."
 msgstr "Mieltymykset..."
-
-
-msgctxt "Operator"
-msgid "Save Copy..."
-msgstr "Tallenna kopio..."
 
 
 msgid "More..."
@@ -13645,6 +13641,11 @@ msgid "True Normal"
 msgstr "Todellinen normaali"
 
 
+msgctxt "Key"
+msgid "Key"
+msgstr "Avain"
+
+
 msgid "AOV"
 msgstr "AOV"
 
@@ -13671,10 +13672,6 @@ msgstr "Veistäminen"
 
 msgid "VFX"
 msgstr "VFX"
-
-
-msgid "Workbench"
-msgstr "Työtila"
 
 
 msgid "Create"
@@ -14192,12 +14189,12 @@ msgid "No vertex selected"
 msgstr "Ei valittua kärkeä"
 
 
-msgid "No selected vertex"
-msgstr "Ei valittuja kärkiä"
-
-
 msgid "No edges selected"
 msgstr "Ei valittuja reunoja"
+
+
+msgid "No selected vertex"
+msgstr "Ei valittuja kärkiä"
 
 
 msgid "No faces filled"
@@ -14508,10 +14505,6 @@ msgstr "Kuvaa ei kyetty löytämään"
 
 msgid "No active camera set"
 msgstr "Ei aktiivista kamerasarjaa"
-
-
-msgid "Attribute Data Detected"
-msgstr "Attribuutti-data havaittu"
 
 
 msgid "PaintCurve"
@@ -15135,11 +15128,6 @@ msgid "Image not packed"
 msgstr "Kuvaa ei ole pakattu"
 
 
-msgctxt "Key"
-msgid "Key"
-msgstr "Avain"
-
-
 msgid "Modify"
 msgstr "Muuta"
 
@@ -15492,6 +15480,18 @@ msgstr "Elämä"
 
 msgid "Start Position"
 msgstr "Aloitussijainti"
+
+
+msgid "Add Item"
+msgstr "Lisää esine"
+
+
+msgid "The size of the image"
+msgstr "Kuvan koko"
+
+
+msgid "An image of the given size and constant color"
+msgstr "Annetun kokoinen ja vakiovärinen kuva"
 
 
 msgid "Key Color"
@@ -15931,6 +15931,10 @@ msgid "Top"
 msgstr "Huippu"
 
 
+msgid "Inverted"
+msgstr "Käännetty"
+
+
 msgid "Main Geometry"
 msgstr "Päägeometria"
 
@@ -15969,10 +15973,6 @@ msgstr "Omistaa naapurin"
 
 msgid "Index of nearest element"
 msgstr "Lähimmän elementin indeksi"
-
-
-msgid "Add Item"
-msgstr "Lisää esine"
 
 
 msgid "The camera used for rendering the scene"
@@ -16200,10 +16200,6 @@ msgid "Grid 2"
 msgstr "Ruudukko 2"
 
 
-msgid "Inverted"
-msgstr "Käännetty"
-
-
 msgid "Skip"
 msgstr "Ohita"
 
@@ -16397,10 +16393,6 @@ msgid "Dot"
 msgstr "Piste"
 
 
-msgid "Object Index"
-msgstr "Objekti-indeksi"
-
-
 msgid "Color Fac"
 msgstr "Väritekijä"
 
@@ -16553,10 +16545,6 @@ msgstr "Audio"
 
 msgid "Colorize"
 msgstr "Väritä"
-
-
-msgid "Blur X"
-msgstr "Sumenna X"
 
 
 msgid "Rim"

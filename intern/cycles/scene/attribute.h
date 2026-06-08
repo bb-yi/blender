@@ -4,10 +4,13 @@
 
 #pragma once
 
+#include <type_traits>
+
 #include "scene/image.h"
 
 #include "kernel/types.h"
 
+#include "util/implicit_sharing.h"
 #include "util/list.h"
 #include "util/param.h"
 #include "util/set.h"
@@ -51,11 +54,23 @@ enum AttrKernelDataType {
 
 class Attribute {
  public:
+  /* Storage buffer for one motion step, or a single buffer if no motion. */
+  struct Buffer {
+    /* Optionally used to share ownership of #data, see implicit_sharing.h.
+     * If this is null, #data is wholly owned by this Attribute. */
+    const void *data = nullptr;
+    ImplicitSharingInfo sharing_info = nullptr;
+  };
+
   ustring name;
   AttributeStandard std;
 
   TypeDesc type;
-  vector<char> buffer;
+  /* Center motion step. */
+  Buffer center;
+  /* Other motion steps. Empty when the attribute has no motion. */
+  vector<Buffer> motion;
+  int size = 0;
   AttributeElement element;
   uint flags; /* enum AttributeFlag */
 
@@ -66,112 +81,107 @@ class Attribute {
             AttributeElement element,
             Geometry *geom,
             AttributePrimitive prim);
-  Attribute(Attribute &&other) = default;
+  Attribute(ustring name,
+            const TypeDesc type,
+            AttributeElement element,
+            const void *data,
+            int size,
+            ImplicitSharingInfo sharing_info);
+  Attribute(Attribute &&other);
+  Attribute &operator=(Attribute &&other) = delete;
   Attribute(const Attribute &other) = delete;
   Attribute &operator=(const Attribute &other) = delete;
   ~Attribute();
 
   void set(ustring name, const TypeDesc type, AttributeElement element);
-  void resize(Geometry *geom, AttributePrimitive prim, bool reserve_only);
+  void resize(Geometry *geom, AttributePrimitive prim);
   void resize(const size_t num_elements);
 
+  /* Allocate or free motion steps, matching the geometry's motion_steps. */
+  void add_motion(const Geometry *geom);
+  void remove_motion();
+  bool has_motion() const
+  {
+    return !motion.empty();
+  }
+  /* Number of motion steps stored, including the center step. */
+  int num_motion_steps() const
+  {
+    return has_motion() ? int(motion.size()) + 1 : 1;
+  }
+
+  /* Move motion steps from another attribute into this one. */
+  void take_motion_from(Attribute &other);
+
+  /* Replace a single motion step's data with a buffer shared with another owner,
+   * using implicit sharing. Motion steps are 1-indexed (step 0 is the center). */
+  void set_motion_step_shared(int step,
+                              const void *data,
+                              int new_size,
+                              ImplicitSharingInfo sharing_info);
+
   size_t data_sizeof() const;
-  size_t element_size(Geometry *geom, AttributePrimitive prim) const;
+  static size_t element_size(Geometry *geom, AttributeElement element, AttributePrimitive prim);
   size_t buffer_size(Geometry *geom, AttributePrimitive prim) const;
 
-  char *data()
+  /* Typed data access. */
+  template<typename T = void> const T *data(const int step = 0) const
   {
-    return (!buffer.empty()) ? buffer.data() : nullptr;
+    if constexpr (!std::is_same_v<T, void>) {
+      assert(data_sizeof() == sizeof(T));
+    }
+    if (step == 0 || !has_motion()) {
+      return static_cast<const T *>(center.data);
+    }
+    assert(step >= 1 && step <= int(motion.size()));
+    return static_cast<const T *>(motion[step - 1].data);
   }
-  float2 *data_float2()
+  template<typename T = void> T *data_for_write(const int step = 0)
   {
-    assert(data_sizeof() == sizeof(float2));
-    return (float2 *)data();
-  }
-  float3 *data_float3()
-  {
-    assert(data_sizeof() == sizeof(float3));
-    return (float3 *)data();
-  }
-  float4 *data_float4()
-  {
-    assert(data_sizeof() == sizeof(float4));
-    return (float4 *)data();
-  }
-  float *data_float()
-  {
-    assert(data_sizeof() == sizeof(float));
-    return (float *)data();
-  }
-  uchar4 *data_uchar4()
-  {
-    assert(data_sizeof() == sizeof(uchar4));
-    return (uchar4 *)data();
-  }
-  packed_normal *data_normal()
-  {
-    assert(data_sizeof() == sizeof(packed_normal));
-    return (packed_normal *)data();
-  }
-  Transform *data_transform()
-  {
-    assert(data_sizeof() == sizeof(Transform));
-    return (Transform *)data();
+    if constexpr (!std::is_same_v<T, void>) {
+      assert(data_sizeof() == sizeof(T));
+    }
+    return reinterpret_cast<T *>(data_for_write_buffer(step));
   }
 
-  /* Attributes for voxels are images */
-  ImageHandle &data_voxel()
+  /* Motion steps come in two orderings:
+   * - data() indexes the attribute step, with the center step at index 0.
+   * - data_at_time_step() indexes the time-ordered step, with the center step
+   *   in the middle.
+   *
+   * The number of time steps must be passed in, as it may be lower than the
+   * stored motion steps, for example when BVH building without motion blur
+   * but there are motion steps for a motion render pass. */
+  int time_step_to_attr_step(const int step, const int num_time_steps) const
   {
-    assert(data_sizeof() == sizeof(ImageHandle));
-    return *(ImageHandle *)data();
+    const int center = (num_time_steps - 1) / 2;
+    return (step == center) ? 0 : (step < center) ? step + 1 : step;
+  }
+  template<typename T = void>
+  const T *data_at_time_step(const int step, const int num_time_steps) const
+  {
+    return data<T>(time_step_to_attr_step(step, num_time_steps));
   }
 
-  const char *data() const
-  {
-    return (!buffer.empty()) ? buffer.data() : nullptr;
-  }
-  const float2 *data_float2() const
-  {
-    assert(data_sizeof() == sizeof(float2));
-    return (const float2 *)data();
-  }
-  const float3 *data_float3() const
-  {
-    assert(data_sizeof() == sizeof(float3));
-    return (const float3 *)data();
-  }
-  const float4 *data_float4() const
-  {
-    assert(data_sizeof() == sizeof(float4));
-    return (const float4 *)data();
-  }
-  const float *data_float() const
-  {
-    assert(data_sizeof() == sizeof(float));
-    return (const float *)data();
-  }
-  const Transform *data_transform() const
-  {
-    assert(data_sizeof() == sizeof(Transform));
-    return (const Transform *)data();
-  }
+  /* Attributes for voxels are 3D NanoVDB images. */
   const ImageHandle &data_voxel() const
   {
-    assert(data_sizeof() == sizeof(ImageHandle));
-    return *(const ImageHandle *)data();
+    return *data<ImageHandle>();
+  }
+  ImageHandle &data_voxel_for_write()
+  {
+    return *data_for_write<ImageHandle>();
   }
 
+ private:
+  char *data_for_write_buffer(const int step);
+
+ public:
   void zero_data(void *dst);
 
-  void add(const float &f);
-  void add(const float2 &f);
-  void add(const float3 &f);
-  void add(const uchar4 &f);
-  void add(const packed_normal &f);
-  void add(const Transform &f);
-  void add(const char *data);
-
   void set_data_from(Attribute &&other);
+
+  void free_data();
 
   static bool same_storage(const TypeDesc a, const TypeDesc b);
   static const char *standard_name(AttributeStandard std);
@@ -199,10 +209,22 @@ class AttributeSet {
   ~AttributeSet();
 
   Attribute *add(ustring name, const TypeDesc type, AttributeElement element);
+  Attribute *add_shared(ustring name,
+                        const TypeDesc type,
+                        AttributeElement element,
+                        const void *data,
+                        int size,
+                        ImplicitSharingInfo sharing_info);
+  Attribute *add_from(Attribute &&other);
   Attribute *find(ustring name) const;
   void remove(ustring name);
 
   Attribute *add(AttributeStandard std, ustring name = ustring());
+  Attribute *add_shared(AttributeStandard std,
+                        ustring name,
+                        const void *data,
+                        int size,
+                        ImplicitSharingInfo sharing_info);
   Attribute *find(AttributeStandard std) const;
   void remove(AttributeStandard std);
 
@@ -215,7 +237,7 @@ class AttributeSet {
 
   void remove(list<Attribute>::iterator it);
 
-  void resize(bool reserve_only = false);
+  void resize();
   void clear(bool preserve_voxel_data = false);
 
   /* Update the attributes in this AttributeSet with the ones from the new set,
@@ -268,16 +290,16 @@ class AttributeRequestSet {
 
   void add(ustring name);
   void add(AttributeStandard std);
-  void add(AttributeRequestSet &reqs);
+  void add(const AttributeRequestSet &reqs);
   void add_standard(ustring name);
 
-  bool find(ustring name);
-  bool find(AttributeStandard std);
+  bool find(ustring name) const;
+  bool find(AttributeStandard std) const;
 
-  size_t size();
+  size_t size() const;
   void clear();
 
-  bool modified(const AttributeRequestSet &other);
+  bool modified(const AttributeRequestSet &other) const;
 };
 
 CCL_NAMESPACE_END

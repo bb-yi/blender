@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
 #include "BKE_attribute.hh"
-#include "BLI_color.hh"
+#include "BLI_color_types.hh"
 #include "BLI_math_matrix.hh"
 
 #include "BKE_curves.hh"
@@ -81,15 +81,14 @@ ImBuf *bitmap_to_image(const Bitmap &bm)
   constexpr potrace_word BM_HIBIT = potrace_word(1) << (BM_WORDBITS - 1);
 
   const int2 size = {bm.w, bm.h};
-  const uint imb_flag = IB_byte_data;
-  ImBuf *ibuf = IMB_allocImBuf(size.x, size.y, 32, imb_flag);
-  BLI_assert(ibuf->byte_buffer.data != nullptr);
+  ImBuf *ibuf = IMB_allocImBuf(size.x, size.y, ImBufFlags::ByteData);
+  BLI_assert(ibuf->byte_data() != nullptr);
 
   const int num_words = bm.dy * bm.h;
   const int words_per_scanline = bm.dy;
   const Span<potrace_word> words = {bm.map, num_words};
   MutableSpan<ColorGeometry4b> colors = {
-      reinterpret_cast<ColorGeometry4b *>(ibuf->byte_buffer.data),
+      reinterpret_cast<ColorGeometry4b *>(ibuf->byte_data_for_write()),
       int64_t(IMB_get_pixel_count(ibuf))};
   threading::parallel_for(IndexRange(ibuf->y), 4096, [&](const IndexRange range) {
     for (const int y : range) {

@@ -157,7 +157,10 @@ static int ptcache_basic_header_write(PTCacheFile *pf)
 
   return 1;
 }
-static void ptcache_add_extra_data(PTCacheMem *pm, uint type, uint count, void *data)
+static void ptcache_add_extra_data(PTCacheMem *pm,
+                                   ePointCache_ExtraDataType type,
+                                   uint count,
+                                   void *data)
 {
   PTCacheExtra *extra = MEM_new<PTCacheExtra>("Point cache: extra data descriptor");
 
@@ -531,6 +534,8 @@ static void ptcache_particle_extra_read(void *psys_v, PTCacheMem *pm, float /*cf
         psys->tot_fluidsprings = psys->alloc_fluidsprings = extra->totdata;
         break;
       }
+      case BPHYS_EXTRA_CLOTH_ACCELERATION:
+        break;
     }
   }
 }
@@ -633,6 +638,8 @@ static void ptcache_cloth_extra_read(void *cloth_v, PTCacheMem *pm, float /*cfra
         copy_v3_v3(cloth->average_acceleration, static_cast<const float *>(extra->data));
         break;
       }
+      case BPHYS_EXTRA_FLUID_SPRINGS:
+        break;
     }
   }
 }
@@ -1102,7 +1109,7 @@ PTCacheID BKE_ptcache_id_find(Object *ob, Scene *scene, PointCache *cache)
     }
   }
 
-  BLI_freelistN(&pidlist);
+  pidlist.free_no_destruct();
 
   return result;
 }
@@ -1738,9 +1745,7 @@ int BKE_ptcache_mem_pointers_seek(int point_index, PTCacheMem *pm, void *cur[BPH
   if (index < 0) {
     /* Can't give proper location without reallocation, so don't give any location.
      * Some points will be cached improperly, but this only happens with simulation
-     * steps bigger than cache->step, so the cache has to be recalculated anyways
-     * at some point.
-     */
+     * steps bigger than cache->step, so the cache has to be recalculated anyway at some point. */
     return 0;
   }
 
@@ -1798,7 +1803,7 @@ static void ptcache_extra_free(PTCacheMem *pm)
       }
     }
 
-    BLI_freelistN(&pm->extradata);
+    pm->extradata.free_no_destruct();
   }
 }
 
@@ -1933,7 +1938,7 @@ static PTCacheMem *ptcache_disk_frame_to_mem(PTCacheID *pid, int cfra)
   }
 
   if (!error && pf->flag & PTCACHE_TYPEFLAG_EXTRADATA) {
-    uint extratype = 0;
+    ePointCache_ExtraDataType extratype = ePointCache_ExtraDataType{};
 
     while (!error && ptcache_file_read(pf, &extratype, 1, sizeof(uint))) {
       PTCacheExtra *extra = MEM_new<PTCacheExtra>("Pointcache extradata");
@@ -2610,7 +2615,7 @@ void BKE_ptcache_id_clear(PTCacheID *pid, int mode, uint cfra)
           for (; pm; pm = pm->next) {
             ptcache_mem_clear(pm);
           }
-          BLI_freelistN(&pid->cache->mem_cache);
+          pid->cache->mem_cache.free_no_destruct();
 
           if (pid->cache->cached_frames) {
             memset(pid->cache->cached_frames, 0, MEM_allocN_len(pid->cache->cached_frames));
@@ -2961,7 +2966,7 @@ void BKE_ptcache_free_mem(ListBaseT<PTCacheMem> *mem_cache)
       ptcache_mem_clear(pm);
     }
 
-    BLI_freelistN(mem_cache);
+    mem_cache->free_no_destruct();
   }
 }
 void BKE_ptcache_free(PointCache *cache)
@@ -2988,7 +2993,7 @@ static PointCache *ptcache_copy(PointCache *cache, const bool copy_data)
 
   ncache = MEM_dupalloc(cache);
 
-  BLI_listbase_clear(&ncache->mem_cache);
+  ncache->mem_cache.clear_no_delete();
 
   if (copy_data == false) {
     ncache->cached_frames = nullptr;
@@ -3029,7 +3034,7 @@ PointCache *BKE_ptcache_copy_list(ListBaseT<PointCache> *ptcaches_new,
 {
   PointCache *cache = static_cast<PointCache *>(ptcaches_old->first);
 
-  BLI_listbase_clear(ptcaches_new);
+  ptcaches_new->clear_no_delete();
 
   for (; cache; cache = cache->next) {
     BLI_addtail(ptcaches_new, ptcache_copy(cache, (flag & LIB_ID_COPY_CACHES) != 0));
@@ -3081,6 +3086,7 @@ static void ptcache_dt_to_str(char *str, size_t str_maxncpy, double dtime)
 
 void BKE_ptcache_bake(PTCacheBaker *baker)
 {
+  const Main *bmain = baker->bmain;
   Scene *scene = baker->scene;
   ViewLayer *view_layer = baker->view_layer;
   Depsgraph *depsgraph = baker->depsgraph;
@@ -3132,7 +3138,7 @@ void BKE_ptcache_bake(PTCacheBaker *baker)
             }
           }
         }
-        BLI_freelistN(&pidlist2);
+        pidlist2.free_no_destruct();
       }
 
       if (bake || cache->flag & PTCACHE_REDO_NEEDED) {
@@ -3153,7 +3159,7 @@ void BKE_ptcache_bake(PTCacheBaker *baker)
     }
   }
   else {
-    for (SETLOOPER_VIEW_LAYER(scene, view_layer, sce_iter, base)) {
+    for (SETLOOPER_VIEW_LAYER(*bmain, scene, view_layer, sce_iter, base)) {
       /* cache/bake everything in the scene */
       BKE_ptcache_ids_from_object(&pidlist, base->object, scene, MAX_DUPLI_RECUR);
 
@@ -3199,7 +3205,7 @@ void BKE_ptcache_bake(PTCacheBaker *baker)
           cache->flag &= ~PTCACHE_BAKED;
         }
       }
-      BLI_freelistN(&pidlist);
+      pidlist.free_no_destruct();
     }
   }
 
@@ -3292,7 +3298,7 @@ void BKE_ptcache_bake(PTCacheBaker *baker)
     }
   }
   else {
-    for (SETLOOPER_VIEW_LAYER(scene, view_layer, sce_iter, base)) {
+    for (SETLOOPER_VIEW_LAYER(*bmain, scene, view_layer, sce_iter, base)) {
       BKE_ptcache_ids_from_object(&pidlist, base->object, scene, MAX_DUPLI_RECUR);
 
       for (PTCacheID &pid : pidlist) {
@@ -3334,7 +3340,7 @@ void BKE_ptcache_bake(PTCacheBaker *baker)
           }
         }
       }
-      BLI_freelistN(&pidlist);
+      pidlist.free_no_destruct();
     }
   }
 
@@ -3354,7 +3360,7 @@ void BKE_ptcache_disk_to_mem(PTCacheID *pid)
 {
   PointCache *cache = pid->cache;
   PTCacheMem *pm = nullptr;
-  int baked = cache->flag & PTCACHE_BAKED;
+  ePointCache_Flag baked = cache->flag & PTCACHE_BAKED;
   int cfra, sfra = cache->startframe, efra = cache->endframe;
 
   /* Remove possible bake flag to allow clear */
@@ -3378,7 +3384,7 @@ void BKE_ptcache_mem_to_disk(PTCacheID *pid)
 {
   PointCache *cache = pid->cache;
   PTCacheMem *pm = static_cast<PTCacheMem *>(cache->mem_cache.first);
-  int baked = cache->flag & PTCACHE_BAKED;
+  ePointCache_Flag baked = cache->flag & PTCACHE_BAKED;
 
   /* Remove possible bake flag to allow clear */
   cache->flag &= ~PTCACHE_BAKED;
@@ -3739,13 +3745,12 @@ void BKE_ptcache_blend_write(BlendWriter *writer, ListBaseT<PointCache> *ptcache
               writer->write_struct_array_cast<BoidData>(pm.totpoint, pm.data[i]);
             }
             else if (i == BPHYS_DATA_INDEX) { /* Only 'cache type' to use uint values. */
-              BLO_write_uint32_array(
-                  writer, pm.totpoint, reinterpret_cast<uint32_t *>(pm.data[i]));
+              writer->write_uint32_array(pm.totpoint, reinterpret_cast<uint32_t *>(pm.data[i]));
             }
             else { /* All other types of caches use (vectors of) floats. */
               /* data_size returns bytes. */
               const uint32_t items_num = pm.totpoint * (BKE_ptcache_data_size(i) / sizeof(float));
-              BLO_write_float_array(writer, items_num, reinterpret_cast<float *>(pm.data[i]));
+              writer->write_float_array(items_num, reinterpret_cast<float *>(pm.data[i]));
             }
           }
         }
@@ -3769,28 +3774,40 @@ void BKE_ptcache_blend_write(BlendWriter *writer, ListBaseT<PointCache> *ptcache
 
 static void direct_link_pointcache_mem(BlendDataReader *reader, PTCacheMem *pm)
 {
+  bool ok = true;
   for (int i = 0; i < BPHYS_TOT_DATA; i++) {
+    if (pm->data[i] == nullptr) {
+      continue;
+    }
+
     if (i == BPHYS_DATA_BOIDS) {
-      BLO_read_struct_array(reader, BoidData, pm->totpoint, &pm->data[i]);
+      ok &= BLO_read_array(reader, reinterpret_cast<BoidData **>(&pm->data[i]), pm->totpoint);
     }
     else if (i == BPHYS_DATA_INDEX) { /* Only 'cache type' to use uint values. */
-      BLO_read_uint32_array(reader, pm->totpoint, reinterpret_cast<uint32_t **>(&pm->data[i]));
+      ok &= BLO_read_array(reader, reinterpret_cast<uint32_t **>(&pm->data[i]), pm->totpoint);
     }
     else { /* All other types of caches use (vectors of) floats. */
       /* data_size returns bytes. */
-      const uint32_t items_num = pm->totpoint * (BKE_ptcache_data_size(i) / sizeof(float));
-      BLO_read_float_array(reader, items_num, reinterpret_cast<float **>(&pm->data[i]));
+      ok &= BLO_read_array(reader,
+                           reinterpret_cast<float **>(&pm->data[i]),
+                           pm->totpoint,
+                           BKE_ptcache_data_size(i) / sizeof(float));
     }
+  }
+  if (!ok) {
+    pm->totpoint = 0;
   }
 
   BLO_read_struct_list(reader, PTCacheExtra, &pm->extradata);
 
   for (PTCacheExtra &extra : pm->extradata) {
     if (extra.type == BPHYS_EXTRA_FLUID_SPRINGS) {
-      BLO_read_struct_array(reader, ParticleSpring, extra.totdata, &extra.data);
+      BLO_read_array_and_validate_size(
+          reader, reinterpret_cast<ParticleSpring **>(&extra.data), &extra.totdata);
     }
     else if (extra.type == BPHYS_EXTRA_CLOTH_ACCELERATION) {
-      BLO_read_struct_array(reader, vec3f, extra.totdata, &extra.data);
+      BLO_read_array_and_validate_size(
+          reader, reinterpret_cast<vec3f **>(&extra.data), &extra.totdata);
     }
     else if (extra.data) {
       extra.data = nullptr;
@@ -3807,7 +3824,7 @@ static void direct_link_pointcache(BlendDataReader *reader, PointCache *cache)
     }
   }
   else {
-    BLI_listbase_clear(&cache->mem_cache);
+    cache->mem_cache.clear_no_delete();
   }
 
   cache->flag &= ~PTCACHE_SIMULATION_VALID;
@@ -3833,18 +3850,19 @@ void BKE_ptcache_blend_read_data(BlendDataReader *reader,
       }
     }
 
-    BLO_read_struct(reader, PointCache, ocache);
+    BLO_read_struct_nonnull(reader, PointCache, ocache);
   }
-  else if (*ocache) {
+  else {
     /* old "single" caches need to be linked too */
-    BLO_read_struct(reader, PointCache, ocache);
-    direct_link_pointcache(reader, *ocache);
-    if (force_disk) {
-      (*ocache)->flag |= PTCACHE_DISK_CACHE;
-      (*ocache)->step = 1;
-    }
+    if (BLO_read_struct_nonnull(reader, PointCache, ocache)) {
+      direct_link_pointcache(reader, *ocache);
+      if (force_disk) {
+        (*ocache)->flag |= PTCACHE_DISK_CACHE;
+        (*ocache)->step = 1;
+      }
 
-    ptcaches->first = ptcaches->last = *ocache;
+      ptcaches->first = ptcaches->last = *ocache;
+    }
   }
 }
 

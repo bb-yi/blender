@@ -221,8 +221,8 @@ bool Action::is_empty() const
    * the animation filtering code. With the functions `rearrange_action_channels` and
    * `join_groups_action_temp` the ownership of FCurves is temporarily transferred to the `groups`
    * ListBaseT leaving `curves` potentially empty. */
-  return this->layer_array_num == 0 && this->slot_array_num == 0 &&
-         BLI_listbase_is_empty(&this->curves) && BLI_listbase_is_empty(&this->groups);
+  return this->layer_array_num == 0 && this->slot_array_num == 0 && this->curves.is_empty() &&
+         this->groups.is_empty();
 }
 
 Span<const Layer *> Action::layers() const
@@ -1928,6 +1928,31 @@ Vector<FCurve *> Channelbag::fcurve_create_many(Main *bmain,
   return new_fcurves;
 }
 
+FCurve &Channelbag::fcurve_clone(const FCurve &old_fcurve,
+                                 const StringRefNull new_path,
+                                 const int new_array_index,
+                                 const StringRef new_group_name)
+{
+  FCurve *new_fcurve = this->fcurve_find({new_path, new_array_index});
+  if (new_fcurve) {
+    MEM_delete(new_fcurve->bezt);
+    new_fcurve->bezt = MEM_dupalloc(old_fcurve.bezt);
+    MEM_delete(new_fcurve->fpt);
+    new_fcurve->fpt = MEM_dupalloc(old_fcurve.fpt);
+    new_fcurve->totvert = old_fcurve.totvert;
+  }
+  else {
+    new_fcurve = BKE_fcurve_copy(&old_fcurve);
+    MEM_delete(new_fcurve->rna_path);
+    new_fcurve->rna_path = BLI_strdup(new_path.data());
+    new_fcurve->array_index = new_array_index;
+    this->fcurve_append(*new_fcurve);
+  }
+  bActionGroup &agrp = this->channel_group_ensure(new_group_name.data());
+  this->fcurve_assign_to_channel_group(*new_fcurve, agrp);
+  return *new_fcurve;
+}
+
 void Channelbag::fcurve_append(FCurve &fcurve)
 {
   /* Appended F-Curves don't belong to any group yet, so better make sure their
@@ -2034,7 +2059,7 @@ static void cyclic_keying_ensure_modifier(FCurve &fcurve)
    * BUT: #add_fmodifier() only allows adding a Cycle modifier when there are none yet, so that's
    * all that we need to check for here.
    */
-  if (!BLI_listbase_is_empty(&fcurve.modifiers)) {
+  if (!fcurve.modifiers.is_empty()) {
     return;
   }
 
@@ -2385,9 +2410,8 @@ void Channelbag::channel_group_move_to_index(bActionGroup &group, const int to_g
       this->group_array, this->group_array_num, group_index, group_index + 1, to_group_index);
   this->restore_channel_group_invariants();
 
-  /* Move the fcurves that were part of `group` (as recorded in
-   *`pre_move_group`) to their new positions (now in `group`) so that they're
-   * part of `group` again. */
+  /* Move the fcurves that were part of `group` (as recorded in `pre_move_group`)
+   * to their new positions (now in `group`) so that they're part of `group` again. */
   array_shift_range(this->fcurve_array,
                     this->fcurve_array_num,
                     pre_move_group.fcurve_range_start,

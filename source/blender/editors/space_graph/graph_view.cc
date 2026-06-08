@@ -15,6 +15,7 @@
 #include "BLI_rect.h"
 
 #include "DNA_anim_types.h"
+#include "DNA_curve_types.h"
 #include "DNA_scene_types.h"
 #include "DNA_space_types.h"
 
@@ -23,13 +24,16 @@
 
 #include "BKE_context.hh"
 #include "BKE_fcurve.hh"
+#include "BKE_main.hh"
 #include "BKE_nla.hh"
+#include "BKE_scene.hh"
 
 #include "UI_view2d.hh"
 
 #include "ED_anim_api.hh"
 #include "ED_markers.hh"
 #include "ED_screen.hh"
+#include "ED_space_graph.hh"
 
 #include "WM_api.hh"
 #include "WM_types.hh"
@@ -42,6 +46,88 @@ namespace blender {
 /** \name Calculate Range
  * \{ */
 
+/* Used to ensure that the extents are not too extreme that view implodes. We need different
+ * values for x and y due to the nature of the data displayed. The minimum distance on x for
+ * keyframes is BEZT_BINARYSEARCH_THRESH so differences smaller than that cannot occur. For the y
+ * value there is no such limit, so we have to choose a smaller number. The units are frames for
+ * the x-axis and value for the y-axis. */
+constexpr float2 zoom_threshold(BEZT_BINARYSEARCH_THRESH, 0.0001f);
+
+/**
+ * Sets the given rect to reasonable defaults. Useful in case no bounds could be found by other
+ * means.
+ */
+static void keyframe_bounds_defaults(bAnimContext &ac, rctf &r_bounds)
+{
+  /* Set default range. */
+  if (ac.scene) {
+    const ScenePlaybackRange playback_range = BKE_scene_get_playback_range(ac.scene);
+    r_bounds.xmin = float(playback_range.start_frame);
+    /* The scene range can have the same start and end frame. */
+    r_bounds.xmax = max_ff(float(playback_range.end_frame), r_bounds.xmin + 1);
+  }
+  else {
+    /* The hardcoded values for x and y are completely arbitrary. */
+    r_bounds.xmin = -5;
+    r_bounds.xmax = 100;
+  }
+  r_bounds.ymin = -5;
+  r_bounds.ymax = 5;
+}
+
+/**
+ * Return the bounds of keyframes elements in anim_data. The bounds will be in frame (x) and value
+ * (y) units.
+ *
+ * For a description on the arguments, see `BKE_fcurve_calc_bounds`.
+ *
+ * \returns true if any bounds are found. If false is returned the `r_bounds` are not a valid rect.
+ */
+static bool calculate_keyframe_bounds(const ListBaseT<bAnimListElem> &anim_data,
+                                      bAnimContext &ac,
+                                      const bool only_selected,
+                                      const bool include_handles,
+                                      rctf &r_bounds)
+{
+  /* Check if any channels to set range with. */
+  if (!anim_data.first) {
+    return false;
+  }
+  constexpr float inf = std::numeric_limits<float>::infinity();
+  r_bounds.xmin = inf;
+  r_bounds.xmax = -inf;
+  r_bounds.ymin = inf;
+  r_bounds.ymax = -inf;
+
+  /* Go through channels, finding max extents. */
+  for (bAnimListElem &ale : anim_data) {
+    FCurve *fcu = static_cast<FCurve *>(ale.key_data);
+    rctf fcu_bounds;
+
+    /* Get range. */
+    if (!BKE_fcurve_calc_bounds(fcu, only_selected, include_handles, nullptr, &fcu_bounds)) {
+      continue;
+    }
+    const short mapping_flag = ANIM_get_normalization_flags(ac.sl);
+
+    /* Apply NLA scaling. */
+    fcu_bounds.xmin = ANIM_nla_tweakedit_remap(&ale, fcu_bounds.xmin, NLATIME_CONVERT_MAP);
+    fcu_bounds.xmax = ANIM_nla_tweakedit_remap(&ale, fcu_bounds.xmax, NLATIME_CONVERT_MAP);
+
+    /* Apply unit corrections. */
+    float offset;
+    const float unitFac = ANIM_unit_mapping_get_factor(
+        ac.scene, ale.id, fcu, mapping_flag, &offset);
+    fcu_bounds.ymin += offset;
+    fcu_bounds.ymax += offset;
+    fcu_bounds.ymin *= unitFac;
+    fcu_bounds.ymax *= unitFac;
+    BLI_rctf_sanitize(&fcu_bounds);
+    BLI_rctf_union(&r_bounds, &fcu_bounds);
+  }
+  return BLI_rctf_is_valid(&r_bounds);
+}
+
 void get_graph_keyframe_extents(bAnimContext *ac,
                                 float *xmin,
                                 float *xmax,
@@ -50,134 +136,136 @@ void get_graph_keyframe_extents(bAnimContext *ac,
                                 const bool do_sel_only,
                                 const bool include_handles)
 {
-  Scene *scene = ac->scene;
+  ListBaseT<bAnimListElem> anim_data = ed::graph::get_editable_fcurves(*ac);
+  rctf fcurve_bounds;
+  const bool foundBounds = calculate_keyframe_bounds(
+      anim_data, *ac, do_sel_only, include_handles, fcurve_bounds);
+  ANIM_animdata_freelist(&anim_data);
 
-  ListBaseT<bAnimListElem> anim_data = {nullptr, nullptr};
-  int filter;
-
-  /* Get data to filter, from Dope-sheet. */
-  filter = (ANIMFILTER_DATA_VISIBLE | ANIMFILTER_CURVE_VISIBLE | ANIMFILTER_FCURVESONLY |
-            ANIMFILTER_NODUPLIS);
-  if (U.animation_flag & USER_ANIM_ONLY_SHOW_SELECTED_CURVE_KEYS) {
-    filter |= ANIMFILTER_SEL;
-  }
-
-  ANIM_animdata_filter(
-      ac, &anim_data, eAnimFilter_Flags(filter), ac->data, eAnimCont_Types(ac->datatype));
-
-  /* Set large values initial values that will be easy to override. */
-  if (xmin) {
-    *xmin = 999999999.0f;
-  }
-  if (xmax) {
-    *xmax = -999999999.0f;
-  }
-  if (ymin) {
-    *ymin = 999999999.0f;
-  }
-  if (ymax) {
-    *ymax = -999999999.0f;
-  }
-
-  /* Check if any channels to set range with. */
-  if (anim_data.first) {
-    bool foundBounds = false;
-
-    /* Go through channels, finding max extents. */
-    for (bAnimListElem &ale : anim_data) {
-      FCurve *fcu = static_cast<FCurve *>(ale.key_data);
-      rctf bounds;
-      float unitFac, offset;
-
-      /* Get range. */
-      if (BKE_fcurve_calc_bounds(fcu, do_sel_only, include_handles, nullptr, &bounds)) {
-        short mapping_flag = ANIM_get_normalization_flags(ac->sl);
-
-        /* Apply NLA scaling. */
-        bounds.xmin = ANIM_nla_tweakedit_remap(&ale, bounds.xmin, NLATIME_CONVERT_MAP);
-        bounds.xmax = ANIM_nla_tweakedit_remap(&ale, bounds.xmax, NLATIME_CONVERT_MAP);
-
-        /* Apply unit corrections. */
-        unitFac = ANIM_unit_mapping_get_factor(ac->scene, ale.id, fcu, mapping_flag, &offset);
-        bounds.ymin += offset;
-        bounds.ymax += offset;
-        bounds.ymin *= unitFac;
-        bounds.ymax *= unitFac;
-
-        /* Try to set cur using these values, if they're more extreme than previously set values.
-         */
-        if ((xmin) && (bounds.xmin < *xmin)) {
-          *xmin = bounds.xmin;
-        }
-        if ((xmax) && (bounds.xmax > *xmax)) {
-          *xmax = bounds.xmax;
-        }
-        if ((ymin) && (bounds.ymin < *ymin)) {
-          *ymin = bounds.ymin;
-        }
-        if ((ymax) && (bounds.ymax > *ymax)) {
-          *ymax = bounds.ymax;
-        }
-
-        foundBounds = true;
-      }
+  /* Ensure that the extents are not too extreme that view implodes. */
+  if (foundBounds) {
+    if (fabsf(fcurve_bounds.xmax - fcurve_bounds.xmin) < zoom_threshold.x) {
+      fcurve_bounds.xmin -= zoom_threshold.x / 2;
+      fcurve_bounds.xmax += zoom_threshold.x / 2;
     }
-
-    /* Ensure that the extents are not too extreme that view implodes. */
-    if (foundBounds) {
-      if ((xmin && xmax) && (fabsf(*xmax - *xmin) < 0.001f)) {
-        *xmin -= 0.0005f;
-        *xmax += 0.0005f;
-      }
-      if ((ymin && ymax) && (fabsf(*ymax - *ymin) < 0.001f)) {
-        *ymin -= 0.05f;
-        *ymax += 0.05f;
-      }
+    if (fabsf(fcurve_bounds.ymax - fcurve_bounds.ymin) < zoom_threshold.y) {
+      fcurve_bounds.ymin -= zoom_threshold.y / 2;
+      fcurve_bounds.ymax += zoom_threshold.y / 2;
     }
-    else {
-      if (xmin) {
-        *xmin = float(PSFRA);
-      }
-      if (xmax) {
-        *xmax = float(PEFRA);
-      }
-      if (ymin) {
-        *ymin = -5;
-      }
-      if (ymax) {
-        *ymax = 5;
-      }
-    }
-
-    /* Free memory. */
-    ANIM_animdata_freelist(&anim_data);
   }
   else {
-    /* Set default range. */
-    if (ac->scene) {
-      if (xmin) {
-        *xmin = float(PSFRA);
-      }
-      if (xmax) {
-        *xmax = float(PEFRA);
-      }
-    }
-    else {
-      if (xmin) {
-        *xmin = -5;
-      }
-      if (xmax) {
-        *xmax = 100;
-      }
-    }
+    keyframe_bounds_defaults(*ac, fcurve_bounds);
+  }
 
-    if (ymin) {
-      *ymin = -5;
+  *xmin = fcurve_bounds.xmin;
+  *xmax = fcurve_bounds.xmax;
+  if (ymin) {
+    *ymin = fcurve_bounds.ymin;
+  }
+  if (ymax) {
+    *ymax = fcurve_bounds.ymax;
+  }
+}
+
+/**
+ * Adds padding to the given view bounds based on surrounding keyframe data of selected keys.
+ */
+static void add_contextual_padding(bAnimContext &ac,
+                                   ListBaseT<bAnimListElem> &anim_data,
+                                   const bool pad_x,
+                                   const bool pad_y,
+                                   rctf &r_bounds)
+{
+  if (!pad_x && !pad_y) {
+    return;
+  }
+  const short mapping_flag = ANIM_get_normalization_flags(ac.sl);
+  for (bAnimListElem &ale : anim_data) {
+    FCurve *fcu = static_cast<FCurve *>(ale.key_data);
+    if (!fcu->bezt || fcu->totvert == 0) {
+      continue;
     }
-    if (ymax) {
-      *ymax = 5;
+    float offset;
+    const float unit_factor = ANIM_unit_mapping_get_factor(
+        ac.scene, ale.id, fcu, mapping_flag, &offset);
+    for (int i : IndexRange(fcu->totvert)) {
+      BezTriple *bezt = &fcu->bezt[i];
+      if (!BEZT_ISSEL_ANY(bezt)) {
+        continue;
+      }
+      const float2 key(bezt->vec[1][0], (bezt->vec[1][1] + offset) * unit_factor);
+      /* Check the previous/next key if they exist and add half the distance to them as padding to
+       * the bounds. */
+      if (i - 1 >= 0) {
+        const float2 prev_key(fcu->bezt[i - 1].vec[1][0],
+                              (fcu->bezt[i - 1].vec[1][1] + offset) * unit_factor);
+        if (pad_x) {
+          const float pad = (key.x - prev_key.x) / 2.0;
+          BLI_rctf_union_x(&r_bounds, key.x - pad);
+        }
+        if (pad_y) {
+          const float pad = fabsf(prev_key.y - key.y) / 2.0;
+          /* Add to top and bottom to keep selection centered. */
+          BLI_rctf_union_y(&r_bounds, key.y - pad);
+          BLI_rctf_union_y(&r_bounds, key.y + pad);
+        }
+      }
+      if (i + 1 < fcu->totvert) {
+        const float2 next_key(fcu->bezt[i + 1].vec[1][0],
+                              (fcu->bezt[i + 1].vec[1][1] + offset) * unit_factor);
+        if (pad_x) {
+          const float pad = (next_key.x - key.x) / 2.0;
+          BLI_rctf_union_x(&r_bounds, key.x + pad);
+        }
+        if (pad_y) {
+          const float pad = fabsf(next_key.y - key.y) / 2.0;
+          /* Add to top and bottom to keep selection centered. */
+          BLI_rctf_union_y(&r_bounds, key.y - pad);
+          BLI_rctf_union_y(&r_bounds, key.y + pad);
+        }
+      }
     }
   }
+}
+
+/**
+ * Generate a rect for framing keyframes in the graph editor.
+ * This function tries to find a reasonable minimum bound for the case where the actual bounds are
+ * 0 on either axis.
+ */
+static void get_graph_view_bounds(bAnimContext *ac,
+                                  rctf &r_bounds,
+                                  const bool only_selected,
+                                  const bool include_handles)
+{
+  ListBaseT<bAnimListElem> anim_data = ed::graph::get_editable_fcurves(*ac);
+  const bool found_bounds = calculate_keyframe_bounds(
+      anim_data, *ac, only_selected, include_handles, r_bounds);
+
+  if (found_bounds) {
+    if (only_selected) {
+      /* Only adding contextual padding when looking at selected keys. When framing all data,
+       * there is no additional information we could possibly use. */
+      add_contextual_padding(*ac,
+                             anim_data,
+                             BLI_rctf_size_x(&r_bounds) < zoom_threshold.x,
+                             BLI_rctf_size_y(&r_bounds) < zoom_threshold.y,
+                             r_bounds);
+    }
+    if (fabsf(r_bounds.xmax - r_bounds.xmin) < zoom_threshold.x) {
+      r_bounds.xmin -= zoom_threshold.x / 2;
+      r_bounds.xmax += zoom_threshold.x / 2;
+    }
+    if (fabsf(r_bounds.ymax - r_bounds.ymin) < zoom_threshold.y) {
+      r_bounds.ymin -= zoom_threshold.y / 2;
+      r_bounds.ymax += zoom_threshold.y / 2;
+    }
+  }
+  else {
+    keyframe_bounds_defaults(*ac, r_bounds);
+  }
+
+  ANIM_animdata_freelist(&anim_data);
 }
 
 /** \} */
@@ -250,14 +338,18 @@ static wmOperatorStatus graphkeys_viewall(bContext *C,
     return OPERATOR_CANCELLED;
   }
 
+  if (ac.regiontype != RGN_TYPE_WINDOW) {
+    /* It is possible that operator is invoked from other regions like the Graph Editor's channel
+     * list. Main region is required here for smooth view function. */
+    for (ARegion &region : ac.area->regionbase) {
+      if (region.regiontype == RGN_TYPE_WINDOW) {
+        ac.region = &region;
+        break;
+      }
+    }
+  }
   /* Set the horizontal range, with an extra offset so that the extreme keys will be in view. */
-  get_graph_keyframe_extents(&ac,
-                             &cur_new.xmin,
-                             &cur_new.xmax,
-                             &cur_new.ymin,
-                             &cur_new.ymax,
-                             do_sel_only,
-                             include_handles);
+  get_graph_view_bounds(&ac, cur_new, do_sel_only, include_handles);
 
   /* Give some more space at the borders. */
   cur_new = ANIM_frame_range_view2d_add_xmargin(ac.region->v2d, cur_new);
@@ -515,7 +607,7 @@ static wmOperatorStatus graphkeys_clear_ghostcurves_exec(bContext *C, wmOperator
   sipo = reinterpret_cast<SpaceGraph *>(ac.sl);
 
   /* If no ghost curves, don't do anything. */
-  if (BLI_listbase_is_empty(&sipo->runtime.ghost_curves)) {
+  if (sipo->runtime.ghost_curves.is_empty()) {
     return OPERATOR_CANCELLED;
   }
   /* Free ghost curves. */
@@ -540,6 +632,176 @@ void GRAPH_OT_ghost_curves_clear(wmOperatorType *ot)
 
   /* Flags */
   ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+}
+
+/* Returns the free bit */
+static uint16_t find_free_localview_bit(const Main *bmain)
+{
+  uint16_t local_view_bits = 0;
+  static_assert(std::is_same_v<decltype(SpaceGraph::local_view_bit), decltype(local_view_bits)>);
+
+  /* Check all areas to see which local view bits are already in use. */
+  for (const bScreen &screen : bmain->screens) {
+    for (const ScrArea &area : screen.areabase) {
+      for (const SpaceLink &sl : area.spacedata) {
+        if (sl.spacetype == SPACE_GRAPH) {
+          const SpaceGraph *sipo = reinterpret_cast<const SpaceGraph *>(&sl);
+          local_view_bits |= sipo->local_view_bit;
+        }
+      }
+    }
+  }
+
+  for (int i = 0; i < sizeof(SpaceGraph::local_view_bit); i++) {
+    if ((local_view_bits & (1 << i)) == 0) {
+      return (1 << i);
+    }
+  }
+
+  return 0;
+}
+
+/**
+ * Returns true if entered in local view.
+ */
+static bool local_view_enter(bContext *C,
+                             SpaceGraph &sipo,
+                             const ARegion &region,
+                             const ListBaseT<bAnimListElem> &anim_data,
+                             const bool frame_selected)
+{
+  bool is_selected = false;
+  /* Find a free bit and set local view for graph editor in current context. */
+  const uint16_t free_bit = find_free_localview_bit(CTX_data_main(C));
+
+  for (bAnimListElem &ale : anim_data) {
+    FCurve *fcu = static_cast<FCurve *>(ale.key_data);
+    if (ale.type != ANIMTYPE_FCURVE) {
+      continue;
+    }
+    if (ale.flag & FCURVE_SELECTED) {
+      /* Set bit for selected Fcurves to draw them in local view. */
+      fcu->local_view_bits |= free_bit;
+      is_selected = true;
+    }
+  }
+
+  /* Only enter local view when Fcurve is selected. */
+  if (!is_selected) {
+    return false;
+  }
+
+  sipo.local_view_bit = free_bit;
+  sipo.local_view_visible_region_before = region.v2d.cur;
+  if (frame_selected) {
+    graphkeys_viewall(C, false, true, 200);
+  }
+
+  return true;
+}
+
+/**
+ * Returns true if exited from the local view.
+ */
+static bool local_view_exit(bContext *C,
+                            SpaceGraph &sipo,
+                            ARegion &region,
+                            const ListBaseT<bAnimListElem> &anim_data,
+                            const bool frame_selected)
+{
+  bool changed = false;
+  for (bAnimListElem &ale : anim_data) {
+    FCurve *fcu = static_cast<FCurve *>(ale.key_data);
+    if (ale.type != ANIMTYPE_FCURVE) {
+      continue;
+    }
+    fcu->local_view_bits &= ~sipo.local_view_bit;
+    changed = true;
+  }
+
+  sipo.local_view_bit = 0;
+  if (frame_selected) {
+    /* Restore view. */
+    ui::view2d_smooth_view(C, &region, &sipo.local_view_visible_region_before, 200);
+  }
+
+  return changed;
+}
+
+static wmOperatorStatus graph_local_view_exec(bContext *C, wmOperator *op)
+{
+  bAnimContext ac;
+  ListBaseT<bAnimListElem> anim_data = {nullptr, nullptr};
+  SpaceGraph *sipo = CTX_wm_space_graph(C);
+  const bool frame_selected = RNA_boolean_get(op->ptr, "frame_selected");
+  const bool enter_local_view = (sipo->local_view_bit == 0);
+
+  if (ANIM_animdata_get_context(C, &ac) == 0) {
+    return OPERATOR_CANCELLED;
+  }
+
+  if (ac.regiontype != RGN_TYPE_WINDOW) {
+    /* It is possible that operator is invoked from other regions like the Graph Editor's channel
+     * list. Main region is required here for current bounds and smooth view function. */
+    for (ARegion &region : ac.area->regionbase) {
+      if (region.regiontype == RGN_TYPE_WINDOW) {
+        ac.region = &region;
+        break;
+      }
+    }
+  }
+
+  const eAnimFilter_Flags filter = (ANIMFILTER_DATA_VISIBLE | ANIMFILTER_LIST_CHANNELS |
+                                    ANIMFILTER_NODUPLIS | ANIMFILTER_FCURVESONLY);
+  ANIM_animdata_filter(&ac, &anim_data, filter, ac.data, ac.datatype);
+
+  const bool changed = enter_local_view ?
+                           local_view_enter(C, *sipo, *ac.region, anim_data, frame_selected) :
+                           local_view_exit(C, *sipo, *ac.region, anim_data, frame_selected);
+
+  ANIM_animdata_freelist(&anim_data);
+
+  if (!changed) {
+    return OPERATOR_CANCELLED;
+  }
+
+  WM_event_add_notifier(C, NC_ANIMATION | ND_ANIMCHAN | NA_EDITED, nullptr);
+  return OPERATOR_FINISHED;
+}
+
+static bool graph_local_view_poll(bContext *C)
+{
+  if (!ED_operator_graphedit_active(C)) {
+    return false;
+  }
+
+  const SpaceGraph *sipo = CTX_wm_space_graph(C);
+  /* Operator is not supported yet in driver editor. */
+  return sipo->mode != SIPO_MODE_DRIVERS;
+}
+
+void GRAPH_OT_local_view(wmOperatorType *ot)
+{
+  /* identifiers */
+  ot->name = "Local View";
+  ot->idname = "GRAPH_OT_local_view";
+  ot->description = "Isolate selected F-Curves in Graph Editor view";
+
+  /* API callbacks. */
+  ot->exec = graph_local_view_exec;
+  ot->poll = graph_local_view_poll;
+
+  /* flags */
+  ot->flag = OPTYPE_UNDO;
+
+  /* Props */
+  PropertyRNA *prop = RNA_def_boolean(
+      ot->srna,
+      "frame_selected",
+      true,
+      "Frame selected",
+      "Zoom current view to draw selected fcurves in visible range");
+  RNA_def_property_flag(prop, PROP_SKIP_SAVE);
 }
 
 /** \} */

@@ -77,10 +77,8 @@ void GHOST_XrContext::initialize(const GHOST_XrContextCreateInfo *create_info)
 {
   initApiLayers();
   initExtensions();
-  if (isDebugMode()) {
-    printSDKVersion();
-    printAvailableAPILayersAndExtensionsInfo();
-  }
+  printSDKVersion();
+  printAvailableAPILayersAndExtensionsInfo();
 
   /* Multiple graphics binding extensions can be enabled, but only one will actually be used
    * (determined later on). */
@@ -95,9 +93,7 @@ void GHOST_XrContext::initialize(const GHOST_XrContextCreateInfo *create_info)
   gpu_binding_type_ = determineGraphicsBindingTypeToUse(graphics_binding_types, create_info);
 
   printInstanceInfo();
-  if (isDebugMode()) {
-    initDebugMessenger();
-  }
+  initDebugMessenger();
 }
 
 void GHOST_XrContext::createOpenXRInstance(
@@ -121,9 +117,7 @@ void GHOST_XrContext::createOpenXRInstance(
   create_info.enabledApiLayerNames = enabled_layers_.data();
   create_info.enabledExtensionCount = enabled_extensions_.size();
   create_info.enabledExtensionNames = enabled_extensions_.data();
-  if (isDebugMode()) {
-    printExtensionsAndAPILayersToEnable();
-  }
+  printExtensionsAndAPILayersToEnable();
 
   CHECK_XR(xrCreateInstance(&create_info, &oxr_->instance),
            "Failed to create OpenXR instance, check active OpenXR runtime.");
@@ -159,41 +153,43 @@ void GHOST_XrContext::printSDKVersion()
 {
   const XrVersion sdk_version = XR_CURRENT_API_VERSION;
 
-  printf("OpenXR SDK Version: %u.%u.%u\n",
-         XR_VERSION_MAJOR(sdk_version),
-         XR_VERSION_MINOR(sdk_version),
-         XR_VERSION_PATCH(sdk_version));
+  CLOG_INFO(LOG_GHOST_XR,
+            "OpenXR SDK Version: %u.%u.%u",
+            XR_VERSION_MAJOR(sdk_version),
+            XR_VERSION_MINOR(sdk_version),
+            XR_VERSION_PATCH(sdk_version));
 }
 
 void GHOST_XrContext::printInstanceInfo()
 {
   assert(oxr_->instance != XR_NULL_HANDLE);
 
-  printf("Connected to OpenXR runtime: %s (Version %u.%u.%u)\n",
-         oxr_->instance_properties.runtimeName,
-         XR_VERSION_MAJOR(oxr_->instance_properties.runtimeVersion),
-         XR_VERSION_MINOR(oxr_->instance_properties.runtimeVersion),
-         XR_VERSION_PATCH(oxr_->instance_properties.runtimeVersion));
+  CLOG_INFO(LOG_GHOST_XR,
+            "Connected to OpenXR runtime: %s (Version %u.%u.%u)",
+            oxr_->instance_properties.runtimeName,
+            XR_VERSION_MAJOR(oxr_->instance_properties.runtimeVersion),
+            XR_VERSION_MINOR(oxr_->instance_properties.runtimeVersion),
+            XR_VERSION_PATCH(oxr_->instance_properties.runtimeVersion));
 }
 
 void GHOST_XrContext::printAvailableAPILayersAndExtensionsInfo()
 {
-  puts("Available OpenXR API-layers/extensions:");
+  CLOG_INFO(LOG_GHOST_XR, "Available OpenXR API-layers/extensions:");
   for (const XrApiLayerProperties &layer_info : oxr_->layers) {
-    printf("Layer: %s\n", layer_info.layerName);
+    CLOG_INFO(LOG_GHOST_XR, "Layer: %s", layer_info.layerName);
   }
   for (const XrExtensionProperties &ext_info : oxr_->extensions) {
-    printf("Extension: %s\n", ext_info.extensionName);
+    CLOG_INFO(LOG_GHOST_XR, "Extension: %s", ext_info.extensionName);
   }
 }
 
 void GHOST_XrContext::printExtensionsAndAPILayersToEnable()
 {
   for (const char *layer_name : enabled_layers_) {
-    printf("Enabling OpenXR API-Layer: %s\n", layer_name);
+    CLOG_INFO(LOG_GHOST_XR, "Enabling OpenXR API-Layer: %s", layer_name);
   }
   for (const char *ext_name : enabled_extensions_) {
-    printf("Enabling OpenXR Extension: %s\n", ext_name);
+    CLOG_INFO(LOG_GHOST_XR, "Enabling OpenXR Extension: %s", ext_name);
   }
 }
 
@@ -202,8 +198,7 @@ static XrBool32 debug_messenger_func(XrDebugUtilsMessageSeverityFlagsEXT /*messa
                                      const XrDebugUtilsMessengerCallbackDataEXT *callbackData,
                                      void * /*user_data*/)
 {
-  puts("OpenXR Debug Message:");
-  puts(callbackData->message);
+  CLOG_INFO(LOG_GHOST_XR, "OpenXR Debug Message: %s", callbackData->message);
   return XR_FALSE; /* OpenXR spec suggests always returning false. */
 }
 
@@ -224,9 +219,9 @@ void GHOST_XrContext::initDebugMessenger()
     oxr_->s_xrCreateDebugUtilsMessengerEXT_fn = nullptr;
     oxr_->s_xrDestroyDebugUtilsMessengerEXT_fn = nullptr;
 
-    fprintf(stderr,
-            "Could not use XR_EXT_debug_utils to enable debug prints. Not a fatal error, "
-            "continuing without the messenger.\n");
+    CLOG_WARN(LOG_GHOST_XR,
+              "Could not use XR_EXT_debug_utils to enable debug prints. Not a fatal error, "
+              "continuing without the messenger.");
     return;
   }
 
@@ -242,9 +237,9 @@ void GHOST_XrContext::initDebugMessenger()
   if (XR_FAILED(oxr_->s_xrCreateDebugUtilsMessengerEXT_fn(
           oxr_->instance, &create_info, &oxr_->debug_messenger)))
   {
-    fprintf(stderr,
-            "Failed to create OpenXR debug messenger. Not a fatal error, continuing without the "
-            "messenger.\n");
+    CLOG_WARN(LOG_GHOST_XR,
+              "Failed to create OpenXR debug messenger. Not a fatal error, continuing without the "
+              "messenger.");
     return;
   }
 }
@@ -262,26 +257,19 @@ void GHOST_XrContext::dispatchErrorMessage(const GHOST_XrException *exception) c
   error.user_message = exception->msg_.data();
   error.customdata = s_error_handler_customdata;
 
-  if (isDebugMode()) {
-    XrInstance instance = getInstance();
-    if (instance) {
-      /* Display both error enum string and raw value. */
-      char error_string_buf[XR_MAX_RESULT_STRING_SIZE];
-      xrResultToString(instance, static_cast<XrResult>(exception->result_), error_string_buf);
-      fprintf(stderr,
-              "Error: \t%s\n\tOpenXR error: %s (error value: %i)\n",
-              error.user_message,
-              error_string_buf,
-              exception->result_);
-    }
-    else {
-      /* OpenXR instance may have failed to initialize, only display error value in this case. */
-      fprintf(stderr,
-              "Error: \t%s\n\tOpenXR error value: %i - "
-              "Refer to the 'Return Codes' section of the OpenXR Specification for meaning.\n",
-              error.user_message,
-              exception->result_);
-    };
+  XrInstance instance = getInstance();
+  if (instance) {
+    char error_string_buf[XR_MAX_RESULT_STRING_SIZE];
+    xrResultToString(instance, static_cast<XrResult>(exception->result_), error_string_buf);
+    CLOG_ERROR(LOG_GHOST_XR,
+               "%s (OpenXR error: %s, value: %i)",
+               error.user_message,
+               error_string_buf,
+               exception->result_);
+  }
+  else {
+    CLOG_ERROR(
+        LOG_GHOST_XR, "%s (OpenXR error value: %i)", error.user_message, exception->result_);
   }
 
   /* Potentially destroys GHOST_XrContext */

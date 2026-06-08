@@ -10,23 +10,39 @@
 #include "BKE_customdata.hh"
 
 #include "BLI_array_utils.hh"
+#include "BLI_bit_span_ops.hh"
+#include "BLI_bit_vector.hh"
 
 namespace blender::bke::curves {
 
+IndexMask point_to_curve_selection(OffsetIndices<int> points_by_curve,
+                                   const IndexMask &point_mask,
+                                   LinearAllocator<> &memory)
+{
+  BitVector<1024> selected(points_by_curve.total_size());
+  point_mask.to_bits(selected);
+
+  return IndexMask::from_predicate(points_by_curve.index_range(), memory, [&](const int curve_i) {
+    const IndexRange points = points_by_curve[curve_i];
+    const BitSpan curve_bits = bits::to_best_bit_span(selected).slice(points);
+    return bits::any_bit_set(curve_bits);
+  });
+}
+
 IndexMask curve_to_point_selection(OffsetIndices<int> points_by_curve,
                                    const IndexMask &curve_selection,
-                                   IndexMaskMemory &memory)
+                                   LinearAllocator<> &memory)
 {
   Array<index_mask::IndexMask::Initializer> point_ranges(curve_selection.size());
-  curve_selection.foreach_index(GrainSize(2048), [&](const int curve, const int pos) {
-    point_ranges[pos] = points_by_curve[curve];
-  });
+  curve_selection.foreach_index(
+      [&](const int curve, const int pos) { point_ranges[pos] = points_by_curve[curve]; },
+      exec_mode::grain_size(2048));
   return IndexMask::from_initializers(point_ranges, memory);
 }
 
 IndexMask curve_type_point_selection(const bke::CurvesGeometry &curves,
                                      const CurveType curve_type,
-                                     IndexMaskMemory &memory)
+                                     LinearAllocator<> &memory)
 {
   return curve_to_point_selection(curves.points_by_curve(),
                                   indices_for_type(curves.curve_types(),
@@ -44,10 +60,12 @@ void fill_points(const OffsetIndices<int> points_by_curve,
 {
   BLI_assert(*value.type() == dst.type());
   const CPPType &type = dst.type();
-  curve_selection.foreach_index(GrainSize(512), [&](const int i) {
-    const IndexRange points = points_by_curve[i];
-    type.fill_assign_n(value.get(), dst.slice(points).data(), points.size());
-  });
+  curve_selection.foreach_index(
+      [&](const int i) {
+        const IndexRange points = points_by_curve[i];
+        type.fill_assign_n(value.get(), dst.slice(points).data(), points.size());
+      },
+      exec_mode::grain_size(512));
 }
 
 CurvesGeometry copy_only_curve_domain(const CurvesGeometry &src_curves)
@@ -66,7 +84,7 @@ IndexMask indices_for_type(const VArray<int8_t> &types,
                            const std::array<int, CURVE_TYPES_NUM> &type_counts,
                            const CurveType type,
                            const IndexMask &selection,
-                           IndexMaskMemory &memory)
+                           LinearAllocator<> &memory)
 {
   if (type_counts[type] == types.size()) {
     return selection;
@@ -75,9 +93,8 @@ IndexMask indices_for_type(const VArray<int8_t> &types,
     return types.get_internal_single() == type ? IndexMask(types.size()) : IndexMask(0);
   }
   Span<int8_t> types_span = types.get_internal_span();
-  return IndexMask::from_predicate(selection, GrainSize(4096), memory, [&](const int index) {
-    return types_span[index] == type;
-  });
+  return IndexMask::from_predicate(
+      selection, memory, [&](const int index) { return types_span[index] == type; });
 }
 
 void foreach_curve_by_type(const VArray<int8_t> &types,
@@ -193,15 +210,17 @@ Array<float3> retrieve_all_positions(const bke::CurvesGeometry &curves,
   }
 
   Array<float3> all_positions(positions.size() * 3);
-  curves_selection.foreach_index(GrainSize(1024), [&](const int curve) {
-    const IndexRange points = points_by_curve[curve];
-    for (const int point : points) {
-      const int index = point * 3;
-      all_positions[index] = (*handle_positions_left)[point];
-      all_positions[index + 1] = positions[point];
-      all_positions[index + 2] = (*handle_positions_right)[point];
-    }
-  });
+  curves_selection.foreach_index(
+      [&](const int curve) {
+        const IndexRange points = points_by_curve[curve];
+        for (const int point : points) {
+          const int index = point * 3;
+          all_positions[index] = (*handle_positions_left)[point];
+          all_positions[index + 1] = positions[point];
+          all_positions[index + 2] = (*handle_positions_right)[point];
+        }
+      },
+      exec_mode::grain_size(1024));
 
   return all_positions;
 }
@@ -221,15 +240,17 @@ void write_all_positions(bke::CurvesGeometry &curves,
   MutableSpan<float3> handle_positions_left = curves.handle_positions_left_for_write();
   MutableSpan<float3> handle_positions_right = curves.handle_positions_right_for_write();
 
-  curves_selection.foreach_index(GrainSize(1024), [&](const int curve) {
-    const IndexRange points = points_by_curve[curve];
-    for (const int point : points) {
-      const int index = point * 3;
-      handle_positions_left[point] = all_positions[index];
-      positions[point] = all_positions[index + 1];
-      handle_positions_right[point] = all_positions[index + 2];
-    }
-  });
+  curves_selection.foreach_index(
+      [&](const int curve) {
+        const IndexRange points = points_by_curve[curve];
+        for (const int point : points) {
+          const int index = point * 3;
+          handle_positions_left[point] = all_positions[index];
+          positions[point] = all_positions[index + 1];
+          handle_positions_right[point] = all_positions[index + 2];
+        }
+      },
+      exec_mode::grain_size(1024));
 }
 
 }  // namespace bezier
@@ -262,12 +283,14 @@ void update_custom_knot_modes(const IndexMask &mask,
 {
   const VArray<bool> cyclic = curves.cyclic();
   MutableSpan<int8_t> knot_modes = curves.nurbs_knots_modes_for_write();
-  mask.foreach_index(GrainSize(512), [&](const int64_t curve) {
-    int8_t &knot_mode = knot_modes[curve];
-    if (knot_mode == NURBS_KNOT_MODE_CUSTOM) {
-      knot_mode = cyclic[curve] ? mode_for_cyclic : mode_for_regular;
-    }
-  });
+  mask.foreach_index(
+      [&](const int64_t curve) {
+        int8_t &knot_mode = knot_modes[curve];
+        if (knot_mode == NURBS_KNOT_MODE_CUSTOM) {
+          knot_mode = cyclic[curve] ? mode_for_cyclic : mode_for_regular;
+        }
+      },
+      exec_mode::grain_size(512));
   curves.nurbs_custom_knots_update_size();
 }
 

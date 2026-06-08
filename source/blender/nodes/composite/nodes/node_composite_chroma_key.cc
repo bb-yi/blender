@@ -24,24 +24,24 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.use_custom_socket_order();
   b.allow_any_socket_order();
   b.is_function_node();
-  b.add_input<decl::Color>("Image").default_value({1.0f, 1.0f, 1.0f, 1.0f}).hide_value();
-  b.add_output<decl::Color>("Image").align_with_previous();
-  b.add_output<decl::Float>("Matte");
+  b.add_input<decl::Color>("Image"_ustr).default_value({1.0f, 1.0f, 1.0f, 1.0f}).hide_value();
+  b.add_output<decl::Color>("Image"_ustr).align_with_previous();
+  b.add_output<decl::Float>("Matte"_ustr);
 
-  b.add_input<decl::Color>("Key Color").default_value({1.0f, 1.0f, 1.0f, 1.0f});
-  b.add_input<decl::Float>("Minimum")
+  b.add_input<decl::Color>("Key Color"_ustr).default_value({1.0f, 1.0f, 1.0f, 1.0f});
+  b.add_input<decl::Float>("Minimum"_ustr)
       .default_value(DEG2RADF(10.0f))
       .subtype(PROP_ANGLE)
       .description(
           "If the angle between the color and the key color in CrCb space is less than this "
           "minimum angle, it is keyed");
-  b.add_input<decl::Float>("Maximum")
+  b.add_input<decl::Float>("Maximum"_ustr)
       .default_value(DEG2RADF(30.0f))
       .subtype(PROP_ANGLE)
       .description(
           "If the angle between the color and the key color in CrCb space is larger than this "
           "maximum angle, it is not keyed");
-  b.add_input<decl::Float>("Falloff")
+  b.add_input<decl::Float>("Falloff"_ustr)
       .default_value(1.0f)
       .min(0.0f)
       .max(1.0f)
@@ -133,7 +133,7 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, "CompositorNodeChromaMatte", CMP_NODE_CHROMA_MATTE);
+  cmp_node_type_base(&ntype, "CompositorNodeChromaMatte"_ustr, CMP_NODE_CHROMA_MATTE);
   ntype.ui_name = "Chroma Key";
   ntype.ui_description = "Create matte based on chroma values";
   ntype.enum_name_legacy = "CHROMA_MATTE";
@@ -142,7 +142,7 @@ static void node_register()
   ntype.flag |= NODE_PREVIEW;
   ntype.gpu_fn = node_gpu_material;
   ntype.build_multi_function = node_build_multi_function;
-  bke::node_type_size(ntype, 155, 140, NODE_DEFAULT_MAX_WIDTH);
+  ntype.default_width = bke::NodeWidth::_160;
 
   bke::node_register_type(ntype);
 }

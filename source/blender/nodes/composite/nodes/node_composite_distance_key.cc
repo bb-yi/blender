@@ -30,17 +30,17 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.use_custom_socket_order();
   b.allow_any_socket_order();
   b.is_function_node();
-  b.add_input<decl::Color>("Image").default_value({1.0f, 1.0f, 1.0f, 1.0f}).hide_value();
-  b.add_output<decl::Color>("Image").align_with_previous();
-  b.add_output<decl::Float>("Matte");
+  b.add_input<decl::Color>("Image"_ustr).default_value({1.0f, 1.0f, 1.0f, 1.0f}).hide_value();
+  b.add_output<decl::Color>("Image"_ustr).align_with_previous();
+  b.add_output<decl::Float>("Matte"_ustr);
 
-  b.add_input<decl::Color>("Key Color").default_value({1.0f, 1.0f, 1.0f, 1.0f});
-  b.add_input<decl::Menu>("Color Space")
+  b.add_input<decl::Color>("Key Color"_ustr).default_value({1.0f, 1.0f, 1.0f, 1.0f});
+  b.add_input<decl::Menu>("Color Space"_ustr)
       .default_value(CMP_NODE_DISTANCE_MATTE_COLOR_SPACE_RGBA)
       .static_items(color_space_items)
       .expanded()
       .optional_label();
-  b.add_input<decl::Float>("Tolerance")
+  b.add_input<decl::Float>("Tolerance"_ustr)
       .default_value(0.1f)
       .subtype(PROP_FACTOR)
       .min(0.0f)
@@ -48,7 +48,7 @@ static void node_declare(NodeDeclarationBuilder &b)
       .description(
           "If the distance between the color and the key color in the given color space is less "
           "than this threshold, it is keyed");
-  b.add_input<decl::Float>("Falloff")
+  b.add_input<decl::Float>("Falloff"_ustr)
       .default_value(0.1f)
       .subtype(PROP_FACTOR)
       .min(0.0f)
@@ -144,7 +144,7 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, "CompositorNodeDistanceMatte", CMP_NODE_DIST_MATTE);
+  cmp_node_type_base(&ntype, "CompositorNodeDistanceMatte"_ustr, CMP_NODE_DIST_MATTE);
   ntype.ui_name = "Distance Key";
   ntype.ui_description = "Create matte based on 3D distance between colors";
   ntype.enum_name_legacy = "DISTANCE_MATTE";
@@ -156,7 +156,7 @@ static void node_register()
       ntype, "NodeChroma", node_free_standard_storage, node_copy_standard_storage);
   ntype.gpu_fn = node_gpu_material;
   ntype.build_multi_function = node_build_multi_function;
-  bke::node_type_size(ntype, 155, 140, NODE_DEFAULT_MAX_WIDTH);
+  ntype.default_width = bke::NodeWidth::_160;
 
   bke::node_register_type(ntype);
 }

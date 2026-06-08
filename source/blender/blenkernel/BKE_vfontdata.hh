@@ -14,9 +14,10 @@
 
 #include "BLI_map.hh"
 
+#include "DNA_vec_types.h"
+
 namespace blender {
 
-struct GHash;
 struct Nurb;
 struct PackedFile;
 struct VFont;
@@ -59,6 +60,8 @@ struct VFontData {
 struct VChar {
   ListBaseT<Nurb> nurbsbase;
   float width;
+  /** Glyph bounding box from FreeType metrics (scaled to VFont units). */
+  rctf bounds;
 };
 
 /**

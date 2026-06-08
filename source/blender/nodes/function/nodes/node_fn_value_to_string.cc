@@ -10,6 +10,8 @@
 #include "UI_interface_layout.hh"
 #include "UI_resources.hh"
 
+#include <algorithm>
+#include <charconv>
 #include <iomanip>
 #include <sstream>
 #include <string>
@@ -18,17 +20,31 @@ namespace blender::nodes::node_fn_value_to_string_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
+  b.is_function_node();
   const bNode *node = b.node_or_null();
 
   if (node != nullptr) {
     const eNodeSocketDatatype data_type = eNodeSocketDatatype(node->custom1);
-    b.add_input(data_type, "Value");
+    b.add_input(data_type, "Value"_ustr);
 
-    auto &decimals = b.add_input<decl::Int>("Decimals").min(0);
+    auto &decimals = b.add_input<decl::Int>("Decimals"_ustr).min(0);
     decimals.available(data_type == SOCK_FLOAT);
+
+    b.add_input<decl::Int>("Base"_ustr)
+        .min(2)
+        .max(36)
+        .default_value(10)
+        .description("Numeric base for the output string (e.g. 2 for binary, 16 for hexadecimal)")
+        .available(data_type == SOCK_INT);
+
+    b.add_input<decl::Int>("Padding"_ustr)
+        .min(0)
+        .default_value(0)
+        .description("Minimum number of characters in the output, zero-padded if shorter")
+        .available(data_type == SOCK_INT);
   }
 
-  b.add_output<decl::String>("String");
+  b.add_output<decl::String>("String"_ustr);
 }
 
 static const mf::MultiFunction *get_multi_function(const bNode &bnode)
@@ -40,8 +56,23 @@ static const mf::MultiFunction *get_multi_function(const bNode &bnode)
         return stream.str();
       });
 
-  static auto int_to_str_fn = mf::build::SI1_SO<int, std::string>(
-      "Value To String", [](int a) { return std::to_string(a); });
+  static auto int_to_str_fn = mf::build::SI3_SO<int, int, int, std::string>(
+      "Value To String", [](int value, int base, int padding) -> std::string {
+        if (base < 2 || base > 36) {
+          return {};
+        }
+        padding = std::max(0, padding);
+        /* Maximum possible string length is reached with -2^31=-2147483648 and base 2. */
+        char buf[33];
+        auto [ptr, ec] = std::to_chars(buf, buf + sizeof(buf), value, base);
+        std::string result(buf, ptr);
+        if (padding > int(result.size())) {
+          const size_t needed = size_t(padding) - result.size();
+          const size_t insert_pos = (!result.empty() && result[0] == '-') ? 1 : 0;
+          result.insert(insert_pos, needed, '0');
+        }
+        return result;
+      });
 
   switch (bnode.custom1) {
     case SOCK_FLOAT:
@@ -67,25 +98,25 @@ static void node_init(bNodeTree * /*tree*/, bNode *node)
 
 static void node_gather_link_searches(GatherLinkSearchOpParams &params)
 {
-  const eNodeSocketDatatype socket_type = eNodeSocketDatatype(params.other_socket().type);
+  const eNodeSocketDatatype socket_type = params.other_socket().type;
   if (params.in_out() == SOCK_IN) {
     if (socket_type == SOCK_INT) {
       params.add_item(IFACE_("Value"), [](LinkSearchOpParams &params) {
-        bNode &node = params.add_node("FunctionNodeValueToString");
+        bNode &node = params.add_node("FunctionNodeValueToString"_ustr);
         node.custom1 = SOCK_INT;
-        params.update_and_connect_available_socket(node, "Value");
+        params.update_and_connect_available_socket(node, "Value"_ustr);
       });
       params.add_item(IFACE_("Decimals"), [](LinkSearchOpParams &params) {
-        bNode &node = params.add_node("FunctionNodeValueToString");
-        params.update_and_connect_available_socket(node, "Decimals");
+        bNode &node = params.add_node("FunctionNodeValueToString"_ustr);
+        params.update_and_connect_available_socket(node, "Decimals"_ustr);
       });
     }
     else {
       if (params.node_tree().typeinfo->validate_link(socket_type, SOCK_FLOAT)) {
         params.add_item(IFACE_("Value"), [](LinkSearchOpParams &params) {
-          bNode &node = params.add_node("FunctionNodeValueToString");
+          bNode &node = params.add_node("FunctionNodeValueToString"_ustr);
           node.custom1 = SOCK_FLOAT;
-          params.update_and_connect_available_socket(node, "Value");
+          params.update_and_connect_available_socket(node, "Value"_ustr);
         });
       }
     }
@@ -93,8 +124,8 @@ static void node_gather_link_searches(GatherLinkSearchOpParams &params)
   else {
     if (socket_type == SOCK_STRING) {
       params.add_item(IFACE_("String"), [](LinkSearchOpParams &params) {
-        bNode &node = params.add_node("FunctionNodeValueToString");
-        params.update_and_connect_available_socket(node, "String");
+        bNode &node = params.add_node("FunctionNodeValueToString"_ustr);
+        params.update_and_connect_available_socket(node, "String"_ustr);
       });
     }
   }
@@ -126,7 +157,7 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  fn_node_type_base(&ntype, "FunctionNodeValueToString", FN_NODE_VALUE_TO_STRING);
+  fn_cmp_node_type_base(&ntype, "FunctionNodeValueToString"_ustr, FN_NODE_VALUE_TO_STRING);
   ntype.ui_name = "Value to String";
   ntype.ui_description = "Generate a string representation of the given input value";
   ntype.enum_name_legacy = "VALUE_TO_STRING";

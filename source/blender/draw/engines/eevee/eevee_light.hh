@@ -242,6 +242,8 @@ class LightModule {
 
   /** Update light on the GPU after culling. Ran for each sample. */
   PassSimple update_ps_ = {"LightUpdate"};
+  /** Draw camera-visible light shapes. */
+  PassSimple shape_display_ps_ = {"Light.ShapeDisplay"};
 
   /** Debug Culling visualization. */
   PassSimple debug_draw_ps_ = {"LightCulling.Debug"};
@@ -251,7 +253,7 @@ class LightModule {
   ~LightModule();
 
   void begin_sync();
-  void sync_light(const Object *ob, ObjectHandle &handle);
+  void sync_light(const ObjectRef &ob_ref);
   void end_sync();
   void sync_render_extent(const int2 render_extent);
 
@@ -273,6 +275,7 @@ class LightModule {
                                  draw::StorageBuffer<CaptureInfoData> &capture_info_buf,
                                  uint surfel_len);
 
+  void shape_display_draw(View &view, gpu::FrameBuffer *view_fb);
   void debug_draw(View &view, gpu::FrameBuffer *view_fb);
 
   int light_count() const
@@ -363,6 +366,7 @@ class LightModule {
   void uniform_light_shader_pass_sync();
   void volume_light_shader_pass_sync(const int3 grid_size);
   void surfel_light_shader_pass_sync(uint surfel_len);
+  void shape_display_pass_sync();
   void debug_pass_sync();
   void culling_extent_sync(const int2 render_extent);
 

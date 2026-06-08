@@ -22,6 +22,7 @@
 #include "BLI_string.h"
 #include "BLI_utildefines.h"
 
+#include "BKE_asset.hh"
 #include "BKE_blender_version.h"
 #include "BKE_blendfile_link_append.hh"
 #include "BKE_context.hh"
@@ -72,6 +73,53 @@ static uint32_t bool_flag_pair_as_flag(const BoolFlagPair *bool_flags, int bool_
 }
 
 /** \} */
+
+/* Named tuple to store BLODataBlockInfo::Library data. */
+static PyTypeObject bpy_lib_LibraryType;
+
+static PyStructSequence_Field bpy_lib_LibraryType_fields[] = {
+    {"filepath",
+     "Filepath to the library file, may be relative to the blendfile being loaded"
+     "\n\n:type: str"},
+    {"is_archive",
+     "Whether the Library data-block is an archive one (used as namespace for packed linked "
+     "data-blocks)"
+     "\n\n:type: bool"},
+    {nullptr},
+};
+
+static PyStructSequence_Desc bpy_lib_LibraryType_desc = {
+    /*name*/ "bpy_lib_library",
+    /*doc*/ "Contains information about libraries present in the loaded blendfile",
+    /*fields*/ bpy_lib_LibraryType_fields,
+    /*n_in_sequence*/ ARRAY_SIZE(bpy_lib_LibraryType_fields) - 1,
+};
+
+static PyObject *make_library_info(BLODataBlockInfo &id_info)
+{
+  PyObject *library_info;
+  int pos = 0;
+
+  library_info = PyStructSequence_New(&bpy_lib_LibraryType);
+  if (library_info == nullptr) {
+    return nullptr;
+  }
+
+  PyStructSequence_SET_ITEM(
+      library_info, pos++, PyC_UnicodeFromBytes(id_info.library_data.filepath));
+  PyStructSequence_SET_ITEM(
+      library_info,
+      pos++,
+      PyBool_FromLong((id_info.library_data.flag & LIBRARY_FLAG_IS_ARCHIVE) != 0));
+
+  BLI_assert(pos == bpy_lib_LibraryType_desc.n_in_sequence);
+
+  if (UNLIKELY(PyErr_Occurred())) {
+    Py_DECREF(library_info);
+    return nullptr;
+  }
+  return library_info;
+}
 
 /**
  * The size to pre-allocate #BPy_Library::dict Add +1 for the "version".
@@ -219,8 +267,27 @@ PyDoc_STRVAR(
     "reuse_liboverrides=False, "
     "create_liboverrides_runtime=False)\n"
     "\n"
-    "   Returns a context manager which exposes 2 library objects on entering.\n"
-    "   Each object has attributes matching bpy.data which are lists of strings to be linked.\n"
+    "   Returns a context manager which exposes a pair of library objects (input and output)\n"
+    "   on entering.\n"
+    "\n"
+    "   The input contains the data-blocks available in the loaded blend-file library and should\n"
+    "   be treated as read-only.\n"
+    "   Data-block names added to the output are linked/appended when the context exits.\n"
+    "\n"
+    "   Each library object contains:\n"
+    "      - Attributes matching ``bpy.data``, which are lists of strings representing linkable\n"
+    "        data-blocks.\n"
+    "      - A ``libraries`` attribute, which for the input is a list of all other libraries\n"
+    "        used by the loaded one, as named tuples (``filepath``, ``is_archive``). The\n"
+    "        filepath may be absolute, or relative to the loaded blend-file. The output\n"
+    "        ``libraries`` attribute is always ``None``.\n"
+    "      - A ``version`` attribute, representing the version of the loaded library blend-file\n"
+    "        (for the input) or the version of the current Blender (for the output).\n"
+    "\n"
+    "   Notes:\n"
+    "      - Not all data-block types are linkable (e.g. WindowManager, Library, ...).\n"
+    "      - Packed linked data-blocks are not linkable and are not listed in the input\n"
+    "        ``libraries`` attribute.\n"
     "\n"
     "   :param filepath: The path to a blend file.\n"
     "   :type filepath: str | bytes\n"
@@ -451,19 +518,31 @@ static PyObject *bpy_lib_load(BPy_PropertyRNA *self, PyObject *args, PyObject *k
   return reinterpret_cast<PyObject *>(ret);
 }
 
-static PyObject *_bpy_names(BPy_Library *self, int blocktype)
+static PyObject *_bpy_ids_info(BPy_Library *self, int blocktype)
 {
-  int names_num;
-  LinkNode *names = BLO_blendhandle_get_datablock_names(
-      self->blo_handle, blocktype, (self->flag & FILE_ASSETS_ONLY) != 0, &names_num);
-  PyObject *list = PyList_New(names_num);
+  int ids_info_num;
+  LinkNode *ids_info = BLO_blendhandle_get_datablock_info(
+      self->blo_handle, blocktype, (self->flag & FILE_ASSETS_ONLY) != 0, &ids_info_num);
+  PyObject *list = PyList_New(ids_info_num);
 
-  if (names) {
+  if (ids_info) {
     int i = 0;
-    for (LinkNode *l = names; l; l = l->next, i++) {
-      PyList_SET_ITEM(list, i, PyUnicode_FromString((char *)l->link));
+    for (LinkNode *l = ids_info; l; l = l->next, i++) {
+      BLODataBlockInfo *id_info = static_cast<BLODataBlockInfo *>(l->link);
+      if (blocktype == ID_LI) {
+        PyList_SET_ITEM(list, i, make_library_info(*id_info));
+        continue;
+      }
+      PyList_SET_ITEM(list, i, PyUnicode_FromString(id_info->name));
     }
-    BLI_linklist_freeN(names); /* free linklist *and* each node's data */
+    /* free linklist *and* each node's data */
+    BLI_linklist_free(ids_info, [](void *link) -> void {
+      BLODataBlockInfo *id_info = static_cast<BLODataBlockInfo *>(link);
+      if (id_info->free_asset_data) {
+        BKE_asset_metadata_free(&id_info->asset_data);
+      }
+      MEM_delete(id_info);
+    });
   }
 
   return list;
@@ -493,7 +572,8 @@ static PyObject *bpy_lib_enter(BPy_Library *self)
 
   int i = 0, code;
   while ((code = BKE_idtype_idcode_iter_step(&i))) {
-    if (!BKE_idtype_idcode_is_linkable(code)) {
+    const bool is_library = (code == ID_LI);
+    if (!is_library && !BKE_idtype_idcode_is_linkable(code)) {
       dict_num_offset += 1;
       continue;
     }
@@ -501,9 +581,15 @@ static PyObject *bpy_lib_enter(BPy_Library *self)
     PyObject *str = PyUnicode_FromString(name_plural);
     PyObject *item;
 
-    PyDict_SetItem(dict_dst, str, item = PyList_New(0));
-    Py_DECREF(item);
-    PyDict_SetItem(dict_src, str, item = _bpy_names(self, code));
+    /* Do not add 'libraries' entry in output data, this would make no sense currently. */
+    if (is_library) {
+      PyDict_SetItem(dict_dst, str, Py_None);
+    }
+    else {
+      PyDict_SetItem(dict_dst, str, item = PyList_New(0));
+      Py_DECREF(item);
+    }
+    PyDict_SetItem(dict_src, str, item = _bpy_ids_info(self, code));
     Py_DECREF(item);
 
     Py_DECREF(str);
@@ -819,6 +905,8 @@ int BPY_library_load_type_ready()
   if (PyType_Ready(&bpy_lib_Type) < 0) {
     return -1;
   }
+
+  PyStructSequence_InitType(&bpy_lib_LibraryType, &bpy_lib_LibraryType_desc);
 
   return 0;
 }

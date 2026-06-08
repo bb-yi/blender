@@ -95,7 +95,7 @@ uiListType *UI_UL_cache_file_layers()
   return list_type;
 }
 
-void template_list_flags(Layout *layout, const bContext *C, PointerRNA *fileptr)
+void template_uilist_flags(Layout *layout, const bContext *C, PointerRNA *fileptr)
 {
   if (RNA_pointer_is_null(fileptr)) {
     return;
@@ -107,26 +107,26 @@ void template_list_flags(Layout *layout, const bContext *C, PointerRNA *fileptr)
   Layout &row = layout->row(false);
   Layout *col = &row.column(true);
 
-  template_list(col,
-                const_cast<bContext *>(C),
-                "UI_UL_cache_file_layers",
-                "cache_file_layers",
-                fileptr,
-                "layers",
-                fileptr,
-                "active_index",
-                "",
-                1,
-                5,
-                UILST_LAYOUT_DEFAULT,
-                TEMPLATE_LIST_FLAG_NONE);
+  template_uilist(col,
+                  const_cast<bContext *>(C),
+                  "UI_UL_cache_file_layers",
+                  "cache_file_layers",
+                  fileptr,
+                  "layers",
+                  fileptr,
+                  "active_index",
+                  "",
+                  1,
+                  5,
+                  UILST_LAYOUT_DEFAULT,
+                  TEMPLATE_LIST_FLAG_NONE);
 
   col = &row.column(true);
   col->op("cachefile.layer_add", "", ICON_ADD);
   col->op("cachefile.layer_remove", "", ICON_REMOVE);
 
   CacheFile *file = static_cast<CacheFile *>(fileptr->data);
-  if (BLI_listbase_count(&file->layers) > 1) {
+  if (file->layers.count() > 1) {
     col->separator(1.0f);
     col->op("cachefile.layer_move", "", ICON_TRIA_UP);
     col->op("cachefile.layer_move", "", ICON_TRIA_DOWN);

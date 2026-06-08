@@ -14,26 +14,29 @@ namespace blender::nodes::node_composite_bokeh_image_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Int>("Flaps").default_value(5).min(3).max(24).description(
-      "The number of flaps in the bokeh");
-  b.add_input<decl::Float>("Angle")
+  b.add_input<decl::Int>("Flaps"_ustr)
+      .default_value(5)
+      .min(3)
+      .max(24)
+      .description("The number of flaps in the bokeh");
+  b.add_input<decl::Float>("Angle"_ustr)
       .default_value(0.0f)
       .subtype(PROP_ANGLE)
       .description("The angle of the bokeh");
-  b.add_input<decl::Float>("Roundness")
+  b.add_input<decl::Float>("Roundness"_ustr)
       .default_value(0.0f)
       .min(0.0f)
       .max(1.0f)
       .subtype(PROP_FACTOR)
       .description(
           "Specifies how round the bokeh is, maximum roundness produces a circular bokeh");
-  b.add_input<decl::Float>("Catadioptric Size")
+  b.add_input<decl::Float>("Catadioptric Size"_ustr)
       .default_value(0.0f)
       .subtype(PROP_FACTOR)
       .min(0.0f)
       .max(1.0f)
       .description("Specifies the size of the catadioptric iris, zero means no iris");
-  b.add_input<decl::Float>("Color Shift")
+  b.add_input<decl::Float>("Color Shift"_ustr)
       .default_value(0.0f)
       .subtype(PROP_FACTOR)
       .min(-1.0f)
@@ -42,7 +45,7 @@ static void node_declare(NodeDeclarationBuilder &b)
           "Specifies the amount of color shifting. 1 means maximum shifting towards blue while -1 "
           "means maximum shifting toward red");
 
-  b.add_output<decl::Color>("Image").structure_type(StructureType::Dynamic);
+  b.add_output<decl::Color>("Image"_ustr).structure_type(StructureType::Dynamic);
 }
 
 static void node_init(bNodeTree * /*node_tree*/, bNode *node)
@@ -70,7 +73,7 @@ class BokehImageOperation : public NodeOperation {
         this->get_color_shift());
 
     Result &output = this->get_result("Image");
-    output.wrap_external(bokeh_kernel);
+    output.share_data(bokeh_kernel);
   }
 
   Domain compute_domain() override
@@ -115,7 +118,7 @@ static void node_register()
 {
   static bke::bNodeType ntype;
 
-  cmp_node_type_base(&ntype, "CompositorNodeBokehImage", CMP_NODE_BOKEHIMAGE);
+  cmp_node_type_base(&ntype, "CompositorNodeBokehImage"_ustr, CMP_NODE_BOKEHIMAGE);
   ntype.ui_name = "Bokeh Image";
   ntype.ui_description = "Generate image with bokeh shape for use with the Bokeh Blur filter node";
   ntype.enum_name_legacy = "BOKEHIMAGE";
@@ -124,7 +127,7 @@ static void node_register()
   ntype.initfunc = node_init;
   ntype.flag |= NODE_PREVIEW;
   ntype.get_compositor_operation = get_compositor_operation;
-  bke::node_type_size(ntype, 160, 140, NODE_DEFAULT_MAX_WIDTH);
+  ntype.default_width = bke::NodeWidth::_160;
 
   bke::node_register_type(ntype);
 }

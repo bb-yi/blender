@@ -140,12 +140,12 @@ void register_node_type_tex_output()
 {
   static bke::bNodeType ntype;
 
-  tex_node_type_base(&ntype, "TextureNodeOutput", TEX_NODE_OUTPUT);
+  tex_node_type_base(&ntype, "TextureNodeOutput"_ustr, TEX_NODE_OUTPUT);
   ntype.ui_name = "Output";
   ntype.enum_name_legacy = "OUTPUT";
   ntype.nclass = NODE_CLASS_OUTPUT;
   bke::node_type_socket_templates(&ntype, inputs, nullptr);
-  bke::node_type_size_preset(ntype, bke::eNodeSizePreset::Middle);
+  ntype.default_width = bke::NodeWidth::_160;
   ntype.initfunc = init;
   bke::node_type_storage(ntype, "TexNodeOutput", node_free_standard_storage, copy);
   ntype.exec_fn = exec;

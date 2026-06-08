@@ -8,16 +8,15 @@
  * \ingroup sequencer
  */
 
-#include "BLF_enums.hh"
-
 #include "BLI_array.hh"
 #include "BLI_math_color.h"
 #include "BLI_math_vector_types.hh"
-#include "BLI_mutex.hh"
 #include "BLI_task.hh"
 
 #include "IMB_imbuf_types.hh"
 #include "SEQ_effects.hh"
+
+#include "render.hh"
 
 namespace blender {
 
@@ -41,9 +40,6 @@ struct EffectHandle {
   /* #init is only called on first creation, or when changing effect type. */
   void (*init)(Strip *strip);
 
-  /* Number of input strips needed for this effect. */
-  int (*num_inputs)();
-
   /* duplicate */
   void (*copy)(Strip *dst, const Strip *src, int flag);
 
@@ -53,13 +49,13 @@ struct EffectHandle {
   StripEarlyOut (*early_out)(const Strip *strip, float fac);
 
   /* execute the effect */
-  ImBuf *(*execute)(const RenderData *context,
-                    SeqRenderState *state,
-                    Strip *strip,
-                    float timeline_frame,
-                    float fac,
-                    ImBuf *ibuf1,
-                    ImBuf *ibuf2);
+  SeqResult (*execute)(const RenderData *context,
+                       SeqRenderState *state,
+                       Strip *strip,
+                       float timeline_frame,
+                       float fac,
+                       const SeqResult &input1,
+                       const SeqResult &input2);
 };
 
 /** Get the effect handle for a given strip.
@@ -80,10 +76,10 @@ float strip_speed_effect_target_frame_get(Scene *scene,
                                           float timeline_frame,
                                           int input);
 
-ImBuf *prepare_effect_imbufs(const RenderData *context,
-                             ImBuf *ibuf1,
-                             ImBuf *ibuf2,
-                             bool uninitialized_pixels = true);
+SeqResult prepare_effect_imbufs(const RenderData *context,
+                                const SeqResult &ibuf1,
+                                const SeqResult &ibuf2,
+                                bool uninitialized_pixels = true);
 
 Array<float> make_gaussian_blur_kernel(float rad, int size);
 
@@ -123,6 +119,7 @@ void alpha_over_effect_get_handle(EffectHandle &rval);
 void alpha_under_effect_get_handle(EffectHandle &rval);
 void blend_mode_effect_get_handle(EffectHandle &rval);
 void color_mix_effect_get_handle(EffectHandle &rval);
+void compositor_effect_get_handle(EffectHandle &rval);
 void cross_effect_get_handle(EffectHandle &rval);
 void gamma_cross_effect_get_handle(EffectHandle &rval);
 void gaussian_blur_effect_get_handle(EffectHandle &rval);
@@ -153,25 +150,24 @@ static void apply_effect_op(const OpT &op, const ImBuf *src1, const ImBuf *src2,
                  "Sequencer only supports 4 channel images");
   BLI_assert_msg(dst->channels == 0 || dst->channels == 4,
                  "Sequencer only supports 4 channel images");
+  float *dst_float_data = dst->float_data_for_write();
+  uchar *dst_byte_data = dst->byte_data_for_write();
   threading::parallel_for(IndexRange(size_t(dst->x) * dst->y), 32 * 1024, [&](IndexRange range) {
     int64_t offset = range.first() * 4;
-    if (dst->float_buffer.data) {
-      const float *src1_ptr = src1->float_buffer.data + offset;
-      const float *src2_ptr = src2->float_buffer.data + offset;
-      float *dst_ptr = dst->float_buffer.data + offset;
+    if (dst_float_data) {
+      const float *src1_ptr = src1->float_data() + offset;
+      const float *src2_ptr = src2->float_data() + offset;
+      float *dst_ptr = dst_float_data + offset;
       op.apply(src1_ptr, src2_ptr, dst_ptr, range.size());
     }
     else {
-      const uchar *src1_ptr = src1->byte_buffer.data + offset;
-      const uchar *src2_ptr = src2->byte_buffer.data + offset;
-      uchar *dst_ptr = dst->byte_buffer.data + offset;
+      const uchar *src1_ptr = src1->byte_data() + offset;
+      const uchar *src2_ptr = src2->byte_data() + offset;
+      uchar *dst_ptr = dst_byte_data + offset;
       op.apply(src1_ptr, src2_ptr, dst_ptr, range.size());
     }
   });
 }
-
-std::unique_lock<Mutex> text_runtime_scoped_lock_get();
-int text_effect_font_init(const RenderData *context, const Strip *strip, FontFlags font_flags);
 
 }  // namespace seq
 }  // namespace blender

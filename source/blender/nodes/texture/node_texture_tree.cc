@@ -42,10 +42,11 @@ static void texture_get_from_context(const bContext *C,
                                      ID **r_id,
                                      ID **r_from)
 {
+  const Main *bmain = CTX_data_main(C);
   SpaceNode *snode = CTX_wm_space_node(C);
   Scene *scene = CTX_data_scene(C);
   ViewLayer *view_layer = CTX_data_view_layer(C);
-  BKE_view_layer_synced_ensure(scene, view_layer);
+  BKE_view_layer_synced_ensure(*bmain, scene, view_layer);
   Object *ob = BKE_view_layer_active_object_get(view_layer);
   Tex *tx = nullptr;
 
@@ -136,11 +137,14 @@ void register_node_tree_type_tex()
   bke::bNodeTreeType *tt = ntreeType_Texture = MEM_new<bke::bNodeTreeType>(__func__);
 
   tt->type = NTREE_TEXTURE;
-  tt->idname = "TextureNodeTree";
-  tt->group_idname = "TextureNodeGroup";
+  tt->idname = "TextureNodeTree"_ustr;
+  tt->group_idname = "TextureNodeGroup"_ustr;
   tt->ui_name = N_("Texture Node Editor");
   tt->ui_icon = ICON_NODE_TEXTURE; /* Defined in `drawnode.cc`. */
   tt->ui_description = N_("Edit textures using nodes");
+  /* Don't define this yet since we don't know which exact catalog name to use yet. Otherwise this
+   * has to be kept for compatibility. */
+  // tt->asset_catalog_path_prefix = "Textures";
 
   tt->foreach_nodeclass = foreach_nodeclass;
   tt->update = update;

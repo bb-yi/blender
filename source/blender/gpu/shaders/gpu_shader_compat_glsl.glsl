@@ -174,6 +174,11 @@ RESHAPE(float3x3, mat3x3, mat3x4)
 #define sampler_get(create_info, _res) _res
 #define image_get(create_info, _res) _res
 #define srt_access(create_info, _res) access_##create_info##_##_res()
+/**
+ * WORKAROUND(fclem): Only used for cases when passing down the resource_table is impractical.
+ * Note that this placeholder is just for the code to compile.
+ */
+#define resource_table_get(table_type) table_type##_ctor_()
 
 /* Incompatible keywords. */
 #define static
@@ -181,6 +186,12 @@ RESHAPE(float3x3, mat3x3, mat3x4)
 #define device
 #define thread
 #define threadgroup
+
+/* MSL component compatibility. */
+#define textureGather0(_tex, _co) textureGather(_tex, _co, 0)
+#define textureGather1(_tex, _co) textureGather(_tex, _co, 1)
+#define textureGather2(_tex, _co) textureGather(_tex, _co, 2)
+#define textureGather3(_tex, _co) textureGather(_tex, _co, 3)
 
 /**
  * This string type is much like the OSL string.
@@ -209,13 +220,29 @@ float4 texelFetchExtend(sampler2D samp, int2 texel, int lvl)
   return texelFetch(samp, texel, lvl);
 }
 
+/* For assert support. */
+#if defined(GPU_VERTEX_SHADER)
+#  define GPU_THREAD uint3(gl_VertexID, gl_InstanceID, 0)
+#elif defined(GPU_FRAGMENT_SHADER)
+#  define GPU_THREAD uint3(gl_FragCoord.x, gl_FragCoord.y, 0)
+#elif defined(GPU_COMPUTE_SHADER)
+#  define GPU_THREAD gl_GlobalInvocationID
+#else
+#  define GPU_THREAD error_not_in_a_shader_question_mark
+#endif
+
 /* Stage agnostic builtin function.
  * GLSL doesn't allow mixing shader stages inside the same source file.
  * Make sure builtin functions are stubbed when used in an invalid stage. */
 #ifdef GPU_FRAGMENT_SHADER
 #  define gpu_discard_fragment() discard
-#  define gpu_dfdx(x) dFdx(x)
-#  define gpu_dfdy(x) dFdy(x)
+#  ifdef GPU_ARB_derivative_control
+#    define gpu_dfdx(x) dFdxFine(x)
+#    define gpu_dfdy(x) dFdyFine(x)
+#  else
+#    define gpu_dfdx(x) dFdx(x)
+#    define gpu_dfdy(x) dFdy(x)
+#  endif
 #  define gpu_fwidth(x) fwidth(x)
 #else
 #  define gpu_discard_fragment()

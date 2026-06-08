@@ -56,6 +56,18 @@ struct WindowManagerRuntime {
   /** Indicates whether interface is locked for user interaction. */
   bool is_interface_locked = false;
 
+  /** Indicates whether modified images should be saved when saving the blend file. */
+  char save_modified_images_when_file_is_saved = true;
+
+  /**
+   * Indicates the main loop (#WM_main()) to stop processing the event queue and move to the next
+   * step. The Remaining events will then be processed during the next iteration of the loop.
+   *
+   * This is used e.g. to avoid handling events immediately after an undo/redo action, when UI has
+   * not yet been updated.
+   */
+  bool break_events_handling = false;
+
   /** Information and error reports. */
   ReportList reports;
 
@@ -105,7 +117,11 @@ struct WindowManagerRuntime {
   /** User configuration. */
   wmKeyConfig *userconf = nullptr;
 
-  /** All undo history. */
+  /**
+   * All undo history.
+   *
+   * \note This will be null in background mode unless explicitly created.
+   */
   UndoStack *undo_stack = nullptr;
 
   wmMsgBus *message_bus = nullptr;

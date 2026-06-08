@@ -129,7 +129,8 @@ VChar *BKE_vfontdata_char_from_freetypefont(VFont *vfont, uint character)
                                &che->nurbsbase,
                                vfont->data->metrics.scale,
                                use_fallback,
-                               &che->width))
+                               &che->width,
+                               &che->bounds))
   {
     /* Free but add to the character cache to prevent future lookups
      * from attempting to load the font again. */
@@ -146,7 +147,7 @@ VChar *BKE_vfontdata_char_copy(const VChar *vchar_src)
 {
   VChar *vchar_dst = MEM_dupalloc(vchar_src);
 
-  BLI_listbase_clear(&vchar_dst->nurbsbase);
+  vchar_dst->nurbsbase.clear_no_delete();
   BKE_nurbList_duplicate(&vchar_dst->nurbsbase, &vchar_src->nurbsbase);
 
   return vchar_dst;

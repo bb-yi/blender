@@ -74,7 +74,7 @@ static void text_init_data(ID *id)
     text->flags |= TXT_TABSTOSPACES;
   }
 
-  BLI_listbase_clear(&text->lines);
+  text->lines.clear_no_delete();
 
   TextLine *tmp = txt_line_malloc();
   tmp->line = MEM_new_array_uninitialized<char>(1, "textline_string");
@@ -120,7 +120,7 @@ static void text_copy_data(Main * /*bmain*/,
 
   text_dst->flags |= TXT_ISDIRTY;
 
-  BLI_listbase_clear(&text_dst->lines);
+  text_dst->lines.clear_no_delete();
   text_dst->curl = text_dst->sell = nullptr;
   text_dst->compiled = nullptr;
 
@@ -179,7 +179,7 @@ static void text_blend_write(BlendWriter *writer, ID *id, const void *id_address
   BKE_id_blend_write(writer, &text->id);
 
   if (text->filepath) {
-    BLO_write_string(writer, text->filepath);
+    writer->write_string(text->filepath);
   }
 
   if (!(text->flags & TXT_ISEXT)) {
@@ -189,7 +189,7 @@ static void text_blend_write(BlendWriter *writer, ID *id, const void *id_address
     }
 
     for (TextLine &tmp : text->lines) {
-      BLO_write_string(writer, tmp.line);
+      writer->write_string(tmp.line);
     }
   }
 }
@@ -217,9 +217,10 @@ static void text_blend_read_data(BlendDataReader *reader, ID *id)
     BLO_read_string(reader, &ln.line);
     ln.format = nullptr;
 
-    if (ln.len != int(strlen(ln.line))) {
+    const int actual_len = ln.line ? int(strlen(ln.line)) : 0;
+    if (ln.len != actual_len) {
       printf("Error loading text, line lengths differ\n");
-      ln.len = strlen(ln.line);
+      ln.len = actual_len;
     }
   }
 
@@ -227,34 +228,34 @@ static void text_blend_read_data(BlendDataReader *reader, ID *id)
 }
 
 IDTypeInfo IDType_ID_TXT = {
-    /*id_code*/ Text::id_type,
-    /*id_filter*/ FILTER_ID_TXT,
-    /*dependencies_id_types*/ 0,
-    /*main_listbase_index*/ INDEX_ID_TXT,
-    /*struct_size*/ sizeof(Text),
-    /*name*/ "Text",
-    /*name_plural*/ N_("texts"),
-    /*translation_context*/ BLT_I18NCONTEXT_ID_TEXT,
-    /*flags*/ IDTYPE_FLAGS_NO_ANIMDATA | IDTYPE_FLAGS_APPEND_IS_REUSABLE,
-    /*asset_type_info*/ nullptr,
+    .id_code = Text::id_type,
+    .id_filter = FILTER_ID_TXT,
+    .dependencies_id_types = 0,
+    .main_listbase_index = INDEX_ID_TXT,
+    .struct_size = sizeof(Text),
+    .name = "Text",
+    .name_plural = N_("texts"),
+    .translation_context = BLT_I18NCONTEXT_ID_TEXT,
+    .flags = IDTYPE_FLAGS_NO_ANIMDATA | IDTYPE_FLAGS_APPEND_IS_REUSABLE,
+    .asset_type_info = nullptr,
 
-    /*init_data*/ text_init_data,
-    /*copy_data*/ text_copy_data,
-    /*free_data*/ text_free_data,
-    /*make_local*/ nullptr,
-    /*foreach_id*/ nullptr,
-    /*foreach_cache*/ nullptr,
-    /*foreach_path*/ text_foreach_path,
-    /*foreach_working_space_color*/ nullptr,
-    /*owner_pointer_get*/ nullptr,
+    .init_data = text_init_data,
+    .copy_data = text_copy_data,
+    .free_data = text_free_data,
+    .make_local = nullptr,
+    .foreach_id = nullptr,
+    .foreach_cache = nullptr,
+    .foreach_path = text_foreach_path,
+    .foreach_working_space_color = nullptr,
+    .owner_pointer_get = nullptr,
 
-    /*blend_write*/ text_blend_write,
-    /*blend_read_data*/ text_blend_read_data,
-    /*blend_read_after_liblink*/ nullptr,
+    .blend_write = text_blend_write,
+    .blend_read_data = text_blend_read_data,
+    .blend_read_after_liblink = nullptr,
 
-    /*blend_read_undo_preserve*/ nullptr,
+    .blend_read_undo_preserve = nullptr,
 
-    /*lib_override_apply_post*/ nullptr,
+    .lib_override_apply_post = nullptr,
 };
 
 /** \} */
@@ -275,7 +276,7 @@ void BKE_text_free_lines(Text *text)
     MEM_delete(tmp);
   }
 
-  BLI_listbase_clear(&text->lines);
+  text->lines.clear_no_delete();
 
   text->curl = text->sell = nullptr;
 }
@@ -360,7 +361,7 @@ static void text_from_buf(Text *text, const uchar *buffer, const int len)
 {
   int i, llen, lines_count;
 
-  BLI_assert(BLI_listbase_is_empty(&text->lines));
+  BLI_assert(text->lines.is_empty());
 
   llen = 0;
   lines_count = 0;
@@ -475,7 +476,7 @@ Text *BKE_text_load_ex(Main *bmain,
   id_us_min(&ta->id);
   id_fake_user_set(&ta->id);
 
-  BLI_listbase_clear(&ta->lines);
+  ta->lines.clear_no_delete();
   ta->curl = ta->sell = nullptr;
 
   if ((U.flag & USER_TXT_TABSTOSPACES_DISABLE) == 0) {
@@ -1289,7 +1290,7 @@ void txt_sel_set(Text *text, int startl, int startc, int endl, int endc)
 
   /* Support negative indices. */
   if (startl < 0 || endl < 0) {
-    int end = BLI_listbase_count(&text->lines) - 1;
+    int end = text->lines.count() - 1;
     if (startl < 0) {
       startl = end + startl + 1;
     }
@@ -1371,7 +1372,7 @@ void txt_from_buf_for_undo(Text *text, const char *buf, size_t buf_len)
    * Good for undo since it means in practice many operations re-use all
    * except for the modified line. */
   TextLine *l_src = static_cast<TextLine *>(text->lines.first);
-  BLI_listbase_clear(&text->lines);
+  text->lines.clear_no_delete();
   while (buf_step != buf_end && l_src) {
     /* New lines are ensured by #txt_to_buf_for_undo. */
     const char *buf_step_next = strchr(buf_step, '\n');
@@ -1432,7 +1433,7 @@ void txt_from_buf_for_undo(Text *text, const char *buf, size_t buf_len)
 
 char *txt_to_buf(Text *text, size_t *r_buf_strlen)
 {
-  const bool has_data = !BLI_listbase_is_empty(&text->lines);
+  const bool has_data = !text->lines.is_empty();
   /* Identical to #txt_to_buf_for_undo except that the string is nil terminated. */
   size_t buf_len = 0;
   for (const TextLine &l : text->lines) {
@@ -1555,7 +1556,7 @@ void txt_insert_buf(Text *text, const char *in_buffer, int in_buffer_len)
   buffer = BLI_strdupn(in_buffer, in_buffer_len);
   in_buffer_len += txt_extended_ascii_as_utf8(&buffer);
 
-  /* Read the first line (or as close as possible */
+  /* Read the first line (or as close as possible). */
   while (buffer[i] && buffer[i] != '\n') {
     txt_add_raw_char(text, BLI_str_utf8_as_unicode_step_safe(buffer, in_buffer_len, &i));
   }

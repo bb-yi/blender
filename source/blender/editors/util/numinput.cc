@@ -6,6 +6,9 @@
  * \ingroup edutil
  */
 
+#include <algorithm>
+#include <limits>
+
 #include "MEM_guardedalloc.h"
 
 #include "BLI_math_rotation.h"
@@ -67,20 +70,31 @@ enum {
 
 /* ************************** Functions *************************** */
 
+bool ED_numinput_double_is_int(double value)
+{
+  value = std::abs(value);
+  /* Use `>=` because `uint64_t::max` rounds up to 2^64 when converted to double. */
+  if (!isfinite(value) || value >= double(std::numeric_limits<uint64_t>::max())) {
+    return false;
+  }
+  return value == double(uint64_t(value));
+}
+
 /* ************************** NUMINPUT **************************** */
 
 void initNumInput(NumInput *n)
 {
   n->idx_max = 0;
   n->unit_sys = USER_UNIT_NONE;
-  copy_vn_i(n->unit_type, NUM_MAX_ELEMENTS, B_UNIT_NONE);
+  std::fill_n(n->unit_type, NUM_MAX_ELEMENTS, B_UNIT_NONE);
   n->unit_use_radians = false;
 
   n->flag = 0;
-  copy_vn_short(n->val_flag, NUM_MAX_ELEMENTS, 0);
+  std::fill_n(n->val_flag, NUM_MAX_ELEMENTS, 0);
   zero_v3(n->val);
-  copy_vn_fl(n->val_org, NUM_MAX_ELEMENTS, 0.0f);
-  copy_vn_fl(n->val_inc, NUM_MAX_ELEMENTS, 1.0f);
+  std::fill_n(n->val_no_units, NUM_MAX_ELEMENTS, 0.0);
+  std::fill_n(n->val_org, NUM_MAX_ELEMENTS, 0.0f);
+  std::fill_n(n->val_inc, NUM_MAX_ELEMENTS, 1.0f);
 
   n->idx = 0;
   n->str[0] = '\0';
@@ -132,7 +146,8 @@ void outputNumInput(NumInput *n, char *str, const UnitSettings &unit_settings)
                                             n->unit_sys,
                                             n->unit_type[i],
                                             true,
-                                            false);
+                                            false,
+                                            true);
         }
 
         /* +1 because of trailing '\0' */
@@ -155,7 +170,7 @@ void outputNumInput(NumInput *n, char *str, const UnitSettings &unit_settings)
         else {
           char tstr[NUM_STR_REP_LEN];
           BKE_unit_value_as_string_adaptive(
-              tstr, ln, double(n->val[i]), prec, n->unit_sys, n->unit_type[i], true, false);
+              tstr, ln, double(n->val[i]), prec, n->unit_sys, n->unit_type[i], true, false, true);
           BLI_snprintf_utf8(&str[j * ln], ln, "%s%s%s", cur, tstr, cur);
         }
       }
@@ -245,7 +260,8 @@ static void value_to_editstr(NumInput *n, int idx)
                                                  n->unit_sys,
                                                  n->unit_type[idx],
                                                  true,
-                                                 false);
+                                                 false,
+                                                 true);
 }
 
 static bool editstr_insert_at_cursor(NumInput *n, const char *buf, const int buf_len)
@@ -270,6 +286,7 @@ bool user_string_to_number(bContext *C,
                            const UnitSettings &unit,
                            int type,
                            double *r_value,
+                           double *r_value_no_units,
                            const bool use_single_line_error,
                            char **r_error)
 {
@@ -285,10 +302,20 @@ bool user_string_to_number(bContext *C,
     BKE_unit_replace_string(
         str_unit_convert, sizeof(str_unit_convert), str, unit_scale, unit.system, type);
 
-    return BPY_run_string_as_number(C, nullptr, str_unit_convert, &err_info, r_value);
+    bool success = BPY_run_string_as_number(C, nullptr, str_unit_convert, &err_info, r_value);
+    if (r_value_no_units) {
+      /* When explicit units are in the string, the pre-scale value isn't directly recoverable.
+       * Store the post-conversion value; callers relying on integer detection will naturally
+       * reject non-integer results (e.g. "90deg" evaluates to ~1.5708 radians). */
+      *r_value_no_units = *r_value;
+    }
+    return success;
   }
 
   bool success = BPY_run_string_as_number(C, nullptr, str, &err_info, r_value);
+  if (r_value_no_units) {
+    *r_value_no_units = *r_value;
+  }
   *r_value = BKE_unit_apply_preferred_unit(unit, type, *r_value);
   *r_value /= unit_scale;
   return success;
@@ -296,6 +323,9 @@ bool user_string_to_number(bContext *C,
 #else
   UNUSED_VARS(C, unit, type, use_single_line_error, r_error);
   *r_value = atof(str);
+  if (r_value_no_units) {
+    *r_value_no_units = *r_value;
+  }
   return true;
 #endif
 }
@@ -582,9 +612,10 @@ bool handleNumInput(bContext *C, NumInput *n, const wmEvent *event)
     Scene *sce = CTX_data_scene(C);
     char *error = nullptr;
 
-    double val;
+    double val = 0.0;
+    double val_no_units = 0.0;
     int success = user_string_to_number(
-        C, n->str, sce->unit, n->unit_type[idx], &val, false, &error);
+        C, n->str, sce->unit, n->unit_type[idx], &val, &val_no_units, false, &error);
 
     if (error) {
       ReportList *reports = CTX_wm_reports(C);
@@ -597,14 +628,25 @@ bool handleNumInput(bContext *C, NumInput *n, const wmEvent *event)
     if (success) {
       n->val[idx] = float(val);
       n->val_flag[idx] &= ~NUM_INVALID;
+
+      /* Store the pre-unit-scale value and check if it's an integer. */
+      n->val_no_units[idx] = val_no_units;
+      if (ED_numinput_double_is_int(val_no_units)) {
+        n->val_flag[idx] |= NUM_INT_INPUT_VALUE;
+      }
+      else {
+        n->val_flag[idx] &= ~NUM_INT_INPUT_VALUE;
+      }
     }
     else {
       n->val_flag[idx] |= NUM_INVALID;
+      n->val_flag[idx] &= ~NUM_INT_INPUT_VALUE;
     }
 
 #ifdef USE_FAKE_EDIT
     if (n->val_flag[idx] & NUM_NEGATE) {
       n->val[idx] = -n->val[idx];
+      n->val_no_units[idx] = -n->val_no_units[idx];
     }
     if (n->val_flag[idx] & NUM_INVERSE) {
       val = n->val[idx];
@@ -618,6 +660,9 @@ bool handleNumInput(bContext *C, NumInput *n, const wmEvent *event)
         val = DEG2RAD(val);
       }
       n->val[idx] = float(val);
+      n->val_no_units[idx] = 1.0 / n->val_no_units[idx];
+      /* Inverse transforms the value to 1/x, invalidating the integer property. */
+      n->val_flag[idx] &= ~NUM_INT_INPUT_VALUE;
     }
 #endif
 
