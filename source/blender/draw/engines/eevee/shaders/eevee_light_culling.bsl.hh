@@ -31,6 +31,15 @@ struct Cull {
   [[storage(2, write)]] LightData (&out_light_buf)[];
   [[storage(3, write)]] float (&out_zdist_buf)[];
   [[storage(4, write)]] uint (&out_key_buf)[];
+
+  [[storage(5, read)]] const int (&in_light_shader_index_buf)[];
+  [[storage(6, write)]] int (&out_light_shader_index_buf)[];
+  [[storage(7, read)]] const int (&in_front_light_shader_index_buf)[];
+  [[storage(8, write)]] int (&out_front_light_shader_index_buf)[];
+  [[storage(9, read)]] const int (&in_volume_light_shader_index_buf)[];
+  [[storage(10, write)]] int (&out_volume_light_shader_index_buf)[];
+  [[storage(11, read)]] const int (&in_surfel_light_shader_index_buf)[];
+  [[storage(12, write)]] int (&out_surfel_light_shader_index_buf)[];
 };
 
 [[compute, local_size(CULLING_SELECT_GROUP_SIZE)]]
@@ -59,7 +68,15 @@ void cull_main([[resource_table]] Cull &srt,
       /* NOTE: Use the radius from UI instead of auto sun size for now. */
     }
     /* NOTE: We know the index because sun lights are packed at the start of the input buffer. */
-    srt.out_light_buf[srt.light_cull_buf.local_lights_len + l_idx] = light;
+    uint output_index = srt.light_cull_buf.local_lights_len + l_idx;
+    srt.out_light_buf[output_index] = light;
+    srt.out_light_shader_index_buf[output_index] = srt.in_light_shader_index_buf[l_idx];
+    srt.out_front_light_shader_index_buf[output_index] =
+        srt.in_front_light_shader_index_buf[l_idx];
+    srt.out_volume_light_shader_index_buf[output_index] =
+        srt.in_volume_light_shader_index_buf[l_idx];
+    srt.out_surfel_light_shader_index_buf[output_index] =
+        srt.in_surfel_light_shader_index_buf[l_idx];
     return;
   }
 
@@ -129,6 +146,15 @@ struct Sort {
   [[storage(3, read)]] const uint (&in_key_buf)[];
 
   [[storage(4, write)]] LightData (&out_light_buf)[];
+
+  [[storage(5, read)]] const int (&in_light_shader_index_buf)[];
+  [[storage(6, write)]] int (&out_light_shader_index_buf)[];
+  [[storage(7, read)]] const int (&in_front_light_shader_index_buf)[];
+  [[storage(8, write)]] int (&out_front_light_shader_index_buf)[];
+  [[storage(9, read)]] const int (&in_volume_light_shader_index_buf)[];
+  [[storage(10, write)]] int (&out_volume_light_shader_index_buf)[];
+  [[storage(11, read)]] const int (&in_surfel_light_shader_index_buf)[];
+  [[storage(12, write)]] int (&out_surfel_light_shader_index_buf)[];
 };
 
 [[compute, local_size(CULLING_SORT_GROUP_SIZE)]]
@@ -186,6 +212,13 @@ void sort_main([[resource_table]] Sort &srt,
     /* Copy sorted light to render light buffer. */
     uint input_index = srt.in_key_buf[src_index];
     srt.out_light_buf[prefix_sum] = srt.in_light_buf[input_index];
+    srt.out_light_shader_index_buf[prefix_sum] = srt.in_light_shader_index_buf[input_index];
+    srt.out_front_light_shader_index_buf[prefix_sum] =
+        srt.in_front_light_shader_index_buf[input_index];
+    srt.out_volume_light_shader_index_buf[prefix_sum] =
+        srt.in_volume_light_shader_index_buf[input_index];
+    srt.out_surfel_light_shader_index_buf[prefix_sum] =
+        srt.in_surfel_light_shader_index_buf[input_index];
   }
 }
 

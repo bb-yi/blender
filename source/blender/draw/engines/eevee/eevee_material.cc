@@ -580,6 +580,7 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
             GPU_material_has_glsl_light_shader_eval(matpass.gpumat) ||
             GPU_material_flag_get(matpass.gpumat, GPU_MATFLAG_GLSL_LIGHT_ACCESS))))
       {
+        matpass.sub_pass->bind_resources(inst_.lights);
         inst_.lights.bind_front_light_shader_resources(*matpass.sub_pass);
       }
       if (ELEM(pipeline_type,
