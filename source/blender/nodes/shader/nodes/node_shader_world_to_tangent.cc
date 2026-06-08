@@ -25,12 +25,12 @@ namespace nodes::node_shader_world_to_tangent_cc {
 static void node_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
-  b.add_input<decl::Vector>("Vector")
+  b.add_input<decl::Vector>("Vector"_ustr)
       .default_value({0.0f, 0.0f, 1.0f})
       .min(-10000.0f)
       .max(10000.0f)
       .description("World-space vector to be transformed into tangent space");
-  b.add_output<decl::Vector>("Vector")
+  b.add_output<decl::Vector>("Vector"_ustr)
       .description("Input vector expressed in the local tangent-space basis");
 }
 
@@ -80,7 +80,7 @@ void register_node_type_sh_world_to_tangent()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeWorldToTangent", SH_NODE_WORLD_TO_TANGENT);
+  sh_node_type_base(&ntype, "ShaderNodeWorldToTangent"_ustr, SH_NODE_WORLD_TO_TANGENT);
   ntype.ui_name = "World To Tangent";
   ntype.ui_description = "Transform a world-space vector into the local tangent-space basis";
   ntype.enum_name_legacy = "WORLD_TO_TANGENT";
@@ -89,7 +89,8 @@ void register_node_type_sh_world_to_tangent()
   ntype.draw_buttons = file_ns::node_shader_buts_world_to_tangent;
   ntype.initfunc = file_ns::node_shader_init_world_to_tangent;
   ntype.add_ui_poll = object_or_npr_eevee_shader_nodes_poll;
-  bke::node_type_size_preset(ntype, bke::eNodeSizePreset::Middle);
+  ntype.default_width = 150;
+  ntype.minwidth = 120;
   bke::node_type_storage(ntype,
                          "NodeShaderWorldToTangent",
                          node_free_standard_storage,

@@ -199,7 +199,7 @@ namespace blender::eevee
     }
 
     /* Alpha stores transmittance. So start at 1. */
-    float4 clear_color = { 0.0f, 0.0f, 0.0f, 1.0f };
+    double4 clear_color = {0.0, 0.0, 0.0, 1.0};
     GPU_framebuffer_bind(combined_fb_);
     GPU_framebuffer_clear_color_depth(combined_fb_, clear_color, inst_.film.depth.clear_value);
     inst_.pipelines.background.clear(render_view_);
@@ -516,7 +516,7 @@ namespace blender::eevee
               GPU_ATTACHMENT_NONE,
               GPU_ATTACHMENT_TEXTURE_CUBEFACE(inst_.sphere_probes.cubemap_tx_, face));
             GPU_framebuffer_bind(combined_fb_);
-            GPU_framebuffer_clear_color(combined_fb_, float4(0.0f));
+            GPU_framebuffer_clear_color(combined_fb_, double4(0.0));
             inst_.pipelines.world.render(view);
           }
         };
@@ -645,7 +645,7 @@ namespace blender::eevee
 
         GPU_framebuffer_bind(combined_fb_);
         GPU_framebuffer_clear_color_depth(
-          combined_fb_, float4(0.0f, 0.0f, 0.0f, 1.0f), inst_.film.depth.clear_value);
+          combined_fb_, double4(0.0, 0.0, 0.0, 1.0), inst_.film.depth.clear_value);
         inst_.pipelines.probe.render(view,
           prepass_fb,
           combined_fb_,

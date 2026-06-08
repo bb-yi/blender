@@ -41,19 +41,19 @@ NODE_STORAGE_FUNCS(NodeSdfVectorOp)
 static void sh_node_sdf_vector_op_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
-  b.add_input<decl::Vector>("Vector1").hide_value();
-  b.add_input<decl::Vector>("Vector2").no_muted_links();
-  b.add_input<decl::Vector>("Vector3").no_muted_links();
-  b.add_input<decl::Float>("Scale").min(-100000.0f).max(100000.0f).default_value(1.0f);
-  b.add_input<decl::Float>("Value1").min(-100000.0f).max(100000.0f).default_value(0.0f);
-  b.add_input<decl::Float>("Value2").min(-100000.0f).max(100000.0f).default_value(0.0f);
-  b.add_input<decl::Float>("Angle").subtype(PROP_ANGLE);
-  b.add_input<decl::Int>("Count1").min(0).max(127).default_value(4);
-  b.add_input<decl::Int>("Count2").min(0).max(127).default_value(4);
+  b.add_input<decl::Vector>("Vector1"_ustr).hide_value();
+  b.add_input<decl::Vector>("Vector2"_ustr).no_muted_links();
+  b.add_input<decl::Vector>("Vector3"_ustr).no_muted_links();
+  b.add_input<decl::Float>("Scale"_ustr).min(-100000.0f).max(100000.0f).default_value(1.0f);
+  b.add_input<decl::Float>("Value1"_ustr).min(-100000.0f).max(100000.0f).default_value(0.0f);
+  b.add_input<decl::Float>("Value2"_ustr).min(-100000.0f).max(100000.0f).default_value(0.0f);
+  b.add_input<decl::Float>("Angle"_ustr).subtype(PROP_ANGLE);
+  b.add_input<decl::Int>("Count1"_ustr).min(0).max(127).default_value(4);
+  b.add_input<decl::Int>("Count2"_ustr).min(0).max(127).default_value(4);
 
-  b.add_output<decl::Vector>("Vector");
-  b.add_output<decl::Vector>("Position");
-  b.add_output<decl::Float>("Value");
+  b.add_output<decl::Vector>("Vector"_ustr);
+  b.add_output<decl::Vector>("Position"_ustr);
+  b.add_output<decl::Float>("Value"_ustr);
 }
 
 }  // namespace nodes::node_shader_sdf_vector_op_cc
@@ -382,7 +382,7 @@ void register_node_type_sh_sdf_vector_op()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeSdfVectorOp", SH_NODE_SDF_VECTOR_OP);
+  sh_node_type_base(&ntype, "ShaderNodeSdfVectorOp"_ustr, SH_NODE_SDF_VECTOR_OP);
   ntype.ui_name = "SDF Vector Operator";
   ntype.ui_description = "Transform or remap vector domains used by SDF workflows";
   ntype.enum_name_legacy = "SDF_VECTOR_OP";

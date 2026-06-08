@@ -22,13 +22,13 @@ NODE_STORAGE_FUNCS(NodeShaderDerivative)
 static void node_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
-  b.add_input<decl::Float>("Value", "Value_Float").min(-10000.0f).max(10000.0f);
-  b.add_input<decl::Vector>("Value", "Value_Vector");
-  b.add_input<decl::Color>("Value", "Value_Color").default_value({0.0f, 0.0f, 0.0f, 1.0f});
+  b.add_input<decl::Float>("Value"_ustr, "Value_Float"_ustr).min(-10000.0f).max(10000.0f);
+  b.add_input<decl::Vector>("Value"_ustr, "Value_Vector"_ustr);
+  b.add_input<decl::Color>("Value"_ustr, "Value_Color"_ustr).default_value({0.0f, 0.0f, 0.0f, 1.0f});
 
-  b.add_output<decl::Float>("Value", "Value_Float");
-  b.add_output<decl::Vector>("Value", "Value_Vector");
-  b.add_output<decl::Color>("Value", "Value_Color");
+  b.add_output<decl::Float>("Value"_ustr, "Value_Float"_ustr);
+  b.add_output<decl::Vector>("Value"_ustr, "Value_Vector"_ustr);
+  b.add_output<decl::Color>("Value"_ustr, "Value_Color"_ustr);
 }
 
 static void node_layout(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
@@ -88,7 +88,7 @@ void register_node_type_sh_screen_derivative()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeScreenDerivative", SH_NODE_SCREEN_DERIVATIVE);
+  sh_node_type_base(&ntype, "ShaderNodeScreenDerivative"_ustr, SH_NODE_SCREEN_DERIVATIVE);
   ntype.ui_name = "Screen Derivative";
   ntype.ui_description = "Partial derivative of the input with respect to screen-space X, Y, or both";
   ntype.enum_name_legacy = "SCREEN_DERIVATIVE";

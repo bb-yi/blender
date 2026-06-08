@@ -801,8 +801,8 @@ class ShaderNodesInliner {
 
   bool should_preserve_foreach_light_zone_node(const bNode &foreach_light_zone_node) const
   {
-    BLI_assert(foreach_light_zone_node.is_type("ShaderNodeForeachLightOutput") ||
-               foreach_light_zone_node.is_type("ShaderNodeForeachLightInput"));
+    BLI_assert(foreach_light_zone_node.is_type("ShaderNodeForeachLightOutput"_ustr) ||
+               foreach_light_zone_node.is_type("ShaderNodeForeachLightInput"_ustr));
     UNUSED_VARS_NDEBUG(foreach_light_zone_node);
     return params_.allow_preserving_repeat_zones;
   }
@@ -1522,8 +1522,8 @@ class ShaderNodesInliner {
       return;
     }
     if (std::get_if<ClosureZoneValue>(&value.value)) {
-      if ((original_node.is_type("ShaderNodeGLSLFunction") ||
-           original_node.is_type("ShaderNodeParallax")) &&
+      if ((original_node.is_type("ShaderNodeGLSLFunction"_ustr) ||
+           original_node.is_type("ShaderNodeParallax"_ustr)) &&
           dst_socket.type == SOCK_CLOSURE)
       {
         /* Closure sources are validated later by the consuming shader-node compiler path. */

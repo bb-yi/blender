@@ -97,6 +97,7 @@
 #include "eevee_shadow_page_ops.bsl.hh"              /* IWYU pragma: export */
 #include "eevee_shadow_tag_update.bsl.hh"            /* IWYU pragma: export */
 #include "eevee_shadow_tag_usage.bsl.hh"             /* IWYU pragma: export */
+#include "eevee_shadow_tag_usage_bounds.bsl.hh"      /* IWYU pragma: export */
 #include "eevee_shadow_tag_usage_transparent.bsl.hh" /* IWYU pragma: export */
 #include "eevee_shadow_tilemap_amend.bsl.hh"         /* IWYU pragma: export */
 #include "eevee_shadow_tilemap_bounds.bsl.hh"        /* IWYU pragma: export */

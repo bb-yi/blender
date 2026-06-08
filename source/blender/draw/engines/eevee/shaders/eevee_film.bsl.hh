@@ -100,6 +100,9 @@ struct Film {
   /* Color History for TAA needs to be sampler to leverage bilinear sampling. */
   [[sampler(5)]] sampler2D in_combined_tx;
 
+  /* Public combined pass output used by final render result and viewport display-only refresh. */
+  [[image(2, write, SFLOAT_16_16_16_16)]] image2D combined_output_img;
+
   [[image(0, read, SFLOAT_32)]] const image2DArray in_weight_img;
   [[image(1, write, SFLOAT_32)]] image2DArray out_weight_img;
 
@@ -628,6 +631,7 @@ struct Film {
     }
     color = patch_float_for_16f_storage(color);
     imageStoreFast(out_combined_img, dst.texel, color);
+    imageStoreFast(combined_output_img, dst.texel, color);
   }
 
   void store_color(FilmSample dst,

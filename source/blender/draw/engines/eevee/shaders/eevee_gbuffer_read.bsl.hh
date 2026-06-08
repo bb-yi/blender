@@ -194,7 +194,7 @@ struct Reader {
   {
     Layers layers;
 
-    layers.header = read_header(texel);
+    layers.header = Header::from_data(texelFetch(gbuf_header_tx, int3(texel, 0), 0).r);
     uint3 layer_types = layers.header.bin_types_per_layer();
     uchar closure_count = layers.header.closure_len();
 
@@ -218,7 +218,14 @@ struct Reader {
   }
   ClosureUndetermined read_bin(int2 texel, uchar bin_index) const
   {
-    return read_bin(read_header(texel), texel, bin_index);
+    Header header = Header::from_data(texelFetch(gbuf_header_tx, int3(texel, 0), 0).r);
+    GBufferMode bin_mode = header.bin_type(bin_index);
+
+    uchar layer_id = header.bin_to_layer(bin_index);
+    uchar normal_id = header.tangent_space_id(layer_id);
+    uchar closure_count = header.closure_len();
+
+    return read_layer(normal_id, closure_count, bin_mode, texel, layer_id);
   }
 
   /* Load thickness data only if available. Return 0 otherwise. */

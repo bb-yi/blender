@@ -20,12 +20,12 @@ float ndot(float2 a, float2 b)
   return a.x * b.x - a.y * b.y;
 }
 
-float dot2(in float2 v)
+float dot2(float2 v)
 {
   return dot(v, v);
 }
 
-float cross2(in float2 a, in float2 b)
+float cross2(float2 a, float2 b)
 {
   return a.x * b.y - a.y * b.x;
 }
@@ -125,7 +125,7 @@ float cubic_pulse(float center, float width, float x)
   }
 }
 
-float p_mod1(inout float p, float size)
+float p_mod1(float &p, float size)
 {
   float halfsize = size * 0.5;
   float c = floor((p + halfsize) / size);
@@ -133,14 +133,14 @@ float p_mod1(inout float p, float size)
   return c;
 }
 
-float p_mirror(inout float p, float dist)
+float p_mirror(float &p, float dist)
 {
   float s = sgn(p);
   p = abs(p) - dist;
   return s;
 }
 
-float3 p_mod_mirror3(inout float3 p, float3 size)
+float3 p_mod_mirror3(float3 &p, float3 size)
 {
   float3 halfsize = size * 0.5;
   float3 c = floor(safe_divide((p + halfsize), size));
@@ -149,7 +149,7 @@ float3 p_mod_mirror3(inout float3 p, float3 size)
   return c;
 }
 
-float2 p_mod_grid2(inout float2 p, float2 size)
+float2 p_mod_grid2(float2 &p, float2 size)
 {
   float2 c = floor(safe_divide((p + size * 0.5), size));
   p = safe_mod(p + size * 0.5, size) - size * 0.5;
@@ -197,7 +197,7 @@ float sdf_op_exclusion(float a, float b, float gap, float gap2)
   return max(min(a, b) - gap2, -(max(a, b)) - gap);
 }
 
-float3 sdf_op_bend(in float3 p, float k)
+float3 sdf_op_bend(float3 p, float k)
 {
   float c = cos(k * p.x);
   float s = sin(k * p.x);
@@ -397,7 +397,7 @@ float sdf_op_tongue(float a, float b, float ra, float rb)
   return min(a, max(a - ra, abs(b) - rb));
 }
 
-float sdf_op_extrude(inout float3 p, in float3 h)
+float sdf_op_extrude(float3 &p, float3 h)
 {
   float3 q = abs(p) - h;
   float3 b = sign(p) * max(q, 0.0);
@@ -406,12 +406,12 @@ float sdf_op_extrude(inout float3 p, in float3 h)
   return -r.w;
 }
 
-float3 sdf_op_spin(in float3 p, float offset)
+float3 sdf_op_spin(float3 p, float offset)
 {
   return float3(length(p.xy) - offset, p.z, p.y);
 }
 
-float3 sdf_op_twist(in float3 p, float k, float offset)
+float3 sdf_op_twist(float3 p, float k, float offset)
 {
   float c = cos(k * p.z + offset);
   float s = sin(k * p.z + offset);
@@ -419,7 +419,7 @@ float3 sdf_op_twist(in float3 p, float k, float offset)
   return float3(m * p.xy, p.z);
 }
 
-float sdf_op_reflect(inout float3 p, float3 plane_normal, float offset)
+float sdf_op_reflect(float3 &p, float3 plane_normal, float offset)
 {
   float t = dot(p, plane_normal) + offset;
   if (t < 0.0) {
@@ -428,12 +428,12 @@ float sdf_op_reflect(inout float3 p, float3 plane_normal, float offset)
   return sgn(t);
 }
 
-float2 sdf_op_mirror(inout float3 p, float3 dist)
+float2 sdf_op_mirror(float3 &p, float3 dist)
 {
   return p_mod_grid2(p.xy, dist.xy);
 }
 
-float sdf_op_polar(inout float2 p, float repetitions)
+float sdf_op_polar(float2 &p, float repetitions)
 {
   float angle = safe_divide(2.0 * M_PI, repetitions);
   float a = atan(p.y, p.x) + angle / 2.0;

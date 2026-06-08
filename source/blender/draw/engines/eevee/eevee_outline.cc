@@ -119,9 +119,9 @@ void OutlineModule::render(View &view, int2 extent)
   auto &drw = *inst_.manager;
 
   if (inst_.pipelines.forward.has_outline_occluders()) {
-    occlusion_depth_tx_.acquire(extent,
-                                gpu::TextureFormat::SFLOAT_32_DEPTH_UINT_8,
-                                GPU_TEXTURE_USAGE_ATTACHMENT | GPU_TEXTURE_USAGE_SHADER_READ);
+    occlusion_depth_tx_.acquire_2d(extent,
+                                   gpu::TextureFormat::SFLOAT_32_DEPTH_UINT_8,
+                                   GPU_TEXTURE_USAGE_ATTACHMENT | GPU_TEXTURE_USAGE_SHADER_READ);
     GPU_texture_copy(occlusion_depth_tx_, inst_.render_buffers.depth_tx);
     GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE | GPU_BARRIER_TEXTURE_FETCH |
                        GPU_BARRIER_FRAMEBUFFER);
@@ -134,7 +134,8 @@ void OutlineModule::render(View &view, int2 extent)
     occlusion_depth_tx_.release();
   }
 
-  edge_seed_tx_.acquire(extent, gpu::TextureFormat::SFLOAT_16_16_16_16, GPU_TEXTURE_USAGE_GENERAL);
+  edge_seed_tx_.acquire_2d(
+      extent, gpu::TextureFormat::SFLOAT_16_16_16_16, GPU_TEXTURE_USAGE_GENERAL);
   edge_seed_tx_.clear(float4(0.0f));
 
   GPU_memory_barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS | GPU_BARRIER_TEXTURE_FETCH);
@@ -154,8 +155,10 @@ void OutlineModule::render(View &view, int2 extent)
   GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH);
 
   /* JFA init: seed the coordinate table from edge pixels. */
-  jfa_tx_.current().acquire(extent, gpu::TextureFormat::SFLOAT_32_32, GPU_TEXTURE_USAGE_GENERAL);
-  jfa_tx_.previous().acquire(extent, gpu::TextureFormat::SFLOAT_32_32, GPU_TEXTURE_USAGE_GENERAL);
+  jfa_tx_.current().acquire_2d(
+      extent, gpu::TextureFormat::SFLOAT_32_32, GPU_TEXTURE_USAGE_GENERAL);
+  jfa_tx_.previous().acquire_2d(
+      extent, gpu::TextureFormat::SFLOAT_32_32, GPU_TEXTURE_USAGE_GENERAL);
   jfa_tx_.current().clear(float4(-1e10f));
 
   jfa_init_fb_.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(jfa_tx_.current()));
@@ -192,15 +195,15 @@ void OutlineModule::render(View &view, int2 extent)
    * We need one more swap so previous() points to the final result. */
   jfa_tx_.swap();
 
-  resolved_outline_tx_.acquire(extent,
-                               gpu::TextureFormat::SFLOAT_16_16_16_16,
-                               GPU_TEXTURE_USAGE_ATTACHMENT | GPU_TEXTURE_USAGE_SHADER_READ);
-  resolved_depth_tx_.acquire(extent,
-                             gpu::TextureFormat::SFLOAT_32,
-                             GPU_TEXTURE_USAGE_ATTACHMENT | GPU_TEXTURE_USAGE_SHADER_READ);
-  resolved_velocity_tx_.acquire(extent,
-                                inst_.render_buffers.vector_tx_format(),
+  resolved_outline_tx_.acquire_2d(extent,
+                                  gpu::TextureFormat::SFLOAT_16_16_16_16,
+                                  GPU_TEXTURE_USAGE_ATTACHMENT | GPU_TEXTURE_USAGE_SHADER_READ);
+  resolved_depth_tx_.acquire_2d(extent,
+                                gpu::TextureFormat::SFLOAT_32,
                                 GPU_TEXTURE_USAGE_ATTACHMENT | GPU_TEXTURE_USAGE_SHADER_READ);
+  resolved_velocity_tx_.acquire_2d(extent,
+                                   inst_.render_buffers.vector_tx_format(),
+                                   GPU_TEXTURE_USAGE_ATTACHMENT | GPU_TEXTURE_USAGE_SHADER_READ);
   const bool do_motion_vectors_swizzle = inst_.render_buffers.vector_tx_format() ==
                                          gpu::TextureFormat::SFLOAT_16_16;
   if (do_motion_vectors_swizzle) {

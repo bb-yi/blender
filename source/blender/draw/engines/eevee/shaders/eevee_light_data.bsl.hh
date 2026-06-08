@@ -17,4 +17,10 @@ struct LightRenderData {
   [[storage(LIGHT_TILE_BUF_SLOT, read)]] const uint (&light_tile_buf)[];
 };
 
+struct LightShaderEvalData {
+  [[sampler(LIGHT_SHADER_TEX_SLOT)]] sampler2DArray light_shader_tx;
+  [[storage(LIGHT_SHADER_INDEX_BUF_SLOT, read)]] const int (&light_shader_index_buf)[];
+  [[storage(LIGHT_SHADER_UNIFORM_BUF_SLOT, read)]] const float4 (&light_shader_uniform_buf)[];
+};
+
 }  // namespace eevee

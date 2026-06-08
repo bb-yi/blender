@@ -38,27 +38,27 @@ enum {
 static void node_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
-  b.add_input<decl::Vector>("Vector")
+  b.add_input<decl::Vector>("Vector"_ustr)
       .hide_value()
-      .implicit_field(NODE_DEFAULT_INPUT_POSITION_FIELD)
+      .default_input_type(NODE_DEFAULT_INPUT_POSITION_FIELD)
       .description("Coordinates used to evaluate the hexagon pattern");
-  b.add_input<decl::Float>("Scale").default_value(5.0f).description("Overall scale of the grid");
-  b.add_input<decl::Float>("Size")
+  b.add_input<decl::Float>("Scale"_ustr).default_value(5.0f).description("Overall scale of the grid");
+  b.add_input<decl::Float>("Size"_ustr)
       .default_value(1.0f)
       .description("Relative size of the generated hexagon cells");
-  b.add_input<decl::Float>("Radius")
+  b.add_input<decl::Float>("Radius"_ustr)
       .default_value(0.0f)
       .description("Blends between edge distance and rounded distance");
-  b.add_input<decl::Float>("Roundness")
+  b.add_input<decl::Float>("Roundness"_ustr)
       .default_value(0.0f)
       .subtype(PROP_FACTOR)
       .description("Roundness applied in SDF mode");
-  b.add_output<decl::Float>("Value").no_muted_links();
-  b.add_output<decl::Color>("Color").no_muted_links();
-  b.add_output<decl::Vector>("Hex Coords").no_muted_links();
-  b.add_output<decl::Vector>("Position").no_muted_links();
-  b.add_output<decl::Vector>("Cell UV").no_muted_links();
-  b.add_output<decl::Vector>("Cell ID").no_muted_links();
+  b.add_output<decl::Float>("Value"_ustr).no_muted_links();
+  b.add_output<decl::Color>("Color"_ustr).no_muted_links();
+  b.add_output<decl::Vector>("Hex Coords"_ustr).no_muted_links();
+  b.add_output<decl::Vector>("Position"_ustr).no_muted_links();
+  b.add_output<decl::Vector>("Cell UV"_ustr).no_muted_links();
+  b.add_output<decl::Vector>("Cell ID"_ustr).no_muted_links();
 }
 
 static void node_layout(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
@@ -80,8 +80,8 @@ static void node_init(bNodeTree * /*ntree*/, bNode *node)
 static void node_update(bNodeTree *ntree, bNode *node)
 {
   NodeTexHexagon &tex = node_storage(*node);
-  bNodeSocket *radius_socket = bke::node_find_socket(*node, SOCK_IN, "Radius");
-  bNodeSocket *roundness_socket = bke::node_find_socket(*node, SOCK_IN, "Roundness");
+  bNodeSocket *radius_socket = bke::node_find_socket(*node, SOCK_IN, "Radius"_ustr);
+  bNodeSocket *roundness_socket = bke::node_find_socket(*node, SOCK_IN, "Roundness"_ustr);
 
   bke::node_set_socket_availability(
       *ntree, *radius_socket, !ELEM(tex.value_mode, SHD_HEXAGON_VALUE_DOT));
@@ -424,7 +424,7 @@ void register_node_type_sh_tex_hexagon()
 
   static bke::bNodeType ntype;
 
-  common_node_type_base(&ntype, "ShaderNodeTexHexagon", SH_NODE_TEX_HEXAGON);
+  common_node_type_base(&ntype, "ShaderNodeTexHexagon"_ustr, SH_NODE_TEX_HEXAGON);
   ntype.ui_name = "Hex Grid Texture";
   ntype.ui_description = "Generate a hexagonal grid texture with cell data outputs";
   ntype.enum_name_legacy = "TEX_HEXAGON";

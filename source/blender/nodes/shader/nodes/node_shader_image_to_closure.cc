@@ -17,7 +17,7 @@ namespace nodes::node_shader_image_to_closure_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_output<decl::Closure>("Closure");
+  b.add_output<decl::Closure>("Closure"_ustr);
 }
 
 static void node_init(bNodeTree * /*ntree*/, bNode *node)
@@ -33,7 +33,7 @@ void register_node_type_sh_image_to_closure()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeImageToClosure", SH_NODE_IMAGE_TO_CLOSURE);
+  sh_node_type_base(&ntype, "ShaderNodeImageToClosure"_ustr, SH_NODE_IMAGE_TO_CLOSURE);
   ntype.enum_name_legacy = "IMAGE_TO_CLOSURE";
   ntype.ui_name = "Image to Closure";
   ntype.ui_description = "Adapt an image into a closure-backed sample source";

@@ -33,19 +33,18 @@ void classify_tiles([[resource_table]] const TileClassification &srt,
                     [[subpass_in]] const TileSubpassIn &frag_in)
 {
   gbuffer::Header header = gbuffer::Header::from_data(frag_in.in_gbuffer_header);
-  int closure_count = int(header.closure_len());
-  int is_transmission = 0;
+  int stencil_bits = int(header.closure_len()) << 4;
   if (header.has_transmission()) {
-    is_transmission = 1 << 2;
+    stencil_bits |= 1 << 6;
   }
 
 #if defined(GPU_ARB_shader_stencil_export) || defined(GPU_METAL)
-  gl_FragStencilRefARB = closure_count | is_transmission;
+  gl_FragStencilRefARB = stencil_bits;
 #else
   /* Instead of setting the stencil at once, we do it (literally) bit by bit.
    * Discard fragments that do not have a number of closure whose bit-pattern
    * overlap the current stencil un-masked bit. */
-  if ((srt.current_bit & (closure_count | is_transmission)) == 0) {
+  if ((srt.current_bit & stencil_bits) == 0) {
     gpu_discard_fragment();
     return;
   }

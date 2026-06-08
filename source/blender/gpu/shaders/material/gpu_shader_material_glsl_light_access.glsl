@@ -153,7 +153,7 @@ bool glsl_light_lookup(uint light_index,
     return false;
   }
 
-  ObjectInfos object_infos = drw_infos[drw_resource_id()];
+  ObjectInfos object_infos = object_infos_get();
   uchar receiver_light_set = receiver_light_set_get(object_infos);
   if (!glsl_light_linking_affects_receiver(light.light_set_membership, receiver_light_set)) {
     return false;
@@ -185,13 +185,8 @@ bool glsl_light_find_ordinal(int light_ordinal, out uint r_light_index, out bool
   }
 
   int current = 0;
-  LIGHT_FOREACH_ALL_BEGIN(light_cull_buf,
-                          light_zbin_buf,
-                          light_tile_buf,
-                          gl_FragCoord.xy,
-                          drw_point_world_to_view(g_data.P).z,
-                          light_index,
-                          is_local)
+  for (uint light_index = 0u; light_index < light_cull_buf.visible_count; light_index++) {
+    bool is_local = true;
     if (!glsl_light_loop_accept(light_index, is_local)) {
       continue;
     }
@@ -201,7 +196,21 @@ bool glsl_light_find_ordinal(int light_ordinal, out uint r_light_index, out bool
       return true;
     }
     current += 1;
-  LIGHT_FOREACH_ALL_END()
+  }
+  for (uint light_index = light_cull_buf.local_lights_len; light_index < light_cull_buf.items_count;
+       light_index++)
+  {
+    bool is_local = false;
+    if (!glsl_light_loop_accept(light_index, is_local)) {
+      continue;
+    }
+    if (current == light_ordinal) {
+      r_light_index = light_index;
+      r_is_local = is_local;
+      return true;
+    }
+    current += 1;
+  }
   return false;
 }
 
@@ -226,7 +235,7 @@ bool glsl_light_shader_eval(uint light_index,
                             LightData light,
                             LightVector light_vector,
                             bool is_directional,
-                            inout GLSLLight result)
+                            GLSLLight &result)
 {
 #if defined(MAT_GLSL_LIGHT_SHADER_EVAL)
   int light_shader_index = light_shader_index_buf[light_index];
@@ -249,7 +258,7 @@ bool glsl_light_shader_eval(uint light_index,
   result.attenuation = light_attenuation_common(light, is_directional, light_vector.L) *
                        light_shader.a;
   if (!is_directional) {
-    result.attenuation *= light_influence_cutoff(
+    result.attenuation *= light_influence_attenuation(
         light_vector.dist, light.local().local.influence_radius_invsqr_surface);
   }
   return true;
@@ -274,12 +283,12 @@ GLSLLight glsl_light_build(uint light_index, bool is_local, uint public_index)
   result.type = glsl_light_public_type(light);
   result.lightgroup_id = light.lightgroup_id;
   result.vector = light_vector.L;
-  result.position = is_directional ? float3(0.0f) : light_position_get(light);
+  result.position = is_directional ? float3(0.0f) : light.position();
   if (is_directional) {
     result.direction = light.sun().direction;
   }
   else if (is_spot_light(light.type) || is_area_light(light.type)) {
-    result.direction = light_z_axis(light);
+    result.direction = light.z_axis();
   }
   else {
     result.direction = float3(0.0f);
@@ -296,18 +305,22 @@ GLSLLight glsl_light_build(uint light_index, bool is_local, uint public_index)
 int glsl_light_count()
 {
   int count = 0;
-  LIGHT_FOREACH_ALL_BEGIN(light_cull_buf,
-                          light_zbin_buf,
-                          light_tile_buf,
-                          gl_FragCoord.xy,
-                          drw_point_world_to_view(g_data.P).z,
-                          light_index,
-                          is_local)
+  for (uint light_index = 0u; light_index < light_cull_buf.visible_count; light_index++) {
+    bool is_local = true;
     if (!glsl_light_loop_accept(light_index, is_local)) {
       continue;
     }
     count += 1;
-  LIGHT_FOREACH_ALL_END()
+  }
+  for (uint light_index = light_cull_buf.local_lights_len; light_index < light_cull_buf.items_count;
+       light_index++)
+  {
+    bool is_local = false;
+    if (!glsl_light_loop_accept(light_index, is_local)) {
+      continue;
+    }
+    count += 1;
+  }
   return count;
 }
 
@@ -337,7 +350,7 @@ float glsl_light_shadow(int light_ordinal, float3 shading_normal)
     return 0.0f;
   }
 
-  ObjectInfos object_infos = drw_infos[drw_resource_id()];
+  ObjectInfos object_infos = object_infos_get();
   float3 geometry_normal = glsl_light_resolve_normal(g_data.Ng);
   float3 resolved_shading_normal = glsl_light_resolve_normal(shading_normal);
 
@@ -345,18 +358,18 @@ float glsl_light_shadow(int light_ordinal, float3 shading_normal)
     return 1.0f;
   }
 
-  return shadow_eval(light,
-                     is_directional,
-                     false,
-                     false,
-                     0.0f,
-                     g_data.P,
-                     geometry_normal,
-                     resolved_shading_normal,
-                     object_infos.shadow_terminator_normal_offset,
-                     object_infos.shadow_terminator_geometry_offset,
-                     uniform_buf.shadow.ray_count,
-                     uniform_buf.shadow.step_count);
+  return eevee_shadow_eval(light,
+                           is_directional,
+                           false,
+                           false,
+                           0.0f,
+                           g_data.P,
+                           geometry_normal,
+                           resolved_shading_normal,
+                           object_infos.shadow_terminator_normal_offset,
+                           object_infos.shadow_terminator_geometry_offset,
+                           uniform_buf.shadow.ray_count,
+                           uniform_buf.shadow.step_count);
 #  else
   return 0.0f;
 #  endif

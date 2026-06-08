@@ -31,15 +31,31 @@ float4 nodetree_filter();
 
 void input_aov_impl(uint hash, out TextureHandle color, out TextureHandle value)
 {
-  int color_index = aov_color_index(hash);
-  int value_index = aov_value_index(hash);
+  uint total_len = uniform_buf.render_pass.aovs.color_len + uniform_buf.render_pass.aovs.value_len;
+  uint hash_index;
+  for (hash_index = 0u; hash_index < AOV_MAX && hash_index < total_len; hash_index += 4u) {
+    bool4 cmp_mask = equal(uniform_buf.render_pass.aovs.hash[hash_index >> 2u], uint4(hash));
+    if (any(cmp_mask)) {
+      hash_index += (cmp_mask[0] ? 0u : (cmp_mask[1] ? 1u : (cmp_mask[2] ? 2u : 3u)));
+      break;
+    }
+  }
 
-  color = (color_index >= 0) ? TextureHandle(TEX_HANDLE_RP_COLOR,
-                                             int(uniform_buf.render_pass.color_len) + color_index) :
-                               TEXTURE_HANDLE_DEFAULT;
-  value = (value_index >= 0) ? TextureHandle(TEX_HANDLE_RP_VALUE,
-                                             int(uniform_buf.render_pass.value_len) + value_index) :
-                               TEXTURE_HANDLE_DEFAULT;
+  if (hash_index < total_len) {
+    bool is_value = hash_index >= uint(uniform_buf.render_pass.aovs.color_len);
+    uint aov_index = hash_index - (is_value ? uint(uniform_buf.render_pass.aovs.color_len) : 0u);
+    int render_pass_index = (is_value ? uniform_buf.render_pass.value_len :
+                                        uniform_buf.render_pass.color_len) +
+                            int(aov_index);
+    color = is_value ? TEXTURE_HANDLE_DEFAULT :
+                       TextureHandle(TEX_HANDLE_RP_COLOR, render_pass_index);
+    value = is_value ? TextureHandle(TEX_HANDLE_RP_VALUE, render_pass_index) :
+                       TEXTURE_HANDLE_DEFAULT;
+    return;
+  }
+
+  color = TEXTURE_HANDLE_DEFAULT;
+  value = TEXTURE_HANDLE_DEFAULT;
 }
 
 float4 TextureHandle_eval(TextureHandle tex, float2 offset, bool texel_offset)
@@ -80,10 +96,12 @@ float4 TextureHandle_eval(TextureHandle tex)
 void main()
 {
   init_globals();
-  g_data.N = drw_normal_view_to_world(drw_view_incident_vector(interp.P));
-  g_data.Ng = g_data.N;
-  g_data.P = -g_data.N;
-  attrib_load(WorldPoint{0});
+  float3 world_N = drw_normal_view_to_world(drw_view_incident_vector(interp.P));
+  g_data.N = world_N;
+  g_data.Ni = world_N;
+  g_data.Ng = world_N;
+  g_data.P = -world_N;
+  attrib_load(WorldPoint{g_data.P});
 
   float4 filter_result = nodetree_filter();
   out_color = float4(filter_result.rgb, saturate(1.0f - filter_result.a));

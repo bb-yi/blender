@@ -201,18 +201,18 @@ float shader_info_shadow_visibility_single(LightData light,
   }
 
   if (shader_info_shadow_is_builtin(shadow_mode)) {
-    return shadow_eval(light,
-                       is_directional,
-                       false,
-                       false,
-                       0.0f,
-                       position,
-                       geometry_normal,
-                       shading_normal,
-                       normal_offset,
-                       geometry_offset,
-                       uniform_buf.shadow.ray_count,
-                       uniform_buf.shadow.step_count);
+    return eevee_shadow_eval(light,
+                             is_directional,
+                             false,
+                             false,
+                             0.0f,
+                             position,
+                             geometry_normal,
+                             shading_normal,
+                             normal_offset,
+                             geometry_offset,
+                             uniform_buf.shadow.ray_count,
+                             uniform_buf.shadow.step_count);
   }
 
   int ray_step_count = max(uniform_buf.shadow.step_count, SHADER_INFO_STABLE_SHADOW_MIN_STEP_COUNT);
@@ -823,10 +823,10 @@ bool shader_info_is_world_sun_light(uint light_index, LightData light, bool is_l
 }
 
 bool shader_info_apply_light_shader(uint light_index,
-                                    inout LightData light,
+                                    LightData &light,
                                     LightVector lv,
                                     bool is_directional,
-                                    inout float attenuation)
+                                    float &attenuation)
 {
 #if defined(LIGHT_SHADER_TEXTURE_EVAL)
   int light_shader_index = light_shader_index_buf[light_index];

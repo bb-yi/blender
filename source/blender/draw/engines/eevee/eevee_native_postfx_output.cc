@@ -349,7 +349,7 @@ void NativePostFXOutputModule::acquire_velocity_work_texture(TextureFromPool &te
 {
   constexpr eGPUTextureUsage usage = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE;
   const gpu::TextureFormat format = inst_.render_buffers.vector_tx_format();
-  texture.acquire(extent, format, usage);
+  texture.acquire_2d(extent, format, usage);
   if (format == gpu::TextureFormat::SFLOAT_16_16) {
     GPU_texture_swizzle_set(texture, "rgrg");
   }
@@ -408,7 +408,7 @@ void NativePostFXOutputModule::render(View &view)
       dof_signatures_[index] = signature;
     }
 
-    source_tx_.acquire(extent, gpu::TextureFormat::SFLOAT_16_16_16_16, usage);
+    source_tx_.acquire_2d(extent, gpu::TextureFormat::SFLOAT_16_16_16_16, usage);
     if (source_valid) {
       extract_source(output, source_tx_.gpu_texture());
     }
@@ -424,7 +424,7 @@ void NativePostFXOutputModule::render(View &view)
     const bool uses_effects = source_valid && (use_motion_blur || use_dof);
     gpu::Texture *final_tx = source_tx_.gpu_texture();
     if (uses_effects) {
-      effect_tx_.acquire(extent, gpu::TextureFormat::SFLOAT_16_16_16_16, usage);
+      effect_tx_.acquire_2d(extent, gpu::TextureFormat::SFLOAT_16_16_16_16, usage);
       gpu::Texture *depth_tx = inst_.render_buffers.depth_tx;
       gpu::Texture *velocity_tx = nullptr;
       gpu::Texture *source_velocity_tx = inst_.render_buffers.vector_tx;
@@ -485,10 +485,10 @@ gpu::Texture *NativePostFXOutputModule::render_outline_for_combined(View &view,
 
   const int2 extent = inst_.film.render_extent_get();
   constexpr eGPUTextureUsage usage = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE;
-  default_outline_tx_.acquire(extent, gpu::TextureFormat::SFLOAT_16_16_16_16, usage);
+  default_outline_tx_.acquire_2d(extent, gpu::TextureFormat::SFLOAT_16_16_16_16, usage);
   GPU_texture_copy(default_outline_tx_.gpu_texture(), outline_tx);
   GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE | GPU_BARRIER_TEXTURE_FETCH);
-  default_outline_effect_tx_.acquire(extent, gpu::TextureFormat::SFLOAT_16_16_16_16, usage);
+  default_outline_effect_tx_.acquire_2d(extent, gpu::TextureFormat::SFLOAT_16_16_16_16, usage);
 
   gpu::Texture *velocity_tx = nullptr;
   gpu::Texture *depth_tx = inst_.outline.resolved_depth_texture();

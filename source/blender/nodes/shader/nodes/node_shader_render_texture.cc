@@ -20,20 +20,20 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.is_function_node();
   b.use_custom_socket_order();
   b.allow_any_socket_order();
-  b.add_output<decl::Color>("Color");
-  b.add_output<decl::Float>("Alpha");
+  b.add_output<decl::Color>("Color"_ustr);
+  b.add_output<decl::Float>("Alpha"_ustr);
   b.add_default_layout();
 
-  b.add_input<decl::Vector>("Vector").hide_value();
+  b.add_input<decl::Vector>("Vector"_ustr).hide_value();
 
-  PanelDeclarationBuilder &camera_panel = b.add_panel("Camera").default_closed(true);
-  camera_panel.add_output<decl::Vector>("Camera Position")
+  PanelDeclarationBuilder &camera_panel = b.add_panel("Camera"_ustr).default_closed(true);
+  camera_panel.add_output<decl::Vector>("Camera Position"_ustr)
       .description("World-space position of the camera used by this render texture");
-  camera_panel.add_output<decl::Vector>("Axis X")
+  camera_panel.add_output<decl::Vector>("Axis X"_ustr)
       .description("Dot with (P - Camera Position) to get render texture camera-space X");
-  camera_panel.add_output<decl::Vector>("Axis Y")
+  camera_panel.add_output<decl::Vector>("Axis Y"_ustr)
       .description("Dot with (P - Camera Position) to get render texture camera-space Y");
-  camera_panel.add_output<decl::Vector>("Axis Z")
+  camera_panel.add_output<decl::Vector>("Axis Z"_ustr)
       .description("Dot with (P - Camera Position) to get render texture camera-space Z");
 }
 
@@ -84,7 +84,7 @@ void register_node_type_sh_render_texture()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeRenderTexture", SH_NODE_RENDER_TEXTURE);
+  sh_node_type_base(&ntype, "ShaderNodeRenderTexture"_ustr, SH_NODE_RENDER_TEXTURE);
   ntype.ui_name = "Render Texture";
   ntype.ui_description = "Sample an Eevee render texture generated from a scene camera";
   ntype.enum_name_legacy = "RENDER_TEXTURE";

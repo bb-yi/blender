@@ -10,15 +10,15 @@ namespace nodes::node_shader_npr_input_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_output<decl::Image>("Combined Color");
-  b.add_output<decl::Image>("Diffuse Color");
-  b.add_output<decl::Image>("Diffuse Direct");
-  b.add_output<decl::Image>("Diffuse Indirect");
-  b.add_output<decl::Image>("Specular Color");
-  b.add_output<decl::Image>("Specular Direct");
-  b.add_output<decl::Image>("Specular Indirect");
-  b.add_output<decl::Image>("Position");
-  b.add_output<decl::Image>("Normal");
+  b.add_output<decl::Image>("Combined Color"_ustr);
+  b.add_output<decl::Image>("Diffuse Color"_ustr);
+  b.add_output<decl::Image>("Diffuse Direct"_ustr);
+  b.add_output<decl::Image>("Diffuse Indirect"_ustr);
+  b.add_output<decl::Image>("Specular Color"_ustr);
+  b.add_output<decl::Image>("Specular Direct"_ustr);
+  b.add_output<decl::Image>("Specular Indirect"_ustr);
+  b.add_output<decl::Image>("Position"_ustr);
+  b.add_output<decl::Image>("Normal"_ustr);
 }
 
 static int node_shader_gpu_npr_input(GPUMaterial *mat,
@@ -38,7 +38,7 @@ void register_node_type_sh_npr_input()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeNPR_Input", SH_NODE_NPR_INPUT);
+  sh_node_type_base(&ntype, "ShaderNodeNPR_Input"_ustr, SH_NODE_NPR_INPUT);
   ntype.enum_name_legacy = "NPR_INPUT";
   ntype.ui_name = "NPR Input";
   ntype.ui_description = "Read NPR render buffers inside the NPR shader tree";

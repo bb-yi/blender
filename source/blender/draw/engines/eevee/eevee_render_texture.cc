@@ -248,7 +248,7 @@ void RenderTextureModule::slot_capture(const int slot_index)
     rbufs.prepass_normal_tx.clear(float4(0.0f));
   }
 
-  const float4 clear_color = float4(0.0f, 0.0f, 0.0f, 1.0f);
+  const double4 clear_color = double4(0.0, 0.0, 0.0, 1.0);
   GPU_framebuffer_bind(combined_fb_);
   GPU_framebuffer_clear_color_depth(combined_fb_, clear_color, inst_.film.depth.clear_value);
   inst_.pipelines.background.clear(render_view);

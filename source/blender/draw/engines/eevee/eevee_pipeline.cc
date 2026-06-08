@@ -637,29 +637,44 @@ void Prepass::init(DRWState extra_state,
             {"HideFromRaycast.SingleSided.Moving", ""}},
            {{"HideFromRaycast.DoubleSided.Static", ""},
             {"HideFromRaycast.DoubleSided.Moving", ""}}}};
+  static constexpr const char *ztest_names[8] = {
+      "ZTest.LessEqual",
+      "ZTest.Less",
+      "ZTest.Greater",
+      "ZTest.GreaterEqual",
+      "ZTest.Equal",
+      "ZTest.NotEqual",
+      "ZTest.Always",
+      "ZTest.Never",
+  };
 
   for (bool hide_from_raycast : {false, true}) {
-    for (bool double_sided : {false, true}) {
-      for (bool moving : {false, true}) {
-        for (bool write_id : {false, true}) {
-          PassMain::Sub *&sub = subs_[hide_from_raycast][double_sided][moving][write_id];
-          PassMain::Sub *&setup_sub =
-              setup_subs_[hide_from_raycast][double_sided][moving][write_id];
-          if ((hide_from_raycast && write_id) || (!supports_motion_vectors && moving) ||
-              (!supports_raycast_visibility && !hide_from_raycast))
-          {
-            /* Never needed.
-             * Object IDs are only used for checking raycast self-hits.
-             * If the pipeline doesn't support motion vectors, Prepass::add should always be called
-             * with has_motion == false.
-             * If the pipeline doesn't support raycast visibility, Prepass::add should always be
-             * called with hide_from_raycast == true. */
-            sub = nullptr;
-            setup_sub = nullptr;
-            continue;
+    for (int ztest_mode = MA_ZTEST_LESS_EQUAL; ztest_mode <= MA_ZTEST_NEVER; ztest_mode++) {
+      PassMain::Sub &ztest_pass = pass_.sub(ztest_names[ztest_mode]);
+      for (bool double_sided : {false, true}) {
+        for (bool moving : {false, true}) {
+          for (bool write_id : {false, true}) {
+            PassMain::Sub *&sub =
+                subs_[hide_from_raycast][ztest_mode][double_sided][moving][write_id];
+            PassMain::Sub *&setup_sub =
+                setup_subs_[hide_from_raycast][ztest_mode][double_sided][moving][write_id];
+            if ((hide_from_raycast && write_id) || (!supports_motion_vectors && moving) ||
+                (!supports_raycast_visibility && !hide_from_raycast))
+            {
+              /* Never needed.
+               * Object IDs are only used for checking raycast self-hits.
+               * If the pipeline doesn't support motion vectors, Prepass::add should always be
+               * called with has_motion == false.
+               * If the pipeline doesn't support raycast visibility, Prepass::add should always be
+               * called with hide_from_raycast == true. */
+              sub = nullptr;
+              setup_sub = nullptr;
+              continue;
+            }
+            sub = &ztest_pass.sub(subpass_names[hide_from_raycast][double_sided][moving]
+                                               [write_id]);
+            setup_sub = &sub->sub("Setup");
           }
-          sub = &pass_.sub(subpass_names[hide_from_raycast][double_sided][moving][write_id]);
-          setup_sub = &sub->sub("Setup");
         }
       }
     }
@@ -677,10 +692,11 @@ PassMain::Sub *Prepass::add(blender::Material *blender_mat,
                             bool force_write_id)
 {
   const bool double_sided = !(blender_mat->blend_flag & MA_BL_CULL_BACKFACE);
+  const int ztest_mode = material_ztest_mode(blender_mat);
   const bool has_raycast = GPU_material_flag_get(gpumat, GPU_MATFLAG_RAYCAST);
   const bool write_id = (force_write_id || has_raycast) && !hide_from_raycast;
 
-  PassMain::Sub &sub = subs_[hide_from_raycast][double_sided][has_motion][write_id]->sub(
+  PassMain::Sub &sub = subs_[hide_from_raycast][ztest_mode][double_sided][has_motion][write_id]->sub(
       GPU_material_get_name(gpumat));
   if (has_raycast) {
     /* NOTE: Bound per subpass since material textures could override these slots. */
@@ -702,45 +718,52 @@ void Prepass::end_sync()
   const bool has_raycast = inst_.pipelines.has_raycast;
 
   for (bool hide_from_raycast : {false, true}) {
-    for (bool double_sided : {false, true}) {
-      for (bool moving : {false, true}) {
-        for (bool write_id : {false, true}) {
-          PassMain::Sub *sub = setup_subs_[hide_from_raycast][double_sided][moving][write_id];
-          if (!sub) {
-            continue;
+    for (int ztest_mode = MA_ZTEST_LESS_EQUAL; ztest_mode <= MA_ZTEST_NEVER; ztest_mode++) {
+      for (bool double_sided : {false, true}) {
+        for (bool moving : {false, true}) {
+          for (bool write_id : {false, true}) {
+            PassMain::Sub *sub =
+                setup_subs_[hide_from_raycast][ztest_mode][double_sided][moving][write_id];
+            if (!sub) {
+              continue;
+            }
+            const bool write_raycast = has_raycast && !hide_from_raycast;
+            const bool read_raycast = has_raycast && hide_from_raycast;
+            const bool write_motion = supports_motion_vectors_ && moving;
+            DRWState state = material_ztest_state_replace(
+                common_state_, eMaterialZTestMode(ztest_mode), inst_.film.depth.test_state);
+            SET_FLAG_FROM_TEST(state, !double_sided, DRW_STATE_CULL_BACK);
+            SET_FLAG_FROM_TEST(state, write_raycast || write_motion, DRW_STATE_WRITE_COLOR);
+            sub->state_set(state);
+            sub->subpass_transition(
+                GPU_ATTACHMENT_WRITE,
+                {write_raycast ?
+                     GPU_ATTACHMENT_WRITE :
+                     (read_raycast ? GPU_ATTACHMENT_READ : GPU_ATTACHMENT_IGNORE), /* normal */
+                 (write_raycast && write_id) ?
+                     GPU_ATTACHMENT_WRITE :
+                     (read_raycast ? GPU_ATTACHMENT_READ : GPU_ATTACHMENT_IGNORE),
+                 write_motion ? GPU_ATTACHMENT_WRITE : GPU_ATTACHMENT_IGNORE});
           }
-          const bool write_raycast = has_raycast && !hide_from_raycast;
-          const bool read_raycast = has_raycast && hide_from_raycast;
-          const bool write_motion = supports_motion_vectors_ && moving;
-          DRWState state = common_state_;
-          SET_FLAG_FROM_TEST(state, !double_sided, DRW_STATE_CULL_BACK);
-          SET_FLAG_FROM_TEST(state, write_raycast || write_motion, DRW_STATE_WRITE_COLOR);
-          sub->state_set(state);
-          sub->subpass_transition(
-              GPU_ATTACHMENT_WRITE,
-              {write_raycast ?
-                   GPU_ATTACHMENT_WRITE :
-                   (read_raycast ? GPU_ATTACHMENT_READ : GPU_ATTACHMENT_IGNORE), /* normal */
-               (write_raycast && write_id) ?
-                   GPU_ATTACHMENT_WRITE :
-                   (read_raycast ? GPU_ATTACHMENT_READ : GPU_ATTACHMENT_IGNORE),
-               write_motion ? GPU_ATTACHMENT_WRITE : GPU_ATTACHMENT_IGNORE});
         }
       }
     }
   }
 
-  if (supports_raycast_visibility_) {
-    /* First Raycast-visible Subpass. */
-    setup_subs_[false][false][false][false]->bind_ubo(PIPELINE_BUF_SLOT, &pipeline_buf_copy_);
+  for (int ztest_mode = MA_ZTEST_LESS_EQUAL; ztest_mode <= MA_ZTEST_NEVER; ztest_mode++) {
+    if (supports_raycast_visibility_) {
+      /* First Raycast-visible Subpass for each material z-test group. */
+      setup_subs_[false][ztest_mode][false][false][false]->bind_ubo(PIPELINE_BUF_SLOT,
+                                                                    &pipeline_buf_copy_);
+    }
+    /* First HideFromRaycast Subpass for each material z-test group. */
+    setup_subs_[true][ztest_mode][false][false][false]->bind_ubo(
+        PIPELINE_BUF_SLOT, &pipeline_buf_copy_hide_from_raycast_);
   }
-  /* First HideFromRaycast Subpass. */
-  setup_subs_[true][false][false][false]->bind_ubo(PIPELINE_BUF_SLOT,
-                                                   &pipeline_buf_copy_hide_from_raycast_);
 
   if (has_raycast && supports_raycast_visibility_) {
-    setup_subs_[true][false][false][false]->texture_copy(&fb_depth_tx_,
-                                                         &inst_.render_buffers.raycast_depth_tx);
+    setup_subs_[true][MA_ZTEST_LESS_EQUAL][false][false][false]->texture_copy(
+        &fb_depth_tx_, &inst_.render_buffers.raycast_depth_tx);
   }
 }
 
@@ -890,12 +913,13 @@ void ForwardPipeline::sync()
     gpu::Shader *sh = inst_.shaders.static_shader_get(TRANSPARENCY_RESOLVE);
 
     resolve_ps_.init();
-    resolve_ps_.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_BLEND_CUSTOM);
+    resolve_ps_.state_set(DRW_STATE_WRITE_COLOR);
     resolve_ps_.shader_set(sh);
     resolve_ps_.bind_texture("transparency_r_tx", &transp_buffer_.r_channel_tx);
     resolve_ps_.bind_texture("transparency_g_tx", &transp_buffer_.g_channel_tx);
     resolve_ps_.bind_texture("transparency_b_tx", &transp_buffer_.b_channel_tx);
     resolve_ps_.bind_texture("transparency_a_tx", &transp_buffer_.a_channel_tx);
+    resolve_ps_.bind_texture("combined_tx", &resolve_input_tx_);
     resolve_ps_.bind_image("rp_color_img", &inst_.render_buffers.rp_color_tx);
     resolve_ps_.bind_image("rp_value_img", &inst_.render_buffers.rp_value_tx);
     resolve_ps_.bind_resources(inst_.uniform_data);
@@ -1128,9 +1152,9 @@ void ForwardPipeline::TransparencyBuffer::release()
 bool ForwardPipeline::use_colored_transparency() const
 {
   /* The monochromatic transparent path regressed on this branch and only preserves the first
-   * radiance channel in final renders. Force the split-channel path for real transparent draws
-   * until the single-target path is brought back in sync. */
-  return has_transparent_ || has_holdout_;
+   * radiance channel in final renders. Forward opaque and custom depth-test/no-depth draws also
+   * resolve through this path, and must preserve combined color when their depth test fails. */
+  return has_opaque_ || has_no_depth_ || has_transparent_ || has_holdout_;
 }
 
 bool ForwardPipeline::has_outline_occluders() const
@@ -1266,9 +1290,15 @@ void ForwardPipeline::render(View &view,
 
   if (needs_transparency_resolve) {
     ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainForwardResolve);
+    resolve_input_tx_.acquire_2d(
+        extent, GPU_texture_format(inst_.render_buffers.combined_tx), GPU_TEXTURE_USAGE_GENERAL);
+    GPU_texture_copy(resolve_input_tx_, inst_.render_buffers.combined_tx);
+    GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE | GPU_BARRIER_TEXTURE_FETCH |
+                       GPU_BARRIER_FRAMEBUFFER);
     combined_fb.bind();
     inst_.manager->submit(resolve_ps_, view);
 
+    resolve_input_tx_.release();
     transp_buffer_.release();
   }
 }
@@ -2116,9 +2146,7 @@ PassMain::Sub *PipelineModule::material_add(Object *ob,
       if (!material_color_write_get(*blender_mat)) {
         return nullptr;
       }
-      if (!material_depth_write_get(*blender_mat) ||
-          material_ztest_mode_get(*blender_mat) != MA_ZTEST_LESS_EQUAL)
-      {
+      if (!material_depth_write_get(*blender_mat)) {
         return forward.material_no_depth_add(ob, blender_mat, gpumat);
       }
       return forward.material_opaque_add(ob, blender_mat, gpumat);
@@ -2820,7 +2848,7 @@ void PlanarProbePipeline::render(View &view,
   inst_.lights.eval_light_shaders(view, extent);
 
   GPU_framebuffer_bind(combined_fb);
-  GPU_framebuffer_clear_color(combined_fb, float4(0.0f));
+  GPU_framebuffer_clear_color(combined_fb, double4(0.0));
   inst_.manager->submit(eval_light_ps_, view);
   GPU_memory_barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS | GPU_BARRIER_TEXTURE_FETCH);
 

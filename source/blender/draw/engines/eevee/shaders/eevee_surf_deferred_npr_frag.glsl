@@ -288,18 +288,18 @@ bool foreach_light_setup(uint l_idx,
   if (light.tilemap_index != LIGHT_NO_SHADOW) {
     int ray_count = uniform_buf.shadow.ray_count;
     int ray_step_count = uniform_buf.shadow.step_count;
-    shadow_mask = shadow_eval(light,
-                              is_directional,
-                              false,
-                              false,
-                              0.0f,
-                              g_data.P,
-                              g_data.Ng,
-                              N,
-                              0.0f,
-                              0.0f,
-                              ray_count,
-                              ray_step_count);
+    shadow_mask = eevee_shadow_eval(light,
+                                    is_directional,
+                                    false,
+                                    false,
+                                    0.0f,
+                                    g_data.P,
+                                    g_data.Ng,
+                                    N,
+                                    0.0f,
+                                    0.0f,
+                                    ray_count,
+                                    ray_step_count);
     shadow_mask *= dot(N, lv.L) > 0.0f ? 1.0f : 0.0f;
   }
 

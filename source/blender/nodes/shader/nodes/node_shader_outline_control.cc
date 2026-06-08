@@ -18,21 +18,21 @@ namespace nodes::node_shader_outline_control_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Color>("Line Color").default_value({0.0f, 0.0f, 0.0f, 1.0f});
-  b.add_input<decl::Float>("Line Alpha")
+  b.add_input<decl::Color>("Line Color"_ustr).default_value({0.0f, 0.0f, 0.0f, 1.0f});
+  b.add_input<decl::Float>("Line Alpha"_ustr)
       .default_value(1.0f)
       .min(0.0f)
       .max(1.0f)
       .subtype(PROP_FACTOR)
       .description("Controls the opacity of the outline");
-  b.add_input<decl::Float>("Line Width").default_value(2.0f).min(0.0f);
-  b.add_input<decl::Float>("Depth Threshold").default_value(0.1f).min(0.0f).max(1.0f);
-  b.add_input<decl::Float>("Normal Threshold").default_value(0.5f).min(0.0f).max(1.0f);
-  b.add_input<decl::Int>("Outline ID").default_value(0).min(0).max(32767);
-  b.add_input<decl::Bool>("ID Edge")
+  b.add_input<decl::Float>("Line Width"_ustr).default_value(2.0f).min(0.0f);
+  b.add_input<decl::Float>("Depth Threshold"_ustr).default_value(0.1f).min(0.0f).max(1.0f);
+  b.add_input<decl::Float>("Normal Threshold"_ustr).default_value(0.5f).min(0.0f).max(1.0f);
+  b.add_input<decl::Int>("Outline ID"_ustr).default_value(0).min(0).max(32767);
+  b.add_input<decl::Bool>("ID Edge"_ustr)
       .default_value(true)
       .description("Draw outlines where the outline ID changes");
-  b.add_input<decl::Bool>("Freestyle Edge")
+  b.add_input<decl::Bool>("Freestyle Edge"_ustr)
       .default_value(true)
       .description("Draw outlines on mesh edges marked as Freestyle edges");
 }
@@ -63,7 +63,7 @@ void register_node_type_sh_outline_control()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeOutlineControl", SH_NODE_OUTLINE_CONTROL);
+  sh_node_type_base(&ntype, "ShaderNodeOutlineControl"_ustr, SH_NODE_OUTLINE_CONTROL);
   ntype.enum_name_legacy = "OUTLINE_CONTROL";
   ntype.ui_name = "Outline Control";
   ntype.ui_description = "Write Eevee outline parameters for the built-in screen-space outline pass";

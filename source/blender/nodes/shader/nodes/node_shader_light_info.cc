@@ -60,23 +60,23 @@ static int node_light_info_output_type_value(const int light_type)
 static void node_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
-  b.add_output<decl::Color>("Color");
-  b.add_output<decl::Float>("Power");
-  b.add_output<decl::Int>("Type")
+  b.add_output<decl::Color>("Color"_ustr);
+  b.add_output<decl::Float>("Power"_ustr);
+  b.add_output<decl::Int>("Type"_ustr)
       .description("Light type index: 0 Point, 1 Sun, 2 Spot, 3 Area. Outputs -1 when no light is assigned");
-  b.add_output<decl::Vector>("Position")
+  b.add_output<decl::Vector>("Position"_ustr)
       .description("World-space location of the selected light object")
       .available(false);
-  b.add_output<decl::Vector>("Direction")
+  b.add_output<decl::Vector>("Direction"_ustr)
       .description("World-space emission direction")
       .available(false);
-  b.add_output<decl::Float>("Radius")
+  b.add_output<decl::Float>("Radius"_ustr)
       .description("Primary size parameter of the selected light")
       .available(false);
-  b.add_output<decl::Float>("Spot Size")
+  b.add_output<decl::Float>("Spot Size"_ustr)
       .description("Spot cone angle in radians")
       .available(false);
-  b.add_output<decl::Float>("Sun Angle")
+  b.add_output<decl::Float>("Sun Angle"_ustr)
       .description("Sun angular diameter in radians")
       .available(false);
 }
@@ -88,11 +88,11 @@ static void node_shader_buts_light_info(ui::Layout &layout, bContext * /*C*/, Po
 
 static void node_update(bNodeTree *ntree, bNode *node)
 {
-  bNodeSocket *position_socket = bke::node_find_socket(*node, SOCK_OUT, "Position");
-  bNodeSocket *direction_socket = bke::node_find_socket(*node, SOCK_OUT, "Direction");
-  bNodeSocket *radius_socket = bke::node_find_socket(*node, SOCK_OUT, "Radius");
-  bNodeSocket *spot_size_socket = bke::node_find_socket(*node, SOCK_OUT, "Spot Size");
-  bNodeSocket *sun_angle_socket = bke::node_find_socket(*node, SOCK_OUT, "Sun Angle");
+  bNodeSocket *position_socket = bke::node_find_socket(*node, SOCK_OUT, "Position"_ustr);
+  bNodeSocket *direction_socket = bke::node_find_socket(*node, SOCK_OUT, "Direction"_ustr);
+  bNodeSocket *radius_socket = bke::node_find_socket(*node, SOCK_OUT, "Radius"_ustr);
+  bNodeSocket *spot_size_socket = bke::node_find_socket(*node, SOCK_OUT, "Spot Size"_ustr);
+  bNodeSocket *sun_angle_socket = bke::node_find_socket(*node, SOCK_OUT, "Sun Angle"_ustr);
 
   const int light_type = node_light_info_type(*node);
   bke::node_set_socket_availability(
@@ -130,7 +130,7 @@ static void node_shader_light_info_values(const Object &light_object,
       math::length(object_to_world.y_axis()),
       math::length(object_to_world.z_axis()),
   };
-  const float max_scale = max_fff(scale.x, scale.y, scale.z);
+  const float max_scale = max_ff(max_ff(scale.x, scale.y), scale.z);
 
   switch (light.type) {
     case LA_LOCAL:
@@ -219,7 +219,7 @@ void register_node_type_sh_light_info()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeLightInfo", SH_NODE_LIGHT_INFO);
+  sh_node_type_base(&ntype, "ShaderNodeLightInfo"_ustr, SH_NODE_LIGHT_INFO);
   ntype.ui_name = "Light Info";
   ntype.ui_description = "Read flat color, power, transform, and size values from a chosen light";
   ntype.enum_name_legacy = "LIGHTINFO";

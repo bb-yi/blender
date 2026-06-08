@@ -144,7 +144,7 @@ static void geometry_set_mesh_to_points(GeometrySet &geometry_set,
       const CPPType &type = src.varray.type();
       const bke::AttributeInitValue init(GPointer(type, info.data));
       dst_attributes.add(dst_name, AttrDomain::Point, data_type, init);
-      continue;
+      return;
     }
 
     if (share_arrays && src.domain == domain && src.sharing_info &&

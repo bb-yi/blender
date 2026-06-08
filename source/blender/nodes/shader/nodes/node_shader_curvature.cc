@@ -18,12 +18,12 @@ namespace nodes::node_shader_curvature_cc {
 static void node_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
-  b.add_input<decl::Float>("Samples").min(1.0f).max(64.0f).default_value(8.0f);
-  b.add_input<decl::Float>("Sample Radius").min(0.0f).max(1000.0f).default_value(1.0f);
-  b.add_input<decl::Float>("Thickness").min(0.0001f).max(1000.0f).default_value(1.0f);
-  b.add_input<decl::Vector>("Scale").default_value(float3(1.0f, 1.0f, 0.0f));
-  b.add_output<decl::Float>("Scene Curvature");
-  b.add_output<decl::Float>("Scene Rim");
+  b.add_input<decl::Float>("Samples"_ustr).min(1.0f).max(64.0f).default_value(8.0f);
+  b.add_input<decl::Float>("Sample Radius"_ustr).min(0.0f).max(1000.0f).default_value(1.0f);
+  b.add_input<decl::Float>("Thickness"_ustr).min(0.0001f).max(1000.0f).default_value(1.0f);
+  b.add_input<decl::Vector>("Scale"_ustr).default_value(float3(1.0f, 1.0f, 0.0f));
+  b.add_output<decl::Float>("Scene Curvature"_ustr);
+  b.add_output<decl::Float>("Scene Rim"_ustr);
 }
 
 static void node_shader_init_curvature(bNodeTree * /*ntree*/, bNode *node)
@@ -69,7 +69,7 @@ void register_node_type_sh_curvature()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeCurvature", SH_NODE_CURVATURE);
+  sh_node_type_base(&ntype, "ShaderNodeCurvature"_ustr, SH_NODE_CURVATURE);
   ntype.ui_name = "Curvature";
   ntype.ui_description = "Sample Goo-style screen-space curvature and rim information";
   ntype.enum_name_legacy = "CURVATURE";

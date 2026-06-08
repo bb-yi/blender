@@ -1233,7 +1233,7 @@ void Film::write_viewport_compositor_passes()
     }
 
     draw::TextureFromPool &output_pass_texture = DRW_viewport_pass_texture_get(output.name);
-    output_pass_texture.acquire(this->display_extent, GPU_texture_format(pass_texture));
+    output_pass_texture.acquire_2d(this->display_extent, GPU_texture_format(pass_texture));
 
     PassSimple write_pass_ps = {"Film.WriteViewportCompositorNativePostFXPass"};
     const ePassStorageType storage_type = NativePostFXOutputModule::output_storage_type(

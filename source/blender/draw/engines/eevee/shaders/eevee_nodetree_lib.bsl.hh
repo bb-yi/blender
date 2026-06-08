@@ -12,6 +12,7 @@
 #include "draw_view.bsl.hh"
 #include "eevee_bxdf_lut_lib.bsl.hh"
 #include "eevee_hiz.bsl.hh"
+#include "eevee_lightprobe.bsl.hh"
 #include "eevee_nodetree_closures_lib.glsl"
 #include "eevee_outline_lib.glsl"
 #include "eevee_pipeline.bsl.hh"
@@ -97,6 +98,47 @@ ViewMatrices view_matrices_get()
   [[resource_table]] const draw::View &views = resource_table_get(draw::View);
   return views.get(view_id_get());
 }
+
+float sampling_rng_1D_get(eSamplingDimension dim)
+{
+  [[resource_table]] const eevee::Sampling &sampling = resource_table_get(eevee::Sampling);
+  return sampling.rng_1D_get(dim);
+}
+
+float2 sampling_rng_2D_get(eSamplingDimension dim)
+{
+  [[resource_table]] const eevee::Sampling &sampling = resource_table_get(eevee::Sampling);
+  return sampling.rng_2D_get(dim);
+}
+
+float3 sampling_rng_3D_get(eSamplingDimension dim)
+{
+  [[resource_table]] const eevee::Sampling &sampling = resource_table_get(eevee::Sampling);
+  return sampling.rng_3D_get(dim);
+}
+
+float4 utility_tx_fetch(sampler2DArray tx, float2 texel, float layer)
+{
+  return texelFetch(tx, int3(int2(texel) % UTIL_TEX_SIZE, int(layer)), 0);
+}
+
+#if defined(GPU_FRAGMENT_SHADER)
+float3 lightprobe_world_sample(float3 L, float lod)
+{
+#  ifdef SPHERE_PROBE
+  [[resource_table]] eevee::LightprobeRenderData &lightprobes = resource_table_get(
+      eevee::LightprobeRenderData);
+  [[resource_table]] eevee::LightprobeSphereRenderData &lp_spheres = lightprobes.spheres;
+  const ViewMatrices view = view_matrices_get();
+  float3 V = view.world_incident_vector(g_data.P);
+  eevee::LightProbeSample samp = lightprobes.load(gl_FragCoord.xy, g_data.P, g_data.Ng, V);
+  return lp_spheres.spherical_sample_normalized_with_parallax(samp, g_data.P, L, lod);
+#  else
+  UNUSED_VARS(L, lod);
+  return float3(0.0f);
+#  endif
+}
+#endif
 
 #define closure_base_copy(cl, in_cl) \
   cl.weight = in_cl.weight; \

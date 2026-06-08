@@ -40,19 +40,19 @@ NODE_STORAGE_FUNCS(NodeSdfOp)
 static void sh_node_sdf_op_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
-  b.add_input<decl::Float>("Distance").min(-100000.0f).max(100000.0f).default_value(0.5f);
-  b.add_input<decl::Float>("Distance", "Distance_001")
+  b.add_input<decl::Float>("Distance"_ustr).min(-100000.0f).max(100000.0f).default_value(0.5f);
+  b.add_input<decl::Float>("Distance"_ustr, "Distance_001"_ustr)
       .min(-100000)
       .max(100000)
       .default_value(0.5f);
-  b.add_input<decl::Float>("Value").min(-100000.0f).max(100000.0f).default_value(0.5f);
-  b.add_input<decl::Float>("Value", "Value_001")
+  b.add_input<decl::Float>("Value"_ustr).min(-100000.0f).max(100000.0f).default_value(0.5f);
+  b.add_input<decl::Float>("Value"_ustr, "Value_001"_ustr)
       .min(-100000.0f)
       .max(100000.0f)
       .default_value(0.5f);
-  b.add_input<decl::Int>("Count").min(-100000).max(100000).default_value(1);
+  b.add_input<decl::Int>("Count"_ustr).min(-100000).max(100000).default_value(1);
 
-  b.add_output<decl::Float>("Distance");
+  b.add_output<decl::Float>("Distance"_ustr);
 }
 
 }  // namespace nodes::node_shader_sdf_op_cc
@@ -302,7 +302,7 @@ void register_node_type_sh_sdf_op()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeSdfOp", SH_NODE_SDF_OP);
+  sh_node_type_base(&ntype, "ShaderNodeSdfOp"_ustr, SH_NODE_SDF_OP);
   ntype.ui_name = "SDF Operator";
   ntype.ui_description = "Combine or reshape signed distance fields";
   ntype.enum_name_legacy = "SDF_OP";

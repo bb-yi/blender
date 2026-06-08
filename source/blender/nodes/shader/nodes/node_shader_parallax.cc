@@ -88,48 +88,48 @@ static void node_declare(NodeDeclarationBuilder &b)
   const bool uses_shadow = uses_height_source && node && node_use_shadow(*node);
 
   if (uses_height_source) {
-    b.add_input<decl::Closure>("Height Source")
+    b.add_input<decl::Closure>("Height Source"_ustr)
         .description("Closure Output or Image to Closure source sampled as height");
   }
-  b.add_input<decl::Vector>("UV").implicit_field(NODE_DEFAULT_INPUT_POSITION_FIELD);
-  b.add_input<decl::Float>("Scale")
+  b.add_input<decl::Vector>("UV"_ustr).default_input_type(NODE_DEFAULT_INPUT_POSITION_FIELD);
+  b.add_input<decl::Float>("Scale"_ustr)
       .default_value(0.05f)
       .min(-FLT_MAX)
       .max(FLT_MAX)
       .description("Parallax displacement amount in UV space");
   if (uses_height_source) {
-    b.add_input<decl::Float>("Offset")
+    b.add_input<decl::Float>("Offset"_ustr)
         .default_value(0.0f)
         .min(-1.0f)
         .max(1.0f)
         .description("Bias added to the sampled height");
-    b.add_input<decl::Float>("Min Steps")
+    b.add_input<decl::Float>("Min Steps"_ustr)
         .default_value(8.0f)
         .min(1.0f)
         .max(128.0f)
         .description("Minimum samples used at near-normal view angles");
-    b.add_input<decl::Float>("Max Steps")
+    b.add_input<decl::Float>("Max Steps"_ustr)
         .default_value(32.0f)
         .min(1.0f)
         .max(128.0f)
         .description("Maximum samples used at grazing view angles");
     if (uses_refinement) {
-      b.add_input<decl::Float>("Refinement Steps")
+      b.add_input<decl::Float>("Refinement Steps"_ustr)
           .default_value(2.0f)
           .min(0.0f)
           .max(8.0f)
           .description("Intersection refinement samples used by relief modes");
     }
     if (uses_shadow) {
-      b.add_input<decl::Vector>("Sun Direction (World Space)")
+      b.add_input<decl::Vector>("Sun Direction (World Space)"_ustr)
           .default_value({0.0f, 0.0f, 1.0f})
           .description("Single directional light direction in world space for parallax shadow");
     }
   }
-  b.add_output<decl::Vector>("UV").description("Parallax-adjusted UV coordinates");
-  b.add_output<decl::Vector>("Normal").description("Normal estimated from the parallax height source");
+  b.add_output<decl::Vector>("UV"_ustr).description("Parallax-adjusted UV coordinates");
+  b.add_output<decl::Vector>("Normal"_ustr).description("Normal estimated from the parallax height source");
   if (uses_shadow) {
-    b.add_output<decl::Float>("Shadow").description("Directional parallax shadow factor");
+    b.add_output<decl::Float>("Shadow"_ustr).description("Directional parallax shadow factor");
   }
 }
 
@@ -190,7 +190,7 @@ static const bNodeSocket *find_node_input_socket_by_identifier(const bNode &node
 static const bNodeSocket *find_closure_output_socket_by_name(const bNode &node,
                                                              const StringRef name)
 {
-  if (!node.is_type("NodeClosureOutput") || node.storage == nullptr) {
+  if (!node.is_type("NodeClosureOutput"_ustr) || node.storage == nullptr) {
     return nullptr;
   }
 
@@ -238,7 +238,7 @@ static const bNodeLink *find_any_direct_link(const bNodeSocket &socket)
 static bool closure_output_has_required_height_signature(const bNode &closure_output_node,
                                                          std::string &r_error)
 {
-  if (!closure_output_node.is_type("NodeClosureOutput") || closure_output_node.storage == nullptr) {
+  if (!closure_output_node.is_type("NodeClosureOutput"_ustr) || closure_output_node.storage == nullptr) {
     r_error = "Height Source must be a Closure Output or Image to Closure node";
     return false;
   }
@@ -350,7 +350,7 @@ static GPUSamplerState sampler_state_from_image_to_closure_node(const bNode &nod
   }
 
   if (image_to_closure_interpolation(node) != SHD_INTERP_CLOSEST) {
-    sampler_state.filtering = GPU_SAMPLER_FILTERING_ANISOTROPIC |
+    sampler_state.filtering = GPU_SAMPLER_FILTERING_ANISOTROPIC_ENABLE |
                               GPU_SAMPLER_FILTERING_LINEAR | GPU_SAMPLER_FILTERING_MIPMAP;
   }
 
@@ -534,7 +534,7 @@ static bool build_image_height_helper(GPUMaterial *mat,
                                       GPUNodeStack *height_stack)
 {
   bNode *image_node = height_link.fromnode;
-  if (image_node == nullptr || !image_node->is_type("ShaderNodeImageToClosure") ||
+  if (image_node == nullptr || !image_node->is_type("ShaderNodeImageToClosure"_ustr) ||
       image_to_closure_texture_type(*image_node) != IMA_IMAGE_TO_CLOSURE_TEXTURE_2D)
   {
     return false;
@@ -1071,7 +1071,7 @@ static int gpu_shader_parallax(GPUMaterial *mat,
 
   GPUNodeStack *height_stack = find_input_stack_by_identifier(*node, in, "Height Source");
   HeightHelper height_helper;
-  if (height_link->fromnode->is_type("ShaderNodeImageToClosure")) {
+  if (height_link->fromnode->is_type("ShaderNodeImageToClosure"_ustr)) {
     if (!build_image_height_helper(mat, *height_link, helper_name, height_helper, height_stack)) {
       CLOG_WARN(&LOG,
                 "Parallax node '%s' requires a 2D Image to Closure source or a valid Closure "
@@ -1081,7 +1081,7 @@ static int gpu_shader_parallax(GPUMaterial *mat,
       return 1;
     }
   }
-  else if (height_link->fromnode->is_type("NodeClosureOutput")) {
+  else if (height_link->fromnode->is_type("NodeClosureOutput"_ustr)) {
     std::string error;
     if (!build_closure_output_height_helper(mat,
                                             *node,
@@ -1131,7 +1131,7 @@ static int gpu_shader_parallax(GPUMaterial *mat,
 static bool node_insert_link(bke::NodeInsertLinkParams &params)
 {
   if (params.link.tonode != &params.node || params.link.tosock->type != SOCK_CLOSURE ||
-      params.link.fromnode == nullptr || !params.link.fromnode->is_type("NodeClosureOutput"))
+      params.link.fromnode == nullptr || !params.link.fromnode->is_type("NodeClosureOutput"_ustr))
   {
     return true;
   }
@@ -1166,7 +1166,7 @@ void register_node_type_sh_parallax()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeParallax", SH_NODE_PARALLAX);
+  sh_node_type_base(&ntype, "ShaderNodeParallax"_ustr, SH_NODE_PARALLAX);
   ntype.ui_name = "Parallax";
   ntype.ui_description = "Offset UV coordinates from a closure-backed height source";
   ntype.enum_name_legacy = "PARALLAX";
@@ -1175,7 +1175,8 @@ void register_node_type_sh_parallax()
   ntype.draw_buttons = file_ns::node_layout;
   ntype.initfunc = file_ns::node_init;
   ntype.add_ui_poll = object_or_npr_eevee_shader_nodes_poll;
-  bke::node_type_size_preset(ntype, bke::eNodeSizePreset::Middle);
+  ntype.default_width = 150;
+  ntype.minwidth = 120;
   bke::node_type_storage(
       ntype, "NodeShaderParallax", node_free_standard_storage, node_copy_standard_storage);
   ntype.blend_data_read_storage_content = file_ns::node_blend_read_storage;

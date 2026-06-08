@@ -18,9 +18,9 @@ namespace nodes::node_shader_scene_color_cc {
 static void node_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
-  b.add_input<decl::Vector>("Vector").hide_value();
-  b.add_output<decl::Color>("Color");
-  b.add_output<decl::Float>("Alpha");
+  b.add_input<decl::Vector>("Vector"_ustr).hide_value();
+  b.add_output<decl::Color>("Color"_ustr);
+  b.add_output<decl::Float>("Alpha"_ustr);
 }
 
 static void node_shader_buts(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
@@ -60,7 +60,7 @@ void register_node_type_sh_scene_color()
 
   static bke::bNodeType ntype;
 
-  common_node_type_base(&ntype, "ShaderNodeSceneColor", SH_NODE_SCENE_COLOR);
+  common_node_type_base(&ntype, "ShaderNodeSceneColor"_ustr, SH_NODE_SCENE_COLOR);
   ntype.ui_name = "Scene Color";
   ntype.ui_description =
       "Read Eevee scene color, depth, normal, or position for filter materials";

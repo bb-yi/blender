@@ -1636,6 +1636,7 @@ void ShadowModule::ShadowView::compute_visibility(ObjectBoundsBuf &bounds,
 
 void ShadowModule::set_view(View &view, int2 extent, const TelemetryShadowContext context)
 {
+  active_shadow_context_ = context;
   data_.film_pixel_radius = screen_pixel_radius(view.wininv(), view.is_persp(), extent);
 }
 
@@ -1794,7 +1795,7 @@ void ShadowModule::render(View &view, int2 extent)
 
   if (record_shadow_context) {
     inst_.telemetry.shadow_context_add(
-        context, BLI_time_now_seconds() - context_start_time, loop_count);
+        active_shadow_context_, BLI_time_now_seconds() - context_start_time, loop_count);
   }
 
   if (prev_fb) {

@@ -42,7 +42,7 @@ namespace nodes::node_shader_script_expression_cc {
 
 NODE_STORAGE_FUNCS(NodeShaderScriptExpression)
 
-static const char *script_expr_output_identifier = "Result";
+static const UString script_expr_output_identifier = "Result"_ustr;
 
 static bool socket_type_supported(const eNodeSocketDatatype socket_type)
 {
@@ -386,8 +386,8 @@ static void node_declare(NodeDeclarationBuilder &b)
   const bNode *node = b.node_or_null();
   const bNodeTree *tree = b.tree_or_null();
   if (!node || !tree || !node->storage) {
-    PanelDeclarationBuilder &expression_panel = b.add_panel("Expression", 0);
-    expression_panel.add_output<decl::Float>("Result", script_expr_output_identifier);
+    PanelDeclarationBuilder &expression_panel = b.add_panel("Expression"_ustr, 0);
+    expression_panel.add_output<decl::Float>("Result"_ustr, script_expr_output_identifier);
     expression_panel.add_layout([](ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr) {
       draw_expression_settings(layout, ptr);
     });
@@ -395,26 +395,26 @@ static void node_declare(NodeDeclarationBuilder &b)
   }
 
   const NodeShaderScriptExpression &storage = node_storage(*node);
-  PanelDeclarationBuilder &expression_panel = b.add_panel("Expression", 0);
+  PanelDeclarationBuilder &expression_panel = b.add_panel("Expression"_ustr, 0);
   expression_panel.add_output(safe_socket_type(storage.output_socket_type),
-                              "Result",
+                              "Result"_ustr,
                               script_expr_output_identifier);
   expression_panel.add_layout([](ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr) {
     draw_expression_settings(layout, ptr);
   });
 
-  PanelDeclarationBuilder &variables_panel = b.add_panel("Variables", 1).default_closed(true);
+  PanelDeclarationBuilder &variables_panel = b.add_panel("Variables"_ustr, 1).default_closed(true);
   variables_panel.add_layout([](ui::Layout &layout, bContext *C, PointerRNA *ptr) {
     draw_variables_settings(layout, C, ptr);
   });
 
-  PanelDeclarationBuilder &inputs_panel = b.add_panel("Inputs", 2).default_closed(false);
+  PanelDeclarationBuilder &inputs_panel = b.add_panel("Inputs"_ustr, 2).default_closed(false);
   for (const NodeShaderScriptExpressionVariable &item : storage.variables_span()) {
     const eNodeSocketDatatype socket_type = safe_socket_type(item.socket_type);
     const StringRefNull name = item.name ? item.name : "";
     const std::string identifier = ShScriptExpressionVariablesAccessor::socket_identifier_for_item(
         item);
-    auto &input_decl = inputs_panel.add_input(socket_type, name, identifier)
+    auto &input_decl = inputs_panel.add_input(socket_type, UString(name), UString(identifier))
                            .socket_name_ptr(&tree->id,
                                             *ShScriptExpressionVariablesAccessor::item_srna,
                                             &item,
@@ -673,7 +673,7 @@ std::string ShScriptExpressionVariablesAccessor::socket_identifier_for_item(cons
 void ShScriptExpressionVariablesAccessor::blend_write_item(BlendWriter *writer,
                                                            const ItemT &item)
 {
-  BLO_write_string(writer, item.name);
+  writer->write_string(item.name);
 }
 
 void ShScriptExpressionVariablesAccessor::blend_read_data_item(BlendDataReader *reader,
@@ -700,7 +700,7 @@ void register_node_type_sh_script_expression()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeScriptExpression", SH_NODE_SCRIPT_EXPRESSION);
+  sh_node_type_base(&ntype, "ShaderNodeScriptExpression"_ustr, SH_NODE_SCRIPT_EXPRESSION);
   ntype.ui_name = "GLSL Script Expression";
   ntype.ui_description = "Evaluate a single GLSL expression with manually defined inputs";
   ntype.enum_name_legacy = "SCRIPT_EXPRESSION";
@@ -715,7 +715,8 @@ void register_node_type_sh_script_expression()
   ntype.register_operators = file_ns::node_operators;
   ntype.blend_write_storage_content = file_ns::node_blend_write;
   ntype.blend_data_read_storage_content = file_ns::node_blend_read;
-  bke::node_type_size_preset(ntype, bke::eNodeSizePreset::Large);
+  ntype.default_width = bke::NodeWidth::_240;
+  ntype.minwidth = bke::NodeWidth::_140;
   bke::node_type_storage(
       ntype, "NodeShaderScriptExpression", file_ns::node_free_storage, file_ns::node_copy_storage);
 

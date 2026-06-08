@@ -6,14 +6,17 @@
 
 #include "infos/eevee_geom_infos.hh"
 
+#include "draw_model.bsl.hh"
+#include "draw_view.bsl.hh"
 #include "eevee_lightprobe_shared.hh" /* IWYU pragma: export: Needed for resource declaration. */
+#include "eevee_pipeline.bsl.hh"
 #include "eevee_sampling_shared.hh"   /* IWYU pragma: export: Needed for resource declaration. */
 #include "eevee_shadow_shared.hh"
 #include "eevee_uniform.bsl.hh"
 #include "gpu_shader_codegen_lib.glsl"
 #include "gpu_shader_math_base_lib.glsl"
 #include "gpu_shader_math_vector_safe_lib.glsl"
-#include "eevee_reverse_z_lib.glsl"
+#include "eevee_reverse_z_lib.bsl.hh"
 
 #define MAT_SURFACE_CULL_NONE 0
 #define MAT_SURFACE_CULL_BACK 1
@@ -38,6 +41,19 @@ struct GeomShadow {
 };
 
 }  // namespace eevee
+
+ViewMatrices surface_view_matrices_get()
+{
+  [[resource_table]] const eevee::PipelineConstants &pipe = resource_table_get(
+      eevee::PipelineConstants);
+  [[resource_table]] const draw::View &views = resource_table_get(draw::View);
+  auto &interp_flat = interface_get(eevee_geom_iface_info, interp_flat);
+  draw::ID id{interp_flat.resource_id_raw};
+  if (pipe.is_shadow_pipe) {
+    return views.get(id.view_id<64>());
+  }
+  return views.get(id.view_id<1>());
+}
 
 #if defined(USE_BARYCENTRICS) && defined(GPU_FRAGMENT_SHADER) && defined(MAT_GEOM_MESH)
 float3 barycentric_distances_get()
@@ -146,7 +162,7 @@ void init_interface()
 void init_globals()
 {
   [[resource_table]] const eevee::Uniform &uni = resource_table_get(eevee::Uniform);
-  const ViewMatrices view = view_matrices_get();
+  const ViewMatrices view = surface_view_matrices_get();
 #  if defined(GPU_FRAGMENT_SHADER)
   init_globals(uni, view, gl_FrontFacing);
 #  else
@@ -163,7 +179,7 @@ bool material_depth_offset_is_zero(float depth_offset)
 
 float material_depth_offset_view_z(float depth_offset)
 {
-  const ViewMatrices view = view_matrices_get();
+  const ViewMatrices view = surface_view_matrices_get();
   float vP_z = view.depth_screen_to_view(reverse_z::read(gl_FragCoord.z));
   return vP_z + depth_offset;
 }
@@ -173,7 +189,7 @@ bool material_depth_offset_is_clipped(float depth_offset)
   if (material_depth_offset_is_zero(depth_offset)) {
     return false;
   }
-  const ViewMatrices view = view_matrices_get();
+  const ViewMatrices view = surface_view_matrices_get();
   float vP_z = material_depth_offset_view_z(depth_offset);
   return vP_z > view.near() || vP_z < view.far();
 }
@@ -183,7 +199,7 @@ float material_depth_offset_frag_depth(float depth_offset)
   if (material_depth_offset_is_zero(depth_offset)) {
     return gl_FragCoord.z;
   }
-  const ViewMatrices view = view_matrices_get();
+  const ViewMatrices view = surface_view_matrices_get();
   float vP_z = material_depth_offset_view_z(depth_offset);
   return saturate(reverse_z::read(view.depth_view_to_screen(vP_z)));
 }
@@ -196,7 +212,7 @@ float material_depth_offset_screen_depth(float depth_offset)
 float3 material_depth_offset_world_position_from_depth(float screen_depth)
 {
   [[resource_table]] const eevee::Uniform &uni = resource_table_get(eevee::Uniform);
-  const ViewMatrices view = view_matrices_get();
+  const ViewMatrices view = surface_view_matrices_get();
   float2 screen_uv = gl_FragCoord.xy * uni.uniform_buf.volumes.main_view_extent_inv;
   return view.point_screen_to_world(float3(screen_uv, screen_depth));
 }
@@ -211,7 +227,7 @@ float3 material_depth_offset_apply_nodetree_position(float depth_offset)
 {
   if (!material_depth_offset_is_zero(depth_offset)) {
     g_data.P = material_depth_offset_world_position(depth_offset);
-    g_data.ray_length = distance(g_data.P, view_matrices_get().position());
+    g_data.ray_length = distance(g_data.P, surface_view_matrices_get().position());
   }
   return g_data.P;
 }

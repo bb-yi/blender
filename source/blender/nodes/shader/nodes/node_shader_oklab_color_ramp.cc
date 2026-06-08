@@ -148,14 +148,14 @@ static void oklab_colorband_evaluate(const ColorBand *coba, float in, ColorGeome
 static void sh_node_oklab_valtorgb_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
-  b.add_input<decl::Float>("Factor", "Fac")
+  b.add_input<decl::Float>("Factor"_ustr, "Fac"_ustr)
       .default_value(0.5f)
       .min(0.0f)
       .max(1.0f)
       .subtype(PROP_FACTOR)
       .description("The value used to map onto the OKLab color gradient");
-  b.add_output<decl::Color>("Color");
-  b.add_output<decl::Float>("Alpha");
+  b.add_output<decl::Color>("Color"_ustr);
+  b.add_output<decl::Float>("Alpha"_ustr);
 }
 
 static void node_shader_init_oklab_valtorgb(bNodeTree * /*ntree*/, bNode *node)
@@ -201,7 +201,7 @@ static int gpu_shader_oklab_valtorgb(GPUMaterial *mat,
   const int size = CM_TABLE + 1;
   float *array = MEM_new_array_uninitialized<float>(size * 4, "OKLab Colorband Array");
 
-  const char original_ipotype = coba->ipotype;
+  const eColorBand_Interp original_ipotype = coba->ipotype;
   coba->ipotype = COLBAND_INTERP_EASE;
 
   for (int i = 0; i < size; i++) {
@@ -284,14 +284,15 @@ void register_node_type_sh_oklab_color_ramp()
 
   static bke::bNodeType ntype;
 
-  common_node_type_base(&ntype, "ShaderNodeOKLabColorRamp", SH_NODE_OKLAB_COLOR_RAMP);
+  common_node_type_base(&ntype, "ShaderNodeOKLabColorRamp"_ustr, SH_NODE_OKLAB_COLOR_RAMP);
   ntype.ui_name = "OKLab Color Ramp";
   ntype.ui_description = "Map values to colors using an OKLab color gradient";
   ntype.enum_name_legacy = "OKLAB_COLOR_RAMP";
   ntype.nclass = NODE_CLASS_CONVERTER;
   ntype.declare = file_ns::sh_node_oklab_valtorgb_declare;
   ntype.initfunc = file_ns::node_shader_init_oklab_valtorgb;
-  bke::node_type_size_preset(ntype, bke::eNodeSizePreset::Large);
+  ntype.default_width = bke::NodeWidth::_240;
+  ntype.minwidth = bke::NodeWidth::_140;
   bke::node_type_storage(
       ntype, "ColorBand", node_free_standard_storage, node_copy_standard_storage);
   ntype.gpu_fn = file_ns::gpu_shader_oklab_valtorgb;

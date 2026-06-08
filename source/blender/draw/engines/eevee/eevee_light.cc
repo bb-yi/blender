@@ -85,7 +85,7 @@ static bool light_nodetree_output_input_is_default_info_link(const bNodeTree &no
                                                              const char *from_identifier,
                                                              const bNode *&r_info_node)
 {
-  const bNodeSocket *to_socket = bke::node_find_socket(output, SOCK_IN, to_identifier);
+  const bNodeSocket *to_socket = bke::node_find_socket(output, SOCK_IN, UString(to_identifier));
   if (to_socket == nullptr || (to_socket->flag & SOCK_UNAVAIL)) {
     return false;
   }
@@ -105,7 +105,7 @@ static bool light_nodetree_output_input_is_default_info_link(const bNodeTree &no
     return false;
   }
 
-  const bNodeSocket *from_socket = bke::node_find_socket(info, SOCK_OUT, from_identifier);
+  const bNodeSocket *from_socket = bke::node_find_socket(info, SOCK_OUT, UString(from_identifier));
   if (from_socket == nullptr || (from_socket->flag & SOCK_UNAVAIL) ||
       link->fromsock != from_socket)
   {
@@ -297,7 +297,8 @@ static LightShaderDependency light_nodetree_eevee_light_shader_dependency_get(
 
   LightShaderDependency result = LightShaderDependency::Uniform;
   for (const StringRefNull input_identifier : {"Color", "Intensity", "Attenuation"}) {
-    const bNodeSocket *input_socket = bke::node_find_socket(*output, SOCK_IN, input_identifier);
+    const bNodeSocket *input_socket = bke::node_find_socket(
+        *output, SOCK_IN, UString(input_identifier));
     if (input_socket == nullptr || (input_socket->flag & SOCK_UNAVAIL)) {
       return LightShaderDependency::PointDependent;
     }
@@ -829,7 +830,7 @@ void LightModule::sync_light(const ObjectRef &ob_ref)
     /* Directional shadow sync stores view-dependent clipmap offsets in the matrix translation.
      * Restore the source object transform before exposing it to light shader nodes this frame. */
     light.object_to_world = light_object_to_world_normalized_get(ob_ref.object_to_world());
-    light.sun().direction = light_z_axis(light);
+    light.sun().direction = light.z_axis();
   }
   light.light_shader_index = -1;
   light.front_light_shader_index = -1;
@@ -936,7 +937,7 @@ void LightModule::update_shadow_light_costs()
       continue;
     }
 
-    const int tilemap_max = light_tilemap_max_get(light);
+    const int tilemap_max = light.tilemap_max_get();
     const int tilemaps = max_ii(0, tilemap_max - light.tilemap_index + 1);
     if (tilemaps == 0) {
       continue;
@@ -1696,7 +1697,7 @@ void LightModule::set_view(View &view, const int2 extent)
         light.object_to_world = inst_.world.sunlight[src_index].object_to_world;
 
         LightSunData sun_data = light.sun();
-        sun_data.direction = transform_z_axis(inst_.world.sunlight[src_index].object_to_world);
+        sun_data.direction = inst_.world.sunlight[src_index].object_to_world.z_axis();
         light.sun() = sun_data;
       }
       return light;

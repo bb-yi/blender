@@ -42,7 +42,7 @@ static bool material_output_has_depth_offset(bNodeTree *nodetree)
   if (output == nullptr) {
     return false;
   }
-  const bNodeSocket *depth_offset = output->input_by_identifier("Depth Offset");
+  const bNodeSocket *depth_offset = output->input_by_identifier("Depth Offset"_ustr);
   return depth_offset != nullptr && depth_offset->is_available() &&
          depth_offset->is_directly_linked();
 }
@@ -468,8 +468,6 @@ ShaderGroups ShaderModule::static_shaders_load(const ShaderGroups request_bits,
                                        SHADOW_PAGE_MASK,
                                        SHADOW_MASK_FILTER,
                                        SHADOW_MASK_FILTER_LAYERED,
-                                       SHADOW_PAGE_TILE_CLEAR,
-                                       SHADOW_PAGE_TILE_STORE,
                                        SHADOW_TILEMAP_AMEND,
                                        SHADOW_TILEMAP_BOUNDS,
                                        SHADOW_TILEMAP_FINALIZE,

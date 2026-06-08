@@ -224,6 +224,7 @@ EvalCtx<true> init_from_reflect_ctx(EvalCtx<false> ctx)
 struct LightEvalIterator {
   [[resource_table]] srt_t<LightEvalData> inner;
   [[resource_table]] srt_t<LightRenderData> light_data;
+  [[resource_table]] srt_t<LightShaderEvalData> light_shader_eval_data;
 
   void eval_reflection(light::EvalCtx<false> &ctx, float vPz)
   {

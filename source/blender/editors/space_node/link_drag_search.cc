@@ -283,8 +283,7 @@ static void gather_socket_link_operations(const bContext &C,
     if (node_type->poll && !node_type->poll(node_type, &node_tree, &disabled_hint)) {
       continue;
     }
-    if (is_light_shader &&
-        !nodes::light_eevee_shader_node_type_supported(StringRefNull(node_type->idname)))
+    if (is_light_shader && !nodes::light_eevee_shader_node_type_supported(node_type->idname.ref()))
     {
       continue;
     }

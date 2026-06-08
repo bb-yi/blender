@@ -802,7 +802,7 @@ float sdf_alteration(float size, float dist, float lw, float invert)
   return (invert > 0.0) ? -dist : dist;
 }
 
-float sdf_dimension(float w, inout float roundness)
+float sdf_dimension(float w, float &roundness)
 {
   float sw = sign(w);
   w = abs(w);
@@ -812,7 +812,7 @@ float sdf_dimension(float w, inout float roundness)
   return dim * sw;
 }
 
-float2 sdf_dimension(float w, float d, inout float roundness)
+float2 sdf_dimension(float w, float d, float &roundness)
 {
   float sw = sign(w);
   float sd = sign(d);
@@ -824,7 +824,7 @@ float2 sdf_dimension(float w, float d, inout float roundness)
   return dim * float2(sw, sd);
 }
 
-float3 sdf_dimension(float w, float d, float h, inout float roundness)
+float3 sdf_dimension(float w, float d, float h, float &roundness)
 {
   float sw = sign(w);
   float sd = sign(d);

@@ -37,13 +37,13 @@ static bool target_socket_evaluates_closure(const SocketInContext &socket)
 static bool is_glsl_function_sample2d_input(const SocketInContext &socket)
 {
   return socket->is_input() && socket->type == SOCK_CLOSURE &&
-         socket.owner_node()->is_type("ShaderNodeGLSLFunction");
+         socket.owner_node()->is_type("ShaderNodeGLSLFunction"_ustr);
 }
 
 static bool is_parallax_height_source_input(const SocketInContext &socket)
 {
   return socket->is_input() && socket->type == SOCK_CLOSURE &&
-         socket.owner_node()->is_type("ShaderNodeParallax");
+         socket.owner_node()->is_type("ShaderNodeParallax"_ustr);
 }
 
 static bool is_closure_zone_output_socket(const SocketInContext &socket)

@@ -15,9 +15,9 @@ namespace nodes::node_shader_screenspace_info_cc {
 static void node_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
-  b.add_input<decl::Vector>("View Position").hide_value();
-  b.add_output<decl::Color>("Scene Color");
-  b.add_output<decl::Float>("Scene Depth");
+  b.add_input<decl::Vector>("View Position"_ustr).hide_value();
+  b.add_output<decl::Color>("Scene Color"_ustr);
+  b.add_output<decl::Float>("Scene Depth"_ustr);
 }
 
 static int node_shader_gpu_screenspace_info(GPUMaterial *mat,
@@ -41,7 +41,7 @@ void register_node_type_sh_screenspace_info()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeScreenspaceInfo", SH_NODE_SCREENSPACE_INFO);
+  sh_node_type_base(&ntype, "ShaderNodeScreenspaceInfo"_ustr, SH_NODE_SCREENSPACE_INFO);
   ntype.ui_name = "Screenspace Info";
   ntype.ui_description = "Sample the Eevee scene color and depth behind the current layer";
   ntype.enum_name_legacy = "SCREENSPACEINFO";

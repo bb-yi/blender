@@ -64,12 +64,12 @@ static void node_declare(NodeDeclarationBuilder &b)
 {
   b.use_custom_socket_order();
   b.allow_any_socket_order();
-  b.add_input<decl::Vector>("Normal").hide_value();
-  b.add_output<decl::Color>("Color");
-  b.add_output<decl::Vector>("Direction");
-  b.add_output<decl::Float>("Distance");
-  b.add_output<decl::Float>("Attenuation");
-  b.add_output<decl::Float>("Shadow Mask");
+  b.add_input<decl::Vector>("Normal"_ustr).hide_value();
+  b.add_output<decl::Color>("Color"_ustr);
+  b.add_output<decl::Vector>("Direction"_ustr);
+  b.add_output<decl::Float>("Distance"_ustr);
+  b.add_output<decl::Float>("Attenuation"_ustr);
+  b.add_output<decl::Float>("Shadow Mask"_ustr);
 
   const bNode *node = b.node_or_null();
   const bNodeTree *tree = b.tree_or_null();
@@ -86,27 +86,29 @@ static void node_declare(NodeDeclarationBuilder &b)
         const std::string identifier = ShForeachLightItemsAccessor::socket_identifier_for_item(
             item);
         if (socket_type == SOCK_RGBA) {
-          auto &input_decl = b.add_input<decl::Color>(name, identifier)
+          auto &input_decl = b.add_input<decl::Color>(UString(name), UString(identifier))
                                  .default_value(ColorGeometry4f(0.0f, 0.0f, 0.0f, 1.0f))
                                  .socket_name_ptr(
                                      &tree->id, *ShForeachLightItemsAccessor::item_srna, &item, "name");
-          auto &output_decl = b.add_output(socket_type, name, identifier).align_with_previous();
+          auto &output_decl = b.add_output(socket_type, UString(name), UString(identifier))
+                                  .align_with_previous();
           input_decl.structure_type(StructureType::Dynamic);
           output_decl.structure_type(StructureType::Dynamic);
         }
         else {
-          auto &input_decl = b.add_input(socket_type, name, identifier)
+          auto &input_decl = b.add_input(socket_type, UString(name), UString(identifier))
                                  .socket_name_ptr(
                                      &tree->id, *ShForeachLightItemsAccessor::item_srna, &item, "name");
-          auto &output_decl = b.add_output(socket_type, name, identifier).align_with_previous();
+          auto &output_decl = b.add_output(socket_type, UString(name), UString(identifier))
+                                  .align_with_previous();
           input_decl.structure_type(StructureType::Dynamic);
           output_decl.structure_type(StructureType::Dynamic);
         }
       }
     }
   }
-  b.add_input<decl::Extend>("", "__extend__").structure_type(StructureType::Dynamic);
-  b.add_output<decl::Extend>("", "__extend__")
+  b.add_input<decl::Extend>(""_ustr, "__extend__"_ustr).structure_type(StructureType::Dynamic);
+  b.add_output<decl::Extend>(""_ustr, "__extend__"_ustr)
       .structure_type(StructureType::Dynamic)
       .align_with_previous();
 }
@@ -153,7 +155,7 @@ static int node_shader_fn(GPUMaterial *mat,
 static void register_node()
 {
   static bke::bNodeType ntype;
-  sh_node_type_base(&ntype, "ShaderNodeForeachLightInput", SH_NODE_FOREACH_LIGHT_INPUT);
+  sh_node_type_base(&ntype, "ShaderNodeForeachLightInput"_ustr, SH_NODE_FOREACH_LIGHT_INPUT);
   ntype.enum_name_legacy = "FOREACH_LIGHT_INPUT";
   ntype.ui_name = "For Each Light Input";
   ntype.nclass = NODE_CLASS_INTERFACE;
@@ -190,17 +192,18 @@ static void node_declare(NodeDeclarationBuilder &b)
       const eNodeSocketDatatype socket_type = eNodeSocketDatatype(item.socket_type);
       const StringRefNull name = item.name ? item.name : "";
       const std::string identifier = ShForeachLightItemsAccessor::socket_identifier_for_item(item);
-      auto &input_decl = b.add_input(socket_type, name, identifier)
+      auto &input_decl = b.add_input(socket_type, UString(name), UString(identifier))
                              .socket_name_ptr(
                                  &tree->id, *ShForeachLightItemsAccessor::item_srna, &item, "name")
                              .hide_value();
-      auto &output_decl = b.add_output(socket_type, name, identifier).align_with_previous();
+      auto &output_decl = b.add_output(socket_type, UString(name), UString(identifier))
+                              .align_with_previous();
       input_decl.structure_type(StructureType::Dynamic);
       output_decl.structure_type(StructureType::Dynamic);
     }
   }
-  b.add_input<decl::Extend>("", "__extend__").structure_type(StructureType::Dynamic);
-  b.add_output<decl::Extend>("", "__extend__")
+  b.add_input<decl::Extend>(""_ustr, "__extend__"_ustr).structure_type(StructureType::Dynamic);
+  b.add_output<decl::Extend>(""_ustr, "__extend__"_ustr)
       .structure_type(StructureType::Dynamic)
       .align_with_previous();
 }
@@ -265,7 +268,7 @@ static void node_blend_read(bNodeTree & /*tree*/, bNode &node, BlendDataReader &
 static void register_node()
 {
   static bke::bNodeType ntype;
-  sh_node_type_base(&ntype, "ShaderNodeForeachLightOutput", SH_NODE_FOREACH_LIGHT_OUTPUT);
+  sh_node_type_base(&ntype, "ShaderNodeForeachLightOutput"_ustr, SH_NODE_FOREACH_LIGHT_OUTPUT);
   ntype.enum_name_legacy = "FOREACH_LIGHT_OUTPUT";
   ntype.ui_name = "For Each Light Output";
   ntype.nclass = NODE_CLASS_INTERFACE;
@@ -296,7 +299,7 @@ int ShForeachLightItemsAccessor::node_type = SH_NODE_FOREACH_LIGHT_OUTPUT;
 
 void ShForeachLightItemsAccessor::blend_write_item(BlendWriter *writer, const ItemT &item)
 {
-  BLO_write_string(writer, item.name);
+  writer->write_string(item.name);
 }
 
 void ShForeachLightItemsAccessor::blend_read_data_item(BlendDataReader *reader, ItemT &item)

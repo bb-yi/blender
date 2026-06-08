@@ -8,6 +8,7 @@
   * An instance contains all structures needed to do a complete render.
   */
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <sstream>
@@ -478,72 +479,58 @@ namespace blender::eevee
   void Instance::object_sync(ObjectRef& ob_ref, Manager& /*manager*/)
   {
     ScopedTelemetrySample telemetry_sample(telemetry, TelemetryStageId::SyncObjects);
-    if (skip_render_)
-    {
+    if (skip_render_) {
       return;
     }
 
-    Object* ob = ob_ref.object;
+    Object *ob = ob_ref.object;
     const bool is_renderable_type = ELEM(ob->type,
-      OB_CURVES,
-      OB_GREASE_PENCIL,
-      OB_MESH,
-      OB_POINTCLOUD,
-      OB_VOLUME,
-      OB_LAMP,
-      OB_LIGHTPROBE);
+                                         OB_CURVES,
+                                         OB_GREASE_PENCIL,
+                                         OB_MESH,
+                                         OB_POINTCLOUD,
+                                         OB_VOLUME,
+                                         OB_LAMP,
+                                         OB_LIGHTPROBE);
     const int ob_visibility = DRW_object_visibility_in_active_context(ob);
     const bool partsys_is_visible = (ob_visibility & OB_VISIBLE_PARTICLES) != 0 &&
-      (ob->type == OB_MESH);
+                                    (ob->type == OB_MESH);
     const bool object_is_visible = DRW_object_is_renderable(ob) &&
-      (ob_visibility & OB_VISIBLE_SELF) != 0;
+                                   (ob_visibility & OB_VISIBLE_SELF) != 0;
 
-    if (!is_renderable_type || (!partsys_is_visible && !object_is_visible))
-    {
+    if (!is_renderable_type || (!partsys_is_visible && !object_is_visible)) {
       return;
     }
 
-    ObjectHandle& ob_handle = sync.sync_object(ob_ref);
-
-    if (partsys_is_visible && ob != draw_ctx->object_edit)
-    {
-      auto sync_hair =
-        [&](ObjectHandle hair_handle, ModifierData& md, ParticleSystem& particle_sys)
-        {
-          ResourceHandleRange _res_handle = manager->resource_handle_for_psys(
-            ob_ref, ob->object_to_world());
-          sync.sync_curves(ob, hair_handle, ob_ref, _res_handle, &md, &particle_sys);
-        };
-      foreach_hair_particle_handle(*this, ob_ref, ob_handle, sync_hair);
+    if (partsys_is_visible && ob != draw_ctx->object_edit) {
+      auto sync_hair = [&](const HairParticleInfo &info) { sync.sync_curves(ob_ref, &info); };
+      foreach_hair_particle(*this, ob_ref, sync_hair);
     }
 
-    if (object_is_visible)
-    {
-      switch (ob->type)
-      {
-      case OB_LAMP:
-        lights.sync_light(ob, ob_handle);
-        break;
-      case OB_MESH:
-        if (!sync.sync_sculpt(ob, ob_handle, ob_ref))
-        {
-          sync.sync_mesh(ob, ob_handle, ob_ref);
-        }
-        break;
-      case OB_POINTCLOUD:
-        sync.sync_pointcloud(ob, ob_handle, ob_ref);
-        break;
-      case OB_VOLUME:
-        sync.sync_volume(ob, ob_handle, ob_ref);
-        break;
-      case OB_CURVES:
-        sync.sync_curves(ob, ob_handle, ob_ref);
-        break;
-      case OB_LIGHTPROBE:
-        light_probes.sync_probe(ob, ob_handle);
-        break;
-      default:
-        break;
+    if (object_is_visible) {
+      switch (ob->type) {
+        case OB_LAMP:
+          lights.sync_light(ob_ref);
+          break;
+        case OB_MESH:
+          if (!sync.sync_sculpt(ob_ref)) {
+            sync.sync_mesh(ob_ref);
+          }
+          break;
+        case OB_POINTCLOUD:
+          sync.sync_pointcloud(ob_ref);
+          break;
+        case OB_VOLUME:
+          sync.sync_volume(ob_ref);
+          break;
+        case OB_CURVES:
+          sync.sync_curves(ob_ref);
+          break;
+        case OB_LIGHTPROBE:
+          light_probes.sync_probe(ob_ref);
+          break;
+        default:
+          break;
       }
     }
   }
@@ -957,7 +944,7 @@ namespace blender::eevee
     {
       telemetry.maybe_end_viewport_frame();
       DefaultFramebufferList* dfbl = draw_ctx->viewport_framebuffer_list_get();
-      GPU_framebuffer_clear_color_depth(dfbl->default_fb, float4(0.0f), 1.0f);
+      GPU_framebuffer_clear_color_depth(dfbl->default_fb, double4(0.0), 1.0f);
       if (!is_loaded(needed_shaders & ~WORLD_SHADERS))
       {
         info_append_i18n("Compiling EEVEE engine shaders");
@@ -1293,7 +1280,7 @@ namespace blender::eevee
           /* Batch ray cast. Avoids too much overhead of the context switch. */
           int sample_count_in_batch = ceilf(time_budget_ms / max(0.1f, time_per_sample_ms_smooth));
           /* Avoid batching too many rays, keep system responsive in case of bad values. */
-          sample_count_in_batch = min_iii(32, sample_count_in_batch, remaining_samples);
+          sample_count_in_batch = std::min({32, sample_count_in_batch, remaining_samples});
 
           CLOG_INFO(&Instance::log, "IrradianceBake: Casting %d rays.", sample_count_in_batch);
 

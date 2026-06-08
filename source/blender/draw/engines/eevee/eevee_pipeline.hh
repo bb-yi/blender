@@ -209,10 +209,10 @@ class Prepass {
   Instance &inst_;
 
   PassMain pass_{"Prepass"};
-  PassMain::Sub *subs_[2 /*hide from raycast*/][2 /*double sided*/][2 /*moving*/][2 /*write id*/] =
-      {{{{nullptr}}}};
-  PassMain::Sub *setup_subs_[2 /*hide from raycast*/][2 /*double sided*/][2 /*moving*/]
-                            [2 /*write id*/] = {{{{nullptr}}}};
+  PassMain::Sub *subs_[2 /*hide from raycast*/][8 /*ztest*/][2 /*double sided*/][2 /*moving*/]
+                       [2 /*write id*/] = {{{{{nullptr}}}}};
+  PassMain::Sub *setup_subs_[2 /*hide from raycast*/][8 /*ztest*/][2 /*double sided*/]
+                            [2 /*moving*/][2 /*write id*/] = {{{{{nullptr}}}}};
 
   DRWState common_state_{};
   bool supports_motion_vectors_ = false;
@@ -283,6 +283,7 @@ class ForwardPipeline {
   PassMain outline_occlusion_ps_ = {"Forward.OutlineOcclusion"};
 
   PassSimple resolve_ps_ = {"Forward.Resolve"};
+  TextureFromPool resolve_input_tx_ = {"Forward.Resolve.Input"};
 
   bool has_opaque_ = false;
   bool has_transparent_ = false;

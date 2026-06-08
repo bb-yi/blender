@@ -15,11 +15,11 @@ namespace nodes::node_shader_scene_time_cc {
 static void node_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
-  b.add_input<decl::Float>("Scale").default_value(1.0f).min(1e-6f).max(1000000.0f);
-  b.add_output<decl::Float>("Frame");
-  b.add_output<decl::Float>("Seconds");
-  b.add_output<decl::Float>("Timeline");
-  b.add_output<decl::Float>("Scaled Frame");
+  b.add_input<decl::Float>("Scale"_ustr).default_value(1.0f).min(1e-6f).max(1000000.0f);
+  b.add_output<decl::Float>("Frame"_ustr);
+  b.add_output<decl::Float>("Seconds"_ustr);
+  b.add_output<decl::Float>("Timeline"_ustr);
+  b.add_output<decl::Float>("Scaled Frame"_ustr);
 }
 
 static int node_shader_gpu_scene_time(GPUMaterial *mat,
@@ -48,7 +48,7 @@ void register_node_type_sh_scene_time()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeSceneTime", SH_NODE_SCENE_TIME);
+  sh_node_type_base(&ntype, "ShaderNodeSceneTime"_ustr, SH_NODE_SCENE_TIME);
   ntype.ui_name = "Scene Time";
   ntype.ui_description =
       "Retrieve the current scene time in frames, seconds, normalized timeline, or scaled frames";

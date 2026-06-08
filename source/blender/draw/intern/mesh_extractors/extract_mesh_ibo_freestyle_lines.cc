@@ -6,6 +6,7 @@
  * \ingroup draw
  */
 
+#include "BLI_array.hh"
 #include "BLI_math_vector.hh"
 
 #include "BKE_attribute.hh"
@@ -84,7 +85,8 @@ static void extract_freestyle_lines_mesh(const MeshRenderData &mr, gpu::IndexBuf
     }
   }
 
-  const Span<int> loose_edges = mr.loose_edges;
+  Array<int, 64> loose_edges(mr.loose_edges.size());
+  mr.loose_edges.to_indices(loose_edges.as_mutable_span());
   for (const int loose_edge_index : loose_edges.index_range()) {
     const int edge = loose_edges[loose_edge_index];
     if (!used[edge] && mesh_edge_visible(mr, edge, false) && freestyle_edges[edge]) {
@@ -220,7 +222,8 @@ gpu::IndexBufPtr extract_freestyle_lines_subdiv(const DRWSubdivCache &subdiv_cac
 
   const int edges_per_edge = subdiv_edges_per_coarse_edge(subdiv_cache);
   const int loose_start = subdiv_cache.num_subdiv_loops;
-  const Span<int> loose_edges = mr.loose_edges;
+  Array<int, 64> loose_edges(mr.loose_edges.size());
+  mr.loose_edges.to_indices(loose_edges.as_mutable_span());
   for (const int loose_edge_index : loose_edges.index_range()) {
     const int edge = loose_edges[loose_edge_index];
     if (edge < 0 || edge >= mr.edges_num || !marked_edges[edge]) {

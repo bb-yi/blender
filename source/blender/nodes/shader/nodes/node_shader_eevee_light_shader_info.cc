@@ -10,14 +10,14 @@ namespace nodes::node_shader_eevee_light_shader_info_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_output<decl::Color>("Default Color");
-  b.add_output<decl::Float>("Default Intensity");
-  b.add_output<decl::Float>("Default Attenuation");
-  b.add_output<decl::Float>("Distance");
-  b.add_output<decl::Vector>("Light Space");
-  b.add_output<decl::Vector>("Direction");
-  b.add_output<decl::Vector>("World Position");
-  b.add_output<decl::Vector>("Rotation").description("XYZ Euler rotation of the light in radians");
+  b.add_output<decl::Color>("Default Color"_ustr);
+  b.add_output<decl::Float>("Default Intensity"_ustr);
+  b.add_output<decl::Float>("Default Attenuation"_ustr);
+  b.add_output<decl::Float>("Distance"_ustr);
+  b.add_output<decl::Vector>("Light Space"_ustr);
+  b.add_output<decl::Vector>("Direction"_ustr);
+  b.add_output<decl::Vector>("World Position"_ustr);
+  b.add_output<decl::Vector>("Rotation"_ustr).description("XYZ Euler rotation of the light in radians");
 }
 
 static int node_shader_gpu_eevee_light_shader_info(GPUMaterial *mat,
@@ -37,7 +37,7 @@ void register_node_type_sh_eevee_light_shader_info()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeEeveeLightShaderInfo", SH_NODE_EEVEE_LIGHT_SHADER_INFO);
+  sh_node_type_base(&ntype, "ShaderNodeEeveeLightShaderInfo"_ustr, SH_NODE_EEVEE_LIGHT_SHADER_INFO);
   ntype.enum_name_legacy = "EEVEE_LIGHT_SHADER_INFO";
   ntype.ui_name = "Light Shader Info";
   ntype.ui_description = "Read the current Eevee light shader evaluation inputs";

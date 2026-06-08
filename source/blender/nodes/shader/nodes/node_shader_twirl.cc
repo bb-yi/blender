@@ -21,16 +21,16 @@ namespace nodes::node_shader_twirl_cc {
 static void sh_node_twirl_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
-  b.add_input<decl::Vector>("Vector")
+  b.add_input<decl::Vector>("Vector"_ustr)
       .default_value(float3{0.0f, 0.0f, 0.0f})
       .description("Input vector to twist around the center");
-  b.add_input<decl::Vector>("Center")
+  b.add_input<decl::Vector>("Center"_ustr)
       .default_value(float3{0.5f, 0.5f, 0.0f})
       .description("Center point of the twirl");
-  b.add_input<decl::Float>("Amount")
+  b.add_input<decl::Float>("Amount"_ustr)
       .default_value(0.0f)
       .description("Twirl amount applied based on the distance to the center");
-  b.add_output<decl::Vector>("Vector").description("Twisted vector");
+  b.add_output<decl::Vector>("Vector"_ustr).description("Twisted vector");
 }
 
 static int gpu_shader_twirl(GPUMaterial *mat,
@@ -71,7 +71,7 @@ void register_node_type_sh_twirl()
 
   static bke::bNodeType ntype;
 
-  common_node_type_base(&ntype, "ShaderNodeTwirl", SH_NODE_TWIRL);
+  common_node_type_base(&ntype, "ShaderNodeTwirl"_ustr, SH_NODE_TWIRL);
   ntype.ui_name = "Twirl";
   ntype.ui_description = "Twirl the input vector around a center point";
   ntype.enum_name_legacy = "TWIRL";

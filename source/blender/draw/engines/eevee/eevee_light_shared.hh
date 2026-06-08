@@ -206,6 +206,7 @@ struct [[host_shared]] LightData {
 
   /* True if the light shape should be visible to camera rays. */
   bool32_t visible_camera;
+  uint _pad6;
   uint2 light_set_membership;
   /** Used by shadow sync. */
   /* TODO(fclem): this should be part of #eevee::Light struct. But for some reason it gets cleared
@@ -216,6 +217,8 @@ struct [[host_shared]] LightData {
   float _pad7;
   float _pad8;
   float _pad9;
+  float _pad10;
+  float _pad11;
 
   union {
     union_t<struct LightLocalData> local;

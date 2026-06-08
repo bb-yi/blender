@@ -1740,7 +1740,7 @@ void ED_view3d_draw_offscreen(Depsgraph *depsgraph,
     /* #View3D */
     eDrawType v3d_shading_type;
     Object *v3d_camera;
-    short v3d_flag;
+    eView3D_Flag v3d_flag;
 
     /* #Region */
     int region_winx, region_winy;

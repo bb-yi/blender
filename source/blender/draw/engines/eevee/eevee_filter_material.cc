@@ -271,7 +271,7 @@ static void filter_material_collect_scene_sources_from_node(
     }
 
     const bNodeSocket *group_output_input = group_output_node->input_by_identifier(
-        output_socket->identifier);
+        UString(output_socket->identifier));
     const bNode *previous_group_node = group_node_by_tree.lookup_default(group_tree, nullptr);
     group_node_by_tree.add_overwrite(group_tree, node);
     filter_material_collect_scene_sources_from_socket(*group_tree,
@@ -297,7 +297,8 @@ static void filter_material_collect_scene_sources_from_node(
       return;
     }
 
-    if (const bNodeSocket *group_input = group_node->input_by_identifier(output_socket->identifier))
+    if (const bNodeSocket *group_input = group_node->input_by_identifier(
+            UString(output_socket->identifier)))
     {
       const bNodeTree &owner_tree = group_node->owner_tree();
       owner_tree.ensure_topology_cache();

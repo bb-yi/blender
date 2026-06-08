@@ -5,6 +5,7 @@
 #ifdef GPU_SHADER
 #  pragma once
 #  include "gpu_shader_compat.hh"
+#  include "draw_view_infos.hh"
 #  include "eevee_defines.hh"
 #  include "eevee_filter_material_shared.hh"
 #endif
@@ -31,4 +32,5 @@ ADDITIONAL_INFO(eevee_filter_object_info_data)
 ADDITIONAL_INFO(eevee_render_texture_data)
 ADDITIONAL_INFO(eevee_sampling_data)
 ADDITIONAL_INFO(eevee_utility_texture)
+ADDITIONAL_INFO(draw_view)
 GPU_SHADER_CREATE_END()

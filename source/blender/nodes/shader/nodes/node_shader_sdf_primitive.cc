@@ -41,32 +41,32 @@ NODE_STORAGE_FUNCS(NodeSdfPrimitive)
 static void sh_node_sdf_primitive_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
-  b.add_input<decl::Vector>("Vector").hide_value().no_muted_links();
-  b.add_input<decl::Float>("Size").min(-100000.0f).max(100000.0f).default_value(1.0f);
-  b.add_input<decl::Float>("Radius").min(-100000.0f).max(100000.0f).default_value(0.5f);
-  b.add_input<decl::Float>("Value1").min(-100000.0f).max(100000.0f).default_value(1.0f);
-  b.add_input<decl::Float>("Value2").min(-100000.0f).max(100000.0f).default_value(1.0f);
-  b.add_input<decl::Float>("Value3").min(-100000.0f).max(100000.0f).default_value(1.0f);
-  b.add_input<decl::Float>("Value4").min(-100000.0f).max(100000.0f).default_value(0.5f);
-  b.add_input<decl::Vector>("Point").default_value({0.5f, 0.5f, 0.5f}).no_muted_links();
-  b.add_input<decl::Vector>("Point", "Point_001")
+  b.add_input<decl::Vector>("Vector"_ustr).hide_value().no_muted_links();
+  b.add_input<decl::Float>("Size"_ustr).min(-100000.0f).max(100000.0f).default_value(1.0f);
+  b.add_input<decl::Float>("Radius"_ustr).min(-100000.0f).max(100000.0f).default_value(0.5f);
+  b.add_input<decl::Float>("Value1"_ustr).min(-100000.0f).max(100000.0f).default_value(1.0f);
+  b.add_input<decl::Float>("Value2"_ustr).min(-100000.0f).max(100000.0f).default_value(1.0f);
+  b.add_input<decl::Float>("Value3"_ustr).min(-100000.0f).max(100000.0f).default_value(1.0f);
+  b.add_input<decl::Float>("Value4"_ustr).min(-100000.0f).max(100000.0f).default_value(0.5f);
+  b.add_input<decl::Vector>("Point"_ustr).default_value({0.5f, 0.5f, 0.5f}).no_muted_links();
+  b.add_input<decl::Vector>("Point"_ustr, "Point_001"_ustr)
       .default_value({0.5f, 0.5f, 0.5f})
       .no_muted_links();
-  b.add_input<decl::Vector>("Point", "Point_002")
+  b.add_input<decl::Vector>("Point"_ustr, "Point_002"_ustr)
       .default_value({0.5f, 0.5f, 0.5f})
       .no_muted_links();
-  b.add_input<decl::Vector>("Point", "Point_003")
+  b.add_input<decl::Vector>("Point"_ustr, "Point_003"_ustr)
       .default_value({0.5f, 0.5f, 0.5f})
       .no_muted_links();
-  b.add_input<decl::Float>("Angle").subtype(PROP_ANGLE);
-  b.add_input<decl::Float>("Roundness")
+  b.add_input<decl::Float>("Angle"_ustr).subtype(PROP_ANGLE);
+  b.add_input<decl::Float>("Roundness"_ustr)
       .min(0.0f)
       .max(1.0f)
       .default_value(0.0f)
       .subtype(PROP_FACTOR);
-  b.add_input<decl::Float>("Linewidth").min(-100000.0f).max(100000.0f).default_value(0.0f);
+  b.add_input<decl::Float>("Linewidth"_ustr).min(-100000.0f).max(100000.0f).default_value(0.0f);
 
-  b.add_output<decl::Float>("Distance");
+  b.add_output<decl::Float>("Distance"_ustr);
 }
 
 }  // namespace nodes::node_shader_sdf_primitive_cc
@@ -484,7 +484,7 @@ void register_node_type_sh_sdf_primitive()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeSdfPrimitive", SH_NODE_SDF_PRIMITIVE);
+  sh_node_type_base(&ntype, "ShaderNodeSdfPrimitive"_ustr, SH_NODE_SDF_PRIMITIVE);
   ntype.ui_name = "SDF Primitive";
   ntype.ui_description = "Evaluate a signed distance field primitive";
   ntype.enum_name_legacy = "SDF_PRIMITIVE";

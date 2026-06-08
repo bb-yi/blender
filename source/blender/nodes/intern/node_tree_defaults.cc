@@ -79,10 +79,11 @@ static bool color_socket_is_default_white(const bNodeSocket &socket)
 static bool light_shader_output_inputs_are_unlinked_defaults(bNodeTree &ntree,
                                                              bNode &light_shader_output)
 {
-  const bNodeSocket *color = bke::node_find_socket(light_shader_output, SOCK_IN, "Color");
-  const bNodeSocket *intensity = bke::node_find_socket(light_shader_output, SOCK_IN, "Intensity");
+  const bNodeSocket *color = bke::node_find_socket(light_shader_output, SOCK_IN, "Color"_ustr);
+  const bNodeSocket *intensity = bke::node_find_socket(
+      light_shader_output, SOCK_IN, "Intensity"_ustr);
   const bNodeSocket *attenuation = bke::node_find_socket(
-      light_shader_output, SOCK_IN, "Attenuation");
+      light_shader_output, SOCK_IN, "Attenuation"_ustr);
   return color != nullptr && intensity != nullptr && attenuation != nullptr &&
          !input_has_link(ntree, *color) && !input_has_link(ntree, *intensity) &&
          !input_has_link(ntree, *attenuation) && color_socket_is_default_white(*color) &&
@@ -92,8 +93,8 @@ static bool light_shader_output_inputs_are_unlinked_defaults(bNodeTree &ntree,
 static bool light_shader_default_nodes_link_socket(bNodeTree &ntree,
                                                    bNode &light_shader_info,
                                                    bNode &light_shader_output,
-                                                   const char *from_identifier,
-                                                   const char *to_identifier)
+                                                   UString from_identifier,
+                                                   UString to_identifier)
 {
   bNodeSocket *from_socket = bke::node_find_socket(light_shader_info, SOCK_OUT, from_identifier);
   bNodeSocket *to_socket = bke::node_find_socket(light_shader_output, SOCK_IN, to_identifier);
@@ -116,11 +117,15 @@ static void light_shader_default_nodes_link(bNodeTree &ntree,
   }
 
   r_changed |= light_shader_default_nodes_link_socket(
-      ntree, light_shader_info, light_shader_output, "Default Color", "Color");
+      ntree, light_shader_info, light_shader_output, "Default Color"_ustr, "Color"_ustr);
   r_changed |= light_shader_default_nodes_link_socket(
-      ntree, light_shader_info, light_shader_output, "Default Intensity", "Intensity");
+      ntree, light_shader_info, light_shader_output, "Default Intensity"_ustr, "Intensity"_ustr);
   r_changed |= light_shader_default_nodes_link_socket(
-      ntree, light_shader_info, light_shader_output, "Default Attenuation", "Attenuation");
+      ntree,
+      light_shader_info,
+      light_shader_output,
+      "Default Attenuation"_ustr,
+      "Attenuation"_ustr);
 }
 
 bool node_tree_light_shader_default_ensure(bNodeTree &ntree)

@@ -13,9 +13,9 @@ namespace nodes::node_shader_npr_image_sample_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Image>("Image").hide_value();
-  b.add_input<decl::Vector>("Offset").hide_value();
-  b.add_output<decl::Color>("Color");
+  b.add_input<decl::Image>("Image"_ustr).hide_value();
+  b.add_input<decl::Vector>("Offset"_ustr).hide_value();
+  b.add_output<decl::Color>("Color"_ustr);
 }
 
 static void node_shader_buts(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
@@ -45,7 +45,7 @@ void register_node_type_sh_npr_image_sample()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeNPR_ImageSample", SH_NODE_NPR_IMAGE_SAMPLE);
+  sh_node_type_base(&ntype, "ShaderNodeNPR_ImageSample"_ustr, SH_NODE_NPR_IMAGE_SAMPLE);
   ntype.enum_name_legacy = "NPR_IMAGE_SAMPLE";
   ntype.ui_name = "Image Sample";
   ntype.ui_description = "Sample an NPR or Filter image handle with an optional offset";

@@ -21,6 +21,7 @@ struct ForwardResolve {
   [[sampler(1)]] sampler2D transparency_g_tx;
   [[sampler(2)]] sampler2D transparency_b_tx;
   [[sampler(3)]] sampler2D transparency_a_tx;
+  [[sampler(4)]] sampler2D combined_tx;
 };
 
 [[vertex]]
@@ -30,8 +31,7 @@ void fullscreen_vert([[vertex_id]] const int vert_id, [[position]] float4 &out_p
 }
 
 struct ForwardResolveFragOut {
-  [[frag_color(0), index(0)]] float4 radiance;
-  [[frag_color(0), index(1)]] float4 transmittance;
+  [[frag_color(0)]] float4 combined;
 };
 
 [[fragment]]
@@ -42,11 +42,13 @@ void resolve_frag([[resource_table]] const ForwardResolve &srt,
                   [[out]] ForwardResolveFragOut &frag_out)
 {
   int2 texel = int2(frag_co.xy);
+  float4 radiance;
+  float4 transmittance;
 
   if (uni.pipeline_buf.use_monochromatic_transmittance) {
     float4 data = texelFetch(srt.transparency_r_tx, texel, 0);
-    frag_out.radiance = float4(data.rgb, 0.0f);
-    frag_out.transmittance = data.aaaa;
+    radiance = float4(data.rgb, 0.0f);
+    transmittance = data.aaaa;
   }
   else {
     /* The data is stored "transposed". */
@@ -56,22 +58,25 @@ void resolve_frag([[resource_table]] const ForwardResolve &srt,
     float2 channel_a = texelFetch(srt.transparency_a_tx, texel, 0).xy;
 
     /* frag_out.transmittance gets multiplied to the frame-buffer color. */
-    frag_out.transmittance.r = channel_r.y;
-    frag_out.transmittance.g = channel_g.y;
-    frag_out.transmittance.b = channel_b.y;
-    frag_out.transmittance.a = channel_a.y;
+    transmittance.r = channel_r.y;
+    transmittance.g = channel_g.y;
+    transmittance.b = channel_b.y;
+    transmittance.a = channel_a.y;
 
     /* frag_out.radiance gets added to the frame-buffer color after the transmittance
      * multiplication. */
-    frag_out.radiance.r = channel_r.x;
-    frag_out.radiance.g = channel_g.x;
-    frag_out.radiance.b = channel_b.x;
-    frag_out.radiance.a = channel_a.x;
+    radiance.r = channel_r.x;
+    radiance.g = channel_g.x;
+    radiance.b = channel_b.x;
+    radiance.a = channel_a.x;
   }
 
   render_passes.store_color(texel,
                             uni.uniform_buf.render_pass.transparent_id,
-                            float4(frag_out.radiance.rgb, frag_out.transmittance.a));
+                            float4(radiance.rgb, transmittance.a));
+
+  float4 combined = texelFetch(srt.combined_tx, texel, 0);
+  frag_out.combined = radiance + combined * transmittance;
 }
 
 }  // namespace eevee::forward

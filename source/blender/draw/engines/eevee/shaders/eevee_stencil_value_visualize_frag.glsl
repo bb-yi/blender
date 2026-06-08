@@ -2,7 +2,7 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
-#include "infos/eevee_deferred_infos.hh"
+#include "infos/eevee_surf_deferred_infos.hh"
 
 FRAGMENT_SHADER_CREATE_INFO(eevee_stencil_value_visualize)
 

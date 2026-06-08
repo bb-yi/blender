@@ -126,8 +126,8 @@ class ShaderForeachLightZoneType : public bke::bNodeZoneType {
  public:
   ShaderForeachLightZoneType()
   {
-    this->input_idname = "ShaderNodeForeachLightInput";
-    this->output_idname = "ShaderNodeForeachLightOutput";
+    this->input_idname = "ShaderNodeForeachLightInput"_ustr;
+    this->output_idname = "ShaderNodeForeachLightOutput"_ustr;
     this->input_type = SH_NODE_FOREACH_LIGHT_INPUT;
     this->output_type = SH_NODE_FOREACH_LIGHT_OUTPUT;
     this->theme_id = TH_NODE_ZONE_FOREACH_GEOMETRY_ELEMENT;

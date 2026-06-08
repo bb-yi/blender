@@ -36,7 +36,7 @@ static bool material_output_has_depth_offset(const Material *material)
     return false;
   }
 
-  const bNodeSocket *depth_offset = output->input_by_identifier("Depth Offset");
+  const bNodeSocket *depth_offset = output->input_by_identifier("Depth Offset"_ustr);
   return depth_offset != nullptr && depth_offset->is_available() &&
          depth_offset->is_directly_linked();
 }

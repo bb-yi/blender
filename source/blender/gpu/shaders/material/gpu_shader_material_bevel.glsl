@@ -123,8 +123,8 @@ void bevel_accumulate_sample(uint self_id,
                              float disk_radius,
                              float3 center_position,
                              float3 fallback_normal,
-                             inout float3 accum,
-                             inout float accum_weight)
+                             float3 &accum,
+                             float &accum_weight)
 {
   if (sample_uv.x <= 0.0f || sample_uv.x >= 1.0f || sample_uv.y <= 0.0f || sample_uv.y >= 1.0f) {
     return;

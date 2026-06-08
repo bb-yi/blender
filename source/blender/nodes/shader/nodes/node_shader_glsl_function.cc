@@ -143,7 +143,7 @@ namespace blender
                                          BlendWriter& writer)
     {
       const NodeShaderGLSLFunction& storage = node_storage(node);
-      BLO_write_string(&writer, storage.packed_source);
+      writer.write_string(storage.packed_source);
       writer.write_struct_array(storage.define_values_num, storage.define_values);
     }
 
@@ -153,8 +153,9 @@ namespace blender
     {
       NodeShaderGLSLFunction& storage = node_storage(node);
       BLO_read_string(&reader, &storage.packed_source);
-      BLO_read_struct_array(
-        &reader, NodeShaderGLSLDefineValue, storage.define_values_num, &storage.define_values);
+      BLO_read_array_and_validate_size(&reader,
+                                       &storage.define_values,
+                                       &storage.define_values_num);
       if (storage.define_values_num <= 0)
       {
         storage.define_values_num = 0;
@@ -339,7 +340,7 @@ namespace blender
 
     static bool node_is_group_input(const bNode& node)
     {
-      return node.is_group_input() || node.is_type("NodeGroupInput");
+      return node.is_group_input() || node.is_type("NodeGroupInput"_ustr);
     }
 
     struct GLSLRawParamMeta
@@ -624,15 +625,15 @@ namespace blender
       {
         return GLSLSample2DSourceKind::None;
       }
-      if (r_link->fromnode->is_type("ShaderNodeImageToClosure"))
+      if (r_link->fromnode->is_type("ShaderNodeImageToClosure"_ustr))
       {
         return GLSLSample2DSourceKind::ImageToClosure;
       }
-      if (r_link->fromnode->is_type("NodeClosureOutput"))
+      if (r_link->fromnode->is_type("NodeClosureOutput"_ustr))
       {
         return GLSLSample2DSourceKind::ClosureOutput;
       }
-      if (r_link->fromnode->is_type("ShaderNodeGLSLFunction"))
+      if (r_link->fromnode->is_type("ShaderNodeGLSLFunction"_ustr))
       {
         return GLSLSample2DSourceKind::GLSLFunction;
       }
@@ -648,7 +649,7 @@ namespace blender
       const bNodeLink*& r_link)
     {
       const bNode* from_node = link.fromnode;
-      if (from_node == nullptr || !from_node->is_type("ShaderNodeGLSLFunction"))
+      if (from_node == nullptr || !from_node->is_type("ShaderNodeGLSLFunction"_ustr))
       {
         r_link = nullptr;
         return GLSLSample2DSourceKind::Unsupported;
@@ -660,7 +661,7 @@ namespace blender
 
     static Image* resolve_image_to_closure_image(const bNodeLink& link)
     {
-      if (link.fromnode == nullptr || !link.fromnode->is_type("ShaderNodeImageToClosure"))
+      if (link.fromnode == nullptr || !link.fromnode->is_type("ShaderNodeImageToClosure"_ustr))
       {
         return nullptr;
       }
@@ -811,7 +812,7 @@ namespace blender
       {
         sampler_state.filtering = use_3d_lut_strip ?
                                     GPU_SAMPLER_FILTERING_LINEAR :
-                                    GPU_SAMPLER_FILTERING_ANISOTROPIC |
+                                    GPU_SAMPLER_FILTERING_ANISOTROPIC_ENABLE |
                                       GPU_SAMPLER_FILTERING_LINEAR | GPU_SAMPLER_FILTERING_MIPMAP;
       }
 
@@ -4895,7 +4896,7 @@ namespace blender
 
     static const bNodeSocket* find_closure_output_socket_by_name(const bNode& node, const StringRef name)
     {
-      if (!node.is_type("NodeClosureOutput"))
+      if (!node.is_type("NodeClosureOutput"_ustr))
       {
         return nullptr;
       }
@@ -6218,8 +6219,8 @@ vec3 glsl_ambient_lighting()
     static void add_glsl_socket_declaration(DeclarationListBuilder& b,
       const GLSLFunctionParam& param,
       const bool is_output,
-      const StringRef socket_name,
-      const StringRef socket_identifier)
+      const UString socket_name,
+      const UString socket_identifier)
     {
       auto apply_input_description = [&](auto& decl) {
         if (!is_output && param.meta.description.has_value())
@@ -6388,8 +6389,8 @@ vec3 glsl_ambient_lighting()
         {
           auto& decl = b.add_output<decl::Vector>(socket_name, socket_identifier);
           decl.dimensions(3);
-          b.add_output<decl::Float>(make_split_vec4_w_socket_name(socket_name),
-            make_split_vec4_w_socket_identifier(socket_identifier));
+          b.add_output<decl::Float>(UString(make_split_vec4_w_socket_name(socket_name.c_str())),
+            UString(make_split_vec4_w_socket_identifier(socket_identifier.c_str())));
           return;
         }
         auto& decl = b.add_output<decl::Vector>(socket_name, socket_identifier);
@@ -6529,16 +6530,17 @@ vec3 glsl_ambient_lighting()
           output_param.type_name = parse_result.function.return_type_name;
           output_param.dimensions = glsl_boundary_dimensions(parse_result.function.return_type);
           add_glsl_socket_declaration(
-            b, output_param, true, "Result", result_socket_identifier);
+            b, output_param, true, "Result"_ustr, UString(result_socket_identifier));
         }
 
         for (const GLSLFunctionParam& param : parse_result.function.params)
         {
           if (glsl_param_has_output_socket(param))
           {
-            const std::string socket_name = glsl_socket_display_name(param);
+            const UString socket_name(glsl_socket_display_name(param));
+            const UString socket_identifier(make_socket_identifier("Out", param.name));
             add_glsl_socket_declaration(
-              b, param, true, socket_name, make_socket_identifier("Out", param.name));
+              b, param, true, socket_name, socket_identifier);
           }
         }
       };
@@ -6552,7 +6554,7 @@ vec3 glsl_ambient_lighting()
       if (has_define_panel)
       {
         PanelDeclarationBuilder& defines_panel =
-          b.add_panel("Defines",
+          b.add_panel("Defines"_ustr,
                       make_defines_panel_identifier(parse_result.defines_panel_default_closed))
             .default_closed(parse_result.defines_panel_default_closed);
         defines_panel.add_layout([parse_result](ui::Layout& layout,
@@ -6581,7 +6583,7 @@ vec3 glsl_ambient_lighting()
         }
         const GLSLPanelMeta& panel = parse_result.function.panels[*panel_index];
         PanelDeclarationBuilder& panel_builder =
-          b.add_panel(panel.name, make_panel_identifier(panel.name)).default_closed(
+          b.add_panel(UString(panel.name), make_panel_identifier(panel.name)).default_closed(
             panel.default_closed);
         panel_builders.add(panel.name, &panel_builder);
         return &panel_builder;
@@ -6591,18 +6593,19 @@ vec3 glsl_ambient_lighting()
       {
         if (glsl_param_has_input_socket(param))
         {
-          const std::string socket_name = glsl_socket_display_name(param);
+          const UString socket_name(glsl_socket_display_name(param));
+          const UString socket_identifier(param.identifier);
           if (param.meta.panel_name.has_value())
           {
             if (PanelDeclarationBuilder* panel_builder = ensure_panel_builder(
                   *param.meta.panel_name))
             {
               add_glsl_socket_declaration(
-                *panel_builder, param, false, socket_name, param.identifier);
+                *panel_builder, param, false, socket_name, socket_identifier);
               continue;
             }
           }
-          add_glsl_socket_declaration(b, param, false, socket_name, param.identifier);
+          add_glsl_socket_declaration(b, param, false, socket_name, socket_identifier);
         }
       }
 
@@ -6973,7 +6976,7 @@ vec3 glsl_ambient_lighting()
     static bool node_insert_link(bke::NodeInsertLinkParams& params)
     {
       if (params.link.tonode != &params.node || params.link.tosock->type != SOCK_CLOSURE ||
-        params.link.fromnode == nullptr || !params.link.fromnode->is_type("NodeClosureOutput"))
+        params.link.fromnode == nullptr || !params.link.fromnode->is_type("NodeClosureOutput"_ustr))
       {
         return true;
       }
@@ -7166,7 +7169,7 @@ vec3 glsl_ambient_lighting()
 
     static bke::bNodeType ntype;
 
-    sh_node_type_base(&ntype, "ShaderNodeGLSLFunction", SH_NODE_GLSL_FUNCTION);
+    sh_node_type_base(&ntype, "ShaderNodeGLSLFunction"_ustr, SH_NODE_GLSL_FUNCTION);
     ntype.ui_name = "GLSL Function";
     ntype.ui_description =
       "Call a user-authored GLSL function from a Text datablock or external GLSL file";

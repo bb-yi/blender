@@ -120,7 +120,7 @@ static bool filter_mask_object_supported(const Object *object)
 static void node_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
-  b.add_output<decl::Float>("Mask")
+  b.add_output<decl::Float>("Mask"_ustr)
       .description("Mask pixels that belong to the selected object set using Eevee Cryptomatte data");
 }
 
@@ -159,19 +159,19 @@ static void draw_filter_mask_items(ui::Layout &layout, bContext *C, PointerRNA *
   NodeFilterMask &node_storage = ensure_storage(node);
 
   ui::Layout &row = layout.row(false);
-  ui::template_list(&row,
-                    C,
-                    filter_mask_items_list_type()->idname,
-                    "",
-                    ptr,
-                    FilterMaskItemsAccessor::rna_names::items,
-                    ptr,
-                    FilterMaskItemsAccessor::rna_names::active_index.c_str(),
-                    nullptr,
-                    3,
-                    5,
-                    UILST_LAYOUT_DEFAULT,
-                    ui::TEMPLATE_LIST_FLAG_NONE);
+  ui::template_uilist(&row,
+                      C,
+                      filter_mask_items_list_type()->idname,
+                      "",
+                      ptr,
+                      FilterMaskItemsAccessor::rna_names::items,
+                      ptr,
+                      FilterMaskItemsAccessor::rna_names::active_index.c_str(),
+                      nullptr,
+                      3,
+                      5,
+                      UILST_LAYOUT_DEFAULT,
+                      ui::TEMPLATE_LIST_FLAG_NONE);
 
   ui::Layout &ops_col = row.column(false);
   {
@@ -433,7 +433,7 @@ void register_node_type_sh_filter_object_mask()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeFilterObjectMask", SH_NODE_FILTER_OBJECT_MASK);
+  sh_node_type_base(&ntype, "ShaderNodeFilterObjectMask"_ustr, SH_NODE_FILTER_OBJECT_MASK);
   ntype.ui_name = "Filter Mask";
   ntype.ui_description =
       "Create fast Eevee filter masks from a single object, an object list, or a collection using Cryptomatte data";

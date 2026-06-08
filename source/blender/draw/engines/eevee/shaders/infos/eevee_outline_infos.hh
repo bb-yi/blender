@@ -15,6 +15,15 @@
 #include "eevee_defines.hh"
 #include "gpu_shader_create_info.hh"
 
+GPU_SHADER_CREATE_INFO(eevee_outline_out)
+IMAGE(OUTLINE_COLOR_SLOT, SFLOAT_16_16_16_16, write, image2D, outline_color_img)
+IMAGE(OUTLINE_INFO_SLOT, UNORM_16_16_16_16, write, image2D, outline_info_img)
+GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(eevee_surf_forward_outline_out)
+ADDITIONAL_INFO(eevee_outline_out)
+GPU_SHADER_CREATE_END()
+
 GPU_SHADER_CREATE_INFO(eevee_outline_detect)
 DO_STATIC_COMPILATION()
 FRAGMENT_OUT(0, float4, out_outline_seed)

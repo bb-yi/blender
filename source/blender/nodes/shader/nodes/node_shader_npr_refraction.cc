@@ -10,8 +10,8 @@ namespace nodes::node_shader_npr_refraction_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_output<decl::Image>("Combined Color");
-  b.add_output<decl::Image>("Position");
+  b.add_output<decl::Image>("Combined Color"_ustr);
+  b.add_output<decl::Image>("Position"_ustr);
 }
 
 static int node_shader_gpu_npr_refraction(GPUMaterial *mat,
@@ -32,7 +32,7 @@ void register_node_type_sh_npr_refraction()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeNPR_Refraction", SH_NODE_NPR_REFRACTION);
+  sh_node_type_base(&ntype, "ShaderNodeNPR_Refraction"_ustr, SH_NODE_NPR_REFRACTION);
   ntype.enum_name_legacy = "NPR_REFRACTION";
   ntype.ui_name = "NPR Refraction";
   ntype.ui_description = "Read refraction buffers inside the NPR shader tree";

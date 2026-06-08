@@ -20,13 +20,13 @@ namespace nodes::node_shader_filter_object_info_cc {
 static void node_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
-  b.add_output<decl::Vector>("Location")
+  b.add_output<decl::Vector>("Location"_ustr)
       .description("World-space location of the selected object");
-  b.add_output<decl::Vector>("Rotation")
+  b.add_output<decl::Vector>("Rotation"_ustr)
       .description("World-space Euler rotation of the selected object in radians");
-  b.add_output<decl::Vector>("Scale")
+  b.add_output<decl::Vector>("Scale"_ustr)
       .description("World-space scale of the selected object");
-  b.add_output<decl::Color>("Color")
+  b.add_output<decl::Color>("Color"_ustr)
       .description("Viewport display color of the selected object");
 }
 
@@ -61,7 +61,7 @@ void register_node_type_sh_filter_object_info()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeFilterObjectInfo", SH_NODE_FILTER_OBJECT_INFO);
+  sh_node_type_base(&ntype, "ShaderNodeFilterObjectInfo"_ustr, SH_NODE_FILTER_OBJECT_INFO);
   ntype.ui_name = "Filter Object Info";
   ntype.ui_description =
       "Read transform and display color data from a chosen object inside Eevee filter materials";

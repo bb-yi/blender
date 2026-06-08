@@ -62,15 +62,15 @@ static void assign_unique_portal_name(const bNodeTree *ntree, bNode &node)
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_input<decl::Float>("Input", "Input_Float")
+  b.add_input<decl::Float>("Input"_ustr, "Input_Float"_ustr)
       .min(-10000.0f)
       .max(10000.0f)
       .is_default_link_socket();
-  b.add_input<decl::Vector>("Input", "Input_Vector").is_default_link_socket();
-  b.add_input<decl::Color>("Input", "Input_Color")
+  b.add_input<decl::Vector>("Input"_ustr, "Input_Vector"_ustr).is_default_link_socket();
+  b.add_input<decl::Color>("Input"_ustr, "Input_Color"_ustr)
       .default_value({0.0f, 0.0f, 0.0f, 1.0f})
       .is_default_link_socket();
-  b.add_input<decl::Shader>("Input", "Input_Shader").is_default_link_socket();
+  b.add_input<decl::Shader>("Input"_ustr, "Input_Shader"_ustr).is_default_link_socket();
 }
 
 static void node_layout(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
@@ -114,7 +114,7 @@ void register_node_type_sh_portal_in()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodePortalIn", SH_NODE_PORTAL_IN);
+  sh_node_type_base(&ntype, "ShaderNodePortalIn"_ustr, SH_NODE_PORTAL_IN);
   ntype.ui_name = "Portal In";
   ntype.ui_description =
       "Store a named typed value that can be reused by portal outputs in the same shader tree";

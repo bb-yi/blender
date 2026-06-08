@@ -17,11 +17,11 @@ namespace nodes::node_shader_world_environment_cc {
 static void node_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
-  b.add_input<decl::Vector>("Direction")
+  b.add_input<decl::Vector>("Direction"_ustr)
       .default_value(float3(0.0f, 0.0f, 0.0f))
       .hide_value()
       .description("World-space direction used to sample the world environment");
-  b.add_output<decl::Color>("Color");
+  b.add_output<decl::Color>("Color"_ustr);
 }
 
 static int node_shader_gpu_world_environment(GPUMaterial *mat,
@@ -45,7 +45,7 @@ void register_node_type_sh_world_environment()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeWorldEnvironment", SH_NODE_WORLD_ENVIRONMENT);
+  sh_node_type_base(&ntype, "ShaderNodeWorldEnvironment"_ustr, SH_NODE_WORLD_ENVIRONMENT);
   ntype.ui_name = "World Environment";
   ntype.ui_description =
       "Sample Eevee world environment color from a custom direction, ignoring "

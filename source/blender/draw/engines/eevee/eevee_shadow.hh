@@ -364,6 +364,7 @@ class ShadowModule {
   bool enabled_ = true;
   bool viewport_history_invalidated_ = false;
   bool viewport_jitter_disabled_by_transform_ = false;
+  TelemetryShadowContext active_shadow_context_ = TelemetryShadowContext::MainView;
 
  public:
   ShadowModule(Instance &inst, ShadowSceneData &data);

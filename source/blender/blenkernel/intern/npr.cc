@@ -16,10 +16,10 @@ namespace blender {
 
 bNodeTree *BKE_npr_tree_add(Main *bmain, const char *name)
 {
-  bNodeTree *ntree = bke::node_tree_add_tree(bmain, name, ntreeType_Shader->idname);
+  bNodeTree *ntree = bke::node_tree_add_tree(bmain, name, ntreeType_Shader->idname.ref());
 
-  bNode *input = bke::node_add_node(nullptr, *ntree, "ShaderNodeNPR_Input");
-  bNode *output = bke::node_add_node(nullptr, *ntree, "ShaderNodeNPR_Output");
+  bNode *input = bke::node_add_node(nullptr, *ntree, "ShaderNodeNPR_Input"_ustr);
+  bNode *output = bke::node_add_node(nullptr, *ntree, "ShaderNodeNPR_Output"_ustr);
 
   input->location[0] = -220.0f;
   input->location[1] = 40.0f;
@@ -28,9 +28,9 @@ bNodeTree *BKE_npr_tree_add(Main *bmain, const char *name)
 
   bke::node_add_link(*ntree,
                      *input,
-                     *bke::node_find_socket(*input, SOCK_OUT, "Combined Color"),
+                     *bke::node_find_socket(*input, SOCK_OUT, "Combined Color"_ustr),
                      *output,
-                     *bke::node_find_socket(*output, SOCK_IN, "Color"));
+                     *bke::node_find_socket(*output, SOCK_IN, "Color"_ustr));
 
   bke::node_set_active(*ntree, *output);
   BKE_ntree_update_after_single_tree_change(*bmain, *ntree);

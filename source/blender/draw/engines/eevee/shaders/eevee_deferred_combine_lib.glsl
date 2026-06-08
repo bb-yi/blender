@@ -125,7 +125,7 @@ DeferredCombine deferred_combine(int2 texel)
   return dc;
 }
 
-void deferred_combine_clamp(inout DeferredCombine dc)
+void deferred_combine_clamp(DeferredCombine &dc)
 {
   float clamp_direct = uniform_buf.clamp.surface_direct;
   float clamp_indirect = uniform_buf.clamp.surface_indirect;

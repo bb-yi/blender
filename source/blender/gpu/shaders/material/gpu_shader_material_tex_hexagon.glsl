@@ -10,7 +10,7 @@
 #define HORIZONTAL_TILED 2
 #define VERTICAL_TILED 3
 
-float sdf_dimension(float w, inout float roundness)
+float sdf_dimension(float w, float &roundness)
 {
   float sw = sign(w);
   w = abs(w);

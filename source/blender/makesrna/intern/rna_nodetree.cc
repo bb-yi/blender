@@ -3685,7 +3685,7 @@ static bool rna_ShaderNodeOutput_nprtree_valid(PointerRNA *ptr, bNodeTree *ngrou
   }
 
   ngroup->ensure_topology_cache();
-  return !ngroup->nodes_by_type("ShaderNodeNPR_Output").is_empty();
+  return !ngroup->nodes_by_type("ShaderNodeNPR_Output"_ustr).is_empty();
 }
 
 static void rna_ShaderNodeOutput_nprtree_set(PointerRNA *ptr,

@@ -66,10 +66,10 @@ static void initialize_portal_storage(const bNodeTree *ntree, NodeShaderPortal &
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.add_output<decl::Float>("Output", "Output_Float");
-  b.add_output<decl::Vector>("Output", "Output_Vector");
-  b.add_output<decl::Color>("Output", "Output_Color");
-  b.add_output<decl::Shader>("Output", "Output_Shader");
+  b.add_output<decl::Float>("Output"_ustr, "Output_Float"_ustr);
+  b.add_output<decl::Vector>("Output"_ustr, "Output_Vector"_ustr);
+  b.add_output<decl::Color>("Output"_ustr, "Output_Color"_ustr);
+  b.add_output<decl::Shader>("Output"_ustr, "Output_Shader"_ustr);
 }
 
 static void node_layout(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
@@ -117,7 +117,7 @@ void register_node_type_sh_portal_out()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodePortalOut", SH_NODE_PORTAL_OUT);
+  sh_node_type_base(&ntype, "ShaderNodePortalOut"_ustr, SH_NODE_PORTAL_OUT);
   ntype.ui_name = "Portal Out";
   ntype.ui_description =
       "Read a named typed value from a portal input in the same shader tree";

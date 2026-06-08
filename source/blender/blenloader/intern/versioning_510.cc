@@ -681,7 +681,7 @@ static void version_add_outline_control_id_edge_input(Main *bmain)
         continue;
       }
 
-      if (bNodeSocket *outline_id_input = bke::node_find_socket(node, SOCK_IN, "Outline ID")) {
+      if (bNodeSocket *outline_id_input = bke::node_find_socket(node, SOCK_IN, "Outline ID"_ustr)) {
         if (outline_id_input->type == SOCK_INT && outline_id_input->default_value != nullptr) {
           bNodeSocketValueInt *value = outline_id_input->default_value_typed<bNodeSocketValueInt>();
           value->value = std::min(value->value, 32767);
@@ -689,7 +689,7 @@ static void version_add_outline_control_id_edge_input(Main *bmain)
         }
       }
 
-      if (bke::node_find_socket(node, SOCK_IN, "ID Edge") != nullptr) {
+      if (bke::node_find_socket(node, SOCK_IN, "ID Edge"_ustr) != nullptr) {
         continue;
       }
 
@@ -714,7 +714,7 @@ static void version_add_outline_control_freestyle_edge_input(Main *bmain)
         continue;
       }
 
-      if (bke::node_find_socket(node, SOCK_IN, "Freestyle Edge") != nullptr) {
+      if (bke::node_find_socket(node, SOCK_IN, "Freestyle Edge"_ustr) != nullptr) {
         continue;
       }
 

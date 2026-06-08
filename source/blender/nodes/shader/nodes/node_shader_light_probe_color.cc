@@ -15,22 +15,22 @@ namespace nodes::node_shader_light_probe_color_cc {
 static void node_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
-  b.add_input<decl::Vector>("Direction")
+  b.add_input<decl::Vector>("Direction"_ustr)
       .default_value(float3(0.0f, 0.0f, 0.0f))
       .hide_value()
       .description(
           "World-space direction used to sample Eevee light probe data. When not connected, "
           "Reflection follows the reflected view direction and Irradiance follows the surface "
           "normal");
-  b.add_input<decl::Float>("Roughness")
+  b.add_input<decl::Float>("Roughness"_ustr)
       .default_value(0.0f)
       .min(0.0f)
       .max(1.0f)
       .subtype(PROP_FACTOR)
       .description("Controls reflection probe blur, from mirror sharp to fully rough");
-  b.add_output<decl::Color>("Reflection");
-  b.add_output<decl::Color>("Irradiance");
-  b.add_output<decl::Color>("Combined");
+  b.add_output<decl::Color>("Reflection"_ustr);
+  b.add_output<decl::Color>("Irradiance"_ustr);
+  b.add_output<decl::Color>("Combined"_ustr);
 }
 
 static int node_shader_gpu_light_probe_color(GPUMaterial *mat,
@@ -51,7 +51,7 @@ void register_node_type_sh_light_probe_color()
 
   static bke::bNodeType ntype;
 
-  sh_node_type_base(&ntype, "ShaderNodeLightProbeColor", SH_NODE_LIGHT_PROBE_COLOR);
+  sh_node_type_base(&ntype, "ShaderNodeLightProbeColor"_ustr, SH_NODE_LIGHT_PROBE_COLOR);
   ntype.ui_name = "Light Probe Color";
   ntype.ui_description =
       "Output Eevee reflection probe and irradiance probe colors for the surface";

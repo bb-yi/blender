@@ -125,10 +125,10 @@ ClosureSignature ClosureSignature::from_glsl_function_sample2d_socket(const bNod
 
   ClosureSignature signature;
   if (const bke::bNodeSocketType *input_type = bke::node_socket_type_find_static(SOCK_VECTOR)) {
-    signature.inputs.add({"UV", input_type, NODE_INTERFACE_SOCKET_STRUCTURE_TYPE_AUTO});
+    signature.inputs.add({"UV", input_type, NodeSocketInterfaceStructureType::Auto});
   }
   if (const bke::bNodeSocketType *output_type = bke::node_socket_type_find_static(SOCK_RGBA)) {
-    signature.outputs.add({"Color", output_type, NODE_INTERFACE_SOCKET_STRUCTURE_TYPE_AUTO});
+    signature.outputs.add({"Color", output_type, NodeSocketInterfaceStructureType::Auto});
   }
   return signature;
 }
@@ -143,10 +143,10 @@ ClosureSignature ClosureSignature::from_parallax_height_source_socket(const bNod
 
   ClosureSignature signature;
   if (const bke::bNodeSocketType *input_type = bke::node_socket_type_find_static(SOCK_VECTOR)) {
-    signature.inputs.add({"UV", input_type, NODE_INTERFACE_SOCKET_STRUCTURE_TYPE_AUTO});
+    signature.inputs.add({"UV", input_type, NodeSocketInterfaceStructureType::Auto});
   }
   if (const bke::bNodeSocketType *output_type = bke::node_socket_type_find_static(SOCK_FLOAT)) {
-    signature.outputs.add({"Height", output_type, NODE_INTERFACE_SOCKET_STRUCTURE_TYPE_AUTO});
+    signature.outputs.add({"Height", output_type, NodeSocketInterfaceStructureType::Auto});
   }
   return signature;
 }
