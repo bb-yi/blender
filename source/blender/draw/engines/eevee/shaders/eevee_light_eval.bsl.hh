@@ -40,7 +40,9 @@ namespace eevee {
 struct LightEvalData {
   [[resource_table]] srt_t<ShadowRenderData> shadow_data;
   [[resource_table]] srt_t<UtilityTexture> utility_tx;
+  [[resource_table]] srt_t<LightShaderEvalData> light_shader_data;
 
+  [[compilation_constant]] bool use_light_shader_texture_eval;
   [[compilation_constant]] int light_closure_eval_count_reflect;
   [[compilation_constant]] int light_closure_eval_count_transmit;
 };
@@ -63,6 +65,88 @@ float power_get(LightData light, LightingType type)
   return light.power[type & 3u];
 }
 
+float light_shader_shape_radiance_get(LightData light)
+{
+  if (light.type == LIGHT_RECT || light.type == LIGHT_ELLIPSE) {
+    float area = light.area().size.x * light.area().size.y * 4.0f;
+    if (light.type == LIGHT_ELLIPSE) {
+      area *= M_PI * 0.25f;
+    }
+    return M_1_PI / area;
+  }
+
+  if (is_sphere_light(light.type)) {
+    float area = 4.0f * M_PI * square(light.local().local.shape_radius);
+    return 1.0f / (area * M_PI);
+  }
+
+  if (is_sun_light(light.type)) {
+    float inv_sin_sq = 1.0f + 1.0f / square(light.sun().shape_radius);
+    return M_1_PI * inv_sin_sq;
+  }
+
+  return 1.0f;
+}
+
+float light_shader_point_radiance_get(LightData light)
+{
+  if (light.type == LIGHT_RECT || light.type == LIGHT_ELLIPSE) {
+    float area = light.area().size.x * light.area().size.y * 4.0f;
+    float tmp = M_PI_2 / (M_PI_2 + sqrt(area));
+    float mrp_scaling = tmp + (1.0f - tmp) * M_1_PI;
+    return M_1_PI * mrp_scaling;
+  }
+
+  if (is_sphere_light(light.type)) {
+    return 1.0f / (4.0f * M_PI);
+  }
+
+  if (is_sun_light(light.type)) {
+    return 1.0f;
+  }
+
+  return 1.0f;
+}
+
+float light_shader_no_distance_power_get(LightData light, LightingType type)
+{
+  if (is_sun_light(light.type)) {
+    return power_get(light, type);
+  }
+
+  float shape_power = light_shader_shape_radiance_get(light);
+  if (shape_power <= 1e-16f) {
+    return 0.0f;
+  }
+  return power_get(light, type) * (light_shader_point_radiance_get(light) / shape_power);
+}
+
+float light_shader_distance_falloff_get(LightData light, LightVector lv, const bool is_directional)
+{
+  if (is_directional) {
+    return 1.0f;
+  }
+
+  float shape_power = light_shader_shape_radiance_get(light);
+  if (shape_power <= 1e-16f) {
+    return 0.0f;
+  }
+  return light_point_light(light, is_directional, lv) *
+         (light_shader_point_radiance_get(light) / shape_power);
+}
+
+float light_shader_no_distance_ltc(sampler2DArray util_tx,
+                                   LightData light,
+                                   LightVector lv,
+                                   LightVertices vertices,
+                                   ClosureLight cl,
+                                   float3 V,
+                                   const bool is_directional)
+{
+  float ltc_result = light_ltc(util_tx, light, cl.N, V, lv, cl.ltc_mat, vertices);
+  return ltc_result / max(light_shader_distance_falloff_get(light, lv, is_directional), 1e-8f);
+}
+
 bool light_linking_affects_receiver(uint2 light_set_membership, uchar receiver_light_set)
 {
   return bitmask64_test(light_set_membership, receiver_light_set);
@@ -75,13 +159,20 @@ void eval_single_closure(sampler2DArray util_tx,
                          ClosureLight &cl,
                          float3 V,
                          float attenuation,
-                         float shadow)
+                         float shadow,
+                         const bool light_shader_no_distance_falloff,
+                         const bool is_directional)
 {
-  attenuation *= power_get(light, cl.type);
+  attenuation *= light_shader_no_distance_falloff ?
+                     light_shader_no_distance_power_get(light, cl.type) :
+                     power_get(light, cl.type);
   if (attenuation < 1e-30f) {
     return;
   }
-  float ltc_result = light_ltc(util_tx, light, cl.N, V, lv, cl.ltc_mat, vertices);
+  float ltc_result = light_shader_no_distance_falloff ?
+                         light_shader_no_distance_ltc(
+                             util_tx, light, lv, vertices, cl, V, is_directional) :
+                         light_ltc(util_tx, light, cl.N, V, lv, cl.ltc_mat, vertices);
   float3 out_radiance = light.color * ltc_result;
   float visibility = shadow * attenuation;
   cl.light_shadowed += visibility * out_radiance;
@@ -101,6 +192,7 @@ template<bool is_transmission> struct EvalCtx {
   float terminator_geometry_offset;
 
   void light_eval_single([[resource_table]] LightEvalData &srt,
+                         uint l_idx,
                          LightData light,
                          const bool is_directional)
   {
@@ -127,6 +219,38 @@ template<bool is_transmission> struct EvalCtx {
 
     float attenuation = light_attenuation_surface(light, is_directional, lv);
     float facing = light_attenuation_facing(light, lv.L, lv.dist, stack.cl[0].N, is_transmission);
+    bool light_shader_no_distance_falloff = false;
+
+    if (!is_transmission) [[static_branch]] {
+      if (srt.use_light_shader_texture_eval) [[static_branch]] {
+        [[resource_table]] const LightShaderEvalData &light_shader_data = srt.light_shader_data;
+        int light_shader_index = light_shader_data.light_shader_index_buf[l_idx];
+        int light_shader_uniform_index = (light_shader_index < -1) ? -light_shader_index - 2 : -1;
+        if (light_shader_uniform_index >= 0) {
+          float4 light_shader =
+              light_shader_data.light_shader_uniform_buf[light_shader_uniform_index];
+          light.color = light_shader.rgb;
+          attenuation = light_attenuation_common(light, is_directional, lv.L) * light_shader.a;
+          light_shader_no_distance_falloff = true;
+          if (!is_directional) {
+            attenuation *= light_influence_cutoff(
+                lv.dist, light.local().local.influence_radius_invsqr_surface);
+          }
+        }
+        else if (light_shader_index >= 0) {
+          float4 light_shader = texelFetch(light_shader_data.light_shader_tx,
+                                           int3(int2(texel), light_shader_index),
+                                           0);
+          light.color = light_shader.rgb;
+          attenuation = light_attenuation_common(light, is_directional, lv.L) * light_shader.a;
+          light_shader_no_distance_falloff = true;
+          if (!is_directional) {
+            attenuation *= light_influence_cutoff(
+                lv.dist, light.local().local.influence_radius_invsqr_surface);
+          }
+        }
+      }
+    }
 
     if (!is_translucent_with_thickness) {
       /* Only do attenuation for this case, since we integrate the whole sphere for translucency.
@@ -172,27 +296,43 @@ template<bool is_transmission> struct EvalCtx {
     for (uint i = 0u; i < 3; i++) [[unroll]] {
       if (is_transmission) [[static_branch]] {
         if (srt.light_closure_eval_count_transmit > i) [[static_branch]] {
-          eval_single_closure(
-              util_tx, light, lv, light_shape_vertices, stack.cl[i], V, attenuation, shadow);
+          eval_single_closure(util_tx,
+                              light,
+                              lv,
+                              light_shape_vertices,
+                              stack.cl[i],
+                              V,
+                              attenuation,
+                              shadow,
+                              light_shader_no_distance_falloff,
+                              is_directional);
         }
       }
       else {
         if (srt.light_closure_eval_count_reflect > i) [[static_branch]] {
-          eval_single_closure(
-              util_tx, light, lv, light_shape_vertices, stack.cl[i], V, attenuation, shadow);
+          eval_single_closure(util_tx,
+                              light,
+                              lv,
+                              light_shape_vertices,
+                              stack.cl[i],
+                              V,
+                              attenuation,
+                              shadow,
+                              light_shader_no_distance_falloff,
+                              is_directional);
         }
       }
     }
   }
 
-  void eval_directional([[resource_table]] LightEvalData &srt, uint /*l_idx*/, LightData light)
+  void eval_directional([[resource_table]] LightEvalData &srt, uint l_idx, LightData light)
   {
-    light_eval_single(srt, light, true);
+    light_eval_single(srt, l_idx, light, true);
   }
 
-  void eval_local([[resource_table]] LightEvalData &srt, uint /*l_idx*/, LightData light)
+  void eval_local([[resource_table]] LightEvalData &srt, uint l_idx, LightData light)
   {
-    light_eval_single(srt, light, false);
+    light_eval_single(srt, l_idx, light, false);
   }
 };
 
@@ -224,7 +364,6 @@ EvalCtx<true> init_from_reflect_ctx(EvalCtx<false> ctx)
 struct LightEvalIterator {
   [[resource_table]] srt_t<LightEvalData> inner;
   [[resource_table]] srt_t<LightRenderData> light_data;
-  [[resource_table]] srt_t<LightShaderEvalData> light_shader_eval_data;
 
   void eval_reflection(light::EvalCtx<false> &ctx, float vPz)
   {

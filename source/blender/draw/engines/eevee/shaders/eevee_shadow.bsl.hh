@@ -17,6 +17,7 @@ namespace eevee {
 struct ShadowRenderData {
   [[sampler(SHADOW_ATLAS_TEX_SLOT)]] usampler2DArrayAtomic shadow_atlas_tx;
   [[sampler(SHADOW_TILEMAPS_TEX_SLOT)]] usampler2D shadow_tilemaps_tx;
+  [[sampler(SHADOW_CASTER_ATLAS_TEX_SLOT)]] usampler2DArray shadow_caster_atlas_tx;
 
   [[compilation_constant]] bool shadow_random;
 

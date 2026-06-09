@@ -31,12 +31,13 @@ void main()
 
   light_shader_globals_init();
 
-  g_data.P = surfel.position;
+  float3 P = surfel.position;
+  g_data.P = P;
   g_data.N = g_data.Ni = surfel.normal;
   g_data.Ng = surfel.normal;
-  g_data.ray_length = distance(g_data.P, drw_view_position());
+  g_data.ray_length = distance(P, drw_view_position());
 
-  attrib_load(WorldPoint{0});
+  attrib_load(WorldPoint{float3(0.0f)});
 
   out_light_shader_buf[light_index * int(capture_info_buf.surfel_len) + index] =
       light_shader_result_clamp(nodetree_light_shader());

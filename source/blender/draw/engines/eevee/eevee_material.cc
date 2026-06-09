@@ -582,6 +582,7 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
       {
         matpass.sub_pass->bind_resources(inst_.lights);
         inst_.lights.bind_front_light_shader_resources(*matpass.sub_pass);
+        matpass.sub_pass->bind_resources(inst_.shadows);
       }
       if (ELEM(pipeline_type,
                MAT_PIPE_PREPASS_DEFERRED,

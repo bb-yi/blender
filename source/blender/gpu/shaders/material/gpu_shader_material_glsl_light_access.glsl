@@ -258,7 +258,7 @@ bool glsl_light_shader_eval(uint light_index,
   result.attenuation = light_attenuation_common(light, is_directional, light_vector.L) *
                        light_shader.a;
   if (!is_directional) {
-    result.attenuation *= light_influence_attenuation(
+    result.attenuation *= light_influence_cutoff(
         light_vector.dist, light.local().local.influence_radius_invsqr_surface);
   }
   return true;

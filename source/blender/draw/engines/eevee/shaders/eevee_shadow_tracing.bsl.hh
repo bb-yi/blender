@@ -607,6 +607,197 @@ float shadow_eval_seeded([[resource_table]] ShadowRenderData &srd,
   return saturate(1.0f - surface_hit / float(ray_count));
 }
 
+#if defined(SHADOW_CASTER_CLASSIFY)
+constexpr uint SHADOW_CASTER_UNKNOWN_ID = 0xFFFFFFFFu;
+
+struct ShadowCasterTraceResult {
+  bool hit;
+  uint caster_id;
+};
+
+uint shadow_caster_id_read([[resource_table]] ShadowRenderData &srd, ShadowCoordinates coord)
+{
+  ShadowSamplingTile tile = shadow_tile_load(
+      srd.shadow_tilemaps_tx, coord.tilemap_tile, coord.tilemap_index);
+  if (!tile.is_valid) {
+    return SHADOW_CASTER_UNKNOWN_ID;
+  }
+
+  constexpr uint page_shift = uint(SHADOW_PAGE_LOD);
+  constexpr uint page_mask = ~(0xFFFFFFFFu << uint(SHADOW_PAGE_LOD));
+
+  uint2 texel = coord.tilemap_texel;
+  texel += uint2(tile.lod_offset << SHADOW_PAGE_LOD);
+  uint2 texel_page = (texel >> tile.lod) & page_mask;
+  texel = (uint2(tile.page.xy) << page_shift) | texel_page;
+
+  uint packed_value = texelFetch(
+                          srd.shadow_caster_atlas_tx, int3(int2(texel), int(tile.page.z)), 0)
+                          .r;
+  if (packed_value == 0xFFFFFFFFu) {
+    return SHADOW_CASTER_UNKNOWN_ID;
+  }
+  return packed_value & 0xFFFFu;
+}
+
+ShadowCoordinates shadow_caster_sample_coord(ShadowRayDirectional ray, float ray_time)
+{
+  float3 ray_pos = ray.origin + ray.direction * ray_time;
+  return shadow_directional_coordinates(ray.light, ray_pos);
+}
+
+ShadowCoordinates shadow_caster_sample_coord(ShadowRayPunctual ray, float ray_time)
+{
+  float3 receiver_pos = ray.origin + ray.direction * ray_time;
+  int face_id = shadow_punctual_face_index_get(receiver_pos);
+  float3 face_pos = shadow_punctual_local_position_to_face_local(face_id, receiver_pos);
+  return shadow_punctual_coordinates(ray.light, face_pos, face_id);
+}
+
+template<typename ShadowRayType>
+ShadowCasterTraceResult shadow_trace_caster_id([[resource_table]] ShadowRenderData &srd,
+                                               ShadowRayType ray,
+                                               int sample_count,
+                                               float step_offset)
+{
+  ShadowMapTracingState state = shadow_map_trace_init(sample_count, step_offset);
+  uint caster_id = SHADOW_CASTER_UNKNOWN_ID;
+  for (int i = 0; (i <= sample_count) && (i <= SHADOW_MAX_STEP) && (state.hit == false); i++)
+  { /* Saturate to always cover the shading point position when i == sample_count. */
+    state.ray_time = square(saturate(float(i) * state.ray_step_mul + state.ray_step_bias));
+
+    ShadowTracingSample samp = shadow_map_trace_sample(srd, state, ray);
+    if (!samp.skip_sample) {
+      caster_id = shadow_caster_id_read(srd, shadow_caster_sample_coord(ray, state.ray_time));
+    }
+    shadow_map_trace_hit_check(state, samp, i == sample_count);
+  }
+
+  ShadowCasterTraceResult result;
+  result.hit = state.hit;
+  result.caster_id = state.hit ? caster_id : SHADOW_CASTER_UNKNOWN_ID;
+  return result;
+}
+
+template ShadowCasterTraceResult shadow_trace_caster_id<ShadowRayDirectional>(
+    ShadowRenderData &, ShadowRayDirectional, int, float);
+template ShadowCasterTraceResult shadow_trace_caster_id<ShadowRayPunctual>(
+    ShadowRenderData &, ShadowRayPunctual, int, float);
+
+float3 shadow_caster_classification_seeded([[resource_table]] ShadowRenderData &srd,
+                                           LightData light,
+                                           const bool is_directional,
+                                           uint receiver_id,
+                                           float3 P,
+                                           float3 Ng,
+                                           float3 N,
+                                           float terminator_normal_offset,
+                                           float terminator_geometry_offset,
+                                           int ray_count,
+                                           int ray_step_count,
+                                           float3 random_shadow_3d,
+                                           float2 random_pcf_2d)
+{
+  [[resource_table]] const Uniform &uni = srd.uniforms;
+  [[resource_table]] const draw::View &views = srd.views;
+
+  if (light.tilemap_index == LIGHT_NO_SHADOW || !uni.uniform_buf.shadow.use_caster_atlas) {
+    return float3(1.0f, 0.0f, 0.0f);
+  }
+
+  int safe_ray_count = clamp(ray_count, 1, SHADOW_MAX_RAY);
+  int safe_step_count = clamp(ray_step_count, 1, SHADOW_MAX_STEP);
+  uint self_id = receiver_id & 0xFFFFu;
+
+  float distance_to_shadow;
+  float3 L;
+  if (is_directional) {
+    L = light.z_axis();
+  }
+  else {
+    L = light.position() + light.local().local.shadow_position - P;
+    L = normalize_and_get_length(L, distance_to_shadow);
+  }
+
+  float texel_radius = shadow_texel_radius_at_position(uni, views, light, is_directional, P);
+  P = offset_ray(P, Ng);
+  P += (light.filter_radius * texel_radius) * shadow_pcf_offset(L, Ng, random_pcf_2d);
+  P += Ng * shadow_normal_offset(Ng, L, texel_radius);
+  P += N * shadow_terminator_offset(N, L, terminator_normal_offset, terminator_geometry_offset);
+
+  float3 lP = is_directional ? light_world_to_local_direction(light, P) :
+                               light_world_to_local_point(light, P);
+
+  float self_hit = 0.0f;
+  float cast_hit = 0.0f;
+  float unknown_hit = 0.0f;
+  for (int ray_index = 0; ray_index < SHADOW_MAX_RAY; ray_index++) {
+    if (ray_index >= safe_ray_count) {
+      break;
+    }
+
+    float2 random_ray_2d = fract(hammersley_2d(ray_index, safe_ray_count) + random_shadow_3d.xy);
+    ShadowCasterTraceResult trace_result;
+    if (is_directional) {
+      ShadowRayDirectional clip_ray = shadow_ray_generate_directional(
+          light, random_ray_2d, lP, texel_radius);
+      trace_result = shadow_trace_caster_id(srd, clip_ray, safe_step_count, random_shadow_3d.z);
+    }
+    else {
+      ShadowRayPunctual clip_ray = shadow_ray_generate_punctual(light, random_ray_2d, lP);
+      trace_result = shadow_trace_caster_id(srd, clip_ray, safe_step_count, random_shadow_3d.z);
+    }
+
+    if (!trace_result.hit) {
+      continue;
+    }
+    if (trace_result.caster_id == SHADOW_CASTER_UNKNOWN_ID) {
+      unknown_hit += 1.0f;
+    }
+    else if (trace_result.caster_id == self_id) {
+      self_hit += 1.0f;
+    }
+    else {
+      cast_hit += 1.0f;
+    }
+  }
+
+  float inv_count = 1.0f / float(safe_ray_count);
+  return float3(saturate(1.0f - (self_hit + cast_hit + unknown_hit) * inv_count),
+                saturate(self_hit * inv_count),
+                saturate(cast_hit * inv_count));
+}
+
+float3 shadow_caster_classification_seeded(LightData light,
+                                           const bool is_directional,
+                                           uint receiver_id,
+                                           float3 P,
+                                           float3 Ng,
+                                           float3 N,
+                                           float terminator_normal_offset,
+                                           float terminator_geometry_offset,
+                                           int ray_count,
+                                           int ray_step_count,
+                                           float3 random_shadow_3d,
+                                           float2 random_pcf_2d)
+{
+  [[resource_table]] ShadowRenderData &srd = resource_table_get(eevee::ShadowRenderData);
+  return shadow_caster_classification_seeded(srd,
+                                             light,
+                                             is_directional,
+                                             receiver_id,
+                                             P,
+                                             Ng,
+                                             N,
+                                             terminator_normal_offset,
+                                             terminator_geometry_offset,
+                                             ray_count,
+                                             ray_step_count,
+                                             random_shadow_3d,
+                                             random_pcf_2d);
+}
+#endif
+
 float shadow_eval([[resource_table]] ShadowRenderData &srd,
                   LightData light,
                   const bool is_directional,

@@ -217,7 +217,6 @@ class LightModule {
   bool light_shader_valid_ = false;
   bool front_light_shader_valid_ = false;
   bool uniform_light_shader_valid_ = false;
-  bool uniform_light_shader_evaluated_ = false;
   bool front_light_shader_missing_prepass_reported_ = false;
   bool front_light_shader_needed_ = false;
   bool volume_light_shader_valid_ = false;
@@ -320,8 +319,10 @@ class LightModule {
 
   template<typename PassType> void bind_light_shader_resources(PassType &pass)
   {
-    pass.bind_texture(LIGHT_SHADER_TEX_SLOT, &light_shader_tx_);
-    pass.bind_ssbo(LIGHT_SHADER_INDEX_BUF_SLOT, &light_shader_index_buf_);
+    /* Deferred direct-light eval reuses the prepass based cache. The GBuffer cache path is not
+     * stable across the 5.2 framebuffer/resource-table transition. */
+    pass.bind_texture(LIGHT_SHADER_TEX_SLOT, &front_light_shader_tx_);
+    pass.bind_ssbo(LIGHT_SHADER_INDEX_BUF_SLOT, &front_light_shader_index_buf_);
     pass.bind_ssbo(LIGHT_SHADER_UNIFORM_BUF_SLOT, &uniform_light_shader_buf_);
   }
 

@@ -70,9 +70,9 @@ void node_eevee_light_shader_info(out float4 default_color,
   distance = light_vector.dist;
   light_space = light_world_to_local_point(light, g_data.P);
   direction = light_vector.L;
-  world_position = light_position_get(light);
+  world_position = light.position();
   rotation = light_shader_info_to_euler(
-      float3x3(light_x_axis(light), light_y_axis(light), light_z_axis(light)));
+      float3x3(light.x_axis(), light.y_axis(), light.z_axis()));
 #else
   default_color = float4(1.0f);
   default_intensity = 1.0f;

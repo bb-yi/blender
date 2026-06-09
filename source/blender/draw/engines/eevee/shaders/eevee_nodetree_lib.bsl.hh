@@ -14,7 +14,6 @@
 #include "eevee_hiz.bsl.hh"
 #include "eevee_lightprobe.bsl.hh"
 #include "eevee_nodetree_closures_lib.glsl"
-#include "eevee_outline_lib.glsl"
 #include "eevee_pipeline.bsl.hh"
 #include "eevee_ray_trace_screen_lib.bsl.hh"
 #include "eevee_renderpass.bsl.hh"
@@ -98,6 +97,70 @@ ViewMatrices view_matrices_get()
   [[resource_table]] const draw::View &views = resource_table_get(draw::View);
   return views.get(view_id_get());
 }
+
+/* === NPR legacy draw-resource compatibility shims ===
+ * The NPR custom material nodes (bevel, curvature, screen-space info, parallax, world environment,
+ * ...) and `eevee_outline_lib.glsl` were written against the legacy `draw_view_lib.glsl` /
+ * `draw_object_infos_lib.glsl` free functions. Blender 5.2 (commit "EEVEE: Use BSL style resource
+ * access in materials") migrated the surface shaders to BSL resource access (`draw::View`,
+ * `draw::Infos`) and stopped pulling in the legacy libraries, so these free functions became
+ * undefined in the deferred/forward/world material passes. Re-expose them here, backed by the BSL
+ * resource accessors above, so the NPR node sources keep compiling unchanged. This library is
+ * included by every material pass, so the shims reach the appended node code.
+ * Skipped in the legacy passes (NPR surface, bake color, ...) that `#include "draw_view_lib.glsl"`
+ * directly before this header, which define `DRW_VIEW_LIB_INCLUDED` and provide the real
+ * functions. */
+#ifndef DRW_VIEW_LIB_INCLUDED
+ViewMatrices drw_view()
+{
+  return view_matrices_get();
+}
+float3 drw_point_world_to_view(float3 P)
+{
+  return view_matrices_get().point_world_to_view(P);
+}
+float3 drw_point_view_to_world(float3 vP)
+{
+  return view_matrices_get().point_view_to_world(vP);
+}
+float3 drw_point_screen_to_world(float3 ss_P)
+{
+  return view_matrices_get().point_screen_to_world(ss_P);
+}
+float3 drw_point_world_to_screen(float3 P)
+{
+  return view_matrices_get().point_world_to_screen(P);
+}
+float3 drw_point_view_to_screen(float3 vP)
+{
+  return view_matrices_get().point_view_to_screen(vP);
+}
+float3 drw_point_screen_to_view(float3 ss_P)
+{
+  return view_matrices_get().point_screen_to_view(ss_P);
+}
+float drw_depth_screen_to_view(float ss_depth)
+{
+  return view_matrices_get().depth_screen_to_view(ss_depth);
+}
+float3 drw_world_incident_vector(float3 P)
+{
+  return view_matrices_get().world_incident_vector(P);
+}
+uint drw_resource_id()
+{
+  return resource_id_get();
+}
+ObjectInfos drw_object_infos()
+{
+  return object_infos_get();
+}
+#endif /* DRW_VIEW_LIB_INCLUDED */
+
+/* Outline library uses the legacy draw free functions above; include it after the shims so they
+ * resolve in the BSL material passes (it is included directly with the real functions in the
+ * legacy passes). */
+#include "eevee_outline_lib.glsl"
 
 float sampling_rng_1D_get(eSamplingDimension dim)
 {
@@ -957,8 +1020,8 @@ void scene_time_uniforms(float &seconds, float &frame)
 {
   [[resource_table]] const eevee::Uniform &uni = resource_table_get(eevee::Uniform);
 
-  seconds = uni.uniform_buf.scene.time;
-  frame = uni.uniform_buf.scene.frame;
+  seconds = uni.uniform_buf.scene_time.seconds;
+  frame = uni.uniform_buf.scene_time.frame;
 }
 
 /** \} */

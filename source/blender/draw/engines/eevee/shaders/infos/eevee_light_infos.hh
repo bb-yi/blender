@@ -6,9 +6,13 @@
 #  pragma once
 #  include "gpu_shader_compat.hh"
 
+#  include "draw_view_infos.hh"
+#  include "eevee_common_infos.hh"
 #  include "eevee_fullscreen_infos.hh"
 #  include "eevee_light_shared.hh"
 #  include "eevee_lightprobe_shared.hh"
+#  include "eevee_sampling_infos.hh"
+#  include "eevee_uniform_infos.hh"
 #endif
 
 #include "eevee_defines.hh"

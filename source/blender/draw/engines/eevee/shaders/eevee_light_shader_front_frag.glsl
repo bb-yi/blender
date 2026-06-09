@@ -52,9 +52,9 @@ void main()
   g_data.P = P;
   g_data.N = g_data.Ni = N;
   g_data.Ng = N;
-  g_data.ray_length = distance(g_data.P, drw_view_position());
+  g_data.ray_length = distance(P, drw_view_position());
 
-  attrib_load(WorldPoint{0});
+  attrib_load(WorldPoint{float3(0.0f)});
 
   out_light_shader = light_shader_result_clamp(nodetree_light_shader());
 }

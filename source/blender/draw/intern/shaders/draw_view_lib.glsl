@@ -4,6 +4,11 @@
 
 #pragma once
 
+/* Marker so EEVEE's BSL material library (eevee_nodetree_lib.bsl.hh) can detect that the legacy
+ * draw-view free functions are provided directly here, and skip its own compatibility shims. Only
+ * the legacy passes include this file; the BSL material passes use draw_view.bsl.hh instead. */
+#define DRW_VIEW_LIB_INCLUDED
+
 #include "draw_view_infos.hh"
 
 SHADER_LIBRARY_CREATE_INFO(draw_view)

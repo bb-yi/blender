@@ -9,7 +9,9 @@
 #  include "draw_view_infos.hh"
 
 #  include "eevee_common_infos.hh"
+#  include "eevee_light_infos.hh"
 #  include "eevee_sampling_infos.hh"
+#  include "eevee_shadow_infos.hh"
 #endif
 
 #include "eevee_defines.hh"
@@ -39,6 +41,8 @@ ADDITIONAL_INFO(eevee_gbuffer_data)
 ADDITIONAL_INFO(eevee_global_ubo)
 ADDITIONAL_INFO(eevee_utility_texture)
 ADDITIONAL_INFO(eevee_sampling_data)
+ADDITIONAL_INFO(eevee_light_data)
+ADDITIONAL_INFO(eevee_shadow_data)
 ADDITIONAL_INFO(eevee_hiz_data)
 ADDITIONAL_INFO(draw_view)
 ADDITIONAL_INFO(draw_view_culling)
@@ -70,6 +74,8 @@ ADDITIONAL_INFO(eevee_gbuffer_data)
 ADDITIONAL_INFO(eevee_global_ubo)
 ADDITIONAL_INFO(eevee_utility_texture)
 ADDITIONAL_INFO(eevee_sampling_data)
+ADDITIONAL_INFO(eevee_light_data)
+ADDITIONAL_INFO(eevee_shadow_data)
 ADDITIONAL_INFO(eevee_hiz_data)
 ADDITIONAL_INFO(draw_view)
 ADDITIONAL_INFO(draw_view_culling)

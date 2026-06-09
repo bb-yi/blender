@@ -423,6 +423,7 @@ namespace blender::eevee
 
   void Instance::begin_sync()
   {
+    update_eval_members();
     telemetry.maybe_begin_viewport_frame();
     ScopedTelemetrySample telemetry_sample(telemetry, TelemetryStageId::SyncBegin);
     /* Needs to be first for sun light parameters.

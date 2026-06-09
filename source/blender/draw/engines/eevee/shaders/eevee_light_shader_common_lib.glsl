@@ -9,7 +9,7 @@ void light_shader_globals_init()
   g_data.is_strand = false;
   g_data.hair_diameter = 0.0f;
   g_data.hair_strand_id = 0;
-  g_data.ray_type = uniform_buf.pipeline.ray_type;
+  g_data.ray_type = RAY_TYPE_CAMERA;
   g_data.ray_depth = 0.0f;
   g_data.barycentric_coords = float2(0.0f);
   g_data.barycentric_dists = float3(0.0f);

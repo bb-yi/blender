@@ -35,15 +35,16 @@ void main()
   float jitter = volume_froxel_jitter(froxel.xy, offset);
   float3 uvw = (float3(froxel) + float3(0.5f, 0.5f, 0.5f - jitter)) *
                uniform_buf.volumes.inv_tex_size;
-  float3 vP = volume_jitter_to_view(uvw);
+  [[resource_table]] const eevee::Uniform &uni = resource_table_get(eevee::Uniform);
+  float3 vP = volume_jitter_to_view(uni, drw_view(), uvw);
   float3 P = drw_point_view_to_world(vP);
 
   g_data.P = P;
   g_data.N = g_data.Ni = drw_world_incident_vector(P);
   g_data.Ng = g_data.N;
-  g_data.ray_length = distance(g_data.P, drw_view_position());
+  g_data.ray_length = distance(P, drw_view_position());
 
-  attrib_load(WorldPoint{0});
+  attrib_load(WorldPoint{float3(0.0f)});
 
   int layer = light_index * uniform_buf.volumes.tex_size.z + froxel.z;
   imageStoreFast(out_light_shader_img,

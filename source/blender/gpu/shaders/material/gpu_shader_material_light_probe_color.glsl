@@ -34,23 +34,27 @@ void node_light_probe_color(float3 direction,
 #  ifdef SPHERE_PROBE
   float3 geometry_normal = light_probe_color_safe_direction(g_data.Ng, float3(0.0f, 0.0f, 1.0f));
   float3 shading_normal = light_probe_color_resolve_shading_normal();
-  float3 view_vector = drw_world_incident_vector(g_data.P);
+  const ViewMatrices view = view_matrices_get();
+  float3 view_vector = view.world_incident_vector(g_data.P);
   float3 reflected_view_direction = light_probe_color_safe_direction(
       -reflect(view_vector, shading_normal), -view_vector);
   float3 reflection_direction = light_probe_color_safe_direction(direction,
                                                                 reflected_view_direction);
   float3 irradiance_direction = light_probe_color_safe_direction(direction, shading_normal);
-  float reflection_lod = sphere_probe_roughness_to_lod(saturate(roughness));
+  float reflection_lod = lightprobe::sphere::roughness_to_lod(saturate(roughness));
 
-  LightProbeSample probe_sample = lightprobe_load(g_data.P, geometry_normal, view_vector);
-  probe_sample.volume_irradiance = spherical_harmonics_clamp(probe_sample.volume_irradiance,
-                                                             uniform_buf.clamp.surface_indirect);
+  [[resource_table]] const eevee::LightprobeRenderData &lightprobes = resource_table_get(
+      eevee::LightprobeRenderData);
+  [[resource_table]] const eevee::LightprobeSphereRenderData &lp_spheres = lightprobes.spheres;
+  eevee::LightProbeSample probe_sample = lightprobes.load(
+      gl_FragCoord.xy, g_data.P, geometry_normal, view_vector);
+  probe_sample.volume_irradiance = spherical_harmonics::clamp_energy(
+      probe_sample.volume_irradiance, uniform_buf.clamp.surface_indirect);
 
-  float3 reflection_rgb = lightprobe_spherical_sample_normalized_with_parallax(
+  float3 reflection_rgb = lp_spheres.spherical_sample_normalized_with_parallax(
       probe_sample, g_data.P, reflection_direction, reflection_lod);
-  float3 irradiance_rgb = max(spherical_harmonics_evaluate_lambert(irradiance_direction,
-                                                                   probe_sample.volume_irradiance),
-                              float3(0.0f));
+  float3 irradiance_rgb = max(
+      probe_sample.volume_irradiance.evaluate_lambert(irradiance_direction).rgb, float3(0.0f));
   float3 combined_rgb = reflection_rgb + irradiance_rgb;
 
   reflection = float4(reflection_rgb, 1.0f);

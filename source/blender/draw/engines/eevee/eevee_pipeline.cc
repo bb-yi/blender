@@ -716,6 +716,9 @@ PassMain::Sub *Prepass::add(blender::Material *blender_mat,
 void Prepass::end_sync()
 {
   const bool has_raycast = inst_.pipelines.has_raycast;
+  const bool needs_camera_prepass_normal = !has_raycast &&
+                                           (inst_.outline.enabled() ||
+                                            inst_.lights.needs_front_light_shader());
 
   for (bool hide_from_raycast : {false, true}) {
     for (int ztest_mode = MA_ZTEST_LESS_EQUAL; ztest_mode <= MA_ZTEST_NEVER; ztest_mode++) {
@@ -729,15 +732,16 @@ void Prepass::end_sync()
             }
             const bool write_raycast = has_raycast && !hide_from_raycast;
             const bool read_raycast = has_raycast && hide_from_raycast;
+            const bool write_normal = write_raycast || needs_camera_prepass_normal;
             const bool write_motion = supports_motion_vectors_ && moving;
             DRWState state = material_ztest_state_replace(
                 common_state_, eMaterialZTestMode(ztest_mode), inst_.film.depth.test_state);
             SET_FLAG_FROM_TEST(state, !double_sided, DRW_STATE_CULL_BACK);
-            SET_FLAG_FROM_TEST(state, write_raycast || write_motion, DRW_STATE_WRITE_COLOR);
+            SET_FLAG_FROM_TEST(state, write_normal || write_motion, DRW_STATE_WRITE_COLOR);
             sub->state_set(state);
             sub->subpass_transition(
                 GPU_ATTACHMENT_WRITE,
-                {write_raycast ?
+                {write_normal ?
                      GPU_ATTACHMENT_WRITE :
                      (read_raycast ? GPU_ATTACHMENT_READ : GPU_ATTACHMENT_IGNORE), /* normal */
                  (write_raycast && write_id) ?
@@ -1792,6 +1796,7 @@ PassMain::Sub *DeferredLayer::material_add(blender::Material *blender_mat, GPUMa
   if (needs_front_light_shader) {
     material_pass->bind_resources(inst_.lights);
     inst_.lights.bind_front_light_shader_resources(*material_pass);
+    material_pass->bind_resources(inst_.shadows);
   }
   /* Set stencil for some deferred specialized shaders. */
   uint8_t material_stencil_bits = 0u;
@@ -2587,6 +2592,7 @@ PassMain::Sub *DeferredProbePipeline::material_add(blender::Material *blender_ma
   if (needs_front_light_shader) {
     material_pass->bind_resources(inst_.lights);
     inst_.lights.bind_front_light_shader_resources(*material_pass);
+    material_pass->bind_resources(inst_.shadows);
   }
   return material_pass;
 }
@@ -2781,6 +2787,7 @@ PassMain::Sub *PlanarProbePipeline::material_add(blender::Material *blender_mat,
   if (needs_front_light_shader) {
     material_pass->bind_resources(inst_.lights);
     inst_.lights.bind_front_light_shader_resources(*material_pass);
+    material_pass->bind_resources(inst_.shadows);
   }
   return material_pass;
 }

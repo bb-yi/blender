@@ -39,6 +39,10 @@ struct SurfShadow {
             read)]] const uint (&render_map_buf)[SHADOW_RENDER_MAP_SIZE];
 
   [[image(SHADOW_ATLAS_IMG_SLOT, read_write, UINT_32)]] uimage2DArrayAtomic shadow_atlas_img;
+  [[image(SHADOW_CASTER_ATLAS_IMG_SLOT, read_write, UINT_32)]] uimage2DArrayAtomic
+      shadow_caster_atlas_img;
+
+  [[push_constant]] const int use_shadow_caster_atlas;
 };
 
 [[fragment]] [[texture_atomic]]
@@ -116,6 +120,10 @@ void surf_shadow([[resource_table]] PipelineConstants &pipe,
   }
   else {
     imageAtomicMin(srt.shadow_atlas_img, out_texel, u_depth);
+    if (srt.use_shadow_caster_atlas != 0) {
+      uint packed_caster = (u_depth & 0xFFFF0000u) | (resource_id_get() & 0xFFFFu);
+      imageAtomicMin(srt.shadow_caster_atlas_img, out_texel, packed_caster);
+    }
   }
 }
 

@@ -51,18 +51,18 @@ bool foreach_light_setup(uint l_idx,
   float shadow_mask = 1.0f;
   if (light.tilemap_index != LIGHT_NO_SHADOW) {
     int ray_step_count = max(uniform_buf.shadow.step_count, NPR_STABLE_SHADOW_MIN_STEP_COUNT);
-    shadow_mask = shadow_eval_stable(light,
-                                     is_directional,
-                                     false,
-                                     false,
-                                     0.0f,
-                                     g_data.P,
-                                     g_data.Ng,
-                                     N,
-                                     0.0f,
-                                     0.0f,
-                                     NPR_STABLE_SHADOW_RAY_COUNT,
-                                     ray_step_count);
+    shadow_mask = eevee_shadow_eval_stable(light,
+                                           is_directional,
+                                           false,
+                                           false,
+                                           0.0f,
+                                           g_data.P,
+                                           g_data.Ng,
+                                           N,
+                                           0.0f,
+                                           0.0f,
+                                           NPR_STABLE_SHADOW_RAY_COUNT,
+                                           ray_step_count);
     shadow_mask *= dot(N, lv.L) > 0.0f ? 1.0f : 0.0f;
   }
 

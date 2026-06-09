@@ -45,6 +45,9 @@ namespace eevee {
 struct SurfaceDeferred {
   [[legacy_info]] ShaderCreateInfo draw_view_culling;
   [[legacy_info]] ShaderCreateInfo eevee_geom_iface_info;
+  /* NPR: custom screen-space material nodes (bevel, curvature, ...) sample scene depth directly.
+   * Restores the `hiz_tx` binding that npr-port-5.1 had on the (now removed) legacy deferred base. */
+  [[legacy_info]] ShaderCreateInfo eevee_hiz_data;
 
   /* Everything is stored inside a two layered target, one for each format. This is to fit the
    * limitation of the number of images we can bind on a single shader. */

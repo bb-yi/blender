@@ -26,12 +26,13 @@ void main()
 
   light_shader_globals_init();
 
-  g_data.P = light_position_get(light);
+  float3 P = light.position();
+  g_data.P = P;
   g_data.N = g_data.Ni = float3(0.0f, 0.0f, 1.0f);
   g_data.Ng = g_data.N;
-  g_data.ray_length = distance(g_data.P, drw_view_position());
+  g_data.ray_length = distance(P, drw_view_position());
 
-  attrib_load(WorldPoint{0});
+  attrib_load(WorldPoint{float3(0.0f)});
 
   out_light_shader_buf[light_index] = light_shader_result_clamp(nodetree_light_shader());
 }

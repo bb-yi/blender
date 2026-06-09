@@ -1220,6 +1220,7 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
           info.name_ += "_bake_color";
           break;
         case MAT_PIPE_DEFERRED:
+          info.define("MAT_DEFERRED");
           if (use_shader_to_rgba) {
             pipeline_info_name = "eevee_surf_hybrid_infos_";
             info.define("closure_to_rgba", "closure_to_rgba_hybrid");
@@ -1250,6 +1251,7 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
           break;
         case MAT_PIPE_FORWARD:
           pipeline_info_name = "eevee_surf_forward_infos_";
+          info.define("MAT_FORWARD");
           info.define("closure_to_rgba", "closure_to_rgba_forward");
           info.compilation_constant(gpu::shader::Type::bool_t, "use_velocity", false);
           info.name_ += "_forward";
@@ -1796,11 +1798,16 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   if (ELEM(pipeline_type, MAT_PIPE_FORWARD, MAT_PIPE_BAKE_COLOR) ||
       use_front_light_shader_in_surface_pass)
   {
+    const bool use_light_shader_texture_eval =
+        ELEM(pipeline_type, MAT_PIPE_FORWARD, MAT_PIPE_BAKE_COLOR) ||
+        use_front_light_shader_in_surface_pass;
     const int transmit_eval_count = (closure_bits &
                                      (CLOSURE_REFRACTION | CLOSURE_TRANSLUCENT | CLOSURE_SSS)) ?
                                         1 :
                                         0;
 
+    info.compilation_constant(
+        gpu::shader::Type::bool_t, "use_light_shader_texture_eval", use_light_shader_texture_eval);
     info.compilation_constant(
         gpu::shader::Type::int_t, "light_closure_eval_count_reflect", closure_bin_count);
     info.compilation_constant(
@@ -2266,13 +2273,24 @@ static void light_create_info_amend(GPUMaterial *gpumat,
   GPUCodegenOutput &codegen = *codegen_;
   ShaderCreateInfo &info = *reinterpret_cast<ShaderCreateInfo *>(codegen.create_info);
 
-  info.additional_info(pipeline_info.create_info_name);
+  SlotAllocator slots;
+  add_create_info_and_reserve(info, slots, pipeline_info.create_info_name);
+  add_create_info_and_reserve(info, slots, "eevee_Uniform");
+  const bool uses_glsl_light_access = codegen.light_shader.has_value() &&
+                                      material_graph_uses_glsl_light_access(gpumat,
+                                                                            *codegen.light_shader);
+  const bool uses_glsl_light_shadow =
+      uses_glsl_light_access &&
+      material_graph_dependency_source_contains(gpumat, *codegen.light_shader, "glsl_light_shadow");
+  if (uses_glsl_light_access) {
+    info.define("MAT_GLSL_LIGHT_ACCESS");
+  }
+  if (uses_glsl_light_shadow) {
+    info.define("MAT_GLSL_LIGHT_SHADOW_ACCESS");
+    add_create_info_and_reserve(info, slots, "eevee_shadow_data");
+  }
   info.name_ += pipeline_info.name_suffix;
 
-  SlotAllocator slots;
-  const ShaderCreateInfo *light_shader_info = reinterpret_cast<const ShaderCreateInfo *>(
-      GPU_shader_create_info_get(pipeline_info.create_info_name));
-  slots.reserve_slots(*light_shader_info);
   slots.reserve_sampler_range(MATERIAL_TEXTURE_RESERVED_SLOT_FIRST,
                               MATERIAL_TEXTURE_RESERVED_SLOT_LAST_NO_EVAL);
   slots.reserve_sampler(LIGHT_SHADER_TEX_SLOT);
@@ -2309,10 +2327,13 @@ static void light_create_info_amend(GPUMaterial *gpumat,
   Set<StringRefNull> dependencies_set;
   Set<StringRefNull> emitted_generated_sources;
   std::stringstream generated_source_block;
-  dependencies_set.add("eevee_geom_types_lib.glsl");
+  dependencies_set.add("eevee_geom_types_lib.bsl.hh");
   dependencies_set.add("eevee_attributes_world_lib.glsl");
   dependencies_set.add("eevee_light_lib.glsl");
-  dependencies_set.add("eevee_nodetree_lib.glsl");
+  dependencies_set.add("eevee_nodetree_lib.bsl.hh");
+  if (uses_glsl_light_shadow) {
+    dependencies_set.add("eevee_shadow_tracing.bsl.hh");
+  }
   if (codegen.light_shader.has_value()) {
     material_graph_dependencies_append(gpumat,
                                        codegen.light_shader->dependencies,
