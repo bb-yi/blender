@@ -180,17 +180,23 @@ def attach_solid_world_npr(output):
     output.nprtree = npr_tree
 
 
-def attach_combined_color_world_npr(output):
-    npr_tree = bpy.data.node_groups.new("WorldCombinedColorNPRTree", "ShaderNodeTree")
+def attach_npr_input_passthrough_world_npr(output, input_name, tree_name):
+    npr_tree = bpy.data.node_groups.new(tree_name, "ShaderNodeTree")
     nodes = npr_tree.nodes
     links = npr_tree.links
     nodes.clear()
 
     npr_input = nodes.new("ShaderNodeNPR_Input")
     npr_output = nodes.new("ShaderNodeNPR_Output")
-    links.new(npr_input.outputs["Combined Color"], npr_output.inputs["Color"])
+    links.new(npr_input.outputs[input_name], npr_output.inputs["Color"])
 
     output.nprtree = npr_tree
+
+
+def attach_combined_color_world_npr(output):
+    attach_npr_input_passthrough_world_npr(
+        output, "Combined Color", "WorldCombinedColorNPRTree"
+    )
 
 
 def attach_image_sample_world_npr(output, input_name, tree_name, scale=1.0):
@@ -388,6 +394,31 @@ def test_basic_world_npr_output():
     assert b < 0.1, f"Expected low blue from World NPR Combined Color passthrough, got {pixel}"
 
 
+def test_world_npr_input_color_channels():
+    clear_scene()
+    world_output = configure_scene()
+
+    for input_name in [
+        "Combined Color",
+        "Diffuse Color",
+        "Diffuse Direct",
+        "Diffuse Indirect",
+        "Specular Color",
+        "Specular Direct",
+        "Specular Indirect",
+    ]:
+        tree_name = "World" + input_name.replace(" ", "") + "PassthroughNPRTree"
+        attach_npr_input_passthrough_world_npr(world_output, input_name, tree_name)
+        pixel = render_center_pixel()
+        r, g, b, _a = pixel
+        safe_name = input_name.upper().replace(" ", "_")
+        print(f"WORLD_NPR_INPUT_{safe_name}_CENTER={pixel}")
+
+        assert g > 0.8, f"Expected World NPR {input_name} to read green background, got {pixel}"
+        assert r < 0.1, f"Expected low red from World NPR {input_name}, got {pixel}"
+        assert b < 0.1, f"Expected low blue from World NPR {input_name}, got {pixel}"
+
+
 def test_world_npr_image_sample_buffers():
     clear_scene()
     world_output = configure_scene()
@@ -482,6 +513,7 @@ def test_world_npr_glsl_closure_output_sampler():
 
 def main():
     test_basic_world_npr_output()
+    test_world_npr_input_color_channels()
     test_world_npr_image_sample_buffers()
     test_world_npr_combined_color_image_sample_offset()
     test_world_npr_image_texture_defaults_to_window_coordinates()

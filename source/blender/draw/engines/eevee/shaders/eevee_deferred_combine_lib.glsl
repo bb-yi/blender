@@ -47,6 +47,83 @@ float3 load_radiance_indirect(int2 texel, uchar i)
   return float3(0.0f);
 }
 
+float4 npr_gbuffer_fetch_data(int2 texel, uchar layer)
+{
+#if defined(GPU_NVIDIA) && defined(GPU_OPENGL)
+  /* Keep parity with gbuffer::Reader::fetch_data(). */
+  layer = min(layer, 9999);
+#endif
+  return texelFetch(gbuf_closure_tx, int3(texel, int(layer)), 0);
+}
+
+float4 npr_gbuffer_fetch_normal(int2 texel, uchar layer)
+{
+#if defined(GPU_NVIDIA) && defined(GPU_OPENGL)
+  /* Keep parity with gbuffer::Reader::fetch_normal(). */
+  layer = min(layer, 9999);
+#endif
+  return texelFetch(gbuf_normal_tx, int3(texel, int(layer)), 0);
+}
+
+float4 npr_gbuffer_fetch_additional_data(int2 texel)
+{
+  return texelFetch(gbuf_normal_tx, int3(texel, textureSize(gbuf_normal_tx, 0).z - 1), 0);
+}
+
+ClosureUndetermined npr_gbuffer_read_layer(uchar normal_id,
+                                           uchar closure_len,
+                                           uchar bin_mode,
+                                           int2 texel,
+                                           uchar layer_id)
+{
+  if (bin_mode == 0u /* GBUF_NONE */) {
+    return closure_new(ClosureType(CLOSURE_NONE_ID));
+  }
+
+  gbuffer::ClosurePacking cl_in;
+  cl_in.mode = bin_mode;
+  cl_in.N = gbuffer::normal_unpack(npr_gbuffer_fetch_normal(texel, normal_id).xy);
+  cl_in.data0 = npr_gbuffer_fetch_data(texel, layer_id);
+  if (cl_in.use_data1()) {
+    cl_in.data1 = npr_gbuffer_fetch_data(texel, layer_id + closure_len);
+  }
+  return gbuffer::detail::unpack_closure(cl_in);
+}
+
+gbuffer::Layers npr_gbuffer_read_layers(int2 texel)
+{
+  gbuffer::Layers layers;
+  layers.header = gbuffer::Header::from_data(texelFetch(gbuf_header_tx, int3(texel, 0), 0).r);
+  uint3 layer_types = layers.header.bin_types_per_layer();
+  uchar closure_count = layers.header.closure_len();
+
+  for (int i = 0; i < 3 /* GBUFFER_LAYER_MAX */; i++) [[unroll]] {
+    layers.layer[i] = npr_gbuffer_read_layer(layers.header.tangent_space_id(i),
+                                             closure_count,
+                                             uchar(layer_types[i]),
+                                             texel,
+                                             uchar(i));
+  }
+  return layers;
+}
+
+Thickness npr_gbuffer_read_thickness(gbuffer::Header header, int2 texel)
+{
+  if (!header.has_additional_data()) {
+    return Thickness::zero();
+  }
+  return gbuffer::AdditionalInfo::unpack(npr_gbuffer_fetch_additional_data(texel).rg).thickness;
+}
+
+float npr_gbuffer_read_surface_depth(gbuffer::Header header, int2 texel, float fallback_depth)
+{
+  if (!header.use_surface_depth()) {
+    return fallback_depth;
+  }
+  return gbuffer::AdditionalInfo::unpack(npr_gbuffer_fetch_additional_data(texel).rg)
+      .surface_depth;
+}
+
 struct DeferredCombine {
   float3 diffuse_color;
   float3 diffuse_direct;
@@ -61,7 +138,7 @@ struct DeferredCombine {
 
 DeferredCombine deferred_combine(int2 texel)
 {
-  const gbuffer::Layers gbuf = gbuffer::read_layers(texel);
+  const gbuffer::Layers gbuf = npr_gbuffer_read_layers(texel);
   const uchar closure_count = gbuf.header.closure_len();
   const uint3 bin_indices = gbuf.header.bin_index_per_layer();
 
@@ -76,47 +153,52 @@ DeferredCombine deferred_combine(int2 texel)
   dc.out_indirect = float3(0.0f);
   dc.average_normal = float3(0.0f);
 
-  for (uchar i = 0; i < GBUFFER_LAYER_MAX && i < closure_count; i++) {
-    ClosureUndetermined cl = gbuf.layer_get(i);
-    if (cl.type == CLOSURE_NONE_ID) {
-      continue;
+  /* Match the BSL deferred combine shader: keep the layer reads unrolled so all packed
+   * GBuffer layers remain visible to the translator and driver. */
+  for (int i = 0; i < 3 /* GBUFFER_LAYER_MAX */; i++) [[unroll]] {
+    if (i < closure_count) {
+      ClosureUndetermined cl = gbuf.layer[i];
+      if (cl.type != CLOSURE_NONE_ID) {
+
+        uchar layer_index = bin_indices[i];
+        float3 closure_direct_light = load_radiance_direct(texel, layer_index);
+        float3 closure_indirect_light = use_split_radiance ?
+                                            load_radiance_indirect(texel, layer_index) :
+                                            float3(0.0f);
+
+        dc.average_normal += cl.N * reduce_add(cl.color);
+
+        switch (cl.type) {
+          case CLOSURE_BSDF_TRANSLUCENT_ID:
+          case CLOSURE_BSSRDF_BURLEY_ID:
+          case CLOSURE_BSDF_DIFFUSE_ID:
+            dc.diffuse_color += cl.color;
+            dc.diffuse_direct += closure_direct_light;
+            dc.diffuse_indirect += closure_indirect_light;
+            break;
+          case CLOSURE_BSDF_MICROFACET_GGX_REFLECTION_ID:
+          case CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID:
+          case CLOSURE_BSDF_THIN_GLASS_TRANSMISSION_ID:
+            dc.specular_color += cl.color;
+            dc.specular_direct += closure_direct_light;
+            dc.specular_indirect += closure_indirect_light;
+            break;
+          case CLOSURE_NONE_ID:
+            break;
+        }
+
+        if ((cl.type == CLOSURE_BSDF_TRANSLUCENT_ID ||
+             cl.type == CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID) &&
+            (npr_gbuffer_read_thickness(gbuf.header, texel).value() != 0.0f))
+        {
+          /* We model two transmission events, so the surface color needs to be applied twice. */
+          cl.color *= cl.color;
+        }
+
+        dc.out_direct += closure_direct_light * cl.color;
+        dc.out_indirect += closure_indirect_light * cl.color;
+      }
     }
-
-    uchar layer_index = bin_indices[i];
-    float3 closure_direct_light = load_radiance_direct(texel, layer_index);
-    float3 closure_indirect_light = use_split_radiance ? load_radiance_indirect(texel, layer_index) :
-                                                        float3(0.0f);
-
-    dc.average_normal += cl.N * reduce_add(cl.color);
-
-    switch (cl.type) {
-      case CLOSURE_BSDF_TRANSLUCENT_ID:
-      case CLOSURE_BSSRDF_BURLEY_ID:
-      case CLOSURE_BSDF_DIFFUSE_ID:
-        dc.diffuse_color += cl.color;
-        dc.diffuse_direct += closure_direct_light;
-        dc.diffuse_indirect += closure_indirect_light;
-        break;
-      case CLOSURE_BSDF_MICROFACET_GGX_REFLECTION_ID:
-      case CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID:
-        dc.specular_color += cl.color;
-        dc.specular_direct += closure_direct_light;
-        dc.specular_indirect += closure_indirect_light;
-        break;
-      case CLOSURE_NONE_ID:
-        break;
-    }
-
-    if ((cl.type == CLOSURE_BSDF_TRANSLUCENT_ID ||
-         cl.type == CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID) &&
-        (gbuffer::read_thickness(gbuf.header, texel).value() != 0.0f))
-    {
-      /* We model two transmission events, so the surface color needs to be applied twice. */
-      cl.color *= cl.color;
-    }
-
-    dc.out_direct += closure_direct_light * cl.color;
-    dc.out_indirect += closure_indirect_light * cl.color;
   }
 
   float normal_len = length(dc.average_normal);

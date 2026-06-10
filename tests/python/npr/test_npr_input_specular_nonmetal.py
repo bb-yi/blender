@@ -105,13 +105,19 @@ object_pixel_indices = [
     i for i in range(0, len(mask_pixels), 4) if luminance_at(mask_pixels, i) > 0.5
 ]
 
-print(f"NPR_INPUT_SPECULAR_NONMETAL_MASK_PIXELS={len(object_pixel_indices)}")
+print(f"NPR_INPUT_NONMETAL_MASK_PIXELS={len(object_pixel_indices)}")
 assert len(object_pixel_indices) > 512, "Expected the Suzanne object mask to cover visible pixels"
 
 checks = [
+    ("Combined Color", 0.0, 0.05, 32),
+    ("Diffuse Color", 0.0, 0.05, 32),
+    ("Diffuse Direct", 0.0, 0.05, 8),
+    ("Diffuse Indirect", 1.0, 0.05, 32),
     ("Specular Color", 0.0, 0.05, 32),
     ("Specular Direct", 0.0, 0.05, 8),
     ("Specular Indirect", 1.0, 0.05, 32),
+    ("Position", 0.0, 0.05, 32),
+    ("Normal", 0.0, 0.05, 32),
 ]
 
 for socket_name, world_strength, min_max_luma, min_bright_pixels in checks:

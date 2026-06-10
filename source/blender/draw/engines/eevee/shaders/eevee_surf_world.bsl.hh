@@ -31,8 +31,14 @@ float4 closure_to_rgba_world(Closure /*cl*/)
 #ifdef NPR_SHADER
 #  define TEX_HANDLE_NULL 0u
 #  define TEX_HANDLE_WORLD_COMBINED_COLOR 1u
-#  define TEX_HANDLE_WORLD_POSITION 2u
-#  define TEX_HANDLE_WORLD_NORMAL 3u
+#  define TEX_HANDLE_WORLD_DIFFUSE_COLOR 2u
+#  define TEX_HANDLE_WORLD_DIFFUSE_DIRECT 3u
+#  define TEX_HANDLE_WORLD_DIFFUSE_INDIRECT 4u
+#  define TEX_HANDLE_WORLD_SPECULAR_COLOR 5u
+#  define TEX_HANDLE_WORLD_SPECULAR_DIRECT 6u
+#  define TEX_HANDLE_WORLD_SPECULAR_INDIRECT 7u
+#  define TEX_HANDLE_WORLD_POSITION 8u
+#  define TEX_HANDLE_WORLD_NORMAL 9u
 
 float4 g_world_combined_color;
 float g_world_background_blur;
@@ -217,12 +223,12 @@ void npr_input_impl(out TextureHandle combined_color,
                     out TextureHandle normal)
 {
   combined_color = TextureHandle(TEX_HANDLE_WORLD_COMBINED_COLOR, 0);
-  diffuse_color = TEXTURE_HANDLE_DEFAULT;
-  diffuse_direct = TEXTURE_HANDLE_DEFAULT;
-  diffuse_indirect = TEXTURE_HANDLE_DEFAULT;
-  specular_color = TEXTURE_HANDLE_DEFAULT;
-  specular_direct = TEXTURE_HANDLE_DEFAULT;
-  specular_indirect = TEXTURE_HANDLE_DEFAULT;
+  diffuse_color = TextureHandle(TEX_HANDLE_WORLD_DIFFUSE_COLOR, 0);
+  diffuse_direct = TextureHandle(TEX_HANDLE_WORLD_DIFFUSE_DIRECT, 0);
+  diffuse_indirect = TextureHandle(TEX_HANDLE_WORLD_DIFFUSE_INDIRECT, 0);
+  specular_color = TextureHandle(TEX_HANDLE_WORLD_SPECULAR_COLOR, 0);
+  specular_direct = TextureHandle(TEX_HANDLE_WORLD_SPECULAR_DIRECT, 0);
+  specular_indirect = TextureHandle(TEX_HANDLE_WORLD_SPECULAR_INDIRECT, 0);
   position = TextureHandle(TEX_HANDLE_WORLD_POSITION, 0);
   normal = TextureHandle(TEX_HANDLE_WORLD_NORMAL, 0);
 }
@@ -248,6 +254,12 @@ float4 TextureHandle_eval(TextureHandle tex, float2 offset, bool texel_offset)
   if (all(equal(offset, float2(0.0f)))) {
     switch (tex.type) {
       case TEX_HANDLE_WORLD_COMBINED_COLOR:
+      case TEX_HANDLE_WORLD_DIFFUSE_COLOR:
+      case TEX_HANDLE_WORLD_DIFFUSE_DIRECT:
+      case TEX_HANDLE_WORLD_DIFFUSE_INDIRECT:
+      case TEX_HANDLE_WORLD_SPECULAR_COLOR:
+      case TEX_HANDLE_WORLD_SPECULAR_DIRECT:
+      case TEX_HANDLE_WORLD_SPECULAR_INDIRECT:
         return g_world_combined_color;
       case TEX_HANDLE_WORLD_POSITION:
         return float4(g_data.P, 0.0f);
@@ -259,7 +271,13 @@ float4 TextureHandle_eval(TextureHandle tex, float2 offset, bool texel_offset)
   }
 
   switch (tex.type) {
-    case TEX_HANDLE_WORLD_COMBINED_COLOR: {
+    case TEX_HANDLE_WORLD_COMBINED_COLOR:
+    case TEX_HANDLE_WORLD_DIFFUSE_COLOR:
+    case TEX_HANDLE_WORLD_DIFFUSE_DIRECT:
+    case TEX_HANDLE_WORLD_DIFFUSE_INDIRECT:
+    case TEX_HANDLE_WORLD_SPECULAR_COLOR:
+    case TEX_HANDLE_WORLD_SPECULAR_DIRECT:
+    case TEX_HANDLE_WORLD_SPECULAR_INDIRECT: {
       float3 direction = world_direction_from_offset(offset, texel_offset);
       return world_combined_color_from_direction(direction);
     }

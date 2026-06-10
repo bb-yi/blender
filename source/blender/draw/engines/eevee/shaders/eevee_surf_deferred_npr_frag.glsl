@@ -137,8 +137,8 @@ float4 TextureHandle_eval_impl(TextureHandle tex, float2 offset, bool texel_offs
         int2 extent = textureSize(radiance_tx, 0);
         float depth = texelFetch(hiz_tx, texel, 0).r;
 #  ifdef MAT_DEPTH_OFFSET_NO_LIGHTING
-        const gbuffer::Layers gbuf = gbuffer::read_layers(texel);
-        depth = gbuffer::read_surface_depth(gbuf.header, texel, depth);
+        const gbuffer::Layers gbuf = npr_gbuffer_read_layers(texel);
+        depth = npr_gbuffer_read_surface_depth(gbuf.header, texel, depth);
 #  endif
         float2 screen_uv = (float2(texel) + 0.5f) / float2(extent);
         return float4(drw_point_screen_to_world(float3(screen_uv, depth)), 0.0f);
@@ -168,8 +168,8 @@ float4 TextureHandle_eval_impl(TextureHandle tex, float2 offset, bool texel_offs
 
   float depth = texelFetch(hiz_tx, texel, 0).r;
 #ifdef MAT_DEPTH_OFFSET_NO_LIGHTING
-  const gbuffer::Layers gbuf = gbuffer::read_layers(texel);
-  depth = gbuffer::read_surface_depth(gbuf.header, texel, depth);
+  const gbuffer::Layers gbuf = npr_gbuffer_read_layers(texel);
+  depth = npr_gbuffer_read_surface_depth(gbuf.header, texel, depth);
 #endif
   float2 screen_uv = (float2(texel) + 0.5f) / float2(extent);
 
