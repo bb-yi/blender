@@ -22,7 +22,44 @@
 #include "eevee_camera.hh"
 #include "eevee_instance.hh"
 
+#include <algorithm>
+#include <cmath>
+
 namespace blender::eevee {
+
+static bool camera_data_projection_dimensions_valid(const bool is_perspective_camera,
+                                                    const float left,
+                                                    const float right,
+                                                    const float bottom,
+                                                    const float top,
+                                                    const float near,
+                                                    const float far)
+{
+  if (!std::isfinite(left) || !std::isfinite(right) || !std::isfinite(bottom) ||
+      !std::isfinite(top) || !std::isfinite(near) || !std::isfinite(far))
+  {
+    return false;
+  }
+
+  return !is_perspective_camera || (std::abs(near) > 1.0e-8f);
+}
+
+static void camera_data_projection_dimensions_fallback(const bool is_perspective_camera,
+                                                       const CameraData &data,
+                                                       float &left,
+                                                       float &right,
+                                                       float &bottom,
+                                                       float &top,
+                                                       float &near,
+                                                       float &far)
+{
+  near = std::max(std::abs(data.clip_near), 0.01f);
+  far = std::max(std::abs(data.clip_far), near + 1.0f);
+
+  const float half_size = is_perspective_camera ? near : 0.5f;
+  left = bottom = -half_size;
+  right = top = half_size;
+}
 
 static void camera_data_update_screen_diagonal(CameraData &data)
 {
@@ -30,9 +67,20 @@ static void camera_data_update_screen_diagonal(CameraData &data)
   projmat_dimensions(data.winmat.ptr(), &left, &right, &bottom, &top, &near, &far);
 
   const bool is_perspective_camera = data.type == CAMERA_PERSP;
-  float2 p0 = float2(left, bottom) / (is_perspective_camera ? -near : 1.0f);
-  float2 p1 = float2(right, top) / (is_perspective_camera ? -far : 1.0f);
+  if (!camera_data_projection_dimensions_valid(
+          is_perspective_camera, left, right, bottom, top, near, far))
+  {
+    camera_data_projection_dimensions_fallback(
+        is_perspective_camera, data, left, right, bottom, top, near, far);
+  }
+
+  const float depth = is_perspective_camera ? -near : 1.0f;
+  float2 p0 = float2(left, bottom) / depth;
+  float2 p1 = float2(right, top) / depth;
   data.screen_diagonal_length = math::distance(p0, p1);
+  if (!std::isfinite(data.screen_diagonal_length) || data.screen_diagonal_length <= 0.0f) {
+    data.screen_diagonal_length = 1.0f;
+  }
 }
 
 bool camera_data_from_object(const Scene *scene,
@@ -291,6 +339,13 @@ void Camera::update_bounds()
   float left, right, bottom, top, near, far;
   projmat_dimensions(data_.winmat.ptr(), &left, &right, &bottom, &top, &near, &far);
 
+  if (!camera_data_projection_dimensions_valid(
+          this->is_perspective(), left, right, bottom, top, near, far))
+  {
+    camera_data_projection_dimensions_fallback(
+        this->is_perspective(), data_, left, right, bottom, top, near, far);
+  }
+
   BoundBox bbox;
   bbox.vec[0][2] = bbox.vec[3][2] = bbox.vec[7][2] = bbox.vec[4][2] = -near;
   bbox.vec[0][0] = bbox.vec[3][0] = left;
@@ -333,6 +388,9 @@ void Camera::update_bounds()
   float2 p0 = float2(bbox.vec[0]) / (this->is_perspective() ? bbox.vec[0][2] : 1.0f);
   float2 p1 = float2(bbox.vec[7]) / (this->is_perspective() ? bbox.vec[7][2] : 1.0f);
   data_.screen_diagonal_length = math::distance(p0, p1);
+  if (!std::isfinite(data_.screen_diagonal_length) || data_.screen_diagonal_length <= 0.0f) {
+    data_.screen_diagonal_length = 1.0f;
+  }
 }
 
 float4x4 Camera::projection_crop_matrix(int2 film_offset, int2 film_extent, int2 display_extent)

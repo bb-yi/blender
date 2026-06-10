@@ -138,6 +138,13 @@ static bool material_needs_front_light_shader_resources(const GPUMaterial *gpuma
          GPU_material_flag_get(gpumat, GPU_MATFLAG_GLSL_LIGHT_ACCESS);
 }
 
+static bool material_needs_lightprobe_resources(const GPUMaterial *gpumat)
+{
+  return GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
+         GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR_FOREACH_LIGHT) ||
+         GPU_material_flag_get(gpumat, GPU_MATFLAG_LIGHTPROBE_ACCESS);
+}
+
 static DRWState material_stencil_drw_test_state(GPUStencilTest test)
 {
   switch (test) {
@@ -1341,6 +1348,8 @@ void DeferredLayerBase::gbuffer_pass_sync(Instance &inst)
   gbuffer_ps_.bind_resources(inst.sampling);
   gbuffer_ps_.bind_resources(inst.hiz_buffer.front);
   gbuffer_ps_.bind_resources(inst.render_textures);
+  gbuffer_ps_.bind_resources(inst.sphere_probes);
+  gbuffer_ps_.bind_resources(inst.volume_probes);
   gbuffer_ps_.bind_resources(inst.cryptomatte);
 
   DRWState state = DRW_STATE_WRITE_COLOR | DRW_STATE_DEPTH_EQUAL | DRW_STATE_WRITE_STENCIL |
@@ -1797,6 +1806,10 @@ PassMain::Sub *DeferredLayer::material_add(blender::Material *blender_mat, GPUMa
     material_pass->bind_resources(inst_.lights);
     inst_.lights.bind_front_light_shader_resources(*material_pass);
     material_pass->bind_resources(inst_.shadows);
+  }
+  if (material_needs_lightprobe_resources(gpumat)) {
+    material_pass->bind_resources(inst_.sphere_probes);
+    material_pass->bind_resources(inst_.volume_probes);
   }
   /* Set stencil for some deferred specialized shaders. */
   uint8_t material_stencil_bits = 0u;
@@ -2594,6 +2607,10 @@ PassMain::Sub *DeferredProbePipeline::material_add(blender::Material *blender_ma
     inst_.lights.bind_front_light_shader_resources(*material_pass);
     material_pass->bind_resources(inst_.shadows);
   }
+  if (material_needs_lightprobe_resources(gpumat)) {
+    material_pass->bind_resources(inst_.sphere_probes);
+    material_pass->bind_resources(inst_.volume_probes);
+  }
   return material_pass;
 }
 
@@ -2788,6 +2805,10 @@ PassMain::Sub *PlanarProbePipeline::material_add(blender::Material *blender_mat,
     material_pass->bind_resources(inst_.lights);
     inst_.lights.bind_front_light_shader_resources(*material_pass);
     material_pass->bind_resources(inst_.shadows);
+  }
+  if (material_needs_lightprobe_resources(gpumat)) {
+    material_pass->bind_resources(inst_.sphere_probes);
+    material_pass->bind_resources(inst_.volume_probes);
   }
   return material_pass;
 }

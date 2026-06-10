@@ -16,6 +16,8 @@ SHADER_LIBRARY_CREATE_INFO(draw_view)
 #if !defined(DRAW_VIEW_CREATE_INFO) && !defined(GLSL_CPP_STUBS)
 #else
 
+#  define DRW_VIEW_LIB_FUNCTIONS_DEFINED
+
 /* Returns the current active view. */
 ViewMatrices drw_view()
 {

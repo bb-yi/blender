@@ -1071,10 +1071,11 @@ static int material_texture_reserved_slot_last(const eMaterialPipeline pipeline_
 }
 
 static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &info,
-                                              eMaterialPipeline pipeline_type,
-                                              eMaterialGeometry geometry_type,
-                                              const bool use_shader_to_rgba,
-                                              const bool has_depth_offset)
+                                               eMaterialPipeline pipeline_type,
+                                               eMaterialGeometry geometry_type,
+                                               const bool use_shader_to_rgba,
+                                               const bool has_depth_offset,
+                                               const bool use_lightprobe_data)
 {
   using namespace blender::gpu::shader;
 
@@ -1238,7 +1239,8 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
             /* Until every vertex shader are ported, we need to bridge the gap here by defining the
              * pipeline. */
             info.fragment_source("eevee_surf_deferred.bsl.hh");
-            info.fragment_function("eevee_surf_deferred");
+            info.fragment_function(use_lightprobe_data ? "eevee_surf_deferred_lightprobe" :
+                                                         "eevee_surf_deferred");
           }
           /* Enable the access to `nt.crypto_hash`.
            * Necessary workaround for static shader compilation tests. */
@@ -1333,7 +1335,7 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
   if (!geometry_info_name.is_empty()) {
     add_create_info_and_reserve(info, available_slots, geometry_info_name);
   }
-  available_slots.assign_material_samplers(info);
+  available_slots.reserve_slots(info);
   return available_slots;
 }
 
@@ -1492,6 +1494,15 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   const bool separate_depth_offset_lighting =
       has_depth_offset && !depth_offset_affect_lighting &&
       ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR);
+  const bool material_graph_uses_lightprobe_data =
+      GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
+      GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR_FOREACH_LIGHT) ||
+      GPU_material_flag_get(gpumat, GPU_MATFLAG_LIGHTPROBE_ACCESS);
+  const bool use_lightprobe_data =
+      pipeline_type == MAT_PIPE_BAKE_COLOR ||
+      (material_graph_uses_lightprobe_data &&
+       ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD));
+  const bool pipeline_create_info_has_lightprobe_data = pipeline_type == MAT_PIPE_DEFERRED_NPR;
 
   const bool use_front_light_shader_in_surface_pass =
       use_shader_to_rgba || surface_graph_uses_glsl_light_access || surface_pass_uses_shader_info;
@@ -1504,8 +1515,12 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     info.additional_info("eevee_PreviousLayerRadiance");
   }
 
-  SlotAllocator slots = add_pipeline_create_info(
-      info, pipeline_type, geometry_type, use_front_light_shader_in_surface_pass, has_depth_offset);
+  SlotAllocator slots = add_pipeline_create_info(info,
+                                                 pipeline_type,
+                                                 geometry_type,
+                                                 use_front_light_shader_in_surface_pass,
+                                                 has_depth_offset,
+                                                 use_lightprobe_data);
   if (pipeline_type == MAT_PIPE_DEFERRED_NPR) {
     reserve_deferred_npr_pass_samplers(slots);
   }
@@ -1630,16 +1645,11 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       GPU_material_glsl_light_shader_eval_set(gpumat);
     }
   }
-  if ((GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
-       GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR_FOREACH_LIGHT) ||
-       GPU_material_flag_get(gpumat, GPU_MATFLAG_LIGHTPROBE_ACCESS)) &&
-      ELEM(pipeline_type,
-           MAT_PIPE_DEFERRED,
-           MAT_PIPE_DEFERRED_NPR,
-           MAT_PIPE_FORWARD,
-           MAT_PIPE_BAKE_COLOR))
-  {
-    add_create_info_and_reserve(info, slots, "eevee_lightprobe_data");
+  if (use_lightprobe_data && !pipeline_create_info_has_lightprobe_data) {
+    add_create_info_and_reserve(info, slots, "eevee_LightprobeRenderData");
+    if (pipeline_type == MAT_PIPE_BAKE_COLOR) {
+      add_create_info_and_reserve(info, slots, "eevee_LightprobePlaneRenderData");
+    }
   }
 
   for (auto &resource : info.batch_resources_) {
@@ -1950,6 +1960,10 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   attr_load << (!codegen.attr_load.empty() ? codegen.attr_load : "");
   attr_load << "}\n\n";
 
+  const bool use_vertex_displacement = !codegen.displacement.empty() &&
+                                       (displacement_type != MAT_DISPLACEMENT_BUMP) &&
+                                       !ELEM(geometry_type, MAT_GEOM_WORLD, MAT_GEOM_VOLUME);
+
   std::stringstream vert_gen, frag_gen;
 
   if (do_vertex_attrib_load) {
@@ -1991,10 +2005,6 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   info.generated_sources.append({"eevee_nodetree_type_lib.glsl", {}, generated_resource_header});
 
   {
-    const bool use_vertex_displacement = !codegen.displacement.empty() &&
-                                         (displacement_type != MAT_DISPLACEMENT_BUMP) &&
-                                         !ELEM(geometry_type, MAT_GEOM_WORLD, MAT_GEOM_VOLUME);
-
     Set<StringRefNull> generated_dependencies;
     Set<StringRefNull> emitted_generated_sources;
     std::stringstream generated_source_block;
@@ -2052,15 +2062,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     if (material_pass_uses_glsl_light_access) {
       dependencies_set.add("eevee_shadow_tracing.bsl.hh");
     }
-    if ((GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
-         GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR_FOREACH_LIGHT) ||
-         GPU_material_flag_get(gpumat, GPU_MATFLAG_LIGHTPROBE_ACCESS)) &&
-        ELEM(pipeline_type,
-             MAT_PIPE_DEFERRED,
-             MAT_PIPE_DEFERRED_NPR,
-             MAT_PIPE_FORWARD,
-             MAT_PIPE_BAKE_COLOR))
-    {
+    if (use_lightprobe_data || pipeline_type == MAT_PIPE_DEFERRED_NPR) {
       dependencies_set.add("eevee_lightprobe.bsl.hh");
     }
     dependencies_set.add("eevee_geom_types_lib.bsl.hh");

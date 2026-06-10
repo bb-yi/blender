@@ -12,12 +12,11 @@
 #include "draw_view.bsl.hh"
 #include "eevee_bxdf_lut_lib.bsl.hh"
 #include "eevee_hiz.bsl.hh"
-#include "eevee_lightprobe.bsl.hh"
 #include "eevee_nodetree_closures_lib.glsl"
 #include "eevee_pipeline.bsl.hh"
 #include "eevee_ray_trace_screen_lib.bsl.hh"
 #include "eevee_renderpass.bsl.hh"
-#include "eevee_sampling_lib.bsl.hh"
+#include "eevee_sampling_shared.hh"
 #include "eevee_uniform.bsl.hh"
 #include "eevee_utility_tx.bsl.hh"
 #include "gpu_shader_codegen_lib.glsl"
@@ -106,11 +105,11 @@ ViewMatrices view_matrices_get()
  * `draw::Infos`) and stopped pulling in the legacy libraries, so these free functions became
  * undefined in the deferred/forward/world material passes. Re-expose them here, backed by the BSL
  * resource accessors above, so the NPR node sources keep compiling unchanged. This library is
- * included by every material pass, so the shims reach the appended node code.
- * Skipped in the legacy passes (NPR surface, bake color, ...) that `#include "draw_view_lib.glsl"`
- * directly before this header, which define `DRW_VIEW_LIB_INCLUDED` and provide the real
- * functions. */
-#ifndef DRW_VIEW_LIB_INCLUDED
+ * included by every material pass, so the shims reach the appended node code. Legacy libraries in
+ * Blender 5.2 can be included without emitting all free functions if their create-info macro is not
+ * active, so guard each compatibility group by the actual provider instead of by include presence
+ * alone. */
+#if !defined(DRW_VIEW_LIB_FUNCTIONS_DEFINED) && !defined(GLSL_CPP_STUBS)
 ViewMatrices drw_view()
 {
   return view_matrices_get();
@@ -147,37 +146,59 @@ float3 drw_world_incident_vector(float3 P)
 {
   return view_matrices_get().world_incident_vector(P);
 }
+#  define DRW_VIEW_LIB_FUNCTIONS_DEFINED
+#endif /* !DRW_VIEW_LIB_FUNCTIONS_DEFINED */
+
+#if !defined(DRW_MODEL_LIB_FUNCTIONS_DEFINED) && !defined(GLSL_CPP_STUBS)
 uint drw_resource_id()
 {
   return resource_id_get();
 }
+#endif /* !DRW_MODEL_LIB_FUNCTIONS_DEFINED */
+
+#ifndef DRW_OBJECT_INFOS_LIB_INCLUDED
 ObjectInfos drw_object_infos()
 {
   return object_infos_get();
 }
-#endif /* DRW_VIEW_LIB_INCLUDED */
+#endif /* !DRW_OBJECT_INFOS_LIB_INCLUDED */
 
-/* Outline library uses the legacy draw free functions above; include it after the shims so they
- * resolve in the BSL material passes (it is included directly with the real functions in the
- * legacy passes). */
-#include "eevee_outline_lib.glsl"
+/* Outline output is fragment-only. Do not include it in vertex displacement shaders; that path can
+ * compile material node defaults but has no outline image outputs or screen-space outline writes. */
+#if defined(GPU_FRAGMENT_SHADER)
+#  include "eevee_outline_lib.glsl"
+#endif
 
 float sampling_rng_1D_get(eSamplingDimension dim)
 {
-  [[resource_table]] const eevee::Sampling &sampling = resource_table_get(eevee::Sampling);
-  return sampling.rng_1D_get(dim);
+#if defined(EEVEE_SAMPLING_DATA) && !defined(GPU_VERTEX_SHADER)
+  return sampling_buf.dimensions[dim];
+#else
+  UNUSED_VARS(dim);
+  return 0.0f;
+#endif
 }
 
 float2 sampling_rng_2D_get(eSamplingDimension dim)
 {
-  [[resource_table]] const eevee::Sampling &sampling = resource_table_get(eevee::Sampling);
-  return sampling.rng_2D_get(dim);
+#if defined(EEVEE_SAMPLING_DATA) && !defined(GPU_VERTEX_SHADER)
+  return float2(sampling_buf.dimensions[dim], sampling_buf.dimensions[dim + 1u]);
+#else
+  UNUSED_VARS(dim);
+  return float2(0.0f);
+#endif
 }
 
 float3 sampling_rng_3D_get(eSamplingDimension dim)
 {
-  [[resource_table]] const eevee::Sampling &sampling = resource_table_get(eevee::Sampling);
-  return sampling.rng_3D_get(dim);
+#if defined(EEVEE_SAMPLING_DATA) && !defined(GPU_VERTEX_SHADER)
+  return float3(sampling_buf.dimensions[dim],
+                sampling_buf.dimensions[dim + 1u],
+                sampling_buf.dimensions[dim + 2u]);
+#else
+  UNUSED_VARS(dim);
+  return float3(0.0f);
+#endif
 }
 
 float4 utility_tx_fetch(sampler2DArray tx, float2 texel, float layer)
@@ -188,7 +209,7 @@ float4 utility_tx_fetch(sampler2DArray tx, float2 texel, float layer)
 #if defined(GPU_FRAGMENT_SHADER)
 float3 lightprobe_world_sample(float3 L, float lod)
 {
-#  ifdef SPHERE_PROBE
+#  if defined(CREATE_INFO_eevee_LightprobeRenderData)
   [[resource_table]] eevee::LightprobeRenderData &lightprobes = resource_table_get(
       eevee::LightprobeRenderData);
   [[resource_table]] eevee::LightprobeSphereRenderData &lp_spheres = lightprobes.spheres;
@@ -197,7 +218,8 @@ float3 lightprobe_world_sample(float3 L, float lod)
   eevee::LightProbeSample samp = lightprobes.load(gl_FragCoord.xy, g_data.P, g_data.Ng, V);
   return lp_spheres.spherical_sample_normalized_with_parallax(samp, g_data.P, L, lod);
 #  else
-  UNUSED_VARS(L, lod);
+  UNUSED_VARS(L);
+  UNUSED_VARS(lod);
   return float3(0.0f);
 #  endif
 }
@@ -483,7 +505,6 @@ float ambient_occlusion_eval([[maybe_unused]] float3 normal,
   FRAGMENT_SHADER_CREATE_INFO(draw_view);
 
   /* clang-format off */ /* Multiline macros would break line count. */
-  [[resource_table]] [[maybe_unused]] const eevee::Sampling &samp = resource_table_get(eevee::Sampling);
   [[resource_table]] [[maybe_unused]] const UtilityTexture &util_tx = resource_table_get(UtilityTexture);
   [[resource_table]] [[maybe_unused]] const eevee::HiZ &hiz = resource_table_get(eevee::HiZ);
   [[resource_table]] [[maybe_unused]] const eevee::Uniform &uni = resource_table_get(eevee::Uniform);
@@ -501,7 +522,7 @@ float ambient_occlusion_eval([[maybe_unused]] float3 normal,
 
     int2 texel = int2(gl_FragCoord.xy);
     float4 noise = util_tx.fetch(float2(texel), UTIL_BLUE_NOISE_LAYER);
-    noise = fract(noise + samp.rng_3D_get(SAMPLING_AO_U).xyzx);
+    noise = fract(noise + sampling_rng_3D_get(SAMPLING_AO_U).xyzx);
 
     float result = eevee::fast_gi::eval<float>(uni,
                                                view,
@@ -566,7 +587,6 @@ void raycast_eval([[maybe_unused]] float3 position,
     FRAGMENT_SHADER_CREATE_INFO(draw_view);
 
     [[resource_table]] const draw::View &views = resource_table_get(draw::View);
-    [[resource_table]] const eevee::Sampling &samp = resource_table_get(eevee::Sampling);
     const auto &raycast_depth_tx = sampler_get(eevee_raycast, raycast_depth_tx);
     const auto &prepass_normal_tx = sampler_get(eevee_raycast, prepass_normal_tx);
     const auto &object_id_tx = sampler_get(eevee_raycast, object_id_tx);
@@ -582,7 +602,7 @@ void raycast_eval([[maybe_unused]] float3 position,
       ws_start += direction * offset_delta;
     }
 
-    float noise_offset = samp.rng_1D_get(SAMPLING_RAYTRACE_W);
+    float noise_offset = sampling_rng_1D_get(SAMPLING_RAYTRACE_W);
     float jitter = interleaved_gradient_noise(gl_FragCoord.xy, 1.0f, noise_offset);
 
     float2 hit_uv = float2(0.0f);

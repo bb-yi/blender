@@ -13,7 +13,7 @@
 
 #include "draw_shader_shared.hh"
 #include "draw_shape_lib.glsl"
-#include "eevee_light_iter.bsl.hh"
+#include "eevee_light_shared.hh"
 #include "eevee_shadow_shared.hh"
 #include "gpu_shader_utildefines_lib.glsl"
 
@@ -36,14 +36,13 @@ void tilemap_bounds_clear([[resource_table]] TilemapBoundsInit &srt,
 }
 
 struct TilemapBounds {
-  [[resource_table]] srt_t<LightRenderData> light_data;
+  [[storage(LIGHT_CULL_BUF_SLOT, read)]] const LightCullingData &light_cull_buf;
+  [[storage(LIGHT_BUF_SLOT, read_write)]] LightData (&light_buf)[];
 
   [[storage(4, read)]] const uint (&casters_id_buf)[];
   [[storage(5, read_write)]] ShadowTileMapData (&tilemaps_buf)[];
   [[storage(6, read)]] const ObjectBounds (&bounds_buf)[];
   [[storage(7, read_write)]] ShadowTileMapClip (&tilemaps_clip_buf)[];
-
-  [[storage(8, read_write)]] LightData (&light_buf_write)[];
 
   [[push_constant]] const int resource_len;
 
@@ -56,11 +55,8 @@ struct TilemapBoundsCtx {
   bool is_valid;
   uint local_id;
 
-  void eval_directional([[resource_table]] TilemapBounds &srt, uint l_index, LightData /*light*/)
+  void eval_directional([[resource_table]] TilemapBounds &srt, uint l_index, LightData light)
   {
-    [[resource_table]] LightRenderData &lrd = srt.light_data;
-    LightData light = lrd.light_buf[l_index];
-
     if (light.tilemap_index == LIGHT_NO_SHADOW) {
       return;
     }
@@ -94,8 +90,8 @@ struct TilemapBoundsCtx {
 
     if (local_id == 0u) {
       /* Final result. Min/Max of the whole dispatch. */
-      atomicMin(srt.light_buf_write[l_index].clip_near, srt.global_min);
-      atomicMax(srt.light_buf_write[l_index].clip_far, srt.global_max);
+      atomicMin(srt.light_buf[l_index].clip_near, srt.global_min);
+      atomicMax(srt.light_buf[l_index].clip_far, srt.global_max);
       /* TODO(fclem): This feel unnecessary but we currently have no indexing from
        * tile-map to lights. This is because the lights are selected by culling phase. */
       for (int i = light.tilemap_index; i <= light.tilemap_max_get(); i++) {
@@ -115,11 +111,6 @@ struct TilemapBoundsCtx {
 };
 
 }  // namespace eevee::shadow
-
-template void eevee::light::foreach<eevee::shadow::TilemapBoundsCtx, eevee::shadow::TilemapBounds>(
-    const eevee::LightRenderData &,
-    eevee::shadow::TilemapBoundsCtx &,
-    eevee::shadow::TilemapBounds &);
 
 namespace eevee::shadow {
 
@@ -154,7 +145,12 @@ void tilemap_bounds_min_max([[resource_table]] TilemapBounds &srt,
                         float3(-1.0f) + float3(0.0f, 0.0f, 1.0f));
   }
 
-  light::foreach(srt.light_data, ctx, srt);
+  for (uint index = srt.light_cull_buf.local_lights_len; index < srt.light_cull_buf.items_count;
+       index++)
+  {
+    LightData light = srt.light_buf[index];
+    ctx.eval_directional(srt, index, light);
+  }
 }
 
 PipelineCompute tilemap_bounds_init(tilemap_bounds_clear);

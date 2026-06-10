@@ -50,6 +50,8 @@ void eval_light([[resource_table]] EvalLight & /*srt*/,
   ctx.receiver_light_set = surfel.receiver_light_set;
   ctx.terminator_normal_offset = 0.0f;
   ctx.terminator_geometry_offset = 0.0f;
+  ctx.light_shader_surfel_index = index;
+  ctx.light_shader_surfel_len = int(surfels.capture_info_buf.surfel_len);
 
   ClosureUndetermined cl_reflect;
   cl_reflect.N = surfel.normal;
@@ -87,6 +89,7 @@ PipelineCompute eevee_surfel_light(eevee::surfel::eval_light,
                                        .shadow_random = false,
                                    },
                                    eevee::LightEvalData{
+                                       .use_light_shader_surfel_eval = true,
                                        .light_closure_eval_count_reflect = 1,
                                        .light_closure_eval_count_transmit = 0,
                                    });

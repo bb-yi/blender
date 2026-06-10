@@ -31,7 +31,7 @@ void node_light_probe_color(float3 direction,
 {
 #if defined(GPU_FRAGMENT_SHADER) && \
     (defined(MAT_DEFERRED) || defined(MAT_FORWARD) || defined(NPR_SHADER))
-#  ifdef SPHERE_PROBE
+#  if defined(CREATE_INFO_eevee_LightprobeRenderData)
   float3 geometry_normal = light_probe_color_safe_direction(g_data.Ng, float3(0.0f, 0.0f, 1.0f));
   float3 shading_normal = light_probe_color_resolve_shading_normal();
   const ViewMatrices view = view_matrices_get();
@@ -41,7 +41,7 @@ void node_light_probe_color(float3 direction,
   float3 reflection_direction = light_probe_color_safe_direction(direction,
                                                                 reflected_view_direction);
   float3 irradiance_direction = light_probe_color_safe_direction(direction, shading_normal);
-  float reflection_lod = lightprobe::sphere::roughness_to_lod(saturate(roughness));
+  float reflection_lod = eevee::lightprobe::sphere::roughness_to_lod(saturate(roughness));
 
   [[resource_table]] const eevee::LightprobeRenderData &lightprobes = resource_table_get(
       eevee::LightprobeRenderData);

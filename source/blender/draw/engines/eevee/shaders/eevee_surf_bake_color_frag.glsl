@@ -18,15 +18,57 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_nodetree)
 FRAGMENT_SHADER_CREATE_INFO(eevee_geom_bake_mesh)
 FRAGMENT_SHADER_CREATE_INFO(eevee_surf_bake_color)
 
-#include "draw_view_lib.glsl"
 #include "eevee_forward_lib.glsl"
 #include "eevee_nodetree_frag_lib.glsl"
 #include "eevee_sampling_lib.glsl"
 #include "eevee_surf_lib.glsl"
 
 /* Global lighting state used by Shader to RGB and by the final bake output. */
-float g_thickness;
-float3 g_forward_lighting_P;
+Thickness g_thickness;
+
+uint bake_resource_id_get()
+{
+  draw::ID id{interp_flat.resource_id_raw};
+  return id.resource_id<1>();
+}
+
+uint bake_view_id_get()
+{
+  draw::ID id{interp_flat.resource_id_raw};
+  return id.view_id<1>();
+}
+
+ViewMatrices bake_view_matrices_get()
+{
+  [[resource_table]] const draw::View &views = resource_table_get(draw::View);
+  return views.get(bake_view_id_get());
+}
+
+void bake_init_globals()
+{
+  [[resource_table]] const eevee::Uniform &uni = resource_table_get(eevee::Uniform);
+  const ViewMatrices view = bake_view_matrices_get();
+
+  g_data.P = interp.P;
+  g_data.Ni = interp.N;
+  g_data.N = safe_normalize(interp.N);
+  g_data.Ng = g_data.N;
+  g_data.is_strand = false;
+  g_data.hair_diameter = 0.0f;
+  g_data.hair_strand_id = 0;
+  g_data.ray_type = uni.pipeline_buf.ray_type;
+  g_data.ray_depth = 0.0f;
+  g_data.ray_length = distance(g_data.P, view.position());
+  g_data.barycentric_coords = float2(0.0f);
+  g_data.barycentric_dists = float3(0.0f);
+
+  g_data.N = gl_FrontFacing ? g_data.N : -g_data.N;
+  g_data.Ni = gl_FrontFacing ? g_data.Ni : -g_data.Ni;
+  g_data.Ng = safe_normalize(cross(gpu_dfdx(g_data.P), gpu_dfdy(g_data.P)));
+  if (uni.pipeline_buf.is_main_view_inverted) {
+    g_data.Ng = -g_data.Ng;
+  }
+}
 
 float bake_closure_rand_get()
 {
@@ -55,7 +97,12 @@ void bake_color_accumulator_reset()
 float4 bake_closure_to_rgba()
 {
   float3 radiance, transmittance;
-  forward_lighting_eval(g_forward_lighting_P, g_thickness, radiance, transmittance);
+  eevee::forward_lighting_eval(bake_view_matrices_get(),
+                               bake_resource_id_get(),
+                               g_thickness,
+                               gl_FragCoord.xy,
+                               radiance,
+                               transmittance);
 
   /* Reset for the next closure tree, matching the regular forward path. */
   bake_closure_tree_reset(bake_closure_rand_get());
@@ -168,7 +215,7 @@ void main()
   }
 
   material_surface_cull_discard();
-  init_globals();
+  bake_init_globals();
   /* UV-space front-facing is defined by UV triangle winding, not by the source mesh surface.
    * Keep local material lighting helpers on the evaluated mesh normal. */
   g_data.Ni = interp.N;
@@ -178,8 +225,7 @@ void main()
 
   float closure_rand = bake_closure_rand_get();
 
-  g_forward_lighting_P = g_data.P;
-  g_thickness = nodetree_thickness() * thickness_mode;
+  g_thickness = Thickness::from(nodetree_thickness(), thickness_mode);
 
   bake_color_accumulator_reset();
   bake_closure_tree_reset(closure_rand);

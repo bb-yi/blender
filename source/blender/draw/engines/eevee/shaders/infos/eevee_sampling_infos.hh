@@ -17,6 +17,7 @@
 #include "gpu_shader_create_info.hh"
 
 GPU_SHADER_CREATE_INFO(eevee_sampling_data)
+DEFINE("CREATE_INFO_eevee_Sampling")
 DEFINE("EEVEE_SAMPLING_DATA")
 TYPEDEF_SOURCE("eevee_defines.hh")
 TYPEDEF_SOURCE("eevee_sampling_shared.hh")

@@ -263,7 +263,11 @@ bool glsl_light_shader_eval(uint light_index,
   }
   return true;
 #else
-  UNUSED_VARS(light_index, light, light_vector, is_directional, result);
+  UNUSED_VARS(light_index);
+  UNUSED_VARS(light);
+  UNUSED_VARS(light_vector);
+  UNUSED_VARS(is_directional);
+  UNUSED_VARS(result);
   return false;
 #endif
 }

@@ -63,6 +63,20 @@ float World::sun_threshold()
   return sun_threshold;
 }
 
+void World::sunlight_clear()
+{
+  for (LightData &sun : sunlight) {
+    sun = {};
+    sun.object_to_world = float4x4::identity();
+    sun.power = float4(0.0f);
+    sun.color = float3(0.0f);
+    sun.type = LIGHT_SUN;
+    sun.tilemap_index = LIGHT_NO_SHADOW;
+    sun.sun().direction = float3(0.0f, 0.0f, 1.0f);
+  }
+  sunlight.push_update();
+}
+
 void World::sync()
 {
   bool has_update = false;
@@ -111,6 +125,10 @@ void World::sync()
   blender::World *orig_world = DEG_get_original(bl_world);
   if (assign_if_different(prev_original_world, orig_world)) {
     has_update = true;
+  }
+
+  if (has_update || sun_threshold() <= 0.0f) {
+    sunlight_clear();
   }
 
   inst_.light_probes.sync_world(bl_world, has_update);

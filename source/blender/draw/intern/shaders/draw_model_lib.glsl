@@ -12,6 +12,8 @@
 #  error Missing draw_modelmat additional create info on shader create info
 #endif
 
+#define DRW_MODEL_LIB_FUNCTIONS_DEFINED
+
 #if defined(GPU_VERTEX_SHADER)
 VERTEX_SHADER_CREATE_INFO(draw_resource_id_varying)
 #elif defined(GPU_FRAGMENT_SHADER)

@@ -116,11 +116,18 @@ void outline_output_flush()
 
 float outline_pixel_world_size_at(float depth, int2 extent, int2 texel)
 {
+#if defined(DRW_VIEW_LIB_FUNCTIONS_DEFINED)
   float2 uv = (float2(texel) + 0.5f) / float2(extent);
   int2 next_texel = min(texel + int2(1, 0), extent - int2(1));
   float2 next_uv = (float2(next_texel) + 0.5f) / float2(extent);
   return distance(drw_point_screen_to_view(float3(uv, depth)),
                   drw_point_screen_to_view(float3(next_uv, depth)));
+#else
+  UNUSED_VARS(depth);
+  UNUSED_VARS(extent);
+  UNUSED_VARS(texel);
+  return 1.0f;
+#endif
 }
 
 void output_outline(float4 line_color,

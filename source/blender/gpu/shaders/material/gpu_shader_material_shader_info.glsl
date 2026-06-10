@@ -1070,7 +1070,7 @@ void node_shader_info(float3 position,
                     1.0f - saturate(cast_shadow_sum / shadow_weight_sum) :
                     1.0f;
 
-#  ifdef SPHERE_PROBE
+#  if defined(CREATE_INFO_eevee_LightprobeRenderData)
   /* Use the interpolated surface normal for probe lookup bias so smooth-shaded meshes do not
    * inherit face-normal stepping from the volume probe receiver path. */
   [[resource_table]] const eevee::LightprobeRenderData &lightprobes = resource_table_get(

@@ -7,7 +7,7 @@ void node_world_environment(float3 direction, out float4 color)
 {
 #if defined(GPU_FRAGMENT_SHADER) && \
     (defined(MAT_DEFERRED) || defined(MAT_FORWARD) || defined(NPR_SHADER))
-#  ifdef SPHERE_PROBE
+#  if defined(CREATE_INFO_eevee_LightprobeRenderData)
   float3 V = direction;
   if (dot(V, V) < 1e-8f) {
     V = -drw_world_incident_vector(g_data.P);

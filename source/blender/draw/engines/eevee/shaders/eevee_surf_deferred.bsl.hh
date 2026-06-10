@@ -88,22 +88,20 @@ struct DeferredFragOut {
   [[frag_color(4)]] float4 gbuf_closure2;
 };
 
-/* NOTE: This removes the possibility of using gl_FragDepth. */
-[[fragment]] [[early_fragment_tests]]
-void surf_deferred([[resource_table]] PipelineConstants &pipe,
-                   [[resource_table]] SurfaceDeferred &srt,
-                   [[resource_table]] gbuffer::PackParameters &gbuf_params,
-                   [[resource_table]] RenderPassOutput &render_passes,
-                   [[resource_table]] CryptomatteOutput &cryptomatte,
-                   [[resource_table]] const draw::Infos &infos,
-                   [[resource_table]] const draw::View &views,
-                   [[resource_table]] const Uniform &uni,
-                   [[resource_table]] const Sampling &sampling,
-                   [[resource_table]] const UtilityTexture &util_tx,
-                   [[frag_coord]] const float4 frag_co,
-                   [[out]] DeferredFragOut &frag_out,
-                   [[front_facing]] const bool front_face)
+DeferredFragOut surf_deferred_impl([[resource_table]] PipelineConstants &pipe,
+                                   [[resource_table]] SurfaceDeferred &srt,
+                                   [[resource_table]] gbuffer::PackParameters &gbuf_params,
+                                   [[resource_table]] RenderPassOutput &render_passes,
+                                   [[resource_table]] CryptomatteOutput &cryptomatte,
+                                   [[resource_table]] const draw::Infos &infos,
+                                   [[resource_table]] const draw::View &views,
+                                   [[resource_table]] const Uniform &uni,
+                                   [[resource_table]] const Sampling &sampling,
+                                   [[resource_table]] const UtilityTexture &util_tx,
+                                   const float4 frag_co,
+                                   const bool front_face)
 {
+  DeferredFragOut frag_out;
   auto &interp_flat = interface_get(eevee_geom_iface_info, interp_flat);
   draw::ID id{interp_flat.resource_id_raw};
   const uint resource_id = id.resource_id<1>();
@@ -260,6 +258,79 @@ void surf_deferred([[resource_table]] PipelineConstants &pipe,
   frag_out.radiance = float4(g_emission, 0.0f);
   frag_out.radiance.rgb *= 1.0f - g_holdout;
   frag_out.radiance.a = g_holdout;
+
+  return frag_out;
+}
+
+/* NOTE: This removes the possibility of using gl_FragDepth. */
+[[fragment]] [[early_fragment_tests]]
+void surf_deferred([[resource_table]] PipelineConstants &pipe,
+                   [[resource_table]] SurfaceDeferred &srt,
+                   [[resource_table]] gbuffer::PackParameters &gbuf_params,
+                   [[resource_table]] RenderPassOutput &render_passes,
+                   [[resource_table]] CryptomatteOutput &cryptomatte,
+                   [[resource_table]] const draw::Infos &infos,
+                   [[resource_table]] const draw::View &views,
+                   [[resource_table]] const Uniform &uni,
+                   [[resource_table]] const Sampling &sampling,
+                   [[resource_table]] const UtilityTexture &util_tx,
+                   [[frag_coord]] const float4 frag_co,
+                   [[out]] DeferredFragOut &frag_out,
+                   [[front_facing]] const bool front_face)
+{
+  DeferredFragOut result = surf_deferred_impl(pipe,
+                                              srt,
+                                              gbuf_params,
+                                              render_passes,
+                                              cryptomatte,
+                                              infos,
+                                              views,
+                                              uni,
+                                              sampling,
+                                              util_tx,
+                                              frag_co,
+                                              front_face);
+  frag_out.radiance = result.radiance;
+  frag_out.gbuf_header = result.gbuf_header;
+  frag_out.gbuf_normal = result.gbuf_normal;
+  frag_out.gbuf_closure1 = result.gbuf_closure1;
+  frag_out.gbuf_closure2 = result.gbuf_closure2;
+}
+
+/* Deferred materials only expose LightprobeRenderData when the material graph actually needs it. */
+[[fragment]] [[early_fragment_tests]]
+void surf_deferred_lightprobe([[resource_table]] PipelineConstants &pipe,
+                              [[resource_table]] SurfaceDeferred &srt,
+                              [[resource_table]] gbuffer::PackParameters &gbuf_params,
+                              [[resource_table]] eevee::LightprobeRenderData & /*lightprobes*/,
+                              [[resource_table]] RenderPassOutput &render_passes,
+                              [[resource_table]] CryptomatteOutput &cryptomatte,
+                              [[resource_table]] const draw::Infos &infos,
+                              [[resource_table]] const draw::View &views,
+                              [[resource_table]] const Uniform &uni,
+                              [[resource_table]] const Sampling &sampling,
+                              [[resource_table]] const UtilityTexture &util_tx,
+                              [[frag_coord]] const float4 frag_co,
+                              [[out]] DeferredFragOut &frag_out,
+                              [[front_facing]] const bool front_face)
+{
+  DeferredFragOut result = surf_deferred_impl(pipe,
+                                              srt,
+                                              gbuf_params,
+                                              render_passes,
+                                              cryptomatte,
+                                              infos,
+                                              views,
+                                              uni,
+                                              sampling,
+                                              util_tx,
+                                              frag_co,
+                                              front_face);
+  frag_out.radiance = result.radiance;
+  frag_out.gbuf_header = result.gbuf_header;
+  frag_out.gbuf_normal = result.gbuf_normal;
+  frag_out.gbuf_closure1 = result.gbuf_closure1;
+  frag_out.gbuf_closure2 = result.gbuf_closure2;
 }
 
 }  // namespace eevee

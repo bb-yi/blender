@@ -1634,8 +1634,10 @@ static bool draw_bake_groups(RenderEngine *engine,
 
     inst.volume_probes.set_view(view);
     inst.sphere_probes.set_view(view);
-    inst.lights.set_view(view, int2(width, height));
     inst.shadows.set_view(view, int2(width, height), TelemetryShadowContext::Bake);
+    inst.uniform_data.data.push_update();
+    inst.lights.set_view(view, int2(width, height));
+    inst.shadows.render(view, int2(width, height));
     inst.lights.eval_uniform_light_shaders(view);
     if (inst.lights.needs_bake_light_shader()) {
       draw_bake_light_shader_surface_context(inst,
@@ -1799,17 +1801,25 @@ static bool run_gpu_bake(RenderEngine *engine,
       if (use_fallback_camera && bake_camera.object != nullptr) {
         inst.camera_orig_object = bake_camera.object;
         inst.camera_eval_object = bake_camera.object;
-        CameraData bake_camera_data;
-        if (camera_data_from_object(
-                inst.scene, bake_camera.object, int2(width, height), bake_camera_data))
-        {
-          inst.camera.override(bake_camera_data, true);
-        }
       }
 
       draw::Manager &manager = *inst.manager;
       manager.begin_sync();
       inst.begin_sync();
+
+      Object *bake_camera_object = inst.camera_eval_object ? inst.camera_eval_object :
+                                                            camera_object;
+      if (use_fallback_camera && bake_camera.object != nullptr) {
+        inst.camera_orig_object = bake_camera.object;
+        inst.camera_eval_object = bake_camera.object;
+        bake_camera_object = bake_camera.object;
+      }
+      CameraData bake_camera_data;
+      if (camera_data_from_object(inst.scene, bake_camera_object, int2(width, height), bake_camera_data))
+      {
+        inst.camera.override(bake_camera_data, true);
+      }
+
       sync_scene_for_bake(engine, depsgraph, inst);
 
       draw::ObjectRef object_ref(object);

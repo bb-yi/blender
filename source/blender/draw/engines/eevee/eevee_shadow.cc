@@ -22,6 +22,7 @@
 #include "draw_cache.hh"
 #include "draw_debug.hh"
 
+#include <algorithm>
 #include <cfloat>
 #include <cmath>
 #include <unordered_map>
@@ -43,6 +44,11 @@ static std::unordered_map<const ShadowModule *, DirectionalFocusData> directiona
 static DirectionalFocusData &directional_focus_data_ensure(const ShadowModule &shadows)
 {
   return directional_focus_cache[&shadows];
+}
+
+static float finite_or_default(const float value, const float fallback)
+{
+  return std::isfinite(value) ? value : fallback;
 }
 
 }  // namespace
@@ -184,6 +190,9 @@ ShadowTileMapPool::ShadowTileMapPool()
   for (int i = SHADOW_MAX_TILEMAP - 1; i >= 0; i--) {
     free_indices.append(i * SHADOW_TILEDATA_PER_TILEMAP);
   }
+  /* The initial free-list has never owned pages. Only later growth relative to this baseline
+   * represents released tile-maps that need GPU-side page cleanup. */
+  last_free_len = free_indices.size();
 
   int2 extent;
   extent.x = min_ii(SHADOW_MAX_TILEMAP, maps_per_row) * ShadowTileMap::tile_map_resolution;
@@ -330,7 +339,8 @@ static int clipmap_level_perspective_bias(const Camera &camera)
   }
 
   const CameraData &cam_data = camera.data_get();
-  const float screen_diag = max_ff(cam_data.screen_diagonal_length, 1e-6f);
+  const float screen_diag = max_ff(finite_or_default(cam_data.screen_diagonal_length, 1.0f),
+                                   1e-6f);
   if (screen_diag >= 1.0f) {
     return 0;
   }
@@ -357,6 +367,8 @@ static void directional_focus_update(DirectionalFocusData &focus,
   }
 
   const CameraData &cam_data = camera.data_get();
+  const float screen_diag = max_ff(finite_or_default(cam_data.screen_diagonal_length, 1.0f),
+                                   1e-6f);
   const float3 camera_position = camera.position();
   const float3 view_direction = -camera.forward();
   const auto &matrices = manager.matrix_buf.current();
@@ -379,7 +391,7 @@ static void directional_focus_update(DirectionalFocusData &focus,
 
     const float3 point_on_ray = camera_position + view_direction * depth;
     const float ray_distance_sq = math::distance_squared(caster_center, point_on_ray);
-    const float projected_radius = max_ff(cam_data.screen_diagonal_length * depth, 1e-4f);
+    const float projected_radius = max_ff(screen_diag * depth, 1e-4f);
     const float score = ray_distance_sq / (projected_radius * projected_radius) + depth * 1e-4f;
 
     if (score < best_score) {
@@ -433,14 +445,17 @@ ShadowDirectional::LevelSpan ShadowDirectional::cascade_level_range(const Light 
   /* This gives the maximum resolution in depth we can have with a fixed set of tile-maps. Gives
    * the best results when view direction is orthogonal to the light direction. */
   float depth_range_in_shadow_space = distance(far_point.xy(), near_point.xy());
+  depth_range_in_shadow_space = finite_or_default(depth_range_in_shadow_space, 0.0f);
   float min_depth_tilemap_size = 2 * (depth_range_in_shadow_space / max_tilemap_per_shadows);
   /* This allow coverage of the whole view with a single tile-map if camera forward is colinear
    * with the light direction. */
-  float min_diagonal_tilemap_size = cam_data.screen_diagonal_length;
+  float min_diagonal_tilemap_size = finite_or_default(cam_data.screen_diagonal_length, 1.0f);
 
   if (camera.is_perspective()) {
     /* Use the far plane diagonal if using perspective. */
-    min_diagonal_tilemap_size *= cam_data.clip_far / cam_data.clip_near;
+    const float clip_near = std::max(finite_or_default(cam_data.clip_near, 0.01f), 0.01f);
+    const float clip_far = std::max(finite_or_default(cam_data.clip_far, clip_near), clip_near);
+    min_diagonal_tilemap_size *= clip_far / clip_near;
   }
 
   /* TODO(fclem): Zoomed in camera can have very small diagonal size which will then result in
@@ -454,6 +469,7 @@ ShadowDirectional::LevelSpan ShadowDirectional::cascade_level_range(const Light 
 
   /* Tile-maps "rotate" around the first one so their effective range is only half their size. */
   float per_tilemap_coverage = ShadowDirectional::coverage_get(lod_level) * 0.5f;
+  per_tilemap_coverage = std::max(finite_or_default(per_tilemap_coverage, 0.5f), 0.5f);
   /* Number of tile-maps needed to cover the whole view. */
   /* NOTE: floor + 0.5 to avoid 0 when parallel. */
   int tilemap_len = ceil(0.5f + depth_range_in_shadow_space / per_tilemap_coverage);
@@ -1226,8 +1242,6 @@ void ShadowModule::end_sync()
         sub.bind_ssbo("tilemaps_clip_buf", tilemap_pool.tilemaps_clip);
         sub.bind_ssbo("casters_id_buf", curr_casters_);
         sub.bind_ssbo("bounds_buf", &manager.bounds_buf.current());
-        /* Bind again using a writable binding. */
-        sub.bind_ssbo("light_buf_write", inst_.lights.culling_light_buf_);
         sub.push_constant("resource_len", int(curr_casters_.size()));
         sub.bind_resources(inst_.lights);
         sub.dispatch(int3(
@@ -1263,7 +1277,8 @@ void ShadowModule::end_sync()
         pass.bind_ssbo("tiles_buf", tilemap_pool.tiles_data);
         pass.bind_ssbo("bounds_buf", &manager.bounds_buf.current());
         pass.bind_ssbo("resource_ids_buf", bake_receivers_);
-        pass.dispatch(int3(bake_receivers_.size(), 1, tilemap_pool.tilemaps_data.size()));
+        pass.bind_resources(inst_.lights);
+        pass.dispatch(int3(bake_receivers_.size(), 1, 1));
         pass.barrier(GPU_BARRIER_SHADER_STORAGE);
       }
     }
@@ -1438,10 +1453,9 @@ void ShadowModule::end_sync()
         sub.shader_set(inst_.shaders.static_shader_get(SHADOW_TILEMAP_AMEND));
         sub.bind_image("tilemaps_img", tilemap_pool.tilemap_tx);
         sub.bind_ssbo("tilemaps_buf", tilemap_pool.tilemaps_data);
+        sub.push_constant("tilemaps_buf_len", int(tilemap_pool.tilemaps_data.size()));
         sub.bind_resources(inst_.lights);
-        /* Bind again using a writable binding. */
-        sub.bind_ssbo("light_buf_write", inst_.lights.culling_light_buf_);
-        sub.dispatch(int3(1));
+        sub.dispatch(int3(1, 1, max_ii(inst_.lights.sun_lights_len_, 1)));
         sub.barrier(GPU_BARRIER_TEXTURE_FETCH);
       }
 

@@ -1314,17 +1314,17 @@ void LightModule::light_shader_pass_sync(const int2 extent)
   const float white[4] = {1.0f, 1.0f, 1.0f, 1.0f};
   light_shader_valid_ = false;
   if (light_shader_materials_.is_empty()) {
+    light_shader_fbs_.clear();
     light_shader_tx_.ensure_2d_array(
         gpu::TextureFormat::SFLOAT_16_16_16_16, int2(1), 1, usage, white);
-    light_shader_fbs_.clear();
     return;
   }
 
   const int layer_len = light_shader_materials_.size();
   if (layer_len > GPU_max_texture_layers()) {
+    light_shader_fbs_.clear();
     light_shader_tx_.ensure_2d_array(
         gpu::TextureFormat::SFLOAT_16_16_16_16, int2(1), 1, usage, white);
-    light_shader_fbs_.clear();
     light_shader_index_buf_disable_point_dependent(light_shader_src_index_buf_,
                                                    max_ii(lights_len_, 1));
     light_shader_src_index_buf_.push_update();
@@ -1364,17 +1364,17 @@ void LightModule::front_light_shader_pass_sync(const int2 extent)
   const float white[4] = {1.0f, 1.0f, 1.0f, 1.0f};
   front_light_shader_valid_ = false;
   if (front_light_shader_materials_.is_empty()) {
+    front_light_shader_fbs_.clear();
     front_light_shader_tx_.ensure_2d_array(
         gpu::TextureFormat::SFLOAT_16_16_16_16, int2(1), 1, usage, white);
-    front_light_shader_fbs_.clear();
     return;
   }
 
   const int layer_len = front_light_shader_materials_.size();
   if (layer_len > GPU_max_texture_layers()) {
+    front_light_shader_fbs_.clear();
     front_light_shader_tx_.ensure_2d_array(
         gpu::TextureFormat::SFLOAT_16_16_16_16, int2(1), 1, usage, white);
-    front_light_shader_fbs_.clear();
     light_shader_index_buf_disable_point_dependent(front_light_shader_src_index_buf_,
                                                    max_ii(lights_len_, 1));
     front_light_shader_src_index_buf_.push_update();
@@ -1583,9 +1583,9 @@ void LightModule::eval_front_light_shaders(View &view, const int2 extent)
                                        GPU_TEXTURE_USAGE_SHADER_READ;
     const float white[4] = {1.0f, 1.0f, 1.0f, 1.0f};
     front_light_shader_valid_ = false;
+    front_light_shader_fbs_.clear();
     front_light_shader_tx_.ensure_2d_array(
         gpu::TextureFormat::SFLOAT_16_16_16_16, int2(1), 1, usage, white);
-    front_light_shader_fbs_.clear();
     disable_point_dependent_front_light_shader_indices();
     if (!front_light_shader_missing_prepass_reported_) {
       inst_.info_append_i18n(

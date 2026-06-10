@@ -4,6 +4,8 @@
 
 #pragma once
 
+#define DRW_OBJECT_INFOS_LIB_INCLUDED
+
 #include "draw_object_infos_infos.hh"
 
 #include "draw_model_lib.glsl"

@@ -504,13 +504,23 @@ void sun_extraction([[resource_table]] SunExtraction &srt,
 
   barrier();
   if (local_index == 0u) {
-    srt.sunlight_buf[srt.sun_id].color = srt.local_radiance[0];
+    float3 radiance = srt.local_radiance[0];
+    float4 direction_sum = srt.local_direction[0];
+    bool valid_radiance = !any(isnan(radiance)) && !any(isinf(radiance)) &&
+                          max(max(abs(radiance.x), abs(radiance.y)), abs(radiance.z)) > 1e-8f;
+    bool valid_direction = !any(isnan(direction_sum)) && !any(isinf(direction_sum)) &&
+                           abs(direction_sum.w) > 1e-8f;
+
+    srt.sunlight_buf[srt.sun_id].color = valid_radiance ? radiance : float3(0.0f);
 
     /* Normalize the sum to get the mean direction. The length of the vector gives us the size of
      * the sun light. */
-    float len;
-    float3 direction = safe_normalize_and_get_length(
-        srt.local_direction[0].xyz / srt.local_direction[0].w, len);
+    float len = 0.0f;
+    float3 direction = float3(0.0f, 0.0f, 1.0f);
+    if (valid_radiance && valid_direction) {
+      direction = safe_normalize_and_get_length(safe_divide(direction_sum.xyz, direction_sum.w),
+                                                len);
+    }
 
     float3x3 tx = transpose(from_up_axis(direction));
     /* Convert to transform. */
@@ -519,15 +529,17 @@ void sun_extraction([[resource_table]] SunExtraction &srt,
     srt.sunlight_buf[srt.sun_id].object_to_world.z = float4(tx[2], 0.0f);
 
     /* Auto sun angle. */
-    float sun_angle_cos = 2.0f * len - 1.0f;
+    float sun_angle_cos = max(abs(2.0f * len - 1.0f), 1e-4f);
     /* Compute tangent from cosine. */
     float sun_angle_tan = sqrt(-1.0f + 1.0f / square(sun_angle_cos));
     /* Clamp value to avoid float imprecision artifacts. */
     float sun_radius = clamp(sun_angle_tan, 0.001f, 20.0f);
 
     /* Convert irradiance to radiance. */
-    float shape_power = M_1_PI * (1.0f + 1.0f / square(sun_radius));
-    float point_power = 1.0f;
+    float shape_power = (valid_radiance && valid_direction) ?
+                            M_1_PI * (1.0f + 1.0f / square(sun_radius)) :
+                            0.0f;
+    float point_power = (valid_radiance && valid_direction) ? 1.0f : 0.0f;
 
     srt.sunlight_buf[srt.sun_id].power[LIGHT_DIFFUSE] = shape_power;
     srt.sunlight_buf[srt.sun_id].power[LIGHT_SPECULAR] = shape_power;

@@ -5604,16 +5604,19 @@ vec3 glsl_helper_ambient_safe_direction(vec3 value, vec3 fallback)
 
 vec3 glsl_ambient_lighting()
 {
-#ifdef SPHERE_PROBE
+#if defined(CREATE_INFO_eevee_LightprobeRenderData)
   vec3 shading_normal = glsl_helper_ambient_safe_direction(g_data.N, g_data.Ng);
   vec3 probe_bias_normal = glsl_helper_ambient_safe_direction(g_data.Ni, g_data.Ng);
-  vec3 view_vector = drw_world_incident_vector(g_data.P);
+  const ViewMatrices view = view_matrices_get();
+  vec3 view_vector = view.world_incident_vector(g_data.P);
 
-  LightProbeSample probe_sample = lightprobe_load(g_data.P, probe_bias_normal, view_vector);
-  probe_sample.volume_irradiance = spherical_harmonics_clamp(probe_sample.volume_irradiance,
-                                                             uniform_buf.clamp.surface_indirect);
-  return max(spherical_harmonics_evaluate_lambert(shading_normal, probe_sample.volume_irradiance),
-             vec3(0.0));
+  [[resource_table]] const eevee::LightprobeRenderData &lightprobes = resource_table_get(
+      eevee::LightprobeRenderData);
+  eevee::LightProbeSample probe_sample = lightprobes.load(
+      gl_FragCoord.xy, g_data.P, probe_bias_normal, view_vector);
+  probe_sample.volume_irradiance = spherical_harmonics::clamp_energy(
+      probe_sample.volume_irradiance, uniform_buf.clamp.surface_indirect);
+  return max(probe_sample.volume_irradiance.evaluate_lambert(shading_normal).rgb, vec3(0.0));
 #else
   return vec3(0.0);
 #endif

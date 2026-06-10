@@ -43,6 +43,9 @@ struct LightEvalData {
   [[resource_table]] srt_t<LightShaderEvalData> light_shader_data;
 
   [[compilation_constant]] bool use_light_shader_texture_eval;
+  [[compilation_constant]] bool use_light_shader_surfel_eval;
+  [[resource_table, condition(use_light_shader_surfel_eval)]] srt_t<LightShaderSurfelEvalData>
+      light_shader_surfel_data;
   [[compilation_constant]] int light_closure_eval_count_reflect;
   [[compilation_constant]] int light_closure_eval_count_transmit;
 };
@@ -135,6 +138,22 @@ float light_shader_distance_falloff_get(LightData light, LightVector lv, const b
          (light_shader_point_radiance_get(light) / shape_power);
 }
 
+void light_shader_eval_apply(LightData &light,
+                             LightVector lv,
+                             const bool is_directional,
+                             float4 light_shader,
+                             float &attenuation,
+                             bool &light_shader_no_distance_falloff)
+{
+  light.color = light_shader.rgb;
+  attenuation = light_attenuation_common(light, is_directional, lv.L) * light_shader.a;
+  light_shader_no_distance_falloff = true;
+  if (!is_directional) {
+    attenuation *= light_influence_cutoff(lv.dist,
+                                          light.local().local.influence_radius_invsqr_surface);
+  }
+}
+
 float light_shader_no_distance_ltc(sampler2DArray util_tx,
                                    LightData light,
                                    LightVector lv,
@@ -190,6 +209,8 @@ template<bool is_transmission> struct EvalCtx {
   uchar receiver_light_set;
   float terminator_normal_offset;
   float terminator_geometry_offset;
+  int light_shader_surfel_index;
+  int light_shader_surfel_len;
 
   void light_eval_single([[resource_table]] LightEvalData &srt,
                          uint l_idx,
@@ -229,25 +250,50 @@ template<bool is_transmission> struct EvalCtx {
         if (light_shader_uniform_index >= 0) {
           float4 light_shader =
               light_shader_data.light_shader_uniform_buf[light_shader_uniform_index];
-          light.color = light_shader.rgb;
-          attenuation = light_attenuation_common(light, is_directional, lv.L) * light_shader.a;
-          light_shader_no_distance_falloff = true;
-          if (!is_directional) {
-            attenuation *= light_influence_cutoff(
-                lv.dist, light.local().local.influence_radius_invsqr_surface);
-          }
+          light_shader_eval_apply(light,
+                                  lv,
+                                  is_directional,
+                                  light_shader,
+                                  attenuation,
+                                  light_shader_no_distance_falloff);
         }
         else if (light_shader_index >= 0) {
           float4 light_shader = texelFetch(light_shader_data.light_shader_tx,
                                            int3(int2(texel), light_shader_index),
                                            0);
-          light.color = light_shader.rgb;
-          attenuation = light_attenuation_common(light, is_directional, lv.L) * light_shader.a;
-          light_shader_no_distance_falloff = true;
-          if (!is_directional) {
-            attenuation *= light_influence_cutoff(
-                lv.dist, light.local().local.influence_radius_invsqr_surface);
-          }
+          light_shader_eval_apply(light,
+                                  lv,
+                                  is_directional,
+                                  light_shader,
+                                  attenuation,
+                                  light_shader_no_distance_falloff);
+        }
+      }
+      if (srt.use_light_shader_surfel_eval) [[static_branch]] {
+        [[resource_table]] const LightShaderSurfelEvalData &light_shader_data =
+            srt.light_shader_surfel_data;
+        int light_shader_index = light_shader_data.surfel_light_shader_index_buf[l_idx];
+        int light_shader_uniform_index = (light_shader_index < -1) ? -light_shader_index - 2 : -1;
+        if (light_shader_uniform_index >= 0) {
+          float4 light_shader =
+              light_shader_data.surfel_light_shader_uniform_buf[light_shader_uniform_index];
+          light_shader_eval_apply(light,
+                                  lv,
+                                  is_directional,
+                                  light_shader,
+                                  attenuation,
+                                  light_shader_no_distance_falloff);
+        }
+        else if (light_shader_index >= 0) {
+          int surfel_offset = light_shader_index * light_shader_surfel_len +
+                              light_shader_surfel_index;
+          float4 light_shader = light_shader_data.surfel_light_shader_buf[surfel_offset];
+          light_shader_eval_apply(light,
+                                  lv,
+                                  is_directional,
+                                  light_shader,
+                                  attenuation,
+                                  light_shader_no_distance_falloff);
         }
       }
     }
@@ -356,6 +402,8 @@ EvalCtx<true> init_from_reflect_ctx(EvalCtx<false> ctx)
   ctx_tr.receiver_light_set = ctx.receiver_light_set;
   ctx_tr.terminator_normal_offset = ctx.terminator_normal_offset;
   ctx_tr.terminator_geometry_offset = ctx.terminator_geometry_offset;
+  ctx_tr.light_shader_surfel_index = ctx.light_shader_surfel_index;
+  ctx_tr.light_shader_surfel_len = ctx.light_shader_surfel_len;
   return ctx_tr;
 }
 

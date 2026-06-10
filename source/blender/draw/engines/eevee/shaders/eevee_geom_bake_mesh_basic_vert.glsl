@@ -10,7 +10,10 @@ VERTEX_SHADER_CREATE_INFO(eevee_geom_bake_mesh_basic)
 
 void main()
 {
+  uint resource_id_raw = drw_resource_id_raw();
   DRW_VIEW_FROM_RESOURCE_ID;
+  interp_flat.resource_id_raw = resource_id_raw;
+  drw_ResourceID_iface.resource_id = resource_id_raw;
 
   interp.P = drw_point_object_to_world(pos);
   interp.N = normalize(drw_normal_object_to_world(nor));

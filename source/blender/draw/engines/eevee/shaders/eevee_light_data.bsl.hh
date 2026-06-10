@@ -24,4 +24,10 @@ struct LightShaderEvalData {
   [[storage(LIGHT_SHADER_UNIFORM_BUF_SLOT, read)]] const float4 (&light_shader_uniform_buf)[];
 };
 
+struct LightShaderSurfelEvalData {
+  [[storage(LIGHT_SHADER_SURFEL_INDEX_BUF_SLOT, read)]] const int (&surfel_light_shader_index_buf)[];
+  [[storage(LIGHT_SHADER_SURFEL_BUF_SLOT, read)]] const float4 (&surfel_light_shader_buf)[];
+  [[storage(LIGHT_SHADER_UNIFORM_BUF_SLOT, read)]] const float4 (&surfel_light_shader_uniform_buf)[];
+};
+
 }  // namespace eevee

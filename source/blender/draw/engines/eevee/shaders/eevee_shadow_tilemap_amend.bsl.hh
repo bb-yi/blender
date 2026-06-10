@@ -10,23 +10,24 @@
  * way for the current destination tile. For each new level we gather the previous level tiles from
  * local memory using the correct relative offset from the previous level as they might not be
  * aligned.
- *
- * TODO(fclem): This shader **should** be dispatched for one thread-group per directional light.
- * Currently this shader is dispatched with one thread-group for all directional light.
  */
 
 #pragma once
 
 #include "eevee_defines.hh"
-#include "eevee_light_iter.bsl.hh"
+#include "eevee_light_shared.hh"
 #include "eevee_shadow_shared.hh"
 #include "eevee_shadow_tilemap_lib.bsl.hh"
 
 namespace eevee {
 
 struct TilemapAmend {
+  [[storage(LIGHT_CULL_BUF_SLOT, read)]] const LightCullingData &light_cull_buf;
+  [[storage(LIGHT_BUF_SLOT, read_write)]] LightData (&light_buf)[];
+
   [[storage(4, read)]] const ShadowTileMapData (&tilemaps_buf)[];
-  [[storage(5, read_write)]] LightData (&light_buf_write)[];
+
+  [[push_constant]] const int tilemaps_buf_len;
 
   [[shared]] uint tiles_local[SHADOW_TILEMAP_RES][SHADOW_TILEMAP_RES];
 
@@ -47,6 +48,10 @@ struct AmendCtx {
     int2 base_offset_pos = light.sun().clipmap_base_offset_pos;
     /* LOD relative max with respect to clipmap_lod_min. */
     int lod_max = light.sun().clipmap_lod_max - light.sun().clipmap_lod_min;
+    lod_max = min(lod_max, srt.tilemaps_buf_len - light.tilemap_index - 1);
+    if (lod_max < 0) {
+      return;
+    }
     /* Iterate in reverse. */
     for (int lod = lod_max; lod >= 0; lod--) {
       int tilemap_index = light.tilemap_index + lod;
@@ -60,6 +65,7 @@ struct AmendCtx {
         int2 offset_binary = ((base_offset_pos >> lod) & 1) - ((base_offset_neg >> lod) & 1);
         int2 offset_centered = int2(SHADOW_TILEMAP_RES / 2) + offset_binary;
         int2 tile_co_prev = (tile_co + offset_centered) >> 1;
+        tile_co_prev = clamp(tile_co_prev, int2(0), int2(SHADOW_TILEMAP_RES - 1));
 
         /* Load tile from the previous LOD. */
         ShadowSamplingTilePacked tile_prev_packed =
@@ -110,6 +116,10 @@ struct AmendCtx {
 
     int lod_min = 0;
     int tilemap_count = light.local_tilemap_count();
+    tilemap_count = min(tilemap_count, srt.tilemaps_buf_len - light.tilemap_index);
+    if (tilemap_count <= 0) {
+      return;
+    }
     for (int i = 0; i < tilemap_count; i++) {
       ShadowTileMapData tilemap = srt.tilemaps_buf[light.tilemap_index + i];
       lod_min = max(lod_min, tilemap.effective_lod_min);
@@ -118,23 +128,31 @@ struct AmendCtx {
       /* Override the effective lod min distance in absolute mode (negative).
        * Note that this only changes the sampling for this AA sample. */
       constexpr float projection_diagonal = 2.0f * M_SQRT2;
-      srt.light_buf_write[index].lod_min = -(projection_diagonal /
-                                             float(SHADOW_MAP_MAX_RES >> lod_min));
+      srt.light_buf[index].lod_min = -(projection_diagonal /
+                                       float(SHADOW_MAP_MAX_RES >> lod_min));
     }
   }
 };
 
-template void light::foreach<AmendCtx, TilemapAmend>(const LightRenderData &,
-                                                     AmendCtx &,
-                                                     TilemapAmend &);
-
 [[compute, local_size(SHADOW_TILEMAP_RES, SHADOW_TILEMAP_RES)]] void tilemap_amend(
     [[resource_table]] TilemapAmend &srt,
-    [[resource_table]] LightRenderData &lrd,
     [[global_invocation_id]] const uint3 global_id)
 {
   AmendCtx ctx = {.tile_co = int2(global_id.xy)};
-  light::foreach(lrd, ctx, srt);
+
+  if (global_id.x == 0u && global_id.y == 0u && global_id.z == 0u) {
+    for (uint index = 0; index < srt.light_cull_buf.visible_count; index++) {
+      LightData light = srt.light_buf[index];
+      ctx.eval_local(srt, index, light);
+    }
+  }
+
+  const uint directional_index = srt.light_cull_buf.local_lights_len + global_id.z;
+  if (directional_index >= srt.light_cull_buf.items_count) {
+    return;
+  }
+  LightData light = srt.light_buf[directional_index];
+  ctx.eval_directional(srt, directional_index, light);
 }
 
 PipelineCompute shadow_tilemap_amend(tilemap_amend);

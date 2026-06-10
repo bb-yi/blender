@@ -17,6 +17,17 @@
 
 namespace eevee::light::culling {
 
+bool world_sunlight_is_valid(LightData sun)
+{
+  float3 color = sun.color;
+  float3 direction = sun.object_to_world.z_axis();
+  bool valid_color = !any(isnan(color)) && !any(isinf(color)) &&
+                     max(max(abs(color.x), abs(color.y)), abs(color.z)) > 1e-8f;
+  bool valid_direction = !any(isnan(direction)) && !any(isinf(direction)) &&
+                         dot(direction, direction) > 1e-8f;
+  return valid_color && valid_direction;
+}
+
 /**
  * Select the visible items inside the active view and put them inside the sorting buffer.
  */
@@ -59,13 +70,21 @@ void cull_main([[resource_table]] Cull &srt,
     /* Some sun-lights are reserved for world light. Perform copy from dedicated buffer. */
     bool is_world_sun_light = light.color.r < 0.0f;
     if (is_world_sun_light) {
-      light.color = srt.sunlight_buf[l_idx].color;
-      light.object_to_world = srt.sunlight_buf[l_idx].object_to_world;
+      LightData extracted_sun = srt.sunlight_buf[l_idx];
+      if (world_sunlight_is_valid(extracted_sun)) {
+        light.color = extracted_sun.color;
+        light.object_to_world = extracted_sun.object_to_world;
 
-      LightSunData sun_data = light.sun();
-      sun_data.direction = srt.sunlight_buf[l_idx].object_to_world.z_axis();
-      light.sun() = sun_data;
-      /* NOTE: Use the radius from UI instead of auto sun size for now. */
+        LightSunData sun_data = light.sun();
+        sun_data.direction = extracted_sun.object_to_world.z_axis();
+        light.sun() = sun_data;
+        /* NOTE: Use the radius from UI instead of auto sun size for now. */
+      }
+      else {
+        light.color = float3(0.0f);
+        light.power = float4(0.0f);
+        light.tilemap_index = LIGHT_NO_SHADOW;
+      }
     }
     /* NOTE: We know the index because sun lights are packed at the start of the input buffer. */
     uint output_index = srt.light_cull_buf.local_lights_len + l_idx;
