@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include "infos/eevee_outline_infos.hh"
+
 #include "eevee_defines.hh"
 #include "gpu_shader_math_base_lib.glsl"
 #include "gpu_shader_utildefines_lib.glsl"
@@ -132,6 +134,15 @@ float outline_pixel_world_size_at(float depth, int2 extent, int2 texel)
   return 1.0f;
 #endif
 }
+
+#if defined(MAT_OUTLINE_SUPPORT) && defined(MAT_OUTLINE_OUTPUT) && defined(GPU_FRAGMENT_SHADER)
+/* NPR: `eevee_outline_lib.glsl` is a dependency of `eevee_nodetree_lib.bsl.hh`, so its body is
+ * emitted BEFORE that file's body which defines the `drw_object_infos`/`drw_resource_id` BSL
+ * compatibility shims. Forward-declare them so `output_outline()` compiles ahead of the shim
+ * definitions (the calls only run from appended node code, after both are defined). */
+ObjectInfos drw_object_infos();
+uint drw_resource_id();
+#endif
 
 void output_outline(float4 line_color,
                     float line_width,

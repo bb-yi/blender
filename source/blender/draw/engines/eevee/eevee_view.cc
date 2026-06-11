@@ -238,7 +238,13 @@ namespace blender::eevee
         rt_buffer_refract_);
     }
 
-    inst_.gbuffer.release();
+    /* NPR: the outline detect pass reads the deferred GBuffer (surface normals for raytrace
+     * transmission, see d55d73358c0b). Keep the GBuffer alive until after the outline pass when
+     * outline is enabled; otherwise release it right away to free the pool textures early. */
+    const bool defer_gbuffer_release_for_outline = inst_.outline.enabled();
+    if (!defer_gbuffer_release_for_outline) {
+      inst_.gbuffer.release();
+    }
 
     if (inst_.filter_materials.has_stage_entries(SCE_EEVEE_FILTER_STAGE_BEFORE_VOLUME_FOG))
     {
@@ -278,6 +284,11 @@ namespace blender::eevee
 
     if (inst_.outline.enabled()) {
       inst_.outline.render(render_view_, extent_);
+    }
+
+    /* NPR: release the GBuffer that was kept alive for the outline detect pass (see above). */
+    if (defer_gbuffer_release_for_outline) {
+      inst_.gbuffer.release();
     }
 
     gpu::Texture *outline_raw_tx = inst_.outline.resolved_texture();
