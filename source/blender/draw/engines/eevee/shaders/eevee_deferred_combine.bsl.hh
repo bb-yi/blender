@@ -5,6 +5,7 @@
 #pragma once
 
 #include "draw_view.bsl.hh"
+#include "draw_model.bsl.hh"
 #include "eevee_colorspace_lib.bsl.hh"
 #include "eevee_gbuffer_read.bsl.hh"
 #include "eevee_hiz.bsl.hh"
@@ -94,6 +95,7 @@ struct CombineFragOut {
 void combine_frag([[resource_table]] Combine &srt,
                   [[resource_table]] RenderPassOutput &render_passes,
                   [[resource_table]] const draw::View &views,
+                  [[resource_table]] const draw::Infos &infos,
                   [[resource_table]] const Uniform &uni,
                   [[resource_table]] const HiZ &hiz,
                   [[resource_table]] const ::gbuffer::Reader &reader,
@@ -106,6 +108,15 @@ void combine_frag([[resource_table]] Combine &srt,
   const gbuffer::Layers gbuf = reader.read_layers(texel);
   const uchar closure_count = gbuf.header.closure_len();
   const uint3 bin_indices = gbuf.header.bin_index_per_layer();
+
+  /* NPR: World environment exclusion — drop ray-traced/probe indirect GI for excluded objects.
+   * The deferred light eval already skips the non-ray-traced probe path; this also covers the
+   * ray-traced indirect that is merged here from `indirect_radiance_*`. */
+  bool world_environment_disabled = false;
+  if (gbuf.header.use_object_id()) {
+    world_environment_disabled = world_environment_disabled_get(
+        infos.get(reader.read_object_id(texel)));
+  }
 
   float3 diffuse_color = float3(0.0f);
   float3 diffuse_direct = float3(0.0f);
@@ -129,6 +140,9 @@ void combine_frag([[resource_table]] Combine &srt,
 
         if (srt.use_split_radiance) {
           closure_indirect_light = srt.load_radiance_indirect(texel, layer_index);
+        }
+        if (world_environment_disabled) {
+          closure_indirect_light = float3(0.0f);
         }
 
         average_normal += cl.N * reduce_add(cl.color);
