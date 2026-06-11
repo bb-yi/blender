@@ -143,6 +143,20 @@ void surf_forward([[resource_table]] PipelineConstants & /*pipe*/,
 
   nodetree_surface(closure_rand);
 
+  /* NPR: Forward/blended materials must still feed the Normal render pass. The deferred path writes
+   * it from the GBuffer during the combine stage, but forward surfaces are never gbuffered, so the
+   * pass would stay black without this explicit write (matches npr-port-5.1 forward behavior).
+   * Forward materials always get the raw `eevee_render_pass_out` create-info (`rp_color_img` +
+   * MAT_RENDER_PASS_SUPPORT), so write to that bound image directly. The BSL RenderPassOutput
+   * resource-table struct is only present for AOV materials, so it cannot be used here. */
+#if defined(MAT_RENDER_PASS_SUPPORT)
+  if (uni.uniform_buf.render_pass.normal_id >= 0) {
+    imageStoreFast(rp_color_img,
+                   int3(int2(gl_FragCoord.xy), uni.uniform_buf.render_pass.normal_id),
+                   float4(g_data.N, 1.0f));
+  }
+#endif
+
   float3 radiance, transmittance;
   eevee::forward_lighting_eval(
       view, resource_id, g_thickness_forward, gl_FragCoord.xy, radiance, transmittance);

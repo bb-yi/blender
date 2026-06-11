@@ -9137,6 +9137,8 @@ static void rna_def_scene_eevee(BlenderRNA *brna)
       {1024, "1024", 0, "1 GB", ""},
       {1536, "1536", 0, "1.5 GB", ""},
       {2048, "2048", 0, "2 GB", ""},
+      {4096, "4096", 0, "4 GB", ""},
+      {8192, "8192", 0, "8 GB", ""},
       {0, nullptr, 0, nullptr, nullptr},
   };
 

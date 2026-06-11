@@ -849,6 +849,11 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
         mat.prepass.gpumat != nullptr)
     {
       mat.stencil.gpumat = mat.prepass.gpumat;
+      /* NPR/5.2: select the stencil sub-pass by the material's render METHOD, not by
+       * `use_forward_pipeline`. A material with depth-write disabled (or custom z-test) renders its
+       * surface in the forward pipeline yet, when its render method is still DEFERRED, its stencil
+       * must be written in the deferred pipeline so deferred stencil READERS observe it (matches the
+       * 74ada546 baseline; routing stencil to forward here breaks material-stencil-portal). */
       const bool use_forward_stencil_pipeline = blender_mat->surface_render_method ==
                                                 MA_SURFACE_METHOD_FORWARD;
       mat.stencil.sub_pass = use_forward_stencil_pipeline ?

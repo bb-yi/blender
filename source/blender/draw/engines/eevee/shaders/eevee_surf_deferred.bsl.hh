@@ -157,7 +157,10 @@ DeferredFragOut surf_deferred_impl([[resource_table]] PipelineConstants &pipe,
   int2 out_texel = int2(frag_co.xy);
 
   ObjectInfos object_infos = infos.get(resource_id);
-  bool use_light_linking = receiver_light_set_get(object_infos) != 0;
+  /* NPR: `world_environment_disabled` must force object-id storage so the deferred light eval can
+   * read the flag back and suppress environment lighting for the excluded object. */
+  bool use_light_linking = receiver_light_set_get(object_infos) != 0 ||
+                           world_environment_disabled_get(object_infos);
   bool use_terminator_offset = object_infos.shadow_terminator_normal_offset > 0.0;
 
   /* ----- Render Passes output ----- */

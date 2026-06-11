@@ -1573,6 +1573,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   {
     info.additional_info((pipeline_type == MAT_PIPE_FORWARD) ? "eevee_surf_forward_outline_out" :
                                                               "eevee_outline_out");
+    info.define("MAT_OUTLINE_OUTPUT");
     if (clears_outline_output) {
       info.define("MAT_OUTLINE_CLEAR");
     }

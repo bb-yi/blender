@@ -166,10 +166,15 @@ void light_eval_frag([[resource_table]] LightEval &srt,
   ctx.receiver_light_set = 0;
   ctx.terminator_normal_offset = 0.0f;
   ctx.terminator_geometry_offset = 0.0f;
+  /* NPR: World environment exclusion. When the receiving object is in the world's
+   * `environment_exclusion_collection`, suppress its world/light-probe (environment) contribution.
+   * The flag is packed into ObjectInfos by `draw_resource` and read back here. */
+  bool world_environment_disabled = false;
   if (gbuf.header.use_object_id()) {
     uint object_id = reader.read_object_id(texel);
     ObjectInfos object_infos = infos.get(object_id);
     ctx.receiver_light_set = receiver_light_set_get(object_infos);
+    world_environment_disabled = world_environment_disabled_get(object_infos);
     ctx.terminator_normal_offset = object_infos.shadow_terminator_normal_offset;
     ctx.terminator_geometry_offset = object_infos.shadow_terminator_geometry_offset;
   }
@@ -215,7 +220,7 @@ void light_eval_frag([[resource_table]] LightEval &srt,
     render_passes.store_value(texel, srt.render_pass_shadow_id, average(shadows));
   }
 
-  if (srt.use_lightprobe_eval) {
+  if (srt.use_lightprobe_eval && !world_environment_disabled) {
     LightProbeSample samp = lightprobes.load(frag_co.xy, P, Ng, V);
 
     float clamp_indirect = uni.uniform_buf.clamp.surface_indirect;

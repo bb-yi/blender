@@ -88,14 +88,16 @@ bool outline_freestyle_edge_unpack(float threshold_packed)
          0u;
 }
 
-#if defined(MAT_OUTLINE_SUPPORT) && defined(MAT_OUTLINE_CLEAR) && defined(GPU_FRAGMENT_SHADER)
+#if defined(MAT_OUTLINE_SUPPORT) && defined(MAT_OUTLINE_OUTPUT) && defined(MAT_OUTLINE_CLEAR) && \
+    defined(GPU_FRAGMENT_SHADER)
 float4 g_outline_staged_color;
 float4 g_outline_staged_info;
 #endif
 
 void outline_output_reset()
 {
-#if defined(MAT_OUTLINE_SUPPORT) && defined(MAT_OUTLINE_CLEAR) && defined(GPU_FRAGMENT_SHADER)
+#if defined(MAT_OUTLINE_SUPPORT) && defined(MAT_OUTLINE_OUTPUT) && defined(MAT_OUTLINE_CLEAR) && \
+    defined(GPU_FRAGMENT_SHADER)
   g_outline_staged_color = float4(0.0f);
   g_outline_staged_info = float4(0.0f);
 #endif
@@ -103,7 +105,8 @@ void outline_output_reset()
 
 void outline_output_flush()
 {
-#if defined(MAT_OUTLINE_SUPPORT) && defined(MAT_OUTLINE_CLEAR) && defined(GPU_FRAGMENT_SHADER)
+#if defined(MAT_OUTLINE_SUPPORT) && defined(MAT_OUTLINE_OUTPUT) && defined(MAT_OUTLINE_CLEAR) && \
+    defined(GPU_FRAGMENT_SHADER)
   if (g_outline_staged_color.a <= 0.0f || g_outline_staged_info.r <= 0.0f) {
     return;
   }
@@ -138,7 +141,7 @@ void output_outline(float4 line_color,
                     bool id_edge,
                     bool freestyle_edge)
 {
-#if defined(MAT_OUTLINE_SUPPORT) && defined(GPU_FRAGMENT_SHADER)
+#if defined(MAT_OUTLINE_SUPPORT) && defined(MAT_OUTLINE_OUTPUT) && defined(GPU_FRAGMENT_SHADER)
   if (flag_test(drw_object_infos().flag, OBJECT_HOLDOUT)) {
     return;
   }

@@ -80,6 +80,9 @@ void forward_lighting_eval(const ViewMatrices view,
   ctx.receiver_light_set = receiver_light_set_get(object_infos);
   ctx.terminator_normal_offset = object_infos.shadow_terminator_normal_offset;
   ctx.terminator_geometry_offset = object_infos.shadow_terminator_geometry_offset;
+  /* NPR: World environment exclusion. Suppress world/light-probe (environment) indirect lighting
+   * for objects in the world's `environment_exclusion_collection`. */
+  bool world_environment_disabled = world_environment_disabled_get(object_infos);
 
   lights.eval_reflection(ctx, vPz);
 
@@ -164,7 +167,9 @@ void forward_lighting_eval(const ViewMatrices view,
       ClosureUndetermined cl = g_closure_get_resolved(uchar(i), 1.0f);
       if (cl.weight > CLOSURE_WEIGHT_CUTOFF) {
         float3 direct_light = ctx.stack.cl[i].light_shadowed;
-        float3 indirect_light = lightprobes.eval(samp, cl, g_data.P, V, thickness);
+        float3 indirect_light = world_environment_disabled ?
+                                    float3(0.0f) :
+                                    lightprobes.eval(samp, cl, g_data.P, V, thickness);
 
 #ifdef MAT_REFLECTION
         if (cl.type == CLOSURE_BSDF_MICROFACET_GGX_REFLECTION_ID) {
