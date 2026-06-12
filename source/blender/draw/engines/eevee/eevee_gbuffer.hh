@@ -189,7 +189,7 @@ struct GBuffer {
   }
 
   /* Bind the GBuffer frame-buffer correctly using the correct workarounds. */
-  void bind(Framebuffer &gbuffer_fb, bool clear_combined = false)
+  void bind(Framebuffer &gbuffer_fb, bool clear_combined = false, bool clear_stencil = true)
   {
     /* Workaround a Metal bug that is only showing up on ATI/Intel GPUs. */
     if (GPU_type_matches(
@@ -200,7 +200,7 @@ struct GBuffer {
       return;
     }
 
-    if (!GPU_stencil_export_support()) {
+    if (clear_stencil && !GPU_stencil_export_support()) {
       /* Clearing custom load-store frame-buffers is invalid,
        * clear the stencil as a regular frame-buffer first. */
       GPU_framebuffer_bind(gbuffer_fb);

@@ -256,12 +256,12 @@ static PassMain::Sub *material_stencil_pass_add(PassSortable &stencil_ps,
                            {GPU_ATTACHMENT_WRITE, /* normal */
                             write_id ? GPU_ATTACHMENT_WRITE : GPU_ATTACHMENT_IGNORE,
                             has_motion ? GPU_ATTACHMENT_WRITE : GPU_ATTACHMENT_IGNORE});
-  const DRWState state = material_write_state(blender_mat, true, true) |
-                         DRW_STATE_WRITE_STENCIL | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
-                         material_ztest_state(material_ztest_mode(blender_mat),
-                                              inst.film.depth.test_state) |
-                         material_surface_cull_state(material_surface_cull_method(blender_mat)) |
-                         stencil.test_state;
+  DRWState state = material_write_state(blender_mat, false, true) |
+                   DRW_STATE_WRITE_STENCIL | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
+                   inst.film.depth.test_state |
+                   material_surface_cull_state(material_surface_cull_method(blender_mat));
+  state = material_ztest_state_replace(
+      state, material_ztest_mode(blender_mat), inst.film.depth.test_state);
   pass->state_set(state);
   pass->state_stencil_op(stencil.fail, stencil.zfail, stencil.pass);
   pass->state_stencil(stencil.write_mask, stencil.reference, stencil.read_mask);
@@ -1816,11 +1816,25 @@ PassMain::Sub *DeferredLayer::material_add(blender::Material *blender_mat, GPUMa
   if (blender_mat->blend_flag & MA_BL_THICKNESS_FROM_SHADOW) {
     material_stencil_bits |= uint8_t(StencilBits::THICKNESS_FROM_SHADOW);
   }
-  /* We use this opportunity to clear the stencil bits. The undefined areas are discarded using the
-   * gbuf header value. */
-  material_pass->state_stencil(EEVEE_STENCIL_INTERNAL_MASK,
-                               material_stencil_bits,
-                               EEVEE_STENCIL_INTERNAL_MASK);
+  /* Stencil readers (write_mask == 0) have their test deferred from the prepass to here, so the
+   * stencil writer pass has already executed and the user stencil bits are in place. */
+  const MaterialStencilState stencil = material_stencil_state_get(blender_mat);
+  const bool is_stencil_reader = stencil.enabled && stencil.write_mask == 0;
+  if (is_stencil_reader) {
+    material_pass->state_stencil_op(
+        GPU_STENCIL_OP_KEEP, GPU_STENCIL_OP_KEEP, GPU_STENCIL_OP_REPLACE_VALUE);
+    material_pass->state_stencil(EEVEE_STENCIL_INTERNAL_MASK,
+                                 material_stencil_bits | stencil.reference,
+                                 stencil.read_mask);
+    material_pass->state_stencil_test(stencil.test);
+  }
+  else {
+    /* We use this opportunity to clear the stencil bits. The undefined areas are discarded using
+     * the gbuf header value. */
+    material_pass->state_stencil(EEVEE_STENCIL_INTERNAL_MASK,
+                                 material_stencil_bits,
+                                 EEVEE_STENCIL_INTERNAL_MASK);
+  }
 
   return material_pass;
 }
@@ -1889,13 +1903,12 @@ gpu::Texture *DeferredLayer::render(View &render_view,
     }
   }
 
-  if (has_stencil_) {
-    ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainDeferredPrepass);
-    GPU_framebuffer_bind(prepass_fb);
-    inst_.manager->submit(stencil_ps_, render_view);
-  }
-
   if (closure_count_ == 0) {
+    if (has_stencil_) {
+      ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainDeferredPrepass);
+      GPU_framebuffer_bind(prepass_fb);
+      inst_.manager->submit(stencil_ps_, render_view);
+    }
     inst_.hiz_buffer.swap_layer();
     inst_.hiz_buffer.update();
     return radiance_behind_tx;
@@ -1932,7 +1945,18 @@ gpu::Texture *DeferredLayer::render(View &render_view,
   {
     ScopedTelemetrySample telemetry_sample(inst_.telemetry,
                                            TelemetryStageId::MainDeferredGBufferPass);
-    inst_.gbuffer.bind(gbuffer_fb);
+    if (has_stencil_ && !GPU_stencil_export_support()) {
+      /* GBuffer::bind() clears the full stencil buffer on backends without shader stencil export.
+       * Material stencil writers must run after that clear so deferred GBuffer readers can observe
+       * the user bits. */
+      GPU_framebuffer_bind(gbuffer_fb);
+      GPU_framebuffer_clear_stencil(gbuffer_fb, 0x0u);
+    }
+    if (has_stencil_) {
+      GPU_framebuffer_bind(prepass_fb);
+      inst_.manager->submit(stencil_ps_, render_view);
+    }
+    inst_.gbuffer.bind(gbuffer_fb, false, !has_stencil_);
     inst_.manager->submit(gbuffer_ps_, render_view);
   }
   inst_.lights.eval_light_shaders(render_view, extent);

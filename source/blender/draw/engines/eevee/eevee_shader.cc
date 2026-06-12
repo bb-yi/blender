@@ -2698,6 +2698,22 @@ void ShaderModule::material_create_info_pipelines_amend(eMaterialGeometry geomet
           .stencil_format(gpu::TextureTargetFormat::SFLOAT_32_DEPTH_UINT_8)
           .color_format(gpu::TextureTargetFormat::SFLOAT_16_16);
 
+      /* Material stencil mask writers can disable material depth writes while still needing the
+       * deferred prepass shader to update only the stencil buffer. */
+      r_info.pipeline_state()
+          .primitive(prim_type)
+          .state(GPU_WRITE_STENCIL,
+                 GPU_BLEND_NONE,
+                 GPU_CULL_NONE,
+                 GPU_DEPTH_GREATER_EQUAL,
+                 GPU_STENCIL_ALWAYS,
+                 GPU_STENCIL_OP_REPLACE,
+                 GPU_VERTEX_LAST)
+          .viewports(1)
+          .depth_format(gpu::TextureTargetFormat::SFLOAT_32_DEPTH_UINT_8)
+          .stencil_format(gpu::TextureTargetFormat::SFLOAT_32_DEPTH_UINT_8)
+          .color_format(gpu::TextureTargetFormat::SFLOAT_16_16);
+
       /* Deferred probe pipeline */
       r_info.pipeline_state()
           .primitive(prim_type)
@@ -2720,6 +2736,19 @@ void ShaderModule::material_create_info_pipelines_amend(eMaterialGeometry geomet
       r_info.pipeline_state()
           .primitive(prim_type)
           .state(GPU_WRITE_COLOR | GPU_WRITE_DEPTH | GPU_WRITE_STENCIL,
+                 GPU_BLEND_NONE,
+                 GPU_CULL_NONE,
+                 GPU_DEPTH_GREATER_EQUAL,
+                 GPU_STENCIL_ALWAYS,
+                 GPU_STENCIL_OP_REPLACE,
+                 GPU_VERTEX_LAST)
+          .viewports(1)
+          .depth_format(gpu::TextureTargetFormat::SFLOAT_32_DEPTH_UINT_8)
+          .stencil_format(gpu::TextureTargetFormat::SFLOAT_32_DEPTH_UINT_8)
+          .color_format(gpu::TextureTargetFormat::SFLOAT_16_16);
+      r_info.pipeline_state()
+          .primitive(prim_type)
+          .state(GPU_WRITE_STENCIL,
                  GPU_BLEND_NONE,
                  GPU_CULL_NONE,
                  GPU_DEPTH_GREATER_EQUAL,

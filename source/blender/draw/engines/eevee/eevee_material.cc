@@ -55,19 +55,25 @@ static void material_surface_stencil_state_set(PassMain::Sub &pass,
     if (blender_mat->blend_flag & MA_BL_THICKNESS_FROM_SHADOW) {
       material_stencil_bits |= uint8_t(DeferredLayerBase::StencilBits::THICKNESS_FROM_SHADOW);
     }
-    /* The deferred prepass clears stencil to 0, so when no internal bit needs
-     * to be written and user stencil is off, leaving the pass's default state
-     * means no per-draw stencil commands are emitted. */
-    if (material_stencil_bits == 0u && !stencil.enabled) {
+    /* Stencil readers (write_mask == 0) must NOT test in the prepass because the stencil writer
+     * pass runs after. Applying the reader's test here would reject its fragments before depth is
+     * written, making the later gbuffer DEPTH_EQUAL test fail. Readers get their stencil test
+     * deferred to the gbuffer pass instead. */
+    const bool is_stencil_reader = stencil.enabled && stencil.write_mask == 0;
+    if (material_stencil_bits == 0u && (!stencil.enabled || is_stencil_reader)) {
       return;
     }
-    const uint8_t reference = material_stencil_bits | (stencil.enabled ? stencil.reference : 0u);
-    const uint8_t compare_mask = stencil.enabled ? stencil.read_mask : EEVEE_STENCIL_INTERNAL_MASK;
+    const uint8_t reference = material_stencil_bits |
+                              (stencil.enabled && !is_stencil_reader ? stencil.reference : 0u);
+    const uint8_t compare_mask = (stencil.enabled && !is_stencil_reader) ?
+                                     stencil.read_mask :
+                                     EEVEE_STENCIL_INTERNAL_MASK;
 
     pass.state_stencil_op(
         GPU_STENCIL_OP_KEEP, GPU_STENCIL_OP_KEEP, GPU_STENCIL_OP_REPLACE_VALUE);
     pass.state_stencil(EEVEE_STENCIL_INTERNAL_MASK, reference, compare_mask);
-    pass.state_stencil_test(stencil.enabled ? stencil.test : GPU_STENCIL_ALWAYS);
+    pass.state_stencil_test((stencil.enabled && !is_stencil_reader) ? stencil.test :
+                                                                      GPU_STENCIL_ALWAYS);
     return;
   }
 
@@ -845,10 +851,9 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
                                   material_has_flag(mat.shading, GPU_MATFLAG_TRANSPARENT);
 
     MaterialStencilState stencil = material_stencil_state_get(blender_mat);
-    if (!hide_on_camera && mat.has_surface && stencil.enabled && !mat.is_alpha_blend_transparent &&
-        mat.prepass.gpumat != nullptr)
+    if (!hide_on_camera && mat.has_surface && stencil.enabled && stencil.write_mask != 0 &&
+        !mat.is_alpha_blend_transparent && mat.prepass.gpumat != nullptr)
     {
-      mat.stencil.gpumat = mat.prepass.gpumat;
       /* NPR/5.2: select the stencil sub-pass by the material's render METHOD, not by
        * `use_forward_pipeline`. A material with depth-write disabled (or custom z-test) renders its
        * surface in the forward pipeline yet, when its render method is still DEFERRED, its stencil
@@ -856,6 +861,14 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
        * 74ada546 baseline; routing stencil to forward here breaks material-stencil-portal). */
       const bool use_forward_stencil_pipeline = blender_mat->surface_render_method ==
                                                 MA_SURFACE_METHOD_FORWARD;
+      MaterialPass stencil_pass = mat.prepass;
+      if (!use_forward_stencil_pipeline && use_forward_pipeline) {
+        const eMaterialPipeline stencil_prepass_pipe = has_motion ?
+                                                           MAT_PIPE_PREPASS_DEFERRED_VELOCITY :
+                                                           MAT_PIPE_PREPASS_DEFERRED;
+        stencil_pass = material_pass_get(ob, blender_mat, stencil_prepass_pipe, geometry_type);
+      }
+      mat.stencil.gpumat = stencil_pass.gpumat;
       mat.stencil.sub_pass = use_forward_stencil_pipeline ?
                                  inst_.pipelines.forward.stencil_opaque_add(blender_mat,
                                                                             mat.stencil.gpumat,
@@ -867,6 +880,7 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
                                      ob->refraction_layer_index,
                                      has_motion,
                                      material_has_flag(mat.npr, GPU_MATFLAG_RAYCAST));
+      /* Stencil writers render through the stencil pass - null their prepass to avoid double-draw. */
       mat.prepass.sub_pass = nullptr;
     }
 
