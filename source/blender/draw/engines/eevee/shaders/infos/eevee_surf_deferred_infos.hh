@@ -9,6 +9,7 @@
 #  include "draw_view_infos.hh"
 
 #  include "eevee_common_infos.hh"
+#  include "eevee_fullscreen_infos.hh"
 #  include "eevee_light_infos.hh"
 #  include "eevee_sampling_infos.hh"
 #  include "eevee_shadow_infos.hh"
@@ -16,6 +17,16 @@
 
 #include "eevee_defines.hh"
 #include "gpu_shader_create_info.hh"
+
+GPU_SHADER_CREATE_INFO(eevee_stencil_value_visualize)
+DO_STATIC_COMPILATION()
+ADDITIONAL_INFO(eevee_fullscreen)
+PUSH_CONSTANT(int, stencil_value)
+PUSH_CONSTANT(bool, is_background)
+FRAGMENT_OUT(0, float4, out_color)
+DEPTH_WRITE(DepthWrite::ANY)
+FRAGMENT_SOURCE("eevee_stencil_value_visualize_frag.glsl")
+GPU_SHADER_CREATE_END()
 
 GPU_SHADER_CREATE_INFO(eevee_surf_npr)
 DEFINE("NPR_SHADER")
