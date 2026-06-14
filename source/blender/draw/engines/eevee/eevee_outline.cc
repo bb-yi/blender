@@ -99,10 +99,8 @@ void OutlineModule::sync()
   resolve_ps_.shader_set(inst_.shaders.static_shader_get(OUTLINE_RESOLVE));
   resolve_ps_.bind_texture("depth_tx", &inst_.render_buffers.depth_tx);
   resolve_ps_.bind_texture("vector_tx", &inst_.render_buffers.vector_tx);
-  gpu::Texture **outline_occlusion_depth_ref =
-      inst_.pipelines.forward.has_outline_occluders() ? &occlusion_depth_tx_ :
-                                                        &inst_.render_buffers.depth_tx;
-  resolve_ps_.bind_texture("outline_occlusion_depth_tx", outline_occlusion_depth_ref);
+  resolve_ps_.bind_texture("outline_occlusion_depth_tx", &outline_occlusion_depth_tx_);
+  resolve_ps_.push_constant("use_outline_occlusion_depth", &use_outline_occlusion_depth_, 1);
   resolve_ps_.bind_texture("outline_seed_tx", &edge_seed_tx_);
   resolve_ps_.bind_texture("outline_color_tx", &inst_.render_buffers.outline_color_tx);
   resolve_ps_.bind_texture("outline_info_tx", &inst_.render_buffers.outline_info_tx);
@@ -118,17 +116,20 @@ void OutlineModule::render(View &view, int2 extent)
 
   auto &drw = *inst_.manager;
 
-  if (inst_.pipelines.forward.has_outline_occluders()) {
+  GPU_memory_barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS | GPU_BARRIER_TEXTURE_FETCH);
+
+  use_outline_occlusion_depth_ = inst_.pipelines.forward.has_outline_occluders() ? 1 : 0;
+  outline_occlusion_depth_tx_ = inst_.render_buffers.depth_tx;
+  if (use_outline_occlusion_depth_ != 0) {
     occlusion_depth_tx_.acquire_2d(extent,
                                    gpu::TextureFormat::SFLOAT_32_DEPTH_UINT_8,
                                    GPU_TEXTURE_USAGE_ATTACHMENT | GPU_TEXTURE_USAGE_SHADER_READ);
-    GPU_texture_copy(occlusion_depth_tx_, inst_.render_buffers.depth_tx);
-    GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE | GPU_BARRIER_TEXTURE_FETCH |
-                       GPU_BARRIER_FRAMEBUFFER);
-
     occlusion_fb_.ensure(GPU_ATTACHMENT_TEXTURE(occlusion_depth_tx_));
+    occlusion_fb_.bind();
+    occlusion_fb_.clear_depth(inst_.film.depth.clear_value);
     inst_.pipelines.forward.render_outline_occlusion(view, occlusion_fb_);
     GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH);
+    outline_occlusion_depth_tx_ = occlusion_depth_tx_;
   }
   else {
     occlusion_depth_tx_.release();
@@ -225,6 +226,8 @@ void OutlineModule::render(View &view, int2 extent)
   jfa_tx_.current().release();
   jfa_tx_.previous().release();
   occlusion_depth_tx_.release();
+  outline_occlusion_depth_tx_ = nullptr;
+  use_outline_occlusion_depth_ = 0;
 }
 
 void OutlineModule::release_result()
@@ -238,6 +241,8 @@ void OutlineModule::release_result()
   resolved_depth_tx_.release();
   resolved_velocity_tx_.release();
   occlusion_depth_tx_.release();
+  outline_occlusion_depth_tx_ = nullptr;
+  use_outline_occlusion_depth_ = 0;
 }
 
 }  // namespace blender::eevee

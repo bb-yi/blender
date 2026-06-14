@@ -69,11 +69,22 @@ void main()
       }
 
       const float sample_depth = outline_depth_fetch(seed_texel);
+      const float sample_occlusion_depth = outline_occlusion_depth_fetch(seed_texel);
       const uint sample_outline_id = outline_id_unpack(outline_source_info_fetch(seed_texel).a);
+      const bool different_outline_id = sample_outline_id != center_outline_id;
       const bool blocked_by_scene_surface = sample_outline_id != center_outline_id &&
                                             center_depth < sample_depth;
-      const bool blocked_by_forward_occluder = center_occlusion_depth + 1e-5f <
-                                               min(center_depth, sample_depth);
+      /* In the 5.2 path, raytrace-transmission occluders can already populate the main depth
+       * while the background outline ID still seeds the outline buffers. Treat the auxiliary
+       * occlusion depth as a foreground mask for JFA seeds generated behind these occluders. */
+      const bool different_id_seed_occluded = different_outline_id &&
+                                              sample_occlusion_depth < 1.0f - 1e-5f;
+      const bool same_id_in_occluder_mask = !different_outline_id &&
+                                            (center_occlusion_depth < 1.0f - 1e-5f ||
+                                             sample_occlusion_depth < 1.0f - 1e-5f);
+      const bool blocked_by_forward_occluder = use_outline_occlusion_depth != 0 &&
+                                               (different_id_seed_occluded ||
+                                                same_id_in_occluder_mask);
 
       if (alpha > 0.0f && !(blocked_by_scene_surface || blocked_by_forward_occluder)) {
         outline_pass_color = float4(outline_color.rgb * alpha, alpha);

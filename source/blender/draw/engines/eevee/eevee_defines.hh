@@ -264,16 +264,18 @@
 /* NPR material passes already use their radiance input slot. Reuse a filter-only slot
  * already reserved away from material texture allocation. */
 #define LIGHT_SHADER_NPR_TEX_SLOT FILTER_SCENE_COLOR_TEX_SLOT
-/* Outline post-process shaders can include GBuffer/draw resources, so keep their texture slots
- * out of the common low range. */
-#define OUTLINE_DEPTH_TEX_SLOT 43
-#define OUTLINE_COLOR_TEX_SLOT 44
-#define OUTLINE_INFO_TEX_SLOT 45
-#define OUTLINE_SEED_TEX_SLOT 46
-#define OUTLINE_JFA_TEX_SLOT 47
-#define OUTLINE_VECTOR_TEX_SLOT 48
-#define OUTLINE_OCCLUSION_DEPTH_TEX_SLOT 49
-#define SHADOW_CASTER_ATLAS_TEX_SLOT OUTLINE_DEPTH_TEX_SLOT
+#define NPR_AOV_COLOR_TEX_SLOT FILTER_AOV_COLOR_TEX_SLOT
+#define NPR_AOV_VALUE_TEX_SLOT FILTER_AOV_VALUE_TEX_SLOT
+/* Outline post-process shaders are isolated from material evaluation. Reuse this local range
+ * instead of consuming high texture units that exceed the minimum per-stage backend limit. */
+#define OUTLINE_DEPTH_TEX_SLOT 20
+#define OUTLINE_COLOR_TEX_SLOT 21
+#define OUTLINE_INFO_TEX_SLOT 22
+#define OUTLINE_SEED_TEX_SLOT 23
+#define OUTLINE_JFA_TEX_SLOT 24
+#define OUTLINE_VECTOR_TEX_SLOT 25
+#define OUTLINE_OCCLUSION_DEPTH_TEX_SLOT 26
+#define SHADOW_CASTER_ATLAS_TEX_SLOT 43
 
 /* Images. */
 #define RBUFS_COLOR_SLOT 0

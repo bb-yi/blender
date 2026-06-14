@@ -7,6 +7,7 @@
  */
 
 #include "BLI_set.hh"
+#include "BLI_string.h"
 #include "BLI_time.h"
 #include "DNA_material_types.h"
 
@@ -112,7 +113,9 @@ static bool node_tree_uses_outline_control(const bNodeTree &ntree, Set<const bNo
   for (const bNode *node = static_cast<const bNode *>(ntree.nodes.first); node != nullptr;
        node = node->next)
   {
-    if (node->type_legacy == SH_NODE_OUTLINE_CONTROL) {
+    if (node->type_legacy == SH_NODE_OUTLINE_CONTROL ||
+        STREQ(node->idname, "ShaderNodeOutlineControl"))
+    {
       return true;
     }
     if (node->type_legacy == NODE_GROUP && node->id != nullptr &&
@@ -655,10 +658,12 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
 
   const bool color_write = material_color_write_get(*blender_mat);
   const bool depth_write = material_depth_write_get(*blender_mat);
+  const bool use_outline = inst_.scene->eevee.use_outline != 0;
+  const bool uses_outline_control = material_uses_outline_control(blender_mat);
   const bool uses_custom_ztest = material_ztest_mode_get(*blender_mat) != MA_ZTEST_LESS_EQUAL;
-  const bool use_forward_pipeline = blender_mat->surface_render_method ==
-                                        MA_SURFACE_METHOD_FORWARD ||
-                                    !depth_write || uses_custom_ztest;
+  const bool use_forward_pipeline =
+      blender_mat->surface_render_method == MA_SURFACE_METHOD_FORWARD ||
+      (!uses_outline_control && (!depth_write || uses_custom_ztest));
   const bool is_filter_material = blender_mat->eevee_domain == MA_EEVEE_DOMAIN_FILTER;
   eMaterialPipeline surface_pipe, prepass_pipe;
   if (use_forward_pipeline) {
@@ -683,11 +688,11 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
                            prepass_pipe,
                            ob->visibility_flag,
                            ob->refraction_layer_index,
-                           inst_.scene->eevee.use_outline != 0);
+                           use_outline);
 
   Material &mat = material_map_.lookup_or_add_cb(material_key, [&]() {
     Material mat = {};
-    mat.uses_outline_control = material_uses_outline_control(blender_mat);
+    mat.uses_outline_control = uses_outline_control;
     if (is_filter_material) {
       /* Filter-domain materials are scene fullscreen passes, not object surface materials. */
       return mat;
@@ -715,9 +720,6 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
     else {
       if (!hide_on_camera) {
         mat.prepass = material_pass_get(ob, blender_mat, prepass_pipe, geometry_type);
-        if (!depth_write) {
-          mat.prepass.sub_pass = nullptr;
-        }
       }
 
       mat.shading = material_pass_get(ob, blender_mat, surface_pipe, geometry_type);
@@ -727,9 +729,13 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
       mat.npr = has_surface_npr_tree ? material_pass_get(
                                    ob, blender_mat, MAT_PIPE_DEFERRED_NPR, geometry_type) :
                                MaterialPass();
-      if (!hide_on_camera && color_write && inst_.scene->eevee.use_outline != 0 &&
-          use_forward_pipeline && material_has_flag(mat.shading, GPU_MATFLAG_TRANSPARENT))
-      {
+      const bool is_default_surface = blender_mat == BKE_material_default_surface();
+      const bool needs_raytrace_transmission_depth =
+          (blender_mat->blend_flag & MA_BL_SS_REFRACTION) != 0;
+      const bool needs_outline_occlusion =
+          !hide_on_camera && color_write && use_outline && !mat.uses_outline_control &&
+          !is_default_surface && needs_raytrace_transmission_depth;
+      if (needs_outline_occlusion) {
         mat.outline_occlusion = material_pass_get(
             ob, blender_mat, MAT_PIPE_PREPASS_OVERLAP, geometry_type);
       }

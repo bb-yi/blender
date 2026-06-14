@@ -75,9 +75,15 @@ void surf_depth([[resource_table]] PipelineConstants &pipe,
 
     nodetree_surface(0.0f);
 
+#if defined(MAT_OUTLINE_OCCLUSION)
+    /* Outline resolve needs a binary front-most surface mask. Treat any visible transparent
+     * coverage as an occluder, but keep fully transparent regions from writing depth. */
+    float threshold = 1.0f - 1e-5f;
+#else
     float noise_offset = sampling.rng_1D_get(SAMPLING_TRANSPARENCY);
     float threshold = hashed_transparency::alpha_threshold(
         uni.pipeline_buf.alpha_hash_scale, noise_offset, g_data.P);
+#endif
 
     float transparency = average(g_transmittance);
     if (transparency > threshold) {

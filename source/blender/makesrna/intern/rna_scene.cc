@@ -9356,6 +9356,14 @@ static void rna_def_scene_eevee(BlenderRNA *brna)
   RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, nullptr);
   RNA_def_property_flag(prop, PROP_ANIMATABLE);
 
+  prop = RNA_def_property(srna, "use_outline", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "use_outline", 1);
+  RNA_def_property_ui_text(
+      prop,
+      "Outline",
+      "Enable Eevee screen-space outlines from Outline Control nodes and the Outline render pass");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, nullptr);
+
   prop = RNA_def_property(srna, "ray_tracing_method", PROP_ENUM, PROP_NONE);
   RNA_def_property_enum_items(prop, ray_tracing_method_items);
   RNA_def_property_ui_text(

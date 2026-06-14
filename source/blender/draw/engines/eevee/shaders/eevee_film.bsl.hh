@@ -96,6 +96,7 @@ struct Film {
   [[sampler(3)]] sampler2DArray rp_color_tx;
   [[sampler(4)]] sampler2DArray rp_value_tx;
   [[sampler(6)]] sampler2D cryptomatte_tx;
+  [[sampler(7)]] sampler2D outline_resolved_tx;
 
   /* Color History for TAA needs to be sampler to leverage bilinear sampling. */
   [[sampler(5)]] sampler2D in_combined_tx;
@@ -114,6 +115,10 @@ struct Film {
 
   [[resource_table]] srt_t<Cryptomatte> cryptomatte;
   [[resource_table]] srt_t<Uniform> uniforms;
+
+  [[push_constant]] const int outline_id;
+  [[push_constant]] const bool use_outline_in_combined;
+  [[push_constant]] const bool has_outline_input;
 
   /* -------------------------------------------------------------------- */
   /** \name Filter
@@ -227,6 +232,24 @@ struct Film {
 
     accum += color * weight;
     weight_accum += weight;
+  }
+
+  float4 outline_resolved_fetch(int2 texel_render)
+  {
+    if (!has_outline_input) {
+      return float4(0.0f);
+    }
+    return texelFetch(outline_resolved_tx, texel_render, 0);
+  }
+
+  float4 apply_outline_to_combined(float4 combined_color, float4 outline_color)
+  {
+    if (!use_outline_in_combined) {
+      return combined_color;
+    }
+    float4 outline_color_ycocg = outline_color;
+    outline_color_ycocg.rgb = colorspace::YCoCg_from_scene_linear(outline_color.rgb);
+    return outline_color_ycocg + combined_color * (1.0f - outline_color_ycocg.a);
   }
 
   void sample_cryptomatte_accum(FilmSample samp,
@@ -556,8 +579,12 @@ struct Film {
   }
 
   /* Returns resolved final color. */
-  void store_combined(
-      FilmSample dst, int2 src_texel, float4 color, float color_weight, float4 &display)
+  void store_combined(FilmSample dst,
+                      int2 src_texel,
+                      float4 color,
+                      float color_weight,
+                      float4 outline_color,
+                      float4 &display)
   {
     if (combined_id == -1) {
       return;
@@ -570,6 +597,8 @@ struct Film {
 
     /* Undo the weighting to get final spatially-filtered color. */
     color_src = color / color_weight;
+    color_src = apply_outline_to_combined(color_src, outline_color);
+    const float outline_factor = saturate(outline_color.a);
 
     if (use_reprojection) {
       /* Interactive accumulation. Do reprojection and Temporal Anti-Aliasing. */
@@ -592,12 +621,21 @@ struct Film {
 
       float blend = history_blend_factor(
           velocity, history_texel, min_color.x, max_color.x, color_dst.x);
+      if (use_outline_in_combined && outline_factor > 1e-4f) {
+        blend = max(blend, outline_factor * 0.35f);
+      }
 
       color_dst = amend_combined_history(min_color, max_color, color_dst, color_src);
 
-      /* Luma weighted blend to avoid flickering. */
-      weight_dst = luma_weight(uni, color_dst.x) * (1.0f - blend);
-      weight_src = luma_weight(uni, color_src.x) * (blend);
+      if (use_outline_in_combined && outline_factor > 1e-4f) {
+        weight_dst = 1.0f - blend;
+        weight_src = blend;
+      }
+      else {
+        /* Luma weighted blend to avoid flickering. */
+        weight_dst = luma_weight(uni, color_dst.x) * (1.0f - blend);
+        weight_src = luma_weight(uni, color_src.x) * (blend);
+      }
     }
     else {
       /* Everything is static. Use render accumulation. */
@@ -751,18 +789,31 @@ struct Film {
     /* NOTE: We split the accumulations into separate loops to avoid using too much registers and
      * maximize occupancy. */
 
-    if (combined_id != -1) {
+    if (combined_id != -1 || outline_id != -1) {
       /* NOTE: Do weight accumulation again since we use custom weights. */
       float weight_accum = 0.0f;
       float4 combined_accum = float4(0.0f);
+      float4 outline_accum = float4(0.0f);
+      float outline_weight_accum = 0.0f;
 
       FilmSample src;
       for (int i = samples_len - 1; i >= 0; i--) {
         src = sample_get(i, texel_film);
-        sample_accum_combined(src, combined_accum, weight_accum);
+        if (combined_id != -1) {
+          sample_accum_combined(src, combined_accum, weight_accum);
+        }
+        outline_accum += outline_resolved_fetch(src.texel) * src.weight;
+        outline_weight_accum += src.weight;
       }
-      /* NOTE: src.texel is center texel in incoming data buffer. */
-      store_combined(dst, src.texel, combined_accum, weight_accum, out_color);
+      const float4 outline_color = outline_accum / max(outline_weight_accum, 1e-8f);
+
+      if (combined_id != -1) {
+        /* NOTE: src.texel is center texel in incoming data buffer. */
+        store_combined(dst, src.texel, combined_accum, weight_accum, outline_color, out_color);
+      }
+      if (outline_id != -1) {
+        store_color(dst, outline_id, outline_accum, out_color, false);
+      }
     }
 
     if (flag_test(enabled_categories, PASS_CATEGORY_DATA)) {

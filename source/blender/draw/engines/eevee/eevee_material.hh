@@ -112,7 +112,8 @@ static inline uint64_t shader_uuid_from_material_type(
     eMaterialProbe probe_capture = MAT_PROBE_NONE,
     char blend_flags = 0,
     bool use_outline = true,
-    bool depth_offset_affect_lighting = false)
+    bool depth_offset_affect_lighting = false,
+    uint64_t extra_key = 0)
 {
   BLI_assert(int64_t(displacement_type) < (1 << 1));
   BLI_assert(int64_t(thickness_type) < (1 << 1));
@@ -120,6 +121,7 @@ static inline uint64_t shader_uuid_from_material_type(
   BLI_assert(int64_t(geometry_type) < (1 << 4));
   BLI_assert(int64_t(pipeline_type) < (1 << 4));
   uint64_t transparent_shadows = blend_flags & MA_BL_TRANSPARENT_SHADOW ? 1 : 0;
+  uint64_t blend_flag_bits = uint64_t(static_cast<unsigned char>(blend_flags));
 
   uint64_t uuid;
   uuid = geometry_type;
@@ -130,6 +132,12 @@ static inline uint64_t shader_uuid_from_material_type(
   uuid |= transparent_shadows << 12;
   uuid |= uint64_t(use_outline) << 13;
   uuid |= uint64_t(depth_offset_affect_lighting) << 14;
+  /* Keep the full blend flag in the shader key. Beyond transparent shadows, flags such as
+   * raytraced transmission affect prepass replacement and auxiliary passes. */
+  uuid |= blend_flag_bits << 15;
+  /* Higher bits are intentionally ignored by material_type_from_shader_uuid(). They separate
+   * graph-dependent variants such as different NPR trees attached to the same material/world. */
+  uuid |= extra_key << 23;
   return uuid;
 }
 

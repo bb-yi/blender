@@ -382,6 +382,8 @@ struct DeferredLayerBase {
   PassMain::Sub *npr_double_sided_ps_ = nullptr;
 
   gpu::Texture *radiance_behind_tx_ = nullptr;
+  gpu::Texture *npr_aov_color_input_tx_ = nullptr;
+  gpu::Texture *npr_aov_value_input_tx_ = nullptr;
 
   /* Closures bits from the materials in this pass. */
   eClosureBits closure_bits_ = CLOSURE_NONE;
@@ -515,6 +517,7 @@ class DeferredLayer : DeferredLayerBase {
   bool has_outline_ = false;
   bool has_prepass_ = false;
   bool has_stencil_ = false;
+  bool has_npr_aov_access_ = false;
   bool is_first_pass_ = true;
 
  public:

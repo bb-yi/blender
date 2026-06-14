@@ -6327,7 +6327,7 @@ static void def_sh_output(BlenderRNA * /*brna*/, StructRNA *srna)
   RNA_def_property_flag(prop, PROP_EDITABLE);
   RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
   RNA_def_property_ui_text(prop, "NPR Tree", "Secondary NPR node tree attached to this shader output");
-  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update_relations");
 }
 
 static void def_sh_eevee_light_shader_output(BlenderRNA *brna, StructRNA *srna)

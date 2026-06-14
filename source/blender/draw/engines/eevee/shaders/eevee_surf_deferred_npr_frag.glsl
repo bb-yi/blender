@@ -176,9 +176,9 @@ float4 TextureHandle_eval_impl(TextureHandle tex, float2 offset, bool texel_offs
   switch (tex.type) {
     case TEX_HANDLE_RP_COLOR:
       /* AOV color passes are data buffers; keep them opaque when exposed through NPR output. */
-      return float4(imageLoad(rp_color_img, int3(texel, tex.index)).rgb, 0.0f);
+      return float4(texelFetch(rp_color_tx, int3(texel, tex.index), 0).rgb, 0.0f);
     case TEX_HANDLE_RP_VALUE:
-      return float4(imageLoad(rp_value_img, int3(texel, tex.index)).rrr, 0.0f);
+      return float4(texelFetch(rp_value_tx, int3(texel, tex.index), 0).rrr, 0.0f);
 #ifdef MAT_NPR_REFRACTION
     case TEX_HANDLE_BACK_COMBINED_COLOR:
       return texelFetch(radiance_back_tx, texel, 0);

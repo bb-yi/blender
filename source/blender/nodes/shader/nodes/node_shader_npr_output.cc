@@ -28,8 +28,15 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.add_input<NPRColorOrImage>("Color"_ustr).hide_value();
 }
 
+static bool input_link_is_image(const bNode &node)
+{
+  const bNodeSocket *color_input = static_cast<const bNodeSocket *>(node.inputs.first);
+  return color_input != nullptr && color_input->link != nullptr &&
+         color_input->link->fromsock != nullptr && color_input->link->fromsock->type == SOCK_IMAGE;
+}
+
 static int node_shader_gpu_npr_output(GPUMaterial *mat,
-                                      bNode * /*node*/,
+                                      bNode *node,
                                       bNodeExecData * /*execdata*/,
                                       GPUNodeStack *in,
                                       GPUNodeStack * /*out*/)
@@ -39,7 +46,10 @@ static int node_shader_gpu_npr_output(GPUMaterial *mat,
     return true;
   }
 
-  switch (in[0].sockettype) {
+  const eNodeSocketDatatype input_socket_type = input_link_is_image(*node) ?
+                                                   SOCK_IMAGE :
+                                                   eNodeSocketDatatype(in[0].sockettype);
+  switch (input_socket_type) {
     case SOCK_FLOAT:
     case SOCK_INT:
     case SOCK_BOOLEAN:

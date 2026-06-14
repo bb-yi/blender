@@ -1127,8 +1127,8 @@ PassMain::Sub *ForwardPipeline::outline_occlusion_add(blender::Material *blender
     return nullptr;
   }
 
-  DRWState state = material_write_state(blender_mat, false, true) |
-                   DRW_STATE_CLIP_CONTROL_UNIT_RANGE | inst_.film.depth.test_state;
+  DRWState state = DRW_STATE_WRITE_DEPTH | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
+                   inst_.film.depth.test_state;
   state = material_ztest_state_replace(
       state, material_ztest_mode(blender_mat), inst_.film.depth.test_state);
   state |= material_surface_cull_state(material_surface_cull_method(blender_mat));
@@ -1410,6 +1410,10 @@ template<typename F> void DeferredLayerBase::npr_pass_sync(Instance &inst, F cal
   npr_ps_.bind_texture(SCENE_SHADOW_TEX_SLOT, &inst.pipelines.shadow_filter.texture_ref());
   npr_ps_.bind_image(RBUFS_COLOR_SLOT, &inst.render_buffers.rp_color_tx);
   npr_ps_.bind_image(RBUFS_VALUE_SLOT, &inst.render_buffers.rp_value_tx);
+  npr_aov_color_input_tx_ = inst.render_buffers.rp_color_tx;
+  npr_aov_value_input_tx_ = inst.render_buffers.rp_value_tx;
+  npr_ps_.bind_texture(NPR_AOV_COLOR_TEX_SLOT, &npr_aov_color_input_tx_);
+  npr_ps_.bind_texture(NPR_AOV_VALUE_TEX_SLOT, &npr_aov_value_input_tx_);
   npr_ps_.bind_image(OUTLINE_COLOR_SLOT, &inst.render_buffers.outline_color_tx);
   npr_ps_.bind_image(OUTLINE_INFO_SLOT, &inst.render_buffers.outline_info_tx);
   /* Bind manually to fixed slots before the sub-pass shader is selected.
@@ -1450,6 +1454,7 @@ void DeferredLayer::begin_sync()
   has_outline_ = false;
   has_prepass_ = false;
   has_stencil_ = false;
+  has_npr_aov_access_ = false;
   is_first_pass_ = true;
   stencil_ps_.init();
 
@@ -1809,6 +1814,10 @@ PassMain::Sub *DeferredLayer::material_add(blender::Material *blender_mat, GPUMa
   }
   PassMain::Sub *pass = get_gbuffer_subpass(blender_mat, gpumat);
   PassMain::Sub *material_pass = &pass->sub(GPU_material_get_name(gpumat));
+  if (inst_.scene->eevee.use_outline && GPU_material_has_outline_output(gpumat)) {
+    material_pass->bind_image(OUTLINE_COLOR_SLOT, &inst_.render_buffers.outline_color_tx);
+    material_pass->bind_image(OUTLINE_INFO_SLOT, &inst_.render_buffers.outline_info_tx);
+  }
   if (needs_front_light_shader) {
     material_pass->bind_resources(inst_.lights);
     inst_.lights.bind_front_light_shader_resources(*material_pass);
@@ -1837,6 +1846,7 @@ PassMain::Sub *DeferredLayer::npr_add(blender::Material *blender_mat, GPUMateria
   BLI_assert(GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR));
   use_depth_offset_lighting_data_ |= material_uses_depth_offset_lighting_data(blender_mat, gpumat);
   has_outline_ = has_outline_ || inst_.materials.material_uses_outline_control(blender_mat);
+  has_npr_aov_access_ |= GPU_material_flag_get(gpumat, GPU_MATFLAG_AOV);
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
       GPU_material_has_glsl_light_shader_eval(gpumat) ||
       GPU_material_flag_get(gpumat, GPU_MATFLAG_GLSL_LIGHT_ACCESS))
@@ -1852,6 +1862,10 @@ PassMain::Sub *DeferredLayer::npr_add(blender::Material *blender_mat, GPUMateria
   /* Bind the material shader before setting NPR-specific push constants. */
   GPUPass *gpupass = GPU_material_get_pass(gpumat);
   material_pass->shader_set(GPU_pass_shader_get(gpupass));
+  if (inst_.scene->eevee.use_outline && GPU_material_has_outline_output(gpumat)) {
+    material_pass->bind_image(OUTLINE_COLOR_SLOT, &inst_.render_buffers.outline_color_tx);
+    material_pass->bind_image(OUTLINE_INFO_SLOT, &inst_.render_buffers.outline_info_tx);
+  }
   material_pass->push_constant("use_split_radiance", &use_split_radiance_);
   material_pass->push_constant("use_radiance_input_for_combined", false);
 
@@ -1874,6 +1888,35 @@ gpu::Texture *DeferredLayer::render(View &render_view,
 
   RenderBuffers &rb = inst_.render_buffers;
 
+  TextureFromPool npr_aov_color_input = {"NPR AOV Color Input"};
+  TextureFromPool npr_aov_value_input = {"NPR AOV Value Input"};
+  npr_aov_color_input_tx_ = rb.rp_color_tx;
+  npr_aov_value_input_tx_ = rb.rp_value_tx;
+
+  const bool has_aovs = inst_.film.aovs_info.color_len > 0 || inst_.film.aovs_info.value_len > 0;
+  const bool preserve_npr_aov_input = !is_first_pass_ && has_npr_aov_access_ && has_aovs;
+  const bool use_npr_aov_input_snapshot = preserve_npr_aov_input && !npr_ps_.is_empty();
+  if (use_npr_aov_input_snapshot) {
+    constexpr eGPUTextureUsage usage_aov_snapshot = GPU_TEXTURE_USAGE_SHADER_READ |
+                                                    GPU_TEXTURE_USAGE_SHADER_WRITE;
+    npr_aov_color_input.acquire_2d_array(extent,
+                                         GPU_texture_layer_count(rb.rp_color_tx),
+                                         GPU_texture_format(rb.rp_color_tx),
+                                         usage_aov_snapshot);
+    npr_aov_value_input.acquire_2d_array(extent,
+                                         GPU_texture_layer_count(rb.rp_value_tx),
+                                         GPU_texture_format(rb.rp_value_tx),
+                                         usage_aov_snapshot);
+    GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE | GPU_BARRIER_TEXTURE_FETCH |
+                       GPU_BARRIER_SHADER_IMAGE_ACCESS);
+    GPU_texture_copy(npr_aov_color_input, rb.rp_color_tx);
+    GPU_texture_copy(npr_aov_value_input, rb.rp_value_tx);
+    GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE | GPU_BARRIER_TEXTURE_FETCH |
+                       GPU_BARRIER_SHADER_IMAGE_ACCESS);
+    npr_aov_color_input_tx_ = npr_aov_color_input;
+    npr_aov_value_input_tx_ = npr_aov_value_input;
+  }
+
   constexpr eGPUTextureUsage usage_read = GPU_TEXTURE_USAGE_SHADER_READ;
   constexpr eGPUTextureUsage usage_write = GPU_TEXTURE_USAGE_SHADER_WRITE;
   constexpr eGPUTextureUsage usage_rw = usage_read | usage_write;
@@ -1891,7 +1934,7 @@ gpu::Texture *DeferredLayer::render(View &render_view,
      * clear AOVs for all the pixels touched by this layer. */
     GPU_framebuffer_clear_stencil(prepass_fb, 0xFFu);
     prepass_.render(render_view, rb.depth_tx, true);
-    if (!clear_aovs_ps_.is_empty()) {
+    if (!clear_aovs_ps_.is_empty() && !preserve_npr_aov_input) {
       inst_.manager->submit(clear_aovs_ps_);
     }
   }
@@ -1904,10 +1947,14 @@ gpu::Texture *DeferredLayer::render(View &render_view,
     }
     inst_.hiz_buffer.swap_layer();
     inst_.hiz_buffer.update();
+    npr_aov_color_input_tx_ = rb.rp_color_tx;
+    npr_aov_value_input_tx_ = rb.rp_value_tx;
+    npr_aov_color_input.release();
+    npr_aov_value_input.release();
     return radiance_behind_tx;
   }
 
-  if (!is_first_pass_) {
+  if (!is_first_pass_ && !preserve_npr_aov_input) {
     ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainDeferredPrepass);
     GPU_framebuffer_bind(prepass_fb);
     inst_.manager->submit(aov_clear_ps_, render_view);
@@ -2037,6 +2084,11 @@ gpu::Texture *DeferredLayer::render(View &render_view,
   }
 
   inst_.pipelines.deferred.debug_draw(render_view, combined_fb);
+
+  npr_aov_color_input_tx_ = rb.rp_color_tx;
+  npr_aov_value_input_tx_ = rb.rp_value_tx;
+  npr_aov_color_input.release();
+  npr_aov_value_input.release();
 
   return use_feedback_output_ ? radiance_feedback_tx_ : nullptr;
 }

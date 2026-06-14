@@ -37,6 +37,8 @@ class OutlineModule {
   TextureFromPool resolved_depth_tx_ = {"Outline.ResolvedDepth"};
   TextureFromPool resolved_velocity_tx_ = {"Outline.ResolvedVelocity"};
   TextureFromPool occlusion_depth_tx_ = {"Outline.OcclusionDepth"};
+  gpu::Texture *outline_occlusion_depth_tx_ = nullptr;
+  int use_outline_occlusion_depth_ = 0;
   SwapChain<TextureFromPool, 2> jfa_tx_;
 
   int jfa_step_size_ = 1;

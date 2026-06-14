@@ -52,6 +52,15 @@ static bool material_depth_offset_affects_lighting(const blender::Material *mate
   return material == nullptr || material->depth_offset_affect_lighting != 0;
 }
 
+static uint64_t shader_node_tree_key_get(const bNodeTree *tree)
+{
+  if (tree == nullptr) {
+    return 0;
+  }
+  const bNodeTree *original_tree = DEG_get_original(tree);
+  return uint64_t(original_tree ? original_tree->id.session_uid : tree->id.session_uid);
+}
+
 static bool material_pipeline_supports_depth_offset(eMaterialPipeline pipeline_type,
                                                     eMaterialGeometry geometry_type)
 {
@@ -1138,13 +1147,21 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
           info.fragment_function("eevee_surf_depthTtrue");
           break;
         case MAT_PIPE_PREPASS_OVERLAP:
+          pipeline_info_name = "eevee_surf_depthTfalse_infos_";
+          info.name_ += "_outline_occlusion_depth";
+          info.define("MAT_OUTLINE_OCCLUSION");
+          info.compilation_constant(gpu::shader::Type::bool_t, "use_velocity", false);
+          info.define("MAT_DEPTH");
+          info.define("closure_to_rgba", "closure_to_rgba_depth");
+          /* Until every vertex shader are ported, we need to bridge the gap here by defining the
+           * pipeline. */
+          info.fragment_source("eevee_surf_depth.bsl.hh");
+          info.fragment_function("eevee_surf_depthTfalse");
+          break;
         case MAT_PIPE_PREPASS_FORWARD:
         case MAT_PIPE_PREPASS_DEFERRED:
           pipeline_info_name = "eevee_surf_depthTfalse_infos_";
           info.name_ += "_depth";
-          if (pipeline_type == MAT_PIPE_PREPASS_OVERLAP) {
-            info.define("MAT_OUTLINE_OCCLUSION");
-          }
           info.compilation_constant(gpu::shader::Type::bool_t, "use_velocity", false);
           info.define("MAT_DEPTH");
           info.define("closure_to_rgba", "closure_to_rgba_depth");
@@ -2485,9 +2502,12 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
   const bool has_depth_offset_output = material_output_has_depth_offset(nodetree) &&
                                        material_pipeline_supports_depth_offset(pipeline_type,
                                                                                geometry_type);
+  bNodeTree *npr_tree = npr_tree_get(nodetree);
   const bool compile_npr_graph = (pipeline_type == MAT_PIPE_DEFERRED_NPR) ||
-                                 (pipeline_type == MAT_PIPE_BAKE_COLOR &&
-                                  npr_tree_get(nodetree) != nullptr);
+                                 (pipeline_type == MAT_PIPE_BAKE_COLOR && npr_tree != nullptr);
+  const uint64_t npr_tree_key = (compile_npr_graph && npr_tree != nullptr) ?
+                                    shader_node_tree_key_get(npr_tree) :
+                                    0;
   const bool needs_npr_vertex_displacement = compile_npr_graph &&
                                              (displacement_type != MAT_DISPLACEMENT_BUMP);
   const bool needs_npr_depth_offset = compile_npr_graph && has_depth_offset_output;
@@ -2505,7 +2525,8 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
       probe_capture,
       blender_mat->blend_flag,
       use_outline,
-      material_depth_offset_affects_lighting(blender_mat));
+      material_depth_offset_affects_lighting(blender_mat),
+      npr_tree_key);
 
   bool is_default_material = default_mat == nullptr;
   BLI_assert(blender_mat != default_mat);
@@ -2536,8 +2557,9 @@ GPUMaterial *ShaderModule::world_shader_get(blender::World *blender_world,
                                             eMaterialPipeline pipeline_type,
                                             bool deferred_compilation)
 {
-  const bool compile_npr_graph = pipeline_type == MAT_PIPE_DEFERRED &&
-                                 npr_tree_get(nodetree) != nullptr;
+  bNodeTree *npr_tree = npr_tree_get(nodetree);
+  const bool compile_npr_graph = pipeline_type == MAT_PIPE_DEFERRED && npr_tree != nullptr;
+  const uint64_t npr_tree_key = compile_npr_graph ? shader_node_tree_key_get(npr_tree) : 0;
   uint64_t shader_uuid = shader_uuid_from_material_type(pipeline_type,
                                                         MAT_GEOM_WORLD,
                                                         MAT_DISPLACEMENT_BUMP,
@@ -2545,7 +2567,8 @@ GPUMaterial *ShaderModule::world_shader_get(blender::World *blender_world,
                                                         MAT_PROBE_NONE,
                                                         0,
                                                         true,
-                                                        compile_npr_graph);
+                                                        compile_npr_graph,
+                                                        npr_tree_key);
 
   CallbackThunk thunk = {this, nullptr};
 

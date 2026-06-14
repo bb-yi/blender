@@ -15,6 +15,7 @@
 #include "DNA_material_types.h"
 #include "DNA_node_types.h"
 #include "DNA_scene_types.h"
+#include "DNA_world_types.h"
 
 #include "GPU_material.hh"
 
@@ -76,6 +77,11 @@ static void propagate_node_tree_changes(Main &bmain,
         Light &light = reinterpret_cast<Light &>(owner_id);
         GPU_material_free(&light.gpumaterial);
         DEG_id_tag_update(&light.id, ID_RECALC_SHADING | ID_RECALC_SYNC_TO_EVAL);
+      }
+      else if (ntree.type == NTREE_SHADER && GS(owner_id.name) == ID_WO) {
+        World &world = reinterpret_cast<World &>(owner_id);
+        GPU_material_free(&world.gpumaterial);
+        DEG_id_tag_update(&world.id, ID_RECALC_SHADING | ID_RECALC_SYNC_TO_EVAL);
       }
       return;
     }
