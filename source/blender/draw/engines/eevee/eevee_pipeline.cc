@@ -229,6 +229,13 @@ MaterialStencilState material_stencil_state_get(const blender::Material *materia
   return state;
 }
 
+bool material_stencil_state_writes(const MaterialStencilState &state)
+{
+  return state.enabled && state.write_mask != 0u &&
+         (state.pass != GPU_STENCIL_OP_KEEP || state.fail != GPU_STENCIL_OP_KEEP ||
+          state.zfail != GPU_STENCIL_OP_KEEP);
+}
+
 static PassMain::Sub *material_stencil_pass_add(PassSortable &stencil_ps,
                                                 Instance &inst,
                                                 blender::Material *blender_mat,
@@ -240,7 +247,7 @@ static PassMain::Sub *material_stencil_pass_add(PassSortable &stencil_ps,
                  "Transparent stencil writers are not supported in v1.");
 
   MaterialStencilState stencil = material_stencil_state_get(blender_mat);
-  if (!stencil.enabled) {
+  if (!material_stencil_state_writes(stencil)) {
     return nullptr;
   }
 
