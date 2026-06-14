@@ -851,8 +851,7 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
                                   material_has_flag(mat.shading, GPU_MATFLAG_TRANSPARENT);
 
     MaterialStencilState stencil = material_stencil_state_get(blender_mat);
-    const bool stencil_writes = material_stencil_state_writes(stencil);
-    if (!hide_on_camera && mat.has_surface && stencil_writes && !mat.is_alpha_blend_transparent &&
+    if (!hide_on_camera && mat.has_surface && stencil.enabled && !mat.is_alpha_blend_transparent &&
         mat.prepass.gpumat != nullptr)
     {
       const bool use_forward_stencil_pipeline = blender_mat->surface_render_method ==

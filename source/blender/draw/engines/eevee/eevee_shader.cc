@@ -1051,6 +1051,9 @@ static int material_texture_reserved_slot_last(const eMaterialPipeline pipeline_
     return MATERIAL_TEXTURE_RESERVED_SLOT_LAST_NPR;
   }
   if (geometry_type == MAT_GEOM_WORLD) {
+    if (pipeline_type == MAT_PIPE_VOLUME_MATERIAL) {
+      return MATERIAL_TEXTURE_RESERVED_SLOT_LAST_WORLD_VOLUME;
+    }
     return MATERIAL_TEXTURE_RESERVED_SLOT_LAST_WORLD;
   }
 

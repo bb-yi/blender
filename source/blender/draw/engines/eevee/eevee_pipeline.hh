@@ -51,7 +51,6 @@ struct MaterialStencilState {
 };
 
 MaterialStencilState material_stencil_state_get(const blender::Material *material);
-bool material_stencil_state_writes(const MaterialStencilState &state);
 
 /* -------------------------------------------------------------------- */
 /** \name World Background Pipeline
