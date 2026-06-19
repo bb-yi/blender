@@ -30,6 +30,7 @@ enum eMaterialPipeline {
   MAT_PIPE_CAPTURE,
   MAT_PIPE_FILTER,
   MAT_PIPE_BAKE_COLOR,
+  MAT_PIPE_OUTLINE_SHELL,
 };
 
 enum eMaterialGeometry {

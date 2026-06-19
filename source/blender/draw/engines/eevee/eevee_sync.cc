@@ -200,6 +200,7 @@ void SyncModule::sync_mesh(Object *ob, ObjectHandle &ob_handle, const ObjectRef 
     geometry_call(material.capture.sub_pass, geom, res_handle);
     geometry_call(material.overlap_masking.sub_pass, geom, res_handle);
     geometry_call(material.outline_occlusion.sub_pass, geom, res_handle);
+    geometry_call(material.outline_shell.sub_pass, geom, res_handle);
     geometry_call(material.stencil.sub_pass, geom, res_handle);
     geometry_call(material.prepass.sub_pass, geom, res_handle);
     geometry_call(material.shading.sub_pass, geom, res_handle);

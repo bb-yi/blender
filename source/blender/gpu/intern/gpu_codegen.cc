@@ -670,6 +670,9 @@ void GPUCodegen::generate_graphs()
     output.light_shader = graph_serialize(
         GPU_NODE_TAG_LIGHT_SHADER, graph.outlink_light_shader, "float4(1.0f)");
   }
+  output.outline_shell_width = graph_serialize(GPU_NODE_TAG_OUTLINE_SHELL_WIDTH,
+                                               graph.outlink_outline_shell_width,
+                                               nullptr);
   if (!BLI_listbase_is_empty(&graph.outlink_compositor)) {
     output.composite = graph_serialize(GPU_NODE_TAG_COMPOSITOR);
   }

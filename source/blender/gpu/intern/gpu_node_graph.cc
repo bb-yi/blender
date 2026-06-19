@@ -1211,6 +1211,7 @@ void gpu_node_graph_prune_unused(GPUNodeGraph *graph)
   gpu_nodes_tag(graph, graph->outlink_npr, GPU_NODE_TAG_NPR);
   gpu_nodes_tag(graph, graph->outlink_filter, GPU_NODE_TAG_FILTER);
   gpu_nodes_tag(graph, graph->outlink_light_shader, GPU_NODE_TAG_LIGHT_SHADER);
+  gpu_nodes_tag(graph, graph->outlink_outline_shell_width, GPU_NODE_TAG_OUTLINE_SHELL_WIDTH);
 
   for (GPUNodeGraphOutputLink &aovlink : graph->outlink_aovs) {
     gpu_nodes_tag(graph, aovlink.outlink, GPU_NODE_TAG_AOV);

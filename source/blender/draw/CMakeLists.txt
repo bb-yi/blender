@@ -534,6 +534,7 @@ set(GLSL_SRC
   engines/eevee/shaders/eevee_outline_jfa_step_comp.glsl
   engines/eevee/shaders/eevee_outline_lib.glsl
   engines/eevee/shaders/eevee_outline_resolve_frag.glsl
+  engines/eevee/shaders/eevee_outline_shell_boundary_frag.glsl
   engines/eevee/shaders/eevee_occupancy_convert_frag.glsl
   engines/eevee/shaders/eevee_occupancy_lib.glsl
   engines/eevee/shaders/eevee_octahedron_lib.glsl
@@ -600,6 +601,7 @@ set(GLSL_SRC
   engines/eevee/shaders/eevee_surf_depth_frag.glsl
   engines/eevee/shaders/eevee_surf_forward_frag.glsl
   engines/eevee/shaders/eevee_surf_hybrid_frag.glsl
+  engines/eevee/shaders/eevee_surf_outline_shell_frag.glsl
   engines/eevee/shaders/eevee_surf_lib.glsl
   engines/eevee/shaders/eevee_surf_occupancy_frag.glsl
   engines/eevee/shaders/eevee_surf_shadow_frag.glsl

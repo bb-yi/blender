@@ -5,9 +5,11 @@
 #include "BLI_math_base.h"
 
 #include "DNA_layer_types.h"
+#include "DNA_material_types.h"
 #include "DNA_object_types.h"
 
 #include "GPU_capabilities.hh"
+#include "GPU_material.hh"
 #include "GPU_texture.hh"
 
 #include "draw_cache.hh"
@@ -17,8 +19,27 @@
 
 namespace blender::eevee {
 
+/* Converts Outline Control's Line Width socket value to the geometry-space shell offset used by
+ * the UMA-style duplicated inverted hull. This remains a calibration point until the legacy
+ * geometry-node group scale is matched exactly. */
+static constexpr float outline_shell_width_to_geometry_scale = 0.01f;
+
 void OutlineModule::begin_sync()
 {
+  shell_ps_.init();
+  shell_ps_.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_DEPTH_GREATER_EQUAL |
+                      DRW_STATE_CULL_FRONT | DRW_STATE_BLEND_ALPHA_PREMUL |
+                      DRW_STATE_CLIP_CONTROL_UNIT_RANGE);
+  shell_ps_.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);
+  shell_ps_.bind_resources(inst_.uniform_data);
+  shell_ps_.bind_resources(inst_.sampling);
+
+  shell_boundary_ps_.init();
+  shell_boundary_ps_.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_BLEND_ALPHA_PREMUL);
+  shell_boundary_ps_.shader_set(inst_.shaders.static_shader_get(OUTLINE_SHELL_BOUNDARY));
+  shell_boundary_ps_.bind_texture("shell_color_tx", &shell_color_tx_);
+  shell_boundary_ps_.draw_procedural(GPU_PRIM_TRIS, 1, 3);
+
   freestyle_edge_ps_.init();
   freestyle_edge_ps_.state_set(DRW_STATE_WRITE_COLOR | DRW_STATE_CLIP_CONTROL_UNIT_RANGE);
   freestyle_edge_ps_.shader_set(inst_.shaders.static_shader_get(OUTLINE_FREESTYLE));
@@ -26,6 +47,18 @@ void OutlineModule::begin_sync()
   freestyle_edge_ps_.bind_texture("outline_color_tx", &inst_.render_buffers.outline_color_tx);
   freestyle_edge_ps_.bind_texture("outline_info_tx", &inst_.render_buffers.outline_info_tx);
   freestyle_edge_ps_.bind_resources(inst_.uniform_data);
+}
+
+PassMain::Sub *OutlineModule::shell_add(blender::Material * /*blender_mat*/, GPUMaterial *gpumat)
+{
+  if (gpumat == nullptr) {
+    return nullptr;
+  }
+
+  PassMain::Sub *pass = &shell_ps_.sub(GPU_material_get_name(gpumat));
+  pass->material_set(*inst_.manager, gpumat, true);
+  pass->push_constant("outline_shell_offset", outline_shell_width_to_geometry_scale);
+  return pass;
 }
 
 void OutlineModule::sync_object(Object *ob, ResourceHandleRange res_handle)
@@ -209,6 +242,10 @@ void OutlineModule::render(View &view, int2 extent)
   resolved_outline_tx_.clear(float4(0.0f));
   resolved_depth_tx_.clear(float4(0.0f));
   resolved_velocity_tx_.clear(float4(0.0f));
+  shell_color_tx_.acquire(extent,
+                          gpu::TextureFormat::SFLOAT_16_16_16_16,
+                          GPU_TEXTURE_USAGE_ATTACHMENT | GPU_TEXTURE_USAGE_SHADER_READ);
+  shell_color_tx_.clear(float4(0.0f));
   resolve_fb_.ensure(GPU_ATTACHMENT_NONE,
                      GPU_ATTACHMENT_TEXTURE(resolved_outline_tx_),
                      GPU_ATTACHMENT_TEXTURE(resolved_depth_tx_),
@@ -218,7 +255,21 @@ void OutlineModule::render(View &view, int2 extent)
   drw.submit(resolve_ps_, view);
   GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH);
 
+  shell_fb_.ensure(GPU_ATTACHMENT_TEXTURE(inst_.render_buffers.depth_tx),
+                   GPU_ATTACHMENT_TEXTURE(shell_color_tx_));
+  shell_ps_.framebuffer_set(&shell_fb_);
+  GPU_framebuffer_bind(shell_fb_);
+  drw.submit(shell_ps_, view);
+  GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH);
+
+  shell_boundary_fb_.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(resolved_outline_tx_));
+  shell_boundary_ps_.framebuffer_set(&shell_boundary_fb_);
+  GPU_framebuffer_bind(shell_boundary_fb_);
+  drw.submit(shell_boundary_ps_, view);
+  GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH);
+
   edge_seed_tx_.release();
+  shell_color_tx_.release();
   jfa_tx_.current().release();
   jfa_tx_.previous().release();
   occlusion_depth_tx_.release();
@@ -234,6 +285,7 @@ void OutlineModule::release_result()
   resolved_outline_tx_.release();
   resolved_depth_tx_.release();
   resolved_velocity_tx_.release();
+  shell_color_tx_.release();
   occlusion_depth_tx_.release();
 }
 

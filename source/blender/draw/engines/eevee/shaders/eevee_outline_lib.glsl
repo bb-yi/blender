@@ -88,14 +88,28 @@ bool outline_freestyle_edge_unpack(float threshold_packed)
          0u;
 }
 
-#if defined(MAT_OUTLINE_SUPPORT) && defined(MAT_OUTLINE_CLEAR) && defined(GPU_FRAGMENT_SHADER)
+float outline_depth_threshold_pack(float depth_threshold)
+{
+  return saturate(depth_threshold);
+}
+
+float outline_depth_threshold_unpack(float threshold_packed)
+{
+  return clamp(threshold_packed, 0.0f, 1.0f);
+}
+
+#if defined(MAT_OUTLINE_SUPPORT) && \
+    (defined(MAT_OUTLINE_CLEAR) || defined(MAT_OUTLINE_STAGE_ONLY)) && \
+    defined(GPU_FRAGMENT_SHADER)
 float4 g_outline_staged_color;
 float4 g_outline_staged_info;
 #endif
 
 void outline_output_reset()
 {
-#if defined(MAT_OUTLINE_SUPPORT) && defined(MAT_OUTLINE_CLEAR) && defined(GPU_FRAGMENT_SHADER)
+#if defined(MAT_OUTLINE_SUPPORT) && \
+    (defined(MAT_OUTLINE_CLEAR) || defined(MAT_OUTLINE_STAGE_ONLY)) && \
+    defined(GPU_FRAGMENT_SHADER)
   g_outline_staged_color = float4(0.0f);
   g_outline_staged_info = float4(0.0f);
 #endif
@@ -149,10 +163,10 @@ void output_outline(float4 line_color,
   float4 stored_color = line_color;
   stored_color.a = saturate(stored_color.a);
   float4 stored_info = float4(outline_width_pack(line_width),
-                              saturate(depth_threshold),
+                              outline_depth_threshold_pack(depth_threshold),
                               outline_normal_threshold_pack(normal_threshold, freestyle_edge),
                               outline_id_pack(resolved_outline_id, id_edge));
-#  if defined(MAT_OUTLINE_CLEAR)
+#  if defined(MAT_OUTLINE_CLEAR) || defined(MAT_OUTLINE_STAGE_ONLY)
   g_outline_staged_color = stored_color;
   g_outline_staged_info = stored_info;
 #  else

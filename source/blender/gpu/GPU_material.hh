@@ -424,6 +424,7 @@ struct GPUCodegenOutput {
   GPUGraphOutput npr;
   GPUGraphOutput filter;
   std::optional<GPUGraphOutput> light_shader;
+  GPUGraphOutput outline_shell_width;
   GPUGraphOutput composite;
   Vector<GPUGraphOutput> material_functions;
 
@@ -533,6 +534,7 @@ void GPU_material_output_depth_offset(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_output_npr(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_output_filter(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_output_light_shader(GPUMaterial *material, GPUNodeLink *link);
+void GPU_material_output_outline_shell_width(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_glsl_light_shader_eval_set(GPUMaterial *material);
 void GPU_material_shader_info_shadow_classification_set(GPUMaterial *material);
 

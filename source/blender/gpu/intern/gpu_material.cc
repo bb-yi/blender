@@ -851,6 +851,13 @@ void GPU_material_output_light_shader(GPUMaterial *material, GPUNodeLink *link)
   }
 }
 
+void GPU_material_output_outline_shell_width(GPUMaterial *material, GPUNodeLink *link)
+{
+  if (link != nullptr && !material->graph.outlink_outline_shell_width) {
+    material->graph.outlink_outline_shell_width = link;
+  }
+}
+
 void GPU_material_glsl_light_shader_eval_set(GPUMaterial *material)
 {
   if (material != nullptr) {

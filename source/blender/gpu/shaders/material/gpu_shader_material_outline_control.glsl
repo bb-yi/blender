@@ -7,6 +7,7 @@ void node_output_outline(
     float4 line_color,
     float line_alpha,
     float line_width,
+    float shell_width,
     float depth_threshold,
     float normal_threshold,
     float outline_id,
@@ -23,4 +24,10 @@ void node_output_outline(
                  outline_id,
                  id_edge > 0.5f,
                  freestyle_edge > 0.5f);
+}
+
+[[node]]
+void node_outline_shell_width(float line_width, float shell_width, float &outline_shell_width)
+{
+  outline_shell_width = (shell_width > 0.0f) ? shell_width : line_width;
 }

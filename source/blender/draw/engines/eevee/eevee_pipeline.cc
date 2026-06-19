@@ -2044,6 +2044,8 @@ PassMain::Sub *PipelineModule::material_add(Object *ob,
         return forward.material_no_depth_add(ob, blender_mat, gpumat);
       }
       return forward.material_opaque_add(ob, blender_mat, gpumat);
+    case MAT_PIPE_OUTLINE_SHELL:
+      return inst_.outline.shell_add(blender_mat, gpumat);
     case MAT_PIPE_SHADOW:
       return shadow.surface_material_add(blender_mat, gpumat);
     case MAT_PIPE_CAPTURE:

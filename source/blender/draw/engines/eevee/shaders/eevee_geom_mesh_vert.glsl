@@ -44,6 +44,15 @@ void main()
 
   interp.P += nodetree_displacement();
 
+#ifdef MAT_OUTLINE_SHELL
+  float shell_width = max(nodetree_outline_shell_width(), 0.0f) * outline_shell_offset;
+  float3 shell_normal = (dot(outline_vnor, outline_vnor) > 1.0e-8f) ?
+                            normalize(outline_vnor) :
+                            normalize(nor);
+  float3 shell_local_pos = pos + shell_normal * shell_width;
+  interp.P += drw_point_object_to_world(shell_local_pos) - drw_point_object_to_world(pos);
+#endif
+
 #ifdef MAT_CLIP_PLANE
   clip_interp.clip_distance = dot(clip_plane.plane, float4(interp.P, 1.0f));
 #endif

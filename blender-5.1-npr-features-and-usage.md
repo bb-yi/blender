@@ -478,21 +478,29 @@
 - `Line Color`
 - `Line Alpha`
 - `Line Width`
+- `Shell Width`
 - `Depth Threshold`
 - `Normal Threshold`
 - `Outline ID`
 
 #### 作用
 
-为 Eevee 内置屏幕空间描边系统写入描边参数。
+为 Eevee 内置描边系统写入材质级描边参数，并驱动实验性的真实 shell 描边路径。
+
+其中：
+
+- `Line Width` 负责描边的基础宽度，它参与描边写入和检测逻辑
+- `Shell Width` 负责真实壳体的几何偏移距离，也就是把原网格沿法线方向向外推开多少
+- 当 `Shell Width = 0` 时，会回退使用 `Line Width`，因此只设置线宽的材质会得到相同结果
 
 #### 使用方法
 
 1. 在需要产生描边的材质里添加 `Outline Control` 节点。
 2. 通过 `Line Color`、`Line Alpha` 和 `Line Width` 控制描边颜色、透明度和宽度。
-3. 通过 `Depth Threshold` 与 `Normal Threshold` 调整轮廓边和内部折线的检测敏感度。
-4. 在 `Render Properties > Outline` 中保持全局描边开关开启。
-5. 如果需要单独输出描边结果，在 `View Layer Properties > Passes > Data` 中开启 `Outline` Render Pass。
+3. 通过 `Shell Width` 控制真实壳体扩张宽度；保持 `0` 时使用 `Line Width`。
+4. 通过 `Depth Threshold` 与 `Normal Threshold` 调整深度断层和法线夹角造成的检测敏感度。
+5. 在 `Render Properties > Outline` 中保持全局描边开关开启。
+6. 如果需要单独输出描边结果，在 `View Layer Properties > Passes > Data` 中开启 `Outline` Render Pass。
 
 #### 说明
 
@@ -504,6 +512,8 @@
 - `Outline ID = 0` 时，系统会按对象资源 ID 自动分配描边分组
 - `Outline ID > 0` 时，可以手动把多个对象或多个材质表面并到同一个描边分组里
 - `Depth Threshold` 更偏向控制深度断层轮廓，`Normal Threshold` 更偏向控制法线夹角造成的内部边
+- 壳体几何偏移的作用，是先生成一个沿法线外扩的真实外壳，再让描边和遮挡关系基于这个外壳来计算，从而得到与外壳几何一致的轮廓与遮挡结果
+- shell 描边保留 Eevee 当前可用的深度测试路径，不再使用单独的视线夹角阈值过滤壳体片元
 
 #### 建议补图
 

@@ -446,6 +446,7 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
                                MAT_PIPE_PREPASS_FORWARD,
                                MAT_PIPE_PREPASS_FORWARD_VELOCITY,
                                MAT_PIPE_PREPASS_OVERLAP);
+  const bool is_overlap_prepass = pipeline_type == MAT_PIPE_PREPASS_OVERLAP;
 
   switch (material_status) {
     case GPU_MAT_SUCCESS: {
@@ -533,7 +534,7 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
     }
   }
 
-  if (!register_pass || is_volume || (is_forward && is_transparent)) {
+  if (!register_pass || is_volume || is_overlap_prepass || (is_forward && is_transparent)) {
     /* Sub pass is generated later. */
     matpass.sub_pass = nullptr;
   }
@@ -689,6 +690,7 @@ Material &MaterialModule::material_sync(Object *ob,
       mat.npr = MaterialPass();
       mat.overlap_masking = MaterialPass();
       mat.outline_occlusion = MaterialPass();
+      mat.outline_shell = MaterialPass();
       mat.lightprobe_sphere_prepass = MaterialPass();
       mat.lightprobe_sphere_shading = MaterialPass();
       mat.planar_probe_prepass = MaterialPass();
@@ -726,6 +728,15 @@ Material &MaterialModule::material_sync(Object *ob,
       }
       else {
         mat.outline_occlusion = MaterialPass();
+      }
+      if (!hide_on_camera && color_write && inst_.scene->eevee.use_outline != 0 &&
+          geometry_type == MAT_GEOM_MESH && mat.uses_outline_control)
+      {
+        mat.outline_shell = material_pass_get(
+            ob, blender_mat, MAT_PIPE_OUTLINE_SHELL, geometry_type);
+      }
+      else {
+        mat.outline_shell = MaterialPass();
       }
       if (material_has_flag(mat.npr, GPU_MATFLAG_RAYCAST) && mat.prepass.gpumat != nullptr) {
         mat.prepass.sub_pass = inst_.pipelines.deferred.prepass_add(

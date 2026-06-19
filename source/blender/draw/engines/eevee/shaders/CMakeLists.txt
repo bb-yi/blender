@@ -72,6 +72,7 @@ set(SRC_GLSL_FRAG
   eevee_outline_freestyle_frag.glsl
   eevee_outline_jfa_init_frag.glsl
   eevee_outline_resolve_frag.glsl
+  eevee_outline_shell_boundary_frag.glsl
   eevee_occupancy_convert_frag.glsl
   eevee_renderpass_clear_frag.glsl
   eevee_shadow_filter_frag.glsl
@@ -85,6 +86,7 @@ set(SRC_GLSL_FRAG
   eevee_surf_depth_frag.glsl
   eevee_surf_forward_frag.glsl
   eevee_surf_hybrid_frag.glsl
+  eevee_surf_outline_shell_frag.glsl
   eevee_surf_occupancy_frag.glsl
   eevee_surf_shadow_frag.glsl
   eevee_surf_volume_frag.glsl

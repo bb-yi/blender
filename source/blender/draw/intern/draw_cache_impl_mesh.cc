@@ -1267,7 +1267,7 @@ void DRW_mesh_batch_cache_create_requested(TaskGraph &task_graph,
                             GPU_PRIM_TRIS,
                             list,
                             IBOType::Tris,
-                            {VBOType::CornerNormal, VBOType::Position}};
+                            {VBOType::CornerNormal, VBOType::Position, VBOType::VertexNormal}};
       if (!cache.cd_used.uv.is_empty()) {
         batch.vbos.append(VBOType::UVs);
       }
@@ -1645,6 +1645,7 @@ void DRW_mesh_batch_cache_create_requested(TaskGraph &task_graph,
   if (batches_to_create & MBC_SURFACE_PER_MAT) {
     ibo_requests[int(BufferList::Final)].add(IBOType::Tris);
     vbo_requests[int(BufferList::Final)].add(VBOType::CornerNormal);
+    vbo_requests[int(BufferList::Final)].add(VBOType::VertexNormal);
     vbo_requests[int(BufferList::Final)].add(VBOType::Position);
     for (const int i : cache.attr_used.index_range()) {
       vbo_requests[int(BufferList::Final)].add(VBOType(int8_t(VBOType::Attr0) + i));
@@ -1751,6 +1752,7 @@ void DRW_mesh_batch_cache_create_requested(TaskGraph &task_graph,
       GPU_batch_init(batch, GPU_PRIM_TRIS, nullptr, cache.tris_per_mat[material].get());
       GPU_batch_vertbuf_add(batch, buffers.vbos.lookup(VBOType::CornerNormal).get(), false);
       GPU_batch_vertbuf_add(batch, buffers.vbos.lookup(VBOType::Position).get(), false);
+      GPU_batch_vertbuf_add(batch, buffers.vbos.lookup(VBOType::VertexNormal).get(), false);
       if (!cache.cd_used.uv.is_empty()) {
         GPU_batch_vertbuf_add(batch, buffers.vbos.lookup(VBOType::UVs).get(), false);
       }

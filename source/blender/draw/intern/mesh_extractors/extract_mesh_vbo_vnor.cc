@@ -72,8 +72,12 @@ static void extract_vert_normals_bm(const MeshRenderData &mr,
 
 gpu::VertBufPtr extract_vert_normals(const MeshRenderData &mr)
 {
-  static GPUVertFormat format = GPU_vertformat_from_attribute("vnor",
-                                                              gpu::VertAttrType::SNORM_10_10_10_2);
+  static GPUVertFormat format = []() {
+    GPUVertFormat format = GPU_vertformat_from_attribute("vnor",
+                                                         gpu::VertAttrType::SNORM_10_10_10_2);
+    GPU_vertformat_alias_add(&format, "outline_vnor");
+    return format;
+  }();
 
   gpu::VertBufPtr vbo = gpu::VertBufPtr(GPU_vertbuf_create_with_format(format));
   GPU_vertbuf_data_alloc(*vbo, mr.corners_num + mr.loose_indices_num);

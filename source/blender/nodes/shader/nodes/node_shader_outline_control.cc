@@ -26,6 +26,10 @@ static void node_declare(NodeDeclarationBuilder &b)
       .subtype(PROP_FACTOR)
       .description("Controls the opacity of the outline");
   b.add_input<decl::Float>("Line Width").default_value(2.0f).min(0.0f);
+  b.add_input<decl::Float>("Shell Width")
+      .default_value(0.0f)
+      .min(0.0f)
+      .description("Optional geometry-shell width; 0 uses Line Width");
   b.add_input<decl::Float>("Depth Threshold").default_value(0.1f).min(0.0f).max(1.0f);
   b.add_input<decl::Float>("Normal Threshold").default_value(0.5f).min(0.0f).max(1.0f);
   b.add_input<decl::Int>("Outline ID").default_value(0).min(0).max(32767);
@@ -47,6 +51,13 @@ static int node_shader_gpu_outline_control(GPUMaterial *mat,
   GPUNodeLink *outlink = nullptr;
   GPU_stack_link(mat, node, "node_output_outline", in, out, &outlink);
   GPU_material_add_output_link_outline(mat, outlink);
+
+  GPUNodeStack shell_width_in[3] = {in[2], in[3], {}};
+  shell_width_in[2].end = true;
+  GPUNodeLink *outlink_shell_width = nullptr;
+  GPU_stack_link(
+      mat, node, "node_outline_shell_width", shell_width_in, nullptr, &outlink_shell_width);
+  GPU_material_output_outline_shell_width(mat, outlink_shell_width);
   return true;
 }
 

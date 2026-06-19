@@ -20,6 +20,12 @@ float3 nodetree_displacement()
   return float3(0.0f);
 }
 
+/* Material graph connected to the Outline Control line-width input for shell expansion. */
+float nodetree_outline_shell_width()
+{
+  return 0.0f;
+}
+
 /* Material graph connected to the surface output. */
 Closure nodetree_surface(float closure_rand)
 {

@@ -8,6 +8,11 @@
 #include "draw_pass.hh"
 
 struct Object;
+struct GPUMaterial;
+
+namespace blender {
+struct Material;
+}
 
 namespace blender::eevee {
 
@@ -22,6 +27,8 @@ class OutlineModule {
   bool use_in_combined_ = false;
 
   PassSimple detect_ps_ = {"Outline.Detect"};
+  PassMain shell_ps_ = {"Outline.Shell"};
+  PassSimple shell_boundary_ps_ = {"Outline.ShellBoundary"};
   PassMain freestyle_edge_ps_ = {"Outline.FreestyleEdge"};
   PassSimple jfa_init_ps_ = {"Outline.JFA.Init"};
   PassSimple jfa_step_ps_ = {"Outline.JFA.Step"};
@@ -30,9 +37,12 @@ class OutlineModule {
   Framebuffer detect_fb_ = {"Outline.Detect.FB"};
   Framebuffer jfa_init_fb_ = {"Outline.JFA.Init.FB"};
   Framebuffer resolve_fb_ = {"Outline.Resolve.FB"};
+  Framebuffer shell_fb_ = {"Outline.Shell.FB"};
+  Framebuffer shell_boundary_fb_ = {"Outline.ShellBoundary.FB"};
   Framebuffer occlusion_fb_ = {"Outline.Occlusion.FB"};
 
   TextureFromPool edge_seed_tx_ = {"Outline.EdgeSeed"};
+  TextureFromPool shell_color_tx_ = {"Outline.ShellColor"};
   TextureFromPool resolved_outline_tx_ = {"Outline.Resolved"};
   TextureFromPool resolved_depth_tx_ = {"Outline.ResolvedDepth"};
   TextureFromPool resolved_velocity_tx_ = {"Outline.ResolvedVelocity"};
@@ -46,6 +56,7 @@ class OutlineModule {
   OutlineModule(Instance &inst) : inst_(inst) {}
 
   void begin_sync();
+  PassMain::Sub *shell_add(blender::Material *blender_mat, GPUMaterial *gpumat);
   void sync_object(Object *ob, ResourceHandleRange res_handle);
 
   void sync();

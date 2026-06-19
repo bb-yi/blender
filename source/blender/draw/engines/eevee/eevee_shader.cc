@@ -348,7 +348,8 @@ ShaderGroups ShaderModule::static_shaders_load(const ShaderGroups request_bits,
                                        OUTLINE_JFA_INIT,
                                        OUTLINE_JFA_STEP,
                                        OUTLINE_RESOLVE,
-                                       OUTLINE_FREESTYLE};
+                                       OUTLINE_FREESTYLE,
+                                       OUTLINE_SHELL_BOUNDARY};
     request(DEFERRED_LIGHTING_SHADERS, AS_SPAN(shader_list));
   }
   {
@@ -611,6 +612,8 @@ const char *ShaderModule::static_shader_create_info_name_get(eShaderType shader_
       return "eevee_outline_resolve";
     case OUTLINE_FREESTYLE:
       return "eevee_outline_freestyle";
+    case OUTLINE_SHELL_BOUNDARY:
+      return "eevee_outline_shell_boundary";
     case DEFERRED_AOV_CLEAR:
       return "eevee_deferred_aov_clear";
     case DEFERRED_CAPTURE_EVAL:
@@ -1000,6 +1003,8 @@ static int material_texture_reserved_slot_last(const eMaterialPipeline pipeline_
       return MATERIAL_TEXTURE_RESERVED_SLOT_LAST_HYBRID;
     case MAT_PIPE_FORWARD:
       return MATERIAL_TEXTURE_RESERVED_SLOT_LAST_FORWARD;
+    case MAT_PIPE_OUTLINE_SHELL:
+      return MATERIAL_TEXTURE_RESERVED_SLOT_LAST_FORWARD;
     case MAT_PIPE_BAKE_COLOR:
       return MATERIAL_TEXTURE_RESERVED_SLOT_LAST_BAKE;
     case MAT_PIPE_PREPASS_FORWARD_VELOCITY:
@@ -1121,6 +1126,10 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
           pipeline_info_name = has_depth_offset ? "eevee_surf_forward_depth_offset" :
                                                   "eevee_surf_forward";
           info.name_ += "_forward";
+          break;
+        case MAT_PIPE_OUTLINE_SHELL:
+          pipeline_info_name = "eevee_surf_outline_shell";
+          info.name_ += "_outline_shell";
           break;
         default:
           BLI_assert_unreachable();
@@ -1385,6 +1394,10 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     if (has_outline_output) {
       info.define("MAT_OUTLINE_SUPPORT");
     }
+  }
+  if (use_outline && has_outline_output && pipeline_type == MAT_PIPE_OUTLINE_SHELL) {
+    info.define("MAT_OUTLINE_SUPPORT");
+    info.define("MAT_OUTLINE_STAGE_ONLY");
   }
 
   if (use_shader_to_rgba) {
@@ -1801,6 +1814,15 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
                                          emitted_generated_sources,
                                          generated_source_block);
     }
+    if (pipeline_type == MAT_PIPE_OUTLINE_SHELL && !codegen.outline_shell_width.empty()) {
+      generated_dependencies.add("eevee_geom_types_lib.glsl");
+      generated_dependencies.add("eevee_nodetree_lib.glsl");
+      material_graph_dependencies_append(gpumat,
+                                         codegen.outline_shell_width.dependencies,
+                                         generated_dependencies,
+                                         emitted_generated_sources,
+                                         generated_source_block);
+    }
 
     vert_gen << generated_source_block.str();
     vert_gen << "float3 nodetree_displacement()\n";
@@ -1808,10 +1830,14 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     vert_gen << ((use_vertex_displacement) ? codegen.displacement.serialized :
                                              "return float3(0);\n");
     vert_gen << "}\n\n";
+    vert_gen << "float nodetree_outline_shell_width()\n";
+    vert_gen << "{\n";
+    vert_gen << ((pipeline_type == MAT_PIPE_OUTLINE_SHELL) ?
+                     codegen.outline_shell_width.serialized_or_default("return 0.0f;\n") :
+                     "return 0.0f;\n");
+    vert_gen << "}\n\n";
 
-    Vector<StringRefNull> dependencies = use_vertex_displacement ?
-                                             material_dependencies_finalize(generated_dependencies) :
-                                             Vector<StringRefNull>{};
+    Vector<StringRefNull> dependencies = material_dependencies_finalize(generated_dependencies);
 
     info.generated_sources.append({"eevee_nodetree_vert_lib.glsl", dependencies, vert_gen.str()});
   }
@@ -2628,6 +2654,23 @@ void ShaderModule::material_create_info_pipelines_amend(eMaterialGeometry geomet
                  GPU_BLEND_NONE,
                  GPU_CULL_NONE,
                  GPU_DEPTH_EQUAL,
+                 GPU_STENCIL_NONE,
+                 GPU_STENCIL_OP_NONE,
+                 GPU_VERTEX_LAST)
+          .viewports(1)
+          .depth_format(gpu::TextureTargetFormat::SFLOAT_32_DEPTH_UINT_8)
+          .stencil_format(gpu::TextureTargetFormat::SFLOAT_32_DEPTH_UINT_8)
+          .color_format(gpu::TextureTargetFormat::SFLOAT_16_16_16_16);
+      break;
+    }
+
+    case MAT_PIPE_OUTLINE_SHELL: {
+      r_info.pipeline_state()
+          .primitive(prim_type)
+          .state(GPU_WRITE_COLOR,
+                 GPU_BLEND_ALPHA_PREMULT,
+                 GPU_CULL_FRONT,
+                 GPU_DEPTH_GREATER_EQUAL,
                  GPU_STENCIL_NONE,
                  GPU_STENCIL_OP_NONE,
                  GPU_VERTEX_LAST)
