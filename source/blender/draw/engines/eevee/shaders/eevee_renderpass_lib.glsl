@@ -46,7 +46,7 @@ void clear_outline()
 #if defined(MAT_OUTLINE_CLEAR) && defined(GPU_FRAGMENT_SHADER)
   int2 texel = int2(gl_FragCoord.xy);
   imageStoreFast(outline_color_img, texel, float4(0.0f));
-  imageStoreFast(outline_info_img, texel, float4(0.0f));
+  imageStoreFast(outline_info_img, texel, uint4(0u));
 #endif
 }
 

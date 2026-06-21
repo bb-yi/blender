@@ -297,15 +297,8 @@ void WM_operator_free_all_after(wmWindowManager *wm, wmOperator *op)
 
 void WM_operator_type_set(wmOperator *op, wmOperatorType *ot)
 {
-#ifdef WITH_PYTHON
-  if (op->py_instance) {
-    /* The operator's RNA type changes below, so any existing Python wrapper for the old type must
-     * be invalidated before updating `op->ptr`. This can happen when Python inspected a running
-     * C modal operator. */
-    BPY_DECREF_RNA_INVALIDATE(op->py_instance);
-    op->py_instance = nullptr;
-  }
-#endif
+  /* Not supported for Python. */
+  BLI_assert(op->py_instance == nullptr);
 
   op->type = ot;
   op->ptr->type = ot->srna;
