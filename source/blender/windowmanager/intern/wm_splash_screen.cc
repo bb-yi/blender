@@ -54,28 +54,33 @@
 
 namespace blender {
 
-#ifdef WITH_BUILDINFO
-extern "C" char build_date[];
-#endif
+extern "C" char build_hash[];
 
 /* -------------------------------------------------------------------- */
 /** \name Splash Screen
  * \{ */
 
+static const char *wm_block_splash_npr_port_label()
+{
+  static char npr_port_label[64] = "";
+
+  if (build_hash[0] != '\0') {
+    BLI_snprintf_utf8(npr_port_label, sizeof(npr_port_label), "NPR Port [%s]", build_hash);
+    return npr_port_label;
+  }
+
+  return "NPR Port";
+}
+
 static const char *wm_block_splash_version_label()
 {
   static char splash_version_label[128] = "";
 
-#ifdef WITH_BUILDINFO
-  if (build_date[0] != '\0') {
-    BLI_snprintf_utf8(
-        splash_version_label, sizeof(splash_version_label), "%s npr post %s", BKE_blender_version_string(), build_date);
-    return splash_version_label;
-  }
-#endif
-
-  BLI_snprintf_utf8(
-      splash_version_label, sizeof(splash_version_label), "%s npr post", BKE_blender_version_string());
+  BLI_snprintf_utf8(splash_version_label,
+                    sizeof(splash_version_label),
+                    "%s %s",
+                    BKE_blender_version_string(),
+                    wm_block_splash_npr_port_label());
   return splash_version_label;
 }
 
