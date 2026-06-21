@@ -263,7 +263,7 @@ static PassMain::Sub *material_stencil_pass_add(PassSortable &stencil_ps,
                            {GPU_ATTACHMENT_WRITE, /* normal */
                             write_id ? GPU_ATTACHMENT_WRITE : GPU_ATTACHMENT_IGNORE,
                             has_motion ? GPU_ATTACHMENT_WRITE : GPU_ATTACHMENT_IGNORE});
-  DRWState state = material_write_state(blender_mat, true, true) |
+  DRWState state = material_write_state(blender_mat, false, true) |
                    DRW_STATE_WRITE_STENCIL | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
                    inst.film.depth.test_state |
                    material_surface_cull_state(material_surface_cull_method(blender_mat));
@@ -1831,11 +1831,25 @@ PassMain::Sub *DeferredLayer::material_add(blender::Material *blender_mat, GPUMa
   if (blender_mat->blend_flag & MA_BL_THICKNESS_FROM_SHADOW) {
     material_stencil_bits |= uint8_t(StencilBits::THICKNESS_FROM_SHADOW);
   }
-  /* We use this opportunity to clear the stencil bits. The undefined areas are discarded using
-   * the gbuf header value. */
-  material_pass->state_stencil(EEVEE_STENCIL_INTERNAL_MASK,
-                               material_stencil_bits,
-                               EEVEE_STENCIL_INTERNAL_MASK);
+  const MaterialStencilState stencil = material_stencil_state_get(blender_mat);
+  const bool is_stencil_reader = stencil.enabled && !material_stencil_state_writes(stencil);
+  if (is_stencil_reader) {
+    /* Stencil readers have their test deferred from the prepass to here, so the stencil writer
+     * pass has already executed and the user stencil bits are in place. */
+    material_pass->state_stencil_op(
+        GPU_STENCIL_OP_KEEP, GPU_STENCIL_OP_KEEP, GPU_STENCIL_OP_REPLACE_VALUE);
+    material_pass->state_stencil(EEVEE_STENCIL_INTERNAL_MASK,
+                                 material_stencil_bits | stencil.reference,
+                                 stencil.read_mask);
+    material_pass->state_stencil_test(stencil.test);
+  }
+  else {
+    /* We use this opportunity to clear the stencil bits. The undefined areas are discarded using
+     * the gbuf header value. */
+    material_pass->state_stencil(EEVEE_STENCIL_INTERNAL_MASK,
+                                 material_stencil_bits,
+                                 EEVEE_STENCIL_INTERNAL_MASK);
+  }
 
   return material_pass;
 }
