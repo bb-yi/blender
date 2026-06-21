@@ -18,6 +18,10 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.add_output<decl::Vector>("Frag Coord");
   b.add_output<decl::Float>("Width");
   b.add_output<decl::Float>("Height");
+  b.add_output<decl::Vector>("Resolution");
+  b.add_output<decl::Float>("Current Sample");
+  b.add_output<decl::Float>("Total Samples");
+  b.add_output<decl::Vector>("Sample Offset");
 }
 
 static int node_shader_gpu_render_info(GPUMaterial *mat,

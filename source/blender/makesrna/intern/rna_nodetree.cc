@@ -8469,7 +8469,9 @@ static void def_sh_image_to_closure(BlenderRNA * /*brna*/, StructRNA *srna)
 static void def_sh_render_info(BlenderRNA * /*brna*/, StructRNA *srna)
 {
   RNA_def_struct_ui_text(
-      srna, "Render Info Node", "Retrieve Eevee render region dimensions and normalized fragment coordinates");
+      srna,
+      "Render Info Node",
+      "Retrieve Eevee render dimensions, sample information, and normalized fragment coordinates");
 }
 
 static void def_sh_scene_time(BlenderRNA * /*brna*/, StructRNA *srna)

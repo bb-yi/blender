@@ -247,7 +247,14 @@ class NODE_MT_shader_node_input_base(node_add_menu.NodeMenu):
         if eevee_shader_nodes_poll(context):
             self.node_operator_with_outputs(
                 context, layout, "ShaderNodeRenderInfo",
-                ["Width", "Height"],
+                [
+                    "Resolution",
+                    "Width",
+                    "Height",
+                    "Current Sample",
+                    "Total Samples",
+                    "Sample Offset",
+                ],
             )
             self.node_operator(layout, "ShaderNodeSceneTime")
             self.node_operator(
