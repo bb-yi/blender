@@ -533,7 +533,10 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
     }
   }
 
-  if (!register_pass || is_volume || (is_forward && is_transparent)) {
+  const bool is_late_registered_forward = is_forward &&
+                                          (is_transparent ||
+                                           pipeline_type == MAT_PIPE_PREPASS_OVERLAP);
+  if (!register_pass || is_volume || is_late_registered_forward) {
     /* Sub pass is generated later. */
     matpass.sub_pass = nullptr;
   }

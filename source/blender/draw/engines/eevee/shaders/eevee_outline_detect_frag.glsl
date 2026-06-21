@@ -16,7 +16,7 @@ float4 outline_source_color_fetch(int2 texel)
   return texelFetch(outline_color_tx, texel, 0);
 }
 
-float4 outline_source_info_fetch(int2 texel)
+uint4 outline_source_info_fetch(int2 texel)
 {
   return texelFetch(outline_info_tx, texel, 0);
 }
@@ -103,14 +103,16 @@ void main()
   const bool use_prepass_normal = outline_prepass_normal_available(extent);
 
   const float4 outline_color = outline_source_color_fetch(texel);
-  const float4 outline_info = outline_source_info_fetch(texel);
+  const uint4 outline_info = outline_source_info_fetch(texel);
   const float line_width = outline_width_unpack(outline_info.r);
   const float normal_threshold_input = outline_normal_threshold_unpack(outline_info.b);
-  const bool use_depth_outline = outline_info.g < 1.0f;
+  const float depth_threshold_input = outline_depth_threshold_unpack(outline_info.g);
+  const bool use_depth_outline = depth_threshold_input < 1.0f;
   const bool use_normal_outline = normal_threshold_input < 1.0f;
   const bool use_geometry_outline = use_depth_outline || use_normal_outline;
   const bool center_id_edge = outline_id_edge_unpack(outline_info.a);
-  const float depth_threshold = use_depth_outline ? pow(outline_info.g, 10.0f) * 999.0f + 1.0f :
+  const float depth_threshold = use_depth_outline ? pow(depth_threshold_input, 10.0f) * 999.0f +
+                                                       1.0f :
                                                    0.0f;
   const float normal_threshold = max(0.01f, normal_threshold_input);
 
@@ -182,7 +184,7 @@ void main()
     const bool center_is_not_behind_sample = center_depth <= sample_depth + 1.0e-5f;
 
     if (center_id_edge && center_is_not_behind_sample) {
-      const float4 sample_outline_info = outline_source_info_fetch(sample_texel);
+      const uint4 sample_outline_info = outline_source_info_fetch(sample_texel);
       const float sample_line_width = outline_width_unpack(sample_outline_info.r);
       const uint sample_outline_id = outline_id_unpack(sample_outline_info.a);
       if (sample_outline_id != center_outline_id) {

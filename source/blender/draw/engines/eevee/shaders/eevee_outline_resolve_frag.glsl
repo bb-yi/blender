@@ -15,7 +15,7 @@ float4 outline_source_color_fetch(int2 texel)
   return texelFetch(outline_color_tx, texel, 0);
 }
 
-float4 outline_source_info_fetch(int2 texel)
+uint4 outline_source_info_fetch(int2 texel)
 {
   return texelFetch(outline_info_tx, texel, 0);
 }
