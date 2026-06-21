@@ -253,7 +253,6 @@ class NODE_MT_shader_node_input_base(node_add_menu.NodeMenu):
                     "Height",
                     "Current Sample",
                     "Total Samples",
-                    "Sample Offset",
                 ],
             )
             self.node_operator(layout, "ShaderNodeSceneTime")

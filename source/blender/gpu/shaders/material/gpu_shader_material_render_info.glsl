@@ -8,8 +8,7 @@ void node_render_info(out float3 frag_coord,
                       out float height,
                       out float3 resolution,
                       out float current_sample,
-                      out float total_samples,
-                      out float3 sample_offset)
+                      out float total_samples)
 {
   width = float(uniform_buf.film.extent.x);
   height = float(uniform_buf.film.extent.y);
@@ -25,10 +24,8 @@ void node_render_info(out float3 frag_coord,
 #ifdef EEVEE_SAMPLING_DATA
   current_sample = float(sampling_buf.sample_index);
   total_samples = float(max(sampling_buf.sample_count, 1));
-  sample_offset = float3(sampling_buf.sample_offset, 0.0f);
 #else
   current_sample = 0.0f;
   total_samples = 1.0f;
-  sample_offset = float3(0.0f);
 #endif
 }

@@ -63,8 +63,8 @@ struct [[host_shared]] SamplingData {
   int sample_index;
   /** Actual EEVEE target sample count exposed to material nodes. */
   int sample_count;
-  /** Current pixel jitter offset relative to the pixel center. */
-  float2 sample_offset;
+  int _pad0;
+  int _pad1;
 };
 
 /* Returns total sample count in a web pattern of the given size. */

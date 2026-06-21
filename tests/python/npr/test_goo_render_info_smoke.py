@@ -17,10 +17,8 @@ assert [socket.name for socket in node.outputs] == [
     "Resolution",
     "Current Sample",
     "Total Samples",
-    "Sample Offset",
 ]
 assert node.outputs["Frag Coord"].type == "VECTOR"
 assert node.outputs["Resolution"].type == "VECTOR"
 assert node.outputs["Current Sample"].type == "VALUE"
 assert node.outputs["Total Samples"].type == "VALUE"
-assert node.outputs["Sample Offset"].type == "VECTOR"

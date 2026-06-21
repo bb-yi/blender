@@ -251,8 +251,6 @@ void Sampling::step()
 
   data_.sample_index = int(sample_);
   data_.sample_count = int(sample_count_);
-  data_.sample_offset = float2(data_.dimensions[SAMPLING_FILTER_U] - 0.5f,
-                               data_.dimensions[SAMPLING_FILTER_V] - 0.5f);
 
   data_.push_update();
 
