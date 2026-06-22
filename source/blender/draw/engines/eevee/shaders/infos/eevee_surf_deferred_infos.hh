@@ -40,7 +40,7 @@
 
 GPU_SHADER_CREATE_INFO(eevee_outline_out)
 IMAGE_FREQ(OUTLINE_COLOR_SLOT, SFLOAT_16_16_16_16, write, image2D, outline_color_img, PASS)
-IMAGE_FREQ(OUTLINE_INFO_SLOT, UINT_16_16_16_16, write, uimage2D, outline_info_img, PASS)
+IMAGE_FREQ(OUTLINE_INFO_SLOT, UINT_32_32_32_32, write, uimage2D, outline_info_img, PASS)
 GPU_SHADER_CREATE_END()
 
 GPU_SHADER_CREATE_INFO(eevee_surf_deferred_base)

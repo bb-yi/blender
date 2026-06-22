@@ -12,6 +12,7 @@ void node_output_outline(
     float outline_id,
     float id_edge,
     float freestyle_edge,
+    float width_variation,
     Closure &dummy)
 {
   dummy = Closure(0);
@@ -22,5 +23,6 @@ void node_output_outline(
                  normal_threshold,
                  outline_id,
                  id_edge > 0.5f,
-                 freestyle_edge > 0.5f);
+                 freestyle_edge > 0.5f,
+                 width_variation);
 }

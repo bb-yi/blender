@@ -9,14 +9,19 @@
 #include "gpu_shader_utildefines_lib.glsl"
 
 /* Outline info is stored in integer channels to avoid Vulkan storage-image issues with UNORM
- * formats while keeping exact 16-bit code points for IDs and flags. Reserve the top width
- * code-point so unpacking never hits 1.0 exactly and can represent very large widths. */
+ * formats. Reserve the top width code-point so unpacking never hits 1.0 exactly and can
+ * represent very large widths. */
 #define OUTLINE_INFO_CODE_MAX 65535u
 #define OUTLINE_WIDTH_PACK_MAX 65534u
 
 uint outline_unorm16_pack(float value)
 {
   return uint(saturate(value) * float(OUTLINE_INFO_CODE_MAX) + 0.5f);
+}
+
+uint outline_unorm_pack(float value, uint max_value)
+{
+  return uint(saturate(value) * float(max_value) + 0.5f);
 }
 
 uint outline_width_pack(float width)
@@ -38,20 +43,34 @@ float outline_width_unpack(uint width_packed)
   return width_normalized / (1.0f - width_normalized);
 }
 
-uint outline_depth_threshold_pack(float threshold)
+#define OUTLINE_THRESHOLD_VALUE_MASK OUTLINE_INFO_CODE_MAX
+#define OUTLINE_WIDTH_VARIATION_MASK 255u
+#define OUTLINE_WIDTH_VARIATION_SHIFT 16u
+
+uint outline_depth_threshold_pack(float threshold, float width_variation)
 {
-  return outline_unorm16_pack(threshold);
+  return outline_unorm16_pack(threshold) |
+         (outline_unorm_pack(width_variation, OUTLINE_WIDTH_VARIATION_MASK)
+          << OUTLINE_WIDTH_VARIATION_SHIFT);
 }
 
 float outline_depth_threshold_unpack(uint threshold_packed)
 {
-  return float(min(threshold_packed, OUTLINE_INFO_CODE_MAX)) / float(OUTLINE_INFO_CODE_MAX);
+  return float(threshold_packed & OUTLINE_THRESHOLD_VALUE_MASK) /
+         float(OUTLINE_THRESHOLD_VALUE_MASK);
+}
+
+float outline_width_variation_unpack(uint threshold_packed)
+{
+  return float((threshold_packed >> OUTLINE_WIDTH_VARIATION_SHIFT) &
+               OUTLINE_WIDTH_VARIATION_MASK) /
+         float(OUTLINE_WIDTH_VARIATION_MASK);
 }
 
 #define OUTLINE_ID_VALUE_MASK 32767u
 #define OUTLINE_ID_EDGE_BIT 32768u
-#define OUTLINE_NORMAL_THRESHOLD_VALUE_MASK 32767u
-#define OUTLINE_FREESTYLE_EDGE_BIT 32768u
+#define OUTLINE_NORMAL_THRESHOLD_VALUE_MASK OUTLINE_INFO_CODE_MAX
+#define OUTLINE_FREESTYLE_EDGE_BIT 2147483648u
 
 uint outline_id_pack(uint outline_id, bool id_edge)
 {
@@ -135,7 +154,8 @@ void output_outline(float4 line_color,
                     float normal_threshold,
                     float outline_id,
                     bool id_edge,
-                    bool freestyle_edge)
+                    bool freestyle_edge,
+                    float width_variation)
 {
 #if defined(MAT_OUTLINE_SUPPORT) && defined(GPU_FRAGMENT_SHADER)
   if (flag_test(drw_object_infos().flag, OBJECT_HOLDOUT)) {
@@ -155,7 +175,7 @@ void output_outline(float4 line_color,
   float4 stored_color = line_color;
   stored_color.a = saturate(stored_color.a);
   uint4 stored_info = uint4(outline_width_pack(line_width),
-                            outline_depth_threshold_pack(depth_threshold),
+                            outline_depth_threshold_pack(depth_threshold, width_variation),
                             outline_normal_threshold_pack(normal_threshold, freestyle_edge),
                             outline_id_pack(resolved_outline_id, id_edge));
 #  if defined(MAT_OUTLINE_CLEAR)

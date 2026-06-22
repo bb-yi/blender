@@ -723,6 +723,44 @@ static void version_add_outline_control_freestyle_edge_input(Main *bmain)
   FOREACH_NODETREE_END;
 }
 
+static bNodeSocket &version_ensure_outline_control_float_input(bNodeTree &ntree,
+                                                               bNode &node,
+                                                               const char *name,
+                                                               const float value,
+                                                               const float min,
+                                                               const float max)
+{
+  if (bNodeSocket *input = bke::node_find_socket(node, SOCK_IN, name)) {
+    return *input;
+  }
+
+  bNodeSocket &input = version_node_add_socket(ntree, node, SOCK_IN, "NodeSocketFloat", name);
+  bNodeSocketValueFloat *default_value = input.default_value_typed<bNodeSocketValueFloat>();
+  default_value->value = value;
+  default_value->min = min;
+  default_value->max = max;
+  return input;
+}
+
+static void version_add_outline_control_width_variation_input(Main *bmain)
+{
+  FOREACH_NODETREE_BEGIN (bmain, ntree, id) {
+    if (ntree->type != NTREE_SHADER) {
+      continue;
+    }
+    for (bNode &node : ntree->nodes) {
+      if (node.type_legacy != SH_NODE_OUTLINE_CONTROL &&
+          !STREQ(node.idname, "ShaderNodeOutlineControl"))
+      {
+        continue;
+      }
+
+      version_ensure_outline_control_float_input(*ntree, node, "Width Variation", 0.0f, 0.0f, 1.0f);
+    }
+  }
+  FOREACH_NODETREE_END;
+}
+
 void do_versions_after_linking_510(FileData *fd, Main *bmain)
 {
   /* Some blend files were saved with an invalid active viewer key, possibly due to a bug that
@@ -1161,6 +1199,10 @@ void blo_do_versions_510(FileData *fd, Library * /*lib*/, Main *bmain)
 
   if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 46)) {
     version_add_outline_control_freestyle_edge_input(bmain);
+  }
+
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 51)) {
+    version_add_outline_control_width_variation_input(bmain);
   }
 
   if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 47)) {
