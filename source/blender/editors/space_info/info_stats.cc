@@ -66,6 +66,20 @@ namespace blender {
 
 ENUM_OPERATORS(eUserpref_StatusBar_Flag)
 
+extern "C" char build_hash[];
+
+static const char *info_stats_npr_port_label()
+{
+  static char npr_port_label[64] = "";
+
+  if (build_hash[0] != '\0') {
+    BLI_snprintf_utf8(npr_port_label, sizeof(npr_port_label), "NPR Port [%s]", build_hash);
+    return npr_port_label;
+  }
+
+  return "NPR Port";
+}
+
 struct SceneStats {
   uint64_t totvert, totvertsel, totvertsculpt;
   uint64_t totedge, totedgesel;
@@ -827,8 +841,7 @@ const char *ED_info_statusbar_string_ex(Main *bmain,
     if (info[0]) {
       ofs += BLI_snprintf_utf8_rlen(info + ofs, len - ofs, " | ");
     }
-    ofs += BLI_snprintf_utf8_rlen(
-        info + ofs, len - ofs, IFACE_("%s"), BKE_blender_version_string_compact());
+    ofs += BLI_snprintf_utf8_rlen(info + ofs, len - ofs, IFACE_("%s"), info_stats_npr_port_label());
   }
 
   return info;

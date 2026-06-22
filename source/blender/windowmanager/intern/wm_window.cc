@@ -102,6 +102,8 @@
 
 namespace blender {
 
+extern "C" char build_hash[];
+
 static void wm_window_csd_title_redraw_tag(wmWindowManager *wm, wmWindow *win);
 
 /* The global to talk to GHOST. */
@@ -588,6 +590,15 @@ void wm_window_close(bContext *C, wmWindowManager *wm, wmWindow *win)
  * \param window_filepath_fn: When non `nullopt` the title text does not need to contain
  * the file-path (typically based on #WM_CAPABILITY_WINDOW_PATH).
  */
+static std::string wm_window_npr_port_label()
+{
+  if (build_hash[0] != '\0') {
+    return fmt::format("NPR Port [{}]", build_hash);
+  }
+
+  return "NPR Port";
+}
+
 static std::string wm_window_title_text(
     wmWindowManager *wm,
     wmWindow *win,
@@ -684,7 +695,8 @@ static std::string wm_window_title_text(
     }
   }
 
-  win_title.append(fmt::format(" - Blender {}", BKE_blender_version_string()));
+  win_title.append(
+      fmt::format(" - Blender {} {}", BKE_blender_version_string(), wm_window_npr_port_label()));
 
   return win_title;
 }
