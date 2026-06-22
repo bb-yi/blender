@@ -2765,12 +2765,16 @@ void PlanarProbePipeline::render(View &view,
   inst_.lights.eval_uniform_light_shaders(view);
   inst_.lights.eval_front_light_shaders(view, extent);
 
+  /* Clear before the GBuffer pass so direct surface radiance written there survives capture.
+   * The GBuffer color attachment is shared with the planar radiance target. */
+  GPU_framebuffer_bind(combined_fb);
+  GPU_framebuffer_clear_color(combined_fb, float4(0.0f));
+
   inst_.gbuffer.bind(gbuffer_fb);
   inst_.manager->submit(gbuffer_ps_, view);
   inst_.lights.eval_light_shaders(view, extent);
 
   GPU_framebuffer_bind(combined_fb);
-  GPU_framebuffer_clear_color(combined_fb, float4(0.0f));
   inst_.manager->submit(eval_light_ps_, view);
   GPU_memory_barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS | GPU_BARRIER_TEXTURE_FETCH);
 
