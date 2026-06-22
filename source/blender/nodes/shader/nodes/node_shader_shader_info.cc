@@ -111,7 +111,7 @@ void register_node_type_sh_shader_info()
   ntype.initfunc = file_ns::node_shader_init_shader_info;
   ntype.draw_buttons = file_ns::node_shader_buts;
   ntype.declare = file_ns::node_declare;
-  ntype.add_ui_poll = object_eevee_shader_nodes_poll;
+  ntype.add_ui_poll = object_or_npr_eevee_shader_nodes_poll;
   bke::node_type_storage(
       ntype, "NodeShaderShaderInfo", node_free_standard_storage, node_copy_standard_storage);
   ntype.gpu_fn = file_ns::node_shader_gpu_shader_info;
