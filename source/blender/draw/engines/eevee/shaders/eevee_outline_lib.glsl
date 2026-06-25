@@ -43,15 +43,59 @@ float outline_width_unpack(uint width_packed)
   return width_normalized / (1.0f - width_normalized);
 }
 
+/* Outline info packing (UINT_32_32_32_32, each channel is a 32-bit unsigned int).
+ * R: [31..24: depth_edge_width  u8] [23..16: depth_threshold_range u8] [15..0: outline_width_pack]
+ * G: [31..24: normal_edge_width u8] [23..16: normal_threshold_range u8] [15..0: depth_threshold unorm16]
+ * B: [31: freestyle_edge bit] [30..23: id_edge_width u8] [22..16: free] [15..0: normal_threshold unorm16]
+ * A: [15: id_edge bit] [14..0: outline_id 15 bits] */
 #define OUTLINE_THRESHOLD_VALUE_MASK OUTLINE_INFO_CODE_MAX
-#define OUTLINE_WIDTH_VARIATION_MASK 255u
-#define OUTLINE_WIDTH_VARIATION_SHIFT 16u
+#define OUTLINE_UNORM8_MAX 255u
 
-uint outline_depth_threshold_pack(float threshold, float width_variation)
+#define OUTLINE_DEPTH_THRESHOLD_RANGE_SHIFT 16u
+#define OUTLINE_DEPTH_EDGE_WIDTH_SHIFT 24u
+#define OUTLINE_NORMAL_THRESHOLD_RANGE_SHIFT 16u
+#define OUTLINE_NORMAL_EDGE_WIDTH_SHIFT 24u
+#define OUTLINE_ID_EDGE_WIDTH_SHIFT 23u
+
+#define OUTLINE_ID_VALUE_MASK 32767u
+#define OUTLINE_ID_EDGE_BIT 32768u
+#define OUTLINE_NORMAL_THRESHOLD_VALUE_MASK OUTLINE_INFO_CODE_MAX
+#define OUTLINE_FREESTYLE_EDGE_BIT 2147483648u
+
+/* R channel: line width + depth range + depth edge width. */
+uint outline_info_r_pack(float line_width,
+                         float depth_threshold_range,
+                         float depth_edge_width)
 {
-  return outline_unorm16_pack(threshold) |
-         (outline_unorm_pack(width_variation, OUTLINE_WIDTH_VARIATION_MASK)
-          << OUTLINE_WIDTH_VARIATION_SHIFT);
+  return outline_width_pack(line_width) |
+         (outline_unorm_pack(depth_threshold_range, OUTLINE_UNORM8_MAX)
+          << OUTLINE_DEPTH_THRESHOLD_RANGE_SHIFT) |
+         (outline_unorm_pack(depth_edge_width, OUTLINE_UNORM8_MAX)
+          << OUTLINE_DEPTH_EDGE_WIDTH_SHIFT);
+}
+
+float outline_depth_threshold_range_unpack(uint info_r)
+{
+  return float((info_r >> OUTLINE_DEPTH_THRESHOLD_RANGE_SHIFT) & OUTLINE_UNORM8_MAX) /
+         float(OUTLINE_UNORM8_MAX);
+}
+
+float outline_depth_edge_width_unpack(uint info_r)
+{
+  return float((info_r >> OUTLINE_DEPTH_EDGE_WIDTH_SHIFT) & OUTLINE_UNORM8_MAX) /
+         float(OUTLINE_UNORM8_MAX);
+}
+
+/* G channel: depth threshold + normal range + normal edge width. */
+uint outline_info_g_pack(float depth_threshold,
+                         float normal_threshold_range,
+                         float normal_edge_width)
+{
+  return outline_unorm16_pack(depth_threshold) |
+         (outline_unorm_pack(normal_threshold_range, OUTLINE_UNORM8_MAX)
+          << OUTLINE_NORMAL_THRESHOLD_RANGE_SHIFT) |
+         (outline_unorm_pack(normal_edge_width, OUTLINE_UNORM8_MAX)
+          << OUTLINE_NORMAL_EDGE_WIDTH_SHIFT);
 }
 
 float outline_depth_threshold_unpack(uint threshold_packed)
@@ -60,18 +104,50 @@ float outline_depth_threshold_unpack(uint threshold_packed)
          float(OUTLINE_THRESHOLD_VALUE_MASK);
 }
 
-float outline_width_variation_unpack(uint threshold_packed)
+float outline_normal_threshold_range_unpack(uint info_g)
 {
-  return float((threshold_packed >> OUTLINE_WIDTH_VARIATION_SHIFT) &
-               OUTLINE_WIDTH_VARIATION_MASK) /
-         float(OUTLINE_WIDTH_VARIATION_MASK);
+  return float((info_g >> OUTLINE_NORMAL_THRESHOLD_RANGE_SHIFT) & OUTLINE_UNORM8_MAX) /
+         float(OUTLINE_UNORM8_MAX);
 }
 
-#define OUTLINE_ID_VALUE_MASK 32767u
-#define OUTLINE_ID_EDGE_BIT 32768u
-#define OUTLINE_NORMAL_THRESHOLD_VALUE_MASK OUTLINE_INFO_CODE_MAX
-#define OUTLINE_FREESTYLE_EDGE_BIT 2147483648u
+float outline_normal_edge_width_unpack(uint info_g)
+{
+  return float((info_g >> OUTLINE_NORMAL_EDGE_WIDTH_SHIFT) & OUTLINE_UNORM8_MAX) /
+         float(OUTLINE_UNORM8_MAX);
+}
 
+/* B channel: normal threshold + id edge width + freestyle bit. */
+uint outline_info_b_pack(float normal_threshold, float id_edge_width, bool freestyle_edge)
+{
+  uint packed_b = uint(saturate(normal_threshold) *
+                           float(OUTLINE_NORMAL_THRESHOLD_VALUE_MASK) +
+                       0.5f);
+  packed_b |= outline_unorm_pack(id_edge_width, OUTLINE_UNORM8_MAX)
+              << OUTLINE_ID_EDGE_WIDTH_SHIFT;
+  if (freestyle_edge) {
+    packed_b |= OUTLINE_FREESTYLE_EDGE_BIT;
+  }
+  return packed_b;
+}
+
+float outline_normal_threshold_unpack(uint threshold_packed)
+{
+  return float(threshold_packed & OUTLINE_NORMAL_THRESHOLD_VALUE_MASK) /
+         float(OUTLINE_NORMAL_THRESHOLD_VALUE_MASK);
+}
+
+float outline_id_edge_width_unpack(uint info_b)
+{
+  return float((info_b >> OUTLINE_ID_EDGE_WIDTH_SHIFT) & OUTLINE_UNORM8_MAX) /
+         float(OUTLINE_UNORM8_MAX);
+}
+
+bool outline_freestyle_edge_unpack(uint threshold_packed)
+{
+  return (threshold_packed & OUTLINE_FREESTYLE_EDGE_BIT) != 0u;
+}
+
+/* A channel: outline id + id edge bit (unchanged). */
 uint outline_id_pack(uint outline_id, bool id_edge)
 {
   uint packed_id = min(outline_id, OUTLINE_ID_VALUE_MASK);
@@ -89,28 +165,6 @@ uint outline_id_unpack(uint outline_id_packed)
 bool outline_id_edge_unpack(uint outline_id_packed)
 {
   return (outline_id_packed & OUTLINE_ID_EDGE_BIT) != 0u;
-}
-
-uint outline_normal_threshold_pack(float threshold, bool freestyle_edge)
-{
-  uint packed_threshold = uint(saturate(threshold) *
-                                   float(OUTLINE_NORMAL_THRESHOLD_VALUE_MASK) +
-                               0.5f);
-  if (freestyle_edge) {
-    packed_threshold |= OUTLINE_FREESTYLE_EDGE_BIT;
-  }
-  return packed_threshold;
-}
-
-float outline_normal_threshold_unpack(uint threshold_packed)
-{
-  return float(threshold_packed & OUTLINE_NORMAL_THRESHOLD_VALUE_MASK) /
-         float(OUTLINE_NORMAL_THRESHOLD_VALUE_MASK);
-}
-
-bool outline_freestyle_edge_unpack(uint threshold_packed)
-{
-  return (threshold_packed & OUTLINE_FREESTYLE_EDGE_BIT) != 0u;
 }
 
 #if defined(MAT_OUTLINE_SUPPORT) && defined(MAT_OUTLINE_CLEAR) && defined(GPU_FRAGMENT_SHADER)
@@ -151,11 +205,15 @@ float outline_pixel_world_size_at(float depth, int2 extent, int2 texel)
 void output_outline(float4 line_color,
                     float line_width,
                     float depth_threshold,
+                    float depth_threshold_range,
+                    float depth_edge_width,
                     float normal_threshold,
+                    float normal_threshold_range,
+                    float normal_edge_width,
                     float outline_id,
                     bool id_edge,
-                    bool freestyle_edge,
-                    float width_variation)
+                    float id_edge_width,
+                    bool freestyle_edge)
 {
 #if defined(MAT_OUTLINE_SUPPORT) && defined(GPU_FRAGMENT_SHADER)
   if (flag_test(drw_object_infos().flag, OBJECT_HOLDOUT)) {
@@ -174,10 +232,11 @@ void output_outline(float4 line_color,
 
   float4 stored_color = line_color;
   stored_color.a = saturate(stored_color.a);
-  uint4 stored_info = uint4(outline_width_pack(line_width),
-                            outline_depth_threshold_pack(depth_threshold, width_variation),
-                            outline_normal_threshold_pack(normal_threshold, freestyle_edge),
-                            outline_id_pack(resolved_outline_id, id_edge));
+  uint4 stored_info = uint4(
+      outline_info_r_pack(line_width, depth_threshold_range, depth_edge_width),
+      outline_info_g_pack(depth_threshold, normal_threshold_range, normal_edge_width),
+      outline_info_b_pack(normal_threshold, id_edge_width, freestyle_edge),
+      outline_id_pack(resolved_outline_id, id_edge));
 #  if defined(MAT_OUTLINE_CLEAR)
   g_outline_staged_color = stored_color;
   g_outline_staged_info = stored_info;

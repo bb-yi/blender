@@ -27,20 +27,49 @@ static void node_declare(NodeDeclarationBuilder &b)
       .description("Controls the opacity of the outline");
   b.add_input<decl::Float>("Line Width").default_value(2.0f).min(0.0f);
   b.add_input<decl::Float>("Depth Threshold").default_value(0.1f).min(0.0f).max(1.0f);
-  b.add_input<decl::Float>("Normal Threshold").default_value(0.5f).min(0.0f).max(1.0f);
-  b.add_input<decl::Int>("Outline ID").default_value(0).min(0).max(32767);
-  b.add_input<decl::Bool>("ID Edge")
-      .default_value(true)
-      .description("Draw outlines where the outline ID changes");
-  b.add_input<decl::Bool>("Freestyle Edge")
-      .default_value(true)
-      .description("Draw outlines on mesh edges marked as Freestyle edges");
-  b.add_input<decl::Float>("Width Variation")
+  b.add_input<decl::Float>("Depth Threshold Range")
       .default_value(0.0f)
       .min(0.0f)
       .max(1.0f)
       .subtype(PROP_FACTOR)
-      .description("Amount of depth and normal edge strength mapped into outline width");
+      .description(
+          "Strength range above the depth threshold over which the line tapers from zero to "
+          "Depth Edge Width. Zero = hard on/off");
+  b.add_input<decl::Float>("Depth Edge Width")
+      .default_value(1.0f)
+      .min(0.0f)
+      .max(1.0f)
+      .subtype(PROP_FACTOR)
+      .description("Width multiplier applied to depth/silhouette edges");
+  b.add_input<decl::Float>("Normal Threshold").default_value(0.5f).min(0.0f).max(1.0f);
+  b.add_input<decl::Float>("Normal Threshold Range")
+      .default_value(0.0f)
+      .min(0.0f)
+      .max(1.0f)
+      .subtype(PROP_FACTOR)
+      .description(
+          "Strength range above the normal threshold over which the line tapers from zero to "
+          "Normal Edge Width. Zero = hard on/off");
+  b.add_input<decl::Float>("Normal Edge Width")
+      .default_value(1.0f)
+      .min(0.0f)
+      .max(1.0f)
+      .subtype(PROP_FACTOR)
+      .description("Width multiplier applied to normal/crease edges");
+  b.add_input<decl::Int>("Outline ID").default_value(0).min(0).max(32767);
+  b.add_input<decl::Bool>("ID Edge")
+      .default_value(true)
+      .description("Draw outlines where the outline ID changes");
+  b.add_input<decl::Float>("ID Edge Width")
+      .default_value(1.0f)
+      .min(0.0f)
+      .max(1.0f)
+      .subtype(PROP_FACTOR)
+      .description(
+          "Width multiplier applied to ID-boundary edges. Independent from Depth/Normal");
+  b.add_input<decl::Bool>("Freestyle Edge")
+      .default_value(true)
+      .description("Draw outlines on mesh edges marked as Freestyle edges");
 }
 
 static int node_shader_gpu_outline_control(GPUMaterial *mat,
