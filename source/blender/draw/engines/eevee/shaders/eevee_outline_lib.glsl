@@ -124,9 +124,7 @@ float outline_normal_edge_width_unpack(uint info_g)
 /* B channel: normal threshold + id edge width + freestyle bit. */
 uint outline_info_b_pack(float normal_threshold, float id_edge_width, bool freestyle_edge)
 {
-  uint packed_b = uint(saturate(normal_threshold) *
-                           float(OUTLINE_NORMAL_THRESHOLD_VALUE_MASK) +
-                       0.5f);
+  uint packed_b = outline_unorm16_pack(normal_threshold);
   packed_b |= outline_unorm_pack(id_edge_width, OUTLINE_UNORM8_MAX)
               << OUTLINE_ID_EDGE_WIDTH_SHIFT;
   if (freestyle_edge) {
