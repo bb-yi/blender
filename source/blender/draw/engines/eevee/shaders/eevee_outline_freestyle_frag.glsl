@@ -48,5 +48,8 @@ void main()
     discard;
   }
 
-  out_outline_seed = float4(outline_color.rgb, line_width);
+  /* Match the detect pass seed layout: .a = full line width (for JFA coverage), .r = width
+   * modulation factor (1.0 = no modulation; Freestyle edges are not strength-modulated).
+   * Color is read from outline_color_tx in resolve, so seed.gb are unused. */
+  out_outline_seed = float4(1.0f, 0.0f, 0.0f, line_width);
 }

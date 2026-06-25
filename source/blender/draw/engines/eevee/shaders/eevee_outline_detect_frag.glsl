@@ -258,7 +258,14 @@ void main()
                                                          width_variation));
       }
     }
-    seed_line_width *= width_factor;
-    out_outline_seed = float4(outline_color.rgb, seed_line_width);
+    /* Decouple coverage geometry from width modulation: the JFA flood and the resolve coverage
+     * test must use a single uniform radius (the full seed_line_width) so that the nearest-seed
+     * Voronoi partition stays consistent with the union-of-disks coverage. Storing a per-seed
+     * modulated width here would make a pixel that is euclidean-nearest to a thin seed get dropped
+     * even though it lies inside a wider neighbor's disk, producing gaps / a broken edge layer.
+     * Instead we keep the full width in .a (used by JFA + coverage) and pass the modulation factor
+     * separately in .r (applied to the drawn radius in resolve). seed.rgb is otherwise unused by
+     * resolve, which reads the line color from outline_color_tx. */
+    out_outline_seed = float4(width_factor, 0.0f, 0.0f, seed_line_width);
   }
 }

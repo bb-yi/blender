@@ -57,15 +57,21 @@ void main()
     const float offset_length = length(offset) - 0.5f;
 
     const float4 seed = texelFetch(outline_seed_tx, seed_texel, 0);
+    /* .a = full line width (uniform across all seeds -> JFA coverage has no holes).
+     * .r = per-seed width modulation factor in (0, 1]. The drawn radius is scaled by the factor,
+     * but the JFA partition itself is built on the uniform full width, so a pixel is never wrongly
+     * dropped because its nearest seed happens to be a narrow one inside a wider neighbor's disk. */
     const float seed_width = seed.a;
-    if (seed_width > 0.0f && offset_length <= seed_width * 0.5f) {
+    const float width_factor = clamp(seed.r, 0.0f, 1.0f);
+    const float effective_width = seed_width * width_factor;
+    if (effective_width > 0.0f && offset_length <= effective_width * 0.5f) {
       const float4 outline_color = outline_source_color_fetch(seed_texel);
       float alpha = outline_color.a;
-      if (offset_length <= 0.0f && seed_width <= 1.0f) {
-        alpha *= seed_width;
+      if (offset_length <= 0.0f && effective_width <= 1.0f) {
+        alpha *= effective_width;
       }
       else {
-        alpha *= clamp(seed_width * 0.5f - offset_length, 0.0f, 1.0f);
+        alpha *= clamp(effective_width * 0.5f - offset_length, 0.0f, 1.0f);
       }
 
       const float sample_depth = outline_depth_fetch(seed_texel);
