@@ -11,9 +11,6 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_outline_detect)
 #include "eevee_outline_lib.glsl"
 #include "eevee_reverse_z_lib.glsl"
 
-#define OUTLINE_STRENGTH_WIDTH_MIN_FACTOR 0.45f
-#define OUTLINE_STRENGTH_WIDTH_RANGE 4.0f
-
 float4 outline_source_color_fetch(int2 texel)
 {
   return texelFetch(outline_color_tx, texel, 0);
@@ -29,15 +26,22 @@ float outline_screen_depth_fetch(int2 texel)
   return reverse_z::read(texelFetch(depth_tx, texel, 0).r);
 }
 
-float outline_strength_width_factor(float strength, float threshold, float width_variation)
+/* Malt-style width factor: returns a factor in [0, edge_width] used to modulate the drawn radius.
+ * - strength <= threshold : 0 (no edge drawn)
+ * - range <= 0            : edge_width (hard on/off, full width as soon as threshold is crossed)
+ * - range > 0             : linear taper (strength - threshold) / range * edge_width, clamped to
+ *                           edge_width once strength >= threshold + range. Matches Malt's
+ *                           line_width_2 / map_range_clamped semantics. */
+float outline_edge_width_factor(float strength, float threshold, float range, float edge_width)
 {
-  if (width_variation <= 0.0f) {
-    return 1.0f;
+  if (strength <= threshold) {
+    return 0.0f;
   }
-  const float overshoot = max(strength - threshold, 0.0f);
-  const float normalized = saturate(overshoot / max(threshold * OUTLINE_STRENGTH_WIDTH_RANGE, 1.0f));
-  const float strength_width = mix(OUTLINE_STRENGTH_WIDTH_MIN_FACTOR, 1.0f, normalized);
-  return mix(1.0f, strength_width, saturate(width_variation));
+  if (range <= 0.0f) {
+    return edge_width;
+  }
+  const float t = saturate((strength - threshold) / range);
+  return t * edge_width;
 }
 
 float3 outline_screen_to_view(int2 texel, int2 extent, float screen_depth)
@@ -119,9 +123,13 @@ void main()
   const float4 outline_color = outline_source_color_fetch(texel);
   const uint4 outline_info = outline_source_info_fetch(texel);
   const float line_width = outline_width_unpack(outline_info.r);
-  const float normal_threshold_input = outline_normal_threshold_unpack(outline_info.b);
   const float depth_threshold_input = outline_depth_threshold_unpack(outline_info.g);
-  const float width_variation = outline_width_variation_unpack(outline_info.g);
+  const float depth_threshold_range_input = outline_depth_threshold_range_unpack(outline_info.r);
+  const float depth_edge_width = outline_depth_edge_width_unpack(outline_info.r);
+  const float normal_threshold_input = outline_normal_threshold_unpack(outline_info.b);
+  const float normal_threshold_range = outline_normal_threshold_range_unpack(outline_info.g);
+  const float normal_edge_width = outline_normal_edge_width_unpack(outline_info.g);
+  const float id_edge_width = outline_id_edge_width_unpack(outline_info.b);
   const bool use_depth_outline = depth_threshold_input < 1.0f;
   const bool use_normal_outline = normal_threshold_input < 1.0f;
   const bool use_geometry_outline = use_depth_outline || use_normal_outline;
@@ -129,6 +137,12 @@ void main()
   const float depth_threshold = use_depth_outline ? pow(depth_threshold_input, 10.0f) * 999.0f +
                                                        1.0f :
                                                    0.0f;
+  /* Remap the depth range with the same pow curve as depth_threshold (Malt: pow(r,10) * 1000) so
+   * the taper interval stays in the same units as the remapped threshold. Zero range = hard
+   * on/off switch. */
+  const float depth_threshold_range = (use_depth_outline && depth_threshold_range_input > 0.0f)
+                                          ? pow(depth_threshold_range_input, 10.0f) * 1000.0f :
+                                          0.0f;
   const float normal_threshold = max(0.01f, normal_threshold_input);
 
   out_outline_seed = float4(0.0f);
@@ -242,21 +256,27 @@ void main()
                                  max_delta_angle > normal_threshold;
 
   if (has_silhouette || has_internal_edge) {
-    float width_factor = 1.0f;
-    if (!has_id_edge) {
-      width_factor = 0.0f;
-      if (has_silhouette) {
-        width_factor = max(width_factor,
-                           outline_strength_width_factor(max_delta_distance,
-                                                         depth_threshold,
-                                                         width_variation));
-      }
-      if (has_internal_edge) {
-        width_factor = max(width_factor,
-                           outline_strength_width_factor(max_delta_angle,
-                                                         normal_threshold,
-                                                         width_variation));
-      }
+    /* Each edge class contributes its own width factor independently (Malt-style):
+     * ID edges use id_edge_width directly; depth silhouette and normal crease edges taper from
+     * 0 to their respective edge_width over their threshold range. Depth is skipped when an ID
+     * edge is present (ID already marks the silhouette boundary). */
+    float width_factor = 0.0f;
+    if (has_id_edge) {
+      width_factor = max(width_factor, id_edge_width);
+    }
+    if (has_silhouette && !has_id_edge) {
+      width_factor = max(width_factor,
+                         outline_edge_width_factor(max_delta_distance,
+                                                   depth_threshold,
+                                                   depth_threshold_range,
+                                                   depth_edge_width));
+    }
+    if (has_internal_edge) {
+      width_factor = max(width_factor,
+                         outline_edge_width_factor(max_delta_angle,
+                                                   normal_threshold,
+                                                   normal_threshold_range,
+                                                   normal_edge_width));
     }
     /* Decouple coverage geometry from width modulation: the JFA flood and the resolve coverage
      * test must use a single uniform radius (the full seed_line_width) so that the nearest-seed
