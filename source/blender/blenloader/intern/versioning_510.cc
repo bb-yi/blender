@@ -761,6 +761,45 @@ static void version_add_outline_control_width_variation_input(Main *bmain)
   FOREACH_NODETREE_END;
 }
 
+/* Replace the legacy single "Width Variation" socket with the Malt-style parameter set:
+ * per-class threshold range + edge width for depth / normal / ID edges. Old scenes are not
+ * preserved bit-for-bit: Width Variation is dropped (links into it are removed) and the new
+ * sockets default to range = 0 (hard on/off) + edge_width = 1.0 (full width), i.e. uniform
+ * outlines. Users re-tune by hand. */
+static void version_replace_outline_control_width_variation(Main *bmain)
+{
+  FOREACH_NODETREE_BEGIN (bmain, ntree, id) {
+    if (ntree->type != NTREE_SHADER) {
+      continue;
+    }
+    for (bNode &node : ntree->nodes) {
+      if (node.type_legacy != SH_NODE_OUTLINE_CONTROL &&
+          !STREQ(node.idname, "ShaderNodeOutlineControl"))
+      {
+        continue;
+      }
+
+      if (bNodeSocket *width_variation_input = bke::node_find_socket(
+              node, SOCK_IN, "Width Variation"))
+      {
+        bke::node_remove_socket(*ntree, node, *width_variation_input);
+      }
+
+      version_ensure_outline_control_float_input(
+          *ntree, node, "Depth Threshold Range", 0.0f, 0.0f, 1.0f);
+      version_ensure_outline_control_float_input(
+          *ntree, node, "Depth Edge Width", 1.0f, 0.0f, 1.0f);
+      version_ensure_outline_control_float_input(
+          *ntree, node, "Normal Threshold Range", 0.0f, 0.0f, 1.0f);
+      version_ensure_outline_control_float_input(
+          *ntree, node, "Normal Edge Width", 1.0f, 0.0f, 1.0f);
+      version_ensure_outline_control_float_input(
+          *ntree, node, "ID Edge Width", 1.0f, 0.0f, 1.0f);
+    }
+  }
+  FOREACH_NODETREE_END;
+}
+
 void do_versions_after_linking_510(FileData *fd, Main *bmain)
 {
   /* Some blend files were saved with an invalid active viewer key, possibly due to a bug that
@@ -1203,6 +1242,10 @@ void blo_do_versions_510(FileData *fd, Library * /*lib*/, Main *bmain)
 
   if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 51)) {
     version_add_outline_control_width_variation_input(bmain);
+  }
+
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 52)) {
+    version_replace_outline_control_width_variation(bmain);
   }
 
   if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 47)) {
