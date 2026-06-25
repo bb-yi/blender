@@ -15,6 +15,11 @@
  * represent very large widths. */
 #define OUTLINE_INFO_CODE_MAX 65535u
 #define OUTLINE_WIDTH_PACK_MAX 65534u
+/* Mask isolating the low-16-bit width code in an info.R channel. The upper 16 bits of R now carry
+ * depth_threshold_range and depth_edge_width (see outline_info_r_pack); without this mask,
+ * outline_width_unpack would read the full 32-bit channel and decode a width of ~65534 whenever
+ * any upper byte is non-zero, flooding JFA coverage to the whole screen. */
+#define OUTLINE_WIDTH_PACK_MASK 65535u
 
 uint outline_unorm16_pack(float value)
 {
@@ -37,7 +42,7 @@ uint outline_width_pack(float width)
 
 float outline_width_unpack(uint width_packed)
 {
-  width_packed = min(width_packed, OUTLINE_WIDTH_PACK_MAX);
+  width_packed = min(width_packed & OUTLINE_WIDTH_PACK_MASK, OUTLINE_WIDTH_PACK_MAX);
   if (width_packed == 0u) {
     return 0.0f;
   }
