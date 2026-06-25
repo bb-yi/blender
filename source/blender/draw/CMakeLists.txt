@@ -528,6 +528,7 @@ set(GLSL_SRC
   engines/eevee/shaders/eevee_nodetree_type_lib.glsl
   engines/eevee/shaders/eevee_nodetree_vert_lib.glsl
   engines/eevee/shaders/eevee_outline_detect_frag.glsl
+  engines/eevee/shaders/eevee_outline_factor_blur_frag.glsl
   engines/eevee/shaders/eevee_outline_freestyle_frag.glsl
   engines/eevee/shaders/eevee_outline_freestyle_vert.glsl
   engines/eevee/shaders/eevee_outline_jfa_init_frag.glsl

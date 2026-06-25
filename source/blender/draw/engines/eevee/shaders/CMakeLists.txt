@@ -69,6 +69,7 @@ set(SRC_GLSL_FRAG
   eevee_light_shader_front_frag.glsl
   eevee_lookdev_display_frag.glsl
   eevee_outline_detect_frag.glsl
+  eevee_outline_factor_blur_frag.glsl
   eevee_outline_freestyle_frag.glsl
   eevee_outline_jfa_init_frag.glsl
   eevee_outline_resolve_frag.glsl

@@ -58,9 +58,10 @@ void main()
 
     const float4 seed = texelFetch(outline_seed_tx, seed_texel, 0);
     /* .a = full line width (uniform across all seeds -> JFA coverage has no holes).
-     * .r = per-seed width modulation factor in (0, 1]. The drawn radius is scaled by the factor,
-     * but the JFA partition itself is built on the uniform full width, so a pixel is never wrongly
-     * dropped because its nearest seed happens to be a narrow one inside a wider neighbor's disk. */
+     * .r = per-seed width modulation factor in (0, 1], already smoothed along the contour by the
+     * factor-blur pass (eevee_outline_factor_blur), so the drawn radius varies smoothly along the
+     * stroke without the per-Voronoi-cell sawtooth. The JFA partition is built on the uniform full
+     * width, so coverage is hole-free regardless of the factor. */
     const float seed_width = seed.a;
     const float width_factor = clamp(seed.r, 0.0f, 1.0f);
     const float effective_width = seed_width * width_factor;
