@@ -830,6 +830,7 @@ enum NodeShaderMixMode {
 enum NodeShaderImageSampleOffsetType {
   SHD_IMG_SAMPLE_OFFSET_VIEW = 0,
   SHD_IMG_SAMPLE_OFFSET_PIXEL = 1,
+  SHD_IMG_SAMPLE_OFFSET_UV = 2,
 };
 
 enum NodeShaderCurvatureRadiusType {

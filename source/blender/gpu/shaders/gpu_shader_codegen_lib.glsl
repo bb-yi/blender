@@ -38,6 +38,9 @@ struct TextureHandle {
   int index;
 };
 
+/* Scene Color is a filter-domain handle. Keep it outside the existing NPR/world ranges. */
+#define TEX_HANDLE_SCENE 30u
+
 #define TEXTURE_HANDLE_DEFAULT TextureHandle(0u, 0)
 
 #if defined(NPR_SHADER) || defined(MAT_FILTER)

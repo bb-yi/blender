@@ -205,13 +205,17 @@ class SCENE_OT_eevee_filter_material_new(Operator):
         nt.nodes.clear()
 
         scene_color = nt.nodes.new("ShaderNodeSceneColor")
-        scene_color.location = (-220, 20)
+        scene_color.location = (-320, 20)
+
+        image_sample = nt.nodes.new("ShaderNodeNPR_ImageSample")
+        image_sample.location = (-120, 20)
 
         filter_output = nt.nodes.new("ShaderNodeOutputFilter")
-        filter_output.location = (40, 20)
+        filter_output.location = (120, 20)
 
-        nt.links.new(scene_color.outputs["Color"], filter_output.inputs["Color"])
-        nt.links.new(scene_color.outputs["Alpha"], filter_output.inputs["Alpha"])
+        nt.links.new(scene_color.outputs["Color Image"], image_sample.inputs["Image"])
+        nt.links.new(image_sample.outputs["Color"], filter_output.inputs["Color"])
+        nt.links.new(image_sample.outputs["Alpha"], filter_output.inputs["Alpha"])
 
         filter_entry.material = mat
         filter_entry.enabled = True

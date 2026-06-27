@@ -238,7 +238,7 @@ static bool material_depth_offset_graph_has_unsupported_dependencies(const GPUMa
 {
   return material_graph_serialized_contains(graph, "node_shader_to_rgba(") ||
          material_graph_serialized_contains(graph, "node_shader_info(") ||
-         material_graph_serialized_contains(graph, "node_scene_color(") ||
+         material_graph_serialized_contains(graph, "node_scene_color_handle_only(") ||
          material_graph_serialized_contains(graph, "node_screenspace_info(") ||
          material_graph_serialized_contains(graph, "node_light_probe_color(") ||
          material_graph_dependency_source_contains(gpumat, graph, "glsl_ambient_lighting") ||

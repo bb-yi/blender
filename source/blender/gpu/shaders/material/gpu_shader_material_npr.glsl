@@ -130,22 +130,58 @@ void FOREACH_LIGHT_END(float dummy)
 #endif
 
 [[node]]
-void npr_image_sample_view(TextureHandle image, float3 offset, float4 &color)
+void npr_image_sample_view(TextureHandle image, float3 offset, float4 &color, float &alpha)
 {
 #if (defined(NPR_SHADER) || defined(MAT_FILTER)) && defined(GPU_FRAGMENT_SHADER)
   color = TextureHandle_eval(image, offset.xy, false);
+  alpha = color.a;
+  /* Scene color stores transmittance in alpha. Invert to get opacity,
+   * matching the original Scene Color node's separate Alpha output. */
+  if (image.type == TEX_HANDLE_SCENE && image.index == 0) {
+    alpha = saturate(1.0f - alpha);
+  }
+  else if (image.type == TEX_HANDLE_SCENE && image.index == 1) {
+    alpha = color.r;
+  }
 #else
   color = float4(0.0f);
+  alpha = 0.0f;
 #endif
 }
 
 [[node]]
-void npr_image_sample_texel(TextureHandle image, float3 offset, float4 &color)
+void npr_image_sample_texel(TextureHandle image, float3 offset, float4 &color, float &alpha)
 {
 #if (defined(NPR_SHADER) || defined(MAT_FILTER)) && defined(GPU_FRAGMENT_SHADER)
   color = TextureHandle_eval(image, offset.xy, true);
+  alpha = color.a;
+  if (image.type == TEX_HANDLE_SCENE && image.index == 0) {
+    alpha = saturate(1.0f - alpha);
+  }
+  else if (image.type == TEX_HANDLE_SCENE && image.index == 1) {
+    alpha = color.r;
+  }
 #else
   color = float4(0.0f);
+  alpha = 0.0f;
+#endif
+}
+
+[[node]]
+void npr_image_sample_uv(TextureHandle image, float3 uv, float4 &color, float &alpha)
+{
+#if (defined(NPR_SHADER) || defined(MAT_FILTER)) && defined(GPU_FRAGMENT_SHADER)
+  color = TextureHandle_eval_uv(image, uv.xy);
+  alpha = color.a;
+  if (image.type == TEX_HANDLE_SCENE && image.index == 0) {
+    alpha = saturate(1.0f - alpha);
+  }
+  else if (image.type == TEX_HANDLE_SCENE && image.index == 1) {
+    alpha = color.r;
+  }
+#else
+  color = float4(0.0f);
+  alpha = 0.0f;
 #endif
 }
 

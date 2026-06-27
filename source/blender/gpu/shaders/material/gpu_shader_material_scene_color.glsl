@@ -44,35 +44,15 @@ float4 scene_position_resolve(float2 uv)
 }
 
 [[node]]
-void node_scene_color(float3 vector,
-                      float use_explicit_vector,
-                      float source,
-                      out float4 color,
-                      out float alpha)
+void node_scene_color_handle_only(TextureHandle &color_image,
+                                  TextureHandle &depth_image,
+                                  TextureHandle &normal_image,
+                                  TextureHandle &position_image)
 {
-  float2 uv = scene_color_resolve_uv(vector, use_explicit_vector);
-  if (source < 0.5f) {
-    color = texture(scene_color_tx, uv);
-    /* Scene color is stored with Eevee transmittance in alpha until film accumulation. */
-    alpha = saturate(1.0f - color.a);
-  }
-  else if (source < 1.5f) {
-    float depth = scene_depth_resolve_linear(uv);
-    color = float4(depth, depth, depth, 1.0f);
-    alpha = depth;
-  }
-  else if (source < 2.5f) {
-    color = scene_normal_resolve(uv);
-    alpha = (uniform_buf.render_pass.normal_id >= 0) ? 1.0f : 0.0f;
-  }
-  else if (source > 3.5f) {
-    color = scene_position_resolve(uv);
-    alpha = (uniform_buf.render_pass.position_id >= 0) ? 1.0f : 0.0f;
-  }
-  else {
-    color = float4(0.0f);
-    alpha = 0.0f;
-  }
+  color_image = TextureHandle(TEX_HANDLE_SCENE, 0);
+  depth_image = TextureHandle(TEX_HANDLE_SCENE, 1);
+  normal_image = TextureHandle(TEX_HANDLE_SCENE, 2);
+  position_image = TextureHandle(TEX_HANDLE_SCENE, 4);
 }
 
 [[node]]

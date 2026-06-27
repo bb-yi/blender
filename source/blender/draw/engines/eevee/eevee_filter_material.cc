@@ -222,16 +222,25 @@ static void filter_material_collect_scene_sources_from_socket(
     bool &r_uses_cryptomatte_object);
 
 static void filter_material_collect_scene_source_node(const bNode &node,
+                                                      const bNodeSocket *output_socket,
                                                       bool &r_uses_scene_depth,
                                                       bool &r_uses_scene_normal,
                                                       bool &r_uses_scene_position,
                                                       bool &r_uses_cryptomatte_object)
 {
   if (node.type_legacy == SH_NODE_SCENE_COLOR) {
-    const int source = node.custom1;
-    r_uses_scene_depth |= (source == SHD_SCENE_SOURCE_DEPTH);
-    r_uses_scene_normal |= (source == SHD_SCENE_SOURCE_NORMAL);
-    r_uses_scene_position |= (source == SHD_SCENE_SOURCE_POSITION);
+    if (output_socket == nullptr) {
+      return;
+    }
+    if (std::strcmp(output_socket->identifier, "Depth Image") == 0) {
+      r_uses_scene_depth = true;
+    }
+    else if (std::strcmp(output_socket->identifier, "Normal Image") == 0) {
+      r_uses_scene_normal = true;
+    }
+    else if (std::strcmp(output_socket->identifier, "Position Image") == 0) {
+      r_uses_scene_position = true;
+    }
   }
   else if (node.type_legacy == SH_NODE_FILTER_OBJECT_MASK) {
     r_uses_cryptomatte_object = true;
@@ -326,8 +335,12 @@ static void filter_material_collect_scene_sources_from_node(
     return;
   }
 
-  filter_material_collect_scene_source_node(
-      *node, r_uses_scene_depth, r_uses_scene_normal, r_uses_scene_position, r_uses_cryptomatte_object);
+  filter_material_collect_scene_source_node(*node,
+                                            output_socket,
+                                            r_uses_scene_depth,
+                                            r_uses_scene_normal,
+                                            r_uses_scene_position,
+                                            r_uses_cryptomatte_object);
 
   for (const bNodeSocket *socket : node->input_sockets()) {
     for (const bNodeLink *link : socket->directly_linked_links()) {

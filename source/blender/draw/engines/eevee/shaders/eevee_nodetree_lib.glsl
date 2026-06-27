@@ -32,6 +32,7 @@ SHADER_LIBRARY_CREATE_INFO(eevee_hiz_data)
 void input_aov_impl(uint hash, out TextureHandle color, out TextureHandle value);
 float4 TextureHandle_eval(TextureHandle tex, float2 offset, bool texel_offset);
 float4 TextureHandle_eval(TextureHandle tex);
+float4 TextureHandle_eval_uv(TextureHandle tex, float2 uv);
 #endif
 
 #ifdef NPR_SHADER

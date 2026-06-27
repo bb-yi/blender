@@ -36,6 +36,7 @@
 #include "BLI_math_vector.h"
 #include "BLI_string.h"
 #include "BLI_sys_types.h"
+#include "BLI_vector.hh"
 
 #include "BKE_asset.hh"
 #include "BKE_attribute_legacy_convert.hh"
@@ -800,6 +801,182 @@ static void version_replace_outline_control_width_variation(Main *bmain)
   FOREACH_NODETREE_END;
 }
 
+static const char *version_scene_color_image_identifier(const int source)
+{
+  switch (source) {
+    case SHD_SCENE_SOURCE_DEPTH:
+      return "Depth Image";
+    case SHD_SCENE_SOURCE_NORMAL:
+      return "Normal Image";
+    case SHD_SCENE_SOURCE_POSITION:
+      return "Position Image";
+    default:
+      return "Color Image";
+  }
+}
+
+static bNodeSocket &version_ensure_scene_color_image_output(bNodeTree &ntree,
+                                                            bNode &node,
+                                                            const char *identifier)
+{
+  if (bNodeSocket *socket = bke::node_find_socket(node, SOCK_OUT, identifier)) {
+    return *socket;
+  }
+  return version_node_add_socket(ntree, node, SOCK_OUT, "NodeSocketImage", identifier);
+}
+
+static void version_rename_npr_image_sample_vector_socket(bNode &node)
+{
+  if (node.type_legacy != SH_NODE_NPR_IMAGE_SAMPLE &&
+      !STREQ(node.idname, "ShaderNodeNPR_ImageSample"))
+  {
+    return;
+  }
+
+  for (bNodeSocket *socket = static_cast<bNodeSocket *>(node.inputs.first); socket != nullptr;
+       socket = socket->next)
+  {
+    if (STREQ(socket->identifier, "Offset")) {
+      STRNCPY(socket->identifier, "Vector");
+    }
+    if (STREQ(socket->name, "Offset")) {
+      STRNCPY(socket->name, "Vector");
+    }
+  }
+}
+
+static void version_convert_scene_color_node(bNodeTree &ntree, bNode &scene_color_node)
+{
+  bNodeSocket *old_color = bke::node_find_socket(scene_color_node, SOCK_OUT, "Color");
+  bNodeSocket *old_alpha = bke::node_find_socket(scene_color_node, SOCK_OUT, "Alpha");
+  bNodeSocket *old_vector = bke::node_find_socket(scene_color_node, SOCK_IN, "Vector");
+
+  bNodeSocket &color_image = version_ensure_scene_color_image_output(
+      ntree, scene_color_node, "Color Image");
+  version_ensure_scene_color_image_output(ntree, scene_color_node, "Depth Image");
+  version_ensure_scene_color_image_output(ntree, scene_color_node, "Normal Image");
+  version_ensure_scene_color_image_output(ntree, scene_color_node, "Position Image");
+
+  if (old_color == nullptr) {
+    return;
+  }
+
+  const int old_source = scene_color_node.custom1;
+  bNodeSocket *selected_image = &color_image;
+  if (old_source != SHD_SCENE_SOURCE_COLOR) {
+    selected_image = bke::node_find_socket(
+        scene_color_node, SOCK_OUT, version_scene_color_image_identifier(old_source));
+  }
+  BLI_assert(selected_image != nullptr);
+
+  struct LinkTarget {
+    bNode *tonode;
+    bNodeSocket *tosock;
+  };
+  struct LinkSource {
+    bNode *fromnode;
+    bNodeSocket *fromsock;
+  };
+
+  Vector<LinkTarget> color_targets;
+  Vector<LinkTarget> alpha_targets;
+  LinkSource vector_source = {nullptr, nullptr};
+  Vector<bNodeLink *> links_to_remove;
+
+  if (old_vector != nullptr) {
+    for (bNodeLink &link : ntree.links) {
+      if (link.tosock == old_vector && link.tonode == &scene_color_node) {
+        vector_source = {link.fromnode, link.fromsock};
+        links_to_remove.append(&link);
+        break;
+      }
+    }
+  }
+
+  for (bNodeLink &link : ntree.links) {
+    if (link.fromsock == old_color && link.fromnode == &scene_color_node) {
+      color_targets.append({link.tonode, link.tosock});
+      links_to_remove.append(&link);
+    }
+    else if (old_alpha != nullptr && link.fromsock == old_alpha &&
+             link.fromnode == &scene_color_node)
+    {
+      alpha_targets.append({link.tonode, link.tosock});
+      links_to_remove.append(&link);
+    }
+  }
+
+  for (bNodeLink *link : links_to_remove) {
+    bke::node_remove_link(&ntree, *link);
+  }
+
+  if (!color_targets.is_empty() || !alpha_targets.is_empty()) {
+    bNode &sample_node = version_node_add_empty(ntree, "ShaderNodeNPR_ImageSample");
+    sample_node.location[0] = scene_color_node.location[0] + scene_color_node.width + 20.0f;
+    sample_node.location[1] = scene_color_node.location[1];
+    sample_node.custom1 = (vector_source.fromnode != nullptr) ? SHD_IMG_SAMPLE_OFFSET_UV :
+                                                                SHD_IMG_SAMPLE_OFFSET_VIEW;
+
+    bNodeSocket &sample_image_in = version_node_add_socket(
+        ntree, sample_node, SOCK_IN, "NodeSocketImage", "Image");
+    bNodeSocket &sample_vector_in = version_node_add_socket(
+        ntree, sample_node, SOCK_IN, "NodeSocketVector", "Vector");
+    bNodeSocket &sample_color_out = version_node_add_socket(
+        ntree, sample_node, SOCK_OUT, "NodeSocketColor", "Color");
+    bNodeSocket &sample_alpha_out = version_node_add_socket(
+        ntree, sample_node, SOCK_OUT, "NodeSocketFloat", "Alpha");
+
+    version_node_add_link(ntree, scene_color_node, *selected_image, sample_node, sample_image_in);
+
+    if (vector_source.fromnode != nullptr && vector_source.fromsock != nullptr) {
+      version_node_add_link(
+          ntree, *vector_source.fromnode, *vector_source.fromsock, sample_node, sample_vector_in);
+    }
+
+    for (const LinkTarget &target : color_targets) {
+      if (target.tonode != nullptr && target.tosock != nullptr) {
+        version_node_add_link(ntree, sample_node, sample_color_out, *target.tonode, *target.tosock);
+      }
+    }
+    for (const LinkTarget &target : alpha_targets) {
+      if (target.tonode != nullptr && target.tosock != nullptr) {
+        version_node_add_link(ntree, sample_node, sample_alpha_out, *target.tonode, *target.tosock);
+      }
+    }
+  }
+
+  if (old_vector != nullptr) {
+    bke::node_remove_socket(ntree, scene_color_node, *old_vector);
+  }
+  if (old_alpha != nullptr) {
+    bke::node_remove_socket(ntree, scene_color_node, *old_alpha);
+  }
+  bke::node_remove_socket(ntree, scene_color_node, *old_color);
+  scene_color_node.custom1 = SHD_SCENE_SOURCE_COLOR;
+}
+
+static void version_scene_color_image_handle_nodes(Main *bmain)
+{
+  FOREACH_NODETREE_BEGIN (bmain, ntree, id) {
+    if (ntree->type != NTREE_SHADER) {
+      continue;
+    }
+
+    Vector<bNode *> scene_color_nodes;
+    for (bNode &node : ntree->nodes) {
+      version_rename_npr_image_sample_vector_socket(node);
+      if (node.type_legacy == SH_NODE_SCENE_COLOR || STREQ(node.idname, "ShaderNodeSceneColor")) {
+        scene_color_nodes.append(&node);
+      }
+    }
+
+    for (bNode *node : scene_color_nodes) {
+      version_convert_scene_color_node(*ntree, *node);
+    }
+  }
+  FOREACH_NODETREE_END;
+}
+
 void do_versions_after_linking_510(FileData *fd, Main *bmain)
 {
   /* Some blend files were saved with an invalid active viewer key, possibly due to a bug that
@@ -1246,6 +1423,10 @@ void blo_do_versions_510(FileData *fd, Library * /*lib*/, Main *bmain)
 
   if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 52)) {
     version_replace_outline_control_width_variation(bmain);
+  }
+
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 53)) {
+    version_scene_color_image_handle_nodes(bmain);
   }
 
   if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 47)) {

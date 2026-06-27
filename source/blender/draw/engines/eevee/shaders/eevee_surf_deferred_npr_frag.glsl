@@ -243,6 +243,21 @@ float4 TextureHandle_eval(TextureHandle tex)
   return TextureHandle_eval(tex, float2(0.0f), true);
 }
 
+float4 TextureHandle_eval_uv(TextureHandle tex, float2 uv)
+{
+  if (tex.type == TEX_HANDLE_NULL) {
+    return float4(0.0f);
+  }
+  /* NPR domain: convert absolute UV to a texel delta from the current fragment,
+   * then reuse the texel-offset path. This is an approximation since the NPR
+   * domain samples radiance/gbuffer buffers that don't have a direct UV path. */
+  int2 extent = textureSize(radiance_tx, 0);
+  int2 target_texel = int2(clamp(uv, float2(0.0f), float2(1.0f)) * float2(extent));
+  int2 frag_texel = int2(gl_FragCoord.xy);
+  int2 delta = target_texel - frag_texel;
+  return TextureHandle_eval(tex, float2(delta), true);
+}
+
 #ifndef FOREACH_LIGHT_BEGIN
 #ifdef MAT_NPR_LIGHTING
 bool npr_is_zero(float3 value)

@@ -8254,6 +8254,7 @@ static void def_sh_image_sample(BlenderRNA * /*brna*/, StructRNA *srna)
   static const EnumPropertyItem offset_type_items[] = {
       {SHD_IMG_SAMPLE_OFFSET_VIEW, "VIEW", 0, "View", "Offset in View Space coordinates"},
       {SHD_IMG_SAMPLE_OFFSET_PIXEL, "PIXEL", 0, "Pixel", "Offset in Pixel coordinates"},
+      {SHD_IMG_SAMPLE_OFFSET_UV, "UV", 0, "UV", "Absolute UV coordinates (0-1)"},
       {0, nullptr, 0, nullptr, nullptr},
   };
 
@@ -8262,7 +8263,7 @@ static void def_sh_image_sample(BlenderRNA * /*brna*/, StructRNA *srna)
   prop = RNA_def_property(srna, "offset_type", PROP_ENUM, PROP_NONE);
   RNA_def_property_enum_sdna(prop, nullptr, "custom1");
   RNA_def_property_enum_items(prop, offset_type_items);
-  RNA_def_property_ui_text(prop, "Type", "Type of the sampling offset");
+  RNA_def_property_ui_text(prop, "Type", "Type of the sampling coordinates");
   RNA_def_property_update(prop, 0, "rna_Node_update");
 }
 
@@ -8659,40 +8660,10 @@ static void def_sh_shader_info(BlenderRNA * /*brna*/, StructRNA *srna)
   RNA_def_struct_sdna_from(srna, "bNode", nullptr);
 }
 
-static void def_sh_scene_color(BlenderRNA * /*brna*/, StructRNA *srna)
+static void def_sh_scene_color(BlenderRNA * /*brna*/, StructRNA * /*srna*/)
 {
-  static const EnumPropertyItem scene_source_items[] = {
-      {SHD_SCENE_SOURCE_COLOR,
-       "COLOR",
-       0,
-       "Color",
-       "Sample the resolved Eevee scene color"},
-      {SHD_SCENE_SOURCE_DEPTH,
-       "DEPTH",
-       0,
-       "Depth",
-       "Sample scene depth as linear distance from the camera"},
-      {SHD_SCENE_SOURCE_NORMAL,
-       "NORMAL",
-       0,
-       "Normal",
-       "Sample the Eevee scene normal render pass"},
-      {SHD_SCENE_SOURCE_POSITION,
-       "POSITION",
-       0,
-       "Position",
-       "Sample the Eevee scene world position render pass"},
-      {0, nullptr, 0, nullptr, nullptr},
-  };
-
-  PropertyRNA *prop;
-
-  prop = RNA_def_property(srna, "source", PROP_ENUM, PROP_NONE);
-  RNA_def_property_enum_sdna(prop, nullptr, "custom1");
-  RNA_def_property_enum_items(prop, scene_source_items);
-  RNA_def_property_enum_default(prop, SHD_SCENE_SOURCE_COLOR);
-  RNA_def_property_ui_text(prop, "Source", "Which scene buffer to sample");
-  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+  /* Scene Color now emits four Image handles (Color/Depth/Normal/Position).
+   * The legacy `source` enum and `custom1` field are no longer used. */
 }
 
 static void def_cmp_convert_to_display(BlenderRNA * /*brna*/, StructRNA *srna)

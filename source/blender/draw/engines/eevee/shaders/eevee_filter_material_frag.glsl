@@ -59,7 +59,6 @@ float4 TextureHandle_eval(TextureHandle tex, float2 offset, bool texel_offset)
                       float2(1.0f));
     texel = int2(uv * float2(extent));
   }
-
   texel = clamp(texel, int2(0), extent - int2(1));
 
   switch (tex.type) {
@@ -67,6 +66,26 @@ float4 TextureHandle_eval(TextureHandle tex, float2 offset, bool texel_offset)
       return texelFetch(rp_color_tx, int3(texel, int(tex.index)), 0);
     case TEX_HANDLE_RP_VALUE:
       return float4(texelFetch(rp_value_tx, int3(texel, int(tex.index)), 0).rrr, 1.0f);
+    case TEX_HANDLE_SCENE:
+      if (tex.index == 0) {
+        /* Return raw scene color. Alpha (transmittance) inversion is handled
+         * by the Image Sample node, matching the original Scene Color behavior. */
+        return texelFetch(scene_color_tx, texel, 0);
+      }
+      if (tex.index == 1) {
+        float2 uv = (float2(texel) + 0.5f) / float2(extent);
+        float depth = -drw_depth_screen_to_view(1.0f - texture(depth_tx, uv).r);
+        return float4(depth, depth, depth, 1.0f);
+      }
+      if (tex.index == 2 && uniform_buf.render_pass.normal_id >= 0) {
+        return float4(texelFetch(rp_color_tx, int3(texel, uniform_buf.render_pass.normal_id), 0).rgb,
+                      1.0f);
+      }
+      if (tex.index == 4 && uniform_buf.render_pass.position_id >= 0) {
+        return float4(texelFetch(rp_color_tx, int3(texel, uniform_buf.render_pass.position_id), 0).rgb,
+                      1.0f);
+      }
+      return float4(0.0f);
     default:
       return float4(0.0f);
   }
@@ -75,6 +94,45 @@ float4 TextureHandle_eval(TextureHandle tex, float2 offset, bool texel_offset)
 float4 TextureHandle_eval(TextureHandle tex)
 {
   return TextureHandle_eval(tex, float2(0.0f), true);
+}
+
+/* Absolute UV sampling: use the provided uv directly (0-1 range), ignoring
+ * gl_FragCoord. Enables procedural coordinate sampling (Voronoi, screen
+ * coordinate nodes, etc.), matching the old Scene Color Vector input. */
+float4 TextureHandle_eval_uv(TextureHandle tex, float2 uv)
+{
+  if (tex.type == TEX_HANDLE_NULL) {
+    return float4(0.0f);
+  }
+
+  int2 extent = textureSize(scene_color_tx, 0);
+  uv = clamp(uv, float2(0.0f), float2(1.0f));
+  int2 texel = clamp(int2(uv * float2(extent)), int2(0), extent - int2(1));
+  switch (tex.type) {
+    case TEX_HANDLE_RP_COLOR:
+      return texelFetch(rp_color_tx, int3(texel, int(tex.index)), 0);
+    case TEX_HANDLE_RP_VALUE:
+      return float4(texelFetch(rp_value_tx, int3(texel, int(tex.index)), 0).rrr, 1.0f);
+    case TEX_HANDLE_SCENE:
+      if (tex.index == 0) {
+        return texelFetch(scene_color_tx, texel, 0);
+      }
+      if (tex.index == 1) {
+        float depth = -drw_depth_screen_to_view(1.0f - texture(depth_tx, uv).r);
+        return float4(depth, depth, depth, 1.0f);
+      }
+      if (tex.index == 2 && uniform_buf.render_pass.normal_id >= 0) {
+        return float4(texelFetch(rp_color_tx, int3(texel, uniform_buf.render_pass.normal_id), 0).rgb,
+                      1.0f);
+      }
+      if (tex.index == 4 && uniform_buf.render_pass.position_id >= 0) {
+        return float4(texelFetch(rp_color_tx, int3(texel, uniform_buf.render_pass.position_id), 0).rgb,
+                      1.0f);
+      }
+      return float4(0.0f);
+    default:
+      return float4(0.0f);
+  }
 }
 
 void main()
