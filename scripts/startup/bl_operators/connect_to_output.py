@@ -114,10 +114,18 @@ class NODE_OT_connect_to_output(Operator, NodeEditorBase):
                 next_node = link.from_node
                 external_socket = link.from_socket
                 if hasattr(next_node, "node_tree"):
-                    for socket_index, socket in enumerate(next_node.node_tree.interface.items_tree):
+                    socket_index = -1
+                    socket = None
+                    for item in next_node.node_tree.interface.items_tree:
+                        if not hasattr(item, "identifier"):
+                            continue
+                        socket_index += 1
                         # Find inside socket matching outside one.
-                        if socket.identifier == external_socket.identifier:
+                        if item.identifier == external_socket.identifier:
+                            socket = item
                             break
+                    if socket is None:
+                        continue
                     if socket.is_inspect_output and socket not in r_sockets:
                         r_sockets.append(socket)
                         # Continue search inside of node group but restrict socket to where we came from.
