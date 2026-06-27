@@ -79,6 +79,8 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.add_output<decl::Float>("Sun Angle")
       .description("Sun angular diameter in radians")
       .available(false);
+  b.add_output<decl::Float>("Visible")
+      .description("Outputs 1 when the selected light object is not hidden, otherwise 0");
 }
 
 static void node_shader_buts_light_info(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
@@ -154,6 +156,11 @@ static void node_shader_light_info_values(const Object &light_object,
   }
 }
 
+static float node_shader_light_info_visible(const Object &light_object)
+{
+  return (light_object.visibility_flag & (OB_HIDE_VIEWPORT | OB_HIDE_RENDER)) == 0 ? 1.0f : 0.0f;
+}
+
 static int node_shader_gpu_light_info(GPUMaterial *mat,
                                       bNode *node,
                                       bNodeExecData * /*execdata*/,
@@ -161,6 +168,7 @@ static int node_shader_gpu_light_info(GPUMaterial *mat,
                                       GPUNodeStack *out)
 {
   static const float zero = 0.0f;
+  static const float one = 1.0f;
   static const float invalid_type = float(NODE_LIGHT_INFO_TYPE_NONE);
   static const float zero_color[3] = {0.0f, 0.0f, 0.0f};
   static const float zero_vector[3] = {0.0f, 0.0f, 0.0f};
@@ -173,11 +181,13 @@ static int node_shader_gpu_light_info(GPUMaterial *mat,
   GPUNodeLink *radius_link = GPU_constant(&zero);
   GPUNodeLink *spot_size_link = GPU_constant(&zero);
   GPUNodeLink *sun_angle_link = GPU_constant(&zero);
+  GPUNodeLink *visible_link = GPU_constant(&zero);
   Object *light_object = reinterpret_cast<Object *>(node->id);
 
   if (light_object != nullptr && light_object->type == OB_LAMP && light_object->data != nullptr) {
     Light *light = id_cast<Light *>(light_object->data);
     const float output_type = float(node_light_info_output_type_value(light->type));
+    const float visible = node_shader_light_info_visible(*light_object);
     float3 position;
     float3 direction;
     float radius;
@@ -194,6 +204,7 @@ static int node_shader_gpu_light_info(GPUMaterial *mat,
     radius_link = GPU_uniform(&radius);
     spot_size_link = GPU_uniform(&spot_size);
     sun_angle_link = GPU_uniform(&sun_angle);
+    visible_link = visible > 0.0f ? GPU_constant(&one) : GPU_constant(&zero);
   }
 
   return GPU_stack_link(mat,
@@ -208,7 +219,8 @@ static int node_shader_gpu_light_info(GPUMaterial *mat,
                         direction_link,
                         radius_link,
                         spot_size_link,
-                        sun_angle_link);
+                        sun_angle_link,
+                        visible_link);
 }
 
 }  // namespace nodes::node_shader_light_info_cc
@@ -221,7 +233,8 @@ void register_node_type_sh_light_info()
 
   sh_node_type_base(&ntype, "ShaderNodeLightInfo", SH_NODE_LIGHT_INFO);
   ntype.ui_name = "Light Info";
-  ntype.ui_description = "Read flat color, power, transform, and size values from a chosen light";
+  ntype.ui_description =
+      "Read flat color, power, transform, visibility, and size values from a chosen light";
   ntype.enum_name_legacy = "LIGHTINFO";
   ntype.nclass = NODE_CLASS_INPUT;
   ntype.declare = file_ns::node_declare;

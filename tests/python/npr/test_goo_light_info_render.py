@@ -255,6 +255,34 @@ def assert_type_output_mapping():
     assert_scalar_close(pixel, 0.0, "Type output for unassigned light")
 
 
+def assert_visible_output():
+    clear_scene()
+    configure_scene()
+    make_camera()
+    light_object = make_light("LightInfoVisible")
+    make_plane(make_light_info_material(light_object, "Visible"))
+
+    pixel = render_center_pixel()
+    assert_scalar_close(pixel, 1.0, "Visible output for visible light")
+
+    light_object.hide_viewport = True
+    pixel = render_center_pixel()
+    assert_scalar_close(pixel, 0.0, "Visible output for hidden viewport light")
+
+    light_object.hide_viewport = False
+    light_object.hide_render = True
+    pixel = render_center_pixel()
+    assert_scalar_close(pixel, 0.0, "Visible output for hidden render light")
+
+    clear_scene()
+    configure_scene()
+    make_camera()
+    make_plane(make_light_info_material(None, "Visible"))
+
+    pixel = render_center_pixel()
+    assert_scalar_close(pixel, 0.0, "Visible output for unassigned light")
+
+
 def assert_unassigned_light_is_black():
     clear_scene()
     configure_scene()
@@ -372,6 +400,7 @@ assert_area_radius_output()
 assert_spot_size_output()
 assert_sun_angle_output()
 assert_type_output_mapping()
+assert_visible_output()
 assert_unassigned_light_is_black()
 assert_light_color_updates_without_relink()
 assert_light_power_updates_without_relink()
