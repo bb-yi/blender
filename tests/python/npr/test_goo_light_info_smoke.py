@@ -19,8 +19,10 @@ assert [socket.name for socket in node.outputs] == [
     "Radius",
     "Spot Size",
     "Sun Angle",
+    "Visible",
 ]
 assert node.outputs["Type"].type == "INT"
+assert node.outputs["Visible"].type == "VALUE"
 assert hasattr(node, "light_object"), "Light Info node should expose a light_object property"
 
 light_data = bpy.data.lights.new("LightInfoSmokeLight", type="POINT")
@@ -34,25 +36,34 @@ def enabled_outputs(shader_node):
     return {socket.name for socket in shader_node.outputs if socket.enabled}
 
 
-assert enabled_outputs(node) == {"Color", "Power", "Type", "Position", "Radius"}
+assert enabled_outputs(node) == {"Color", "Power", "Type", "Position", "Radius", "Visible"}
 
 light_data.type = "SUN"
-assert enabled_outputs(node) == {"Color", "Power", "Type", "Direction", "Sun Angle"}
+assert enabled_outputs(node) == {"Color", "Power", "Type", "Direction", "Sun Angle", "Visible"}
 
 spot_data = bpy.data.lights.new("LightInfoSmokeSpot", type="SPOT")
 spot_object = bpy.data.objects.new("LightInfoSmokeSpot", spot_data)
 node.light_object = spot_object
-assert enabled_outputs(node) == {"Color", "Power", "Type", "Position", "Direction", "Radius", "Spot Size"}
+assert enabled_outputs(node) == {
+    "Color",
+    "Power",
+    "Type",
+    "Position",
+    "Direction",
+    "Radius",
+    "Spot Size",
+    "Visible",
+}
 
 area_data = bpy.data.lights.new("LightInfoSmokeArea", type="AREA")
 area_object = bpy.data.objects.new("LightInfoSmokeArea", area_data)
 node.light_object = area_object
-assert enabled_outputs(node) == {"Color", "Power", "Type", "Position", "Direction", "Radius"}
+assert enabled_outputs(node) == {"Color", "Power", "Type", "Position", "Direction", "Radius", "Visible"}
 
 sun_data = bpy.data.lights.new("LightInfoSmokeSun", type="SUN")
 sun_object = bpy.data.objects.new("LightInfoSmokeSun", sun_data)
 node.light_object = sun_object
-assert enabled_outputs(node) == {"Color", "Power", "Type", "Direction", "Sun Angle"}
+assert enabled_outputs(node) == {"Color", "Power", "Type", "Direction", "Sun Angle", "Visible"}
 
 node.light_object = None
-assert enabled_outputs(node) == {"Color", "Power", "Type"}
+assert enabled_outputs(node) == {"Color", "Power", "Type", "Visible"}
