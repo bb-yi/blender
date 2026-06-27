@@ -999,6 +999,38 @@ class SlotAllocator {
   }
 };
 
+static bool create_info_contains_additional_info(
+    const gpu::shader::ShaderCreateInfo &info,
+    const StringRefNull create_info_name,
+    Set<StringRefNull> &visited_infos)
+{
+  using namespace blender::gpu::shader;
+
+  for (const ShaderCreateInfo::AdditionalInfo &additional_info : info.additional_infos_) {
+    if (additional_info.name == create_info_name) {
+      return true;
+    }
+    if (!visited_infos.add(additional_info.name)) {
+      continue;
+    }
+    const ShaderCreateInfo *nested_info = reinterpret_cast<const ShaderCreateInfo *>(
+        GPU_shader_create_info_get(additional_info.name.c_str()));
+    if (nested_info != nullptr &&
+        create_info_contains_additional_info(*nested_info, create_info_name, visited_infos))
+    {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool create_info_contains_additional_info(const gpu::shader::ShaderCreateInfo &info,
+                                                 const StringRefNull create_info_name)
+{
+  Set<StringRefNull> visited_infos;
+  return create_info_contains_additional_info(info, create_info_name, visited_infos);
+}
+
 static void add_create_info_and_reserve(gpu::shader::ShaderCreateInfo &info,
                                         SlotAllocator &slots,
                                         StringRefNull create_info_name)
@@ -1009,9 +1041,11 @@ static void add_create_info_and_reserve(gpu::shader::ShaderCreateInfo &info,
     return;
   }
 
-  info.additional_info(create_info_name);
   const ShaderCreateInfo *create_info = reinterpret_cast<const ShaderCreateInfo *>(
       GPU_shader_create_info_get(create_info_name.c_str()));
+  if (!create_info_contains_additional_info(info, create_info_name)) {
+    info.additional_info(create_info_name);
+  }
   slots.reserve_slots(*create_info);
 }
 
