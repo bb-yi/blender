@@ -31,6 +31,9 @@
   - `vec2`
   - `vec3`
   - `vec4`
+  - `mat2`
+  - `mat3`
+  - `mat4`
   - `sampler2D`
 - 输出参数 `out`
   - `float`
@@ -39,6 +42,9 @@
   - `vec2`
   - `vec3`
   - `vec4`
+  - `mat2`
+  - `mat3`
+  - `mat4`
 - 返回值
   - `void`
   - `float`
@@ -47,12 +53,16 @@
   - `vec2`
   - `vec3`
   - `vec4`
+  - `mat2`
+  - `mat3`
+  - `mat4`
 
 ### 2. 当前不支持的函数接口写法
 
 - `inout`
 - `out sampler2D`
-- `mat*` / `struct` / `array` 作为函数边界类型
+- `struct` / `array` 作为函数边界类型
+- 非方阵矩阵（例如 `mat2x3`）作为函数边界类型
 - 多返回值结构体
 - 递归
 - 依赖外部运行时注入的全局 uniform 体系
@@ -67,9 +77,10 @@
 - 如果函数依赖显式 `LOD`、`grad` 或尺寸查询等图像专用能力，应优先使用 `Image to Closure`
 - 导出函数边界当前已经支持 `int / bool`，适合直接作为模式开关、枚举值、`lightgroup_id` 这类参数
 - 默认情况下 `vec2/vec3/vec4` 仍然显示为“向量插口”
-- 只有显式写了 `subtype=color` 的 `vec3/vec4` 输入，才会显示为颜色插口
+- 只有显式写了 `subtype=color` 的 `vec3` 输入，才会显示为颜色插口
 - `vec3 + subtype=color` 会显示为颜色插口，内部按 `rgb` 使用，`alpha` 固定为 `1.0`
-- `vec4 + subtype=color` 会显示为颜色插口，并保留 `rgba`
+- `vec4` 输入会显示为 `vec3 + float W` 两个插口，并在 GLSL wrapper 内重组为 `vec4`
+- `mat2/mat3/mat4` 边界会按列拆分为多个向量插口；`mat4` 的每列会进一步拆成 `vec3 + float W`
 
 ### 4. 内部实现和边界接口要区分
 
@@ -89,7 +100,7 @@
 也就是说：
 
 - “函数内部”可以相对自由
-- “节点导出函数的参数和返回值”必须严格受限
+- “节点导出函数的参数和返回值”必须使用上方支持的边界类型
 - “辅助函数”不必都遵守导出函数的边界类型限制；真正必须满足限制的是节点 `Function` 最终选中的那个函数
 - 因此辅助函数里可以出现 `bool` / `int` / `mat*` / 非方阵矩阵 / 更自由的 `out` 参数组合，但最终报告里必须再次明确真正要调用的是哪个导出函数
 
@@ -151,7 +162,7 @@ Meta 必须覆盖导出函数的公开接口：
 - 每个输入参数都应有一行 Meta，说明 `label` 和必要的 `description`
 - 数值调节参数应尽量写 `default`，并在语义明确时写 `min` / `max`
 - `0..1` 混合、阈值、强度、柔和度等参数应优先写 `subtype=factor`
-- 颜色参数 `vec3` / `vec4` 应写 `subtype=color`
+- 颜色参数优先用 `vec3` 并写 `subtype=color`；需要 alpha 时使用 `vec4` 或拆成 `vec3 color + float alpha`
 - 坐标、方向、比例等向量参数应写清楚语义；不要给方向/法线参数写 `subtype=direction`，这个 subtype 会触发不友好的球形方向控件；需要普通三轴向量 UI 时用 `subtype=xyz` 或省略 subtype
 - 固定模式类 `int` 参数应优先写 `items="0:Label;1:Other"`，让默认值显示成下拉菜单；只有连续数值范围才用普通 `min/max` 整数框
 - `items` 下拉默认隐藏前置参数名，只显示当前选项；当同一行没有足够上下文或面板里有多个相似下拉时，再写 `show_label=true`
@@ -802,14 +813,39 @@ float test(float mode, float enabled)
 }
 ```
 
-### 2. `mat*` 不能作为节点接口
+### 2. 方阵矩阵可以作为节点接口，非方阵仍要改写
 
-不要把矩阵暴露为函数参数或返回值。
+当前 `GLSL Function` 的公开边界已经支持 `mat2`、`mat3`、`mat4`，可以直接作为输入参数、`out` 参数或返回值使用。节点 UI 会按 GLSL 列主序把它们拆成多组插口：
 
-应改成：
+- `mat2` -> `C1`、`C2` 两个 `vec2`
+- `mat3` -> `C1`、`C2`、`C3` 三个 `vec3`
+- `mat4` -> `C1`、`C2`、`C3`、`C4` 四列，每列拆成 `vec3 + W float`
 
-- 传入需要的若干 `vec*`
-- 或在函数内部自己构造矩阵
+因此这类方阵接口不需要再为了节点边界强行拆成多个独立函数参数：
+
+```glsl
+/* @glsl_meta v1
+transform: label="Transform" description="Column-major transform matrix"
+out_basis: label="Basis"
+*/
+mat4 matrix_boundary_example(mat4 transform, out mat3 out_basis)
+{
+  out_basis = mat3(transform);
+  return transform;
+}
+```
+
+但仍然不要把下列类型作为公开边界：
+
+- `mat2x3`、`mat3x2`、`mat4x3` 等非方阵矩阵
+- `struct` / `array`
+- 方向语义很难读清的混合矩阵边界
+
+这类情况应改成：
+
+- 展开为语义明确的 `vec2` / `vec3` / `vec4` 参数
+- 或把矩阵保留在函数内部/辅助函数内部构造
+- 或用 `dot(...)` helper 明确表达投影方向
 
 ### 3. 多返回值不要用结构体
 
@@ -1304,7 +1340,7 @@ vec2 triangle_unproject(vec3 v)
 4. Meta 要覆盖每个输入参数和 out 参数：输入参数写 label/description 和必要的 default/min/max/subtype；sampler2D 只写 label/description/panel；out 参数只写 label；返回值不支持 Meta，必须在 Outputs 中说明。
 5. 参数超过 4 个或语义能自然分组时，使用一级 `@panel` / `@end_panel` 分组，panel 必须闭合。
 6. 把所有外部 uniform / 时间 / 分辨率 / 鼠标 / 贴图输入改成函数参数。
-7. 导出函数的参数和返回值只允许使用 float、int、bool、vec2、vec3、vec4、sampler2D，以及 out float/int/bool/vec2/vec3/vec4。
+7. 导出函数的参数和返回值只允许使用 float、int、bool、vec2、vec3、vec4、mat2、mat3、mat4、sampler2D，以及 out float/int/bool/vec2/vec3/vec4/mat2/mat3/mat4。
 8. 不允许使用 inout，也不允许 out sampler2D。
 9. 如果来源是 HLSL 或 ShaderLab，去掉语义、Pass、Properties、pragma 和引擎包装层。
 10. 贴图采样优先改成 `texture(tex, uv)`；如果原算法明确依赖显式 `LOD`，可以保留为 `textureLod(tex, uv, lod)`，并说明这更适合配合 `Image to Closure`。
@@ -1395,7 +1431,7 @@ Meta 只会作用到它正下方那个函数。
 - `int` / `bool` 开关：写清楚 `label`、`default` 和 `description`；如果 `int` 是固定模式枚举，优先写 `items`
 - `int items` 下拉：默认不写 `show_label`，让控件只显示当前选项；当下拉项离开上下文会难以理解时写 `show_label=true`
 - `vec2` 坐标、偏移、比例：写 `label`、`default=vec2(...)` 和 `description`
-- `vec3` / `vec4` 颜色：写 `subtype=color`，并给出颜色默认值
+- `vec3` 颜色：写 `subtype=color`，并给出颜色默认值；需要 alpha 时用 `vec4`，它会拆成 `vec3 + float W`
 - `vec3` 方向、法线、位置：不要误标为颜色；用 `description` 写清楚空间语义；不要使用 `subtype=direction`，需要普通三轴输入时用 `subtype=xyz` 或省略 subtype
 - `sampler2D`：只写 `label` 和 `description`，必要时放进 `@panel`
 - `out` 参数：只写 `label`；不要写 `default/min/max/subtype/description`
@@ -1446,6 +1482,7 @@ stylize.tint: default=vec3(1.0, 0.8, 0.2)
 - `float` 使用标量
 - `vec2/vec3/vec4` 使用对应构造器
 - `float/vec2/vec3/vec4` 也可以直接写 GLSL 表达式默认值
+- `mat2/mat3/mat4` 当前不支持 Meta 默认值；节点会生成按列拆分的输入插口
 - 当 `default=` 是表达式时，socket 未连接会使用这段表达式；一旦连线，就使用连线值
 - 当 `default=` 是表达式时，节点会自动隐藏这个输入的数值输入框，但保留 socket 本身
 - 表达式默认值可以引用同一份源码里的 top-level helper 函数，也可以直接调用 `glsl_position()`、`glsl_normal()`、`glsl_ambient_lighting()` 这类内置 helper
@@ -1570,7 +1607,7 @@ vec4 subsurface_mode(vec4 color, int method)
 - `acceleration`
 - `euler`
 - `xyz`
-- `color`（仅 `vec3/vec4`，会显示为颜色插口）
+- `color`（`vec3` 会显示为颜色插口；`vec4` 可解析但仍会拆成 `vec3 + float W`）
 
 示例：
 
@@ -1579,7 +1616,7 @@ strength: default=0.5 min=0.0 max=1.0 subtype=factor
 offset: default=vec3(0.0) subtype=translation
 normal_dir: default=vec3(0.0, 0.0, 1.0) subtype=xyz
 tint: default=vec3(1.0, 0.8, 0.2) subtype=color
-overlay: default=vec4(1.0, 0.8, 0.2, 0.5) subtype=color
+overlay: default=vec4(1.0, 0.8, 0.2, 0.5)
 ```
 
 `direction` 虽然是 Blender 的向量 subtype，但它会在节点 UI 中显示成球形方向控件，不适合 GLSL Function 自动生成的方向、法线、视线、切线参数；这类参数应靠 `label` / `description` 写清楚坐标空间，并使用 `subtype=xyz` 或不写 subtype。
@@ -1614,7 +1651,7 @@ strength: default=0.5 hide_value=true
 这适合把必须保持合法 GLSL 标识符的参数名显示成中文或更易读的名称：
 
 ```glsl
-base_color: label="基础色" default=vec4(1.0, 1.0, 1.0, 1.0) subtype=color
+base_color: label="基础色" default=vec4(1.0, 1.0, 1.0, 1.0)
 tex: label="贴图"
 out_color: label="输出色"
 ```
@@ -1717,9 +1754,9 @@ vec3 shader(
 - `subtype=factor` 会让 float 输入变成 `NodeSocketFloatFactor`
 - `subtype=xyz` 会让 vector 输入变成 `NodeSocketVectorXYZ`
 - `vec3/vec4` 默认仍然是向量输入，不会自动变成颜色输入
-- `subtype=color` 会让 `vec3/vec4` 输入变成 `NodeSocketColor`
+- `subtype=color` 会让 `vec3` 输入变成 `NodeSocketColor`
 - `vec3 + subtype=color` 进入 GLSL 函数时只使用 `rgb`
-- `vec4 + subtype=color` 进入 GLSL 函数时会保留 `rgba`
+- `vec4` 输入会拆成 `vec3 + float W`，进入 GLSL 函数时会重组为完整 `rgba`
 - `label="..."` 会显示为 socket 名称，不影响 GLSL 参数名、identifier 或计算
 - `description="..."` 会显示在 socket tooltip 中，不影响计算
 
@@ -1731,7 +1768,8 @@ vec3 shader(
 - 不支持返回值 Meta
 - 不支持 `inout`
 - `sampler2D` 只支持 `label`、`description` 和 panel 分组，不支持默认值、范围、隐藏值或 subtype
-- 不支持 `mat*` / `struct` / `array` 边界参数 Meta
+- `mat2/mat3/mat4` 边界参数的 Meta 只建议写 `label/description/panel`，不要写 `default/min/max/subtype`
+- 不支持 `struct` / `array` 边界参数 Meta
 - panel 只支持一级，不支持嵌套
 - panel 必须显式 `@end_panel` 关闭
 - 表达式默认值当前只支持输入参数 `float / vec2 / vec3 / vec4`

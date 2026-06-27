@@ -146,7 +146,7 @@ class GLSLFunctionNodeTest(unittest.TestCase):
 
         self.assertEqual(node.parse_status, 'ERROR')
 
-    def test_vec4_input_uses_four_dimensional_vector_socket(self):
+    def test_vec4_input_splits_xyz_and_w_sockets(self):
         _, tree = self.make_material_tree()
         node = tree.nodes.new("ShaderNodeGLSLFunction")
         source = (
@@ -163,15 +163,90 @@ class GLSLFunctionNodeTest(unittest.TestCase):
 
         self.assertEqual(node.parse_status, 'READY')
         color_socket = find_socket(node.inputs, "color")
-        self.assertEqual(color_socket.bl_idname, "NodeSocketVector4D")
-        self.assertEqual(len(color_socket.default_value), 4)
-        self.assertAlmostEqual(color_socket.default_value[3], 0.4)
+        color_w_socket = find_socket(node.inputs, "In_color_w")
+        self.assertEqual(color_socket.bl_idname, "NodeSocketVector")
+        self.assertEqual(len(color_socket.default_value), 3)
+        self.assertEqual(color_w_socket.bl_idname, "NodeSocketFloat")
+        self.assertAlmostEqual(color_socket.default_value[0], 0.1)
+        self.assertAlmostEqual(color_socket.default_value[1], 0.2)
+        self.assertAlmostEqual(color_socket.default_value[2], 0.3)
+        self.assertAlmostEqual(color_w_socket.default_value, 0.4)
 
-        color_socket.default_value = (0.0, 0.0, 0.0, 0.0)
+        color_socket.default_value = (0.0, 0.0, 0.0)
+        color_w_socket.default_value = 0.0
         refresh_glsl_node(node)
 
         self.assertEqual(node.parse_status, 'READY')
-        self.assertAlmostEqual(find_socket(node.inputs, "color").default_value[3], 0.0)
+        self.assertAlmostEqual(find_socket(node.inputs, "color").default_value[0], 0.0)
+        self.assertAlmostEqual(find_socket(node.inputs, "In_color_w").default_value, 0.0)
+
+    def test_matrix_boundaries_split_into_column_sockets(self):
+        _, tree = self.make_material_tree()
+        node = tree.nodes.new("ShaderNodeGLSLFunction")
+        source = (
+            "mat4 matrix_boundaries(mat2 m2, mat3 m3, mat4 m4, out mat3 out_m3){\n"
+            "  out_m3 = m3;\n"
+            "  return m4;\n"
+            "}\n"
+        )
+        make_text_block("glsl_matrix_boundaries.glsl", source)
+
+        self.configure_glsl_node(node, "glsl_matrix_boundaries.glsl", "matrix_boundaries")
+
+        self.assertEqual(node.parse_status, 'READY')
+        for column in range(2):
+            socket = find_socket(node.inputs, f"In_m2_c{column}")
+            self.assertEqual(socket.name, f"m2 C{column + 1}")
+            self.assertEqual(socket.bl_idname, "NodeSocketVector2D")
+            self.assertEqual(len(socket.default_value), 2)
+        for column in range(3):
+            socket = find_socket(node.inputs, f"In_m3_c{column}")
+            self.assertEqual(socket.name, f"m3 C{column + 1}")
+            self.assertEqual(socket.bl_idname, "NodeSocketVector")
+            self.assertEqual(len(socket.default_value), 3)
+            out_socket = find_socket(node.outputs, f"Out_out_m3_c{column}")
+            self.assertEqual(out_socket.name, f"out_m3 C{column + 1}")
+            self.assertEqual(out_socket.bl_idname, "NodeSocketVector")
+        for column in range(4):
+            socket = find_socket(node.inputs, f"In_m4_c{column}")
+            w_socket = find_socket(node.inputs, f"In_m4_c{column}_w")
+            result_socket = find_socket(node.outputs, f"Result_c{column}")
+            result_w_socket = find_socket(node.outputs, f"Result_c{column}_w")
+            self.assertEqual(socket.name, f"m4 C{column + 1}")
+            self.assertEqual(w_socket.name, f"m4 C{column + 1} W")
+            self.assertEqual(result_socket.name, f"Result C{column + 1}")
+            self.assertEqual(result_w_socket.name, f"Result C{column + 1} W")
+            self.assertEqual(socket.bl_idname, "NodeSocketVector")
+            self.assertEqual(w_socket.bl_idname, "NodeSocketFloat")
+            self.assertEqual(result_socket.bl_idname, "NodeSocketVector")
+            self.assertEqual(result_w_socket.bl_idname, "NodeSocketFloat")
+
+    def test_split_boundary_generated_identifier_collisions_error(self):
+        cases = [
+            (
+                "glsl_vec4_split_identifier_collision.glsl",
+                "vec4_collision",
+                "vec4 vec4_collision(vec4 color2, float color2_w){\n"
+                "  return color2 + vec4(vec3(color2_w), 0.0);\n"
+                "}\n",
+            ),
+            (
+                "glsl_mat4_split_identifier_collision.glsl",
+                "mat4_collision",
+                "mat4 mat4_collision(mat4 m4, float m4_c0_w){\n"
+                "  return m4 + mat4(vec4(vec3(m4_c0_w), 0.0), vec4(0.0), vec4(0.0), vec4(0.0));\n"
+                "}\n",
+            ),
+        ]
+        for text_name, function_name, source in cases:
+            with self.subTest(function_name=function_name):
+                _, tree = self.make_material_tree()
+                node = tree.nodes.new("ShaderNodeGLSLFunction")
+                make_text_block(text_name, source)
+
+                self.configure_glsl_node(node, text_name, function_name)
+
+                self.assertEqual(node.parse_status, 'ERROR')
 
     def test_image_sample2d_builds_color_output(self):
         _, tree = self.make_material_tree()
@@ -241,17 +316,25 @@ class GLSLFunctionNodeTest(unittest.TestCase):
 
         self.assertEqual(glsl_node.parse_status, 'READY')
         color_socket = find_socket(glsl_node.inputs, "In_color")
+        color_w_socket = find_socket(glsl_node.inputs, "In_color_w")
         tex_socket = find_socket(glsl_node.inputs, "In_tex")
         out_socket = find_socket(glsl_node.outputs, "Out_out_color")
+        out_w_socket = find_socket(glsl_node.outputs, "Out_out_color_w")
         self.assertEqual(color_socket.name, color_label)
+        self.assertEqual(color_w_socket.name, color_label + " W")
         self.assertEqual(tex_socket.name, texture_label)
         self.assertEqual(out_socket.name, output_label)
+        self.assertEqual(out_w_socket.name, output_label + " W")
         self.assertEqual(color_socket.identifier, "In_color")
+        self.assertEqual(color_w_socket.identifier, "In_color_w")
         self.assertEqual(tex_socket.identifier, "In_tex")
         self.assertEqual(out_socket.identifier, "Out_out_color")
-        self.assertEqual(color_socket.bl_idname, "NodeSocketVector4D")
+        self.assertEqual(out_w_socket.identifier, "Out_out_color_w")
+        self.assertEqual(color_socket.bl_idname, "NodeSocketVector")
+        self.assertEqual(color_w_socket.bl_idname, "NodeSocketFloat")
         self.assertEqual(tex_socket.bl_idname, "NodeSocketClosure")
         self.assertEqual(out_socket.bl_idname, "NodeSocketVector")
+        self.assertEqual(out_w_socket.bl_idname, "NodeSocketFloat")
 
     def test_defines_are_parsed_and_not_sockets(self):
         _, tree = self.make_material_tree()
