@@ -419,11 +419,15 @@ void LookdevModule::sync_pass(PassSimple &pass,
   pass.state_set(state);
   pass.material_set(*inst_.manager, gpumat, false, inst_.anisotropic_filtering);
   pass.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);
+  pass.bind_image(RBUFS_COLOR_SLOT, &dummy_aov_color_tx_);
+  pass.bind_image(RBUFS_VALUE_SLOT, &dummy_aov_value_tx_);
   pass.bind_resources(inst_.uniform_data);
   pass.bind_resources(inst_.lights);
+  inst_.lights.bind_front_light_shader_resources(pass);
   pass.bind_resources(inst_.shadows);
   pass.bind_resources(inst_.volume.result);
   pass.bind_resources(inst_.sampling);
+  pass.bind_resources(inst_.render_textures);
   pass.bind_resources(inst_.hiz_buffer.front);
   pass.bind_resources(inst_.volume_probes);
   pass.bind_resources(inst_.sphere_probes);

@@ -18,6 +18,10 @@ namespace nodes::node_shader_outline_control_cc {
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
+  /* Enable custom socket order so collapsible panels and resource bindings stay stable. */
+  b.use_custom_socket_order();
+  b.allow_any_socket_order();
+
   b.add_input<decl::Color>("Line Color"_ustr).default_value({0.0f, 0.0f, 0.0f, 1.0f});
   b.add_input<decl::Float>("Line Alpha"_ustr)
       .default_value(1.0f)

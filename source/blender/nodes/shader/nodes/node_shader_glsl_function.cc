@@ -6523,6 +6523,7 @@ vec3 glsl_ambient_lighting()
       if (use_declaration_panels)
       {
         b.use_custom_socket_order();
+        b.allow_any_socket_order();
       }
 
       auto add_output_declarations = [&]() {
