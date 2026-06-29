@@ -358,6 +358,12 @@ void LookdevModule::sync()
   const int2 extent = int2(calc_sphere_extent(viewport_scale));
 
   const gpu::TextureFormat color_format = gpu::TextureFormat::SFLOAT_16_16_16_16;
+  constexpr eGPUTextureUsage dummy_usage = GPU_TEXTURE_USAGE_SHADER_WRITE |
+                                           GPU_TEXTURE_USAGE_SHADER_READ;
+
+  /* Forward materials may write render-pass images when a viewport pass is selected. */
+  dummy_aov_color_tx_.ensure_2d_array(color_format, extent, 1, dummy_usage);
+  dummy_aov_value_tx_.ensure_2d_array(gpu::TextureFormat::SFLOAT_16, extent, 1, dummy_usage);
 
   for (int index : IndexRange(num_spheres)) {
     if (spheres_[index].color_tx_.ensure_2d(color_format, extent)) {
