@@ -47,9 +47,6 @@ class BindSpaceUniformBuffers {
 
   VKUniformBuffer *get(int binding) const
   {
-    if (binding >= bound_resources.size()) {
-      return nullptr;
-    }
     return bound_resources[binding];
   }
 
@@ -94,9 +91,6 @@ template<int Offset> class BindSpaceImages {
   {
     if (binding >= Offset) {
       binding -= Offset;
-    }
-    if (binding >= bound_resources.size()) {
-      return nullptr;
     }
     return bound_resources[binding];
   }
@@ -145,12 +139,9 @@ class BindSpaceStorageBuffers {
     bound_resources[binding].offset = offset;
   }
 
-  const Elem *get(int binding) const
+  const Elem &get(int binding) const
   {
-    if (binding >= bound_resources.size()) {
-      return nullptr;
-    }
-    return &bound_resources[binding];
+    return bound_resources[binding];
   }
 
   void unbind(void *resource)

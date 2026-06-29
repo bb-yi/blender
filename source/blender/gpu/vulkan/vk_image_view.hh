@@ -61,11 +61,6 @@ class VKImageView : NonCopyable {
     return vk_image_view_;
   }
 
-  bool is_valid() const
-  {
-    return vk_image_view_ != VK_NULL_HANDLE;
-  }
-
   VkFormat vk_format() const
   {
     return vk_format_;

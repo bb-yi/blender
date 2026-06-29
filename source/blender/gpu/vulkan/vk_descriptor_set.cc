@@ -68,12 +68,7 @@ void VKDescriptorSetTracker::update_resource_access_info_binding_uniform_buffer(
     const VKResourceBinding &resource_binding,
     render_graph::VKResourceAccessInfo &access_info)
 {
-  VKUniformBuffer *uniform_buffer_ptr = state_manager.uniform_buffers_.get(
-      resource_binding.binding);
-  if (uniform_buffer_ptr == nullptr) {
-    return;
-  }
-  VKUniformBuffer &uniform_buffer = *uniform_buffer_ptr;
+  VKUniformBuffer &uniform_buffer = *state_manager.uniform_buffers_.get(resource_binding.binding);
   uniform_buffer.ensure_updated();
   access_info.buffers.append({uniform_buffer.vk_handle(), resource_binding.access_mask});
 }
@@ -83,14 +78,8 @@ void VKDescriptorSetTracker::update_resource_access_info_binding_storage_buffer(
     const VKResourceBinding &resource_binding,
     render_graph::VKResourceAccessInfo &access_info)
 {
-  const BindSpaceStorageBuffers::Elem *elem_ptr = state_manager.storage_buffers_.get(
+  const BindSpaceStorageBuffers::Elem &elem = state_manager.storage_buffers_.get(
       resource_binding.binding);
-  if (elem_ptr == nullptr || elem_ptr->resource == nullptr ||
-      elem_ptr->resource_type == BindSpaceStorageBuffers::Type::Unused)
-  {
-    return;
-  }
-  const BindSpaceStorageBuffers::Elem &elem = *elem_ptr;
   VkBuffer vk_buffer = VK_NULL_HANDLE;
   switch (elem.resource_type) {
     case BindSpaceStorageBuffers::Type::IndexBuffer: {
@@ -123,7 +112,7 @@ void VKDescriptorSetTracker::update_resource_access_info_binding_storage_buffer(
       break;
     }
     case BindSpaceStorageBuffers::Type::Unused: {
-      break;
+      BLI_assert_unreachable();
     }
   }
   if (vk_buffer != VK_NULL_HANDLE) {
@@ -186,22 +175,19 @@ void VKDescriptorSetTracker::update_resource_access_info_binding_image(
     const VKResourceBinding &resource_binding,
     render_graph::VKResourceAccessInfo &access_info)
 {
-  VKTexture *texture = state_manager.images_.get(resource_binding.binding);
-  if (texture == nullptr || texture->device_format_get() == TextureFormat::Invalid) {
-    return;
-  }
+  VKTexture &texture = *state_manager.images_.get(resource_binding.binding);
   VKSubImageRange subimage = {};
-  if (texture->is_texture_view()) {
-    IndexRange layer_range = texture->layer_range();
-    IndexRange mipmap_range = texture->mip_map_range();
+  if (texture.is_texture_view()) {
+    IndexRange layer_range = texture.layer_range();
+    IndexRange mipmap_range = texture.mip_map_range();
     subimage = {uint32_t(mipmap_range.start()),
                 uint32_t(mipmap_range.size()),
                 uint32_t(layer_range.start()),
                 uint32_t(layer_range.size())};
   }
-  access_info.images.append({texture->vk_image_handle(),
+  access_info.images.append({texture.vk_image_handle(),
                              resource_binding.access_mask,
-                             to_vk_image_aspect_flag_bits(texture->device_format_get()),
+                             to_vk_image_aspect_flag_bits(texture.device_format_get()),
                              subimage});
 }
 
@@ -216,15 +202,11 @@ void VKDescriptorSetTracker::update_resource_access_info_binding_input_attachmen
     texture = state_manager.images_.get(resource_binding.binding);
   }
   else {
-    const BindSpaceTextures::Elem *elem_ptr = state_manager.textures_.get(resource_binding.binding);
-    if (elem_ptr != nullptr) {
-      texture = static_cast<VKTexture *>(elem_ptr->resource);
-    }
+    texture = static_cast<VKTexture *>(
+        state_manager.textures_.get(resource_binding.binding)->resource);
   }
 
-  if (texture == nullptr || texture->device_format_get() == TextureFormat::Invalid) {
-    return;
-  }
+  BLI_assert(texture);
   VkImage vk_image = texture->vk_image_handle();
   if (vk_image != VK_NULL_HANDLE) {
     VKSubImageRange subimage = {};
@@ -268,8 +250,7 @@ void VKDescriptorSetTracker::update_resource_access_info_binding(
     }
 
     case VKBindType::IMAGE: {
-      update_resource_access_info_binding_image(
-          state_manager, resource_binding, access_info);
+      update_resource_access_info_binding_image(state_manager, resource_binding, access_info);
       break;
     }
 
@@ -321,19 +302,11 @@ void VKDescriptorSetTracker::upload_descriptor_sets()
 void VKDescriptorSetUpdator::bind_image_resource(const VKStateManager &state_manager,
                                                  const VKResourceBinding &resource_binding)
 {
-  VKTexture *texture = state_manager.images_.get(resource_binding.binding);
-  if (texture == nullptr || texture->device_format_get() == TextureFormat::Invalid) {
-    return;
-  }
-  const VKImageView &image_view = texture->image_view_get(resource_binding.arrayed,
-                                                          VKImageViewFlags::NO_SWIZZLING);
-  if (!image_view.is_valid()) {
-    return;
-  }
+  VKTexture &texture = *state_manager.images_.get(resource_binding.binding);
   bind_image(
       VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
       VK_NULL_HANDLE,
-      image_view.vk_handle(),
+      texture.image_view_get(resource_binding.arrayed, VKImageViewFlags::NO_SWIZZLING).vk_handle(),
       VK_IMAGE_LAYOUT_GENERAL,
       resource_binding.location);
 }
@@ -365,14 +338,10 @@ void VKDescriptorSetUpdator::bind_texture_resource(const VKDevice &device,
       }
       else {
         const VKSampler &sampler = device.samplers().get(elem.sampler);
-        const VKImageView &image_view = texture->image_view_get(resource_binding.arrayed,
-                                                                VKImageViewFlags::DEFAULT);
-        if (!image_view.is_valid()) {
-          return;
-        }
         bind_image(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                    sampler.vk_handle(),
-                   image_view.vk_handle(),
+                   texture->image_view_get(resource_binding.arrayed, VKImageViewFlags::DEFAULT)
+                       .vk_handle(),
                    VK_IMAGE_LAYOUT_GENERAL,
                    resource_binding.location);
       }
@@ -393,17 +362,11 @@ void VKDescriptorSetUpdator::bind_input_attachment_resource(
   if (supports_local_read) {
     VKTexture *texture = static_cast<VKTexture *>(
         state_manager.images_.get(resource_binding.binding));
-    if (texture == nullptr || texture->device_format_get() == TextureFormat::Invalid) {
-      return;
-    }
-    const VKImageView &image_view = texture->image_view_get(resource_binding.arrayed,
-                                                            VKImageViewFlags::NO_SWIZZLING);
-    if (!image_view.is_valid()) {
-      return;
-    }
+    BLI_assert(texture);
     bind_image(VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT,
                VK_NULL_HANDLE,
-               image_view.vk_handle(),
+               texture->image_view_get(resource_binding.arrayed, VKImageViewFlags::NO_SWIZZLING)
+                   .vk_handle(),
                VK_IMAGE_LAYOUT_RENDERING_LOCAL_READ_KHR,
                resource_binding.location);
   }
@@ -417,20 +380,13 @@ void VKDescriptorSetUpdator::bind_input_attachment_resource(
     }
     const BindSpaceTextures::Elem &elem = *elem_ptr;
     VKTexture *texture = static_cast<VKTexture *>(elem.resource);
-    if (texture == nullptr || texture->device_format_get() == TextureFormat::Invalid) {
-      return;
-    }
+    BLI_assert(texture);
     BLI_assert(elem.resource_type == BindSpaceTextures::Type::Texture);
     const VKSampler &sampler = device.samplers().get(elem.sampler);
-    const VKImageView &image_view = texture->image_view_get(resource_binding.arrayed,
-                                                            VKImageViewFlags::DEFAULT);
-    if (!image_view.is_valid()) {
-      return;
-    }
     bind_image(
         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
         sampler.vk_handle(),
-        image_view.vk_handle(),
+        texture->image_view_get(resource_binding.arrayed, VKImageViewFlags::DEFAULT).vk_handle(),
         VK_IMAGE_LAYOUT_GENERAL,
         resource_binding.location);
   }
@@ -439,14 +395,8 @@ void VKDescriptorSetUpdator::bind_input_attachment_resource(
 void VKDescriptorSetUpdator::bind_storage_buffer_resource(
     const VKStateManager &state_manager, const VKResourceBinding &resource_binding)
 {
-  const BindSpaceStorageBuffers::Elem *elem_ptr = state_manager.storage_buffers_.get(
+  const BindSpaceStorageBuffers::Elem &elem = state_manager.storage_buffers_.get(
       resource_binding.binding);
-  if (elem_ptr == nullptr || elem_ptr->resource == nullptr ||
-      elem_ptr->resource_type == BindSpaceStorageBuffers::Type::Unused)
-  {
-    return;
-  }
-  const BindSpaceStorageBuffers::Elem &elem = *elem_ptr;
   VkBuffer vk_buffer = VK_NULL_HANDLE;
   VkDeviceSize vk_device_size = 0;
   switch (elem.resource_type) {
@@ -483,7 +433,7 @@ void VKDescriptorSetUpdator::bind_storage_buffer_resource(
       break;
     }
     case BindSpaceStorageBuffers::Type::Unused: {
-      break;
+      BLI_assert_unreachable();
     }
   }
 
@@ -497,12 +447,7 @@ void VKDescriptorSetUpdator::bind_storage_buffer_resource(
 void VKDescriptorSetUpdator::bind_uniform_buffer_resource(
     const VKStateManager &state_manager, const VKResourceBinding &resource_binding)
 {
-  VKUniformBuffer *uniform_buffer_ptr = state_manager.uniform_buffers_.get(
-      resource_binding.binding);
-  if (uniform_buffer_ptr == nullptr) {
-    return;
-  }
-  VKUniformBuffer &uniform_buffer = *uniform_buffer_ptr;
+  VKUniformBuffer &uniform_buffer = *state_manager.uniform_buffers_.get(resource_binding.binding);
   bind_buffer(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
               uniform_buffer.vk_handle(),
               0,
