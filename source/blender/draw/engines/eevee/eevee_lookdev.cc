@@ -358,6 +358,12 @@ void LookdevModule::sync()
   const int2 extent = int2(calc_sphere_extent(viewport_scale));
 
   const gpu::TextureFormat color_format = gpu::TextureFormat::SFLOAT_16_16_16_16;
+  constexpr eGPUTextureUsage dummy_usage = GPU_TEXTURE_USAGE_SHADER_WRITE |
+                                           GPU_TEXTURE_USAGE_SHADER_READ;
+
+  /* Forward materials may write render-pass images when a viewport pass is selected. */
+  dummy_aov_color_tx_.ensure_2d_array(color_format, extent, 1, dummy_usage);
+  dummy_aov_value_tx_.ensure_2d_array(gpu::TextureFormat::SFLOAT_16, extent, 1, dummy_usage);
 
   for (int index : IndexRange(num_spheres)) {
     if (spheres_[index].color_tx_.ensure_2d(color_format, extent)) {
@@ -419,11 +425,15 @@ void LookdevModule::sync_pass(PassSimple &pass,
   pass.state_set(state);
   pass.material_set(*inst_.manager, gpumat);
   pass.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);
+  pass.bind_image(RBUFS_COLOR_SLOT, &dummy_aov_color_tx_);
+  pass.bind_image(RBUFS_VALUE_SLOT, &dummy_aov_value_tx_);
   pass.bind_resources(inst_.uniform_data);
   pass.bind_resources(inst_.lights);
+  inst_.lights.bind_front_light_shader_resources(pass);
   pass.bind_resources(inst_.shadows);
   pass.bind_resources(inst_.volume.result);
   pass.bind_resources(inst_.sampling);
+  pass.bind_resources(inst_.render_textures);
   pass.bind_resources(inst_.hiz_buffer.front);
   pass.bind_resources(inst_.volume_probes);
   pass.bind_resources(inst_.sphere_probes);

@@ -20,6 +20,7 @@ static void node_declare(NodeDeclarationBuilder &b)
 {
   /* Enable custom socket order so that collapsible panels work. */
   b.use_custom_socket_order();
+  b.allow_any_socket_order();
 
   /* Top-level: line style. Always visible. */
   b.add_input<decl::Color>("Line Color").default_value({0.0f, 0.0f, 0.0f, 1.0f});

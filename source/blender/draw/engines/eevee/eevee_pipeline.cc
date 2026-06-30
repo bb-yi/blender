@@ -744,11 +744,14 @@ void ForwardPipeline::sync()
     {
       /* Common resources. */
       opaque_ps_.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);
+      opaque_ps_.bind_texture(HIZ_PREVIOUS_LAYER_TEX_SLOT, &inst_.hiz_buffer.back.ref_tx_);
       opaque_ps_.bind_texture(RADIANCE_PREVIOUS_LAYER_TEX_SLOT, &inst_.render_buffers.combined_tx);
       opaque_ps_.bind_texture(OBJECT_ID_TEX_SLOT, &inst_.render_buffers.object_id_tx);
       opaque_ps_.bind_texture(PREPASS_NORMAL_TEX_SLOT, &inst_.render_buffers.prepass_normal_tx);
       opaque_ps_.bind_image(RBUFS_COLOR_SLOT, &inst_.render_buffers.rp_color_tx);
       opaque_ps_.bind_image(RBUFS_VALUE_SLOT, &inst_.render_buffers.rp_value_tx);
+      opaque_ps_.bind_image(OUTLINE_COLOR_SLOT, &inst_.render_buffers.outline_color_tx);
+      opaque_ps_.bind_image(OUTLINE_INFO_SLOT, &inst_.render_buffers.outline_info_tx);
 
       opaque_ps_.bind_resources(inst_.uniform_data);
       opaque_ps_.bind_resources(inst_.lights);
@@ -784,11 +787,14 @@ void ForwardPipeline::sync()
 
     /* Textures. */
     sub.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);
+    sub.bind_texture(HIZ_PREVIOUS_LAYER_TEX_SLOT, &inst_.hiz_buffer.back.ref_tx_);
     sub.bind_texture(RADIANCE_PREVIOUS_LAYER_TEX_SLOT, &inst_.render_buffers.combined_tx);
     sub.bind_texture(OBJECT_ID_TEX_SLOT, &inst_.render_buffers.object_id_tx);
     sub.bind_texture(PREPASS_NORMAL_TEX_SLOT, &inst_.render_buffers.prepass_normal_tx);
     sub.bind_image(RBUFS_COLOR_SLOT, &inst_.render_buffers.rp_color_tx);
     sub.bind_image(RBUFS_VALUE_SLOT, &inst_.render_buffers.rp_value_tx);
+    sub.bind_image(OUTLINE_COLOR_SLOT, &inst_.render_buffers.outline_color_tx);
+    sub.bind_image(OUTLINE_INFO_SLOT, &inst_.render_buffers.outline_info_tx);
 
     sub.bind_resources(inst_.uniform_data);
     sub.bind_resources(inst_.lights);
@@ -805,11 +811,14 @@ void ForwardPipeline::sync()
     no_depth_ps_.init();
     PassMain::Sub &sub = no_depth_ps_.sub("ResourceBind", -FLT_MAX);
     sub.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);
+    sub.bind_texture(HIZ_PREVIOUS_LAYER_TEX_SLOT, &inst_.hiz_buffer.back.ref_tx_);
     sub.bind_texture(RADIANCE_PREVIOUS_LAYER_TEX_SLOT, &inst_.render_buffers.combined_tx);
     sub.bind_texture(OBJECT_ID_TEX_SLOT, &inst_.render_buffers.object_id_tx);
     sub.bind_texture(PREPASS_NORMAL_TEX_SLOT, &inst_.render_buffers.prepass_normal_tx);
     sub.bind_image(RBUFS_COLOR_SLOT, &inst_.render_buffers.rp_color_tx);
     sub.bind_image(RBUFS_VALUE_SLOT, &inst_.render_buffers.rp_value_tx);
+    sub.bind_image(OUTLINE_COLOR_SLOT, &inst_.render_buffers.outline_color_tx);
+    sub.bind_image(OUTLINE_INFO_SLOT, &inst_.render_buffers.outline_info_tx);
     sub.bind_resources(inst_.uniform_data);
     sub.bind_resources(inst_.lights);
     inst_.lights.bind_front_light_shader_resources(sub);
@@ -899,10 +908,6 @@ PassMain::Sub *ForwardPipeline::material_opaque_add(const Object *ob,
   has_opaque_ = true;
   inst_.lights.tag_front_light_shader_needed();
   PassMain::Sub *sub_pass = &pass->sub(GPU_material_get_name(gpumat));
-  if (inst_.scene->eevee.use_outline) {
-    sub_pass->bind_image(OUTLINE_COLOR_SLOT, &inst_.render_buffers.outline_color_tx);
-    sub_pass->bind_image(OUTLINE_INFO_SLOT, &inst_.render_buffers.outline_info_tx);
-  }
   return sub_pass;
 }
 
@@ -930,10 +935,6 @@ PassMain::Sub *ForwardPipeline::material_no_depth_add(const Object *ob,
   pass->push_constant("surface_cull_mode", int(material_surface_cull_method(blender_mat)));
   material_stencil_test_only_state_set(*pass, blender_mat);
   inst_.lights.bind_front_light_shader_resources(*pass);
-  if (inst_.scene->eevee.use_outline) {
-    pass->bind_image(OUTLINE_COLOR_SLOT, &inst_.render_buffers.outline_color_tx);
-    pass->bind_image(OUTLINE_INFO_SLOT, &inst_.render_buffers.outline_info_tx);
-  }
   return pass;
 }
 
@@ -957,13 +958,6 @@ PassMain::Sub *ForwardPipeline::prepass_transparent_add(const Object *ob,
   pass->material_set(*inst_.manager, gpumat, true);
   pass->push_constant("surface_cull_mode", int(material_surface_cull_method(blender_mat)));
   material_stencil_test_only_state_set(*pass, blender_mat);
-
-  if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_TO_RGBA) &&
-      GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT))
-  {
-    pass->bind_texture(HIZ_PREVIOUS_LAYER_TEX_SLOT, &inst_.hiz_buffer.back.ref_tx_);
-    pass->bind_texture(RADIANCE_PREVIOUS_LAYER_TEX_SLOT, &inst_.render_buffers.combined_tx);
-  }
   return pass;
 }
 
@@ -990,17 +984,6 @@ PassMain::Sub *ForwardPipeline::material_transparent_add(const Object *ob,
   pass->push_constant("surface_cull_mode", int(material_surface_cull_method(blender_mat)));
   material_stencil_test_only_state_set(*pass, blender_mat);
   inst_.lights.bind_front_light_shader_resources(*pass);
-  if (inst_.scene->eevee.use_outline) {
-    pass->bind_image(OUTLINE_COLOR_SLOT, &inst_.render_buffers.outline_color_tx);
-    pass->bind_image(OUTLINE_INFO_SLOT, &inst_.render_buffers.outline_info_tx);
-  }
-
-  if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_TO_RGBA) &&
-      GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT))
-  {
-    pass->bind_texture(HIZ_PREVIOUS_LAYER_TEX_SLOT, &inst_.hiz_buffer.back.ref_tx_);
-    pass->bind_texture(RADIANCE_PREVIOUS_LAYER_TEX_SLOT, &inst_.render_buffers.combined_tx);
-  }
   return pass;
 }
 
