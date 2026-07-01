@@ -263,6 +263,7 @@ namespace blender::eevee
     SET_FLAG_FROM_TEST(shader_request, motion_blur.postfx_enabled(), MOTION_BLUR_SHADERS);
     SET_FLAG_FROM_TEST(shader_request, raytracing.use_fast_gi(), HORIZON_SCAN_SHADERS);
     SET_FLAG_FROM_TEST(shader_request, raytracing.use_raytracing(), RAYTRACING_SHADERS);
+    SET_FLAG_FROM_TEST(shader_request, scene->eevee.filter_graph != nullptr, FILTER_GRAPH_SHADERS);
 
     loaded_shaders = ShaderGroups::NONE;
     loaded_shaders |= shaders.static_shaders_load_async(shader_request);

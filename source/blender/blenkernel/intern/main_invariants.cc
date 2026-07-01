@@ -6,6 +6,7 @@
 #include "BKE_main.hh"
 #include "BKE_material.hh"
 #include "BKE_node_tree_update.hh"
+#include "BKE_node_legacy_types.hh"
 
 #include "BLI_listbase.h"
 
@@ -99,9 +100,25 @@ static void propagate_node_tree_changes(Main &bmain,
         }
       }
       if (!uses_filter_material) {
+        bNodeTree *filter_graph = scene->eevee.filter_graph;
+        if (filter_graph != nullptr && filter_graph->type == NTREE_EEVEE_FILTER_GRAPH) {
+          for (bNode *node = static_cast<bNode *>(filter_graph->nodes.first); node != nullptr;
+               node = node->next)
+          {
+            if (node->type_legacy == EEVEE_FILTER_GRAPH_NODE_FILTER_MATERIAL &&
+                node->id == &material.id)
+            {
+              uses_filter_material = true;
+              break;
+            }
+          }
+        }
+      }
+      if (!uses_filter_material) {
         continue;
       }
       DEG_id_tag_update(&scene->id, ID_RECALC_SYNC_TO_EVAL);
+      WM_main_add_notifier(NC_SCENE | ND_NODES, scene);
       WM_main_add_notifier(NC_SCENE | ND_RENDER_OPTIONS, scene);
     }
   };

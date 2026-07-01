@@ -51,6 +51,7 @@
 #include "DEG_depsgraph_query.hh"
 
 #include "NOD_shader_nodes_inline.hh"
+#include "../../nodes/shader/include/NOD_filter_graph.hh"
 #include "RE_compositor.hh"
 #include "RE_engine.h"
 #include "RE_pipeline.h"
@@ -637,6 +638,13 @@ void ED_node_set_active(
         node->flag |= NODE_DO_OUTPUT;
       }
       ed::viewer_path::activate_geometry_node(*bmain, *snode, *node);
+    }
+  }
+  else if (ntree->type == NTREE_EEVEE_FILTER_GRAPH) {
+    if (node->type_legacy == EEVEE_FILTER_GRAPH_NODE_STAGE_OUTPUT) {
+      blender::nodes::filter_graph_stage_output_activate(*ntree, *node);
+      BKE_ntree_update_tag_active_output_changed(ntree);
+      blender::nodes::filter_graph_tag_tree_changed(*bmain, *ntree);
     }
   }
 }

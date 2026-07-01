@@ -71,25 +71,6 @@ class SCENE_UL_eevee_render_textures(UIList):
             layout.label(text="", icon='TEXTURE')
 
 
-class SCENE_UL_eevee_filter_materials(UIList):
-    def draw_item(self, _context, layout, _data, item, _icon, _active_data, _active_propname, _index):
-        filter_entry = item
-        if self.layout_type in {'DEFAULT', 'COMPACT'}:
-            row = layout.row(align=True)
-            row.prop(
-                filter_entry,
-                "enabled",
-                text="",
-                emboss=False,
-                icon='HIDE_OFF' if filter_entry.enabled else 'HIDE_ON',
-            )
-            material_name = filter_entry.material.name if filter_entry.material else "None"
-            row.label(text=material_name, icon='MATERIAL')
-        elif self.layout_type == 'GRID':
-            layout.alignment = 'CENTER'
-            layout.label(text="", icon='MATERIAL')
-
-
 def eevee_active_filter_material_entry(props):
     active_index = props.active_filter_material_index
     if active_index < 0 or active_index >= len(props.filter_materials):
@@ -143,46 +124,34 @@ def draw_eevee_render_textures(layout, context):
     col.prop(render_texture, "format")
 
 
-def draw_eevee_filter_material(layout, context):
+def draw_eevee_filter_graph(layout, context):
     if context.engine != 'BLENDER_EEVEE':
         return
 
     props = context.scene.eevee
 
-    list_col = layout.column()
-    list_col.use_property_split = False
-    list_col.use_property_decorate = False
-
-    draw_ui_list(
-        list_col,
-        context,
-        class_name="SCENE_UL_eevee_filter_materials",
-        unique_id="scene_eevee_filter_materials",
-        list_path="scene.eevee.filter_materials",
-        active_index_path="scene.eevee.active_filter_material_index",
-    )
-
-    filter_entry = eevee_active_filter_material_entry(props)
-    if filter_entry is None:
-        layout.label(text="Add a filter material entry to configure it.", icon='INFO')
-        return
-
     col = layout.column()
     col.use_property_split = True
     col.use_property_decorate = False
-    col.prop(filter_entry, "enabled")
-    col.prop(filter_entry, "execution_stage")
+    col.template_ID(props, "filter_graph", new="scene.eevee_filter_graph_new")
 
-    row = col.row(align=True)
-    row.template_ID(filter_entry, "material", new="scene.eevee_filter_material_new")
+    if props.filter_graph is None:
+        layout.label(text="No filter graph assigned.", icon='INFO')
+    else:
+        sync_filter_graph_node_editors(context, props.filter_graph)
 
-    filter_material = filter_entry.material
-    name_display = filter_material.name if filter_material is not None else "None"
-    col.label(text=f"Name: {name_display}")
-    if filter_material is None:
-        layout.label(text="Select a filter-domain material.", icon='INFO')
-    elif filter_material.eevee_domain != 'FILTER':
-        layout.label(text="Selected material is not in Filter domain.", icon='ERROR')
+
+def sync_filter_graph_node_editors(context, graph):
+    screen = getattr(context, "screen", None)
+    if screen is None:
+        return
+
+    for area in screen.areas:
+        if area.type != 'NODE_EDITOR':
+            continue
+        for space in area.spaces:
+            if space.type == 'NODE_EDITOR' and space.tree_type == 'EeveeFilterGraphNodeTree':
+                space.node_tree = graph
 
 
 class SCENE_OT_eevee_filter_material_new(Operator):
@@ -204,8 +173,8 @@ class SCENE_OT_eevee_filter_material_new(Operator):
         nt = mat.node_tree
         nt.nodes.clear()
 
-        scene_color = nt.nodes.new("ShaderNodeSceneColor")
-        scene_color.location = (-320, 20)
+        pass_input = nt.nodes.new("ShaderNodeFilterGraphInput")
+        pass_input.location = (-320, 20)
 
         image_sample = nt.nodes.new("ShaderNodeNPR_ImageSample")
         image_sample.location = (-120, 20)
@@ -213,7 +182,7 @@ class SCENE_OT_eevee_filter_material_new(Operator):
         filter_output = nt.nodes.new("ShaderNodeOutputFilter")
         filter_output.location = (120, 20)
 
-        nt.links.new(scene_color.outputs["Color Image"], image_sample.inputs["Image"])
+        nt.links.new(pass_input.outputs["Image"], image_sample.inputs["Image"])
         nt.links.new(image_sample.outputs["Color"], filter_output.inputs["Color"])
         nt.links.new(image_sample.outputs["Alpha"], filter_output.inputs["Alpha"])
 
@@ -222,6 +191,31 @@ class SCENE_OT_eevee_filter_material_new(Operator):
         filter_entry.name = mat.name
 
         self.report({'INFO'}, f"Created filter material '{mat.name}'")
+        return {'FINISHED'}
+
+
+class SCENE_OT_eevee_filter_graph_new(Operator):
+    bl_idname = "scene.eevee_filter_graph_new"
+    bl_label = "New Filter Graph"
+    bl_description = "Create a new Eevee filter graph and assign it to the scene"
+
+    def execute(self, context):
+        graph = bpy.data.node_groups.new(name="Eevee Filter Graph", type="EeveeFilterGraphNodeTree")
+
+        scene_color = graph.nodes.new("EeveeFilterGraphNodeSceneColor")
+        scene_color.location = (-260, 0)
+
+        stage_output = graph.nodes.new("EeveeFilterGraphNodeStageOutput")
+        stage_output.location = (80, 0)
+
+        graph.links.new(scene_color.outputs["Color Image"], stage_output.inputs["Image"])
+        graph.nodes.active = stage_output
+        stage_output.select = True
+
+        context.scene.eevee.filter_graph = graph
+        sync_filter_graph_node_editors(context, graph)
+
+        self.report({'INFO'}, f"Created filter graph '{graph.name}'")
         return {'FINISHED'}
 
 
@@ -265,8 +259,8 @@ class SCENE_PT_eevee_render_textures(SceneButtonsPanel, Panel):
         draw_eevee_render_textures(self.layout, context)
 
 
-class SCENE_PT_eevee_filter_materials(SceneButtonsPanel, Panel):
-    bl_label = "Filter Materials"
+class SCENE_PT_eevee_filter_graph(SceneButtonsPanel, Panel):
+    bl_label = "Filter Graph"
     bl_options = {'DEFAULT_CLOSED'}
     COMPAT_ENGINES = {'BLENDER_EEVEE'}
 
@@ -275,7 +269,7 @@ class SCENE_PT_eevee_filter_materials(SceneButtonsPanel, Panel):
         return context.engine in cls.COMPAT_ENGINES
 
     def draw(self, context):
-        draw_eevee_filter_material(self.layout, context)
+        draw_eevee_filter_graph(self.layout, context)
 
 
 class SCENE_PT_unit(SceneButtonsPanel, Panel):
@@ -689,12 +683,12 @@ class SCENE_PT_custom_props(SceneButtonsPanel, PropertyPanel, Panel):
 classes = (
     SCENE_UL_keying_set_paths,
     SCENE_UL_eevee_render_textures,
-    SCENE_UL_eevee_filter_materials,
     SCENE_OT_eevee_filter_material_new,
+    SCENE_OT_eevee_filter_graph_new,
     SCENE_PT_context_scene,
     SCENE_PT_scene,
     SCENE_PT_eevee_render_textures,
-    SCENE_PT_eevee_filter_materials,
+    SCENE_PT_eevee_filter_graph,
     SCENE_PT_unit,
     SCENE_PT_physics,
     SCENE_PT_simulation,

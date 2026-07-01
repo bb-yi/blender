@@ -470,6 +470,7 @@ void NODE_OT_group_ungroup(wmOperatorType *ot);
 void NODE_OT_group_separate(wmOperatorType *ot);
 void NODE_OT_group_edit(wmOperatorType *ot);
 void NODE_OT_group_enter_exit(wmOperatorType *ot);
+void NODE_OT_filter_pass_edit_material(wmOperatorType *ot);
 
 void NODE_OT_default_group_width_set(wmOperatorType *ot);
 

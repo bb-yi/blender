@@ -17,6 +17,7 @@
 #include "BLI_map.hh"
 #include "BLI_math_matrix.hh"
 #include "BLI_set.hh"
+#include "BLI_string.h"
 #include "BLI_vector.hh"
 
 #include "BKE_collection.hh"
@@ -24,6 +25,8 @@
 #include "BKE_node_legacy_types.hh"
 #include "BKE_node_runtime.hh"
 #include "BKE_node.hh"
+
+#include "NOD_filter_graph.hh"
 
 #include "DEG_depsgraph_query.hh"
 
@@ -33,8 +36,60 @@
 
 #include "eevee_filter_material.hh"
 #include "eevee_instance.hh"
+#include "eevee_shader.hh"
+
+#include <memory>
+#include <vector>
 
 namespace blender::eevee {
+
+static constexpr uint32_t FILTER_TEX_HANDLE_NULL = 0u;
+static constexpr uint32_t FILTER_TEX_HANDLE_RP_COLOR = 1u;
+static constexpr uint32_t FILTER_TEX_HANDLE_RP_VALUE = 2u;
+static constexpr uint32_t FILTER_TEX_HANDLE_SCENE = 30u;
+static constexpr uint32_t FILTER_TEX_HANDLE_FILTER_GRAPH_INPUT = 31u;
+static constexpr uint32_t FILTER_TEX_HANDLE_FILTER_GRAPH_TEXTURE = 32u;
+
+struct FilterGraphImageHandle {
+  uint32_t type = FILTER_TEX_HANDLE_NULL;
+  int index = 0;
+  gpu::Texture *texture = nullptr;
+
+  static FilterGraphImageHandle null()
+  {
+    return {};
+  }
+
+  static FilterGraphImageHandle scene(const int index)
+  {
+    return {FILTER_TEX_HANDLE_SCENE, index, nullptr};
+  }
+
+  static FilterGraphImageHandle render_pass_color(const int index)
+  {
+    return {FILTER_TEX_HANDLE_RP_COLOR, index, nullptr};
+  }
+
+  static FilterGraphImageHandle render_pass_value(const int index)
+  {
+    return {FILTER_TEX_HANDLE_RP_VALUE, index, nullptr};
+  }
+
+  static FilterGraphImageHandle graph_texture(gpu::Texture *texture)
+  {
+    return {FILTER_TEX_HANDLE_FILTER_GRAPH_TEXTURE, 0, texture};
+  }
+
+  bool is_texture() const
+  {
+    return type == FILTER_TEX_HANDLE_FILTER_GRAPH_TEXTURE && texture != nullptr;
+  }
+};
+
+static bool filter_graph_enabled(const Scene &scene)
+{
+  return scene.eevee.filter_graph != nullptr;
+}
 
 static FilterObjectInfoData filter_object_info_default()
 {
@@ -51,6 +106,33 @@ static bool filter_material_is_valid(blender::Material *material)
 {
   return material != nullptr && material->eevee_domain == MA_EEVEE_DOMAIN_FILTER &&
          material->nodetree != nullptr;
+}
+
+static blender::Material *filter_graph_node_material(const bNode &node)
+{
+  if (node.id == nullptr || GS(node.id->name) != ID_MA) {
+    return nullptr;
+  }
+  return reinterpret_cast<blender::Material *>(node.id);
+}
+
+static int filter_graph_aov_index_get(const RenderBuffersInfoData &render_pass,
+                                      const StringRef name,
+                                      const bool is_value)
+{
+  if (name.is_empty()) {
+    return -1;
+  }
+
+  const uint32_t hash = BLI_hash_string(name.data());
+  const int start = is_value ? render_pass.aovs.color_len : 0;
+  const int len = is_value ? render_pass.aovs.value_len : render_pass.aovs.color_len;
+  for (int i = start; i < start + len; i++) {
+    if (render_pass.aovs.hash[i / 4][i % 4] == hash) {
+      return i - start;
+    }
+  }
+  return -1;
 }
 
 static bool filter_mask_object_supported(const Object *object)
@@ -232,13 +314,21 @@ static void filter_material_collect_scene_source_node(const bNode &node,
     if (output_socket == nullptr) {
       return;
     }
-    if (std::strcmp(output_socket->identifier, "Depth Image") == 0) {
+    const bool legacy_sample_output = STREQ(output_socket->identifier, "Color") ||
+                                      STREQ(output_socket->identifier, "Alpha");
+    if (std::strcmp(output_socket->identifier, "Depth Image") == 0 ||
+        (node.custom1 == SHD_SCENE_SOURCE_DEPTH && legacy_sample_output))
+    {
       r_uses_scene_depth = true;
     }
-    else if (std::strcmp(output_socket->identifier, "Normal Image") == 0) {
+    else if (std::strcmp(output_socket->identifier, "Normal Image") == 0 ||
+             (node.custom1 == SHD_SCENE_SOURCE_NORMAL && legacy_sample_output))
+    {
       r_uses_scene_normal = true;
     }
-    else if (std::strcmp(output_socket->identifier, "Position Image") == 0) {
+    else if (std::strcmp(output_socket->identifier, "Position Image") == 0 ||
+             (node.custom1 == SHD_SCENE_SOURCE_POSITION && legacy_sample_output))
+    {
       r_uses_scene_position = true;
     }
   }
@@ -485,12 +575,72 @@ static void filter_material_collect_scene_sources(const bNodeTree &ntree,
   }
 }
 
+static void filter_graph_collect_scene_sources(const bNodeTree &ntree,
+                                               bool &r_uses_scene_depth,
+                                               bool &r_uses_scene_normal,
+                                               bool &r_uses_scene_position)
+{
+  ntree.ensure_topology_cache();
+  for (const bNode *node : ntree.all_nodes()) {
+    if (node->type_legacy != EEVEE_FILTER_GRAPH_NODE_SCENE_COLOR || node->is_muted()) {
+      continue;
+    }
+    for (const bNodeSocket *socket : node->output_sockets()) {
+      bool has_used_link = false;
+      for (const bNodeLink *link : socket->directly_linked_links()) {
+        if (link->is_used()) {
+          has_used_link = true;
+          break;
+        }
+      }
+      if (!has_used_link) {
+        continue;
+      }
+      if (STREQ(socket->identifier, "Depth Image")) {
+        r_uses_scene_depth = true;
+      }
+      else if (STREQ(socket->identifier, "Normal Image")) {
+        r_uses_scene_normal = true;
+      }
+      else if (STREQ(socket->identifier, "Position Image")) {
+        r_uses_scene_position = true;
+      }
+    }
+  }
+}
+
 void FilterMaterialModule::init()
 {
   uses_scene_depth_ = false;
   uses_scene_normal_ = false;
   uses_scene_position_ = false;
   uses_cryptomatte_object_ = false;
+
+  if (filter_graph_enabled(*inst_.scene)) {
+    bNodeTree *filter_graph = inst_.scene->eevee.filter_graph;
+    filter_graph_collect_scene_sources(
+        *filter_graph, uses_scene_depth_, uses_scene_normal_, uses_scene_position_);
+    for (const bNode *node : filter_graph->all_nodes()) {
+      if (node->type_legacy != EEVEE_FILTER_GRAPH_NODE_FILTER_MATERIAL || node->is_muted()) {
+        continue;
+      }
+      blender::Material *material = filter_graph_node_material(*node);
+      if (!filter_material_is_valid(material)) {
+        continue;
+      }
+      filter_material_collect_scene_sources(*material->nodetree,
+                                            uses_scene_depth_,
+                                            uses_scene_normal_,
+                                            uses_scene_position_,
+                                            uses_cryptomatte_object_);
+      if (uses_scene_depth_ && uses_scene_normal_ && uses_scene_position_ &&
+          uses_cryptomatte_object_)
+      {
+        break;
+      }
+    }
+    return;
+  }
 
   for (SceneFilterMaterial *filter_entry = static_cast<SceneFilterMaterial *>(
            inst_.scene->eevee.filter_materials.first);
@@ -567,10 +717,74 @@ void FilterMaterialModule::update_filter_object_info_buffer(GPUMaterial *gpumat)
   filter_object_info_buf_.push_update();
 }
 
+bool FilterMaterialModule::sync_pass_entry(blender::Material *material, FilterPassEntry &entry)
+{
+  if (!filter_material_is_valid(material)) {
+    return false;
+  }
+
+  Set<const bNodeTree *> visited;
+  const bool collection_signature_changed = filter_mask_update_collection_signatures(
+      *material->nodetree, visited);
+  if (collection_signature_changed) {
+    GPU_material_free(&material->gpumaterial);
+  }
+
+  GPUMaterial *gpumat = inst_.shaders.material_shader_get(material,
+                                                          material->nodetree,
+                                                          MAT_PIPE_FILTER,
+                                                          MAT_GEOM_WORLD,
+                                                          MAT_PROBE_NONE,
+                                                          false,
+                                                          nullptr,
+                                                          false);
+  const int status = (gpumat != nullptr) ? GPU_material_status(gpumat) : -1;
+  const int has_filter_output = (gpumat != nullptr) ? int(GPU_material_has_filter_output(gpumat)) :
+                                                     0;
+  if (gpumat == nullptr || status != GPU_MAT_SUCCESS || !has_filter_output) {
+    return false;
+  }
+
+  inst_.manager->register_layer_attributes(gpumat);
+
+  visited.clear();
+  FilterMaterialAOVUsage aov_usage;
+  filter_material_collect_aov_usage(*material->nodetree, visited, aov_usage);
+
+  entry.material = material;
+  entry.gpumat = gpumat;
+  entry.uses_aov_input = !aov_usage.input_names.is_empty();
+  entry.uses_aov_output = !aov_usage.output_names.is_empty();
+  entry.conflicting_aov_names = filter_material_collect_conflicting_aov_names(aov_usage);
+  return true;
+}
+
 void FilterMaterialModule::begin_sync()
 {
   entries_.clear();
   uses_scene_time_ = false;
+
+  if (filter_graph_enabled(*inst_.scene)) {
+    bNodeTree *filter_graph = inst_.scene->eevee.filter_graph;
+    blender::nodes::filter_graph_sync_filter_pass_interfaces_from_materials(*filter_graph);
+    for (const bNode *node : filter_graph->all_nodes()) {
+      if (node->type_legacy != EEVEE_FILTER_GRAPH_NODE_FILTER_MATERIAL || node->is_muted()) {
+        continue;
+      }
+
+      FilterPassEntry entry;
+      entry.graph_node = node;
+      entry.execution_stage = SCE_EEVEE_FILTER_STAGE_BEFORE_POSTFX;
+      blender::Material *material = filter_graph_node_material(*node);
+      if (!sync_pass_entry(material, entry)) {
+        continue;
+      }
+
+      uses_scene_time_ |= GPU_material_is_time_dependent(entry.gpumat);
+      entries_.append(entry);
+    }
+    return;
+  }
 
   for (SceneFilterMaterial *filter_entry = static_cast<SceneFilterMaterial *>(
            inst_.scene->eevee.filter_materials.first);
@@ -581,56 +795,157 @@ void FilterMaterialModule::begin_sync()
       continue;
     }
 
-    Set<const bNodeTree *> visited;
-    const bool collection_signature_changed = filter_mask_update_collection_signatures(
-        *filter_entry->material->nodetree, visited);
-    if (collection_signature_changed)
-    {
-      GPU_material_free(&filter_entry->material->gpumaterial);
-    }
-
-    GPUMaterial *gpumat = inst_.shaders.material_shader_get(filter_entry->material,
-                                                            filter_entry->material->nodetree,
-                                                            MAT_PIPE_FILTER,
-                                                            MAT_GEOM_WORLD,
-                                                            MAT_PROBE_NONE,
-                                                            false,
-                                                            nullptr,
-                                                            false);
-    const int status = (gpumat != nullptr) ? GPU_material_status(gpumat) : -1;
-    const int has_filter_output = (gpumat != nullptr) ?
-                                      int(GPU_material_has_filter_output(gpumat)) :
-                                      0;
-    if (gpumat == nullptr || status != GPU_MAT_SUCCESS || !has_filter_output) {
-      continue;
-    }
-
-    uses_scene_time_ |= GPU_material_is_time_dependent(gpumat);
-    inst_.manager->register_layer_attributes(gpumat);
-
-    visited.clear();
-    FilterMaterialAOVUsage aov_usage;
-    filter_material_collect_aov_usage(*filter_entry->material->nodetree, visited, aov_usage);
-
     FilterPassEntry entry;
     entry.scene_filter = filter_entry;
-    entry.material = filter_entry->material;
-    entry.gpumat = gpumat;
-    entry.uses_aov_input = !aov_usage.input_names.is_empty();
-    entry.uses_aov_output = !aov_usage.output_names.is_empty();
-    entry.conflicting_aov_names = filter_material_collect_conflicting_aov_names(aov_usage);
+    entry.execution_stage = SceneEEVEEFilterExecutionStage(filter_entry->execution_stage);
+    if (!sync_pass_entry(filter_entry->material, entry)) {
+      continue;
+    }
+    uses_scene_time_ |= GPU_material_is_time_dependent(entry.gpumat);
     entries_.append(entry);
   }
 }
 
 bool FilterMaterialModule::has_stage_entries(SceneEEVEEFilterExecutionStage stage) const
 {
+  if (filter_graph_enabled(*inst_.scene)) {
+    const bNodeTree *filter_graph = inst_.scene->eevee.filter_graph;
+    for (const bNode *node : filter_graph->all_nodes()) {
+      if (node->type_legacy == EEVEE_FILTER_GRAPH_NODE_STAGE_OUTPUT && !node->is_muted() &&
+          node->custom1 == stage && (node->flag & NODE_DO_OUTPUT))
+      {
+        return true;
+      }
+    }
+    return false;
+  }
+
   for (const FilterPassEntry &entry : entries_) {
-    if (entry.scene_filter != nullptr && entry.scene_filter->execution_stage == stage) {
+    if (entry.scene_filter != nullptr && entry.execution_stage == stage) {
       return true;
     }
   }
   return false;
+}
+
+static const bNodeLink *filter_graph_socket_used_link(const bNodeSocket &socket)
+{
+  for (const bNodeLink *link : socket.directly_linked_links()) {
+    if (link->is_used() && link->fromnode != nullptr && link->fromsock != nullptr) {
+      return link;
+    }
+  }
+  return nullptr;
+}
+
+static const bNode *filter_graph_stage_output_node_get(const bNodeTree &ntree,
+                                                       const SceneEEVEEFilterExecutionStage stage)
+{
+  for (const bNode *node : ntree.all_nodes()) {
+    if (node->type_legacy != EEVEE_FILTER_GRAPH_NODE_STAGE_OUTPUT || node->is_muted() ||
+        node->custom1 != stage || !(node->flag & NODE_DO_OUTPUT))
+    {
+      continue;
+    }
+    return node;
+  }
+  return nullptr;
+}
+
+static bool filter_graph_collect_dependencies(const bNode &node,
+                                              Set<const bNode *> &visiting,
+                                              Set<const bNode *> &visited,
+                                              Vector<const bNode *> &r_order)
+{
+  if (visited.contains(&node)) {
+    return true;
+  }
+  if (visiting.contains(&node)) {
+    return false;
+  }
+  visiting.add(&node);
+
+  auto collect_input_socket = [&](const bNodeSocket *socket) -> bool {
+    if (socket == nullptr) {
+      return true;
+    }
+    const bNodeLink *link = filter_graph_socket_used_link(*socket);
+    return link == nullptr || filter_graph_collect_dependencies(
+                                  *link->fromnode, visiting, visited, r_order);
+  };
+
+  if (node.is_reroute()) {
+    if (!collect_input_socket(static_cast<const bNodeSocket *>(node.inputs.first))) {
+      return false;
+    }
+  }
+  else if (node.type_legacy == EEVEE_FILTER_GRAPH_NODE_FILTER_MATERIAL) {
+    const NodeEeveeFilterGraphFilterMaterial *storage =
+        static_cast<const NodeEeveeFilterGraphFilterMaterial *>(node.storage);
+    if (storage == nullptr || storage->items_num > FILTER_GRAPH_INPUT_MAX ||
+        !filter_material_is_valid(filter_graph_node_material(node)))
+    {
+      return false;
+    }
+    for (const int i : IndexRange(storage->items_num)) {
+      const std::string identifier = "Image_" + std::to_string(storage->items[i].identifier);
+      if (!collect_input_socket(node.input_by_identifier(identifier))) {
+        return false;
+      }
+    }
+  }
+  else if (!ELEM(node.type_legacy,
+                EEVEE_FILTER_GRAPH_NODE_SCENE_COLOR,
+                EEVEE_FILTER_GRAPH_NODE_AOV_INPUT))
+  {
+    return false;
+  }
+
+  visiting.remove(&node);
+  visited.add(&node);
+  r_order.append(&node);
+  return true;
+}
+
+static FilterGraphImageHandle filter_graph_scene_output_handle(const bNodeSocket &socket)
+{
+  if (STREQ(socket.identifier, "Color Image")) {
+    return FilterGraphImageHandle::scene(0);
+  }
+  if (STREQ(socket.identifier, "Depth Image")) {
+    return FilterGraphImageHandle::scene(1);
+  }
+  if (STREQ(socket.identifier, "Normal Image")) {
+    return FilterGraphImageHandle::scene(2);
+  }
+  if (STREQ(socket.identifier, "Position Image")) {
+    return FilterGraphImageHandle::scene(4);
+  }
+  return FilterGraphImageHandle::null();
+}
+
+static FilterGraphImageHandle filter_graph_aov_output_handle(const bNode &node,
+                                                             const bNodeSocket &socket,
+                                                             const RenderBuffersInfoData &data)
+{
+  const NodeEeveeFilterGraphAOVInput *storage =
+      static_cast<const NodeEeveeFilterGraphAOVInput *>(node.storage);
+  if (storage == nullptr) {
+    return FilterGraphImageHandle::null();
+  }
+  if (STREQ(socket.identifier, "Color")) {
+    const int aov_index = filter_graph_aov_index_get(data, storage->name, false);
+    return (aov_index >= 0) ?
+               FilterGraphImageHandle::render_pass_color(data.color_len + aov_index) :
+               FilterGraphImageHandle::null();
+  }
+  if (STREQ(socket.identifier, "Value")) {
+    const int aov_index = filter_graph_aov_index_get(data, storage->name, true);
+    return (aov_index >= 0) ?
+               FilterGraphImageHandle::render_pass_value(data.value_len + aov_index) :
+               FilterGraphImageHandle::null();
+  }
+  return FilterGraphImageHandle::null();
 }
 
 gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
@@ -638,16 +953,301 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
                                                  int2 extent,
                                                  SceneEEVEEFilterExecutionStage stage)
 {
-  if (entries_.is_empty() || input_tx == nullptr || !has_stage_entries(stage)) {
+  if (input_tx == nullptr || !has_stage_entries(stage)) {
     return input_tx;
   }
 
-  ping_tx_.ensure_2d(GPU_texture_format(input_tx), extent, GPU_TEXTURE_USAGE_GENERAL);
-  pong_tx_.ensure_2d(GPU_texture_format(input_tx), extent, GPU_TEXTURE_USAGE_GENERAL);
+  const gpu::TextureFormat stage_format = GPU_texture_format(input_tx);
+
+  auto black_graph_output = [&]() -> gpu::Texture * {
+    graph_black_tx_.ensure_2d(stage_format, extent, GPU_TEXTURE_USAGE_GENERAL);
+    const float clear_color[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    GPU_texture_clear(graph_black_tx_, GPU_DATA_FLOAT, clear_color);
+    GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE | GPU_BARRIER_TEXTURE_FETCH);
+    return graph_black_tx_;
+  };
+
+  auto clear_filter_graph_inputs = [&]() {
+    for (FilterGraphInputHandleData &handle : filter_graph_input_buf_) {
+      handle.type = FILTER_TEX_HANDLE_NULL;
+      handle.index = 0;
+      handle._pad = int2(0);
+    }
+    graph_input_tx_.ensure_2d_array(stage_format, extent, 1, GPU_TEXTURE_USAGE_GENERAL);
+    filter_graph_input_buf_.push_update();
+  };
+
+  auto prepare_filter_graph_inputs = [&](const Vector<FilterGraphImageHandle> &inputs) {
+    Vector<gpu::Texture *> texture_inputs;
+    for (FilterGraphInputHandleData &handle : filter_graph_input_buf_) {
+      handle.type = FILTER_TEX_HANDLE_NULL;
+      handle.index = 0;
+      handle._pad = int2(0);
+    }
+    for (const int i : inputs.index_range()) {
+      if (i >= FILTER_GRAPH_INPUT_MAX) {
+        break;
+      }
+      const FilterGraphImageHandle &input = inputs[i];
+      if (input.is_texture()) {
+        filter_graph_input_buf_[i].type = FILTER_TEX_HANDLE_FILTER_GRAPH_TEXTURE;
+        filter_graph_input_buf_[i].index = texture_inputs.size();
+        texture_inputs.append(input.texture);
+      }
+      else if (input.type != FILTER_TEX_HANDLE_FILTER_GRAPH_INPUT) {
+        filter_graph_input_buf_[i].type = input.type;
+        filter_graph_input_buf_[i].index = input.index;
+      }
+    }
+
+    const int layer_count = math::max(1, int(texture_inputs.size()));
+    graph_input_tx_.ensure_2d_array(stage_format, extent, layer_count, GPU_TEXTURE_USAGE_GENERAL);
+    if (!texture_inputs.is_empty()) {
+      graph_input_tx_.ensure_layer_views();
+      while (graph_input_fbs_.size() < texture_inputs.size()) {
+        graph_input_fbs_.append(std::make_unique<Framebuffer>("FilterMaterial.GraphInputCopy"));
+      }
+      while (graph_input_fbs_.size() > texture_inputs.size()) {
+        graph_input_fbs_.remove_last();
+      }
+      gpu::Shader *copy_shader = inst_.shaders.static_shader_get(FILTER_GRAPH_INPUT_COPY);
+      if (copy_shader == nullptr) {
+        return;
+      }
+      for (const int layer : texture_inputs.index_range()) {
+        graph_input_fbs_[layer]->ensure(
+            GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE_LAYER(graph_input_tx_.layer_view(layer), 0));
+
+        PassSimple pass("FilterMaterial.GraphInputCopy");
+        pass.init();
+        pass.state_set(DRW_STATE_WRITE_COLOR);
+        pass.framebuffer_set(&*graph_input_fbs_[layer]);
+        pass.shader_set(copy_shader);
+        pass.bind_texture("input_tx", texture_inputs[layer]);
+        pass.draw_procedural(GPU_PRIM_TRIS, 1, 3);
+        inst_.manager->submit(pass);
+      }
+      GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH);
+    }
+    filter_graph_input_buf_.push_update();
+  };
+
+  auto render_filter_entry = [&](const FilterPassEntry &entry,
+                                 gpu::Texture *scene_color_tx,
+                                 Texture &target_tx) {
+    gpu::Texture *aov_color_tx = inst_.render_buffers.rp_color_tx;
+    gpu::Texture *aov_value_tx = inst_.render_buffers.rp_value_tx;
+
+    if (!entry.conflicting_aov_names.is_empty()) {
+      aov_color_snapshot_tx_.ensure_2d_array(GPU_texture_format(inst_.render_buffers.rp_color_tx),
+                                             extent,
+                                             GPU_texture_layer_count(inst_.render_buffers.rp_color_tx),
+                                             GPU_TEXTURE_USAGE_GENERAL);
+      aov_value_snapshot_tx_.ensure_2d_array(GPU_texture_format(inst_.render_buffers.rp_value_tx),
+                                             extent,
+                                             GPU_texture_layer_count(inst_.render_buffers.rp_value_tx),
+                                             GPU_TEXTURE_USAGE_GENERAL);
+      GPU_texture_copy(aov_color_snapshot_tx_, inst_.render_buffers.rp_color_tx);
+      GPU_texture_copy(aov_value_snapshot_tx_, inst_.render_buffers.rp_value_tx);
+      GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE | GPU_BARRIER_TEXTURE_FETCH |
+                         GPU_BARRIER_SHADER_IMAGE_ACCESS);
+      aov_color_tx = aov_color_snapshot_tx_;
+      aov_value_tx = aov_value_snapshot_tx_;
+    }
+
+    framebuffer_.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(target_tx));
+
+    PassSimple pass = {"FilterMaterial.Pass"};
+    pass.state_set(DRW_STATE_WRITE_COLOR);
+    pass.framebuffer_set(&framebuffer_);
+    update_filter_object_info_buffer(entry.gpumat);
+    pass.material_set(*inst_.manager, entry.gpumat);
+    pass.bind_texture("scene_color_tx", &scene_color_tx);
+    pass.bind_texture("rp_color_tx", &aov_color_tx);
+    pass.bind_texture("rp_value_tx", &aov_value_tx);
+    pass.bind_texture("depth_tx", &inst_.render_buffers.depth_tx);
+    pass.bind_texture("cryptomatte_tx", &inst_.render_buffers.cryptomatte_tx);
+    pass.bind_texture("filter_graph_input_tx", &graph_input_tx_);
+    pass.bind_image(RBUFS_COLOR_SLOT, &inst_.render_buffers.rp_color_tx);
+    pass.bind_image(RBUFS_VALUE_SLOT, &inst_.render_buffers.rp_value_tx);
+    pass.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);
+    pass.bind_ubo(FILTER_OBJECT_INFO_BUF_SLOT, &filter_object_info_buf_);
+    pass.bind_ubo(FILTER_GRAPH_INPUT_BUF_SLOT, &filter_graph_input_buf_);
+    pass.bind_resources(inst_.uniform_data);
+    pass.bind_resources(inst_.sampling);
+    pass.bind_resources(inst_.render_textures);
+    pass.barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_SHADER_IMAGE_ACCESS);
+    pass.draw_procedural(GPU_PRIM_TRIS, 1, 3);
+
+    GPU_memory_barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS | GPU_BARRIER_TEXTURE_FETCH);
+    inst_.manager->submit(pass, view);
+    GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH);
+  };
+
+  auto resolve_filter_graph_handle = [&](const FilterGraphImageHandle &handle) -> gpu::Texture * {
+    if (handle.is_texture()) {
+      ping_tx_.ensure_2d(stage_format, extent, GPU_TEXTURE_USAGE_GENERAL);
+      GPU_texture_copy(ping_tx_, handle.texture);
+      GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE | GPU_BARRIER_TEXTURE_FETCH);
+      return ping_tx_;
+    }
+    if (handle.type == FILTER_TEX_HANDLE_SCENE && handle.index == 0) {
+      return input_tx;
+    }
+    if (handle.type == FILTER_TEX_HANDLE_NULL) {
+      return black_graph_output();
+    }
+
+    gpu::Shader *resolve_shader = inst_.shaders.static_shader_get(FILTER_GRAPH_RESOLVE);
+    if (resolve_shader == nullptr) {
+      return black_graph_output();
+    }
+
+    Vector<FilterGraphImageHandle> resolve_inputs;
+    resolve_inputs.append(handle);
+    prepare_filter_graph_inputs(resolve_inputs);
+    ping_tx_.ensure_2d(stage_format, extent, GPU_TEXTURE_USAGE_GENERAL);
+    framebuffer_.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(ping_tx_));
+
+    PassSimple pass("FilterMaterial.GraphResolve");
+    pass.init();
+    pass.framebuffer_set(&framebuffer_);
+    pass.shader_set(resolve_shader);
+    pass.bind_texture("scene_color_tx", &input_tx);
+    pass.bind_texture("rp_color_tx", &inst_.render_buffers.rp_color_tx);
+    pass.bind_texture("rp_value_tx", &inst_.render_buffers.rp_value_tx);
+    pass.bind_texture("depth_tx", &inst_.render_buffers.depth_tx);
+    pass.bind_texture("filter_graph_input_tx", &graph_input_tx_);
+    pass.bind_ubo(FILTER_OBJECT_INFO_BUF_SLOT, &filter_object_info_buf_);
+    pass.bind_ubo(FILTER_GRAPH_INPUT_BUF_SLOT, &filter_graph_input_buf_);
+    pass.bind_resources(inst_.uniform_data);
+    pass.barrier(GPU_BARRIER_TEXTURE_FETCH);
+    pass.draw_procedural(GPU_PRIM_TRIS, 1, 3);
+
+    inst_.manager->submit(pass, view);
+    GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH);
+    return ping_tx_;
+  };
+
+  if (filter_graph_enabled(*inst_.scene)) {
+    bNodeTree &filter_graph = *inst_.scene->eevee.filter_graph;
+    filter_graph.ensure_topology_cache();
+
+    const bNode *stage_output = filter_graph_stage_output_node_get(filter_graph, stage);
+    if (stage_output == nullptr) {
+      return input_tx;
+    }
+
+    const bNodeSocket *stage_input = stage_output->input_by_identifier("Image");
+    const bNodeLink *stage_link = (stage_input != nullptr) ?
+                                      filter_graph_socket_used_link(*stage_input) :
+                                      nullptr;
+    if (stage_link == nullptr) {
+      return black_graph_output();
+    }
+
+    Set<const bNode *> visiting;
+    Set<const bNode *> visited;
+    Vector<const bNode *> order;
+    if (!filter_graph_collect_dependencies(*stage_link->fromnode, visiting, visited, order)) {
+      inst_.info_append_i18n(
+          "Error: Filter Graph contains a cycle, invalid material, unsupported node, or too many inputs");
+      return black_graph_output();
+    }
+
+    Map<const bNodeSocket *, FilterGraphImageHandle> result_by_socket;
+    std::vector<std::unique_ptr<Texture>> graph_textures;
+
+    for (const bNode *node : order) {
+      if (node->type_legacy == EEVEE_FILTER_GRAPH_NODE_SCENE_COLOR) {
+        for (const bNodeSocket *socket : node->output_sockets()) {
+          result_by_socket.add_overwrite(socket, filter_graph_scene_output_handle(*socket));
+        }
+      }
+      else if (node->type_legacy == EEVEE_FILTER_GRAPH_NODE_AOV_INPUT) {
+        for (const bNodeSocket *socket : node->output_sockets()) {
+          result_by_socket.add_overwrite(
+              socket, filter_graph_aov_output_handle(*node, *socket, inst_.render_buffers.data));
+        }
+      }
+      else if (node->is_reroute()) {
+        const bNodeSocket *input_socket = static_cast<const bNodeSocket *>(node->inputs.first);
+        const bNodeLink *input_link = (input_socket != nullptr) ?
+                                          filter_graph_socket_used_link(*input_socket) :
+                                          nullptr;
+        const FilterGraphImageHandle input_handle =
+            (input_link != nullptr) ?
+                result_by_socket.lookup_default(input_link->fromsock, FilterGraphImageHandle::null()) :
+                FilterGraphImageHandle::null();
+        for (const bNodeSocket *socket : node->output_sockets()) {
+          result_by_socket.add_overwrite(socket, input_handle);
+        }
+      }
+      else if (node->type_legacy == EEVEE_FILTER_GRAPH_NODE_FILTER_MATERIAL) {
+        const FilterPassEntry *entry = nullptr;
+        for (const FilterPassEntry &candidate : entries_) {
+          if (candidate.graph_node == node) {
+            entry = &candidate;
+            break;
+          }
+        }
+        if (entry == nullptr) {
+          inst_.info_append_i18n("Error: Filter Graph material node did not compile");
+          return black_graph_output();
+        }
+
+        const NodeEeveeFilterGraphFilterMaterial *storage =
+            static_cast<const NodeEeveeFilterGraphFilterMaterial *>(node->storage);
+        if (storage == nullptr || storage->items_num > FILTER_GRAPH_INPUT_MAX) {
+          inst_.info_append_i18n("Error: Filter Graph material node has too many inputs");
+          return black_graph_output();
+        }
+
+        Vector<FilterGraphImageHandle> material_inputs;
+        material_inputs.reserve(storage->items_num);
+        for (const int i : IndexRange(storage->items_num)) {
+          const std::string identifier = "Image_" + std::to_string(storage->items[i].identifier);
+          const bNodeSocket *socket = node->input_by_identifier(identifier);
+          const bNodeLink *link = (socket != nullptr) ? filter_graph_socket_used_link(*socket) :
+                                                       nullptr;
+          material_inputs.append(
+              (link != nullptr) ?
+                  result_by_socket.lookup_default(link->fromsock, FilterGraphImageHandle::null()) :
+                  FilterGraphImageHandle::null());
+        }
+        prepare_filter_graph_inputs(material_inputs);
+
+        std::unique_ptr<Texture> target_tx = std::make_unique<Texture>(
+            "FilterMaterial.GraphIntermediate");
+        target_tx->ensure_2d(stage_format, extent, GPU_TEXTURE_USAGE_GENERAL);
+        render_filter_entry(*entry, input_tx, *target_tx);
+
+        const bNodeSocket *output_socket = node->output_by_identifier("Image");
+        if (output_socket != nullptr) {
+          result_by_socket.add_overwrite(output_socket,
+                                         FilterGraphImageHandle::graph_texture(
+                                             target_tx->gpu_texture()));
+        }
+        graph_textures.emplace_back(std::move(target_tx));
+      }
+    }
+
+    const FilterGraphImageHandle output_handle = result_by_socket.lookup_default(
+        stage_link->fromsock, FilterGraphImageHandle::null());
+    return resolve_filter_graph_handle(output_handle);
+  }
+
+  if (entries_.is_empty()) {
+    return input_tx;
+  }
+
+  ping_tx_.ensure_2d(stage_format, extent, GPU_TEXTURE_USAGE_GENERAL);
+  pong_tx_.ensure_2d(stage_format, extent, GPU_TEXTURE_USAGE_GENERAL);
+  clear_filter_graph_inputs();
 
   bool stage_needs_aov_snapshot = false;
   for (const FilterPassEntry &entry : entries_) {
-    if (entry.scene_filter != nullptr && entry.scene_filter->execution_stage == stage &&
+    if (entry.scene_filter != nullptr && entry.execution_stage == stage &&
         !entry.conflicting_aov_names.is_empty())
     {
       stage_needs_aov_snapshot = true;
@@ -670,50 +1270,14 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
 
   for (const int entry_index : entries_.index_range()) {
     if (entries_[entry_index].scene_filter == nullptr ||
-        entries_[entry_index].scene_filter->execution_stage != stage)
+        entries_[entry_index].execution_stage != stage)
     {
       continue;
     }
 
     Texture &target_tx = ((stage_entry_index & 1) == 0) ? ping_tx_ : pong_tx_;
     gpu::Texture *scene_color_tx = source_tx;
-    gpu::Texture *aov_color_tx = inst_.render_buffers.rp_color_tx;
-    gpu::Texture *aov_value_tx = inst_.render_buffers.rp_value_tx;
-
-    if (!entries_[entry_index].conflicting_aov_names.is_empty()) {
-      GPU_texture_copy(aov_color_snapshot_tx_, inst_.render_buffers.rp_color_tx);
-      GPU_texture_copy(aov_value_snapshot_tx_, inst_.render_buffers.rp_value_tx);
-      GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE | GPU_BARRIER_TEXTURE_FETCH |
-                         GPU_BARRIER_SHADER_IMAGE_ACCESS);
-      aov_color_tx = aov_color_snapshot_tx_;
-      aov_value_tx = aov_value_snapshot_tx_;
-    }
-
-    framebuffer_.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(target_tx));
-
-    PassSimple pass = {"FilterMaterial.Pass"};
-    pass.state_set(DRW_STATE_WRITE_COLOR);
-    pass.framebuffer_set(&framebuffer_);
-    update_filter_object_info_buffer(entries_[entry_index].gpumat);
-    pass.material_set(*inst_.manager, entries_[entry_index].gpumat);
-    pass.bind_texture("scene_color_tx", &scene_color_tx);
-    pass.bind_texture("rp_color_tx", &aov_color_tx);
-    pass.bind_texture("rp_value_tx", &aov_value_tx);
-    pass.bind_texture("depth_tx", &inst_.render_buffers.depth_tx);
-    pass.bind_texture("cryptomatte_tx", &inst_.render_buffers.cryptomatte_tx);
-    pass.bind_image(RBUFS_COLOR_SLOT, &inst_.render_buffers.rp_color_tx);
-    pass.bind_image(RBUFS_VALUE_SLOT, &inst_.render_buffers.rp_value_tx);
-    pass.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);
-    pass.bind_ubo(FILTER_OBJECT_INFO_BUF_SLOT, &filter_object_info_buf_);
-    pass.bind_resources(inst_.uniform_data);
-    pass.bind_resources(inst_.sampling);
-    pass.bind_resources(inst_.render_textures);
-    pass.barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_SHADER_IMAGE_ACCESS);
-    pass.draw_procedural(GPU_PRIM_TRIS, 1, 3);
-
-    GPU_memory_barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS | GPU_BARRIER_TEXTURE_FETCH);
-    inst_.manager->submit(pass, view);
-    GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH);
+    render_filter_entry(entries_[entry_index], scene_color_tx, target_tx);
 
     source_tx = target_tx;
     stage_entry_index++;

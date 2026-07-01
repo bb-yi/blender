@@ -1343,6 +1343,35 @@ namespace blender
     id_us_plus(&scene->compositing_node_group->id);
   }
 
+  static bool rna_Scene_eevee_filter_graph_poll(PointerRNA* /*ptr*/, PointerRNA value)
+  {
+    bNodeTree* ntree = static_cast<bNodeTree*>(value.data);
+    return ntree->type == NTREE_EEVEE_FILTER_GRAPH;
+  }
+
+  static void rna_Scene_eevee_filter_graph_set(PointerRNA* ptr,
+                                               const PointerRNA value,
+                                               ReportList* reports)
+  {
+    SceneEEVEE* eevee = static_cast<SceneEEVEE*>(ptr->data);
+    bNodeTree* ntree = static_cast<bNodeTree*>(value.data);
+    if (ntree && ntree->type != NTREE_EEVEE_FILTER_GRAPH)
+    {
+      BKE_reportf(
+        reports, RPT_ERROR, "Node tree '%s' is not an Eevee filter graph.", ntree->id.name + 2);
+      return;
+    }
+    if (eevee->filter_graph)
+    {
+      id_us_min(&eevee->filter_graph->id);
+    }
+    eevee->filter_graph = ntree;
+    if (eevee->filter_graph)
+    {
+      id_us_plus(&eevee->filter_graph->id);
+    }
+  }
+
   static std::optional<std::string> rna_SceneEEVEE_path(const PointerRNA* /*ptr*/)
   {
     return "eevee";
@@ -9350,6 +9379,18 @@ namespace blender
     RNA_def_property_struct_type(prop, "SceneFilterMaterial");
     RNA_def_property_ui_text(prop, "Filter Materials", "Scene-level Eevee filter material stack");
     rna_def_scene_eevee_filter_materials(brna, prop);
+
+    prop = RNA_def_property(srna, "filter_graph", PROP_POINTER, PROP_NONE);
+    RNA_def_property_pointer_sdna(prop, nullptr, "filter_graph");
+    RNA_def_property_struct_type(prop, "NodeTree");
+    RNA_def_property_flag(prop, PROP_EDITABLE | PROP_ID_REFCOUNT);
+    RNA_def_property_ui_text(prop, "Filter Graph", "Scene-level Eevee filter material graph");
+    RNA_def_property_update(prop, NC_SCENE | ND_NODES, "rna_Scene_set_update");
+    RNA_def_property_pointer_funcs(prop,
+                                   nullptr,
+                                   "rna_Scene_eevee_filter_graph_set",
+                                   nullptr,
+                                   "rna_Scene_eevee_filter_graph_poll");
 
     prop = RNA_def_property(srna, "active_filter_material_index", PROP_INT, PROP_NONE);
     RNA_def_property_int_funcs(prop,

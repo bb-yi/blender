@@ -7,6 +7,7 @@
 namespace blender {
 
 void register_node_tree_type_sh();
+void register_node_type_sh_filter_graph_input();
 
 void register_node_type_sh_group();
 
@@ -149,5 +150,11 @@ void register_node_type_sh_volume_scatter();
 void register_node_type_sh_volume_coefficients();
 void register_node_type_sh_wavelength();
 void register_node_type_sh_wireframe();
+
+void register_node_tree_type_eevee_filter_graph();
+void register_node_type_eevee_filter_graph_scene_color();
+void register_node_type_eevee_filter_graph_aov_input();
+void register_node_type_eevee_filter_graph_filter_material();
+void register_node_type_eevee_filter_graph_stage_output();
 
 }  // namespace blender

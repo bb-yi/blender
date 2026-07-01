@@ -61,6 +61,8 @@ set(SRC_GLSL_FRAG
   eevee_display_lightprobe_volume_frag.glsl
   eevee_film_copy_frag.glsl
   eevee_film_frag.glsl
+  eevee_filter_graph_input_copy_frag.glsl
+  eevee_filter_graph_resolve_frag.glsl
   eevee_filter_material_frag.glsl
   eevee_hiz_debug_frag.glsl
   eevee_light_culling_debug_frag.glsl

@@ -42,13 +42,43 @@ void input_aov_impl(uint hash, out TextureHandle color, out TextureHandle value)
                                TEXTURE_HANDLE_DEFAULT;
 }
 
+TextureHandle filter_graph_input_resolve(TextureHandle tex)
+{
+  if (tex.type != TEX_HANDLE_FILTER_GRAPH_INPUT) {
+    return tex;
+  }
+  if (tex.index < 0 || tex.index >= FILTER_GRAPH_INPUT_MAX) {
+    return TEXTURE_HANDLE_DEFAULT;
+  }
+
+  TextureHandle resolved = TextureHandle(filter_graph_input_buf[tex.index].type,
+                                         filter_graph_input_buf[tex.index].index);
+  return (resolved.type != TEX_HANDLE_FILTER_GRAPH_INPUT) ? resolved : TEXTURE_HANDLE_DEFAULT;
+}
+
+bool TextureHandle_stores_transmittance_alpha(TextureHandle tex)
+{
+  tex = filter_graph_input_resolve(tex);
+  return (tex.type == TEX_HANDLE_SCENE && tex.index == 0) ||
+         tex.type == TEX_HANDLE_FILTER_GRAPH_TEXTURE;
+}
+
+bool TextureHandle_is_scene_depth(TextureHandle tex)
+{
+  tex = filter_graph_input_resolve(tex);
+  return tex.type == TEX_HANDLE_SCENE && tex.index == 1;
+}
+
 float4 TextureHandle_eval(TextureHandle tex, float2 offset, bool texel_offset)
 {
+  tex = filter_graph_input_resolve(tex);
   if (tex.type == TEX_HANDLE_NULL) {
     return float4(0.0f);
   }
 
-  int2 extent = textureSize(scene_color_tx, 0);
+  int2 extent = (tex.type == TEX_HANDLE_FILTER_GRAPH_TEXTURE) ?
+                    int2(textureSize(filter_graph_input_tx, 0).xy) :
+                    textureSize(scene_color_tx, 0);
   int2 texel = int2(gl_FragCoord.xy);
   if (texel_offset) {
     texel += int2(offset);
@@ -66,6 +96,8 @@ float4 TextureHandle_eval(TextureHandle tex, float2 offset, bool texel_offset)
       return texelFetch(rp_color_tx, int3(texel, int(tex.index)), 0);
     case TEX_HANDLE_RP_VALUE:
       return float4(texelFetch(rp_value_tx, int3(texel, int(tex.index)), 0).rrr, 1.0f);
+    case TEX_HANDLE_FILTER_GRAPH_TEXTURE:
+      return texelFetch(filter_graph_input_tx, int3(texel, int(tex.index)), 0);
     case TEX_HANDLE_SCENE:
       if (tex.index == 0) {
         /* Return raw scene color. Alpha (transmittance) inversion is handled
@@ -101,11 +133,14 @@ float4 TextureHandle_eval(TextureHandle tex)
  * coordinate nodes, etc.), matching the old Scene Color Vector input. */
 float4 TextureHandle_eval_uv(TextureHandle tex, float2 uv)
 {
+  tex = filter_graph_input_resolve(tex);
   if (tex.type == TEX_HANDLE_NULL) {
     return float4(0.0f);
   }
 
-  int2 extent = textureSize(scene_color_tx, 0);
+  int2 extent = (tex.type == TEX_HANDLE_FILTER_GRAPH_TEXTURE) ?
+                    int2(textureSize(filter_graph_input_tx, 0).xy) :
+                    textureSize(scene_color_tx, 0);
   uv = clamp(uv, float2(0.0f), float2(1.0f));
   int2 texel = clamp(int2(uv * float2(extent)), int2(0), extent - int2(1));
   switch (tex.type) {
@@ -113,6 +148,8 @@ float4 TextureHandle_eval_uv(TextureHandle tex, float2 uv)
       return texelFetch(rp_color_tx, int3(texel, int(tex.index)), 0);
     case TEX_HANDLE_RP_VALUE:
       return float4(texelFetch(rp_value_tx, int3(texel, int(tex.index)), 0).rrr, 1.0f);
+    case TEX_HANDLE_FILTER_GRAPH_TEXTURE:
+      return texelFetch(filter_graph_input_tx, int3(texel, int(tex.index)), 0);
     case TEX_HANDLE_SCENE:
       if (tex.index == 0) {
         return texelFetch(scene_color_tx, texel, 0);

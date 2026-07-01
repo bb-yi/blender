@@ -139,6 +139,15 @@ static void shader_get_from_context(const bContext *C,
     }
   }
   else if (snode->shaderfrom == SNODE_SHADER_FILTER) {
+    if (snode->id != nullptr && GS(snode->id->name) == ID_MA) {
+      Material *ma = reinterpret_cast<Material *>(snode->id);
+      if (ma->eevee_domain == MA_EEVEE_DOMAIN_FILTER && ma->nodetree != nullptr) {
+        *r_from = nullptr;
+        *r_id = &ma->id;
+        *r_ntree = ma->nodetree;
+        return;
+      }
+    }
     Material *ma = scene_active_filter_material_get(scene);
     if (ma) {
       *r_from = nullptr;

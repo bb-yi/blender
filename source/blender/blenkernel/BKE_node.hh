@@ -226,6 +226,8 @@ struct NodeInsertLinkParams {
   bNodeLink &link;
   /** Optional context to allow for more advanced link insertion functionality. */
   bContext *C = nullptr;
+  /** Optional main data-base for non-context callers such as RNA link creation. */
+  Main *bmain = nullptr;
 };
 
 /**

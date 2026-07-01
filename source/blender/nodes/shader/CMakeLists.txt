@@ -19,6 +19,8 @@ set(INC_SYS
 )
 
 set(SRC
+  node_filter_graph_tree.cc
+  nodes/node_filter_graph_nodes.cc
   nodes/node_shader_add_shader.cc
   nodes/node_shader_ambient_occlusion.cc
   nodes/node_shader_attribute.cc
@@ -55,6 +57,7 @@ set(SRC
   nodes/node_shader_foreach_light.cc
   nodes/node_shader_filter_object_mask.cc
   nodes/node_shader_filter_object_info.cc
+  nodes/node_shader_filter_graph_input.cc
   nodes/node_shader_gamma.cc
   nodes/node_shader_geometry.cc
   nodes/node_shader_glsl_function.cc
@@ -159,6 +162,7 @@ set(SRC
 
   node_shader_register.hh
   node_shader_util.hh
+  include/NOD_filter_graph.hh
   include/NOD_sh_script_expression.hh
 )
 

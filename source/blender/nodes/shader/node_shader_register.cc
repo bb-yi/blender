@@ -11,6 +11,7 @@ namespace blender {
 void register_shader_nodes()
 {
   register_node_tree_type_sh();
+  register_node_tree_type_eevee_filter_graph();
 
   register_node_type_sh_group();
 
@@ -50,6 +51,7 @@ void register_shader_nodes()
   register_node_type_sh_emission();
   register_node_type_sh_fresnel();
   register_node_type_sh_foreach_light();
+  register_node_type_sh_filter_graph_input();
   register_node_type_sh_filter_object_mask();
   register_node_type_sh_filter_object_info();
   register_node_type_sh_gamma();
@@ -150,6 +152,11 @@ void register_shader_nodes()
   register_node_type_sh_volume_coefficients();
   register_node_type_sh_wavelength();
   register_node_type_sh_wireframe();
+
+  register_node_type_eevee_filter_graph_scene_color();
+  register_node_type_eevee_filter_graph_aov_input();
+  register_node_type_eevee_filter_graph_filter_material();
+  register_node_type_eevee_filter_graph_stage_output();
 }
 
 }  // namespace blender

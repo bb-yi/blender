@@ -18,12 +18,14 @@
 #include "BLO_read_write.hh"
 
 #include "BKE_image.hh"
+#include "BKE_main.hh"
 #include "BKE_main_invariants.hh"
 #include "BKE_node_runtime.hh"
 #include "BKE_node_tree_update.hh"
 #include "BKE_text.h"
 
 #include "DNA_material_types.h"
+#include "DNA_space_types.h"
 
 #include "BLI_fileops.h"
 #include "BLI_ghash.h"
@@ -51,6 +53,7 @@
 #include "BKE_context.hh"
 
 #include "UI_interface_layout.hh"
+#include "UI_interface_c.hh"
 #include "UI_resources.hh"
 
 namespace blender

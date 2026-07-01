@@ -40,12 +40,18 @@ struct TextureHandle {
 
 /* Scene Color is a filter-domain handle. Keep it outside the existing NPR/world ranges. */
 #define TEX_HANDLE_SCENE 30u
+#define TEX_HANDLE_FILTER_GRAPH_INPUT 31u
+#define TEX_HANDLE_FILTER_GRAPH_TEXTURE 32u
 
 #define TEXTURE_HANDLE_DEFAULT TextureHandle(0u, 0)
 
 #if defined(NPR_SHADER) || defined(MAT_FILTER)
 float4 TextureHandle_eval(TextureHandle tex, float2 offset, bool texel_offset);
 float4 TextureHandle_eval(TextureHandle tex);
+#  if defined(MAT_FILTER)
+bool TextureHandle_stores_transmittance_alpha(TextureHandle tex);
+bool TextureHandle_is_scene_depth(TextureHandle tex);
+#  endif
 #else
 float4 TextureHandle_eval(TextureHandle tex, float2 offset, bool texel_offset)
 {

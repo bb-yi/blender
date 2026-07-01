@@ -19,7 +19,7 @@ COMPUTE_SHADER_CREATE_INFO(eevee_light_shadow_setup)
 
 float shadow_directional_coverage_get(int level, float scale)
 {
-  return exp2(level) * scale;
+  return exp2(float(level)) * scale;
 }
 
 void orthographic_sync(int tilemap_id,

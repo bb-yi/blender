@@ -839,9 +839,6 @@ static void version_rename_npr_image_sample_vector_socket(bNode &node)
     if (STREQ(socket->identifier, "Offset")) {
       STRNCPY(socket->identifier, "Vector");
     }
-    if (STREQ(socket->name, "Offset")) {
-      STRNCPY(socket->name, "Vector");
-    }
   }
 }
 
@@ -921,6 +918,7 @@ static void version_convert_scene_color_node(bNodeTree &ntree, bNode &scene_colo
         ntree, sample_node, SOCK_IN, "NodeSocketImage", "Image");
     bNodeSocket &sample_vector_in = version_node_add_socket(
         ntree, sample_node, SOCK_IN, "NodeSocketVector", "Vector");
+    STRNCPY(sample_vector_in.name, "Offset");
     bNodeSocket &sample_color_out = version_node_add_socket(
         ntree, sample_node, SOCK_OUT, "NodeSocketColor", "Color");
     bNodeSocket &sample_alpha_out = version_node_add_socket(

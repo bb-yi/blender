@@ -357,6 +357,10 @@ ShaderGroups ShaderModule::static_shaders_load(const ShaderGroups request_bits,
     request(AMBIENT_OCCLUSION_SHADERS, AS_SPAN(shader_list));
   }
   {
+    const eShaderType shader_list[] = {FILTER_GRAPH_INPUT_COPY, FILTER_GRAPH_RESOLVE};
+    request(FILTER_GRAPH_SHADERS, AS_SPAN(shader_list));
+  }
+  {
     const eShaderType shader_list[] = {RENDERPASS_CLEAR,
                                        RENDER_TEXTURE_EXTRACT_RGBA16F,
                                        RENDER_TEXTURE_EXTRACT_RGBA32F,
@@ -594,6 +598,10 @@ const char *ShaderModule::static_shader_create_info_name_get(eShaderType shader_
       return "eevee_film_pass_convert_color";
     case FILM_PASS_CONVERT_CRYPTOMATTE:
       return "eevee_film_pass_convert_cryptomatte";
+    case FILTER_GRAPH_INPUT_COPY:
+      return "eevee_filter_graph_input_copy";
+    case FILTER_GRAPH_RESOLVE:
+      return "eevee_filter_graph_resolve";
     case DEFERRED_COMBINE:
       return "eevee_deferred_combine";
     case DEFERRED_LIGHT_SINGLE:

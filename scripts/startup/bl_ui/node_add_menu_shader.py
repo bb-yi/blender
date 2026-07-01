@@ -320,7 +320,6 @@ class NODE_MT_shader_node_input_base(node_add_menu.NodeMenu):
             context, layout, "ShaderNodeTexCoord",
             ["Generated", "Normal", "UV", "Object", "Camera", "Window", "Reflection"],
         )
-        self.node_operator(layout, "ShaderNodeSceneColor", poll=filter_eevee_shader_nodes_poll(context))
         self.node_operator(layout, "ShaderNodeUVAlongStroke", poll=line_style_shader_nodes_poll(context))
         self.node_operator(layout, "ShaderNodeUVMap")
         self.node_operator(layout, "ShaderNodeValue")

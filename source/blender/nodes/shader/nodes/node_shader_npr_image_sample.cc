@@ -14,7 +14,7 @@ namespace nodes::node_shader_npr_image_sample_cc {
 static void node_declare(NodeDeclarationBuilder &b)
 {
   b.add_input<decl::Image>("Image").hide_value();
-  b.add_input<decl::Vector>("Vector").hide_value();
+  b.add_input<decl::Vector>("Offset", "Vector").hide_value();
   b.add_output<decl::Color>("Color");
   b.add_output<decl::Float>("Alpha");
 }
