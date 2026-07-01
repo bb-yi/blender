@@ -449,7 +449,6 @@ NODE_STORAGE_FUNCS(NodeEeveeFilterGraphFilterMaterial);
 
 static void node_declare(NodeDeclarationBuilder &b)
 {
-  b.is_function_node();
   b.use_custom_socket_order();
   b.allow_any_socket_order();
   b.add_default_layout();

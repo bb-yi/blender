@@ -181,5 +181,5 @@ void main()
   attrib_load(WorldPoint{0});
 
   float4 filter_result = nodetree_filter();
-  out_color = float4(filter_result.rgb, saturate(1.0f - filter_result.a));
+  out_color = filter_result;
 }

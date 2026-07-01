@@ -188,7 +188,20 @@ static void get_context_path_node_shader(const bContext &C,
       ui::context_path_add_generic(path, *RNA_Material, mat);
     }
 #endif
-    context_path_add_node_tree_and_node_groups(snode, path, true);
+    else if (snode.shaderfrom == SNODE_SHADER_FILTER) {
+      Scene *scene = CTX_data_scene(&C);
+      if (scene != nullptr && scene->eevee.filter_graph != nullptr) {
+        ui::context_path_add_generic(path,
+                                     *RNA_NodeTree,
+                                     scene->eevee.filter_graph,
+                                     ICON_NODETREE,
+                                     tree_path_handle_func(0));
+      }
+      context_path_add_node_tree_and_node_groups(snode, path, true);
+    }
+    else {
+      context_path_add_node_tree_and_node_groups(snode, path, true);
+    }
   }
 }
 

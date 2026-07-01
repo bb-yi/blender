@@ -101,15 +101,20 @@ static void filter_material_make_active_for_header(Scene &scene, Material &mater
 
 static wmOperatorStatus node_filter_graph_return_exec(bContext *C)
 {
-  Scene *scene = CTX_data_scene(C);
   SpaceNode *snode = CTX_wm_space_node(C);
   ARegion *region = CTX_wm_region(C);
-  if (scene == nullptr || snode == nullptr || scene->eevee.filter_graph == nullptr) {
+  if (snode == nullptr || region == nullptr) {
     return OPERATOR_CANCELLED;
   }
 
-  STRNCPY_UTF8(snode->tree_idname, "EeveeFilterGraphNodeTree");
-  ED_node_tree_start(region, snode, scene->eevee.filter_graph, &scene->id, nullptr);
+  ED_node_tree_pop(region, snode);
+
+  Scene *scene = CTX_data_scene(C);
+  if (scene != nullptr && snode->edittree == scene->eevee.filter_graph) {
+    STRNCPY_UTF8(snode->tree_idname, "EeveeFilterGraphNodeTree");
+    snode->shaderfrom = SNODE_SHADER_NONE;
+  }
+
   WM_event_add_notifier(C, NC_SCENE | ND_NODES, nullptr);
   WM_event_add_notifier(C, NC_NODE | ND_NODE_GIZMO, nullptr);
   return OPERATOR_FINISHED;
@@ -136,7 +141,11 @@ static wmOperatorStatus node_filter_pass_edit_material_exec(bContext *C, bNode &
   ED_preview_kill_jobs(CTX_wm_manager(C), CTX_data_main(C));
   STRNCPY_UTF8(snode->tree_idname, "ShaderNodeTree");
   snode->shaderfrom = SNODE_SHADER_FILTER;
-  ED_node_tree_start(region, snode, material->nodetree, &material->id, nullptr);
+  ED_node_tree_push(region, snode, material->nodetree, &node);
+  bNodeTreePath *path = static_cast<bNodeTreePath *>(snode->treepath.last);
+  if (path != nullptr) {
+    STRNCPY_UTF8(path->display_name, material->id.name + 2);
+  }
   WM_event_add_notifier(C, NC_MATERIAL | ND_NODES, &material->id);
   WM_event_add_notifier(C, NC_NODE | ND_NODE_GIZMO, nullptr);
   return OPERATOR_FINISHED;

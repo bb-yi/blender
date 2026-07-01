@@ -17,8 +17,9 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_filter_graph_resolve)
 
 float4 filter_graph_debug_color(float3 color)
 {
-  /* EEVEE combined textures store alpha as transmittance before film. */
-  return float4(color, 0.0f);
+  /* Resolve output goes straight to the stage framebuffer; alpha must be opaque
+   * for depth/normal/position debug visualization. */
+  return float4(color, 1.0f);
 }
 
 float4 filter_graph_visualize_scene_depth(int2 texel, int2 extent)
