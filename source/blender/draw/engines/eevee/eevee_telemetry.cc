@@ -16,8 +16,10 @@
 
 #include "DEG_depsgraph_query.hh"
 
+#include "BKE_node_legacy_types.hh"
 #include "BKE_scene_runtime.hh"
 
+#include "DNA_node_types.h"
 #include "DNA_scene_types.h"
 
 #include "WM_api.hh"
@@ -55,6 +57,24 @@ static std::string sample_progress_string(const TelemetryFrameRecord &record)
     return fmt::format("{}/Continuous", current);
   }
   return fmt::format("{}/{}", current, record.sample_count);
+}
+
+static int filter_graph_pass_count(const Scene &scene)
+{
+  const bNodeTree *filter_graph = scene.eevee.filter_graph;
+  if (filter_graph == nullptr || filter_graph->type != NTREE_EEVEE_FILTER_GRAPH) {
+    return 0;
+  }
+
+  int count = 0;
+  for (const bNode *node = static_cast<const bNode *>(filter_graph->nodes.first); node != nullptr;
+       node = node->next)
+  {
+    if (node->type_legacy == EEVEE_FILTER_GRAPH_NODE_FILTER_MATERIAL) {
+      count++;
+    }
+  }
+  return count;
 }
 
 static const char *sample_status_string(const TelemetryFrameRecord &record)
@@ -269,7 +289,7 @@ void TelemetryModule::snapshot_features()
   features.has_motion_blur = inst_.motion_blur.postfx_enabled();
   features.has_volume = inst_.volume.enabled();
   features.has_raytracing = inst_.raytracing.use_raytracing();
-  features.filter_material_count = BLI_listbase_count(&inst_.scene->eevee.filter_materials);
+  features.filter_material_count = filter_graph_pass_count(*inst_.scene);
   features.render_texture_count = BLI_listbase_count(&inst_.scene->eevee.render_textures);
   features.light_count = inst_.lights.light_count();
   features.probe_count = inst_.light_probes.probe_count();

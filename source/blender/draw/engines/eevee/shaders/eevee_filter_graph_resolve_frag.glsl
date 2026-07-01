@@ -15,26 +15,55 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_filter_graph_resolve)
 #define TEX_HANDLE_RP_COLOR 1u
 #define TEX_HANDLE_RP_VALUE 2u
 
-float4 filter_graph_debug_color(float3 color)
+float filter_graph_scene_depth_value(float2 uv)
 {
-  /* Resolve output goes straight to the stage framebuffer; alpha must be opaque
-   * for depth/normal/position debug visualization. */
-  return float4(color, 1.0f);
+  return reverse_z::read(texture(depth_tx, uv).r);
 }
 
-float4 filter_graph_visualize_scene_depth(int2 texel, int2 extent)
+float filter_graph_scene_depth_linear(float2 uv)
 {
-  float depth = reverse_z::read(texelFetch(depth_tx, texel, 0).r);
-  bool has_surface = depth < 1.0f;
-  float linear_depth = has_surface ? -drw_depth_screen_to_view(depth) : 0.0f;
-  if (!has_surface || linear_depth <= 0.0f) {
-    return filter_graph_debug_color(float3(0.0f));
+  return -drw_depth_screen_to_view(filter_graph_scene_depth_value(uv));
+}
+
+float4 filter_graph_scene_depth_color(float2 uv)
+{
+  float depth = filter_graph_scene_depth_linear(uv);
+  return float4(depth.xxx, 1.0f);
+}
+
+float4 filter_graph_scene_normal_color(int2 texel, float2 uv)
+{
+  if (uniform_buf.render_pass.normal_id >= 0) {
+    return float4(texelFetch(rp_color_tx, int3(texel, uniform_buf.render_pass.normal_id), 0).rgb,
+                  1.0f);
   }
-  float visible_depth = linear_depth / max(drw_view_far(), 1e-5f);
-  return filter_graph_debug_color(float3(saturate(visible_depth)));
+
+  float depth = filter_graph_scene_depth_value(uv);
+  if (depth >= 1.0f) {
+    return float4(0.0f);
+  }
+
+  float3 position = drw_point_screen_to_world(float3(uv, depth));
+  float3 normal = normalize(cross(gpu_dfdx(position), gpu_dfdy(position)));
+  return float4(normal, 1.0f);
 }
 
-float4 filter_graph_visualize_handle(TextureHandle tex)
+float4 filter_graph_scene_position_color(int2 texel, float2 uv)
+{
+  if (uniform_buf.render_pass.position_id >= 0) {
+    return float4(texelFetch(rp_color_tx, int3(texel, uniform_buf.render_pass.position_id), 0).rgb,
+                  1.0f);
+  }
+
+  float depth = filter_graph_scene_depth_value(uv);
+  if (depth >= 1.0f) {
+    return float4(0.0f);
+  }
+
+  return float4(drw_point_screen_to_world(float3(uv, depth)), 1.0f);
+}
+
+float4 filter_graph_eval_handle(TextureHandle tex)
 {
   int2 extent = (tex.type == TEX_HANDLE_FILTER_GRAPH_TEXTURE) ?
                     int2(textureSize(filter_graph_input_tx, 0).xy) :
@@ -43,12 +72,11 @@ float4 filter_graph_visualize_handle(TextureHandle tex)
 
   switch (tex.type) {
     case TEX_HANDLE_RP_COLOR: {
-      float4 color = texelFetch(rp_color_tx, int3(texel, int(tex.index)), 0);
-      return filter_graph_debug_color(color.rgb);
+      return texelFetch(rp_color_tx, int3(texel, int(tex.index)), 0);
     }
     case TEX_HANDLE_RP_VALUE: {
       float value = texelFetch(rp_value_tx, int3(texel, int(tex.index)), 0).r;
-      return filter_graph_debug_color(value.xxx);
+      return float4(value.xxx, 1.0f);
     }
     case TEX_HANDLE_FILTER_GRAPH_TEXTURE:
       return texelFetch(filter_graph_input_tx, int3(texel, int(tex.index)), 0);
@@ -57,34 +85,44 @@ float4 filter_graph_visualize_handle(TextureHandle tex)
         return texelFetch(scene_color_tx, texel, 0);
       }
       if (tex.index == 1) {
-        return filter_graph_visualize_scene_depth(texel, extent);
-      }
-      if (tex.index == 2 && uniform_buf.render_pass.normal_id >= 0) {
-        float3 normal = texelFetch(
-                            rp_color_tx, int3(texel, uniform_buf.render_pass.normal_id), 0)
-                            .rgb;
-        return filter_graph_debug_color(normal * 0.5f + 0.5f);
+        float2 uv = (float2(texel) + 0.5f) / float2(extent);
+        return filter_graph_scene_depth_color(uv);
       }
       if (tex.index == 2) {
-        return filter_graph_debug_color(float3(1.0f, 0.0f, 1.0f));
-      }
-      if (tex.index == 4 && uniform_buf.render_pass.position_id >= 0) {
-        float3 position = texelFetch(
-                              rp_color_tx, int3(texel, uniform_buf.render_pass.position_id), 0)
-                              .rgb;
-        return filter_graph_debug_color(fract(abs(position) * 0.1f));
+        float2 uv = (float2(texel) + 0.5f) / float2(extent);
+        return filter_graph_scene_normal_color(texel, uv);
       }
       if (tex.index == 4) {
-        return filter_graph_debug_color(float3(0.0f, 1.0f, 1.0f));
+        float2 uv = (float2(texel) + 0.5f) / float2(extent);
+        return filter_graph_scene_position_color(texel, uv);
       }
       break;
   }
 
-  return filter_graph_debug_color(float3(0.0f));
+  return float4(0.0f);
+}
+
+float4 filter_graph_resolve_stage_output(TextureHandle tex)
+{
+  float4 color = filter_graph_eval_handle(tex);
+
+  if (tex.type == TEX_HANDLE_FILTER_GRAPH_TEXTURE) {
+    return color;
+  }
+
+  float opacity = color.a;
+  if (tex.type == TEX_HANDLE_SCENE && tex.index == 0) {
+    opacity = saturate(1.0f - color.a);
+  }
+  else if (tex.type == TEX_HANDLE_SCENE && tex.index == 1) {
+    opacity = color.r;
+  }
+
+  return float4(color.rgb, saturate(1.0f - opacity));
 }
 
 void main()
 {
   TextureHandle tex = TextureHandle(filter_graph_input_buf[0].type, filter_graph_input_buf[0].index);
-  out_color = filter_graph_visualize_handle(tex);
+  out_color = filter_graph_resolve_stage_output(tex);
 }

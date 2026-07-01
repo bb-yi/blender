@@ -64,17 +64,6 @@ static bool shader_tree_poll(const bContext *C, bke::bNodeTreeType * /*treetype*
           !BKE_scene_use_shading_nodes_custom(scene));
 }
 
-static Material *scene_active_filter_material_get(Scene *scene)
-{
-  if (scene == nullptr) {
-    return nullptr;
-  }
-
-  auto *filter_entry = static_cast<SceneFilterMaterial *>(
-      BLI_findlink(&scene->eevee.filter_materials, scene->eevee.active_filter_material_index));
-  return (filter_entry != nullptr) ? filter_entry->material : nullptr;
-}
-
 static void shader_get_from_context(const bContext *C,
                                     bke::bNodeTreeType * /*treetype*/,
                                     bNodeTree **r_ntree,
@@ -141,18 +130,12 @@ static void shader_get_from_context(const bContext *C,
   else if (snode->shaderfrom == SNODE_SHADER_FILTER) {
     if (snode->id != nullptr && GS(snode->id->name) == ID_MA) {
       Material *ma = reinterpret_cast<Material *>(snode->id);
-      if (ma->eevee_domain == MA_EEVEE_DOMAIN_FILTER && ma->nodetree != nullptr) {
+      if (ma->eevee_domain == MA_EEVEE_DOMAIN_FILTER) {
         *r_from = nullptr;
         *r_id = &ma->id;
         *r_ntree = ma->nodetree;
         return;
       }
-    }
-    Material *ma = scene_active_filter_material_get(scene);
-    if (ma) {
-      *r_from = nullptr;
-      *r_id = &ma->id;
-      *r_ntree = ma->nodetree;
     }
   }
 }

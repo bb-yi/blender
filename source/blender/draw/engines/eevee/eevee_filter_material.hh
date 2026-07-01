@@ -40,11 +40,9 @@ class Instance;
 class FilterMaterialModule {
  private:
   struct FilterPassEntry {
-    SceneFilterMaterial *scene_filter = nullptr;
     const bNode *graph_node = nullptr;
     blender::Material *material = nullptr;
     GPUMaterial *gpumat = nullptr;
-    SceneEEVEEFilterExecutionStage execution_stage = SCE_EEVEE_FILTER_STAGE_BEFORE_POSTFX;
     bool uses_aov_input = false;
     bool uses_aov_output = false;
     blender::Vector<std::string> conflicting_aov_names;

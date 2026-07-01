@@ -89,28 +89,16 @@ static void propagate_node_tree_changes(Main &bmain,
          scene = scene->id.next ? reinterpret_cast<Scene *>(scene->id.next) : nullptr)
     {
       bool uses_filter_material = false;
-      for (SceneFilterMaterial *filter_entry = static_cast<SceneFilterMaterial *>(
-               scene->eevee.filter_materials.first);
-           filter_entry != nullptr;
-           filter_entry = filter_entry->next)
-      {
-        if (filter_entry->material == &material) {
-          uses_filter_material = true;
-          break;
-        }
-      }
-      if (!uses_filter_material) {
-        bNodeTree *filter_graph = scene->eevee.filter_graph;
-        if (filter_graph != nullptr && filter_graph->type == NTREE_EEVEE_FILTER_GRAPH) {
-          for (bNode *node = static_cast<bNode *>(filter_graph->nodes.first); node != nullptr;
-               node = node->next)
+      bNodeTree *filter_graph = scene->eevee.filter_graph;
+      if (filter_graph != nullptr && filter_graph->type == NTREE_EEVEE_FILTER_GRAPH) {
+        for (bNode *node = static_cast<bNode *>(filter_graph->nodes.first); node != nullptr;
+             node = node->next)
+        {
+          if (node->type_legacy == EEVEE_FILTER_GRAPH_NODE_FILTER_MATERIAL &&
+              node->id == &material.id)
           {
-            if (node->type_legacy == EEVEE_FILTER_GRAPH_NODE_FILTER_MATERIAL &&
-                node->id == &material.id)
-            {
-              uses_filter_material = true;
-              break;
-            }
+            uses_filter_material = true;
+            break;
           }
         }
       }

@@ -447,11 +447,13 @@ namespace filter_material {
 
 NODE_STORAGE_FUNCS(NodeEeveeFilterGraphFilterMaterial);
 
+static void draw_buttons(ui::Layout &layout, bContext *C, PointerRNA *ptr);
+
 static void node_declare(NodeDeclarationBuilder &b)
 {
   b.use_custom_socket_order();
   b.allow_any_socket_order();
-  b.add_default_layout();
+  b.add_layout(draw_buttons);
 
   const bNode *node = b.node_or_null();
   const bNodeTree *tree = b.tree_or_null();
@@ -484,7 +486,7 @@ static void node_init(bNodeTree * /*tree*/, bNode *node)
   data->resolution_scale = 1.0f;
   node->storage = data;
   node->flag |= NODE_OPTIONS;
-  node->width = 220.0f;
+  node->width = 240.0f;
 }
 
 static void node_free_storage(bNode *node)
@@ -503,40 +505,29 @@ static void node_copy_storage(bNodeTree * /*dst_tree*/, bNode *dst_node, const b
   dst_node->flag |= NODE_OPTIONS;
 }
 
+static void node_update(bNodeTree * /*tree*/, bNode *node)
+{
+  node->flag |= NODE_OPTIONS;
+  node->width = std::max(node->width, 240.0f);
+}
+
 static void draw_buttons(ui::Layout &layout, bContext *C, PointerRNA *ptr)
 {
-  bNode &node = *ptr->data_as<bNode>();
-
-  ui::Layout &id_row = layout.row(false);
-  template_id(&id_row, C, ptr, "material", nullptr, nullptr, nullptr);
-
-  ui::Layout &tools_row = layout.row(true);
-  tools_row.op("node.filter_pass_new_material", IFACE_("New"), ICON_ADD);
-  tools_row.op("node.filter_pass_clear_material", IFACE_("Clear"), ICON_X);
-
-  ui::Layout &edit_row = tools_row.row(true);
-  edit_row.active_set(node.id != nullptr);
-  edit_row.op("NODE_OT_filter_pass_edit_material", IFACE_("Edit"), ICON_NODETREE);
-  PointerRNA op_ptr = tools_row.op(
-      EeveeFilterGraphMaterialItemsAccessor::operator_idnames::sync_interface,
-      IFACE_("Sync"),
-      ICON_FILE_REFRESH);
-  RNA_int_set(&op_ptr, "node_identifier", node.identifier);
+  layout.use_property_split_set(false);
+  layout.use_property_decorate_set(false);
+  ui::Layout &material_row = layout.row(true);
+  template_id(&material_row, C, ptr, "material", "node.filter_pass_new_material", nullptr, nullptr);
 }
 
 static void draw_buttons_ex(ui::Layout &layout, bContext *C, PointerRNA *ptr)
 {
-  layout.prop(ptr, "material", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+  layout.use_property_split_set(false);
+  layout.use_property_decorate_set(false);
+  ui::Layout &material_row = layout.row(true);
+  template_id(&material_row, C, ptr, "material", "node.filter_pass_new_material", nullptr, nullptr);
+
   bNodeTree &ntree = *reinterpret_cast<bNodeTree *>(ptr->owner_id);
   bNode &node = *ptr->data_as<bNode>();
-  ui::Layout &row = layout.row(true);
-  row.op("node.filter_pass_new_material", IFACE_("New"), ICON_ADD);
-  row.op("node.filter_pass_clear_material", IFACE_("Clear"), ICON_X);
-  row.op("NODE_OT_filter_pass_edit_material", IFACE_("Edit"), ICON_NODETREE);
-  PointerRNA op_ptr = layout.op(EeveeFilterGraphMaterialItemsAccessor::operator_idnames::sync_interface,
-                                IFACE_("Sync Interface"),
-                                ICON_FILE_REFRESH);
-  RNA_int_set(&op_ptr, "node_identifier", node.identifier);
   if (filter_graph_filter_pass_has_pass_input(node)) {
     if (ui::Layout *panel = layout.panel(C, "filter_graph_inputs", false, IFACE_("Inputs"))) {
       socket_items::ui::draw_items_list_with_operators<EeveeFilterGraphMaterialItemsAccessor>(
@@ -708,6 +699,7 @@ void register_node_type_eevee_filter_graph_filter_material()
   ntype.nclass = NODE_CLASS_SHADER;
   ntype.declare = file_ns::filter_material::node_declare;
   ntype.initfunc = file_ns::filter_material::node_init;
+  ntype.updatefunc = file_ns::filter_material::node_update;
   ntype.insert_link = file_ns::filter_material::node_insert_link;
   ntype.labelfunc = file_ns::filter_material::node_label;
   ntype.draw_buttons = file_ns::filter_material::draw_buttons;

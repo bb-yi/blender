@@ -12,6 +12,7 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_filter_material)
 #include "draw_view_lib.glsl"
 #include "eevee_attributes_world_lib.glsl"
 #include "eevee_nodetree_frag_lib.glsl"
+#include "eevee_reverse_z_lib.glsl"
 #include "eevee_sampling_lib.glsl"
 #include "eevee_surf_lib.glsl"
 
@@ -59,14 +60,61 @@ TextureHandle filter_graph_input_resolve(TextureHandle tex)
 bool TextureHandle_stores_transmittance_alpha(TextureHandle tex)
 {
   tex = filter_graph_input_resolve(tex);
-  return (tex.type == TEX_HANDLE_SCENE && tex.index == 0) ||
-         tex.type == TEX_HANDLE_FILTER_GRAPH_TEXTURE;
+  return tex.type == TEX_HANDLE_SCENE && tex.index == 0;
 }
 
 bool TextureHandle_is_scene_depth(TextureHandle tex)
 {
   tex = filter_graph_input_resolve(tex);
   return tex.type == TEX_HANDLE_SCENE && tex.index == 1;
+}
+
+float filter_scene_depth_value(float2 uv)
+{
+  return reverse_z::read(texture(depth_tx, uv).r);
+}
+
+float filter_scene_depth_linear(float2 uv)
+{
+  return -drw_depth_screen_to_view(filter_scene_depth_value(uv));
+}
+
+float4 filter_scene_depth_color(float2 uv)
+{
+  float depth = filter_scene_depth_linear(uv);
+  return float4(depth.xxx, 1.0f);
+}
+
+float4 filter_scene_normal_color(int2 texel, float2 uv)
+{
+  if (uniform_buf.render_pass.normal_id >= 0) {
+    return float4(texelFetch(rp_color_tx, int3(texel, uniform_buf.render_pass.normal_id), 0).rgb,
+                  1.0f);
+  }
+
+  float depth = filter_scene_depth_value(uv);
+  if (depth >= 1.0f) {
+    return float4(0.0f);
+  }
+
+  float3 position = drw_point_screen_to_world(float3(uv, depth));
+  float3 normal = normalize(cross(gpu_dfdx(position), gpu_dfdy(position)));
+  return float4(normal, 1.0f);
+}
+
+float4 filter_scene_position_color(int2 texel, float2 uv)
+{
+  if (uniform_buf.render_pass.position_id >= 0) {
+    return float4(texelFetch(rp_color_tx, int3(texel, uniform_buf.render_pass.position_id), 0).rgb,
+                  1.0f);
+  }
+
+  float depth = filter_scene_depth_value(uv);
+  if (depth >= 1.0f) {
+    return float4(0.0f);
+  }
+
+  return float4(drw_point_screen_to_world(float3(uv, depth)), 1.0f);
 }
 
 float4 TextureHandle_eval(TextureHandle tex, float2 offset, bool texel_offset)
@@ -106,16 +154,15 @@ float4 TextureHandle_eval(TextureHandle tex, float2 offset, bool texel_offset)
       }
       if (tex.index == 1) {
         float2 uv = (float2(texel) + 0.5f) / float2(extent);
-        float depth = -drw_depth_screen_to_view(1.0f - texture(depth_tx, uv).r);
-        return float4(depth, depth, depth, 1.0f);
+        return filter_scene_depth_color(uv);
       }
-      if (tex.index == 2 && uniform_buf.render_pass.normal_id >= 0) {
-        return float4(texelFetch(rp_color_tx, int3(texel, uniform_buf.render_pass.normal_id), 0).rgb,
-                      1.0f);
+      if (tex.index == 2) {
+        float2 uv = (float2(texel) + 0.5f) / float2(extent);
+        return filter_scene_normal_color(texel, uv);
       }
-      if (tex.index == 4 && uniform_buf.render_pass.position_id >= 0) {
-        return float4(texelFetch(rp_color_tx, int3(texel, uniform_buf.render_pass.position_id), 0).rgb,
-                      1.0f);
+      if (tex.index == 4) {
+        float2 uv = (float2(texel) + 0.5f) / float2(extent);
+        return filter_scene_position_color(texel, uv);
       }
       return float4(0.0f);
     default:
@@ -155,16 +202,13 @@ float4 TextureHandle_eval_uv(TextureHandle tex, float2 uv)
         return texelFetch(scene_color_tx, texel, 0);
       }
       if (tex.index == 1) {
-        float depth = -drw_depth_screen_to_view(1.0f - texture(depth_tx, uv).r);
-        return float4(depth, depth, depth, 1.0f);
+        return filter_scene_depth_color(uv);
       }
-      if (tex.index == 2 && uniform_buf.render_pass.normal_id >= 0) {
-        return float4(texelFetch(rp_color_tx, int3(texel, uniform_buf.render_pass.normal_id), 0).rgb,
-                      1.0f);
+      if (tex.index == 2) {
+        return filter_scene_normal_color(texel, uv);
       }
-      if (tex.index == 4 && uniform_buf.render_pass.position_id >= 0) {
-        return float4(texelFetch(rp_color_tx, int3(texel, uniform_buf.render_pass.position_id), 0).rgb,
-                      1.0f);
+      if (tex.index == 4) {
+        return filter_scene_position_color(texel, uv);
       }
       return float4(0.0f);
     default:
@@ -181,5 +225,7 @@ void main()
   attrib_load(WorldPoint{0});
 
   float4 filter_result = nodetree_filter();
-  out_color = filter_result;
+  /* User-facing Filter Output alpha is opacity. EEVEE stores alpha as transmittance until film
+   * converts it back to opacity, so write the inverse here. */
+  out_color = float4(filter_result.rgb, saturate(1.0f - filter_result.a));
 }

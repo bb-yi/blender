@@ -86,9 +86,110 @@ struct FilterGraphImageHandle {
   }
 };
 
+static bool filter_material_is_valid(blender::Material *material);
+static blender::Material *filter_graph_node_material(const bNode &node);
+
 static bool filter_graph_enabled(const Scene &scene)
 {
   return scene.eevee.filter_graph != nullptr;
+}
+
+static const bNodeLink *filter_graph_socket_used_link(const bNodeSocket &socket)
+{
+  for (const bNodeLink *link : socket.directly_linked_links()) {
+    if (link->is_used() && link->fromnode != nullptr && link->fromsock != nullptr) {
+      return link;
+    }
+  }
+  return nullptr;
+}
+
+static const bNode *filter_graph_stage_output_node_get(const bNodeTree &ntree,
+                                                       const SceneEEVEEFilterExecutionStage stage)
+{
+  for (const bNode *node : ntree.all_nodes()) {
+    if (node->type_legacy != EEVEE_FILTER_GRAPH_NODE_STAGE_OUTPUT || node->is_muted() ||
+        node->custom1 != stage || !(node->flag & NODE_DO_OUTPUT))
+    {
+      continue;
+    }
+    return node;
+  }
+  return nullptr;
+}
+
+static bool filter_graph_collect_dependencies(const bNode &node,
+                                              Set<const bNode *> &visiting,
+                                              Set<const bNode *> &visited,
+                                              Vector<const bNode *> &r_order)
+{
+  if (visited.contains(&node)) {
+    return true;
+  }
+  if (visiting.contains(&node)) {
+    return false;
+  }
+  visiting.add(&node);
+
+  auto collect_input_socket = [&](const bNodeSocket *socket) -> bool {
+    if (socket == nullptr) {
+      return true;
+    }
+    const bNodeLink *link = filter_graph_socket_used_link(*socket);
+    return link == nullptr || filter_graph_collect_dependencies(
+                                  *link->fromnode, visiting, visited, r_order);
+  };
+
+  if (node.is_reroute()) {
+    if (!collect_input_socket(static_cast<const bNodeSocket *>(node.inputs.first))) {
+      return false;
+    }
+  }
+  else if (node.type_legacy == EEVEE_FILTER_GRAPH_NODE_FILTER_MATERIAL) {
+    const NodeEeveeFilterGraphFilterMaterial *storage =
+        static_cast<const NodeEeveeFilterGraphFilterMaterial *>(node.storage);
+    if (storage == nullptr || storage->items_num > FILTER_GRAPH_INPUT_MAX ||
+        !filter_material_is_valid(filter_graph_node_material(node)))
+    {
+      return false;
+    }
+    for (const int i : IndexRange(storage->items_num)) {
+      const std::string identifier = "Image_" + std::to_string(storage->items[i].identifier);
+      if (!collect_input_socket(node.input_by_identifier(identifier))) {
+        return false;
+      }
+    }
+  }
+  else if (!ELEM(node.type_legacy,
+                EEVEE_FILTER_GRAPH_NODE_SCENE_COLOR,
+                EEVEE_FILTER_GRAPH_NODE_AOV_INPUT))
+  {
+    return false;
+  }
+
+  visiting.remove(&node);
+  visited.add(&node);
+  r_order.append(&node);
+  return true;
+}
+
+static bool filter_graph_stage_dependency_order_get(const bNodeTree &filter_graph,
+                                                    const SceneEEVEEFilterExecutionStage stage,
+                                                    Vector<const bNode *> &r_order)
+{
+  const bNode *stage_output = filter_graph_stage_output_node_get(filter_graph, stage);
+  if (stage_output == nullptr) {
+    return true;
+  }
+  const bNodeSocket *stage_input = stage_output->input_by_identifier("Image");
+  const bNodeLink *stage_link = (stage_input != nullptr) ? filter_graph_socket_used_link(*stage_input) :
+                                                          nullptr;
+  if (stage_link == nullptr) {
+    return true;
+  }
+  Set<const bNode *> visiting;
+  Set<const bNode *> visited;
+  return filter_graph_collect_dependencies(*stage_link->fromnode, visiting, visited, r_order);
 }
 
 static FilterObjectInfoData filter_object_info_default()
@@ -575,13 +676,12 @@ static void filter_material_collect_scene_sources(const bNodeTree &ntree,
   }
 }
 
-static void filter_graph_collect_scene_sources(const bNodeTree &ntree,
+static void filter_graph_collect_scene_sources(const Span<const bNode *> dependencies,
                                                bool &r_uses_scene_depth,
                                                bool &r_uses_scene_normal,
                                                bool &r_uses_scene_position)
 {
-  ntree.ensure_topology_cache();
-  for (const bNode *node : ntree.all_nodes()) {
+  for (const bNode *node : dependencies) {
     if (node->type_legacy != EEVEE_FILTER_GRAPH_NODE_SCENE_COLOR || node->is_muted()) {
       continue;
     }
@@ -618,9 +718,23 @@ void FilterMaterialModule::init()
 
   if (filter_graph_enabled(*inst_.scene)) {
     bNodeTree *filter_graph = inst_.scene->eevee.filter_graph;
+    filter_graph->ensure_topology_cache();
+    Vector<const bNode *> dependencies;
+    for (const int stage : {SCE_EEVEE_FILTER_STAGE_BEFORE_VOLUME_FOG,
+                            SCE_EEVEE_FILTER_STAGE_BEFORE_POSTFX,
+                            SCE_EEVEE_FILTER_STAGE_BEFORE_DEPTH_OF_FIELD,
+                            SCE_EEVEE_FILTER_STAGE_BEFORE_COMPOSITE})
+    {
+      if (!filter_graph_stage_dependency_order_get(
+              *filter_graph, SceneEEVEEFilterExecutionStage(stage), dependencies))
+      {
+        dependencies.clear();
+        break;
+      }
+    }
     filter_graph_collect_scene_sources(
-        *filter_graph, uses_scene_depth_, uses_scene_normal_, uses_scene_position_);
-    for (const bNode *node : filter_graph->all_nodes()) {
+        dependencies, uses_scene_depth_, uses_scene_normal_, uses_scene_position_);
+    for (const bNode *node : dependencies) {
       if (node->type_legacy != EEVEE_FILTER_GRAPH_NODE_FILTER_MATERIAL || node->is_muted()) {
         continue;
       }
@@ -641,27 +755,6 @@ void FilterMaterialModule::init()
     }
     return;
   }
-
-  for (SceneFilterMaterial *filter_entry = static_cast<SceneFilterMaterial *>(
-           inst_.scene->eevee.filter_materials.first);
-       filter_entry != nullptr;
-       filter_entry = filter_entry->next)
-  {
-    if (!filter_entry->enabled || !filter_material_is_valid(filter_entry->material)) {
-      continue;
-    }
-    filter_material_collect_scene_sources(*filter_entry->material->nodetree,
-                                          uses_scene_depth_,
-                                          uses_scene_normal_,
-                                          uses_scene_position_,
-                                          uses_cryptomatte_object_);
-    if (uses_scene_depth_ && uses_scene_normal_ && uses_scene_position_ &&
-        uses_cryptomatte_object_)
-    {
-      break;
-    }
-  }
-
 }
 
 bool FilterMaterialModule::uses_aov() const
@@ -766,15 +859,33 @@ void FilterMaterialModule::begin_sync()
 
   if (filter_graph_enabled(*inst_.scene)) {
     bNodeTree *filter_graph = inst_.scene->eevee.filter_graph;
+    filter_graph->ensure_topology_cache();
     blender::nodes::filter_graph_sync_filter_pass_interfaces_from_materials(*filter_graph);
-    for (const bNode *node : filter_graph->all_nodes()) {
+    Vector<const bNode *> dependencies;
+    for (const int stage : {SCE_EEVEE_FILTER_STAGE_BEFORE_VOLUME_FOG,
+                            SCE_EEVEE_FILTER_STAGE_BEFORE_POSTFX,
+                            SCE_EEVEE_FILTER_STAGE_BEFORE_DEPTH_OF_FIELD,
+                            SCE_EEVEE_FILTER_STAGE_BEFORE_COMPOSITE})
+    {
+      if (!filter_graph_stage_dependency_order_get(
+              *filter_graph, SceneEEVEEFilterExecutionStage(stage), dependencies))
+      {
+        dependencies.clear();
+        break;
+      }
+    }
+    Set<const bNode *> synced_nodes;
+    for (const bNode *node : dependencies) {
       if (node->type_legacy != EEVEE_FILTER_GRAPH_NODE_FILTER_MATERIAL || node->is_muted()) {
         continue;
       }
+      if (synced_nodes.contains(node)) {
+        continue;
+      }
+      synced_nodes.add(node);
 
       FilterPassEntry entry;
       entry.graph_node = node;
-      entry.execution_stage = SCE_EEVEE_FILTER_STAGE_BEFORE_POSTFX;
       blender::Material *material = filter_graph_node_material(*node);
       if (!sync_pass_entry(material, entry)) {
         continue;
@@ -784,25 +895,6 @@ void FilterMaterialModule::begin_sync()
       entries_.append(entry);
     }
     return;
-  }
-
-  for (SceneFilterMaterial *filter_entry = static_cast<SceneFilterMaterial *>(
-           inst_.scene->eevee.filter_materials.first);
-       filter_entry != nullptr;
-       filter_entry = filter_entry->next)
-  {
-    if (!filter_entry->enabled || !filter_material_is_valid(filter_entry->material)) {
-      continue;
-    }
-
-    FilterPassEntry entry;
-    entry.scene_filter = filter_entry;
-    entry.execution_stage = SceneEEVEEFilterExecutionStage(filter_entry->execution_stage);
-    if (!sync_pass_entry(filter_entry->material, entry)) {
-      continue;
-    }
-    uses_scene_time_ |= GPU_material_is_time_dependent(entry.gpumat);
-    entries_.append(entry);
   }
 }
 
@@ -819,92 +911,7 @@ bool FilterMaterialModule::has_stage_entries(SceneEEVEEFilterExecutionStage stag
     }
     return false;
   }
-
-  for (const FilterPassEntry &entry : entries_) {
-    if (entry.scene_filter != nullptr && entry.execution_stage == stage) {
-      return true;
-    }
-  }
   return false;
-}
-
-static const bNodeLink *filter_graph_socket_used_link(const bNodeSocket &socket)
-{
-  for (const bNodeLink *link : socket.directly_linked_links()) {
-    if (link->is_used() && link->fromnode != nullptr && link->fromsock != nullptr) {
-      return link;
-    }
-  }
-  return nullptr;
-}
-
-static const bNode *filter_graph_stage_output_node_get(const bNodeTree &ntree,
-                                                       const SceneEEVEEFilterExecutionStage stage)
-{
-  for (const bNode *node : ntree.all_nodes()) {
-    if (node->type_legacy != EEVEE_FILTER_GRAPH_NODE_STAGE_OUTPUT || node->is_muted() ||
-        node->custom1 != stage || !(node->flag & NODE_DO_OUTPUT))
-    {
-      continue;
-    }
-    return node;
-  }
-  return nullptr;
-}
-
-static bool filter_graph_collect_dependencies(const bNode &node,
-                                              Set<const bNode *> &visiting,
-                                              Set<const bNode *> &visited,
-                                              Vector<const bNode *> &r_order)
-{
-  if (visited.contains(&node)) {
-    return true;
-  }
-  if (visiting.contains(&node)) {
-    return false;
-  }
-  visiting.add(&node);
-
-  auto collect_input_socket = [&](const bNodeSocket *socket) -> bool {
-    if (socket == nullptr) {
-      return true;
-    }
-    const bNodeLink *link = filter_graph_socket_used_link(*socket);
-    return link == nullptr || filter_graph_collect_dependencies(
-                                  *link->fromnode, visiting, visited, r_order);
-  };
-
-  if (node.is_reroute()) {
-    if (!collect_input_socket(static_cast<const bNodeSocket *>(node.inputs.first))) {
-      return false;
-    }
-  }
-  else if (node.type_legacy == EEVEE_FILTER_GRAPH_NODE_FILTER_MATERIAL) {
-    const NodeEeveeFilterGraphFilterMaterial *storage =
-        static_cast<const NodeEeveeFilterGraphFilterMaterial *>(node.storage);
-    if (storage == nullptr || storage->items_num > FILTER_GRAPH_INPUT_MAX ||
-        !filter_material_is_valid(filter_graph_node_material(node)))
-    {
-      return false;
-    }
-    for (const int i : IndexRange(storage->items_num)) {
-      const std::string identifier = "Image_" + std::to_string(storage->items[i].identifier);
-      if (!collect_input_socket(node.input_by_identifier(identifier))) {
-        return false;
-      }
-    }
-  }
-  else if (!ELEM(node.type_legacy,
-                EEVEE_FILTER_GRAPH_NODE_SCENE_COLOR,
-                EEVEE_FILTER_GRAPH_NODE_AOV_INPUT))
-  {
-    return false;
-  }
-
-  visiting.remove(&node);
-  visited.add(&node);
-  r_order.append(&node);
-  return true;
 }
 
 static FilterGraphImageHandle filter_graph_scene_output_handle(const bNodeSocket &socket)
@@ -1111,6 +1118,7 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
 
     PassSimple pass("FilterMaterial.GraphResolve");
     pass.init();
+    pass.state_set(DRW_STATE_WRITE_COLOR);
     pass.framebuffer_set(&framebuffer_);
     pass.shader_set(resolve_shader);
     pass.bind_texture("scene_color_tx", &input_tx);
@@ -1237,53 +1245,7 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
     return resolve_filter_graph_handle(output_handle);
   }
 
-  if (entries_.is_empty()) {
-    return input_tx;
-  }
-
-  ping_tx_.ensure_2d(stage_format, extent, GPU_TEXTURE_USAGE_GENERAL);
-  pong_tx_.ensure_2d(stage_format, extent, GPU_TEXTURE_USAGE_GENERAL);
-  clear_filter_graph_inputs();
-
-  bool stage_needs_aov_snapshot = false;
-  for (const FilterPassEntry &entry : entries_) {
-    if (entry.scene_filter != nullptr && entry.execution_stage == stage &&
-        !entry.conflicting_aov_names.is_empty())
-    {
-      stage_needs_aov_snapshot = true;
-      break;
-    }
-  }
-  if (stage_needs_aov_snapshot) {
-    aov_color_snapshot_tx_.ensure_2d_array(GPU_texture_format(inst_.render_buffers.rp_color_tx),
-                                           extent,
-                                           GPU_texture_layer_count(inst_.render_buffers.rp_color_tx),
-                                           GPU_TEXTURE_USAGE_GENERAL);
-    aov_value_snapshot_tx_.ensure_2d_array(GPU_texture_format(inst_.render_buffers.rp_value_tx),
-                                           extent,
-                                           GPU_texture_layer_count(inst_.render_buffers.rp_value_tx),
-                                           GPU_TEXTURE_USAGE_GENERAL);
-  }
-
-  gpu::Texture *source_tx = input_tx;
-  int stage_entry_index = 0;
-
-  for (const int entry_index : entries_.index_range()) {
-    if (entries_[entry_index].scene_filter == nullptr ||
-        entries_[entry_index].execution_stage != stage)
-    {
-      continue;
-    }
-
-    Texture &target_tx = ((stage_entry_index & 1) == 0) ? ping_tx_ : pong_tx_;
-    gpu::Texture *scene_color_tx = source_tx;
-    render_filter_entry(entries_[entry_index], scene_color_tx, target_tx);
-
-    source_tx = target_tx;
-    stage_entry_index++;
-  }
-
-  return source_tx;
+  return input_tx;
 }
 
 }  // namespace blender::eevee

@@ -36,14 +36,6 @@ from bl_ui.properties_data_light import (
     DATA_PT_EEVEE_light,
 )
 
-
-def eevee_active_filter_material_entry(props):
-    active_index = props.active_filter_material_index
-    if active_index < 0 or active_index >= len(props.filter_materials):
-        return None
-    return props.filter_materials[active_index]
-
-
 class NODE_HT_header(Header):
     bl_space_type = 'NODE_EDITOR'
 
@@ -115,25 +107,17 @@ class NODE_HT_header(Header):
 
             if snode.shader_type == 'FILTER':
                 NODE_MT_editor_menus.draw_collapsible(context, layout)
-                props = scene.eevee
-                filter_material = (
-                    snode_id
-                    if getattr(snode_id, "eevee_domain", None) == 'FILTER'
-                    else None
-                )
-                filter_entry = None if filter_material is not None else eevee_active_filter_material_entry(props)
 
                 layout.separator_spacer()
 
-                row = layout.row(align=True)
-                if filter_material is not None:
-                    row.prop(filter_material, "name", text="", icon='MATERIAL')
-                elif filter_entry is None:
-                    row.enabled = not snode.pin
-                    row.operator("scene.eevee_filter_material_new", text="New Filter Material")
+                row = layout.row()
+                row.enabled = not snode.pin
+                if hasattr(snode, "filter_material"):
+                    row.template_ID(snode, "filter_material", new="node.filter_material_new")
+                elif snode_id and getattr(snode_id, "eevee_domain", None) == 'FILTER':
+                    row.label(text=snode_id.name, icon='MATERIAL')
                 else:
-                    row.enabled = not snode.pin
-                    row.template_ID(filter_entry, "material", new="scene.eevee_filter_material_new")
+                    row.label(text="No Filter Material", icon='MATERIAL')
 
             if snode.shader_type == 'LINESTYLE':
                 view_layer = context.view_layer

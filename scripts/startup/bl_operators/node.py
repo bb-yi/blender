@@ -501,11 +501,36 @@ class NODE_OT_add_node(NodeAddOperator, Operator):
             return {'CANCELLED'}
 
 
-def _active_filter_pass_node(context):
-    node = getattr(context, "node", None) or getattr(context, "active_node", None)
+def _filter_pass_node_from_identifier(context, node_identifier):
+    space = getattr(context, "space_data", None)
+    tree = getattr(space, "edit_tree", None) if space is not None else None
+    if tree is None:
+        return None
+    for node in tree.nodes:
+        if (
+                getattr(node, "identifier", 0) == node_identifier and
+                node.bl_idname == "EeveeFilterGraphNodeFilterMaterial"):
+            return node
+    return None
+
+
+def _active_filter_pass_node(context, node_identifier=0):
+    node = (
+        _filter_pass_node_from_identifier(context, node_identifier)
+        if node_identifier
+        else None
+    )
+    if node is None:
+        node = getattr(context, "node", None) or getattr(context, "active_node", None)
     if node is None or node.bl_idname != "EeveeFilterGraphNodeFilterMaterial":
         return None
     return node
+
+
+def _filter_graph_tree_poll(context):
+    space = getattr(context, "space_data", None)
+    tree = getattr(space, "edit_tree", None) if space is not None else None
+    return tree is not None and tree.bl_idname == "EeveeFilterGraphNodeTree"
 
 
 def _new_filter_pass_material():
@@ -532,25 +557,54 @@ def _new_filter_pass_material():
     return mat
 
 
+class NODE_OT_filter_material_new(Operator):
+    """Create a filter material for the current Filter Material editor"""
+    bl_idname = "node.filter_material_new"
+    bl_label = "New Filter Material"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        space = getattr(context, "space_data", None)
+        return (
+            space is not None and
+            space.type == 'NODE_EDITOR' and
+            space.tree_type == 'ShaderNodeTree' and
+            space.shader_type == 'FILTER' and
+            hasattr(space, "filter_material")
+        )
+
+    def execute(self, context):
+        mat = _new_filter_pass_material()
+        context.space_data.filter_material = mat
+        self.report({'INFO'}, rpt_("Created filter material '{:s}'").format(mat.name))
+        return {'FINISHED'}
+
+
 class NODE_OT_filter_pass_new_material(Operator):
     """Create and assign a filter material to the active Filter Pass node"""
     bl_idname = "node.filter_pass_new_material"
     bl_label = "New Filter Material"
     bl_options = {'REGISTER', 'UNDO'}
 
+    node_identifier: IntProperty(
+        name="Node Identifier",
+        options={'SKIP_SAVE'},
+    )
+
     @classmethod
     def poll(cls, context):
-        return _active_filter_pass_node(context) is not None
+        return _filter_graph_tree_poll(context)
 
     def execute(self, context):
-        node = _active_filter_pass_node(context)
+        node = _active_filter_pass_node(context, self.node_identifier)
         if node is None:
             return {'CANCELLED'}
 
         mat = _new_filter_pass_material()
         node.material = mat
         try:
-            bpy.ops.node.eevee_filter_graph_material_sync_interface()
+            bpy.ops.node.eevee_filter_graph_material_sync_interface(node_identifier=node.identifier)
         except Exception:
             pass
         self.report({'INFO'}, rpt_("Created filter material '{:s}'").format(mat.name))
@@ -563,14 +617,18 @@ class NODE_OT_filter_pass_clear_material(Operator):
     bl_label = "Clear Filter Material"
     bl_options = {'REGISTER', 'UNDO'}
 
+    node_identifier: IntProperty(
+        name="Node Identifier",
+        options={'SKIP_SAVE'},
+    )
+
     @classmethod
     def poll(cls, context):
-        node = _active_filter_pass_node(context)
-        return node is not None and node.material is not None
+        return _filter_graph_tree_poll(context)
 
     def execute(self, context):
-        node = _active_filter_pass_node(context)
-        if node is None:
+        node = _active_filter_pass_node(context, self.node_identifier)
+        if node is None or node.material is None:
             return {'CANCELLED'}
         node.material = None
         return {'FINISHED'}
@@ -1535,6 +1593,7 @@ classes = (
     NODE_FH_image_node,
 
     NODE_OT_add_node,
+    NODE_OT_filter_material_new,
     NODE_OT_filter_pass_new_material,
     NODE_OT_filter_pass_clear_material,
     NODE_OT_swap_node,
