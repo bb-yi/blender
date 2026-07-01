@@ -10,6 +10,10 @@
 
 #include "eevee_defines.hh"
 
+#define FILTER_GRAPH_ALPHA_MODE_OPACITY 0
+#define FILTER_GRAPH_ALPHA_MODE_TRANSMITTANCE 1
+#define FILTER_GRAPH_ALPHA_MODE_DEPTH 2
+
 #ifndef GPU_SHADER
 #  include "BLI_memory_utils.hh"
 #  include "GPU_shader_shared.hh"
@@ -28,7 +32,8 @@ struct [[host_shared]] FilterObjectInfoData {
 struct [[host_shared]] FilterGraphInputHandleData {
   uint type;
   int index;
-  int2 _pad;
+  int alpha_mode;
+  int _pad;
 };
 
 #ifndef GPU_SHADER

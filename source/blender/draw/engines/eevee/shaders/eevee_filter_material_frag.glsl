@@ -57,16 +57,33 @@ TextureHandle filter_graph_input_resolve(TextureHandle tex)
   return (resolved.type != TEX_HANDLE_FILTER_GRAPH_INPUT) ? resolved : TEXTURE_HANDLE_DEFAULT;
 }
 
+int TextureHandle_alpha_mode(TextureHandle tex)
+{
+  if (tex.type == TEX_HANDLE_FILTER_GRAPH_INPUT) {
+    if (tex.index < 0 || tex.index >= FILTER_GRAPH_INPUT_MAX) {
+      return FILTER_GRAPH_ALPHA_MODE_OPACITY;
+    }
+    return filter_graph_input_buf[tex.index].alpha_mode;
+  }
+
+  tex = filter_graph_input_resolve(tex);
+  if (tex.type == TEX_HANDLE_SCENE && tex.index == 0) {
+    return FILTER_GRAPH_ALPHA_MODE_TRANSMITTANCE;
+  }
+  if (tex.type == TEX_HANDLE_SCENE && tex.index == 1) {
+    return FILTER_GRAPH_ALPHA_MODE_DEPTH;
+  }
+  return FILTER_GRAPH_ALPHA_MODE_OPACITY;
+}
+
 bool TextureHandle_stores_transmittance_alpha(TextureHandle tex)
 {
-  tex = filter_graph_input_resolve(tex);
-  return tex.type == TEX_HANDLE_SCENE && tex.index == 0;
+  return TextureHandle_alpha_mode(tex) == FILTER_GRAPH_ALPHA_MODE_TRANSMITTANCE;
 }
 
 bool TextureHandle_is_scene_depth(TextureHandle tex)
 {
-  tex = filter_graph_input_resolve(tex);
-  return tex.type == TEX_HANDLE_SCENE && tex.index == 1;
+  return TextureHandle_alpha_mode(tex) == FILTER_GRAPH_ALPHA_MODE_DEPTH;
 }
 
 float filter_scene_depth_value(float2 uv)

@@ -102,19 +102,16 @@ float4 filter_graph_eval_handle(TextureHandle tex)
   return float4(0.0f);
 }
 
-float4 filter_graph_resolve_stage_output(TextureHandle tex)
+float4 filter_graph_resolve_stage_output(TextureHandle tex, int alpha_mode)
 {
   float4 color = filter_graph_eval_handle(tex);
 
-  if (tex.type == TEX_HANDLE_FILTER_GRAPH_TEXTURE) {
+  if (alpha_mode == FILTER_GRAPH_ALPHA_MODE_TRANSMITTANCE) {
     return color;
   }
 
   float opacity = color.a;
-  if (tex.type == TEX_HANDLE_SCENE && tex.index == 0) {
-    opacity = saturate(1.0f - color.a);
-  }
-  else if (tex.type == TEX_HANDLE_SCENE && tex.index == 1) {
+  if (alpha_mode == FILTER_GRAPH_ALPHA_MODE_DEPTH) {
     opacity = color.r;
   }
 
@@ -124,5 +121,5 @@ float4 filter_graph_resolve_stage_output(TextureHandle tex)
 void main()
 {
   TextureHandle tex = TextureHandle(filter_graph_input_buf[0].type, filter_graph_input_buf[0].index);
-  out_color = filter_graph_resolve_stage_output(tex);
+  out_color = filter_graph_resolve_stage_output(tex, filter_graph_input_buf[0].alpha_mode);
 }

@@ -50,10 +50,22 @@ static constexpr uint32_t FILTER_TEX_HANDLE_SCENE = 30u;
 static constexpr uint32_t FILTER_TEX_HANDLE_FILTER_GRAPH_INPUT = 31u;
 static constexpr uint32_t FILTER_TEX_HANDLE_FILTER_GRAPH_TEXTURE = 32u;
 
+static int filter_graph_scene_alpha_mode(const int index)
+{
+  if (index == 0) {
+    return FILTER_GRAPH_ALPHA_MODE_TRANSMITTANCE;
+  }
+  if (index == 1) {
+    return FILTER_GRAPH_ALPHA_MODE_DEPTH;
+  }
+  return FILTER_GRAPH_ALPHA_MODE_OPACITY;
+}
+
 struct FilterGraphImageHandle {
   uint32_t type = FILTER_TEX_HANDLE_NULL;
   int index = 0;
   gpu::Texture *texture = nullptr;
+  int alpha_mode = FILTER_GRAPH_ALPHA_MODE_OPACITY;
 
   static FilterGraphImageHandle null()
   {
@@ -62,22 +74,25 @@ struct FilterGraphImageHandle {
 
   static FilterGraphImageHandle scene(const int index)
   {
-    return {FILTER_TEX_HANDLE_SCENE, index, nullptr};
+    return {FILTER_TEX_HANDLE_SCENE, index, nullptr, filter_graph_scene_alpha_mode(index)};
   }
 
   static FilterGraphImageHandle render_pass_color(const int index)
   {
-    return {FILTER_TEX_HANDLE_RP_COLOR, index, nullptr};
+    return {FILTER_TEX_HANDLE_RP_COLOR, index, nullptr, FILTER_GRAPH_ALPHA_MODE_OPACITY};
   }
 
   static FilterGraphImageHandle render_pass_value(const int index)
   {
-    return {FILTER_TEX_HANDLE_RP_VALUE, index, nullptr};
+    return {FILTER_TEX_HANDLE_RP_VALUE, index, nullptr, FILTER_GRAPH_ALPHA_MODE_OPACITY};
   }
 
   static FilterGraphImageHandle graph_texture(gpu::Texture *texture)
   {
-    return {FILTER_TEX_HANDLE_FILTER_GRAPH_TEXTURE, 0, texture};
+    return {FILTER_TEX_HANDLE_FILTER_GRAPH_TEXTURE,
+            0,
+            texture,
+            FILTER_GRAPH_ALPHA_MODE_TRANSMITTANCE};
   }
 
   bool is_texture() const
@@ -978,18 +993,20 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
     for (FilterGraphInputHandleData &handle : filter_graph_input_buf_) {
       handle.type = FILTER_TEX_HANDLE_NULL;
       handle.index = 0;
-      handle._pad = int2(0);
+      handle.alpha_mode = FILTER_GRAPH_ALPHA_MODE_OPACITY;
+      handle._pad = 0;
     }
     graph_input_tx_.ensure_2d_array(stage_format, extent, 1, GPU_TEXTURE_USAGE_GENERAL);
     filter_graph_input_buf_.push_update();
   };
 
-  auto prepare_filter_graph_inputs = [&](const Vector<FilterGraphImageHandle> &inputs) {
+  auto prepare_filter_graph_inputs = [&](const Vector<FilterGraphImageHandle> &inputs) -> bool {
     Vector<gpu::Texture *> texture_inputs;
     for (FilterGraphInputHandleData &handle : filter_graph_input_buf_) {
       handle.type = FILTER_TEX_HANDLE_NULL;
       handle.index = 0;
-      handle._pad = int2(0);
+      handle.alpha_mode = FILTER_GRAPH_ALPHA_MODE_OPACITY;
+      handle._pad = 0;
     }
     for (const int i : inputs.index_range()) {
       if (i >= FILTER_GRAPH_INPUT_MAX) {
@@ -999,11 +1016,13 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
       if (input.is_texture()) {
         filter_graph_input_buf_[i].type = FILTER_TEX_HANDLE_FILTER_GRAPH_TEXTURE;
         filter_graph_input_buf_[i].index = texture_inputs.size();
+        filter_graph_input_buf_[i].alpha_mode = input.alpha_mode;
         texture_inputs.append(input.texture);
       }
       else if (input.type != FILTER_TEX_HANDLE_FILTER_GRAPH_INPUT) {
         filter_graph_input_buf_[i].type = input.type;
         filter_graph_input_buf_[i].index = input.index;
+        filter_graph_input_buf_[i].alpha_mode = input.alpha_mode;
       }
     }
 
@@ -1019,7 +1038,8 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
       }
       gpu::Shader *copy_shader = inst_.shaders.static_shader_get(FILTER_GRAPH_INPUT_COPY);
       if (copy_shader == nullptr) {
-        return;
+        filter_graph_input_buf_.push_update();
+        return false;
       }
       for (const int layer : texture_inputs.index_range()) {
         graph_input_fbs_[layer]->ensure(
@@ -1037,6 +1057,7 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
       GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH);
     }
     filter_graph_input_buf_.push_update();
+    return true;
   };
 
   auto render_filter_entry = [&](const FilterPassEntry &entry,
@@ -1092,17 +1113,11 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
   };
 
   auto resolve_filter_graph_handle = [&](const FilterGraphImageHandle &handle) -> gpu::Texture * {
-    if (handle.is_texture()) {
-      ping_tx_.ensure_2d(stage_format, extent, GPU_TEXTURE_USAGE_GENERAL);
-      GPU_texture_copy(ping_tx_, handle.texture);
-      GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE | GPU_BARRIER_TEXTURE_FETCH);
-      return ping_tx_;
+    if (handle.type == FILTER_TEX_HANDLE_NULL) {
+      return black_graph_output();
     }
     if (handle.type == FILTER_TEX_HANDLE_SCENE && handle.index == 0) {
       return input_tx;
-    }
-    if (handle.type == FILTER_TEX_HANDLE_NULL) {
-      return black_graph_output();
     }
 
     gpu::Shader *resolve_shader = inst_.shaders.static_shader_get(FILTER_GRAPH_RESOLVE);
@@ -1112,7 +1127,9 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
 
     Vector<FilterGraphImageHandle> resolve_inputs;
     resolve_inputs.append(handle);
-    prepare_filter_graph_inputs(resolve_inputs);
+    if (!prepare_filter_graph_inputs(resolve_inputs)) {
+      return black_graph_output();
+    }
     ping_tx_.ensure_2d(stage_format, extent, GPU_TEXTURE_USAGE_GENERAL);
     framebuffer_.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(ping_tx_));
 
@@ -1223,7 +1240,9 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
                   result_by_socket.lookup_default(link->fromsock, FilterGraphImageHandle::null()) :
                   FilterGraphImageHandle::null());
         }
-        prepare_filter_graph_inputs(material_inputs);
+        if (!prepare_filter_graph_inputs(material_inputs)) {
+          return black_graph_output();
+        }
 
         std::unique_ptr<Texture> target_tx = std::make_unique<Texture>(
             "FilterMaterial.GraphIntermediate");
