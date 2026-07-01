@@ -1624,6 +1624,16 @@ struct NodeShaderFilterGraphInput {
   int _pad = 0;
 };
 
+struct NodeShaderFilterOutput {
+  DNA_DEFINE_CXX_METHODS(NodeShaderFilterOutput)
+
+  NodeEeveeFilterGraphSocketItem *items = nullptr;
+  int items_num = 0;
+  int active_index = 0;
+  int next_identifier = 0;
+  int _pad = 0;
+};
+
 struct NodeEeveeFilterGraphFilterMaterial {
   DNA_DEFINE_CXX_METHODS(NodeEeveeFilterGraphFilterMaterial)
 

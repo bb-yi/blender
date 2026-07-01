@@ -1887,8 +1887,22 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
         gpumat, codegen.surface.dependencies, dependencies_set, emitted_generated_sources, generated_source_block);
     material_graph_dependencies_append(
         gpumat, codegen.npr.dependencies, dependencies_set, emitted_generated_sources, generated_source_block);
-    material_graph_dependencies_append(
-        gpumat, codegen.filter.dependencies, dependencies_set, emitted_generated_sources, generated_source_block);
+    if (!codegen.filter_outputs.is_empty()) {
+      for (const GPUGraphOutput &filter_output : codegen.filter_outputs) {
+        material_graph_dependencies_append(gpumat,
+                                           filter_output.dependencies,
+                                           dependencies_set,
+                                           emitted_generated_sources,
+                                           generated_source_block);
+      }
+    }
+    else {
+      material_graph_dependencies_append(gpumat,
+                                         codegen.filter.dependencies,
+                                         dependencies_set,
+                                         emitted_generated_sources,
+                                         generated_source_block);
+    }
     material_graph_dependencies_append(
         gpumat, codegen.thickness.dependencies, dependencies_set, emitted_generated_sources, generated_source_block);
     if (has_depth_offset && codegen.depth_offset.has_value() &&
@@ -1929,9 +1943,41 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     frag_gen << codegen.npr.serialized_or_default("return float4(0.0f);\n");
     frag_gen << "}\n\n";
 
+    Vector<GPUGraphOutput> filter_outputs;
+    if (!codegen.filter_outputs.is_empty()) {
+      filter_outputs = codegen.filter_outputs;
+    }
+    else {
+      filter_outputs.append(codegen.filter);
+    }
+    for (const int i : filter_outputs.index_range()) {
+      frag_gen << "float4 nodetree_filter_output_" << i << "()\n";
+      frag_gen << "{\n";
+      frag_gen << filter_outputs[i].serialized_or_default("return float4(0.0f);\n");
+      frag_gen << "}\n\n";
+    }
     frag_gen << "float4 nodetree_filter()\n";
     frag_gen << "{\n";
-    frag_gen << codegen.filter.serialized_or_default("return float4(0.0f);\n");
+    frag_gen << "  return nodetree_filter_output_0();\n";
+    frag_gen << "}\n\n";
+    frag_gen << "void nodetree_filter_outputs()\n";
+    frag_gen << "{\n";
+    frag_gen << "#if defined(MAT_FILTER)\n";
+    for (const int i : filter_outputs.index_range()) {
+      frag_gen << "  float4 filter_result_" << i << " = nodetree_filter_output_" << i << "();\n";
+      frag_gen << "  float4 filter_store_" << i
+               << " = float4(filter_result_" << i
+               << ".rgb, saturate(filter_result_" << i << ".a));\n";
+      frag_gen << "  imageStore(filter_graph_output_img, int3(int2(gl_FragCoord.xy), " << i
+               << "), filter_store_" << i << ");\n";
+      if (i == 0) {
+        frag_gen << "  out_color = filter_store_0;\n";
+      }
+    }
+    if (filter_outputs.is_empty()) {
+      frag_gen << "  out_color = float4(0.0f, 1.0f, 1.0f, 1.0f);\n";
+    }
+    frag_gen << "#endif\n";
     frag_gen << "}\n\n";
 
     /* TODO(fclem): Find a way to pass material parameters inside the material UBO. */

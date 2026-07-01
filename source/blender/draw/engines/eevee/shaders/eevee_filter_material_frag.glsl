@@ -27,6 +27,7 @@ float4 closure_to_rgba(Closure cl)
 }
 
 float4 nodetree_filter();
+void nodetree_filter_outputs();
 
 #define TEXTURE_HANDLE_EVAL_DEFINED
 
@@ -241,8 +242,5 @@ void main()
   g_data.P = -g_data.N;
   attrib_load(WorldPoint{0});
 
-  float4 filter_result = nodetree_filter();
-  /* User-facing Filter Output alpha is opacity. EEVEE stores alpha as transmittance until film
-   * converts it back to opacity, so write the inverse here. */
-  out_color = float4(filter_result.rgb, saturate(1.0f - filter_result.a));
+  nodetree_filter_outputs();
 }

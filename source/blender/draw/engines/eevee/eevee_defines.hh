@@ -273,6 +273,7 @@
 #define FILTER_CRYPTOMATTE_TEX_SLOT 40
 #define SCENE_SHADOW_TEX_SLOT 41
 #define FILTER_GRAPH_INPUT_TEX_SLOT 42
+#define FILTER_GRAPH_OUTPUT_IMG_SLOT 3
 /* NPR material passes already use slot 19 for their radiance input. Reuse a filter-only slot
  * already reserved away from material texture allocation. */
 #define LIGHT_SHADER_NPR_TEX_SLOT FILTER_SCENE_COLOR_TEX_SLOT
@@ -376,6 +377,7 @@
 #define RENDER_TEXTURE_SLOT_MAX 4
 #define FILTER_OBJECT_INFO_MAX 512
 #define FILTER_GRAPH_INPUT_MAX 32
+#define FILTER_GRAPH_OUTPUT_MAX 32
 #define FILTER_MASK_HASH_MAX 128
 #define OUTLINE_MAX_WIDTH 20.0f
 

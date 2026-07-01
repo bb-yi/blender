@@ -80,6 +80,28 @@ static bNode *filter_graph_find_pass_input_node(Material &material)
   return nullptr;
 }
 
+static bNode *filter_graph_find_filter_output_node(Material &material)
+{
+  if (material.nodetree == nullptr) {
+    return nullptr;
+  }
+  bNode *output = nullptr;
+  for (bNode *node = static_cast<bNode *>(material.nodetree->nodes.first); node != nullptr;
+       node = node->next)
+  {
+    if (node->type_legacy != SH_NODE_OUTPUT_FILTER) {
+      continue;
+    }
+    if (output == nullptr) {
+      output = node;
+    }
+    else if ((node->flag & NODE_DO_OUTPUT) && !(output->flag & NODE_DO_OUTPUT)) {
+      output = node;
+    }
+  }
+  return output;
+}
+
 static Material *filter_graph_material_from_pass_input_tree(Main &bmain, const bNodeTree &ntree)
 {
   for (Material &material : bmain.materials) {
@@ -282,6 +304,35 @@ void filter_graph_pass_input_interface_changed(Main &bmain, bNodeTree &ntree, bN
   filter_graph_sync_material_to_all_filter_passes(bmain, *material);
 }
 
+void filter_graph_filter_output_interface_changed(Main &bmain, bNodeTree &ntree, bNode &node)
+{
+  filter_graph_tag_node_changed(bmain, ntree, node);
+  Material *material = filter_graph_material_from_pass_input_tree(bmain, ntree);
+  if (material == nullptr) {
+    return;
+  }
+
+  for (Scene &scene : bmain.scenes) {
+    bNodeTree *filter_graph = scene.eevee.filter_graph;
+    if (filter_graph == nullptr ||
+        !STREQ(filter_graph->idname, eevee_filter_graph_tree_idname.c_str()))
+    {
+      continue;
+    }
+    for (bNode *graph_node = static_cast<bNode *>(filter_graph->nodes.first); graph_node != nullptr;
+         graph_node = graph_node->next)
+    {
+      if (graph_node->type_legacy != EEVEE_FILTER_GRAPH_NODE_FILTER_MATERIAL ||
+          graph_node->id != &material->id)
+      {
+        continue;
+      }
+      update_node_declaration_and_sockets(*filter_graph, *graph_node);
+      filter_graph_tag_node_changed(bmain, *filter_graph, *graph_node);
+    }
+  }
+}
+
 void filter_graph_filter_pass_interface_changed(Main &bmain, bNodeTree &ntree, bNode &node)
 {
   Material *material = filter_graph_filter_pass_material(node);
@@ -362,11 +413,24 @@ void ShaderFilterGraphInputItemsAccessor::post_item_change(bContext *C, PointerR
   post_item_change(*bmain, ntree, node);
 }
 
+void ShaderFilterOutputItemsAccessor::post_item_change(bContext *C, PointerRNA node_ptr)
+{
+  Main *bmain = CTX_data_main(C);
+  bNodeTree &ntree = *reinterpret_cast<bNodeTree *>(node_ptr.owner_id);
+  bNode &node = *static_cast<bNode *>(node_ptr.data);
+  post_item_change(*bmain, ntree, node);
+}
+
 void ShaderFilterGraphInputItemsAccessor::post_item_change(Main &bmain,
                                                            bNodeTree &ntree,
                                                            bNode &node)
 {
   filter_graph_pass_input_interface_changed(bmain, ntree, node);
+}
+
+void ShaderFilterOutputItemsAccessor::post_item_change(Main &bmain, bNodeTree &ntree, bNode &node)
+{
+  filter_graph_filter_output_interface_changed(bmain, ntree, node);
 }
 
 void EeveeFilterGraphMaterialItemsAccessor::post_item_change(bContext *C, PointerRNA node_ptr)
@@ -472,7 +536,28 @@ static void node_declare(NodeDeclarationBuilder &b)
     }
     b.add_input<decl::Extend>("", "__extend__").structure_type(StructureType::Dynamic);
   }
-  b.add_output<decl::Image>("Image");
+
+  bool declared_output = false;
+  if (node != nullptr) {
+    Material *material = filter_graph_filter_pass_material(*node);
+    bNode *filter_output_node = material ? filter_graph_find_filter_output_node(*material) : nullptr;
+    if (filter_output_node != nullptr && filter_output_node->storage != nullptr) {
+      const NodeShaderFilterOutput &output_storage =
+          *static_cast<const NodeShaderFilterOutput *>(filter_output_node->storage);
+      for (const int i : IndexRange(output_storage.items_num)) {
+        const NodeEeveeFilterGraphSocketItem &item = output_storage.items[i];
+        const StringRefNull name = item.name ? item.name : "";
+        const std::string identifier = item.identifier == 0 ?
+                                           "Image" :
+                                           "Image_" + std::to_string(item.identifier);
+        b.add_output<decl::Image>(name, identifier).structure_type(StructureType::Dynamic);
+        declared_output = true;
+      }
+    }
+  }
+  if (!declared_output) {
+    b.add_output<decl::Image>("Image", "Image");
+  }
 }
 
 static void node_init(bNodeTree * /*tree*/, bNode *node)

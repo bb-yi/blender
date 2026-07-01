@@ -53,6 +53,10 @@ FilterGraphSocketItemsAccessorBase::get_items_from_node(bNode &node)
     auto &storage = *static_cast<NodeShaderFilterGraphInput *>(node.storage);
     return {&storage.items, &storage.items_num, &storage.active_index};
   }
+  if (STREQ(node.idname, ShaderFilterOutputItemsAccessor::node_idname.c_str())) {
+    auto &storage = *ensure_shader_filter_output_storage(node);
+    return {&storage.items, &storage.items_num, &storage.active_index};
+  }
   auto &storage = *static_cast<NodeEeveeFilterGraphFilterMaterial *>(node.storage);
   return {&storage.items, &storage.items_num, &storage.active_index};
 }
@@ -64,6 +68,10 @@ void FilterGraphSocketItemsAccessorBase::init_with_name(bNode &node, ItemT &item
   }
   if (STREQ(node.idname, ShaderFilterGraphInputItemsAccessor::node_idname.c_str())) {
     auto &storage = *static_cast<NodeShaderFilterGraphInput *>(node.storage);
+    item.identifier = storage.next_identifier++;
+  }
+  else if (STREQ(node.idname, ShaderFilterOutputItemsAccessor::node_idname.c_str())) {
+    auto &storage = *ensure_shader_filter_output_storage(node);
     item.identifier = storage.next_identifier++;
   }
   else if (STREQ(node.idname, EeveeFilterGraphMaterialItemsAccessor::node_idname.c_str())) {
@@ -93,6 +101,13 @@ socket_items::SocketItemsRef<NodeEeveeFilterGraphSocketItem>
 ShaderFilterGraphInputItemsAccessor::get_items_from_node(bNode &node)
 {
   auto &storage = *static_cast<NodeShaderFilterGraphInput *>(node.storage);
+  return {&storage.items, &storage.items_num, &storage.active_index};
+}
+
+socket_items::SocketItemsRef<NodeEeveeFilterGraphSocketItem>
+ShaderFilterOutputItemsAccessor::get_items_from_node(bNode &node)
+{
+  auto &storage = *ensure_shader_filter_output_storage(node);
   return {&storage.items, &storage.items_num, &storage.active_index};
 }
 
@@ -214,6 +229,7 @@ static void node_blend_read(bNodeTree & /*tree*/, bNode &node, BlendDataReader &
 
 namespace nodes {
 StructRNA **ShaderFilterGraphInputItemsAccessor::item_srna = &RNA_EeveeFilterGraphSocketItem;
+StructRNA **ShaderFilterOutputItemsAccessor::item_srna = &RNA_EeveeFilterGraphSocketItem;
 }  // namespace nodes
 
 void register_node_type_sh_filter_graph_input()

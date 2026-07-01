@@ -663,9 +663,30 @@ void GPUCodegen::generate_graphs()
   }
   output.npr = graph_serialize(
       GPU_NODE_TAG_NPR | GPU_NODE_TAG_OUTLINE, graph.outlink_npr, "float4(0.0f)");
-  output.filter = graph_serialize(GPU_NODE_TAG_FILTER | GPU_NODE_TAG_AOV,
-                                  graph.outlink_filter,
-                                  nullptr);
+  if (!BLI_listbase_is_empty(&graph.outlink_filters)) {
+    for (GPUNodeGraphOutputLink &filter_link : graph.outlink_filters) {
+      for (GPUNode &node : graph.nodes) {
+        node.tag &= ~GPU_NODE_TAG_FILTER;
+      }
+      gpu_nodes_tag(&graph, filter_link.outlink, GPU_NODE_TAG_FILTER);
+      GPUGraphOutput filter_graph = graph_serialize(GPU_NODE_TAG_FILTER | GPU_NODE_TAG_AOV,
+                                                     filter_link.outlink,
+                                                     nullptr);
+      output.filter_output_identifiers.append(filter_link.hash);
+      output.filter_outputs.append(filter_graph);
+    }
+    for (GPUNodeGraphOutputLink &filter_link : graph.outlink_filters) {
+      gpu_nodes_tag(&graph, filter_link.outlink, GPU_NODE_TAG_FILTER);
+    }
+    if (!output.filter_outputs.is_empty()) {
+      output.filter = output.filter_outputs.first();
+    }
+  }
+  else {
+    output.filter = graph_serialize(GPU_NODE_TAG_FILTER | GPU_NODE_TAG_AOV,
+                                    graph.outlink_filter,
+                                    nullptr);
+  }
   if (graph.outlink_light_shader != nullptr) {
     output.light_shader = graph_serialize(
         GPU_NODE_TAG_LIGHT_SHADER, graph.outlink_light_shader, "float4(1.0f)");
