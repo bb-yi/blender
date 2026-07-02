@@ -281,6 +281,9 @@ static bool filter_graph_sync_material_to_all_filter_passes(Main &bmain, Materia
       else {
         filter_graph_clear_filter_pass_interface(*node);
       }
+      BKE_ntree_update_tag_node_property(filter_graph, node);
+      BKE_main_ensure_invariants(bmain, filter_graph->id);
+      update_node_declaration_and_sockets(*filter_graph, *node);
       filter_graph_tag_node_changed(bmain, *filter_graph, *node);
     }
   }
@@ -311,26 +314,7 @@ void filter_graph_filter_output_interface_changed(Main &bmain, bNodeTree &ntree,
   if (material == nullptr) {
     return;
   }
-
-  for (Scene &scene : bmain.scenes) {
-    bNodeTree *filter_graph = scene.eevee.filter_graph;
-    if (filter_graph == nullptr ||
-        !STREQ(filter_graph->idname, eevee_filter_graph_tree_idname.c_str()))
-    {
-      continue;
-    }
-    for (bNode *graph_node = static_cast<bNode *>(filter_graph->nodes.first); graph_node != nullptr;
-         graph_node = graph_node->next)
-    {
-      if (graph_node->type_legacy != EEVEE_FILTER_GRAPH_NODE_FILTER_MATERIAL ||
-          graph_node->id != &material->id)
-      {
-        continue;
-      }
-      update_node_declaration_and_sockets(*filter_graph, *graph_node);
-      filter_graph_tag_node_changed(bmain, *filter_graph, *graph_node);
-    }
-  }
+  filter_graph_sync_material_to_all_filter_passes(bmain, *material);
 }
 
 void filter_graph_filter_pass_interface_changed(Main &bmain, bNodeTree &ntree, bNode &node)
@@ -430,6 +414,8 @@ void ShaderFilterGraphInputItemsAccessor::post_item_change(Main &bmain,
 
 void ShaderFilterOutputItemsAccessor::post_item_change(Main &bmain, bNodeTree &ntree, bNode &node)
 {
+  ensure_shader_filter_output_storage(node);
+  update_node_declaration_and_sockets(ntree, node);
   filter_graph_filter_output_interface_changed(bmain, ntree, node);
 }
 

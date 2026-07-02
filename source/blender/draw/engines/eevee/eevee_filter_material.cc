@@ -255,7 +255,7 @@ static int filter_material_output_count(const blender::Material *material)
   }
   const NodeShaderFilterOutput &storage =
       *static_cast<const NodeShaderFilterOutput *>(output_node->storage);
-  return storage.items_num;
+  return storage.items_num > 0 ? storage.items_num : 1;
 }
 
 static int filter_material_output_index_from_socket(const blender::Material *material,
@@ -274,6 +274,9 @@ static int filter_material_output_index_from_socket(const blender::Material *mat
   }
   const NodeShaderFilterOutput &storage =
       *static_cast<const NodeShaderFilterOutput *>(output_node->storage);
+  if (storage.items_num <= 0) {
+    return STREQ(socket.identifier, "Image") ? 0 : -1;
+  }
   for (const int i : IndexRange(storage.items_num)) {
     const NodeEeveeFilterGraphSocketItem &item = storage.items[i];
     const std::string identifier = item.identifier == 0 ?
@@ -408,13 +411,10 @@ static void filter_material_collect_aov_usage(const bNodeTree &ntree,
   for (const bNode *node = static_cast<const bNode *>(ntree.nodes.first); node != nullptr;
        node = node->next)
   {
-    if (ELEM(node->type_legacy, SH_NODE_INPUT_AOV, SH_NODE_OUTPUT_AOV)) {
+    if (node->type_legacy == SH_NODE_INPUT_AOV) {
       const StringRef aov_name = filter_material_aov_node_name(*node);
       if (!aov_name.is_empty()) {
-        Vector<std::string> &names = (node->type_legacy == SH_NODE_INPUT_AOV) ?
-                                         r_usage.input_names :
-                                         r_usage.output_names;
-        filter_material_add_aov_name(names, aov_name);
+        filter_material_add_aov_name(r_usage.input_names, aov_name);
       }
     }
     if (node->type_legacy == NODE_GROUP && node->id != nullptr) {
@@ -724,7 +724,7 @@ static void filter_material_collect_scene_sources(const bNodeTree &ntree,
   }
 
   for (const bNode *node : ntree.all_nodes()) {
-    if (!ELEM(node->type_legacy, SH_NODE_OUTPUT_AOV, SH_NODE_OUTLINE_CONTROL) || node->is_muted()) {
+    if (node->type_legacy != SH_NODE_OUTLINE_CONTROL || node->is_muted()) {
       continue;
     }
     filter_material_collect_scene_sources_from_output(ntree,

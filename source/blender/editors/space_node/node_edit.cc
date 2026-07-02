@@ -550,6 +550,7 @@ void ED_node_set_active(
              SH_NODE_OUTPUT_WORLD,
              SH_NODE_OUTPUT_LIGHT,
              SH_NODE_EEVEE_LIGHT_SHADER_OUTPUT,
+             SH_NODE_OUTPUT_FILTER,
              SH_NODE_OUTPUT_LINESTYLE))
     {
       for (bNode *node_iter : ntree->all_nodes()) {
@@ -563,6 +564,9 @@ void ED_node_set_active(
     }
 
     BKE_main_ensure_invariants(*bmain, ntree->id);
+    if (node->type_legacy == SH_NODE_OUTPUT_FILTER) {
+      blender::nodes::filter_graph_filter_output_interface_changed(*bmain, *ntree, *node);
+    }
 
     if (node->flag & NODE_ACTIVE_TEXTURE) {
       /* If active texture changed, free GLSL materials. */

@@ -6,7 +6,11 @@
  * \ingroup shdnodes
  */
 
+#include <algorithm>
+
 #include "BLO_read_write.hh"
+
+#include "DNA_array_utils.hh"
 
 #include "BLI_string.h"
 
@@ -33,7 +37,25 @@ namespace nodes {
 NodeShaderFilterOutput *ensure_shader_filter_output_storage(bNode &node)
 {
   if (node.storage != nullptr) {
-    return static_cast<NodeShaderFilterOutput *>(node.storage);
+    NodeShaderFilterOutput *data = static_cast<NodeShaderFilterOutput *>(node.storage);
+    if (data->items == nullptr || data->items_num <= 0) {
+      MEM_SAFE_DELETE(data->items);
+      data->items = MEM_new_array<NodeEeveeFilterGraphSocketItem>(1, __func__);
+      data->items[0].name = BLI_strdup(DATA_("Image"));
+      data->items[0].identifier = 0;
+      data->items_num = 1;
+      data->active_index = 0;
+      data->next_identifier = std::max(data->next_identifier, 1);
+    }
+    else {
+      int next_identifier = data->next_identifier;
+      for (const int i : IndexRange(data->items_num)) {
+        next_identifier = std::max(next_identifier, data->items[i].identifier + 1);
+      }
+      data->next_identifier = next_identifier;
+      data->active_index = std::clamp(data->active_index, 0, data->items_num - 1);
+    }
+    return data;
   }
 
   NodeShaderFilterOutput *data = MEM_new<NodeShaderFilterOutput>(__func__);
@@ -86,18 +108,20 @@ static void node_declare(NodeDeclarationBuilder &b)
   const bNode *node = b.node_or_null();
   if (node && node->storage != nullptr) {
     const NodeShaderFilterOutput &storage = node_storage(*node);
-    for (const int i : IndexRange(storage.items_num)) {
-      const NodeEeveeFilterGraphSocketItem &item = storage.items[i];
-      b.add_input<decl::Color>(color_name_for_item(item), color_identifier_for_item(item))
-          .default_value({0.0f, 0.0f, 0.0f, 1.0f})
-          .structure_type(StructureType::Dynamic);
-      b.add_input<decl::Float>(alpha_name_for_item(item), alpha_identifier_for_item(item))
-          .default_value(1.0f)
-          .min(0.0f)
-          .max(1.0f)
-          .structure_type(StructureType::Dynamic);
+    if (storage.items != nullptr && storage.items_num > 0) {
+      for (const int i : IndexRange(storage.items_num)) {
+        const NodeEeveeFilterGraphSocketItem &item = storage.items[i];
+        b.add_input<decl::Color>(color_name_for_item(item), color_identifier_for_item(item))
+            .default_value({0.0f, 0.0f, 0.0f, 1.0f})
+            .structure_type(StructureType::Dynamic);
+        b.add_input<decl::Float>(alpha_name_for_item(item), alpha_identifier_for_item(item))
+            .default_value(1.0f)
+            .min(0.0f)
+            .max(1.0f)
+            .structure_type(StructureType::Dynamic);
+      }
+      return;
     }
-    return;
   }
 
   b.add_input<decl::Color>("Color", "Color").default_value({0.0f, 0.0f, 0.0f, 1.0f});
@@ -148,7 +172,8 @@ static int node_shader_gpu_output_filter(GPUMaterial *mat,
 {
   GPU_material_flag_set(mat, GPU_MATFLAG_FILTER_MATERIAL);
 
-  if (node->storage == nullptr) {
+  NodeShaderFilterOutput *storage = ensure_shader_filter_output_storage(*node);
+  if (storage == nullptr) {
     GPUNodeLink *outlink_filter = nullptr;
     GPUNodeLink *color = in[0].link ? in[0].link : GPU_constant(in[0].vec);
     GPUNodeLink *alpha = in[1].link ? in[1].link : GPU_constant(&in[1].vec[0]);
@@ -159,8 +184,7 @@ static int node_shader_gpu_output_filter(GPUMaterial *mat,
     return true;
   }
 
-  const NodeShaderFilterOutput &storage = node_storage(*node);
-  for (const int i : IndexRange(storage.items_num)) {
+  for (const int i : IndexRange(storage->items_num)) {
     if (i >= eevee_filter_graph_output_cap) {
       break;
     }
@@ -171,14 +195,76 @@ static int node_shader_gpu_output_filter(GPUMaterial *mat,
     if (!GPU_link(mat, "node_output_filter", color, alpha, &outlink_filter)) {
       return false;
     }
-    GPU_material_output_filter_item(mat, storage.items[i].identifier, outlink_filter);
+    GPU_material_output_filter_item(mat, storage->items[i].identifier, outlink_filter);
   }
   return true;
 }
 
+static void node_remove_active_output_item(wmOperatorType *ot,
+                                           const char *name,
+                                           const char *idname,
+                                           const char *description)
+{
+  ot->name = name;
+  ot->idname = idname;
+  ot->description = description;
+  ot->poll = socket_items::ops::editable_node_active_poll<ShaderFilterOutputItemsAccessor>;
+  ot->flag = OPTYPE_UNDO;
+
+  ot->exec = [](bContext *C, wmOperator *op) -> wmOperatorStatus {
+    PointerRNA node_ptr = socket_items::ops::get_active_node_to_operate_on(
+        C, op, ShaderFilterOutputItemsAccessor::node_idname);
+    if (node_ptr.data == nullptr) {
+      return OPERATOR_CANCELLED;
+    }
+    bNode &node = *static_cast<bNode *>(node_ptr.data);
+    ensure_shader_filter_output_storage(node);
+    socket_items::SocketItemsRef<NodeEeveeFilterGraphSocketItem> ref =
+        ShaderFilterOutputItemsAccessor::get_items_from_node(node);
+    if (*ref.items_num <= 1) {
+      return OPERATOR_CANCELLED;
+    }
+
+    int index_to_remove = ref.active_index ? *ref.active_index : 0;
+    if (index_to_remove < 0 || index_to_remove >= *ref.items_num) {
+      index_to_remove = *ref.items_num - 1;
+    }
+    dna::array::remove_index(ref.items,
+                             ref.items_num,
+                             ref.active_index,
+                             index_to_remove,
+                             ShaderFilterOutputItemsAccessor::destruct_item);
+    socket_items::ops::update_after_item_array_change<ShaderFilterOutputItemsAccessor>(C,
+                                                                                       node_ptr);
+    return OPERATOR_FINISHED;
+  };
+
+  socket_items::ops::add_node_identifier_property(ot);
+}
+
 static void node_operators()
 {
-  socket_items::ops::make_common_operators<ShaderFilterOutputItemsAccessor>();
+  WM_operatortype_append([](wmOperatorType *ot) {
+    socket_items::ops::add_item<ShaderFilterOutputItemsAccessor>(
+        ot,
+        "Add Item",
+        ShaderFilterOutputItemsAccessor::operator_idnames::add_item.c_str(),
+        "Add item below active item");
+  });
+  WM_operatortype_append([](wmOperatorType *ot) {
+    node_remove_active_output_item(
+        ot,
+        "Remove Item",
+        ShaderFilterOutputItemsAccessor::operator_idnames::remove_item.c_str(),
+        "Remove active item");
+  });
+  WM_operatortype_append([](wmOperatorType *ot) {
+    socket_items::ops::move_active_item<ShaderFilterOutputItemsAccessor>(
+        ot,
+        "Move Item",
+        ShaderFilterOutputItemsAccessor::operator_idnames::move_item.c_str(),
+        "Move active item");
+  });
 }
 
 static void node_blend_write(const bNodeTree & /*tree*/, const bNode &node, BlendWriter &writer)
@@ -196,6 +282,7 @@ static void node_blend_read(bNodeTree & /*tree*/, bNode &node, BlendDataReader &
     return;
   }
   socket_items::blend_read_data<ShaderFilterOutputItemsAccessor>(&reader, node);
+  ensure_shader_filter_output_storage(node);
 }
 
 }  // namespace nodes::node_shader_output_filter_cc

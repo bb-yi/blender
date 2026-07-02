@@ -669,7 +669,7 @@ void GPUCodegen::generate_graphs()
         node.tag &= ~GPU_NODE_TAG_FILTER;
       }
       gpu_nodes_tag(&graph, filter_link.outlink, GPU_NODE_TAG_FILTER);
-      GPUGraphOutput filter_graph = graph_serialize(GPU_NODE_TAG_FILTER | GPU_NODE_TAG_AOV,
+      GPUGraphOutput filter_graph = graph_serialize(GPU_NODE_TAG_FILTER,
                                                      filter_link.outlink,
                                                      nullptr);
       output.filter_output_identifiers.append(filter_link.hash);
@@ -683,9 +683,7 @@ void GPUCodegen::generate_graphs()
     }
   }
   else {
-    output.filter = graph_serialize(GPU_NODE_TAG_FILTER | GPU_NODE_TAG_AOV,
-                                    graph.outlink_filter,
-                                    nullptr);
+    output.filter = graph_serialize(GPU_NODE_TAG_FILTER, graph.outlink_filter, nullptr);
   }
   if (graph.outlink_light_shader != nullptr) {
     output.light_shader = graph_serialize(

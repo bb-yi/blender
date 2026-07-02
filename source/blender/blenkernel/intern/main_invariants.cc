@@ -20,6 +20,7 @@
 #include "GPU_material.hh"
 
 #include "NOD_defaults.hh"
+#include "NOD_filter_graph.hh"
 
 #include "WM_api.hh"
 #include "WM_types.hh"
@@ -110,8 +111,24 @@ static void propagate_node_tree_changes(Main &bmain,
       WM_main_add_notifier(NC_SCENE | ND_RENDER_OPTIONS, scene);
     }
   };
-  params.tree_output_changed_fn = [](bNodeTree &ntree, ID & /*owner_id*/) {
+  params.tree_output_changed_fn = [&bmain](bNodeTree &ntree, ID &owner_id) {
     DEG_id_tag_update(&ntree.id, ID_RECALC_NTREE_OUTPUT);
+    if (ntree.type != NTREE_SHADER || GS(owner_id.name) != ID_MA) {
+      return;
+    }
+
+    Material &material = reinterpret_cast<Material &>(owner_id);
+    if (material.eevee_domain != MA_EEVEE_DOMAIN_FILTER) {
+      return;
+    }
+
+    for (bNode *node = static_cast<bNode *>(ntree.nodes.first); node != nullptr; node = node->next)
+    {
+      if (node->type_legacy == SH_NODE_OUTPUT_FILTER && (node->flag & NODE_DO_OUTPUT)) {
+        nodes::filter_graph_filter_output_interface_changed(bmain, ntree, *node);
+        return;
+      }
+    }
   };
 
   std::optional<Vector<bNodeTree *>> modified_trees;

@@ -31,6 +31,7 @@
 #include "BKE_attribute.hh"
 #include "BKE_context.hh"
 #include "BKE_geometry_set.hh"
+#include "BKE_global.hh"
 #include "BKE_layer.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_main_invariants.hh"
@@ -1745,6 +1746,17 @@ static void rna_NodeTree_update(Main *bmain, Scene * /*scene*/, PointerRNA *ptr)
 {
   bNodeTree *ntree = reinterpret_cast<bNodeTree *>(ptr->owner_id);
 
+  if (ntree->type == NTREE_SHADER) {
+    for (bNode *node = static_cast<bNode *>(ntree->nodes.first); node != nullptr;
+         node = node->next)
+    {
+      if (node->type_legacy == SH_NODE_OUTPUT_FILTER && (node->flag & NODE_DO_OUTPUT)) {
+        nodes::filter_graph_filter_output_interface_changed(*bmain, *ntree, *node);
+        break;
+      }
+    }
+  }
+
   WM_main_add_notifier(NC_NODE | NA_EDITED, &ntree->id);
   WM_main_add_notifier(NC_SCENE | ND_NODES, &ntree->id);
 
@@ -1947,6 +1959,9 @@ static void rna_NodeTree_active_node_set(PointerRNA *ptr,
       node->flag |= NODE_DO_OUTPUT;
       bke::node_tree_set_output(*ntree);
       BKE_ntree_update_tag_active_output_changed(ntree);
+      if (node->type_legacy == SH_NODE_OUTPUT_FILTER && G_MAIN != nullptr) {
+        nodes::filter_graph_filter_output_interface_changed(*G_MAIN, *ntree, *node);
+      }
     }
   }
   else {
@@ -3228,6 +3243,9 @@ void rna_Node_update(Main *bmain, Scene * /*scene*/, PointerRNA *ptr)
 {
   bNodeTree *ntree = reinterpret_cast<bNodeTree *>(ptr->owner_id);
   bNode *node = ptr->data_as<bNode>();
+  if (node->type_legacy == SH_NODE_OUTPUT_FILTER) {
+    nodes::filter_graph_filter_output_interface_changed(*bmain, *ntree, *node);
+  }
   BKE_ntree_update_tag_node_property(ntree, node);
   BKE_main_ensure_invariants(*bmain, ntree->id);
 }
@@ -4574,6 +4592,12 @@ static void rna_Node_ItemArray_remove(ID *id,
     return;
   }
   const int remove_index = item_to_remove - *ref.items;
+  if constexpr (std::is_same_v<Accessor, nodes::ShaderFilterOutputItemsAccessor>) {
+    if (*ref.items_num <= 1) {
+      BKE_report(reports, RPT_ERROR, "Filter Output requires at least one item");
+      return;
+    }
+  }
   dna::array::remove_index(
       ref.items, ref.items_num, ref.active_index, remove_index, Accessor::destruct_item);
 
@@ -4584,6 +4608,9 @@ template<typename Accessor> static void rna_Node_ItemArray_clear(ID *id, bNode *
 {
   nodes::socket_items::SocketItemsRef ref = Accessor::get_items_from_node(*node);
   dna::array::clear(ref.items, ref.items_num, ref.active_index, Accessor::destruct_item);
+  if constexpr (std::is_same_v<Accessor, nodes::ShaderFilterOutputItemsAccessor>) {
+    nodes::ensure_shader_filter_output_storage(*node);
+  }
 
   rna_Node_ItemArray_update_after_change<Accessor>(id, node, bmain);
 }
@@ -5255,6 +5282,11 @@ static void rna_ShaderNode_is_active_output_set(PointerRNA *ptr, bool value)
   }
   else {
     node->flag &= ~NODE_DO_OUTPUT;
+  }
+  BKE_ntree_update_tag_active_output_changed(ntree);
+  if (node->type_legacy == SH_NODE_OUTPUT_FILTER && G_MAIN != nullptr) {
+    BKE_main_ensure_invariants(*G_MAIN, ntree->id);
+    nodes::filter_graph_filter_output_interface_changed(*G_MAIN, *ntree, *node);
   }
 }
 
