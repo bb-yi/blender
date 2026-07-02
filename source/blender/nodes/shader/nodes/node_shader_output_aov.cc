@@ -52,6 +52,11 @@ static int node_shader_gpu_output_aov(GPUMaterial *mat,
   return true;
 }
 
+static bool node_add_ui_poll(const bContext *C)
+{
+  return !filter_eevee_shader_nodes_poll(C);
+}
+
 }  // namespace nodes::node_shader_output_aov_cc
 
 /* node type definition */
@@ -71,6 +76,7 @@ void register_node_type_sh_output_aov()
   ntype.declare = file_ns::node_declare;
   ntype.draw_buttons = file_ns::node_shader_buts_output_aov;
   ntype.initfunc = file_ns::node_shader_init_output_aov;
+  ntype.add_ui_poll = file_ns::node_add_ui_poll;
   bke::node_type_storage(
       ntype, "NodeShaderOutputAOV", node_free_standard_storage, node_copy_standard_storage);
   ntype.gpu_fn = file_ns::node_shader_gpu_output_aov;

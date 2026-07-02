@@ -281,7 +281,20 @@ static void node_blend_read(bNodeTree & /*tree*/, bNode &node, BlendDataReader &
     ensure_shader_filter_output_storage(node);
     return;
   }
-  socket_items::blend_read_data<ShaderFilterOutputItemsAccessor>(&reader, node);
+
+  /* The generic socket item blend reader asks the accessor for the item array first. The Filter
+   * Output accessor normalizes storage through ensure_shader_filter_output_storage(), which is not
+   * safe here because the items pointer still contains the on-disk address. Direct-link the raw
+   * storage first, then normalize it below. */
+  NodeShaderFilterOutput &storage = node_storage(node);
+  storage.items_num = std::max(storage.items_num, 0);
+  storage.items = static_cast<NodeEeveeFilterGraphSocketItem *>(BLO_read_struct_array_with_size(
+      &reader,
+      storage.items,
+      sizeof(NodeEeveeFilterGraphSocketItem) * storage.items_num));
+  for (NodeEeveeFilterGraphSocketItem &item : MutableSpan(storage.items, storage.items_num)) {
+    ShaderFilterOutputItemsAccessor::blend_read_data_item(&reader, item);
+  }
   ensure_shader_filter_output_storage(node);
 }
 

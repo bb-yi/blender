@@ -14,6 +14,18 @@
 #define FILTER_GRAPH_ALPHA_MODE_TRANSMITTANCE 1
 #define FILTER_GRAPH_ALPHA_MODE_DEPTH 2
 
+#define FILTER_GRAPH_SOURCE_COLOR 0
+#define FILTER_GRAPH_SOURCE_DEPTH 1
+#define FILTER_GRAPH_SOURCE_VALUE 2
+#define FILTER_GRAPH_SOURCE_DATA 3
+#define FILTER_GRAPH_SOURCE_INTERMEDIATE 4
+
+#define FILTER_GRAPH_RESAMPLE_NEAREST 0
+#define FILTER_GRAPH_RESAMPLE_LINEAR 1
+
+#define FILTER_GRAPH_RESOLVE_RAW 0
+#define FILTER_GRAPH_RESOLVE_STAGE_OUTPUT 1
+
 #ifndef GPU_SHADER
 #  include "BLI_memory_utils.hh"
 #  include "GPU_shader_shared.hh"
@@ -33,7 +45,7 @@ struct [[host_shared]] FilterGraphInputHandleData {
   uint type;
   int index;
   int alpha_mode;
-  int _pad;
+  int source_kind;
 };
 
 #ifndef GPU_SHADER

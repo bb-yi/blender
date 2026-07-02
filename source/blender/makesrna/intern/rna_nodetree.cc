@@ -952,6 +952,62 @@ static void rna_EeveeFilterGraphNode_material_update(Main *bmain,
   nodes::filter_graph_filter_pass_material_changed(*bmain, ntree, node);
 }
 
+static int rna_EeveeFilterGraphNode_execution_resolution_get(PointerRNA *ptr)
+{
+  bNode &node = *ptr->data_as<bNode>();
+  const NodeEeveeFilterGraphFilterMaterial *storage =
+      static_cast<const NodeEeveeFilterGraphFilterMaterial *>(node.storage);
+  const float scale = storage ? storage->resolution_scale : 1.0f;
+  if (scale <= 0.07f) {
+    return 4;
+  }
+  if (scale <= 0.14f) {
+    return 3;
+  }
+  if (scale <= 0.30f) {
+    return 2;
+  }
+  if (scale <= 0.75f) {
+    return 1;
+  }
+  return 0;
+}
+
+static void rna_EeveeFilterGraphNode_execution_resolution_set(PointerRNA *ptr, int value)
+{
+  bNode &node = *ptr->data_as<bNode>();
+  NodeEeveeFilterGraphFilterMaterial *storage =
+      static_cast<NodeEeveeFilterGraphFilterMaterial *>(node.storage);
+  if (storage == nullptr) {
+    return;
+  }
+  switch (value) {
+    case 4:
+      storage->resolution_scale = 1.0f / 16.0f;
+      break;
+    case 3:
+      storage->resolution_scale = 1.0f / 8.0f;
+      break;
+    case 2:
+      storage->resolution_scale = 1.0f / 4.0f;
+      break;
+    case 1:
+      storage->resolution_scale = 1.0f / 2.0f;
+      break;
+    default:
+      storage->resolution_scale = 1.0f;
+      break;
+  }
+}
+
+static void rna_EeveeFilterGraphNode_execution_resolution_update(Main *bmain,
+                                                                 Scene * /*scene*/,
+                                                                 PointerRNA *ptr)
+{
+  bNodeTree &ntree = *reinterpret_cast<bNodeTree *>(ptr->owner_id);
+  nodes::filter_graph_tag_tree_changed(*bmain, ntree);
+}
+
 static void rna_EeveeFilterGraphStageOutput_execution_stage_set(PointerRNA *ptr, int value)
 {
   bNodeTree &ntree = *reinterpret_cast<bNodeTree *>(ptr->owner_id);
@@ -4609,7 +4665,19 @@ template<typename Accessor> static void rna_Node_ItemArray_clear(ID *id, bNode *
   nodes::socket_items::SocketItemsRef ref = Accessor::get_items_from_node(*node);
   dna::array::clear(ref.items, ref.items_num, ref.active_index, Accessor::destruct_item);
   if constexpr (std::is_same_v<Accessor, nodes::ShaderFilterOutputItemsAccessor>) {
-    nodes::ensure_shader_filter_output_storage(*node);
+    *ref.items = MEM_new_array<typename Accessor::ItemT>(1, __func__);
+    (*ref.items)[0].name = BLI_strdup(DATA_("Image"));
+    (*ref.items)[0].identifier = 0;
+    *ref.items_num = 1;
+    if (ref.active_index != nullptr) {
+      *ref.active_index = 0;
+    }
+    if (node->storage != nullptr) {
+      NodeShaderFilterOutput &storage = *static_cast<NodeShaderFilterOutput *>(node->storage);
+      if (storage.next_identifier < 1) {
+        storage.next_identifier = 1;
+      }
+    }
   }
 
   rna_Node_ItemArray_update_after_change<Accessor>(id, node, bmain);
@@ -8053,6 +8121,14 @@ static void def_eevee_filter_graph_aov_input(BlenderRNA * /*brna*/, StructRNA *s
 
 static void def_eevee_filter_graph_filter_material(BlenderRNA *brna, StructRNA *srna)
 {
+  static const EnumPropertyItem filter_graph_execution_resolution_items[] = {
+      {0, "FULL", 0, "Full", "Execute this filter pass at full stage resolution"},
+      {1, "HALF", 0, "1/2", "Execute this filter pass at half stage resolution"},
+      {2, "QUARTER", 0, "1/4", "Execute this filter pass at quarter stage resolution"},
+      {3, "EIGHTH", 0, "1/8", "Execute this filter pass at one eighth stage resolution"},
+      {4, "SIXTEENTH", 0, "1/16", "Execute this filter pass at one sixteenth stage resolution"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
   PropertyRNA *prop;
 
   rna_def_eevee_filter_graph_material_items(brna);
@@ -8092,11 +8168,21 @@ static void def_eevee_filter_graph_filter_material(BlenderRNA *brna, StructRNA *
   RNA_def_property_ui_text(prop, "Active Item", "Active filter material input item");
   RNA_def_property_update(prop, NC_NODE, nullptr);
 
+  prop = RNA_def_property(srna, "execution_resolution", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, filter_graph_execution_resolution_items);
+  RNA_def_property_enum_funcs(prop,
+                              "rna_EeveeFilterGraphNode_execution_resolution_get",
+                              "rna_EeveeFilterGraphNode_execution_resolution_set",
+                              nullptr);
+  RNA_def_property_ui_text(prop, "Execution Resolution", "Resolution used to execute this filter pass");
+  RNA_def_property_update(
+      prop, NC_NODE | NA_EDITED, "rna_EeveeFilterGraphNode_execution_resolution_update");
+
   prop = RNA_def_property(srna, "resolution_scale", PROP_FLOAT, PROP_FACTOR);
   RNA_def_property_float_sdna(prop, nullptr, "resolution_scale");
   RNA_def_property_range(prop, 0.0625f, 1.0f);
   RNA_def_property_ui_text(
-      prop, "Resolution Scale", "Reserved resource scale metadata for future low-resolution passes");
+      prop, "Resolution Scale", "Internal execution resolution scale for this filter pass");
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
 
   RNA_def_struct_sdna_from(srna, "bNode", nullptr);

@@ -48,6 +48,7 @@ struct TextureHandle {
 #if defined(NPR_SHADER) || defined(MAT_FILTER)
 float4 TextureHandle_eval(TextureHandle tex, float2 offset, bool texel_offset);
 float4 TextureHandle_eval(TextureHandle tex);
+float4 TextureHandle_eval_uv(TextureHandle tex, float2 uv);
 #  if defined(MAT_FILTER)
 bool TextureHandle_stores_transmittance_alpha(TextureHandle tex);
 bool TextureHandle_is_scene_depth(TextureHandle tex);
@@ -61,6 +62,11 @@ float4 TextureHandle_eval(TextureHandle tex, float2 offset, bool texel_offset)
 float4 TextureHandle_eval(TextureHandle tex)
 {
   return TextureHandle_eval(tex, float2(0.0f), false);
+}
+
+float4 TextureHandle_eval_uv(TextureHandle tex, float2 uv)
+{
+  return TextureHandle_eval(tex, uv, false);
 }
 #endif
 

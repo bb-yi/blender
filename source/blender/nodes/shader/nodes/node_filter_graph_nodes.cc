@@ -588,6 +588,7 @@ static void draw_buttons(ui::Layout &layout, bContext *C, PointerRNA *ptr)
   layout.use_property_decorate_set(false);
   ui::Layout &material_row = layout.row(true);
   template_id(&material_row, C, ptr, "material", "node.filter_pass_new_material", nullptr, nullptr);
+  layout.prop(ptr, "execution_resolution", ui::ITEM_R_SPLIT_EMPTY_NAME, IFACE_("Res"), ICON_NONE);
 }
 
 static void draw_buttons_ex(ui::Layout &layout, bContext *C, PointerRNA *ptr)
@@ -596,6 +597,7 @@ static void draw_buttons_ex(ui::Layout &layout, bContext *C, PointerRNA *ptr)
   layout.use_property_decorate_set(false);
   ui::Layout &material_row = layout.row(true);
   template_id(&material_row, C, ptr, "material", "node.filter_pass_new_material", nullptr, nullptr);
+  layout.prop(ptr, "execution_resolution", ui::ITEM_R_SPLIT_EMPTY_NAME, IFACE_("Resolution"), ICON_NONE);
 
   bNodeTree &ntree = *reinterpret_cast<bNodeTree *>(ptr->owner_id);
   bNode &node = *ptr->data_as<bNode>();

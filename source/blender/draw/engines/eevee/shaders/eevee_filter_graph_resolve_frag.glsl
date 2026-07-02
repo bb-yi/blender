@@ -63,37 +63,64 @@ float4 filter_graph_scene_position_color(int2 texel, float2 uv)
   return float4(drw_point_screen_to_world(float3(uv, depth)), 1.0f);
 }
 
-float4 filter_graph_eval_handle(TextureHandle tex)
+int2 filter_graph_source_texel(float2 uv, int2 source_extent)
 {
-  int2 extent = (tex.type == TEX_HANDLE_FILTER_GRAPH_TEXTURE) ?
-                    int2(textureSize(filter_graph_input_tx, 0).xy) :
-                    textureSize(scene_color_tx, 0);
-  int2 texel = clamp(int2(gl_FragCoord.xy), int2(0), extent - int2(1));
+  return clamp(int2(uv * float2(source_extent)), int2(0), source_extent - int2(1));
+}
+
+bool filter_graph_use_linear_resample(int source_kind)
+{
+  return source_kind == FILTER_GRAPH_SOURCE_COLOR ||
+         source_kind == FILTER_GRAPH_SOURCE_INTERMEDIATE;
+}
+
+float4 filter_graph_eval_handle(TextureHandle tex, int source_kind)
+{
+  float2 uv = gl_FragCoord.xy / float2(target_extent);
+  uv = clamp(uv, float2(0.0f), float2(1.0f));
 
   switch (tex.type) {
     case TEX_HANDLE_RP_COLOR: {
-      return texelFetch(rp_color_tx, int3(texel, int(tex.index)), 0);
+      int2 extent = int2(textureSize(rp_color_tx, 0).xy);
+      if (filter_graph_use_linear_resample(source_kind)) {
+        return texture(rp_color_tx, float3(uv, float(tex.index)));
+      }
+      return texelFetch(rp_color_tx, int3(filter_graph_source_texel(uv, extent), int(tex.index)), 0);
     }
     case TEX_HANDLE_RP_VALUE: {
-      float value = texelFetch(rp_value_tx, int3(texel, int(tex.index)), 0).r;
+      int2 extent = int2(textureSize(rp_value_tx, 0).xy);
+      float value = texelFetch(
+                        rp_value_tx, int3(filter_graph_source_texel(uv, extent), int(tex.index)), 0)
+                        .r;
       return float4(value.xxx, 1.0f);
     }
-    case TEX_HANDLE_FILTER_GRAPH_TEXTURE:
-      return texelFetch(filter_graph_input_tx, int3(texel, int(tex.index)), 0);
+    case TEX_HANDLE_FILTER_GRAPH_TEXTURE: {
+      int2 extent = int2(textureSize(filter_graph_input_tx, 0).xy);
+      if (filter_graph_use_linear_resample(source_kind)) {
+        return texture(filter_graph_input_tx, float3(uv, float(tex.index)));
+      }
+      return texelFetch(filter_graph_input_tx,
+                        int3(filter_graph_source_texel(uv, extent), int(tex.index)),
+                        0);
+    }
     case TEX_HANDLE_SCENE:
       if (tex.index == 0) {
+        int2 extent = textureSize(scene_color_tx, 0);
+        if (filter_graph_use_linear_resample(source_kind)) {
+          return texture(scene_color_tx, uv);
+        }
+        int2 texel = filter_graph_source_texel(uv, extent);
         return texelFetch(scene_color_tx, texel, 0);
       }
       if (tex.index == 1) {
-        float2 uv = (float2(texel) + 0.5f) / float2(extent);
         return filter_graph_scene_depth_color(uv);
       }
       if (tex.index == 2) {
-        float2 uv = (float2(texel) + 0.5f) / float2(extent);
+        int2 texel = filter_graph_source_texel(uv, textureSize(scene_color_tx, 0));
         return filter_graph_scene_normal_color(texel, uv);
       }
       if (tex.index == 4) {
-        float2 uv = (float2(texel) + 0.5f) / float2(extent);
+        int2 texel = filter_graph_source_texel(uv, textureSize(scene_color_tx, 0));
         return filter_graph_scene_position_color(texel, uv);
       }
       break;
@@ -104,7 +131,7 @@ float4 filter_graph_eval_handle(TextureHandle tex)
 
 float4 filter_graph_resolve_stage_output(TextureHandle tex, int alpha_mode)
 {
-  float4 color = filter_graph_eval_handle(tex);
+  float4 color = filter_graph_eval_handle(tex, filter_graph_input_buf[0].source_kind);
 
   if (alpha_mode == FILTER_GRAPH_ALPHA_MODE_TRANSMITTANCE) {
     return color;
@@ -121,5 +148,9 @@ float4 filter_graph_resolve_stage_output(TextureHandle tex, int alpha_mode)
 void main()
 {
   TextureHandle tex = TextureHandle(filter_graph_input_buf[0].type, filter_graph_input_buf[0].index);
+  if (resolve_mode == FILTER_GRAPH_RESOLVE_RAW) {
+    out_color = filter_graph_eval_handle(tex, filter_graph_input_buf[0].source_kind);
+    return;
+  }
   out_color = filter_graph_resolve_stage_output(tex, filter_graph_input_buf[0].alpha_mode);
 }
