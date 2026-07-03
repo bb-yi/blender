@@ -115,6 +115,7 @@ void node_operatortypes()
   WM_operatortype_append(NODE_OT_shader_script_update);
   WM_operatortype_append(NODE_OT_glsl_function_refresh);
   WM_operatortype_append(NODE_OT_glsl_function_new_text);
+  WM_operatortype_append(NODE_OT_glsl_function_reset_defaults);
 
   WM_operatortype_append(NODE_OT_viewer_border);
   WM_operatortype_append(NODE_OT_clear_viewer_border);

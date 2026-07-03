@@ -84,6 +84,8 @@
 
 namespace blender {
 
+bool node_shader_glsl_function_reset_defaults(bNode &node, std::string &r_error);
+
 namespace ed::space_node {
 
 /* -------------------------------------------------------------------- */
@@ -2034,6 +2036,30 @@ static wmOperatorStatus node_glsl_function_new_text_exec(bContext *C, wmOperator
   return OPERATOR_FINISHED;
 }
 
+static wmOperatorStatus node_glsl_function_reset_defaults_exec(bContext *C, wmOperator *op)
+{
+  bNodeTree *ntree = nullptr;
+  PointerRNA nodeptr = {};
+  bNode *node = nullptr;
+  if (!node_glsl_function_context_get(C, &ntree, &nodeptr, &node)) {
+    return OPERATOR_CANCELLED;
+  }
+
+  std::string error;
+  if (!node_shader_glsl_function_reset_defaults(*node, error)) {
+    if (!error.empty()) {
+      BKE_report(op->reports, RPT_ERROR, error.c_str());
+    }
+    return OPERATOR_CANCELLED;
+  }
+
+  BKE_ntree_update_tag_node_property(ntree, node);
+  BKE_main_ensure_invariants(*CTX_data_main(C), ntree->id);
+  WM_event_add_notifier(C, NC_NODE | NA_EDITED, &ntree->id);
+
+  return OPERATOR_FINISHED;
+}
+
 void NODE_OT_glsl_function_new_text(wmOperatorType *ot)
 {
   ot->name = "New GLSL Function Text";
@@ -2053,6 +2079,18 @@ void NODE_OT_glsl_function_refresh(wmOperatorType *ot)
   ot->idname = "NODE_OT_glsl_function_refresh";
 
   ot->exec = node_glsl_function_refresh_exec;
+  ot->poll = node_glsl_function_refresh_poll;
+
+  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+}
+
+void NODE_OT_glsl_function_reset_defaults(wmOperatorType *ot)
+{
+  ot->name = "Reset GLSL Function Parameters";
+  ot->description = "Reset GLSL Function parameters and defines to their declared defaults";
+  ot->idname = "NODE_OT_glsl_function_reset_defaults";
+
+  ot->exec = node_glsl_function_reset_defaults_exec;
   ot->poll = node_glsl_function_refresh_poll;
 
   ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;

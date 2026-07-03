@@ -3311,6 +3311,159 @@ namespace blender
       sync_glsl_define_choice_items(storage, parse_result);
     }
 
+    static bool reset_glsl_define_values_to_defaults(bNode& node,
+                                                     const GLSLParseResult& parse_result)
+    {
+      NodeShaderGLSLFunction& storage = node_storage(node);
+      if (!parse_result.defines_parsed || parse_result.defines.is_empty())
+      {
+        return false;
+      }
+
+      sync_glsl_define_values(node, parse_result);
+
+      bool changed = false;
+      for (const GLSLDefineMeta& define : parse_result.defines)
+      {
+        NodeShaderGLSLDefineValue* value = nullptr;
+        for (const int i : IndexRange(storage.define_values_num))
+        {
+          NodeShaderGLSLDefineValue& candidate = storage.define_values[i];
+          if (candidate.type == define.type && define.name == candidate.name)
+          {
+            value = &candidate;
+            break;
+          }
+        }
+        if (value == nullptr)
+        {
+          continue;
+        }
+
+        const int default_value = clamp_glsl_define_value(define, define.default_value);
+        if (value->value != default_value)
+        {
+          value->value = default_value;
+          changed = true;
+        }
+        if (define.type == SHD_GLSL_FUNCTION_DEFINE_INT)
+        {
+          register_glsl_define_int_choices(*value, define.int_choices);
+        }
+        else
+        {
+          RNA_shader_node_glsl_define_value_choices_unregister(value, 1);
+        }
+      }
+      return changed;
+    }
+
+    static bool set_glsl_socket_default_from_meta(bNodeSocket& socket, const float4 default_value)
+    {
+      if (socket.default_value == nullptr)
+      {
+        return false;
+      }
+
+      switch (socket.type)
+      {
+        case SOCK_FLOAT: {
+          bNodeSocketValueFloat& value = *static_cast<bNodeSocketValueFloat*>(
+            socket.default_value);
+          if (value.value == default_value.x)
+          {
+            return false;
+          }
+          value.value = default_value.x;
+          return true;
+        }
+        case SOCK_INT: {
+          bNodeSocketValueInt& value = *static_cast<bNodeSocketValueInt*>(socket.default_value);
+          const int default_int = int(default_value.x);
+          if (value.value == default_int)
+          {
+            return false;
+          }
+          value.value = default_int;
+          return true;
+        }
+        case SOCK_BOOLEAN: {
+          bNodeSocketValueBoolean& value = *static_cast<bNodeSocketValueBoolean*>(
+            socket.default_value);
+          const char default_bool = default_value.x != 0.0f;
+          if (value.value == default_bool)
+          {
+            return false;
+          }
+          value.value = default_bool;
+          return true;
+        }
+        case SOCK_VECTOR: {
+          bNodeSocketValueVector& value = *static_cast<bNodeSocketValueVector*>(
+            socket.default_value);
+          const int dimensions = std::min(value.dimensions, 4);
+          bool changed = false;
+          for (const int i : IndexRange(dimensions))
+          {
+            if (value.value[i] != default_value[i])
+            {
+              value.value[i] = default_value[i];
+              changed = true;
+            }
+          }
+          return changed;
+        }
+        case SOCK_RGBA: {
+          bNodeSocketValueRGBA& value = *static_cast<bNodeSocketValueRGBA*>(
+            socket.default_value);
+          const float4 color_default(default_value.x, default_value.y, default_value.z, 1.0f);
+          bool changed = false;
+          for (const int i : IndexRange(4))
+          {
+            if (value.value[i] != color_default[i])
+            {
+              value.value[i] = color_default[i];
+              changed = true;
+            }
+          }
+          return changed;
+        }
+        default:
+          break;
+      }
+
+      return false;
+    }
+
+    static bool reset_glsl_input_defaults_to_meta(bNode& node, const GLSLParseResult& parse_result)
+    {
+      bool changed = false;
+      for (const GLSLFunctionParam& param : parse_result.function.params)
+      {
+        if (!glsl_param_has_input_socket(param) || !param.meta.has_default_value ||
+            glsl_boundary_type_is_sampler(param.type) || glsl_boundary_type_is_matrix(param.type))
+        {
+          continue;
+        }
+
+        if (bNodeSocket* socket = find_node_input_socket_by_identifier(node, param.identifier))
+        {
+          changed |= set_glsl_socket_default_from_meta(*socket, param.meta.default_value);
+        }
+
+        if (param.type == GLSLBoundaryType::Vec4)
+        {
+          if (bNodeSocket* w_socket = find_node_input_socket_by_identifier(
+                node, make_split_vec4_w_socket_identifier(param.identifier)))
+          {
+            changed |= set_glsl_socket_default_from_meta(
+              *w_socket, float4(param.meta.default_value.w));
+          }
+        }
+      }
+      return changed;
+    }
+
     static std::string build_glsl_define_signature_key(const bNode& node,
       const Span<GLSLDefineMeta> defines)
     {
@@ -6723,45 +6876,52 @@ vec3 glsl_ambient_lighting()
           apply_input_description(decl);
         };
       auto add_split_vec4_declarations =
-        [&](const StringRef name, const StringRef identifier, const float4 default_value)
+        [&](const UString name, const UString identifier, const float4 default_value)
         {
           if (is_output)
           {
             auto& vector_decl = b.add_output<decl::Vector>(name, identifier);
             vector_decl.dimensions(3);
-            b.add_output<decl::Float>(make_split_vec4_w_socket_name(name),
-                                      make_split_vec4_w_socket_identifier(identifier));
+            b.add_output<decl::Float>(UString(make_split_vec4_w_socket_name(name.c_str())),
+                                      UString(make_split_vec4_w_socket_identifier(
+                                        identifier.c_str())));
             return;
           }
 
           auto& vector_decl = b.add_input<decl::Vector>(name, identifier);
           configure_vector_decl(vector_decl, 3, default_value);
-          auto& w_decl = b.add_input<decl::Float>(make_split_vec4_w_socket_name(name),
-                                                  make_split_vec4_w_socket_identifier(identifier));
+          auto& w_decl = b.add_input<decl::Float>(
+            UString(make_split_vec4_w_socket_name(name.c_str())),
+            UString(make_split_vec4_w_socket_identifier(identifier.c_str())));
           configure_float_input_decl(w_decl, default_value.w);
         };
       auto add_matrix_declarations =
-        [&](const StringRef name, const StringRef identifier)
+        [&](const UString name, const UString identifier)
         {
           const int column_dimensions = glsl_matrix_column_dimensions(param.type);
           for (const int column : IndexRange(glsl_matrix_columns(param.type)))
           {
-            const std::string column_name = make_split_matrix_column_socket_name(name, column);
+            const std::string column_name = make_split_matrix_column_socket_name(name.c_str(),
+                                                                                column);
             const std::string column_identifier = make_split_matrix_column_socket_identifier(
-              identifier, column);
+              identifier.c_str(), column);
             if (column_dimensions == 4)
             {
-              add_split_vec4_declarations(column_name, column_identifier, float4(0.0f));
+              add_split_vec4_declarations(UString(column_name),
+                                          UString(column_identifier),
+                                          float4(0.0f));
               continue;
             }
             if (is_output)
             {
-              auto& vector_decl = b.add_output<decl::Vector>(column_name, column_identifier);
+              auto& vector_decl = b.add_output<decl::Vector>(UString(column_name),
+                                                             UString(column_identifier));
               vector_decl.dimensions(column_dimensions);
             }
             else
             {
-              auto& vector_decl = b.add_input<decl::Vector>(column_name, column_identifier);
+              auto& vector_decl = b.add_input<decl::Vector>(UString(column_name),
+                                                            UString(column_identifier));
               configure_vector_decl(vector_decl, column_dimensions, float4(0.0f));
             }
           }
@@ -7161,6 +7321,7 @@ vec3 glsl_ambient_lighting()
           {
             field_row.prop(ptr, "script", UI_ITEM_NONE, "", ICON_NONE);
           }
+          field_row.op("node.glsl_function_reset_defaults", "", ICON_LOOP_BACK);
           field_row.op("node.glsl_function_refresh", "", ICON_FILE_REFRESH);
         }
         else
@@ -7184,6 +7345,7 @@ vec3 glsl_ambient_lighting()
           {
             row.prop(ptr, "filepath", UI_ITEM_NONE, "", ICON_NONE);
           }
+          row.op("node.glsl_function_reset_defaults", "", ICON_LOOP_BACK);
           row.op("node.glsl_function_refresh", "", ICON_FILE_REFRESH);
         }
       }
@@ -7670,6 +7832,30 @@ vec3 glsl_ambient_lighting()
     }
 
   }  // namespace nodes::node_shader_glsl_function_cc
+
+  bool node_shader_glsl_function_reset_defaults(bNode& node, std::string& r_error)
+  {
+    namespace file_ns = nodes::node_shader_glsl_function_cc;
+    if (node.type_legacy != SH_NODE_GLSL_FUNCTION)
+    {
+      r_error = "Active node is not a GLSL Function";
+      return false;
+    }
+
+    const file_ns::GLSLParseResult parse_result = file_ns::parse_glsl_for_node(node);
+    file_ns::cache_parse_status(node, parse_result);
+    if (!parse_result.ok)
+    {
+      r_error = parse_result.error.empty() ? "GLSL Function did not parse" : parse_result.error;
+      return false;
+    }
+
+    file_ns::sync_glsl_meta_defaults(node, parse_result);
+    file_ns::reset_glsl_input_defaults_to_meta(node, parse_result);
+    file_ns::reset_glsl_define_values_to_defaults(node, parse_result);
+    r_error.clear();
+    return true;
+  }
 
   void register_node_type_sh_glsl_function()
   {
