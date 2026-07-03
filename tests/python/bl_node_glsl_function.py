@@ -61,6 +61,14 @@ def refresh_glsl_node(node):
 
 
 def refresh_glsl_node_with_operator(node, tree):
+    return run_glsl_node_operator(node, tree, bpy.ops.node.glsl_function_refresh)
+
+
+def reset_glsl_node_defaults_with_operator(node, tree):
+    return run_glsl_node_operator(node, tree, bpy.ops.node.glsl_function_reset_defaults)
+
+
+def run_glsl_node_operator(node, tree, operator):
     screen = bpy.context.screen
     if screen is None or not screen.areas:
         raise RuntimeError("No screen area available for node refresh operator context")
@@ -86,7 +94,7 @@ def refresh_glsl_node_with_operator(node, tree):
         edit_tree=tree,
         node_tree=tree,
     ):
-        return bpy.ops.node.glsl_function_refresh()
+        return operator()
 
 
 def relink_and_update(tree, from_socket, to_socket):
@@ -746,6 +754,101 @@ class GLSLFunctionNodeTest(unittest.TestCase):
 
         self.assertEqual(node.parse_status, 'READY')
         self.assertAlmostEqual(find_socket(node.inputs, "strength").default_value, 0.75)
+
+    def test_reset_defaults_restores_meta_and_define_defaults(self):
+        _, tree = self.make_material_tree()
+        node = tree.nodes.new("ShaderNodeGLSLFunction")
+        value_node = tree.nodes.new("ShaderNodeValue")
+        source = (
+            "/* @glsl_defines v1\n"
+            "@define USE_RIM bool default=true\n"
+            "@define METHOD int default=1 items=\"0:Off;1:Soft;2:Hard\"\n"
+            "*/\n"
+            "/* @glsl_meta v1\n"
+            "strength: default=0.25\n"
+            "steps: default=3\n"
+            "enabled: default=true\n"
+            "uv: default=vec2(0.2, 0.4)\n"
+            "tint: default=vec3(1.0, 0.5, 0.25) subtype=color\n"
+            "color: default=vec4(0.1, 0.2, 0.3, 0.4)\n"
+            "*/\n"
+            "vec4 reset_probe(float strength, int steps, bool enabled, vec2 uv, vec3 tint, "
+            "vec4 color, float no_default){\n"
+            "  return color + vec4(tint * strength + vec3(float(steps)) + vec3(uv, 0.0), "
+            "                  enabled ? no_default : 0.0);\n"
+            "}\n"
+        )
+        make_text_block("glsl_reset_defaults.glsl", source)
+
+        self.configure_glsl_node(node, "glsl_reset_defaults.glsl", "reset_probe")
+        self.assertEqual(node.parse_status, 'READY')
+
+        strength = find_socket(node.inputs, "In_strength")
+        steps = find_socket(node.inputs, "In_steps")
+        enabled = find_socket(node.inputs, "In_enabled")
+        uv = find_socket(node.inputs, "In_uv")
+        tint = find_socket(node.inputs, "In_tint")
+        color = find_socket(node.inputs, "In_color")
+        color_w = find_socket(node.inputs, "In_color_w")
+        no_default = find_socket(node.inputs, "In_no_default")
+
+        relink_and_update(tree, find_socket(value_node.outputs, "Value"), strength)
+        self.assertTrue(strength.is_linked)
+
+        strength.default_value = 0.9
+        steps.default_value = 2
+        enabled.default_value = False
+        uv.default_value = (0.8, 0.7)
+        tint.default_value = (0.0, 0.1, 0.2, 0.75)
+        color.default_value = (0.9, 0.8, 0.7)
+        color_w.default_value = 0.6
+        no_default.default_value = 0.33
+        find_define_value(node, "USE_RIM").bool_value = False
+        find_define_value(node, "METHOD").choice_value = 'VALUE_2'
+
+        result = reset_glsl_node_defaults_with_operator(node, tree)
+
+        self.assertEqual(result, {'FINISHED'})
+        self.assertTrue(strength.is_linked)
+        self.assertAlmostEqual(strength.default_value, 0.25)
+        self.assertEqual(steps.default_value, 3)
+        self.assertTrue(enabled.default_value)
+        self.assertAlmostEqual(uv.default_value[0], 0.2)
+        self.assertAlmostEqual(uv.default_value[1], 0.4)
+        self.assertAlmostEqual(tint.default_value[0], 1.0)
+        self.assertAlmostEqual(tint.default_value[1], 0.5)
+        self.assertAlmostEqual(tint.default_value[2], 0.25)
+        self.assertAlmostEqual(tint.default_value[3], 1.0)
+        self.assertAlmostEqual(color.default_value[0], 0.1)
+        self.assertAlmostEqual(color.default_value[1], 0.2)
+        self.assertAlmostEqual(color.default_value[2], 0.3)
+        self.assertAlmostEqual(color_w.default_value, 0.4)
+        self.assertAlmostEqual(no_default.default_value, 0.33)
+        self.assertTrue(find_define_value(node, "USE_RIM").bool_value)
+        self.assertEqual(find_define_value(node, "METHOD").int_value, 1)
+
+    def test_reset_defaults_cancelled_on_parse_error_preserves_values(self):
+        _, tree = self.make_material_tree()
+        node = tree.nodes.new("ShaderNodeGLSLFunction")
+        text = make_text_block(
+            "glsl_reset_parse_error.glsl",
+            "/* @glsl_meta v1\n"
+            "strength: default=0.25\n"
+            "*/\n"
+            "float reset_parse_error(float strength){return strength;}\n",
+        )
+
+        self.configure_glsl_node(node, "glsl_reset_parse_error.glsl", "reset_parse_error")
+        self.assertEqual(node.parse_status, 'READY')
+        strength = find_socket(node.inputs, "In_strength")
+        strength.default_value = 0.75
+
+        text.clear()
+        text.write("float renamed_function(float strength){return strength;}\n")
+
+        with self.assertRaises(RuntimeError):
+            reset_glsl_node_defaults_with_operator(node, tree)
+        self.assertAlmostEqual(strength.default_value, 0.75)
 
     def test_int_param_choice_items_preserve_and_fallback(self):
         _, tree = self.make_material_tree()
