@@ -647,11 +647,11 @@ struct GLSLLight {
 - `description="..."` 可以给输入 socket 写 tooltip 注释，支持带空格的单行引号字符串
 - `@panel "Name" closed=true|false` 可以把后续输入放到面板内，必须用 `@end_panel` 显式关闭
 - 面板只支持一级，不支持嵌套；面板内可以写 `param:` 空属性行，只做分组不改默认值
-- 只有显式写了 `subtype=color` 的 `vec3 / vec4` 输入，才会显示成颜色插口
+- 只有显式写了 `subtype=color` 的 `vec3` 输入，才会显示成颜色插口
 - `vec3 + subtype=color` 进入 GLSL 时按 `rgb` 使用，`alpha` 固定为 `1.0`
-- `vec4 + subtype=color` 会保留完整 `rgba`
+- `vec4` 输入会拆成 `vec3 + float W`，方便单独连接和控制第四分量
 - 刷新或重新编译节点时，`vec4` 输入会保留 `w` 分量，不会退化成 `vec3 / rgb`
-- 当前不支持把 `mat* / struct / array` 作为导出函数边界类型
+- 当前支持把 `mat2 / mat3 / mat4` 作为导出函数边界类型，并按列拆成向量插口；仍不支持 `struct / array` 或非方阵矩阵边界
 - 导出函数边界当前已经支持 `int / bool`，适合直接写模式开关、枚举值、`lightgroup_id` 这类参数
 - 内置了几何 helper，可在函数体里直接读取：`glsl_position()`、`glsl_normal()`、`glsl_true_normal()`、`glsl_incoming()`
 - 这四个 helper 的语义直接对齐 `Geometry` 节点的 `Position`、`Normal`、`True Normal`、`Incoming` 输出

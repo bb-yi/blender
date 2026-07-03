@@ -172,6 +172,9 @@ namespace blender
       Vec2,
       Vec3,
       Vec4,
+      Mat2,
+      Mat3,
+      Mat4,
       Sample2D,
       Sample3D,
       Void,
@@ -441,6 +444,9 @@ namespace blender
       GLSLFunctionDefinition& r_function,
       std::string& r_error);
     static bool is_sample2d_sampling_function_name(const StringRef name);
+    static std::string make_split_vec4_w_socket_identifier(const StringRef identifier);
+    static std::string make_split_matrix_column_socket_identifier(const StringRef identifier,
+                                                                  const int column);
     static GPUType gpu_node_link_output_type(const GPUNodeLink& link);
 
     static bool is_identifier_start(const char c)
@@ -479,6 +485,18 @@ namespace blender
       {
         return GLSLBoundaryType::Vec4;
       }
+      if (type_name == "mat2")
+      {
+        return GLSLBoundaryType::Mat2;
+      }
+      if (type_name == "mat3")
+      {
+        return GLSLBoundaryType::Mat3;
+      }
+      if (type_name == "mat4")
+      {
+        return GLSLBoundaryType::Mat4;
+      }
       if (type_name == "sampler2D")
       {
         return GLSLBoundaryType::Sample2D;
@@ -506,6 +524,47 @@ namespace blender
         return 4;
       default:
         return 0;
+      }
+    }
+
+    static bool glsl_boundary_type_is_matrix(const GLSLBoundaryType type)
+    {
+      return ELEM(type, GLSLBoundaryType::Mat2, GLSLBoundaryType::Mat3, GLSLBoundaryType::Mat4);
+    }
+
+    static int glsl_matrix_columns(const GLSLBoundaryType type)
+    {
+      switch (type)
+      {
+      case GLSLBoundaryType::Mat2:
+        return 2;
+      case GLSLBoundaryType::Mat3:
+        return 3;
+      case GLSLBoundaryType::Mat4:
+        return 4;
+      default:
+        return 0;
+      }
+    }
+
+    static int glsl_matrix_column_dimensions(const GLSLBoundaryType type)
+    {
+      return glsl_matrix_columns(type);
+    }
+
+    static StringRefNull glsl_vector_type_name(const int dimensions)
+    {
+      switch (dimensions)
+      {
+      case 2:
+        return StringRefNull("vec2");
+      case 3:
+        return StringRefNull("vec3");
+      case 4:
+        return StringRefNull("vec4");
+      default:
+        BLI_assert_unreachable();
+        return StringRefNull("vec3");
       }
     }
 
@@ -585,9 +644,48 @@ namespace blender
       return socket;
     }
 
+    static bool glsl_input_socket_is_directly_linked(const bNode& node, const StringRef identifier)
+    {
+      const bNodeSocket* socket = find_node_input_socket_by_identifier(node, identifier);
+      if ((socket == nullptr || !socket->is_directly_linked()) && node.runtime->original)
+      {
+        socket = find_node_input_socket_by_identifier(*node.runtime->original, identifier);
+      }
+      return socket != nullptr && socket->is_directly_linked();
+    }
+
     static bool glsl_function_input_is_directly_linked(const bNode& node,
       const GLSLFunctionParam& param)
     {
+      if (param.type == GLSLBoundaryType::Vec4)
+      {
+        if (glsl_input_socket_is_directly_linked(node, param.identifier))
+        {
+          return true;
+        }
+        return glsl_input_socket_is_directly_linked(
+          node, make_split_vec4_w_socket_identifier(param.identifier));
+      }
+      if (glsl_boundary_type_is_matrix(param.type))
+      {
+        for (const int column : IndexRange(glsl_matrix_columns(param.type)))
+        {
+          const std::string column_identifier = make_split_matrix_column_socket_identifier(
+            param.identifier, column);
+          if (glsl_input_socket_is_directly_linked(node, column_identifier))
+          {
+            return true;
+          }
+          if (glsl_matrix_column_dimensions(param.type) == 4 &&
+              glsl_input_socket_is_directly_linked(
+                node, make_split_vec4_w_socket_identifier(column_identifier)))
+          {
+            return true;
+          }
+        }
+        return false;
+      }
+
       const bNodeSocket* socket = find_glsl_function_input_socket(node, param);
       return socket != nullptr && socket->is_directly_linked();
     }
@@ -1446,6 +1544,19 @@ namespace blender
       return identifier;
     }
 
+    static std::string make_derived_socket_identifier(const StringRef base_identifier,
+                                                      const StringRef suffix)
+    {
+      std::string identifier = std::string(base_identifier);
+      if (identifier.size() >= 2 && identifier.back() == '_' &&
+          std::isdigit(uchar(identifier[identifier.size() - 2])))
+      {
+        identifier.pop_back();
+      }
+      identifier.append(suffix);
+      return identifier;
+    }
+
     static int make_panel_identifier(const StringRef name)
     {
       const std::string key = "glsl_meta_panel_" + std::string(name);
@@ -1479,7 +1590,7 @@ namespace blender
 
     static std::string make_split_vec4_w_socket_identifier(const StringRef identifier)
     {
-      return std::string(identifier) + "_w";
+      return make_derived_socket_identifier(identifier, "_w");
     }
 
     static std::string make_split_vec4_w_socket_name(const StringRef name)
@@ -1487,19 +1598,30 @@ namespace blender
       return std::string(name) + " W";
     }
 
+    static std::string make_split_matrix_column_socket_identifier(const StringRef identifier,
+                                                                  const int column)
+    {
+      return make_derived_socket_identifier(identifier, "_c" + std::to_string(column));
+    }
+
+    static std::string make_split_matrix_column_socket_name(const StringRef name, const int column)
+    {
+      return std::string(name) + " C" + std::to_string(column + 1);
+    }
+
     static std::string make_wrapper_vec4_temp_name(const StringRef name)
     {
-      return std::string(name) + "_vec4_tmp";
+      return make_derived_socket_identifier(name, "_vec4_tmp");
     }
 
     static std::string make_wrapper_temp_name(const StringRef name)
     {
-      return std::string(name) + "_tmp";
+      return make_derived_socket_identifier(name, "_tmp");
     }
 
     static bool glsl_param_uses_color_socket(const GLSLFunctionParam& param)
     {
-      return ELEM(param.type, GLSLBoundaryType::Vec3, GLSLBoundaryType::Vec4) &&
+      return param.type == GLSLBoundaryType::Vec3 &&
         param.meta.subtype.has_value() && *param.meta.subtype == PROP_COLOR;
     }
 
@@ -4152,12 +4274,15 @@ namespace blender
         GLSLBoundaryType::Vec2,
         GLSLBoundaryType::Vec3,
         GLSLBoundaryType::Vec4,
+        GLSLBoundaryType::Mat2,
+        GLSLBoundaryType::Mat3,
+        GLSLBoundaryType::Mat4,
         GLSLBoundaryType::Sample2D,
         GLSLBoundaryType::Sample3D))
       {
         r_error =
-          "Supported parameter types are float, int, bool, vec2, vec3, vec4, sampler2D, and "
-          "sampler3D";
+          "Supported parameter types are float, int, bool, vec2, vec3, vec4, mat2, mat3, mat4, "
+          "sampler2D, and sampler3D";
         return false;
       }
 
@@ -4215,9 +4340,14 @@ namespace blender
         GLSLBoundaryType::Bool,
         GLSLBoundaryType::Vec2,
         GLSLBoundaryType::Vec3,
-        GLSLBoundaryType::Vec4))
+        GLSLBoundaryType::Vec4,
+        GLSLBoundaryType::Mat2,
+        GLSLBoundaryType::Mat3,
+        GLSLBoundaryType::Mat4))
       {
-        r_error = "Supported return types are void, float, int, bool, vec2, vec3, and vec4";
+        r_error =
+          "Supported return types are void, float, int, bool, vec2, vec3, vec4, mat2, mat3, and "
+          "mat4";
         return false;
       }
 
@@ -5703,6 +5833,85 @@ vec3 glsl_ambient_lighting()
       return glsl_boundary_type_uses_float_transport(type) ? StringRefNull("float") : type_name;
     }
 
+    static std::string make_wrapper_split_vec4_expression(const StringRef vector_name)
+    {
+      const std::string name = std::string(vector_name);
+      return "vec4(" + name + ", " + make_split_vec4_w_socket_identifier(name) + ")";
+    }
+
+    static std::string make_wrapper_matrix_column_name(const StringRef matrix_name,
+                                                       const int column)
+    {
+      return make_split_matrix_column_socket_identifier(matrix_name, column);
+    }
+
+    static std::string make_wrapper_matrix_column_expression(const GLSLBoundaryType type,
+                                                             const StringRef matrix_name,
+                                                             const int column)
+    {
+      const std::string column_name = make_wrapper_matrix_column_name(matrix_name, column);
+      if (glsl_matrix_column_dimensions(type) == 4)
+      {
+        return make_wrapper_split_vec4_expression(column_name);
+      }
+      return column_name;
+    }
+
+    static std::string make_wrapper_matrix_constructor_expression(const GLSLBoundaryType type,
+                                                                  const StringRef type_name,
+                                                                  const StringRef matrix_name)
+    {
+      std::string expression = std::string(type_name) + "(";
+      for (const int column : IndexRange(glsl_matrix_columns(type)))
+      {
+        if (column != 0)
+        {
+          expression += ", ";
+        }
+        expression += make_wrapper_matrix_column_expression(type, matrix_name, column);
+      }
+      expression += ")";
+      return expression;
+    }
+
+    static void append_wrapper_split_vec4_assignment(std::stringstream& ss,
+                                                     const StringRef output_name,
+                                                     const StringRef value_name)
+    {
+      ss << "  " << output_name << " = " << value_name << ".xyz;\n";
+      ss << "  " << make_split_vec4_w_socket_identifier(output_name) << " = " << value_name
+         << ".w;\n";
+    }
+
+    static void append_wrapper_matrix_column_assignment(std::stringstream& ss,
+                                                        const GLSLBoundaryType type,
+                                                        const StringRef output_name,
+                                                        const StringRef value_name,
+                                                        const int column)
+    {
+      const std::string column_output = make_wrapper_matrix_column_name(output_name, column);
+      std::string column_value = std::string(value_name) + "[" + std::to_string(column) + "]";
+      if (glsl_matrix_column_dimensions(type) == 4)
+      {
+        append_wrapper_split_vec4_assignment(ss, column_output, column_value);
+      }
+      else
+      {
+        ss << "  " << column_output << " = " << column_value << ";\n";
+      }
+    }
+
+    static void append_wrapper_matrix_assignment(std::stringstream& ss,
+                                                 const GLSLBoundaryType type,
+                                                 const StringRef output_name,
+                                                 const StringRef value_name)
+    {
+      for (const int column : IndexRange(glsl_matrix_columns(type)))
+      {
+        append_wrapper_matrix_column_assignment(ss, type, output_name, value_name, column);
+      }
+    }
+
     static std::string wrapper_argument_expression(const bNode& node, const GLSLFunctionParam& param)
     {
       if (param.meta.default_expression.has_value() &&
@@ -5714,6 +5923,14 @@ vec3 glsl_ambient_lighting()
       if (glsl_param_uses_color_socket(param) && param.type == GLSLBoundaryType::Vec3)
       {
         return argument_name + ".rgb";
+      }
+      if (param.type == GLSLBoundaryType::Vec4)
+      {
+        return make_wrapper_split_vec4_expression(argument_name);
+      }
+      if (glsl_boundary_type_is_matrix(param.type))
+      {
+        return make_wrapper_matrix_constructor_expression(param.type, param.type_name, argument_name);
       }
       if (param.type == GLSLBoundaryType::Int)
       {
@@ -5733,7 +5950,8 @@ vec3 glsl_ambient_lighting()
 
     static bool glsl_boundary_type_uses_output_temp(const GLSLBoundaryType type)
     {
-      return ELEM(type, GLSLBoundaryType::Vec4, GLSLBoundaryType::Int, GLSLBoundaryType::Bool);
+      return ELEM(type, GLSLBoundaryType::Vec4, GLSLBoundaryType::Int, GLSLBoundaryType::Bool) ||
+        glsl_boundary_type_is_matrix(type);
     }
 
     static std::string build_wrapper_glsl_source(
@@ -5787,23 +6005,79 @@ vec3 glsl_ambient_lighting()
           ss << "out " << type_name << " " << name;
           need_comma = true;
         };
+      auto append_wrapper_split_vec4_input = [&](const StringRef name)
+        {
+          append_wrapper_input("vec3", name);
+          append_wrapper_input("float", make_split_vec4_w_socket_identifier(name));
+        };
+      auto append_wrapper_split_vec4_output = [&](const StringRef name)
+        {
+          append_wrapper_output("vec3", name);
+          append_wrapper_output("float", make_split_vec4_w_socket_identifier(name));
+        };
+      auto append_wrapper_matrix_input = [&](const GLSLBoundaryType type, const StringRef name)
+        {
+          const int column_dimensions = glsl_matrix_column_dimensions(type);
+          for (const int column : IndexRange(glsl_matrix_columns(type)))
+          {
+            const std::string column_name = make_wrapper_matrix_column_name(name, column);
+            if (column_dimensions == 4)
+            {
+              append_wrapper_split_vec4_input(column_name);
+            }
+            else
+            {
+              append_wrapper_input(glsl_vector_type_name(column_dimensions), column_name);
+            }
+          }
+        };
+      auto append_wrapper_matrix_output = [&](const GLSLBoundaryType type, const StringRef name)
+        {
+          const int column_dimensions = glsl_matrix_column_dimensions(type);
+          for (const int column : IndexRange(glsl_matrix_columns(type)))
+          {
+            const std::string column_name = make_wrapper_matrix_column_name(name, column);
+            if (column_dimensions == 4)
+            {
+              append_wrapper_split_vec4_output(column_name);
+            }
+            else
+            {
+              append_wrapper_output(glsl_vector_type_name(column_dimensions), column_name);
+            }
+          }
+        };
       for (const GLSLFunctionParam& param : function.params)
       {
         if (!glsl_param_has_input_socket(param))
         {
           continue;
         }
+        const std::string input_name = make_wrapper_argument_name("in", param.name);
+        if (param.type == GLSLBoundaryType::Vec4)
+        {
+          append_wrapper_split_vec4_input(input_name);
+          continue;
+        }
+        if (glsl_boundary_type_is_matrix(param.type))
+        {
+          append_wrapper_matrix_input(param.type, input_name);
+          continue;
+        }
         const GLSLSample2DSourceKind source_kind = sample2d_source_kinds.lookup_ptr(param.name) ?
           *sample2d_source_kinds.lookup_ptr(param.name) :
           GLSLSample2DSourceKind::None;
-        append_wrapper_input(emitted_type_name(param, source_kind), make_wrapper_argument_name("in", param.name));
+        append_wrapper_input(emitted_type_name(param, source_kind), input_name);
       }
       if (function.return_type != GLSLBoundaryType::Void)
       {
         if (function.return_type == GLSLBoundaryType::Vec4)
         {
-          append_wrapper_output("vec3", "out_result");
-          append_wrapper_output("float", "out_result_w");
+          append_wrapper_split_vec4_output("out_result");
+        }
+        else if (glsl_boundary_type_is_matrix(function.return_type))
+        {
+          append_wrapper_matrix_output(function.return_type, "out_result");
         }
         else
         {
@@ -5819,9 +6093,11 @@ vec3 glsl_ambient_lighting()
         }
         if (glsl_output_is_split_vec4(param))
         {
-          append_wrapper_output("vec3", make_wrapper_argument_name("out", param.name));
-          append_wrapper_output("float", make_split_vec4_w_socket_identifier(
-            make_wrapper_argument_name("out", param.name)));
+          append_wrapper_split_vec4_output(make_wrapper_argument_name("out", param.name));
+        }
+        else if (glsl_boundary_type_is_matrix(param.type))
+        {
+          append_wrapper_matrix_output(param.type, make_wrapper_argument_name("out", param.name));
         }
         else
         {
@@ -5866,7 +6142,7 @@ vec3 glsl_ambient_lighting()
         {
           ss << make_wrapper_vec4_temp_name("out_result") << " = ";
         }
-        else if (glsl_boundary_type_uses_float_transport(function.return_type))
+        else if (glsl_boundary_type_uses_output_temp(function.return_type))
         {
           ss << make_wrapper_temp_name("out_result") << " = ";
         }
@@ -5889,7 +6165,7 @@ vec3 glsl_ambient_lighting()
           {
             ss << make_wrapper_vec4_temp_name(make_wrapper_argument_name("out", param.name));
           }
-          else if (glsl_boundary_type_uses_float_transport(param.type))
+          else if (glsl_boundary_type_uses_output_temp(param.type))
           {
             ss << make_wrapper_temp_name(make_wrapper_argument_name("out", param.name));
           }
@@ -5907,8 +6183,12 @@ vec3 glsl_ambient_lighting()
       ss << ");\n";
       if (function.return_type == GLSLBoundaryType::Vec4)
       {
-        ss << "  out_result = " << make_wrapper_vec4_temp_name("out_result") << ".xyz;\n";
-        ss << "  out_result_w = " << make_wrapper_vec4_temp_name("out_result") << ".w;\n";
+        append_wrapper_split_vec4_assignment(ss, "out_result", make_wrapper_vec4_temp_name("out_result"));
+      }
+      else if (glsl_boundary_type_is_matrix(function.return_type))
+      {
+        append_wrapper_matrix_assignment(
+          ss, function.return_type, "out_result", make_wrapper_temp_name("out_result"));
       }
       else if (function.return_type == GLSLBoundaryType::Int)
       {
@@ -5926,9 +6206,12 @@ vec3 glsl_ambient_lighting()
           if (glsl_output_is_split_vec4(param))
           {
             const std::string temp_name = make_wrapper_vec4_temp_name(output_name);
-            ss << "  " << output_name << " = " << temp_name << ".xyz;\n";
-            ss << "  " << make_split_vec4_w_socket_identifier(output_name) << " = " << temp_name
-              << ".w;\n";
+            append_wrapper_split_vec4_assignment(ss, output_name, temp_name);
+          }
+          else if (glsl_boundary_type_is_matrix(param.type))
+          {
+            append_wrapper_matrix_assignment(
+              ss, param.type, output_name, make_wrapper_temp_name(output_name));
           }
           else if (param.type == GLSLBoundaryType::Int)
           {
@@ -5955,6 +6238,166 @@ vec3 glsl_ambient_lighting()
         }
       }
       return ss.str();
+    }
+
+    static bool add_unique_generated_identifier(Set<std::string>& identifiers,
+                                                const std::string& identifier,
+                                                const StringRef scope,
+                                                std::string& r_error)
+    {
+      if (identifiers.add(identifier))
+      {
+        return true;
+      }
+      r_error = "Generated GLSL Function " + std::string(scope) + " identifier '" + identifier +
+        "' is duplicated after splitting vec4 or matrix boundary sockets; rename parameters that "
+        "end with generated suffixes such as _w, _c0, or _tmp";
+      return false;
+    }
+
+    static bool add_generated_boundary_identifiers(Set<std::string>& identifiers,
+                                                   const GLSLBoundaryType type,
+                                                   const StringRef base_identifier,
+                                                   const StringRef scope,
+                                                   std::string& r_error)
+    {
+      if (type == GLSLBoundaryType::Void)
+      {
+        return true;
+      }
+      if (type == GLSLBoundaryType::Vec4)
+      {
+        return add_unique_generated_identifier(
+                 identifiers, std::string(base_identifier), scope, r_error) &&
+          add_unique_generated_identifier(
+                 identifiers, make_split_vec4_w_socket_identifier(base_identifier), scope, r_error);
+      }
+      if (glsl_boundary_type_is_matrix(type))
+      {
+        for (const int column : IndexRange(glsl_matrix_columns(type)))
+        {
+          const std::string column_identifier = make_split_matrix_column_socket_identifier(
+            base_identifier, column);
+          if (!add_unique_generated_identifier(identifiers, column_identifier, scope, r_error))
+          {
+            return false;
+          }
+          if (glsl_matrix_column_dimensions(type) == 4 &&
+              !add_unique_generated_identifier(identifiers,
+                                               make_split_vec4_w_socket_identifier(
+                                                 column_identifier),
+                                               scope,
+                                               r_error))
+          {
+            return false;
+          }
+        }
+        return true;
+      }
+      return add_unique_generated_identifier(
+        identifiers, std::string(base_identifier), scope, r_error);
+    }
+
+    static bool validate_generated_glsl_function_identifiers(
+      const GLSLFunctionDefinition& function, std::string& r_error)
+    {
+      Set<std::string> input_socket_identifiers;
+      Set<std::string> output_socket_identifiers;
+      Set<std::string> wrapper_identifiers;
+
+      for (const GLSLFunctionParam& param : function.params)
+      {
+        if (glsl_param_has_input_socket(param) &&
+            !add_generated_boundary_identifiers(input_socket_identifiers,
+                                                param.type,
+                                                param.identifier,
+                                                "input socket",
+                                                r_error))
+        {
+          return false;
+        }
+        if (glsl_param_has_output_socket(param))
+        {
+          const std::string output_identifier = make_socket_identifier("Out", param.name);
+          if (!add_generated_boundary_identifiers(output_socket_identifiers,
+                                                 param.type,
+                                                 output_identifier,
+                                                 "output socket",
+                                                 r_error))
+          {
+            return false;
+          }
+        }
+      }
+
+      if (!add_generated_boundary_identifiers(output_socket_identifiers,
+                                             function.return_type,
+                                             result_socket_identifier,
+                                             "output socket",
+                                             r_error))
+      {
+        return false;
+      }
+
+      for (const GLSLFunctionParam& param : function.params)
+      {
+        if (glsl_param_has_input_socket(param))
+        {
+          const std::string input_name = make_wrapper_argument_name("in", param.name);
+          if (!add_generated_boundary_identifiers(
+                wrapper_identifiers, param.type, input_name, "wrapper", r_error))
+          {
+            return false;
+          }
+        }
+        if (glsl_param_has_output_socket(param))
+        {
+          const std::string output_name = make_wrapper_argument_name("out", param.name);
+          if (!add_generated_boundary_identifiers(
+                wrapper_identifiers, param.type, output_name, "wrapper", r_error))
+          {
+            return false;
+          }
+          if (glsl_output_is_split_vec4(param) &&
+              !add_unique_generated_identifier(wrapper_identifiers,
+                                               make_wrapper_vec4_temp_name(output_name),
+                                               "wrapper",
+                                               r_error))
+          {
+            return false;
+          }
+          if (param.type != GLSLBoundaryType::Vec4 &&
+              glsl_boundary_type_uses_output_temp(param.type) &&
+              !add_unique_generated_identifier(wrapper_identifiers,
+                                               make_wrapper_temp_name(output_name),
+                                               "wrapper",
+                                               r_error))
+          {
+            return false;
+          }
+        }
+      }
+
+      if (!add_generated_boundary_identifiers(
+            wrapper_identifiers, function.return_type, "out_result", "wrapper", r_error))
+      {
+        return false;
+      }
+      if (function.return_type == GLSLBoundaryType::Vec4)
+      {
+        return add_unique_generated_identifier(wrapper_identifiers,
+                                               make_wrapper_vec4_temp_name("out_result"),
+                                               "wrapper",
+                                               r_error);
+      }
+      if (glsl_boundary_type_uses_output_temp(function.return_type))
+      {
+        return add_unique_generated_identifier(wrapper_identifiers,
+                                               make_wrapper_temp_name("out_result"),
+                                               "wrapper",
+                                               r_error);
+      }
+      return true;
     }
 
     static bool build_specialized_glsl_sources(GPUMaterial* mat,
@@ -6131,6 +6574,10 @@ vec3 glsl_ambient_lighting()
       result.uses_geometry_access |= glsl_function_meta_uses_geometry_access(result.function);
       result.uses_lightprobe_access |= glsl_function_meta_uses_lightprobe_access(result.function);
       result.uses_eevee_light_access |= glsl_function_meta_uses_eevee_light_access(result.function);
+      if (!validate_generated_glsl_function_identifiers(result.function, result.error))
+      {
+        return result;
+      }
       if (!validate_sampler_inputs(node, tokens, result.function, result.error))
       {
         return result;
@@ -6231,6 +6678,94 @@ vec3 glsl_ambient_lighting()
           decl.description(*param.meta.description);
         }
       };
+      auto configure_float_input_decl = [&](auto& decl, const float default_value)
+        {
+          decl.min(param.meta.has_min ? param.meta.min_value : -10000.0f)
+            .max(param.meta.has_max ? param.meta.max_value : 10000.0f);
+          if (param.meta.has_default_value)
+          {
+            decl.default_value(default_value);
+          }
+          if (param.meta.hide_value)
+          {
+            decl.hide_value();
+          }
+          apply_input_description(decl);
+        };
+      auto configure_vector_decl = [&](auto& decl, const int dimensions, const float4 default_value)
+        {
+          decl.dimensions(dimensions)
+            .min(param.meta.has_min ? param.meta.min_value : -10000.0f)
+            .max(param.meta.has_max ? param.meta.max_value : 10000.0f);
+          if (param.meta.has_default_value)
+          {
+            switch (dimensions)
+            {
+            case 2:
+              decl.default_value(float2(default_value.x, default_value.y));
+              break;
+            case 3:
+              decl.default_value(float3(default_value.x, default_value.y, default_value.z));
+              break;
+            default:
+              break;
+            }
+          }
+          if (param.meta.subtype.has_value() &&
+              !(param.type == GLSLBoundaryType::Vec4 && *param.meta.subtype == PROP_COLOR))
+          {
+            decl.subtype(*param.meta.subtype);
+          }
+          if (param.meta.hide_value)
+          {
+            decl.hide_value();
+          }
+          apply_input_description(decl);
+        };
+      auto add_split_vec4_declarations =
+        [&](const StringRef name, const StringRef identifier, const float4 default_value)
+        {
+          if (is_output)
+          {
+            auto& vector_decl = b.add_output<decl::Vector>(name, identifier);
+            vector_decl.dimensions(3);
+            b.add_output<decl::Float>(make_split_vec4_w_socket_name(name),
+                                      make_split_vec4_w_socket_identifier(identifier));
+            return;
+          }
+
+          auto& vector_decl = b.add_input<decl::Vector>(name, identifier);
+          configure_vector_decl(vector_decl, 3, default_value);
+          auto& w_decl = b.add_input<decl::Float>(make_split_vec4_w_socket_name(name),
+                                                  make_split_vec4_w_socket_identifier(identifier));
+          configure_float_input_decl(w_decl, default_value.w);
+        };
+      auto add_matrix_declarations =
+        [&](const StringRef name, const StringRef identifier)
+        {
+          const int column_dimensions = glsl_matrix_column_dimensions(param.type);
+          for (const int column : IndexRange(glsl_matrix_columns(param.type)))
+          {
+            const std::string column_name = make_split_matrix_column_socket_name(name, column);
+            const std::string column_identifier = make_split_matrix_column_socket_identifier(
+              identifier, column);
+            if (column_dimensions == 4)
+            {
+              add_split_vec4_declarations(column_name, column_identifier, float4(0.0f));
+              continue;
+            }
+            if (is_output)
+            {
+              auto& vector_decl = b.add_output<decl::Vector>(column_name, column_identifier);
+              vector_decl.dimensions(column_dimensions);
+            }
+            else
+            {
+              auto& vector_decl = b.add_input<decl::Vector>(column_name, column_identifier);
+              configure_vector_decl(vector_decl, column_dimensions, float4(0.0f));
+            }
+          }
+        };
 
       if (glsl_boundary_type_is_sampler(param.type))
       {
@@ -6332,6 +6867,18 @@ vec3 glsl_ambient_lighting()
         return;
       }
 
+      if (param.type == GLSLBoundaryType::Vec4)
+      {
+        add_split_vec4_declarations(socket_name, socket_identifier, param.meta.default_value);
+        return;
+      }
+
+      if (glsl_boundary_type_is_matrix(param.type))
+      {
+        add_matrix_declarations(socket_name, socket_identifier);
+        return;
+      }
+
       const bool use_color_socket = !is_output && glsl_param_uses_color_socket(param);
       if (use_color_socket)
       {
@@ -6341,7 +6888,6 @@ vec3 glsl_ambient_lighting()
           decl.default_value(ColorGeometry4f(param.meta.default_value.x,
             param.meta.default_value.y,
             param.meta.default_value.z,
-            param.type == GLSLBoundaryType::Vec4 ? param.meta.default_value.w :
             1.0f));
         }
         if (param.meta.hide_value)
@@ -6352,57 +6898,15 @@ vec3 glsl_ambient_lighting()
         return;
       }
 
-      auto configure_vector_decl = [&](auto& decl)
-        {
-          decl.dimensions(param.dimensions)
-            .min(param.meta.has_min ? param.meta.min_value : -10000.0f)
-            .max(param.meta.has_max ? param.meta.max_value : 10000.0f);
-          if (param.meta.has_default_value)
-          {
-            switch (param.dimensions)
-            {
-            case 2:
-              decl.default_value(float2(param.meta.default_value.x, param.meta.default_value.y));
-              break;
-            case 3:
-              decl.default_value(
-                float3(param.meta.default_value.x, param.meta.default_value.y, param.meta.default_value.z));
-              break;
-            case 4:
-              decl.default_value(param.meta.default_value);
-              break;
-            default:
-              break;
-            }
-          }
-          if (param.meta.subtype.has_value())
-          {
-            decl.subtype(*param.meta.subtype);
-          }
-          if (param.meta.hide_value)
-          {
-            decl.hide_value();
-          }
-          apply_input_description(decl);
-        };
-
       if (is_output)
       {
-        if (glsl_output_is_split_vec4(param))
-        {
-          auto& decl = b.add_output<decl::Vector>(socket_name, socket_identifier);
-          decl.dimensions(3);
-          b.add_output<decl::Float>(UString(make_split_vec4_w_socket_name(socket_name.c_str())),
-            UString(make_split_vec4_w_socket_identifier(socket_identifier.c_str())));
-          return;
-        }
         auto& decl = b.add_output<decl::Vector>(socket_name, socket_identifier);
-        configure_vector_decl(decl);
+        configure_vector_decl(decl, param.dimensions, param.meta.default_value);
       }
       else
       {
         auto& decl = b.add_input<decl::Vector>(socket_name, socket_identifier);
-        configure_vector_decl(decl);
+        configure_vector_decl(decl, param.dimensions, param.meta.default_value);
       }
     }
 
