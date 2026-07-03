@@ -1488,7 +1488,7 @@ static void add_nodes_inlined(Scene *scene,
   }
 
   for (blender::bNode *b_node : b_ntree.all_nodes()) {
-    if (!b_node->is_type("ShaderNodePortalOut")) {
+    if (!b_node->is_type("ShaderNodePortalOut"_ustr)) {
       continue;
     }
     blender::bNodeSocket *portal_output = nullptr;
