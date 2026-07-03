@@ -164,7 +164,6 @@ void main()
   float3 center_normal = float3(0.0f);
   float3 true_normal_camera = float3(0.0f);
   float3 current_view_direction = float3(0.0f);
-  bool mask_only_outline = false;
 
   if (use_geometry_outline) {
     center_position = outline_screen_to_view(texel, extent, center_depth);
@@ -192,7 +191,6 @@ void main()
     center_normal = (center_has_surface_normal && center_normal_alignment > 0.5f) ?
                         center_surface_normal :
                         true_normal;
-    mask_only_outline = !(center_has_surface_normal && center_normal_alignment > 0.5f);
     true_normal_camera = drw_normal_world_to_view(true_normal);
   }
 
@@ -222,7 +220,9 @@ void main()
       }
     }
 
-    if (use_geometry_outline && !mask_only_outline && center_is_not_behind_sample) {
+    /* Forward/dithered outline materials can miss GBuffer normals; depth-reconstructed geometry
+     * still carries valid depth and normal deltas for Malt-style depth/normal edges. */
+    if (use_geometry_outline && center_is_not_behind_sample) {
       const float3 sample_true_normal = outline_reconstruct_normal(
           sample_texel, extent, current_view_direction);
       bool sample_has_surface_normal = false;
@@ -250,10 +250,8 @@ void main()
   }
 
   const bool has_silhouette = has_id_edge ||
-                              (!mask_only_outline && use_depth_outline &&
-                               max_delta_distance > depth_threshold);
-  const bool has_internal_edge = !mask_only_outline && use_normal_outline &&
-                                 max_delta_angle > normal_threshold;
+                              (use_depth_outline && max_delta_distance > depth_threshold);
+  const bool has_internal_edge = use_normal_outline && max_delta_angle > normal_threshold;
 
   if (has_silhouette || has_internal_edge) {
     /* Each edge class contributes its own width factor independently (Malt-style):

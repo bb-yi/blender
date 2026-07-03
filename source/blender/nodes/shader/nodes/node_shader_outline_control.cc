@@ -16,6 +16,32 @@ namespace blender {
 
 namespace nodes::node_shader_outline_control_cc {
 
+static GPUNodeStack outline_control_default_input(const GPUType gpu_type,
+                                                  const short socket_type,
+                                                  const float value)
+{
+  GPUNodeStack stack = {};
+  stack.type = gpu_type;
+  stack.vec[0] = value;
+  stack.vec[1] = value;
+  stack.vec[2] = value;
+  stack.vec[3] = 1.0f;
+  stack.sockettype = socket_type;
+  return stack;
+}
+
+static GPUNodeStack outline_control_input_or_default(const bNode &node,
+                                                     GPUNodeStack *in,
+                                                     const UString identifier,
+                                                     const GPUNodeStack &default_input)
+{
+  const bNodeSocket *socket = node.input_by_identifier(identifier);
+  if (socket == nullptr) {
+    return default_input;
+  }
+  return in[socket->index()];
+}
+
 static void node_declare(NodeDeclarationBuilder &b)
 {
   /* Enable custom socket order so collapsible panels and resource bindings stay stable. */
@@ -95,7 +121,43 @@ static int node_shader_gpu_outline_control(GPUMaterial *mat,
 {
   GPU_material_flag_set(mat, GPU_MATFLAG_OBJECT_INFO);
   GPUNodeLink *outlink = nullptr;
-  GPU_stack_link(mat, node, "node_output_outline", in, out, &outlink);
+
+  GPUNodeStack outline_in[14] = {};
+  outline_in[0] = outline_control_input_or_default(
+      *node, in, "Line Color"_ustr, outline_control_default_input(GPU_VEC4, SOCK_RGBA, 0.0f));
+  outline_in[1] = outline_control_input_or_default(
+      *node, in, "Line Alpha"_ustr, outline_control_default_input(GPU_FLOAT, SOCK_FLOAT, 1.0f));
+  outline_in[2] = outline_control_input_or_default(
+      *node, in, "Line Width"_ustr, outline_control_default_input(GPU_FLOAT, SOCK_FLOAT, 2.0f));
+  outline_in[3] = outline_control_input_or_default(
+      *node, in, "Depth Threshold"_ustr, outline_control_default_input(GPU_FLOAT, SOCK_FLOAT, 0.1f));
+  outline_in[4] = outline_control_input_or_default(*node,
+                                                   in,
+                                                   "Depth Threshold Range"_ustr,
+                                                   outline_control_default_input(
+                                                       GPU_FLOAT, SOCK_FLOAT, 0.0f));
+  outline_in[5] = outline_control_input_or_default(
+      *node, in, "Depth Edge Width"_ustr, outline_control_default_input(GPU_FLOAT, SOCK_FLOAT, 1.0f));
+  outline_in[6] = outline_control_input_or_default(
+      *node, in, "Normal Threshold"_ustr, outline_control_default_input(GPU_FLOAT, SOCK_FLOAT, 0.5f));
+  outline_in[7] = outline_control_input_or_default(*node,
+                                                   in,
+                                                   "Normal Threshold Range"_ustr,
+                                                   outline_control_default_input(
+                                                       GPU_FLOAT, SOCK_FLOAT, 0.0f));
+  outline_in[8] = outline_control_input_or_default(
+      *node, in, "Normal Edge Width"_ustr, outline_control_default_input(GPU_FLOAT, SOCK_FLOAT, 1.0f));
+  outline_in[9] = outline_control_input_or_default(
+      *node, in, "Outline ID"_ustr, outline_control_default_input(GPU_FLOAT, SOCK_INT, 0.0f));
+  outline_in[10] = outline_control_input_or_default(
+      *node, in, "ID Edge"_ustr, outline_control_default_input(GPU_FLOAT, SOCK_BOOLEAN, 1.0f));
+  outline_in[11] = outline_control_input_or_default(
+      *node, in, "ID Edge Width"_ustr, outline_control_default_input(GPU_FLOAT, SOCK_FLOAT, 1.0f));
+  outline_in[12] = outline_control_input_or_default(
+      *node, in, "Freestyle Edge"_ustr, outline_control_default_input(GPU_FLOAT, SOCK_BOOLEAN, 1.0f));
+  outline_in[13].end = true;
+
+  GPU_stack_link(mat, node, "node_output_outline", outline_in, out, &outlink);
   GPU_material_add_output_link_outline(mat, outlink);
   return true;
 }
