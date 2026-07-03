@@ -11,6 +11,9 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_outline_detect)
 #include "eevee_outline_lib.glsl"
 #include "eevee_reverse_z_lib.glsl"
 
+#define OUTLINE_STRENGTH_WIDTH_MIN_FACTOR 0.45f
+#define OUTLINE_STRENGTH_WIDTH_RANGE 4.0f
+
 float4 outline_source_color_fetch(int2 texel)
 {
   return texelFetch(outline_color_tx, texel, 0);
@@ -24,6 +27,17 @@ uint4 outline_source_info_fetch(int2 texel)
 float outline_screen_depth_fetch(int2 texel)
 {
   return reverse_z::read(texelFetch(depth_tx, texel, 0).r);
+}
+
+float outline_strength_width_factor(float strength, float threshold, float width_variation)
+{
+  if (width_variation <= 0.0f) {
+    return 1.0f;
+  }
+  const float overshoot = max(strength - threshold, 0.0f);
+  const float normalized = saturate(overshoot / max(threshold * OUTLINE_STRENGTH_WIDTH_RANGE, 1.0f));
+  const float strength_width = mix(OUTLINE_STRENGTH_WIDTH_MIN_FACTOR, 1.0f, normalized);
+  return mix(1.0f, strength_width, saturate(width_variation));
 }
 
 float3 outline_screen_to_view(int2 texel, int2 extent, float screen_depth)
@@ -107,6 +121,7 @@ void main()
   const float line_width = outline_width_unpack(outline_info.r);
   const float normal_threshold_input = outline_normal_threshold_unpack(outline_info.b);
   const float depth_threshold_input = outline_depth_threshold_unpack(outline_info.g);
+  const float width_variation = outline_width_variation_unpack(outline_info.g);
   const bool use_depth_outline = depth_threshold_input < 1.0f;
   const bool use_normal_outline = normal_threshold_input < 1.0f;
   const bool use_geometry_outline = use_depth_outline || use_normal_outline;
@@ -227,6 +242,23 @@ void main()
                                  max_delta_angle > normal_threshold;
 
   if (has_silhouette || has_internal_edge) {
+    float width_factor = 1.0f;
+    if (!has_id_edge) {
+      width_factor = 0.0f;
+      if (has_silhouette) {
+        width_factor = max(width_factor,
+                           outline_strength_width_factor(max_delta_distance,
+                                                         depth_threshold,
+                                                         width_variation));
+      }
+      if (has_internal_edge) {
+        width_factor = max(width_factor,
+                           outline_strength_width_factor(max_delta_angle,
+                                                         normal_threshold,
+                                                         width_variation));
+      }
+    }
+    seed_line_width *= width_factor;
     out_outline_seed = float4(outline_color.rgb, seed_line_width);
   }
 }

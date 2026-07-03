@@ -39,6 +39,12 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.add_input<decl::Bool>("Freestyle Edge"_ustr)
       .default_value(true)
       .description("Draw outlines on mesh edges marked as Freestyle edges");
+  b.add_input<decl::Float>("Width Variation")
+      .default_value(0.0f)
+      .min(0.0f)
+      .max(1.0f)
+      .subtype(PROP_FACTOR)
+      .description("Amount of depth and normal edge strength mapped into outline width");
 }
 
 static int node_shader_gpu_outline_control(GPUMaterial *mat,
