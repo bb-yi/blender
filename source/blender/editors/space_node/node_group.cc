@@ -7,13 +7,17 @@
  */
 
 #include <cstdlib>
+#include <climits>
 
 #include "MEM_guardedalloc.h"
 
+#include "DNA_material_types.h"
 #include "DNA_node_types.h"
+#include "DNA_scene_types.h"
 
 #include "BLI_math_vector.h"
 #include "BLI_math_vector_types.hh"
+#include "BLI_listbase.h"
 #include "BLI_string.h"
 #include "BLI_string_utf8.h"
 #include "BLI_vector.hh"
@@ -61,6 +65,102 @@
 
 namespace blender::ed::space_node {
 
+static Material *filter_pass_node_material_get(const bNode &node)
+{
+  if (!STREQ(node.idname, "EeveeFilterGraphNodeFilterMaterial")) {
+    return nullptr;
+  }
+  if (node.id == nullptr || GS(node.id->name) != ID_MA) {
+    return nullptr;
+  }
+  Material *material = reinterpret_cast<Material *>(node.id);
+  return material->nodetree != nullptr ? material : nullptr;
+}
+
+static bNode *filter_pass_node_find_by_identifier(SpaceNode &snode, const int identifier)
+{
+  if (identifier == 0 || snode.edittree == nullptr ||
+      !STREQ(snode.edittree->idname, "EeveeFilterGraphNodeTree"))
+  {
+    return nullptr;
+  }
+  for (bNode *node : snode.edittree->all_nodes()) {
+    if (node->identifier == identifier &&
+        STREQ(node->idname, "EeveeFilterGraphNodeFilterMaterial"))
+    {
+      return node;
+    }
+  }
+  return nullptr;
+}
+
+static bool node_filter_material_context_poll(const SpaceNode &snode)
+{
+  if (snode.shaderfrom != SNODE_SHADER_FILTER) {
+    return false;
+  }
+  if (STREQ(snode.tree_idname, "ShaderNodeTree")) {
+    return true;
+  }
+  return snode.edittree != nullptr && STREQ(snode.edittree->idname, "ShaderNodeTree");
+}
+
+static wmOperatorStatus node_filter_graph_return_exec(bContext *C)
+{
+  SpaceNode *snode = CTX_wm_space_node(C);
+  ARegion *region = CTX_wm_region(C);
+  Scene *scene = CTX_data_scene(C);
+  if (snode == nullptr || scene == nullptr || scene->eevee.filter_graph == nullptr) {
+    return OPERATOR_CANCELLED;
+  }
+
+  STRNCPY_UTF8(snode->tree_idname, "EeveeFilterGraphNodeTree");
+  snode->shaderfrom = SNODE_SHADER_OBJECT;
+  ED_node_tree_start(region, snode, scene->eevee.filter_graph, &scene->id, nullptr);
+
+  WM_event_add_notifier(C, NC_SCENE | ND_NODES, nullptr);
+  WM_event_add_notifier(C, NC_NODE | ND_NODE_GIZMO, nullptr);
+  return OPERATOR_FINISHED;
+}
+
+static bool node_filter_graph_return_poll(bContext *C)
+{
+  SpaceNode *snode = CTX_wm_space_node(C);
+  Scene *scene = CTX_data_scene(C);
+  if (snode == nullptr || scene == nullptr || scene->eevee.filter_graph == nullptr) {
+    return false;
+  }
+  return node_filter_material_context_poll(*snode);
+}
+
+static wmOperatorStatus node_filter_pass_edit_material_exec(bContext *C, bNode &node)
+{
+  Material *material = filter_pass_node_material_get(node);
+  if (material == nullptr) {
+    return OPERATOR_PASS_THROUGH;
+  }
+
+  SpaceNode *snode = CTX_wm_space_node(C);
+  ARegion *region = CTX_wm_region(C);
+  if (snode == nullptr) {
+    return OPERATOR_CANCELLED;
+  }
+
+  ED_preview_kill_jobs(CTX_wm_manager(C), CTX_data_main(C));
+  STRNCPY_UTF8(snode->tree_idname, "ShaderNodeTree");
+  snode->shaderfrom = SNODE_SHADER_FILTER;
+  ED_node_tree_push(region, snode, material->nodetree, &node);
+  snode->id = &material->id;
+  snode->from = nullptr;
+  bNodeTreePath *path = static_cast<bNodeTreePath *>(snode->treepath.last);
+  if (path != nullptr) {
+    STRNCPY_UTF8(path->display_name, material->id.name + 2);
+  }
+  WM_event_add_notifier(C, NC_MATERIAL | ND_NODES, &material->id);
+  WM_event_add_notifier(C, NC_NODE | ND_NODE_GIZMO, nullptr);
+  return OPERATOR_FINISHED;
+}
+
 /* -------------------------------------------------------------------- */
 /** \name Local Utilities
  * \{ */
@@ -77,7 +177,8 @@ static bool node_group_operator_active_poll(bContext *C)
                  "ShaderNodeTree",
                  "CompositorNodeTree",
                  "TextureNodeTree",
-                 "GeometryNodeTree"))
+                 "GeometryNodeTree",
+                 "EeveeFilterGraphNodeTree"))
     {
       return true;
     }
@@ -92,7 +193,8 @@ static bool node_group_edit_poll(bContext *C)
   }
 
   SpaceNode *snode = CTX_wm_space_node(C);
-  return snode != nullptr && ED_node_is_shader(snode) && snode->shaderfrom == SNODE_SHADER_NPR;
+  return snode != nullptr && ED_node_is_shader(snode) &&
+         ELEM(snode->shaderfrom, SNODE_SHADER_NPR, SNODE_SHADER_FILTER);
 }
 
 static bool node_group_operator_editable(bContext *C)
@@ -165,6 +267,24 @@ static wmOperatorStatus node_group_edit_exec(bContext *C, wmOperator *op)
   const StringRef node_idname = node_group_idname(C);
   const bool exit = RNA_boolean_get(op->ptr, "exit");
 
+  if (!exit && snode != nullptr && snode->edittree != nullptr &&
+      STREQ(snode->edittree->idname, "EeveeFilterGraphNodeTree"))
+  {
+    bNode *node = bke::node_get_active(*snode->edittree);
+    if (node != nullptr && STREQ(node->idname, "EeveeFilterGraphNodeFilterMaterial")) {
+      return node_filter_pass_edit_material_exec(C, *node);
+    }
+    return OPERATOR_CANCELLED;
+  }
+
+  if (exit && snode != nullptr && node_filter_material_context_poll(*snode))
+  {
+    wmOperatorStatus status = node_filter_graph_return_exec(C);
+    if (status == OPERATOR_FINISHED) {
+      return status;
+    }
+  }
+
   ED_preview_kill_jobs(CTX_wm_manager(C), CTX_data_main(C));
 
   if (snode->edittree == nullptr) {
@@ -236,9 +356,19 @@ static wmOperatorStatus node_group_enter_exit_invoke(bContext *C,
   ui::view2d_region_to_view(&region.v2d, event->mval[0], event->mval[1], &cursor.x, &cursor.y);
   bNode *node = node_under_mouse_get(snode, cursor);
 
+  if (STREQ(snode.tree_idname, "EeveeFilterGraphNodeTree")) {
+    if (node != nullptr && STREQ(node->idname, "EeveeFilterGraphNodeFilterMaterial")) {
+      return node_filter_pass_edit_material_exec(C, *node);
+    }
+    return OPERATOR_PASS_THROUGH;
+  }
+
   if (!node || node->is_frame()) {
     ED_node_tree_pop(&region, &snode);
     return OPERATOR_FINISHED;
+  }
+  if (STREQ(node->idname, "EeveeFilterGraphNodeFilterMaterial")) {
+    return node_filter_pass_edit_material_exec(C, *node);
   }
   if (!node->is_group()) {
     return OPERATOR_PASS_THROUGH;
@@ -264,6 +394,85 @@ void NODE_OT_group_enter_exit(wmOperatorType *ot)
   ot->poll = node_group_operator_active_poll;
 
   ot->flag = OPTYPE_REGISTER;
+}
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Edit Filter Pass Material Operator
+ * \{ */
+
+static bool node_filter_pass_edit_material_poll(bContext *C)
+{
+  SpaceNode *snode = CTX_wm_space_node(C);
+  if (snode == nullptr || snode->edittree == nullptr) {
+    return false;
+  }
+  if (STREQ(snode->edittree->idname, "EeveeFilterGraphNodeTree")) {
+    return true;
+  }
+  if (!ED_operator_node_active(C)) {
+    return false;
+  }
+  bNode *node = bke::node_get_active(*snode->edittree);
+  return node != nullptr && filter_pass_node_material_get(*node) != nullptr;
+}
+
+static wmOperatorStatus node_filter_pass_edit_material_operator_exec(bContext *C,
+                                                                     wmOperator *op)
+{
+  SpaceNode *snode = CTX_wm_space_node(C);
+  if (snode == nullptr || snode->edittree == nullptr) {
+    return OPERATOR_CANCELLED;
+  }
+  const int node_identifier = RNA_int_get(op->ptr, "node_identifier");
+  bNode *node = filter_pass_node_find_by_identifier(*snode, node_identifier);
+  if (node == nullptr) {
+    node = bke::node_get_active(*snode->edittree);
+  }
+  if (node == nullptr) {
+    return OPERATOR_CANCELLED;
+  }
+  return node_filter_pass_edit_material_exec(C, *node);
+}
+
+void NODE_OT_filter_pass_edit_material(wmOperatorType *ot)
+{
+  ot->name = "Edit Filter Pass Material";
+  ot->description = "Edit the filter material used by the active Filter Pass node";
+  ot->idname = "NODE_OT_filter_pass_edit_material";
+
+  ot->exec = node_filter_pass_edit_material_operator_exec;
+  ot->poll = node_filter_pass_edit_material_poll;
+
+  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+
+  PropertyRNA *prop = RNA_def_int(
+      ot->srna, "node_identifier", 0, 0, INT_MAX, "Node Identifier", "", 0, INT_MAX);
+  RNA_def_property_flag(prop, PROP_SKIP_SAVE);
+}
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Return to Filter Graph Operator
+ * \{ */
+
+static wmOperatorStatus node_filter_graph_return_operator_exec(bContext *C, wmOperator * /*op*/)
+{
+  return node_filter_graph_return_exec(C);
+}
+
+void NODE_OT_filter_graph_return(wmOperatorType *ot)
+{
+  ot->name = "Return to Eevee Filter Graph";
+  ot->description = "Return from a filter material node tree to the scene Eevee Filter Graph";
+  ot->idname = "NODE_OT_filter_graph_return";
+
+  ot->exec = node_filter_graph_return_operator_exec;
+  ot->poll = node_filter_graph_return_poll;
+
+  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
 }
 
 /** \} */

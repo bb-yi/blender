@@ -49,7 +49,11 @@
 #include "BKE_node.hh"
 #include "BKE_node_legacy_types.hh"
 #include "BKE_node_runtime.hh"
+#include "BKE_node_tree_update.hh"
 #include "BKE_tracking.hh"
+
+#include "NOD_filter_graph.hh"
+#include "NOD_socket.hh"
 
 #include "SEQ_iterator.hh"
 #include "SEQ_sequencer.hh"
@@ -839,9 +843,6 @@ static void version_rename_npr_image_sample_vector_socket(bNode &node)
     if (STREQ(socket->identifier, "Offset")) {
       STRNCPY(socket->identifier, "Vector");
     }
-    if (STREQ(socket->name, "Offset")) {
-      STRNCPY(socket->name, "Vector");
-    }
   }
 }
 
@@ -921,6 +922,7 @@ static void version_convert_scene_color_node(bNodeTree &ntree, bNode &scene_colo
         ntree, sample_node, SOCK_IN, "NodeSocketImage", "Image");
     bNodeSocket &sample_vector_in = version_node_add_socket(
         ntree, sample_node, SOCK_IN, "NodeSocketVector", "Vector");
+    STRNCPY(sample_vector_in.name, "Offset");
     bNodeSocket &sample_color_out = version_node_add_socket(
         ntree, sample_node, SOCK_OUT, "NodeSocketColor", "Color");
     bNodeSocket &sample_alpha_out = version_node_add_socket(
@@ -975,6 +977,491 @@ static void version_scene_color_image_handle_nodes(Main *bmain)
     }
   }
   FOREACH_NODETREE_END;
+}
+
+static bool version_filter_graph_stage_valid(const int stage)
+{
+  switch (stage) {
+    case SCE_EEVEE_FILTER_STAGE_BEFORE_DEPTH_OF_FIELD:
+    case SCE_EEVEE_FILTER_STAGE_BEFORE_COMPOSITE:
+    case SCE_EEVEE_FILTER_STAGE_BEFORE_VOLUME_FOG:
+    case SCE_EEVEE_FILTER_STAGE_BEFORE_POSTFX:
+      return true;
+  }
+  return false;
+}
+
+static const char *version_scene_color_output_identifier(const int index)
+{
+  switch (index) {
+    case 0:
+      return "Color Image";
+    case 1:
+      return "Depth Image";
+    case 2:
+      return "Normal Image";
+    case 3:
+      return "Position Image";
+  }
+  return nullptr;
+}
+
+static int version_scene_color_output_index(const char *identifier)
+{
+  for (const int i : IndexRange(4)) {
+    if (STREQ(identifier, version_scene_color_output_identifier(i))) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+static bNodeSocket *version_find_first_image_socket(bNode &node, const eNodeSocketInOut in_out)
+{
+  ListBase &sockets = (in_out == SOCK_IN) ? node.inputs : node.outputs;
+  for (bNodeSocket *socket = static_cast<bNodeSocket *>(sockets.first); socket != nullptr;
+       socket = socket->next)
+  {
+    if (socket->type == SOCK_IMAGE && !STREQ(socket->idname, "NodeSocketVirtual")) {
+      return socket;
+    }
+  }
+  return nullptr;
+}
+
+static bNodeSocket *version_filter_graph_input_socket_for_identifier(bNode &node,
+                                                                     const int identifier)
+{
+  const std::string socket_identifier = "Image_" + std::to_string(identifier);
+  return bke::node_find_socket(node, SOCK_IN, socket_identifier);
+}
+
+static bNodeSocket *version_filter_graph_main_output_socket(bNode &node)
+{
+  if (bNodeSocket *socket = bke::node_find_socket(node, SOCK_OUT, "Image")) {
+    return socket;
+  }
+  if (bNodeSocket *socket = bke::node_find_socket(node, SOCK_OUT, "Image_0")) {
+    return socket;
+  }
+  return version_find_first_image_socket(node, SOCK_OUT);
+}
+
+static bool version_node_link_exists(const bNodeTree &ntree,
+                                     const bNode &from_node,
+                                     const bNodeSocket &from_socket,
+                                     const bNode &to_node,
+                                     const bNodeSocket &to_socket)
+{
+  for (const bNodeLink &link : ntree.links) {
+    if (link.fromnode == &from_node && link.fromsock == &from_socket &&
+        link.tonode == &to_node && link.tosock == &to_socket)
+    {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bNode *version_find_filter_graph_pass_input_node(Material &material)
+{
+  if (material.nodetree == nullptr) {
+    return nullptr;
+  }
+  for (bNode &node : material.nodetree->nodes) {
+    if (STREQ(node.idname, nodes::ShaderFilterGraphInputItemsAccessor::node_idname.c_str()) &&
+        node.storage != nullptr)
+    {
+      return &node;
+    }
+  }
+  return nullptr;
+}
+
+static bNode *version_ensure_filter_graph_pass_input_node(Material &material,
+                                                         const bool used_scene_color_outputs[4])
+{
+  bNodeTree *ntree = material.nodetree;
+  if (ntree == nullptr) {
+    return nullptr;
+  }
+  bNode *node = version_find_filter_graph_pass_input_node(material);
+
+  if (node == nullptr) {
+    node = bke::node_add_node(
+        nullptr, *ntree, nodes::ShaderFilterGraphInputItemsAccessor::node_idname);
+    if (node == nullptr || node->storage == nullptr) {
+      return nullptr;
+    }
+
+    node->location[0] = -520.0f;
+    node->location[1] = 220.0f;
+    for (bNode &other_node : ntree->nodes) {
+      if (other_node.type_legacy == SH_NODE_SCENE_COLOR ||
+          STREQ(other_node.idname, "ShaderNodeSceneColor"))
+      {
+        node->location[0] = other_node.location[0] - 260.0f;
+        node->location[1] = other_node.location[1];
+        break;
+      }
+    }
+  }
+
+  NodeShaderFilterGraphInput &storage = *static_cast<NodeShaderFilterGraphInput *>(node->storage);
+  for (const int i : IndexRange(storage.items_num)) {
+    MEM_SAFE_DELETE(storage.items[i].name);
+  }
+  MEM_SAFE_DELETE(storage.items);
+
+  int items_num = 0;
+  for (const int i : IndexRange(4)) {
+    if (used_scene_color_outputs[i]) {
+      items_num++;
+    }
+  }
+
+  storage.items_num = items_num;
+  storage.items = items_num > 0 ? MEM_new_array<NodeEeveeFilterGraphSocketItem>(items_num,
+                                                                                 __func__) :
+                                  nullptr;
+  storage.active_index = items_num > 0 ? 0 : -1;
+  storage.next_identifier = 4;
+
+  int item_index = 0;
+  for (const int i : IndexRange(4)) {
+    if (!used_scene_color_outputs[i]) {
+      continue;
+    }
+    NodeEeveeFilterGraphSocketItem &item = storage.items[item_index++];
+    item.name = BLI_strdup(version_scene_color_output_identifier(i));
+    item.identifier = i;
+  }
+
+  nodes::update_node_declaration_and_sockets(*ntree, *node);
+  return node;
+}
+
+struct VersionLegacyFilterGraphInput {
+  int scene_output_index;
+  int input_identifier;
+};
+
+static void version_route_scene_color_to_pass_input(Material &material,
+                                                    bNode &pass_input_node,
+                                                    Vector<VersionLegacyFilterGraphInput> &r_inputs)
+{
+  bNodeTree *ntree = material.nodetree;
+  if (ntree == nullptr) {
+    return;
+  }
+
+  struct LinkTarget {
+    int scene_output_index;
+    bNode *node;
+    bNodeSocket *socket;
+  };
+
+  Vector<LinkTarget> targets;
+  Vector<bNodeLink *> links_to_remove;
+  Vector<bNode *> scene_color_nodes;
+  for (bNode &node : ntree->nodes) {
+    if (node.type_legacy != SH_NODE_SCENE_COLOR && !STREQ(node.idname, "ShaderNodeSceneColor")) {
+      continue;
+    }
+    scene_color_nodes.append(&node);
+    for (bNodeLink &link : ntree->links) {
+      if (link.fromnode != &node || link.fromsock == nullptr || link.tonode == nullptr ||
+          link.tosock == nullptr)
+      {
+        continue;
+      }
+      const int scene_output_index = version_scene_color_output_index(link.fromsock->identifier);
+      if (scene_output_index >= 0) {
+        targets.append({scene_output_index, link.tonode, link.tosock});
+        links_to_remove.append(&link);
+      }
+    }
+  }
+
+  for (bNodeLink *link : links_to_remove) {
+    bke::node_remove_link(ntree, *link);
+  }
+  for (const LinkTarget &target : targets) {
+    const std::string pass_input_identifier = "Image_" + std::to_string(target.scene_output_index);
+    bNodeSocket *pass_input_output = bke::node_find_socket(
+        pass_input_node, SOCK_OUT, pass_input_identifier);
+    if (pass_input_output == nullptr) {
+      continue;
+    }
+    if (!version_node_link_exists(
+            *ntree, pass_input_node, *pass_input_output, *target.node, *target.socket))
+    {
+      version_node_add_link(*ntree, pass_input_node, *pass_input_output, *target.node, *target.socket);
+    }
+  }
+  for (bNode *scene_color_node : scene_color_nodes) {
+    version_node_remove(*ntree, *scene_color_node);
+  }
+
+  for (const int i : IndexRange(4)) {
+    NodeShaderFilterGraphInput &storage = *static_cast<NodeShaderFilterGraphInput *>(
+        pass_input_node.storage);
+    for (const int item_i : IndexRange(storage.items_num)) {
+      if (storage.items[item_i].identifier == i) {
+        r_inputs.append({i, i});
+        break;
+      }
+    }
+  }
+}
+
+static bool version_prepare_legacy_filter_material_for_graph(
+    Material &material, Vector<VersionLegacyFilterGraphInput> &r_inputs)
+{
+  if (material.nodetree == nullptr) {
+    return false;
+  }
+
+  material.eevee_domain = MA_EEVEE_DOMAIN_FILTER;
+
+  bool used_scene_color_outputs[4] = {true, false, false, false};
+  for (bNode &node : material.nodetree->nodes) {
+    if (node.type_legacy != SH_NODE_SCENE_COLOR && !STREQ(node.idname, "ShaderNodeSceneColor")) {
+      continue;
+    }
+    for (bNodeLink &link : material.nodetree->links) {
+      if (link.fromnode != &node || link.fromsock == nullptr) {
+        continue;
+      }
+      const int scene_output_index = version_scene_color_output_index(link.fromsock->identifier);
+      if (scene_output_index >= 0) {
+        used_scene_color_outputs[scene_output_index] = true;
+      }
+    }
+  }
+
+  bNode *pass_input_node = version_ensure_filter_graph_pass_input_node(material,
+                                                                       used_scene_color_outputs);
+  if (pass_input_node == nullptr) {
+    return false;
+  }
+  version_route_scene_color_to_pass_input(material, *pass_input_node, r_inputs);
+  BKE_ntree_update_tag_all(material.nodetree);
+  return true;
+}
+
+static bool version_legacy_filter_material_entry_is_valid(const SceneFilterMaterial &entry)
+{
+  if (!entry.enabled || entry.material == nullptr || entry.material->nodetree == nullptr) {
+    return false;
+  }
+  return version_filter_graph_stage_valid(entry.execution_stage);
+}
+
+static bool version_scene_has_legacy_filter_materials(const Scene &scene)
+{
+  for (const SceneFilterMaterial *entry = static_cast<const SceneFilterMaterial *>(
+           scene.eevee.filter_materials.first);
+       entry != nullptr;
+       entry = entry->next)
+  {
+    if (version_legacy_filter_material_entry_is_valid(*entry)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool version_scene_stage_has_legacy_filter_materials(const Scene &scene, const int stage)
+{
+  for (const SceneFilterMaterial *entry = static_cast<const SceneFilterMaterial *>(
+           scene.eevee.filter_materials.first);
+       entry != nullptr;
+       entry = entry->next)
+  {
+    if (version_legacy_filter_material_entry_is_valid(*entry) && entry->execution_stage == stage) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static void version_scene_clear_legacy_filter_materials(Scene &scene)
+{
+  for (SceneFilterMaterial *entry = static_cast<SceneFilterMaterial *>(
+           scene.eevee.filter_materials.first);
+       entry != nullptr;
+       entry = entry->next)
+  {
+    if (entry->material != nullptr) {
+      id_us_min(&entry->material->id);
+    }
+  }
+  BLI_freelistN(&scene.eevee.filter_materials);
+}
+
+static void version_set_filter_pass_material(bNode &node, Material &material)
+{
+  if (node.id == &material.id) {
+    return;
+  }
+  if (node.id != nullptr) {
+    id_us_min(node.id);
+  }
+  node.id = &material.id;
+  id_us_plus(node.id);
+}
+
+static void version_scene_legacy_filter_materials_to_filter_graph(Main &bmain, Scene &scene)
+{
+  if (scene.eevee.filter_graph != nullptr || !version_scene_has_legacy_filter_materials(scene)) {
+    return;
+  }
+
+  bNodeTree *filter_graph = bke::node_tree_add_tree(
+      &bmain, "Eevee Filter Graph", nodes::eevee_filter_graph_tree_idname);
+  if (filter_graph == nullptr) {
+    return;
+  }
+  scene.eevee.filter_graph = filter_graph;
+  id_us_plus(&filter_graph->id);
+
+  constexpr int stages[] = {
+      SCE_EEVEE_FILTER_STAGE_BEFORE_VOLUME_FOG,
+      SCE_EEVEE_FILTER_STAGE_BEFORE_POSTFX,
+      SCE_EEVEE_FILTER_STAGE_BEFORE_DEPTH_OF_FIELD,
+      SCE_EEVEE_FILTER_STAGE_BEFORE_COMPOSITE,
+  };
+
+  int row = 0;
+  for (const int stage : stages) {
+    if (!version_scene_stage_has_legacy_filter_materials(scene, stage)) {
+      continue;
+    }
+
+    const float y = -260.0f * row++;
+    bNode *scene_color = bke::node_add_node(
+        nullptr, *filter_graph, "EeveeFilterGraphNodeSceneColor");
+    bNode *stage_output = bke::node_add_node(
+        nullptr, *filter_graph, "EeveeFilterGraphNodeStageOutput");
+    if (scene_color == nullptr || stage_output == nullptr) {
+      continue;
+    }
+    scene_color->location[0] = -520.0f;
+    scene_color->location[1] = y;
+    stage_output->custom1 = stage;
+    stage_output->location[1] = y;
+
+    bNodeSocket *previous_output = bke::node_find_socket(*scene_color, SOCK_OUT, "Color Image");
+    bNode *previous_node = scene_color;
+    int pass_index = 0;
+
+    for (SceneFilterMaterial *entry = static_cast<SceneFilterMaterial *>(
+             scene.eevee.filter_materials.first);
+         entry != nullptr;
+         entry = entry->next)
+    {
+      if (!version_legacy_filter_material_entry_is_valid(*entry) ||
+          entry->execution_stage != stage)
+      {
+        continue;
+      }
+
+      Material &material = *entry->material;
+      Vector<VersionLegacyFilterGraphInput> legacy_inputs;
+      if (!version_prepare_legacy_filter_material_for_graph(material, legacy_inputs)) {
+        continue;
+      }
+
+      bNode *filter_pass = bke::node_add_node(
+          nullptr, *filter_graph, "EeveeFilterGraphNodeFilterMaterial");
+      if (filter_pass == nullptr) {
+        continue;
+      }
+      version_set_filter_pass_material(*filter_pass, material);
+      filter_pass->location[0] = -180.0f + 320.0f * pass_index;
+      filter_pass->location[1] = y;
+      if (entry->name[0] != '\0') {
+        STRNCPY(filter_pass->name, entry->name);
+        bke::node_unique_name(*filter_graph, *filter_pass);
+      }
+
+      nodes::filter_graph_sync_filter_pass_interface_from_material_storage(*filter_graph,
+                                                                           *filter_pass);
+      nodes::update_node_declaration_and_sockets(*filter_graph, *filter_pass);
+
+      for (const VersionLegacyFilterGraphInput &legacy_input : legacy_inputs) {
+        bNodeSocket *input = version_filter_graph_input_socket_for_identifier(
+            *filter_pass, legacy_input.input_identifier);
+        if (input == nullptr) {
+          continue;
+        }
+        if (legacy_input.scene_output_index == 0) {
+          if (previous_node != nullptr && previous_output != nullptr) {
+            version_node_add_link(
+                *filter_graph, *previous_node, *previous_output, *filter_pass, *input);
+          }
+        }
+        else if (const char *scene_output_identifier = version_scene_color_output_identifier(
+                     legacy_input.scene_output_index))
+        {
+          if (bNodeSocket *scene_output = bke::node_find_socket(
+                  *scene_color, SOCK_OUT, scene_output_identifier))
+          {
+            version_node_add_link(*filter_graph, *scene_color, *scene_output, *filter_pass, *input);
+          }
+        }
+      }
+
+      if (bNodeSocket *output = version_filter_graph_main_output_socket(*filter_pass)) {
+        previous_node = filter_pass;
+        previous_output = output;
+        pass_index++;
+      }
+    }
+
+    stage_output->location[0] = -180.0f + 320.0f * pass_index;
+    nodes::update_node_declaration_and_sockets(*filter_graph, *stage_output);
+    nodes::filter_graph_stage_output_activate(*filter_graph, *stage_output);
+
+    bNodeSocket *stage_input = bke::node_find_socket(*stage_output, SOCK_IN, "Image");
+    if (previous_node != nullptr && previous_output != nullptr && stage_input != nullptr) {
+      version_node_add_link(
+          *filter_graph, *previous_node, *previous_output, *stage_output, *stage_input);
+    }
+  }
+
+  nodes::filter_graph_stage_outputs_ensure(*filter_graph);
+  BKE_ntree_update_tag_all(filter_graph);
+  version_scene_clear_legacy_filter_materials(scene);
+}
+
+static void version_filter_graph_pass_resolution_scale_init(Main &bmain)
+{
+  for (Scene &scene : bmain.scenes) {
+    bNodeTree *filter_graph = scene.eevee.filter_graph;
+    if (filter_graph == nullptr ||
+        !STREQ(filter_graph->idname, nodes::eevee_filter_graph_tree_idname.c_str()))
+    {
+      continue;
+    }
+
+    bool changed = false;
+    for (bNode &node : filter_graph->nodes) {
+      if (node.type_legacy != EEVEE_FILTER_GRAPH_NODE_FILTER_MATERIAL || node.storage == nullptr) {
+        continue;
+      }
+      NodeEeveeFilterGraphFilterMaterial &storage =
+          *static_cast<NodeEeveeFilterGraphFilterMaterial *>(node.storage);
+      if (storage.resolution_scale <= 0.0f) {
+        storage.resolution_scale = 1.0f;
+        changed = true;
+      }
+    }
+    if (changed) {
+      BKE_ntree_update_tag_all(filter_graph);
+    }
+  }
 }
 
 void do_versions_after_linking_510(FileData *fd, Main *bmain)
@@ -1040,6 +1527,21 @@ void do_versions_after_linking_510(FileData *fd, Main *bmain)
         gp_style.fill_rgba[3] = 0.0f;
       }
     }
+  }
+
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 54)) {
+    for (Scene &scene : bmain->scenes) {
+      version_scene_legacy_filter_materials_to_filter_graph(*bmain, scene);
+    }
+  }
+
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 55) &&
+      !DNA_struct_member_exists(fd->filesdna,
+                                "NodeEeveeFilterGraphFilterMaterial",
+                                "float",
+                                "resolution_scale"))
+  {
+    version_filter_graph_pass_resolution_scale_init(*bmain);
   }
 
   /**

@@ -273,6 +273,7 @@ enum {
   NTREE_COMPOSIT = 1,
   NTREE_TEXTURE = 2,
   NTREE_GEOMETRY = 3,
+  NTREE_EEVEE_FILTER_GRAPH = 4,
 };
 
 /** #NodeTree.flag */
@@ -1605,6 +1606,48 @@ struct bNodeStack {
   /** Data is used by external nodes (no freeing). */
   short external = 0;
   char _pad[4] = {};
+};
+
+struct NodeEeveeFilterGraphSocketItem {
+  char *name = nullptr;
+  int identifier = 0;
+  int _pad = 0;
+};
+
+struct NodeShaderFilterGraphInput {
+  DNA_DEFINE_CXX_METHODS(NodeShaderFilterGraphInput)
+
+  NodeEeveeFilterGraphSocketItem *items = nullptr;
+  int items_num = 0;
+  int active_index = 0;
+  int next_identifier = 0;
+  int _pad = 0;
+};
+
+struct NodeShaderFilterOutput {
+  DNA_DEFINE_CXX_METHODS(NodeShaderFilterOutput)
+
+  NodeEeveeFilterGraphSocketItem *items = nullptr;
+  int items_num = 0;
+  int active_index = 0;
+  int next_identifier = 0;
+  int _pad = 0;
+};
+
+struct NodeEeveeFilterGraphFilterMaterial {
+  DNA_DEFINE_CXX_METHODS(NodeEeveeFilterGraphFilterMaterial)
+
+  NodeEeveeFilterGraphSocketItem *items = nullptr;
+  int items_num = 0;
+  int active_index = 0;
+  int next_identifier = 0;
+  float resolution_scale = 1.0f;
+  char format = 0;
+  char _pad[7] = {};
+};
+
+struct NodeEeveeFilterGraphAOVInput {
+  char name[64] = "";
 };
 
 struct bNodeSocket {

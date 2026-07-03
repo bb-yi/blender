@@ -8,6 +8,9 @@
 
 #include "node_shader_util.hh"
 
+#include "UI_interface_layout.hh"
+#include "UI_resources.hh"
+
 namespace blender {
 
 namespace nodes::node_shader_scene_color_cc {
@@ -15,10 +18,23 @@ namespace nodes::node_shader_scene_color_cc {
 static void node_declare(NodeDeclarationBuilder &b)
 {
   b.is_function_node();
+  b.add_input<decl::Vector>("Vector").hide_value();
+  b.add_output<decl::Color>("Color");
+  b.add_output<decl::Float>("Alpha");
   b.add_output<decl::Image>("Color Image");
   b.add_output<decl::Image>("Depth Image");
   b.add_output<decl::Image>("Normal Image");
   b.add_output<decl::Image>("Position Image");
+}
+
+static void node_shader_buts(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
+{
+  layout.prop(ptr, "source", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+}
+
+static void node_shader_init_scene_color(bNodeTree * /*ntree*/, bNode *node)
+{
+  node->custom1 = SHD_SCENE_SOURCE_COLOR;
 }
 
 static int node_shader_gpu_scene_color(GPUMaterial *mat,
@@ -27,8 +43,22 @@ static int node_shader_gpu_scene_color(GPUMaterial *mat,
                                        GPUNodeStack *in,
                                        GPUNodeStack *out)
 {
+  const float use_explicit_vector = (in[0].link != nullptr) ? 1.0f : 0.0f;
+  const float scene_source = float(node->custom1);
+
   GPU_material_flag_set(mat, GPU_MATFLAG_SCENE_COLOR);
-  return GPU_stack_link(mat, node, "node_scene_color_handle_only", in, out);
+  return GPU_stack_link(mat,
+                        node,
+                        "node_scene_color",
+                        in,
+                        out,
+                        GPU_constant(&use_explicit_vector),
+                        GPU_constant(&scene_source));
+}
+
+static bool node_add_ui_poll(const bContext *C)
+{
+  return !filter_eevee_shader_nodes_poll(C);
 }
 
 }  // namespace nodes::node_shader_scene_color_cc
@@ -46,8 +76,10 @@ void register_node_type_sh_scene_color()
   ntype.enum_name_legacy = "SCENE_COLOR";
   ntype.nclass = NODE_CLASS_INPUT;
   ntype.declare = file_ns::node_declare;
-  ntype.add_ui_poll = filter_eevee_shader_nodes_poll;
+  ntype.draw_buttons = file_ns::node_shader_buts;
+  ntype.initfunc = file_ns::node_shader_init_scene_color;
   ntype.gpu_fn = file_ns::node_shader_gpu_scene_color;
+  ntype.add_ui_poll = file_ns::node_add_ui_poll;
 
   bke::node_register_type(ntype);
 }

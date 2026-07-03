@@ -463,6 +463,8 @@ set(GLSL_SRC
   engines/eevee/shaders/eevee_film_frag.glsl
   engines/eevee/shaders/eevee_film_lib.glsl
   engines/eevee/shaders/eevee_film_pass_convert_comp.glsl
+  engines/eevee/shaders/eevee_filter_graph_input_copy_frag.glsl
+  engines/eevee/shaders/eevee_filter_graph_resolve_frag.glsl
   engines/eevee/shaders/eevee_filter_material_frag.glsl
   engines/eevee/shaders/eevee_filter_lib.glsl
   engines/eevee/shaders/eevee_forward_lib.glsl

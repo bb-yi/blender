@@ -51,6 +51,7 @@
 #include "DEG_depsgraph_query.hh"
 
 #include "NOD_shader_nodes_inline.hh"
+#include "../../nodes/shader/include/NOD_filter_graph.hh"
 #include "RE_compositor.hh"
 #include "RE_engine.h"
 #include "RE_pipeline.h"
@@ -549,6 +550,7 @@ void ED_node_set_active(
              SH_NODE_OUTPUT_WORLD,
              SH_NODE_OUTPUT_LIGHT,
              SH_NODE_EEVEE_LIGHT_SHADER_OUTPUT,
+             SH_NODE_OUTPUT_FILTER,
              SH_NODE_OUTPUT_LINESTYLE))
     {
       for (bNode *node_iter : ntree->all_nodes()) {
@@ -562,6 +564,9 @@ void ED_node_set_active(
     }
 
     BKE_main_ensure_invariants(*bmain, ntree->id);
+    if (node->type_legacy == SH_NODE_OUTPUT_FILTER) {
+      blender::nodes::filter_graph_filter_output_interface_changed(*bmain, *ntree, *node);
+    }
 
     if (node->flag & NODE_ACTIVE_TEXTURE) {
       /* If active texture changed, free GLSL materials. */
@@ -637,6 +642,13 @@ void ED_node_set_active(
         node->flag |= NODE_DO_OUTPUT;
       }
       ed::viewer_path::activate_geometry_node(*bmain, *snode, *node);
+    }
+  }
+  else if (ntree->type == NTREE_EEVEE_FILTER_GRAPH) {
+    if (node->type_legacy == EEVEE_FILTER_GRAPH_NODE_STAGE_OUTPUT) {
+      blender::nodes::filter_graph_stage_output_activate(*ntree, *node);
+      BKE_ntree_update_tag_active_output_changed(ntree);
+      blender::nodes::filter_graph_tag_tree_changed(*bmain, *ntree);
     }
   }
 }
@@ -1878,14 +1890,21 @@ static wmOperatorStatus node_mute_exec(bContext *C, wmOperator * /*op*/)
 
   ED_preview_kill_jobs(CTX_wm_manager(C), bmain);
 
+  bool node_mute_changed = false;
   for (bNode *node : snode->edittree->all_nodes()) {
     if ((node->flag & SELECT) && !node->typeinfo->no_muting) {
       node->flag ^= NODE_MUTED;
       BKE_ntree_update_tag_node_mute(snode->edittree, node);
+      node_mute_changed = true;
     }
   }
 
-  BKE_main_ensure_invariants(*bmain, snode->edittree->id);
+  if (node_mute_changed && snode->edittree->type == NTREE_EEVEE_FILTER_GRAPH) {
+    blender::nodes::filter_graph_tag_tree_changed(*bmain, *snode->edittree);
+  }
+  else {
+    BKE_main_ensure_invariants(*bmain, snode->edittree->id);
+  }
 
   return OPERATOR_FINISHED;
 }

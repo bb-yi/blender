@@ -2720,6 +2720,8 @@ struct SceneEEVEE {
 
   ListBase filter_materials = {};
   ListBase render_textures = {};
+  struct bNodeTree *filter_graph = nullptr;
+  void *_pad3 = nullptr;
   int active_filter_material_index = -1;
   int active_render_texture_index = -1;
   int next_filter_material_uid = 1;

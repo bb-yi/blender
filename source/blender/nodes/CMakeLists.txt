@@ -52,6 +52,7 @@ set(INC
   geometry
   intern
   shader
+  shader/include
   texture
   geometry/include
   ../animrig
@@ -79,6 +80,7 @@ set(SRC
   intern/geometry_nodes_lazy_function.cc
   intern/geometry_nodes_list.cc
   intern/geometry_nodes_log.cc
+  intern/filter_graph.cc
   intern/geometry_nodes_repeat_zone.cc
   intern/geometry_nodes_warning.cc
   intern/inverse_eval.cc
@@ -109,6 +111,7 @@ set(SRC
   NOD_common.hh
   NOD_composite.hh
   NOD_defaults.hh
+  NOD_filter_graph.hh
   NOD_geometry.hh
   NOD_geometry_exec.hh
   NOD_geometry_nodes_bundle.hh

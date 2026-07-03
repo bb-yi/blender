@@ -135,14 +135,18 @@ void npr_image_sample_view(TextureHandle image, float3 offset, float4 &color, fl
 #if (defined(NPR_SHADER) || defined(MAT_FILTER)) && defined(GPU_FRAGMENT_SHADER)
   color = TextureHandle_eval(image, offset.xy, false);
   alpha = color.a;
-  /* Scene color stores transmittance in alpha. Invert to get opacity,
-   * matching the original Scene Color node's separate Alpha output. */
-  if (image.type == TEX_HANDLE_SCENE && image.index == 0) {
+#  if defined(MAT_FILTER)
+  if (TextureHandle_stores_transmittance_alpha(image)) {
     alpha = saturate(1.0f - alpha);
   }
-  else if (image.type == TEX_HANDLE_SCENE && image.index == 1) {
+  if (TextureHandle_is_scene_depth(image)) {
     alpha = color.r;
   }
+#  else
+  if (image.type == TEX_HANDLE_SCENE && image.index == 1) {
+    alpha = color.r;
+  }
+#  endif
 #else
   color = float4(0.0f);
   alpha = 0.0f;
@@ -155,12 +159,18 @@ void npr_image_sample_texel(TextureHandle image, float3 offset, float4 &color, f
 #if (defined(NPR_SHADER) || defined(MAT_FILTER)) && defined(GPU_FRAGMENT_SHADER)
   color = TextureHandle_eval(image, offset.xy, true);
   alpha = color.a;
-  if (image.type == TEX_HANDLE_SCENE && image.index == 0) {
+#  if defined(MAT_FILTER)
+  if (TextureHandle_stores_transmittance_alpha(image)) {
     alpha = saturate(1.0f - alpha);
   }
-  else if (image.type == TEX_HANDLE_SCENE && image.index == 1) {
+  if (TextureHandle_is_scene_depth(image)) {
     alpha = color.r;
   }
+#  else
+  if (image.type == TEX_HANDLE_SCENE && image.index == 1) {
+    alpha = color.r;
+  }
+#  endif
 #else
   color = float4(0.0f);
   alpha = 0.0f;
@@ -173,12 +183,18 @@ void npr_image_sample_uv(TextureHandle image, float3 uv, float4 &color, float &a
 #if (defined(NPR_SHADER) || defined(MAT_FILTER)) && defined(GPU_FRAGMENT_SHADER)
   color = TextureHandle_eval_uv(image, uv.xy);
   alpha = color.a;
-  if (image.type == TEX_HANDLE_SCENE && image.index == 0) {
+#  if defined(MAT_FILTER)
+  if (TextureHandle_stores_transmittance_alpha(image)) {
     alpha = saturate(1.0f - alpha);
   }
-  else if (image.type == TEX_HANDLE_SCENE && image.index == 1) {
+  if (TextureHandle_is_scene_depth(image)) {
     alpha = color.r;
   }
+#  else
+  if (image.type == TEX_HANDLE_SCENE && image.index == 1) {
+    alpha = color.r;
+  }
+#  endif
 #else
   color = float4(0.0f);
   alpha = 0.0f;
@@ -255,6 +271,16 @@ void npr_refraction(TextureHandle &combined_color, TextureHandle &position)
 #else
   combined_color = TEXTURE_HANDLE_DEFAULT;
   position = TEXTURE_HANDLE_DEFAULT;
+#endif
+}
+
+[[node]]
+void node_filter_graph_input(float index, TextureHandle &image)
+{
+#if defined(MAT_FILTER)
+  image = TextureHandle(TEX_HANDLE_FILTER_GRAPH_INPUT, int(index));
+#else
+  image = TEXTURE_HANDLE_DEFAULT;
 #endif
 }
 

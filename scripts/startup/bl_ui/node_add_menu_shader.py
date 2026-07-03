@@ -320,7 +320,6 @@ class NODE_MT_shader_node_input_base(node_add_menu.NodeMenu):
             context, layout, "ShaderNodeTexCoord",
             ["Generated", "Normal", "UV", "Object", "Camera", "Window", "Reflection"],
         )
-        self.node_operator(layout, "ShaderNodeSceneColor", poll=filter_eevee_shader_nodes_poll(context))
         self.node_operator(layout, "ShaderNodeUVAlongStroke", poll=line_style_shader_nodes_poll(context))
         self.node_operator(layout, "ShaderNodeUVMap")
         self.node_operator(layout, "ShaderNodeValue")
@@ -368,6 +367,7 @@ class NODE_MT_shader_node_output_base(node_add_menu.NodeMenu):
         self.node_operator(
             layout,
             "ShaderNodeOutputAOV",
+            poll=not filter_eevee_shader_nodes_poll(context),
         )
         self.node_operator(
             layout,
