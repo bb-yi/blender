@@ -131,9 +131,9 @@ void RenderBuffers::acquire(int2 extent, gpu::TextureFormat raycast_depth_format
   const int2 outline_extent = use_outline_buffers ? extent : int2(1);
   outline_color_tx.acquire_2d(
       outline_extent, gpu::TextureFormat::SFLOAT_16_16_16_16, outline_usage);
-  outline_info_tx.acquire_2d(outline_extent, gpu::TextureFormat::UNORM_16_16_16_16, outline_usage);
+  outline_info_tx.acquire_2d(outline_extent, gpu::TextureFormat::UINT_16_16_16_16, outline_usage);
   outline_color_tx.clear(float4(0.0f));
-  outline_info_tx.clear(float4(0.0f));
+  outline_info_tx.clear(uint4(0u));
 }
 
 void RenderBuffers::release()

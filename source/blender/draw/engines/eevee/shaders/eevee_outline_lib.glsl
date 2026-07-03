@@ -10,26 +10,44 @@
 #include "gpu_shader_math_base_lib.glsl"
 #include "gpu_shader_utildefines_lib.glsl"
 
-/* Width is stored in a UNORM16 channel. Reserve the top code-point so unpacking never hits 1.0
- * exactly and can represent very large widths without a fixed shader-side cap. */
-#define OUTLINE_WIDTH_PACK_MAX (65534.0f / 65535.0f)
+/* Outline info is stored in integer channels to avoid Vulkan storage-image issues with UNORM
+ * formats while keeping exact 16-bit code points for IDs and flags. Reserve the top width
+ * code-point so unpacking never hits 1.0 exactly and can represent very large widths. */
+#define OUTLINE_INFO_CODE_MAX 65535u
+#define OUTLINE_WIDTH_PACK_MAX 65534u
 
-float outline_width_pack(float width)
+uint outline_unorm16_pack(float value)
+{
+  return uint(saturate(value) * float(OUTLINE_INFO_CODE_MAX) + 0.5f);
+}
+
+uint outline_width_pack(float width)
 {
   width = max(width, 0.0f);
   if (width <= 0.0f) {
-    return 0.0f;
+    return 0u;
   }
-  return min(width / (width + 1.0f), OUTLINE_WIDTH_PACK_MAX);
+  return min(outline_unorm16_pack(width / (width + 1.0f)), OUTLINE_WIDTH_PACK_MAX);
 }
 
-float outline_width_unpack(float width_packed)
+float outline_width_unpack(uint width_packed)
 {
-  width_packed = clamp(width_packed, 0.0f, OUTLINE_WIDTH_PACK_MAX);
-  if (width_packed <= 0.0f) {
+  width_packed = min(width_packed, OUTLINE_WIDTH_PACK_MAX);
+  if (width_packed == 0u) {
     return 0.0f;
   }
-  return width_packed / (1.0f - width_packed);
+  const float width_normalized = float(width_packed) / float(OUTLINE_INFO_CODE_MAX);
+  return width_normalized / (1.0f - width_normalized);
+}
+
+uint outline_depth_threshold_pack(float threshold)
+{
+  return outline_unorm16_pack(threshold);
+}
+
+float outline_depth_threshold_unpack(uint threshold_packed)
+{
+  return float(min(threshold_packed, OUTLINE_INFO_CODE_MAX)) / float(OUTLINE_INFO_CODE_MAX);
 }
 
 #define OUTLINE_ID_VALUE_MASK 32767u
@@ -37,36 +55,26 @@ float outline_width_unpack(float width_packed)
 #define OUTLINE_NORMAL_THRESHOLD_VALUE_MASK 32767u
 #define OUTLINE_FREESTYLE_EDGE_BIT 32768u
 
-uint outline_id_bits_unpack(float outline_id_packed)
-{
-  return uint(clamp(outline_id_packed, 0.0f, 1.0f) * 65535.0f + 0.5f);
-}
-
-float outline_id_pack(uint outline_id, bool id_edge)
+uint outline_id_pack(uint outline_id, bool id_edge)
 {
   uint packed_id = min(outline_id, OUTLINE_ID_VALUE_MASK);
   if (id_edge) {
     packed_id |= OUTLINE_ID_EDGE_BIT;
   }
-  return float(packed_id) / 65535.0f;
+  return packed_id;
 }
 
-uint outline_id_unpack(float outline_id_packed)
+uint outline_id_unpack(uint outline_id_packed)
 {
-  return outline_id_bits_unpack(outline_id_packed) & OUTLINE_ID_VALUE_MASK;
+  return outline_id_packed & OUTLINE_ID_VALUE_MASK;
 }
 
-bool outline_id_edge_unpack(float outline_id_packed)
+bool outline_id_edge_unpack(uint outline_id_packed)
 {
-  return (outline_id_bits_unpack(outline_id_packed) & OUTLINE_ID_EDGE_BIT) != 0u;
+  return (outline_id_packed & OUTLINE_ID_EDGE_BIT) != 0u;
 }
 
-uint outline_normal_threshold_bits_unpack(float threshold_packed)
-{
-  return uint(clamp(threshold_packed, 0.0f, 1.0f) * 65535.0f + 0.5f);
-}
-
-float outline_normal_threshold_pack(float threshold, bool freestyle_edge)
+uint outline_normal_threshold_pack(float threshold, bool freestyle_edge)
 {
   uint packed_threshold = uint(saturate(threshold) *
                                    float(OUTLINE_NORMAL_THRESHOLD_VALUE_MASK) +
@@ -74,26 +82,24 @@ float outline_normal_threshold_pack(float threshold, bool freestyle_edge)
   if (freestyle_edge) {
     packed_threshold |= OUTLINE_FREESTYLE_EDGE_BIT;
   }
-  return float(packed_threshold) / 65535.0f;
+  return packed_threshold;
 }
 
-float outline_normal_threshold_unpack(float threshold_packed)
+float outline_normal_threshold_unpack(uint threshold_packed)
 {
-  return float(outline_normal_threshold_bits_unpack(threshold_packed) &
-               OUTLINE_NORMAL_THRESHOLD_VALUE_MASK) /
+  return float(threshold_packed & OUTLINE_NORMAL_THRESHOLD_VALUE_MASK) /
          float(OUTLINE_NORMAL_THRESHOLD_VALUE_MASK);
 }
 
-bool outline_freestyle_edge_unpack(float threshold_packed)
+bool outline_freestyle_edge_unpack(uint threshold_packed)
 {
-  return (outline_normal_threshold_bits_unpack(threshold_packed) & OUTLINE_FREESTYLE_EDGE_BIT) !=
-         0u;
+  return (threshold_packed & OUTLINE_FREESTYLE_EDGE_BIT) != 0u;
 }
 
 #if defined(MAT_OUTLINE_SUPPORT) && defined(MAT_OUTLINE_OUTPUT) && defined(MAT_OUTLINE_CLEAR) && \
     defined(GPU_FRAGMENT_SHADER)
 float4 g_outline_staged_color;
-float4 g_outline_staged_info;
+uint4 g_outline_staged_info;
 #endif
 
 void outline_output_reset()
@@ -101,7 +107,7 @@ void outline_output_reset()
 #if defined(MAT_OUTLINE_SUPPORT) && defined(MAT_OUTLINE_OUTPUT) && defined(MAT_OUTLINE_CLEAR) && \
     defined(GPU_FRAGMENT_SHADER)
   g_outline_staged_color = float4(0.0f);
-  g_outline_staged_info = float4(0.0f);
+  g_outline_staged_info = uint4(0u);
 #endif
 }
 
@@ -109,7 +115,7 @@ void outline_output_flush()
 {
 #if defined(MAT_OUTLINE_SUPPORT) && defined(MAT_OUTLINE_OUTPUT) && defined(MAT_OUTLINE_CLEAR) && \
     defined(GPU_FRAGMENT_SHADER)
-  if (g_outline_staged_color.a <= 0.0f || g_outline_staged_info.r <= 0.0f) {
+  if (g_outline_staged_color.a <= 0.0f || g_outline_staged_info.r == 0u) {
     return;
   }
 
@@ -169,10 +175,10 @@ void output_outline(float4 line_color,
 
   float4 stored_color = line_color;
   stored_color.a = saturate(stored_color.a);
-  float4 stored_info = float4(outline_width_pack(line_width),
-                              saturate(depth_threshold),
-                              outline_normal_threshold_pack(normal_threshold, freestyle_edge),
-                              outline_id_pack(resolved_outline_id, id_edge));
+  uint4 stored_info = uint4(outline_width_pack(line_width),
+                            outline_depth_threshold_pack(depth_threshold),
+                            outline_normal_threshold_pack(normal_threshold, freestyle_edge),
+                            outline_id_pack(resolved_outline_id, id_edge));
 #  if defined(MAT_OUTLINE_CLEAR)
   g_outline_staged_color = stored_color;
   g_outline_staged_info = stored_info;
