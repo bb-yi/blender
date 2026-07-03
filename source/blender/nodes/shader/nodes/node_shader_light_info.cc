@@ -79,7 +79,7 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.add_output<decl::Float>("Sun Angle"_ustr)
       .description("Sun angular diameter in radians")
       .available(false);
-  b.add_output<decl::Float>("Visible")
+  b.add_output<decl::Float>("Visible"_ustr)
       .description("Outputs 1 when the selected light object is not hidden, otherwise 0");
 }
 
