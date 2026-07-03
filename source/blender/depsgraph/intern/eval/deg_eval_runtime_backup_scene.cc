@@ -8,6 +8,8 @@
 
 #include "intern/eval/deg_eval_runtime_backup_scene.h"
 
+#include "MEM_guardedalloc.h"
+
 #include "BKE_scene_runtime.hh"
 #include "BKE_sound.hh"
 
@@ -31,6 +33,10 @@ void SceneBackup::init_from_scene(Scene *scene)
 {
   BKE_sound_lock();
 
+  if (scene->runtime == nullptr) {
+    scene->runtime = MEM_new<bke::SceneRuntime>(__func__);
+  }
+
   if (scene->rigidbody_world != nullptr) {
     rigidbody_last_time = scene->rigidbody_world->ltime;
   }
@@ -43,6 +49,10 @@ void SceneBackup::init_from_scene(Scene *scene)
 
 void SceneBackup::restore_to_scene(Scene *scene)
 {
+  if (scene->runtime == nullptr) {
+    scene->runtime = MEM_new<bke::SceneRuntime>(__func__);
+  }
+
   scene->runtime->audio = std::move(audio_runtime);
 
   if (scene->rigidbody_world != nullptr) {
