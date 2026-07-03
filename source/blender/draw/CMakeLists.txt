@@ -419,6 +419,8 @@ set(GLSL_SRC
   engines/eevee/shaders/eevee_depth_of_field_tiles.bsl.hh
   engines/eevee/shaders/eevee_film.bsl.hh
   engines/eevee/shaders/eevee_filter.bsl.hh
+  engines/eevee/shaders/eevee_filter_graph_input_copy_frag.glsl
+  engines/eevee/shaders/eevee_filter_graph_resolve_frag.glsl
   engines/eevee/shaders/eevee_filter_material_frag.glsl
   engines/eevee/shaders/eevee_forward_lib.bsl.hh
   engines/eevee/shaders/eevee_forward_lib.glsl

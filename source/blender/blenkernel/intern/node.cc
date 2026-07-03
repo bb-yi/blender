@@ -2568,11 +2568,42 @@ static void ntree_set_typeinfo(bNodeTree *ntree, bNodeTreeType *typeinfo)
   BKE_ntree_update_tag_all(ntree);
 }
 
+static bool node_ensure_legacy_filter_output_storage(bNode &node)
+{
+  const bool has_filter_output_idname = STREQ(node.idname, "ShaderNodeOutputFilter");
+  const bool has_undefined_filter_output_idname = STREQ(node.idname,
+                                                        "Undefined[ShaderNodeOutputFilter]");
+  if (!has_undefined_filter_output_idname && !(has_filter_output_idname && node.storage == nullptr))
+  {
+    return false;
+  }
+
+  STRNCPY(node.idname, "ShaderNodeOutputFilter");
+  node.type_legacy = SH_NODE_OUTPUT_FILTER;
+  if (node.storage != nullptr) {
+    return true;
+  }
+
+  NodeShaderFilterOutput *data = MEM_new<NodeShaderFilterOutput>(__func__);
+  data->items = MEM_new_array<NodeEeveeFilterGraphSocketItem>(1, __func__);
+  data->items[0].name = BLI_strdup(DATA_("Image"));
+  data->items[0].identifier = 0;
+  data->items_num = 1;
+  data->active_index = 0;
+  data->next_identifier = 1;
+  node.storage = data;
+  return true;
+}
+
 static void node_set_typeinfo(const bContext *C,
                               bNodeTree *ntree,
                               bNode *node,
                               bNodeType *typeinfo)
 {
+  if (node_ensure_legacy_filter_output_storage(*node) && typeinfo == nullptr) {
+    typeinfo = node_type_find(UString(node->idname));
+  }
+
   /* for nodes saved in older versions storage can get lost, make undefined then */
   if (node->flag & NODE_INIT) {
     if (typeinfo && typeinfo->storagename[0] && !node->storage) {
@@ -5529,6 +5560,11 @@ void node_tree_update_all_new(Main &main)
    * replaced in those late versioning steps. */
   FOREACH_NODETREE_BEGIN (&main, ntree, owner_id) {
     for (bNode *node : ntree->all_nodes()) {
+      if (node_ensure_legacy_filter_output_storage(*node)) {
+        if (bNodeType *typeinfo = node_type_find(UString(node->idname))) {
+          node_set_typeinfo(nullptr, ntree, node, typeinfo);
+        }
+      }
       /* If the node type is built-in but unknown, the node cannot be read. */
       if (!can_read_node_type(*node)) {
         node_set_undefined_type(*node);

@@ -21,6 +21,10 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.add_input<decl::Vector>("Vector"_ustr).hide_value();
   b.add_output<decl::Color>("Color"_ustr);
   b.add_output<decl::Float>("Alpha"_ustr);
+  b.add_output<decl::Image>("Color Image"_ustr);
+  b.add_output<decl::Image>("Depth Image"_ustr);
+  b.add_output<decl::Image>("Normal Image"_ustr);
+  b.add_output<decl::Image>("Position Image"_ustr);
 }
 
 static void node_shader_buts(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
@@ -52,6 +56,11 @@ static int node_shader_gpu_scene_color(GPUMaterial *mat,
                         GPU_constant(&scene_source));
 }
 
+static bool node_add_ui_poll(const bContext *C)
+{
+  return !filter_eevee_shader_nodes_poll(C);
+}
+
 }  // namespace nodes::node_shader_scene_color_cc
 
 void register_node_type_sh_scene_color()
@@ -69,8 +78,8 @@ void register_node_type_sh_scene_color()
   ntype.declare = file_ns::node_declare;
   ntype.draw_buttons = file_ns::node_shader_buts;
   ntype.initfunc = file_ns::node_shader_init_scene_color;
-  ntype.add_ui_poll = filter_eevee_shader_nodes_poll;
   ntype.gpu_fn = file_ns::node_shader_gpu_scene_color;
+  ntype.add_ui_poll = file_ns::node_add_ui_poll;
 
   bke::node_register_type(ntype);
 }

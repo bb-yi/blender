@@ -501,6 +501,9 @@ class MaterialModule {
                         int mat_nr,
                         eMaterialGeometry geometry_type);
 
+  /* Push unloaded textures used by this material to the texture loading queue. */
+  void queue_texture_loading(GPUMaterial *material);
+
   /* Request default materials and return DEFAULT_MATERIALS if they are compiled. */
   ShaderGroups default_materials_load_async()
   {
@@ -525,9 +528,6 @@ class MaterialModule {
                                  eMaterialGeometry geometry_type,
                                  eMaterialProbe probe_capture = MAT_PROBE_NONE,
                                  bool register_pass = true);
-
-  /* Push unloaded texture used by this material to the texture loading queue. */
-  void queue_texture_loading(GPUMaterial *material);
 
   ShaderGroups default_materials_load(bool block_until_ready = false);
 };

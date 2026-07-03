@@ -245,6 +245,12 @@ void input_aov_impl(uint /*hash*/, out TextureHandle color, out TextureHandle va
   value = TEXTURE_HANDLE_DEFAULT;
 }
 
+bool TextureHandle_is_scene_depth(TextureHandle tex)
+{
+  UNUSED_VARS(tex);
+  return false;
+}
+
 float4 TextureHandle_eval(TextureHandle tex, float2 offset, bool texel_offset)
 {
   if (tex.type == TEX_HANDLE_NULL) {
@@ -298,5 +304,10 @@ float4 TextureHandle_eval(TextureHandle tex, float2 offset, bool texel_offset)
 float4 TextureHandle_eval(TextureHandle tex)
 {
   return TextureHandle_eval(tex, float2(0.0f), false);
+}
+
+float4 TextureHandle_eval_uv(TextureHandle tex, float2 uv)
+{
+  return TextureHandle_eval(tex, uv - float2(0.5f), false);
 }
 #endif

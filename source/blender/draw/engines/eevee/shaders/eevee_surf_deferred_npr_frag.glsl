@@ -25,6 +25,7 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_surf_npr)
 #define TEX_HANDLE_NULL 0u
 #define TEX_HANDLE_RP_COLOR 1u
 #define TEX_HANDLE_RP_VALUE 2u
+#define TEX_HANDLE_SCENE 30u
 #define TEX_HANDLE_COMBINED_COLOR 10u
 #define TEX_HANDLE_DIFFUSE_COLOR 11u
 #define TEX_HANDLE_DIFFUSE_DIRECT 12u
@@ -106,6 +107,72 @@ float4 swap_alpha(float4 v)
 
 #define TEXTURE_HANDLE_EVAL_DEFINED
 
+bool TextureHandle_is_scene_depth(TextureHandle tex)
+{
+  return tex.type == TEX_HANDLE_SCENE && tex.index == 1;
+}
+
+int2 npr_texture_texel_from_uv(float2 uv, int2 extent)
+{
+  uv = clamp(uv, float2(0.0f), float2(1.0f));
+  return clamp(int2(uv * float2(extent)), int2(0), extent - int2(1));
+}
+
+float npr_depth_at_texel(int2 texel)
+{
+  float depth = texelFetch(hiz_tx, texel, 0).r;
+#ifdef MAT_DEPTH_OFFSET_NO_LIGHTING
+  const gbuffer::Layers gbuf = npr_gbuffer_read_layers(texel);
+  depth = npr_gbuffer_read_surface_depth(gbuf.header, texel, depth);
+#endif
+  return depth;
+}
+
+float4 npr_scene_depth_color(float depth)
+{
+  float linear_depth = -drw_depth_screen_to_view(depth);
+  return float4(linear_depth.xxx, 1.0f);
+}
+
+float4 npr_scene_handle_eval(TextureHandle tex, int2 texel, float depth, float2 screen_uv)
+{
+  if (tex.index == 0) {
+    return texelFetch(radiance_tx, texel, 0);
+  }
+  if (tex.index == 1) {
+    return npr_scene_depth_color(depth);
+  }
+  if (tex.index == 2) {
+    if (uniform_buf.render_pass.normal_id >= 0) {
+      return float4(texelFetch(rp_color_tx,
+                               int3(texel, uniform_buf.render_pass.normal_id),
+                               0)
+                        .rgb,
+                    1.0f);
+    }
+    if (depth >= 1.0f) {
+      return float4(0.0f);
+    }
+    float3 position = drw_point_screen_to_world(float3(screen_uv, depth));
+    float3 normal = normalize(cross(gpu_dfdx(position), gpu_dfdy(position)));
+    return float4(normal, 1.0f);
+  }
+  if (tex.index == 4) {
+    if (uniform_buf.render_pass.position_id >= 0) {
+      return float4(texelFetch(rp_color_tx,
+                               int3(texel, uniform_buf.render_pass.position_id),
+                               0)
+                        .rgb,
+                    1.0f);
+    }
+    if (depth >= 1.0f) {
+      return float4(0.0f);
+    }
+    return float4(drw_point_screen_to_world(float3(screen_uv, depth)), 1.0f);
+  }
+  return float4(0.0f);
+}
+
 float4 TextureHandle_eval_impl(TextureHandle tex, float2 offset, bool texel_offset)
 {
   if (tex.type == TEX_HANDLE_NULL) {
@@ -179,6 +246,8 @@ float4 TextureHandle_eval_impl(TextureHandle tex, float2 offset, bool texel_offs
       return float4(texelFetch(rp_color_tx, int3(texel, tex.index), 0).rgb, 0.0f);
     case TEX_HANDLE_RP_VALUE:
       return float4(texelFetch(rp_value_tx, int3(texel, tex.index), 0).rrr, 0.0f);
+    case TEX_HANDLE_SCENE:
+      return npr_scene_handle_eval(tex, texel, depth, screen_uv);
 #ifdef MAT_NPR_REFRACTION
     case TEX_HANDLE_BACK_COMBINED_COLOR:
       return texelFetch(radiance_back_tx, texel, 0);
@@ -241,6 +310,82 @@ float4 TextureHandle_eval(TextureHandle tex, float2 offset, bool texel_offset)
 float4 TextureHandle_eval(TextureHandle tex)
 {
   return TextureHandle_eval(tex, float2(0.0f), true);
+}
+
+float4 TextureHandle_eval_uv_impl(TextureHandle tex, float2 uv)
+{
+  if (tex.type == TEX_HANDLE_NULL) {
+    return float4(0.0f);
+  }
+
+  int2 extent = textureSize(radiance_tx, 0);
+  int2 texel = npr_texture_texel_from_uv(uv, extent);
+  float depth = npr_depth_at_texel(texel);
+  float2 screen_uv = (float2(texel) + 0.5f) / float2(extent);
+
+  switch (tex.type) {
+    case TEX_HANDLE_RP_COLOR:
+      return float4(texelFetch(rp_color_tx, int3(texel, tex.index), 0).rgb, 0.0f);
+    case TEX_HANDLE_RP_VALUE:
+      return float4(texelFetch(rp_value_tx, int3(texel, tex.index), 0).rrr, 0.0f);
+    case TEX_HANDLE_SCENE:
+      return npr_scene_handle_eval(tex, texel, depth, screen_uv);
+#ifdef MAT_NPR_REFRACTION
+    case TEX_HANDLE_BACK_COMBINED_COLOR:
+      return texelFetch(radiance_back_tx, texel, 0);
+#endif
+    case TEX_HANDLE_POSITION:
+      return float4(drw_point_screen_to_world(float3(screen_uv, depth)), 0.0f);
+#ifdef MAT_NPR_REFRACTION
+    case TEX_HANDLE_BACK_POSITION: {
+      float back_depth = texelFetch(hiz_back_tx, texel, 0).r;
+      float3 back_position = drw_point_screen_to_world(float3(screen_uv, back_depth));
+      return float4(back_position, 0.0f);
+    }
+#endif
+    default:
+      break;
+  }
+
+  if (depth == 1.0f) {
+    if (tex.type == TEX_HANDLE_COMBINED_COLOR) {
+      return texelFetch(radiance_tx, texel, 0);
+    }
+    if (tex.type == TEX_HANDLE_NORMAL) {
+      float3 position = drw_point_screen_to_world(float3(screen_uv, depth));
+      float3 normal = drw_world_incident_vector(position);
+      return float4(normal, 0.0f);
+    }
+    return float4(0.0f);
+  }
+
+  DeferredCombine dc = deferred_combine(texel);
+  deferred_combine_clamp(dc);
+  switch (tex.type) {
+    case TEX_HANDLE_COMBINED_COLOR:
+      return texelFetch(radiance_tx, texel, 0);
+    case TEX_HANDLE_DIFFUSE_COLOR:
+      return float4(dc.diffuse_color, 0.0f);
+    case TEX_HANDLE_DIFFUSE_DIRECT:
+      return float4(dc.diffuse_direct, 0.0f);
+    case TEX_HANDLE_DIFFUSE_INDIRECT:
+      return float4(dc.diffuse_indirect, 0.0f);
+    case TEX_HANDLE_SPECULAR_COLOR:
+      return float4(dc.specular_color, 0.0f);
+    case TEX_HANDLE_SPECULAR_DIRECT:
+      return float4(dc.specular_direct, 0.0f);
+    case TEX_HANDLE_SPECULAR_INDIRECT:
+      return float4(dc.specular_indirect, 0.0f);
+    case TEX_HANDLE_NORMAL:
+      return float4(dc.average_normal, 0.0f);
+    default:
+      return float4(0.0f);
+  }
+}
+
+float4 TextureHandle_eval_uv(TextureHandle tex, float2 uv)
+{
+  return swap_alpha(TextureHandle_eval_uv_impl(tex, uv));
 }
 
 #ifndef FOREACH_LIGHT_BEGIN

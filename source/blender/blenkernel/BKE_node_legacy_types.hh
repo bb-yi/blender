@@ -562,6 +562,13 @@
 #define NODE_EVALUATE_CLOSURE 2156
 #define NODE_CLOSURE_INPUT 2157
 
+/** Eevee Filter Graph nodes. */
+#define SH_NODE_FILTER_GRAPH_INPUT 818
+#define EEVEE_FILTER_GRAPH_NODE_SCENE_COLOR 900
+#define EEVEE_FILTER_GRAPH_NODE_AOV_INPUT 901
+#define EEVEE_FILTER_GRAPH_NODE_FILTER_MATERIAL 902
+#define EEVEE_FILTER_GRAPH_NODE_STAGE_OUTPUT 903
+
 /** \} */
 
 /* -------------------------------------------------------------------- */

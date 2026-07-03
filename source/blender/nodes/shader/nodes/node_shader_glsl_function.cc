@@ -49,7 +49,11 @@
 #include "RNA_prototypes.hh"
 
 #include "BKE_context.hh"
+#include "BKE_main.hh"
 
+#include "DNA_space_types.h"
+
+#include "UI_interface_c.hh"
 #include "UI_interface_layout.hh"
 #include "UI_resources.hh"
 
@@ -419,6 +423,8 @@ namespace blender
     static constexpr int closure_output_virtual_texture_size = 1024;
     static constexpr const char* glsl_light_access_helper_filename =
       "gpu_shader_material_glsl_light_access.glsl";
+    static constexpr const char* glsl_light_probe_color_helper_filename =
+      "gpu_shader_material_light_probe_color.glsl";
 
     static Vector<GLSLToken> tokenize_glsl_source(const StringRef source);
     static const bNodeSocket* find_node_input_socket_by_identifier(const bNode& node,
@@ -5870,36 +5876,14 @@ vec3 glsl_incoming()
     {
       return R"GLSL(
 #if defined(GPU_FRAGMENT_SHADER) && (defined(MAT_DEFERRED) || defined(MAT_FORWARD) || defined(NPR_SHADER))
-vec3 glsl_helper_ambient_safe_direction(vec3 value, vec3 fallback)
-{
-  float value_len_squared = dot(value, value);
-  if (value_len_squared > 1e-16) {
-    return value * inversesqrt(value_len_squared);
-  }
-
-  float fallback_len_squared = dot(fallback, fallback);
-  if (fallback_len_squared > 1e-16) {
-    return fallback * inversesqrt(fallback_len_squared);
-  }
-
-  return vec3(0.0, 0.0, 1.0);
-}
-
 vec3 glsl_ambient_lighting()
 {
 #if defined(CREATE_INFO_eevee_LightprobeRenderData)
-  vec3 shading_normal = glsl_helper_ambient_safe_direction(g_data.N, g_data.Ng);
-  vec3 probe_bias_normal = glsl_helper_ambient_safe_direction(g_data.Ni, g_data.Ng);
-  const ViewMatrices view = view_matrices_get();
-  vec3 view_vector = view.world_incident_vector(g_data.P);
-
-  [[resource_table]] const eevee::LightprobeRenderData &lightprobes = resource_table_get(
-      eevee::LightprobeRenderData);
-  eevee::LightProbeSample probe_sample = lightprobes.load(
-      gl_FragCoord.xy, g_data.P, probe_bias_normal, view_vector);
-  probe_sample.volume_irradiance = spherical_harmonics::clamp_energy(
-      probe_sample.volume_irradiance, uniform_buf.clamp.surface_indirect);
-  return max(probe_sample.volume_irradiance.evaluate_lambert(shading_normal).rgb, vec3(0.0));
+  vec4 reflection;
+  vec4 irradiance;
+  vec4 combined;
+  node_light_probe_color(vec3(0.0), 1.0, reflection, irradiance, combined);
+  return max(irradiance.rgb, vec3(0.0));
 #else
   return vec3(0.0);
 #endif
@@ -7788,8 +7772,13 @@ vec3 glsl_ambient_lighting()
       if (parse_result.uses_lightprobe_access)
       {
         const std::string lightprobe_helper_source = build_glsl_lightprobe_helper_block();
+        Vector<StringRefNull> lightprobe_helper_dependencies;
+        lightprobe_helper_dependencies.append(glsl_light_probe_color_helper_filename);
         GPU_material_generated_source_add(
-          mat, GPU_GLSL_FUNCTION_LIGHTPROBE_HELPER_FILENAME, {}, lightprobe_helper_source.c_str());
+          mat,
+          GPU_GLSL_FUNCTION_LIGHTPROBE_HELPER_FILENAME,
+          lightprobe_helper_dependencies,
+          lightprobe_helper_source.c_str());
       }
       GPU_material_generated_source_add(
         mat,

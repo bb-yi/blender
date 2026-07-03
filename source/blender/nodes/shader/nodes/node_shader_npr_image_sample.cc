@@ -14,8 +14,9 @@ namespace nodes::node_shader_npr_image_sample_cc {
 static void node_declare(NodeDeclarationBuilder &b)
 {
   b.add_input<decl::Image>("Image"_ustr).hide_value();
-  b.add_input<decl::Vector>("Offset"_ustr).hide_value();
+  b.add_input<decl::Vector>("Offset"_ustr, "Vector"_ustr).hide_value();
   b.add_output<decl::Color>("Color"_ustr);
+  b.add_output<decl::Float>("Alpha"_ustr);
 }
 
 static void node_shader_buts(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
@@ -33,8 +34,19 @@ static int node_shader_gpu_npr_image_sample(GPUMaterial *mat,
                                             GPUNodeStack *in,
                                             GPUNodeStack *out)
 {
-  return GPU_stack_link(
-      mat, node, node->custom1 ? "npr_image_sample_texel" : "npr_image_sample_view", in, out);
+  const char *shader_name;
+  switch (node->custom1) {
+    case SHD_IMG_SAMPLE_OFFSET_PIXEL:
+      shader_name = "npr_image_sample_texel";
+      break;
+    case SHD_IMG_SAMPLE_OFFSET_UV:
+      shader_name = "npr_image_sample_uv";
+      break;
+    default:
+      shader_name = "npr_image_sample_view";
+      break;
+  }
+  return GPU_stack_link(mat, node, shader_name, in, out);
 }
 
 }  // namespace nodes::node_shader_npr_image_sample_cc

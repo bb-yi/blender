@@ -85,6 +85,7 @@ set(SRC
   intern/geometry_nodes_gizmos.cc
   intern/geometry_nodes_lazy_function.cc
   intern/geometry_nodes_list.cc
+  intern/filter_graph.cc
   intern/geometry_nodes_repeat_zone.cc
   intern/geometry_nodes_physics_bundles.cc
   intern/geometry_nodes_srna.cc
@@ -126,6 +127,7 @@ set(SRC
   NOD_defaults.hh
   NOD_dependencies.hh
   NOD_eval_log.hh
+  NOD_filter_graph.hh
   NOD_geometry.hh
   NOD_geometry_exec.hh
   NOD_geometry_nodes_bundle.hh

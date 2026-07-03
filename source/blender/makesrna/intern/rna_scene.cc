@@ -802,6 +802,7 @@ static const EnumPropertyItem eevee_resolution_scale_items[] = {
 
 #  include "NOD_composite.hh"
 #  include "NOD_compositor_file_output.hh"
+#  include "NOD_filter_graph.hh"
 
 #  include "ED_grease_pencil.hh"
 #  include "ED_image.hh"
@@ -1298,6 +1299,32 @@ static void rna_Scene_compositing_node_group_set(PointerRNA *ptr,
   }
   scene->compositing_node_group = ntree;
   id_us_plus(&scene->compositing_node_group->id);
+}
+
+static bool rna_Scene_eevee_filter_graph_poll(PointerRNA * /*ptr*/, PointerRNA value)
+{
+  bNodeTree *ntree = static_cast<bNodeTree *>(value.data);
+  return ntree != nullptr && ntree->type == NTREE_EEVEE_FILTER_GRAPH;
+}
+
+static void rna_Scene_eevee_filter_graph_set(PointerRNA *ptr,
+                                             const PointerRNA value,
+                                             ReportList *reports)
+{
+  SceneEEVEE *eevee = static_cast<SceneEEVEE *>(ptr->data);
+  bNodeTree *ntree = static_cast<bNodeTree *>(value.data);
+  if (ntree && ntree->type != NTREE_EEVEE_FILTER_GRAPH) {
+    BKE_reportf(
+        reports, RPT_ERROR, "Node tree '%s' is not an Eevee filter graph.", ntree->id.name + 2);
+    return;
+  }
+  if (eevee->filter_graph) {
+    id_us_min(&eevee->filter_graph->id);
+  }
+  eevee->filter_graph = ntree;
+  if (eevee->filter_graph) {
+    id_us_plus(&eevee->filter_graph->id);
+  }
 }
 
 static std::optional<std::string> rna_SceneEEVEE_path(const PointerRNA * /*ptr*/)
@@ -2250,6 +2277,27 @@ static void rna_SceneEEVEE_filter_material_tag_update(Scene *scene)
   WM_main_add_notifier(NC_SCENE | ND_RENDER_OPTIONS, scene);
 }
 
+static void rna_SceneEEVEE_filter_material_sync_graph(Main *bmain, Scene *scene)
+{
+  if (bmain == nullptr || scene == nullptr) {
+    return;
+  }
+  if (blender::nodes::filter_graph_sync_legacy_filter_materials(*bmain, *scene, false) &&
+      scene->eevee.filter_graph != nullptr)
+  {
+    blender::nodes::filter_graph_tag_tree_changed(*bmain, *scene->eevee.filter_graph);
+  }
+}
+
+static void rna_SceneEEVEE_filter_material_update(Main *bmain,
+                                                  Scene * /*scene*/,
+                                                  PointerRNA *ptr)
+{
+  Scene *scene = reinterpret_cast<Scene *>(ptr->owner_id);
+  rna_SceneEEVEE_filter_material_sync_graph(bmain, scene);
+  rna_SceneEEVEE_filter_material_tag_update(scene);
+}
+
 static int rna_SceneEEVEE_filter_material_active_index_max(const SceneEEVEE *eevee)
 {
   return max_ii(-1, BLI_listbase_count(&eevee->filter_materials) - 1);
@@ -2358,6 +2406,7 @@ static SceneFilterMaterial *rna_SceneEEVEE_filter_material_add(ID *id, SceneEEVE
   BLI_addtail(&eevee->filter_materials, filter_material);
   eevee->active_filter_material_index = BLI_findindex(&eevee->filter_materials, filter_material);
 
+  rna_SceneEEVEE_filter_material_sync_graph(G_MAIN, scene);
   rna_SceneEEVEE_filter_material_tag_update(scene);
   return filter_material;
 }
@@ -2384,6 +2433,7 @@ static void rna_SceneEEVEE_filter_material_remove(ID *id,
   eevee->active_filter_material_index = std::clamp(
       eevee->active_filter_material_index, -1, rna_SceneEEVEE_filter_material_active_index_max(eevee));
 
+  rna_SceneEEVEE_filter_material_sync_graph(G_MAIN, scene);
   rna_SceneEEVEE_filter_material_tag_update(scene);
 }
 
@@ -2416,6 +2466,7 @@ static void rna_SceneEEVEE_filter_material_move(ID *id,
   }
 
   Scene *scene = reinterpret_cast<Scene *>(id);
+  rna_SceneEEVEE_filter_material_sync_graph(G_MAIN, scene);
   rna_SceneEEVEE_filter_material_tag_update(scene);
 }
 
@@ -8927,7 +8978,7 @@ static void rna_def_scene_filter_material(BlenderRNA *brna)
   RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
   RNA_def_property_ui_text(prop, "Name", "Display name of this filter material entry");
   RNA_def_property_update(
-      prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_render_texture_update");
+      prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_filter_material_update");
   RNA_def_struct_name_property(srna, prop);
 
   prop = RNA_def_property(srna, "uid", PROP_INT, PROP_NONE);
@@ -8939,7 +8990,7 @@ static void rna_def_scene_filter_material(BlenderRNA *brna)
   RNA_def_property_boolean_sdna(prop, nullptr, "enabled", 1);
   RNA_def_property_ui_text(prop, "Enabled", "Run this filter material in the stack");
   RNA_def_property_update(
-      prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_render_texture_update");
+      prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_filter_material_update");
 
   prop = RNA_def_property(srna, "execution_stage", PROP_ENUM, PROP_NONE);
   RNA_def_property_enum_sdna(prop, nullptr, "execution_stage");
@@ -8948,7 +8999,7 @@ static void rna_def_scene_filter_material(BlenderRNA *brna)
                            "Execution Stage",
                            "Where this filter material runs in Eevee post-processing");
   RNA_def_property_update(
-      prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_render_texture_update");
+      prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_filter_material_update");
 
   prop = RNA_def_property(srna, "material", PROP_POINTER, PROP_NONE);
   RNA_def_property_struct_type(prop, "Material");
@@ -8960,7 +9011,7 @@ static void rna_def_scene_filter_material(BlenderRNA *brna)
                                  "rna_SceneFilterMaterial_material_poll");
   RNA_def_property_ui_text(prop, "Material", "Filter-domain material to run for this stack entry");
   RNA_def_property_update(
-      prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_render_texture_update");
+      prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_filter_material_update");
 }
 
 static void rna_def_scene_render_texture(BlenderRNA *brna)
@@ -9181,6 +9232,18 @@ static void rna_def_scene_eevee(BlenderRNA *brna)
   srna = RNA_def_struct(brna, "SceneEEVEE", nullptr);
   RNA_def_struct_path_func(srna, "rna_SceneEEVEE_path");
   RNA_def_struct_ui_text(srna, "Scene Display", "Scene display settings for 3D viewport");
+
+  prop = RNA_def_property(srna, "filter_graph", PROP_POINTER, PROP_NONE);
+  RNA_def_property_pointer_sdna(prop, nullptr, "filter_graph");
+  RNA_def_property_struct_type(prop, "NodeTree");
+  RNA_def_property_flag(prop, PROP_EDITABLE | PROP_ID_REFCOUNT);
+  RNA_def_property_ui_text(prop, "Filter Graph", "Scene-level Eevee filter material graph");
+  RNA_def_property_update(prop, NC_SCENE | ND_NODES, "rna_Scene_set_update");
+  RNA_def_property_pointer_funcs(prop,
+                                 nullptr,
+                                 "rna_Scene_eevee_filter_graph_set",
+                                 nullptr,
+                                 "rna_Scene_eevee_filter_graph_poll");
 
   prop = RNA_def_property(srna, "filter_materials", PROP_COLLECTION, PROP_NONE);
   RNA_def_property_collection_sdna(prop, nullptr, "filter_materials", nullptr);

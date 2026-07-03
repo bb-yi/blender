@@ -280,6 +280,7 @@ enum eNodeTree_Type : int {
   NTREE_COMPOSIT = 1,
   NTREE_TEXTURE = 2,
   NTREE_GEOMETRY = 3,
+  NTREE_EEVEE_FILTER_GRAPH = 4,
 };
 
 /** #NodeTree.flag */
@@ -852,6 +853,7 @@ enum NodeShaderMixMode : int8_t {
 enum NodeShaderImageSampleOffsetType {
   SHD_IMG_SAMPLE_OFFSET_VIEW = 0,
   SHD_IMG_SAMPLE_OFFSET_PIXEL = 1,
+  SHD_IMG_SAMPLE_OFFSET_UV = 2,
 };
 
 enum NodeShaderCurvatureRadiusType {
@@ -3289,6 +3291,47 @@ struct NodeShaderOutputAOV {
   DNA_DEFINE_CXX_METHODS(NodeShaderOutputAOV)
 
   char name[/*MAX_NAME*/ 64] = "";
+};
+
+struct NodeEeveeFilterGraphSocketItem {
+  char *name = nullptr;
+  int identifier = 0;
+  int _pad = 0;
+};
+
+struct NodeShaderFilterGraphInput {
+  DNA_DEFINE_CXX_METHODS(NodeShaderFilterGraphInput)
+
+  NodeEeveeFilterGraphSocketItem *items = nullptr;
+  int items_num = 0;
+  int active_index = 0;
+  int next_identifier = 0;
+  int _pad = 0;
+};
+
+struct NodeShaderFilterOutput {
+  DNA_DEFINE_CXX_METHODS(NodeShaderFilterOutput)
+
+  NodeEeveeFilterGraphSocketItem *items = nullptr;
+  int items_num = 0;
+  int active_index = 0;
+  int next_identifier = 0;
+  int _pad = 0;
+};
+
+struct NodeEeveeFilterGraphFilterMaterial {
+  DNA_DEFINE_CXX_METHODS(NodeEeveeFilterGraphFilterMaterial)
+
+  NodeEeveeFilterGraphSocketItem *items = nullptr;
+  int items_num = 0;
+  int active_index = 0;
+  int next_identifier = 0;
+  float resolution_scale = 1.0f;
+  char _pad[8] = {};
+};
+
+struct NodeEeveeFilterGraphAOVInput {
+  char name[64] = "";
 };
 
 struct NodeShaderPortal {

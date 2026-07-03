@@ -838,10 +838,23 @@ void GPU_material_output_npr(GPUMaterial *material, GPUNodeLink *link)
 
 void GPU_material_output_filter(GPUMaterial *material, GPUNodeLink *link)
 {
+  GPU_material_output_filter_item(material, 0, link);
+}
+
+void GPU_material_output_filter_item(GPUMaterial *material, int identifier, GPUNodeLink *link)
+{
   if (link != nullptr && !material->graph.outlink_filter) {
     material->graph.outlink_filter = link;
     material->has_filter_output = true;
   }
+  if (link == nullptr) {
+    return;
+  }
+  GPUNodeGraphOutputLink *filter_link = MEM_new<GPUNodeGraphOutputLink>(__func__);
+  filter_link->hash = identifier;
+  filter_link->outlink = link;
+  BLI_addtail(&material->graph.outlink_filters, filter_link);
+  material->has_filter_output = true;
 }
 
 void GPU_material_output_light_shader(GPUMaterial *material, GPUNodeLink *link)

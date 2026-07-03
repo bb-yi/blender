@@ -48,7 +48,11 @@ void node_scene_color(float3 vector,
                       float use_explicit_vector,
                       float source,
                       out float4 color,
-                      out float alpha)
+                      out float alpha,
+                      TextureHandle &color_image,
+                      TextureHandle &depth_image,
+                      TextureHandle &normal_image,
+                      TextureHandle &position_image)
 {
   float2 uv = scene_color_resolve_uv(vector, use_explicit_vector);
   if (source < 0.5f) {
@@ -73,6 +77,11 @@ void node_scene_color(float3 vector,
     color = float4(0.0f);
     alpha = 0.0f;
   }
+
+  color_image = TextureHandle(TEX_HANDLE_SCENE, 0);
+  depth_image = TextureHandle(TEX_HANDLE_SCENE, 1);
+  normal_image = TextureHandle(TEX_HANDLE_SCENE, 2);
+  position_image = TextureHandle(TEX_HANDLE_SCENE, 4);
 }
 
 [[node]]

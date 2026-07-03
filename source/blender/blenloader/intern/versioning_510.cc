@@ -36,6 +36,7 @@
 #include "BLI_math_vector.h"
 #include "BLI_string.h"
 #include "BLI_sys_types.h"
+#include "BLI_vector.hh"
 
 #include "BKE_asset.hh"
 #include "BKE_attribute_legacy_convert.hh"
@@ -49,6 +50,9 @@
 #include "BKE_node_legacy_types.hh"
 #include "BKE_node_runtime.hh"
 #include "BKE_tracking.hh"
+
+#include "NOD_filter_graph.hh"
+#include "NOD_socket.hh"
 
 #include "SEQ_iterator.hh"
 #include "SEQ_sequencer.hh"
@@ -800,6 +804,42 @@ static void version_replace_outline_control_width_variation(Main *bmain)
   FOREACH_NODETREE_END;
 }
 
+static void version_scene_legacy_filter_materials_to_filter_graph(Main &bmain, Scene &scene)
+{
+  if (scene.eevee.filter_graph != nullptr) {
+    return;
+  }
+  nodes::filter_graph_sync_legacy_filter_materials(bmain, scene, true);
+}
+
+static void version_filter_graph_pass_resolution_scale_init(Main &bmain)
+{
+  for (Scene &scene : bmain.scenes) {
+    bNodeTree *filter_graph = scene.eevee.filter_graph;
+    if (filter_graph == nullptr ||
+        !STREQ(filter_graph->idname, nodes::eevee_filter_graph_tree_idname.c_str()))
+    {
+      continue;
+    }
+
+    bool changed = false;
+    for (bNode &node : filter_graph->nodes) {
+      if (node.type_legacy != EEVEE_FILTER_GRAPH_NODE_FILTER_MATERIAL || node.storage == nullptr) {
+        continue;
+      }
+      NodeEeveeFilterGraphFilterMaterial &storage =
+          *static_cast<NodeEeveeFilterGraphFilterMaterial *>(node.storage);
+      if (storage.resolution_scale <= 0.0f) {
+        storage.resolution_scale = 1.0f;
+        changed = true;
+      }
+    }
+    if (changed) {
+      BKE_ntree_update_tag_all(filter_graph);
+    }
+  }
+}
+
 void do_versions_after_linking_510(FileData *fd, Main *bmain)
 {
   /* Some blend files were saved with an invalid active viewer key, possibly due to a bug that
@@ -863,6 +903,23 @@ void do_versions_after_linking_510(FileData *fd, Main *bmain)
         gp_style.fill_rgba[3] = 0.0f;
       }
     }
+  }
+
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 54) ||
+      !DNA_struct_member_exists(fd->filesdna, "SceneEEVEE", "bNodeTree", "*filter_graph"))
+  {
+    for (Scene &scene : bmain->scenes) {
+      version_scene_legacy_filter_materials_to_filter_graph(*bmain, scene);
+    }
+  }
+
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 501, 55) ||
+      !DNA_struct_member_exists(fd->filesdna,
+                                "NodeEeveeFilterGraphFilterMaterial",
+                                "float",
+                                "resolution_scale"))
+  {
+    version_filter_graph_pass_resolution_scale_init(*bmain);
   }
 
   /**

@@ -1130,6 +1130,7 @@ static void gpu_node_free(GPUNode *node)
 
 void gpu_node_graph_free_nodes(GPUNodeGraph *graph)
 {
+  BLI_freelistN(&graph->outlink_filters);
   while (GPUNode *node = static_cast<GPUNode *>(BLI_pophead(&graph->nodes))) {
     gpu_node_free(node);
   }
@@ -1214,6 +1215,9 @@ void gpu_node_graph_prune_unused(GPUNodeGraph *graph)
   gpu_nodes_tag(graph, graph->outlink_depth_offset, GPU_NODE_TAG_DEPTH_OFFSET);
   gpu_nodes_tag(graph, graph->outlink_npr, GPU_NODE_TAG_NPR);
   gpu_nodes_tag(graph, graph->outlink_filter, GPU_NODE_TAG_FILTER);
+  for (GPUNodeGraphOutputLink &filter_link : graph->outlink_filters) {
+    gpu_nodes_tag(graph, filter_link.outlink, GPU_NODE_TAG_FILTER);
+  }
   gpu_nodes_tag(graph, graph->outlink_light_shader, GPU_NODE_TAG_LIGHT_SHADER);
 
   for (GPUNodeGraphOutputLink &aovlink : graph->outlink_aovs) {

@@ -14,17 +14,6 @@ bool npr_is_zero(float3 value)
   return all(lessThanEqual(abs(value), float3(1e-8f)));
 }
 
-bool npr_light_linking_affects_receiver(uint2 light_set_membership, uchar receiver_light_set)
-{
-  return bitmask64_test(light_set_membership, receiver_light_set);
-}
-
-float npr_light_power_get(LightData light, LightingType type)
-{
-  /* Mask anything above 3. See LIGHT_TRANSLUCENT_WITH_THICKNESS. */
-  return light.power[type & 3u];
-}
-
 bool foreach_light_setup(uint l_idx,
                          bool is_directional,
                          float3 N,
@@ -41,7 +30,7 @@ bool foreach_light_setup(uint l_idx,
 
   ObjectInfos object_infos = drw_infos[drw_resource_id()];
   uchar receiver_light_set = receiver_light_set_get(object_infos);
-  if (!npr_light_linking_affects_receiver(light.light_set_membership, receiver_light_set)) {
+  if (!light_linking_affects_receiver(light.light_set_membership, receiver_light_set)) {
     return false;
   }
 
@@ -53,9 +42,8 @@ bool foreach_light_setup(uint l_idx,
 
   float3 V = drw_world_incident_vector(g_data.P);
   float4 ltc_mat = float4(1.0f, 0.0f, 0.0f, 1.0f);
-  LightVertices light_shape_vertices = light_shape_corners(light, lv);
-  float ltc = light_ltc(utility_tx, light, lv.L, V, lv, ltc_mat, light_shape_vertices);
-  attenuation *= ltc * npr_light_power_get(light, LIGHT_DIFFUSE);
+  float ltc = light_ltc(utility_tx, light, lv.L, V, lv, ltc_mat);
+  attenuation *= ltc * light_power_get(light, LIGHT_DIFFUSE);
   if (attenuation < LIGHT_ATTENUATION_THRESHOLD) {
     return false;
   }
@@ -63,18 +51,18 @@ bool foreach_light_setup(uint l_idx,
   float shadow_mask = 1.0f;
   if (light.tilemap_index != LIGHT_NO_SHADOW) {
     int ray_step_count = max(uniform_buf.shadow.step_count, NPR_STABLE_SHADOW_MIN_STEP_COUNT);
-    shadow_mask = eevee_shadow_eval_stable(light,
-                                           is_directional,
-                                           false,
-                                           false,
-                                           0.0f,
-                                           g_data.P,
-                                           g_data.Ng,
-                                           N,
-                                           0.0f,
-                                           0.0f,
-                                           NPR_STABLE_SHADOW_RAY_COUNT,
-                                           ray_step_count);
+    shadow_mask = shadow_eval_stable(light,
+                                     is_directional,
+                                     false,
+                                     false,
+                                     0.0f,
+                                     g_data.P,
+                                     g_data.Ng,
+                                     N,
+                                     0.0f,
+                                     0.0f,
+                                     NPR_STABLE_SHADOW_RAY_COUNT,
+                                     ray_step_count);
     shadow_mask *= dot(N, lv.L) > 0.0f ? 1.0f : 0.0f;
   }
 
@@ -142,22 +130,74 @@ void FOREACH_LIGHT_END(float dummy)
 #endif
 
 [[node]]
-void npr_image_sample_view(TextureHandle image, float3 offset, float4 &color)
+void npr_image_sample_view(TextureHandle image, float3 offset, float4 &color, float &alpha)
 {
 #if (defined(NPR_SHADER) || defined(MAT_FILTER)) && defined(GPU_FRAGMENT_SHADER)
   color = TextureHandle_eval(image, offset.xy, false);
+  alpha = color.a;
+#  if defined(MAT_FILTER)
+  if (TextureHandle_stores_transmittance_alpha(image)) {
+    alpha = saturate(1.0f - alpha);
+  }
+  if (TextureHandle_is_scene_depth(image)) {
+    alpha = color.r;
+  }
+#  else
+  if (TextureHandle_is_scene_depth(image)) {
+    alpha = color.r;
+  }
+#  endif
 #else
   color = float4(0.0f);
+  alpha = 0.0f;
 #endif
 }
 
 [[node]]
-void npr_image_sample_texel(TextureHandle image, float3 offset, float4 &color)
+void npr_image_sample_texel(TextureHandle image, float3 offset, float4 &color, float &alpha)
 {
 #if (defined(NPR_SHADER) || defined(MAT_FILTER)) && defined(GPU_FRAGMENT_SHADER)
   color = TextureHandle_eval(image, offset.xy, true);
+  alpha = color.a;
+#  if defined(MAT_FILTER)
+  if (TextureHandle_stores_transmittance_alpha(image)) {
+    alpha = saturate(1.0f - alpha);
+  }
+  if (TextureHandle_is_scene_depth(image)) {
+    alpha = color.r;
+  }
+#  else
+  if (TextureHandle_is_scene_depth(image)) {
+    alpha = color.r;
+  }
+#  endif
 #else
   color = float4(0.0f);
+  alpha = 0.0f;
+#endif
+}
+
+[[node]]
+void npr_image_sample_uv(TextureHandle image, float3 uv, float4 &color, float &alpha)
+{
+#if (defined(NPR_SHADER) || defined(MAT_FILTER)) && defined(GPU_FRAGMENT_SHADER)
+  color = TextureHandle_eval_uv(image, uv.xy);
+  alpha = color.a;
+#  if defined(MAT_FILTER)
+  if (TextureHandle_stores_transmittance_alpha(image)) {
+    alpha = saturate(1.0f - alpha);
+  }
+  if (TextureHandle_is_scene_depth(image)) {
+    alpha = color.r;
+  }
+#  else
+  if (TextureHandle_is_scene_depth(image)) {
+    alpha = color.r;
+  }
+#  endif
+#else
+  color = float4(0.0f);
+  alpha = 0.0f;
 #endif
 }
 
@@ -231,6 +271,16 @@ void npr_refraction(TextureHandle &combined_color, TextureHandle &position)
 #else
   combined_color = TEXTURE_HANDLE_DEFAULT;
   position = TEXTURE_HANDLE_DEFAULT;
+#endif
+}
+
+[[node]]
+void node_filter_graph_input(float index, TextureHandle &image)
+{
+#if defined(MAT_FILTER)
+  image = TextureHandle(TEX_HANDLE_FILTER_GRAPH_INPUT, int(index));
+#else
+  image = TEXTURE_HANDLE_DEFAULT;
 #endif
 }
 

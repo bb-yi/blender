@@ -197,6 +197,8 @@ struct GPUNodeGraph {
   GPUNodeLink *outlink_filter;
   GPUNodeLink *outlink_light_shader;
   /* List of GPUNodeGraphOutputLink */
+  ListBaseT<GPUNodeGraphOutputLink> outlink_filters;
+  /* List of GPUNodeGraphOutputLink */
   ListBaseT<GPUNodeGraphOutputLink> outlink_aovs;
   /* List of GPUNodeGraphOutputLink */
   ListBaseT<GPUNodeGraphOutputLink> outlink_outlines;
