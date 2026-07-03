@@ -14,6 +14,17 @@ bool npr_is_zero(float3 value)
   return all(lessThanEqual(abs(value), float3(1e-8f)));
 }
 
+bool npr_light_linking_affects_receiver(uint2 light_set_membership, uchar receiver_light_set)
+{
+  return bitmask64_test(light_set_membership, receiver_light_set);
+}
+
+float npr_light_power_get(LightData light, LightingType type)
+{
+  /* Mask anything above 3. See LIGHT_TRANSLUCENT_WITH_THICKNESS. */
+  return light.power[type & 3u];
+}
+
 bool foreach_light_setup(uint l_idx,
                          bool is_directional,
                          float3 N,
@@ -30,7 +41,7 @@ bool foreach_light_setup(uint l_idx,
 
   ObjectInfos object_infos = drw_infos[drw_resource_id()];
   uchar receiver_light_set = receiver_light_set_get(object_infos);
-  if (!light_linking_affects_receiver(light.light_set_membership, receiver_light_set)) {
+  if (!npr_light_linking_affects_receiver(light.light_set_membership, receiver_light_set)) {
     return false;
   }
 
@@ -42,8 +53,9 @@ bool foreach_light_setup(uint l_idx,
 
   float3 V = drw_world_incident_vector(g_data.P);
   float4 ltc_mat = float4(1.0f, 0.0f, 0.0f, 1.0f);
-  float ltc = light_ltc(utility_tx, light, lv.L, V, lv, ltc_mat);
-  attenuation *= ltc * light_power_get(light, LIGHT_DIFFUSE);
+  LightVertices light_shape_vertices = light_shape_corners(light, lv);
+  float ltc = light_ltc(utility_tx, light, lv.L, V, lv, ltc_mat, light_shape_vertices);
+  attenuation *= ltc * npr_light_power_get(light, LIGHT_DIFFUSE);
   if (attenuation < LIGHT_ATTENUATION_THRESHOLD) {
     return false;
   }

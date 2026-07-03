@@ -2754,6 +2754,9 @@ void DeferredProbePipeline::render(View &view,
   inst_.manager->submit(eval_light_ps_, view);
   GPU_memory_barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS | GPU_BARRIER_TEXTURE_FETCH);
 
+  opaque_layer_.npr_aov_color_input_tx_ = inst_.render_buffers.rp_color_tx;
+  opaque_layer_.npr_aov_value_input_tx_ = inst_.render_buffers.rp_value_tx;
+
   TextureFromPool npr_radiance_input = {"NPR Radiance Input"};
   {
     npr_radiance_input.acquire_2d(
@@ -2768,6 +2771,8 @@ void DeferredProbePipeline::render(View &view,
 
   inst_.manager->submit(opaque_layer_.npr_ps_, view);
 
+  opaque_layer_.npr_aov_color_input_tx_ = nullptr;
+  opaque_layer_.npr_aov_value_input_tx_ = nullptr;
   npr_radiance_input_tx_ = nullptr;
   npr_radiance_input.release();
   for (int i = 0; i < ARRAY_SIZE(direct_radiance_txs_); i++) {
@@ -2962,6 +2967,9 @@ void PlanarProbePipeline::render(View &view,
 
   inst_.pipelines.background.render(view, combined_fb);
 
+  npr_aov_color_input_tx_ = inst_.render_buffers.rp_color_tx;
+  npr_aov_value_input_tx_ = inst_.render_buffers.rp_value_tx;
+
   TextureFromPool npr_radiance_input = {"NPR Radiance Input"};
   {
     npr_radiance_input.acquire_2d(
@@ -2976,6 +2984,8 @@ void PlanarProbePipeline::render(View &view,
 
   inst_.manager->submit(npr_ps_, view);
 
+  npr_aov_color_input_tx_ = nullptr;
+  npr_aov_value_input_tx_ = nullptr;
   npr_radiance_input_tx_ = nullptr;
   npr_radiance_input.release();
   for (int i = 0; i < ARRAY_SIZE(direct_radiance_txs_); i++) {

@@ -1678,6 +1678,9 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
            MAT_PIPE_BAKE_COLOR))
   {
     add_create_info_and_reserve(info, slots, "eevee_light_data");
+    if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO)) {
+      info.define("CREATE_INFO_eevee_LightRenderData");
+    }
     add_create_info_and_reserve(info, slots, "eevee_shadow_data");
     if (use_shader_info_shadow_classification) {
       info.define("SHADOW_CASTER_CLASSIFY");
