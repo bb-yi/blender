@@ -443,6 +443,60 @@ static void versioning_replace_legacy_compositor_switch_node(bNodeTree *node_tre
   }
 }
 
+static bNodeSocket &version_ensure_outline_control_float_input(bNodeTree &ntree,
+                                                               bNode &node,
+                                                               const UString identifier,
+                                                               const float value,
+                                                               const float min,
+                                                               const float max)
+{
+  if (bNodeSocket *input = bke::node_find_socket(node, SOCK_IN, identifier)) {
+    return *input;
+  }
+
+  bNodeSocket &input = version_node_add_socket(
+      ntree, node, SOCK_IN, "NodeSocketFloat", identifier.c_str());
+  bNodeSocketValueFloat *default_value = input.default_value_typed<bNodeSocketValueFloat>();
+  default_value->value = value;
+  default_value->min = min;
+  default_value->max = max;
+  return input;
+}
+
+static void version_replace_outline_control_width_variation(Main *bmain)
+{
+  FOREACH_NODETREE_BEGIN (bmain, ntree, id) {
+    if (ntree->type != NTREE_SHADER) {
+      continue;
+    }
+    for (bNode &node : ntree->nodes) {
+      if (node.type_legacy != SH_NODE_OUTLINE_CONTROL &&
+          !STREQ(node.idname, "ShaderNodeOutlineControl"))
+      {
+        continue;
+      }
+
+      if (bNodeSocket *width_variation_input = bke::node_find_socket(
+              node, SOCK_IN, "Width Variation"_ustr))
+      {
+        bke::node_remove_socket(*ntree, node, *width_variation_input);
+      }
+
+      version_ensure_outline_control_float_input(
+          *ntree, node, "Depth Threshold Range"_ustr, 0.0f, 0.0f, 1.0f);
+      version_ensure_outline_control_float_input(
+          *ntree, node, "Depth Edge Width"_ustr, 1.0f, 0.0f, 1.0f);
+      version_ensure_outline_control_float_input(
+          *ntree, node, "Normal Threshold Range"_ustr, 0.0f, 0.0f, 1.0f);
+      version_ensure_outline_control_float_input(
+          *ntree, node, "Normal Edge Width"_ustr, 1.0f, 0.0f, 1.0f);
+      version_ensure_outline_control_float_input(
+          *ntree, node, "ID Edge Width"_ustr, 1.0f, 0.0f, 1.0f);
+    }
+  }
+  FOREACH_NODETREE_END;
+}
+
 void do_versions_after_linking_520(FileData *fd, Main *bmain)
 {
   if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 2)) {
@@ -840,6 +894,10 @@ void blo_do_versions_520(FileData * /*fd*/, Library * /*lib*/, Main *bmain)
 
   if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 41)) {
     version_solid_color_width_height_defaults(*bmain);
+  }
+
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 43)) {
+    version_replace_outline_control_width_variation(bmain);
   }
 
   /**

@@ -22,6 +22,7 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.use_custom_socket_order();
   b.allow_any_socket_order();
 
+  /* Line style. */
   b.add_input<decl::Color>("Line Color"_ustr).default_value({0.0f, 0.0f, 0.0f, 1.0f});
   b.add_input<decl::Float>("Line Alpha"_ustr)
       .default_value(1.0f)
@@ -30,8 +31,11 @@ static void node_declare(NodeDeclarationBuilder &b)
       .subtype(PROP_FACTOR)
       .description("Controls the opacity of the outline");
   b.add_input<decl::Float>("Line Width"_ustr).default_value(2.0f).min(0.0f);
-  b.add_input<decl::Float>("Depth Threshold"_ustr).default_value(0.1f).min(0.0f).max(1.0f);
-  b.add_input<decl::Float>("Depth Threshold Range"_ustr)
+
+  /* Depth / silhouette edge settings. */
+  PanelDeclarationBuilder &depth = b.add_panel("Depth"_ustr).default_closed(true);
+  depth.add_input<decl::Float>("Depth Threshold"_ustr).default_value(0.1f).min(0.0f).max(1.0f);
+  depth.add_input<decl::Float>("Depth Threshold Range"_ustr)
       .default_value(0.0f)
       .min(0.0f)
       .max(1.0f)
@@ -39,14 +43,17 @@ static void node_declare(NodeDeclarationBuilder &b)
       .description(
           "Strength range above the depth threshold over which the line tapers from zero to "
           "Depth Edge Width. Zero = hard on/off");
-  b.add_input<decl::Float>("Depth Edge Width"_ustr)
+  depth.add_input<decl::Float>("Depth Edge Width"_ustr)
       .default_value(1.0f)
       .min(0.0f)
       .max(1.0f)
       .subtype(PROP_FACTOR)
       .description("Width multiplier applied to depth/silhouette edges");
-  b.add_input<decl::Float>("Normal Threshold"_ustr).default_value(0.5f).min(0.0f).max(1.0f);
-  b.add_input<decl::Float>("Normal Threshold Range"_ustr)
+
+  /* Normal / crease edge settings. */
+  PanelDeclarationBuilder &normal = b.add_panel("Normal"_ustr).default_closed(true);
+  normal.add_input<decl::Float>("Normal Threshold"_ustr).default_value(0.5f).min(0.0f).max(1.0f);
+  normal.add_input<decl::Float>("Normal Threshold Range"_ustr)
       .default_value(0.0f)
       .min(0.0f)
       .max(1.0f)
@@ -54,23 +61,27 @@ static void node_declare(NodeDeclarationBuilder &b)
       .description(
           "Strength range above the normal threshold over which the line tapers from zero to "
           "Normal Edge Width. Zero = hard on/off");
-  b.add_input<decl::Float>("Normal Edge Width"_ustr)
+  normal.add_input<decl::Float>("Normal Edge Width"_ustr)
       .default_value(1.0f)
       .min(0.0f)
       .max(1.0f)
       .subtype(PROP_FACTOR)
       .description("Width multiplier applied to normal/crease edges");
-  b.add_input<decl::Int>("Outline ID"_ustr).default_value(0).min(0).max(32767);
-  b.add_input<decl::Bool>("ID Edge"_ustr)
+
+  /* ID-boundary edge settings. */
+  PanelDeclarationBuilder &id = b.add_panel("ID"_ustr).default_closed(true);
+  id.add_input<decl::Int>("Outline ID"_ustr).default_value(0).min(0).max(32767);
+  id.add_input<decl::Bool>("ID Edge"_ustr)
       .default_value(true)
       .description("Draw outlines where the outline ID changes");
-  b.add_input<decl::Float>("ID Edge Width"_ustr)
+  id.add_input<decl::Float>("ID Edge Width"_ustr)
       .default_value(1.0f)
       .min(0.0f)
       .max(1.0f)
       .subtype(PROP_FACTOR)
       .description(
           "Width multiplier applied to ID-boundary edges. Independent from Depth/Normal");
+
   b.add_input<decl::Bool>("Freestyle Edge"_ustr)
       .default_value(true)
       .description("Draw outlines on mesh edges marked as Freestyle edges");
