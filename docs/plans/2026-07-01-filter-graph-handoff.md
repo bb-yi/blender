@@ -182,4 +182,3 @@ This needs follow-up if it persists.
 - `scripts/startup/bl_ui/properties_scene.py`
 - `scripts/startup/bl_ui/space_node.py`
 - `scripts/startup/bl_operators/node.py`
-
