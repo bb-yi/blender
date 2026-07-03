@@ -4792,9 +4792,18 @@ typename Accessor::ItemT *rna_Node_ItemArray_new_with_socket_and_name(
 
 template<typename Accessor>
 typename Accessor::ItemT *rna_Node_ItemArray_new_with_name(
-    ID *id, bNode *node, Main *bmain, ReportList * /*reports*/, const char *name)
+    ID *id, bNode *node, Main *bmain, ReportList *reports, const char *name)
 {
   using ItemT = typename Accessor::ItemT;
+
+  if (STREQ(node->idname, "EeveeFilterGraphNodeFilterMaterial")) {
+    if (!nodes::filter_graph_filter_pass_has_pass_input(*node)) {
+      BKE_report(reports,
+                 RPT_ERROR,
+                 "Filter Pass inputs require a filter material with a Pass Input node");
+      return nullptr;
+    }
+  }
 
   ItemT *new_item = nodes::socket_items::add_item_with_name<Accessor>(*node, name);
 
@@ -8183,7 +8192,8 @@ static void def_eevee_filter_graph_filter_material(BlenderRNA *brna, StructRNA *
   RNA_def_property_range(prop, 0.0625f, 1.0f);
   RNA_def_property_ui_text(
       prop, "Resolution Scale", "Internal execution resolution scale for this filter pass");
-  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+  RNA_def_property_update(
+      prop, NC_NODE | NA_EDITED, "rna_EeveeFilterGraphNode_execution_resolution_update");
 
   RNA_def_struct_sdna_from(srna, "bNode", nullptr);
 }

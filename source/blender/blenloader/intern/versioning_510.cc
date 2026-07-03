@@ -1286,6 +1286,20 @@ static bool version_scene_stage_has_legacy_filter_materials(const Scene &scene, 
   return false;
 }
 
+static void version_scene_clear_legacy_filter_materials(Scene &scene)
+{
+  for (SceneFilterMaterial *entry = static_cast<SceneFilterMaterial *>(
+           scene.eevee.filter_materials.first);
+       entry != nullptr;
+       entry = entry->next)
+  {
+    if (entry->material != nullptr) {
+      id_us_min(&entry->material->id);
+    }
+  }
+  BLI_freelistN(&scene.eevee.filter_materials);
+}
+
 static void version_set_filter_pass_material(bNode &node, Material &material)
 {
   if (node.id == &material.id) {
@@ -1419,6 +1433,7 @@ static void version_scene_legacy_filter_materials_to_filter_graph(Main &bmain, S
 
   nodes::filter_graph_stage_outputs_ensure(*filter_graph);
   BKE_ntree_update_tag_all(filter_graph);
+  version_scene_clear_legacy_filter_materials(scene);
 }
 
 static void version_filter_graph_pass_resolution_scale_init(Main &bmain)

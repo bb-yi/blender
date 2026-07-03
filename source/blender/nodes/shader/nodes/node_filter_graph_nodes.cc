@@ -255,7 +255,10 @@ static bool filter_graph_clear_filter_pass_interface_if_needed(bNode &node)
   return true;
 }
 
-static bool filter_graph_sync_material_to_all_filter_passes(Main &bmain, Material &material)
+static bool filter_graph_sync_material_to_all_filter_passes(Main &bmain,
+                                                            Material &material,
+                                                            const bNodeTree *skip_tree = nullptr,
+                                                            const bNode *skip_node = nullptr)
 {
   bNode *pass_input_node = filter_graph_find_pass_input_node(material);
   const bool has_pass_input = pass_input_node != nullptr;
@@ -270,6 +273,9 @@ static bool filter_graph_sync_material_to_all_filter_passes(Main &bmain, Materia
     for (bNode *node = static_cast<bNode *>(filter_graph->nodes.first); node != nullptr;
          node = node->next)
     {
+      if (filter_graph == skip_tree && node == skip_node) {
+        continue;
+      }
       if (node->type_legacy != EEVEE_FILTER_GRAPH_NODE_FILTER_MATERIAL ||
           node->storage == nullptr || node->id != &material.id)
       {
@@ -322,15 +328,17 @@ void filter_graph_filter_pass_interface_changed(Main &bmain, bNodeTree &ntree, b
   Material *material = filter_graph_filter_pass_material(node);
   bNode *pass_input_node = material ? filter_graph_find_pass_input_node(*material) : nullptr;
   if (pass_input_node == nullptr) {
-    filter_graph_clear_filter_pass_interface(node);
+    update_node_declaration_and_sockets(ntree, node);
     filter_graph_tag_node_changed(bmain, ntree, node);
     return;
   }
 
   filter_graph_copy_filter_pass_to_pass_input(node, *pass_input_node);
+  update_node_declaration_and_sockets(ntree, node);
+  update_node_declaration_and_sockets(*material->nodetree, *pass_input_node);
   filter_graph_tag_node_changed(bmain, ntree, node);
   filter_graph_tag_node_changed(bmain, *material->nodetree, *pass_input_node);
-  filter_graph_sync_material_to_all_filter_passes(bmain, *material);
+  filter_graph_sync_material_to_all_filter_passes(bmain, *material, &ntree, &node);
 }
 
 void filter_graph_filter_pass_material_changed(Main &bmain, bNodeTree &ntree, bNode &node)

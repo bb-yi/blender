@@ -69,19 +69,20 @@ void Film::init_aovs(const Set<std::string> &passes_used_by_viewport_compositor)
       }
     }
 
-    /* NPR trees can sample arbitrary AOVs in the rendered viewport, but this requirement is not
-     * known yet when Film is initialized. Keep viewport AOV textures available so AOV Input works
-     * the same way as final render. */
-    const bool request_all_viewport_aovs = true || inst_.filter_materials.uses_aov();
+    /* NPR filter trees can sample AOVs in the rendered viewport. Request only the
+     * referenced names so large AOV lists do not force extra render-pass layers. */
+    const bool request_filter_aovs = inst_.filter_materials.uses_aov();
 
-    if (request_all_viewport_aovs || inst_.is_viewport_compositor_enabled) {
+    if (request_filter_aovs || inst_.is_viewport_compositor_enabled) {
       for (ViewLayerAOV &aov : inst_.view_layer->aovs) {
         /* Already added as a display pass. No need to add again. */
         if (!aovs.is_empty() && aovs.last() == &aov) {
           continue;
         }
 
-        if (request_all_viewport_aovs || passes_used_by_viewport_compositor.contains(aov.name)) {
+        if (inst_.filter_materials.uses_aov_name(aov.name) ||
+            passes_used_by_viewport_compositor.contains(aov.name))
+        {
           aovs.append(&aov);
         }
       }

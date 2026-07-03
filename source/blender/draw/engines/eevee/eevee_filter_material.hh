@@ -22,6 +22,7 @@
 
 #include <string>
 #include <memory>
+#include <vector>
 
 struct bNode;
 
@@ -45,7 +46,16 @@ class FilterMaterialModule {
     GPUMaterial *gpumat = nullptr;
     bool uses_aov_input = false;
     bool uses_aov_output = false;
+    bool uses_filter_object_info = false;
     blender::Vector<std::string> conflicting_aov_names;
+  };
+
+  struct GraphTexturePoolEntry {
+    std::unique_ptr<Texture> texture;
+    gpu::TextureFormat format = gpu::TextureFormat::SFLOAT_16_16_16_16;
+    int2 extent = int2(0);
+    int layers = 0;
+    bool used = false;
   };
 
   Instance &inst_;
@@ -56,17 +66,25 @@ class FilterMaterialModule {
   Texture pong_tx_ = {"FilterMaterial.Pong"};
   Texture aov_color_snapshot_tx_ = {"FilterMaterial.AOVColorSnapshot"};
   Texture aov_value_snapshot_tx_ = {"FilterMaterial.AOVValueSnapshot"};
-  Texture graph_input_tx_ = {"FilterMaterial.GraphInput"};
   Texture graph_black_tx_ = {"FilterMaterial.GraphBlack"};
   Vector<std::unique_ptr<Framebuffer>> graph_input_fbs_;
+  std::vector<GraphTexturePoolEntry> graph_texture_pool_;
+  int2 graph_texture_pool_stage_extent_ = int2(0);
   FilterObjectInfoBuf filter_object_info_buf_ = {"FilterObjectInfoBuf"};
   FilterGraphInputHandleBuf filter_graph_input_buf_ = {"FilterGraphInputBuf"};
   bool uses_scene_depth_ = false;
   bool uses_scene_normal_ = false;
   bool uses_scene_position_ = false;
   bool uses_cryptomatte_object_ = false;
+  bool uses_aov_ = false;
+  blender::Vector<std::string> used_aov_names_;
   bool uses_scene_time_ = false;
 
+  void reset_graph_texture_pool(int2 stage_extent);
+  Texture *acquire_graph_texture(const char *name,
+                                 gpu::TextureFormat format,
+                                 int2 extent,
+                                 int layers);
   void update_filter_object_info_buffer(GPUMaterial *gpumat);
   bool sync_pass_entry(blender::Material *material, FilterPassEntry &entry);
 
@@ -78,6 +96,7 @@ class FilterMaterialModule {
   void end_sync() {}
 
   bool uses_aov() const;
+  bool uses_aov_name(const char *name) const;
   bool uses_scene_depth() const
   {
     return uses_scene_depth_;

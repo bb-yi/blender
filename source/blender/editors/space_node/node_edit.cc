@@ -1890,14 +1890,21 @@ static wmOperatorStatus node_mute_exec(bContext *C, wmOperator * /*op*/)
 
   ED_preview_kill_jobs(CTX_wm_manager(C), bmain);
 
+  bool node_mute_changed = false;
   for (bNode *node : snode->edittree->all_nodes()) {
     if ((node->flag & SELECT) && !node->typeinfo->no_muting) {
       node->flag ^= NODE_MUTED;
       BKE_ntree_update_tag_node_mute(snode->edittree, node);
+      node_mute_changed = true;
     }
   }
 
-  BKE_main_ensure_invariants(*bmain, snode->edittree->id);
+  if (node_mute_changed && snode->edittree->type == NTREE_EEVEE_FILTER_GRAPH) {
+    blender::nodes::filter_graph_tag_tree_changed(*bmain, *snode->edittree);
+  }
+  else {
+    BKE_main_ensure_invariants(*bmain, snode->edittree->id);
+  }
 
   return OPERATOR_FINISHED;
 }
