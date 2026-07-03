@@ -1,6 +1,16 @@
 import bpy
 import os
+import sys
 import tempfile
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from filter_graph_test_utils import (
+    add_pass_input_image_sample,
+    attach_filter_material as attach_filter_material_to_graph,
+    clear_filter_graph,
+)
 
 
 RESOLUTION = 64
@@ -24,8 +34,7 @@ def configure_scene():
     scene.world.use_nodes = False
     scene.world.color = (0.0, 0.0, 0.0)
 
-    while len(scene.eevee.filter_materials) > 0:
-        scene.eevee.filter_materials.remove(0)
+    clear_filter_graph(scene)
 
 
 def make_camera():
@@ -93,9 +102,7 @@ def make_filter_material_invert_scene():
     output.location = (520.0, 0.0)
     output.inputs["Alpha"].default_value = 1.0
 
-    scene_color = nodes.new("ShaderNodeSceneColor")
-    scene_color.location = (0.0, 0.0)
-    scene_color.source = "COLOR"
+    _, image_sample = add_pass_input_image_sample(nodes, links, location=(-40.0, 0.0))
 
     glsl = nodes.new("ShaderNodeGLSLFunction")
     glsl.location = (260.0, 0.0)
@@ -109,7 +116,7 @@ def make_filter_material_invert_scene():
     glsl.function_name = "invert_scene"
     refresh_glsl_node(glsl)
 
-    links.new(scene_color.outputs["Color"], glsl.inputs["color"])
+    links.new(image_sample.outputs["Color"], glsl.inputs["color"])
     links.new(glsl.outputs["Result"], output.inputs["Color"])
     return material
 
@@ -151,11 +158,9 @@ def make_filter_material_sample2d():
 
 
 def attach_filter_material(material):
-    entry = bpy.context.scene.eevee.filter_materials.add()
-    entry.material = material
-    entry.enabled = True
-    entry.execution_stage = "BEFORE_COMPOSITE"
-    return entry
+    return attach_filter_material_to_graph(
+        material, stage="BEFORE_COMPOSITE", scene_socket="Color Image"
+    )
 
 
 def render_image():
@@ -210,7 +215,7 @@ def test_sample2d_image_to_closure():
     configure_scene()
     make_camera()
     make_plane(make_surface_material((0.0, 0.0, 0.0, 1.0)))
-    attach_filter_material(make_filter_material_sample2d())
+    attach_filter_material_to_graph(make_filter_material_sample2d(), stage="BEFORE_COMPOSITE")
 
     bpy.context.view_layer.update()
     color = sample_center_color(render_image())

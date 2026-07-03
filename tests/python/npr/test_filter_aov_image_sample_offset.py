@@ -1,6 +1,16 @@
 import bpy
 import os
+import sys
 import tempfile
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from filter_graph_test_utils import (
+    add_pass_input_image_sample,
+    attach_filter_material as attach_filter_material_to_graph,
+    clear_filter_graph,
+)
 
 
 RESOLUTION = 64
@@ -25,8 +35,7 @@ def configure_scene():
     scene.world.use_nodes = False
     scene.world.color = (0.0, 0.0, 0.0)
 
-    while len(scene.eevee.filter_materials) > 0:
-        scene.eevee.filter_materials.remove(0)
+    clear_filter_graph(scene)
 
     view_layer = bpy.context.view_layer
     while len(view_layer.aovs) > 0:
@@ -95,16 +104,12 @@ def make_filter_material(offset_x):
     output = nodes.new("ShaderNodeOutputFilter")
     output.inputs["Alpha"].default_value = 1.0
 
-    aov_input = nodes.new("ShaderNodeInputAOV")
-    aov_input.aov_name = AOV_NAME
-
-    image_sample = nodes.new("ShaderNodeNPR_ImageSample")
+    _, image_sample = add_pass_input_image_sample(nodes, links)
     image_sample.offset_type = "PIXEL"
 
     offset = nodes.new("ShaderNodeCombineXYZ")
     offset.inputs["X"].default_value = offset_x
 
-    links.new(aov_input.outputs["Color"], image_sample.inputs["Image"])
     links.new(offset.outputs["Vector"], image_sample.inputs["Offset"])
     links.new(image_sample.outputs["Color"], output.inputs["Color"])
 
@@ -112,11 +117,9 @@ def make_filter_material(offset_x):
 
 
 def attach_filter_material(material):
-    entry = bpy.context.scene.eevee.filter_materials.add()
-    entry.material = material
-    entry.enabled = True
-    entry.execution_stage = "BEFORE_COMPOSITE"
-    return entry
+    return attach_filter_material_to_graph(
+        material, stage="BEFORE_COMPOSITE", aov_name=AOV_NAME, aov_socket="Color"
+    )
 
 
 def render_image():

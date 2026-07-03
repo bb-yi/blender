@@ -1,6 +1,15 @@
 import bpy
 import os
+import sys
 import tempfile
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from filter_graph_test_utils import (
+    attach_filter_material as attach_filter_material_to_graph,
+    clear_filter_graph,
+)
 
 
 RESOLUTION = 64
@@ -25,8 +34,7 @@ def configure_scene():
     scene.world.color = (0.0, 0.0, 0.0)
     bpy.context.view_layer.use_pass_cryptomatte_object = False
 
-    while len(scene.eevee.filter_materials) > 0:
-        scene.eevee.filter_materials.remove(0)
+    clear_filter_graph(scene)
 
 
 def make_camera():
@@ -90,10 +98,7 @@ def make_filter_material(target):
 
 
 def attach_filter_material(material):
-    entry = bpy.context.scene.eevee.filter_materials.add()
-    entry.material = material
-    entry.enabled = True
-    entry.execution_stage = "BEFORE_POSTFX"
+    attach_filter_material_to_graph(material, stage="BEFORE_POSTFX")
 
 
 def render_image():
