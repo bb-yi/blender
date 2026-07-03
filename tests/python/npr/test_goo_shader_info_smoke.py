@@ -25,9 +25,14 @@ assert [socket.name for socket in node.outputs] == [
 seen_menu_nodes = []
 
 
+class FakeLayout:
+    def separator(self):
+        pass
+
+
 class FakeShaderInputMenu:
     bl_label = "Input"
-    layout = object()
+    layout = FakeLayout()
 
     def node_operator(self, layout, node_type, **kwargs):
         seen_menu_nodes.append((node_type, kwargs.get("poll")))
@@ -39,10 +44,14 @@ class FakeShaderInputMenu:
     def draw_assets_for_catalog(self, layout, catalog_path):
         pass
 
+    def draw_menu(self, layout, path):
+        pass
+
 
 class FakeSpace:
     tree_type = "ShaderNodeTree"
     shader_type = "NPR"
+    id_from = None
 
 
 class FakeContext:
