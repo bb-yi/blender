@@ -2947,7 +2947,7 @@ void PlanarProbePipeline::render(View &view,
   /* Clear before the GBuffer pass so direct surface radiance written there survives capture.
    * The GBuffer color attachment is shared with the planar radiance target. */
   GPU_framebuffer_bind(combined_fb);
-  GPU_framebuffer_clear_color(combined_fb, float4(0.0f));
+  GPU_framebuffer_clear_color(combined_fb, double4(0.0));
 
   inst_.gbuffer.bind(gbuffer_fb, true);
   inst_.manager->submit(gbuffer_ps_, view);
