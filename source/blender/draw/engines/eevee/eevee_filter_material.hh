@@ -117,6 +117,10 @@ class FilterMaterialModule {
   {
     return uses_cryptomatte_object_;
   }
+  int material_count() const
+  {
+    return int(entries_.size());
+  }
 
   bool has_stage_entries(SceneEEVEEFilterExecutionStage stage) const;
   gpu::Texture *render_stage(draw::View &view,

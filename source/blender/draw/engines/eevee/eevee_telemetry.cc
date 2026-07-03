@@ -269,7 +269,7 @@ void TelemetryModule::snapshot_features()
   features.has_motion_blur = inst_.motion_blur.postfx_enabled();
   features.has_volume = inst_.volume.enabled();
   features.has_raytracing = inst_.raytracing.use_raytracing();
-  features.filter_material_count = BLI_listbase_count(&inst_.scene->eevee.filter_materials);
+  features.filter_material_count = inst_.filter_materials.material_count();
   features.render_texture_count = BLI_listbase_count(&inst_.scene->eevee.render_textures);
   features.light_count = inst_.lights.light_count();
   features.probe_count = inst_.light_probes.probe_count();
