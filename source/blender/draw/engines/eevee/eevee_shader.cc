@@ -356,6 +356,7 @@ ShaderGroups ShaderModule::static_shaders_load(const ShaderGroups request_bits,
                                        DEFERRED_TILE_CLASSIFY,
                                        OUTLINE_DETECT,
                                        OUTLINE_JFA_INIT,
+                                       OUTLINE_FACTOR_BLUR,
                                        OUTLINE_JFA_STEP,
                                        OUTLINE_RESOLVE,
                                        OUTLINE_FREESTYLE};
@@ -615,6 +616,8 @@ const char *ShaderModule::static_shader_create_info_name_get(eShaderType shader_
       return "eevee_outline_detect";
     case OUTLINE_JFA_INIT:
       return "eevee_outline_jfa_init";
+    case OUTLINE_FACTOR_BLUR:
+      return "eevee_outline_factor_blur";
     case OUTLINE_JFA_STEP:
       return "eevee_outline_jfa_step";
     case OUTLINE_RESOLVE:

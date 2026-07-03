@@ -83,8 +83,18 @@ void OutlineModule::sync()
   jfa_init_ps_.init();
   jfa_init_ps_.state_set(DRW_STATE_WRITE_COLOR);
   jfa_init_ps_.shader_set(inst_.shaders.static_shader_get(OUTLINE_JFA_INIT));
-  jfa_init_ps_.bind_texture("outline_seed_tx", &edge_seed_tx_);
+  jfa_init_ps_.bind_texture("outline_seed_tx", &edge_seed_tx_.current());
   jfa_init_ps_.draw_procedural(GPU_PRIM_TRIS, 1, 3);
+
+  /* Factor blur: smooth the per-seed width-variation factor along the contour (8-neighbour seed
+   * connectivity), removing the per-Voronoi-cell drawn-radius sawtooth. Ping-pongs the seed buffer;
+   * reads previous(), writes current(). Only .r is blurred, .a (full width) is passed through. */
+  factor_blur_ps_.init();
+  factor_blur_ps_.state_set(DRW_STATE_WRITE_COLOR);
+  factor_blur_ps_.shader_set(inst_.shaders.static_shader_get(OUTLINE_FACTOR_BLUR));
+  factor_blur_ps_.bind_texture("outline_seed_tx", &edge_seed_tx_.previous());
+  factor_blur_ps_.bind_texture("outline_info_tx", &inst_.render_buffers.outline_info_tx);
+  factor_blur_ps_.draw_procedural(GPU_PRIM_TRIS, 1, 3);
 
   jfa_step_ps_.init();
   jfa_step_ps_.shader_set(inst_.shaders.static_shader_get(OUTLINE_JFA_STEP));
@@ -101,7 +111,7 @@ void OutlineModule::sync()
   resolve_ps_.bind_texture("vector_tx", &inst_.render_buffers.vector_tx);
   resolve_ps_.bind_texture("outline_occlusion_depth_tx", &outline_occlusion_depth_tx_);
   resolve_ps_.push_constant("use_outline_occlusion_depth", &use_outline_occlusion_depth_, 1);
-  resolve_ps_.bind_texture("outline_seed_tx", &edge_seed_tx_);
+  resolve_ps_.bind_texture("outline_seed_tx", &edge_seed_tx_.current());
   resolve_ps_.bind_texture("outline_color_tx", &inst_.render_buffers.outline_color_tx);
   resolve_ps_.bind_texture("outline_info_tx", &inst_.render_buffers.outline_info_tx);
   resolve_ps_.bind_texture("jfa_tx", &jfa_tx_.previous());
@@ -135,14 +145,16 @@ void OutlineModule::render(View &view, int2 extent)
     occlusion_depth_tx_.release();
   }
 
-  edge_seed_tx_.acquire_2d(
+  edge_seed_tx_.current().acquire_2d(
       extent, gpu::TextureFormat::SFLOAT_16_16_16_16, GPU_TEXTURE_USAGE_GENERAL);
-  edge_seed_tx_.clear(float4(0.0f));
+  edge_seed_tx_.previous().acquire_2d(
+      extent, gpu::TextureFormat::SFLOAT_16_16_16_16, GPU_TEXTURE_USAGE_GENERAL);
+  edge_seed_tx_.current().clear(float4(0.0f));
 
   GPU_memory_barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS | GPU_BARRIER_TEXTURE_FETCH);
 
   /* Detect pass: find edge pixels. */
-  detect_fb_.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(edge_seed_tx_));
+  detect_fb_.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(edge_seed_tx_.current()));
   detect_ps_.framebuffer_set(&detect_fb_);
   GPU_framebuffer_bind(detect_fb_);
   GPU_memory_barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS | GPU_BARRIER_TEXTURE_FETCH);
@@ -154,6 +166,21 @@ void OutlineModule::render(View &view, int2 extent)
   GPU_framebuffer_bind(detect_fb_);
   drw.submit(freestyle_edge_ps_, view);
   GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH);
+
+  /* Factor blur ping-pong: smooth the width-variation factor along the contour. The detect/
+   * freestyle result is in current(); each iteration swaps so blur reads previous() (the latest
+   * result, bound at sync) and writes current(), then we leave the final result in current() for
+   * jfa_init/resolve. An even iteration count returns the result to the original current(). */
+  const int factor_blur_iterations = 6;
+  for (int i = 0; i < factor_blur_iterations; i++) {
+    edge_seed_tx_.swap();
+    factor_blur_fb_.ensure(GPU_ATTACHMENT_NONE,
+                           GPU_ATTACHMENT_TEXTURE(edge_seed_tx_.current()));
+    factor_blur_ps_.framebuffer_set(&factor_blur_fb_);
+    GPU_framebuffer_bind(factor_blur_fb_);
+    drw.submit(factor_blur_ps_, view);
+    GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH);
+  }
 
   /* JFA init: seed the coordinate table from edge pixels. */
   jfa_tx_.current().acquire_2d(
@@ -222,7 +249,8 @@ void OutlineModule::render(View &view, int2 extent)
   drw.submit(resolve_ps_, view);
   GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH);
 
-  edge_seed_tx_.release();
+  edge_seed_tx_.current().release();
+  edge_seed_tx_.previous().release();
   jfa_tx_.current().release();
   jfa_tx_.previous().release();
   occlusion_depth_tx_.release();

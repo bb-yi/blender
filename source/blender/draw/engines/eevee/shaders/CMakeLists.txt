@@ -22,7 +22,6 @@ set(INC_GLSL
   ../../gpencil
 )
 
-
 set(SRC_GLSL_LIB
   eevee_attributes_curves_lib.glsl
   eevee_attributes_mesh_lib.glsl

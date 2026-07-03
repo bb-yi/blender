@@ -480,6 +480,7 @@ set(GLSL_SRC
   engines/eevee/shaders/eevee_occupancy_lib.bsl.hh
   engines/eevee/shaders/eevee_octahedron_lib.bsl.hh
   engines/eevee/shaders/eevee_outline_detect_frag.glsl
+  engines/eevee/shaders/eevee_outline_factor_blur_frag.glsl
   engines/eevee/shaders/eevee_outline_freestyle_frag.glsl
   engines/eevee/shaders/eevee_outline_freestyle_vert.glsl
   engines/eevee/shaders/eevee_outline_jfa_init_frag.glsl
