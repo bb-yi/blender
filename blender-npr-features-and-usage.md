@@ -1,8 +1,10 @@
-﻿# Blender 5.1 NPR Port 新增功能与使用说明
+﻿# Blender NPR Port 新增功能与使用说明
 
 ## 文档范围
 
-这份文档说明当前 `Blender 5.1 NPR Port` 相比官方 `Blender 5.1` 已经加入、并且当前分支内实际存在的 NPR / Eevee 扩展功能，以及它们的基本使用方法。
+这份文档说明当前 `Blender NPR Port` 相比官方 Blender 主线已经加入、并且当前分支内实际存在的 NPR / Eevee 扩展功能，以及它们的基本使用方法。
+
+> 当前默认分支是 `main` / Blender 5.2 NPR 主线。文档内保留的 5.1.x 小节是历史版本记录，不再代表当前默认分支名。
 
 ## 5.1.2 更新重点
 

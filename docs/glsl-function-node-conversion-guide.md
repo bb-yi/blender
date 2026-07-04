@@ -1,4 +1,4 @@
-# Blender 5.1 NPR Port GLSL Function 节点转换指南
+# Blender NPR Port GLSL Function 节点转换指南
 
 ## 文档目的
 
@@ -11,7 +11,7 @@
 - `HLSL`
 - 一部分 `ShaderLab / Unity CGPROGRAM / HLSLPROGRAM`
 
-稳定地转换成可直接粘贴到 `Blender 5.1 NPR Port` 的 `GLSL Function` 节点里的、符合当前实现规范的 `GLSL` 源码。
+稳定地转换成可直接粘贴到 `Blender NPR Port` 的 `GLSL Function` 节点里的、符合当前实现规范的 `GLSL` 源码。
 
 
 ## 一、先记住当前节点真正支持什么
@@ -450,7 +450,7 @@ texture(buffer, uv + delta_pixels / resolution)
 - 因此 `shadow` 仍然应显式写成 `glsl_light_shadow(i, N)`
 - 如果想写更接近标准 PBR 的版本，优先在函数体内部自己实现 Fresnel / NDF / Geometry，而不要再寻找旧的 `glsl_light_diffuse_attenuation(...)` 或 `glsl_light_specular_attenuation(...)`
 
-仓库内的 [`blender-5.1-npr-features-and-usage.md`](../blender-5.1-npr-features-and-usage.md) 已附带一段可直接粘贴到 `GLSL Function` 的 PBR 风格完整示例，可作为转换结果的参考模板。
+仓库内的 [`blender-npr-features-and-usage.md`](../blender-npr-features-and-usage.md) 已附带一段可直接粘贴到 `GLSL Function` 的 PBR 风格完整示例，可作为转换结果的参考模板。
 
 
 ### 规则 5：如果原代码是屏幕着色器，要把它改写成“可被材质节点调用的函数”
@@ -1331,7 +1331,7 @@ vec2 triangle_unproject(vec3 v)
 如果你想让另一个 AI 帮你转换 shader，推荐直接给它下面这段要求：
 
 ```text
-把下面这段 shader 代码转换为 Blender 5.1 NPR Port 的 GLSL Function 节点可直接使用的 GLSL。
+把下面这段 shader 代码转换为 Blender NPR Port 的 GLSL Function 节点可直接使用的 GLSL。
 
 必须遵守这些规则：
 1. 最终结果只能是普通 GLSL 函数源码，不要输出完整 shader 文件。
