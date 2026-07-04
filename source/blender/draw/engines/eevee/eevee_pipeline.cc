@@ -1902,34 +1902,13 @@ gpu::Texture *DeferredLayer::render(View &render_view,
 
   RenderBuffers &rb = inst_.render_buffers;
 
-  TextureFromPool npr_aov_color_input = {"NPR AOV Color Input"};
-  TextureFromPool npr_aov_value_input = {"NPR AOV Value Input"};
   npr_aov_color_input_tx_ = rb.rp_color_tx;
   npr_aov_value_input_tx_ = rb.rp_value_tx;
 
   const bool has_aovs = inst_.film.aovs_info.color_len > 0 || inst_.film.aovs_info.value_len > 0;
+  /* Keep previous layer AOVs in the live render-pass buffer for NPR AOV Input.
+   * Current-layer AOV Output writes naturally override them where the current material writes. */
   const bool preserve_npr_aov_input = !is_first_pass_ && has_npr_aov_access_ && has_aovs;
-  const bool use_npr_aov_input_snapshot = preserve_npr_aov_input && !npr_ps_.is_empty();
-  if (use_npr_aov_input_snapshot) {
-    constexpr eGPUTextureUsage usage_aov_snapshot = GPU_TEXTURE_USAGE_SHADER_READ |
-                                                    GPU_TEXTURE_USAGE_SHADER_WRITE;
-    npr_aov_color_input.acquire_2d_array(extent,
-                                         GPU_texture_layer_count(rb.rp_color_tx),
-                                         GPU_texture_format(rb.rp_color_tx),
-                                         usage_aov_snapshot);
-    npr_aov_value_input.acquire_2d_array(extent,
-                                         GPU_texture_layer_count(rb.rp_value_tx),
-                                         GPU_texture_format(rb.rp_value_tx),
-                                         usage_aov_snapshot);
-    GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE | GPU_BARRIER_TEXTURE_FETCH |
-                       GPU_BARRIER_SHADER_IMAGE_ACCESS);
-    GPU_texture_copy(npr_aov_color_input, rb.rp_color_tx);
-    GPU_texture_copy(npr_aov_value_input, rb.rp_value_tx);
-    GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE | GPU_BARRIER_TEXTURE_FETCH |
-                       GPU_BARRIER_SHADER_IMAGE_ACCESS);
-    npr_aov_color_input_tx_ = npr_aov_color_input;
-    npr_aov_value_input_tx_ = npr_aov_value_input;
-  }
 
   constexpr eGPUTextureUsage usage_read = GPU_TEXTURE_USAGE_SHADER_READ;
   constexpr eGPUTextureUsage usage_write = GPU_TEXTURE_USAGE_SHADER_WRITE;
@@ -1963,8 +1942,6 @@ gpu::Texture *DeferredLayer::render(View &render_view,
     inst_.hiz_buffer.update();
     npr_aov_color_input_tx_ = rb.rp_color_tx;
     npr_aov_value_input_tx_ = rb.rp_value_tx;
-    npr_aov_color_input.release();
-    npr_aov_value_input.release();
     return radiance_behind_tx;
   }
 
@@ -2101,8 +2078,6 @@ gpu::Texture *DeferredLayer::render(View &render_view,
 
   npr_aov_color_input_tx_ = rb.rp_color_tx;
   npr_aov_value_input_tx_ = rb.rp_value_tx;
-  npr_aov_color_input.release();
-  npr_aov_value_input.release();
 
   return use_feedback_output_ ? radiance_feedback_tx_ : nullptr;
 }
