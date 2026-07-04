@@ -1195,6 +1195,7 @@ def km_node_editor(params):
         ("node.group_ungroup", {"type": 'G', "value": 'PRESS', "ctrl": True, "alt": True}, None),
         ("node.group_edit", {"type": 'LEFTMOUSE', "value": 'DOUBLE_CLICK'},
          {"properties": [("exit", False)]}),
+        ("node.filter_graph_return", {"type": 'TAB', "value": 'PRESS', "ctrl": True}, None),
         ("node.group_edit", {"type": 'ESC', "value": 'PRESS'},
          {"properties": [("exit", True)]}),
         ("node.clipboard_copy", {"type": 'C', "value": 'PRESS', "ctrl": True}, None),

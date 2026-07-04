@@ -282,6 +282,9 @@ void Sampling::step()
     UNUSED_VARS_NDEBUG(i);
   }
 
+  data_.sample_index = int(sample_);
+  data_.sample_count = int(sample_count_);
+
   data_.push_update();
 
   viewport_sample_++;

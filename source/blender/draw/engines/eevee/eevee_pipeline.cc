@@ -3018,6 +3018,7 @@ void CapturePipeline::sync()
   /* TODO(fclem): Remove. Bind to get the camera data,
    * but there should be no view dependent behavior during capture. */
   surface_ps_.bind_resources(inst_.uniform_data);
+  surface_ps_.bind_resources(inst_.sampling);
   surface_ps_.bind_resources(inst_.render_textures);
 }
 

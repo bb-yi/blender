@@ -29,6 +29,8 @@ namespace bke {
 /* Runtime data specific to the compositing trees. */
 class CompositorRuntime {
  public:
+  CompositorRuntime();
+
   /* A nodes log of the last compositor evaluation. */
   std::unique_ptr<nodes::eval_log::NodesEvalLog> nodes_evaluation_log;
   /* A dependency graph used for interactive compositing. This is initialized the first time it is

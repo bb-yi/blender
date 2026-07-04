@@ -51,7 +51,7 @@ void OutlineModule::sync()
   const bool has_outline_materials = scene_outline_enabled &&
                                      inst_.materials.has_visible_outline_materials();
   const bool public_pass_enabled =
-      ((inst_.view_layer->eevee.render_passes & EEVEE_RENDER_PASS_OUTLINE) != 0) ||
+      inst_.film.pass_id_get(EEVEE_RENDER_PASS_OUTLINE) != -1 ||
       inst_.render_buffers.data.outline_id != -1;
   const bool use_in_combined = !public_pass_enabled;
   enabled_ = scene_outline_enabled && has_outline_materials &&
@@ -260,9 +260,7 @@ void OutlineModule::render(View &view, int2 extent)
 
 void OutlineModule::release_result()
 {
-  const bool do_motion_vectors_swizzle = inst_.render_buffers.vector_tx_format() ==
-                                         gpu::TextureFormat::SFLOAT_16_16;
-  if (do_motion_vectors_swizzle && resolved_velocity_tx_.is_valid()) {
+  if (resolved_velocity_tx_.is_valid()) {
     GPU_texture_swizzle_set(resolved_velocity_tx_, "rgba");
   }
   resolved_outline_tx_.release();

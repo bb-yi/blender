@@ -2382,6 +2382,7 @@ def km_node_editor(params):
         ("node.group_enter_exit", {"type": 'LEFTMOUSE', "value": 'DOUBLE_CLICK'}, None),
         ("node.group_edit", {"type": 'TAB', "value": 'PRESS'},
          {"properties": [("exit", False)]}),
+        ("node.filter_graph_return", {"type": 'TAB', "value": 'PRESS', "ctrl": True}, None),
         ("node.group_edit", {"type": 'TAB', "value": 'PRESS', "ctrl": True},
          {"properties": [("exit", True)]}),
         ("node.read_viewlayers", {"type": 'R', "value": 'PRESS', "ctrl": True}, None),

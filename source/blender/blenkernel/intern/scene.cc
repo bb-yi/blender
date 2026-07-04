@@ -126,6 +126,8 @@ using bke::CompositorRuntime;
 using bke::SceneRuntime;
 using bke::SequencerRuntime;
 
+CompositorRuntime::CompositorRuntime() = default;
+
 CompositorRuntime::~CompositorRuntime()
 {
   if (preview_depsgraph) {

@@ -45,6 +45,7 @@
 #include "UI_view2d.hh"
 
 #include "NOD_geo_viewer.hh"
+#include "NOD_filter_graph.hh"
 #include "NOD_node_declaration.hh"
 #include "NOD_socket.hh"
 #include "NOD_socket_items.hh"
@@ -64,6 +65,15 @@ struct NodeInsertOfsData {
 };
 
 namespace ed::space_node {
+
+static void tag_node_tree_after_link_edit(Main &bmain, bNodeTree &ntree)
+{
+  if (ntree.type == NTREE_EEVEE_FILTER_GRAPH) {
+    nodes::filter_graph_tag_tree_changed(bmain, ntree);
+    return;
+  }
+  BKE_main_ensure_invariants(bmain, ntree.id);
+}
 
 static void clear_picking_highlight(ListBaseT<bNodeLink> *links)
 {
@@ -1364,7 +1374,7 @@ static void add_dragged_links_to_tree(bContext &C, bNodeLinkDrag &nldrag)
     BKE_ntree_update_tag_link_added(&ntree, new_link);
   }
 
-  BKE_main_ensure_invariants(*bmain, ntree.id);
+  tag_node_tree_after_link_edit(*bmain, ntree);
 
   /* Ensure drag-link tool-tip is disabled. */
   draw_draglink_tooltip_deactivate(region, nldrag);
@@ -1909,7 +1919,7 @@ static wmOperatorStatus cut_links_exec(bContext *C, wmOperator *op)
     update_multi_input_indices_for_removed_links(*node);
   }
 
-  BKE_main_ensure_invariants(*CTX_data_main(C), snode.edittree->id);
+  tag_node_tree_after_link_edit(*CTX_data_main(C), *snode.edittree);
   if (found) {
     return OPERATOR_FINISHED;
   }
@@ -2039,7 +2049,7 @@ static wmOperatorStatus mute_links_exec(bContext *C, wmOperator *op)
     }
   }
 
-  BKE_main_ensure_invariants(*CTX_data_main(C), ntree.id);
+  tag_node_tree_after_link_edit(*CTX_data_main(C), ntree);
   return OPERATOR_FINISHED;
 }
 
@@ -2087,7 +2097,7 @@ static wmOperatorStatus detach_links_exec(bContext *C, wmOperator * /*op*/)
     }
   }
 
-  BKE_main_ensure_invariants(*CTX_data_main(C), ntree.id);
+  tag_node_tree_after_link_edit(*CTX_data_main(C), ntree);
   return OPERATOR_FINISHED;
 }
 

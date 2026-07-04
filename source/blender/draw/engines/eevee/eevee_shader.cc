@@ -243,6 +243,42 @@ static bool material_graph_serialized_contains(const GPUGraphOutput &graph,
   return graph.serialized.find(needle.c_str()) != std::string::npos;
 }
 
+static bool material_graph_uses_render_info(const GPUGraphOutput &graph)
+{
+  return material_graph_serialized_contains(graph, "node_render_info(");
+}
+
+static bool material_codegen_uses_render_info(const GPUCodegenOutput &codegen)
+{
+  if (material_graph_uses_render_info(codegen.displacement) ||
+      material_graph_uses_render_info(codegen.surface) ||
+      material_graph_uses_render_info(codegen.volume) ||
+      material_graph_uses_render_info(codegen.thickness) ||
+      material_graph_uses_render_info(codegen.npr) ||
+      material_graph_uses_render_info(codegen.filter) ||
+      material_graph_uses_render_info(codegen.composite))
+  {
+    return true;
+  }
+  if (codegen.depth_offset.has_value() && material_graph_uses_render_info(*codegen.depth_offset)) {
+    return true;
+  }
+  if (codegen.light_shader.has_value() && material_graph_uses_render_info(*codegen.light_shader)) {
+    return true;
+  }
+  for (const GPUGraphOutput &graph : codegen.filter_outputs) {
+    if (material_graph_uses_render_info(graph)) {
+      return true;
+    }
+  }
+  for (const GPUGraphOutput &graph : codegen.material_functions) {
+    if (material_graph_uses_render_info(graph)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static bool material_depth_offset_graph_has_unsupported_dependencies(const GPUMaterial *gpumat,
                                                                      const GPUGraphOutput &graph)
 {
@@ -1589,6 +1625,9 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
                                                  use_front_light_shader_in_surface_pass,
                                                  has_depth_offset,
                                                  use_lightprobe_data);
+  if (material_codegen_uses_render_info(codegen)) {
+    add_create_info_and_reserve(info, slots, "eevee_sampling_data");
+  }
   if (pipeline_type == MAT_PIPE_DEFERRED_NPR) {
     reserve_deferred_npr_pass_samplers(slots);
   }

@@ -11,6 +11,7 @@
 
 #include "DNA_material_types.h"
 #include "DNA_mesh_types.h"
+#include "DNA_node_types.h"
 #include "DNA_scene_types.h"
 
 #include "BLI_math_rotation.h"
@@ -18,6 +19,8 @@
 #include "BLT_translation.hh"
 
 #include "BKE_customdata.hh"
+#include "BKE_node_legacy_types.hh"
+#include "BKE_node_tree_update.hh"
 
 #include "RNA_define.hh"
 #include "RNA_enum_types.hh"
@@ -170,20 +173,23 @@ static void rna_Material_eevee_domain_update(Main *bmain, Scene * /*scene*/, Poi
        scene = static_cast<Scene *>(scene->id.next))
   {
     bool changed = false;
-    for (SceneFilterMaterial *filter_entry = static_cast<SceneFilterMaterial *>(
-             scene->eevee.filter_materials.first);
-         filter_entry != nullptr;
-         filter_entry = static_cast<SceneFilterMaterial *>(filter_entry->next))
-    {
-      if (filter_entry->material != ma) {
-        continue;
+    bNodeTree *filter_graph = scene->eevee.filter_graph;
+    if (filter_graph != nullptr && filter_graph->type == NTREE_EEVEE_FILTER_GRAPH) {
+      for (bNode *node = static_cast<bNode *>(filter_graph->nodes.first); node != nullptr;
+           node = node->next)
+      {
+        if (node->type_legacy != EEVEE_FILTER_GRAPH_NODE_FILTER_MATERIAL || node->id != &ma->id) {
+          continue;
+        }
+        id_us_min(&ma->id);
+        node->id = nullptr;
+        BKE_ntree_update_tag_node_property(filter_graph, node);
+        changed = true;
       }
-      id_us_min(&ma->id);
-      filter_entry->material = nullptr;
-      changed = true;
     }
     if (changed) {
       DEG_id_tag_update(&scene->id, ID_RECALC_SYNC_TO_EVAL);
+      WM_main_add_notifier(NC_SCENE | ND_NODES, scene);
       WM_main_add_notifier(NC_SCENE | ND_RENDER_OPTIONS, scene);
     }
   }

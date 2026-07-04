@@ -87,6 +87,17 @@ inline void update_after_node_change(bContext *C, const PointerRNA node_ptr)
   WM_main_add_notifier(NC_NODE | NA_EDITED, ntree);
 }
 
+template<typename Accessor>
+inline void update_after_item_array_change(bContext *C, const PointerRNA node_ptr)
+{
+  if constexpr (Accessor::has_post_item_change) {
+    Accessor::post_item_change(C, node_ptr);
+  }
+  else {
+    update_after_node_change(C, node_ptr);
+  }
+}
+
 template<typename Accessor> inline bool editable_node_active_poll(bContext *C)
 {
   SpaceNode *snode = CTX_wm_space_node(C);
@@ -134,7 +145,7 @@ inline void remove_active_item(wmOperatorType *ot,
     if (*ref.items_num > 0 && ref.active_index) {
       dna::array::remove_index(
           ref.items, ref.items_num, ref.active_index, *ref.active_index, Accessor::destruct_item);
-      update_after_node_change(C, node_ptr);
+      update_after_item_array_change<Accessor>(C, node_ptr);
     }
     return OPERATOR_FINISHED;
   };
@@ -162,7 +173,7 @@ inline void remove_item_by_index(wmOperatorType *ot,
     dna::array::remove_index(
         ref.items, ref.items_num, ref.active_index, index_to_remove, Accessor::destruct_item);
 
-    update_after_node_change(C, node_ptr);
+    update_after_item_array_change<Accessor>(C, node_ptr);
     return OPERATOR_FINISHED;
   };
 
@@ -273,7 +284,7 @@ inline void add_item(wmOperatorType *ot,
       *ref.active_index = dst_index;
     }
 
-    update_after_node_change(C, node_ptr);
+    update_after_item_array_change<Accessor>(C, node_ptr);
     return OPERATOR_FINISHED;
   };
 
@@ -360,7 +371,7 @@ inline void move_active_item(wmOperatorType *ot,
       *ref.active_index += 1;
     }
 
-    update_after_node_change(C, node_ptr);
+    update_after_item_array_change<Accessor>(C, node_ptr);
     return OPERATOR_FINISHED;
   };
 

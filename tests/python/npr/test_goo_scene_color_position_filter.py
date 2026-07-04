@@ -1,7 +1,17 @@
 import bpy
 import math
 import os
+import sys
 import tempfile
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from filter_graph_test_utils import (
+    add_pass_input_image_sample,
+    attach_filter_material as attach_filter_material_to_graph,
+    clear_filter_graph,
+)
 
 
 WIDTH = 257
@@ -29,8 +39,7 @@ def configure_scene():
     scene.view_settings.look = "None"
     scene.world.use_nodes = False
     scene.world.color = (0.0, 0.0, 0.0)
-    while len(scene.eevee.filter_materials) > 0:
-        scene.eevee.filter_materials.remove(0)
+    clear_filter_graph(scene)
 
 
 def make_camera():
@@ -73,10 +82,7 @@ def make_filter_material():
     output.location = (700.0, 0.0)
     output.inputs["Alpha"].default_value = 1.0
 
-    scene_color = nodes.new("ShaderNodeSceneColor")
-    scene_color.location = (0.0, 0.0)
-    scene_color.source = "POSITION"
-    assert scene_color.source == "POSITION", "Scene Color source should accept POSITION"
+    _, image_sample = add_pass_input_image_sample(nodes, links, location=(-40.0, 0.0))
 
     separate_xyz = nodes.new("ShaderNodeSeparateXYZ")
     separate_xyz.location = (180.0, 0.0)
@@ -98,7 +104,7 @@ def make_filter_material():
     combine = nodes.new("ShaderNodeCombineColor")
     combine.location = (540.0, 0.0)
 
-    links.new(scene_color.outputs["Color"], separate_xyz.inputs["Vector"])
+    links.new(image_sample.outputs["Color"], separate_xyz.inputs["Vector"])
     links.new(separate_xyz.outputs["X"], encode_x.inputs[0])
     links.new(separate_xyz.outputs["Z"], encode_z.inputs[0])
     links.new(encode_x.outputs["Value"], combine.inputs["Red"])
@@ -108,11 +114,7 @@ def make_filter_material():
 
 
 def attach_filter_material(material):
-    filter_entry = bpy.context.scene.eevee.filter_materials.add()
-    filter_entry.material = material
-    filter_entry.enabled = True
-    if hasattr(filter_entry, "execution_stage"):
-        filter_entry.execution_stage = "BEFORE_COMPOSITE"
+    attach_filter_material_to_graph(material, stage="BEFORE_COMPOSITE", scene_socket="Position Image")
 
 
 def make_plane(material):

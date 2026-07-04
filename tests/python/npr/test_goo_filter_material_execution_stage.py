@@ -1,6 +1,16 @@
 import bpy
 import os
+import sys
 import tempfile
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from filter_graph_test_utils import (
+    add_pass_input_image_sample,
+    attach_filter_material as attach_filter_material_to_graph,
+    clear_filter_graph,
+)
 
 
 RESOLUTION = 128
@@ -24,8 +34,7 @@ def configure_scene():
     scene.world.use_nodes = False
     scene.world.color = (0.0, 0.0, 0.0)
 
-    while len(scene.eevee.filter_materials) > 0:
-        scene.eevee.filter_materials.remove(0)
+    clear_filter_graph(scene)
 
 
 def make_camera():
@@ -66,15 +75,13 @@ def make_filter_material():
     output = nodes.new("ShaderNodeOutputFilter")
     output.location = (420.0, 0.0)
 
-    scene_color = nodes.new("ShaderNodeSceneColor")
-    scene_color.location = (0.0, 0.0)
-    scene_color.source = "COLOR"
+    _, image_sample = add_pass_input_image_sample(nodes, links, location=(-40.0, 0.0))
 
     invert = nodes.new("ShaderNodeInvert")
     invert.location = (220.0, 0.0)
     invert.inputs["Fac"].default_value = 1.0
 
-    links.new(scene_color.outputs["Color"], invert.inputs["Color"])
+    links.new(image_sample.outputs["Color"], invert.inputs["Color"])
     links.new(invert.outputs["Color"], output.inputs["Color"])
     output.inputs["Alpha"].default_value = 1.0
     return material
@@ -87,10 +94,9 @@ def make_plane(material):
 
 
 def attach_filter_material(material):
-    entry = bpy.context.scene.eevee.filter_materials.add()
-    entry.material = material
-    entry.enabled = True
-    return entry
+    return attach_filter_material_to_graph(
+        material, stage="BEFORE_COMPOSITE", scene_socket="Color Image"
+    )
 
 
 def render_image():
@@ -127,18 +133,18 @@ def main():
     configure_scene()
     make_camera()
     make_plane(make_surface_material())
-    filter_entry = attach_filter_material(make_filter_material())
+    _, _, stage_output = attach_filter_material(make_filter_material())
 
-    assert filter_entry.execution_stage == "BEFORE_COMPOSITE", (
-        f"Expected default filter stage to be BEFORE_COMPOSITE, got {filter_entry.execution_stage}"
+    assert stage_output.execution_stage == "BEFORE_COMPOSITE", (
+        f"Expected graph output stage to be BEFORE_COMPOSITE, got {stage_output.execution_stage}"
     )
 
     for stage in ("BEFORE_VOLUME_FOG", "BEFORE_DEPTH_OF_FIELD", "BEFORE_COMPOSITE"):
-        filter_entry.execution_stage = stage
+        stage_output.execution_stage = stage
         color = sample_center_color(render_image())
 
-        assert filter_entry.execution_stage == stage, (
-            f"Expected filter stage round-trip to keep {stage}, got {filter_entry.execution_stage}"
+        assert stage_output.execution_stage == stage, (
+            f"Expected graph output stage round-trip to keep {stage}, got {stage_output.execution_stage}"
         )
         assert color[0] > 0.9 and color[1] > 0.9, (
             f"Expected filter output to invert the blue surface for stage {stage}, got {color}"

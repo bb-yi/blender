@@ -2005,6 +2005,9 @@ void BKE_sound_set_scene_sound_time_stretch_constant_range(AUD_Sound /*handle*/,
 
 void BKE_sound_ensure_scene(Scene *scene)
 {
+  if (scene->runtime == nullptr) {
+    scene->runtime = MEM_new<blender::bke::SceneRuntime>(__func__);
+  }
   if (scene->runtime->audio.sound_scene != nullptr) {
     return;
   }

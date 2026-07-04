@@ -207,6 +207,24 @@ void SyncModule::sync_alpha_blended_passes(const ObjectHandle &ob_handle,
   }
 }
 
+void SyncModule::sync_outline_occlusion_passes(const ObjectHandle &ob_handle,
+                                               const Material &material,
+                                               FunctionRef<void(const MaterialPass &, int)> sync_cb)
+{
+  const bool hide_on_camera = ob_handle.object->visibility_flag & OB_HIDE_CAMERA;
+  if (hide_on_camera || material.outline_occlusion.gpumat == nullptr) {
+    return;
+  }
+
+  blender::Material *blender_mat = GPU_material_get_material(material.outline_occlusion.gpumat);
+
+  for (int instance : IndexRange(ob_handle.instances_count())) {
+    PassMain::Sub *pass = inst_.pipelines.forward.outline_occlusion_add(
+        blender_mat, material.outline_occlusion.gpumat);
+    sync_cb(MaterialPass{material.outline_occlusion.gpumat, pass}, instance);
+  }
+}
+
 void SyncModule::sync_common(const ObjectHandle &ob_handle,
                              Span<Material *> materials,
                              Span<GPUMaterial *> gpu_materials)
@@ -339,6 +357,11 @@ void SyncModule::sync_mesh(const ObjectRef &ob_ref)
       geometry_call(pass.sub_pass, use_npr_geom ? geom_npr : geom, ob_handle.res_handle);
     });
 
+    sync_outline_occlusion_passes(ob_handle, material, [&](const MaterialPass &pass,
+                                                           int instance) {
+      geometry_call(pass.sub_pass, geom, ob_handle.res_handle.sub_handle(instance));
+    });
+
     sync_alpha_blended_passes(ob_handle, material, [&](const MaterialPass &pass, int instance) {
       geometry_call(pass.sub_pass, geom, ob_handle.res_handle.sub_handle(instance));
     });
@@ -410,6 +433,11 @@ bool SyncModule::sync_sculpt(const ObjectRef &ob_ref)
       geometry_call(pass.sub_pass, use_npr_geom ? geom_npr : geom, ob_handle.res_handle);
     });
 
+    sync_outline_occlusion_passes(ob_handle, material, [&](const MaterialPass &pass,
+                                                           int instance) {
+      geometry_call(pass.sub_pass, geom, ob_handle.res_handle.sub_handle(instance));
+    });
+
     sync_alpha_blended_passes(ob_handle, material, [&](const MaterialPass &pass, int instance) {
       geometry_call(pass.sub_pass, geom, ob_handle.res_handle.sub_handle(instance));
     });
@@ -470,6 +498,11 @@ void SyncModule::sync_pointcloud(const ObjectRef &ob_ref)
   }
 
   sync_common_passes(material, [&](const MaterialPass &pass) { drawcall_add(pass); });
+
+  sync_outline_occlusion_passes(ob_handle, material, [&](const MaterialPass &pass,
+                                                         int /*instance*/) {
+    drawcall_add(pass);
+  });
 
   sync_alpha_blended_passes(ob_handle, material, [&](const MaterialPass &pass, int /*instance*/) {
     drawcall_add(pass);
@@ -601,6 +634,11 @@ void SyncModule::sync_curves(const ObjectRef &ob_ref, HairParticleInfo const *ha
   }
 
   sync_common_passes(material, [&](const MaterialPass &pass) { drawcall_add(pass); });
+
+  sync_outline_occlusion_passes(ob_handle, material, [&](const MaterialPass &pass,
+                                                         int /*instance*/) {
+    drawcall_add(pass);
+  });
 
   sync_alpha_blended_passes(ob_handle, material, [&](const MaterialPass &pass, int /*instance*/) {
     drawcall_add(pass);

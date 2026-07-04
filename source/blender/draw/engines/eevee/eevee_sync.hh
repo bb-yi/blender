@@ -78,6 +78,9 @@ class SyncModule {
   void sync_alpha_blended_passes(const ObjectHandle &ob_handle,
                                  const Material &material,
                                  FunctionRef<void(const MaterialPass &, int)> sync_cb);
+  void sync_outline_occlusion_passes(const ObjectHandle &ob_handle,
+                                     const Material &material,
+                                     FunctionRef<void(const MaterialPass &, int)> sync_cb);
 
   void sync_common(const ObjectHandle &ob_handle,
                    Span<Material *> materials,

@@ -37,6 +37,7 @@ struct SocketItemsAccessorDefaults {
   static constexpr bool has_name_validation = false;
   static constexpr bool has_custom_initial_name = false;
   static constexpr bool has_vector_dimensions = false;
+  static constexpr bool has_post_item_change = false;
   static constexpr bool can_have_empty_name = false;
   static constexpr char unique_name_separator = '.';
 };

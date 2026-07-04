@@ -18,6 +18,9 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.add_output<decl::Vector>("Frag Coord"_ustr);
   b.add_output<decl::Float>("Width"_ustr);
   b.add_output<decl::Float>("Height"_ustr);
+  b.add_output<decl::Vector>("Resolution"_ustr);
+  b.add_output<decl::Float>("Current Sample"_ustr);
+  b.add_output<decl::Float>("Total Samples"_ustr);
 }
 
 static int node_shader_gpu_render_info(GPUMaterial *mat,
@@ -47,7 +50,8 @@ void register_node_type_sh_render_info()
 
   sh_node_type_base(&ntype, "ShaderNodeRenderInfo"_ustr, SH_NODE_RENDER_INFO);
   ntype.ui_name = "Render Info";
-  ntype.ui_description = "Retrieve Eevee render region dimensions and normalized fragment coordinates";
+  ntype.ui_description =
+      "Retrieve Eevee render dimensions, sample information, and normalized fragment coordinates";
   ntype.enum_name_legacy = "RENDER_INFO";
   ntype.nclass = NODE_CLASS_INPUT;
   ntype.declare = file_ns::node_declare;
