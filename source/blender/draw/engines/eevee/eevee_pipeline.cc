@@ -640,16 +640,21 @@ void Prepass::init(DRWState extra_state,
     pass_setup_cb(pass_);
   }
 
-  static constexpr const char
-      *subpass_names[2 /*hide from raycast*/][2 /*double sided*/][2 /*moving*/][2 /*write id*/] = {
-          {{{"SingleSided.Static", "SingleSided.Static.ID"},
-            {"SingleSided.Moving", "SingleSided.Moving.ID"}},
-           {{"DoubleSided.Static", "DoubleSided.Static.ID"},
-            {"DoubleSided.Moving", "DoubleSided.Moving.ID"}}},
-          {{{"HideFromRaycast.SingleSided.Static", ""},
-            {"HideFromRaycast.SingleSided.Moving", ""}},
-           {{"HideFromRaycast.DoubleSided.Static", ""},
-            {"HideFromRaycast.DoubleSided.Moving", ""}}}};
+  static constexpr const char *subpass_names
+      [2 /*hide from raycast*/][EEVEE_SURFACE_CULL_METHOD_COUNT][2 /*moving*/]
+      [2 /*write id*/] = {
+          {{{"DoubleSided.Static", "DoubleSided.Static.ID"},
+            {"DoubleSided.Moving", "DoubleSided.Moving.ID"}},
+           {{"BackCull.Static", "BackCull.Static.ID"},
+            {"BackCull.Moving", "BackCull.Moving.ID"}},
+           {{"FrontCull.Static", "FrontCull.Static.ID"},
+            {"FrontCull.Moving", "FrontCull.Moving.ID"}}},
+          {{{"HideFromRaycast.DoubleSided.Static", ""},
+            {"HideFromRaycast.DoubleSided.Moving", ""}},
+           {{"HideFromRaycast.BackCull.Static", ""},
+            {"HideFromRaycast.BackCull.Moving", ""}},
+           {{"HideFromRaycast.FrontCull.Static", ""},
+            {"HideFromRaycast.FrontCull.Moving", ""}}}};
   static constexpr const char *ztest_names[8] = {
       "ZTest.LessEqual",
       "ZTest.Less",
@@ -664,13 +669,13 @@ void Prepass::init(DRWState extra_state,
   for (bool hide_from_raycast : {false, true}) {
     for (int ztest_mode = MA_ZTEST_LESS_EQUAL; ztest_mode <= MA_ZTEST_NEVER; ztest_mode++) {
       PassMain::Sub &ztest_pass = pass_.sub(ztest_names[ztest_mode]);
-      for (bool double_sided : {false, true}) {
+      for (int cull_method = 0; cull_method < EEVEE_SURFACE_CULL_METHOD_COUNT; cull_method++) {
         for (bool moving : {false, true}) {
           for (bool write_id : {false, true}) {
             PassMain::Sub *&sub =
-                subs_[hide_from_raycast][ztest_mode][double_sided][moving][write_id];
+                subs_[hide_from_raycast][ztest_mode][cull_method][moving][write_id];
             PassMain::Sub *&setup_sub =
-                setup_subs_[hide_from_raycast][ztest_mode][double_sided][moving][write_id];
+                setup_subs_[hide_from_raycast][ztest_mode][cull_method][moving][write_id];
             if ((hide_from_raycast && write_id) || (!supports_motion_vectors && moving) ||
                 (!supports_raycast_visibility && !hide_from_raycast))
             {
@@ -684,7 +689,7 @@ void Prepass::init(DRWState extra_state,
               setup_sub = nullptr;
               continue;
             }
-            sub = &ztest_pass.sub(subpass_names[hide_from_raycast][double_sided][moving]
+            sub = &ztest_pass.sub(subpass_names[hide_from_raycast][cull_method][moving]
                                                [write_id]);
             setup_sub = &sub->sub("Setup");
           }
@@ -704,12 +709,12 @@ PassMain::Sub *Prepass::add(blender::Material *blender_mat,
                             bool hide_from_raycast,
                             bool force_write_id)
 {
-  const bool double_sided = !(blender_mat->blend_flag & MA_BL_CULL_BACKFACE);
+  const int cull_method = material_surface_cull_subpass_index(blender_mat);
   const int ztest_mode = material_ztest_mode(blender_mat);
   const bool has_raycast = GPU_material_flag_get(gpumat, GPU_MATFLAG_RAYCAST);
   const bool write_id = (force_write_id || has_raycast) && !hide_from_raycast;
 
-  PassMain::Sub &sub = subs_[hide_from_raycast][ztest_mode][double_sided][has_motion][write_id]->sub(
+  PassMain::Sub &sub = subs_[hide_from_raycast][ztest_mode][cull_method][has_motion][write_id]->sub(
       GPU_material_get_name(gpumat));
   if (has_raycast) {
     /* NOTE: Bound per subpass since material textures could override these slots. */
@@ -735,11 +740,11 @@ void Prepass::end_sync()
 
   for (bool hide_from_raycast : {false, true}) {
     for (int ztest_mode = MA_ZTEST_LESS_EQUAL; ztest_mode <= MA_ZTEST_NEVER; ztest_mode++) {
-      for (bool double_sided : {false, true}) {
+      for (int cull_method = 0; cull_method < EEVEE_SURFACE_CULL_METHOD_COUNT; cull_method++) {
         for (bool moving : {false, true}) {
           for (bool write_id : {false, true}) {
             PassMain::Sub *sub =
-                setup_subs_[hide_from_raycast][ztest_mode][double_sided][moving][write_id];
+                setup_subs_[hide_from_raycast][ztest_mode][cull_method][moving][write_id];
             if (!sub) {
               continue;
             }
@@ -749,7 +754,7 @@ void Prepass::end_sync()
             const bool write_motion = supports_motion_vectors_ && moving;
             DRWState state = material_ztest_state_replace(
                 common_state_, eMaterialZTestMode(ztest_mode), inst_.film.depth.test_state);
-            SET_FLAG_FROM_TEST(state, !double_sided, DRW_STATE_CULL_BACK);
+            state |= material_surface_cull_state(eMaterialCullMethod(cull_method));
             SET_FLAG_FROM_TEST(state, write_normal || write_motion, DRW_STATE_WRITE_COLOR);
             sub->state_set(state);
             sub->subpass_transition(
@@ -770,11 +775,11 @@ void Prepass::end_sync()
   for (int ztest_mode = MA_ZTEST_LESS_EQUAL; ztest_mode <= MA_ZTEST_NEVER; ztest_mode++) {
     if (supports_raycast_visibility_) {
       /* First Raycast-visible Subpass for each material z-test group. */
-      setup_subs_[false][ztest_mode][false][false][false]->bind_ubo(PIPELINE_BUF_SLOT,
-                                                                    &pipeline_buf_copy_);
+      setup_subs_[false][ztest_mode][MA_SURFACE_CULL_NONE][false][false]->bind_ubo(
+          PIPELINE_BUF_SLOT, &pipeline_buf_copy_);
     }
     /* First HideFromRaycast Subpass for each material z-test group. */
-    setup_subs_[true][ztest_mode][false][false][false]->bind_ubo(
+    setup_subs_[true][ztest_mode][MA_SURFACE_CULL_NONE][false][false]->bind_ubo(
         PIPELINE_BUF_SLOT, &pipeline_buf_copy_hide_from_raycast_);
   }
 
@@ -854,15 +859,16 @@ void ForwardPipeline::sync()
     const DRWState state = DRW_STATE_WRITE_COLOR | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
                            DRW_STATE_DEPTH_EQUAL;
 
-    static constexpr const char *subpass_names[2 /*Raycast*/][2 /*DoubleSided*/] = {
-        {"NoRaycast.SingleSided", "NoRaycast.DoubleSided"},
-        {"Raycast.SingleSided", "Raycast.DoubleSided"}};
+    static constexpr const char
+        *subpass_names[2 /*Raycast*/][EEVEE_SURFACE_CULL_METHOD_COUNT] = {
+            {"NoRaycast.DoubleSided", "NoRaycast.BackCull", "NoRaycast.FrontCull"},
+            {"Raycast.DoubleSided", "Raycast.BackCull", "Raycast.FrontCull"}};
 
     for (bool raycast : {false, true}) {
-      for (bool double_sided : {false, true}) {
-        PassMain::Sub *&pass = opaque_subpasses_[raycast][double_sided];
-        pass = &opaque_ps_.sub(subpass_names[raycast][double_sided]);
-        pass->state_set(double_sided ? state : (state | DRW_STATE_CULL_BACK));
+      for (int cull_method = 0; cull_method < EEVEE_SURFACE_CULL_METHOD_COUNT; cull_method++) {
+        PassMain::Sub *&pass = opaque_subpasses_[raycast][cull_method];
+        pass = &opaque_ps_.sub(subpass_names[raycast][cull_method]);
+        pass->state_set(state | material_surface_cull_state(eMaterialCullMethod(cull_method)));
         if (raycast) {
           pass->bind_texture(RAYCAST_DEPTH_TEX_SLOT, &inst_.render_buffers.raycast_depth_tx);
           pass->bind_texture(OBJECT_ID_TEX_SLOT, &inst_.render_buffers.object_id_tx);
@@ -1347,18 +1353,27 @@ void DeferredLayerBase::gbuffer_pass_sync(Instance &inst)
   DRWState state = DRW_STATE_WRITE_COLOR | DRW_STATE_DEPTH_EQUAL | DRW_STATE_WRITE_STENCIL |
                    DRW_STATE_CLIP_CONTROL_UNIT_RANGE | DRW_STATE_STENCIL_ALWAYS;
 
-  static constexpr const char *subpass_names[2 /*Hybrid*/][2 /*Raycast*/][2 /*DoubleSided*/] = {
-      {{"Deferred.NoRaycast.SingleSided", "Deferred.NoRaycast.DoubleSided"},
-       {"Deferred.Raycast.SingleSided", "Deferred.Raycast.DoubleSided"}},
-      {{"Hybrid.NoRaycast.SingleSided", "Hybrid.NoRaycast.DoubleSided"},
-       {"Hybrid.Raycast.SingleSided", "Hybrid.Raycast.DoubleSided"}}};
+  static constexpr const char *subpass_names[2 /*Hybrid*/][2 /*Raycast*/]
+                                            [EEVEE_SURFACE_CULL_METHOD_COUNT] = {
+                                                {{"Deferred.NoRaycast.DoubleSided",
+                                                  "Deferred.NoRaycast.BackCull",
+                                                  "Deferred.NoRaycast.FrontCull"},
+                                                 {"Deferred.Raycast.DoubleSided",
+                                                  "Deferred.Raycast.BackCull",
+                                                  "Deferred.Raycast.FrontCull"}},
+                                                {{"Hybrid.NoRaycast.DoubleSided",
+                                                  "Hybrid.NoRaycast.BackCull",
+                                                  "Hybrid.NoRaycast.FrontCull"},
+                                                 {"Hybrid.Raycast.DoubleSided",
+                                                  "Hybrid.Raycast.BackCull",
+                                                  "Hybrid.Raycast.FrontCull"}}};
 
   for (bool hybrid : {false, true}) {
     for (bool raycast : {false, true}) {
-      for (bool double_sided : {false, true}) {
-        PassMain::Sub *&pass = gbuffer_subpasses_[hybrid][raycast][double_sided];
-        pass = &gbuffer_ps_.sub(subpass_names[hybrid][raycast][double_sided]);
-        pass->state_set(double_sided ? state : (state | DRW_STATE_CULL_BACK));
+      for (int cull_method = 0; cull_method < EEVEE_SURFACE_CULL_METHOD_COUNT; cull_method++) {
+        PassMain::Sub *&pass = gbuffer_subpasses_[hybrid][raycast][cull_method];
+        pass = &gbuffer_ps_.sub(subpass_names[hybrid][raycast][cull_method]);
+        pass->state_set(state | material_surface_cull_state(eMaterialCullMethod(cull_method)));
         if (hybrid) {
           pass->bind_resources(inst.lights);
           pass->bind_resources(inst.shadows);

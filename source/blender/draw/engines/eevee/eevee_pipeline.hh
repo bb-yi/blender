@@ -37,6 +37,13 @@ struct RayTraceBuffer;
 
 static constexpr uint8_t EEVEE_STENCIL_USER_MASK = 0x0Fu;
 static constexpr uint8_t EEVEE_STENCIL_INTERNAL_MASK = 0xF0u;
+static constexpr int EEVEE_SURFACE_CULL_METHOD_COUNT = 3;
+
+static inline int material_surface_cull_subpass_index(const blender::Material *material)
+{
+  return int(material != nullptr ? blender::material_surface_cull_method_get(*material) :
+                                  MA_SURFACE_CULL_NONE);
+}
 
 struct MaterialStencilState {
   bool enabled = false;
@@ -210,10 +217,12 @@ class Prepass {
   Instance &inst_;
 
   PassMain pass_{"Prepass"};
-  PassMain::Sub *subs_[2 /*hide from raycast*/][8 /*ztest*/][2 /*double sided*/][2 /*moving*/]
-                       [2 /*write id*/] = {{{{{nullptr}}}}};
-  PassMain::Sub *setup_subs_[2 /*hide from raycast*/][8 /*ztest*/][2 /*double sided*/]
-                            [2 /*moving*/][2 /*write id*/] = {{{{{nullptr}}}}};
+  PassMain::Sub
+      *subs_[2 /*hide from raycast*/][8 /*ztest*/][EEVEE_SURFACE_CULL_METHOD_COUNT]
+             [2 /*moving*/][2 /*write id*/] = {{{{{nullptr}}}}};
+  PassMain::Sub
+      *setup_subs_[2 /*hide from raycast*/][8 /*ztest*/][EEVEE_SURFACE_CULL_METHOD_COUNT]
+                  [2 /*moving*/][2 /*write id*/] = {{{{{nullptr}}}}};
 
   DRWState common_state_{};
   bool supports_motion_vectors_ = false;
@@ -267,14 +276,15 @@ class ForwardPipeline {
   Prepass prepass_{inst_};
 
   PassMain opaque_ps_ = {"Shading"};
-  PassMain::Sub *opaque_subpasses_[2 /*Raycast*/][2 /*Double-Sided*/] = {{nullptr}};
+  PassMain::Sub *opaque_subpasses_[2 /*Raycast*/][EEVEE_SURFACE_CULL_METHOD_COUNT] = {
+      {nullptr}};
 
   PassMain::Sub *get_opaque_subpass(blender::Material *blender_mat, GPUMaterial *gpumat)
   {
     const bool has_raycast = GPU_material_flag_get(gpumat, GPU_MATFLAG_RAYCAST);
-    const bool double_sided = !(blender_mat->blend_flag & MA_BL_CULL_BACKFACE);
+    const int cull_method = material_surface_cull_subpass_index(blender_mat);
 
-    return opaque_subpasses_[has_raycast][double_sided];
+    return opaque_subpasses_[has_raycast][cull_method];
   }
   PassSortable no_depth_ps_ = {"Shading.NoDepth"};
 
@@ -362,8 +372,9 @@ struct DeferredLayerBase {
   PassSimple clear_aovs_ps_{"Clear AOVs"};
 
   PassMain gbuffer_ps_ = {"Shading"};
-  PassMain::Sub *gbuffer_subpasses_[2 /*Hybrid*/][2 /*Raycast*/][2 /*Double-Sided*/] = {
-      {{nullptr}}};
+  PassMain::Sub
+      *gbuffer_subpasses_[2 /*Hybrid*/][2 /*Raycast*/][EEVEE_SURFACE_CULL_METHOD_COUNT] = {
+          {{nullptr}}};
 
   DeferredLayerBase(Instance &inst) : prepass_(inst) {};
 
@@ -371,9 +382,9 @@ struct DeferredLayerBase {
   {
     const bool has_shader_to_rgba = GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_TO_RGBA);
     const bool has_raycast = GPU_material_flag_get(gpumat, GPU_MATFLAG_RAYCAST);
-    const bool double_sided = !(blender_mat->blend_flag & MA_BL_CULL_BACKFACE);
+    const int cull_method = material_surface_cull_subpass_index(blender_mat);
 
-    return gbuffer_subpasses_[has_shader_to_rgba][has_raycast][double_sided];
+    return gbuffer_subpasses_[has_shader_to_rgba][has_raycast][cull_method];
   }
 
   PassMain npr_ps_ = {"NPR"};
