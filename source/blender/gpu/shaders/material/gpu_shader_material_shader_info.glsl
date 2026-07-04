@@ -140,8 +140,12 @@ int shader_info_shadow_soft_filtered_ray_count(float stable_shadow_samples, int 
 float3 shader_info_shadow_soft_frame_rotation_3d()
 {
   float3 rotation = float3(0.0f);
-#if defined(EEVEE_SAMPLING_DATA) && !defined(GLSL_CPP_STUBS)
-  rotation = sampling_rng_3D_get(SAMPLING_SHADOW_U);
+#if defined(GPU_FRAGMENT_SHADER) && !defined(GLSL_CPP_STUBS)
+  [[resource_table]] eevee::ShadowRenderData &srd = resource_table_get(eevee::ShadowRenderData);
+  if (srd.shadow_random) [[static_branch]] {
+    [[resource_table]] const eevee::Sampling sampling = srd.sampling;
+    rotation = sampling.rng_3D_get(SAMPLING_SHADOW_U);
+  }
 #endif
   return rotation;
 }
@@ -149,8 +153,12 @@ float3 shader_info_shadow_soft_frame_rotation_3d()
 float2 shader_info_shadow_soft_frame_rotation_2d()
 {
   float2 rotation = float2(0.0f);
-#if defined(EEVEE_SAMPLING_DATA) && !defined(GLSL_CPP_STUBS)
-  rotation = sampling_rng_2D_get(SAMPLING_SHADOW_X);
+#if defined(GPU_FRAGMENT_SHADER) && !defined(GLSL_CPP_STUBS)
+  [[resource_table]] eevee::ShadowRenderData &srd = resource_table_get(eevee::ShadowRenderData);
+  if (srd.shadow_random) [[static_branch]] {
+    [[resource_table]] const eevee::Sampling sampling = srd.sampling;
+    rotation = sampling.rng_2D_get(SAMPLING_SHADOW_X);
+  }
 #endif
   return rotation;
 }
@@ -167,10 +175,15 @@ void shader_info_shadow_eval_random_numbers_get(out float3 random_shadow_3d,
 {
   random_shadow_3d = float3(0.5f);
   random_pcf_2d = float2(0.0f);
-#if defined(GPU_FRAGMENT_SHADER) && defined(EEVEE_SAMPLING_DATA) && !defined(GLSL_CPP_STUBS)
-  float3 blue_noise_3d = utility_tx_fetch(utility_tx, gl_FragCoord.xy, UTIL_BLUE_NOISE_LAYER).rgb;
-  random_shadow_3d = fract(blue_noise_3d + sampling_rng_3D_get(SAMPLING_SHADOW_U));
-  random_pcf_2d = fract(blue_noise_3d.xy + sampling_rng_2D_get(SAMPLING_SHADOW_X));
+#if defined(GPU_FRAGMENT_SHADER) && !defined(GLSL_CPP_STUBS)
+  [[resource_table]] eevee::ShadowRenderData &srd = resource_table_get(eevee::ShadowRenderData);
+  if (srd.shadow_random) [[static_branch]] {
+    [[resource_table]] const eevee::Sampling sampling = srd.sampling;
+    [[resource_table]] const UtilityTexture util_tx = srd.util_tx;
+    float3 blue_noise_3d = util_tx.fetch(gl_FragCoord.xy, UTIL_BLUE_NOISE_LAYER).rgb;
+    random_shadow_3d = fract(blue_noise_3d + sampling.rng_3D_get(SAMPLING_SHADOW_U));
+    random_pcf_2d = fract(blue_noise_3d.xy + sampling.rng_2D_get(SAMPLING_SHADOW_X));
+  }
 #endif
 }
 
