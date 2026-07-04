@@ -237,6 +237,48 @@ static bool material_graph_uses_glsl_light_access(const GPUMaterial *gpumat,
       gpumat, graph, "gpu_shader_material_glsl_light_access.glsl");
 }
 
+static bool material_graph_uses_hiz_data(const GPUMaterial *gpumat, const GPUGraphOutput &graph)
+{
+  return material_graph_dependency_tree_contains(
+      gpumat, graph, "gpu_shader_material_curvature.glsl");
+}
+
+static bool material_codegen_uses_hiz_data(const GPUMaterial *gpumat,
+                                           const GPUCodegenOutput &codegen)
+{
+  if (material_graph_uses_hiz_data(gpumat, codegen.displacement) ||
+      material_graph_uses_hiz_data(gpumat, codegen.surface) ||
+      material_graph_uses_hiz_data(gpumat, codegen.volume) ||
+      material_graph_uses_hiz_data(gpumat, codegen.thickness) ||
+      material_graph_uses_hiz_data(gpumat, codegen.npr) ||
+      material_graph_uses_hiz_data(gpumat, codegen.filter) ||
+      material_graph_uses_hiz_data(gpumat, codegen.composite))
+  {
+    return true;
+  }
+  if (codegen.depth_offset.has_value() &&
+      material_graph_uses_hiz_data(gpumat, *codegen.depth_offset))
+  {
+    return true;
+  }
+  if (codegen.light_shader.has_value() &&
+      material_graph_uses_hiz_data(gpumat, *codegen.light_shader))
+  {
+    return true;
+  }
+  for (const GPUGraphOutput &graph : codegen.filter_outputs) {
+    if (material_graph_uses_hiz_data(gpumat, graph)) {
+      return true;
+    }
+  }
+  for (const GPUGraphOutput &graph : codegen.material_functions) {
+    if (material_graph_uses_hiz_data(gpumat, graph)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static bool material_graph_serialized_contains(const GPUGraphOutput &graph,
                                                const StringRefNull needle)
 {
@@ -273,42 +315,6 @@ static bool material_codegen_uses_render_info(const GPUCodegenOutput &codegen)
   }
   for (const GPUGraphOutput &graph : codegen.material_functions) {
     if (material_graph_uses_render_info(graph)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-static bool material_graph_uses_hiz_data(const GPUGraphOutput &graph)
-{
-  return material_graph_serialized_contains(graph, "node_screenspace_curvature");
-}
-
-static bool material_codegen_uses_hiz_data(const GPUCodegenOutput &codegen)
-{
-  if (material_graph_uses_hiz_data(codegen.displacement) ||
-      material_graph_uses_hiz_data(codegen.surface) ||
-      material_graph_uses_hiz_data(codegen.volume) ||
-      material_graph_uses_hiz_data(codegen.thickness) ||
-      material_graph_uses_hiz_data(codegen.npr) ||
-      material_graph_uses_hiz_data(codegen.filter) ||
-      material_graph_uses_hiz_data(codegen.composite))
-  {
-    return true;
-  }
-  if (codegen.depth_offset.has_value() && material_graph_uses_hiz_data(*codegen.depth_offset)) {
-    return true;
-  }
-  if (codegen.light_shader.has_value() && material_graph_uses_hiz_data(*codegen.light_shader)) {
-    return true;
-  }
-  for (const GPUGraphOutput &graph : codegen.filter_outputs) {
-    if (material_graph_uses_hiz_data(graph)) {
-      return true;
-    }
-  }
-  for (const GPUGraphOutput &graph : codegen.material_functions) {
-    if (material_graph_uses_hiz_data(graph)) {
       return true;
     }
   }
@@ -958,9 +964,8 @@ class SlotAllocator {
   /* Material textures must avoid all sampler slots reserved by ShaderCreateInfos, including NPR
    * fixed slots above GPU_max_textures() used by filter and shadow resources. */
   uint64_t available_samplers_ = ~uint64_t(0u);
-  /* But some backends may allow more samplers that we can use for material textures.
-   * These slots are just increased linearly. */
-  int total_requested_samplers_ = 0;
+  /* Dynamic material samplers are counted separately from engine-reserved binding slots. */
+  int requested_material_samplers_ = 0;
   bool sampler_overflow_ = false;
 
   uint32_t available_vertex_id_ = ~uint32_t(0u);
@@ -1011,7 +1016,6 @@ class SlotAllocator {
   void reserve_slots(const gpu::shader::ShaderCreateInfo &info)
   {
     reserve_slots_recursive(info);
-    total_requested_samplers_ = count_bits_uint64(uint64_t(~available_samplers_));
   }
 
   void assign_material_samplers(gpu::shader::ShaderCreateInfo &info)
@@ -1032,7 +1036,7 @@ class SlotAllocator {
 
   int requested_sampler_count() const
   {
-    return total_requested_samplers_;
+    return requested_material_samplers_;
   }
 
   bool vertex_id_overflow() const
@@ -1042,15 +1046,14 @@ class SlotAllocator {
 
   int get_next_sampler()
   {
-    if (available_samplers_ == 0) {
-      total_requested_samplers_++;
+    requested_material_samplers_++;
+    if (requested_material_samplers_ > GPU_max_textures() || available_samplers_ == 0) {
       /* Should result in compilation failure. */
       sampler_overflow_ = true;
       return -1;
     }
 
     int next_sampler = bitscan_forward_clear_uint64(&available_samplers_);
-    total_requested_samplers_++;
     return next_sampler;
   }
 
@@ -1576,7 +1579,14 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
                                 MAT_PIPE_DEFERRED_NPR,
                                 MAT_PIPE_FORWARD,
                                 MAT_PIPE_BAKE_COLOR);
-  const bool use_hiz_data = use_raycast || material_codegen_uses_hiz_data(codegen);
+  const bool use_hiz_data =
+      (GPU_material_uses_hiz_data(gpumat) || use_raycast ||
+       material_codegen_uses_hiz_data(gpumat, codegen)) &&
+      ELEM(pipeline_type,
+           MAT_PIPE_DEFERRED,
+           MAT_PIPE_DEFERRED_NPR,
+           MAT_PIPE_FORWARD,
+           MAT_PIPE_BAKE_COLOR);
 
   if (probe_capture != MAT_PROBE_NONE) {
     info.define("MAT_PROBE_CAPTURE");

@@ -49,6 +49,7 @@ static int node_shader_gpu_curvature(GPUMaterial *mat,
                                      GPUNodeStack *out)
 {
   GPU_material_flag_set(mat, GPU_MATFLAG_DIFFUSE);
+  GPU_material_hiz_data_set(mat);
   const bool use_view_radius = (node->custom2 == SHD_CURVATURE_RADIUS_VIEW);
   if (node->custom1) {
     GPU_material_flag_set(mat, GPU_MATFLAG_RAYCAST);

@@ -82,6 +82,7 @@ static int node_shader_gpu_shader_info(GPUMaterial *mat,
   }
   if (node->custom1 == SHD_SHADER_INFO_SHADOW_SOFT_FILTERED) {
     GPU_material_flag_set(mat, GPU_MATFLAG_RAYCAST);
+    GPU_material_hiz_data_set(mat);
   }
   return GPU_stack_link(mat,
                         node,

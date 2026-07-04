@@ -39,6 +39,7 @@ static int gpu_shader_bevel(GPUMaterial *mat,
   }
 
   GPU_material_flag_set(mat, GPU_MATFLAG_RAYCAST);
+  GPU_material_hiz_data_set(mat);
 
   const float f_samples = (node->custom1 > 0) ? float(node->custom1) : 1.0f;
   return GPU_stack_link(mat, node, "node_bevel", in, out, GPU_constant(&f_samples));

@@ -175,6 +175,7 @@ static int node_shader_gpu(GPUMaterial *mat,
                            GPUNodeStack *out)
 {
   GPU_material_flag_set(mat, GPU_MATFLAG_RAYCAST);
+  GPU_material_hiz_data_set(mat);
 
   if (!in[0].link) {
     GPU_link(mat, "world_position_get", &in[0].link);
