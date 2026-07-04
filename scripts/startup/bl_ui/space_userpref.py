@@ -2975,7 +2975,7 @@ class ExperimentalPanel:
 
     @classmethod
     def poll(cls, _context):
-        return True
+        return bpy.app.version_cycle == "alpha"
 
 
 """
@@ -3009,20 +3009,6 @@ class USERPREF_PT_experimental_new_features(ExperimentalPanel, Panel):
                  ("blender/blender/projects/10", "Pipeline, Assets & IO Project Page")),
                 ({"property": "use_shader_node_previews"}, ("blender/blender/issues/110353", "#110353")),
                 ({"property": "use_collection_importer"}, ("blender/blender/issues/132171", "#132171")),
-            ),
-        )
-
-
-class USERPREF_PT_experimental_pr_145849(ExperimentalPanel, Panel):
-    bl_label = "PR 145849"
-
-    def draw(self, context):
-        _draw_experimental_items(
-            self.layout,
-            context.preferences,
-            (
-                ({"property": "use_geometry_nodes_lists"}, ("blender/blender/pulls/145849", "#145849")),
-                ({"property": "use_geometry_bundle"}, ("blender/blender/pulls/145849", "#145849")),
             ),
         )
 
@@ -3174,7 +3160,6 @@ classes = (
     USERPREF_PT_addons_filter,
 
     USERPREF_PT_experimental_new_features,
-    USERPREF_PT_experimental_pr_145849,
     USERPREF_PT_experimental_prototypes,
     # USERPREF_PT_experimental_tweaks,
 

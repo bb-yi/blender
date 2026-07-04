@@ -940,7 +940,12 @@ static const EnumPropertyItem *rna_UseDef_active_section_itemf(bContext * /*C*/,
   for (const EnumPropertyItem *it = rna_enum_preference_section_items; it->identifier != nullptr;
        it++)
   {
-    if (it->value == USER_SECTION_DEVELOPER_TOOLS) {
+    if (it->value == USER_SECTION_EXPERIMENTAL) {
+      if (is_alpha == false) {
+        continue;
+      }
+    }
+    else if (it->value == USER_SECTION_DEVELOPER_TOOLS) {
       if (use_developer_ui == false) {
         continue;
       }
