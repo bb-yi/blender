@@ -1316,6 +1316,7 @@ void DeferredLayer::begin_sync()
   has_outline_ = false;
   has_prepass_ = false;
   has_stencil_ = false;
+  has_npr_aov_access_ = false;
   is_first_pass_ = true;
   stencil_ps_.init();
   {
@@ -1693,6 +1694,7 @@ PassMain::Sub *DeferredLayer::npr_add(blender::Material *blender_mat, GPUMateria
   BLI_assert(GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR));
   use_depth_offset_lighting_data_ |= material_uses_depth_offset_lighting_data(blender_mat, gpumat);
   has_outline_ = has_outline_ || inst_.materials.material_uses_outline_control(blender_mat);
+  has_npr_aov_access_ |= GPU_material_flag_get(gpumat, GPU_MATFLAG_AOV);
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
       GPU_material_has_glsl_light_shader_eval(gpumat) ||
       GPU_material_flag_get(gpumat, GPU_MATFLAG_GLSL_LIGHT_ACCESS))
@@ -1731,6 +1733,11 @@ gpu::Texture *DeferredLayer::render(View &main_view,
 
   RenderBuffers &rb = inst_.render_buffers;
 
+  const bool has_aovs = inst_.film.aovs_info.color_len > 0 || inst_.film.aovs_info.value_len > 0;
+  /* Keep previous layer AOVs in the live render-pass buffer for NPR AOV Input.
+   * Current-layer AOV Output writes naturally override them where the current material writes. */
+  const bool preserve_npr_aov_input = !is_first_pass_ && has_npr_aov_access_ && has_aovs;
+
   constexpr eGPUTextureUsage usage_read = GPU_TEXTURE_USAGE_SHADER_READ;
   constexpr eGPUTextureUsage usage_write = GPU_TEXTURE_USAGE_SHADER_WRITE;
   constexpr eGPUTextureUsage usage_rw = usage_read | usage_write;
@@ -1759,7 +1766,7 @@ gpu::Texture *DeferredLayer::render(View &main_view,
     return radiance_behind_tx;
   }
 
-  if (!is_first_pass_) {
+  if (!is_first_pass_ && !preserve_npr_aov_input) {
     ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainDeferredPrepass);
     GPU_framebuffer_bind(prepass_fb);
     inst_.manager->submit(aov_clear_ps_, render_view);

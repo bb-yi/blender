@@ -465,6 +465,7 @@ class DeferredLayer : DeferredLayerBase {
   bool has_outline_ = false;
   bool has_prepass_ = false;
   bool has_stencil_ = false;
+  bool has_npr_aov_access_ = false;
   bool is_first_pass_ = true;
 
  public:
