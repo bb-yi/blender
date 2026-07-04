@@ -279,6 +279,42 @@ static bool material_codegen_uses_render_info(const GPUCodegenOutput &codegen)
   return false;
 }
 
+static bool material_graph_uses_hiz_data(const GPUGraphOutput &graph)
+{
+  return material_graph_serialized_contains(graph, "node_screenspace_curvature");
+}
+
+static bool material_codegen_uses_hiz_data(const GPUCodegenOutput &codegen)
+{
+  if (material_graph_uses_hiz_data(codegen.displacement) ||
+      material_graph_uses_hiz_data(codegen.surface) ||
+      material_graph_uses_hiz_data(codegen.volume) ||
+      material_graph_uses_hiz_data(codegen.thickness) ||
+      material_graph_uses_hiz_data(codegen.npr) ||
+      material_graph_uses_hiz_data(codegen.filter) ||
+      material_graph_uses_hiz_data(codegen.composite))
+  {
+    return true;
+  }
+  if (codegen.depth_offset.has_value() && material_graph_uses_hiz_data(*codegen.depth_offset)) {
+    return true;
+  }
+  if (codegen.light_shader.has_value() && material_graph_uses_hiz_data(*codegen.light_shader)) {
+    return true;
+  }
+  for (const GPUGraphOutput &graph : codegen.filter_outputs) {
+    if (material_graph_uses_hiz_data(graph)) {
+      return true;
+    }
+  }
+  for (const GPUGraphOutput &graph : codegen.material_functions) {
+    if (material_graph_uses_hiz_data(graph)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static bool material_depth_offset_graph_has_unsupported_dependencies(const GPUMaterial *gpumat,
                                                                      const GPUGraphOutput &graph)
 {
@@ -919,7 +955,8 @@ gpu::Shader *ShaderModule::static_shader_get(eShaderType shader_type)
 
 /* Helper class to get free sampler slots for materials. */
 class SlotAllocator {
-  /* Assumes slots reserved from ShaderCreateInfos are always below 32. */
+  /* Material textures must avoid all sampler slots reserved by ShaderCreateInfos, including NPR
+   * fixed slots above GPU_max_textures() used by filter and shadow resources. */
   uint64_t available_samplers_ = ~uint64_t(0u);
   /* But some backends may allow more samplers that we can use for material textures.
    * These slots are just increased linearly. */
@@ -1005,15 +1042,15 @@ class SlotAllocator {
 
   int get_next_sampler()
   {
-    int next_sampler = available_samplers_ == 0 ? total_requested_samplers_ :
-                                                  bitscan_forward_clear_uint64(&available_samplers_);
-    total_requested_samplers_++;
-    if (next_sampler >= GPU_max_textures()) {
+    if (available_samplers_ == 0) {
+      total_requested_samplers_++;
       /* Should result in compilation failure. */
       sampler_overflow_ = true;
       return -1;
     }
 
+    int next_sampler = bitscan_forward_clear_uint64(&available_samplers_);
+    total_requested_samplers_++;
     return next_sampler;
   }
 
@@ -1539,6 +1576,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
                                 MAT_PIPE_DEFERRED_NPR,
                                 MAT_PIPE_FORWARD,
                                 MAT_PIPE_BAKE_COLOR);
+  const bool use_hiz_data = use_raycast || material_codegen_uses_hiz_data(codegen);
 
   if (probe_capture != MAT_PROBE_NONE) {
     info.define("MAT_PROBE_CAPTURE");
@@ -1657,6 +1695,9 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     }
   }
 
+  if (use_hiz_data) {
+    add_create_info_and_reserve(info, slots, "eevee_hiz_data");
+  }
   if (use_raycast) {
     add_create_info_and_reserve(info, slots, "eevee_raycast");
   }
