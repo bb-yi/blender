@@ -43,6 +43,7 @@ void GPU_pass_release(GPUPass *pass);
 
 uint64_t GPU_pass_global_compilation_count();
 uint64_t GPU_pass_compilation_timestamp(GPUPass *pass);
+double GPU_pass_compilation_time(GPUPass *pass);
 
 void GPU_pass_cache_init();
 void GPU_pass_cache_update();

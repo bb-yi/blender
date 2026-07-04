@@ -7,6 +7,7 @@
  */
 
 #include <cfloat>
+#include <climits>
 #include <cstdlib>
 
 #include "DNA_material_types.h"
@@ -60,6 +61,21 @@ const EnumPropertyItem rna_enum_ramp_blend_items[] = {
     {0, nullptr, 0, nullptr, nullptr},
 };
 
+enum {
+  MA_SHADER_COMPILE_NOT_COMPILED = 0,
+  MA_SHADER_COMPILE_QUEUED = 1,
+  MA_SHADER_COMPILE_COMPILED = 2,
+  MA_SHADER_COMPILE_FAILED = 3,
+};
+
+const EnumPropertyItem rna_enum_material_shader_compile_status_items[] = {
+    {MA_SHADER_COMPILE_NOT_COMPILED, "NOT_COMPILED", 0, "Not Compiled", ""},
+    {MA_SHADER_COMPILE_QUEUED, "QUEUED", 0, "Queued", ""},
+    {MA_SHADER_COMPILE_COMPILED, "COMPILED", 0, "Compiled", ""},
+    {MA_SHADER_COMPILE_FAILED, "FAILED", 0, "Failed", ""},
+    {0, nullptr, 0, nullptr, nullptr},
+};
+
 }
 
 #ifdef RNA_RUNTIME
@@ -100,6 +116,8 @@ const EnumPropertyItem rna_enum_ramp_blend_items[] = {
 #  include "ED_image.hh"
 #  include "ED_node.hh"
 #  include "ED_screen.hh"
+
+#  include "GPU_material.hh"
 
 namespace blender {
 
@@ -155,6 +173,79 @@ static void rna_Material_draw_update(Main * /*bmain*/, Scene * /*scene*/, Pointe
 
   DEG_id_tag_update(&ma->id, ID_RECALC_SHADING);
   WM_main_add_notifier(NC_MATERIAL | ND_SHADING_DRAW, ma);
+}
+
+static GPUMaterial *rna_Material_latest_compiled_gpu_material(Material *ma)
+{
+  GPUMaterial *latest_gpumat = nullptr;
+  uint64_t latest_timestamp = 0;
+
+  for (LinkData &link : ma->gpumaterial) {
+    GPUMaterial *gpumat = static_cast<GPUMaterial *>(link.data);
+    if (gpumat == nullptr || GPU_material_status(gpumat) != GPU_MAT_SUCCESS) {
+      continue;
+    }
+
+    const uint64_t timestamp = GPU_material_compilation_timestamp(gpumat);
+    if (timestamp >= latest_timestamp) {
+      latest_timestamp = timestamp;
+      latest_gpumat = gpumat;
+    }
+  }
+
+  return latest_gpumat;
+}
+
+static int rna_Material_shader_compile_status_get(PointerRNA *ptr)
+{
+  Material *ma = id_cast<Material *>(ptr->owner_id);
+  bool has_compiled = false;
+  bool has_failed = false;
+
+  for (LinkData &link : ma->gpumaterial) {
+    GPUMaterial *gpumat = static_cast<GPUMaterial *>(link.data);
+    if (gpumat == nullptr) {
+      continue;
+    }
+
+    switch (GPU_material_status(gpumat)) {
+      case GPU_MAT_QUEUED:
+        return MA_SHADER_COMPILE_QUEUED;
+      case GPU_MAT_SUCCESS:
+        has_compiled = true;
+        break;
+      case GPU_MAT_FAILED:
+        has_failed = true;
+        break;
+    }
+  }
+
+  if (has_failed) {
+    return MA_SHADER_COMPILE_FAILED;
+  }
+  if (has_compiled) {
+    return MA_SHADER_COMPILE_COMPILED;
+  }
+  return MA_SHADER_COMPILE_NOT_COMPILED;
+}
+
+static float rna_Material_shader_compile_time_get(PointerRNA *ptr)
+{
+  Material *ma = id_cast<Material *>(ptr->owner_id);
+  GPUMaterial *gpumat = rna_Material_latest_compiled_gpu_material(ma);
+  return gpumat ? float(GPU_material_compilation_time(gpumat)) : 0.0f;
+}
+
+static int rna_Material_shader_compile_timestamp_get(PointerRNA *ptr)
+{
+  Material *ma = id_cast<Material *>(ptr->owner_id);
+  GPUMaterial *gpumat = rna_Material_latest_compiled_gpu_material(ma);
+  if (gpumat == nullptr) {
+    return 0;
+  }
+
+  const uint64_t timestamp = GPU_material_compilation_timestamp(gpumat);
+  return timestamp > uint64_t(INT_MAX) ? INT_MAX : int(timestamp);
 }
 
 static void rna_Material_eevee_domain_update(Main *bmain, Scene * /*scene*/, PointerRNA *ptr)
@@ -1451,6 +1542,25 @@ void RNA_def_material(BlenderRNA *brna)
   RNA_def_property_ui_text(
       prop, "Pass Index", "Index number for the \"Material Index\" render pass");
   RNA_def_property_update(prop, NC_OBJECT, "rna_Material_update");
+
+  prop = RNA_def_property(srna, "shader_compile_status", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, rna_enum_material_shader_compile_status_items);
+  RNA_def_property_enum_funcs(prop, "rna_Material_shader_compile_status_get", nullptr, nullptr);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_ui_text(prop, "Shader Compile Status", "Current GPU shader compilation status");
+
+  prop = RNA_def_property(srna, "shader_compile_time", PROP_FLOAT, PROP_TIME_ABSOLUTE);
+  RNA_def_property_float_funcs(prop, "rna_Material_shader_compile_time_get", nullptr, nullptr);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_ui_range(prop, 0.0f, FLT_MAX, 0.001f, 3);
+  RNA_def_property_ui_text(
+      prop, "Shader Compile Time", "GPU shader compilation wall time in seconds");
+
+  prop = RNA_def_property(srna, "shader_compile_timestamp", PROP_INT, PROP_UNSIGNED);
+  RNA_def_property_int_funcs(prop, "rna_Material_shader_compile_timestamp_get", nullptr, nullptr);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_flag(prop, PROP_HIDDEN);
+  RNA_def_property_ui_text(prop, "Shader Compile Timestamp", "Latest GPU shader compilation count");
 
   /* nodetree */
   prop = RNA_def_property(srna, "node_tree", PROP_POINTER, PROP_NONE);

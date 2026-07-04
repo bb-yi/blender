@@ -152,6 +152,7 @@ GPUCodegen::GPUCodegen(GPUMaterial *mat_, GPUNodeGraph *graph_, const char *debu
 {
   BLI_hash_mm2a_init(&hm2a_, GPU_material_uuid_get(&mat));
   BLI_hash_mm2a_add_int(&hm2a_, GPU_material_flag(&mat));
+  BLI_hash_mm2a_add_int(&hm2a_, GPU_material_recompile_serial_get(&mat));
   create_info = MEM_new<GPUCodegenCreateInfo>(__func__, debug_name);
   output.create_info = reinterpret_cast<GPUShaderCreateInfo *>(
       static_cast<ShaderCreateInfo *>(create_info));

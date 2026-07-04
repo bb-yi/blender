@@ -48,6 +48,8 @@ struct GPUPass {
   double gc_timestamp = 0.0f;
 
   uint64_t compilation_timestamp = 0;
+  double compilation_start_timestamp = 0.0;
+  double compilation_time = 0.0;
 
   /** Hint that an optimized variant of this pass should be created.
    *  Based on a complexity heuristic from pass code generation. */
@@ -75,9 +77,11 @@ struct GPUPass {
     GPUShaderCreateInfo *base_info = reinterpret_cast<GPUShaderCreateInfo *>(create_info);
 
     if (deferred_compilation) {
+      start_compilation_timer();
       compilation_handle = GPU_shader_async_compilation(base_info, compilation_priority());
     }
     else {
+      start_compilation_timer();
       shader = GPU_shader_create_from_info(base_info);
       finalize_compilation();
     }
@@ -100,6 +104,12 @@ struct GPUPass {
     return is_optimization_pass ? CompilationPriority::Low : CompilationPriority::Medium;
   }
 
+  void start_compilation_timer()
+  {
+    compilation_start_timestamp = BLI_time_now_seconds();
+    compilation_time = 0.0;
+  }
+
   void finalize_compilation()
   {
     BLI_assert_msg(create_info, "GPUPass::finalize_compilation() called more than once.");
@@ -108,6 +118,9 @@ struct GPUPass {
       shader = GPU_shader_async_compilation_finalize(compilation_handle);
     }
 
+    if (compilation_start_timestamp != 0.0) {
+      compilation_time = BLI_time_now_seconds() - compilation_start_timestamp;
+    }
     compilation_timestamp = ++compilation_counts;
 
     if (!shader && !gpu_pass_validate(create_info)) {
@@ -138,6 +151,7 @@ struct GPUPass {
     {
       BLI_assert(is_optimization_pass);
       GPUShaderCreateInfo *base_info = reinterpret_cast<GPUShaderCreateInfo *>(create_info);
+      start_compilation_timer();
       compilation_handle = GPU_shader_async_compilation(base_info, compilation_priority());
     }
   }
@@ -198,6 +212,11 @@ uint64_t GPU_pass_global_compilation_count()
 uint64_t GPU_pass_compilation_timestamp(GPUPass *pass)
 {
   return pass->compilation_timestamp;
+}
+
+double GPU_pass_compilation_time(GPUPass *pass)
+{
+  return pass->compilation_time;
 }
 
 /** \} */

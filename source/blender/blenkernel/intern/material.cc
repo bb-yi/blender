@@ -150,6 +150,7 @@ static void material_free_data(ID *id)
 
   /* Free gpu material before the ntree */
   GPU_material_free(&material->gpumaterial);
+  GPU_material_recompile_serial_clear(material);
 
   /* is no lib link block, but material extension */
   if (material->nodetree) {
@@ -206,6 +207,7 @@ static void material_blend_write(BlendWriter *writer, ID *id, const void *id_add
   /* Clean up, important in undo case to reduce false detection of changed datablocks. */
   ma->texpaintslot = nullptr;
   BLI_listbase_clear(&ma->gpumaterial);
+  ma->_pad3[0] = 0;
 
   /* Set deprecated #use_nodes for forward compatibility. */
   ma->use_nodes = true;

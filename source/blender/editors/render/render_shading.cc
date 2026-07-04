@@ -104,6 +104,8 @@
 #include "RE_engine.h"
 #include "RE_pipeline.h"
 
+#include "GPU_material.hh"
+
 #include "engines/eevee/eevee_lightcache.hh"
 
 #include "render_intern.hh" /* own include */
@@ -3155,6 +3157,66 @@ void MATERIAL_OT_paste(wmOperatorType *ot)
 
   /* flags */
   ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO | OPTYPE_INTERNAL;
+}
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Material Shader Recompile Operator
+ * \{ */
+
+static Material *material_context_get(bContext *C)
+{
+  Material *ma = static_cast<Material *>(
+      CTX_data_pointer_get_type(C, "material", RNA_Material).data);
+  if (ma != nullptr) {
+    return ma;
+  }
+
+  Object *ob = ed::object::context_object(C);
+  return ob ? BKE_object_material_get(ob, ob->actcol) : nullptr;
+}
+
+static bool material_shader_recompile_poll(bContext *C)
+{
+  Material *ma = material_context_get(C);
+  return ma != nullptr && ID_IS_EDITABLE(&ma->id) && !ID_IS_OVERRIDE_LIBRARY(&ma->id);
+}
+
+static wmOperatorStatus recompile_material_shader_exec(bContext *C, wmOperator *op)
+{
+  Material *ma = material_context_get(C);
+  if (ma == nullptr) {
+    BKE_report(op->reports, RPT_WARNING, "Cannot recompile without a material");
+    return OPERATOR_CANCELLED;
+  }
+  if (!ID_IS_EDITABLE(&ma->id) || ID_IS_OVERRIDE_LIBRARY(&ma->id)) {
+    BKE_report(op->reports, RPT_WARNING, "Cannot recompile a non-editable material");
+    return OPERATOR_CANCELLED;
+  }
+
+  GPU_material_recompile_serial_increment(ma);
+  GPU_material_free(&ma->gpumaterial);
+  DEG_id_tag_update(&ma->id, ID_RECALC_SHADING | ID_RECALC_SYNC_TO_EVAL);
+  WM_event_add_notifier(C, NC_MATERIAL | ND_SHADING_DRAW, ma);
+
+  BKE_report(op->reports, RPT_INFO, "Queued material shader recompilation");
+  return OPERATOR_FINISHED;
+}
+
+void MATERIAL_OT_recompile_shader(wmOperatorType *ot)
+{
+  /* identifiers */
+  ot->name = "Recompile Shader";
+  ot->idname = "MATERIAL_OT_recompile_shader";
+  ot->description = "Force this material GPU shader to be regenerated and recompiled";
+
+  /* API callbacks. */
+  ot->exec = recompile_material_shader_exec;
+  ot->poll = material_shader_recompile_poll;
+
+  /* flags */
+  ot->flag = OPTYPE_REGISTER;
 }
 
 /** \} */
