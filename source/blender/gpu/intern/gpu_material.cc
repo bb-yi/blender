@@ -8,7 +8,10 @@
  * Manages materials, lights and textures.
  */
 
+#include <climits>
 #include <cstring>
+#include <mutex>
+#include <unordered_map>
 
 #include "BKE_lib_id.hh"
 #include "MEM_guardedalloc.h"
@@ -49,6 +52,14 @@ namespace blender {
 
 static void gpu_material_ramp_texture_build(GPUMaterial *mat);
 static void gpu_material_sky_texture_build(GPUMaterial *mat);
+
+static std::unordered_map<const Material *, int> g_material_recompile_serials;
+static std::mutex g_material_recompile_serials_mutex;
+
+static const Material *gpu_material_recompile_serial_key(const Material *material)
+{
+  return material->id.orig_id ? reinterpret_cast<const Material *>(material->id.orig_id) : material;
+}
 
 /* Structs */
 #define MAX_COLOR_BAND 128
@@ -400,6 +411,45 @@ eGPUMaterialOptimizationStatus GPU_material_optimization_status(GPUMaterial *mat
 uint64_t GPU_material_compilation_timestamp(GPUMaterial *mat)
 {
   return GPU_pass_compilation_timestamp(mat->pass);
+}
+
+double GPU_material_compilation_time(GPUMaterial *mat)
+{
+  return GPU_pass_compilation_time(GPU_material_get_pass(mat));
+}
+
+int GPU_material_recompile_serial_get(const GPUMaterial *mat)
+{
+  if (mat->source_material == nullptr) {
+    return 0;
+  }
+
+  const Material *source_material = gpu_material_recompile_serial_key(mat->source_material);
+  std::lock_guard lock(g_material_recompile_serials_mutex);
+  const auto serial = g_material_recompile_serials.find(source_material);
+  return serial == g_material_recompile_serials.end() ? 0 : serial->second;
+}
+
+void GPU_material_recompile_serial_increment(Material *material)
+{
+  if (material == nullptr) {
+    return;
+  }
+
+  const Material *source_material = gpu_material_recompile_serial_key(material);
+  std::lock_guard lock(g_material_recompile_serials_mutex);
+  int &serial = g_material_recompile_serials[source_material];
+  serial = (serial == INT_MAX) ? 1 : serial + 1;
+}
+
+void GPU_material_recompile_serial_clear(const Material *material)
+{
+  if (material == nullptr) {
+    return;
+  }
+
+  std::lock_guard lock(g_material_recompile_serials_mutex);
+  g_material_recompile_serials.erase(material);
 }
 
 bool GPU_material_has_surface_output(GPUMaterial *mat)

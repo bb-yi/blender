@@ -102,7 +102,7 @@ jobs:
           echo "TAR_PATH=$TAR_FILE" >> $GITHUB_ENV
 
       - name: Upload Linux Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: linux-asset
           path: blender/${{ env.TAR_PATH }}
@@ -167,7 +167,7 @@ jobs:
           echo "DMG_PATH=$DMG_FILE" >> $GITHUB_ENV
 
       - name: Upload macOS Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: macos-asset
           path: ${{ env.DMG_PATH }}

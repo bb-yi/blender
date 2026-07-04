@@ -330,6 +330,72 @@ def draw_material_volume_settings(layout, mat, is_eevee=True):
     layout.prop(mat, "volume_intersection_method", text="Intersection" if is_eevee else "Volume Intersection")
 
 
+def material_shader_compile_display_material(context):
+    ob = context.object
+    mat = getattr(context, "material", None)
+    if mat is None and ob is not None:
+        mat = ob.active_material
+    if mat is None or ob is None:
+        return mat
+
+    depsgraph = context.evaluated_depsgraph_get()
+    ob_eval = ob.evaluated_get(depsgraph)
+    candidates = []
+
+    def add_candidate(candidate):
+        if candidate is not None and candidate not in candidates:
+            candidates.append(candidate)
+
+    add_candidate(ob_eval.active_material)
+    for slot in getattr(ob_eval, "material_slots", ()):
+        add_candidate(slot.material)
+    data = getattr(ob_eval, "data", None)
+    for data_mat in getattr(data, "materials", ()):
+        add_candidate(data_mat)
+
+    if not candidates:
+        return mat
+
+    mat_eval = None
+    for candidate in candidates:
+        candidate_orig = getattr(candidate, "original", None)
+        if candidate_orig is not None and candidate_orig == mat:
+            mat_eval = candidate
+            break
+        if candidate_orig is None and candidate.name == mat.name:
+            mat_eval = candidate
+            break
+
+    if mat_eval is None:
+        return mat
+
+    if mat_eval.shader_compile_status != 'NOT_COMPILED':
+        return mat_eval
+
+    return mat
+
+
+def material_shader_compile_time_text(compile_time):
+    if compile_time > 10.0:
+        return f"{compile_time:.3f} s"
+    return f"{compile_time * 1000.0:.3f} ms"
+
+
+def draw_material_shader_compilation_status(layout, mat):
+    status_names = {
+        'NOT_COMPILED': "Not Compiled",
+        'QUEUED': "Queued",
+        'COMPILED': "Compiled",
+        'FAILED': "Failed",
+    }
+    status = getattr(mat, "shader_compile_status", 'NOT_COMPILED')
+    compile_time = getattr(mat, "shader_compile_time", 0.0)
+
+    col = layout.column(align=True)
+    col.label(text="Status: " + status_names.get(status, status))
+    col.label(text="Compile Time: " + material_shader_compile_time_text(compile_time))
+
+
 def draw_material_settings(self, context):
     layout = self.layout
     layout.use_property_split = True
@@ -397,6 +463,26 @@ class EEVEE_MATERIAL_PT_settings_volume(MaterialButtonsPanel, Panel):
         mat = context.material
 
         draw_material_volume_settings(layout, mat)
+
+
+class EEVEE_MATERIAL_PT_settings_shader_compilation(MaterialButtonsPanel, Panel):
+    bl_label = "Shader Compilation"
+    bl_context = "material"
+    bl_parent_id = "EEVEE_MATERIAL_PT_settings"
+    COMPAT_ENGINES = {'BLENDER_EEVEE'}
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+
+        mat = material_shader_compile_display_material(context)
+
+        draw_material_shader_compilation_status(layout, mat)
+
+        row = layout.row()
+        row.use_property_split = False
+        row.operator("material.recompile_shader", icon='FILE_REFRESH')
 
 
 class MATERIAL_PT_viewport(MaterialButtonsPanel, Panel):
@@ -501,6 +587,7 @@ classes = (
     EEVEE_MATERIAL_PT_settings,
     EEVEE_MATERIAL_PT_settings_surface,
     EEVEE_MATERIAL_PT_settings_volume,
+    EEVEE_MATERIAL_PT_settings_shader_compilation,
     MATERIAL_PT_lineart,
     MATERIAL_PT_viewport,
     EEVEE_MATERIAL_PT_viewport_settings,

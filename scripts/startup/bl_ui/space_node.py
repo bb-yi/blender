@@ -24,6 +24,7 @@ from bl_ui.space_toolsystem_common import (
 )
 from bl_ui.properties_material import (
     EEVEE_MATERIAL_PT_settings,
+    EEVEE_MATERIAL_PT_settings_shader_compilation,
     EEVEE_MATERIAL_PT_settings_surface,
     EEVEE_MATERIAL_PT_settings_volume,
     MATERIAL_PT_viewport,
@@ -1328,6 +1329,7 @@ classes = (
     node_panel(EEVEE_MATERIAL_PT_settings),
     node_panel(EEVEE_MATERIAL_PT_settings_surface),
     node_panel(EEVEE_MATERIAL_PT_settings_volume),
+    node_panel(EEVEE_MATERIAL_PT_settings_shader_compilation),
     node_panel(MATERIAL_PT_viewport),
     node_panel(WORLD_PT_viewport_display),
     node_panel(DATA_PT_light),

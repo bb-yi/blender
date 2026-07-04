@@ -1245,6 +1245,7 @@ void blo_do_versions_510(FileData *fd, Library * /*lib*/, Main *bmain)
       else {
         mat.surface_cull_method = MA_SURFACE_CULL_NONE;
       }
+      mat._pad3[0] = 0;
 
       SET_FLAG_FROM_TEST(
           mat.blend_flag, mat.surface_cull_method == MA_SURFACE_CULL_BACK, MA_BL_CULL_BACKFACE);

@@ -32,6 +32,7 @@ struct GPUInput;
 struct GPUNodeLink;
 struct GPUNodeStack;
 struct GPUPass;
+struct Material;
 namespace gpu {
 class Texture;
 class UniformBuf;
@@ -206,6 +207,10 @@ GPUMaterialStatus GPU_material_status(GPUMaterial *mat);
 eGPUMaterialOptimizationStatus GPU_material_optimization_status(GPUMaterial *mat);
 
 uint64_t GPU_material_compilation_timestamp(GPUMaterial *mat);
+double GPU_material_compilation_time(GPUMaterial *mat);
+int GPU_material_recompile_serial_get(const GPUMaterial *mat);
+void GPU_material_recompile_serial_increment(Material *material);
+void GPU_material_recompile_serial_clear(const Material *material);
 
 gpu::UniformBuf *GPU_material_uniform_buffer_get(GPUMaterial *material);
 /**

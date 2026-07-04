@@ -35,6 +35,7 @@ void RENDER_OT_npr_new(wmOperatorType *ot);
 
 void MATERIAL_OT_copy(wmOperatorType *ot);
 void MATERIAL_OT_paste(wmOperatorType *ot);
+void MATERIAL_OT_recompile_shader(wmOperatorType *ot);
 
 void SCENE_OT_view_layer_add(wmOperatorType *ot);
 void SCENE_OT_view_layer_remove(wmOperatorType *ot);
