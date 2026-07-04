@@ -55,7 +55,7 @@
 ## 📊 最终项目结构
 
 ```
-blender-5.1-npr-doc-site/
+blender-npr-doc-site/
 ├── mkdocs.yml                    # 纯中文配置
 ├── docs/
 │   ├── index.md                  # 首页（纯中文）

@@ -5,7 +5,7 @@
 ## 项目结构
 
 ```
-blender-5.1-npr-doc-site/
+blender-npr-doc-site/
 ├── mkdocs.yml          # MkDocs 配置文件
 ├── docs/               # 文档源文件目录
 │   ├── index.md        # 首页
@@ -32,7 +32,7 @@ pip install mkdocs mkdocs-material
 如果你要看和 GitHub Pages 部署后一模一样的路径与语言切换行为，请使用：
 
 ```powershell
-cd blender-5.1-npr-doc-site
+cd blender-npr-doc-site
 powershell -ExecutionPolicy Bypass -File .\preview-ghpages.ps1
 ```
 

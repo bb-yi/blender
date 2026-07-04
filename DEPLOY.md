@@ -15,7 +15,7 @@
 ### 1️⃣ 初始化 Git 仓库
 
 ```powershell
-cd e:\blender_bulid_test\blender_npr_bulid\blender-5.1-npr-doc-site
+cd e:\blender_bulid_test\blender_npr_bulid\blender-npr-doc-site
 
 # 初始化 git
 git init
@@ -145,7 +145,7 @@ edit_uri: edit/docs/docs/
 每次更新文档内容后：
 
 ```powershell
-cd e:\blender_bulid_test\blender_npr_bulid\blender-5.1-npr-doc-site
+cd e:\blender_bulid_test\blender_npr_bulid\blender-npr-doc-site
 
 # 提交本地更改
 git add .
