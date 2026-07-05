@@ -1042,7 +1042,7 @@ void node_shader_info(float3 position,
   blinn_phong_factor = saturate(blinn_phong_sum);
 #else
   diffuse_shading = float4(0.0f);
-  shadow = 0.0f;
+  shadow = 1.0f;
   ambient_lighting = float4(0.0f);
   half_lambert_factor = 0.0f;
   blinn_phong_factor = 0.0f;
