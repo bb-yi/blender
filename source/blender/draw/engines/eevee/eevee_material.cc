@@ -884,9 +884,9 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
                                      ob->refraction_layer_index,
                                      has_motion,
                                      material_has_flag(mat.npr, GPU_MATFLAG_RAYCAST));
-      if (mat.stencil.sub_pass != nullptr) {
-        mat.prepass.sub_pass = nullptr;
-      }
+      /* Keep the regular prepass active. Deferred GBuffer shading uses DEPTH_EQUAL and still
+       * depends on the prepass depth; the stencil pass runs afterward to apply the user stencil
+       * mask/ops in stencil_order without replacing that depth path. */
     }
 
     return mat;
