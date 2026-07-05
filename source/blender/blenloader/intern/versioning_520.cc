@@ -497,6 +497,30 @@ static void version_replace_outline_control_width_variation(Main *bmain)
   FOREACH_NODETREE_END;
 }
 
+static void version_npr_image_sample_offset_socket_identifier(Main *bmain)
+{
+  FOREACH_NODETREE_BEGIN (bmain, ntree, id) {
+    if (ntree->type != NTREE_SHADER) {
+      continue;
+    }
+
+    for (bNode &node : ntree->nodes) {
+      if (node.type_legacy != SH_NODE_NPR_IMAGE_SAMPLE &&
+          !STREQ(node.idname, "ShaderNodeNPR_ImageSample"))
+      {
+        continue;
+      }
+
+      for (bNodeSocket &socket : node.inputs) {
+        if (STREQ(socket.identifier, "Offset")) {
+          version_node_socket_identifier_set(socket, "Vector");
+        }
+      }
+    }
+  }
+  FOREACH_NODETREE_END;
+}
+
 void do_versions_after_linking_520(FileData *fd, Main *bmain)
 {
   if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 2)) {
@@ -898,6 +922,10 @@ void blo_do_versions_520(FileData * /*fd*/, Library * /*lib*/, Main *bmain)
 
   if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 43)) {
     version_replace_outline_control_width_variation(bmain);
+  }
+
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 44)) {
+    version_npr_image_sample_offset_socket_identifier(bmain);
   }
 
   /**

@@ -990,6 +990,25 @@ void shader_info_eval_light(uint l_idx,
   }
 }
 
+#if defined(CREATE_INFO_eevee_LightprobeRenderData)
+float4 shader_info_ambient_lighting(float3 position,
+                                    float3 probe_bias_normal,
+                                    float3 view_vector,
+                                    float3 shading_normal)
+{
+  /* Use the interpolated surface normal for probe lookup bias so smooth-shaded meshes do not
+   * inherit face-normal stepping from the volume probe receiver path. */
+  [[resource_table]] const eevee::LightprobeRenderData &lightprobes = resource_table_get(
+      eevee::LightprobeRenderData);
+  eevee::LightProbeSample probe_sample = lightprobes.load(
+      gl_FragCoord.xy, position, probe_bias_normal, view_vector);
+  probe_sample.volume_irradiance = spherical_harmonics::clamp_energy(
+      probe_sample.volume_irradiance, uniform_buf.clamp.surface_indirect);
+  float3 ambient = probe_sample.volume_irradiance.evaluate_lambert(shading_normal).rgb;
+  return float4(max(ambient, float3(0.0f)), 1.0f);
+}
+#endif
+
 [[node]]
 void node_shader_info(float3 position,
                       float3 normal_in,
@@ -1084,16 +1103,8 @@ void node_shader_info(float3 position,
                     1.0f;
 
 #  if defined(CREATE_INFO_eevee_LightprobeRenderData)
-  /* Use the interpolated surface normal for probe lookup bias so smooth-shaded meshes do not
-   * inherit face-normal stepping from the volume probe receiver path. */
-  [[resource_table]] const eevee::LightprobeRenderData &lightprobes = resource_table_get(
-      eevee::LightprobeRenderData);
-  eevee::LightProbeSample probe_sample = lightprobes.load(
-      gl_FragCoord.xy, position, probe_bias_normal, view_vector);
-  probe_sample.volume_irradiance = spherical_harmonics::clamp_energy(
-      probe_sample.volume_irradiance, uniform_buf.clamp.surface_indirect);
-  float3 ambient = probe_sample.volume_irradiance.evaluate_lambert(shading_normal).rgb;
-  ambient_lighting = float4(max(ambient, float3(0.0f)), 1.0f);
+  ambient_lighting = shader_info_ambient_lighting(
+      position, probe_bias_normal, view_vector, shading_normal);
 #  else
   ambient_lighting = float4(0.0f);
 #  endif
@@ -1102,7 +1113,7 @@ void node_shader_info(float3 position,
   blinn_phong_factor = saturate(blinn_phong_sum);
 #else
   diffuse_shading = float4(0.0f);
-  shadow = 0.0f;
+  shadow = 1.0f;
   ambient_lighting = float4(0.0f);
   half_lambert_factor = 0.0f;
   blinn_phong_factor = 0.0f;

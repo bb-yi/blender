@@ -156,6 +156,11 @@ void SyncModule::sync_volume_passes(const ObjectHandle &ob_handle,
   if (material.volume_occupancy.gpumat == nullptr || material.volume_material.gpumat == nullptr) {
     return;
   }
+  if (GPU_material_status(material.volume_occupancy.gpumat) != GPU_MAT_SUCCESS ||
+      GPU_material_status(material.volume_material.gpumat) != GPU_MAT_SUCCESS)
+  {
+    return;
+  }
 
   blender::Material *blender_mat = GPU_material_get_material(material.volume_material.gpumat);
 

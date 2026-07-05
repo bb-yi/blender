@@ -151,7 +151,8 @@ void init_interface([[maybe_unused]] uint resource_id_raw)
 #endif
 }
 
-#if defined(GPU_VERTEX_SHADER) && defined(DRAW_MODELMAT_CREATE_INFO)
+#if defined(GPU_VERTEX_SHADER) && defined(DRAW_MODELMAT_CREATE_INFO) && \
+    defined(DRW_MODEL_LIB_FUNCTIONS_DEFINED)
 void init_interface()
 {
   init_interface(drw_resource_id_raw());

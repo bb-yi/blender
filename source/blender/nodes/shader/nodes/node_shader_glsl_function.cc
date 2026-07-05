@@ -5827,7 +5827,7 @@ namespace blender
     static std::string build_glsl_geometry_helper_block()
     {
       return R"GLSL(
-#if defined(GPU_FRAGMENT_SHADER) && (defined(MAT_DEFERRED) || defined(MAT_FORWARD) || defined(NPR_SHADER))
+#if defined(GPU_FRAGMENT_SHADER) && (defined(MAT_DEFERRED) || defined(MAT_FORWARD) || defined(MAT_DEPTH) || defined(MAT_SHADOW) || defined(NPR_SHADER))
 vec3 glsl_position()
 {
   return g_data.P;

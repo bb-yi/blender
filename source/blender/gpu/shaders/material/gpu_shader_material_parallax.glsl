@@ -46,7 +46,7 @@ bool parallax_tangent_basis(float4 tangent, out float3 T, out float3 B, out floa
   T = parallax_safe_normalize(tangent.xyz);
   T = cross(N, parallax_safe_normalize(cross(T, N)));
   B = tangent.w * parallax_safe_normalize(cross(N, T));
-  B *= (drw_object_infos().flag & OBJECT_NEGATIVE_SCALE) != 0 ? -1.0f : 1.0f;
+  B *= (object_infos_get().flag & OBJECT_NEGATIVE_SCALE) != 0 ? -1.0f : 1.0f;
   return true;
 #else
   T = float3(1.0f, 0.0f, 0.0f);
