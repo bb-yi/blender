@@ -259,6 +259,26 @@
 - 修复`AOV`通道不同类型交替添加时覆盖的BUG
 - 为`glsl Function`节点在`filter`材质添加支持
 
+## 2026-04-17  64d1a79a72eb
+
+#### 新增功能
+- `glsl Function`节点中允许读取灯光信息结构体,详细见文档的`glsl Function`节点部分
+- `glsl Function`节点中允许读取几何数据,`位置`,`法向`,`引入`
+- `glsl Function`节点中函数使用的`Meta`信息中的默认值允许使用函数表达式
+- `glsl Function`节点中函数入口支持`int`和`bool`类型
+
+#### 修复与改进
+- `glsl Function`节点修复`sampler2D`的语意错误
+- 修复旧版本保存的材质在新版本中打开时`正面剔除`模式丢失的问题
+
+## 2026-04-18  efc8a19d43be
+
+#### 新增功能
+- 无
+
+#### 修复与改进
+- 修复多个使用不同 GLSL 文件的 `GLSL Function` 节点同时参与运算时，内置几何 / 环境 helper 重复定义导致的材质编译报错问题
+
 
 ## 2026-04-19  cf37c8c56d62
 
@@ -404,7 +424,7 @@
 - 修复混合渲染方式下 Forward 材质不写入 Normal 渲染通道，导致法线控制描边读取到纯黑法线的问题
 - 修复透明 AOV 与 `GLSL Function` 灯光访问组合时 deferred hybrid shader 的 closure eval count 不匹配编译错误
 
-## 2026-05-20  0a040bce012
+## 2026-05-20  32a38759f4de
 
 #### 新增功能
 - 合并 Blender 5.1.2 更新，包含官方 5.1.2 修复与版本更新
@@ -414,7 +434,7 @@
 - 更新 NPR Port 启动画面
 - 修复描边相机效果读取 seed 数据与 velocity prepass 交互的问题，避免 velocity 阶段错误携带灯光数据
 - 修复 `GLSL Function` 的 `vec4` 输入在刷新或编译路径中丢失 `w` 分量的问题，并补充对应 Python 回归测试
-- - 恢复独立 `OKLab Color Ramp` 节点，普通 `Color Ramp` 保持 RGB / HSV / HSL 工作流，旧 OKLab 模式文件会迁移回独立节点
+- 恢复独立 `OKLab Color Ramp` 节点，普通 `Color Ramp` 保持 RGB / HSV / HSL 工作流，旧 OKLab 模式文件会迁移回独立节点
 
 ## 2026-05-24  c6933607751a
 
@@ -430,17 +450,13 @@
 ## 2026-05-26  84bf15f74761
 
 #### 新增功能
-- Eevee `Shadow Pool` 最高可选值扩展到 `8192 MB`，默认值保持 `512 MB`，可支持更大规模多灯阴影场景。
-- `Shadow Pool` 设置新增 `2048 MB`、`4096 MB`、`8192 MB` 选项，`GI Irradiance Pool` 仍保持原有上限。
-- `Shader Info` 补充阴影可见性分类，用于区分不同阴影来源与可见性路径。
-- 发布构建中开放实验性资产入口，便于正式包中验证新节点资产。
+- Shader Info 增加阴影可见性分类输出，用于区分自阴影和投射阴影。
+- 扩大阴影池上限为8GB。
+- 实验特性开启时，扩展资产类型会在资产库中对发布构建可见。
 
 #### 修复与改进
-- Eevee 阴影图集会按 GPU texture array layer 能力和实际分配结果自动降级，避免旧显卡、Vulkan/OpenGL 后端限制或显存碎片导致崩溃。
-- 改进 OpenGL 纹理真实分配失败检测，让阴影池分配失败可以触发 Eevee 的逐级降级 fallback。
-- 修复 `Shader Info` 阴影 caster atlas 保护与阴影分类回归测试，减少阴影分类错误。
-- 稳定 Parallax Closure 高度来源，避免高度输入路径不一致。
-- 增加 Eevee Shadow Pool 压力 release test，覆盖 257 灯场景下 `2048 MB` 负例与 `4096/8192 MB` 通过路径。
+- 稳定 Parallax closure 的高度来源，避免相关节点链路在特定组合下失败。
+- 保持旧 Shader Info 节点连接兼容，已有只连接前 5 个输出的工程可以继续打开。
 
 ## 2026-05-31  523671f87353
 
@@ -448,17 +464,15 @@
 - Eevee `Performance` 视图新增阴影与光照探头耗时归因，可展开查看 Shadow Contexts、Shadow Lights、Probe Costs 等细分统计，便于定位阴影图集、灯光与 probe 更新开销。
 - `GLSL Function` 的 `@glsl_meta v1` 支持 `label` 元数据，可为输入/输出 socket 设置本地化或自定义显示名称。
 - 新增 `GLSL Script Expression` 节点，可在 Shader 节点树中直接编写单行 GLSL 表达式，并手动定义输入变量。
-- `GLSL Script Expression` 节点补充节点内控件与侧栏面板，变量、表达式和输出类型等设置会分组显示，节点 UI 更易整理。
 
 #### 修复与改进
-- 修复 `GLSL Function` 放入节点组后部分路径无法正确内联或编译的问题，并补充节点组回归测试。
+- 修复 `GLSL Function` 放入节点组后部分路径无法正确内联或编译的问题。
 - 修复 `GLSL Function` 经过节点组内联后颜色 alpha 分量丢失的问题。
 - 修复混合 Forward 材质会清掉或丢失背后 AOV 数据的问题，保留透明/混合表面后的 AOV 读取结果。
 - 修复 `Scene Color` 的 `Position` 输出在 filter pass 中采样 UV 偏移的问题，使位置通道读取与屏幕像素对齐。
-- 修复 `GLSL Script Expression` 节点面板绘制时的崩溃问题，并调整控件折叠与节点内显示逻辑。
-- 修复 Eevee 性能分析器 release 报告契约，移除不稳定的细分字段，避免发布测试覆盖非稳定输出。
+- 修复 View Layer 集合开启 Holdout 后，集合内带 `Outline Control` 的材质仍会产生 NPR 描边的问题；Holdout 对象仍参与深度/遮挡，但不再写入材质描边或 marked-edge 描边。
 
-## 暂存
+## 2026-06-07  1a518a697c72
 
 #### 新增功能
 - World / World NPR 节点树现在可以从添加菜单中直接使用 `GLSL Function` 与 `GLSL Script Expression`。
@@ -467,17 +481,54 @@
 - `Image Sample` 节点现在可以在 `Filter Materials` 中添加和使用，便于滤镜材质直接采样图像或 AOV 链路。
 
 #### 修复与改进
-- 继续改进 Eevee 性能分析器归因逻辑，减少材质、阴影和 probe 统计被错误归入其他阶段的情况。
-- 继续精简 Eevee 性能分析器 release 报告输出，保持发布测试只覆盖稳定的核心归因。
-- 修复 View Layer 集合开启 Holdout 后，集合内带 `Outline Control` 的材质仍会产生 NPR 描边的问题；Holdout 对象仍参与深度/遮挡，但不再写入材质描边或 marked-edge 描边。
-- 修复 World / World NPR 中普通 `Image Texture` 未连接 `Vector` 时固定采样同一 texel 的问题，默认改为使用窗口坐标，避免多张 2D 贴图混合退化为常量颜色。
-- 修复 NPR 材质与多贴图混合场景下 texture sampler 槽位重复占用的问题，降低 shader 编译失败和错误采样概率。
-- `GLSL Function` 转换指南补充 metadata 要求，减少缺少参数声明时的解析歧义。
-- 修复 `GLSL Function` Define 解析边界、面板可见性和节点刷新后 UI 状态不一致的问题。
-- 修复 `GLSL Function` 整数下拉选项的交互、RNA 缓存和节点 socket 缓存更新问题。
+- 修复 View Layer 集合开启 Holdout 后，集合内带 `Outline Control` 的材质仍会产生 NPR 描边的问题。
+- 修复 World / World NPR 中普通 `Image Texture` 未连接 `Vector` 时固定采样同一 texel 的问题。
+- 修复 NPR 材质与多贴图混合场景下 texture sampler 槽位重复占用的问题。
 - 修复最终渲染与视口渲染模式判断混用的问题，避免 filter / NPR 路径按错误上下文执行。
-- 修复 `Image Sample` 在滤镜材质中不能从添加菜单使用的问题，并补充 AOV 偏移采样回归测试。
-- 修复 Eevee filter material pass 依赖不稳定的问题，减少滤镜材质读取上一阶段结果时的错序、漏同步和 stale resource 风险。
+- 修复 `Image Sample` 在滤镜材质中不能从添加菜单使用的问题。
+- 修复 Eevee filter material pass 依赖不稳定的问题，减少错序、漏同步和 stale resource 风险。
+
+## 2026-06-28  0e2bb4d50c03
+
+#### 新增功能
+- `Light Info` 节点新增 `Visible` 输出，绑定灯光对象不可见、隐藏或无效时输出 `0`，可用于手动控制 `Power` / `Color` / Mix 等节点逻辑。
+- `Scene Color` 改为输出 `Color Image`、`Depth Image`、`Normal Image`、`Position Image` 四个图像句柄，并通过 `Image Sample` 采样，便于在 Filter / NPR 链路中做邻域采样和偏移采样。
+- `Image Sample` 新增 `UV` 坐标模式，并将坐标输入统一为 `Vector`，输出补充 `Alpha`。
+- `Outline Control` 新增 Malt 风格描边宽度控制能力，支持宽度变化、边缘宽度映射和参数折叠分组。
+- `GLSL Function` 增加矩阵边界 socket 支持，改善矩阵输入 / 输出在节点接口和 GLSL 函数边界中的兼容性。
+- `Render Info` 补充 Eevee 采样信息输出，可读取当前采样相关状态。
+- 启动画面和窗口版本信息补充 NPR Port 构建标识，便于区分不同自定义构建。
+
+#### 修复与改进
+- 修复 `Shader Info` 在反射探针 / reflection capture 场景下的读取路径，恢复反射捕获中的相关输出。
+- 修复 Vulkan 路径下 Outline storage image 兼容性问题，并将描边信息存储调整为整数图像，减少格式不匹配风险。
+- 修复 Eevee 中重复注册 light create info 的问题，避免 shader create info 重复定义导致启动或编译异常。
+
+## 2026-07-03  e970ee6eca06
+
+#### 新增功能
+- 新增 Eevee Filter Graph 工作流，Filter Materials 可以通过图节点组织输入、滤镜材质和阶段输出。
+- `GLSL Function` 新增重置默认参数操作，便于恢复节点输入默认值。
+
+#### 修复与改进
+- 修复 Vulkan 路径下 NPR 资源绑定与 descriptor fallback 兼容性问题，并补齐 lookdev dummy AOV 尺寸处理。
+- 修复 Metal 下 Eevee shadow setup shader 的 `exp2` 重载歧义，避免相关平台编译失败。
+
+## 2026-07-05  8474d1845a91
+
+#### 新增功能
+- 新增材质 shader 重编译诊断入口，便于在材质面板和节点编辑器中检查、刷新材质编译状态。
+
+#### 修复与改进
+- 修复视口 AOV 在 NPR 输入链路中被过早清理，导致 Filter / GLSL Function 无法读取当前 AOV 的问题。
+- 修复 NPR 读取当前 self AOV 时拿到旧帧或空数据的问题，提升透明和混合材质后的 AOV 读取稳定性。
+- 修复 dithered transparency 在 prepass 中丢失几何 helper / 阴影透明混合信息的问题，避免相关 shader 编译和渲染回归。
+
+## 暂存
+
+#### 新增功能
+
+#### 修复与改进
 
 # TODO
 
