@@ -237,41 +237,92 @@ bool material_stencil_state_writes(const MaterialStencilState &state)
 }
 
 static PassMain::Sub *material_stencil_pass_add(PassSortable &stencil_ps,
-                                                Instance &inst,
-                                                blender::Material *blender_mat,
-                                                GPUMaterial *gpumat,
-                                                bool has_motion,
-                                                bool force_write_id)
+                                                 Instance &inst,
+                                                 blender::Material *blender_mat,
+                                                 GPUMaterial *gpumat,
+                                                 bool has_motion,
+                                                 bool force_write_id,
+                                                 bool clear_deferred_prepass_marker)
 {
   BLI_assert_msg(GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT) == false,
                  "Transparent stencil writers are not supported in v1.");
 
   MaterialStencilState stencil = material_stencil_state_get(blender_mat);
-  if (!material_stencil_state_writes(stencil)) {
+  if (!stencil.enabled) {
     return nullptr;
   }
 
-  PassMain::Sub *pass = &stencil_ps.sub(GPU_material_get_name(gpumat),
-                                        material_stencil_order(blender_mat));
-  pass->bind_texture(RBUFS_UTILITY_TEX_SLOT, inst.pipelines.utility_tx);
-  pass->bind_resources(inst.uniform_data);
-  pass->bind_resources(inst.velocity);
-  pass->bind_resources(inst.sampling);
-  pass->bind_resources(inst.render_textures);
+  const bool writes_stencil = material_stencil_state_writes(stencil);
+  const float sort_order = material_stencil_order(blender_mat) + (writes_stencil ? 0.0f : 0.001f);
+  const char *pass_name = GPU_material_get_name(gpumat);
   const bool write_id = force_write_id || GPU_material_flag_get(gpumat, GPU_MATFLAG_RAYCAST);
+
+  auto bind_pass_resources = [&](PassMain::Sub &pass) {
+    pass.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst.pipelines.utility_tx);
+    pass.bind_resources(inst.uniform_data);
+    pass.bind_resources(inst.velocity);
+    pass.bind_resources(inst.sampling);
+    pass.bind_resources(inst.render_textures);
+  };
+
+  auto set_pass_state = [&](PassMain::Sub &pass, const bool write_prepass_attachments) {
+    DRWState state = material_write_state(
+                         blender_mat, write_prepass_attachments, write_prepass_attachments) |
+                     DRW_STATE_WRITE_STENCIL | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
+                     inst.film.depth.test_state |
+                     material_surface_cull_state(material_surface_cull_method(blender_mat)) |
+                     stencil.test_state;
+    state = material_ztest_state_replace(
+        state, material_ztest_mode(blender_mat), inst.film.depth.test_state);
+    pass.state_set(state);
+  };
+
+  if (clear_deferred_prepass_marker) {
+    /* Stencil-enabled deferred materials replace the regular prepass. Clear the 5.2
+     * "prepass untouched" marker in a small stencil-only draw before applying user stencil ops, so
+     * AOV/outline clearing sees these pixels as touched while the low user bits stay intact. */
+    PassMain::Sub *marker_pass = &stencil_ps.sub(pass_name, sort_order - 0.00025f);
+    bind_pass_resources(*marker_pass);
+    set_pass_state(*marker_pass, false);
+    marker_pass->state_stencil_op(
+        GPU_STENCIL_OP_KEEP, GPU_STENCIL_OP_KEEP, GPU_STENCIL_OP_REPLACE_VALUE);
+    marker_pass->state_stencil(uint8_t(DeferredLayerBase::StencilBits::THICKNESS_FROM_SHADOW),
+                               stencil.reference,
+                               stencil.read_mask);
+    marker_pass->state_stencil_test(stencil.test);
+    marker_pass->material_set(*inst.manager, gpumat, true);
+    marker_pass->push_constant("surface_cull_mode", int(material_surface_cull_method(blender_mat)));
+  }
+
+  PassMain::Sub *pass = &stencil_ps.sub(pass_name, sort_order);
+  bind_pass_resources(*pass);
   pass->subpass_transition(GPU_ATTACHMENT_WRITE,
                            {GPU_ATTACHMENT_WRITE, /* normal */
                             write_id ? GPU_ATTACHMENT_WRITE : GPU_ATTACHMENT_IGNORE,
                             has_motion ? GPU_ATTACHMENT_WRITE : GPU_ATTACHMENT_IGNORE});
-  DRWState state = material_write_state(blender_mat, false, true) |
-                   DRW_STATE_WRITE_STENCIL | DRW_STATE_CLIP_CONTROL_UNIT_RANGE |
-                   inst.film.depth.test_state |
-                   material_surface_cull_state(material_surface_cull_method(blender_mat));
-  state = material_ztest_state_replace(
-      state, material_ztest_mode(blender_mat), inst.film.depth.test_state);
-  pass->state_set(state);
-  pass->state_stencil_op(stencil.fail, stencil.zfail, stencil.pass);
-  pass->state_stencil(stencil.write_mask, stencil.reference, stencil.read_mask);
+  /* Match the 5.1 stencil path: this pass replaces the material prepass for stencil-enabled
+   * surfaces, so it must write the same depth/color attachments in addition to user stencil bits. */
+  set_pass_state(*pass, true);
+  GPUStencilOpType fail_op = stencil.fail;
+  GPUStencilOpType zfail_op = stencil.zfail;
+  GPUStencilOpType pass_op = stencil.pass;
+  uint8_t write_mask = stencil.write_mask;
+  uint8_t reference = stencil.reference;
+  if (clear_deferred_prepass_marker) {
+    const uint8_t prepass_marker = uint8_t(DeferredLayerBase::StencilBits::THICKNESS_FROM_SHADOW);
+    if (!writes_stencil) {
+      fail_op = GPU_STENCIL_OP_KEEP;
+      zfail_op = GPU_STENCIL_OP_KEEP;
+      pass_op = GPU_STENCIL_OP_REPLACE_VALUE;
+      write_mask = prepass_marker;
+      reference = stencil.reference;
+    }
+    else if (ELEM(stencil.pass, GPU_STENCIL_OP_REPLACE_VALUE, GPU_STENCIL_OP_ZERO)) {
+      write_mask |= prepass_marker;
+    }
+  }
+  pass->state_stencil_op(fail_op, zfail_op, pass_op);
+  pass->state_stencil(write_mask, reference, stencil.read_mask);
   pass->state_stencil_test(stencil.test);
   pass->material_set(*inst.manager, gpumat, true);
   pass->push_constant("surface_cull_mode", int(material_surface_cull_method(blender_mat)));
@@ -993,7 +1044,7 @@ PassMain::Sub *ForwardPipeline::stencil_opaque_add(blender::Material *blender_ma
                                                    bool force_write_id)
 {
   PassMain::Sub *pass = material_stencil_pass_add(
-      stencil_ps_, inst_, blender_mat, gpumat, has_motion, force_write_id);
+      stencil_ps_, inst_, blender_mat, gpumat, has_motion, force_write_id, false);
   has_stencil_ |= pass != nullptr;
   return pass;
 }
@@ -1488,7 +1539,9 @@ void DeferredLayer::begin_sync()
     clear_aovs_ps_.bind_image("rp_cryptomatte_img", &inst_.render_buffers.cryptomatte_tx);
     clear_aovs_ps_.bind_resources(inst_.cryptomatte);
     clear_aovs_ps_.bind_resources(inst_.uniform_data);
-    clear_aovs_ps_.state_stencil(0xFFu, 0x0u, 0xFFu);
+    clear_aovs_ps_.state_stencil(EEVEE_STENCIL_INTERNAL_MASK,
+                                 0x0u,
+                                 uint8_t(StencilBits::THICKNESS_FROM_SHADOW));
   }
   {
     aov_clear_ps_.init();
@@ -1772,7 +1825,7 @@ PassMain::Sub *DeferredLayerBase::stencil_add(blender::Material *blender_mat,
                                               bool force_write_id)
 {
   return material_stencil_pass_add(
-      stencil_ps_, inst, blender_mat, gpumat, has_motion, force_write_id);
+      stencil_ps_, inst, blender_mat, gpumat, has_motion, force_write_id, true);
 }
 
 PassMain::Sub *DeferredLayer::stencil_add(blender::Material *blender_mat,
@@ -1832,25 +1885,12 @@ PassMain::Sub *DeferredLayer::material_add(blender::Material *blender_mat, GPUMa
   if (blender_mat->blend_flag & MA_BL_THICKNESS_FROM_SHADOW) {
     material_stencil_bits |= uint8_t(StencilBits::THICKNESS_FROM_SHADOW);
   }
-  const MaterialStencilState stencil = material_stencil_state_get(blender_mat);
-  const bool is_stencil_reader = stencil.enabled && !material_stencil_state_writes(stencil);
-  if (is_stencil_reader) {
-    /* Stencil readers have their test deferred from the prepass to here, so the stencil writer
-     * pass has already executed and the user stencil bits are in place. */
-    material_pass->state_stencil_op(
-        GPU_STENCIL_OP_KEEP, GPU_STENCIL_OP_KEEP, GPU_STENCIL_OP_REPLACE_VALUE);
-    material_pass->state_stencil(EEVEE_STENCIL_INTERNAL_MASK,
-                                 material_stencil_bits | stencil.reference,
-                                 stencil.read_mask);
-    material_pass->state_stencil_test(stencil.test);
-  }
-  else {
-    /* We use this opportunity to clear the stencil bits. The undefined areas are discarded using
-     * the gbuf header value. */
-    material_pass->state_stencil(EEVEE_STENCIL_INTERNAL_MASK,
-                                 material_stencil_bits,
-                                 EEVEE_STENCIL_INTERNAL_MASK);
-  }
+  /* This pass is shared by ShaderKey, so it must not carry per-material user stencil state.
+   * The actual material sub-pass applies user stencil tests in material_surface_stencil_state_set().
+   * We only set the internal EEVEE bits here; undefined areas are discarded by the GBuffer header. */
+  material_pass->state_stencil(EEVEE_STENCIL_INTERNAL_MASK,
+                               material_stencil_bits,
+                               EEVEE_STENCIL_INTERNAL_MASK);
 
   return material_pass;
 }
@@ -1927,17 +1967,15 @@ gpu::Texture *DeferredLayer::render(View &render_view,
      * clear AOVs for all the pixels touched by this layer. */
     GPU_framebuffer_clear_stencil(prepass_fb, 0xFFu);
     prepass_.render(render_view, rb.depth_tx, true);
+    if (has_stencil_) {
+      inst_.manager->submit(stencil_ps_, render_view);
+    }
     if (!clear_aovs_ps_.is_empty() && !preserve_npr_aov_input) {
       inst_.manager->submit(clear_aovs_ps_);
     }
   }
 
   if (closure_count_ == 0) {
-    if (has_stencil_) {
-      ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainDeferredPrepass);
-      GPU_framebuffer_bind(prepass_fb);
-      inst_.manager->submit(stencil_ps_, render_view);
-    }
     inst_.hiz_buffer.swap_layer();
     inst_.hiz_buffer.update();
     npr_aov_color_input_tx_ = rb.rp_color_tx;
@@ -1976,17 +2014,9 @@ gpu::Texture *DeferredLayer::render(View &render_view,
   {
     ScopedTelemetrySample telemetry_sample(inst_.telemetry,
                                            TelemetryStageId::MainDeferredGBufferPass);
-    if (has_stencil_ && !GPU_stencil_export_support()) {
-      /* GBuffer::bind() clears the full stencil buffer on backends without shader stencil export.
-       * Material stencil writers must run after that clear so deferred GBuffer readers can observe
-       * the user bits. */
-      GPU_framebuffer_bind(gbuffer_fb);
-      GPU_framebuffer_clear_stencil(gbuffer_fb, 0x0u);
-    }
-    if (has_stencil_) {
-      GPU_framebuffer_bind(prepass_fb);
-      inst_.manager->submit(stencil_ps_, render_view);
-    }
+    /* Keep the stencil values produced by the 5.1-style material stencil prepass. Replaying the
+     * pass here would run against the already-filled depth buffer and can prevent behind-surface
+     * writers from restoring the mask before readers shade in the GBuffer pass. */
     inst_.gbuffer.bind(gbuffer_fb, false, !has_stencil_);
     inst_.manager->submit(gbuffer_ps_, render_view);
   }

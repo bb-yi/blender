@@ -56,25 +56,19 @@ static void material_surface_stencil_state_set(PassMain::Sub &pass,
     if (blender_mat->blend_flag & MA_BL_THICKNESS_FROM_SHADOW) {
       material_stencil_bits |= uint8_t(DeferredLayerBase::StencilBits::THICKNESS_FROM_SHADOW);
     }
-    /* Stencil readers must NOT test in the prepass because the stencil writer pass runs after.
-     * Applying the reader's test here would reject its fragments before depth is written, making
-     * the later GBuffer DEPTH_EQUAL test fail. Readers get their stencil test deferred to the
-     * GBuffer pass instead. */
-    const bool is_stencil_reader = stencil.enabled && !material_stencil_state_writes(stencil);
-    if (material_stencil_bits == 0u && (!stencil.enabled || is_stencil_reader)) {
+    /* Keep deferred shading gated by the same user stencil bits that the stencil prepass used.
+     * The shared GBuffer pass cannot hold per-material user stencil state, so this is applied on
+     * the concrete material sub-pass. */
+    if (material_stencil_bits == 0u && !stencil.enabled) {
       return;
     }
-    const uint8_t reference = material_stencil_bits |
-                              (stencil.enabled && !is_stencil_reader ? stencil.reference : 0u);
-    const uint8_t compare_mask = (stencil.enabled && !is_stencil_reader) ?
-                                     stencil.read_mask :
-                                     EEVEE_STENCIL_INTERNAL_MASK;
+    const uint8_t reference = material_stencil_bits | (stencil.enabled ? stencil.reference : 0u);
+    const uint8_t compare_mask = stencil.enabled ? stencil.read_mask : EEVEE_STENCIL_INTERNAL_MASK;
 
     pass.state_stencil_op(
         GPU_STENCIL_OP_KEEP, GPU_STENCIL_OP_KEEP, GPU_STENCIL_OP_REPLACE_VALUE);
     pass.state_stencil(EEVEE_STENCIL_INTERNAL_MASK, reference, compare_mask);
-    pass.state_stencil_test((stencil.enabled && !is_stencil_reader) ? stencil.test :
-                                                                      GPU_STENCIL_ALWAYS);
+    pass.state_stencil_test(stencil.enabled ? stencil.test : GPU_STENCIL_ALWAYS);
     return;
   }
 
@@ -860,8 +854,8 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
                                   material_has_flag(mat.shading, GPU_MATFLAG_TRANSPARENT);
 
     MaterialStencilState stencil = material_stencil_state_get(blender_mat);
-    if (!hide_on_camera && material_stencil_state_writes(stencil) &&
-        !mat.is_alpha_blend_transparent && mat.prepass.gpumat != nullptr)
+    if (!hide_on_camera && mat.has_surface && stencil.enabled && !mat.is_alpha_blend_transparent &&
+        mat.prepass.gpumat != nullptr)
     {
       const bool use_forward_stencil_pipeline = blender_mat->surface_render_method ==
                                                 MA_SURFACE_METHOD_FORWARD;
@@ -884,9 +878,11 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
                                      ob->refraction_layer_index,
                                      has_motion,
                                      material_has_flag(mat.npr, GPU_MATFLAG_RAYCAST));
-      /* Keep the regular prepass active. Deferred GBuffer shading uses DEPTH_EQUAL and still
-       * depends on the prepass depth; the stencil pass runs afterward to apply the user stencil
-       * mask/ops in stencil_order without replacing that depth path. */
+      if (mat.stencil.sub_pass != nullptr) {
+        /* The stencil pass is the 5.1-style material prepass for stencil-enabled surfaces. It
+         * writes depth, prepass attachments, and user stencil in stencil_order before HiZ/shadows. */
+        mat.prepass.sub_pass = nullptr;
+      }
     }
 
     return mat;
