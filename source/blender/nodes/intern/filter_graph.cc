@@ -70,6 +70,34 @@ static int filter_graph_scene_color_output_index(const char *identifier)
   return -1;
 }
 
+static int filter_graph_legacy_scene_color_source_output_index(const bNode &node)
+{
+  switch (node.custom1) {
+    case SHD_SCENE_SOURCE_DEPTH:
+      return 1;
+    case SHD_SCENE_SOURCE_NORMAL:
+      return 2;
+    case SHD_SCENE_SOURCE_POSITION:
+      return 3;
+    case SHD_SCENE_SOURCE_COLOR:
+    case SHD_SCENE_SOURCE_SHADOW:
+    default:
+      return 0;
+  }
+}
+
+static const char *filter_graph_legacy_scene_color_sample_output_identifier(
+    const char *identifier)
+{
+  if (STREQ(identifier, "Color")) {
+    return "Color";
+  }
+  if (STREQ(identifier, "Alpha")) {
+    return "Alpha";
+  }
+  return nullptr;
+}
+
 static bNodeSocket *filter_graph_find_first_image_socket(bNode &node,
                                                          const eNodeSocketInOut in_out)
 {
@@ -195,6 +223,70 @@ static bNode *filter_graph_ensure_pass_input_node(Material &material,
   return node;
 }
 
+static bNodeSocket *filter_graph_find_image_sample_vector_input(bNode &node)
+{
+  if (bNodeSocket *socket = bke::node_find_socket(node, SOCK_IN, "Vector"_ustr)) {
+    return socket;
+  }
+  return bke::node_find_socket(node, SOCK_IN, "Offset"_ustr);
+}
+
+static bNode *filter_graph_add_legacy_scene_color_image_sample(bNodeTree &ntree,
+                                                               bNode &scene_color_node,
+                                                               bNode &pass_input_node,
+                                                               const int scene_output_index)
+{
+  bNode *image_sample = bke::node_add_node(nullptr, ntree, "ShaderNodeNPR_ImageSample"_ustr);
+  if (image_sample == nullptr) {
+    return nullptr;
+  }
+
+  image_sample->location[0] = scene_color_node.location[0];
+  image_sample->location[1] = scene_color_node.location[1];
+
+  const std::string pass_input_identifier = "Image_" + std::to_string(scene_output_index);
+  bNodeSocket *pass_input_output = bke::node_find_socket(
+      pass_input_node, SOCK_OUT, UString(pass_input_identifier.c_str()));
+  bNodeSocket *sample_image_input = bke::node_find_socket(*image_sample, SOCK_IN, "Image"_ustr);
+  if (pass_input_output != nullptr && sample_image_input != nullptr &&
+      !filter_graph_node_link_exists(
+          ntree, pass_input_node, *pass_input_output, *image_sample, *sample_image_input))
+  {
+    bke::node_add_link(
+        ntree, pass_input_node, *pass_input_output, *image_sample, *sample_image_input);
+  }
+
+  bNodeSocket *scene_vector_input = bke::node_find_socket(
+      scene_color_node, SOCK_IN, "Vector"_ustr);
+  bNodeSocket *sample_vector_input = filter_graph_find_image_sample_vector_input(*image_sample);
+  if (scene_vector_input == nullptr || sample_vector_input == nullptr) {
+    return image_sample;
+  }
+
+  Vector<bNodeLink *> vector_links;
+  for (bNodeLink &link : ntree.links) {
+    if (link.tonode == &scene_color_node && link.tosock == scene_vector_input &&
+        link.fromnode != nullptr && link.fromsock != nullptr)
+    {
+      vector_links.append(&link);
+    }
+  }
+
+  if (!vector_links.is_empty()) {
+    image_sample->custom1 = SHD_IMG_SAMPLE_OFFSET_UV;
+  }
+  for (bNodeLink *link : vector_links) {
+    if (!filter_graph_node_link_exists(
+            ntree, *link->fromnode, *link->fromsock, *image_sample, *sample_vector_input))
+    {
+      bke::node_add_link(
+          ntree, *link->fromnode, *link->fromsock, *image_sample, *sample_vector_input);
+    }
+  }
+
+  return image_sample;
+}
+
 struct LegacyFilterGraphInput {
   int scene_output_index;
   int input_identifier;
@@ -216,7 +308,22 @@ static void filter_graph_route_scene_color_to_pass_input(Main &bmain,
     bNodeSocket *socket;
   };
 
+  struct SampledLinkTarget {
+    bNode *scene_color_node;
+    int scene_output_index;
+    const char *sample_output_identifier;
+    bNode *node;
+    bNodeSocket *socket;
+  };
+
+  struct ImageSampleEntry {
+    bNode *scene_color_node;
+    int scene_output_index;
+    bNode *image_sample_node;
+  };
+
   Vector<LinkTarget> targets;
+  Vector<SampledLinkTarget> sampled_targets;
   Vector<bNodeLink *> links_to_remove;
   Vector<bNode *> scene_color_nodes;
   for (bNode &node : ntree->nodes) {
@@ -237,11 +344,23 @@ static void filter_graph_route_scene_color_to_pass_input(Main &bmain,
         links_to_remove.append(&link);
         has_migrated_links = true;
       }
+      else if (const char *sample_output_identifier =
+                   filter_graph_legacy_scene_color_sample_output_identifier(
+                       link.fromsock->identifier))
+      {
+        sampled_targets.append({&node,
+                                filter_graph_legacy_scene_color_source_output_index(node),
+                                sample_output_identifier,
+                                link.tonode,
+                                link.tosock});
+        links_to_remove.append(&link);
+        has_migrated_links = true;
+      }
       else {
         has_kept_links = true;
       }
     }
-    if (has_migrated_links && !has_kept_links) {
+    if (!has_kept_links) {
       scene_color_nodes.append(&node);
     }
   }
@@ -262,6 +381,40 @@ static void filter_graph_route_scene_color_to_pass_input(Main &bmain,
       bke::node_add_link(*ntree, pass_input_node, *pass_input_output, *target.node, *target.socket);
     }
   }
+
+  Vector<ImageSampleEntry> image_sample_entries;
+  for (const SampledLinkTarget &target : sampled_targets) {
+    bNode *image_sample = nullptr;
+    for (const ImageSampleEntry &entry : image_sample_entries) {
+      if (entry.scene_color_node == target.scene_color_node &&
+          entry.scene_output_index == target.scene_output_index)
+      {
+        image_sample = entry.image_sample_node;
+        break;
+      }
+    }
+    if (image_sample == nullptr) {
+      image_sample = filter_graph_add_legacy_scene_color_image_sample(
+          *ntree, *target.scene_color_node, pass_input_node, target.scene_output_index);
+      if (image_sample == nullptr) {
+        continue;
+      }
+      image_sample_entries.append(
+          {target.scene_color_node, target.scene_output_index, image_sample});
+    }
+
+    bNodeSocket *sample_output = bke::node_find_socket(
+        *image_sample, SOCK_OUT, UString(target.sample_output_identifier));
+    if (sample_output == nullptr) {
+      continue;
+    }
+    if (!filter_graph_node_link_exists(
+            *ntree, *image_sample, *sample_output, *target.node, *target.socket))
+    {
+      bke::node_add_link(*ntree, *image_sample, *sample_output, *target.node, *target.socket);
+    }
+  }
+
   for (bNode *scene_color_node : scene_color_nodes) {
     bke::node_remove_node(&bmain, *ntree, *scene_color_node, true);
   }
@@ -299,6 +452,10 @@ static bool filter_graph_prepare_legacy_filter_material(
       const int scene_output_index = filter_graph_scene_color_output_index(link.fromsock->identifier);
       if (scene_output_index >= 0) {
         used_scene_color_outputs[scene_output_index] = true;
+      }
+      else if (filter_graph_legacy_scene_color_sample_output_identifier(link.fromsock->identifier))
+      {
+        used_scene_color_outputs[filter_graph_legacy_scene_color_source_output_index(node)] = true;
       }
     }
   }
