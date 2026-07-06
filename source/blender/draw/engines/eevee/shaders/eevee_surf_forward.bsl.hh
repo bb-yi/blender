@@ -26,6 +26,7 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_geom_iface_info)
 
 /* Global thickness because it is needed for closure_to_rgba. */
 Thickness g_thickness_forward;
+float3 g_forward_surface_lighting_P;
 
 float4 closure_to_rgba_forward(Closure /*cl_unused*/)
 {
@@ -39,8 +40,11 @@ float4 closure_to_rgba_forward(Closure /*cl_unused*/)
   const float2 frag_co = gl_FragCoord.xy;
 
   float3 radiance, transmittance;
+  float3 nodetree_P = g_data.P;
+  g_data.P = g_forward_surface_lighting_P;
   eevee::forward_lighting_eval(
       views.get(0), resource_id, g_thickness_forward, frag_co, radiance, transmittance);
+  g_data.P = nodetree_P;
 
   /* Reset for the next closure tree. */
   float noise = util_tx.fetch(frag_co, UTIL_BLUE_NOISE_LAYER).r;
@@ -55,10 +59,11 @@ float4 closure_to_rgba_forward(Closure /*cl_unused*/)
     /* clang-format on */
     [[resource_table]] eevee::LightprobeSphereRenderData &lp_spheres = lightprobes.spheres;
 
-    float3 V = -views.get(0).world_incident_vector(g_data.P);
-    eevee::LightProbeSample samp = lightprobes.load(frag_co, g_data.P, g_data.Ng, V);
+    float3 V = -views.get(0).world_incident_vector(g_forward_surface_lighting_P);
+    eevee::LightProbeSample samp = lightprobes.load(
+        frag_co, g_forward_surface_lighting_P, g_data.Ng, V);
     float3 radiance_behind = lp_spheres.spherical_sample_normalized_with_parallax(
-        samp, g_data.P, V, 0.0);
+        samp, g_forward_surface_lighting_P, V, 0.0);
 
 #  ifndef MAT_FIRST_LAYER
     { /* Limit resource guard to this scope. */
@@ -131,14 +136,21 @@ SurfaceForwardFragOut surf_forward_impl(
   const ViewMatrices view = views.get(0);
 
   init_globals(uni, view, front_face);
+  g_forward_surface_lighting_P = g_data.P;
 
   float noise = util_tx.fetch(gl_FragCoord.xy, UTIL_BLUE_NOISE_LAYER).r;
   float closure_rand = fract(noise + sampling.rng_1D_get(SAMPLING_CLOSURE));
 
 #ifdef MAT_DEPTH_OFFSET
   float depth_offset = nodetree_depth_offset();
-  float volume_depth = material_depth_offset_screen_depth(depth_offset);
-  material_depth_offset_apply_nodetree_position(depth_offset);
+  float volume_depth = reverse_z::read(frag_co.z);
+  if (!material_depth_offset_is_zero(depth_offset)) {
+    volume_depth = material_depth_offset_screen_depth(depth_offset);
+    float3 depth_offset_P = material_depth_offset_apply_nodetree_position(depth_offset);
+#  ifndef MAT_DEPTH_OFFSET_NO_LIGHTING
+    g_forward_surface_lighting_P = depth_offset_P;
+#  endif
+  }
   material_depth_offset_write(depth_offset);
 #else
   float volume_depth = reverse_z::read(frag_co.z);
@@ -165,8 +177,11 @@ SurfaceForwardFragOut surf_forward_impl(
 #endif
 
   float3 radiance, transmittance;
+  float3 nodetree_P = g_data.P;
+  g_data.P = g_forward_surface_lighting_P;
   eevee::forward_lighting_eval(
       view, resource_id, g_thickness_forward, gl_FragCoord.xy, radiance, transmittance);
+  g_data.P = nodetree_P;
 
   /* Volumetric resolve and compositing. */
   float2 uvs = gl_FragCoord.xy * uni.uniform_buf.volumes.main_view_extent_inv;

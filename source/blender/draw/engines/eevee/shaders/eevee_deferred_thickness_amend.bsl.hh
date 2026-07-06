@@ -125,18 +125,24 @@ void amend_frag([[resource_table]] ThicknessAmend &srt,
   /* Bias the shading point position because of depth buffer precision.
    * Constant is taken from https://www.terathon.com/gdc07_lengyel.pdf. */
   constexpr float bias = 2.4e-7f;
-  const float depth = texelFetch(hiz.hiz_tx, texel, 0).r - bias;
+  const float depth = texelFetch(hiz.hiz_tx, texel, 0).r;
+
+  gbuffer::Header header = gbuffer::Header::from_data(
+      texelFetch(srt.gbuf_header_tx, int3(texel, 0), 0).r);
+  uchar data_layer = uni.pipeline_buf.gbuffer_additional_data_layer_id;
+  float2 data_packed = imageLoad(srt.gbuf_normal_img, int3(texel, int(data_layer))).rg;
+  gbuffer::AdditionalInfo additional_info = gbuffer::AdditionalInfo::unpack(data_packed);
+  const float surface_depth = (header.use_surface_depth() ? additional_info.surface_depth : depth) -
+                              bias;
 
   const ViewMatrices view = views.get(0);
 
-  const float3 P = view.point_screen_to_world(float3(v_out.uv, depth));
+  const float3 P = view.point_screen_to_world(float3(v_out.uv, surface_depth));
   const float vPz = dot(view.forward(), P) - dot(view.forward(), view.position());
 
   const float3 Ng = gbuffer::normal_unpack(imageLoad(srt.gbuf_normal_img, int3(texel, 0)).rg);
 
-  uchar data_layer = uni.pipeline_buf.gbuffer_additional_data_layer_id;
-  float2 data_packed = imageLoad(srt.gbuf_normal_img, int3(texel, int(data_layer))).rg;
-  Thickness gbuffer_thickness = gbuffer::thickness_unpack(data_packed.x);
+  Thickness gbuffer_thickness = additional_info.thickness;
   if (gbuffer_thickness.value() == 0.0f) {
     return;
   }

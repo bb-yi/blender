@@ -140,12 +140,13 @@ void light_eval_frag([[resource_table]] LightEval &srt,
 
   const float depth = texelFetch(hiz.hiz_tx, texel, 0).r - bias;
   const gbuffer::Layers gbuf = reader.read_layers(texel);
+  const float surface_depth = reader.read_surface_depth(gbuf.header, texel, depth);
   const Thickness thickness = reader.read_thickness(gbuf.header, texel);
   const uchar closure_count = gbuf.header.closure_len();
 
   const ViewMatrices view = views.get(0);
 
-  const float3 P = view.point_screen_to_world(float3(v_out.screen_uv, depth));
+  const float3 P = view.point_screen_to_world(float3(v_out.screen_uv, surface_depth));
   const float3 Ng = gbuf.header.geometry_normal(gbuf.surface_N());
   const float3 V = view.world_incident_vector(P);
   const float vPz = dot(view.forward(), P) - dot(view.forward(), view.position());
@@ -292,6 +293,7 @@ void sphere_eval_frag([[resource_table]] LightEvalIterator &lights,
   }
 
   const uchar closure_count = gbuf.header.closure_len();
+  const float surface_depth = reader.read_surface_depth(gbuf.header, texel, depth);
   const Thickness thickness = reader.read_thickness(gbuf.header, texel);
 
   float3 albedo_front = float3(0.0f);
@@ -323,7 +325,7 @@ void sphere_eval_frag([[resource_table]] LightEvalIterator &lights,
 
   const ViewMatrices view = views.get(0);
 
-  float3 P = view.point_screen_to_world(float3(v_out.screen_uv, depth));
+  float3 P = view.point_screen_to_world(float3(v_out.screen_uv, surface_depth));
   float3 Ng = gbuf.header.geometry_normal(gbuf.surface_N());
   float3 V = view.world_incident_vector(P);
   float vPz = dot(view.forward(), P) - dot(view.forward(), view.position());
@@ -402,6 +404,7 @@ void planar_eval_frag([[resource_table]] PlanarProbeEval & /*srt*/,
 
   const gbuffer::Layers gbuf = reader.read_layers(texel);
   const uchar closure_count = gbuf.header.closure_len();
+  const float surface_depth = reader.read_surface_depth(gbuf.header, texel, depth);
   const Thickness thickness = reader.read_thickness(gbuf.header, texel);
 
   float3 albedo_front = float3(0.0f);
@@ -486,7 +489,7 @@ void planar_eval_frag([[resource_table]] PlanarProbeEval & /*srt*/,
 
   const ViewMatrices view = views.get(0);
 
-  float3 P = view.point_screen_to_world(float3(v_out.screen_uv, depth));
+  float3 P = view.point_screen_to_world(float3(v_out.screen_uv, surface_depth));
   float3 Ng = gbuf.header.geometry_normal(gbuf.surface_N());
   float3 V = view.world_incident_vector(P);
   float vPz = dot(view.forward(), P) - dot(view.forward(), view.position());
