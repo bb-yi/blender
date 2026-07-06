@@ -107,25 +107,23 @@ struct SurfaceForwardFragOut {
   [[frag_color(3)]] float4 combined_a;
 };
 
-/* Early fragment test is needed for render passes support for forward surfaces. */
-/* NOTE: This removes the possibility of using gl_FragDepth. */
-[[fragment]] [[early_fragment_tests]]
-void surf_forward([[resource_table]] PipelineConstants & /*pipe*/,
-                  [[resource_table]] SurfaceForward & /*srt*/,
-                  [[resource_table]] LightEvalIterator & /*lights*/,
-                  [[resource_table]] eevee::LightprobeRenderData & /*lightprobes*/,
-                  [[resource_table]] eevee::LightprobePlaneRenderData & /*lightprobe_planes*/,
-                  [[resource_table]] const draw::View &views,
-                  [[resource_table]] const draw::Model & /*models*/,
-                  [[resource_table]] const draw::Infos & /*infos*/,
-                  [[resource_table]] const UnifiedVolumeData &volumes,
-                  [[resource_table]] const Uniform &uni,
-                  [[resource_table]] const Sampling &sampling,
-                  [[resource_table]] const UtilityTexture &util_tx,
-                  [[frag_coord]] const float4 frag_co,
-                  [[out]] SurfaceForwardFragOut &frag_out,
-                  [[front_facing]] const bool front_face)
+SurfaceForwardFragOut surf_forward_impl(
+    [[resource_table]] PipelineConstants & /*pipe*/,
+    [[resource_table]] SurfaceForward & /*srt*/,
+    [[resource_table]] LightEvalIterator & /*lights*/,
+    [[resource_table]] eevee::LightprobeRenderData & /*lightprobes*/,
+    [[resource_table]] eevee::LightprobePlaneRenderData & /*lightprobe_planes*/,
+    [[resource_table]] const draw::View &views,
+    [[resource_table]] const draw::Model & /*models*/,
+    [[resource_table]] const draw::Infos & /*infos*/,
+    [[resource_table]] const UnifiedVolumeData &volumes,
+    [[resource_table]] const Uniform &uni,
+    [[resource_table]] const Sampling &sampling,
+    [[resource_table]] const UtilityTexture &util_tx,
+    const float4 frag_co,
+    const bool front_face)
 {
+  SurfaceForwardFragOut frag_out = {};
   auto &interp_flat = interface_get(eevee_geom_iface_info, interp_flat);
   draw::ID id{interp_flat.resource_id_raw};
   const uint resource_id = id.resource_id<1>();
@@ -136,6 +134,15 @@ void surf_forward([[resource_table]] PipelineConstants & /*pipe*/,
 
   float noise = util_tx.fetch(gl_FragCoord.xy, UTIL_BLUE_NOISE_LAYER).r;
   float closure_rand = fract(noise + sampling.rng_1D_get(SAMPLING_CLOSURE));
+
+#ifdef MAT_DEPTH_OFFSET
+  float depth_offset = nodetree_depth_offset();
+  float volume_depth = material_depth_offset_screen_depth(depth_offset);
+  material_depth_offset_apply_nodetree_position(depth_offset);
+  material_depth_offset_write(depth_offset);
+#else
+  float volume_depth = reverse_z::read(frag_co.z);
+#endif
 
   fragment_displacement();
 
@@ -163,7 +170,7 @@ void surf_forward([[resource_table]] PipelineConstants & /*pipe*/,
 
   /* Volumetric resolve and compositing. */
   float2 uvs = gl_FragCoord.xy * uni.uniform_buf.volumes.main_view_extent_inv;
-  VolumeResolveSample vol = volumes.resolve(float3(uvs, reverse_z::read(frag_co.z)));
+  VolumeResolveSample vol = volumes.resolve(float3(uvs, volume_depth));
   /* Removes the part of the volume scattering that has
    * already been added to the destination pixels by the opaque resolve.
    * Since we do that using the blending pipeline we need to account for material transmittance. */
@@ -192,6 +199,84 @@ void surf_forward([[resource_table]] PipelineConstants & /*pipe*/,
     frag_out.combined_b = float4(radiance.b, 0.0f, 0.0f, transmittance.b);
     frag_out.combined_a = float4(g_holdout, 0.0f, 0.0f, average(transmittance));
   }
+  return frag_out;
+}
+
+/* Early fragment test is needed for render pass support for forward surfaces.
+ * NOTE: This removes the possibility of using gl_FragDepth. Depth Offset materials use the
+ * sibling entry-point below so they can keep late depth tests and write gl_FragDepth. */
+[[fragment]] [[early_fragment_tests]]
+void surf_forward([[resource_table]] PipelineConstants &pipe,
+                  [[resource_table]] SurfaceForward &srt,
+                  [[resource_table]] LightEvalIterator &lights,
+                  [[resource_table]] eevee::LightprobeRenderData &lightprobes,
+                  [[resource_table]] eevee::LightprobePlaneRenderData &lightprobe_planes,
+                  [[resource_table]] const draw::View &views,
+                  [[resource_table]] const draw::Model &models,
+                  [[resource_table]] const draw::Infos &infos,
+                  [[resource_table]] const UnifiedVolumeData &volumes,
+                  [[resource_table]] const Uniform &uni,
+                  [[resource_table]] const Sampling &sampling,
+                  [[resource_table]] const UtilityTexture &util_tx,
+                  [[frag_coord]] const float4 frag_co,
+                  [[out]] SurfaceForwardFragOut &frag_out,
+                  [[front_facing]] const bool front_face)
+{
+  SurfaceForwardFragOut result = surf_forward_impl(pipe,
+                                                   srt,
+                                                   lights,
+                                                   lightprobes,
+                                                   lightprobe_planes,
+                                                   views,
+                                                   models,
+                                                   infos,
+                                                   volumes,
+                                                   uni,
+                                                   sampling,
+                                                   util_tx,
+                                                   frag_co,
+                                                   front_face);
+  frag_out.combined_r = result.combined_r;
+  frag_out.combined_g = result.combined_g;
+  frag_out.combined_b = result.combined_b;
+  frag_out.combined_a = result.combined_a;
+}
+
+[[fragment]]
+void surf_forward_depth_offset([[resource_table]] PipelineConstants &pipe,
+                               [[resource_table]] SurfaceForward &srt,
+                               [[resource_table]] LightEvalIterator &lights,
+                               [[resource_table]] eevee::LightprobeRenderData &lightprobes,
+                               [[resource_table]] eevee::LightprobePlaneRenderData &lightprobe_planes,
+                               [[resource_table]] const draw::View &views,
+                               [[resource_table]] const draw::Model &models,
+                               [[resource_table]] const draw::Infos &infos,
+                               [[resource_table]] const UnifiedVolumeData &volumes,
+                               [[resource_table]] const Uniform &uni,
+                               [[resource_table]] const Sampling &sampling,
+                               [[resource_table]] const UtilityTexture &util_tx,
+                               [[frag_coord]] const float4 frag_co,
+                               [[out]] SurfaceForwardFragOut &frag_out,
+                               [[front_facing]] const bool front_face)
+{
+  SurfaceForwardFragOut result = surf_forward_impl(pipe,
+                                                   srt,
+                                                   lights,
+                                                   lightprobes,
+                                                   lightprobe_planes,
+                                                   views,
+                                                   models,
+                                                   infos,
+                                                   volumes,
+                                                   uni,
+                                                   sampling,
+                                                   util_tx,
+                                                   frag_co,
+                                                   front_face);
+  frag_out.combined_r = result.combined_r;
+  frag_out.combined_g = result.combined_g;
+  frag_out.combined_b = result.combined_b;
+  frag_out.combined_a = result.combined_a;
 }
 
 }  // namespace eevee

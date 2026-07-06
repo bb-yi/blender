@@ -521,19 +521,16 @@ static bool ntree_weight_tree_tag_nodes(bNode *fromnode, bNode *tonode, void *us
  * with their respective weights. */
 static void ntree_shader_weight_tree_invert(bNodeTree *ntree, bNode *output_node)
 {
-  bNodeLink *displace_link = nullptr;
-  bNodeSocket *displace_output = ntree_shader_node_find_input(output_node, "Displacement");
-  if (displace_output && displace_output->link) {
-    /* Remove any displacement link to avoid tagging it later on. */
-    displace_link = displace_output->link;
-    displace_output->link = nullptr;
-  }
-  bNodeLink *thickness_link = nullptr;
-  bNodeSocket *thickness_output = ntree_shader_node_find_input(output_node, "Thickness");
-  if (thickness_output && thickness_output->link) {
-    /* Remove any thickness link to avoid tagging it later on. */
-    thickness_link = thickness_output->link;
-    thickness_output->link = nullptr;
+  struct DetachedOutputLink {
+    bNodeSocket *socket;
+    bNodeLink *link;
+  };
+  Vector<DetachedOutputLink> detached_output_links;
+  for (bNodeSocket &socket : output_node->inputs) {
+    if (socket.link && socket.type != SOCK_SHADER) {
+      detached_output_links.append({&socket, socket.link});
+      socket.link = nullptr;
+    }
   }
   /* Init tmp flag. */
   for (bNode &node : ntree->nodes) {
@@ -683,6 +680,16 @@ static void ntree_shader_weight_tree_invert(bNodeTree *ntree, bNode *output_node
         }
 
         if (sock.link) {
+          if (ELEM(node.type_legacy,
+                   SH_NODE_SHADERTORGB,
+                   SH_NODE_OUTPUT_LIGHT,
+                   SH_NODE_OUTPUT_WORLD,
+                   SH_NODE_OUTPUT_MATERIAL) &&
+              sock.type != SOCK_SHADER)
+          {
+            continue;
+          }
+
           bNodeSocket *fromsock;
           bNode *fromnode = sock.link->fromnode;
 
@@ -742,20 +749,12 @@ static void ntree_shader_weight_tree_invert(bNodeTree *ntree, bNode *output_node
       }
     }
   }
-  /* Restore displacement & thickness link. */
-  if (displace_link) {
+  for (DetachedOutputLink detached : detached_output_links) {
     bke::node_add_link(*ntree,
-                       *displace_link->fromnode,
-                       *displace_link->fromsock,
+                       *detached.link->fromnode,
+                       *detached.link->fromsock,
                        *output_node,
-                       *displace_output);
-  }
-  if (thickness_link) {
-    bke::node_add_link(*ntree,
-                       *thickness_link->fromnode,
-                       *thickness_link->fromsock,
-                       *output_node,
-                       *thickness_output);
+                       *detached.socket);
   }
   BKE_ntree_update_without_main(*ntree);
 }

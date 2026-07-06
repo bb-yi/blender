@@ -210,6 +210,15 @@ float material_depth_offset_screen_depth(float depth_offset)
   return reverse_z::read(material_depth_offset_frag_depth(depth_offset));
 }
 
+#  if defined(MAT_DEFERRED)
+bool material_depth_offset_fragment_matches_prepass(float depth_offset)
+{
+  float fragment_depth = reverse_z::read(material_depth_offset_frag_depth(depth_offset));
+  float prepass_depth = texelFetch(hiz_tx, int2(gl_FragCoord.xy), 0).r;
+  return abs(fragment_depth - prepass_depth) <= 1.0e-6f;
+}
+#  endif
+
 float3 material_depth_offset_world_position_from_depth(float screen_depth)
 {
   [[resource_table]] const eevee::Uniform &uni = resource_table_get(eevee::Uniform);

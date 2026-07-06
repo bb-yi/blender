@@ -101,7 +101,7 @@ DeferredFragOut surf_deferred_impl([[resource_table]] PipelineConstants &pipe,
                                    const float4 frag_co,
                                    const bool front_face)
 {
-  DeferredFragOut frag_out;
+  DeferredFragOut frag_out = {};
   auto &interp_flat = interface_get(eevee_geom_iface_info, interp_flat);
   draw::ID id{interp_flat.resource_id_raw};
   const uint resource_id = id.resource_id<1>();
@@ -115,6 +115,10 @@ DeferredFragOut surf_deferred_impl([[resource_table]] PipelineConstants &pipe,
 
 #ifdef MAT_DEPTH_OFFSET
   float depth_offset = nodetree_depth_offset();
+  if (!material_depth_offset_fragment_matches_prepass(depth_offset)) {
+    gpu_discard_fragment();
+    return frag_out;
+  }
 #endif
 
 #ifdef MAT_DEPTH_OFFSET_NO_LIGHTING
@@ -265,7 +269,8 @@ DeferredFragOut surf_deferred_impl([[resource_table]] PipelineConstants &pipe,
   return frag_out;
 }
 
-/* NOTE: This removes the possibility of using gl_FragDepth. */
+/* NOTE: This removes the possibility of using gl_FragDepth. Depth Offset materials use the
+ * sibling entry-points below so they can keep late depth tests and write gl_FragDepth. */
 [[fragment]] [[early_fragment_tests]]
 void surf_deferred([[resource_table]] PipelineConstants &pipe,
                    [[resource_table]] SurfaceDeferred &srt,
@@ -280,6 +285,40 @@ void surf_deferred([[resource_table]] PipelineConstants &pipe,
                    [[frag_coord]] const float4 frag_co,
                    [[out]] DeferredFragOut &frag_out,
                    [[front_facing]] const bool front_face)
+{
+  DeferredFragOut result = surf_deferred_impl(pipe,
+                                              srt,
+                                              gbuf_params,
+                                              render_passes,
+                                              cryptomatte,
+                                              infos,
+                                              views,
+                                              uni,
+                                              sampling,
+                                              util_tx,
+                                              frag_co,
+                                              front_face);
+  frag_out.radiance = result.radiance;
+  frag_out.gbuf_header = result.gbuf_header;
+  frag_out.gbuf_normal = result.gbuf_normal;
+  frag_out.gbuf_closure1 = result.gbuf_closure1;
+  frag_out.gbuf_closure2 = result.gbuf_closure2;
+}
+
+[[fragment]]
+void surf_deferred_depth_offset([[resource_table]] PipelineConstants &pipe,
+                                [[resource_table]] SurfaceDeferred &srt,
+                                [[resource_table]] gbuffer::PackParameters &gbuf_params,
+                                [[resource_table]] RenderPassOutput &render_passes,
+                                [[resource_table]] CryptomatteOutput &cryptomatte,
+                                [[resource_table]] const draw::Infos &infos,
+                                [[resource_table]] const draw::View &views,
+                                [[resource_table]] const Uniform &uni,
+                                [[resource_table]] const Sampling &sampling,
+                                [[resource_table]] const UtilityTexture &util_tx,
+                                [[frag_coord]] const float4 frag_co,
+                                [[out]] DeferredFragOut &frag_out,
+                                [[front_facing]] const bool front_face)
 {
   DeferredFragOut result = surf_deferred_impl(pipe,
                                               srt,
@@ -316,6 +355,42 @@ void surf_deferred_lightprobe([[resource_table]] PipelineConstants &pipe,
                               [[frag_coord]] const float4 frag_co,
                               [[out]] DeferredFragOut &frag_out,
                               [[front_facing]] const bool front_face)
+{
+  DeferredFragOut result = surf_deferred_impl(pipe,
+                                              srt,
+                                              gbuf_params,
+                                              render_passes,
+                                              cryptomatte,
+                                              infos,
+                                              views,
+                                              uni,
+                                              sampling,
+                                              util_tx,
+                                              frag_co,
+                                              front_face);
+  frag_out.radiance = result.radiance;
+  frag_out.gbuf_header = result.gbuf_header;
+  frag_out.gbuf_normal = result.gbuf_normal;
+  frag_out.gbuf_closure1 = result.gbuf_closure1;
+  frag_out.gbuf_closure2 = result.gbuf_closure2;
+}
+
+[[fragment]]
+void surf_deferred_lightprobe_depth_offset(
+    [[resource_table]] PipelineConstants &pipe,
+    [[resource_table]] SurfaceDeferred &srt,
+    [[resource_table]] gbuffer::PackParameters &gbuf_params,
+    [[resource_table]] eevee::LightprobeRenderData & /*lightprobes*/,
+    [[resource_table]] RenderPassOutput &render_passes,
+    [[resource_table]] CryptomatteOutput &cryptomatte,
+    [[resource_table]] const draw::Infos &infos,
+    [[resource_table]] const draw::View &views,
+    [[resource_table]] const Uniform &uni,
+    [[resource_table]] const Sampling &sampling,
+    [[resource_table]] const UtilityTexture &util_tx,
+    [[frag_coord]] const float4 frag_co,
+    [[out]] DeferredFragOut &frag_out,
+    [[front_facing]] const bool front_face)
 {
   DeferredFragOut result = surf_deferred_impl(pipe,
                                               srt,

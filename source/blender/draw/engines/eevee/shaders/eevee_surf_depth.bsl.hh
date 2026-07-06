@@ -92,6 +92,13 @@ void surf_depth([[resource_table]] PipelineConstants &pipe,
     }
   }
 
+#if defined(MAT_DEPTH_OFFSET)
+  {
+    const ViewMatrices view = views.get(0);
+    init_globals(uni, view, front_face);
+  }
+#endif
+
   if (pipe.use_clip_plane) [[static_branch]] {
     auto &clip_interp = interface_get(eevee_clip_plane, clip_interp);
     /* Do not use hardware clip planes as they modify the rasterization (some GPUs add vertices).
@@ -103,6 +110,10 @@ void surf_depth([[resource_table]] PipelineConstants &pipe,
     }
   }
 
+#ifdef MAT_DEPTH_OFFSET
+  float depth_offset = nodetree_depth_offset();
+#endif
+
   if constexpr (with_velocity) {
     if (pipe.use_velocity) [[static_branch]] {
       /* clang-format off */ /* Multiline define messes up line index. */
@@ -110,11 +121,20 @@ void surf_depth([[resource_table]] PipelineConstants &pipe,
       /* clang-format on */
       [[resource_table]] const CameraVelocity &cam_vel = geo_vel.camera;
       const auto &motion = interface_get(eevee_velocity_iface_info, motion);
+#  ifdef MAT_DEPTH_OFFSET
+      frag_out.velocity = cam_vel.surface_velocity_depth_offset(
+          interp.P + motion.prev, interp.P, interp.P + motion.next, depth_offset);
+#  else
       frag_out.velocity = cam_vel.surface_velocity(
           interp.P + motion.prev, interp.P, interp.P + motion.next);
+#  endif
       frag_out.velocity = velocity::pack(frag_out.velocity);
     }
   }
+
+#ifdef MAT_DEPTH_OFFSET
+  material_depth_offset_write(depth_offset);
+#endif
 
   /* Always written, but may be optimized out by frame-buffer/subpass setup. */
   frag_out.normal.rgb = normalize(interp.N) * 0.5f + 0.5f;

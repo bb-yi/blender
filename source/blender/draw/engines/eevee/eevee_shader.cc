@@ -1364,24 +1364,37 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
         case MAT_PIPE_DEFERRED:
           info.define("MAT_DEFERRED");
           if (use_shader_to_rgba) {
-            pipeline_info_name = "eevee_surf_hybrid_infos_";
+            pipeline_info_name = has_depth_offset ? "eevee_surf_hybrid_depth_offset_infos_" :
+                                                    "eevee_surf_hybrid_infos_";
             info.define("closure_to_rgba", "closure_to_rgba_hybrid");
             info.name_ += "_deferred_hybrid";
             info.compilation_constant(gpu::shader::Type::bool_t, "use_velocity", false);
             /* Until every vertex shader are ported, we need to bridge the gap here by defining the
              * pipeline. */
             info.fragment_source("eevee_surf_hybrid.bsl.hh");
-            info.fragment_function("eevee_surf_hybrid");
+            info.fragment_function(has_depth_offset ? "eevee_surf_hybrid_depth_offset" :
+                                                      "eevee_surf_hybrid");
           }
           else {
-            pipeline_info_name = "eevee_surf_deferred_infos_";
             info.name_ += "_deferred";
             info.compilation_constant(gpu::shader::Type::bool_t, "use_velocity", false);
             /* Until every vertex shader are ported, we need to bridge the gap here by defining the
              * pipeline. */
             info.fragment_source("eevee_surf_deferred.bsl.hh");
-            info.fragment_function(use_lightprobe_data ? "eevee_surf_deferred_lightprobe" :
-                                                         "eevee_surf_deferred");
+            if (use_lightprobe_data) {
+              pipeline_info_name = has_depth_offset ?
+                                       "eevee_surf_deferred_lightprobe_depth_offset_infos_" :
+                                       "eevee_surf_deferred_lightprobe_infos_";
+              info.fragment_function(has_depth_offset ?
+                                         "eevee_surf_deferred_lightprobe_depth_offset" :
+                                         "eevee_surf_deferred_lightprobe");
+            }
+            else {
+              pipeline_info_name = has_depth_offset ? "eevee_surf_deferred_depth_offset_infos_" :
+                                                      "eevee_surf_deferred_infos_";
+              info.fragment_function(has_depth_offset ? "eevee_surf_deferred_depth_offset" :
+                                                        "eevee_surf_deferred");
+            }
           }
           /* Enable the access to `nt.crypto_hash`.
            * Necessary workaround for static shader compilation tests. */
@@ -1393,7 +1406,8 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
           info.name_ += "_deferred_npr";
           break;
         case MAT_PIPE_FORWARD:
-          pipeline_info_name = "eevee_surf_forward_infos_";
+          pipeline_info_name = has_depth_offset ? "eevee_surf_forward_depth_offset_infos_" :
+                                                  "eevee_surf_forward_infos_";
           info.define("MAT_FORWARD");
           info.define("closure_to_rgba", "closure_to_rgba_forward");
           info.compilation_constant(gpu::shader::Type::bool_t, "use_velocity", false);
@@ -1401,7 +1415,8 @@ static SlotAllocator add_pipeline_create_info(gpu::shader::ShaderCreateInfo &inf
           /* Until every vertex shader are ported, we need to bridge the gap here by defining the
            * pipeline. */
           info.fragment_source("eevee_surf_forward.bsl.hh");
-          info.fragment_function("eevee_surf_forward");
+          info.fragment_function(has_depth_offset ? "eevee_surf_forward_depth_offset" :
+                                                    "eevee_surf_forward");
           break;
         default:
           BLI_assert_unreachable();

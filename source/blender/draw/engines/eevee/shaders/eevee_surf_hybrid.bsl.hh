@@ -27,6 +27,7 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_geom_iface_info)
 
 /* Global thickness because it is needed for closure_to_rgba. */
 Thickness g_thickness;
+float3 g_forward_lighting_P;
 
 float4 closure_to_rgba_hybrid(Closure /*cl*/)
 {
@@ -39,8 +40,11 @@ float4 closure_to_rgba_hybrid(Closure /*cl*/)
   const float2 frag_co = gl_FragCoord.xy;
 
   float3 radiance, transmittance;
+  float3 nodetree_P = g_data.P;
+  g_data.P = g_forward_lighting_P;
   eevee::forward_lighting_eval(
       views.get(0), resource_id, g_thickness, frag_co, radiance, transmittance);
+  g_data.P = nodetree_P;
 
   /* Reset for the next closure tree. */
   float noise = util_tx.fetch(frag_co, UTIL_BLUE_NOISE_LAYER).r;
@@ -54,10 +58,11 @@ float4 closure_to_rgba_hybrid(Closure /*cl*/)
     /* clang-format on */
     [[resource_table]] eevee::LightprobeSphereRenderData &lp_spheres = lightprobes.spheres;
 
-    float3 V = -views.get(0).world_incident_vector(g_data.P);
-    eevee::LightProbeSample samp = lightprobes.load(frag_co.xy, g_data.P, g_data.Ng, V);
+    float3 V = -views.get(0).world_incident_vector(g_forward_lighting_P);
+    eevee::LightProbeSample samp = lightprobes.load(
+        frag_co.xy, g_forward_lighting_P, g_data.Ng, V);
     float3 radiance_behind = lp_spheres.spherical_sample_normalized_with_parallax(
-        samp, g_data.P, V, 0.0);
+        samp, g_forward_lighting_P, V, 0.0);
 
 #  ifndef MAT_FIRST_LAYER
     { /* Limit resource guard to this scope. */
@@ -86,6 +91,7 @@ namespace eevee {
 struct SurfaceHybrid {
   [[legacy_info]] ShaderCreateInfo draw_view_culling;
   [[legacy_info]] ShaderCreateInfo eevee_geom_iface_info;
+  [[legacy_info]] ShaderCreateInfo eevee_hiz_data;
 
   /* Everything is stored inside a two layered target, one for each format. This is to fit the
    * limitation of the number of images we can bind on a single shader. */
@@ -126,25 +132,23 @@ struct HybridFragOut {
   [[frag_color(4)]] float4 gbuf_closure2;
 };
 
-/* NOTE: This removes the possibility of using gl_FragDepth. */
-[[fragment]] [[early_fragment_tests]]
-void surf_hybrid([[resource_table]] PipelineConstants &pipe,
-                 [[resource_table]] SurfaceHybrid &srt,
-                 [[resource_table]] gbuffer::PackParameters &gbuf_params,
-                 [[resource_table]] LightEvalIterator & /*lights*/,
-                 [[resource_table]] eevee::LightprobeRenderData & /*lightprobes*/,
-                 [[resource_table]] eevee::LightprobePlaneRenderData & /*lightprobe_planes*/,
-                 [[resource_table]] CryptomatteOutput &cryptomatte,
-                 [[resource_table]] RenderPassOutput &render_passes,
-                 [[resource_table]] const draw::View &views,
-                 [[resource_table]] const draw::Infos & /*infos*/,
-                 [[resource_table]] const Uniform &uni,
-                 [[resource_table]] const Sampling &sampling,
-                 [[resource_table]] const UtilityTexture &util_tx,
-                 [[frag_coord]] const float4 frag_co,
-                 [[out]] HybridFragOut &frag_out,
-                 [[front_facing]] const bool front_face)
+HybridFragOut surf_hybrid_impl([[resource_table]] PipelineConstants &pipe,
+                               [[resource_table]] SurfaceHybrid &srt,
+                               [[resource_table]] gbuffer::PackParameters &gbuf_params,
+                               [[resource_table]] LightEvalIterator & /*lights*/,
+                               [[resource_table]] eevee::LightprobeRenderData & /*lightprobes*/,
+                               [[resource_table]] eevee::LightprobePlaneRenderData & /*lightprobe_planes*/,
+                               [[resource_table]] CryptomatteOutput &cryptomatte,
+                               [[resource_table]] RenderPassOutput &render_passes,
+                               [[resource_table]] const draw::View &views,
+                               [[resource_table]] const draw::Infos & /*infos*/,
+                               [[resource_table]] const Uniform &uni,
+                               [[resource_table]] const Sampling &sampling,
+                               [[resource_table]] const UtilityTexture &util_tx,
+                               const float4 frag_co,
+                               const bool front_face)
 {
+  HybridFragOut frag_out = {};
   auto &interp_flat = interface_get(eevee_geom_iface_info, interp_flat);
   draw::ID id{interp_flat.resource_id_raw};
   const uint resource_id = id.resource_id<1>();
@@ -152,12 +156,17 @@ void surf_hybrid([[resource_table]] PipelineConstants &pipe,
   const ViewMatrices view = views.get(0);
 
   init_globals(uni, view, front_face);
+  g_forward_lighting_P = g_data.P;
 
   float noise = util_tx.fetch(frag_co.xy, UTIL_BLUE_NOISE_LAYER).r;
   float closure_rand = fract(noise + sampling.rng_1D_get(SAMPLING_CLOSURE));
 
 #ifdef MAT_DEPTH_OFFSET
   float depth_offset = nodetree_depth_offset();
+  if (!material_depth_offset_fragment_matches_prepass(depth_offset)) {
+    gpu_discard_fragment();
+    return frag_out;
+  }
 #endif
 
 #ifdef MAT_DEPTH_OFFSET_NO_LIGHTING
@@ -169,12 +178,13 @@ void surf_hybrid([[resource_table]] PipelineConstants &pipe,
 #endif
 
 #ifdef MAT_DEPTH_OFFSET
-  material_depth_offset_write(depth_offset);
   if (!material_depth_offset_is_zero(depth_offset)) {
+    float3 depth_offset_P = material_depth_offset_apply_nodetree_position(depth_offset);
 #  ifndef MAT_DEPTH_OFFSET_NO_LIGHTING
-    material_depth_offset_apply_nodetree_position(depth_offset);
+    g_forward_lighting_P = depth_offset_P;
 #  endif
   }
+  material_depth_offset_write(depth_offset);
 #endif
 
   g_thickness = Thickness::from(nodetree_thickness(), thickness_mode);
@@ -308,5 +318,89 @@ void surf_hybrid([[resource_table]] PipelineConstants &pipe,
   frag_out.radiance = float4(g_emission, 0.0f);
   frag_out.radiance.rgb *= 1.0f - g_holdout;
   frag_out.radiance.a = g_holdout;
+  return frag_out;
 }
+
+/* NOTE: This removes the possibility of using gl_FragDepth. Depth Offset materials use the
+ * sibling entry-point below so they can keep late depth tests and write gl_FragDepth. */
+[[fragment]] [[early_fragment_tests]]
+void surf_hybrid([[resource_table]] PipelineConstants &pipe,
+                 [[resource_table]] SurfaceHybrid &srt,
+                 [[resource_table]] gbuffer::PackParameters &gbuf_params,
+                 [[resource_table]] LightEvalIterator &lights,
+                 [[resource_table]] eevee::LightprobeRenderData &lightprobes,
+                 [[resource_table]] eevee::LightprobePlaneRenderData &lightprobe_planes,
+                 [[resource_table]] CryptomatteOutput &cryptomatte,
+                 [[resource_table]] RenderPassOutput &render_passes,
+                 [[resource_table]] const draw::View &views,
+                 [[resource_table]] const draw::Infos &infos,
+                 [[resource_table]] const Uniform &uni,
+                 [[resource_table]] const Sampling &sampling,
+                 [[resource_table]] const UtilityTexture &util_tx,
+                 [[frag_coord]] const float4 frag_co,
+                 [[out]] HybridFragOut &frag_out,
+                 [[front_facing]] const bool front_face)
+{
+  HybridFragOut result = surf_hybrid_impl(pipe,
+                                          srt,
+                                          gbuf_params,
+                                          lights,
+                                          lightprobes,
+                                          lightprobe_planes,
+                                          cryptomatte,
+                                          render_passes,
+                                          views,
+                                          infos,
+                                          uni,
+                                          sampling,
+                                          util_tx,
+                                          frag_co,
+                                          front_face);
+  frag_out.radiance = result.radiance;
+  frag_out.gbuf_header = result.gbuf_header;
+  frag_out.gbuf_normal = result.gbuf_normal;
+  frag_out.gbuf_closure1 = result.gbuf_closure1;
+  frag_out.gbuf_closure2 = result.gbuf_closure2;
+}
+
+[[fragment]]
+void surf_hybrid_depth_offset([[resource_table]] PipelineConstants &pipe,
+                              [[resource_table]] SurfaceHybrid &srt,
+                              [[resource_table]] gbuffer::PackParameters &gbuf_params,
+                              [[resource_table]] LightEvalIterator &lights,
+                              [[resource_table]] eevee::LightprobeRenderData &lightprobes,
+                              [[resource_table]] eevee::LightprobePlaneRenderData &lightprobe_planes,
+                              [[resource_table]] CryptomatteOutput &cryptomatte,
+                              [[resource_table]] RenderPassOutput &render_passes,
+                              [[resource_table]] const draw::View &views,
+                              [[resource_table]] const draw::Infos &infos,
+                              [[resource_table]] const Uniform &uni,
+                              [[resource_table]] const Sampling &sampling,
+                              [[resource_table]] const UtilityTexture &util_tx,
+                              [[frag_coord]] const float4 frag_co,
+                              [[out]] HybridFragOut &frag_out,
+                              [[front_facing]] const bool front_face)
+{
+  HybridFragOut result = surf_hybrid_impl(pipe,
+                                          srt,
+                                          gbuf_params,
+                                          lights,
+                                          lightprobes,
+                                          lightprobe_planes,
+                                          cryptomatte,
+                                          render_passes,
+                                          views,
+                                          infos,
+                                          uni,
+                                          sampling,
+                                          util_tx,
+                                          frag_co,
+                                          front_face);
+  frag_out.radiance = result.radiance;
+  frag_out.gbuf_header = result.gbuf_header;
+  frag_out.gbuf_normal = result.gbuf_normal;
+  frag_out.gbuf_closure1 = result.gbuf_closure1;
+  frag_out.gbuf_closure2 = result.gbuf_closure2;
+}
+
 }  // namespace eevee
