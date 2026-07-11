@@ -433,6 +433,15 @@ void Film::init(const int2 &extent, const rcti *output_rect)
       needed_passes |= EEVEE_RENDER_PASS_CRYPTOMATTE_OBJECT;
     }
 
+    /* Force enable color passes if light passes are enabled.
+     * This is needed since we need to pre-divide by them. */
+    if (enabled_passes_ & EEVEE_RENDER_PASS_DIFFUSE_LIGHT) {
+      enabled_passes_ |= EEVEE_RENDER_PASS_DIFFUSE_COLOR;
+    }
+    if (enabled_passes_ & EEVEE_RENDER_PASS_SPECULAR_LIGHT) {
+      enabled_passes_ |= EEVEE_RENDER_PASS_SPECULAR_COLOR;
+    }
+
     /* Filter obsolete passes. */
     needed_passes &= ~(EEVEE_RENDER_PASS_UNUSED_8 | EEVEE_RENDER_PASS_UNUSED_14);
 
@@ -517,11 +526,11 @@ void Film::init(const int2 &extent, const rcti *output_rect)
                                                 EEVEE_RENDER_PASS_POSITION |
                                                 EEVEE_RENDER_PASS_VECTOR;
     const eViewLayerEEVEEPassType color_passes_1 = EEVEE_RENDER_PASS_DIFFUSE_LIGHT |
+                                                   EEVEE_RENDER_PASS_DIFFUSE_COLOR |
                                                    EEVEE_RENDER_PASS_SPECULAR_LIGHT |
-                                                   EEVEE_RENDER_PASS_VOLUME_LIGHT |
-                                                   EEVEE_RENDER_PASS_EMIT;
-    const eViewLayerEEVEEPassType color_passes_2 = EEVEE_RENDER_PASS_DIFFUSE_COLOR |
-                                                   EEVEE_RENDER_PASS_SPECULAR_COLOR |
+                                                   EEVEE_RENDER_PASS_SPECULAR_COLOR;
+    const eViewLayerEEVEEPassType color_passes_2 = EEVEE_RENDER_PASS_VOLUME_LIGHT |
+                                                   EEVEE_RENDER_PASS_EMIT |
                                                    EEVEE_RENDER_PASS_ENVIRONMENT |
                                                    EEVEE_RENDER_PASS_MIST |
                                                    EEVEE_RENDER_PASS_SHADOW | EEVEE_RENDER_PASS_AO;

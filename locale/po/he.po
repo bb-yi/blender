@@ -1,9 +1,9 @@
 
 msgid ""
 msgstr ""
-"Project-Id-Version: Blender 5.2.0 Alpha (b'8764d33c658b')\n"
+"Project-Id-Version: Blender 5.2.0 LTS Beta (b'b2d38940ccd4')\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-06-01 07:36+0000\n"
+"POT-Creation-Date: 2026-07-06 08:37+0000\n"
 "PO-Revision-Date: 2026-01-20 15:20+0000\n"
 "Last-Translator: golden dragon <trmhtk2@gmail.com>\n"
 "Language-Team: Hebrew <https://translate.blender.org/projects/blender-ui/ui/he/>\n"
@@ -556,7 +556,7 @@ msgstr "קיר"
 
 
 msgid "UV/Image Editor"
-msgstr "UV\\תונומתה ךרוע"
+msgstr "\\‬UV‪תונומתה ךרוע"
 
 
 msgid "View and edit images and UV Maps"
@@ -1732,7 +1732,7 @@ msgstr "קלח"
 
 
 msgid "Rotate/Twist"
-msgstr "לתפ\\בבוס"
+msgstr "לתפ\\‬‪בבוס"
 
 
 msgctxt "Brush"
@@ -2028,7 +2028,7 @@ msgstr "Python -ב ()frame_set -מ היצמינאה ינותנ ןוכדעל ,ת�
 
 
 msgid "Final frame of the playback/rendering range"
-msgstr "הגצה\\דוביעה חווט לש תיפוס תרגסמ"
+msgstr "הגצה\\‬‪דוביעה חווט לש תיפוס תרגסמ"
 
 
 msgid "Current Subframe"
@@ -2052,11 +2052,11 @@ msgstr "שמתשמה קשממב הגצהל תיפולח הלחתה תרגסמ"
 
 
 msgid "First frame of the playback/rendering range"
-msgstr "הגצה\\דוביעה חווט לש הנושאר תרגסמ"
+msgstr "הגצה\\‬‪דוביעה חווט לש הנושאר תרגסמ"
 
 
 msgid "Number of frames to skip forward while rendering/playing back each frame"
-msgstr "תרגסמ לכ רובע הגצה\\דוביע ןמזב המידק גולידל תורגסמ רפסמ"
+msgstr "תרגסמ לכ רובע הגצה\\‬‪דוביע ןמזב המידק גולידל תורגסמ רפסמ"
 
 
 msgid "Outer Cone Volume"
@@ -2237,10 +2237,6 @@ msgid "Grease Pencil Color"
 msgstr "Grease Pencil יאבצ"
 
 
-msgid "Mirror"
-msgstr "הארמ"
-
-
 msgid "Apply"
 msgstr "לחה"
 
@@ -2251,6 +2247,10 @@ msgstr "רמה"
 
 msgid "Face Data"
 msgstr "האפ ינותנ"
+
+
+msgid "Mirror"
+msgstr "הארמ"
 
 
 msgid "Layout"
@@ -2614,11 +2614,11 @@ msgstr "תעבטה לש תינשמה הרוגחה לש םיחלפה רפסמ"
 
 
 msgid "Use the major/minor radii for torus dimensions"
-msgstr "תעבטה ידממ ליבשב ינשמ\\ירקיעה סוידרב שמתשה"
+msgstr "תעבטה ידממ ליבשב ינשמ\\‬‪ירקיעה סוידרב שמתשה"
 
 
 msgid "Use the exterior/interior radii for torus dimensions"
-msgstr "תעבטה ידממל ימינפ\\ינוציחה סוידרב שמתשה"
+msgstr "תעבטה ידממל ימינפ\\‬‪ינוציחה סוידרב שמתשה"
 
 
 msgctxt "Mesh"
@@ -2636,7 +2636,7 @@ msgstr "תשר ינותנ תסירפ רבעה"
 
 
 msgid "Transfer layout of data layer(s) from active to selected meshes"
-msgstr "תורחבנ תותשרל הליעפ תשרמ םינותנ תובכש\\הבכש לש הסירפ רבעה"
+msgstr "תורחבנ תותשרל הליעפ תשרמ םינותנ תובכש\\‬‪הבכש לש הסירפ רבעה"
 
 
 msgid "Toggle object's edit mode"
@@ -3013,6 +3013,10 @@ msgid "Error Message"
 msgstr "האיגש תעדוה"
 
 
+msgid "Cancel"
+msgstr "לוטיב"
+
+
 msgctxt "WindowManager"
 msgid "Grease Pencil"
 msgstr "Grease Pencil"
@@ -3119,10 +3123,6 @@ msgstr "AOV"
 
 msgid "Video_Editing"
 msgstr "ואידיו_תכירע"
-
-
-msgid "Cancel"
-msgstr "לוטיב"
 
 
 msgid "Nothing selected"

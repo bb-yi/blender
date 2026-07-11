@@ -46,6 +46,7 @@
 #include "BKE_mesh_types.hh"
 #include "BKE_object.hh"
 #include "BKE_object_types.hh"
+#include "BKE_paint.hh"
 #include "BKE_report.hh"
 
 #include "DEG_depsgraph.hh"
@@ -4618,7 +4619,7 @@ static wmOperatorStatus edbm_separate_exec(bContext *C, wmOperator *op)
         BMeshToMeshParams to_mesh_params{};
         to_mesh_params.calc_object_remap = true;
         BM_mesh_bm_to_me(bmain, bm_old, mesh, &to_mesh_params);
-
+        BKE_sculptsession_free_pbvh(*ob);
         DEG_id_tag_update(&mesh->id, ID_RECALC_GEOMETRY_ALL_MODES);
         WM_event_add_notifier(C, NC_GEOM | ND_DATA, mesh);
       }
@@ -4942,6 +4943,68 @@ struct FillGridSplitJoin {
 };
 
 /**
+ * This function has two responsibilities:
+ *
+ * - Flush #BM_ELEM_SELECT to #BM_ELEM_TAG (on selected faces edges & vertices too).
+ * - Return false if there are no boundary edges, or any of the "boundary" vertices has
+ *   more than 2 face users (unsupported).
+ *
+ * \note Selection pre-processing here avoids having to handle much more
+ * complicated errors that can lead to mesh corruption, see #160546.
+ */
+static bool bm_faces_select_to_tag_with_manifold_bounds_check(BMesh *bm)
+{
+  BM_mesh_elem_hflag_disable_all(bm, BM_VERT | BM_EDGE, BM_ELEM_TAG, false);
+  BMIter iter;
+  BMFace *f;
+  BM_ITER_MESH (f, &iter, bm, BM_FACES_OF_MESH) {
+    if (BM_elem_flag_test(f, BM_ELEM_SELECT)) {
+      BM_elem_flag_enable(f, BM_ELEM_TAG);
+      BMIter liter;
+      BMLoop *l;
+      BM_ITER_ELEM (l, &liter, f, BM_LOOPS_OF_FACE) {
+        BM_elem_flag_enable(l->v, BM_ELEM_TAG);
+        BM_elem_flag_enable(l->e, BM_ELEM_TAG);
+      }
+    }
+    else {
+      BM_elem_flag_disable(f, BM_ELEM_TAG);
+    }
+  }
+
+  BM_mesh_elem_index_ensure(bm, BM_VERT);
+  blender::Array<uint8_t> vert_boundary_edge_counts(bm->totvert, 0);
+  int boundary_edges_count = 0;
+  BMEdge *e;
+  BM_ITER_MESH (e, &iter, bm, BM_EDGES_OF_MESH) {
+    int faces_tagged = 0;
+    BMIter fiter;
+    BMFace *f;
+    BM_ITER_ELEM (f, &fiter, e, BM_FACES_OF_EDGE) {
+      if (BM_elem_flag_test(f, BM_ELEM_TAG)) {
+        if (++faces_tagged == 2) {
+          break;
+        }
+      }
+    }
+    if (faces_tagged == 1) {
+      boundary_edges_count++;
+      for (int i = 0; i < 2; i++) {
+        const BMVert *v = *((&e->v1) + i);
+        /* There is no need to check for a count of 1 since we only evaluate
+         * edges from face-boundaries the final count will never be one. */
+        if (++vert_boundary_edge_counts[BM_elem_index_get(v)] == 3) {
+          return false;
+        }
+      }
+    }
+  }
+
+  /* No boundary means the faces form a closed region with nothing to grid fill. */
+  return boundary_edges_count != 0;
+}
+
+/**
  * Split the current selection into a separate island and prepare to rejoin it.
  *
  * This is done only when there are faces selected. Once split this way, fill_grid will
@@ -4955,13 +5018,19 @@ struct FillGridSplitJoin {
  */
 static FillGridSplitJoin *edbm_fill_grid_split_join_init(BMEditMesh *em)
 {
+  /* Convert selection to tags, so `split` doesn't run on disconnected geometry.
+   * The only user of the tag is the call to #BMO_slot_buffer_from_enabled_hflag below. */
+  if (!bm_faces_select_to_tag_with_manifold_bounds_check(em->bm)) {
+    return nullptr;
+  }
+
   FillGridSplitJoin *split_join = MEM_new_zeroed<FillGridSplitJoin>(__func__);
 
-  /* Split the selection into an island. */
+  /* Split the tagged faces into an island. */
   BMOperator split_op;
   BMO_op_init(em->bm, &split_op, 0, "split");
   BMO_slot_buffer_from_enabled_hflag(
-      em->bm, &split_op, split_op.slots_in, "geom", BM_FACE | BM_EDGE | BM_VERT, BM_ELEM_SELECT);
+      em->bm, &split_op, split_op.slots_in, "geom", BM_FACE | BM_EDGE | BM_VERT, BM_ELEM_TAG);
   BMO_op_exec(em->bm, &split_op);
 
   /* Setup the weld op that will undo the split.
@@ -5087,6 +5156,11 @@ static wmOperatorStatus edbm_fill_grid_exec(bContext *C, wmOperator *op)
     FillGridSplitJoin *split_join = nullptr;
     if (em->bm->totfacesel != 0) {
       split_join = edbm_fill_grid_split_join_init(em);
+      if (split_join == nullptr) {
+        /* The selected faces don't have a clean boundary to grid fill from, skip this object
+         * rather than falling through to a grid fill that would run over the existing faces. */
+        continue;
+      }
     }
 
     const int totedge_orig = em->bm->totedge;
@@ -8152,7 +8226,7 @@ static wmOperatorStatus mesh_symmetry_snap_exec(bContext *C, wmOperator *op)
     }
     EDBMUpdate_Params params{};
     params.calc_looptris = false;
-    params.calc_normals = false;
+    params.calc_normals = true;
     params.is_destructive = false;
     EDBM_update(id_cast<Mesh *>(obedit->data), &params);
 
@@ -9046,6 +9120,7 @@ static void normals_split(BMesh *bm)
 
   BLI_SMALLSTACK_DECLARE(loop_stack, BMLoop *);
 
+  BM_data_layer_ensure_named(bm, &bm->ldata, CD_PROP_INT16_2D, "custom_normal");
   const int cd_clnors_offset = CustomData_get_offset_named(
       &bm->ldata, CD_PROP_INT16_2D, "custom_normal");
   BM_ITER_MESH (f, &fiter, bm, BM_FACES_OF_MESH) {
@@ -9263,6 +9338,7 @@ static wmOperatorStatus edbm_average_normals_exec(bContext *C, wmOperator *op)
     bm->spacearr_dirty |= BM_SPACEARR_DIRTY_ALL;
     BKE_editmesh_lnorspace_update(em);
 
+    BM_data_layer_ensure_named(bm, &bm->ldata, CD_PROP_INT16_2D, "custom_normal");
     const int cd_clnors_offset = CustomData_get_offset_named(
         &bm->ldata, CD_PROP_INT16_2D, "custom_normal");
 
@@ -9534,6 +9610,7 @@ static wmOperatorStatus edbm_normals_tools_exec(bContext *C, wmOperator *op)
         }
         if (lnors_ed_arr->totloop == 1) {
           copy_v3_v3(scene->toolsettings->normal_vector, lnors_ed_arr->lnor_editdata->nloc);
+          done_copy = true;
         }
         else if (bm->totfacesel == 1) {
           BMFace *f;
@@ -9543,8 +9620,9 @@ static wmOperatorStatus edbm_normals_tools_exec(bContext *C, wmOperator *op)
               copy_v3_v3(scene->toolsettings->normal_vector, f->no);
             }
           }
+          done_copy = true;
         }
-        else {
+        else if (lnors_ed_arr->totloop != 0) {
           /* 'Vertex' normal, i.e. common set of loop normals on the same vertex,
            * only if they are all the same. */
           bool are_same_lnors = true;
@@ -9556,8 +9634,8 @@ static wmOperatorStatus edbm_normals_tools_exec(bContext *C, wmOperator *op)
           if (are_same_lnors) {
             copy_v3_v3(scene->toolsettings->normal_vector, lnors_ed_arr->lnor_editdata->nloc);
           }
+          done_copy = true;
         }
-        done_copy = true;
         break;
 
       case EDBM_CLNOR_TOOLS_PASTE:
@@ -9747,10 +9825,14 @@ static wmOperatorStatus edbm_set_normals_from_faces_exec(bContext *C, wmOperator
     {
       int v_index;
       BM_ITER_MESH_INDEX (v, &viter, bm, BM_VERTS_OF_MESH, v_index) {
+        BM_elem_index_set(v, v_index); /* set_inline */
         BM_vert_calc_normal_ex(v, BM_ELEM_SELECT, vert_normals[v_index]);
       }
+      bm->elem_index_dirty &= ~BM_VERT;
     }
 
+    BM_data_layer_ensure_named(bm, &bm->ldata, CD_PROP_INT16_2D, "custom_normal");
+    BM_mesh_elem_index_ensure(bm, BM_LOOP);
     BLI_bitmap *loop_set = BLI_BITMAP_NEW(bm->totloop, __func__);
     const int cd_clnors_offset = CustomData_get_offset_named(
         &bm->ldata, CD_PROP_INT16_2D, "custom_normal");

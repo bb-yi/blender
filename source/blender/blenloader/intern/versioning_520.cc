@@ -29,6 +29,7 @@
 #include "BLI_string_utils.hh"
 #include "BLI_sys_types.h"
 
+#include "BKE_anim_visualization.h"
 #include "BKE_animsys.h"
 #include "BKE_attribute.hh"
 #include "BKE_colortools.hh"
@@ -36,6 +37,7 @@
 #include "BKE_idprop.hh"
 #include "BKE_layer.hh"
 #include "BKE_lib_id.hh"
+#include "BKE_lib_override.hh"
 #include "BKE_main.hh"
 #include "BKE_mesh_legacy_convert.hh"
 #include "BKE_node.hh"
@@ -124,7 +126,8 @@ static void version_geometry_nodes_properties(FileData &fd,
       IDP_AddToGroup(
           group, bke::idprop::create("type", int(nodes::GeometryNodesInputType::Layer)).release());
       const StringRefNull layer_name = [&]() {
-        const IDProperty *layer_name = IDP_GetPropertyFromGroup(old_props, identifier);
+        const IDProperty *layer_name = IDP_GetPropertyTypeFromGroup(
+            old_props, identifier, IDP_STRING);
         if (layer_name) {
           return StringRefNull(IDP_string_get(layer_name));
         }
@@ -173,7 +176,7 @@ static void version_geometry_nodes_properties(FileData &fd,
       if (use_attribute_prop->type == IDP_INT) {
         use_attribute = bool(IDP_int_get(use_attribute_prop));
       }
-      else {
+      else if (use_attribute_prop->type == IDP_BOOLEAN) {
         use_attribute = bool(IDP_bool_get(use_attribute_prop));
       }
     }
@@ -182,8 +185,8 @@ static void version_geometry_nodes_properties(FileData &fd,
                                             nodes::GeometryNodesInputType::Value;
     IDP_AddToGroup(group, bke::idprop::create("type", int(input_type)).release());
     const StringRefNull attribute_name = [&]() {
-      const IDProperty *attribute_name = IDP_GetPropertyFromGroup(old_props,
-                                                                  identifier + "_attribute_name");
+      const IDProperty *attribute_name = IDP_GetPropertyTypeFromGroup(
+          old_props, identifier + "_attribute_name", IDP_STRING);
       if (attribute_name) {
         return StringRefNull(IDP_string_get(attribute_name));
       }
@@ -196,8 +199,8 @@ static void version_geometry_nodes_properties(FileData &fd,
   IDP_AddToGroup(system_props, outputs);
   for (const bNodeTreeInterfaceSocket *output : ntree.interface_outputs()) {
     const StringRef identifier = output->identifier;
-    IDProperty *old_name_prop = IDP_GetPropertyFromGroup(old_props,
-                                                         identifier + "_attribute_name");
+    IDProperty *old_name_prop = IDP_GetPropertyTypeFromGroup(
+        old_props, identifier + "_attribute_name", IDP_STRING);
     if (!old_name_prop) {
       continue;
     }
@@ -221,6 +224,7 @@ static void sanitize_node_tree_interface_socket_identifiers(bNodeTree &node_tree
 {
   node_tree.ensure_interface_cache();
   Set<StringRef> all_identifiers;
+  Map<std::string, StringRefNull> identifier_map;
   for (bNodeTreeInterfaceItem *item : node_tree.interface_items()) {
     if (item->item_type == NodeTreeInterfaceItemType::Panel) {
       continue;
@@ -228,6 +232,7 @@ static void sanitize_node_tree_interface_socket_identifiers(bNodeTree &node_tree
     auto &socket = *bke::node_interface::get_item_as<bNodeTreeInterfaceSocket>(item);
     /* Socket identifiers are required to be valid RNA identifiers and unique. */
     if (!RNA_validate_identifier(socket.identifier, true)) {
+      std::string prev_identifier(socket.identifier);
       RNA_identifier_sanitize(socket.identifier, true);
       if (all_identifiers.contains(socket.identifier)) {
         std::string new_identifier = BLI_uniquename_cb(
@@ -237,8 +242,24 @@ static void sanitize_node_tree_interface_socket_identifiers(bNodeTree &node_tree
         MEM_SAFE_DELETE(socket.identifier);
         socket.identifier = BLI_strdup(new_identifier.c_str());
       }
+      identifier_map.add(std::move(prev_identifier), socket.identifier);
     }
     all_identifiers.add(socket.identifier);
+  }
+
+  /* Rename all the node socket identifiers that got changed in the interface. */
+  if (!identifier_map.is_empty()) {
+    for (bNode &node : node_tree.nodes) {
+      if (!(node.is_group_input() || node.is_group_output())) {
+        continue;
+      }
+      ListBaseT<bNodeSocket> sockets = node.is_group_output() ? node.inputs : node.outputs;
+      for (bNodeSocket &socket : sockets) {
+        if (identifier_map.contains(socket.identifier)) {
+          version_node_socket_identifier_set(socket, identifier_map.lookup(socket.identifier));
+        }
+      }
+    }
   }
 }
 
@@ -299,7 +320,7 @@ static void version_compositor_effect_initialized(Main &bmain)
 {
   /* A file with compositor effects that was saved, opened in
    * previous version and saved there, would have lost the
-   * compositor effect data since ealier versions would not
+   * compositor effect data since earlier versions would not
    * write it. Ensure the effect data is not null. */
   for (Scene &scene : bmain.scenes) {
     if (scene.ed) {
@@ -551,6 +572,28 @@ void do_versions_after_linking_520(FileData *fd, Main *bmain)
   if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 36)) {
     /* Shift animation data to accommodate the new thin wall input. */
     version_node_socket_index_animdata(bmain, NTREE_SHADER, SH_NODE_BSDF_PRINCIPLED, 5, 1, 31);
+  }
+
+  /* The NPR branch previously used subversion 44 before this official migration landed. */
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 46)) {
+    /* We have to remove the invalid motion paths. Re-baking into clip space on file load would be
+     * very expensive. */
+    for (Object &object : bmain->objects) {
+      if (object.mpath && (object.avs.path_bakeflag & MOTIONPATH_BAKE_CAMERA_SPACE)) {
+        animviz_free_motionpath(object.mpath);
+        object.mpath = nullptr;
+        object.avs.path_bakeflag &= ~MOTIONPATH_BAKE_HAS_PATHS;
+      }
+      if (object.pose && (object.pose->avs.path_bakeflag & MOTIONPATH_BAKE_CAMERA_SPACE)) {
+        for (bPoseChannel &pose_bone : object.pose->chanbase) {
+          if (pose_bone.mpath) {
+            animviz_free_motionpath(pose_bone.mpath);
+            pose_bone.mpath = nullptr;
+          }
+        }
+        object.pose->avs.path_bakeflag &= ~MOTIONPATH_BAKE_HAS_PATHS;
+      }
+    }
   }
 
   /**
@@ -920,11 +963,35 @@ void blo_do_versions_520(FileData * /*fd*/, Library * /*lib*/, Main *bmain)
     version_solid_color_width_height_defaults(*bmain);
   }
 
-  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 43)) {
+  /* Fix the fact that previously, making a linked data local and/or clearing a liboverride would
+   * not properly flag some sub-data like modifiers or constraints as local. The official and NPR
+   * branches both used subversion 43, so run both migrations under a new merged subversion. */
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 45)) {
+    for (ID &id : MainAllIDsIterator{*bmain}) {
+      if (!ID_IS_LINKED(&id) && !ID_IS_OVERRIDE_LIBRARY(&id)) {
+        BKE_lib_override_flag_subdata_local(id);
+      }
+    }
     version_replace_outline_control_width_variation(bmain);
   }
 
-  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 44)) {
+  /* The compositor previously did not support default inputs for group nodes, but some built-in
+   * nodes had the position field default type for some inputs, so node groups would gain it as a
+   * default type through some operators. Later, the default inputs were supported for group nodes,
+   * though position field were not supported in the compositor, so it would assert. To fix this,
+   * we reset any position field default input to the default value. */
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 46)) {
+    FOREACH_NODETREE_BEGIN (bmain, node_tree, id) {
+      if (node_tree->type == NTREE_COMPOSIT) {
+        node_tree->ensure_interface_cache();
+        for (bNodeTreeInterfaceSocket *input : node_tree->interface_inputs()) {
+          if (input->default_input == NODE_DEFAULT_INPUT_POSITION_FIELD) {
+            input->default_input = NODE_DEFAULT_INPUT_VALUE;
+          }
+        }
+      }
+    }
+    FOREACH_NODETREE_END;
     version_npr_image_sample_offset_socket_identifier(bmain);
   }
 

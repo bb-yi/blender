@@ -89,6 +89,7 @@ ccl_device_forceinline void integrator_state_write_shadow_ray(
   INTEGRATOR_STATE_WRITE(state, shadow_ray, tmax) = ray->tmax;
   INTEGRATOR_STATE_WRITE(state, shadow_ray, time) = ray->time;
   INTEGRATOR_STATE_WRITE(state, shadow_ray, dP) = ray->dP;
+  INTEGRATOR_STATE_WRITE(state, shadow_ray, dD) = ray->dD;
 }
 
 ccl_device_forceinline void integrator_state_read_shadow_ray(ConstIntegratorShadowState state,
@@ -100,7 +101,7 @@ ccl_device_forceinline void integrator_state_read_shadow_ray(ConstIntegratorShad
   ray->tmax = INTEGRATOR_STATE(state, shadow_ray, tmax);
   ray->time = INTEGRATOR_STATE(state, shadow_ray, time);
   ray->dP = INTEGRATOR_STATE(state, shadow_ray, dP);
-  ray->dD = differential_zero_compact();
+  ray->dD = INTEGRATOR_STATE(state, shadow_ray, dD);
 }
 
 ccl_device_forceinline void integrator_state_write_shadow_ray_self(
@@ -337,12 +338,14 @@ integrator_state_get_mnee_shadow_state(ConstIntegratorState state)
 ccl_device_forceinline void integrator_state_write_mnee_shadow_owner(
     IntegratorShadowState shadow_state, IntegratorState state)
 {
+  static_assert(INTEGRATOR_SHADOW_ISECT_SIZE >= 3);
   INTEGRATOR_STATE_ARRAY_WRITE(shadow_state, shadow_isect, 2, prim) = (int)state;
 }
 
 ccl_device_forceinline IntegratorState
 integrator_state_read_mnee_shadow_owner(ConstIntegratorShadowState shadow_state)
 {
+  static_assert(INTEGRATOR_SHADOW_ISECT_SIZE >= 3);
   return IntegratorState(INTEGRATOR_STATE_ARRAY(shadow_state, shadow_isect, 2, prim));
 }
 #  endif
@@ -387,6 +390,7 @@ ccl_device_forceinline void integrator_state_write_mnee(IntegratorState state,
   INTEGRATOR_STATE_WRITE(shadow_state, shadow_ray, D) = ls->D;
   INTEGRATOR_STATE_WRITE(shadow_state, shadow_ray, P) = ray->P;
   INTEGRATOR_STATE_WRITE(shadow_state, shadow_ray, dP) = ray->dP;
+  INTEGRATOR_STATE_WRITE(shadow_state, shadow_ray, dD) = ray->dD;
   INTEGRATOR_STATE_ARRAY_WRITE(shadow_state, shadow_isect, 1, object) = ray->self.object;
   INTEGRATOR_STATE_ARRAY_WRITE(shadow_state, shadow_isect, 1, type) = ray->self.prim;
 
@@ -443,7 +447,7 @@ ccl_device_forceinline void integrator_state_read_mnee_ray(ConstIntegratorState 
   ray->tmin = ((ls->shader & SHADER_CAST_SHADOW) == 0) ? FLT_MAX : 0.0f;
   ray->time = INTEGRATOR_STATE(state, ray, time);
   ray->dP = INTEGRATOR_STATE(shadow_state, shadow_ray, dP);
-  ray->dD = differential_zero_compact();
+  ray->dD = INTEGRATOR_STATE(shadow_state, shadow_ray, dD);
   ray->self.object = INTEGRATOR_STATE_ARRAY(shadow_state, shadow_isect, 1, object);
   ray->self.prim = INTEGRATOR_STATE_ARRAY(shadow_state, shadow_isect, 1, type);
   ray->self.light_object = ls->object;

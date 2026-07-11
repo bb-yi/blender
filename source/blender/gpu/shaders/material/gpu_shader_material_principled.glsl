@@ -105,8 +105,8 @@ void node_bsdf_principled(float4 base_color,
   base_color = max(base_color, float4(0.0f));
   float4 clamped_base_color = min(base_color, float4(1.0f));
 
-  N = safe_normalize(N);
-  CN = safe_normalize(CN);
+  N = normalize_fallback(N, g_data.N);
+  CN = normalize_fallback(CN, g_data.N);
   float3 V = coordinate_incoming(g_data.P);
   float NV = dot(N, V);
 
@@ -139,6 +139,7 @@ void node_bsdf_principled(float4 base_color,
       sheen_NV = dot(sheen_N, V);
     }
 #endif
+    sheen_NV = saturate(sheen_NV);
 
     /* TODO: Maybe sheen_weight should be specular. */
     float3 sheen_color = sheen_weight * sheen_tint.rgb *

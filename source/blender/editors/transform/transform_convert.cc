@@ -958,7 +958,7 @@ static TransConvertTypeInfo *convert_type_get(const TransInfo *t, Object **r_obj
   }
   if (t->spacetype == SPACE_CLIP) {
     if (t->options & CTX_MOVIECLIP) {
-      if (t->region->regiontype == RGN_TYPE_PREVIEW) {
+      if (t->region && (t->region->regiontype == RGN_TYPE_PREVIEW)) {
         return &TransConvertType_TrackingCurves;
       }
       return &TransConvertType_Tracking;
@@ -1095,6 +1095,9 @@ void create_trans_data(bContext *C, TransInfo *t)
       t->num.flag |= NUM_NO_FRACTION;
     }
     else if (t->data_type == &TransConvertType_SequencerImage) {
+      t->obedit_type = -1;
+    }
+    else if (t->data_type == &TransConvertType_NLA) {
       t->obedit_type = -1;
     }
     t->data_type->create_trans_data(C, t);

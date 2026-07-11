@@ -439,7 +439,7 @@ static void update_system_properties(Object &object, NodesModifierData &nmd)
   }
   PointerRNA properties_ptr = RNA_pointer_create_discrete(
       &object.id, RNA_NodesModifierProperties, &nmd);
-  RNA_sync_system_properties(properties_ptr, *nmd.modifier.system_properties);
+  RNA_ensure_and_sync_system_properties(properties_ptr, *nmd.modifier.system_properties);
 }
 
 void MOD_nodes_update_interface(Object *object, NodesModifierData *nmd)
@@ -847,6 +847,9 @@ static void find_side_effect_nodes(const NodesModifierData &nmd,
     find_side_effect_nodes_for_viewer_path(workspace->viewer_path, nmd, ctx, r_side_effect_nodes);
     for (const ScrArea &area : screen->areabase) {
       const SpaceLink *sl = static_cast<SpaceLink *>(area.spacedata.first);
+      if (sl == nullptr) {
+        continue;
+      }
       if (sl->spacetype == SPACE_SPREADSHEET) {
         const SpaceSpreadsheet &sspreadsheet = *reinterpret_cast<const SpaceSpreadsheet *>(sl);
         find_side_effect_nodes_for_viewer_path(
@@ -878,6 +881,9 @@ static void find_verbose_log_contexts(const NodesModifierData &nmd,
     const bScreen *screen = BKE_workspace_active_screen_get(window.workspace_hook);
     for (const ScrArea &area : screen->areabase) {
       const SpaceLink *sl = static_cast<SpaceLink *>(area.spacedata.first);
+      if (sl == nullptr) [[unlikely]] {
+        continue;
+      }
       if (sl->spacetype == SPACE_NODE) {
         const SpaceNode &snode = *reinterpret_cast<const SpaceNode *>(sl);
         if (snode.edittree == nullptr || snode.edittree->type != NTREE_GEOMETRY) {

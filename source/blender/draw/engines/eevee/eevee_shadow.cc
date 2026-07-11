@@ -1055,8 +1055,12 @@ void ShadowModule::sync_object(const ObjectHandle &ob_handle,
                                bool has_transparent_shadows,
                                bool has_time_dependent_shadows)
 {
+  if (is_alpha_blend && !inst_.is_baking()) {
+    tilemap_usage_transparent_ps_->draw(box_batch_, ob_handle.res_handle);
+  }
+
   bool is_shadow_caster = !(ob_handle.object->visibility_flag & OB_HIDE_SHADOW);
-  if (!is_shadow_caster && !is_alpha_blend) {
+  if (!is_shadow_caster) {
     return;
   }
 
@@ -1087,10 +1091,6 @@ void ShadowModule::sync_object(const ObjectHandle &ob_handle,
     if (is_shadow_caster) {
       curr_casters_.append(instance_handle.raw());
     }
-  }
-
-  if (is_alpha_blend && !inst_.is_baking()) {
-    tilemap_usage_transparent_ps_->draw(box_batch_, ob_handle.res_handle);
   }
 }
 
@@ -1242,6 +1242,8 @@ void ShadowModule::end_sync()
         sub.bind_ssbo("tilemaps_clip_buf", tilemap_pool.tilemaps_clip);
         sub.bind_ssbo("casters_id_buf", curr_casters_);
         sub.bind_ssbo("bounds_buf", &manager.bounds_buf.current());
+        /* Bind again using a writable binding. */
+        sub.bind_ssbo("light_buf_write", &inst_.lights.culling_light_buf_);
         sub.push_constant("resource_len", int(curr_casters_.size()));
         sub.bind_resources(inst_.lights);
         sub.dispatch(int3(
@@ -1454,6 +1456,8 @@ void ShadowModule::end_sync()
         sub.bind_image("tilemaps_img", tilemap_pool.tilemap_tx);
         sub.bind_ssbo("tilemaps_buf", tilemap_pool.tilemaps_data);
         sub.push_constant("tilemaps_buf_len", int(tilemap_pool.tilemaps_data.size()));
+        /* Bind again using a writable binding. */
+        sub.bind_ssbo("light_buf_write", &inst_.lights.culling_light_buf_);
         sub.bind_resources(inst_.lights);
         sub.dispatch(int3(1, 1, max_ii(inst_.lights.sun_lights_len_, 1)));
         sub.barrier(GPU_BARRIER_TEXTURE_FETCH);

@@ -1,9 +1,9 @@
 
 msgid ""
 msgstr ""
-"Project-Id-Version: Blender 5.2.0 Alpha (b'8764d33c658b')\n"
+"Project-Id-Version: Blender 5.2.0 LTS Beta (b'b2d38940ccd4')\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-06-01 07:36+0000\n"
+"POT-Creation-Date: 2026-07-06 08:37+0000\n"
 "PO-Revision-Date: 2025-11-19 06:24+0000\n"
 "Last-Translator: \"M. Amin Taheri\" <amintaheri2001@gmail.com>\n"
 "Language-Team: Persian <https://translate.blender.org/projects/blender-ui/ui/fa/>\n"
@@ -2317,6 +2317,10 @@ msgid "Operator"
 msgstr "ﻞﻣﺎﻋ"
 
 
+msgid "Unassigned"
+msgstr "ﻩﺪﺸﻧ ﺭﺍﺬﮔﺍﻭ"
+
+
 msgid "Matrix"
 msgstr "ﺲﯾﺮﺗﺎﻣ"
 
@@ -3086,24 +3090,12 @@ msgid "Mix"
 msgstr "ﻁﻮﻠﺨﻣ"
 
 
-msgid "Mirror"
-msgstr "ﻪﻨﯾﺁ"
-
-
-msgid "Math"
-msgstr "ﯽﺿﺎﯾﺭ"
-
-
 msgid "Add Image"
 msgstr "ﺮﯾﻮﺼﺗ ﻥﺩﺮﮐ‌ﻪﻓﺎﺿﺍ"
 
 
 msgid "Relations"
 msgstr "ﻂﺑﺍﻭﺭ"
-
-
-msgid "Import"
-msgstr "ﻥﺩﺮﮐ ﺩﺭﺍﻭ"
 
 
 msgid "Apply"
@@ -3114,8 +3106,24 @@ msgid "Convert"
 msgstr "ﻞﯾﺪﺒﺗ"
 
 
+msgid "Math"
+msgstr "ﯽﺿﺎﯾﺭ"
+
+
+msgid "Import"
+msgstr "ﻥﺩﺮﮐ ﺩﺭﺍﻭ"
+
+
 msgid "UV"
 msgstr "UV"
+
+
+msgid "Pivot Point"
+msgstr "ﺶﺧﺮﭼ ﻪﻄﻘﻧ"
+
+
+msgid "Mirror"
+msgstr "ﻪﻨﯾﺁ"
 
 
 msgid "Linked"
@@ -3128,10 +3136,6 @@ msgstr "ﺡﺮﻃ"
 
 msgid "Tracking"
 msgstr "ﯽﺑﺎﯾﺩﺭ"
-
-
-msgid "Pivot Point"
-msgstr "ﺶﺧﺮﭼ ﻪﻄﻘﻧ"
 
 
 msgid "Key"
@@ -4674,6 +4678,10 @@ msgid "Use linear progression"
 msgstr "ﯽﻄﺧ ﺖﻓﺮﺸﯿﭘ ﺯﺍ ﻩﺩﺎﻔﺘﺳﺍ"
 
 
+msgid "Cancel"
+msgstr "ﻑﺍﺮﺼﻧﺍ"
+
+
 msgctxt "WindowManager"
 msgid "Rotate"
 msgstr "ﺶﺧﺮﭼ"
@@ -4803,13 +4811,13 @@ msgid "Back"
 msgstr "ﺖﺸﮔﺯﺎﺑ"
 
 
+msgid ".blend Files"
+msgstr "blend. ﻞﯾﺎﻓ"
+
+
 msgctxt "Operator"
 msgid "New Folder"
 msgstr "ﺪﯾﺪﺟ ﻪﺷﻮﭘ"
-
-
-msgid ".blend Files"
-msgstr "blend. ﻞﯾﺎﻓ"
 
 
 msgid "Drivers:"
@@ -4899,10 +4907,6 @@ msgid "Out"
 msgstr "ﯽﺟﻭﺮﺧ"
 
 
-msgid "Cancel"
-msgstr "ﻑﺍﺮﺼﻧﺍ"
-
-
 msgid "Nothing selected"
 msgstr "ﻩﺪﺸﻧ ﺏﺎﺨﺘﻧﺍ ﺰﯿﭼ ﭻﯿﻫ"
 
@@ -4966,7 +4970,7 @@ msgstr "ﺪﯿﯾﺄﺗ"
 
 
 msgid "Value: {}"
-msgstr "{} :ﺭﺍﺪﻘﻣ"
+msgstr "‬{}‪ :ﺭﺍﺪﻘﻣ"
 
 
 msgid "Delete the active position"
@@ -5122,7 +5126,7 @@ msgstr "ﺩﺮﮐ ﻑﺬﺣ ﺍﺭ ﺩﺭﺍﺩ ﻢﺴﺟ ﻪﭽﻧﺁ ﺯﺍ �
 
 
 msgid "Cannot add more than %i UV maps"
-msgstr "ﺩﺮﮐ ﻪﻓﺎﺿﺍ UV ﻪﺸﻘﻧ i% ﺯﺍ ﺶﯿﺑ ﻥﺍﻮﺗ‌ﯽﻤﻧ"
+msgstr "ﺩﺮﮐ ﻪﻓﺎﺿﺍ UV ﻪﺸﻘﻧ %i‬‪ ﺯﺍ ﺶﯿﺑ ﻥﺍﻮﺗ‌ﯽﻤﻧ"
 
 
 msgid "%d %s mirrored, %d failed"
@@ -5151,10 +5155,6 @@ msgstr "؟ﺩﻮﺷ ﻑﺬﺣ ﯽﺑﺎﺨﺘﻧﺍ ﻝﺎﺑﺎﺘﻣ ﺮﺻﺎ
 
 msgid "Loading Asset Libraries"
 msgstr "ﯽﯾﺍﺭﺍﺩ ﯼﺎﻫ‌ﻪﻧﺎﺨﺑﺎﺘﮐ ﯼﺮﯿﮔﺭﺎﺑ"
-
-
-msgid "Unassigned"
-msgstr "ﻩﺪﺸﻧ ﺭﺍﺬﮔﺍﻭ"
 
 
 msgid "Delete selected objects?"

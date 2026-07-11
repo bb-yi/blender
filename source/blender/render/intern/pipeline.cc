@@ -190,11 +190,13 @@ static bool default_break(void * /*arg*/)
   return G.is_break == true;
 }
 
-static void stats_update(void * /*arg*/, RenderStats *rs)
+static void stats_update(void *arg, RenderStats *rs)
 {
   if (rs->infostr == nullptr) {
     return;
   }
+
+  Render *re = static_cast<Render *>(arg);
 
   /* Compositor calls this from multiple threads, mutex lock to ensure we don't
    * get garbled output. */
@@ -212,7 +214,7 @@ static void stats_update(void * /*arg*/, RenderStats *rs)
 
   /* NOTE: using G_MAIN seems valid here???
    * Not sure it's actually even used anyway, we could as well pass nullptr? */
-  BKE_callback_exec_string(G_MAIN, rs->infostr, BKE_CB_EVT_RENDER_STATS);
+  render_callback_exec_string(re, G_MAIN, BKE_CB_EVT_RENDER_STATS, rs->infostr);
 
   if (show_info) {
     fflush(stdout);
@@ -944,6 +946,7 @@ void RE_display_init(Render *re)
   re->display->progress_cb = float_nothing;
   re->display->test_break_cb = default_break;
   re->display->stats_draw_cb = stats_update;
+  re->display->sdh = re;
 }
 
 void RE_display_ensure_gpu_context(Render *re)
@@ -1681,6 +1684,35 @@ static bool is_compositing_possible_on_gpu(Scene *scene, ReportList *reports)
   return true;
 }
 
+bool RE_disable_save_output_allowed(const bool is_animation, Scene &scene, ReportList *reports)
+{
+  const bool save_output = (scene.r.mode & R_SAVE_OUTPUT) != 0;
+  const bool do_compositing = (scene.r.scemode & R_DOCOMP) != 0;
+  const bool do_sequencer = RE_seq_render_active(&scene, &scene.r);
+
+  if (is_animation && do_sequencer && !save_output) {
+    BKE_report(reports, RPT_ERROR, "Render output disabled in Output properties");
+    return false;
+  }
+
+  if (is_animation && !save_output && !do_compositing) {
+    BKE_report(reports, RPT_ERROR, "Render output and compositing disabled in Output properties");
+    return false;
+  }
+
+  if (is_animation && !save_output && do_compositing) {
+    if (!bke::compositor::node_tree_has_linked_file_output(scene.compositing_node_group)) {
+      BKE_report(reports,
+                 RPT_ERROR,
+                 "Render output disabled in Output properties and no active compositing File "
+                 "Output nodes");
+      return false;
+    }
+  }
+
+  return true;
+}
+
 bool RE_is_rendering_allowed(const Main &bmain,
                              Scene *scene,
                              ViewLayer *single_layer,
@@ -1846,6 +1878,7 @@ void RE_SetReports(Render *re, ReportList *reports)
 static void render_update_depsgraph(Render *re)
 {
   Scene *scene = re->scene;
+  BKE_scene_camera_switch_update(re->scene);
   DEG_evaluate_on_framechange(re->pipeline_depsgraph, BKE_scene_frame_get(scene));
   BKE_scene_update_sound(re->pipeline_depsgraph, re->main);
 }

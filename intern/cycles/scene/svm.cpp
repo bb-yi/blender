@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0 */
 
 #include <algorithm>
+#include <functional>
 
 #include "device/device.h"
 
@@ -19,6 +20,7 @@
 #include "kernel/svm/node_types.h"
 
 #include "util/log.h"
+#include "util/map.h"
 #include "util/math_float3.h"
 #include "util/progress.h"
 #include "util/queue.h"
@@ -259,7 +261,7 @@ SVMStackOffset SVMCompiler::stack_assign(ShaderInput *input)
       input->stack_offset = input->link->stack_offset;
     }
     else {
-      const ShaderNode *node = input->parent;
+      ShaderNode *node = input->parent;
 
       /* not linked to output -> add nodes to load default value */
       input->stack_offset = stack_find_offset(input);
@@ -349,6 +351,9 @@ SVMStackOffset SVMCompiler::input_link(const char *name)
    * to write the value to the stack with another load and return a linked svm offset, as these
    * never store the default value in the SVMNode. */
   ShaderInput *input = current_node->input(name);
+  /* Ensure input link is pushed to SVM before the node itself. */
+  assert(!(current_node->added_to_svm && input->constant_folded_in && input->link == nullptr &&
+           input->stack_offset == SVM_STACK_INVALID));
   return (input->link || input->constant_folded_in) ? stack_assign(input) : SVM_STACK_INVALID;
 }
 
@@ -378,35 +383,39 @@ void SVMCompiler::stack_link(ShaderInput *input, ShaderOutput *output)
   }
 }
 
+bool SVMCompiler::is_sole_user(const ShaderNode *node,
+                               const ShaderOutput *output,
+                               const ShaderNodeSet &done)
+{
+  /* Check if the node is the only remaining user of the output, meaning the
+   * output's stack space can be freed once the node is compiled. */
+
+  /* optimization we should add: verify if in->parent is actually used */
+  for (const ShaderInput *in : output->links) {
+    if (in->parent != node && !done.contains(in->parent)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 void SVMCompiler::stack_clear_users(ShaderNode *node, ShaderNodeSet &done)
 {
-  /* optimization we should add:
-   * find and lower user counts for outputs for which all inputs are done.
-   * this is done before the node is compiled, under the assumption that the
-   * node will first load all inputs from the stack and then writes its
-   * outputs. this used to work, but was disabled because it gave trouble
-   * with inputs getting stack positions assigned */
+  /* Possible minor optimization: If all nodes read all inputs before writing outputs,
+   * the input stack space could be reused for the output and cache locality would be
+   * improved. This was tried at some point but disabled, it would need careful validation
+   * of stack assignment code and every SVM node implementation. It's not obvious if it's
+   * worth it. */
 
   for (ShaderInput *input : node->inputs) {
     ShaderOutput *output = input->link;
 
-    if (output && output->stack_offset != SVM_STACK_INVALID) {
-      bool all_done = true;
+    if (output && output->stack_offset != SVM_STACK_INVALID && is_sole_user(node, output, done)) {
+      stack_clear_offset(output, output->stack_offset);
+      output->stack_offset = SVM_STACK_INVALID;
 
-      /* optimization we should add: verify if in->parent is actually used */
       for (ShaderInput *in : output->links) {
-        if (in->parent != node && !done.contains(in->parent)) {
-          all_done = false;
-        }
-      }
-
-      if (all_done) {
-        stack_clear_offset(output, output->stack_offset);
-        output->stack_offset = SVM_STACK_INVALID;
-
-        for (ShaderInput *in : output->links) {
-          in->stack_offset = SVM_STACK_INVALID;
-        }
+        in->stack_offset = SVM_STACK_INVALID;
       }
     }
   }
@@ -468,7 +477,7 @@ void SVMCompiler::add_node_data_float(const float f)
   current_svm_nodes.push_back_slow(__float_as_int(f));
 }
 
-void SVMCompiler::add_value_node(const ShaderNode *shader_node,
+void SVMCompiler::add_value_node(ShaderNode *shader_node,
                                  const float value,
                                  const int stack_offset)
 {
@@ -480,7 +489,7 @@ void SVMCompiler::add_value_node(const ShaderNode *shader_node,
            });
 }
 
-void SVMCompiler::add_value_node(const ShaderNode *shader_node,
+void SVMCompiler::add_value_node(ShaderNode *shader_node,
                                  const float3 &value,
                                  const int stack_offset)
 {
@@ -582,35 +591,168 @@ void SVMCompiler::generate_node(ShaderNode *node, ShaderNodeSet &done)
   }
 }
 
+int SVMCompiler::stack_node_output_size(const ShaderNode *node)
+{
+  /* Compute stack size that will be allocated by this node. */
+  int size = 0;
+  for (const ShaderOutput *output : node->outputs) {
+    if (!output->links.empty() && output->stack_offset == SVM_STACK_INVALID) {
+      size += stack_size(output);
+    }
+  }
+  return size;
+}
+
 void SVMCompiler::generate_svm_nodes(const ShaderNodeSet &nodes, CompilerState *state)
 {
   ShaderNodeSet &done = state->nodes_done;
   vector<bool> &done_flag = state->nodes_done_flag;
 
-  bool nodes_done;
-  do {
-    nodes_done = true;
+  /* Schedule the nodes to reduce peak SVM stack usage with a Sethi-Ullman style
+   * heuristic. This is optimal for trees, but only a heuristic for DAGs where
+   * it's an NP-hard problem.
+   *
+   * Nodes whose sub-graphs need the most stack are generated first, which helps
+   * complete tightly related sub-graphs before handling other parts of the graph.
+   *
+   * See "Generalizations of the Sethi-Ullman algorithm for register allocation"
+   * by Appel and Supowit for details. We use different terminology as some of it
+   * conflicts with our own.
+   *
+   * The Sethi-Ullman number is the peak SVM stack size needed to evaluate a node
+   * and "producer" nodes feeding into it, including the node output stack size.
+   *
+   * It was proven that evaluating producer nodes by descending order of this number
+   * minus the output stack size is optimal for trees. For a graph, we approximate
+   * this by only counting the output stack size for a producer node with multiple
+   * consumers. */
 
-    for (ShaderNode *node : nodes) {
-      if (!done_flag[node->id]) {
-        bool inputs_done = true;
-
-        for (ShaderInput *input : node->inputs) {
-          if (input->link && !done_flag[input->link->parent->id]) {
-            inputs_done = false;
-          }
-        }
-        if (inputs_done) {
-          generate_node(node, done);
-          done.insert(node);
-          done_flag[node->id] = true;
-        }
-        else {
-          nodes_done = false;
+  /* Producer nodes feeding into #node that have not been scheduled yet. */
+  auto get_producers = [&](const ShaderNode *node, vector<ShaderNode *> &producers) {
+    producers.clear();
+    for (const ShaderInput *input : node->inputs) {
+      if (input->link) {
+        ShaderNode *producer = input->link->parent;
+        if (!done_flag[producer->id] &&
+            std::find(producers.begin(), producers.end(), producer) == producers.end())
+        {
+          producers.push_back(producer);
         }
       }
     }
-  } while (!nodes_done);
+  };
+
+  /* Number of unique unscheduled consumer nodes for each producer node. */
+  unordered_map<const ShaderNode *, int> num_consumers;
+  vector<ShaderNode *> consumers;
+  for (ShaderNode *node : nodes) {
+    if (done_flag[node->id]) {
+      continue;
+    }
+    consumers.clear();
+    for (const ShaderOutput *output : node->outputs) {
+      for (const ShaderInput *in : output->links) {
+        ShaderNode *consumer = in->parent;
+        if (!done_flag[consumer->id] && nodes.contains(consumer) &&
+            std::find(consumers.begin(), consumers.end(), consumer) == consumers.end())
+        {
+          consumers.push_back(consumer);
+        }
+      }
+    }
+    num_consumers[node] = consumers.size();
+  }
+
+  /* Sethi-Ullman number for each node. */
+  unordered_map<const ShaderNode *, int> sethi_ullman_number;
+
+  /* Current Sethi-Ullman number for graph scheduling, only counting the output
+   * size when there are multiple consumers. */
+  auto current_sethi_ullman_number = [&](ShaderNode *node) -> int {
+    return (num_consumers[node] > 1) ? stack_node_output_size(node) : sethi_ullman_number[node];
+  };
+
+  /* Order producers by Sethi-Ullman number. Node ID is the tie breaker. */
+  auto node_order_key = [&](ShaderNode *node) -> int {
+    return current_sethi_ullman_number(node) - stack_node_output_size(node);
+  };
+  auto node_order_compare = [&](ShaderNode *a, ShaderNode *b) {
+    return node_order_key(a) > node_order_key(b) ||
+           (node_order_key(a) == node_order_key(b) && a->id < b->id);
+  };
+
+  /* Compute Sethi-Ullman number recursively. */
+  std::function<int(ShaderNode *)> compute_sethi_ullman_number = [&](ShaderNode *node) -> int {
+    const auto it = sethi_ullman_number.find(node);
+    if (it != sethi_ullman_number.end()) {
+      return it->second;
+    }
+
+    vector<ShaderNode *> producers;
+    get_producers(node, producers);
+    for (ShaderNode *producer : producers) {
+      compute_sethi_ullman_number(producer);
+    }
+    std::sort(producers.begin(), producers.end(), node_order_compare);
+
+    /* Sum output and peak stack usage of producers. */
+    int output_size = 0;
+    int peak_size = 0;
+    for (ShaderNode *producer : producers) {
+      peak_size = max(peak_size, output_size + current_sethi_ullman_number(producer));
+      output_size += stack_node_output_size(producer);
+    }
+    peak_size = max(peak_size, output_size + stack_node_output_size(node));
+    sethi_ullman_number[node] = peak_size;
+
+    return peak_size;
+  };
+
+  /* Gather all sink nodes (that have no unscheduled consumers) and sort by
+   * Sethi-Ullman number. */
+  vector<ShaderNode *> sinks;
+  for (ShaderNode *node : nodes) {
+    if (done_flag[node->id]) {
+      continue;
+    }
+    compute_sethi_ullman_number(node);
+    bool is_sink = true;
+    for (const ShaderOutput *output : node->outputs) {
+      for (const ShaderInput *in : output->links) {
+        if (!done_flag[in->parent->id] && nodes.contains(in->parent)) {
+          is_sink = false;
+          break;
+        }
+      }
+      if (!is_sink) {
+        break;
+      }
+    }
+    if (is_sink) {
+      sinks.push_back(node);
+    }
+  }
+  std::sort(sinks.begin(), sinks.end(), node_order_compare);
+
+  /* Generate nodes recursively from sink nodes. */
+  std::function<void(ShaderNode *)> generate = [&](ShaderNode *node) {
+    if (done_flag[node->id]) {
+      return;
+    }
+    vector<ShaderNode *> producers;
+    get_producers(node, producers);
+    std::sort(producers.begin(), producers.end(), node_order_compare);
+    for (ShaderNode *producer : producers) {
+      generate(producer);
+    }
+    generate_node(node, done);
+    done.insert(node);
+    done_flag[node->id] = true;
+  };
+
+  for (ShaderNode *node : sinks) {
+    generate(node);
+  }
 }
 
 void SVMCompiler::generate_closure_node(ShaderNode *node, CompilerState *state)
@@ -939,6 +1081,7 @@ void SVMCompiler::compile_type(Shader *shader, ShaderGraph *graph, ShaderType ty
   current_svm_nodes.clear();
 
   for (ShaderNode *node : graph->nodes) {
+    node->added_to_svm = false;
     for (ShaderInput *input : node->inputs) {
       input->stack_offset = SVM_STACK_INVALID;
     }

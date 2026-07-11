@@ -593,7 +593,7 @@ static wmOperatorStatus file_select_exec(bContext *C, wmOperator *op)
   mval[1] = RNA_int_get(op->ptr, "mouse_y");
   rect = file_select_mval_to_select_rect(mval);
 
-  if (sfile->layout == nullptr) {
+  if (sfile->files == nullptr || sfile->layout == nullptr) {
     return OPERATOR_CANCELLED;
   }
   if (!ED_fileselect_layout_is_inside_pt(sfile->layout, &region->v2d, rect.xmin, rect.ymin)) {
@@ -1127,6 +1127,9 @@ static wmOperatorStatus bookmark_select_exec(bContext *C, wmOperator *op)
 
   PropertyRNA *prop = RNA_struct_find_property(op->ptr, "dir");
   FileSelectParams *params = ED_fileselect_get_active_params(sfile);
+  if (params == nullptr) [[unlikely]] {
+    return OPERATOR_CANCELLED;
+  }
   char entry[256];
 
   RNA_property_string_get(op->ptr, prop, entry);
@@ -1171,6 +1174,9 @@ static wmOperatorStatus bookmark_add_exec(bContext *C, wmOperator *op)
   SpaceFile *sfile = CTX_wm_space_file(C);
   FSMenu *fsmenu = ED_fsmenu_get();
   FileSelectParams *params = ED_fileselect_get_active_params(sfile);
+  if (!params) {
+    return OPERATOR_CANCELLED;
+  }
 
   if (params->dir[0] != '\0') {
 
@@ -1876,15 +1882,22 @@ static wmOperatorStatus file_external_operation_exec(bContext *C, wmOperator *op
     return OPERATOR_CANCELLED;
   }
 
+  const FileExternalOperation operation = (FileExternalOperation)RNA_enum_get(op->ptr,
+                                                                              "operation");
+
   char filepath[FILE_MAX_LIBEXTRA];
-  filelist_file_get_full_path(sfile->files, fileentry, filepath);
+  if (!(fileentry->typeflag & FILE_TYPE_DIR) && (operation == FILE_EXTERNAL_OPERATION_FOLDER_OPEN))
+  {
+    const char *root = filelist_dir(sfile->files);
+    BLI_strncpy(filepath, root, sizeof(filepath));
+  }
+  else {
+    filelist_file_get_full_path(sfile->files, fileentry, filepath);
+  }
 
   WM_cursor_set(CTX_wm_window(C), WM_CURSOR_WAIT);
 
 #ifdef WIN32
-  const FileExternalOperation operation = (FileExternalOperation)RNA_enum_get(op->ptr,
-                                                                              "operation");
-
   if (!(fileentry->typeflag & FILE_TYPE_DIR) &&
       ELEM(operation, FILE_EXTERNAL_OPERATION_FOLDER_OPEN, FILE_EXTERNAL_OPERATION_FOLDER_CMD))
   {
@@ -2107,6 +2120,9 @@ static bool file_execute(bContext *C, SpaceFile *sfile)
 {
   Main *bmain = CTX_data_main(C);
   FileSelectParams *params = ED_fileselect_get_active_params(sfile);
+  if (!params) {
+    return false;
+  }
   FileDirEntry *file = filelist_file(sfile->files, params->active_file);
 
   if (file && file->redirection_path) {

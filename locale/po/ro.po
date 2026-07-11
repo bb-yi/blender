@@ -1,10 +1,10 @@
 
 msgid ""
 msgstr ""
-"Project-Id-Version: Blender 5.2.0 Alpha (b'8764d33c658b')\n"
+"Project-Id-Version: Blender 5.2.0 LTS Beta (b'b2d38940ccd4')\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-06-01 07:36+0000\n"
-"PO-Revision-Date: 2026-04-13 10:12+0000\n"
+"POT-Creation-Date: 2026-07-06 08:37+0000\n"
+"PO-Revision-Date: 2026-06-29 10:51+0000\n"
 "Last-Translator: Dominic Iastrebschi <domjotebit@gmail.com>\n"
 "Language-Team: Romanian <https://translate.blender.org/projects/blender-ui/ui/ro/>\n"
 "Language: ro\n"
@@ -79,8 +79,24 @@ msgid "F-Curve Groups"
 msgstr "Grupuri de curbele F"
 
 
+msgid "Groupings of F-Curves for display purposes, in e.g. the dopesheet and graph editor"
+msgstr "Grupări de curbe F în scopuri de afișare, de exemplu în dopesheet și în editorul de grafice"
+
+
 msgid "Slot"
 msgstr "Slot"
+
+
+msgid "The Slot that the Channelbag's animation data is for"
+msgstr "Slotul pentru care sunt destinate datele de animație ale Channelbag-ului"
+
+
+msgid "Collection of F-Curves for a specific action slot, on a specific strip"
+msgstr "Colecție de curbe F pentru un slot de acțiune specific, pe o bandă specifică"
+
+
+msgid "Collection of f-curve groups"
+msgstr "Colecție de grupuri de curbe F"
 
 
 msgid "For each action slot, a list of animation channels that are meant for that slot"
@@ -244,7 +260,7 @@ msgstr "Grupul de acțiune este extins cu excepția în editorului de grafice"
 
 
 msgid "Expanded in Graph Editor"
-msgstr "Extins în Editorul de Grafice"
+msgstr "Extins în editorul de grafice"
 
 
 msgid "Action group is expanded in graph editor"
@@ -255,24 +271,40 @@ msgid "Pin in Graph Editor"
 msgstr "Fixare în Editorul de Grafice"
 
 
+msgid "Strips"
+msgstr "Benzi"
+
+
+msgid "The list of strips that are on this animation layer"
+msgstr "Lista benzilor care se află pe acest strat de animație"
+
+
+msgid "Action Layers"
+msgstr "Straturi de acțiune"
+
+
+msgid "Collection of animation layers"
+msgstr "Colecție de straturi de animație"
+
+
 msgid "Action Pose Markers"
-msgstr "Marcatori de poziție de acțiune"
+msgstr "Marcatoare de poziție de acțiune"
 
 
 msgid "Collection of timeline markers"
-msgstr "Colecție de marcatori cronologici"
+msgstr "Colecție de marcatoare cronologici"
 
 
 msgid "Active Pose Marker"
-msgstr "Marcator Poziție Activ"
+msgstr "Marcator de poziție activ"
 
 
 msgid "Active pose marker for this action"
-msgstr "Marcator Poziție Activ pentru această acțiune"
+msgstr "Marcator de poziție activ pentru această acțiune"
 
 
 msgid "Active Pose Marker Index"
-msgstr "Indexul Marcatorului De Poziție Activ"
+msgstr "Indexul marcatorului de poziție activ"
 
 
 msgid "Index of active pose marker"
@@ -2136,10 +2168,6 @@ msgid "Sampling"
 msgstr "Eșantionare"
 
 
-msgid "Light"
-msgstr "Lumină"
-
-
 msgid "Add Image"
 msgstr "Adăugare Imagine"
 
@@ -2162,6 +2190,10 @@ msgstr "Aspect"
 
 msgid "Tracking"
 msgstr "Urmărire"
+
+
+msgid "Light"
+msgstr "Lumină"
 
 
 msgid "Marker"
@@ -2735,6 +2767,10 @@ msgid "Error Message"
 msgstr "Mesaj de Eroare"
 
 
+msgid "Cancel"
+msgstr "Anulare"
+
+
 msgctxt "WindowManager"
 msgid "Window"
 msgstr "Fereastră"
@@ -3089,10 +3125,6 @@ msgstr "Lipire Driver: niciun driver de lipit"
 
 msgid "Out"
 msgstr "Ieșire"
-
-
-msgid "Cancel"
-msgstr "Anulare"
 
 
 msgid "Cannot paint stroke"

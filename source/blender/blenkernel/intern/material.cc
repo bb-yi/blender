@@ -45,6 +45,7 @@
 
 #include "BKE_anim_data.hh"
 #include "BKE_attribute.h"
+#include "BKE_attribute.hh"
 #include "BKE_brush.hh"
 #include "BKE_curve.hh"
 #include "BKE_curves.hh"
@@ -64,6 +65,7 @@
 #include "BKE_node_runtime.hh"
 #include "BKE_object.hh"
 #include "BKE_object_types.hh"
+#include "BKE_pointcloud.hh"
 #include "BKE_preview_image.hh"
 #include "BKE_scene.hh"
 #include "BKE_vfont.hh"
@@ -986,12 +988,10 @@ MaterialGPencilStyle *BKE_gpencil_material_settings(Object *ob, short act)
  * When materials are assigned, the active material must be in the range of `1..totcol`.
  * see #139182 for details.
  */
-static void object_material_active_index_sanitize(Object *ob)
+void BKE_object_material_active_index_sanitize(Object *ob)
 {
-  if (ob->totcol && ob->actcol == 0) {
-    ob->actcol = 1;
-  }
-  ob->actcol = std::min(ob->actcol, ob->totcol);
+  const int min_index = (ob->totcol) ? 1 : 0;
+  ob->actcol = std::clamp(ob->actcol, min_index, ob->totcol);
 }
 
 void BKE_object_material_resize(Main *bmain, Object *ob, const short totcol, bool do_id_user)
@@ -1056,7 +1056,7 @@ void BKE_object_materials_sync_length(Main *bmain, Object *ob, ID *id)
   else {
     /* Normal case: the use the obdata amount of materials slots to update the object's one. */
     BKE_object_material_resize(bmain, ob, *totcol, false);
-    object_material_active_index_sanitize(ob);
+    BKE_object_material_active_index_sanitize(ob);
   }
 }
 
@@ -1076,7 +1076,7 @@ void BKE_objects_materials_sync_length_all(Main *bmain, ID *id)
   {
     if (ob->data == id) {
       BKE_object_material_resize(bmain, ob, *totcol, false);
-      object_material_active_index_sanitize(ob);
+      BKE_object_material_active_index_sanitize(ob);
       processed_objects++;
       BLI_assert(processed_objects <= id->us && processed_objects > 0);
       if (processed_objects == id->us) {
@@ -1242,6 +1242,26 @@ void BKE_object_material_assign_single_obdata(Main *bmain, Object *ob, Material 
   object_material_assign(bmain, ob, ma, act, BKE_MAT_ASSIGN_OBDATA, false);
 }
 
+void BKE_material_attr_indices_remap(bke::MutableAttributeAccessor attributes,
+                                     const uint *remap,
+                                     const int remap_num)
+{
+  /* The "material_index" attribute may contain values outside the valid material range
+   * (it's only clamped on read), so skip indices that don't map into the material array. */
+  bke::SpanAttributeWriter<int> material_indices = attributes.lookup_for_write_span<int>(
+      "material_index");
+  if (!material_indices) {
+    return;
+  }
+  for (const int i : material_indices.span.index_range()) {
+    const int index = material_indices.span[i];
+    if (IndexRange(remap_num).contains(index)) {
+      material_indices.span[i] = remap[index];
+    }
+  }
+  material_indices.finish();
+}
+
 void BKE_object_material_remap(Object *ob, const uint *remap)
 {
   Material ***matar = BKE_object_material_array_p(ob);
@@ -1265,6 +1285,12 @@ void BKE_object_material_remap(Object *ob, const uint *remap)
   }
   else if (ob->type == OB_GREASE_PENCIL) {
     BKE_grease_pencil_material_remap(id_cast<GreasePencil *>(ob->data), remap, ob->totcol);
+  }
+  else if (ob->type == OB_CURVES) {
+    BKE_curves_material_remap(id_cast<Curves *>(ob->data), remap, ob->totcol);
+  }
+  else if (ob->type == OB_POINTCLOUD) {
+    BKE_pointcloud_material_remap(id_cast<PointCloud *>(ob->data), remap, ob->totcol);
   }
   else if (ob->type == OB_VOLUME) {
     /* Material support doesn't store "indices".
@@ -1461,7 +1487,7 @@ bool BKE_object_material_slot_remove(Main *bmain, Object *ob)
   }
 
   /* can happen on face selection in editmode */
-  object_material_active_index_sanitize(ob);
+  BKE_object_material_active_index_sanitize(ob);
 
   /* we delete the actcol */
   mao = (*matarar)[ob->actcol - 1];
@@ -1500,7 +1526,7 @@ bool BKE_object_material_slot_remove(Main *bmain, Object *ob)
         obt->matbits[a - 1] = obt->matbits[a];
       }
       obt->totcol--;
-      object_material_active_index_sanitize(ob);
+      BKE_object_material_active_index_sanitize(ob);
 
       if (obt->totcol == 0) {
         MEM_delete(obt->mat);
@@ -1520,6 +1546,59 @@ bool BKE_object_material_slot_remove(Main *bmain, Object *ob)
   }
 
   return true;
+}
+
+int BKE_object_material_remove_unused(Main *bmain, Object *ob)
+{
+  int actcol = ob->actcol;
+  int removed = 0;
+
+  for (int slot = 1; slot <= ob->totcol; slot++) {
+    while (slot <= ob->totcol && !BKE_object_material_slot_used(ob, slot)) {
+      ob->actcol = slot;
+
+      if (!BKE_object_material_slot_remove(bmain, ob)) {
+        break;
+      }
+
+      if (actcol >= slot) {
+        actcol--;
+      }
+
+      removed++;
+    }
+  }
+
+  ob->actcol = actcol;
+  BKE_object_material_active_index_sanitize(ob);
+
+  return removed;
+}
+
+int BKE_object_material_remove_all(Main *bmain, Object *ob)
+{
+  int actcol = ob->actcol;
+  int removed = 0;
+
+  for (int slot = 1; slot <= ob->totcol; slot++) {
+    while (slot <= ob->totcol) {
+      ob->actcol = slot;
+
+      if (!BKE_object_material_slot_remove(bmain, ob)) {
+        break;
+      }
+
+      if (actcol >= slot) {
+        actcol--;
+      }
+
+      removed++;
+    }
+  }
+  ob->actcol = actcol;
+  BKE_object_material_active_index_sanitize(ob);
+
+  return removed;
 }
 
 static bNode *nodetree_uv_node_recursive(bNode *node)

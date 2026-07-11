@@ -2178,7 +2178,7 @@ static bool outliner_liboverride_property_remove_do(bContext *C,
                 current_id->override_library->reference->lib ?
                     current_id->override_library->reference->lib->runtime->filepath_abs :
                     "<NONE>",
-                liboverride_property->rna_path);
+                override_elem.rna_path.c_str());
     return false;
   }
 
@@ -2209,7 +2209,7 @@ static bool outliner_liboverride_property_remove_do(bContext *C,
                   current_id->override_library->reference->lib ?
                       current_id->override_library->reference->lib->runtime->filepath_abs :
                       "<NONE>",
-                  liboverride_property->rna_path);
+                  override_elem.rna_path.c_str());
       return false;
     }
   }
@@ -2326,7 +2326,7 @@ static wmOperatorStatus outliner_liboverride_property_remove_exec(bContext *C, w
 void OUTLINER_OT_liboverride_property_remove(wmOperatorType *ot)
 {
   /* identifiers */
-  ot->name = "Outliner Library Override Propery Remove";
+  ot->name = "Outliner Library Override Property Remove";
   ot->idname = "OUTLINER_OT_liboverride_property_remove";
   ot->description =
       "Remove the selected library override properties, and reset the relevant data to the linked "

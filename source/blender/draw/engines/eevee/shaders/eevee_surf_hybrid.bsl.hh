@@ -53,14 +53,14 @@ float4 closure_to_rgba_hybrid(Closure /*cl*/)
 
 #if defined(MAT_TRANSPARENT) && defined(MAT_SHADER_TO_RGBA)
   { /* Limit resource guard to this scope. */
-    /* clang-format off */ /* Multiline macro breaks error line counting. */
+    /* clang-format off */ /* Multi-line macro breaks error line counting. */
     [[resource_table]] eevee::LightprobeRenderData &lightprobes = resource_table_get(eevee::LightprobeRenderData);
     /* clang-format on */
     [[resource_table]] eevee::LightprobeSphereRenderData &lp_spheres = lightprobes.spheres;
 
     float3 V = -views.get(0).world_incident_vector(g_forward_lighting_P);
     eevee::LightProbeSample samp = lightprobes.load(
-        frag_co.xy, g_forward_lighting_P, g_data.Ng, V);
+        frag_co.xy, g_forward_lighting_P, g_data.N, V);
     float3 radiance_behind = lp_spheres.spherical_sample_normalized_with_parallax(
         samp, g_forward_lighting_P, V, 0.0);
 
@@ -233,7 +233,7 @@ HybridFragOut surf_hybrid_impl([[resource_table]] PipelineConstants &pipe,
   /* ----- GBuffer output ----- */
 
   gbuffer::InputClosures gbuf_data;
-  /* Make sure we we do not read uninitialized data (see #159161). */
+  /* Make sure we do not read uninitialized data (see #159161). */
   if (pipe.closure_bin_count == 0) [[static_branch]] {
     gbuf_data.closure[0] = ClosureUndetermined{};
   }

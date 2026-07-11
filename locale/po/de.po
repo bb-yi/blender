@@ -1,9 +1,9 @@
 
 msgid ""
 msgstr ""
-"Project-Id-Version: Blender 5.2.0 Alpha (b'8764d33c658b')\n"
+"Project-Id-Version: Blender 5.2.0 LTS Beta (b'b2d38940ccd4')\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-06-01 07:36+0000\n"
+"POT-Creation-Date: 2026-07-06 08:37+0000\n"
 "PO-Revision-Date: 2025-12-02 20:06+0000\n"
 "Last-Translator: Bastitron <bastitronhd@gmail.com>\n"
 "Language-Team: German <https://translate.blender.org/projects/blender-ui/ui/de/>\n"
@@ -1268,6 +1268,18 @@ msgid "Armatures active edit bone"
 msgstr "Aktiven Bearbeitungsknochen verankern"
 
 
+msgid "Asset Library"
+msgstr "Bestand-Bibliothek"
+
+
+msgid "Current File"
+msgstr "Aktuelle Datei"
+
+
+msgid "Custom"
+msgstr "Benutzerdefiniert"
+
+
 msgid "Asset Data"
 msgstr "Vermögenssdaten"
 
@@ -1326,18 +1338,6 @@ msgstr "Benutzerdefiniertes Schild (Namenskürzel) für das Vermögen, verwendet
 
 msgid "Asset Metadata"
 msgstr "Asset-Metadaten"
-
-
-msgid "Asset Library"
-msgstr "Bestand-Bibliothek"
-
-
-msgid "Current File"
-msgstr "Aktuelle Datei"
-
-
-msgid "Custom"
-msgstr "Benutzerdefiniert"
 
 
 msgid "ID Name"
@@ -9284,10 +9284,6 @@ msgid "sin(x) / x"
 msgstr "sin(x) / x"
 
 
-msgid "Phase Multiple"
-msgstr "Phasenmultiplikator"
-
-
 msgid "Phase Offset"
 msgstr "Phasen Versatz"
 
@@ -9966,6 +9962,10 @@ msgstr "Rückwärts sortieren"
 
 msgid "Asset Select Parameters"
 msgstr "Asset Auswahl-Parameter"
+
+
+msgid "Unassigned"
+msgstr "Unbestimmt"
 
 
 msgid "Float2 Attribute Value"
@@ -11156,6 +11156,10 @@ msgstr "Fußzeile"
 
 msgid "XR"
 msgstr "XR"
+
+
+msgid "Scrubbing"
+msgstr "Schruppen"
 
 
 msgid "Gizmos"
@@ -18683,98 +18687,6 @@ msgid "Material slot name"
 msgstr "Materialsteckplatzname"
 
 
-msgid "Mirror"
-msgstr "Spiegeln"
-
-
-msgid "Snap"
-msgstr "Einrasten"
-
-
-msgid "Local View"
-msgstr "Lokale Ansicht"
-
-
-msgid "Viewpoint"
-msgstr "Ansicht"
-
-
-msgid "Navigation"
-msgstr "Navigation"
-
-
-msgid "Align View"
-msgstr "Ansicht ausrichten"
-
-
-msgid "Align View to Active"
-msgstr "Ansicht auf Aktiv ausrichten"
-
-
-msgid "View Regions"
-msgstr "Vierfenster Ansicht"
-
-
-msgid "Math"
-msgstr "Mathematisch"
-
-
-msgid "Select More/Less"
-msgstr "Mehr/weniger anzeigen"
-
-
-msgid "Select Similar"
-msgstr "Ähnliche auswählen"
-
-
-msgid "Select All by Trait"
-msgstr "Alles nach Merkmal auswählen"
-
-
-msgid "Select Linked"
-msgstr "Verknüpfte auswählen"
-
-
-msgid "Select Loops"
-msgstr "Schleifen auswählen"
-
-
-msgid "Assign Material"
-msgstr "Material zuweisen"
-
-
-msgid "Read"
-msgstr "Lesen"
-
-
-msgid "Sample"
-msgstr "Beispiel"
-
-
-msgid "Write"
-msgstr "Schreiben"
-
-
-msgid "Primitives"
-msgstr "Grundkörper"
-
-
-msgid "Metaball"
-msgstr "Metaball"
-
-
-msgid "Light"
-msgstr "Licht"
-
-
-msgid "Light Probe"
-msgstr "Lichtsonde"
-
-
-msgid "Instances"
-msgstr "Instanzen"
-
-
 msgid "Add Image"
 msgstr "Bild hinzufügen"
 
@@ -18785,10 +18697,6 @@ msgstr "Beziehungen"
 
 msgid "Rigid Body"
 msgstr "Rigid Body"
-
-
-msgid "Import"
-msgstr "Importieren"
 
 
 msgid "Apply"
@@ -18827,12 +18735,12 @@ msgid "Hooks"
 msgstr "Haken"
 
 
-msgid "UV"
-msgstr "UV"
-
-
 msgid "Vertex Group Locks"
 msgstr "Punktgruppen sperren"
+
+
+msgid "Math"
+msgstr "Mathematisch"
 
 
 msgid "Random Mask"
@@ -18851,12 +18759,28 @@ msgid "Names"
 msgstr "Namen"
 
 
+msgid "Read"
+msgstr "Lesen"
+
+
+msgid "Sample"
+msgstr "Beispiel"
+
+
+msgid "Write"
+msgstr "Schreiben"
+
+
 msgid "Toggle Bone Options"
 msgstr "Knochen-Optionen umschalten"
 
 
 msgid "Enable Bone Options"
 msgstr "Knochen-Optionen einschalten"
+
+
+msgid "Primitives"
+msgstr "Grundkörper"
 
 
 msgid "Disable Bone Options"
@@ -18871,16 +18795,16 @@ msgid "Face Data"
 msgstr "Flächendaten"
 
 
+msgid "Instances"
+msgstr "Instanzen"
+
+
 msgid "Merge"
 msgstr "Zusammenführen"
 
 
-msgid "Linked"
-msgstr "Verknüpft"
-
-
-msgid "Layout"
-msgstr "Layout"
+msgid "Import"
+msgstr "Importieren"
 
 
 msgid "Special Characters"
@@ -18891,16 +18815,20 @@ msgid "Kerning"
 msgstr "Kerning"
 
 
-msgid "Keying"
-msgstr "Schlüsselbilder"
+msgid "Metaball"
+msgstr "Metaball"
 
 
-msgid "Tracking"
-msgstr "Verfolgen"
+msgid "UV"
+msgstr "UV"
 
 
 msgid "Pivot Point"
 msgstr "Drehpunkt"
+
+
+msgid "Snap"
+msgstr "Einrasten"
 
 
 msgid "Proportional Editing Falloff"
@@ -18909,6 +18837,82 @@ msgstr "Proportionaler Bearbeitungsabfall"
 
 msgid "Mask Edit"
 msgstr "Maskenbearbeitung"
+
+
+msgid "Mirror"
+msgstr "Spiegeln"
+
+
+msgid "Local View"
+msgstr "Lokale Ansicht"
+
+
+msgid "Viewpoint"
+msgstr "Ansicht"
+
+
+msgid "Linked"
+msgstr "Verknüpft"
+
+
+msgid "Navigation"
+msgstr "Navigation"
+
+
+msgid "Layout"
+msgstr "Layout"
+
+
+msgid "Align View"
+msgstr "Ansicht ausrichten"
+
+
+msgid "Align View to Active"
+msgstr "Ansicht auf Aktiv ausrichten"
+
+
+msgid "View Regions"
+msgstr "Vierfenster Ansicht"
+
+
+msgid "Select More/Less"
+msgstr "Mehr/weniger anzeigen"
+
+
+msgid "Select Similar"
+msgstr "Ähnliche auswählen"
+
+
+msgid "Select All by Trait"
+msgstr "Alles nach Merkmal auswählen"
+
+
+msgid "Select Linked"
+msgstr "Verknüpfte auswählen"
+
+
+msgid "Select Loops"
+msgstr "Schleifen auswählen"
+
+
+msgid "Keying"
+msgstr "Schlüsselbilder"
+
+
+msgid "Tracking"
+msgstr "Verfolgen"
+
+
+msgid "Assign Material"
+msgstr "Material zuweisen"
+
+
+msgid "Light"
+msgstr "Licht"
+
+
+msgid "Light Probe"
+msgstr "Lichtsonde"
 
 
 msgid "Assets"
@@ -38732,6 +38736,10 @@ msgid "Active Palette Color"
 msgstr "Aktive Farbpalette"
 
 
+msgid "VR"
+msgstr "VR"
+
+
 msgid "Active Tool"
 msgstr "Aktives Werkzeug"
 
@@ -38806,10 +38814,6 @@ msgstr "Stereoskopie"
 
 msgid "Auto-Masking"
 msgstr "Automatisches Maskieren"
-
-
-msgid "VR"
-msgstr "VR"
 
 
 msgid "Chain Scaling"
@@ -39573,11 +39577,6 @@ msgstr "Rollen"
 
 
 msgctxt "Operator"
-msgid "Bone Size"
-msgstr "Knochengröße"
-
-
-msgctxt "Operator"
 msgid "Bone Envelope"
 msgstr "Knochen umhüllen"
 
@@ -39741,6 +39740,10 @@ msgstr "Posen-Optionen"
 
 msgid "Action Maps"
 msgstr "Aktionskarten"
+
+
+msgid "Passepartout"
+msgstr "Hauptschlüssel"
 
 
 msgid "VR Session"
@@ -47730,6 +47733,10 @@ msgid "Collection of OpenXR user paths"
 msgstr "Sammlung von OpenXR Benutzerpfaden"
 
 
+msgid "Cancel"
+msgstr "Abbrechen"
+
+
 msgid "WorkSpace UI Tags"
 msgstr "Arbeitsplatz UI Tags"
 
@@ -49093,10 +49100,6 @@ msgstr "Rotation kontrollieren"
 msgctxt "Operator"
 msgid "Add Image"
 msgstr "Bild hinzufügen"
-
-
-msgid "Passepartout"
-msgstr "Hauptschlüssel"
 
 
 msgid "Golden"
@@ -50624,11 +50627,6 @@ msgid "Go to Parent"
 msgstr "Gehe zum Elternteil"
 
 
-msgctxt "Operator"
-msgid "New Folder"
-msgstr "Neuer Ordner"
-
-
 msgid "Asset Details"
 msgstr "Asset Dtails"
 
@@ -50696,6 +50694,11 @@ msgstr "Erhöhe Nummer"
 msgctxt "Operator"
 msgid "Decrease Number"
 msgstr "Vermindere Nummer"
+
+
+msgctxt "Operator"
+msgid "New Folder"
+msgstr "Neuer Ordner"
 
 
 msgid "Asset Catalog:"
@@ -51469,10 +51472,6 @@ msgstr "Marker der Szene duplizieren..."
 msgctxt "Operator"
 msgid "Duplicate Marker to Scene"
 msgstr "Marker der Szene duplizieren"
-
-
-msgid "Scrubbing"
-msgstr "Schruppen"
 
 
 msgid "Limit to Frame Range"
@@ -53567,10 +53566,6 @@ msgid "Hidden %d"
 msgstr "Ausgeblendet %d"
 
 
-msgid "Eevee material conversion problem. Error in console"
-msgstr "Eevee Materialumwandlungsproblem. Fehler in der Konsole"
-
-
 msgid "Unable to make version backup: filename too short"
 msgstr "Versions-Backup kann nicht erstellt werden: Dateiname zu kurz"
 
@@ -53789,10 +53784,6 @@ msgstr "Aktives Objekt ist kein ausgewählter Anker"
 
 msgid "Separated bones"
 msgstr "Getrennte Knochen"
-
-
-msgid "Cancel"
-msgstr "Abbrechen"
 
 
 msgid "Programming error: missing clear transform function or keying set name"
@@ -54818,10 +54809,6 @@ msgstr "Aktives Objekt ist keine selektierte Masche"
 
 msgid "No mesh data to join"
 msgstr "Keine Maschendaten zum verknüpfen"
-
-
-msgid "Unassigned"
-msgstr "Unbestimmt"
 
 
 msgid "SoundTrack"
@@ -57340,6 +57327,10 @@ msgid "Strings"
 msgstr "Strings"
 
 
+msgid "Top Right"
+msgstr "Oben rechts"
+
+
 msgid "Text Box Width"
 msgstr "Textboxbreite"
 
@@ -57358,10 +57349,6 @@ msgstr "Rest"
 
 msgid "Edge Crease"
 msgstr "Kantenfalte"
-
-
-msgid "Top Right"
-msgstr "Oben rechts"
 
 
 msgid "No named attributes used"

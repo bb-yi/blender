@@ -433,8 +433,12 @@ static PopupBlockHandle *popup_menu_create_impl(
   return handle;
 }
 
-PopupBlockHandle *popup_menu_create(
-    bContext *C, ARegion *butregion, Button *but, MenuCreateFunc menu_func, void *arg)
+PopupBlockHandle *popup_menu_create(bContext *C,
+                                    ARegion *butregion,
+                                    Button *but,
+                                    MenuCreateFunc menu_func,
+                                    void *arg,
+                                    const bool can_refresh)
 {
   return popup_menu_create_impl(
       C,
@@ -442,7 +446,7 @@ PopupBlockHandle *popup_menu_create(
       but,
       nullptr,
       [menu_func, arg](bContext *C, Layout *layout) { menu_func(C, layout, arg); },
-      false);
+      can_refresh);
 }
 
 /** \} */
@@ -617,7 +621,7 @@ static void popup_menu_create_from_menutype(bContext *C,
         item_menutype_func(C, layout, mt);
       },
       true);
-
+  handle->srna_owner = mt->rna_ext.srna;
   STRNCPY_UTF8(handle->menu_idname, mt->idname);
 
   WorkspaceStatus status(C);
@@ -667,14 +671,19 @@ wmOperatorStatus popup_menu_invoke(bContext *C, const char *idname, ReportList *
 /** \name Popup Block API
  * \{ */
 
-void popup_block_invoke_ex(
-    bContext *C, BlockCreateFunc func, void *arg, FreeArgFunc arg_free, const bool can_refresh)
+void popup_block_invoke_ex(bContext *C,
+                           BlockCreateFunc func,
+                           void *arg,
+                           FreeArgFunc arg_free,
+                           const bool can_refresh,
+                           StructRNA *srna_owner)
 {
   wmWindow *window = CTX_wm_window(C);
 
   PopupBlockHandle *handle = popup_block_create(
       C, nullptr, nullptr, func, nullptr, arg, arg_free, can_refresh);
   handle->popup = true;
+  handle->srna_owner = srna_owner;
 
   /* Clear the status bar. */
   WorkspaceStatus status(C);
@@ -686,9 +695,10 @@ void popup_block_invoke_ex(
   WM_event_add_mousemove(window);
 }
 
-void popup_block_invoke(bContext *C, BlockCreateFunc func, void *arg, FreeArgFunc arg_free)
+void popup_block_invoke(
+    bContext *C, BlockCreateFunc func, void *arg, FreeArgFunc arg_free, StructRNA *srna_owner)
 {
-  popup_block_invoke_ex(C, func, arg, arg_free, true);
+  popup_block_invoke_ex(C, func, arg, arg_free, true, srna_owner);
 }
 
 void popup_block_ex(bContext *C,
@@ -706,6 +716,9 @@ void popup_block_ex(bContext *C,
   handle->retvalue = 1;
 
   handle->popup_op = op;
+  if (op) {
+    handle->srna_owner = op->type->srna;
+  }
   handle->popup_arg = arg;
   handle->popup_func = popup_func;
   handle->cancel_func = cancel_func;

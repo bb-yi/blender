@@ -1737,7 +1737,7 @@ enum eMarkers_LeftRightSelect_Mode {
 static const EnumPropertyItem prop_markers_select_leftright_modes[] = {
     {MARKERS_LRSEL_LEFT, "LEFT", 0, "Before Current Frame", ""},
     {MARKERS_LRSEL_RIGHT, "RIGHT", 0, "After Current Frame", ""},
-    {MARKERS_LRSEL_CLICK_SIDE, "CLICK_SIDE", 0, "Check which side was clicked", ""},
+    {MARKERS_LRSEL_CLICK_SIDE, "CLICK_SIDE", 0, "Mouse Click Side", ""},
     {0, nullptr, 0, nullptr, nullptr},
 };
 
@@ -1858,8 +1858,7 @@ static wmOperatorStatus ed_marker_delete_exec(bContext *C, wmOperator * /*op*/)
     nmarker = marker->next;
     if (marker->flag & SELECT) {
       if (marker->prop != nullptr) {
-        IDP_FreePropertyContent(marker->prop);
-        MEM_delete(marker->prop);
+        IDP_FreeProperty(marker->prop);
       }
       BLI_freelinkN(markers, marker);
       changed = true;

@@ -810,8 +810,8 @@ void BKE_image_free_anim_gputextures(Main *bmain)
 
 void BKE_image_free_old_gputextures(Main *bmain)
 {
-  static int lasttime = 0;
-  int ctime = int(BLI_time_now_seconds());
+  static int64_t lasttime = 0;
+  int64_t ctime = BLI_time_now_seconds_i();
 
   /*
    * Run garbage collector once for every collecting period of time
@@ -1009,12 +1009,12 @@ static void gpu_texture_update_from_ibuf(
     if (IMB_colormanagement_space_is_data(ibuf->byte_buffer.colorspace) && !scaled) {
       /* Not scaled Non-color data, just store buffer as is. */
     }
-    else if (IMB_colormanagement_space_is_srgb(ibuf->byte_buffer.colorspace) ||
+    else if (IMB_colormanagement_space_is_scene_linear_srgb(ibuf->byte_buffer.colorspace) ||
              IMB_colormanagement_space_is_scene_linear(ibuf->byte_buffer.colorspace) ||
              IMB_colormanagement_space_is_data(ibuf->byte_buffer.colorspace))
     {
-      /* sRGB or scene linear or scaled down non-color data, store as byte texture that the GPU
-       * can decode directly. */
+      /* scene linear + sRGB transfer function or scene linear or scaled down non-color data,
+       * store as byte texture that the GPU can decode directly. */
       rect = MEM_new_array_uninitialized<uchar>(4 * size_t(w) * size_t(h), __func__);
       if (rect == nullptr) {
         return;

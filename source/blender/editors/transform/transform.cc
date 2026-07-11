@@ -568,8 +568,11 @@ static void viewRedrawForce(const bContext *C, TransInfo *t)
       SpaceImage *sima = static_cast<SpaceImage *>(t->area->spacedata.first);
       if (sima->lock) {
         BKE_view_layer_synced_ensure(*t->bmain, t->scene, t->view_layer);
-        WM_event_add_notifier(
-            C, NC_GEOM | ND_DATA, BKE_view_layer_edit_object_get(t->view_layer)->data);
+        if (Object *ob = BKE_view_layer_edit_object_get(t->view_layer)) {
+          if (ob->type == OB_MESH) {
+            WM_event_add_notifier(C, NC_GEOM | ND_DATA, ob->data);
+          }
+        }
       }
       else {
         ED_area_tag_redraw(t->area);
@@ -793,6 +796,9 @@ static bool transform_modal_item_poll(const wmOperator *op, int value)
       return t->vod != nullptr;
     case TFM_MODAL_STRIP_CLAMP:
       if (t->spacetype != SPACE_SEQ) {
+        return false;
+      }
+      if (t->data_type == &TransConvertType_SequencerRetiming) {
         return false;
       }
       break;

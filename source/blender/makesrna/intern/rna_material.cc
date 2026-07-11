@@ -763,9 +763,10 @@ static void rna_def_material_greasepencil(BlenderRNA *brna)
   RNA_def_struct_path_func(srna, "rna_GpencilColorData_path");
 
   prop = RNA_def_property(srna, "color", PROP_FLOAT, PROP_COLOR);
-  RNA_def_property_range(prop, 0.0, 1.0);
   RNA_def_property_float_sdna(prop, nullptr, "stroke_rgba");
   RNA_def_property_array(prop, 4);
+  RNA_def_property_range(prop, 0.0f, FLT_MAX);
+  RNA_def_property_ui_range(prop, 0.0f, 1.0f, 0.1f, 3);
   RNA_def_property_ui_text(prop, "Color", "");
   RNA_def_property_update(prop, NC_GPENCIL | ND_SHADING, "rna_MaterialGpencil_update");
 
@@ -773,7 +774,8 @@ static void rna_def_material_greasepencil(BlenderRNA *brna)
   prop = RNA_def_property(srna, "fill_color", PROP_FLOAT, PROP_COLOR);
   RNA_def_property_float_sdna(prop, nullptr, "fill_rgba");
   RNA_def_property_array(prop, 4);
-  RNA_def_property_range(prop, 0.0f, 1.0f);
+  RNA_def_property_range(prop, 0.0f, FLT_MAX);
+  RNA_def_property_ui_range(prop, 0.0f, 1.0f, 0.1f, 3);
   RNA_def_property_ui_text(prop, "Fill Color", "Color for filling region bounded by each stroke");
   RNA_def_property_update(prop, NC_GPENCIL | ND_SHADING, "rna_MaterialGpencil_update");
 
@@ -781,7 +783,8 @@ static void rna_def_material_greasepencil(BlenderRNA *brna)
   prop = RNA_def_property(srna, "mix_color", PROP_FLOAT, PROP_COLOR);
   RNA_def_property_float_sdna(prop, nullptr, "mix_rgba");
   RNA_def_property_array(prop, 4);
-  RNA_def_property_range(prop, 0.0f, 1.0f);
+  RNA_def_property_range(prop, 0.0f, FLT_MAX);
+  RNA_def_property_ui_range(prop, 0.0f, 1.0f, 0.1f, 3);
   RNA_def_property_ui_text(prop, "Mix Color", "Color for mixing with primary filling color");
   RNA_def_property_update(prop, NC_GPENCIL | ND_SHADING, "rna_MaterialGpencil_update");
 
@@ -905,10 +908,8 @@ static void rna_def_material_greasepencil(BlenderRNA *brna)
   RNA_def_property_float_default(prop, 0.0f);
   RNA_def_property_range(prop, -DEG2RADF(90.0f), DEG2RADF(90.0f));
   RNA_def_property_ui_range(prop, -DEG2RADF(90.0f), DEG2RADF(90.0f), 10, 3);
-  RNA_def_property_ui_text(prop,
-                           "Rotation",
-                           "Additional rotation applied to dots and square texture of strokes. "
-                           "Only applies in texture shading mode.");
+  RNA_def_property_ui_text(
+      prop, "Rotation", "Additional rotation applied to dots and square texture of strokes");
   RNA_def_property_update(prop, NC_GPENCIL | ND_SHADING, "rna_MaterialGpencil_update");
 
   /* Placement mode for Dots and Squares. */

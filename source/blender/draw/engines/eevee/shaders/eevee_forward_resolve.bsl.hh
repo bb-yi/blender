@@ -71,6 +71,11 @@ void resolve_frag([[resource_table]] const ForwardResolve &srt,
     radiance.a = channel_a.x;
   }
 
+  /* Since Forward.Transparent is additive, overlapping high emissive values can reach the float16
+   * limit and end up stored as INF, so here we just clamp it to representable values. */
+  const float half_max = 65504.0f;
+  frag_out.radiance = min(frag_out.radiance, half_max);
+
   render_passes.store_color(texel,
                             uni.uniform_buf.render_pass.transparent_id,
                             float4(radiance.rgb, transmittance.a));

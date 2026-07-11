@@ -551,7 +551,7 @@ IDTypeInfo IDType_ID_IM = {
     .main_listbase_index = INDEX_ID_IM,
     .struct_size = sizeof(Image),
     .name = "Image",
-    .name_plural = "images",
+    .name_plural = N_("images"),
     .translation_context = BLT_I18NCONTEXT_ID_IMAGE,
     .flags = IDTYPE_FLAGS_NO_ANIMDATA | IDTYPE_FLAGS_APPEND_IS_REUSABLE,
     .asset_type_info = nullptr,
@@ -1707,7 +1707,7 @@ static bool image_memorypack_imbuf_for_autosave(
   Vector<uint8_t> encoded = IMB_save_image_to_buffer(ibuf, ImBufFlags::ByteData);
   if (encoded.is_empty()) {
     CLOG_STR_ERROR(&LOG, "memory save for pack error");
-    image_free_packedfiles(ima);
+    image_free_autosave_packedfiles(ima);
     return false;
   }
 
@@ -1722,7 +1722,7 @@ static bool image_memorypack_imbuf_for_autosave(
   imapf->tile_number = tile_number;
   BLI_addtail(&ima->autosave_packedfiles, imapf);
 
-  /* We should not clear the dirty flag when autosaving */
+  /* We should not clear the dirty flag when auto-saving. */
 
   return true;
 }
@@ -4739,9 +4739,11 @@ void BKE_image_populate_cache_from_autosave(Image *ima)
           "<packed data>",
           nullptr,
           ima->colorspace_settings.name);
-      ibuf->userflags |= IB_BITMAPDIRTY;
-      image_assign_ibuf(ima, ibuf, index, entry);
-      IMB_freeImBuf(ibuf);
+      if (ibuf) {
+        ibuf->userflags |= IB_BITMAPDIRTY;
+        image_assign_ibuf(ima, ibuf, index, entry);
+        IMB_freeImBuf(ibuf);
+      }
     }
   }
 

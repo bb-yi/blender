@@ -1693,7 +1693,7 @@ static bool grease_pencil_apply_fill(bContext &C, wmOperator &op, const wmEvent 
   }
 
   if (!did_create_fill) {
-    BKE_reportf(op.reports, RPT_ERROR, "Unable to fill unclosed areas");
+    BKE_report(op.reports, RPT_ERROR, "No fill created");
   }
 
   WM_cursor_modal_restore(&win);
@@ -2054,8 +2054,8 @@ static bool remove_points_and_split_from_drawings(
     if (Drawing *drawing = get_current_drawing_or_duplicate_for_autokey(
             scene, grease_pencil, info.layer_index))
     {
-      drawing->strokes_for_write() = geometry::remove_points_and_split(drawing->strokes(),
-                                                                       points_to_remove);
+      drawing->strokes_for_write() = geometry::grease_pencil_remove_points_and_split(
+          drawing->strokes(), points_to_remove);
       drawing->tag_topology_changed();
       changed = true;
     }

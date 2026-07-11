@@ -21,8 +21,12 @@
 namespace blender::nodes::node_geo_bevel_cc {
 
 static const EnumPropertyItem affect_items[] = {
-    {int(geometry::BevelAffect::Vertices), "VERTICES", 0, "Vertices", "Bevel affects vertices"},
-    {int(geometry::BevelAffect::Edges), "EDGES", 0, "Edges", "Bevel affects edges"},
+    {int(geometry::BevelAffect::Vertices),
+     "VERTICES",
+     0,
+     N_("Vertices"),
+     N_("Bevel affects vertices")},
+    {int(geometry::BevelAffect::Edges), "EDGES", 0, N_("Edges"), N_("Bevel affects edges")},
     {0, nullptr, 0, nullptr, nullptr}};
 
 static void node_declare(NodeDeclarationBuilder &b)
@@ -92,7 +96,7 @@ static void node_declare(NodeDeclarationBuilder &b)
       .default_value(1)
       .description(
           "How many pieces is an edge beveled into, "
-          "or, for vertex bevels, the how many segments on the arcs between the edges.");
+          "or, for vertex bevels, how many segments on the arcs between the edges.");
   b.add_input<decl::Float>("Shape"_ustr)
       .default_value(0.5f)
       .min(0.0f)
@@ -100,12 +104,12 @@ static void node_declare(NodeDeclarationBuilder &b)
       .subtype(PROP_FACTOR)
       .description(
           "Superellipse shape parameter, used when there is no Profile, "
-          " and also used for Arc and Patch miters");
+          "and also used for Arc and Patch miters");
   b.add_input<decl::Geometry>("Profile"_ustr)
       .supported_type(GeometryComponent::Type::Curve)
       .description(
-          "If present, the first curve will be sampled to give a custom profile on edges."
-          " The curve should be in the XY plane, going from (0,1,0) to (1,0,0)");
+          "If present, the first curve will be sampled to give a custom profile on edges. "
+          "The curve should be in the XY plane, going from (0,1,0) to (1,0,0)");
 
   PanelDeclarationBuilder &selections_panel = b.add_panel("Selections"_ustr);
   selections_panel.default_closed(true);
@@ -126,7 +130,7 @@ static void node_declare(NodeDeclarationBuilder &b)
       .no_muted_links()
       .description(
           "Identifies output edges that are in the middle of new mesh parts of edges "
-          " and continued through vertices (round down if odd number of segments)");
+          "and continued through vertices (round down if odd number of segments)");
 }
 
 /* -------------------------------------------------------------------- */

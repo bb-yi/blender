@@ -202,6 +202,12 @@ struct Mesh {
    * generic type attributes from vertex, edge, face, and corner custom data.
    *
    * Set to -1 when none is active.
+   *
+   * This default should actually be -1, and setting this to 0 can lead to internal attributes
+   * being active. However changing would need quite some research into where this index is used
+   * and on top of that other object types also use this same index, also set to 0.
+   * As we plan to store the active attribute as a string in the future we leave it at 0
+   * for now.
    */
   int attributes_active_index = 0;
 
@@ -513,11 +519,8 @@ struct Mesh {
    * When possible, it's preferred to use face normals over vertex normals and vertex normals over
    * face corner normals, since there is a 2-4x performance cost increase for each more complex
    * domain.
-   *
-   * Optionally the consumer of the mesh can indicate that they support the sharp_face attribute
-   * natively, to avoid using corner normals in some cases.
    */
-  bke::MeshNormalDomain normals_domain(const bool support_sharp_face = false) const;
+  bke::MeshNormalDomain normals_domain() const;
   /**
    * Normal direction of faces, defined by positions and the winding direction of face corners.
    */

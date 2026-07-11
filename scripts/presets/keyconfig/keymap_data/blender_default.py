@@ -1291,6 +1291,7 @@ def km_property_editor(_params):
         ("constraint.apply", {"type": 'A', "value": 'PRESS', "ctrl": True}, {"properties": [("report", True)]}),
         # Strip modifiers
         ("sequencer.strip_modifier_duplicate", {"type": 'D', "value": 'PRESS', "shift": True}, None),
+        ("sequencer.strip_modifier_set_active", {"type": 'LEFTMOUSE', "value": 'PRESS'}, None),
     ])
 
     return keymap
@@ -5760,7 +5761,7 @@ def km_edit_armature(params):
             (op_tool_cycle, "builtin.bone_size"), params),
         op_tool_optional(
             ("transform.transform", {"type": 'S', "value": 'PRESS', "alt": True},
-             {"properties": [("mode", 'BONE_ENVELOPE')]}),
+             {"properties": [("mode", 'BONE_ENVELOPE_DIST')]}),
             (op_tool_cycle, "builtin.bone_envelope"), params),
         op_tool_optional(
             ("transform.transform", {"type": 'R', "value": 'PRESS', "ctrl": True},
@@ -7701,11 +7702,11 @@ def km_3d_view_tool_edit_armature_roll(params):
 
 def km_3d_view_tool_edit_armature_bone_size(params):
     return (
-        "3D View Tool: Edit Armature, Bone Size",
+        "3D View Tool: Edit Armature, B-Bone Size",
         {"space_type": 'VIEW_3D', "region_type": 'WINDOW'},
         {"items": [
-            ("transform.transform", {**params.tool_maybe_tweak_event, **params.tool_modifier},
-             {"properties": [("release_confirm", True), ("mode", 'BONE_ENVELOPE')]}),
+            ("transform.bbone_resize", {**params.tool_maybe_tweak_event, **params.tool_modifier},
+             {"properties": [("release_confirm", True)]}),
         ]},
     )
 
@@ -7716,8 +7717,8 @@ def km_3d_view_tool_edit_armature_bone_envelope(params):
         {"space_type": 'VIEW_3D', "region_type": 'WINDOW'},
 
         {"items": [
-            ("transform.bbone_resize", {**params.tool_maybe_tweak_event, **params.tool_modifier},
-             {"properties": [("release_confirm", True)]}),
+            ("transform.transform", {**params.tool_maybe_tweak_event, **params.tool_modifier},
+             {"properties": [("release_confirm", True), ("mode", 'BONE_ENVELOPE_DIST')]}),
         ]},
     )
 

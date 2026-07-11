@@ -1078,11 +1078,12 @@ class SlotAllocator {
 
   void set_vertex_input(int index)
   {
-    if ((available_vertex_id_ & 0xFFFFu) == 0) {
+    uint32_t bit = uint32_t(1) << index;
+    if ((available_vertex_id_ & bit) == 0) {
       /* Should result in compilation failure. */
       vertex_id_overflow_ = true;
     }
-    available_vertex_id_ &= ~(uint32_t(1) << index);
+    available_vertex_id_ &= ~bit;
   }
 };
 
@@ -1682,6 +1683,17 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     info.additional_info("eevee_PreviousLayerRadiance");
   }
 
+  if (ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD) &&
+      !ELEM(geometry_type, MAT_GEOM_WORLD, MAT_GEOM_VOLUME))
+  {
+    /* While only needed for the AO node, bind HiZ before allocating user resource slots. */
+    info.additional_info("eevee_HiZ");
+  }
+
+  /* Vertex inputs may be transferred into other resource types below. */
+  auto vertex_inputs = info.vertex_inputs_;
+  info.vertex_inputs_.clear();
+
   SlotAllocator slots = add_pipeline_create_info(info,
                                                  pipeline_type,
                                                  geometry_type,
@@ -2034,10 +2046,10 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
          * attribute for displacement. */
         /* TODO(fclem): Eventually, we could add support for loading both. For now, remove the
          * vertex inputs after conversion (avoid name collision). */
-        for (auto &input : info.vertex_inputs_) {
+        for (auto &input : vertex_inputs) {
           info.sampler(slots.get_next_sampler(), ImageType::Float3D, input.name, Frequency::BATCH);
         }
-        info.vertex_inputs_.clear();
+        vertex_inputs.clear();
         /* Volume materials require these for loading the grid attributes from smoke sims. */
         info.additional_info("draw_volume_infos");
       }
@@ -2045,7 +2057,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     case MAT_GEOM_POINTCLOUD:
     case MAT_GEOM_CURVES:
       /** Hair attributes come from sampler buffer. Transfer attributes to sampler. */
-      for (auto &input : info.vertex_inputs_) {
+      for (auto &input : vertex_inputs) {
         if (input.name == "orco") {
           /** NOTE: Orco is generated from strand position for now. */
           global_vars << input.type << " " << input.name << ";\n";
@@ -2055,37 +2067,38 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
               slots.get_next_sampler(), ImageType::FloatBuffer, input.name, Frequency::BATCH);
         }
       }
-      info.vertex_inputs_.clear();
+      vertex_inputs.clear();
       break;
     case MAT_GEOM_WORLD:
       if (pipeline_type == MAT_PIPE_VOLUME_MATERIAL) {
         /* Even if world do not have grid attributes, we use dummy texture binds to pass correct
          * defaults. So we have to replace all attributes as samplers. */
-        for (auto &input : info.vertex_inputs_) {
+        for (auto &input : vertex_inputs) {
           info.sampler(slots.get_next_sampler(), ImageType::Float3D, input.name, Frequency::BATCH);
         }
-        info.vertex_inputs_.clear();
+        vertex_inputs.clear();
       }
       /**
        * Only orco layer is supported by world and it is procedurally generated. These are here to
        * make the attribs_load function calls valid.
        */
-      for (auto &input : info.vertex_inputs_) {
+      for (auto &input : vertex_inputs) {
         global_vars << input.type << " " << input.name << ";\n";
       }
-      info.vertex_inputs_.clear();
+      vertex_inputs.clear();
       break;
     case MAT_GEOM_VOLUME:
       /** Volume grid attributes come from 3D textures. Transfer attributes to samplers. */
-      for (auto &input : info.vertex_inputs_) {
+      for (auto &input : vertex_inputs) {
         info.sampler(slots.get_next_sampler(), ImageType::Float3D, input.name, Frequency::BATCH);
       }
-      info.vertex_inputs_.clear();
+      vertex_inputs.clear();
       break;
   }
 
-  for (auto &vert_in : info.vertex_inputs_) {
+  for (auto &vert_in : vertex_inputs) {
     slots.set_vertex_input(vert_in.index);
+    info.vertex_in(vert_in.index, vert_in.type, vert_in.name);
   }
 
   const bool support_volume_attributes = ELEM(geometry_type, MAT_GEOM_MESH, MAT_GEOM_VOLUME);
@@ -2219,7 +2232,6 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     std::stringstream generated_source_block;
     if (use_ao_node) {
       dependencies_set.add("eevee_fast_gi.bsl.hh");
-      info.additional_info("eevee_HiZ");
     }
     const bool pipeline_uses_light_eval =
         (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
