@@ -1461,8 +1461,10 @@ template<typename F> void DeferredLayerBase::npr_pass_sync(Instance &inst, F cal
   npr_ps_.bind_texture(SCENE_SHADOW_TEX_SLOT, &inst.pipelines.shadow_filter.texture_ref());
   npr_ps_.bind_image(RBUFS_COLOR_SLOT, &inst.render_buffers.rp_color_tx);
   npr_ps_.bind_image(RBUFS_VALUE_SLOT, &inst.render_buffers.rp_value_tx);
-  npr_aov_color_input_tx_ = inst.render_buffers.rp_color_tx;
-  npr_aov_value_input_tx_ = inst.render_buffers.rp_value_tx;
+  /* Render buffers may not be allocated yet during probe pipeline sync. The concrete inputs are
+   * assigned immediately before each NPR pass is rendered. */
+  npr_aov_color_input_tx_ = nullptr;
+  npr_aov_value_input_tx_ = nullptr;
   npr_ps_.bind_texture(NPR_AOV_COLOR_TEX_SLOT, &npr_aov_color_input_tx_);
   npr_ps_.bind_texture(NPR_AOV_VALUE_TEX_SLOT, &npr_aov_value_input_tx_);
   npr_ps_.bind_image(OUTLINE_COLOR_SLOT, &inst.render_buffers.outline_color_tx);
