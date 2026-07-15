@@ -4,6 +4,7 @@
 
 import sys
 import importlib.util
+import tempfile
 import bpy
 import unittest
 from types import SimpleNamespace
@@ -66,6 +67,30 @@ def refresh_glsl_node_with_operator(node, tree):
 
 def reset_glsl_node_defaults_with_operator(node, tree):
     return run_glsl_node_operator(node, tree, bpy.ops.node.glsl_function_reset_defaults)
+
+
+def toggle_glsl_node_code_mode_with_operator(node, tree):
+    return run_glsl_node_operator(node, tree, bpy.ops.node.glsl_function_toggle_code_mode)
+
+
+def new_glsl_node_text_with_operator(node, tree):
+    return run_glsl_node_operator(node, tree, bpy.ops.node.glsl_function_new_text)
+
+
+def discard_glsl_node_draft_with_operator(node, tree):
+    return run_glsl_node_operator(node, tree, bpy.ops.node.glsl_function_discard_draft)
+
+
+def make_glsl_node_internal_with_operator(node, tree):
+    return run_glsl_node_operator(node, tree, bpy.ops.node.glsl_function_make_internal)
+
+
+def duplicate_glsl_node_with_operator(node, tree):
+    for item in tree.nodes:
+        item.select = False
+    result = run_glsl_node_operator(node, tree, bpy.ops.node.duplicate)
+    duplicate = next(item for item in tree.nodes if item.select and item != node)
+    return result, duplicate
 
 
 def run_glsl_node_operator(node, tree, operator):
@@ -715,6 +740,438 @@ class GLSLFunctionNodeTest(unittest.TestCase):
         self.assertEqual(result, {'FINISHED'})
         self.assertEqual(glsl_node.parse_status, 'READY')
         self.assertIsNotNone(find_socket(glsl_node.inputs, "strength"))
+
+    def test_code_mode_creates_template_without_resizing_node(self):
+        _, tree = self.make_material_tree()
+        node = tree.nodes.new("ShaderNodeGLSLFunction")
+        node.width = 180.0
+
+        result = toggle_glsl_node_code_mode_with_operator(node, tree)
+
+        self.assertEqual(result, {'FINISHED'})
+        self.assertEqual(node.display_mode, 'CODE')
+        self.assertAlmostEqual(node.width, 180.0)
+        self.assertIsNotNone(node.script)
+        self.assertEqual(node.function_name, "glsl_function")
+        self.assertIn("vec4 glsl_function(vec4 color)", node.script.as_string())
+        self.assertEqual(node.parse_status, 'READY')
+        self.assertIsNotNone(find_socket(node.inputs, "In_color"))
+
+    def test_code_mode_preserves_socket_links(self):
+        _, tree = self.make_material_tree()
+        node = tree.nodes.new("ShaderNodeGLSLFunction")
+        value_node = tree.nodes.new("ShaderNodeValue")
+        source = "float linked_probe(float value){return value;}\n"
+        make_text_block("glsl_code_mode_link.glsl", source)
+        self.configure_glsl_node(node, "glsl_code_mode_link.glsl", "linked_probe")
+        tree.links.new(value_node.outputs["Value"], find_socket(node.inputs, "In_value"))
+
+        node.display_mode = 'CODE'
+
+        self.assertTrue(find_socket(node.inputs, "In_value").is_linked)
+        self.assertEqual(len(tree.links), 1)
+
+        node.display_mode = 'NODE'
+
+        self.assertTrue(find_socket(node.inputs, "In_value").is_linked)
+        self.assertEqual(len(tree.links), 1)
+
+    def test_direct_code_mode_creates_template(self):
+        _, tree = self.make_material_tree()
+        node = tree.nodes.new("ShaderNodeGLSLFunction")
+
+        node.display_mode = 'CODE'
+
+        self.assertIsNotNone(node.script)
+        self.assertEqual(node.function_name, "glsl_function")
+        self.assertIn("vec4 glsl_function(vec4 color)", node.script.as_string())
+
+    def test_new_text_operator_creates_template(self):
+        _, tree = self.make_material_tree()
+        node = tree.nodes.new("ShaderNodeGLSLFunction")
+
+        result = new_glsl_node_text_with_operator(node, tree)
+
+        self.assertEqual(result, {'FINISHED'})
+        self.assertIsNotNone(node.script)
+        self.assertEqual(node.function_name, "glsl_function")
+        self.assertIn("return color;", node.script.as_string())
+
+    def test_code_mode_populates_assigned_empty_text(self):
+        _, tree = self.make_material_tree()
+        node = tree.nodes.new("ShaderNodeGLSLFunction")
+        text = make_text_block("glsl_empty_code_source.glsl", "")
+        node.script = text
+
+        result = toggle_glsl_node_code_mode_with_operator(node, tree)
+
+        self.assertEqual(result, {'FINISHED'})
+        self.assertEqual(node.display_mode, 'CODE')
+        self.assertEqual(node.function_name, "glsl_function")
+        self.assertIn("vec4 glsl_function(vec4 color)", text.as_string())
+
+    def test_code_mode_preserves_existing_draft_on_empty_text(self):
+        _, tree = self.make_material_tree()
+        node = tree.nodes.new("ShaderNodeGLSLFunction")
+        text = make_text_block("glsl_empty_source_with_draft.glsl", "")
+        node.script = text
+        draft = "float draft_from_empty(float value){return value;}\n"
+        node.source_code = draft
+        node.edit_function_name = "draft_from_empty"
+
+        result = toggle_glsl_node_code_mode_with_operator(node, tree)
+
+        self.assertEqual(result, {'FINISHED'})
+        self.assertEqual(node.display_mode, 'CODE')
+        self.assertTrue(node.source_dirty)
+        self.assertEqual(node.source_code, draft)
+        self.assertEqual(text.as_string(), "")
+
+    def test_code_draft_applies_only_on_refresh(self):
+        _, tree = self.make_material_tree()
+        node = tree.nodes.new("ShaderNodeGLSLFunction")
+        original_source = "vec4 draft_probe(vec4 color){return color;}\n"
+        text = make_text_block("glsl_code_draft.glsl", original_source)
+        self.configure_glsl_node(node, text.name, "draft_probe")
+
+        draft_source = (
+            "vec4 draft_probe(vec4 color, float strength){\n"
+            "  return color * strength;\n"
+            "}\n"
+        )
+        node.source_code = draft_source
+
+        self.assertTrue(node.source_dirty)
+        self.assertEqual(node.source_code, draft_source)
+        self.assertEqual(text.as_string(), original_source)
+        with self.assertRaises(AssertionError):
+            find_socket(node.inputs, "strength")
+
+        result = refresh_glsl_node_with_operator(node, tree)
+
+        self.assertEqual(result, {'FINISHED'})
+        self.assertFalse(node.source_dirty)
+        self.assertEqual(text.as_string(), draft_source)
+        self.assertIsNotNone(find_socket(node.inputs, "strength"))
+
+    def test_invalid_code_draft_preserves_text_and_sockets(self):
+        _, tree = self.make_material_tree()
+        node = tree.nodes.new("ShaderNodeGLSLFunction")
+        original_source = "float stable_probe(float value){return value;}\n"
+        text = make_text_block("glsl_invalid_code_draft.glsl", original_source)
+        self.configure_glsl_node(node, text.name, "stable_probe")
+        original_socket_names = [socket.name for socket in node.inputs]
+
+        invalid_source = "float stable_probe(float value){\n"
+        node.source_code = invalid_source
+
+        with self.assertRaises(RuntimeError):
+            refresh_glsl_node_with_operator(node, tree)
+
+        self.assertTrue(node.source_dirty)
+        self.assertEqual(node.source_code, invalid_source)
+        self.assertEqual(text.as_string(), original_source)
+        self.assertEqual([socket.name for socket in node.inputs], original_socket_names)
+
+        result = discard_glsl_node_draft_with_operator(node, tree)
+        self.assertEqual(result, {'FINISHED'})
+        self.assertFalse(node.source_dirty)
+        self.assertEqual(node.source_code, original_source)
+
+    def test_gpu_invalid_code_draft_preserves_text_and_sockets(self):
+        if bpy.app.background:
+            self.skipTest("GPU draft validation requires an active graphics context")
+
+        _, tree = self.make_material_tree()
+        node = tree.nodes.new("ShaderNodeGLSLFunction")
+        original_source = "float stable_gpu_probe(float value){return value;}\n"
+        text = make_text_block("glsl_gpu_invalid_code_draft.glsl", original_source)
+        self.configure_glsl_node(node, text.name, "stable_gpu_probe")
+        original_socket_names = [socket.name for socket in node.inputs]
+
+        invalid_source = (
+            "float stable_gpu_probe(float value){\n"
+            "  return undefined_draft_identifier;\n"
+            "}\n"
+        )
+        node.source_code = invalid_source
+
+        with self.assertRaisesRegex(RuntimeError, "GPU shader compiler rejected"):
+            refresh_glsl_node_with_operator(node, tree)
+
+        self.assertTrue(node.source_dirty)
+        self.assertEqual(node.source_code, invalid_source)
+        self.assertEqual(text.as_string(), original_source)
+        self.assertEqual([socket.name for socket in node.inputs], original_socket_names)
+
+    def test_code_draft_applies_function_rename_atomically(self):
+        _, tree = self.make_material_tree()
+        node = tree.nodes.new("ShaderNodeGLSLFunction")
+        text = make_text_block(
+            "glsl_function_rename_draft.glsl",
+            "float old_function(float value){return value;}\n",
+        )
+        self.configure_glsl_node(node, text.name, "old_function")
+
+        node.source_code = "float new_function(float value){return value * 2.0;}\n"
+        node.edit_function_name = "new_function"
+
+        self.assertTrue(node.source_dirty)
+        self.assertEqual(node.function_name, "old_function")
+        self.assertEqual(node.edit_function_name, "new_function")
+
+        result = refresh_glsl_node_with_operator(node, tree)
+
+        self.assertEqual(result, {'FINISHED'})
+        self.assertFalse(node.source_dirty)
+        self.assertEqual(node.function_name, "new_function")
+        self.assertEqual(node.edit_function_name, "new_function")
+        self.assertIn("new_function", text.as_string())
+        self.assertEqual(node.parse_status, 'READY')
+
+    def test_function_only_draft_does_not_rewrite_text(self):
+        _, tree = self.make_material_tree()
+        node = tree.nodes.new("ShaderNodeGLSLFunction")
+        source = (
+            "float first_function(float value){return value;}\n"
+            "float second_function(float value){return value * 2.0;}\n"
+        )
+        text = make_text_block("glsl_function_only_draft.glsl", source)
+        self.configure_glsl_node(node, text.name, "first_function")
+
+        node.edit_function_name = "second_function"
+        result = refresh_glsl_node_with_operator(node, tree)
+
+        self.assertEqual(result, {'FINISHED'})
+        self.assertFalse(node.source_dirty)
+        self.assertEqual(node.function_name, "second_function")
+        self.assertEqual(text.as_string(), source)
+
+    def test_code_draft_detects_external_text_change(self):
+        _, tree = self.make_material_tree()
+        node = tree.nodes.new("ShaderNodeGLSLFunction")
+        original_source = "float conflict_probe(float value){return value;}\n"
+        text = make_text_block("glsl_code_conflict.glsl", original_source)
+        self.configure_glsl_node(node, text.name, "conflict_probe")
+
+        draft_source = "float conflict_probe(float value){return value + 1.0;}\n"
+        external_source = "float conflict_probe(float value){return value - 1.0;}\n"
+        node.source_code = draft_source
+        text.from_string(external_source)
+
+        with self.assertRaises(RuntimeError):
+            refresh_glsl_node_with_operator(node, tree)
+
+        self.assertTrue(node.source_dirty)
+        self.assertEqual(node.source_code, draft_source)
+        self.assertEqual(text.as_string(), external_source)
+
+    def test_changing_internal_text_discards_bound_draft(self):
+        _, tree = self.make_material_tree()
+        node = tree.nodes.new("ShaderNodeGLSLFunction")
+        first = make_text_block(
+            "glsl_first_draft_source.glsl",
+            "float first_source(float value){return value;}\n",
+        )
+        second = make_text_block(
+            "glsl_second_draft_source.glsl",
+            "float second_source(float value){return value;}\n",
+        )
+        self.configure_glsl_node(node, first.name, "first_source")
+        node.source_code = "float first_source(float value){return value + 1.0;}\n"
+        self.assertTrue(node.source_dirty)
+
+        node.script = second
+
+        self.assertFalse(node.source_dirty)
+        self.assertEqual(node.source_code, second.as_string())
+
+    def test_shared_text_refresh_is_atomic(self):
+        _, tree = self.make_material_tree()
+        first = tree.nodes.new("ShaderNodeGLSLFunction")
+        second = tree.nodes.new("ShaderNodeGLSLFunction")
+        original_source = (
+            "float shared_first(float value){return value;}\n"
+            "float shared_second(float value){return value;}\n"
+        )
+        text = make_text_block("glsl_shared_code_draft.glsl", original_source)
+        self.configure_glsl_node(first, text.name, "shared_first")
+        self.configure_glsl_node(second, text.name, "shared_second")
+
+        valid_source = (
+            "float shared_first(float value, float gain){return value * gain;}\n"
+            "float shared_second(float value, float bias){return value + bias;}\n"
+        )
+        first.source_code = valid_source
+        result = refresh_glsl_node_with_operator(first, tree)
+
+        self.assertEqual(result, {'FINISHED'})
+        self.assertEqual(text.as_string(), valid_source)
+        self.assertIsNotNone(find_socket(first.inputs, "gain"))
+        self.assertIsNotNone(find_socket(second.inputs, "bias"))
+
+        invalid_for_second = (
+            "float shared_first(float value, float gain){return value * gain;}\n"
+        )
+        first.source_code = invalid_for_second
+        with self.assertRaises(RuntimeError):
+            refresh_glsl_node_with_operator(first, tree)
+
+        self.assertTrue(first.source_dirty)
+        self.assertEqual(text.as_string(), valid_source)
+        self.assertIsNotNone(find_socket(second.inputs, "bias"))
+
+    def test_shared_text_rejects_concurrent_node_drafts(self):
+        _, tree = self.make_material_tree()
+        first = tree.nodes.new("ShaderNodeGLSLFunction")
+        second = tree.nodes.new("ShaderNodeGLSLFunction")
+        source = (
+            "float concurrent_first(float value){return value;}\n"
+            "float concurrent_second(float value){return value;}\n"
+        )
+        text = make_text_block("glsl_concurrent_code_draft.glsl", source)
+        self.configure_glsl_node(first, text.name, "concurrent_first")
+        self.configure_glsl_node(second, text.name, "concurrent_second")
+
+        first.source_code = source.replace("return value;", "return value + 1.0;", 1)
+        second.source_code = source.replace("return value;", "return value - 1.0;", 1)
+
+        with self.assertRaises(RuntimeError):
+            refresh_glsl_node_with_operator(first, tree)
+
+        self.assertEqual(text.as_string(), source)
+        self.assertTrue(first.source_dirty)
+        self.assertTrue(second.source_dirty)
+
+    def test_external_source_is_read_only_and_can_convert_to_internal(self):
+        _, tree = self.make_material_tree()
+        node = tree.nodes.new("ShaderNodeGLSLFunction")
+        source = "float external_probe(float value){return value;}\n"
+
+        with tempfile.TemporaryDirectory() as directory:
+            filepath = Path(directory) / "external_probe.glsl"
+            filepath.write_text(source, encoding="utf-8")
+            node.source_mode = 'EXTERNAL'
+            node.filepath = str(filepath)
+            node.function_name = "external_probe"
+            refresh_glsl_node(node)
+
+            self.assertEqual(node.source_code, source)
+            node.source_code = "float overwritten(){return 0.0;}\n"
+            self.assertFalse(node.source_dirty)
+            self.assertEqual(filepath.read_text(encoding="utf-8"), source)
+
+            result = make_glsl_node_internal_with_operator(node, tree)
+
+            self.assertEqual(result, {'FINISHED'})
+            self.assertEqual(node.source_mode, 'INTERNAL')
+            self.assertIsNotNone(node.script)
+            self.assertEqual(node.script.as_string(), source)
+            self.assertEqual(filepath.read_text(encoding="utf-8"), source)
+            self.assertEqual(node.parse_status, 'READY')
+
+    def test_code_draft_survives_blend_save_and_reload(self):
+        material, tree = self.make_material_tree()
+        material.use_fake_user = True
+        material_name = material.name
+        node = tree.nodes.new("ShaderNodeGLSLFunction")
+        original_source = "float saved_probe(float value){return value;}\n"
+        draft_source = "float saved_probe(float value){return value + 1.0;}\n"
+        text = make_text_block("glsl_saved_code_draft.glsl", original_source)
+        self.configure_glsl_node(node, text.name, "saved_probe")
+        node.source_code = draft_source
+        node.display_mode = 'CODE'
+
+        with tempfile.TemporaryDirectory() as directory:
+            filepath = Path(directory) / "glsl_code_draft.blend"
+            bpy.ops.wm.save_as_mainfile(filepath=str(filepath), check_existing=False)
+            bpy.ops.wm.open_mainfile(filepath=str(filepath), load_ui=False)
+
+            loaded_material = bpy.data.materials[material_name]
+            loaded_node = next(
+                item
+                for item in loaded_material.node_tree.nodes
+                if item.bl_idname == "ShaderNodeGLSLFunction"
+            )
+            self.assertEqual(loaded_node.display_mode, 'CODE')
+            self.assertTrue(loaded_node.source_dirty)
+            self.assertEqual(loaded_node.source_code, draft_source)
+            self.assertEqual(loaded_node.script.as_string(), original_source)
+
+    def test_code_draft_survives_node_copy_and_source_node_delete(self):
+        _, tree = self.make_material_tree()
+        node = tree.nodes.new("ShaderNodeGLSLFunction")
+        original_source = "float copy_probe(float value){return value;}\n"
+        draft_source = "float copy_probe(float value){return value + 1.0;}\n"
+        text = make_text_block("glsl_copied_code_draft.glsl", original_source)
+        self.configure_glsl_node(node, text.name, "copy_probe")
+        node.source_code = draft_source
+        node.display_mode = 'CODE'
+
+        result, duplicate = duplicate_glsl_node_with_operator(node, tree)
+
+        self.assertEqual(result, {'FINISHED'})
+        self.assertEqual(duplicate.script, text)
+        self.assertEqual(duplicate.display_mode, 'CODE')
+        self.assertTrue(duplicate.source_dirty)
+        self.assertEqual(duplicate.source_code, draft_source)
+        self.assertEqual(text.as_string(), original_source)
+
+        tree.nodes.remove(node)
+        result = refresh_glsl_node_with_operator(duplicate, tree)
+
+        self.assertEqual(result, {'FINISHED'})
+        self.assertFalse(duplicate.source_dirty)
+        self.assertEqual(text.as_string(), draft_source)
+
+    def test_code_draft_survives_undo_and_redo(self):
+        material, tree = self.make_material_tree()
+        material.use_fake_user = True
+        material_name = material.name
+        node = tree.nodes.new("ShaderNodeGLSLFunction")
+        node_name = node.name
+        original_source = "float undo_probe(float value){return value;}\n"
+        first_draft = "float undo_probe(float value){return value + 1.0;}\n"
+        second_draft = "float undo_probe(float value){return value + 2.0;}\n"
+        text = make_text_block("glsl_undo_code_draft.glsl", original_source)
+        self.configure_glsl_node(node, text.name, "undo_probe")
+
+        bpy.ops.ed.undo_push(message="GLSL draft initial state")
+        node.source_code = first_draft
+        bpy.ops.ed.undo_push(message="GLSL draft first edit")
+        node.source_code = second_draft
+        bpy.ops.ed.undo_push(message="GLSL draft second edit")
+
+        self.assertEqual(bpy.ops.ed.undo(), {'FINISHED'})
+        undo_node = bpy.data.materials[material_name].node_tree.nodes[node_name]
+        self.assertTrue(undo_node.source_dirty)
+        self.assertEqual(undo_node.source_code, first_draft)
+        self.assertEqual(undo_node.script.as_string(), original_source)
+
+        self.assertEqual(bpy.ops.ed.redo(), {'FINISHED'})
+        redo_node = bpy.data.materials[material_name].node_tree.nodes[node_name]
+        self.assertTrue(redo_node.source_dirty)
+        self.assertEqual(redo_node.source_code, second_draft)
+        self.assertEqual(redo_node.script.as_string(), original_source)
+
+    def test_external_packed_source_remains_available(self):
+        _, tree = self.make_material_tree()
+        node = tree.nodes.new("ShaderNodeGLSLFunction")
+        source = "float packed_probe(float value){return value;}\n"
+
+        with tempfile.TemporaryDirectory() as directory:
+            filepath = Path(directory) / "packed_probe.glsl"
+            filepath.write_text(source, encoding="utf-8")
+            node.source_mode = 'EXTERNAL'
+            node.filepath = str(filepath)
+            node.function_name = "packed_probe"
+            refresh_glsl_node(node)
+
+            bpy.ops.file.pack_all()
+            filepath.unlink()
+
+            self.assertEqual(node.source_code, source)
+            self.assertEqual(node.parse_status, 'READY')
 
     def test_meta_description_preserves_existing_socket_values(self):
         _, tree = self.make_material_tree()

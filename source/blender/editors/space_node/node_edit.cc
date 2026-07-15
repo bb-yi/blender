@@ -39,6 +39,7 @@
 #include "BLI_listbase.h"
 #include "BLI_math_vector.h"
 #include "BLI_math_vector.hh"
+#include "BLI_path_utils.hh"
 #include "BLI_string.h"
 #include "BLI_string_utf8.h"
 #include "BLI_utildefines.h"
@@ -83,8 +84,6 @@
 #include "node_intern.hh" /* own include */
 
 namespace blender {
-
-bool node_shader_glsl_function_reset_defaults(bNode &node, std::string &r_error);
 
 namespace ed::space_node {
 
@@ -1989,7 +1988,26 @@ static bool node_glsl_function_refresh_poll(bContext *C)
   return node_glsl_function_context_get(C, &ntree, &nodeptr, &node) && ED_operator_node_editable(C);
 }
 
-static wmOperatorStatus node_glsl_function_refresh_exec(bContext *C, wmOperator * /*op*/)
+static void node_glsl_function_refresh_node(Main &bmain, bNodeTree &ntree, bNode &node)
+{
+  const std::string old_socket_signature = node_glsl_function_socket_signature(node);
+
+  if (NodeShaderGLSLFunction *data = static_cast<NodeShaderGLSLFunction *>(node.storage)) {
+    data->parse_status = SHD_GLSL_FUNCTION_PARSE_DIRTY;
+    data->signature_hash = 0;
+  }
+
+  BKE_ntree_update_tag_node_property(&ntree, &node);
+  nodes::update_node_declaration_and_sockets(ntree, node);
+  if (old_socket_signature != node_glsl_function_socket_signature(node) &&
+      GS(ntree.id.name) == ID_NT)
+  {
+    ntree.tree_interface.tag_items_changed_generic();
+  }
+  BKE_main_ensure_invariants(bmain, ntree.id);
+}
+
+static wmOperatorStatus node_glsl_function_refresh_exec(bContext *C, wmOperator *op)
 {
   bNodeTree *ntree = nullptr;
   PointerRNA nodeptr = {};
@@ -1998,27 +2016,26 @@ static wmOperatorStatus node_glsl_function_refresh_exec(bContext *C, wmOperator 
     return OPERATOR_CANCELLED;
   }
 
-  const std::string old_socket_signature = node_glsl_function_socket_signature(*node);
-
-  if (NodeShaderGLSLFunction *data = static_cast<NodeShaderGLSLFunction *>(node->storage)) {
-    data->parse_status = SHD_GLSL_FUNCTION_PARSE_DIRTY;
-    data->signature_hash = 0;
+  if (node_shader_glsl_function_source_dirty(*node)) {
+    std::string error;
+    if (!node_shader_glsl_function_apply_draft(*CTX_data_main(C), *ntree, *node, error)) {
+      if (!error.empty()) {
+        BKE_report(op->reports, RPT_ERROR, error.c_str());
+      }
+      return OPERATOR_CANCELLED;
+    }
+    WM_event_add_notifier(C, NC_TEXT | NA_EDITED, node->id);
+    WM_event_add_notifier(C, NC_NODE | NA_EDITED, nullptr);
+    return OPERATOR_FINISHED;
   }
 
-  BKE_ntree_update_tag_node_property(ntree, node);
-  nodes::update_node_declaration_and_sockets(*ntree, *node);
-  if (old_socket_signature != node_glsl_function_socket_signature(*node) &&
-      GS(ntree->id.name) == ID_NT)
-  {
-    ntree->tree_interface.tag_items_changed_generic();
-  }
-  BKE_main_ensure_invariants(*CTX_data_main(C), ntree->id);
+  node_glsl_function_refresh_node(*CTX_data_main(C), *ntree, *node);
   WM_event_add_notifier(C, NC_NODE | NA_EDITED, &ntree->id);
 
   return OPERATOR_FINISHED;
 }
 
-static wmOperatorStatus node_glsl_function_new_text_exec(bContext *C, wmOperator * /*op*/)
+static wmOperatorStatus node_glsl_function_new_text_exec(bContext *C, wmOperator *op)
 {
   bNodeTree *ntree = nullptr;
   PointerRNA nodeptr = {};
@@ -2027,17 +2044,127 @@ static wmOperatorStatus node_glsl_function_new_text_exec(bContext *C, wmOperator
     return OPERATOR_CANCELLED;
   }
 
-  PropertyRNA *script_prop = RNA_struct_find_property(&nodeptr, "script");
-  if (script_prop == nullptr) {
+  if (node->id != nullptr) {
     return OPERATOR_CANCELLED;
   }
 
-  Text *text = BKE_text_add(CTX_data_main(C), DATA_("Text"));
-  PointerRNA text_ptr = RNA_id_pointer_create(&text->id);
-  RNA_property_pointer_set(&nodeptr, script_prop, text_ptr, nullptr);
-  RNA_property_update(C, &nodeptr, script_prop);
+  bool changed = false;
+  std::string error;
+  if (!node_shader_glsl_function_code_source_ensure(
+        *CTX_data_main(C), *node, changed, error))
+  {
+    BKE_report(op->reports, RPT_ERROR, error.c_str());
+    return OPERATOR_CANCELLED;
+  }
+  node_glsl_function_refresh_node(*CTX_data_main(C), *ntree, *node);
 
+  WM_event_add_notifier(C, NC_TEXT | NA_ADDED, node->id);
+  WM_event_add_notifier(C, NC_NODE | NA_EDITED, &ntree->id);
+  return OPERATOR_FINISHED;
+}
+
+static wmOperatorStatus node_glsl_function_toggle_code_mode_exec(bContext *C,
+                                                                  wmOperator *op)
+{
+  bNodeTree *ntree = nullptr;
+  PointerRNA nodeptr = {};
+  bNode *node = nullptr;
+  if (!node_glsl_function_context_get(C, &ntree, &nodeptr, &node)) {
+    return OPERATOR_CANCELLED;
+  }
+
+  NodeShaderGLSLFunction *data = static_cast<NodeShaderGLSLFunction *>(node->storage);
+  if (data == nullptr) {
+    return OPERATOR_CANCELLED;
+  }
+
+  const bool enter_code_mode = (data->flags & SHD_GLSL_FUNCTION_CODE_MODE) == 0;
+  if (enter_code_mode && data->source_mode == SHD_GLSL_FUNCTION_SOURCE_INTERNAL) {
+    const bool created_text = node->id == nullptr;
+    bool changed = false;
+    std::string error;
+    if (!node_shader_glsl_function_code_source_ensure(
+          *CTX_data_main(C), *node, changed, error))
+    {
+      BKE_report(op->reports, RPT_ERROR, error.c_str());
+      return OPERATOR_CANCELLED;
+    }
+    if (changed) {
+      node_glsl_function_refresh_node(*CTX_data_main(C), *ntree, *node);
+      WM_event_add_notifier(
+          C, NC_TEXT | (created_text ? NA_ADDED : NA_EDITED), node->id);
+    }
+  }
+
+  SET_FLAG_FROM_TEST(data->flags, enter_code_mode, SHD_GLSL_FUNCTION_CODE_MODE);
+  BKE_ntree_update_tag_node_property(ntree, node);
+  nodes::update_node_declaration_and_sockets(*ntree, *node);
+  BKE_main_ensure_invariants(*CTX_data_main(C), ntree->id);
+  WM_event_add_notifier(C, NC_NODE | NA_EDITED, &ntree->id);
+  return OPERATOR_FINISHED;
+}
+
+static wmOperatorStatus node_glsl_function_discard_draft_exec(bContext *C,
+                                                               wmOperator * /*op*/)
+{
+  bNodeTree *ntree = nullptr;
+  PointerRNA nodeptr = {};
+  bNode *node = nullptr;
+  if (!node_glsl_function_context_get(C, &ntree, &nodeptr, &node) ||
+      !node_shader_glsl_function_source_dirty(*node))
+  {
+    return OPERATOR_CANCELLED;
+  }
+
+  node_shader_glsl_function_discard_draft(*node);
+  WM_event_add_notifier(C, NC_NODE | NA_EDITED, &ntree->id);
+  return OPERATOR_FINISHED;
+}
+
+static wmOperatorStatus node_glsl_function_make_internal_exec(bContext *C, wmOperator *op)
+{
+  bNodeTree *ntree = nullptr;
+  PointerRNA nodeptr = {};
+  bNode *node = nullptr;
+  if (!node_glsl_function_context_get(C, &ntree, &nodeptr, &node)) {
+    return OPERATOR_CANCELLED;
+  }
+
+  NodeShaderGLSLFunction *data = static_cast<NodeShaderGLSLFunction *>(node->storage);
+  if (data == nullptr || data->source_mode != SHD_GLSL_FUNCTION_SOURCE_EXTERNAL) {
+    return OPERATOR_CANCELLED;
+  }
+
+  std::string source;
+  std::string error;
+  if (!node_shader_glsl_function_source_get(*node, source, error)) {
+    BKE_report(op->reports, RPT_ERROR, error.c_str());
+    return OPERATOR_CANCELLED;
+  }
+
+  char function_name[sizeof(data->function_name)];
+  STRNCPY(function_name, data->function_name);
+  const char *text_name = data->filepath[0] != '\0' ? BLI_path_basename(data->filepath) :
+                                                      DATA_("GLSL Function.glsl");
+  Text *text = BKE_text_add(CTX_data_main(C), text_name);
+  BKE_text_write(text, source.c_str(), int(source.size()));
+
+  PropertyRNA *source_mode_prop = RNA_struct_find_property(&nodeptr, "source_mode");
+  PropertyRNA *script_prop = RNA_struct_find_property(&nodeptr, "script");
+  PropertyRNA *function_prop = RNA_struct_find_property(&nodeptr, "function_name");
+  if (source_mode_prop == nullptr || script_prop == nullptr || function_prop == nullptr) {
+    return OPERATOR_CANCELLED;
+  }
+  RNA_property_enum_set(&nodeptr, source_mode_prop, SHD_GLSL_FUNCTION_SOURCE_INTERNAL);
+  RNA_property_update(C, &nodeptr, source_mode_prop);
+  RNA_property_pointer_set(&nodeptr, script_prop, RNA_id_pointer_create(&text->id), nullptr);
+  RNA_property_update(C, &nodeptr, script_prop);
+  RNA_property_string_set(&nodeptr, function_prop, function_name);
+  RNA_property_update(C, &nodeptr, function_prop);
+
+  node_glsl_function_refresh_node(*CTX_data_main(C), *ntree, *node);
   WM_event_add_notifier(C, NC_TEXT | NA_ADDED, text);
+  WM_event_add_notifier(C, NC_NODE | NA_EDITED, &ntree->id);
   return OPERATOR_FINISHED;
 }
 
@@ -2074,6 +2201,36 @@ void NODE_OT_glsl_function_new_text(wmOperatorType *ot)
   ot->poll = node_glsl_function_refresh_poll;
   ot->exec = node_glsl_function_new_text_exec;
 
+  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+}
+
+void NODE_OT_glsl_function_toggle_code_mode(wmOperatorType *ot)
+{
+  ot->name = "Toggle GLSL Function Code Editor";
+  ot->description = "Switch between node controls and inline GLSL source editing";
+  ot->idname = "NODE_OT_glsl_function_toggle_code_mode";
+  ot->poll = node_glsl_function_refresh_poll;
+  ot->exec = node_glsl_function_toggle_code_mode_exec;
+  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+}
+
+void NODE_OT_glsl_function_discard_draft(wmOperatorType *ot)
+{
+  ot->name = "Discard GLSL Function Code Draft";
+  ot->description = "Discard unapplied GLSL source and function name edits";
+  ot->idname = "NODE_OT_glsl_function_discard_draft";
+  ot->poll = node_glsl_function_refresh_poll;
+  ot->exec = node_glsl_function_discard_draft_exec;
+  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
+}
+
+void NODE_OT_glsl_function_make_internal(wmOperatorType *ot)
+{
+  ot->name = "Convert GLSL Function Source to Internal";
+  ot->description = "Copy the external GLSL source into an internal Text data-block";
+  ot->idname = "NODE_OT_glsl_function_make_internal";
+  ot->poll = node_glsl_function_refresh_poll;
+  ot->exec = node_glsl_function_make_internal_exec;
   ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
 }
 

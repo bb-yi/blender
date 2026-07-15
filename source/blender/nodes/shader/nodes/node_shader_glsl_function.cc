@@ -18,15 +18,19 @@
 #include "BLO_read_write.hh"
 
 #include "BKE_image.hh"
+#include "BKE_lib_id.hh"
+#include "BKE_library.hh"
 #include "BKE_main_invariants.hh"
 #include "BKE_node_runtime.hh"
 #include "BKE_node_tree_update.hh"
 #include "BKE_text.h"
 
 #include "DNA_material_types.h"
+#include "DNA_text_types.h"
 
 #include "BLI_fileops.h"
 #include "BLI_ghash.h"
+#include "BLI_hash.hh"
 #include "BLI_map.hh"
 #include "BLI_memory_utils.hh"
 #include "BLI_path_utils.hh"
@@ -36,14 +40,19 @@
 #include "CLG_log.h"
 
 #include "GPU_capabilities.hh"
+#include "GPU_context.hh"
+#include "GPU_shader.hh"
 
 #include "IMB_imbuf_types.hh"
 
 #include "MEM_guardedalloc.h"
 
 #include "intern/gpu_node_graph.hh"
+#include "intern/gpu_shader_create_info.hh"
 
 #include "NOD_sync_sockets.hh"
+#include "NOD_shader.h"
+#include "NOD_socket.hh"
 
 #include "RNA_access.hh"
 #include "RNA_prototypes.hh"
@@ -103,6 +112,7 @@ namespace blender
         RNA_node_socket_glsl_int_choices_unregister(socket);
       }
       MEM_SAFE_DELETE(storage->packed_source);
+      MEM_SAFE_DELETE(storage->edit_source);
       RNA_shader_node_glsl_define_value_choices_unregister(storage->define_values,
                                                            storage->define_values_num);
       MEM_SAFE_DELETE(storage->define_values);
@@ -122,9 +132,15 @@ namespace blender
 
       NodeShaderGLSLFunction* dst_storage = MEM_dupalloc(src_storage);
       dst_storage->define_values = nullptr;
+      dst_storage->edit_source = nullptr;
+      dst_storage->edit_source_session_uid = 0;
       if (src_storage->packed_source != nullptr)
       {
         dst_storage->packed_source = BLI_strdup(src_storage->packed_source);
+      }
+      if (src_storage->edit_source != nullptr)
+      {
+        dst_storage->edit_source = BLI_strdup(src_storage->edit_source);
       }
       if (src_storage->define_values != nullptr && src_storage->define_values_num > 0)
       {
@@ -148,6 +164,7 @@ namespace blender
     {
       const NodeShaderGLSLFunction& storage = node_storage(node);
       writer.write_string(storage.packed_source);
+      writer.write_string(storage.edit_source);
       writer.write_struct_array(storage.define_values_num, storage.define_values);
     }
 
@@ -157,6 +174,8 @@ namespace blender
     {
       NodeShaderGLSLFunction& storage = node_storage(node);
       BLO_read_string(&reader, &storage.packed_source);
+      BLO_read_string(&reader, &storage.edit_source);
+      storage.edit_source_session_uid = 0;
       BLO_read_array_and_validate_size(&reader,
                                        &storage.define_values,
                                        &storage.define_values_num);
@@ -1573,6 +1592,11 @@ namespace blender
     {
       const char* key = default_closed ? "glsl_defines_panel_closed" : "glsl_defines_panel";
       return int(BLI_ghashutil_strhash_p(key) & 0x7fffffff);
+    }
+
+    static int make_code_interface_panel_identifier()
+    {
+      return int(BLI_ghashutil_strhash_p("glsl_code_interface_panel") & 0x7fffffff);
     }
 
     static std::string make_wrapper_argument_name(const StringRef prefix, const StringRef name)
@@ -5183,6 +5207,11 @@ namespace blender
       return true;
     }
 
+    static uint64_t glsl_source_hash(const StringRef source)
+    {
+      return hash_string(source);
+    }
+
     static const bNodeSocket* find_closure_output_socket_by_name(const bNode& node, const StringRef name)
     {
       if (!node.is_type("NodeClosureOutput"_ustr))
@@ -6613,16 +6642,13 @@ vec3 glsl_ambient_lighting()
       return true;
     }
 
-    static GLSLParseResult parse_glsl_for_node(const bNode& node)
+    static GLSLParseResult parse_glsl_source_for_node(const bNode& node,
+                                                      const std::string& source,
+                                                      const StringRef function_name)
     {
       GLSLParseResult result;
       result.keep_existing_sockets = true;
 
-      std::string source;
-      if (!load_glsl_source(node, source, result.error))
-      {
-        return result;
-      }
       if (trim_copy(source).empty())
       {
         result.error = "The GLSL source is empty";
@@ -6677,8 +6703,7 @@ vec3 glsl_ambient_lighting()
         return result;
       }
 
-      const NodeShaderGLSLFunction& storage = node_storage(node);
-      const StringRef requested_function_name = storage.function_name;
+      const StringRef requested_function_name = function_name;
       if (requested_function_name.is_empty())
       {
         return result;
@@ -6772,6 +6797,99 @@ vec3 glsl_ambient_lighting()
       result.wrapper_source = build_wrapper_glsl_source(
         node, result, Map<std::string, GLSLSample2DSourceKind>());
       return result;
+    }
+
+    static GLSLParseResult parse_glsl_for_node(const bNode& node)
+    {
+      GLSLParseResult result;
+      result.keep_existing_sockets = true;
+
+      std::string source;
+      if (!load_glsl_source(node, source, result.error))
+      {
+        return result;
+      }
+      return parse_glsl_source_for_node(node, source, node_storage(node).function_name);
+    }
+
+    static bool validate_glsl_candidate_with_gpu(const GLSLParseResult& parse_result,
+                                                 std::string& r_error)
+    {
+      if (GPU_context_active_get() == nullptr)
+      {
+        /* Background automation has no running GPU material to preserve. The structural parser
+         * validation above still prevents invalid function signatures and metadata from applying. */
+        r_error.clear();
+        return true;
+      }
+
+      static constexpr char validation_preamble[] = R"GLSL(
+#define GLSL_LIGHT_TYPE_INVALID 0
+#define GLSL_LIGHT_TYPE_SUN 1
+#define GLSL_LIGHT_TYPE_POINT 2
+#define GLSL_LIGHT_TYPE_SPOT 3
+#define GLSL_LIGHT_TYPE_AREA_RECT 4
+#define GLSL_LIGHT_TYPE_AREA_ELLIPSE 5
+
+struct GLSLLight {
+  bool valid;
+  uint index;
+  int type;
+  int lightgroup_id;
+  vec3 vector;
+  vec3 position;
+  vec3 direction;
+  float distance;
+  vec3 diffuse_color;
+  vec3 specular_color;
+  float attenuation;
+};
+
+GLSLLight glsl_light_default()
+{
+  GLSLLight light;
+  light.valid = false;
+  light.index = 0u;
+  light.type = GLSL_LIGHT_TYPE_INVALID;
+  light.lightgroup_id = 0;
+  light.vector = vec3(0.0, 0.0, 1.0);
+  light.position = vec3(0.0);
+  light.direction = vec3(0.0);
+  light.distance = 0.0;
+  light.diffuse_color = vec3(0.0);
+  light.specular_color = vec3(0.0);
+  light.attenuation = 0.0;
+  return light;
+}
+
+int glsl_light_count() { return 0; }
+GLSLLight glsl_light_get(int light_ordinal) { return glsl_light_default(); }
+float glsl_light_shadow(int light_ordinal, vec3 shading_normal) { return 0.0; }
+vec3 glsl_position() { return vec3(0.0); }
+vec3 glsl_normal() { return vec3(0.0); }
+vec3 glsl_true_normal() { return vec3(0.0); }
+vec3 glsl_incoming() { return vec3(0.0); }
+vec3 glsl_ambient_lighting() { return vec3(0.0); }
+)GLSL";
+
+      gpu::shader::ShaderCreateInfo create_info("pyGPU_Shader");
+      create_info.fragment_out(0, gpu::shader::Type::float4_t, "frag_out");
+      create_info.vertex_source_generated = "void main() { gl_Position = vec4(0.0); }";
+      create_info.fragment_source_generated = validation_preamble;
+      create_info.fragment_source_generated += parse_result.library_source;
+      create_info.fragment_source_generated += parse_result.wrapper_source;
+      create_info.fragment_source_generated += "\nvoid main() { frag_out = vec4(0.0); }\n";
+
+      gpu::Shader* shader = GPU_shader_create_from_info_python(
+        reinterpret_cast<GPUShaderCreateInfo*>(&create_info));
+      if (shader == nullptr)
+      {
+        r_error = "The GPU shader compiler rejected the GLSL draft";
+        return false;
+      }
+      GPU_shader_free(shader);
+      r_error.clear();
+      return true;
     }
 
     static void cache_parse_status(bNode& node, const GLSLParseResult& parse_result)
@@ -7165,16 +7283,17 @@ vec3 glsl_ambient_lighting()
         return;
       }
 
+      const bool code_mode = (node_storage(*node).flags & SHD_GLSL_FUNCTION_CODE_MODE) != 0;
       const bool has_parameter_panels = !parse_result.function.panels.is_empty();
       const bool has_define_panel = !parse_result.defines.is_empty();
       const bool use_declaration_panels = has_parameter_panels || has_define_panel;
-      if (use_declaration_panels)
+      if (code_mode || use_declaration_panels)
       {
         b.use_custom_socket_order();
         b.allow_any_socket_order();
       }
 
-      auto add_output_declarations = [&]() {
+      auto add_output_declarations = [&](DeclarationListBuilder& builder) {
         if (parse_result.function.return_type != GLSLBoundaryType::Void)
         {
           GLSLFunctionParam output_param;
@@ -7182,7 +7301,7 @@ vec3 glsl_ambient_lighting()
           output_param.type_name = parse_result.function.return_type_name;
           output_param.dimensions = glsl_boundary_dimensions(parse_result.function.return_type);
           add_glsl_socket_declaration(
-            b, output_param, true, "Result"_ustr, UString(result_socket_identifier));
+            builder, output_param, true, "Result"_ustr, UString(result_socket_identifier));
         }
 
         for (const GLSLFunctionParam& param : parse_result.function.params)
@@ -7192,14 +7311,36 @@ vec3 glsl_ambient_lighting()
             const UString socket_name(glsl_socket_display_name(param));
             const UString socket_identifier(make_socket_identifier("Out", param.name));
             add_glsl_socket_declaration(
-              b, param, true, socket_name, socket_identifier);
+              builder, param, true, socket_name, socket_identifier);
           }
         }
       };
 
+      if (code_mode)
+      {
+        b.add_default_layout();
+        PanelDeclarationBuilder& interface_panel =
+          b.add_panel("Interface"_ustr, make_code_interface_panel_identifier())
+            .default_closed(true);
+        add_output_declarations(interface_panel);
+        for (const GLSLFunctionParam& param : parse_result.function.params)
+        {
+          if (!glsl_param_has_input_socket(param))
+          {
+            continue;
+          }
+          add_glsl_socket_declaration(interface_panel,
+                                      param,
+                                      false,
+                                      UString(glsl_socket_display_name(param)),
+                                      UString(param.identifier));
+        }
+        return;
+      }
+
       if (use_declaration_panels)
       {
-        add_output_declarations();
+        add_output_declarations(b);
         b.add_default_layout();
       }
 
@@ -7263,17 +7404,34 @@ vec3 glsl_ambient_lighting()
 
       if (!use_declaration_panels)
       {
-        add_output_declarations();
+        add_output_declarations(b);
       }
+    }
+
+    static void draw_display_mode_switch(ui::Layout& layout,
+                                         PointerRNA* ptr,
+                                         const bool source_dirty)
+    {
+      ui::Layout& row = layout.row(true);
+      row.red_alert_set(source_dirty);
+      row.prop(ptr, "display_mode", ui::ITEM_R_EXPAND, std::nullopt, ICON_NONE);
     }
 
     static GLSLParseResult draw_node_layout_content(ui::Layout& layout, bContext* C, PointerRNA* ptr)
     {
+      bNode& node = *static_cast<bNode*>(ptr->data);
+      const bool source_dirty = node_shader_glsl_function_source_dirty(node);
+
+      layout.use_property_split_set(false);
+      layout.use_property_decorate_set(false);
+      draw_display_mode_switch(layout, ptr, source_dirty);
+
       layout.use_property_split_set(true);
       layout.use_property_decorate_set(false);
 
       {
         ui::Layout& row = layout.row(false);
+        row.enabled_set(!source_dirty);
         row.prop(
           ptr, "source_mode", ui::ITEM_R_SPLIT_EMPTY_NAME | ui::ITEM_R_EXPAND, std::nullopt, ICON_NONE);
       }
@@ -7314,29 +7472,33 @@ vec3 glsl_ambient_lighting()
           row.use_property_split_set(false);
           row.use_property_decorate_set(false);
 
+          ui::Layout& source_row = row.row(true);
+          source_row.enabled_set(!source_dirty);
+
           if (is_internal)
           {
             if (C != nullptr)
             {
-              template_id(&row, C, ptr, "script", nullptr, nullptr, nullptr);
+              template_id(&source_row, C, ptr, "script", nullptr, nullptr, nullptr);
             }
             else
             {
-              row.prop(ptr, "script", UI_ITEM_NONE, "", ICON_NONE);
+              source_row.prop(ptr, "script", UI_ITEM_NONE, "", ICON_NONE);
             }
           }
           else
           {
-            row.prop(ptr, "filepath", UI_ITEM_NONE, "", ICON_NONE);
+            source_row.prop(ptr, "filepath", UI_ITEM_NONE, "", ICON_NONE);
           }
           row.op("node.glsl_function_reset_defaults", "", ICON_LOOP_BACK);
           row.op("node.glsl_function_refresh", "", ICON_FILE_REFRESH);
         }
       }
 
-      layout.prop(ptr, "function_name", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+      ui::Layout& function_row = layout.row(false);
+      function_row.enabled_set(!source_dirty);
+      function_row.prop(ptr, "function_name", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
 
-      bNode& node = *static_cast<bNode*>(ptr->data);
       const NodeShaderGLSLFunction& storage = node_storage(node);
       const GLSLParseResult parse_result = parse_glsl_for_node(node);
       cache_parse_status(node, parse_result);
@@ -7358,6 +7520,70 @@ vec3 glsl_ambient_lighting()
       }
 
       return parse_result;
+    }
+
+    static void draw_code_layout_content(ui::Layout& layout, bContext* C, PointerRNA* ptr)
+    {
+      layout.use_property_split_set(false);
+      layout.use_property_decorate_set(false);
+
+      bNode& node = *static_cast<bNode*>(ptr->data);
+      const NodeShaderGLSLFunction& storage = node_storage(node);
+      const bool is_internal = storage.source_mode == SHD_GLSL_FUNCTION_SOURCE_INTERNAL;
+      const bool has_script = node.id != nullptr;
+      const bool source_dirty = node_shader_glsl_function_source_dirty(node);
+
+      draw_display_mode_switch(layout, ptr, source_dirty);
+
+      ui::Layout& toolbar = layout.row(true);
+      ui::Layout& function_field = toolbar.row(true);
+      function_field.enabled_set(!is_internal || has_script);
+      function_field.prop(
+        ptr, is_internal ? "edit_function_name" : "function_name", UI_ITEM_NONE, "", ICON_NONE);
+
+      if (is_internal)
+      {
+        ui::Layout& discard_button = toolbar.row(true);
+        discard_button.enabled_set(source_dirty);
+        discard_button.op("node.glsl_function_discard_draft", "", ICON_LOOP_BACK);
+      }
+      else
+      {
+        toolbar.op("node.glsl_function_make_internal", "", ICON_DUPLICATE);
+      }
+      toolbar.op("node.glsl_function_refresh", "", ICON_FILE_REFRESH);
+
+      ui::Layout& source_row = layout.row(false);
+      source_row.active_set(false);
+      if (is_internal && has_script)
+      {
+        const Text& text = *reinterpret_cast<const Text*>(node.id);
+        source_row.label(text.id.name + 2, ICON_FILE_TEXT);
+      }
+      else if (!is_internal && storage.filepath[0] != '\0')
+      {
+        source_row.label(BLI_path_basename(storage.filepath), ICON_FILE_SCRIPT);
+      }
+      else
+      {
+        source_row.label(IFACE_("No GLSL source"), ICON_ERROR);
+      }
+
+      ui::Layout& editor = layout.column(false);
+      editor.enabled_set(is_internal && has_script && ID_IS_EDITABLE(node.id));
+      if (C != nullptr)
+      {
+        editor.textbox(C, ptr, "source_code", std::nullopt, 10);
+      }
+      else
+      {
+        editor.prop(ptr, "source_code", UI_ITEM_NONE, "", ICON_NONE);
+      }
+
+      if (source_dirty)
+      {
+        layout.label(IFACE_("Unapplied Changes"), ICON_INFO);
+      }
     }
 
     static void draw_glsl_define_settings(ui::Layout& layout,
@@ -7444,11 +7670,23 @@ vec3 glsl_ambient_lighting()
 
     static void node_layout(ui::Layout& layout, bContext* C, PointerRNA* ptr)
     {
+      const bNode& node = *static_cast<const bNode*>(ptr->data);
+      if ((node_storage(node).flags & SHD_GLSL_FUNCTION_CODE_MODE) != 0)
+      {
+        draw_code_layout_content(layout, C, ptr);
+        return;
+      }
       draw_node_layout_content(layout, C, ptr);
     }
 
     static void node_layout_ex(ui::Layout& layout, bContext* C, PointerRNA* ptr)
     {
+      const bNode& node = *static_cast<const bNode*>(ptr->data);
+      if ((node_storage(node).flags & SHD_GLSL_FUNCTION_CODE_MODE) != 0)
+      {
+        draw_code_layout_content(layout, C, ptr);
+        return;
+      }
       const GLSLParseResult parse_result = draw_node_layout_content(layout, C, ptr);
       draw_glsl_define_panel(layout,
                              C,
@@ -7821,6 +8059,352 @@ vec3 glsl_ambient_lighting()
     }
 
   }  // namespace nodes::node_shader_glsl_function_cc
+
+  bool node_shader_glsl_function_source_get(const bNode& node,
+                                            std::string& r_source,
+                                            std::string& r_error)
+  {
+    return nodes::node_shader_glsl_function_cc::load_glsl_source(node, r_source, r_error);
+  }
+
+  bool node_shader_glsl_function_code_source_ensure(Main& bmain,
+                                                    bNode& node,
+                                                    bool& r_changed,
+                                                    std::string& r_error)
+  {
+    static constexpr char default_source[] =
+      "/* @glsl_meta v1\n"
+      "color: label=\"Color\" default=vec4(1.0)\n"
+      "*/\n"
+      "vec4 glsl_function(vec4 color)\n"
+      "{\n"
+      "  return color;\n"
+      "}\n";
+
+    r_changed = false;
+    NodeShaderGLSLFunction* storage = static_cast<NodeShaderGLSLFunction*>(node.storage);
+    if (storage == nullptr || storage->source_mode != SHD_GLSL_FUNCTION_SOURCE_INTERNAL)
+    {
+      r_error.clear();
+      return true;
+    }
+
+    Text* text = reinterpret_cast<Text*>(node.id);
+    if (text == nullptr)
+    {
+      text = BKE_text_add(&bmain, "GLSL Function.glsl");
+      node.id = &text->id;
+      id_us_plus(&text->id);
+      r_changed = true;
+    }
+
+    size_t source_len = 0;
+    char* source = txt_to_buf(text, &source_len);
+    BLI_SCOPED_DEFER([&]() { MEM_delete(source); });
+    if (source_len != 0)
+    {
+      r_error.clear();
+      return true;
+    }
+    if (storage->edit_source != nullptr ||
+        (storage->flags & SHD_GLSL_FUNCTION_EDIT_FUNCTION) != 0)
+    {
+      r_error.clear();
+      return true;
+    }
+    if (!ID_IS_EDITABLE(&text->id))
+    {
+      r_error.clear();
+      return true;
+    }
+
+    BKE_text_write(text, default_source, int(sizeof(default_source) - 1));
+    STRNCPY(storage->function_name, "glsl_function");
+    storage->parse_status = SHD_GLSL_FUNCTION_PARSE_DIRTY;
+    storage->signature_hash = 0;
+    r_changed = true;
+    r_error.clear();
+    return true;
+  }
+
+  bool node_shader_glsl_function_edit_source_get(const bNode& node,
+                                                 std::string& r_source,
+                                                 std::string& r_error)
+  {
+    const NodeShaderGLSLFunction* storage = static_cast<const NodeShaderGLSLFunction*>(
+      node.storage);
+    if (storage != nullptr && storage->edit_source != nullptr)
+    {
+      r_source = storage->edit_source;
+      r_error.clear();
+      return true;
+    }
+    return node_shader_glsl_function_source_get(node, r_source, r_error);
+  }
+
+  static bool node_shader_glsl_function_draft_base_ensure(bNode& node)
+  {
+    NodeShaderGLSLFunction* storage = static_cast<NodeShaderGLSLFunction*>(node.storage);
+    if (storage == nullptr ||
+        storage->source_mode != SHD_GLSL_FUNCTION_SOURCE_INTERNAL || node.id == nullptr)
+    {
+      return false;
+    }
+    if (storage->edit_source_session_uid != 0)
+    {
+      return true;
+    }
+
+    std::string source;
+    std::string error;
+    if (!node_shader_glsl_function_source_get(node, source, error))
+    {
+      return false;
+    }
+    const Text& text = *reinterpret_cast<const Text*>(node.id);
+    storage->edit_source_session_uid = text.id.session_uid;
+    if (storage->edit_source_hash == 0)
+    {
+      storage->edit_source_hash = nodes::node_shader_glsl_function_cc::glsl_source_hash(source);
+    }
+    return true;
+  }
+
+  void node_shader_glsl_function_edit_source_set(bNode& node, const char* source)
+  {
+    NodeShaderGLSLFunction* storage = static_cast<NodeShaderGLSLFunction*>(node.storage);
+    if (storage == nullptr || source == nullptr ||
+        storage->source_mode != SHD_GLSL_FUNCTION_SOURCE_INTERNAL || node.id == nullptr)
+    {
+      return;
+    }
+
+    std::string current_source;
+    std::string error;
+    if (!node_shader_glsl_function_source_get(node, current_source, error))
+    {
+      return;
+    }
+
+    if (current_source == source)
+    {
+      MEM_SAFE_DELETE(storage->edit_source);
+      if ((storage->flags & SHD_GLSL_FUNCTION_EDIT_FUNCTION) == 0)
+      {
+        storage->edit_source_session_uid = 0;
+        storage->edit_source_hash = 0;
+      }
+      return;
+    }
+
+    if (!node_shader_glsl_function_draft_base_ensure(node))
+    {
+      return;
+    }
+    MEM_SAFE_DELETE(storage->edit_source);
+    storage->edit_source = BLI_strdup(source);
+  }
+
+  void node_shader_glsl_function_edit_function_set(bNode& node, const char* function_name)
+  {
+    NodeShaderGLSLFunction* storage = static_cast<NodeShaderGLSLFunction*>(node.storage);
+    if (storage == nullptr || function_name == nullptr ||
+        storage->source_mode != SHD_GLSL_FUNCTION_SOURCE_INTERNAL || node.id == nullptr)
+    {
+      return;
+    }
+
+    if (STREQ(storage->function_name, function_name))
+    {
+      storage->flags &= ~SHD_GLSL_FUNCTION_EDIT_FUNCTION;
+      storage->edit_function_name[0] = '\0';
+      if (storage->edit_source == nullptr)
+      {
+        storage->edit_source_session_uid = 0;
+        storage->edit_source_hash = 0;
+      }
+      return;
+    }
+
+    if (!node_shader_glsl_function_draft_base_ensure(node))
+    {
+      return;
+    }
+    STRNCPY(storage->edit_function_name, function_name);
+    storage->flags |= SHD_GLSL_FUNCTION_EDIT_FUNCTION;
+  }
+
+  bool node_shader_glsl_function_source_dirty(const bNode& node)
+  {
+    const NodeShaderGLSLFunction* storage = static_cast<const NodeShaderGLSLFunction*>(
+      node.storage);
+    return storage != nullptr &&
+      (storage->edit_source != nullptr ||
+       (storage->flags & SHD_GLSL_FUNCTION_EDIT_FUNCTION) != 0);
+  }
+
+  void node_shader_glsl_function_discard_draft(bNode& node)
+  {
+    NodeShaderGLSLFunction* storage = static_cast<NodeShaderGLSLFunction*>(node.storage);
+    if (storage == nullptr)
+    {
+      return;
+    }
+    MEM_SAFE_DELETE(storage->edit_source);
+    storage->flags &= ~SHD_GLSL_FUNCTION_EDIT_FUNCTION;
+    storage->edit_function_name[0] = '\0';
+    storage->edit_source_session_uid = 0;
+    storage->edit_source_hash = 0;
+  }
+
+  bool node_shader_glsl_function_apply_draft(Main& bmain,
+                                             bNodeTree& ntree,
+                                             bNode& node,
+                                             std::string& r_error)
+  {
+    namespace file_ns = nodes::node_shader_glsl_function_cc;
+    NodeShaderGLSLFunction* storage = static_cast<NodeShaderGLSLFunction*>(node.storage);
+    if (storage == nullptr || !node_shader_glsl_function_source_dirty(node))
+    {
+      r_error.clear();
+      return true;
+    }
+    if (storage->source_mode != SHD_GLSL_FUNCTION_SOURCE_INTERNAL || node.id == nullptr)
+    {
+      r_error = "Only internal GLSL Text sources can apply code drafts";
+      return false;
+    }
+
+    Text& text = *reinterpret_cast<Text*>(node.id);
+    const bool source_changed = storage->edit_source != nullptr;
+    if (source_changed && !ID_IS_EDITABLE(&text.id))
+    {
+      r_error = "The GLSL Text data-block is not editable";
+      return false;
+    }
+    if (storage->edit_source_session_uid != 0 &&
+        storage->edit_source_session_uid != text.id.session_uid)
+    {
+      r_error = "The GLSL source changed while the code draft was open";
+      return false;
+    }
+
+    std::string current_source;
+    if (!node_shader_glsl_function_source_get(node, current_source, r_error))
+    {
+      return false;
+    }
+    if (file_ns::glsl_source_hash(current_source) != storage->edit_source_hash)
+    {
+      r_error = "The GLSL Text was modified outside this node; discard or copy the draft before "
+                "refreshing";
+      return false;
+    }
+
+    const std::string candidate_source = storage->edit_source != nullptr ? storage->edit_source :
+                                                                          current_source;
+    const StringRef candidate_function =
+      (storage->flags & SHD_GLSL_FUNCTION_EDIT_FUNCTION) != 0 ?
+        StringRef(storage->edit_function_name) :
+        StringRef(storage->function_name);
+
+    struct TextUser {
+      ID* owner_id;
+      bNodeTree* tree;
+      bNode* node;
+    };
+    Vector<TextUser> users;
+    if (source_changed)
+    {
+      FOREACH_NODETREE_BEGIN (&bmain, user_tree, owner_id)
+      {
+        for (bNode& user_node : user_tree->nodes)
+        {
+          if (user_node.type_legacy != SH_NODE_GLSL_FUNCTION || user_node.storage == nullptr ||
+              user_node.id != &text.id)
+          {
+            continue;
+          }
+          if (!ID_IS_EDITABLE(owner_id))
+          {
+            r_error = "A linked node tree uses this GLSL Text and cannot be refreshed atomically";
+            return false;
+          }
+          if (&user_node != &node && node_shader_glsl_function_source_dirty(user_node))
+          {
+            r_error = "Another GLSL Function node has unapplied edits for this Text";
+            return false;
+          }
+          users.append({owner_id, user_tree, &user_node});
+        }
+      }
+      FOREACH_NODETREE_END;
+    }
+    else
+    {
+      users.append({&ntree.id, &ntree, &node});
+    }
+
+    if (users.is_empty())
+    {
+      users.append({&ntree.id, &ntree, &node});
+    }
+
+    for (const TextUser& user : users)
+    {
+      const NodeShaderGLSLFunction& user_storage = *static_cast<const NodeShaderGLSLFunction*>(
+        user.node->storage);
+      const StringRef function_name = user.node == &node ? candidate_function :
+                                                          StringRef(user_storage.function_name);
+      const file_ns::GLSLParseResult parse_result = file_ns::parse_glsl_source_for_node(
+        *user.node, candidate_source, function_name);
+      if (!parse_result.ok)
+      {
+        r_error = parse_result.error.empty() ?
+          "A GLSL Function using this Text has no selected function" :
+          parse_result.error;
+        return false;
+      }
+      if (!file_ns::validate_glsl_candidate_with_gpu(parse_result, r_error))
+      {
+        return false;
+      }
+    }
+
+    if (storage->edit_source != nullptr)
+    {
+      BKE_text_clear(&text);
+      BKE_text_write(&text, candidate_source.c_str(), int(candidate_source.size()));
+    }
+    if ((storage->flags & SHD_GLSL_FUNCTION_EDIT_FUNCTION) != 0)
+    {
+      STRNCPY(storage->function_name, storage->edit_function_name);
+    }
+    node_shader_glsl_function_discard_draft(node);
+
+    Set<bNodeTree*> changed_trees;
+    for (const TextUser& user : users)
+    {
+      NodeShaderGLSLFunction& user_storage = *static_cast<NodeShaderGLSLFunction*>(
+        user.node->storage);
+      user_storage.parse_status = SHD_GLSL_FUNCTION_PARSE_DIRTY;
+      user_storage.signature_hash = 0;
+      BKE_ntree_update_tag_node_property(user.tree, user.node);
+      nodes::update_node_declaration_and_sockets(*user.tree, *user.node);
+      changed_trees.add(user.tree);
+    }
+    for (bNodeTree* changed_tree : changed_trees)
+    {
+      if (GS(changed_tree->id.name) == ID_NT)
+      {
+        changed_tree->tree_interface.tag_items_changed_generic();
+      }
+    }
+    BKE_main_ensure_invariants(bmain);
+
+    r_error.clear();
+    return true;
+  }
 
   bool node_shader_glsl_function_reset_defaults(bNode& node, std::string& r_error)
   {

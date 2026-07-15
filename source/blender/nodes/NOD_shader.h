@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include <string>
+
 #include "BKE_node.hh"
 
 namespace blender {
@@ -38,5 +40,25 @@ void ntreeGPULightShaderNodes(struct bNodeTree *localtree, struct GPUMaterial *m
  * This one needs to work on a local tree.
  */
 void ntreeGPUMaterialNodes(struct bNodeTree *localtree, struct GPUMaterial *mat);
+
+bool node_shader_glsl_function_source_get(const bNode &node,
+                                          std::string &r_source,
+                                          std::string &r_error);
+bool node_shader_glsl_function_code_source_ensure(Main &bmain,
+                                                  bNode &node,
+                                                  bool &r_changed,
+                                                  std::string &r_error);
+bool node_shader_glsl_function_edit_source_get(const bNode &node,
+                                               std::string &r_source,
+                                               std::string &r_error);
+void node_shader_glsl_function_edit_source_set(bNode &node, const char *source);
+void node_shader_glsl_function_edit_function_set(bNode &node, const char *function_name);
+bool node_shader_glsl_function_source_dirty(const bNode &node);
+void node_shader_glsl_function_discard_draft(bNode &node);
+bool node_shader_glsl_function_apply_draft(Main &bmain,
+                                           bNodeTree &ntree,
+                                           bNode &node,
+                                           std::string &r_error);
+bool node_shader_glsl_function_reset_defaults(bNode &node, std::string &r_error);
 
 }  // namespace blender

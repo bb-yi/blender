@@ -1374,6 +1374,11 @@ enum NodeGLSLFunctionParseStatus {
   SHD_GLSL_FUNCTION_PARSE_ERROR = 2,
 };
 
+enum NodeGLSLFunctionFlag {
+  SHD_GLSL_FUNCTION_CODE_MODE = 1 << 0,
+  SHD_GLSL_FUNCTION_EDIT_FUNCTION = 1 << 1,
+};
+
 enum NodeGLSLFunctionDefineType {
   SHD_GLSL_FUNCTION_DEFINE_BOOL = 0,
   SHD_GLSL_FUNCTION_DEFINE_INT = 1,
@@ -3196,10 +3201,16 @@ struct NodeShaderGLSLFunction {
   int sampler_extension = SHD_IMAGE_EXTENSION_REPEAT;
 
   char function_name[64] = "";
+  char edit_function_name[64] = "";
   char filepath[/*FILE_MAX*/ 1024] = "";
   int define_values_num = 0;
+  unsigned int edit_source_session_uid = 0;
+  int _pad = 0;
+  uint64_t edit_source_hash = 0;
   char *packed_source = nullptr;
+  char *edit_source = nullptr;
   NodeShaderGLSLDefineValue *define_values = nullptr;
+  void *_pad2 = nullptr;
 };
 
 struct NodeShaderTangent {
