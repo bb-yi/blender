@@ -1673,14 +1673,14 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   const bool pipeline_create_info_has_lightprobe_data = ELEM(
       pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD);
 
+  const bool use_front_light_shader_in_surface_pass =
+      use_shader_to_rgba || surface_graph_uses_glsl_light_access || surface_pass_uses_shader_info;
+
   /* Forward and hybrid BSL entry points expose LightEvalIterator, which already contains the
    * light and shadow resource tables. */
   const bool has_bsl_light_eval_resources =
       pipeline_type == MAT_PIPE_FORWARD ||
-      (pipeline_type == MAT_PIPE_DEFERRED && use_shader_to_rgba);
-
-  const bool use_front_light_shader_in_surface_pass =
-      use_shader_to_rgba || surface_graph_uses_glsl_light_access || surface_pass_uses_shader_info;
+      (pipeline_type == MAT_PIPE_DEFERRED && use_front_light_shader_in_surface_pass);
 
   const bool has_bsl_previous_layer_resources =
       ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD) &&
