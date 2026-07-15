@@ -10,12 +10,10 @@
 
 #include "DNA_node_types.h"
 #include "DNA_scene_types.h"
-#include "DNA_space_types.h"
 
 #include "BLI_index_range.hh"
 
 #include "BKE_context.hh"
-#include "BKE_lib_id.hh"
 #include "BKE_main.hh"
 #include "BKE_main_invariants.hh"
 #include "BKE_node.hh"
@@ -109,20 +107,6 @@ void filter_graph_stage_outputs_ensure(bNodeTree &ntree)
   }
 }
 
-static void filter_graph_set_scene_tree(Scene &scene, bNodeTree *ntree)
-{
-  if (scene.eevee.filter_graph == ntree) {
-    return;
-  }
-  if (scene.eevee.filter_graph != nullptr) {
-    id_us_min(&scene.eevee.filter_graph->id);
-  }
-  scene.eevee.filter_graph = ntree;
-  if (scene.eevee.filter_graph != nullptr) {
-    id_us_plus(&scene.eevee.filter_graph->id);
-  }
-}
-
 static void filter_graph_get_from_context(const bContext *C,
                                           bke::bNodeTreeType * /*treetype*/,
                                           bNodeTree **r_ntree,
@@ -135,14 +119,6 @@ static void filter_graph_get_from_context(const bContext *C,
   if (scene == nullptr) {
     *r_ntree = nullptr;
     return;
-  }
-
-  SpaceNode *snode = CTX_wm_space_node(C);
-  if (snode != nullptr && is_eevee_filter_graph_tree(snode->nodetree) &&
-      snode->nodetree != scene->eevee.filter_graph &&
-      (snode->id == nullptr || snode->id == &scene->id || scene->eevee.filter_graph == nullptr))
-  {
-    filter_graph_set_scene_tree(*scene, snode->nodetree);
   }
 
   *r_ntree = scene->eevee.filter_graph;

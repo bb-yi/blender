@@ -129,21 +129,6 @@ def draw_eevee_filter_graph(layout, context):
 
     if props.filter_graph is None:
         layout.label(text="No filter graph assigned.", icon='INFO')
-    else:
-        sync_filter_graph_node_editors(context, props.filter_graph)
-
-
-def sync_filter_graph_node_editors(context, graph):
-    screen = getattr(context, "screen", None)
-    if screen is None:
-        return
-
-    for area in screen.areas:
-        if area.type != 'NODE_EDITOR':
-            continue
-        for space in area.spaces:
-            if space.type == 'NODE_EDITOR' and space.tree_type == 'EeveeFilterGraphNodeTree':
-                space.node_tree = graph
 
 
 class SCENE_OT_eevee_filter_graph_new(Operator):
@@ -153,6 +138,7 @@ class SCENE_OT_eevee_filter_graph_new(Operator):
 
     def execute(self, context):
         graph = bpy.data.node_groups.new(name="Eevee Filter Graph", type="EeveeFilterGraphNodeTree")
+        graph.use_fake_user = True
 
         scene_color = graph.nodes.new("EeveeFilterGraphNodeSceneColor")
         scene_color.location = (-260, 0)
@@ -165,7 +151,6 @@ class SCENE_OT_eevee_filter_graph_new(Operator):
         stage_output.select = True
 
         context.scene.eevee.filter_graph = graph
-        sync_filter_graph_node_editors(context, graph)
 
         self.report({'INFO'}, f"Created filter graph '{graph.name}'")
         return {'FINISHED'}

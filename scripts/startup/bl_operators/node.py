@@ -611,6 +611,7 @@ def _filter_graph_tree_poll(context):
 
 def _new_filter_pass_material():
     mat = bpy.data.materials.new(name="Filter Material")
+    mat.use_fake_user = True
     mat.use_nodes = True
     mat.eevee_domain = 'FILTER'
 

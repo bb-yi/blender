@@ -237,8 +237,6 @@ class NODE_HT_header(Header):
 
             if snode.tree_type == 'EeveeFilterGraphNodeTree':
                 layout.template_ID(scene.eevee, "filter_graph", new="scene.eevee_filter_graph_new")
-                if scene.eevee.filter_graph is not None and snode.node_tree != scene.eevee.filter_graph:
-                    snode.node_tree = scene.eevee.filter_graph
             else:
                 layout.template_ID(snode, "node_tree", new="node.new_node_tree")
 
