@@ -138,6 +138,13 @@ static bool material_needs_front_light_shader_resources(const GPUMaterial *gpuma
          GPU_material_flag_get(gpumat, GPU_MATFLAG_GLSL_LIGHT_ACCESS);
 }
 
+static bool material_uses_hybrid_pipeline(const GPUMaterial *gpumat)
+{
+  return GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_TO_RGBA) ||
+         GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
+         GPU_material_has_glsl_light_shader_eval(gpumat);
+}
+
 static bool material_needs_lightprobe_resources(const GPUMaterial *gpumat)
 {
   return GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
@@ -1461,8 +1468,10 @@ template<typename F> void DeferredLayerBase::npr_pass_sync(Instance &inst, F cal
   npr_ps_.bind_texture(SCENE_SHADOW_TEX_SLOT, &inst.pipelines.shadow_filter.texture_ref());
   npr_ps_.bind_image(RBUFS_COLOR_SLOT, &inst.render_buffers.rp_color_tx);
   npr_ps_.bind_image(RBUFS_VALUE_SLOT, &inst.render_buffers.rp_value_tx);
-  npr_aov_color_input_tx_ = inst.render_buffers.rp_color_tx;
-  npr_aov_value_input_tx_ = inst.render_buffers.rp_value_tx;
+  /* Render buffers may not be allocated yet during probe pipeline sync. The concrete inputs are
+   * assigned immediately before each NPR pass is rendered. */
+  npr_aov_color_input_tx_ = nullptr;
+  npr_aov_value_input_tx_ = nullptr;
   npr_ps_.bind_texture(NPR_AOV_COLOR_TEX_SLOT, &npr_aov_color_input_tx_);
   npr_ps_.bind_texture(NPR_AOV_VALUE_TEX_SLOT, &npr_aov_value_input_tx_);
   npr_ps_.bind_image(OUTLINE_COLOR_SLOT, &inst.render_buffers.outline_color_tx);
@@ -1862,10 +1871,11 @@ PassMain::Sub *DeferredLayer::material_add(blender::Material *blender_mat, GPUMa
 
   const bool needs_front_light_shader = material_needs_front_light_shader_resources(gpumat,
                                                                                    closure_bits);
+  const bool uses_hybrid_pipeline = material_uses_hybrid_pipeline(gpumat);
   if (needs_front_light_shader) {
     inst_.lights.tag_front_light_shader_needed();
   }
-  PassMain::Sub *pass = get_gbuffer_subpass(blender_mat, gpumat);
+  PassMain::Sub *pass = get_gbuffer_subpass(blender_mat, gpumat, uses_hybrid_pipeline);
   PassMain::Sub *material_pass = &pass->sub(GPU_material_get_name(gpumat));
   if (inst_.scene->eevee.use_outline && GPU_material_has_outline_output(gpumat)) {
     material_pass->bind_image(OUTLINE_COLOR_SLOT, &inst_.render_buffers.outline_color_tx);
@@ -2684,11 +2694,13 @@ PassMain::Sub *DeferredProbePipeline::material_add(blender::Material *blender_ma
 
   const bool needs_front_light_shader = material_needs_front_light_shader_resources(gpumat,
                                                                                    closure_bits);
+  const bool uses_hybrid_pipeline = material_uses_hybrid_pipeline(gpumat);
   if (needs_front_light_shader) {
     inst_.lights.tag_front_light_shader_needed();
   }
 
-  PassMain::Sub *pass = opaque_layer_.get_gbuffer_subpass(blender_mat, gpumat);
+  PassMain::Sub *pass = opaque_layer_.get_gbuffer_subpass(
+      blender_mat, gpumat, uses_hybrid_pipeline);
   PassMain::Sub *material_pass = &pass->sub(GPU_material_get_name(gpumat));
   if (needs_front_light_shader) {
     material_pass->bind_resources(inst_.lights);
@@ -2888,11 +2900,12 @@ PassMain::Sub *PlanarProbePipeline::material_add(blender::Material *blender_mat,
 
   const bool needs_front_light_shader = material_needs_front_light_shader_resources(gpumat,
                                                                                    closure_bits);
+  const bool uses_hybrid_pipeline = material_uses_hybrid_pipeline(gpumat);
   if (needs_front_light_shader) {
     inst_.lights.tag_front_light_shader_needed();
   }
 
-  PassMain::Sub *pass = get_gbuffer_subpass(blender_mat, gpumat);
+  PassMain::Sub *pass = get_gbuffer_subpass(blender_mat, gpumat, uses_hybrid_pipeline);
   PassMain::Sub *material_pass = &pass->sub(GPU_material_get_name(gpumat));
   if (needs_front_light_shader) {
     material_pass->bind_resources(inst_.lights);

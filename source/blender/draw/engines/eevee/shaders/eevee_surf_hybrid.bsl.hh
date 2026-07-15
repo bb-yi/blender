@@ -91,7 +91,6 @@ namespace eevee {
 struct SurfaceHybrid {
   [[legacy_info]] ShaderCreateInfo draw_view_culling;
   [[legacy_info]] ShaderCreateInfo eevee_geom_iface_info;
-  [[legacy_info]] ShaderCreateInfo eevee_hiz_data;
 
   /* Everything is stored inside a two layered target, one for each format. This is to fit the
    * limitation of the number of images we can bind on a single shader. */

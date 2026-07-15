@@ -378,13 +378,14 @@ struct DeferredLayerBase {
 
   DeferredLayerBase(Instance &inst) : prepass_(inst) {};
 
-  PassMain::Sub *get_gbuffer_subpass(blender::Material *blender_mat, GPUMaterial *gpumat)
+  PassMain::Sub *get_gbuffer_subpass(blender::Material *blender_mat,
+                                     GPUMaterial *gpumat,
+                                     const bool use_hybrid_resources)
   {
-    const bool has_shader_to_rgba = GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_TO_RGBA);
     const bool has_raycast = GPU_material_flag_get(gpumat, GPU_MATFLAG_RAYCAST);
     const int cull_method = material_surface_cull_subpass_index(blender_mat);
 
-    return gbuffer_subpasses_[has_shader_to_rgba][has_raycast][cull_method];
+    return gbuffer_subpasses_[use_hybrid_resources][has_raycast][cull_method];
   }
 
   PassMain npr_ps_ = {"NPR"};
