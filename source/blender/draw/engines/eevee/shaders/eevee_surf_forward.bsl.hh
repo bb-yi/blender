@@ -94,10 +94,6 @@ struct SurfaceForward {
 
   [[legacy_info]] ShaderCreateInfo draw_view_culling;
 
-  /* NPR: custom screen-space material nodes (bevel, curvature, ...) sample scene depth directly.
-   * Restores the `hiz_tx` binding that npr-port-5.1 had on the (now removed) legacy forward base. */
-  [[legacy_info]] ShaderCreateInfo eevee_hiz_data;
-
   /* Optionally added depending on the material. */
   // [[legacy_info]] ShaderCreateInfo eevee_hiz_prev_data;
   // [[legacy_info]] ShaderCreateInfo eevee_previous_layer_radiance;

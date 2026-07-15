@@ -1670,22 +1670,30 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       pipeline_type == MAT_PIPE_BAKE_COLOR ||
       (material_graph_uses_lightprobe_data &&
        ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD));
-  const bool pipeline_create_info_has_lightprobe_data = pipeline_type == MAT_PIPE_DEFERRED_NPR;
+  const bool pipeline_create_info_has_lightprobe_data = ELEM(
+      pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_FORWARD);
 
   const bool use_front_light_shader_in_surface_pass =
       use_shader_to_rgba || surface_graph_uses_glsl_light_access || surface_pass_uses_shader_info;
 
-  if (ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD) &&
+  /* Forward and hybrid BSL entry points expose LightEvalIterator, which already contains the
+   * light and shadow resource tables. */
+  const bool has_bsl_light_eval_resources =
+      pipeline_type == MAT_PIPE_FORWARD ||
+      (pipeline_type == MAT_PIPE_DEFERRED && use_front_light_shader_in_surface_pass);
+
+  const bool has_bsl_previous_layer_resources =
+      ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD) &&
       GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_TO_RGBA) &&
-      GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT))
-  {
+      GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT);
+  if (has_bsl_previous_layer_resources) {
     info.additional_info("eevee_PreviousLayerHiZ");
     info.additional_info("eevee_PreviousLayerRadiance");
   }
 
-  if (ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD) &&
-      !ELEM(geometry_type, MAT_GEOM_WORLD, MAT_GEOM_VOLUME))
-  {
+  const bool has_bsl_hiz_resource = ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD) &&
+                                    !ELEM(geometry_type, MAT_GEOM_WORLD, MAT_GEOM_VOLUME);
+  if (has_bsl_hiz_resource) {
     /* While only needed for the AO node, bind HiZ before allocating user resource slots. */
     info.additional_info("eevee_HiZ");
   }
@@ -1732,7 +1740,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     }
   }
 
-  if (use_hiz_data) {
+  if (use_hiz_data && !has_bsl_hiz_resource) {
     add_create_info_and_reserve(info, slots, "eevee_hiz_data");
   }
   if (use_raycast) {
@@ -1794,28 +1802,36 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   }
 
   if (ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD) &&
-      (use_shader_to_rgba || GPU_material_flag_get(gpumat, GPU_MATFLAG_SCREENSPACE_INFO)))
+      (use_shader_to_rgba || GPU_material_flag_get(gpumat, GPU_MATFLAG_SCREENSPACE_INFO)) &&
+      !has_bsl_previous_layer_resources)
   {
     add_create_info_and_reserve(info, slots, "eevee_hiz_prev_data");
     add_create_info_and_reserve(info, slots, "eevee_previous_layer_radiance");
   }
 
-  if ((GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
+  const bool has_shader_info_light_resources =
+      (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
        GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR_FOREACH_LIGHT)) &&
       ELEM(pipeline_type,
            MAT_PIPE_DEFERRED,
            MAT_PIPE_DEFERRED_NPR,
            MAT_PIPE_FORWARD,
-           MAT_PIPE_BAKE_COLOR))
-  {
-    add_create_info_and_reserve(info, slots, "eevee_light_data");
+           MAT_PIPE_BAKE_COLOR);
+  if (has_shader_info_light_resources) {
+    if (!has_bsl_light_eval_resources) {
+      add_create_info_and_reserve(info, slots, "eevee_light_data");
+    }
     if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO)) {
       info.define("CREATE_INFO_eevee_LightRenderData");
     }
-    add_create_info_and_reserve(info, slots, "eevee_shadow_data");
+    if (!has_bsl_light_eval_resources) {
+      add_create_info_and_reserve(info, slots, "eevee_shadow_data");
+    }
     if (use_shader_info_shadow_classification) {
       info.define("SHADOW_CASTER_CLASSIFY");
-      add_create_info_and_reserve(info, slots, "eevee_shadow_caster_data");
+      if (!has_bsl_light_eval_resources) {
+        add_create_info_and_reserve(info, slots, "eevee_shadow_caster_data");
+      }
     }
   }
   if (pipeline_type == MAT_PIPE_BAKE_COLOR) {
@@ -1826,10 +1842,14 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     if (depth_offset_uses_light_access && pipeline_type != MAT_PIPE_BAKE_COLOR) {
       info.define("LIGHT_ITER_FORCE_NO_CULLING");
     }
-    add_create_info_and_reserve(info, slots, "eevee_light_data");
+    if (!has_shader_info_light_resources && !has_bsl_light_eval_resources) {
+      add_create_info_and_reserve(info, slots, "eevee_light_data");
+    }
     if (material_pass_uses_glsl_light_access) {
       info.define("MAT_GLSL_LIGHT_SHADOW_ACCESS");
-      add_create_info_and_reserve(info, slots, "eevee_shadow_data");
+      if (!has_shader_info_light_resources && !has_bsl_light_eval_resources) {
+        add_create_info_and_reserve(info, slots, "eevee_shadow_data");
+      }
     }
     if (surface_pass_uses_glsl_light_access) {
       info.define("MAT_GLSL_LIGHT_SHADER_EVAL");
