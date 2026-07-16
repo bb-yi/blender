@@ -64,6 +64,7 @@ class FilterMaterialModule {
   Framebuffer framebuffer_ = {"FilterMaterial.Framebuffer"};
   Texture ping_tx_ = {"FilterMaterial.Ping"};
   Texture pong_tx_ = {"FilterMaterial.Pong"};
+  Texture pass_tx_ = {"FilterMaterial.Pass"};
   Texture aov_color_snapshot_tx_ = {"FilterMaterial.AOVColorSnapshot"};
   Texture aov_value_snapshot_tx_ = {"FilterMaterial.AOVValueSnapshot"};
   Texture graph_black_tx_ = {"FilterMaterial.GraphBlack"};

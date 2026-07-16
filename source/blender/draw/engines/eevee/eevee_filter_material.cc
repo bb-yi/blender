@@ -1271,6 +1271,7 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
   }
 
   const gpu::TextureFormat stage_format = GPU_texture_format(input_tx);
+  Texture &stage_tx = (input_tx == ping_tx_.gpu_texture()) ? pong_tx_ : ping_tx_;
   const GPUSamplerState nearest_sampler = GPUSamplerState::default_sampler();
   const GPUSamplerState linear_sampler = {GPU_SAMPLER_FILTERING_LINEAR};
   reset_graph_texture_pool(extent);
@@ -1439,9 +1440,9 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
     const float clear_color[4] = {0.0f, 0.0f, 0.0f, 0.0f};
     GPU_texture_clear(output_tx, GPU_DATA_FLOAT, clear_color);
     GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE | GPU_BARRIER_SHADER_IMAGE_ACCESS);
-    pong_tx_.ensure_2d(
+    pass_tx_.ensure_2d(
         gpu::TextureFormat::SFLOAT_16_16_16_16, pass_extent, GPU_TEXTURE_USAGE_GENERAL);
-    framebuffer_.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(pong_tx_));
+    framebuffer_.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(pass_tx_));
 
     PassSimple pass = {"FilterMaterial.Pass"};
     pass.state_set(DRW_STATE_WRITE_COLOR);
@@ -1604,8 +1605,8 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
     if (graph_input_tx == nullptr) {
       return black_graph_output();
     }
-    ping_tx_.ensure_2d(stage_format, extent, GPU_TEXTURE_USAGE_GENERAL);
-    framebuffer_.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(ping_tx_));
+    stage_tx.ensure_2d(stage_format, extent, GPU_TEXTURE_USAGE_GENERAL);
+    framebuffer_.ensure(GPU_ATTACHMENT_NONE, GPU_ATTACHMENT_TEXTURE(stage_tx));
 
     PassSimple pass("FilterMaterial.GraphResolve");
     pass.init();
@@ -1631,7 +1632,7 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
 
     inst_.manager->submit(pass, view);
     GPU_memory_barrier(GPU_BARRIER_FRAMEBUFFER | GPU_BARRIER_TEXTURE_FETCH);
-    return ping_tx_;
+    return stage_tx;
   };
 
   if (filter_graph_enabled(*inst_.scene)) {

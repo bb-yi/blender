@@ -1,4 +1,5 @@
 import bpy
+import gpu
 import os
 import sys
 import tempfile
@@ -152,6 +153,31 @@ def main():
         assert color[2] < 0.1, (
             f"Expected filter output to remove the blue channel for stage {stage}, got {color}"
         )
+
+    graph = bpy.context.scene.eevee.filter_graph
+    stage_outputs = [stage_output]
+    for stage in ("BEFORE_VOLUME_FOG", "BEFORE_DEPTH_OF_FIELD", "BEFORE_POSTFX"):
+        _, _, additional_output = attach_filter_material_to_graph(
+            make_filter_material(),
+            stage=stage,
+            scene_socket="Color Image",
+            graph=graph,
+        )
+        assert additional_output.execution_stage == stage
+        stage_outputs.append(additional_output)
+
+    assert all(output.is_active_output for output in stage_outputs), (
+        "Expected one active Filter Graph output for each execution stage"
+    )
+
+    color = sample_center_color(render_image())
+    assert color[0] < 0.1 and color[1] < 0.1 and color[2] > 0.9, (
+        "Expected four simultaneous invert stages to restore the blue surface, "
+        f"got {color}"
+    )
+
+    print("__FILTER_STAGE_BACKEND__=" + gpu.platform.backend_type_get(), flush=True)
+    print("__FILTER_STAGE_MULTISTAGE_DONE__", flush=True)
 
 
 if __name__ == "__main__":
