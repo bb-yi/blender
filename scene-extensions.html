@@ -656,15 +656,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#_18" class="md-nav__link">
-    <span class="md-ellipsis">
-      建议补图
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -939,15 +930,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#_18" class="md-nav__link">
-    <span class="md-ellipsis">
-      建议补图
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1020,6 +1002,12 @@
 <li>把任意区域的编辑器类型切换为 <code>Eevee Filter Graph</code>，即可编辑当前场景指定的图。</li>
 <li><code>Filter Pass</code> 使用的材质仍是 <code>Filter</code> 域材质；进入该材质后，可在 Shader Editor 中编辑内部节点树。</li>
 </ul>
+<div align="center">
+  <img src="images/filter_graph_scene_panel.png" alt="Scene Properties 中的 Filter Graph" style="border-radius: 10px;">
+  <br>
+  <sub>在 Scene Properties 中指定当前场景使用的 Eevee Filter Graph</sub>
+</div>
+
 <h4 id="filter-graph">Filter Graph 节点<a class="headerlink" href="#filter-graph" title="Permanent link">&para;</a></h4>
 <ul>
 <li><code>Scene Color</code>：提供当前阶段的 <code>Color Image</code>、<code>Depth Image</code>、<code>Normal Image</code> 和 <code>Position Image</code> 图像句柄。</li>
@@ -1027,10 +1015,22 @@
 <li><code>Filter Pass</code>：执行一个 <code>Filter</code> 域材质。输入接口同步自材质的 <code>Pass Input</code>，输出接口同步自材质的 <code>Filter Output</code>。</li>
 <li><code>Stage Output</code>：把连接的图像写回所选渲染阶段。每个阶段只能有一个 active <code>Stage Output</code>。</li>
 </ul>
+<div align="center">
+  <img src="images/filter_graph_editor_overview.png" alt="Eevee Filter Graph 编辑器总览" style="border-radius: 10px;">
+  <br>
+  <sub>Scene Color、AOV Input、Filter Pass 与 Stage Output 的完整连接示例</sub>
+</div>
+
 <h4 id="filter">Filter 材质内部结构<a class="headerlink" href="#filter" title="Permanent link">&para;</a></h4>
 <p>新建 Filter Pass 材质时会生成这条默认链路：</p>
 <p><code>Pass Input -&gt; Image Sample -&gt; Filter Output</code></p>
 <p><code>Pass Input</code> 接收 Filter Graph 传入的图像句柄，<code>Image Sample</code> 在当前像素或偏移位置采样，<code>Filter Output</code> 把结果返回给图中的 <code>Filter Pass</code>。可按需要在 <code>Pass Input</code> 与 <code>Filter Output</code> 上维护动态接口；单个 Filter Pass 最多支持 <code>32</code> 个输入和 <code>32</code> 个输出。</p>
+<div align="center">
+  <img src="images/filter_graph_effect_example.png" alt="Filter 材质内部节点与效果示例" style="border-radius: 10px;">
+  <br>
+  <sub>Pass Input、Image Sample、Filter Output 组成的材质链及其视口效果</sub>
+</div>
+
 <h4 id="_7">基本使用方法<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h4>
 <ol>
 <li>打开 <code>Scene Properties &gt; Filter Graph</code>，新建或指定一个图。</li>
@@ -1040,6 +1040,12 @@
 <li>把 <code>Filter Pass</code> 的结果连接到 <code>Stage Output</code>，选择执行阶段并确保该输出处于 active 状态。</li>
 <li>按性能和效果需要，为每个 <code>Filter Pass</code> 选择 <code>Full</code>、<code>1/2</code>、<code>1/4</code>、<code>1/8</code> 或 <code>1/16</code> 执行分辨率。</li>
 </ol>
+<div align="center">
+  <img src="images/filter_pass_resolution_menu.png" alt="Filter Pass 执行分辨率菜单" style="border-radius: 10px;">
+  <br>
+  <sub>Filter Pass 支持的执行分辨率</sub>
+</div>
+
 <h4 id="_8">执行阶段<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h4>
 <ul>
 <li><code>Before Volume Fog</code></li>
@@ -1047,6 +1053,12 @@
 <li><code>Before Depth of Field</code></li>
 <li><code>Before Composite</code></li>
 </ul>
+<div align="center">
+  <img src="images/filter_graph_stage_menu.png" alt="Filter Graph 执行阶段菜单" style="border-radius: 10px;">
+  <br>
+  <sub>Stage Output 的四个执行阶段</sub>
+</div>
+
 <p>同一阶段即使放置多个 <code>Stage Output</code>，也只会使用其中一个 active 输出；其他阶段可以各自维护独立的 active 输出链路。</p>
 <h4 id="_9">数据块与旧文件迁移<a class="headerlink" href="#_9" title="Permanent link">&para;</a></h4>
 <ul>
@@ -1060,6 +1072,12 @@
 <p>这适合为描边、AOV、深度、法线、光照分量等通道生成带相机运动模糊或景深的版本，用于合成器、后续滤镜或外部后期流程。</p>
 <h4 id="_11">面板入口<a class="headerlink" href="#_11" title="Permanent link">&para;</a></h4>
 <p><code>View Layer Properties &gt; Passes &gt; Native Camera FX Outputs</code></p>
+<div align="center">
+  <img src="images/native_camera_fx_outputs.png" alt="Native Camera FX Outputs 面板" style="border-radius: 10px;">
+  <br>
+  <sub>为指定 Render Pass 单独应用运动模糊与景深</sub>
+</div>
+
 <h4 id="_12">可配置内容<a class="headerlink" href="#_12" title="Permanent link">&para;</a></h4>
 <p>每个输出条目支持：</p>
 <ul>
@@ -1126,13 +1144,17 @@
 <li>渲染方式为 <code>Blended</code> 的前景材质会参与后方描边遮挡：完全不透明时遮挡后方描边，完全透明时不影响后方描边</li>
 <li>半透明 <code>Blended</code> 前景会按材质透射率衰减后方描边强度，不会用前景材质颜色染色后方描边</li>
 </ul>
-<h4 id="_18">建议补图<a class="headerlink" href="#_18" title="Permanent link">&para;</a></h4>
-<ul>
-<li><code>images/placeholder_eevee_outline.png</code></li>
-<li>建议内容：<code>Render Properties &gt; Outline</code> 面板</li>
-<li><code>images/placeholder_outline_render_pass.png</code></li>
-<li>建议内容：<code>View Layer Properties &gt; Passes &gt; Data &gt; Outline</code> 位置，或合成器读取 <code>Outline</code> pass 的示例</li>
-</ul>
+<div align="center">
+  <img src="images/placeholder_eevee_outline.png" alt="Render Properties 中的 Eevee Outline 开关" style="border-radius: 10px;">
+  <br>
+  <sub>Render Properties 中的全局 Outline 开关</sub>
+</div>
+
+<div align="center">
+  <img src="images/placeholder_outline_render_pass.png" alt="View Layer Properties 中的 Outline Render Pass" style="border-radius: 10px;">
+  <br>
+  <sub>View Layer Properties > Passes > Data 中的 Outline Render Pass</sub>
+</div>
 
 
 

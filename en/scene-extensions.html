@@ -656,15 +656,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#suggested-images" class="md-nav__link">
-    <span class="md-ellipsis">
-      Suggested Images
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -939,15 +930,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#suggested-images" class="md-nav__link">
-    <span class="md-ellipsis">
-      Suggested Images
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1020,6 +1002,12 @@
 <li>Switch any area to the <code>Eevee Filter Graph</code> editor to edit the graph assigned to the current scene.</li>
 <li>A <code>Filter Pass</code> still uses a material in the <code>Filter</code> domain. Enter that material to edit its internal node tree in the Shader Editor.</li>
 </ul>
+<div align="center">
+  <img src="images/filter_graph_scene_panel.png" alt="Filter Graph in Scene Properties" style="border-radius: 10px;">
+  <br>
+  <sub>Assigning the current scene's Eevee Filter Graph in Scene Properties</sub>
+</div>
+
 <h4 id="filter-graph-nodes">Filter Graph Nodes<a class="headerlink" href="#filter-graph-nodes" title="Permanent link">&para;</a></h4>
 <ul>
 <li><code>Scene Color</code>: exposes the current stage's <code>Color Image</code>, <code>Depth Image</code>, <code>Normal Image</code>, and <code>Position Image</code> handles.</li>
@@ -1027,10 +1015,22 @@
 <li><code>Filter Pass</code>: executes one <code>Filter</code> domain material. Its input interface is synchronized from the material's <code>Pass Input</code>, and its output interface is synchronized from <code>Filter Output</code>.</li>
 <li><code>Stage Output</code>: publishes the connected image at the selected render stage. Each stage can have only one active <code>Stage Output</code>.</li>
 </ul>
+<div align="center">
+  <img src="images/filter_graph_editor_overview.png" alt="Eevee Filter Graph editor overview" style="border-radius: 10px;">
+  <br>
+  <sub>A complete Scene Color, AOV Input, Filter Pass, and Stage Output connection</sub>
+</div>
+
 <h4 id="inside-a-filter-material">Inside a Filter Material<a class="headerlink" href="#inside-a-filter-material" title="Permanent link">&para;</a></h4>
 <p>Creating a Filter Pass material builds this default chain:</p>
 <p><code>Pass Input -&gt; Image Sample -&gt; Filter Output</code></p>
 <p><code>Pass Input</code> receives image handles from the Filter Graph, <code>Image Sample</code> samples them at the current or an offset pixel, and <code>Filter Output</code> returns results to the graph's <code>Filter Pass</code>. Dynamic interfaces can be maintained on <code>Pass Input</code> and <code>Filter Output</code>; one Filter Pass supports at most <code>32</code> inputs and <code>32</code> outputs.</p>
+<div align="center">
+  <img src="images/filter_graph_effect_example.png" alt="Filter material nodes and viewport effect" style="border-radius: 10px;">
+  <br>
+  <sub>A Pass Input, Image Sample, and Filter Output chain with its viewport result</sub>
+</div>
+
 <h4 id="basic-workflow_1">Basic Workflow<a class="headerlink" href="#basic-workflow_1" title="Permanent link">&para;</a></h4>
 <ol>
 <li>Create or assign a graph at <code>Scene Properties &gt; Filter Graph</code>.</li>
@@ -1040,6 +1040,12 @@
 <li>Connect the <code>Filter Pass</code> result to a <code>Stage Output</code>, choose its execution stage, and make sure that output is active.</li>
 <li>Choose <code>Full</code>, <code>1/2</code>, <code>1/4</code>, <code>1/8</code>, or <code>1/16</code> execution resolution on each <code>Filter Pass</code> according to quality and performance needs.</li>
 </ol>
+<div align="center">
+  <img src="images/filter_pass_resolution_menu.png" alt="Filter Pass execution resolution menu" style="border-radius: 10px;">
+  <br>
+  <sub>Execution resolutions available on a Filter Pass</sub>
+</div>
+
 <h4 id="execution-stages">Execution Stages<a class="headerlink" href="#execution-stages" title="Permanent link">&para;</a></h4>
 <ul>
 <li><code>Before Volume Fog</code></li>
@@ -1047,6 +1053,12 @@
 <li><code>Before Depth of Field</code></li>
 <li><code>Before Composite</code></li>
 </ul>
+<div align="center">
+  <img src="images/filter_graph_stage_menu.png" alt="Filter Graph execution stage menu" style="border-radius: 10px;">
+  <br>
+  <sub>The four execution stages available on Stage Output</sub>
+</div>
+
 <p>If multiple <code>Stage Output</code> nodes target the same stage, only one can be active. Other stages can each maintain an independent active output chain.</p>
 <h4 id="data-blocks-and-legacy-migration">Data-Blocks and Legacy Migration<a class="headerlink" href="#data-blocks-and-legacy-migration" title="Permanent link">&para;</a></h4>
 <ul>
@@ -1060,6 +1072,12 @@
 <p>This is useful for generating camera-FX versions of outlines, AOVs, depth, normals, lighting components, and other channels for compositor, filter, or external post-production workflows.</p>
 <h4 id="panel-entry_1">Panel Entry<a class="headerlink" href="#panel-entry_1" title="Permanent link">&para;</a></h4>
 <p><code>View Layer Properties &gt; Passes &gt; Native Camera FX Outputs</code></p>
+<div align="center">
+  <img src="images/native_camera_fx_outputs.png" alt="Native Camera FX Outputs panel" style="border-radius: 10px;">
+  <br>
+  <sub>Applying motion blur and depth of field to a selected render pass</sub>
+</div>
+
 <h4 id="configurable-fields_1">Configurable Fields<a class="headerlink" href="#configurable-fields_1" title="Permanent link">&para;</a></h4>
 <p>Each output entry supports:</p>
 <ul>
@@ -1126,13 +1144,17 @@
 <li><code>Blended</code> foreground materials participate in behind-outline occlusion: fully opaque foreground blocks behind outlines, fully transparent foreground leaves them unchanged</li>
 <li>Semi-transparent <code>Blended</code> foreground attenuates behind-outline intensity by material transmittance without tinting the outline with the foreground material color</li>
 </ul>
-<h4 id="suggested-images">Suggested Images<a class="headerlink" href="#suggested-images" title="Permanent link">&para;</a></h4>
-<ul>
-<li><code>images/placeholder_eevee_outline.png</code></li>
-<li>Suggested content: the <code>Render Properties &gt; Outline</code> panel</li>
-<li><code>images/placeholder_outline_render_pass.png</code></li>
-<li>Suggested content: the <code>View Layer &gt; Passes &gt; Data &gt; Outline</code> toggle, or a compositor example reading the <code>Outline</code> pass</li>
-</ul>
+<div align="center">
+  <img src="images/placeholder_eevee_outline.png" alt="Eevee Outline toggle in Render Properties" style="border-radius: 10px;">
+  <br>
+  <sub>The global Outline toggle in Render Properties</sub>
+</div>
+
+<div align="center">
+  <img src="images/placeholder_outline_render_pass.png" alt="Outline render pass in View Layer Properties" style="border-radius: 10px;">
+  <br>
+  <sub>The Outline render pass under View Layer Properties > Passes > Data</sub>
+</div>
 
 
 
