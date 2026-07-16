@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Blender 5.1 NPR Port Features & Usage Guide">
+        <meta name="description" content="Blender 5.2 LTS NPR Port Features, Usage, and Release Guide">
       
       
         <meta name="author" content="NPR Port Team">
@@ -24,7 +24,7 @@
     
     
       
-        <title>Scene Extensions - Blender 5.1 NPR Port Documentation</title>
+        <title>Scene Extensions - Blender 5.2 LTS NPR Port Documentation</title>
       
     
     
@@ -92,7 +92,7 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="index.html" title="Blender 5.1 NPR Port Documentation" class="md-header__button md-logo" aria-label="Blender 5.1 NPR Port Documentation" data-md-component="logo">
+    <a href="index.html" title="Blender 5.2 LTS NPR Port Documentation" class="md-header__button md-logo" aria-label="Blender 5.2 LTS NPR Port Documentation" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -106,7 +106,7 @@
       <div class="md-header__ellipsis">
         <div class="md-header__topic">
           <span class="md-ellipsis">
-            Blender 5.1 NPR Port Documentation
+            Blender 5.2 LTS NPR Port Documentation
           </span>
         </div>
         <div class="md-header__topic" data-md-component="header-topic">
@@ -244,13 +244,13 @@
 
 <nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="index.html" title="Blender 5.1 NPR Port Documentation" class="md-nav__button md-logo" aria-label="Blender 5.1 NPR Port Documentation" data-md-component="logo">
+    <a href="index.html" title="Blender 5.2 LTS NPR Port Documentation" class="md-nav__button md-logo" aria-label="Blender 5.2 LTS NPR Port Documentation" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
 
     </a>
-    Blender 5.1 NPR Port Documentation
+    Blender 5.2 LTS NPR Port Documentation
   </label>
   
   <ul class="md-nav__list" data-md-scrollfix>
@@ -268,6 +268,28 @@
   
   <span class="md-ellipsis">
     Home
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="release.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Download & Release
     
   </span>
   
@@ -451,13 +473,13 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-filter-materials" class="md-nav__link">
+  <a href="#2-filter-graph" class="md-nav__link">
     <span class="md-ellipsis">
-      2. Filter Materials
+      2. Filter Graph
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="2. Filter Materials">
+    <nav class="md-nav" aria-label="2. Filter Graph">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -470,9 +492,27 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#panel-entry_1" class="md-nav__link">
+  <a href="#panel-and-editor-entry" class="md-nav__link">
     <span class="md-ellipsis">
-      Panel Entry
+      Panel and Editor Entry
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#filter-graph-nodes" class="md-nav__link">
+    <span class="md-ellipsis">
+      Filter Graph Nodes
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#inside-a-filter-material" class="md-nav__link">
+    <span class="md-ellipsis">
+      Inside a Filter Material
     </span>
   </a>
   
@@ -488,9 +528,18 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#important-notes" class="md-nav__link">
+  <a href="#execution-stages" class="md-nav__link">
     <span class="md-ellipsis">
-      Important Notes
+      Execution Stages
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#data-blocks-and-legacy-migration" class="md-nav__link">
+    <span class="md-ellipsis">
+      Data-Blocks and Legacy Migration
     </span>
   </a>
   
@@ -521,7 +570,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#panel-entry_2" class="md-nav__link">
+  <a href="#panel-entry_1" class="md-nav__link">
     <span class="md-ellipsis">
       Panel Entry
     </span>
@@ -557,7 +606,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#important-notes_1" class="md-nav__link">
+  <a href="#important-notes" class="md-nav__link">
     <span class="md-ellipsis">
       Important Notes
     </span>
@@ -590,7 +639,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#panel-entry_3" class="md-nav__link">
+  <a href="#panel-entry_2" class="md-nav__link">
     <span class="md-ellipsis">
       Panel Entry
     </span>
@@ -707,13 +756,13 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-filter-materials" class="md-nav__link">
+  <a href="#2-filter-graph" class="md-nav__link">
     <span class="md-ellipsis">
-      2. Filter Materials
+      2. Filter Graph
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="2. Filter Materials">
+    <nav class="md-nav" aria-label="2. Filter Graph">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -726,9 +775,27 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#panel-entry_1" class="md-nav__link">
+  <a href="#panel-and-editor-entry" class="md-nav__link">
     <span class="md-ellipsis">
-      Panel Entry
+      Panel and Editor Entry
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#filter-graph-nodes" class="md-nav__link">
+    <span class="md-ellipsis">
+      Filter Graph Nodes
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#inside-a-filter-material" class="md-nav__link">
+    <span class="md-ellipsis">
+      Inside a Filter Material
     </span>
   </a>
   
@@ -744,9 +811,18 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#important-notes" class="md-nav__link">
+  <a href="#execution-stages" class="md-nav__link">
     <span class="md-ellipsis">
-      Important Notes
+      Execution Stages
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#data-blocks-and-legacy-migration" class="md-nav__link">
+    <span class="md-ellipsis">
+      Data-Blocks and Legacy Migration
     </span>
   </a>
   
@@ -777,7 +853,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#panel-entry_2" class="md-nav__link">
+  <a href="#panel-entry_1" class="md-nav__link">
     <span class="md-ellipsis">
       Panel Entry
     </span>
@@ -813,7 +889,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#important-notes_1" class="md-nav__link">
+  <a href="#important-notes" class="md-nav__link">
     <span class="md-ellipsis">
       Important Notes
     </span>
@@ -846,7 +922,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#panel-entry_3" class="md-nav__link">
+  <a href="#panel-entry_2" class="md-nav__link">
     <span class="md-ellipsis">
       Panel Entry
     </span>
@@ -935,49 +1011,54 @@
 <li>Pick the matching <code>Render Texture</code> entry in the node panel.</li>
 <li>Use the node's <code>Color</code> / <code>Alpha</code> outputs in the rest of the material.</li>
 </ol>
-<h2 id="2-filter-materials">2. Filter Materials<a class="headerlink" href="#2-filter-materials" title="Permanent link">&para;</a></h2>
+<h2 id="2-filter-graph">2. Filter Graph<a class="headerlink" href="#2-filter-graph" title="Permanent link">&para;</a></h2>
 <h4 id="feature-description_1">Feature Description<a class="headerlink" href="#feature-description_1" title="Permanent link">&para;</a></h4>
-<p><code>Filter Materials</code> is a scene-level Eevee full-screen filter stack. Each entry is a material in the <code>Filter</code> domain, and the stack is applied in list order to the current frame.</p>
-<h4 id="panel-entry_1">Panel Entry<a class="headerlink" href="#panel-entry_1" title="Permanent link">&para;</a></h4>
-<p><code>Scene Properties &gt; Filter Materials</code></p>
-<div align="center">
-  <img src="images/SnowShot_2026-03-28_04-41-53.png" alt="Filter Materials" style="border-radius: 10px;">
-  <br>
-</div>
-
-<p>Node-tree entry: Shader Editor &gt; Shader Type &gt; <code>Filter</code></p>
-<div align="center">
-  <img src="images/SnowShot_2026-03-28_04-42-42.png" alt="Filter Shader Type" style="border-radius: 10px;">
-  <br>
-</div>
-
+<p><code>Filter Graph</code> is a scene-level Eevee full-screen filter execution graph. It replaces the legacy linear Filter Materials list with node connections. The scene selects its authoritative graph through <code>Scene.eevee.filter_graph</code>; image handles in that graph can feed multiple Filter Passes and publish results at different render stages.</p>
+<h4 id="panel-and-editor-entry">Panel and Editor Entry<a class="headerlink" href="#panel-and-editor-entry" title="Permanent link">&para;</a></h4>
+<ul>
+<li>Create or assign the scene Filter Graph at <code>Scene Properties &gt; Filter Graph</code>.</li>
+<li>Switch any area to the <code>Eevee Filter Graph</code> editor to edit the graph assigned to the current scene.</li>
+<li>A <code>Filter Pass</code> still uses a material in the <code>Filter</code> domain. Enter that material to edit its internal node tree in the Shader Editor.</li>
+</ul>
+<h4 id="filter-graph-nodes">Filter Graph Nodes<a class="headerlink" href="#filter-graph-nodes" title="Permanent link">&para;</a></h4>
+<ul>
+<li><code>Scene Color</code>: exposes the current stage's <code>Color Image</code>, <code>Depth Image</code>, <code>Normal Image</code>, and <code>Position Image</code> handles.</li>
+<li><code>AOV Input</code>: reads a named View Layer AOV and exposes <code>Color</code> and <code>Value</code> image handles.</li>
+<li><code>Filter Pass</code>: executes one <code>Filter</code> domain material. Its input interface is synchronized from the material's <code>Pass Input</code>, and its output interface is synchronized from <code>Filter Output</code>.</li>
+<li><code>Stage Output</code>: publishes the connected image at the selected render stage. Each stage can have only one active <code>Stage Output</code>.</li>
+</ul>
+<h4 id="inside-a-filter-material">Inside a Filter Material<a class="headerlink" href="#inside-a-filter-material" title="Permanent link">&para;</a></h4>
+<p>Creating a Filter Pass material builds this default chain:</p>
+<p><code>Pass Input -&gt; Image Sample -&gt; Filter Output</code></p>
+<p><code>Pass Input</code> receives image handles from the Filter Graph, <code>Image Sample</code> samples them at the current or an offset pixel, and <code>Filter Output</code> returns results to the graph's <code>Filter Pass</code>. Dynamic interfaces can be maintained on <code>Pass Input</code> and <code>Filter Output</code>; one Filter Pass supports at most <code>32</code> inputs and <code>32</code> outputs.</p>
 <h4 id="basic-workflow_1">Basic Workflow<a class="headerlink" href="#basic-workflow_1" title="Permanent link">&para;</a></h4>
 <ol>
-<li>Open <code>Scene Properties &gt; Filter Materials</code>.</li>
-<li>Create a new entry, or click <code>New Filter Material</code>.</li>
-<li>The selected material must be a <code>Filter</code> domain material.</li>
-<li>In the Shader Editor, switch the top <code>Shader Type</code> to <code>Filter</code>.</li>
-<li>Use <code>Scene Color</code> to read scene data, and combine it with <code>Filter Object Info</code> or <code>Filter Mask</code> when object-driven control is needed.</li>
-<li>Use <code>AOV Input</code> if the filter needs to read an existing custom pass.</li>
-<li>Use <code>AOV Output</code> if the filter should write an intermediate or final result into a named AOV.</li>
-<li>Choose the insertion point with <code>Execution Stage</code>.</li>
+<li>Create or assign a graph at <code>Scene Properties &gt; Filter Graph</code>.</li>
+<li>Switch to the <code>Eevee Filter Graph</code> editor.</li>
+<li>Feed a <code>Filter Pass</code> from <code>Scene Color</code> or <code>AOV Input</code>.</li>
+<li>Create or assign a Filter material on the <code>Filter Pass</code>, then enter the material to build the actual filter logic.</li>
+<li>Connect the <code>Filter Pass</code> result to a <code>Stage Output</code>, choose its execution stage, and make sure that output is active.</li>
+<li>Choose <code>Full</code>, <code>1/2</code>, <code>1/4</code>, <code>1/8</code>, or <code>1/16</code> execution resolution on each <code>Filter Pass</code> according to quality and performance needs.</li>
 </ol>
-<h4 id="important-notes">Important Notes<a class="headerlink" href="#important-notes" title="Permanent link">&para;</a></h4>
+<h4 id="execution-stages">Execution Stages<a class="headerlink" href="#execution-stages" title="Permanent link">&para;</a></h4>
 <ul>
-<li>The default sampling coordinate for <code>Scene Color</code> is the <code>Window</code> output of the <code>Texture Coordinate</code> node</li>
-<li><code>Scene Color</code> uses consistent screen-UV sampling for <code>Color / Depth / Normal / Position</code>; when <code>Vector</code> is connected for offset sampling, <code>Position</code> reconstructs the world position for the offset pixel</li>
-<li><code>AOV Input</code> is supported</li>
-<li><code>AOV Output</code> is supported, so a filter can write to a named AOV before sending the final result into <code>Filter Output</code></li>
-<li><code>Execution Stage</code> currently provides three insertion points:</li>
 <li><code>Before Volume Fog</code></li>
+<li><code>Before PostFX</code></li>
 <li><code>Before Depth of Field</code></li>
 <li><code>Before Composite</code></li>
+</ul>
+<p>If multiple <code>Stage Output</code> nodes target the same stage, only one can be active. Other stages can each maintain an independent active output chain.</p>
+<h4 id="data-blocks-and-legacy-migration">Data-Blocks and Legacy Migration<a class="headerlink" href="#data-blocks-and-legacy-migration" title="Permanent link">&para;</a></h4>
+<ul>
+<li>Filter Graphs created from the scene panel and Filter materials created from a <code>Filter Pass</code> automatically receive a fake user. Temporarily unlinking them from a scene or node therefore does not immediately make them disappear on save.</li>
+<li>When a file containing the 5.1 linear Filter Materials list is opened, its entries are migrated automatically into an equivalent Filter Graph, preserving their execution stages and list order in the generated connections.</li>
+<li>Filter materials can still use Filter-domain nodes such as <code>Filter Object Info</code>, <code>Filter Mask</code>, and <code>GLSL Function</code>; route scene buffers and AOVs at graph level when possible.</li>
 </ul>
 <h2 id="3-native-camera-fx-outputs">3. Native Camera FX Outputs<a class="headerlink" href="#3-native-camera-fx-outputs" title="Permanent link">&para;</a></h2>
 <h4 id="feature-description_2">Feature Description<a class="headerlink" href="#feature-description_2" title="Permanent link">&para;</a></h4>
 <p><code>Native Camera FX Outputs</code> is a View Layer level Eevee native post-effect output system. It can extract a selected render channel, apply Eevee native <code>Motion Blur</code> and / or <code>Depth of Field</code> to that channel, and publish the result as a new render pass.</p>
 <p>This is useful for generating camera-FX versions of outlines, AOVs, depth, normals, lighting components, and other channels for compositor, filter, or external post-production workflows.</p>
-<h4 id="panel-entry_2">Panel Entry<a class="headerlink" href="#panel-entry_2" title="Permanent link">&para;</a></h4>
+<h4 id="panel-entry_1">Panel Entry<a class="headerlink" href="#panel-entry_1" title="Permanent link">&para;</a></h4>
 <p><code>View Layer Properties &gt; Passes &gt; Native Camera FX Outputs</code></p>
 <h4 id="configurable-fields_1">Configurable Fields<a class="headerlink" href="#configurable-fields_1" title="Permanent link">&para;</a></h4>
 <p>Each output entry supports:</p>
@@ -1017,7 +1098,7 @@
 <li>Enable <code>Motion Blur</code>, <code>Depth of Field</code>, or both as needed.</li>
 <li>Read the generated render pass by name in the compositor or later pipeline stage.</li>
 </ol>
-<h4 id="important-notes_1">Important Notes<a class="headerlink" href="#important-notes_1" title="Permanent link">&para;</a></h4>
+<h4 id="important-notes">Important Notes<a class="headerlink" href="#important-notes" title="Permanent link">&para;</a></h4>
 <ul>
 <li><code>Motion Blur</code> still requires Eevee motion blur to be enabled for the scene / View Layer</li>
 <li><code>Depth of Field</code> still uses the active camera depth-of-field settings</li>
@@ -1028,7 +1109,7 @@
 <h2 id="4-eevee-outline">4. Eevee Outline<a class="headerlink" href="#4-eevee-outline" title="Permanent link">&para;</a></h2>
 <h4 id="feature-description_3">Feature Description<a class="headerlink" href="#feature-description_3" title="Permanent link">&para;</a></h4>
 <p><code>Eevee Outline</code> is the scene-level master switch for the built-in screen-space outline system in the NPR Port.</p>
-<h4 id="panel-entry_3">Panel Entry<a class="headerlink" href="#panel-entry_3" title="Permanent link">&para;</a></h4>
+<h4 id="panel-entry_2">Panel Entry<a class="headerlink" href="#panel-entry_2" title="Permanent link">&para;</a></h4>
 <p><code>Render Properties &gt; Outline</code></p>
 <p>Outline render-pass entry:</p>
 <p><code>View Layer Properties &gt; Passes &gt; Data &gt; Outline</code></p>
@@ -1128,10 +1209,6 @@
     
     
       <script src="assets/javascripts/bundle.f55a23d4.min.js"></script>
-      
-        <script src="javascripts/mathjax.js"></script>
-      
-        <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
       
     
   </body>

@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Blender 5.1 NPR Port 新增功能与使用说明">
+        <meta name="description" content="Blender 5.2 LTS NPR Port 功能、使用与版本说明">
       
       
         <meta name="author" content="NPR Port Team">
@@ -16,7 +16,7 @@
       
       
       
-        <link rel="next" href="extended-nodes.html">
+        <link rel="next" href="release.html">
       
       
       <link rel="icon" href="assets/images/favicon.png">
@@ -24,7 +24,7 @@
     
     
       
-        <title>Blender 5.1 NPR Port 文档</title>
+        <title>Blender 5.2 LTS NPR Port 文档</title>
       
     
     
@@ -76,7 +76,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#blender-51-npr-port" class="md-skip">
+        <a href="#blender-520-lts-npr-port" class="md-skip">
           跳转至
         </a>
       
@@ -92,7 +92,7 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="页眉">
-    <a href="index.html" title="Blender 5.1 NPR Port 文档" class="md-header__button md-logo" aria-label="Blender 5.1 NPR Port 文档" data-md-component="logo">
+    <a href="index.html" title="Blender 5.2 LTS NPR Port 文档" class="md-header__button md-logo" aria-label="Blender 5.2 LTS NPR Port 文档" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -106,7 +106,7 @@
       <div class="md-header__ellipsis">
         <div class="md-header__topic">
           <span class="md-ellipsis">
-            Blender 5.1 NPR Port 文档
+            Blender 5.2 LTS NPR Port 文档
           </span>
         </div>
         <div class="md-header__topic" data-md-component="header-topic">
@@ -244,13 +244,13 @@
 
 <nav class="md-nav md-nav--primary" aria-label="导航栏" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="index.html" title="Blender 5.1 NPR Port 文档" class="md-nav__button md-logo" aria-label="Blender 5.1 NPR Port 文档" data-md-component="logo">
+    <a href="index.html" title="Blender 5.2 LTS NPR Port 文档" class="md-nav__button md-logo" aria-label="Blender 5.2 LTS NPR Port 文档" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
 
     </a>
-    Blender 5.1 NPR Port 文档
+    Blender 5.2 LTS NPR Port 文档
   </label>
   
   <ul class="md-nav__list" data-md-scrollfix>
@@ -330,9 +330,9 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#512" class="md-nav__link">
+  <a href="#520-lts" class="md-nav__link">
     <span class="md-ellipsis">
-      5.1.2 更新重点
+      5.2.0 LTS 更新重点
     </span>
   </a>
   
@@ -402,6 +402,28 @@
   
 </nav>
       
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="release.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    下载与版本
+    
+  </span>
+  
+
+      </a>
     </li>
   
 
@@ -539,9 +561,9 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#512" class="md-nav__link">
+  <a href="#520-lts" class="md-nav__link">
     <span class="md-ellipsis">
-      5.1.2 更新重点
+      5.2.0 LTS 更新重点
     </span>
   </a>
   
@@ -623,24 +645,20 @@
 
 
 
-<h1 id="blender-51-npr-port">Blender 5.1 NPR Port 新增功能与使用说明<a class="headerlink" href="#blender-51-npr-port" title="Permanent link">&para;</a></h1>
+<h1 id="blender-520-lts-npr-port">Blender 5.2.0 LTS NPR Port 新增功能与使用说明<a class="headerlink" href="#blender-520-lts-npr-port" title="Permanent link">&para;</a></h1>
 <h2 id="_1">项目介绍<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
-<p><code>Blender 5.1 NPR Port</code> 是一个 NPR 特化的 <code>Blender</code> 分支。在融合 <code>Goo Engine</code> 和 <code>4.4 NPR-prototype</code> 特色节点之外，还额外加入了一批面向 <code>Eevee</code> 的扩展节点、滤镜工作流和界面增强。</p>
-<p>大部分功能是 <code>Eevee</code> 专用，不支持 <code>Cycles</code>。</p>
+<p><code>Blender 5.2.0 LTS NPR Port</code> 是一个 NPR 特化的 <code>Blender</code> 分支。在融合 <code>Goo Engine</code> 和 <code>4.4 NPR-prototype</code> 特色节点之外，还额外加入了一批面向 <code>Eevee</code> 的扩展节点、Filter Graph 工作流和界面增强。</p>
+<p>发布包包含 <code>Cycles</code>，但本文介绍的 NPR 扩展功能是 <code>Eevee</code> 专用，不支持在 <code>Cycles</code> 中使用。</p>
 <h2 id="_2">文档范围<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
-<p>这份文档说明当前 <code>Blender 5.1 NPR Port</code> 相比官方 <code>Blender 5.1</code> 已经加入、并且当前分支内实际存在的 NPR / Eevee 扩展功能，以及它们的基本使用方法。</p>
-<h2 id="512">5.1.2 更新重点<a class="headerlink" href="#512" title="Permanent link">&para;</a></h2>
+<p>这份文档说明当前 <code>Blender 5.2.0 LTS NPR Port</code> 相比官方 <code>Blender 5.2.0 LTS</code> 已经加入、并且当前分支内实际存在的 NPR / Eevee 扩展功能，以及它们的基本使用方法。</p>
+<h2 id="520-lts">5.2.0 LTS 更新重点<a class="headerlink" href="#520-lts" title="Permanent link">&para;</a></h2>
 <ul>
-<li>合并官方 <code>Blender 5.1.2</code> 修复与版本更新</li>
-<li>新增 <code>GLSL Script Expression</code> 节点，可用单行 GLSL 表达式快速生成自定义标量、向量或颜色输出</li>
-<li><code>GLSL Function</code> 的 <code>@glsl_meta v1</code> 新增 <code>label</code>，可为输入、输出和 <code>sampler2D</code> 插口设置节点界面显示名</li>
-<li><code>Eevee Performance</code> 视图新增阴影和探针归因分组：<code>Shadow Contexts</code>、<code>Shadow Lights</code>、<code>Probe Costs</code></li>
-<li>新增 <code>Native Camera FX Outputs</code>，可在 <code>View Layer</code> 中把 Eevee 原生 <code>Motion Blur</code> 和 <code>Depth of Field</code> 应用到指定通道</li>
-<li>恢复独立 <code>OKLab Color Ramp</code> 节点，普通 <code>Color Ramp</code> 保持原有 RGB / HSV / HSL 工作流</li>
-<li>修复 <code>GLSL Function</code> 的 <code>vec4</code> 输入在刷新或编译路径中丢失 <code>w</code> 分量的问题</li>
-<li>修复 <code>Scene Color</code> 的 <code>Position</code> 源在偏移采样时和其他场景缓冲不一致的问题</li>
-<li>修复透明 / <code>Blended</code> Forward 层在未显式写入 AOV 时覆盖后方 AOV 的问题</li>
-<li>更新 NPR Port 启动画面</li>
+<li>迁移到官方 <code>Blender 5.2.0 LTS</code> 代码基线，并完成 Eevee NPR 渲染路径适配</li>
+<li>用场景级 <code>Filter Graph</code> 取代旧的线性 Filter Materials 列表，支持四个执行阶段和可复用的 Filter Pass 材质</li>
+<li><code>GLSL Function</code> 新增 <code>Node / Code</code> 编辑模式，可在节点内编辑内部 Text，并通过原子 Apply / Discard 工作流保护正在运行的材质</li>
+<li><code>GLSL Function</code> 支持 <code>mat2</code>、<code>mat3</code>、<code>mat4</code> 输入、<code>out</code> 参数和返回值，并可用于 Eevee 物体材质、Filter 材质和 <code>NPR Tree</code></li>
+<li>保留 <code>GLSL Script Expression</code>、<code>Native Camera FX Outputs</code>、<code>Eevee Performance</code> 阴影 / 探针归因和 <code>OKLab Color Ramp</code> 等 NPR 扩展</li>
+<li>修复 5.2 迁移后的 Eevee 着色器、透明 AOV、Scene Color 偏移采样和节点接口兼容问题</li>
 </ul>
 <h2 id="_3">节点一览<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
 <div align="center">
@@ -693,10 +711,10 @@
 <h3 id="1-scene-eevee">1. Scene 级 Eevee 扩展<a class="headerlink" href="#1-scene-eevee" title="Permanent link">&para;</a></h3>
 <ul>
 <li><a href="scene-extensions.html#1-render-textures"><code>Render Textures</code></a></li>
-<li><a href="scene-extensions.html#2-filter-materials"><code>Filter Materials</code></a></li>
+<li><a href="scene-extensions.html#2-filter-graph"><code>Filter Graph</code></a></li>
 <li><a href="scene-extensions.html#4-eevee-outline"><code>Eevee Outline</code></a></li>
 <li><a href="scene-extensions.html#3-native-camera-fx-outputs"><code>Native Camera FX Outputs</code></a></li>
-<li><a href="scene-extensions.html#2-filter-materials"><code>Filter</code> 域下可用的 <code>AOV Input / AOV Output</code></a></li>
+<li><a href="scene-extensions.html#2-filter-graph"><code>Scene Color / AOV Input / Filter Pass / Stage Output</code></a></li>
 </ul>
 <h3 id="2">2. 着色器节点<a class="headerlink" href="#2" title="Permanent link">&para;</a></h3>
 <ul>
@@ -752,7 +770,7 @@
 </ul>
 <div class="admonition warning">
 <p class="admonition-title">Eevee 专用</p>
-<p>所有 NPR Port 功能都需要 <strong>Eevee 渲染引擎</strong>。不支持 <code>Cycles</code>。</p>
+<p>发布包可以运行 <code>Cycles</code>，但本文介绍的 NPR Port 扩展功能需要 <strong>Eevee 渲染引擎</strong>，不支持在 <code>Cycles</code> 中使用。</p>
 </div>
 
 
@@ -830,10 +848,6 @@
     
     
       <script src="assets/javascripts/bundle.f55a23d4.min.js"></script>
-      
-        <script src="javascripts/mathjax.js"></script>
-      
-        <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
       
     
   </body>

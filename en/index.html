@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Blender 5.1 NPR Port Features & Usage Guide">
+        <meta name="description" content="Blender 5.2 LTS NPR Port Features, Usage, and Release Guide">
       
       
         <meta name="author" content="NPR Port Team">
@@ -16,7 +16,7 @@
       
       
       
-        <link rel="next" href="extended-nodes.html">
+        <link rel="next" href="release.html">
       
       
       <link rel="icon" href="assets/images/favicon.png">
@@ -24,7 +24,7 @@
     
     
       
-        <title>Blender 5.1 NPR Port Documentation</title>
+        <title>Blender 5.2 LTS NPR Port Documentation</title>
       
     
     
@@ -76,7 +76,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#blender-51-npr-port-features-and-usage-guide" class="md-skip">
+        <a href="#blender-520-lts-npr-port-features-and-usage-guide" class="md-skip">
           Skip to content
         </a>
       
@@ -92,7 +92,7 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="index.html" title="Blender 5.1 NPR Port Documentation" class="md-header__button md-logo" aria-label="Blender 5.1 NPR Port Documentation" data-md-component="logo">
+    <a href="index.html" title="Blender 5.2 LTS NPR Port Documentation" class="md-header__button md-logo" aria-label="Blender 5.2 LTS NPR Port Documentation" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -106,7 +106,7 @@
       <div class="md-header__ellipsis">
         <div class="md-header__topic">
           <span class="md-ellipsis">
-            Blender 5.1 NPR Port Documentation
+            Blender 5.2 LTS NPR Port Documentation
           </span>
         </div>
         <div class="md-header__topic" data-md-component="header-topic">
@@ -244,13 +244,13 @@
 
 <nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="index.html" title="Blender 5.1 NPR Port Documentation" class="md-nav__button md-logo" aria-label="Blender 5.1 NPR Port Documentation" data-md-component="logo">
+    <a href="index.html" title="Blender 5.2 LTS NPR Port Documentation" class="md-nav__button md-logo" aria-label="Blender 5.2 LTS NPR Port Documentation" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
 
     </a>
-    Blender 5.1 NPR Port Documentation
+    Blender 5.2 LTS NPR Port Documentation
   </label>
   
   <ul class="md-nav__list" data-md-scrollfix>
@@ -330,9 +330,9 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#512-highlights" class="md-nav__link">
+  <a href="#520-lts-highlights" class="md-nav__link">
     <span class="md-ellipsis">
-      5.1.2 Highlights
+      5.2.0 LTS Highlights
     </span>
   </a>
   
@@ -402,6 +402,28 @@
   
 </nav>
       
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="release.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Download & Release
+    
+  </span>
+  
+
+      </a>
     </li>
   
 
@@ -539,9 +561,9 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#512-highlights" class="md-nav__link">
+  <a href="#520-lts-highlights" class="md-nav__link">
     <span class="md-ellipsis">
-      5.1.2 Highlights
+      5.2.0 LTS Highlights
     </span>
   </a>
   
@@ -623,24 +645,20 @@
 
 
 
-<h1 id="blender-51-npr-port-features-and-usage-guide">Blender 5.1 NPR Port - Features and Usage Guide<a class="headerlink" href="#blender-51-npr-port-features-and-usage-guide" title="Permanent link">&para;</a></h1>
+<h1 id="blender-520-lts-npr-port-features-and-usage-guide">Blender 5.2.0 LTS NPR Port - Features and Usage Guide<a class="headerlink" href="#blender-520-lts-npr-port-features-and-usage-guide" title="Permanent link">&para;</a></h1>
 <h2 id="project-introduction">Project Introduction<a class="headerlink" href="#project-introduction" title="Permanent link">&para;</a></h2>
-<p><code>Blender 5.1 NPR Port</code> is an NPR-focused <code>Blender</code> branch. In addition to integrating characteristic nodes from <code>Goo Engine</code> and the <code>4.4 NPR-prototype</code>, it adds a set of Eevee-oriented extension nodes, filter workflows, and interface improvements.</p>
-<p>Most features are <code>Eevee</code>-only and do not support <code>Cycles</code>.</p>
+<p><code>Blender 5.2.0 LTS NPR Port</code> is an NPR-focused <code>Blender</code> branch. In addition to integrating characteristic nodes from <code>Goo Engine</code> and the <code>4.4 NPR-prototype</code>, it adds a set of Eevee-oriented extension nodes, a Filter Graph workflow, and interface improvements.</p>
+<p>The release package includes <code>Cycles</code>, but the NPR extensions documented here are <code>Eevee</code>-only and cannot be used in <code>Cycles</code>.</p>
 <h2 id="documentation-scope">Documentation Scope<a class="headerlink" href="#documentation-scope" title="Permanent link">&para;</a></h2>
-<p>This document describes the NPR / Eevee extension features that have been added to the current <code>Blender 5.1 NPR Port</code> branch compared with official <code>Blender 5.1</code>, together with their basic usage.</p>
-<h2 id="512-highlights">5.1.2 Highlights<a class="headerlink" href="#512-highlights" title="Permanent link">&para;</a></h2>
+<p>This document describes the NPR / Eevee extension features that have been added to the current <code>Blender 5.2.0 LTS NPR Port</code> branch compared with official <code>Blender 5.2.0 LTS</code>, together with their basic usage.</p>
+<h2 id="520-lts-highlights">5.2.0 LTS Highlights<a class="headerlink" href="#520-lts-highlights" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Merged official <code>Blender 5.1.2</code> fixes and version updates</li>
-<li>Added <code>GLSL Script Expression</code> for quick custom scalar, vector, or color outputs from a single GLSL expression</li>
-<li>Added <code>label</code> support to <code>GLSL Function</code> <code>@glsl_meta v1</code>, allowing input, output, and <code>sampler2D</code> sockets to use custom UI display names</li>
-<li>Added shadow and probe attribution groups to the <code>Eevee Performance</code> view: <code>Shadow Contexts</code>, <code>Shadow Lights</code>, and <code>Probe Costs</code></li>
-<li>Added <code>Native Camera FX Outputs</code>, allowing Eevee native <code>Motion Blur</code> and <code>Depth of Field</code> to be applied to selected View Layer channels</li>
-<li>Restored the standalone <code>OKLab Color Ramp</code> node; regular <code>Color Ramp</code> keeps the existing RGB / HSV / HSL workflow</li>
-<li>Fixed <code>GLSL Function</code> <code>vec4</code> inputs losing the <code>w</code> component during refresh or compile paths</li>
-<li>Fixed <code>Scene Color</code> <code>Position</code> source offset sampling so it matches the other scene-buffer sources</li>
-<li>Fixed transparent / <code>Blended</code> Forward layers overwriting behind-surface AOVs when they do not explicitly write an AOV</li>
-<li>Updated the NPR Port splash screen</li>
+<li>Migrated to the official <code>Blender 5.2.0 LTS</code> code base and adapted the Eevee NPR render paths</li>
+<li>Replaced the legacy linear Filter Materials list with a scene-level <code>Filter Graph</code> supporting four execution stages and reusable Filter Pass materials</li>
+<li>Added a <code>Node / Code</code> editor to <code>GLSL Function</code>, with inline internal-Text editing and an atomic Apply / Discard workflow that protects the live material</li>
+<li>Added <code>mat2</code>, <code>mat3</code>, and <code>mat4</code> input, <code>out</code> parameter, and return-value support to <code>GLSL Function</code>, available in Eevee object materials, Filter materials, and <code>NPR Tree</code></li>
+<li>Retained NPR extensions such as <code>GLSL Script Expression</code>, <code>Native Camera FX Outputs</code>, <code>Eevee Performance</code> shadow / probe attribution, and <code>OKLab Color Ramp</code></li>
+<li>Fixed Eevee shader, transparent AOV, Scene Color offset-sampling, and node-interface compatibility regressions found during the 5.2 migration</li>
 </ul>
 <h2 id="node-overview">Node Overview<a class="headerlink" href="#node-overview" title="Permanent link">&para;</a></h2>
 <div align="center">
@@ -693,10 +711,10 @@
 <h3 id="1-scene-level-eevee-extensions">1. Scene-Level Eevee Extensions<a class="headerlink" href="#1-scene-level-eevee-extensions" title="Permanent link">&para;</a></h3>
 <ul>
 <li><a href="scene-extensions.html#1-render-textures"><code>Render Textures</code></a></li>
-<li><a href="scene-extensions.html#2-filter-materials"><code>Filter Materials</code></a></li>
+<li><a href="scene-extensions.html#2-filter-graph"><code>Filter Graph</code></a></li>
 <li><a href="scene-extensions.html#4-eevee-outline"><code>Eevee Outline</code></a></li>
 <li><a href="scene-extensions.html#3-native-camera-fx-outputs"><code>Native Camera FX Outputs</code></a></li>
-<li><a href="scene-extensions.html#2-filter-materials"><code>AOV Input / AOV Output</code> in the <code>Filter</code> domain</a></li>
+<li><a href="scene-extensions.html#2-filter-graph"><code>Scene Color / AOV Input / Filter Pass / Stage Output</code></a></li>
 </ul>
 <h3 id="2-shader-nodes">2. Shader Nodes<a class="headerlink" href="#2-shader-nodes" title="Permanent link">&para;</a></h3>
 <ul>
@@ -752,7 +770,7 @@
 </ul>
 <div class="admonition warning">
 <p class="admonition-title">Eevee Only</p>
-<p>All NPR Port features require the <strong>Eevee render engine</strong>. <code>Cycles</code> is not supported.</p>
+<p>The release package can run <code>Cycles</code>, but the NPR Port extensions documented here require the <strong>Eevee render engine</strong> and cannot be used in <code>Cycles</code>.</p>
 </div>
 
 
@@ -830,10 +848,6 @@
     
     
       <script src="assets/javascripts/bundle.f55a23d4.min.js"></script>
-      
-        <script src="javascripts/mathjax.js"></script>
-      
-        <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
       
     
   </body>

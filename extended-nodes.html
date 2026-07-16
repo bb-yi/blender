@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Blender 5.1 NPR Port 新增功能与使用说明">
+        <meta name="description" content="Blender 5.2 LTS NPR Port 功能、使用与版本说明">
       
       
         <meta name="author" content="NPR Port Team">
@@ -15,7 +15,7 @@
         <link rel="canonical" href="https://bb-yi.github.io/blender/extended-nodes.html">
       
       
-        <link rel="prev" href="index.html">
+        <link rel="prev" href="release.html">
       
       
         <link rel="next" href="npr-workflow.html">
@@ -26,7 +26,7 @@
     
     
       
-        <title>扩展着色器节点 - Blender 5.1 NPR Port 文档</title>
+        <title>扩展着色器节点 - Blender 5.2 LTS NPR Port 文档</title>
       
     
     
@@ -94,7 +94,7 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="页眉">
-    <a href="index.html" title="Blender 5.1 NPR Port 文档" class="md-header__button md-logo" aria-label="Blender 5.1 NPR Port 文档" data-md-component="logo">
+    <a href="index.html" title="Blender 5.2 LTS NPR Port 文档" class="md-header__button md-logo" aria-label="Blender 5.2 LTS NPR Port 文档" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -108,7 +108,7 @@
       <div class="md-header__ellipsis">
         <div class="md-header__topic">
           <span class="md-ellipsis">
-            Blender 5.1 NPR Port 文档
+            Blender 5.2 LTS NPR Port 文档
           </span>
         </div>
         <div class="md-header__topic" data-md-component="header-topic">
@@ -246,13 +246,13 @@
 
 <nav class="md-nav md-nav--primary" aria-label="导航栏" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="index.html" title="Blender 5.1 NPR Port 文档" class="md-nav__button md-logo" aria-label="Blender 5.1 NPR Port 文档" data-md-component="logo">
+    <a href="index.html" title="Blender 5.2 LTS NPR Port 文档" class="md-nav__button md-logo" aria-label="Blender 5.2 LTS NPR Port 文档" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
 
     </a>
-    Blender 5.1 NPR Port 文档
+    Blender 5.2 LTS NPR Port 文档
   </label>
   
   <ul class="md-nav__list" data-md-scrollfix>
@@ -270,6 +270,28 @@
   
   <span class="md-ellipsis">
     首页
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="release.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    下载与版本
     
   </span>
   
@@ -1070,6 +1092,15 @@
   <a href="#_56" class="md-nav__link">
     <span class="md-ellipsis">
       基本使用方法
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#node-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      Node / Code 编辑模式
     </span>
   </a>
   
@@ -2811,6 +2842,15 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#node-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      Node / Code 编辑模式
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#_57" class="md-nav__link">
     <span class="md-ellipsis">
       示例工程
@@ -3733,7 +3773,7 @@
 </div>
 
 <h4 id="_3">作用<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h4>
-<p>读取指定对象的世界空间变换和视口显示颜色，方便在 <code>Filter Materials</code> 中做基于对象状态的全屏滤镜控制。</p>
+<p>读取指定对象的世界空间变换和视口显示颜色，方便在 Filter Graph 的 <code>Filter Pass</code> 材质中做基于对象状态的全屏滤镜控制。</p>
 <h4 id="_4">节点设置<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h4>
 <ul>
 <li><code>Object</code></li>
@@ -4031,22 +4071,32 @@
 <h3 id="glsl-function">GLSL Function<a class="headerlink" href="#glsl-function" title="Permanent link">&para;</a></h3>
 <h4 id="_54">入口<a class="headerlink" href="#_54" title="Permanent link">&para;</a></h4>
 <p><code>Add &gt; Script &gt; GLSL Function</code></p>
-<p>在 <code>Eevee</code> 物体材质和 <code>NPR Tree</code> 中可用。</p>
+<p>在 <code>Eevee</code> 物体材质、<code>Filter</code> 材质和 <code>NPR Tree</code> 中可用；当前不在 <code>World</code> 域开放。</p>
 <div align="center">
     <img src="images/glsl_function_label.png" alt="GLSL Function label metadata" style="border-radius: 10px;">
     <br>
 </div>
 
 <h4 id="_55">作用<a class="headerlink" href="#_55" title="Permanent link">&para;</a></h4>
-<p>把一段用户编写的 <code>GLSL</code> 函数接入当前 <code>Eevee / NPR</code> 材质编译流程，适合做自定义数学节点、程序纹理、SDF、屏幕效果封装，以及移植一部分外部 GLSL / HLSL 逻辑。</p>
+<p>把一段用户编写的 <code>GLSL</code> 函数接入当前 Eevee 物体、Filter 或 NPR 材质编译流程，适合做自定义数学节点、程序纹理、SDF、屏幕效果封装，以及移植一部分外部 GLSL / HLSL 逻辑。</p>
 <h4 id="_56">基本使用方法<a class="headerlink" href="#_56" title="Permanent link">&para;</a></h4>
 <ol>
-<li>在 <code>Text Editor</code> 中准备一段 <code>GLSL</code> 函数源码，或者指定一个外部 <code>.glsl</code> 文件。</li>
 <li>添加 <code>GLSL Function</code> 节点。</li>
-<li>在节点面板中选择源码来源和目标函数。</li>
-<li>如果修改了源码，可点击节点上的刷新按钮重新解析。</li>
+<li>选择内部 <code>Text</code> 数据块，或者指定一个外部 <code>.glsl</code> 文件。</li>
 <li>在 <code>Function</code> 中显式选择真正要导出的函数名。</li>
+<li>使用节点顶部的 <code>Node / Code</code> 分段按钮切换普通节点控制和内联代码编辑。</li>
+<li>源码或函数选择发生变化后，点击刷新按钮解析、验证并更新节点接口。</li>
 </ol>
+<h4 id="node-code">Node / Code 编辑模式<a class="headerlink" href="#node-code" title="Permanent link">&para;</a></h4>
+<ul>
+<li><code>Node</code> 模式用于选择源码、函数和调整 socket；<code>Code</code> 模式可直接在节点中编辑内部 Text 的源码与目标函数名。</li>
+<li>在 <code>Code</code> 模式输入内容只会更新节点的 draft，不会立即覆盖 Text、替换现有 socket 或改变正在运行的材质。</li>
+<li>draft 处于 dirty 状态时，刷新按钮执行原子 Apply：候选源码必须先通过解析和 GPU 编译验证，成功后才会写回 Text 并刷新接口；失败时继续保留旧 Text、旧 socket 和旧材质结果。</li>
+<li>回退按钮执行 Discard，放弃尚未 Apply 的源码和函数名修改。</li>
+<li>多个 <code>GLSL Function</code> 节点共享同一个 Text 时，Apply 会先验证所有用户，再一起刷新。其他用户存在未应用 draft、Text 被外部修改或存在不可编辑的链接用户时，Apply 会拒绝并保留当前状态。</li>
+<li>外部 <code>.glsl</code> 在 <code>Code</code> 模式中只读；使用 <code>Make Internal</code> 可把当前外部源码复制为内部 Text 后再编辑。</li>
+<li>未应用的 draft 会随 <code>.blend</code> 文件保存并在重新打开后恢复。</li>
+</ul>
 <h4 id="_57">示例工程<a class="headerlink" href="#_57" title="Permanent link">&para;</a></h4>
 <ul>
 <li><code>GLSL Function</code> 示例 <code>.blend</code> 工程：
@@ -4055,9 +4105,9 @@
 </ul>
 <h4 id="_58">当前支持的函数边界类型<a class="headerlink" href="#_58" title="Permanent link">&para;</a></h4>
 <ul>
-<li>输入参数：<code>float</code>、<code>int</code>、<code>bool</code>、<code>vec2</code>、<code>vec3</code>、<code>vec4</code>、<code>sampler2D</code></li>
-<li>输出参数：<code>out float</code>、<code>out int</code>、<code>out bool</code>、<code>out vec2</code>、<code>out vec3</code>、<code>out vec4</code></li>
-<li>返回值：<code>void</code>、<code>float</code>、<code>int</code>、<code>bool</code>、<code>vec2</code>、<code>vec3</code>、<code>vec4</code></li>
+<li>输入参数：<code>float</code>、<code>int</code>、<code>bool</code>、<code>vec2</code>、<code>vec3</code>、<code>vec4</code>、<code>mat2</code>、<code>mat3</code>、<code>mat4</code>、<code>sampler2D</code></li>
+<li>输出参数：<code>out float</code>、<code>out int</code>、<code>out bool</code>、<code>out vec2</code>、<code>out vec3</code>、<code>out vec4</code>、<code>out mat2</code>、<code>out mat3</code>、<code>out mat4</code></li>
+<li>返回值：<code>void</code>、<code>float</code>、<code>int</code>、<code>bool</code>、<code>vec2</code>、<code>vec3</code>、<code>vec4</code>、<code>mat2</code>、<code>mat3</code>、<code>mat4</code></li>
 </ul>
 <h4 id="_59">重要说明<a class="headerlink" href="#_59" title="Permanent link">&para;</a></h4>
 <ul>
@@ -4082,7 +4132,9 @@
 <li><code>vec3 + subtype=color</code> 进入 GLSL 时按 <code>rgb</code> 使用，<code>alpha</code> 固定为 <code>1.0</code></li>
 <li><code>vec4 + subtype=color</code> 会保留完整 <code>rgba</code></li>
 <li>刷新或重新编译节点时，<code>vec4</code> 输入会保留 <code>w</code> 分量，不会退化成 <code>vec3 / rgb</code></li>
-<li>当前不支持把 <code>mat* / struct / array</code> 作为导出函数边界类型</li>
+<li><code>mat2 / mat3 / mat4</code> 边界会在节点上拆分为矩阵列 socket，并在生成的 GLSL 包装函数中重新组合</li>
+<li>矩阵输入的 Meta 目前只建议使用 <code>label</code>、<code>description</code> 和 <code>panel</code>；不要为矩阵写 <code>default / min / max / subtype</code></li>
+<li>当前不支持把 <code>struct / array</code> 作为导出函数边界类型</li>
 <li>导出函数边界当前已经支持 <code>int / bool</code>，适合直接写模式开关、枚举值、<code>lightgroup_id</code> 这类参数</li>
 <li>内置了几何 helper，可在函数体里直接读取：<code>glsl_position()</code>、<code>glsl_normal()</code>、<code>glsl_true_normal()</code>、<code>glsl_incoming()</code></li>
 <li>内置了环境光 helper：<code>glsl_ambient_lighting()</code></li>
@@ -4921,10 +4973,6 @@
     
     
       <script src="assets/javascripts/bundle.f55a23d4.min.js"></script>
-      
-        <script src="javascripts/mathjax.js"></script>
-      
-        <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
       
     
   </body>

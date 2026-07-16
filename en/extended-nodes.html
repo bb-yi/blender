@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Blender 5.1 NPR Port Features & Usage Guide">
+        <meta name="description" content="Blender 5.2 LTS NPR Port Features, Usage, and Release Guide">
       
       
         <meta name="author" content="NPR Port Team">
@@ -15,7 +15,7 @@
         <link rel="canonical" href="https://bb-yi.github.io/blender/en/extended-nodes.html">
       
       
-        <link rel="prev" href="index.html">
+        <link rel="prev" href="release.html">
       
       
         <link rel="next" href="npr-workflow.html">
@@ -26,7 +26,7 @@
     
     
       
-        <title>Extended Nodes - Blender 5.1 NPR Port Documentation</title>
+        <title>Extended Nodes - Blender 5.2 LTS NPR Port Documentation</title>
       
     
     
@@ -94,7 +94,7 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="index.html" title="Blender 5.1 NPR Port Documentation" class="md-header__button md-logo" aria-label="Blender 5.1 NPR Port Documentation" data-md-component="logo">
+    <a href="index.html" title="Blender 5.2 LTS NPR Port Documentation" class="md-header__button md-logo" aria-label="Blender 5.2 LTS NPR Port Documentation" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -108,7 +108,7 @@
       <div class="md-header__ellipsis">
         <div class="md-header__topic">
           <span class="md-ellipsis">
-            Blender 5.1 NPR Port Documentation
+            Blender 5.2 LTS NPR Port Documentation
           </span>
         </div>
         <div class="md-header__topic" data-md-component="header-topic">
@@ -246,13 +246,13 @@
 
 <nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="index.html" title="Blender 5.1 NPR Port Documentation" class="md-nav__button md-logo" aria-label="Blender 5.1 NPR Port Documentation" data-md-component="logo">
+    <a href="index.html" title="Blender 5.2 LTS NPR Port Documentation" class="md-nav__button md-logo" aria-label="Blender 5.2 LTS NPR Port Documentation" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
 
     </a>
-    Blender 5.1 NPR Port Documentation
+    Blender 5.2 LTS NPR Port Documentation
   </label>
   
   <ul class="md-nav__list" data-md-scrollfix>
@@ -270,6 +270,28 @@
   
   <span class="md-ellipsis">
     Home
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="release.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Download & Release
     
   </span>
   
@@ -1061,6 +1083,15 @@
   <a href="#basic-workflow_1" class="md-nav__link">
     <span class="md-ellipsis">
       Basic Workflow
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#node-code-editing" class="md-nav__link">
+    <span class="md-ellipsis">
+      Node / Code Editing
     </span>
   </a>
   
@@ -2793,6 +2824,15 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#node-code-editing" class="md-nav__link">
+    <span class="md-ellipsis">
+      Node / Code Editing
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#example-project" class="md-nav__link">
     <span class="md-ellipsis">
       Example Project
@@ -3715,7 +3755,7 @@
 </div>
 
 <h4 id="purpose">Purpose<a class="headerlink" href="#purpose" title="Permanent link">&para;</a></h4>
-<p>Reads the world-space transform and viewport display color of a chosen object, making it easier to drive full-screen filters from scene helpers or controller objects.</p>
+<p>Reads the world-space transform and viewport display color of a chosen object, making it easier to drive a Filter Graph <code>Filter Pass</code> from scene helpers or controller objects.</p>
 <h4 id="node-setting">Node Setting<a class="headerlink" href="#node-setting" title="Permanent link">&para;</a></h4>
 <ul>
 <li><code>Object</code></li>
@@ -4007,22 +4047,32 @@
 <h3 id="glsl-function">GLSL Function<a class="headerlink" href="#glsl-function" title="Permanent link">&para;</a></h3>
 <h4 id="entry_13">Entry<a class="headerlink" href="#entry_13" title="Permanent link">&para;</a></h4>
 <p><code>Add &gt; Script &gt; GLSL Function</code></p>
-<p>Available in both <code>Eevee</code> object materials and <code>NPR Tree</code>.</p>
+<p>Available in <code>Eevee</code> object materials, <code>Filter</code> materials, and <code>NPR Tree</code>. It is not currently exposed in the <code>World</code> domain.</p>
 <div align="center">
     <img src="images/glsl_function_label.png" alt="GLSL Function label metadata" style="border-radius: 10px;">
     <br>
 </div>
 
 <h4 id="purpose_11">Purpose<a class="headerlink" href="#purpose_11" title="Permanent link">&para;</a></h4>
-<p>Injects a user-authored GLSL function into the current <code>Eevee / NPR</code> material compile path. This is useful for custom math nodes, procedural textures, SDF logic, screen-space effects, and porting parts of external GLSL / HLSL code.</p>
+<p>Injects a user-authored GLSL function into an Eevee object, Filter, or NPR material compile path. This is useful for custom math nodes, procedural textures, SDF logic, screen-space effects, and porting parts of external GLSL / HLSL code.</p>
 <h4 id="basic-workflow_1">Basic Workflow<a class="headerlink" href="#basic-workflow_1" title="Permanent link">&para;</a></h4>
 <ol>
-<li>Prepare a GLSL function in the <code>Text Editor</code> or point the node to an external <code>.glsl</code> file.</li>
 <li>Add a <code>GLSL Function</code> node.</li>
-<li>Choose the source and the target function in the node panel.</li>
-<li>Refresh the node after editing the source.</li>
+<li>Select an internal <code>Text</code> data-block or point the node to an external <code>.glsl</code> file.</li>
 <li>Explicitly select the exported function name in <code>Function</code>.</li>
+<li>Use the <code>Node / Code</code> segmented control at the top of the node to switch between regular controls and inline source editing.</li>
+<li>After changing the source or function selection, use the refresh button to parse, validate, and update the node interface.</li>
 </ol>
+<h4 id="node-code-editing">Node / Code Editing<a class="headerlink" href="#node-code-editing" title="Permanent link">&para;</a></h4>
+<ul>
+<li><code>Node</code> mode is used to choose the source and function and to adjust sockets. <code>Code</code> mode edits an internal Text source and target function name directly inside the node.</li>
+<li>Typing in <code>Code</code> mode updates a node draft only. It does not immediately overwrite the Text, replace live sockets, or change the running material.</li>
+<li>When the draft is dirty, the refresh button performs an atomic Apply. The candidate must pass parsing and GPU compilation before it is written to the Text and its interfaces are refreshed; a failure keeps the previous Text, sockets, and material result intact.</li>
+<li>The revert button performs Discard, removing unapplied source and function-name changes.</li>
+<li>If several <code>GLSL Function</code> nodes share one Text, Apply validates every user before refreshing them together. It is rejected without changing the live state when another user has a draft, the Text changed externally, or a linked user cannot be edited.</li>
+<li>External <code>.glsl</code> sources are read-only in <code>Code</code> mode. Use <code>Make Internal</code> to copy the current external source into an internal Text before editing.</li>
+<li>Unapplied drafts are stored in the <code>.blend</code> file and restored when it is reopened.</li>
+</ul>
 <h4 id="example-project">Example Project<a class="headerlink" href="#example-project" title="Permanent link">&para;</a></h4>
 <ul>
 <li>GLSL Function example <code>.blend</code> project:
@@ -4031,9 +4081,9 @@
 </ul>
 <h4 id="supported-boundary-types">Supported Boundary Types<a class="headerlink" href="#supported-boundary-types" title="Permanent link">&para;</a></h4>
 <ul>
-<li>Input parameters: <code>float</code>, <code>int</code>, <code>bool</code>, <code>vec2</code>, <code>vec3</code>, <code>vec4</code>, <code>sampler2D</code></li>
-<li>Output parameters: <code>out float</code>, <code>out int</code>, <code>out bool</code>, <code>out vec2</code>, <code>out vec3</code>, <code>out vec4</code></li>
-<li>Return values: <code>void</code>, <code>float</code>, <code>int</code>, <code>bool</code>, <code>vec2</code>, <code>vec3</code>, <code>vec4</code></li>
+<li>Input parameters: <code>float</code>, <code>int</code>, <code>bool</code>, <code>vec2</code>, <code>vec3</code>, <code>vec4</code>, <code>mat2</code>, <code>mat3</code>, <code>mat4</code>, <code>sampler2D</code></li>
+<li>Output parameters: <code>out float</code>, <code>out int</code>, <code>out bool</code>, <code>out vec2</code>, <code>out vec3</code>, <code>out vec4</code>, <code>out mat2</code>, <code>out mat3</code>, <code>out mat4</code></li>
+<li>Return values: <code>void</code>, <code>float</code>, <code>int</code>, <code>bool</code>, <code>vec2</code>, <code>vec3</code>, <code>vec4</code>, <code>mat2</code>, <code>mat3</code>, <code>mat4</code></li>
 </ul>
 <h4 id="important-notes">Important Notes<a class="headerlink" href="#important-notes" title="Permanent link">&para;</a></h4>
 <ul>
@@ -4058,7 +4108,9 @@
 <li><code>vec3 + subtype=color</code> enters GLSL as <code>rgb</code> with <code>alpha = 1.0</code></li>
 <li><code>vec4 + subtype=color</code> keeps full <code>rgba</code></li>
 <li>Refreshing or recompiling the node preserves the <code>w</code> component of <code>vec4</code> inputs instead of degrading them to <code>vec3 / rgb</code></li>
-<li>Exported boundary types do not currently support <code>mat*</code>, <code>struct</code>, or <code>array</code></li>
+<li><code>mat2 / mat3 / mat4</code> boundaries are split into matrix-column sockets in the node and reassembled in the generated GLSL wrapper</li>
+<li>For matrix inputs, limit Meta to <code>label</code>, <code>description</code>, and <code>panel</code>; do not use <code>default / min / max / subtype</code> on matrices</li>
+<li>Exported boundary types do not currently support <code>struct</code> or <code>array</code></li>
 <li><code>int / bool</code> boundaries are useful for mode switches, enums, and <code>lightgroup_id</code> style parameters</li>
 <li>Built-in geometry helpers are available in the function body: <code>glsl_position()</code>, <code>glsl_normal()</code>, <code>glsl_true_normal()</code>, <code>glsl_incoming()</code></li>
 <li>Built-in ambient-light helper: <code>glsl_ambient_lighting()</code></li>
@@ -4889,10 +4941,6 @@
     
     
       <script src="assets/javascripts/bundle.f55a23d4.min.js"></script>
-      
-        <script src="javascripts/mathjax.js"></script>
-      
-        <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
       
     
   </body>

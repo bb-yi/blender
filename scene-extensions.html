@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Blender 5.1 NPR Port 新增功能与使用说明">
+        <meta name="description" content="Blender 5.2 LTS NPR Port 功能、使用与版本说明">
       
       
         <meta name="author" content="NPR Port Team">
@@ -24,7 +24,7 @@
     
     
       
-        <title>Scene 级 Eevee 扩展 - Blender 5.1 NPR Port 文档</title>
+        <title>Scene 级 Eevee 扩展 - Blender 5.2 LTS NPR Port 文档</title>
       
     
     
@@ -92,7 +92,7 @@
 
 <header class="md-header md-header--shadow" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="页眉">
-    <a href="index.html" title="Blender 5.1 NPR Port 文档" class="md-header__button md-logo" aria-label="Blender 5.1 NPR Port 文档" data-md-component="logo">
+    <a href="index.html" title="Blender 5.2 LTS NPR Port 文档" class="md-header__button md-logo" aria-label="Blender 5.2 LTS NPR Port 文档" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -106,7 +106,7 @@
       <div class="md-header__ellipsis">
         <div class="md-header__topic">
           <span class="md-ellipsis">
-            Blender 5.1 NPR Port 文档
+            Blender 5.2 LTS NPR Port 文档
           </span>
         </div>
         <div class="md-header__topic" data-md-component="header-topic">
@@ -244,13 +244,13 @@
 
 <nav class="md-nav md-nav--primary" aria-label="导航栏" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="index.html" title="Blender 5.1 NPR Port 文档" class="md-nav__button md-logo" aria-label="Blender 5.1 NPR Port 文档" data-md-component="logo">
+    <a href="index.html" title="Blender 5.2 LTS NPR Port 文档" class="md-nav__button md-logo" aria-label="Blender 5.2 LTS NPR Port 文档" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
 
     </a>
-    Blender 5.1 NPR Port 文档
+    Blender 5.2 LTS NPR Port 文档
   </label>
   
   <ul class="md-nav__list" data-md-scrollfix>
@@ -268,6 +268,28 @@
   
   <span class="md-ellipsis">
     首页
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="release.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    下载与版本
     
   </span>
   
@@ -451,13 +473,13 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-filter-materials" class="md-nav__link">
+  <a href="#2-filter-graph" class="md-nav__link">
     <span class="md-ellipsis">
-      2. Filter Materials
+      2. Filter Graph
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="2. Filter Materials">
+    <nav class="md-nav" aria-label="2. Filter Graph">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -472,7 +494,25 @@
           <li class="md-nav__item">
   <a href="#_6" class="md-nav__link">
     <span class="md-ellipsis">
-      面板入口
+      面板与编辑器入口
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#filter-graph" class="md-nav__link">
+    <span class="md-ellipsis">
+      Filter Graph 节点
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#filter" class="md-nav__link">
+    <span class="md-ellipsis">
+      Filter 材质内部结构
     </span>
   </a>
   
@@ -490,7 +530,16 @@
           <li class="md-nav__item">
   <a href="#_8" class="md-nav__link">
     <span class="md-ellipsis">
-      重要说明
+      执行阶段
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      数据块与旧文件迁移
     </span>
   </a>
   
@@ -512,7 +561,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#_9" class="md-nav__link">
+  <a href="#_10" class="md-nav__link">
     <span class="md-ellipsis">
       功能说明
     </span>
@@ -521,7 +570,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_10" class="md-nav__link">
+  <a href="#_11" class="md-nav__link">
     <span class="md-ellipsis">
       面板入口
     </span>
@@ -530,7 +579,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_11" class="md-nav__link">
+  <a href="#_12" class="md-nav__link">
     <span class="md-ellipsis">
       可配置内容
     </span>
@@ -548,7 +597,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_12" class="md-nav__link">
+  <a href="#_13" class="md-nav__link">
     <span class="md-ellipsis">
       基本使用方法
     </span>
@@ -557,7 +606,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_13" class="md-nav__link">
+  <a href="#_14" class="md-nav__link">
     <span class="md-ellipsis">
       重要说明
     </span>
@@ -581,7 +630,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#_14" class="md-nav__link">
+  <a href="#_15" class="md-nav__link">
     <span class="md-ellipsis">
       功能说明
     </span>
@@ -590,7 +639,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_15" class="md-nav__link">
+  <a href="#_16" class="md-nav__link">
     <span class="md-ellipsis">
       面板入口
     </span>
@@ -599,7 +648,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_16" class="md-nav__link">
+  <a href="#_17" class="md-nav__link">
     <span class="md-ellipsis">
       行为说明
     </span>
@@ -608,7 +657,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_17" class="md-nav__link">
+  <a href="#_18" class="md-nav__link">
     <span class="md-ellipsis">
       建议补图
     </span>
@@ -707,13 +756,13 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#2-filter-materials" class="md-nav__link">
+  <a href="#2-filter-graph" class="md-nav__link">
     <span class="md-ellipsis">
-      2. Filter Materials
+      2. Filter Graph
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="2. Filter Materials">
+    <nav class="md-nav" aria-label="2. Filter Graph">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -728,7 +777,25 @@
           <li class="md-nav__item">
   <a href="#_6" class="md-nav__link">
     <span class="md-ellipsis">
-      面板入口
+      面板与编辑器入口
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#filter-graph" class="md-nav__link">
+    <span class="md-ellipsis">
+      Filter Graph 节点
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#filter" class="md-nav__link">
+    <span class="md-ellipsis">
+      Filter 材质内部结构
     </span>
   </a>
   
@@ -746,7 +813,16 @@
           <li class="md-nav__item">
   <a href="#_8" class="md-nav__link">
     <span class="md-ellipsis">
-      重要说明
+      执行阶段
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      数据块与旧文件迁移
     </span>
   </a>
   
@@ -768,7 +844,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#_9" class="md-nav__link">
+  <a href="#_10" class="md-nav__link">
     <span class="md-ellipsis">
       功能说明
     </span>
@@ -777,7 +853,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_10" class="md-nav__link">
+  <a href="#_11" class="md-nav__link">
     <span class="md-ellipsis">
       面板入口
     </span>
@@ -786,7 +862,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_11" class="md-nav__link">
+  <a href="#_12" class="md-nav__link">
     <span class="md-ellipsis">
       可配置内容
     </span>
@@ -804,7 +880,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_12" class="md-nav__link">
+  <a href="#_13" class="md-nav__link">
     <span class="md-ellipsis">
       基本使用方法
     </span>
@@ -813,7 +889,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_13" class="md-nav__link">
+  <a href="#_14" class="md-nav__link">
     <span class="md-ellipsis">
       重要说明
     </span>
@@ -837,7 +913,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#_14" class="md-nav__link">
+  <a href="#_15" class="md-nav__link">
     <span class="md-ellipsis">
       功能说明
     </span>
@@ -846,7 +922,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_15" class="md-nav__link">
+  <a href="#_16" class="md-nav__link">
     <span class="md-ellipsis">
       面板入口
     </span>
@@ -855,7 +931,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_16" class="md-nav__link">
+  <a href="#_17" class="md-nav__link">
     <span class="md-ellipsis">
       行为说明
     </span>
@@ -864,7 +940,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_17" class="md-nav__link">
+  <a href="#_18" class="md-nav__link">
     <span class="md-ellipsis">
       建议补图
     </span>
@@ -935,51 +1011,56 @@
 <li>在节点面板中选择对应的 <code>Render Texture</code> 条目。</li>
 <li>使用节点输出的 <code>Color</code> / <code>Alpha</code> 参与后续材质计算。</li>
 </ol>
-<h2 id="2-filter-materials">2. Filter Materials<a class="headerlink" href="#2-filter-materials" title="Permanent link">&para;</a></h2>
+<h2 id="2-filter-graph">2. Filter Graph<a class="headerlink" href="#2-filter-graph" title="Permanent link">&para;</a></h2>
 <h4 id="_5">功能说明<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h4>
-<p>它是一套场景级的 Eevee 全屏滤镜栈。每个条目都是一个 <code>Filter</code> 域材质，按列表顺序依次对当前帧进行处理。</p>
-<h4 id="_6">面板入口<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h4>
-<p><code>Scene Properties &gt; Filter Materials</code></p>
-<div align="center">
-  <img src="images/SnowShot_2026-03-28_04-41-53.png" alt="Filter Materials" style="border-radius: 10px;">
-  <br>
-</div>
-
-<p>节点树入口：着色器节点编辑器 &gt; 着色器类型 &gt; <code>Filter</code></p>
-<div align="center">
-  <img src="images/SnowShot_2026-03-28_04-42-42.png" alt="Filter Shader Type" style="border-radius: 10px;">
-  <br>
-</div>
-
+<p><code>Filter Graph</code> 是场景级的 Eevee 全屏滤镜执行图，用节点连接代替旧版按列表顺序执行的线性 Filter Materials。场景通过 <code>Scene.eevee.filter_graph</code> 指定唯一的权威图数据块，图中的图像句柄可以连接到多个 Filter Pass，并在不同渲染阶段输出结果。</p>
+<h4 id="_6">面板与编辑器入口<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h4>
+<ul>
+<li>在 <code>Scene Properties &gt; Filter Graph</code> 新建或指定场景使用的 Filter Graph。</li>
+<li>把任意区域的编辑器类型切换为 <code>Eevee Filter Graph</code>，即可编辑当前场景指定的图。</li>
+<li><code>Filter Pass</code> 使用的材质仍是 <code>Filter</code> 域材质；进入该材质后，可在 Shader Editor 中编辑内部节点树。</li>
+</ul>
+<h4 id="filter-graph">Filter Graph 节点<a class="headerlink" href="#filter-graph" title="Permanent link">&para;</a></h4>
+<ul>
+<li><code>Scene Color</code>：提供当前阶段的 <code>Color Image</code>、<code>Depth Image</code>、<code>Normal Image</code> 和 <code>Position Image</code> 图像句柄。</li>
+<li><code>AOV Input</code>：按名称读取 View Layer AOV，提供 <code>Color</code> 和 <code>Value</code> 图像句柄。</li>
+<li><code>Filter Pass</code>：执行一个 <code>Filter</code> 域材质。输入接口同步自材质的 <code>Pass Input</code>，输出接口同步自材质的 <code>Filter Output</code>。</li>
+<li><code>Stage Output</code>：把连接的图像写回所选渲染阶段。每个阶段只能有一个 active <code>Stage Output</code>。</li>
+</ul>
+<h4 id="filter">Filter 材质内部结构<a class="headerlink" href="#filter" title="Permanent link">&para;</a></h4>
+<p>新建 Filter Pass 材质时会生成这条默认链路：</p>
+<p><code>Pass Input -&gt; Image Sample -&gt; Filter Output</code></p>
+<p><code>Pass Input</code> 接收 Filter Graph 传入的图像句柄，<code>Image Sample</code> 在当前像素或偏移位置采样，<code>Filter Output</code> 把结果返回给图中的 <code>Filter Pass</code>。可按需要在 <code>Pass Input</code> 与 <code>Filter Output</code> 上维护动态接口；单个 Filter Pass 最多支持 <code>32</code> 个输入和 <code>32</code> 个输出。</p>
 <h4 id="_7">基本使用方法<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h4>
 <ol>
-<li>打开 <code>Scene Properties &gt; Filter Materials</code>。</li>
-<li>新建一个条目，或者直接点 <code>New Filter Material</code>。</li>
-<li>选中的材质必须是 <code>Filter</code> 域材质。</li>
-<li>打开 Shader Editor，把顶部 <code>Shader Type</code> 切换到 <code>Filter</code>。</li>
-<li>在滤镜材质里使用 <code>Scene Color</code> 读取场景数据，也可以配合 <code>Filter Object Info</code> 或 <code>Filter Mask</code> 做对象驱动控制。</li>
-<li>如果需要读取已有自定义通道，可使用 <code>AOV Input</code>。</li>
-<li>如果需要把滤镜中间结果或最终结果额外写入自定义通道，可使用 <code>AOV Output</code>。</li>
-<li>通过 <code>Execution Stage</code> 选择滤镜执行位置。</li>
+<li>打开 <code>Scene Properties &gt; Filter Graph</code>，新建或指定一个图。</li>
+<li>切换到 <code>Eevee Filter Graph</code> 编辑器。</li>
+<li>用 <code>Scene Color</code> 或 <code>AOV Input</code> 提供源图像，并连接到 <code>Filter Pass</code>。</li>
+<li>在 <code>Filter Pass</code> 上新建或指定 Filter 材质，再进入材质内部编辑实际滤镜逻辑。</li>
+<li>把 <code>Filter Pass</code> 的结果连接到 <code>Stage Output</code>，选择执行阶段并确保该输出处于 active 状态。</li>
+<li>按性能和效果需要，为每个 <code>Filter Pass</code> 选择 <code>Full</code>、<code>1/2</code>、<code>1/4</code>、<code>1/8</code> 或 <code>1/16</code> 执行分辨率。</li>
 </ol>
-<h4 id="_8">重要说明<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h4>
+<h4 id="_8">执行阶段<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h4>
 <ul>
-<li><code>Scene Color</code> 节点的默认采样坐标为 <code>Texture Coordinate</code> 节点的 <code>Window</code> 输出</li>
-<li><code>Scene Color</code> 的 <code>Color / Depth / Normal / Position</code> 源使用一致的屏幕 UV 采样语义；连接 <code>Vector</code> 做偏移采样时，<code>Position</code> 会重建偏移像素对应的世界坐标</li>
-<li>支持 <code>AOV Input</code></li>
-<li>支持 <code>AOV Output</code>，可以先写出命名 AOV，再继续把结果送到 <code>Filter Output</code></li>
-<li><code>Execution Stage</code> 目前提供三个位置：</li>
 <li><code>Before Volume Fog</code></li>
+<li><code>Before PostFX</code></li>
 <li><code>Before Depth of Field</code></li>
 <li><code>Before Composite</code></li>
 </ul>
+<p>同一阶段即使放置多个 <code>Stage Output</code>，也只会使用其中一个 active 输出；其他阶段可以各自维护独立的 active 输出链路。</p>
+<h4 id="_9">数据块与旧文件迁移<a class="headerlink" href="#_9" title="Permanent link">&para;</a></h4>
+<ul>
+<li>从面板新建的 Filter Graph 和从 <code>Filter Pass</code> 新建的 Filter 材质都会自动启用 fake user；暂时从场景或节点解除关联不会让数据块在保存时立即丢失。</li>
+<li>打开使用 5.1 线性 Filter Materials 列表的旧文件时，条目会自动迁移为等价的 Filter Graph，并按原执行阶段和顺序生成连接。</li>
+<li>Filter 材质中仍可使用 <code>Filter Object Info</code>、<code>Filter Mask</code>、<code>GLSL Function</code> 等 Filter 域节点；场景缓冲和 AOV 的图级路由应优先在 Filter Graph 中完成。</li>
+</ul>
 <h2 id="3-native-camera-fx-outputs">3. Native Camera FX Outputs<a class="headerlink" href="#3-native-camera-fx-outputs" title="Permanent link">&para;</a></h2>
-<h4 id="_9">功能说明<a class="headerlink" href="#_9" title="Permanent link">&para;</a></h4>
+<h4 id="_10">功能说明<a class="headerlink" href="#_10" title="Permanent link">&para;</a></h4>
 <p><code>Native Camera FX Outputs</code> 是 View Layer 级的 Eevee 原生后期输出系统。它可以把指定的渲染通道抽出后，单独套用 Eevee 的 <code>Motion Blur</code> 和 / 或 <code>Depth of Field</code>，再以新的 Render Pass 输出。</p>
 <p>这适合为描边、AOV、深度、法线、光照分量等通道生成带相机运动模糊或景深的版本，用于合成器、后续滤镜或外部后期流程。</p>
-<h4 id="_10">面板入口<a class="headerlink" href="#_10" title="Permanent link">&para;</a></h4>
+<h4 id="_11">面板入口<a class="headerlink" href="#_11" title="Permanent link">&para;</a></h4>
 <p><code>View Layer Properties &gt; Passes &gt; Native Camera FX Outputs</code></p>
-<h4 id="_11">可配置内容<a class="headerlink" href="#_11" title="Permanent link">&para;</a></h4>
+<h4 id="_12">可配置内容<a class="headerlink" href="#_12" title="Permanent link">&para;</a></h4>
 <p>每个输出条目支持：</p>
 <ul>
 <li><code>Name</code>：生成的 Render Pass 名称</li>
@@ -1008,7 +1089,7 @@
 <li><code>Shader AOV</code></li>
 <li><code>Outline</code></li>
 </ul>
-<h4 id="_12">基本使用方法<a class="headerlink" href="#_12" title="Permanent link">&para;</a></h4>
+<h4 id="_13">基本使用方法<a class="headerlink" href="#_13" title="Permanent link">&para;</a></h4>
 <ol>
 <li>切换到 <code>Eevee</code> 渲染引擎。</li>
 <li>打开 <code>View Layer Properties &gt; Passes &gt; Native Camera FX Outputs</code>。</li>
@@ -1017,7 +1098,7 @@
 <li>按需要启用 <code>Motion Blur</code>、<code>Depth of Field</code>，或同时启用两者。</li>
 <li>在合成器或后续流程中读取同名 Render Pass。</li>
 </ol>
-<h4 id="_13">重要说明<a class="headerlink" href="#_13" title="Permanent link">&para;</a></h4>
+<h4 id="_14">重要说明<a class="headerlink" href="#_14" title="Permanent link">&para;</a></h4>
 <ul>
 <li><code>Motion Blur</code> 仍需要场景 / View Layer 中启用 Eevee 运动模糊</li>
 <li><code>Depth of Field</code> 仍使用当前相机的景深设置</li>
@@ -1026,13 +1107,13 @@
 <li>描边通道可作为 <code>Outline</code> 来源输出，并可单独获得带景深或运动模糊的版本</li>
 </ul>
 <h2 id="4-eevee-outline">4. Eevee Outline<a class="headerlink" href="#4-eevee-outline" title="Permanent link">&para;</a></h2>
-<h4 id="_14">功能说明<a class="headerlink" href="#_14" title="Permanent link">&para;</a></h4>
+<h4 id="_15">功能说明<a class="headerlink" href="#_15" title="Permanent link">&para;</a></h4>
 <p><code>Eevee Outline</code> 是场景级描边总开关，用于控制当前 NPR Port 内置的屏幕空间描边系统。</p>
-<h4 id="_15">面板入口<a class="headerlink" href="#_15" title="Permanent link">&para;</a></h4>
+<h4 id="_16">面板入口<a class="headerlink" href="#_16" title="Permanent link">&para;</a></h4>
 <p><code>Render Properties &gt; Outline</code></p>
 <p>描边 Render Pass 入口：</p>
 <p><code>View Layer Properties &gt; Passes &gt; Data &gt; Outline</code></p>
-<h4 id="_16">行为说明<a class="headerlink" href="#_16" title="Permanent link">&para;</a></h4>
+<h4 id="_17">行为说明<a class="headerlink" href="#_17" title="Permanent link">&para;</a></h4>
 <ul>
 <li>默认开启，保持 <code>Outline Control</code> 节点和 <code>Outline</code> Render Pass 的正常行为</li>
 <li>关闭后，<code>Outline Control</code> 节点不会影响 Combined 渲染结果</li>
@@ -1045,7 +1126,7 @@
 <li>渲染方式为 <code>Blended</code> 的前景材质会参与后方描边遮挡：完全不透明时遮挡后方描边，完全透明时不影响后方描边</li>
 <li>半透明 <code>Blended</code> 前景会按材质透射率衰减后方描边强度，不会用前景材质颜色染色后方描边</li>
 </ul>
-<h4 id="_17">建议补图<a class="headerlink" href="#_17" title="Permanent link">&para;</a></h4>
+<h4 id="_18">建议补图<a class="headerlink" href="#_18" title="Permanent link">&para;</a></h4>
 <ul>
 <li><code>images/placeholder_eevee_outline.png</code></li>
 <li>建议内容：<code>Render Properties &gt; Outline</code> 面板</li>
@@ -1128,10 +1209,6 @@
     
     
       <script src="assets/javascripts/bundle.f55a23d4.min.js"></script>
-      
-        <script src="javascripts/mathjax.js"></script>
-      
-        <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
       
     
   </body>
