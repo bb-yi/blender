@@ -555,6 +555,8 @@
 
 #### 修复与改进
 
+- 恢复 Eevee Outline Render Pass 的 `ViewLayer.use_pass_outline` RNA 注册，确保 Python API 与 View Layer 通道配置可用。
+
 # TODO
 
 - [ ] 提高阴影分辨率
