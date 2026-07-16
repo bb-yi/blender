@@ -181,6 +181,12 @@
 
 `Light Data > Light > Lightgroup ID`
 
+<div align="center">
+	<img src="images/eevee_lightgroup_id.png" alt="Eevee 灯光 Lightgroup ID" style="border-radius: 10px;">
+	<br>
+	<sub>灯光数据面板中的 Lightgroup ID</sub>
+</div>
+
 ### 行为说明
 
 - 默认值为 `0`

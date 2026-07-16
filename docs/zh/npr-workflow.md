@@ -146,6 +146,12 @@
 - `Shading Models`
 - `Surface Curvature`
 
+<div align="center">
+	<img src="images/npr_node_group_assets.png" alt="内置 NPR 节点组资产" style="border-radius: 10px;">
+	<br>
+	<sub>迁移到 Blender 5.2.0 LTS 的主要 NPR 节点组</sub>
+</div>
+
 ### 资产说明
 
 - 这些节点组已经按 Blender 5.2.0 LTS 的格式迁移

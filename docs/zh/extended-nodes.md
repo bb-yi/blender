@@ -220,14 +220,26 @@
 
 在 `Eevee` 物体材质和 `NPR Tree` 中可用。
 
+<div align="center">
+	<img src="images/outline_control_5_2.png" alt="Blender 5.2 Outline Control 节点" style="border-radius: 10px;">
+	<br>
+</div>
+
 #### 输入
 
 - `Line Color`
 - `Line Alpha`
 - `Line Width`
 - `Depth Threshold`
+- `Depth Threshold Range`
+- `Depth Edge Width`
 - `Normal Threshold`
+- `Normal Threshold Range`
+- `Normal Edge Width`
 - `Outline ID`
+- `ID Edge`
+- `ID Edge Width`
+- `Freestyle Edge`
 
 #### 作用
 
@@ -237,9 +249,10 @@
 
 1. 在需要产生描边的材质里添加 `Outline Control` 节点。
 2. 通过 `Line Color`、`Line Alpha` 和 `Line Width` 控制描边颜色、透明度和宽度。
-3. 通过 `Depth Threshold` 与 `Normal Threshold` 调整轮廓边和内部折线的检测敏感度。
-4. 在 `Render Properties > Outline` 中保持全局描边开关开启。
-5. 如果需要单独输出描边结果，在 `View Layer Properties > Passes > Data` 中开启 `Outline` Render Pass。
+3. 在 `Depth` 与 `Normal` 面板中分别调整阈值、过渡范围和边宽倍率。
+4. 在 `ID` 面板中控制 ID 边界及其宽度，并按需启用 `Freestyle Edge`。
+5. 在 `Render Properties > Outline` 中保持全局描边开关开启。
+6. 如果需要单独输出描边结果，在 `View Layer Properties > Passes > Data` 中开启 `Outline` Render Pass。
 
 #### 说明
 
@@ -249,12 +262,10 @@
 - `Outline ID = 0` 时，系统会按对象资源 ID 自动分配描边分组
 - `Outline ID > 0` 时，可以手动把多个对象或多个材质表面并到同一个描边分组里
 - `Depth Threshold` 更偏向控制深度断层轮廓，`Normal Threshold` 更偏向控制法线夹角造成的内部边
+- `Threshold Range = 0` 时阈值为硬切换；增大范围可让边宽在越过阈值后平滑增长
+- `Depth / Normal / ID Edge Width` 分别控制三类边的宽度倍率
+- `ID Edge` 控制不同 Outline ID 之间的边界，`Freestyle Edge` 控制标记边是否参与描边
 - 位于 Holdout 集合中的物体不会继续写出 `Outline Control` 参数，也不会贡献 Freestyle / marked-edge 描边种子
-
-#### 建议补图
-
-- `images/placeholder_outline_control.png`
-  - 建议内容：`Outline Control` 节点面板和一组典型参数
 
 ### Render Texture
 
@@ -335,9 +346,14 @@
 
 `Add > Input > Light Probe Color`
 
+<div align="center">
+	<img src="images/light_probe_color_5_2.png" alt="Light Probe Color 节点" style="border-radius: 10px;">
+	<br>
+</div>
+
 #### 输入输出
 
-- 输入：`Direction`
+- 输入：`Direction`、`Roughness`
 - 输出：`Reflection`、`Irradiance`、`Combined`
 
 #### 作用
@@ -349,6 +365,7 @@
 - `Reflection` 更接近反射探针 / 世界环境方向采样结果
 - `Irradiance` 更接近体积光照探针或环境谐波的漫反射光照结果
 - `Combined` 为 `Reflection + Irradiance`
+- `Roughness` 控制反射探针的模糊程度，`0` 接近镜面，`1` 为最粗糙
 
 ### World To Tangent
 
@@ -400,6 +417,12 @@
 4. 使用节点顶部的 `Node / Code` 分段按钮切换普通节点控制和内联代码编辑。
 5. 源码或函数选择发生变化后，点击刷新按钮解析、验证并更新节点接口。
 
+<div align="center">
+	<img src="images/glsl_function_node_mode.png" alt="GLSL Function Node 模式" style="border-radius: 10px;">
+	<br>
+	<sub>Node 模式中的源码、函数和参数接口</sub>
+</div>
+
 #### Node / Code 编辑模式
 
 - `Node` 模式用于选择源码、函数和调整 socket；`Code` 模式可直接在节点中编辑内部 Text 的源码与目标函数名。
@@ -409,6 +432,12 @@
 - 多个 `GLSL Function` 节点共享同一个 Text 时，Apply 会先验证所有用户，再一起刷新。其他用户存在未应用 draft、Text 被外部修改或存在不可编辑的链接用户时，Apply 会拒绝并保留当前状态。
 - 外部 `.glsl` 在 `Code` 模式中只读；使用 `Make Internal` 可把当前外部源码复制为内部 Text 后再编辑。
 - 未应用的 draft 会随 `.blend` 文件保存并在重新打开后恢复。
+
+<div align="center">
+	<img src="images/glsl_function_make_internal.png" alt="GLSL Function 外部源码的 Code 模式" style="border-radius: 10px;">
+	<br>
+	<sub>外部源码在 Code 模式中只读，可通过 Make Internal 转为内部 Text</sub>
+</div>
 
 #### 示例工程
 
@@ -1122,7 +1151,7 @@ mix(base_color, tint_color, clamp(mask, 0.0, 1.0))
 `Add > Input > Light Info`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_05-13-13.png" alt="Light Info" style="border-radius: 10px;">
+	<img src="images/light_info_5_2.png" alt="Blender 5.2 Light Info" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -1135,6 +1164,9 @@ mix(base_color, tint_color, clamp(mask, 0.0, 1.0))
 - `Color`
 - `Power`
 - `Type`
+- `Visible`
+
+`Visible` 在所选灯光对象未隐藏时输出 `1`，隐藏时输出 `0`。
 
 其中 `Type` 是整数插槽，含义为：
 

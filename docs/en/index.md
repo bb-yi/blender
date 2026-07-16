@@ -34,9 +34,9 @@ This document describes the NPR / Eevee extension features that have been added 
 </div>
 
 <div align="center">
-    <img src="images/SnowShot_2026-03-28_04-30-16.png" alt="Filter Nodes" style="border-radius: 10px;">
+    <img src="images/filter_graph_editor_overview.png" alt="Eevee Filter Graph" style="border-radius: 10px;">
     <br>
-    <sub>Filter Nodes</sub>
+    <sub>Eevee Filter Graph</sub>
 </div>
 
 <div class="grid cards" markdown>

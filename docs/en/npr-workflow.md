@@ -142,6 +142,12 @@ This version ports a group of commonly used node groups from the Blender 4.4 NPR
 - `Shading Models`
 - `Surface Curvature`
 
+<div align="center">
+	<img src="images/npr_node_group_assets.png" alt="Built-in NPR node group assets" style="border-radius: 10px;">
+	<br>
+	<sub>Main NPR node groups migrated to Blender 5.2.0 LTS</sub>
+</div>
+
 ### Asset Notes
 
 - These node groups have been migrated to the Blender 5.2.0 LTS format

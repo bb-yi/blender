@@ -60,12 +60,24 @@
 - 把任意区域的编辑器类型切换为 `Eevee Filter Graph`，即可编辑当前场景指定的图。
 - `Filter Pass` 使用的材质仍是 `Filter` 域材质；进入该材质后，可在 Shader Editor 中编辑内部节点树。
 
+<div align="center">
+  <img src="images/filter_graph_scene_panel.png" alt="Scene Properties 中的 Filter Graph" style="border-radius: 10px;">
+  <br>
+  <sub>在 Scene Properties 中指定当前场景使用的 Eevee Filter Graph</sub>
+</div>
+
 #### Filter Graph 节点
 
 - `Scene Color`：提供当前阶段的 `Color Image`、`Depth Image`、`Normal Image` 和 `Position Image` 图像句柄。
 - `AOV Input`：按名称读取 View Layer AOV，提供 `Color` 和 `Value` 图像句柄。
 - `Filter Pass`：执行一个 `Filter` 域材质。输入接口同步自材质的 `Pass Input`，输出接口同步自材质的 `Filter Output`。
 - `Stage Output`：把连接的图像写回所选渲染阶段。每个阶段只能有一个 active `Stage Output`。
+
+<div align="center">
+  <img src="images/filter_graph_editor_overview.png" alt="Eevee Filter Graph 编辑器总览" style="border-radius: 10px;">
+  <br>
+  <sub>Scene Color、AOV Input、Filter Pass 与 Stage Output 的完整连接示例</sub>
+</div>
 
 #### Filter 材质内部结构
 
@@ -74,6 +86,12 @@
 `Pass Input -> Image Sample -> Filter Output`
 
 `Pass Input` 接收 Filter Graph 传入的图像句柄，`Image Sample` 在当前像素或偏移位置采样，`Filter Output` 把结果返回给图中的 `Filter Pass`。可按需要在 `Pass Input` 与 `Filter Output` 上维护动态接口；单个 Filter Pass 最多支持 `32` 个输入和 `32` 个输出。
+
+<div align="center">
+  <img src="images/filter_graph_effect_example.png" alt="Filter 材质内部节点与效果示例" style="border-radius: 10px;">
+  <br>
+  <sub>Pass Input、Image Sample、Filter Output 组成的材质链及其视口效果</sub>
+</div>
 
 #### 基本使用方法
 
@@ -84,12 +102,24 @@
 5. 把 `Filter Pass` 的结果连接到 `Stage Output`，选择执行阶段并确保该输出处于 active 状态。
 6. 按性能和效果需要，为每个 `Filter Pass` 选择 `Full`、`1/2`、`1/4`、`1/8` 或 `1/16` 执行分辨率。
 
+<div align="center">
+  <img src="images/filter_pass_resolution_menu.png" alt="Filter Pass 执行分辨率菜单" style="border-radius: 10px;">
+  <br>
+  <sub>Filter Pass 支持的执行分辨率</sub>
+</div>
+
 #### 执行阶段
 
 - `Before Volume Fog`
 - `Before PostFX`
 - `Before Depth of Field`
 - `Before Composite`
+
+<div align="center">
+  <img src="images/filter_graph_stage_menu.png" alt="Filter Graph 执行阶段菜单" style="border-radius: 10px;">
+  <br>
+  <sub>Stage Output 的四个执行阶段</sub>
+</div>
 
 同一阶段即使放置多个 `Stage Output`，也只会使用其中一个 active 输出；其他阶段可以各自维护独立的 active 输出链路。
 
@@ -110,6 +140,12 @@
 #### 面板入口
 
 `View Layer Properties > Passes > Native Camera FX Outputs`
+
+<div align="center">
+  <img src="images/native_camera_fx_outputs.png" alt="Native Camera FX Outputs 面板" style="border-radius: 10px;">
+  <br>
+  <sub>为指定 Render Pass 单独应用运动模糊与景深</sub>
+</div>
 
 #### 可配置内容
 
@@ -185,9 +221,14 @@
 - 渲染方式为 `Blended` 的前景材质会参与后方描边遮挡：完全不透明时遮挡后方描边，完全透明时不影响后方描边
 - 半透明 `Blended` 前景会按材质透射率衰减后方描边强度，不会用前景材质颜色染色后方描边
 
-#### 建议补图
+<div align="center">
+  <img src="images/placeholder_eevee_outline.png" alt="Render Properties 中的 Eevee Outline 开关" style="border-radius: 10px;">
+  <br>
+  <sub>Render Properties 中的全局 Outline 开关</sub>
+</div>
 
-- `images/placeholder_eevee_outline.png`
-  - 建议内容：`Render Properties > Outline` 面板
-- `images/placeholder_outline_render_pass.png`
-  - 建议内容：`View Layer Properties > Passes > Data > Outline` 位置，或合成器读取 `Outline` pass 的示例
+<div align="center">
+  <img src="images/placeholder_outline_render_pass.png" alt="View Layer Properties 中的 Outline Render Pass" style="border-radius: 10px;">
+  <br>
+  <sub>View Layer Properties > Passes > Data 中的 Outline Render Pass</sub>
+</div>

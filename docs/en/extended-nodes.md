@@ -220,14 +220,26 @@ These are “portal” nodes used to organize node links.
 
 Available in `Eevee` object materials and `NPR Tree`.
 
+<div align="center">
+	<img src="images/outline_control_5_2.png" alt="Blender 5.2 Outline Control node" style="border-radius: 10px;">
+	<br>
+</div>
+
 #### Inputs
 
 - `Line Color`
 - `Line Alpha`
 - `Line Width`
 - `Depth Threshold`
+- `Depth Threshold Range`
+- `Depth Edge Width`
 - `Normal Threshold`
+- `Normal Threshold Range`
+- `Normal Edge Width`
 - `Outline ID`
+- `ID Edge`
+- `ID Edge Width`
+- `Freestyle Edge`
 
 #### Purpose
 
@@ -237,9 +249,10 @@ Writes outline parameters for Eevee's built-in screen-space outline pass.
 
 1. Add `Outline Control` to a material that should contribute outlines.
 2. Use `Line Color`, `Line Alpha`, and `Line Width` to control the visible stroke.
-3. Use `Depth Threshold` and `Normal Threshold` to tune silhouette edges versus internal edge detection.
-4. Keep `Render Properties > Outline` enabled globally.
-5. Enable `View Layer Properties > Passes > Data > Outline` when the outline result should be available as a separate pass.
+3. Use the `Depth` and `Normal` panels to tune thresholds, transition ranges, and edge-width multipliers.
+4. Use the `ID` panel to control ID boundaries and their width, and enable `Freestyle Edge` when needed.
+5. Keep `Render Properties > Outline` enabled globally.
+6. Enable `View Layer Properties > Passes > Data > Outline` when the outline result should be available as a separate pass.
 
 #### Notes
 
@@ -249,12 +262,10 @@ Writes outline parameters for Eevee's built-in screen-space outline pass.
 - `Outline ID = 0` uses automatic grouping from the object resource ID
 - `Outline ID > 0` can be used to force multiple objects or surfaces into the same outline group
 - `Depth Threshold` is more related to depth discontinuity edges, while `Normal Threshold` is more related to internal edges from normal variation
+- `Threshold Range = 0` produces a hard threshold; increasing the range lets edge width ramp in smoothly above it
+- `Depth / Normal / ID Edge Width` independently scale the width of each edge class
+- `ID Edge` controls boundaries between Outline IDs, while `Freestyle Edge` controls marked mesh edges
 - Objects in Holdout collections no longer write `Outline Control` parameters and no longer contribute Freestyle / marked-edge outline seeds
-
-#### Suggested Images
-
-- `images/placeholder_outline_control.png`
-  - Suggested content: the `Outline Control` node with a representative parameter setup
 
 ### Render Texture
 
@@ -335,14 +346,26 @@ Directly samples the `Eevee` world environment color without depending on whethe
 
 `Add > Input > Light Probe Color`
 
+<div align="center">
+	<img src="images/light_probe_color_5_2.png" alt="Light Probe Color node" style="border-radius: 10px;">
+	<br>
+</div>
+
 #### Inputs / Outputs
 
-- Input: `Direction`
+- Inputs: `Direction`, `Roughness`
 - Outputs: `Reflection`, `Irradiance`, `Combined`
 
 #### Purpose
 
 Reads the currently available Eevee lighting-probe result directly, splitting it into reflection, irradiance, and combined outputs.
+
+#### Notes
+
+- `Reflection` samples reflection-probe or world-environment lighting
+- `Irradiance` reads diffuse probe or ambient spherical-harmonic lighting
+- `Combined` is `Reflection + Irradiance`
+- `Roughness` controls reflection-probe blur from mirror-like at `0` to fully rough at `1`
 
 ### World To Tangent
 
@@ -394,6 +417,12 @@ Injects a user-authored GLSL function into an Eevee object, Filter, or NPR mater
 4. Use the `Node / Code` segmented control at the top of the node to switch between regular controls and inline source editing.
 5. After changing the source or function selection, use the refresh button to parse, validate, and update the node interface.
 
+<div align="center">
+	<img src="images/glsl_function_node_mode.png" alt="GLSL Function Node mode" style="border-radius: 10px;">
+	<br>
+	<sub>Source, function, and parameter controls in Node mode</sub>
+</div>
+
 #### Node / Code Editing
 
 - `Node` mode is used to choose the source and function and to adjust sockets. `Code` mode edits an internal Text source and target function name directly inside the node.
@@ -403,6 +432,12 @@ Injects a user-authored GLSL function into an Eevee object, Filter, or NPR mater
 - If several `GLSL Function` nodes share one Text, Apply validates every user before refreshing them together. It is rejected without changing the live state when another user has a draft, the Text changed externally, or a linked user cannot be edited.
 - External `.glsl` sources are read-only in `Code` mode. Use `Make Internal` to copy the current external source into an internal Text before editing.
 - Unapplied drafts are stored in the `.blend` file and restored when it is reopened.
+
+<div align="center">
+	<img src="images/glsl_function_make_internal.png" alt="GLSL Function external source in Code mode" style="border-radius: 10px;">
+	<br>
+	<sub>External sources are read-only in Code mode and can be copied with Make Internal</sub>
+</div>
 
 #### Example Project
 
@@ -1109,7 +1144,7 @@ Generates an approximate beveled normal in `Eevee` so hard edges can look smooth
 `Add > Input > Light Info`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_05-13-13.png" alt="Light Info" style="border-radius: 10px;">
+	<img src="images/light_info_5_2.png" alt="Blender 5.2 Light Info" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -1122,6 +1157,9 @@ Reads information from a selected light.
 - `Color`
 - `Power`
 - `Type`
+- `Visible`
+
+`Visible` outputs `1` when the selected light object is not hidden and `0` when it is hidden.
 
 `Type` is an integer socket with the following values:
 

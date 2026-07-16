@@ -181,6 +181,12 @@ Assigns an integer light-group ID to Eevee lights so the `Shader Info` node and 
 
 `Light Data > Light > Lightgroup ID`
 
+<div align="center">
+	<img src="images/eevee_lightgroup_id.png" alt="Eevee light Lightgroup ID" style="border-radius: 10px;">
+	<br>
+	<sub>Lightgroup ID in the light data panel</sub>
+</div>
+
 ### Behavior
 
 - Default value: `0`

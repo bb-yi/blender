@@ -60,12 +60,24 @@ Each `Render Texture` entry currently supports:
 - Switch any area to the `Eevee Filter Graph` editor to edit the graph assigned to the current scene.
 - A `Filter Pass` still uses a material in the `Filter` domain. Enter that material to edit its internal node tree in the Shader Editor.
 
+<div align="center">
+  <img src="images/filter_graph_scene_panel.png" alt="Filter Graph in Scene Properties" style="border-radius: 10px;">
+  <br>
+  <sub>Assigning the current scene's Eevee Filter Graph in Scene Properties</sub>
+</div>
+
 #### Filter Graph Nodes
 
 - `Scene Color`: exposes the current stage's `Color Image`, `Depth Image`, `Normal Image`, and `Position Image` handles.
 - `AOV Input`: reads a named View Layer AOV and exposes `Color` and `Value` image handles.
 - `Filter Pass`: executes one `Filter` domain material. Its input interface is synchronized from the material's `Pass Input`, and its output interface is synchronized from `Filter Output`.
 - `Stage Output`: publishes the connected image at the selected render stage. Each stage can have only one active `Stage Output`.
+
+<div align="center">
+  <img src="images/filter_graph_editor_overview.png" alt="Eevee Filter Graph editor overview" style="border-radius: 10px;">
+  <br>
+  <sub>A complete Scene Color, AOV Input, Filter Pass, and Stage Output connection</sub>
+</div>
 
 #### Inside a Filter Material
 
@@ -74,6 +86,12 @@ Creating a Filter Pass material builds this default chain:
 `Pass Input -> Image Sample -> Filter Output`
 
 `Pass Input` receives image handles from the Filter Graph, `Image Sample` samples them at the current or an offset pixel, and `Filter Output` returns results to the graph's `Filter Pass`. Dynamic interfaces can be maintained on `Pass Input` and `Filter Output`; one Filter Pass supports at most `32` inputs and `32` outputs.
+
+<div align="center">
+  <img src="images/filter_graph_effect_example.png" alt="Filter material nodes and viewport effect" style="border-radius: 10px;">
+  <br>
+  <sub>A Pass Input, Image Sample, and Filter Output chain with its viewport result</sub>
+</div>
 
 #### Basic Workflow
 
@@ -84,12 +102,24 @@ Creating a Filter Pass material builds this default chain:
 5. Connect the `Filter Pass` result to a `Stage Output`, choose its execution stage, and make sure that output is active.
 6. Choose `Full`, `1/2`, `1/4`, `1/8`, or `1/16` execution resolution on each `Filter Pass` according to quality and performance needs.
 
+<div align="center">
+  <img src="images/filter_pass_resolution_menu.png" alt="Filter Pass execution resolution menu" style="border-radius: 10px;">
+  <br>
+  <sub>Execution resolutions available on a Filter Pass</sub>
+</div>
+
 #### Execution Stages
 
 - `Before Volume Fog`
 - `Before PostFX`
 - `Before Depth of Field`
 - `Before Composite`
+
+<div align="center">
+  <img src="images/filter_graph_stage_menu.png" alt="Filter Graph execution stage menu" style="border-radius: 10px;">
+  <br>
+  <sub>The four execution stages available on Stage Output</sub>
+</div>
 
 If multiple `Stage Output` nodes target the same stage, only one can be active. Other stages can each maintain an independent active output chain.
 
@@ -110,6 +140,12 @@ This is useful for generating camera-FX versions of outlines, AOVs, depth, norma
 #### Panel Entry
 
 `View Layer Properties > Passes > Native Camera FX Outputs`
+
+<div align="center">
+  <img src="images/native_camera_fx_outputs.png" alt="Native Camera FX Outputs panel" style="border-radius: 10px;">
+  <br>
+  <sub>Applying motion blur and depth of field to a selected render pass</sub>
+</div>
 
 #### Configurable Fields
 
@@ -185,9 +221,14 @@ Outline render-pass entry:
 - `Blended` foreground materials participate in behind-outline occlusion: fully opaque foreground blocks behind outlines, fully transparent foreground leaves them unchanged
 - Semi-transparent `Blended` foreground attenuates behind-outline intensity by material transmittance without tinting the outline with the foreground material color
 
-#### Suggested Images
+<div align="center">
+  <img src="images/placeholder_eevee_outline.png" alt="Eevee Outline toggle in Render Properties" style="border-radius: 10px;">
+  <br>
+  <sub>The global Outline toggle in Render Properties</sub>
+</div>
 
-- `images/placeholder_eevee_outline.png`
-  - Suggested content: the `Render Properties > Outline` panel
-- `images/placeholder_outline_render_pass.png`
-  - Suggested content: the `View Layer > Passes > Data > Outline` toggle, or a compositor example reading the `Outline` pass
+<div align="center">
+  <img src="images/placeholder_outline_render_pass.png" alt="Outline render pass in View Layer Properties" style="border-radius: 10px;">
+  <br>
+  <sub>The Outline render pass under View Layer Properties > Passes > Data</sub>
+</div>
