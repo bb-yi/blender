@@ -88,6 +88,29 @@ def make_filter_material():
     return material
 
 
+def make_scale_filter_material(scale):
+    material = bpy.data.materials.new(f"StageScale_{scale:.1f}")
+    material.use_nodes = True
+    material.eevee_domain = "FILTER"
+
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+    nodes.clear()
+
+    output = nodes.new("ShaderNodeOutputFilter")
+    _, image_sample = add_pass_input_image_sample(nodes, links, location=(-40.0, 0.0))
+
+    multiply = nodes.new("ShaderNodeMixRGB")
+    multiply.blend_type = "MULTIPLY"
+    multiply.inputs[0].default_value = 1.0
+    multiply.inputs[2].default_value = (scale, scale, scale, 1.0)
+
+    links.new(image_sample.outputs["Color"], multiply.inputs[1])
+    links.new(multiply.outputs["Color"], output.inputs["Color"])
+    output.inputs["Alpha"].default_value = 1.0
+    return material
+
+
 def make_plane(material):
     bpy.ops.mesh.primitive_plane_add(size=4.0, location=(0.0, 0.0, 0.0))
     plane = bpy.context.active_object
@@ -154,25 +177,33 @@ def main():
             f"Expected filter output to remove the blue channel for stage {stage}, got {color}"
         )
 
-    graph = bpy.context.scene.eevee.filter_graph
-    stage_outputs = [stage_output]
-    for stage in ("BEFORE_VOLUME_FOG", "BEFORE_DEPTH_OF_FIELD", "BEFORE_POSTFX"):
-        _, _, additional_output = attach_filter_material_to_graph(
-            make_filter_material(),
+    clear_filter_graph()
+    graph = None
+    stage_outputs = []
+    stage_scales = (
+        ("BEFORE_VOLUME_FOG", 0.9),
+        ("BEFORE_DEPTH_OF_FIELD", 0.8),
+        ("BEFORE_COMPOSITE", 0.7),
+        ("BEFORE_POSTFX", 0.6),
+    )
+    for stage, scale in stage_scales:
+        graph, _, stage_output = attach_filter_material_to_graph(
+            make_scale_filter_material(scale),
             stage=stage,
             scene_socket="Color Image",
             graph=graph,
         )
-        assert additional_output.execution_stage == stage
-        stage_outputs.append(additional_output)
+        assert stage_output.execution_stage == stage
+        stage_outputs.append(stage_output)
 
     assert all(output.is_active_output for output in stage_outputs), (
         "Expected one active Filter Graph output for each execution stage"
     )
 
     color = sample_center_color(render_image())
-    assert color[0] < 0.1 and color[1] < 0.1 and color[2] > 0.9, (
-        "Expected four simultaneous invert stages to restore the blue surface, "
+    expected_blue = 0.9 * 0.8 * 0.7 * 0.6
+    assert color[0] < 0.05 and color[1] < 0.05 and abs(color[2] - expected_blue) < 0.02, (
+        "Expected all four stage-specific scales to produce a unique blue value, "
         f"got {color}"
     )
 
