@@ -357,7 +357,7 @@ deferred 主阶段结束后释放 GBuffer。
 
 ### Step 14. Filter.BeforeVolumeFog
 
-如果 `Filter Materials` 在 `Before Volume Fog` 有条目，这里会执行。
+如果场景级 `Eevee Filter Graph` 在 `Before Volume Fog` 有活动的 `Stage Output`，这里会从该输出反向解析依赖并执行上游 DAG。
 
 这是当前分支新增的阶段。
 
@@ -397,7 +397,7 @@ deferred 主阶段结束后释放 GBuffer。
 
 ### Step 20. Filter.BeforePostFX
 
-如果当前分支的 `Filter Materials` 在 `Before PostFX` 有条目，这里会执行。
+如果场景级 `Eevee Filter Graph` 在 `Before PostFX` 有活动的 `Stage Output`，这里会执行该输出依赖的图节点。
 
 ### Step 21. render_postfx
 
@@ -444,7 +444,7 @@ deferred 主阶段结束后释放 GBuffer。
 
 ### 4. Filter.BeforeDepthOfField
 
-如果当前分支有这个执行阶段的滤镜，这里执行。
+如果 Filter Graph 在这个阶段有活动的 `Stage Output`，这里执行其上游 DAG。
 
 ### 5. depth_of_field.render
 
@@ -452,7 +452,7 @@ deferred 主阶段结束后释放 GBuffer。
 
 ### 6. Filter.BeforeComposite
 
-如果当前分支有这个执行阶段的滤镜，这里执行。
+如果 Filter Graph 在这个阶段有活动的 `Stage Output`，这里执行其上游 DAG。
 
 ### 7. 返回最终 postfx 输出
 
@@ -562,7 +562,7 @@ deferred 主阶段结束后释放 GBuffer。
 - 先从指定相机渲染额外场景纹理
 - 再供材质中的 `Render Texture` 节点采样
 
-### 2. Filter Materials
+### 2. Eevee Filter Graph
 
 对应：
 
@@ -573,7 +573,11 @@ deferred 主阶段结束后释放 GBuffer。
 
 作用：
 
-- 在 Eevee 主渲染链不同位置插入全屏滤镜 pass
+- 权威图由 `Scene.eevee.filter_graph` 持有，在 `Eevee Filter Graph` 编辑器中以场景级 DAG 组织 `Scene Color`、`AOV Input`、`Filter Pass` 与 `Stage Output`
+- 每个执行阶段最多只有一个活动的 `Stage Output`；执行器从该输出反向收集依赖，只运行当前阶段实际可达的节点，而不是遍历旧的线性材质列表
+- `Filter Pass` 引用一个 Filter Material；材质内部通过 `Pass Input -> Image Sample -> Filter Output` 声明图级输入和输出，每侧最多同步 32 个接口
+- `Filter Pass` 可按 `Full`、`1/2`、`1/4`、`1/8` 或 `1/16` 分辨率执行，图边传递的是图像资源句柄
+- 四个阶段在 Eevee 主渲染链的不同位置执行，并使用阶段对应的上游结果；多阶段路径通过独立读写资源避免纹理反馈回路
 
 ### 3. NPR Deferred Path
 

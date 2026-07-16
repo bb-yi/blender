@@ -70,6 +70,7 @@
 
 ### 3. 当前和 UI 相关的重要事实
 
+- `GLSL Function` 节点只允许用于 Eevee 的 Object、Filter 和 NPR 节点域；World 节点树当前不支持
 - `Function` 现在必须显式指定，不会自动选第一个函数
 - `sampler2D` 会显示为 `Closure` 输入口
 - `sampler2D` 可连接 `Image to Closure` 或符合约定的 `Closure Output`
@@ -82,7 +83,17 @@
 - `vec4` 输入会显示为 `vec3 + float W` 两个插口，并在 GLSL wrapper 内重组为 `vec4`
 - `mat2/mat3/mat4` 边界会按列拆分为多个向量插口；`mat4` 的每列会进一步拆成 `vec3 + float W`
 
-### 4. 内部实现和边界接口要区分
+### 4. `Node / Code` 编辑模式与刷新生命周期
+
+- 节点顶部的 `Node / Code` 分段控件用于切换普通节点界面和源码编辑界面。
+- 内部 `Text` 数据块可以在 `Code` 模式直接编辑。编辑内容先进入节点草稿，不会立即改写当前运行中的 `Text`、函数列表或 socket。
+- 草稿变脏后，执行 `Apply`（刷新）会先解析并验证整次变更，再原子更新源码和 socket；`Discard` 会丢弃草稿并恢复当前已应用源码。
+- 解析或 GPU 编译失败时，旧的 `Text` 与 socket 保持可用，不会留下半更新状态。
+- 多个节点共享同一个 `Text` 时，Apply 会验证并刷新所有使用者；如果存在另一个未处理的并发草稿，本次提交会被拒绝，避免静默覆盖。
+- 外部 `.glsl` 文件在 `Code` 模式中只读；需要节点内编辑时，先使用 `Make Internal` 转为内部 `Text`。
+- 未提交草稿会随 `.blend` 保存并恢复，但只有 Apply 成功后的源码参与实际编译和渲染。
+
+### 5. 内部实现和边界接口要区分
 
 虽然函数边界只支持上面那几种类型，但函数体内部可以正常使用很多普通 GLSL 语法，比如：
 
@@ -794,24 +805,24 @@ AI 必须删除：
 
 这是 AI 最容易翻车的地方。
 
-### 1. `int` / `bool` 不能作为节点接口
+### 1. `int` / `bool` 可以直接作为节点接口
 
-不要生成这种导出函数：
-
-```glsl
-float test(int mode, bool enabled)
-```
-
-应该改成：
+当前公开边界已经支持 `int` 和 `bool` 输入、`out` 参数与返回值，不要再为了节点接口把它们改写成 `float`。例如：
 
 ```glsl
-float test(float mode, float enabled)
+/* @glsl_meta v1
+mode: label="Mode" description="Integer mode selector"
+enabled: label="Enabled" description="Enables the selected mode"
+out_mode: label="Selected Mode"
+*/
+bool test(int mode, bool enabled, out int out_mode)
 {
-  int mode_i = int(mode);
-  bool enabled_b = enabled > 0.5;
-  ...
+  out_mode = mode;
+  return enabled && mode > 0;
 }
 ```
+
+模式型整数可以通过 `items` 元数据生成下拉选项；连续整数和布尔值也可以保留原生 socket 语义。
 
 ### 2. 方阵矩阵可以作为节点接口，非方阵仍要改写
 

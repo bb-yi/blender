@@ -520,6 +520,35 @@
 - 修复 Vulkan 路径下 NPR 资源绑定与 descriptor fallback 兼容性问题，并补齐 lookdev dummy AOV 尺寸处理。
 - 修复 Metal 下 Eevee shadow setup shader 的 `exp2` 重载歧义，避免相关平台编译失败。
 
+## 2026-07-08  e90b4fac84ac（预发布）
+
+#### 新增功能
+- 发布基于 Blender 5.2.0 Beta 的 NPR Port 公开测试包，提供 Windows、Linux 与 macOS 资产。
+
+#### 修复与改进
+- 此版本仅用于预发布测试，不作为最新稳定版。
+
+## 2026-07-12  e073b171936a（预发布）
+
+#### 新增功能
+- 无
+
+#### 修复与改进
+- 同步 Blender 官方 5.2 稳定分支至 `710df102694f`。
+- 修复前向透明高亮截断在 5.2 合并后的兼容问题。
+
+## 2026-07-16  c663d58f4da9
+
+#### 新增功能
+- `GLSL Function` 节点新增 `Node / Code` 双模式，支持节点内源码编辑、草稿提交/丢弃及共享源码原子刷新。
+
+#### 修复与改进
+- 同步至 Blender 5.2.0 LTS 正式版，合入官方 GPU、Grease Pencil、Cycles 修复及翻译更新。
+- 修复 EEVEE 混合管线的重复 GPU 资源绑定与 AOV/光照资源路由，覆盖 `Shader to RGB`、`Shader Info`、`GLSL Light` 和探针路径。
+- 统一 Filter Graph 的 Scene 所有权与编辑状态，修复视图重置、取消关联后数据丢失及误红提示。
+- 修复 Filter Graph 多执行阶段的纹理反馈回路，确保 OpenGL/Vulkan 多阶段输出正确。
+- Windows 本地发布构建的完整 Release 测试通过 `92/92`；该结果不代表 Linux 或 macOS 测试覆盖。
+
 ## 暂存
 
 #### 新增功能
