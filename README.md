@@ -19,7 +19,7 @@ Blender NPR Port 5.2 LTS
 This branch adds NPR workflows to Blender 5.2 LTS. The NPR extensions target EEVEE; the release package also includes Cycles for standard Blender workflows.
 
 - [NPR Port Documentation](https://bb-yi.github.io/blender/)
-- [Blender 5.2.0 NPR Port Release (Windows, Linux, and macOS)](https://github.com/bb-yi/blender/releases/tag/v5.2.0-npr-port-win64-c663d58f4da9-20260716-165938)
+- [Latest Blender 5.2.0 NPR Port Release (Windows)](https://github.com/bb-yi/blender/releases/latest)
 
 Project Pages
 -------------
