@@ -1,27 +1,23 @@
-# Blender 5.1 NPR Port 新增功能与使用说明
+# Blender 5.2.0 LTS NPR Port 新增功能与使用说明
 
 ## 项目介绍
 
-`Blender 5.1 NPR Port` 是一个 NPR 特化的 `Blender` 分支。在融合 `Goo Engine` 和 `4.4 NPR-prototype` 特色节点之外，还额外加入了一批面向 `Eevee` 的扩展节点、滤镜工作流和界面增强。
+`Blender 5.2.0 LTS NPR Port` 是一个 NPR 特化的 `Blender` 分支。在融合 `Goo Engine` 和 `4.4 NPR-prototype` 特色节点之外，还额外加入了一批面向 `Eevee` 的扩展节点、Filter Graph 工作流和界面增强。
 
-大部分功能是 `Eevee` 专用，不支持 `Cycles`。
+发布包包含 `Cycles`，但本文介绍的 NPR 扩展功能是 `Eevee` 专用，不支持在 `Cycles` 中使用。
 
 ## 文档范围
 
-这份文档说明当前 `Blender 5.1 NPR Port` 相比官方 `Blender 5.1` 已经加入、并且当前分支内实际存在的 NPR / Eevee 扩展功能，以及它们的基本使用方法。
+这份文档说明当前 `Blender 5.2.0 LTS NPR Port` 相比官方 `Blender 5.2.0 LTS` 已经加入、并且当前分支内实际存在的 NPR / Eevee 扩展功能，以及它们的基本使用方法。
 
-## 5.1.2 更新重点
+## 5.2.0 LTS 更新重点
 
-- 合并官方 `Blender 5.1.2` 修复与版本更新
-- 新增 `GLSL Script Expression` 节点，可用单行 GLSL 表达式快速生成自定义标量、向量或颜色输出
-- `GLSL Function` 的 `@glsl_meta v1` 新增 `label`，可为输入、输出和 `sampler2D` 插口设置节点界面显示名
-- `Eevee Performance` 视图新增阴影和探针归因分组：`Shadow Contexts`、`Shadow Lights`、`Probe Costs`
-- 新增 `Native Camera FX Outputs`，可在 `View Layer` 中把 Eevee 原生 `Motion Blur` 和 `Depth of Field` 应用到指定通道
-- 恢复独立 `OKLab Color Ramp` 节点，普通 `Color Ramp` 保持原有 RGB / HSV / HSL 工作流
-- 修复 `GLSL Function` 的 `vec4` 输入在刷新或编译路径中丢失 `w` 分量的问题
-- 修复 `Scene Color` 的 `Position` 源在偏移采样时和其他场景缓冲不一致的问题
-- 修复透明 / `Blended` Forward 层在未显式写入 AOV 时覆盖后方 AOV 的问题
-- 更新 NPR Port 启动画面
+- 迁移到官方 `Blender 5.2.0 LTS` 代码基线，并完成 Eevee NPR 渲染路径适配
+- 用场景级 `Filter Graph` 取代旧的线性 Filter Materials 列表，支持四个执行阶段和可复用的 Filter Pass 材质
+- `GLSL Function` 新增 `Node / Code` 编辑模式，可在节点内编辑内部 Text，并通过原子 Apply / Discard 工作流保护正在运行的材质
+- `GLSL Function` 支持 `mat2`、`mat3`、`mat4` 输入、`out` 参数和返回值，并可用于 Eevee 物体材质、Filter 材质和 `NPR Tree`
+- 保留 `GLSL Script Expression`、`Native Camera FX Outputs`、`Eevee Performance` 阴影 / 探针归因和 `OKLab Color Ramp` 等 NPR 扩展
+- 修复 5.2 迁移后的 Eevee 着色器、透明 AOV、Scene Color 偏移采样和节点接口兼容问题
 
 ## 节点一览
 
@@ -84,10 +80,10 @@
 ### 1. Scene 级 Eevee 扩展
 
 - [`Render Textures`](scene-extensions.md#1-render-textures)
-- [`Filter Materials`](scene-extensions.md#2-filter-materials)
+- [`Filter Graph`](scene-extensions.md#2-filter-graph)
 - [`Eevee Outline`](scene-extensions.md#4-eevee-outline)
 - [`Native Camera FX Outputs`](scene-extensions.md#3-native-camera-fx-outputs)
-- [`Filter` 域下可用的 `AOV Input / AOV Output`](scene-extensions.md#2-filter-materials)
+- [`Scene Color / AOV Input / Filter Pass / Stage Output`](scene-extensions.md#2-filter-graph)
 
 ### 2. 着色器节点
 
@@ -142,4 +138,4 @@
 - [骨骼 Outliner 显示控制](interface-guide.md#8-outliner)
 
 !!! warning "Eevee 专用"
-    所有 NPR Port 功能都需要 **Eevee 渲染引擎**。不支持 `Cycles`。
+    发布包可以运行 `Cycles`，但本文介绍的 NPR Port 扩展功能需要 **Eevee 渲染引擎**，不支持在 `Cycles` 中使用。

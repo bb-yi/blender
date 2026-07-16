@@ -1,5 +1,5 @@
-site_name: Blender 5.1 NPR Port Documentation
-site_description: Blender 5.1 NPR Port Features & Usage Guide
+site_name: Blender 5.2 LTS NPR Port Documentation
+site_description: Blender 5.2 LTS NPR Port Features, Usage, and Release Guide
 site_author: NPR Port Team
 site_url: "https://bb-yi.github.io/blender/en/"
 
@@ -34,6 +34,7 @@ theme:
 
 nav:
   - Home: index.md
+  - Download & Release: release.md
   - Extended Nodes: extended-nodes.md
   - NPR Workflow: npr-workflow.md
   - Interface & Settings: interface-guide.md
@@ -48,8 +49,6 @@ markdown_extensions:
   - pymdownx.snippets
   - pymdownx.tabbed:
       alternate_style: true
-  - pymdownx.arithmatex:
-      generic: true
   - tables
   - toc:
       permalink: true
@@ -71,7 +70,3 @@ extra:
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/bb-yi/blender
-
-extra_javascript:
-  - javascripts/mathjax.js
-  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js

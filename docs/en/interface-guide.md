@@ -223,7 +223,7 @@ Appends the current NPR build tag and build date to the version text in the top-
 ### Current Format
 
 - `version + npr post + build date`
-- Example: `5.1.0 npr post 2026-03-27`
+- Example: `5.2.0 npr post 2026-07-16`
 
 ## 8. Pose Bone Outliner Visibility
 

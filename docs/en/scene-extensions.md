@@ -48,49 +48,56 @@ Each `Render Texture` entry currently supports:
 5. Pick the matching `Render Texture` entry in the node panel.
 6. Use the node's `Color` / `Alpha` outputs in the rest of the material.
 
-## 2. Filter Materials
+## 2. Filter Graph
 
 #### Feature Description
 
-`Filter Materials` is a scene-level Eevee full-screen filter stack. Each entry is a material in the `Filter` domain, and the stack is applied in list order to the current frame.
+`Filter Graph` is a scene-level Eevee full-screen filter execution graph. It replaces the legacy linear Filter Materials list with node connections. The scene selects its authoritative graph through `Scene.eevee.filter_graph`; image handles in that graph can feed multiple Filter Passes and publish results at different render stages.
 
-#### Panel Entry
+#### Panel and Editor Entry
 
-`Scene Properties > Filter Materials`
+- Create or assign the scene Filter Graph at `Scene Properties > Filter Graph`.
+- Switch any area to the `Eevee Filter Graph` editor to edit the graph assigned to the current scene.
+- A `Filter Pass` still uses a material in the `Filter` domain. Enter that material to edit its internal node tree in the Shader Editor.
 
-<div align="center">
-  <img src="images/SnowShot_2026-03-28_04-41-53.png" alt="Filter Materials" style="border-radius: 10px;">
-  <br>
-</div>
+#### Filter Graph Nodes
 
-Node-tree entry: Shader Editor > Shader Type > `Filter`
+- `Scene Color`: exposes the current stage's `Color Image`, `Depth Image`, `Normal Image`, and `Position Image` handles.
+- `AOV Input`: reads a named View Layer AOV and exposes `Color` and `Value` image handles.
+- `Filter Pass`: executes one `Filter` domain material. Its input interface is synchronized from the material's `Pass Input`, and its output interface is synchronized from `Filter Output`.
+- `Stage Output`: publishes the connected image at the selected render stage. Each stage can have only one active `Stage Output`.
 
-<div align="center">
-  <img src="images/SnowShot_2026-03-28_04-42-42.png" alt="Filter Shader Type" style="border-radius: 10px;">
-  <br>
-</div>
+#### Inside a Filter Material
+
+Creating a Filter Pass material builds this default chain:
+
+`Pass Input -> Image Sample -> Filter Output`
+
+`Pass Input` receives image handles from the Filter Graph, `Image Sample` samples them at the current or an offset pixel, and `Filter Output` returns results to the graph's `Filter Pass`. Dynamic interfaces can be maintained on `Pass Input` and `Filter Output`; one Filter Pass supports at most `32` inputs and `32` outputs.
 
 #### Basic Workflow
 
-1. Open `Scene Properties > Filter Materials`.
-2. Create a new entry, or click `New Filter Material`.
-3. The selected material must be a `Filter` domain material.
-4. In the Shader Editor, switch the top `Shader Type` to `Filter`.
-5. Use `Scene Color` to read scene data, and combine it with `Filter Object Info` or `Filter Mask` when object-driven control is needed.
-6. Use `AOV Input` if the filter needs to read an existing custom pass.
-7. Use `AOV Output` if the filter should write an intermediate or final result into a named AOV.
-8. Choose the insertion point with `Execution Stage`.
+1. Create or assign a graph at `Scene Properties > Filter Graph`.
+2. Switch to the `Eevee Filter Graph` editor.
+3. Feed a `Filter Pass` from `Scene Color` or `AOV Input`.
+4. Create or assign a Filter material on the `Filter Pass`, then enter the material to build the actual filter logic.
+5. Connect the `Filter Pass` result to a `Stage Output`, choose its execution stage, and make sure that output is active.
+6. Choose `Full`, `1/2`, `1/4`, `1/8`, or `1/16` execution resolution on each `Filter Pass` according to quality and performance needs.
 
-#### Important Notes
+#### Execution Stages
 
-- The default sampling coordinate for `Scene Color` is the `Window` output of the `Texture Coordinate` node
-- `Scene Color` uses consistent screen-UV sampling for `Color / Depth / Normal / Position`; when `Vector` is connected for offset sampling, `Position` reconstructs the world position for the offset pixel
-- `AOV Input` is supported
-- `AOV Output` is supported, so a filter can write to a named AOV before sending the final result into `Filter Output`
-- `Execution Stage` currently provides three insertion points:
-  - `Before Volume Fog`
-  - `Before Depth of Field`
-  - `Before Composite`
+- `Before Volume Fog`
+- `Before PostFX`
+- `Before Depth of Field`
+- `Before Composite`
+
+If multiple `Stage Output` nodes target the same stage, only one can be active. Other stages can each maintain an independent active output chain.
+
+#### Data-Blocks and Legacy Migration
+
+- Filter Graphs created from the scene panel and Filter materials created from a `Filter Pass` automatically receive a fake user. Temporarily unlinking them from a scene or node therefore does not immediately make them disappear on save.
+- When a file containing the 5.1 linear Filter Materials list is opened, its entries are migrated automatically into an equivalent Filter Graph, preserving their execution stages and list order in the generated connections.
+- Filter materials can still use Filter-domain nodes such as `Filter Object Info`, `Filter Mask`, and `GLSL Function`; route scene buffers and AOVs at graph level when possible.
 
 ## 3. Native Camera FX Outputs
 

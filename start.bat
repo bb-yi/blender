@@ -1,75 +1,44 @@
 @echo off
-REM Blender 5.1 NPR Port Documentation Website Quick Start
-
-setlocal enabledelayedexpansion
+setlocal
+cd /d "%~dp0"
 
 echo.
-echo ====================================
-echo Blender 5.1 NPR Port Documentation  
-echo ====================================
+echo ========================================
+echo Blender 5.2 LTS NPR Port Documentation
+echo ========================================
 echo.
 
-REM Check if Python is installed
 python --version >nul 2>&1
 if errorlevel 1 (
-    echo Error: Python is not installed or not in PATH
-    echo Please install Python first: https://www.python.org/
-    pause
+    echo Error: Python is not available in PATH.
     exit /b 1
 )
 
-REM Check if mkdocs is installed
 python -m mkdocs --version >nul 2>&1
 if errorlevel 1 (
-    echo.
-    echo Installing MkDocs and Material theme...
-    echo.
-    pip install mkdocs mkdocs-material
-    if errorlevel 1 (
-        echo Error: Failed to install mkdocs
-        pause
-        exit /b 1
-    )
-)
-
-echo.
-echo 选择操作:
-echo 1. 启动本地预览服务 (与 GitHub Pages 路径一致)
-echo 2. 生成静态网站
-echo 3. 使用 MkDocs 单站预览（仅调试单语言）
-echo 4. 退出
-echo.
-
-set /p choice="请选择 (1-4): "
-
-if "%choice%"=="1" (
-    echo.
-    echo 启动与 GitHub Pages 一致的本地预览...
-    echo 请在浏览器中打开: http://127.0.0.1:8000/blender/
-    echo.
-    powershell -ExecutionPolicy Bypass -File preview-ghpages.ps1
-) else if "%choice%"=="2" (
-    echo.
-    echo 生成静态网站...
-    echo.
-    python -m mkdocs build
-    if errorlevel 0 (
-        echo.
-        echo 完成! 静态网站已生成到 site/ 文件夹
-        echo.
-    )
-) else if "%choice%"=="3" (
-    echo.
-    echo 启动 MkDocs 单站预览...
-    echo 中文: http://127.0.0.1:8000
-    echo.
-    python -m mkdocs serve -f mkdocs.yml
-) else if "%choice%"=="4" (
-    exit /b 0
-) else (
-    echo 无效的选择
-    pause
+    echo Error: MkDocs is not installed.
+    echo Run: python -m pip install mkdocs mkdocs-material
     exit /b 1
 )
 
-pause
+echo 1. Preview the bilingual GitHub Pages layout
+echo 2. Build both languages in strict mode
+echo 3. Serve the Chinese site only
+echo 4. Serve the English site only
+echo 5. Exit
+echo.
+set "choice=%~1"
+if not defined choice set /p choice="Select an option (1-5): "
+
+if "%choice%"=="1" powershell -ExecutionPolicy Bypass -File .\preview-ghpages.ps1
+if "%choice%"=="2" python .\build_multilingual.py
+if "%choice%"=="3" python -m mkdocs serve -f .\mkdocs.yml
+if "%choice%"=="4" python -m mkdocs serve -f .\mkdocs.en.yml
+if "%choice%"=="5" exit /b 0
+
+if not "%choice%"=="1" if not "%choice%"=="2" if not "%choice%"=="3" if not "%choice%"=="4" if not "%choice%"=="5" (
+    echo Invalid option.
+    exit /b 1
+)
+
+exit /b %errorlevel%

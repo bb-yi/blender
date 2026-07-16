@@ -131,7 +131,7 @@ It also supports custom area input / output sockets so intermediate values can b
 
 ## 5. Built-In NPR Node Group Assets
 
-This version already ports a group of commonly used node groups from the Blender 4.4 NPR branch and repackages them as 5.1-compatible assets.
+This version ports a group of commonly used node groups from the Blender 4.4 NPR branch and repackages them as Blender 5.2.0 LTS-compatible assets.
 
 ### Main Built-In Assets
 
@@ -144,7 +144,7 @@ This version already ports a group of commonly used node groups from the Blender
 
 ### Asset Notes
 
-- These node groups have been migrated to the Blender 5.1 format
+- These node groups have been migrated to the Blender 5.2.0 LTS format
 - Because repeat-zone node names changed, old Blender 4.4 NPR Prototype files may need to reconnect region-related nodes manually
 
 !!! warning "Eevee Only"

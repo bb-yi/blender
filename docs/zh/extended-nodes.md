@@ -17,7 +17,7 @@
 
 #### 作用
 
-读取指定对象的世界空间变换和视口显示颜色，方便在 `Filter Materials` 中做基于对象状态的全屏滤镜控制。
+读取指定对象的世界空间变换和视口显示颜色，方便在 Filter Graph 的 `Filter Pass` 材质中做基于对象状态的全屏滤镜控制。
 
 #### 节点设置
 
@@ -381,7 +381,7 @@
 
 `Add > Script > GLSL Function`
 
-在 `Eevee` 物体材质和 `NPR Tree` 中可用。
+在 `Eevee` 物体材质、`Filter` 材质和 `NPR Tree` 中可用；当前不在 `World` 域开放。
 
 <div align="center">
 	<img src="images/glsl_function_label.png" alt="GLSL Function label metadata" style="border-radius: 10px;">
@@ -390,15 +390,25 @@
 
 #### 作用
 
-把一段用户编写的 `GLSL` 函数接入当前 `Eevee / NPR` 材质编译流程，适合做自定义数学节点、程序纹理、SDF、屏幕效果封装，以及移植一部分外部 GLSL / HLSL 逻辑。
+把一段用户编写的 `GLSL` 函数接入当前 Eevee 物体、Filter 或 NPR 材质编译流程，适合做自定义数学节点、程序纹理、SDF、屏幕效果封装，以及移植一部分外部 GLSL / HLSL 逻辑。
 
 #### 基本使用方法
 
-1. 在 `Text Editor` 中准备一段 `GLSL` 函数源码，或者指定一个外部 `.glsl` 文件。
-2. 添加 `GLSL Function` 节点。
-3. 在节点面板中选择源码来源和目标函数。
-4. 如果修改了源码，可点击节点上的刷新按钮重新解析。
-5. 在 `Function` 中显式选择真正要导出的函数名。
+1. 添加 `GLSL Function` 节点。
+2. 选择内部 `Text` 数据块，或者指定一个外部 `.glsl` 文件。
+3. 在 `Function` 中显式选择真正要导出的函数名。
+4. 使用节点顶部的 `Node / Code` 分段按钮切换普通节点控制和内联代码编辑。
+5. 源码或函数选择发生变化后，点击刷新按钮解析、验证并更新节点接口。
+
+#### Node / Code 编辑模式
+
+- `Node` 模式用于选择源码、函数和调整 socket；`Code` 模式可直接在节点中编辑内部 Text 的源码与目标函数名。
+- 在 `Code` 模式输入内容只会更新节点的 draft，不会立即覆盖 Text、替换现有 socket 或改变正在运行的材质。
+- draft 处于 dirty 状态时，刷新按钮执行原子 Apply：候选源码必须先通过解析和 GPU 编译验证，成功后才会写回 Text 并刷新接口；失败时继续保留旧 Text、旧 socket 和旧材质结果。
+- 回退按钮执行 Discard，放弃尚未 Apply 的源码和函数名修改。
+- 多个 `GLSL Function` 节点共享同一个 Text 时，Apply 会先验证所有用户，再一起刷新。其他用户存在未应用 draft、Text 被外部修改或存在不可编辑的链接用户时，Apply 会拒绝并保留当前状态。
+- 外部 `.glsl` 在 `Code` 模式中只读；使用 `Make Internal` 可把当前外部源码复制为内部 Text 后再编辑。
+- 未应用的 draft 会随 `.blend` 文件保存并在重新打开后恢复。
 
 #### 示例工程
 
@@ -408,9 +418,9 @@
 
 #### 当前支持的函数边界类型
 
-- 输入参数：`float`、`int`、`bool`、`vec2`、`vec3`、`vec4`、`sampler2D`
-- 输出参数：`out float`、`out int`、`out bool`、`out vec2`、`out vec3`、`out vec4`
-- 返回值：`void`、`float`、`int`、`bool`、`vec2`、`vec3`、`vec4`
+- 输入参数：`float`、`int`、`bool`、`vec2`、`vec3`、`vec4`、`mat2`、`mat3`、`mat4`、`sampler2D`
+- 输出参数：`out float`、`out int`、`out bool`、`out vec2`、`out vec3`、`out vec4`、`out mat2`、`out mat3`、`out mat4`
+- 返回值：`void`、`float`、`int`、`bool`、`vec2`、`vec3`、`vec4`、`mat2`、`mat3`、`mat4`
 
 #### 重要说明
 
@@ -435,7 +445,9 @@
 - `vec3 + subtype=color` 进入 GLSL 时按 `rgb` 使用，`alpha` 固定为 `1.0`
 - `vec4 + subtype=color` 会保留完整 `rgba`
 - 刷新或重新编译节点时，`vec4` 输入会保留 `w` 分量，不会退化成 `vec3 / rgb`
-- 当前不支持把 `mat* / struct / array` 作为导出函数边界类型
+- `mat2 / mat3 / mat4` 边界会在节点上拆分为矩阵列 socket，并在生成的 GLSL 包装函数中重新组合
+- 矩阵输入的 Meta 目前只建议使用 `label`、`description` 和 `panel`；不要为矩阵写 `default / min / max / subtype`
+- 当前不支持把 `struct / array` 作为导出函数边界类型
 - 导出函数边界当前已经支持 `int / bool`，适合直接写模式开关、枚举值、`lightgroup_id` 这类参数
 - 内置了几何 helper，可在函数体里直接读取：`glsl_position()`、`glsl_normal()`、`glsl_true_normal()`、`glsl_incoming()`
 - 内置了环境光 helper：`glsl_ambient_lighting()`

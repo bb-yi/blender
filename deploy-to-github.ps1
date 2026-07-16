@@ -1,158 +1,92 @@
-#!/usr/bin/env powershell
-# GitHub Pages Auto Deploy for Blender NPR Documentation
-# Usage: .\deploy-to-github.ps1
-
+[CmdletBinding()]
 param(
-    [string]$CommitMessage = "Update: Documentation Website"
+    [string]$CommitMessage = "Deploy Blender 5.2 LTS NPR documentation"
 )
 
-function WriteSection {
-    param([string]$Title)
-    Write-Host "`n========================================" -ForegroundColor Cyan
-    Write-Host $Title -ForegroundColor Cyan
-    Write-Host "========================================`n" -ForegroundColor Cyan
-}
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
 
-function WriteOk {
-    param([string]$Message)
-    Write-Host "[OK] $Message" -ForegroundColor Green
-}
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+Set-Location $scriptDir
 
-function WriteError {
-    param([string]$Message)
-    Write-Host "[ERROR] $Message" -ForegroundColor Red
-}
+function Invoke-Checked {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FilePath,
+        [Parameter(Mandatory = $true)]
+        [string[]]$ArgumentList
+    )
 
-function WriteWarn {
-    param([string]$Message)
-    Write-Host "[INFO] $Message" -ForegroundColor Yellow
-}
-
-# Step 1: Check prerequisites
-WriteSection "STEP 1: Checking Prerequisites"
-
-Write-Host "Checking Git..." -ForegroundColor White
-try {
-    git --version | Out-Null
-    WriteOk "Git is installed"
-} catch {
-    WriteError "Git not found. Please install from https://git-scm.com/"
-    exit 1
-}
-
-Write-Host "`nChecking MkDocs..." -ForegroundColor White
-try {
-    python -m mkdocs --version | Out-Null
-    WriteOk "MkDocs is installed"
-} catch {
-    WriteWarn "Installing MkDocs and Material theme..."
-    pip install mkdocs mkdocs-material
-    WriteOk "MkDocs installed"
-}
-
-# Step 2: Initialize Git
-WriteSection "STEP 2: Initializing Git Repository"
-
-if (-not (Test-Path ".git")) {
-    Write-Host "Creating new Git repository..." -ForegroundColor White
-    git init
-    WriteOk "Git repository initialized"
-} else {
-    WriteOk "Git repository already exists"
-}
-
-# Step 3: Configure remote
-WriteSection "STEP 3: Configuring Remote Origin"
-
-$remoteExists = git remote | Select-String "origin"
-if (-not $remoteExists) {
-    Write-Host "Adding remote origin..." -ForegroundColor White
-    git remote add origin https://github.com/bb-yi/blender.git
-    WriteOk "Remote added: https://github.com/bb-yi/blender.git"
-} else {
-    WriteOk "Remote origin already configured"
-}
-
-# Step 4: Check for changes
-WriteSection "STEP 4: Checking Local Changes"
-
-# First ensure we have a docs branch
-Write-Host "Ensuring docs branch exists..." -ForegroundColor White
-$branchExists = git branch | Select-String "docs"
-if (-not $branchExists) {
-    Write-Host "Creating docs branch..." -ForegroundColor White
-    git checkout -b docs 2>&1 | Out-Null
-}
-
-$status = git status --porcelain
-if ($status) {
-    Write-Host "Found changes to commit:" -ForegroundColor White
-    Write-Host $status
-    
-    Write-Host "`nStaging all changes..." -ForegroundColor White
-    git add .
-    
-    Write-Host "Committing with message: $CommitMessage" -ForegroundColor White
-    git commit -m $CommitMessage
-    WriteOk "Changes committed"
-} else {
-    Write-Host "No changes to commit, but creating initial commit if needed..." -ForegroundColor White
-    # Check if there are any commits
-    $hasCommits = git rev-parse HEAD 2>&1
+    & $FilePath @ArgumentList
     if ($LASTEXITCODE -ne 0) {
-        # No commits yet, create initial commit
-        Write-Host "Creating initial commit..." -ForegroundColor White
-        git add .
-        git commit -m "Initial commit: Blender 5.1 NPR Port Documentation" 2>&1 | Out-Null
-        WriteOk "Initial commit created"
-    } else {
-        WriteOk "Repository already has commits"
+        throw "Command failed with exit code ${LASTEXITCODE}: $FilePath $($ArgumentList -join ' ')"
     }
 }
 
-# Step 5: Deploy to GitHub Pages
-WriteSection "STEP 5: Deploying to GitHub Pages"
-
-Write-Host "Running: mkdocs gh-deploy" -ForegroundColor White
-try {
-    mkdocs gh-deploy
-    WriteOk "Deployed to GitHub Pages successfully!"
-} catch {
-    WriteError "Deployment failed"
-    Write-Host $_
-    exit 1
+if (-not (Test-Path -LiteralPath (Join-Path $scriptDir ".git") -PathType Container)) {
+    throw "This script must run from the blender-npr-doc-site Git repository."
 }
 
-# Step 6: Push docs branch
-WriteSection "STEP 6: Pushing Documentation Branch"
+$branch = (git branch --show-current).Trim()
+if ($LASTEXITCODE -ne 0 -or $branch -ne "docs") {
+    throw "Expected the docs branch, found '$branch'."
+}
 
-Write-Host "Pushing to origin/docs..." -ForegroundColor White
-try {
-    $output = git push -u origin docs 2>&1
-    if ($LASTEXITCODE -eq 0) {
-        WriteOk "Docs branch pushed to GitHub"
-    } else {
-        WriteWarn "Failed to push docs branch (may need authentication)"
+$status = @(git status --porcelain)
+if ($LASTEXITCODE -ne 0) {
+    throw "Unable to read Git working-tree status."
+}
+if ($status.Count -ne 0) {
+    throw "Commit or discard source changes before deployment. The deployment must be traceable to a clean docs revision."
+}
+
+Write-Host "[deploy] Rebuilding the complete bilingual site in strict mode..." -ForegroundColor Cyan
+Invoke-Checked -FilePath "python" -ArgumentList @((Join-Path $scriptDir "build_multilingual.py"))
+
+$required = @(
+    "site\index.html",
+    "site\release.html",
+    "site\en\index.html",
+    "site\en\release.html"
+)
+foreach ($relativePath in $required) {
+    if (-not (Test-Path -LiteralPath (Join-Path $scriptDir $relativePath) -PathType Leaf)) {
+        throw "Bilingual build is incomplete: missing $relativePath"
     }
-} catch {
-    WriteWarn "Branch push encountered an error"
 }
 
-# Success
-WriteSection "DEPLOYMENT COMPLETE!"
+Write-Host "[deploy] Refreshing the gh-pages deployment base..." -ForegroundColor Cyan
+Invoke-Checked -FilePath "git" -ArgumentList @("fetch", "origin", "gh-pages")
 
-Write-Host "Your documentation is now live at:" -ForegroundColor White
-Write-Host "  https://bb-yi.github.io/blender/" -ForegroundColor Cyan
+$ghPagesWorktree = @(git worktree list --porcelain | Select-String -SimpleMatch "branch refs/heads/gh-pages")
+if ($LASTEXITCODE -ne 0) {
+    throw "Unable to inspect Git worktrees."
+}
+if ($ghPagesWorktree.Count -ne 0) {
+    throw "The local gh-pages branch is checked out in another worktree. Remove that worktree before deployment."
+}
 
-Write-Host "`nNotes:" -ForegroundColor White
-Write-Host "  - Pages may take 1-2 minutes to appear" -ForegroundColor White
-Write-Host "  - Clear browser cache if you see old content (Ctrl+Shift+Del)" -ForegroundColor White
-Write-Host "  - Verify settings: https://github.com/bb-yi/blender/settings/pages" -ForegroundColor White
+Invoke-Checked -FilePath "git" -ArgumentList @(
+    "branch",
+    "--force",
+    "gh-pages",
+    "origin/gh-pages"
+)
 
-Write-Host "`nFor future updates:" -ForegroundColor White
-Write-Host "  git add ." -ForegroundColor Gray
-Write-Host "  git commit -m 'your message'" -ForegroundColor Gray
-Write-Host "  mkdocs gh-deploy" -ForegroundColor Gray
-Write-Host "`n"
+Write-Host "[deploy] Publishing site/ to origin/gh-pages..." -ForegroundColor Cyan
+Invoke-Checked -FilePath "python" -ArgumentList @(
+    "-m",
+    "ghp_import",
+    "--no-jekyll",
+    "--push",
+    "--remote",
+    "origin",
+    "--branch",
+    "gh-pages",
+    "--message",
+    $CommitMessage,
+    (Join-Path $scriptDir "site")
+)
 
-Read-Host "Press Enter to exit"
+Write-Host "[deploy] Chinese: https://bb-yi.github.io/blender/" -ForegroundColor Green
+Write-Host "[deploy] English: https://bb-yi.github.io/blender/en/" -ForegroundColor Green

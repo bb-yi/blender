@@ -124,6 +124,7 @@ dmypy.json
 
 # MkDocs specific
 .DS_Store
+.preview_root/
 *.swp
 *.swo
 *~

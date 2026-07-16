@@ -1,191 +1,55 @@
-# Blender 5.1 NPR Port 文档网站
+# Blender 5.2 LTS NPR Port 文档网站
 
-这是一个使用 MkDocs 构建的 Blender 5.1 NPR Port 功能文档网站。
+本仓库保存 Blender 5.2 LTS NPR Port 的中英文 MkDocs 文档源文件。中文站部署在网站根路径，英文站部署在 `/en/`。
 
-## 项目结构
+- 中文：<https://bb-yi.github.io/blender/>
+- English: <https://bb-yi.github.io/blender/en/>
+- 正式版本：[Blender 5.2.0 LTS NPR Port](https://github.com/bb-yi/blender/releases/tag/v5.2.0-npr-port-win64-c663d58f4da9-20260716-165938)
 
-```
-blender-npr-doc-site/
-├── mkdocs.yml          # MkDocs 配置文件
-├── docs/               # 文档源文件目录
-│   ├── index.md        # 首页
-│   ├── 1_scene_level_extension.md      # Scene 级 Eevee 扩展
-│   ├── 2_extended_nodes.md             # 主要扩展节点
-│   ├── 3_npr_tree_workflow.md          # NPR Tree 工作流
-│   ├── 4_interface_workflow.md         # 界面与工作流补充
-│   └── images/         # 文档中使用的图片
-└── site/               # 生成的静态网站（build后产生）
-```
+## 目录
 
-## 快速开始
-
-### 1. 安装依赖
-
-如果你的系统中还没有安装 MkDocs，请先安装：
-
-```bash
-pip install mkdocs mkdocs-material
+```text
+docs/zh/                 中文文档
+docs/en/                 英文文档
+mkdocs.yml               中文站配置
+mkdocs.en.yml            英文站配置
+build_multilingual.py    双语严格构建入口
+preview-ghpages.ps1      本地 GitHub Pages 路径预览
+deploy-to-github.ps1     双语 GitHub Pages 部署入口
 ```
 
-### 2. 本地预览
+`site/` 与 `.preview_root/` 都是生成目录，不应提交。
 
-如果你要看和 GitHub Pages 部署后一模一样的路径与语言切换行为，请使用：
+## 环境
 
 ```powershell
-cd blender-npr-doc-site
+python -m pip install mkdocs mkdocs-material
+```
+
+## 构建与预览
+
+构建中文根站和英文子站：
+
+```powershell
+python .\build_multilingual.py
+```
+
+构建脚本对两套配置都使用 MkDocs strict 模式，任一语言出现警告或错误都会失败。
+
+按线上 `/blender/` 路径预览：
+
+```powershell
 powershell -ExecutionPolicy Bypass -File .\preview-ghpages.ps1
 ```
 
-然后在浏览器中打开 `http://127.0.0.1:8000/blender/`。
-
-这个方式会先构建双语站点，再按 `/blender/` 路径提供本地静态预览，因此和线上部署行为一致。
-
-如果只是临时调试单一语言页面，也可以使用：
-
-```powershell
-mkdocs serve -f mkdocs.yml
-```
-
-但这种方式不会完整模拟 GitHub Pages 的 `/blender/` 路径和双语切换。
-
-### 3. 生成静态网站
-
-生成可部署的静态网站文件：
-
-```bash
-mkdocs build
-```
-
-生成的文件将保存在 `site/` 文件夹中。
-
-## 文档内容
-
-### 首页 (index.md)
-- 项目介绍
-- 功能总览
-- 快速导航
-
-### Scene 级 Eevee 扩展 (1_scene_level_extension.md)
-- Render Textures 系统
-- Filter Materials 全屏滤镜
-
-### 主要扩展节点 (2_extended_nodes.md)
-- Eevee 通用辅助节点
-  - Render Info
-  - Scene Time
-  - Screen Derivative
-  - Portal In / Out
-- Eevee 物体材质节点
-  - Render Texture
-  - Screenspace Info
-  - World Environment
-  - World To Tangent
-  - GLSL Function
-  - Image to Closure
-  - Bevel
-  - Curvature
-  - Shader Info
-  - Light Info
-- Filter 域节点
-  - Scene Color
-
-### NPR Tree 工作流 (3_npr_tree_workflow.md)
-- 基本概念和挂接方式
-- NPR Input / Output
-- NPR Refraction
-- Image Sample
-- For Each Light
-- 内置节点组资产
-
-### 界面与工作流补充 (4_interface_workflow.md)
-- 材质选择器预览开关
-- 世界环境排除
-- Eevee Performance
-- Lightgroup ID
-- 启动图版本标识
-- 常见问题解决
-
-## 配置说明
-
-mkdocs.yml 配置文件包含以下主要设置：
-
-- **site_name**: 网站标题
-- **theme**: 使用 Material 主题
-- **nav**: 导航菜单结构
-- **markdown_extensions**: Markdown 扩展支持
-- **plugins**: 搜索、视频等插件
-
-## 主题特性
-
-该网站使用 Material for MkDocs 主题，提供的特性包括：
-
-- ✨ 亮色/深色模式切换
-- 🔍 全文搜索
-- 📱 响应式设计（适配手机和平板）
-- ⚡ 快速加载
-- 💬 代码块高亮和复制按钮
-- 📊 支持表格、提示块、代码注释
+打开 <http://127.0.0.1:8000/blender/>。
 
 ## 部署
 
-### 部署到 GitHub Pages
+先提交并推送 `docs` 分支，再运行：
 
-1. 创建一个 GitHub 仓库
-2. 将项目推送到仓库
-3. 在 GitHub 仓库设置中启用 GitHub Pages
-4. 选择 `gh-pages` 分支作为发布源
-
-使用以下脚本自动部署：
-
-```bash
-mkdocs gh-deploy
+```powershell
+powershell -ExecutionPolicy Bypass -File .\deploy-to-github.ps1
 ```
 
-### 部署到其他平台
-
-生成的 `site/` 文件夹可以部署到任何静态网站托管服务，如：
-- Netlify
-- Vercel
-- GitLab Pages
-- 自己的服务器
-
-## 修改和扩展
-
-### 添加新文档
-
-1. 在 `docs/` 文件夹中创建新的 `.md` 文件
-2. 在 `mkdocs.yml` 的 `nav` 部分添加导航链接
-3. 运行 `mkdocs serve` 预览效果
-
-### 修改网站配置
-
-编辑 `mkdocs.yml` 文件可以：
-- 改变网站名称和描述
-- 调整主题颜色和特性
-- 修改导航结构
-- 添加或移除扩展功能
-
-### 添加图片
-
-1. 将图片放在 `docs/images/` 文件夹中
-2. 在 Markdown 中使用相对路径引用：`![描述](images/文件名.png)`
-
-## 许可证
-
-本文档遵循与 Blender 5.1 NPR Port 相同的许可证。
-
-## 支持和反馈
-
-如有问题或建议，请提交 Issue 或 Pull Request。
-
-## 参考
-
-- [MkDocs 官方文档](https://www.mkdocs.org/)
-- [Material for MkDocs](https://squidfunk.github.io/mkdocs-material/)
-- [Markdown 语法](https://www.markdownguide.org/)
-
----
-
-**最后更新**: 2026-04-06
-
-**构建工具**: MkDocs + Material Theme
+部署入口会重新执行完整双语 strict 构建，然后把生成的 `site/` 发布到 `gh-pages`。详细要求见 [DEPLOY.md](DEPLOY.md)。

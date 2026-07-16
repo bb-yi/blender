@@ -48,49 +48,56 @@
 5. 在节点面板中选择对应的 `Render Texture` 条目。
 6. 使用节点输出的 `Color` / `Alpha` 参与后续材质计算。
 
-## 2. Filter Materials
+## 2. Filter Graph
 
 #### 功能说明
 
-它是一套场景级的 Eevee 全屏滤镜栈。每个条目都是一个 `Filter` 域材质，按列表顺序依次对当前帧进行处理。
+`Filter Graph` 是场景级的 Eevee 全屏滤镜执行图，用节点连接代替旧版按列表顺序执行的线性 Filter Materials。场景通过 `Scene.eevee.filter_graph` 指定唯一的权威图数据块，图中的图像句柄可以连接到多个 Filter Pass，并在不同渲染阶段输出结果。
 
-#### 面板入口
+#### 面板与编辑器入口
 
-`Scene Properties > Filter Materials`
+- 在 `Scene Properties > Filter Graph` 新建或指定场景使用的 Filter Graph。
+- 把任意区域的编辑器类型切换为 `Eevee Filter Graph`，即可编辑当前场景指定的图。
+- `Filter Pass` 使用的材质仍是 `Filter` 域材质；进入该材质后，可在 Shader Editor 中编辑内部节点树。
 
-<div align="center">
-  <img src="images/SnowShot_2026-03-28_04-41-53.png" alt="Filter Materials" style="border-radius: 10px;">
-  <br>
-</div>
+#### Filter Graph 节点
 
-节点树入口：着色器节点编辑器 > 着色器类型 > `Filter`
+- `Scene Color`：提供当前阶段的 `Color Image`、`Depth Image`、`Normal Image` 和 `Position Image` 图像句柄。
+- `AOV Input`：按名称读取 View Layer AOV，提供 `Color` 和 `Value` 图像句柄。
+- `Filter Pass`：执行一个 `Filter` 域材质。输入接口同步自材质的 `Pass Input`，输出接口同步自材质的 `Filter Output`。
+- `Stage Output`：把连接的图像写回所选渲染阶段。每个阶段只能有一个 active `Stage Output`。
 
-<div align="center">
-  <img src="images/SnowShot_2026-03-28_04-42-42.png" alt="Filter Shader Type" style="border-radius: 10px;">
-  <br>
-</div>
+#### Filter 材质内部结构
+
+新建 Filter Pass 材质时会生成这条默认链路：
+
+`Pass Input -> Image Sample -> Filter Output`
+
+`Pass Input` 接收 Filter Graph 传入的图像句柄，`Image Sample` 在当前像素或偏移位置采样，`Filter Output` 把结果返回给图中的 `Filter Pass`。可按需要在 `Pass Input` 与 `Filter Output` 上维护动态接口；单个 Filter Pass 最多支持 `32` 个输入和 `32` 个输出。
 
 #### 基本使用方法
 
-1. 打开 `Scene Properties > Filter Materials`。
-2. 新建一个条目，或者直接点 `New Filter Material`。
-3. 选中的材质必须是 `Filter` 域材质。
-4. 打开 Shader Editor，把顶部 `Shader Type` 切换到 `Filter`。
-5. 在滤镜材质里使用 `Scene Color` 读取场景数据，也可以配合 `Filter Object Info` 或 `Filter Mask` 做对象驱动控制。
-6. 如果需要读取已有自定义通道，可使用 `AOV Input`。
-7. 如果需要把滤镜中间结果或最终结果额外写入自定义通道，可使用 `AOV Output`。
-8. 通过 `Execution Stage` 选择滤镜执行位置。
+1. 打开 `Scene Properties > Filter Graph`，新建或指定一个图。
+2. 切换到 `Eevee Filter Graph` 编辑器。
+3. 用 `Scene Color` 或 `AOV Input` 提供源图像，并连接到 `Filter Pass`。
+4. 在 `Filter Pass` 上新建或指定 Filter 材质，再进入材质内部编辑实际滤镜逻辑。
+5. 把 `Filter Pass` 的结果连接到 `Stage Output`，选择执行阶段并确保该输出处于 active 状态。
+6. 按性能和效果需要，为每个 `Filter Pass` 选择 `Full`、`1/2`、`1/4`、`1/8` 或 `1/16` 执行分辨率。
 
-#### 重要说明
+#### 执行阶段
 
-- `Scene Color` 节点的默认采样坐标为 `Texture Coordinate` 节点的 `Window` 输出
-- `Scene Color` 的 `Color / Depth / Normal / Position` 源使用一致的屏幕 UV 采样语义；连接 `Vector` 做偏移采样时，`Position` 会重建偏移像素对应的世界坐标
-- 支持 `AOV Input`
-- 支持 `AOV Output`，可以先写出命名 AOV，再继续把结果送到 `Filter Output`
-- `Execution Stage` 目前提供三个位置：
-  - `Before Volume Fog`
-  - `Before Depth of Field`
-  - `Before Composite`
+- `Before Volume Fog`
+- `Before PostFX`
+- `Before Depth of Field`
+- `Before Composite`
+
+同一阶段即使放置多个 `Stage Output`，也只会使用其中一个 active 输出；其他阶段可以各自维护独立的 active 输出链路。
+
+#### 数据块与旧文件迁移
+
+- 从面板新建的 Filter Graph 和从 `Filter Pass` 新建的 Filter 材质都会自动启用 fake user；暂时从场景或节点解除关联不会让数据块在保存时立即丢失。
+- 打开使用 5.1 线性 Filter Materials 列表的旧文件时，条目会自动迁移为等价的 Filter Graph，并按原执行阶段和顺序生成连接。
+- Filter 材质中仍可使用 `Filter Object Info`、`Filter Mask`、`GLSL Function` 等 Filter 域节点；场景缓冲和 AOV 的图级路由应优先在 Filter Graph 中完成。
 
 ## 3. Native Camera FX Outputs
 

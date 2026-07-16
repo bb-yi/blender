@@ -17,7 +17,7 @@ Available only in the `Filter` domain.
 
 #### Purpose
 
-Reads the world-space transform and viewport display color of a chosen object, making it easier to drive full-screen filters from scene helpers or controller objects.
+Reads the world-space transform and viewport display color of a chosen object, making it easier to drive a Filter Graph `Filter Pass` from scene helpers or controller objects.
 
 #### Node Setting
 
@@ -375,7 +375,7 @@ Converts a world-space direction vector into the tangent space of the current su
 
 `Add > Script > GLSL Function`
 
-Available in both `Eevee` object materials and `NPR Tree`.
+Available in `Eevee` object materials, `Filter` materials, and `NPR Tree`. It is not currently exposed in the `World` domain.
 
 <div align="center">
 	<img src="images/glsl_function_label.png" alt="GLSL Function label metadata" style="border-radius: 10px;">
@@ -384,15 +384,25 @@ Available in both `Eevee` object materials and `NPR Tree`.
 
 #### Purpose
 
-Injects a user-authored GLSL function into the current `Eevee / NPR` material compile path. This is useful for custom math nodes, procedural textures, SDF logic, screen-space effects, and porting parts of external GLSL / HLSL code.
+Injects a user-authored GLSL function into an Eevee object, Filter, or NPR material compile path. This is useful for custom math nodes, procedural textures, SDF logic, screen-space effects, and porting parts of external GLSL / HLSL code.
 
 #### Basic Workflow
 
-1. Prepare a GLSL function in the `Text Editor` or point the node to an external `.glsl` file.
-2. Add a `GLSL Function` node.
-3. Choose the source and the target function in the node panel.
-4. Refresh the node after editing the source.
-5. Explicitly select the exported function name in `Function`.
+1. Add a `GLSL Function` node.
+2. Select an internal `Text` data-block or point the node to an external `.glsl` file.
+3. Explicitly select the exported function name in `Function`.
+4. Use the `Node / Code` segmented control at the top of the node to switch between regular controls and inline source editing.
+5. After changing the source or function selection, use the refresh button to parse, validate, and update the node interface.
+
+#### Node / Code Editing
+
+- `Node` mode is used to choose the source and function and to adjust sockets. `Code` mode edits an internal Text source and target function name directly inside the node.
+- Typing in `Code` mode updates a node draft only. It does not immediately overwrite the Text, replace live sockets, or change the running material.
+- When the draft is dirty, the refresh button performs an atomic Apply. The candidate must pass parsing and GPU compilation before it is written to the Text and its interfaces are refreshed; a failure keeps the previous Text, sockets, and material result intact.
+- The revert button performs Discard, removing unapplied source and function-name changes.
+- If several `GLSL Function` nodes share one Text, Apply validates every user before refreshing them together. It is rejected without changing the live state when another user has a draft, the Text changed externally, or a linked user cannot be edited.
+- External `.glsl` sources are read-only in `Code` mode. Use `Make Internal` to copy the current external source into an internal Text before editing.
+- Unapplied drafts are stored in the `.blend` file and restored when it is reopened.
 
 #### Example Project
 
@@ -402,9 +412,9 @@ Injects a user-authored GLSL function into the current `Eevee / NPR` material co
 
 #### Supported Boundary Types
 
-- Input parameters: `float`, `int`, `bool`, `vec2`, `vec3`, `vec4`, `sampler2D`
-- Output parameters: `out float`, `out int`, `out bool`, `out vec2`, `out vec3`, `out vec4`
-- Return values: `void`, `float`, `int`, `bool`, `vec2`, `vec3`, `vec4`
+- Input parameters: `float`, `int`, `bool`, `vec2`, `vec3`, `vec4`, `mat2`, `mat3`, `mat4`, `sampler2D`
+- Output parameters: `out float`, `out int`, `out bool`, `out vec2`, `out vec3`, `out vec4`, `out mat2`, `out mat3`, `out mat4`
+- Return values: `void`, `float`, `int`, `bool`, `vec2`, `vec3`, `vec4`, `mat2`, `mat3`, `mat4`
 
 #### Important Notes
 
@@ -429,7 +439,9 @@ Injects a user-authored GLSL function into the current `Eevee / NPR` material co
 - `vec3 + subtype=color` enters GLSL as `rgb` with `alpha = 1.0`
 - `vec4 + subtype=color` keeps full `rgba`
 - Refreshing or recompiling the node preserves the `w` component of `vec4` inputs instead of degrading them to `vec3 / rgb`
-- Exported boundary types do not currently support `mat*`, `struct`, or `array`
+- `mat2 / mat3 / mat4` boundaries are split into matrix-column sockets in the node and reassembled in the generated GLSL wrapper
+- For matrix inputs, limit Meta to `label`, `description`, and `panel`; do not use `default / min / max / subtype` on matrices
+- Exported boundary types do not currently support `struct` or `array`
 - `int / bool` boundaries are useful for mode switches, enums, and `lightgroup_id` style parameters
 - Built-in geometry helpers are available in the function body: `glsl_position()`, `glsl_normal()`, `glsl_true_normal()`, `glsl_incoming()`
 - Built-in ambient-light helper: `glsl_ambient_lighting()`
