@@ -251,6 +251,7 @@ enum eMaterialProbe {
 class ShaderModule {
  private:
   std::array<StaticShader, MAX_SHADER_TYPE> shaders_;
+  ShaderGroups failed_shader_groups_ = ShaderGroups::NONE;
 
   Mutex mutex_;
 
@@ -311,6 +312,8 @@ class ShaderModule {
   {
     return static_shaders_load(request_bits, true);
   }
+
+  bool static_shaders_has_failed(ShaderGroups request_bits);
 
   bool request_specializations(bool block_until_ready,
                                int render_buffers_shadow_id,

@@ -326,7 +326,7 @@ namespace blender::eevee
 
     /* Light bake. */
 
-    void init_light_bake(Depsgraph* depsgraph, draw::Manager* manager);
+    bool init_light_bake(Depsgraph* depsgraph, draw::Manager* manager);
     void light_bake_irradiance(
       Object& probe,
       FunctionRef<void()> context_enable,

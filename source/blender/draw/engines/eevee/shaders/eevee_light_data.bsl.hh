@@ -15,7 +15,8 @@ struct LightRenderData {
   [[storage(LIGHT_BUF_SLOT, read)]] const LightData (&light_buf)[];
   [[storage(LIGHT_ZBIN_BUF_SLOT, read)]] const uint (&light_zbin_buf)[];
   [[storage(LIGHT_TILE_BUF_SLOT, read)]] const uint (&light_tile_buf)[];
-  [[uniform(WORLD_SUNLIGHT_BUF_SLOT)]] const LightData (&sunlight_buf)[WORLD_SUN_MAX];
+  /* Metal emits scoped enum constants inside stage namespaces. */
+  [[uniform(WORLD_SUNLIGHT_BUF_SLOT)]] const LightData (&sunlight_buf)[2];
 };
 
 struct LightShaderEvalData {

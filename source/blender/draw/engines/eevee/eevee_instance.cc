@@ -275,7 +275,7 @@ namespace blender::eevee
     /* Request static shaders */
     ShaderGroups shader_request = DEFERRED_LIGHTING_SHADERS | SHADOW_SHADERS | FILM_SHADERS |
       HIZ_SHADERS | SPHERE_PROBE_SHADERS | VOLUME_PROBE_SHADERS |
-      LIGHT_CULLING_SHADERS;
+      LIGHT_CULLING_SHADERS | SUBSURFACE_SHADERS | VOLUME_EVAL_SHADERS;
     SET_FLAG_FROM_TEST(shader_request, depth_of_field.enabled(), DEPTH_OF_FIELD_SHADERS);
     SET_FLAG_FROM_TEST(shader_request, needs_planar_probe_passes(), DEFERRED_PLANAR_SHADERS);
     SET_FLAG_FROM_TEST(shader_request, needs_lightprobe_sphere_passes(), DEFERRED_CAPTURE_SHADERS);
@@ -315,10 +315,14 @@ namespace blender::eevee
     /* Needed bits to be able to display something to the screen. */
     needed_shaders = shader_request | DEFAULT_MATERIALS;
 
+    if (is_image_render && shaders.static_shaders_has_failed(shader_request))
+    {
+      info_append_i18n("Error: Failed to compile EEVEE engine shaders");
+    }
     skip_render_ = !is_loaded(needed_shaders) || !film.is_valid_render_extent();
   }
 
-  void Instance::init_light_bake(Depsgraph* depsgraph, draw::Manager* manager)
+  bool Instance::init_light_bake(Depsgraph* depsgraph, draw::Manager* manager)
   {
     telemetry.reset();
     this->depsgraph = depsgraph;
@@ -359,9 +363,16 @@ namespace blender::eevee
     volume.init();
     lookdev.init(&empty_rect);
 
-    needed_shaders = IRRADIANCE_BAKE_SHADERS | SHADOW_SHADERS | SURFEL_SHADERS;
+    needed_shaders = IRRADIANCE_BAKE_SHADERS | LIGHT_CULLING_SHADERS | SHADOW_SHADERS |
+                     SURFEL_SHADERS;
     shaders.static_shaders_load_async(needed_shaders);
-    shaders.static_shaders_wait_ready(needed_shaders);
+    loaded_shaders = shaders.static_shaders_wait_ready(needed_shaders);
+    if (shaders.static_shaders_has_failed(needed_shaders))
+    {
+      info_append_i18n("Error: Failed to compile EEVEE light bake shaders");
+      return false;
+    }
+    return is_loaded(needed_shaders);
   }
 
   void Instance::set_time(float time)
@@ -556,20 +567,6 @@ namespace blender::eevee
       /* We might run in the case where the next check sets skip_render_ to false after the
        * begin_sync was skipped, which would call `end_sync` function with invalid data. */
       return;
-    }
-
-    bool use_sss = pipelines.deferred.closure_bits_get() & CLOSURE_SSS;
-    bool use_volume = volume.will_enable();
-
-    ShaderGroups request_bits = NONE;
-    SET_FLAG_FROM_TEST(request_bits, use_sss, SUBSURFACE_SHADERS);
-    SET_FLAG_FROM_TEST(request_bits, use_volume, VOLUME_EVAL_SHADERS);
-    loaded_shaders |= shaders.static_shaders_load_async(request_bits);
-    needed_shaders |= request_bits;
-
-    if (is_image_render)
-    {
-      loaded_shaders |= shaders.static_shaders_wait_ready(request_bits);
     }
 
     materials.end_sync();
@@ -960,8 +957,15 @@ namespace blender::eevee
       GPU_framebuffer_clear_color_depth(dfbl->default_fb, double4(0.0), 1.0f);
       if (!is_loaded(needed_shaders & ~WORLD_SHADERS))
       {
-        info_append_i18n("Compiling EEVEE engine shaders");
-        DRW_viewport_request_redraw();
+        if (shaders.static_shaders_has_failed(needed_shaders & ~WORLD_SHADERS))
+        {
+          info_append_i18n("Error: Failed to compile EEVEE engine shaders");
+        }
+        else
+        {
+          info_append_i18n("Compiling EEVEE engine shaders");
+          DRW_viewport_request_redraw();
+        }
       }
       /* Do not swap if the velocity module didn't go through a full sync cycle. */
       if (!is_loaded(needed_shaders))

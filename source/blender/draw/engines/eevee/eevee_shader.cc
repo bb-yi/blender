@@ -404,17 +404,27 @@ ShaderGroups ShaderModule::static_shaders_load(const ShaderGroups request_bits,
   auto request = [&](ShaderGroups bit, Span<eShaderType> shader_types) {
     if (request_bits & bit) {
       bool all_loaded = true;
+      bool any_failed = false;
       for (eShaderType shader : shader_types) {
         if (shaders_[shader].is_ready()) {
-          /* Noop. */
+          if (shaders_[shader].get() == nullptr) {
+            all_loaded = false;
+            any_failed = true;
+          }
         }
         else if (block_until_ready) {
-          shaders_[shader].get();
+          if (shaders_[shader].get() == nullptr) {
+            all_loaded = false;
+            any_failed = true;
+          }
         }
         else {
           shaders_[shader].ensure_compile_async();
           all_loaded = false;
         }
+      }
+      if (any_failed) {
+        failed_shader_groups_ |= bit;
       }
       if (all_loaded) {
         ready |= bit;
@@ -427,17 +437,22 @@ ShaderGroups ShaderModule::static_shaders_load(const ShaderGroups request_bits,
     /* These are the slowest shaders by far. Submitting them first make sure they overlap with
      * other shaders compilation. */
     const eShaderType shader_list[] = {DEFERRED_LIGHT_TRIPLE,
+                                       BAKE_LIGHT_SHADER_SURFACE,
+                                       DEBUG_GBUFFER,
                                        DEFERRED_LIGHT_SINGLE,
                                        DEFERRED_LIGHT_DOUBLE,
                                        DEFERRED_COMBINE,
                                        DEFERRED_AOV_CLEAR,
+                                       DEFERRED_THICKNESS_AMEND,
                                        DEFERRED_TILE_CLASSIFY,
                                        OUTLINE_DETECT,
                                        OUTLINE_JFA_INIT,
                                        OUTLINE_FACTOR_BLUR,
                                        OUTLINE_JFA_STEP,
                                        OUTLINE_RESOLVE,
-                                       OUTLINE_FREESTYLE};
+                                       OUTLINE_FREESTYLE,
+                                       STENCIL_VALUE_VISUALIZE,
+                                       TRANSPARENCY_RESOLVE};
     request(DEFERRED_LIGHTING_SHADERS, AS_SPAN(shader_list));
   }
   {
@@ -473,7 +488,7 @@ ShaderGroups ShaderModule::static_shaders_load(const ShaderGroups request_bits,
     request(DEFERRED_CAPTURE_SHADERS, AS_SPAN(shader_list));
   }
   {
-    const eShaderType shader_list[] = {DEFERRED_PLANAR_EVAL};
+    const eShaderType shader_list[] = {DEFERRED_PLANAR_EVAL, DISPLAY_PROBE_PLANAR};
     request(DEFERRED_PLANAR_SHADERS, AS_SPAN(shader_list));
   }
   {
@@ -497,7 +512,7 @@ ShaderGroups ShaderModule::static_shaders_load(const ShaderGroups request_bits,
     request(DEPTH_OF_FIELD_SHADERS, AS_SPAN(shader_list));
   }
   {
-    const eShaderType shader_list[] = {HIZ_UPDATE, HIZ_UPDATE_LAYER};
+    const eShaderType shader_list[] = {HIZ_DEBUG, HIZ_UPDATE, HIZ_UPDATE_LAYER};
     request(HIZ_SHADERS, AS_SPAN(shader_list));
   }
   {
@@ -541,6 +556,9 @@ ShaderGroups ShaderModule::static_shaders_load(const ShaderGroups request_bits,
   }
   {
     const eShaderType shader_list[] = {SPHERE_PROBE_CONVOLVE,
+                                       DISPLAY_PROBE_SPHERE,
+                                       LOOKDEV_COPY_WORLD,
+                                       LOOKDEV_DISPLAY,
                                        SPHERE_PROBE_IRRADIANCE,
                                        SPHERE_PROBE_REMAP,
                                        SPHERE_PROBE_SELECT,
@@ -548,11 +566,16 @@ ShaderGroups ShaderModule::static_shaders_load(const ShaderGroups request_bits,
     request(SPHERE_PROBE_SHADERS, AS_SPAN(shader_list));
   }
   {
-    const eShaderType shader_list[] = {LIGHTPROBE_IRRADIANCE_WORLD, LIGHTPROBE_IRRADIANCE_LOAD};
+    const eShaderType shader_list[] = {DEBUG_IRRADIANCE_GRID,
+                                       DEBUG_SURFELS,
+                                       DISPLAY_PROBE_VOLUME,
+                                       LIGHTPROBE_IRRADIANCE_WORLD,
+                                       LIGHTPROBE_IRRADIANCE_LOAD};
     request(VOLUME_PROBE_SHADERS, AS_SPAN(shader_list));
   }
   {
     const eShaderType shader_list[] = {SHADOW_CLIPMAP_CLEAR,
+                                       SHADOW_DEBUG,
                                        SHADOW_PAGE_ALLOCATE,
                                        SHADOW_PAGE_CLEAR,
                                        SHADOW_PAGE_DEFRAG,
@@ -581,6 +604,9 @@ ShaderGroups ShaderModule::static_shaders_load(const ShaderGroups request_bits,
     const eShaderType shader_list[] = {SURFEL_CLUSTER_BUILD,
                                        SURFEL_LIGHT,
                                        SURFEL_LIST_BUILD,
+                                       SURFEL_LIST_FLATTEN,
+                                       SURFEL_LIST_PREFIX,
+                                       SURFEL_LIST_PREPARE,
                                        SURFEL_LIST_SORT,
                                        SHADOW_TILEMAP_TAG_USAGE_SURFELS,
                                        SURFEL_RAY};
@@ -603,6 +629,12 @@ ShaderGroups ShaderModule::static_shaders_load(const ShaderGroups request_bits,
   return ready;
 }
 
+bool ShaderModule::static_shaders_has_failed(const ShaderGroups request_bits)
+{
+  std::lock_guard lock(mutex_);
+  return bool(failed_shader_groups_ & request_bits);
+}
+
 bool ShaderModule::request_specializations(bool block_until_ready,
                                            int render_buffers_shadow_id,
                                            int shadow_ray_count,
@@ -620,9 +652,15 @@ bool ShaderModule::request_specializations(bool block_until_ready,
        use_lightprobe_eval},
       [&]() {
         Vector<AsyncSpecializationHandle> handles;
+        gpu::Shader *shaders[3];
         for (int i : IndexRange(3)) {
-          gpu::Shader *shader = static_shader_get(eShaderType(DEFERRED_LIGHT_SINGLE + i));
+          shaders[i] = static_shader_get(eShaderType(DEFERRED_LIGHT_SINGLE + i));
+          if (shaders[i] == nullptr) {
+            return handles;
+          }
+        }
 
+        for (gpu::Shader *shader : shaders) {
           ShaderSpecialization specialization;
           specialization.shader = shader;
           gpu::shader::SpecializationConstants &constants = specialization.constants;
@@ -646,6 +684,10 @@ bool ShaderModule::request_specializations(bool block_until_ready,
 
         return handles;
       });
+
+  if (handles.is_empty()) {
+    return false;
+  }
 
   bool is_ready = true;
   for (AsyncSpecializationHandle &handle : handles) {
