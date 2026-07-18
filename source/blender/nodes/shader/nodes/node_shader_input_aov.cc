@@ -20,9 +20,9 @@ static void node_declare(NodeDeclarationBuilder &b)
   b.add_output<decl::Image>("Value"_ustr);
 }
 
-static void node_shader_buts_input_aov(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
+static void node_shader_buts_input_aov(ui::Layout &layout, bContext *C, PointerRNA *ptr)
 {
-  layout.prop(ptr, "aov_name", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+  draw_aov_name_search(layout, C, ptr);
 }
 
 static void node_shader_init_input_aov(bNodeTree * /*ntree*/, bNode *node)

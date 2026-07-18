@@ -32,6 +32,8 @@
 #  define NODE_SHADER_MATERIALX_END
 #endif
 
+struct PointerRNA;
+
 namespace blender {
 
 struct bContext;
@@ -41,6 +43,10 @@ struct bNodeTreeExec;
 struct GPUNodeLink;
 struct GPUNodeStack;
 struct GPUMaterial;
+
+namespace ui {
+class Layout;
+}
 
 bool sh_node_poll_default(const bke::bNodeType *ntype,
                           const bNodeTree *ntree,
@@ -66,6 +72,7 @@ bool object_filter_or_npr_eevee_shader_nodes_poll(const bContext *C);
 bool filter_eevee_shader_nodes_poll(const bContext *C);
 bool npr_shader_nodes_poll(const bContext *C);
 bool filter_or_npr_eevee_shader_nodes_poll(const bContext *C);
+void draw_aov_name_search(ui::Layout &layout, bContext *C, PointerRNA *ptr);
 
 /* ********* exec data struct, remains internal *********** */
 

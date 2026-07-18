@@ -494,9 +494,9 @@ static void node_init(bNodeTree * /*tree*/, bNode *node)
   node->storage = MEM_new<NodeEeveeFilterGraphAOVInput>(__func__);
 }
 
-static void draw_buttons(ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr)
+static void draw_buttons(ui::Layout &layout, bContext *C, PointerRNA *ptr)
 {
-  layout.prop(ptr, "aov_name", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+  draw_aov_name_search(layout, C, ptr);
 }
 
 }  // namespace aov_input
