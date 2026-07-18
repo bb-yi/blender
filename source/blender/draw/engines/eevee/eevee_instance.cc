@@ -583,8 +583,7 @@ namespace blender::eevee
         (scene->eevee.flag & SCE_EEVEE_SHADOW_ENABLED) &&
         (scene->eevee.flag & SCE_EEVEE_SHADOW_JITTERED_VIEWPORT);
     discard_viewport_history_ = is_viewport() &&
-                                (depsgraph_last_update_ != DEG_get_update_count(depsgraph) ||
-                                 shadows.viewport_history_invalidated() ||
+                                (shadows.viewport_history_invalidated() ||
                                  viewport_soft_shadow_transform);
     if (is_viewport())
     {

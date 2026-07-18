@@ -633,7 +633,7 @@ struct Film {
     color_src = apply_outline_to_combined(color_src, outline_color);
     const float outline_factor = saturate(outline_color.a);
 
-    if (use_reprojection) {
+    if (use_reprojection && uni.uniform_buf.film.use_history) {
       /* Interactive accumulation. Do reprojection and Temporal Anti-Aliasing. */
 
       /* Reproject by finding where this pixel was in the previous frame. */
@@ -672,12 +672,19 @@ struct Film {
     }
     else {
       /* Everything is static. Use render accumulation. */
-      color_dst = texelFetch(in_combined_tx, dst.texel, 0);
-      color_dst.rgb = colorspace::YCoCg_from_scene_linear(color_dst.rgb);
+      if (uni.uniform_buf.film.use_history) {
+        color_dst = texelFetch(in_combined_tx, dst.texel, 0);
+        color_dst.rgb = colorspace::YCoCg_from_scene_linear(color_dst.rgb);
 
-      /* Luma weighted blend to avoid flickering. */
-      weight_dst = luma_weight(uni, color_dst.x) * dst.weight;
-      weight_src = color_weight;
+        /* Luma weighted blend to avoid flickering. */
+        weight_dst = luma_weight(uni, color_dst.x) * dst.weight;
+        weight_src = color_weight;
+      }
+      else {
+        color_dst = color_src;
+        weight_dst = 0.0f;
+        weight_src = color_weight;
+      }
     }
     /* Weighted blend. */
     color = color_dst * weight_dst + color_src * weight_src;

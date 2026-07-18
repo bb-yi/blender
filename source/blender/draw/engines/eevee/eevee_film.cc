@@ -832,6 +832,14 @@ void Film::end_sync()
 
 float2 Film::pixel_jitter_get() const
 {
+  if (inst_.is_viewport() && inst_.discard_viewport_history() &&
+      inst_.sampling.interactive_mode() &&
+      !inst_.sampling.use_custom_pixel_jitter_sample())
+  {
+    /* Without reprojection history, sub-pixel jitter is exposed as whole-image motion. */
+    return float2(0.0f);
+  }
+
   float2 jitter = inst_.sampling.rng_2d_get(SAMPLING_FILTER_U);
 
   if (!use_box_filter && data_.filter_radius < M_SQRT1_2 && !inst_.camera.is_panoramic() &&
