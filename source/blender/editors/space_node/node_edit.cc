@@ -2016,21 +2016,25 @@ static wmOperatorStatus node_glsl_function_refresh_exec(bContext *C, wmOperator 
     return OPERATOR_CANCELLED;
   }
 
-  if (node_shader_glsl_function_source_dirty(*node)) {
-    std::string error;
-    if (!node_shader_glsl_function_apply_draft(*CTX_data_main(C), *ntree, *node, error)) {
-      if (!error.empty()) {
-        BKE_report(op->reports, RPT_ERROR, error.c_str());
-      }
-      return OPERATOR_CANCELLED;
-    }
-    WM_event_add_notifier(C, NC_TEXT | NA_EDITED, node->id);
-    WM_event_add_notifier(C, NC_NODE | NA_EDITED, nullptr);
-    return OPERATOR_FINISHED;
+  bool source_changed = false;
+  std::string error;
+  if (!node_shader_glsl_function_code_source_ensure(
+        *CTX_data_main(C), *node, source_changed, error))
+  {
+    BKE_report(op->reports, RPT_ERROR, error.c_str());
+    return OPERATOR_CANCELLED;
   }
-
-  node_glsl_function_refresh_node(*CTX_data_main(C), *ntree, *node);
-  WM_event_add_notifier(C, NC_NODE | NA_EDITED, &ntree->id);
+  if (!node_shader_glsl_function_refresh_text_users(*CTX_data_main(C), *ntree, *node, error))
+  {
+    if (!error.empty()) {
+      BKE_report(op->reports, RPT_ERROR, error.c_str());
+    }
+    return OPERATOR_CANCELLED;
+  }
+  if (source_changed) {
+    WM_event_add_notifier(C, NC_TEXT | NA_EDITED, node->id);
+  }
+  WM_event_add_notifier(C, NC_NODE | NA_EDITED, nullptr);
 
   return OPERATOR_FINISHED;
 }
@@ -2100,23 +2104,6 @@ static wmOperatorStatus node_glsl_function_toggle_code_mode_exec(bContext *C,
   BKE_ntree_update_tag_node_property(ntree, node);
   nodes::update_node_declaration_and_sockets(*ntree, *node);
   BKE_main_ensure_invariants(*CTX_data_main(C), ntree->id);
-  WM_event_add_notifier(C, NC_NODE | NA_EDITED, &ntree->id);
-  return OPERATOR_FINISHED;
-}
-
-static wmOperatorStatus node_glsl_function_discard_draft_exec(bContext *C,
-                                                               wmOperator * /*op*/)
-{
-  bNodeTree *ntree = nullptr;
-  PointerRNA nodeptr = {};
-  bNode *node = nullptr;
-  if (!node_glsl_function_context_get(C, &ntree, &nodeptr, &node) ||
-      !node_shader_glsl_function_source_dirty(*node))
-  {
-    return OPERATOR_CANCELLED;
-  }
-
-  node_shader_glsl_function_discard_draft(*node);
   WM_event_add_notifier(C, NC_NODE | NA_EDITED, &ntree->id);
   return OPERATOR_FINISHED;
 }
@@ -2214,16 +2201,6 @@ void NODE_OT_glsl_function_toggle_code_mode(wmOperatorType *ot)
   ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
 }
 
-void NODE_OT_glsl_function_discard_draft(wmOperatorType *ot)
-{
-  ot->name = "Discard GLSL Function Code Draft";
-  ot->description = "Discard unapplied GLSL source and function name edits";
-  ot->idname = "NODE_OT_glsl_function_discard_draft";
-  ot->poll = node_glsl_function_refresh_poll;
-  ot->exec = node_glsl_function_discard_draft_exec;
-  ot->flag = OPTYPE_REGISTER | OPTYPE_UNDO;
-}
-
 void NODE_OT_glsl_function_make_internal(wmOperatorType *ot)
 {
   ot->name = "Convert GLSL Function Source to Internal";
@@ -2237,7 +2214,8 @@ void NODE_OT_glsl_function_make_internal(wmOperatorType *ot)
 void NODE_OT_glsl_function_refresh(wmOperatorType *ot)
 {
   ot->name = "Refresh GLSL Function Node";
-  ot->description = "Re-read the GLSL source and refresh the node sockets and status";
+  ot->description = "Refresh every GLSL Function node using this Text without changing their "
+                    "independent function selections";
   ot->idname = "NODE_OT_glsl_function_refresh";
 
   ot->exec = node_glsl_function_refresh_exec;

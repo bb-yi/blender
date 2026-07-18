@@ -18,6 +18,7 @@
 #include "BLO_read_write.hh"
 
 #include "BKE_image.hh"
+#include "BKE_idtype.hh"
 #include "BKE_lib_id.hh"
 #include "BKE_library.hh"
 #include "BKE_main_invariants.hh"
@@ -132,8 +133,6 @@ namespace blender
 
       NodeShaderGLSLFunction* dst_storage = MEM_dupalloc(src_storage);
       dst_storage->define_values = nullptr;
-      dst_storage->edit_source = nullptr;
-      dst_storage->edit_source_session_uid = 0;
       if (src_storage->packed_source != nullptr)
       {
         dst_storage->packed_source = BLI_strdup(src_storage->packed_source);
@@ -172,10 +171,23 @@ namespace blender
                                         bNode& node,
                                         BlendDataReader& reader)
     {
+      static constexpr int legacy_text_edit_baseline_flag = 1 << 2;
       NodeShaderGLSLFunction& storage = node_storage(node);
       BLO_read_string(&reader, &storage.packed_source);
       BLO_read_string(&reader, &storage.edit_source);
+      if ((storage.flags & SHD_GLSL_FUNCTION_EDIT_FUNCTION) != 0)
+      {
+        STRNCPY(storage.function_name, storage.edit_function_name);
+      }
+      storage.flags &= ~SHD_GLSL_FUNCTION_EDIT_FUNCTION;
+      storage.edit_function_name[0] = '\0';
       storage.edit_source_session_uid = 0;
+      storage.edit_source_hash = 0;
+      if ((storage.flags & legacy_text_edit_baseline_flag) != 0)
+      {
+        MEM_SAFE_DELETE(storage.edit_source);
+        storage.flags &= ~legacy_text_edit_baseline_flag;
+      }
       BLO_read_array_and_validate_size(&reader,
                                        &storage.define_values,
                                        &storage.define_values_num);
@@ -5207,11 +5219,6 @@ namespace blender
       return true;
     }
 
-    static uint64_t glsl_source_hash(const StringRef source)
-    {
-      return hash_string(source);
-    }
-
     static const bNodeSocket* find_closure_output_socket_by_name(const bNode& node, const StringRef name)
     {
       if (!node.is_type("NodeClosureOutput"_ustr))
@@ -6884,7 +6891,7 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
         reinterpret_cast<GPUShaderCreateInfo*>(&create_info));
       if (shader == nullptr)
       {
-        r_error = "The GPU shader compiler rejected the GLSL draft";
+        r_error = "The GPU shader compiler rejected the current GLSL source";
         return false;
       }
       GPU_shader_free(shader);
@@ -6966,8 +6973,7 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
               break;
             }
           }
-          if (param.meta.subtype.has_value() &&
-              !(param.type == GLSLBoundaryType::Vec4 && *param.meta.subtype == PROP_COLOR))
+          if (param.meta.subtype.has_value())
           {
             decl.subtype(*param.meta.subtype);
           }
@@ -7408,30 +7414,24 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
       }
     }
 
-    static void draw_display_mode_switch(ui::Layout& layout,
-                                         PointerRNA* ptr,
-                                         const bool source_dirty)
+    static void draw_display_mode_switch(ui::Layout& layout, PointerRNA* ptr)
     {
       ui::Layout& row = layout.row(true);
-      row.red_alert_set(source_dirty);
       row.prop(ptr, "display_mode", ui::ITEM_R_EXPAND, std::nullopt, ICON_NONE);
     }
 
     static GLSLParseResult draw_node_layout_content(ui::Layout& layout, bContext* C, PointerRNA* ptr)
     {
       bNode& node = *static_cast<bNode*>(ptr->data);
-      const bool source_dirty = node_shader_glsl_function_source_dirty(node);
-
       layout.use_property_split_set(false);
       layout.use_property_decorate_set(false);
-      draw_display_mode_switch(layout, ptr, source_dirty);
+      draw_display_mode_switch(layout, ptr);
 
       layout.use_property_split_set(true);
       layout.use_property_decorate_set(false);
 
       {
         ui::Layout& row = layout.row(false);
-        row.enabled_set(!source_dirty);
         row.prop(
           ptr, "source_mode", ui::ITEM_R_SPLIT_EMPTY_NAME | ui::ITEM_R_EXPAND, std::nullopt, ICON_NONE);
       }
@@ -7473,8 +7473,6 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
           row.use_property_decorate_set(false);
 
           ui::Layout& source_row = row.row(true);
-          source_row.enabled_set(!source_dirty);
-
           if (is_internal)
           {
             if (C != nullptr)
@@ -7496,7 +7494,6 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
       }
 
       ui::Layout& function_row = layout.row(false);
-      function_row.enabled_set(!source_dirty);
       function_row.prop(ptr, "function_name", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
 
       const NodeShaderGLSLFunction& storage = node_storage(node);
@@ -7531,43 +7528,15 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
       const NodeShaderGLSLFunction& storage = node_storage(node);
       const bool is_internal = storage.source_mode == SHD_GLSL_FUNCTION_SOURCE_INTERNAL;
       const bool has_script = node.id != nullptr;
-      const bool source_dirty = node_shader_glsl_function_source_dirty(node);
-
-      draw_display_mode_switch(layout, ptr, source_dirty);
+      draw_display_mode_switch(layout, ptr);
 
       ui::Layout& toolbar = layout.row(true);
       ui::Layout& function_field = toolbar.row(true);
       function_field.enabled_set(!is_internal || has_script);
-      function_field.prop(
-        ptr, is_internal ? "edit_function_name" : "function_name", UI_ITEM_NONE, "", ICON_NONE);
-
-      if (is_internal)
-      {
-        ui::Layout& discard_button = toolbar.row(true);
-        discard_button.enabled_set(source_dirty);
-        discard_button.op("node.glsl_function_discard_draft", "", ICON_LOOP_BACK);
-      }
-      else
-      {
-        toolbar.op("node.glsl_function_make_internal", "", ICON_DUPLICATE);
-      }
+      const GLSLParseResult parse_result = parse_glsl_for_node(node);
+      function_field.red_alert_set(!parse_result.ok && storage.function_name[0] != '\0');
+      function_field.prop(ptr, "function_name", UI_ITEM_NONE, "", ICON_NONE);
       toolbar.op("node.glsl_function_refresh", "", ICON_FILE_REFRESH);
-
-      ui::Layout& source_row = layout.row(false);
-      source_row.active_set(false);
-      if (is_internal && has_script)
-      {
-        const Text& text = *reinterpret_cast<const Text*>(node.id);
-        source_row.label(text.id.name + 2, ICON_FILE_TEXT);
-      }
-      else if (!is_internal && storage.filepath[0] != '\0')
-      {
-        source_row.label(BLI_path_basename(storage.filepath), ICON_FILE_SCRIPT);
-      }
-      else
-      {
-        source_row.label(IFACE_("No GLSL source"), ICON_ERROR);
-      }
 
       ui::Layout& editor = layout.column(false);
       editor.enabled_set(is_internal && has_script && ID_IS_EDITABLE(node.id));
@@ -7580,10 +7549,6 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
         editor.prop(ptr, "source_code", UI_ITEM_NONE, "", ICON_NONE);
       }
 
-      if (source_dirty)
-      {
-        layout.label(IFACE_("Unapplied Changes"), ICON_INFO);
-      }
     }
 
     static void draw_glsl_define_settings(ui::Layout& layout,
@@ -8074,7 +8039,7 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
   {
     static constexpr char default_source[] =
       "/* @glsl_meta v1\n"
-      "color: label=\"Color\" default=vec4(1.0)\n"
+      "color: label=\"Color\" default=vec4(1.0) subtype=color\n"
       "*/\n"
       "vec4 glsl_function(vec4 color)\n"
       "{\n"
@@ -8098,16 +8063,30 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
       r_changed = true;
     }
 
+    if (storage->edit_source != nullptr)
+    {
+      if (!ID_IS_EDITABLE(&text->id))
+      {
+        r_error = "The GLSL Text data-block is not editable";
+        return false;
+      }
+      BKE_text_clear(text);
+      BKE_text_write(text, storage->edit_source, int(strlen(storage->edit_source)));
+      MEM_SAFE_DELETE(storage->edit_source);
+      storage->edit_source_session_uid = 0;
+      storage->edit_source_hash = 0;
+      storage->parse_status = SHD_GLSL_FUNCTION_PARSE_DIRTY;
+      storage->signature_hash = 0;
+      node_shader_glsl_function_tag_text_users_dirty(bmain, node);
+      r_changed = true;
+      r_error.clear();
+      return true;
+    }
+
     size_t source_len = 0;
     char* source = txt_to_buf(text, &source_len);
     BLI_SCOPED_DEFER([&]() { MEM_delete(source); });
     if (source_len != 0)
-    {
-      r_error.clear();
-      return true;
-    }
-    if (storage->edit_source != nullptr ||
-        (storage->flags & SHD_GLSL_FUNCTION_EDIT_FUNCTION) != 0)
     {
       r_error.clear();
       return true;
@@ -8122,6 +8101,7 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
     STRNCPY(storage->function_name, "glsl_function");
     storage->parse_status = SHD_GLSL_FUNCTION_PARSE_DIRTY;
     storage->signature_hash = 0;
+    node_shader_glsl_function_tag_text_users_dirty(bmain, node);
     r_changed = true;
     r_error.clear();
     return true;
@@ -8142,34 +8122,6 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
     return node_shader_glsl_function_source_get(node, r_source, r_error);
   }
 
-  static bool node_shader_glsl_function_draft_base_ensure(bNode& node)
-  {
-    NodeShaderGLSLFunction* storage = static_cast<NodeShaderGLSLFunction*>(node.storage);
-    if (storage == nullptr ||
-        storage->source_mode != SHD_GLSL_FUNCTION_SOURCE_INTERNAL || node.id == nullptr)
-    {
-      return false;
-    }
-    if (storage->edit_source_session_uid != 0)
-    {
-      return true;
-    }
-
-    std::string source;
-    std::string error;
-    if (!node_shader_glsl_function_source_get(node, source, error))
-    {
-      return false;
-    }
-    const Text& text = *reinterpret_cast<const Text*>(node.id);
-    storage->edit_source_session_uid = text.id.session_uid;
-    if (storage->edit_source_hash == 0)
-    {
-      storage->edit_source_hash = nodes::node_shader_glsl_function_cc::glsl_source_hash(source);
-    }
-    return true;
-  }
-
   void node_shader_glsl_function_edit_source_set(bNode& node, const char* source)
   {
     NodeShaderGLSLFunction* storage = static_cast<NodeShaderGLSLFunction*>(node.storage);
@@ -8181,212 +8133,121 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
 
     std::string current_source;
     std::string error;
-    if (!node_shader_glsl_function_source_get(node, current_source, error))
+    if (!node_shader_glsl_function_edit_source_get(node, current_source, error) ||
+        current_source == source || !ID_IS_EDITABLE(node.id))
     {
       return;
-    }
-
-    if (current_source == source)
-    {
-      MEM_SAFE_DELETE(storage->edit_source);
-      if ((storage->flags & SHD_GLSL_FUNCTION_EDIT_FUNCTION) == 0)
-      {
-        storage->edit_source_session_uid = 0;
-        storage->edit_source_hash = 0;
-      }
-      return;
-    }
-
-    if (!node_shader_glsl_function_draft_base_ensure(node))
-    {
-      return;
-    }
-    MEM_SAFE_DELETE(storage->edit_source);
-    storage->edit_source = BLI_strdup(source);
-  }
-
-  void node_shader_glsl_function_edit_function_set(bNode& node, const char* function_name)
-  {
-    NodeShaderGLSLFunction* storage = static_cast<NodeShaderGLSLFunction*>(node.storage);
-    if (storage == nullptr || function_name == nullptr ||
-        storage->source_mode != SHD_GLSL_FUNCTION_SOURCE_INTERNAL || node.id == nullptr)
-    {
-      return;
-    }
-
-    if (STREQ(storage->function_name, function_name))
-    {
-      storage->flags &= ~SHD_GLSL_FUNCTION_EDIT_FUNCTION;
-      storage->edit_function_name[0] = '\0';
-      if (storage->edit_source == nullptr)
-      {
-        storage->edit_source_session_uid = 0;
-        storage->edit_source_hash = 0;
-      }
-      return;
-    }
-
-    if (!node_shader_glsl_function_draft_base_ensure(node))
-    {
-      return;
-    }
-    STRNCPY(storage->edit_function_name, function_name);
-    storage->flags |= SHD_GLSL_FUNCTION_EDIT_FUNCTION;
-  }
-
-  bool node_shader_glsl_function_source_dirty(const bNode& node)
-  {
-    const NodeShaderGLSLFunction* storage = static_cast<const NodeShaderGLSLFunction*>(
-      node.storage);
-    return storage != nullptr &&
-      (storage->edit_source != nullptr ||
-       (storage->flags & SHD_GLSL_FUNCTION_EDIT_FUNCTION) != 0);
-  }
-
-  void node_shader_glsl_function_discard_draft(bNode& node)
-  {
-    NodeShaderGLSLFunction* storage = static_cast<NodeShaderGLSLFunction*>(node.storage);
-    if (storage == nullptr)
-    {
-      return;
-    }
-    MEM_SAFE_DELETE(storage->edit_source);
-    storage->flags &= ~SHD_GLSL_FUNCTION_EDIT_FUNCTION;
-    storage->edit_function_name[0] = '\0';
-    storage->edit_source_session_uid = 0;
-    storage->edit_source_hash = 0;
-  }
-
-  bool node_shader_glsl_function_apply_draft(Main& bmain,
-                                             bNodeTree& ntree,
-                                             bNode& node,
-                                             std::string& r_error)
-  {
-    namespace file_ns = nodes::node_shader_glsl_function_cc;
-    NodeShaderGLSLFunction* storage = static_cast<NodeShaderGLSLFunction*>(node.storage);
-    if (storage == nullptr || !node_shader_glsl_function_source_dirty(node))
-    {
-      r_error.clear();
-      return true;
-    }
-    if (storage->source_mode != SHD_GLSL_FUNCTION_SOURCE_INTERNAL || node.id == nullptr)
-    {
-      r_error = "Only internal GLSL Text sources can apply code drafts";
-      return false;
     }
 
     Text& text = *reinterpret_cast<Text*>(node.id);
-    const bool source_changed = storage->edit_source != nullptr;
-    if (source_changed && !ID_IS_EDITABLE(&text.id))
+    BKE_text_clear(&text);
+    BKE_text_write(&text, source, int(strlen(source)));
+    MEM_SAFE_DELETE(storage->edit_source);
+    storage->edit_source_session_uid = 0;
+    storage->edit_source_hash = 0;
+    storage->parse_status = SHD_GLSL_FUNCTION_PARSE_DIRTY;
+    storage->signature_hash = 0;
+  }
+
+  struct GLSLTextUser
+  {
+    ID* owner_id;
+    bNodeTree* tree;
+    bNode* node;
+  };
+
+  static Vector<GLSLTextUser> node_shader_glsl_function_text_users(Main& bmain,
+                                                                   const bNode& node)
+  {
+    Vector<GLSLTextUser> users;
+    if (node.id == nullptr)
     {
-      r_error = "The GLSL Text data-block is not editable";
-      return false;
-    }
-    if (storage->edit_source_session_uid != 0 &&
-        storage->edit_source_session_uid != text.id.session_uid)
-    {
-      r_error = "The GLSL source changed while the code draft was open";
-      return false;
+      return users;
     }
 
-    std::string current_source;
-    if (!node_shader_glsl_function_source_get(node, current_source, r_error))
+    FOREACH_NODETREE_BEGIN (&bmain, user_tree, owner_id)
     {
-      return false;
-    }
-    if (file_ns::glsl_source_hash(current_source) != storage->edit_source_hash)
-    {
-      r_error = "The GLSL Text was modified outside this node; discard or copy the draft before "
-                "refreshing";
-      return false;
-    }
-
-    const std::string candidate_source = storage->edit_source != nullptr ? storage->edit_source :
-                                                                          current_source;
-    const StringRef candidate_function =
-      (storage->flags & SHD_GLSL_FUNCTION_EDIT_FUNCTION) != 0 ?
-        StringRef(storage->edit_function_name) :
-        StringRef(storage->function_name);
-
-    struct TextUser {
-      ID* owner_id;
-      bNodeTree* tree;
-      bNode* node;
-    };
-    Vector<TextUser> users;
-    if (source_changed)
-    {
-      FOREACH_NODETREE_BEGIN (&bmain, user_tree, owner_id)
+      for (bNode& user_node : user_tree->nodes)
       {
-        for (bNode& user_node : user_tree->nodes)
+        if (user_node.type_legacy == SH_NODE_GLSL_FUNCTION && user_node.storage != nullptr &&
+            user_node.id == node.id)
         {
-          if (user_node.type_legacy != SH_NODE_GLSL_FUNCTION || user_node.storage == nullptr ||
-              user_node.id != &text.id)
-          {
-            continue;
-          }
-          if (!ID_IS_EDITABLE(owner_id))
-          {
-            r_error = "A linked node tree uses this GLSL Text and cannot be refreshed atomically";
-            return false;
-          }
-          if (&user_node != &node && node_shader_glsl_function_source_dirty(user_node))
-          {
-            r_error = "Another GLSL Function node has unapplied edits for this Text";
-            return false;
-          }
           users.append({owner_id, user_tree, &user_node});
         }
       }
-      FOREACH_NODETREE_END;
     }
-    else
+    FOREACH_NODETREE_END;
+    return users;
+  }
+
+  void node_shader_glsl_function_tag_text_users_dirty(Main& bmain, const bNode& node)
+  {
+    for (const GLSLTextUser& user : node_shader_glsl_function_text_users(bmain, node))
     {
-      users.append({&ntree.id, &ntree, &node});
+      NodeShaderGLSLFunction& user_storage =
+        *static_cast<NodeShaderGLSLFunction*>(user.node->storage);
+      user_storage.parse_status = SHD_GLSL_FUNCTION_PARSE_DIRTY;
+      user_storage.signature_hash = 0;
+    }
+  }
+
+  bool node_shader_glsl_function_refresh_text_users(Main& bmain,
+                                                     bNodeTree& ntree,
+                                                     bNode& node,
+                                                     std::string& r_error)
+  {
+    namespace file_ns = nodes::node_shader_glsl_function_cc;
+    NodeShaderGLSLFunction* storage = static_cast<NodeShaderGLSLFunction*>(node.storage);
+    if (storage == nullptr)
+    {
+      r_error = "Invalid GLSL Function node storage";
+      return false;
     }
 
+    std::string source;
+    if (!node_shader_glsl_function_source_get(node, source, r_error))
+    {
+      return false;
+    }
+
+    Vector<GLSLTextUser> users;
+    if (storage->source_mode == SHD_GLSL_FUNCTION_SOURCE_INTERNAL && node.id != nullptr)
+    {
+      users = node_shader_glsl_function_text_users(bmain, node);
+    }
     if (users.is_empty())
     {
       users.append({&ntree.id, &ntree, &node});
     }
 
-    for (const TextUser& user : users)
-    {
-      const NodeShaderGLSLFunction& user_storage = *static_cast<const NodeShaderGLSLFunction*>(
-        user.node->storage);
-      const StringRef function_name = user.node == &node ? candidate_function :
-                                                          StringRef(user_storage.function_name);
-      const file_ns::GLSLParseResult parse_result = file_ns::parse_glsl_source_for_node(
-        *user.node, candidate_source, function_name);
-      if (!parse_result.ok)
-      {
-        r_error = parse_result.error.empty() ?
-          "A GLSL Function using this Text has no selected function" :
-          parse_result.error;
-        return false;
-      }
-      if (!file_ns::validate_glsl_candidate_with_gpu(parse_result, r_error))
-      {
-        return false;
-      }
-    }
-
-    if (storage->edit_source != nullptr)
-    {
-      BKE_text_clear(&text);
-      BKE_text_write(&text, candidate_source.c_str(), int(candidate_source.size()));
-    }
-    if ((storage->flags & SHD_GLSL_FUNCTION_EDIT_FUNCTION) != 0)
-    {
-      STRNCPY(storage->function_name, storage->edit_function_name);
-    }
-    node_shader_glsl_function_discard_draft(node);
-
+    std::string current_error;
     Set<bNodeTree*> changed_trees;
-    for (const TextUser& user : users)
+    for (const GLSLTextUser& user : users)
     {
-      NodeShaderGLSLFunction& user_storage = *static_cast<NodeShaderGLSLFunction*>(
-        user.node->storage);
+      NodeShaderGLSLFunction& user_storage =
+        *static_cast<NodeShaderGLSLFunction*>(user.node->storage);
+      const file_ns::GLSLParseResult parse_result = file_ns::parse_glsl_source_for_node(
+        *user.node, source, user_storage.function_name);
+      file_ns::cache_parse_status(*user.node, parse_result);
+      std::string error = parse_result.error;
+      if (parse_result.ok && !file_ns::validate_glsl_candidate_with_gpu(parse_result, error))
+      {
+        user_storage.parse_status = SHD_GLSL_FUNCTION_PARSE_ERROR;
+        user_storage.signature_hash = 0;
+      }
+      if (!parse_result.ok || !error.empty())
+      {
+        if (user.node == &node)
+        {
+          current_error = error.empty() ? "GLSL Function did not parse" : std::move(error);
+        }
+        continue;
+      }
+      if (!ID_IS_EDITABLE(user.owner_id))
+      {
+        continue;
+      }
+
       user_storage.parse_status = SHD_GLSL_FUNCTION_PARSE_DIRTY;
       user_storage.signature_hash = 0;
       BKE_ntree_update_tag_node_property(user.tree, user.node);
@@ -8401,7 +8262,17 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
       }
     }
     BKE_main_ensure_invariants(bmain);
-
+    if (!current_error.empty())
+    {
+      const Text* text = node.id != nullptr ? reinterpret_cast<const Text*>(node.id) : nullptr;
+      r_error = "Cannot refresh GLSL Function \"" + std::string(storage->function_name) + "\"";
+      if (text != nullptr)
+      {
+        r_error += " from Text \"" + std::string(text->id.name + 2) + "\"";
+      }
+      r_error += ": " + current_error;
+      return false;
+    }
     r_error.clear();
     return true;
   }

@@ -5034,6 +5034,19 @@ static void rna_ShaderNodeGLSLFunction_tag_dirty(PointerRNA *ptr)
   }
 }
 
+static void rna_ShaderNodeGLSLFunction_clear_legacy_edit_state(bNode &node)
+{
+  NodeShaderGLSLFunction *data = static_cast<NodeShaderGLSLFunction *>(node.storage);
+  if (data == nullptr) {
+    return;
+  }
+  MEM_SAFE_DELETE(data->edit_source);
+  data->flags &= ~SHD_GLSL_FUNCTION_EDIT_FUNCTION;
+  data->edit_function_name[0] = '\0';
+  data->edit_source_session_uid = 0;
+  data->edit_source_hash = 0;
+}
+
 static void rna_ShaderNodeGLSLFunction_script_set(PointerRNA *ptr,
                                                   PointerRNA value,
                                                   ReportList * /*reports*/)
@@ -5044,7 +5057,7 @@ static void rna_ShaderNodeGLSLFunction_script_set(PointerRNA *ptr,
     return;
   }
 
-  node_shader_glsl_function_discard_draft(*node);
+  rna_ShaderNodeGLSLFunction_clear_legacy_edit_state(*node);
   if (node->id != nullptr) {
     id_us_min(node->id);
   }
@@ -5080,36 +5093,14 @@ static void rna_ShaderNodeGLSLFunction_source_code_set(PointerRNA *ptr, const ch
   node_shader_glsl_function_edit_source_set(*node, value);
 }
 
-static void rna_ShaderNodeGLSLFunction_edit_function_get(PointerRNA *ptr, char *value)
-{
-  const bNode *node = ptr->data_as<const bNode>();
-  const NodeShaderGLSLFunction *data = static_cast<const NodeShaderGLSLFunction *>(node->storage);
-  if (data == nullptr) {
-    value[0] = '\0';
-    return;
-  }
-  const char *function_name = (data->flags & SHD_GLSL_FUNCTION_EDIT_FUNCTION) != 0 ?
-                                  data->edit_function_name :
-                                  data->function_name;
-  strcpy(value, function_name);
-}
-
-static int rna_ShaderNodeGLSLFunction_edit_function_length(PointerRNA *ptr)
-{
-  const bNode *node = ptr->data_as<const bNode>();
-  const NodeShaderGLSLFunction *data = static_cast<const NodeShaderGLSLFunction *>(node->storage);
-  if (data == nullptr) {
-    return 0;
-  }
-  return strlen((data->flags & SHD_GLSL_FUNCTION_EDIT_FUNCTION) != 0 ?
-                    data->edit_function_name :
-                    data->function_name);
-}
-
-static void rna_ShaderNodeGLSLFunction_edit_function_set(PointerRNA *ptr, const char *value)
+static void rna_ShaderNodeGLSLFunction_source_code_update(Main *bmain,
+                                                          Scene * /*scene*/,
+                                                          PointerRNA *ptr)
 {
   bNode *node = ptr->data_as<bNode>();
-  node_shader_glsl_function_edit_function_set(*node, value);
+  node_shader_glsl_function_tag_text_users_dirty(*bmain, *node);
+  WM_main_add_notifier(NC_TEXT | NA_EDITED, node->id);
+  WM_main_add_notifier(NC_NODE | NA_EDITED, nullptr);
 }
 
 static int rna_ShaderNodeGLSLFunction_display_mode_get(PointerRNA *ptr)
@@ -5127,12 +5118,6 @@ static void rna_ShaderNodeGLSLFunction_display_mode_set(PointerRNA *ptr, int val
     return;
   }
   SET_FLAG_FROM_TEST(data->flags, value == 1, SHD_GLSL_FUNCTION_CODE_MODE);
-}
-
-static bool rna_ShaderNodeGLSLFunction_source_dirty_get(PointerRNA *ptr)
-{
-  const bNode *node = ptr->data_as<const bNode>();
-  return node_shader_glsl_function_source_dirty(*node);
 }
 
 static void rna_ShaderNodeGLSLFunction_update(Main *bmain, Scene *scene, PointerRNA *ptr)
@@ -5167,7 +5152,7 @@ static void rna_ShaderNodeGLSLFunction_filepath_set(PointerRNA *ptr, const char 
     return;
   }
 
-  node_shader_glsl_function_discard_draft(*node);
+  rna_ShaderNodeGLSLFunction_clear_legacy_edit_state(*node);
 
   if (data->packed_source != nullptr) {
     MEM_delete(data->packed_source);
@@ -5270,7 +5255,7 @@ static void rna_ShaderNodeGLSLFunction_source_mode_set(PointerRNA *ptr, int valu
     return;
   }
 
-  node_shader_glsl_function_discard_draft(*node);
+  rna_ShaderNodeGLSLFunction_clear_legacy_edit_state(*node);
   data->source_mode = value;
   data->parse_status = SHD_GLSL_FUNCTION_PARSE_DIRTY;
   data->function_name[0] = '\0';
@@ -8929,21 +8914,10 @@ static void def_sh_glsl_function(BlenderRNA *brna, StructRNA *srna)
                                 "rna_ShaderNodeGLSLFunction_source_code_get",
                                 "rna_ShaderNodeGLSLFunction_source_code_length",
                                 "rna_ShaderNodeGLSLFunction_source_code_set");
-  RNA_def_property_ui_text(prop, "Source Code", "Unapplied GLSL source code draft");
-  RNA_def_property_update(prop, NC_NODE | NA_EDITED, nullptr);
-
-  prop = RNA_def_property(srna, "edit_function_name", PROP_STRING, PROP_NONE);
-  RNA_def_property_string_funcs(prop,
-                                "rna_ShaderNodeGLSLFunction_edit_function_get",
-                                "rna_ShaderNodeGLSLFunction_edit_function_length",
-                                "rna_ShaderNodeGLSLFunction_edit_function_set");
-  RNA_def_property_ui_text(prop, "Function", "Unapplied exported GLSL function name");
-  RNA_def_property_update(prop, NC_NODE | NA_EDITED, nullptr);
-
-  prop = RNA_def_property(srna, "source_dirty", PROP_BOOLEAN, PROP_NONE);
-  RNA_def_property_boolean_funcs(prop, "rna_ShaderNodeGLSLFunction_source_dirty_get", nullptr);
-  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
-  RNA_def_property_ui_text(prop, "Source Dirty", "Whether this node has unapplied source edits");
+  RNA_def_property_ui_text(
+      prop, "Source Code", "GLSL source code stored directly in the selected Text data-block");
+  RNA_def_property_update(
+      prop, NC_NODE | NA_EDITED, "rna_ShaderNodeGLSLFunction_source_code_update");
 
   prop = RNA_def_property(srna, "function_name", PROP_STRING, PROP_NONE);
   RNA_def_property_string_sdna(prop, nullptr, "function_name");

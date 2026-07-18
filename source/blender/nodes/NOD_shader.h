@@ -52,13 +52,11 @@ bool node_shader_glsl_function_edit_source_get(const bNode &node,
                                                std::string &r_source,
                                                std::string &r_error);
 void node_shader_glsl_function_edit_source_set(bNode &node, const char *source);
-void node_shader_glsl_function_edit_function_set(bNode &node, const char *function_name);
-bool node_shader_glsl_function_source_dirty(const bNode &node);
-void node_shader_glsl_function_discard_draft(bNode &node);
-bool node_shader_glsl_function_apply_draft(Main &bmain,
-                                           bNodeTree &ntree,
-                                           bNode &node,
-                                           std::string &r_error);
+void node_shader_glsl_function_tag_text_users_dirty(Main &bmain, const bNode &node);
+bool node_shader_glsl_function_refresh_text_users(Main &bmain,
+                                                  bNodeTree &ntree,
+                                                  bNode &node,
+                                                  std::string &r_error);
 bool node_shader_glsl_function_reset_defaults(bNode &node, std::string &r_error);
 
 }  // namespace blender
