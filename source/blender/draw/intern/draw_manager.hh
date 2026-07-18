@@ -434,18 +434,18 @@ inline void Manager::extract_object_attributes(ResourceHandleRange handle,
                                                const GPUMaterial *material)
 {
   const GPUUniformAttrList *attr_list = GPU_material_uniform_attributes(material);
-  if (attr_list == nullptr || attr_list->count == 0) {
-    return;
-  }
 
   int instance_index = 0;
   for (ResourceID resource_id : handle.id_range()) {
     ObjectInfos &infos = infos_buf.current().get_or_resize(resource_id.index());
     infos.object_attrs_offset = attribute_len_;
-    for (const GPUUniformAttr &attr : attr_list->list) {
-      if (attributes_buf.get_or_resize(attribute_len_).sync(ref, *&attr, instance_index)) {
-        infos.object_attrs_len++;
-        attribute_len_++;
+    infos.object_attrs_len = 0;
+    if (attr_list != nullptr) {
+      for (const GPUUniformAttr &attr : attr_list->list) {
+        if (attributes_buf.get_or_resize(attribute_len_).sync(ref, *&attr, instance_index)) {
+          infos.object_attrs_len++;
+          attribute_len_++;
+        }
       }
     }
     instance_index++;
@@ -472,6 +472,7 @@ inline void Manager::extract_object_attributes(ResourceHandleRange handle,
   for (ResourceID resource_id : handle.id_range()) {
     ObjectInfos &infos = infos_buf.current().get_or_resize(resource_id.index());
     infos.object_attrs_offset = attribute_len_;
+    infos.object_attrs_len = 0;
     for (const GPUUniformAttr *attr : attributes.values()) {
       if (attributes_buf.get_or_resize(attribute_len_).sync(ref, *attr, instance_index)) {
         infos.object_attrs_len++;

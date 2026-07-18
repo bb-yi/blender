@@ -36,34 +36,19 @@ static Vector<GPUMaterial *> non_null_materials(Span<GPUMaterial *> materials)
   return filtered;
 }
 
-static void append_unique_material(Vector<GPUMaterial *> &materials, GPUMaterial *material)
+static void append_npr_and_probe_materials(Vector<GPUMaterial *> &materials,
+                                           Span<Material *> npr_materials)
 {
-  if (material == nullptr || materials.contains(material)) {
-    return;
+  for (const Material *material : npr_materials) {
+    for (GPUMaterial *gpumat : {material->npr.gpumat,
+                               material->planar_probe_npr.gpumat,
+                               material->lightprobe_sphere_npr.gpumat})
+    {
+      if (gpumat != nullptr) {
+        materials.append(gpumat);
+      }
+    }
   }
-  materials.append(material);
-}
-
-static Vector<GPUMaterial *> npr_and_probe_materials(Span<Material> materials)
-{
-  Vector<GPUMaterial *> filtered;
-  filtered.reserve(materials.size() * 3);
-  for (const Material &material : materials) {
-    append_unique_material(filtered, material.npr.gpumat);
-    append_unique_material(filtered, material.planar_probe_npr.gpumat);
-    append_unique_material(filtered, material.lightprobe_sphere_npr.gpumat);
-  }
-  return filtered;
-}
-
-static Vector<GPUMaterial *> npr_and_probe_materials(const Material &material)
-{
-  Vector<GPUMaterial *> filtered;
-  filtered.reserve(3);
-  append_unique_material(filtered, material.npr.gpumat);
-  append_unique_material(filtered, material.planar_probe_npr.gpumat);
-  append_unique_material(filtered, material.lightprobe_sphere_npr.gpumat);
-  return filtered;
 }
 
 static bool material_array_uses_outline_control(const MaterialArray &material_array,
@@ -278,16 +263,11 @@ void SyncModule::sync_common(const ObjectHandle &ob_handle,
     inst_.manager->update_handle_bounds(ob_handle.res_handle, ob_handle, inflate_bounds);
   }
 
-  inst_.manager->extract_object_attributes(ob_handle.res_handle, ob_handle, gpu_materials);
-  Vector<GPUMaterial *> gpu_materials_npr;
-  for (const Material *material : materials) {
-    for (GPUMaterial *gpumat : npr_and_probe_materials(*material)) {
-      append_unique_material(gpu_materials_npr, gpumat);
-    }
-  }
-  if (!gpu_materials_npr.is_empty()) {
-    inst_.manager->extract_object_attributes(ob_handle.res_handle, ob_handle, gpu_materials_npr);
-  }
+  Vector<GPUMaterial *> attribute_materials = non_null_materials(gpu_materials);
+  attribute_materials.reserve(attribute_materials.size() + materials.size() * 3);
+  append_npr_and_probe_materials(attribute_materials, materials);
+  inst_.manager->extract_object_attributes(
+      ob_handle.res_handle, ob_handle, attribute_materials);
 }
 
 /** \} */
