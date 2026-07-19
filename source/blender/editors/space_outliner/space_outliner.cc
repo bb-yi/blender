@@ -235,7 +235,14 @@ static void outliner_main_region_listener(const wmRegionListenerParams *params)
       break;
     case NC_SPACE:
       if (wmn->data == ND_SPACE_OUTLINER) {
-        ED_region_tag_redraw(region);
+        /* EEVEE profiler publishes use NA_EDITED so only Performance Outliners rebuild at the
+         * capture cadence. Regular Outliner notifications keep their existing global behavior. */
+        const bool performance_update =
+            wmn->action == NA_EDITED && space_outliner->outlinevis == SO_EEVEE_PERFORMANCE &&
+            (wmn->reference == nullptr || wmn->reference == params->scene);
+        if (wmn->action != NA_EDITED || performance_update) {
+          ED_region_tag_redraw(region);
+        }
       }
       break;
     case NC_ID:

@@ -213,19 +213,6 @@ static const char *telemetry_mode_label(const TelemetryRuntimeMode mode)
   return "UNKNOWN";
 }
 
-static double record_sync_cpu_ms(const TelemetryFrameRecord &record)
-{
-  /* Playback peaks are intentionally selected by synchronization cost: this profiler's primary
-   * diagnostic is finding the frame that stalls scene extraction, not the frame with the largest
-   * submission or readback cost. The UI labels these records as Sync Peaks. */
-  if (record.has_shared_draw_timing) {
-    return record.draw_sync_ms;
-  }
-  return record.stages[int(TelemetryStageId::SyncBegin)].cpu_ms +
-         record.stages[int(TelemetryStageId::SyncObjects)].cpu_ms +
-         record.stages[int(TelemetryStageId::SyncEnd)].cpu_ms;
-}
-
 static bke::SceneEeveePerformanceNode snapshot_scope_node(
     const TelemetryFrameRecord &record,
     const int node_index,
@@ -472,58 +459,31 @@ bool TelemetryModule::enabled() const
   return inst_.render == nullptr || (inst_.render->flag & RE_ENGINE_PREVIEW) == 0;
 }
 
-TelemetryModule::~TelemetryModule()
-{
-  /* Scene runtime teardown can race Instance destruction during WM exit. Finalize only local state
-   * here. In particular, do not dereference the Instance's raw Scene pointer from this destructor. */
-  if (!source_state_) {
-    return;
-  }
-  this->finalize_playback_session();
-  frame_active_ = false;
-  scope_stack_.clear();
-  source_state_->closed = true;
-  /* Invalidate any registry entry that still refers to this viewport source. A later instance must
-   * start a new epoch before publishing again, while an old Scene can safely drop the expired
-   * weak token without requiring a Scene pointer here. */
-  source_state_->lifetime.reset();
-}
-
-bool TelemetryModule::finalize_playback_session()
-{
-  const bool had_session = source_state_->playback_active || source_state_->has_playback_peak;
-  if (source_state_->has_playback_peak) {
-    source_state_->playback_peak_history.append(source_state_->playback_peak);
-    if (source_state_->playback_peak_history.size() > playback_peak_history_limit_) {
-      source_state_->playback_peak_history.remove(0);
-    }
-  }
-  source_state_->playback_active = false;
-  source_state_->has_playback_peak = false;
-  source_state_->playback_peak = {};
-  return had_session;
-}
-
 void TelemetryModule::source_deactivate()
 {
   if (!source_state_ || source_state_->closed) {
     return;
   }
 
-  this->finalize_playback_session();
   frame_active_ = false;
   scope_stack_.clear();
   source_state_->closed = true;
 
-  /* Profiler disable is a live transition, so this is still allowed to publish a closed snapshot.
-   * The destructor above deliberately does not call this path because its Scene pointer may no
-   * longer be valid. */
+  /* Profiler disable is a live transition, so the Instance's Scene pointer is still valid and a
+   * closed snapshot can be published immediately. */
   if (inst_.scene == nullptr) {
     return;
   }
   const TelemetryFrameRecord *record = last_viewport_record();
   if (record != nullptr) {
     this->publish_viewport_snapshot(*record, viewport_summary_line(), viewport_report());
+  }
+  if (BLI_thread_is_main()) {
+    Scene *notify_scene = DEG_get_original(inst_.scene);
+    if (notify_scene == nullptr) {
+      notify_scene = inst_.scene;
+    }
+    WM_main_add_notifier(NC_SPACE | ND_SPACE_OUTLINER | NA_EDITED, notify_scene);
   }
 }
 
@@ -687,15 +647,6 @@ void TelemetryModule::frame_begin(const TelemetryRuntimeMode mode)
   current_frame_.resolution_x = frame_extent.x;
   current_frame_.resolution_y = frame_extent.y;
   current_frame_.is_playback = (mode == TelemetryRuntimeMode::Viewport) && inst_.is_playback;
-  if (current_frame_.is_playback) {
-    if (!source_state_->playback_active) {
-      source_state_->playback_active = true;
-      source_state_->next_playback_session++;
-      source_state_->has_playback_peak = false;
-      source_state_->playback_peak = {};
-    }
-    current_frame_.playback_session_id = source_state_->next_playback_session;
-  }
   current_frame_.frame = (inst_.scene != nullptr) ? inst_.scene->r.cfra : 0;
   current_frame_.sample_index = ELEM(mode,
                                      TelemetryRuntimeMode::Viewport,
@@ -791,8 +742,7 @@ void TelemetryModule::frame_end()
   }
   const bool is_viewport_mode = ELEM(current_frame_.runtime_mode,
                                      TelemetryRuntimeMode::Viewport,
-                                     TelemetryRuntimeMode::ViewportImageRender,
-                                     TelemetryRuntimeMode::Bake);
+                                     TelemetryRuntimeMode::ViewportImageRender);
   if (is_viewport_mode && !frame_has_stage_samples(current_frame_)) {
     frame_active_ = false;
     scope_stack_.clear();
@@ -850,50 +800,22 @@ void TelemetryModule::frame_end()
   source_state_->has_last_record[mode_index] = true;
   source_state_->capture_seq++;
 
-  bool playback_finished = false;
-  if (current_frame_.runtime_mode == TelemetryRuntimeMode::Viewport)
-  {
-    if (current_frame_.is_playback && current_frame_.has_shared_draw_timing) {
-      if (!source_state_->has_playback_peak ||
-          record_sync_cpu_ms(current_frame_) > record_sync_cpu_ms(source_state_->playback_peak))
-      {
-        source_state_->playback_peak = current_frame_;
-        source_state_->has_playback_peak = true;
-      }
-    }
-    else if (source_state_->playback_active) {
-      playback_finished = this->finalize_playback_session();
-    }
-  }
-
   if (inst_.scene != nullptr) {
     Scene *scene_orig = DEG_get_original(inst_.scene);
     Scene *notify_scene = (scene_orig != nullptr) ? scene_orig : inst_.scene;
-    bool reports_changed = false;
 
-    const bool finished_viewport = is_viewport_mode && inst_.sampling.finished_viewport();
-    const bool finished_transition = finished_viewport && !source_state_->viewport_was_finished;
-    source_state_->viewport_was_finished = finished_viewport;
-    const bool publish_viewport = is_viewport_mode &&
-                                   (!source_state_->has_viewport_publish ||
-                                    ((frame_end_time - source_state_->last_viewport_publish_time) >=
-                                     viewport_publish_interval_seconds_) ||
-                                    finished_transition || playback_finished);
-
-    if (publish_viewport) {
-      maybe_publish_cached_viewport(finished_transition || playback_finished);
+    /* Publish every completed viewport sample. This keeps sample progress and short sync spikes
+     * visible instead of merging several samples behind a wall-clock throttle. */
+    if (is_viewport_mode) {
+      maybe_publish_cached_viewport();
     }
 
     if (current_frame_.runtime_mode == TelemetryRuntimeMode::FinalRender) {
       const std::string render_summary = render_report();
-      const bke::SceneEeveePerformanceRuntime *notify_runtime =
-          scene_eevee_performance_runtime(notify_scene);
-      reports_changed |= (notify_runtime == nullptr) ||
-                         (notify_runtime->render_report_get() != render_summary);
       publish_render_snapshot(current_frame_, render_summary);
-    }
-    if (reports_changed && BLI_thread_is_main()) {
-      WM_main_add_notifier(NC_SCENE | ND_RENDER_OPTIONS, notify_scene);
+      if (BLI_thread_is_main()) {
+        WM_main_add_notifier(NC_SPACE | ND_SPACE_OUTLINER | NA_EDITED, notify_scene);
+      }
     }
   }
 
@@ -960,7 +882,7 @@ void TelemetryModule::cancel_frame()
   scope_stack_.clear();
 }
 
-void TelemetryModule::maybe_publish_cached_viewport(const bool force)
+void TelemetryModule::maybe_publish_cached_viewport()
 {
   if (!enabled() || inst_.scene == nullptr || viewport_publish_paused()) {
     return;
@@ -971,30 +893,17 @@ void TelemetryModule::maybe_publish_cached_viewport(const bool force)
     return;
   }
 
-  const double now = BLI_time_now_seconds();
-  if (!force && source_state_->has_viewport_publish &&
-      ((now - source_state_->last_viewport_publish_time) <
-       viewport_publish_interval_seconds_))
-  {
-    return;
-  }
-
   const std::string viewport_summary = viewport_summary_line();
   const std::string viewport_report = this->viewport_report();
-  Scene *scene_orig = DEG_get_original(inst_.scene);
-  Scene *notify_scene = (scene_orig != nullptr) ? scene_orig : inst_.scene;
-  const bke::SceneEeveePerformanceRuntime *notify_runtime =
-      scene_eevee_performance_runtime(notify_scene);
-  const bool reports_changed = (notify_runtime == nullptr) ||
-                               (notify_runtime->viewport_summary_get() != viewport_summary) ||
-                               (notify_runtime->viewport_report_get() != viewport_report);
   publish_viewport_snapshot(*record, viewport_summary, viewport_report);
 
-  source_state_->last_viewport_publish_time = now;
-  source_state_->has_viewport_publish = true;
-
-  if (reports_changed && BLI_thread_is_main()) {
-    WM_main_add_notifier(NC_SCENE | ND_RENDER_OPTIONS, notify_scene);
+  if (BLI_thread_is_main()) {
+    /* Capture sequence and sample progress change even when rounded timing text does not. */
+    Scene *notify_scene = DEG_get_original(inst_.scene);
+    if (notify_scene == nullptr) {
+      notify_scene = inst_.scene;
+    }
+    WM_main_add_notifier(NC_SPACE | ND_SPACE_OUTLINER | NA_EDITED, notify_scene);
   }
 }
 
@@ -1007,7 +916,6 @@ void TelemetryModule::reset()
 
 void TelemetryModule::reset_epoch(const bool clear_source_session)
 {
-  this->finalize_playback_session();
   this->reset();
   current_frame_ = {};
   for (Vector<TelemetryFrameRecord> &history : source_state_->history) {
@@ -1017,18 +925,11 @@ void TelemetryModule::reset_epoch(const bool clear_source_session)
     has_last_record = false;
   }
   source_state_->last_records = {};
-  source_state_->playback_active = false;
-  source_state_->has_playback_peak = false;
-  source_state_->playback_peak = {};
   source_state_->epoch++;
-  source_state_->last_viewport_publish_time = 0.0;
-  source_state_->has_viewport_publish = false;
-  source_state_->viewport_was_finished = false;
   if (clear_source_session) {
-    source_state_->playback_peak_history.clear();
     source_state_->last_published_viewport_summary.clear();
     source_state_->last_published_viewport_report.clear();
-    /* Expire snapshots associated with the previous Scene/ViewLayer or closed instance. The next
+    /* Expire snapshots associated with the previous Scene, ViewLayer, or source session. The next
      * publish receives a fresh token and is therefore not mistaken for the old source. */
     source_state_->lifetime = std::make_shared<int>(0);
   }
@@ -1392,15 +1293,8 @@ std::shared_ptr<const bke::SceneEeveePerformanceSnapshot> TelemetryModule::build
 {
   auto snapshot = std::make_shared<bke::SceneEeveePerformanceSnapshot>();
   const auto &averages = record.average_stage_values;
-  const bool is_playback_peak = std::strncmp(kind, "viewport_peak", 13) == 0;
-  const bool is_active_playback_peak = std::strcmp(kind, "viewport_peak_active") == 0;
   snapshot->id = fmt::format("{}-source-{}-epoch-{}", kind, record.source_id, record.epoch);
-  if (is_playback_peak) {
-    snapshot->id = fmt::format("viewport_peak-source-{}-session-{}",
-                               record.source_id,
-                               record.playback_session_id);
-  }
-  else if (std::strcmp(kind, "final_render") == 0) {
+  if (std::strcmp(kind, "final_render") == 0) {
     snapshot->id = fmt::format("{}-scene-{}-run-{}-layer-{}-view-{}",
                                kind,
                                record.scene_session_uid,
@@ -1409,12 +1303,9 @@ std::shared_ptr<const bke::SceneEeveePerformanceSnapshot> TelemetryModule::build
                                record.render_view_name.empty() ? "default" :
                                                                   record.render_view_name);
   }
-  snapshot->kind = is_playback_peak ? "viewport_peak" : kind;
+  snapshot->kind = kind;
   snapshot->mode = telemetry_mode_label(record.runtime_mode);
-  snapshot->status = is_active_playback_peak ?
-                         "Playback Sync Peak Active" :
-                          (is_playback_peak ? "Frozen Playback Sync Peak" :
-                          (record.is_playback ? "Playback Active" : sample_status_string(record)));
+  snapshot->status = record.is_playback ? "Playback Active" : sample_status_string(record);
   snapshot->timing_domain = "CPU wall time";
   snapshot->timing_scope = snapshot->kind.rfind("viewport", 0) == 0 ?
                                "Shared 3D draw cycle (Draw Sync + Draw/Submission; excludes "
@@ -1424,10 +1315,11 @@ std::shared_ptr<const bke::SceneEeveePerformanceSnapshot> TelemetryModule::build
                                     "Instance init and shader setup)" :
                                     "EEVEE frame");
   snapshot->source_label = snapshot->kind.rfind("viewport", 0) == 0 ?
-                               fmt::format("Viewport {} ({}x{})",
+                               fmt::format("Viewport {} ({}x{}, Samples {})",
                                            record.source_id,
                                            record.resolution_x,
-                                           record.resolution_y) :
+                                           record.resolution_y,
+                                           sample_progress_string(record)) :
                                (snapshot->kind == "final_render" ?
                                     fmt::format("Final Render scene {} run {} layer {} view {}",
                                                 record.scene_session_uid,
@@ -1442,7 +1334,6 @@ std::shared_ptr<const bke::SceneEeveePerformanceSnapshot> TelemetryModule::build
   snapshot->source_id = record.source_id;
   snapshot->capture_seq = capture_seq;
   snapshot->epoch = record.epoch;
-  snapshot->playback_session_id = record.playback_session_id;
   snapshot->is_playback = record.is_playback;
   snapshot->scene_session_uid = record.scene_session_uid;
   snapshot->render_run_id = record.render_run_id;
@@ -1526,15 +1417,6 @@ void TelemetryModule::publish_viewport_snapshot(const TelemetryFrameRecord &reco
   source.lifetime = source_state_->lifetime;
   source.closed = source_state_->closed;
   source.latest = latest;
-  for (const TelemetryFrameRecord &peak : source_state_->playback_peak_history) {
-    source.playback_peaks.push_back(
-        build_snapshot(peak, "viewport_peak", "", "", peak.capture_seq));
-  }
-  if (source_state_->has_playback_peak) {
-    const TelemetryFrameRecord &peak = source_state_->playback_peak;
-    source.playback_peaks.push_back(
-        build_snapshot(peak, "viewport_peak_active", "", "", peak.capture_seq));
-  }
   runtime->viewport_source_publish(std::move(source), summary, report);
   source_state_->last_published_viewport_summary = summary;
   source_state_->last_published_viewport_report = report;
@@ -1973,6 +1855,8 @@ std::string TelemetryModule::viewport_report() const
       "Last Evaluation: {}\n"
       "Depsgraph Eval Serial: {}\n"
       "Frame: {}\n"
+      "Source ID: {}\n"
+      "Capture Sequence: {}\n"
       "Sample Progress: {}\n"
       "Sampling: {}\n"
       "Features: AO={} DOF={} MB={} Volume={} Raytrace={} Filters={} RenderTextures={} Lights={} Probes={} NPR Mats={} Raycast Mats={} GLSL Mats={}\n",
@@ -1984,6 +1868,8 @@ std::string TelemetryModule::viewport_report() const
                                     std::string("n/a"),
       record->depsgraph_eval_serial,
       record->frame,
+      record->source_id,
+      record->capture_seq,
       sample_progress_string(*record),
       sample_status_string(*record),
       record->features.has_ao ? "On" : "Off",

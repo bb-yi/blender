@@ -1224,9 +1224,7 @@ void outliner_build_tree(Main *mainvar,
   }
   space_outliner->storeflag &= ~SO_TREESTORE_REBUILD;
 
-  if ((region->runtime->do_draw & RGN_DRAW_NO_REBUILD) &&
-      (space_outliner->outlinevis != SO_EEVEE_PERFORMANCE))
-  {
+  if (region->runtime->do_draw & RGN_DRAW_NO_REBUILD) {
     BLI_assert_msg(space_outliner->runtime->tree_display != nullptr,
                    "Skipping rebuild before tree was built properly, a full redraw should be "
                    "triggered instead");

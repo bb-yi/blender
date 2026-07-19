@@ -251,7 +251,6 @@ struct TelemetryFrameRecord {
   uint64_t source_id = 0;
   uint64_t epoch = 0;
   uint64_t capture_seq = 0;
-  uint64_t playback_session_id = 0;
   bool is_playback = false;
   uint32_t scene_session_uid = 0;
   uint64_t render_run_id = 0;
@@ -297,20 +296,12 @@ struct TelemetrySourceState {
   std::shared_ptr<const void> lifetime = std::make_shared<int>(0);
   uint64_t epoch = 1;
   uint64_t capture_seq = 0;
-  double last_viewport_publish_time = 0.0;
-  bool has_viewport_publish = false;
   /* Text is kept per source so a paused viewport never reads another source's Scene-level writer. */
   std::string last_published_viewport_summary;
   std::string last_published_viewport_report;
-  bool viewport_was_finished = false;
   std::array<Vector<TelemetryFrameRecord>, int(TelemetryRuntimeMode::Count)> history;
   std::array<TelemetryFrameRecord, int(TelemetryRuntimeMode::Count)> last_records = {};
   std::array<bool, int(TelemetryRuntimeMode::Count)> has_last_record = {};
-  bool playback_active = false;
-  bool has_playback_peak = false;
-  uint64_t next_playback_session = 0;
-  TelemetryFrameRecord playback_peak;
-  Vector<TelemetryFrameRecord> playback_peak_history;
   bool profiler_inputs_initialized = false;
   bool profiler_enabled = false;
   int extent_x = 0;
@@ -330,8 +321,6 @@ struct TelemetrySourceState {
 class TelemetryModule {
  private:
   static constexpr int history_limit_ = 64;
-  static constexpr int playback_peak_history_limit_ = 8;
-  static constexpr double viewport_publish_interval_seconds_ = 0.25;
 
   Instance &inst_;
   std::shared_ptr<TelemetrySourceState> source_state_;
@@ -349,7 +338,7 @@ class TelemetryModule {
         source_state_(source_state ? std::move(source_state) :
                                      std::make_shared<TelemetrySourceState>())
   {}
-  ~TelemetryModule();
+  ~TelemetryModule() = default;
 
   bool enabled() const;
   bool epoch_inputs_update(bool profiler_enabled,
@@ -376,7 +365,7 @@ class TelemetryModule {
   void maybe_end_viewport_frame();
   void maybe_begin_final_frame();
   void maybe_end_final_frame();
-  void maybe_publish_cached_viewport(bool force = false);
+  void maybe_publish_cached_viewport();
   void cancel_frame();
   void reset();
   void reset_epoch(bool clear_source_session = false);
@@ -434,7 +423,6 @@ class TelemetryModule {
   std::string format_material_sync_report(const TelemetryFrameRecord &record) const;
   std::string format_probe_costs_report(const TelemetryFrameRecord &record) const;
   void merge_draw_performance(const blender::DrawPerformanceMetrics &metrics);
-  bool finalize_playback_session();
   void source_deactivate();
   void publish_viewport_snapshot(const TelemetryFrameRecord &record,
                                  const std::string &summary,

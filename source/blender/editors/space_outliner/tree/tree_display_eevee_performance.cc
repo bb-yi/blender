@@ -693,21 +693,26 @@ void append_parsed_report(PerformanceTreeBuilder &builder, ListBaseT<TreeElement
 
 struct SnapshotNodeMetrics {
   double current_ms = 0.0;
-  double average_ms = 0.0;
   double self_ms = 0.0;
   bool ran_directly = false;
   bool ran = false;
 };
 
-SnapshotNodeMetrics snapshot_node_metrics(const bke::SceneEeveePerformanceNode &node)
+using SnapshotNodeMetricsCache =
+    std::unordered_map<const bke::SceneEeveePerformanceNode *, SnapshotNodeMetrics>;
+
+SnapshotNodeMetrics snapshot_node_metrics(const bke::SceneEeveePerformanceNode &node,
+                                          SnapshotNodeMetricsCache &cache)
 {
+  const auto cached = cache.find(&node);
+  if (cached != cache.end()) {
+    return cached->second;
+  }
   double children_current_ms = 0.0;
-  double children_average_ms = 0.0;
   bool child_ran = false;
   for (const bke::SceneEeveePerformanceNode &child : node.children) {
-    const SnapshotNodeMetrics child_metrics = snapshot_node_metrics(child);
+    const SnapshotNodeMetrics child_metrics = snapshot_node_metrics(child, cache);
     children_current_ms += child_metrics.current_ms;
-    children_average_ms += child_metrics.average_ms;
     child_ran |= child_metrics.ran;
   }
 
@@ -719,32 +724,24 @@ SnapshotNodeMetrics snapshot_node_metrics(const bke::SceneEeveePerformanceNode &
    * synthetic nodes; direct scopes already publish authoritative inclusive and self timings. */
   const double measured_current_ms = std::max(0.0, node.current_ms);
   metrics.current_ms = metrics.ran_directly ? measured_current_ms : children_current_ms;
-  const double measured_average_ms = std::max(0.0, node.average_ms);
-  metrics.average_ms = metrics.ran_directly ?
-                           measured_average_ms :
-                           std::max(measured_average_ms, children_average_ms);
   metrics.self_ms = metrics.ran_directly ? std::max(0.0, node.self_ms) : 0.0;
+  cache.emplace(&node, metrics);
   return metrics;
 }
 
-std::string snapshot_node_label(const bke::SceneEeveePerformanceNode &node)
+std::string snapshot_node_label(const bke::SceneEeveePerformanceNode &node,
+                                SnapshotNodeMetricsCache &cache)
 {
-  const SnapshotNodeMetrics metrics = snapshot_node_metrics(node);
+  const SnapshotNodeMetrics metrics = snapshot_node_metrics(node, cache);
   std::string label = node.label;
   if (!metrics.ran) {
     label += " (Not Run";
-    if (metrics.average_ms > 0.0) {
-      label += ", avg " + format_ms(metrics.average_ms) + " ms";
-    }
     return label + ")";
   }
 
   label += " (" + format_ms(metrics.current_ms) + " ms";
   if (!metrics.ran_directly) {
     label += " aggregate";
-  }
-  if (metrics.average_ms > 0.0) {
-    label += ", avg " + format_ms(metrics.average_ms) + " ms";
   }
   if (metrics.ran_directly) {
     label += ", self " + format_ms(metrics.self_ms) + " ms, calls " +
@@ -754,7 +751,9 @@ std::string snapshot_node_label(const bke::SceneEeveePerformanceNode &node)
 }
 
 std::vector<const bke::SceneEeveePerformanceNode *> snapshot_node_children(
-    const bke::SceneEeveePerformanceNode &node, const bool sort_by_time)
+    const bke::SceneEeveePerformanceNode &node,
+    const bool sort_by_time,
+    SnapshotNodeMetricsCache &cache)
 {
   std::vector<const bke::SceneEeveePerformanceNode *> children;
   children.reserve(node.children.size());
@@ -762,21 +761,17 @@ std::vector<const bke::SceneEeveePerformanceNode *> snapshot_node_children(
     children.push_back(&child);
   }
   if (sort_by_time) {
-    std::stable_sort(
-        children.begin(),
-        children.end(),
-        [](const bke::SceneEeveePerformanceNode *a,
-           const bke::SceneEeveePerformanceNode *b) {
-          const SnapshotNodeMetrics a_metrics = snapshot_node_metrics(*a);
-          const SnapshotNodeMetrics b_metrics = snapshot_node_metrics(*b);
-          if (a_metrics.current_ms != b_metrics.current_ms) {
-            return a_metrics.current_ms > b_metrics.current_ms;
-          }
-          if (a_metrics.average_ms != b_metrics.average_ms) {
-            return a_metrics.average_ms > b_metrics.average_ms;
-          }
-          return a->id < b->id;
-        });
+    std::stable_sort(children.begin(),
+                     children.end(),
+                     [&cache](const bke::SceneEeveePerformanceNode *a,
+                              const bke::SceneEeveePerformanceNode *b) {
+                       const SnapshotNodeMetrics a_metrics = snapshot_node_metrics(*a, cache);
+                       const SnapshotNodeMetrics b_metrics = snapshot_node_metrics(*b, cache);
+                       if (a_metrics.current_ms != b_metrics.current_ms) {
+                         return a_metrics.current_ms > b_metrics.current_ms;
+                       }
+                       return a->id < b->id;
+                     });
   }
   return children;
 }
@@ -789,19 +784,50 @@ std::string snapshot_node_key(const std::string &snapshot_key,
 
 void collect_snapshot_node_keys(const bke::SceneEeveePerformanceNode &node,
                                 const std::string &snapshot_key,
-                                std::vector<std::string> &r_keys)
+                                std::vector<std::string> &r_keys,
+                                const bke::SceneEeveePerformanceNode *omitted_node = nullptr)
 {
+  if (&node == omitted_node) {
+    return;
+  }
   r_keys.push_back(snapshot_node_key(snapshot_key, node));
   for (const bke::SceneEeveePerformanceNode &child : node.children) {
-    collect_snapshot_node_keys(child, snapshot_key, r_keys);
+    collect_snapshot_node_keys(child, snapshot_key, r_keys, omitted_node);
   }
 }
 
-void collect_snapshot_keys(const bke::SceneEeveePerformanceSnapshot &snapshot,
-                           const std::string &snapshot_key,
-                           std::vector<std::string> &r_keys)
+struct SnapshotReportCache {
+  bool sort_by_time;
+  std::unordered_map<const bke::SceneEeveePerformanceSnapshot *, std::unique_ptr<ParsedReport>>
+      reports;
+
+  explicit SnapshotReportCache(const bool sort_by_time) : sort_by_time(sort_by_time) {}
+
+  const ParsedReport *get(const bke::SceneEeveePerformanceSnapshot &snapshot)
+  {
+    if (snapshot.report.empty()) {
+      return nullptr;
+    }
+    const auto cached = reports.find(&snapshot);
+    if (cached != reports.end()) {
+      return cached->second.get();
+    }
+    auto report = std::make_unique<ParsedReport>(
+        parse_report(snapshot.kind, snapshot.report.c_str(), "", sort_by_time));
+    const ParsedReport *result = report.get();
+    reports.emplace(&snapshot, std::move(report));
+    return result;
+  }
+};
+
+const bke::SceneEeveePerformanceNode *snapshot_node_find(
+    const bke::SceneEeveePerformanceNode &node, const char *label);
+
+void collect_snapshot_content_keys(const bke::SceneEeveePerformanceSnapshot &snapshot,
+                                   const std::string &snapshot_key,
+                                   std::vector<std::string> &r_keys,
+                                   SnapshotReportCache &report_cache)
 {
-  r_keys.push_back(snapshot_key);
   const std::string metadata_key = snapshot_key + "/metadata";
   r_keys.push_back(metadata_key);
   for (const char *key : {"identity",
@@ -809,6 +835,7 @@ void collect_snapshot_keys(const bke::SceneEeveePerformanceSnapshot &snapshot,
                           "mode-status",
                           "source",
                           "scene-view-layer",
+                          "render-run-id",
                           "render-view",
                           "sequence",
                           "frame",
@@ -826,58 +853,114 @@ void collect_snapshot_keys(const bke::SceneEeveePerformanceSnapshot &snapshot,
   {
     r_keys.push_back(metadata_key + "/" + key);
   }
+  const bke::SceneEeveePerformanceNode *current_main_view = snapshot_node_find(
+      snapshot.root, "MainView");
+  const std::string main_view_key = snapshot_key + "/main-view";
+  r_keys.push_back(main_view_key);
+  if (current_main_view) {
+    for (const bke::SceneEeveePerformanceNode &child : current_main_view->children) {
+      collect_snapshot_node_keys(child, main_view_key, r_keys);
+    }
+  }
   for (const bke::SceneEeveePerformanceNode &child : snapshot.root.children) {
-    collect_snapshot_node_keys(child, snapshot_key, r_keys);
+    collect_snapshot_node_keys(child, snapshot_key, r_keys, current_main_view);
   }
   if (snapshot.root.children.empty()) {
     r_keys.push_back(snapshot_key + "/not-run");
   }
-  if (!snapshot.report.empty()) {
-    const ParsedReport attribution = parse_report(
-        snapshot.kind, snapshot.report.c_str(), "", false);
-    collect_report_attribution_keys(attribution, snapshot_key, r_keys);
+  if (const ParsedReport *attribution = report_cache.get(snapshot)) {
+    collect_report_attribution_keys(*attribution, snapshot_key, r_keys);
   }
+}
+
+void collect_snapshot_keys(const bke::SceneEeveePerformanceSnapshot &snapshot,
+                           const std::string &snapshot_key,
+                           std::vector<std::string> &r_keys,
+                           SnapshotReportCache &report_cache)
+{
+  r_keys.push_back(snapshot_key);
+  collect_snapshot_content_keys(snapshot, snapshot_key, r_keys, report_cache);
+}
+
+const bke::SceneEeveePerformanceNode *snapshot_node_find(
+    const bke::SceneEeveePerformanceNode &node, const char *label)
+{
+  if (node.label == label) {
+    return &node;
+  }
+  for (const bke::SceneEeveePerformanceNode &child : node.children) {
+    if (const bke::SceneEeveePerformanceNode *result = snapshot_node_find(child, label)) {
+      return result;
+    }
+  }
+  return nullptr;
 }
 
 void append_snapshot_node(PerformanceTreeBuilder &builder,
                           TreeElement &parent,
                           const bke::SceneEeveePerformanceNode &node,
                           const std::string &snapshot_key,
-                          const bool sort_by_time)
+                          const bool sort_by_time,
+                          SnapshotNodeMetricsCache &metrics_cache,
+                          const bke::SceneEeveePerformanceNode *omitted_node = nullptr,
+                          const bool force_open = false,
+                          const std::string *label_override = nullptr,
+                          const std::string *key_override = nullptr)
 {
+  if (&node == omitted_node) {
+    return;
+  }
   TreeElement &element = builder.add_label(parent.subtree,
                                            &parent,
-                                           snapshot_node_label(node),
-                                           snapshot_node_key(snapshot_key, node),
-                                           node.kind != "stage");
-  for (const bke::SceneEeveePerformanceNode *child : snapshot_node_children(node, sort_by_time)) {
-    append_snapshot_node(builder, element, *child, snapshot_key, sort_by_time);
+                                           label_override ? *label_override :
+                                                            snapshot_node_label(node, metrics_cache),
+                                           key_override ? *key_override :
+                                                          snapshot_node_key(snapshot_key, node),
+                                           force_open || node.kind != "stage");
+  for (const bke::SceneEeveePerformanceNode *child :
+       snapshot_node_children(node, sort_by_time, metrics_cache))
+  {
+    append_snapshot_node(
+        builder, element, *child, snapshot_key, sort_by_time, metrics_cache, omitted_node);
   }
+}
+
+std::string snapshot_sample_progress(const bke::SceneEeveePerformanceSnapshot &snapshot)
+{
+  const uint64_t current = snapshot.sample_count >= 0xFFFFFFu ?
+                               uint64_t(snapshot.sample_index) :
+                               std::min(uint64_t(snapshot.sample_index), snapshot.sample_count);
+  if (snapshot.sample_count >= 0xFFFFFFu) {
+    return std::to_string(current) + "/Continuous";
+  }
+  return std::to_string(current) + "/" + std::to_string(snapshot.sample_count);
+}
+
+std::string snapshot_resolution_and_samples(const bke::SceneEeveePerformanceSnapshot &snapshot)
+{
+  return std::to_string(snapshot.resolution_x) + "x" + std::to_string(snapshot.resolution_y) +
+         ", Samples " + snapshot_sample_progress(snapshot);
 }
 
 std::string snapshot_root_label(const bke::SceneEeveePerformanceSnapshot &snapshot,
-                                const std::string &title)
+                                const std::string &title,
+                                SnapshotNodeMetricsCache &metrics_cache)
 {
-  const SnapshotNodeMetrics metrics = snapshot_node_metrics(snapshot.root);
+  const SnapshotNodeMetrics metrics = snapshot_node_metrics(snapshot.root, metrics_cache);
   std::string label = title + " (" + format_ms(metrics.current_ms) + " ms";
-  if (metrics.average_ms > 0.0) {
-    label += ", avg " + format_ms(metrics.average_ms) + " ms";
-  }
-  label += ", self " + format_ms(metrics.self_ms) + " ms)";
+  label += ", self " + format_ms(metrics.self_ms) + " ms, " +
+           snapshot_resolution_and_samples(snapshot) + ")";
   return label;
 }
 
-void append_snapshot(PerformanceTreeBuilder &builder,
-                     ListBaseT<TreeElement> &tree,
-                     TreeElement *parent,
-                     const bke::SceneEeveePerformanceSnapshot &snapshot,
-                     const std::string &title,
-                     const std::string &snapshot_key,
-                     const bool sort_by_time)
+void append_snapshot_contents(PerformanceTreeBuilder &builder,
+                              TreeElement &root,
+                              const bke::SceneEeveePerformanceSnapshot &snapshot,
+                              const std::string &snapshot_key,
+                              const bool sort_by_time,
+                              SnapshotNodeMetricsCache &metrics_cache,
+                              SnapshotReportCache &report_cache)
 {
-  ListBaseT<TreeElement> &target = parent ? parent->subtree : tree;
-  TreeElement &root = builder.add_label(
-      target, parent, snapshot_root_label(snapshot, title), snapshot_key, true);
   const std::string metadata_key = snapshot_key + "/metadata";
   TreeElement &metadata = builder.add_label(root.subtree, &root, "Metadata", metadata_key, false);
   builder.add_label(metadata.subtree,
@@ -924,15 +1007,12 @@ void append_snapshot(PerformanceTreeBuilder &builder,
                     metadata_key + "/frame");
   builder.add_label(metadata.subtree,
                     &metadata,
-                    "sample=" + std::to_string(snapshot.sample_index) + "/" +
-                        std::to_string(snapshot.sample_count) +
-                        " playback=" + (snapshot.is_playback ? "true" : "false") +
-                        " playback_session=" + std::to_string(snapshot.playback_session_id),
+                    "sample=" + snapshot_sample_progress(snapshot) +
+                        " playback=" + (snapshot.is_playback ? "true" : "false"),
                     metadata_key + "/sampling");
   builder.add_label(metadata.subtree,
                     &metadata,
-                    "resolution=" + std::to_string(snapshot.resolution_x) + "x" +
-                        std::to_string(snapshot.resolution_y),
+                    "resolution=" + snapshot_resolution_and_samples(snapshot),
                     metadata_key + "/resolution");
   builder.add_label(metadata.subtree,
                     &metadata,
@@ -979,29 +1059,70 @@ void append_snapshot(PerformanceTreeBuilder &builder,
           " ms (excluded from Draw CPU; pre-publication accounting only)",
       metadata_key + "/profiler-accounting");
 
+  const bke::SceneEeveePerformanceNode *current_main_view = snapshot_node_find(
+      snapshot.root, "MainView");
+  const std::string main_view_key = snapshot_key + "/main-view";
+  if (current_main_view) {
+    const std::string main_view_label = snapshot_node_label(*current_main_view, metrics_cache);
+    append_snapshot_node(builder,
+                         root,
+                         *current_main_view,
+                         main_view_key,
+                         sort_by_time,
+                         metrics_cache,
+                         nullptr,
+                         true,
+                         &main_view_label,
+                         &main_view_key);
+  }
+  else {
+    builder.add_label(root.subtree, &root, "MainView (Not Run)", main_view_key, true);
+  }
+
   if (snapshot.root.children.empty()) {
     builder.add_label(
         root.subtree, &root, "Stages (Not Run)", snapshot_key + "/not-run", false);
   }
   else {
     for (const bke::SceneEeveePerformanceNode *child :
-         snapshot_node_children(snapshot.root, sort_by_time))
+         snapshot_node_children(snapshot.root, sort_by_time, metrics_cache))
     {
-      append_snapshot_node(builder, root, *child, snapshot_key, sort_by_time);
+      append_snapshot_node(builder,
+                           root,
+                           *child,
+                           snapshot_key,
+                           sort_by_time,
+                           metrics_cache,
+                           current_main_view);
     }
   }
 
-  if (!snapshot.report.empty()) {
-    const ParsedReport attribution = parse_report(
-        snapshot.kind, snapshot.report.c_str(), "", sort_by_time);
-    append_report_attribution(builder, root, attribution, snapshot_key);
+  if (const ParsedReport *attribution = report_cache.get(snapshot)) {
+    append_report_attribution(builder, root, *attribution, snapshot_key);
   }
 }
 
-std::string playback_peak_key(
-    const std::string &peaks_key, const bke::SceneEeveePerformanceSnapshot &peak)
+void append_snapshot(PerformanceTreeBuilder &builder,
+                     ListBaseT<TreeElement> &tree,
+                     TreeElement *parent,
+                     const bke::SceneEeveePerformanceSnapshot &snapshot,
+                     const std::string &title,
+                     const std::string &snapshot_key,
+                     const bool sort_by_time,
+                     SnapshotNodeMetricsCache &metrics_cache,
+                     SnapshotReportCache &report_cache)
 {
-  return peaks_key + "/session-" + std::to_string(peak.playback_session_id);
+  ListBaseT<TreeElement> &target = parent ? parent->subtree : tree;
+  TreeElement &root = builder.add_label(
+      target, parent, snapshot_root_label(snapshot, title, metrics_cache), snapshot_key, true);
+  append_snapshot_contents(
+      builder,
+      root,
+      snapshot,
+      snapshot_key,
+      sort_by_time,
+      metrics_cache,
+      report_cache);
 }
 
 std::string final_render_name_key(const std::string &name)
@@ -1017,77 +1138,72 @@ std::string final_render_snapshot_key(const bke::SceneEeveePerformanceSnapshot &
          final_render_name_key(snapshot.render_view_name);
 }
 
-std::string final_render_layer_key(const bke::SceneEeveePerformanceSnapshot &snapshot)
+bool viewport_source_closed(const bke::SceneEeveePerformanceViewportSource &source)
 {
-  return "Final Render/scene-" + std::to_string(snapshot.scene_session_uid) + "/layer-" +
-         final_render_name_key(snapshot.view_layer_name);
+  return source.closed || source.lifetime.expired();
+}
+
+std::vector<std::shared_ptr<const bke::SceneEeveePerformanceSnapshot>> final_render_snapshots(
+    const bke::SceneEeveePerformanceSnapshotSet &snapshots)
+{
+  std::vector<std::shared_ptr<const bke::SceneEeveePerformanceSnapshot>> result;
+  for (const std::shared_ptr<const bke::SceneEeveePerformanceSnapshot> &snapshot :
+       snapshots.final_renders)
+  {
+    if (snapshot) {
+      result.push_back(snapshot);
+    }
+  }
+  if (result.empty() && snapshots.final_render) {
+    result.push_back(snapshots.final_render);
+  }
+  return result;
 }
 
 void collect_structured_snapshot_keys(const bke::SceneEeveePerformanceSnapshotSet &snapshots,
-                                      std::vector<std::string> &r_keys)
+                                      std::vector<std::string> &r_keys,
+                                      SnapshotReportCache &report_cache)
 {
   r_keys.push_back("Viewport Sources");
   for (const bke::SceneEeveePerformanceViewportSource &source : snapshots.viewport_sources) {
     const std::string source_key = "Viewport Sources/source-" + std::to_string(source.source_id);
     r_keys.push_back(source_key);
     if (source.latest) {
-      collect_snapshot_keys(*source.latest, source_key + "/latest", r_keys);
+      collect_snapshot_content_keys(*source.latest, source_key, r_keys, report_cache);
     }
-    const bool has_peak = std::any_of(
-        source.playback_peaks.begin(), source.playback_peaks.end(), [](const auto &peak) {
-          return peak != nullptr;
-        });
-    const std::string peaks_key = source_key + "/playback-peaks";
-    if (has_peak) {
-      r_keys.push_back(peaks_key);
-      for (const std::shared_ptr<const bke::SceneEeveePerformanceSnapshot> &peak :
-           source.playback_peaks)
-      {
-        if (peak) {
-          collect_snapshot_keys(*peak, playback_peak_key(peaks_key, *peak), r_keys);
-        }
-      }
-    }
-    if (!source.latest && !has_peak) {
+    if (!source.latest) {
       r_keys.push_back(source_key + "/not-run");
     }
   }
   r_keys.push_back("Final Render");
-  std::unordered_set<std::string> final_layer_keys;
-  const auto collect_final_snapshot_keys = [&](
-      const std::shared_ptr<const bke::SceneEeveePerformanceSnapshot> &snapshot) {
-    if (!snapshot) {
-      return;
-    }
-    const std::string layer_key = final_render_layer_key(*snapshot);
-    if (final_layer_keys.insert(layer_key).second) {
-      r_keys.push_back(layer_key);
-    }
-    collect_snapshot_keys(*snapshot, final_render_snapshot_key(*snapshot), r_keys);
-  };
-  for (const std::shared_ptr<const bke::SceneEeveePerformanceSnapshot> &snapshot :
-       snapshots.final_renders)
-  {
-    collect_final_snapshot_keys(snapshot);
+  const auto final_snapshots = final_render_snapshots(snapshots);
+  if (final_snapshots.size() == 1) {
+    collect_snapshot_content_keys(*final_snapshots.front(), "Final Render", r_keys, report_cache);
   }
-  if (snapshots.final_renders.empty()) {
-    collect_final_snapshot_keys(snapshots.final_render);
+  else {
+    for (const std::shared_ptr<const bke::SceneEeveePerformanceSnapshot> &snapshot :
+         final_snapshots)
+    {
+      collect_snapshot_keys(*snapshot, final_render_snapshot_key(*snapshot), r_keys, report_cache);
+    }
   }
   r_keys.push_back("Color Bake");
   if (snapshots.color_bake) {
-    collect_snapshot_keys(*snapshots.color_bake, "Color Bake", r_keys);
+    collect_snapshot_keys(*snapshots.color_bake, "Color Bake", r_keys, report_cache);
   }
   r_keys.push_back("Light Probe Bake");
   if (snapshots.light_probe_bake) {
-    collect_snapshot_keys(*snapshots.light_probe_bake, "Light Probe Bake", r_keys);
+    collect_snapshot_keys(*snapshots.light_probe_bake, "Light Probe Bake", r_keys, report_cache);
   }
 }
 
 void append_structured_snapshots(PerformanceTreeBuilder &builder,
                                  ListBaseT<TreeElement> &tree,
                                  const bke::SceneEeveePerformanceSnapshotSet &snapshots,
-                                 const bool sort_by_time)
+                                 const bool sort_by_time,
+                                 SnapshotReportCache &report_cache)
 {
+  SnapshotNodeMetricsCache metrics_cache;
   const bool has_viewport_source = !snapshots.viewport_sources.empty();
   TreeElement &viewports = builder.add_label(
       tree,
@@ -1095,101 +1211,81 @@ void append_structured_snapshots(PerformanceTreeBuilder &builder,
       has_viewport_source ? "Viewport Sources" : "Viewport Sources (Not Run)",
       "Viewport Sources",
       true);
+  std::vector<const bke::SceneEeveePerformanceViewportSource *> ordered_sources;
+  ordered_sources.reserve(snapshots.viewport_sources.size());
   for (const bke::SceneEeveePerformanceViewportSource &source : snapshots.viewport_sources) {
+    ordered_sources.push_back(&source);
+  }
+  std::sort(ordered_sources.begin(), ordered_sources.end(), [](const auto *a, const auto *b) {
+    const bool a_closed = viewport_source_closed(*a);
+    const bool b_closed = viewport_source_closed(*b);
+    return (a_closed != b_closed) ? !a_closed : a->source_id > b->source_id;
+  });
+  for (const bke::SceneEeveePerformanceViewportSource *source_ptr : ordered_sources) {
+    const bke::SceneEeveePerformanceViewportSource &source = *source_ptr;
     const std::string source_key = "Viewport Sources/source-" + std::to_string(source.source_id);
-    const bool source_closed = source.closed || source.lifetime.expired();
-    TreeElement &source_root = builder.add_label(
-        viewports.subtree,
-        &viewports,
-        source.label + (source_closed ? " (Closed)" : ""),
-        source_key,
-        true);
+    const bool source_closed = viewport_source_closed(source);
+    TreeElement &source_root = builder.add_label(viewports.subtree,
+                                                 &viewports,
+                                                 source.label + (source_closed ? " (Closed)" : ""),
+                                                 source_key,
+                                                 !source_closed);
     if (source.latest) {
-      append_snapshot(
-          builder,
-          tree,
-          &source_root,
-          *source.latest,
-          "Latest",
-          source_key + "/latest",
-          sort_by_time);
+      append_snapshot_contents(builder,
+                               source_root,
+                               *source.latest,
+                               source_key,
+                               sort_by_time,
+                               metrics_cache,
+                               report_cache);
     }
-    const bool has_peak = std::any_of(
-        source.playback_peaks.begin(), source.playback_peaks.end(), [](const auto &peak) {
-          return peak != nullptr;
-        });
-    if (has_peak) {
-      const std::string peaks_key = source_key + "/playback-peaks";
-      TreeElement &peaks = builder.add_label(
-          source_root.subtree, &source_root, "Playback Sync Peaks", peaks_key, true);
-      for (const std::shared_ptr<const bke::SceneEeveePerformanceSnapshot> &peak :
-           source.playback_peaks)
-      {
-        if (peak) {
-          append_snapshot(builder,
-                          tree,
-                          &peaks,
-                          *peak,
-                          "Session " + std::to_string(peak->playback_session_id) + " Sync Peak",
-                          playback_peak_key(peaks_key, *peak),
-                          sort_by_time);
-        }
-      }
-    }
-    if (!source.latest && !has_peak) {
+    if (!source.latest) {
       builder.add_label(source_root.subtree,
                         &source_root,
                         "No timing captured yet (Not Run)",
                         source_key + "/not-run");
     }
   }
-  std::vector<std::shared_ptr<const bke::SceneEeveePerformanceSnapshot>> final_snapshots;
-  for (const std::shared_ptr<const bke::SceneEeveePerformanceSnapshot> &snapshot :
-       snapshots.final_renders)
-  {
-    if (snapshot) {
-      final_snapshots.push_back(snapshot);
-    }
+  const auto final_snapshots = final_render_snapshots(snapshots);
+  if (final_snapshots.empty()) {
+    builder.add_label(tree, nullptr, "Final Render (Not Run)", "Final Render", true);
   }
-  if (final_snapshots.empty() && snapshots.final_render) {
-    final_snapshots.push_back(snapshots.final_render);
+  else if (final_snapshots.size() == 1) {
+    const bke::SceneEeveePerformanceSnapshot &snapshot = *final_snapshots.front();
+    TreeElement &final_root = builder.add_label(
+        tree,
+        nullptr,
+        snapshot_root_label(snapshot, "Final Render", metrics_cache),
+        "Final Render",
+        true);
+    append_snapshot_contents(
+        builder, final_root, snapshot, "Final Render", sort_by_time, metrics_cache, report_cache);
   }
-
-  const std::string final_label = final_snapshots.empty() ?
-                                      "Final Render (Not Run)" :
-                                      "Final Render (" +
-                                          std::to_string(final_snapshots.size()) + " result" +
-                                          (final_snapshots.size() == 1 ? "" : "s") + ")";
-  TreeElement &final_root = builder.add_label(tree, nullptr, final_label, "Final Render", true);
-  std::unordered_map<std::string, TreeElement *> final_layers;
-  for (const std::shared_ptr<const bke::SceneEeveePerformanceSnapshot> &snapshot : final_snapshots) {
-    const std::string layer_key = final_render_layer_key(*snapshot);
-    TreeElement *layer = nullptr;
-    const auto layer_it = final_layers.find(layer_key);
-    if (layer_it != final_layers.end()) {
-      layer = layer_it->second;
+  else {
+    TreeElement &final_root = builder.add_label(
+        tree,
+        nullptr,
+        "Final Render (" + std::to_string(final_snapshots.size()) + " results)",
+        "Final Render",
+        true);
+    for (const std::shared_ptr<const bke::SceneEeveePerformanceSnapshot> &snapshot :
+         final_snapshots)
+    {
+      const std::string layer_name = snapshot->view_layer_name.empty() ? std::string("<None>") :
+                                                                         snapshot->view_layer_name;
+      const std::string view_name = snapshot->render_view_name.empty() ?
+                                        std::string("<default>") :
+                                        snapshot->render_view_name;
+      append_snapshot(builder,
+                      tree,
+                      &final_root,
+                      *snapshot,
+                      "Layer " + layer_name + " / View " + view_name,
+                      final_render_snapshot_key(*snapshot),
+                      sort_by_time,
+                      metrics_cache,
+                      report_cache);
     }
-    else {
-      TreeElement &layer_element = builder.add_label(
-          final_root.subtree,
-          &final_root,
-          "Layer " +
-              (snapshot->view_layer_name.empty() ? std::string("<None>") :
-                                                    snapshot->view_layer_name),
-          layer_key,
-          true);
-      layer = &layer_element;
-      final_layers.emplace(layer_key, layer);
-    }
-    append_snapshot(builder,
-                    tree,
-                    layer,
-                    *snapshot,
-                    "View " +
-                        (snapshot->render_view_name.empty() ? std::string("<default>") :
-                                                               snapshot->render_view_name),
-                    final_render_snapshot_key(*snapshot),
-                    sort_by_time);
   }
   if (snapshots.color_bake) {
     append_snapshot(builder,
@@ -1198,10 +1294,12 @@ void append_structured_snapshots(PerformanceTreeBuilder &builder,
                     *snapshots.color_bake,
                     "Color Bake",
                     "Color Bake",
-                    sort_by_time);
+                    sort_by_time,
+                    metrics_cache,
+                    report_cache);
   }
   else {
-    builder.add_label(tree, nullptr, "Color Bake (Not Captured)", "Color Bake", true);
+    builder.add_label(tree, nullptr, "Color Bake (Not Implemented)", "Color Bake", true);
   }
   if (snapshots.light_probe_bake) {
     append_snapshot(builder,
@@ -1210,11 +1308,13 @@ void append_structured_snapshots(PerformanceTreeBuilder &builder,
                     *snapshots.light_probe_bake,
                     "Light Probe Bake",
                     "Light Probe Bake",
-                    sort_by_time);
+                    sort_by_time,
+                    metrics_cache,
+                    report_cache);
   }
   else {
     builder.add_label(
-        tree, nullptr, "Light Probe Bake (Not Captured)", "Light Probe Bake", true);
+        tree, nullptr, "Light Probe Bake (Not Implemented)", "Light Probe Bake", true);
   }
 }
 
@@ -1236,10 +1336,11 @@ ListBaseT<TreeElement> TreeDisplayEeveePerformance::build_tree(const TreeSourceD
   const std::shared_ptr<const bke::SceneEeveePerformanceSnapshotSet> snapshots =
       runtime ? runtime->snapshot_set_get() : nullptr;
   if (snapshots) {
+    SnapshotReportCache report_cache(sort_by_time);
     std::vector<std::string> persistent_keys;
-    collect_structured_snapshot_keys(*snapshots, persistent_keys);
+    collect_structured_snapshot_keys(*snapshots, persistent_keys, report_cache);
     PerformanceTreeBuilder builder{space_outliner_, scene.id, std::move(persistent_keys)};
-    append_structured_snapshots(builder, tree, *snapshots, sort_by_time);
+    append_structured_snapshots(builder, tree, *snapshots, sort_by_time, report_cache);
     return tree;
   }
 
@@ -1249,10 +1350,11 @@ ListBaseT<TreeElement> TreeDisplayEeveePerformance::build_tree(const TreeSourceD
 
   if (legacy_viewport_report.empty() && legacy_render_report.empty()) {
     const bke::SceneEeveePerformanceSnapshotSet empty_snapshots;
+    SnapshotReportCache report_cache(sort_by_time);
     std::vector<std::string> persistent_keys;
-    collect_structured_snapshot_keys(empty_snapshots, persistent_keys);
+    collect_structured_snapshot_keys(empty_snapshots, persistent_keys, report_cache);
     PerformanceTreeBuilder builder{space_outliner_, scene.id, std::move(persistent_keys)};
-    append_structured_snapshots(builder, tree, empty_snapshots, sort_by_time);
+    append_structured_snapshots(builder, tree, empty_snapshots, sort_by_time, report_cache);
     return tree;
   }
 

@@ -90,7 +90,6 @@ struct SceneEeveePerformanceSnapshot {
   uint64_t source_id = 0;
   uint64_t capture_seq = 0;
   uint64_t epoch = 0;
-  uint64_t playback_session_id = 0;
   bool is_playback = false;
   uint32_t scene_session_uid = 0;
   uint64_t render_run_id = 0;
@@ -122,7 +121,6 @@ struct SceneEeveePerformanceViewportSource {
   std::weak_ptr<const void> lifetime;
   bool closed = false;
   std::shared_ptr<const SceneEeveePerformanceSnapshot> latest;
-  std::vector<std::shared_ptr<const SceneEeveePerformanceSnapshot>> playback_peaks;
 };
 
 struct SceneEeveePerformanceSnapshotSet {
