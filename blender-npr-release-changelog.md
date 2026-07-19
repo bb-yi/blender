@@ -549,13 +549,32 @@
 - 修复 Filter Graph 多执行阶段的纹理反馈回路，确保 OpenGL/Vulkan 多阶段输出正确。
 - Windows 本地发布构建的完整 Release 测试通过 `92/92`；该结果不代表 Linux 或 macOS 测试覆盖。
 
+## 2026-07-16  bab5a63ca3b8
+
+#### 新增功能
+- `GLSL Function` 节点新增 `Node / Code` 双模式，支持节点内源码编辑、草稿提交/丢弃及共享源码原子刷新。
+
+#### 修复与改进
+- 同步至 Blender 5.2.0 LTS 正式版，合入官方 GPU、Grease Pencil、Cycles 修复及翻译更新。
+- 修复 EEVEE 混合管线的重复 GPU 资源绑定与 AOV/光照资源路由，覆盖 `Shader to RGB`、`Shader Info`、`GLSL Light` 和探针路径。
+- 统一 Filter Graph 的 Scene 所有权与编辑状态，修复视图重置、取消关联后数据丢失及误红提示。
+- 修复 Filter Graph 多执行阶段的纹理反馈回路，确保 OpenGL/Vulkan 多阶段输出正确。
+- 修复 EEVEE View Layer 的 Outline 通道 RNA 注册遗漏，消除通道面板持续报告 `ViewLayerEEVEE.use_pass_outline` 属性不存在的问题，并恢复 Outline pass 开关。
+
+## 2026-07-20  f0da4307f3ec
+
+#### 修复与改进
+- 修复 Performance Outliner 刷新不同步、MainView 闪动/消失、只在视图移动时刷新以及跨 Scene 旧快照残留问题；
+- 稳定播放期间的 EEVEE temporal reprojection 与 NPR instance attribute 更新，改善连续刷新期间的结果一致性。
+- 改进 GLSL Function code editing、AOV 节点UI同步官方；
+- EEVEE Performance 新增 Sync 阶段，细分 Begin/Objects/End、World、Scene Modules、View Effects、NPR Post，以及 Draw Sync 的对象迭代、实例提取、延迟提取和等待等耗时来源。
+- EEVEE 增加引用对象数据到着色器的稳定传递路径，补充 NPR 实例属性与材质/AOV 相关数据通道。
+
 ## 暂存
 
 #### 新增功能
 
 #### 修复与改进
-
-- 恢复 Eevee Outline Render Pass 的 `ViewLayer.use_pass_outline` RNA 注册，确保 Python API 与 View Layer 通道配置可用。
 
 # TODO
 
