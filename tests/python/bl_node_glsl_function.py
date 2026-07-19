@@ -751,7 +751,8 @@ class GLSLFunctionNodeTest(unittest.TestCase):
         self.assertEqual(node.function_name, "glsl_function")
         self.assertIn("vec4 glsl_function(vec4 color)", node.script.as_string())
         self.assertEqual(node.parse_status, 'READY')
-        self.assertEqual(find_socket(node.inputs, "In_color").type, 'RGBA')
+        self.assertEqual(find_socket(node.inputs, "In_color").type, 'VECTOR')
+        self.assertEqual(find_socket(node.inputs, "In_color_w").type, 'VALUE')
 
     def test_code_mode_preserves_socket_links(self):
         _, tree = self.make_material_tree()
