@@ -16,7 +16,6 @@
 #include "BLI_hash.h"
 #include "BLI_listbase.h"
 #include "BLI_map.hh"
-#include "BLI_math_matrix.hh"
 #include "BLI_set.hh"
 #include "BLI_string.h"
 #include "BLI_vector.hh"
@@ -28,8 +27,6 @@
 #include "BKE_node.hh"
 
 #include "NOD_filter_graph.hh"
-
-#include "DEG_depsgraph_query.hh"
 
 #include "GPU_material.hh"
 #include "GPU_framebuffer.hh"
@@ -1019,7 +1016,7 @@ Texture *FilterMaterialModule::acquire_graph_texture(const char *name,
   return graph_texture_pool_.back().texture.get();
 }
 
-void FilterMaterialModule::update_filter_object_info_buffer(GPUMaterial *gpumat)
+void FilterMaterialModule::update_filter_object_mask_buffer(GPUMaterial *gpumat)
 {
   for (FilterObjectInfoData &entry : filter_object_info_buf_) {
     entry = filter_object_info_default();
@@ -1037,23 +1034,7 @@ void FilterMaterialModule::update_filter_object_info_buffer(GPUMaterial *gpumat)
       continue;
     }
 
-    Object *object_eval = DEG_get_evaluated(inst_.depsgraph, object);
-    const Object *runtime_object = (object_eval != nullptr) ? object_eval : object;
-
-    float3 location;
-    math::EulerXYZ rotation;
-    float3 scale;
-    math::to_loc_rot_scale<true>(runtime_object->object_to_world(), location, rotation, scale);
-    const float3 rotation_value = float3(rotation);
-
     FilterObjectInfoData &entry = filter_object_info_buf_[index];
-    entry.location = float4(location[0], location[1], location[2], 0.0f);
-    entry.rotation = float4(rotation_value[0], rotation_value[1], rotation_value[2], 0.0f);
-    entry.scale = float4(scale[0], scale[1], scale[2], 0.0f);
-    entry.color = float4(runtime_object->color[0],
-                         runtime_object->color[1],
-                         runtime_object->color[2],
-                         runtime_object->color[3]);
     const char *name = object->id.name + 2;
     const uint32_t hash = BKE_cryptomatte_hash(name, int(std::strlen(name)));
     entry.metadata = float4(BKE_cryptomatte_hash_to_float(hash), 0.0f, 0.0f, 0.0f);
@@ -1135,7 +1116,7 @@ bool FilterMaterialModule::sync_pass_entry(blender::Material *material, FilterPa
 
   inst_.telemetry.material_sync_add(
       shader_queued, optimize_queued, false, material_failed, material_name);
-  inst_.manager->register_layer_attributes(gpumat);
+  inst_.manager->register_material_resources(gpumat);
 
   visited.clear();
   FilterMaterialAOVUsage aov_usage;
@@ -1145,7 +1126,7 @@ bool FilterMaterialModule::sync_pass_entry(blender::Material *material, FilterPa
   entry.gpumat = gpumat;
   entry.uses_aov_input = !aov_usage.input_names.is_empty();
   entry.uses_aov_output = !aov_usage.output_names.is_empty();
-  entry.uses_filter_object_info = GPU_material_filter_object_info_count(gpumat) > 0 ||
+  entry.uses_filter_object_mask = GPU_material_filter_object_info_count(gpumat) > 0 ||
                                   GPU_material_filter_mask_object_count(gpumat) > 0;
   entry.conflicting_aov_names = filter_material_collect_conflicting_aov_names(aov_usage);
   return true;
@@ -1447,8 +1428,8 @@ gpu::Texture *FilterMaterialModule::render_stage(draw::View &view,
     PassSimple pass = {"FilterMaterial.Pass"};
     pass.state_set(DRW_STATE_WRITE_COLOR);
     pass.framebuffer_set(&framebuffer_);
-    if (entry.uses_filter_object_info) {
-      update_filter_object_info_buffer(entry.gpumat);
+    if (entry.uses_filter_object_mask) {
+      update_filter_object_mask_buffer(entry.gpumat);
     }
     pass.material_set(*inst_.manager, entry.gpumat);
     pass.bind_texture("scene_color_tx", &scene_color_tx, linear_sampler);

@@ -111,6 +111,11 @@ class Manager {
   /** Number of object attribute recorded. */
   uint attribute_len_ = 0;
 
+  /** Unique referenced objects requested by all materials in this manager. */
+  Map<uint32_t, GPUReferencedObject> referenced_objects_;
+  uint referenced_object_table_offset_ = 0;
+  uint referenced_object_table_size_ = 0;
+
   Object *object_active = nullptr;
 
  public:
@@ -176,7 +181,8 @@ class Manager {
   /**
    * Collect necessary View Layer attributes.
    */
-  void register_layer_attributes(GPUMaterial *material);
+  /** Collect layer attributes and referenced-object requests from a material. */
+  void register_material_resources(GPUMaterial *material);
 
   /**
    * Compute <-> Graphic queue transition is quite slow on some backend. To avoid unnecessary
@@ -304,6 +310,7 @@ class Manager {
 
  private:
   void sync_layer_attributes();
+  void sync_referenced_objects();
 
   /* Fingerprint of the manager in a certain state. Assured to not be 0.
    * Not reliable enough for general update detection. Only to be used for debugging assertion. */
@@ -483,7 +490,7 @@ inline void Manager::extract_object_attributes(ResourceHandleRange handle,
   }
 }
 
-inline void Manager::register_layer_attributes(GPUMaterial *material)
+inline void Manager::register_material_resources(GPUMaterial *material)
 {
   const ListBaseT<GPULayerAttr> *attr_list = GPU_material_layer_attributes(material);
 
@@ -493,6 +500,16 @@ inline void Manager::register_layer_attributes(GPUMaterial *material)
        *  this only collects a table of their names. */
       layer_attributes.add(attr.hash_code, *&attr);
     }
+  }
+
+  const int referenced_object_count = GPU_material_referenced_object_count(material);
+  for (int index = 0; index < referenced_object_count; index++) {
+    const GPUReferencedObject *request = GPU_material_referenced_object_get(material, index);
+    if (request == nullptr || request->session_uid == 0) {
+      continue;
+    }
+    GPUReferencedObject &entry = referenced_objects_.lookup_or_add(request->session_uid, *request);
+    entry.flags |= request->flags;
   }
 }
 

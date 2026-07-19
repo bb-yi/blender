@@ -581,6 +581,11 @@ struct [[host_shared]] ObjectAttribute {
  * C++ compiler gives us the same size. */
 BLI_STATIC_ASSERT_ALIGN(ObjectAttribute, 20)
 
+/* Referenced-object records are packed into the existing ObjectAttribute SSBO. */
+#define DRW_REFERENCED_OBJECT_DATA_MAGIC 0x524F4431u /* "ROD1" */
+#define DRW_REFERENCED_OBJECT_DATA_ABI_VERSION 1u
+#define DRW_REFERENCED_OBJECT_DATA_RECORD_STRIDE 10u
+
 struct [[host_shared]] LayerAttribute {
   float4 data;
   uint hash_code;

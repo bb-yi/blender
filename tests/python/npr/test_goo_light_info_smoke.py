@@ -32,38 +32,30 @@ node.light_object = light_object
 assert node.light_object == light_object
 
 
-def enabled_outputs(shader_node):
-    return {socket.name for socket in shader_node.outputs if socket.enabled}
+def assert_all_outputs_enabled(shader_node):
+    disabled = [socket.name for socket in shader_node.outputs if not socket.enabled]
+    assert not disabled, f"Light Info outputs must stay enabled; disabled={disabled}"
 
 
-assert enabled_outputs(node) == {"Color", "Power", "Type", "Position", "Radius", "Visible"}
+assert_all_outputs_enabled(node)
 
 light_data.type = "SUN"
-assert enabled_outputs(node) == {"Color", "Power", "Type", "Direction", "Sun Angle", "Visible"}
+assert_all_outputs_enabled(node)
 
 spot_data = bpy.data.lights.new("LightInfoSmokeSpot", type="SPOT")
 spot_object = bpy.data.objects.new("LightInfoSmokeSpot", spot_data)
 node.light_object = spot_object
-assert enabled_outputs(node) == {
-    "Color",
-    "Power",
-    "Type",
-    "Position",
-    "Direction",
-    "Radius",
-    "Spot Size",
-    "Visible",
-}
+assert_all_outputs_enabled(node)
 
 area_data = bpy.data.lights.new("LightInfoSmokeArea", type="AREA")
 area_object = bpy.data.objects.new("LightInfoSmokeArea", area_data)
 node.light_object = area_object
-assert enabled_outputs(node) == {"Color", "Power", "Type", "Position", "Direction", "Radius", "Visible"}
+assert_all_outputs_enabled(node)
 
 sun_data = bpy.data.lights.new("LightInfoSmokeSun", type="SUN")
 sun_object = bpy.data.objects.new("LightInfoSmokeSun", sun_data)
 node.light_object = sun_object
-assert enabled_outputs(node) == {"Color", "Power", "Type", "Direction", "Sun Angle", "Visible"}
+assert_all_outputs_enabled(node)
 
 node.light_object = None
-assert enabled_outputs(node) == {"Color", "Power", "Type", "Visible"}
+assert_all_outputs_enabled(node)

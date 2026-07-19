@@ -355,7 +355,8 @@ const EnumPropertyItem rna_enum_object_axis_flip_items[] = {
 
 namespace blender {
 
-static void rna_Object_tag_dependent_node_trees(Main *bmain, Object *object)
+static void rna_Object_tag_dependent_node_trees(Main *bmain,
+                                                Object *object)
 {
   Set<ID *> changed_ntree_ids;
   Set<ID *> changed_owner_ids;
@@ -363,7 +364,9 @@ static void rna_Object_tag_dependent_node_trees(Main *bmain, Object *object)
   FOREACH_NODETREE_BEGIN (bmain, ntree, owner_id) {
     bool tree_uses_object_id = false;
     for (bNode *node : ntree->all_nodes()) {
-      if (node->id == &object->id) {
+      const bool uses_referenced_object_data =
+          node->typeinfo != nullptr && node->typeinfo->gpu_uses_referenced_object_data;
+      if (node->id == &object->id && !uses_referenced_object_data) {
         BKE_ntree_update_tag_node_property(ntree, node);
         tree_uses_object_id = true;
       }

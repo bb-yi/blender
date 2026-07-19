@@ -3173,12 +3173,17 @@ void DepsgraphRelationBuilder::build_nodetree(bNodeTree *ntree)
       add_relation(image_key, ntree_output_key, "Image -> Node");
     }
     else if (id_type == ID_OB) {
-      build_object(id_cast<Object *>(id));
-      ComponentKey object_transform_key(id, NodeType::TRANSFORM);
-      add_relation(object_transform_key, ntree_output_key, "Object Transform -> Node");
-      if (object_have_geometry_component(reinterpret_cast<Object *>(id))) {
-        ComponentKey object_geometry_key(id, NodeType::GEOMETRY);
-        add_relation(object_geometry_key, ntree_output_key, "Object Geometry -> Node");
+      Object *object = id_cast<Object *>(id);
+      build_object(object);
+      const bool uses_referenced_object_data =
+          bnode->typeinfo != nullptr && bnode->typeinfo->gpu_uses_referenced_object_data;
+      if (!uses_referenced_object_data) {
+        ComponentKey object_transform_key(id, NodeType::TRANSFORM);
+        add_relation(object_transform_key, ntree_output_key, "Object Transform -> Node");
+        if (object_have_geometry_component(object)) {
+          ComponentKey object_geometry_key(id, NodeType::GEOMETRY);
+          add_relation(object_geometry_key, ntree_output_key, "Object Geometry -> Node");
+        }
       }
     }
     else if (id_type == ID_SCE) {

@@ -372,6 +372,8 @@ struct bNodeType {
   NodeExecFunction exec_fn = nullptr;
   /* gpu */
   NodeGPUExecFunction gpu_fn = nullptr;
+  /** True when the node reads evaluated object data through Draw Manager at runtime. */
+  bool gpu_uses_referenced_object_data = false;
   /* MaterialX */
   NodeMaterialXFunction materialx_fn = nullptr;
 

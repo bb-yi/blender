@@ -62,6 +62,24 @@ enum GPUMaterialStatus {
   GPU_MAT_SUCCESS,
 };
 
+/** Data lanes requested from an evaluated object by a material node. */
+enum eGPUReferencedObjectDataFlag : uint32_t {
+  GPU_REFERENCED_OBJECT_DATA_NONE = 0,
+  GPU_REFERENCED_OBJECT_DATA_TRANSFORM = (1u << 0),
+  GPU_REFERENCED_OBJECT_DATA_COLOR = (1u << 1),
+  GPU_REFERENCED_OBJECT_DATA_VISIBILITY = (1u << 2),
+  GPU_REFERENCED_OBJECT_DATA_TYPE = (1u << 3),
+  GPU_REFERENCED_OBJECT_DATA_LIGHT = (1u << 4),
+};
+ENUM_OPERATORS(eGPUReferencedObjectDataFlag);
+
+/** Original object identity retained by a GPUMaterial until Draw Manager sync. */
+struct GPUReferencedObject {
+  Object *object = nullptr;
+  uint32_t session_uid = 0;
+  eGPUReferencedObjectDataFlag flags = GPU_REFERENCED_OBJECT_DATA_NONE;
+};
+
 /* GPU_MAT_OPTIMIZATION_SKIP for cases where we do not
  * plan to perform optimization on a given material. */
 enum eGPUMaterialOptimizationStatus {
@@ -233,6 +251,12 @@ bool GPU_material_uses_hiz_data(const GPUMaterial *mat);
 int GPU_material_filter_object_info_ensure(GPUMaterial *material, Object *object);
 int GPU_material_filter_object_info_count(const GPUMaterial *material);
 Object *GPU_material_filter_object_info_get(const GPUMaterial *material, int index);
+uint32_t GPU_material_referenced_object_ensure(
+    GPUMaterial *material, Object *object, eGPUReferencedObjectDataFlag flags);
+bool GPU_material_uses_referenced_object_data(const GPUMaterial *material);
+int GPU_material_referenced_object_count(const GPUMaterial *material);
+const GPUReferencedObject *GPU_material_referenced_object_get(const GPUMaterial *material,
+                                                              int index);
 int GPU_material_filter_mask_object_append(GPUMaterial *material, Object *object);
 int GPU_material_filter_mask_object_count(const GPUMaterial *material);
 Object *GPU_material_filter_mask_object_get(const GPUMaterial *material, int index);

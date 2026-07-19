@@ -71,7 +71,7 @@ def make_target_object():
     return target
 
 
-def make_filter_material(target):
+def make_filter_material(target, output_name="Location"):
     material = bpy.data.materials.new("FilterObjectInfo")
     material.use_nodes = True
     material.eevee_domain = "FILTER"
@@ -88,21 +88,24 @@ def make_filter_material(target):
     object_info.location = (0.0, 0.0)
     object_info.object = target
 
-    separate = nodes.new("ShaderNodeSeparateXYZ")
-    separate.location = (220.0, 0.0)
+    if output_name == "Location":
+        separate = nodes.new("ShaderNodeSeparateXYZ")
+        separate.location = (220.0, 0.0)
 
-    multiply = nodes.new("ShaderNodeMath")
-    multiply.location = (440.0, 0.0)
-    multiply.operation = "MULTIPLY"
-    multiply.inputs[1].default_value = 0.5
+        multiply = nodes.new("ShaderNodeMath")
+        multiply.location = (440.0, 0.0)
+        multiply.operation = "MULTIPLY"
+        multiply.inputs[1].default_value = 0.5
 
-    combine = nodes.new("ShaderNodeCombineColor")
-    combine.location = (560.0, 0.0)
+        combine = nodes.new("ShaderNodeCombineColor")
+        combine.location = (560.0, 0.0)
 
-    links.new(object_info.outputs["Location"], separate.inputs["Vector"])
-    links.new(separate.outputs["X"], multiply.inputs[0])
-    links.new(multiply.outputs["Value"], combine.inputs["Red"])
-    links.new(combine.outputs["Color"], output.inputs["Color"])
+        links.new(object_info.outputs[output_name], separate.inputs["Vector"])
+        links.new(separate.outputs["X"], multiply.inputs[0])
+        links.new(multiply.outputs["Value"], combine.inputs["Red"])
+        links.new(combine.outputs["Color"], output.inputs["Color"])
+    else:
+        links.new(object_info.outputs[output_name], output.inputs["Color"])
 
     return material
 
@@ -140,23 +143,40 @@ def sample_center_red(pixels):
     return pixels[index]
 
 
+def sample_center_rgb(pixels):
+    index = ((RESOLUTION // 2) * RESOLUTION + (RESOLUTION // 2)) * 4
+    return tuple(pixels[index:index + 3])
+
+
 def main():
     clear_scene()
     configure_scene()
     make_camera()
     make_plane()
     target = make_target_object()
-    attach_filter_material(make_filter_material(target))
+    filter_material = make_filter_material(target)
+    attach_filter_material(filter_material)
 
     bpy.context.view_layer.update()
     red_initial = sample_center_red(render_image())
+    compile_status_initial = filter_material.shader_compile_status
+    compile_timestamp_initial = filter_material.shader_compile_timestamp
 
     target.location.x = 1.0
     bpy.context.view_layer.update()
     red_moved = sample_center_red(render_image())
+    compile_status_moved = filter_material.shader_compile_status
+    compile_timestamp_moved = filter_material.shader_compile_timestamp
 
     print(f"FILTER_OBJECT_INFO_RED_INITIAL={red_initial:.6f}")
     print(f"FILTER_OBJECT_INFO_RED_MOVED={red_moved:.6f}")
+    print(
+        f"FILTER_OBJECT_INFO_COMPILE_STATUS={compile_status_initial},{compile_status_moved}"
+    )
+    print(
+        f"FILTER_OBJECT_INFO_COMPILE_TIMESTAMP={compile_timestamp_initial},"
+        f"{compile_timestamp_moved}"
+    )
 
     assert red_initial < 0.1, (
         f"Expected near-black initial filter color from X=0.0, got {red_initial}"
@@ -167,6 +187,45 @@ def main():
     assert (red_moved - red_initial) > 0.3, (
         f"Expected object move to change filter output, got initial={red_initial}, moved={red_moved}"
     )
+    assert compile_status_initial != "FAILED" and compile_status_moved != "FAILED", (
+        f"Filter Object Info shader compilation failed: "
+        f"initial={compile_status_initial}, moved={compile_status_moved}"
+    )
+    assert compile_status_moved == compile_status_initial, (
+        f"Object move changed filter shader compile status: "
+        f"initial={compile_status_initial}, moved={compile_status_moved}"
+    )
+    assert compile_timestamp_moved == compile_timestamp_initial, (
+        f"Object move recompiled Filter Object Info shader: "
+        f"initial={compile_timestamp_initial}, moved={compile_timestamp_moved}"
+    )
+
+    target.rotation_euler = (0.2, 0.3, 0.4)
+    target.scale = (1.2, 1.4, 1.6)
+    target.color = (0.15, 0.35, 0.75, 1.0)
+
+    def render_field(field):
+        clear_filter_graph(bpy.context.scene)
+        attach_filter_material(make_filter_material(target, field))
+        bpy.context.view_layer.update()
+        return sample_center_rgb(render_image())
+
+    rotation_rgb = render_field("Rotation")
+    scale_rgb = render_field("Scale")
+    color_rgb = render_field("Color")
+
+    print(f"FILTER_OBJECT_INFO_ROTATION={rotation_rgb}")
+    print(f"FILTER_OBJECT_INFO_SCALE={scale_rgb}")
+    print(f"FILTER_OBJECT_INFO_COLOR={color_rgb}")
+
+    for actual, expected, label in (
+        (rotation_rgb, (0.2, 0.3, 0.4), "rotation"),
+        (scale_rgb, (1.2, 1.4, 1.6), "scale"),
+        (color_rgb, (0.15, 0.35, 0.75), "color"),
+    ):
+        assert all(abs(value - target_value) < 0.05 for value, target_value in zip(actual, expected)), (
+            f"Filter Object Info {label} mismatch: actual={actual}, expected={expected}"
+        )
 
 
 if __name__ == "__main__":

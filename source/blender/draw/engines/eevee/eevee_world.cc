@@ -153,7 +153,7 @@ void World::sync()
   is_ready_ = true;
   uses_scene_time_ |= GPU_material_is_time_dependent(gpumat);
 
-  inst_.manager->register_layer_attributes(gpumat);
+  inst_.manager->register_material_resources(gpumat);
 
   float opacity = inst_.use_studio_light() ? lookdev_world_.background_opacity_get() :
                                              inst_.film.background_opacity_get();
@@ -179,6 +179,7 @@ void World::sync_volume(const WorldHandle &world_handle, bool wait_ready)
   bool had_volume = has_volume_;
 
   if (gpumat && (GPU_material_status(gpumat) == GPU_MAT_SUCCESS)) {
+    inst_.manager->register_material_resources(gpumat);
     has_volume_ = GPU_material_has_volume_output(gpumat);
     has_volume_scatter_ = GPU_material_flag_get(gpumat, GPU_MATFLAG_VOLUME_SCATTER);
     has_volume_absorption_ = GPU_material_flag_get(gpumat, GPU_MATFLAG_VOLUME_ABSORPTION);

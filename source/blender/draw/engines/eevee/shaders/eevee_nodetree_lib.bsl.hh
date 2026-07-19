@@ -8,6 +8,8 @@
 #include "infos/eevee_geom_infos.hh"
 
 #include "draw_intersect_lib.glsl"
+#include "gpu_shader_common_hash.glsl"
+#include "draw_referenced_object_lib.glsl"
 #include "draw_model.bsl.hh"
 #include "draw_view.bsl.hh"
 #include "eevee_bxdf_lut_lib.bsl.hh"

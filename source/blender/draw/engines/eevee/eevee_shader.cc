@@ -1545,9 +1545,15 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
         {generated_source->filename.c_str(), dependencies, generated_source->content});
   }
 
-  /* WORKAROUND: Add new ob attr buffer. */
-  if (GPU_material_uniform_attributes(gpumat) != nullptr) {
+  /* The existing ObjectAttribute SSBO is shared by ordinary attributes and referenced objects. */
+  const bool uses_uniform_attributes = GPU_material_uniform_attributes(gpumat) != nullptr;
+  const bool uses_referenced_object_data = GPU_material_uses_referenced_object_data(gpumat);
+  if (uses_uniform_attributes || uses_referenced_object_data) {
     info.additional_info("draw_object_attributes");
+  }
+
+  /* WORKAROUND: Remove the old object attribute UBO when ordinary attributes are used. */
+  if (uses_uniform_attributes) {
 
     /* Search and remove the old object attribute UBO which would creating bind point collision. */
     for (auto &resource_info : info.batch_resources_) {

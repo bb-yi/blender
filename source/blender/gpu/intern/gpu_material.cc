@@ -18,6 +18,7 @@
 
 #include "DNA_material_types.h"
 #include "DNA_light_types.h"
+#include "DNA_object_types.h"
 #include "DNA_scene_types.h"
 #include "DNA_world_types.h"
 
@@ -109,6 +110,8 @@ struct GPUMaterial {
   GPUSkyBuilder *sky_builder = nullptr;
   /* Low level node graph(s). Also contains resources needed by the material. */
   GPUNodeGraph graph = {};
+  bool uses_referenced_object_data = false;
+  Vector<GPUReferencedObject> referenced_objects;
   Vector<Object *> filter_object_infos;
   Vector<Object *> filter_mask_objects;
   Vector<GPUMaterialGeneratedSource> generated_sources;
@@ -511,6 +514,78 @@ int GPU_material_filter_object_info_ensure(GPUMaterial *material, Object *object
 
   material->filter_object_infos.append(object);
   return material->filter_object_infos.size() - 1;
+}
+
+static Object *gpu_material_referenced_object_original(Object *object)
+{
+  if (object == nullptr) {
+    return nullptr;
+  }
+  if (object->id.orig_id != nullptr) {
+    return reinterpret_cast<Object *>(object->id.orig_id);
+  }
+  return object;
+}
+
+uint32_t GPU_material_referenced_object_ensure(GPUMaterial *material,
+                                               Object *object,
+                                               eGPUReferencedObjectDataFlag flags)
+{
+  if (material == nullptr) {
+    return 0;
+  }
+  material->uses_referenced_object_data = true;
+
+  Object *original = gpu_material_referenced_object_original(object);
+  if (original == nullptr) {
+    return 0;
+  }
+
+  /* Temporary Main IDs intentionally do not receive session UIDs. Referenced-object requests
+   * from runtime-only graphs must degrade to the shader default instead of tripping the UID assert. */
+  if (original->id.tag & ID_TAG_TEMP_MAIN) {
+    return 0;
+  }
+  if (original->id.session_uid == 0) {
+    BKE_lib_libblock_session_uid_ensure(&original->id);
+  }
+  const uint32_t session_uid = original->id.session_uid;
+  if (session_uid == 0) {
+    return 0;
+  }
+
+  for (GPUReferencedObject &entry : material->referenced_objects) {
+    if (entry.session_uid == session_uid) {
+      entry.flags |= flags;
+      return session_uid;
+    }
+  }
+
+  GPUReferencedObject entry;
+  entry.object = original;
+  entry.session_uid = session_uid;
+  entry.flags = flags;
+  material->referenced_objects.append(entry);
+  return session_uid;
+}
+
+bool GPU_material_uses_referenced_object_data(const GPUMaterial *material)
+{
+  return material != nullptr && material->uses_referenced_object_data;
+}
+
+int GPU_material_referenced_object_count(const GPUMaterial *material)
+{
+  return (material != nullptr) ? material->referenced_objects.size() : 0;
+}
+
+const GPUReferencedObject *GPU_material_referenced_object_get(const GPUMaterial *material,
+                                                              int index)
+{
+  if (material == nullptr || index < 0 || index >= material->referenced_objects.size()) {
+    return nullptr;
+  }
+  return &material->referenced_objects[index];
 }
 
 int GPU_material_filter_object_info_count(const GPUMaterial *material)

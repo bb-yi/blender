@@ -255,6 +255,36 @@ def assert_type_output_mapping():
     assert_scalar_close(pixel, 0.0, "Type output for unassigned light")
 
 
+def assert_unsupported_type_outputs_default():
+    clear_scene()
+    configure_scene()
+    make_camera()
+    sun = make_light("LightInfoUnsupportedSun", light_type="SUN", location=(0.4, 0.5, 0.6))
+    make_plane(make_light_info_material(sun, "Position"))
+    assert_scalar_close(render_center_pixel(), 0.0, "Sun Position default")
+
+    clear_scene()
+    configure_scene()
+    make_camera()
+    sun = make_light("LightInfoUnsupportedSunRadius", light_type="SUN")
+    make_plane(make_light_info_material(sun, "Radius"))
+    assert_scalar_close(render_center_pixel(), 0.0, "Sun Radius default")
+
+    clear_scene()
+    configure_scene()
+    make_camera()
+    point = make_light("LightInfoUnsupportedPointDirection", light_type="POINT")
+    make_plane(make_light_info_material(point, "Direction"))
+    assert_scalar_close(render_center_pixel(), 0.0, "Point Direction default")
+
+    clear_scene()
+    configure_scene()
+    make_camera()
+    area = make_light("LightInfoUnsupportedAreaSpotSize", light_type="AREA")
+    make_plane(make_light_info_material(area, "Spot Size"))
+    assert_scalar_close(render_center_pixel(), 0.0, "Area Spot Size default")
+
+
 def assert_visible_output():
     clear_scene()
     configure_scene()
@@ -391,6 +421,53 @@ def assert_light_type_updates_without_relink():
     assert 0.8 < pixel_after[0] < 1.2, f"Updated type output mismatch: {pixel_after}"
 
 
+def assert_light_updates_without_material_recompile():
+    clear_scene()
+    configure_scene()
+    make_camera()
+    light_object = make_light(
+        "LightInfoNoRecompile",
+        light_type="SPOT",
+        color=(0.2, 0.4, 0.8),
+        energy=3.0,
+        location=(0.2, 0.3, 1.0),
+    )
+    material = make_light_info_material(light_object, "Color")
+    make_plane(material)
+
+    # The first render is the shader warm-up.  Only subsequent renders are used
+    # for the no-recompile assertion.
+    render_center_pixel()
+    timestamp_before = material.shader_compile_timestamp
+    print(
+        f"LIGHT_INFO_SHADER_WARMUP_STATUS={material.shader_compile_status},"
+        f"timestamp={timestamp_before}"
+    )
+
+    updates = (
+        ("transform", lambda: setattr(light_object, "location", (0.7, -0.2, 1.4))),
+        ("rotation", lambda: orient_light(light_object, Vector((0.0, 1.0, 0.0)))),
+        ("color", lambda: setattr(light_object.data, "color", (0.8, 0.2, 0.1))),
+        ("energy", lambda: setattr(light_object.data, "energy", 8.0)),
+        ("type", lambda: setattr(light_object.data, "type", "SUN")),
+        ("visibility", lambda: setattr(light_object, "hide_viewport", True)),
+        ("render_visibility", lambda: setattr(light_object, "hide_render", True)),
+    )
+    for label, update in updates:
+        update()
+        bpy.context.view_layer.update()
+        render_center_pixel()
+        timestamp_after = material.shader_compile_timestamp
+        print(
+            f"LIGHT_INFO_SHADER_TIMESTAMP_{label.upper()}="
+            f"{timestamp_before}->{timestamp_after}"
+        )
+        assert timestamp_after == timestamp_before, (
+            f"Light Info {label} update rebuilt the material shader: "
+            f"{timestamp_before}->{timestamp_after}"
+        )
+
+
 assert_color_output()
 assert_power_output()
 assert_position_output()
@@ -400,6 +477,7 @@ assert_area_radius_output()
 assert_spot_size_output()
 assert_sun_angle_output()
 assert_type_output_mapping()
+assert_unsupported_type_outputs_default()
 assert_visible_output()
 assert_unassigned_light_is_black()
 assert_light_color_updates_without_relink()
@@ -408,3 +486,4 @@ assert_light_position_updates_without_relink()
 assert_light_direction_updates_without_relink()
 assert_light_radius_updates_without_relink_from_scale()
 assert_light_type_updates_without_relink()
+assert_light_updates_without_material_recompile()

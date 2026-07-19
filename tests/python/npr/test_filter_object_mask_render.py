@@ -67,6 +67,7 @@ def make_target_object():
     bpy.ops.mesh.primitive_cube_add(size=1.2, location=(0.0, 0.0, 0.0))
     target = bpy.context.active_object
     target.name = "MaskTarget"
+    target.rotation_euler.x = 0.6
     target.data.materials.append(make_surface_material())
     return target
 
@@ -88,10 +89,24 @@ def make_filter_material(target):
     object_mask.location = (0.0, 0.0)
     object_mask.object = target
 
-    combine = nodes.new("ShaderNodeCombineColor")
-    combine.location = (260.0, 0.0)
+    object_info = nodes.new("ShaderNodeFilterObjectInfo")
+    object_info.location = (0.0, -160.0)
+    object_info.object = target
 
-    links.new(object_mask.outputs["Mask"], combine.inputs["Red"])
+    separate = nodes.new("ShaderNodeSeparateXYZ")
+    separate.location = (220.0, -160.0)
+
+    multiply = nodes.new("ShaderNodeMath")
+    multiply.location = (260.0, 0.0)
+    multiply.operation = "MULTIPLY"
+
+    combine = nodes.new("ShaderNodeCombineColor")
+    combine.location = (440.0, 0.0)
+
+    links.new(object_info.outputs["Rotation"], separate.inputs["Vector"])
+    links.new(object_mask.outputs["Mask"], multiply.inputs[0])
+    links.new(separate.outputs["X"], multiply.inputs[1])
+    links.new(multiply.outputs["Value"], combine.inputs["Red"])
     links.new(combine.outputs["Color"], output.inputs["Color"])
 
     return material
@@ -169,8 +184,8 @@ def main():
         f"Expected pixels outside the selected object to stay dark when Crypto Object is disabled, "
         f"got {red_corner_disabled}"
     )
-    assert red_center_initial > 0.8, (
-        f"Expected the selected object to be masked at the center, got {red_center_initial}"
+    assert 0.5 < red_center_initial < 0.7, (
+        f"Expected mask * Rotation.X to be about 0.6 at the center, got {red_center_initial}"
     )
     assert red_corner_initial < 0.1, (
         f"Expected pixels outside the selected object to stay dark, got {red_corner_initial}"

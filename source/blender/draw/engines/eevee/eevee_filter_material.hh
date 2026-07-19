@@ -46,7 +46,7 @@ class FilterMaterialModule {
     GPUMaterial *gpumat = nullptr;
     bool uses_aov_input = false;
     bool uses_aov_output = false;
-    bool uses_filter_object_info = false;
+    bool uses_filter_object_mask = false;
     blender::Vector<std::string> conflicting_aov_names;
   };
 
@@ -86,7 +86,7 @@ class FilterMaterialModule {
                                  gpu::TextureFormat format,
                                  int2 extent,
                                  int layers);
-  void update_filter_object_info_buffer(GPUMaterial *gpumat);
+  void update_filter_object_mask_buffer(GPUMaterial *gpumat);
   bool sync_pass_entry(blender::Material *material, FilterPassEntry &entry);
 
  public:

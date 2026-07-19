@@ -6,12 +6,21 @@
  * \ingroup draw
  */
 
+#include "DNA_light_types.h"
+#include "DNA_object_types.h"
 #include "DNA_userdef_types.h"
 
+#include "BKE_main.hh"
+#include "DEG_depsgraph_query.hh"
+
+#include "BLI_hash.h"
 #include "BKE_paint.hh"
 #include "BKE_paint_bvh.hh"
 
 #include "BLI_math_base.h"
+#include "BLI_math_bits.h"
+#include "BLI_math_matrix.hh"
+#include "GPU_capabilities.hh"
 #include "GPU_compute.hh"
 
 #include "draw_context_private.hh"
@@ -24,6 +33,86 @@
 namespace blender::draw {
 
 std::atomic<uint32_t> Manager::global_sync_counter_ = 1;
+
+namespace {
+
+static ObjectAttribute referenced_object_attribute(const float4 &value, const uint hash_code = 0)
+{
+  ObjectAttribute attribute{};
+  attribute.data_x = value.x;
+  attribute.data_y = value.y;
+  attribute.data_z = value.z;
+  attribute.data_w = value.w;
+  attribute.hash_code = hash_code;
+  return attribute;
+}
+
+static int referenced_light_type(const Light &light)
+{
+  switch (light.type) {
+    case LA_LOCAL:
+      return 0;
+    case LA_SUN:
+      return 1;
+    case LA_SPOT:
+      return 2;
+    case LA_AREA:
+      return 3;
+    default:
+      return -1;
+  }
+}
+
+static void referenced_light_values(const Object &object,
+                                    const Light &light,
+                                    float &r_radius,
+                                    float &r_spot_size,
+                                    float &r_sun_angle)
+{
+  const float4x4 object_to_world = object.object_to_world();
+  r_radius = 0.0f;
+  r_spot_size = 0.0f;
+  r_sun_angle = 0.0f;
+
+  const float3 scale = {
+      math::length(object_to_world.x_axis()),
+      math::length(object_to_world.y_axis()),
+      math::length(object_to_world.z_axis()),
+  };
+  const float max_scale = max_ff(max_ff(scale.x, scale.y), scale.z);
+
+  switch (light.type) {
+    case LA_LOCAL:
+      r_radius = light.radius * max_scale;
+      break;
+    case LA_SUN:
+      r_radius = light.sun_angle;
+      r_sun_angle = light.sun_angle;
+      break;
+    case LA_SPOT:
+      r_radius = light.radius * max_scale;
+      r_spot_size = light.spotsize;
+      break;
+    case LA_AREA: {
+      const bool is_irregular = ELEM(light.area_shape, LA_AREA_RECT, LA_AREA_ELLIPSE);
+      const float size_x = light.area_size * scale.x;
+      const float size_y = (is_irregular ? light.area_sizey : light.area_size) * scale.y;
+      r_radius = 0.5f * max_ff(size_x, size_y);
+      break;
+    }
+  }
+}
+
+static Object *referenced_object_evaluated(Depsgraph *depsgraph, Object *object)
+{
+  if (depsgraph == nullptr || object == nullptr) {
+    return nullptr;
+  }
+  Object *object_eval = DEG_get_evaluated(depsgraph, object);
+  return object_eval != nullptr ? object_eval : object;
+}
+
+}  // namespace
 
 Manager::~Manager()
 {
@@ -56,6 +145,9 @@ void Manager::begin_sync(Object *object_active)
 
   acquired_textures.clear();
   layer_attributes.clear();
+  referenced_objects_.clear();
+  referenced_object_table_offset_ = 0;
+  referenced_object_table_size_ = 0;
 
 /* For some reason, if this uninitialized data pattern was enabled (ie release asserts enabled),
  * The viewport just gives up rendering objects on ARM64 devices. Possibly Mesa GLOn12-related. */
@@ -72,7 +164,9 @@ void Manager::begin_sync(Object *object_active)
          matrix_buf.current().size() * sizeof(*infos_buf.current().data()));
 #endif
   resource_len_ = 0;
-  attribute_len_ = 0;
+  /* Lane zero is reserved for the referenced-object channel header. */
+  attribute_len_ = 1;
+  attributes_buf.get_or_resize(0) = ObjectAttribute{};
   /* TODO(fclem): Resize buffers if too big, but with an hysteresis threshold. */
 
   this->object_active = object_active;
@@ -111,11 +205,165 @@ void Manager::sync_layer_attributes()
   layer_attributes_buf[0].buffer_length = count;
 }
 
+void Manager::sync_referenced_objects()
+{
+  const uint reference_count = uint(referenced_objects_.size());
+  uint table_size = 0;
+  if (reference_count > 0) {
+    table_size = 1;
+    while (table_size < reference_count * 2u && table_size < (1u << 20)) {
+      table_size <<= 1;
+    }
+    if (table_size < reference_count) {
+      table_size = 0;
+    }
+  }
+
+  referenced_object_table_offset_ = attribute_len_;
+  if (table_size > 0) {
+    const uint table_end = referenced_object_table_offset_ +
+                           table_size * DRW_REFERENCED_OBJECT_DATA_RECORD_STRIDE;
+    const size_t allocated_bytes = size_t(power_of_2_max_u(table_end)) *
+                                   sizeof(ObjectAttribute);
+    if (allocated_bytes > GPU_max_storage_buffer_size()) {
+      /* Do not let the shared attribute buffer exceed the backend SSBO limit. */
+      table_size = 0;
+    }
+  }
+  referenced_object_table_size_ = table_size;
+  if (table_size > 0) {
+    const uint table_end = referenced_object_table_offset_ +
+                           table_size * DRW_REFERENCED_OBJECT_DATA_RECORD_STRIDE;
+    for (uint index = referenced_object_table_offset_; index < table_end; index++) {
+      attributes_buf.get_or_resize(index) = ObjectAttribute{};
+    }
+    attribute_len_ = table_end;
+  }
+
+  ObjectAttribute &header = attributes_buf.get_or_resize(0);
+  header = referenced_object_attribute(
+      float4(uint_as_float(DRW_REFERENCED_OBJECT_DATA_ABI_VERSION),
+             uint_as_float(referenced_object_table_offset_),
+             uint_as_float(referenced_object_table_size_),
+             uint_as_float(DRW_REFERENCED_OBJECT_DATA_RECORD_STRIDE)),
+      DRW_REFERENCED_OBJECT_DATA_MAGIC);
+
+  Depsgraph *depsgraph = drw_get().depsgraph;
+  if (table_size == 0 || depsgraph == nullptr) {
+    return;
+  }
+  Main *bmain = DEG_get_bmain(depsgraph);
+  if (bmain == nullptr) {
+    return;
+  }
+
+  /* Resolve all requested UIDs in one Main traversal. The previous per-reference lookup scanned
+   * the complete object list for every material reference, making sync cost O(references * objects).
+   * Keeping this map local also makes deletion/remap safe: no stale GPUMaterial pointer is touched. */
+  Map<uint32_t, Object *> referenced_object_sources;
+  referenced_object_sources.reserve(reference_count);
+  for (Object &object : bmain->objects) {
+    const uint32_t session_uid = object.id.session_uid;
+    if (referenced_objects_.contains(session_uid)) {
+      referenced_object_sources.add(session_uid, &object);
+      if (referenced_object_sources.size() == reference_count) {
+        break;
+      }
+    }
+  }
+
+  for (const auto item : referenced_objects_.items()) {
+    const uint32_t session_uid = item.key;
+    const GPUReferencedObject &request = item.value;
+    Object *object = referenced_object_sources.lookup_default(session_uid, nullptr);
+    Object *object_eval = referenced_object_evaluated(depsgraph, object);
+    if (object_eval == nullptr) {
+      continue;
+    }
+
+    const uint slot_start = BLI_hash_int(session_uid) & (table_size - 1);
+    uint slot = slot_start;
+    bool inserted = false;
+    for (uint probe = 0; probe < table_size; probe++) {
+      ObjectAttribute &metadata = attributes_buf.get_or_resize(
+          referenced_object_table_offset_ + slot * DRW_REFERENCED_OBJECT_DATA_RECORD_STRIDE);
+      if (metadata.hash_code == 0 || metadata.hash_code == session_uid) {
+        metadata.hash_code = session_uid;
+        const int light_type = (object_eval->type == OB_LAMP && object_eval->data != nullptr) ?
+                                   referenced_light_type(*id_cast<Light *>(object_eval->data)) :
+                                   -1;
+        metadata.data_x = uint_as_float(uint(object_eval->type));
+        metadata.data_y = int_as_float(light_type);
+        metadata.data_z = uint_as_float(
+            uint(object_eval->visibility_flag & (OB_HIDE_VIEWPORT | OB_HIDE_RENDER)));
+        metadata.data_w = uint_as_float(uint(request.flags));
+
+        const uint record_offset = referenced_object_table_offset_ +
+                                   slot * DRW_REFERENCED_OBJECT_DATA_RECORD_STRIDE;
+        attributes_buf.get_or_resize(record_offset + 6) = referenced_object_attribute(
+            float4(1.0f, 1.0f, 1.0f, 0.0f));
+        if (request.flags & GPU_REFERENCED_OBJECT_DATA_TRANSFORM) {
+          const float4x4 &object_to_world = object_eval->object_to_world();
+          for (int column = 0; column < 4; column++) {
+            attributes_buf.get_or_resize(record_offset + 1 + column) =
+                referenced_object_attribute(object_to_world[column]);
+          }
+
+          float3 location;
+          math::EulerXYZ rotation;
+          float3 scale;
+          math::to_loc_rot_scale<true>(object_to_world, location, rotation, scale);
+          attributes_buf.get_or_resize(record_offset + 5) = referenced_object_attribute(
+              float4(float3(rotation), 0.0f));
+          attributes_buf.get_or_resize(record_offset + 6) = referenced_object_attribute(
+              float4(scale, 0.0f));
+        }
+        if (request.flags & GPU_REFERENCED_OBJECT_DATA_COLOR) {
+          attributes_buf.get_or_resize(record_offset + 7) = referenced_object_attribute(
+              float4(object_eval->color[0],
+                    object_eval->color[1],
+                    object_eval->color[2],
+                    object_eval->color[3]));
+        }
+
+        float visible = (object_eval->visibility_flag & (OB_HIDE_VIEWPORT | OB_HIDE_RENDER)) == 0 ?
+                            1.0f :
+                            0.0f;
+        if (request.flags & GPU_REFERENCED_OBJECT_DATA_LIGHT && object_eval->type == OB_LAMP &&
+            object_eval->data != nullptr)
+        {
+          const Light &light = *id_cast<Light *>(object_eval->data);
+          attributes_buf.get_or_resize(record_offset + 8) = referenced_object_attribute(
+              float4(light.r, light.g, light.b, light.energy));
+          float radius;
+          float spot_size;
+          float sun_angle;
+          referenced_light_values(*object_eval, light, radius, spot_size, sun_angle);
+          attributes_buf.get_or_resize(record_offset + 9) = referenced_object_attribute(
+              float4(radius, spot_size, sun_angle, visible));
+        }
+        else if (request.flags & GPU_REFERENCED_OBJECT_DATA_VISIBILITY) {
+          attributes_buf.get_or_resize(record_offset + 9).data_w = visible;
+        }
+
+        inserted = true;
+        break;
+      }
+      slot = (slot + 1) & (table_size - 1);
+    }
+    if (!inserted) {
+      /* A full table is a safe default rather than an out-of-bounds write. */
+      continue;
+    }
+  }
+}
+
 void Manager::end_sync()
 {
   GPU_debug_group_begin("Manager.end_sync");
 
   sync_layer_attributes();
+  sync_referenced_objects();
 
   matrix_buf.current().push_update();
   bounds_buf.current().push_update();

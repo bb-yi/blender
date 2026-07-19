@@ -1863,7 +1863,7 @@ static bool run_gpu_bake(RenderEngine *engine,
           break;
         }
 
-        inst.manager->register_layer_attributes(gpumat);
+        inst.manager->register_material_resources(gpumat);
         gpu_materials.append(gpumat);
 
         BakeDrawGroup group;

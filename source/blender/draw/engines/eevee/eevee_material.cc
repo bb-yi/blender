@@ -529,7 +529,7 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
   /* Returned material should be ready to be drawn. */
   BLI_assert(GPU_material_status(matpass.gpumat) == GPU_MAT_SUCCESS);
 
-  inst_.manager->register_layer_attributes(matpass.gpumat);
+  inst_.manager->register_material_resources(matpass.gpumat);
 
   const bool is_transparent = GPU_material_flag_get(matpass.gpumat, GPU_MATFLAG_TRANSPARENT);
 

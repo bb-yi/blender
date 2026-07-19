@@ -921,7 +921,7 @@ void LightModule::sync_light(const ObjectRef &ob_ref)
       const bool is_time_dependent = GPU_material_is_time_dependent(gpumat) ||
                                      light_nodetree_eevee_light_shader_uses_scene_time(la.nodetree);
       has_time_dependent_light_shaders_ |= is_time_dependent;
-      inst_.manager->register_layer_attributes(gpumat);
+      inst_.manager->register_material_resources(gpumat);
       return;
     }
     inst_.info_append_i18n(error_message);
