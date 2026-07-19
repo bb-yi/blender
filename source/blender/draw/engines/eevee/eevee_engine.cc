@@ -3,8 +3,9 @@
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
 #include "BLI_rect.h"
-
 #include "GPU_framebuffer.hh"
+
+#include "BKE_scene_runtime.hh"
 
 #include "ED_screen.hh"
 #include "ED_view3d.hh"
@@ -12,6 +13,7 @@
 #include "DRW_render.hh"
 
 #include "RE_pipeline.h"
+#include "render_types.h"
 
 #include "eevee_engine.h" /* Own include. */
 
@@ -26,7 +28,7 @@ namespace eevee {
 
 DrawEngine *Engine::create_instance()
 {
-  return new Instance();
+  return new Instance(telemetry_source);
 }
 
 void Engine::free_static()
@@ -40,6 +42,14 @@ using namespace blender::eevee;
 
 static void eevee_render(RenderEngine *engine, Depsgraph *depsgraph)
 {
+  Scene *scene = RE_GetScene(engine->re);
+  if (scene != nullptr && scene->runtime != nullptr &&
+      (scene->eevee.flag & SCE_EEVEE_PERFORMANCE_PROFILER) != 0 &&
+      (engine->flag & RE_ENGINE_PREVIEW) == 0)
+  {
+    scene->runtime->eevee_performance.final_render_session_begin(engine->render_run_id);
+  }
+
   Instance *instance = nullptr;
 
   auto eevee_render_to_image = [&](RenderEngine *engine, RenderLayer *layer, const rcti /*rect*/) {

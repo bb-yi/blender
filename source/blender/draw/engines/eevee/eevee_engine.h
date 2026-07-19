@@ -8,8 +8,11 @@
 
 #pragma once
 
+#include <cstdint>
+
 #include "DRW_render.hh"
 #include "RE_engine.h"
+#include "eevee_telemetry.hh"
 
 namespace blender {
 
@@ -18,6 +21,9 @@ extern RenderEngineType DRW_engine_viewport_eevee_type;
 namespace eevee {
 
 struct Engine : public DrawEngine::Pointer {
+  std::shared_ptr<TelemetrySourceState> telemetry_source =
+      std::make_shared<TelemetrySourceState>();
+
   DrawEngine *create_instance() final;
 
   static void free_static();

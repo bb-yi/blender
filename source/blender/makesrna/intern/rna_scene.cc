@@ -6,7 +6,9 @@
  * \ingroup RNA
  */
 
+#include <array>
 #include <cstdlib>
+#include <cstring>
 
 #include "DNA_curve_types.h"
 #include "DNA_layer_types.h"
@@ -1809,64 +1811,107 @@ enum class SceneEEVEEPerformanceString {
   RenderReport,
 };
 
-static const std::string &rna_SceneEEVEE_performance_string(
+static std::string rna_SceneEEVEE_performance_string(
     const PointerRNA *ptr, const SceneEEVEEPerformanceString which)
 {
-  static const std::string empty_string;
   const Scene *scene = reinterpret_cast<const Scene *>(ptr->owner_id);
   if (scene == nullptr || scene->runtime == nullptr) {
-    return empty_string;
+    return {};
   }
 
   switch (which) {
     case SceneEEVEEPerformanceString::ViewportSummary:
-      return scene->runtime->eevee_performance.viewport_summary;
+      return scene->runtime->eevee_performance.viewport_summary_get();
     case SceneEEVEEPerformanceString::ViewportReport:
-      return scene->runtime->eevee_performance.viewport_report;
+      return scene->runtime->eevee_performance.viewport_report_get();
     case SceneEEVEEPerformanceString::RenderReport:
-      return scene->runtime->eevee_performance.render_report;
+      return scene->runtime->eevee_performance.render_report_get();
   }
 
-  return empty_string;
+  return {};
 }
 
-static void rna_SceneEEVEE_performance_profiler_viewport_summary_get(PointerRNA *ptr,
-                                                                     char *value)
+struct RnaEeveePerformanceStringPin {
+  const Scene *scene = nullptr;
+  std::string text;
+  bool valid = false;
+};
+
+static thread_local std::array<RnaEeveePerformanceStringPin, 3> rna_eevee_performance_pins;
+
+static std::string rna_SceneEEVEE_performance_string_pinned(
+    const PointerRNA *ptr, const SceneEEVEEPerformanceString which)
 {
-  strcpy(value,
-         rna_SceneEEVEE_performance_string(ptr, SceneEEVEEPerformanceString::ViewportSummary)
-             .c_str());
+  const int index = int(which);
+  RnaEeveePerformanceStringPin &pin = rna_eevee_performance_pins[index];
+  const Scene *scene = reinterpret_cast<const Scene *>(ptr->owner_id);
+  if (pin.valid && pin.scene == scene) {
+    pin.valid = false;
+    return pin.text;
+  }
+  return rna_SceneEEVEE_performance_string(ptr, which);
+}
+
+static int rna_SceneEEVEE_performance_string_length(
+    PointerRNA *ptr, const SceneEEVEEPerformanceString which)
+{
+  const int index = int(which);
+  RnaEeveePerformanceStringPin &pin = rna_eevee_performance_pins[index];
+  const Scene *scene = reinterpret_cast<const Scene *>(ptr->owner_id);
+  /* RNA's C API may call length() first and then call get() with the caller's buffer. Keep the
+   * exact value pinned across the second internal length() call so a worker-thread publication
+   * cannot make get() copy a longer string into a buffer sized for the old value. */
+  if (!pin.valid || pin.scene != scene) {
+    pin.scene = scene;
+    pin.text = rna_SceneEEVEE_performance_string(ptr, which);
+    pin.valid = true;
+  }
+  return int(pin.text.size());
+}
+
+static void rna_SceneEEVEE_performance_profiler_viewport_summary_get(PointerRNA *ptr, char *value)
+{
+  const std::string text = rna_SceneEEVEE_performance_string_pinned(
+      ptr, SceneEEVEEPerformanceString::ViewportSummary);
+  if (value != nullptr) {
+    memcpy(value, text.c_str(), text.size() + 1);
+  }
 }
 
 static int rna_SceneEEVEE_performance_profiler_viewport_summary_length(PointerRNA *ptr)
 {
-  return rna_SceneEEVEE_performance_string(ptr, SceneEEVEEPerformanceString::ViewportSummary)
-      .size();
+  return rna_SceneEEVEE_performance_string_length(
+      ptr, SceneEEVEEPerformanceString::ViewportSummary);
 }
 
-static void rna_SceneEEVEE_performance_profiler_viewport_report_get(PointerRNA *ptr,
-                                                                    char *value)
+static void rna_SceneEEVEE_performance_profiler_viewport_report_get(PointerRNA *ptr, char *value)
 {
-  strcpy(value,
-         rna_SceneEEVEE_performance_string(ptr, SceneEEVEEPerformanceString::ViewportReport)
-             .c_str());
+  const std::string text = rna_SceneEEVEE_performance_string_pinned(
+      ptr, SceneEEVEEPerformanceString::ViewportReport);
+  if (value != nullptr) {
+    memcpy(value, text.c_str(), text.size() + 1);
+  }
 }
 
 static int rna_SceneEEVEE_performance_profiler_viewport_report_length(PointerRNA *ptr)
 {
-  return rna_SceneEEVEE_performance_string(ptr, SceneEEVEEPerformanceString::ViewportReport).size();
+  return rna_SceneEEVEE_performance_string_length(
+      ptr, SceneEEVEEPerformanceString::ViewportReport);
 }
 
 static void rna_SceneEEVEE_performance_profiler_render_report_get(PointerRNA *ptr, char *value)
 {
-  strcpy(value,
-         rna_SceneEEVEE_performance_string(ptr, SceneEEVEEPerformanceString::RenderReport)
-             .c_str());
+  const std::string text = rna_SceneEEVEE_performance_string_pinned(
+      ptr, SceneEEVEEPerformanceString::RenderReport);
+  if (value != nullptr) {
+    memcpy(value, text.c_str(), text.size() + 1);
+  }
 }
 
 static int rna_SceneEEVEE_performance_profiler_render_report_length(PointerRNA *ptr)
 {
-  return rna_SceneEEVEE_performance_string(ptr, SceneEEVEEPerformanceString::RenderReport).size();
+  return rna_SceneEEVEE_performance_string_length(
+      ptr, SceneEEVEEPerformanceString::RenderReport);
 }
 
 static int rna_SceneEEVEE_performance_profiler_average_window_get(PointerRNA *ptr)

@@ -7,18 +7,25 @@
  */
 
 #include <algorithm>
+#include <atomic>
+#include <cstring>
+#include <memory>
+#include <sstream>
 
 #include <fmt/format.h>
 
 #include "BLI_listbase.h"
 #include "BLI_string.h"
 #include "BLI_time.h"
+#include "BLI_threads.h"
 
 #include "DEG_depsgraph_query.hh"
 
 #include "BKE_scene_runtime.hh"
 
 #include "DNA_scene_types.h"
+
+#include "RE_engine.h"
 
 #include "WM_api.hh"
 
@@ -32,7 +39,14 @@ static constexpr int stage_count = int(TelemetryStageId::Count);
 static constexpr int shadow_context_count = int(TelemetryShadowContext::Count);
 static constexpr int pass_readback_type_count = int(TelemetryPassReadbackType::Count);
 static constexpr int material_hotspot_report_limit = 8;
+static constexpr int material_hotspot_tracking_limit = 32;
 static constexpr int pass_readback_name_limit = 8;
+static std::atomic<uint64_t> next_telemetry_source_id{1};
+
+uint64_t telemetry_source_id_generate()
+{
+  return next_telemetry_source_id.fetch_add(1, std::memory_order_relaxed);
+}
 
 static bke::SceneEeveePerformanceRuntime *scene_eevee_performance_runtime(Scene *scene)
 {
@@ -65,10 +79,206 @@ static const char *sample_status_string(const TelemetryFrameRecord &record)
   return (uint64_t(record.sample_index) >= record.sample_count) ? "Complete" : "In Progress";
 }
 
+static Vector<std::string> split_overlay_text(const std::string &text)
+{
+  Vector<std::string> lines;
+  std::stringstream stream(text);
+  std::string line;
+  while (std::getline(stream, line)) {
+    if (!line.empty()) {
+      lines.append(line);
+    }
+  }
+  return lines;
+}
+
+static int scope_node_find_or_add(TelemetryFrameRecord &record,
+                                  const int parent_index,
+                                  const TelemetryStageId stage)
+{
+  for (const int child_index : record.scope_nodes[parent_index].children) {
+    if (record.scope_nodes[child_index].stage == stage) {
+      return child_index;
+    }
+  }
+
+  TelemetryScopeNode node;
+  node.stage = stage;
+  const int node_index = record.scope_nodes.size();
+  record.scope_nodes.append(std::move(node));
+  record.scope_nodes[parent_index].children.append(node_index);
+  return node_index;
+}
+
+static void scope_node_add_sample(TelemetryFrameRecord &record,
+                                  const int parent_index,
+                                  const TelemetryStageId stage,
+                                  const double cpu_ms)
+{
+  const int node_index = scope_node_find_or_add(record, parent_index, stage);
+  TelemetryScopeNode &node = record.scope_nodes[node_index];
+  node.cpu_ms += cpu_ms;
+  node.call_count += 1;
+}
+
+static const TelemetryScopeNode *scope_node_find_path(
+    const TelemetryFrameRecord &record, const Vector<TelemetryStageId> &path)
+{
+  if (record.scope_nodes.is_empty()) {
+    return nullptr;
+  }
+
+  int parent_index = 0;
+  for (const TelemetryStageId stage : path) {
+    int matching_child_index = -1;
+    for (const int child_index : record.scope_nodes[parent_index].children) {
+      if (record.scope_nodes[child_index].stage == stage) {
+        matching_child_index = child_index;
+        break;
+      }
+    }
+    if (matching_child_index < 0) {
+      return nullptr;
+    }
+    parent_index = matching_child_index;
+  }
+  return &record.scope_nodes[parent_index];
+}
+
+static void scope_node_averages_update(TelemetryFrameRecord &record,
+                                       const Vector<TelemetryFrameRecord> &history,
+                                       const int average_count,
+                                       const int node_index,
+                                       Vector<TelemetryStageId> &path)
+{
+  TelemetryScopeNode &node = record.scope_nodes[node_index];
+  path.append(node.stage);
+
+  double total_cpu_ms = 0.0;
+  /* Keep the window denominator stable: an absent path contributes zero for that frame. */
+  for (int offset = 0; offset < average_count; offset++) {
+    const TelemetryFrameRecord &history_record = history[history.size() - 1 - offset];
+    if (const TelemetryScopeNode *history_node = scope_node_find_path(history_record, path)) {
+      total_cpu_ms += history_node->cpu_ms;
+    }
+  }
+  node.average_cpu_ms = (average_count > 0) ?
+                            total_cpu_ms / double(average_count) :
+                            0.0;
+
+  for (const int child_index : node.children) {
+    scope_node_averages_update(record, history, average_count, child_index, path);
+  }
+  path.pop_last();
+}
+
+static void scope_node_reparent_from_root(TelemetryFrameRecord &record,
+                                          const TelemetryStageId stage,
+                                          const int new_parent_index)
+{
+  int child_index = -1;
+  for (const int root_child_index : record.scope_nodes[0].children) {
+    if (record.scope_nodes[root_child_index].stage == stage) {
+      child_index = root_child_index;
+      break;
+    }
+  }
+  if (child_index < 0) {
+    return;
+  }
+
+  for (int index = 0; index < record.scope_nodes[0].children.size(); index++) {
+    if (record.scope_nodes[0].children[index] == child_index) {
+      record.scope_nodes[0].children.remove(index);
+      break;
+    }
+  }
+  record.scope_nodes[new_parent_index].children.append(child_index);
+}
+
+static const char *telemetry_mode_label(const TelemetryRuntimeMode mode)
+{
+  switch (mode) {
+    case TelemetryRuntimeMode::Viewport:
+      return "VIEWPORT";
+    case TelemetryRuntimeMode::ViewportImageRender:
+      return "VIEWPORT_RENDER";
+    case TelemetryRuntimeMode::FinalRender:
+      return "FINAL_RENDER";
+    case TelemetryRuntimeMode::Bake:
+      return "BAKE";
+    case TelemetryRuntimeMode::Count:
+      break;
+  }
+  return "UNKNOWN";
+}
+
+static double record_sync_cpu_ms(const TelemetryFrameRecord &record)
+{
+  /* Playback peaks are intentionally selected by synchronization cost: this profiler's primary
+   * diagnostic is finding the frame that stalls scene extraction, not the frame with the largest
+   * submission or readback cost. The UI labels these records as Sync Peaks. */
+  if (record.has_shared_draw_timing) {
+    return record.draw_sync_ms;
+  }
+  return record.stages[int(TelemetryStageId::SyncBegin)].cpu_ms +
+         record.stages[int(TelemetryStageId::SyncObjects)].cpu_ms +
+         record.stages[int(TelemetryStageId::SyncEnd)].cpu_ms;
+}
+
+static bke::SceneEeveePerformanceNode snapshot_scope_node(
+    const TelemetryFrameRecord &record,
+    const int node_index,
+    const std::string &parent_id)
+{
+  const TelemetryScopeNode &source = record.scope_nodes[node_index];
+  const TelemetryStageInfo &info = TelemetryModule::stage_info(source.stage);
+  bke::SceneEeveePerformanceNode result;
+  result.id = parent_id + "/stage-" + std::to_string(int(source.stage));
+  result.kind = (source.stage >= TelemetryStageId::DrawSyncShared) ? "phase" : "stage";
+  result.label = info.label;
+  result.current_ms = source.cpu_ms;
+  result.average_ms = source.average_cpu_ms;
+  result.calls = source.call_count;
+  result.active = source.call_count > 0;
+  double children_ms = 0.0;
+  for (const int child_index : source.children) {
+    bke::SceneEeveePerformanceNode child = snapshot_scope_node(record, child_index, result.id);
+    children_ms += child.current_ms;
+    result.children.push_back(std::move(child));
+  }
+  result.self_ms = std::max(0.0, result.current_ms - children_ms);
+  return result;
+}
+
 static constexpr std::array<TelemetryStageInfo, stage_count> telemetry_stage_info = {{
     {TelemetryStageId::SyncBegin, "Sync.Begin", "Sync/Begin"},
     {TelemetryStageId::SyncObjects, "Sync.Objects", "Sync/Objects"},
     {TelemetryStageId::SyncEnd, "Sync.End", "Sync/End"},
+    {TelemetryStageId::SyncBeginWorld, "Sync.Begin.World", "Sync/Begin/World"},
+    {TelemetryStageId::SyncBeginSceneModules,
+     "Sync.Begin.SceneModules",
+     "Sync/Begin/Scene Modules"},
+    {TelemetryStageId::SyncBeginViewEffects,
+     "Sync.Begin.ViewEffects",
+     "Sync/Begin/View Effects"},
+    {TelemetryStageId::SyncBeginNPRPost, "Sync.Begin.NPRPost", "Sync/Begin/NPR Post"},
+    {TelemetryStageId::SyncEndShaderReadiness,
+     "Sync.End.ShaderReadiness",
+     "Sync/End/Shader Readiness"},
+    {TelemetryStageId::SyncEndMaterialsVelocity,
+     "Sync.End.MaterialsVelocity",
+     "Sync/End/Materials + Velocity"},
+    {TelemetryStageId::SyncEndVolumeShadowsLights,
+     "Sync.End.VolumeShadowsLights",
+     "Sync/End/Volume + Shadows + Lights"},
+    {TelemetryStageId::SyncEndFrameState,
+     "Sync.End.FrameState",
+     "Sync/End/Frame State"},
+    {TelemetryStageId::SyncEndNPRPost, "Sync.End.NPRPost", "Sync/End/NPR Post"},
+    {TelemetryStageId::SyncEndProbesUniforms,
+     "Sync.End.ProbesUniforms",
+     "Sync/End/Probes + Uniforms"},
     {TelemetryStageId::CaptureWorld, "Capture.World", "Capture/World"},
     {TelemetryStageId::CaptureProbes, "Capture.Probes", "Capture/Probes"},
     {TelemetryStageId::RenderTextures, "RenderTextures", "Render Textures"},
@@ -195,11 +405,228 @@ static constexpr std::array<TelemetryStageInfo, stage_count> telemetry_stage_inf
      "Shadow.UpdateFinish",
      "Shadow/Update Finish"},
     {TelemetryStageId::ShadowSurface, "Shadow.Surface", "Shadow/Surface"},
+    {TelemetryStageId::DrawSyncShared, "Draw.Sync.Shared", "Draw Sync (Shared)"},
+    {TelemetryStageId::DrawSyncEngineSetup,
+     "Draw.Sync.EngineSetup",
+     "Draw Sync (Shared)/Engine Setup"},
+    {TelemetryStageId::DrawSyncEngineInit, "Draw.Sync.EngineInit", "Draw Sync (Shared)/Engine Init"},
+    {TelemetryStageId::DrawSyncManagerBegin,
+     "Draw.Sync.ManagerBegin",
+     "Draw Sync (Shared)/Manager Begin"},
+    {TelemetryStageId::DrawSyncEngineBegin,
+     "Draw.Sync.EngineBegin",
+     "Draw Sync (Shared)/Engine Begin Sync"},
+    {TelemetryStageId::DrawSyncModulesBegin,
+     "Draw.Sync.ModulesBegin",
+     "Draw Sync (Shared)/Modules Begin"},
+    {TelemetryStageId::DrawSyncObjectIteration,
+     "Draw.Sync.ObjectIteration",
+     "Draw Sync (Shared)/Object Iteration"},
+    {TelemetryStageId::DrawSyncDupliExtraction,
+     "Draw.Sync.DupliExtraction",
+     "Draw Sync (Shared)/Dupli Extraction"},
+    {TelemetryStageId::DrawSyncDelayedExtraction,
+     "Draw.Sync.DelayedExtraction",
+     "Draw Sync (Shared)/Delayed Extraction"},
+    {TelemetryStageId::DrawSyncExtractionWait,
+     "Draw.Sync.ExtractionWait",
+     "Draw Sync (Shared)/Extraction Wait"},
+    {TelemetryStageId::DrawSyncCurvesUpdate,
+     "Draw.Sync.CurvesUpdate",
+     "Draw Sync (Shared)/Curves Update"},
+    {TelemetryStageId::DrawSyncEngineEnd,
+     "Draw.Sync.EngineEnd",
+     "Draw Sync (Shared)/Engine End Sync"},
+    {TelemetryStageId::DrawSyncManagerEnd,
+     "Draw.Sync.ManagerEnd",
+     "Draw Sync (Shared)/Manager End"},
+    {TelemetryStageId::DrawSubmissionShared,
+     "Draw.Submission.Shared",
+     "Draw/Submission (Shared)"},
+    {TelemetryStageId::DrawSubmissionFramebuffer,
+     "Draw.Submission.Framebuffer",
+     "Draw/Submission (Shared)/Framebuffer"},
+    {TelemetryStageId::DrawSubmissionCallbacksPre,
+     "Draw.Submission.CallbacksPre",
+     "Draw/Submission (Shared)/Pre Callbacks"},
+    {TelemetryStageId::DrawSubmissionEngineDraw,
+     "Draw.Submission.EngineDraw",
+     "Draw/Submission (Shared)/Engine Draw"},
+    {TelemetryStageId::DrawSubmissionCallbacksPost,
+     "Draw.Submission.CallbacksPost",
+     "Draw/Submission (Shared)/Post Callbacks"},
+    {TelemetryStageId::DrawSubmissionFramebufferRestore,
+     "Draw.Submission.FramebufferRestore",
+     "Draw/Submission (Shared)/Framebuffer Restore"},
 }};
 
 bool TelemetryModule::enabled() const
 {
-  return inst_.scene != nullptr && (inst_.scene->eevee.flag & SCE_EEVEE_PERFORMANCE_PROFILER);
+  if (inst_.scene == nullptr ||
+      (inst_.scene->eevee.flag & SCE_EEVEE_PERFORMANCE_PROFILER) == 0)
+  {
+    return false;
+  }
+  /* Material/thumbnail previews use the same EEVEE render callback but are not the user's final
+   * render. Do not let them clear or publish into the final-render performance registry. */
+  return inst_.render == nullptr || (inst_.render->flag & RE_ENGINE_PREVIEW) == 0;
+}
+
+TelemetryModule::~TelemetryModule()
+{
+  /* Scene runtime teardown can race Instance destruction during WM exit. Finalize only local state
+   * here. In particular, do not dereference the Instance's raw Scene pointer from this destructor. */
+  if (!source_state_) {
+    return;
+  }
+  this->finalize_playback_session();
+  frame_active_ = false;
+  scope_stack_.clear();
+  source_state_->closed = true;
+  /* Invalidate any registry entry that still refers to this viewport source. A later instance must
+   * start a new epoch before publishing again, while an old Scene can safely drop the expired
+   * weak token without requiring a Scene pointer here. */
+  source_state_->lifetime.reset();
+}
+
+bool TelemetryModule::finalize_playback_session()
+{
+  const bool had_session = source_state_->playback_active || source_state_->has_playback_peak;
+  if (source_state_->has_playback_peak) {
+    source_state_->playback_peak_history.append(source_state_->playback_peak);
+    if (source_state_->playback_peak_history.size() > playback_peak_history_limit_) {
+      source_state_->playback_peak_history.remove(0);
+    }
+  }
+  source_state_->playback_active = false;
+  source_state_->has_playback_peak = false;
+  source_state_->playback_peak = {};
+  return had_session;
+}
+
+void TelemetryModule::source_deactivate()
+{
+  if (!source_state_ || source_state_->closed) {
+    return;
+  }
+
+  this->finalize_playback_session();
+  frame_active_ = false;
+  scope_stack_.clear();
+  source_state_->closed = true;
+
+  /* Profiler disable is a live transition, so this is still allowed to publish a closed snapshot.
+   * The destructor above deliberately does not call this path because its Scene pointer may no
+   * longer be valid. */
+  if (inst_.scene == nullptr) {
+    return;
+  }
+  const TelemetryFrameRecord *record = last_viewport_record();
+  if (record != nullptr) {
+    this->publish_viewport_snapshot(*record, viewport_summary_line(), viewport_report());
+  }
+}
+
+bool TelemetryModule::epoch_inputs_update(const bool profiler_enabled,
+                                          const int extent_x,
+                                          const int extent_y,
+                                          const int output_offset_x,
+                                          const int output_offset_y,
+                                          const int output_extent_x,
+                                          const int output_extent_y)
+{
+  if (!source_state_->profiler_inputs_initialized) {
+    const bool reactivating = source_state_->closed && profiler_enabled;
+    source_state_->profiler_inputs_initialized = true;
+    source_state_->profiler_enabled = profiler_enabled;
+    source_state_->extent_x = extent_x;
+    source_state_->extent_y = extent_y;
+    source_state_->output_offset_x = output_offset_x;
+    source_state_->output_offset_y = output_offset_y;
+    source_state_->output_extent_x = output_extent_x;
+    source_state_->output_extent_y = output_extent_y;
+    if (reactivating) {
+      reset_epoch(true);
+      source_state_->closed = false;
+    }
+    return reactivating;
+  }
+  const bool changed = source_state_->profiler_enabled != profiler_enabled ||
+                       source_state_->extent_x != extent_x ||
+                       source_state_->extent_y != extent_y ||
+                       source_state_->output_offset_x != output_offset_x ||
+                       source_state_->output_offset_y != output_offset_y ||
+                       source_state_->output_extent_x != output_extent_x ||
+                       source_state_->output_extent_y != output_extent_y;
+  if (changed) {
+    const bool profiler_disabled = source_state_->profiler_enabled && !profiler_enabled;
+    const bool profiler_changed = source_state_->profiler_enabled != profiler_enabled;
+    if (profiler_disabled) {
+      this->source_deactivate();
+    }
+    source_state_->profiler_enabled = profiler_enabled;
+    source_state_->extent_x = extent_x;
+    source_state_->extent_y = extent_y;
+    source_state_->output_offset_x = output_offset_x;
+    source_state_->output_offset_y = output_offset_y;
+    source_state_->output_extent_x = output_extent_x;
+    source_state_->output_extent_y = output_extent_y;
+    /* Toggling the profiler starts a fresh source session. Geometry changes start a fresh epoch
+     * as well, because timing histories from different render borders are not comparable. */
+    reset_epoch(profiler_changed);
+    if (profiler_enabled) {
+      source_state_->closed = false;
+    }
+  }
+  return changed;
+}
+
+bool TelemetryModule::source_binding_update(const uint32_t scene_session_uid,
+                                            const char *view_layer_name)
+{
+  const std::string layer_name = view_layer_name ? view_layer_name : "";
+  const bool was_closed = source_state_->closed;
+  /* The previous state identifies an instance teardown, while the current flag distinguishes it
+   * from a source that is still closed because the profiler is disabled. */
+  const bool reactivating = was_closed && source_state_->profiler_enabled && enabled();
+  if (!source_state_->binding_initialized) {
+    source_state_->binding_initialized = true;
+    source_state_->scene_session_uid = scene_session_uid;
+    source_state_->view_layer_name = layer_name;
+    if (reactivating) {
+      reset_epoch(true);
+      source_state_->closed = false;
+    }
+    return reactivating;
+  }
+  const bool changed = source_state_->scene_session_uid != scene_session_uid ||
+                       source_state_->view_layer_name != layer_name;
+  if (changed || reactivating) {
+    reset_epoch(true);
+  }
+  if (changed) {
+    source_state_->scene_session_uid = scene_session_uid;
+    source_state_->view_layer_name = layer_name;
+  }
+  if (reactivating) {
+    source_state_->closed = false;
+  }
+  return changed || reactivating;
+}
+
+void TelemetryModule::render_view_name_set(const char *render_view_name)
+{
+  source_state_->render_view_name = render_view_name ? render_view_name : "";
+}
+
+void TelemetryModule::render_run_id_set(const uint64_t render_run_id)
+{
+  source_state_->render_run_id = render_run_id;
+}
+
+uint64_t TelemetryModule::source_id()
+{
+  return source_state_->source_id;
 }
 
 TelemetryRuntimeMode TelemetryModule::runtime_mode() const
@@ -242,9 +669,33 @@ void TelemetryModule::frame_begin(const TelemetryRuntimeMode mode)
     return;
   }
 
+  profiler_accounting_start_time_ = 0.0;
   current_frame_ = {};
+  scope_stack_.clear();
+  TelemetryScopeNode root;
+  root.stage = TelemetryStageId::Count;
+  current_frame_.scope_nodes.append(std::move(root));
   inst_.light_probes.probe_costs_reset();
   current_frame_.runtime_mode = mode;
+  current_frame_.source_id = source_id();
+  current_frame_.epoch = source_state_->epoch;
+  current_frame_.scene_session_uid = source_state_->scene_session_uid;
+  current_frame_.render_run_id = source_state_->render_run_id;
+  current_frame_.view_layer_name = source_state_->view_layer_name;
+  current_frame_.render_view_name = source_state_->render_view_name;
+  const int2 frame_extent = inst_.film.display_extent_get();
+  current_frame_.resolution_x = frame_extent.x;
+  current_frame_.resolution_y = frame_extent.y;
+  current_frame_.is_playback = (mode == TelemetryRuntimeMode::Viewport) && inst_.is_playback;
+  if (current_frame_.is_playback) {
+    if (!source_state_->playback_active) {
+      source_state_->playback_active = true;
+      source_state_->next_playback_session++;
+      source_state_->has_playback_peak = false;
+      source_state_->playback_peak = {};
+    }
+    current_frame_.playback_session_id = source_state_->next_playback_session;
+  }
   current_frame_.frame = (inst_.scene != nullptr) ? inst_.scene->r.cfra : 0;
   current_frame_.sample_index = ELEM(mode,
                                      TelemetryRuntimeMode::Viewport,
@@ -294,6 +745,13 @@ void TelemetryModule::frame_end()
     return;
   }
 
+  const bool measure_profiler_accounting = current_frame_.has_shared_draw_timing;
+  const double profiler_accounting_start = measure_profiler_accounting ?
+                                               (profiler_accounting_start_time_ > 0.0 ?
+                                                    profiler_accounting_start_time_ :
+                                                    BLI_time_now_seconds()) :
+                                               0.0;
+
   current_frame_.sample_index = ELEM(current_frame_.runtime_mode,
                                      TelemetryRuntimeMode::Viewport,
                                      TelemetryRuntimeMode::ViewportImageRender,
@@ -302,7 +760,9 @@ void TelemetryModule::frame_end()
                                     int(inst_.sampling.sample_index());
   current_frame_.sample_count = inst_.sampling.sample_count();
   const double frame_end_time = BLI_time_now_seconds();
-  current_frame_.total_cpu_ms = (frame_end_time - frame_start_time_) * 1000.0;
+  if (!current_frame_.has_shared_draw_timing) {
+    current_frame_.total_cpu_ms = (frame_end_time - frame_start_time_) * 1000.0;
+  }
   snapshot_features();
   current_frame_.shadow_light_costs.clear();
   for (const TelemetryShadowLightCost &cost : inst_.lights.shadow_light_costs()) {
@@ -335,17 +795,75 @@ void TelemetryModule::frame_end()
                                      TelemetryRuntimeMode::Bake);
   if (is_viewport_mode && !frame_has_stage_samples(current_frame_)) {
     frame_active_ = false;
+    scope_stack_.clear();
+    profiler_accounting_start_time_ = 0.0;
     return;
   }
 
-  const int mode_index = int(current_frame_.runtime_mode);
-  last_records_[mode_index] = current_frame_;
-  has_last_record_[mode_index] = true;
+  /* History averages only read scalar timings and the scope tree. Keep the potentially large
+   * light/probe/material diagnostic vectors out of every retained history entry; otherwise the
+   * profiler itself periodically copies and frees them while trying to explain a frame. */
+  Vector<TelemetryShadowLightCost> shadow_light_costs =
+      std::move(current_frame_.shadow_light_costs);
+  Vector<TelemetryProbeCost> probe_costs = std::move(current_frame_.probe_costs);
+  Vector<TelemetryMaterialHotspot> material_hotspots =
+      std::move(current_frame_.material_hotspots);
 
-  Vector<TelemetryFrameRecord> &history = history_[mode_index];
+  const int mode_index = int(current_frame_.runtime_mode);
+  current_frame_.capture_seq = source_state_->capture_seq + 1;
+  Vector<TelemetryFrameRecord> &history = source_state_->history[mode_index];
   history.append(current_frame_);
   if (history.size() > history_limit_) {
     history.remove(0);
+  }
+  const int average_count = min_ii(average_window(), history.size());
+  if (average_count > 0) {
+    double total_average = 0.0;
+    std::array<double, stage_count> stage_average{};
+    for (int offset = 0; offset < average_count; offset++) {
+      const TelemetryFrameRecord &history_record =
+          history[history.size() - 1 - offset];
+      total_average += history_record.total_cpu_ms;
+      for (int stage_index = 0; stage_index < stage_count; stage_index++) {
+        stage_average[stage_index] += history_record.stages[stage_index].cpu_ms;
+      }
+    }
+    current_frame_.average_total_cpu_ms = total_average / double(average_count);
+    for (int stage_index = 0; stage_index < stage_count; stage_index++) {
+      current_frame_.average_stage_values[stage_index] =
+          stage_average[stage_index] / double(average_count);
+    }
+    Vector<TelemetryStageId> scope_path;
+    for (const int child_index : current_frame_.scope_nodes[0].children) {
+      scope_node_averages_update(
+          current_frame_, history, average_count, child_index, scope_path);
+    }
+  }
+  if (measure_profiler_accounting) {
+    current_frame_.profiler_accounting_ms =
+        (BLI_time_now_seconds() - profiler_accounting_start) * 1000.0;
+  }
+  current_frame_.shadow_light_costs = std::move(shadow_light_costs);
+  current_frame_.probe_costs = std::move(probe_costs);
+  current_frame_.material_hotspots = std::move(material_hotspots);
+  source_state_->last_records[mode_index] = current_frame_;
+  source_state_->has_last_record[mode_index] = true;
+  source_state_->capture_seq++;
+
+  bool playback_finished = false;
+  if (current_frame_.runtime_mode == TelemetryRuntimeMode::Viewport)
+  {
+    if (current_frame_.is_playback && current_frame_.has_shared_draw_timing) {
+      if (!source_state_->has_playback_peak ||
+          record_sync_cpu_ms(current_frame_) > record_sync_cpu_ms(source_state_->playback_peak))
+      {
+        source_state_->playback_peak = current_frame_;
+        source_state_->has_playback_peak = true;
+      }
+    }
+    else if (source_state_->playback_active) {
+      playback_finished = this->finalize_playback_session();
+    }
   }
 
   if (inst_.scene != nullptr) {
@@ -353,40 +871,34 @@ void TelemetryModule::frame_end()
     Scene *notify_scene = (scene_orig != nullptr) ? scene_orig : inst_.scene;
     bool reports_changed = false;
 
+    const bool finished_viewport = is_viewport_mode && inst_.sampling.finished_viewport();
+    const bool finished_transition = finished_viewport && !source_state_->viewport_was_finished;
+    source_state_->viewport_was_finished = finished_viewport;
     const bool publish_viewport = is_viewport_mode &&
-                                  (!has_viewport_publish_ ||
-                                   ((frame_end_time - last_viewport_publish_time_) >=
-                                    viewport_publish_interval_seconds_) ||
-                                   inst_.sampling.finished_viewport());
+                                   (!source_state_->has_viewport_publish ||
+                                    ((frame_end_time - source_state_->last_viewport_publish_time) >=
+                                     viewport_publish_interval_seconds_) ||
+                                    finished_transition || playback_finished);
 
     if (publish_viewport) {
-      maybe_publish_cached_viewport(inst_.sampling.finished_viewport());
+      maybe_publish_cached_viewport(finished_transition || playback_finished);
     }
 
     if (current_frame_.runtime_mode == TelemetryRuntimeMode::FinalRender) {
       const std::string render_summary = render_report();
       const bke::SceneEeveePerformanceRuntime *notify_runtime =
           scene_eevee_performance_runtime(notify_scene);
-      reports_changed |= (notify_runtime == nullptr) || (notify_runtime->render_report != render_summary);
-      if (bke::SceneEeveePerformanceRuntime *runtime =
-              scene_eevee_performance_runtime(inst_.scene))
-      {
-        runtime->render_report = render_summary;
-      }
-      if (scene_orig != nullptr && scene_orig != inst_.scene) {
-        if (bke::SceneEeveePerformanceRuntime *runtime =
-                scene_eevee_performance_runtime(scene_orig))
-        {
-          runtime->render_report = render_summary;
-        }
-      }
+      reports_changed |= (notify_runtime == nullptr) ||
+                         (notify_runtime->render_report_get() != render_summary);
+      publish_render_snapshot(current_frame_, render_summary);
     }
-    if (reports_changed) {
+    if (reports_changed && BLI_thread_is_main()) {
       WM_main_add_notifier(NC_SCENE | ND_RENDER_OPTIONS, notify_scene);
     }
   }
 
   frame_active_ = false;
+  profiler_accounting_start_time_ = 0.0;
 }
 
 void TelemetryModule::maybe_begin_viewport_frame()
@@ -394,10 +906,12 @@ void TelemetryModule::maybe_begin_viewport_frame()
   if (!enabled() || frame_active_) {
     return;
   }
-  if (ELEM(runtime_mode(),
-           TelemetryRuntimeMode::Viewport,
-           TelemetryRuntimeMode::ViewportImageRender,
-           TelemetryRuntimeMode::Bake))
+  if (inst_.draw_ctx == nullptr ||
+      !ELEM(inst_.draw_ctx->mode, DRWContext::VIEWPORT, DRWContext::VIEWPORT_RENDER))
+  {
+    return;
+  }
+  if (ELEM(runtime_mode(), TelemetryRuntimeMode::Viewport, TelemetryRuntimeMode::ViewportImageRender))
   {
     frame_begin(runtime_mode());
   }
@@ -408,10 +922,12 @@ void TelemetryModule::maybe_end_viewport_frame()
   if (!enabled() || !frame_active_) {
     return;
   }
-  if (ELEM(runtime_mode(),
-           TelemetryRuntimeMode::Viewport,
-           TelemetryRuntimeMode::ViewportImageRender,
-           TelemetryRuntimeMode::Bake))
+  if (inst_.draw_ctx == nullptr ||
+      !ELEM(inst_.draw_ctx->mode, DRWContext::VIEWPORT, DRWContext::VIEWPORT_RENDER))
+  {
+    return;
+  }
+  if (ELEM(runtime_mode(), TelemetryRuntimeMode::Viewport, TelemetryRuntimeMode::ViewportImageRender))
   {
     frame_end();
   }
@@ -440,6 +956,8 @@ void TelemetryModule::maybe_end_final_frame()
 void TelemetryModule::cancel_frame()
 {
   frame_active_ = false;
+  profiler_accounting_start_time_ = 0.0;
+  scope_stack_.clear();
 }
 
 void TelemetryModule::maybe_publish_cached_viewport(const bool force)
@@ -448,20 +966,15 @@ void TelemetryModule::maybe_publish_cached_viewport(const bool force)
     return;
   }
 
-  const TelemetryFrameRecord *record = last_record(TelemetryRuntimeMode::Viewport);
-  if (record == nullptr) {
-    record = last_record(TelemetryRuntimeMode::ViewportImageRender);
-  }
-  if (record == nullptr) {
-    record = last_record(TelemetryRuntimeMode::Bake);
-  }
+  const TelemetryFrameRecord *record = last_viewport_record();
   if (record == nullptr) {
     return;
   }
 
   const double now = BLI_time_now_seconds();
-  if (!force && has_viewport_publish_ &&
-      ((now - last_viewport_publish_time_) < viewport_publish_interval_seconds_))
+  if (!force && source_state_->has_viewport_publish &&
+      ((now - source_state_->last_viewport_publish_time) <
+       viewport_publish_interval_seconds_))
   {
     return;
   }
@@ -473,28 +986,14 @@ void TelemetryModule::maybe_publish_cached_viewport(const bool force)
   const bke::SceneEeveePerformanceRuntime *notify_runtime =
       scene_eevee_performance_runtime(notify_scene);
   const bool reports_changed = (notify_runtime == nullptr) ||
-                               (notify_runtime->viewport_summary != viewport_summary) ||
-                               (notify_runtime->viewport_report != viewport_report);
+                               (notify_runtime->viewport_summary_get() != viewport_summary) ||
+                               (notify_runtime->viewport_report_get() != viewport_report);
+  publish_viewport_snapshot(*record, viewport_summary, viewport_report);
 
-  if (bke::SceneEeveePerformanceRuntime *runtime =
-          scene_eevee_performance_runtime(inst_.scene))
-  {
-    runtime->viewport_summary = viewport_summary;
-    runtime->viewport_report = viewport_report;
-  }
-  if (scene_orig != nullptr && scene_orig != inst_.scene) {
-    if (bke::SceneEeveePerformanceRuntime *runtime =
-            scene_eevee_performance_runtime(scene_orig))
-    {
-      runtime->viewport_summary = viewport_summary;
-      runtime->viewport_report = viewport_report;
-    }
-  }
+  source_state_->last_viewport_publish_time = now;
+  source_state_->has_viewport_publish = true;
 
-  last_viewport_publish_time_ = now;
-  has_viewport_publish_ = true;
-
-  if (reports_changed) {
+  if (reports_changed && BLI_thread_is_main()) {
     WM_main_add_notifier(NC_SCENE | ND_RENDER_OPTIONS, notify_scene);
   }
 }
@@ -502,8 +1001,37 @@ void TelemetryModule::maybe_publish_cached_viewport(const bool force)
 void TelemetryModule::reset()
 {
   frame_active_ = false;
-  last_viewport_publish_time_ = 0.0;
-  has_viewport_publish_ = false;
+  profiler_accounting_start_time_ = 0.0;
+  scope_stack_.clear();
+}
+
+void TelemetryModule::reset_epoch(const bool clear_source_session)
+{
+  this->finalize_playback_session();
+  this->reset();
+  current_frame_ = {};
+  for (Vector<TelemetryFrameRecord> &history : source_state_->history) {
+    history.clear();
+  }
+  for (bool &has_last_record : source_state_->has_last_record) {
+    has_last_record = false;
+  }
+  source_state_->last_records = {};
+  source_state_->playback_active = false;
+  source_state_->has_playback_peak = false;
+  source_state_->playback_peak = {};
+  source_state_->epoch++;
+  source_state_->last_viewport_publish_time = 0.0;
+  source_state_->has_viewport_publish = false;
+  source_state_->viewport_was_finished = false;
+  if (clear_source_session) {
+    source_state_->playback_peak_history.clear();
+    source_state_->last_published_viewport_summary.clear();
+    source_state_->last_published_viewport_report.clear();
+    /* Expire snapshots associated with the previous Scene/ViewLayer or closed instance. The next
+     * publish receives a fresh token and is therefore not mistaken for the old source. */
+    source_state_->lifetime = std::make_shared<int>(0);
+  }
 }
 
 void TelemetryModule::stage_add(const TelemetryStageId stage, const double elapsed_seconds)
@@ -514,6 +1042,191 @@ void TelemetryModule::stage_add(const TelemetryStageId stage, const double elaps
   TelemetryStageSample &sample = current_frame_.stages[int(stage)];
   sample.cpu_ms += elapsed_seconds * 1000.0;
   sample.call_count += 1;
+}
+
+void TelemetryModule::merge_draw_performance(const blender::DrawPerformanceMetrics &metrics)
+{
+  if (!enabled() || !frame_active_ || !metrics.valid || current_frame_.has_shared_draw_timing ||
+      current_frame_.scope_nodes.is_empty())
+  {
+    return;
+  }
+
+  current_frame_.has_shared_draw_timing = true;
+  current_frame_.has_last_evaluation = metrics.has_last_evaluation;
+  current_frame_.last_evaluation_ms = metrics.last_evaluation_ms;
+  current_frame_.depsgraph_eval_serial = metrics.depsgraph_eval_serial;
+  current_frame_.draw_sync_ms = metrics.sync_total_ms;
+  current_frame_.draw_submission_ms = metrics.submission_total_ms;
+  current_frame_.total_cpu_ms = metrics.sync_total_ms + metrics.submission_total_ms;
+
+  auto add_flat_sample = [&](const TelemetryStageId stage, const double cpu_ms) {
+    if (cpu_ms < 0.0) {
+      return;
+    }
+    TelemetryStageSample &sample = current_frame_.stages[int(stage)];
+    sample.cpu_ms += std::max(0.0, cpu_ms);
+    sample.call_count += 1;
+  };
+  add_flat_sample(TelemetryStageId::DrawSyncShared, metrics.sync_total_ms);
+  add_flat_sample(TelemetryStageId::DrawSyncEngineSetup, metrics.sync_engine_setup_ms);
+  add_flat_sample(TelemetryStageId::DrawSyncEngineInit, metrics.sync_engine_init_ms);
+  add_flat_sample(TelemetryStageId::DrawSyncManagerBegin, metrics.sync_manager_begin_ms);
+  add_flat_sample(TelemetryStageId::DrawSyncEngineBegin, metrics.sync_engine_begin_ms);
+  add_flat_sample(TelemetryStageId::DrawSyncModulesBegin, metrics.sync_modules_begin_ms);
+  add_flat_sample(TelemetryStageId::DrawSyncObjectIteration, metrics.sync_object_iteration_ms);
+  add_flat_sample(TelemetryStageId::DrawSyncDupliExtraction, metrics.sync_dupli_extraction_ms);
+  add_flat_sample(TelemetryStageId::DrawSyncDelayedExtraction, metrics.sync_delayed_extraction_ms);
+  add_flat_sample(TelemetryStageId::DrawSyncExtractionWait, metrics.sync_extraction_wait_ms);
+  add_flat_sample(TelemetryStageId::DrawSyncCurvesUpdate, metrics.sync_curves_update_ms);
+  add_flat_sample(TelemetryStageId::DrawSyncEngineEnd, metrics.sync_engine_end_ms);
+  add_flat_sample(TelemetryStageId::DrawSyncManagerEnd, metrics.sync_manager_end_ms);
+  add_flat_sample(TelemetryStageId::DrawSubmissionShared, metrics.submission_total_ms);
+  add_flat_sample(TelemetryStageId::DrawSubmissionFramebuffer, metrics.submission_framebuffer_ms);
+  add_flat_sample(TelemetryStageId::DrawSubmissionCallbacksPre,
+                  metrics.submission_callbacks_pre_ms);
+  add_flat_sample(TelemetryStageId::DrawSubmissionEngineDraw,
+                  metrics.submission_engine_draw_ms);
+  add_flat_sample(TelemetryStageId::DrawSubmissionCallbacksPost,
+                  metrics.submission_callbacks_post_ms);
+  add_flat_sample(TelemetryStageId::DrawSubmissionFramebufferRestore,
+                  metrics.submission_framebuffer_restore_ms);
+
+  const int sync_root = scope_node_find_or_add(
+      current_frame_, 0, TelemetryStageId::DrawSyncShared);
+  const int submission_root = scope_node_find_or_add(
+      current_frame_, 0, TelemetryStageId::DrawSubmissionShared);
+  current_frame_.scope_nodes[sync_root].cpu_ms += metrics.sync_total_ms;
+  current_frame_.scope_nodes[sync_root].call_count += 1;
+  current_frame_.scope_nodes[submission_root].cpu_ms += metrics.submission_total_ms;
+  current_frame_.scope_nodes[submission_root].call_count += 1;
+
+  auto add_scope_sample = [&](const int parent_index,
+                              const TelemetryStageId stage,
+                              const double cpu_ms) {
+    if (cpu_ms >= 0.0) {
+      scope_node_add_sample(current_frame_, parent_index, stage, std::max(0.0, cpu_ms));
+    }
+  };
+  add_scope_sample(sync_root, TelemetryStageId::DrawSyncEngineSetup, metrics.sync_engine_setup_ms);
+  add_scope_sample(sync_root, TelemetryStageId::DrawSyncEngineInit, metrics.sync_engine_init_ms);
+  add_scope_sample(sync_root, TelemetryStageId::DrawSyncManagerBegin, metrics.sync_manager_begin_ms);
+  add_scope_sample(sync_root, TelemetryStageId::DrawSyncEngineBegin, metrics.sync_engine_begin_ms);
+  add_scope_sample(sync_root, TelemetryStageId::DrawSyncModulesBegin, metrics.sync_modules_begin_ms);
+  add_scope_sample(sync_root, TelemetryStageId::DrawSyncObjectIteration, metrics.sync_object_iteration_ms);
+  add_scope_sample(sync_root, TelemetryStageId::DrawSyncDupliExtraction, metrics.sync_dupli_extraction_ms);
+  add_scope_sample(sync_root, TelemetryStageId::DrawSyncDelayedExtraction, metrics.sync_delayed_extraction_ms);
+  add_scope_sample(sync_root, TelemetryStageId::DrawSyncExtractionWait, metrics.sync_extraction_wait_ms);
+  add_scope_sample(sync_root, TelemetryStageId::DrawSyncCurvesUpdate, metrics.sync_curves_update_ms);
+  add_scope_sample(sync_root, TelemetryStageId::DrawSyncEngineEnd, metrics.sync_engine_end_ms);
+  add_scope_sample(sync_root, TelemetryStageId::DrawSyncManagerEnd, metrics.sync_manager_end_ms);
+  add_scope_sample(submission_root,
+                   TelemetryStageId::DrawSubmissionFramebuffer,
+                   metrics.submission_framebuffer_ms);
+  add_scope_sample(submission_root,
+                   TelemetryStageId::DrawSubmissionCallbacksPre,
+                   metrics.submission_callbacks_pre_ms);
+  add_scope_sample(submission_root,
+                   TelemetryStageId::DrawSubmissionEngineDraw,
+                   metrics.submission_engine_draw_ms);
+  add_scope_sample(submission_root,
+                   TelemetryStageId::DrawSubmissionCallbacksPost,
+                   metrics.submission_callbacks_post_ms);
+  add_scope_sample(submission_root,
+                   TelemetryStageId::DrawSubmissionFramebufferRestore,
+                   metrics.submission_framebuffer_restore_ms);
+
+  const int sync_engine_begin = scope_node_find_or_add(
+      current_frame_, sync_root, TelemetryStageId::DrawSyncEngineBegin);
+  const int sync_object_iteration = scope_node_find_or_add(
+      current_frame_, sync_root, TelemetryStageId::DrawSyncObjectIteration);
+  const int sync_engine_end = scope_node_find_or_add(
+      current_frame_, sync_root, TelemetryStageId::DrawSyncEngineEnd);
+  scope_node_reparent_from_root(current_frame_, TelemetryStageId::SyncBegin, sync_engine_begin);
+  scope_node_reparent_from_root(
+      current_frame_, TelemetryStageId::SyncObjects, sync_object_iteration);
+  scope_node_reparent_from_root(current_frame_, TelemetryStageId::SyncEnd, sync_engine_end);
+
+  /* Engine draw owns the Eevee render scopes. Attach all scopes that were recorded directly below
+   * the temporary tree root while retaining their original pipeline order. */
+  const int submission_engine_draw = scope_node_find_or_add(
+      current_frame_, submission_root, TelemetryStageId::DrawSubmissionEngineDraw);
+  Vector<int> engine_draw_children;
+  for (const int child_index : current_frame_.scope_nodes[0].children) {
+    const TelemetryStageId stage = current_frame_.scope_nodes[child_index].stage;
+    if (stage != TelemetryStageId::DrawSyncShared &&
+        stage != TelemetryStageId::DrawSubmissionShared)
+    {
+      engine_draw_children.append(child_index);
+    }
+  }
+  for (int index = current_frame_.scope_nodes[0].children.size() - 1; index >= 0; index--) {
+    const int child_index = current_frame_.scope_nodes[0].children[index];
+    const TelemetryStageId stage = current_frame_.scope_nodes[child_index].stage;
+    if (stage == TelemetryStageId::DrawSyncShared ||
+        stage == TelemetryStageId::DrawSubmissionShared)
+    {
+      continue;
+    }
+    current_frame_.scope_nodes[0].children.remove(index);
+  }
+  for (const int child_index : engine_draw_children) {
+    current_frame_.scope_nodes[submission_engine_draw].children.append(child_index);
+  }
+}
+
+void TelemetryModule::draw_performance_end(const blender::DrawPerformanceMetrics &metrics)
+{
+  if (!enabled() || !frame_active_ || !metrics.valid) {
+    return;
+  }
+  profiler_accounting_start_time_ = BLI_time_now_seconds();
+  this->merge_draw_performance(metrics);
+  this->frame_end();
+}
+
+int TelemetryModule::scope_begin(const TelemetryStageId stage)
+{
+  if (!enabled() || !frame_active_ || current_frame_.scope_nodes.is_empty()) {
+    return -1;
+  }
+
+  const int parent_index = scope_stack_.is_empty() ? 0 : scope_stack_.last();
+  int node_index = -1;
+  for (const int child_index : current_frame_.scope_nodes[parent_index].children) {
+    if (current_frame_.scope_nodes[child_index].stage == stage) {
+      node_index = child_index;
+      break;
+    }
+  }
+  if (node_index == -1) {
+    TelemetryScopeNode node;
+    node.stage = stage;
+    node_index = current_frame_.scope_nodes.size();
+    current_frame_.scope_nodes.append(std::move(node));
+    current_frame_.scope_nodes[parent_index].children.append(node_index);
+  }
+  scope_stack_.append(node_index);
+  return node_index;
+}
+
+void TelemetryModule::scope_end(const int node_index, const double elapsed_seconds)
+{
+  if (node_index < 0 || !frame_active_ || scope_stack_.is_empty()) {
+    return;
+  }
+
+  if (scope_stack_.last() != node_index) {
+    /* A scope must be closed in LIFO order. Do not corrupt the rest of the capture if an
+     * exceptional path violates that contract. */
+    scope_stack_.clear();
+    return;
+  }
+
+  TelemetryScopeNode &node = current_frame_.scope_nodes[node_index];
+  node.cpu_ms += elapsed_seconds * 1000.0;
+  node.call_count += 1;
+  scope_stack_.pop_last();
 }
 
 void TelemetryModule::shadow_context_add(const TelemetryShadowContext context,
@@ -538,7 +1251,7 @@ void TelemetryModule::material_sync_add(const bool shader_queued,
   if (!enabled() || !frame_active_) {
     return;
   }
-  const auto add_sample = [&](TelemetryMaterialSyncSample &sample) {
+  const auto add_sample = [&](auto &sample) {
     sample.request_count += 1;
     sample.shader_queued_count += int64_t(shader_queued);
     sample.optimize_queued_count += int64_t(optimize_queued);
@@ -546,28 +1259,28 @@ void TelemetryModule::material_sync_add(const bool shader_queued,
     sample.failed_count += int64_t(failed);
   };
   add_sample(current_frame_.material_sync);
-  const std::string hotspot_name = (material_name != nullptr && material_name[0] != '\0') ?
-                                       material_name :
-                                       "<None>";
+
+  /* Name only requests with a concrete compilation/fallback problem. Successful material lookups
+   * remain aggregate-only so normal object iteration does not pay for per-material string work. */
+  if (!(shader_queued || optimize_queued || fallback || failed) || material_name == nullptr ||
+      material_name[0] == '\0')
+  {
+    return;
+  }
   for (TelemetryMaterialHotspot &hotspot : current_frame_.material_hotspots) {
-    if (hotspot.name != hotspot_name) {
-      continue;
+    if (hotspot.name == material_name) {
+      add_sample(hotspot);
+      return;
     }
-    hotspot.request_count += 1;
-    hotspot.shader_queued_count += int64_t(shader_queued);
-    hotspot.optimize_queued_count += int64_t(optimize_queued);
-    hotspot.fallback_count += int64_t(fallback);
-    hotspot.failed_count += int64_t(failed);
+  }
+  if (current_frame_.material_hotspots.size() >= material_hotspot_tracking_limit) {
+    current_frame_.material_hotspot_untracked_count++;
     return;
   }
   TelemetryMaterialHotspot hotspot;
-  hotspot.name = hotspot_name;
-  hotspot.request_count = 1;
-  hotspot.shader_queued_count = int64_t(shader_queued);
-  hotspot.optimize_queued_count = int64_t(optimize_queued);
-  hotspot.fallback_count = int64_t(fallback);
-  hotspot.failed_count = int64_t(failed);
-  current_frame_.material_hotspots.append(hotspot);
+  hotspot.name = material_name;
+  add_sample(hotspot);
+  current_frame_.material_hotspots.append(std::move(hotspot));
 }
 
 void TelemetryModule::shader_wait_add(const int64_t queued_shaders,
@@ -614,12 +1327,28 @@ void TelemetryModule::pass_readback_add(const TelemetryPassReadbackType type,
 const TelemetryFrameRecord *TelemetryModule::last_record(const TelemetryRuntimeMode mode) const
 {
   const int mode_index = int(mode);
-  return has_last_record_[mode_index] ? &last_records_[mode_index] : nullptr;
+  return source_state_->has_last_record[mode_index] ?
+             &source_state_->last_records[mode_index] :
+             nullptr;
+}
+
+const TelemetryFrameRecord *TelemetryModule::last_viewport_record() const
+{
+  const TelemetryFrameRecord *viewport = last_record(TelemetryRuntimeMode::Viewport);
+  const TelemetryFrameRecord *image_render = last_record(
+      TelemetryRuntimeMode::ViewportImageRender);
+  if (viewport == nullptr) {
+    return image_render;
+  }
+  if (image_render == nullptr) {
+    return viewport;
+  }
+  return (image_render->capture_seq > viewport->capture_seq) ? image_render : viewport;
 }
 
 double TelemetryModule::averaged_total_cpu_ms(const TelemetryRuntimeMode mode) const
 {
-  const Vector<TelemetryFrameRecord> &history = history_[int(mode)];
+  const Vector<TelemetryFrameRecord> &history = source_state_->history[int(mode)];
   if (history.is_empty()) {
     return 0.0;
   }
@@ -636,7 +1365,7 @@ std::array<double, stage_count> TelemetryModule::averaged_stage_values(
     const TelemetryRuntimeMode mode) const
 {
   std::array<double, stage_count> result{};
-  const Vector<TelemetryFrameRecord> &history = history_[int(mode)];
+  const Vector<TelemetryFrameRecord> &history = source_state_->history[int(mode)];
   if (history.is_empty()) {
     return result;
   }
@@ -652,6 +1381,178 @@ std::array<double, stage_count> TelemetryModule::averaged_stage_values(
     value /= double(window);
   }
   return result;
+}
+
+std::shared_ptr<const bke::SceneEeveePerformanceSnapshot> TelemetryModule::build_snapshot(
+    const TelemetryFrameRecord &record,
+    const char *kind,
+    const std::string &summary,
+    const std::string &report,
+    const uint64_t capture_seq) const
+{
+  auto snapshot = std::make_shared<bke::SceneEeveePerformanceSnapshot>();
+  const auto &averages = record.average_stage_values;
+  const bool is_playback_peak = std::strncmp(kind, "viewport_peak", 13) == 0;
+  const bool is_active_playback_peak = std::strcmp(kind, "viewport_peak_active") == 0;
+  snapshot->id = fmt::format("{}-source-{}-epoch-{}", kind, record.source_id, record.epoch);
+  if (is_playback_peak) {
+    snapshot->id = fmt::format("viewport_peak-source-{}-session-{}",
+                               record.source_id,
+                               record.playback_session_id);
+  }
+  else if (std::strcmp(kind, "final_render") == 0) {
+    snapshot->id = fmt::format("{}-scene-{}-run-{}-layer-{}-view-{}",
+                               kind,
+                               record.scene_session_uid,
+                               record.render_run_id,
+                               record.view_layer_name,
+                               record.render_view_name.empty() ? "default" :
+                                                                  record.render_view_name);
+  }
+  snapshot->kind = is_playback_peak ? "viewport_peak" : kind;
+  snapshot->mode = telemetry_mode_label(record.runtime_mode);
+  snapshot->status = is_active_playback_peak ?
+                         "Playback Sync Peak Active" :
+                          (is_playback_peak ? "Frozen Playback Sync Peak" :
+                          (record.is_playback ? "Playback Active" : sample_status_string(record)));
+  snapshot->timing_domain = "CPU wall time";
+  snapshot->timing_scope = snapshot->kind.rfind("viewport", 0) == 0 ?
+                               "Shared 3D draw cycle (Draw Sync + Draw/Submission; excludes "
+                               "depsgraph evaluation, viewport unbind, and post-draw UI overlay)" :
+                               (snapshot->kind == "final_render" ?
+                                    "EEVEE render samples + sync/submission/readback (excludes "
+                                    "Instance init and shader setup)" :
+                                    "EEVEE frame");
+  snapshot->source_label = snapshot->kind.rfind("viewport", 0) == 0 ?
+                               fmt::format("Viewport {} ({}x{})",
+                                           record.source_id,
+                                           record.resolution_x,
+                                           record.resolution_y) :
+                               (snapshot->kind == "final_render" ?
+                                    fmt::format("Final Render scene {} run {} layer {} view {}",
+                                                record.scene_session_uid,
+                                                record.render_run_id,
+                                                record.view_layer_name.empty() ? "<None>" :
+                                                                                  record.view_layer_name,
+                                                record.render_view_name.empty() ? "<default>" :
+                                                                                   record.render_view_name) :
+                                    fmt::format("{} scene {}",
+                                                snapshot->mode,
+                                                record.scene_session_uid));
+  snapshot->source_id = record.source_id;
+  snapshot->capture_seq = capture_seq;
+  snapshot->epoch = record.epoch;
+  snapshot->playback_session_id = record.playback_session_id;
+  snapshot->is_playback = record.is_playback;
+  snapshot->scene_session_uid = record.scene_session_uid;
+  snapshot->render_run_id = record.render_run_id;
+  snapshot->view_layer_name = record.view_layer_name;
+  snapshot->render_view_name = record.render_view_name;
+  snapshot->frame = record.frame;
+  snapshot->sample_index = record.sample_index;
+  snapshot->sample_count = record.sample_count;
+  snapshot->resolution_x = record.resolution_x;
+  snapshot->resolution_y = record.resolution_y;
+  snapshot->has_last_evaluation = record.has_last_evaluation;
+  snapshot->last_evaluation_ms = record.last_evaluation_ms;
+  snapshot->depsgraph_eval_serial = record.depsgraph_eval_serial;
+  snapshot->total_cpu_ms = record.total_cpu_ms;
+  snapshot->draw_sync_ms = record.draw_sync_ms;
+  snapshot->draw_submission_ms = record.draw_submission_ms;
+  snapshot->profiler_accounting_ms = record.profiler_accounting_ms;
+  snapshot->summary = summary;
+  snapshot->report = report;
+  snapshot->root.id = snapshot->kind + "/root";
+  snapshot->root.kind = "root";
+  snapshot->root.label = (record.runtime_mode == TelemetryRuntimeMode::FinalRender) ?
+                            "Final Render" :
+                            (record.runtime_mode == TelemetryRuntimeMode::Bake ? "Bake" :
+                                                                                 "Viewport");
+  snapshot->root.current_ms = record.total_cpu_ms;
+  snapshot->root.average_ms = record.average_total_cpu_ms;
+  snapshot->root.self_ms = record.total_cpu_ms;
+  snapshot->root.calls = 1;
+  snapshot->root.active = true;
+
+  if (!record.scope_nodes.is_empty()) {
+    double child_ms = 0.0;
+    for (const int child_index : record.scope_nodes[0].children) {
+      bke::SceneEeveePerformanceNode child = snapshot_scope_node(
+          record, child_index, snapshot->root.id);
+      child_ms += child.current_ms;
+      snapshot->root.children.push_back(std::move(child));
+    }
+    snapshot->root.self_ms = std::max(0.0, record.total_cpu_ms - child_ms);
+  }
+  else {
+    for (int stage_index = 0; stage_index < stage_count; stage_index++) {
+      const TelemetryStageSample &stage = record.stages[stage_index];
+      if (stage.call_count == 0) {
+        continue;
+      }
+      bke::SceneEeveePerformanceNode child;
+      child.id = snapshot->root.id + "/stage-" + std::to_string(stage_index);
+      child.kind = "stage";
+      child.label = stage_label(TelemetryStageId(stage_index));
+      child.current_ms = stage.cpu_ms;
+      child.average_ms = averages[stage_index];
+      child.self_ms = stage.cpu_ms;
+      child.calls = stage.call_count;
+      child.active = true;
+      snapshot->root.children.push_back(std::move(child));
+    }
+  }
+  return snapshot;
+}
+
+void TelemetryModule::publish_viewport_snapshot(const TelemetryFrameRecord &record,
+                                                const std::string &summary,
+                                                const std::string &report)
+{
+  const uint64_t sequence = record.capture_seq;
+  const auto latest = build_snapshot(record, "viewport_latest", summary, report, sequence);
+  Scene *scene_publish = DEG_get_original(inst_.scene);
+  if (scene_publish == nullptr) {
+    scene_publish = inst_.scene;
+  }
+  bke::SceneEeveePerformanceRuntime *runtime = scene_eevee_performance_runtime(scene_publish);
+  if (runtime == nullptr) {
+    return;
+  }
+
+  bke::SceneEeveePerformanceViewportSource source;
+  source.source_id = record.source_id;
+  source.label = latest->source_label;
+  source.lifetime = source_state_->lifetime;
+  source.closed = source_state_->closed;
+  source.latest = latest;
+  for (const TelemetryFrameRecord &peak : source_state_->playback_peak_history) {
+    source.playback_peaks.push_back(
+        build_snapshot(peak, "viewport_peak", "", "", peak.capture_seq));
+  }
+  if (source_state_->has_playback_peak) {
+    const TelemetryFrameRecord &peak = source_state_->playback_peak;
+    source.playback_peaks.push_back(
+        build_snapshot(peak, "viewport_peak_active", "", "", peak.capture_seq));
+  }
+  runtime->viewport_source_publish(std::move(source), summary, report);
+  source_state_->last_published_viewport_summary = summary;
+  source_state_->last_published_viewport_report = report;
+}
+
+void TelemetryModule::publish_render_snapshot(const TelemetryFrameRecord &record,
+                                              const std::string &report)
+{
+  const auto snapshot = build_snapshot(record, "final_render", "", report, record.capture_seq);
+  Scene *scene_publish = DEG_get_original(inst_.scene);
+  if (scene_publish == nullptr) {
+    scene_publish = inst_.scene;
+  }
+  if (bke::SceneEeveePerformanceRuntime *runtime =
+          scene_eevee_performance_runtime(scene_publish))
+  {
+    runtime->final_render_publish(snapshot, report);
+  }
 }
 
 const char *TelemetryModule::stage_label(const TelemetryStageId stage)
@@ -705,19 +1606,18 @@ Span<const TelemetryStageInfo> TelemetryModule::stage_infos()
 
 std::string TelemetryModule::viewport_summary_line() const
 {
-  const TelemetryFrameRecord *record = last_record(TelemetryRuntimeMode::Viewport);
-  if (record == nullptr) {
-    record = last_record(TelemetryRuntimeMode::ViewportImageRender);
-  }
+  const TelemetryFrameRecord *record = last_viewport_record();
   if (record == nullptr) {
     return "";
   }
 
   const double total_cpu_ms = averaged_total_cpu_ms(record->runtime_mode);
   const auto averages = averaged_stage_values(record->runtime_mode);
-  const double sync_ms = averages[int(TelemetryStageId::SyncBegin)] +
-                         averages[int(TelemetryStageId::SyncObjects)] +
-                         averages[int(TelemetryStageId::SyncEnd)];
+  const double sync_ms = record->has_shared_draw_timing ?
+                             averages[int(TelemetryStageId::DrawSyncShared)] :
+                             (averages[int(TelemetryStageId::SyncBegin)] +
+                              averages[int(TelemetryStageId::SyncObjects)] +
+                              averages[int(TelemetryStageId::SyncEnd)]);
   const double main_ms = averages[int(TelemetryStageId::MainView)];
   const double deferred_ms = averages[int(TelemetryStageId::MainDeferred)];
   const double dof_ms = averages[int(TelemetryStageId::PostDepthOfField)];
@@ -726,8 +1626,12 @@ std::string TelemetryModule::viewport_summary_line() const
                            averages[int(TelemetryStageId::PostFilterBeforeDepthOfField)] +
                            averages[int(TelemetryStageId::PostFilterBeforeComposite)];
 
-  return fmt::format("Perf CPU {:.2f} ms | Sample {} ({}) | Sync {:.2f} | Main {:.2f} | Deferred {:.2f} | DOF {:.2f} | Filter {:.2f}",
+  return fmt::format("Perf Draw CPU {:.2f} ms | Avg {:.2f} | Prof {:.2f} | Eval {} | Sample {} ({}) | Avg Sync {:.2f} | Main {:.2f} | Deferred {:.2f} | DOF {:.2f} | Filter {:.2f}",
+                     record->total_cpu_ms,
                      total_cpu_ms,
+                     record->profiler_accounting_ms,
+                     record->has_last_evaluation ? fmt::format("{:.2f} ms", record->last_evaluation_ms) :
+                                                   std::string("n/a"),
                      sample_progress_string(*record),
                      sample_status_string(*record),
                      sync_ms,
@@ -825,15 +1729,15 @@ std::string TelemetryModule::format_shader_waits_report(const TelemetryFrameReco
     return "";
   }
 
-  const double sync_end_cpu = record.stages[int(TelemetryStageId::SyncEnd)].cpu_ms;
-  const double sync_end_share = (sync_end_cpu > 0.0) ? (sample.cpu_ms / sync_end_cpu) * 100.0 :
-                                                       0.0;
+  const double frame_share = (record.total_cpu_ms > 0.0) ?
+                                 (sample.cpu_ms / record.total_cpu_ms) * 100.0 :
+                                 0.0;
   return fmt::format(
       "  Shader Waits:\n"
-      "    - waits={} cpu={:.3f} ms sync_end_share={:.1f}% queued_shaders={} queued_textures={}\n",
+      "    - waits={} cpu={:.3f} ms frame_share={:.1f}% queued_shaders={} queued_textures={}\n",
       sample.wait_count,
       sample.cpu_ms,
-      sync_end_share,
+      frame_share,
       sample.queued_shader_count,
       sample.queued_texture_count);
 }
@@ -944,6 +1848,11 @@ std::string TelemetryModule::format_material_sync_report(const TelemetryFrameRec
                             hotspots.size() - material_hotspot_report_limit);
     }
   }
+  if (record.material_hotspot_untracked_count > 0) {
+    result += fmt::format("    - ... {} additional flagged requests not named (tracking limit {})\n",
+                          record.material_hotspot_untracked_count,
+                          material_hotspot_tracking_limit);
+  }
 
   return result;
 }
@@ -982,10 +1891,14 @@ std::string TelemetryModule::format_probe_costs_report(const TelemetryFrameRecor
 
 Vector<std::string> TelemetryModule::viewport_overlay_lines(const bool include_stage_list) const
 {
-  const TelemetryFrameRecord *record = last_record(TelemetryRuntimeMode::Viewport);
-  if (record == nullptr) {
-    record = last_record(TelemetryRuntimeMode::ViewportImageRender);
+  if (viewport_publish_paused()) {
+    const std::string &text = include_stage_list ?
+                                  source_state_->last_published_viewport_report :
+                                  source_state_->last_published_viewport_summary;
+    return split_overlay_text(text);
   }
+
+  const TelemetryFrameRecord *record = last_viewport_record();
   if (record == nullptr) {
     return {};
   }
@@ -1044,22 +1957,32 @@ Vector<std::string> TelemetryModule::viewport_overlay_lines(const bool include_s
 
 std::string TelemetryModule::viewport_report() const
 {
-  const TelemetryFrameRecord *record = last_record(TelemetryRuntimeMode::Viewport);
-  if (record == nullptr) {
-    record = last_record(TelemetryRuntimeMode::ViewportImageRender);
-  }
+  const TelemetryFrameRecord *record = last_viewport_record();
   if (record == nullptr) {
     return "";
   }
 
   const auto averages = averaged_stage_values(record->runtime_mode);
   std::string result = fmt::format(
-      "Viewport CPU: {:.3f} ms\n"
+      "Viewport Draw CPU: {:.3f} ms\n"
+      "Average Draw CPU: {:.3f} ms\n"
+      "Profiler Accounting CPU: {:.3f} ms (excluded from Draw CPU; report formatting and snapshot publication not included)\n"
+      "Timing Domain: CPU wall time\n"
+      "Timing Scope: Shared 3D draw cycle (Draw Sync + Draw/Submission; excludes depsgraph evaluation, viewport unbind, and post-draw UI overlay)\n"
+      "Accounting: Inclusive scopes (parent rows include child time; do not sum nested rows)\n"
+      "Last Evaluation: {}\n"
+      "Depsgraph Eval Serial: {}\n"
       "Frame: {}\n"
       "Sample Progress: {}\n"
       "Sampling: {}\n"
       "Features: AO={} DOF={} MB={} Volume={} Raytrace={} Filters={} RenderTextures={} Lights={} Probes={} NPR Mats={} Raycast Mats={} GLSL Mats={}\n",
       record->total_cpu_ms,
+      record->average_total_cpu_ms,
+      record->profiler_accounting_ms,
+      record->has_last_evaluation ? fmt::format("{:.3f} ms (not included in Draw CPU)",
+                                                record->last_evaluation_ms) :
+                                    std::string("n/a"),
+      record->depsgraph_eval_serial,
       record->frame,
       sample_progress_string(*record),
       sample_status_string(*record),
@@ -1079,6 +2002,9 @@ std::string TelemetryModule::viewport_report() const
   for (const int stage_index : sorted_stage_indices(*record)) {
     const TelemetryStageSample &stage = record->stages[stage_index];
     const double avg_ms = averages[stage_index];
+    if (stage.call_count == 0 && avg_ms == 0.0) {
+      continue;
+    }
     const double ms_per_call = (stage.call_count > 0) ? stage.cpu_ms / double(stage.call_count) :
                                                         0.0;
     result += fmt::format(
@@ -1089,6 +2015,9 @@ std::string TelemetryModule::viewport_report() const
         stage.call_count,
         ms_per_call);
   }
+  result += format_material_sync_report(*record);
+  result += format_shader_waits_report(*record);
+  result += format_pass_readbacks_report(*record);
   result += format_shadow_contexts_report(*record);
   result += format_shadow_lights_report(*record);
   result += format_probe_costs_report(*record);
@@ -1104,12 +2033,21 @@ std::string TelemetryModule::render_report() const
 
   std::string result = fmt::format(
       "EEVEE Performance Summary\n"
+      "Timing Domain: CPU wall time\n"
+      "Timing Scope: EEVEE render samples + sync/submission/readback (excludes Instance init and shader setup)\n"
+      "Accounting: Inclusive scopes (parent rows include child time; do not sum nested rows)\n"
+      "  Render Run: {}\n"
+      "  View Layer: {}\n"
+      "  Render View: {}\n"
       "  Frame: {}\n"
       "  Sample Progress: {}\n"
       "  Sampling: {}\n"
       "  Sample Count: {}\n"
       "  Total CPU: {:.3f} ms\n"
       "  Features: AO={} DOF={} MB={} Volume={} Raytrace={} Filters={} RenderTextures={} Lights={} Probes={} NPR Mats={} Raycast Mats={} GLSL Mats={}\n",
+      record->render_run_id,
+      record->view_layer_name.empty() ? "<None>" : record->view_layer_name,
+      record->render_view_name.empty() ? "<default>" : record->render_view_name,
       record->frame,
       sample_progress_string(*record),
       sample_status_string(*record),
@@ -1144,6 +2082,9 @@ std::string TelemetryModule::render_report() const
         ms_per_call,
         ms_per_sample);
   }
+  result += format_material_sync_report(*record);
+  result += format_shader_waits_report(*record);
+  result += format_pass_readbacks_report(*record);
   result += format_shadow_contexts_report(*record);
   result += format_shadow_lights_report(*record);
   result += format_probe_costs_report(*record);
@@ -1155,6 +2096,7 @@ ScopedTelemetrySample::ScopedTelemetrySample(TelemetryModule &telemetry, const T
       stage_(stage)
 {
   if (telemetry_ != nullptr) {
+    scope_node_index_ = telemetry_->scope_begin(stage_);
     start_time_ = BLI_time_now_seconds();
   }
 }
@@ -1162,7 +2104,9 @@ ScopedTelemetrySample::ScopedTelemetrySample(TelemetryModule &telemetry, const T
 ScopedTelemetrySample::~ScopedTelemetrySample()
 {
   if (telemetry_ != nullptr) {
-    telemetry_->stage_add(stage_, BLI_time_now_seconds() - start_time_);
+    const double elapsed_seconds = BLI_time_now_seconds() - start_time_;
+    telemetry_->stage_add(stage_, elapsed_seconds);
+    telemetry_->scope_end(scope_node_index_, elapsed_seconds);
   }
 }
 

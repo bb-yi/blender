@@ -7,6 +7,7 @@
  */
 
 #include <cstdio>
+#include <optional>
 
 #include "CLG_log.h"
 
@@ -1060,41 +1061,103 @@ static void drw_engines_cache_populate(draw::ObjectRef &ref,
 
 void DRWContext::sync(iter_callback_t iter_callback)
 {
+  const bool capture = performance_metrics_.valid;
+  double phase_start = capture ? BLI_time_now_seconds() : 0.0;
+
   /* Enable modules and init for next sync. */
   data->modules_begin_sync();
+  if (capture) {
+    const double phase_end = BLI_time_now_seconds();
+    performance_metrics_.sync_modules_begin_ms = (phase_end - phase_start) * 1000.0;
+    phase_start = phase_end;
+  }
 
   DupliCacheManager dupli_handler;
   ExtractionGraph extraction;
 
   /* Custom callback defines the set of object to sync. */
   iter_callback(dupli_handler, extraction);
+  if (capture) {
+    const double phase_end = BLI_time_now_seconds();
+    performance_metrics_.sync_object_iteration_ms = (phase_end - phase_start) * 1000.0;
+    phase_start = phase_end;
+  }
 
   dupli_handler.extract_all(extraction);
+  if (capture) {
+    const double phase_end = BLI_time_now_seconds();
+    performance_metrics_.sync_dupli_extraction_ms = (phase_end - phase_start) * 1000.0;
+    phase_start = phase_end;
+  }
   for (Object *object : this->delayed_extraction) {
     draw::drw_batch_cache_generate_requested_evaluated_mesh_or_curve(object, *extraction.graph);
   }
   this->delayed_extraction.clear();
+  if (capture) {
+    const double phase_end = BLI_time_now_seconds();
+    performance_metrics_.sync_delayed_extraction_ms = (phase_end - phase_start) * 1000.0;
+    phase_start = phase_end;
+  }
 
   extraction.work_and_wait();
+  if (capture) {
+    const double phase_end = BLI_time_now_seconds();
+    performance_metrics_.sync_extraction_wait_ms = (phase_end - phase_start) * 1000.0;
+    phase_start = phase_end;
+  }
 
   DRW_curves_update(*view_data_active->manager);
+  if (capture) {
+    const double phase_end = BLI_time_now_seconds();
+    performance_metrics_.sync_curves_update_ms = (phase_end - phase_start) * 1000.0;
+  }
 }
 
 void DRWContext::engines_init_and_sync(iter_callback_t iter_callback)
 {
   double start_time = BLI_time_now_seconds();
+  const bool capture = performance_metrics_.valid;
+  double phase_start = start_time;
 
   view_data_active->foreach_enabled_engine([&](DrawEngine &instance) { instance.init(); });
+  if (capture) {
+    const double phase_end = BLI_time_now_seconds();
+    performance_metrics_.sync_engine_init_ms = (phase_end - phase_start) * 1000.0;
+    phase_start = phase_end;
+  }
 
   view_data_active->manager->begin_sync(this->obact);
+  if (capture) {
+    const double phase_end = BLI_time_now_seconds();
+    performance_metrics_.sync_manager_begin_ms = (phase_end - phase_start) * 1000.0;
+    phase_start = phase_end;
+  }
 
   view_data_active->foreach_enabled_engine([&](DrawEngine &instance) { instance.begin_sync(); });
+  if (capture) {
+    const double phase_end = BLI_time_now_seconds();
+    performance_metrics_.sync_engine_begin_ms = (phase_end - phase_start) * 1000.0;
+    phase_start = phase_end;
+  }
 
   sync(iter_callback);
 
+  if (capture) {
+    phase_start = BLI_time_now_seconds();
+  }
+
   view_data_active->foreach_enabled_engine([&](DrawEngine &instance) { instance.end_sync(); });
+  if (capture) {
+    const double phase_end = BLI_time_now_seconds();
+    performance_metrics_.sync_engine_end_ms = (phase_end - phase_start) * 1000.0;
+    phase_start = phase_end;
+  }
 
   view_data_active->manager->end_sync();
+  if (capture) {
+    const double phase_end = BLI_time_now_seconds();
+    performance_metrics_.sync_manager_end_ms = (phase_end - phase_start) * 1000.0;
+  }
 
   last_sync_time_ = float(BLI_time_now_seconds() - start_time);
 }
@@ -1126,6 +1189,75 @@ void DRWContext::engines_draw_scene()
   }
 
   last_submission_time_ = float(BLI_time_now_seconds() - start_time);
+  if (performance_metrics_.valid) {
+    performance_metrics_.submission_engine_draw_ms = double(last_submission_time_) * 1000.0;
+  }
+}
+
+void DRWContext::performance_sync_begin(const double sync_start_time)
+{
+  performance_metrics_ = {};
+  performance_sync_start_time_ = sync_start_time;
+}
+
+void DRWContext::performance_capture_enable()
+{
+  /* Only the regular 3D viewport and viewport-image-render paths publish Eevee telemetry.
+   * XR, generic offscreen, selection, depth, and custom loops have different
+   * ownership/lifecycle semantics. */
+  if (!ELEM(mode, VIEWPORT, VIEWPORT_RENDER) || view_data_active == nullptr) {
+    return;
+  }
+
+  view_data_active->foreach_enabled_engine([&](DrawEngine &instance) {
+    performance_metrics_.valid |= instance.performance_capture_requested(*this);
+  });
+  if (performance_metrics_.valid) {
+    performance_metrics_.sync_engine_setup_ms =
+        (BLI_time_now_seconds() - performance_sync_start_time_) * 1000.0;
+    if (depsgraph != nullptr) {
+      const std::optional<double> evaluation_time = DEG_get_last_evaluation_time(depsgraph);
+      performance_metrics_.has_last_evaluation = evaluation_time.has_value();
+      performance_metrics_.last_evaluation_ms = evaluation_time.value_or(0.0) * 1000.0;
+      performance_metrics_.depsgraph_eval_serial = DEG_get_update_count(depsgraph);
+    }
+  }
+}
+
+void DRWContext::performance_sync_end()
+{
+  const double sync_total_ms = (BLI_time_now_seconds() - performance_sync_start_time_) * 1000.0;
+  /* Keep the inexpensive root timing available to the existing View3D overlay even when detailed
+   * profiler capture is disabled. */
+  last_sync_time_ = float(sync_total_ms / 1000.0);
+  if (performance_metrics_.valid) {
+    performance_metrics_.sync_total_ms = sync_total_ms;
+  }
+}
+
+void DRWContext::performance_submission_end(const double total_ms,
+                                            const double framebuffer_ms,
+                                            const double callbacks_pre_ms,
+                                            const double engine_draw_ms,
+                                            const double callbacks_post_ms,
+                                            const double framebuffer_restore_ms)
+{
+  /* Keep the inexpensive root timing available to the existing View3D overlay even when detailed
+   * profiler capture is disabled. */
+  last_submission_time_ = float(total_ms / 1000.0);
+  if (!performance_metrics_.valid) {
+    return;
+  }
+
+  performance_metrics_.submission_total_ms = total_ms;
+  performance_metrics_.submission_framebuffer_ms = framebuffer_ms;
+  performance_metrics_.submission_callbacks_pre_ms = callbacks_pre_ms;
+  performance_metrics_.submission_engine_draw_ms = engine_draw_ms;
+  performance_metrics_.submission_callbacks_post_ms = callbacks_post_ms;
+  performance_metrics_.submission_framebuffer_restore_ms = framebuffer_restore_ms;
+
+  view_data_active->foreach_enabled_engine(
+      [&](DrawEngine &instance) { instance.performance_frame_end(performance_metrics_); });
 }
 
 void DRW_draw_region_engine_info(int xoffset, int *yoffset, int line_height)
@@ -1552,8 +1684,11 @@ static void drw_draw_render_loop_3d(DRWContext &draw_ctx, RenderEngineType *engi
     return BKE_object_is_visible_in_viewport(v3d, &ob) ? DrawFilter::Draw : DrawFilter::Skip;
   };
 
+  const double sync_start_time = BLI_time_now_seconds();
+  draw_ctx.performance_sync_begin(sync_start_time);
   draw_ctx.enable_engines(gpencil_engine_needed, engine_type);
   draw_ctx.engines_data_validate();
+  draw_ctx.performance_capture_enable();
   draw_ctx.engines_init_and_sync([&](DupliCacheManager &duplis, ExtractionGraph &extraction) {
     /* Only iterate over objects for internal engines or when overlays are enabled */
     if (do_populate_loop) {
@@ -1562,16 +1697,43 @@ static void drw_draw_render_loop_3d(DRWContext &draw_ctx, RenderEngineType *engi
       });
     }
   });
+  draw_ctx.performance_sync_end();
+
+  const double submission_start = BLI_time_now_seconds();
+  const bool capture = draw_ctx.performance_capture_valid();
+  double phase_start = capture ? submission_start : 0.0;
 
   /* No frame-buffer allowed before drawing. */
   BLI_assert(GPU_framebuffer_active_get() == GPU_framebuffer_back_get());
   GPU_framebuffer_bind(draw_ctx.default_framebuffer());
   GPU_framebuffer_clear_depth_stencil(draw_ctx.default_framebuffer(), 1.0f, 0xFF);
+  const double framebuffer_end = capture ? BLI_time_now_seconds() : 0.0;
+  const double framebuffer_ms = capture ? (framebuffer_end - phase_start) * 1000.0 : 0.0;
 
+  if (capture) {
+    phase_start = framebuffer_end;
+  }
   drw_callbacks_pre_scene(draw_ctx);
-  draw_ctx.engines_draw_scene();
-  drw_callbacks_post_scene(draw_ctx);
+  const double callbacks_pre_end = capture ? BLI_time_now_seconds() : 0.0;
+  const double callbacks_pre_ms = capture ? (callbacks_pre_end - phase_start) * 1000.0 : 0.0;
 
+  if (capture) {
+    phase_start = callbacks_pre_end;
+  }
+  draw_ctx.engines_draw_scene();
+  const double engine_draw_end = capture ? BLI_time_now_seconds() : 0.0;
+  const double engine_draw_ms = capture ? (engine_draw_end - phase_start) * 1000.0 : 0.0;
+
+  if (capture) {
+    phase_start = engine_draw_end;
+  }
+  drw_callbacks_post_scene(draw_ctx);
+  const double callbacks_post_end = capture ? BLI_time_now_seconds() : 0.0;
+  const double callbacks_post_ms = capture ? (callbacks_post_end - phase_start) * 1000.0 : 0.0;
+
+  if (capture) {
+    phase_start = callbacks_post_end;
+  }
   if (WM_draw_region_get_bound_viewport(draw_ctx.region)) {
     /* Don't unbind the frame-buffer yet in this case and let
      * GPU_viewport_unbind do it, so that we can still do further
@@ -1580,6 +1742,18 @@ static void drw_draw_render_loop_3d(DRWContext &draw_ctx, RenderEngineType *engi
   else {
     GPU_framebuffer_restore();
   }
+  const double framebuffer_restore_end = capture ? BLI_time_now_seconds() : 0.0;
+  const double framebuffer_restore_ms = capture ?
+                                            (framebuffer_restore_end - phase_start) * 1000.0 :
+                                            0.0;
+  const double submission_end = capture ? framebuffer_restore_end : BLI_time_now_seconds();
+  const double submission_total_ms = (submission_end - submission_start) * 1000.0;
+  draw_ctx.performance_submission_end(submission_total_ms,
+                                      framebuffer_ms,
+                                      callbacks_pre_ms,
+                                      engine_draw_ms,
+                                      callbacks_post_ms,
+                                      framebuffer_restore_ms);
 }
 
 static void drw_draw_render_loop_2d(DRWContext &draw_ctx)
@@ -2224,9 +2398,29 @@ const DRWContext *DRW_context_get()
 
 bool DRWContext::is_playback() const
 {
-  if (this->evil_C != nullptr) {
-    wmWindowManager *wm = CTX_wm_manager(this->evil_C);
-    return ED_screen_animation_playing(wm) != nullptr;
+  if (this->evil_C == nullptr || this->depsgraph == nullptr) {
+    return false;
+  }
+
+  /* Playback is owned by the screen that owns the animation timer, which can be a different
+   * window from the viewport being drawn. Match the timer's input Scene instead of restricting
+   * the query to the current screen; otherwise a second window of the same Scene falls back to
+   * non-playback sampling and loses its playback peak attribution. */
+  wmWindowManager *wm = CTX_wm_manager(this->evil_C);
+  Scene *input_scene = DEG_get_input_scene(this->depsgraph);
+  if (wm == nullptr || input_scene == nullptr) {
+    return false;
+  }
+
+  for (wmWindow &window : wm->windows) {
+    bScreen *screen = WM_window_get_active_screen(&window);
+    if (screen == nullptr || screen->scrubbing) {
+      continue;
+    }
+    Scene *playing_scene = ED_screen_find_playing_scene(screen, false);
+    if (playing_scene == input_scene) {
+      return true;
+    }
   }
   return false;
 }

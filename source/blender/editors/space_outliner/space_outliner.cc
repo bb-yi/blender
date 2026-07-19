@@ -171,6 +171,11 @@ static void outliner_main_region_listener(const wmRegionListenerParams *params)
         case ND_SCENEBROWSE:
           ED_region_tag_redraw(region);
           break;
+        case ND_RENDER_RESULT:
+          if (space_outliner->outlinevis == SO_EEVEE_PERFORMANCE) {
+            ED_region_tag_redraw(region);
+          }
+          break;
         case ND_LAYER:
           /* Avoid rebuild if only the active collection changes */
           if ((wmn->subtype == NS_LAYER_COLLECTION) && (wmn->action == NA_ACTIVATED)) {

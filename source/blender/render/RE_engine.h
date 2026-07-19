@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include <cstdint>
+
 #include "DNA_listBase.h"
 #include "DNA_node_types.h"
 #include "DNA_scene_types.h"
@@ -133,6 +135,9 @@ struct RenderEngine {
   void *py_instance;
 
   int flag;
+  /* Monotonic identifier for one complete RE_engine_render() invocation. All view-layer and
+   * render-view callbacks belonging to that invocation share this value. */
+  uint64_t render_run_id;
   struct Object *camera_override;
   unsigned int layer_override;
 

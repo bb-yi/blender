@@ -7,6 +7,7 @@
  */
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstring>
 #include <iomanip>
@@ -112,7 +113,11 @@ std::string metadata_key_from_line(const std::string &line)
 std::string detail_key_from_line(const std::string &line)
 {
   if (startswith(line, "... ")) {
-    return line;
+    const size_t more_pos = line.find(" more");
+    if (more_pos != std::string::npos) {
+      return "..." + line.substr(more_pos);
+    }
+    return "...";
   }
 
   static const char *metric_tokens[] = {
@@ -356,6 +361,8 @@ ParsedReport parse_report(const std::string &root_title,
   populate_stage_skeleton(*parsed.stages);
 
   ReportSection section = ReportSection::Main;
+  bool has_timing_domain = false;
+  bool has_accounting = false;
   const char *line_start = report;
   while (*line_start != '\0') {
     const char *line_end = std::strchr(line_start, '\n');
@@ -366,7 +373,7 @@ ParsedReport parse_report(const std::string &root_title,
     const std::string line = trim_copy(raw_line);
 
     if (!line.empty()) {
-      if (startswith(line, "Viewport CPU:")) {
+      if (startswith(line, "Viewport Draw CPU:") || startswith(line, "Viewport CPU:")) {
         double total = 0.0;
         if (parse_double_from_suffix(line, total)) {
           parsed.has_total = true;
@@ -380,10 +387,18 @@ ParsedReport parse_report(const std::string &root_title,
           parsed.total_ms = total;
         }
       }
-      else if (startswith(line, "Frame:") || startswith(line, "Sample Index:") ||
-               startswith(line, "Sample Progress:") || startswith(line, "Sampling:"))
+      else if (startswith(line, "Average Draw CPU:") || startswith(line, "Timing Domain:") ||
+               startswith(line, "Timing Scope:") || startswith(line, "Accounting:") ||
+               startswith(line, "Profiler Accounting CPU:") || startswith(line, "Render Run:") ||
+               startswith(line, "Last Evaluation:") ||
+               startswith(line, "Depsgraph Eval Serial:") || startswith(line, "Frame:") ||
+               startswith(line, "View Layer:") || startswith(line, "Render View:") ||
+               startswith(line, "Sample Index:") || startswith(line, "Sample Progress:") ||
+               startswith(line, "Sample Count:") || startswith(line, "Sampling:"))
       {
         parsed.metadata.push_back(line);
+        has_timing_domain |= startswith(line, "Timing Domain:");
+        has_accounting |= startswith(line, "Accounting:");
       }
       else if (startswith(line, "Features:")) {
         section = ReportSection::Main;
@@ -435,6 +450,15 @@ ParsedReport parse_report(const std::string &root_title,
       break;
     }
     line_start = line_end + 1;
+  }
+
+  if (!has_timing_domain) {
+    /* Legacy reports predate the explicit field, but all values here are CPU wall-time samples. */
+    parsed.metadata.push_back("Timing Domain: CPU wall time");
+  }
+  if (!has_accounting) {
+    parsed.metadata.push_back(
+        "Accounting: Inclusive scopes (parent rows include child time; do not sum nested rows)");
   }
 
   finalize_stage_times(*parsed.stages);
@@ -497,6 +521,28 @@ void collect_report_keys(const ParsedReport &report, std::vector<std::string> &r
   }
   if (!report.probe_costs->children.empty()) {
     collect_node_keys(*report.probe_costs, root_key, r_keys);
+  }
+}
+
+std::array<const PerfNode *, 7> report_attribution_nodes(const ParsedReport &report)
+{
+  return {report.features.get(),
+          report.shader_waits.get(),
+          report.pass_readback.get(),
+          report.material_sync.get(),
+          report.shadow_contexts.get(),
+          report.shadow_lights.get(),
+          report.probe_costs.get()};
+}
+
+void collect_report_attribution_keys(const ParsedReport &report,
+                                     const std::string &snapshot_key,
+                                     std::vector<std::string> &r_keys)
+{
+  for (const PerfNode *node : report_attribution_nodes(report)) {
+    if (!node->children.empty()) {
+      collect_node_keys(*node, snapshot_key, r_keys);
+    }
   }
 }
 
@@ -584,6 +630,19 @@ void append_node_tree(PerformanceTreeBuilder &builder,
   }
 }
 
+void append_report_attribution(PerformanceTreeBuilder &builder,
+                               TreeElement &snapshot_root,
+                               const ParsedReport &report,
+                               const std::string &snapshot_key)
+{
+  /* Structured snapshots already contain the stage tree. Only retain report-only attribution. */
+  for (const PerfNode *node : report_attribution_nodes(report)) {
+    if (!node->children.empty()) {
+      append_node_tree(builder, snapshot_root, *node, snapshot_key);
+    }
+  }
+}
+
 void append_parsed_report(PerformanceTreeBuilder &builder, ListBaseT<TreeElement> &tree, const ParsedReport &report)
 {
   std::string root_label = report.title;
@@ -632,6 +691,533 @@ void append_parsed_report(PerformanceTreeBuilder &builder, ListBaseT<TreeElement
   }
 }
 
+struct SnapshotNodeMetrics {
+  double current_ms = 0.0;
+  double average_ms = 0.0;
+  double self_ms = 0.0;
+  bool ran_directly = false;
+  bool ran = false;
+};
+
+SnapshotNodeMetrics snapshot_node_metrics(const bke::SceneEeveePerformanceNode &node)
+{
+  double children_current_ms = 0.0;
+  double children_average_ms = 0.0;
+  bool child_ran = false;
+  for (const bke::SceneEeveePerformanceNode &child : node.children) {
+    const SnapshotNodeMetrics child_metrics = snapshot_node_metrics(child);
+    children_current_ms += child_metrics.current_ms;
+    children_average_ms += child_metrics.average_ms;
+    child_ran |= child_metrics.ran;
+  }
+
+  SnapshotNodeMetrics metrics;
+  metrics.ran_directly = node.active || node.calls > 0 || node.current_ms > 0.0;
+  metrics.ran = metrics.ran_directly || child_ran;
+
+  /* Some nodes exist only to preserve scope hierarchy. Aggregate children only for those
+   * synthetic nodes; direct scopes already publish authoritative inclusive and self timings. */
+  const double measured_current_ms = std::max(0.0, node.current_ms);
+  metrics.current_ms = metrics.ran_directly ? measured_current_ms : children_current_ms;
+  const double measured_average_ms = std::max(0.0, node.average_ms);
+  metrics.average_ms = metrics.ran_directly ?
+                           measured_average_ms :
+                           std::max(measured_average_ms, children_average_ms);
+  metrics.self_ms = metrics.ran_directly ? std::max(0.0, node.self_ms) : 0.0;
+  return metrics;
+}
+
+std::string snapshot_node_label(const bke::SceneEeveePerformanceNode &node)
+{
+  const SnapshotNodeMetrics metrics = snapshot_node_metrics(node);
+  std::string label = node.label;
+  if (!metrics.ran) {
+    label += " (Not Run";
+    if (metrics.average_ms > 0.0) {
+      label += ", avg " + format_ms(metrics.average_ms) + " ms";
+    }
+    return label + ")";
+  }
+
+  label += " (" + format_ms(metrics.current_ms) + " ms";
+  if (!metrics.ran_directly) {
+    label += " aggregate";
+  }
+  if (metrics.average_ms > 0.0) {
+    label += ", avg " + format_ms(metrics.average_ms) + " ms";
+  }
+  if (metrics.ran_directly) {
+    label += ", self " + format_ms(metrics.self_ms) + " ms, calls " +
+             std::to_string(node.calls);
+  }
+  return label + ")";
+}
+
+std::vector<const bke::SceneEeveePerformanceNode *> snapshot_node_children(
+    const bke::SceneEeveePerformanceNode &node, const bool sort_by_time)
+{
+  std::vector<const bke::SceneEeveePerformanceNode *> children;
+  children.reserve(node.children.size());
+  for (const bke::SceneEeveePerformanceNode &child : node.children) {
+    children.push_back(&child);
+  }
+  if (sort_by_time) {
+    std::stable_sort(
+        children.begin(),
+        children.end(),
+        [](const bke::SceneEeveePerformanceNode *a,
+           const bke::SceneEeveePerformanceNode *b) {
+          const SnapshotNodeMetrics a_metrics = snapshot_node_metrics(*a);
+          const SnapshotNodeMetrics b_metrics = snapshot_node_metrics(*b);
+          if (a_metrics.current_ms != b_metrics.current_ms) {
+            return a_metrics.current_ms > b_metrics.current_ms;
+          }
+          if (a_metrics.average_ms != b_metrics.average_ms) {
+            return a_metrics.average_ms > b_metrics.average_ms;
+          }
+          return a->id < b->id;
+        });
+  }
+  return children;
+}
+
+std::string snapshot_node_key(const std::string &snapshot_key,
+                              const bke::SceneEeveePerformanceNode &node)
+{
+  return snapshot_key + "/node/" + node.id;
+}
+
+void collect_snapshot_node_keys(const bke::SceneEeveePerformanceNode &node,
+                                const std::string &snapshot_key,
+                                std::vector<std::string> &r_keys)
+{
+  r_keys.push_back(snapshot_node_key(snapshot_key, node));
+  for (const bke::SceneEeveePerformanceNode &child : node.children) {
+    collect_snapshot_node_keys(child, snapshot_key, r_keys);
+  }
+}
+
+void collect_snapshot_keys(const bke::SceneEeveePerformanceSnapshot &snapshot,
+                           const std::string &snapshot_key,
+                           std::vector<std::string> &r_keys)
+{
+  r_keys.push_back(snapshot_key);
+  const std::string metadata_key = snapshot_key + "/metadata";
+  r_keys.push_back(metadata_key);
+  for (const char *key : {"identity",
+                          "schema",
+                          "mode-status",
+                          "source",
+                          "scene-view-layer",
+                          "render-view",
+                          "sequence",
+                          "frame",
+                          "sampling",
+                          "resolution",
+                          "timing-domain",
+                          "timing-scope",
+                          "accounting",
+                          "last-evaluation",
+                          "depsgraph-eval-serial",
+                          "total-cpu",
+                          "draw-sync",
+                          "draw-submission",
+                          "profiler-accounting"})
+  {
+    r_keys.push_back(metadata_key + "/" + key);
+  }
+  for (const bke::SceneEeveePerformanceNode &child : snapshot.root.children) {
+    collect_snapshot_node_keys(child, snapshot_key, r_keys);
+  }
+  if (snapshot.root.children.empty()) {
+    r_keys.push_back(snapshot_key + "/not-run");
+  }
+  if (!snapshot.report.empty()) {
+    const ParsedReport attribution = parse_report(
+        snapshot.kind, snapshot.report.c_str(), "", false);
+    collect_report_attribution_keys(attribution, snapshot_key, r_keys);
+  }
+}
+
+void append_snapshot_node(PerformanceTreeBuilder &builder,
+                          TreeElement &parent,
+                          const bke::SceneEeveePerformanceNode &node,
+                          const std::string &snapshot_key,
+                          const bool sort_by_time)
+{
+  TreeElement &element = builder.add_label(parent.subtree,
+                                           &parent,
+                                           snapshot_node_label(node),
+                                           snapshot_node_key(snapshot_key, node),
+                                           node.kind != "stage");
+  for (const bke::SceneEeveePerformanceNode *child : snapshot_node_children(node, sort_by_time)) {
+    append_snapshot_node(builder, element, *child, snapshot_key, sort_by_time);
+  }
+}
+
+std::string snapshot_root_label(const bke::SceneEeveePerformanceSnapshot &snapshot,
+                                const std::string &title)
+{
+  const SnapshotNodeMetrics metrics = snapshot_node_metrics(snapshot.root);
+  std::string label = title + " (" + format_ms(metrics.current_ms) + " ms";
+  if (metrics.average_ms > 0.0) {
+    label += ", avg " + format_ms(metrics.average_ms) + " ms";
+  }
+  label += ", self " + format_ms(metrics.self_ms) + " ms)";
+  return label;
+}
+
+void append_snapshot(PerformanceTreeBuilder &builder,
+                     ListBaseT<TreeElement> &tree,
+                     TreeElement *parent,
+                     const bke::SceneEeveePerformanceSnapshot &snapshot,
+                     const std::string &title,
+                     const std::string &snapshot_key,
+                     const bool sort_by_time)
+{
+  ListBaseT<TreeElement> &target = parent ? parent->subtree : tree;
+  TreeElement &root = builder.add_label(
+      target, parent, snapshot_root_label(snapshot, title), snapshot_key, true);
+  const std::string metadata_key = snapshot_key + "/metadata";
+  TreeElement &metadata = builder.add_label(root.subtree, &root, "Metadata", metadata_key, false);
+  builder.add_label(metadata.subtree,
+                    &metadata,
+                    "id=" + snapshot.id + " kind=" + snapshot.kind,
+                    metadata_key + "/identity");
+  builder.add_label(metadata.subtree,
+                    &metadata,
+                    "schema=" + snapshot.schema,
+                    metadata_key + "/schema");
+  builder.add_label(metadata.subtree,
+                    &metadata,
+                    "mode=" + snapshot.mode + " status=" + snapshot.status,
+                    metadata_key + "/mode-status");
+  builder.add_label(metadata.subtree,
+                    &metadata,
+                    "source=" + snapshot.source_label +
+                        " source_id=" + std::to_string(snapshot.source_id),
+                    metadata_key + "/source");
+  builder.add_label(metadata.subtree,
+                    &metadata,
+                    "scene_uid=" + std::to_string(snapshot.scene_session_uid) +
+                        " view_layer=" +
+                        (snapshot.view_layer_name.empty() ? "<None>" : snapshot.view_layer_name),
+                    metadata_key + "/scene-view-layer");
+  builder.add_label(metadata.subtree,
+                    &metadata,
+                    "render_run_id=" + std::to_string(snapshot.render_run_id),
+                    metadata_key + "/render-run-id");
+  builder.add_label(metadata.subtree,
+                    &metadata,
+                    "render_view=" +
+                        (snapshot.render_view_name.empty() ? "<default>" :
+                                                              snapshot.render_view_name),
+                    metadata_key + "/render-view");
+  builder.add_label(metadata.subtree,
+                    &metadata,
+                    "epoch=" + std::to_string(snapshot.epoch) +
+                        " capture_seq=" + std::to_string(snapshot.capture_seq),
+                    metadata_key + "/sequence");
+  builder.add_label(metadata.subtree,
+                    &metadata,
+                    "frame=" + std::to_string(snapshot.frame),
+                    metadata_key + "/frame");
+  builder.add_label(metadata.subtree,
+                    &metadata,
+                    "sample=" + std::to_string(snapshot.sample_index) + "/" +
+                        std::to_string(snapshot.sample_count) +
+                        " playback=" + (snapshot.is_playback ? "true" : "false") +
+                        " playback_session=" + std::to_string(snapshot.playback_session_id),
+                    metadata_key + "/sampling");
+  builder.add_label(metadata.subtree,
+                    &metadata,
+                    "resolution=" + std::to_string(snapshot.resolution_x) + "x" +
+                        std::to_string(snapshot.resolution_y),
+                    metadata_key + "/resolution");
+  builder.add_label(metadata.subtree,
+                    &metadata,
+                    "Timing Domain: " + snapshot.timing_domain,
+                    metadata_key + "/timing-domain");
+  builder.add_label(metadata.subtree,
+                    &metadata,
+                    "Timing Scope: " + snapshot.timing_scope,
+                    metadata_key + "/timing-scope");
+  builder.add_label(
+      metadata.subtree,
+      &metadata,
+      "Accounting: Inclusive scopes (parent rows include child time; do not sum nested rows)",
+      metadata_key + "/accounting");
+  builder.add_label(metadata.subtree,
+                    &metadata,
+                    snapshot.has_last_evaluation ?
+                        "Last Evaluation: " + format_ms(snapshot.last_evaluation_ms) +
+                            " ms (not included in Draw CPU)" :
+                        "Last Evaluation: n/a",
+                    metadata_key + "/last-evaluation");
+  builder.add_label(metadata.subtree,
+                    &metadata,
+                    "depsgraph_eval_serial=" + std::to_string(snapshot.depsgraph_eval_serial),
+                    metadata_key + "/depsgraph-eval-serial");
+  builder.add_label(metadata.subtree,
+                    &metadata,
+                    (startswith(snapshot.kind, "viewport") ? "Viewport Draw CPU: " :
+                                                            "Total CPU: ") +
+                        format_ms(snapshot.total_cpu_ms) + " ms",
+                    metadata_key + "/total-cpu");
+  builder.add_label(metadata.subtree,
+                    &metadata,
+                    "Draw Sync: " + format_ms(snapshot.draw_sync_ms) + " ms",
+                    metadata_key + "/draw-sync");
+  builder.add_label(metadata.subtree,
+                    &metadata,
+                    "Draw/Submission: " + format_ms(snapshot.draw_submission_ms) + " ms",
+                    metadata_key + "/draw-submission");
+  builder.add_label(
+      metadata.subtree,
+      &metadata,
+      "Profiler Accounting CPU: " + format_ms(snapshot.profiler_accounting_ms) +
+          " ms (excluded from Draw CPU; pre-publication accounting only)",
+      metadata_key + "/profiler-accounting");
+
+  if (snapshot.root.children.empty()) {
+    builder.add_label(
+        root.subtree, &root, "Stages (Not Run)", snapshot_key + "/not-run", false);
+  }
+  else {
+    for (const bke::SceneEeveePerformanceNode *child :
+         snapshot_node_children(snapshot.root, sort_by_time))
+    {
+      append_snapshot_node(builder, root, *child, snapshot_key, sort_by_time);
+    }
+  }
+
+  if (!snapshot.report.empty()) {
+    const ParsedReport attribution = parse_report(
+        snapshot.kind, snapshot.report.c_str(), "", sort_by_time);
+    append_report_attribution(builder, root, attribution, snapshot_key);
+  }
+}
+
+std::string playback_peak_key(
+    const std::string &peaks_key, const bke::SceneEeveePerformanceSnapshot &peak)
+{
+  return peaks_key + "/session-" + std::to_string(peak.playback_session_id);
+}
+
+std::string final_render_name_key(const std::string &name)
+{
+  /* Length-prefix names so separators and the empty default view cannot collide. */
+  return std::to_string(name.size()) + ":" + name;
+}
+
+std::string final_render_snapshot_key(const bke::SceneEeveePerformanceSnapshot &snapshot)
+{
+  return "Final Render/scene-" + std::to_string(snapshot.scene_session_uid) + "/layer-" +
+         final_render_name_key(snapshot.view_layer_name) + "/view-" +
+         final_render_name_key(snapshot.render_view_name);
+}
+
+std::string final_render_layer_key(const bke::SceneEeveePerformanceSnapshot &snapshot)
+{
+  return "Final Render/scene-" + std::to_string(snapshot.scene_session_uid) + "/layer-" +
+         final_render_name_key(snapshot.view_layer_name);
+}
+
+void collect_structured_snapshot_keys(const bke::SceneEeveePerformanceSnapshotSet &snapshots,
+                                      std::vector<std::string> &r_keys)
+{
+  r_keys.push_back("Viewport Sources");
+  for (const bke::SceneEeveePerformanceViewportSource &source : snapshots.viewport_sources) {
+    const std::string source_key = "Viewport Sources/source-" + std::to_string(source.source_id);
+    r_keys.push_back(source_key);
+    if (source.latest) {
+      collect_snapshot_keys(*source.latest, source_key + "/latest", r_keys);
+    }
+    const bool has_peak = std::any_of(
+        source.playback_peaks.begin(), source.playback_peaks.end(), [](const auto &peak) {
+          return peak != nullptr;
+        });
+    const std::string peaks_key = source_key + "/playback-peaks";
+    if (has_peak) {
+      r_keys.push_back(peaks_key);
+      for (const std::shared_ptr<const bke::SceneEeveePerformanceSnapshot> &peak :
+           source.playback_peaks)
+      {
+        if (peak) {
+          collect_snapshot_keys(*peak, playback_peak_key(peaks_key, *peak), r_keys);
+        }
+      }
+    }
+    if (!source.latest && !has_peak) {
+      r_keys.push_back(source_key + "/not-run");
+    }
+  }
+  r_keys.push_back("Final Render");
+  std::unordered_set<std::string> final_layer_keys;
+  const auto collect_final_snapshot_keys = [&](
+      const std::shared_ptr<const bke::SceneEeveePerformanceSnapshot> &snapshot) {
+    if (!snapshot) {
+      return;
+    }
+    const std::string layer_key = final_render_layer_key(*snapshot);
+    if (final_layer_keys.insert(layer_key).second) {
+      r_keys.push_back(layer_key);
+    }
+    collect_snapshot_keys(*snapshot, final_render_snapshot_key(*snapshot), r_keys);
+  };
+  for (const std::shared_ptr<const bke::SceneEeveePerformanceSnapshot> &snapshot :
+       snapshots.final_renders)
+  {
+    collect_final_snapshot_keys(snapshot);
+  }
+  if (snapshots.final_renders.empty()) {
+    collect_final_snapshot_keys(snapshots.final_render);
+  }
+  r_keys.push_back("Color Bake");
+  if (snapshots.color_bake) {
+    collect_snapshot_keys(*snapshots.color_bake, "Color Bake", r_keys);
+  }
+  r_keys.push_back("Light Probe Bake");
+  if (snapshots.light_probe_bake) {
+    collect_snapshot_keys(*snapshots.light_probe_bake, "Light Probe Bake", r_keys);
+  }
+}
+
+void append_structured_snapshots(PerformanceTreeBuilder &builder,
+                                 ListBaseT<TreeElement> &tree,
+                                 const bke::SceneEeveePerformanceSnapshotSet &snapshots,
+                                 const bool sort_by_time)
+{
+  const bool has_viewport_source = !snapshots.viewport_sources.empty();
+  TreeElement &viewports = builder.add_label(
+      tree,
+      nullptr,
+      has_viewport_source ? "Viewport Sources" : "Viewport Sources (Not Run)",
+      "Viewport Sources",
+      true);
+  for (const bke::SceneEeveePerformanceViewportSource &source : snapshots.viewport_sources) {
+    const std::string source_key = "Viewport Sources/source-" + std::to_string(source.source_id);
+    const bool source_closed = source.closed || source.lifetime.expired();
+    TreeElement &source_root = builder.add_label(
+        viewports.subtree,
+        &viewports,
+        source.label + (source_closed ? " (Closed)" : ""),
+        source_key,
+        true);
+    if (source.latest) {
+      append_snapshot(
+          builder,
+          tree,
+          &source_root,
+          *source.latest,
+          "Latest",
+          source_key + "/latest",
+          sort_by_time);
+    }
+    const bool has_peak = std::any_of(
+        source.playback_peaks.begin(), source.playback_peaks.end(), [](const auto &peak) {
+          return peak != nullptr;
+        });
+    if (has_peak) {
+      const std::string peaks_key = source_key + "/playback-peaks";
+      TreeElement &peaks = builder.add_label(
+          source_root.subtree, &source_root, "Playback Sync Peaks", peaks_key, true);
+      for (const std::shared_ptr<const bke::SceneEeveePerformanceSnapshot> &peak :
+           source.playback_peaks)
+      {
+        if (peak) {
+          append_snapshot(builder,
+                          tree,
+                          &peaks,
+                          *peak,
+                          "Session " + std::to_string(peak->playback_session_id) + " Sync Peak",
+                          playback_peak_key(peaks_key, *peak),
+                          sort_by_time);
+        }
+      }
+    }
+    if (!source.latest && !has_peak) {
+      builder.add_label(source_root.subtree,
+                        &source_root,
+                        "No timing captured yet (Not Run)",
+                        source_key + "/not-run");
+    }
+  }
+  std::vector<std::shared_ptr<const bke::SceneEeveePerformanceSnapshot>> final_snapshots;
+  for (const std::shared_ptr<const bke::SceneEeveePerformanceSnapshot> &snapshot :
+       snapshots.final_renders)
+  {
+    if (snapshot) {
+      final_snapshots.push_back(snapshot);
+    }
+  }
+  if (final_snapshots.empty() && snapshots.final_render) {
+    final_snapshots.push_back(snapshots.final_render);
+  }
+
+  const std::string final_label = final_snapshots.empty() ?
+                                      "Final Render (Not Run)" :
+                                      "Final Render (" +
+                                          std::to_string(final_snapshots.size()) + " result" +
+                                          (final_snapshots.size() == 1 ? "" : "s") + ")";
+  TreeElement &final_root = builder.add_label(tree, nullptr, final_label, "Final Render", true);
+  std::unordered_map<std::string, TreeElement *> final_layers;
+  for (const std::shared_ptr<const bke::SceneEeveePerformanceSnapshot> &snapshot : final_snapshots) {
+    const std::string layer_key = final_render_layer_key(*snapshot);
+    TreeElement *layer = nullptr;
+    const auto layer_it = final_layers.find(layer_key);
+    if (layer_it != final_layers.end()) {
+      layer = layer_it->second;
+    }
+    else {
+      TreeElement &layer_element = builder.add_label(
+          final_root.subtree,
+          &final_root,
+          "Layer " +
+              (snapshot->view_layer_name.empty() ? std::string("<None>") :
+                                                    snapshot->view_layer_name),
+          layer_key,
+          true);
+      layer = &layer_element;
+      final_layers.emplace(layer_key, layer);
+    }
+    append_snapshot(builder,
+                    tree,
+                    layer,
+                    *snapshot,
+                    "View " +
+                        (snapshot->render_view_name.empty() ? std::string("<default>") :
+                                                               snapshot->render_view_name),
+                    final_render_snapshot_key(*snapshot),
+                    sort_by_time);
+  }
+  if (snapshots.color_bake) {
+    append_snapshot(builder,
+                    tree,
+                    nullptr,
+                    *snapshots.color_bake,
+                    "Color Bake",
+                    "Color Bake",
+                    sort_by_time);
+  }
+  else {
+    builder.add_label(tree, nullptr, "Color Bake (Not Captured)", "Color Bake", true);
+  }
+  if (snapshots.light_probe_bake) {
+    append_snapshot(builder,
+                    tree,
+                    nullptr,
+                    *snapshots.light_probe_bake,
+                    "Light Probe Bake",
+                    "Light Probe Bake",
+                    sort_by_time);
+  }
+  else {
+    builder.add_label(
+        tree, nullptr, "Light Probe Bake (Not Captured)", "Light Probe Bake", true);
+  }
+}
+
 }  // namespace
 
 TreeDisplayEeveePerformance::TreeDisplayEeveePerformance(SpaceOutliner &space_outliner)
@@ -645,17 +1231,39 @@ ListBaseT<TreeElement> TreeDisplayEeveePerformance::build_tree(const TreeSourceD
   Scene &scene = *source_data.scene;
   const bke::SceneEeveePerformanceRuntime *runtime =
       (scene.runtime != nullptr) ? &scene.runtime->eevee_performance : nullptr;
-
   const bool sort_by_time = (scene.eevee.flag & SCE_EEVEE_PERFORMANCE_PROFILER_SORT_BY_TIME) != 0;
+
+  const std::shared_ptr<const bke::SceneEeveePerformanceSnapshotSet> snapshots =
+      runtime ? runtime->snapshot_set_get() : nullptr;
+  if (snapshots) {
+    std::vector<std::string> persistent_keys;
+    collect_structured_snapshot_keys(*snapshots, persistent_keys);
+    PerformanceTreeBuilder builder{space_outliner_, scene.id, std::move(persistent_keys)};
+    append_structured_snapshots(builder, tree, *snapshots, sort_by_time);
+    return tree;
+  }
+
+  const std::string legacy_viewport_report =
+      runtime ? runtime->viewport_report_get() : std::string();
+  const std::string legacy_render_report = runtime ? runtime->render_report_get() : std::string();
+
+  if (legacy_viewport_report.empty() && legacy_render_report.empty()) {
+    const bke::SceneEeveePerformanceSnapshotSet empty_snapshots;
+    std::vector<std::string> persistent_keys;
+    collect_structured_snapshot_keys(empty_snapshots, persistent_keys);
+    PerformanceTreeBuilder builder{space_outliner_, scene.id, std::move(persistent_keys)};
+    append_structured_snapshots(builder, tree, empty_snapshots, sort_by_time);
+    return tree;
+  }
 
   const ParsedReport viewport_report = parse_report(
       "Viewport",
-      (runtime != nullptr) ? runtime->viewport_report.c_str() : nullptr,
+      legacy_viewport_report.c_str(),
       "No viewport timing captured yet.",
       sort_by_time);
   const ParsedReport render_report = parse_report(
       "Final Render",
-      (runtime != nullptr) ? runtime->render_report.c_str() : nullptr,
+      legacy_render_report.c_str(),
       "No final render timing captured yet.",
       sort_by_time);
 

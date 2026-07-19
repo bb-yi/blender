@@ -6,6 +6,7 @@
  * \ingroup render
  */
 
+#include <atomic>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
@@ -1004,6 +1005,7 @@ static RenderResult *engine_render_create_result(Render *re)
 
 bool RE_engine_render(Render *re, bool do_all)
 {
+  static std::atomic<uint64_t> next_render_run_id{1};
   RenderEngineType *type = RE_engines_find(re->r.engine);
 
   /* verify if we can render */
@@ -1074,6 +1076,7 @@ bool RE_engine_render(Render *re, bool do_all)
   STRNCPY(re->i.scene_name, re->scene->id.name + 2);
 
   engine->flag |= RE_ENGINE_RENDERING;
+  engine->render_run_id = next_render_run_id.fetch_add(1, std::memory_order_relaxed);
 
   /* TODO: actually link to a parent which shouldn't happen */
   engine->re = re;
@@ -1081,6 +1084,9 @@ bool RE_engine_render(Render *re, bool do_all)
   if (re->flag & R_ANIMATION) {
     engine->flag |= RE_ENGINE_ANIMATION;
   }
+  /* Preview is a per-render-call state. The RenderEngine object can be reused for a subsequent
+   * final render, so do not leave the preview bit latched from an earlier call. */
+  engine->flag &= ~RE_ENGINE_PREVIEW;
   if (re->r.scemode & R_BUTS_PREVIEW) {
     engine->flag |= RE_ENGINE_PREVIEW;
   }

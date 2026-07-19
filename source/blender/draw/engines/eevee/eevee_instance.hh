@@ -106,7 +106,6 @@ namespace blender::eevee
 
     uint64_t depsgraph_last_update_ = 0;
     bool overlays_enabled_ = false;
-    bool profiler_enabled_ = false;
     bool skip_render_ = false;
     bool last_viewport_scene_time_valid_ = false;
     float last_viewport_scene_time_ = 0.0f;
@@ -209,7 +208,7 @@ namespace blender::eevee
     eDebugMode debug_mode = eDebugMode::DEBUG_NONE;
 
   public:
-    Instance()
+    explicit Instance(std::shared_ptr<TelemetrySourceState> telemetry_source = nullptr)
       : shaders(*ShaderModule::module_get()),
       sync(*this),
       materials(*this),
@@ -242,7 +241,7 @@ namespace blender::eevee
       volume_probes(*this),
       light_probes(*this),
       volume(*this, uniform_data.data.volumes),
-      telemetry(*this)
+       telemetry(*this, std::move(telemetry_source))
     {};
     ~Instance() override {};
 
@@ -250,6 +249,9 @@ namespace blender::eevee
     {
       return "EEVEE";
     }
+
+    bool performance_capture_requested(const DRWContext &draw_ctx) const final;
+    void performance_frame_end(const DrawPerformanceMetrics &metrics) final;
 
     /* Render & Viewport. */
     /* TODO(fclem): Split for clarity. */

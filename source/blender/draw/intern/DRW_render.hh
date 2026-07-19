@@ -10,6 +10,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <functional>
 
 #include "BKE_mesh_wrapper.hh"
@@ -67,6 +68,36 @@ struct BoundSphere {
   float center[3], radius;
 };
 
+struct DrawPerformanceMetrics {
+  bool valid = false;
+
+  bool has_last_evaluation = false;
+  double last_evaluation_ms = 0.0;
+  /* Monotonic depsgraph evaluation serial, not a count of updated IDs. */
+  uint64_t depsgraph_eval_serial = 0;
+
+  double sync_total_ms = 0.0;
+  double sync_engine_setup_ms = 0.0;
+  double sync_engine_init_ms = 0.0;
+  double sync_manager_begin_ms = 0.0;
+  double sync_engine_begin_ms = 0.0;
+  double sync_modules_begin_ms = 0.0;
+  double sync_object_iteration_ms = 0.0;
+  double sync_dupli_extraction_ms = 0.0;
+  double sync_delayed_extraction_ms = 0.0;
+  double sync_extraction_wait_ms = 0.0;
+  double sync_curves_update_ms = 0.0;
+  double sync_engine_end_ms = 0.0;
+  double sync_manager_end_ms = 0.0;
+
+  double submission_total_ms = 0.0;
+  double submission_framebuffer_ms = 0.0;
+  double submission_callbacks_pre_ms = 0.0;
+  double submission_engine_draw_ms = 0.0;
+  double submission_callbacks_post_ms = 0.0;
+  double submission_framebuffer_restore_ms = 0.0;
+};
+
 struct DrawEngine {
   static constexpr int GPU_INFO_SIZE = 512; /* IMA_MAX_RENDER_TEXT_SIZE */
 
@@ -78,6 +109,11 @@ struct DrawEngine {
 
   virtual StringRefNull name_get() = 0;
 
+  virtual bool performance_capture_requested(const DRWContext & /*draw_ctx*/) const
+  {
+    return false;
+  }
+
   /* Functions called for viewport. */
 
   /** Init engine. Run first and for every redraw. */
@@ -88,6 +124,11 @@ struct DrawEngine {
   virtual void end_sync() = 0;
   /** Command Submission. */
   virtual void draw(draw::Manager &manager) = 0;
+  /**
+   * Optional callback after the complete shared viewport draw cycle.
+   * The metrics reference is transient and must be copied if the engine keeps it.
+   */
+  virtual void performance_frame_end(const DrawPerformanceMetrics & /*metrics*/) {}
 
   /* Called when closing blender.
    * Cleanup all lazily initialized static members that have GPU resources.
@@ -233,6 +274,8 @@ struct DRWContext {
   /** Timings recorded for performance overlay. */
   float last_sync_time_;
   float last_submission_time_;
+  DrawPerformanceMetrics performance_metrics_;
+  double performance_sync_start_time_ = 0.0;
 
   /* TODO(fclem): Private? */
  public:
@@ -385,6 +428,23 @@ struct DRWContext {
   void engines_init_and_sync(iter_callback_t iter_callback);
   /** Run enabled engine init and draw scene callbacks. */
   void engines_draw_scene();
+  /** Start the shared performance root timer for a regular 3D viewport draw. */
+  void performance_sync_begin(double sync_start_time);
+  /** Enable detailed capture after the draw engines have been selected and validated. */
+  void performance_capture_enable();
+  void performance_sync_end();
+  void performance_submission_end(double total_ms,
+                                  double framebuffer_ms,
+                                  double callbacks_pre_ms,
+                                  double engine_draw_ms,
+                                  double callbacks_post_ms,
+                                  double framebuffer_restore_ms);
+
+  /** True when the detailed shared timing phases are being collected for this draw. */
+  bool performance_capture_valid() const
+  {
+    return performance_metrics_.valid;
+  }
 
   static DRWContext &get_active()
   {

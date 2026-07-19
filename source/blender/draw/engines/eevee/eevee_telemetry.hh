@@ -9,14 +9,30 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
+#include <memory>
 #include <string>
+#include <utility>
 
 #include "BLI_span.hh"
 #include "BLI_vector.hh"
 
 namespace blender::eevee {
 
+uint64_t telemetry_source_id_generate();
+
 class Instance;
+}  // namespace blender::eevee
+
+namespace blender {
+struct DrawPerformanceMetrics;
+namespace bke {
+struct SceneEeveePerformanceSnapshot;
+struct SceneEeveePerformanceSnapshotSet;
+}
+}
+
+namespace blender::eevee {
 
 enum class TelemetryRuntimeMode : uint8_t {
   Viewport = 0,
@@ -46,70 +62,99 @@ enum class TelemetryStageId : uint8_t {
   SyncBegin = 0,
   SyncObjects = 1,
   SyncEnd = 2,
-  CaptureWorld = 3,
-  CaptureProbes = 4,
-  RenderTextures = 5,
-  MainView = 6,
-  MainUpdateView = 7,
-  MainRenderBuffersAcquire = 8,
-  MainPlanarProbesSetView = 9,
-  MainLightsSetView = 10,
-  MainGBufferAcquire = 11,
-  MainBackground = 12,
-  MainVolumePrepass = 13,
-  MainDeferred = 14,
-  MainDeferredPrepass = 15,
-  MainDeferredHiZUpdate = 16,
-  MainDeferredProbeSetup = 17,
-  MainDeferredShadowSetup = 18,
-  MainDeferredGBufferPass = 19,
-  MainDeferredOpaque = 20,
-  MainDeferredRefract = 21,
-  MainDeferredRaytrace = 22,
-  MainDeferredEvalLight = 23,
-  MainDeferredSubsurface = 24,
-  MainDeferredCombine = 25,
-  MainDeferredShadowFilter = 26,
-  MainDeferredNPR = 27,
-  MainFilterBeforeVolumeFog = 28,
-  MainVolumeCompute = 29,
-  MainVolumeComputeSetup = 30,
-  MainVolumeScatter = 31,
-  MainVolumeIntegration = 32,
-  MainVolumeResolve = 33,
-  MainVolumeResolveHiZUpdate = 34,
-  MainVolumeResolveComposite = 35,
-  MainAmbientOcclusion = 36,
-  MainForward = 37,
-  MainForwardHiZUpdate = 38,
-  MainForwardProbeSetup = 39,
-  MainForwardShadowSetup = 40,
-  MainForwardTransparencySetup = 41,
-  MainForwardPrepass = 42,
-  MainForwardOpaque = 43,
-  MainForwardTransparent = 44,
-  MainForwardResolve = 45,
-  MainFilterBeforePostFX = 46,
-  PostMotionBlur = 47,
-  PostFilterBeforeDepthOfField = 48,
-  PostDepthOfField = 49,
-  DOFSetup = 50,
-  DOFTilePrepare = 51,
-  DOFBackgroundConvolution = 52,
-  DOFForegroundConvolution = 53,
-  DOFHoleFill = 54,
-  DOFResolve = 55,
-  PostFilterBeforeComposite = 56,
-  MainFilmAccumulate = 57,
-  Lookdev = 58,
-  ReadResult = 59,
-  ShadowTilemapSetup = 60,
-  ShadowCasterUpdate = 61,
-  ShadowTransparentCasterUpdate = 62,
-  ShadowUsageMarking = 63,
-  ShadowTilemapUpdate = 64,
-  ShadowUpdateFinish = 65,
-  ShadowSurface = 66,
+  SyncBeginWorld = 3,
+  SyncBeginSceneModules = 4,
+  SyncBeginViewEffects = 5,
+  SyncBeginNPRPost = 6,
+  SyncEndShaderReadiness = 7,
+  SyncEndMaterialsVelocity = 8,
+  SyncEndVolumeShadowsLights = 9,
+  SyncEndFrameState = 10,
+  SyncEndNPRPost = 11,
+  SyncEndProbesUniforms = 12,
+  CaptureWorld = 13,
+  CaptureProbes = 14,
+  RenderTextures = 15,
+  MainView = 16,
+  MainUpdateView = 17,
+  MainRenderBuffersAcquire = 18,
+  MainPlanarProbesSetView = 19,
+  MainLightsSetView = 20,
+  MainGBufferAcquire = 21,
+  MainBackground = 22,
+  MainVolumePrepass = 23,
+  MainDeferred = 24,
+  MainDeferredPrepass = 25,
+  MainDeferredHiZUpdate = 26,
+  MainDeferredProbeSetup = 27,
+  MainDeferredShadowSetup = 28,
+  MainDeferredGBufferPass = 29,
+  MainDeferredOpaque = 30,
+  MainDeferredRefract = 31,
+  MainDeferredRaytrace = 32,
+  MainDeferredEvalLight = 33,
+  MainDeferredSubsurface = 34,
+  MainDeferredCombine = 35,
+  MainDeferredShadowFilter = 36,
+  MainDeferredNPR = 37,
+  MainFilterBeforeVolumeFog = 38,
+  MainVolumeCompute = 39,
+  MainVolumeComputeSetup = 40,
+  MainVolumeScatter = 41,
+  MainVolumeIntegration = 42,
+  MainVolumeResolve = 43,
+  MainVolumeResolveHiZUpdate = 44,
+  MainVolumeResolveComposite = 45,
+  MainAmbientOcclusion = 46,
+  MainForward = 47,
+  MainForwardHiZUpdate = 48,
+  MainForwardProbeSetup = 49,
+  MainForwardShadowSetup = 50,
+  MainForwardTransparencySetup = 51,
+  MainForwardPrepass = 52,
+  MainForwardOpaque = 53,
+  MainForwardTransparent = 54,
+  MainForwardResolve = 55,
+  MainFilterBeforePostFX = 56,
+  PostMotionBlur = 57,
+  PostFilterBeforeDepthOfField = 58,
+  PostDepthOfField = 59,
+  DOFSetup = 60,
+  DOFTilePrepare = 61,
+  DOFBackgroundConvolution = 62,
+  DOFForegroundConvolution = 63,
+  DOFHoleFill = 64,
+  DOFResolve = 65,
+  PostFilterBeforeComposite = 66,
+  MainFilmAccumulate = 67,
+  Lookdev = 68,
+  ReadResult = 69,
+  ShadowTilemapSetup = 70,
+  ShadowCasterUpdate = 71,
+  ShadowTransparentCasterUpdate = 72,
+  ShadowUsageMarking = 73,
+  ShadowTilemapUpdate = 74,
+  ShadowUpdateFinish = 75,
+  ShadowSurface = 76,
+  DrawSyncShared = 77,
+  DrawSyncEngineSetup = 78,
+  DrawSyncEngineInit = 79,
+  DrawSyncManagerBegin = 80,
+  DrawSyncEngineBegin = 81,
+  DrawSyncModulesBegin = 82,
+  DrawSyncObjectIteration = 83,
+  DrawSyncDupliExtraction = 84,
+  DrawSyncDelayedExtraction = 85,
+  DrawSyncExtractionWait = 86,
+  DrawSyncCurvesUpdate = 87,
+  DrawSyncEngineEnd = 88,
+  DrawSyncManagerEnd = 89,
+  DrawSubmissionShared = 90,
+  DrawSubmissionFramebuffer = 91,
+  DrawSubmissionCallbacksPre = 92,
+  DrawSubmissionEngineDraw = 93,
+  DrawSubmissionCallbacksPost = 94,
+  DrawSubmissionFramebufferRestore = 95,
   Count,
 };
 
@@ -131,6 +176,15 @@ struct TelemetryFeatureSnapshot {
 struct TelemetryStageSample {
   double cpu_ms = 0.0;
   int call_count = 0;
+};
+
+struct TelemetryScopeNode {
+  TelemetryStageId stage = TelemetryStageId::Count;
+  double cpu_ms = 0.0;
+  /* Average of this exact root-to-node scope path over the active history window. */
+  double average_cpu_ms = 0.0;
+  int call_count = 0;
+  Vector<int> children;
 };
 
 struct TelemetryShadowLightCost {
@@ -194,17 +248,39 @@ struct TelemetryProbeCost {
 
 struct TelemetryFrameRecord {
   TelemetryRuntimeMode runtime_mode = TelemetryRuntimeMode::Viewport;
+  uint64_t source_id = 0;
+  uint64_t epoch = 0;
+  uint64_t capture_seq = 0;
+  uint64_t playback_session_id = 0;
+  bool is_playback = false;
+  uint32_t scene_session_uid = 0;
+  uint64_t render_run_id = 0;
+  std::string view_layer_name;
+  std::string render_view_name;
   int frame = 0;
   int sample_index = 0;
   uint64_t sample_count = 0;
+  int resolution_x = 0;
+  int resolution_y = 0;
+  bool has_last_evaluation = false;
+  double last_evaluation_ms = 0.0;
+  uint64_t depsgraph_eval_serial = 0;
   double total_cpu_ms = 0.0;
+  double average_total_cpu_ms = 0.0;
+  std::array<double, int(TelemetryStageId::Count)> average_stage_values = {};
+  double draw_sync_ms = 0.0;
+  double draw_submission_ms = 0.0;
+  double profiler_accounting_ms = 0.0;
+  bool has_shared_draw_timing = false;
   std::array<TelemetryStageSample, int(TelemetryStageId::Count)> stages = {};
+  Vector<TelemetryScopeNode> scope_nodes;
   std::array<TelemetryShadowContextSample, int(TelemetryShadowContext::Count)> shadow_contexts = {};
   TelemetryShaderWaitSample shader_waits;
   std::array<TelemetryPassReadbackSample, int(TelemetryPassReadbackType::Count)> pass_readbacks =
       {};
   TelemetryMaterialSyncSample material_sync;
   Vector<TelemetryMaterialHotspot> material_hotspots;
+  int64_t material_hotspot_untracked_count = 0;
   TelemetryFeatureSnapshot features;
   Vector<TelemetryShadowLightCost> shadow_light_costs;
   Vector<TelemetryProbeCost> probe_costs;
@@ -216,25 +292,76 @@ struct TelemetryStageInfo {
   const char *tree_path;
 };
 
+struct TelemetrySourceState {
+  uint64_t source_id = telemetry_source_id_generate();
+  std::shared_ptr<const void> lifetime = std::make_shared<int>(0);
+  uint64_t epoch = 1;
+  uint64_t capture_seq = 0;
+  double last_viewport_publish_time = 0.0;
+  bool has_viewport_publish = false;
+  /* Text is kept per source so a paused viewport never reads another source's Scene-level writer. */
+  std::string last_published_viewport_summary;
+  std::string last_published_viewport_report;
+  bool viewport_was_finished = false;
+  std::array<Vector<TelemetryFrameRecord>, int(TelemetryRuntimeMode::Count)> history;
+  std::array<TelemetryFrameRecord, int(TelemetryRuntimeMode::Count)> last_records = {};
+  std::array<bool, int(TelemetryRuntimeMode::Count)> has_last_record = {};
+  bool playback_active = false;
+  bool has_playback_peak = false;
+  uint64_t next_playback_session = 0;
+  TelemetryFrameRecord playback_peak;
+  Vector<TelemetryFrameRecord> playback_peak_history;
+  bool profiler_inputs_initialized = false;
+  bool profiler_enabled = false;
+  int extent_x = 0;
+  int extent_y = 0;
+  int output_offset_x = 0;
+  int output_offset_y = 0;
+  int output_extent_x = 0;
+  int output_extent_y = 0;
+  bool binding_initialized = false;
+  uint32_t scene_session_uid = 0;
+  std::string view_layer_name;
+  std::string render_view_name;
+  uint64_t render_run_id = 0;
+  bool closed = false;
+};
+
 class TelemetryModule {
  private:
   static constexpr int history_limit_ = 64;
+  static constexpr int playback_peak_history_limit_ = 8;
   static constexpr double viewport_publish_interval_seconds_ = 0.25;
 
   Instance &inst_;
+  std::shared_ptr<TelemetrySourceState> source_state_;
   bool frame_active_ = false;
   double frame_start_time_ = 0.0;
-  double last_viewport_publish_time_ = 0.0;
-  bool has_viewport_publish_ = false;
+  /* Starts before Draw Manager metrics are merged, so this bookkeeping is visible separately from
+   * the measured Draw CPU total. */
+  double profiler_accounting_start_time_ = 0.0;
   TelemetryFrameRecord current_frame_;
-  std::array<Vector<TelemetryFrameRecord>, int(TelemetryRuntimeMode::Count)> history_;
-  std::array<TelemetryFrameRecord, int(TelemetryRuntimeMode::Count)> last_records_ = {};
-  std::array<bool, int(TelemetryRuntimeMode::Count)> has_last_record_ = {};
+  Vector<int> scope_stack_;
 
  public:
-  TelemetryModule(Instance &inst) : inst_(inst) {}
+  TelemetryModule(Instance &inst, std::shared_ptr<TelemetrySourceState> source_state = nullptr)
+      : inst_(inst),
+        source_state_(source_state ? std::move(source_state) :
+                                     std::make_shared<TelemetrySourceState>())
+  {}
+  ~TelemetryModule();
 
   bool enabled() const;
+  bool epoch_inputs_update(bool profiler_enabled,
+                           int extent_x,
+                           int extent_y,
+                           int output_offset_x,
+                           int output_offset_y,
+                           int output_extent_x,
+                           int output_extent_y);
+  bool source_binding_update(uint32_t scene_session_uid, const char *view_layer_name);
+  void render_view_name_set(const char *render_view_name);
+  void render_run_id_set(uint64_t render_run_id);
   TelemetryRuntimeMode runtime_mode() const;
   int average_window() const;
   bool frame_active() const
@@ -252,8 +379,18 @@ class TelemetryModule {
   void maybe_publish_cached_viewport(bool force = false);
   void cancel_frame();
   void reset();
+  void reset_epoch(bool clear_source_session = false);
+  void draw_performance_end(const blender::DrawPerformanceMetrics &metrics);
+
+  uint64_t source_id();
+  uint64_t epoch() const
+  {
+    return source_state_->epoch;
+  }
 
   void stage_add(TelemetryStageId stage, double elapsed_seconds);
+  int scope_begin(TelemetryStageId stage);
+  void scope_end(int node_index, double elapsed_seconds);
   void shadow_context_add(TelemetryShadowContext context, double elapsed_seconds, int loop_count);
   void material_sync_add(bool shader_queued,
                          bool optimize_queued,
@@ -283,6 +420,7 @@ class TelemetryModule {
   void snapshot_features();
   bool frame_has_stage_samples(const TelemetryFrameRecord &record) const;
   const TelemetryFrameRecord *last_record(TelemetryRuntimeMode mode) const;
+  const TelemetryFrameRecord *last_viewport_record() const;
   double averaged_total_cpu_ms(TelemetryRuntimeMode mode) const;
   std::array<double, int(TelemetryStageId::Count)> averaged_stage_values(
       TelemetryRuntimeMode mode) const;
@@ -295,12 +433,27 @@ class TelemetryModule {
   std::string format_pass_readbacks_report(const TelemetryFrameRecord &record) const;
   std::string format_material_sync_report(const TelemetryFrameRecord &record) const;
   std::string format_probe_costs_report(const TelemetryFrameRecord &record) const;
+  void merge_draw_performance(const blender::DrawPerformanceMetrics &metrics);
+  bool finalize_playback_session();
+  void source_deactivate();
+  void publish_viewport_snapshot(const TelemetryFrameRecord &record,
+                                 const std::string &summary,
+                                 const std::string &report);
+  void publish_render_snapshot(const TelemetryFrameRecord &record,
+                               const std::string &report);
+  std::shared_ptr<const bke::SceneEeveePerformanceSnapshot> build_snapshot(
+      const TelemetryFrameRecord &record,
+      const char *kind,
+      const std::string &summary,
+      const std::string &report,
+      uint64_t capture_seq) const;
 };
 
 class ScopedTelemetrySample {
  private:
   TelemetryModule *telemetry_ = nullptr;
   TelemetryStageId stage_;
+  int scope_node_index_ = -1;
   double start_time_ = 0.0;
 
  public:
