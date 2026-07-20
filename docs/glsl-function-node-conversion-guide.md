@@ -76,7 +76,8 @@
 - `sampler2D` 会显示为 `Closure` 输入口
 - `sampler2D` 可连接 `Image to Closure` 或符合约定的 `Closure Output`
 - `Closure Output -> sampler2D` 当前只保证 `texture(tex, coord)` 这种直接采样形式；`coord` 的语义由闭包内部决定，普通贴图通常是 UV，NPR 图像句柄通常是 `Image Sample.Offset`
-- `sampler3D` 也会显示为 `Closure` 输入口，但只接受 `Image to Closure` 的 `LUT_STRIP_3D` 来源；需要按实际逻辑宽/高/深度配置 3D strip，`Closure Output -> sampler3D` 不在当前保证范围内
+- `sampler3D` 也会显示为 `Closure` 输入口，可连接 `Image to Closure` 的 `3D LUT Strip` 或符合约定的 `Closure Output`
+- `Closure Output -> sampler3D` 使用 `Closure Input` 中名为 `UV` 的 `Vector` 传递完整 `vec3` 坐标；首版只保证 `texture(volume, vec3_coord)`，不支持 `textureLod`、`textureGrad`、`textureSize`、`texelFetch` 或 `textureGather`
 - 如果函数依赖显式 `LOD`、`grad` 或尺寸查询等图像专用能力，应优先使用 `Image to Closure`
 - 导出函数边界当前已经支持 `int / bool`，适合直接作为模式开关、枚举值、`lightgroup_id` 这类参数
 - 默认情况下 `vec2/vec3/vec4` 仍然显示为“向量插口”
@@ -340,6 +341,30 @@ texture(buffer, uv + delta_pixels / resolution)
 - 不要因为它使用 `sampler2D` 就自动把第二个参数命名成 `uv`。
 - 不要把 mesh UV 直接接到闭包内部的 `Image Sample.Offset`，除非用户明确要用 UV 值伪装偏移。
 - 转换报告应写清楚：图像句柄采样发生在 `Image Sample` 闭包内部，GLSL 函数边界仍然是 `sampler2D image`，但 `texture(image, offset)` 的 `offset` 是 NPR 偏移量。
+
+### 规则 4B：程序化三维距离场使用 `sampler3D + Closure Output`
+
+当输入来自 `SDF Primitive`、程序化纹理或其他可由 Closure helper 执行的三维节点网络时，公开边界可以写成：
+
+```glsl
+float sample_sdf(sampler3D sdf_volume, vec3 position)
+{
+  return texture(sdf_volume, position).r;
+}
+```
+
+节点侧的接口约定是：
+
+```text
+Closure Input.UV (Vector) -> 程序化节点的三维 Vector
+程序化结果 -> Closure Output.Color (Float / Vector / RGBA)
+Closure Output.Closure -> GLSL Function 的 sampler3D 输入
+```
+
+- `UV` 只是固定接口名；在 `sampler3D` 路径中运行时值是完整 `vec3`，Z 不会固定为 `0.0`。
+- 这条路径是每次调用时重新执行程序化闭包的 helper，不是真实 GPU 3D 纹理，不提供硬件 mip、LOD 或导数语义。
+- 首版只使用两参数 `texture(sampler3D, vec3)`；需要真实 3D LUT 或其他纹理采样语义时，改用 `Image to Closure` 的 `3D LUT Strip`。
+- Closure Output 必须有名为 `UV` 的 Vector 输入项，以及名为 `Color` 的 Float、Vector 或 RGBA 输出项。
 
 ### 规则 4.1：如果要使用 Eevee 逐灯辅助接口，必须把范围说清楚
 

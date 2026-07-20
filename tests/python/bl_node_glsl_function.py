@@ -125,6 +125,20 @@ def relink_and_update(tree, from_socket, to_socket):
     bpy.context.view_layer.update()
 
 
+def make_closure_sampler(tree, *, include_uv=True, color_type="FLOAT"):
+    closure_input = tree.nodes.new("NodeClosureInput")
+    closure_output = tree.nodes.new("NodeClosureOutput")
+    closure_input.pair_with_output(closure_output)
+    if include_uv:
+        closure_output.input_items.new("VECTOR", "UV")
+    if color_type is not None:
+        closure_output.output_items.new(color_type, "Color")
+    tree.interface_update(bpy.context)
+    tree.update_tag()
+    bpy.context.view_layer.update()
+    return closure_input, closure_output
+
+
 def make_menu_context(shader_type, engine="BLENDER_EEVEE", tree_type="ShaderNodeTree"):
     return SimpleNamespace(
         engine=engine,
@@ -736,6 +750,161 @@ class GLSLFunctionNodeTest(unittest.TestCase):
         self.assertEqual(result, {'FINISHED'})
         self.assertEqual(glsl_node.parse_status, 'READY')
         self.assertIsNotNone(find_socket(glsl_node.inputs, "strength"))
+
+    def test_unlinked_sample3d_is_ready(self):
+        _, tree = self.make_material_tree()
+        glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        source = (
+            "vec4 sample_volume(sampler3D volume, vec3 coord){\n"
+            "  return texture(volume, coord);\n"
+            "}\n"
+        )
+        make_text_block("glsl_unlinked_sample3d.glsl", source)
+
+        self.configure_glsl_node(glsl_node, "glsl_unlinked_sample3d.glsl", "sample_volume")
+
+        self.assertEqual(glsl_node.parse_status, 'READY')
+        self.assertEqual(find_socket(glsl_node.inputs, "volume").bl_idname, "NodeSocketClosure")
+
+    def test_closure_output_sample3d_signature_validation(self):
+        cases = [
+            (True, "FLOAT", 'READY'),
+            (False, "FLOAT", 'ERROR'),
+            (True, None, 'ERROR'),
+        ]
+        source = (
+            "vec4 sample_volume(sampler3D volume, vec3 coord){\n"
+            "  return texture(volume, coord);\n"
+            "}\n"
+        )
+        for index, (include_uv, color_type, expected_status) in enumerate(cases):
+            with self.subTest(include_uv=include_uv, color_type=color_type):
+                _, tree = self.make_material_tree()
+                glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+                _, closure_output = make_closure_sampler(
+                    tree, include_uv=include_uv, color_type=color_type
+                )
+                text_name = f"glsl_sample3d_closure_signature_{index}.glsl"
+                make_text_block(text_name, source)
+                self.configure_glsl_node(glsl_node, text_name, "sample_volume")
+
+                relink_and_update(
+                    tree,
+                    find_socket(closure_output.outputs, "Closure"),
+                    find_socket(glsl_node.inputs, "volume"),
+                )
+                refresh_glsl_node(glsl_node)
+
+                self.assertEqual(glsl_node.parse_status, expected_status)
+
+    def test_image_to_closure_sample3d_requires_lut_strip(self):
+        source = (
+            "vec4 sample_volume(sampler3D volume, vec3 coord){\n"
+            "  return texture(volume, coord);\n"
+            "}\n"
+        )
+        for texture_type, expected_status in (("IMAGE_2D", 'ERROR'), ("LUT_STRIP_3D", 'READY')):
+            with self.subTest(texture_type=texture_type):
+                _, tree = self.make_material_tree()
+                glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+                image_node = tree.nodes.new("ShaderNodeImageToClosure")
+                image_node.texture_type = texture_type
+                image_node.image = bpy.data.images.new(
+                    f"glsl_sample3d_{texture_type}", 16, 4, alpha=True, float_buffer=True
+                )
+                text_name = f"glsl_sample3d_{texture_type}.glsl"
+                make_text_block(text_name, source)
+                self.configure_glsl_node(glsl_node, text_name, "sample_volume")
+
+                relink_and_update(
+                    tree,
+                    find_socket(image_node.outputs, "Closure"),
+                    find_socket(glsl_node.inputs, "volume"),
+                )
+                refresh_glsl_node(glsl_node)
+
+                self.assertEqual(glsl_node.parse_status, expected_status)
+
+    def test_mixed_closure_sampler_dimensions_are_isolated(self):
+        _, tree = self.make_material_tree()
+        glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        _, closure_2d = make_closure_sampler(tree)
+        _, closure_3d = make_closure_sampler(tree)
+        source = (
+            "vec4 sample_mixed(sampler2D image, sampler3D volume, vec2 uv, vec3 coord){\n"
+            "  return texture(image, uv) + texture(volume, coord);\n"
+            "}\n"
+        )
+        make_text_block("glsl_mixed_closure_samplers.glsl", source)
+        self.configure_glsl_node(glsl_node, "glsl_mixed_closure_samplers.glsl", "sample_mixed")
+
+        relink_and_update(
+            tree,
+            find_socket(closure_2d.outputs, "Closure"),
+            find_socket(glsl_node.inputs, "image"),
+        )
+        relink_and_update(
+            tree,
+            find_socket(closure_3d.outputs, "Closure"),
+            find_socket(glsl_node.inputs, "volume"),
+        )
+        refresh_glsl_node(glsl_node)
+
+        self.assertEqual(glsl_node.parse_status, 'READY')
+
+    def test_nested_closure_sample3d_dimension_validation(self):
+        cases = [
+            (
+                "vec4 inner(sampler3D src, vec3 coord){ return texture(src, coord); }\n",
+                'READY',
+            ),
+            (
+                "vec4 inner(sampler2D src, vec3 coord){ return texture(src, coord.xy); }\n",
+                'ERROR',
+            ),
+        ]
+        for index, (inner_source, expected_status) in enumerate(cases):
+            with self.subTest(expected_status=expected_status):
+                _, tree = self.make_material_tree()
+                glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+                _, closure_output = make_closure_sampler(tree)
+                source = (
+                    "vec4 outer(sampler3D src, vec3 coord){ return inner(src, coord); }\n"
+                    + inner_source
+                )
+                text_name = f"glsl_nested_sample3d_{index}.glsl"
+                make_text_block(text_name, source)
+                self.configure_glsl_node(glsl_node, text_name, "outer")
+
+                relink_and_update(
+                    tree,
+                    find_socket(closure_output.outputs, "Closure"),
+                    find_socket(glsl_node.inputs, "src"),
+                )
+                refresh_glsl_node(glsl_node)
+
+                self.assertEqual(glsl_node.parse_status, expected_status)
+
+    def test_closure_sample3d_rejects_non_texture_sampling(self):
+        _, tree = self.make_material_tree()
+        glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        _, closure_output = make_closure_sampler(tree)
+        source = (
+            "vec4 sample_volume_lod(sampler3D volume, vec3 coord){\n"
+            "  return textureLod(volume, coord, 0.0);\n"
+            "}\n"
+        )
+        make_text_block("glsl_sample3d_closure_lod.glsl", source)
+        self.configure_glsl_node(glsl_node, "glsl_sample3d_closure_lod.glsl", "sample_volume_lod")
+
+        relink_and_update(
+            tree,
+            find_socket(closure_output.outputs, "Closure"),
+            find_socket(glsl_node.inputs, "volume"),
+        )
+        refresh_glsl_node(glsl_node)
+
+        self.assertEqual(glsl_node.parse_status, 'ERROR')
 
     def test_code_mode_creates_template_without_resizing_node(self):
         _, tree = self.make_material_tree()
