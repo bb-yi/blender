@@ -1025,7 +1025,7 @@ namespace blender
       {
         if (*existing_root != root_param_name)
         {
-          r_error = "Closure Output sampler2D identifier '" + identifier_key + "' in function '" +
+          r_error = "Closure Output sampler identifier '" + identifier_key + "' in function '" +
             std::string(function_name) + "' is bound to multiple inputs";
           return false;
         }
@@ -1825,8 +1825,7 @@ namespace blender
           if (source_kind != GLSLSamplerSourceKind::ImageToClosure || used_link == nullptr)
           {
             r_error = std::string(sampler_type_name(param.type).c_str()) + " parameter '" + param.name +
-              "' currently only supports Image to Closure" +
-              (glsl_boundary_type_is_sample2d(param.type) ? " or Closure Output links" : " links");
+              "' currently only supports Image to Closure or Closure Output links";
             return false;
           }
 
