@@ -177,9 +177,11 @@ ObjectInfos drw_object_infos()
 #  include "eevee_outline_lib.glsl"
 #endif
 
+/* Additional create-info composition propagates the resource-table marker, not the legacy data
+ * define, to dynamically generated material shaders. */
 float sampling_rng_1D_get(eSamplingDimension dim)
 {
-#if defined(EEVEE_SAMPLING_DATA) && !defined(GPU_VERTEX_SHADER)
+#if defined(CREATE_INFO_eevee_Sampling) && !defined(GPU_VERTEX_SHADER)
   return sampling_buf.dimensions[dim];
 #else
   UNUSED_VARS(dim);
@@ -189,7 +191,7 @@ float sampling_rng_1D_get(eSamplingDimension dim)
 
 float2 sampling_rng_2D_get(eSamplingDimension dim)
 {
-#if defined(EEVEE_SAMPLING_DATA) && !defined(GPU_VERTEX_SHADER)
+#if defined(CREATE_INFO_eevee_Sampling) && !defined(GPU_VERTEX_SHADER)
   return float2(sampling_buf.dimensions[dim], sampling_buf.dimensions[dim + 1u]);
 #else
   UNUSED_VARS(dim);
@@ -199,7 +201,7 @@ float2 sampling_rng_2D_get(eSamplingDimension dim)
 
 float3 sampling_rng_3D_get(eSamplingDimension dim)
 {
-#if defined(EEVEE_SAMPLING_DATA) && !defined(GPU_VERTEX_SHADER)
+#if defined(CREATE_INFO_eevee_Sampling) && !defined(GPU_VERTEX_SHADER)
   return float3(sampling_buf.dimensions[dim],
                 sampling_buf.dimensions[dim + 1u],
                 sampling_buf.dimensions[dim + 2u]);
