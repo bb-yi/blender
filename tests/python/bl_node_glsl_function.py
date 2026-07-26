@@ -1499,6 +1499,52 @@ class GLSLFunctionNodeTest(unittest.TestCase):
         self.assertEqual(plain_method_socket.default_value, 0)
         self.assertEqual(plain_method_socket.glsl_int_choice_value, '')
 
+    def test_code_mode_sampler3d_updates_isolate_int_choice_cache(self):
+        _, tree = self.make_material_tree()
+        tree.nodes.new("ShaderNodeImageToClosure")
+        node = tree.nodes.new("ShaderNodeGLSLFunction")
+        node.display_mode = 'CODE'
+
+        int_source = (
+            "/* @glsl_meta v1\n"
+            "sdf_volume: default=1 items=\"0:Off;1:On\"\n"
+            "*/\n"
+            "float probe_int_choice(int sdf_volume){return float(sdf_volume);}\n"
+        )
+        sampler3d_source = (
+            "/* @glsl_meta v1\n"
+            "sdf_volume: label=\"Procedural 3D Field\" "
+            "description=\"Connect a Closure Output with UV Vector input and Color Float output\"\n"
+            "coordinate: label=\"Coordinate\" default=vec3(0.5)\n"
+            "*/\n"
+            "vec4 sample_sampler3d(sampler3D sdf_volume, vec3 coordinate)\n"
+            "{\n"
+            "  return texture(sdf_volume, coordinate);\n"
+            "}\n"
+        )
+
+        for _ in range(4):
+            node.source_code = int_source
+            node.function_name = "probe_int_choice"
+            tree.interface_update(bpy.context)
+            bpy.context.view_layer.update()
+            refresh_glsl_node(node)
+            int_socket = find_socket(node.inputs, "In_sdf_volume")
+            self.assertEqual(int_socket.type, 'INT')
+            self.assertEqual(int_socket.glsl_int_choice_value, 'VALUE_1')
+
+            node.source_code = sampler3d_source
+            node.source_code = sampler3d_source
+            node.function_name = "sample_sampler3d"
+            tree.interface_update(bpy.context)
+            bpy.context.view_layer.update()
+            refresh_glsl_node(node)
+            closure_socket = find_socket(node.inputs, "In_sdf_volume")
+            self.assertEqual(closure_socket.type, 'CLOSURE')
+            coordinate_socket = find_socket(node.inputs, "In_coordinate")
+            self.assertEqual(coordinate_socket.type, 'VECTOR')
+            self.assertEqual(node.parse_status, 'READY')
+
     def test_sampler2d_meta_allows_label_description_and_panel_only(self):
         _, tree = self.make_material_tree()
         node = tree.nodes.new("ShaderNodeGLSLFunction")

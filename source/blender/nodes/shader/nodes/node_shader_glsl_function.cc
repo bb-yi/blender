@@ -7265,6 +7265,10 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
     {
       for (bNodeSocket* socket : node.input_sockets())
       {
+        if (socket->type != SOCK_INT)
+        {
+          continue;
+        }
         RNA_node_socket_glsl_int_choices_unregister(socket);
       }
     }

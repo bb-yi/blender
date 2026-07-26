@@ -134,7 +134,7 @@ def make_sampler3d_material(name, source, function_name, *, smooth_union=False, 
     closure_output = add_centered_sdf_closure(nodes, links, smooth_union=smooth_union)
 
     material.node_tree.interface_update(bpy.context)
-    links.new(closure_output.outputs["Closure"], find_socket(glsl.inputs, "sdf_volume"))
+    links.new(closure_output.outputs["Closure"], find_socket(glsl.inputs, "In_sdf_volume"))
     if use_uv:
         uv_map = nodes.new("ShaderNodeUVMap")
         links.new(uv_map.outputs["UV"], find_socket(glsl.inputs, "uv"))
@@ -172,7 +172,7 @@ def make_lut_strip_material():
     glsl.script = make_text_block("Sampler3DLutStripRegression.glsl", source)
     glsl.function_name = "sample_lut"
     material.node_tree.interface_update(bpy.context)
-    links.new(image_node.outputs["Closure"], find_socket(glsl.inputs, "sdf_volume"))
+    links.new(image_node.outputs["Closure"], find_socket(glsl.inputs, "In_sdf_volume"))
     links.new(find_socket(glsl.outputs, "Result"), emission.inputs["Color"])
     links.new(emission.outputs["Emission"], output.inputs["Surface"])
     refresh_glsl_node(glsl)
@@ -208,7 +208,7 @@ def make_unsupported_helper_material():
     glsl.script = make_text_block("Sampler3DUnsupportedHelper.glsl", source)
     glsl.function_name = "sample_unsupported"
     material.node_tree.interface_update(bpy.context)
-    links.new(closure_output.outputs["Closure"], find_socket(glsl.inputs, "sdf_volume"))
+    links.new(closure_output.outputs["Closure"], find_socket(glsl.inputs, "In_sdf_volume"))
     links.new(find_socket(glsl.outputs, "Result"), emission.inputs["Color"])
     links.new(emission.outputs["Emission"], output.inputs["Surface"])
     refresh_glsl_node(glsl)
@@ -249,7 +249,7 @@ def make_mixed_closure_sampler_material():
     glsl.function_name = "sample_mixed"
     material.node_tree.interface_update(bpy.context)
     links.new(closure_2d_output.outputs["Closure"], find_socket(glsl.inputs, "image"))
-    links.new(closure_3d_output.outputs["Closure"], find_socket(glsl.inputs, "sdf_volume"))
+    links.new(closure_3d_output.outputs["Closure"], find_socket(glsl.inputs, "In_sdf_volume"))
     links.new(find_socket(glsl.outputs, "Result"), emission.inputs["Color"])
     links.new(emission.outputs["Emission"], output.inputs["Surface"])
     refresh_glsl_node(glsl)
@@ -308,21 +308,33 @@ def sample_pixel(pixels, width, x, y):
 def test_three_dimensional_coordinate_probe():
     clear_scene()
     source = (
-        "vec4 probe_sdf(sampler3D sdf_volume){\n"
-        "  float low = texture(sdf_volume, vec3(0.5, 0.5, 0.25)).r;\n"
-        "  float middle = texture(sdf_volume, vec3(0.5, 0.5, 0.50)).r;\n"
-        "  float high = texture(sdf_volume, vec3(0.5, 0.5, 0.75)).r;\n"
-        "  return vec4(vec3(0.5) + vec3(low, middle, high), 1.0);\n"
+        "/* @glsl_meta v1\n"
+        "sdf_volume: label=\"3D Sample\" description=\"Procedural Closure source\"\n"
+        "coordinate: label=\"Coordinate\" default=vec3(0.5)\n"
+        "*/\n"
+        "vec4 sample_sampler3d(sampler3D sdf_volume, vec3 coordinate){\n"
+        "  return texture(sdf_volume, coordinate);\n"
         "}\n"
     )
-    material, _ = make_sampler3d_material("ClosureSampler3DProbe", source, "probe_sdf")
+    material, glsl = make_sampler3d_material(
+        "ClosureSampler3DProbe", source, "sample_sampler3d"
+    )
     build_plane(material)
-    pixels, width, height, elapsed = render_pixels("glsl_closure_sampler3d_probe")
-    center = sample_pixel(pixels, width, width // 2, height // 2)
+    coordinate = find_socket(glsl.inputs, "In_coordinate")
+    samples = {}
+    elapsed_total = 0.0
+    for name, z in (("low", 0.0), ("middle", 0.5), ("high", 1.0)):
+        coordinate.default_value = (0.5, 0.5, z)
+        pixels, width, height, elapsed = render_pixels(f"glsl_closure_sampler3d_probe_{name}")
+        samples[name] = sample_pixel(pixels, width, width // 2, height // 2)
+        elapsed_total += elapsed
 
-    require(abs(center[0] - center[2]) < 0.04, f"Symmetric Z probes diverged: {center}")
-    require(center[0] - center[1] > 0.15, f"Z coordinate did not change SDF distance: {center}")
-    print(f"GLSL_CLOSURE_SAMPLER3D_PROBE={center} render_seconds={elapsed:.3f}")
+    low = samples["low"][0]
+    middle = samples["middle"][0]
+    high = samples["high"][0]
+    require(abs(low - high) < 0.04, f"Symmetric Z probes diverged: {samples}")
+    require(low - middle > 0.15, f"Coordinate input Z did not change 3D sample: {samples}")
+    print(f"GLSL_CLOSURE_SAMPLER3D_PROBE={samples} render_seconds={elapsed_total:.3f}")
 
 
 def test_sphere_raymarch_and_normals():
