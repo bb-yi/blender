@@ -550,7 +550,7 @@ ShadowDirectional::LevelSpan ShadowDirectional::clipmap_level_range(const Camera
 
   const CameraData &cam_data = cam.data_get();
   /* Covers the closest points of the view. */
-  int min_level = max_ii(0, floor(log2(max_ff(cam_data.clip_near, 1e-8f))));
+  int min_level = floor(log2(max_ff(cam_data.clip_near, 1e-8f)));
   /* Covers the farthest points of the view. */
   int max_level = ceil(log2(cam.bound_radius() + distance(cam.bound_center(), cam.position())));
 
