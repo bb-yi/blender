@@ -780,6 +780,8 @@ namespace blender::eevee
       DRW_submission_start();
 
       sampling.step();
+      film.update_sample_table();
+      uniform_data.push_update();
 
       capture_view.render_world();
       lookdev.rotate_world();
