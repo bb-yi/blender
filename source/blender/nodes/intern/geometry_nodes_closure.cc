@@ -130,6 +130,9 @@ ClosureSignature ClosureSignature::from_glsl_function_sample2d_socket(const bNod
   if (const bke::bNodeSocketType *output_type = bke::node_socket_type_find_static(SOCK_RGBA)) {
     signature.outputs.add({"Color", output_type, NodeSocketInterfaceStructureType::Auto});
   }
+  if (const bke::bNodeSocketType *output_type = bke::node_socket_type_find_static(SOCK_FLOAT)) {
+    signature.outputs.add({"Alpha", output_type, NodeSocketInterfaceStructureType::Auto});
+  }
   return signature;
 }
 

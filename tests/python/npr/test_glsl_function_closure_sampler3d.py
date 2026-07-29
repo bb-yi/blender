@@ -118,6 +118,36 @@ def add_centered_sdf_closure(nodes, links, *, smooth_union=False):
     return closure_output
 
 
+def add_constant_sample_closure(nodes, links, name, color, *, color_type="RGBA", alpha=None):
+    closure_input = nodes.new("NodeClosureInput")
+    closure_input.name = f"{name} Input"
+    closure_output = nodes.new("NodeClosureOutput")
+    closure_output.name = f"{name} Output"
+    closure_input.pair_with_output(closure_output)
+    closure_output.input_items.new("VECTOR", "UV")
+    closure_output.output_items.new(color_type, "Color")
+
+    if color_type == "RGBA":
+        color_node = nodes.new("ShaderNodeRGB")
+        color_node.name = f"{name} Color"
+        color_node.outputs["Color"].default_value = color
+        links.new(color_node.outputs["Color"], closure_output.inputs["Color"])
+    else:
+        color_node = nodes.new("ShaderNodeCombineXYZ")
+        color_node.name = f"{name} Color"
+        for socket, value in zip(color_node.inputs, color[:3]):
+            socket.default_value = value
+        links.new(color_node.outputs["Vector"], closure_output.inputs["Color"])
+
+    if alpha is not None:
+        closure_output.output_items.new("FLOAT", "Alpha")
+        alpha_node = nodes.new("ShaderNodeValue")
+        alpha_node.name = f"{name} Alpha"
+        alpha_node.outputs["Value"].default_value = alpha
+        links.new(alpha_node.outputs["Value"], closure_output.inputs["Alpha"])
+    return closure_output
+
+
 def make_sampler3d_material(name, source, function_name, *, smooth_union=False, use_uv=False):
     material = bpy.data.materials.new(name)
     material.use_nodes = True
@@ -254,6 +284,52 @@ def make_mixed_closure_sampler_material():
     links.new(emission.outputs["Emission"], output.inputs["Surface"])
     refresh_glsl_node(glsl)
     require(glsl.parse_status == "READY", f"Mixed helper parse failed: {glsl.parse_status}")
+    return material
+
+
+def make_closure_sampler_alpha_material(*, explicit_alpha):
+    suffix = "Explicit" if explicit_alpha else "Fallback"
+    material = bpy.data.materials.new(f"ClosureSamplerAlpha{suffix}")
+    material.use_nodes = True
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+    nodes.clear()
+
+    output = nodes.new("ShaderNodeOutputMaterial")
+    emission = nodes.new("ShaderNodeEmission")
+    glsl = nodes.new("ShaderNodeGLSLFunction")
+    closure_2d = add_constant_sample_closure(
+        nodes,
+        links,
+        "Sampler 2D",
+        (0.2, 0.4, 0.5, 0.8),
+        alpha=0.35 if explicit_alpha else None,
+    )
+    closure_3d = add_constant_sample_closure(
+        nodes,
+        links,
+        "Sampler 3D",
+        (0.1, 0.3, 0.6, 0.9),
+        color_type="RGBA" if explicit_alpha else "VECTOR",
+        alpha=0.65 if explicit_alpha else None,
+    )
+    source = (
+        "vec3 sample_closure_alpha(sampler2D image, sampler3D volume){\n"
+        "  vec4 image_sample = texture(image, vec2(0.25, 0.75));\n"
+        "  vec4 volume_sample = texture(volume, vec3(0.5));\n"
+        "  return vec3(image_sample.a, volume_sample.a, image_sample.r + volume_sample.b);\n"
+        "}\n"
+    )
+    glsl.source_mode = "INTERNAL"
+    glsl.script = make_text_block(f"ClosureSamplerAlpha{suffix}.glsl", source)
+    glsl.function_name = "sample_closure_alpha"
+    material.node_tree.interface_update(bpy.context)
+    links.new(closure_2d.outputs["Closure"], find_socket(glsl.inputs, "image"))
+    links.new(closure_3d.outputs["Closure"], find_socket(glsl.inputs, "volume"))
+    links.new(find_socket(glsl.outputs, "Result"), emission.inputs["Color"])
+    links.new(emission.outputs["Emission"], output.inputs["Surface"])
+    refresh_glsl_node(glsl)
+    require(glsl.parse_status == "READY", f"Alpha helper parse failed: {glsl.parse_status}")
     return material
 
 
@@ -456,6 +532,29 @@ def test_mixed_closure_sampler_dimensions():
     print(f"GLSL_MIXED_CLOSURE_SAMPLERS={center} render_seconds={elapsed:.3f}")
 
 
+def test_closure_sampler_alpha_channels():
+    cases = (
+        ("explicit", True, (0.35, 0.65, 0.80)),
+        ("fallback", False, (0.80, 1.00, 0.80)),
+    )
+    samples = {}
+    elapsed_total = 0.0
+    for name, explicit_alpha, expected in cases:
+        clear_scene()
+        material = make_closure_sampler_alpha_material(explicit_alpha=explicit_alpha)
+        build_plane(material)
+        pixels, width, height, elapsed = render_pixels(f"glsl_closure_sampler_alpha_{name}")
+        center = sample_pixel(pixels, width, width // 2, height // 2)
+        for channel, actual, target in zip("RGB", center, expected):
+            require(
+                abs(actual - target) < 0.05,
+                f"Closure sampler alpha {name} {channel} mismatch: {center}",
+            )
+        samples[name] = center
+        elapsed_total += elapsed
+    print(f"GLSL_CLOSURE_SAMPLER_ALPHA={samples} render_seconds={elapsed_total:.3f}")
+
+
 def main():
     bpy.ops.wm.read_homefile(use_factory_startup=True)
     configure_scene()
@@ -465,6 +564,7 @@ def main():
     test_sampler3d_lut_strip_regression()
     test_unsupported_helper_node_fails_readably()
     test_mixed_closure_sampler_dimensions()
+    test_closure_sampler_alpha_channels()
 
 
 if __name__ == "__main__":

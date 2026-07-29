@@ -65,6 +65,10 @@ def refresh_glsl_node_with_operator(node, tree):
     return run_glsl_node_operator(node, tree, bpy.ops.node.glsl_function_refresh)
 
 
+def sync_closure_output_with_operator(node, tree):
+    return run_glsl_node_operator(node, tree, bpy.ops.node.sockets_sync)
+
+
 def reset_glsl_node_defaults_with_operator(node, tree):
     return run_glsl_node_operator(node, tree, bpy.ops.node.glsl_function_reset_defaults)
 
@@ -125,7 +129,7 @@ def relink_and_update(tree, from_socket, to_socket):
     bpy.context.view_layer.update()
 
 
-def make_closure_sampler(tree, *, include_uv=True, color_type="FLOAT"):
+def make_closure_sampler(tree, *, include_uv=True, color_type="FLOAT", alpha_type=None):
     closure_input = tree.nodes.new("NodeClosureInput")
     closure_output = tree.nodes.new("NodeClosureOutput")
     closure_input.pair_with_output(closure_output)
@@ -133,6 +137,8 @@ def make_closure_sampler(tree, *, include_uv=True, color_type="FLOAT"):
         closure_output.input_items.new("VECTOR", "UV")
     if color_type is not None:
         closure_output.output_items.new(color_type, "Color")
+    if alpha_type is not None:
+        closure_output.output_items.new(alpha_type, "Alpha")
     tree.interface_update(bpy.context)
     tree.update_tag()
     bpy.context.view_layer.update()
@@ -766,23 +772,74 @@ class GLSLFunctionNodeTest(unittest.TestCase):
         self.assertEqual(glsl_node.parse_status, 'READY')
         self.assertEqual(find_socket(glsl_node.inputs, "volume").bl_idname, "NodeSocketClosure")
 
+    def test_closure_sampler_sync_adds_opaque_alpha(self):
+        _, tree = self.make_material_tree()
+        glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        closure_input, closure_output = make_closure_sampler(tree, color_type="RGBA")
+        color_socket = find_socket(closure_output.inputs, "Color")
+        color_socket.default_value = (0.2, 0.4, 0.6, 0.8)
+        source = (
+            "vec4 sample_image(sampler2D image, vec2 uv){\n"
+            "  return texture(image, uv);\n"
+            "}\n"
+        )
+        make_text_block("glsl_closure_sampler_alpha_sync.glsl", source)
+        self.configure_glsl_node(
+            glsl_node, "glsl_closure_sampler_alpha_sync.glsl", "sample_image"
+        )
+        relink_and_update(
+            tree,
+            find_socket(closure_output.outputs, "Closure"),
+            find_socket(glsl_node.inputs, "image"),
+        )
+
+        self.assertEqual(sync_closure_output_with_operator(closure_output, tree), {'FINISHED'})
+
+        self.assertEqual(find_socket(closure_input.outputs, "UV").type, 'VECTOR')
+        synced_color = find_socket(closure_output.inputs, "Color")
+        self.assertEqual(synced_color.type, 'RGBA')
+        for actual, expected in zip(synced_color.default_value, (0.2, 0.4, 0.6, 0.8)):
+            self.assertAlmostEqual(actual, expected)
+        alpha_socket = find_socket(closure_output.inputs, "Alpha")
+        self.assertEqual(alpha_socket.type, 'VALUE')
+        self.assertEqual(alpha_socket.default_value, 1.0)
+
+        alpha_socket.default_value = 0.37
+        alpha_source = tree.nodes.new("ShaderNodeValue")
+        tree.links.new(alpha_source.outputs["Value"], alpha_socket)
+
+        self.assertEqual(sync_closure_output_with_operator(closure_output, tree), {'FINISHED'})
+
+        alpha_socket = find_socket(closure_output.inputs, "Alpha")
+        self.assertAlmostEqual(alpha_socket.default_value, 0.37)
+        self.assertTrue(alpha_socket.is_linked)
+        self.assertEqual(alpha_socket.links[0].from_socket, alpha_source.outputs["Value"])
+
     def test_closure_output_sample3d_signature_validation(self):
         cases = [
-            (True, "FLOAT", 'READY'),
-            (False, "FLOAT", 'ERROR'),
-            (True, None, 'ERROR'),
+            (True, "FLOAT", None, 'READY'),
+            (True, "VECTOR", "FLOAT", 'READY'),
+            (True, "RGBA", "FLOAT", 'READY'),
+            (True, "FLOAT", "VECTOR", 'ERROR'),
+            (False, "FLOAT", None, 'ERROR'),
+            (True, None, None, 'ERROR'),
         ]
         source = (
             "vec4 sample_volume(sampler3D volume, vec3 coord){\n"
             "  return texture(volume, coord);\n"
             "}\n"
         )
-        for index, (include_uv, color_type, expected_status) in enumerate(cases):
-            with self.subTest(include_uv=include_uv, color_type=color_type):
+        for index, (include_uv, color_type, alpha_type, expected_status) in enumerate(cases):
+            with self.subTest(
+                include_uv=include_uv, color_type=color_type, alpha_type=alpha_type
+            ):
                 _, tree = self.make_material_tree()
                 glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
                 _, closure_output = make_closure_sampler(
-                    tree, include_uv=include_uv, color_type=color_type
+                    tree,
+                    include_uv=include_uv,
+                    color_type=color_type,
+                    alpha_type=alpha_type,
                 )
                 text_name = f"glsl_sample3d_closure_signature_{index}.glsl"
                 make_text_block(text_name, source)
@@ -1514,7 +1571,7 @@ class GLSLFunctionNodeTest(unittest.TestCase):
         sampler3d_source = (
             "/* @glsl_meta v1\n"
             "sdf_volume: label=\"Procedural 3D Field\" "
-            "description=\"Connect a Closure Output with UV Vector input and Color Float output\"\n"
+            "description=\"Connect a Closure Output with UV Vector, Color, and optional Alpha Float outputs\"\n"
             "coordinate: label=\"Coordinate\" default=vec3(0.5)\n"
             "*/\n"
             "vec4 sample_sampler3d(sampler3D sdf_volume, vec3 coordinate)\n"

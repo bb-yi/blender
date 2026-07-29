@@ -463,8 +463,19 @@ void sync_sockets_closure(SpaceNode &snode,
   nodes::update_node_declaration_and_sockets(*snode.edittree, closure_input_node);
   nodes::update_node_declaration_and_sockets(*snode.edittree, closure_output_node);
 
-  /* Create internal zone links for newly created sockets. */
   snode.edittree->ensure_topology_cache();
+  for (const int output_i : signature.outputs.index_range()) {
+    const nodes::ClosureSignature::Item &item = signature.outputs[output_i];
+    if (old_output_identifiers.contains(item.key) || item.key != "Alpha" ||
+        item.type->type != SOCK_FLOAT)
+    {
+      continue;
+    }
+    bNodeSocket &alpha_socket = closure_output_node.input_socket(output_i);
+    alpha_socket.default_value_typed<bNodeSocketValueFloat>()->value = 1.0f;
+  }
+
+  /* Create internal zone links for newly created sockets. */
   Vector<std::pair<bNodeSocket *, bNodeSocket *>> internal_links;
   for (const int input_i : signature.inputs.index_range()) {
     const nodes::ClosureSignature::Item &input_item = signature.inputs[input_i];

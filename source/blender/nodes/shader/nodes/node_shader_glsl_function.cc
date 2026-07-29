@@ -5316,6 +5316,16 @@ namespace blender
           std::string(sampler_type_name(sampler_type).c_str());
         return false;
       }
+      for (const int i : IndexRange(storage.output_items.items_num))
+      {
+        const NodeClosureOutputItem& item = storage.output_items.items[i];
+        if (item.name != nullptr && STREQ(item.name, "Alpha") && item.socket_type != SOCK_FLOAT)
+        {
+          r_error = "Closure Output item named 'Alpha' must be a Float for " +
+            std::string(sampler_type_name(sampler_type).c_str());
+          return false;
+        }
+      }
       return true;
     }
 
@@ -5429,6 +5439,12 @@ namespace blender
       const bNodeLink* color_source_link = find_any_direct_link(*color_socket);
       const bNodeSocket* sample_socket = color_source_link != nullptr ? color_source_link->fromsock :
                                                                         color_socket;
+      const bNodeSocket* alpha_socket = find_closure_output_socket_by_name(*closure_output_node, "Alpha");
+      const bNodeLink* alpha_source_link = alpha_socket != nullptr ? find_any_direct_link(*alpha_socket) :
+                                                                    nullptr;
+      const bNodeSocket* alpha_sample_socket = alpha_source_link != nullptr ?
+        alpha_source_link->fromsock :
+        alpha_socket;
 
       bNodeExecContext context = {};
       bNodeTree* helper_tree = const_cast<bNodeTree*>(&closure_output_node->owner_tree());
@@ -5464,6 +5480,17 @@ namespace blender
       {
         mark_socket_upstream_for_closure_helper(*color_socket, visited_nodes);
       }
+      if (alpha_socket != nullptr)
+      {
+        if (alpha_source_link != nullptr && alpha_source_link->fromnode != nullptr)
+        {
+          mark_node_upstream_for_closure_helper(*alpha_source_link->fromnode, visited_nodes);
+        }
+        else
+        {
+          mark_socket_upstream_for_closure_helper(*alpha_socket, visited_nodes);
+        }
+      }
 
       const GPUType coordinate_type = glsl_boundary_type_is_sample3d(param.type) ? GPU_VEC3 :
                                                                                 GPU_VEC2;
@@ -5491,6 +5518,31 @@ namespace blender
         r_error = "Could not evaluate Closure Output Color for " +
           std::string(sampler_type_name(param.type).c_str()) + " parameter '" + param.name + "'";
         return false;
+      }
+
+      GPUNodeLink* alpha_link = nullptr;
+      if (alpha_sample_socket != nullptr)
+      {
+        bNodeStack* alpha_stack = node_get_socket_stack(
+          exec->stack, const_cast<bNodeSocket*>(alpha_sample_socket));
+        alpha_link = (alpha_stack != nullptr) ? static_cast<GPUNodeLink*>(alpha_stack->data) : nullptr;
+        if (alpha_link == nullptr && alpha_source_link != nullptr)
+        {
+          r_error = "Closure Output Alpha source node '" +
+            std::string(alpha_source_link->fromnode->name) + "' could not compile for " +
+            std::string(sampler_type_name(param.type).c_str()) + " parameter '" + param.name + "'";
+          return false;
+        }
+        if (alpha_link == nullptr && alpha_stack != nullptr)
+        {
+          alpha_link = GPU_constant(alpha_stack->vec);
+        }
+        if (alpha_link == nullptr)
+        {
+          r_error = "Could not evaluate Closure Output Alpha for " +
+            std::string(sampler_type_name(param.type).c_str()) + " parameter '" + param.name + "'";
+          return false;
+        }
       }
 
       GPUType helper_return_type = GPU_VEC4;
@@ -5524,6 +5576,19 @@ namespace blender
       else if (sample_socket->type == SOCK_VECTOR)
       {
         helper_return_type = GPU_VEC3;
+      }
+
+      if (alpha_link != nullptr)
+      {
+        GPUNodeLink* rgba_link = nullptr;
+        if (!GPU_link(mat, "set_rgba_alpha", color_link, alpha_link, &rgba_link))
+        {
+          r_error = "Could not combine Closure Output Color and Alpha for " +
+            std::string(sampler_type_name(param.type).c_str()) + " parameter '" + param.name + "'";
+          return false;
+        }
+        color_link = rgba_link;
+        helper_return_type = GPU_VEC4;
       }
 
       release_active_helper();
