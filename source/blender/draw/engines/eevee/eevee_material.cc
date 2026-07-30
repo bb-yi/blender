@@ -103,6 +103,23 @@ static bool material_uses_glsl_function(const MaterialPass &pass)
   return false;
 }
 
+static void material_telemetry_features_update(Material &material)
+{
+  material.telemetry_uses_npr = material_has_flag(material.npr, GPU_MATFLAG_NPR);
+  material.telemetry_uses_raycast =
+      material_has_flag(material.shadow, GPU_MATFLAG_RAYCAST) ||
+      material_has_flag(material.shading, GPU_MATFLAG_RAYCAST) ||
+      material_has_flag(material.npr, GPU_MATFLAG_RAYCAST) ||
+      material_has_flag(material.prepass, GPU_MATFLAG_RAYCAST) ||
+      material_has_flag(material.capture, GPU_MATFLAG_RAYCAST);
+  material.telemetry_uses_glsl_function =
+      material_uses_glsl_function(material.shadow) ||
+      material_uses_glsl_function(material.shading) ||
+      material_uses_glsl_function(material.npr) ||
+      material_uses_glsl_function(material.prepass) ||
+      material_uses_glsl_function(material.capture);
+}
+
 static bool node_tree_uses_outline_control(const bNodeTree &ntree, Set<const bNodeTree *> &visited)
 {
   if (visited.contains(&ntree)) {
@@ -340,7 +357,7 @@ int MaterialModule::npr_material_count() const
 {
   Set<const blender::Material *> counted_materials;
   for (const auto item : material_map_.items()) {
-    if (material_has_flag(item.value.npr, GPU_MATFLAG_NPR)) {
+    if (item.value.telemetry_uses_npr) {
       counted_materials.add(item.key.mat);
     }
   }
@@ -351,12 +368,7 @@ int MaterialModule::raycast_material_count() const
 {
   Set<const blender::Material *> counted_materials;
   for (const auto item : material_map_.items()) {
-    if (material_has_flag(item.value.shadow, GPU_MATFLAG_RAYCAST) ||
-        material_has_flag(item.value.shading, GPU_MATFLAG_RAYCAST) ||
-        material_has_flag(item.value.npr, GPU_MATFLAG_RAYCAST) ||
-        material_has_flag(item.value.prepass, GPU_MATFLAG_RAYCAST) ||
-        material_has_flag(item.value.capture, GPU_MATFLAG_RAYCAST))
-    {
+    if (item.value.telemetry_uses_raycast) {
       counted_materials.add(item.key.mat);
     }
   }
@@ -367,12 +379,7 @@ int MaterialModule::glsl_function_material_count() const
 {
   Set<const blender::Material *> counted_materials;
   for (const auto item : material_map_.items()) {
-    if (material_uses_glsl_function(item.value.shadow) ||
-        material_uses_glsl_function(item.value.shading) ||
-        material_uses_glsl_function(item.value.npr) ||
-        material_uses_glsl_function(item.value.prepass) ||
-        material_uses_glsl_function(item.value.capture))
-    {
+    if (item.value.telemetry_uses_glsl_function) {
       counted_materials.add(item.key.mat);
     }
   }
@@ -654,6 +661,7 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
       mat.volume_material = material_pass_get(
           ob, blender_mat, MAT_PIPE_VOLUME_MATERIAL, MAT_GEOM_VOLUME);
       mat.has_volume = GPU_material_has_volume_output(mat.volume_material.gpumat);
+      material_telemetry_features_update(mat);
       return mat;
     });
     return mat;
@@ -698,6 +706,7 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
     mat.uses_outline_control = uses_outline_control;
     if (is_filter_material) {
       /* Filter-domain materials are scene fullscreen passes, not object surface materials. */
+      material_telemetry_features_update(mat);
       return mat;
     }
     if (inst_.is_baking()) {
@@ -885,6 +894,7 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
       }
     }
 
+    material_telemetry_features_update(mat);
     return mat;
   });
 

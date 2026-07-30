@@ -409,6 +409,10 @@ struct Material {
   bool has_surface;
   bool has_volume;
   bool uses_outline_control;
+  /* Snapshot while the pass GPUMaterial pointers are valid during material sync. */
+  bool telemetry_uses_npr;
+  bool telemetry_uses_raycast;
+  bool telemetry_uses_glsl_function;
   MaterialPass shadow;
   MaterialPass shading;
   MaterialPass npr;
