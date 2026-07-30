@@ -369,7 +369,6 @@ namespace blender
       Vector<GLSLClosureCallback> closure_callbacks;
       GLSLFunctionDefinition function;
       bool defines_panel_default_closed = false;
-      bool closures_panel_default_closed = false;
       int signature_hash = 0;
       int meta_hash = 0;
       int define_hash = 0;
@@ -442,7 +441,6 @@ namespace blender
     {
       std::optional<std::string> label;
       std::optional<std::string> description;
-      std::optional<bool> panel_default_closed;
       Map<std::string, GLSLRawParamMeta> items;
     };
 
@@ -2917,15 +2915,6 @@ namespace blender
             {
               r_closure.description = item.value;
             }
-            else if (item.key == "closed")
-            {
-              bool closed = false;
-              if (!parse_glsl_meta_bool_literal(item.value, closed, r_error))
-              {
-                return false;
-              }
-              r_closure.panel_default_closed = closed;
-            }
             else
             {
               r_error = "Unsupported GLSL closure header attribute '" + item.key + "'";
@@ -4616,25 +4605,6 @@ namespace blender
      * represented exactly by that transport. */
     static constexpr int glsl_closure_exact_int_limit = 1 << 24;
 
-    static bool validate_glsl_closure_int_meta_range(const GLSLFunctionParam& param,
-      std::string& r_error)
-    {
-      const auto validate_value = [&](const std::optional<int> value, const StringRef field) {
-        if (!value.has_value() ||
-            (*value >= -glsl_closure_exact_int_limit &&
-             *value <= glsl_closure_exact_int_limit))
-        {
-          return true;
-        }
-        r_error = "GLSL closure int " + std::string(field) + " must be in the exact GPU "
-          "transport range [-16777216, 16777216]";
-        return false;
-      };
-      return validate_value(param.meta.int_default_value, "default") &&
-        validate_value(param.meta.int_min_value, "min") &&
-        validate_value(param.meta.int_max_value, "max");
-    }
-
     static bool apply_glsl_closure_item_meta(const GLSLRawParamMeta& raw_meta,
       GLSLFunctionParam& r_param,
       const bool is_output,
@@ -4649,18 +4619,10 @@ namespace blender
 
       if (!is_output)
       {
-        if (!apply_glsl_meta_to_param(raw_meta, r_param, r_error))
+        if (raw_meta.default_value.has_value() || raw_meta.min_value.has_value() ||
+            raw_meta.max_value.has_value() || raw_meta.hide_value.has_value())
         {
-          return false;
-        }
-        if (r_param.meta.default_expression.has_value())
-        {
-          r_error = "GLSL closure defaults must be literals";
-          return false;
-        }
-        if (r_param.type == GLSLBoundaryType::Int &&
-            !validate_glsl_closure_int_meta_range(r_param, r_error))
-        {
+          r_error = "GLSL closure inputs only support label, description, and subtype=color";
           return false;
         }
       }
@@ -4672,18 +4634,24 @@ namespace blender
           r_error = "GLSL closure outputs only support label, description, and subtype";
           return false;
         }
-        if (raw_meta.subtype.has_value())
-        {
-          PropertySubType subtype = PROP_NONE;
-          if (!parse_glsl_meta_subtype(*raw_meta.subtype, r_param.type, subtype, r_error))
-          {
-            return false;
-          }
-          r_param.meta.subtype = subtype;
-        }
-        r_param.meta.label = raw_meta.label;
-        r_param.meta.description = raw_meta.description;
       }
+
+      if (raw_meta.subtype.has_value())
+      {
+        PropertySubType subtype = PROP_NONE;
+        if (!parse_glsl_meta_subtype(*raw_meta.subtype, r_param.type, subtype, r_error))
+        {
+          return false;
+        }
+        if (!is_output && subtype != PROP_COLOR)
+        {
+          r_error = "GLSL closure inputs only support subtype=color";
+          return false;
+        }
+        r_param.meta.subtype = subtype;
+      }
+      r_param.meta.label = raw_meta.label;
+      r_param.meta.description = raw_meta.description;
 
       if (r_param.type == GLSLBoundaryType::Vec4 && r_param.meta.subtype.has_value())
       {
@@ -6047,11 +6015,9 @@ namespace blender
       const Map<std::string, GLSLRawClosureMeta>& raw_closures,
       const GLSLFunctionDefinition& entry_function,
       Vector<GLSLClosureCallback>& r_callbacks,
-      bool& r_panel_default_closed,
       std::string& r_error)
     {
       r_callbacks.clear();
-      r_panel_default_closed = false;
       if (raw_closures.is_empty())
       {
         return true;
@@ -6110,7 +6076,6 @@ namespace blender
         return false;
       }
 
-      std::optional<bool> explicit_closed;
       for (GLSLFunctionDefinition function : functions)
       {
         const GLSLRawClosureMeta* raw_closure = raw_closures.lookup_ptr(function.name);
@@ -6122,20 +6087,9 @@ namespace blender
         {
           return false;
         }
-        if (raw_closure->panel_default_closed.has_value())
-        {
-          if (explicit_closed.has_value() &&
-              *explicit_closed != *raw_closure->panel_default_closed)
-          {
-            r_error = "Reachable GLSL closure helpers specify conflicting closed values";
-            return false;
-          }
-          explicit_closed = *raw_closure->panel_default_closed;
-        }
         r_callbacks.append(
           {std::move(function), raw_closure->label, raw_closure->description});
       }
-      r_panel_default_closed = explicit_closed.value_or(false);
       return true;
     }
 
@@ -8500,7 +8454,6 @@ vec3 glsl_ambient_lighting()
                                         raw_closures,
                                         result.function,
                                         result.closure_callbacks,
-                                        result.closures_panel_default_closed,
                                         result.error))
       {
         return result;
@@ -8972,7 +8925,6 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
 
     static ClosureSignature::ItemUIData glsl_closure_item_ui_data(
       const GLSLFunctionParam& param,
-      const bool is_output,
       const bool w_component)
     {
       ClosureSignature::ItemUIData ui;
@@ -8986,53 +8938,10 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
       {
         ui.subtype = param.meta.subtype;
       }
-      if (!is_output && param.meta.has_default_value)
-      {
-        if (w_component || param.type == GLSLBoundaryType::Float)
-        {
-          ui.default_value = w_component ? param.meta.default_value.w : param.meta.default_value.x;
-        }
-        else if (param.type == GLSLBoundaryType::Int)
-        {
-          BLI_assert(param.meta.int_default_value.has_value());
-          ui.default_value = param.meta.int_default_value.value_or(0);
-        }
-        else if (param.type == GLSLBoundaryType::Bool)
-        {
-          ui.default_value = param.meta.default_value.x != 0.0f;
-        }
-        else
-        {
-          float4 value = param.meta.default_value;
-          if (glsl_param_uses_color_socket(param))
-          {
-            value.w = 1.0f;
-          }
-          ui.default_value = value;
-        }
-      }
       if (param.type == GLSLBoundaryType::Int)
       {
-        ui.min_value = ClosureSignature::ItemMinMaxValue(
-          !is_output && param.meta.has_min ?
-            param.meta.int_min_value.value_or(-glsl_closure_exact_int_limit) :
-            -glsl_closure_exact_int_limit);
-        ui.max_value = ClosureSignature::ItemMinMaxValue(
-          !is_output && param.meta.has_max ?
-            param.meta.int_max_value.value_or(glsl_closure_exact_int_limit) :
-            glsl_closure_exact_int_limit);
-      }
-      else if (!is_output && param.meta.has_min)
-      {
-        ui.min_value = ClosureSignature::ItemMinMaxValue(param.meta.min_value);
-      }
-      if (param.type != GLSLBoundaryType::Int && !is_output && param.meta.has_max)
-      {
-        ui.max_value = ClosureSignature::ItemMinMaxValue(param.meta.max_value);
-      }
-      if (!is_output && param.meta.hide_value)
-      {
-        ui.hide_value = true;
+        ui.min_value = ClosureSignature::ItemMinMaxValue(-glsl_closure_exact_int_limit);
+        ui.max_value = ClosureSignature::ItemMinMaxValue(glsl_closure_exact_int_limit);
       }
       return ui;
     }
@@ -9086,7 +8995,7 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
       item.type = bke::node_socket_type_find_static(socket_type);
       item.structure_type = NodeSocketInterfaceStructureType::Single;
       item.dimensions = dimensions;
-      item.ui = glsl_closure_item_ui_data(param, is_output, w_component);
+      item.ui = glsl_closure_item_ui_data(param, w_component);
       if (is_output)
       {
         signature.outputs.add(std::move(item));
@@ -9321,8 +9230,7 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
           return;
         }
         PanelDeclarationBuilder& closures_panel =
-          b.add_panel("Closures"_ustr, make_closures_panel_identifier())
-            .default_closed(parse_result.closures_panel_default_closed);
+          b.add_panel("Closures"_ustr, make_closures_panel_identifier());
         add_glsl_closure_declarations(closures_panel, parse_result);
       };
 

@@ -189,6 +189,40 @@ Meta 必须覆盖导出函数的公开接口：
 
 如果导出函数确实没有任何输入参数和 `out` 参数，可以省略 Meta，但结果说明里要写明“无可标注接口”。
 
+### 规则 2B：可由 Closure 替换的 helper 只写最小 Meta
+
+`@glsl_closure v1` 标记普通 helper 可以由外部 Closure 节点子图替换。helper 的函数名、参数名、参数类型、返回值和 `out` 参数已经构成完整调用 ABI，不要重复写普通输入控件 Meta。
+
+- header 只支持可选的 `label` 和 `description`
+- 输入项只支持可选的 `label`、`description`，以及用于区分 `vec3` Color/Vector 的 `subtype=color`
+- `Result` 和 `out` 输出项支持可选的 `label`、`description` 和 `subtype`
+- 不支持 `closed`、`default`、`min`、`max`、`hide_value`、`items`、`show_label` 或嵌套 panel
+- helper 没有连接 Closure 时执行原始 GLSL 函数体；Closure Meta 不定义 fallback 参数值
+
+推荐的最小写法：
+
+```glsl
+/* @glsl_closure v1 label="Typed Remap"
+color: subtype=color
+Result: subtype=color
+*/
+vec3 typed_remap(vec3 color, float strength, out float mask)
+{
+  mask = clamp(strength, 0.0, 1.0);
+  return color * mask;
+}
+```
+
+如果不需要友好名称、说明或 Color 插口，块内可以不写任何逐项 Meta：
+
+```glsl
+/* @glsl_closure v1 */
+float remap(float value)
+{
+  return value;
+}
+```
+
 ### 规则 3：所有外部输入都改成函数参数
 
 不要依赖下面这些外部名字直接存在：
