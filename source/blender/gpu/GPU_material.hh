@@ -322,6 +322,19 @@ enum GPUType {
   GPU_ATTR = 3001,
 };
 
+/** Non-owning callback input description copied by the frame push API. */
+struct GPUMaterialClosureCallbackInput {
+  int closure_output_node_id = 0;
+  StringRef item_key;
+  GPUType type = GPU_NONE;
+  int function_input_index = -1;
+};
+
+struct GPUMaterialFunctionOutput {
+  GPUType type = GPU_NONE;
+  GPUNodeLink **link = nullptr;
+};
+
 enum GPUDefaultValue {
   GPU_DEFAULT_0 = 0,
   GPU_DEFAULT_1,
@@ -549,6 +562,19 @@ void GPU_material_closure_uv_gradient_source_pop(GPUMaterial *material);
 void GPU_material_closure_uv_gradient_source_get(const GPUMaterial *material,
                                                  StringRefNull &r_dx_source,
                                                  StringRefNull &r_dy_source);
+/** Pushes an owned copy. Lookup searches frames from the newest to the oldest. */
+void GPU_material_closure_callback_input_frame_push(GPUMaterial *material,
+                                                    Span<GPUMaterialClosureCallbackInput> inputs);
+void GPU_material_closure_callback_input_frame_pop(GPUMaterial *material);
+bool GPU_material_closure_callback_input_find(const GPUMaterial *material,
+                                              int closure_output_node_id,
+                                              StringRef item_key,
+                                              GPUType &r_type,
+                                              int &r_function_input_index,
+                                              bool &r_is_ancestor_capture);
+bool GPU_material_closure_callback_input_frame_error_set(GPUMaterial *material, StringRef error);
+bool GPU_material_closure_callback_input_frame_error_get(const GPUMaterial *material,
+                                                         std::string &r_error);
 
 bool GPU_link(GPUMaterial *mat, const char *name, ...);
 bool GPU_stack_link(GPUMaterial *mat,
@@ -605,6 +631,15 @@ char *GPU_material_split_sub_function(GPUMaterial *material,
                                       GPUType return_type,
                                       GPUNodeLink **link,
                                       StringRefNull dependency_name);
+
+/**
+ * Wrap a part of the material graph into a void function with typed inputs and outputs.
+ * Each output is cast to its declared type and all output dependency graphs are serialized once.
+ */
+char *GPU_material_split_sub_function_multi(GPUMaterial *material,
+                                            Span<GPUType> input_types,
+                                            Span<GPUMaterialFunctionOutput> outputs,
+                                            StringRefNull dependency_name);
 
 void GPU_material_flag_set(GPUMaterial *mat, eGPUMaterialFlag flag);
 eGPUMaterialFlag GPU_material_flag(const GPUMaterial *mat);

@@ -454,6 +454,21 @@ static bool build_closure_output_height_helper(GPUMaterial *mat,
 
   bNodeExecContext context = {};
   bNodeTree *helper_tree = const_cast<bNodeTree *>(&closure_output_node->owner_tree());
+
+  /* Snapshot need_exec BEFORE building the helper exec tree; ntreeShaderBeginExecTree_internal
+   * resets every node's need_exec to 1, so a later snapshot would restore all-1s and corrupt the
+   * calling compile (see the GLSL closure callback helper for details). */
+  Vector<int> previous_need_exec;
+  for (bNode &tree_node : helper_tree->nodes) {
+    previous_need_exec.append(tree_node.runtime->need_exec);
+  }
+  BLI_SCOPED_DEFER([&]() {
+    int node_index = 0;
+    for (bNode &tree_node : helper_tree->nodes) {
+      tree_node.runtime->need_exec = previous_need_exec[node_index++];
+    }
+  });
+
   bNodeTreeExec *exec = ntreeShaderBeginExecTree_internal(
       &context, helper_tree, bke::NODE_INSTANCE_KEY_BASE);
   if (exec == nullptr) {
@@ -462,17 +477,9 @@ static bool build_closure_output_height_helper(GPUMaterial *mat,
   }
   BLI_SCOPED_DEFER([&]() { ntreeShaderEndExecTree_internal(exec); });
 
-  Vector<int> previous_need_exec;
   for (bNode &tree_node : helper_tree->nodes) {
-    previous_need_exec.append(tree_node.runtime->need_exec);
     tree_node.runtime->need_exec = 0;
   }
-  BLI_SCOPED_DEFER([&]() {
-    int node_index = 0;
-    for (bNode &tree_node : helper_tree->nodes) {
-      tree_node.runtime->need_exec = previous_need_exec[node_index++];
-    }
-  });
 
   Set<const bNode *> visited_nodes;
   if (const bke::bNodeZoneType *closure_zone_type = bke::zone_type_by_node_type(

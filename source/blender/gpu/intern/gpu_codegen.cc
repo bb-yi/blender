@@ -703,19 +703,69 @@ void GPUCodegen::generate_graphs()
       for (GPUNode &node : graph.nodes) {
         node.tag &= ~GPU_NODE_TAG_FUNCTION;
       }
-      /* Tag only the nodes needed for the current function */
-      gpu_nodes_tag(&graph, func_link.outlink, GPU_NODE_TAG_FUNCTION);
-      GPUGraphOutput graph = graph_serialize(GPU_NODE_TAG_FUNCTION, func_link.outlink);
-      if (func_link.dependency_name[0] != '\0') {
-        graph.dependencies.append_non_duplicates(func_link.dependency_name);
+      if (func_link.mode == GPU_NODE_GRAPH_FUNCTION_LEGACY) {
+        /* Tag only the nodes needed for the current function */
+        gpu_nodes_tag(&graph, func_link.outlink, GPU_NODE_TAG_FUNCTION);
+        GPUGraphOutput graph = graph_serialize(GPU_NODE_TAG_FUNCTION, func_link.outlink);
+        if (func_link.dependency_name[0] != '\0') {
+          graph.dependencies.append_non_duplicates(func_link.dependency_name);
+        }
+        eval_ss << func_link.return_type << " " << func_link.name << "() {\n"
+                << graph.serialized << "}\n\n";
+        output.material_functions.append({eval_ss.str(), graph.dependencies});
       }
-      eval_ss << func_link.return_type << " " << func_link.name << "() {\n"
-              << graph.serialized << "}\n\n";
-      output.material_functions.append({eval_ss.str(), graph.dependencies});
+      else {
+        BLI_assert(func_link.mode == GPU_NODE_GRAPH_FUNCTION_MULTI_IO);
+        for (int output_index = 0; output_index < func_link.outputs_len; output_index++) {
+          gpu_nodes_tag(&graph, func_link.outputs[output_index].outlink, GPU_NODE_TAG_FUNCTION);
+        }
+        GPUGraphOutput function_graph = graph_serialize(GPU_NODE_TAG_FUNCTION);
+        if (func_link.dependency_name[0] != '\0') {
+          function_graph.dependencies.append_non_duplicates(func_link.dependency_name);
+        }
+
+        eval_ss << "void " << func_link.name << "(";
+        bool is_first_parameter = true;
+        for (int input_index = 0; input_index < func_link.input_types_len; input_index++) {
+          if (!is_first_parameter) {
+            eval_ss << ", ";
+          }
+          eval_ss << func_link.input_types[input_index] << " in" << input_index;
+          is_first_parameter = false;
+        }
+        for (int output_index = 0; output_index < func_link.outputs_len; output_index++) {
+          if (!is_first_parameter) {
+            eval_ss << ", ";
+          }
+          eval_ss << "out " << func_link.outputs[output_index].type << " out" << output_index;
+          is_first_parameter = false;
+        }
+        eval_ss << ") {\n" << function_graph.serialized;
+        for (int output_index = 0; output_index < func_link.outputs_len; output_index++) {
+          BLI_assert(func_link.outputs[output_index].outlink != nullptr &&
+                     func_link.outputs[output_index].outlink->output != nullptr);
+          eval_ss << "out" << output_index << " = "
+                  << func_link.outputs[output_index].outlink->output << ";\n";
+        }
+        eval_ss << "}\n\n";
+
+        const std::string serialized = eval_ss.str();
+        BLI_hash_mm2a_add(
+            &hm2a_, reinterpret_cast<const uchar *>(serialized.c_str()), serialized.size());
+        output.material_functions.append({serialized, function_graph.dependencies});
+      }
     }
     /* Leave the function tags as they were before serialization */
     for (GPUNodeGraphFunctionLink &funclink : graph.material_functions) {
-      gpu_nodes_tag(&graph, funclink.outlink, GPU_NODE_TAG_FUNCTION);
+      if (funclink.mode == GPU_NODE_GRAPH_FUNCTION_LEGACY) {
+        gpu_nodes_tag(&graph, funclink.outlink, GPU_NODE_TAG_FUNCTION);
+      }
+      else {
+        BLI_assert(funclink.mode == GPU_NODE_GRAPH_FUNCTION_MULTI_IO);
+        for (int output_index = 0; output_index < funclink.outputs_len; output_index++) {
+          gpu_nodes_tag(&graph, funclink.outputs[output_index].outlink, GPU_NODE_TAG_FUNCTION);
+        }
+      }
     }
   }
 

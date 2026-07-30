@@ -24,6 +24,199 @@ namespace blender {
 
 namespace nodes::node_geo_closure_cc {
 
+static bool gpu_link_zero_value(GPUMaterial *mat, const GPUType type, GPUNodeLink **r_link)
+{
+  const char *function_name = type == GPU_FLOAT ? "set_value_zero" :
+                              ELEM(type, GPU_VEC2, GPU_VEC3) ? "set_rgb_zero" :
+                              type == GPU_VEC4 ? "set_rgba_zero" :
+                                                 nullptr;
+  return function_name != nullptr && GPU_link(mat, function_name, r_link);
+}
+
+static const bNodeSocket *find_socket_by_identifier(const bNode &node,
+                                                    const eNodeSocketInOut in_out,
+                                                    const StringRef identifier)
+{
+  const ListBaseT<bNodeSocket> &sockets = in_out == SOCK_IN ? node.inputs : node.outputs;
+  for (const bNodeSocket &socket : sockets) {
+    if (socket.identifier == identifier) {
+      return &socket;
+    }
+  }
+  return nullptr;
+}
+
+static int normalized_vector_dimensions(const bNodeSocketValueVector &value)
+{
+  return ELEM(value.dimensions, 2, 3, 4) ? value.dimensions : 3;
+}
+
+static void configure_socket_declaration(BaseSocketDeclarationBuilder &decl,
+                                         const bNodeSocket *socket,
+                                         const eNodeSocketInOut in_out,
+                                         const StringRef identifier,
+                                         const StringRef key)
+{
+  if (socket) {
+    decl.description(socket->description).hide_value(socket->flag & SOCK_HIDE_VALUE);
+  }
+  decl.label_fn([in_out, identifier = std::string(identifier), key = std::string(key)](
+                    const bNode &node) -> StringRefNull {
+    const bNodeSocket *socket = find_socket_by_identifier(node, in_out, identifier);
+    return socket && socket->label[0] != '\0' ? StringRefNull(socket->label) : StringRefNull(key);
+  });
+}
+
+static void configure_socket_declaration(decl::FloatBuilder &decl, const bNodeSocket *socket)
+{
+  if (!socket || socket->type != SOCK_FLOAT || !socket->default_value) {
+    return;
+  }
+  const auto &value = *socket->default_value_typed<bNodeSocketValueFloat>();
+  decl.default_value(value.value)
+      .min(value.min)
+      .max(value.max)
+      .subtype(PropertySubType(value.subtype));
+}
+
+static void configure_socket_declaration(decl::IntBuilder &decl, const bNodeSocket *socket)
+{
+  if (!socket || socket->type != SOCK_INT || !socket->default_value) {
+    return;
+  }
+  const auto &value = *socket->default_value_typed<bNodeSocketValueInt>();
+  decl.default_value(value.value)
+      .min(value.min)
+      .max(value.max)
+      .subtype(PropertySubType(value.subtype));
+}
+
+static void configure_socket_declaration(decl::BoolBuilder &decl, const bNodeSocket *socket)
+{
+  if (!socket || socket->type != SOCK_BOOLEAN || !socket->default_value) {
+    return;
+  }
+  const auto &value = *socket->default_value_typed<bNodeSocketValueBoolean>();
+  decl.default_value(bool(value.value));
+}
+
+static void configure_socket_declaration(decl::VectorBuilder &decl, const bNodeSocket *socket)
+{
+  if (!socket || socket->type != SOCK_VECTOR || !socket->default_value) {
+    return;
+  }
+  const auto &value = *socket->default_value_typed<bNodeSocketValueVector>();
+  decl.default_value(float4(value.value[0], value.value[1], value.value[2], value.value[3]))
+      .dimensions(normalized_vector_dimensions(value))
+      .min(value.min)
+      .max(value.max)
+      .subtype(PropertySubType(value.subtype));
+}
+
+static void configure_socket_declaration(decl::ColorBuilder &decl, const bNodeSocket *socket)
+{
+  if (!socket || socket->type != SOCK_RGBA || !socket->default_value) {
+    return;
+  }
+  const auto &value = *socket->default_value_typed<bNodeSocketValueRGBA>();
+  decl.default_value(
+      ColorGeometry4f(value.value[0], value.value[1], value.value[2], value.value[3]));
+}
+
+static BaseSocketDeclarationBuilder &add_closure_input_declaration(
+    DeclarationListBuilder &b,
+    const eNodeSocketDatatype socket_type,
+    const UString name,
+    const UString identifier,
+    const bNodeSocket *socket)
+{
+  switch (socket_type) {
+    case SOCK_FLOAT: {
+      auto &decl = b.add_input<decl::Float>(name, identifier);
+      configure_socket_declaration(decl, socket);
+      return decl;
+    }
+    case SOCK_INT: {
+      auto &decl = b.add_input<decl::Int>(name, identifier);
+      configure_socket_declaration(decl, socket);
+      return decl;
+    }
+    case SOCK_BOOLEAN: {
+      auto &decl = b.add_input<decl::Bool>(name, identifier);
+      configure_socket_declaration(decl, socket);
+      return decl;
+    }
+    case SOCK_VECTOR: {
+      auto &decl = b.add_input<decl::Vector>(name, identifier);
+      configure_socket_declaration(decl, socket);
+      return decl;
+    }
+    case SOCK_RGBA: {
+      auto &decl = b.add_input<decl::Color>(name, identifier);
+      configure_socket_declaration(decl, socket);
+      return decl;
+    }
+    default:
+      return b.add_input(socket_type, name, identifier);
+  }
+}
+
+static BaseSocketDeclarationBuilder &add_closure_output_declaration(
+    DeclarationListBuilder &b,
+    const eNodeSocketDatatype socket_type,
+    const UString name,
+    const UString identifier,
+    const bNodeSocket *socket)
+{
+  switch (socket_type) {
+    case SOCK_FLOAT: {
+      auto &decl = b.add_output<decl::Float>(name, identifier);
+      configure_socket_declaration(decl, socket);
+      return decl;
+    }
+    case SOCK_INT: {
+      auto &decl = b.add_output<decl::Int>(name, identifier);
+      configure_socket_declaration(decl, socket);
+      return decl;
+    }
+    case SOCK_BOOLEAN: {
+      auto &decl = b.add_output<decl::Bool>(name, identifier);
+      configure_socket_declaration(decl, socket);
+      return decl;
+    }
+    case SOCK_VECTOR: {
+      auto &decl = b.add_output<decl::Vector>(name, identifier);
+      configure_socket_declaration(decl, socket);
+      return decl;
+    }
+    case SOCK_RGBA: {
+      auto &decl = b.add_output<decl::Color>(name, identifier);
+      configure_socket_declaration(decl, socket);
+      return decl;
+    }
+    default:
+      return b.add_output(socket_type, name, identifier);
+  }
+}
+
+BaseSocketDeclarationBuilder &add_closure_socket_declaration(
+    DeclarationListBuilder &builder,
+    const eNodeSocketDatatype socket_type,
+    const eNodeSocketInOut in_out,
+    UString name,
+    UString identifier,
+    const bNodeSocket *socket,
+    const StringRef key)
+{
+  BaseSocketDeclarationBuilder &decl = in_out == SOCK_IN ?
+                                            add_closure_input_declaration(
+                                                builder, socket_type, name, identifier, socket) :
+                                            add_closure_output_declaration(
+                                                builder, socket_type, name, identifier, socket);
+  configure_socket_declaration(decl, socket, in_out, identifier.ref(), key);
+  return decl;
+}
+
 /** Shared between closure input and output node. */
 static void node_layout_ex(ui::Layout &layout, bContext *C, PointerRNA *current_node_ptr)
 {
@@ -95,7 +288,9 @@ static void node_declare(NodeDeclarationBuilder &b)
         const NodeClosureInputItem &item = output_storage.input_items.items[i];
         const eNodeSocketDatatype socket_type = item.socket_type;
         const UString identifier(ClosureInputItemsAccessor::socket_identifier_for_item(item));
-        auto &decl = b.add_output(socket_type, UString(item.name), identifier);
+        const bNodeSocket *socket = find_socket_by_identifier(*node, SOCK_OUT, identifier.ref());
+        auto &decl = add_closure_socket_declaration(
+            b, socket_type, SOCK_OUT, UString(item.name), identifier, socket, item.name);
         decl.socket_name_ptr(&tree->id, *ClosureInputItemsAccessor::item_srna, &item, "name");
         if (item.structure_type != NodeSocketInterfaceStructureType::Auto) {
           decl.structure_type(StructureType(item.structure_type));
@@ -140,38 +335,139 @@ static int gpu_shader_closure_input(GPUMaterial *mat,
                                     GPUNodeStack * /*in*/,
                                     GPUNodeStack *out)
 {
-  static float zero_value[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-
-  for (int i = 0; !out[i].end; i++) {
-    if (out[i].type != GPU_NONE) {
-      out[i].link = GPU_constant(zero_value);
+  const int closure_output_node_id = node_storage(*node).output_node_id;
+  struct CallbackBinding {
+    bool found = false;
+    int function_input_index = -1;
+    GPUType transport_type = GPU_NONE;
+  };
+  Vector<CallbackBinding> callback_bindings;
+  bool found_callback_input = false;
+  int output_index = 0;
+  for (const bNodeSocket *socket : node->output_sockets()) {
+    if (out[output_index].end) {
+      break;
     }
+
+    GPUType callback_type = GPU_NONE;
+    int function_input_index = -1;
+    bool is_ancestor_capture = false;
+    if (GPU_material_closure_callback_input_find(
+            mat,
+            closure_output_node_id,
+            socket->name,
+            callback_type,
+            function_input_index,
+            is_ancestor_capture))
+    {
+      found_callback_input = true;
+      const bool extract_xy = callback_type == GPU_VEC3 && out[output_index].type == GPU_VEC2;
+      if ((!extract_xy && callback_type != out[output_index].type) || callback_type == GPU_NONE ||
+          function_input_index < 0)
+      {
+        GPU_material_closure_callback_input_frame_error_set(
+            mat,
+            "Closure Input item '" + std::string(socket->name) +
+                "' has an incompatible callback transport type or input index");
+        return 0;
+      }
+      callback_bindings.append({true, function_input_index, callback_type});
+    }
+    else
+    {
+      if (is_ancestor_capture && out[output_index].hasoutput)
+      {
+        GPU_material_closure_callback_input_frame_error_set(
+            mat,
+            "Nested closure callback cannot capture Closure Input item '" +
+                std::string(socket->name) + "' from an outer callback frame");
+        return 0;
+      }
+      callback_bindings.append({});
+    }
+    output_index++;
+  }
+  if (found_callback_input) {
+    for (const int index : callback_bindings.index_range()) {
+      if (!out[index].hasoutput) {
+        continue;
+      }
+      const CallbackBinding &binding = callback_bindings[index];
+      if (!binding.found) {
+        GPU_material_closure_callback_input_frame_error_set(
+            mat,
+            "Active closure callback frame has no binding for Closure Input item '" +
+                std::string(node->output_socket(index).name) + "'");
+        return 0;
+      }
+      const std::string input_expr = "$OUT = in" +
+                                     std::to_string(binding.function_input_index);
+      GPUNodeLink *input_link = GPU_function_call(input_expr.c_str());
+      const char *set_function = binding.transport_type == GPU_FLOAT ? "set_value" :
+                                 binding.transport_type == GPU_VEC3  ? "set_rgb" :
+                                 binding.transport_type == GPU_VEC4  ? "set_rgba" :
+                                                                      nullptr;
+      if (set_function == nullptr || !GPU_link(mat, set_function, input_link, &out[index].link)) {
+        GPU_material_closure_callback_input_frame_error_set(
+            mat,
+            "Could not materialize Closure Input item '" +
+                std::string(node->output_socket(index).name) + "' as a typed GPU value");
+        return 0;
+      }
+    }
+    return 1;
   }
 
   const StringRefNull uv_source = GPU_material_closure_uv_source_get(mat);
   if (uv_source.is_empty()) {
+    if (GPU_material_closure_callback_input_frame_error_set(
+            mat,
+            "Active closure callback frame has no bindings for Closure Input node '" +
+                std::string(node->name) + "'"))
+    {
+      return 0;
+    }
+    for (int i = 0; !out[i].end; i++) {
+      if (out[i].type != GPU_NONE && out[i].hasoutput) {
+        if (!gpu_link_zero_value(mat, out[i].type, &out[i].link)) {
+          return 0;
+        }
+      }
+    }
     return 1;
   }
   const GPUType uv_source_type = GPU_material_closure_uv_source_type_get(mat);
 
-  int output_index = 0;
+  int uv_output_index = -1;
+  output_index = 0;
   for (const bNodeSocket *socket : node->output_sockets()) {
     if (socket->type != SOCK_VECTOR || !STREQ(socket->name, "UV")) {
       output_index++;
       continue;
+    }
+    uv_output_index = output_index;
+    if (!out[output_index].hasoutput) {
+      break;
     }
     if (uv_source_type == GPU_VEC3) {
       const std::string uv_attr_expr = "$OUT = " + std::string(uv_source);
       out[output_index].link = GPU_function_call(uv_attr_expr.c_str());
     }
     else {
-      const std::string uv_attr_expr = "$OUT = float4(" + std::string(uv_source) +
-                                       ", 0.0, 1.0)";
+      const std::string uv_attr_expr = "$OUT = float4(" + std::string(uv_source) + ", 0.0, 1.0)";
       GPUNodeLink *uv_attr_link = GPU_function_call(uv_attr_expr.c_str());
       GPU_link(mat, "node_uvmap", uv_attr_link, &out[output_index].link);
       node_shader_gpu_bump_tex_coord(mat, node, &out[output_index].link);
     }
     break;
+  }
+
+  for (int i = 0; !out[i].end; i++) {
+    if (i != uv_output_index && out[i].type != GPU_NONE && out[i].hasoutput) {
+      if (!gpu_link_zero_value(mat, out[i].type, &out[i].link)) {
+        return 0;
+      }
+    }
   }
 
   return 1;
@@ -213,7 +509,9 @@ static void node_declare(NodeDeclarationBuilder &b)
       const NodeClosureOutputItem &item = storage.output_items.items[i];
       const eNodeSocketDatatype socket_type = item.socket_type;
       const UString identifier(ClosureOutputItemsAccessor::socket_identifier_for_item(item));
-      auto &decl = b.add_input(socket_type, UString(item.name), identifier);
+      const bNodeSocket *socket = find_socket_by_identifier(*node, SOCK_IN, identifier.ref());
+      auto &decl = add_closure_socket_declaration(
+          b, socket_type, SOCK_IN, UString(item.name), identifier, socket, item.name);
       decl.socket_name_ptr(&tree->id, *ClosureOutputItemsAccessor::item_srna, &item, "name");
       if (item.structure_type != NodeSocketInterfaceStructureType::Auto) {
         decl.structure_type(StructureType(item.structure_type));

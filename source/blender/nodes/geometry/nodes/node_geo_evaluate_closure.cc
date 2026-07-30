@@ -86,7 +86,9 @@ static void node_declare(NodeDeclarationBuilder &b)
       const eNodeSocketDatatype socket_type = item.socket_type;
       const UString identifier(
           EvaluateClosureOutputItemsAccessor::socket_identifier_for_item(item));
-      auto &decl = panel.add_output(socket_type, UString(item.name), identifier);
+      const bNodeSocket *socket = node->output_by_identifier(identifier);
+      auto &decl = node_geo_closure_cc::add_closure_socket_declaration(
+          panel, socket_type, SOCK_OUT, UString(item.name), identifier, socket, item.name);
       decl.socket_name_ptr(
           &tree->id, *EvaluateClosureOutputItemsAccessor::item_srna, &item, "name");
       if (item.structure_type != NodeSocketInterfaceStructureType::Auto) {
@@ -104,7 +106,9 @@ static void node_declare(NodeDeclarationBuilder &b)
       const eNodeSocketDatatype socket_type = item.socket_type;
       const UString identifier(
           EvaluateClosureInputItemsAccessor::socket_identifier_for_item(item));
-      auto &decl = panel.add_input(socket_type, UString(item.name), identifier);
+      const bNodeSocket *socket = node->input_by_identifier(identifier);
+      auto &decl = node_geo_closure_cc::add_closure_socket_declaration(
+          panel, socket_type, SOCK_IN, UString(item.name), identifier, socket, item.name);
       decl.socket_name_ptr(
           &tree->id, *EvaluateClosureInputItemsAccessor::item_srna, &item, "name");
       if (item.structure_type != NodeSocketInterfaceStructureType::Auto) {

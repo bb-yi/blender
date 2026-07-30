@@ -207,6 +207,20 @@ struct PreservedZone {
   bNode *output_node = nullptr;
 };
 
+struct LocalizedClosureZone {
+  enum class Status {
+    Materializing,
+    Complete,
+    Failed,
+  };
+
+  Status status = Status::Materializing;
+  NodeInContext consumer_node;
+  SocketInContext requester_socket;
+  int64_t requester_stack_depth = 0;
+  LinkedSocketValue closure_output;
+};
+
 class ShaderNodesInliner {
  private:
   /** Cache for intermediate values used during the inline process. */
@@ -231,6 +245,13 @@ class ShaderNodesInliner {
    * again in the end.
    */
   Map<NodeInContext, PreservedZone> copied_zone_by_zone_output_node_;
+  /**
+   * Closure zones connected to typed GLSL Function callbacks have to survive in the
+   * localized
+   * shader tree. The source output node and its creation context uniquely identify
+   * such a zone.
+   */
+  Map<NodeInContext, LocalizedClosureZone> localized_closure_zones_;
   /** Sockets that still have to be evaluated. */
   Stack<SocketInContext> scheduled_sockets_stack_;
   /** Knows how to compute between different data types. */
@@ -253,6 +274,22 @@ class ShaderNodesInliner {
   {
     src_tree_.ensure_topology_cache();
     if (src_tree_.has_available_link_cycle()) {
+      for (const bNode *node : src_tree_.all_nodes()) {
+        if (!node->is_type("ShaderNodeGLSLFunction"_ustr)) {
+          continue;
+        }
+        for (const bNodeSocket *socket : node->input_sockets()) {
+          const StringRef identifier(socket->identifier);
+          if (socket->type == SOCK_CLOSURE && identifier.startswith("closure.") &&
+              socket->is_directly_linked())
+          {
+            params_.r_error_messages.append(
+                {node,
+                 fmt::format("GLSL closure callback '{}' is part of a cyclic shader dependency",
+                             identifier.drop_prefix(8))});
+          }
+        }
+      }
       return false;
     }
 
@@ -1288,11 +1325,120 @@ class ShaderNodesInliner {
     bool all_inputs_primitive = false;
   };
 
+  static bool is_glsl_closure_callback_input(const NodeInContext &node, const bNodeSocket &socket)
+  {
+    return node->is_type("ShaderNodeGLSLFunction"_ustr) && socket.type == SOCK_CLOSURE &&
+           StringRef(socket.identifier).startswith("closure.");
+  }
+
+  std::optional<SocketValue> ensure_glsl_closure_callback_localized(
+      const NodeInContext &consumer_node,
+      const bNodeSocket &callback_socket,
+      const ClosureZoneValue closure_zone_value)
+  {
+    const StringRef socket_identifier(callback_socket.identifier);
+    const StringRef helper_name = socket_identifier.drop_prefix(StringRef("closure.").size());
+
+    const bke::bNodeTreeZone *zone = closure_zone_value.zone;
+    const bNode *closure_input_node = zone ? zone->input_node() : nullptr;
+    const bNode *closure_output_node = zone ? zone->output_node() : nullptr;
+    if (!closure_input_node || !closure_output_node) {
+      params_.r_error_messages.append(
+          {consumer_node.node,
+           fmt::format("GLSL closure callback '{}' has no valid Closure Input/Output zone",
+                       helper_name)});
+      return SocketValue{FallbackValue{}};
+    }
+
+    const NodeInContext closure_output_node_ctx{closure_zone_value.closure_creation_context,
+                                                closure_output_node};
+    BLI_assert(!scheduled_sockets_stack_.is_empty());
+    const SocketInContext requester_socket = scheduled_sockets_stack_.peek();
+    LocalizedClosureZone *localization = localized_closure_zones_.lookup_ptr(
+        closure_output_node_ctx);
+    if (localization) {
+      if (localization->status == LocalizedClosureZone::Status::Complete) {
+        return SocketValue{localization->closure_output};
+      }
+      if (localization->status == LocalizedClosureZone::Status::Failed) {
+        return SocketValue{FallbackValue{}};
+      }
+      const bool is_normal_resume = localization->consumer_node == consumer_node &&
+                                    localization->requester_socket == requester_socket &&
+                                    localization->requester_stack_depth ==
+                                        scheduled_sockets_stack_.size();
+      if (!is_normal_resume) {
+        localization->status = LocalizedClosureZone::Status::Failed;
+        params_.r_error_messages.append(
+            {consumer_node.node,
+             fmt::format("Recursive GLSL closure callback '{}' is not supported", helper_name)});
+        return SocketValue{FallbackValue{}};
+      }
+    }
+    else {
+      localized_closure_zones_.add_new(
+          closure_output_node_ctx,
+          LocalizedClosureZone{LocalizedClosureZone::Status::Materializing,
+                               consumer_node,
+                               requester_socket,
+                               scheduled_sockets_stack_.size(),
+                               {}});
+      localization = localized_closure_zones_.lookup_ptr(closure_output_node_ctx);
+
+      const NodeInContext closure_input_node_ctx{closure_zone_value.closure_creation_context,
+                                                 closure_input_node};
+      Map<const bNodeSocket *, bNodeSocket *> socket_map;
+      bNode &copied_input_node = this->copy_node_with_input_values(closure_input_node_ctx,
+                                                                   socket_map);
+      for (const bNodeSocket *src_output_socket : closure_input_node->output_sockets()) {
+        if (!src_output_socket->is_available()) {
+          continue;
+        }
+        bNodeSocket *copied_output_socket = socket_map.lookup(src_output_socket);
+        value_by_socket_.add_overwrite(
+            {closure_zone_value.closure_creation_context, src_output_socket},
+            {LinkedSocketValue{&copied_input_node, copied_output_socket}});
+      }
+      PreservedZone &preserved_zone = copied_zone_by_zone_output_node_.lookup_or_add_default(
+          closure_output_node_ctx);
+      preserved_zone.input_node = &copied_input_node;
+    }
+
+    const EnsureInputsResult ensured_inputs = this->ensure_node_inputs(closure_output_node_ctx);
+    if (ensured_inputs.has_missing_inputs) {
+      return std::nullopt;
+    }
+    /* Nested callback localization may have grown the map, so don't retain the old map pointer. */
+    localization = localized_closure_zones_.lookup_ptr(closure_output_node_ctx);
+    BLI_assert(localization != nullptr);
+    if (localization->status == LocalizedClosureZone::Status::Failed) {
+      return SocketValue{FallbackValue{}};
+    }
+    if (localization->status == LocalizedClosureZone::Status::Complete) {
+      return SocketValue{localization->closure_output};
+    }
+
+    Map<const bNodeSocket *, bNodeSocket *> socket_map;
+    bNode &copied_output_node = this->copy_node_with_input_values(closure_output_node_ctx,
+                                                                  socket_map);
+    bNodeSocket *copied_closure_socket = socket_map.lookup(&closure_output_node->output_socket(0));
+    localization->closure_output = {&copied_output_node, copied_closure_socket};
+    localization->status = LocalizedClosureZone::Status::Complete;
+
+    PreservedZone &preserved_zone = copied_zone_by_zone_output_node_.lookup_or_add_default(
+        closure_output_node_ctx);
+    preserved_zone.output_node = &copied_output_node;
+    return SocketValue{localization->closure_output};
+  }
+
   EnsureInputsResult ensure_node_inputs(const NodeInContext &node)
   {
     EnsureInputsResult result;
     result.has_missing_inputs = false;
     result.all_inputs_primitive = true;
+
+    /* Resolve ordinary inputs first so callback materialization always records the stable socket
+     * and stack depth of the node evaluation, not a sibling dependency scheduled earlier here. */
     for (const bNodeSocket *input_socket : node->input_sockets()) {
       if (!input_socket->is_available()) {
         continue;
@@ -1302,7 +1448,33 @@ class ShaderNodesInliner {
       if (!value) {
         this->schedule_socket(input_socket_ctx);
         result.has_missing_inputs = true;
+      }
+    }
+    if (result.has_missing_inputs) {
+      result.all_inputs_primitive = false;
+      return result;
+    }
+
+    for (const bNodeSocket *input_socket : node->input_sockets()) {
+      if (!input_socket->is_available()) {
         continue;
+      }
+      const SocketInContext input_socket_ctx = {node.context, input_socket};
+      const SocketValue *value = value_by_socket_.lookup_ptr(input_socket_ctx);
+      BLI_assert(value != nullptr);
+      if (is_glsl_closure_callback_input(node, *input_socket)) {
+        if (const auto *closure_zone_value = std::get_if<ClosureZoneValue>(&value->value)) {
+          const std::optional<SocketValue> localized_value =
+              this->ensure_glsl_closure_callback_localized(
+                  node, *input_socket, *closure_zone_value);
+          if (!localized_value) {
+            result.has_missing_inputs = true;
+            result.all_inputs_primitive = false;
+            return result;
+          }
+          value_by_socket_.add_overwrite(input_socket_ctx, *localized_value);
+          value = value_by_socket_.lookup_ptr(input_socket_ctx);
+        }
       }
       if (!value->to_primitive(*input_socket->typeinfo)) {
         result.all_inputs_primitive = false;
@@ -1359,10 +1531,11 @@ class ShaderNodesInliner {
     }
   }
 
-  bNode &handle_output_socket__eval_copy_node(const NodeInContext &node)
+  bNode &copy_node_with_input_values(const NodeInContext &node,
+                                     Map<const bNodeSocket *, bNodeSocket *> &r_socket_map)
   {
-    Map<const bNodeSocket *, bNodeSocket *> socket_map;
-    /* We generate our own identifier and name here to get unique values without having to scan all
+    /* We generate our own identifier and name here to get unique values without having to scan
+     * all
      * already existing nodes. */
     const int identifier = this->get_next_node_identifier();
     const std::string unique_name = fmt::format("{}_{}", identifier, node.node->name);
@@ -1373,7 +1546,7 @@ class ShaderNodesInliner {
         unique_name.size() < sizeof(bNode::name) ? std::make_optional<StringRefNull>(unique_name) :
                                                    std::nullopt,
         identifier,
-        socket_map);
+        r_socket_map);
 
     /* Clear the parent frame pointer, because it does not exist in the destination tree. */
     copied_node.parent = nullptr;
@@ -1386,11 +1559,18 @@ class ShaderNodesInliner {
       if (!src_input_socket->is_available()) {
         continue;
       }
-      bNodeSocket &dst_input_socket = *socket_map.lookup(src_input_socket);
+      bNodeSocket &dst_input_socket = *r_socket_map.lookup(src_input_socket);
       const SocketInContext input_socket_ctx = {node.context, src_input_socket};
       const SocketValue &value = value_by_socket_.lookup(input_socket_ctx);
       this->set_input_socket_value(*node, copied_node, dst_input_socket, value);
     }
+    return copied_node;
+  }
+
+  bNode &handle_output_socket__eval_copy_node(const NodeInContext &node)
+  {
+    Map<const bNodeSocket *, bNodeSocket *> socket_map;
+    bNode &copied_node = this->copy_node_with_input_values(node, socket_map);
     for (const bNodeSocket *src_output_socket : node->output_sockets()) {
       if (!src_output_socket->is_available()) {
         continue;

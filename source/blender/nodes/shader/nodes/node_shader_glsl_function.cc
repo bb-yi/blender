@@ -8,6 +8,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
+#include <cmath>
+#include <climits>
 #include <cstdlib>
 #include <cstring>
 #include <sstream>
@@ -52,6 +55,7 @@
 #include "intern/gpu_shader_create_info.hh"
 
 #include "NOD_sync_sockets.hh"
+#include "NOD_geometry_nodes_closure_signature.hh"
 #include "NOD_shader.h"
 #include "NOD_socket.hh"
 
@@ -249,14 +253,17 @@ namespace blender
       {
         bool has_default_value = false;
         float4 default_value = float4(0.0f);
+        std::optional<int> int_default_value;
         std::optional<std::string> default_expression;
         std::optional<std::string> panel_name;
         std::optional<std::string> description;
         std::optional<std::string> label;
         bool has_min = false;
         float min_value = 0.0f;
+        std::optional<int> int_min_value;
         bool has_max = false;
         float max_value = 0.0f;
+        std::optional<int> int_max_value;
         bool hide_value = false;
         std::optional<PropertySubType> subtype;
         Vector<IntChoiceItem> int_choices;
@@ -276,6 +283,7 @@ namespace blender
       std::string name;
       std::string identifier;
       int dimensions = 0;
+      bool is_array = false;
       int64_t type_source_start = -1;
       int64_t type_source_end = -1;
       Meta meta;
@@ -318,10 +326,20 @@ namespace blender
       std::string name;
       std::string return_type_name;
       GLSLBoundaryType return_type = GLSLBoundaryType::Unsupported;
+      GLSLFunctionParam::Meta return_meta;
       Vector<GLSLFunctionParam> params;
       Vector<GLSLPanelMeta> panels;
       int body_token_start = -1;
       int body_token_end = -1;
+      int64_t body_source_start = -1;
+      int64_t body_source_end = -1;
+    };
+
+    struct GLSLClosureCallback
+    {
+      GLSLFunctionDefinition function;
+      std::optional<std::string> label;
+      std::optional<std::string> description;
     };
 
     struct GLSLParseResult
@@ -348,8 +366,10 @@ namespace blender
       Vector<std::string> function_names;
       Vector<std::string> global_names;
       Vector<GLSLDefineMeta> defines;
+      Vector<GLSLClosureCallback> closure_callbacks;
       GLSLFunctionDefinition function;
       bool defines_panel_default_closed = false;
+      bool closures_panel_default_closed = false;
       int signature_hash = 0;
       int meta_hash = 0;
       int define_hash = 0;
@@ -418,6 +438,14 @@ namespace blender
       }
     };
 
+    struct GLSLRawClosureMeta
+    {
+      std::optional<std::string> label;
+      std::optional<std::string> description;
+      std::optional<bool> panel_default_closed;
+      Map<std::string, GLSLRawParamMeta> items;
+    };
+
     struct GLSLClosureSampleHelper
     {
       std::string param_name;
@@ -426,6 +454,14 @@ namespace blender
       std::string sub_function_name;
       GPUType coordinate_type = GPU_VEC2;
       GPUType return_type = GPU_VEC4;
+    };
+
+    struct GLSLClosureCallbackHelper
+    {
+      std::string function_name;
+      std::string sub_function_name;
+      Vector<GPUType> input_types;
+      Vector<GPUType> output_types;
     };
 
     struct GLSLTokenRange
@@ -467,6 +503,7 @@ namespace blender
       GLSLBoundaryType sampler_type,
       std::string& r_error);
     static bool glsl_param_has_input_socket(const GLSLFunctionParam& param);
+    static ClosureSignature build_glsl_closure_signature(const GLSLClosureCallback& callback);
     static Vector<std::string> find_top_level_glsl_function_names(const Vector<GLSLToken>& tokens);
     static bool validate_top_level_glsl_declarations(const Vector<GLSLToken>& tokens,
       std::string& r_error);
@@ -1647,6 +1684,11 @@ namespace blender
       return int(BLI_ghashutil_strhash_p(key) & 0x7fffffff);
     }
 
+    static int make_closures_panel_identifier()
+    {
+      return int(BLI_ghashutil_strhash_p("glsl_closures_panel") & 0x7fffffff);
+    }
+
     static int make_code_interface_panel_identifier()
     {
       return int(BLI_ghashutil_strhash_p("glsl_code_interface_panel") & 0x7fffffff);
@@ -1931,23 +1973,56 @@ namespace blender
 
       for (int64_t i = 0; i < source.size();)
       {
+        if (ELEM(source[i], '\"', '\''))
+        {
+          const char quote = source[i];
+          stripped.push_back(source[i++]);
+          while (i < source.size())
+          {
+            const char c = source[i];
+            stripped.push_back(c);
+            i++;
+            if (c == '\\' && i < source.size())
+            {
+              stripped.push_back(source[i++]);
+              continue;
+            }
+            if (c == quote)
+            {
+              break;
+            }
+          }
+          continue;
+        }
         if ((i + 1) < source.size() && source[i] == '/' && source[i + 1] == '/')
         {
+          stripped.append("  ");
           i += 2;
           while (i < source.size() && source[i] != '\n')
           {
+            stripped.push_back(source[i] == '\r' ? '\r' : ' ');
             i++;
           }
           continue;
         }
         if ((i + 1) < source.size() && source[i] == '/' && source[i + 1] == '*')
         {
+          stripped.append("  ");
           i += 2;
           while ((i + 1) < source.size() && !(source[i] == '*' && source[i + 1] == '/'))
           {
+            stripped.push_back(ELEM(source[i], '\r', '\n') ? source[i] : ' ');
             i++;
           }
-          i = std::min<int64_t>(i + 2, source.size());
+          if ((i + 1) < source.size())
+          {
+            stripped.append("  ");
+            i += 2;
+          }
+          else if (i < source.size())
+          {
+            stripped.push_back(source[i++]);
+          }
           continue;
         }
         stripped.push_back(source[i]);
@@ -2009,8 +2084,15 @@ namespace blender
       return false;
     }
 
-    static bool parse_glsl_meta_int_literal(const StringRef text, int& r_value, std::string& r_error)
+    static bool parse_glsl_meta_int_literal(const StringRef text,
+      int& r_value,
+      std::string& r_error,
+      bool* r_out_of_range = nullptr)
     {
+      if (r_out_of_range != nullptr)
+      {
+        *r_out_of_range = false;
+      }
       const std::string trimmed = trim_copy(text);
       if (trimmed.empty())
       {
@@ -2019,10 +2101,20 @@ namespace blender
       }
 
       char* end = nullptr;
-      const long value = std::strtol(trimmed.c_str(), &end, 10);
-      if (end == trimmed.c_str() || trim_copy(end).size() != 0)
+      errno = 0;
+      const long long value = std::strtoll(trimmed.c_str(), &end, 10);
+      if (end == trimmed.c_str() || *end != '\0')
       {
         r_error = "Could not parse GLSL meta integer value '" + trimmed + "'";
+        return false;
+      }
+      if (errno == ERANGE || value < INT_MIN || value > INT_MAX)
+      {
+        if (r_out_of_range != nullptr)
+        {
+          *r_out_of_range = true;
+        }
+        r_error = "GLSL meta integer value '" + trimmed + "' is outside the int32 range";
         return false;
       }
       r_value = int(value);
@@ -2773,6 +2865,194 @@ namespace blender
       return true;
     }
 
+    static bool parse_glsl_closure_block(const StringRef comment,
+      GLSLRawClosureMeta& r_closure,
+      bool& r_is_closure_block,
+      std::string& r_error)
+    {
+      r_is_closure_block = false;
+      std::stringstream stream{std::string(comment)};
+      std::string line;
+      bool header_seen = false;
+
+      while (std::getline(stream, line))
+      {
+        std::string normalized = trim_copy(line);
+        if (!normalized.empty() && normalized[0] == '*')
+        {
+          normalized = trim_copy(StringRef(normalized).drop_prefix(1));
+        }
+        if (normalized.empty())
+        {
+          continue;
+        }
+
+        if (!header_seen)
+        {
+          if (!StringRef(normalized).startswith("@glsl_closure"))
+          {
+            return true;
+          }
+          const StringRef suffix = StringRef(normalized).drop_prefix(13);
+          const std::string options = trim_copy(suffix);
+          if (options.size() < 2 || !StringRef(options).startswith("v1") ||
+              (options.size() > 2 && !std::isspace(uchar(options[2]))))
+          {
+            r_error = "GLSL closure header must start with '@glsl_closure v1'";
+            return false;
+          }
+
+          Map<std::string, std::string> assignments;
+          if (!parse_glsl_meta_assignment_list(StringRef(options).drop_prefix(2), assignments, r_error))
+          {
+            return false;
+          }
+          for (const auto& item : assignments.items())
+          {
+            if (item.key == "label")
+            {
+              r_closure.label = item.value;
+            }
+            else if (item.key == "description")
+            {
+              r_closure.description = item.value;
+            }
+            else if (item.key == "closed")
+            {
+              bool closed = false;
+              if (!parse_glsl_meta_bool_literal(item.value, closed, r_error))
+              {
+                return false;
+              }
+              r_closure.panel_default_closed = closed;
+            }
+            else
+            {
+              r_error = "Unsupported GLSL closure header attribute '" + item.key + "'";
+              return false;
+            }
+          }
+          header_seen = true;
+          r_is_closure_block = true;
+          continue;
+        }
+
+        if (StringRef(normalized).startswith("@"))
+        {
+          r_error = "GLSL closure blocks do not support nested directives";
+          return false;
+        }
+
+        const int64_t separator = StringRef(normalized).find(':');
+        if (separator == StringRef::not_found)
+        {
+          r_error = "GLSL closure lines must use 'name: key=value' syntax";
+          return false;
+        }
+        const std::string target = trim_copy(StringRef(normalized).substr(0, separator));
+        const std::string attributes_text = trim_copy(StringRef(normalized).substr(separator + 1));
+        if (target.empty() || attributes_text.empty())
+        {
+          r_error = "GLSL closure lines must define a target and at least one attribute";
+          return false;
+        }
+        if (StringRef(target).find('.') != StringRef::not_found)
+        {
+          r_error = "GLSL closure item targets must use plain parameter names";
+          return false;
+        }
+
+        Map<std::string, std::string> assignments;
+        if (!parse_glsl_meta_assignment_list(attributes_text, assignments, r_error))
+        {
+          return false;
+        }
+        GLSLRawParamMeta meta;
+        if (const GLSLRawParamMeta* existing = r_closure.items.lookup_ptr(target))
+        {
+          meta = *existing;
+        }
+        if (!merge_glsl_raw_param_meta(meta, assignments, r_error))
+        {
+          return false;
+        }
+        r_closure.items.add_overwrite(target, std::move(meta));
+      }
+
+      return true;
+    }
+
+    static bool extract_glsl_closures(const StringRef source,
+      Map<std::string, GLSLRawClosureMeta>& r_closures_by_function,
+      std::string& r_error)
+    {
+      Set<std::string> annotated_functions;
+      for (int64_t i = 0; (i + 1) < source.size();)
+      {
+        if (source[i] == '/' && source[i + 1] == '/')
+        {
+          i += 2;
+          while (i < source.size() && source[i] != '\n')
+          {
+            i++;
+          }
+          continue;
+        }
+        if (source[i] != '/' || source[i + 1] != '*')
+        {
+          i++;
+          continue;
+        }
+
+        const int64_t body_start = i + 2;
+        int64_t body_end = source.size();
+        bool found_end = false;
+        for (int64_t j = body_start; (j + 1) < source.size(); j++)
+        {
+          if (source[j] == '*' && source[j + 1] == '/')
+          {
+            body_end = j;
+            i = j + 2;
+            found_end = true;
+            break;
+          }
+        }
+        if (!found_end)
+        {
+          r_error = "Unterminated GLSL block comment";
+          return false;
+        }
+
+        GLSLRawClosureMeta closure;
+        bool is_closure_block = false;
+        if (!parse_glsl_closure_block(source.substr(body_start, body_end - body_start),
+                                      closure,
+                                      is_closure_block,
+                                      r_error))
+        {
+          return false;
+        }
+        if (!is_closure_block)
+        {
+          continue;
+        }
+
+        std::string function_name;
+        if (!find_glsl_meta_target_function_name(source.substr(i), function_name, r_error))
+        {
+          r_error = "GLSL closure block must be placed directly above a function definition";
+          return false;
+        }
+        if (!annotated_functions.add(function_name))
+        {
+          r_error = "Only one GLSL closure block is supported per function";
+          return false;
+        }
+        r_closures_by_function.add(function_name, std::move(closure));
+      }
+      return true;
+    }
+
     static bool parse_glsl_define_directive(const StringRef text,
       GLSLDefineMeta& r_define,
       std::string& r_error)
@@ -3437,6 +3717,22 @@ namespace blender
       return changed;
     }
 
+    static bool set_glsl_int_socket_default_from_meta(bNodeSocket& socket,
+      const int default_value)
+    {
+      if (socket.type != SOCK_INT || socket.default_value == nullptr)
+      {
+        return false;
+      }
+      bNodeSocketValueInt& value = *static_cast<bNodeSocketValueInt*>(socket.default_value);
+      if (value.value == default_value)
+      {
+        return false;
+      }
+      value.value = default_value;
+      return true;
+    }
+
     static bool set_glsl_socket_default_from_meta(bNodeSocket& socket, const float4 default_value)
     {
       if (socket.default_value == nullptr)
@@ -3454,16 +3750,6 @@ namespace blender
             return false;
           }
           value.value = default_value.x;
-          return true;
-        }
-        case SOCK_INT: {
-          bNodeSocketValueInt& value = *static_cast<bNodeSocketValueInt*>(socket.default_value);
-          const int default_int = int(default_value.x);
-          if (value.value == default_int)
-          {
-            return false;
-          }
-          value.value = default_int;
           return true;
         }
         case SOCK_BOOLEAN: {
@@ -3527,7 +3813,16 @@ namespace blender
 
         if (bNodeSocket* socket = find_node_input_socket_by_identifier(node, param.identifier))
         {
-          changed |= set_glsl_socket_default_from_meta(*socket, param.meta.default_value);
+          if (param.type == GLSLBoundaryType::Int)
+          {
+            BLI_assert(param.meta.int_default_value.has_value());
+            changed |= set_glsl_int_socket_default_from_meta(
+              *socket, param.meta.int_default_value.value_or(0));
+          }
+          else
+          {
+            changed |= set_glsl_socket_default_from_meta(*socket, param.meta.default_value);
+          }
         }
 
         if (param.type == GLSLBoundaryType::Vec4)
@@ -3665,10 +3960,16 @@ namespace blender
       }
 
       char* end = nullptr;
+      errno = 0;
       const float value = std::strtof(trimmed.c_str(), &end);
       if (end == trimmed.c_str() || trim_copy(end).size() != 0)
       {
         r_error = "Could not parse GLSL meta float value '" + trimmed + "'";
+        return false;
+      }
+      if (errno == ERANGE || !std::isfinite(value))
+      {
+        r_error = "GLSL meta float value '" + trimmed + "' is outside the finite float range";
         return false;
       }
       r_value = value;
@@ -3964,11 +4265,17 @@ namespace blender
         else if (r_param.type == GLSLBoundaryType::Int)
         {
           int literal_default = 0;
-          if (parse_glsl_meta_int_literal(*raw_meta.default_value, literal_default, r_error))
+          bool out_of_range = false;
+          if (parse_glsl_meta_int_literal(
+                *raw_meta.default_value, literal_default, r_error, &out_of_range))
           {
-            r_param.meta.default_value.x = float(literal_default);
+            r_param.meta.int_default_value = literal_default;
             r_param.meta.has_default_value = true;
             parsed_literal_default = true;
+          }
+          else if (out_of_range)
+          {
+            return false;
           }
         }
         else if (r_param.type == GLSLBoundaryType::Bool)
@@ -4014,13 +4321,13 @@ namespace blender
 
       if (raw_meta.items.has_value())
       {
-        if (!r_param.meta.has_default_value)
+        if (!r_param.meta.has_default_value || !r_param.meta.int_default_value.has_value())
         {
           r_error = "GLSL meta int items require default=...";
           return false;
         }
         if (!glsl_int_choice_contains_value(r_param.meta.int_choices,
-              int(r_param.meta.default_value.x)))
+              *r_param.meta.int_default_value))
         {
           r_error = "GLSL meta int default must be one of its items";
           return false;
@@ -4036,7 +4343,7 @@ namespace blender
           {
             return false;
           }
-          r_param.meta.min_value = float(min_value);
+          r_param.meta.int_min_value = min_value;
         }
         else if (r_param.type == GLSLBoundaryType::Bool)
         {
@@ -4059,7 +4366,7 @@ namespace blender
           {
             return false;
           }
-          r_param.meta.max_value = float(max_value);
+          r_param.meta.int_max_value = max_value;
         }
         else if (r_param.type == GLSLBoundaryType::Bool)
         {
@@ -4081,11 +4388,16 @@ namespace blender
         }
       }
 
-      if (r_param.meta.has_min && r_param.meta.has_max &&
-        r_param.meta.min_value > r_param.meta.max_value)
+      if (r_param.meta.has_min && r_param.meta.has_max)
       {
-        r_error = "GLSL meta min cannot be greater than max";
-        return false;
+        const bool invalid_range = r_param.type == GLSLBoundaryType::Int ?
+          r_param.meta.int_min_value.value_or(0) > r_param.meta.int_max_value.value_or(0) :
+          r_param.meta.min_value > r_param.meta.max_value;
+        if (invalid_range)
+        {
+          r_error = "GLSL meta min cannot be greater than max";
+          return false;
+        }
       }
 
       if (raw_meta.subtype.has_value())
@@ -4133,13 +4445,21 @@ namespace blender
         if (param.meta.has_default_value)
         {
           ss << "default=";
-          for (const int i : IndexRange(std::max(param.dimensions, 1)))
+          if (param.type == GLSLBoundaryType::Int)
           {
-            if (i != 0)
+            BLI_assert(param.meta.int_default_value.has_value());
+            ss << param.meta.int_default_value.value_or(0);
+          }
+          else
+          {
+            for (const int i : IndexRange(std::max(param.dimensions, 1)))
             {
-              ss << ',';
+              if (i != 0)
+              {
+                ss << ',';
+              }
+              ss << param.meta.default_value[i];
             }
-            ss << param.meta.default_value[i];
           }
           ss << ';';
         }
@@ -4161,11 +4481,31 @@ namespace blender
         }
         if (param.meta.has_min)
         {
-          ss << "min=" << param.meta.min_value << ';';
+          ss << "min=";
+          if (param.type == GLSLBoundaryType::Int)
+          {
+            BLI_assert(param.meta.int_min_value.has_value());
+            ss << param.meta.int_min_value.value_or(0);
+          }
+          else
+          {
+            ss << param.meta.min_value;
+          }
+          ss << ';';
         }
         if (param.meta.has_max)
         {
-          ss << "max=" << param.meta.max_value << ';';
+          ss << "max=";
+          if (param.type == GLSLBoundaryType::Int)
+          {
+            BLI_assert(param.meta.int_max_value.has_value());
+            ss << param.meta.int_max_value.value_or(0);
+          }
+          else
+          {
+            ss << param.meta.max_value;
+          }
+          ss << ';';
         }
         if (param.meta.hide_value)
         {
@@ -4245,6 +4585,265 @@ namespace blender
       return true;
     }
 
+    static bool validate_glsl_closure_socket_text(const StringRef value,
+      const StringRef field,
+      const StringRef helper_name,
+      std::string& r_error)
+    {
+      constexpr int max_socket_text_bytes = sizeof(((bNodeSocket*)nullptr)->identifier) - 1;
+      if (value.size() <= max_socket_text_bytes)
+      {
+        return true;
+      }
+      r_error = "GLSL closure " + std::string(field) + " for helper '" +
+        std::string(helper_name) + "' exceeds the " + std::to_string(max_socket_text_bytes) +
+        " byte socket limit";
+      return false;
+    }
+
+    static bool glsl_closure_boundary_type_supported(const GLSLBoundaryType type)
+    {
+      return ELEM(type,
+        GLSLBoundaryType::Float,
+        GLSLBoundaryType::Int,
+        GLSLBoundaryType::Bool,
+        GLSLBoundaryType::Vec2,
+        GLSLBoundaryType::Vec3,
+        GLSLBoundaryType::Vec4);
+    }
+
+    /* Scalar GPU node sockets use float transport. Every integer in this inclusive range is
+     * represented exactly by that transport. */
+    static constexpr int glsl_closure_exact_int_limit = 1 << 24;
+
+    static bool validate_glsl_closure_int_meta_range(const GLSLFunctionParam& param,
+      std::string& r_error)
+    {
+      const auto validate_value = [&](const std::optional<int> value, const StringRef field) {
+        if (!value.has_value() ||
+            (*value >= -glsl_closure_exact_int_limit &&
+             *value <= glsl_closure_exact_int_limit))
+        {
+          return true;
+        }
+        r_error = "GLSL closure int " + std::string(field) + " must be in the exact GPU "
+          "transport range [-16777216, 16777216]";
+        return false;
+      };
+      return validate_value(param.meta.int_default_value, "default") &&
+        validate_value(param.meta.int_min_value, "min") &&
+        validate_value(param.meta.int_max_value, "max");
+    }
+
+    static bool apply_glsl_closure_item_meta(const GLSLRawParamMeta& raw_meta,
+      GLSLFunctionParam& r_param,
+      const bool is_output,
+      std::string& r_error)
+    {
+      if (raw_meta.items.has_value() || raw_meta.show_label.has_value() ||
+          raw_meta.panel_name.has_value())
+      {
+        r_error = "GLSL closure items, show_label, and nested panels are not supported";
+        return false;
+      }
+
+      if (!is_output)
+      {
+        if (!apply_glsl_meta_to_param(raw_meta, r_param, r_error))
+        {
+          return false;
+        }
+        if (r_param.meta.default_expression.has_value())
+        {
+          r_error = "GLSL closure defaults must be literals";
+          return false;
+        }
+        if (r_param.type == GLSLBoundaryType::Int &&
+            !validate_glsl_closure_int_meta_range(r_param, r_error))
+        {
+          return false;
+        }
+      }
+      else
+      {
+        if (raw_meta.default_value.has_value() || raw_meta.min_value.has_value() ||
+            raw_meta.max_value.has_value() || raw_meta.hide_value.has_value())
+        {
+          r_error = "GLSL closure outputs only support label, description, and subtype";
+          return false;
+        }
+        if (raw_meta.subtype.has_value())
+        {
+          PropertySubType subtype = PROP_NONE;
+          if (!parse_glsl_meta_subtype(*raw_meta.subtype, r_param.type, subtype, r_error))
+          {
+            return false;
+          }
+          r_param.meta.subtype = subtype;
+        }
+        r_param.meta.label = raw_meta.label;
+        r_param.meta.description = raw_meta.description;
+      }
+
+      if (r_param.type == GLSLBoundaryType::Vec4 && r_param.meta.subtype.has_value())
+      {
+        r_error = "GLSL closure vec4 items do not support subtype in v1";
+        return false;
+      }
+      return true;
+    }
+
+    static bool apply_glsl_closure_meta_to_function(const GLSLRawClosureMeta& raw_closure,
+      GLSLFunctionDefinition& r_function,
+      std::string& r_error)
+    {
+      if (!validate_glsl_closure_socket_text(
+            "closure." + r_function.name, "identifier", r_function.name, r_error) ||
+          (raw_closure.label.has_value() &&
+           !validate_glsl_closure_socket_text(
+             *raw_closure.label, "label", r_function.name, r_error)) ||
+          (raw_closure.description.has_value() &&
+           !validate_glsl_closure_socket_text(
+             *raw_closure.description, "description", r_function.name, r_error)))
+      {
+        return false;
+      }
+
+      Set<std::string> item_names;
+      if (r_function.return_type != GLSLBoundaryType::Void)
+      {
+        item_names.add("Result");
+      }
+      for (const GLSLFunctionParam& param : r_function.params)
+      {
+        if (!item_names.add(param.name))
+        {
+          r_error = "GLSL closure helper '" + r_function.name +
+            "' has duplicate parameter name '" + param.name + "'";
+          return false;
+        }
+        if (param.name == "Result")
+        {
+          r_error = "GLSL closure helper '" + r_function.name +
+            "' uses reserved parameter name 'Result'";
+          return false;
+        }
+        if (StringRef(param.name).startswith("npr_closure_callback_out_"))
+        {
+          r_error = "GLSL closure helper '" + r_function.name + "' parameter '" + param.name +
+            "' uses the reserved callback wrapper prefix";
+          return false;
+        }
+      }
+
+      for (const auto& item : raw_closure.items.items())
+      {
+        if (!item_names.contains(item.key))
+        {
+          r_error = "GLSL closure item '" + item.key + "' was not found in helper '" +
+            r_function.name + "'";
+          return false;
+        }
+      }
+
+      if (r_function.return_type != GLSLBoundaryType::Void)
+      {
+        if (!glsl_closure_boundary_type_supported(r_function.return_type))
+        {
+          r_error = "GLSL closure helper '" + r_function.name + "' has unsupported return type '" +
+            r_function.return_type_name + "'";
+          return false;
+        }
+        GLSLFunctionParam result_param;
+        result_param.name = "Result";
+        result_param.type = r_function.return_type;
+        result_param.type_name = r_function.return_type_name;
+        result_param.dimensions = glsl_boundary_dimensions(r_function.return_type);
+        result_param.qualifier = GLSLFunctionParam::Qualifier::Out;
+        if (const GLSLRawParamMeta* result_meta = raw_closure.items.lookup_ptr("Result"))
+        {
+          if (!apply_glsl_closure_item_meta(*result_meta, result_param, true, r_error))
+          {
+            r_error = "For GLSL closure helper '" + r_function.name + "' Result: " + r_error;
+            return false;
+          }
+        }
+        r_function.return_meta = std::move(result_param.meta);
+        if ((r_function.return_type == GLSLBoundaryType::Vec4 &&
+             !validate_glsl_closure_socket_text(
+               "Result.__w", "item key", r_function.name, r_error)) ||
+            (r_function.return_meta.label.has_value() &&
+             !validate_glsl_closure_socket_text(
+               *r_function.return_meta.label, "item label", r_function.name, r_error)) ||
+            (r_function.return_type == GLSLBoundaryType::Vec4 &&
+             r_function.return_meta.label.has_value() &&
+             !validate_glsl_closure_socket_text(
+               make_split_vec4_w_socket_name(*r_function.return_meta.label),
+               "generated item label",
+               r_function.name,
+               r_error)) ||
+            (r_function.return_meta.description.has_value() &&
+             !validate_glsl_closure_socket_text(
+               *r_function.return_meta.description, "item description", r_function.name, r_error)))
+        {
+          return false;
+        }
+      }
+
+      int output_count = r_function.return_type == GLSLBoundaryType::Void ? 0 : 1;
+      for (GLSLFunctionParam& param : r_function.params)
+      {
+        if (param.is_array)
+        {
+          r_error = "GLSL closure helper '" + r_function.name + "' parameter '" + param.name +
+            "' uses an unsupported array type";
+          return false;
+        }
+        if (!glsl_closure_boundary_type_supported(param.type))
+        {
+          r_error = "GLSL closure helper '" + r_function.name + "' parameter '" + param.name +
+            "' has unsupported type '" + param.type_name + "'";
+          return false;
+        }
+        const bool is_output = param.qualifier == GLSLFunctionParam::Qualifier::Out;
+        output_count += is_output ? 1 : 0;
+        if (const GLSLRawParamMeta* item_meta = raw_closure.items.lookup_ptr(param.name))
+        {
+          if (!apply_glsl_closure_item_meta(*item_meta, param, is_output, r_error))
+          {
+            r_error = "For GLSL closure helper '" + r_function.name + "' item '" + param.name +
+              "': " + r_error;
+            return false;
+          }
+        }
+
+        const std::string key_w = param.name + ".__w";
+        if (!validate_glsl_closure_socket_text(param.name, "item key", r_function.name, r_error) ||
+            (param.type == GLSLBoundaryType::Vec4 &&
+             !validate_glsl_closure_socket_text(key_w, "item key", r_function.name, r_error)) ||
+            (param.meta.label.has_value() &&
+             !validate_glsl_closure_socket_text(
+               *param.meta.label, "item label", r_function.name, r_error)) ||
+            (param.type == GLSLBoundaryType::Vec4 && param.meta.label.has_value() &&
+             !validate_glsl_closure_socket_text(make_split_vec4_w_socket_name(*param.meta.label),
+                                                "generated item label",
+                                                r_function.name,
+                                                r_error)) ||
+            (param.meta.description.has_value() &&
+             !validate_glsl_closure_socket_text(
+               *param.meta.description, "item description", r_function.name, r_error)))
+        {
+          return false;
+        }
+      }
+      if (output_count == 0)
+      {
+        r_error = "GLSL closure helper '" + r_function.name + "' must have a return value or out parameter";
+        return false;
+      }
+      return true;
+    }
+
     static Vector<GLSLToken> tokenize_glsl_source(const StringRef source)
     {
       Vector<GLSLToken> tokens;
@@ -4276,6 +4875,25 @@ namespace blender
 
         beginning_of_line = false;
 
+        if (ELEM(c, '\"', '\''))
+        {
+          const char quote = c;
+          i++;
+          while (i < source.size())
+          {
+            if (source[i] == '\\' && (i + 1) < source.size())
+            {
+              i += 2;
+              continue;
+            }
+            if (source[i++] == quote)
+            {
+              break;
+            }
+          }
+          continue;
+        }
+
         if (is_identifier_start(c))
         {
           const int64_t start = i;
@@ -4297,6 +4915,190 @@ namespace blender
       }
 
       return tokens;
+    }
+
+    static bool validate_glsl_closure_function_like_macros(
+      const StringRef source,
+      const Map<std::string, GLSLRawClosureMeta>& raw_closures,
+      std::string& r_error)
+    {
+      if (raw_closures.is_empty())
+      {
+        return true;
+      }
+
+      struct MacroDefinition
+      {
+        std::string name;
+        Set<std::string> parameter_names;
+        Vector<std::string> replacement_identifiers;
+      };
+      Vector<MacroDefinition> macro_definitions;
+
+      const auto parse_logical_line = [&](const StringRef line) {
+        int64_t i = 0;
+        while (i < line.size() && std::isspace(uchar(line[i])))
+        {
+          i++;
+        }
+        if (i >= line.size() || line[i] != '#')
+        {
+          return true;
+        }
+        i++;
+        while (i < line.size() && std::isspace(uchar(line[i])))
+        {
+          i++;
+        }
+        const int64_t directive_start = i;
+        while (i < line.size() && is_identifier_continue(line[i]))
+        {
+          i++;
+        }
+        if (line.substr(directive_start, i - directive_start) != "define")
+        {
+          return true;
+        }
+        while (i < line.size() && std::isspace(uchar(line[i])))
+        {
+          i++;
+        }
+        if (i >= line.size() || !is_identifier_start(line[i]))
+        {
+          return true;
+        }
+        const int64_t macro_name_start = i;
+        i++;
+        while (i < line.size() && is_identifier_continue(line[i]))
+        {
+          i++;
+        }
+        const std::string macro_name(line.substr(macro_name_start, i - macro_name_start));
+        Set<std::string> parameter_names;
+        if (i < line.size() && line[i] == '(')
+        {
+          const int64_t parameters_start = i + 1;
+          int paren_depth = 1;
+          i++;
+          while (i < line.size() && paren_depth > 0)
+          {
+            if (line[i] == '(')
+            {
+              paren_depth++;
+            }
+            else if (line[i] == ')')
+            {
+              paren_depth--;
+            }
+            i++;
+          }
+          if (paren_depth != 0)
+          {
+            return true;
+          }
+          for (const GLSLToken& token :
+               tokenize_glsl_source(line.substr(parameters_start, i - parameters_start - 1)))
+          {
+            if (token.kind == GLSLToken::Kind::Identifier)
+            {
+              parameter_names.add(token.text);
+            }
+          }
+        }
+
+        const StringRef replacement = line.substr(i);
+        if (replacement.find("##") != StringRef::not_found)
+        {
+          r_error = "GLSL macro '" + macro_name +
+            "' uses token pasting, which is not supported with GLSL closure callbacks";
+          return false;
+        }
+
+        MacroDefinition definition;
+        definition.name = macro_name;
+        definition.parameter_names = std::move(parameter_names);
+        for (const GLSLToken& token : tokenize_glsl_source(line.substr(i)))
+        {
+          if (token.kind == GLSLToken::Kind::Identifier &&
+              !definition.parameter_names.contains(token.text))
+          {
+            definition.replacement_identifiers.append(token.text);
+          }
+        }
+        macro_definitions.append(std::move(definition));
+        return true;
+      };
+
+      std::stringstream stream{std::string(source)};
+      std::string physical_line;
+      std::string logical_line;
+      while (std::getline(stream, physical_line))
+      {
+        int64_t content_end = physical_line.size();
+        if (content_end > 0 && physical_line[content_end - 1] == '\r')
+        {
+          content_end--;
+        }
+        const bool continues = content_end > 0 && physical_line[content_end - 1] == '\\';
+        const int64_t append_end = continues ? content_end - 1 : physical_line.size();
+        logical_line.append(physical_line, 0, append_end);
+        if (continues)
+        {
+          continue;
+        }
+        if (!parse_logical_line(logical_line))
+        {
+          return false;
+        }
+        logical_line.clear();
+      }
+      if (!logical_line.empty() && !parse_logical_line(logical_line))
+      {
+        return false;
+      }
+
+      const auto find_referenced_helper = [&](const MacroDefinition& root,
+                                              std::string& r_helper_name) {
+        Set<std::string> visited_macros;
+        Vector<const MacroDefinition*> to_visit;
+        to_visit.append(&root);
+        while (!to_visit.is_empty())
+        {
+          const MacroDefinition& definition = *to_visit.pop_last();
+          if (!visited_macros.add(definition.name))
+          {
+            continue;
+          }
+          for (const std::string& identifier : definition.replacement_identifiers)
+          {
+            if (raw_closures.contains(identifier))
+            {
+              r_helper_name = identifier;
+              return true;
+            }
+            for (const MacroDefinition& candidate : macro_definitions)
+            {
+              if (candidate.name == identifier)
+              {
+                to_visit.append(&candidate);
+              }
+            }
+          }
+        }
+        return false;
+      };
+
+      for (const MacroDefinition& definition : macro_definitions)
+      {
+        std::string helper_name;
+        if (find_referenced_helper(definition, helper_name))
+        {
+          r_error = "GLSL macro '" + definition.name + "' references GLSL closure helper '" +
+            helper_name + "', which is not supported";
+          return false;
+        }
+      }
+      return true;
     }
 
     static bool parse_glsl_preprocessor_directive_name(const StringRef line,
@@ -4455,20 +5257,32 @@ namespace blender
         return false;
       }
 
-      Vector<StringRef> identifiers;
+      Vector<const GLSLToken*> identifiers;
       bool has_out_qualifier = false;
       bool has_inout_qualifier = false;
+      bool has_array_declarator = false;
       bool has_unsupported_punctuation = false;
+      int array_bracket_depth = 0;
 
       for (const GLSLToken& token : tokens)
       {
-        if (token.kind == GLSLToken::Kind::Identifier)
+        if (token.kind == GLSLToken::Kind::Punctuation && token.punctuation == '[')
         {
-          identifiers.append(token.text);
+          has_array_declarator = true;
+          array_bracket_depth++;
+        }
+        else if (token.kind == GLSLToken::Kind::Punctuation && token.punctuation == ']')
+        {
+          has_array_declarator = true;
+          array_bracket_depth = std::max(array_bracket_depth - 1, 0);
+        }
+        else if (token.kind == GLSLToken::Kind::Identifier && array_bracket_depth == 0)
+        {
+          identifiers.append(&token);
           has_out_qualifier |= token.text == "out";
           has_inout_qualifier |= token.text == "inout";
         }
-        else if (!ELEM(token.punctuation, '[', ']'))
+        else if (token.kind == GLSLToken::Kind::Punctuation)
         {
           has_unsupported_punctuation = true;
         }
@@ -4484,7 +5298,7 @@ namespace blender
         r_error = "Unsupported GLSL parameter syntax";
         return false;
       }
-      if (identifiers.size() == 1 && identifiers[0] == "void")
+      if (identifiers.size() == 1 && identifiers[0]->text == "void")
       {
         r_param = {};
         return true;
@@ -4495,9 +5309,9 @@ namespace blender
         return false;
       }
 
-      const StringRef type_name = identifiers[identifiers.size() - 2];
-      const StringRef param_name = identifiers.last();
-      const GLSLToken& type_token = tokens[tokens.size() - 2];
+      const GLSLToken& type_token = *identifiers[identifiers.size() - 2];
+      const StringRef type_name = type_token.text;
+      const StringRef param_name = identifiers.last()->text;
       const GLSLBoundaryType boundary_type = glsl_boundary_type_from_name(type_name);
       if (!ELEM(boundary_type,
         GLSLBoundaryType::Float,
@@ -4535,6 +5349,7 @@ namespace blender
       r_param.name = std::string(param_name);
       r_param.identifier = make_socket_identifier(has_out_qualifier ? "Out" : "In", param_name);
       r_param.dimensions = glsl_boundary_dimensions(boundary_type);
+      r_param.is_array = has_array_declarator;
       r_param.type_source_start = type_token.source_start;
       r_param.type_source_end = type_token.source_end;
       return true;
@@ -4674,6 +5489,8 @@ namespace blender
       }
       r_function.body_token_start = opening_brace_index + 1;
       r_function.body_token_end = closing_brace_index - 1;
+      r_function.body_source_start = tokens[opening_brace_index].source_end;
+      r_function.body_source_end = tokens[closing_brace_index].source_start;
 
       return true;
     }
@@ -5177,6 +5994,151 @@ namespace blender
       return false;
     }
 
+    static bool collect_reachable_glsl_functions(const Vector<GLSLToken>& tokens,
+      const Span<GLSLFunctionDefinition> functions,
+      const GLSLFunctionDefinition& function,
+      Set<std::string>& r_reachable,
+      Set<std::string>& r_visiting,
+      std::string& r_error)
+    {
+      if (r_visiting.contains(function.name))
+      {
+        r_error = "Recursive GLSL closure call graph detected at helper '" + function.name + "'";
+        return false;
+      }
+      if (!r_reachable.add(function.name))
+      {
+        return true;
+      }
+
+      r_visiting.add(function.name);
+      BLI_SCOPED_DEFER([&]() { r_visiting.remove(function.name); });
+      for (int i = function.body_token_start; i <= function.body_token_end; i++)
+      {
+        if (tokens[i].kind != GLSLToken::Kind::Identifier || (i + 1) > function.body_token_end ||
+            tokens[i + 1].kind != GLSLToken::Kind::Punctuation ||
+            tokens[i + 1].punctuation != '(')
+        {
+          continue;
+        }
+        const GLSLFunctionDefinition* callee = find_glsl_function_definition_by_name(
+          functions, tokens[i].text);
+        if (callee == nullptr)
+        {
+          continue;
+        }
+        if (r_visiting.contains(callee->name))
+        {
+          r_error = "Recursive GLSL closure call graph detected between helper '" + function.name +
+            "' and '" + callee->name + "'";
+          return false;
+        }
+        if (!collect_reachable_glsl_functions(
+              tokens, functions, *callee, r_reachable, r_visiting, r_error))
+        {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    static bool build_glsl_closure_callbacks(const Vector<GLSLToken>& tokens,
+      const Span<std::string> function_names,
+      const Map<std::string, GLSLRawClosureMeta>& raw_closures,
+      const GLSLFunctionDefinition& entry_function,
+      Vector<GLSLClosureCallback>& r_callbacks,
+      bool& r_panel_default_closed,
+      std::string& r_error)
+    {
+      r_callbacks.clear();
+      r_panel_default_closed = false;
+      if (raw_closures.is_empty())
+      {
+        return true;
+      }
+
+      Map<std::string, int> definition_counts;
+      for (const std::string& function_name : function_names)
+      {
+        definition_counts.add_or_modify(
+          function_name, [](int* count) { *count = 1; }, [](int* count) { (*count)++; });
+      }
+      for (const std::string& function_name : function_names)
+      {
+        if (definition_counts.lookup(function_name) > 1)
+        {
+          r_error = "GLSL function '" + function_name +
+            "' is overloaded or defined more than once";
+          return false;
+        }
+      }
+      for (const auto& item : raw_closures.items())
+      {
+        const int definition_count = definition_counts.lookup_default(item.key, 0);
+        if (definition_count == 0)
+        {
+          r_error = "GLSL closure helper '" + item.key + "' was not found";
+          return false;
+        }
+      }
+      if (raw_closures.contains(entry_function.name))
+      {
+        r_error = "The exported GLSL function '" + entry_function.name +
+          "' cannot be annotated as a closure helper";
+        return false;
+      }
+
+      Vector<GLSLFunctionDefinition> functions;
+      if (!find_all_top_level_glsl_function_definitions(
+            tokens, function_names, functions, r_error))
+      {
+        return false;
+      }
+
+      Set<std::string> reachable;
+      Set<std::string> visiting;
+      const GLSLFunctionDefinition* parsed_entry = find_glsl_function_definition_by_name(
+        functions, entry_function.name);
+      if (parsed_entry == nullptr ||
+          !collect_reachable_glsl_functions(
+            tokens, functions, *parsed_entry, reachable, visiting, r_error))
+      {
+        if (r_error.empty())
+        {
+          r_error = "Could not build the GLSL closure call graph";
+        }
+        return false;
+      }
+
+      std::optional<bool> explicit_closed;
+      for (GLSLFunctionDefinition function : functions)
+      {
+        const GLSLRawClosureMeta* raw_closure = raw_closures.lookup_ptr(function.name);
+        if (raw_closure == nullptr || !reachable.contains(function.name))
+        {
+          continue;
+        }
+        if (!apply_glsl_closure_meta_to_function(*raw_closure, function, r_error))
+        {
+          return false;
+        }
+        if (raw_closure->panel_default_closed.has_value())
+        {
+          if (explicit_closed.has_value() &&
+              *explicit_closed != *raw_closure->panel_default_closed)
+          {
+            r_error = "Reachable GLSL closure helpers specify conflicting closed values";
+            return false;
+          }
+          explicit_closed = *raw_closure->panel_default_closed;
+        }
+        r_callbacks.append(
+          {std::move(function), raw_closure->label, raw_closure->description});
+      }
+      r_panel_default_closed = explicit_closed.value_or(false);
+      return true;
+    }
+
     static std::string build_function_signature_key(const GLSLFunctionDefinition& function)
     {
       std::stringstream ss;
@@ -5203,6 +6165,17 @@ namespace blender
         ss << param.type_name << ' ' << param.name;
       }
       ss << ')';
+      return ss.str();
+    }
+
+    static std::string build_glsl_closure_signature_key(
+      const Span<GLSLClosureCallback> callbacks)
+    {
+      std::stringstream ss;
+      for (const GLSLClosureCallback& callback : callbacks)
+      {
+        ss << "\nclosure{" << build_function_signature_key(callback.function) << '}';
+      }
       return ss.str();
     }
 
@@ -5274,18 +6247,6 @@ namespace blender
       return nullptr;
     }
 
-    static const bNode* find_localized_copy_of_original_node(const bNodeTree& tree, const bNode& original_node)
-    {
-      for (const bNode* node : tree.all_nodes())
-      {
-        if (node->runtime->original == &original_node)
-        {
-          return node;
-        }
-      }
-      return nullptr;
-    }
-
     static bool closure_output_has_required_sampler_signature(const bNode& closure_output_node,
       const GLSLBoundaryType sampler_type,
       std::string& r_error)
@@ -5334,6 +6295,13 @@ namespace blender
     static void mark_socket_upstream_for_closure_helper(const bNodeSocket& socket,
       Set<const bNode*>& r_visited_nodes)
     {
+      if (socket.type == SOCK_CLOSURE)
+      {
+        /* A nested closure callback zone is compiled by its own helper with its own
+         * callback frame. Marking it here would compile the nested Closure Input under
+         * the outer frame, which has no bindings for it. */
+        return;
+      }
       for (const bNodeLink* link : socket.directly_linked_links())
       {
         if (!link->is_used() || link->fromnode == nullptr)
@@ -5346,20 +6314,12 @@ namespace blender
 
     static void mark_node_upstream_for_closure_helper(const bNode& node, Set<const bNode*>& r_visited_nodes)
     {
-      const bNode* node_to_mark = &node;
-      const bNode* node_original = node.runtime->original ? node.runtime->original : &node;
-      if (const bNode* localized_node = find_localized_copy_of_original_node(node.owner_tree(),
-        *node_original))
-      {
-        node_to_mark = localized_node;
-      }
-
-      if (!r_visited_nodes.add(node_to_mark))
+      if (!r_visited_nodes.add(&node))
       {
         return;
       }
-      const_cast<bNode&>(*node_to_mark).runtime->need_exec = 1;
-      for (const bNodeSocket* input_socket : node_to_mark->input_sockets())
+      const_cast<bNode&>(node).runtime->need_exec = 1;
+      for (const bNodeSocket* input_socket : node.input_sockets())
       {
         mark_socket_upstream_for_closure_helper(*input_socket, r_visited_nodes);
       }
@@ -5376,11 +6336,6 @@ namespace blender
     {
       const bNode* logical_node = node.runtime->original ? node.runtime->original : &node;
       const bNode* eval_node = &node;
-      if (const bNode* localized_node = find_localized_copy_of_original_node(node.owner_tree(),
-        *logical_node))
-      {
-        eval_node = localized_node;
-      }
 
       const std::string helper_key = std::to_string(reinterpret_cast<uintptr_t>(eval_node)) + ":" +
         param.name;
@@ -5418,14 +6373,6 @@ namespace blender
       }
 
       const bNode* closure_output_node = used_link->fromnode;
-      const bNode* closure_output_original = closure_output_node->runtime->original ?
-        closure_output_node->runtime->original :
-        closure_output_node;
-      if (const bNode* localized_node = find_localized_copy_of_original_node(node.owner_tree(),
-        *closure_output_original))
-      {
-        closure_output_node = localized_node;
-      }
 
       std::string closure_error;
       if (!closure_output_has_required_sampler_signature(
@@ -5448,20 +6395,13 @@ namespace blender
 
       bNodeExecContext context = {};
       bNodeTree* helper_tree = const_cast<bNodeTree*>(&closure_output_node->owner_tree());
-      bNodeTreeExec* exec = ntreeShaderBeginExecTree_internal(&context, helper_tree, bke::NODE_INSTANCE_KEY_BASE);
-      if (exec == nullptr)
-      {
-        r_error = "Could not build a helper shader tree for " +
-          std::string(sampler_type_name(param.type).c_str()) + " parameter '" + param.name + "'";
-        return false;
-      }
-      BLI_SCOPED_DEFER([&]() { ntreeShaderEndExecTree_internal(exec); });
 
+      /* Snapshot need_exec BEFORE building the helper exec tree (see the typed callback helper
+       * for why restoring an all-1 snapshot corrupts the calling compile). */
       Vector<int> previous_need_exec;
       for (bNode& tree_node : helper_tree->nodes)
       {
         previous_need_exec.append(tree_node.runtime->need_exec);
-        tree_node.runtime->need_exec = 0;
       }
       BLI_SCOPED_DEFER([&]()
         {
@@ -5471,6 +6411,20 @@ namespace blender
             tree_node.runtime->need_exec = previous_need_exec[node_index++];
           }
         });
+
+      bNodeTreeExec* exec = ntreeShaderBeginExecTree_internal(&context, helper_tree, bke::NODE_INSTANCE_KEY_BASE);
+      if (exec == nullptr)
+      {
+        r_error = "Could not build a helper shader tree for " +
+          std::string(sampler_type_name(param.type).c_str()) + " parameter '" + param.name + "'";
+        return false;
+      }
+      BLI_SCOPED_DEFER([&]() { ntreeShaderEndExecTree_internal(exec); });
+
+      for (bNode& tree_node : helper_tree->nodes)
+      {
+        tree_node.runtime->need_exec = 0;
+      }
       Set<const bNode*> visited_nodes;
       if (color_source_link != nullptr && color_source_link->fromnode != nullptr)
       {
@@ -5602,6 +6556,305 @@ namespace blender
       r_helper.sub_function_name = sub_function_name;
       r_helper.coordinate_type = coordinate_type;
       r_helper.return_type = helper_return_type;
+      return true;
+    }
+
+    static GPUType glsl_closure_callback_item_gpu_type(const ClosureSignature::Item& item)
+    {
+      if (item.type == nullptr)
+      {
+        return GPU_NONE;
+      }
+      switch (item.type->type)
+      {
+      case SOCK_FLOAT:
+      case SOCK_INT:
+      case SOCK_BOOLEAN:
+        return GPU_FLOAT;
+      case SOCK_VECTOR:
+        return GPU_VEC3;
+      case SOCK_RGBA:
+        return GPU_VEC4;
+      default:
+        return GPU_NONE;
+      }
+    }
+
+    static bool glsl_closure_callback_signatures_have_same_abi(
+      const ClosureSignature& expected,
+      const ClosureSignature& actual,
+      const StringRef helper_name,
+      std::string& r_error)
+    {
+      const auto items_have_same_abi = [](const ClosureSignature::Item& expected_item,
+                                          const ClosureSignature::Item& actual_item) {
+        if (expected_item.has_same_abi(actual_item))
+        {
+          return true;
+        }
+        if (expected_item.key != actual_item.key ||
+            expected_item.structure_type != actual_item.structure_type ||
+            expected_item.type == nullptr || actual_item.type == nullptr)
+        {
+          return false;
+        }
+        const bool expected_is_vector3 = expected_item.type->type == SOCK_VECTOR &&
+          expected_item.dimensions == 3;
+        const bool actual_is_vector3 = actual_item.type->type == SOCK_VECTOR &&
+          actual_item.dimensions == 3;
+        return (expected_item.type->type == SOCK_RGBA && actual_is_vector3) ||
+          (actual_item.type->type == SOCK_RGBA && expected_is_vector3);
+      };
+
+      auto compare_items = [&](const auto& expected_items,
+                               const auto& actual_items,
+                               const StringRef direction) {
+        if (expected_items.size() != actual_items.size())
+        {
+          r_error = "GLSL closure callback '" + std::string(helper_name) + "' expects " +
+            std::to_string(expected_items.size()) + " " + std::string(direction) +
+            " items, but the connected Closure provides " +
+            std::to_string(actual_items.size());
+          return false;
+        }
+        for (const int i : expected_items.index_range())
+        {
+          if (!items_have_same_abi(expected_items[i], actual_items[i]))
+          {
+            r_error = "GLSL closure callback '" + std::string(helper_name) + "' " +
+              std::string(direction) + " item '" + expected_items[i].key +
+              "' does not match the connected Closure ABI";
+            return false;
+          }
+        }
+        return true;
+      };
+
+      return compare_items(expected.inputs, actual.inputs, "input") &&
+        compare_items(expected.outputs, actual.outputs, "output");
+    }
+
+    static bool build_glsl_closure_callback_helper(GPUMaterial* mat,
+      const bNode& node,
+      const GLSLClosureCallback& callback,
+      const StringRef source_filename,
+      GLSLClosureCallbackHelper& r_helper,
+      std::string& r_error)
+    {
+      const std::string socket_identifier = "closure." + callback.function.name;
+      const bNodeSocket* callback_socket = find_node_input_socket_by_identifier(node,
+        socket_identifier);
+      const bNodeLink* callback_link = callback_socket != nullptr ?
+        find_used_direct_link(*callback_socket) :
+        nullptr;
+      if (callback_link == nullptr || callback_link->fromnode == nullptr ||
+          !callback_link->fromnode->is_type("NodeClosureOutput"_ustr))
+      {
+        r_error = "GLSL closure callback '" + callback.function.name +
+          "' is connected but has no localized Closure Output source";
+        return false;
+      }
+
+      const bNode* logical_node = node.runtime->original ? node.runtime->original : &node;
+      const std::string helper_key = "callback:" +
+        std::to_string(reinterpret_cast<uintptr_t>(&node)) + ":" + callback.function.name;
+      if (!active_closure_helper_keys.add(helper_key))
+      {
+        r_error = "Recursive GLSL closure callback dependency detected for helper '" +
+          callback.function.name + "'";
+        return false;
+      }
+      active_closure_helper_nodes.append(logical_node);
+      const auto release_active_helper = [&]() {
+        active_closure_helper_keys.remove(helper_key);
+        active_closure_helper_nodes.pop_last();
+      };
+      bool active_helper_released = false;
+      BLI_SCOPED_DEFER([&]() {
+        if (!active_helper_released)
+        {
+          release_active_helper();
+        }
+      });
+
+      const bNode& closure_output_node = *callback_link->fromnode;
+      const ClosureSignature expected_signature = build_glsl_closure_signature(callback);
+      const ClosureSignature actual_signature = ClosureSignature::from_closure_output_node(
+        closure_output_node, false);
+      if (!glsl_closure_callback_signatures_have_same_abi(
+            expected_signature, actual_signature, callback.function.name, r_error))
+      {
+        return false;
+      }
+
+      Vector<GPUType> input_types;
+      Vector<GPUMaterialClosureCallbackInput> callback_inputs;
+      input_types.reserve(actual_signature.inputs.size());
+      callback_inputs.reserve(actual_signature.inputs.size());
+      for (const ClosureSignature::Item& item : actual_signature.inputs)
+      {
+        const GPUType gpu_type = glsl_closure_callback_item_gpu_type(item);
+        if (gpu_type == GPU_NONE)
+        {
+          r_error = "GLSL closure callback '" + callback.function.name + "' input item '" +
+            item.key + "' has no GPU transport type";
+          return false;
+        }
+        const int function_input_index = input_types.size();
+        input_types.append(gpu_type);
+        callback_inputs.append({closure_output_node.identifier,
+                                StringRef(item.key),
+                                gpu_type,
+                                function_input_index});
+      }
+
+      struct OutputBinding
+      {
+        const ClosureSignature::Item* item = nullptr;
+        const bNodeSocket* closure_socket = nullptr;
+        const bNodeLink* source_link = nullptr;
+        const bNodeSocket* sample_socket = nullptr;
+        GPUType type = GPU_NONE;
+        GPUNodeLink* link = nullptr;
+      };
+      Vector<OutputBinding> output_bindings;
+      output_bindings.reserve(actual_signature.outputs.size());
+      for (const ClosureSignature::Item& item : actual_signature.outputs)
+      {
+        const bNodeSocket* closure_socket = find_closure_output_socket_by_name(
+          closure_output_node, item.key);
+        if (closure_socket == nullptr)
+        {
+          r_error = "GLSL closure callback '" + callback.function.name + "' output item '" +
+            item.key + "' was not found on the localized Closure Output";
+          return false;
+        }
+        const GPUType gpu_type = glsl_closure_callback_item_gpu_type(item);
+        if (gpu_type == GPU_NONE)
+        {
+          r_error = "GLSL closure callback '" + callback.function.name + "' output item '" +
+            item.key + "' has no GPU transport type";
+          return false;
+        }
+        const bNodeLink* source_link = find_any_direct_link(*closure_socket);
+        output_bindings.append({&item,
+                                closure_socket,
+                                source_link,
+                                source_link != nullptr ? source_link->fromsock : closure_socket,
+                                gpu_type,
+                                nullptr});
+      }
+
+      bNodeExecContext context = {};
+      bNodeTree* helper_tree = const_cast<bNodeTree*>(&closure_output_node.owner_tree());
+
+      /* Snapshot need_exec BEFORE building the helper exec tree: ntreeShaderBeginExecTree_internal
+       * resets every node's need_exec to 1, so a snapshot taken after it would restore all-1s and
+       * make the calling compile (e.g. an outer callback helper) recompile every remaining node,
+       * including nested closure zones under the wrong frame. */
+      Vector<int> previous_need_exec;
+      for (bNode& tree_node : helper_tree->nodes)
+      {
+        previous_need_exec.append(tree_node.runtime->need_exec);
+      }
+      BLI_SCOPED_DEFER([&]() {
+        int node_index = 0;
+        for (bNode& tree_node : helper_tree->nodes)
+        {
+          tree_node.runtime->need_exec = previous_need_exec[node_index++];
+        }
+      });
+
+      bNodeTreeExec* exec = ntreeShaderBeginExecTree_internal(
+        &context, helper_tree, bke::NODE_INSTANCE_KEY_BASE);
+      if (exec == nullptr)
+      {
+        r_error = "Could not build the localized shader tree for GLSL closure callback '" +
+          callback.function.name + "'";
+        return false;
+      }
+      BLI_SCOPED_DEFER([&]() { ntreeShaderEndExecTree_internal(exec); });
+
+      for (bNode& tree_node : helper_tree->nodes)
+      {
+        tree_node.runtime->need_exec = 0;
+      }
+
+      Set<const bNode*> visited_nodes;
+      for (const OutputBinding& binding : output_bindings)
+      {
+        if (binding.source_link != nullptr && binding.source_link->fromnode != nullptr)
+        {
+          mark_node_upstream_for_closure_helper(*binding.source_link->fromnode, visited_nodes);
+        }
+        else
+        {
+          mark_socket_upstream_for_closure_helper(*binding.closure_socket, visited_nodes);
+        }
+      }
+
+      GPU_material_closure_callback_input_frame_push(mat, callback_inputs);
+      BLI_SCOPED_DEFER([&]() { GPU_material_closure_callback_input_frame_pop(mat); });
+      ntreeExecGPUNodes(exec, mat, nullptr);
+
+      std::string callback_gpu_error;
+      if (GPU_material_closure_callback_input_frame_error_get(mat, callback_gpu_error))
+      {
+        r_error = "GLSL closure callback '" + callback.function.name +
+          "' GPU compilation failed: " + callback_gpu_error;
+        return false;
+      }
+
+      for (OutputBinding& binding : output_bindings)
+      {
+        bNodeStack* stack = node_get_socket_stack(
+          exec->stack, const_cast<bNodeSocket*>(binding.sample_socket));
+        binding.link = stack != nullptr ? static_cast<GPUNodeLink*>(stack->data) : nullptr;
+        if (binding.link == nullptr && binding.source_link != nullptr)
+        {
+          r_error = "GLSL closure callback '" + callback.function.name + "' output item '" +
+            binding.item->key + "' could not compile from node '" +
+            std::string(binding.source_link->fromnode->name) + "'";
+          return false;
+        }
+        if (binding.link == nullptr && stack != nullptr)
+        {
+          binding.link = GPU_constant(stack->vec);
+        }
+        if (binding.link == nullptr)
+        {
+          r_error = "Could not evaluate output item '" + binding.item->key +
+            "' for GLSL closure callback '" + callback.function.name + "'";
+          return false;
+        }
+      }
+
+      Vector<GPUMaterialFunctionOutput> function_outputs;
+      function_outputs.reserve(output_bindings.size());
+      for (OutputBinding& binding : output_bindings)
+      {
+        function_outputs.append({binding.type, &binding.link});
+      }
+
+      release_active_helper();
+      active_helper_released = true;
+      const char* sub_function_name = GPU_material_split_sub_function_multi(
+        mat, input_types, function_outputs, StringRefNull(source_filename));
+      if (sub_function_name == nullptr)
+      {
+        r_error = "Could not create the multi-output GPU function for GLSL closure callback '" +
+          callback.function.name + "'";
+        return false;
+      }
+
+      r_helper.function_name = callback.function.name;
+      r_helper.sub_function_name = sub_function_name;
+      r_helper.input_types = std::move(input_types);
+      r_helper.output_types.reserve(output_bindings.size());
+      for (const OutputBinding& binding : output_bindings)
+      {
+        r_helper.output_types.append(binding.type);
+      }
       return true;
     }
 
@@ -5947,6 +7200,310 @@ namespace blender
       CLOG_WARN(&LOG, "%s", ss.str().c_str());
     }
 
+    static const GLSLClosureCallbackHelper* find_glsl_closure_callback_helper(
+      const Span<GLSLClosureCallbackHelper> helpers, const StringRef function_name)
+    {
+      for (const GLSLClosureCallbackHelper& helper : helpers)
+      {
+        if (helper.function_name == function_name)
+        {
+          return &helper;
+        }
+      }
+      return nullptr;
+    }
+
+    static const GLSLClosureCallback* find_glsl_closure_callback(
+      const Span<GLSLClosureCallback> callbacks, const StringRef function_name)
+    {
+      for (const GLSLClosureCallback& callback : callbacks)
+      {
+        if (callback.function.name == function_name)
+        {
+          return &callback;
+        }
+      }
+      return nullptr;
+    }
+
+    static const char* glsl_closure_callback_gpu_type_name(const GPUType type)
+    {
+      switch (type)
+      {
+      case GPU_FLOAT:
+        return "float";
+      case GPU_VEC3:
+        return "vec3";
+      case GPU_VEC4:
+        return "vec4";
+      default:
+        BLI_assert_unreachable();
+        return "float";
+      }
+    }
+
+    static std::string build_glsl_closure_callback_helper_block(
+      const Span<GLSLClosureCallbackHelper> helpers)
+    {
+      if (helpers.is_empty())
+      {
+        return "";
+      }
+
+      std::stringstream ss;
+      for (const GLSLClosureCallbackHelper& helper : helpers)
+      {
+        ss << "void " << helper.sub_function_name << "(";
+        bool needs_separator = false;
+        for (const int i : helper.input_types.index_range())
+        {
+          if (needs_separator)
+          {
+            ss << ", ";
+          }
+          ss << glsl_closure_callback_gpu_type_name(helper.input_types[i]) << " in" << i;
+          needs_separator = true;
+        }
+        for (const int i : helper.output_types.index_range())
+        {
+          if (needs_separator)
+          {
+            ss << ", ";
+          }
+          ss << "out " << glsl_closure_callback_gpu_type_name(helper.output_types[i]) << " out"
+             << i;
+          needs_separator = true;
+        }
+        ss << ");\n";
+      }
+      ss << "\n";
+      return ss.str();
+    }
+
+    static void append_glsl_closure_callback_input_expressions(
+      const GLSLFunctionParam& param,
+      const Span<GPUType> input_types,
+      int& r_input_index,
+      Vector<std::string>& r_expressions)
+    {
+      switch (param.type)
+      {
+      case GLSLBoundaryType::Int:
+      {
+        BLI_assert(input_types[r_input_index] == GPU_FLOAT);
+        r_input_index++;
+        r_expressions.append("float(clamp(" + param.name + ", -16777216, 16777216))");
+        break;
+      }
+      case GLSLBoundaryType::Bool:
+      {
+        BLI_assert(input_types[r_input_index] == GPU_FLOAT);
+        r_input_index++;
+        r_expressions.append("(" + param.name + " ? 1.0 : 0.0)");
+        break;
+      }
+      case GLSLBoundaryType::Vec2:
+      {
+        BLI_assert(input_types[r_input_index] == GPU_VEC3);
+        r_input_index++;
+        r_expressions.append("vec3(" + param.name + ", 0.0)");
+        break;
+      }
+      case GLSLBoundaryType::Vec3:
+      {
+        const GPUType transport_type = input_types[r_input_index++];
+        BLI_assert(ELEM(transport_type, GPU_VEC3, GPU_VEC4));
+        r_expressions.append(transport_type == GPU_VEC4 ?
+                               "vec4(" + param.name + ", 1.0)" : param.name);
+        break;
+      }
+      case GLSLBoundaryType::Vec4:
+      {
+        BLI_assert(input_types[r_input_index] == GPU_VEC3);
+        BLI_assert(input_types[r_input_index + 1] == GPU_FLOAT);
+        r_input_index += 2;
+        r_expressions.append(param.name + ".xyz");
+        r_expressions.append(param.name + ".w");
+        break;
+      }
+      case GLSLBoundaryType::Float:
+      default:
+      {
+        BLI_assert(input_types[r_input_index] == GPU_FLOAT);
+        r_input_index++;
+        r_expressions.append(param.name);
+        break;
+      }
+      }
+    }
+
+    static std::string glsl_closure_callback_output_expression(
+      const GLSLFunctionParam& param,
+      const Span<GPUType> output_types,
+      int& r_output_index)
+    {
+      const int value_index = r_output_index++;
+      const GPUType transport_type = output_types[value_index];
+      const std::string value_name = "npr_closure_callback_out_" +
+        std::to_string(value_index);
+      switch (param.type)
+      {
+      case GLSLBoundaryType::Int:
+        BLI_assert(transport_type == GPU_FLOAT);
+        return "int(round(clamp(" + value_name + ", -16777216.0, 16777216.0)))";
+      case GLSLBoundaryType::Bool:
+        BLI_assert(transport_type == GPU_FLOAT);
+        return "(" + value_name + " != 0.0)";
+      case GLSLBoundaryType::Vec2:
+        BLI_assert(transport_type == GPU_VEC3);
+        return value_name + ".xy";
+      case GLSLBoundaryType::Vec3:
+        BLI_assert(ELEM(transport_type, GPU_VEC3, GPU_VEC4));
+        return transport_type == GPU_VEC4 ? value_name + ".rgb" : value_name;
+      case GLSLBoundaryType::Vec4:
+      {
+        BLI_assert(transport_type == GPU_VEC3);
+        BLI_assert(output_types[r_output_index] == GPU_FLOAT);
+        const std::string w_name = "npr_closure_callback_out_" +
+          std::to_string(r_output_index++);
+        return "vec4(" + value_name + ".xyz, " + w_name + ")";
+      }
+      case GLSLBoundaryType::Float:
+      default:
+        BLI_assert(transport_type == GPU_FLOAT);
+        return value_name;
+      }
+    }
+
+    static std::string build_glsl_closure_callback_body(
+      const GLSLClosureCallback& callback, const GLSLClosureCallbackHelper& helper)
+    {
+      std::stringstream ss;
+      for (const int i : helper.output_types.index_range())
+      {
+        ss << "\n  " << glsl_closure_callback_gpu_type_name(helper.output_types[i])
+           << " npr_closure_callback_out_" << i << ";";
+      }
+
+      Vector<std::string> call_arguments;
+      int input_index = 0;
+      for (const GLSLFunctionParam& param : callback.function.params)
+      {
+        if (param.qualifier != GLSLFunctionParam::Qualifier::Out)
+        {
+          append_glsl_closure_callback_input_expressions(
+            param, helper.input_types, input_index, call_arguments);
+        }
+      }
+      BLI_assert(input_index == helper.input_types.size());
+      for (const int i : helper.output_types.index_range())
+      {
+        call_arguments.append("npr_closure_callback_out_" + std::to_string(i));
+      }
+
+      ss << "\n  " << helper.sub_function_name << "(";
+      for (const int i : call_arguments.index_range())
+      {
+        if (i != 0)
+        {
+          ss << ", ";
+        }
+        ss << call_arguments[i];
+      }
+      ss << ");";
+
+      int output_index = 0;
+      std::optional<std::string> return_expression;
+      if (callback.function.return_type != GLSLBoundaryType::Void)
+      {
+        GLSLFunctionParam result;
+        result.name = "Result";
+        result.type = callback.function.return_type;
+        result.type_name = callback.function.return_type_name;
+        result.dimensions = glsl_boundary_dimensions(result.type);
+        result.qualifier = GLSLFunctionParam::Qualifier::Out;
+        result.meta = callback.function.return_meta;
+        return_expression = glsl_closure_callback_output_expression(
+          result, helper.output_types, output_index);
+      }
+      for (const GLSLFunctionParam& param : callback.function.params)
+      {
+        if (param.qualifier == GLSLFunctionParam::Qualifier::Out)
+        {
+          ss << "\n  " << param.name << " = " <<
+            glsl_closure_callback_output_expression(param, helper.output_types, output_index) <<
+            ";";
+        }
+      }
+      BLI_assert(output_index == helper.output_types.size());
+      if (return_expression.has_value())
+      {
+        ss << "\n  return " << *return_expression << ";";
+      }
+      ss << "\n";
+      return ss.str();
+    }
+
+    static bool rewrite_glsl_source_for_closure_callbacks(
+      const StringRef source,
+      const Span<std::string> function_names,
+      const Span<GLSLClosureCallback> callbacks,
+      const Span<GLSLClosureCallbackHelper> helpers,
+      std::string& r_rewritten_source,
+      std::string& r_error)
+    {
+      if (helpers.is_empty())
+      {
+        r_rewritten_source = source;
+        return true;
+      }
+
+      const Vector<GLSLToken> tokens = tokenize_glsl_source(source);
+      Vector<GLSLFunctionDefinition> functions;
+      if (!find_all_top_level_glsl_function_definitions(
+            tokens, function_names, functions, r_error))
+      {
+        return false;
+      }
+
+      struct Replacement
+      {
+        int64_t start;
+        int64_t end;
+        std::string body;
+      };
+      Vector<Replacement> replacements;
+      for (const GLSLClosureCallbackHelper& helper : helpers)
+      {
+        const GLSLClosureCallback* callback = find_glsl_closure_callback(callbacks,
+          helper.function_name);
+        const GLSLFunctionDefinition* function = find_glsl_function_definition_by_name(
+          functions, helper.function_name);
+        if (callback == nullptr || function == nullptr || function->body_source_start < 0 ||
+            function->body_source_end < function->body_source_start)
+        {
+          r_error = "Could not locate the function body for connected GLSL closure callback '" +
+            helper.function_name + "'";
+          return false;
+        }
+        replacements.append({function->body_source_start,
+                             function->body_source_end,
+                             build_glsl_closure_callback_body(*callback, helper)});
+      }
+
+      std::sort(replacements.begin(),
+                replacements.end(),
+                [](const Replacement& a, const Replacement& b) { return a.start > b.start; });
+      r_rewritten_source = source;
+      for (const Replacement& replacement : replacements)
+      {
+        r_rewritten_source.replace(replacement.start,
+                                   replacement.end - replacement.start,
+                                   replacement.body);
+      }
+      return true;
+    }
+
     static std::string build_closure_sampler_helper_block(
       const Span<GLSLClosureSampleHelper> closure_helpers)
     {
@@ -6085,9 +7642,11 @@ vec3 glsl_ambient_lighting()
       const Span<GLSLDefineMeta> defines,
       const StringRef define_block,
       const StringRef source,
-      const Span<GLSLClosureSampleHelper> closure_helpers)
+      const Span<GLSLClosureSampleHelper> closure_helpers,
+      const Span<GLSLClosureCallbackHelper> callback_helpers)
     {
       std::stringstream ss;
+      ss << build_glsl_closure_callback_helper_block(callback_helpers);
       ss << build_closure_sampler_helper_block(closure_helpers);
       ss << "#define sample2D sampler2D\n";
       for (const std::string& name : global_names)
@@ -6767,7 +8326,49 @@ vec3 glsl_ambient_lighting()
         closure_helpers.append(helper);
       }
 
-      std::string rewritten_source;
+      Vector<GLSLClosureCallbackHelper> callback_helpers;
+      for (const GLSLClosureCallback& callback : parse_result.closure_callbacks)
+      {
+        const std::string socket_identifier = "closure." + callback.function.name;
+        const bNodeSocket* callback_socket = find_node_input_socket_by_identifier(
+          node, socket_identifier);
+        const bNodeLink* callback_link = callback_socket != nullptr ?
+          find_used_direct_link(*callback_socket) :
+          nullptr;
+        if (callback_link == nullptr)
+        {
+          continue;
+        }
+
+        GLSLClosureCallbackHelper helper;
+        if (!build_glsl_closure_callback_helper(
+              mat, node, callback, parse_result.source_filename, helper, r_error))
+        {
+          return false;
+        }
+        const bool collides_with_user_name =
+          std::find(parse_result.function_names.begin(),
+                    parse_result.function_names.end(),
+                    helper.sub_function_name) != parse_result.function_names.end() ||
+          std::find(parse_result.global_names.begin(),
+                    parse_result.global_names.end(),
+                    helper.sub_function_name) != parse_result.global_names.end() ||
+          std::any_of(parse_result.defines.begin(),
+                      parse_result.defines.end(),
+                      [&](const GLSLDefineMeta& define) {
+                        return define.name == helper.sub_function_name;
+                      });
+        if (collides_with_user_name)
+        {
+          r_error = "Generated GPU function name '" + helper.sub_function_name +
+            "' conflicts with GLSL source while compiling closure callback '" +
+            callback.function.name + "'";
+          return false;
+        }
+        callback_helpers.append(std::move(helper));
+      }
+
+      std::string sampler_rewritten_source;
       GLSLClosureSamplerDowngradeInfo downgrade_info;
       if (!rewrite_glsl_source_for_closure_samplers(
         stripped_source,
@@ -6775,13 +8376,24 @@ vec3 glsl_ambient_lighting()
         all_functions,
         bindings_by_function,
         closure_helpers,
-        rewritten_source,
+        sampler_rewritten_source,
         downgrade_info,
         r_error))
       {
         return false;
       }
       log_closure_sampler_downgrades(mat, node, parse_result, downgrade_info);
+
+      std::string callback_rewritten_source;
+      if (!rewrite_glsl_source_for_closure_callbacks(sampler_rewritten_source,
+                                                     parse_result.function_names,
+                                                     parse_result.closure_callbacks,
+                                                     callback_helpers,
+                                                     callback_rewritten_source,
+                                                     r_error))
+      {
+        return false;
+      }
 
       const std::string define_block = build_glsl_define_block(node, parse_result.defines);
       r_library_source = build_namespaced_glsl_source(
@@ -6790,8 +8402,9 @@ vec3 glsl_ambient_lighting()
         parse_result.global_names,
         parse_result.defines,
         define_block,
-        rewritten_source,
-        closure_helpers);
+        callback_rewritten_source,
+        closure_helpers,
+        callback_helpers);
       r_wrapper_source = build_wrapper_glsl_source(node, parse_result, source_kinds);
 
       return true;
@@ -6812,7 +8425,12 @@ vec3 glsl_ambient_lighting()
 
       Map<std::string, GLSLRawParamMeta> meta_by_key;
       Map<std::string, Vector<GLSLPanelMeta>> panels_by_function;
+      Map<std::string, GLSLRawClosureMeta> raw_closures;
       if (!extract_glsl_meta(source, meta_by_key, panels_by_function, result.error))
+      {
+        return result;
+      }
+      if (!extract_glsl_closures(source, raw_closures, result.error))
       {
         return result;
       }
@@ -6824,6 +8442,11 @@ vec3 glsl_ambient_lighting()
       result.defines_parsed = true;
 
       const std::string stripped_source = strip_glsl_comments(source);
+      if (!validate_glsl_closure_function_like_macros(
+            stripped_source, raw_closures, result.error))
+      {
+        return result;
+      }
       const Vector<GLSLToken> tokens = tokenize_glsl_source(stripped_source);
       std::string deprecated_identifier;
       if (glsl_source_uses_deprecated_eevee_light_access(tokens, deprecated_identifier))
@@ -6872,12 +8495,28 @@ vec3 glsl_ambient_lighting()
       {
         return result;
       }
+      if (!build_glsl_closure_callbacks(tokens,
+                                        result.function_names,
+                                        raw_closures,
+                                        result.function,
+                                        result.closure_callbacks,
+                                        result.closures_panel_default_closed,
+                                        result.error))
+      {
+        return result;
+      }
       const std::string define_meta_signature_key = build_glsl_define_meta_signature_key(
         result.defines, result.defines_panel_default_closed);
       if (!define_meta_signature_key.empty())
       {
         const std::string meta_hash_key = std::to_string(result.meta_hash) +
           "\n\x1fglsl_define_meta\x1f" + define_meta_signature_key;
+        result.meta_hash = int(BLI_ghashutil_strhash_p(meta_hash_key.c_str()));
+      }
+      if (!result.closure_callbacks.is_empty())
+      {
+        const std::string meta_hash_key = std::to_string(result.meta_hash) +
+          "\n\x1fglsl_closure_meta\x1f" + source;
         result.meta_hash = int(BLI_ghashutil_strhash_p(meta_hash_key.c_str()));
       }
       if (glsl_function_meta_uses_deprecated_eevee_light_access(result.function, deprecated_identifier))
@@ -6905,7 +8544,8 @@ vec3 glsl_ambient_lighting()
       result.resolved_function_name = result.function.name;
       result.used_first_function = false;
 
-      const std::string signature_key = build_function_signature_key(result.function);
+      const std::string signature_key = build_function_signature_key(result.function) +
+        build_glsl_closure_signature_key(result.closure_callbacks);
       const uint signature_hash = BLI_ghashutil_strhash_p(signature_key.c_str());
       result.signature_hash = int(signature_hash);
 
@@ -6948,7 +8588,8 @@ vec3 glsl_ambient_lighting()
         result.defines,
         define_block,
         result.source,
-        Span<GLSLClosureSampleHelper>());
+        Span<GLSLClosureSampleHelper>(),
+        Span<GLSLClosureCallbackHelper>());
       result.wrapper_source = build_wrapper_glsl_source(
         node, result, Map<std::string, GLSLSamplerSourceKind>());
       return result;
@@ -7227,12 +8868,15 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
         }
         else
         {
+          BLI_assert(!param.meta.has_default_value || param.meta.int_default_value.has_value());
+          BLI_assert(!param.meta.has_min || param.meta.int_min_value.has_value());
+          BLI_assert(!param.meta.has_max || param.meta.int_max_value.has_value());
           auto& decl = b.add_input<decl::Int>(socket_name, socket_identifier)
-            .min(param.meta.has_min ? int(param.meta.min_value) : -10000)
-            .max(param.meta.has_max ? int(param.meta.max_value) : 10000);
+            .min(param.meta.has_min ? param.meta.int_min_value.value_or(-10000) : -10000)
+            .max(param.meta.has_max ? param.meta.int_max_value.value_or(10000) : 10000);
           if (param.meta.has_default_value)
           {
-            decl.default_value(int(param.meta.default_value.x));
+            decl.default_value(param.meta.int_default_value.value_or(0));
           }
           if (param.meta.hide_value)
           {
@@ -7326,6 +8970,182 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
       }
     }
 
+    static ClosureSignature::ItemUIData glsl_closure_item_ui_data(
+      const GLSLFunctionParam& param,
+      const bool is_output,
+      const bool w_component)
+    {
+      ClosureSignature::ItemUIData ui;
+      if (param.meta.label.has_value())
+      {
+        ui.label = w_component ? make_split_vec4_w_socket_name(*param.meta.label) :
+                               *param.meta.label;
+      }
+      ui.description = param.meta.description;
+      if (!w_component)
+      {
+        ui.subtype = param.meta.subtype;
+      }
+      if (!is_output && param.meta.has_default_value)
+      {
+        if (w_component || param.type == GLSLBoundaryType::Float)
+        {
+          ui.default_value = w_component ? param.meta.default_value.w : param.meta.default_value.x;
+        }
+        else if (param.type == GLSLBoundaryType::Int)
+        {
+          BLI_assert(param.meta.int_default_value.has_value());
+          ui.default_value = param.meta.int_default_value.value_or(0);
+        }
+        else if (param.type == GLSLBoundaryType::Bool)
+        {
+          ui.default_value = param.meta.default_value.x != 0.0f;
+        }
+        else
+        {
+          float4 value = param.meta.default_value;
+          if (glsl_param_uses_color_socket(param))
+          {
+            value.w = 1.0f;
+          }
+          ui.default_value = value;
+        }
+      }
+      if (param.type == GLSLBoundaryType::Int)
+      {
+        ui.min_value = ClosureSignature::ItemMinMaxValue(
+          !is_output && param.meta.has_min ?
+            param.meta.int_min_value.value_or(-glsl_closure_exact_int_limit) :
+            -glsl_closure_exact_int_limit);
+        ui.max_value = ClosureSignature::ItemMinMaxValue(
+          !is_output && param.meta.has_max ?
+            param.meta.int_max_value.value_or(glsl_closure_exact_int_limit) :
+            glsl_closure_exact_int_limit);
+      }
+      else if (!is_output && param.meta.has_min)
+      {
+        ui.min_value = ClosureSignature::ItemMinMaxValue(param.meta.min_value);
+      }
+      if (param.type != GLSLBoundaryType::Int && !is_output && param.meta.has_max)
+      {
+        ui.max_value = ClosureSignature::ItemMinMaxValue(param.meta.max_value);
+      }
+      if (!is_output && param.meta.hide_value)
+      {
+        ui.hide_value = true;
+      }
+      return ui;
+    }
+
+    static void add_glsl_closure_signature_item(ClosureSignature& signature,
+      const GLSLFunctionParam& param,
+      const StringRef key,
+      const bool is_output,
+      const bool w_component = false)
+    {
+      eNodeSocketDatatype socket_type = SOCK_FLOAT;
+      int dimensions = 0;
+      if (!w_component)
+      {
+        switch (param.type)
+        {
+        case GLSLBoundaryType::Int:
+          socket_type = SOCK_INT;
+          break;
+        case GLSLBoundaryType::Bool:
+          socket_type = SOCK_BOOLEAN;
+          break;
+        case GLSLBoundaryType::Vec2:
+          socket_type = SOCK_VECTOR;
+          dimensions = 2;
+          break;
+        case GLSLBoundaryType::Vec3:
+          if (glsl_param_uses_color_socket(param))
+          {
+            socket_type = SOCK_RGBA;
+          }
+          else
+          {
+            socket_type = SOCK_VECTOR;
+            dimensions = 3;
+          }
+          break;
+        case GLSLBoundaryType::Vec4:
+          socket_type = SOCK_VECTOR;
+          dimensions = 3;
+          break;
+        case GLSLBoundaryType::Float:
+        default:
+          socket_type = SOCK_FLOAT;
+          break;
+        }
+      }
+
+      ClosureSignature::Item item;
+      item.key = key;
+      item.type = bke::node_socket_type_find_static(socket_type);
+      item.structure_type = NodeSocketInterfaceStructureType::Single;
+      item.dimensions = dimensions;
+      item.ui = glsl_closure_item_ui_data(param, is_output, w_component);
+      if (is_output)
+      {
+        signature.outputs.add(std::move(item));
+      }
+      else
+      {
+        signature.inputs.add(std::move(item));
+      }
+    }
+
+    static ClosureSignature build_glsl_closure_signature(const GLSLClosureCallback& callback)
+    {
+      ClosureSignature signature;
+      auto add_param = [&](const GLSLFunctionParam& param,
+                           const StringRef key,
+                           const bool is_output) {
+        add_glsl_closure_signature_item(signature, param, key, is_output);
+        if (param.type == GLSLBoundaryType::Vec4)
+        {
+          add_glsl_closure_signature_item(
+            signature, param, std::string(key) + ".__w", is_output, true);
+        }
+      };
+
+      if (callback.function.return_type != GLSLBoundaryType::Void)
+      {
+        GLSLFunctionParam result;
+        result.name = "Result";
+        result.type = callback.function.return_type;
+        result.type_name = callback.function.return_type_name;
+        result.dimensions = glsl_boundary_dimensions(result.type);
+        result.qualifier = GLSLFunctionParam::Qualifier::Out;
+        result.meta = callback.function.return_meta;
+        add_param(result, "Result", true);
+      }
+      for (const GLSLFunctionParam& param : callback.function.params)
+      {
+        add_param(param, param.name, param.qualifier == GLSLFunctionParam::Qualifier::Out);
+      }
+      return signature;
+    }
+
+    static void add_glsl_closure_declarations(DeclarationListBuilder& builder,
+      const GLSLParseResult& parse_result)
+    {
+      for (const GLSLClosureCallback& callback : parse_result.closure_callbacks)
+      {
+        const ClosureSignature signature = build_glsl_closure_signature(callback);
+        auto& decl = builder.add_input<decl::Closure>(
+          UString(callback.label.value_or(callback.function.name)),
+          UString("closure." + callback.function.name));
+        if (callback.description.has_value())
+        {
+          decl.description(*callback.description);
+        }
+        decl.create_signature([signature](const bNode& /*node*/) { return signature; });
+      }
+    }
+
     static void unregister_glsl_param_int_choices(bNode& node)
     {
       for (bNodeSocket* socket : node.input_sockets())
@@ -7394,6 +9214,24 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
         return;
       }
       sync_glsl_param_int_choices(node, parse_result);
+      for (const GLSLClosureCallback& callback : parse_result.closure_callbacks)
+      {
+        bNodeSocket* socket = find_node_input_socket_by_identifier(
+          node, "closure." + callback.function.name);
+        if (socket == nullptr || socket->type != SOCK_CLOSURE)
+        {
+          continue;
+        }
+        if (callback.description.has_value())
+        {
+          BLI_strncpy_utf8(
+            socket->description, callback.description->c_str(), sizeof(socket->description));
+        }
+        else
+        {
+          socket->description[0] = '\0';
+        }
+      }
       if (storage.meta_hash == parse_result.meta_hash)
       {
         return;
@@ -7416,7 +9254,8 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
         bNodeSocketValueInt& value = *static_cast<bNodeSocketValueInt*>(socket->default_value);
         if (!glsl_int_choice_contains_value(param.meta.int_choices, value.value))
         {
-          value.value = int(param.meta.default_value.x);
+          BLI_assert(param.meta.int_default_value.has_value());
+          value.value = param.meta.int_default_value.value_or(0);
         }
       }
       storage.meta_hash = parse_result.meta_hash;
@@ -7444,7 +9283,9 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
       const bool code_mode = (node_storage(*node).flags & SHD_GLSL_FUNCTION_CODE_MODE) != 0;
       const bool has_parameter_panels = !parse_result.function.panels.is_empty();
       const bool has_define_panel = !parse_result.defines.is_empty();
-      const bool use_declaration_panels = has_parameter_panels || has_define_panel;
+      const bool has_closure_panel = !parse_result.closure_callbacks.is_empty();
+      const bool use_declaration_panels = has_parameter_panels || has_define_panel ||
+        has_closure_panel;
       if (code_mode || use_declaration_panels)
       {
         b.use_custom_socket_order();
@@ -7474,6 +9315,17 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
         }
       };
 
+      auto add_closure_panel = [&]() {
+        if (!has_closure_panel)
+        {
+          return;
+        }
+        PanelDeclarationBuilder& closures_panel =
+          b.add_panel("Closures"_ustr, make_closures_panel_identifier())
+            .default_closed(parse_result.closures_panel_default_closed);
+        add_glsl_closure_declarations(closures_panel, parse_result);
+      };
+
       if (code_mode)
       {
         b.add_default_layout();
@@ -7493,6 +9345,7 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
                                       UString(glsl_socket_display_name(param)),
                                       UString(param.identifier));
         }
+        add_closure_panel();
         return;
       }
 
@@ -7559,6 +9412,8 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
           add_glsl_socket_declaration(b, param, false, socket_name, socket_identifier);
         }
       }
+
+      add_closure_panel();
 
       if (!use_declaration_panels)
       {
@@ -7984,6 +9839,79 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
       sync_glsl_meta_defaults(*node, parse_result);
     }
 
+    static std::optional<std::string> find_connected_glsl_closure_callback_name(
+      const bNode& node, const StringRef error)
+    {
+      const bNode* original_node = node.runtime->original;
+      Vector<std::string> connected_helpers;
+      const auto gather_connected_helpers = [&](const bNode& candidate_node) {
+        for (const bNodeSocket* socket : candidate_node.input_sockets())
+        {
+          const StringRef identifier(socket->identifier);
+          if (socket->type != SOCK_CLOSURE || !identifier.startswith("closure.") ||
+              find_used_direct_link(*socket) == nullptr)
+          {
+            continue;
+          }
+          const std::string helper_name = identifier.drop_prefix(8);
+          if (std::find(connected_helpers.begin(), connected_helpers.end(), helper_name) ==
+              connected_helpers.end())
+          {
+            connected_helpers.append(helper_name);
+          }
+        }
+      };
+
+      gather_connected_helpers(node);
+      if (original_node != nullptr && original_node != &node)
+      {
+        gather_connected_helpers(*original_node);
+      }
+      for (const std::string& helper_name : connected_helpers)
+      {
+        const std::string quoted_helper = "'" + helper_name + "'";
+        if (error.find(quoted_helper) != StringRef::not_found)
+        {
+          return helper_name;
+        }
+      }
+      return connected_helpers.is_empty() ? std::nullopt :
+                                            std::make_optional(connected_helpers.first());
+    }
+
+    static int fail_glsl_closure_callback_material_compile(
+      GPUMaterial* mat,
+      bNode* node,
+      const StringRef helper_name,
+      const StringRef error,
+      GPUNodeStack* out)
+    {
+      CLOG_ERROR(&LOG,
+                 "GLSL Function material '%s' node '%s' closure callback '%s' failed: %.*s",
+                 glsl_function_material_name(mat),
+                 node->name,
+                 std::string(helper_name).c_str(),
+                 int(error.size()),
+                 error.data());
+
+      /* Keep a custom node call in the graph and make its generated dependency fail shader
+       * compilation explicitly. This also works when parsing failed and no regular wrapper exists. */
+      const std::string failure_name = "glsl_closure_callback_failure_" +
+        std::to_string(node->identifier);
+      const std::string failure_filename = failure_name + ".glsl";
+      const std::string error_source = "#error GLSL_closure_callback_" +
+        std::string(helper_name) + "_failed\n";
+      GPU_material_generated_source_add(
+        mat, failure_filename.c_str(), {}, error_source.c_str());
+      return GPU_stack_link_custom(mat,
+                                   node,
+                                   failure_name.c_str(),
+                                   failure_filename.c_str(),
+                                   GPU_CUSTOM_NODE_DEPENDENCY_NONE,
+                                   nullptr,
+                                   out);
+    }
+
     static bool node_insert_link(bke::NodeInsertLinkParams& params)
     {
       if (params.link.tonode != &params.node || params.link.tosock->type != SOCK_CLOSURE ||
@@ -8024,14 +9952,24 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
       GPUNodeStack* in,
       GPUNodeStack* out)
     {
-      if (!active_closure_helper_nodes.is_empty() &&
-        !GPU_material_closure_uv_source_get(mat).is_empty())
+      if (!active_closure_helper_nodes.is_empty())
       {
         const bNode* logical_node = node->runtime->original ? node->runtime->original : node;
         for (const bNode* active_logical_node : active_closure_helper_nodes)
         {
           if (active_logical_node == logical_node)
           {
+            if (GPU_material_closure_uv_source_get(mat).is_empty())
+            {
+              GPU_material_closure_callback_input_frame_error_set(
+                mat,
+                "Recursive GLSL Function dependency reached node '" +
+                  std::string(logical_node->name) + "'");
+              CLOG_ERROR(&LOG,
+                         "Recursive GLSL closure callback dependency reached node '%s'",
+                         logical_node->name);
+              return 0;
+            }
             static float zero_value[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
             if (out != nullptr)
             {
@@ -8055,6 +9993,19 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
 
       if (!parse_result.ok)
       {
+        if (const std::optional<std::string> helper_name =
+              find_connected_glsl_closure_callback_name(*node, parse_result.error))
+        {
+          return fail_glsl_closure_callback_material_compile(
+            mat, node, *helper_name, parse_result.error, out);
+        }
+        if (GPU_material_closure_callback_input_frame_error_set(
+              mat,
+              "GLSL Function node '" + std::string(node->name) +
+                "' could not parse: " + parse_result.error))
+        {
+          return 0;
+        }
         static float zero_value[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
         if (out != nullptr)
         {
@@ -8078,6 +10029,19 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
       }
       if (!prepare_sampler_input_bindings(mat, *node, parse_result.function, in))
       {
+        if (const std::optional<std::string> helper_name =
+              find_connected_glsl_closure_callback_name(*node, {}))
+        {
+          return fail_glsl_closure_callback_material_compile(
+            mat, node, *helper_name, "sampler input preparation failed", out);
+        }
+        if (GPU_material_closure_callback_input_frame_error_set(
+              mat,
+              "GLSL Function node '" + std::string(node->name) +
+                "' sampler input preparation failed"))
+        {
+          return 0;
+        }
         CLOG_WARN(&LOG,
           "GLSL Function material '%s' node '%s' sampler preparation failed",
           glsl_function_material_name(mat),
@@ -8102,6 +10066,19 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
       if (!build_specialized_glsl_sources(
         mat, *node, parse_result, library_source, wrapper_source, specialized_error))
       {
+        if (const std::optional<std::string> helper_name =
+              find_connected_glsl_closure_callback_name(*node, specialized_error))
+        {
+          return fail_glsl_closure_callback_material_compile(
+            mat, node, *helper_name, specialized_error, out);
+        }
+        if (GPU_material_closure_callback_input_frame_error_set(
+              mat,
+              "GLSL Function node '" + std::string(node->name) +
+                "' specialization failed: " + specialized_error))
+        {
+          return 0;
+        }
         CLOG_WARN(&LOG,
           "GLSL Function material '%s' node '%s' specialized source build failed: %s",
           glsl_function_material_name(mat),
@@ -8168,13 +10145,27 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
         dependencies,
         wrapper_source.c_str());
 
-      return GPU_stack_link_custom(mat,
-        node,
-        parse_result.wrapper_name.c_str(),
-        parse_result.wrapper_filename.c_str(),
-        dependency_flags,
-        in,
-        out);
+      const int link_result = GPU_stack_link_custom(mat,
+                                                    node,
+                                                    parse_result.wrapper_name.c_str(),
+                                                    parse_result.wrapper_filename.c_str(),
+                                                    dependency_flags,
+                                                    in,
+                                                    out);
+      if (link_result == 0)
+      {
+        if (const std::optional<std::string> helper_name =
+              find_connected_glsl_closure_callback_name(*node, {}))
+        {
+          return fail_glsl_closure_callback_material_compile(
+            mat, node, *helper_name, "generated wrapper graph link failed", out);
+        }
+        GPU_material_closure_callback_input_frame_error_set(
+          mat,
+          "GLSL Function node '" + std::string(node->name) +
+            "' generated wrapper graph link failed");
+      }
+      return link_result;
     }
 
   }  // namespace nodes::node_shader_glsl_function_cc

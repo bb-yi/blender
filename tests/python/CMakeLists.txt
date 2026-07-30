@@ -864,6 +864,7 @@ if(TEST_SRC_DIR_EXISTS)
     bl_node_glsl_function
     --python ${CMAKE_CURRENT_LIST_DIR}/bl_node_glsl_function.py
   )
+
 endif()
 
 # ------------------------------------------------------------------------------

@@ -62,6 +62,15 @@ static void gpu_node_link_free(GPUNodeLink *link)
   }
 }
 
+void gpu_node_link_discard(GPUNodeLink *link)
+{
+  if (link == nullptr) {
+    return;
+  }
+  BLI_assert(link->users == 1);
+  gpu_node_link_free(link);
+}
+
 /* Node Functions */
 
 static GPUNode *gpu_node_create(StringRefNull name, const bool use_static_function = true)
@@ -127,6 +136,12 @@ static void gpu_node_input_link(GPUNode *node, GPUNodeLink *link, const GPUType 
           break;
         case GPU_SOURCE_TEX_TILED_MAPPING:
           /* Already handled by GPU_SOURCE_TEX. */
+          break;
+        case GPU_SOURCE_FUNCTION_CALL:
+          if (input->function_call) {
+            input->function_call = BLI_strdup(input->function_call);
+          }
+          break;
         default:
           break;
       }
@@ -1148,7 +1163,13 @@ void gpu_node_graph_free(GPUNodeGraph *graph)
 {
   graph->outlink_aovs.free_no_destruct();
   graph->outlink_outlines.free_no_destruct();
-  graph->material_functions.free_no_destruct();
+  while (GPUNodeGraphFunctionLink *func_link = static_cast<GPUNodeGraphFunctionLink *>(
+             BLI_pophead(&graph->material_functions)))
+  {
+    MEM_delete(func_link->input_types);
+    MEM_delete(func_link->outputs);
+    MEM_delete(func_link);
+  }
   graph->outlink_compositor.free_no_destruct();
   gpu_node_graph_free_nodes(graph);
 
@@ -1226,7 +1247,15 @@ void gpu_node_graph_prune_unused(GPUNodeGraph *graph)
     gpu_nodes_tag(graph, outline_link.outlink, GPU_NODE_TAG_OUTLINE);
   }
   for (GPUNodeGraphFunctionLink &funclink : graph->material_functions) {
-    gpu_nodes_tag(graph, funclink.outlink, GPU_NODE_TAG_FUNCTION);
+    if (funclink.mode == GPU_NODE_GRAPH_FUNCTION_LEGACY) {
+      gpu_nodes_tag(graph, funclink.outlink, GPU_NODE_TAG_FUNCTION);
+    }
+    else {
+      BLI_assert(funclink.mode == GPU_NODE_GRAPH_FUNCTION_MULTI_IO);
+      for (int output_index = 0; output_index < funclink.outputs_len; output_index++) {
+        gpu_nodes_tag(graph, funclink.outputs[output_index].outlink, GPU_NODE_TAG_FUNCTION);
+      }
+    }
   }
   for (GPUNodeGraphOutputLink &compositor_link : graph->outlink_compositor) {
     gpu_nodes_tag(graph, compositor_link.outlink, GPU_NODE_TAG_COMPOSITOR);

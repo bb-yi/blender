@@ -707,8 +707,16 @@ LinkedClosureSignatures gather_linked_target_closure_signatures(
               else if (node.is_type("GeometryNodeClosureToList"_ustr)) {
                 define_signature = true;
               }
-              result.items.append(
-                  {(*closure_decl->create_signature)(node), define_signature, socket});
+              else if (node.is_type("ShaderNodeGLSLFunction"_ustr)) {
+                /* The GLSL Function callback signature is the authoritative type
+                 * definition. Without this, syncing converts every structure type
+                 * to Auto, which the render-time ABI check then rejects. */
+                define_signature = true;
+              }
+              result.items.append({(*closure_decl->create_signature)(node),
+                                   define_signature,
+                                   socket,
+                                   node.is_type("ShaderNodeGLSLFunction"_ustr)});
               return true;
             }
           }

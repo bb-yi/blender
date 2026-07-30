@@ -107,6 +107,8 @@ def run_glsl_node_operator(node, tree, operator):
     space = area.spaces.active
     space.tree_type = 'ShaderNodeTree'
     space.node_tree = tree
+    for item in tree.nodes:
+        item.select = False
     tree.nodes.active = node
     node.select = True
 
@@ -143,6 +145,27 @@ def make_closure_sampler(tree, *, include_uv=True, color_type="FLOAT", alpha_typ
     tree.update_tag()
     bpy.context.view_layer.update()
     return closure_input, closure_output
+
+
+def make_synced_glsl_callback(tree, glsl_node, helper_name):
+    closure_input = tree.nodes.new("NodeClosureInput")
+    closure_output = tree.nodes.new("NodeClosureOutput")
+    closure_input.pair_with_output(closure_output)
+    relink_and_update(
+        tree,
+        find_socket(closure_output.outputs, "Closure"),
+        find_socket(glsl_node.inputs, f"closure.{helper_name}"),
+    )
+    result = sync_closure_output_with_operator(closure_output, tree)
+    return closure_input, closure_output, result
+
+
+def glsl_callback_sockets(node):
+    return [
+        socket
+        for socket in node.inputs
+        if socket.type == 'CLOSURE' and socket.identifier.startswith("closure.")
+    ]
 
 
 def make_menu_context(shader_type, engine="BLENDER_EEVEE", tree_type="ShaderNodeTree"):
@@ -771,6 +794,1268 @@ class GLSLFunctionNodeTest(unittest.TestCase):
 
         self.assertEqual(glsl_node.parse_status, 'READY')
         self.assertEqual(find_socket(glsl_node.inputs, "volume").bl_idname, "NodeSocketClosure")
+
+    def test_typed_closure_callback_meta_syncs_to_zone_sockets(self):
+        _, tree = self.make_material_tree()
+        glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        source = (
+            "/* @glsl_closure v1 label=\"Remap Callback\" "
+            "description=\"Override the remap helper\" closed=true\n"
+            "color: label=\"Color\" description=\"Color passed to the helper\" "
+            "default=vec3(0.1, 0.2, 0.3) subtype=color hide_value=true\n"
+            "strength: label=\"Strength\" description=\"Remap amount\" "
+            "default=0.25 min=0.0 max=1.0 subtype=factor\n"
+            "steps: label=\"Steps\" default=3 min=1 max=8\n"
+            "enabled: label=\"Enabled\" default=true hide_value=true\n"
+            "Result: label=\"Mapped Color\" description=\"Remapped helper result\" subtype=color\n"
+            "mask: label=\"Mask\" description=\"Mask produced by the helper\"\n"
+            "*/\n"
+            "vec3 remap(vec3 color, float strength, int steps, bool enabled, out float mask){\n"
+            "  mask = enabled ? strength : 0.0;\n"
+            "  return color * mask * float(steps);\n"
+            "}\n"
+            "vec4 closure_meta_export(vec3 base_color){\n"
+            "  float mask;\n"
+            "  vec3 result = remap(base_color, 0.5, 2, true, mask);\n"
+            "  return vec4(result * mask, 1.0);\n"
+            "}\n"
+        )
+        make_text_block("glsl_typed_closure_meta.glsl", source)
+        self.configure_glsl_node(
+            glsl_node, "glsl_typed_closure_meta.glsl", "closure_meta_export"
+        )
+
+        self.assertEqual(glsl_node.parse_status, 'READY')
+        callback_socket = find_socket(glsl_node.inputs, "closure.remap")
+        self.assertEqual(callback_socket.name, "Remap Callback")
+        self.assertEqual(callback_socket.description, "Override the remap helper")
+        self.assertTrue(any(state.is_collapsed for state in glsl_node.panel_states))
+
+        closure_input, closure_output, sync_result = make_synced_glsl_callback(
+            tree, glsl_node, "remap"
+        )
+        self.assertEqual(sync_result, {'FINISHED'})
+        self.assertEqual(
+            [item.name for item in closure_output.input_items],
+            ["color", "strength", "steps", "enabled"],
+        )
+        self.assertEqual(
+            [item.name for item in closure_output.output_items], ["Result", "mask"]
+        )
+
+        color = find_socket(closure_input.outputs, "color")
+        strength = find_socket(closure_input.outputs, "strength")
+        steps = find_socket(closure_input.outputs, "steps")
+        enabled = find_socket(closure_input.outputs, "enabled")
+        result = find_socket(closure_output.inputs, "Result")
+        mask = find_socket(closure_output.inputs, "mask")
+
+        self.assertEqual(color.bl_idname, "NodeSocketColor")
+        self.assertEqual(color.label, "Color")
+        self.assertEqual(color.description, "Color passed to the helper")
+        self.assertTrue(color.hide_value)
+        for actual, expected in zip(color.default_value, (0.1, 0.2, 0.3, 1.0)):
+            self.assertAlmostEqual(actual, expected)
+        self.assertEqual(strength.type, 'VALUE')
+        self.assertEqual(strength.label, "Strength")
+        self.assertEqual(strength.description, "Remap amount")
+        self.assertAlmostEqual(strength.default_value, 0.25)
+        self.assertEqual(steps.type, 'INT')
+        self.assertEqual(steps.label, "Steps")
+        self.assertEqual(steps.default_value, 3)
+        self.assertEqual(enabled.type, 'BOOLEAN')
+        self.assertEqual(enabled.label, "Enabled")
+        self.assertTrue(enabled.default_value)
+        self.assertTrue(enabled.hide_value)
+        self.assertEqual(result.bl_idname, "NodeSocketColor")
+        self.assertEqual(result.label, "Mapped Color")
+        self.assertEqual(result.description, "Remapped helper result")
+        self.assertEqual(mask.type, 'VALUE')
+        self.assertEqual(mask.label, "Mask")
+        self.assertEqual(mask.description, "Mask produced by the helper")
+
+    def test_typed_closure_callback_meta_syncs_to_evaluate_closure_and_persists(self):
+        material, tree = self.make_material_tree()
+        material.use_fake_user = True
+        material_name = material.name
+        glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        source = (
+            "/* @glsl_closure v1 label=\"Evaluate Meta\"\n"
+            "value: label=\"Value\" description=\"Exact integer input\" "
+            "default=16777216 min=-16777216 max=16777216\n"
+            "enabled: label=\"Enabled\" default=true hide_value=true\n"
+            "Result: label=\"Result\"\n"
+            "*/\n"
+            "int evaluate_meta(int value, bool enabled){return enabled ? value : 0;}\n"
+            "vec4 evaluate_meta_export(float value){"
+            "return vec4(float(evaluate_meta(int(value), true)));}\n"
+        )
+        make_text_block("glsl_typed_closure_evaluate_meta.glsl", source)
+        self.configure_glsl_node(
+            glsl_node, "glsl_typed_closure_evaluate_meta.glsl", "evaluate_meta_export"
+        )
+        self.assertEqual(glsl_node.parse_status, 'READY')
+
+        closure_input, closure_output, sync_result = make_synced_glsl_callback(
+            tree, glsl_node, "evaluate_meta"
+        )
+        self.assertEqual(sync_result, {'FINISHED'})
+        evaluate = tree.nodes.new("NodeEvaluateClosure")
+        evaluate.name = "Evaluate Callback Meta"
+        relink_and_update(
+            tree,
+            find_socket(closure_output.outputs, "Closure"),
+            find_socket(evaluate.inputs, "Closure"),
+        )
+        self.assertEqual(sync_closure_output_with_operator(evaluate, tree), {'FINISHED'})
+        tree.interface_update(bpy.context)
+        tree.update_tag()
+        bpy.context.view_layer.update()
+
+        def assert_evaluate_meta(node):
+            value = find_socket(node.inputs, "value")
+            enabled = find_socket(node.inputs, "enabled")
+            result = find_socket(node.outputs, "Result")
+            self.assertEqual(value.bl_idname, "NodeSocketInt")
+            self.assertEqual(value.label, "value")
+            self.assertEqual(value.description, "Exact integer input")
+            self.assertEqual(value.default_value, 16777216)
+            self.assertEqual(enabled.bl_idname, "NodeSocketBool")
+            self.assertEqual(enabled.label, "enabled")
+            self.assertTrue(enabled.default_value)
+            self.assertFalse(enabled.hide_value)
+            self.assertEqual(result.bl_idname, "NodeSocketInt")
+            self.assertEqual(result.label, "Result")
+
+        assert_evaluate_meta(evaluate)
+        evaluate_name = evaluate.name
+        closure_input_name = closure_input.name
+        with tempfile.TemporaryDirectory() as directory:
+            filepath = Path(directory) / "glsl_typed_closure_evaluate_meta.blend"
+            self.assertEqual(
+                bpy.ops.wm.save_as_mainfile(filepath=str(filepath), check_existing=False),
+                {'FINISHED'},
+            )
+            self.assertEqual(
+                bpy.ops.wm.open_mainfile(filepath=str(filepath), load_ui=False), {'FINISHED'}
+            )
+            loaded_tree = bpy.data.materials[material_name].node_tree
+            loaded_evaluate = loaded_tree.nodes[evaluate_name]
+            assert_evaluate_meta(loaded_evaluate)
+            self.assertEqual(
+                find_socket(loaded_tree.nodes[closure_input_name].outputs, "value").default_value,
+                16777216,
+            )
+
+    def test_typed_closure_callback_maps_all_supported_types_and_vec4_keys(self):
+        material, tree = self.make_material_tree()
+        material.use_fake_user = True
+        material_name = material.name
+        glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        source = (
+            "/* @glsl_closure v1\n"
+            "scalar: default=0.4\n"
+            "count: default=2\n"
+            "enabled: default=true\n"
+            "uv: default=vec2(0.1, 0.2)\n"
+            "vector: default=vec3(0.3, 0.4, 0.5)\n"
+            "tint: default=vec3(0.6, 0.7, 0.8) subtype=color\n"
+            "packed: default=vec4(0.6, 0.7, 0.8, 0.9)\n"
+            "out_tint: subtype=color\n"
+            "*/\n"
+            "vec4 typed_helper(float scalar, int count, bool enabled, vec2 uv, vec3 vector, "
+            "vec3 tint, vec4 packed, out float out_scalar, out int out_count, "
+            "out bool out_enabled, out vec2 out_uv, out vec3 out_vector, "
+            "out vec3 out_tint, out vec4 out_packed){\n"
+            "  out_scalar = scalar;\n"
+            "  out_count = count;\n"
+            "  out_enabled = enabled;\n"
+            "  out_uv = uv;\n"
+            "  out_vector = vector;\n"
+            "  out_tint = tint;\n"
+            "  out_packed = packed;\n"
+            "  return packed;\n"
+            "}\n"
+            "vec4 typed_callback_export(float value){\n"
+            "  float out_scalar; int out_count; bool out_enabled; vec2 out_uv;\n"
+            "  vec3 out_vector; vec3 out_tint; vec4 out_packed;\n"
+            "  return typed_helper(value, 2, true, vec2(0.1), vec3(0.2), vec3(0.3), "
+            "vec4(0.4), out_scalar, out_count, out_enabled, out_uv, out_vector, "
+            "out_tint, out_packed);\n"
+            "}\n"
+        )
+        make_text_block("glsl_typed_closure_types.glsl", source)
+        self.configure_glsl_node(
+            glsl_node, "glsl_typed_closure_types.glsl", "typed_callback_export"
+        )
+
+        self.assertEqual(glsl_node.parse_status, 'READY')
+        self.assertEqual(
+            [socket.identifier for socket in glsl_callback_sockets(glsl_node)],
+            ["closure.typed_helper"],
+        )
+        closure_input, closure_output, sync_result = make_synced_glsl_callback(
+            tree, glsl_node, "typed_helper"
+        )
+        self.assertEqual(sync_result, {'FINISHED'})
+
+        expected_inputs = [
+            "scalar",
+            "count",
+            "enabled",
+            "uv",
+            "vector",
+            "tint",
+            "packed",
+            "packed.__w",
+        ]
+        expected_outputs = [
+            "Result",
+            "Result.__w",
+            "out_scalar",
+            "out_count",
+            "out_enabled",
+            "out_uv",
+            "out_vector",
+            "out_tint",
+            "out_packed",
+            "out_packed.__w",
+        ]
+        self.assertEqual(
+            [item.name for item in closure_output.input_items], expected_inputs
+        )
+        self.assertEqual(
+            [item.name for item in closure_output.output_items], expected_outputs
+        )
+
+        input_types = {
+            key: find_socket(closure_input.outputs, key).bl_idname for key in expected_inputs
+        }
+        self.assertEqual(input_types["scalar"], "NodeSocketFloat")
+        self.assertEqual(input_types["count"], "NodeSocketInt")
+        self.assertEqual(input_types["enabled"], "NodeSocketBool")
+        self.assertEqual(input_types["uv"], "NodeSocketVector2D")
+        self.assertEqual(input_types["vector"], "NodeSocketVector")
+        self.assertEqual(input_types["tint"], "NodeSocketColor")
+        self.assertEqual(input_types["packed"], "NodeSocketVector")
+        self.assertEqual(input_types["packed.__w"], "NodeSocketFloat")
+        self.assertAlmostEqual(find_socket(closure_input.outputs, "scalar").default_value, 0.4)
+        self.assertEqual(find_socket(closure_input.outputs, "count").default_value, 2)
+        self.assertTrue(find_socket(closure_input.outputs, "enabled").default_value)
+        for actual, expected in zip(
+            find_socket(closure_input.outputs, "uv").default_value, (0.1, 0.2)
+        ):
+            self.assertAlmostEqual(actual, expected)
+        for actual, expected in zip(
+            find_socket(closure_input.outputs, "vector").default_value, (0.3, 0.4, 0.5)
+        ):
+            self.assertAlmostEqual(actual, expected)
+        for actual, expected in zip(
+            find_socket(closure_input.outputs, "tint").default_value, (0.6, 0.7, 0.8, 1.0)
+        ):
+            self.assertAlmostEqual(actual, expected)
+        for actual, expected in zip(
+            find_socket(closure_input.outputs, "packed").default_value, (0.6, 0.7, 0.8)
+        ):
+            self.assertAlmostEqual(actual, expected)
+        self.assertAlmostEqual(
+            find_socket(closure_input.outputs, "packed.__w").default_value, 0.9
+        )
+
+        output_types = {
+            key: find_socket(closure_output.inputs, key).bl_idname for key in expected_outputs
+        }
+        self.assertEqual(output_types["Result"], "NodeSocketVector")
+        self.assertEqual(output_types["Result.__w"], "NodeSocketFloat")
+        self.assertEqual(output_types["out_scalar"], "NodeSocketFloat")
+        self.assertEqual(output_types["out_count"], "NodeSocketInt")
+        self.assertEqual(output_types["out_enabled"], "NodeSocketBool")
+        self.assertEqual(output_types["out_uv"], "NodeSocketVector2D")
+        self.assertEqual(output_types["out_vector"], "NodeSocketVector")
+        self.assertEqual(output_types["out_tint"], "NodeSocketColor")
+        self.assertEqual(output_types["out_packed"], "NodeSocketVector")
+        self.assertEqual(output_types["out_packed.__w"], "NodeSocketFloat")
+
+        closure_input_name = closure_input.name
+        closure_output_name = closure_output.name
+        with tempfile.TemporaryDirectory() as directory:
+            filepath = Path(directory) / "glsl_typed_closure_dimensions.blend"
+            self.assertEqual(
+                bpy.ops.wm.save_as_mainfile(filepath=str(filepath), check_existing=False),
+                {'FINISHED'},
+            )
+            self.assertEqual(
+                bpy.ops.wm.open_mainfile(filepath=str(filepath), load_ui=False), {'FINISHED'}
+            )
+            loaded_tree = bpy.data.materials[material_name].node_tree
+            loaded_input = loaded_tree.nodes[closure_input_name]
+            loaded_output = loaded_tree.nodes[closure_output_name]
+            self.assertEqual(
+                find_socket(loaded_input.outputs, "uv").bl_idname, "NodeSocketVector2D"
+            )
+            self.assertEqual(
+                find_socket(loaded_output.inputs, "out_uv").bl_idname, "NodeSocketVector2D"
+            )
+
+    def test_typed_closure_callbacks_only_expose_reachable_helpers_in_definition_order(self):
+        _, tree = self.make_material_tree()
+        glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        source = (
+            "/* @glsl_closure v1 label=\"Unused\" closed=true\n"
+            "*/\n"
+            "float unused_helper(float value){return value + 10.0;}\n"
+            "/* @glsl_closure v1 label=\"Downstream\"\n"
+            "*/\n"
+            "float downstream(float value){return value * 2.0;}\n"
+            "/* @glsl_closure v1 label=\"Upstream\"\n"
+            "*/\n"
+            "float upstream(float value){return downstream(value) + 1.0;}\n"
+            "vec4 reachable_callback_export(float value){\n"
+            "  return vec4(upstream(value));\n"
+            "}\n"
+        )
+        make_text_block("glsl_typed_closure_reachable.glsl", source)
+        self.configure_glsl_node(
+            glsl_node, "glsl_typed_closure_reachable.glsl", "reachable_callback_export"
+        )
+
+        self.assertEqual(glsl_node.parse_status, 'READY')
+        callbacks = glsl_callback_sockets(glsl_node)
+        self.assertEqual(
+            [socket.identifier for socket in callbacks],
+            ["closure.downstream", "closure.upstream"],
+        )
+        self.assertEqual([socket.name for socket in callbacks], ["Downstream", "Upstream"])
+        self.assertNotIn(
+            "closure.unused_helper", {socket.identifier for socket in glsl_node.inputs}
+        )
+
+    def test_typed_closure_callback_line_comment_disables_annotation(self):
+        _, tree = self.make_material_tree()
+        glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        source = (
+            "// /* @glsl_closure v1 */\n"
+            "float helper(float value){return value * 2.0;}\n"
+            "vec4 line_comment_export(float value){return vec4(helper(value));}\n"
+        )
+        make_text_block("glsl_typed_closure_line_comment.glsl", source)
+        self.configure_glsl_node(
+            glsl_node, "glsl_typed_closure_line_comment.glsl", "line_comment_export"
+        )
+
+        self.assertEqual(glsl_node.parse_status, 'READY')
+        self.assertEqual(glsl_callback_sockets(glsl_node), [])
+
+    def test_typed_closure_callback_sync_preserves_identity_links_and_values(self):
+        material, tree = self.make_material_tree()
+        material.use_fake_user = True
+        material_name = material.name
+        glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        text = make_text_block(
+            "glsl_typed_closure_sync.glsl",
+            "/* @glsl_closure v1 label=\"Callback A\"\n"
+            "value: label=\"Value A\" description=\"Input A\" default=0.25 min=0.0 max=1.0\n"
+            "Result: label=\"Result A\" description=\"Output A\"\n"
+            "*/\n"
+            "float remap(float value){return value;}\n"
+            "vec4 callback_sync_export(float value){return vec4(remap(value));}\n",
+        )
+        self.configure_glsl_node(
+            glsl_node, "glsl_typed_closure_sync.glsl", "callback_sync_export"
+        )
+        self.assertEqual(glsl_node.parse_status, 'READY')
+        closure_input, closure_output, sync_result = make_synced_glsl_callback(
+            tree, glsl_node, "remap"
+        )
+        self.assertEqual(sync_result, {'FINISHED'})
+
+        callback = find_socket(glsl_node.inputs, "closure.remap")
+        value_socket = find_socket(closure_input.outputs, "value")
+        result_socket = find_socket(closure_output.inputs, "Result")
+        self.assertEqual(value_socket.label, "Value A")
+        self.assertEqual(result_socket.label, "Result A")
+        callback_identifier = callback.identifier
+        value_identifier = value_socket.identifier
+        result_identifier = result_socket.identifier
+        value_socket.default_value = 0.75
+
+        value_node = tree.nodes.new("ShaderNodeValue")
+        value_node.outputs[0].default_value = 0.6
+        relink_and_update(tree, value_node.outputs[0], result_socket)
+
+        text.clear()
+        text.write(
+            "/* @glsl_closure v1 label=\"Callback B\"\n"
+            "value: label=\"Value B\" description=\"Input B\" default=0.1 min=-1.0 max=2.0\n"
+            "Result: label=\"Result B\" description=\"Output B\"\n"
+            "*/\n"
+            "float remap(float value){return value;}\n"
+            "vec4 callback_sync_export(float value){return vec4(remap(value));}\n"
+        )
+        refresh_glsl_node(glsl_node)
+
+        self.assertEqual(glsl_node.parse_status, 'READY')
+        callback = find_socket(glsl_node.inputs, "closure.remap")
+        self.assertEqual(callback.identifier, callback_identifier)
+        self.assertEqual(callback.name, "Callback B")
+        self.assertTrue(callback.is_linked)
+        self.assertEqual(sync_closure_output_with_operator(closure_output, tree), {'FINISHED'})
+
+        value_socket = find_socket(closure_input.outputs, "value")
+        result_socket = find_socket(closure_output.inputs, "Result")
+        self.assertEqual(value_socket.identifier, value_identifier)
+        self.assertEqual(result_socket.identifier, result_identifier)
+        self.assertEqual(value_socket.label, "Value B")
+        self.assertEqual(result_socket.label, "Result B")
+        self.assertAlmostEqual(value_socket.default_value, 0.75)
+        self.assertEqual(value_socket.description, "Input B")
+        self.assertEqual(result_socket.description, "Output B")
+        self.assertTrue(result_socket.is_linked)
+        self.assertEqual(result_socket.links[0].from_node, value_node)
+
+        self.assertEqual(len(glsl_node.panel_states), 1)
+        glsl_node.panel_states[0].is_collapsed = True
+        panel_identifier = glsl_node.panel_states[0].identifier
+        glsl_node_name = glsl_node.name
+        closure_input_name = closure_input.name
+        closure_output_name = closure_output.name
+        value_node_name = value_node.name
+
+        with tempfile.TemporaryDirectory() as directory:
+            filepath = Path(directory) / "glsl_typed_closure_sync.blend"
+            self.assertEqual(
+                bpy.ops.wm.save_as_mainfile(filepath=str(filepath), check_existing=False),
+                {'FINISHED'},
+            )
+            self.assertEqual(
+                bpy.ops.wm.open_mainfile(filepath=str(filepath), load_ui=False), {'FINISHED'}
+            )
+
+            loaded_tree = bpy.data.materials[material_name].node_tree
+            loaded_glsl = loaded_tree.nodes[glsl_node_name]
+            loaded_input = loaded_tree.nodes[closure_input_name]
+            loaded_output = loaded_tree.nodes[closure_output_name]
+            loaded_callback = find_socket(loaded_glsl.inputs, "closure.remap")
+            loaded_value = find_socket(loaded_input.outputs, "value")
+            loaded_result = find_socket(loaded_output.inputs, "Result")
+
+            self.assertEqual(loaded_glsl.parse_status, 'READY')
+            self.assertEqual(loaded_callback.identifier, callback_identifier)
+            self.assertEqual(loaded_callback.name, "Callback B")
+            self.assertTrue(loaded_callback.is_linked)
+            self.assertEqual(loaded_callback.links[0].from_node, loaded_output)
+            self.assertEqual(loaded_value.identifier, value_identifier)
+            self.assertEqual(loaded_result.identifier, result_identifier)
+            self.assertEqual(loaded_value.label, "Value B")
+            self.assertEqual(loaded_result.label, "Result B")
+            self.assertEqual(loaded_value.description, "Input B")
+            self.assertEqual(loaded_result.description, "Output B")
+            self.assertAlmostEqual(loaded_value.default_value, 0.75)
+            self.assertTrue(loaded_result.is_linked)
+            self.assertEqual(loaded_result.links[0].from_node.name, value_node_name)
+            self.assertEqual(len(loaded_glsl.panel_states), 1)
+            self.assertEqual(loaded_glsl.panel_states[0].identifier, panel_identifier)
+            self.assertTrue(loaded_glsl.panel_states[0].is_collapsed)
+
+    def test_typed_closure_callback_closed_change_preserves_panel_identity_and_state(self):
+        _, tree = self.make_material_tree()
+        text = make_text_block(
+            "glsl_typed_closure_panel_identity.glsl",
+            "/* @glsl_closure v1 closed=false\n*/\n"
+            "float remap(float value){return value;}\n"
+            "vec4 panel_identity_export(float value){return vec4(remap(value));}\n",
+        )
+        first = tree.nodes.new("ShaderNodeGLSLFunction")
+        self.configure_glsl_node(
+            first, "glsl_typed_closure_panel_identity.glsl", "panel_identity_export"
+        )
+
+        self.assertEqual(first.parse_status, 'READY')
+        self.assertEqual(len(first.panel_states), 1)
+        self.assertFalse(first.panel_states[0].is_collapsed)
+        panel_identifier = first.panel_states[0].identifier
+
+        text.clear()
+        text.write(
+            "/* @glsl_closure v1 closed=true\n*/\n"
+            "float remap(float value){return value;}\n"
+            "vec4 panel_identity_export(float value){return vec4(remap(value));}\n"
+        )
+        refresh_glsl_node(first)
+
+        self.assertEqual(first.parse_status, 'READY')
+        self.assertEqual(first.panel_states[0].identifier, panel_identifier)
+        self.assertFalse(first.panel_states[0].is_collapsed)
+
+        second = tree.nodes.new("ShaderNodeGLSLFunction")
+        self.configure_glsl_node(
+            second, "glsl_typed_closure_panel_identity.glsl", "panel_identity_export"
+        )
+        self.assertEqual(second.parse_status, 'READY')
+        self.assertEqual(len(second.panel_states), 1)
+        self.assertEqual(second.panel_states[0].identifier, panel_identifier)
+        self.assertTrue(second.panel_states[0].is_collapsed)
+
+    def test_typed_closure_callback_muted_link_state_survives_refresh(self):
+        _, tree = self.make_material_tree()
+        glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        source = (
+            "/* @glsl_closure v1\n*/\n"
+            "float remap(float value){return value * 0.5;}\n"
+            "vec4 muted_callback_export(float value){return vec4(remap(value));}\n"
+        )
+        make_text_block("glsl_typed_closure_muted_link.glsl", source)
+        self.configure_glsl_node(
+            glsl_node, "glsl_typed_closure_muted_link.glsl", "muted_callback_export"
+        )
+        _, closure_output, sync_result = make_synced_glsl_callback(
+            tree, glsl_node, "remap"
+        )
+        self.assertEqual(sync_result, {'FINISHED'})
+
+        callback = find_socket(glsl_node.inputs, "closure.remap")
+        self.assertTrue(callback.is_linked)
+        callback.links[0].is_muted = True
+        tree.interface_update(bpy.context)
+        tree.update_tag()
+        bpy.context.view_layer.update()
+        refresh_glsl_node(glsl_node)
+
+        callback = find_socket(glsl_node.inputs, "closure.remap")
+        self.assertEqual(glsl_node.parse_status, 'READY')
+        self.assertTrue(callback.is_linked)
+        self.assertTrue(callback.links[0].is_muted)
+        self.assertEqual(callback.links[0].from_node, closure_output)
+
+    def test_typed_closure_callback_int_meta_preserves_exact_transport_boundaries(self):
+        material, tree = self.make_material_tree()
+        material.use_fake_user = True
+        material_name = material.name
+        glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        source = (
+            "/* @glsl_closure v1\n"
+            "value: default=16777216 min=-16777216 max=16777216\n"
+            "*/\n"
+            "int exact_int(int value){return value;}\n"
+            "vec4 exact_int_export(float value){return vec4(float(exact_int(int(value))));}\n"
+        )
+        make_text_block("glsl_typed_closure_exact_int.glsl", source)
+        self.configure_glsl_node(
+            glsl_node, "glsl_typed_closure_exact_int.glsl", "exact_int_export"
+        )
+
+        self.assertEqual(glsl_node.parse_status, 'READY')
+        closure_input, _, sync_result = make_synced_glsl_callback(
+            tree, glsl_node, "exact_int"
+        )
+        self.assertEqual(sync_result, {'FINISHED'})
+        value_socket = find_socket(closure_input.outputs, "value")
+        self.assertEqual(value_socket.default_value, 16777216)
+
+        glsl_node_name = glsl_node.name
+        closure_input_name = closure_input.name
+        with tempfile.TemporaryDirectory() as directory:
+            filepath = Path(directory) / "glsl_typed_closure_exact_int.blend"
+            self.assertEqual(
+                bpy.ops.wm.save_as_mainfile(filepath=str(filepath), check_existing=False),
+                {'FINISHED'},
+            )
+            self.assertEqual(
+                bpy.ops.wm.open_mainfile(filepath=str(filepath), load_ui=False), {'FINISHED'}
+            )
+            loaded_tree = bpy.data.materials[material_name].node_tree
+            loaded_glsl = loaded_tree.nodes[glsl_node_name]
+            loaded_value = find_socket(loaded_tree.nodes[closure_input_name].outputs, "value")
+            self.assertEqual(loaded_glsl.parse_status, 'READY')
+            self.assertEqual(loaded_value.default_value, 16777216)
+
+    def test_typed_closure_callback_meta_conflicts_do_not_change_abi(self):
+        _, tree = self.make_material_tree()
+        first = tree.nodes.new("ShaderNodeGLSLFunction")
+        second = tree.nodes.new("ShaderNodeGLSLFunction")
+        first_source = (
+            "/* @glsl_closure v1\n"
+            "value: label=\"First Value\" default=0.25\n"
+            "Result: label=\"First Result\"\n"
+            "*/\n"
+            "float remap(float value){return value;}\n"
+            "vec4 first_export(float value){return vec4(remap(value));}\n"
+        )
+        second_source = (
+            "/* @glsl_closure v1\n"
+            "value: label=\"Second Value\" default=0.75\n"
+            "Result: label=\"Second Result\"\n"
+            "*/\n"
+            "float remap(float value){return value;}\n"
+            "vec4 second_export(float value){return vec4(remap(value));}\n"
+        )
+        make_text_block("glsl_typed_closure_meta_first.glsl", first_source)
+        make_text_block("glsl_typed_closure_meta_second.glsl", second_source)
+        self.configure_glsl_node(first, "glsl_typed_closure_meta_first.glsl", "first_export")
+        self.configure_glsl_node(second, "glsl_typed_closure_meta_second.glsl", "second_export")
+
+        closure_input = tree.nodes.new("NodeClosureInput")
+        closure_output = tree.nodes.new("NodeClosureOutput")
+        closure_input.pair_with_output(closure_output)
+        closure_socket = find_socket(closure_output.outputs, "Closure")
+        relink_and_update(tree, closure_socket, find_socket(first.inputs, "closure.remap"))
+        relink_and_update(tree, closure_socket, find_socket(second.inputs, "closure.remap"))
+
+        self.assertEqual(sync_closure_output_with_operator(closure_output, tree), {'FINISHED'})
+        self.assertEqual(first.parse_status, 'READY')
+        self.assertEqual(second.parse_status, 'READY')
+        self.assertEqual(find_socket(closure_input.outputs, "value").type, 'VALUE')
+        self.assertEqual(find_socket(closure_output.inputs, "Result").type, 'VALUE')
+
+    def test_typed_closure_callback_color_vector_consumers_use_stable_vector_abi(self):
+        color_source = (
+            "/* @glsl_closure v1\n"
+            "tint: subtype=color\n"
+            "Result: subtype=color\n"
+            "*/\n"
+            "vec3 remap(vec3 tint){return tint;}\n"
+            "vec4 color_consumer(vec3 tint){return vec4(remap(tint), 1.0);}\n"
+        )
+        vector_source = (
+            "/* @glsl_closure v1\n*/\n"
+            "vec3 remap(vec3 tint){return tint;}\n"
+            "vec4 vector_consumer(vec3 tint){return vec4(remap(tint), 1.0);}\n"
+        )
+
+        for order in (("color", "vector"), ("vector", "color")):
+            with self.subTest(order=order):
+                _, tree = self.make_material_tree()
+                color = tree.nodes.new("ShaderNodeGLSLFunction")
+                vector = tree.nodes.new("ShaderNodeGLSLFunction")
+                suffix = "_".join(order)
+                color_text = f"glsl_typed_closure_color_consumer_{suffix}.glsl"
+                vector_text = f"glsl_typed_closure_vector_consumer_{suffix}.glsl"
+                make_text_block(color_text, color_source)
+                make_text_block(vector_text, vector_source)
+                self.configure_glsl_node(color, color_text, "color_consumer")
+                self.configure_glsl_node(vector, vector_text, "vector_consumer")
+
+                closure_input = tree.nodes.new("NodeClosureInput")
+                closure_output = tree.nodes.new("NodeClosureOutput")
+                closure_input.pair_with_output(closure_output)
+                consumers = {"color": color, "vector": vector}
+                for consumer_name in order:
+                    relink_and_update(
+                        tree,
+                        find_socket(closure_output.outputs, "Closure"),
+                        find_socket(consumers[consumer_name].inputs, "closure.remap"),
+                    )
+
+                self.assertEqual(
+                    sync_closure_output_with_operator(closure_output, tree), {'FINISHED'}
+                )
+                self.assertEqual(color.parse_status, 'READY')
+                self.assertEqual(vector.parse_status, 'READY')
+                self.assertEqual(
+                    find_socket(closure_input.outputs, "tint").bl_idname,
+                    "NodeSocketVector",
+                )
+                self.assertEqual(
+                    find_socket(closure_output.inputs, "Result").bl_idname,
+                    "NodeSocketVector",
+                )
+
+    def test_typed_closure_callback_color_vector_switch_preserves_state(self):
+        _, tree = self.make_material_tree()
+        color = tree.nodes.new("ShaderNodeGLSLFunction")
+        vector = tree.nodes.new("ShaderNodeGLSLFunction")
+        color_source = (
+            "/* @glsl_closure v1\n"
+            "tint: subtype=color default=vec3(0.1, 0.2, 0.3)\n"
+            "Result: subtype=color\n"
+            "*/\n"
+            "vec3 remap(vec3 tint){return tint;}\n"
+            "vec4 color_switch_export(vec3 tint){return vec4(remap(tint), 1.0);}\n"
+        )
+        vector_source = (
+            "/* @glsl_closure v1\n*/\n"
+            "vec3 remap(vec3 tint){return tint;}\n"
+            "vec4 vector_switch_export(vec3 tint){return vec4(remap(tint), 1.0);}\n"
+        )
+        make_text_block("glsl_typed_closure_color_switch.glsl", color_source)
+        make_text_block("glsl_typed_closure_vector_switch.glsl", vector_source)
+        self.configure_glsl_node(
+            color, "glsl_typed_closure_color_switch.glsl", "color_switch_export"
+        )
+        self.configure_glsl_node(
+            vector, "glsl_typed_closure_vector_switch.glsl", "vector_switch_export"
+        )
+
+        closure_input, closure_output, sync_result = make_synced_glsl_callback(
+            tree, color, "remap"
+        )
+        self.assertEqual(sync_result, {'FINISHED'})
+        tint = find_socket(closure_input.outputs, "tint")
+        result = find_socket(closure_output.inputs, "Result")
+        self.assertEqual(tint.bl_idname, "NodeSocketColor")
+        self.assertEqual(result.bl_idname, "NodeSocketColor")
+        tint_identifier = tint.identifier
+        result_identifier = result.identifier
+        tint.default_value = (0.2, 0.4, 0.6, 1.0)
+
+        source = tree.nodes.new("ShaderNodeCombineXYZ")
+        relink_and_update(tree, source.outputs[0], result)
+        vector_callback = find_socket(vector.inputs, "closure.remap")
+        relink_and_update(tree, closure_output.outputs["Closure"], vector_callback)
+        self.assertEqual(sync_closure_output_with_operator(closure_output, tree), {'FINISHED'})
+
+        tint = find_socket(closure_input.outputs, "tint")
+        result = find_socket(closure_output.inputs, "Result")
+        self.assertEqual(tint.bl_idname, "NodeSocketVector")
+        self.assertEqual(result.bl_idname, "NodeSocketVector")
+        self.assertEqual(tint.identifier, tint_identifier)
+        self.assertEqual(result.identifier, result_identifier)
+        for actual, expected in zip(tint.default_value, (0.2, 0.4, 0.6)):
+            self.assertAlmostEqual(actual, expected)
+        self.assertTrue(find_socket(color.inputs, "closure.remap").is_linked)
+        self.assertTrue(vector_callback.is_linked)
+        self.assertTrue(result.is_linked)
+        self.assertEqual(result.links[0].from_node, source)
+
+        tree.links.remove(vector_callback.links[0])
+        tree.interface_update(bpy.context)
+        tree.update_tag()
+        bpy.context.view_layer.update()
+        self.assertEqual(sync_closure_output_with_operator(closure_output, tree), {'FINISHED'})
+
+        tint = find_socket(closure_input.outputs, "tint")
+        result = find_socket(closure_output.inputs, "Result")
+        self.assertEqual(tint.bl_idname, "NodeSocketColor")
+        self.assertEqual(result.bl_idname, "NodeSocketColor")
+        self.assertEqual(tint.identifier, tint_identifier)
+        self.assertEqual(result.identifier, result_identifier)
+        for actual, expected in zip(tint.default_value, (0.2, 0.4, 0.6, 1.0)):
+            self.assertAlmostEqual(actual, expected)
+        self.assertTrue(find_socket(color.inputs, "closure.remap").is_linked)
+        self.assertFalse(vector_callback.is_linked)
+        self.assertTrue(result.is_linked)
+        self.assertEqual(result.links[0].from_node, source)
+
+    def test_typed_closure_callback_incompatible_switch_replaces_sockets(self):
+        _, tree = self.make_material_tree()
+        scalar = tree.nodes.new("ShaderNodeGLSLFunction")
+        vector = tree.nodes.new("ShaderNodeGLSLFunction")
+        make_text_block(
+            "glsl_typed_closure_scalar_incompatible.glsl",
+            "/* @glsl_closure v1\n*/\n"
+            "float remap(float value){return value;}\n"
+            "vec4 scalar_incompatible_export(float value){return vec4(remap(value));}\n",
+        )
+        make_text_block(
+            "glsl_typed_closure_vector_incompatible.glsl",
+            "/* @glsl_closure v1\n*/\n"
+            "vec3 remap(vec3 value){return value;}\n"
+            "vec4 vector_incompatible_export(vec3 value){return vec4(remap(value), 1.0);}\n",
+        )
+        self.configure_glsl_node(
+            scalar,
+            "glsl_typed_closure_scalar_incompatible.glsl",
+            "scalar_incompatible_export",
+        )
+        self.configure_glsl_node(
+            vector,
+            "glsl_typed_closure_vector_incompatible.glsl",
+            "vector_incompatible_export",
+        )
+
+        closure_input, closure_output, sync_result = make_synced_glsl_callback(
+            tree, scalar, "remap"
+        )
+        self.assertEqual(sync_result, {'FINISHED'})
+        value = find_socket(closure_input.outputs, "value")
+        result = find_socket(closure_output.inputs, "Result")
+        value_identifier = value.identifier
+        result_identifier = result.identifier
+        source = tree.nodes.new("ShaderNodeValue")
+        relink_and_update(tree, source.outputs[0], result)
+
+        scalar_callback = find_socket(scalar.inputs, "closure.remap")
+        tree.links.remove(scalar_callback.links[0])
+        tree.interface_update(bpy.context)
+        tree.update_tag()
+        bpy.context.view_layer.update()
+        vector_callback = find_socket(vector.inputs, "closure.remap")
+        relink_and_update(tree, closure_output.outputs["Closure"], vector_callback)
+        self.assertEqual(sync_closure_output_with_operator(closure_output, tree), {'FINISHED'})
+
+        value = find_socket(closure_input.outputs, "value")
+        result = find_socket(closure_output.inputs, "Result")
+        self.assertEqual(value.bl_idname, "NodeSocketVector")
+        self.assertEqual(result.bl_idname, "NodeSocketVector")
+        self.assertNotEqual(value.identifier, value_identifier)
+        self.assertNotEqual(result.identifier, result_identifier)
+        self.assertFalse(result.is_linked)
+
+    def test_typed_closure_callback_rejects_invalid_meta(self):
+        cases = [
+            (
+                "bad_header_version",
+                "/* @glsl_closure v2\n*/\nfloat helper(float value){return value;}\n"
+                "vec4 bad_header_version(float value){return vec4(helper(value));}\n",
+            ),
+            (
+                "bad_header_attribute",
+                "/* @glsl_closure v1 open=true\n*/\nfloat helper(float value){return value;}\n"
+                "vec4 bad_header_attribute(float value){return vec4(helper(value));}\n",
+            ),
+            (
+                "bad_nested_panel",
+                "/* @glsl_closure v1\n@panel Nested\n*/\n"
+                "float helper(float value){return value;}\n"
+                "vec4 bad_nested_panel(float value){return vec4(helper(value));}\n",
+            ),
+            (
+                "bad_items",
+                "/* @glsl_closure v1\nmode: default=0 items=\"0:Off;1:On\"\n*/\n"
+                "float helper(int mode){return float(mode);}\n"
+                "vec4 bad_items(int mode){return vec4(helper(mode));}\n",
+            ),
+            (
+                "bad_output_default",
+                "/* @glsl_closure v1\nResult: default=0.5\n*/\n"
+                "float helper(float value){return value;}\n"
+                "vec4 bad_output_default(float value){return vec4(helper(value));}\n",
+            ),
+            (
+                "bad_expression_default",
+                "/* @glsl_closure v1\nvalue: default=scene_time\n*/\n"
+                "float helper(float value){return value;}\n"
+                "vec4 bad_expression_default(float value){return vec4(helper(value));}\n",
+            ),
+            (
+                "bad_vec4_subtype",
+                "/* @glsl_closure v1\nvalue: subtype=color\n*/\n"
+                "vec4 helper(vec4 value){return value;}\n"
+                "vec4 bad_vec4_subtype(vec4 value){return helper(value);}\n",
+            ),
+            (
+                "bad_conflicting_closed",
+                "/* @glsl_closure v1 closed=true\n*/\n"
+                "float first_helper(float value){return value;}\n"
+                "/* @glsl_closure v1 closed=false\n*/\n"
+                "float second_helper(float value){return value;}\n"
+                "vec4 bad_conflicting_closed(float value){\n"
+                "  return vec4(first_helper(value) + second_helper(value));\n"
+                "}\n",
+            ),
+            (
+                "bad_int_default_exact_transport_overflow",
+                "/* @glsl_closure v1\nvalue: default=16777217\n*/\n"
+                "int helper(int value){return value;}\n"
+                "vec4 bad_int_default_exact_transport_overflow(float value){"
+                "return vec4(float(helper(int(value))));}\n",
+            ),
+            (
+                "bad_int_default_exact_transport_underflow",
+                "/* @glsl_closure v1\nvalue: default=-16777217\n*/\n"
+                "int helper(int value){return value;}\n"
+                "vec4 bad_int_default_exact_transport_underflow(float value){"
+                "return vec4(float(helper(int(value))));}\n",
+            ),
+            (
+                "bad_int_min_exact_transport_overflow",
+                "/* @glsl_closure v1\nvalue: min=16777217\n*/\n"
+                "int helper(int value){return value;}\n"
+                "vec4 bad_int_min_exact_transport_overflow(float value){"
+                "return vec4(float(helper(int(value))));}\n",
+            ),
+            (
+                "bad_int_min_exact_transport_underflow",
+                "/* @glsl_closure v1\nvalue: min=-16777217\n*/\n"
+                "int helper(int value){return value;}\n"
+                "vec4 bad_int_min_exact_transport_underflow(float value){"
+                "return vec4(float(helper(int(value))));}\n",
+            ),
+            (
+                "bad_int_max_exact_transport_overflow",
+                "/* @glsl_closure v1\nvalue: max=16777217\n*/\n"
+                "int helper(int value){return value;}\n"
+                "vec4 bad_int_max_exact_transport_overflow(float value){"
+                "return vec4(float(helper(int(value))));}\n",
+            ),
+            (
+                "bad_int_max_exact_transport_underflow",
+                "/* @glsl_closure v1\nvalue: max=-16777217\n*/\n"
+                "int helper(int value){return value;}\n"
+                "vec4 bad_int_max_exact_transport_underflow(float value){"
+                "return vec4(float(helper(int(value))));}\n",
+            ),
+            (
+                "bad_int_default_overflow",
+                "/* @glsl_closure v1\nvalue: default=2147483648\n*/\n"
+                "int helper(int value){return value;}\n"
+                "vec4 bad_int_default_overflow(float value){return vec4(float(helper(int(value))));}\n",
+            ),
+            (
+                "bad_int_default_underflow",
+                "/* @glsl_closure v1\nvalue: default=-2147483649\n*/\n"
+                "int helper(int value){return value;}\n"
+                "vec4 bad_int_default_underflow(float value){return vec4(float(helper(int(value))));}\n",
+            ),
+            (
+                "bad_int_min_overflow",
+                "/* @glsl_closure v1\nvalue: min=2147483648\n*/\n"
+                "int helper(int value){return value;}\n"
+                "vec4 bad_int_min_overflow(float value){return vec4(float(helper(int(value))));}\n",
+            ),
+            (
+                "bad_int_min_underflow",
+                "/* @glsl_closure v1\nvalue: min=-2147483649\n*/\n"
+                "int helper(int value){return value;}\n"
+                "vec4 bad_int_min_underflow(float value){return vec4(float(helper(int(value))));}\n",
+            ),
+            (
+                "bad_int_max_overflow",
+                "/* @glsl_closure v1\nvalue: max=2147483648\n*/\n"
+                "int helper(int value){return value;}\n"
+                "vec4 bad_int_max_overflow(float value){return vec4(float(helper(int(value))));}\n",
+            ),
+            (
+                "bad_int_max_underflow",
+                "/* @glsl_closure v1\nvalue: max=-2147483649\n*/\n"
+                "int helper(int value){return value;}\n"
+                "vec4 bad_int_max_underflow(float value){return vec4(float(helper(int(value))));}\n",
+            ),
+            (
+                "bad_float_default_nan",
+                "/* @glsl_closure v1\nvalue: default=nan\n*/\n"
+                "float helper(float value){return value;}\n"
+                "vec4 bad_float_default_nan(float value){return vec4(helper(value));}\n",
+            ),
+            (
+                "bad_float_min_negative_inf",
+                "/* @glsl_closure v1\nvalue: min=-inf\n*/\n"
+                "float helper(float value){return value;}\n"
+                "vec4 bad_float_min_negative_inf(float value){return vec4(helper(value));}\n",
+            ),
+            (
+                "bad_float_max_inf",
+                "/* @glsl_closure v1\nvalue: max=inf\n*/\n"
+                "float helper(float value){return value;}\n"
+                "vec4 bad_float_max_inf(float value){return vec4(helper(value));}\n",
+            ),
+            (
+                "bad_float_default_overflow",
+                "/* @glsl_closure v1\nvalue: default=1e999\n*/\n"
+                "float helper(float value){return value;}\n"
+                "vec4 bad_float_default_overflow(float value){return vec4(helper(value));}\n",
+            ),
+            (
+                "bad_float_default_negative_overflow",
+                "/* @glsl_closure v1\nvalue: default=-1e999\n*/\n"
+                "float helper(float value){return value;}\n"
+                "vec4 bad_float_default_negative_overflow(float value){return vec4(helper(value));}\n",
+            ),
+        ]
+
+        for function_name, source in cases:
+            with self.subTest(function_name=function_name):
+                _, tree = self.make_material_tree()
+                node = tree.nodes.new("ShaderNodeGLSLFunction")
+                text_name = f"glsl_typed_closure_{function_name}.glsl"
+                make_text_block(text_name, source)
+                self.configure_glsl_node(node, text_name, function_name)
+                self.assertEqual(node.parse_status, 'ERROR')
+
+    def test_typed_closure_callback_rejects_function_like_macro_references(self):
+        cases = [
+            (
+                "macro_direct_export",
+                "#define CALL_HELPER(value) helper(value)\n"
+                "/* @glsl_closure v1\n*/\n"
+                "float helper(float value){return value;}\n"
+                "vec4 macro_direct_export(float value){return vec4(CALL_HELPER(value));}\n",
+            ),
+            (
+                "macro_recursive_export",
+                "#define CALL_HELPER(value) FORWARD_HELPER(value)\n"
+                "#define FORWARD_HELPER(value) \\\n"
+                "  helper(value)\n"
+                "/* @glsl_closure v1\n*/\n"
+                "float helper(float value){\n"
+                "  return value > 0.0 ? CALL_HELPER(value - 1.0) : value;\n"
+                "}\n"
+                "vec4 macro_recursive_export(float value){return vec4(helper(value));}\n",
+            ),
+            (
+                "macro_spliced_identifier_export",
+                "#define CALL_HELPER(value) hel\\\n"
+                "per(value)\n"
+                "/* @glsl_closure v1\n*/\n"
+                "float helper(float value){return value;}\n"
+                "vec4 macro_spliced_identifier_export(float value){\n"
+                "  return vec4(CALL_HELPER(value));\n"
+                "}\n",
+            ),
+            (
+                "macro_object_alias_export",
+                "#define HELPER_ALIAS helper\n"
+                "#define CALL_HELPER(value) HELPER_ALIAS(value)\n"
+                "/* @glsl_closure v1\n*/\n"
+                "float helper(float value){return value;}\n"
+                "vec4 macro_object_alias_export(float value){\n"
+                "  return vec4(CALL_HELPER(value));\n"
+                "}\n",
+            ),
+            (
+                "macro_token_paste_export",
+                "#define CALL_HELPER(value) hel##per(value)\n"
+                "/* @glsl_closure v1\n*/\n"
+                "float helper(float value){return value;}\n"
+                "vec4 macro_token_paste_export(float value){\n"
+                "  return vec4(CALL_HELPER(value));\n"
+                "}\n",
+            ),
+        ]
+
+        for function_name, invalid_source in cases:
+            with self.subTest(function_name=function_name):
+                _, tree = self.make_material_tree()
+                node = tree.nodes.new("ShaderNodeGLSLFunction")
+                text_name = f"glsl_typed_closure_{function_name}.glsl"
+                text = make_text_block(
+                    text_name,
+                    f"vec4 {function_name}(float value){{return vec4(value);}}\n",
+                )
+                self.configure_glsl_node(node, text_name, function_name)
+                self.assertEqual(node.parse_status, 'READY')
+
+                text.clear()
+                text.write(invalid_source)
+                with self.assertRaisesRegex(RuntimeError, "GLSL macro"):
+                    refresh_glsl_node_with_operator(node, tree)
+                self.assertEqual(node.parse_status, 'ERROR')
+
+    def test_typed_closure_callback_macro_scanner_ignores_comments_and_strings(self):
+        _, tree = self.make_material_tree()
+        node = tree.nodes.new("ShaderNodeGLSLFunction")
+        source = (
+            "#define TEXT() \"helper\"\n"
+            "#define JOINED_NAME() hel/**/per\n"
+            "/* @glsl_closure v1\n*/\n"
+            "float helper(float value){return value;}\n"
+            "vec4 macro_comment_string_export(float value){return vec4(helper(value));}\n"
+        )
+        make_text_block("glsl_typed_closure_macro_comment_string.glsl", source)
+        self.configure_glsl_node(
+            node,
+            "glsl_typed_closure_macro_comment_string.glsl",
+            "macro_comment_string_export",
+        )
+        self.assertEqual(node.parse_status, 'READY')
+
+    def test_typed_closure_callback_rejects_invalid_signatures(self):
+        cases = [
+            (
+                "bad_inout",
+                "/* @glsl_closure v1\n*/\nfloat helper(inout float value){return value;}\n"
+                "vec4 bad_inout(float value){return vec4(helper(value));}\n",
+            ),
+            (
+                "bad_matrix",
+                "/* @glsl_closure v1\n*/\nmat3 helper(mat3 value){return value;}\n"
+                "vec4 bad_matrix(float value){return vec4(helper(mat3(value))[0], 1.0);}\n",
+            ),
+            (
+                "bad_sampler",
+                "/* @glsl_closure v1\n*/\nvec4 helper(sampler2D image, vec2 uv){\n"
+                "  return texture(image, uv);\n"
+                "}\n"
+                "vec4 bad_sampler(sampler2D image, vec2 uv){return helper(image, uv);}\n",
+            ),
+            (
+                "bad_array",
+                "/* @glsl_closure v1\n*/\nfloat helper(float values[2]){return values[0];}\n"
+                "vec4 bad_array(float value){\n"
+                "  float values[2]; values[0] = value; values[1] = 0.0;\n"
+                "  return vec4(helper(values));\n"
+                "}\n",
+            ),
+            (
+                "bad_unsized_array",
+                "/* @glsl_closure v1\n*/\nfloat helper(in float values[]){return values[0];}\n"
+                "vec4 bad_unsized_array(float value){\n"
+                "  float values[2]; values[0] = value; values[1] = 0.0;\n"
+                "  return vec4(helper(values));\n"
+                "}\n",
+            ),
+            (
+                "bad_multidimensional_array",
+                "#define ROWS 2\n"
+                "#define COLS 3\n"
+                "/* @glsl_closure v1\n*/\n"
+                "float helper(float value, out float values[ROWS][COLS]){\n"
+                "  values[0][0] = value; return value;\n"
+                "}\n"
+                "vec4 bad_multidimensional_array(float value){\n"
+                "  float values[ROWS][COLS]; return vec4(helper(value, values));\n"
+                "}\n",
+            ),
+            (
+                "bad_struct",
+                "struct Payload { float value; };\n"
+                "/* @glsl_closure v1\n*/\nfloat helper(Payload value){return value.value;}\n"
+                "vec4 bad_struct(float value){\n"
+                "  Payload payload; payload.value = value; return vec4(helper(payload));\n"
+                "}\n",
+            ),
+            (
+                "bad_reserved_result",
+                "/* @glsl_closure v1\n*/\nfloat helper(float Result){return Result;}\n"
+                "vec4 bad_reserved_result(float value){return vec4(helper(value));}\n",
+            ),
+            (
+                "bad_reserved_wrapper_key",
+                "/* @glsl_closure v1\n*/\n"
+                "float helper(float npr_closure_callback_out_value){\n"
+                "  return npr_closure_callback_out_value;\n"
+                "}\n"
+                "vec4 bad_reserved_wrapper_key(float value){return vec4(helper(value));}\n",
+            ),
+            (
+                "bad_no_outputs",
+                "/* @glsl_closure v1\n*/\nvoid helper(float value){}\n"
+                "vec4 bad_no_outputs(float value){helper(value); return vec4(value);}\n",
+            ),
+        ]
+
+        for function_name, source in cases:
+            with self.subTest(function_name=function_name):
+                _, tree = self.make_material_tree()
+                node = tree.nodes.new("ShaderNodeGLSLFunction")
+                text_name = f"glsl_typed_closure_{function_name}.glsl"
+                make_text_block(text_name, source)
+                self.configure_glsl_node(node, text_name, function_name)
+                self.assertEqual(node.parse_status, 'ERROR')
+
+    def test_typed_closure_callback_rejects_exports_overloads_and_recursion(self):
+        cases = [
+            (
+                "annotated_export",
+                "/* @glsl_closure v1\n*/\n"
+                "vec4 annotated_export(float value){return vec4(value);}\n",
+            ),
+            (
+                "overloaded_export",
+                "/* @glsl_closure v1\n*/\nfloat helper(float value){return value;}\n"
+                "float helper(vec2 value){return value.x;}\n"
+                "vec4 overloaded_export(float value){return vec4(helper(value));}\n",
+            ),
+            (
+                "export_name_overloaded",
+                "/* @glsl_closure v1\n*/\nfloat helper(float value){return value;}\n"
+                "vec4 export_name_overloaded(float value){return vec4(helper(value));}\n"
+                "vec4 export_name_overloaded(vec2 value){return vec4(helper(value.x));}\n",
+            ),
+            (
+                "reachable_bridge_overloaded",
+                "/* @glsl_closure v1\n*/\nfloat helper(float value){return value;}\n"
+                "float bridge(float value){return helper(value);}\n"
+                "float bridge(vec2 value){return helper(value.x);}\n"
+                "vec4 reachable_bridge_overloaded(float value){return vec4(bridge(value));}\n",
+            ),
+            (
+                "duplicate_same_signature",
+                "/* @glsl_closure v1\n*/\nfloat helper(float value){return value;}\n"
+                "float bridge(float value){return helper(value);}\n"
+                "float bridge(float value){return helper(value + 1.0);}\n"
+                "vec4 duplicate_same_signature(float value){return vec4(bridge(value));}\n",
+            ),
+            (
+                "unreachable_name_overloaded",
+                "/* @glsl_closure v1\n*/\nfloat helper(float value){return value;}\n"
+                "float unused(float value){return value;}\n"
+                "float unused(vec2 value){return value.x;}\n"
+                "vec4 unreachable_name_overloaded(float value){return vec4(helper(value));}\n",
+            ),
+            (
+                "direct_recursive_export",
+                "/* @glsl_closure v1\n*/\n"
+                "float helper(float value){return value > 0.0 ? helper(value - 1.0) : value;}\n"
+                "vec4 direct_recursive_export(float value){return vec4(helper(value));}\n",
+            ),
+            (
+                "indirect_recursive_export",
+                "float helper_b(float value);\n"
+                "/* @glsl_closure v1\n*/\n"
+                "float helper_a(float value){return helper_b(value);}\n"
+                "float helper_b(float value){return helper_a(value);}\n"
+                "vec4 indirect_recursive_export(float value){return vec4(helper_a(value));}\n",
+            ),
+        ]
+
+        for function_name, source in cases:
+            with self.subTest(function_name=function_name):
+                _, tree = self.make_material_tree()
+                node = tree.nodes.new("ShaderNodeGLSLFunction")
+                text_name = f"glsl_typed_closure_{function_name}.glsl"
+                make_text_block(text_name, source)
+                self.configure_glsl_node(node, text_name, function_name)
+                self.assertEqual(node.parse_status, 'ERROR')
+
+    def test_typed_closure_callback_rejects_socket_text_over_63_bytes(self):
+        long_helper = "h" * 56
+        long_key = "k" * 64
+        split_key = "v" * 60
+        long_text = "x" * 64
+        split_label = "L" * 62
+        cases = [
+            (
+                "long_helper_identifier",
+                f"/* @glsl_closure v1\n*/\nfloat {long_helper}(float value){{return value;}}\n"
+                f"vec4 long_helper_identifier(float value){{\n"
+                f"  return vec4({long_helper}(value));\n"
+                "}\n",
+            ),
+            (
+                "long_item_key",
+                f"/* @glsl_closure v1\n*/\nfloat helper(float {long_key}){{return {long_key};}}\n"
+                f"vec4 long_item_key(float value){{return vec4(helper(value));}}\n",
+            ),
+            (
+                "long_vec4_split_key",
+                f"/* @glsl_closure v1\n*/\nvec4 helper(vec4 {split_key}){{return {split_key};}}\n"
+                "vec4 long_vec4_split_key(vec4 value){return helper(value);}\n",
+            ),
+            (
+                "long_callback_label",
+                f"/* @glsl_closure v1 label=\"{long_text}\"\n*/\n"
+                "float helper(float value){return value;}\n"
+                "vec4 long_callback_label(float value){return vec4(helper(value));}\n",
+            ),
+            (
+                "long_item_description",
+                f"/* @glsl_closure v1\nvalue: description=\"{long_text}\"\n*/\n"
+                "float helper(float value){return value;}\n"
+                "vec4 long_item_description(float value){return vec4(helper(value));}\n",
+            ),
+            (
+                "long_generated_vec4_label",
+                f"/* @glsl_closure v1\nvalue: label=\"{split_label}\"\n*/\n"
+                "vec4 helper(vec4 value){return value;}\n"
+                "vec4 long_generated_vec4_label(vec4 value){return helper(value);}\n",
+            ),
+            (
+                "long_generated_result_label",
+                f"/* @glsl_closure v1\nResult: label=\"{split_label}\"\n*/\n"
+                "vec4 helper(vec4 value){return value;}\n"
+                "vec4 long_generated_result_label(vec4 value){return helper(value);}\n",
+            ),
+        ]
+
+        for function_name, source in cases:
+            with self.subTest(function_name=function_name):
+                _, tree = self.make_material_tree()
+                node = tree.nodes.new("ShaderNodeGLSLFunction")
+                text_name = f"glsl_typed_closure_{function_name}.glsl"
+                make_text_block(text_name, source)
+                self.configure_glsl_node(node, text_name, function_name)
+                self.assertEqual(node.parse_status, 'ERROR')
 
     def test_closure_sampler_sync_adds_opaque_alpha(self):
         _, tree = self.make_material_tree()

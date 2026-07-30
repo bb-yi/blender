@@ -5,6 +5,10 @@
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 
+#include <algorithm>
+#include <cfloat>
+#include <climits>
+
 #include "DNA_node_types.h"
 #include "DNA_space_types.h"
 
@@ -26,6 +30,8 @@
 #include "ED_screen.hh"
 
 #include "BLI_listbase.h"
+#include "BLI_set.hh"
+#include "BLI_string_utf8.h"
 
 #include "BLT_translation.hh"
 
@@ -55,6 +61,175 @@ struct ClosureSyncState {
   NodeSyncState state;
   std::optional<nodes::ClosureSignature> source_signature;
 };
+
+static int normalized_vector_dimensions(const int dimensions)
+{
+  return ELEM(dimensions, 2, 3, 4) ? dimensions : 3;
+}
+
+static float closure_ui_float_value(const std::optional<ClosureSignature::ItemMinMaxValue> &value,
+                                    const float fallback)
+{
+  if (value) {
+    if (const float *typed_value = std::get_if<float>(&*value)) {
+      return *typed_value;
+    }
+  }
+  return fallback;
+}
+
+static int closure_ui_int_value(const std::optional<ClosureSignature::ItemMinMaxValue> &value,
+                                const int fallback)
+{
+  if (value) {
+    if (const int *typed_value = std::get_if<int>(&*value)) {
+      return *typed_value;
+    }
+  }
+  return fallback;
+}
+
+static void update_socket_typeinfo(bNodeSocket &socket,
+                                   const PropertySubType subtype,
+                                   const int dimensions = 0)
+{
+  const StringRefNull idname = dimensions == 0 ?
+                                   *bke::node_static_socket_type(socket.type, subtype) :
+                                   *bke::node_static_socket_type(socket.type, subtype, dimensions);
+  BLI_strncpy_utf8(socket.idname, idname.c_str(), sizeof(socket.idname));
+  socket.typeinfo = bke::node_socket_type_find(idname);
+}
+
+static void apply_closure_item_default_value(
+    const std::optional<ClosureSignature::ItemDefaultValue> &default_value,
+    bNodeSocket &socket)
+{
+  if (!socket.default_value || !default_value) {
+    return;
+  }
+  switch (socket.type) {
+    case SOCK_FLOAT:
+      if (const float *value = std::get_if<float>(&*default_value)) {
+        socket.default_value_typed<bNodeSocketValueFloat>()->value = *value;
+      }
+      break;
+    case SOCK_INT:
+      if (const int *value = std::get_if<int>(&*default_value)) {
+        socket.default_value_typed<bNodeSocketValueInt>()->value = *value;
+      }
+      break;
+    case SOCK_BOOLEAN:
+      if (const bool *value = std::get_if<bool>(&*default_value)) {
+        socket.default_value_typed<bNodeSocketValueBoolean>()->value = *value;
+      }
+      break;
+    case SOCK_VECTOR:
+      if (const float4 *value = std::get_if<float4>(&*default_value)) {
+        std::copy_n(&(*value)[0], 4, socket.default_value_typed<bNodeSocketValueVector>()->value);
+      }
+      break;
+    case SOCK_RGBA:
+      if (const float4 *value = std::get_if<float4>(&*default_value)) {
+        std::copy_n(&(*value)[0], 4, socket.default_value_typed<bNodeSocketValueRGBA>()->value);
+      }
+      break;
+    default:
+      break;
+  }
+}
+
+static void apply_closure_item_ui_data(const ClosureSignature::Item &item,
+                                       bNodeSocket &socket,
+                                       const bool apply_default_value)
+{
+  if (item.ui.label) {
+    BLI_strncpy_utf8(socket.label, item.ui.label->c_str(), sizeof(socket.label));
+  }
+  else {
+    socket.label[0] = '\0';
+  }
+  if (item.ui.description) {
+    BLI_strncpy_utf8(socket.description, item.ui.description->c_str(), sizeof(socket.description));
+  }
+  else {
+    socket.description[0] = '\0';
+  }
+  SET_FLAG_FROM_TEST(socket.flag, item.ui.hide_value.value_or(false), SOCK_HIDE_VALUE);
+
+  if (!socket.default_value) {
+    return;
+  }
+  switch (socket.type) {
+    case SOCK_FLOAT: {
+      auto &value = *socket.default_value_typed<bNodeSocketValueFloat>();
+      value.subtype = item.ui.subtype.value_or(PROP_NONE);
+      value.min = closure_ui_float_value(item.ui.min_value, -FLT_MAX);
+      value.max = closure_ui_float_value(item.ui.max_value, FLT_MAX);
+      update_socket_typeinfo(socket, PropertySubType(value.subtype));
+      break;
+    }
+    case SOCK_INT: {
+      auto &value = *socket.default_value_typed<bNodeSocketValueInt>();
+      value.subtype = item.ui.subtype.value_or(PROP_NONE);
+      value.min = closure_ui_int_value(item.ui.min_value, INT_MIN);
+      value.max = closure_ui_int_value(item.ui.max_value, INT_MAX);
+      update_socket_typeinfo(socket, PropertySubType(value.subtype));
+      break;
+    }
+    case SOCK_BOOLEAN: {
+      break;
+    }
+    case SOCK_VECTOR: {
+      auto &value = *socket.default_value_typed<bNodeSocketValueVector>();
+      value.subtype = item.ui.subtype.value_or(PROP_NONE);
+      value.dimensions = normalized_vector_dimensions(item.dimensions);
+      value.min = closure_ui_float_value(item.ui.min_value, -FLT_MAX);
+      value.max = closure_ui_float_value(item.ui.max_value, FLT_MAX);
+      update_socket_typeinfo(
+          socket, PropertySubType(value.subtype), normalized_vector_dimensions(value.dimensions));
+      break;
+    }
+    case SOCK_RGBA: {
+      break;
+    }
+    default:
+      break;
+  }
+  if (apply_default_value) {
+    apply_closure_item_default_value(item.ui.default_value, socket);
+  }
+}
+
+static void restore_closure_item_default_value(const Span<ClosureSignature::Item> old_items,
+                                               const StringRef key,
+                                               bNodeSocket &socket)
+{
+  for (const ClosureSignature::Item &old_item : old_items) {
+    if (old_item.key == key) {
+      apply_closure_item_default_value(old_item.ui.default_value, socket);
+      return;
+    }
+  }
+}
+
+static bool closure_items_can_preserve_socket(const ClosureSignature::Item &old_item,
+                                              const ClosureSignature::Item &new_item)
+{
+  if (old_item.has_same_abi(new_item)) {
+    return true;
+  }
+  if (old_item.key != new_item.key || old_item.structure_type != new_item.structure_type ||
+      old_item.type == nullptr || new_item.type == nullptr)
+  {
+    return false;
+  }
+
+  const auto is_vector3 = [](const ClosureSignature::Item &item) {
+    return item.type->type == SOCK_VECTOR && ELEM(item.dimensions, 0, 3);
+  };
+  return (old_item.type->type == SOCK_RGBA && is_vector3(new_item)) ||
+         (new_item.type->type == SOCK_RGBA && is_vector3(old_item));
+}
 
 static BundleSyncState get_sync_state_separate_bundle(
     const SpaceNode &snode,
@@ -363,6 +538,8 @@ void sync_sockets_evaluate_closure(SpaceNode &snode,
   }
 
   auto &storage = *static_cast<NodeEvaluateClosure *>(evaluate_closure_node.storage);
+  const ClosureSignature old_signature = ClosureSignature::from_evaluate_closure_node(
+      evaluate_closure_node, true);
 
   Map<std::string, int> old_input_identifiers;
   Map<std::string, int> old_output_identifiers;
@@ -378,14 +555,20 @@ void sync_sockets_evaluate_closure(SpaceNode &snode,
   nodes::socket_items::clear<nodes::EvaluateClosureInputItemsAccessor>(evaluate_closure_node);
   nodes::socket_items::clear<nodes::EvaluateClosureOutputItemsAccessor>(evaluate_closure_node);
 
+  Set<std::string> preserved_inputs;
+  Set<std::string> preserved_outputs;
   for (const nodes::ClosureSignature::Item &item : sync_state.source_signature->inputs) {
     NodeEvaluateClosureInputItem &new_item =
         *nodes::socket_items::add_item_with_socket_type_and_name<
             nodes::EvaluateClosureInputItemsAccessor>(
             *snode.edittree, evaluate_closure_node, item.type->type, item.key.c_str());
     new_item.structure_type = item.structure_type;
-    if (const std::optional<int> old_identifier = old_input_identifiers.lookup_try(item.key)) {
-      new_item.identifier = *old_identifier;
+    const int old_index = old_signature.inputs.index_of_try_as(item.key);
+    if (old_index != -1 && old_signature.inputs[old_index].has_same_abi(item)) {
+      if (const std::optional<int> old_identifier = old_input_identifiers.lookup_try(item.key)) {
+        new_item.identifier = *old_identifier;
+        preserved_inputs.add(item.key);
+      }
     }
   }
   for (const nodes::ClosureSignature::Item &item : sync_state.source_signature->outputs) {
@@ -394,8 +577,33 @@ void sync_sockets_evaluate_closure(SpaceNode &snode,
             nodes::EvaluateClosureOutputItemsAccessor>(
             *snode.edittree, evaluate_closure_node, item.type->type, item.key.c_str());
     new_item.structure_type = item.structure_type;
-    if (const std::optional<int> old_identifier = old_output_identifiers.lookup_try(item.key)) {
-      new_item.identifier = *old_identifier;
+    const int old_index = old_signature.outputs.index_of_try_as(item.key);
+    if (old_index != -1 && old_signature.outputs[old_index].has_same_abi(item)) {
+      if (const std::optional<int> old_identifier = old_output_identifiers.lookup_try(item.key)) {
+        new_item.identifier = *old_identifier;
+        preserved_outputs.add(item.key);
+      }
+    }
+  }
+
+  nodes::update_node_declaration_and_sockets(*snode.edittree, evaluate_closure_node);
+  snode.edittree->ensure_topology_cache();
+  for (const int i : sync_state.source_signature->inputs.index_range()) {
+    const ClosureSignature::Item &item = sync_state.source_signature->inputs[i];
+    bNodeSocket &socket = evaluate_closure_node.input_socket(i + 1);
+    const bool preserved = preserved_inputs.contains(item.key);
+    apply_closure_item_ui_data(item, socket, !preserved);
+    if (preserved) {
+      restore_closure_item_default_value(old_signature.inputs.as_span(), item.key, socket);
+    }
+  }
+  for (const int i : sync_state.source_signature->outputs.index_range()) {
+    const ClosureSignature::Item &item = sync_state.source_signature->outputs[i];
+    bNodeSocket &socket = evaluate_closure_node.output_socket(i);
+    const bool preserved = preserved_outputs.contains(item.key);
+    apply_closure_item_ui_data(item, socket, !preserved);
+    if (preserved) {
+      restore_closure_item_default_value(old_signature.outputs.as_span(), item.key, socket);
     }
   }
   BKE_ntree_update_tag_node_property(snode.edittree, &evaluate_closure_node);
@@ -424,6 +632,8 @@ void sync_sockets_closure(SpaceNode &snode,
   const nodes::ClosureSignature &signature = *sync_state.source_signature;
 
   auto &storage = *static_cast<NodeClosureOutput *>(closure_output_node.storage);
+  const ClosureSignature old_signature = ClosureSignature::from_closure_output_node(
+      closure_output_node, true);
 
   Map<std::string, int> old_input_identifiers;
   Map<std::string, int> old_output_identifiers;
@@ -439,13 +649,21 @@ void sync_sockets_closure(SpaceNode &snode,
   nodes::socket_items::clear<nodes::ClosureInputItemsAccessor>(closure_output_node);
   nodes::socket_items::clear<nodes::ClosureOutputItemsAccessor>(closure_output_node);
 
+  Set<std::string> preserved_inputs;
+  Set<std::string> preserved_outputs;
   for (const nodes::ClosureSignature::Item &item : signature.inputs) {
     NodeClosureInputItem &new_item =
         *nodes::socket_items::add_item_with_socket_type_and_name<nodes::ClosureInputItemsAccessor>(
             *snode.edittree, closure_output_node, item.type->type, item.key.c_str());
     new_item.structure_type = item.structure_type;
-    if (const std::optional<int> old_identifier = old_input_identifiers.lookup_try(item.key)) {
-      new_item.identifier = *old_identifier;
+    const int old_index = old_signature.inputs.index_of_try_as(item.key);
+    if (old_index != -1 &&
+        closure_items_can_preserve_socket(old_signature.inputs[old_index], item))
+    {
+      if (const std::optional<int> old_identifier = old_input_identifiers.lookup_try(item.key)) {
+        new_item.identifier = *old_identifier;
+        preserved_inputs.add(item.key);
+      }
     }
   }
   for (const nodes::ClosureSignature::Item &item : signature.outputs) {
@@ -453,8 +671,14 @@ void sync_sockets_closure(SpaceNode &snode,
         nodes::ClosureOutputItemsAccessor>(
         *snode.edittree, closure_output_node, item.type->type, item.key.c_str());
     new_item.structure_type = item.structure_type;
-    if (const std::optional<int> old_identifier = old_output_identifiers.lookup_try(item.key)) {
-      new_item.identifier = *old_identifier;
+    const int old_index = old_signature.outputs.index_of_try_as(item.key);
+    if (old_index != -1 &&
+        closure_items_can_preserve_socket(old_signature.outputs[old_index], item))
+    {
+      if (const std::optional<int> old_identifier = old_output_identifiers.lookup_try(item.key)) {
+        new_item.identifier = *old_identifier;
+        preserved_outputs.add(item.key);
+      }
     }
   }
   BKE_ntree_update_tag_node_property(snode.edittree, &closure_input_node);
@@ -462,11 +686,35 @@ void sync_sockets_closure(SpaceNode &snode,
 
   nodes::update_node_declaration_and_sockets(*snode.edittree, closure_input_node);
   nodes::update_node_declaration_and_sockets(*snode.edittree, closure_output_node);
+  snode.edittree->ensure_topology_cache();
+
+  for (const int i : signature.inputs.index_range()) {
+    const ClosureSignature::Item &item = signature.inputs[i];
+    bNodeSocket &socket = closure_input_node.output_socket(i);
+    const bool preserved = preserved_inputs.contains(item.key);
+    apply_closure_item_ui_data(item, socket, !preserved);
+    if (preserved) {
+      restore_closure_item_default_value(old_signature.inputs.as_span(), item.key, socket);
+    }
+  }
+  for (const int i : signature.outputs.index_range()) {
+    const ClosureSignature::Item &item = signature.outputs[i];
+    bNodeSocket &socket = closure_output_node.input_socket(i);
+    const bool preserved = preserved_outputs.contains(item.key);
+    apply_closure_item_ui_data(item, socket, !preserved);
+    if (preserved) {
+      restore_closure_item_default_value(old_signature.outputs.as_span(), item.key, socket);
+    }
+  }
+
+  /* Rebuild declarations from the now-persisted socket UI data. */
+  nodes::update_node_declaration_and_sockets(*snode.edittree, closure_input_node);
+  nodes::update_node_declaration_and_sockets(*snode.edittree, closure_output_node);
 
   snode.edittree->ensure_topology_cache();
   for (const int output_i : signature.outputs.index_range()) {
     const nodes::ClosureSignature::Item &item = signature.outputs[output_i];
-    if (old_output_identifiers.contains(item.key) || item.key != "Alpha" ||
+    if (preserved_outputs.contains(item.key) || item.ui.default_value || item.key != "Alpha" ||
         item.type->type != SOCK_FLOAT)
     {
       continue;
@@ -479,12 +727,12 @@ void sync_sockets_closure(SpaceNode &snode,
   Vector<std::pair<bNodeSocket *, bNodeSocket *>> internal_links;
   for (const int input_i : signature.inputs.index_range()) {
     const nodes::ClosureSignature::Item &input_item = signature.inputs[input_i];
-    if (old_input_identifiers.contains(input_item.key)) {
+    if (preserved_inputs.contains(input_item.key)) {
       continue;
     }
     for (const int output_i : signature.outputs.index_range()) {
       const nodes::ClosureSignature::Item &output_item = signature.outputs[output_i];
-      if (old_output_identifiers.contains(output_item.key)) {
+      if (preserved_outputs.contains(output_item.key)) {
         continue;
       }
       if (input_item.key == output_item.key) {
@@ -526,6 +774,8 @@ void sync_sockets_closure_to_list(SpaceNode &snode,
 
   const ClosureSignature &signature = *sync_state.source_signature;
   auto &storage = *static_cast<GeometryNodeClosureToList *>(closure_to_list_node.storage);
+  const ClosureSignature old_signature = ClosureSignature::from_closure_to_list_node(
+      closure_to_list_node);
 
   Map<std::string, int> old_identifiers;
   for (const int i : IndexRange(storage.items_num)) {
@@ -534,18 +784,33 @@ void sync_sockets_closure_to_list(SpaceNode &snode,
   }
 
   nodes::socket_items::clear<ClosureToListItemsAccessor>(closure_to_list_node);
+  Set<std::string> preserved_outputs;
   for (const nodes::ClosureSignature::Item &item : signature.outputs) {
     GeometryNodeClosureToListItem &new_item =
         *socket_items::add_item_with_socket_type_and_name<ClosureToListItemsAccessor>(
             *snode.edittree, closure_to_list_node, item.type->type, item.key.c_str());
     new_item.structure_type = item.structure_type;
-    if (const std::optional<int> old_identifier = old_identifiers.lookup_try(item.key)) {
-      new_item.identifier = *old_identifier;
+    const int old_index = old_signature.outputs.index_of_try_as(item.key);
+    if (old_index != -1 && old_signature.outputs[old_index].has_same_abi(item)) {
+      if (const std::optional<int> old_identifier = old_identifiers.lookup_try(item.key)) {
+        new_item.identifier = *old_identifier;
+        preserved_outputs.add(item.key);
+      }
     }
   }
 
   BKE_ntree_update_tag_node_property(snode.edittree, &closure_to_list_node);
   update_node_declaration_and_sockets(*snode.edittree, closure_to_list_node);
+  snode.edittree->ensure_topology_cache();
+  for (const int i : signature.outputs.index_range()) {
+    const ClosureSignature::Item &item = signature.outputs[i];
+    bNodeSocket &socket = closure_to_list_node.output_socket(i);
+    const bool preserved = preserved_outputs.contains(item.key);
+    apply_closure_item_ui_data(item, socket, !preserved);
+    if (preserved) {
+      restore_closure_item_default_value(old_signature.outputs.as_span(), item.key, socket);
+    }
+  }
 }
 
 static std::string get_bundle_sync_tooltip(const nodes::BundleSignature &old_signature,
