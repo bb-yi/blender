@@ -832,11 +832,18 @@ void Film::end_sync()
 
 float2 Film::pixel_jitter_get() const
 {
-  if (inst_.is_viewport() && inst_.discard_viewport_history() &&
+  const bool has_time_dependent_shading = inst_.materials.has_time_dependent_materials() ||
+                                          inst_.world.uses_scene_time() ||
+                                          inst_.filter_materials.uses_scene_time() ||
+                                          inst_.lights.has_time_dependent_light_shaders();
+  if (inst_.is_viewport() &&
+      (inst_.discard_viewport_history() || has_time_dependent_shading) &&
       inst_.sampling.interactive_mode() &&
       !inst_.sampling.use_custom_pixel_jitter_sample())
   {
-    /* Without reprojection history, sub-pixel jitter is exposed as whole-image motion. */
+    /* Without reprojection history, sub-pixel jitter is exposed as whole-image motion. Keep the
+     * jitter deterministic for time-dependent shading too: an extra redraw of the same timeline
+     * frame can temporarily re-enable history while playback is still invalidating it. */
     return float2(0.0f);
   }
 
