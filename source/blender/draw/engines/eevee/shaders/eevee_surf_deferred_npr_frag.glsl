@@ -388,115 +388,6 @@ float4 TextureHandle_eval_uv(TextureHandle tex, float2 uv)
   return swap_alpha(TextureHandle_eval_uv_impl(tex, uv));
 }
 
-#ifndef FOREACH_LIGHT_BEGIN
-#ifdef MAT_NPR_LIGHTING
-bool npr_is_zero(float3 value)
-{
-  return all(lessThanEqual(abs(value), float3(1e-8f)));
-}
-
-bool npr_light_linking_affects_receiver(uint2 light_set_membership, uchar receiver_light_set)
-{
-  return bitmask64_test(light_set_membership, receiver_light_set);
-}
-
-float npr_light_power_get(LightData light, LightingType type)
-{
-  /* Mask anything above 3. See LIGHT_TRANSLUCENT_WITH_THICKNESS. */
-  return light.power[type & 3u];
-}
-
-bool foreach_light_setup(uint l_idx,
-                         bool is_directional,
-                         float3 N,
-                         out float4 out_color,
-                         out float3 out_vector,
-                         out float out_distance,
-                         out float out_attenuation,
-                         out float out_shadow_mask)
-{
-  LightData light = light_buf[l_idx];
-  if (npr_is_zero(light.color)) {
-    return false;
-  }
-
-  ObjectInfos object_infos = drw_infos[drw_resource_id()];
-  uchar receiver_light_set = receiver_light_set_get(object_infos);
-  if (!npr_light_linking_affects_receiver(light.light_set_membership, receiver_light_set)) {
-    return false;
-  }
-
-  LightVector lv = light_vector_get(light, is_directional, g_data.P);
-  float attenuation = light_attenuation_volume(light, is_directional, lv);
-  if (attenuation < LIGHT_ATTENUATION_THRESHOLD) {
-    return false;
-  }
-
-  float3 V = drw_world_incident_vector(g_data.P);
-  float4 ltc_mat = float4(1.0f, 0.0f, 0.0f, 1.0f);
-  LightVertices light_shape_vertices = light_shape_corners(light, lv);
-  float ltc = light_ltc(utility_tx, light, lv.L, V, lv, ltc_mat, light_shape_vertices);
-  attenuation *= ltc * npr_light_power_get(light, LIGHT_DIFFUSE);
-  if (attenuation < LIGHT_ATTENUATION_THRESHOLD) {
-    return false;
-  }
-
-  float shadow_mask = 1.0f;
-  if (light.tilemap_index != LIGHT_NO_SHADOW) {
-    int ray_count = uniform_buf.shadow.ray_count;
-    int ray_step_count = uniform_buf.shadow.step_count;
-    shadow_mask = eevee_shadow_eval(light,
-                                    is_directional,
-                                    false,
-                                    false,
-                                    0.0f,
-                                    g_data.P,
-                                    g_data.Ng,
-                                    N,
-                                    0.0f,
-                                    0.0f,
-                                    ray_count,
-                                    ray_step_count);
-    shadow_mask *= dot(N, lv.L) > 0.0f ? 1.0f : 0.0f;
-  }
-
-  out_color = float4(light.color, 1.0f);
-  out_vector = lv.L;
-  out_distance = lv.dist;
-  out_attenuation = attenuation;
-  out_shadow_mask = shadow_mask;
-  return true;
-}
-
-#  define FOREACH_LIGHT_BEGIN( \
-      N, out_color, out_vector, out_distance, out_attenuation, out_shadow_mask) \
-    LIGHT_FOREACH_ALL_BEGIN(light_cull_buf, \
-                            light_zbin_buf, \
-                            light_tile_buf, \
-                            gl_FragCoord.xy, \
-                            drw_point_world_to_view(g_data.P).z, \
-                            l_idx, \
-                            is_local) \
-    if (!foreach_light_setup(l_idx, \
-                             !is_local, \
-                             N, \
-                             out_color, \
-                             out_vector, \
-                             out_distance, \
-                             out_attenuation, \
-                             out_shadow_mask)) \
-    { \
-      continue; \
-    }
-
-#  define FOREACH_LIGHT_END() LIGHT_FOREACH_ALL_END()
-#else
-#  define FOREACH_LIGHT_BEGIN( \
-      N, out_color, out_vector, out_distance, out_attenuation, out_shadow_mask)
-#  define FOREACH_LIGHT_END()
-#endif
-#endif
-
 #ifdef MAT_DEPTH_OFFSET
 bool depth_offset_fragment_matches_prepass(float depth_offset)
 {
@@ -552,5 +443,8 @@ void main()
   g_specular_indirect = float4(dc.specular_indirect, 1.0f);
 
   out_radiance = swap_alpha(nodetree_npr());
+  /* Radiance is non-negative. Signed NPR data otherwise contaminates screen-space reflection
+   * filtering and appears as saturated magenta. Keep the HDR upper range and alpha untouched. */
+  out_radiance.rgb = max(out_radiance.rgb, float3(0.0f));
   nodetree_surface(0.0f);
 }

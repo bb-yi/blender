@@ -1504,6 +1504,9 @@ static void bind_bake_resources(PassSimple::Sub &sub, Instance &inst)
   sub.bind_resources(inst.sampling);
   sub.bind_resources(inst.volume_probes);
   sub.bind_resources(inst.sphere_probes);
+  /* Color Bake has no view-dependent planar-probe pass, but the 5.2 light-probe BSL table still
+   * declares its descriptors. Bind the sentinel resources instead of uninitialized live probes. */
+  sub.bind_resources(inst.planar_probes.dummy_resources);
 }
 
 static void draw_bake_light_shader_surface_context(

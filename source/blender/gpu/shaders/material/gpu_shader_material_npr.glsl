@@ -86,15 +86,122 @@ bool foreach_light_setup(uint l_idx,
   return true;
 }
 
+#define NPR_LIGHT_CHUNK_LOCAL 0u
+#define NPR_LIGHT_CHUNK_DIRECTIONAL 1u
+#define NPR_LIGHT_CHUNK_DONE 2u
+
+struct NPRLightChunkIterator {
+  uint phase;
+  uint tile_word_offset;
+  uint word_index;
+  uint word_end;
+  uint zbin_min;
+  uint zbin_max;
+  uint directional_index;
+};
+
+NPRLightChunkIterator npr_light_chunk_iterator_init(float2 pixel, float linear_view_z)
+{
+  NPRLightChunkIterator iterator;
+  iterator.phase = NPR_LIGHT_CHUNK_LOCAL;
+  iterator.tile_word_offset = 0u;
+  iterator.word_index = 0u;
+  iterator.word_end = 0u;
+  iterator.zbin_min = 0u;
+  iterator.zbin_max = 0u;
+  iterator.directional_index = light_cull_buf.local_lights_len;
+
+#ifdef LIGHT_ITER_FORCE_NO_CULLING
+  if (light_cull_buf.visible_count == 0u) {
+    iterator.phase = NPR_LIGHT_CHUNK_DIRECTIONAL;
+  }
+  else {
+    iterator.word_end = (light_cull_buf.visible_count - 1u) >> 5u;
+  }
+#else
+  uint2 tile_co = uint2(pixel / light_cull_buf.tile_size);
+  iterator.tile_word_offset =
+      (tile_co.x + tile_co.y * light_cull_buf.tile_x_len) * light_cull_buf.tile_word_len;
+
+  int zbin_index = eevee::light::culling_z_to_zbin(
+      light_cull_buf.zbin_scale, light_cull_buf.zbin_bias, linear_view_z);
+  zbin_index = clamp(zbin_index, 0, CULLING_ZBIN_COUNT - 1);
+  uint zbin_data = light_zbin_buf[zbin_index];
+  iterator.zbin_min = zbin_data & 0xFFFFu;
+  iterator.zbin_max = zbin_data >> 16u;
+
+#  ifdef GPU_METAL
+  iterator.zbin_min = simd_broadcast_first(simd_min(iterator.zbin_min));
+  iterator.zbin_max = simd_broadcast_first(simd_max(iterator.zbin_max));
+#  endif
+
+  iterator.word_index = iterator.zbin_min >> 5u;
+  iterator.word_end = iterator.zbin_max >> 5u;
+#endif
+
+  return iterator;
+}
+
+bool npr_light_chunk_iterator_next(NPRLightChunkIterator &iterator,
+                                   out uint chunk_base,
+                                   out uint chunk_word,
+                                   out bool is_local)
+{
+  if (iterator.phase == NPR_LIGHT_CHUNK_LOCAL) {
+    if (iterator.word_index <= iterator.word_end) {
+      uint word_index = iterator.word_index++;
+      chunk_base = word_index * 32u;
+
+#ifdef LIGHT_ITER_FORCE_NO_CULLING
+      uint local_count = min(32u, light_cull_buf.visible_count - chunk_base);
+      chunk_word = eevee::light::bitfield_mask(local_count, 0u);
+#else
+      chunk_word = light_tile_buf[iterator.tile_word_offset + word_index];
+      chunk_word &= eevee::light::zbin_mask(
+          word_index, iterator.zbin_min, iterator.zbin_max);
+
+#  ifdef GPU_METAL
+      chunk_word = simd_broadcast_first(simd_or(chunk_word));
+#  endif
+#endif
+
+      is_local = true;
+      return true;
+    }
+    iterator.phase = NPR_LIGHT_CHUNK_DIRECTIONAL;
+  }
+
+  if (iterator.phase == NPR_LIGHT_CHUNK_DIRECTIONAL) {
+    if (iterator.directional_index < light_cull_buf.items_count) {
+      chunk_base = iterator.directional_index++;
+      chunk_word = 1u;
+      is_local = false;
+      return true;
+    }
+    iterator.phase = NPR_LIGHT_CHUNK_DONE;
+  }
+
+  chunk_base = 0u;
+  chunk_word = 0u;
+  is_local = false;
+  return false;
+}
+
 #    define FOREACH_LIGHT_BEGIN( \
         N, out_color, out_vector, out_distance, out_attenuation, out_shadow_mask) \
-      LIGHT_FOREACH_ALL_BEGIN(light_cull_buf, \
-                              light_zbin_buf, \
-                              light_tile_buf, \
-                              gl_FragCoord.xy, \
-                              drw_point_world_to_view(g_data.P).z, \
-                              l_idx, \
-                              is_local) \
+      { \
+        NPRLightChunkIterator npr_light_iterator = npr_light_chunk_iterator_init( \
+            gl_FragCoord.xy, drw_point_world_to_view(g_data.P).z); \
+        uint npr_light_chunk_base; \
+        uint npr_light_chunk_word; \
+        bool is_local; \
+        while (npr_light_chunk_iterator_next( \
+            npr_light_iterator, npr_light_chunk_base, npr_light_chunk_word, is_local)) \
+        { \
+          int npr_light_bit_index; \
+          while ((npr_light_bit_index = findLSB(npr_light_chunk_word)) != -1) { \
+            npr_light_chunk_word &= ~(1u << uint(npr_light_bit_index)); \
+            uint l_idx = npr_light_chunk_base + uint(npr_light_bit_index); \
       if (!foreach_light_setup(l_idx, \
                                !is_local, \
                                N, \
@@ -107,7 +214,10 @@ bool foreach_light_setup(uint l_idx,
         continue; \
       }
 
-#    define FOREACH_LIGHT_END() LIGHT_FOREACH_ALL_END()
+#    define FOREACH_LIGHT_END() \
+  } \
+  } \
+  }
 
 #  else
 
