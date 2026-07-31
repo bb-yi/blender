@@ -100,7 +100,7 @@ struct Scatter {
   [[resource_table]] srt_t<draw::View> views_;
   [[resource_table]] srt_t<LightRenderData> light_data;
   [[resource_table]] srt_t<ShadowRenderData> shadow_data;
-  [[resource_table]] srt_t<LightShaderEvalData> light_shader_data;
+  [[resource_table, condition(use_volume_light)]] srt_t<LightShaderEvalData> light_shader_data;
   [[resource_table]] srt_t<LightprobeVolumeRenderData> lightprobe_volume_data;
 
   [[sampler(0)]] sampler3D scattering_history_tx;
@@ -154,30 +154,32 @@ struct LightEvalCtx {
 
     float attenuation = light_attenuation_volume(light, is_directional, lv);
     bool use_light_shader_no_distance = false;
-    [[resource_table]] const LightShaderEvalData &light_shader_data = srt.light_shader_data;
-    int light_shader_index = light_shader_data.light_shader_index_buf[l_idx];
-    int light_shader_uniform_index = (light_shader_index < -1) ? -light_shader_index - 2 : -1;
-    if (light_shader_uniform_index >= 0) {
-      float4 light_shader = light_shader_data.light_shader_uniform_buf[light_shader_uniform_index];
-      light.color = light_shader.rgb;
-      attenuation = light_attenuation_common(light, is_directional, lv.L) * light_shader.a;
-      use_light_shader_no_distance = true;
-      if (!is_directional) {
-        attenuation *= light_influence_cutoff(lv.dist,
-                                              light.local().local.influence_radius_invsqr_volume);
+    if (srt.use_volume_light) [[static_branch]] {
+      [[resource_table]] const LightShaderEvalData &light_shader_data = srt.light_shader_data;
+      int light_shader_index = light_shader_data.light_shader_index_buf[l_idx];
+      int light_shader_uniform_index = (light_shader_index < -1) ? -light_shader_index - 2 : -1;
+      if (light_shader_uniform_index >= 0) {
+        float4 light_shader = light_shader_data.light_shader_uniform_buf[light_shader_uniform_index];
+        light.color = light_shader.rgb;
+        attenuation = light_attenuation_common(light, is_directional, lv.L) * light_shader.a;
+        use_light_shader_no_distance = true;
+        if (!is_directional) {
+          attenuation *= light_influence_cutoff(lv.dist,
+                                                light.local().local.influence_radius_invsqr_volume);
+        }
       }
-    }
-    else if (light_shader_index >= 0) {
-      int layer = light_shader_index * uni.uniform_buf.volumes.tex_size.z + froxel.z;
-      float4 light_shader = texelFetch(light_shader_data.light_shader_tx,
-                                       int3(froxel.xy, layer),
-                                       0);
-      light.color = light_shader.rgb;
-      attenuation = light_attenuation_common(light, is_directional, lv.L) * light_shader.a;
-      use_light_shader_no_distance = true;
-      if (!is_directional) {
-        attenuation *= light_influence_cutoff(lv.dist,
-                                              light.local().local.influence_radius_invsqr_volume);
+      else if (light_shader_index >= 0) {
+        int layer = light_shader_index * uni.uniform_buf.volumes.tex_size.z + froxel.z;
+        float4 light_shader = texelFetch(light_shader_data.light_shader_tx,
+                                         int3(froxel.xy, layer),
+                                         0);
+        light.color = light_shader.rgb;
+        attenuation = light_attenuation_common(light, is_directional, lv.L) * light_shader.a;
+        use_light_shader_no_distance = true;
+        if (!is_directional) {
+          attenuation *= light_influence_cutoff(lv.dist,
+                                                light.local().local.influence_radius_invsqr_volume);
+        }
       }
     }
     if (attenuation < LIGHT_ATTENUATION_THRESHOLD) {
