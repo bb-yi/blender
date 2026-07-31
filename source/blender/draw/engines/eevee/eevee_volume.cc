@@ -283,13 +283,6 @@ void VolumeModule::end_sync()
   const GPUSamplerState history_sampler = {GPU_SAMPLER_FILTERING_LINEAR,
                                            GPU_SAMPLER_EXTEND_MODE_EXTEND,
                                            GPU_SAMPLER_EXTEND_MODE_EXTEND};
-  /* Ensure light shader SSBOs are allocated before binding. The volume scatter shader
-   * struct always includes LightShaderEvalData which references these SSBO slots, even
-   * when no lights with custom light shaders are present. Without pre-allocation the
-   * underlying VkBuffers may not be registered in the resource tracker.
-   */
-  inst_.lights.ensure_volume_light_shader_resources_allocated();
-
   scatter_ps_.init();
   scatter_ps_.shader_set(
       inst_.shaders.static_shader_get(use_lights_ ? VOLUME_SCATTER_WITH_LIGHTS : VOLUME_SCATTER));
