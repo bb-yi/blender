@@ -1074,6 +1074,53 @@ struct Film {
       }
     }
 
+    if (flag_test(enabled_categories, PASS_CATEGORY_NATIVE_POSTFX)) {
+      for (int output_index = 0;
+           output_index < uni.uniform_buf.film.native_postfx_color_len;
+           output_index++)
+      {
+        float4 output_accum = float4(0.0f);
+        int source_layer = uni.uniform_buf.render_pass.color_len +
+                           uni.uniform_buf.render_pass.aovs.color_len + output_index;
+
+        for (int i = 0; i < samples_len; i++) {
+          FilmSample src = sample_get(i, texel_film);
+          sample_accum(src,
+                       uni.uniform_buf.film.native_postfx_color_id + output_index,
+                       source_layer,
+                       rp_color_tx,
+                       output_accum);
+        }
+        store_color(dst,
+                    uni.uniform_buf.film.native_postfx_color_id + output_index,
+                    output_accum,
+                    out_color,
+                    false);
+      }
+
+      for (int output_index = 0;
+           output_index < uni.uniform_buf.film.native_postfx_value_len;
+           output_index++)
+      {
+        float output_accum = 0.0f;
+        int source_layer = uni.uniform_buf.render_pass.value_len +
+                           uni.uniform_buf.render_pass.aovs.value_len + output_index;
+
+        for (int i = 0; i < samples_len; i++) {
+          FilmSample src = sample_get(i, texel_film);
+          sample_accum(src,
+                       uni.uniform_buf.film.native_postfx_value_id + output_index,
+                       source_layer,
+                       rp_value_tx,
+                       output_accum);
+        }
+        store_value(dst,
+                    uni.uniform_buf.film.native_postfx_value_id + output_index,
+                    output_accum,
+                    out_color);
+      }
+    }
+
     if (flag_test(enabled_categories, PASS_CATEGORY_CRYPTOMATTE)) {
       if (uni.uniform_buf.film.cryptomatte_samples_len != 0) {
         [[resource_table]] Cryptomatte &crypto = this->cryptomatte;

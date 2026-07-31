@@ -35,6 +35,7 @@
   - `mat3`
   - `mat4`
   - `sampler2D`
+  - `sampler3D`
 - 输出参数 `out`
   - `float`
   - `int`
@@ -60,7 +61,7 @@
 ### 2. 当前不支持的函数接口写法
 
 - `inout`
-- `out sampler2D`
+- `out sampler2D` / `out sampler3D`
 - `struct` / `array` 作为函数边界类型
 - 非方阵矩阵（例如 `mat2x3`）作为函数边界类型
 - 多返回值结构体
@@ -70,11 +71,13 @@
 
 ### 3. 当前和 UI 相关的重要事实
 
-- `GLSL Function` 节点只允许用于 Eevee 的 Object、Filter 和 NPR 节点域；World 节点树当前不支持
+- `GLSL Function` 节点可用于 Eevee 的 Object、Filter、NPR 和 World 节点域；World 中的输入方向应显式连接 `Texture Coordinate.Normal`，并且仍需用实际 GPU 渲染验证，不能只看 `parse_status=READY`
 - `Function` 现在必须显式指定，不会自动选第一个函数
 - `sampler2D` 会显示为 `Closure` 输入口
 - `sampler2D` 可连接 `Image to Closure` 或符合约定的 `Closure Output`
 - `Closure Output -> sampler2D` 当前只保证 `texture(tex, coord)` 这种直接采样形式；`coord` 的语义由闭包内部决定，普通贴图通常是 UV，NPR 图像句柄通常是 `Image Sample.Offset`
+- `sampler3D` 也会显示为 `Closure` 输入口，可连接 `Image to Closure` 的 `3D LUT Strip` 或符合约定的 `Closure Output`
+- `Closure Output -> sampler3D` 使用 `Closure Input` 中名为 `UV` 的 `Vector` 传递完整 `vec3` 坐标；首版只保证 `texture(volume, vec3_coord)`，不支持 `textureLod`、`textureGrad`、`textureSize`、`texelFetch` 或 `textureGather`
 - 如果函数依赖显式 `LOD`、`grad` 或尺寸查询等图像专用能力，应优先使用 `Image to Closure`
 - 导出函数边界当前已经支持 `int / bool`，适合直接作为模式开关、枚举值、`lightgroup_id` 这类参数
 - 默认情况下 `vec2/vec3/vec4` 仍然显示为“向量插口”
@@ -177,7 +180,7 @@ Meta 必须覆盖导出函数的公开接口：
 - 坐标、方向、比例等向量参数应写清楚语义；不要给方向/法线参数写 `subtype=direction`，这个 subtype 会触发不友好的球形方向控件；需要普通三轴向量 UI 时用 `subtype=xyz` 或省略 subtype
 - 固定模式类 `int` 参数应优先写 `items="0:Label;1:Other"`，让默认值显示成下拉菜单；只有连续数值范围才用普通 `min/max` 整数框
 - `items` 下拉默认隐藏前置参数名，只显示当前选项；当同一行没有足够上下文或面板里有多个相似下拉时，再写 `show_label=true`
-- `sampler2D` 只能写 `label`、`description`，以及放进 panel；不要写 `default/min/max/hide_value/subtype`
+- `sampler2D` / `sampler3D` 只能写 `label`、`description`，以及放进 panel；不要写 `default/min/max/hide_value/subtype`
 - `out` 参数只能写 `label`，不要写默认值、范围、subtype 或 description
 - 返回值不支持 Meta，必须在 `Outputs` 和结果说明里写清楚
 - 参数超过 4 个，或语义能自然分组时，应使用一级 `@panel` / `@end_panel` 分组；高级/很少调节的参数默认 `closed=true`，主要工作流参数可以 `closed=false`
@@ -338,6 +341,30 @@ texture(buffer, uv + delta_pixels / resolution)
 - 不要因为它使用 `sampler2D` 就自动把第二个参数命名成 `uv`。
 - 不要把 mesh UV 直接接到闭包内部的 `Image Sample.Offset`，除非用户明确要用 UV 值伪装偏移。
 - 转换报告应写清楚：图像句柄采样发生在 `Image Sample` 闭包内部，GLSL 函数边界仍然是 `sampler2D image`，但 `texture(image, offset)` 的 `offset` 是 NPR 偏移量。
+
+### 规则 4B：程序化三维距离场使用 `sampler3D + Closure Output`
+
+当输入来自 `SDF Primitive`、程序化纹理或其他可由 Closure helper 执行的三维节点网络时，公开边界可以写成：
+
+```glsl
+float sample_sdf(sampler3D sdf_volume, vec3 position)
+{
+  return texture(sdf_volume, position).r;
+}
+```
+
+节点侧的接口约定是：
+
+```text
+Closure Input.UV (Vector) -> 程序化节点的三维 Vector
+程序化结果 -> Closure Output.Color (Float / Vector / RGBA)
+Closure Output.Closure -> GLSL Function 的 sampler3D 输入
+```
+
+- `UV` 只是固定接口名；在 `sampler3D` 路径中运行时值是完整 `vec3`，Z 不会固定为 `0.0`。
+- 这条路径是每次调用时重新执行程序化闭包的 helper，不是真实 GPU 3D 纹理，不提供硬件 mip、LOD 或导数语义。
+- 首版只使用两参数 `texture(sampler3D, vec3)`；需要真实 3D LUT 或其他纹理采样语义时，改用 `Image to Closure` 的 `3D LUT Strip`。
+- Closure Output 必须有名为 `UV` 的 Vector 输入项，以及名为 `Color` 的 Float、Vector 或 RGBA 输出项。
 
 ### 规则 4.1：如果要使用 Eevee 逐灯辅助接口，必须把范围说清楚
 
@@ -1348,11 +1375,11 @@ vec2 triangle_unproject(vec3 v)
 1. 最终结果只能是普通 GLSL 函数源码，不要输出完整 shader 文件。
 2. 明确给出 Function 应设置的函数名。
 3. 只要导出函数有输入参数或 out 参数，代码里必须在导出函数正上方写完整的 `@glsl_meta v1`，不要让用户后续自己补。
-4. Meta 要覆盖每个输入参数和 out 参数：输入参数写 label/description 和必要的 default/min/max/subtype；sampler2D 只写 label/description/panel；out 参数只写 label；返回值不支持 Meta，必须在 Outputs 中说明。
+4. Meta 要覆盖每个输入参数和 out 参数：输入参数写 label/description 和必要的 default/min/max/subtype；sampler2D/sampler3D 只写 label/description/panel；out 参数只写 label；返回值不支持 Meta，必须在 Outputs 中说明。
 5. 参数超过 4 个或语义能自然分组时，使用一级 `@panel` / `@end_panel` 分组，panel 必须闭合。
 6. 把所有外部 uniform / 时间 / 分辨率 / 鼠标 / 贴图输入改成函数参数。
-7. 导出函数的参数和返回值只允许使用 float、int、bool、vec2、vec3、vec4、mat2、mat3、mat4、sampler2D，以及 out float/int/bool/vec2/vec3/vec4/mat2/mat3/mat4。
-8. 不允许使用 inout，也不允许 out sampler2D。
+7. 导出函数的参数和返回值只允许使用 float、int、bool、vec2、vec3、vec4、mat2、mat3、mat4、sampler2D、sampler3D，以及 out float/int/bool/vec2/vec3/vec4/mat2/mat3/mat4。
+8. 不允许使用 inout，也不允许 out sampler2D 或 out sampler3D。
 9. 如果来源是 HLSL 或 ShaderLab，去掉语义、Pass、Properties、pragma 和引擎包装层。
 10. 贴图采样优先改成 `texture(tex, uv)`；如果原算法明确依赖显式 `LOD`，可以保留为 `textureLod(tex, uv, lod)`，并说明这更适合配合 `Image to Closure`。
 11. 如果存在宏开关、死代码、未使用辅助函数、反向 `smoothstep`、运行时别名宏、共享可变全局状态、布尔到数值隐式转换、非方阵矩阵双向乘法这类不稳定写法，要收敛成稳定版本。
@@ -1444,7 +1471,7 @@ Meta 只会作用到它正下方那个函数。
 - `vec2` 坐标、偏移、比例：写 `label`、`default=vec2(...)` 和 `description`
 - `vec3` 颜色：写 `subtype=color`，并给出颜色默认值；需要 alpha 时用 `vec4`，它会拆成 `vec3 + float W`
 - `vec3` 方向、法线、位置：不要误标为颜色；用 `description` 写清楚空间语义；不要使用 `subtype=direction`，需要普通三轴输入时用 `subtype=xyz` 或省略 subtype
-- `sampler2D`：只写 `label` 和 `description`，必要时放进 `@panel`
+- `sampler2D` / `sampler3D`：只写 `label` 和 `description`，必要时放进 `@panel`
 - `out` 参数：只写 `label`；不要写 `default/min/max/subtype/description`
 - 返回值：不写 Meta；在 `Outputs` 中说明返回类型和含义
 - 参数较多时：用一级 `@panel "分组名" closed=true/false` 分组，并用 `@end_panel` 闭合
@@ -1676,7 +1703,7 @@ out_color: label="输出色"
 - `label` 不改变 socket identifier；例如参数 `base_color` 的输入仍然是 `In_base_color`
 - 输入参数都支持 `label`
 - `out` 参数只支持 `label`，不支持默认值、范围、隐藏值、subtype、description 或 panel
-- `sampler2D` 支持 `label`
+- `sampler2D` / `sampler3D` 支持 `label`
 
 #### 3.8 `description`
 
@@ -1697,7 +1724,7 @@ tex: label="贴图" description="Source texture closure"
 - 如果文本里需要写反斜杠，使用 `\\`
 - V1 只支持单行描述，不支持跨行文本
 - `description` 只影响 UI，不改变 socket identifier、默认值、范围或 GLSL 函数调用方式
-- `sampler2D` 只支持 `label`、`description` 和 panel 分组，不支持 `default/min/max/hide_value/subtype`
+- `sampler2D` / `sampler3D` 只支持 `label`、`description` 和 panel 分组，不支持 `default/min/max/hide_value/subtype`
 
 #### 3.9 `@panel` / `@end_panel`
 
@@ -1778,7 +1805,7 @@ vec3 shader(
 - 除 `out` 参数的 `label` 以外，Meta 只支持输入参数
 - 不支持返回值 Meta
 - 不支持 `inout`
-- `sampler2D` 只支持 `label`、`description` 和 panel 分组，不支持默认值、范围、隐藏值或 subtype
+- `sampler2D` / `sampler3D` 只支持 `label`、`description` 和 panel 分组，不支持默认值、范围、隐藏值或 subtype
 - `mat2/mat3/mat4` 边界参数的 Meta 只建议写 `label/description/panel`，不要写 `default/min/max/subtype`
 - 不支持 `struct` / `array` 边界参数 Meta
 - panel 只支持一级，不支持嵌套

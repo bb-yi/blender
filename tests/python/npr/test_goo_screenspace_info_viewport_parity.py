@@ -1,11 +1,32 @@
-import bpy
 import os
 import tempfile
+
+import bpy
+import gpu
 
 
 def clear_scene():
     bpy.ops.object.select_all(action="SELECT")
     bpy.ops.object.delete()
+
+
+def configure_scene(use_raytracing):
+    scene = bpy.context.scene
+    scene.render.engine = "BLENDER_EEVEE"
+    scene.render.resolution_x = 128
+    scene.render.resolution_y = 128
+    scene.render.resolution_percentage = 100
+    scene.eevee.taa_render_samples = 1
+    scene.eevee.taa_samples = 1
+    scene.eevee.use_raytracing = use_raytracing
+    if hasattr(scene.eevee, "ray_tracing_method"):
+        scene.eevee.ray_tracing_method = "SCREEN"
+    scene.view_settings.view_transform = "Standard"
+    scene.view_settings.look = "None"
+    scene.view_settings.exposure = 0.0
+    scene.view_settings.gamma = 1.0
+    if scene.world is not None:
+        scene.world.color = (0.0, 0.0, 0.0)
 
 
 def make_camera():
@@ -17,7 +38,6 @@ def make_camera():
     camera.rotation_euler = (0.0, 0.0, 0.0)
     camera_data.type = "ORTHO"
     camera_data.ortho_scale = 2.0
-    return camera
 
 
 def make_plane(name, z_location):
@@ -25,6 +45,20 @@ def make_plane(name, z_location):
     obj = bpy.context.active_object
     obj.name = name
     return obj
+
+
+def assign_single_material(obj, material):
+    obj.data.materials.clear()
+    obj.data.materials.append(material)
+    obj.active_material_index = 0
+    for polygon in obj.data.polygons:
+        polygon.material_index = 0
+
+    assert len(obj.data.materials) == 1, f"{obj.name}: expected exactly one material slot"
+    assert obj.active_material == material, f"{obj.name}: active material assignment failed"
+    assert all(polygon.material_index == 0 for polygon in obj.data.polygons), (
+        f"{obj.name}: not every polygon uses material slot 0"
+    )
 
 
 def make_emission_material(name, color):
@@ -35,21 +69,20 @@ def make_emission_material(name, color):
     nodes.clear()
 
     output = nodes.new("ShaderNodeOutputMaterial")
-    output.location = (300.0, 0.0)
-
     emission = nodes.new("ShaderNodeEmission")
-    emission.location = (0.0, 0.0)
     emission.inputs["Color"].default_value = color
     emission.inputs["Strength"].default_value = 1.0
-
     links.new(emission.outputs["Emission"], output.inputs["Surface"])
     return material
 
 
-def make_screenspace_material(name, surface_render_method, explicit_view_position=None):
+def make_screenspace_material(
+    name, surface_render_method, explicit_view_position=None, direct_scene_color=False
+):
     material = bpy.data.materials.new(name)
     material.use_nodes = True
     material.surface_render_method = surface_render_method
+    material.use_raytrace_refraction = surface_render_method == "DITHERED"
 
     nodes = material.node_tree.nodes
     links = material.node_tree.links
@@ -73,8 +106,11 @@ def make_screenspace_material(name, surface_render_method, explicit_view_positio
         combine_xyz.inputs["Z"].default_value = explicit_view_position[2]
         links.new(combine_xyz.outputs["Vector"], screenspace.inputs["View Position"])
 
-    links.new(screenspace.outputs["Scene Color"], emission.inputs["Color"])
-    links.new(emission.outputs["Emission"], output.inputs["Surface"])
+    if direct_scene_color:
+        links.new(screenspace.outputs["Scene Color"], output.inputs["Surface"])
+    else:
+        links.new(screenspace.outputs["Scene Color"], emission.inputs["Color"])
+        links.new(emission.outputs["Emission"], output.inputs["Surface"])
 
     return material, screenspace, emission, output
 
@@ -96,16 +132,12 @@ def render_center_rgb():
     try:
         width = image.size[0]
         height = image.size[1]
-        x = width // 2
-        y = height // 2
-        pixel_index = (y * width + x) * 4
-        pixels = list(image.pixels[pixel_index:pixel_index + 4])
+        pixel_index = ((height // 2) * width + (width // 2)) * 4
+        return list(image.pixels[pixel_index : pixel_index + 4])
     finally:
         bpy.data.images.remove(image)
         if os.path.exists(filepath):
             os.remove(filepath)
-
-    return pixels
 
 
 def assert_is_red(pixel, label):
@@ -116,37 +148,40 @@ def assert_is_red(pixel, label):
 
 
 def assert_is_non_black(pixel, label):
-    value = max(pixel[:3])
-    assert value > 0.05, f"{label}: expected non-black depth visualization, got {pixel}"
+    assert max(pixel[:3]) > 0.05, f"{label}: expected non-black depth, got {pixel}"
 
 
-def run_case(label, explicit_view_position=None):
+def run_case(
+    label,
+    surface_render_method,
+    use_raytracing,
+    explicit_view_position=None,
+    direct_scene_color=False,
+    check_depth=True,
+):
     clear_scene()
+    configure_scene(use_raytracing)
     make_camera()
 
-    scene = bpy.context.scene
-    scene.render.engine = "BLENDER_EEVEE"
-    scene.render.resolution_x = 128
-    scene.render.resolution_y = 128
-    scene.render.resolution_percentage = 100
-    scene.eevee.taa_render_samples = 1
-    scene.eevee.taa_samples = 1
-    scene.view_settings.view_transform = "Standard"
-    scene.view_settings.look = "None"
-
     back_plane = make_plane(f"Back_{label}", 0.0)
-    back_plane.data.materials.append(
-        make_emission_material(f"BackMaterial_{label}", (1.0, 0.0, 0.0, 1.0))
+    assign_single_material(
+        back_plane, make_emission_material(f"BackMaterial_{label}", (1.0, 0.0, 0.0, 1.0))
     )
 
     front_plane = make_plane(f"Front_{label}", 0.1)
     front_material, screenspace, emission, output = make_screenspace_material(
-        f"FrontMaterial_{label}", "BLENDED", explicit_view_position
+        f"FrontMaterial_{label}",
+        surface_render_method,
+        explicit_view_position,
+        direct_scene_color,
     )
-    front_plane.data.materials.append(front_material)
+    assign_single_material(front_plane, front_material)
 
     color_pixel = render_center_rgb()
     assert_is_red(color_pixel, f"{label} scene color")
+
+    if not check_depth:
+        return
 
     front_material.node_tree.links.clear()
     front_material.node_tree.links.new(screenspace.outputs["Scene Depth"], emission.inputs["Color"])
@@ -156,7 +191,34 @@ def run_case(label, explicit_view_position=None):
     assert_is_non_black(depth_pixel, f"{label} scene depth")
 
 
-assert hasattr(bpy.types, "ShaderNodeScreenspaceInfo"), "ShaderNodeScreenspaceInfo is not registered"
+def main():
+    assert hasattr(bpy.types, "ShaderNodeScreenspaceInfo"), (
+        "ShaderNodeScreenspaceInfo is not registered"
+    )
 
-run_case("current_pixel")
-run_case("explicit_view_position", (0.0, 0.0, -4.0))
+    run_case("blended_current_pixel", "BLENDED", False)
+    run_case("blended_explicit_view_position", "BLENDED", False, (0.0, 0.0, -4.0))
+    run_case("dithered_current_pixel", "DITHERED", True)
+    run_case("dithered_explicit_view_position", "DITHERED", True, (0.0, 0.0, -4.0))
+    run_case(
+        "dithered_direct_current_pixel",
+        "DITHERED",
+        True,
+        direct_scene_color=True,
+        check_depth=False,
+    )
+    run_case(
+        "dithered_direct_explicit_view_position",
+        "DITHERED",
+        True,
+        (0.0, 0.0, -4.0),
+        direct_scene_color=True,
+        check_depth=False,
+    )
+
+    print("SCREENSPACE_INFO_BACKEND=" + gpu.platform.backend_type_get(), flush=True)
+    print("SCREENSPACE_INFO_VIEWPORT_PARITY_OK", flush=True)
+
+
+if __name__ == "__main__":
+    main()
