@@ -25,6 +25,7 @@
 
 #include "BLT_translation.hh"
 
+#include "BKE_main_invariants.hh"
 #include "BKE_paint.hh"
 #include "BKE_scene_runtime.hh"
 
@@ -2236,7 +2237,7 @@ void rna_ViewLayer_pass_update(Main *bmain, Scene *activescene, PointerRNA *ptr)
   }
 
   BKE_ntree_update_tag_id_changed(bmain, &scene->id);
-  BKE_ntree_update(*bmain);
+  BKE_main_ensure_invariants(*bmain);
 
   rna_Scene_render_update(bmain, activescene, ptr);
 }

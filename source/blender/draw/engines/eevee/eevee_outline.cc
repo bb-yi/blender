@@ -51,7 +51,7 @@ void OutlineModule::sync()
   const bool has_outline_materials = scene_outline_enabled &&
                                      inst_.materials.has_visible_outline_materials();
   const bool public_pass_enabled =
-      inst_.film.pass_id_get(EEVEE_RENDER_PASS_OUTLINE) != -1 ||
+      ((inst_.view_layer->eevee.render_passes & EEVEE_RENDER_PASS_OUTLINE) != 0) ||
       inst_.render_buffers.data.outline_id != -1;
   const bool use_in_combined = !public_pass_enabled;
   enabled_ = scene_outline_enabled && has_outline_materials &&

@@ -21,6 +21,7 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_geom_iface_info)
 #include "eevee_nodetree_frag_lib.glsl"
 #include "eevee_reverse_z_lib.bsl.hh"
 #include "eevee_sampling_lib.bsl.hh"
+#include "eevee_outline_lib.glsl"
 #include "eevee_surf_common.bsl.hh"
 #include "eevee_volume_lib.bsl.hh"
 
@@ -156,6 +157,7 @@ SurfaceForwardFragOut surf_forward_impl(
 
   g_thickness_forward = Thickness::from(nodetree_thickness(), thickness_mode);
 
+  outline_output_reset();
   nodetree_surface(closure_rand);
 
   /* NPR: Forward/blended materials must still feed the Normal render pass. The deferred path writes
@@ -178,6 +180,8 @@ SurfaceForwardFragOut surf_forward_impl(
   eevee::forward_lighting_eval(
       view, resource_id, g_thickness_forward, gl_FragCoord.xy, radiance, transmittance);
   g_data.P = nodetree_P;
+  attenuate_outline(saturate(average(transmittance)));
+  outline_output_flush();
 
   /* Volumetric resolve and compositing. */
   float2 uvs = gl_FragCoord.xy * uni.uniform_buf.volumes.main_view_extent_inv;

@@ -201,6 +201,40 @@ void outline_output_flush()
 #endif
 }
 
+void attenuate_outline(float keep_factor)
+{
+#if defined(MAT_OUTLINE_SUPPORT) && defined(MAT_OUTLINE_OUTPUT) && defined(MAT_OUTLINE_CLEAR) && \
+    defined(MAT_FORWARD) && defined(GPU_FRAGMENT_SHADER)
+  int2 texel = int2(gl_FragCoord.xy);
+  keep_factor = saturate(keep_factor);
+  if (keep_factor <= 1e-5f) {
+    imageStoreFast(outline_color_img, texel, float4(0.0f));
+    imageStoreFast(outline_info_img, texel, uint4(0u));
+    return;
+  }
+  if (keep_factor >= 0.99999f) {
+    return;
+  }
+
+  float4 outline_color = imageLoadFast(outline_color_img, texel);
+  if (outline_color.a <= 1e-5f) {
+    imageStoreFast(outline_color_img, texel, float4(0.0f));
+    imageStoreFast(outline_info_img, texel, uint4(0u));
+    return;
+  }
+
+  outline_color.a *= keep_factor;
+  if (outline_color.a <= 1e-5f) {
+    imageStoreFast(outline_color_img, texel, float4(0.0f));
+    imageStoreFast(outline_info_img, texel, uint4(0u));
+    return;
+  }
+  imageStoreFast(outline_color_img, texel, outline_color);
+#else
+  UNUSED_VARS(keep_factor);
+#endif
+}
+
 float outline_pixel_world_size_at(float depth, int2 extent, int2 texel)
 {
 #if defined(DRW_VIEW_LIB_FUNCTIONS_DEFINED)

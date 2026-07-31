@@ -21,7 +21,8 @@ IMAGE(OUTLINE_INFO_SLOT, UINT_32_32_32_32, write, uimage2D, outline_info_img)
 GPU_SHADER_CREATE_END()
 
 GPU_SHADER_CREATE_INFO(eevee_surf_forward_outline_out)
-ADDITIONAL_INFO(eevee_outline_out)
+IMAGE(OUTLINE_COLOR_SLOT, SFLOAT_16_16_16_16, read_write, image2D, outline_color_img)
+IMAGE(OUTLINE_INFO_SLOT, UINT_32_32_32_32, read_write, uimage2D, outline_info_img)
 GPU_SHADER_CREATE_END()
 
 GPU_SHADER_CREATE_INFO(eevee_outline_detect)
