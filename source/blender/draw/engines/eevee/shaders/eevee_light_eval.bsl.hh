@@ -40,7 +40,7 @@ namespace eevee {
 struct LightEvalData {
   [[resource_table]] srt_t<ShadowRenderData> shadow_data;
   [[resource_table]] srt_t<UtilityTexture> utility_tx;
-  [[resource_table]] srt_t<LightShaderEvalData> light_shader_data;
+  [[resource_table, condition(use_light_shader_texture_eval)]] srt_t<LightShaderEvalData> light_shader_data;
 
   [[compilation_constant]] bool use_light_shader_texture_eval;
   [[compilation_constant]] bool use_light_shader_surfel_eval;
