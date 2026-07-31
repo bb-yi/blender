@@ -1687,6 +1687,9 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   const bool has_bsl_light_eval_resources =
       pipeline_type == MAT_PIPE_FORWARD ||
       (pipeline_type == MAT_PIPE_DEFERRED && use_front_light_shader_in_surface_pass);
+  const bool use_npr_foreach_shadow =
+      pipeline_type == MAT_PIPE_DEFERRED_NPR &&
+      GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR_FOREACH_LIGHT);
 
   const bool has_bsl_previous_layer_resources =
       ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD) &&
@@ -1832,10 +1835,11 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     }
     if (!has_bsl_light_eval_resources) {
       add_create_info_and_reserve(info, slots, "eevee_shadow_data");
-      if (GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR_FOREACH_LIGHT)) {
+      if (use_npr_foreach_shadow) {
         /* The legacy material create-info above binds the same resources used by the generated BSL
          * table. Enable its bridge for the NPR shadow output without changing Shader Info paths. */
         info.define("CREATE_INFO_eevee_ShadowRenderData");
+        info.define("CREATE_INFO_UtilityTexture");
       }
     }
     if (use_shader_info_shadow_classification) {
@@ -2028,12 +2032,10 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
         gpu::shader::Type::bool_t, "gbuffer_simple_layout", use_simple_layout);
   }
 
-  if (ELEM(pipeline_type, MAT_PIPE_FORWARD, MAT_PIPE_BAKE_COLOR) ||
-      use_front_light_shader_in_surface_pass)
-  {
-    const bool use_light_shader_texture_eval =
-        ELEM(pipeline_type, MAT_PIPE_FORWARD, MAT_PIPE_BAKE_COLOR) ||
-        use_front_light_shader_in_surface_pass;
+  const bool use_light_shader_texture_eval =
+      ELEM(pipeline_type, MAT_PIPE_FORWARD, MAT_PIPE_BAKE_COLOR) ||
+      use_front_light_shader_in_surface_pass;
+  if (use_light_shader_texture_eval) {
     const int transmit_eval_count = (closure_bits &
                                      (CLOSURE_REFRACTION | CLOSURE_TRANSLUCENT | CLOSURE_SSS)) ?
                                         1 :
@@ -2045,6 +2047,9 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
         gpu::shader::Type::int_t, "light_closure_eval_count_reflect", closure_bin_count);
     info.compilation_constant(
         gpu::shader::Type::int_t, "light_closure_eval_count_transmit", transmit_eval_count);
+  }
+
+  if (use_light_shader_texture_eval || use_npr_foreach_shadow) {
     info.compilation_constant(gpu::shader::Type::bool_t, "shadow_random", true);
   }
 

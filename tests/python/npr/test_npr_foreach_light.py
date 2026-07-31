@@ -1,12 +1,15 @@
 import argparse
 import math
 from pathlib import Path
+import statistics
 import sys
 
 import bpy
 
 
 RENDER_SIZE = 32
+SOFT_SHADOW_WIDTH = 96
+SOFT_SHADOW_HEIGHT = 64
 POINT_ENERGY = 100.0
 BACKEND_MARKER = "NPR_FOREACH_LIGHT_BACKEND="
 SUCCESS_MARKER = "NPR_FOREACH_LIGHT_OK"
@@ -193,7 +196,21 @@ def add_sun_light(name, color, energy=1.0):
     return light
 
 
-def render_pixels(label):
+def add_area_light(name, location=(-2.5, 0.0, 3.5), energy=500.0):
+    light_data = bpy.data.lights.new(name, type="AREA")
+    light_data.color = (1.0, 1.0, 1.0)
+    light_data.energy = energy
+    light_data.use_shadow = True
+    light_data.shape = "RECTANGLE"
+    light_data.size = 2.0
+    light_data.size_y = 6.0
+    light = bpy.data.objects.new(name, light_data)
+    light.location = location
+    bpy.context.scene.collection.objects.link(light)
+    return light
+
+
+def render_image(label):
     require(OUTPUT_DIR is not None, "Render output directory was not configured")
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     filepath = OUTPUT_DIR / f"{label}.exr"
@@ -208,17 +225,22 @@ def render_pixels(label):
     image = bpy.data.images.load(str(filepath), check_existing=False)
     try:
         width, height = image.size[:]
-        require(
-            (width, height) == (RENDER_SIZE, RENDER_SIZE),
-            f"{label}: expected {RENDER_SIZE}x{RENDER_SIZE}, got {width}x{height}",
-        )
         pixels = list(image.pixels[:])
         require(len(pixels) == width * height * 4, f"{label}: unexpected pixel count {len(pixels)}")
         require(all(math.isfinite(value) for value in pixels), f"{label}: non-finite render pixel")
-        index = ((height // 2) * width + (width // 2)) * 4
-        center = tuple(pixels[index : index + 4])
     finally:
         bpy.data.images.remove(image)
+    return width, height, pixels
+
+
+def render_pixels(label):
+    width, height, pixels = render_image(label)
+    require(
+        (width, height) == (RENDER_SIZE, RENDER_SIZE),
+        f"{label}: expected {RENDER_SIZE}x{RENDER_SIZE}, got {width}x{height}",
+    )
+    index = ((height // 2) * width + (width // 2)) * 4
+    center = tuple(pixels[index : index + 4])
     print(f"NPR_FOREACH_LIGHT_{label.upper()}={center}", flush=True)
     return center
 
@@ -308,6 +330,90 @@ def test_shadow_mask_visibility():
     assert_channels("occluded shadow mask", occluded, {}, {0: 0.2, 1: 0.2, 2: 0.2})
 
 
+def red_channel(pixels, width, x, y):
+    return pixels[(y * width + x) * 4]
+
+
+def test_area_shadow_temporal_convergence():
+    plane = setup_render_scene("ForeachAreaShadow", "shadow")
+    scene = bpy.context.scene
+    scene.render.resolution_x = SOFT_SHADOW_WIDTH
+    scene.render.resolution_y = SOFT_SHADOW_HEIGHT
+    scene.camera.data.ortho_scale = 4.0
+    plane.scale = (1.5, 1.5, 1.0)
+    add_area_light("Temporal Area")
+
+    bpy.ops.mesh.primitive_cube_add(size=1.0, location=(-1.2, 0.0, 1.0))
+    blocker = bpy.context.object
+    blocker.name = "Temporal Area Blocker"
+    blocker.scale = (0.2, 3.0, 1.0)
+
+    scene.eevee.taa_render_samples = 1
+    one_width, one_height, one_sample = render_image("area_shadow_one_sample")
+    scene.eevee.taa_render_samples = 64
+    many_width, many_height, many_samples = render_image("area_shadow_64_samples")
+    require(
+        (one_width, one_height) == (SOFT_SHADOW_WIDTH, SOFT_SHADOW_HEIGHT),
+        f"Unexpected one-sample size {(one_width, one_height)}",
+    )
+    require(
+        (many_width, many_height) == (SOFT_SHADOW_WIDTH, SOFT_SHADOW_HEIGHT),
+        f"Unexpected multi-sample size {(many_width, many_height)}",
+    )
+
+    rows = range(SOFT_SHADOW_HEIGHT // 4, SOFT_SHADOW_HEIGHT * 3 // 4)
+    columns = range(SOFT_SHADOW_WIDTH * 7 // 20, SOFT_SHADOW_WIDTH * 9 // 10)
+    many_profile = {
+        x: statistics.fmean(red_channel(many_samples, many_width, x, y) for y in rows)
+        for x in columns
+    }
+    penumbra_columns = [x for x, value in many_profile.items() if 0.1 < value < 0.9]
+    require(
+        len(penumbra_columns) >= 8,
+        f"Area shadow should contain a measurable penumbra, got profile {many_profile}",
+    )
+
+    one_variance = statistics.fmean(
+        statistics.pvariance(red_channel(one_sample, one_width, x, y) for y in rows)
+        for x in penumbra_columns
+    )
+    many_variance = statistics.fmean(
+        statistics.pvariance(red_channel(many_samples, many_width, x, y) for y in rows)
+        for x in penumbra_columns
+    )
+    grayscale_levels = len({round(many_profile[x], 2) for x in penumbra_columns})
+    quantized_eighth_ratio = statistics.fmean(
+        abs(value * 8.0 - round(value * 8.0)) < 0.08
+        for value in (many_profile[x] for x in penumbra_columns)
+    )
+
+    print(
+        "NPR_FOREACH_LIGHT_AREA_SHADOW="
+        f"columns={len(penumbra_columns)} "
+        f"one_variance={one_variance:.6f} "
+        f"many_variance={many_variance:.6f} "
+        f"levels={grayscale_levels} "
+        f"eighth_ratio={quantized_eighth_ratio:.6f}",
+        flush=True,
+    )
+    require(
+        one_variance > 0.01,
+        f"One-sample area shadow should use spatially randomized rays, variance={one_variance}",
+    )
+    require(
+        many_variance < one_variance * 0.45,
+        f"64 samples should converge spatial noise: one={one_variance}, many={many_variance}",
+    )
+    require(
+        grayscale_levels >= 12,
+        f"Area penumbra should exceed the fixed 8-ray grayscale levels, got {grayscale_levels}",
+    )
+    require(
+        quantized_eighth_ratio < 0.75,
+        f"Area penumbra should not cluster on 1/8 levels, ratio={quantized_eighth_ratio}",
+    )
+
+
 def test_signed_radiance_is_clamped_for_reflections():
     setup_render_scene("ForeachSignedRadiance", "signed_direction")
     add_point_light(
@@ -333,7 +439,7 @@ def test_color_bake_no_culling():
     tree = make_npr_tree("ForeachBakeTree", "overwrite")
     material = make_material("ForeachBakeMaterial", tree, bake_image=image)
     plane = make_plane(material, size=2.0)
-    add_point_light("Bake Red Point", (1.0, 0.0, 0.0))
+    add_point_light("Bake Red Point", (1.0, 0.0, 0.0), use_shadow=True)
     add_sun_light("Bake Blue Sun", (0.0, 0.0, 1.0))
 
     bpy.ops.object.select_all(action="DESELECT")
@@ -362,6 +468,7 @@ def main():
     test_local_before_directional_order()
     test_second_local_light_word()
     test_shadow_mask_visibility()
+    test_area_shadow_temporal_convergence()
     test_signed_radiance_is_clamped_for_reflections()
     test_color_bake_no_culling()
     print(SUCCESS_MARKER, flush=True)
