@@ -832,11 +832,14 @@ void Film::end_sync()
 
 float2 Film::pixel_jitter_get() const
 {
-  if (inst_.is_viewport() && inst_.discard_viewport_history() &&
-      inst_.sampling.interactive_mode() &&
-      !inst_.sampling.use_custom_pixel_jitter_sample())
+  if (!use_reprojection_ ||
+      (inst_.is_viewport() && inst_.discard_viewport_history() &&
+       inst_.sampling.interactive_mode() &&
+       !inst_.sampling.use_custom_pixel_jitter_sample()))
   {
-    /* Without reprojection history, sub-pixel jitter is exposed as whole-image motion. */
+    /* Without temporal reprojection, sub-pixel jitter is exposed as whole-image motion
+     * and a biased filter kernel causes a consistent spatial offset that accumulates
+     * across render samples. */
     return float2(0.0f);
   }
 
@@ -907,6 +910,15 @@ void Film::update_sample_table()
 {
   /* Offset in render target pixels. */
   data_.subpixel_offset = pixel_jitter_get();
+
+  /* When temporal reprojection is inactive (final render, or viewport reset),
+   * the subpixel jitter bias won't be averaged out over time. Force a symmetric
+   * sampling pattern to prevent a consistent 1-pixel spatial offset in all
+   * channels (depth, normal, color) caused by an asymmetric filter kernel
+   * accumulating across render samples. */
+  if (!use_reprojection_) {
+    data_.subpixel_offset = float2(0.0f);
+  }
 
   int filter_radius_ceil = ceilf(data_.filter_radius);
   float filter_radius_sqr = square_f(data_.filter_radius);
