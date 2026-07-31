@@ -6419,7 +6419,7 @@ namespace blender
       }
       if (color_link == nullptr && color_stack != nullptr)
       {
-        color_link = GPU_constant(color_stack->vec);
+        color_link = GPU_uniform(color_stack->vec);
       }
       if (color_link == nullptr)
       {
@@ -6443,7 +6443,7 @@ namespace blender
         }
         if (alpha_link == nullptr && alpha_stack != nullptr)
         {
-          alpha_link = GPU_constant(alpha_stack->vec);
+          alpha_link = GPU_uniform(alpha_stack->vec);
         }
         if (alpha_link == nullptr)
         {
@@ -6489,7 +6489,7 @@ namespace blender
       if (alpha_link != nullptr)
       {
         GPUNodeLink* rgba_link = nullptr;
-        if (!GPU_link(mat, "set_rgba_alpha", color_link, alpha_link, &rgba_link))
+        if (!GPU_link(mat, "multiply_rgba_alpha", color_link, alpha_link, &rgba_link))
         {
           r_error = "Could not combine Closure Output Color and Alpha for " +
             std::string(sampler_type_name(param.type).c_str()) + " parameter '" + param.name + "'";

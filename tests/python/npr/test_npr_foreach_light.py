@@ -5,6 +5,15 @@ import statistics
 import sys
 
 import bpy
+from mathutils import Vector
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from filter_graph_test_utils import (
+    add_pass_input_image_sample,
+    attach_filter_material,
+    clear_filter_graph,
+)
 
 
 RENDER_SIZE = 32
@@ -53,6 +62,7 @@ def configure_scene():
     scene.view_settings.gamma = 1.0
     scene.world.use_nodes = False
     scene.world.color = (0.0, 0.0, 0.0)
+    clear_filter_graph(scene)
     return scene
 
 
@@ -94,11 +104,11 @@ def make_foreach_zone(tree, initial_socket, mode, name):
         links.new(input_node.outputs["Color"], zone_output)
     elif mode == "shadow":
         links.new(input_node.outputs["Shadow Mask"], zone_output)
-    elif mode == "signed_direction":
+    elif mode in {"signed_direction", "signed_direction_strong"}:
         scale = nodes.new("ShaderNodeVectorMath")
         scale.name = name + " Negate Direction"
         scale.operation = "SCALE"
-        scale.inputs[3].default_value = -1.0
+        scale.inputs[3].default_value = -4.0 if mode == "signed_direction_strong" else -1.0
         links.new(input_node.outputs["Direction"], scale.inputs[0])
         links.new(scale.outputs["Vector"], zone_output)
     else:
@@ -159,12 +169,66 @@ def make_material(name, npr_tree, bake_image=None):
     return material
 
 
+def attach_signed_npr_remap_filter():
+    material = bpy.data.materials.new("Signed NPR Remap Filter")
+    material.use_nodes = True
+    material.eevee_domain = "FILTER"
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+    nodes.clear()
+
+    output = nodes.new("ShaderNodeOutputFilter")
+    output.inputs["Alpha"].default_value = 1.0
+    _, image_sample = add_pass_input_image_sample(nodes, links)
+    glsl = nodes.new("ShaderNodeGLSLFunction")
+    text = bpy.data.texts.new("signed_npr_remap_filter.glsl")
+    text.write(
+        "vec4 remap_signed_npr(vec4 color){\n"
+        "  return vec4(color.rgb * 0.5 + 0.5, color.a);\n"
+        "}\n"
+    )
+    glsl.source_mode = "INTERNAL"
+    glsl.script = text
+    glsl.function_name = "remap_signed_npr"
+    material.node_tree.interface_update(bpy.context)
+    material.node_tree.update_tag()
+    bpy.context.view_layer.update()
+    require(glsl.parse_status == "READY", f"Signed NPR remap filter failed: {glsl.parse_status}")
+
+    links.new(image_sample.outputs["Color"], glsl.inputs["color"])
+    links.new(glsl.outputs["Result"], output.inputs["Color"])
+    attach_filter_material(
+        material,
+        stage="BEFORE_COMPOSITE",
+        scene_socket="Color Image",
+    )
+
+
 def make_plane(material, size=4.0):
     bpy.ops.mesh.primitive_plane_add(size=size, location=(0.0, 0.0, 0.0))
     plane = bpy.context.object
     plane.name = "ForeachLightPlane"
     plane.data.materials.append(material)
     return plane
+
+
+def point_camera_at(camera, target):
+    camera.rotation_euler = (Vector(target) - camera.location).to_track_quat("-Z", "Y").to_euler()
+
+
+def make_reflective_floor_material():
+    material = bpy.data.materials.new("Signed NPR Reflection Receiver")
+    material.use_nodes = True
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+    nodes.clear()
+    output = nodes.new("ShaderNodeOutputMaterial")
+    principled = nodes.new("ShaderNodeBsdfPrincipled")
+    principled.inputs["Base Color"].default_value = (0.8, 0.8, 0.8, 1.0)
+    principled.inputs["Metallic"].default_value = 1.0
+    principled.inputs["Roughness"].default_value = 0.35
+    links.new(principled.outputs["BSDF"], output.inputs["Surface"])
+    return material
 
 
 def add_point_light(
@@ -414,19 +478,88 @@ def test_area_shadow_temporal_convergence():
     )
 
 
-def test_signed_radiance_is_clamped_for_reflections():
+def test_signed_npr_output_is_preserved_for_filter_consumers():
     setup_render_scene("ForeachSignedRadiance", "signed_direction")
     add_point_light(
         "Signed Direction Point",
         (1.0, 1.0, 1.0),
         location=(1.0, -1.0, 2.0),
     )
-    color = render_pixels("signed_radiance_clamp")
-    assert_channels(
-        "signed NPR radiance clamp",
-        color,
-        {1: 0.2},
-        {0: 0.001, 2: 0.001},
+    attach_signed_npr_remap_filter()
+    color = render_pixels("signed_npr_filter_remap")
+    require(
+        color[0] < 0.4 and color[1] > 0.6 and color[2] < 0.25,
+        f"filter should receive signed NPR red/blue before remapping to positive values, got {color}",
+    )
+
+
+def test_signed_npr_screen_reflection_is_sanitized():
+    clear_scene()
+    scene = configure_scene()
+    scene.render.resolution_x = 128
+    scene.render.resolution_y = 128
+    scene.eevee.taa_render_samples = 16
+    scene.eevee.use_raytracing = True
+    scene.eevee.ray_tracing_method = "SCREEN"
+    ray_options = scene.eevee.ray_tracing_options
+    ray_options.resolution_scale = "1"
+    ray_options.trace_max_roughness = 1.0
+    ray_options.screen_trace_quality = 1.0
+    ray_options.screen_trace_thickness = 1.0
+    ray_options.use_denoise = False
+
+    camera_data = bpy.data.cameras.new("Signed NPR Reflection Camera")
+    camera = bpy.data.objects.new("Signed NPR Reflection Camera", camera_data)
+    camera.location = (0.0, -6.0, 3.0)
+    camera_data.lens = 50.0
+    point_camera_at(camera, (0.0, 0.7, 0.8))
+    scene.collection.objects.link(camera)
+    scene.camera = camera
+
+    signed_tree = make_npr_tree("Signed NPR Reflection Tree", "signed_direction_strong")
+    signed_material = make_material("Signed NPR Reflection Source", signed_tree)
+    bpy.ops.mesh.primitive_plane_add(
+        size=2.0,
+        location=(0.0, 1.0, 1.25),
+        rotation=(math.pi * 0.5, 0.0, 0.0),
+    )
+    source = bpy.context.object
+    source.name = "Signed NPR Reflection Source"
+    source.scale = (1.4, 1.0, 1.0)
+    source.data.materials.append(signed_material)
+
+    floor_material = make_reflective_floor_material()
+    bpy.ops.mesh.primitive_plane_add(size=12.0, location=(0.0, 0.0, 0.0))
+    floor = bpy.context.object
+    floor.name = "Signed NPR Reflection Floor"
+    floor.data.materials.append(floor_material)
+
+    add_point_light(
+        "Signed Reflection Direction Point",
+        (1.0, 1.0, 1.0),
+        location=(1.0, -1.0, 2.0),
+        energy=POINT_ENERGY,
+    )
+
+    width, height, pixels = render_image("signed_npr_screen_reflection")
+    green_pixels = []
+    for y in range(height // 2):
+        for x in range(width):
+            index = (y * width + x) * 4
+            red, green, blue = pixels[index : index + 3]
+            if green > 0.03 and green > red + 0.02 and green > blue + 0.02:
+                green_pixels.append((red, green, blue))
+
+    max_green = max((color[1] for color in green_pixels), default=0.0)
+    print(
+        "NPR_FOREACH_LIGHT_SIGNED_SCREEN_REFLECTION="
+        f"green_pixels={len(green_pixels)} max_green={max_green:.6f}",
+        flush=True,
+    )
+    require(
+        len(green_pixels) > 20 and max_green > 0.08,
+        "screen-space reflection did not preserve the sanitized positive green radiance: "
+        f"green_pixels={len(green_pixels)} max_green={max_green}",
     )
 
 
@@ -469,7 +602,8 @@ def main():
     test_second_local_light_word()
     test_shadow_mask_visibility()
     test_area_shadow_temporal_convergence()
-    test_signed_radiance_is_clamped_for_reflections()
+    test_signed_npr_output_is_preserved_for_filter_consumers()
+    test_signed_npr_screen_reflection_is_sanitized()
     test_color_bake_no_culling()
     print(SUCCESS_MARKER, flush=True)
 

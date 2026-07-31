@@ -319,7 +319,10 @@ ClosureSignature ClosureSignature::from_glsl_function_sample2d_socket(const bNod
                            .ui = {.subtype = PROP_COLOR}});
   }
   if (const bke::bNodeSocketType *output_type = bke::node_socket_type_find_static(SOCK_FLOAT)) {
-    signature.outputs.add({"Alpha", output_type, NodeSocketInterfaceStructureType::Auto});
+    signature.outputs.add({.key = "Alpha",
+                           .type = output_type,
+                           .structure_type = NodeSocketInterfaceStructureType::Auto,
+                           .ui = {.default_value = ClosureSignature::ItemDefaultValue(1.0f)}});
   }
   return signature;
 }

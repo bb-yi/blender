@@ -118,7 +118,17 @@ def add_centered_sdf_closure(nodes, links, *, smooth_union=False):
     return closure_output
 
 
-def add_constant_sample_closure(nodes, links, name, color, *, color_type="RGBA", alpha=None):
+def add_constant_sample_closure(
+    nodes,
+    links,
+    name,
+    color,
+    *,
+    color_type="RGBA",
+    link_color=True,
+    alpha=None,
+    alpha_default=None,
+):
     closure_input = nodes.new("NodeClosureInput")
     closure_input.name = f"{name} Input"
     closure_output = nodes.new("NodeClosureOutput")
@@ -127,7 +137,9 @@ def add_constant_sample_closure(nodes, links, name, color, *, color_type="RGBA",
     closure_output.input_items.new("VECTOR", "UV")
     closure_output.output_items.new(color_type, "Color")
 
-    if color_type == "RGBA":
+    if not link_color:
+        closure_output.inputs["Color"].default_value = color
+    elif color_type == "RGBA":
         color_node = nodes.new("ShaderNodeRGB")
         color_node.name = f"{name} Color"
         color_node.outputs["Color"].default_value = color
@@ -139,8 +151,11 @@ def add_constant_sample_closure(nodes, links, name, color, *, color_type="RGBA",
             socket.default_value = value
         links.new(color_node.outputs["Vector"], closure_output.inputs["Color"])
 
-    if alpha is not None:
+    if alpha is not None or alpha_default is not None:
         closure_output.output_items.new("FLOAT", "Alpha")
+    if alpha_default is not None:
+        closure_output.inputs["Alpha"].default_value = alpha_default
+    if alpha is not None:
         alpha_node = nodes.new("ShaderNodeValue")
         alpha_node.name = f"{name} Alpha"
         alpha_node.outputs["Value"].default_value = alpha
@@ -287,8 +302,8 @@ def make_mixed_closure_sampler_material():
     return material
 
 
-def make_closure_sampler_alpha_material(*, explicit_alpha):
-    suffix = "Explicit" if explicit_alpha else "Fallback"
+def make_closure_sampler_alpha_material(alpha_mode):
+    suffix = alpha_mode.title()
     material = bpy.data.materials.new(f"ClosureSamplerAlpha{suffix}")
     material.use_nodes = True
     nodes = material.node_tree.nodes
@@ -303,15 +318,23 @@ def make_closure_sampler_alpha_material(*, explicit_alpha):
         links,
         "Sampler 2D",
         (0.2, 0.4, 0.5, 0.8),
-        alpha=0.35 if explicit_alpha else None,
+        link_color=alpha_mode != "numeric",
+        alpha=0.35 if alpha_mode == "linked" else None,
+        alpha_default=(
+            0.35 if alpha_mode == "numeric" else (1.0 if alpha_mode == "default" else None)
+        ),
     )
     closure_3d = add_constant_sample_closure(
         nodes,
         links,
         "Sampler 3D",
         (0.1, 0.3, 0.6, 0.9),
-        color_type="RGBA" if explicit_alpha else "VECTOR",
-        alpha=0.65 if explicit_alpha else None,
+        color_type="RGBA" if alpha_mode != "absent" else "VECTOR",
+        link_color=alpha_mode != "numeric",
+        alpha=0.65 if alpha_mode == "linked" else None,
+        alpha_default=(
+            0.65 if alpha_mode == "numeric" else (1.0 if alpha_mode == "default" else None)
+        ),
     )
     source = (
         "vec3 sample_closure_alpha(sampler2D image, sampler3D volume){\n"
@@ -345,6 +368,7 @@ def build_plane(material):
     camera.location = (0.0, 0.0, 2.0)
     bpy.context.scene.collection.objects.link(camera)
     bpy.context.scene.camera = camera
+    return plane
 
 
 def output_path(name):
@@ -534,14 +558,16 @@ def test_mixed_closure_sampler_dimensions():
 
 def test_closure_sampler_alpha_channels():
     cases = (
-        ("explicit", True, (0.35, 0.65, 0.80)),
-        ("fallback", False, (0.80, 1.00, 0.80)),
+        ("linked", (0.28, 0.585, 0.80)),
+        ("numeric", (0.28, 0.585, 0.80)),
+        ("default", (0.80, 0.90, 0.80)),
+        ("absent", (0.80, 1.00, 0.80)),
     )
     samples = {}
     elapsed_total = 0.0
-    for name, explicit_alpha, expected in cases:
+    for name, expected in cases:
         clear_scene()
-        material = make_closure_sampler_alpha_material(explicit_alpha=explicit_alpha)
+        material = make_closure_sampler_alpha_material(name)
         build_plane(material)
         pixels, width, height, elapsed = render_pixels(f"glsl_closure_sampler_alpha_{name}")
         center = sample_pixel(pixels, width, width // 2, height // 2)
@@ -555,6 +581,39 @@ def test_closure_sampler_alpha_channels():
     print(f"GLSL_CLOSURE_SAMPLER_ALPHA={samples} render_seconds={elapsed_total:.3f}")
 
 
+def test_closure_sampler_numeric_updates():
+    clear_scene()
+    material = make_closure_sampler_alpha_material("numeric")
+    build_plane(material)
+
+    pixels, width, height, _elapsed = render_pixels("glsl_closure_sampler_uniform_initial")
+    initial = sample_pixel(pixels, width, width // 2, height // 2)
+
+    output_2d = material.node_tree.nodes["Sampler 2D Output"]
+    output_3d = material.node_tree.nodes["Sampler 3D Output"]
+    output_2d.inputs["Color"].default_value = (0.25, 0.4, 0.5, 0.6)
+    output_2d.inputs["Alpha"].default_value = 0.5
+    output_3d.inputs["Color"].default_value = (0.1, 0.3, 0.6, 0.4)
+    output_3d.inputs["Alpha"].default_value = 0.25
+    material.node_tree.update_tag()
+    bpy.context.view_layer.update()
+
+    pixels, width, height, _elapsed = render_pixels("glsl_closure_sampler_uniform_updated")
+    updated = sample_pixel(pixels, width, width // 2, height // 2)
+
+    for channel, actual, target in zip("RGB", initial, (0.28, 0.585, 0.80)):
+        require(
+            abs(actual - target) < 0.05,
+            f"Initial numeric Closure sampler {channel} mismatch: {initial}",
+        )
+    for channel, actual, target in zip("RGB", updated, (0.30, 0.10, 0.85)):
+        require(
+            abs(actual - target) < 0.05,
+            f"Updated numeric Closure sampler {channel} mismatch: {updated}",
+        )
+    print(f"GLSL_CLOSURE_SAMPLER_UNIFORM_UPDATE={initial}->{updated}")
+
+
 def main():
     bpy.ops.wm.read_homefile(use_factory_startup=True)
     configure_scene()
@@ -565,6 +624,7 @@ def main():
     test_unsupported_helper_node_fails_readably()
     test_mixed_closure_sampler_dimensions()
     test_closure_sampler_alpha_channels()
+    test_closure_sampler_numeric_updates()
 
 
 if __name__ == "__main__":

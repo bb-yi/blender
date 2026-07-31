@@ -985,6 +985,105 @@ class GLSLFunctionNodeTest(unittest.TestCase):
                 find_socket(loaded_output.inputs, "out_uv").bl_idname, "NodeSocketVector2D"
             )
 
+    def test_typed_closure_callback_evaluate_sync_survives_reload(self):
+        material, tree = self.make_material_tree()
+        material.use_fake_user = True
+        material_name = material.name
+        glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        source = (
+            "/* @glsl_closure v1 label=\"Evaluate Callback\"\n"
+            "count: label=\"Count\" description=\"Integer callback input\"\n"
+            "enabled: label=\"Enabled\" description=\"Boolean callback input\"\n"
+            "Result: label=\"Value\" description=\"Callback result\"\n"
+            "accepted: label=\"Accepted\" description=\"Boolean callback output\"\n"
+            "*/\n"
+            "float evaluate_helper(int count, bool enabled, out bool accepted){\n"
+            "  accepted = enabled && count > 0;\n"
+            "  return accepted ? float(count) : 0.0;\n"
+            "}\n"
+            "vec4 evaluate_export(int count, bool enabled){\n"
+            "  bool accepted;\n"
+            "  float value = evaluate_helper(count, enabled, accepted);\n"
+            "  return vec4(value, accepted ? 1.0 : 0.0, 0.0, 1.0);\n"
+            "}\n"
+        )
+        make_text_block("glsl_typed_closure_evaluate.glsl", source)
+        self.configure_glsl_node(
+            glsl_node, "glsl_typed_closure_evaluate.glsl", "evaluate_export"
+        )
+        self.assertEqual(glsl_node.parse_status, 'READY')
+
+        _, closure_output, sync_result = make_synced_glsl_callback(
+            tree, glsl_node, "evaluate_helper"
+        )
+        self.assertEqual(sync_result, {'FINISHED'})
+
+        evaluate = tree.nodes.new("NodeEvaluateClosure")
+        relink_and_update(
+            tree,
+            find_socket(closure_output.outputs, "Closure"),
+            find_socket(evaluate.inputs, "Closure"),
+        )
+        self.assertEqual(
+            run_glsl_node_operator(evaluate, tree, bpy.ops.node.sockets_sync), {'FINISHED'}
+        )
+
+        count = find_socket(evaluate.inputs, "count")
+        enabled = find_socket(evaluate.inputs, "enabled")
+        result = find_socket(evaluate.outputs, "Result")
+        accepted = find_socket(evaluate.outputs, "accepted")
+        self.assertEqual(count.type, 'INT')
+        self.assertEqual(enabled.type, 'BOOLEAN')
+        self.assertEqual(result.type, 'VALUE')
+        self.assertEqual(accepted.type, 'BOOLEAN')
+        self.assertEqual(count.label, "Count")
+        self.assertEqual(enabled.description, "Boolean callback input")
+        self.assertEqual(result.label, "Value")
+        self.assertEqual(accepted.description, "Boolean callback output")
+
+        count.default_value = 7
+        enabled.default_value = False
+        identifiers = {
+            "count": count.identifier,
+            "enabled": enabled.identifier,
+            "Result": result.identifier,
+            "accepted": accepted.identifier,
+        }
+        self.assertEqual(
+            run_glsl_node_operator(evaluate, tree, bpy.ops.node.sockets_sync), {'FINISHED'}
+        )
+        self.assertEqual(find_socket(evaluate.inputs, "count").default_value, 7)
+        self.assertFalse(find_socket(evaluate.inputs, "enabled").default_value)
+
+        evaluate_name = evaluate.name
+        closure_output_name = closure_output.name
+        with tempfile.TemporaryDirectory() as directory:
+            filepath = Path(directory) / "glsl_typed_closure_evaluate.blend"
+            self.assertEqual(
+                bpy.ops.wm.save_as_mainfile(filepath=str(filepath), check_existing=False),
+                {'FINISHED'},
+            )
+            self.assertEqual(
+                bpy.ops.wm.open_mainfile(filepath=str(filepath), load_ui=False), {'FINISHED'}
+            )
+
+            loaded_tree = bpy.data.materials[material_name].node_tree
+            loaded_evaluate = loaded_tree.nodes[evaluate_name]
+            loaded_closure_output = loaded_tree.nodes[closure_output_name]
+            loaded_closure = find_socket(loaded_evaluate.inputs, "Closure")
+            self.assertTrue(loaded_closure.is_linked)
+            self.assertEqual(loaded_closure.links[0].from_node, loaded_closure_output)
+            for name in ("count", "enabled"):
+                self.assertEqual(
+                    find_socket(loaded_evaluate.inputs, name).identifier, identifiers[name]
+                )
+            for name in ("Result", "accepted"):
+                self.assertEqual(
+                    find_socket(loaded_evaluate.outputs, name).identifier, identifiers[name]
+                )
+            self.assertEqual(find_socket(loaded_evaluate.inputs, "count").default_value, 7)
+            self.assertFalse(find_socket(loaded_evaluate.inputs, "enabled").default_value)
+
     def test_typed_closure_callbacks_only_expose_reachable_helpers_in_definition_order(self):
         _, tree = self.make_material_tree()
         glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
@@ -1770,8 +1869,10 @@ class GLSLFunctionNodeTest(unittest.TestCase):
                 self.configure_glsl_node(node, text_name, function_name)
                 self.assertEqual(node.parse_status, 'ERROR')
 
-    def test_closure_sampler_sync_adds_opaque_alpha(self):
-        _, tree = self.make_material_tree()
+    def test_closure_sampler_sync_adds_visible_multiplicative_alpha(self):
+        material, tree = self.make_material_tree()
+        material.use_fake_user = True
+        material_name = material.name
         glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
         closure_input, closure_output = make_closure_sampler(tree, color_type="RGBA")
         color_socket = find_socket(closure_output.inputs, "Color")
@@ -1800,18 +1901,61 @@ class GLSLFunctionNodeTest(unittest.TestCase):
             self.assertAlmostEqual(actual, expected)
         alpha_socket = find_socket(closure_output.inputs, "Alpha")
         self.assertEqual(alpha_socket.type, 'VALUE')
-        self.assertEqual(alpha_socket.default_value, 1.0)
+        self.assertFalse(alpha_socket.hide_value)
+        self.assertAlmostEqual(alpha_socket.default_value, 1.0)
+
+        # Migrate sockets created by the short-lived connection-only implementation. Their hidden
+        # default was ignored, so exposing it must initialize the multiplicative identity.
+        alpha_socket.hide_value = True
+        alpha_socket.default_value = 0.0
+        self.assertEqual(sync_closure_output_with_operator(closure_output, tree), {'FINISHED'})
+        alpha_socket = find_socket(closure_output.inputs, "Alpha")
+        self.assertFalse(alpha_socket.hide_value)
+        self.assertAlmostEqual(alpha_socket.default_value, 1.0)
 
         alpha_socket.default_value = 0.37
+        self.assertEqual(sync_closure_output_with_operator(closure_output, tree), {'FINISHED'})
+        alpha_socket = find_socket(closure_output.inputs, "Alpha")
+        self.assertFalse(alpha_socket.hide_value)
+        self.assertAlmostEqual(alpha_socket.default_value, 0.37)
+
         alpha_source = tree.nodes.new("ShaderNodeValue")
+        alpha_source.outputs["Value"].default_value = 0.65
         tree.links.new(alpha_source.outputs["Value"], alpha_socket)
 
         self.assertEqual(sync_closure_output_with_operator(closure_output, tree), {'FINISHED'})
 
         alpha_socket = find_socket(closure_output.inputs, "Alpha")
+        self.assertFalse(alpha_socket.hide_value)
         self.assertAlmostEqual(alpha_socket.default_value, 0.37)
         self.assertTrue(alpha_socket.is_linked)
         self.assertEqual(alpha_socket.links[0].from_socket, alpha_source.outputs["Value"])
+
+        closure_input_name = closure_input.name
+        closure_output_name = closure_output.name
+        alpha_source_name = alpha_source.name
+        with tempfile.TemporaryDirectory() as directory:
+            filepath = Path(directory) / "glsl_closure_sampler_alpha.blend"
+            self.assertEqual(
+                bpy.ops.wm.save_as_mainfile(filepath=str(filepath), check_existing=False),
+                {'FINISHED'},
+            )
+            self.assertEqual(
+                bpy.ops.wm.open_mainfile(filepath=str(filepath), load_ui=False), {'FINISHED'}
+            )
+
+            loaded_tree = bpy.data.materials[material_name].node_tree
+            loaded_input = loaded_tree.nodes[closure_input_name]
+            loaded_output = loaded_tree.nodes[closure_output_name]
+            loaded_alpha = find_socket(loaded_output.inputs, "Alpha")
+            loaded_color = find_socket(loaded_output.inputs, "Color")
+            self.assertEqual(find_socket(loaded_input.outputs, "UV").type, 'VECTOR')
+            self.assertFalse(loaded_alpha.hide_value)
+            self.assertAlmostEqual(loaded_alpha.default_value, 0.37)
+            self.assertTrue(loaded_alpha.is_linked)
+            self.assertEqual(loaded_alpha.links[0].from_node.name, alpha_source_name)
+            for actual, expected in zip(loaded_color.default_value, (0.2, 0.4, 0.6, 0.8)):
+                self.assertAlmostEqual(actual, expected)
 
     def test_closure_output_sample3d_signature_validation(self):
         cases = [

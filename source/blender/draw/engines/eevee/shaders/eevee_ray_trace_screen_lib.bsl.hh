@@ -378,6 +378,14 @@ float raytrace_screen_2(ViewMatrices view,
  * Sample the given full-screen frame-buffer at the given hit location.
  * Does a small contact aware blur on incoming radiance.
  */
+float3 raytrace_sanitize_screen_radiance(float3 radiance)
+{
+  /* NPR and compositing passes may intentionally store signed data in Combined. Screen-space
+   * tracing consumes that texture as physical radiance, which must be non-negative before the
+   * logarithmic roughness filter. */
+  return max(radiance, float3(0.0f));
+}
+
 float3 raytrace_sample_screen(ViewMatrices view,
                               sampler2D radiance_tx,
                               RayTraceData raytrace,
@@ -397,7 +405,8 @@ float3 raytrace_sample_screen(ViewMatrices view,
   float3 radiance;
   /* Fetch radiance at hit-point. */
   if (pixel_footprint < 1.0f) {
-    radiance = textureLod(radiance_tx, ss_hit_P, 0.0f).rgb;
+    radiance = raytrace_sanitize_screen_radiance(
+        textureLod(radiance_tx, ss_hit_P, 0.0f).rgb);
   }
   else {
     float kernel_radius = saturate(pixel_footprint - 1.0f);
@@ -405,10 +414,14 @@ float3 raytrace_sample_screen(ViewMatrices view,
     /* 4x4 box filter kernel for rough rays at the hit point.
      * Reduces variance of noisy reflected objects.
      * Use squared space to reduce fireflies at the cost of losing energy. */
-    radiance = log2(1.0f + textureLod(radiance_tx, ss_hit_P + ofs.xy, 0.0f).rgb);
-    radiance += log2(1.0f + textureLod(radiance_tx, ss_hit_P + ofs.xw, 0.0f).rgb);
-    radiance += log2(1.0f + textureLod(radiance_tx, ss_hit_P + ofs.zy, 0.0f).rgb);
-    radiance += log2(1.0f + textureLod(radiance_tx, ss_hit_P + ofs.zw, 0.0f).rgb);
+    radiance = log2(1.0f + raytrace_sanitize_screen_radiance(
+                                  textureLod(radiance_tx, ss_hit_P + ofs.xy, 0.0f).rgb));
+    radiance += log2(1.0f + raytrace_sanitize_screen_radiance(
+                                   textureLod(radiance_tx, ss_hit_P + ofs.xw, 0.0f).rgb));
+    radiance += log2(1.0f + raytrace_sanitize_screen_radiance(
+                                   textureLod(radiance_tx, ss_hit_P + ofs.zy, 0.0f).rgb));
+    radiance += log2(1.0f + raytrace_sanitize_screen_radiance(
+                                   textureLod(radiance_tx, ss_hit_P + ofs.zw, 0.0f).rgb));
     radiance *= 0.25f;
     radiance = exp2(radiance) - 1.0f;
   }
@@ -439,7 +452,8 @@ float3 raytrace_sample_screen(ViewMatrices view,
   float3 radiance;
   /* Fetch radiance at hit-point. */
   if (pixel_footprint < 1.0f) {
-    radiance = textureLod(radiance_tx, float3(ss_hit_P, layer), 0.0f).rgb;
+    radiance = raytrace_sanitize_screen_radiance(
+        textureLod(radiance_tx, float3(ss_hit_P, layer), 0.0f).rgb);
   }
   else {
     float kernel_radius = saturate(pixel_footprint - 1.0f);
@@ -447,10 +461,18 @@ float3 raytrace_sample_screen(ViewMatrices view,
     /* 4x4 box filter kernel for rough rays at the hit point.
      * Reduces variance of noisy reflected objects.
      * Use squared space to reduce fireflies at the cost of losing energy. */
-    radiance = log2(1.0f + textureLod(radiance_tx, float3(ss_hit_P + ofs.xy, layer), 0.0f).rgb);
-    radiance += log2(1.0f + textureLod(radiance_tx, float3(ss_hit_P + ofs.xw, layer), 0.0f).rgb);
-    radiance += log2(1.0f + textureLod(radiance_tx, float3(ss_hit_P + ofs.zy, layer), 0.0f).rgb);
-    radiance += log2(1.0f + textureLod(radiance_tx, float3(ss_hit_P + ofs.zw, layer), 0.0f).rgb);
+    radiance = log2(1.0f + raytrace_sanitize_screen_radiance(
+                                  textureLod(radiance_tx, float3(ss_hit_P + ofs.xy, layer), 0.0f)
+                                      .rgb));
+    radiance += log2(1.0f + raytrace_sanitize_screen_radiance(
+                                   textureLod(radiance_tx, float3(ss_hit_P + ofs.xw, layer), 0.0f)
+                                       .rgb));
+    radiance += log2(1.0f + raytrace_sanitize_screen_radiance(
+                                   textureLod(radiance_tx, float3(ss_hit_P + ofs.zy, layer), 0.0f)
+                                       .rgb));
+    radiance += log2(1.0f + raytrace_sanitize_screen_radiance(
+                                   textureLod(radiance_tx, float3(ss_hit_P + ofs.zw, layer), 0.0f)
+                                       .rgb));
     radiance *= 0.25f;
     radiance = exp2(radiance) - 1.0f;
   }

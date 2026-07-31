@@ -704,24 +704,22 @@ void sync_sockets_closure(SpaceNode &snode,
     apply_closure_item_ui_data(item, socket, !preserved);
     if (preserved) {
       restore_closure_item_default_value(old_signature.outputs.as_span(), item.key, socket);
+      /* Alpha used to be hidden and ignored when it was not connected. Its old default is
+       * therefore not meaningful; migrate it to the multiplicative identity when exposing the
+       * socket. */
+      const int old_index = old_signature.outputs.index_of_try_as(item.key);
+      if (item.key == "Alpha" && item.type->type == SOCK_FLOAT && old_index != -1 &&
+          old_signature.outputs[old_index].ui.hide_value.value_or(false) &&
+          item.ui.default_value.has_value())
+      {
+        apply_closure_item_default_value(item.ui.default_value, socket);
+      }
     }
   }
 
   /* Rebuild declarations from the now-persisted socket UI data. */
   nodes::update_node_declaration_and_sockets(*snode.edittree, closure_input_node);
   nodes::update_node_declaration_and_sockets(*snode.edittree, closure_output_node);
-
-  snode.edittree->ensure_topology_cache();
-  for (const int output_i : signature.outputs.index_range()) {
-    const nodes::ClosureSignature::Item &item = signature.outputs[output_i];
-    if (preserved_outputs.contains(item.key) || item.ui.default_value || item.key != "Alpha" ||
-        item.type->type != SOCK_FLOAT)
-    {
-      continue;
-    }
-    bNodeSocket &alpha_socket = closure_output_node.input_socket(output_i);
-    alpha_socket.default_value_typed<bNodeSocketValueFloat>()->value = 1.0f;
-  }
 
   /* Create internal zone links for newly created sockets. */
   Vector<std::pair<bNodeSocket *, bNodeSocket *>> internal_links;

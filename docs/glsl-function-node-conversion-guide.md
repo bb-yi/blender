@@ -193,9 +193,15 @@ Meta 必须覆盖导出函数的公开接口：
 
 `@glsl_closure v1` 标记普通 helper 可以由外部 Closure 节点子图替换。helper 的函数名、参数名、参数类型、返回值和 `out` 参数已经构成完整调用 ABI，不要重复写普通输入控件 Meta。
 
+- helper 的参数、返回值和 `out` 只支持 `float / int / bool / vec2 / vec3 / vec4`；不支持 sampler、矩阵、数组、struct 或 `inout`
+- helper 必须有返回值或至少一个 `out`；返回 socket 固定使用保留名 `Result`，参数不能命名为 `Result`
+- 标记的 helper 必须能从导出函数的调用链到达；导出函数本身不能标记为 Closure helper
+- 含 Closure helper 的源码不允许函数重载或重复定义，也不允许可达调用链递归
+- 不要用函数式宏直接或间接调用 Closure helper；应写普通 GLSL 函数调用，避免预处理后 ABI 无法可靠定位
+- `int` 经由 Closure socket 的 float 通道传输，只有闭区间 `[-16777216, 16777216]` 保证整数精确
 - header 只支持可选的 `label` 和 `description`
-- 输入项只支持可选的 `label`、`description`，以及用于区分 `vec3` Color/Vector 的 `subtype=color`
-- `Result` 和 `out` 输出项支持可选的 `label`、`description` 和 `subtype`
+- 输入项只支持可选的 `label`、`description`，以及用于区分 `vec3` Color/Vector 的 `subtype=color`；`float subtype=factor` 等其他输入 subtype 不支持
+- `Result` 和 `out` 输出项支持可选的 `label`、`description` 和与类型匹配的 `subtype`；`vec4` item 在 v1 中不支持 subtype
 - 不支持 `closed`、`default`、`min`、`max`、`hide_value`、`items`、`show_label` 或嵌套 panel
 - helper 没有连接 Closure 时执行原始 GLSL 函数体；Closure Meta 不定义 fallback 参数值
 
@@ -266,7 +272,7 @@ float remap(float value)
 - Unity `sampler2D _MainTex`
 - GLSL `sampler2D`
 
-如果只是“普通静态 2D 图片，由节点面板直接选图”，优先改成：
+如果只是普通静态 2D 图片，优先改成下面的边界，并在节点图中通过 `Image to Closure` 选择图片后连接到该 Closure 输入口：
 
 ```glsl
 sampler2D tex
@@ -583,7 +589,7 @@ Shadertoy 的 `iChannel0~3` 并不总是“普通 2D 贴图”。
 
 对当前 `GLSL Function` 节点来说，最稳妥的规则是：
 
-- 如果某个通道本质上就是“普通静态 2D 图片采样，直接在节点面板选图”，改成 `sampler2D`
+- 如果某个通道本质上就是普通静态 2D 图片采样，改成 `sampler2D`，并在节点图中用 `Image to Closure` 选择图片和提供 Closure
 - 如果某个通道希望在节点图里接图片或程序化纹理，且核心采样能收敛为 `texture(tex, uv)`，公开函数边界仍然改成 `sampler2D`，再在节点侧用 `Image to Closure` 或 `Closure Output` 提供来源
 - 如果某个通道在 `NPR Tree` 中实际来自 `NPR Input`、`AOV Input`、`NPR Refraction`、`NPR SSS Input` 或其他 NPR 运行时图像句柄，仍然可以改成 `sampler2D` 闭包输入；但闭包内部应使用 `Image Sample.Image + Offset`，GLSL 里的 `texture(image, coord)` 第二个参数应按 offset 写法和命名
 - 如果某个通道依赖“上一帧反馈”“多 pass 缓冲”“运行时积累”“专用输入设备纹理”，不要假装它和普通 `sampler2D` 完全等价
@@ -617,6 +623,30 @@ Shadertoy 的 `iChannel0~3` 并不总是“普通 2D 贴图”。
 - 如果用户用中文提问，就用中文写结果报告
 - 如果用户用英文提问，就用英文写结果报告
 - 像 `Function` 这种需要直接对应节点 UI 的字段名可以保留原样，但解释性文字和结果报告应优先跟随用户语言
+
+### 规则 9：交付前必须经过静态检查和 Blender 真实解析
+
+外观看起来正确或历史上曾经 `parse_status=READY`，都不能代替当前候选源码的验证。
+
+在本工作区，把完整候选代码写入 `temp\...` 下的临时 `.glsl` 文件，并运行：
+
+```powershell
+python tools\validate_glsl_function.py <file.glsl> --function <export_name> --require-blender --json
+```
+
+只有同时满足以下条件，才能报告 `Validation: PASS (static + Blender parser)`：
+
+- `"valid": true`
+- `"blender": "READY"`
+- `"findings": []`
+
+如果转换涉及 typed Closure callback、Closure sampler 重写、Eevee 逐灯/环境 helper、Filter/World 上下文或其他 GPU 专用行为，`READY` 只证明解析和 socket 生成成功，不能证明专用 GPU 源码或渲染结果正确。此时还必须运行对应的最小 GPU / render 回归，并把实际测试名写进验证状态，例如：
+
+```text
+Validation: PASS (static + Blender parser + typed Closure GPU regression)
+```
+
+工作区外没有真实 Blender 校验器时，只能报告 `Validation: STATIC_ONLY`；验证失败必须报告 `Validation: FAIL`，不得把未验证结果写成可直接使用或 `READY`。
 
 
 ## 三、AI 推荐输出格式
@@ -656,7 +686,7 @@ Code:
 - 已近似或已替代: ...
 - Alpha 处理: 已保留 / 已拆分 / 原始 alpha 恒定 / 已省略
 - Meta 情况: 已补全 / 无可标注接口 / 未补全并说明原因
-- 验证情况: 已解析 / 已渲染 / 未验证
+- 验证情况: PASS (static + Blender parser) / PASS (static + Blender parser + 具体 GPU/render 测试) / STATIC_ONLY / FAIL
 ````
 
 如果函数有额外 `out` 参数，也写清楚：
@@ -694,9 +724,10 @@ Outputs:
   - 如果没有写 Meta，必须说明导出函数没有输入参数和 `out` 参数，或说明当前限制导致无法标注
   - 不要把“用户可自行补 Meta”当作完成状态
 - `验证情况`
-  - 如果只做了静态转换，写 `未验证`
-  - 如果通过节点解析，写 `已解析`
-  - 如果通过本地渲染或编译，写 `已渲染`
+  - 当前工作区必须通过静态检查和 Blender 节点解析，写 `PASS (static + Blender parser)`
+  - 涉及 GPU 专用行为时还要写出实际通过的测试名
+  - 工作区外只能完成静态检查时写 `STATIC_ONLY`
+  - 任一必需检查失败时写 `FAIL`
 - 如果用户不是中文语境，上面这些字段名和状态值应切换成对应语言，而不是强行保留中文
 
 
@@ -1111,7 +1142,7 @@ vec3 effect(vec2 uv, float time)
 8. 是否把 `sampler2D` 写成了 `out`？
 9. 如果用了普通贴图采样，是否已经改成 `texture(tex, uv)`；如果是 NPR 图像句柄采样，是否已经改成 `texture(image, offset)` 语义；如果确实需要显式级别，是否说明了 `textureLod` 等限制？
 10. 如果导出函数返回 `void`，是否仍然通过 `out` 参数暴露了至少一个输出？
-11. 如果有 `sampler2D` 参数，是否提醒了使用者在节点参数区为每个 `sampler2D` 选择图片？
+11. 如果有 `sampler2D` / `sampler3D` 参数，是否明确它会显示为 Closure 输入口，并说明应连接哪类 `Image to Closure` 或符合约定的 `Closure Output`？
 12. 如果有 `sampler2D` 参数，是否明确说明应通过 `Image to Closure` 或符合约定的 `Closure Output` 提供来源？
 13. 如果有 `sampler2D` 参数，是否错误假设它支持任意 Closure、任意图像专用采样函数或旧的面板选图工作流？
 14. 如果原始来源使用了历史 `sample2D` 旧写法，是否已经统一改写成公开的 `sampler2D` 边界类型？
@@ -1133,6 +1164,9 @@ vec3 effect(vec2 uv, float time)
 30. 如果源码里有把比较结果直接拿去构造 `vec*` 或参与数值运算的写法，是否已经改成显式数值表达式？
 31. 如果源码里用了 `mat3x2` / `mat2x3` 或其他方向不够直观的矩阵乘法，是否已经改写成更清晰的 helper？
 32. 如果原 shader 的 alpha 有实际含义，是否已经明确说明保留、拆分还是省略？
+33. 如果使用 `@glsl_closure v1`，helper ABI、`Result` 保留名、可达性、重载/递归/函数式宏限制和整数精确范围是否都满足？
+34. 完整候选是否已通过 `tools\validate_glsl_function.py ... --require-blender --json`，且 `valid=true`、`blender=READY`、`findings=[]`？
+35. 如果涉及 Closure callback、sampler 重写、Eevee helper 或 Filter/World 上下文，是否还运行了对应 GPU / render 回归，而不是只依据 `parse_status=READY`？
 
 
 ## 七、推荐的最小输出模板
@@ -1152,6 +1186,11 @@ Outputs:
 
 Code:
 ```glsl
+/* @glsl_meta v1
+uv: label="UV" default=vec2(0.0) description="Texture coordinates"
+time: label="Time" default=0.0 description="Animation time in seconds"
+tex: label="Texture" description="Texture Closure sampled with UV"
+*/
 vec3 converted_function(vec2 uv, float time, sampler2D tex)
 {
   vec3 col = texture(tex, uv).rgb;
@@ -1166,7 +1205,8 @@ vec3 converted_function(vec2 uv, float time, sampler2D tex)
 - 不支持或已删除: 无
 - 已近似或已替代: 无
 - Alpha 处理: 原始 alpha 恒定
-- 验证情况: 未验证
+- Meta 情况: 已补全
+- 验证情况: PASS (static + Blender parser)
 ````
 
 如果是部分成功，也建议像这样写：
@@ -1179,7 +1219,8 @@ vec3 converted_function(vec2 uv, float time, sampler2D tex)
 - 不支持或已删除: 删除 iChannel1 的 backbuffer feedback
 - 已近似或已替代: 将多 pass 运行时依赖替换为单 pass 近似
 - Alpha 处理: 已省略
-- 验证情况: 已解析
+- Meta 情况: 已补全
+- 验证情况: PASS (static + Blender parser)
 ````
 
 
@@ -1424,7 +1465,8 @@ vec2 triangle_unproject(vec3 v)
 12. 如果需要多个输出，用 out 参数，不要用 struct 返回。
 13. 如果原 shader 的 alpha 有意义，要明确说明是保留、拆分还是省略。
 14. 在结果最后明确说明转换是 success / partial / failed，并列出不支持、删除、近似、替代、alpha 处理、Meta 情况、验证情况。
-15. 输出格式为：
+15. 在当前 NPR 工作区，完整候选必须通过 `python tools\validate_glsl_function.py <file> --function <name> --require-blender --json`，并满足 valid=true、blender=READY、findings=[]；涉及 Closure callback、sampler 重写、Eevee helper 或 Filter/World 行为时还要运行对应 GPU/render 回归。
+16. 输出格式为：
    Function: ...
    Inputs: ...
    Outputs: ...

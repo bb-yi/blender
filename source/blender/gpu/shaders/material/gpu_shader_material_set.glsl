@@ -21,9 +21,9 @@ void set_rgba(float4 col, float4 &outcol)
 }
 
 [[node]]
-void set_rgba_alpha(float4 col, float alpha, float4 &outcol)
+void multiply_rgba_alpha(float4 col, float alpha, float4 &outcol)
 {
-  outcol = float4(col.rgb, alpha);
+  outcol = float4(col.rgb, col.a * alpha);
 }
 
 [[node]]

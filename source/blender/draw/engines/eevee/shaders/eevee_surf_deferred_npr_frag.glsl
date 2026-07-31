@@ -443,8 +443,5 @@ void main()
   g_specular_indirect = float4(dc.specular_indirect, 1.0f);
 
   out_radiance = swap_alpha(nodetree_npr());
-  /* Radiance is non-negative. Signed NPR data otherwise contaminates screen-space reflection
-   * filtering and appears as saturated magenta. Keep the HDR upper range and alpha untouched. */
-  out_radiance.rgb = max(out_radiance.rgb, float3(0.0f));
   nodetree_surface(0.0f);
 }
