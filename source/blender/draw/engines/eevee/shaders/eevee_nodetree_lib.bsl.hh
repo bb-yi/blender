@@ -1047,12 +1047,13 @@ float4 attr_load_uniform(float4 /*attr*/, const uint attr_hash)
   return float4(0.0f);
 }
 
-void scene_time_uniforms(float &seconds, float &frame)
+void scene_time_uniforms(float &seconds, float &frame, float &timeline)
 {
   [[resource_table]] const eevee::Uniform &uni = resource_table_get(eevee::Uniform);
 
-  seconds = uni.uniform_buf.scene_time.seconds;
-  frame = uni.uniform_buf.scene_time.frame;
+  seconds = uni.uniform_buf.scene.time;
+  frame = uni.uniform_buf.scene.frame;
+  timeline = uni.uniform_buf.scene.timeline;
 }
 
 /** \} */

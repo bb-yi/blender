@@ -77,7 +77,7 @@ def light_eevee_shader_node_type_supported(node_idname):
         "ShaderNodeEeveeLightShaderOutput",
         "ShaderNodeRGB",
         "ShaderNodeValue",
-        "ShaderNodeSceneTime",
+        "GeometryNodeInputSceneTime",
         "ShaderNodeBlackbody",
         "ShaderNodeBrightContrast",
         "ShaderNodeValToRGB",
@@ -193,7 +193,9 @@ class NODE_MT_shader_node_input_base(node_add_menu.NodeMenu):
         if light_eevee_shader_nodes_poll(context):
             self.node_operator(layout, "ShaderNodeRGB")
             self.node_operator(layout, "ShaderNodeValue")
-            self.node_operator(layout, "ShaderNodeSceneTime")
+            self.node_operator_with_outputs(
+                context, layout, "GeometryNodeInputSceneTime",
+                ["Frame", "Seconds", "Timeline", "Scaled Frame"])
             self.node_operator(
                 layout,
                 "ShaderNodeEeveeLightShaderInfo",
@@ -266,7 +268,9 @@ class NODE_MT_shader_node_input_base(node_add_menu.NodeMenu):
                 context, layout, "ShaderNodeRenderInfo",
                 ["Width", "Height"],
             )
-            self.node_operator(layout, "ShaderNodeSceneTime")
+            self.node_operator_with_outputs(
+                context, layout, "GeometryNodeInputSceneTime",
+                ["Frame", "Seconds", "Timeline", "Scaled Frame"])
             self.node_operator(
                 layout,
                 "ShaderNodeWorldEnvironment",
@@ -328,7 +332,9 @@ class NODE_MT_shader_node_input_base(node_add_menu.NodeMenu):
             "ShaderNodeRaycast",
             poll=object_or_npr_eevee_shader_nodes_poll(context),
         )
-        self.node_operator_with_outputs(context, layout, "GeometryNodeInputSceneTime", ["Frame", "Seconds"])
+        self.node_operator_with_outputs(
+            context, layout, "GeometryNodeInputSceneTime",
+            ["Frame", "Seconds", "Timeline", "Scaled Frame"])
         self.node_operator(layout, "ShaderNodeTangent")
         self.node_operator_with_outputs(
             context, layout, "ShaderNodeTexCoord",

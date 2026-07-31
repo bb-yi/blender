@@ -50,13 +50,6 @@ struct [[host_shared]] ShadowSceneData {
   int _pad1;
 };
 
-struct [[host_shared]] SceneData {
-  float time;
-  float frame;
-  uint _pad0;
-  uint _pad1;
-};
-
 /* Light Clamping. */
 struct [[host_shared]] ClampData {
   float sun_threshold;
@@ -97,9 +90,9 @@ struct [[host_shared]] PipelineInfoData {
   bool32_t _pad2;
 };
 
-struct [[host_shared]] SceneTimeData {
+struct [[host_shared]] SceneData {
+  float time;
   float frame;
-  float seconds;
   float timeline;
   float _pad0;
 };
@@ -112,7 +105,6 @@ struct [[host_shared]] UniformData {
   struct FilmData film;
   struct HiZData hiz;
   struct RenderBuffersInfoData render_pass;
-  struct SceneTimeData scene_time;
   struct ShadowSceneData shadow;
   struct VolumesInfoData volumes;
   struct SceneData scene;

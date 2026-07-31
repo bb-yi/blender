@@ -166,7 +166,7 @@ static bool light_shader_node_type_is_uniform(const int type)
   switch (type) {
     case SH_NODE_RGB:
     case SH_NODE_VALUE:
-    case SH_NODE_SCENE_TIME:
+    case GEO_NODE_INPUT_SCENE_TIME:
     case SH_NODE_BLACKBODY:
     case SH_NODE_BRIGHTCONTRAST:
     case SH_NODE_VALTORGB:
@@ -323,7 +323,7 @@ static bool light_shader_node_uses_scene_time_get(const bNodeTree &nodetree,
   if (node.flag & NODE_MUTED) {
     return false;
   }
-  if (node.type_legacy == SH_NODE_SCENE_TIME) {
+  if (node.type_legacy == GEO_NODE_INPUT_SCENE_TIME) {
     return true;
   }
   if (visited.contains(&node)) {

@@ -127,9 +127,6 @@ enum eGPUMaterialFlag {
   GPU_MATFLAG_SCENE_COLOR = (1 << 27),
   GPU_MATFLAG_SCREENSPACE_INFO = (1 << 28),
 
-  /* Signals scene time use. */
-  GPU_MATFLAG_SCENE_TIME = (1 << 25),
-
   /* Tells the render engine the material was just compiled or updated. */
   GPU_MATFLAG_UPDATED = (1 << 29),
   /* Signals the material needs Eevee light-probe resources without enabling full lighting. */

@@ -9,6 +9,7 @@
 #define DNA_DEPRECATED_ALLOW
 
 #include "NOD_geometry_nodes_srna.hh"
+#include "NOD_socket.hh"
 
 #include "DNA_ID.h"
 #include "DNA_brush_types.h"
@@ -542,6 +543,47 @@ static void version_npr_image_sample_offset_socket_identifier(Main *bmain)
   FOREACH_NODETREE_END;
 }
 
+static void version_scene_time_shader_nodes(Main *bmain)
+{
+  FOREACH_NODETREE_BEGIN (bmain, ntree, id) {
+    if (ntree->type != NTREE_SHADER) {
+      continue;
+    }
+
+    bool has_scene_time_node = false;
+    for (bNode &node : ntree->nodes) {
+      const bool is_legacy_scene_time =
+          node.type_legacy == SH_NODE_SCENE_TIME ||
+          STR_ELEM(node.idname, "ShaderNodeSceneTime", "Undefined[ShaderNodeSceneTime]");
+      const bool is_scene_time = node.type_legacy == GEO_NODE_INPUT_SCENE_TIME ||
+                                 STREQ(node.idname, "GeometryNodeInputSceneTime");
+      if (is_legacy_scene_time) {
+        STRNCPY(node.idname, "GeometryNodeInputSceneTime");
+        node.type_legacy = GEO_NODE_INPUT_SCENE_TIME;
+        has_scene_time_node = true;
+      }
+      else if (is_scene_time) {
+        has_scene_time_node = true;
+      }
+    }
+
+    if (!has_scene_time_node) {
+      continue;
+    }
+
+    /* The legacy shader node may have no registered type after the custom node is removed. */
+    bke::node_tree_set_type(*ntree);
+    for (bNode &node : ntree->nodes) {
+      if (node.type_legacy == GEO_NODE_INPUT_SCENE_TIME &&
+          STREQ(node.idname, "GeometryNodeInputSceneTime"))
+      {
+        node_verify_sockets(bmain, ntree, &node, false);
+      }
+    }
+  }
+  FOREACH_NODETREE_END;
+}
+
 void do_versions_after_linking_520(FileData *fd, Main *bmain)
 {
   if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 2)) {
@@ -594,6 +636,10 @@ void do_versions_after_linking_520(FileData *fd, Main *bmain)
         object.pose->avs.path_bakeflag &= ~MOTIONPATH_BAKE_HAS_PATHS;
       }
     }
+  }
+
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 47)) {
+    version_scene_time_shader_nodes(bmain);
   }
 
   /**

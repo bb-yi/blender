@@ -443,16 +443,14 @@ namespace blender::eevee
       (float(scene->r.frs_sec) / scene->r.frs_sec_base) :
       24.0f;
 
-    const float seconds = (fps > 1e-8f) ? (frame / fps) : 0.0f;
+    const float seconds = (std::abs(fps) > 1e-8f) ? (frame / fps) : 0.0f;
 
-    uniform_data.data.scene_time.frame = frame;
-    uniform_data.data.scene_time.seconds = seconds;
-    uniform_data.data.scene_time.timeline = (frame_range > 1e-8f) ?
+    uniform_data.data.scene.frame = frame;
+    uniform_data.data.scene.time = seconds;
+    uniform_data.data.scene.timeline = (std::abs(frame_range) > 1e-8f) ?
       clamp_f((frame - frame_start) / frame_range, 0.0f, 1.0f) :
       0.0f;
-    uniform_data.data.scene_time._pad0 = 0.0f;
-    uniform_data.data.scene.time = seconds;
-    uniform_data.data.scene.frame = frame;
+    uniform_data.data.scene._pad0 = 0.0f;
   }
 
   /** \} */
@@ -646,7 +644,7 @@ namespace blender::eevee
         const bool uses_scene_time = materials.has_time_dependent_materials() ||
           world.uses_scene_time() || filter_materials.uses_scene_time() ||
           lights.has_time_dependent_light_shaders();
-        const float scene_time = uniform_data.data.scene_time.frame;
+        const float scene_time = uniform_data.data.scene.frame;
         const bool scene_time_changed = uses_scene_time && last_viewport_scene_time_valid_ &&
           std::abs(scene_time - last_viewport_scene_time_) > 1e-8f;
         if (scene_time_changed)

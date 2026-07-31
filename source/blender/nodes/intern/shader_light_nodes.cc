@@ -34,7 +34,7 @@ bool light_eevee_shader_node_type_supported(const StringRefNull idname)
       "ShaderNodeEeveeLightShaderOutput",
       "ShaderNodeRGB",
       "ShaderNodeValue",
-      "ShaderNodeSceneTime",
+      "GeometryNodeInputSceneTime",
       "ShaderNodeBlackbody",
       "ShaderNodeBrightContrast",
       "ShaderNodeValToRGB",

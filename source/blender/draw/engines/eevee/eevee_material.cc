@@ -232,16 +232,13 @@ MaterialModule::~MaterialModule()
 
 void MaterialModule::begin_sync()
 {
-  float frame = BKE_scene_frame_get(inst_.scene);
+  const Scene *scene = inst_.scene;
+  float frame = BKE_scene_frame_get(scene);
 
-  Scene *scene = inst_.scene;
   bool frame_change = assign_if_different(material_frame, frame);
   bool time_change = assign_if_different(material_time, float(FRA2TIME(frame)));
 
   material_time_changed = (time_change || frame_change);
-
-  inst_.uniform_data.data.scene.time = material_time;
-  inst_.uniform_data.data.scene.frame = material_frame;
 
   queued_shaders_count = 0;
   queued_textures_count = 0;

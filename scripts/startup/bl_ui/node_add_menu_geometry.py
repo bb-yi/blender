@@ -396,7 +396,9 @@ class NODE_MT_gn_input_scene_base(node_add_menu.NodeMenu):
                 ["Mouse X", "Mouse Y", "Region Width", "Region Height"],
             )
         self.node_operator(layout, "GeometryNodeObjectInfo")
-        self.node_operator_with_outputs(context, layout, "GeometryNodeInputSceneTime", ["Frame", "Seconds"])
+        self.node_operator_with_outputs(
+            context, layout, "GeometryNodeInputSceneTime",
+            ["Frame", "Seconds", "Timeline", "Scaled Frame"])
         self.node_operator(layout, "GeometryNodeSelfObject")
         if context.space_data.node_tree_sub_type == 'TOOL':
             self.node_operator_with_outputs(

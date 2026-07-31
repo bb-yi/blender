@@ -112,7 +112,7 @@ def add_scene_time_light():
 
     nodes = tree.nodes
     links = tree.links
-    scene_time = nodes.new("ShaderNodeSceneTime")
+    scene_time = nodes.new("GeometryNodeInputSceneTime")
     map_range = nodes.new("ShaderNodeMapRange")
     map_range.inputs["From Min"].default_value = 1.0
     map_range.inputs["From Max"].default_value = 11.0

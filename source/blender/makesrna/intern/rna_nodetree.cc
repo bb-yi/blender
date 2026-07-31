@@ -9482,12 +9482,6 @@ static void def_sh_render_info(BlenderRNA * /*brna*/, StructRNA *srna)
       "Retrieve Eevee render dimensions, sample information, and normalized fragment coordinates");
 }
 
-static void def_sh_scene_time(BlenderRNA * /*brna*/, StructRNA *srna)
-{
-  RNA_def_struct_ui_text(
-      srna, "Scene Time Node", "Retrieve the current scene time in frames, seconds, or normalized timeline space");
-}
-
 static void def_sh_world_to_tangent(BlenderRNA * /*brna*/, StructRNA *srna)
 {
   PropertyRNA *prop;
@@ -13317,7 +13311,6 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("ShaderNode", "ShaderNodePortalOut", def_sh_portal_out);
   define("ShaderNode", "ShaderNodeRenderTexture", def_sh_render_texture);
   define("ShaderNode", "ShaderNodeRenderInfo", def_sh_render_info);
-  define("ShaderNode", "ShaderNodeSceneTime", def_sh_scene_time);
   define("ShaderNode", "ShaderNodeWorldEnvironment");
   define("ShaderNode", "ShaderNodeLightProbeColor");
   define("ShaderNode", "ShaderNodeWorldToTangent", def_sh_world_to_tangent);

@@ -85,7 +85,6 @@ void register_shader_nodes()
   register_node_type_sh_portal_out();
   register_node_type_sh_render_texture();
   register_node_type_sh_render_info();
-  register_node_type_sh_scene_time();
   register_node_type_sh_world_environment();
   register_node_type_sh_light_probe_color();
   register_node_type_sh_world_to_tangent();
