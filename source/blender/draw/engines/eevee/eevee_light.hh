@@ -351,6 +351,20 @@ class LightModule {
     pass.bind_ssbo(LIGHT_SHADER_UNIFORM_BUF_SLOT, &uniform_light_shader_buf_);
   }
 
+  /**
+   * Ensure GPU buffers backing the light shader SSBOs are allocated, even when no lights
+   * with light shaders are present. Required because the volume scatter shader struct
+   * always includes LightShaderEvalData bindings (LIGHT_SHADER_INDEX_BUF_SLOT,
+   * LIGHT_SHADER_UNIFORM_BUF_SLOT). Without this call the VkBuffer handles may remain
+   * unregistered in the resource tracker, causing a crash when the render graph builds
+   * resource links.
+   */
+  void ensure_volume_light_shader_resources_allocated()
+  {
+    volume_light_shader_index_buf_.clear_to_zero();
+    uniform_light_shader_buf_.clear_to_zero();
+  }
+
   template<typename PassType> void bind_surfel_light_shader_resources(PassType &pass)
   {
     pass.bind_ssbo(LIGHT_SHADER_SURFEL_INDEX_BUF_SLOT, &surfel_light_shader_index_buf_);
