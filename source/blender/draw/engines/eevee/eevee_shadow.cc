@@ -320,8 +320,17 @@ void ShadowPunctual::end_sync(Light &light)
 
 eShadowProjectionType ShadowDirectional::directional_distribution_type_get(const Camera &camera)
 {
-  /* TODO(fclem): Enable the cascade projection if the FOV is tiny in perspective mode. */
-  return camera.is_perspective() ? SHADOW_PROJECTION_CLIPMAP : SHADOW_PROJECTION_CASCADE;
+  if (camera.is_perspective()) {
+    const CameraData &cam_data = camera.data_get();
+    float screen_diag = finite_or_default(cam_data.screen_diagonal_length, 1.0f);
+    if (screen_diag < 0.4f) {
+      /* Telephoto (≈100mm+): use cascade distribution to avoid wasting tile-maps on
+       * empty regions outside the narrow frustum. */
+      return SHADOW_PROJECTION_CASCADE;
+    }
+    return SHADOW_PROJECTION_CLIPMAP;
+  }
+  return SHADOW_PROJECTION_CASCADE;
 }
 
 static int clipmap_level_perspective_bias(const Camera &camera)
@@ -541,7 +550,7 @@ ShadowDirectional::LevelSpan ShadowDirectional::clipmap_level_range(const Camera
 
   const CameraData &cam_data = cam.data_get();
   /* Covers the closest points of the view. */
-  int min_level = max_ii(0, floor(log2(max_ff(cam_data.clip_near, 1e-8f))));
+  int min_level = floor(log2(max_ff(cam_data.clip_near, 1e-8f)));
   /* Covers the farthest points of the view. */
   int max_level = ceil(log2(cam.bound_radius() + distance(cam.bound_center(), cam.position())));
 
