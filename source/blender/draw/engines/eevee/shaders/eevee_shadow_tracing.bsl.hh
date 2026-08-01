@@ -392,7 +392,8 @@ float shadow_texel_radius_at_position([[resource_table]] const Uniform &uni,
   }
   /* Pixel bounding radius inside a tilemap of unit scale.
    * Take only half of it because we want the radius and not the diameter. */
-  constexpr float texel_radius = M_SQRT2 / SHADOW_MAP_MAX_RES;
+  float map_max_res = float(int(light.shadow_page_res) * SHADOW_TILEMAP_RES);
+  float texel_radius = M_SQRT2 / map_max_res;
   return texel_radius * scale;
 }
 
