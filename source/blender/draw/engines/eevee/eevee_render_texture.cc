@@ -267,8 +267,6 @@ void RenderTextureModule::slot_capture(const int slot_index)
                                   rt_buffer_refract_);
   inst_.pipelines.background.render(render_view, combined_fb_);
 
-  inst_.gbuffer.release();
-
   inst_.volume.draw_compute(main_view, slot.extent);
   inst_.volume.draw_resolve(main_view);
   inst_.ambient_occlusion.render_pass(render_view);
@@ -277,6 +275,7 @@ void RenderTextureModule::slot_capture(const int slot_index)
 
   slot_extract(slot_index, rbufs);
 
+  inst_.gbuffer.release();
   rbufs.release();
 
   data_[slot_index].info.w &= ~RENDER_TEXTURE_SLOT_CAPTURING;

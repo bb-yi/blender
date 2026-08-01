@@ -1797,9 +1797,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     info.define("NPR_SHADER");
   }
 
-  if (GPU_material_flag_get(gpumat, GPU_MATFLAG_RENDER_TEXTURE) &&
-      pipeline_type == MAT_PIPE_DEFERRED_NPR)
-  {
+  if (GPU_material_flag_get(gpumat, GPU_MATFLAG_RENDER_TEXTURE)) {
     add_create_info_and_reserve(info, slots, "eevee_render_texture_data");
   }
 
