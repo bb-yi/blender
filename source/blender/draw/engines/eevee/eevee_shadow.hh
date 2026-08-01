@@ -79,7 +79,6 @@ struct ShadowTileMap : public ShadowTileMapData {
   eCubeFace cubeface = Z_NEG;
   /** Cached, used for detecting updates. */
   float4x4 object_mat = float4x4::identity();
-  float shadow_map_scale = 1.0f;
 
  public:
   ShadowTileMap(int tiles_index_) : ShadowTileMapData{}
@@ -96,7 +95,6 @@ struct ShadowTileMap : public ShadowTileMapData {
   void sync_orthographic(const float4x4 &object_mat_,
                          int2 origin_offset,
                          int clipmap_level,
-                         float shadow_map_scale,
                          eShadowProjectionType projection_type_,
                          uint2 shadow_set_membership_ = ~uint2(0));
 
@@ -350,10 +348,8 @@ class ShadowModule {
 
   /* Render setting that reduces the LOD for every light. */
   float global_lod_bias_ = 0.0f;
-  /* Scale of sunlight shadow map size, also length of LOD0. */
-  float shadow_map_scale = 1.0f;
-  /** For now, needs to be hardcoded. */
-  int shadow_page_size_ = SHADOW_PAGE_RES;
+  /** Page pixel resolution LOD. Page resolution = 1 << shadow_page_lod_. */
+  int shadow_page_lod_ = SHADOW_PAGE_LOD;
   /** Maximum number of allocated pages. Maximum value is SHADOW_MAX_PAGE. */
   int shadow_page_len_ = SHADOW_MAX_PAGE;
   /** Requested and effectively allocated pool size in megabytes. */
@@ -444,6 +440,16 @@ class ShadowModule {
   float global_lod_bias() const
   {
     return global_lod_bias_;
+  }
+
+  int shadow_page_lod() const
+  {
+    return shadow_page_lod_;
+  }
+
+  const int *shadow_page_lod_push_ref() const
+  {
+    return &shadow_page_lod_;
   }
 
   bool viewport_history_invalidated() const

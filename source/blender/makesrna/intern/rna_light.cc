@@ -393,14 +393,6 @@ static void rna_def_light_shadow(StructRNA *srna, bool sun)
                            "the cost of shadow quality.");
   RNA_def_property_update(prop, 0, "rna_Light_update");
 
-  prop = RNA_def_property(srna, "shadow_map_scale", PROP_FLOAT, PROP_NONE);
-  RNA_def_property_float_sdna(prop, nullptr, "shadow_map_scale");
-  RNA_def_property_float_default(prop, 1.0f);
-  RNA_def_property_range(prop, 0.0001f, FLT_MAX);
-  RNA_def_property_ui_range(prop, 0.0001f, FLT_MAX, 0.05f, 2);
-  RNA_def_property_ui_text(prop, "Shadows Map Scale", " ");
-  RNA_def_property_update(prop, 0, "rna_Light_update");
-
   prop = RNA_def_property(srna, "use_shadow_jitter", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(prop, nullptr, "mode", LA_SHADOW_JITTER);
   RNA_def_property_ui_text(

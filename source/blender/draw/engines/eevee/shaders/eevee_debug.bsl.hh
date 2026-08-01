@@ -245,7 +245,7 @@ ShadowDebugOutput debug_atlas_values([[resource_table]] const ShadowDebug &srt,
   [[resource_table]] const ShadowRenderData &srd = srt.shadow_data;
 
   ShadowCoordinates coord = srt.debug_coord_get(P, light);
-  float depth = srd.read_depth(coord);
+  float depth = srd.read_depth(coord, int(light.shadow_page_lod));
   return {
       .valid = true,
       .color_add = float4((depth == -1) ? float3(1.0f, 0.0f, 0.0f) : float3(1.0f / depth), 0.0f) *
@@ -263,7 +263,7 @@ struct AtomicCostCtx {
     [[resource_table]] const ShadowRenderData &srd = srt.shadow_data;
 
     ShadowCoordinates coord = srt.debug_coord_get(P, light);
-    uint u_cost = floatBitsToUint(srd.read_depth(coord));
+    uint u_cost = floatBitsToUint(srd.read_depth(coord, int(light.shadow_page_lod)));
     return float(u_cost - floatBitsToUint(FLT_MAX));
   }
 

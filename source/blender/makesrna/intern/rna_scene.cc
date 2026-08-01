@@ -9244,6 +9244,14 @@ static void rna_def_scene_eevee(BlenderRNA *brna)
       {0, nullptr, 0, nullptr, nullptr},
   };
 
+  static const EnumPropertyItem eevee_shadow_page_resolution_items[] = {
+      {256, "256", 0, "256 px", ""},
+      {512, "512", 0, "512 px", ""},
+      {1024, "1024", 0, "1024 px", ""},
+      {2048, "2048", 0, "2048 px", ""},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+
   static const EnumPropertyItem eevee_gi_visibility_size_items[] = {
       {8, "8", 0, "8 px", ""},
       {16, "16", 0, "16 px", ""},
@@ -9793,6 +9801,15 @@ static void rna_def_scene_eevee(BlenderRNA *brna)
                            "Size of the shadow pool, "
                            "a bigger pool size allows for more shadows in the scene "
                            "but might not fit into GPU memory");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, nullptr);
+
+  prop = RNA_def_property(srna, "shadow_page_resolution", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, eevee_shadow_page_resolution_items);
+  RNA_def_property_ui_text(prop,
+                           "Shadow Page Resolution",
+                           "Pixel resolution of each shadow page. "
+                           "Higher values improve shadow quality but use more memory per page");
   RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
   RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, nullptr);
 

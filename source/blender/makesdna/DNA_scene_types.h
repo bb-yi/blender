@@ -2802,6 +2802,8 @@ struct SceneEEVEE {
   int stage_output_view = SCE_EEVEE_STAGE_VIEW_OFF;
   char use_outline = true;
   char _pad2[3] = {};
+  int shadow_page_resolution = 256;
+  char _pad5[4] = {};
 };
 
 struct SceneGpencil {

@@ -18,6 +18,8 @@ struct PageClear {
       shadow_caster_atlas_img;
 
   [[push_constant]] const int use_shadow_caster_atlas;
+  [[push_constant]] const int shadow_page_lod;
+  [[push_constant]] const int shadow_page_res;
 };
 
 /**
@@ -32,7 +34,7 @@ void page_clear_comp([[resource_table]] PageClear &srt,
   /* We clear the destination pixels directly for the atomicMin technique. */
   uint page_packed = srt.dst_coord_buf[global_id.z];
   uint3 page_co = shadow_page_unpack(page_packed);
-  page_co.xy = page_co.xy * SHADOW_PAGE_RES + global_id.xy;
+  page_co.xy = page_co.xy * srt.shadow_page_res + global_id.xy;
 
   imageStoreFast(srt.shadow_atlas_img, int3(page_co), uint4(floatBitsToUint(FLT_MAX)));
   if (srt.use_shadow_caster_atlas != 0) {

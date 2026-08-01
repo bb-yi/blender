@@ -45,6 +45,7 @@ struct SurfShadow {
       shadow_caster_atlas_img;
 
   [[push_constant]] const int use_shadow_caster_atlas;
+  [[push_constant]] const int shadow_page_lod;
 };
 
 [[fragment]] [[texture_atomic]]
@@ -87,8 +88,8 @@ void surf_shadow([[resource_table]] PipelineConstants &pipe,
   int2 texel_co = int2(frag_co.xy);
 
   /* Using bitwise ops is way faster than integer ops. */
-  constexpr int page_shift = SHADOW_PAGE_LOD;
-  constexpr int page_mask = ~(0xFFFFFFFF << SHADOW_PAGE_LOD);
+  int page_shift = srt.shadow_page_lod;
+  int page_mask = ~(0xFFFFFFFF << srt.shadow_page_lod);
 
   int2 tile_co = texel_co >> page_shift;
   int2 texel_page = texel_co & page_mask;

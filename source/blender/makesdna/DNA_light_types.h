@@ -173,7 +173,7 @@ struct Light {
   /* Deprecated. */
   DNA_DEPRECATED float energy_deprecated = 10.0f;
 
-  float shadow_map_scale = 1.0f;
+  char _pad_scale[4] = {};
 
   int lightgroup_id = 0;
   int _pad3 = 0;

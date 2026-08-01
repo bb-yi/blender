@@ -26,7 +26,7 @@ struct ShadowRenderData {
   [[resource_table, condition(shadow_random)]] srt_t<Sampling> sampling;
   [[resource_table, condition(shadow_random)]] srt_t<UtilityTexture> util_tx;
 
-  float read_depth(ShadowCoordinates coord) const
+  float read_depth(ShadowCoordinates coord, int shadow_page_lod) const
   {
     ShadowSamplingTile tile = shadow_tile_load(
         shadow_tilemaps_tx, coord.tilemap_tile, coord.tilemap_index);
@@ -34,12 +34,11 @@ struct ShadowRenderData {
       return -1.0f;
     }
     /* Using bitwise ops is way faster than integer ops. */
-    constexpr uint page_shift = uint(SHADOW_PAGE_LOD);
-    constexpr uint page_mask = ~(0xFFFFFFFFu << uint(SHADOW_PAGE_LOD));
+    uint page_shift = uint(shadow_page_lod);
+    uint page_mask = ~(0xFFFFFFFFu << page_shift);
 
     uint2 texel = coord.tilemap_texel;
-    /* Shift LOD0 pixels so that they get wrapped at the right position for the given LOD. */
-    texel += uint2(tile.lod_offset << SHADOW_PAGE_LOD);
+    texel += uint2(tile.lod_offset << page_shift);
     /* Scale to LOD pixels (merge LOD0 pixels together) then mask to get pixel in page. */
     uint2 texel_page = (texel >> tile.lod) & page_mask;
     texel = (uint2(tile.page.xy) << page_shift) | texel_page;
@@ -56,7 +55,7 @@ struct ShadowRenderData {
     lP = shadow_punctual_local_position_to_face_local(face_id, lP);
     ShadowCoordinates coord = shadow_punctual_coordinates(light, lP, face_id);
 
-    float radial_dist = read_depth(coord);
+    float radial_dist = read_depth(coord, int(light.shadow_page_lod));
     if (radial_dist == -1.0f) {
       return 1e10f;
     }
@@ -70,7 +69,7 @@ struct ShadowRenderData {
     float3 lP = transform_direction_transposed(light.object_to_world, P);
     ShadowCoordinates coord = shadow_directional_coordinates(light, lP);
 
-    float depth = read_depth(coord);
+    float depth = read_depth(coord, int(light.shadow_page_lod));
     if (depth == -1.0f) {
       return 1e10f;
     }

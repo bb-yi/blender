@@ -63,7 +63,6 @@ ShadowTechnique ShadowModule::shadow_technique = ShadowTechnique::ATOMIC_RASTER;
 void ShadowTileMap::sync_orthographic(const float4x4 &object_mat_,
                                       int2 origin_offset,
                                       int clipmap_level,
-                                      float shadow_map_scale_,
                                       eShadowProjectionType projection_type_,
                                       uint2 shadow_set_membership_)
 {
@@ -76,13 +75,6 @@ void ShadowTileMap::sync_orthographic(const float4x4 &object_mat_,
   level = clipmap_level;
   light_type = eLightType::LIGHT_SUN;
   shadow_set_membership = shadow_set_membership_;
-
-    /* If the shadow map scale changed, mark the tilemap dirty so it gets re-generated.
-   * This mirrors the behaviour when the light direction / object matrix changes. */
-  if (shadow_map_scale != shadow_map_scale_) {
-    set_dirty();
-  }
-  shadow_map_scale = shadow_map_scale_;
 
   grid_shift = origin_offset - grid_offset;
   grid_offset = origin_offset;
@@ -521,7 +513,6 @@ void ShadowDirectional::cascade_tilemaps_distribution(Light &light, const Camera
     tilemap->sync_orthographic(object_mat,
                                level_offset,
                                level,
-                               light.shadow_map_scale,
                                SHADOW_PROJECTION_CASCADE,
                                light.shadow_set_membership);
 
@@ -594,7 +585,6 @@ void ShadowDirectional::clipmap_tilemaps_distribution(Light &light, const Camera
     tilemap->sync_orthographic(object_mat,
                                level_offset,
                                level,
-                               light.shadow_map_scale,
                                SHADOW_PROJECTION_CLIPMAP,
                                light.shadow_set_membership);
 
@@ -813,7 +803,18 @@ void ShadowModule::init()
     data_.step_count = 1;
   }
 
-  const int2 atlas_extent = shadow_page_size_ * int2(SHADOW_PAGE_PER_ROW, SHADOW_PAGE_PER_COL);
+  /* Read shadow page resolution from user setting. */
+  const int new_lod = log2_ceil_u(scene.eevee.shadow_page_resolution);
+  if (shadow_page_lod_ != new_lod) {
+    shadow_page_lod_ = new_lod;
+    /* Force full rebuild on resolution change. */
+    do_full_update_ = true;
+    for (Light &light : inst_.lights.light_map_.values()) {
+      light.initialized = false;
+    }
+  }
+
+  const int2 atlas_extent = (1 << shadow_page_lod_) * int2(SHADOW_PAGE_PER_ROW, SHADOW_PAGE_PER_COL);
 
   eGPUTextureUsage tex_usage = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE;
   if (ShadowModule::shadow_technique == ShadowTechnique::ATOMIC_RASTER) {
@@ -834,7 +835,7 @@ void ShadowModule::init()
     shadow_pool_retry_countdown_ = 0;
   }
 
-  const size_t page_byte_size = square_i(shadow_page_size_) * sizeof(int);
+  const size_t page_byte_size = square_i(1 << shadow_page_lod_) * sizeof(int);
   const uint64_t requested_pool_byte_size = uint64_t(shadow_pool_size_requested_) * square_i(1024);
   const int requested_page_len = enabled_ ?
                                      max_ii(1,
@@ -964,8 +965,8 @@ void ShadowModule::init()
     int size_in_tile = min_ii(1 << i, SHADOW_TILEMAP_RES);
     multi_viewports_[i][0] = 0;
     multi_viewports_[i][1] = 0;
-    multi_viewports_[i][2] = size_in_tile * shadow_page_size_;
-    multi_viewports_[i][3] = size_in_tile * shadow_page_size_;
+    multi_viewports_[i][2] = size_in_tile * (1 << shadow_page_lod_);
+    multi_viewports_[i][3] = size_in_tile * (1 << shadow_page_lod_);
   }
 }
 
@@ -1396,6 +1397,8 @@ void ShadowModule::end_sync()
         /* De-fragment the free page heap after cache reuse phase which can leave hole. */
         PassSimple::Sub &sub = pass.sub("Defrag");
         sub.shader_set(inst_.shaders.static_shader_get(SHADOW_PAGE_DEFRAG));
+        sub.push_constant("shadow_page_lod", shadow_page_lod_);
+        sub.push_constant("shadow_page_res", 1 << shadow_page_lod_);
         sub.bind_ssbo("pages_infos_buf", pages_infos_data_);
         sub.bind_ssbo("pages_free_buf", pages_free_data_);
         sub.bind_ssbo("pages_cached_buf", pages_cached_data_);
@@ -1469,6 +1472,8 @@ void ShadowModule::end_sync()
         sub.framebuffer_set(&render_fb_);
         sub.state_set(DRW_STATE_WRITE_DEPTH | DRW_STATE_DEPTH_ALWAYS);
         sub.shader_set(inst_.shaders.static_shader_get(SHADOW_PAGE_CLEAR));
+        sub.push_constant("shadow_page_lod", shadow_page_lod_);
+        sub.push_constant("shadow_page_res", 1 << shadow_page_lod_);
         sub.bind_ssbo("pages_infos_buf", pages_infos_data_);
         sub.bind_ssbo("dst_coord_buf", dst_coord_buf_);
         sub.push_constant("use_shadow_caster_atlas", use_caster_atlas_push_);
@@ -1680,7 +1685,7 @@ void ShadowModule::render(View &view, int2 extent)
   usage_tag_fb.ensure(usage_tag_fb_resolution_);
 
   eGPUTextureUsage usage = GPU_TEXTURE_USAGE_ATTACHMENT | GPU_TEXTURE_USAGE_MEMORYLESS;
-  int2 fb_size = int2(SHADOW_TILEMAP_RES * shadow_page_size_);
+  int2 fb_size = int2(SHADOW_TILEMAP_RES * (1 << shadow_page_lod_));
   int fb_layers = SHADOW_VIEW_MAX;
 
   if (shadow_technique == ShadowTechnique::ATOMIC_RASTER) {

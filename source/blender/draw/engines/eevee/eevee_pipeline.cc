@@ -583,6 +583,8 @@ PassMain::Sub *ShadowPipeline::surface_material_add(blender::Material *material,
   material_pass->shader_set(GPU_pass_shader_get(gpupass));
   material_pass->push_constant("use_shadow_caster_atlas",
                                inst_.shadows.use_caster_atlas_push_ref());
+  material_pass->push_constant("shadow_page_lod",
+                               inst_.shadows.shadow_page_lod_push_ref());
   return material_pass;
 }
 
