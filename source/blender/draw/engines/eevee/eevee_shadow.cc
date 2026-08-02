@@ -321,13 +321,7 @@ void ShadowPunctual::end_sync(Light &light)
 eShadowProjectionType ShadowDirectional::directional_distribution_type_get(const Camera &camera)
 {
   if (camera.is_perspective()) {
-    const CameraData &cam_data = camera.data_get();
-    float screen_diag = finite_or_default(cam_data.screen_diagonal_length, 1.0f);
-    if (screen_diag < 0.4f) {
-      /* Telephoto (≈100mm+): use cascade distribution to avoid wasting tile-maps on
-       * empty regions outside the narrow frustum. */
-      return SHADOW_PROJECTION_CASCADE;
-    }
+    /* TODO: Make telephoto auto-switch a user-configurable option. */
     return SHADOW_PROJECTION_CLIPMAP;
   }
   return SHADOW_PROJECTION_CASCADE;
