@@ -140,8 +140,8 @@ static void console_textview_draw_cursor(TextViewContext *tvc, int cwidth, int c
   {
     const SpaceConsole *sc = static_cast<SpaceConsole *>(const_cast<void *>(tvc->arg1));
     /* Cache the font metrics computed during draw, reused for IME cursor positioning. */
-    sc->runtime->char_width_px = char_width;
-    sc->runtime->line_height_px = tvc->line_height;
+    sc->runtime->char_width_px = cwidth;
+    sc->runtime->line_height_px = tvc->lheight;
     const ConsoleLine *cl = static_cast<ConsoleLine *>(sc->history.last);
     int offl = 0, offc = 0;
 
