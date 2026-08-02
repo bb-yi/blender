@@ -144,10 +144,7 @@ float4 npr_scene_handle_eval(TextureHandle tex, int2 texel, float depth, float2 
   }
   if (tex.index == 2) {
     if (uniform_buf.render_pass.normal_id >= 0) {
-      return float4(texelFetch(rp_color_tx,
-                               int3(texel, uniform_buf.render_pass.normal_id),
-                               0)
-                        .rgb,
+      return float4(imageLoad(rp_color_img, int3(texel, uniform_buf.render_pass.normal_id)).rgb,
                     1.0f);
     }
     if (depth >= 1.0f) {
@@ -159,10 +156,7 @@ float4 npr_scene_handle_eval(TextureHandle tex, int2 texel, float depth, float2 
   }
   if (tex.index == 4) {
     if (uniform_buf.render_pass.position_id >= 0) {
-      return float4(texelFetch(rp_color_tx,
-                               int3(texel, uniform_buf.render_pass.position_id),
-                               0)
-                        .rgb,
+      return float4(imageLoad(rp_color_img, int3(texel, uniform_buf.render_pass.position_id)).rgb,
                     1.0f);
     }
     if (depth >= 1.0f) {
@@ -243,9 +237,9 @@ float4 TextureHandle_eval_impl(TextureHandle tex, float2 offset, bool texel_offs
   switch (tex.type) {
     case TEX_HANDLE_RP_COLOR:
       /* AOV color passes are data buffers; keep them opaque when exposed through NPR output. */
-      return float4(texelFetch(rp_color_tx, int3(texel, tex.index), 0).rgb, 0.0f);
+      return float4(imageLoad(rp_color_img, int3(texel, tex.index)).rgb, 0.0f);
     case TEX_HANDLE_RP_VALUE:
-      return float4(texelFetch(rp_value_tx, int3(texel, tex.index), 0).rrr, 0.0f);
+      return float4(imageLoad(rp_value_img, int3(texel, tex.index)).rrr, 0.0f);
     case TEX_HANDLE_SCENE:
       return npr_scene_handle_eval(tex, texel, depth, screen_uv);
 #ifdef MAT_NPR_REFRACTION
@@ -325,9 +319,9 @@ float4 TextureHandle_eval_uv_impl(TextureHandle tex, float2 uv)
 
   switch (tex.type) {
     case TEX_HANDLE_RP_COLOR:
-      return float4(texelFetch(rp_color_tx, int3(texel, tex.index), 0).rgb, 0.0f);
+      return float4(imageLoad(rp_color_img, int3(texel, tex.index)).rgb, 0.0f);
     case TEX_HANDLE_RP_VALUE:
-      return float4(texelFetch(rp_value_tx, int3(texel, tex.index), 0).rrr, 0.0f);
+      return float4(imageLoad(rp_value_img, int3(texel, tex.index)).rrr, 0.0f);
     case TEX_HANDLE_SCENE:
       return npr_scene_handle_eval(tex, texel, depth, screen_uv);
 #ifdef MAT_NPR_REFRACTION

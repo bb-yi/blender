@@ -1469,12 +1469,6 @@ template<typename F> void DeferredLayerBase::npr_pass_sync(Instance &inst, F cal
   npr_ps_.bind_texture(SCENE_SHADOW_TEX_SLOT, &inst.pipelines.shadow_filter.texture_ref());
   npr_ps_.bind_image(RBUFS_COLOR_SLOT, &inst.render_buffers.rp_color_tx);
   npr_ps_.bind_image(RBUFS_VALUE_SLOT, &inst.render_buffers.rp_value_tx);
-  /* Render buffers may not be allocated yet during probe pipeline sync. The concrete inputs are
-   * assigned immediately before each NPR pass is rendered. */
-  npr_aov_color_input_tx_ = nullptr;
-  npr_aov_value_input_tx_ = nullptr;
-  npr_ps_.bind_texture(NPR_AOV_COLOR_TEX_SLOT, &npr_aov_color_input_tx_);
-  npr_ps_.bind_texture(NPR_AOV_VALUE_TEX_SLOT, &npr_aov_value_input_tx_);
   npr_ps_.bind_image(OUTLINE_COLOR_SLOT, &inst.render_buffers.outline_color_tx);
   npr_ps_.bind_image(OUTLINE_INFO_SLOT, &inst.render_buffers.outline_info_tx);
   /* Bind manually to fixed slots before the sub-pass shader is selected.
@@ -1953,9 +1947,6 @@ gpu::Texture *DeferredLayer::render(View &render_view,
 
   RenderBuffers &rb = inst_.render_buffers;
 
-  npr_aov_color_input_tx_ = rb.rp_color_tx;
-  npr_aov_value_input_tx_ = rb.rp_value_tx;
-
   const bool has_aovs = inst_.film.aovs_info.color_len > 0 || inst_.film.aovs_info.value_len > 0;
   /* Keep previous layer AOVs in the live render-pass buffer for NPR AOV Input.
    * Current-layer AOV Output writes naturally override them where the current material writes. */
@@ -1989,8 +1980,6 @@ gpu::Texture *DeferredLayer::render(View &render_view,
   if (closure_count_ == 0) {
     inst_.hiz_buffer.swap_layer();
     inst_.hiz_buffer.update();
-    npr_aov_color_input_tx_ = rb.rp_color_tx;
-    npr_aov_value_input_tx_ = rb.rp_value_tx;
     return radiance_behind_tx;
   }
 
@@ -2096,7 +2085,9 @@ gpu::Texture *DeferredLayer::render(View &render_view,
     {
       ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainDeferredNPR);
       GPU_framebuffer_bind(combined_fb);
+      GPU_memory_barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS);
       inst_.manager->submit(npr_ps_, render_view);
+      GPU_memory_barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS);
     }
     npr_radiance_input_tx_ = nullptr;
     npr_radiance_input.release();
@@ -2116,9 +2107,6 @@ gpu::Texture *DeferredLayer::render(View &render_view,
   }
 
   inst_.pipelines.deferred.debug_draw(render_view, combined_fb);
-
-  npr_aov_color_input_tx_ = rb.rp_color_tx;
-  npr_aov_value_input_tx_ = rb.rp_value_tx;
 
   return use_feedback_output_ ? radiance_feedback_tx_ : nullptr;
 }
@@ -2787,9 +2775,6 @@ void DeferredProbePipeline::render(View &view,
   inst_.manager->submit(eval_light_ps_, view);
   GPU_memory_barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS | GPU_BARRIER_TEXTURE_FETCH);
 
-  opaque_layer_.npr_aov_color_input_tx_ = inst_.render_buffers.rp_color_tx;
-  opaque_layer_.npr_aov_value_input_tx_ = inst_.render_buffers.rp_value_tx;
-
   TextureFromPool npr_radiance_input = {"NPR Radiance Input"};
   {
     npr_radiance_input.acquire_2d(
@@ -2802,10 +2787,10 @@ void DeferredProbePipeline::render(View &view,
     GPU_framebuffer_blit(combined_fb, 0, npr_radiance_fb, 0, GPU_COLOR_BIT);
   }
 
+  GPU_memory_barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS);
   inst_.manager->submit(opaque_layer_.npr_ps_, view);
+  GPU_memory_barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS);
 
-  opaque_layer_.npr_aov_color_input_tx_ = nullptr;
-  opaque_layer_.npr_aov_value_input_tx_ = nullptr;
   npr_radiance_input_tx_ = nullptr;
   npr_radiance_input.release();
   for (int i = 0; i < ARRAY_SIZE(direct_radiance_txs_); i++) {
@@ -3001,9 +2986,6 @@ void PlanarProbePipeline::render(View &view,
 
   inst_.pipelines.background.render(view, combined_fb);
 
-  npr_aov_color_input_tx_ = inst_.render_buffers.rp_color_tx;
-  npr_aov_value_input_tx_ = inst_.render_buffers.rp_value_tx;
-
   TextureFromPool npr_radiance_input = {"NPR Radiance Input"};
   {
     npr_radiance_input.acquire_2d(
@@ -3016,10 +2998,10 @@ void PlanarProbePipeline::render(View &view,
     GPU_framebuffer_blit(combined_fb, 0, npr_radiance_fb, 0, GPU_COLOR_BIT);
   }
 
+  GPU_memory_barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS);
   inst_.manager->submit(npr_ps_, view);
+  GPU_memory_barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS);
 
-  npr_aov_color_input_tx_ = nullptr;
-  npr_aov_value_input_tx_ = nullptr;
   npr_radiance_input_tx_ = nullptr;
   npr_radiance_input.release();
   for (int i = 0; i < ARRAY_SIZE(direct_radiance_txs_); i++) {

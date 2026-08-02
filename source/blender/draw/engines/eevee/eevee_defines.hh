@@ -265,8 +265,6 @@
 /* NPR material passes already use their radiance input slot. Reuse a filter-only slot
  * already reserved away from material texture allocation. */
 #define LIGHT_SHADER_NPR_TEX_SLOT FILTER_SCENE_COLOR_TEX_SLOT
-#define NPR_AOV_COLOR_TEX_SLOT FILTER_AOV_COLOR_TEX_SLOT
-#define NPR_AOV_VALUE_TEX_SLOT FILTER_AOV_VALUE_TEX_SLOT
 /* Outline post-process shaders are isolated from material evaluation. Reuse this local range
  * instead of consuming high texture units that exceed the minimum per-stage backend limit. */
 #define OUTLINE_DEPTH_TEX_SLOT 20
