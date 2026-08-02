@@ -135,11 +135,11 @@ static std::optional<rcti> text_main_region_cursor_ime(wmWindow * /*win*/,
                     st->top + offl;
   const int vselc = space_text_get_char_pos(st, st->text->sell->line, st->text->selc) - st->left +
                     offc;
-  const int x = TXT_BODY_LEFT(st) + (vselc * st->runtime->char_width_px);
+  const int x = TXT_BODY_LEFT(st) + (vselc * st->runtime->cwidth_px);
   const int y = region->winy - vsell * line_height;
   rcti rect;
   rect.xmin = x;
-  rect.xmax = x + st->runtime->char_width_px;
+  rect.xmax = x + st->runtime->cwidth_px;
   rect.ymin = y - line_height;
   rect.ymax = y;
   return rect;
