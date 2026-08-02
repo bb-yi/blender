@@ -75,6 +75,9 @@
 - `Function` 现在必须显式指定，不会自动选第一个函数
 - `sampler2D` 会显示为 `Closure` 输入口
 - `sampler2D` 可连接 `Image to Closure` 或符合约定的 `Closure Output`
+- `sampler2D` / `sampler3D` 真正未连接时，会在 GPU 编译阶段隐式使用不透明白色常量来源；它不会创建 Image datablock、GPU texture、纹理槽或额外节点
+- 白色来源下，2D 的 `texture`（含 bias）、`textureLod`、`textureGrad`、`texelFetch`、`textureGather` 都返回 `vec4(1.0)`，`textureSize` 返回 `ivec2(1)`；3D 的对应合法查询也返回白色，`textureSize` 返回 `ivec3(1)`
+- `textureGather(sampler3D, ...)` 在 GLSL 中本来就无效，不会被白色来源放宽；显式连接但图片缺失、Closure 签名错误或来源不受支持时仍然报错
 - `Closure Output -> sampler2D` 当前只保证 `texture(tex, coord)` 这种直接采样形式；`coord` 的语义由闭包内部决定，普通贴图通常是 UV，NPR 图像句柄通常是 `Image Sample.Offset`
 - `sampler3D` 也会显示为 `Closure` 输入口，可连接 `Image to Closure` 的 `3D LUT Strip` 或符合约定的 `Closure Output`
 - `Closure Output -> sampler3D` 使用 `Closure Input` 中名为 `UV` 的 `Vector` 传递完整 `vec3` 坐标；首版只保证 `texture(volume, vec3_coord)`，不支持 `textureLod`、`textureGrad`、`textureSize`、`texelFetch` 或 `textureGather`
@@ -1957,7 +1960,7 @@ vec4 sample_it(sampler2D tex, vec2 uv)
 }
 ```
 
-`sampler2D` 当前通过 `Image to Closure` 或 `Closure Output` 接入来源，不支持默认值、范围、隐藏值或 subtype。
+`sampler2D` / `sampler3D` 可以通过 `Image to Closure` 或 `Closure Output` 接入来源；真正未连接时会在 GPU 编译阶段隐式采样不透明白色。这个行为不是 socket 或 Meta 默认值，不创建 Image，也不允许写 `@glsl_meta default=`；sampler 仍不支持默认值、范围、隐藏值或 subtype。
 
 可以写 `label`、`description`，也可以放进 panel：
 
