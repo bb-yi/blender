@@ -13,6 +13,8 @@
 
 稳定地转换成可直接粘贴到 `Blender NPR Port` 的 `GLSL Function` 节点里的、符合当前实现规范的 `GLSL` 源码。
 
+> 当前实现基线：Blender 5.2 NPR `main`（`1257abb95445`）。本指南覆盖当前的 typed Closure callback、Closure sampler Alpha、sampler3D 以及 `@glsl_defines v1` 合同；如果目标是 `blender_npr_post_mainfix`，必须先检查该分支的源码和测试是否已经包含这些能力。
+
 
 ## 一、先记住当前节点真正支持什么
 
@@ -89,6 +91,23 @@
 - `vec3 + subtype=color` 会显示为颜色插口，内部按 `rgb` 使用，`alpha` 固定为 `1.0`
 - `vec4` 输入会显示为 `vec3 + float W` 两个插口，并在 GLSL wrapper 内重组为 `vec4`
 - `mat2/mat3/mat4` 边界会按列拆分为多个向量插口；`mat4` 的每列会进一步拆成 `vec3 + float W`
+
+### 3A. 5.2 当前 Closure / sampler 快速判定
+
+转换前先判断外部代码依赖的是哪一种 Closure 合同。下面四种路径不能互相替换：
+
+| 来源或需求 | GLSL Function 边界 | 节点侧连接 / 坐标语义 | 关键限制 |
+| --- | --- | --- | --- |
+| 普通图片、噪声图、LUT | `sampler2D` | `Image to Closure`，通常使用 `texture(tex, uv)` | 需要 `LOD`、导数、尺寸或 texel 查询时必须说明真实纹理语义 |
+| NPR/AOV/渲染结果图像句柄 | `sampler2D` | `Image Sample.Image -> Image Sample.Color/Alpha -> Closure Output` | `texture(image, offset)` 的第二个参数是像素/视图偏移，不是 mesh UV；需要透明度时必须连 `Image Sample.Alpha` |
+| 程序化三维场、SDF | `sampler3D` | `Closure Input.UV (Vector)` 接完整 `vec3`，结果接 `Closure Output` | 首版只保证 `texture(volume, vec3)`；不支持 `textureLod`、`textureGrad`、`textureSize`、`texelFetch`、`textureGather` |
+| 硬件 3D LUT | `sampler3D` | `Image to Closure` 的 `3D LUT Strip` | 使用原生 3D 纹理语义，不要手工把 LUT strip 插值改写成程序化 Closure |
+
+`@glsl_closure v1` 是另一条独立合同：它只能标记由导出函数可达的普通 helper，供 Closure 节点子图替换。callback 只允许 `float / int / bool / vec2 / vec3 / vec4`，不能使用 sampler、矩阵、数组、struct 或 `inout`；必须有返回值或至少一个 `out`，返回 socket 保留名为 `Result`。没有连接 Closure 时，原始 helper 函数体继续作为 fallback。
+
+typed Closure 的 `int` 通过 float 通道传输，只有闭区间 `[-16777216, 16777216]` 保证整数精确。callback Meta 只能使用最小的 `label`、`description` 和类型允许的 `subtype`，不能套用导出函数的 `default`、`min/max`、`items`、`panel` 或 `closed` 配置。
+
+边界拆分也必须提前考虑：`vec4` 会生成 Vector + W 插口，`mat2/mat3/mat4` 按列拆分，`mat4` 的每列进一步生成 Vector + W。不要把参数命名成可能与生成的 split identifier 冲突的名称。涉及这些合同的转换，除 parser 外还应优先运行 `glsl-function-typed-closure-callback`、`glsl-function-closure-sampler3d` 或对应的最小 GPU/render 回归。
 
 ### 4. `Node / Code` 编辑模式与刷新生命周期
 
