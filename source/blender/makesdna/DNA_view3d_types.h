@@ -303,8 +303,14 @@ enum eView3DOverlay_Flag : int {
   V3D_OVERLAY_SHOW_LIGHT_COLORS = (1 << 17),
   V3D_OVERLAY_VIEWER_ATTRIBUTE_TEXT = (1 << 18),
   V3D_OVERLAY_PERFORMANCE = (1 << 19),
+  V3D_OVERLAY_SHOW_SHADOW_LOD = (1 << 20),
 };
 ENUM_OPERATORS(eView3DOverlay_Flag)
+
+/* Store the Shadow LOD opacity as percent + 1. Zero keeps older files at the 70% default. */
+#define V3D_OVERLAY_SHADOW_LOD_OPACITY_SHIFT 21
+#define V3D_OVERLAY_SHADOW_LOD_OPACITY_MASK (0x7f << V3D_OVERLAY_SHADOW_LOD_OPACITY_SHIFT)
+#define V3D_OVERLAY_SHADOW_LOD_OPACITY_DEFAULT 70
 
 /** #View3DOverlay.edit_flag */
 enum eView3DOverlay_EditFlag : int {

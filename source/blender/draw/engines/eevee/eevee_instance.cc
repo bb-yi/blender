@@ -254,6 +254,27 @@ namespace blender::eevee
       {
         sampling.reset();
       }
+      const bool is_material_or_rendered =
+        v3d && ELEM(v3d->shading.type, OB_MATERIAL, OB_RENDER);
+      const bool show_shadow_lod = draw_overlays && is_material_or_rendered &&
+        (v3d->overlay.flag & V3D_OVERLAY_SHOW_SHADOW_LOD);
+      if (assign_if_different(shadow_lod_overlay_, show_shadow_lod))
+      {
+        sampling.reset();
+      }
+      const int shadow_lod_opacity_encoded = v3d ?
+                                                  ((v3d->overlay.flag &
+                                                    V3D_OVERLAY_SHADOW_LOD_OPACITY_MASK) >>
+                                                   V3D_OVERLAY_SHADOW_LOD_OPACITY_SHIFT) :
+                                                  0;
+      const int shadow_lod_opacity_percent = shadow_lod_opacity_encoded == 0 ?
+                                               V3D_OVERLAY_SHADOW_LOD_OPACITY_DEFAULT :
+                                               shadow_lod_opacity_encoded - 1;
+      const float shadow_lod_opacity = float(shadow_lod_opacity_percent) * 0.01f;
+      if (assign_if_different(shadow_lod_overlay_opacity_, shadow_lod_opacity))
+      {
+        sampling.reset();
+      }
       if (is_painting)
       {
         sampling.reset();
@@ -267,6 +288,8 @@ namespace blender::eevee
     else
     {
       is_image_render = true;
+      shadow_lod_overlay_ = false;
+      shadow_lod_overlay_opacity_ = 0.7f;
     }
 
     rcti lookdev_rect = *visible_rect;

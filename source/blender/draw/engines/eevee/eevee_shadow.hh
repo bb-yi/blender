@@ -10,6 +10,8 @@
 
 #pragma once
 
+#include <string>
+
 #include "BLI_pool.hh"
 #include "BLI_vector.hh"
 
@@ -343,6 +345,11 @@ class ShadowModule {
 
   /** Display information about the virtual shadows. */
   PassSimple debug_draw_ps_ = {"Shadow.Debug"};
+  int debug_draw_mode_ = 0;
+  bool debug_draw_ready_ = false;
+  ObjectKey debug_light_key_;
+  bool has_debug_light_key_ = false;
+  std::string debug_light_name_;
 
   /** \} */
 

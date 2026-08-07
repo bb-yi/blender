@@ -7131,6 +7131,31 @@ class VIEW3D_PT_overlay_text(Panel):
         sub.prop(overlay, "show_performance", text="Performance")
 
 
+class VIEW3D_PT_overlay_shadows(Panel):
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'HEADER'
+    bl_parent_id = "VIEW3D_PT_overlay"
+    bl_label = "Shadows"
+
+    def draw(self, context):
+        layout = self.layout
+        view = context.space_data
+        shading = view.shading
+
+        is_eevee_view = (
+            shading.type == 'MATERIAL' or
+            (shading.type == 'RENDERED' and
+             context.scene.render.engine in {'BLENDER_EEVEE', 'BLENDER_EEVEE_NEXT'})
+        )
+
+        col = layout.column()
+        col.active = view.overlay.show_overlays and is_eevee_view
+        col.prop(view.overlay, "show_shadow_lod", text="Shadow LOD")
+        sub = col.column()
+        sub.active = view.overlay.show_shadow_lod
+        sub.prop(view.overlay, "shadow_lod_opacity", text="Opacity", slider=True)
+
+
 class VIEW3D_PT_overlay_object(Panel):
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'HEADER'
@@ -9490,6 +9515,7 @@ classes = (
     VIEW3D_PT_overlay,
     VIEW3D_PT_overlay_guides,
     VIEW3D_PT_overlay_text,
+    VIEW3D_PT_overlay_shadows,
     VIEW3D_PT_overlay_object,
     VIEW3D_PT_overlay_geometry,
     VIEW3D_PT_overlay_viewer_node,
