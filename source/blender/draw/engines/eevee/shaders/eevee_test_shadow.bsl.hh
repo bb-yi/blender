@@ -21,6 +21,7 @@ void set_clipmap_data(LightData &light,
   sun_data.clipmap_lod_min = clipmap_lod_min;
   sun_data.clipmap_lod_max = clipmap_lod_max;
   light.sun() = sun_data;
+  light.shadow_map_scale = 1.0f;
 }
 
 void set_clipmap_base_offset(LightData &light, int2 clipmap_base_offset)
@@ -53,19 +54,24 @@ void main()
     set_clipmap_data(light, -5, 8, 0.0f, 0.0f);
     light.lod_bias = 0.0f;
     float fac = float(SHADOW_TILEMAP_RES - 1) / float(SHADOW_TILEMAP_RES);
-    EXPECT_EQ(shadow_directional_level(light, float3(fac * 0.0f)), light.sun().clipmap_lod_min);
-    EXPECT_EQ(shadow_directional_level(light, float3(fac * 0.49f)), 1);
-    EXPECT_EQ(shadow_directional_level(light, float3(fac * 0.5f)), 1);
-    EXPECT_EQ(shadow_directional_level(light, float3(fac * 0.51f)), 1);
-    EXPECT_EQ(shadow_directional_level(light, float3(fac * 0.99f)), 2);
-    EXPECT_EQ(shadow_directional_level(light, float3(fac * 1.0f)), 2);
-    EXPECT_EQ(shadow_directional_level(light, float3(fac * 1.01f)), 2);
-    EXPECT_EQ(shadow_directional_level(light, float3(fac * 12.5f)), 6);
-    EXPECT_EQ(shadow_directional_level(light, float3(fac * 12.51f)), 6);
-    EXPECT_EQ(shadow_directional_level(light, float3(fac * 15.9999f)), 6);
-    EXPECT_EQ(shadow_directional_level(light, float3(fac * 16.0f)), 6);
-    EXPECT_EQ(shadow_directional_level(light, float3(fac * 16.00001f)), 6);
-    EXPECT_EQ(shadow_directional_level(light, float3(fac * 5000.0f)), light.sun().clipmap_lod_max);
+    EXPECT_EQ(shadow_directional_level(light, float3(fac * 0.0f, 0.0f, 0.0f)),
+              light.sun().clipmap_lod_min);
+    EXPECT_EQ(shadow_directional_level(light, float3(fac * 0.49f, 0.0f, 0.0f)), 0);
+    EXPECT_EQ(shadow_directional_level(light, float3(fac * 0.5f, 0.0f, 0.0f)), 0);
+    EXPECT_EQ(shadow_directional_level(light, float3(fac * 0.51f, 0.0f, 0.0f)), 1);
+    EXPECT_EQ(shadow_directional_level(light, float3(fac * 0.99f, 0.0f, 0.0f)), 1);
+    EXPECT_EQ(shadow_directional_level(light, float3(fac * 1.0f, 0.0f, 0.0f)), 1);
+    EXPECT_EQ(shadow_directional_level(light, float3(fac * 1.01f, 0.0f, 0.0f)), 2);
+    EXPECT_EQ(shadow_directional_level(light, float3(fac * 12.5f, 0.0f, 0.0f)), 5);
+    EXPECT_EQ(shadow_directional_level(light, float3(fac * 12.51f, 0.0f, 0.0f)), 5);
+    EXPECT_EQ(shadow_directional_level(light, float3(fac * 15.9999f, 0.0f, 0.0f)), 5);
+    EXPECT_EQ(shadow_directional_level(light, float3(fac * 16.0f, 0.0f, 0.0f)), 5);
+    EXPECT_EQ(shadow_directional_level(light, float3(fac * 16.00001f, 0.0f, 0.0f)), 6);
+    EXPECT_EQ(shadow_directional_level(light, float3(fac * 0.49f, fac * 0.49f, 100.0f)), 0);
+    light.shadow_map_scale = 6.0f;
+    EXPECT_EQ(shadow_directional_level(light, float3(fac * 12.5f, 0.0f, 0.0f)), 5);
+    EXPECT_EQ(shadow_directional_level(light, float3(fac * 5000.0f, 0.0f, 0.0f)),
+              light.sun().clipmap_lod_max);
     /* Produces NaN / Inf, Undefined behavior. */
     // EXPECT_EQ(shadow_directional_level(light, float3(FLT_MAX)),
     // light.sun().clipmap_lod_max);

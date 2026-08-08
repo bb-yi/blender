@@ -150,7 +150,9 @@ int shadow_directional_tilemap_index(LightData light, float3 lP)
 
 float shadow_directional_clipmap_scale(LightData light, float3 lP)
 {
-  float scale = length(lP) * 2.0f;
+  /* Directional clipmap coverage is orthographic in light-space XY.
+   * Light-space depth must not select a coarser clipmap. */
+  float scale = reduce_max(abs(lP.xy)) * 2.0f;
   scale = max(scale * exp2(light.lod_bias), exp2(light.lod_min));
   return clamp(
       scale, exp2(float(light.sun().clipmap_lod_min)), exp2(float(light.sun().clipmap_lod_max)));
@@ -171,9 +173,7 @@ float shadow_directional_level_fractional(LightData light, float3 lP)
     /* Since the distance is centered around the camera (and thus by extension the tile-map),
      * we need to multiply by 2 to get the lod level which covers the following range:
      * [-coverage_get(lod)/2..coverage_get(lod)/2] */
-    float scale = light.shadow_map_scale;
-
-    lod = log2(shadow_directional_clipmap_scale(light, lP) * narrowing / scale);
+    lod = log2(shadow_directional_clipmap_scale(light, lP) * narrowing);
 
     lod = max(lod, light.lod_min);
   }
@@ -300,7 +300,7 @@ ShadowCoordinates shadow_directional_coordinates_at_level(LightData light, float
                                                       level_relative);
   /* UV in [0..1] range over the tilemap. */
   float2 tilemap_uv = lP.xy - light.sun().clipmap_origin;
-  tilemap_uv *= exp2(float(-lod_relative)) / light.shadow_map_scale;
+  tilemap_uv *= exp2(float(-lod_relative));
   tilemap_uv -= float2(clipmap_offset) * (1.0f / float(SHADOW_TILEMAP_RES));
   tilemap_uv = saturate(tilemap_uv + 0.5f);
 

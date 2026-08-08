@@ -357,8 +357,6 @@ class ShadowModule {
 
   /* Render setting that reduces the LOD for every light. */
   float global_lod_bias_ = 0.0f;
-  /* Scale of sunlight shadow map size, also length of LOD0. */
-  float shadow_map_scale = 1.0f;
   /** For now, needs to be hardcoded. */
   int shadow_page_size_ = SHADOW_PAGE_RES;
   /** Maximum number of allocated pages. Maximum value is SHADOW_MAX_PAGE. */
@@ -564,16 +562,16 @@ class ShadowDirectional : public NonCopyable, NonMovable {
   void end_sync(Light &light, const Camera &camera);
 
   /* Return coverage of the whole tile-map in world unit. */
-  static float coverage_get(int lvl, float scale = 1.0f)
+  static float coverage_get(int lvl)
   {
     /* This function should be kept in sync with shadow_directional_level(). */
-    return exp2(lvl) * scale;
+    return exp2(lvl);
   }
 
   /* Return coverage of a single tile for a tile-map of this LOD in world unit. */
-  static float tile_size_get(int lvl, float scale = 1.0f)
+  static float tile_size_get(int lvl)
   {
-    return coverage_get(lvl, scale) / SHADOW_TILEMAP_RES;
+    return coverage_get(lvl) / SHADOW_TILEMAP_RES;
   }
 
  private:

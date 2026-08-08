@@ -114,13 +114,13 @@ void ShadowTileMap::sync_orthographic(const float4x4 &object_mat_,
     set_dirty();
   }
 
-  float tile_size = ShadowDirectional::tile_size_get(level, shadow_map_scale);
+  float tile_size = ShadowDirectional::tile_size_get(level);
 
   /* object_mat is a rotation matrix. Reduce imprecision by taking the transpose which is also the
    * inverse in this particular case. */
   viewmat = math::transpose(object_mat);
 
-  half_size = ShadowDirectional::coverage_get(level, shadow_map_scale) / 2.0f;
+  half_size = ShadowDirectional::coverage_get(level) / 2.0f;
   center_offset = float2(grid_offset) * tile_size;
 
   winmat = math::projection::orthographic(-half_size + center_offset.x,
@@ -377,14 +377,17 @@ static int clipmap_level_perspective_bias(const Camera &camera)
 static void directional_focus_update(DirectionalFocusData &focus,
                                      const Camera &camera,
                                      const draw::StorageVectorBuffer<uint, 128> &curr_casters,
-                                     const draw::Manager &manager)
+                                     const draw::Manager &manager,
+                                     const bool force_focus)
 {
   focus.position = camera.position();
   focus.distance = 0.0f;
   focus.blend = 0.0f;
 
   const int perspective_bias = clipmap_level_perspective_bias(camera);
-  if (!camera.is_perspective() || (perspective_bias == 0) || curr_casters.is_empty()) {
+  if (!camera.is_perspective() || (!force_focus && perspective_bias == 0) ||
+      curr_casters.is_empty())
+  {
     return;
   }
 
@@ -490,9 +493,7 @@ ShadowDirectional::LevelSpan ShadowDirectional::cascade_level_range(const Light 
   int lod_level = ceil(log2(max_ff(min_depth_tilemap_size, min_diagonal_tilemap_size)) + 0.5);
 
   /* Tile-maps "rotate" around the first one so their effective range is only half their size. */
-  float per_tilemap_coverage = ShadowDirectional::coverage_get(lod_level,
-                                                               light.shadow_map_scale) *
-                               0.5f;
+  float per_tilemap_coverage = ShadowDirectional::coverage_get(lod_level) * 0.5f;
   per_tilemap_coverage = std::max(finite_or_default(per_tilemap_coverage, 0.5f), 0.5f);
   /* Number of tile-maps needed to cover the whole view. */
   /* NOTE: floor + 0.5 to avoid 0 when parallel. */
@@ -511,9 +512,8 @@ void ShadowDirectional::cascade_tilemaps_distribution(Light &light, const Camera
   light.sun().focus_blend = 0.0f;
 
   /* All tile-maps use the first level size. */
-  float half_size = ShadowDirectional::coverage_get(levels_.lod_min, light.shadow_map_scale) /
-                    2.0f;
-  float tile_size = ShadowDirectional::tile_size_get(levels_.lod_min, light.shadow_map_scale);
+  float half_size = ShadowDirectional::coverage_get(levels_.lod_min) / 2.0f;
+  float tile_size = ShadowDirectional::tile_size_get(levels_.lod_min);
 
   float3 near_point, far_point;
   cascade_tilemaps_distribution_near_far_points(camera, light, near_point, far_point);
@@ -596,14 +596,21 @@ ShadowDirectional::LevelSpan ShadowDirectional::clipmap_level_range(const Camera
 void ShadowDirectional::clipmap_tilemaps_distribution(Light &light, const Camera &camera)
 {
   const DirectionalFocusData &focus = directional_focus_data_ensure(shadows_);
+  /* Keep every LOD's physical coverage at its power-of-two size so its label still describes its
+   * actual texel density. Higher map scale concentrates the clipmaps around the visible caster
+   * focus instead of enlarging each map and cancelling the requested resolution increase. */
+  const float map_scale = max_ff(light.shadow_map_scale, 0.0001f);
+  const float focus_blend = (map_scale >= 1.0f) ?
+                                1.0f - (1.0f - focus.blend) / map_scale :
+                                focus.blend * map_scale;
   const float3 clipmap_center = math::interpolate(
-      camera.position(), focus.position, focus.blend);
+      camera.position(), focus.position, focus_blend);
 
   float4x4 object_mat = light.object_to_world;
   object_mat.location() = float3(0.0f);
   light.lod_bias = shadows_.global_lod_bias();
   light.sun().focus_distance = focus.distance;
-  light.sun().focus_blend = focus.blend;
+  light.sun().focus_blend = focus_blend;
 
   for (int lod : IndexRange(levels_.size())) {
     ShadowTileMap *tilemap = tilemaps_[lod];
@@ -611,7 +618,7 @@ void ShadowDirectional::clipmap_tilemaps_distribution(Light &light, const Camera
     int level = levels_.lod_min + lod;
     /* Compute full offset from world origin to the smallest clipmap tile centered around the
      * clipmap focus point. The offset is computed in smallest tile unit. */
-    float tile_size = ShadowDirectional::tile_size_get(level, light.shadow_map_scale);
+    float tile_size = ShadowDirectional::tile_size_get(level);
     /* Moving to light space by multiplying by the transpose (which is the inverse). */
     float2 light_space_center = clipmap_center * float2x3(object_mat.view<2, 3>());
     int2 level_offset = int2(math::round(light_space_center / tile_size));
@@ -648,8 +655,7 @@ void ShadowDirectional::clipmap_tilemaps_distribution(Light &light, const Camera
   light.sun().clipmap_base_offset_pos = pos_offset;
   light.sun().clipmap_base_offset_neg = neg_offset;
 
-  float tile_size_max = ShadowDirectional::tile_size_get(levels_.lod_max,
-                                                         light.shadow_map_scale);
+  float tile_size_max = ShadowDirectional::tile_size_get(levels_.lod_max);
   int2 level_offset_max = tilemaps_[levels_.size() - 1]->grid_offset;
 
   light.type = LIGHT_SUN;
@@ -1146,6 +1152,7 @@ void ShadowModule::end_sync()
   data_.use_caster_atlas = bool32_t(use_caster_atlas_);
 
   const DirectionalFocusData old_focus = directional_focus_data_ensure(*this);
+  bool needs_scaled_directional_focus = false;
 
   /* Delete unused shadows first to release tile-maps that could be reused for new lights. */
   for (Light &light : inst_.lights.light_map_.values()) {
@@ -1154,6 +1161,7 @@ void ShadowModule::end_sync()
       light.shadow_discard_safe(*this);
     }
     else if (light.directional != nullptr) {
+      needs_scaled_directional_focus |= light.shadow_map_scale > 1.0f;
       light.directional->release_excess_tilemaps(light, inst_.camera);
     }
     else if (light.punctual != nullptr) {
@@ -1162,7 +1170,11 @@ void ShadowModule::end_sync()
   }
 
   directional_focus_update(
-      directional_focus_data_ensure(*this), inst_.camera, curr_casters_, *inst_.manager);
+      directional_focus_data_ensure(*this),
+      inst_.camera,
+      curr_casters_,
+      *inst_.manager,
+      needs_scaled_directional_focus);
   const DirectionalFocusData &new_focus = directional_focus_data_ensure(*this);
   viewport_history_invalidated_ |= inst_.is_viewport() && data_.use_jitter &&
                                    (math::distance_squared(old_focus.position,

@@ -201,17 +201,18 @@ static void test_eevee_shadow_shift()
 }
 DRAW_TEST(eevee_shadow_shift)
 
-static void test_eevee_shadow_tilemap_scale()
+static void test_eevee_shadow_tilemap_quality_scale()
 {
   ShadowTileMap tilemap(0);
   tilemap.sync_orthographic(
       float4x4::identity(), int2(3, -2), 1, 4.0f, SHADOW_PROJECTION_CLIPMAP);
 
-  EXPECT_FLOAT_EQ(tilemap.half_size, 4.0f);
-  EXPECT_FLOAT_EQ(tilemap.center_offset.x, 0.75f);
-  EXPECT_FLOAT_EQ(tilemap.center_offset.y, -0.5f);
+  /* Quality scale must not enlarge physical LOD coverage and cancel its resolution increase. */
+  EXPECT_FLOAT_EQ(tilemap.half_size, 1.0f);
+  EXPECT_FLOAT_EQ(tilemap.center_offset.x, 0.1875f);
+  EXPECT_FLOAT_EQ(tilemap.center_offset.y, -0.125f);
 }
-DRAW_TEST(eevee_shadow_tilemap_scale)
+DRAW_TEST(eevee_shadow_tilemap_quality_scale)
 
 static void test_eevee_shadow_tag_update()
 {

@@ -15,9 +15,9 @@
 
 namespace eevee::light {
 
-float shadow_directional_coverage_get(int level, float scale)
+float shadow_directional_coverage_get(int level)
 {
-  return exp2(float(level)) * scale;
+  return exp2(float(level));
 }
 
 struct Resources {
@@ -32,8 +32,7 @@ struct Resources {
                          Transform object_to_world,
                          int2 origin_offset,
                          int clipmap_level,
-                         eShadowProjectionType projection_type,
-                         float scale)
+                         eShadowProjectionType projection_type)
   {
     /* Do not check translation. */
     object_to_world.x.w = 0.0f;
@@ -60,7 +59,7 @@ struct Resources {
     /* TODO(fclem): Remove this duplicate. Only needed because of the base offset packing. */
     tilemaps_buf[tilemap_id].grid_offset = origin_offset;
 
-    float level_size = shadow_directional_coverage_get(clipmap_level, scale);
+    float level_size = shadow_directional_coverage_get(clipmap_level);
     float half_size = level_size / 2.0f;
     float tile_size = level_size / float(SHADOW_TILEMAP_RES);
     float2 center_offset = float2(origin_offset) * tile_size;
@@ -88,8 +87,6 @@ struct Resources {
   void cascade_sync(LightData &light)
   {
     [[resource_table]] const Uniform &uni = uniforms;
-    float scale = light.shadow_map_scale;
-
     int level_min = light.sun().clipmap_lod_min;
     int level_max = light.sun().clipmap_lod_max;
     int level_range = level_max - level_min;
@@ -101,7 +98,7 @@ struct Resources {
     float camera_clip_far = uni.uniform_buf.camera.clip_far;
 
     /* All tile-maps use the first level size. */
-    float level_size = shadow_directional_coverage_get(level_min, scale);
+    float level_size = shadow_directional_coverage_get(level_min);
     float half_size = level_size / 2.0f;
     float tile_size = level_size / float(SHADOW_TILEMAP_RES);
 
@@ -136,8 +133,7 @@ struct Resources {
                         light.object_to_world,
                         level_offset,
                         level_min,
-                        SHADOW_PROJECTION_CASCADE,
-                        scale);
+                        SHADOW_PROJECTION_CASCADE);
     }
 
     float2 clipmap_origin = float2(origin_offset) * tile_size;
@@ -155,11 +151,14 @@ struct Resources {
   void clipmap_sync(LightData &light)
   {
     [[resource_table]] const Uniform &uni = uniforms;
-    float scale = light.shadow_map_scale;
-
     float3 ws_camera_position = uni.uniform_buf.camera.viewinv[3].xyz;
-    float3 ls_camera_position = transform_direction_transposed(light.object_to_world,
-                                                               ws_camera_position);
+    float3 ws_camera_backward = uni.uniform_buf.camera.viewinv[2].xyz;
+    float3 ws_clipmap_focus = ws_camera_position -
+                              ws_camera_backward * light.sun().focus_distance;
+    float3 ws_clipmap_center = mix(
+        ws_camera_position, ws_clipmap_focus, clamp(light.sun().focus_blend, 0.0f, 1.0f));
+    float3 ls_clipmap_center = transform_direction_transposed(light.object_to_world,
+                                                              ws_clipmap_center);
 
     int level_min = light.sun().clipmap_lod_min;
     int level_max = light.sun().clipmap_lod_max;
@@ -170,16 +169,14 @@ struct Resources {
       int level = level_min + lod;
       /* Compute full offset from world origin to the smallest clipmap tile centered around the
        * camera position. The offset is computed in smallest tile unit. */
-      float tile_size = shadow_directional_coverage_get(level, scale) /
-                        float(SHADOW_TILEMAP_RES);
-      int2 level_offset = int2(round(ls_camera_position.xy / tile_size));
+      float tile_size = shadow_directional_coverage_get(level) / float(SHADOW_TILEMAP_RES);
+      int2 level_offset = int2(round(ls_clipmap_center.xy / tile_size));
 
       orthographic_sync(light.tilemap_index + lod,
                         light.object_to_world,
                         level_offset,
                         level,
-                        SHADOW_PROJECTION_CLIPMAP,
-                        scale);
+                        SHADOW_PROJECTION_CLIPMAP);
 
       clipmap_origin = float2(level_offset) * tile_size;
     }
@@ -200,9 +197,9 @@ struct Resources {
     }
 
     /* Used for selecting the clipmap level. */
-    light.object_to_world.x.w = ls_camera_position.x;
-    light.object_to_world.y.w = ls_camera_position.y;
-    light.object_to_world.z.w = ls_camera_position.z;
+    light.object_to_world.x.w = ls_clipmap_center.x;
+    light.object_to_world.y.w = ls_clipmap_center.y;
+    light.object_to_world.z.w = ls_clipmap_center.z;
 
     LightSunData sun_data = light.sun();
     /* Used as origin for the clipmap_base_offset trick. */
