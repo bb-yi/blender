@@ -564,17 +564,16 @@ class ShadowDirectional : public NonCopyable, NonMovable {
   void end_sync(Light &light, const Camera &camera);
 
   /* Return coverage of the whole tile-map in world unit. */
-  static float coverage_get(int lvl)
+  static float coverage_get(int lvl, float scale = 1.0f)
   {
     /* This function should be kept in sync with shadow_directional_level(). */
-    /* \note If we would to introduce a global scaling option it would be here. */
-    return exp2(lvl);
+    return exp2(lvl) * scale;
   }
 
   /* Return coverage of a single tile for a tile-map of this LOD in world unit. */
-  static float tile_size_get(int lvl)
+  static float tile_size_get(int lvl, float scale = 1.0f)
   {
-    return coverage_get(lvl) / SHADOW_TILEMAP_RES;
+    return coverage_get(lvl, scale) / SHADOW_TILEMAP_RES;
   }
 
  private:

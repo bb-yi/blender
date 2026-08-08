@@ -201,6 +201,18 @@ static void test_eevee_shadow_shift()
 }
 DRAW_TEST(eevee_shadow_shift)
 
+static void test_eevee_shadow_tilemap_scale()
+{
+  ShadowTileMap tilemap(0);
+  tilemap.sync_orthographic(
+      float4x4::identity(), int2(3, -2), 1, 4.0f, SHADOW_PROJECTION_CLIPMAP);
+
+  EXPECT_FLOAT_EQ(tilemap.half_size, 4.0f);
+  EXPECT_FLOAT_EQ(tilemap.center_offset.x, 0.75f);
+  EXPECT_FLOAT_EQ(tilemap.center_offset.y, -0.5f);
+}
+DRAW_TEST(eevee_shadow_tilemap_scale)
+
 static void test_eevee_shadow_tag_update()
 {
   GPU_render_begin();
@@ -245,7 +257,8 @@ static void test_eevee_shadow_tag_update()
   }
   {
     ShadowTileMap tilemap(1 * SHADOW_TILEDATA_PER_TILEMAP);
-    tilemap.sync_orthographic(float4x4::identity(), int2(0), 1, SHADOW_PROJECTION_CLIPMAP);
+    tilemap.sync_orthographic(
+        float4x4::identity(), int2(0), 1, 1.0f, SHADOW_PROJECTION_CLIPMAP);
     tilemaps_data.append(tilemap);
   }
 
