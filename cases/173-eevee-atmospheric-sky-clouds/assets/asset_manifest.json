@@ -1,0 +1,576 @@
+{
+  "assets": {
+    "blue_noise": {
+      "alpha_constant": 1.0,
+      "byte_size": 946,
+      "channels": {
+        "A": "constant 1",
+        "B": "copy of R",
+        "G": "copy of R",
+        "R": "spectral blue-noise"
+      },
+      "color_space": "Non-Color",
+      "format": "PNG",
+      "kind": "jitter_noise",
+      "logical_size": [
+        16,
+        16
+      ],
+      "path": "blue_noise_16.png",
+      "physical_size": [
+        16,
+        16
+      ],
+      "sampling": {
+        "extension": "Repeat",
+        "interpolation": "Closest"
+      },
+      "sha256": "512af9fa42a572ace665bafb6efd5bfb4701721c0d797762d8fe8afa747d0b91",
+      "source": {
+        "algorithm": "tileable FFT spectral high-pass noise (blue-noise approximation)",
+        "generator": "tools/atmospheric_sky_clouds/generate_assets.py@1.0.0",
+        "license": "project-generated; no third-party binary data",
+        "references": [
+          {
+            "commit": "not-applicable",
+            "license": "reference-only; no code or binary assets copied",
+            "title": "A Scalable and Production Ready Sky and Atmosphere Rendering Technique",
+            "url": "https://sebh.github.io/publications/egsr2020.pdf"
+          },
+          {
+            "commit": "not-applicable",
+            "license": "reference-only; no code or binary assets copied",
+            "title": "Precomputed Atmospheric Scattering",
+            "url": "https://github.com/ebruneton/precomputed_atmospheric_scattering"
+          },
+          {
+            "commit": "not-applicable",
+            "license": "reference-only; no code or binary assets copied",
+            "title": "Procedural volume noise (Perlin/Worley literature)",
+            "url": "https://doi.org/10.1080/2151237X.1985.10129811"
+          }
+        ],
+        "type": "procedural-generated"
+      },
+      "stats": {
+        "alpha_max": 1.0,
+        "alpha_min": 1.0,
+        "max": 1.0,
+        "mean": 0.6378127336502075,
+        "min": 0.0
+      }
+    },
+    "cloud_detail": {
+      "alpha_constant": 1.0,
+      "byte_size": 1637,
+      "channels": {
+        "A": "constant 1",
+        "B": "Worley detail high",
+        "G": "Worley detail mid",
+        "R": "Worley detail low"
+      },
+      "color_space": "Non-Color",
+      "format": "PNG",
+      "kind": "volume_noise",
+      "logical_size": [
+        8,
+        8,
+        8
+      ],
+      "path": "cloud_detail_8_strip.png",
+      "physical_size": [
+        64,
+        8
+      ],
+      "sampling": {
+        "extension": "Repeat",
+        "interpolation": "Linear"
+      },
+      "sha256": "a1dcd826b5b2f4244911bd865731729845da67d2989093fa117b128f5738134c",
+      "source": {
+        "algorithm": "three periodic Worley F1/F2 erosion bands",
+        "generator": "tools/atmospheric_sky_clouds/generate_assets.py@1.0.0",
+        "license": "project-generated; no third-party binary data",
+        "references": [
+          {
+            "commit": "not-applicable",
+            "license": "reference-only; no code or binary assets copied",
+            "title": "A Scalable and Production Ready Sky and Atmosphere Rendering Technique",
+            "url": "https://sebh.github.io/publications/egsr2020.pdf"
+          },
+          {
+            "commit": "not-applicable",
+            "license": "reference-only; no code or binary assets copied",
+            "title": "Precomputed Atmospheric Scattering",
+            "url": "https://github.com/ebruneton/precomputed_atmospheric_scattering"
+          },
+          {
+            "commit": "not-applicable",
+            "license": "reference-only; no code or binary assets copied",
+            "title": "Procedural volume noise (Perlin/Worley literature)",
+            "url": "https://doi.org/10.1080/2151237X.1985.10129811"
+          }
+        ],
+        "type": "procedural-generated"
+      },
+      "stats": {
+        "alpha_max": 1.0,
+        "alpha_min": 1.0,
+        "max": 1.0,
+        "mean": 0.6507083773612976,
+        "min": 0.23082660138607025
+      },
+      "strip": {
+        "depth": 8,
+        "height": 8,
+        "layout": "horizontal_z_slices",
+        "pixel_mapping": "physical_x = z * width + x",
+        "width": 8,
+        "z_order": "ascending"
+      }
+    },
+    "cloud_shape": {
+      "alpha_constant": 1.0,
+      "byte_size": 10511,
+      "channels": {
+        "A": "constant 1",
+        "B": "Worley mid F1",
+        "G": "Worley low F1",
+        "R": "Perlin-Worley"
+      },
+      "color_space": "Non-Color",
+      "format": "PNG",
+      "kind": "volume_noise",
+      "logical_size": [
+        16,
+        16,
+        16
+      ],
+      "path": "cloud_shape_16_strip.png",
+      "physical_size": [
+        256,
+        16
+      ],
+      "sampling": {
+        "extension": "Repeat",
+        "interpolation": "Linear"
+      },
+      "sha256": "8dd384279999d88d11aee684da596d890c994b529795baea268787e329dd83ba",
+      "source": {
+        "algorithm": "4-octave periodic gradient noise + periodic Worley F1/F2 (three packed channels)",
+        "generator": "tools/atmospheric_sky_clouds/generate_assets.py@1.0.0",
+        "license": "project-generated; no third-party binary data",
+        "references": [
+          {
+            "commit": "not-applicable",
+            "license": "reference-only; no code or binary assets copied",
+            "title": "A Scalable and Production Ready Sky and Atmosphere Rendering Technique",
+            "url": "https://sebh.github.io/publications/egsr2020.pdf"
+          },
+          {
+            "commit": "not-applicable",
+            "license": "reference-only; no code or binary assets copied",
+            "title": "Precomputed Atmospheric Scattering",
+            "url": "https://github.com/ebruneton/precomputed_atmospheric_scattering"
+          },
+          {
+            "commit": "not-applicable",
+            "license": "reference-only; no code or binary assets copied",
+            "title": "Procedural volume noise (Perlin/Worley literature)",
+            "url": "https://doi.org/10.1080/2151237X.1985.10129811"
+          }
+        ],
+        "type": "procedural-generated"
+      },
+      "stats": {
+        "alpha_max": 1.0,
+        "alpha_min": 1.0,
+        "max": 1.0,
+        "mean": 0.7081876993179321,
+        "min": 0.2663799524307251
+      },
+      "strip": {
+        "depth": 16,
+        "height": 16,
+        "layout": "horizontal_z_slices",
+        "pixel_mapping": "physical_x = z * width + x",
+        "width": 16,
+        "z_order": "ascending"
+      }
+    },
+    "moon_albedo": {
+      "alpha_constant": 1.0,
+      "byte_size": 2078,
+      "channels": {
+        "A": "constant 1",
+        "B": "procedural lunar albedo",
+        "G": "procedural lunar albedo",
+        "R": "procedural lunar albedo"
+      },
+      "color_space": "Non-Color",
+      "format": "PNG",
+      "kind": "moon_map",
+      "logical_size": [
+        32,
+        32
+      ],
+      "path": "moon_albedo_32.png",
+      "physical_size": [
+        32,
+        32
+      ],
+      "sampling": {
+        "extension": "Extend",
+        "interpolation": "Linear"
+      },
+      "sha256": "497a13725077ba7837516778760afb478ff883ae48198d9b15572841d52765be",
+      "source": {
+        "algorithm": "low-frequency maria plus deterministic multi-scale crater field",
+        "generator": "tools/atmospheric_sky_clouds/generate_assets.py@1.0.0",
+        "license": "project-generated; no third-party binary data",
+        "references": [
+          {
+            "commit": "not-applicable",
+            "license": "reference-only; no code or binary assets copied",
+            "title": "A Scalable and Production Ready Sky and Atmosphere Rendering Technique",
+            "url": "https://sebh.github.io/publications/egsr2020.pdf"
+          },
+          {
+            "commit": "not-applicable",
+            "license": "reference-only; no code or binary assets copied",
+            "title": "Precomputed Atmospheric Scattering",
+            "url": "https://github.com/ebruneton/precomputed_atmospheric_scattering"
+          },
+          {
+            "commit": "not-applicable",
+            "license": "reference-only; no code or binary assets copied",
+            "title": "Procedural volume noise (Perlin/Worley literature)",
+            "url": "https://doi.org/10.1080/2151237X.1985.10129811"
+          }
+        ],
+        "type": "procedural-generated"
+      },
+      "stats": {
+        "alpha_max": 1.0,
+        "alpha_min": 1.0,
+        "max": 1.0,
+        "mean": 0.4991214871406555,
+        "min": 0.0
+      }
+    },
+    "sky_view": {
+      "alpha_constant": 1.0,
+      "byte_size": 1872,
+      "channels": {
+        "A": "constant 1",
+        "B": "linear sky radiance",
+        "G": "linear sky radiance",
+        "R": "linear sky radiance"
+      },
+      "color_space": "Non-Color",
+      "format": "EXR",
+      "kind": "sky_view_lut",
+      "logical_size": [
+        16,
+        8,
+        4
+      ],
+      "path": "sky_view_16x8x4_strip.exr",
+      "physical_size": [
+        64,
+        8
+      ],
+      "sampling": {
+        "extension": "Extend",
+        "interpolation": "Linear"
+      },
+      "sha256": "ab303c7e41188c3a8ae4c78262d3ca1a29322d1a40eb0d764f6470eb5cedebf3",
+      "source": {
+        "algorithm": "analytic Rayleigh/Mie sky-view atlas over solar elevation",
+        "generator": "tools/atmospheric_sky_clouds/generate_assets.py@1.0.0",
+        "license": "project-generated; no third-party binary data",
+        "references": [
+          {
+            "commit": "not-applicable",
+            "license": "reference-only; no code or binary assets copied",
+            "title": "A Scalable and Production Ready Sky and Atmosphere Rendering Technique",
+            "url": "https://sebh.github.io/publications/egsr2020.pdf"
+          },
+          {
+            "commit": "not-applicable",
+            "license": "reference-only; no code or binary assets copied",
+            "title": "Precomputed Atmospheric Scattering",
+            "url": "https://github.com/ebruneton/precomputed_atmospheric_scattering"
+          },
+          {
+            "commit": "not-applicable",
+            "license": "reference-only; no code or binary assets copied",
+            "title": "Procedural volume noise (Perlin/Worley literature)",
+            "url": "https://doi.org/10.1080/2151237X.1985.10129811"
+          }
+        ],
+        "type": "procedural-generated"
+      },
+      "stats": {
+        "alpha_max": 1.0,
+        "alpha_min": 1.0,
+        "max": 1.0063323974609375,
+        "mean": 0.4090891182422638,
+        "min": 0.017896661534905434
+      },
+      "strip": {
+        "depth": 4,
+        "height": 8,
+        "layout": "horizontal_z_slices",
+        "pixel_mapping": "physical_x = z * width + x",
+        "width": 16,
+        "z_order": "ascending solar elevation"
+      }
+    },
+    "stars": {
+      "alpha_constant": 1.0,
+      "byte_size": 3149,
+      "channels": {
+        "A": "constant 1",
+        "B": "star/galaxy emission",
+        "G": "star/galaxy emission",
+        "R": "star/galaxy emission"
+      },
+      "color_space": "Non-Color",
+      "format": "PNG",
+      "kind": "star_map",
+      "logical_size": [
+        64,
+        32
+      ],
+      "path": "stars_64x32.png",
+      "physical_size": [
+        64,
+        32
+      ],
+      "sampling": {
+        "extension": "Repeat",
+        "interpolation": "Linear"
+      },
+      "sha256": "ef3e317090b169951f689591f5f9f3970eded22e13fa233a154c2493b2aa2245",
+      "source": {
+        "algorithm": "uniform-sphere deterministic star field with equirectangular latitude compensation",
+        "generator": "tools/atmospheric_sky_clouds/generate_assets.py@1.0.0",
+        "license": "project-generated; no third-party binary data",
+        "references": [
+          {
+            "commit": "not-applicable",
+            "license": "reference-only; no code or binary assets copied",
+            "title": "A Scalable and Production Ready Sky and Atmosphere Rendering Technique",
+            "url": "https://sebh.github.io/publications/egsr2020.pdf"
+          },
+          {
+            "commit": "not-applicable",
+            "license": "reference-only; no code or binary assets copied",
+            "title": "Precomputed Atmospheric Scattering",
+            "url": "https://github.com/ebruneton/precomputed_atmospheric_scattering"
+          },
+          {
+            "commit": "not-applicable",
+            "license": "reference-only; no code or binary assets copied",
+            "title": "Procedural volume noise (Perlin/Worley literature)",
+            "url": "https://doi.org/10.1080/2151237X.1985.10129811"
+          }
+        ],
+        "type": "procedural-generated"
+      },
+      "stats": {
+        "alpha_max": 1.0,
+        "alpha_min": 1.0,
+        "max": 1.0,
+        "mean": 0.277372807264328,
+        "min": 0.0012060143053531647
+      }
+    },
+    "transmittance": {
+      "alpha_constant": 1.0,
+      "byte_size": 831,
+      "channels": {
+        "A": "constant 1",
+        "B": "RGB optical transmittance",
+        "G": "RGB optical transmittance",
+        "R": "RGB optical transmittance"
+      },
+      "color_space": "Non-Color",
+      "format": "EXR",
+      "kind": "atmosphere_lut",
+      "logical_size": [
+        16,
+        8
+      ],
+      "path": "transmittance_16x8.exr",
+      "physical_size": [
+        16,
+        8
+      ],
+      "sampling": {
+        "extension": "Extend",
+        "interpolation": "Linear"
+      },
+      "sha256": "ab8e0660762ac4009e07c5c7c951fa918cadd103019c999347e8d0eb027731fb",
+      "source": {
+        "algorithm": "single-scattering optical-depth integration (Rayleigh/Mie/Ozone)",
+        "generator": "tools/atmospheric_sky_clouds/generate_assets.py@1.0.0",
+        "license": "project-generated; no third-party binary data",
+        "references": [
+          {
+            "commit": "not-applicable",
+            "license": "reference-only; no code or binary assets copied",
+            "title": "A Scalable and Production Ready Sky and Atmosphere Rendering Technique",
+            "url": "https://sebh.github.io/publications/egsr2020.pdf"
+          },
+          {
+            "commit": "not-applicable",
+            "license": "reference-only; no code or binary assets copied",
+            "title": "Precomputed Atmospheric Scattering",
+            "url": "https://github.com/ebruneton/precomputed_atmospheric_scattering"
+          },
+          {
+            "commit": "not-applicable",
+            "license": "reference-only; no code or binary assets copied",
+            "title": "Procedural volume noise (Perlin/Worley literature)",
+            "url": "https://doi.org/10.1080/2151237X.1985.10129811"
+          }
+        ],
+        "type": "procedural-generated"
+      },
+      "stats": {
+        "alpha_max": 1.0,
+        "alpha_min": 1.0,
+        "max": 1.0,
+        "mean": 0.6042772531509399,
+        "min": 0.0
+      }
+    },
+    "weather": {
+      "alpha_constant": 1.0,
+      "byte_size": 3245,
+      "channels": {
+        "A": "constant 1",
+        "B": "cloud type",
+        "G": "rain/extinction",
+        "R": "coverage"
+      },
+      "color_space": "Non-Color",
+      "format": "PNG",
+      "kind": "weather_map",
+      "logical_size": [
+        32,
+        32
+      ],
+      "path": "weather_32.png",
+      "physical_size": [
+        32,
+        32
+      ],
+      "sampling": {
+        "extension": "Repeat",
+        "interpolation": "Linear"
+      },
+      "sha256": "a15ff96de6d93778dc3b5b7d32e58f7bad7e9802170fdcd3e208f30df19712eb",
+      "source": {
+        "algorithm": "periodic gradient noise with periodic domain warp",
+        "generator": "tools/atmospheric_sky_clouds/generate_assets.py@1.0.0",
+        "license": "project-generated; no third-party binary data",
+        "references": [
+          {
+            "commit": "not-applicable",
+            "license": "reference-only; no code or binary assets copied",
+            "title": "A Scalable and Production Ready Sky and Atmosphere Rendering Technique",
+            "url": "https://sebh.github.io/publications/egsr2020.pdf"
+          },
+          {
+            "commit": "not-applicable",
+            "license": "reference-only; no code or binary assets copied",
+            "title": "Precomputed Atmospheric Scattering",
+            "url": "https://github.com/ebruneton/precomputed_atmospheric_scattering"
+          },
+          {
+            "commit": "not-applicable",
+            "license": "reference-only; no code or binary assets copied",
+            "title": "Procedural volume noise (Perlin/Worley literature)",
+            "url": "https://doi.org/10.1080/2151237X.1985.10129811"
+          }
+        ],
+        "type": "procedural-generated"
+      },
+      "stats": {
+        "alpha_max": 1.0,
+        "alpha_min": 1.0,
+        "max": 1.0,
+        "mean": 0.5540003180503845,
+        "min": 0.0
+      }
+    }
+  },
+  "atmosphere_parameters": {
+    "atmosphere_height_km": 100.0,
+    "beta_mie": [
+      0.003996,
+      0.003996,
+      0.003996
+    ],
+    "beta_ozone": [
+      0.00065,
+      0.001881,
+      8.5e-05
+    ],
+    "beta_rayleigh": [
+      0.005802,
+      0.013558,
+      0.0331
+    ],
+    "integration_samples": 48,
+    "mie_scale_height_km": 1.2,
+    "ozone_center_height_km": 25.0,
+    "ozone_half_width_km": 15.0,
+    "planet_radius_km": 6360.0,
+    "rayleigh_scale_height_km": 8.0
+  },
+  "generator": {
+    "command": "all",
+    "name": "atmospheric_sky_clouds_asset_generator",
+    "random_generator": "numpy.random.Generator(PCG64(seed))",
+    "seed": 20260719,
+    "stream_derivation": "PCG64 SeedSequence(seed, SHA256(label)[0:16])",
+    "version": "1.0.0"
+  },
+  "mappings": {
+    "periodic_sampling": "all repeat fields use modulo lattice indexing, including negative and N coordinates",
+    "sky_view": "u -> azimuth=(2u-1)pi; v -> elevation=asin(2v-1); w -> solar_elevation=asin(2w-1)",
+    "transmittance": "u=(x+0.5)/width -> mu=2u-1; v=(y+0.5)/height -> altitude=v^2*atmosphere_height_km",
+    "volume_strip": "physical_x = z * logical_width + x; physical_y = y; z slices ascend left-to-right"
+  },
+  "references": [
+    {
+      "commit": "not-applicable",
+      "license": "reference-only; no code or binary assets copied",
+      "title": "A Scalable and Production Ready Sky and Atmosphere Rendering Technique",
+      "url": "https://sebh.github.io/publications/egsr2020.pdf"
+    },
+    {
+      "commit": "not-applicable",
+      "license": "reference-only; no code or binary assets copied",
+      "title": "Precomputed Atmospheric Scattering",
+      "url": "https://github.com/ebruneton/precomputed_atmospheric_scattering"
+    },
+    {
+      "commit": "not-applicable",
+      "license": "reference-only; no code or binary assets copied",
+      "title": "Procedural volume noise (Perlin/Worley literature)",
+      "url": "https://doi.org/10.1080/2151237X.1985.10129811"
+    }
+  ],
+  "schema_version": 1,
+  "validation": {
+    "alpha": "every generated pixel has A=1",
+    "exr_encoding": "linear RGBA half-float EXR via Blender Image API",
+    "finite": "all channels are finite",
+    "png_encoding": "linear values quantized directly to RGBA8; no color-management transform"
+  }
+}

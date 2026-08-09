@@ -1,0 +1,7 @@
+{
+  "name": "cycles-bake-image-smoke",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "验证发布安装树中的 Cycles 不只是可选择，还能完成一次最小贴图烘焙。该测试覆盖此前 Cycles bake image 依赖/崩溃类回归。",
+  "passCriteria": "脚本创建带 UV 的平面、红色 Principled 材质和活动 Image Texture 节点，使用 Cycles 执行一次 `DIFFUSE` 的 color-only bake。烘焙后的图片有效像素必须以红色为主，红通道均值明显高于绿/蓝通道，并且 alpha 保持有效。"
+}

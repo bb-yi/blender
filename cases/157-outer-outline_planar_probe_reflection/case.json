@@ -1,0 +1,8 @@
+﻿{
+  "name": "outer-outline_planar_probe_reflection",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify the local planar reflection repro keeps the source monkey outline visible while the reflected outline remains bounded after the probe-capture outline suppression fix.",
+  "passCriteria": "The copied blend asset opens in a factory-startup background session, renders with Eevee, and the top monkey keeps a strong red outline. The bottom reflected monkey also keeps a red outline, but the reflected outline must stay bounded and not balloon into a full-screen artifact.",
+  "original": "test/描边平面探头测试.blend"
+}

@@ -1,0 +1,8 @@
+{
+    "name":  "npr-test_goo_light_probe_color_render",
+    "type":  "blender-python",
+    "script":  "run.py",
+    "purpose":  "验证 `Light Probe Color` 节点能在实际 Eevee 渲染中读取绿色 World/Probe 环境，而不是采到前景红色平面。场景包含绿色世界背景、后方红色发光平面和前方测试平面。前方测试平面依次使用 `Reflection`、`Irradiance`、`Combined` 输出，覆盖直接连接 `Surface`、自定义 `Direction`、`Roughness = 1.0`，并验证 `Light Probe Color` 在 NPR Tree 中连接到 `NPR Output` 时也能覆盖基础红色材质输出。",
+    "passCriteria":  "`Reflection` 输出中心像素绿通道大于 `0.8`，红/蓝通道小于 `0.1`。直接连接 `Surface` 的 `Reflection` 输出满足同样条件。`Irradiance` 输出绿通道大于 `0.2`，红/蓝通道小于 `0.15`。`Combined` 输出绿通道大于 `0.8`，红/蓝通道小于 `0.2`。自定义 `Direction` 且 `Roughness = 1.0` 的 `Reflection` 输出绿通道大于 `0.8`，红/蓝通道小于 `0.1`。NPR Tree 中的 `Light Probe Color Reflection` 输出中心像素绿通道大于 `0.8`，红/蓝通道小于 `0.1`，证明它覆盖了基础红色材质输出。",
+    "original":  "blender_5_1_port/tests/python/npr/test_goo_light_probe_color_render.py"
+}

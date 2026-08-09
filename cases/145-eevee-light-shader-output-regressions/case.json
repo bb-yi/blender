@@ -1,0 +1,7 @@
+{
+  "name": "eevee-light-shader-output-regressions",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify Eevee Light Shader Output regression coverage for time-dependent uniform results, cache invalidation, and saved-file reload behavior.",
+  "passCriteria": "The test must render a Light datablock node tree using Scene Time through Light Shader Output, prove frame 1 and frame 11 produce different blue-to-red direct lighting, save and reopen the generated blend file, and prove the reloaded file still renders the custom red Light Shader Output result."
+}

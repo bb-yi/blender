@@ -1,0 +1,7 @@
+{
+  "name": "depth-offset-forward-hybrid-variants",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Create synthetic Eevee materials that combine linked Material Output Depth Offset with Shader To RGB hybrid rendering and BLENDED forward rendering, then verify both variants compile and render visible output.",
+  "passCriteria": "The hybrid material must contain Shader To RGB plus a linked Depth Offset input and render a green center region. The forward material must use BLENDED surface rendering plus a linked Depth Offset input and render a green center region. Both renders must complete without shader create-info or gl_FragDepth compilation errors."
+}

@@ -1,0 +1,7 @@
+{
+  "name": "npr-test_goo_screen_derivative_render",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify the Screen Derivative node computes non-zero DDX and DDY values for an X+Y input and keeps DDXY numerically close to DDX + DDY in Eevee render output.",
+  "passCriteria": "DDX and DDY must both be non-zero and positive. DDXY must also be positive and stay within 0.002 of DDX + DDY, allowing for render quantization noise in the saved EXR result."
+}

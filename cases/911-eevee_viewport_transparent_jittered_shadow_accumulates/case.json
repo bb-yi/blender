@@ -1,0 +1,7 @@
+{
+  "name": "eevee_viewport_transparent_jittered_shadow_accumulates",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify that an Eevee rendered viewport accumulates static hashed transparent materials with transparent shadows while viewport jittered shadows are enabled.",
+  "passCriteria": "The test captures an early viewport frame and a later accumulated viewport frame from a static semi-transparent hashed shadow caster. The later frame must have substantially lower high-frequency noise while the scene content remains visible, proving film history is not discarded every sample."
+}

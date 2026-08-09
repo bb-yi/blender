@@ -1,0 +1,7 @@
+{
+  "name": "pr18-npr-asset-import-policy-smoke",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "验证 PR #18 相关的 NPR 节点组资产导入前提没有失效：发布安装树中的内置 NPR node group asset 仍位于固定 NPR catalog，并且 reuse-local-id 导入路径不会生成重复 `.001` 节点组；普通外部节点组按默认 append 行为仍会生成独立副本。",
+  "passCriteria": "安装树 `npr_node_groups.blend` 必须存在，核心 NPR 资产组必须带有 catalog id `ee51ee5f-d28f-4de4-8881-54dbd865436e`。用 `do_reuse_local_id=True` 追加同一内置 NPR 组两次后，本地只能有一个 `Cavity` 节点组且不能出现 `Cavity.001`。对测试现场创建的普通外部节点组执行默认 append 两次时，必须得到两个本地副本，证明默认行为没有被全局改成复用。"
+}

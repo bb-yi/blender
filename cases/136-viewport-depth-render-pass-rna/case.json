@@ -1,0 +1,7 @@
+{
+  "name": "viewport-depth-render-pass-rna",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "验证 3D Viewport Shading 的 Render Pass 枚举包含 `Depth`，并且后台环境中所有可用 View3D space 都能切换到 `DEPTH` 而不回退到 `COMBINED`。同时用一个简单 Eevee 场景触发后台渲染，避免 Depth pass 入口破坏普通渲染初始化。",
+  "passCriteria": "`View3DShading.render_pass` 的 enum 必须包含 `DEPTH`。至少一个 `VIEW_3D` space 可以设置 `shading.type='RENDERED'` 和 `shading.render_pass='DEPTH'`，读回仍为 `DEPTH`。后台 Eevee 渲染必须完成，并且渲染结果中前后两个物体区域颜色不同，证明测试场景确实被渲染而不是空跑。"
+}

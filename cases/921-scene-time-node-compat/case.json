@@ -1,0 +1,7 @@
+{
+  "name": "scene-time-node-compat",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify the unified GeometryNodeInputSceneTime interface, negative Scale handling, Geometry CPU values with subframes and non-unit frame mapping, round-trip links, and legacy Scene Time migration.",
+  "passCriteria": "The source test reports SCENE_TIME_NODE_COMPAT_OK after checking Scale=1.0, all four outputs and links, Geometry values for Frame, Seconds, Timeline, and Scaled Frame at a non-unit frame map, and migration of both legacy custom and legacy official Scene Time fixtures."
+}

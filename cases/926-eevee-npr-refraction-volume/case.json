@@ -1,0 +1,7 @@
+{
+  "name": "eevee-npr-refraction-volume",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify that NPR Refraction composes absorption and scattering volume segments between the current refractive layer and either sampled geometry or the transparent world background, including multiple refraction layers and multi-sample TAA, without leaking current-layer surface lighting or allowing Render Texture captures to pollute the main-view volume result.",
+  "passCriteria": "Volume renders covered by one or two NPR Refraction layers must agree with their unobstructed reference within tolerance, while the no-volume path must remain unchanged. A transparent-film background miss must retain world-volume scattering and nonzero alpha, while disabling volume must produce a measurable change. With volume disabled, lighting the refractive surface must still leave a transparent-world miss black and fully transparent. Enabling an active Render Texture during an 8-sample render must not change the main-view result, and strong colored absorption must produce finite, bounded radiance. The Blender background run must print EEVEE_NPR_REFRACTION_VOLUME_OK."
+}

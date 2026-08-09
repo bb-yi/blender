@@ -1,0 +1,8 @@
+{
+    "name":  "outer-render_minimal_emission_plane",
+    "type":  "blender-python",
+    "script":  "run.py",
+    "purpose":  "验证最小发光材质平面可以在发布安装树的 Eevee 后台渲染中正常写出。 \n脚本创建一个红色 `ShaderNodeEmission` 平面，材质直接连接到 Material Output Surface，渲染到 `temp\\render_exports\\minimal_emission.png`。",
+    "passCriteria":  "Eevee render 调用完成。 \n`temp\\render_exports\\minimal_emission.png` 被写出。 \n输出文件大小大于 0。",
+    "original":  "test/render_minimal_emission_plane.py"
+}

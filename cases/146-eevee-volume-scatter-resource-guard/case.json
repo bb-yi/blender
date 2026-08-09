@@ -1,0 +1,7 @@
+{
+  "name": "eevee-volume-scatter-resource-guard",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify that an Eevee world with volume absorption but no volume scattering or lights can render through the VOLUME_SCATTER shader variant without invalid light shader resource bindings.",
+  "passCriteria": "The background render completes in factory-startup mode, the Render Result is 16x16, the output image is written, and the script prints EEVEE_VOLUME_SCATTER_RESOURCE_GUARD_OK."
+}

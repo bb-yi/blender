@@ -1,0 +1,8 @@
+{
+  "name": "eevee-referenced-object-data-channel",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Validate the fixed Light Info socket ABI, shared referenced-object updates, shader timestamp stability, ordinary Object Attribute behavior, initial hash-slot collision rendering, and empty/deleted/rebound target behavior.",
+  "passCriteria": "The source Python test completes without an assertion or Blender error; all Light Info outputs remain enabled for every light type; material shader_compile_timestamp stays unchanged across referenced-object updates; attribute-only and attribute-plus-reference values render correctly; two light UIDs with the same initial slot in a four-slot table both render their own colors; empty and deleted references return safe defaults; rebinding resolves the replacement UID and color.",
+  "original": "blender_npr_post/tests/python/npr/test_referenced_object_data_channel.py"
+}

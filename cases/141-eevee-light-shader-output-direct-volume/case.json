@@ -1,0 +1,7 @@
+{
+  "name": "eevee-light-shader-output-direct-volume",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify the Eevee Light Shader Output and Light Shader Info node path used by this branch for direct surface lighting, forward and Shader to RGB paths, and volume direct scattering.",
+  "passCriteria": "The test must create the Eevee light shader nodes in Light datablock node trees, verify default pass-through stays identical to the non-custom path, verify custom color/intensity/attenuation/range behavior in direct lighting, verify Scene Time and info vector outputs work, verify forward/blended materials read uniform light shader results, verify Shader to RGB reads the front-most point-dependent light shader cache, and verify volume direct scattering responds to custom color, attenuation, Light Space, and Scene Time."
+}

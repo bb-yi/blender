@@ -1,0 +1,7 @@
+{
+  "name": "eevee_taa_soft_shadow_history_reset",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify that an Eevee rendered viewport with temporal reprojection and jittered soft shadows discards stale film history when a shadow receiver transform changes.",
+  "passCriteria": "The test warms a rendered viewport, moves the shadow receiver, captures the first post-update viewport frame, and compares it with a fresh reference at the same receiver position. The mean image difference must stay low and the changed-frame comparison must include non-trivial lit/shadow content, so old Combined history cannot be stretched across the receiver after the scene update."
+}

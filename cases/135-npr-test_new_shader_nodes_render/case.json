@@ -1,0 +1,7 @@
+{
+  "name": "npr-test_new_shader_nodes_render",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify representative newer NPR/Goo shader nodes participate in Eevee render output instead of only existing at the RNA/UI level. The case renders procedural scenes that exercise Scene Time, inactive and active Render Texture paths, Portal In/Out, Twirl, and Hex Grid Texture.",
+  "passCriteria": "Scene Time Scaled Frame must drive a center pixel close to 2.0 at frame 20 with scale 10. An unbound Render Texture must stay black. An active Render Texture used by an ordinary Surface material must capture the configured camera's red color and front-facing normal without shader compilation errors or a native crash. Portal Out must forward the Portal In color. Twirl with amount 8 must materially change the rendered image compared with amount 0. Hex Grid Texture must create visible color variation across the render."
+}

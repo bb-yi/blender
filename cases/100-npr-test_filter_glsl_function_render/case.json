@@ -1,0 +1,8 @@
+{
+    "name":  "npr-test_filter_glsl_function_render",
+    "type":  "blender-python",
+    "script":  "run.py",
+    "purpose":  "验证 Eevee Filter material 中的 `GLSL Function` 能参与实际渲染。 \n具体检查两个场景： \n用 `Scene Color` 读取蓝色发光平面，再由 GLSL Function 反相，中心像素应变成黄色。 \n用 `Image to Closure` 提供 1x1 纹理给 `sampler2D` 参数，Filter 输出应采到纹理颜色 `(1.0, 0.25, 0.0)`。",
+    "passCriteria":  "反相场景中心像素红、绿通道都大于 `0.9`，蓝通道小于 `0.1`。 \nsampler2D 场景中心像素红通道大于 `0.9`，绿通道在 `0.2..0.3`，蓝通道小于 `0.1`。",
+    "original":  "blender_5_1_port/tests/python/npr/test_filter_glsl_function_render.py"
+}

@@ -1,0 +1,8 @@
+{
+    "name":  "npr-test_world_npr_tree_render",
+    "type":  "blender-python",
+    "script":  "run.py",
+    "purpose":  "验证 World Output 的 NPR Tree 支持，包括直接颜色、NPR Input 和 Image Sample 采样路径。 \n覆盖内容： \nWorld NPR Tree 输出纯红，应覆盖绿色普通 World 背景。 \n`NPR Input Combined Color` 应读取绿色普通 World 背景。 \nWorld NPR 的 Diffuse 与 Specular 颜色类输入应和 Combined Color 一样可读取普通 World 背景，而不是保持默认黑。 \n`Image Sample` 采样 `NPR Input Normal` 和 `Position` 时应得到蓝通道为主的向量结果。 \n对方向相关的 world background，`Image Sample Combined Color` 加 offset 后应采到不同方向的颜色。",
+    "passCriteria":  "Solid World NPR 中心像素红通道大于 `0.8`，绿/蓝小于 `0.1`。 \nCombined Color、Diffuse 与 Specular 颜色类输入中心像素绿通道大于 `0.8`，红/蓝小于 `0.1`。 \nNormal 和 Position 的 Image Sample 中心像素蓝通道大于 `0.8`，红/绿绝对值小于 `0.1`。 \nCombined Color 的 offset 采样与中心采样红通道差值必须大于 `0.05`。",
+    "original":  "blender_5_1_port/tests/python/npr/test_world_npr_tree_render.py"
+}

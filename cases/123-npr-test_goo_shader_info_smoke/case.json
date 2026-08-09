@@ -1,0 +1,8 @@
+{
+  "name": "npr-test_goo_shader_info_smoke",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify that the Shader Info node is registered with the expected input and output socket shape.",
+  "passCriteria": "ShaderNodeShaderInfo exists and has the label Shader Info. Input sockets are World Position, Normal, and Exponent. Output sockets are Diffuse Shading, Shadow, Ambient Lighting, Half-Lambert Factor, Blinn-Phong Factor, Self Shadow, and Cast Shadow.",
+  "original": "blender_5_1_port/tests/python/npr/test_goo_shader_info_smoke.py"
+}

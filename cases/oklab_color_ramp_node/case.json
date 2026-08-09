@@ -1,0 +1,7 @@
+{
+  "name": "oklab-color-ramp-node",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verifies that OKLab Color Ramp is an independent common node, that regular Color Ramp no longer exposes OKLab as a public mode, that legacy Color Ramp plus OKLAB files migrate back to the independent node, and that the OKLab node can compile in Eevee material and light shader graphs.",
+  "passCriteria": "Shader, Geometry, Compositor, and Eevee Light node trees can create ShaderNodeOKLabColorRamp; regular ShaderNodeValToRGB color_mode enum does not expose OKLAB; OKLab node storage exposes only the internal OKLAB color_mode; saving and reopening preserves OKLab nodes; a legacy ShaderNodeValToRGB plus OKLAB asset opens as ShaderNodeOKLabColorRamp; a minimal Eevee render using OKLab material and light shader nodes completes."
+}

@@ -1,0 +1,7 @@
+{
+  "name": "npr-test_goo_curvature_viewport_parity",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify the Curvature node's Scene Curvature and Scene Rim outputs keep the expected spatial profile in Eevee. The test renders a plane and a sphere, then compares the plane center against the sphere center and the sphere middle band so the assertion follows the actual shape trend instead of one brittle single-sample difference.",
+  "passCriteria": "Plane curvature center and edge must stay below 0.05. Sphere curvature center must exceed the plane center by at least 0.1, exceed the four-direction middle-band mean by at least 0.05, and stay at least three times larger than that middle-band mean. Plane rim center must stay below 0.001. Sphere rim center must stay below 0.01, then the mid, edge, and silhouette samples must rise outward in order."
+}

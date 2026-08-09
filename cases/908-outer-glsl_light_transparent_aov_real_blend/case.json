@@ -1,0 +1,7 @@
+{
+  "name": "outer-glsl_light_transparent_aov_real_blend",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Open the real local repro blend `assets/灯光函数透明aov报错.blend` and verify that its transparent AOV material using GLSL Function light access can compile and render in Eevee without GPU shader syntax errors.",
+  "passCriteria": "The blend must contain a mesh material with both `ShaderNodeGLSLFunction` and `ShaderNodeOutputAOV`, and the active view layer must keep the `PBR` color AOV. A clean background Eevee render must finish successfully with `--log gpu.shader`, print `GLSL_LIGHT_TRANSPARENT_AOV_REPRO_OK`, include the light-access shader dependency in the log, and produce no `gpu.shader` ERROR, `C0000`, `syntax error`, or `unexpected ')'` diagnostics."
+}

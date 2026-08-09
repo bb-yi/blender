@@ -1,0 +1,8 @@
+{
+  "name": "eevee-material-stencil-aov-clear",
+  "suite": "release",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify that stencil-enabled deferred materials in a secondary EEVEE layer still clear stale AOV data under their covered pixels.",
+  "passCriteria": "A back plane writes a red color AOV, a front raytrace-transmission DITHERED plane covers the center and uses read-only material stencil. The Filter Graph displays the AOV: corner pixels remain red from the back plane, while center pixels covered by both the plain and stencil front planes are black."
+}

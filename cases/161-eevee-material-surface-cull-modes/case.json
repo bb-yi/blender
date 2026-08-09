@@ -1,0 +1,7 @@
+{
+  "name": "eevee-material-surface-cull-modes",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Protect Eevee material surface culling for Blender 5.2 NPR builds by rendering front-facing and back-facing planes with None, Back, and Front cull modes through deferred and blended surface paths.",
+  "passCriteria": "The rendered pixel brightness must show that None renders both sides, Back hides only back-facing surfaces, and Front hides only front-facing surfaces for both dithered/deferred and blended/forward material paths."
+}

@@ -1,0 +1,7 @@
+{
+  "name": "outer-blended-material-aov-passthrough",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Open the real local repro blend stored in assets and verify that an Eevee BLENDED foreground material with opaque Principled alpha does not clear the red color AOV written by the DITHERED Suzanne behind it.",
+  "passCriteria": "The blend must keep a color AOV named AOV, a BLENDED foreground material using Principled Alpha 1.0, and a material with ShaderNodeOutputAOV. After Eevee background render with the compositor output enabled, the image must contain a substantial red-dominant AOV area instead of black, proving the BLENDED foreground surface passed through the AOV data from the object behind it."
+}

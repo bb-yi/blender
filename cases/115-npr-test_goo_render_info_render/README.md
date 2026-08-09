@@ -1,0 +1,21 @@
+# npr-test_goo_render_info_render
+
+## 测试内容
+
+验证 `Render Info` 节点的 `Frag Coord` 输出在实际 Eevee 渲染中提供归一化片元坐标。
+
+材质把 `Frag Coord` 直接写入发光颜色，并采样画面中心像素。
+
+## 通过条件
+
+- 中心像素红通道，也就是归一化 X，必须在 `0.45..0.55`。
+- 中心像素绿通道，也就是归一化 Y，必须在 `0.45..0.55`。
+- 中心像素蓝通道，也就是窗口深度 Z，必须在 `0.0..1.0`。
+
+## 测试入口
+
+`run.py`
+
+## 原始测试
+
+`blender_5_1_port\tests\python\npr\test_goo_render_info_render.py`

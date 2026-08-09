@@ -1,0 +1,15 @@
+{
+    "version":  2,
+    "defaultSuite":  "release",
+    "suites":  {
+                   "release":  [
+                                   {
+                                       "patterns":  [
+                                                        "cases/*"
+                                                    ],
+                                       "name":  "release-cases",
+                                       "type":  "case-folder-glob"
+                                   }
+                               ]
+               }
+}

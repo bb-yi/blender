@@ -1,0 +1,7 @@
+{
+  "name": "eevee-light-shader-fast-path",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify the Eevee Light Shader fast paths added for uniform light shader results, Shader to RGB front-layer point-dependent cache, and point-dependent surface texture layer overflow fallback.",
+  "passCriteria": "The test must render uniform custom light shader results with Range Scale kept at 1 through deferred, forward, and volume paths; render a Light Space checker through Shader to RGB using the front-layer cache; create more point-dependent custom light shaders than the GPU texture-layer limit and verify the render completes with the custom surface path safely disabled instead of crashing."
+}

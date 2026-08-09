@@ -1,0 +1,7 @@
+{
+  "name": "eevee-shadow-pool-stress",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify Eevee shadow pool expansion with a 257-light scene that exceeds 2048 MB but fits in 4096 MB and 8192 MB on hardware that can allocate the requested atlas.",
+  "passCriteria": "The 2048 MB control render must report a shadow buffer full warning. The 4096 MB and 8192 MB renders must complete without shadow buffer full warnings and without shadow atlas allocation downgrade warnings."
+}

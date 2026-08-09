@@ -1,0 +1,7 @@
+{
+  "name": "material-color-depth-write",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify Material Color Write and Depth Write release path: RNA defaults and exposure, blend-file persistence, and Eevee deferred/forward rendering semantics for the four (color_write, depth_write) combinations.",
+  "passCriteria": "use_color_write and use_depth_write must default to True, accept assignment, and persist a saved False/False value across reopen. Eevee renders of a near red plane occluding a far blue plane must show: color=on/depth=on -> red front (default), color=off/depth=on -> back blue hidden but not red (depth-only occluder), color=on/depth=off -> red front visible without writing depth, color=off/depth=off -> back blue visible because front does not occlude. Generated PNGs and summary.json are written under this case's out directory."
+}

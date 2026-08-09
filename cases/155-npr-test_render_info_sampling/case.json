@@ -1,0 +1,8 @@
+{
+  "name": "npr-test_render_info_sampling",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify Render Info sample outputs in an Eevee render and compile the direct Current Sample to White Noise W workflow.",
+  "passCriteria": "With four Eevee render samples, Current Sample must accumulate close to the average of 0,1,2,3; Total Samples must render close to 4; and a material linking Current Sample to White Noise Texture W must compile and produce a finite rendered value.",
+  "original": "blender_5_1_port/tests/python/npr/test_render_info_sampling.py"
+}

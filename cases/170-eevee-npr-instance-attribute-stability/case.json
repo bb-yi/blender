@@ -1,0 +1,7 @@
+{
+  "name": "eevee-npr-instance-attribute-stability",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify that Geometry Nodes instance-domain color attributes remain stable when source geometry carries an NPR Tree that reads a second Instancer attribute and the evaluated instances use a replacement material that reads the primary ID attribute.",
+  "passCriteria": "Before and after moving the source objects, the left Geometry Nodes instance must contain more than 400 red pixels and fewer than 20 blue pixels, while the right instance must contain more than 400 blue pixels and fewer than 20 red pixels."
+}

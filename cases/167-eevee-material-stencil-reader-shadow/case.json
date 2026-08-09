@@ -1,0 +1,7 @@
+{
+  "name": "eevee-material-stencil-reader-shadow",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify that a read-only stencil/template reader keeps normal EEVEE shadow-caster behavior instead of being silently removed from shadows.",
+  "passCriteria": "The masked red reader remains visible, and the default render is measurably darker on the floor than an explicit reader-shadow-disabled render."
+}

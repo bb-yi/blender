@@ -1,0 +1,7 @@
+{
+  "name": "eevee-outline-render-pass-rna",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify that the EEVEE view-layer Outline pass exposed by the View Layer UI is registered in RNA and remains writable.",
+  "passCriteria": "ViewLayer.eevee.use_pass_outline must exist, accept both boolean states, and read each state back correctly."
+}

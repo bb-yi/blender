@@ -1,0 +1,8 @@
+{
+  "name": "filter-aov-image-sample-offset",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify that Eevee Filter materials can sample a view-layer AOV through Image Sample with a pixel offset.",
+  "passCriteria": "A filter tree links AOV Input.Color to Image Sample.Image, uses Pixel offset, renders without shader errors, and the center pixel samples the shifted red AOV region while a left-side pixel stays dark.",
+  "original": "blender_5_1_port/tests/python/npr/test_filter_aov_image_sample_offset.py"
+}

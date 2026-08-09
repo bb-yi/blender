@@ -1,0 +1,7 @@
+{
+  "name": "eevee-native-camera-fx-outputs",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify that Eevee Native Camera FX value and color outputs survive Film accumulation and that native depth of field and motion blur alter only their intended output regions on OpenGL and Vulkan.",
+  "passCriteria": "Depth and Normal Native Camera FX passes are non-black with zero backgrounds, DOF changes the deliberately defocused depth output, motion blur changes the moving emission object without changing static or background regions, both requested backends are confirmed, and no child reports GPU binding, validation, device-lost, crash, or timeout errors."
+}

@@ -1,0 +1,8 @@
+{
+    "name":  "npr-test_goo_world_environment_smoke",
+    "type":  "blender-python",
+    "script":  "run.py",
+    "purpose":  "验证 `World Environment` 节点的注册和 socket 形状。",
+    "passCriteria":  "`ShaderNodeWorldEnvironment` 存在，label 为 `World Environment`。 \n输入 socket 为 `Direction`，类型为 `VECTOR`，并且隐藏默认值。 \n输出 socket 为 `Color`，类型为 `RGBA`。",
+    "original":  "blender_5_1_port/tests/python/npr/test_goo_world_environment_smoke.py"
+}

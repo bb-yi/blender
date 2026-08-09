@@ -1,0 +1,8 @@
+{
+  "name": "glsl-function-unconnected-sampler-default",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "验证 GLSL Function 未连接的 sampler2D/sampler3D Closure 输入在 GPU 专用化阶段等价为不透明白色常量纹理，不创建真实 Image/GPU texture，也不影响已连接 sampler。覆盖直接采样、嵌套函数、alias、texture/textureLod/textureGrad/textureSize/texelFetch、sampler2D textureGather、混合连接、连接状态切换、Node Group 输入的未连接与外部连接实例，以及非法参数数量和 sampler3D textureGather 的拒绝路径。",
+  "passCriteria": "OpenGL 与 Vulkan 子进程必须确认实际后端并完成真实 Eevee 渲染；所有合法未连接采样及未连接 Group Input 的 RGBA 必须在 0.02 误差内等于 (1,1,1,1)；混合连接、重新连接和已连接 Group Input 必须在 0.02 误差内保持已连接图像颜色 (0.25,0.5,0.75)；断开后必须恢复白色；参数数量非法的采样和无效 sampler3D textureGather 必须输出黑色失败回退；shader dump 必须把 fallback sampler 参数和 alias 改为 float dummy，包含 vec4(1.0) 的 2D/3D helper，且不保留针对这些参数的 texture 调用。",
+  "original": "blender_npr_post/tests/python/npr/test_glsl_function_unconnected_sampler_default.py"
+}

@@ -1,0 +1,7 @@
+{
+    "name":  "cycles-engine",
+    "type":  "blender-python",
+    "script":  "run.py",
+    "purpose":  "验证当前安装树是带 Cycles 的发布构建，而不是日常的 Eevee-only 构建。",
+    "passCriteria":  "`bpy.context.scene.render.engine = \u0027CYCLES\u0027` 能成功执行。 \n赋值后 `scene.render.engine` 读回值必须仍然是 `CYCLES`。 \n脚本打印 `CYCLES_OK=True`。"
+}

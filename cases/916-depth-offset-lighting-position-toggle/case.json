@@ -1,0 +1,7 @@
+{
+  "name": "depth-offset-lighting-position-toggle",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify that Material Output Depth Offset only changes Eevee lighting position when material.depth_offset_affect_lighting is enabled.",
+  "passCriteria": "Deferred and BLENDED forward materials with Depth Offset Affects Lighting disabled must match their no-offset lighting baselines, while enabling the toggle must produce a measurable lighting change from the same baseline."
+}

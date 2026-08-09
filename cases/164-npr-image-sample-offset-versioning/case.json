@@ -1,0 +1,7 @@
+{
+  "name": "npr-image-sample-offset-versioning",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify that legacy NPR Image Sample offset links survive file loading after the Offset socket identifier was renamed to Vector.",
+  "passCriteria": "Opening the legacy blend keeps both Image Sample Offset inputs linked from the matching Closure Input UV output, and the sockets use the current Vector identifier."
+}

@@ -1,0 +1,7 @@
+{
+  "name": "eevee-motion-blur-velocity-direction",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify Eevee motion blur uses the correct object velocity buffers for ordinary moving objects and does not smear static objects or background pixels.",
+  "passCriteria": "A synthetic scene with one static object and one horizontally animated object must show motion-blur differences only around the moving object. The static object and background regions must remain nearly identical between motion-blur on/off renders, while the moving-object region must contain a clear blur footprint."
+}

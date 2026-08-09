@@ -1,0 +1,8 @@
+{
+    "name":  "npr-test_goo_curvature_smoke",
+    "type":  "blender-python",
+    "script":  "run.py",
+    "purpose":  "验证 Curvature 节点已注册，并且节点 UI socket 结构符合发布预期。",
+    "passCriteria":  "`bpy.types.ShaderNodeCurvature` 存在。 \n节点 label 为 `Curvature`。 \n输入 socket 名称依次为 `Samples`、`Sample Radius`、`Thickness`、`Scale`。 \n输出 socket 名称依次为 `Scene Curvature`、`Scene Rim`。",
+    "original":  "blender_5_1_port/tests/python/npr/test_goo_curvature_smoke.py"
+}

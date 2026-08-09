@@ -1,0 +1,7 @@
+{
+  "name": "npr-test_goo_screenspace_info_viewport_parity",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify Screen Space Info previous-layer color and depth in explicit OpenGL and Vulkan renders, plus stable Vulkan Rendered viewport sessions for Dithered materials with raytracing disabled and enabled.",
+  "passCriteria": "Scene Color reads the red object behind the foreground material, Scene Depth is non-black, all objects use the asserted intended material, both requested backends are confirmed, both Vulkan Rendered viewport sessions complete, and no child reports missing bindings, GPU validation failures, VK_ERROR_DEVICE_LOST, native crashes, or timeouts."
+}

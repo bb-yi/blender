@@ -1,0 +1,7 @@
+{
+  "name": "eevee-material-compile-regressions",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Reproduce Blender 5.2 NPR material compiler regressions where deferred Eevee materials with image samplers, soft-filtered Shader Info shadow, Curvature, mesh volume output, and World To Tangent nodes could log sampler overflow, missing HiZ or generated resources, and Vulkan resource binding collisions while Blender still exited successfully or crashed in rendered viewport sync.",
+  "passCriteria": "Factory-startup child Blender sessions render the material probe on the default backend and confirmed Vulkan backend; their captured output contains no sampler overflow, missing generated resources, shader diagnostics, overlapping bindings, or missing GPU resource bindings."
+}

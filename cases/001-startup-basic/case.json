@@ -1,0 +1,7 @@
+{
+    "name":  "startup-basic",
+    "type":  "blender-python",
+    "script":  "run.py",
+    "purpose":  "验证发布包里的 Blender 能在 `--background --factory-startup` 下完成最小启动流程，并且 Python 运行环境可以访问当前场景。",
+    "passCriteria":  "`bpy.context.scene` 存在，说明 factory startup 创建了可用的活动场景。 \n脚本打印 `STARTUP_OK=1`。"
+}

@@ -1,0 +1,7 @@
+{
+  "name": "viewport-crypto-render-pass-gating",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "验证 3D Viewport 的 CryptoObject / CryptoAsset / CryptoMaterial 通道预览不会隐式开启 ViewLayer 的 Cryptomatte pass 开关。这个测试保护最近的性能修复：未开启对应通道时，viewport 选择预览项不应该让后台继续计算这些 Crypto pass。",
+  "passCriteria": "在 `use_pass_cryptomatte_object`、`use_pass_cryptomatte_asset`、`use_pass_cryptomatte_material` 全部为 False 时，所有可用 View3D space 仍可选择对应预览项，但三个 ViewLayer 开关必须保持 False。随后逐个开启对应开关并选择对应预览项时，只能保持当前开关为 True，不得隐式开启另外两个 Crypto pass。"
+}

@@ -1,0 +1,7 @@
+{
+  "name": "npr-test_new_shader_nodes_smoke",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify the newer NPR/Goo shader nodes are registered, can be created with nodes.new(), still expose their key public sockets, and keep their main enum or mode properties switchable through RNA.",
+  "passCriteria": "All listed node types must be creatable. Key sockets such as Render Texture Color/Alpha, Scene Time Frame/Scaled Frame, SDF outputs, Hexagon Value/Color, and Filter Output Color/Alpha must exist. Basis Transform, SDF Primitive, SDF Operator, SDF Vector Operator, Water Ripples, Portal In/Out, and Image to Closure must keep their main enum properties present and switchable without RNA errors."
+}

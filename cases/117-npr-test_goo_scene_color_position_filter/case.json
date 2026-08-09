@@ -1,0 +1,8 @@
+{
+  "name": "npr-test_goo_scene_color_position_filter",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify that Filter material Scene Color with source POSITION returns correctly aligned world-space position data, including at non-64-multiple render sizes that exercise HiZ padding.",
+  "passCriteria": "The test must keep scene_color.source set to POSITION, render a 257x257 Eevee image, decode Scene Color(Position) X/Z from filter output, and confirm the center plus multiple off-center samples are within 0.03 world units of the orthographic camera's expected world positions.",
+  "original": "blender_5_1_port_mainfix/tests/python/npr/test_goo_scene_color_position_filter.py"
+}

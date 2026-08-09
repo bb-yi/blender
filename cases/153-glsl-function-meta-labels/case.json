@@ -1,0 +1,8 @@
+{
+  "name": "glsl-function-meta-labels",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "验证 `GLSL Function` 的 `@glsl_meta label=\"...\"` 能为节点 socket 提供中文/本地化显示名，同时不改变 GLSL 参数名、socket identifier、sampler2D 的 Closure 输入语义或刷新时同名 socket 的用户值。",
+  "passCriteria": "输入 `vec4 color` 必须显示为中文 label 且 identifier 保持 `In_color`；`sampler2D tex` 必须显示为中文 label 且仍是 `NodeSocketClosure`；`out vec4 out_color` 必须支持 label。修改 label 后刷新节点，已有 `In_color` 的默认值必须保留。对 `out` 参数写非 label meta 必须进入 `ERROR`。",
+  "original": "GLSL Function meta label release regression"
+}

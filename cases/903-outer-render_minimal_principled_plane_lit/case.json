@@ -1,0 +1,8 @@
+{
+    "name":  "outer-render_minimal_principled_plane_lit",
+    "type":  "blender-python",
+    "script":  "run.py",
+    "purpose":  "验证最小 `Principled BSDF` 红色平面在黑色 World 和 Sun 光下能通过 Eevee 后台渲染写出。 \n脚本清空场景，创建相机、Sun 光和红色 Principled 平面，渲染到 `temp\\render_exports\\minimal_principled_lit.png`。",
+    "passCriteria":  "Eevee render 调用完成。 \n`temp\\render_exports\\minimal_principled_lit.png` 被写出。 \n输出文件大小大于 0。",
+    "original":  "test/render_minimal_principled_plane_lit.py"
+}

@@ -1,0 +1,8 @@
+{
+  "name": "glsl-function-vec4-input-w",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify that an unlinked GLSL Function vec4 input preserves the fourth vector component during Eevee material evaluation.",
+  "passCriteria": "A GLSL Function receives a vec4 input with w=0.0, maps color.w to RGB, renders a plane in Eevee, and the center pixel RGB channels stay below 0.05.",
+  "original": "GLSL Function vec4 input w release regression"
+}

@@ -1,0 +1,7 @@
+{
+  "name": "outer-transmission_aov_occlusion_real_blend",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Open the real local repro blend `assets/透射AOV遮挡测试.blend` and verify that an NPR Tree on the front transmissive sphere can read the red AOV written by the Suzanne behind it.",
+  "passCriteria": "The blend must contain the `AOV_001` color AOV and a material output with an NPR Tree that reads that AOV. After Eevee background render, the center area covered by the transmissive sphere must be visibly red-dominant rather than black, proving that the front transmission/refraction layer did not clear the AOV data from the object behind it."
+}

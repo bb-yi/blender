@@ -1,0 +1,7 @@
+{
+  "name": "eevee-viewport-aov-through-transmission",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify that Eevee rendered viewport keeps view-layer AOV buffers available for material NPR AOV Input nodes when a ray-traced transmissive foreground layer reads AOV data from the layer behind it.",
+  "passCriteria": "A child Blender viewport opens the repro scene, captures a rendered camera viewport, and the foreground transmissive region that reads the behind-object AOV must be visibly non-black while a normal Eevee render of the same scene also remains non-black."
+}

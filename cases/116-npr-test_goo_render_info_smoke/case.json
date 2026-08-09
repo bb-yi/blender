@@ -1,0 +1,8 @@
+{
+  "name": "npr-test_goo_render_info_smoke",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify Render Info node registration and socket shape.",
+  "passCriteria": "ShaderNodeRenderInfo exists, has no inputs, keeps Frag Coord/Width/Height, and exposes Resolution, Current Sample, and Total Samples with the expected socket types.",
+  "original": "blender_5_1_port/tests/python/npr/test_goo_render_info_smoke.py"
+}

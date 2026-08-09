@@ -1,0 +1,7 @@
+{
+  "name": "eevee-light-shader-probe-reflection",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify the user-provided Sphere Probe scene where a checker texture drives Light Shader Output color and the reflected result on a metallic sphere shows the checker-lit plane.",
+  "passCriteria": "The test opens the copied blend asset in a factory-startup background session, renders it with Eevee, samples the sphere reflection area, and requires non-trivial luminance plus visible local checker variation in that reflected region. The same asset is also rendered with the custom light shader disabled, and local checker-scale variation must drop, proving the probe capture is using the light shader result instead of only material or camera gradients."
+}

@@ -1,0 +1,7 @@
+{
+  "name": "forward-normal-render-pass",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify Eevee forward and blended surface materials write usable Normal render-pass data for viewport/pass preview and outline normal-edge detection.",
+  "passCriteria": "A BLENDED material on a tilted plane must produce a non-black Normal render pass in Eevee, and the sampled normal vector must differ from the black background by a clear margin. Generated EXR and summary.json are written under this case's out directory."
+}

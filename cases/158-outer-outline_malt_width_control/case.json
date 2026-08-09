@@ -1,0 +1,8 @@
+{
+  "name": "outer-outline_malt_width_control",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify the Malt-style per-class outline width control: Depth/Normal/ID edges each have independent threshold range + edge width, hard switch (range=0) vs linear taper (range>0), and no full-screen outline regression from the info buffer repack.",
+  "passCriteria": "The copied blend asset opens in a factory-startup background session, the Outline Control node has 13 sockets (5 new Malt params), rendering with edge_width=0 for each class independently suppresses that class's outline, threshold_range>0 produces a taper (different from hard switch), and no scenario floods the screen with the outline color (the outline_width_unpack mask bug regression guard).",
+  "original": "test/描边断口测试.blend"
+}

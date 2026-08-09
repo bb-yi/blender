@@ -1,0 +1,7 @@
+{
+  "name": "eevee_material_ao_temporal_sampling",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify that the Eevee Ambient Occlusion material node reads the per-sample RNG buffer and converges across rendered temporal samples.",
+  "passCriteria": "A procedural Suzanne AO scene must contain strong one-sample high-frequency noise, while the 64-sample render must reduce the measured central-region Laplacian energy below 0.06 and below 12 percent of the one-sample energy."
+}

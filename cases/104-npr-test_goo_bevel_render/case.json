@@ -1,0 +1,8 @@
+{
+    "name":  "npr-test_goo_bevel_render",
+    "type":  "blender-python",
+    "script":  "run.py",
+    "purpose":  "验证 Goo/Eevee 的 Bevel 节点会在实际渲染中改变法线结果。 \n测试渲染同一个立方体两次：第一次 Bevel 半径为 `0.0`，第二次半径为 `0.25`。材质把 Bevel 输出法线与固定方向做点积后写入发光颜色，用像素差判断边缘区域是否真的受到 Bevel 影响。",
+    "passCriteria":  "两次渲染之间，RGB 差值超过 `0.02` 的像素数量必须大于 `120`。 \n最大差值必须来自真实渲染结果，而不是节点解析失败或全黑输出。",
+    "original":  "blender_5_1_port/tests/python/npr/test_goo_bevel_render.py"
+}

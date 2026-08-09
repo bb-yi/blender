@@ -1,0 +1,7 @@
+{
+  "name": "parallax-closure-node",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify the native Parallax shader node interface, undo memfile storage round-tripping, and Eevee runtime behavior for image and closure height sources, including Closure Output Image Texture gradients and 3D procedural texture coordinates.",
+  "passCriteria": "The test must create ShaderNodeParallax in Plane Offset, Parallax Occlusion, Relief Parallax Mapping, and Secant Method Relief Mapping modes; confirm Parallax Occlusion hides Refinement Steps while Relief modes expose it; confirm shadow uses a world-space sun direction socket; undo a Parallax node socket change without crashing and restore the socket value; render Image to Closure, Closure Output Image Texture, and Closure Output 3D Noise height sources; prove scale zero falls back to direct UV, positive and negative plane offsets differ, Offset changes occlusion, Closure Output Image Texture height compiles and affects UVs, Closure Output 3D Noise height affects UVs and changes when only UV Z changes, Normal output changes with height, and oblique parallax shadow differs from straight-up sun direction."
+}

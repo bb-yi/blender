@@ -1,0 +1,7 @@
+{
+  "name": "eevee_temporal_material_animation_stability",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify that Eevee temporal reprojection keeps a static rendered viewport spatially stable during ordinary material animation and during required Scene Time history invalidation.",
+  "passCriteria": "The test plays the timeline and captures a static high-contrast emission edge with no animation, with a constant material FCurve, after deleting the FCurve while retaining the empty Action, and with a visually constant Scene Time node path. The ordinary animated states must retain the same bounded temporal edge motion as the control, while the Scene Time state must use a stable deterministic edge because its history is intentionally discarded."
+}

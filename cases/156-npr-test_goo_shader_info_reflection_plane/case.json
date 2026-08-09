@@ -1,0 +1,8 @@
+{
+  "name": "npr-test_goo_shader_info_reflection_plane",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify that the Shader Info node path used in the user's reflection plane scene renders visible lighting in Eevee after the planar probe fix, and that the scene keeps one direct Shader Info material path plus one NPR Shader Info material path.",
+  "passCriteria": "The copied blend asset opens in a factory-startup background session, renders with Eevee, and the left reflection area is lit above a minimum threshold. The right reflection remains visible as a control. The scene must still contain exactly one direct Shader Info material path and exactly one NPR Shader Info material path.",
+  "original": "test/shader info 反射平面测试.blend"
+}

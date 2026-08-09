@@ -1,0 +1,8 @@
+{
+    "name":  "npr-test_npr_asset_node_groups",
+    "type":  "blender-python",
+    "script":  "run.py",
+    "purpose":  "验证发布包内置 NPR 节点组资产文件可用，并且迁移后的节点组能参与实际 NPR 渲染。 \n检查 `assets\\nodes\\npr_node_groups.blend`： \n必须包含 `Cavity`、`Co-Planar Edge Detection`、`Curvature`、`Kuwahara`、`Shading Models`、`Surface Curvature` 这些 asset node groups。 \n任意 ShaderNodeTree 中不能有 `NodeUndefined`。 \n`Cavity` 组必须保留 repeat input/output 节点。 \n追加 `Cavity` 组后，用它构造 NPR Tree 并渲染球体。",
+    "passCriteria":  "资产 bundle 文件存在。 \n所有预期资产节点组存在，且无 undefined node。 \n`Cavity` 组包含 `GeometryNodeRepeatInput` 和 `GeometryNodeRepeatOutput`。 \n渲染结果不是全黑，且中心像素红通道大于 `0.05`。",
+    "original":  "blender_5_1_port/tests/python/npr/test_npr_asset_node_groups.py"
+}

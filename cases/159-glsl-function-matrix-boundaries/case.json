@@ -1,0 +1,8 @@
+{
+  "name": "glsl-function-matrix-boundaries",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify GLSL Function mat2, mat3, and mat4 public boundary sockets compile through Eevee and preserve split matrix column values.",
+  "passCriteria": "A GLSL Function material accepts mat2, mat3, and mat4 inputs, returns a mat4, writes an out mat4, and renders the expected center pixel color and strength from the split matrix column sockets.",
+  "original": "GLSL Function matrix boundary release regression"
+}

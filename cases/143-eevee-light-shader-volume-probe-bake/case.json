@@ -1,0 +1,7 @@
+{
+  "name": "eevee-light-shader-volume-probe-bake",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify that Eevee Light Shader Output affects Volume Probe / Irradiance Grid bake direct lighting through the surfel-space light shader path.",
+  "passCriteria": "The test must bake a small Volume Probe scene, render the baked irradiance through Light Probe Color, and prove default pass-through matches the non-custom path while custom color, custom attenuation, and Light Space-driven variation are present in the baked irradiance result."
+}

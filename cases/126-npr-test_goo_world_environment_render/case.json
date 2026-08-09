@@ -1,0 +1,8 @@
+{
+    "name":  "npr-test_goo_world_environment_render",
+    "type":  "blender-python",
+    "script":  "run.py",
+    "purpose":  "验证材质域 `World Environment` 节点能采样世界背景，而不会被前景红色平面遮挡污染。 \n测试两种模式： \n默认 Direction 输入，读取当前方向的绿色世界。 \n显式 Direction 输入 `(1.0, 0.5, 0.25)`，仍应读取绿色世界。",
+    "passCriteria":  "默认 Direction 和自定义 Direction 两次渲染中，中心像素绿通道都必须大于 `0.8`。 \n两次渲染中红通道都必须小于 `0.1`。 \n两次渲染中蓝通道都必须小于 `0.1`。",
+    "original":  "blender_5_1_port/tests/python/npr/test_goo_world_environment_render.py"
+}

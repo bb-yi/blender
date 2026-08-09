@@ -1,0 +1,7 @@
+{
+  "name": "npr-foreach-light",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify that the NPR For Each Light zone uses Blender 5.2 light and shadow resources on OpenGL and Vulkan, preserves local-before-directional ordering and signed NPR data for Filter consumers, sanitizes signed Combined data at the screen-reflection radiance boundary, produces temporally converged Area Light penumbrae, handles multiple zones and more than 32 local lights, and remains valid in Eevee Color Bake's no-culling path.",
+  "passCriteria": "Both requested GPU backends are confirmed; programmatic renders distinguish zero, local, and directional lights with finite non-empty pixels; Shadow Mask distinguishes visible and occluded receivers; a one-sample Area Light shadow is spatially stochastic and converges after 64 samples into more than the fixed 8-ray grayscale levels without 1/8 clustering; a Filter remap proves signed light-direction red and blue survive NPR output; a rough screen-space reflection of values below -1 remains finite and contains measurable positive green radiance; 33 visible local lights are iterated; two sequential zones compile; Eevee Color Bake executes a shadowed light and returns the final directional-light color without shader compilation, GPU validation, device-loss, crash, or timeout diagnostics."
+}

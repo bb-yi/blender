@@ -1,0 +1,7 @@
+{
+  "name": "npr-subsurface-compile-smoke",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "验证带 NPR Tree 的 Subsurface/SSS 材质能在 Eevee deferred NPR 路径中完成 shader 编译和渲染。该测试覆盖此前 release 中 SSS 相关符号误提交导致 `npr_sss_input_impl` 未定义的控制台报错。",
+  "passCriteria": "脚本创建一个带 `Subsurface Weight` 的 Principled 球体，并给 Material Output 挂接一个读取 `NPR Input Combined Color` 的 NPR Tree。Eevee 后台渲染必须完成，中心球体像素不能为黑，且背景采样必须保持接近黑色。"
+}

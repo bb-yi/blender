@@ -1,0 +1,8 @@
+{
+  "name": "npr-test_npr_input_specular_nonmetal",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "验证 NPR Input 的 `Combined Color`、Diffuse、Specular、`Position`、`Normal` 通道都能读取非金属 Principled 材质的 GBuffer 与光照信息。测试打开 `assets/010-specular-nonmetal/scene.blend`，将 Suzanne 材质 `Metallic` 强制为 `0`，并分别把 NPR Tree 输出连接到各个关键 socket。",
+  "passCriteria": "先用白色 NPR 输出生成 Suzanne 对象 mask，mask 像素数必须大于 `512`。在 mask 内，`Combined Color`、`Diffuse Color`、`Diffuse Direct`、`Position`、`Normal` 最大亮度必须大于 `0.05` 且亮像素达到脚本阈值；`Diffuse Indirect` 与 `Specular Indirect` 在白色 World 间接光下最大亮度必须大于 `0.05` 且亮像素不少于 `32`；`Specular Color` 最大亮度必须大于 `0.05` 且亮像素不少于 `32`；`Specular Direct` 最大亮度必须大于 `0.05` 且亮像素不少于 `8`。",
+  "original": "blender_5_1_port/tests/python/npr/test_npr_input_specular_nonmetal.py"
+}

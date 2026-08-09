@@ -1,0 +1,8 @@
+{
+  "name": "npr-test_goo_filter_material_execution_stage",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "验证 Eevee Filter Graph execution stage 的属性保存、单阶段执行，以及四个阶段在同一帧连续执行时不会形成输入纹理与颜色附件的 feedback loop。",
+  "passCriteria": "三个单独阶段均正确执行反相 Filter；四个 execution stage 同时启用时分别应用 0.9、0.8、0.7、0.6 的乘法系数，蓝通道结果接近唯一乘积 0.3024；OpenGL 和 Vulkan 子进程均确认实际后端、完成渲染，并且 --debug-gpu 输出不包含 feedback-loop 诊断。",
+  "original": "blender_npr_post/tests/python/npr/test_goo_filter_material_execution_stage.py"
+}

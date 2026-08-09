@@ -1,0 +1,8 @@
+{
+    "name":  "npr-test_goo_environment_exclusion_render",
+    "type":  "blender-python",
+    "script":  "run.py",
+    "purpose":  "验证 World 的 environment exclusion collection 会在 Eevee 中排除指定物体的环境光照。 \n场景中有两个白色漫反射球，绿色 World 背景提供环境光。右侧球被移动到 `world.environment_exclusion_collection` 中，左侧球保持正常受环境光影响。",
+    "passCriteria":  "左侧未排除球的绿色通道大于 `0.12`。 \n右侧被排除球的绿色通道小于 `0.03`。 \n左右绿色通道差值大于 `0.08`。",
+    "original":  "blender_5_1_port/tests/python/npr/test_goo_environment_exclusion_render.py"
+}

@@ -1,0 +1,7 @@
+{
+  "name": "eevee-outline-pass-toggle-compositor-refresh",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify that disabling the EEVEE Outline render pass removes the Render Layers Outline socket and link from both original and evaluated compositor trees, then refreshes the existing Alpha Over result without reconnecting nodes.",
+  "passCriteria": "With Outline enabled, the existing Render Layers to Alpha Over graph must render visible red outline pixels. After changing only use_pass_outline to false, both original and evaluated trees must remove the Outline socket and foreground link, and a second render through the unchanged Alpha Over graph must overwrite the output with an all-white image containing no red outline pixels."
+}

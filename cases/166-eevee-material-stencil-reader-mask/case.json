@@ -1,0 +1,7 @@
+{
+  "name": "eevee-material-stencil-reader-mask",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify that EEVEE material stencil/template readers use writer-produced user stencil bits as a screen-space mask without blocking the writer during the regular prepass.",
+  "passCriteria": "A red stencil reader is visible only inside a smaller writer plane mask, becomes invisible when the reader test is NEVER or the writer is disabled, and becomes fully visible when the reader stencil test is disabled."
+}

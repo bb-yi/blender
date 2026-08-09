@@ -1,0 +1,7 @@
+{
+  "name": "eevee-film-jitter-reconstruction-alignment",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify that Eevee updates Film reconstruction data and uniform buffers for every final-render sample so camera jitter does not leave a whole-image subpixel offset.",
+  "passCriteria": "A procedural asymmetric emission triangle is rendered with 1 and 64 Eevee samples. The alpha centroid must move by less than 0.10 pixels on each axis, the 64-sample render must contain at least 500 fractional-alpha edge pixels, and alpha mass must remain within 0.5 percent. The case also writes a red/cyan overlay that makes directional edge misalignment visible."
+}

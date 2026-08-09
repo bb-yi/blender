@@ -1,0 +1,7 @@
+{
+  "name": "outer-filter_object_mask_real_blend",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Open the real local repro blend `assets/Filter Object Mask测试.blend` and verify that its legacy Filter Material stack converts to a scene Filter Graph without leaving `Scene Color` inside the Filter material, then verify that it outputs the selected Suzanne object mask when the view layer Crypto Object pass is enabled. This protects the exact user-facing scene where Filter Object Mask is wired directly into Filter Output color and legacy Scene Color alpha feeds Filter Output alpha.",
+  "passCriteria": "The repro blend must keep `ViewLayer.use_pass_cryptomatte_object` enabled. Converted Filter materials must contain no `ShaderNodeSceneColor`, must receive scene images through `ShaderNodeFilterGraphInput`, and must sample legacy Scene Color alpha through `ShaderNodeNPR_ImageSample`. After Eevee background render, the center pixel inside Suzanne must be bright white-like, a corner background pixel must stay dark, and the bright mask must occupy a substantial bounded area instead of collapsing to only a few pixels. This catches both the legacy conversion regression where Scene Color remains inside Filter Mat and the render regression where Filter Object Mask stays black even though the blend has Crypto Object enabled."
+}

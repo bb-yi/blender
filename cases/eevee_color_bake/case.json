@@ -1,0 +1,7 @@
+{
+  "name": "eevee-color-bake",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Validate Eevee Emit/Color Bake as a single GPU/DRW path that writes local Eevee GPUMaterial shading, conservative deterministic shadow-map lighting, and light shader node results into image texture or active color attribute targets while rejecting unsupported screen-space, non-Emit, or missing-target cases.",
+  "passCriteria": "Emission, BSDF local lighting, world ambient, repeated point and sun shadow checks, Shader to RGB, Principled Emission, multi-material multi-image, active corner and point color attribute targets including byte-color corner and multiple selected objects, Image Texture, Checker/UV/Mapping/ColorRamp, Node Group, GLSL Function, local NPR output, Shader Info light response, Light Shader node point-dependent color, Tangent Space Normal Map lighting, and the copied Shader Info shadow reference scene match expected pixels; disabled light shadows do not darken the receiver; non-Emit bake, NPR Input, Scene Color, Screen Space Info, Render Texture, NPR Refraction, AOV, Filter-domain output, and face-domain active color attribute targets fail clearly instead of writing invalid bake data; missing image texture targets cancel with a warning report."
+}

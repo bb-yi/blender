@@ -1,0 +1,7 @@
+{
+  "name": "outer-outline_raytrace_transmission_occlusion",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify Eevee NPR outline visibility stays depth-consistent when a DITHERED foreground material toggles Raytrace Transmission. The test opens the local outline refraction repro blends, renders the covered and half-covered Suzanne scenes, and checks that a raytrace-transmission foreground surface blocks background outlines while preserving the visible Suzanne outlines outside the foreground plane.",
+  "passCriteria": "In test/折射通道测试.blend, the foreground raytrace-transmission plane must leave no bright Suzanne outline pixels in the covered center/right region. In test/描边透射遮挡测试.blend, enabling and disabling raytrace transmission on the foreground plane must produce nearly identical bright-outline masks for the visible right-side Suzanne, so internal depth/normal outlines are not lost when transmission is enabled."
+}

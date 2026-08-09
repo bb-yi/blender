@@ -1,0 +1,7 @@
+{
+  "name": "eevee-viewport-self-aov-raytracing",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify that an Eevee material can write a color AOV in its surface tree and read that same AOV from its material NPR Tree when ray tracing forces the material into a non-first deferred layer.",
+  "passCriteria": "A child Blender viewport opens the repro scene with Eevee ray tracing enabled; the selected Suzanne region that is driven by its own material AOV must show a visible checker pattern instead of becoming black, and the normal Eevee render of the same scene must also stay visibly non-black."
+}

@@ -1,0 +1,8 @@
+{
+  "name": "eevee-atmospheric-sky-clouds",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify the production atmospheric World GLSL Function with its smoke LUT/noise assets, including asset integrity, sampler2D/sampler3D bindings, VolumeCloud runtime-control sockets, Eevee GPU compilation, day/night control, and volumetric-cloud ray marching.",
+  "passCriteria": "All eight smoke assets must match the manifest SHA-256 and dimensions; the World GLSL Function must parse as READY with every sampler linked and all VolumeCloud runtime controls typed correctly; 48x32 Eevee renders must be finite and non-empty; noon must be brighter than midnight with a measurable image delta; and Cloud Alpha debug output must contain both cloud body and clear holes.",
+  "original": "Atmospheric sky and volumetric clouds V1 release regression"
+}

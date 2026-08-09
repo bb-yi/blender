@@ -1,0 +1,8 @@
+{
+    "name":  "npr-test_filter_object_info_updates",
+    "type":  "blender-python",
+    "script":  "run.py",
+    "purpose":  "验证 Filter 域的 `Filter Object Info` 节点会随目标物体变换和显示属性实时更新，并且目标更新不会重编译材质。场景还分别读取 Location、Rotation、Scale 和 Color。",
+    "passCriteria":  "Location 初始中心红通道小于 `0.1`；目标移动到 `X=1` 后大于 `0.4`，前后差值大于 `0.3`。Rotation、Scale、Color 三次输出各通道与目标值误差小于 `0.05`。目标移动前后 shader compile status 不失败且 compile timestamp 不变。",
+    "original":  "blender_npr_post/tests/python/npr/test_filter_object_info_updates.py"
+}

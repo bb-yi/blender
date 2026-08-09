@@ -1,0 +1,7 @@
+{
+  "name": "outer-depth-offset-material-output-crash",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Open the real local Depth Offset repro blend stored in assets and verify that an Eevee material output with both Surface and Depth Offset links can compile without crashing and matches the 5.1 visible-depth behavior for positive and negative offsets.",
+  "passCriteria": "The blend must contain a material output with linked Surface and Depth Offset inputs. Eevee must render a positive Depth Offset as the green offset material visible in the center, with alpha-preserving non-black output, and render a negative Depth Offset as the red plane visible in the center."
+}

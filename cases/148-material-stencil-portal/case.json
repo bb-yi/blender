@@ -1,0 +1,7 @@
+{
+  "name": "material-stencil-portal",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify the Eevee material stencil portal happy path: a color/depth-write-disabled writer with stencil_order lower than the reader writes stencil through visible pixels only, and a stencil-tested reader renders only through that portal.",
+  "passCriteria": "The case must expose the material stencil and write-state RNA properties, render a DITHERED writer using stencil_order=-1 and REPLACE before a DITHERED reader using stencil_order=0 and EQUAL, and sample blue on the unoccluded portal half while sampling black where a closer depth-only occluder prevents the writer from passing depth and therefore prevents the stencil write. The PNG render and summary.json are written under this case's out directory."
+}

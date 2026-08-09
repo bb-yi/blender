@@ -1,0 +1,7 @@
+{
+  "name": "eevee-material-stencil-template-lighting",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify that EEVEE material stencil/template writers do not break deferred material lighting and that read-only stencil tests still gate shading.",
+  "passCriteria": "A DITHERED deferred material that writes stencil remains as brightly lit as the same material without stencil, read-only ALWAYS remains lit, missing EQUAL stencil reads stay dark, and the forward writer path remains lit."
+}

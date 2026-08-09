@@ -1,0 +1,21 @@
+# npr-test_goo_light_info_npr_render
+
+## 测试内容
+
+验证 `Light Info` 节点在 NPR Tree 中可以读取指定灯光颜色，并覆盖基础材质输出。
+
+场景基础材质是红色发光；NPR Tree 中把 `Light Info Color` 接到 `NPR Output Color`。目标灯光颜色为 `(0.2, 0.6, 0.9)`。
+
+## 通过条件
+
+- 中心像素红通道接近 `0.2`，误差小于 `0.08`。
+- 中心像素绿通道接近 `0.6`，误差小于 `0.08`。
+- 中心像素蓝通道接近 `0.9`，误差小于 `0.08`。
+
+## 测试入口
+
+`run.py`
+
+## 原始测试
+
+`blender_5_1_port\tests\python\npr\test_goo_light_info_npr_render.py`

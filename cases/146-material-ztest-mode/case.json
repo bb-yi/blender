@@ -1,0 +1,7 @@
+{
+  "name": "material-ztest-mode",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify the Material ZTest Mode release path: RNA defaults and enum values, blend-file persistence, Python GPU API exposure for NOT_EQUAL, and Eevee depth-test behavior in opaque prepass and forward transparent rendering.",
+  "passCriteria": "A new material must default to LESS_EQUAL, expose and accept LESS/GREATER/LESS_EQUAL/GREATER_EQUAL/EQUAL/NOT_EQUAL/ALWAYS, persist a saved NOT_EQUAL value after reopening the generated blend file, and expose NOT_EQUAL in gpu.state.depth_test_set documentation. Eevee renders must show the expected front/back color for every ZTest mode in opaque and transparent matrices. Generated evidence must be written under this case's out directory."
+}

@@ -1,0 +1,8 @@
+{
+    "name":  "npr-test_goo_light_info_smoke",
+    "type":  "blender-python",
+    "script":  "run.py",
+    "purpose":  "验证 `Light Info` 节点的注册、socket 列表、`light_object` 属性和不同灯光类型下的动态 socket 启用规则。",
+    "passCriteria":  "`ShaderNodeLightInfo` 存在，label 为 `Light Info`。 \n输出 socket 为 `Color`、`Power`、`Type`、`Position`、`Direction`、`Radius`、`Spot Size`、`Sun Angle`。 \n`Type` 输出类型为 `INT`，节点暴露 `light_object` 属性。 \nPOINT 启用 `Color/Power/Type/Position/Radius`。 \nSUN 启用 `Color/Power/Type/Direction/Sun Angle`。 \nSPOT 启用 `Color/Power/Type/Position/Direction/Radius/Spot Size`。 \nAREA 启用 `Color/Power/Type/Position/Direction/Radius`。 \n未绑定灯光时只启用 `Color/Power/Type`。",
+    "original":  "blender_5_1_port/tests/python/npr/test_goo_light_info_smoke.py"
+}

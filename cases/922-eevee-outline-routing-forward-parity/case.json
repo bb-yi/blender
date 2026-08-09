@@ -1,0 +1,7 @@
+{
+  "name": "eevee-outline-routing-forward-parity",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify that the EEVEE Outline render pass stays separate from Combined when enabled, returns to Combined when disabled, and that Outline Control survives both DITHERED and BLENDED material paths in final renders and Rendered Viewport.",
+  "passCriteria": "OpenGL and Vulkan final-render child processes confirm a non-empty Outline pass with no red outline in Combined when use_pass_outline is enabled, confirm the outline returns to Combined when disabled, and confirm DITHERED and BLENDED Outline Control outputs. The Vulkan child also confirms the same separation/merge behavior through Rendered Viewport captures, with no shader, GPU validation, device-lost, timeout, or native-crash errors."
+}

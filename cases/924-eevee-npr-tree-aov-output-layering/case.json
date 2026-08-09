@@ -1,0 +1,7 @@
+{
+  "name": "eevee-npr-tree-aov-output-layering",
+  "type": "blender-python",
+  "script": "run.py",
+  "purpose": "Verify that the EEVEE NPR Tree Add menu exposes AOV Output and that NPR Trees can write Color and Value AOVs, read current-surface and previous-layer AOVs, overwrite an existing AOV, and expose the final result to both Render Layers and the Filter Graph.",
+  "passCriteria": "AOV Output must be visible in the NPR Tree Add menu and remain hidden in the Filter Tree Add menu. Direct Render Layers AOV outputs and Filter Graph consumption must agree within 0.02: an opaque NPR Tree writes red Color and 0.625 Value AOVs, copies a green Surface AOV, and overwrites a green Surface AOV with red; a front ray-traced transmission layer reads the green back-layer AOV, writes it to a new AOV, overwrites blue with red only inside its coverage, and preserves the back-layer values outside its coverage."
+}
