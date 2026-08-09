@@ -2362,6 +2362,14 @@ void DeferredPipeline::render(View &main_view,
   }
   GPU_debug_group_end();
 
+  if (feedback_tx == nullptr && !refraction_layers_.empty()) {
+    /* An empty opaque layer has no feedback output, but NPR Refraction still needs the actual
+     * background that precedes the first refraction layer. Seed the existing opaque feedback only
+     * after rendering the opaque layer so its ray-tracing inputs keep their original semantics. */
+    feedback_tx = rt_buffer_opaque_layer.feedback_ensure(false, extent);
+    GPU_texture_copy(feedback_tx, inst_.render_buffers.combined_tx);
+  }
+
   GPU_debug_group_begin("Deferred.Refract");
   for (auto &[index, layer] : refraction_layers_) {
     ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainDeferredRefract);

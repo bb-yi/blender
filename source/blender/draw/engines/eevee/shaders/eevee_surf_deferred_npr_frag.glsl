@@ -362,16 +362,6 @@ float4 TextureHandle_eval_impl(TextureHandle tex, float2 offset, bool texel_offs
       float4 back_color = texelFetch(radiance_back_tx, texel, 0);
       float back_depth = texelFetch(hiz_back_tx, texel, 0).r;
 #  ifdef MAT_NPR_REFRACTION_VOLUME
-      /* The previous-layer radiance is a dummy black texture when Hi-Z reports a background miss.
-       * Use the current pre-NPR radiance so transparent-film/world background alpha survives the
-       * volume segment instead of becoming an opaque black pixel. */
-      if (npr_volume_depth_is_background(back_depth)) {
-        back_color = texelFetch(radiance_tx, texel, 0);
-        /* A transparent film leaves the pre-NPR world radiance with zero alpha. In the volume
-         * segment that alpha must mean “background continues past the froxel grid”; opaque-world
-         * radiance keeps its original alpha. */
-        back_color.a = max(back_color.a, 1.0f - uniform_buf.film.background_opacity);
-      }
       back_color = npr_volume_compose_back_color(
           back_color, screen_uv, front_depth, back_depth);
 #  endif
@@ -463,10 +453,6 @@ float4 TextureHandle_eval_uv_impl(TextureHandle tex, float2 uv)
       float4 back_color = texelFetch(radiance_back_tx, texel, 0);
       float back_depth = texelFetch(hiz_back_tx, texel, 0).r;
 #  ifdef MAT_NPR_REFRACTION_VOLUME
-      if (npr_volume_depth_is_background(back_depth)) {
-        back_color = texelFetch(radiance_tx, texel, 0);
-        back_color.a = max(back_color.a, 1.0f - uniform_buf.film.background_opacity);
-      }
       back_color = npr_volume_compose_back_color(
           back_color, screen_uv, front_depth, back_depth);
 #  endif
