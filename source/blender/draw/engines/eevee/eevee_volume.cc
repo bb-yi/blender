@@ -343,8 +343,6 @@ void VolumeModule::end_sync()
 
 void VolumeModule::set_view(View &main_view)
 {
-  data_.main_viewmat = main_view.viewmat();
-
   /* Number of frame to consider for blending with exponential (infinite) average. */
   int exponential_frame_count = 16;
   if (inst_.is_image_render) {

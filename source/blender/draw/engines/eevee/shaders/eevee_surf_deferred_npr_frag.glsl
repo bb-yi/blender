@@ -171,14 +171,21 @@ float4 npr_scene_handle_eval(TextureHandle tex, int2 texel, float depth, float2 
 }
 
 #ifdef MAT_NPR_REFRACTION_VOLUME
+float npr_volume_depth_screen_to_view(float depth)
+{
+  /* The volume integration uses the stable main-view projection. Using the render-view helper
+   * here would apply NPR/TAA jitter to the depth lookup and can select a neighboring froxel. */
+  float4 view_position = uniform_buf.volumes.wininv_stable *
+                         float4(0.0f, 0.0f, depth * 2.0f - 1.0f, 1.0f);
+  return view_position.z / max(abs(view_position.w), 1.0e-8f);
+}
+
 float3 npr_volume_screen_to_resolve(float2 screen_uv, float depth)
 {
-  /* Volume resolve uses the main view's screen-to-froxel mapping directly. Do the same here
-   * instead of reconstructing through the jittered NPR render view; the latter can land in a
-   * neighboring froxel even when the screen pixel is unchanged. */
+  /* Volume resolve uses the main view's screen-to-froxel mapping directly. Do the same here. */
   float3 coord;
   coord.xy = screen_uv * uniform_buf.volumes.coord_scale;
-  const float view_z = drw_depth_screen_to_view(depth);
+  const float view_z = npr_volume_depth_screen_to_view(depth);
   if (uniform_buf.volumes.depth_distribution > 0.0f) {
     coord.z = uniform_buf.volumes.depth_distribution *
               log2(max(1.0e-8f,
@@ -227,7 +234,7 @@ float4 npr_volume_compose_back_color(float4 back_color,
                                      float front_depth,
                                      float back_depth)
 {
-  const float front_view_depth = -drw_depth_screen_to_view(front_depth);
+  const float front_view_depth = -npr_volume_depth_screen_to_view(front_depth);
   /* Hi-Z is stored in the regular (non-reversed) depth convention. A clear/miss is normally one,
    * even though the hardware depth attachment uses reverse-Z. Empty first-layer feedback can also
    * expose zero; both forms still have a valid segment ending at the last integrated froxel. */
@@ -239,7 +246,7 @@ float4 npr_volume_compose_back_color(float4 back_color,
   }
 
   if (!back_is_background) {
-    const float back_view_depth = -drw_depth_screen_to_view(back_depth);
+    const float back_view_depth = -npr_volume_depth_screen_to_view(back_depth);
     if (!(back_view_depth > front_view_depth) || isnan(back_view_depth) ||
         isinf(back_view_depth)) {
       return back_color;
