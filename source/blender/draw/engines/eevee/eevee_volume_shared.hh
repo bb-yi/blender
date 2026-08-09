@@ -27,6 +27,8 @@ struct [[host_shared]] VolumesInfoData {
   float4x4 history_winmat_stable;
   /* Transform from current view space to previous render sample view space. */
   float4x4 curr_view_to_past_view;
+  /* Unjittered main view transform used to map NPR render-view samples into volume space. */
+  float4x4 main_viewmat;
   /* Size of the froxel grid texture. */
   packed_int3 tex_size;
   /* Maximum light intensity during volume lighting evaluation. */

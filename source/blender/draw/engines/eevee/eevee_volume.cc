@@ -71,6 +71,7 @@ void VolumeModule::init()
 
 void VolumeModule::begin_sync()
 {
+  compute_done_ = false;
   previous_objects_ = current_objects_;
   current_objects_.clear();
 }
@@ -342,6 +343,8 @@ void VolumeModule::end_sync()
 
 void VolumeModule::set_view(View &main_view)
 {
+  data_.main_viewmat = main_view.viewmat();
+
   /* Number of frame to consider for blending with exponential (infinite) average. */
   int exponential_frame_count = 16;
   if (inst_.is_image_render) {
@@ -458,8 +461,15 @@ void VolumeModule::draw_prepass(View &main_view)
   GPU_debug_group_end();
 }
 
-void VolumeModule::draw_compute(View &main_view, int2 extent)
+void VolumeModule::draw_compute(View &main_view, int2 extent, bool reuse_frame_compute)
 {
+  if (reuse_frame_compute && compute_done_) {
+    return;
+  }
+  if (reuse_frame_compute) {
+    compute_done_ = true;
+  }
+
   if (!enabled_) {
     return;
   }
@@ -490,6 +500,8 @@ void VolumeModule::draw_compute(View &main_view, int2 extent)
     ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainVolumeIntegration);
     inst_.manager->submit(integration_ps_, main_view);
   }
+  /* NPR deferred passes sample the integrated images before the final volume resolve. */
+  GPU_memory_barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS | GPU_BARRIER_TEXTURE_FETCH);
 
   /* Copy history data. */
   history_viewmat_ = main_view.viewmat();

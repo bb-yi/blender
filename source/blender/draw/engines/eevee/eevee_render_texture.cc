@@ -267,7 +267,9 @@ void RenderTextureModule::slot_capture(const int slot_index)
                                   rt_buffer_refract_);
   inst_.pipelines.background.render(render_view, combined_fb_);
 
-  inst_.volume.draw_compute(main_view, slot.extent);
+  /* Render-texture captures use an isolated view and extent. Keep their volume compute separate
+   * from the main-view one-shot compute consumed by NPR Refraction. */
+  inst_.volume.draw_compute(main_view, slot.extent, false);
   inst_.volume.draw_resolve(main_view);
   inst_.ambient_occlusion.render_pass(render_view);
   inst_.pipelines.forward.render(

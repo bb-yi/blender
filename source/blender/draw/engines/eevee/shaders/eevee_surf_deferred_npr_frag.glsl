@@ -21,6 +21,9 @@ FRAGMENT_SHADER_CREATE_INFO(eevee_surf_npr)
 #include "eevee_renderpass_lib.glsl"
 #include "eevee_sampling_lib.glsl"
 #include "eevee_surf_lib.glsl"
+#ifdef MAT_NPR_REFRACTION_VOLUME
+#  include "eevee_volume_lib.glsl"
+#endif
 
 #define TEX_HANDLE_NULL 0u
 #define TEX_HANDLE_RP_COLOR 1u
@@ -167,6 +170,84 @@ float4 npr_scene_handle_eval(TextureHandle tex, int2 texel, float depth, float2 
   return float4(0.0f);
 }
 
+#ifdef MAT_NPR_REFRACTION_VOLUME
+float3 npr_volume_screen_to_resolve(float2 screen_uv, float depth)
+{
+  /* NPR is rasterized with the jittered/render view while volume froxels are aligned to the
+   * unjittered main view. Reconstruct the sample in world space, then project it with the same
+   * finite (volume-jittered) projection used by VolumeModule. */
+  float3 world_P = drw_point_screen_to_world(float3(screen_uv, depth));
+  float3 main_view_P = transform_point(uniform_buf.volumes.main_viewmat, world_P);
+  float4 volume_clip_P = uniform_buf.volumes.winmat_finite * float4(main_view_P, 1.0f);
+  float3 volume_ndc_P = volume_clip_P.xyz / volume_clip_P.w;
+
+  float3 coord;
+  coord.xy = (volume_ndc_P.xy * 0.5f + 0.5f) * uniform_buf.volumes.coord_scale;
+  if (uniform_buf.volumes.depth_distribution > 0.0f) {
+    coord.z = uniform_buf.volumes.depth_distribution *
+              log2(max(1.0e-8f,
+                       main_view_P.z * uniform_buf.volumes.depth_far +
+                           uniform_buf.volumes.depth_near));
+  }
+  else {
+    coord.z = (main_view_P.z - uniform_buf.volumes.depth_near) /
+              (uniform_buf.volumes.depth_far - uniform_buf.volumes.depth_near);
+  }
+  return clamp(coord, float3(0.0f), float3(1.0f));
+}
+
+VolumeResolveSample npr_volume_resolve(float2 screen_uv, float depth)
+{
+  float3 coord = npr_volume_screen_to_resolve(screen_uv, depth);
+  coord.z -= uniform_buf.volumes.inv_tex_size.z;
+
+  VolumeResolveSample volume;
+  volume.scattering = texture(volume_scattering_tx, coord).rgb;
+  volume.transmittance = texture(volume_transmittance_tx, coord).rgb;
+  return volume;
+}
+
+float4 npr_volume_compose_back_color(float4 back_color,
+                                     float2 screen_uv,
+                                     float front_depth,
+                                     float back_depth)
+{
+  const float front_view_depth = -drw_depth_screen_to_view(front_depth);
+  const float back_view_depth = -drw_depth_screen_to_view(back_depth);
+  /* Hi-Z is stored in the regular (non-reversed) depth convention. A clear/miss is therefore
+   * one, even though the hardware depth attachment uses reverse-Z. */
+  if (!(front_depth >= 0.0f && front_depth < 1.0f - 1.0e-6f) ||
+      !(back_depth >= 0.0f && back_depth < 1.0f - 1.0e-6f) ||
+      !(back_view_depth > front_view_depth) || isnan(front_view_depth) || isnan(back_view_depth) ||
+      isinf(front_view_depth) || isinf(back_view_depth)) {
+    return back_color;
+  }
+
+  VolumeResolveSample front = npr_volume_resolve(screen_uv, front_depth);
+  VolumeResolveSample back = npr_volume_resolve(screen_uv, back_depth);
+  if (any(isnan(front.scattering)) || any(isinf(front.scattering)) ||
+      any(isnan(front.transmittance)) || any(isinf(front.transmittance)) ||
+      any(isnan(back.scattering)) || any(isinf(back.scattering)) ||
+      any(isnan(back.transmittance)) || any(isinf(back.transmittance))) {
+    return back_color;
+  }
+  if (average(front.transmittance) <= 1.0e-4f) {
+    /* Once the front segment is effectively opaque, no background contribution can reach the
+     * refractor. The final volume resolve still supplies camera-to-front scattering. */
+    return float4(0.0f);
+  }
+  float3 front_transmittance = max(front.transmittance, float3(1.0e-4f));
+  float3 segment_transmittance = clamp(back.transmittance / front_transmittance,
+                                       float3(0.0f),
+                                       float3(1.0f));
+  float3 segment_scattering = max((back.scattering - front.scattering) / front_transmittance,
+                                  float3(0.0f));
+
+  return float4(segment_scattering + segment_transmittance * back_color.rgb,
+                average(segment_transmittance) * back_color.a);
+}
+#endif
+
 float4 TextureHandle_eval_impl(TextureHandle tex, float2 offset, bool texel_offset)
 {
   if (tex.type == TEX_HANDLE_NULL) {
@@ -233,6 +314,7 @@ float4 TextureHandle_eval_impl(TextureHandle tex, float2 offset, bool texel_offs
   depth = npr_gbuffer_read_surface_depth(gbuf.header, texel, depth);
 #endif
   float2 screen_uv = (float2(texel) + 0.5f) / float2(extent);
+  const float front_depth = npr_depth_at_texel(int2(gl_FragCoord.xy));
 
   switch (tex.type) {
     case TEX_HANDLE_RP_COLOR:
@@ -244,7 +326,15 @@ float4 TextureHandle_eval_impl(TextureHandle tex, float2 offset, bool texel_offs
       return npr_scene_handle_eval(tex, texel, depth, screen_uv);
 #ifdef MAT_NPR_REFRACTION
     case TEX_HANDLE_BACK_COMBINED_COLOR:
-      return texelFetch(radiance_back_tx, texel, 0);
+    {
+      float4 back_color = texelFetch(radiance_back_tx, texel, 0);
+      float back_depth = texelFetch(hiz_back_tx, texel, 0).r;
+#  ifdef MAT_NPR_REFRACTION_VOLUME
+      back_color = npr_volume_compose_back_color(
+          back_color, screen_uv, front_depth, back_depth);
+#  endif
+      return back_color;
+    }
 #endif
     case TEX_HANDLE_POSITION: {
       float3 position = drw_point_screen_to_world(float3(screen_uv, depth));
@@ -316,6 +406,7 @@ float4 TextureHandle_eval_uv_impl(TextureHandle tex, float2 uv)
   int2 texel = npr_texture_texel_from_uv(uv, extent);
   float depth = npr_depth_at_texel(texel);
   float2 screen_uv = (float2(texel) + 0.5f) / float2(extent);
+  const float front_depth = npr_depth_at_texel(int2(gl_FragCoord.xy));
 
   switch (tex.type) {
     case TEX_HANDLE_RP_COLOR:
@@ -326,7 +417,15 @@ float4 TextureHandle_eval_uv_impl(TextureHandle tex, float2 uv)
       return npr_scene_handle_eval(tex, texel, depth, screen_uv);
 #ifdef MAT_NPR_REFRACTION
     case TEX_HANDLE_BACK_COMBINED_COLOR:
-      return texelFetch(radiance_back_tx, texel, 0);
+    {
+      float4 back_color = texelFetch(radiance_back_tx, texel, 0);
+      float back_depth = texelFetch(hiz_back_tx, texel, 0).r;
+#  ifdef MAT_NPR_REFRACTION_VOLUME
+      back_color = npr_volume_compose_back_color(
+          back_color, screen_uv, front_depth, back_depth);
+#  endif
+      return back_color;
+    }
 #endif
     case TEX_HANDLE_POSITION:
       return float4(drw_point_screen_to_world(float3(screen_uv, depth)), 0.0f);

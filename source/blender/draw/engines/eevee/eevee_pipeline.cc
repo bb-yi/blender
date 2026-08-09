@@ -1572,6 +1572,7 @@ void DeferredLayer::begin_sync()
     npr_ps_.bind_texture(INDIRECT_RADIANCE_NPR_TX_SLOT_1 + 0, &indirect_result_.closures[0]);
     npr_ps_.bind_texture(INDIRECT_RADIANCE_NPR_TX_SLOT_1 + 1, &indirect_result_.closures[1]);
     npr_ps_.bind_texture(INDIRECT_RADIANCE_NPR_TX_SLOT_1 + 2, &indirect_result_.closures[2]);
+    npr_ps_.bind_resources(inst_.volume.result);
     npr_ps_.bind_texture(BACK_RADIANCE_TX_SLOT, &radiance_back_tx_);
     npr_ps_.bind_texture(BACK_HIZ_TX_SLOT, &inst_.hiz_buffer.back.ref_tx_);
   });
@@ -1931,7 +1932,8 @@ PassMain::Sub *DeferredLayer::npr_add(blender::Material *blender_mat, GPUMateria
   return material_pass;
 }
 
-gpu::Texture *DeferredLayer::render(View &render_view,
+gpu::Texture *DeferredLayer::render(View &main_view,
+                                    View &render_view,
                                     Framebuffer &prepass_fb,
                                     Framebuffer &combined_fb,
                                     Framebuffer &gbuffer_fb,
@@ -2010,6 +2012,11 @@ gpu::Texture *DeferredLayer::render(View &render_view,
   }
   inst_.lights.eval_uniform_light_shaders(render_view);
   inst_.lights.eval_front_light_shaders(render_view, extent);
+
+  /* NPR Refraction consumes the integrated volume data before the final volume resolve. Compute
+   * it once after the layer's shadow/light setup; VolumeModule guards later layers and the main
+   * view fallback against duplicate work. */
+  inst_.volume.draw_compute(main_view, extent);
 
   {
     ScopedTelemetrySample telemetry_sample(inst_.telemetry,
@@ -2330,7 +2337,7 @@ PassMain::Sub *DeferredPipeline::npr_add(blender::Material *blender_mat,
   return opaque_layer_.npr_add(blender_mat, gpumat);
 }
 
-void DeferredPipeline::render(View & /*main_view*/,
+void DeferredPipeline::render(View &main_view,
                               View &render_view,
                               Framebuffer &prepass_fb,
                               Framebuffer &combined_fb,
@@ -2344,7 +2351,8 @@ void DeferredPipeline::render(View & /*main_view*/,
   GPU_debug_group_begin("Deferred.Opaque");
   {
     ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainDeferredOpaque);
-    feedback_tx = opaque_layer_.render(render_view,
+    feedback_tx = opaque_layer_.render(main_view,
+                                       render_view,
                                        prepass_fb,
                                        combined_fb,
                                        gbuffer_fb,
@@ -2357,7 +2365,8 @@ void DeferredPipeline::render(View & /*main_view*/,
   GPU_debug_group_begin("Deferred.Refract");
   for (auto &[index, layer] : refraction_layers_) {
     ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainDeferredRefract);
-    feedback_tx = layer->render(render_view,
+    feedback_tx = layer->render(main_view,
+                                render_view,
                                 prepass_fb,
                                 combined_fb,
                                 gbuffer_fb,

@@ -57,6 +57,8 @@ class VolumeModule {
   Instance &inst_;
 
   bool enabled_;
+  /* Volume integration can be consumed by NPR before the final resolve. */
+  bool compute_done_ = false;
   bool viewport_sampling_is_reset_ = false;
   bool use_reprojection_;
   bool use_lights_;
@@ -173,7 +175,9 @@ class VolumeModule {
   /* Render material properties. Needs to be called after `set_view`. */
   void draw_prepass(View &main_view);
   /* Compute scattering and integration. */
-  void draw_compute(View &main_view, int2 extent);
+  /* `reuse_frame_compute` is false for isolated render-texture captures, which have their own
+   * view/extent and must not consume the main-view one-shot compute. */
+  void draw_compute(View &main_view, int2 extent, bool reuse_frame_compute = true);
   /* Final image compositing. */
   void draw_resolve(View &view);
 
