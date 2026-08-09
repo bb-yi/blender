@@ -263,20 +263,36 @@ float4 npr_volume_compose_back_color(float4 back_color,
       any(isnan(back.transmittance)) || any(isinf(back.transmittance))) {
     return back_color;
   }
-  if (average(front.transmittance) <= 1.0e-4f) {
+  const float transmittance_epsilon = 1.0e-4f;
+  if (average(front.transmittance) <= transmittance_epsilon) {
     /* Once the front segment is effectively opaque, no background contribution can reach the
      * refractor. The final volume resolve still supplies camera-to-front scattering. */
     return float4(0.0f);
   }
-  float3 front_transmittance = max(front.transmittance, float3(1.0e-4f));
+  const bool3 visible_channels = greaterThan(front.transmittance,
+                                             float3(transmittance_epsilon));
+  float3 front_transmittance = max(front.transmittance, float3(transmittance_epsilon));
   float3 segment_transmittance = clamp(back.transmittance / front_transmittance,
                                        float3(0.0f),
                                        float3(1.0f));
   float3 segment_scattering = max((back.scattering - front.scattering) / front_transmittance,
                                   float3(0.0f));
+  /* A low-transmittance channel cannot carry a stable difference of two low-precision cumulative
+   * scattering samples. Its contribution behind the front segment is negligible, so discard it
+   * instead of amplifying R11G11B10 quantization noise. */
+  segment_transmittance = mix(float3(0.0f), segment_transmittance, visible_channels);
+  segment_scattering = mix(float3(0.0f), segment_scattering, visible_channels);
 
-  return float4(segment_scattering + segment_transmittance * back_color.rgb,
-                average(segment_transmittance) * back_color.a);
+  const float half_max = 65504.0f;
+  segment_scattering = min(segment_scattering, float3(half_max));
+  float3 composed_radiance = segment_scattering + segment_transmittance * back_color.rgb;
+  if (any(isnan(composed_radiance)) || any(isinf(composed_radiance))) {
+    return back_color;
+  }
+  composed_radiance = clamp(composed_radiance, float3(0.0f), float3(half_max));
+
+  return float4(composed_radiance,
+                saturate(average(segment_transmittance) * back_color.a));
 }
 #endif
 

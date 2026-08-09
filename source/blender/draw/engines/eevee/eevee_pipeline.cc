@@ -1510,6 +1510,7 @@ void DeferredLayer::begin_sync()
   has_prepass_ = false;
   has_stencil_ = false;
   has_npr_aov_access_ = false;
+  has_npr_refraction_ = false;
   is_first_pass_ = true;
   stencil_ps_.init();
 
@@ -1907,6 +1908,7 @@ PassMain::Sub *DeferredLayer::npr_add(blender::Material *blender_mat, GPUMateria
   use_depth_offset_lighting_data_ |= material_uses_depth_offset_lighting_data(blender_mat, gpumat);
   has_outline_ = has_outline_ || inst_.materials.material_uses_outline_control(blender_mat);
   has_npr_aov_access_ |= GPU_material_flag_get(gpumat, GPU_MATFLAG_AOV);
+  has_npr_refraction_ |= GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR_REFRACTION);
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
       GPU_material_has_glsl_light_shader_eval(gpumat) ||
       GPU_material_flag_get(gpumat, GPU_MATFLAG_GLSL_LIGHT_ACCESS))
@@ -1939,7 +1941,8 @@ gpu::Texture *DeferredLayer::render(View &main_view,
                                     Framebuffer &gbuffer_fb,
                                     int2 extent,
                                     RayTraceBuffer &rt_buffer,
-                                    gpu::Texture *radiance_behind_tx)
+                                    gpu::Texture *radiance_behind_tx,
+                                    bool &volume_compute_done)
 {
   if (this->is_empty()) {
     return radiance_behind_tx;
@@ -2013,10 +2016,12 @@ gpu::Texture *DeferredLayer::render(View &main_view,
   inst_.lights.eval_uniform_light_shaders(render_view);
   inst_.lights.eval_front_light_shaders(render_view, extent);
 
-  /* NPR Refraction consumes the integrated volume data before the final volume resolve. Compute
-   * it once after the layer's shadow/light setup; VolumeModule guards later layers and the main
-   * view fallback against duplicate work. */
-  inst_.volume.draw_compute(main_view, extent);
+  if (has_npr_refraction_ && !volume_compute_done) {
+    /* NPR Refraction consumes integrated volume data before the final resolve. The caller owns the
+     * once-per-view state so a new render sample or Render Texture capture gets a fresh compute. */
+    inst_.volume.draw_compute(main_view, extent);
+    volume_compute_done = true;
+  }
 
   {
     ScopedTelemetrySample telemetry_sample(inst_.telemetry,
@@ -2344,7 +2349,8 @@ void DeferredPipeline::render(View &main_view,
                               Framebuffer &gbuffer_fb,
                               int2 extent,
                               RayTraceBuffer &rt_buffer_opaque_layer,
-                              RayTraceBuffer &rt_buffer_refract_layer)
+                              RayTraceBuffer &rt_buffer_refract_layer,
+                              bool &volume_compute_done)
 {
   gpu::Texture *feedback_tx = nullptr;
 
@@ -2358,7 +2364,8 @@ void DeferredPipeline::render(View &main_view,
                                        gbuffer_fb,
                                        extent,
                                        rt_buffer_opaque_layer,
-                                       feedback_tx);
+                                       feedback_tx,
+                                       volume_compute_done);
   }
   GPU_debug_group_end();
 
@@ -2380,7 +2387,8 @@ void DeferredPipeline::render(View &main_view,
                                 gbuffer_fb,
                                 extent,
                                 rt_buffer_refract_layer,
-                                feedback_tx);
+                                feedback_tx,
+                                volume_compute_done);
   }
   GPU_debug_group_end();
 }

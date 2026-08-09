@@ -71,9 +71,37 @@ void VolumeModule::init()
 
 void VolumeModule::begin_sync()
 {
-  compute_done_ = false;
   previous_objects_ = current_objects_;
   current_objects_.clear();
+}
+
+void VolumeModule::compute_resources_select(const bool use_history)
+{
+  use_history_ = use_history;
+  if (!enabled_) {
+    result.scattering_tx_ = dummy_scatter_tx_;
+    result.transmittance_tx_ = dummy_transmit_tx_;
+    return;
+  }
+
+  scatter_history_tx_ = scatter_tx_.previous();
+  extinction_history_tx_ = extinction_tx_.previous();
+
+  if (use_history) {
+    scatter_result_tx_ = scatter_tx_.current();
+    extinction_result_tx_ = extinction_tx_.current();
+    integrated_scatter_result_tx_ = integrated_scatter_tx_;
+    integrated_transmit_result_tx_ = integrated_transmit_tx_;
+  }
+  else {
+    scatter_result_tx_ = capture_scatter_tx_;
+    extinction_result_tx_ = capture_extinction_tx_;
+    integrated_scatter_result_tx_ = capture_integrated_scatter_tx_;
+    integrated_transmit_result_tx_ = capture_integrated_transmit_tx_;
+  }
+
+  result.scattering_tx_ = integrated_scatter_result_tx_;
+  result.transmittance_tx_ = integrated_transmit_result_tx_;
 }
 
 void VolumeModule::world_sync(const WorldHandle &world_handle)
@@ -181,6 +209,10 @@ void VolumeModule::end_sync()
     extinction_tx_.previous().free();
     integrated_scatter_tx_.free();
     integrated_transmit_tx_.free();
+    capture_scatter_tx_.free();
+    capture_extinction_tx_.free();
+    capture_integrated_scatter_tx_.free();
+    capture_integrated_transmit_tx_.free();
 
     /* Update references for bindings. */
     result.scattering_tx_ = dummy_scatter_tx_;
@@ -265,9 +297,25 @@ void VolumeModule::end_sync()
   integrated_scatter_tx_.ensure_3d(gpu::TextureFormat::UFLOAT_11_11_10, data_.tex_size, usage);
   integrated_transmit_tx_.ensure_3d(gpu::TextureFormat::UFLOAT_11_11_10, data_.tex_size, usage);
 
+  if (inst_.render_textures.has_active()) {
+    capture_scatter_tx_.ensure_3d(
+        gpu::TextureFormat::UFLOAT_11_11_10, data_.tex_size, usage);
+    capture_extinction_tx_.ensure_3d(
+        gpu::TextureFormat::UFLOAT_11_11_10, data_.tex_size, usage);
+    capture_integrated_scatter_tx_.ensure_3d(
+        gpu::TextureFormat::UFLOAT_11_11_10, data_.tex_size, usage);
+    capture_integrated_transmit_tx_.ensure_3d(
+        gpu::TextureFormat::UFLOAT_11_11_10, data_.tex_size, usage);
+  }
+  else {
+    capture_scatter_tx_.free();
+    capture_extinction_tx_.free();
+    capture_integrated_scatter_tx_.free();
+    capture_integrated_transmit_tx_.free();
+  }
+
   /* Update references for bindings. */
-  result.scattering_tx_ = integrated_scatter_tx_;
-  result.transmittance_tx_ = integrated_transmit_tx_;
+  compute_resources_select(true);
   properties.scattering_tx_ = prop_scattering_tx_;
   properties.extinction_tx_ = prop_extinction_tx_;
   properties.emission_tx_ = prop_emission_tx_;
@@ -306,10 +354,10 @@ void VolumeModule::end_sync()
   scatter_ps_.bind_image("in_emission_img", &prop_emission_tx_);
   scatter_ps_.bind_image("in_phase_img", &prop_phase_tx_);
   scatter_ps_.bind_image("in_phase_weight_img", &prop_phase_weight_tx_);
-  scatter_ps_.bind_texture("scattering_history_tx", &scatter_tx_.previous(), history_sampler);
-  scatter_ps_.bind_texture("extinction_history_tx", &extinction_tx_.previous(), history_sampler);
-  scatter_ps_.bind_image("out_scattering_img", &scatter_tx_.current());
-  scatter_ps_.bind_image("out_extinction_img", &extinction_tx_.current());
+  scatter_ps_.bind_texture("scattering_history_tx", &scatter_history_tx_, history_sampler);
+  scatter_ps_.bind_texture("extinction_history_tx", &extinction_history_tx_, history_sampler);
+  scatter_ps_.bind_image("out_scattering_img", &scatter_result_tx_);
+  scatter_ps_.bind_image("out_extinction_img", &extinction_result_tx_);
   scatter_ps_.bind_texture(RBUFS_UTILITY_TEX_SLOT, inst_.pipelines.utility_tx);
   /* Sync with the property pass. */
   scatter_ps_.barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS | GPU_BARRIER_TEXTURE_FETCH);
@@ -319,10 +367,10 @@ void VolumeModule::end_sync()
   integration_ps_.shader_set(inst_.shaders.static_shader_get(VOLUME_INTEGRATION));
   integration_ps_.bind_resources(inst_.uniform_data);
   integration_ps_.bind_resources(inst_.sampling);
-  integration_ps_.bind_texture("in_scattering_tx", &scatter_tx_.current());
-  integration_ps_.bind_texture("in_extinction_tx", &extinction_tx_.current());
-  integration_ps_.bind_image("out_scattering_img", &integrated_scatter_tx_);
-  integration_ps_.bind_image("out_transmittance_img", &integrated_transmit_tx_);
+  integration_ps_.bind_texture("in_scattering_tx", &scatter_result_tx_);
+  integration_ps_.bind_texture("in_extinction_tx", &extinction_result_tx_);
+  integration_ps_.bind_image("out_scattering_img", &integrated_scatter_result_tx_);
+  integration_ps_.bind_image("out_transmittance_img", &integrated_transmit_result_tx_);
   /* Sync with the scatter pass. */
   integration_ps_.barrier(GPU_BARRIER_TEXTURE_FETCH);
   integration_ps_.dispatch(
@@ -343,56 +391,72 @@ void VolumeModule::end_sync()
 
 void VolumeModule::set_view(View &main_view)
 {
-  /* Number of frame to consider for blending with exponential (infinite) average. */
-  int exponential_frame_count = 16;
-  if (inst_.is_image_render) {
-    /* Disable reprojection for rendering. */
-    exponential_frame_count = 0;
-  }
-  else if (!use_reprojection_) {
-    /* No re-projection if TAA is disabled. */
-    exponential_frame_count = 0;
-  }
-  else if (inst_.is_playback) {
-    /* For now, we assume we want responsiveness for volume animation.
-     * But this makes general animation inside uniform volumes less stable.
-     * When we introduce updated volume tagging, we will be able to increase this for general
-     * playback. */
-    exponential_frame_count = 3;
-  }
-  else if (inst_.is_transforming) {
-    /* Improve responsiveness of volume if we are transforming objects. */
-    /* TODO(fclem): This is too general as it will be triggered even for non volume object.
-     * Instead, we should tag which areas of the volume that need increased responsiveness. */
-    exponential_frame_count = 3;
-  }
-  else if (inst_.is_navigating) {
-    /* Navigation is usually smooth because of the re-projection but we can get ghosting
-     * artifacts on lights because of voxels stretched in Z or anisotropy. */
-    exponential_frame_count = 8;
-  }
-  else if (viewport_sampling_is_reset_) {
-    /* If we are not falling in any cases above, this usually means there is a scene or object
-     * parameter update. Reset accumulation completely. */
-    exponential_frame_count = 0;
-  }
+  this->set_view(main_view, inst_.film.render_extent_get(), true);
+}
 
-  if (!valid_history_) {
-    history_frame_count_ = 0;
+void VolumeModule::set_view(View &main_view, const int2 extent, const bool use_history)
+{
+  compute_resources_select(use_history);
+
+  data_.coord_scale = float2(extent) / float2(data_.tile_size * data_.tex_size.xy());
+  data_.main_view_extent = float2(extent);
+  data_.main_view_extent_inv = 1.0f / float2(extent);
+
+  if (use_history) {
+    /* Number of frame to consider for blending with exponential (infinite) average. */
+    int exponential_frame_count = 16;
+    if (inst_.is_image_render) {
+      /* Disable reprojection for rendering. */
+      exponential_frame_count = 0;
+    }
+    else if (!use_reprojection_) {
+      /* No re-projection if TAA is disabled. */
+      exponential_frame_count = 0;
+    }
+    else if (inst_.is_playback) {
+      /* For now, we assume we want responsiveness for volume animation.
+       * But this makes general animation inside uniform volumes less stable.
+       * When we introduce updated volume tagging, we will be able to increase this for general
+       * playback. */
+      exponential_frame_count = 3;
+    }
+    else if (inst_.is_transforming) {
+      /* Improve responsiveness of volume if we are transforming objects. */
+      /* TODO(fclem): This is too general as it will be triggered even for non volume object.
+       * Instead, we should tag which areas of the volume that need increased responsiveness. */
+      exponential_frame_count = 3;
+    }
+    else if (inst_.is_navigating) {
+      /* Navigation is usually smooth because of the re-projection but we can get ghosting
+       * artifacts on lights because of voxels stretched in Z or anisotropy. */
+      exponential_frame_count = 8;
+    }
+    else if (viewport_sampling_is_reset_) {
+      /* If we are not falling in any cases above, this usually means there is a scene or object
+       * parameter update. Reset accumulation completely. */
+      exponential_frame_count = 0;
+    }
+
+    if (!valid_history_) {
+      history_frame_count_ = 0;
+    }
+    /* Interactive mode accumulate samples using exponential average.
+     * We still reuse the history when we go into static mode.
+     * However, using re-projection for static mode will show the precision limit of RG11B10 format.
+     * So we clamp it to the exponential frame count in any case. */
+    history_frame_count_ = math::min(history_frame_count_, exponential_frame_count);
+
+    /* In interactive mode, use exponential average (fixed ratio).
+     * For static / render mode use simple average (moving ratio). */
+    float history_opacity = history_frame_count_ / (history_frame_count_ + 1.0f);
+
+    /* Setting opacity to 0.0 will bypass any sampling of history buffer.
+     * Allowing us to skip the 3D texture clear. */
+    data_.history_opacity = (valid_history_) ? history_opacity : 0.0f;
   }
-  /* Interactive mode accumulate samples using exponential average.
-   * We still reuse the history when we go into static mode.
-   * However, using re-projection for static mode will show the precision limit of RG11B10 format.
-   * So we clamp it to the exponential frame count in any case. */
-  history_frame_count_ = math::min(history_frame_count_, exponential_frame_count);
-
-  /* In interactive mode, use exponential average (fixed ratio).
-   * For static / render mode use simple average (moving ratio). */
-  float history_opacity = history_frame_count_ / (history_frame_count_ + 1.0f);
-
-  /* Setting opacity to 0.0 will bypass any sampling of history buffer.
-   * Allowing us to skip the 3D texture clear. */
-  data_.history_opacity = (valid_history_) ? history_opacity : 0.0f;
+  else {
+    data_.history_opacity = 0.0f;
+  }
 
   float left, right, bottom, top, near, far;
   projmat_dimensions(main_view.winmat().ptr(), &left, &right, &bottom, &top, &near, &far);
@@ -401,7 +465,7 @@ void VolumeModule::set_view(View &main_view)
    * our froxel volume so that a 2D pixel covers exactly the number of pixel in a tile. */
   float2 render_size = float2(right - left, top - bottom);
   float2 volume_size = render_size * float2(data_.tex_size.xy() * data_.tile_size) /
-                       float2(inst_.film.render_extent_get());
+                       float2(extent);
   /* Change to the padded extends. */
   right = left + volume_size.x;
   top = bottom + volume_size.y;
@@ -459,15 +523,8 @@ void VolumeModule::draw_prepass(View &main_view)
   GPU_debug_group_end();
 }
 
-void VolumeModule::draw_compute(View &main_view, int2 extent, bool reuse_frame_compute)
+void VolumeModule::draw_compute(View &main_view, int2 extent)
 {
-  if (reuse_frame_compute && compute_done_) {
-    return;
-  }
-  if (reuse_frame_compute) {
-    compute_done_ = true;
-  }
-
   if (!enabled_) {
     return;
   }
@@ -486,8 +543,11 @@ void VolumeModule::draw_compute(View &main_view, int2 extent, bool reuse_frame_c
     inst_.lights.eval_uniform_light_shaders(main_view);
     inst_.lights.eval_volume_light_shaders(main_view, data_.tex_size);
 
-    scatter_tx_.swap();
-    extinction_tx_.swap();
+    if (use_history_) {
+      scatter_tx_.swap();
+      extinction_tx_.swap();
+      compute_resources_select(true);
+    }
   }
 
   {
@@ -501,14 +561,16 @@ void VolumeModule::draw_compute(View &main_view, int2 extent, bool reuse_frame_c
   /* NPR deferred passes sample the integrated images before the final volume resolve. */
   GPU_memory_barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS | GPU_BARRIER_TEXTURE_FETCH);
 
-  /* Copy history data. */
-  history_viewmat_ = main_view.viewmat();
-  data_.history_depth_near = data_.depth_near;
-  data_.history_depth_far = data_.depth_far;
-  data_.history_depth_distribution = data_.depth_distribution;
-  data_.history_winmat_stable = data_.winmat_stable;
-  valid_history_ = true;
-  history_frame_count_ += 1;
+  if (use_history_) {
+    /* Copy history data. Auxiliary captures deliberately leave the main-view history untouched. */
+    history_viewmat_ = main_view.viewmat();
+    data_.history_depth_near = data_.depth_near;
+    data_.history_depth_far = data_.depth_far;
+    data_.history_depth_distribution = data_.depth_distribution;
+    data_.history_winmat_stable = data_.winmat_stable;
+    valid_history_ = true;
+    history_frame_count_ += 1;
+  }
 }
 
 void VolumeModule::draw_resolve(View &view)

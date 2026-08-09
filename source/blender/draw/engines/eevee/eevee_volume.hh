@@ -57,8 +57,8 @@ class VolumeModule {
   Instance &inst_;
 
   bool enabled_;
-  /* Volume integration can be consumed by NPR before the final resolve. */
-  bool compute_done_ = false;
+  /* Auxiliary views use independent integration textures and never consume main-view history. */
+  bool use_history_ = true;
   bool viewport_sampling_is_reset_ = false;
   bool use_reprojection_;
   bool use_lights_;
@@ -97,10 +97,26 @@ class VolumeModule {
   SwapChain<Texture, 2> scatter_tx_;
   SwapChain<Texture, 2> extinction_tx_;
 
+  /* Render Texture captures run before the main view. Keep their output separate so they cannot
+   * replace the main-view history or the integrated result consumed by NPR Refraction. */
+  Texture capture_scatter_tx_ = {"capture_scatter_tx"};
+  Texture capture_extinction_tx_ = {"capture_extinction_tx"};
+
   /* Volume Integration */
   PassSimple integration_ps_ = {"Volumes.Integration"};
   Texture integrated_scatter_tx_;
   Texture integrated_transmit_tx_;
+  Texture capture_integrated_scatter_tx_ = {"capture_integrated_scatter_tx"};
+  Texture capture_integrated_transmit_tx_ = {"capture_integrated_transmit_tx"};
+
+  /* Pass bindings point to these references so the same passes can target either the main-view or
+   * capture resources without rebuilding them during rendering. */
+  gpu::Texture *scatter_history_tx_ = nullptr;
+  gpu::Texture *extinction_history_tx_ = nullptr;
+  gpu::Texture *scatter_result_tx_ = nullptr;
+  gpu::Texture *extinction_result_tx_ = nullptr;
+  gpu::Texture *integrated_scatter_result_tx_ = nullptr;
+  gpu::Texture *integrated_transmit_result_tx_ = nullptr;
 
   /* Full-screen Resolve */
   PassSimple resolve_ps_ = {"Volumes.Resolve"};
@@ -171,13 +187,13 @@ class VolumeModule {
   void end_sync();
 
   void set_view(View &main_view);
+  /* Configure an auxiliary view with its own extent and without temporal history. */
+  void set_view(View &main_view, int2 extent, bool use_history);
 
   /* Render material properties. Needs to be called after `set_view`. */
   void draw_prepass(View &main_view);
   /* Compute scattering and integration. */
-  /* `reuse_frame_compute` is false for isolated render-texture captures, which have their own
-   * view/extent and must not consume the main-view one-shot compute. */
-  void draw_compute(View &main_view, int2 extent, bool reuse_frame_compute = true);
+  void draw_compute(View &main_view, int2 extent);
   /* Final image compositing. */
   void draw_resolve(View &view);
 
@@ -229,5 +245,8 @@ class VolumeModule {
       pass.bind_image(VOLUME_HIT_COUNT_SLOT, &hit_count_tx_);
     }
   } occupancy;
+
+ private:
+  void compute_resources_select(bool use_history);
 };
 }  // namespace blender::eevee

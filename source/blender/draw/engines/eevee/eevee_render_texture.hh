@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 
 #include "DRW_render.hh"
@@ -55,6 +56,13 @@ class RenderTextureModule {
   void begin_sync();
   void render();
   void end_sync() {}
+
+  bool has_active() const
+  {
+    return std::any_of(slots_.begin(), slots_.end(), [](const RuntimeSlot &slot) {
+      return slot.active;
+    });
+  }
 
   template<typename PassType> void bind_resources(PassType &pass)
   {
