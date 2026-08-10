@@ -140,6 +140,7 @@ enum eGPUCustomNodeDependencyFlag {
   GPU_CUSTOM_NODE_DEPENDENCY_NONE = 0,
   GPU_CUSTOM_NODE_DEPENDENCY_GLSL_GEOMETRY_HELPERS = (1 << 0),
   GPU_CUSTOM_NODE_DEPENDENCY_GLSL_LIGHTPROBE_HELPERS = (1 << 1),
+  GPU_CUSTOM_NODE_DEPENDENCY_GLSL_MATRIX_HELPERS = (1 << 2),
 };
 ENUM_OPERATORS(eGPUCustomNodeDependencyFlag);
 
@@ -147,6 +148,8 @@ inline constexpr const char *GPU_GLSL_FUNCTION_GEOMETRY_HELPER_FILENAME =
     "__glsl_function_geometry_helpers.glsl";
 inline constexpr const char *GPU_GLSL_FUNCTION_LIGHTPROBE_HELPER_FILENAME =
     "__glsl_function_lightprobe_helpers.glsl";
+inline constexpr const char *GPU_GLSL_FUNCTION_MATRIX_HELPER_FILENAME =
+    "__glsl_function_matrix_helpers.glsl";
 
 using GPUCodegenCallbackFn = void (*)(void *thunk,
                                       GPUMaterial *mat,

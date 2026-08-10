@@ -350,6 +350,7 @@ namespace blender
       bool uses_geometry_access = false;
       bool uses_lightprobe_access = false;
       bool uses_eevee_light_access = false;
+      bool uses_matrix_access = false;
       bool defines_parsed = false;
 
       std::string error;
@@ -512,9 +513,11 @@ namespace blender
     static bool glsl_source_uses_geometry_access(const Vector<GLSLToken>& tokens);
     static bool glsl_source_uses_lightprobe_access(const Vector<GLSLToken>& tokens);
     static bool glsl_source_uses_eevee_light_access(const Vector<GLSLToken>& tokens);
+    static bool glsl_source_uses_matrix_access(const Vector<GLSLToken>& tokens);
     static bool glsl_function_meta_uses_geometry_access(const GLSLFunctionDefinition& function);
     static bool glsl_function_meta_uses_lightprobe_access(const GLSLFunctionDefinition& function);
     static bool glsl_function_meta_uses_eevee_light_access(const GLSLFunctionDefinition& function);
+    static bool glsl_function_meta_uses_matrix_access(const GLSLFunctionDefinition& function);
     static bool find_glsl_function_definition(const Vector<GLSLToken>& tokens,
       const StringRef function_name,
       GLSLFunctionDefinition& r_function,
@@ -5750,6 +5753,22 @@ namespace blender
         "glsl_incoming");
     }
 
+    static bool is_glsl_matrix_access_identifier(const StringRef identifier)
+    {
+      return ELEM(identifier,
+        "glsl_view_matrix",
+        "glsl_view_matrix_inverse",
+        "glsl_projection_matrix",
+        "glsl_projection_matrix_inverse",
+        "glsl_view_projection_matrix",
+        "glsl_view_projection_matrix_inverse",
+        "glsl_model_matrix",
+        "glsl_model_matrix_inverse",
+        "glsl_model_view_matrix",
+        "glsl_model_view_projection_matrix",
+        "glsl_normal_matrix");
+    }
+
     static bool glsl_expression_uses_identifier(const StringRef expression,
       bool (*predicate)(const StringRef identifier))
     {
@@ -5770,6 +5789,19 @@ namespace blender
       {
         if (token.kind == GLSLToken::Kind::Identifier &&
             is_glsl_geometry_access_identifier(token.text))
+        {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    static bool glsl_source_uses_matrix_access(const Vector<GLSLToken>& tokens)
+    {
+      for (const GLSLToken& token : tokens)
+      {
+        if (token.kind == GLSLToken::Kind::Identifier &&
+            is_glsl_matrix_access_identifier(token.text))
         {
           return true;
         }
@@ -5832,6 +5864,20 @@ namespace blender
         if (param.meta.default_expression.has_value() &&
           glsl_expression_uses_identifier(*param.meta.default_expression,
             is_glsl_geometry_access_identifier))
+        {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    static bool glsl_function_meta_uses_matrix_access(const GLSLFunctionDefinition& function)
+    {
+      for (const GLSLFunctionParam& param : function.params)
+      {
+        if (param.meta.default_expression.has_value() &&
+          glsl_expression_uses_identifier(*param.meta.default_expression,
+            is_glsl_matrix_access_identifier))
         {
           return true;
         }
@@ -7824,6 +7870,126 @@ vec3 glsl_incoming()
 )GLSL";
     }
 
+    static std::string build_glsl_matrix_helper_block()
+    {
+      return R"GLSL(
+/* Draw-view transform helpers for GLSL Function.
+ * View/projection use the current draw ViewMatrices (includes overscan / film crop / TAA jitter).
+ * Enabled in vertex+fragment (vertex required for true Displacement).
+ * Model helpers are only live on object surface-like paths; Filter (MAT_FILTER) stubs them. */
+
+#if (defined(GPU_VERTEX_SHADER) || defined(GPU_FRAGMENT_SHADER)) && \
+    (defined(MAT_DEFERRED) || defined(MAT_FORWARD) || defined(MAT_DEPTH) || \
+     defined(MAT_SHADOW) || defined(NPR_SHADER) || defined(MAT_FILTER))
+mat4 glsl_view_matrix()
+{
+  return view_matrices_get().viewmat;
+}
+mat4 glsl_view_matrix_inverse()
+{
+  return view_matrices_get().viewinv;
+}
+mat4 glsl_projection_matrix()
+{
+  return view_matrices_get().winmat;
+}
+mat4 glsl_projection_matrix_inverse()
+{
+  return view_matrices_get().wininv;
+}
+mat4 glsl_view_projection_matrix()
+{
+  const ViewMatrices view = view_matrices_get();
+  return view.winmat * view.viewmat;
+}
+mat4 glsl_view_projection_matrix_inverse()
+{
+  const ViewMatrices view = view_matrices_get();
+  return view.viewinv * view.wininv;
+}
+#else
+mat4 glsl_view_matrix()
+{
+  return mat4(1.0);
+}
+mat4 glsl_view_matrix_inverse()
+{
+  return mat4(1.0);
+}
+mat4 glsl_projection_matrix()
+{
+  return mat4(1.0);
+}
+mat4 glsl_projection_matrix_inverse()
+{
+  return mat4(1.0);
+}
+mat4 glsl_view_projection_matrix()
+{
+  return mat4(1.0);
+}
+mat4 glsl_view_projection_matrix_inverse()
+{
+  return mat4(1.0);
+}
+#endif
+
+#if (defined(GPU_VERTEX_SHADER) || defined(GPU_FRAGMENT_SHADER)) && \
+    (defined(MAT_DEFERRED) || defined(MAT_FORWARD) || defined(MAT_DEPTH) || \
+     defined(MAT_SHADOW) || defined(NPR_SHADER)) && !defined(MAT_FILTER)
+mat4 glsl_model_matrix()
+{
+  return object_matrices_get().model;
+}
+mat4 glsl_model_matrix_inverse()
+{
+  return object_matrices_get().model_inverse;
+}
+mat4 glsl_model_view_matrix()
+{
+  const ViewMatrices view = view_matrices_get();
+  const ObjectMatrices obj = object_matrices_get();
+  return view.viewmat * obj.model;
+}
+mat4 glsl_model_view_projection_matrix()
+{
+  const ViewMatrices view = view_matrices_get();
+  const ObjectMatrices obj = object_matrices_get();
+  return view.winmat * (view.viewmat * obj.model);
+}
+mat3 glsl_normal_matrix()
+{
+  /* Match normal_transform_object_to_world: N' = N * mat3(model_inverse)
+   * for column vectors that is N' = transpose(mat3(model_inverse)) * N. */
+  const ObjectMatrices obj = object_matrices_get();
+  return transpose(to_float3x3(obj.model_inverse));
+}
+#else
+mat4 glsl_model_matrix()
+{
+  return mat4(1.0);
+}
+mat4 glsl_model_matrix_inverse()
+{
+  return mat4(1.0);
+}
+mat4 glsl_model_view_matrix()
+{
+  return mat4(1.0);
+}
+mat4 glsl_model_view_projection_matrix()
+{
+  return mat4(1.0);
+}
+mat3 glsl_normal_matrix()
+{
+  return mat3(1.0);
+}
+#endif
+
+)GLSL";
+    }
+
     static std::string build_glsl_lightprobe_helper_block()
     {
       return R"GLSL(
@@ -8702,6 +8868,7 @@ vec3 glsl_ambient_lighting()
       result.uses_geometry_access = glsl_source_uses_geometry_access(tokens);
       result.uses_lightprobe_access = glsl_source_uses_lightprobe_access(tokens);
       result.uses_eevee_light_access = glsl_source_uses_eevee_light_access(tokens);
+      result.uses_matrix_access = glsl_source_uses_matrix_access(tokens);
       if (!validate_no_top_level_conditional_glsl_code(stripped_source, tokens, result.error))
       {
         return result;
@@ -8771,6 +8938,7 @@ vec3 glsl_ambient_lighting()
       result.uses_geometry_access |= glsl_function_meta_uses_geometry_access(result.function);
       result.uses_lightprobe_access |= glsl_function_meta_uses_lightprobe_access(result.function);
       result.uses_eevee_light_access |= glsl_function_meta_uses_eevee_light_access(result.function);
+      result.uses_matrix_access |= glsl_function_meta_uses_matrix_access(result.function);
       if (!validate_generated_glsl_function_identifiers(result.function, result.error))
       {
         return result;
@@ -10305,6 +10473,12 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
         GPU_material_generated_source_add(
           mat, GPU_GLSL_FUNCTION_GEOMETRY_HELPER_FILENAME, {}, geometry_helper_source.c_str());
       }
+      if (parse_result.uses_matrix_access)
+      {
+        const std::string matrix_helper_source = build_glsl_matrix_helper_block();
+        GPU_material_generated_source_add(
+          mat, GPU_GLSL_FUNCTION_MATRIX_HELPER_FILENAME, {}, matrix_helper_source.c_str());
+      }
       if (parse_result.uses_lightprobe_access)
       {
         const std::string lightprobe_helper_source = build_glsl_lightprobe_helper_block();
@@ -10335,6 +10509,11 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
       {
         dependency_flags = eGPUCustomNodeDependencyFlag(
           dependency_flags | GPU_CUSTOM_NODE_DEPENDENCY_GLSL_GEOMETRY_HELPERS);
+      }
+      if (parse_result.uses_matrix_access)
+      {
+        dependency_flags = eGPUCustomNodeDependencyFlag(
+          dependency_flags | GPU_CUSTOM_NODE_DEPENDENCY_GLSL_MATRIX_HELPERS);
       }
       if (parse_result.uses_lightprobe_access)
       {

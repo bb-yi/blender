@@ -346,6 +346,9 @@ void GPUCodegen::node_serialize(Set<StringRefNull> &used_libraries,
   if (node->dependency_flags & GPU_CUSTOM_NODE_DEPENDENCY_GLSL_LIGHTPROBE_HELPERS) {
     used_libraries.add(GPU_GLSL_FUNCTION_LIGHTPROBE_HELPER_FILENAME);
   }
+  if (node->dependency_flags & GPU_CUSTOM_NODE_DEPENDENCY_GLSL_MATRIX_HELPERS) {
+    used_libraries.add(GPU_GLSL_FUNCTION_MATRIX_HELPER_FILENAME);
+  }
 
   auto source_reference = [&](GPUInput *input) {
     BLI_assert(ELEM(input->source, GPU_SOURCE_OUTPUT, GPU_SOURCE_ATTR));
