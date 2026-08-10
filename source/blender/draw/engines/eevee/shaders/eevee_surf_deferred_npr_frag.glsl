@@ -230,10 +230,14 @@ bool npr_volume_depth_is_background(float depth)
 }
 
 float4 npr_volume_compose_back_color(float4 back_color,
-                                     float2 screen_uv,
+                                     float2 volume_uv,
                                      float front_depth,
                                      float back_depth)
 {
+  /* Froxel integration is stored per camera column. `volume_uv` / both depths must belong to the
+   * refracting surface pixel. Image Sample offsets may read back radiance from another texel, but
+   * reusing that sample UV with the refractor depth reads a different ray's optical depth and can
+   * collapse front transmittance to ~0 (pure black holes). */
   const float front_view_depth = -npr_volume_depth_screen_to_view(front_depth);
   /* Hi-Z is stored in the regular (non-reversed) depth convention. A clear/miss is normally one,
    * even though the hardware depth attachment uses reverse-Z. Empty first-layer feedback can also
@@ -253,10 +257,10 @@ float4 npr_volume_compose_back_color(float4 back_color,
     }
   }
 
-  VolumeResolveSample front = npr_volume_resolve(screen_uv, front_depth);
+  VolumeResolveSample front = npr_volume_resolve(volume_uv, front_depth);
   VolumeResolveSample back = back_is_background ?
-                                 npr_volume_resolve_background(screen_uv, front_depth) :
-                                 npr_volume_resolve(screen_uv, back_depth);
+                                 npr_volume_resolve_background(volume_uv, front_depth) :
+                                 npr_volume_resolve(volume_uv, back_depth);
   if (any(isnan(front.scattering)) || any(isinf(front.scattering)) ||
       any(isnan(front.transmittance)) || any(isinf(front.transmittance)) ||
       any(isnan(back.scattering)) || any(isinf(back.scattering)) ||
@@ -264,9 +268,11 @@ float4 npr_volume_compose_back_color(float4 back_color,
     return back_color;
   }
   const float transmittance_epsilon = 1.0e-4f;
-  if (average(front.transmittance) <= transmittance_epsilon) {
-    /* Once the front segment is effectively opaque, no background contribution can reach the
-     * refractor. The final volume resolve still supplies camera-to-front scattering. */
+  /* Per-channel: a single dead absorption channel must not zero the whole RGB sample. Only when
+   * every channel is opaque in front of the refractor is the background blocked. */
+  if (all(lessThanEqual(front.transmittance, float3(transmittance_epsilon)))) {
+    /* No background contribution can reach the refractor. The final volume resolve still supplies
+     * camera-to-front scattering. */
     return float4(0.0f);
   }
   const bool3 visible_channels = greaterThan(front.transmittance,
@@ -362,7 +368,9 @@ float4 TextureHandle_eval_impl(TextureHandle tex, float2 offset, bool texel_offs
   depth = npr_gbuffer_read_surface_depth(gbuf.header, texel, depth);
 #endif
   float2 screen_uv = (float2(texel) + 0.5f) / float2(extent);
-  const float front_depth = npr_depth_at_texel(int2(gl_FragCoord.xy));
+  const int2 front_texel = int2(gl_FragCoord.xy);
+  const float2 volume_uv = (float2(front_texel) + 0.5f) / float2(extent);
+  const float front_depth = npr_depth_at_texel(front_texel);
 
   switch (tex.type) {
     case TEX_HANDLE_RP_COLOR:
@@ -376,10 +384,11 @@ float4 TextureHandle_eval_impl(TextureHandle tex, float2 offset, bool texel_offs
     case TEX_HANDLE_BACK_COMBINED_COLOR:
     {
       float4 back_color = texelFetch(radiance_back_tx, texel, 0);
-      float back_depth = texelFetch(hiz_back_tx, texel, 0).r;
 #  ifdef MAT_NPR_REFRACTION_VOLUME
+      /* Color may come from an offset texel; volume segment stays on the refractor camera column. */
+      const float back_depth_volume = texelFetch(hiz_back_tx, front_texel, 0).r;
       back_color = npr_volume_compose_back_color(
-          back_color, screen_uv, front_depth, back_depth);
+          back_color, volume_uv, front_depth, back_depth_volume);
 #  endif
       return back_color;
     }
@@ -454,7 +463,9 @@ float4 TextureHandle_eval_uv_impl(TextureHandle tex, float2 uv)
   int2 texel = npr_texture_texel_from_uv(uv, extent);
   float depth = npr_depth_at_texel(texel);
   float2 screen_uv = (float2(texel) + 0.5f) / float2(extent);
-  const float front_depth = npr_depth_at_texel(int2(gl_FragCoord.xy));
+  const int2 front_texel = int2(gl_FragCoord.xy);
+  const float2 volume_uv = (float2(front_texel) + 0.5f) / float2(extent);
+  const float front_depth = npr_depth_at_texel(front_texel);
 
   switch (tex.type) {
     case TEX_HANDLE_RP_COLOR:
@@ -467,10 +478,11 @@ float4 TextureHandle_eval_uv_impl(TextureHandle tex, float2 uv)
     case TEX_HANDLE_BACK_COMBINED_COLOR:
     {
       float4 back_color = texelFetch(radiance_back_tx, texel, 0);
-      float back_depth = texelFetch(hiz_back_tx, texel, 0).r;
 #  ifdef MAT_NPR_REFRACTION_VOLUME
+      /* Color may come from an arbitrary UV; volume segment stays on the refractor camera column. */
+      const float back_depth_volume = texelFetch(hiz_back_tx, front_texel, 0).r;
       back_color = npr_volume_compose_back_color(
-          back_color, screen_uv, front_depth, back_depth);
+          back_color, volume_uv, front_depth, back_depth_volume);
 #  endif
       return back_color;
     }
