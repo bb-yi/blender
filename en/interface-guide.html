@@ -750,17 +750,50 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#8-pose-bone-outliner-visibility" class="md-nav__link">
+  <a href="#8-ime-input" class="md-nav__link">
     <span class="md-ellipsis">
-      8. Pose Bone Outliner Visibility
+      8. IME Input
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="8. Pose Bone Outliner Visibility">
+    <nav class="md-nav" aria-label="8. IME Input">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
   <a href="#purpose_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      Purpose
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#notes_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      Notes
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-pose-bone-outliner-visibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      9. Pose Bone Outliner Visibility
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. Pose Bone Outliner Visibility">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#purpose_8" class="md-nav__link">
     <span class="md-ellipsis">
       Purpose
     </span>
@@ -1205,17 +1238,50 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#8-pose-bone-outliner-visibility" class="md-nav__link">
+  <a href="#8-ime-input" class="md-nav__link">
     <span class="md-ellipsis">
-      8. Pose Bone Outliner Visibility
+      8. IME Input
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="8. Pose Bone Outliner Visibility">
+    <nav class="md-nav" aria-label="8. IME Input">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
   <a href="#purpose_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      Purpose
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#notes_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      Notes
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-pose-bone-outliner-visibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      9. Pose Bone Outliner Visibility
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. Pose Bone Outliner Visibility">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#purpose_8" class="md-nav__link">
     <span class="md-ellipsis">
       Purpose
     </span>
@@ -1452,9 +1518,10 @@
 <h3 id="behavior_3">Behavior<a class="headerlink" href="#behavior_3" title="Permanent link">&para;</a></h3>
 <ul>
 <li>Default value: <code>1</code></li>
-<li>Higher values expand the Sun shadow-map coverage scale and usually reduce effective detail per area</li>
+<li>Higher values expand the Sun shadow-map coverage scale; the current stable build applies scale to tilemaps correctly and improves effective detail allocation as coverage grows</li>
 <li>Lower values concentrate the shadow map into a smaller range and can improve nearby detail, but can expose insufficient coverage or boundary issues more easily</li>
 <li>This setting affects only Eevee Sun shadow-map sampling / coverage behavior; it does not change light color, energy, direction, or material-side shading</li>
+<li>Viewport Shadow LOD visualization can be enabled to inspect clipmap detail levels (debug aid; does not change material shading)</li>
 </ul>
 <h2 id="7-splash-version-tag">7. Splash Version Tag<a class="headerlink" href="#7-splash-version-tag" title="Permanent link">&para;</a></h2>
 <h3 id="purpose_6">Purpose<a class="headerlink" href="#purpose_6" title="Permanent link">&para;</a></h3>
@@ -1462,10 +1529,18 @@
 <h3 id="current-format">Current Format<a class="headerlink" href="#current-format" title="Permanent link">&para;</a></h3>
 <ul>
 <li><code>version + npr post + build date</code></li>
-<li>Example: <code>5.2.0 npr post 2026-07-16</code></li>
+<li>Example: <code>5.2.0 npr post 2026-08-11</code></li>
 </ul>
-<h2 id="8-pose-bone-outliner-visibility">8. Pose Bone Outliner Visibility<a class="headerlink" href="#8-pose-bone-outliner-visibility" title="Permanent link">&para;</a></h2>
+<h2 id="8-ime-input">8. IME Input<a class="headerlink" href="#8-ime-input" title="Permanent link">&para;</a></h2>
 <h3 id="purpose_7">Purpose<a class="headerlink" href="#purpose_7" title="Permanent link">&para;</a></h3>
+<p>Improves IME support in text editing and UI input paths (including Blender 5.2 API adaptation and text-editor cursor metrics) so candidate windows and caret placement are more stable for languages such as Chinese.</p>
+<h3 id="notes_2">Notes<a class="headerlink" href="#notes_2" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Mainly affects the text editor and other IME-enabled UI inputs</li>
+<li>Does not change material nodes or render results</li>
+</ul>
+<h2 id="9-pose-bone-outliner-visibility">9. Pose Bone Outliner Visibility<a class="headerlink" href="#9-pose-bone-outliner-visibility" title="Permanent link">&para;</a></h2>
+<h3 id="purpose_8">Purpose<a class="headerlink" href="#purpose_8" title="Permanent link">&para;</a></h3>
 <p>Adds a dedicated Outliner visibility flag to each <code>Pose Bone</code>, making it easier to organize complex rigs without changing rig behavior itself.</p>
 <h3 id="entry_6">Entry<a class="headerlink" href="#entry_6" title="Permanent link">&para;</a></h3>
 <ul>

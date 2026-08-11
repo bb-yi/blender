@@ -477,6 +477,15 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      Notes
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -553,7 +562,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#notes" class="md-nav__link">
+  <a href="#notes_1" class="md-nav__link">
     <span class="md-ellipsis">
       Notes
     </span>
@@ -789,6 +798,15 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      Notes
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -865,7 +883,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#notes" class="md-nav__link">
+  <a href="#notes_1" class="md-nav__link">
     <span class="md-ellipsis">
       Notes
     </span>
@@ -1005,11 +1023,17 @@
 </div>
 
 <h4 id="purpose_1">Purpose<a class="headerlink" href="#purpose_1" title="Permanent link">&para;</a></h4>
-<p>Reads refraction-related buffers, similar in spirit to <code>Screenspace Info</code>.</p>
+<p>Reads refraction-related buffers, similar in spirit to <code>Screenspace Info</code>. The current stable build also includes the EEVEE NPR <strong>refraction volume</strong> approximation: when volumes are present, refraction background sampling/capture is isolated from volume compositing to reduce background leaks, depth mismatches, and black-hole artifacts after <code>Image Sample</code> offsets.</p>
 <h4 id="outputs_1">Outputs<a class="headerlink" href="#outputs_1" title="Permanent link">&para;</a></h4>
 <ul>
 <li><code>Combined Color</code></li>
 <li><code>Position</code></li>
+</ul>
+<h4 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h4>
+<ul>
+<li>Refraction outputs behave like image handles and are usually passed to <code>Image Sample</code>.</li>
+<li>With volume fog / volume objects, validate viewport and final render consistency on <code>fd9fabb4f531</code> or newer packages.</li>
+<li>Both <code>View</code> and <code>Pixel</code> offsets on <code>Image Sample</code> should affect the refraction buffer; solid black results often indicate an older build.</li>
 </ul>
 <h3 id="image-sample">Image Sample<a class="headerlink" href="#image-sample" title="Permanent link">&para;</a></h3>
 <h4 id="entry">Entry<a class="headerlink" href="#entry" title="Permanent link">&para;</a></h4>
@@ -1039,7 +1063,7 @@
     <br>
 </div>
 
-<h4 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h4>
+<h4 id="notes_1">Notes<a class="headerlink" href="#notes_1" title="Permanent link">&para;</a></h4>
 <p>This node runs its internal logic once for every light affecting the current surface and outputs per-light information during each iteration.</p>
 <h4 id="built-in-data">Built-In Data<a class="headerlink" href="#built-in-data" title="Permanent link">&para;</a></h4>
 <p><code>For Each Light Input</code> currently provides:</p>

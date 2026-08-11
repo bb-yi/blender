@@ -4148,6 +4148,10 @@
 <li>当前不支持把 <code>struct / array</code> 作为导出函数边界类型</li>
 <li>导出函数边界当前已经支持 <code>int / bool</code>，适合直接写模式开关、枚举值、<code>lightgroup_id</code> 这类参数</li>
 <li>内置了几何 helper，可在函数体里直接读取：<code>glsl_position()</code>、<code>glsl_normal()</code>、<code>glsl_true_normal()</code>、<code>glsl_incoming()</code></li>
+<li>内置了 draw-view 变换矩阵 helper（顶点与片元阶段可用）：</li>
+<li>视图 / 投影：<code>glsl_view_matrix()</code>、<code>glsl_view_matrix_inverse()</code>、<code>glsl_projection_matrix()</code>、<code>glsl_projection_matrix_inverse()</code>、<code>glsl_view_projection_matrix()</code>、<code>glsl_view_projection_matrix_inverse()</code></li>
+<li>物体模型（Surface / NPR；<code>Filter</code> 路径回退为单位矩阵）：<code>glsl_model_matrix()</code>、<code>glsl_model_matrix_inverse()</code>、<code>glsl_model_view_matrix()</code>、<code>glsl_model_view_projection_matrix()</code>、<code>glsl_normal_matrix()</code></li>
+<li>视图 / 投影来自当前 draw 的 <code>ViewMatrices</code>，包含 overscan、Film crop 与 TAA jitter；<code>Filter</code> 可用视图 / 投影 helper</li>
 <li>内置了环境光 helper：<code>glsl_ambient_lighting()</code></li>
 <li>内置了 Eevee 直接光辅助 helper，可在函数体里使用：<code>GLSLLight</code>、<code>glsl_light_count()</code>、<code>glsl_light_get(light_index)</code>、<code>glsl_light_shadow(light_index, shading_normal)</code></li>
 <li><code>GLSLLight.lightgroup_id</code> 直接对应灯光数据面板里的 <code>Lightgroup ID</code></li>
@@ -4161,26 +4165,25 @@
 </ul>
 <h4 id="meta">示例：带注释和面板的参数 Meta<a class="headerlink" href="#meta" title="Permanent link">&para;</a></h4>
 <p><code>label="..."</code> 会显示为 socket 名称；<code>description="..."</code> 会显示为输入 socket 的 tooltip；<code>@panel</code> 可以把大量输入分组到节点上的一级折叠面板里。</p>
-<div class="highlight"><pre><span></span><code><span class="cm">/* @glsl_meta v1</span>
-<span class="cm">base_color: label=&quot;基础色&quot; default=vec3(1.0) subtype=color description=&quot;Base surface color&quot;</span>
-
-<span class="cm">@panel Specular closed=true</span>
-<span class="cm">specular: label=&quot;高光强度&quot; default=0.5 min=0.0 max=1.0 subtype=factor description=&quot;Specular strength&quot;</span>
-<span class="cm">roughness: label=&quot;粗糙度&quot; default=0.45 min=0.0 max=1.0 subtype=factor description=&quot;Highlight roughness&quot;</span>
-<span class="cm">@end_panel</span>
-
-<span class="cm">@panel Texture closed=true</span>
-<span class="cm">tex: label=&quot;贴图&quot; description=&quot;Texture closure used by texture(tex, uv)&quot;</span>
-<span class="cm">uv: label=&quot;坐标&quot; default=vec2(0.0) description=&quot;Texture coordinates&quot;</span>
-<span class="cm">@end_panel</span>
-<span class="cm">*/</span>
-<span class="kt">vec4</span><span class="w"> </span><span class="n">annotated_shader</span><span class="p">(</span><span class="kt">vec3</span><span class="w"> </span><span class="n">base_color</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">specular</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">roughness</span><span class="p">,</span><span class="w"> </span><span class="kt">sampler2D</span><span class="w"> </span><span class="n">tex</span><span class="p">,</span><span class="w"> </span><span class="kt">vec2</span><span class="w"> </span><span class="n">uv</span><span class="p">)</span>
-<span class="p">{</span>
-<span class="w">  </span><span class="kt">vec3</span><span class="w"> </span><span class="n">tex_color</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">texture</span><span class="p">(</span><span class="n">tex</span><span class="p">,</span><span class="w"> </span><span class="n">uv</span><span class="p">).</span><span class="n">rgb</span><span class="p">;</span>
-<span class="w">  </span><span class="kt">vec3</span><span class="w"> </span><span class="n">color</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">mix</span><span class="p">(</span><span class="n">base_color</span><span class="p">,</span><span class="w"> </span><span class="n">tex_color</span><span class="p">,</span><span class="w"> </span><span class="n">specular</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="p">(</span><span class="mf">1.0</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">roughness</span><span class="p">));</span>
-<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="kt">vec4</span><span class="p">(</span><span class="n">color</span><span class="p">,</span><span class="w"> </span><span class="mf">1.0</span><span class="p">);</span>
-<span class="p">}</span>
-</code></pre></div>
+<p>```glsl
+/* @glsl_meta v1
+base_color: label="基础色" default=vec3(1.0) subtype=color description="Base surface color"</p>
+<p>@panel Specular closed=true
+specular: label="高光强度" default=0.5 min=0.0 max=1.0 subtype=factor description="Specular strength"
+roughness: label="粗糙度" default=0.45 min=0.0 max=1.0 subtype=factor description="Highlight roughness"
+@end_panel</p>
+<p>@panel Texture closed=true
+tex: label="贴图" description="Texture closure used by texture(tex, uv)"
+uv: label="坐标" default=vec2(0.0) description="Texture coordinates"
+@end_panel
+*/
+vec4 annotated_shader(vec3 base_color, float specular, float roughness, sampler2D tex, vec2 uv)
+{
+  vec3 tex_color = texture(tex, uv).rgb;
+  vec3 color = mix(base_color, tex_color, specular * (1.0 - roughness));
+  return vec4(color, 1.0);
+}
+```</p>
 <ul>
 <li><code>label</code> 和 <code>description</code> 只影响 UI，不改变 socket identifier、默认值同步规则或 GLSL 调用方式</li>
 <li><code>out</code> 参数只支持 <code>label</code>；其他 Meta 仍只支持输入参数</li>
@@ -4269,46 +4272,44 @@
 </table>
 <h4 id="lightgroup_id">示例：按 <code>lightgroup_id</code> 过滤灯光<a class="headerlink" href="#lightgroup_id" title="Permanent link">&para;</a></h4>
 <p>如果你想在 <code>GLSL Function</code> 里只接收某一个灯光组，可以直接读取 <code>GLSLLight.lightgroup_id</code>。下面这个版本同时展示 <code>subtype=color</code>、<code>int / bool</code> 默认值、<code>description</code>、<code>min / max</code>、<code>subtype=factor</code> 和 <code>@panel</code>：</p>
-<div class="highlight"><pre><span></span><code><span class="cm">/* @glsl_meta v1</span>
-<span class="cm">albedo: default=vec3(1.0) subtype=color description=&quot;Diffuse albedo for the selected light group&quot;</span>
-<span class="cm">target_lightgroup_id: default=0 description=&quot;Only lights with this Lightgroup ID are included&quot;</span>
+<p>```glsl
+/* @glsl_meta v1
+albedo: default=vec3(1.0) subtype=color description="Diffuse albedo for the selected light group"
+target_lightgroup_id: default=0 description="Only lights with this Lightgroup ID are included"</p>
+<p>@panel Shading closed=false
+use_shadow: default=true description="Apply glsl_light_shadow to selected lights"
+shadow_strength: default=1.0 min=0.0 max=1.0 subtype=factor description="Blend from unshadowed to fully shadowed direct light"
+ambient_floor: default=0.0 min=0.0 max=1.0 subtype=factor description="Small constant fill after lightgroup filtering"
+@end_panel
+*/
+vec4 lightgroup_lambert(vec3 albedo,
+                        int target_lightgroup_id,
+                        bool use_shadow,
+                        float shadow_strength,
+                        float ambient_floor)
+{
+  vec3 N = normalize(glsl_normal());
+  vec3 result = vec3(0.0);
+  float shadow_mix = clamp(shadow_strength, 0.0, 1.0);</p>
+<p>for (int i = 0; i &lt; glsl_light_count(); i++) {
+    GLSLLight light = glsl_light_get(i);
+    if (!light.valid || light.lightgroup_id != target_lightgroup_id) {
+      continue;
+    }</p>
+<pre><code>float NdotL = max(dot(N, light.vector), 0.0);
+if (NdotL &lt;= 0.0) {
+  continue;
+}
 
-<span class="cm">@panel Shading closed=false</span>
-<span class="cm">use_shadow: default=true description=&quot;Apply glsl_light_shadow to selected lights&quot;</span>
-<span class="cm">shadow_strength: default=1.0 min=0.0 max=1.0 subtype=factor description=&quot;Blend from unshadowed to fully shadowed direct light&quot;</span>
-<span class="cm">ambient_floor: default=0.0 min=0.0 max=1.0 subtype=factor description=&quot;Small constant fill after lightgroup filtering&quot;</span>
-<span class="cm">@end_panel</span>
-<span class="cm">*/</span>
-<span class="kt">vec4</span><span class="w"> </span><span class="n">lightgroup_lambert</span><span class="p">(</span><span class="kt">vec3</span><span class="w"> </span><span class="n">albedo</span><span class="p">,</span>
-<span class="w">                        </span><span class="kt">int</span><span class="w"> </span><span class="n">target_lightgroup_id</span><span class="p">,</span>
-<span class="w">                        </span><span class="kt">bool</span><span class="w"> </span><span class="n">use_shadow</span><span class="p">,</span>
-<span class="w">                        </span><span class="kt">float</span><span class="w"> </span><span class="n">shadow_strength</span><span class="p">,</span>
-<span class="w">                        </span><span class="kt">float</span><span class="w"> </span><span class="n">ambient_floor</span><span class="p">)</span>
-<span class="p">{</span>
-<span class="w">  </span><span class="kt">vec3</span><span class="w"> </span><span class="n">N</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">normalize</span><span class="p">(</span><span class="n">glsl_normal</span><span class="p">());</span>
-<span class="w">  </span><span class="kt">vec3</span><span class="w"> </span><span class="n">result</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kt">vec3</span><span class="p">(</span><span class="mf">0.0</span><span class="p">);</span>
-<span class="w">  </span><span class="kt">float</span><span class="w"> </span><span class="n">shadow_mix</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">clamp</span><span class="p">(</span><span class="n">shadow_strength</span><span class="p">,</span><span class="w"> </span><span class="mf">0.0</span><span class="p">,</span><span class="w"> </span><span class="mf">1.0</span><span class="p">);</span>
-
-<span class="w">  </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mo">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">glsl_light_count</span><span class="p">();</span><span class="w"> </span><span class="n">i</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="n">GLSLLight</span><span class="w"> </span><span class="n">light</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">glsl_light_get</span><span class="p">(</span><span class="n">i</span><span class="p">);</span>
-<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">light</span><span class="p">.</span><span class="n">valid</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="n">light</span><span class="p">.</span><span class="n">lightgroup_id</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">target_lightgroup_id</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
-<span class="w">      </span><span class="k">continue</span><span class="p">;</span>
-<span class="w">    </span><span class="p">}</span>
-
-<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">NdotL</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">max</span><span class="p">(</span><span class="n">dot</span><span class="p">(</span><span class="n">N</span><span class="p">,</span><span class="w"> </span><span class="n">light</span><span class="p">.</span><span class="n">vector</span><span class="p">),</span><span class="w"> </span><span class="mf">0.0</span><span class="p">);</span>
-<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">NdotL</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="mf">0.0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
-<span class="w">      </span><span class="k">continue</span><span class="p">;</span>
-<span class="w">    </span><span class="p">}</span>
-
-<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">shadow</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">use_shadow</span><span class="w"> </span><span class="o">?</span><span class="w"> </span><span class="n">glsl_light_shadow</span><span class="p">(</span><span class="n">i</span><span class="p">,</span><span class="w"> </span><span class="n">N</span><span class="p">)</span><span class="w"> </span><span class="o">:</span><span class="w"> </span><span class="mf">1.0</span><span class="p">;</span>
-<span class="w">    </span><span class="n">shadow</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">mix</span><span class="p">(</span><span class="mf">1.0</span><span class="p">,</span><span class="w"> </span><span class="n">shadow</span><span class="p">,</span><span class="w"> </span><span class="n">shadow_mix</span><span class="p">);</span>
-<span class="w">    </span><span class="n">result</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">albedo</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">light</span><span class="p">.</span><span class="n">diffuse_color</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">light</span><span class="p">.</span><span class="n">attenuation</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">NdotL</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">shadow</span><span class="p">;</span>
-<span class="w">  </span><span class="p">}</span>
-
-<span class="w">  </span><span class="n">result</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">albedo</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">clamp</span><span class="p">(</span><span class="n">ambient_floor</span><span class="p">,</span><span class="w"> </span><span class="mf">0.0</span><span class="p">,</span><span class="w"> </span><span class="mf">1.0</span><span class="p">);</span>
-<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="kt">vec4</span><span class="p">(</span><span class="n">result</span><span class="p">,</span><span class="w"> </span><span class="mf">1.0</span><span class="p">);</span>
-<span class="p">}</span>
-</code></pre></div>
+float shadow = use_shadow ? glsl_light_shadow(i, N) : 1.0;
+shadow = mix(1.0, shadow, shadow_mix);
+result += albedo * light.diffuse_color * light.attenuation * NdotL * shadow;
+</code></pre>
+<p>}</p>
+<p>result += albedo * clamp(ambient_floor, 0.0, 1.0);
+  return vec4(result, 1.0);
+}
+```</p>
 <h4 id="pbr">示例：PBR 风格直光 + 环境光<a class="headerlink" href="#pbr" title="Permanent link">&para;</a></h4>
 <p>下面这段示例演示当前 <code>GLSL Function</code> 如何直接同时使用：</p>
 <ul>
@@ -4317,126 +4318,113 @@
 <li>逐灯 helper：<code>glsl_light_count()</code>、<code>glsl_light_get(i)</code>、<code>glsl_light_shadow(i, N)</code></li>
 </ul>
 <p>函数名可设为 <code>pbr_lit</code>。这个版本把常用表面参数放进 <code>Surface</code> 面板，并把内置 helper 作为 expression default 暴露成可选覆盖输入：</p>
-<div class="highlight"><pre><span></span><code><span class="cm">/* @glsl_meta v1</span>
-<span class="cm">base_color: default=vec3(0.8, 0.72, 0.6) subtype=color description=&quot;Base surface albedo&quot;</span>
+<p>```glsl
+/* @glsl_meta v1
+base_color: default=vec3(0.8, 0.72, 0.6) subtype=color description="Base surface albedo"</p>
+<p>@panel Surface closed=false
+roughness: default=0.45 min=0.04 max=1.0 subtype=factor description="Microfacet roughness"
+metallic: default=0.0 min=0.0 max=1.0 subtype=factor description="Metallic blend amount"
+ao: default=1.0 min=0.0 max=1.0 subtype=factor description="Ambient occlusion multiplier"
+@end_panel</p>
+<p>@panel Builtin Helpers closed=true
+normal_ws: default=normalize(glsl_normal()) hide_value=true description="Optional world-space shading normal override"
+view_ws: default=normalize(glsl_incoming()) hide_value=true description="Optional world-space view direction override"
+ambient_light: default=glsl_ambient_lighting() subtype=color hide_value=true description="Optional ambient lighting override"
+@end_panel
+*/
+float saturate1(float x)
+{
+  return clamp(x, 0.0, 1.0);
+}</p>
+<p>float pow5(float x)
+{
+  float x2 = x * x;
+  return x2 * x2 * x;
+}</p>
+<p>vec3 fresnel_schlick(float cos_theta, vec3 F0)
+{
+  return F0 + (vec3(1.0) - F0) * pow5(1.0 - saturate1(cos_theta));
+}</p>
+<p>float distribution_ggx(float NdotH, float roughness)
+{
+  float a = roughness * roughness;
+  float a2 = a * a;
+  float nh2 = NdotH * NdotH;
+  float denom = nh2 * (a2 - 1.0) + 1.0;
+  return a2 / max(3.14159265 * denom * denom, 1e-6);
+}</p>
+<p>float geometry_schlick_ggx(float NdotV, float roughness)
+{
+  float r = roughness + 1.0;
+  float k = (r * r) / 8.0;
+  return NdotV / max(NdotV * (1.0 - k) + k, 1e-6);
+}</p>
+<p>float geometry_smith(float NdotV, float NdotL, float roughness)
+{
+  return geometry_schlick_ggx(NdotV, roughness) *
+         geometry_schlick_ggx(NdotL, roughness);
+}</p>
+<p>vec4 pbr_lit(vec3 base_color,
+             float roughness,
+             float metallic,
+             float ao,
+             vec3 normal_ws,
+             vec3 view_ws,
+             vec3 ambient_light)
+{
+  vec3 N = normalize(normal_ws);
+  vec3 Ng = normalize(glsl_true_normal());
+  vec3 V = normalize(view_ws);</p>
+<p>if (dot(N, Ng) &lt; 0.0) {
+    N = Ng;
+  }</p>
+<p>roughness = clamp(roughness, 0.04, 1.0);
+  metallic = clamp(metallic, 0.0, 1.0);
+  ao = clamp(ao, 0.0, 1.0);</p>
+<p>vec3 F0 = mix(vec3(0.04), base_color, metallic);</p>
+<p>vec3 direct_diffuse = vec3(0.0);
+  vec3 direct_specular = vec3(0.0);</p>
+<p>for (int i = 0; i &lt; glsl_light_count(); i++) {
+    GLSLLight light = glsl_light_get(i);
+    vec3 L = normalize(light.vector);
+    vec3 H = normalize(V + L);</p>
+<pre><code>float NdotL = saturate1(dot(N, L));
+float NdotV = saturate1(dot(N, V));
+float NdotH = saturate1(dot(N, H));
+float VdotH = saturate1(dot(V, H));
 
-<span class="cm">@panel Surface closed=false</span>
-<span class="cm">roughness: default=0.45 min=0.04 max=1.0 subtype=factor description=&quot;Microfacet roughness&quot;</span>
-<span class="cm">metallic: default=0.0 min=0.0 max=1.0 subtype=factor description=&quot;Metallic blend amount&quot;</span>
-<span class="cm">ao: default=1.0 min=0.0 max=1.0 subtype=factor description=&quot;Ambient occlusion multiplier&quot;</span>
-<span class="cm">@end_panel</span>
+if (NdotL &lt;= 1e-5 || NdotV &lt;= 1e-5) {
+  continue;
+}
 
-<span class="cm">@panel Builtin Helpers closed=true</span>
-<span class="cm">normal_ws: default=normalize(glsl_normal()) hide_value=true description=&quot;Optional world-space shading normal override&quot;</span>
-<span class="cm">view_ws: default=normalize(glsl_incoming()) hide_value=true description=&quot;Optional world-space view direction override&quot;</span>
-<span class="cm">ambient_light: default=glsl_ambient_lighting() subtype=color hide_value=true description=&quot;Optional ambient lighting override&quot;</span>
-<span class="cm">@end_panel</span>
-<span class="cm">*/</span>
-<span class="kt">float</span><span class="w"> </span><span class="n">saturate1</span><span class="p">(</span><span class="kt">float</span><span class="w"> </span><span class="n">x</span><span class="p">)</span>
-<span class="p">{</span>
-<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="n">clamp</span><span class="p">(</span><span class="n">x</span><span class="p">,</span><span class="w"> </span><span class="mf">0.0</span><span class="p">,</span><span class="w"> </span><span class="mf">1.0</span><span class="p">);</span>
-<span class="p">}</span>
+float shadow = glsl_light_shadow(i, N);
 
-<span class="kt">float</span><span class="w"> </span><span class="n">pow5</span><span class="p">(</span><span class="kt">float</span><span class="w"> </span><span class="n">x</span><span class="p">)</span>
-<span class="p">{</span>
-<span class="w">  </span><span class="kt">float</span><span class="w"> </span><span class="n">x2</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">x</span><span class="p">;</span>
-<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="n">x2</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">x2</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">x</span><span class="p">;</span>
-<span class="p">}</span>
+vec3 F = fresnel_schlick(VdotH, F0);
+float D = distribution_ggx(NdotH, roughness);
+float G = geometry_smith(NdotV, NdotL, roughness);
 
-<span class="kt">vec3</span><span class="w"> </span><span class="n">fresnel_schlick</span><span class="p">(</span><span class="kt">float</span><span class="w"> </span><span class="n">cos_theta</span><span class="p">,</span><span class="w"> </span><span class="kt">vec3</span><span class="w"> </span><span class="n">F0</span><span class="p">)</span>
-<span class="p">{</span>
-<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="n">F0</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="p">(</span><span class="kt">vec3</span><span class="p">(</span><span class="mf">1.0</span><span class="p">)</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">F0</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">pow5</span><span class="p">(</span><span class="mf">1.0</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">saturate1</span><span class="p">(</span><span class="n">cos_theta</span><span class="p">));</span>
-<span class="p">}</span>
+vec3 specular_brdf = (D * G * F) / max(4.0 * NdotV * NdotL, 1e-5);
+vec3 kd = (vec3(1.0) - F) * (1.0 - metallic);
+vec3 diffuse_brdf = kd * base_color / 3.14159265;
 
-<span class="kt">float</span><span class="w"> </span><span class="n">distribution_ggx</span><span class="p">(</span><span class="kt">float</span><span class="w"> </span><span class="n">NdotH</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">roughness</span><span class="p">)</span>
-<span class="p">{</span>
-<span class="w">  </span><span class="kt">float</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">roughness</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">roughness</span><span class="p">;</span>
-<span class="w">  </span><span class="kt">float</span><span class="w"> </span><span class="n">a2</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">a</span><span class="p">;</span>
-<span class="w">  </span><span class="kt">float</span><span class="w"> </span><span class="n">nh2</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">NdotH</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">NdotH</span><span class="p">;</span>
-<span class="w">  </span><span class="kt">float</span><span class="w"> </span><span class="n">denom</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">nh2</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="p">(</span><span class="n">a2</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mf">1.0</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mf">1.0</span><span class="p">;</span>
-<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="n">a2</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">max</span><span class="p">(</span><span class="mf">3.14159265</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">denom</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">denom</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="n">e</span><span class="o">-</span><span class="mi">6</span><span class="p">);</span>
-<span class="p">}</span>
+direct_diffuse += diffuse_brdf *
+                  light.diffuse_color *
+                  light.attenuation *
+                  NdotL *
+                  shadow;
 
-<span class="kt">float</span><span class="w"> </span><span class="n">geometry_schlick_ggx</span><span class="p">(</span><span class="kt">float</span><span class="w"> </span><span class="n">NdotV</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">roughness</span><span class="p">)</span>
-<span class="p">{</span>
-<span class="w">  </span><span class="kt">float</span><span class="w"> </span><span class="n">r</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">roughness</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mf">1.0</span><span class="p">;</span>
-<span class="w">  </span><span class="kt">float</span><span class="w"> </span><span class="n">k</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">r</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">r</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mf">8.0</span><span class="p">;</span>
-<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="n">NdotV</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">max</span><span class="p">(</span><span class="n">NdotV</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="p">(</span><span class="mf">1.0</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">k</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">k</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="n">e</span><span class="o">-</span><span class="mi">6</span><span class="p">);</span>
-<span class="p">}</span>
-
-<span class="kt">float</span><span class="w"> </span><span class="n">geometry_smith</span><span class="p">(</span><span class="kt">float</span><span class="w"> </span><span class="n">NdotV</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">NdotL</span><span class="p">,</span><span class="w"> </span><span class="kt">float</span><span class="w"> </span><span class="n">roughness</span><span class="p">)</span>
-<span class="p">{</span>
-<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="n">geometry_schlick_ggx</span><span class="p">(</span><span class="n">NdotV</span><span class="p">,</span><span class="w"> </span><span class="n">roughness</span><span class="p">)</span><span class="w"> </span><span class="o">*</span>
-<span class="w">         </span><span class="n">geometry_schlick_ggx</span><span class="p">(</span><span class="n">NdotL</span><span class="p">,</span><span class="w"> </span><span class="n">roughness</span><span class="p">);</span>
-<span class="p">}</span>
-
-<span class="kt">vec4</span><span class="w"> </span><span class="n">pbr_lit</span><span class="p">(</span><span class="kt">vec3</span><span class="w"> </span><span class="n">base_color</span><span class="p">,</span>
-<span class="w">             </span><span class="kt">float</span><span class="w"> </span><span class="n">roughness</span><span class="p">,</span>
-<span class="w">             </span><span class="kt">float</span><span class="w"> </span><span class="n">metallic</span><span class="p">,</span>
-<span class="w">             </span><span class="kt">float</span><span class="w"> </span><span class="n">ao</span><span class="p">,</span>
-<span class="w">             </span><span class="kt">vec3</span><span class="w"> </span><span class="n">normal_ws</span><span class="p">,</span>
-<span class="w">             </span><span class="kt">vec3</span><span class="w"> </span><span class="n">view_ws</span><span class="p">,</span>
-<span class="w">             </span><span class="kt">vec3</span><span class="w"> </span><span class="n">ambient_light</span><span class="p">)</span>
-<span class="p">{</span>
-<span class="w">  </span><span class="kt">vec3</span><span class="w"> </span><span class="n">N</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">normalize</span><span class="p">(</span><span class="n">normal_ws</span><span class="p">);</span>
-<span class="w">  </span><span class="kt">vec3</span><span class="w"> </span><span class="n">Ng</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">normalize</span><span class="p">(</span><span class="n">glsl_true_normal</span><span class="p">());</span>
-<span class="w">  </span><span class="kt">vec3</span><span class="w"> </span><span class="n">V</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">normalize</span><span class="p">(</span><span class="n">view_ws</span><span class="p">);</span>
-
-<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">dot</span><span class="p">(</span><span class="n">N</span><span class="p">,</span><span class="w"> </span><span class="n">Ng</span><span class="p">)</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mf">0.0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="n">N</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Ng</span><span class="p">;</span>
-<span class="w">  </span><span class="p">}</span>
-
-<span class="w">  </span><span class="n">roughness</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">clamp</span><span class="p">(</span><span class="n">roughness</span><span class="p">,</span><span class="w"> </span><span class="mf">0.04</span><span class="p">,</span><span class="w"> </span><span class="mf">1.0</span><span class="p">);</span>
-<span class="w">  </span><span class="n">metallic</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">clamp</span><span class="p">(</span><span class="n">metallic</span><span class="p">,</span><span class="w"> </span><span class="mf">0.0</span><span class="p">,</span><span class="w"> </span><span class="mf">1.0</span><span class="p">);</span>
-<span class="w">  </span><span class="n">ao</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">clamp</span><span class="p">(</span><span class="n">ao</span><span class="p">,</span><span class="w"> </span><span class="mf">0.0</span><span class="p">,</span><span class="w"> </span><span class="mf">1.0</span><span class="p">);</span>
-
-<span class="w">  </span><span class="kt">vec3</span><span class="w"> </span><span class="n">F0</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">mix</span><span class="p">(</span><span class="kt">vec3</span><span class="p">(</span><span class="mf">0.04</span><span class="p">),</span><span class="w"> </span><span class="n">base_color</span><span class="p">,</span><span class="w"> </span><span class="n">metallic</span><span class="p">);</span>
-
-<span class="w">  </span><span class="kt">vec3</span><span class="w"> </span><span class="n">direct_diffuse</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kt">vec3</span><span class="p">(</span><span class="mf">0.0</span><span class="p">);</span>
-<span class="w">  </span><span class="kt">vec3</span><span class="w"> </span><span class="n">direct_specular</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kt">vec3</span><span class="p">(</span><span class="mf">0.0</span><span class="p">);</span>
-
-<span class="w">  </span><span class="k">for</span><span class="w"> </span><span class="p">(</span><span class="kt">int</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mo">0</span><span class="p">;</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">glsl_light_count</span><span class="p">();</span><span class="w"> </span><span class="n">i</span><span class="o">++</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
-<span class="w">    </span><span class="n">GLSLLight</span><span class="w"> </span><span class="n">light</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">glsl_light_get</span><span class="p">(</span><span class="n">i</span><span class="p">);</span>
-<span class="w">    </span><span class="kt">vec3</span><span class="w"> </span><span class="n">L</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">normalize</span><span class="p">(</span><span class="n">light</span><span class="p">.</span><span class="n">vector</span><span class="p">);</span>
-<span class="w">    </span><span class="kt">vec3</span><span class="w"> </span><span class="n">H</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">normalize</span><span class="p">(</span><span class="n">V</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">L</span><span class="p">);</span>
-
-<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">NdotL</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">saturate1</span><span class="p">(</span><span class="n">dot</span><span class="p">(</span><span class="n">N</span><span class="p">,</span><span class="w"> </span><span class="n">L</span><span class="p">));</span>
-<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">NdotV</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">saturate1</span><span class="p">(</span><span class="n">dot</span><span class="p">(</span><span class="n">N</span><span class="p">,</span><span class="w"> </span><span class="n">V</span><span class="p">));</span>
-<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">NdotH</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">saturate1</span><span class="p">(</span><span class="n">dot</span><span class="p">(</span><span class="n">N</span><span class="p">,</span><span class="w"> </span><span class="n">H</span><span class="p">));</span>
-<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">VdotH</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">saturate1</span><span class="p">(</span><span class="n">dot</span><span class="p">(</span><span class="n">V</span><span class="p">,</span><span class="w"> </span><span class="n">H</span><span class="p">));</span>
-
-<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">NdotL</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="mi">1</span><span class="n">e</span><span class="o">-</span><span class="mi">5</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="n">NdotV</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="mi">1</span><span class="n">e</span><span class="o">-</span><span class="mi">5</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
-<span class="w">      </span><span class="k">continue</span><span class="p">;</span>
-<span class="w">    </span><span class="p">}</span>
-
-<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">shadow</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">glsl_light_shadow</span><span class="p">(</span><span class="n">i</span><span class="p">,</span><span class="w"> </span><span class="n">N</span><span class="p">);</span>
-
-<span class="w">    </span><span class="kt">vec3</span><span class="w"> </span><span class="n">F</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">fresnel_schlick</span><span class="p">(</span><span class="n">VdotH</span><span class="p">,</span><span class="w"> </span><span class="n">F0</span><span class="p">);</span>
-<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">D</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">distribution_ggx</span><span class="p">(</span><span class="n">NdotH</span><span class="p">,</span><span class="w"> </span><span class="n">roughness</span><span class="p">);</span>
-<span class="w">    </span><span class="kt">float</span><span class="w"> </span><span class="n">G</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">geometry_smith</span><span class="p">(</span><span class="n">NdotV</span><span class="p">,</span><span class="w"> </span><span class="n">NdotL</span><span class="p">,</span><span class="w"> </span><span class="n">roughness</span><span class="p">);</span>
-
-<span class="w">    </span><span class="kt">vec3</span><span class="w"> </span><span class="n">specular_brdf</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">D</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">G</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">F</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">max</span><span class="p">(</span><span class="mf">4.0</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">NdotV</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">NdotL</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="n">e</span><span class="o">-</span><span class="mi">5</span><span class="p">);</span>
-<span class="w">    </span><span class="kt">vec3</span><span class="w"> </span><span class="n">kd</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="kt">vec3</span><span class="p">(</span><span class="mf">1.0</span><span class="p">)</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">F</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="p">(</span><span class="mf">1.0</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">metallic</span><span class="p">);</span>
-<span class="w">    </span><span class="kt">vec3</span><span class="w"> </span><span class="n">diffuse_brdf</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">kd</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">base_color</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="mf">3.14159265</span><span class="p">;</span>
-
-<span class="w">    </span><span class="n">direct_diffuse</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">diffuse_brdf</span><span class="w"> </span><span class="o">*</span>
-<span class="w">                      </span><span class="n">light</span><span class="p">.</span><span class="n">diffuse_color</span><span class="w"> </span><span class="o">*</span>
-<span class="w">                      </span><span class="n">light</span><span class="p">.</span><span class="n">attenuation</span><span class="w"> </span><span class="o">*</span>
-<span class="w">                      </span><span class="n">NdotL</span><span class="w"> </span><span class="o">*</span>
-<span class="w">                      </span><span class="n">shadow</span><span class="p">;</span>
-
-<span class="w">    </span><span class="n">direct_specular</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">specular_brdf</span><span class="w"> </span><span class="o">*</span>
-<span class="w">                       </span><span class="n">light</span><span class="p">.</span><span class="n">specular_color</span><span class="w"> </span><span class="o">*</span>
-<span class="w">                       </span><span class="n">light</span><span class="p">.</span><span class="n">attenuation</span><span class="w"> </span><span class="o">*</span>
-<span class="w">                       </span><span class="n">NdotL</span><span class="w"> </span><span class="o">*</span>
-<span class="w">                       </span><span class="n">shadow</span><span class="p">;</span>
-<span class="w">  </span><span class="p">}</span>
-
-<span class="w">  </span><span class="kt">vec3</span><span class="w"> </span><span class="n">ambient</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ambient_light</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">base_color</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="p">(</span><span class="mf">1.0</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">metallic</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">ao</span><span class="p">;</span>
-<span class="w">  </span><span class="kt">vec3</span><span class="w"> </span><span class="n">color</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ambient</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">direct_diffuse</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">direct_specular</span><span class="p">;</span>
-<span class="w">  </span><span class="k">return</span><span class="w"> </span><span class="kt">vec4</span><span class="p">(</span><span class="n">max</span><span class="p">(</span><span class="n">color</span><span class="p">,</span><span class="w"> </span><span class="kt">vec3</span><span class="p">(</span><span class="mf">0.0</span><span class="p">)),</span><span class="w"> </span><span class="mf">1.0</span><span class="p">);</span>
-<span class="p">}</span>
-</code></pre></div>
+direct_specular += specular_brdf *
+                   light.specular_color *
+                   light.attenuation *
+                   NdotL *
+                   shadow;
+</code></pre>
+<p>}</p>
+<p>vec3 ambient = ambient_light * base_color * (1.0 - metallic) * ao;
+  vec3 color = ambient + direct_diffuse + direct_specular;
+  return vec4(max(color, vec3(0.0)), 1.0);
+}
+```</p>
 <p>补充说明：</p>
 <ul>
 <li><code>normal_ws</code>、<code>view_ws</code>、<code>ambient_light</code> 都有表达式默认值；socket 未连接时会自动调用对应内置 helper，连接后则使用外部输入</li>
@@ -4472,8 +4460,8 @@
 <li>把 <code>Result</code> 接到后续节点。</li>
 </ol>
 <h4 id="_63">示例<a class="headerlink" href="#_63" title="Permanent link">&para;</a></h4>
-<div class="highlight"><pre><span></span><code><span class="n">mix</span><span class="p">(</span><span class="n">base_color</span><span class="p">,</span><span class="w"> </span><span class="n">tint_color</span><span class="p">,</span><span class="w"> </span><span class="n">clamp</span><span class="p">(</span><span class="n">mask</span><span class="p">,</span><span class="w"> </span><span class="mf">0.0</span><span class="p">,</span><span class="w"> </span><span class="mf">1.0</span><span class="p">))</span>
-</code></pre></div>
+<p><code>glsl
+mix(base_color, tint_color, clamp(mask, 0.0, 1.0))</code></p>
 <p>对应变量：</p>
 <ul>
 <li><code>base_color</code>：<code>Color</code></li>
@@ -4876,8 +4864,8 @@
 <li><code>Range Scale</code>：缩放 Eevee 参与剔除和阴影使用的灯光影响范围；默认 <code>1</code> 保持原始灯光范围</li>
 </ul>
 <p>最终写出的 Light Shader 结果语义为：</p>
-<div class="highlight"><pre><span></span><code><span class="kt">vec4</span><span class="p">(</span><span class="n">Color</span><span class="p">.</span><span class="n">rgb</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">max</span><span class="p">(</span><span class="n">Intensity</span><span class="p">,</span><span class="w"> </span><span class="mf">0.0</span><span class="p">),</span><span class="w"> </span><span class="n">max</span><span class="p">(</span><span class="n">Attenuation</span><span class="p">,</span><span class="w"> </span><span class="mf">0.0</span><span class="p">))</span>
-</code></pre></div>
+<p><code>glsl
+vec4(Color.rgb * max(Intensity, 0.0), max(Attenuation, 0.0))</code></p>
 <h4 id="_116">行为说明<a class="headerlink" href="#_116" title="Permanent link">&para;</a></h4>
 <ul>
 <li>如果灯光没有自定义 Light Shader 输出，会保持普通 Eevee 灯光行为</li>

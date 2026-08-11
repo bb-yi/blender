@@ -657,8 +657,11 @@
 <li>Replaced the legacy linear Filter Materials list with a scene-level <code>Filter Graph</code> supporting four execution stages and reusable Filter Pass materials</li>
 <li>Added a <code>Node / Code</code> editor to <code>GLSL Function</code>, with inline internal-Text editing and an atomic Apply / Discard workflow that protects the live material</li>
 <li>Added <code>mat2</code>, <code>mat3</code>, and <code>mat4</code> input, <code>out</code> parameter, and return-value support to <code>GLSL Function</code>, available in Eevee object materials, Filter materials, and <code>NPR Tree</code></li>
+<li>Added draw-view transform matrix helpers to <code>GLSL Function</code> (view / projection / model, including overscan and TAA jitter)</li>
+<li>Added the EEVEE NPR refraction volume approximation for more stable refraction backgrounds with volumes and <code>Image Sample</code> offsets</li>
 <li>Retained NPR extensions such as <code>GLSL Script Expression</code>, <code>Native Camera FX Outputs</code>, <code>Eevee Performance</code> shadow / probe attribution, and <code>OKLab Color Ramp</code></li>
 <li>Fixed Eevee shader, transparent AOV, Scene Color offset-sampling, and node-interface compatibility regressions found during the 5.2 migration</li>
+<li>Current stable package: <code>fd9fabb4f531</code> (2026-08-11), with all <code>110/110</code> Release tests passing</li>
 </ul>
 <h2 id="node-overview">Node Overview<a class="headerlink" href="#node-overview" title="Permanent link">&para;</a></h2>
 <div align="center">
@@ -766,7 +769,7 @@
 <li><a href="interface-guide.html#5-eevee-lightgroup-id">Lightgroup management</a></li>
 <li><a href="interface-guide.html#6-sun-shadow-map-scale">Sun <code>Shadow Map Scale</code></a></li>
 <li><a href="interface-guide.html#7-splash-version-tag">Splash version tag</a></li>
-<li><a href="interface-guide.html#8-pose-bone-outliner-visibility">Pose bone Outliner visibility</a></li>
+<li><a href="interface-guide.html#9-pose-bone-outliner-visibility">Pose bone Outliner visibility</a></li>
 </ul>
 <div class="admonition warning">
 <p class="admonition-title">Eevee Only</p>

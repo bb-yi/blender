@@ -657,8 +657,11 @@
 <li>用场景级 <code>Filter Graph</code> 取代旧的线性 Filter Materials 列表，支持四个执行阶段和可复用的 Filter Pass 材质</li>
 <li><code>GLSL Function</code> 新增 <code>Node / Code</code> 编辑模式，可在节点内编辑内部 Text，并通过原子 Apply / Discard 工作流保护正在运行的材质</li>
 <li><code>GLSL Function</code> 支持 <code>mat2</code>、<code>mat3</code>、<code>mat4</code> 输入、<code>out</code> 参数和返回值，并可用于 Eevee 物体材质、Filter 材质和 <code>NPR Tree</code></li>
+<li><code>GLSL Function</code> 新增 draw-view 变换矩阵 helper（视图 / 投影 / 模型，含 overscan 与 TAA jitter）</li>
+<li>EEVEE NPR 折射体积近似，改善体积场景中的折射背景合成与 <code>Image Sample</code> 偏移稳定性</li>
 <li>保留 <code>GLSL Script Expression</code>、<code>Native Camera FX Outputs</code>、<code>Eevee Performance</code> 阴影 / 探针归因和 <code>OKLab Color Ramp</code> 等 NPR 扩展</li>
 <li>修复 5.2 迁移后的 Eevee 着色器、透明 AOV、Scene Color 偏移采样和节点接口兼容问题</li>
+<li>当前正式包：<code>fd9fabb4f531</code>（2026-08-11），Release 测试 <code>110/110</code> 通过</li>
 </ul>
 <h2 id="_3">节点一览<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
 <div align="center">
@@ -766,7 +769,7 @@
 <li><a href="interface-guide.html#5-eevee-lightgroup-id">灯光组管理</a></li>
 <li><a href="interface-guide.html#6-shadow-map-scale">太阳光 <code>Shadow Map Scale</code></a></li>
 <li><a href="interface-guide.html#7">启动图版本标识</a></li>
-<li><a href="interface-guide.html#8-outliner">骨骼 Outliner 显示控制</a></li>
+<li><a href="interface-guide.html#9-outliner">骨骼 Outliner 显示控制</a></li>
 </ul>
 <div class="admonition warning">
 <p class="admonition-title">Eevee 专用</p>

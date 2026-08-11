@@ -750,13 +750,13 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#8-outliner" class="md-nav__link">
+  <a href="#8-ime" class="md-nav__link">
     <span class="md-ellipsis">
-      8. 骨骼在 Outliner 隐藏
+      8. IME 输入
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="8. 骨骼在 Outliner 隐藏">
+    <nav class="md-nav" aria-label="8. IME 输入">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -771,6 +771,39 @@
           <li class="md-nav__item">
   <a href="#_27" class="md-nav__link">
     <span class="md-ellipsis">
+      说明
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-outliner" class="md-nav__link">
+    <span class="md-ellipsis">
+      9. 骨骼在 Outliner 隐藏
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. 骨骼在 Outliner 隐藏">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_28" class="md-nav__link">
+    <span class="md-ellipsis">
+      作用
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_29" class="md-nav__link">
+    <span class="md-ellipsis">
       入口
     </span>
   </a>
@@ -778,7 +811,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_28" class="md-nav__link">
+  <a href="#_30" class="md-nav__link">
     <span class="md-ellipsis">
       行为说明
     </span>
@@ -787,7 +820,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_29" class="md-nav__link">
+  <a href="#_31" class="md-nav__link">
     <span class="md-ellipsis">
       当前范围
     </span>
@@ -1205,13 +1238,13 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#8-outliner" class="md-nav__link">
+  <a href="#8-ime" class="md-nav__link">
     <span class="md-ellipsis">
-      8. 骨骼在 Outliner 隐藏
+      8. IME 输入
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="8. 骨骼在 Outliner 隐藏">
+    <nav class="md-nav" aria-label="8. IME 输入">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -1226,6 +1259,39 @@
           <li class="md-nav__item">
   <a href="#_27" class="md-nav__link">
     <span class="md-ellipsis">
+      说明
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-outliner" class="md-nav__link">
+    <span class="md-ellipsis">
+      9. 骨骼在 Outliner 隐藏
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. 骨骼在 Outliner 隐藏">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_28" class="md-nav__link">
+    <span class="md-ellipsis">
+      作用
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_29" class="md-nav__link">
+    <span class="md-ellipsis">
       入口
     </span>
   </a>
@@ -1233,7 +1299,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_28" class="md-nav__link">
+  <a href="#_30" class="md-nav__link">
     <span class="md-ellipsis">
       行为说明
     </span>
@@ -1242,7 +1308,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#_29" class="md-nav__link">
+  <a href="#_31" class="md-nav__link">
     <span class="md-ellipsis">
       当前范围
     </span>
@@ -1452,9 +1518,10 @@
 <h3 id="_23">行为说明<a class="headerlink" href="#_23" title="Permanent link">&para;</a></h3>
 <ul>
 <li>默认值为 <code>1</code></li>
-<li>增大数值会扩大 Sun shadow map 的覆盖尺度，通常会降低单位区域内的有效阴影细节</li>
+<li>增大数值会扩大 Sun shadow map 的覆盖尺度；当前正式版会把 scale 正确应用到 tilemap，并在扩大覆盖时同步提升有效细节分配</li>
 <li>减小数值会把阴影贴图集中到更小范围，通常能提高近处细节，但更容易暴露覆盖范围不足或边界问题</li>
 <li>该设置只影响 Eevee Sun shadow map 的采样 / 覆盖行为，不改变灯光颜色、能量、方向或材质侧着色模型</li>
+<li>视口可开启 Shadow LOD 可视化，辅助排查 clipmap 细节层级（调试用途，不改变最终材质着色）</li>
 </ul>
 <h2 id="7">7. 启动图版本标识<a class="headerlink" href="#7" title="Permanent link">&para;</a></h2>
 <h3 id="_24">作用<a class="headerlink" href="#_24" title="Permanent link">&para;</a></h3>
@@ -1462,18 +1529,26 @@
 <h3 id="_25">当前显示格式<a class="headerlink" href="#_25" title="Permanent link">&para;</a></h3>
 <ul>
 <li><code>版本号 + npr post + 构建日期</code></li>
-<li>例如：<code>5.2.0 npr post 2026-07-16</code></li>
+<li>例如：<code>5.2.0 npr post 2026-08-11</code></li>
 </ul>
-<h2 id="8-outliner">8. 骨骼在 Outliner 隐藏<a class="headerlink" href="#8-outliner" title="Permanent link">&para;</a></h2>
+<h2 id="8-ime">8. IME 输入<a class="headerlink" href="#8-ime" title="Permanent link">&para;</a></h2>
 <h3 id="_26">作用<a class="headerlink" href="#_26" title="Permanent link">&para;</a></h3>
+<p>改进文本编辑与界面输入中的 IME 支持（含 Blender 5.2 API 适配与文本编辑器光标度量），让中文等输入法候选与光标位置更稳定。</p>
+<h3 id="_27">说明<a class="headerlink" href="#_27" title="Permanent link">&para;</a></h3>
+<ul>
+<li>主要影响文本编辑器与需要 IME 的 UI 输入路径</li>
+<li>不改变材质节点或渲染结果</li>
+</ul>
+<h2 id="9-outliner">9. 骨骼在 Outliner 隐藏<a class="headerlink" href="#9-outliner" title="Permanent link">&para;</a></h2>
+<h3 id="_28">作用<a class="headerlink" href="#_28" title="Permanent link">&para;</a></h3>
 <p>为每个 <code>Pose Bone</code> 增加单独的 Outliner 可见性标记，用来在不影响骨骼本身功能的前提下整理复杂绑定的层级显示。</p>
 <p>它适合把机制骨、辅助骨或不需要频繁查看的控制层从 Outliner 中隐藏，只保留更重要的骨架结构。</p>
-<h3 id="_27">入口<a class="headerlink" href="#_27" title="Permanent link">&para;</a></h3>
+<h3 id="_29">入口<a class="headerlink" href="#_29" title="Permanent link">&para;</a></h3>
 <ul>
 <li><code>Bone Properties &gt; Viewport Display &gt; Hide in Outliner</code></li>
 <li><code>Outliner &gt; Filter &gt; Hidden PoseBones</code></li>
 </ul>
-<h3 id="_28">行为说明<a class="headerlink" href="#_28" title="Permanent link">&para;</a></h3>
+<h3 id="_30">行为说明<a class="headerlink" href="#_30" title="Permanent link">&para;</a></h3>
 <ul>
 <li>每个 <code>Pose Bone</code> 都有自己的 <code>Hide in Outliner</code> 开关</li>
 <li>这个开关默认是开启的</li>
@@ -1481,7 +1556,7 @@
 <li>当关闭 <code>Outliner &gt; Filter &gt; Hidden PoseBones</code> 后，勾选了 <code>Hide in Outliner</code> 的姿态骨骼会从 Outliner 树中隐藏</li>
 <li>如果某个被隐藏的父骨骼仍然有可见子骨骼，可见子骨骼会继续保留在树里，不会整支层级一起消失</li>
 </ul>
-<h3 id="_29">当前范围<a class="headerlink" href="#_29" title="Permanent link">&para;</a></h3>
+<h3 id="_31">当前范围<a class="headerlink" href="#_31" title="Permanent link">&para;</a></h3>
 <ul>
 <li>当前只作用于 <code>Pose Bone</code></li>
 <li>不作用于 <code>Edit Bone</code></li>
