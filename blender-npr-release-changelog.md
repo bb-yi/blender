@@ -587,6 +587,22 @@
 - 移除体积灯光资源的冗余预分配，改为按实际使用条件绑定。
 - 改进 NPR 材质特性快照、GLSL Closure socket 同步、光线追踪屏幕资源更新和整体渲染稳定性。
 
+## 2026-08-11  fd9fabb4f531
+
+#### 新增功能
+- EEVEE NPR 折射体积近似（refraction volume）：在体积参与的场景中更稳定地合成折射背景，并完成采样 / 捕获隔离。
+- `GLSL Function` 新增 draw-view 变换矩阵 helper：`glsl_view_matrix()`、`glsl_projection_matrix()`、`glsl_view_projection_matrix()` 及其 inverse，以及物体路径上的 `glsl_model_*` / `glsl_normal_matrix()`（含 overscan / Film crop / TAA jitter）。
+- 视口 Shadow LOD 可视化，便于排查太阳光 clipmap 细节层级。
+- 改进 IME 输入支持（含 Blender 5.2 API 适配与文本编辑器光标度量）。
+
+#### 修复与改进
+- 修复 NPR 折射体积在 `Image Sample` offset 下的黑洞、背景 miss、背景照明漏光和体积深度映射问题。
+- 修复太阳光 `Shadow Map Scale` 对 tilemap 的应用，并让增大 scale 时有效细节同步提升。
+- 未连接的 GLSL sampler 使用白色 fallback，避免异常采样。
+- 恢复 NPR Tree AOV 输出。
+- 稳定 Render Texture 资源生命周期。
+- 文档：更新 NPR changelog / GLSL guide，补充投影矩阵相关待办。
+
 ## 暂存
 
 #### 新增功能

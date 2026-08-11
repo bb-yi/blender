@@ -658,6 +658,10 @@ struct GLSLLight {
 - 内置了几何 helper，可在函数体里直接读取：`glsl_position()`、`glsl_normal()`、`glsl_true_normal()`、`glsl_incoming()`
 - 这四个 helper 的语义直接对齐 `Geometry` 节点的 `Position`、`Normal`、`True Normal`、`Incoming` 输出
 - 这组几何 helper 当前按普通 `Eevee` 物体材质和 `NPR Tree` 的几何语义工作；`FILTER`、`World` 不作为稳定保证范围
+- 内置了 draw-view 变换矩阵 helper（顶点与片元阶段可用，便于 Displacement 等路径做相机平面反投影）：
+  - 视图 / 投影：`glsl_view_matrix()`、`glsl_view_matrix_inverse()`、`glsl_projection_matrix()`、`glsl_projection_matrix_inverse()`、`glsl_view_projection_matrix()`、`glsl_view_projection_matrix_inverse()`
+  - 物体模型（仅 Surface / NPR，不在 `Filter` 路径生效）：`glsl_model_matrix()`、`glsl_model_matrix_inverse()`、`glsl_model_view_matrix()`、`glsl_model_view_projection_matrix()`、`glsl_normal_matrix()`
+- 视图 / 投影矩阵来自当前 draw 的 `ViewMatrices`，包含 overscan、Film crop 与 TAA jitter；`Filter`（`MAT_FILTER`）路径仍可使用视图 / 投影 helper，模型 helper 会回退为单位矩阵
 - 内置了环境光 helper：`glsl_ambient_lighting()`
 - `glsl_ambient_lighting()` 的语义对齐 `Shader Info` 的 `Ambient Lighting`，读取当前着色点的 probe / 环境间接光结果
 - `glsl_ambient_lighting()` 只返回这类环境漫反射项，不包含 reflection probe 反射颜色，也不包含 `Light Probe Color` 的 `Combined`
@@ -1679,12 +1683,18 @@ vec4(Color.rgb * max(Intensity, 0.0), max(Attenuation, 0.0))
 
 #### 作用
 
-读取折射相关缓冲，类似 `Screenspace Info`。
+读取折射相关缓冲，类似 `Screenspace Info`。当前 `main` 还包含 EEVEE NPR **折射体积近似**（refraction volume）：当场景存在体积参与时，折射背景的采样与捕获会与体积合成隔离，降低背景漏光、深度错配，以及 `Image Sample` 偏移后的黑洞伪影。
 
 #### 输出
 
 - `Combined Color`
 - `Position`
+
+#### 使用注意
+
+- 折射缓冲更接近图像句柄，通常继续交给 `Image Sample` 做偏移采样。
+- 有体积雾 / 体积对象参与时，请优先用当前正式包验证视口与最终渲染一致性；旧包在 offset 采样路径上可能出现黑洞或背景 miss。
+- `Image Sample` 的 `Offset` 在 `View` / `Pixel` 模式下都应对折射缓冲生效；若出现整块发黑，优先检查体积深度映射与背景捕获是否来自旧版本。
 
 ### Image Sample
 

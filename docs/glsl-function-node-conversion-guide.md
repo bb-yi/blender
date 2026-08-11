@@ -13,7 +13,7 @@
 
 稳定地转换成可直接粘贴到 `Blender NPR Port` 的 `GLSL Function` 节点里的、符合当前实现规范的 `GLSL` 源码。
 
-> 当前实现基线：Blender 5.2 NPR `main`（`1257abb95445`）。本指南覆盖当前的 typed Closure callback、Closure sampler Alpha、sampler3D 以及 `@glsl_defines v1` 合同；如果目标是 `blender_npr_post_mainfix`，必须先检查该分支的源码和测试是否已经包含这些能力。
+> 当前实现基线：Blender 5.2 NPR `main`（`fd9fabb4f531`）。本指南覆盖当前的 typed Closure callback、Closure sampler Alpha、sampler3D、draw-view 矩阵 helper 以及 `@glsl_defines v1` 合同；如果目标是 `blender_npr_post_mainfix`，必须先检查该分支的源码和测试是否已经包含这些能力。
 
 
 ## 一、先记住当前节点真正支持什么
@@ -512,6 +512,25 @@ Closure Output.Closure -> GLSL Function 的 sampler3D 输入
 
 - 不要把它说成“任意域都稳定可用”的全局 GLSL 内建
 - 不要把它和 `Texture Coordinate`、`Camera`、`Object Info` 等别的输入节点混成一组等价接口
+
+### 规则 4.2.1：如果需要视图 / 投影 / 模型矩阵，使用 draw-view 矩阵 helper
+
+当前 `GLSL Function` 额外提供一组 **draw-view 变换矩阵 helper**，来自当前 draw 的 `ViewMatrices` / `ObjectMatrices`（含 overscan、Film crop、TAA jitter）：
+
+- 视图 / 投影（Surface、NPR、Filter 可用；顶点与片元阶段）：
+  - `glsl_view_matrix()` / `glsl_view_matrix_inverse()`
+  - `glsl_projection_matrix()` / `glsl_projection_matrix_inverse()`
+  - `glsl_view_projection_matrix()` / `glsl_view_projection_matrix_inverse()`
+- 物体模型（仅 Surface / NPR；`Filter` 路径回退为单位矩阵）：
+  - `glsl_model_matrix()` / `glsl_model_matrix_inverse()`
+  - `glsl_model_view_matrix()` / `glsl_model_view_projection_matrix()`
+  - `glsl_normal_matrix()`（object→world 法线：`transpose(mat3(model_inverse))`）
+
+使用这组 helper 时要明确：
+
+- 这是**当前 draw 视图状态**，不是自定义 Camera 节点或任意用户矩阵输入
+- 适合 Displacement、屏幕空间反投影、自定义 clip 空间变换等；不要假设在 `World` 路径稳定可用
+- `Filter` 材质可以用视图 / 投影 helper；不要在 Filter 路径依赖 `glsl_model_*` 的真实物体矩阵
 
 ### 规则 4.3：如果要读 `Shader Info` 那种环境光，使用 `glsl_ambient_lighting()`
 
