@@ -528,6 +528,7 @@ class DeferredLayer : DeferredLayerBase {
   bool has_prepass_ = false;
   bool has_stencil_ = false;
   bool has_npr_aov_access_ = false;
+  bool has_npr_refraction_ = false;
   bool is_first_pass_ = true;
 
  public:
@@ -572,13 +573,15 @@ class DeferredLayer : DeferredLayerBase {
   static bool do_split_direct_indirect_radiance(const Instance &inst);
 
   /* Returns the radiance buffer to feed the next layer. */
-  gpu::Texture *render(View &render_view,
+  gpu::Texture *render(View &main_view,
+                       View &render_view,
                        Framebuffer &prepass_fb,
                        Framebuffer &combined_fb,
                        Framebuffer &gbuffer_fb,
                        int2 extent,
                        RayTraceBuffer &rt_buffer,
-                       gpu::Texture *radiance_behind_tx);
+                       gpu::Texture *radiance_behind_tx,
+                       bool &volume_compute_done);
 };
 
 class DeferredPipeline {
@@ -626,7 +629,8 @@ class DeferredPipeline {
               Framebuffer &gbuffer_fb,
               int2 extent,
               RayTraceBuffer &rt_buffer_opaque_layer,
-              RayTraceBuffer &rt_buffer_refract_layer);
+              RayTraceBuffer &rt_buffer_refract_layer,
+              bool &volume_compute_done);
 
   /* Return the maximum amount of gbuffer layer needed. */
   int header_layer_count() const

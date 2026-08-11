@@ -102,3 +102,8 @@ GPU_SHADER_CREATE_INFO(eevee_surf_npr_refraction_data)
 SAMPLER(BACK_HIZ_TX_SLOT, sampler2D, hiz_back_tx)
 SAMPLER(BACK_RADIANCE_TX_SLOT, sampler2D, radiance_back_tx)
 GPU_SHADER_CREATE_END()
+
+GPU_SHADER_CREATE_INFO(eevee_surf_npr_refraction_volume_data)
+SAMPLER(VOLUME_SCATTERING_TEX_SLOT, sampler3D, volume_scattering_tx)
+SAMPLER(VOLUME_TRANSMITTANCE_TEX_SLOT, sampler3D, volume_transmittance_tx)
+GPU_SHADER_CREATE_END()
