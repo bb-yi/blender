@@ -4,7 +4,7 @@
 
 - 中文：<https://bb-yi.github.io/blender/>
 - English: <https://bb-yi.github.io/blender/en/>
-- 正式版本：[Blender 5.2.0 LTS NPR Port](https://github.com/bb-yi/blender/releases/tag/v5.2.0-npr-port-win64-c663d58f4da9-20260716-165938)
+- 正式版本：[Blender 5.2.0 LTS NPR Port](https://github.com/bb-yi/blender/releases/tag/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604)
 
 ## 目录
 

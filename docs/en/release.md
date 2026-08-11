@@ -2,25 +2,23 @@
 
 ## Blender 5.2.0 LTS NPR Port
 
-The current stable release was published on 2026-07-16 and is based on source revision `c663d58f4da9`.
+The current stable release was published on 2026-08-11 and is based on source revision `fd9fabb4f531`.
 
-- **Release**: [`v5.2.0-npr-port-win64-c663d58f4da9-20260716-165938`](https://github.com/bb-yi/blender/releases/tag/v5.2.0-npr-port-win64-c663d58f4da9-20260716-165938)
-- **Release title**: `Blender 5.2.0 NPR Port - c663d58f4da9`
+- **Release**: [`v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604`](https://github.com/bb-yi/blender/releases/tag/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604)
+- **Release title**: `Blender 5.2.0 NPR Port - fd9fabb4f531`
 
 ### Downloads
 
 | Platform | File | Size | SHA256 |
 |---|---|---:|---|
-| Windows x64 | [`blender-5.2.0-npr-port-win64-c663d58f4da9-20260716-165938.zip`](https://github.com/bb-yi/blender/releases/download/v5.2.0-npr-port-win64-c663d58f4da9-20260716-165938/blender-5.2.0-npr-port-win64-c663d58f4da9-20260716-165938.zip) | 403,583,383 bytes | `64f762d6749bca06145b60042febc068c7a8dd2184230ae516cacc0ec9d41fa6` |
-| Linux x64 | [`blender-5.2.0-npr-port-linux64-c663d58f-20260716.tar.xz`](https://github.com/bb-yi/blender/releases/download/v5.2.0-npr-port-win64-c663d58f4da9-20260716-165938/blender-5.2.0-npr-port-linux64-c663d58f-20260716.tar.xz) | 334,859,976 bytes | `336cb0eba1cb38d7229a812538f00b0ba348773f746afde8f250613617c4a4b9` |
-| macOS | [`blender-5.2.0-npr-port-macos-c663d58f-20260716.dmg`](https://github.com/bb-yi/blender/releases/download/v5.2.0-npr-port-win64-c663d58f4da9-20260716-165938/blender-5.2.0-npr-port-macos-c663d58f-20260716.dmg) | 380,602,074 bytes | `4f74f6d5bacf1426fdac7f36616710307bb70f3ff901596cbf291622fb2bdb27` |
+| Windows x64 | [`blender-5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604.zip`](https://github.com/bb-yi/blender/releases/download/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604/blender-5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604.zip) | 403,722,980 bytes | `63709e3aa4c43ed190a83c82b3814f8343376737694bd774e1d97ddf91c8fdd7` |
 
 ### Integrity Check
 
 Verify the SHA256 value after downloading. Windows PowerShell example:
 
 ```powershell
-Get-FileHash .\blender-5.2.0-npr-port-win64-c663d58f4da9-20260716-165938.zip -Algorithm SHA256
+Get-FileHash .\blender-5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604.zip -Algorithm SHA256
 ```
 
 Linux example:
@@ -35,11 +33,38 @@ macOS example:
 shasum -a 256 <downloaded-file>
 ```
 
+### Highlights in this release
+
+#### New features
+
+- EEVEE NPR refraction volume approximation, with sampling/capture isolation and background-leak fixes
+- `GLSL Function` draw-view transform matrix helpers (view / projection / model)
+- Viewport Shadow LOD visualization
+- Improved IME support (Blender 5.2 API adaptation and text-editor cursor metrics)
+
+#### Fixes and improvements
+
+- Fixed NPR refraction volume black holes on Image Sample offsets, background misses, and depth mapping issues
+- Fixed Sun `Shadow Map Scale` application to tilemaps and improved detail when scale increases
+- White fallback for unconnected GLSL samplers
+- Restored NPR Tree AOV output
+- Stabilized Render Texture resource lifetime
+
+Full history: [`blender-npr-release-changelog.md`](https://github.com/bb-yi/blender/blob/main/blender-npr-release-changelog.md).
+
 ### Support and Validation Scope
 
 !!! important "Render engine support"
     Cycles is included in these packages, but the NPR Port extensions support EEVEE only. NPR Port nodes, Filter Graph, and the other EEVEE NPR features are not available when rendering with Cycles.
 
-- The Windows x64 package is the fully validated baseline for this stable release and passed all `92/92` Release tests.
-- Linux x64 and macOS artifacts are provided in the same stable Release, but they are not claimed to have received the same complete runtime validation as Windows.
+- The Windows x64 package is the fully validated baseline for this stable release and passed all `110/110` Release tests.
 - When reporting an issue, include the platform, full asset filename, splash-screen version information, and minimal reproduction steps.
+
+### Previous stable packages
+
+| Date | Hash | Release |
+|---|---|---|
+| 2026-08-01 | `1257abb95445` | [`v5.2.0-npr-port-win64-1257abb95445-20260801-065135`](https://github.com/bb-yi/blender/releases/tag/v5.2.0-npr-port-win64-1257abb95445-20260801-065135) |
+| 2026-07-27 | `2c437ecb7c1b` | [`v5.2.0-npr-port-win64-2c437ecb7c1b-20260727-054725`](https://github.com/bb-yi/blender/releases/tag/v5.2.0-npr-port-win64-2c437ecb7c1b-20260727-054725) |
+| 2026-07-20 | `f0da4307f3ec` | [`v5.2.0-npr-port-win64-f0da4307f3ec-20260720-020117`](https://github.com/bb-yi/blender/releases/tag/v5.2.0-npr-port-win64-f0da4307f3ec-20260720-020117) |
+| 2026-07-16 | `c663d58f4da9` | [`v5.2.0-npr-port-win64-c663d58f4da9-20260716-165938`](https://github.com/bb-yi/blender/releases/tag/v5.2.0-npr-port-win64-c663d58f4da9-20260716-165938) |

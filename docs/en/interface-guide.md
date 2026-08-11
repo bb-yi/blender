@@ -216,9 +216,10 @@ This option is shown only for `Sun` lights.
 ### Behavior
 
 - Default value: `1`
-- Higher values expand the Sun shadow-map coverage scale and usually reduce effective detail per area
+- Higher values expand the Sun shadow-map coverage scale; the current stable build applies scale to tilemaps correctly and improves effective detail allocation as coverage grows
 - Lower values concentrate the shadow map into a smaller range and can improve nearby detail, but can expose insufficient coverage or boundary issues more easily
 - This setting affects only Eevee Sun shadow-map sampling / coverage behavior; it does not change light color, energy, direction, or material-side shading
+- Viewport Shadow LOD visualization can be enabled to inspect clipmap detail levels (debug aid; does not change material shading)
 
 ## 7. Splash Version Tag
 
@@ -229,9 +230,20 @@ Appends the current NPR build tag and build date to the version text in the top-
 ### Current Format
 
 - `version + npr post + build date`
-- Example: `5.2.0 npr post 2026-07-16`
+- Example: `5.2.0 npr post 2026-08-11`
 
-## 8. Pose Bone Outliner Visibility
+## 8. IME Input
+
+### Purpose
+
+Improves IME support in text editing and UI input paths (including Blender 5.2 API adaptation and text-editor cursor metrics) so candidate windows and caret placement are more stable for languages such as Chinese.
+
+### Notes
+
+- Mainly affects the text editor and other IME-enabled UI inputs
+- Does not change material nodes or render results
+
+## 9. Pose Bone Outliner Visibility
 
 ### Purpose
 

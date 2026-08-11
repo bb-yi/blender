@@ -479,16 +479,20 @@ Injects a user-authored GLSL function into an Eevee object, Filter, or NPR mater
 - Exported boundary types do not currently support `struct` or `array`
 - `int / bool` boundaries are useful for mode switches, enums, and `lightgroup_id` style parameters
 - Built-in geometry helpers are available in the function body: `glsl_position()`, `glsl_normal()`, `glsl_true_normal()`, `glsl_incoming()`
+- Built-in draw-view transform matrix helpers (vertex + fragment stages):
+  - View / projection: `glsl_view_matrix()`, `glsl_view_matrix_inverse()`, `glsl_projection_matrix()`, `glsl_projection_matrix_inverse()`, `glsl_view_projection_matrix()`, `glsl_view_projection_matrix_inverse()`
+  - Object model (Surface / NPR; identity stubs under `Filter`): `glsl_model_matrix()`, `glsl_model_matrix_inverse()`, `glsl_model_view_matrix()`, `glsl_model_view_projection_matrix()`, `glsl_normal_matrix()`
+- View / projection matrices come from the current draw `ViewMatrices` and include overscan, Film crop, and TAA jitter; view / projection helpers remain available under `Filter`
 - Built-in ambient-light helper: `glsl_ambient_lighting()`
 - Built-in direct-light helpers: `GLSLLight`, `glsl_light_count()`, `glsl_light_get(light_index)`, `glsl_light_shadow(light_index, shading_normal)`
-- `GLSLLight.lightgroup_id` maps directly to the light data panel `Lightgroup ID`
-- `GLSLLight.attenuation` is a base attenuation term for custom per-light models; it does not include `NdotL`, toon ramps, Blinn-Phong, GGX, shadows, or material-side Fresnel / metallic / roughness behavior
-- If the light node tree uses `Light Shader Output`, `glsl_light_get(i).diffuse_color`, `glsl_light_get(i).specular_color`, and `glsl_light_get(i).attenuation` read the Light Shader evaluated color and attenuation
-- `Light Shader Output` affects only those color / attenuation fields; `type`, `index`, `lightgroup_id`, `vector`, `position`, `direction`, and `distance` still come from raw Eevee light data
-- Without a Light Shader output, `GLSLLight` keeps the normal Eevee light-access behavior
+- `GLSLLight.lightgroup_id` maps directly to the light-data panel `Lightgroup ID`
+- `GLSLLight.attenuation` is only the base attenuation term for custom per-light models; it does not include `NdotL`, toon ramps, Blinn-Phong, GGX, shadows, or material-side Fresnel / metallic / roughness
+- When a light node tree uses `Light Shader Output`, `glsl_light_get(i).diffuse_color`, `glsl_light_get(i).specular_color`, and `glsl_light_get(i).attenuation` read the evaluated Light Shader color and attenuation
+- `Light Shader Output` only affects those three color / attenuation fields; `type`, `index`, `lightgroup_id`, `vector`, `position`, `direction`, and `distance` still come from raw Eevee light data
+- Without a Light Shader output, `GLSLLight` keeps ordinary Eevee light-access behavior
 - These direct-light helpers target Eevee object materials and `NPR Tree` Surface/Fragment paths; `Filter`, `World`, volume, probe / indirect lighting are not stable public helper semantics
-- Recommended diffuse pattern: `light.diffuse_color * light.attenuation * max(dot(N, light.vector), 0.0) * glsl_light_shadow(...)`
-- Recommended specular pattern: `light.specular_color * light.attenuation * custom_spec_term * glsl_light_shadow(...)`
+- Recommended form: `light.diffuse_color * light.attenuation * max(dot(N, light.vector), 0.0) * glsl_light_shadow(...)`
+- Recommended form: `light.specular_color * light.attenuation * custom_spec_term * glsl_light_shadow(...)`
 
 #### Example: Parameter Meta with Descriptions and Panels
 

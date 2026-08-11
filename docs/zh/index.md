@@ -16,8 +16,11 @@
 - 用场景级 `Filter Graph` 取代旧的线性 Filter Materials 列表，支持四个执行阶段和可复用的 Filter Pass 材质
 - `GLSL Function` 新增 `Node / Code` 编辑模式，可在节点内编辑内部 Text，并通过原子 Apply / Discard 工作流保护正在运行的材质
 - `GLSL Function` 支持 `mat2`、`mat3`、`mat4` 输入、`out` 参数和返回值，并可用于 Eevee 物体材质、Filter 材质和 `NPR Tree`
+- `GLSL Function` 新增 draw-view 变换矩阵 helper（视图 / 投影 / 模型，含 overscan 与 TAA jitter）
+- EEVEE NPR 折射体积近似，改善体积场景中的折射背景合成与 `Image Sample` 偏移稳定性
 - 保留 `GLSL Script Expression`、`Native Camera FX Outputs`、`Eevee Performance` 阴影 / 探针归因和 `OKLab Color Ramp` 等 NPR 扩展
 - 修复 5.2 迁移后的 Eevee 着色器、透明 AOV、Scene Color 偏移采样和节点接口兼容问题
+- 当前正式包：`fd9fabb4f531`（2026-08-11），Release 测试 `110/110` 通过
 
 ## 节点一览
 
@@ -135,7 +138,7 @@
 - [灯光组管理](interface-guide.md#5-eevee-lightgroup-id)
 - [太阳光 `Shadow Map Scale`](interface-guide.md#6-shadow-map-scale)
 - [启动图版本标识](interface-guide.md#7)
-- [骨骼 Outliner 显示控制](interface-guide.md#8-outliner)
+- [骨骼 Outliner 显示控制](interface-guide.md#9-outliner)
 
 !!! warning "Eevee 专用"
     发布包可以运行 `Cycles`，但本文介绍的 NPR Port 扩展功能需要 **Eevee 渲染引擎**，不支持在 `Cycles` 中使用。

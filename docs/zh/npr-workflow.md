@@ -73,12 +73,18 @@
 
 #### 作用
 
-读取折射相关缓冲，类似 `Screenspace Info`。
+读取折射相关缓冲，类似 `Screenspace Info`。当前正式版还包含 EEVEE NPR **折射体积近似**：当场景有体积参与时，折射背景的采样与捕获会与体积合成隔离，降低背景漏光、深度错配，以及 `Image Sample` 偏移后的黑洞伪影。
 
 #### 输出
 
 - `Combined Color`
 - `Position`
+
+#### 使用注意
+
+- 折射输出更接近图像句柄，通常继续交给 `Image Sample`。
+- 有体积雾 / 体积对象时，请使用 `fd9fabb4f531` 及之后的正式包验证视口与最终渲染一致性。
+- `Image Sample` 的 `View` / `Pixel` offset 都应对折射缓冲生效；若出现整块发黑，优先确认是否仍在使用旧版本。
 
 ### Image Sample
 

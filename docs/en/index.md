@@ -16,8 +16,11 @@ This document describes the NPR / Eevee extension features that have been added 
 - Replaced the legacy linear Filter Materials list with a scene-level `Filter Graph` supporting four execution stages and reusable Filter Pass materials
 - Added a `Node / Code` editor to `GLSL Function`, with inline internal-Text editing and an atomic Apply / Discard workflow that protects the live material
 - Added `mat2`, `mat3`, and `mat4` input, `out` parameter, and return-value support to `GLSL Function`, available in Eevee object materials, Filter materials, and `NPR Tree`
+- Added draw-view transform matrix helpers to `GLSL Function` (view / projection / model, including overscan and TAA jitter)
+- Added the EEVEE NPR refraction volume approximation for more stable refraction backgrounds with volumes and `Image Sample` offsets
 - Retained NPR extensions such as `GLSL Script Expression`, `Native Camera FX Outputs`, `Eevee Performance` shadow / probe attribution, and `OKLab Color Ramp`
 - Fixed Eevee shader, transparent AOV, Scene Color offset-sampling, and node-interface compatibility regressions found during the 5.2 migration
+- Current stable package: `fd9fabb4f531` (2026-08-11), with all `110/110` Release tests passing
 
 ## Node Overview
 
@@ -135,7 +138,7 @@ This document describes the NPR / Eevee extension features that have been added 
 - [Lightgroup management](interface-guide.md#5-eevee-lightgroup-id)
 - [Sun `Shadow Map Scale`](interface-guide.md#6-sun-shadow-map-scale)
 - [Splash version tag](interface-guide.md#7-splash-version-tag)
-- [Pose bone Outliner visibility](interface-guide.md#8-pose-bone-outliner-visibility)
+- [Pose bone Outliner visibility](interface-guide.md#9-pose-bone-outliner-visibility)
 
 !!! warning "Eevee Only"
     The release package can run `Cycles`, but the NPR Port extensions documented here require the **Eevee render engine** and cannot be used in `Cycles`.

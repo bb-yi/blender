@@ -479,6 +479,10 @@
 - 当前不支持把 `struct / array` 作为导出函数边界类型
 - 导出函数边界当前已经支持 `int / bool`，适合直接写模式开关、枚举值、`lightgroup_id` 这类参数
 - 内置了几何 helper，可在函数体里直接读取：`glsl_position()`、`glsl_normal()`、`glsl_true_normal()`、`glsl_incoming()`
+- 内置了 draw-view 变换矩阵 helper（顶点与片元阶段可用）：
+  - 视图 / 投影：`glsl_view_matrix()`、`glsl_view_matrix_inverse()`、`glsl_projection_matrix()`、`glsl_projection_matrix_inverse()`、`glsl_view_projection_matrix()`、`glsl_view_projection_matrix_inverse()`
+  - 物体模型（Surface / NPR；`Filter` 路径回退为单位矩阵）：`glsl_model_matrix()`、`glsl_model_matrix_inverse()`、`glsl_model_view_matrix()`、`glsl_model_view_projection_matrix()`、`glsl_normal_matrix()`
+- 视图 / 投影来自当前 draw 的 `ViewMatrices`，包含 overscan、Film crop 与 TAA jitter；`Filter` 可用视图 / 投影 helper
 - 内置了环境光 helper：`glsl_ambient_lighting()`
 - 内置了 Eevee 直接光辅助 helper，可在函数体里使用：`GLSLLight`、`glsl_light_count()`、`glsl_light_get(light_index)`、`glsl_light_shadow(light_index, shading_normal)`
 - `GLSLLight.lightgroup_id` 直接对应灯光数据面板里的 `Lightgroup ID`

@@ -73,12 +73,18 @@ These outputs are closer to image / texture handles than ordinary scalar values,
 
 #### Purpose
 
-Reads refraction-related buffers, similar in spirit to `Screenspace Info`.
+Reads refraction-related buffers, similar in spirit to `Screenspace Info`. The current stable build also includes the EEVEE NPR **refraction volume** approximation: when volumes are present, refraction background sampling/capture is isolated from volume compositing to reduce background leaks, depth mismatches, and black-hole artifacts after `Image Sample` offsets.
 
 #### Outputs
 
 - `Combined Color`
 - `Position`
+
+#### Notes
+
+- Refraction outputs behave like image handles and are usually passed to `Image Sample`.
+- With volume fog / volume objects, validate viewport and final render consistency on `fd9fabb4f531` or newer packages.
+- Both `View` and `Pixel` offsets on `Image Sample` should affect the refraction buffer; solid black results often indicate an older build.
 
 ### Image Sample
 
