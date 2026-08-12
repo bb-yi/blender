@@ -1,66 +1,111 @@
-# Download & Release
+---
+hide:
+  - navigation
+---
 
-## Blender 5.2.0 LTS NPR Port
+<div class="npr-release-hero" markdown>
 
-The current stable release was published on 2026-08-11 and is based on source revision `fd9fabb4f531`.
+# Download Blender NPR Port
 
-- **Release**: [`v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604`](https://github.com/bb-yi/blender/releases/tag/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604)
-- **Release title**: `Blender 5.2.0 NPR Port - fd9fabb4f531`
+<p class="lead">
+Current stable build is based on Blender <strong>5.2.0 LTS</strong>, source revision <code>fd9fabb4f531</code>, published on 2026-08-11.
+Windows x64 is the fully validated baseline for this release.
+</p>
 
-### Downloads
+<div class="npr-meta">
+<span class="npr-chip">Release <strong>fd9fabb4f531</strong></span>
+<span class="npr-chip">Tests <strong>110/110 passed</strong></span>
+<span class="npr-chip">Engine note <strong>NPR = Eevee</strong></span>
+</div>
 
-| Platform | File | Size | SHA256 |
-|---|---|---:|---|
-| Windows x64 | [`blender-5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604.zip`](https://github.com/bb-yi/blender/releases/download/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604/blender-5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604.zip) | 403,722,980 bytes | `63709e3aa4c43ed190a83c82b3814f8343376737694bd774e1d97ddf91c8fdd7` |
+</div>
 
-### Integrity Check
+<div class="npr-download-card" markdown>
 
-Verify the SHA256 value after downloading. Windows PowerShell example:
+<div markdown>
+### Windows x64 package
 
-```powershell
-Get-FileHash .\blender-5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604.zip -Algorithm SHA256
-```
+<p class="file">blender-5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604.zip</p>
 
-Linux example:
+<div class="npr-stats">
+  <div class="npr-stat"><span class="label">Size</span><span class="value">≈ 385 MB</span></div>
+  <div class="npr-stat"><span class="label">Bytes</span><span class="value">403,722,980</span></div>
+  <div class="npr-stat"><span class="label">Platform</span><span class="value">Win x64</span></div>
+</div>
 
-```bash
-sha256sum <downloaded-file>
-```
+<div class="npr-hash"><strong>SHA256</strong><br>63709e3aa4c43ed190a83c82b3814f8343376737694bd774e1d97ddf91c8fdd7</div>
+</div>
 
-macOS example:
+<div class="npr-dl-side" markdown>
+<a class="npr-btn npr-btn--primary" href="https://github.com/bb-yi/blender/releases/download/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604/blender-5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604.zip">⬇ Download ZIP</a>
+<a class="npr-btn npr-btn--ghost" href="https://github.com/bb-yi/blender/releases/tag/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604">View GitHub Release</a>
+<a class="npr-btn npr-btn--ghost" href="https://github.com/bb-yi/blender/releases">All releases</a>
+</div>
 
-```bash
-shasum -a 256 <downloaded-file>
-```
+</div>
 
-### Highlights in this release
+## Integrity check
 
-#### New features
+Verify the SHA256 hash after downloading.
 
+=== "Windows PowerShell"
+
+    ```powershell
+    Get-FileHash .\blender-5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604.zip -Algorithm SHA256
+    ```
+
+=== "Linux"
+
+    ```bash
+    sha256sum blender-5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604.zip
+    ```
+
+=== "macOS"
+
+    ```bash
+    shasum -a 256 blender-5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604.zip
+    ```
+
+## Highlights in this release
+
+<div class="npr-split" markdown>
+
+<div markdown>
+### New features
 - EEVEE NPR refraction volume approximation, with sampling/capture isolation and background-leak fixes
 - `GLSL Function` draw-view transform matrix helpers (view / projection / model)
 - Viewport Shadow LOD visualization
 - Improved IME support (Blender 5.2 API adaptation and text-editor cursor metrics)
+</div>
 
-#### Fixes and improvements
-
+<div markdown>
+### Fixes and improvements
 - Fixed NPR refraction volume black holes on Image Sample offsets, background misses, and depth mapping issues
 - Fixed Sun `Shadow Map Scale` application to tilemaps and improved detail when scale increases
 - White fallback for unconnected GLSL samplers
 - Restored NPR Tree AOV output
 - Stabilized Render Texture resource lifetime
+</div>
+
+</div>
 
 Full history: [`blender-npr-release-changelog.md`](https://github.com/bb-yi/blender/blob/main/blender-npr-release-changelog.md).
 
-### Support and Validation Scope
+## Support and validation scope
 
 !!! important "Render engine support"
-    Cycles is included in these packages, but the NPR Port extensions support EEVEE only. NPR Port nodes, Filter Graph, and the other EEVEE NPR features are not available when rendering with Cycles.
+    Cycles is included in these packages, but the NPR Port extensions support **EEVEE** only. NPR Port nodes, Filter Graph, and the other EEVEE NPR features are not available when rendering with Cycles.
 
 - The Windows x64 package is the fully validated baseline for this stable release and passed all `110/110` Release tests.
 - When reporting an issue, include the platform, full asset filename, splash-screen version information, and minimal reproduction steps.
 
-### Previous stable packages
+## Download table
+
+| Platform | File | Size | SHA256 |
+|---|---|---:|---|
+| Windows x64 | [`blender-5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604.zip`](https://github.com/bb-yi/blender/releases/download/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604/blender-5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604.zip) | 403,722,980 | `63709e3aa4c43ed190a83c82b3814f8343376737694bd774e1d97ddf91c8fdd7` |
+
+## Previous stable packages
 
 | Date | Hash | Release |
 |---|---|---|

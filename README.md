@@ -1,6 +1,8 @@
 # Blender 5.2 LTS NPR Port 文档网站
 
-本仓库保存 Blender 5.2 LTS NPR Port 的中英文 MkDocs 文档源文件。中文站部署在网站根路径，英文站部署在 `/en/`。
+本仓库保存 Blender 5.2 LTS NPR Port 的中英文 MkDocs Material 文档源文件。中文站部署在网站根路径，英文站部署在 `/en/`。
+
+站点包含现代化首页（产品介绍 + 功能入口）与下载发布页（正式包 CTA / SHA256 / 变更摘要）。
 
 - 中文：<https://bb-yi.github.io/blender/>
 - English: <https://bb-yi.github.io/blender/en/>
@@ -9,8 +11,9 @@
 ## 目录
 
 ```text
-docs/zh/                 中文文档
-docs/en/                 英文文档
+docs/zh/                 中文文档（含 stylesheets/extra.css）
+docs/en/                 英文文档（含 stylesheets/extra.css）
+overrides/               Material 主题覆盖（main.html）
 mkdocs.yml               中文站配置
 mkdocs.en.yml            英文站配置
 build_multilingual.py    双语严格构建入口
@@ -19,6 +22,12 @@ deploy-to-github.ps1     双语 GitHub Pages 部署入口
 ```
 
 `site/` 与 `.preview_root/` 都是生成目录，不应提交。
+
+主题定制要点：
+
+- 顶栏 Tabs：首页 / 下载 / 功能文档
+- 共享样式：`docs/*/stylesheets/extra.css`（hero、卡片、下载 CTA）
+- 首页与下载页用 HTML + Material cards；功能页保持正文文档布局
 
 ## 环境
 

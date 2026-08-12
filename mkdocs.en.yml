@@ -1,54 +1,79 @@
-site_name: Blender 5.2 LTS NPR Port Documentation
-site_description: Blender 5.2 LTS NPR Port Features, Usage, and Release Guide
+site_name: Blender NPR Port
+site_description: Blender 5.2 LTS NPR Port — features, usage guide, and downloads
 site_author: NPR Port Team
 site_url: "https://bb-yi.github.io/blender/en/"
+repo_url: https://github.com/bb-yi/blender
+repo_name: bb-yi/blender
+edit_uri: ""
+copyright: Copyright &copy; NPR Port Team
 
 docs_dir: docs/en
 
 theme:
   name: material
   language: en
+  custom_dir: overrides
+  font:
+    text: Inter
+    code: JetBrains Mono
   palette:
-    - scheme: default
-      primary: indigo
-      accent: red
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
       toggle:
-        icon: material/brightness-7
-        name: Dark mode
-    - scheme: slate
-      primary: indigo
-      accent: red
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
       toggle:
-        icon: material/brightness-4
-        name: Light mode
+        icon: material/weather-sunny
+        name: Switch to light mode
   features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
     - navigation.expand
     - navigation.top
+    - navigation.path
+    - navigation.indexes
     - search.suggest
     - search.highlight
+    - search.share
     - content.code.copy
     - content.code.select
     - content.code.annotate
     - content.tabs.link
+    - content.tooltips
     - toc.follow
 
 nav:
   - Home: index.md
-  - Download & Release: release.md
-  - Extended Nodes: extended-nodes.md
-  - NPR Workflow: npr-workflow.md
-  - Interface & Settings: interface-guide.md
-  - Scene Extensions: scene-extensions.md
+  - Download:
+    - Download & Release: release.md
+  - Documentation:
+    - Scene Extensions: scene-extensions.md
+    - Extended Nodes: extended-nodes.md
+    - NPR Workflow: npr-workflow.md
+    - Interface & Settings: interface-guide.md
 
 markdown_extensions:
   - admonition
   - attr_list
   - md_in_html
+  - def_list
+  - footnotes
+  - pymdownx.details
   - pymdownx.superfences
   - pymdownx.inlinehilite
   - pymdownx.snippets
   - pymdownx.tabbed:
       alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - tables
   - toc:
       permalink: true
@@ -59,7 +84,11 @@ plugins:
   - search:
       lang: en
 
+extra_css:
+  - stylesheets/extra.css
+
 extra:
+  generator: false
   alternate:
     - name: English
       lang: en
@@ -70,3 +99,4 @@ extra:
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/bb-yi/blender
+      name: GitHub

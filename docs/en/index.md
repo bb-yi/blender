@@ -1,144 +1,173 @@
-# Blender 5.2.0 LTS NPR Port - Features and Usage Guide
+---
+hide:
+  - navigation
+  - toc
+---
 
-## Project Introduction
+<div class="npr-hero" markdown>
 
-`Blender 5.2.0 LTS NPR Port` is an NPR-focused `Blender` branch. In addition to integrating characteristic nodes from `Goo Engine` and the `4.4 NPR-prototype`, it adds a set of Eevee-oriented extension nodes, a Filter Graph workflow, and interface improvements.
+<div class="npr-kicker"><span class="dot"></span> Blender 5.2.0 LTS · NPR Port</div>
 
-The release package includes `Cycles`, but the NPR extensions documented here are `Eevee`-only and cannot be used in `Cycles`.
+# A Blender branch built for stylized rendering
 
-## Documentation Scope
+<p class="lead">
+Combines strengths from Goo Engine and the 4.4 NPR-prototype, plus Eevee extension nodes, a Filter Graph workflow, and interface upgrades.
+Release builds include Cycles, but the NPR extensions documented here are <strong>Eevee-only</strong>.
+</p>
 
-This document describes the NPR / Eevee extension features that have been added to the current `Blender 5.2.0 LTS NPR Port` branch compared with official `Blender 5.2.0 LTS`, together with their basic usage.
-
-## 5.2.0 LTS Highlights
-
-- Migrated to the official `Blender 5.2.0 LTS` code base and adapted the Eevee NPR render paths
-- Replaced the legacy linear Filter Materials list with a scene-level `Filter Graph` supporting four execution stages and reusable Filter Pass materials
-- Added a `Node / Code` editor to `GLSL Function`, with inline internal-Text editing and an atomic Apply / Discard workflow that protects the live material
-- Added `mat2`, `mat3`, and `mat4` input, `out` parameter, and return-value support to `GLSL Function`, available in Eevee object materials, Filter materials, and `NPR Tree`
-- Added draw-view transform matrix helpers to `GLSL Function` (view / projection / model, including overscan and TAA jitter)
-- Added the EEVEE NPR refraction volume approximation for more stable refraction backgrounds with volumes and `Image Sample` offsets
-- Retained NPR extensions such as `GLSL Script Expression`, `Native Camera FX Outputs`, `Eevee Performance` shadow / probe attribution, and `OKLab Color Ramp`
-- Fixed Eevee shader, transparent AOV, Scene Color offset-sampling, and node-interface compatibility regressions found during the 5.2 migration
-- Current stable package: `fd9fabb4f531` (2026-08-11), with all `110/110` Release tests passing
-
-## Node Overview
-
-<div align="center">
-    <img src="images/SnowShot_2026-03-28_07-50-39.png" alt="Shader Nodes" style="border-radius: 10px;">
-    <br>
-    <sub>Shader Nodes</sub>
+<div class="npr-actions">
+<a class="npr-btn npr-btn--primary" href="release.html">⬇ Download stable</a>
+<a class="npr-btn npr-btn--ghost" href="scene-extensions.html">Browse docs</a>
+<a class="npr-btn npr-btn--ghost" href="https://github.com/bb-yi/blender">GitHub</a>
 </div>
 
-<div align="center">
-    <img src="images/SnowShot_2026-03-28_04-23-33.png" alt="NPR Tree Nodes" style="border-radius: 10px;">
-    <br>
-    <sub>NPR Tree Nodes (some shader nodes can also be used inside NPR Tree)</sub>
+<div class="npr-meta">
+<span class="npr-chip">Build <strong>fd9fabb4f531</strong></span>
+<span class="npr-chip">Released <strong>2026-08-11</strong></span>
+<span class="npr-chip">Release tests <strong>110/110</strong></span>
+<span class="npr-chip">Platform <strong>Windows x64</strong></span>
 </div>
 
-<div align="center">
-    <img src="images/filter_graph_editor_overview.png" alt="Eevee Filter Graph" style="border-radius: 10px;">
-    <br>
-    <sub>Eevee Filter Graph</sub>
 </div>
+
+## Highlights in 5.2.0 LTS
+
+<div class="npr-highlights" markdown>
+
+<div class="npr-highlight" markdown>
+**Filter Graph workflow**
+<p>Scene-level four-stage execution graph replacing the legacy linear Filter Materials list, with reusable Filter Pass materials.</p>
+</div>
+
+<div class="npr-highlight" markdown>
+**GLSL Function upgrades**
+<p>Node / Code editing modes, matrix inputs and return values, plus draw-view transform matrix helpers.</p>
+</div>
+
+<div class="npr-highlight" markdown>
+**Refraction volume approx.**
+<p>More stable refraction backgrounds with volumes and improved Image Sample offset behavior.</p>
+</div>
+
+<div class="npr-highlight" markdown>
+**UI & performance**
+<p>Keeps Eevee Performance shadow/probe attribution, material render-state controls, light groups, and more.</p>
+</div>
+
+</div>
+
+## Node overview
+
+<div class="npr-shots">
+<figure class="npr-shot">
+  <img src="images/SnowShot_2026-03-28_07-50-39.png" alt="Shader Nodes">
+  <figcaption>Shader nodes</figcaption>
+</figure>
+<figure class="npr-shot">
+  <img src="images/SnowShot_2026-03-28_04-23-33.png" alt="NPR Tree Nodes">
+  <figcaption>NPR Tree nodes</figcaption>
+</figure>
+<figure class="npr-shot">
+  <img src="images/filter_graph_editor_overview.png" alt="Eevee Filter Graph">
+  <figcaption>Eevee Filter Graph</figcaption>
+</figure>
+</div>
+
+## Start here
 
 <div class="grid cards" markdown>
 
-- **Scene-Level Extensions**
+-   :material-graph:{ .lg .middle } **Scene extensions**
 
     ---
 
-    Start with the scene-level Eevee extensions to understand the core features.
+    Render Textures, Filter Graph, Outline, Camera FX.
 
-    [View Scene-Level Extensions →](scene-extensions.md)
+    [:octicons-arrow-right-24: Open scene extensions](scene-extensions.md)
 
-- **Extended Nodes**
-
-    ---
-
-    Dive into the functionality of each newly added node.
-
-    [View Extended Nodes →](extended-nodes.md)
-
-- **NPR Workflow**
+-   :material-vector-polyline:{ .lg .middle } **Extended nodes**
 
     ---
 
-    Learn how the NPR Tree workflow is organized.
+    Scene Color, GLSL Function, SDF, OKLab, and more.
 
-    [View NPR Workflow →](npr-workflow.md)
+    [:octicons-arrow-right-24: Open extended nodes](extended-nodes.md)
 
-- **Interface & Settings**
+-   :material-tree:{ .lg .middle } **NPR workflow**
 
     ---
 
-    Check additional interface options and workflow settings.
+    NPR Input / Refraction / Image Sample and built-in assets.
 
-    [View Interface & Settings →](interface-guide.md)
+    [:octicons-arrow-right-24: Open NPR workflow](npr-workflow.md)
+
+-   :material-tune-vertical:{ .lg .middle } **Interface & settings**
+
+    ---
+
+    Performance, material state, light groups, Shadow Map Scale.
+
+    [:octicons-arrow-right-24: Open interface guide](interface-guide.md)
+
+-   :material-download:{ .lg .middle } **Download & release**
+
+    ---
+
+    Stable package, SHA256 checks, notes, and previous builds.
+
+    [:octicons-arrow-right-24: Open download page](release.md)
+
+-   :material-book-open-page-variant:{ .lg .middle } **Documentation scope**
+
+    ---
+
+    Covers NPR / Eevee extensions that **actually exist** in this branch vs official 5.2.0 LTS.
+
+    [:octicons-arrow-right-24: Full changelog on GitHub](https://github.com/bb-yi/blender/blob/main/blender-npr-release-changelog.md)
 
 </div>
 
-## Main Feature Categories
+## Feature index
 
-### 1. Scene-Level Eevee Extensions
+<div class="npr-feature-grid" markdown>
 
+<div class="npr-feature-card" markdown>
+### 1. Scene-level Eevee extensions
 - [`Render Textures`](scene-extensions.md#1-render-textures)
 - [`Filter Graph`](scene-extensions.md#2-filter-graph)
-- [`Eevee Outline`](scene-extensions.md#4-eevee-outline)
 - [`Native Camera FX Outputs`](scene-extensions.md#3-native-camera-fx-outputs)
-- [`Scene Color / AOV Input / Filter Pass / Stage Output`](scene-extensions.md#2-filter-graph)
+- [`Eevee Outline`](scene-extensions.md#4-eevee-outline)
+- [Scene Color / AOV / Filter Pass](scene-extensions.md#2-filter-graph)
+</div>
 
-### 2. Shader Nodes
+<div class="npr-feature-card" markdown>
+### 2. Shader nodes
+- [`GLSL Function`](extended-nodes.md#glsl-function) / [`GLSL Script Expression`](extended-nodes.md#glsl-script-expression)
+- [`Scene Color`](extended-nodes.md#scene-color) · [`Filter Mask`](extended-nodes.md#filter-mask)
+- [`Portal In/Out`](extended-nodes.md#portal-in-portal-out) · [`Outline Control`](extended-nodes.md#outline-control)
+- [`SDF`](extended-nodes.md#sdf-primitive) · [`OKLab Color Ramp`](extended-nodes.md#oklab-color-ramp)
+- [Full node list →](extended-nodes.md)
+</div>
 
-- [`Filter Object Info`](extended-nodes.md#filter-object-info)
-- [`Filter Mask`](extended-nodes.md#filter-mask)
-- [`Scene Color`](extended-nodes.md#scene-color)
-- [`Render Info`](extended-nodes.md#render-info)
-- [`Scene Time`](extended-nodes.md#scene-time)
-- [`Screen Derivative`](extended-nodes.md#screen-derivative)
-- [`Portal In / Portal Out`](extended-nodes.md#portal-in-portal-out)
-- [`Outline Control`](extended-nodes.md#outline-control)
-- [`Screenspace Info`](extended-nodes.md#screenspace-info)
-- [`World Environment`](extended-nodes.md#world-environment)
-- [`Light Probe Color`](extended-nodes.md#light-probe-color)
-- [`World To Tangent`](extended-nodes.md#world-to-tangent)
-- [`GLSL Function`](extended-nodes.md#glsl-function)
-- [`GLSL Script Expression`](extended-nodes.md#glsl-script-expression)
-- [`Image to Closure`](extended-nodes.md#image-to-closure)
-- [`Light Shader Info`](extended-nodes.md#light-shader-info-light-shader-output)
-- [`Light Shader Output`](extended-nodes.md#light-shader-info-light-shader-output)
-- [`Basis Transform`](extended-nodes.md#basis-transform)
-- [`Twirl`](extended-nodes.md#twirl)
-- [`Water Ripples`](extended-nodes.md#water-ripples)
-- [`Hex Grid Texture`](extended-nodes.md#hex-grid-texture)
-- [`SDF Primitive`](extended-nodes.md#sdf-primitive)
-- [`SDF Operator`](extended-nodes.md#sdf-operator)
-- [`SDF Vector Operator`](extended-nodes.md#sdf-vector-operator)
-- [`Bevel`](extended-nodes.md#bevel)
-- [`Curvature`](extended-nodes.md#curvature)
-- [`Shader Info`](extended-nodes.md#shader-info)
-- [`Light Info`](extended-nodes.md#light-info)
-- [`OKLab Color Ramp`](extended-nodes.md#oklab-color-ramp)
-
-### 3. NPR Workflow
-
+<div class="npr-feature-card" markdown>
+### 3. NPR Tree workflow
 - [`NPR Input`](npr-workflow.md#npr-input)
 - [`NPR Refraction`](npr-workflow.md#npr-refraction)
 - [`Image Sample`](npr-workflow.md#image-sample)
 - [`For Each Light`](npr-workflow.md#for-each-light)
 - [Built-in node-group assets](npr-workflow.md#5-built-in-npr-node-group-assets)
+</div>
 
-### 4. Interface & Settings
-
-- [`Eevee Performance` Outliner view](interface-guide.md#1-eevee-performance)
-- [Shadow / probe cost attribution in `Eevee Performance`](interface-guide.md#shadow-and-probe-attribution)
-- [Material preview control](interface-guide.md#2-material-selector-previews)
-- [Material face culling](interface-guide.md#3-material-face-culling)
-- [Material `ZTest / Stencil / Color Write / Depth Write`](interface-guide.md#4-material-surface-render-state)
-- [Lightgroup management](interface-guide.md#5-eevee-lightgroup-id)
-- [Sun `Shadow Map Scale`](interface-guide.md#6-sun-shadow-map-scale)
+<div class="npr-feature-card" markdown>
+### 4. Interface & settings
+- [`Eevee Performance`](interface-guide.md#1-eevee-performance)
+- [Material preview / culling / render state](interface-guide.md#2-material-selector-previews)
+- [Light groups · Shadow Map Scale](interface-guide.md#5-eevee-lightgroup-id)
 - [Splash version tag](interface-guide.md#7-splash-version-tag)
 - [Pose bone Outliner visibility](interface-guide.md#9-pose-bone-outliner-visibility)
+</div>
 
-!!! warning "Eevee Only"
-    The release package can run `Cycles`, but the NPR Port extensions documented here require the **Eevee render engine** and cannot be used in `Cycles`.
+</div>
+
+!!! warning "Eevee only"
+    The release package can run Cycles, but the NPR Port extensions documented here require the **Eevee render engine** and cannot be used in Cycles.

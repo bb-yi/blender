@@ -1,54 +1,79 @@
-site_name: Blender 5.2 LTS NPR Port 文档
-site_description: Blender 5.2 LTS NPR Port 功能、使用与版本说明
+site_name: Blender NPR Port
+site_description: Blender 5.2 LTS NPR Port — 功能说明、使用指南与正式下载
 site_author: NPR Port Team
 site_url: "https://bb-yi.github.io/blender/"
+repo_url: https://github.com/bb-yi/blender
+repo_name: bb-yi/blender
+edit_uri: ""
+copyright: Copyright &copy; NPR Port Team
 
 docs_dir: docs/zh
 
 theme:
   name: material
   language: zh
+  custom_dir: overrides
+  font:
+    text: Inter
+    code: JetBrains Mono
   palette:
-    - scheme: default
-      primary: indigo
-      accent: red
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
       toggle:
-        icon: material/brightness-7
+        icon: material/weather-night
         name: 深色模式
-    - scheme: slate
-      primary: indigo
-      accent: red
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
       toggle:
-        icon: material/brightness-4
+        icon: material/weather-sunny
         name: 亮色模式
   features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
     - navigation.expand
     - navigation.top
+    - navigation.path
+    - navigation.indexes
     - search.suggest
     - search.highlight
+    - search.share
     - content.code.copy
     - content.code.select
     - content.code.annotate
     - content.tabs.link
+    - content.tooltips
     - toc.follow
 
 nav:
   - 首页: index.md
-  - 下载与版本: release.md
-  - 扩展着色器节点: extended-nodes.md
-  - NPR Tree 工作流: npr-workflow.md
-  - 界面与设置: interface-guide.md
-  - Scene 级 Eevee 扩展: scene-extensions.md
+  - 下载:
+    - 下载与版本: release.md
+  - 功能文档:
+    - Scene 级 Eevee 扩展: scene-extensions.md
+    - 扩展着色器节点: extended-nodes.md
+    - NPR Tree 工作流: npr-workflow.md
+    - 界面与设置: interface-guide.md
 
 markdown_extensions:
   - admonition
   - attr_list
   - md_in_html
+  - def_list
+  - footnotes
+  - pymdownx.details
   - pymdownx.superfences
   - pymdownx.inlinehilite
   - pymdownx.snippets
   - pymdownx.tabbed:
       alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - tables
   - toc:
       permalink: true
@@ -59,7 +84,11 @@ plugins:
   - search:
       lang: zh
 
+extra_css:
+  - stylesheets/extra.css
+
 extra:
+  generator: false
   alternate:
     - name: 中文
       lang: zh
@@ -70,3 +99,4 @@ extra:
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/bb-yi/blender
+      name: GitHub
