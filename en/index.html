@@ -6,7 +6,7 @@
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width,initial-scale=1">
       
-        <meta name="description" content="Blender 5.2 LTS NPR Port Features, Usage, and Release Guide">
+        <meta name="description" content="Blender 5.2 LTS NPR Port — features, usage guide, and downloads">
       
       
         <meta name="author" content="NPR Port Team">
@@ -24,7 +24,7 @@
     
     
       
-        <title>Blender 5.2 LTS NPR Port Documentation</title>
+        <title>Blender NPR Port</title>
       
     
     
@@ -45,10 +45,12 @@
         
         
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
-        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
       
     
+    
+      <link rel="stylesheet" href="stylesheets/extra.css">
     
     <script>__md_scope=new URL(".",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
     
@@ -57,6 +59,10 @@
     
     
     
+  
+  <meta name="theme-color" content="#1b2430">
+  <meta name="color-scheme" content="dark light">
+
   </head>
   
   
@@ -67,7 +73,7 @@
     
     
     
-    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="red">
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom">
   
     
     <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
@@ -76,7 +82,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#blender-520-lts-npr-port-features-and-usage-guide" class="md-skip">
+        <a href="#a-blender-branch-built-for-stylized-rendering" class="md-skip">
           Skip to content
         </a>
       
@@ -90,9 +96,9 @@
 
   
 
-<header class="md-header md-header--shadow" data-md-component="header">
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
   <nav class="md-header__inner md-grid" aria-label="Header">
-    <a href="index.html" title="Blender 5.2 LTS NPR Port Documentation" class="md-header__button md-logo" aria-label="Blender 5.2 LTS NPR Port Documentation" data-md-component="logo">
+    <a href="index.html" title="Blender NPR Port" class="md-header__button md-logo" aria-label="Blender NPR Port" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
@@ -106,7 +112,7 @@
       <div class="md-header__ellipsis">
         <div class="md-header__topic">
           <span class="md-ellipsis">
-            Blender 5.2 LTS NPR Port Documentation
+            Blender NPR Port
           </span>
         </div>
         <div class="md-header__topic" data-md-component="header-topic">
@@ -125,20 +131,20 @@
     
     
     
-    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="red"  aria-label="Dark mode"  type="radio" name="__palette" id="__palette_0">
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
     
-      <label class="md-header__button md-icon" title="Dark mode" for="__palette_1" hidden>
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
       </label>
     
   
     
     
     
-    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="red"  aria-label="Light mode"  type="radio" name="__palette" id="__palette_1">
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="custom" data-md-color-accent="custom"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
     
-      <label class="md-header__button md-icon" title="Light mode" for="__palette_0" hidden>
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
       </label>
     
   
@@ -195,6 +201,11 @@
       </label>
       <nav class="md-search__options" aria-label="Search">
         
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="Share" aria-label="Share" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
         <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
           
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
@@ -219,7 +230,95 @@
       
     
     
+      <div class="md-header__source">
+        <a href="https://github.com/bb-yi/blender" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    bb-yi/blender
+  </div>
+</a>
+      </div>
+    
   </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="index.html" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="release.html" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Download
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="scene-extensions.html" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Documentation
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
   
 </header>
     
@@ -227,31 +326,45 @@
       
       
         
-          
-        
       
       <main class="md-main" data-md-component="main">
         <div class="md-main__inner md-grid">
           
             
               
-              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" hidden>
                 <div class="md-sidebar__scrollwrap">
                   <div class="md-sidebar__inner">
                     
 
 
+  
 
-<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
   <label class="md-nav__title" for="__drawer">
-    <a href="index.html" title="Blender 5.2 LTS NPR Port Documentation" class="md-nav__button md-logo" aria-label="Blender 5.2 LTS NPR Port Documentation" data-md-component="logo">
+    <a href="index.html" title="Blender NPR Port" class="md-nav__button md-logo" aria-label="Blender NPR Port" data-md-component="logo">
       
   
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
 
     </a>
-    Blender 5.2 LTS NPR Port Documentation
+    Blender NPR Port
   </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/bb-yi/blender" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    bb-yi/blender
+  </div>
+</a>
+    </div>
   
   <ul class="md-nav__list" data-md-scrollfix>
     
@@ -312,27 +425,9 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#project-introduction" class="md-nav__link">
+  <a href="#highlights-in-520-lts" class="md-nav__link">
     <span class="md-ellipsis">
-      Project Introduction
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#documentation-scope" class="md-nav__link">
-    <span class="md-ellipsis">
-      Documentation Scope
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#520-lts-highlights" class="md-nav__link">
-    <span class="md-ellipsis">
-      5.2.0 LTS Highlights
+      Highlights in 5.2.0 LTS
     </span>
   </a>
   
@@ -341,26 +436,35 @@
         <li class="md-nav__item">
   <a href="#node-overview" class="md-nav__link">
     <span class="md-ellipsis">
-      Node Overview
+      Node overview
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#main-feature-categories" class="md-nav__link">
+  <a href="#start-here" class="md-nav__link">
     <span class="md-ellipsis">
-      Main Feature Categories
+      Start here
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Main Feature Categories">
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#feature-index" class="md-nav__link">
+    <span class="md-ellipsis">
+      Feature index
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Feature index">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
   <a href="#1-scene-level-eevee-extensions" class="md-nav__link">
     <span class="md-ellipsis">
-      1. Scene-Level Eevee Extensions
+      1. Scene-level Eevee extensions
     </span>
   </a>
   
@@ -369,16 +473,16 @@
           <li class="md-nav__item">
   <a href="#2-shader-nodes" class="md-nav__link">
     <span class="md-ellipsis">
-      2. Shader Nodes
+      2. Shader nodes
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#3-npr-workflow" class="md-nav__link">
+  <a href="#3-npr-tree-workflow" class="md-nav__link">
     <span class="md-ellipsis">
-      3. NPR Workflow
+      3. NPR Tree workflow
     </span>
   </a>
   
@@ -387,7 +491,7 @@
           <li class="md-nav__item">
   <a href="#4-interface-settings" class="md-nav__link">
     <span class="md-ellipsis">
-      4. Interface &amp; Settings
+      4. Interface &amp; settings
     </span>
   </a>
   
@@ -412,6 +516,55 @@
   
   
   
+    
+    
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    Download
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            Download
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
     <li class="md-nav__item">
       <a href="release.html" class="md-nav__link">
         
@@ -427,25 +580,11 @@
     </li>
   
 
-    
+              
+            
+          </ul>
+        </nav>
       
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="extended-nodes.html" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    Extended Nodes
-    
-  </span>
-  
-
-      </a>
     </li>
   
 
@@ -456,46 +595,57 @@
   
   
   
-    <li class="md-nav__item">
-      <a href="npr-workflow.html" class="md-nav__link">
+    
+    
+      
         
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
   
   
   <span class="md-ellipsis">
-    NPR Workflow
+    Documentation
     
   </span>
   
 
-      </a>
-    </li>
-  
-
-    
-      
-      
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="interface-guide.html" class="md-nav__link">
+            <span class="md-nav__icon md-icon"></span>
+          </label>
         
-  
-  
-  <span class="md-ellipsis">
-    Interface & Settings
-    
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-    
-      
-      
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            Documentation
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
   
   
   
@@ -515,6 +665,83 @@
     </li>
   
 
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="extended-nodes.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Extended Nodes
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="npr-workflow.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    NPR Workflow
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="interface-guide.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Interface & Settings
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
     
   </ul>
 </nav>
@@ -524,7 +751,9 @@
             
             
               
-              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" hidden>
                 <div class="md-sidebar__scrollwrap">
                   <div class="md-sidebar__inner">
                     
@@ -543,27 +772,9 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#project-introduction" class="md-nav__link">
+  <a href="#highlights-in-520-lts" class="md-nav__link">
     <span class="md-ellipsis">
-      Project Introduction
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#documentation-scope" class="md-nav__link">
-    <span class="md-ellipsis">
-      Documentation Scope
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#520-lts-highlights" class="md-nav__link">
-    <span class="md-ellipsis">
-      5.2.0 LTS Highlights
+      Highlights in 5.2.0 LTS
     </span>
   </a>
   
@@ -572,26 +783,35 @@
         <li class="md-nav__item">
   <a href="#node-overview" class="md-nav__link">
     <span class="md-ellipsis">
-      Node Overview
+      Node overview
     </span>
   </a>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#main-feature-categories" class="md-nav__link">
+  <a href="#start-here" class="md-nav__link">
     <span class="md-ellipsis">
-      Main Feature Categories
+      Start here
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Main Feature Categories">
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#feature-index" class="md-nav__link">
+    <span class="md-ellipsis">
+      Feature index
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Feature index">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
   <a href="#1-scene-level-eevee-extensions" class="md-nav__link">
     <span class="md-ellipsis">
-      1. Scene-Level Eevee Extensions
+      1. Scene-level Eevee extensions
     </span>
   </a>
   
@@ -600,16 +820,16 @@
           <li class="md-nav__item">
   <a href="#2-shader-nodes" class="md-nav__link">
     <span class="md-ellipsis">
-      2. Shader Nodes
+      2. Shader nodes
     </span>
   </a>
   
 </li>
         
           <li class="md-nav__item">
-  <a href="#3-npr-workflow" class="md-nav__link">
+  <a href="#3-npr-tree-workflow" class="md-nav__link">
     <span class="md-ellipsis">
-      3. NPR Workflow
+      3. NPR Tree workflow
     </span>
   </a>
   
@@ -618,7 +838,7 @@
           <li class="md-nav__item">
   <a href="#4-interface-settings" class="md-nav__link">
     <span class="md-ellipsis">
-      4. Interface &amp; Settings
+      4. Interface &amp; settings
     </span>
   </a>
   
@@ -642,116 +862,130 @@
               <article class="md-content__inner md-typeset">
                 
                   
+  
 
 
 
-<h1 id="blender-520-lts-npr-port-features-and-usage-guide">Blender 5.2.0 LTS NPR Port - Features and Usage Guide<a class="headerlink" href="#blender-520-lts-npr-port-features-and-usage-guide" title="Permanent link">&para;</a></h1>
-<h2 id="project-introduction">Project Introduction<a class="headerlink" href="#project-introduction" title="Permanent link">&para;</a></h2>
-<p><code>Blender 5.2.0 LTS NPR Port</code> is an NPR-focused <code>Blender</code> branch. In addition to integrating characteristic nodes from <code>Goo Engine</code> and the <code>4.4 NPR-prototype</code>, it adds a set of Eevee-oriented extension nodes, a Filter Graph workflow, and interface improvements.</p>
-<p>The release package includes <code>Cycles</code>, but the NPR extensions documented here are <code>Eevee</code>-only and cannot be used in <code>Cycles</code>.</p>
-<h2 id="documentation-scope">Documentation Scope<a class="headerlink" href="#documentation-scope" title="Permanent link">&para;</a></h2>
-<p>This document describes the NPR / Eevee extension features that have been added to the current <code>Blender 5.2.0 LTS NPR Port</code> branch compared with official <code>Blender 5.2.0 LTS</code>, together with their basic usage.</p>
-<h2 id="520-lts-highlights">5.2.0 LTS Highlights<a class="headerlink" href="#520-lts-highlights" title="Permanent link">&para;</a></h2>
-<ul>
-<li>Migrated to the official <code>Blender 5.2.0 LTS</code> code base and adapted the Eevee NPR render paths</li>
-<li>Replaced the legacy linear Filter Materials list with a scene-level <code>Filter Graph</code> supporting four execution stages and reusable Filter Pass materials</li>
-<li>Added a <code>Node / Code</code> editor to <code>GLSL Function</code>, with inline internal-Text editing and an atomic Apply / Discard workflow that protects the live material</li>
-<li>Added <code>mat2</code>, <code>mat3</code>, and <code>mat4</code> input, <code>out</code> parameter, and return-value support to <code>GLSL Function</code>, available in Eevee object materials, Filter materials, and <code>NPR Tree</code></li>
-<li>Added draw-view transform matrix helpers to <code>GLSL Function</code> (view / projection / model, including overscan and TAA jitter)</li>
-<li>Added the EEVEE NPR refraction volume approximation for more stable refraction backgrounds with volumes and <code>Image Sample</code> offsets</li>
-<li>Retained NPR extensions such as <code>GLSL Script Expression</code>, <code>Native Camera FX Outputs</code>, <code>Eevee Performance</code> shadow / probe attribution, and <code>OKLab Color Ramp</code></li>
-<li>Fixed Eevee shader, transparent AOV, Scene Color offset-sampling, and node-interface compatibility regressions found during the 5.2 migration</li>
-<li>Current stable package: <code>fd9fabb4f531</code> (2026-08-11), with all <code>110/110</code> Release tests passing</li>
-</ul>
-<h2 id="node-overview">Node Overview<a class="headerlink" href="#node-overview" title="Permanent link">&para;</a></h2>
-<div align="center">
-    <img src="images/SnowShot_2026-03-28_07-50-39.png" alt="Shader Nodes" style="border-radius: 10px;">
-    <br>
-    <sub>Shader Nodes</sub>
+
+<div class="npr-hero">
+<div class="npr-kicker"><span class="dot"></span> Blender 5.2.0 LTS · NPR Port</div>
+<h1 id="a-blender-branch-built-for-stylized-rendering">A Blender branch built for stylized rendering<a class="headerlink" href="#a-blender-branch-built-for-stylized-rendering" title="Permanent link">&para;</a></h1>
+<p class="lead">
+Combines strengths from Goo Engine and the 4.4 NPR-prototype, plus Eevee extension nodes, a Filter Graph workflow, and interface upgrades.
+Release builds include Cycles, but the NPR extensions documented here are <strong>Eevee-only</strong>.
+</p>
+<div class="npr-actions">
+<a class="npr-btn npr-btn--primary" href="release.html">⬇ Download stable</a>
+<a class="npr-btn npr-btn--ghost" href="scene-extensions.html">Browse docs</a>
+<a class="npr-btn npr-btn--ghost" href="https://github.com/bb-yi/blender">GitHub</a>
+</div>
+<div class="npr-meta">
+<span class="npr-chip">Build <strong>fd9fabb4f531</strong></span>
+<span class="npr-chip">Released <strong>2026-08-11</strong></span>
+<span class="npr-chip">Release tests <strong>110/110</strong></span>
+<span class="npr-chip">Platform <strong>Windows x64</strong></span>
+</div>
+</div>
+<h2 id="highlights-in-520-lts">Highlights in 5.2.0 LTS<a class="headerlink" href="#highlights-in-520-lts" title="Permanent link">&para;</a></h2>
+<div class="npr-highlights">
+<div class="npr-highlight">
+<p><strong>Filter Graph workflow</strong></p>
+<p>Scene-level four-stage execution graph replacing the legacy linear Filter Materials list, with reusable Filter Pass materials.</p>
+</div>
+<div class="npr-highlight">
+<p><strong>GLSL Function upgrades</strong></p>
+<p>Node / Code editing modes, matrix inputs and return values, plus draw-view transform matrix helpers.</p>
+</div>
+<div class="npr-highlight">
+<p><strong>Refraction volume approx.</strong></p>
+<p>More stable refraction backgrounds with volumes and improved Image Sample offset behavior.</p>
+</div>
+<div class="npr-highlight">
+<p><strong>UI &amp; performance</strong></p>
+<p>Keeps Eevee Performance shadow/probe attribution, material render-state controls, light groups, and more.</p>
+</div>
+</div>
+<h2 id="node-overview">Node overview<a class="headerlink" href="#node-overview" title="Permanent link">&para;</a></h2>
+<div class="npr-shots">
+<figure class="npr-shot">
+  <img src="images/SnowShot_2026-03-28_07-50-39.png" alt="Shader Nodes">
+  <figcaption>Shader nodes</figcaption>
+</figure>
+<figure class="npr-shot">
+  <img src="images/SnowShot_2026-03-28_04-23-33.png" alt="NPR Tree Nodes">
+  <figcaption>NPR Tree nodes</figcaption>
+</figure>
+<figure class="npr-shot">
+  <img src="images/filter_graph_editor_overview.png" alt="Eevee Filter Graph">
+  <figcaption>Eevee Filter Graph</figcaption>
+</figure>
 </div>
 
-<div align="center">
-    <img src="images/SnowShot_2026-03-28_04-23-33.png" alt="NPR Tree Nodes" style="border-radius: 10px;">
-    <br>
-    <sub>NPR Tree Nodes (some shader nodes can also be used inside NPR Tree)</sub>
-</div>
-
-<div align="center">
-    <img src="images/filter_graph_editor_overview.png" alt="Eevee Filter Graph" style="border-radius: 10px;">
-    <br>
-    <sub>Eevee Filter Graph</sub>
-</div>
-
+<h2 id="start-here">Start here<a class="headerlink" href="#start-here" title="Permanent link">&para;</a></h2>
 <div class="grid cards">
 <ul>
 <li>
-<p><strong>Scene-Level Extensions</strong></p>
+<p><span class="twemoji lg middle"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19.5 17c-.13 0-.26 0-.39.04l-1.61-3.25a2.5 2.5 0 0 0-1.75-4.29c-.13 0-.25 0-.39.04l-1.63-3.25c.48-.45.77-1.08.77-1.79a2.5 2.5 0 0 0-5 0c0 .71.29 1.34.76 1.79L8.64 9.54c-.14-.04-.26-.04-.39-.04a2.5 2.5 0 0 0-1.75 4.29l-1.61 3.25C4.76 17 4.63 17 4.5 17a2.5 2.5 0 0 0 0 5A2.5 2.5 0 0 0 7 19.5c0-.7-.29-1.34-.76-1.79l1.62-3.25c.14.04.26.04.39.04s.25 0 .39-.04l1.63 3.25c-.47.45-.77 1.09-.77 1.79a2.5 2.5 0 0 0 5 0A2.5 2.5 0 0 0 12 17c-.13 0-.26 0-.39.04L10 13.79c.46-.45.75-1.08.75-1.79s-.29-1.34-.75-1.79l1.61-3.25c.13.04.26.04.39.04s.26 0 .39-.04L14 10.21c-.45.45-.75 1.09-.75 1.79a2.5 2.5 0 0 0 2.5 2.5c.13 0 .25 0 .39-.04l1.63 3.25c-.47.45-.77 1.09-.77 1.79a2.5 2.5 0 0 0 5 0 2.5 2.5 0 0 0-2.5-2.5"/></svg></span> <strong>Scene extensions</strong></p>
 <hr />
-<p>Start with the scene-level Eevee extensions to understand the core features.</p>
-<p><a href="scene-extensions.html">View Scene-Level Extensions →</a></p>
+<p>Render Textures, Filter Graph, Outline, Camera FX.</p>
+<p><a href="scene-extensions.html"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13.22 19.03a.75.75 0 0 1 0-1.06L18.19 13H3.75a.75.75 0 0 1 0-1.5h14.44l-4.97-4.97a.749.749 0 0 1 .326-1.275.75.75 0 0 1 .734.215l6.25 6.25a.75.75 0 0 1 0 1.06l-6.25 6.25a.75.75 0 0 1-1.06 0"/></svg></span> Open scene extensions</a></p>
 </li>
 <li>
-<p><strong>Extended Nodes</strong></p>
+<p><span class="twemoji lg middle"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M2 3v6h2.95l2 6H6v6h6v-4.59L17.41 11H22V5h-6v4.57L10.59 15H9.06l-2-6H8V3M4 5h2v2H4m14 0h2v2h-2M8 17h2v2H8Z"/></svg></span> <strong>Extended nodes</strong></p>
 <hr />
-<p>Dive into the functionality of each newly added node.</p>
-<p><a href="extended-nodes.html">View Extended Nodes →</a></p>
+<p>Scene Color, GLSL Function, SDF, OKLab, and more.</p>
+<p><a href="extended-nodes.html"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13.22 19.03a.75.75 0 0 1 0-1.06L18.19 13H3.75a.75.75 0 0 1 0-1.5h14.44l-4.97-4.97a.749.749 0 0 1 .326-1.275.75.75 0 0 1 .734.215l6.25 6.25a.75.75 0 0 1 0 1.06l-6.25 6.25a.75.75 0 0 1-1.06 0"/></svg></span> Open extended nodes</a></p>
 </li>
 <li>
-<p><strong>NPR Workflow</strong></p>
+<p><span class="twemoji lg middle"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M11 21v-4.26c-.47.17-.97.26-1.5.26C7 17 5 15 5 12.5c0-1.27.5-2.41 1.36-3.23C6.13 8.73 6 8.13 6 7.5 6 5 8 3 10.5 3c1.56 0 2.94.8 3.75 2h.25a5.5 5.5 0 0 1 5.5 5.5 5.5 5.5 0 0 1-5.5 5.5q-.75 0-1.5-.21V21z"/></svg></span> <strong>NPR workflow</strong></p>
 <hr />
-<p>Learn how the NPR Tree workflow is organized.</p>
-<p><a href="npr-workflow.html">View NPR Workflow →</a></p>
+<p>NPR Input / Refraction / Image Sample and built-in assets.</p>
+<p><a href="npr-workflow.html"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13.22 19.03a.75.75 0 0 1 0-1.06L18.19 13H3.75a.75.75 0 0 1 0-1.5h14.44l-4.97-4.97a.749.749 0 0 1 .326-1.275.75.75 0 0 1 .734.215l6.25 6.25a.75.75 0 0 1 0 1.06l-6.25 6.25a.75.75 0 0 1-1.06 0"/></svg></span> Open NPR workflow</a></p>
 </li>
 <li>
-<p><strong>Interface &amp; Settings</strong></p>
+<p><span class="twemoji lg middle"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M7 3H5v6h2zm12 0h-2v10h2zM3 13h2v8h2v-8h2v-2H3zm12-6h-2V3h-2v4H9v2h6zm-4 14h2V11h-2zm4-6v2h2v4h2v-4h2v-2z"/></svg></span> <strong>Interface &amp; settings</strong></p>
 <hr />
-<p>Check additional interface options and workflow settings.</p>
-<p><a href="interface-guide.html">View Interface &amp; Settings →</a></p>
+<p>Performance, material state, light groups, Shadow Map Scale.</p>
+<p><a href="interface-guide.html"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13.22 19.03a.75.75 0 0 1 0-1.06L18.19 13H3.75a.75.75 0 0 1 0-1.5h14.44l-4.97-4.97a.749.749 0 0 1 .326-1.275.75.75 0 0 1 .734.215l6.25 6.25a.75.75 0 0 1 0 1.06l-6.25 6.25a.75.75 0 0 1-1.06 0"/></svg></span> Open interface guide</a></p>
+</li>
+<li>
+<p><span class="twemoji lg middle"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M5 20h14v-2H5m14-9h-4V3H9v6H5l7 7z"/></svg></span> <strong>Download &amp; release</strong></p>
+<hr />
+<p>Stable package, SHA256 checks, notes, and previous builds.</p>
+<p><a href="release.html"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13.22 19.03a.75.75 0 0 1 0-1.06L18.19 13H3.75a.75.75 0 0 1 0-1.5h14.44l-4.97-4.97a.749.749 0 0 1 .326-1.275.75.75 0 0 1 .734.215l6.25 6.25a.75.75 0 0 1 0 1.06l-6.25 6.25a.75.75 0 0 1-1.06 0"/></svg></span> Open download page</a></p>
+</li>
+<li>
+<p><span class="twemoji lg middle"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m19 2-5 4.5v11l5-4.5zM6.5 5C4.55 5 2.45 5.4 1 6.5v14.66c0 .25.25.5.5.5.1 0 .15-.07.25-.07 1.35-.65 3.3-1.09 4.75-1.09 1.95 0 4.05.4 5.5 1.5 1.35-.85 3.8-1.5 5.5-1.5 1.65 0 3.35.31 4.75 1.06.1.05.15.03.25.03.25 0 .5-.25.5-.5V6.5c-.6-.45-1.25-.75-2-1V19c-1.1-.35-2.3-.5-3.5-.5-1.7 0-4.15.65-5.5 1.5V6.5C10.55 5.4 8.45 5 6.5 5"/></svg></span> <strong>Documentation scope</strong></p>
+<hr />
+<p>Covers NPR / Eevee extensions that <strong>actually exist</strong> in this branch vs official 5.2.0 LTS.</p>
+<p><a href="https://github.com/bb-yi/blender/blob/main/blender-npr-release-changelog.md"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13.22 19.03a.75.75 0 0 1 0-1.06L18.19 13H3.75a.75.75 0 0 1 0-1.5h14.44l-4.97-4.97a.749.749 0 0 1 .326-1.275.75.75 0 0 1 .734.215l6.25 6.25a.75.75 0 0 1 0 1.06l-6.25 6.25a.75.75 0 0 1-1.06 0"/></svg></span> Full changelog on GitHub</a></p>
 </li>
 </ul>
 </div>
-<h2 id="main-feature-categories">Main Feature Categories<a class="headerlink" href="#main-feature-categories" title="Permanent link">&para;</a></h2>
-<h3 id="1-scene-level-eevee-extensions">1. Scene-Level Eevee Extensions<a class="headerlink" href="#1-scene-level-eevee-extensions" title="Permanent link">&para;</a></h3>
+<h2 id="feature-index">Feature index<a class="headerlink" href="#feature-index" title="Permanent link">&para;</a></h2>
+<div class="npr-feature-grid">
+<div class="npr-feature-card">
+<h3 id="1-scene-level-eevee-extensions">1. Scene-level Eevee extensions<a class="headerlink" href="#1-scene-level-eevee-extensions" title="Permanent link">&para;</a></h3>
 <ul>
 <li><a href="scene-extensions.html#1-render-textures"><code>Render Textures</code></a></li>
 <li><a href="scene-extensions.html#2-filter-graph"><code>Filter Graph</code></a></li>
-<li><a href="scene-extensions.html#4-eevee-outline"><code>Eevee Outline</code></a></li>
 <li><a href="scene-extensions.html#3-native-camera-fx-outputs"><code>Native Camera FX Outputs</code></a></li>
-<li><a href="scene-extensions.html#2-filter-graph"><code>Scene Color / AOV Input / Filter Pass / Stage Output</code></a></li>
+<li><a href="scene-extensions.html#4-eevee-outline"><code>Eevee Outline</code></a></li>
+<li><a href="scene-extensions.html#2-filter-graph">Scene Color / AOV / Filter Pass</a></li>
 </ul>
-<h3 id="2-shader-nodes">2. Shader Nodes<a class="headerlink" href="#2-shader-nodes" title="Permanent link">&para;</a></h3>
+</div>
+<div class="npr-feature-card">
+<h3 id="2-shader-nodes">2. Shader nodes<a class="headerlink" href="#2-shader-nodes" title="Permanent link">&para;</a></h3>
 <ul>
-<li><a href="extended-nodes.html#filter-object-info"><code>Filter Object Info</code></a></li>
-<li><a href="extended-nodes.html#filter-mask"><code>Filter Mask</code></a></li>
-<li><a href="extended-nodes.html#scene-color"><code>Scene Color</code></a></li>
-<li><a href="extended-nodes.html#render-info"><code>Render Info</code></a></li>
-<li><a href="extended-nodes.html#scene-time"><code>Scene Time</code></a></li>
-<li><a href="extended-nodes.html#screen-derivative"><code>Screen Derivative</code></a></li>
-<li><a href="extended-nodes.html#portal-in-portal-out"><code>Portal In / Portal Out</code></a></li>
-<li><a href="extended-nodes.html#outline-control"><code>Outline Control</code></a></li>
-<li><a href="extended-nodes.html#screenspace-info"><code>Screenspace Info</code></a></li>
-<li><a href="extended-nodes.html#world-environment"><code>World Environment</code></a></li>
-<li><a href="extended-nodes.html#light-probe-color"><code>Light Probe Color</code></a></li>
-<li><a href="extended-nodes.html#world-to-tangent"><code>World To Tangent</code></a></li>
-<li><a href="extended-nodes.html#glsl-function"><code>GLSL Function</code></a></li>
-<li><a href="extended-nodes.html#glsl-script-expression"><code>GLSL Script Expression</code></a></li>
-<li><a href="extended-nodes.html#image-to-closure"><code>Image to Closure</code></a></li>
-<li><a href="extended-nodes.html#light-shader-info-light-shader-output"><code>Light Shader Info</code></a></li>
-<li><a href="extended-nodes.html#light-shader-info-light-shader-output"><code>Light Shader Output</code></a></li>
-<li><a href="extended-nodes.html#basis-transform"><code>Basis Transform</code></a></li>
-<li><a href="extended-nodes.html#twirl"><code>Twirl</code></a></li>
-<li><a href="extended-nodes.html#water-ripples"><code>Water Ripples</code></a></li>
-<li><a href="extended-nodes.html#hex-grid-texture"><code>Hex Grid Texture</code></a></li>
-<li><a href="extended-nodes.html#sdf-primitive"><code>SDF Primitive</code></a></li>
-<li><a href="extended-nodes.html#sdf-operator"><code>SDF Operator</code></a></li>
-<li><a href="extended-nodes.html#sdf-vector-operator"><code>SDF Vector Operator</code></a></li>
-<li><a href="extended-nodes.html#bevel"><code>Bevel</code></a></li>
-<li><a href="extended-nodes.html#curvature"><code>Curvature</code></a></li>
-<li><a href="extended-nodes.html#shader-info"><code>Shader Info</code></a></li>
-<li><a href="extended-nodes.html#light-info"><code>Light Info</code></a></li>
-<li><a href="extended-nodes.html#oklab-color-ramp"><code>OKLab Color Ramp</code></a></li>
+<li><a href="extended-nodes.html#glsl-function"><code>GLSL Function</code></a> / <a href="extended-nodes.html#glsl-script-expression"><code>GLSL Script Expression</code></a></li>
+<li><a href="extended-nodes.html#scene-color"><code>Scene Color</code></a> · <a href="extended-nodes.html#filter-mask"><code>Filter Mask</code></a></li>
+<li><a href="extended-nodes.html#portal-in-portal-out"><code>Portal In/Out</code></a> · <a href="extended-nodes.html#outline-control"><code>Outline Control</code></a></li>
+<li><a href="extended-nodes.html#sdf-primitive"><code>SDF</code></a> · <a href="extended-nodes.html#oklab-color-ramp"><code>OKLab Color Ramp</code></a></li>
+<li><a href="extended-nodes.html">Full node list →</a></li>
 </ul>
-<h3 id="3-npr-workflow">3. NPR Workflow<a class="headerlink" href="#3-npr-workflow" title="Permanent link">&para;</a></h3>
+</div>
+<div class="npr-feature-card">
+<h3 id="3-npr-tree-workflow">3. NPR Tree workflow<a class="headerlink" href="#3-npr-tree-workflow" title="Permanent link">&para;</a></h3>
 <ul>
 <li><a href="npr-workflow.html#npr-input"><code>NPR Input</code></a></li>
 <li><a href="npr-workflow.html#npr-refraction"><code>NPR Refraction</code></a></li>
@@ -759,21 +993,21 @@
 <li><a href="npr-workflow.html#for-each-light"><code>For Each Light</code></a></li>
 <li><a href="npr-workflow.html#5-built-in-npr-node-group-assets">Built-in node-group assets</a></li>
 </ul>
-<h3 id="4-interface-settings">4. Interface &amp; Settings<a class="headerlink" href="#4-interface-settings" title="Permanent link">&para;</a></h3>
+</div>
+<div class="npr-feature-card">
+<h3 id="4-interface-settings">4. Interface &amp; settings<a class="headerlink" href="#4-interface-settings" title="Permanent link">&para;</a></h3>
 <ul>
-<li><a href="interface-guide.html#1-eevee-performance"><code>Eevee Performance</code> Outliner view</a></li>
-<li><a href="interface-guide.html#shadow-and-probe-attribution">Shadow / probe cost attribution in <code>Eevee Performance</code></a></li>
-<li><a href="interface-guide.html#2-material-selector-previews">Material preview control</a></li>
-<li><a href="interface-guide.html#3-material-face-culling">Material face culling</a></li>
-<li><a href="interface-guide.html#4-material-surface-render-state">Material <code>ZTest / Stencil / Color Write / Depth Write</code></a></li>
-<li><a href="interface-guide.html#5-eevee-lightgroup-id">Lightgroup management</a></li>
-<li><a href="interface-guide.html#6-sun-shadow-map-scale">Sun <code>Shadow Map Scale</code></a></li>
+<li><a href="interface-guide.html#1-eevee-performance"><code>Eevee Performance</code></a></li>
+<li><a href="interface-guide.html#2-material-selector-previews">Material preview / culling / render state</a></li>
+<li><a href="interface-guide.html#5-eevee-lightgroup-id">Light groups · Shadow Map Scale</a></li>
 <li><a href="interface-guide.html#7-splash-version-tag">Splash version tag</a></li>
 <li><a href="interface-guide.html#9-pose-bone-outliner-visibility">Pose bone Outliner visibility</a></li>
 </ul>
+</div>
+</div>
 <div class="admonition warning">
-<p class="admonition-title">Eevee Only</p>
-<p>The release package can run <code>Cycles</code>, but the NPR Port extensions documented here require the <strong>Eevee render engine</strong> and cannot be used in <code>Cycles</code>.</p>
+<p class="admonition-title">Eevee only</p>
+<p>The release package can run Cycles, but the NPR Port extensions documented here require the <strong>Eevee render engine</strong> and cannot be used in Cycles.</p>
 </div>
 
 
@@ -782,8 +1016,13 @@
 
 
 
+  
+  
 
 
+
+
+  
 
 
 
@@ -811,11 +1050,10 @@
     <div class="md-footer-meta__inner md-grid">
       <div class="md-copyright">
   
+    <div class="md-copyright__highlight">
+      Copyright &copy; NPR Port Team
+    </div>
   
-    Made with
-    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
-      Material for MkDocs
-    </a>
   
 </div>
       
@@ -826,10 +1064,7 @@
     
     
     
-      
-      
-    
-    <a href="https://github.com/bb-yi/blender" target="_blank" rel="noopener" title="github.com" class="md-social__link">
+    <a href="https://github.com/bb-yi/blender" target="_blank" rel="noopener" title="GitHub" class="md-social__link">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
     </a>
   
@@ -847,7 +1082,7 @@
     
     
       
-      <script id="__config" type="application/json">{"base": ".", "features": ["navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy", "content.code.select", "content.code.annotate", "content.tabs.link", "toc.follow"], "search": "assets/javascripts/workers/search.973d3a69.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+      <script id="__config" type="application/json">{"base": ".", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.expand", "navigation.top", "navigation.path", "navigation.indexes", "search.suggest", "search.highlight", "search.share", "content.code.copy", "content.code.select", "content.code.annotate", "content.tabs.link", "content.tooltips", "toc.follow"], "search": "assets/javascripts/workers/search.973d3a69.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
     
     
       <script src="assets/javascripts/bundle.f55a23d4.min.js"></script>
