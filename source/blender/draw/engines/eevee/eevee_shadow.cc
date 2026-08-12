@@ -321,7 +321,12 @@ void ShadowPunctual::end_sync(Light &light)
 eShadowProjectionType ShadowDirectional::directional_distribution_type_get(const Camera &camera)
 {
   if (camera.is_perspective()) {
-    /* TODO: Make telephoto auto-switch a user-configurable option. */
+    /* Narrow FOV (< ~45°): cascade is more efficient than clipmap.
+     * screen_diagonal_length ≈ 2*tan(diag_fov/2). Threshold 1.2 ≈ 45° hfov. */
+    const CameraData &cam_data = camera.data_get();
+    if (finite_or_default(cam_data.screen_diagonal_length, 1.0f) < 1.2f) {
+      return SHADOW_PROJECTION_CASCADE;
+    }
     return SHADOW_PROJECTION_CLIPMAP;
   }
   return SHADOW_PROJECTION_CASCADE;
@@ -415,11 +420,12 @@ void ShadowDirectional::cascade_tilemaps_distribution_near_far_points(const Came
                                                                       float3 &far_point)
 {
   const CameraData &cam_data = camera.data_get();
+  const float3 ws_pos_shifted = camera.position() + camera.forward_shifted();
   /* Ideally we should only take the intersection with the scene bounds. */
   far_point = transform_direction_transposed(
-      light.object_to_world, camera.position() - camera.forward() * cam_data.clip_far);
+      light.object_to_world, ws_pos_shifted - camera.forward() * cam_data.clip_far);
   near_point = transform_direction_transposed(
-      light.object_to_world, camera.position() - camera.forward() * cam_data.clip_near);
+      light.object_to_world, ws_pos_shifted - camera.forward() * cam_data.clip_near);
 }
 
 ShadowDirectional::LevelSpan ShadowDirectional::cascade_level_range(const Light &light,

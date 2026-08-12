@@ -98,14 +98,20 @@ struct Resources {
     float camera_clip_near = uni.uniform_buf.camera.clip_near;
     float camera_clip_far = uni.uniform_buf.camera.clip_far;
 
+    /* Origin shift for orthographic cameras (from CPU Camera::forward_shifted).
+     * Maps to world-space lateral offset: right*dx + up*dy.
+     * TODO: Perspective uses line-of-sight shift (rotated forward direction). */
+    float3 ws_lateral_shift = uni.uniform_buf.camera.forward_shifted;
+    float3 ws_shifted_pos = ws_camera_position + ws_lateral_shift;
+
     /* All tile-maps use the first level size. */
     float level_size = shadow_directional_coverage_get(level_min);
     float half_size = level_size / 2.0f;
     float tile_size = level_size / float(SHADOW_TILEMAP_RES);
 
     /* Ideally we should only take the intersection with the scene bounds. */
-    float3 ws_far_point = ws_camera_position - ws_camera_forward * camera_clip_far;
-    float3 ws_near_point = ws_camera_position - ws_camera_forward * camera_clip_near;
+    float3 ws_far_point = ws_shifted_pos - ws_camera_forward * camera_clip_far;
+    float3 ws_near_point = ws_shifted_pos - ws_camera_forward * camera_clip_near;
 
     float3 ls_far_point = transform_direction_transposed(light.object_to_world, ws_far_point);
     float3 ls_near_point = transform_direction_transposed(light.object_to_world, ws_near_point);

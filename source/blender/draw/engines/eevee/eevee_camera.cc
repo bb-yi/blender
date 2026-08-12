@@ -193,6 +193,22 @@ void Camera::init()
   camera_changed_ = assign_if_different(last_camera_object_, inst_.camera_orig_object);
 }
 
+float3 Camera::forward_shifted() const
+{
+  if (is_orthographic()) {
+    /* Origin shift: camera shift encoded in asymmetric orthographic winmat.
+     * Lateral offset = right * dx + up * dy where dx = -winmat[3][0]/winmat[0][0]. */
+    float dx = -data_.winmat[3][0] / data_.winmat[0][0];
+    float dy = -data_.winmat[3][1] / data_.winmat[1][1];
+    return float3(data_.viewinv[0]) * dx +
+           float3(data_.viewinv[1]) * dy;
+  }
+
+  /* Perspective: line-of-sight shift (rotate view direction).
+   * TODO: horizontal FOV angle a; shift 1 → arctan(2*tan(a/2)). */
+  return float3(0.0f);
+}
+
 void Camera::sync()
 {
   const Object *camera_eval = inst_.camera_eval_object;
@@ -322,6 +338,8 @@ void Camera::sync()
     data.equirect_scale = float2(0.0f);
   }
 
+  data.forward_shifted = forward_shifted();
+
   data_.initialized = true;
 
   update_bounds();
@@ -331,6 +349,7 @@ void Camera::override(const CameraData &data, bool is_camera_object)
 {
   data_ = data;
   is_camera_object_ = is_camera_object;
+  data_.forward_shifted = forward_shifted();
   update_bounds();
 }
 
