@@ -1,7 +1,7 @@
 site_name: Blender NPR Port
 site_description: Blender 5.2 LTS NPR Port — features, usage guide, and downloads
 site_author: NPR Port Team
-site_url: "https://bb-yi.github.io/blender/en/"
+site_url: "https://blendernpr.fun/en/"
 repo_url: https://github.com/bb-yi/blender
 repo_name: bb-yi/blender
 edit_uri: ""
@@ -84,10 +84,10 @@ extra:
   alternate:
     - name: 中文
       lang: zh
-      link: /blender/
+      link: ../
     - name: English
       lang: en
-      link: /blender/en/
+      link: ./
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/bb-yi/blender

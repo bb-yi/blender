@@ -4,8 +4,9 @@
 
 站点包含现代化首页（产品介绍 + 功能入口）与下载发布页（正式包 CTA / SHA256 / 变更摘要）。
 
-- 中文：<https://bb-yi.github.io/blender/>
-- English: <https://bb-yi.github.io/blender/en/>
+- 中文：<https://blendernpr.fun/>
+- English: <https://blendernpr.fun/en/>
+- 旧地址（仍可用）：<https://bb-yi.github.io/blender/>
 - 正式版本：[Blender 5.2.0 LTS NPR Port](https://github.com/bb-yi/blender/releases/tag/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604)
 
 ## 目录
