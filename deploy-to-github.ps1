@@ -73,11 +73,17 @@ Invoke-Checked -FilePath "git" -ArgumentList @(
     "origin/gh-pages"
 )
 
-Write-Host "[deploy] Publishing site/ to origin/gh-pages..." -ForegroundColor Cyan
+# ghp-import replaces the whole gh-pages tree with site/; without --cname,
+# a GitHub Pages custom-domain CNAME committed on gh-pages is wiped each deploy.
+$pagesCname = "blendernpr.fun"
+
+Write-Host "[deploy] Publishing site/ to origin/gh-pages (CNAME=$pagesCname)..." -ForegroundColor Cyan
 Invoke-Checked -FilePath "python" -ArgumentList @(
     "-m",
     "ghp_import",
     "--no-jekyll",
+    "--cname",
+    $pagesCname,
     "--push",
     "--remote",
     "origin",
@@ -88,5 +94,6 @@ Invoke-Checked -FilePath "python" -ArgumentList @(
     (Join-Path $scriptDir "site")
 )
 
-Write-Host "[deploy] Chinese: https://bb-yi.github.io/blender/" -ForegroundColor Green
-Write-Host "[deploy] English: https://bb-yi.github.io/blender/en/" -ForegroundColor Green
+Write-Host "[deploy] Chinese: https://$pagesCname/" -ForegroundColor Green
+Write-Host "[deploy] English: https://$pagesCname/en/" -ForegroundColor Green
+Write-Host "[deploy] Legacy GitHub Pages: https://bb-yi.github.io/blender/" -ForegroundColor DarkGray
