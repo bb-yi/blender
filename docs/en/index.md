@@ -22,9 +22,9 @@ The package includes Cycles; this site documents <strong>Eevee</strong> extensio
 </div>
 
 <div class="npr-meta">
-<span class="npr-chip">Tests <strong>110/110</strong></span>
+<span class="npr-chip">Tests <strong>110/110 · Win</strong></span>
 <span class="npr-chip">Date <strong>2026-08-11</strong></span>
-<span class="npr-chip">Platform <strong>Win x64</strong></span>
+<span class="npr-chip">Platforms <strong>Win · Linux · macOS</strong></span>
 <span class="npr-chip">Engine <strong>Eevee</strong></span>
 </div>
 
@@ -185,7 +185,7 @@ The package includes Cycles; this site documents <strong>Eevee</strong> extensio
 <div markdown>
 ### New
 - EEVEE NPR refraction volume approximation, with sampling/capture isolation and background-leak fixes
-- `GLSL Function` draw-view transform matrix helpers (view / projection / model)
+- `GLSL Function` draw-view matrix helpers (view / projection / model and inverses; see node docs)
 - Viewport Shadow LOD visualization
 - Improved IME support (5.2 API adaptation and text-editor cursor metrics)
 </div>
@@ -214,7 +214,7 @@ The package includes Cycles; this site documents <strong>Eevee</strong> extensio
 
 ## Windows x64 stable package
 
-<p>Fully validated baseline, Release tests 110/110, SHA256 included.</p>
+<p>Windows is the fully validated baseline (110/110). Linux / macOS companion builds ship in the same release with SHA256.</p>
 
 <div class="npr-actions">
 <a class="npr-btn npr-btn--primary" href="release.html">Open download page</a>

@@ -22,9 +22,9 @@ hide:
 </div>
 
 <div class="npr-meta">
-<span class="npr-chip">测试 <strong>110/110</strong></span>
+<span class="npr-chip">测试 <strong>110/110 · Win</strong></span>
 <span class="npr-chip">日期 <strong>2026-08-11</strong></span>
-<span class="npr-chip">平台 <strong>Win x64</strong></span>
+<span class="npr-chip">平台 <strong>Win · Linux · macOS</strong></span>
 <span class="npr-chip">引擎 <strong>Eevee</strong></span>
 </div>
 
@@ -185,7 +185,7 @@ hide:
 <div markdown>
 ### 新增
 - EEVEE NPR 折射体积近似，并完成采样 / 捕获隔离与背景漏光修复
-- `GLSL Function` 提供 draw-view 变换矩阵 helper（视图 / 投影 / 模型）
+- `GLSL Function` 提供 draw-view 矩阵 helper（view / projection / model 及 inverse；详见节点文档）
 - 视口 Shadow LOD 可视化
 - 改进 IME（适配 5.2 API，修正文本编辑器光标度量）
 </div>
@@ -214,7 +214,7 @@ hide:
 
 ## Windows x64 正式包
 
-<p>完整验证基线，Release 测试 110/110，含 SHA256。</p>
+<p>完整验证基线为 Windows（110/110）；同版本附带 Linux / macOS，含 SHA256。</p>
 
 <div class="npr-actions">
 <a class="npr-btn npr-btn--primary" href="release.html">打开下载页</a>
