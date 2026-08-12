@@ -17,20 +17,13 @@ theme:
     text: Inter
     code: JetBrains Mono
   palette:
-    - media: "(prefers-color-scheme: light)"
-      scheme: default
+    # xAI is dark-canvas only
+    - scheme: slate
       primary: custom
       accent: custom
       toggle:
-        icon: material/weather-night
-        name: 深色模式
-    - media: "(prefers-color-scheme: dark)"
-      scheme: slate
-      primary: custom
-      accent: custom
-      toggle:
-        icon: material/weather-sunny
-        name: 亮色模式
+        icon: material/brightness-4
+        name: 深色画布
   features:
     - navigation.tabs
     - navigation.tabs.sticky

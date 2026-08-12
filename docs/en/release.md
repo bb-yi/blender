@@ -5,17 +5,19 @@ hide:
 
 <div class="npr-release-hero" markdown>
 
+<div class="npr-eyebrow">Release · fd9fabb4f531</div>
+
 # Download Blender NPR Port
 
 <p class="lead">
-Current stable build is based on Blender <strong>5.2.0 LTS</strong>, source revision <code>fd9fabb4f531</code>, published on 2026-08-11.
-Windows x64 is the fully validated baseline for this release.
+Stable build based on Blender <strong>5.2.0 LTS</strong>, source <code>fd9fabb4f531</code>, published 2026-08-11.
+Windows x64 is the fully validated baseline.
 </p>
 
 <div class="npr-meta">
-<span class="npr-chip">Release <strong>fd9fabb4f531</strong></span>
-<span class="npr-chip">Tests <strong>110/110 passed</strong></span>
-<span class="npr-chip">Engine note <strong>NPR = Eevee</strong></span>
+<span class="npr-chip">Tests <strong>110/110</strong></span>
+<span class="npr-chip">Engine <strong>NPR = Eevee</strong></span>
+<span class="npr-chip">Platform <strong>Win x64</strong></span>
 </div>
 
 </div>
@@ -37,14 +39,22 @@ Windows x64 is the fully validated baseline for this release.
 </div>
 
 <div class="npr-dl-side" markdown>
-<a class="npr-btn npr-btn--primary" href="https://github.com/bb-yi/blender/releases/download/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604/blender-5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604.zip">⬇ Download ZIP</a>
-<a class="npr-btn npr-btn--ghost" href="https://github.com/bb-yi/blender/releases/tag/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604">View GitHub Release</a>
-<a class="npr-btn npr-btn--ghost" href="https://github.com/bb-yi/blender/releases">All releases</a>
+
+<a class="npr-btn npr-btn--primary" href="https://github.com/bb-yi/blender/releases/download/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604/blender-5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604.zip">Download ZIP</a>
+
+<a class="npr-btn npr-btn--outline" href="https://github.com/bb-yi/blender/releases/tag/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604">GitHub Release</a>
+
+<a class="npr-btn npr-btn--outline" href="https://github.com/bb-yi/blender/releases">All releases</a>
+
 </div>
 
 </div>
+
+<div class="npr-section-head" markdown>
+<div class="npr-eyebrow">Integrity</div>
 
 ## Integrity check
+</div>
 
 Verify the SHA256 hash after downloading.
 
@@ -66,22 +76,26 @@ Verify the SHA256 hash after downloading.
     shasum -a 256 blender-5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604.zip
     ```
 
-## Highlights in this release
+<div class="npr-section-head" markdown>
+<div class="npr-eyebrow">Notes</div>
+
+## Release notes
+</div>
 
 <div class="npr-split" markdown>
 
 <div markdown>
-### New features
+### New
 - EEVEE NPR refraction volume approximation, with sampling/capture isolation and background-leak fixes
 - `GLSL Function` draw-view transform matrix helpers (view / projection / model)
 - Viewport Shadow LOD visualization
-- Improved IME support (Blender 5.2 API adaptation and text-editor cursor metrics)
+- Improved IME support (5.2 API adaptation and text-editor cursor metrics)
 </div>
 
 <div markdown>
-### Fixes and improvements
-- Fixed NPR refraction volume black holes on Image Sample offsets, background misses, and depth mapping issues
-- Fixed Sun `Shadow Map Scale` application to tilemaps and improved detail when scale increases
+### Fixes
+- Refraction volume Image Sample offset black holes, background misses, depth mapping
+- Sun `Shadow Map Scale` application to tilemaps
 - White fallback for unconnected GLSL samplers
 - Restored NPR Tree AOV output
 - Stabilized Render Texture resource lifetime
@@ -91,13 +105,17 @@ Verify the SHA256 hash after downloading.
 
 Full history: [`blender-npr-release-changelog.md`](https://github.com/bb-yi/blender/blob/main/blender-npr-release-changelog.md).
 
-## Support and validation scope
+<div class="npr-section-head" markdown>
+<div class="npr-eyebrow">Support</div>
 
-!!! important "Render engine support"
-    Cycles is included in these packages, but the NPR Port extensions support **EEVEE** only. NPR Port nodes, Filter Graph, and the other EEVEE NPR features are not available when rendering with Cycles.
+## Support scope
+</div>
 
-- The Windows x64 package is the fully validated baseline for this stable release and passed all `110/110` Release tests.
-- When reporting an issue, include the platform, full asset filename, splash-screen version information, and minimal reproduction steps.
+!!! important "Render engine"
+    Cycles is included, but NPR Port extensions support **EEVEE** only.
+
+- The Windows x64 package is the fully validated baseline and passed `110/110` Release tests.
+- When reporting issues, include platform, full filename, splash version, and minimal reproduction steps.
 
 ## Download table
 

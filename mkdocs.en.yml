@@ -17,20 +17,12 @@ theme:
     text: Inter
     code: JetBrains Mono
   palette:
-    - media: "(prefers-color-scheme: light)"
-      scheme: default
+    - scheme: slate
       primary: custom
       accent: custom
       toggle:
-        icon: material/weather-night
-        name: Switch to dark mode
-    - media: "(prefers-color-scheme: dark)"
-      scheme: slate
-      primary: custom
-      accent: custom
-      toggle:
-        icon: material/weather-sunny
-        name: Switch to light mode
+        icon: material/brightness-4
+        name: Dark canvas
   features:
     - navigation.tabs
     - navigation.tabs.sticky
@@ -52,12 +44,12 @@ theme:
 nav:
   - Home: index.md
   - Download:
-    - Download & Release: release.md
-  - Documentation:
-    - Scene Extensions: scene-extensions.md
-    - Extended Nodes: extended-nodes.md
-    - NPR Workflow: npr-workflow.md
-    - Interface & Settings: interface-guide.md
+    - Download & releases: release.md
+  - Docs:
+    - Scene-level Eevee extensions: scene-extensions.md
+    - Extended shader nodes: extended-nodes.md
+    - NPR Tree workflow: npr-workflow.md
+    - Interface & settings: interface-guide.md
 
 markdown_extensions:
   - admonition
@@ -90,12 +82,12 @@ extra_css:
 extra:
   generator: false
   alternate:
-    - name: English
-      lang: en
-      link: /blender/en/
     - name: 中文
       lang: zh
       link: /blender/
+    - name: English
+      lang: en
+      link: /blender/en/
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/bb-yi/blender
