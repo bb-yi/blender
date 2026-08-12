@@ -130,3 +130,7 @@ dmypy.json
 *~
 .vscode/
 .idea/
+
+# local design refs / scratch
+temp/
+.preview_root/
