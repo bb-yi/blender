@@ -13,14 +13,14 @@ The regular object material still handles the base surface shading, while the `N
 3. Create or assign a node group in its `NPR Tree` property.
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_05-18-15.png" alt="NPR Tree Slot" style="border-radius: 10px;">
+	<img src="images/npr_tree_slot.png" alt="NPR Tree Slot" style="border-radius: 10px;">
 	<br>
 </div>
 
 4. To edit this tree, switch the Shader Editor top `Shader Type` to `NPR`.
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_05-18-33.png" alt="NPR Shader Type" style="border-radius: 10px;">
+	<img src="images/npr_shader_type.png" alt="NPR Shader Type" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -31,7 +31,7 @@ The regular object material still handles the base surface shading, while the `N
 - `NPR Tree` keyframes and drivers use a dedicated `NPR Tree Action`, which can be viewed, switched, or created in `Material Properties > Animation > NPR Tree Action`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-31_03-35-17.png" alt="NPR Tree Action" style="border-radius: 10px;">
+	<img src="images/npr_tree_action.png" alt="NPR Tree Action" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -42,7 +42,7 @@ In addition to the dedicated NPR nodes below, `Curvature`, `Raycast`, `GLSL Func
 ### NPR Input
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_05-22-04.png" alt="NPR Input" style="border-radius: 10px;">
+	<img src="images/node_npr_input.png" alt="NPR Input" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -67,7 +67,7 @@ These outputs are closer to image / texture handles than ordinary scalar values,
 ### NPR Refraction
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_05-22-16.png" alt="NPR Refraction" style="border-radius: 10px;">
+	<img src="images/node_npr_refraction.png" alt="NPR Refraction" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -93,23 +93,28 @@ Reads refraction-related buffers, similar in spirit to `Screenspace Info`. The c
 `Add > Utilities > Image Sample`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_05-25-34.png" alt="Image Sample" style="border-radius: 10px;">
+	<img src="images/node_npr_image_sample.png" alt="Image Sample" style="border-radius: 10px;">
 	<br>
 </div>
 
 #### Inputs / Outputs
 
 - Inputs: `Image`, `Offset`
-- Output: `Color`
+- Outputs: `Color`, `Alpha`
 
 #### Purpose
 
-Samples image-style handles such as those coming from `NPR Input` or `NPR Refraction`.
+Samples image-style handles from `NPR Input`, `NPR Refraction`, Filter `Pass Input`, and similar sources.
 
 #### Offset Modes
 
-- `View`: offset in view space
-- `Pixel`: offset in pixel space
+The node panel exposes three offset interpretations:
+
+- `View`: offset the sample position in view space
+- `Pixel`: offset in screen pixels (resolution-dependent)
+- `UV`: treat `Offset` as a UV / screen-coordinate delta for texture-space displacement sampling
+
+With `Offset` unconnected, sampling uses the current pixel / UV location.
 
 ### For Each Light
 
@@ -118,7 +123,7 @@ Samples image-style handles such as those coming from `NPR Input` or `NPR Refrac
 `Add > Utilities > For Each Light`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_05-26-08.png" alt="For Each Light" style="border-radius: 10px;">
+	<img src="images/node_npr_foreach_light.png" alt="For Each Light" style="border-radius: 10px;">
 	<br>
 </div>
 

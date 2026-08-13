@@ -13,7 +13,7 @@
 `Scene Properties > Render Textures`
 
 <div align="center">
-  <img src="images/SnowShot_2026-03-28_04-37-13.png" alt="Render Textures" style="border-radius: 10px;">
+  <img src="images/render_textures_panel.png" alt="Render Textures" style="border-radius: 10px;">
   <br>
 </div>
 
@@ -88,9 +88,9 @@
 `Pass Input` 接收 Filter Graph 传入的图像句柄，`Image Sample` 在当前像素或偏移位置采样，`Filter Output` 把结果返回给图中的 `Filter Pass`。可按需要在 `Pass Input` 与 `Filter Output` 上维护动态接口；单个 Filter Pass 最多支持 `32` 个输入和 `32` 个输出。
 
 <div align="center">
-  <img src="images/filter_graph_effect_example.png" alt="Filter 材质内部节点与效果示例" style="border-radius: 10px;">
+  <img src="images/filter_pass_material_chain.png" alt="Filter Pass 材质内部：Pass Input → Image Sample → Filter Output" style="border-radius: 10px;">
   <br>
-  <sub>Pass Input、Image Sample、Filter Output 组成的材质链及其视口效果</sub>
+  <sub>Pass Input、Image Sample、Filter Output 组成的默认 Filter 材质链</sub>
 </div>
 
 #### 基本使用方法

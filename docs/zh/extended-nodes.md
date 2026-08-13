@@ -1,116 +1,7 @@
 # 主要扩展节点
 
-## 1. Filter 域节点
+## 1. Eevee 通用辅助节点
 
-### Filter Object Info
-
-#### 入口
-
-`Add > Input > Filter Object Info`
-
-仅在 `Filter` 域下可用。
-
-<div align="center">
-	<img src="images/filter_object_info.png" alt="Filter Object Info" style="border-radius: 10px;">
-	<br>
-</div>
-
-#### 作用
-
-读取指定对象的世界空间变换和视口显示颜色，方便在 Filter Graph 的 `Filter Pass` 材质中做基于对象状态的全屏滤镜控制。
-
-#### 节点设置
-
-- `Object`
-
-#### 输出
-
-- `Location`
-- `Rotation`
-- `Scale`
-- `Color`
-
-#### 说明
-
-- `Location`：所选对象的世界空间位置
-- `Rotation`：所选对象的世界空间欧拉旋转，单位为弧度
-- `Scale`：所选对象的世界空间缩放
-- `Color`：所选对象的视口显示颜色
-- 如果没有指定对象，会输出默认值：位置 / 旋转 / 颜色为 `0`，缩放为 `1`
-
-### Filter Mask
-
-#### 入口
-
-`Add > Input > Filter Mask`
-
-仅在 `Filter` 域下可用。
-
-<div align="center">
-	<img src="images/placeholder_filter_mask.png" alt="Filter Mask" style="border-radius: 10px;">
-	<br>
-</div>
-
-#### 作用
-
-使用 Eevee `Cryptomatte` 对象信息，为滤镜材质快速生成对象遮罩。
-
-#### 输出
-
-- `Mask`
-
-#### 面板选项
-
-- `Mode`
-  - `Single Object`
-  - `Object List`
-  - `Collection`
-
-#### 说明
-
-- `Single Object` 适合快速指定单个控制对象
-- `Object List` 适合手动维护一组对象，也可以用 `Use Selection` / `Append Selection` 从当前选择批量填充
-- `Collection` 适合按集合层级统一管理遮罩对象
-- 输出是 `0-1` 浮点遮罩，可直接接到 `Mix`、阈值、AOV 写出或其他滤镜控制链路中
-- 只对可渲染的几何对象有效
-
-### Scene Color
-
-#### 入口
-
-`Add > Input > Scene Color`
-
-仅在 `Filter` 域下可用。
-
-<div align="center">
-	<img src="images/SnowShot_2026-03-28_05-15-31.png" alt="Scene Color" style="border-radius: 10px;">
-	<br>
-</div>
-
-#### 作用
-
-读取 Eevee 当前场景缓冲，可在节点面板中切换 `Source`：
-
-- `Color`
-- `Depth`
-- `Normal`
-- `Position`
-
-#### 输入输出
-
-- 输入：`Vector`
-- 输出：`Color`、`Alpha`
-
-#### 说明
-
-- `Color`：读取最终场景颜色
-- `Depth`：读取线性深度
-- `Normal`：读取场景法线
-- `Position`：读取世界空间位置
-- 不连接 `Vector` 时，默认按 `Texture Coordinate` 的 `Window` 坐标采样
-- 连接 `Vector` 时，`Color / Depth / Normal / Position` 都按同一套屏幕 UV 偏移采样；`Position` 会从偏移后的深度和屏幕坐标重建对应像素的世界坐标
-
-## 2. Eevee 通用辅助节点
 
 ### Render Info
 
@@ -119,7 +10,7 @@
 `Add > Input > Render Info`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_04-51-10.png" alt="Render Info" style="border-radius: 10px;">
+	<img src="images/node_render_info.png" alt="Render Info" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -146,7 +37,7 @@
 `Add > Input > Scene Time`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_04-52-48.png" alt="Scene Time" style="border-radius: 10px;">
+	<img src="images/node_scene_time.png" alt="Scene Time" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -172,7 +63,7 @@
 `Add > Utilities > Math > Screen Derivative`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_04-53-23.png" alt="Screen Derivative" style="border-radius: 10px;">
+	<img src="images/node_screen_derivative.png" alt="Screen Derivative" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -194,7 +85,7 @@
 - `Add > Layout > Portal Out`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_04-53-44.png" alt="Portal Nodes" style="border-radius: 10px;">
+	<img src="images/node_portal_in_out.png" alt="Portal Nodes" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -210,7 +101,8 @@
 - `Portal Out` 上带有放大镜按钮，可快速跳转到对应的 `Portal In`
 - 只在同一个 shader node tree 内识别，不支持跨节点树和跨节点组自动穿透
 
-## 3. Eevee 物体材质节点
+## 2. Eevee 物体材质节点
+
 
 ### Outline Control
 
@@ -274,7 +166,7 @@
 `Add > Texture > Render Texture`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_04-54-27.png" alt="Render Texture" style="border-radius: 10px;">
+	<img src="images/node_render_texture.png" alt="Render Texture" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -294,7 +186,7 @@
 `Add > Input > Screenspace Info`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_04-56-22.png" alt="Screenspace Info" style="border-radius: 10px;">
+	<img src="images/node_screenspace_info.png" alt="Screenspace Info" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -321,7 +213,7 @@
 `Add > Input > World Environment`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_05-01-56.png" alt="World Environment" style="border-radius: 10px;">
+	<img src="images/node_world_environment.png" alt="World Environment" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -374,7 +266,7 @@
 `Add > Utilities > Vector > World To Tangent`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_05-04-02.png" alt="World To Tangent" style="border-radius: 10px;">
+	<img src="images/node_world_to_tangent.png" alt="World To Tangent" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -829,7 +721,7 @@ mix(base_color, tint_color, clamp(mask, 0.0, 1.0))
 `Add > Utilities > Vector > Basis Transform`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_07-51-05.png" alt="Basis Transform" style="border-radius: 10px;">
+	<img src="images/node_basis_transform.png" alt="Basis Transform" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -983,7 +875,7 @@ mix(base_color, tint_color, clamp(mask, 0.0, 1.0))
 `Add > Texture > SDF Primitive`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-31_03-34-28.png" alt="SDF Primitive" style="border-radius: 10px;">
+	<img src="images/node_sdf_primitive.png" alt="SDF Primitive" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -1002,7 +894,7 @@ mix(base_color, tint_color, clamp(mask, 0.0, 1.0))
 `Add > Converter > SDF Operator`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-31_03-34-47.png" alt="SDF Operator" style="border-radius: 10px;">
+	<img src="images/node_sdf_operator.png" alt="SDF Operator" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -1021,7 +913,7 @@ mix(base_color, tint_color, clamp(mask, 0.0, 1.0))
 `Add > Utilities > Vector > SDF Vector Operator`
 
 <div align="center">
-	<img src="images/SnowShot_2026-04-01_02-15-32.png" alt="SDF Vector Operator" style="border-radius: 10px;">
+	<img src="images/node_sdf_vector_operator.png" alt="SDF Vector Operator" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -1035,7 +927,8 @@ mix(base_color, tint_color, clamp(mask, 0.0, 1.0))
 
 在进入 `SDF Primitive` 之前，先对采样坐标、UV 或向量域做重复、镜像、旋转、扭曲、平铺和范围映射等处理。
 
-## 4. Goo Engine / NPR 相关输入节点
+## 3. Goo Engine / NPR 相关输入节点
+
 
 ### Bevel
 
@@ -1044,7 +937,7 @@ mix(base_color, tint_color, clamp(mask, 0.0, 1.0))
 `Add > Input > Bevel`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_05-06-05.png" alt="Bevel" style="border-radius: 10px;">
+	<img src="images/node_bevel.png" alt="Bevel" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -1064,7 +957,7 @@ mix(base_color, tint_color, clamp(mask, 0.0, 1.0))
 `Add > Input > Curvature`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_05-06-57.png" alt="Curvature" style="border-radius: 10px;">
+	<img src="images/node_curvature.png" alt="Curvature" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -1258,7 +1151,119 @@ vec4(Color.rgb * max(Intensity, 0.0), max(Attenuation, 0.0))
 	<sub>Light Shader Output 对灯光颜色与衰减的影响示例</sub>
 </div>
 
+## 4. Filter 域节点 {#4-filter-域节点}
+
+
+### Filter Object Info
+
+#### 入口
+
+`Add > Input > Filter Object Info`
+
+仅在 `Filter` 域下可用。
+
+<div align="center">
+	<img src="images/filter_object_info.png" alt="Filter Object Info" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### 作用
+
+读取指定对象的世界空间变换和视口显示颜色，方便在 Filter Graph 的 `Filter Pass` 材质中做基于对象状态的全屏滤镜控制。
+
+#### 节点设置
+
+- `Object`
+
+#### 输出
+
+- `Location`
+- `Rotation`
+- `Scale`
+- `Color`
+
+#### 说明
+
+- `Location`：所选对象的世界空间位置
+- `Rotation`：所选对象的世界空间欧拉旋转，单位为弧度
+- `Scale`：所选对象的世界空间缩放
+- `Color`：所选对象的视口显示颜色
+- 如果没有指定对象，会输出默认值：位置 / 旋转 / 颜色为 `0`，缩放为 `1`
+
+### Filter Mask
+
+#### 入口
+
+`Add > Input > Filter Mask`
+
+仅在 `Filter` 域下可用。
+
+<div align="center">
+	<img src="images/placeholder_filter_mask.png" alt="Filter Mask" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### 作用
+
+使用 Eevee `Cryptomatte` 对象信息，为滤镜材质快速生成对象遮罩。
+
+#### 输出
+
+- `Mask`
+
+#### 面板选项
+
+- `Mode`
+  - `Single Object`
+  - `Object List`
+  - `Collection`
+
+#### 说明
+
+- `Single Object` 适合快速指定单个控制对象
+- `Object List` 适合手动维护一组对象，也可以用 `Use Selection` / `Append Selection` 从当前选择批量填充
+- `Collection` 适合按集合层级统一管理遮罩对象
+- 输出是 `0-1` 浮点遮罩，可直接接到 `Mix`、阈值、AOV 写出或其他滤镜控制链路中
+- 只对可渲染的几何对象有效
+
+### Scene Color
+
+#### 入口
+
+`Add > Input > Scene Color`
+
+仅在 `Filter` 域下可用。
+
+<div align="center">
+	<img src="images/node_scene_color.png" alt="Scene Color" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### 作用
+
+读取 Eevee 当前场景缓冲，可在节点面板中切换 `Source`：
+
+- `Color`
+- `Depth`
+- `Normal`
+- `Position`
+
+#### 输入输出
+
+- 输入：`Vector`
+- 输出：`Color`、`Alpha`
+
+#### 说明
+
+- `Color`：读取最终场景颜色
+- `Depth`：读取线性深度
+- `Normal`：读取场景法线
+- `Position`：读取世界空间位置
+- 不连接 `Vector` 时，默认按 `Texture Coordinate` 的 `Window` 坐标采样
+- 连接 `Vector` 时，`Color / Depth / Normal / Position` 都按同一套屏幕 UV 偏移采样；`Position` 会从偏移后的深度和屏幕坐标重建对应像素的世界坐标
+
 ## 5. 内置节点增强
+
 
 ### OKLab Color Ramp
 

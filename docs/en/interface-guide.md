@@ -51,7 +51,7 @@ This is mainly useful when many materials exist and expanding the selector would
 `Edit > Preferences > Editing > Objects > Materials > Material Selector Previews`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_05-28-34.png" alt="Material Selector Previews" style="border-radius: 10px;">
+	<img src="images/material_selector_previews.png" alt="Material Selector Previews" style="border-radius: 10px;">
 	<br>
 </div>
 

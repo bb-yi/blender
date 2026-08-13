@@ -16,7 +16,7 @@ hide:
 </p>
 
 <div class="npr-actions">
-<a class="npr-btn npr-btn--primary" href="release.html">下载正式版</a>
+<a class="npr-btn npr-btn--primary" href="release.md">下载正式版</a>
 <a class="npr-btn npr-btn--outline" href="#modules">功能模块</a>
 <a class="npr-btn npr-btn--outline" href="https://github.com/bb-yi/blender">GitHub</a>
 </div>
@@ -40,22 +40,22 @@ hide:
 </div>
 
 <div class="npr-map">
-<a href="scene-extensions.html">
+<a href="scene-extensions.md">
 <span class="code">01 · Scene</span>
 <span class="title">Scene 管线</span>
 <span class="desc">渲染纹理、Filter Graph、相机输出、描边</span>
 </a>
-<a href="extended-nodes.html">
+<a href="extended-nodes.md">
 <span class="code">02 · Nodes</span>
 <span class="title">扩展节点</span>
 <span class="desc">Filter 域、辅助信息、GLSL、SDF、材质节点</span>
 </a>
-<a href="npr-workflow.html">
+<a href="npr-workflow.md">
 <span class="code">03 · NPR Tree</span>
 <span class="title">NPR 工作流</span>
 <span class="desc">光照分解、折射、图像采样、逐灯循环</span>
 </a>
-<a href="interface-guide.html">
+<a href="interface-guide.md">
 <span class="code">04 · UI</span>
 <span class="title">界面控制</span>
 <span class="desc">性能归因、材质状态、灯光组、阴影缩放</span>
@@ -86,12 +86,12 @@ hide:
 </div>
 
 <div class="npr-actions">
-<a class="npr-btn npr-btn--outline" href="scene-extensions.html">阅读 Scene 文档</a>
+<a class="npr-btn npr-btn--outline" href="scene-extensions.md">阅读 Scene 文档</a>
 </div>
 </div>
 <div class="npr-module__media">
-<img src="images/filter_graph_effect_example.png" alt="Filter Graph 效果示例：视口与 Filter Material 节点">
-<p class="cap">Filter Graph · 视口 + Filter Material</p>
+<img src="images/filter_graph_editor_overview.png" alt="Filter Graph：Scene Color、Filter Pass、Stage Output">
+<p class="cap">Filter Graph · Scene Color / Pass / Stage</p>
 </div>
 </div>
 
@@ -99,24 +99,24 @@ hide:
 <div class="npr-module__body" markdown>
 <span class="code">02 · Nodes</span>
 ### 扩展着色器节点
-<p class="blurb">补齐 Filter、屏幕空间、物体材质和自定义 GLSL 所需节点，从采样做到程序化造型。</p>
+<p class="blurb">补齐屏幕空间、物体材质和自定义 GLSL 所需节点；Filter 域节点单独成类，见下方节点一览。</p>
 
-- **Filter 域**：Object Info、Mask、Scene Color
 - **通用辅助**：Render Info、Scene Time、Screen Derivative、Portal
 - **物体材质**：Outline Control、Screenspace Info、World / Probe
-- **GLSL / 程序化**：Function、Script Expression、SDF、OKLab
+- **GLSL / 程序化**：Function、Script Expression、SDF、OKLab、Parallax
+- **Filter 域**：Object Info、Mask、Scene Color、Pass I/O
 
 <div class="npr-tags">
-<span>Scene Color</span><span>GLSL Function</span><span>SDF</span><span>Portal</span>
+<span>GLSL Function</span><span>SDF</span><span>Portal</span><span>Outline</span>
 </div>
 
 <div class="npr-actions">
-<a class="npr-btn npr-btn--outline" href="extended-nodes.html">阅读节点文档</a>
+<a class="npr-btn npr-btn--outline" href="extended-nodes.md">阅读节点文档</a>
 </div>
 </div>
 <div class="npr-module__media">
-<img src="images/glsl_function_node_mode.png" alt="GLSL Function 节点模式面板">
-<p class="cap">GLSL Function · Node / Code</p>
+<img src="images/overview_shader_nodes.png" alt="扩展着色器节点一览">
+<p class="cap">扩展着色器 · 节点一览</p>
 </div>
 </div>
 
@@ -126,9 +126,9 @@ hide:
 ### NPR Tree 工作流
 <p class="blurb">在专用 NPR Tree 里做光照分解、折射、采样和逐灯处理，并附带可拖用的内置节点组。</p>
 
-- **NPR Input**：合成 / 漫射 / 高光等光照分解
+- **NPR Input / Output**：合成 / 漫射 / 高光等光照分解与写出
 - **NPR Refraction**：折射路径（含体积近似相关修复）
-- **Image Sample**：支持偏移模式的图像采样
+- **Image Sample**：视图 / 像素 / UV 三种偏移采样
 - **For Each Light**：逐灯循环与灯光信息
 - **内置资产**：常用 NPR 节点组可直接拖入
 
@@ -137,12 +137,12 @@ hide:
 </div>
 
 <div class="npr-actions">
-<a class="npr-btn npr-btn--outline" href="npr-workflow.html">阅读 NPR 工作流</a>
+<a class="npr-btn npr-btn--outline" href="npr-workflow.md">阅读 NPR 工作流</a>
 </div>
 </div>
 <div class="npr-module__media">
-<img src="images/SnowShot_2026-03-28_04-23-33.png" alt="NPR Tree 节点总览">
-<p class="cap">NPR Tree · Input / Refraction / Assets</p>
+<img src="images/overview_npr_tree_nodes.png" alt="NPR Tree 专用节点一览">
+<p class="cap">NPR Tree · 专用节点一览</p>
 </div>
 </div>
 
@@ -162,7 +162,7 @@ hide:
 </div>
 
 <div class="npr-actions">
-<a class="npr-btn npr-btn--outline" href="interface-guide.html">阅读界面文档</a>
+<a class="npr-btn npr-btn--outline" href="interface-guide.md">阅读界面文档</a>
 </div>
 </div>
 <div class="npr-module__media">
@@ -170,6 +170,55 @@ hide:
 <p class="cap">Eevee Performance · Shadow / Probe</p>
 </div>
 </div>
+
+</div>
+
+<div id="node-catalog" class="npr-section-head" markdown>
+<div class="npr-eyebrow">Node catalog</div>
+
+## 新增节点一览
+<p>相对官方 Blender，本 Port 在着色器、NPR Tree 与 Filter 域新增的节点分三类集中展示。详细参数见对应文档页。</p>
+</div>
+
+<div class="npr-node-catalog" markdown>
+
+### 着色器扩展节点
+<div align="center" markdown>
+<img src="images/overview_shader_nodes.png" alt="着色器扩展节点总览" style="border-radius: 10px;">
+</div>
+
+- Render Info / Screen Derivative / Portal In·Out  
+- Outline Control / Render Texture / Screenspace Info  
+- World Environment / Light Probe Color / World To Tangent  
+- GLSL Function / Script Expression / Image to Closure  
+- Basis Transform / Twirl / Water Ripples / Hex Grid / Parallax  
+- SDF Primitive·Operator·Vector Op / Bevel / Curvature  
+- Shader Info / Light Info / Light Shader Info·Output / OKLab Color Ramp  
+
+[扩展节点文档 →](extended-nodes.md)
+
+### NPR Tree 节点
+<div align="center" markdown>
+<img src="images/overview_npr_tree_nodes.png" alt="NPR Tree 节点总览" style="border-radius: 10px;">
+</div>
+
+- NPR Input / NPR Output / NPR Refraction  
+- Image Sample（视图 / 像素 / UV）  
+- For Each Light（Input + Output 成对 Zone）  
+- 内置节点组：Cavity / Co-Planar Edge / Curvature / Kuwahara / Shading Models / Surface Curvature  
+
+[NPR 工作流 →](npr-workflow.md)
+
+### Filter 域节点
+<div align="center" markdown>
+<img src="images/overview_filter_domain_nodes.png" alt="Filter 域节点总览" style="border-radius: 10px;">
+</div>
+
+- Pass Input / Image Sample / Filter Output（Filter Pass 材质默认链）  
+- Filter Object Info / Filter Mask / Scene Color  
+- 图级节点：Scene Color · AOV Input · Filter Pass · Stage Output（见 Scene 文档）  
+
+[Scene / Filter Graph →](scene-extensions.md) · [Filter 域节点 →](extended-nodes.md#4-filter-域节点)
 
 </div>
 
@@ -202,7 +251,7 @@ hide:
 </div>
 
 <div class="npr-actions">
-<a class="npr-btn npr-btn--outline" href="release.html">下载与校验信息</a>
+<a class="npr-btn npr-btn--outline" href="release.md">下载与校验信息</a>
 <a class="npr-btn npr-btn--outline" href="https://github.com/bb-yi/blender/blob/main/blender-npr-release-changelog.md">完整 changelog</a>
 </div>
 
@@ -217,7 +266,7 @@ hide:
 <p>完整验证基线为 Windows（110/110）；同版本附带 Linux / macOS，含 SHA256。</p>
 
 <div class="npr-actions">
-<a class="npr-btn npr-btn--primary" href="release.html">打开下载页</a>
+<a class="npr-btn npr-btn--primary" href="release.md">打开下载页</a>
 <a class="npr-btn npr-btn--outline" href="https://github.com/bb-yi/blender/releases">全部 Release</a>
 </div>
 </div>

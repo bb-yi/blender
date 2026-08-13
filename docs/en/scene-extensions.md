@@ -13,7 +13,7 @@ It lets a scene maintain up to `4` render texture slots. Each slot can point to 
 `Scene Properties > Render Textures`
 
 <div align="center">
-  <img src="images/SnowShot_2026-03-28_04-37-13.png" alt="Render Textures" style="border-radius: 10px;">
+  <img src="images/render_textures_panel.png" alt="Render Textures" style="border-radius: 10px;">
   <br>
 </div>
 
@@ -88,7 +88,7 @@ Creating a Filter Pass material builds this default chain:
 `Pass Input` receives image handles from the Filter Graph, `Image Sample` samples them at the current or an offset pixel, and `Filter Output` returns results to the graph's `Filter Pass`. Dynamic interfaces can be maintained on `Pass Input` and `Filter Output`; one Filter Pass supports at most `32` inputs and `32` outputs.
 
 <div align="center">
-  <img src="images/filter_graph_effect_example.png" alt="Filter material nodes and viewport effect" style="border-radius: 10px;">
+  <img src="images/filter_pass_material_chain.png" alt="Filter material nodes and viewport effect" style="border-radius: 10px;">
   <br>
   <sub>A Pass Input, Image Sample, and Filter Output chain with its viewport result</sub>
 </div>

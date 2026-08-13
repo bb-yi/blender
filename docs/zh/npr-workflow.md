@@ -13,14 +13,14 @@
 3. 在它的 `NPR Tree` 属性里新建或指定一个节点组。
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_05-18-15.png" alt="NPR Tree Slot" style="border-radius: 10px;">
+	<img src="images/npr_tree_slot.png" alt="NPR Tree Slot" style="border-radius: 10px;">
 	<br>
 </div>
 
 4. 需要编辑这棵树时，在 Shader Editor 顶部把 `Shader Type` 切到 `NPR`。
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_05-18-33.png" alt="NPR Shader Type" style="border-radius: 10px;">
+	<img src="images/npr_shader_type.png" alt="NPR Shader Type" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -31,7 +31,7 @@
 - `NPR Tree` 的关键帧与驱动器使用独立的 `NPR Tree Action`，可在 `Material Properties > Animation > NPR Tree Action` 查看、切换或新建
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-31_03-35-17.png" alt="NPR Tree Action" style="border-radius: 10px;">
+	<img src="images/npr_tree_action.png" alt="NPR Tree Action" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -42,7 +42,7 @@
 ### NPR Input
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_05-22-04.png" alt="NPR Input" style="border-radius: 10px;">
+	<img src="images/node_npr_input.png" alt="NPR Input" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -67,7 +67,7 @@
 ### NPR Refraction
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_05-22-16.png" alt="NPR Refraction" style="border-radius: 10px;">
+	<img src="images/node_npr_refraction.png" alt="NPR Refraction" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -93,23 +93,28 @@
 `Add > Utilities > Image Sample`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_05-25-34.png" alt="Image Sample" style="border-radius: 10px;">
+	<img src="images/node_npr_image_sample.png" alt="Image Sample" style="border-radius: 10px;">
 	<br>
 </div>
 
 #### 输入输出
 
 - 输入：`Image`、`Offset`
-- 输出：`Color`
+- 输出：`Color`、`Alpha`
 
 #### 作用
 
-对 `NPR Input` / `NPR Refraction` 之类输出的图像句柄做采样。
+对 `NPR Input` / `NPR Refraction` / Filter `Pass Input` 等输出的图像句柄做采样。
 
 #### 偏移模式
 
-- `View`：按视空间偏移
-- `Pixel`：按像素偏移
+节点面板提供三种偏移解释方式：
+
+- `视图`（View）：按视空间偏移采样位置，适合与视角相关的邻域取样
+- `像素`（Pixel）：按屏幕像素偏移，效果会随分辨率变化
+- `UV`：把 `Offset` 当作 UV / 屏幕坐标偏移来解释，便于按纹理坐标空间做位移采样
+
+未连接 `Offset` 时，默认在当前像素 / 当前 UV 位置采样。
 
 ### For Each Light
 
@@ -118,7 +123,7 @@
 `Add > Utilities > For Each Light`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_05-26-08.png" alt="For Each Light" style="border-radius: 10px;">
+	<img src="images/node_npr_foreach_light.png" alt="For Each Light" style="border-radius: 10px;">
 	<br>
 </div>
 

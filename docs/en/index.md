@@ -16,7 +16,7 @@ The package includes Cycles; this site documents <strong>Eevee</strong> extensio
 </p>
 
 <div class="npr-actions">
-<a class="npr-btn npr-btn--primary" href="release.html">Download stable</a>
+<a class="npr-btn npr-btn--primary" href="release.md">Download stable</a>
 <a class="npr-btn npr-btn--outline" href="#modules">Modules</a>
 <a class="npr-btn npr-btn--outline" href="https://github.com/bb-yi/blender">GitHub</a>
 </div>
@@ -40,22 +40,22 @@ The package includes Cycles; this site documents <strong>Eevee</strong> extensio
 </div>
 
 <div class="npr-map">
-<a href="scene-extensions.html">
+<a href="scene-extensions.md">
 <span class="code">01 · Scene</span>
 <span class="title">Scene pipeline</span>
 <span class="desc">Render textures, Filter Graph, camera outputs, outline</span>
 </a>
-<a href="extended-nodes.html">
+<a href="extended-nodes.md">
 <span class="code">02 · Nodes</span>
 <span class="title">Extended nodes</span>
 <span class="desc">Filter domain, helpers, GLSL, SDF, material nodes</span>
 </a>
-<a href="npr-workflow.html">
+<a href="npr-workflow.md">
 <span class="code">03 · NPR Tree</span>
 <span class="title">NPR workflow</span>
 <span class="desc">Lighting breakdown, refraction, image sample, per-light loops</span>
 </a>
-<a href="interface-guide.html">
+<a href="interface-guide.md">
 <span class="code">04 · UI</span>
 <span class="title">UI controls</span>
 <span class="desc">Performance attribution, material state, light groups, shadow scale</span>
@@ -86,7 +86,7 @@ The package includes Cycles; this site documents <strong>Eevee</strong> extensio
 </div>
 
 <div class="npr-actions">
-<a class="npr-btn npr-btn--outline" href="scene-extensions.html">Read Scene docs</a>
+<a class="npr-btn npr-btn--outline" href="scene-extensions.md">Read Scene docs</a>
 </div>
 </div>
 <div class="npr-module__media">
@@ -111,12 +111,12 @@ The package includes Cycles; this site documents <strong>Eevee</strong> extensio
 </div>
 
 <div class="npr-actions">
-<a class="npr-btn npr-btn--outline" href="extended-nodes.html">Read node docs</a>
+<a class="npr-btn npr-btn--outline" href="extended-nodes.md">Read node docs</a>
 </div>
 </div>
 <div class="npr-module__media">
-<img src="images/glsl_function_node_mode.png" alt="GLSL Function node mode panel">
-<p class="cap">GLSL Function · Node / Code</p>
+<img src="images/overview_shader_nodes.png" alt="Extended shader nodes overview">
+<p class="cap">Extended shader · node catalog</p>
 </div>
 </div>
 
@@ -128,7 +128,7 @@ The package includes Cycles; this site documents <strong>Eevee</strong> extensio
 
 - **NPR Input**: combined / diffuse / specular lighting breakdown
 - **NPR Refraction**: refraction path (including volume-approximation fixes)
-- **Image Sample**: image sampling with offset modes
+- **Image Sample**: View / Pixel / UV offset sampling
 - **For Each Light**: per-light loops and light info
 - **Built-in assets**: drop-in NPR node groups
 
@@ -137,12 +137,12 @@ The package includes Cycles; this site documents <strong>Eevee</strong> extensio
 </div>
 
 <div class="npr-actions">
-<a class="npr-btn npr-btn--outline" href="npr-workflow.html">Read NPR workflow</a>
+<a class="npr-btn npr-btn--outline" href="npr-workflow.md">Read NPR workflow</a>
 </div>
 </div>
 <div class="npr-module__media">
-<img src="images/SnowShot_2026-03-28_04-23-33.png" alt="NPR Tree node overview">
-<p class="cap">NPR Tree · Input / Refraction / Assets</p>
+<img src="images/overview_npr_tree_nodes.png" alt="NPR Tree dedicated nodes overview">
+<p class="cap">NPR Tree · dedicated nodes</p>
 </div>
 </div>
 
@@ -162,7 +162,7 @@ The package includes Cycles; this site documents <strong>Eevee</strong> extensio
 </div>
 
 <div class="npr-actions">
-<a class="npr-btn npr-btn--outline" href="interface-guide.html">Read interface docs</a>
+<a class="npr-btn npr-btn--outline" href="interface-guide.md">Read interface docs</a>
 </div>
 </div>
 <div class="npr-module__media">
@@ -170,6 +170,56 @@ The package includes Cycles; this site documents <strong>Eevee</strong> extensio
 <p class="cap">Eevee Performance · Shadow / Probe</p>
 </div>
 </div>
+
+</div>
+
+
+<div id="node-catalog" class="npr-section-head" markdown>
+<div class="npr-eyebrow">Node catalog</div>
+
+## New nodes at a glance
+<p>Relative to stock Blender, this Port adds nodes across shader trees, NPR Tree, and the Filter domain. Full parameters live on the linked pages.</p>
+</div>
+
+<div class="npr-node-catalog" markdown>
+
+### Extended shader nodes
+<div align="center" markdown>
+<img src="images/overview_shader_nodes.png" alt="Extended shader nodes overview" style="border-radius: 10px;">
+</div>
+
+- Render Info / Screen Derivative / Portal In·Out  
+- Outline Control / Render Texture / Screenspace Info  
+- World Environment / Light Probe Color / World To Tangent  
+- GLSL Function / Script Expression / Image to Closure  
+- Basis Transform / Twirl / Water Ripples / Hex Grid / Parallax  
+- SDF Primitive·Operator·Vector Op / Bevel / Curvature  
+- Shader Info / Light Info / Light Shader Info·Output / OKLab Color Ramp  
+
+[Extended nodes →](extended-nodes.md)
+
+### NPR Tree nodes
+<div align="center" markdown>
+<img src="images/overview_npr_tree_nodes.png" alt="NPR Tree nodes overview" style="border-radius: 10px;">
+</div>
+
+- NPR Input / NPR Output / NPR Refraction  
+- Image Sample (View / Pixel / UV)  
+- For Each Light (paired Input + Output zone)  
+- Built-in groups: Cavity / Co-Planar Edge / Curvature / Kuwahara / Shading Models / Surface Curvature  
+
+[NPR workflow →](npr-workflow.md)
+
+### Filter-domain nodes
+<div align="center" markdown>
+<img src="images/overview_filter_domain_nodes.png" alt="Filter-domain nodes overview" style="border-radius: 10px;">
+</div>
+
+- Pass Input / Image Sample / Filter Output (default Filter Pass material chain)  
+- Filter Object Info / Filter Mask / Scene Color  
+- Graph-level: Scene Color · AOV Input · Filter Pass · Stage Output (see Scene docs)  
+
+[Scene / Filter Graph →](scene-extensions.md) · [Filter-domain nodes →](extended-nodes.md#4-filter-domain-nodes)
 
 </div>
 
@@ -202,7 +252,7 @@ The package includes Cycles; this site documents <strong>Eevee</strong> extensio
 </div>
 
 <div class="npr-actions">
-<a class="npr-btn npr-btn--outline" href="release.html">Download & integrity info</a>
+<a class="npr-btn npr-btn--outline" href="release.md">Download & integrity info</a>
 <a class="npr-btn npr-btn--outline" href="https://github.com/bb-yi/blender/blob/main/blender-npr-release-changelog.md">Full changelog</a>
 </div>
 
@@ -217,7 +267,7 @@ The package includes Cycles; this site documents <strong>Eevee</strong> extensio
 <p>Windows is the fully validated baseline (110/110). Linux / macOS companion builds ship in the same release with SHA256.</p>
 
 <div class="npr-actions">
-<a class="npr-btn npr-btn--primary" href="release.html">Open download page</a>
+<a class="npr-btn npr-btn--primary" href="release.md">Open download page</a>
 <a class="npr-btn npr-btn--outline" href="https://github.com/bb-yi/blender/releases">All releases</a>
 </div>
 </div>

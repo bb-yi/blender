@@ -1,116 +1,7 @@
 # Extended Shader Nodes
 
-## 1. Filter-Domain Nodes
+## 1. General Eevee Utility Nodes
 
-### Filter Object Info
-
-#### Entry
-
-`Add > Input > Filter Object Info`
-
-Available only in the `Filter` domain.
-
-<div align="center">
-	<img src="images/filter_object_info.png" alt="Filter Object Info" style="border-radius: 10px;">
-	<br>
-</div>
-
-#### Purpose
-
-Reads the world-space transform and viewport display color of a chosen object, making it easier to drive a Filter Graph `Filter Pass` from scene helpers or controller objects.
-
-#### Node Setting
-
-- `Object`
-
-#### Outputs
-
-- `Location`
-- `Rotation`
-- `Scale`
-- `Color`
-
-#### Notes
-
-- `Location`: world-space location of the chosen object
-- `Rotation`: world-space Euler rotation in radians
-- `Scale`: world-space scale of the chosen object
-- `Color`: viewport display color of the chosen object
-- If no object is assigned, the node falls back to `0` for location / rotation / color and `1` for scale
-
-### Filter Mask
-
-#### Entry
-
-`Add > Input > Filter Mask`
-
-Available only in the `Filter` domain.
-
-<div align="center">
-	<img src="images/placeholder_filter_mask.png" alt="Filter Mask" style="border-radius: 10px;">
-	<br>
-</div>
-
-#### Purpose
-
-Uses Eevee `Cryptomatte` object information to build fast object masks for filter materials.
-
-#### Output
-
-- `Mask`
-
-#### Panel Options
-
-- `Mode`
-  - `Single Object`
-  - `Object List`
-  - `Collection`
-
-#### Notes
-
-- `Single Object` is useful for one controller object
-- `Object List` is useful when a manual object set is needed, and can be filled from the current selection
-- `Collection` is useful when the mask should follow a collection hierarchy
-- The output is a `0-1` float mask that can be used with `Mix`, thresholds, AOV writing, or any other filter logic
-- Only renderable geometry objects are supported
-
-### Scene Color
-
-#### Entry
-
-`Add > Input > Scene Color`
-
-Available only in the `Filter` domain.
-
-<div align="center">
-	<img src="images/SnowShot_2026-03-28_05-15-31.png" alt="Scene Color" style="border-radius: 10px;">
-	<br>
-</div>
-
-#### Purpose
-
-Reads the current Eevee scene buffer. The `Source` can be switched in the node panel:
-
-- `Color`
-- `Depth`
-- `Normal`
-- `Position`
-
-#### Inputs / Outputs
-
-- Input: `Vector`
-- Outputs: `Color`, `Alpha`
-
-#### Notes
-
-- `Color`: read the resolved scene color
-- `Depth`: read linear scene depth
-- `Normal`: read scene normals
-- `Position`: read the world-space position pass
-- If `Vector` is not connected, the node samples with the `Window` output of the `Texture Coordinate` node
-- When `Vector` is connected, `Color / Depth / Normal / Position` use the same screen-UV offset sampling semantics; `Position` reconstructs the world position for the offset pixel from its depth and screen coordinate
-
-## 2. General Eevee Utility Nodes
 
 ### Render Info
 
@@ -119,7 +10,7 @@ Reads the current Eevee scene buffer. The `Source` can be switched in the node p
 `Add > Input > Render Info`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_04-51-10.png" alt="Render Info" style="border-radius: 10px;">
+	<img src="images/node_render_info.png" alt="Render Info" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -146,7 +37,7 @@ Provides the coordinate and pixel size of the current Eevee render window.
 `Add > Input > Scene Time`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_04-52-48.png" alt="Scene Time" style="border-radius: 10px;">
+	<img src="images/node_scene_time.png" alt="Scene Time" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -172,7 +63,7 @@ Provides time-related values from the current scene.
 `Add > Utilities > Math > Screen Derivative`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_04-53-23.png" alt="Screen Derivative" style="border-radius: 10px;">
+	<img src="images/node_screen_derivative.png" alt="Screen Derivative" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -194,7 +85,7 @@ where `DDXY` means `DDX + DDY`.
 - `Add > Layout > Portal Out`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_04-53-44.png" alt="Portal Nodes" style="border-radius: 10px;">
+	<img src="images/node_portal_in_out.png" alt="Portal Nodes" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -210,7 +101,8 @@ These are “portal” nodes used to organize node links.
 - `Portal Out` includes a magnifier button that jumps to the matching `Portal In`
 - Portals are only recognized inside the same shader node tree and do not automatically pass through node groups
 
-## 3. Eevee Object Material Nodes
+## 2. Eevee Object Material Nodes
+
 
 ### Outline Control
 
@@ -274,7 +166,7 @@ Writes outline parameters for Eevee's built-in screen-space outline pass.
 `Add > Texture > Render Texture`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_04-54-27.png" alt="Render Texture" style="border-radius: 10px;">
+	<img src="images/node_render_texture.png" alt="Render Texture" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -294,7 +186,7 @@ Reads a `Render Textures` entry configured in the scene.
 `Add > Input > Screenspace Info`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_04-56-22.png" alt="Screenspace Info" style="border-radius: 10px;">
+	<img src="images/node_screenspace_info.png" alt="Screenspace Info" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -321,7 +213,7 @@ Reads color or depth from the current render buffer.
 `Add > Input > World Environment`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_05-01-56.png" alt="World Environment" style="border-radius: 10px;">
+	<img src="images/node_world_environment.png" alt="World Environment" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -374,7 +266,7 @@ Reads the currently available Eevee lighting-probe result directly, splitting it
 `Add > Utilities > Vector > World To Tangent`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_05-04-02.png" alt="World To Tangent" style="border-radius: 10px;">
+	<img src="images/node_world_to_tangent.png" alt="World To Tangent" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -845,7 +737,7 @@ Wraps a regular image as a closure-backed source for `sampler2D`, mainly for fee
 `Add > Utilities > Vector > Basis Transform`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_07-51-05.png" alt="Basis Transform" style="border-radius: 10px;">
+	<img src="images/node_basis_transform.png" alt="Basis Transform" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -985,7 +877,7 @@ Generates a hex-grid texture that can be used for honeycomb patterns, cell parti
 `Add > Texture > SDF Primitive`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-31_03-34-28.png" alt="SDF Primitive" style="border-radius: 10px;">
+	<img src="images/node_sdf_primitive.png" alt="SDF Primitive" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -1004,7 +896,7 @@ Generates signed-distance-field base shapes directly inside material nodes.
 `Add > Converter > SDF Operator`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-31_03-34-47.png" alt="SDF Operator" style="border-radius: 10px;">
+	<img src="images/node_sdf_operator.png" alt="SDF Operator" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -1023,7 +915,7 @@ Combines, trims, and reshapes one or two SDF distance fields.
 `Add > Utilities > Vector > SDF Vector Operator`
 
 <div align="center">
-	<img src="images/SnowShot_2026-04-01_02-15-32.png" alt="SDF Vector Operator" style="border-radius: 10px;">
+	<img src="images/node_sdf_vector_operator.png" alt="SDF Vector Operator" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -1037,7 +929,8 @@ Combines, trims, and reshapes one or two SDF distance fields.
 
 Preprocesses coordinate, UV, or vector domains before they are fed into `SDF Primitive`.
 
-## 4. Goo Engine / NPR-Oriented Input Nodes
+## 3. Goo Engine / NPR-Oriented Input Nodes
+
 
 ### Bevel
 
@@ -1046,7 +939,7 @@ Preprocesses coordinate, UV, or vector domains before they are fed into `SDF Pri
 `Add > Input > Bevel`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_05-06-05.png" alt="Bevel" style="border-radius: 10px;">
+	<img src="images/node_bevel.png" alt="Bevel" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -1066,7 +959,7 @@ Generates an approximate beveled normal in `Eevee` so hard edges can look smooth
 `Add > Input > Curvature`
 
 <div align="center">
-	<img src="images/SnowShot_2026-03-28_05-06-57.png" alt="Curvature" style="border-radius: 10px;">
+	<img src="images/node_curvature.png" alt="Curvature" style="border-radius: 10px;">
 	<br>
 </div>
 
@@ -1251,7 +1144,119 @@ vec4(Color.rgb * max(Intensity, 0.0), max(Attenuation, 0.0))
 	<sub>Example effect of Light Shader Output on light color and attenuation</sub>
 </div>
 
+## 4. Filter-Domain Nodes {#4-filter-domain-nodes}
+
+
+### Filter Object Info
+
+#### Entry
+
+`Add > Input > Filter Object Info`
+
+Available only in the `Filter` domain.
+
+<div align="center">
+	<img src="images/filter_object_info.png" alt="Filter Object Info" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### Purpose
+
+Reads the world-space transform and viewport display color of a chosen object, making it easier to drive a Filter Graph `Filter Pass` from scene helpers or controller objects.
+
+#### Node Setting
+
+- `Object`
+
+#### Outputs
+
+- `Location`
+- `Rotation`
+- `Scale`
+- `Color`
+
+#### Notes
+
+- `Location`: world-space location of the chosen object
+- `Rotation`: world-space Euler rotation in radians
+- `Scale`: world-space scale of the chosen object
+- `Color`: viewport display color of the chosen object
+- If no object is assigned, the node falls back to `0` for location / rotation / color and `1` for scale
+
+### Filter Mask
+
+#### Entry
+
+`Add > Input > Filter Mask`
+
+Available only in the `Filter` domain.
+
+<div align="center">
+	<img src="images/placeholder_filter_mask.png" alt="Filter Mask" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### Purpose
+
+Uses Eevee `Cryptomatte` object information to build fast object masks for filter materials.
+
+#### Output
+
+- `Mask`
+
+#### Panel Options
+
+- `Mode`
+  - `Single Object`
+  - `Object List`
+  - `Collection`
+
+#### Notes
+
+- `Single Object` is useful for one controller object
+- `Object List` is useful when a manual object set is needed, and can be filled from the current selection
+- `Collection` is useful when the mask should follow a collection hierarchy
+- The output is a `0-1` float mask that can be used with `Mix`, thresholds, AOV writing, or any other filter logic
+- Only renderable geometry objects are supported
+
+### Scene Color
+
+#### Entry
+
+`Add > Input > Scene Color`
+
+Available only in the `Filter` domain.
+
+<div align="center">
+	<img src="images/node_scene_color.png" alt="Scene Color" style="border-radius: 10px;">
+	<br>
+</div>
+
+#### Purpose
+
+Reads the current Eevee scene buffer. The `Source` can be switched in the node panel:
+
+- `Color`
+- `Depth`
+- `Normal`
+- `Position`
+
+#### Inputs / Outputs
+
+- Input: `Vector`
+- Outputs: `Color`, `Alpha`
+
+#### Notes
+
+- `Color`: read the resolved scene color
+- `Depth`: read linear scene depth
+- `Normal`: read scene normals
+- `Position`: read the world-space position pass
+- If `Vector` is not connected, the node samples with the `Window` output of the `Texture Coordinate` node
+- When `Vector` is connected, `Color / Depth / Normal / Position` use the same screen-UV offset sampling semantics; `Position` reconstructs the world position for the offset pixel from its depth and screen coordinate
+
 ## 5. Built-In Node Enhancements
+
 
 ### OKLab Color Ramp
 
