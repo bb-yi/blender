@@ -1197,7 +1197,7 @@
 <li>在它的 <code>NPR Tree</code> 属性里新建或指定一个节点组。</li>
 </ol>
 <div align="center">
-    <img src="images/SnowShot_2026-03-28_05-18-15.png" alt="NPR Tree Slot" style="border-radius: 10px;">
+    <img src="images/npr_tree_slot.png" alt="NPR Tree Slot" style="border-radius: 10px;">
     <br>
 </div>
 
@@ -1205,7 +1205,7 @@
 <li>需要编辑这棵树时，在 Shader Editor 顶部把 <code>Shader Type</code> 切到 <code>NPR</code>。</li>
 </ol>
 <div align="center">
-    <img src="images/SnowShot_2026-03-28_05-18-33.png" alt="NPR Shader Type" style="border-radius: 10px;">
+    <img src="images/npr_shader_type.png" alt="NPR Shader Type" style="border-radius: 10px;">
     <br>
 </div>
 
@@ -1216,7 +1216,7 @@
 <li><code>NPR Tree</code> 的关键帧与驱动器使用独立的 <code>NPR Tree Action</code>，可在 <code>Material Properties &gt; Animation &gt; NPR Tree Action</code> 查看、切换或新建</li>
 </ul>
 <div align="center">
-    <img src="images/SnowShot_2026-03-31_03-35-17.png" alt="NPR Tree Action" style="border-radius: 10px;">
+    <img src="images/npr_tree_action.png" alt="NPR Tree Action" style="border-radius: 10px;">
     <br>
 </div>
 
@@ -1224,7 +1224,7 @@
 <p>除了下面这些专用 NPR 节点以外，<code>Curvature</code>、<code>Raycast</code>、<code>GLSL Function</code> 和 <code>GLSL Script Expression</code> 现在也可以直接在 <code>NPR Tree</code> 中使用。</p>
 <h3 id="npr-input">NPR Input<a class="headerlink" href="#npr-input" title="Permanent link">&para;</a></h3>
 <div align="center">
-    <img src="images/SnowShot_2026-03-28_05-22-04.png" alt="NPR Input" style="border-radius: 10px;">
+    <img src="images/node_npr_input.png" alt="NPR Input" style="border-radius: 10px;">
     <br>
 </div>
 
@@ -1245,7 +1245,7 @@
 <p>这些输出本质上更接近图像句柄 / 纹理句柄，适合继续交给 <code>Image Sample</code> 做邻域采样，或接到支持这类输入的 NPR 节点上继续处理。</p>
 <h3 id="npr-refraction">NPR Refraction<a class="headerlink" href="#npr-refraction" title="Permanent link">&para;</a></h3>
 <div align="center">
-    <img src="images/SnowShot_2026-03-28_05-22-16.png" alt="NPR Refraction" style="border-radius: 10px;">
+    <img src="images/node_npr_refraction.png" alt="NPR Refraction" style="border-radius: 10px;">
     <br>
 </div>
 
@@ -1266,27 +1266,30 @@
 <h4 id="_6">入口<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h4>
 <p><code>Add &gt; Utilities &gt; Image Sample</code></p>
 <div align="center">
-    <img src="images/SnowShot_2026-03-28_05-25-34.png" alt="Image Sample" style="border-radius: 10px;">
+    <img src="images/node_npr_image_sample.png" alt="Image Sample" style="border-radius: 10px;">
     <br>
 </div>
 
 <h4 id="_7">输入输出<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h4>
 <ul>
 <li>输入：<code>Image</code>、<code>Offset</code></li>
-<li>输出：<code>Color</code></li>
+<li>输出：<code>Color</code>、<code>Alpha</code></li>
 </ul>
 <h4 id="_8">作用<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h4>
-<p>对 <code>NPR Input</code> / <code>NPR Refraction</code> 之类输出的图像句柄做采样。</p>
+<p>对 <code>NPR Input</code> / <code>NPR Refraction</code> / Filter <code>Pass Input</code> 等输出的图像句柄做采样。</p>
 <h4 id="_9">偏移模式<a class="headerlink" href="#_9" title="Permanent link">&para;</a></h4>
+<p>节点面板提供三种偏移解释方式：</p>
 <ul>
-<li><code>View</code>：按视空间偏移</li>
-<li><code>Pixel</code>：按像素偏移</li>
+<li><code>视图</code>（View）：按视空间偏移采样位置，适合与视角相关的邻域取样</li>
+<li><code>像素</code>（Pixel）：按屏幕像素偏移，效果会随分辨率变化</li>
+<li><code>UV</code>：把 <code>Offset</code> 当作 UV / 屏幕坐标偏移来解释，便于按纹理坐标空间做位移采样</li>
 </ul>
+<p>未连接 <code>Offset</code> 时，默认在当前像素 / 当前 UV 位置采样。</p>
 <h3 id="for-each-light">For Each Light<a class="headerlink" href="#for-each-light" title="Permanent link">&para;</a></h3>
 <h4 id="_10">入口<a class="headerlink" href="#_10" title="Permanent link">&para;</a></h4>
 <p><code>Add &gt; Utilities &gt; For Each Light</code></p>
 <div align="center">
-    <img src="images/SnowShot_2026-03-28_05-26-08.png" alt="For Each Light" style="border-radius: 10px;">
+    <img src="images/node_npr_foreach_light.png" alt="For Each Light" style="border-radius: 10px;">
     <br>
 </div>
 

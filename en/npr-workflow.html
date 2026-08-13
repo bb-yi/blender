@@ -1197,7 +1197,7 @@
 <li>Create or assign a node group in its <code>NPR Tree</code> property.</li>
 </ol>
 <div align="center">
-    <img src="images/SnowShot_2026-03-28_05-18-15.png" alt="NPR Tree Slot" style="border-radius: 10px;">
+    <img src="images/npr_tree_slot.png" alt="NPR Tree Slot" style="border-radius: 10px;">
     <br>
 </div>
 
@@ -1205,7 +1205,7 @@
 <li>To edit this tree, switch the Shader Editor top <code>Shader Type</code> to <code>NPR</code>.</li>
 </ol>
 <div align="center">
-    <img src="images/SnowShot_2026-03-28_05-18-33.png" alt="NPR Shader Type" style="border-radius: 10px;">
+    <img src="images/npr_shader_type.png" alt="NPR Shader Type" style="border-radius: 10px;">
     <br>
 </div>
 
@@ -1216,7 +1216,7 @@
 <li><code>NPR Tree</code> keyframes and drivers use a dedicated <code>NPR Tree Action</code>, which can be viewed, switched, or created in <code>Material Properties &gt; Animation &gt; NPR Tree Action</code></li>
 </ul>
 <div align="center">
-    <img src="images/SnowShot_2026-03-31_03-35-17.png" alt="NPR Tree Action" style="border-radius: 10px;">
+    <img src="images/npr_tree_action.png" alt="NPR Tree Action" style="border-radius: 10px;">
     <br>
 </div>
 
@@ -1224,7 +1224,7 @@
 <p>In addition to the dedicated NPR nodes below, <code>Curvature</code>, <code>Raycast</code>, <code>GLSL Function</code>, and <code>GLSL Script Expression</code> can also be used directly inside <code>NPR Tree</code>.</p>
 <h3 id="npr-input">NPR Input<a class="headerlink" href="#npr-input" title="Permanent link">&para;</a></h3>
 <div align="center">
-    <img src="images/SnowShot_2026-03-28_05-22-04.png" alt="NPR Input" style="border-radius: 10px;">
+    <img src="images/node_npr_input.png" alt="NPR Input" style="border-radius: 10px;">
     <br>
 </div>
 
@@ -1245,7 +1245,7 @@
 <p>These outputs are closer to image / texture handles than ordinary scalar values, so they are typically passed to <code>Image Sample</code> or other NPR-aware nodes for further processing.</p>
 <h3 id="npr-refraction">NPR Refraction<a class="headerlink" href="#npr-refraction" title="Permanent link">&para;</a></h3>
 <div align="center">
-    <img src="images/SnowShot_2026-03-28_05-22-16.png" alt="NPR Refraction" style="border-radius: 10px;">
+    <img src="images/node_npr_refraction.png" alt="NPR Refraction" style="border-radius: 10px;">
     <br>
 </div>
 
@@ -1266,27 +1266,30 @@
 <h4 id="entry">Entry<a class="headerlink" href="#entry" title="Permanent link">&para;</a></h4>
 <p><code>Add &gt; Utilities &gt; Image Sample</code></p>
 <div align="center">
-    <img src="images/SnowShot_2026-03-28_05-25-34.png" alt="Image Sample" style="border-radius: 10px;">
+    <img src="images/node_npr_image_sample.png" alt="Image Sample" style="border-radius: 10px;">
     <br>
 </div>
 
 <h4 id="inputs-outputs">Inputs / Outputs<a class="headerlink" href="#inputs-outputs" title="Permanent link">&para;</a></h4>
 <ul>
 <li>Inputs: <code>Image</code>, <code>Offset</code></li>
-<li>Output: <code>Color</code></li>
+<li>Outputs: <code>Color</code>, <code>Alpha</code></li>
 </ul>
 <h4 id="purpose_2">Purpose<a class="headerlink" href="#purpose_2" title="Permanent link">&para;</a></h4>
-<p>Samples image-style handles such as those coming from <code>NPR Input</code> or <code>NPR Refraction</code>.</p>
+<p>Samples image-style handles from <code>NPR Input</code>, <code>NPR Refraction</code>, Filter <code>Pass Input</code>, and similar sources.</p>
 <h4 id="offset-modes">Offset Modes<a class="headerlink" href="#offset-modes" title="Permanent link">&para;</a></h4>
+<p>The node panel exposes three offset interpretations:</p>
 <ul>
-<li><code>View</code>: offset in view space</li>
-<li><code>Pixel</code>: offset in pixel space</li>
+<li><code>View</code>: offset the sample position in view space</li>
+<li><code>Pixel</code>: offset in screen pixels (resolution-dependent)</li>
+<li><code>UV</code>: treat <code>Offset</code> as a UV / screen-coordinate delta for texture-space displacement sampling</li>
 </ul>
+<p>With <code>Offset</code> unconnected, sampling uses the current pixel / UV location.</p>
 <h3 id="for-each-light">For Each Light<a class="headerlink" href="#for-each-light" title="Permanent link">&para;</a></h3>
 <h4 id="entry_1">Entry<a class="headerlink" href="#entry_1" title="Permanent link">&para;</a></h4>
 <p><code>Add &gt; Utilities &gt; For Each Light</code></p>
 <div align="center">
-    <img src="images/SnowShot_2026-03-28_05-26-08.png" alt="For Each Light" style="border-radius: 10px;">
+    <img src="images/node_npr_foreach_light.png" alt="For Each Light" style="border-radius: 10px;">
     <br>
 </div>
 

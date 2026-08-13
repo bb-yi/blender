@@ -1188,7 +1188,7 @@
 <h4 id="_2">面板入口<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h4>
 <p><code>Scene Properties &gt; Render Textures</code></p>
 <div align="center">
-  <img src="images/SnowShot_2026-03-28_04-37-13.png" alt="Render Textures" style="border-radius: 10px;">
+  <img src="images/render_textures_panel.png" alt="Render Textures" style="border-radius: 10px;">
   <br>
 </div>
 
@@ -1255,9 +1255,9 @@
 <p><code>Pass Input -&gt; Image Sample -&gt; Filter Output</code></p>
 <p><code>Pass Input</code> 接收 Filter Graph 传入的图像句柄，<code>Image Sample</code> 在当前像素或偏移位置采样，<code>Filter Output</code> 把结果返回给图中的 <code>Filter Pass</code>。可按需要在 <code>Pass Input</code> 与 <code>Filter Output</code> 上维护动态接口；单个 Filter Pass 最多支持 <code>32</code> 个输入和 <code>32</code> 个输出。</p>
 <div align="center">
-  <img src="images/filter_graph_effect_example.png" alt="Filter 材质内部节点与效果示例" style="border-radius: 10px;">
+  <img src="images/filter_pass_material_chain.png" alt="Filter Pass 材质内部：Pass Input → Image Sample → Filter Output" style="border-radius: 10px;">
   <br>
-  <sub>Pass Input、Image Sample、Filter Output 组成的材质链及其视口效果</sub>
+  <sub>Pass Input、Image Sample、Filter Output 组成的默认 Filter 材质链</sub>
 </div>
 
 <h4 id="_7">基本使用方法<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h4>
