@@ -80,6 +80,9 @@ plugins:
 extra_css:
   - stylesheets/extra.css
 
+extra_javascript:
+  - javascripts/latest-win-release.js
+
 extra:
   generator: false
   alternate:

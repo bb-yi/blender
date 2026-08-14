@@ -16,7 +16,7 @@ hide:
 </p>
 
 <div class="npr-actions">
-<a class="npr-btn npr-btn--primary" href="release.md">下载正式版</a>
+<a class="npr-btn npr-btn--primary" data-npr-latest-win href="https://github.com/bb-yi/blender/releases/download/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604/blender-5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604.zip">下载正式版</a>
 <a class="npr-btn npr-btn--outline" href="#modules">功能模块</a>
 <a class="npr-btn npr-btn--outline" href="https://github.com/bb-yi/blender">GitHub</a>
 </div>
@@ -40,22 +40,22 @@ hide:
 </div>
 
 <div class="npr-map">
-<a href="scene-extensions.md">
+<a href="scene-extensions.html">
 <span class="code">01 · Scene</span>
 <span class="title">Scene 管线</span>
 <span class="desc">渲染纹理、Filter Graph、相机输出、描边</span>
 </a>
-<a href="extended-nodes.md">
+<a href="extended-nodes.html">
 <span class="code">02 · Nodes</span>
 <span class="title">扩展节点</span>
 <span class="desc">Filter 域、辅助信息、GLSL、SDF、材质节点</span>
 </a>
-<a href="npr-workflow.md">
+<a href="npr-workflow.html">
 <span class="code">03 · NPR Tree</span>
 <span class="title">NPR 工作流</span>
 <span class="desc">光照分解、折射、图像采样、逐灯循环</span>
 </a>
-<a href="interface-guide.md">
+<a href="interface-guide.html">
 <span class="code">04 · UI</span>
 <span class="title">界面控制</span>
 <span class="desc">性能归因、材质状态、灯光组、阴影缩放</span>
@@ -86,7 +86,7 @@ hide:
 </div>
 
 <div class="npr-actions">
-<a class="npr-btn npr-btn--outline" href="scene-extensions.md">阅读 Scene 文档</a>
+<a class="npr-btn npr-btn--outline" href="scene-extensions.html">阅读 Scene 文档</a>
 </div>
 </div>
 <div class="npr-module__media">
@@ -111,7 +111,7 @@ hide:
 </div>
 
 <div class="npr-actions">
-<a class="npr-btn npr-btn--outline" href="extended-nodes.md">阅读节点文档</a>
+<a class="npr-btn npr-btn--outline" href="extended-nodes.html">阅读节点文档</a>
 </div>
 </div>
 <div class="npr-module__media">
@@ -137,7 +137,7 @@ hide:
 </div>
 
 <div class="npr-actions">
-<a class="npr-btn npr-btn--outline" href="npr-workflow.md">阅读 NPR 工作流</a>
+<a class="npr-btn npr-btn--outline" href="npr-workflow.html">阅读 NPR 工作流</a>
 </div>
 </div>
 <div class="npr-module__media">
@@ -162,7 +162,7 @@ hide:
 </div>
 
 <div class="npr-actions">
-<a class="npr-btn npr-btn--outline" href="interface-guide.md">阅读界面文档</a>
+<a class="npr-btn npr-btn--outline" href="interface-guide.html">阅读界面文档</a>
 </div>
 </div>
 <div class="npr-module__media">
@@ -251,7 +251,7 @@ hide:
 </div>
 
 <div class="npr-actions">
-<a class="npr-btn npr-btn--outline" href="release.md">下载与校验信息</a>
+<a class="npr-btn npr-btn--outline" href="release.html">下载与校验信息</a>
 <a class="npr-btn npr-btn--outline" href="https://github.com/bb-yi/blender/blob/main/blender-npr-release-changelog.md">完整 changelog</a>
 </div>
 
@@ -266,7 +266,7 @@ hide:
 <p>完整验证基线为 Windows（110/110）；同版本附带 Linux / macOS，含 SHA256。</p>
 
 <div class="npr-actions">
-<a class="npr-btn npr-btn--primary" href="release.md">打开下载页</a>
+<a class="npr-btn npr-btn--primary" href="release.html">打开下载页</a>
 <a class="npr-btn npr-btn--outline" href="https://github.com/bb-yi/blender/releases">全部 Release</a>
 </div>
 </div>

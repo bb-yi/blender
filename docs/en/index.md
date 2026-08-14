@@ -16,7 +16,7 @@ The package includes Cycles; this site documents <strong>Eevee</strong> extensio
 </p>
 
 <div class="npr-actions">
-<a class="npr-btn npr-btn--primary" href="release.md">Download stable</a>
+<a class="npr-btn npr-btn--primary" data-npr-latest-win href="https://github.com/bb-yi/blender/releases/download/v5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604/blender-5.2.0-npr-port-win64-fd9fabb4f531-20260811-235604.zip">Download stable</a>
 <a class="npr-btn npr-btn--outline" href="#modules">Modules</a>
 <a class="npr-btn npr-btn--outline" href="https://github.com/bb-yi/blender">GitHub</a>
 </div>
@@ -40,22 +40,22 @@ The package includes Cycles; this site documents <strong>Eevee</strong> extensio
 </div>
 
 <div class="npr-map">
-<a href="scene-extensions.md">
+<a href="scene-extensions.html">
 <span class="code">01 · Scene</span>
 <span class="title">Scene pipeline</span>
 <span class="desc">Render textures, Filter Graph, camera outputs, outline</span>
 </a>
-<a href="extended-nodes.md">
+<a href="extended-nodes.html">
 <span class="code">02 · Nodes</span>
 <span class="title">Extended nodes</span>
 <span class="desc">Filter domain, helpers, GLSL, SDF, material nodes</span>
 </a>
-<a href="npr-workflow.md">
+<a href="npr-workflow.html">
 <span class="code">03 · NPR Tree</span>
 <span class="title">NPR workflow</span>
 <span class="desc">Lighting breakdown, refraction, image sample, per-light loops</span>
 </a>
-<a href="interface-guide.md">
+<a href="interface-guide.html">
 <span class="code">04 · UI</span>
 <span class="title">UI controls</span>
 <span class="desc">Performance attribution, material state, light groups, shadow scale</span>
@@ -86,7 +86,7 @@ The package includes Cycles; this site documents <strong>Eevee</strong> extensio
 </div>
 
 <div class="npr-actions">
-<a class="npr-btn npr-btn--outline" href="scene-extensions.md">Read Scene docs</a>
+<a class="npr-btn npr-btn--outline" href="scene-extensions.html">Read Scene docs</a>
 </div>
 </div>
 <div class="npr-module__media">
@@ -111,7 +111,7 @@ The package includes Cycles; this site documents <strong>Eevee</strong> extensio
 </div>
 
 <div class="npr-actions">
-<a class="npr-btn npr-btn--outline" href="extended-nodes.md">Read node docs</a>
+<a class="npr-btn npr-btn--outline" href="extended-nodes.html">Read node docs</a>
 </div>
 </div>
 <div class="npr-module__media">
@@ -137,7 +137,7 @@ The package includes Cycles; this site documents <strong>Eevee</strong> extensio
 </div>
 
 <div class="npr-actions">
-<a class="npr-btn npr-btn--outline" href="npr-workflow.md">Read NPR workflow</a>
+<a class="npr-btn npr-btn--outline" href="npr-workflow.html">Read NPR workflow</a>
 </div>
 </div>
 <div class="npr-module__media">
@@ -162,7 +162,7 @@ The package includes Cycles; this site documents <strong>Eevee</strong> extensio
 </div>
 
 <div class="npr-actions">
-<a class="npr-btn npr-btn--outline" href="interface-guide.md">Read interface docs</a>
+<a class="npr-btn npr-btn--outline" href="interface-guide.html">Read interface docs</a>
 </div>
 </div>
 <div class="npr-module__media">
@@ -252,7 +252,7 @@ The package includes Cycles; this site documents <strong>Eevee</strong> extensio
 </div>
 
 <div class="npr-actions">
-<a class="npr-btn npr-btn--outline" href="release.md">Download & integrity info</a>
+<a class="npr-btn npr-btn--outline" href="release.html">Download & integrity info</a>
 <a class="npr-btn npr-btn--outline" href="https://github.com/bb-yi/blender/blob/main/blender-npr-release-changelog.md">Full changelog</a>
 </div>
 
@@ -267,7 +267,7 @@ The package includes Cycles; this site documents <strong>Eevee</strong> extensio
 <p>Windows is the fully validated baseline (110/110). Linux / macOS companion builds ship in the same release with SHA256.</p>
 
 <div class="npr-actions">
-<a class="npr-btn npr-btn--primary" href="release.md">Open download page</a>
+<a class="npr-btn npr-btn--primary" href="release.html">Open download page</a>
 <a class="npr-btn npr-btn--outline" href="https://github.com/bb-yi/blender/releases">All releases</a>
 </div>
 </div>
