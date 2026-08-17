@@ -10,6 +10,8 @@
 
 #pragma once
 
+#include <string>
+
 #include "BLI_pool.hh"
 #include "BLI_vector.hh"
 
@@ -341,6 +343,11 @@ class ShadowModule {
 
   /** Display information about the virtual shadows. */
   PassSimple debug_draw_ps_ = {"Shadow.Debug"};
+  int debug_draw_mode_ = 0;
+  bool debug_draw_ready_ = false;
+  ObjectKey debug_light_key_;
+  bool has_debug_light_key_ = false;
+  std::string debug_light_name_;
 
   /** \} */
 
@@ -566,7 +573,6 @@ class ShadowDirectional : public NonCopyable, NonMovable {
   static float coverage_get(int lvl)
   {
     /* This function should be kept in sync with shadow_directional_level(). */
-    /* \note If we would to introduce a global scaling option it would be here. */
     return exp2(lvl);
   }
 

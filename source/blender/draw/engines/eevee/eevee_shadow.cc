@@ -11,6 +11,9 @@
 #include "BLI_math_matrix.hh"
 #include "BLI_time.h"
 
+#include "DNA_light_types.h"
+#include "DNA_object_types.h"
+
 #include "GPU_batch_utils.hh"
 #include "GPU_capabilities.hh"
 #include "GPU_compute.hh"
@@ -44,6 +47,25 @@ static std::unordered_map<const ShadowModule *, DirectionalFocusData> directiona
 static DirectionalFocusData &directional_focus_data_ensure(const ShadowModule &shadows)
 {
   return directional_focus_cache[&shadows];
+}
+
+static const char *debug_light_type_name_get(const eLightType type)
+{
+  switch (type) {
+    case LIGHT_SUN:
+    case LIGHT_SUN_ORTHO:
+      return "Sun";
+    case LIGHT_RECT:
+    case LIGHT_ELLIPSE:
+      return "Area";
+    case LIGHT_SPOT_SPHERE:
+    case LIGHT_SPOT_DISK:
+      return "Spot";
+    case LIGHT_OMNI_SPHERE:
+    case LIGHT_OMNI_DISK:
+      return "Point";
+  }
+  return "Unknown";
 }
 
 static float finite_or_default(const float value, const float fallback)
@@ -1499,7 +1521,12 @@ void ShadowModule::end_sync()
 
 void ShadowModule::debug_end_sync()
 {
-  if (!ELEM(inst_.debug_mode,
+  debug_draw_ready_ = false;
+  debug_draw_mode_ = int(eDebugMode::DEBUG_NONE);
+
+  const bool show_shadow_lod = inst_.shadow_lod_overlay_enabled();
+  if (!show_shadow_lod &&
+      !ELEM(inst_.debug_mode,
             eDebugMode::DEBUG_SHADOW_TILEMAPS,
             eDebugMode::DEBUG_SHADOW_VALUES,
             eDebugMode::DEBUG_SHADOW_TILE_RANDOM_COLOR,
@@ -1509,22 +1536,91 @@ void ShadowModule::debug_end_sync()
     return;
   }
 
+  const eDebugMode debug_mode = show_shadow_lod ? eDebugMode::DEBUG_SHADOW_LOD :
+                                                  inst_.debug_mode;
+
   /* Init but not filled if no active object. */
   debug_draw_ps_.init();
 
   int tilemap_index = 0;
+  bool has_debug_light = false;
   Object *object_active = inst_.draw_ctx->obact;
-  if (object_active != nullptr) {
+  const bool active_light_selected = object_active != nullptr && object_active->type == OB_LAMP;
+  ObjectKey selected_light_key;
+  std::string selected_light_name;
+  bool active_light_has_valid_tilemap = false;
+  if (show_shadow_lod && active_light_selected) {
     ObjectKey object_key(ObjectRef(DEG_get_original(object_active)));
     if (inst_.lights.light_map_.contains(object_key)) {
-      Light &light = inst_.lights.light_map_.lookup(object_key);
-      if (light.tilemap_index < SHADOW_MAX_TILEMAP) {
-        tilemap_index = light.tilemap_index;
+      const Light &light = inst_.lights.light_map_.lookup(object_key);
+      if (light.tilemap_index != LIGHT_NO_SHADOW && light.tilemap_index >= 0 &&
+          light.tilemap_index < SHADOW_MAX_TILEMAP &&
+          light.tilemap_index <= light.tilemap_max_get())
+      {
+        active_light_has_valid_tilemap = true;
+        debug_light_key_ = object_key;
+        has_debug_light_key_ = true;
+        debug_light_name_ = object_active->id.name + 2;
       }
     }
   }
 
-  if (tilemap_index == 0 && inst_.debug_mode != eDebugMode::DEBUG_SHADOW_ATOMIC_COST) {
+  if (show_shadow_lod && has_debug_light_key_ &&
+      (!active_light_selected || active_light_has_valid_tilemap) &&
+      inst_.lights.light_map_.contains(debug_light_key_))
+  {
+    const Light &light = inst_.lights.light_map_.lookup(debug_light_key_);
+    if (light.tilemap_index != LIGHT_NO_SHADOW && light.tilemap_index >= 0 &&
+        light.tilemap_index < SHADOW_MAX_TILEMAP && light.tilemap_index <= light.tilemap_max_get())
+    {
+      selected_light_key = debug_light_key_;
+      selected_light_name = debug_light_name_;
+      tilemap_index = light.tilemap_index;
+      has_debug_light = true;
+    }
+  }
+  else if (!show_shadow_lod && debug_mode != eDebugMode::DEBUG_SHADOW_ATOMIC_COST &&
+           object_active != nullptr)
+  {
+    ObjectKey object_key(ObjectRef(DEG_get_original(object_active)));
+    if (inst_.lights.light_map_.contains(object_key)) {
+      const Light &light = inst_.lights.light_map_.lookup(object_key);
+      if (light.tilemap_index != LIGHT_NO_SHADOW && light.tilemap_index >= 0 &&
+          light.tilemap_index < SHADOW_MAX_TILEMAP &&
+          light.tilemap_index <= light.tilemap_max_get())
+      {
+        selected_light_key = object_key;
+        selected_light_name = object_active->id.name + 2;
+        tilemap_index = light.tilemap_index;
+        has_debug_light = true;
+      }
+    }
+  }
+
+  if (show_shadow_lod && has_debug_light_key_ && !has_debug_light) {
+    has_debug_light_key_ = false;
+  }
+
+  if (!has_debug_light && debug_mode != eDebugMode::DEBUG_SHADOW_ATOMIC_COST) {
+    if (show_shadow_lod) {
+      if (object_active == nullptr) {
+        inst_.info_append("Shadow LOD: Select a shadow-casting light to inspect.");
+      }
+      else if (object_active->type != OB_LAMP) {
+        inst_.info_append("Shadow LOD: Select a shadow-casting light to inspect.");
+      }
+      else if (!(id_cast<::blender::Light *>(object_active->data)->mode & LA_SHADOW)) {
+        inst_.info_append(
+            "Shadow LOD: Active light \"{}\" has shadows disabled.", object_active->id.name + 2);
+      }
+      else if (!enabled_) {
+        inst_.info_append("Shadow LOD: EEVEE shadows are disabled.");
+      }
+      else {
+        inst_.info_append("Shadow LOD: Active light \"{}\" has no valid shadow tilemap.",
+                          object_active->id.name + 2);
+      }
+    }
     return;
   }
 
@@ -1533,8 +1629,9 @@ void ShadowModule::debug_end_sync()
 
   debug_draw_ps_.state_set(state);
   debug_draw_ps_.shader_set(inst_.shaders.static_shader_get(SHADOW_DEBUG));
-  debug_draw_ps_.push_constant("debug_mode", int(inst_.debug_mode));
+  debug_draw_ps_.push_constant("debug_mode", int(debug_mode));
   debug_draw_ps_.push_constant("debug_tilemap_index", tilemap_index);
+  debug_draw_ps_.push_constant("shadow_lod_opacity", inst_.shadow_lod_overlay_opacity());
   debug_draw_ps_.bind_ssbo("tilemaps_buf", &tilemap_pool.tilemaps_data);
   debug_draw_ps_.bind_ssbo("tiles_buf", &tilemap_pool.tiles_data);
   debug_draw_ps_.bind_resources(inst_.uniform_data);
@@ -1542,6 +1639,27 @@ void ShadowModule::debug_end_sync()
   debug_draw_ps_.bind_resources(inst_.lights);
   debug_draw_ps_.bind_resources(inst_.shadows);
   debug_draw_ps_.draw_procedural(GPU_PRIM_TRIS, 1, 3);
+
+  debug_draw_mode_ = int(debug_mode);
+  debug_draw_ready_ = true;
+
+  if (show_shadow_lod) {
+    const Light &light = inst_.lights.light_map_.lookup(selected_light_key);
+    const bool is_sun = ELEM(light.type, LIGHT_SUN, LIGHT_SUN_ORTHO);
+    inst_.info_append("Shadow LOD: {} ({}){}\n"
+                      " - L row: {}\n"
+                      " - D row: N (near) to F (far) depth\n"
+                      " - Legend: Effective LOD and equivalent virtual resolution\n"
+                      " - Magenta in L row: Invalid shadow tile",
+                      selected_light_name,
+                      debug_light_type_name_get(light.type),
+                      object_active != nullptr && object_active->type != OB_LAMP ?
+                          " (pinned while editing another object)" :
+                          "",
+                      is_sun ?
+                          "Sun level; each +1 covers about 2x wider and is coarser" :
+                          "Effective LOD 0 (fine) to 7 (coarse)");
+  }
 }
 
 float ShadowModule::screen_pixel_radius(const float4x4 &wininv,
@@ -1837,8 +1955,11 @@ void ShadowModule::render(View &view, int2 extent)
 
 void ShadowModule::debug_draw(View &view, gpu::FrameBuffer *view_fb)
 {
+  if (!debug_draw_ready_) {
+    return;
+  }
 
-  switch (inst_.debug_mode) {
+  switch (eDebugMode(debug_draw_mode_)) {
     case DEBUG_SHADOW_TILEMAPS:
       inst_.info_append(
           "Debug Mode: Shadow Tilemap (active light)\n"
@@ -1861,6 +1982,8 @@ void ShadowModule::debug_draw(View &view, gpu::FrameBuffer *view_fb)
           " - Blue: Low\n"
           " - Red: Medium\n"
           " - White: High");
+      break;
+    case DEBUG_SHADOW_LOD:
       break;
     default:
       return;

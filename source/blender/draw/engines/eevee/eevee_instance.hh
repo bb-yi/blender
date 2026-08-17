@@ -106,6 +106,8 @@ namespace blender::eevee
 
     uint64_t depsgraph_last_update_ = 0;
     bool overlays_enabled_ = false;
+    bool shadow_lod_overlay_ = false;
+    float shadow_lod_overlay_opacity_ = 0.7f;
     bool skip_render_ = false;
     bool last_viewport_scene_time_valid_ = false;
     float last_viewport_scene_time_ = 0.0f;
@@ -390,6 +392,16 @@ namespace blender::eevee
     bool overlays_enabled() const
     {
       return overlays_enabled_;
+    }
+
+    bool shadow_lod_overlay_enabled() const
+    {
+      return shadow_lod_overlay_;
+    }
+
+    float shadow_lod_overlay_opacity() const
+    {
+      return shadow_lod_overlay_opacity_;
     }
 
     /** True if the grease pencil engine might be running. */

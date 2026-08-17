@@ -350,6 +350,7 @@ namespace blender
       bool uses_geometry_access = false;
       bool uses_lightprobe_access = false;
       bool uses_eevee_light_access = false;
+      bool uses_matrix_access = false;
       bool defines_parsed = false;
 
       std::string error;
@@ -388,6 +389,7 @@ namespace blender
     enum class GLSLSamplerSourceKind : uint8_t
     {
       None = 0,
+      FallbackWhite,
       ImageToClosure,
       ClosureOutput,
       GLSLFunction,
@@ -452,6 +454,7 @@ namespace blender
       std::string sub_function_name;
       GPUType coordinate_type = GPU_VEC2;
       GPUType return_type = GPU_VEC4;
+      bool is_fallback_white = false;
     };
 
     struct GLSLClosureCallbackHelper
@@ -510,9 +513,11 @@ namespace blender
     static bool glsl_source_uses_geometry_access(const Vector<GLSLToken>& tokens);
     static bool glsl_source_uses_lightprobe_access(const Vector<GLSLToken>& tokens);
     static bool glsl_source_uses_eevee_light_access(const Vector<GLSLToken>& tokens);
+    static bool glsl_source_uses_matrix_access(const Vector<GLSLToken>& tokens);
     static bool glsl_function_meta_uses_geometry_access(const GLSLFunctionDefinition& function);
     static bool glsl_function_meta_uses_lightprobe_access(const GLSLFunctionDefinition& function);
     static bool glsl_function_meta_uses_eevee_light_access(const GLSLFunctionDefinition& function);
+    static bool glsl_function_meta_uses_matrix_access(const GLSLFunctionDefinition& function);
     static bool find_glsl_function_definition(const Vector<GLSLToken>& tokens,
       const StringRef function_name,
       GLSLFunctionDefinition& r_function,
@@ -780,7 +785,7 @@ namespace blender
       if (sample_socket == nullptr)
       {
         r_link = nullptr;
-        return GLSLSamplerSourceKind::None;
+        return GLSLSamplerSourceKind::FallbackWhite;
       }
 
       r_link = find_used_direct_link(*sample_socket);
@@ -795,7 +800,7 @@ namespace blender
       }
       if (r_link == nullptr || r_link->fromnode == nullptr)
       {
-        return GLSLSamplerSourceKind::None;
+        return GLSLSamplerSourceKind::FallbackWhite;
       }
       if (r_link->fromnode->is_type("ShaderNodeImageToClosure"_ustr))
       {
@@ -992,7 +997,9 @@ namespace blender
     }
 
     static Map<std::string, GLSLSamplerSourceKind> resolve_sampler_source_kinds(
-      const bNode& node, const GLSLFunctionDefinition& function)
+      const bNode& node,
+      const GLSLFunctionDefinition& function,
+      const bool resolve_group_inputs_as_fallback = false)
     {
       Map<std::string, GLSLSamplerSourceKind> source_kinds;
       const bNode* logical_node = node.runtime->original ? node.runtime->original : &node;
@@ -1003,8 +1010,17 @@ namespace blender
           continue;
         }
         const bNodeLink* used_link = nullptr;
-        source_kinds.add_new(param.name,
-          resolve_sampler_source_kind(node, param, used_link, logical_node));
+        GLSLSamplerSourceKind source_kind = resolve_sampler_source_kind(
+          node, param, used_link, logical_node);
+        if (source_kind == GLSLSamplerSourceKind::GLSLFunction && used_link != nullptr)
+        {
+          source_kind = resolve_nested_sampler_source_kind(param, *used_link, used_link);
+        }
+        if (resolve_group_inputs_as_fallback && source_kind == GLSLSamplerSourceKind::GroupInput)
+        {
+          source_kind = GLSLSamplerSourceKind::FallbackWhite;
+        }
+        source_kinds.add_new(param.name, source_kind);
       }
       return source_kinds;
     }
@@ -1362,7 +1378,9 @@ namespace blender
         }
         const GLSLSamplerSourceKind source_kind = entry_source_kinds.lookup_default(
           param.name, GLSLSamplerSourceKind::None);
-        if (source_kind != GLSLSamplerSourceKind::ClosureOutput)
+        if (!ELEM(source_kind,
+                  GLSLSamplerSourceKind::ClosureOutput,
+                  GLSLSamplerSourceKind::FallbackWhite))
         {
           continue;
         }
@@ -1455,8 +1473,8 @@ namespace blender
               {
                 const StringRefNull root_type = root_param ? sampler_type_name(root_param->type) :
                                                             StringRefNull("sampler");
-                r_error = "Closure Output driven " + std::string(root_type.c_str()) +
-                  " parameter '" + *root_param_name + "' cannot be passed to " +
+                r_error = "Emulated " + std::string(root_type.c_str()) + " parameter '" +
+                  *root_param_name + "' cannot be passed to " +
                   std::string(sampler_type_name(callee_param.type).c_str()) + " parameter '" +
                   callee_param.name + "' in function '" + callee->name + "'";
                 return false;
@@ -1490,6 +1508,7 @@ namespace blender
       const Vector<GLSLToken>& tokens,
       const Span<GLSLFunctionDefinition> functions,
       const GLSLFunctionDefinition& entry_function,
+      const Map<std::string, GLSLSamplerSourceKind>& entry_source_kinds,
       const Span<GLSLClosureFunctionBindings> bindings_by_function,
       std::string& r_error)
     {
@@ -1567,12 +1586,25 @@ namespace blender
                 const GLSLFunctionParam* root_param = root_param_name ?
                   find_glsl_function_param_by_name(entry_function, *root_param_name) :
                   nullptr;
+                const GLSLSamplerSourceKind source_kind = root_param_name ?
+                  entry_source_kinds.lookup_default(*root_param_name,
+                                                    GLSLSamplerSourceKind::None) :
+                  GLSLSamplerSourceKind::None;
                 if (root_param != nullptr && glsl_boundary_type_is_sample3d(root_param->type) &&
+                    source_kind == GLSLSamplerSourceKind::ClosureOutput &&
                     (token.text != "texture" || argument_ranges.size() != 2))
                 {
                   r_error = "Closure Output driven sampler3D parameter '" + *root_param_name +
                     "' only supports texture(sampler3D, vec3); '" + token.text +
                     "' is not supported";
+                  return false;
+                }
+                if (root_param != nullptr && glsl_boundary_type_is_sample3d(root_param->type) &&
+                    source_kind == GLSLSamplerSourceKind::FallbackWhite &&
+                    token.text == "textureGather")
+                {
+                  r_error = "Fallback sampler3D parameter '" + *root_param_name +
+                    "' does not support textureGather";
                   return false;
                 }
               }
@@ -1620,8 +1652,7 @@ namespace blender
             continue;
           }
 
-          r_error = "Closure Output driven sampler identifier '" + token.text + "' in function '" +
-            function.name +
+          r_error = "Emulated sampler identifier '" + token.text + "' in function '" + function.name +
             "' must be used through texture-family sampling, direct function passthrough, or "
             "direct alias assignment";
           return false;
@@ -1941,7 +1972,7 @@ namespace blender
         return false;
       }
       if (!validate_closure_sampler_bindings(
-            tokens, all_functions, function, bindings_by_function, r_error))
+            tokens, all_functions, function, source_kinds, bindings_by_function, r_error))
       {
         return false;
       }
@@ -5722,6 +5753,22 @@ namespace blender
         "glsl_incoming");
     }
 
+    static bool is_glsl_matrix_access_identifier(const StringRef identifier)
+    {
+      return ELEM(identifier,
+        "glsl_view_matrix",
+        "glsl_view_matrix_inverse",
+        "glsl_projection_matrix",
+        "glsl_projection_matrix_inverse",
+        "glsl_view_projection_matrix",
+        "glsl_view_projection_matrix_inverse",
+        "glsl_model_matrix",
+        "glsl_model_matrix_inverse",
+        "glsl_model_view_matrix",
+        "glsl_model_view_projection_matrix",
+        "glsl_normal_matrix");
+    }
+
     static bool glsl_expression_uses_identifier(const StringRef expression,
       bool (*predicate)(const StringRef identifier))
     {
@@ -5742,6 +5789,19 @@ namespace blender
       {
         if (token.kind == GLSLToken::Kind::Identifier &&
             is_glsl_geometry_access_identifier(token.text))
+        {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    static bool glsl_source_uses_matrix_access(const Vector<GLSLToken>& tokens)
+    {
+      for (const GLSLToken& token : tokens)
+      {
+        if (token.kind == GLSLToken::Kind::Identifier &&
+            is_glsl_matrix_access_identifier(token.text))
         {
           return true;
         }
@@ -5804,6 +5864,20 @@ namespace blender
         if (param.meta.default_expression.has_value() &&
           glsl_expression_uses_identifier(*param.meta.default_expression,
             is_glsl_geometry_access_identifier))
+        {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    static bool glsl_function_meta_uses_matrix_access(const GLSLFunctionDefinition& function)
+    {
+      for (const GLSLFunctionParam& param : function.params)
+      {
+        if (param.meta.default_expression.has_value() &&
+          glsl_expression_uses_identifier(*param.meta.default_expression,
+            is_glsl_matrix_access_identifier))
         {
           return true;
         }
@@ -6873,10 +6947,115 @@ namespace blender
       return ss.str();
     }
 
+    static int count_glsl_call_arguments(const StringRef source,
+                                         const GLSLToken& open_paren,
+                                         const GLSLToken& closing_paren)
+    {
+      if (open_paren.source_end > closing_paren.source_start)
+      {
+        return -1;
+      }
+
+      const StringRef arguments = source.substr(open_paren.source_end,
+                                                closing_paren.source_start - open_paren.source_end);
+      int nested_depth = 0;
+      int argument_count = 0;
+      bool has_argument_content = false;
+      for (int64_t i = 0; i < arguments.size(); i++)
+      {
+        const char c = arguments[i];
+        if (ELEM(c, '"', '\''))
+        {
+          const char quote = c;
+          has_argument_content = true;
+          while (++i < arguments.size())
+          {
+            if (arguments[i] == '\\' && (i + 1) < arguments.size())
+            {
+              i++;
+              continue;
+            }
+            if (arguments[i] == quote)
+            {
+              break;
+            }
+          }
+          continue;
+        }
+        if (ELEM(c, '(', '[', '{'))
+        {
+          nested_depth++;
+          has_argument_content = true;
+          continue;
+        }
+        if (ELEM(c, ')', ']', '}'))
+        {
+          nested_depth--;
+          if (nested_depth < 0)
+          {
+            return -1;
+          }
+          has_argument_content = true;
+          continue;
+        }
+        if (c == ',' && nested_depth == 0)
+        {
+          if (!has_argument_content)
+          {
+            return -1;
+          }
+          argument_count++;
+          has_argument_content = false;
+          continue;
+        }
+        if (!std::isspace(uchar(c)))
+        {
+          has_argument_content = true;
+        }
+      }
+      if (nested_depth != 0 || (!has_argument_content && argument_count > 0))
+      {
+        return -1;
+      }
+      return has_argument_content ? argument_count + 1 : 0;
+    }
+
+    static bool fallback_sampler_call_has_valid_argument_count(const StringRef function_name,
+                                                               const int argument_count)
+    {
+      if (function_name == "texture")
+      {
+        return ELEM(argument_count, 2, 3);
+      }
+      if (function_name == "textureLod")
+      {
+        return argument_count == 3;
+      }
+      if (function_name == "textureGrad")
+      {
+        return argument_count == 4;
+      }
+      if (function_name == "textureSize")
+      {
+        return argument_count == 2;
+      }
+      if (function_name == "texelFetch")
+      {
+        return argument_count == 3;
+      }
+      if (function_name == "textureGather")
+      {
+        return ELEM(argument_count, 2, 3);
+      }
+      return false;
+    }
+
     static bool rewrite_glsl_source_for_closure_samplers(
       const StringRef source,
       const Vector<GLSLToken>& tokens,
       const Span<GLSLFunctionDefinition> functions,
+      const GLSLFunctionDefinition& entry_function,
+      const Map<std::string, GLSLSamplerSourceKind>& entry_source_kinds,
       const Span<GLSLClosureFunctionBindings> bindings_by_function,
       const Span<GLSLClosureSampleHelper> closure_helpers,
       std::string& r_rewritten_source,
@@ -6916,6 +7095,34 @@ namespace blender
           tokens, function, seed_bindings->bindings, local_bindings, r_error))
         {
           return false;
+        }
+
+        const Vector<GLSLTokenRange> statements = collect_function_statement_ranges(tokens,
+                                                                                     function);
+        for (const GLSLTokenRange& statement : statements)
+        {
+          std::string lhs_identifier;
+          std::string rhs_identifier;
+          int lhs_token_index = -1;
+          int rhs_token_index = -1;
+          if (!parse_direct_identifier_assignment_statement(tokens,
+                                                            statement,
+                                                            lhs_identifier,
+                                                            lhs_token_index,
+                                                            rhs_identifier,
+                                                            rhs_token_index) ||
+              !local_bindings.contains(lhs_identifier) ||
+              !local_bindings.contains(rhs_identifier) || lhs_token_index <= statement.start)
+          {
+            continue;
+          }
+          const GLSLToken& declared_type = tokens[lhs_token_index - 1];
+          if (declared_type.kind == GLSLToken::Kind::Identifier &&
+              ELEM(declared_type.text, "sampler2D", "sampler3D"))
+          {
+            replacements.append(
+              {declared_type.source_start, declared_type.source_end, "float"});
+          }
         }
 
         for (int i = function.body_token_start; i <= function.body_token_end; i++)
@@ -6963,9 +7170,94 @@ namespace blender
             *root_param_name);
           if (helper == nullptr)
           {
-            r_error = "Could not resolve a Closure Output helper for sampler parameter '" +
+            r_error = "Could not resolve an emulated sampler helper for parameter '" +
               *root_param_name + "'";
             return false;
+          }
+
+          const GLSLSamplerSourceKind source_kind = entry_source_kinds.lookup_default(
+            *root_param_name, GLSLSamplerSourceKind::None);
+          if (source_kind == GLSLSamplerSourceKind::FallbackWhite)
+          {
+            const GLSLFunctionParam* root_param = find_glsl_function_param_by_name(
+              entry_function, *root_param_name);
+            if (root_param == nullptr)
+            {
+              r_error = "Could not resolve fallback sampler parameter '" + *root_param_name + "'";
+              return false;
+            }
+
+            const bool is_sampler3d = glsl_boundary_type_is_sample3d(root_param->type);
+            const int argument_count = count_glsl_call_arguments(
+              source, tokens[i + 1], tokens[closing_paren_index]);
+            if (!fallback_sampler_call_has_valid_argument_count(token.text, argument_count))
+            {
+              r_error = "Fallback " + std::string(sampler_type_name(root_param->type).c_str()) +
+                " parameter '" + *root_param_name + "' cannot rewrite " + token.text +
+                "(...) with " + std::to_string(std::max(argument_count, 0)) + " arguments";
+              return false;
+            }
+            std::string replacement_text;
+            if (token.text == "texture" || token.text == "textureLod" ||
+                token.text == "textureGrad")
+            {
+              if (argument_ranges.size() < 2)
+              {
+                r_error = "Fallback " + std::string(sampler_type_name(root_param->type).c_str()) +
+                  " parameter '" + *root_param_name + "' could not rewrite " + token.text +
+                  "(...)";
+                return false;
+              }
+              const std::string coordinate_expression = trim_source_range(
+                source,
+                tokens[argument_ranges[1].start].source_start,
+                tokens[argument_ranges[1].end].source_end);
+              replacement_text = helper->helper_name + "(" + coordinate_expression + ")";
+            }
+            else if (token.text == "textureSize")
+            {
+              replacement_text = is_sampler3d ? "ivec3(1)" : "ivec2(1)";
+            }
+            else if (token.text == "texelFetch")
+            {
+              if (argument_ranges.size() < 2)
+              {
+                r_error = "Fallback " + std::string(sampler_type_name(root_param->type).c_str()) +
+                  " parameter '" + *root_param_name + "' could not rewrite texelFetch(...)";
+                return false;
+              }
+              const std::string coordinate_expression = trim_source_range(
+                source,
+                tokens[argument_ranges[1].start].source_start,
+                tokens[argument_ranges[1].end].source_end);
+              const char* coordinate_type = is_sampler3d ? "vec3" : "vec2";
+              replacement_text = helper->helper_name + "(" + coordinate_type + "(" +
+                coordinate_expression + "))";
+            }
+            else if (token.text == "textureGather")
+            {
+              if (is_sampler3d)
+              {
+                r_error = "Fallback sampler3D parameter '" + *root_param_name +
+                  "' does not support textureGather";
+                return false;
+              }
+              if (argument_ranges.size() < 2)
+              {
+                r_error = "Fallback sampler2D parameter '" + *root_param_name +
+                  "' could not rewrite textureGather(...)";
+                return false;
+              }
+              const std::string coordinate_expression = trim_source_range(
+                source,
+                tokens[argument_ranges[1].start].source_start,
+                tokens[argument_ranges[1].end].source_end);
+              replacement_text = helper->helper_name + "(" + coordinate_expression + ")";
+            }
+
+            replacements.append(
+              {token.source_start, tokens[closing_paren_index].source_end, replacement_text});
+            continue;
           }
 
           r_downgrade_info.root_param_names.add(*root_param_name);
@@ -7469,6 +7761,10 @@ namespace blender
       std::stringstream ss;
       for (const GLSLClosureSampleHelper& helper : closure_helpers)
       {
+        if (helper.is_fallback_white)
+        {
+          continue;
+        }
         switch (helper.return_type)
         {
         case GPU_FLOAT:
@@ -7486,6 +7782,10 @@ namespace blender
       ss << "\n";
       for (const GLSLClosureSampleHelper& helper : closure_helpers)
       {
+        if (helper.is_fallback_white)
+        {
+          continue;
+        }
         const char* coordinate_type = helper.coordinate_type == GPU_VEC3 ? "vec3" : "vec2";
         ss << coordinate_type << " " << helper.uv_global_name << " = " << coordinate_type
            << "(0.0);\n";
@@ -7497,6 +7797,12 @@ namespace blender
         const char* coordinate_name = helper.coordinate_type == GPU_VEC3 ? "coord" : "uv";
         ss << "vec4 " << helper.helper_name << "(" << coordinate_type << " " << coordinate_name
            << ")\n{\n";
+        if (helper.is_fallback_white)
+        {
+          ss << "  return vec4(1.0);\n";
+          ss << "}\n\n";
+          continue;
+        }
         ss << "  " << helper.uv_global_name << " = " << coordinate_name << ";\n";
         switch (helper.return_type)
         {
@@ -7558,6 +7864,126 @@ vec3 glsl_true_normal()
 vec3 glsl_incoming()
 {
   return vec3(0.0);
+}
+#endif
+
+)GLSL";
+    }
+
+    static std::string build_glsl_matrix_helper_block()
+    {
+      return R"GLSL(
+/* Draw-view transform helpers for GLSL Function.
+ * View/projection use the current draw ViewMatrices (includes overscan / film crop / TAA jitter).
+ * Enabled in vertex+fragment (vertex required for true Displacement).
+ * Model helpers are only live on object surface-like paths; Filter (MAT_FILTER) stubs them. */
+
+#if (defined(GPU_VERTEX_SHADER) || defined(GPU_FRAGMENT_SHADER)) && \
+    (defined(MAT_DEFERRED) || defined(MAT_FORWARD) || defined(MAT_DEPTH) || \
+     defined(MAT_SHADOW) || defined(NPR_SHADER) || defined(MAT_FILTER))
+mat4 glsl_view_matrix()
+{
+  return view_matrices_get().viewmat;
+}
+mat4 glsl_view_matrix_inverse()
+{
+  return view_matrices_get().viewinv;
+}
+mat4 glsl_projection_matrix()
+{
+  return view_matrices_get().winmat;
+}
+mat4 glsl_projection_matrix_inverse()
+{
+  return view_matrices_get().wininv;
+}
+mat4 glsl_view_projection_matrix()
+{
+  const ViewMatrices view = view_matrices_get();
+  return view.winmat * view.viewmat;
+}
+mat4 glsl_view_projection_matrix_inverse()
+{
+  const ViewMatrices view = view_matrices_get();
+  return view.viewinv * view.wininv;
+}
+#else
+mat4 glsl_view_matrix()
+{
+  return mat4(1.0);
+}
+mat4 glsl_view_matrix_inverse()
+{
+  return mat4(1.0);
+}
+mat4 glsl_projection_matrix()
+{
+  return mat4(1.0);
+}
+mat4 glsl_projection_matrix_inverse()
+{
+  return mat4(1.0);
+}
+mat4 glsl_view_projection_matrix()
+{
+  return mat4(1.0);
+}
+mat4 glsl_view_projection_matrix_inverse()
+{
+  return mat4(1.0);
+}
+#endif
+
+#if (defined(GPU_VERTEX_SHADER) || defined(GPU_FRAGMENT_SHADER)) && \
+    (defined(MAT_DEFERRED) || defined(MAT_FORWARD) || defined(MAT_DEPTH) || \
+     defined(MAT_SHADOW) || defined(NPR_SHADER)) && !defined(MAT_FILTER)
+mat4 glsl_model_matrix()
+{
+  return object_matrices_get().model;
+}
+mat4 glsl_model_matrix_inverse()
+{
+  return object_matrices_get().model_inverse;
+}
+mat4 glsl_model_view_matrix()
+{
+  const ViewMatrices view = view_matrices_get();
+  const ObjectMatrices obj = object_matrices_get();
+  return view.viewmat * obj.model;
+}
+mat4 glsl_model_view_projection_matrix()
+{
+  const ViewMatrices view = view_matrices_get();
+  const ObjectMatrices obj = object_matrices_get();
+  return view.winmat * (view.viewmat * obj.model);
+}
+mat3 glsl_normal_matrix()
+{
+  /* Match normal_transform_object_to_world: N' = N * mat3(model_inverse)
+   * for column vectors that is N' = transpose(mat3(model_inverse)) * N. */
+  const ObjectMatrices obj = object_matrices_get();
+  return transpose(to_float3x3(obj.model_inverse));
+}
+#else
+mat4 glsl_model_matrix()
+{
+  return mat4(1.0);
+}
+mat4 glsl_model_matrix_inverse()
+{
+  return mat4(1.0);
+}
+mat4 glsl_model_view_matrix()
+{
+  return mat4(1.0);
+}
+mat4 glsl_model_view_projection_matrix()
+{
+  return mat4(1.0);
+}
+mat3 glsl_normal_matrix()
+{
+  return mat3(1.0);
 }
 #endif
 
@@ -7651,7 +8077,9 @@ vec3 glsl_ambient_lighting()
       {
         return param.type_name;
       }
-      if (sampler_source_kind == GLSLSamplerSourceKind::ClosureOutput)
+      if (ELEM(sampler_source_kind,
+               GLSLSamplerSourceKind::ClosureOutput,
+               GLSLSamplerSourceKind::FallbackWhite))
       {
         return StringRefNull("float");
       }
@@ -8241,7 +8669,7 @@ vec3 glsl_ambient_lighting()
       const std::string stripped_source = strip_glsl_comments(parse_result.source);
       const Vector<GLSLToken> tokens = tokenize_glsl_source(stripped_source);
       const Map<std::string, GLSLSamplerSourceKind> source_kinds = resolve_sampler_source_kinds(
-        node, parse_result.function);
+        node, parse_result.function, true);
       Vector<GLSLFunctionDefinition> all_functions;
       if (!find_all_top_level_glsl_function_definitions(
         tokens, parse_result.function_names, all_functions, r_error))
@@ -8255,12 +8683,24 @@ vec3 glsl_ambient_lighting()
       {
         return false;
       }
+      if (!validate_closure_sampler_bindings(tokens,
+                                             all_functions,
+                                             parse_result.function,
+                                             source_kinds,
+                                             bindings_by_function,
+                                             r_error))
+      {
+        return false;
+      }
 
       Vector<GLSLClosureSampleHelper> closure_helpers;
       for (const GLSLFunctionParam& param : parse_result.function.params)
       {
         const GLSLSamplerSourceKind* source_kind = source_kinds.lookup_ptr(param.name);
-        if (source_kind == nullptr || *source_kind != GLSLSamplerSourceKind::ClosureOutput)
+        if (source_kind == nullptr ||
+            !ELEM(*source_kind,
+                  GLSLSamplerSourceKind::ClosureOutput,
+                  GLSLSamplerSourceKind::FallbackWhite))
         {
           continue;
         }
@@ -8268,10 +8708,22 @@ vec3 glsl_ambient_lighting()
         GLSLClosureSampleHelper helper;
         const std::string sampler_dimension = glsl_boundary_type_is_sample3d(param.type) ? "3d" :
                                                                                         "2d";
-        const std::string helper_name = "glsl_sampler" + sampler_dimension + "_" +
+        const char* helper_prefix = *source_kind == GLSLSamplerSourceKind::FallbackWhite ?
+          "glsl_sampler_fallback" :
+          "glsl_sampler";
+        const std::string helper_name = helper_prefix + sampler_dimension + "_" +
           std::to_string(node.identifier) + "_" + param.identifier;
         const std::string uv_global_name = helper_name +
           (glsl_boundary_type_is_sample3d(param.type) ? "_coord" : "_uv");
+        if (*source_kind == GLSLSamplerSourceKind::FallbackWhite)
+        {
+          helper.param_name = param.name;
+          helper.helper_name = helper_name;
+          helper.coordinate_type = glsl_boundary_type_is_sample3d(param.type) ? GPU_VEC3 : GPU_VEC2;
+          helper.is_fallback_white = true;
+          closure_helpers.append(std::move(helper));
+          continue;
+        }
         if (!build_closure_sample_helper(
           mat, node, param, parse_result.source_filename, helper_name, uv_global_name, helper, r_error))
         {
@@ -8328,6 +8780,8 @@ vec3 glsl_ambient_lighting()
         stripped_source,
         tokens,
         all_functions,
+        parse_result.function,
+        source_kinds,
         bindings_by_function,
         closure_helpers,
         sampler_rewritten_source,
@@ -8414,6 +8868,7 @@ vec3 glsl_ambient_lighting()
       result.uses_geometry_access = glsl_source_uses_geometry_access(tokens);
       result.uses_lightprobe_access = glsl_source_uses_lightprobe_access(tokens);
       result.uses_eevee_light_access = glsl_source_uses_eevee_light_access(tokens);
+      result.uses_matrix_access = glsl_source_uses_matrix_access(tokens);
       if (!validate_no_top_level_conditional_glsl_code(stripped_source, tokens, result.error))
       {
         return result;
@@ -8483,6 +8938,7 @@ vec3 glsl_ambient_lighting()
       result.uses_geometry_access |= glsl_function_meta_uses_geometry_access(result.function);
       result.uses_lightprobe_access |= glsl_function_meta_uses_lightprobe_access(result.function);
       result.uses_eevee_light_access |= glsl_function_meta_uses_eevee_light_access(result.function);
+      result.uses_matrix_access |= glsl_function_meta_uses_matrix_access(result.function);
       if (!validate_generated_glsl_function_identifiers(result.function, result.error))
       {
         return result;
@@ -9683,7 +10139,13 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
           {
             source_kind = resolve_nested_sampler_source_kind(param, *sampler_link, sampler_link);
           }
-          if (source_kind == GLSLSamplerSourceKind::ClosureOutput)
+          if (source_kind == GLSLSamplerSourceKind::GroupInput)
+          {
+            source_kind = GLSLSamplerSourceKind::FallbackWhite;
+          }
+          if (ELEM(source_kind,
+                   GLSLSamplerSourceKind::ClosureOutput,
+                   GLSLSamplerSourceKind::FallbackWhite))
           {
             stack->type = GPU_FLOAT;
             stack->link = GPU_constant(zero_value);
@@ -10011,6 +10473,12 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
         GPU_material_generated_source_add(
           mat, GPU_GLSL_FUNCTION_GEOMETRY_HELPER_FILENAME, {}, geometry_helper_source.c_str());
       }
+      if (parse_result.uses_matrix_access)
+      {
+        const std::string matrix_helper_source = build_glsl_matrix_helper_block();
+        GPU_material_generated_source_add(
+          mat, GPU_GLSL_FUNCTION_MATRIX_HELPER_FILENAME, {}, matrix_helper_source.c_str());
+      }
       if (parse_result.uses_lightprobe_access)
       {
         const std::string lightprobe_helper_source = build_glsl_lightprobe_helper_block();
@@ -10041,6 +10509,11 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
       {
         dependency_flags = eGPUCustomNodeDependencyFlag(
           dependency_flags | GPU_CUSTOM_NODE_DEPENDENCY_GLSL_GEOMETRY_HELPERS);
+      }
+      if (parse_result.uses_matrix_access)
+      {
+        dependency_flags = eGPUCustomNodeDependencyFlag(
+          dependency_flags | GPU_CUSTOM_NODE_DEPENDENCY_GLSL_MATRIX_HELPERS);
       }
       if (parse_result.uses_lightprobe_access)
       {

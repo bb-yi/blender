@@ -70,6 +70,7 @@ struct ShadowDebug {
   [[storage(6, read)]] uint (&tiles_buf)[];
   [[push_constant]] int debug_mode;
   [[push_constant]] int debug_tilemap_index;
+  [[push_constant]] float shadow_lod_opacity;
 
   ShadowSamplingTile shadow_tile_data_get(usampler2D tilemaps_tx, ShadowCoordinates coord) const
   {
@@ -129,6 +130,51 @@ struct ShadowDebug {
                                                      SHADOW_TILEMAP_LOD));
   }
 
+  int debug_shadow_effective_lod(LightData light,
+                                 int tilemap_index,
+                                 ShadowSamplingTile tile) const
+  {
+    if (is_sun_light(light.type)) {
+      int tilemap_lod = light.sun().clipmap_lod_min + tilemap_index - light.tilemap_index;
+      return tilemap_lod + int(tile.lod);
+    }
+    return int(tile.lod);
+  }
+
+  float3 debug_shadow_lod_palette(int lod) const
+  {
+    switch (clamp(lod, 0, 7)) {
+      case 0:
+        return float3(0.0f, 0.35f, 1.0f);
+      case 1:
+        return float3(0.0f, 0.8f, 1.0f);
+      case 2:
+        return float3(0.0f, 1.0f, 0.55f);
+      case 3:
+        return float3(0.45f, 1.0f, 0.0f);
+      case 4:
+        return float3(1.0f, 1.0f, 0.0f);
+      case 5:
+        return float3(1.0f, 0.65f, 0.0f);
+      case 6:
+        return float3(1.0f, 0.2f, 0.0f);
+      default:
+        return float3(0.65f, 0.0f, 0.0f);
+    }
+  }
+
+  float3 debug_shadow_lod_color(LightData light,
+                                int tilemap_index,
+                                ShadowSamplingTile tile) const
+  {
+    if (!tile.is_valid) {
+      return float3(1.0f, 0.0f, 1.0f);
+    }
+
+    int lod = debug_shadow_effective_lod(light, tilemap_index, tile);
+    return debug_shadow_lod_palette(lod);
+  }
+
   ShadowCoordinates debug_coord_get(float3 P, LightData light) const
   {
     if (is_sun_light(light.type)) {
@@ -175,6 +221,384 @@ struct ShadowDebugOutput {
   float4 color_mul;
   float depth;
 };
+
+ShadowDebugOutput debug_shadow_color_output(float3 color)
+{
+  return {.valid = true,
+          .color_add = float4(color, 0.0f),
+          .color_mul = float4(0.0f),
+          .depth = 1.0f};
+}
+
+bool debug_digit_glyph(int digit, int2 p)
+{
+  if (any(lessThan(p, int2(0))) || any(greaterThanEqual(p, int2(5, 7)))) {
+    return false;
+  }
+
+  int mask = 0;
+  switch (digit) {
+    case 0:
+      mask = 0x3f;
+      break;
+    case 1:
+      mask = 0x06;
+      break;
+    case 2:
+      mask = 0x5b;
+      break;
+    case 3:
+      mask = 0x4f;
+      break;
+    case 4:
+      mask = 0x66;
+      break;
+    case 5:
+      mask = 0x6d;
+      break;
+    case 6:
+      mask = 0x7d;
+      break;
+    case 7:
+      mask = 0x07;
+      break;
+    case 8:
+      mask = 0x7f;
+      break;
+    case 9:
+      mask = 0x6f;
+      break;
+  }
+
+  bool segment_a = (p.y == 6) && (p.x > 0) && (p.x < 4);
+  bool segment_b = (p.x == 4) && (p.y > 3) && (p.y < 6);
+  bool segment_c = (p.x == 4) && (p.y > 0) && (p.y < 3);
+  bool segment_d = (p.y == 0) && (p.x > 0) && (p.x < 4);
+  bool segment_e = (p.x == 0) && (p.y > 0) && (p.y < 3);
+  bool segment_f = (p.x == 0) && (p.y > 3) && (p.y < 6);
+  bool segment_g = (p.y == 3) && (p.x > 0) && (p.x < 4);
+  return (((mask & 0x01) != 0) && segment_a) || (((mask & 0x02) != 0) && segment_b) ||
+         (((mask & 0x04) != 0) && segment_c) || (((mask & 0x08) != 0) && segment_d) ||
+         (((mask & 0x10) != 0) && segment_e) || (((mask & 0x20) != 0) && segment_f) ||
+         (((mask & 0x40) != 0) && segment_g);
+}
+
+bool debug_letter_glyph(int letter, int2 p)
+{
+  if (any(lessThan(p, int2(0))) || any(greaterThanEqual(p, int2(5, 7)))) {
+    return false;
+  }
+
+  switch (letter) {
+    case 0: /* L */
+      return (p.x == 0) || (p.y == 0);
+    case 1: /* D */
+      return (p.x == 0) || ((p.y == 0 || p.y == 6) && p.x < 4) ||
+             (p.x == 4 && p.y > 0 && p.y < 6);
+    case 2: /* N */
+      return (p.x == 0) || (p.x == 4) || (p.x == (p.y * 4) / 6);
+    case 3: /* F */
+      return (p.x == 0) || (p.y == 6) || (p.y == 3 && p.x < 4);
+    case 4: /* X */
+      return (p.x == (p.y * 4) / 6) || (p.x == 4 - (p.y * 4) / 6);
+    case 5: /* Y */
+      return ((p.y >= 3) &&
+              ((p.x == (p.y * 4) / 6) || (p.x == 4 - (p.y * 4) / 6))) ||
+             ((p.y < 3) && p.x == 2);
+    case 6: /* Z */
+      return (p.y == 0) || (p.y == 6) || (p.x == (p.y * 4) / 6);
+    case 7: /* O */
+      return (p.x == 0) || (p.x == 4) || (p.y == 0) || (p.y == 6);
+    case 8: /* E */
+      return (p.x == 0) || (p.y == 0) || (p.y == 3) || (p.y == 6);
+    case 9: /* P */
+      return (p.x == 0) || (p.y == 6) || (p.y == 3) ||
+             (p.x == 4 && p.y > 3 && p.y < 6);
+    case 10: /* T */
+      return (p.y == 6) || (p.x == 2);
+    case 11: /* H */
+      return (p.x == 0) || (p.x == 4) || (p.y == 3);
+  }
+  return false;
+}
+
+bool debug_sign_glyph(bool is_positive, int2 p)
+{
+  if (any(lessThan(p, int2(0))) || any(greaterThanEqual(p, int2(5, 7)))) {
+    return false;
+  }
+  return (p.y == 3) || (is_positive && p.x == 2 && p.y > 0 && p.y < 6);
+}
+
+bool debug_direction_label(int face, int2 p, int width)
+{
+  int start = (width - 11) / 2;
+  bool is_positive = (face == int(X_POS)) || (face == int(Y_POS)) || (face == int(Z_POS));
+  int axis_letter = (face == int(X_POS) || face == int(X_NEG)) ? 4 :
+                    (face == int(Y_POS) || face == int(Y_NEG)) ? 5 :
+                                                                  6;
+  return debug_sign_glyph(is_positive, p - int2(start, 2)) ||
+         debug_letter_glyph(axis_letter, p - int2(start + 6, 2));
+}
+
+int debug_direction_face_from_slot(int slot)
+{
+  switch (slot) {
+    case 0:
+      return int(X_POS);
+    case 1:
+      return int(X_NEG);
+    case 2:
+      return int(Y_POS);
+    case 3:
+      return int(Y_NEG);
+    case 4:
+      return int(Z_POS);
+    default:
+      return int(Z_NEG);
+  }
+}
+
+bool debug_sun_level_label(int level, int2 p, int width)
+{
+  int value = abs(level);
+  bool has_sign = level < 0;
+  bool has_tens = value >= 10;
+  int character_count = 2 + int(has_sign) + int(has_tens);
+  int cursor = (width - (character_count * 6 - 1)) / 2;
+
+  bool glyph = debug_letter_glyph(0, p - int2(cursor, 2));
+  cursor += 6;
+  if (has_sign) {
+    glyph = glyph || debug_sign_glyph(false, p - int2(cursor, 2));
+    cursor += 6;
+  }
+  if (has_tens) {
+    glyph = glyph || debug_digit_glyph((value / 10) % 10, p - int2(cursor, 2));
+    cursor += 6;
+  }
+  return glyph || debug_digit_glyph(value % 10, p - int2(cursor, 2));
+}
+
+bool debug_number_label(int value, int2 p, int width)
+{
+  int digit_count = (value >= 1000) ? 4 : (value >= 100) ? 3 : (value >= 10) ? 2 : 1;
+  int cursor = (width - (digit_count * 6 - 1)) / 2;
+  int divisor = (digit_count == 4) ? 1000 : (digit_count == 3) ? 100 :
+                                               (digit_count == 2) ? 10 :
+                                                                    1;
+  bool glyph = false;
+  for (int i = 0; i < 4; i++) {
+    if (i >= digit_count) {
+      break;
+    }
+    glyph = glyph || debug_digit_glyph((value / divisor) % 10, p - int2(cursor, 0));
+    cursor += 6;
+    divisor = max(divisor / 10, 1);
+  }
+  return glyph;
+}
+
+bool debug_lod_legend_label(int lod, int2 p, int width)
+{
+  int start = (width - 11) / 2;
+  return debug_letter_glyph(0, p - int2(start, 0)) ||
+         debug_digit_glyph(lod, p - int2(start + 6, 0));
+}
+
+bool debug_row_label(bool is_depth_row, int2 p, int width)
+{
+  if (!is_depth_row) {
+    int start = (width - 17) / 2;
+    return debug_letter_glyph(0, p - int2(start, 0)) ||
+           debug_letter_glyph(7, p - int2(start + 6, 0)) ||
+           debug_letter_glyph(1, p - int2(start + 12, 0));
+  }
+
+  int start = (width - 29) / 2;
+  return debug_letter_glyph(1, p - int2(start, 0)) ||
+         debug_letter_glyph(8, p - int2(start + 6, 0)) ||
+         debug_letter_glyph(9, p - int2(start + 12, 0)) ||
+         debug_letter_glyph(10, p - int2(start + 18, 0)) ||
+         debug_letter_glyph(11, p - int2(start + 24, 0));
+}
+
+ShadowDebugOutput debug_shadow_lod_legend([[resource_table]] const ShadowDebug &srt,
+                                         int2 texel,
+                                         int viewport_width)
+{
+  constexpr int legend_y = 2;
+  constexpr int legend_height = 24;
+  constexpr int swatch_width = 28;
+  constexpr int swatch_count = 9;
+  constexpr int depth_width = 96;
+  constexpr int right_margin = 14;
+  constexpr int legend_width = swatch_width * swatch_count + 8 + depth_width;
+  int legend_x = max(viewport_width - right_margin - legend_width, 0);
+
+  if (texel.y < legend_y || texel.y >= legend_y + legend_height) {
+    return {false, float4(0.0f), float4(1.0f), 1.0f};
+  }
+
+  int local_x = texel.x - legend_x;
+  if (local_x >= 0 && local_x < swatch_width * swatch_count) {
+    int swatch = local_x / swatch_width;
+    int2 p = int2(local_x % swatch_width, texel.y - legend_y);
+    bool border = (p.x == 0) || (p.x == swatch_width - 1) || (p.y == 0) ||
+                  (p.y == legend_height - 1);
+    float3 color = (swatch == 8) ? float3(1.0f, 0.0f, 1.0f) :
+                                   srt.debug_shadow_lod_palette(swatch);
+    if (border) {
+      color = float3(0.08f);
+    }
+    else {
+      bool glyph = false;
+      if (swatch == 8) {
+        glyph = debug_letter_glyph(4, p - int2((swatch_width - 5) / 2, 8));
+      }
+      else {
+        int resolution = SHADOW_MAP_MAX_RES >> swatch;
+        glyph = debug_lod_legend_label(swatch, p - int2(0, 14), swatch_width) ||
+                debug_number_label(resolution, p - int2(0, 3), swatch_width);
+      }
+      if (glyph) {
+        bool use_light_text = (swatch <= 2) || (swatch >= 6);
+        color = use_light_text ? float3(1.0f) : float3(0.0f);
+      }
+    }
+    return debug_shadow_color_output(color);
+  }
+
+  int depth_x = legend_x + swatch_width * swatch_count + 8;
+  int depth_local_x = texel.x - depth_x;
+  if (depth_local_x >= 0 && depth_local_x < depth_width) {
+    int2 p = int2(depth_local_x, texel.y - legend_y);
+    bool border = (p.x == 0) || (p.x == depth_width - 1) || (p.y == 0) ||
+                  (p.y == legend_height - 1);
+    float value = float(depth_local_x) / float(depth_width - 1);
+    float3 color = border ? float3(0.08f) : float3(value);
+    if (!border) {
+      if (debug_letter_glyph(2, p - int2(4, 8))) {
+        color = float3(1.0f);
+      }
+      if (debug_letter_glyph(3, p - int2(depth_width - 9, 8))) {
+        color = float3(0.0f);
+      }
+    }
+    return debug_shadow_color_output(color);
+  }
+
+  return {false, float4(0.0f), float4(1.0f), 1.0f};
+}
+
+ShadowDebugOutput debug_shadow_lod_panels([[resource_table]] const ShadowDebug &srt,
+                                         LightData light,
+                                         int2 texel,
+                                         int viewport_width)
+{
+  [[resource_table]] const ShadowRenderData &srd = srt.shadow_data;
+
+  ShadowDebugOutput legend = debug_shadow_lod_legend(srt, texel, viewport_width);
+  if (legend.valid) {
+    return legend;
+  }
+
+  constexpr int label_width = 36;
+  constexpr int right_margin = 14;
+  constexpr int legend_height = 30;
+  constexpr int label_height = 11;
+  constexpr int row_gap = 2;
+  int slot_count = is_sun_light(light.type) ?
+                       light.sun().clipmap_lod_max - light.sun().clipmap_lod_min + 1 :
+                       6;
+  int panel_scale = clamp((viewport_width - label_width - right_margin) /
+                              max(slot_count * SHADOW_TILEMAP_RES, 1),
+                          1,
+                          3);
+  int panel_size = SHADOW_TILEMAP_RES * panel_scale;
+  int panel_origin_x = max(viewport_width - right_margin - label_width - slot_count * panel_size,
+                           0);
+  int panel_x = panel_origin_x + label_width;
+  int depth_y = legend_height;
+  int lod_y = depth_y + panel_size + label_height + row_gap;
+
+  bool is_depth_row = texel.y >= depth_y && texel.y < depth_y + panel_size + label_height;
+  bool is_lod_row = texel.y >= lod_y && texel.y < lod_y + panel_size + label_height;
+  if (!is_depth_row && !is_lod_row) {
+    return {false, float4(0.0f), float4(1.0f), 1.0f};
+  }
+
+  int row_y = is_depth_row ? depth_y : lod_y;
+  int local_y = texel.y - row_y;
+  if (texel.x < panel_origin_x) {
+    return {false, float4(0.0f), float4(1.0f), 1.0f};
+  }
+  if (texel.x >= panel_origin_x && texel.x < panel_x) {
+    if (local_y < panel_size) {
+      return {false, float4(0.0f), float4(1.0f), 1.0f};
+    }
+    bool glyph = debug_row_label(is_depth_row,
+                                 int2(texel.x - panel_origin_x, local_y - panel_size - 2),
+                                 label_width);
+    return debug_shadow_color_output(glyph ? float3(1.0f) : float3(0.03f));
+  }
+
+  int slot_x = texel.x - panel_x;
+  int slot = slot_x / panel_size;
+  if (slot < 0 || slot >= slot_count) {
+    return {false, float4(0.0f), float4(1.0f), 1.0f};
+  }
+
+  int2 panel_p = int2(slot_x % panel_size, local_y);
+  int face = is_sun_light(light.type) ? slot : debug_direction_face_from_slot(slot);
+  int active_count = is_sun_light(light.type) ? slot_count : light.local().tilemaps_count;
+  bool slot_active = face < active_count;
+  if (local_y >= panel_size) {
+    float3 color = float3(0.03f);
+    bool glyph = is_sun_light(light.type) ?
+                     debug_sun_level_label(light.sun().clipmap_lod_min + slot,
+                                           panel_p - int2(0, panel_size),
+                                           panel_size) :
+                     debug_direction_label(face, panel_p - int2(0, panel_size), panel_size);
+    if (glyph) {
+      color = slot_active ? float3(1.0f) : float3(0.35f);
+    }
+    return debug_shadow_color_output(color);
+  }
+
+  bool border = (panel_p.x == 0) || (panel_p.x == panel_size - 1) || (panel_p.y == 0) ||
+                (panel_p.y == panel_size - 1);
+  if (border) {
+    return debug_shadow_color_output(float3(0.25f));
+  }
+  if (!slot_active) {
+    return debug_shadow_color_output(float3(0.03f));
+  }
+
+  int tilemap_index = light.tilemap_index + face;
+  if (!is_depth_row) {
+    uint2 tile_co = uint2(panel_p / panel_scale);
+    ShadowSamplingTile tile = shadow_tile_load(srd.shadow_tilemaps_tx, tile_co, tilemap_index);
+    return debug_shadow_color_output(srt.debug_shadow_lod_color(light, tilemap_index, tile));
+  }
+
+  float2 tilemap_uv = (float2(panel_p) + 0.5f) / float(panel_size);
+  ShadowCoordinates coord = shadow_coordinate_from_uvs(tilemap_index, tilemap_uv);
+  ShadowSamplingTile tile = shadow_tile_load(
+      srd.shadow_tilemaps_tx, coord.tilemap_tile, coord.tilemap_index);
+  if (!tile.is_valid) {
+    bool checker = (((panel_p.x / 6) + (panel_p.y / 6)) & 1) != 0;
+    return debug_shadow_color_output(checker ? float3(0.18f) : float3(0.07f));
+  }
+
+  float shadow_depth = srd.read_depth(coord);
+  float clip_near = orderedIntBitsToFloat(light.clip_near);
+  float clip_far = orderedIntBitsToFloat(light.clip_far);
+  float clip_range = max(clip_far - clip_near, 1e-8f);
+  float depth_normalized = is_sun_light(light.type) ? shadow_depth / clip_range :
+                                                      (shadow_depth - clip_near) / clip_range;
+  return debug_shadow_color_output(float3(saturate(depth_normalized)));
+}
 
 ShadowDebugOutput debug_tilemaps([[resource_table]] const ShadowDebug &srt,
                                  float3 /*P*/,
@@ -319,6 +743,27 @@ ShadowDebugOutput debug_random_tilemap_color([[resource_table]] const ShadowDebu
           .depth = default_depth};
 }
 
+ShadowDebugOutput debug_shadow_lod([[resource_table]] const ShadowDebug &srt,
+                                   float3 P,
+                                   LightData light)
+{
+  ShadowCoordinates coord = srt.debug_coord_get(P, light);
+  ShadowSamplingTile tile = srt.debug_tile_get(P, light);
+  if (!tile.is_valid) {
+    float opacity = srt.shadow_lod_opacity;
+    return {.valid = true,
+            .color_add = float4(float3(1.0f, 0.0f, 1.0f) * opacity, 0.0f),
+            .color_mul = float4(1.0f - opacity),
+            .depth = default_depth};
+  }
+  float3 color = srt.debug_shadow_lod_color(light, coord.tilemap_index, tile);
+  float opacity = srt.shadow_lod_opacity;
+  return {.valid = true,
+          .color_add = float4(color * opacity, 0.0f),
+          .color_mul = float4(1.0f - opacity),
+          .depth = default_depth};
+}
+
 [[fragment]]
 void debug_shadow_frag([[resource_table]] ShadowDebug &srt,
                        [[resource_table]] const draw::View &views,
@@ -344,7 +789,10 @@ void debug_shadow_frag([[resource_table]] ShadowDebug &srt,
 
   ShadowDebugOutput result;
   result.valid = false;
-  if (mode != DEBUG_SHADOW_ATOMIC_COST) {
+  if (mode == DEBUG_SHADOW_LOD) {
+    result = debug_shadow_lod_panels(srt, light, int2(frag_co.xy), textureSize(hiz.hiz_tx, 0).x);
+  }
+  else if (mode != DEBUG_SHADOW_ATOMIC_COST) {
     result = debug_tilemaps(srt, P, light, int2(frag_co.xy), do_debug_sample_tile);
   }
 
@@ -364,6 +812,9 @@ void debug_shadow_frag([[resource_table]] ShadowDebug &srt,
         break;
       case DEBUG_SHADOW_ATOMIC_COST:
         result = debug_atomic_cost(srt, P, light);
+        break;
+      case DEBUG_SHADOW_LOD:
+        result = debug_shadow_lod(srt, P, light);
         break;
       default:
         break;

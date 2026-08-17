@@ -13,6 +13,8 @@
 
 稳定地转换成可直接粘贴到 `Blender NPR Port` 的 `GLSL Function` 节点里的、符合当前实现规范的 `GLSL` 源码。
 
+> 当前实现基线：Blender 5.2 NPR `main`（`fd9fabb4f531`）。本指南覆盖当前的 typed Closure callback、Closure sampler Alpha、sampler3D、draw-view 矩阵 helper 以及 `@glsl_defines v1` 合同；如果目标是 `blender_npr_post_mainfix`，必须先检查该分支的源码和测试是否已经包含这些能力。
+
 
 ## 一、先记住当前节点真正支持什么
 
@@ -75,6 +77,9 @@
 - `Function` 现在必须显式指定，不会自动选第一个函数
 - `sampler2D` 会显示为 `Closure` 输入口
 - `sampler2D` 可连接 `Image to Closure` 或符合约定的 `Closure Output`
+- `sampler2D` / `sampler3D` 真正未连接时，会在 GPU 编译阶段隐式使用不透明白色常量来源；它不会创建 Image datablock、GPU texture、纹理槽或额外节点
+- 白色来源下，2D 的 `texture`（含 bias）、`textureLod`、`textureGrad`、`texelFetch`、`textureGather` 都返回 `vec4(1.0)`，`textureSize` 返回 `ivec2(1)`；3D 的对应合法查询也返回白色，`textureSize` 返回 `ivec3(1)`
+- `textureGather(sampler3D, ...)` 在 GLSL 中本来就无效，不会被白色来源放宽；显式连接但图片缺失、Closure 签名错误或来源不受支持时仍然报错
 - `Closure Output -> sampler2D` 当前只保证 `texture(tex, coord)` 这种直接采样形式；`coord` 的语义由闭包内部决定，普通贴图通常是 UV，NPR 图像句柄通常是 `Image Sample.Offset`
 - `sampler3D` 也会显示为 `Closure` 输入口，可连接 `Image to Closure` 的 `3D LUT Strip` 或符合约定的 `Closure Output`
 - `Closure Output -> sampler3D` 使用 `Closure Input` 中名为 `UV` 的 `Vector` 传递完整 `vec3` 坐标；首版只保证 `texture(volume, vec3_coord)`，不支持 `textureLod`、`textureGrad`、`textureSize`、`texelFetch` 或 `textureGather`
@@ -86,6 +91,23 @@
 - `vec3 + subtype=color` 会显示为颜色插口，内部按 `rgb` 使用，`alpha` 固定为 `1.0`
 - `vec4` 输入会显示为 `vec3 + float W` 两个插口，并在 GLSL wrapper 内重组为 `vec4`
 - `mat2/mat3/mat4` 边界会按列拆分为多个向量插口；`mat4` 的每列会进一步拆成 `vec3 + float W`
+
+### 3A. 5.2 当前 Closure / sampler 快速判定
+
+转换前先判断外部代码依赖的是哪一种 Closure 合同。下面四种路径不能互相替换：
+
+| 来源或需求 | GLSL Function 边界 | 节点侧连接 / 坐标语义 | 关键限制 |
+| --- | --- | --- | --- |
+| 普通图片、噪声图、LUT | `sampler2D` | `Image to Closure`，通常使用 `texture(tex, uv)` | 需要 `LOD`、导数、尺寸或 texel 查询时必须说明真实纹理语义 |
+| NPR/AOV/渲染结果图像句柄 | `sampler2D` | `Image Sample.Image -> Image Sample.Color/Alpha -> Closure Output` | `texture(image, offset)` 的第二个参数是像素/视图偏移，不是 mesh UV；需要透明度时必须连 `Image Sample.Alpha` |
+| 程序化三维场、SDF | `sampler3D` | `Closure Input.UV (Vector)` 接完整 `vec3`，结果接 `Closure Output` | 首版只保证 `texture(volume, vec3)`；不支持 `textureLod`、`textureGrad`、`textureSize`、`texelFetch`、`textureGather` |
+| 硬件 3D LUT | `sampler3D` | `Image to Closure` 的 `3D LUT Strip` | 使用原生 3D 纹理语义，不要手工把 LUT strip 插值改写成程序化 Closure |
+
+`@glsl_closure v1` 是另一条独立合同：它只能标记由导出函数可达的普通 helper，供 Closure 节点子图替换。callback 只允许 `float / int / bool / vec2 / vec3 / vec4`，不能使用 sampler、矩阵、数组、struct 或 `inout`；必须有返回值或至少一个 `out`，返回 socket 保留名为 `Result`。没有连接 Closure 时，原始 helper 函数体继续作为 fallback。
+
+typed Closure 的 `int` 通过 float 通道传输，只有闭区间 `[-16777216, 16777216]` 保证整数精确。callback Meta 只能使用最小的 `label`、`description` 和类型允许的 `subtype`，不能套用导出函数的 `default`、`min/max`、`items`、`panel` 或 `closed` 配置。
+
+边界拆分也必须提前考虑：`vec4` 会生成 Vector + W 插口，`mat2/mat3/mat4` 按列拆分，`mat4` 的每列进一步生成 Vector + W。不要把参数命名成可能与生成的 split identifier 冲突的名称。涉及这些合同的转换，除 parser 外还应优先运行 `glsl-function-typed-closure-callback`、`glsl-function-closure-sampler3d` 或对应的最小 GPU/render 回归。
 
 ### 4. `Node / Code` 编辑模式与刷新生命周期
 
@@ -490,6 +512,25 @@ Closure Output.Closure -> GLSL Function 的 sampler3D 输入
 
 - 不要把它说成“任意域都稳定可用”的全局 GLSL 内建
 - 不要把它和 `Texture Coordinate`、`Camera`、`Object Info` 等别的输入节点混成一组等价接口
+
+### 规则 4.2.1：如果需要视图 / 投影 / 模型矩阵，使用 draw-view 矩阵 helper
+
+当前 `GLSL Function` 额外提供一组 **draw-view 变换矩阵 helper**，来自当前 draw 的 `ViewMatrices` / `ObjectMatrices`（含 overscan、Film crop、TAA jitter）：
+
+- 视图 / 投影（Surface、NPR、Filter 可用；顶点与片元阶段）：
+  - `glsl_view_matrix()` / `glsl_view_matrix_inverse()`
+  - `glsl_projection_matrix()` / `glsl_projection_matrix_inverse()`
+  - `glsl_view_projection_matrix()` / `glsl_view_projection_matrix_inverse()`
+- 物体模型（仅 Surface / NPR；`Filter` 路径回退为单位矩阵）：
+  - `glsl_model_matrix()` / `glsl_model_matrix_inverse()`
+  - `glsl_model_view_matrix()` / `glsl_model_view_projection_matrix()`
+  - `glsl_normal_matrix()`（object→world 法线：`transpose(mat3(model_inverse))`）
+
+使用这组 helper 时要明确：
+
+- 这是**当前 draw 视图状态**，不是自定义 Camera 节点或任意用户矩阵输入
+- 适合 Displacement、屏幕空间反投影、自定义 clip 空间变换等；不要假设在 `World` 路径稳定可用
+- `Filter` 材质可以用视图 / 投影 helper；不要在 Filter 路径依赖 `glsl_model_*` 的真实物体矩阵
 
 ### 规则 4.3：如果要读 `Shader Info` 那种环境光，使用 `glsl_ambient_lighting()`
 
@@ -1957,7 +1998,7 @@ vec4 sample_it(sampler2D tex, vec2 uv)
 }
 ```
 
-`sampler2D` 当前通过 `Image to Closure` 或 `Closure Output` 接入来源，不支持默认值、范围、隐藏值或 subtype。
+`sampler2D` / `sampler3D` 可以通过 `Image to Closure` 或 `Closure Output` 接入来源；真正未连接时会在 GPU 编译阶段隐式采样不透明白色。这个行为不是 socket 或 Meta 默认值，不创建 Image，也不允许写 `@glsl_meta default=`；sampler 仍不支持默认值、范围、隐藏值或 subtype。
 
 可以写 `label`、`description`，也可以放进 panel：
 

@@ -87,7 +87,6 @@ struct Resources {
   void cascade_sync(LightData &light)
   {
     [[resource_table]] const Uniform &uni = uniforms;
-
     int level_min = light.sun().clipmap_lod_min;
     int level_max = light.sun().clipmap_lod_max;
     int level_range = level_max - level_min;
@@ -158,7 +157,6 @@ struct Resources {
   void clipmap_sync(LightData &light)
   {
     [[resource_table]] const Uniform &uni = uniforms;
-
     float3 ws_camera_position = uni.uniform_buf.camera.viewinv[3].xyz;
     float3 ls_camera_position = transform_direction_transposed(light.object_to_world,
                                                                ws_camera_position);

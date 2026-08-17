@@ -1471,12 +1471,6 @@ template<typename F> void DeferredLayerBase::npr_pass_sync(Instance &inst, F cal
   npr_ps_.bind_texture(SCENE_SHADOW_TEX_SLOT, &inst.pipelines.shadow_filter.texture_ref());
   npr_ps_.bind_image(RBUFS_COLOR_SLOT, &inst.render_buffers.rp_color_tx);
   npr_ps_.bind_image(RBUFS_VALUE_SLOT, &inst.render_buffers.rp_value_tx);
-  /* Render buffers may not be allocated yet during probe pipeline sync. The concrete inputs are
-   * assigned immediately before each NPR pass is rendered. */
-  npr_aov_color_input_tx_ = nullptr;
-  npr_aov_value_input_tx_ = nullptr;
-  npr_ps_.bind_texture(NPR_AOV_COLOR_TEX_SLOT, &npr_aov_color_input_tx_);
-  npr_ps_.bind_texture(NPR_AOV_VALUE_TEX_SLOT, &npr_aov_value_input_tx_);
   npr_ps_.bind_image(OUTLINE_COLOR_SLOT, &inst.render_buffers.outline_color_tx);
   npr_ps_.bind_image(OUTLINE_INFO_SLOT, &inst.render_buffers.outline_info_tx);
   /* Bind manually to fixed slots before the sub-pass shader is selected.
@@ -1518,6 +1512,7 @@ void DeferredLayer::begin_sync()
   has_prepass_ = false;
   has_stencil_ = false;
   has_npr_aov_access_ = false;
+  has_npr_refraction_ = false;
   is_first_pass_ = true;
   stencil_ps_.init();
 
@@ -1580,6 +1575,7 @@ void DeferredLayer::begin_sync()
     npr_ps_.bind_texture(INDIRECT_RADIANCE_NPR_TX_SLOT_1 + 0, &indirect_result_.closures[0]);
     npr_ps_.bind_texture(INDIRECT_RADIANCE_NPR_TX_SLOT_1 + 1, &indirect_result_.closures[1]);
     npr_ps_.bind_texture(INDIRECT_RADIANCE_NPR_TX_SLOT_1 + 2, &indirect_result_.closures[2]);
+    npr_ps_.bind_resources(inst_.volume.result);
     npr_ps_.bind_texture(BACK_RADIANCE_TX_SLOT, &radiance_back_tx_);
     npr_ps_.bind_texture(BACK_HIZ_TX_SLOT, &inst_.hiz_buffer.back.ref_tx_);
   });
@@ -1914,6 +1910,7 @@ PassMain::Sub *DeferredLayer::npr_add(blender::Material *blender_mat, GPUMateria
   use_depth_offset_lighting_data_ |= material_uses_depth_offset_lighting_data(blender_mat, gpumat);
   has_outline_ = has_outline_ || inst_.materials.material_uses_outline_control(blender_mat);
   has_npr_aov_access_ |= GPU_material_flag_get(gpumat, GPU_MATFLAG_AOV);
+  has_npr_refraction_ |= GPU_material_flag_get(gpumat, GPU_MATFLAG_NPR_REFRACTION);
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
       GPU_material_has_glsl_light_shader_eval(gpumat) ||
       GPU_material_flag_get(gpumat, GPU_MATFLAG_GLSL_LIGHT_ACCESS))
@@ -1939,13 +1936,15 @@ PassMain::Sub *DeferredLayer::npr_add(blender::Material *blender_mat, GPUMateria
   return material_pass;
 }
 
-gpu::Texture *DeferredLayer::render(View &render_view,
+gpu::Texture *DeferredLayer::render(View &main_view,
+                                    View &render_view,
                                     Framebuffer &prepass_fb,
                                     Framebuffer &combined_fb,
                                     Framebuffer &gbuffer_fb,
                                     int2 extent,
                                     RayTraceBuffer &rt_buffer,
-                                    gpu::Texture *radiance_behind_tx)
+                                    gpu::Texture *radiance_behind_tx,
+                                    bool &volume_compute_done)
 {
   if (this->is_empty()) {
     return radiance_behind_tx;
@@ -1954,9 +1953,6 @@ gpu::Texture *DeferredLayer::render(View &render_view,
   radiance_behind_tx_ = radiance_behind_tx ? radiance_behind_tx : dummy_black;
 
   RenderBuffers &rb = inst_.render_buffers;
-
-  npr_aov_color_input_tx_ = rb.rp_color_tx;
-  npr_aov_value_input_tx_ = rb.rp_value_tx;
 
   const bool has_aovs = inst_.film.aovs_info.color_len > 0 || inst_.film.aovs_info.value_len > 0;
   /* Keep previous layer AOVs in the live render-pass buffer for NPR AOV Input.
@@ -1991,8 +1987,6 @@ gpu::Texture *DeferredLayer::render(View &render_view,
   if (closure_count_ == 0) {
     inst_.hiz_buffer.swap_layer();
     inst_.hiz_buffer.update();
-    npr_aov_color_input_tx_ = rb.rp_color_tx;
-    npr_aov_value_input_tx_ = rb.rp_value_tx;
     return radiance_behind_tx;
   }
 
@@ -2023,6 +2017,13 @@ gpu::Texture *DeferredLayer::render(View &render_view,
   }
   inst_.lights.eval_uniform_light_shaders(render_view);
   inst_.lights.eval_front_light_shaders(render_view, extent);
+
+  if (has_npr_refraction_ && !volume_compute_done) {
+    /* NPR Refraction consumes integrated volume data before the final resolve. The caller owns the
+     * once-per-view state so a new render sample or Render Texture capture gets a fresh compute. */
+    inst_.volume.draw_compute(main_view, extent);
+    volume_compute_done = true;
+  }
 
   {
     ScopedTelemetrySample telemetry_sample(inst_.telemetry,
@@ -2098,7 +2099,9 @@ gpu::Texture *DeferredLayer::render(View &render_view,
     {
       ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainDeferredNPR);
       GPU_framebuffer_bind(combined_fb);
+      GPU_memory_barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS);
       inst_.manager->submit(npr_ps_, render_view);
+      GPU_memory_barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS);
     }
     npr_radiance_input_tx_ = nullptr;
     npr_radiance_input.release();
@@ -2118,9 +2121,6 @@ gpu::Texture *DeferredLayer::render(View &render_view,
   }
 
   inst_.pipelines.deferred.debug_draw(render_view, combined_fb);
-
-  npr_aov_color_input_tx_ = rb.rp_color_tx;
-  npr_aov_value_input_tx_ = rb.rp_value_tx;
 
   return use_feedback_output_ ? radiance_feedback_tx_ : nullptr;
 }
@@ -2344,40 +2344,53 @@ PassMain::Sub *DeferredPipeline::npr_add(blender::Material *blender_mat,
   return opaque_layer_.npr_add(blender_mat, gpumat);
 }
 
-void DeferredPipeline::render(View & /*main_view*/,
+void DeferredPipeline::render(View &main_view,
                               View &render_view,
                               Framebuffer &prepass_fb,
                               Framebuffer &combined_fb,
                               Framebuffer &gbuffer_fb,
                               int2 extent,
                               RayTraceBuffer &rt_buffer_opaque_layer,
-                              RayTraceBuffer &rt_buffer_refract_layer)
+                              RayTraceBuffer &rt_buffer_refract_layer,
+                              bool &volume_compute_done)
 {
   gpu::Texture *feedback_tx = nullptr;
 
   GPU_debug_group_begin("Deferred.Opaque");
   {
     ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainDeferredOpaque);
-    feedback_tx = opaque_layer_.render(render_view,
+    feedback_tx = opaque_layer_.render(main_view,
+                                       render_view,
                                        prepass_fb,
                                        combined_fb,
                                        gbuffer_fb,
                                        extent,
                                        rt_buffer_opaque_layer,
-                                       feedback_tx);
+                                       feedback_tx,
+                                       volume_compute_done);
   }
   GPU_debug_group_end();
+
+  if (feedback_tx == nullptr && !refraction_layers_.empty()) {
+    /* An empty opaque layer has no feedback output, but NPR Refraction still needs the actual
+     * background that precedes the first refraction layer. Seed the existing opaque feedback only
+     * after rendering the opaque layer so its ray-tracing inputs keep their original semantics. */
+    feedback_tx = rt_buffer_opaque_layer.feedback_ensure(false, extent);
+    GPU_texture_copy(feedback_tx, inst_.render_buffers.combined_tx);
+  }
 
   GPU_debug_group_begin("Deferred.Refract");
   for (auto &[index, layer] : refraction_layers_) {
     ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainDeferredRefract);
-    feedback_tx = layer->render(render_view,
+    feedback_tx = layer->render(main_view,
+                                render_view,
                                 prepass_fb,
                                 combined_fb,
                                 gbuffer_fb,
                                 extent,
                                 rt_buffer_refract_layer,
-                                feedback_tx);
+                                feedback_tx,
+                                volume_compute_done);
   }
   GPU_debug_group_end();
 }
@@ -2789,9 +2802,6 @@ void DeferredProbePipeline::render(View &view,
   inst_.manager->submit(eval_light_ps_, view);
   GPU_memory_barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS | GPU_BARRIER_TEXTURE_FETCH);
 
-  opaque_layer_.npr_aov_color_input_tx_ = inst_.render_buffers.rp_color_tx;
-  opaque_layer_.npr_aov_value_input_tx_ = inst_.render_buffers.rp_value_tx;
-
   TextureFromPool npr_radiance_input = {"NPR Radiance Input"};
   {
     npr_radiance_input.acquire_2d(
@@ -2804,10 +2814,10 @@ void DeferredProbePipeline::render(View &view,
     GPU_framebuffer_blit(combined_fb, 0, npr_radiance_fb, 0, GPU_COLOR_BIT);
   }
 
+  GPU_memory_barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS);
   inst_.manager->submit(opaque_layer_.npr_ps_, view);
+  GPU_memory_barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS);
 
-  opaque_layer_.npr_aov_color_input_tx_ = nullptr;
-  opaque_layer_.npr_aov_value_input_tx_ = nullptr;
   npr_radiance_input_tx_ = nullptr;
   npr_radiance_input.release();
   for (int i = 0; i < ARRAY_SIZE(direct_radiance_txs_); i++) {
@@ -3003,9 +3013,6 @@ void PlanarProbePipeline::render(View &view,
 
   inst_.pipelines.background.render(view, combined_fb);
 
-  npr_aov_color_input_tx_ = inst_.render_buffers.rp_color_tx;
-  npr_aov_value_input_tx_ = inst_.render_buffers.rp_value_tx;
-
   TextureFromPool npr_radiance_input = {"NPR Radiance Input"};
   {
     npr_radiance_input.acquire_2d(
@@ -3018,10 +3025,10 @@ void PlanarProbePipeline::render(View &view,
     GPU_framebuffer_blit(combined_fb, 0, npr_radiance_fb, 0, GPU_COLOR_BIT);
   }
 
+  GPU_memory_barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS);
   inst_.manager->submit(npr_ps_, view);
+  GPU_memory_barrier(GPU_BARRIER_SHADER_IMAGE_ACCESS);
 
-  npr_aov_color_input_tx_ = nullptr;
-  npr_aov_value_input_tx_ = nullptr;
   npr_radiance_input_tx_ = nullptr;
   npr_radiance_input.release();
   for (int i = 0; i < ARRAY_SIZE(direct_radiance_txs_); i++) {

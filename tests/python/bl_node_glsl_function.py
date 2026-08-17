@@ -780,12 +780,39 @@ class GLSLFunctionNodeTest(unittest.TestCase):
         self.assertEqual(glsl_node.parse_status, 'READY')
         self.assertIsNotNone(find_socket(glsl_node.inputs, "strength"))
 
-    def test_unlinked_sample3d_is_ready(self):
+    def test_unlinked_sample2d_is_ready_without_creating_an_image(self):
         _, tree = self.make_material_tree()
         glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        images_before = set(bpy.data.images.keys())
+        source = (
+            "vec4 sample_image(sampler2D image, vec2 uv){\n"
+            "  vec4 sampled = texture(image, uv);\n"
+            "  sampled += textureLod(image, uv, 0.0);\n"
+            "  sampled += textureGrad(image, uv, vec2(0.0), vec2(0.0));\n"
+            "  sampled += texelFetch(image, ivec2(0), 0);\n"
+            "  sampled += textureGather(image, uv);\n"
+            "  return sampled + vec4(textureSize(image, 0), 0.0, 0.0);\n"
+            "}\n"
+        )
+        make_text_block("glsl_unlinked_sample2d.glsl", source)
+
+        self.configure_glsl_node(glsl_node, "glsl_unlinked_sample2d.glsl", "sample_image")
+
+        self.assertEqual(glsl_node.parse_status, 'READY')
+        self.assertEqual(find_socket(glsl_node.inputs, "image").bl_idname, "NodeSocketClosure")
+        self.assertEqual(set(bpy.data.images.keys()), images_before)
+
+    def test_unlinked_sample3d_is_ready_without_creating_an_image(self):
+        _, tree = self.make_material_tree()
+        glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        images_before = set(bpy.data.images.keys())
         source = (
             "vec4 sample_volume(sampler3D volume, vec3 coord){\n"
-            "  return texture(volume, coord);\n"
+            "  vec4 sampled = texture(volume, coord);\n"
+            "  sampled += textureLod(volume, coord, 0.0);\n"
+            "  sampled += textureGrad(volume, coord, vec3(0.0), vec3(0.0));\n"
+            "  sampled += texelFetch(volume, ivec3(0), 0);\n"
+            "  return sampled + vec4(textureSize(volume, 0), 0.0);\n"
             "}\n"
         )
         make_text_block("glsl_unlinked_sample3d.glsl", source)
@@ -794,6 +821,23 @@ class GLSLFunctionNodeTest(unittest.TestCase):
 
         self.assertEqual(glsl_node.parse_status, 'READY')
         self.assertEqual(find_socket(glsl_node.inputs, "volume").bl_idname, "NodeSocketClosure")
+        self.assertEqual(set(bpy.data.images.keys()), images_before)
+
+    def test_unlinked_sample3d_gather_defers_gpu_validation(self):
+        _, tree = self.make_material_tree()
+        glsl_node = tree.nodes.new("ShaderNodeGLSLFunction")
+        source = (
+            "vec4 sample_volume(sampler3D volume, vec3 coord){\n"
+            "  return textureGather(volume, coord);\n"
+            "}\n"
+        )
+        make_text_block("glsl_unlinked_sample3d_gather.glsl", source)
+
+        self.configure_glsl_node(
+            glsl_node, "glsl_unlinked_sample3d_gather.glsl", "sample_volume"
+        )
+
+        self.assertEqual(glsl_node.parse_status, 'READY')
 
     def test_typed_closure_callback_meta_syncs_to_zone_sockets(self):
         _, tree = self.make_material_tree()

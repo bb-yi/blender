@@ -407,7 +407,9 @@ class NODE_MT_shader_node_output_base(node_add_menu.NodeMenu):
         self.node_operator(
             layout,
             "ShaderNodeOutputAOV",
-            poll=object_material_shader_nodes_poll(context) or world_shader_nodes_poll(context),
+            poll=(object_material_shader_nodes_poll(context) or
+                  world_shader_nodes_poll(context) or
+                  npr_shader_nodes_poll(context)),
         )
         self.node_operator(
             layout,

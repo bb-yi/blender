@@ -1155,6 +1155,8 @@ static void reserve_deferred_npr_pass_samplers(SlotAllocator &slots)
   slots.reserve_sampler_range(DIRECT_RADIANCE_NPR_TX_SLOT_1, DIRECT_RADIANCE_NPR_TX_SLOT_1 + 2);
   slots.reserve_sampler_range(INDIRECT_RADIANCE_NPR_TX_SLOT_1,
                               INDIRECT_RADIANCE_NPR_TX_SLOT_1 + 2);
+  slots.reserve_sampler(VOLUME_SCATTERING_TEX_SLOT);
+  slots.reserve_sampler(VOLUME_TRANSMITTANCE_TEX_SLOT);
   slots.reserve_sampler(BACK_HIZ_TX_SLOT);
   slots.reserve_sampler(BACK_RADIANCE_TX_SLOT);
   slots.reserve_sampler_range(RENDER_TEXTURE_COLOR_TX_SLOT_0, RENDER_TEXTURE_HISTORY_TX_SLOT_3);
@@ -1797,9 +1799,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     info.define("NPR_SHADER");
   }
 
-  if (GPU_material_flag_get(gpumat, GPU_MATFLAG_RENDER_TEXTURE) &&
-      pipeline_type == MAT_PIPE_DEFERRED_NPR)
-  {
+  if (GPU_material_flag_get(gpumat, GPU_MATFLAG_RENDER_TEXTURE)) {
     add_create_info_and_reserve(info, slots, "eevee_render_texture_data");
   }
 
@@ -1808,6 +1808,10 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   {
     info.define("MAT_NPR_REFRACTION");
     add_create_info_and_reserve(info, slots, "eevee_surf_npr_refraction_data");
+    if (probe_capture == MAT_PROBE_NONE) {
+      info.define("MAT_NPR_REFRACTION_VOLUME");
+      add_create_info_and_reserve(info, slots, "eevee_surf_npr_refraction_volume_data");
+    }
   }
 
   if (ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD) &&

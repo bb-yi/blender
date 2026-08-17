@@ -6,6 +6,7 @@
  * \ingroup RNA
  */
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 
@@ -1241,6 +1242,25 @@ static float rna_View3DOverlay_GridScaleUnit_get(PointerRNA *ptr)
     /* When accessed from non-active screen. */
     return 1.0f;
   }
+}
+
+static float rna_View3DOverlay_shadow_lod_opacity_get(PointerRNA *ptr)
+{
+  const View3D *v3d = static_cast<View3D *>(ptr->data);
+  const int encoded = (v3d->overlay.flag & V3D_OVERLAY_SHADOW_LOD_OPACITY_MASK) >>
+                      V3D_OVERLAY_SHADOW_LOD_OPACITY_SHIFT;
+  const int percent = (encoded == 0) ? V3D_OVERLAY_SHADOW_LOD_OPACITY_DEFAULT : encoded - 1;
+  return float(percent) * 0.01f;
+}
+
+static void rna_View3DOverlay_shadow_lod_opacity_set(PointerRNA *ptr, const float value)
+{
+  View3D *v3d = static_cast<View3D *>(ptr->data);
+  const int percent = int(std::clamp(value, 0.0f, 1.0f) * 100.0f + 0.5f);
+  const int encoded = percent + 1;
+  v3d->overlay.flag = eView3DOverlay_Flag(
+      (v3d->overlay.flag & ~V3D_OVERLAY_SHADOW_LOD_OPACITY_MASK) |
+      (encoded << V3D_OVERLAY_SHADOW_LOD_OPACITY_SHIFT));
 }
 
 static PointerRNA rna_SpaceView3D_region_3d_get(PointerRNA *ptr)
@@ -5159,6 +5179,29 @@ static void rna_def_space_view3d_overlay(BlenderRNA *brna)
                            "Display viewport performance timings:\n"
                            " \u2022 Evaluation: Time to evaluate the dependency graph.\n"
                            " \u2022 Synchronization: Time to build the GPU buffers.");
+  RNA_def_property_update(prop, NC_SPACE | ND_SPACE_VIEW3D, nullptr);
+
+  prop = RNA_def_property(srna, "show_shadow_lod", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(
+      prop, nullptr, "overlay.flag", V3D_OVERLAY_SHOW_SHADOW_LOD);
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_ui_text(
+      prop,
+      "Shadow LOD",
+      "Visualize the effective shadow level of detail for the last selected shadow-casting light");
+  RNA_def_property_update(prop, NC_SPACE | ND_SPACE_VIEW3D, nullptr);
+
+  prop = RNA_def_property(srna, "shadow_lod_opacity", PROP_FLOAT, PROP_FACTOR);
+  RNA_def_property_float_funcs(prop,
+                               "rna_View3DOverlay_shadow_lod_opacity_get",
+                               "rna_View3DOverlay_shadow_lod_opacity_set",
+                               nullptr);
+  RNA_def_property_float_default(prop, 0.7f);
+  RNA_def_property_range(prop, 0.0f, 1.0f);
+  RNA_def_property_ui_range(prop, 0.0f, 1.0f, 0.01f, 2);
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_ui_text(
+      prop, "Opacity", "Blend the Shadow LOD colors over the rendered viewport");
   RNA_def_property_update(prop, NC_SPACE | ND_SPACE_VIEW3D, nullptr);
 
   /* show camera composition guides */

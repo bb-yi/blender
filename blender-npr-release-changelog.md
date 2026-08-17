@@ -570,6 +570,39 @@
 - EEVEE Performance 新增 Sync 阶段，细分 Begin/Objects/End、World、Scene Modules、View Effects、NPR Post，以及 Draw Sync 的对象迭代、实例提取、延迟提取和等待等耗时来源。
 - EEVEE 增加引用对象数据到着色器的稳定传递路径，补充 NPR 实例属性与材质/AOV 相关数据通道。
 
+## 2026-08-01  1257abb95445
+
+#### 新增功能
+- `GLSL Function` 新增带类型的 Closure 回调，可将闭包节点作为可调用函数使用。
+- `GLSL Function` Closure 新增独立 Alpha 接口，补全sample的Alpha通道。
+
+#### 修复与改进
+- 修复启用 `Outline` 渲染通道后描边仍被合并进 `Combined` 的问题；
+- 修复 `Outline Control` 在材质渲染方式从 `Dithered` 改为 `Blended` 后描边消失的问题，补齐前向混合材质路径。
+- 恢复 Blender 5.2 中 NPR `For Each Light` 的编译与渲染路径。
+- 恢复 NPR 多样本软阴影的时域随机收敛，改善 Area Light 多样本阴影质量。
+- 统一 Shader/Geometry 的 `Scene Time` 节点，并增加旧文件迁移支持。
+- 修复时间相关材质的视口抖动、历史重置和 Film 重建采样对齐问题。
+- 修复体积散射对自定义灯光着色资源的错误绑定，避免 Vulkan 下未注册缓冲区导致崩溃。
+- 移除体积灯光资源的冗余预分配，改为按实际使用条件绑定。
+- 改进 NPR 材质特性快照、GLSL Closure socket 同步、光线追踪屏幕资源更新和整体渲染稳定性。
+
+## 2026-08-11  fd9fabb4f531
+
+#### 新增功能
+- EEVEE NPR 折射体积近似（refraction volume）：在体积参与的场景中更稳定地合成折射背景，并完成采样 / 捕获隔离。
+- `GLSL Function` 新增 draw-view 变换矩阵 helper：`glsl_view_matrix()`、`glsl_projection_matrix()`、`glsl_view_projection_matrix()` 及其 inverse，以及物体路径上的 `glsl_model_*` / `glsl_normal_matrix()`（含 overscan / Film crop / TAA jitter）。
+- 视口 Shadow LOD 可视化，便于排查太阳光 clipmap 细节层级。
+- 改进 IME 输入支持（含 Blender 5.2 API 适配与文本编辑器光标度量）。
+
+#### 修复与改进
+- 修复 NPR 折射体积在 `Image Sample` offset 下的黑洞、背景 miss、背景照明漏光和体积深度映射问题。
+- 修复太阳光 `Shadow Map Scale` 对 tilemap 的应用，并让增大 scale 时有效细节同步提升。
+- 未连接的 GLSL sampler 使用白色 fallback，避免异常采样。
+- 恢复 NPR Tree AOV 输出。
+- 稳定 Render Texture 资源生命周期。
+- 文档：更新 NPR changelog / GLSL guide，补充投影矩阵相关待办。
+
 ## 暂存
 
 #### 新增功能
@@ -589,3 +622,4 @@
 - [×] gpu实例
 - [ ] outline优化
 - [ ] 区分自阴影和投射阴影
+- [ ] 投影矩阵

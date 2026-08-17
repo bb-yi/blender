@@ -133,6 +133,7 @@ namespace blender::eevee
     inst_.shadows.set_view(render_view_, extent_);
     inst_.volume.set_view(main_view_);
     inst_.uniform_data.data.push_update();
+    bool volume_compute_done = false;
     /* Need to be set early for planar probe rendering (if using ray-cast node) and ray-cast nodes
      * in deferred / forward pipelines. */
     inst_.raytracing.thickness_parameters_setup(render_view_.winmat(), extent_);
@@ -229,13 +230,14 @@ namespace blender::eevee
     {
       ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainDeferred);
       inst_.pipelines.deferred.render(main_view_,
-        render_view_,
-        prepass_fb_,
-        combined_fb_,
-        gbuffer_fb_,
-        extent_,
-        rt_buffer_opaque_,
-        rt_buffer_refract_);
+                                      render_view_,
+                                      prepass_fb_,
+                                      combined_fb_,
+                                      gbuffer_fb_,
+                                      extent_,
+                                      rt_buffer_opaque_,
+                                      rt_buffer_refract_,
+                                      volume_compute_done);
     }
 
     /* NPR: the outline detect pass reads the deferred GBuffer (surface normals for raytrace
@@ -262,7 +264,9 @@ namespace blender::eevee
 
     {
       ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainVolumeCompute);
-      inst_.volume.draw_compute(main_view_, extent_);
+      if (!volume_compute_done) {
+        inst_.volume.draw_compute(main_view_, extent_);
+      }
     }
 
     {

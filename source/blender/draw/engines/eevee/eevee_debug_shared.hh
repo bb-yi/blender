@@ -69,6 +69,11 @@ enum [[host_shared]] eDebugMode : uint32_t {
    * Color different buffers of the depth of field.
    */
   DEBUG_DOF_PLANES = 16u,
+  /**
+   * Show the effective shadow LOD selected for the active light.
+   * This is selected by the viewport overlay, not by `G.debug_value`.
+   */
+  DEBUG_SHADOW_LOD = 18u,
 };
 
 #ifndef GPU_SHADER
