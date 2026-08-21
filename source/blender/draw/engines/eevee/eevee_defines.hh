@@ -102,8 +102,8 @@
 #  define SHADOW_PAGE_LOD 3 /* LOG2(SHADOW_PAGE_RES) */
 #else
 #  define SHADOW_PAGE_CLEAR_GROUP_SIZE 32
-#  define SHADOW_PAGE_RES 256
 #  define SHADOW_PAGE_LOD 8 /* LOG2(SHADOW_PAGE_RES) */
+#  define SHADOW_PAGE_RES (1 << SHADOW_PAGE_LOD)
 #endif
 /* For testing only. */
 // #define SHADOW_FORCE_LOD0

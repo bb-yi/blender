@@ -1041,6 +1041,12 @@ void blo_do_versions_520(FileData * /*fd*/, Library * /*lib*/, Main *bmain)
     version_npr_image_sample_offset_socket_identifier(bmain);
   }
 
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 47)) {
+    for (Scene &scene : bmain->scenes) {
+      scene.eevee.shadow_page_resolution = 256;
+    }
+  }
+
   /**
    * Always bump subversion in BKE_blender_version.h when adding versioning
    * code here, and wrap it inside a MAIN_VERSION_FILE_ATLEAST check.

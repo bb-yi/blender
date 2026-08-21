@@ -85,7 +85,6 @@ ShadowTechnique ShadowModule::shadow_technique = ShadowTechnique::ATOMIC_RASTER;
 void ShadowTileMap::sync_orthographic(const float4x4 &object_mat_,
                                       int2 origin_offset,
                                       int clipmap_level,
-                                      float shadow_map_scale_,
                                       eShadowProjectionType projection_type_,
                                       uint2 shadow_set_membership_)
 {
@@ -98,13 +97,6 @@ void ShadowTileMap::sync_orthographic(const float4x4 &object_mat_,
   level = clipmap_level;
   light_type = eLightType::LIGHT_SUN;
   shadow_set_membership = shadow_set_membership_;
-
-  /* If the shadow map scale changed, mark the tilemap dirty so it gets re-generated.
-   * This mirrors the behaviour when the light direction / object matrix changes. */
-  if (shadow_map_scale != shadow_map_scale_) {
-    set_dirty();
-  }
-  shadow_map_scale = shadow_map_scale_;
 
   grid_shift = origin_offset - grid_offset;
   grid_offset = origin_offset;
@@ -350,8 +342,16 @@ void ShadowPunctual::end_sync(Light &light)
 
 eShadowProjectionType ShadowDirectional::directional_distribution_type_get(const Camera &camera)
 {
-  /* TODO(fclem): Enable the cascade projection if the FOV is tiny in perspective mode. */
-  return camera.is_perspective() ? SHADOW_PROJECTION_CLIPMAP : SHADOW_PROJECTION_CASCADE;
+  if (camera.is_perspective()) {
+    /* Narrow FOV (< ~45°): cascade is more efficient than clipmap.
+     * screen_diagonal_length ≈ 2*tan(diag_fov/2). Threshold 1.2 ≈ 45° hfov. */
+    const CameraData &cam_data = camera.data_get();
+    //if (finite_or_default(cam_data.screen_diagonal_length, 1.0f) < 1.2f) {
+    //  return SHADOW_PROJECTION_CASCADE;
+    //}
+    return SHADOW_PROJECTION_CLIPMAP;
+  }
+  return SHADOW_PROJECTION_CASCADE;
 }
 
 static int clipmap_level_perspective_bias(const Camera &camera)
@@ -377,17 +377,14 @@ static int clipmap_level_perspective_bias(const Camera &camera)
 static void directional_focus_update(DirectionalFocusData &focus,
                                      const Camera &camera,
                                      const draw::StorageVectorBuffer<uint, 128> &curr_casters,
-                                     const draw::Manager &manager,
-                                     const bool force_focus)
+                                     const draw::Manager &manager)
 {
   focus.position = camera.position();
   focus.distance = 0.0f;
   focus.blend = 0.0f;
 
   const int perspective_bias = clipmap_level_perspective_bias(camera);
-  if (!camera.is_perspective() || (!force_focus && perspective_bias == 0) ||
-      curr_casters.is_empty())
-  {
+  if (!camera.is_perspective() || (perspective_bias == 0) || curr_casters.is_empty()) {
     return;
   }
 
@@ -445,11 +442,12 @@ void ShadowDirectional::cascade_tilemaps_distribution_near_far_points(const Came
                                                                       float3 &far_point)
 {
   const CameraData &cam_data = camera.data_get();
+  const float3 ws_pos_shifted = camera.position() + camera.forward_shifted();
   /* Ideally we should only take the intersection with the scene bounds. */
   far_point = transform_direction_transposed(
-      light.object_to_world, camera.position() - camera.forward() * cam_data.clip_far);
+      light.object_to_world, ws_pos_shifted - camera.forward() * cam_data.clip_far);
   near_point = transform_direction_transposed(
-      light.object_to_world, camera.position() - camera.forward() * cam_data.clip_near);
+      light.object_to_world, ws_pos_shifted - camera.forward() * cam_data.clip_near);
 }
 
 ShadowDirectional::LevelSpan ShadowDirectional::cascade_level_range(const Light &light,
@@ -546,7 +544,6 @@ void ShadowDirectional::cascade_tilemaps_distribution(Light &light, const Camera
     tilemap->sync_orthographic(object_mat,
                                level_offset,
                                level,
-                               light.shadow_map_scale,
                                SHADOW_PROJECTION_CASCADE,
                                light.shadow_set_membership);
 
@@ -574,8 +571,10 @@ ShadowDirectional::LevelSpan ShadowDirectional::clipmap_level_range(const Camera
   using namespace blender::math;
 
   const CameraData &cam_data = cam.data_get();
-  /* Covers the closest points of the view. */
-  int min_level = max_ii(0, floor(log2(max_ff(cam_data.clip_near, 1e-8f))));
+  /* Keep the smallest LOD whose coverage radius (0.5 * exp2(lvl)) still covers the near clip
+   * plane. Levels narrower than the camera near distance are never useful, so drop them to save
+   * tilemap budget. The level may still be negative for small scenes. */
+  int min_level = ceil(log2(max_ff(cam_data.clip_near, 1e-8f)));
   /* Covers the farthest points of the view. */
   int max_level = ceil(log2(cam.bound_radius() + distance(cam.bound_center(), cam.position())));
 
@@ -596,21 +595,14 @@ ShadowDirectional::LevelSpan ShadowDirectional::clipmap_level_range(const Camera
 void ShadowDirectional::clipmap_tilemaps_distribution(Light &light, const Camera &camera)
 {
   const DirectionalFocusData &focus = directional_focus_data_ensure(shadows_);
-  /* Keep every LOD's physical coverage at its power-of-two size so its label still describes its
-   * actual texel density. Higher map scale concentrates the clipmaps around the visible caster
-   * focus instead of enlarging each map and cancelling the requested resolution increase. */
-  const float map_scale = max_ff(light.shadow_map_scale, 0.0001f);
-  const float focus_blend = (map_scale >= 1.0f) ?
-                                1.0f - (1.0f - focus.blend) / map_scale :
-                                focus.blend * map_scale;
   const float3 clipmap_center = math::interpolate(
-      camera.position(), focus.position, focus_blend);
+      camera.position(), focus.position, focus.blend);
 
   float4x4 object_mat = light.object_to_world;
   object_mat.location() = float3(0.0f);
   light.lod_bias = shadows_.global_lod_bias();
   light.sun().focus_distance = focus.distance;
-  light.sun().focus_blend = focus_blend;
+  light.sun().focus_blend = focus.blend;
 
   for (int lod : IndexRange(levels_.size())) {
     ShadowTileMap *tilemap = tilemaps_[lod];
@@ -626,7 +618,6 @@ void ShadowDirectional::clipmap_tilemaps_distribution(Light &light, const Camera
     tilemap->sync_orthographic(object_mat,
                                level_offset,
                                level,
-                               light.shadow_map_scale,
                                SHADOW_PROJECTION_CLIPMAP,
                                light.shadow_set_membership);
 
@@ -845,7 +836,18 @@ void ShadowModule::init()
     data_.step_count = 1;
   }
 
-  const int2 atlas_extent = shadow_page_size_ * int2(SHADOW_PAGE_PER_ROW, SHADOW_PAGE_PER_COL);
+  /* Read shadow page resolution from user setting. */
+  const int new_lod = log2_ceil_u(scene.eevee.shadow_page_resolution);
+  if (shadow_page_lod_ != new_lod) {
+    shadow_page_lod_ = new_lod;
+    /* Force full rebuild on resolution change. */
+    do_full_update_ = true;
+    for (Light &light : inst_.lights.light_map_.values()) {
+      light.initialized = false;
+    }
+  }
+
+  const int2 atlas_extent = (1 << shadow_page_lod_) * int2(SHADOW_PAGE_PER_ROW, SHADOW_PAGE_PER_COL);
 
   eGPUTextureUsage tex_usage = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE;
   if (ShadowModule::shadow_technique == ShadowTechnique::ATOMIC_RASTER) {
@@ -866,7 +868,7 @@ void ShadowModule::init()
     shadow_pool_retry_countdown_ = 0;
   }
 
-  const size_t page_byte_size = square_i(shadow_page_size_) * sizeof(int);
+  const size_t page_byte_size = square_i(1 << shadow_page_lod_) * sizeof(int);
   const uint64_t requested_pool_byte_size = uint64_t(shadow_pool_size_requested_) * square_i(1024);
   const int requested_page_len = enabled_ ?
                                      max_ii(1,
@@ -996,8 +998,8 @@ void ShadowModule::init()
     int size_in_tile = min_ii(1 << i, SHADOW_TILEMAP_RES);
     multi_viewports_[i][0] = 0;
     multi_viewports_[i][1] = 0;
-    multi_viewports_[i][2] = size_in_tile * shadow_page_size_;
-    multi_viewports_[i][3] = size_in_tile * shadow_page_size_;
+    multi_viewports_[i][2] = size_in_tile * (1 << shadow_page_lod_);
+    multi_viewports_[i][3] = size_in_tile * (1 << shadow_page_lod_);
   }
 }
 
@@ -1152,7 +1154,6 @@ void ShadowModule::end_sync()
   data_.use_caster_atlas = bool32_t(use_caster_atlas_);
 
   const DirectionalFocusData old_focus = directional_focus_data_ensure(*this);
-  bool needs_scaled_directional_focus = false;
 
   /* Delete unused shadows first to release tile-maps that could be reused for new lights. */
   for (Light &light : inst_.lights.light_map_.values()) {
@@ -1161,7 +1162,6 @@ void ShadowModule::end_sync()
       light.shadow_discard_safe(*this);
     }
     else if (light.directional != nullptr) {
-      needs_scaled_directional_focus |= light.shadow_map_scale > 1.0f;
       light.directional->release_excess_tilemaps(light, inst_.camera);
     }
     else if (light.punctual != nullptr) {
@@ -1170,11 +1170,7 @@ void ShadowModule::end_sync()
   }
 
   directional_focus_update(
-      directional_focus_data_ensure(*this),
-      inst_.camera,
-      curr_casters_,
-      *inst_.manager,
-      needs_scaled_directional_focus);
+      directional_focus_data_ensure(*this), inst_.camera, curr_casters_, *inst_.manager);
   const DirectionalFocusData &new_focus = directional_focus_data_ensure(*this);
   viewport_history_invalidated_ |= inst_.is_viewport() && data_.use_jitter &&
                                    (math::distance_squared(old_focus.position,
@@ -1434,6 +1430,8 @@ void ShadowModule::end_sync()
         /* De-fragment the free page heap after cache reuse phase which can leave hole. */
         PassSimple::Sub &sub = pass.sub("Defrag");
         sub.shader_set(inst_.shaders.static_shader_get(SHADOW_PAGE_DEFRAG));
+        sub.push_constant("shadow_page_lod", shadow_page_lod_);
+        sub.push_constant("shadow_page_res", 1 << shadow_page_lod_);
         sub.bind_ssbo("pages_infos_buf", pages_infos_data_);
         sub.bind_ssbo("pages_free_buf", pages_free_data_);
         sub.bind_ssbo("pages_cached_buf", pages_cached_data_);
@@ -1507,6 +1505,8 @@ void ShadowModule::end_sync()
         sub.framebuffer_set(&render_fb_);
         sub.state_set(DRW_STATE_WRITE_DEPTH | DRW_STATE_DEPTH_ALWAYS);
         sub.shader_set(inst_.shaders.static_shader_get(SHADOW_PAGE_CLEAR));
+        sub.push_constant("shadow_page_lod", shadow_page_lod_);
+        sub.push_constant("shadow_page_res", 1 << shadow_page_lod_);
         sub.bind_ssbo("pages_infos_buf", pages_infos_data_);
         sub.bind_ssbo("dst_coord_buf", dst_coord_buf_);
         sub.push_constant("use_shadow_caster_atlas", use_caster_atlas_push_);
@@ -1814,7 +1814,7 @@ void ShadowModule::render(View &view, int2 extent)
   usage_tag_fb.ensure(usage_tag_fb_resolution_);
 
   eGPUTextureUsage usage = GPU_TEXTURE_USAGE_ATTACHMENT | GPU_TEXTURE_USAGE_MEMORYLESS;
-  int2 fb_size = int2(SHADOW_TILEMAP_RES * shadow_page_size_);
+  int2 fb_size = int2(SHADOW_TILEMAP_RES * (1 << shadow_page_lod_));
   int fb_layers = SHADOW_VIEW_MAX;
 
   if (shadow_technique == ShadowTechnique::ATOMIC_RASTER) {

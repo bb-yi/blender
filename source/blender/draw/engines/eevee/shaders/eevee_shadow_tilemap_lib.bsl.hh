@@ -173,6 +173,7 @@ float shadow_directional_level_fractional(LightData light, float3 lP)
     /* Since the distance is centered around the camera (and thus by extension the tile-map),
      * we need to multiply by 2 to get the lod level which covers the following range:
      * [-coverage_get(lod)/2..coverage_get(lod)/2] */
+
     lod = log2(shadow_directional_clipmap_scale(light, lP) * narrowing);
 
     lod = max(lod, light.lod_min);
@@ -223,7 +224,8 @@ float shadow_punctual_pixel_ratio(LightData light,
   /* Clamp in shadow space. */
   film_pixel_footprint = max(film_pixel_footprint, -light.lod_min);
   /* Cube-face diagonal divided by LOD0 resolution. */
-  constexpr float shadow_pixel_radius = (2.0f * M_SQRT2) / SHADOW_MAP_MAX_RES;
+  float shadow_map_max_res = float(int(light.shadow_page_res) * SHADOW_TILEMAP_RES);
+  float shadow_pixel_radius = (2.0f * M_SQRT2) / shadow_map_max_res;
   return saturate(shadow_pixel_radius / film_pixel_footprint);
 }
 
@@ -263,12 +265,15 @@ struct ShadowCoordinates {
 };
 
 /* Assumes tilemap_uv is already saturated. */
-ShadowCoordinates shadow_coordinate_from_uvs(int tilemap_index, float2 tilemap_uv)
+ShadowCoordinates shadow_coordinate_from_uvs(int tilemap_index,
+                                             float2 tilemap_uv,
+                                             int shadow_page_lod)
 {
   ShadowCoordinates ret;
   ret.tilemap_index = tilemap_index;
-  ret.tilemap_texel = uint2(tilemap_uv * (float(SHADOW_MAP_MAX_RES) - 1e-2f));
-  ret.tilemap_tile = ret.tilemap_texel >> uint(SHADOW_PAGE_LOD);
+  ret.tilemap_texel = uint2(tilemap_uv *
+                            (float((1 << shadow_page_lod) * SHADOW_TILEMAP_RES) - 1e-2f));
+  ret.tilemap_tile = ret.tilemap_texel >> uint(shadow_page_lod);
   return ret;
 }
 
@@ -304,7 +309,9 @@ ShadowCoordinates shadow_directional_coordinates_at_level(LightData light, float
   tilemap_uv -= float2(clipmap_offset) * (1.0f / float(SHADOW_TILEMAP_RES));
   tilemap_uv = saturate(tilemap_uv + 0.5f);
 
-  return shadow_coordinate_from_uvs(light.tilemap_index + level_relative, tilemap_uv);
+  return shadow_coordinate_from_uvs(light.tilemap_index + level_relative,
+                                     tilemap_uv,
+                                     int(light.shadow_page_lod));
 }
 
 /**
@@ -378,7 +385,9 @@ ShadowCoordinates shadow_punctual_coordinates(LightData light, float3 lP, int fa
   /* UVs in [0..1] range. */
   tilemap_uv = saturate(tilemap_uv * 0.5f + 0.5f);
 
-  return shadow_coordinate_from_uvs(light.tilemap_index + face_id, tilemap_uv);
+  return shadow_coordinate_from_uvs(light.tilemap_index + face_id,
+                                     tilemap_uv,
+                                     int(light.shadow_page_lod));
 }
 
 /** \} */

@@ -158,7 +158,8 @@ ShadowRayDirectional shadow_ray_generate_directional(LightData light,
   /* Assumed to be non-null. */
   float dist_to_near_plane = -lP.z - clip_near;
   /* Trace in a radius that is covered by low resolution page inflation. */
-  float max_tracing_distance = texel_radius * float(SHADOW_PAGE_RES << SHADOW_TILEMAP_LOD);
+  float max_tracing_distance = texel_radius *
+                                float(int(light.shadow_page_res) << SHADOW_TILEMAP_LOD);
   float max_tracing_angle_cos = cos_from_tan(max_tracing_distance / dist_to_near_plane);
   /* Taking max of cosines to get the minimum of the angles. */
   float shadow_angle_cos = max(light.sun().shadow_angle_cos, max_tracing_angle_cos);
@@ -188,7 +189,7 @@ ShadowTracingSample shadow_map_trace_sample([[resource_table]] ShadowRenderData 
 
   ShadowCoordinates coord = shadow_directional_coordinates(ray.light, ray_pos);
 
-  float depth = srd.read_depth(coord);
+  float depth = srd.read_depth(coord, int(ray.light.shadow_page_lod));
   /* Distance from near plane. */
   float clip_near = orderedIntBitsToFloat(ray.light.clip_near);
   float3 occluder_pos = float3(ray_pos.xy, -depth - clip_near);
@@ -295,7 +296,7 @@ ShadowTracingSample shadow_map_trace_sample([[resource_table]] ShadowRenderData 
   float3 face_pos = shadow_punctual_local_position_to_face_local(face_id, receiver_pos);
   ShadowCoordinates coord = shadow_punctual_coordinates(ray.light, face_pos, face_id);
 
-  float radial_occluder_depth = srd.read_depth(coord);
+  float radial_occluder_depth = srd.read_depth(coord, int(ray.light.shadow_page_lod));
   float3 occluder_pos = receiver_pos * (radial_occluder_depth / length(receiver_pos));
 
   /* Transform to ray local space. */
@@ -391,7 +392,8 @@ float shadow_texel_radius_at_position([[resource_table]] const Uniform &uni,
   }
   /* Pixel bounding radius inside a tilemap of unit scale.
    * Take only half of it because we want the radius and not the diameter. */
-  constexpr float texel_radius = M_SQRT2 / SHADOW_MAP_MAX_RES;
+  float map_max_res = float(int(light.shadow_page_res) * SHADOW_TILEMAP_RES);
+  float texel_radius = M_SQRT2 / map_max_res;
   return texel_radius * scale;
 }
 
@@ -615,7 +617,9 @@ struct ShadowCasterTraceResult {
   uint caster_id;
 };
 
-uint shadow_caster_id_read([[resource_table]] ShadowRenderData &srd, ShadowCoordinates coord)
+uint shadow_caster_id_read([[resource_table]] ShadowRenderData &srd,
+                           ShadowCoordinates coord,
+                           int shadow_page_lod)
 {
   ShadowSamplingTile tile = shadow_tile_load(
       srd.shadow_tilemaps_tx, coord.tilemap_tile, coord.tilemap_index);
@@ -623,11 +627,11 @@ uint shadow_caster_id_read([[resource_table]] ShadowRenderData &srd, ShadowCoord
     return SHADOW_CASTER_UNKNOWN_ID;
   }
 
-  constexpr uint page_shift = uint(SHADOW_PAGE_LOD);
-  constexpr uint page_mask = ~(0xFFFFFFFFu << uint(SHADOW_PAGE_LOD));
+  uint page_shift = uint(shadow_page_lod);
+  uint page_mask = ~(0xFFFFFFFFu << page_shift);
 
   uint2 texel = coord.tilemap_texel;
-  texel += uint2(tile.lod_offset << SHADOW_PAGE_LOD);
+  texel += uint2(tile.lod_offset << page_shift);
   uint2 texel_page = (texel >> tile.lod) & page_mask;
   texel = (uint2(tile.page.xy) << page_shift) | texel_page;
 
@@ -668,7 +672,8 @@ ShadowCasterTraceResult shadow_trace_caster_id([[resource_table]] ShadowRenderDa
 
     ShadowTracingSample samp = shadow_map_trace_sample(srd, state, ray);
     if (!samp.skip_sample) {
-      caster_id = shadow_caster_id_read(srd, shadow_caster_sample_coord(ray, state.ray_time));
+      caster_id = shadow_caster_id_read(
+          srd, shadow_caster_sample_coord(ray, state.ray_time), int(ray.light.shadow_page_lod));
     }
     shadow_map_trace_hit_check(state, samp, i == sample_count);
   }
