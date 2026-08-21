@@ -346,9 +346,9 @@ eShadowProjectionType ShadowDirectional::directional_distribution_type_get(const
     /* Narrow FOV (< ~45°): cascade is more efficient than clipmap.
      * screen_diagonal_length ≈ 2*tan(diag_fov/2). Threshold 1.2 ≈ 45° hfov. */
     const CameraData &cam_data = camera.data_get();
-    if (finite_or_default(cam_data.screen_diagonal_length, 1.0f) < 1.2f) {
-      return SHADOW_PROJECTION_CASCADE;
-    }
+    //if (finite_or_default(cam_data.screen_diagonal_length, 1.0f) < 1.2f) {
+    //  return SHADOW_PROJECTION_CASCADE;
+    //}
     return SHADOW_PROJECTION_CLIPMAP;
   }
   return SHADOW_PROJECTION_CASCADE;
@@ -574,7 +574,7 @@ ShadowDirectional::LevelSpan ShadowDirectional::clipmap_level_range(const Camera
   /* Keep the smallest LOD whose coverage radius (0.5 * exp2(lvl)) still covers the near clip
    * plane. Levels narrower than the camera near distance are never useful, so drop them to save
    * tilemap budget. The level may still be negative for small scenes. */
-  int min_level = ceil(log2(2.0f * max_ff(cam_data.clip_near, 1e-8f)));
+  int min_level = ceil(log2(max_ff(cam_data.clip_near, 1e-8f)));
   /* Covers the farthest points of the view. */
   int max_level = ceil(log2(cam.bound_radius() + distance(cam.bound_center(), cam.position())));
 
