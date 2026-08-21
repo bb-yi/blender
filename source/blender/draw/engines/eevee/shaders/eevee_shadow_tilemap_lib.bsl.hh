@@ -174,6 +174,8 @@ float shadow_directional_level_fractional(LightData light, float3 lP)
      * we need to multiply by 2 to get the lod level which covers the following range:
      * [-coverage_get(lod)/2..coverage_get(lod)/2] */
 
+    lod = log2(shadow_directional_clipmap_scale(light, lP) * narrowing);
+
     lod = max(lod, light.lod_min);
   }
   else {

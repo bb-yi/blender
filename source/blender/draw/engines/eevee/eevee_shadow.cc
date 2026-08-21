@@ -571,8 +571,10 @@ ShadowDirectional::LevelSpan ShadowDirectional::clipmap_level_range(const Camera
   using namespace blender::math;
 
   const CameraData &cam_data = cam.data_get();
-  /* Covers the closest points of the view. */
-  int min_level = floor(log2(max_ff(cam_data.clip_near, 1e-8f)));
+  /* Keep the smallest LOD whose coverage radius (0.5 * exp2(lvl)) still covers the near clip
+   * plane. Levels narrower than the camera near distance are never useful, so drop them to save
+   * tilemap budget. The level may still be negative for small scenes. */
+  int min_level = ceil(log2(2.0f * max_ff(cam_data.clip_near, 1e-8f)));
   /* Covers the farthest points of the view. */
   int max_level = ceil(log2(cam.bound_radius() + distance(cam.bound_center(), cam.position())));
 

@@ -583,7 +583,8 @@ ShadowDebugOutput debug_shadow_lod_panels([[resource_table]] const ShadowDebug &
   }
 
   float2 tilemap_uv = (float2(panel_p) + 0.5f) / float(panel_size);
-  ShadowCoordinates coord = shadow_coordinate_from_uvs(tilemap_index, tilemap_uv);
+  ShadowCoordinates coord = shadow_coordinate_from_uvs(
+      tilemap_index, tilemap_uv, int(light.shadow_page_lod));
   ShadowSamplingTile tile = shadow_tile_load(
       srd.shadow_tilemaps_tx, coord.tilemap_tile, coord.tilemap_index);
   if (!tile.is_valid) {
@@ -591,7 +592,7 @@ ShadowDebugOutput debug_shadow_lod_panels([[resource_table]] const ShadowDebug &
     return debug_shadow_color_output(checker ? float3(0.18f) : float3(0.07f));
   }
 
-  float shadow_depth = srd.read_depth(coord);
+  float shadow_depth = srd.read_depth(coord, int(light.shadow_page_lod));
   float clip_near = orderedIntBitsToFloat(light.clip_near);
   float clip_far = orderedIntBitsToFloat(light.clip_far);
   float clip_range = max(clip_far - clip_near, 1e-8f);
