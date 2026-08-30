@@ -800,6 +800,7 @@ namespace blender::eevee
       /* Critical section. Potential gpu::Shader concurrent usage. */
       DRW_submission_start();
 
+      dlss5_reset_ = discard_viewport_history_ || (is_viewport() && sampling.is_reset());
       sampling.step();
       film.update_sample_table();
       uniform_data.push_update();
