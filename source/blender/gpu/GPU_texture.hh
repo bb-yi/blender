@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <string>
 
 #include "BLI_assert.h"
@@ -27,6 +28,20 @@ struct GPUPixelBuffer;
 namespace gpu {
 class VertBuf;
 }
+
+enum class GPUExternalTextureType : uint8_t {
+  D3D12_RESOURCE = 0,
+};
+
+/**
+ * Opaque external texture handle passed to a backend-specific import path.
+ *
+ * The handle ownership is transferred to the backend when import succeeds.
+ */
+struct GPUExternalTextureHandle {
+  GPUExternalTextureType type = GPUExternalTextureType::D3D12_RESOURCE;
+  uint64_t handle = 0;
+};
 
 namespace gpu {
 
@@ -822,6 +837,12 @@ gpu::Texture *GPU_texture_create_2d(const char *name,
                                     gpu::TextureFormat format,
                                     eGPUTextureUsage usage,
                                     const float *data);
+gpu::Texture *GPU_texture_create_2d_from_external(const char *name,
+                                                   int width,
+                                                   int height,
+                                                   gpu::TextureFormat format,
+                                                   eGPUTextureUsage usage,
+                                                   const GPUExternalTextureHandle &external);
 gpu::Texture *GPU_texture_create_2d_array(const char *name,
                                           int width,
                                           int height,

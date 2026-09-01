@@ -729,6 +729,34 @@ class RENDER_PT_eevee_sampling_viewport(RenderButtonsPanel, Panel):
         # Add SSS sample count here.
 
 
+class RENDER_PT_eevee_dlss5(RenderButtonsPanel, Panel):
+    bl_label = "DLSS5"
+    bl_options = {'DEFAULT_CLOSED'}
+    COMPAT_ENGINES = {'BLENDER_EEVEE'}
+
+    @classmethod
+    def poll(cls, context):
+        return (context.engine in cls.COMPAT_ENGINES)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+
+        props = context.scene.eevee
+        layout.prop(props, "dlss5_mode")
+
+        enabled = props.dlss5_mode == 'DLSSNR'
+        col = layout.column(align=True)
+        col.active = enabled
+        col.prop(props, "dlss5_intensity")
+        col.prop(props, "dlss5_local_tone_strength")
+        col.prop(props, "dlss5_local_structure_strength")
+        col.prop(props, "dlss5_skin_structure_strength")
+        col.prop(props, "dlss5_use_auto_mask")
+        col.prop(props, "dlss5_ui_correction")
+
+
 class RENDER_PT_eevee_sampling_render(RenderButtonsPanel, Panel):
     bl_label = "Render"
     bl_parent_id = "RENDER_PT_eevee_sampling"
@@ -1227,6 +1255,7 @@ classes = (
     RENDER_PT_context,
     RENDER_PT_eevee_sampling,
     RENDER_PT_eevee_sampling_viewport,
+    RENDER_PT_eevee_dlss5,
     RENDER_PT_eevee_sampling_render,
     RENDER_PT_eevee_sampling_shadows,
     RENDER_PT_eevee_sampling_advanced,

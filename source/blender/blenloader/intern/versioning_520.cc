@@ -23,6 +23,7 @@
 #include "DNA_screen_types.h"
 #include "DNA_windowmanager_types.h"
 #include "DNA_xr_types.h"
+#include "DNA_view3d_types.h"
 
 #include "BLI_listbase_iterator.hh"
 #include "BLI_string.h"
@@ -642,6 +643,32 @@ void do_versions_after_linking_520(FileData *fd, Main *bmain)
     version_scene_time_shader_nodes(bmain);
   }
 
+
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 49)) {
+    for (bScreen &screen : bmain->screens) {
+      for (ScrArea &area : screen.areabase) {
+        for (SpaceLink &sl : area.spacedata) {
+          if (sl.spacetype == SPACE_VIEW3D) {
+            View3D *v3d = reinterpret_cast<View3D *>(&sl);
+            /* New overlay field is zero in old files; 0 is invalid for signed mapping. */
+            if (!(v3d->overlay.value_info_range > 0.0f)) {
+              v3d->overlay.value_info_range = 1.0f;
+            }
+          }
+        }
+      }
+    }
+    for (Scene &scene : bmain->scenes) {
+      scene.eevee.dlss5_intensity = 1.0f;
+      scene.eevee.dlss5_local_tone_strength = 1.0f;
+      scene.eevee.dlss5_local_structure_strength = 1.0f;
+      scene.eevee.dlss5_skin_structure_strength = -1.0f;
+      scene.eevee.dlss5_mode = SCE_EEVEE_DLSS5_OFF;
+      scene.eevee.dlss5_use_auto_mask = false;
+      scene.eevee.dlss5_ui_correction = false;
+    }
+  }
+
   /**
    * Always bump subversion in BKE_blender_version.h when adding versioning
    * code here, and wrap it inside a MAIN_VERSION_FILE_ATLEAST check.
@@ -1039,6 +1066,32 @@ void blo_do_versions_520(FileData * /*fd*/, Library * /*lib*/, Main *bmain)
     }
     FOREACH_NODETREE_END;
     version_npr_image_sample_offset_socket_identifier(bmain);
+  }
+
+
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 49)) {
+    for (bScreen &screen : bmain->screens) {
+      for (ScrArea &area : screen.areabase) {
+        for (SpaceLink &sl : area.spacedata) {
+          if (sl.spacetype == SPACE_VIEW3D) {
+            View3D *v3d = reinterpret_cast<View3D *>(&sl);
+            /* New overlay field is zero in old files; 0 is invalid for signed mapping. */
+            if (!(v3d->overlay.value_info_range > 0.0f)) {
+              v3d->overlay.value_info_range = 1.0f;
+            }
+          }
+        }
+      }
+    }
+    for (Scene &scene : bmain->scenes) {
+      scene.eevee.dlss5_intensity = 1.0f;
+      scene.eevee.dlss5_local_tone_strength = 1.0f;
+      scene.eevee.dlss5_local_structure_strength = 1.0f;
+      scene.eevee.dlss5_skin_structure_strength = -1.0f;
+      scene.eevee.dlss5_mode = SCE_EEVEE_DLSS5_OFF;
+      scene.eevee.dlss5_use_auto_mask = false;
+      scene.eevee.dlss5_ui_correction = false;
+    }
   }
 
   /**

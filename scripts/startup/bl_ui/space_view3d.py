@@ -7131,6 +7131,42 @@ class VIEW3D_PT_overlay_text(Panel):
         sub.prop(overlay, "show_performance", text="Performance")
 
 
+class VIEW3D_PT_overlay_value_info(Panel):
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'HEADER'
+    bl_parent_id = "VIEW3D_PT_overlay"
+    bl_label = "Value Info"
+
+    def draw_header(self, context):
+        self.layout.prop(context.space_data.overlay, "show_value_info", text="")
+
+    def draw(self, context):
+        layout = self.layout
+        view = context.space_data
+        overlay = view.overlay
+        shading = view.shading
+        view_layer = context.view_layer
+
+        layout.active = overlay.show_overlays and overlay.show_value_info
+        layout.label(text="Mouse: raw R/G/B under cursor")
+        layout.prop(overlay, "value_info_source", text="Sample")
+
+        if overlay.value_info_source == 'AOV':
+            col = layout.column(align=True)
+            col.prop_search(shading, "aov_name", view_layer, "aovs", text="AOV")
+            col.label(text="View stays on current Render Pass")
+        else:
+            layout.label(text="Reads current display (Render Pass)")
+
+        col = layout.column(align=True)
+        col.prop(overlay, "show_value_info_signed", text="Signed Color")
+        sub = col.column(align=True)
+        sub.active = overlay.show_value_info_signed
+        sub.prop(overlay, "value_info_range", text="Range")
+        if overlay.show_value_info_signed:
+            layout.label(text="Swatch only: 0.5 gray = 0")
+
+
 class VIEW3D_PT_overlay_shadows(Panel):
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'HEADER'
@@ -9515,6 +9551,7 @@ classes = (
     VIEW3D_PT_overlay,
     VIEW3D_PT_overlay_guides,
     VIEW3D_PT_overlay_text,
+    VIEW3D_PT_overlay_value_info,
     VIEW3D_PT_overlay_shadows,
     VIEW3D_PT_overlay_object,
     VIEW3D_PT_overlay_geometry,

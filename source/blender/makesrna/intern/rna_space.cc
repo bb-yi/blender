@@ -5059,6 +5059,7 @@ static void rna_def_space_view3d_shading(BlenderRNA *brna)
   RNA_def_property_update(prop,
                           NC_SPACE | ND_SPACE_VIEW3D | NS_VIEW3D_SHADING,
                           "rna_SpaceView3D_shading_use_compositor_update");
+
 }
 
 static void rna_def_space_view3d_overlay(BlenderRNA *brna)
@@ -5342,6 +5343,61 @@ static void rna_def_space_view3d_overlay(BlenderRNA *brna)
   RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
   RNA_def_property_ui_text(
       prop, "View Attribute Text", "Show attribute values as text in viewport");
+  RNA_def_property_update(prop, NC_SPACE | ND_SPACE_VIEW3D, nullptr);
+
+  prop = RNA_def_property(srna, "show_value_info", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "overlay.flag", V3D_OVERLAY_VALUE_INFO);
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_ui_text(
+      prop,
+      "Value Info",
+      "Show floating-point color/value under the mouse in the 3D Viewport. "
+      "Sample Source can read the display buffer or an AOV without switching the view. "
+      "Combined display may clamp negatives to zero; AOV samples stay unclamped");
+  RNA_def_property_update(prop, NC_SPACE | ND_SPACE_VIEW3D, nullptr);
+
+  static const EnumPropertyItem value_info_source_items[] = {
+      {V3D_VALUE_INFO_SOURCE_DISPLAY,
+       "DISPLAY",
+       0,
+       "Display",
+       "Sample the current viewport display buffer (current Render Pass)"},
+      {V3D_VALUE_INFO_SOURCE_AOV,
+       "AOV",
+       0,
+       "AOV",
+       "Sample an EEVEE AOV accumulation without changing the viewport image"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  prop = RNA_def_property(srna, "value_info_source", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "overlay.value_info_source");
+  RNA_def_property_enum_items(prop, value_info_source_items);
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_ui_text(prop,
+                           "Sample Source",
+                           "Where Value Info reads numbers from. AOV keeps the view on the "
+                           "current Render Pass (e.g. Combined)");
+  RNA_def_property_update(prop, NC_SPACE | ND_SPACE_VIEW3D, nullptr);
+
+  prop = RNA_def_property(srna, "show_value_info_signed", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "overlay.flag", V3D_OVERLAY_VALUE_INFO_SIGNED);
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_ui_text(prop,
+                           "Signed Color",
+                           "HUD color swatch only: map so 0.5 gray is zero (darker=negative, "
+                           "brighter=positive). Number readout still shows raw values");
+  RNA_def_property_update(prop, NC_SPACE | ND_SPACE_VIEW3D, nullptr);
+
+  prop = RNA_def_property(srna, "value_info_range", PROP_FLOAT, PROP_NONE);
+  RNA_def_property_float_sdna(prop, nullptr, "overlay.value_info_range");
+  RNA_def_property_float_default(prop, 1.0f);
+  RNA_def_property_range(prop, 1e-4f, 1e6f);
+  RNA_def_property_ui_range(prop, 0.01f, 100.0f, 1, 3);
+  RNA_def_property_ui_text(prop,
+                           "Range",
+                           "Absolute value mapped to full signed HUD swatch "
+                           "(|value| >= Range saturates the swatch encoding)");
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
   RNA_def_property_update(prop, NC_SPACE | ND_SPACE_VIEW3D, nullptr);
 
   prop = RNA_def_property(srna, "show_paint_wire", PROP_BOOLEAN, PROP_NONE);

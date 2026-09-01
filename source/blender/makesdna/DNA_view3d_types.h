@@ -304,8 +304,27 @@ enum eView3DOverlay_Flag : int {
   V3D_OVERLAY_VIEWER_ATTRIBUTE_TEXT = (1 << 18),
   V3D_OVERLAY_PERFORMANCE = (1 << 19),
   V3D_OVERLAY_SHOW_SHADOW_LOD = (1 << 20),
+  /* Bits 21-27 store Shadow LOD opacity (see mask below). */
+  /** Show floating-point pixel values under the mouse (View3D overlay). */
+  V3D_OVERLAY_VALUE_INFO = (1 << 28),
+  /**
+   * Value Info HUD swatch only: map raw values so 0.5 gray is zero
+   * (darker = negative, brighter = positive). Number readout stays raw.
+   */
+  V3D_OVERLAY_VALUE_INFO_SIGNED = (1 << 29),
 };
 ENUM_OPERATORS(eView3DOverlay_Flag)
+
+/** #View3DOverlay.value_info_source */
+enum eView3DOverlay_ValueInfoSource : char {
+  /** Sample the current viewport display buffer (whatever Render Pass shows). */
+  V3D_VALUE_INFO_SOURCE_DISPLAY = 0,
+  /**
+   * Sample an EEVEE AOV accumulation layer without changing the display pass
+   * (viewport image stays Combined / current pass).
+   */
+  V3D_VALUE_INFO_SOURCE_AOV = 1,
+};
 
 /* Store the Shadow LOD opacity as percent + 1. Zero keeps older files at the 70% default. */
 #define V3D_OVERLAY_SHADOW_LOD_OPACITY_SHIFT 21
@@ -701,6 +720,16 @@ struct View3DOverlay {
 
   /** Curves sculpt mode settings. */
   float sculpt_curves_cage_opacity = 0;
+
+  /**
+   * Absolute range used by signed HUD swatch:
+   * swatch = clamp(value / range * 0.5 + 0.5, 0, 1). Default 1.0.
+   */
+  float value_info_range = 1.0f;
+  /** #eView3DOverlay_ValueInfoSource */
+  char value_info_source = V3D_VALUE_INFO_SOURCE_DISPLAY;
+  /* Keep struct size 8-byte aligned for View3D member layout. */
+  char _pad_value_info[3] = {};
 };
 
 struct View3D_Runtime {

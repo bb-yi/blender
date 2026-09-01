@@ -461,7 +461,11 @@ ShaderGroups ShaderModule::static_shaders_load(const ShaderGroups request_bits,
                                        FILM_PASS_CONVERT_DEPTH,
                                        FILM_PASS_CONVERT_VALUE,
                                        FILM_PASS_CONVERT_COLOR,
-                                       FILM_PASS_CONVERT_CRYPTOMATTE};
+                                       FILM_PASS_CONVERT_CRYPTOMATTE,
+                                       DLSS5_COLOR_CONVERT,
+                                       DLSS5_HDR_RECONSTRUCT,
+                                       DLSS5_DEPTH_CONVERT,
+                                       DLSS5_VELOCITY_CONVERT};
     request(FILM_SHADERS, AS_SPAN(shader_list));
   }
   {
@@ -686,6 +690,14 @@ const char *ShaderModule::static_shader_create_info_name_get(eShaderType shader_
       return "eevee_film_pass_convert_color";
     case FILM_PASS_CONVERT_CRYPTOMATTE:
       return "eevee_film_pass_convert_cryptomatte";
+    case DLSS5_COLOR_CONVERT:
+      return "eevee_dlss5_color_convert";
+    case DLSS5_HDR_RECONSTRUCT:
+      return "eevee_dlss5_hdr_reconstruct";
+    case DLSS5_DEPTH_CONVERT:
+      return "eevee_dlss5_depth_convert";
+    case DLSS5_VELOCITY_CONVERT:
+      return "eevee_dlss5_velocity_convert";
     case FILTER_GRAPH_INPUT_COPY:
       return "eevee_filter_graph_input_copy";
     case FILTER_GRAPH_RESOLVE:

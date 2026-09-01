@@ -99,6 +99,7 @@ set(SRC
   engines/eevee/eevee_cryptomatte.cc
   engines/eevee/eevee_depth_of_field.cc
   engines/eevee/eevee_dlss5.cc
+  engines/eevee/dlss5_d3d12.cc
   engines/eevee/eevee_engine.cc
   engines/eevee/eevee_filter_material.cc
   engines/eevee/eevee_film.cc
@@ -202,6 +203,7 @@ set(SRC
   engines/eevee/eevee_cryptomatte.hh
   engines/eevee/eevee_depth_of_field.hh
   engines/eevee/eevee_dlss5.hh
+  engines/eevee/dlss5_d3d12.hh
   engines/eevee/eevee_engine.h
   engines/eevee/eevee_filter_material.hh
   engines/eevee/eevee_film.hh
@@ -406,6 +408,7 @@ set(GLSL_SRC
   engines/eevee/shaders/eevee_cryptomatte_sort.bsl.hh
   engines/eevee/shaders/eevee_debug.bsl.hh
   engines/eevee/shaders/eevee_deferred_eval.bsl.hh
+  engines/eevee/shaders/eevee_dlss5.bsl.hh
   engines/eevee/shaders/eevee_deferred_combine.bsl.hh
   engines/eevee/shaders/eevee_deferred_combine_lib.glsl
   engines/eevee/shaders/eevee_deferred_thickness_amend.bsl.hh
@@ -884,6 +887,13 @@ list(APPEND LIB
   PRIVATE bf::animrig
   bf_draw_shaders
 )
+
+if(WIN32)
+  list(APPEND LIB
+    PRIVATE d3d12
+    PRIVATE dxgi
+  )
+endif()
 
 set(GLSL_SOURCE_CONTENT "")
 set(GLSL_METADATA_CONTENT "")

@@ -65,6 +65,17 @@ void DRW_draw_view(const bContext *C);
 void DRW_draw_region_engine_info(int xoffset, int *yoffset, int line_height);
 
 /**
+ * Sample one pixel from an EEVEE viewport AOV accumulation layer.
+ * Uses display/region coordinates (bottom-left origin). Does not change the
+ * viewport display pass. Value AOVs fill RGB with the scalar, A=1.
+ * \return false if EEVEE/AOV/pixel is unavailable.
+ */
+bool DRW_viewport_aov_color_sample(GPUViewport *viewport,
+                                   const char *aov_name,
+                                   const int mval[2],
+                                   float r_col[4]);
+
+/**
  * \param context: can be nullptr, optionally passed to the DRWContext for draw handlers/callbacks.
  * \param viewport: can be nullptr, in this case we create one.
  */

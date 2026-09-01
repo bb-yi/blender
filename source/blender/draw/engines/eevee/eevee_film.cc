@@ -173,6 +173,68 @@ gpu::Texture *Film::get_aov_texture(ViewLayerAOV *aov)
   return accum_tx.layer_view(index);
 }
 
+bool Film::sample_aov_pixel(const char *aov_name, int2 display_texel, float4 &r_color)
+{
+  if (aov_name == nullptr || aov_name[0] == 0 || inst_.view_layer == nullptr) {
+    return false;
+  }
+
+  ViewLayerAOV *aov = static_cast<ViewLayerAOV *>(
+      BLI_findstring(&inst_.view_layer->aovs, aov_name, offsetof(ViewLayerAOV, name)));
+  if (aov == nullptr || (aov->flag & AOV_CONFLICT) != 0) {
+    return false;
+  }
+
+  gpu::Texture *pass_tx = this->get_aov_texture(aov);
+  if (pass_tx == nullptr) {
+    return false;
+  }
+
+  const int2 film_texel = display_texel - data_.offset;
+  const int w = GPU_texture_width(pass_tx);
+  const int h = GPU_texture_height(pass_tx);
+  if (film_texel.x < 0 || film_texel.y < 0 || film_texel.x >= w || film_texel.y >= h) {
+    return false;
+  }
+
+  /* Never attach the live AOV texture to a temporary framebuffer: that can detach it from
+   * engine resources. Copy into a HOST_READ texture, then read back. */
+  const bool is_value = (aov->type == AOV_TYPE_VALUE);
+  const gpu::TextureFormat format = is_value ? gpu::TextureFormat::SFLOAT_16 :
+                                               gpu::TextureFormat::SFLOAT_16_16_16_16;
+  gpu::Texture *copy_tx = GPU_texture_create_2d(
+      "value_info_aov_copy", w, h, 1, format, GPU_TEXTURE_USAGE_HOST_READ, nullptr);
+  if (copy_tx == nullptr) {
+    return false;
+  }
+
+  GPU_texture_copy(copy_tx, pass_tx);
+  GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE);
+
+  bool ok = false;
+  if (is_value) {
+    float *data = static_cast<float *>(GPU_texture_read(copy_tx, GPU_DATA_FLOAT, 0));
+    if (data != nullptr) {
+      const float v = data[film_texel.y * w + film_texel.x];
+      r_color = float4(v, v, v, 1.0f);
+      MEM_delete(data);
+      ok = true;
+    }
+  }
+  else {
+    float *data = static_cast<float *>(GPU_texture_read(copy_tx, GPU_DATA_FLOAT, 0));
+    if (data != nullptr) {
+      const float *px = data + (film_texel.y * w + film_texel.x) * 4;
+      r_color = float4(px[0], px[1], px[2], px[3]);
+      MEM_delete(data);
+      ok = true;
+    }
+  }
+
+  GPU_texture_free(copy_tx);
+  return ok;
+}
+
 float *Film::read_native_postfx_output(ViewLayerNativePostFXOutput *output)
 {
   gpu::Texture *pass_tx = this->get_native_postfx_output_texture(output);
@@ -1057,8 +1119,47 @@ void Film::accumulate(View &view,
   has_outline_input_ = outline_input_tx != nullptr;
   use_outline_in_combined_ = outline_combined_tx != nullptr;
   display_only_ = false;
+  /* DLSS-NR must see the current post-FX sample. combined_output_tx_ is Film's
+   * accumulated history target and is already temporally resolved by this point. */
+  gpu::Texture *dlss_display_tx = nullptr;
   inst_.manager->submit(accumulate_ps_, view);
-  inst_.manager->submit(copy_ps_, view);
+  if (inst_.is_viewport() || inst_.is_image_render) {
+    dlss_display_tx = inst_.dlss5.process({
+        combined_final_tx,
+        combined_output_tx_.gpu_texture(),
+        inst_.render_buffers.depth_tx,
+        inst_.render_buffers.vector_tx,
+        data_.extent,
+        data_.extent,
+        inst_.film.pixel_jitter_get(),
+        inst_.dlss5_reset(),
+        inst_.is_viewport(),
+        true,
+        true,
+        true,
+        false,
+        exp2f(inst_.scene->view_settings.exposure),
+    });
+  }
+  const bool dlss_active = dlss_display_tx != nullptr &&
+                           inst_.dlss5.display_texture() == dlss_display_tx;
+  if (dlss_active) {
+    GPU_texture_copy(combined_output_tx_.gpu_texture(), dlss_display_tx);
+    GPU_memory_barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_TEXTURE_UPDATE);
+    if (inst_.is_viewport()) {
+      DefaultTextureList *dtxl = inst_.draw_ctx->viewport_texture_list_get();
+      if (dtxl->color != nullptr &&
+          GPU_texture_width(dtxl->color) == GPU_texture_width(dlss_display_tx) &&
+          GPU_texture_height(dtxl->color) == GPU_texture_height(dlss_display_tx))
+      {
+        GPU_texture_copy(dtxl->color, dlss_display_tx);
+        GPU_memory_barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_SHADER_IMAGE_ACCESS);
+      }
+    }
+  }
+  if (!dlss_active) {
+    inst_.manager->submit(copy_ps_, view);
+  }
 
   combined_tx_.swap();
   weight_tx_.swap();
@@ -1094,6 +1195,19 @@ void Film::display()
   display_only_ = true;
   DRW_manager_get()->submit(accumulate_ps_, drw_view);
 
+  /* DLSS5 display path: if DLSS was active in the last accumulate call, blit its
+   * scene-linear output directly to the viewport color texture, overriding the
+   * display-only accumulate_ps_ output. */
+  gpu::Texture *dlss_display_tx = inst_.dlss5.display_texture();
+  DefaultTextureList *dtxl = inst_.draw_ctx->viewport_texture_list_get();
+  if (dlss_display_tx != nullptr && dtxl->color != nullptr &&
+      GPU_texture_width(dtxl->color) == GPU_texture_width(dlss_display_tx) &&
+      GPU_texture_height(dtxl->color) == GPU_texture_height(dlss_display_tx))
+  {
+    GPU_texture_copy(dtxl->color, dlss_display_tx);
+    GPU_memory_barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_SHADER_IMAGE_ACCESS);
+  }
+
   inst_.render_buffers.release();
 
   /* IMPORTANT: Do not swap! No accumulation has happened. */
@@ -1106,7 +1220,18 @@ void Film::cryptomatte_sort()
 
 float *Film::read_pass(eViewLayerEEVEEPassType pass_type, int layer_offset)
 {
-  gpu::Texture *pass_tx = this->get_pass_texture(pass_type, layer_offset);
+  gpu::Texture *pass_tx = nullptr;
+  if (!inst_.is_viewport() && pass_type == EEVEE_RENDER_PASS_COMBINED) {
+    gpu::Texture *dlss_tx = inst_.dlss5.display_texture();
+    if (dlss_tx != nullptr && GPU_texture_width(dlss_tx) == data_.extent.x &&
+        GPU_texture_height(dlss_tx) == data_.extent.y)
+    {
+      pass_tx = dlss_tx;
+    }
+  }
+  if (pass_tx == nullptr) {
+    pass_tx = this->get_pass_texture(pass_type, layer_offset);
+  }
 
   GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE);
 

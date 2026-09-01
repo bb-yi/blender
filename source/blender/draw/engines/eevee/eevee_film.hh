@@ -155,6 +155,12 @@ class Film {
   gpu::Texture *get_aov_texture(ViewLayerAOV *aov);
   gpu::Texture *get_native_postfx_output_texture(ViewLayerNativePostFXOutput *output);
 
+  /**
+   * Sample one pixel from an AOV accumulation layer using display/region coordinates.
+   * Does not change the viewport display pass. Value AOVs fill RGB with the scalar.
+   */
+  bool sample_aov_pixel(const char *aov_name, int2 display_texel, float4 &r_color);
+
   void write_viewport_compositor_passes();
 
   /** Returns shading views internal resolution. Includes overscan pixels. */

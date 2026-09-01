@@ -96,6 +96,7 @@
 
 #include "engines/compositor/compositor_engine.h"
 #include "engines/eevee/eevee_engine.h"
+#include "engines/eevee/eevee_instance.hh"
 #include "engines/external/external_engine.h"
 #include "engines/gpencil/gpencil_engine.hh"
 #include "engines/image/image_engine.h"
@@ -517,6 +518,46 @@ draw::TextureFromPool &DRW_viewport_pass_texture_get(const char *pass_name)
 bool DRW_viewport_pass_texture_exists(const char *pass_name)
 {
   return drw_get().view_data_active->viewport_compositor_passes.contains(pass_name);
+}
+
+bool DRW_viewport_aov_color_sample(GPUViewport *viewport,
+                                   const char *aov_name,
+                                   const int mval[2],
+                                   float r_col[4])
+{
+  if (viewport == nullptr || aov_name == nullptr || aov_name[0] == '\0' || r_col == nullptr ||
+      mval == nullptr)
+  {
+    return false;
+  }
+  if (GPU_context_active_get() == nullptr) {
+    return false;
+  }
+
+  DRWData **data_p = GPU_viewport_data_get(viewport);
+  if (data_p == nullptr || *data_p == nullptr) {
+    return false;
+  }
+
+  const int view = GPU_viewport_active_view_get(viewport);
+  DRWViewData *view_data = (*data_p)->view_data[view];
+  if (view_data == nullptr || view_data->eevee.instance == nullptr) {
+    return false;
+  }
+
+  DrawEngine *engine = view_data->eevee.instance;
+  if (!engine->used) {
+    return false;
+  }
+
+  auto *inst = static_cast<eevee::Instance *>(engine);
+  float4 color(0.0f);
+  if (!inst->film.sample_aov_pixel(aov_name, int2(mval[0], mval[1]), color)) {
+    return false;
+  }
+
+  copy_v4_fl4(r_col, color.x, color.y, color.z, color.w);
+  return true;
 }
 
 void DRW_viewport_request_redraw()

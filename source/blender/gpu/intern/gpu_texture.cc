@@ -10,6 +10,7 @@
 
 #include "DNA_userdef_types.h"
 
+#include "GPU_context.hh"
 #include "GPU_framebuffer.hh"
 #include "GPU_texture.hh"
 
@@ -177,6 +178,24 @@ bool Texture::init_view(Texture *src,
   return this->init_internal(src, mip_start, layer_start, use_stencil);
 }
 
+bool Texture::init_external_2D(const int w,
+                               const int h,
+                               const TextureFormat format,
+                               const GPUExternalTextureHandle &external)
+{
+  w_ = w;
+  h_ = h;
+  d_ = 0;
+  mipmaps_ = 1;
+  format_ = format;
+  format_flag_ = to_format_flag(format);
+  type_ = GPU_TEXTURE_2D;
+  if ((format_flag_ & (GPU_FORMAT_DEPTH_STENCIL | GPU_FORMAT_INTEGER)) == 0) {
+    sampler_state.filtering = GPU_SAMPLER_FILTERING_LINEAR;
+  }
+  return this->init_internal_external_2D(external);
+}
+
 void Texture::usage_set(eGPUTextureUsage usage_flags)
 {
   gpu_image_usage_flags_ = usage_flags;
@@ -329,6 +348,27 @@ gpu::Texture *GPU_texture_create_2d(const char *name,
                                     const float *data)
 {
   return gpu_texture_create(name, width, height, 0, GPU_TEXTURE_2D, mip_len, format, usage, data);
+}
+
+gpu::Texture *GPU_texture_create_2d_from_external(
+    const char *name,
+    const int width,
+    const int height,
+    const TextureFormat format,
+    const eGPUTextureUsage usage,
+    const GPUExternalTextureHandle &external)
+{
+  if (GPU_backend_get_type() != GPU_BACKEND_VULKAN) {
+    return nullptr;
+  }
+
+  Texture *texture = GPUBackend::get()->texture_alloc(name);
+  texture->usage_set(usage);
+  if (!texture->init_external_2D(width, height, format, external)) {
+    delete texture;
+    return nullptr;
+  }
+  return texture;
 }
 
 gpu::Texture *GPU_texture_create_2d_array(const char *name,

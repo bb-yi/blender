@@ -46,6 +46,7 @@
 #include "DNA_armature_types.h"
 #include "DNA_camera_types.h"
 #include "DNA_key_types.h"
+#include "DNA_layer_types.h"
 #include "DNA_object_types.h"
 #include "DNA_view3d_types.h"
 #include "DNA_windowmanager_types.h"
@@ -71,6 +72,7 @@
 #include "GPU_immediate_util.hh"
 #include "GPU_matrix.hh"
 #include "GPU_state.hh"
+#include "GPU_texture.hh"
 #include "GPU_viewport.hh"
 
 #include "MEM_guardedalloc.h"
@@ -1479,6 +1481,235 @@ static void draw_performance_stats(Depsgraph *depsgraph,
   draw_time_stat(labels[TOTAL], total_time);
 }
 
+
+
+
+/* -------------------------------------------------------------------- */
+/** \name Value Info HUD (safe readback)
+ *
+ * Overlay-only pixel probe. Must not:
+ * - Use paint-cursors (steals overlay/gizmo path when region is active)
+ * - Attach live viewport/AOV textures to temporary framebuffers (detaches them)
+ *
+ * Sample via texture copy + HOST_READ. Draw only from region_info after text overlays.
+ * \{ */
+
+static float value_info_signed_unit(float v, float range)
+{
+  const float r = max_ff(range, 1e-4f);
+  return clamp_f(v / r * 0.5f + 0.5f, 0.0f, 1.0f);
+}
+
+static const char *view3d_value_info_resolve_aov_name(const View3D *v3d, const ViewLayer *view_layer)
+{
+  if (v3d->shading.aov_name[0] != 0) {
+    return v3d->shading.aov_name;
+  }
+  if (view_layer != nullptr && view_layer->active_aov != nullptr) {
+    return view_layer->active_aov->name;
+  }
+  return "";
+}
+
+/**
+ * Safe display-buffer sample: copy viewport color texture then read one pixel.
+ * Never re-binds the live viewport color attachment.
+ */
+static bool view3d_value_info_sample_display(ARegion *region, const int mval[2], float r_col[4])
+{
+  GPUViewport *viewport = WM_draw_region_get_viewport(region);
+  if (viewport == nullptr) {
+    return false;
+  }
+
+  gpu::Texture *color_tex = GPU_viewport_color_texture(viewport, 0);
+  if (color_tex == nullptr) {
+    return false;
+  }
+
+  const int tex_w = GPU_texture_width(color_tex);
+  const int tex_h = GPU_texture_height(color_tex);
+  if (mval[0] < 0 || mval[1] < 0 || mval[0] >= tex_w || mval[1] >= tex_h) {
+    return false;
+  }
+
+  gpu::Texture *copy_tx = GPU_texture_create_2d("value_info_display_copy",
+                                                tex_w,
+                                                tex_h,
+                                                1,
+                                                gpu::TextureFormat::SFLOAT_16_16_16_16,
+                                                GPU_TEXTURE_USAGE_HOST_READ,
+                                                nullptr);
+  if (copy_tx == nullptr) {
+    return false;
+  }
+
+  GPU_texture_copy(copy_tx, color_tex);
+  GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE);
+
+  ushort4 *data = static_cast<ushort4 *>(GPU_texture_read(copy_tx, GPU_DATA_HALF_FLOAT, 0));
+  GPU_texture_free(copy_tx);
+  if (data == nullptr) {
+    return false;
+  }
+
+  const ushort4 pixel = data[mval[1] * tex_w + mval[0]];
+  MEM_delete(data);
+
+  r_col[0] = math::half_to_float(pixel.x);
+  r_col[1] = math::half_to_float(pixel.y);
+  r_col[2] = math::half_to_float(pixel.z);
+  r_col[3] = math::half_to_float(pixel.w);
+  return true;
+}
+
+static void view3d_draw_value_info(const bContext *C, ARegion *region, View3D *v3d)
+{
+  if ((v3d->flag2 & V3D_HIDE_OVERLAYS) != 0) {
+    return;
+  }
+  if ((v3d->overlay.flag & V3D_OVERLAY_VALUE_INFO) == 0) {
+    return;
+  }
+
+  wmWindow *win = CTX_wm_window(C);
+  if (win == nullptr || win->runtime == nullptr || win->runtime->eventstate == nullptr) {
+    return;
+  }
+
+  const int mval[2] = {
+      win->runtime->eventstate->xy[0] - region->winrct.xmin,
+      win->runtime->eventstate->xy[1] - region->winrct.ymin,
+  };
+
+  ViewLayer *view_layer = CTX_data_view_layer(C);
+  const bool use_aov = (v3d->overlay.value_info_source == V3D_VALUE_INFO_SOURCE_AOV);
+  const char *aov_name = view3d_value_info_resolve_aov_name(v3d, view_layer);
+
+  float col[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+  bool have_sample = false;
+  const char *status = nullptr;
+
+  const bool in_region = (mval[0] >= 0 && mval[1] >= 0 && mval[0] < region->winx &&
+                          mval[1] < region->winy);
+
+  if (!in_region) {
+    status = "out of view";
+  }
+  else if (use_aov) {
+    if (aov_name[0] == 0) {
+      status = "AOV:(none)";
+    }
+    else {
+      GPUViewport *viewport = WM_draw_region_get_viewport(region);
+      if (viewport == nullptr) {
+        status = "no viewport";
+      }
+      else if (!DRW_viewport_aov_color_sample(viewport, aov_name, mval, col)) {
+        status = "AOV unavailable";
+      }
+      else {
+        have_sample = true;
+      }
+    }
+  }
+  else if (!view3d_value_info_sample_display(region, mval, col)) {
+    status = "display sample failed";
+  }
+  else {
+    have_sample = true;
+  }
+
+  float range = v3d->overlay.value_info_range;
+  if (!(range > 0.0f)) {
+    range = 1.0f;
+  }
+  const bool use_signed = (v3d->overlay.flag & V3D_OVERLAY_VALUE_INFO_SIGNED) != 0;
+  const bool has_neg = have_sample && (col[0] < 0.0f || col[1] < 0.0f || col[2] < 0.0f);
+  const float mean = have_sample ? ((col[0] + col[1] + col[2]) / 3.0f) : 0.0f;
+
+  /* Draw after region_info text: keep GPU state local. */
+  const rcti *rect = ED_region_visible_rect(region);
+  const float ymin = float(rect->ymin);
+  const float ymax = ymin + float(int(UI_UNIT_Y * 1.15f));
+  const float xmin = float(rect->xmin);
+  const float xmax = float(rect->xmax + 1);
+  const float sw = float(UI_UNIT_X);
+  const float pad = 4.0f * UI_SCALE_FAC;
+
+  GPU_blend(GPU_BLEND_ALPHA);
+  GPUVertFormat *format = immVertexFormat();
+  uint pos = GPU_vertformat_attr_add(format, "pos", gpu::VertAttrType::SFLOAT_32_32);
+  immBindBuiltinProgram(GPU_SHADER_3D_UNIFORM_COLOR);
+  immUniformColor4ub(0, 0, 0, 190);
+  immRectf(pos, xmin, ymin, xmax, ymax);
+
+  float swatch[3] = {0.2f, 0.2f, 0.2f};
+  if (have_sample) {
+    if (use_signed) {
+      swatch[0] = value_info_signed_unit(col[0], range);
+      swatch[1] = value_info_signed_unit(col[1], range);
+      swatch[2] = value_info_signed_unit(col[2], range);
+    }
+    else {
+      copy_v3_v3(swatch, col);
+      clamp_v3(swatch, 0.0f, 1.0f);
+    }
+  }
+  immUniformColor3fv(swatch);
+  immRectf(pos, xmin + pad, ymin + pad, xmin + pad + sw, ymax - pad);
+  immUnbindProgram();
+  GPU_blend(GPU_BLEND_NONE);
+
+  char str[320];
+  if (have_sample) {
+    if (use_aov) {
+      SNPRINTF_UTF8(str,
+                    "X:%-4d Y:%-4d | R:%-.5f G:%-.5f B:%-.5f | Mean:%-.4f | AOV:%s%s",
+                    mval[0],
+                    mval[1],
+                    double(col[0]),
+                    double(col[1]),
+                    double(col[2]),
+                    double(mean),
+                    aov_name,
+                    has_neg ? " | NEG" : "");
+    }
+    else {
+      SNPRINTF_UTF8(str,
+                    "X:%-4d Y:%-4d | R:%-.5f G:%-.5f B:%-.5f | Mean:%-.4f | Display%s",
+                    mval[0],
+                    mval[1],
+                    double(col[0]),
+                    double(col[1]),
+                    double(col[2]),
+                    double(mean),
+                    has_neg ? " | NEG" : "");
+    }
+  }
+  else if (use_aov && aov_name[0] != 0) {
+    SNPRINTF_UTF8(str, "Value Info | AOV:%s | %s", aov_name, status ? status : "no sample");
+  }
+  else {
+    SNPRINTF_UTF8(str, "Value Info | %s", status ? status : "no sample");
+  }
+
+  BLF_size(blf_mono_font, 11.0f * UI_SCALE_FAC);
+  if (has_neg) {
+    BLF_color3ub(blf_mono_font, 255, 160, 160);
+  }
+  else if (!have_sample) {
+    BLF_color3ub(blf_mono_font, 220, 200, 120);
+  }
+  else {
+    BLF_color3ub(blf_mono_font, 255, 255, 255);
+  }
+  BLF_position(blf_mono_font, xmin + pad + sw + pad, ymin + 0.3f * UI_UNIT_Y, 0.0f);
+  BLF_draw(blf_mono_font, str, sizeof(str));
+}
+
+/** \} */
+
 void view3d_draw_region_info(const bContext *C, ARegion *region)
 {
   RegionView3D *rv3d = static_cast<RegionView3D *>(region->regiondata);
@@ -1612,6 +1843,9 @@ void view3d_draw_region_info(const bContext *C, ARegion *region)
   }
 
   BLF_batch_draw_end();
+
+  /* Value Info: sample+draw after all other region text (no paint-cursor). */
+  view3d_draw_value_info(C, region, v3d);
 }
 
 /** \} */

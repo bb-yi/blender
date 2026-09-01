@@ -2106,6 +2106,12 @@ void rna_Scene_render_update(Main * /*bmain*/, Scene * /*scene*/, PointerRNA *pt
   DEG_id_tag_update(&scene->id, ID_RECALC_SYNC_TO_EVAL);
 }
 
+static void rna_SceneEEVEE_dlss5_update(Main *bmain, Scene *scene, PointerRNA *ptr)
+{
+  rna_Scene_render_update(bmain, scene, ptr);
+  WM_main_add_notifier(NC_SCENE | ND_RENDER_OPTIONS, scene);
+}
+
 static void rna_Scene_world_update(Main *bmain, Scene *scene, PointerRNA *ptr)
 {
   Scene *screen = id_cast<Scene *>(ptr->owner_id);
@@ -9280,6 +9286,20 @@ static void rna_def_scene_eevee(BlenderRNA *brna)
       {0, nullptr, 0, nullptr, nullptr},
   };
 
+  static const EnumPropertyItem dlss5_mode_items[] = {
+      {SCE_EEVEE_DLSS5_OFF,
+       "OFF",
+       0,
+       "Off",
+       "Use the regular EEVEE viewport output"},
+      {SCE_EEVEE_DLSSNR,
+       "DLSSNR",
+       0,
+       "DLSSNR",
+       "Run NVIDIA DLSS Ray Reconstruction on the EEVEE Rendered viewport"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+
   srna = RNA_def_struct(brna, "SceneEEVEE", nullptr);
   RNA_def_struct_path_func(srna, "rna_SceneEEVEE_path");
   RNA_def_struct_ui_text(srna, "Scene Display", "Scene display settings for 3D viewport");
@@ -9469,6 +9489,80 @@ static void rna_def_scene_eevee(BlenderRNA *brna)
   RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
   RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, nullptr);
   RNA_def_property_flag(prop, PROP_ANIMATABLE);
+
+  /* DLSS5 / DLSSNR viewport reconstruction. */
+  prop = RNA_def_property(srna, "dlss5_mode", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "dlss5_mode");
+  RNA_def_property_enum_items(prop, dlss5_mode_items);
+  RNA_def_property_enum_default(prop, SCE_EEVEE_DLSS5_OFF);
+  RNA_def_property_ui_text(
+      prop,
+      "DLSS5",
+      "Select the optional NVIDIA DLSS Ray Reconstruction mode for the EEVEE Rendered viewport");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(
+      prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_dlss5_update");
+
+  prop = RNA_def_property(srna, "dlss5_intensity", PROP_FLOAT, PROP_FACTOR);
+  RNA_def_property_float_sdna(prop, nullptr, "dlss5_intensity");
+  RNA_def_property_float_default(prop, 1.0f);
+  RNA_def_property_range(prop, 0.0f, 1.0f);
+  RNA_def_property_ui_range(prop, 0.0f, 1.0f, 0.01f, 3);
+  RNA_def_property_ui_text(
+      prop, "Intensity", "Strength of the DLSS Ray Reconstruction response");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(
+      prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_dlss5_update");
+
+  prop = RNA_def_property(srna, "dlss5_local_tone_strength", PROP_FLOAT, PROP_FACTOR);
+  RNA_def_property_float_sdna(prop, nullptr, "dlss5_local_tone_strength");
+  RNA_def_property_float_default(prop, 1.0f);
+  RNA_def_property_range(prop, 0.0f, 2.0f);
+  RNA_def_property_ui_range(prop, 0.0f, 2.0f, 0.01f, 3);
+  RNA_def_property_ui_text(
+      prop, "Local Tone", "Preserve local tone structure during reconstruction");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(
+      prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_dlss5_update");
+
+  prop = RNA_def_property(srna, "dlss5_local_structure_strength", PROP_FLOAT, PROP_FACTOR);
+  RNA_def_property_float_sdna(prop, nullptr, "dlss5_local_structure_strength");
+  RNA_def_property_float_default(prop, 1.0f);
+  RNA_def_property_range(prop, 0.0f, 2.0f);
+  RNA_def_property_ui_range(prop, 0.0f, 2.0f, 0.01f, 3);
+  RNA_def_property_ui_text(
+      prop, "Local Structure", "Preserve local geometric and shading structure");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(
+      prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_dlss5_update");
+
+  prop = RNA_def_property(srna, "dlss5_skin_structure_strength", PROP_FLOAT, PROP_NONE);
+  RNA_def_property_float_sdna(prop, nullptr, "dlss5_skin_structure_strength");
+  RNA_def_property_float_default(prop, -1.0f);
+  RNA_def_property_range(prop, -1.0f, 1.0f);
+  RNA_def_property_ui_range(prop, -1.0f, 1.0f, 0.01f, 3);
+  RNA_def_property_ui_text(
+      prop, "Skin Structure", "Adjust preservation of fine skin-like surface structure");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(
+      prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_dlss5_update");
+
+  prop = RNA_def_property(srna, "dlss5_use_auto_mask", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "dlss5_use_auto_mask", 1);
+  RNA_def_property_boolean_default(prop, false);
+  RNA_def_property_ui_text(prop, "Auto Mask", "Enable the DLSSNR automatic reconstruction mask");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(
+      prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_dlss5_update");
+
+  prop = RNA_def_property(srna, "dlss5_ui_correction", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "dlss5_ui_correction", 1);
+  RNA_def_property_boolean_default(prop, false);
+  RNA_def_property_ui_text(
+      prop, "UI Correction", "Preserve screen-space UI elements during reconstruction");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(
+      prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_dlss5_update");
 
   prop = RNA_def_property(srna, "use_outline", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_sdna(prop, nullptr, "use_outline", 1);

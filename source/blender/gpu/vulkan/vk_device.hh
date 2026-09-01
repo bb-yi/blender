@@ -311,6 +311,11 @@ class VKDevice : public NonCopyable {
     return vk_physical_device_id_properties_;
   }
 
+  const VkPhysicalDeviceMemoryProperties &physical_device_memory_properties_get() const
+  {
+    return vk_physical_device_memory_properties_;
+  }
+
   inline const VkPhysicalDeviceGraphicsPipelineLibraryPropertiesEXT &
   physical_device_graphics_pipeline_properties_get()
   {
@@ -422,7 +427,9 @@ class VKDevice : public NonCopyable {
                                     VkPipelineStageFlags wait_dst_stage_mask,
                                     VkSemaphore wait_semaphore,
                                     VkSemaphore signal_semaphore,
-                                    VkFence signal_fence);
+                                    VkFence signal_fence,
+                                    uint64_t wait_semaphore_value,
+                                    uint64_t signal_semaphore_value);
   void wait_for_timeline(TimelineValue timeline);
   void wait_queue_idle();
 

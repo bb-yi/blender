@@ -154,6 +154,7 @@ class Texture {
                  int layer_len,
                  bool cube_as_array,
                  bool use_stencil);
+  bool init_external_2D(int w, int h, TextureFormat format, const GPUExternalTextureHandle &external);
 
   virtual void generate_mipmap() = 0;
   virtual void copy_to(Texture *tex, IndexRange mip_levels) = 0;
@@ -337,6 +338,10 @@ class Texture {
                              int mip_offset,
                              int layer_offset,
                              bool use_stencil) = 0;
+  virtual bool init_internal_external_2D(const GPUExternalTextureHandle & /*external*/)
+  {
+    return false;
+  }
 };
 
 /* GPU pixel Buffer. */

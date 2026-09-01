@@ -24,6 +24,7 @@ class GHOST_IWindow;
 namespace blender {
 
 struct GPUContext;
+struct GPUVulkanExternalSemaphore;
 
 /* GPU back-ends abstract the differences between different APIs. #GPU_context_create
  * automatically initializes the back-end, and #GPU_context_discard frees it when there
@@ -107,6 +108,29 @@ void GPU_context_discard(GPUContext *);
  */
 void GPU_context_active_set(GPUContext *);
 GPUContext *GPU_context_active_get();
+
+/**
+ * Import a D3D12 fence as a Vulkan timeline semaphore.
+ *
+ * The Win32 handle ownership is transferred to Vulkan only when this returns a non-null
+ * semaphore. The caller keeps ownership when the import fails.
+ */
+GPUVulkanExternalSemaphore *GPU_vulkan_external_semaphore_create_from_d3d12_fence(
+    uint64_t handle);
+/**
+ * Add a Vulkan submission that signals the imported timeline semaphore.
+ */
+bool GPU_vulkan_external_semaphore_signal(GPUVulkanExternalSemaphore *semaphore,
+                                          uint64_t value);
+/**
+ * Add a Vulkan submission that waits for the imported timeline semaphore before executing the
+ * current render graph.
+ */
+bool GPU_vulkan_external_semaphore_wait(GPUVulkanExternalSemaphore *semaphore, uint64_t value);
+/**
+ * Destroy an imported external semaphore after all submissions using it have completed.
+ */
+void GPU_vulkan_external_semaphore_free(GPUVulkanExternalSemaphore *semaphore);
 
 /**
  * Begin and end frame are used to mark the singular boundary representing the lifetime of a whole

@@ -114,6 +114,14 @@ namespace blender::eevee
     float last_viewport_scene_time_ = 0.0f;
     bool discard_viewport_history_ = false;
     bool dlss5_reset_ = false;
+    bool dlss5_settings_changed_ = false;
+    SceneEEVEEDLSS5Mode dlss5_mode_ = SCE_EEVEE_DLSS5_OFF;
+    float dlss5_intensity_ = 1.0f;
+    float dlss5_local_tone_strength_ = 1.0f;
+    float dlss5_local_structure_strength_ = 1.0f;
+    float dlss5_skin_structure_strength_ = -1.0f;
+    bool dlss5_use_auto_mask_ = false;
+    bool dlss5_ui_correction_ = false;
     int2 render_extent_override_ = int2(-1);
 
     /** Info string displayed at the top of the render / viewport, or the console when baking. */
@@ -291,6 +299,11 @@ namespace blender::eevee
     bool dlss5_reset() const
     {
       return dlss5_reset_;
+    }
+
+    bool dlss5_settings_changed() const
+    {
+      return dlss5_settings_changed_;
     }
 
     /**

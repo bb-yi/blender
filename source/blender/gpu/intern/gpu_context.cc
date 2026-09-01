@@ -37,6 +37,7 @@
 
 #ifdef WITH_VULKAN_BACKEND
 #  include "vk_backend.hh"
+#  include "vk_context.hh"
 #endif
 #ifdef WITH_OPENGL_BACKEND
 #  include "gl_backend.hh"
@@ -63,6 +64,12 @@ static int num_backend_users = 0;
 
 static void gpu_backend_create();
 static void gpu_backend_discard();
+
+#ifdef WITH_VULKAN_BACKEND
+struct GPUVulkanExternalSemaphore {
+  VkSemaphore vk_semaphore = VK_NULL_HANDLE;
+};
+#endif
 
 /* -------------------------------------------------------------------- */
 /** \name gpu::Context methods
@@ -263,6 +270,140 @@ void GPU_context_active_set(GPUContext *ctx_)
 GPUContext *GPU_context_active_get()
 {
   return wrap(Context::get());
+}
+
+GPUVulkanExternalSemaphore *GPU_vulkan_external_semaphore_create_from_d3d12_fence(
+    const uint64_t handle)
+{
+#ifdef WITH_VULKAN_BACKEND
+#  ifdef _WIN32
+  if (handle == 0 || GPU_backend_get_type() != GPU_BACKEND_VULKAN ||
+      GPU_context_active_get() == nullptr)
+  {
+    return nullptr;
+  }
+
+  gpu::VKDevice &device = gpu::VKBackend::get().device;
+  if (!device.is_initialized() ||
+      !device.supports_extension(VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME) ||
+      !device.supports_extension(VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME) ||
+      device.physical_device_vulkan_12_features_get().timelineSemaphore == VK_FALSE)
+  {
+    return nullptr;
+  }
+
+  VkSemaphoreTypeCreateInfo semaphore_type = {
+      VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO, nullptr, VK_SEMAPHORE_TYPE_TIMELINE, 0};
+  VkSemaphoreCreateInfo semaphore_info = {
+      VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, &semaphore_type, 0};
+  VkSemaphore semaphore = VK_NULL_HANDLE;
+  if (vkCreateSemaphore(device.vk_handle(), &semaphore_info, nullptr, &semaphore) != VK_SUCCESS) {
+    return nullptr;
+  }
+
+  const auto import_fn = reinterpret_cast<PFN_vkImportSemaphoreWin32HandleKHR>(
+      vkGetDeviceProcAddr(device.vk_handle(), "vkImportSemaphoreWin32HandleKHR"));
+  if (import_fn == nullptr) {
+    vkDestroySemaphore(device.vk_handle(), semaphore, nullptr);
+    return nullptr;
+  }
+
+  VkImportSemaphoreWin32HandleInfoKHR import_info = {
+      VK_STRUCTURE_TYPE_IMPORT_SEMAPHORE_WIN32_HANDLE_INFO_KHR};
+  import_info.semaphore = semaphore;
+  import_info.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_D3D12_FENCE_BIT;
+  import_info.handle = reinterpret_cast<HANDLE>(handle);
+  if (import_fn(device.vk_handle(), &import_info) != VK_SUCCESS) {
+    vkDestroySemaphore(device.vk_handle(), semaphore, nullptr);
+    return nullptr;
+  }
+
+  auto *result = MEM_new<GPUVulkanExternalSemaphore>(__func__);
+  result->vk_semaphore = semaphore;
+  return result;
+#  else
+  UNUSED_VARS(handle);
+  return nullptr;
+#  endif
+#else
+  UNUSED_VARS(handle);
+  return nullptr;
+#endif
+}
+
+bool GPU_vulkan_external_semaphore_signal(GPUVulkanExternalSemaphore *semaphore,
+                                          const uint64_t value)
+{
+#ifdef WITH_VULKAN_BACKEND
+  if (semaphore == nullptr || semaphore->vk_semaphore == VK_NULL_HANDLE || value == 0 ||
+      GPU_backend_get_type() != GPU_BACKEND_VULKAN || GPU_context_active_get() == nullptr)
+  {
+    return false;
+  }
+  gpu::VKContext *context = gpu::VKContext::get();
+  context->flush_render_graph(gpu::RenderGraphFlushFlags::SUBMIT |
+                                  gpu::RenderGraphFlushFlags::WAIT_FOR_SUBMISSION |
+                                  gpu::RenderGraphFlushFlags::RENEW_RENDER_GRAPH,
+                              VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                              VK_NULL_HANDLE,
+                              semaphore->vk_semaphore,
+                              VK_NULL_HANDLE,
+                              0,
+                              value);
+  return true;
+#else
+  UNUSED_VARS(semaphore, value);
+  return false;
+#endif
+}
+
+bool GPU_vulkan_external_semaphore_wait(GPUVulkanExternalSemaphore *semaphore,
+                                        const uint64_t value)
+{
+#ifdef WITH_VULKAN_BACKEND
+  if (semaphore == nullptr || semaphore->vk_semaphore == VK_NULL_HANDLE || value == 0 ||
+      GPU_backend_get_type() != GPU_BACKEND_VULKAN || GPU_context_active_get() == nullptr)
+  {
+    return false;
+  }
+  gpu::VKContext *context = gpu::VKContext::get();
+  context->flush_render_graph(gpu::RenderGraphFlushFlags::SUBMIT |
+                                  gpu::RenderGraphFlushFlags::WAIT_FOR_SUBMISSION |
+                                  gpu::RenderGraphFlushFlags::RENEW_RENDER_GRAPH,
+                              VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                              semaphore->vk_semaphore,
+                              VK_NULL_HANDLE,
+                              VK_NULL_HANDLE,
+                              value,
+                              0);
+  return true;
+#else
+  UNUSED_VARS(semaphore, value);
+  return false;
+#endif
+}
+
+void GPU_vulkan_external_semaphore_free(GPUVulkanExternalSemaphore *semaphore)
+{
+#ifdef WITH_VULKAN_BACKEND
+  if (semaphore == nullptr) {
+    return;
+  }
+  if (GPU_backend_get_type() == GPU_BACKEND_VULKAN && GPU_context_active_get() != nullptr) {
+    gpu::VKContext::get()->finish();
+    gpu::VKBackend::get().device.wait_queue_idle();
+    vkDestroySemaphore(
+        gpu::VKBackend::get().device.vk_handle(), semaphore->vk_semaphore, nullptr);
+  }
+  else if (GPU_backend_get_type() == GPU_BACKEND_VULKAN) {
+    gpu::VKBackend::get().device.wait_queue_idle();
+    vkDestroySemaphore(
+        gpu::VKBackend::get().device.vk_handle(), semaphore->vk_semaphore, nullptr);
+  }
+  MEM_delete(semaphore);
+#else
+  UNUSED_VARS(semaphore);
+#endif
 }
 
 void GPU_context_begin_frame(GPUContext *ctx)

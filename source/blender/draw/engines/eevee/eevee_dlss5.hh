@@ -14,7 +14,14 @@
 
 #pragma once
 
+#include <memory>
+
 #include "BLI_math_vector_types.hh"
+
+#include "DRW_gpu_wrapper.hh"
+#include "draw_pass.hh"
+
+#include "dlss5_d3d12.hh"
 
 namespace blender::gpu {
 class Texture;
@@ -26,6 +33,7 @@ class Instance;
 
 struct Dlss5FrameInputs {
   gpu::Texture *color = nullptr;
+  gpu::Texture *base_color = nullptr;
   gpu::Texture *depth = nullptr;
   gpu::Texture *velocity = nullptr;
   int2 input_extent = int2(0);
@@ -51,15 +59,42 @@ class Dlss5Module {
  private:
   Instance &inst_;
   bool reported_ = false;
+  bool active_reported_ = false;
+  bool failure_reported_ = false;
+  bool retry_blocked_ = false;
+  int2 retry_input_extent_ = int2(-1);
+  int2 retry_output_extent_ = int2(-1);
+  std::unique_ptr<Dlss5D3D12Session> d3d12_session_;
+  gpu::Texture *last_display_texture_ = nullptr;
+  draw::Texture scene_linear_output_tx_ = {"DLSS5.SceneLinearOutput"};
+  draw::Framebuffer display_color_fb_ = {"DLSS5.DisplayColor"};
+  draw::PassSimple color_convert_ps_ = {"DLSS5.ColorConvert"};
+  draw::Framebuffer hdr_reconstruct_fb_ = {"DLSS5.HDRReconstruct"};
+  draw::PassSimple hdr_reconstruct_ps_ = {"DLSS5.HDRReconstruct"};
+  draw::Framebuffer depth_convert_fb_ = {"DLSS5.DepthConvert"};
+  draw::PassSimple depth_convert_ps_ = {"DLSS5.DepthConvert"};
+  draw::Framebuffer velocity_convert_fb_ = {"DLSS5.VelocityConvert"};
+  draw::PassSimple velocity_convert_ps_ = {"DLSS5.VelocityConvert"};
+  bool color_convert_inverse_ = false;
+
+  bool prepare_display_color(gpu::Texture *source, gpu::Texture *destination);
+  bool reconstruct_scene_linear(gpu::Texture *source,
+                                gpu::Texture *input,
+                                gpu::Texture *original,
+                                gpu::Texture *destination);
+  bool prepare_velocity(gpu::Texture *source, gpu::Texture *destination, int2 extent);
 
  public:
-  explicit Dlss5Module(Instance &inst) : inst_(inst) {}
+  explicit Dlss5Module(Instance &inst);
+  ~Dlss5Module();
 
   gpu::Texture *process(const Dlss5FrameInputs &inputs);
 
-  bool available() const
+  bool available() const;
+  const char *status() const;
+  gpu::Texture *display_texture() const
   {
-    return false;
+    return last_display_texture_;
   }
 };
 

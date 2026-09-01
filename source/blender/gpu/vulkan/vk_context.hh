@@ -103,7 +103,9 @@ class VKContext : public Context, NonCopyable {
       VkPipelineStageFlags wait_dst_stage_mask = VK_PIPELINE_STAGE_NONE,
       VkSemaphore wait_semaphore = VK_NULL_HANDLE,
       VkSemaphore signal_semaphore = VK_NULL_HANDLE,
-      VkFence signal_fence = VK_NULL_HANDLE);
+      VkFence signal_fence = VK_NULL_HANDLE,
+      uint64_t wait_semaphore_value = 0,
+      uint64_t signal_semaphore_value = 0);
   void finish() override;
 
   void memory_statistics_get(int *r_total_mem_kb, int *r_free_mem_kb) override;

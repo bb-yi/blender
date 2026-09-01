@@ -42,6 +42,8 @@ struct VKRenderGraphSubmitTask {
   VkSemaphore wait_semaphore;
   VkSemaphore signal_semaphore;
   VkFence signal_fence;
+  uint64_t wait_semaphore_value;
+  uint64_t signal_semaphore_value;
   VKRenderGraphWait *wait_for_submission;
 };
 
@@ -53,7 +55,9 @@ TimelineValue VKDevice::render_graph_submit(render_graph::VKRenderGraph *render_
                                             VkPipelineStageFlags wait_dst_stage_mask,
                                             VkSemaphore wait_semaphore,
                                             VkSemaphore signal_semaphore,
-                                            VkFence signal_fence)
+                                            VkFence signal_fence,
+                                            uint64_t wait_semaphore_value,
+                                            uint64_t signal_semaphore_value)
 {
   /* Syncing input flags. */
   /* When we wait for completion/submission we must submit to device. */
@@ -69,6 +73,8 @@ TimelineValue VKDevice::render_graph_submit(render_graph::VKRenderGraph *render_
   submit_task->wait_semaphore = wait_semaphore;
   submit_task->signal_semaphore = signal_semaphore;
   submit_task->signal_fence = signal_fence;
+  submit_task->wait_semaphore_value = wait_semaphore_value;
+  submit_task->signal_semaphore_value = signal_semaphore_value;
   submit_task->wait_for_submission = nullptr;
 
   VKRenderGraphWait wait_condition{};
@@ -212,12 +218,14 @@ void VKDevice::submission_runner(TaskPool *__restrict pool, void *task_data)
       uint32_t wait_semaphore_len = submit_task->wait_semaphore == VK_NULL_HANDLE ? 1 : 2;
       VkSemaphore wait_semaphores[2] = {device->vk_timeline_semaphore_,
                                         submit_task->wait_semaphore};
-      uint64_t wait_semaphore_values[2] = {submit_task->timeline - 1, 0};
+      uint64_t wait_semaphore_values[2] = {submit_task->timeline - 1,
+                                           submit_task->wait_semaphore_value};
 
       uint32_t signal_semaphore_len = submit_task->signal_semaphore == VK_NULL_HANDLE ? 1 : 2;
       VkSemaphore signal_semaphores[2] = {device->vk_timeline_semaphore_,
                                           submit_task->signal_semaphore};
-      uint64_t signal_semaphore_values[2] = {submit_task->timeline, 0};
+      uint64_t signal_semaphore_values[2] = {submit_task->timeline,
+                                             submit_task->signal_semaphore_value};
       VkPipelineStageFlags pipeline_stage_flags[2] = {VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
                                                       submit_task->wait_dst_stage_mask};
 

@@ -168,7 +168,9 @@ TimelineValue VKContext::flush_render_graph(RenderGraphFlushFlags flags,
                                             VkPipelineStageFlags wait_dst_stage_mask,
                                             VkSemaphore wait_semaphore,
                                             VkSemaphore signal_semaphore,
-                                            VkFence signal_fence)
+                                            VkFence signal_fence,
+                                            uint64_t wait_semaphore_value,
+                                            uint64_t signal_semaphore_value)
 {
   if (has_active_framebuffer()) {
     VKFrameBuffer &framebuffer = *active_framebuffer_get();
@@ -189,7 +191,9 @@ TimelineValue VKContext::flush_render_graph(RenderGraphFlushFlags flags,
       wait_dst_stage_mask,
       wait_semaphore,
       signal_semaphore,
-      signal_fence);
+      signal_fence,
+      wait_semaphore_value,
+      signal_semaphore_value);
   render_graph_.reset();
   streaming_buffers_.clear();
   if (bool(flags & RenderGraphFlushFlags::RENEW_RENDER_GRAPH)) {

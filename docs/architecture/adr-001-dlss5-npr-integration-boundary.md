@@ -340,3 +340,47 @@ size=(800, 600)
 has_data=True
 DLSS5_RESULT={'FINISHED'}
 ```
+
+## Real-time interop gate (2026-08-30)
+
+The official Blender `dlss` reference branch was inspected at
+`025b1d4c5b4d8d5bf7f86a3f1680bca7d76efc13`. Its implementation is a Cycles
+CUDA DLSS denoiser; it provides reusable session lifetime, capability-cache,
+lazy recreation and jitter/reset handling, but it is not an EEVEE DLSSNR
+backend.
+
+The mainfix worktree now contains an independent Vulkan/D3D12 interop probe
+under `tests/dlss5/vulkan_d3d12_interop`. On the local RTX 4080 it reported:
+
+```text
+VK_KHR_external_memory=yes
+VK_KHR_external_memory_win32=yes
+VK_KHR_external_semaphore=yes
+VK_KHR_external_semaphore_win32=yes
+R16G16B16A16_SFLOAT D3D12_RESOURCE import=1 dedicated=1
+D3D12_FENCE semaphore import=1
+matching D3D12 device=yes
+DLSS5_INTEROP_BASELINE_READY: YES
+```
+
+The follow-up shared-resource smoke passed:
+
+```text
+Vulkan clear -> shared D3D12 resource -> D3D12 readback
+readback=0.125,0.25,0.5,1
+DLSS5_VULKAN_D3D12_SHARED_RESOURCE: PASS
+```
+
+This changes the implementation direction from Vulkan exporting its existing
+EEVEE allocation to D3D12. The current driver advertises Vulkan import of
+D3D12-owned resources, so the real-time path should allocate D3D12-owned
+Color/Depth/Vector/Output resources, import them into Vulkan, and copy EEVEE
+buffers into them. EEVEE's depth buffer is `D32_SFLOAT_S8_UINT`, while the
+DLSSNR host consumes `R32_FLOAT`; a GPU depth conversion pass is required.
+The viewport vector buffer is `RG16_FLOAT` with the existing `rgrg` swizzle
+on the storage texture and must be copied without losing the logical XY
+interpretation.
+
+The next implementation gate is therefore an in-process D3D12 NGX session
+with CPU-side queue waits first. Shared fence submission will replace those
+waits only after the session produces a correct EEVEE frame.

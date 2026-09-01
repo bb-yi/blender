@@ -17,6 +17,8 @@
 
 #include "DRW_render.hh"
 
+#include "BLI_math_base.hh"
+
 #include "GPU_debug.hh"
 
 #include "eevee_instance.hh"
@@ -335,21 +337,9 @@ namespace blender::eevee
     {
       ScopedTelemetrySample telemetry_sample(inst_.telemetry,
         TelemetryStageId::MainFilmAccumulate);
-      combined_final_tx = inst_.dlss5.process({
-          combined_final_tx,
-          rbufs.depth_tx,
-          rbufs.vector_tx,
-          extent_,
-          inst_.film.display_extent_get(),
-          inst_.film.pixel_jitter_get(),
-          inst_.dlss5_reset(),
-          inst_.is_viewport(),
-          true,
-          true,
-          true,
-          false,
-          inst_.film.get_data().exposure_scale,
-      });
+      /* DLSS5 is now invoked inside Film::accumulate after TAA convergence,
+       * avoiding the double-accumulation that occurred when DLSS output was
+       * fed back into Film's temporal history. */
       inst_.film.accumulate(jitter_view_, combined_final_tx, outline_raw_tx, outline_combined_tx);
     }
     inst_.outline.release_result();
