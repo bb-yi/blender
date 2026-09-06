@@ -2170,6 +2170,20 @@ endif()
 # -----------------------------------------------------------------------------
 # Post-install script
 
+if(WIN32)
+  set(DLSS5_RUNTIME_DIR "$ENV{DLSS5_RUNTIME_DIR}" CACHE PATH
+    "Directory containing the optional DLSSNR runtime binaries")
+  if(DLSS5_RUNTIME_DIR)
+    foreach(_dlss5_file nvngx_dlssnr.dll nvngx.dll)
+      if(NOT EXISTS "${DLSS5_RUNTIME_DIR}/${_dlss5_file}")
+        message(FATAL_ERROR "Missing DLSS5 runtime file: ${DLSS5_RUNTIME_DIR}/${_dlss5_file}")
+      endif()
+      install(FILES "${DLSS5_RUNTIME_DIR}/${_dlss5_file}" DESTINATION "dlss5")
+    endforeach()
+    unset(_dlss5_file)
+  endif()
+endif()
+
 if(POSTINSTALL_SCRIPT)
   install(SCRIPT ${POSTINSTALL_SCRIPT})
 endif()

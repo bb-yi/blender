@@ -76,6 +76,7 @@ class Dlss5D3D12Session {
                         bool color_is_scene_linear,
                         bool depth_is_reverse_z);
   bool warmup();
+  void retry_initialization();
   bool copy_inputs_and_evaluate(const Dlss5D3D12Frame &frame,
                                 bool copy_color = true,
                                 bool copy_velocity = true);

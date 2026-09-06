@@ -188,6 +188,7 @@ gpu::Texture *Dlss5Module::process(const Dlss5FrameInputs &inputs, draw::View &v
   {
     retry_blocked_ = false;
     failure_reported_ = false;
+    d3d12_session_->retry_initialization();
   }
   if (retry_blocked_) {
     return inputs.color;

@@ -1166,9 +1166,16 @@ void Film::accumulate(View &view,
     DefaultFramebufferList *dfbl = inst_.draw_ctx->viewport_framebuffer_list_get();
     GPU_framebuffer_bind(dfbl->default_fb);
     GPU_framebuffer_viewport_set(dfbl->default_fb, UNPACK2(data_.offset), UNPACK2(data_.extent));
-    history_display_tx_ = dlss_active ? dlss_display_tx : combined_output_tx_.gpu_texture();
-    display_only_ = true;
-    inst_.manager->submit(use_compute_ ? copy_ps_ : accumulate_ps_, view);
+    if (dlss_active) {
+      history_display_tx_ = dlss_display_tx;
+      display_only_ = true;
+      inst_.manager->submit(use_compute_ ? copy_ps_ : accumulate_ps_, view);
+    }
+    else {
+      /* The normal fragment accumulation already presented the native image.
+       * Only the compute path needs the original copy pass. */
+      inst_.manager->submit(copy_ps_, view);
+    }
   }
 
   combined_tx_.swap();

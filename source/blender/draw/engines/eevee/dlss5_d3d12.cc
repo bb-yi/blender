@@ -5,6 +5,7 @@
 #include "dlss5_d3d12.hh"
 
 #include "CLG_log.h"
+#include "BKE_appdir.hh"
 
 #include "GPU_context.hh"
 #include "GPU_platform.hh"
@@ -305,7 +306,7 @@ void SetRect(NVSDK_NGX_Parameter *parameters, const char *prefix, int width, int
 fs::path RuntimeDirectory()
 {
   const wchar_t *configured = _wgetenv(L"DLSS5_RUNTIME_DIR");
-  if (configured && *configured && fs::is_directory(configured)) {
+  if (configured && *configured) {
     return fs::absolute(configured);
   }
 
@@ -317,9 +318,8 @@ fs::path RuntimeDirectory()
 
   const fs::path executable = fs::path(module_path).parent_path();
   const std::vector<fs::path> candidates = {
-      executable / "temp" / "dlss5_runtime",
-      executable.parent_path() / "temp" / "dlss5_runtime",
-      executable.parent_path().parent_path() / "temp" / "dlss5_runtime",
+      executable / "dlss5",
+      executable,
   };
   for (const fs::path &candidate : candidates) {
     if (fs::is_regular_file(candidate / "nvngx_dlssnr.dll")) {
@@ -327,6 +327,24 @@ fs::path RuntimeDirectory()
     }
   }
   return {};
+}
+
+fs::path NgxDataDirectory()
+{
+  const wchar_t *configured = _wgetenv(L"DLSS5_CACHE_DIR");
+  if (configured && *configured) {
+    return fs::absolute(configured);
+  }
+  char cache_path[4096] = {};
+  BKE_appdir_folder_caches(cache_path, sizeof(cache_path));
+  return fs::u8path(cache_path) / "dlss5";
+}
+
+/* Exercise error paths in isolated release tests without removing the GPU device. */
+bool inject_test_failure(const wchar_t *stage)
+{
+  const wchar_t *configured = _wgetenv(L"BLENDER_DLSS5_TEST_FAILURE");
+  return configured && wcscmp(configured, stage) == 0;
 }
 
 fs::path NgxCorePath(const fs::path &runtime_directory)
@@ -531,7 +549,7 @@ struct Dlss5NgxRuntime {
       return false;
     }
 
-    const fs::path data_directory = runtime_directory / "ngx-data";
+    const fs::path data_directory = NgxDataDirectory();
     fs::create_directories(data_directory);
     const wchar_t *feature_paths[] = {runtime_directory.c_str()};
     NgxFeatureCommonInfo common_info = {};
@@ -585,8 +603,14 @@ static std::shared_ptr<Dlss5NgxRuntime> acquire_ngx_runtime(std::string &error)
   std::lock_guard lock(mutex);
   if (cached) { return cached; }
   auto runtime = std::make_shared<Dlss5NgxRuntime>();
-  if (!runtime->initialize_device() || !runtime->initialize_ngx()) {
-    error = runtime->status;
+  try {
+    if (!runtime->initialize_device() || !runtime->initialize_ngx()) {
+      error = runtime->status;
+      return nullptr;
+    }
+  }
+  catch (const fs::filesystem_error &exception) {
+    error = std::string("DLSS5 runtime/cache path error: ") + exception.what();
     return nullptr;
   }
   cached = runtime;
@@ -643,6 +667,10 @@ struct Dlss5D3D12Session::Impl {
   uint64_t d3d12_to_vulkan_value = 0;
   bool external_sync = false;
   bool textures_released = false;
+  bool startup_failed = false;
+  bool execution_failed = false;
+  bool untracked_submission = false;
+  bool evaluation_submitted = false;
 
   std::shared_ptr<Dlss5NgxRuntime> runtime;
   NVSDK_NGX_Parameter *parameters = nullptr;
@@ -671,6 +699,9 @@ struct Dlss5D3D12Session::Impl {
 
   void reset()
   {
+    if (!can_destroy()) {
+      return;
+    }
     if (!wait_for_fence_value(completion_value, INFINITE)) {
       return;
     }
@@ -736,6 +767,33 @@ struct Dlss5D3D12Session::Impl {
     runtime.reset();
     initialized = false;
     parameters_reported = false;
+    startup_failed = false;
+    execution_failed = false;
+    untracked_submission = false;
+    evaluation_submitted = false;
+  }
+
+  bool can_destroy() const
+  {
+    return !untracked_submission || device == nullptr || FAILED(device->GetDeviceRemovedReason());
+  }
+
+  bool signal_completion()
+  {
+    const uint64_t next_value = completion_value + 1;
+    const HRESULT result = inject_test_failure(L"completion_signal") ?
+                               E_FAIL : queue->Signal(completion_fence.Get(), next_value);
+    if (FAILED(result)) {
+      /* Work was submitted, but has no reliable retirement point. Disable this
+       * session and retain its resources until process exit/device removal. */
+      untracked_submission = true;
+      execution_failed = true;
+      set_error("DLSS5 stopped: completion signal failed; restart required (0x" +
+                HResultString(result) + ")");
+      return false;
+    }
+    completion_value = next_value;
+    return true;
   }
 
   bool wait_for_fence_value(const uint64_t value, const DWORD timeout_ms)
@@ -765,6 +823,10 @@ struct Dlss5D3D12Session::Impl {
 
   bool initialize_external_sync()
   {
+    if (inject_test_failure(L"sync_init")) {
+      set_error("DLSS5 external sync initialization failed (test injection)");
+      return false;
+    }
     auto import_fence = [&](ID3D12Fence *fence,
                             GPUVulkanExternalSemaphore **r_semaphore) {
       HANDLE handle = nullptr;
@@ -1015,11 +1077,7 @@ struct Dlss5D3D12Session::Impl {
     }
     ID3D12CommandList *lists[] = {command_list};
     queue->ExecuteCommandLists(1, lists);
-    ++completion_value;
-    reset_result = queue->Signal(completion_fence.Get(), completion_value);
-    if (FAILED(reset_result)) {
-      set_error("D3D12 completion signal failed (create_feature): 0x" +
-                HResultString(reset_result));
+    if (!signal_completion()) {
       return false;
     }
     command_list_completion_values[command_list_index] = completion_value;
@@ -1104,6 +1162,9 @@ struct Dlss5D3D12Session::Impl {
                         const bool color_is_scene_linear,
                         const bool depth_is_reverse_z)
   {
+    if (execution_failed || !warmup()) {
+      return false;
+    }
     if (input_extent.x < 32 || input_extent.y < 32 || output_extent.x < 32 ||
         output_extent.y < 32 || guide_extent.x < 32 || guide_extent.y < 32 ||
         input_extent != output_extent)
@@ -1123,30 +1184,6 @@ struct Dlss5D3D12Session::Impl {
     if (GPU_backend_get_type() != GPU_BACKEND_VULKAN) {
       set_error("realtime DLSSNR requires the Vulkan GPU backend");
       return false;
-    }
-
-    /* OptiScaler keeps NGX/device loaded and only ReleaseFeature + CreateFeature
-     * when size or tuning changes. Reloading nvngx_dlssnr.dll (165MB) on every
-     * slider tick is what made enable feel like a hang. */
-    if (device == nullptr) {
-      if (!initialize_device()) {
-        reset();
-        return false;
-      }
-      external_sync = initialize_external_sync();
-      if (!external_sync) { return false; }
-      if (external_sync) {
-        CLOG_INFO(&LOG, "DLSS5 synchronization: external semaphore");
-      }
-      else {
-        CLOG_WARN(&LOG, "DLSS5 synchronization: CPU fallback (%s)", status.c_str());
-      }
-    }
-    if (parameters == nullptr) {
-      if (!initialize_ngx()) {
-        reset();
-        return false;
-      }
     }
 
     /* Pending Vulkan reads of the previous output must retire before resize. */
@@ -1192,7 +1229,7 @@ struct Dlss5D3D12Session::Impl {
     feature_settings_valid = true;
     feature_color_is_scene_linear = color_is_scene_linear;
     feature_depth_is_reverse_z = depth_is_reverse_z;
-    status = external_sync ? "ready (external sync)" : "ready (CPU synchronization)";
+    status = "ready (external sync)";
     return true;
   }
 
@@ -1215,7 +1252,8 @@ struct Dlss5D3D12Session::Impl {
 
   bool evaluate(const Dlss5D3D12Frame &frame)
   {
-    if (!initialized || feature == nullptr) {
+    evaluation_submitted = false;
+    if (!initialized || !external_sync || execution_failed || feature == nullptr) {
       return false;
     }
     SetResource(parameters, "DLSSNR.Color", color.d3d12.Get());
@@ -1357,26 +1395,23 @@ struct Dlss5D3D12Session::Impl {
     }
     ID3D12CommandList *lists[] = {command_list};
     queue->ExecuteCommandLists(1, lists);
-    ++completion_value;
-    result = queue->Signal(completion_fence.Get(), completion_value);
-    if (FAILED(result)) {
-      set_error("D3D12 completion signal failed: 0x" + HResultString(result));
+    evaluation_submitted = true;
+    if (!signal_completion()) {
       return false;
     }
     command_list_completion_values[command_list_index] = completion_value;
     ++evaluate_count;
 
-    if (external_sync) {
-      ++d3d12_to_vulkan_value;
-      result = queue->Signal(d3d12_to_vulkan_fence.Get(), d3d12_to_vulkan_value);
-      if (FAILED(result)) {
-        set_error("D3D12 output signal failed: 0x" + HResultString(result));
-        return false;
-      }
-    }
-    else if (!wait_for_fence_value(completion_value, 3000)) {
+    const uint64_t next_value = d3d12_to_vulkan_value + 1;
+    result = inject_test_failure(L"output_signal") ?
+                 E_FAIL : queue->Signal(d3d12_to_vulkan_fence.Get(), next_value);
+    if (FAILED(result)) {
+      execution_failed = true;
+      set_error("DLSS5 stopped: output signal failed; restart required (0x" +
+                HResultString(result) + ")");
       return false;
     }
+    d3d12_to_vulkan_value = next_value;
     return true;
   }
 
@@ -1391,8 +1426,8 @@ struct Dlss5D3D12Session::Impl {
 
   bool wait_for_output()
   {
-    if (!external_sync || d3d12_to_vulkan_value == 0) {
-      return true;
+    if (!external_sync || execution_failed || d3d12_to_vulkan_value == 0) {
+      return false;
     }
     if (!GPU_vulkan_external_semaphore_wait(
             d3d12_to_vulkan_semaphore, d3d12_to_vulkan_value))
@@ -1405,29 +1440,24 @@ struct Dlss5D3D12Session::Impl {
 
   bool warmup()
   {
+    if (startup_failed || execution_failed) {
+      return false;
+    }
     if (GPU_backend_get_type() != GPU_BACKEND_VULKAN) {
       set_error("realtime DLSSNR requires the Vulkan GPU backend");
       return false;
     }
-    if (device == nullptr) {
-      if (!initialize_device()) {
-        return false;
-      }
-      external_sync = initialize_external_sync();
-      if (!external_sync) { return false; }
-      if (external_sync) {
-        CLOG_INFO(&LOG, "DLSS5 synchronization: external semaphore");
-      }
-      else {
-        CLOG_WARN(&LOG, "DLSS5 synchronization: CPU fallback (%s)", status.c_str());
-      }
+    if ((device == nullptr && !initialize_device()) ||
+        (!external_sync && !initialize_external_sync()) ||
+        (parameters == nullptr && !initialize_ngx()))
+    {
+      /* Roll back all per-session objects; the process-wide NGX runtime stays
+       * cached. A non-null device alone must never imply a usable session. */
+      reset();
+      startup_failed = true;
+      return false;
     }
-    if (parameters == nullptr) {
-      if (!initialize_ngx()) {
-        return false;
-      }
-      CLOG_INFO(&LOG, "DLSS5 NGX warmed up (dll kept loaded)");
-    }
+    BLI_assert(device && queue && external_sync && parameters);
     return true;
   }
 };
@@ -1436,7 +1466,16 @@ Dlss5D3D12Session::Dlss5D3D12Session() : impl_(new Impl()) {}
 
 Dlss5D3D12Session::~Dlss5D3D12Session()
 {
+  if (!impl_->can_destroy()) {
+    CLOG_ERROR(&LOG, "Retaining untracked DLSS5 GPU resources until process exit");
+    return;
+  }
   delete impl_;
+}
+
+void Dlss5D3D12Session::retry_initialization()
+{
+  impl_->startup_failed = false;
 }
 
 bool Dlss5D3D12Session::ensure_resources(const int2 input_extent,
@@ -1459,7 +1498,8 @@ bool Dlss5D3D12Session::copy_inputs_and_evaluate(const Dlss5D3D12Frame &frame,
                                                  const bool copy_color,
                                                  const bool copy_velocity)
 {
-  if (!impl_->initialized || frame.color == nullptr || frame.depth == nullptr ||
+  if (!impl_->initialized || !impl_->external_sync || impl_->execution_failed ||
+      frame.color == nullptr || frame.depth == nullptr ||
       frame.velocity == nullptr)
   {
     return false;
@@ -1497,13 +1537,17 @@ bool Dlss5D3D12Session::copy_inputs_and_evaluate(const Dlss5D3D12Frame &frame,
       return false;
     }
   }
-  else {
-    GPU_finish();
-  }
   if (!impl_->evaluate(frame)) {
-    /* Failed recording does not submit writes, but the input release was already
-     * queued. Reclaim ownership before any later conversion can reuse textures. */
-    impl_->wait_for_output();
+    if (impl_->untracked_submission) {
+      return false;
+    }
+    /* A failed output Signal must not queue a Vulkan wait for its unsubmitted
+     * value. Rare post-submit failure retires using the known completion fence. */
+    if (impl_->evaluation_submitted && !impl_->wait_for_fence_value(impl_->completion_value, 30000)) {
+      impl_->untracked_submission = true;
+      impl_->execution_failed = true;
+      return false;
+    }
     impl_->acquire_textures();
     return false;
   }
@@ -1548,7 +1592,7 @@ double Dlss5D3D12Session::gpu_time_ms() const
 
 bool Dlss5D3D12Session::available() const
 {
-  return impl_->initialized;
+  return impl_->initialized && impl_->external_sync && !impl_->execution_failed;
 }
 
 const char *Dlss5D3D12Session::status() const
@@ -1579,6 +1623,7 @@ bool Dlss5D3D12Session::ensure_resources(int2,
   return false;
 }
 void Dlss5D3D12Session::reset() {}
+void Dlss5D3D12Session::retry_initialization() {}
 bool Dlss5D3D12Session::warmup()
 {
   return false;

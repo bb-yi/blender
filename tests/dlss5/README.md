@@ -95,3 +95,27 @@ The input contract is:
 
 Detailed decisions and measured results are recorded in
 `docs/architecture/adr-001-dlss5-npr-integration-boundary.md`.
+
+## Installed EEVEE runtime regression
+
+The standalone-host measurements above are historical. The current EEVEE integration
+is tested by `test_runtime.py` against an installed Blender executable. Configure
+`DLSS5_RUNTIME_DIR` in CMake (or supply the environment variable on initial configure)
+to install `nvngx_dlssnr.dll` and `nvngx.dll` under the executable's `dlss5` directory.
+Runtime lookup uses that directory without any dependency on a development workspace.
+
+NGX data is stored in Blender's writable user cache. `DLSS5_CACHE_DIR` can override
+the cache for an isolated test; DLL directories are never used for cache storage.
+
+Run Blender with `--background --factory-startup --python-exit-code 1 --python
+tests/dlss5/test_runtime.py`. Set `DLSS5_TEST_OUT` to an output directory outside the
+source repository. The test clears development runtime overrides and launches seven
+isolated Vulkan subprocess cases, asserting changed NR pixels, exact native bypass,
+preserved Alpha and safe failure behavior.
+
+`BLENDER_DLSS5_TEST_FAILURE` is an isolated regression hook with values `sync_init`,
+`output_signal`, and `completion_signal`; it simulates API failure without removing
+the GPU device. Never set it for normal operation. An untrackable GPU submission
+disables the session and retains its resources until process exit/device removal,
+rather than freeing memory still potentially used by the GPU; the status requests
+a restart in this exceptional case.
