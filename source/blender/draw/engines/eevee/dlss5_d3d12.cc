@@ -19,6 +19,9 @@
 #  include <wrl/client.h>
 
 #  include <array>
+#  include <memory>
+#  include <mutex>
+#  include <algorithm>
 #  include <filesystem>
 #  include <fstream>
 #  include <limits>
@@ -383,48 +386,11 @@ std::string HResultString(HRESULT result)
 
 }  // namespace
 
-struct Dlss5D3D12Session::Impl {
-  struct SharedTexture {
-    ComPtr<ID3D12Resource> d3d12;
-    HANDLE shared_handle = nullptr;
-    gpu::Texture *vulkan = nullptr;
-    int2 extent = int2(0);
-    gpu::TextureFormat format = gpu::TextureFormat::Invalid;
-
-    void reset()
-    {
-      if (vulkan != nullptr) {
-        GPU_texture_free(vulkan);
-        vulkan = nullptr;
-      }
-      if (shared_handle != nullptr) {
-        CloseHandle(shared_handle);
-        shared_handle = nullptr;
-      }
-      d3d12.Reset();
-      extent = int2(0);
-      format = gpu::TextureFormat::Invalid;
-    }
-  };
-
+/* NGX DLL hooks and initialization are process-wide. A viewport and F12 must
+ * not hook the same IAT twice or shut down each other's device. Keep the runtime
+ * loaded for the process lifetime; only feature/history resources are per view. */
+struct Dlss5NgxRuntime {
   ComPtr<ID3D12Device> device;
-  ComPtr<ID3D12CommandQueue> queue;
-  static constexpr int kCommandListCount = 3;
-  std::array<ComPtr<ID3D12CommandAllocator>, kCommandListCount> allocators;
-  std::array<ComPtr<ID3D12GraphicsCommandList>, kCommandListCount> command_lists;
-  std::array<uint64_t, kCommandListCount> command_list_completion_values = {};
-  int command_list_index = -1;
-  ComPtr<ID3D12Fence> completion_fence;
-  ComPtr<ID3D12Fence> vulkan_to_d3d12_fence;
-  ComPtr<ID3D12Fence> d3d12_to_vulkan_fence;
-  GPUVulkanExternalSemaphore *vulkan_to_d3d12_semaphore = nullptr;
-  GPUVulkanExternalSemaphore *d3d12_to_vulkan_semaphore = nullptr;
-  HANDLE completion_event = nullptr;
-  uint64_t completion_value = 0;
-  uint64_t vulkan_to_d3d12_value = 0;
-  uint64_t d3d12_to_vulkan_value = 0;
-  bool external_sync = false;
-
   HMODULE core_module = nullptr;
   HMODULE snippet_module = nullptr;
   void **snippet_iat_slot = nullptr;
@@ -439,150 +405,23 @@ struct Dlss5D3D12Session::Impl {
   NgxEvaluateFeatureFn ngx_evaluate_feature = nullptr;
   NgxReleaseFeatureFn ngx_release_feature = nullptr;
   NgxGetCapabilityParametersFn ngx_get_capability_parameters = nullptr;
-  NVSDK_NGX_Parameter *parameters = nullptr;
-  NVSDK_NGX_Handle *feature = nullptr;
   fs::path runtime_directory;
   bool core_initialized = false;
   bool snippet_initialized = false;
-  bool initialized = false;
-  bool parameters_reported = false;
-  std::string status = "not initialized";
+  std::string status;
+  /* Serialize the NGX host API, not GPU execution on the separate queues. */
+  std::mutex mutex;
 
-  SharedTexture color;
-  SharedTexture depth;
-  SharedTexture velocity;
-  SharedTexture output;
+  void set_error(const std::string &message) { status = message; }
 
-  ~Impl()
+  ~Dlss5NgxRuntime()
   {
-    reset();
-  }
-
-  void set_error(const std::string &message)
-  {
-    status = message;
-  }
-
-  void reset()
-  {
-    wait_for_completion();
-    if (GPU_context_active_get() != nullptr) {
-      GPU_finish();
-    }
-
-    GPU_vulkan_external_semaphore_free(d3d12_to_vulkan_semaphore);
-    d3d12_to_vulkan_semaphore = nullptr;
-    GPU_vulkan_external_semaphore_free(vulkan_to_d3d12_semaphore);
-    vulkan_to_d3d12_semaphore = nullptr;
-    external_sync = false;
-
-    if (feature != nullptr && ngx_release_feature != nullptr) {
-      ngx_release_feature(feature);
-      feature = nullptr;
-    }
-    if (parameters != nullptr && ngx_destroy_parameters != nullptr) {
-      ngx_destroy_parameters(parameters);
-      parameters = nullptr;
-    }
-    if (snippet_initialized && ngx_shutdown != nullptr && device) {
-      ngx_shutdown(device.Get());
-      snippet_initialized = false;
-    }
-    if (core_initialized && ngx_shutdown_core != nullptr && device) {
-      ngx_shutdown_core(device.Get());
-      core_initialized = false;
-    }
-
+    if (snippet_initialized) { ngx_shutdown(device.Get()); }
+    if (core_initialized) { ngx_shutdown_core(device.Get()); }
     UnhookSnippetGetModuleFileNameW(snippet_iat_slot);
-    snippet_iat_slot = nullptr;
-
-    color.reset();
-    depth.reset();
-    velocity.reset();
-    output.reset();
-
-    if (completion_event != nullptr) {
-      CloseHandle(completion_event);
-      completion_event = nullptr;
-    }
-    if (snippet_module != nullptr) {
-      FreeLibrary(snippet_module);
-      snippet_module = nullptr;
-    }
-    if (core_module != nullptr) {
-      FreeLibrary(core_module);
-      core_module = nullptr;
-    }
-    for (auto &command_list : command_lists) {
-      command_list.Reset();
-    }
-    for (auto &allocator : allocators) {
-      allocator.Reset();
-    }
-    command_list_completion_values = {};
-    command_list_index = -1;
-    queue.Reset();
-    completion_fence.Reset();
-    vulkan_to_d3d12_fence.Reset();
-    d3d12_to_vulkan_fence.Reset();
-    completion_value = 0;
-    vulkan_to_d3d12_value = 0;
-    d3d12_to_vulkan_value = 0;
-    device.Reset();
-    initialized = false;
-    parameters_reported = false;
+    if (snippet_module) { FreeLibrary(snippet_module); }
+    if (core_module) { FreeLibrary(core_module); }
   }
-
-  void wait_for_completion()
-  {
-    if (completion_fence == nullptr || completion_value == 0 ||
-        completion_fence->GetCompletedValue() >= completion_value)
-    {
-      return;
-    }
-    if (completion_event == nullptr) {
-      return;
-    }
-    if (FAILED(completion_fence->SetEventOnCompletion(completion_value, completion_event))) {
-      return;
-    }
-    WaitForSingleObject(completion_event, INFINITE);
-  }
-
-  bool initialize_external_sync()
-  {
-    auto import_fence = [&](ID3D12Fence *fence,
-                            GPUVulkanExternalSemaphore **r_semaphore) {
-      HANDLE handle = nullptr;
-      HRESULT result = device->CreateSharedHandle(
-          fence, nullptr, GENERIC_ALL, nullptr, &handle);
-      if (FAILED(result)) {
-        set_error("CreateSharedHandle fence failed: 0x" + HResultString(result));
-        return false;
-      }
-      *r_semaphore = GPU_vulkan_external_semaphore_create_from_d3d12_fence(
-          reinterpret_cast<uint64_t>(handle));
-      if (*r_semaphore == nullptr) {
-        CloseHandle(handle);
-        set_error("Vulkan import of D3D12 fence failed");
-        return false;
-      }
-      return true;
-    };
-
-    if (!import_fence(vulkan_to_d3d12_fence.Get(), &vulkan_to_d3d12_semaphore) ||
-        !import_fence(d3d12_to_vulkan_fence.Get(), &d3d12_to_vulkan_semaphore))
-    {
-      GPU_vulkan_external_semaphore_free(d3d12_to_vulkan_semaphore);
-      d3d12_to_vulkan_semaphore = nullptr;
-      GPU_vulkan_external_semaphore_free(vulkan_to_d3d12_semaphore);
-      vulkan_to_d3d12_semaphore = nullptr;
-      return false;
-    }
-    external_sync = true;
-    return true;
-  }
-
   bool initialize_device()
   {
     ComPtr<IDXGIFactory6> factory;
@@ -592,6 +431,11 @@ struct Dlss5D3D12Session::Impl {
       return false;
     }
 
+    const Span<uint8_t> luid = GPU_platform_luid();
+    if (luid.size() != sizeof(LUID)) {
+      set_error("Vulkan device does not expose a Windows LUID");
+      return false;
+    }
     ComPtr<IDXGIAdapter1> selected_adapter;
     for (UINT index = 0;; ++index) {
       ComPtr<IDXGIAdapter1> adapter;
@@ -608,6 +452,9 @@ struct Dlss5D3D12Session::Impl {
       if ((description.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0 || description.VendorId != 0x10DE) {
         continue;
       }
+      if (memcmp(luid.data(), &description.AdapterLuid, sizeof(LUID)) != 0) {
+        continue;
+      }
       if (SUCCEEDED(D3D12CreateDevice(
               adapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&device))))
       {
@@ -616,60 +463,12 @@ struct Dlss5D3D12Session::Impl {
       }
     }
     if (!selected_adapter || !device) {
-      set_error("No NVIDIA D3D12 device found");
+      set_error("No NVIDIA D3D12 adapter matches the active Vulkan device");
       return false;
     }
 
-    D3D12_COMMAND_QUEUE_DESC queue_desc = {};
-    queue_desc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
-    result = device->CreateCommandQueue(&queue_desc, IID_PPV_ARGS(&queue));
-    if (FAILED(result)) {
-      set_error("CreateCommandQueue failed: 0x" + HResultString(result));
-      return false;
-    }
-    for (int index = 0; index < kCommandListCount; index++) {
-      result = device->CreateCommandAllocator(
-          D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocators[index]));
-      if (FAILED(result)) {
-        set_error("CreateCommandAllocator failed: 0x" + HResultString(result));
-        return false;
-      }
-      result = device->CreateCommandList(0,
-                                         D3D12_COMMAND_LIST_TYPE_DIRECT,
-                                         allocators[index].Get(),
-                                         nullptr,
-                                         IID_PPV_ARGS(&command_lists[index]));
-      if (FAILED(result)) {
-        set_error("CreateCommandList failed: 0x" + HResultString(result));
-        return false;
-      }
-      command_lists[index]->Close();
-    }
-    result = device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&completion_fence));
-    if (FAILED(result)) {
-      set_error("CreateFence failed: 0x" + HResultString(result));
-      return false;
-    }
-    result = device->CreateFence(
-        0, D3D12_FENCE_FLAG_SHARED, IID_PPV_ARGS(&vulkan_to_d3d12_fence));
-    if (FAILED(result)) {
-      set_error("Create Vulkan-to-D3D12 fence failed: 0x" + HResultString(result));
-      return false;
-    }
-    result = device->CreateFence(
-        0, D3D12_FENCE_FLAG_SHARED, IID_PPV_ARGS(&d3d12_to_vulkan_fence));
-    if (FAILED(result)) {
-      set_error("Create D3D12-to-Vulkan fence failed: 0x" + HResultString(result));
-      return false;
-    }
-    completion_event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-    if (completion_event == nullptr) {
-      set_error("CreateEventW failed");
-      return false;
-    }
     return true;
   }
-
   bool initialize_ngx()
   {
     runtime_directory = RuntimeDirectory();
@@ -775,48 +574,397 @@ struct Dlss5D3D12Session::Impl {
     }
     snippet_initialized = true;
 
-    result = ngx_allocate_parameters(&parameters);
-    if (!NgxSucceeded(result) || parameters == nullptr) {
-      if (ngx_get_capability_parameters == nullptr ||
-          !NgxSucceeded(ngx_get_capability_parameters(&parameters)))
-      {
-        set_error("NVSDK_NGX_D3D12_AllocateParameters failed: 0x" +
-                  HResultString(static_cast<HRESULT>(result)));
+    return true;
+  }
+};
+
+static std::shared_ptr<Dlss5NgxRuntime> acquire_ngx_runtime(std::string &error)
+{
+  static std::mutex mutex;
+  static std::shared_ptr<Dlss5NgxRuntime> cached;
+  std::lock_guard lock(mutex);
+  if (cached) { return cached; }
+  auto runtime = std::make_shared<Dlss5NgxRuntime>();
+  if (!runtime->initialize_device() || !runtime->initialize_ngx()) {
+    error = runtime->status;
+    return nullptr;
+  }
+  cached = runtime;
+  return runtime;
+}
+
+struct Dlss5D3D12Session::Impl {
+  struct SharedTexture {
+    ComPtr<ID3D12Resource> d3d12;
+    HANDLE shared_handle = nullptr;
+    gpu::Texture *vulkan = nullptr;
+    int2 extent = int2(0);
+    gpu::TextureFormat format = gpu::TextureFormat::Invalid;
+
+    void reset()
+    {
+      if (vulkan != nullptr) {
+        GPU_texture_free(vulkan);
+        vulkan = nullptr;
+      }
+      if (shared_handle != nullptr) {
+        CloseHandle(shared_handle);
+        shared_handle = nullptr;
+      }
+      d3d12.Reset();
+      extent = int2(0);
+      format = gpu::TextureFormat::Invalid;
+    }
+  };
+
+  ComPtr<ID3D12Device> device;
+  ComPtr<ID3D12CommandQueue> queue;
+  static constexpr int kCommandListCount = 3;
+  std::array<ComPtr<ID3D12CommandAllocator>, kCommandListCount> allocators;
+  std::array<ComPtr<ID3D12GraphicsCommandList>, kCommandListCount> command_lists;
+  std::array<uint64_t, kCommandListCount> command_list_completion_values = {};
+  int command_list_index = -1;
+  ComPtr<ID3D12QueryHeap> timestamp_heap;
+  ComPtr<ID3D12Resource> timestamp_readback;
+  uint64_t timestamp_frequency = 0;
+  std::array<bool, kCommandListCount> timestamp_valid = {};
+  std::array<uint64_t, kCommandListCount> timestamp_serial = {};
+  double last_gpu_time_ms = -1.0;
+  uint64_t evaluate_count = 0;
+  uint64_t feature_create_count = 0;
+  ComPtr<ID3D12Fence> completion_fence;
+  ComPtr<ID3D12Fence> vulkan_to_d3d12_fence;
+  ComPtr<ID3D12Fence> d3d12_to_vulkan_fence;
+  GPUVulkanExternalSemaphore *vulkan_to_d3d12_semaphore = nullptr;
+  GPUVulkanExternalSemaphore *d3d12_to_vulkan_semaphore = nullptr;
+  HANDLE completion_event = nullptr;
+  uint64_t completion_value = 0;
+  uint64_t vulkan_to_d3d12_value = 0;
+  uint64_t d3d12_to_vulkan_value = 0;
+  bool external_sync = false;
+  bool textures_released = false;
+
+  std::shared_ptr<Dlss5NgxRuntime> runtime;
+  NVSDK_NGX_Parameter *parameters = nullptr;
+  NVSDK_NGX_Handle *feature = nullptr;
+  bool initialized = false;
+  bool parameters_reported = false;
+  bool feature_settings_valid = false;
+  bool feature_color_is_scene_linear = true;
+  bool feature_depth_is_reverse_z = true;
+  std::string status = "not initialized";
+
+  SharedTexture color;
+  SharedTexture depth;
+  SharedTexture velocity;
+  SharedTexture output;
+
+  ~Impl()
+  {
+    reset();
+  }
+
+  void set_error(const std::string &message)
+  {
+    status = message;
+  }
+
+  void reset()
+  {
+    if (!wait_for_fence_value(completion_value, INFINITE)) {
+      return;
+    }
+    /* Only stall the GPU if we actually have imported shared textures to free.
+     * Calling GPU_finish() on first enable waits for the whole EEVEE frame and
+     * freezes heavy scenes when the user just ticks DLSSNR. */
+    const bool has_shared_textures = color.vulkan != nullptr || depth.vulkan != nullptr ||
+                                     velocity.vulkan != nullptr || output.vulkan != nullptr;
+    if (has_shared_textures && GPU_context_active_get() != nullptr) {
+      GPU_finish();
+    }
+
+    GPU_vulkan_external_semaphore_free(d3d12_to_vulkan_semaphore);
+    d3d12_to_vulkan_semaphore = nullptr;
+    GPU_vulkan_external_semaphore_free(vulkan_to_d3d12_semaphore);
+    vulkan_to_d3d12_semaphore = nullptr;
+    external_sync = false;
+    textures_released = false;
+
+    if (feature != nullptr && runtime != nullptr) {
+      std::lock_guard lock(runtime->mutex);
+      runtime->ngx_release_feature(feature);
+      feature = nullptr;
+    }
+    if (parameters != nullptr && runtime != nullptr) {
+      std::lock_guard lock(runtime->mutex);
+      runtime->ngx_destroy_parameters(parameters);
+      parameters = nullptr;
+    }
+    color.reset();
+    depth.reset();
+    velocity.reset();
+    output.reset();
+    feature_settings_valid = false;
+    feature_color_is_scene_linear = true;
+    feature_depth_is_reverse_z = true;
+
+    if (completion_event != nullptr) {
+      CloseHandle(completion_event);
+      completion_event = nullptr;
+    }
+    for (auto &command_list : command_lists) {
+      command_list.Reset();
+    }
+    for (auto &allocator : allocators) {
+      allocator.Reset();
+    }
+    command_list_completion_values = {};
+    command_list_index = -1;
+    timestamp_heap.Reset();
+    timestamp_readback.Reset();
+    timestamp_frequency = 0;
+    timestamp_valid = {};
+    last_gpu_time_ms = -1.0;
+    queue.Reset();
+    completion_fence.Reset();
+    vulkan_to_d3d12_fence.Reset();
+    d3d12_to_vulkan_fence.Reset();
+    completion_value = 0;
+    vulkan_to_d3d12_value = 0;
+    d3d12_to_vulkan_value = 0;
+    device.Reset();
+    runtime.reset();
+    initialized = false;
+    parameters_reported = false;
+  }
+
+  bool wait_for_fence_value(const uint64_t value, const DWORD timeout_ms)
+  {
+    if (completion_fence == nullptr || value == 0) { return true; }
+    const ULONGLONG start = GetTickCount64();
+    for (;;) {
+      const uint64_t completed = completion_fence->GetCompletedValue();
+      if (completed == UINT64_MAX) {
+        set_error("DLSS5 D3D12 device removed");
+        /* The device is no longer executing commands, so teardown is safe. */
+        return FAILED(device->GetDeviceRemovedReason());
+      }
+      if (completed >= value) { return true; }
+      if (timeout_ms == 0 || completion_event == nullptr) { return false; }
+      ResetEvent(completion_event);
+      if (FAILED(completion_fence->SetEventOnCompletion(value, completion_event))) {
+        set_error("DLSS5 SetEventOnCompletion failed");
         return false;
       }
+      const ULONGLONG elapsed = GetTickCount64() - start;
+      if (timeout_ms != INFINITE && elapsed >= timeout_ms) { return false; }
+      const DWORD remaining = timeout_ms == INFINITE ? INFINITE : timeout_ms - DWORD(elapsed);
+      if (WaitForSingleObject(completion_event, remaining) != WAIT_OBJECT_0) { return false; }
     }
-    if (parameters == nullptr) {
-      set_error("DLSS5 NGX returned a null parameter interface");
+  }
+
+  bool initialize_external_sync()
+  {
+    auto import_fence = [&](ID3D12Fence *fence,
+                            GPUVulkanExternalSemaphore **r_semaphore) {
+      HANDLE handle = nullptr;
+      HRESULT result = device->CreateSharedHandle(
+          fence, nullptr, GENERIC_ALL, nullptr, &handle);
+      if (FAILED(result)) {
+        set_error("CreateSharedHandle fence failed: 0x" + HResultString(result));
+        return false;
+      }
+      *r_semaphore = GPU_vulkan_external_semaphore_create_from_d3d12_fence(
+          reinterpret_cast<uint64_t>(handle));
+      if (*r_semaphore == nullptr) {
+        CloseHandle(handle);
+        set_error("Vulkan import of D3D12 fence failed");
+        return false;
+      }
+      CloseHandle(handle); /* Vulkan imports the payload, not ownership of this NT handle. */
+      return true;
+    };
+
+    if (!import_fence(vulkan_to_d3d12_fence.Get(), &vulkan_to_d3d12_semaphore) ||
+        !import_fence(d3d12_to_vulkan_fence.Get(), &d3d12_to_vulkan_semaphore))
+    {
+      GPU_vulkan_external_semaphore_free(d3d12_to_vulkan_semaphore);
+      d3d12_to_vulkan_semaphore = nullptr;
+      GPU_vulkan_external_semaphore_free(vulkan_to_d3d12_semaphore);
+      vulkan_to_d3d12_semaphore = nullptr;
+      return false;
+    }
+    external_sync = true;
+    return true;
+  }
+
+  bool initialize_device()
+  {
+    runtime = acquire_ngx_runtime(status);
+    if (!runtime) { return false; }
+    device = runtime->device;
+    HRESULT result;
+    D3D12_COMMAND_QUEUE_DESC queue_desc = {};
+    queue_desc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+    result = device->CreateCommandQueue(&queue_desc, IID_PPV_ARGS(&queue));
+    if (FAILED(result)) {
+      set_error("CreateCommandQueue failed: 0x" + HResultString(result));
+      return false;
+    }
+    for (int index = 0; index < kCommandListCount; index++) {
+      result = device->CreateCommandAllocator(
+          D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocators[index]));
+      if (FAILED(result)) {
+        set_error("CreateCommandAllocator failed: 0x" + HResultString(result));
+        return false;
+      }
+      result = device->CreateCommandList(0,
+                                         D3D12_COMMAND_LIST_TYPE_DIRECT,
+                                         allocators[index].Get(),
+                                         nullptr,
+                                         IID_PPV_ARGS(&command_lists[index]));
+      if (FAILED(result)) {
+        set_error("CreateCommandList failed: 0x" + HResultString(result));
+        return false;
+      }
+      command_lists[index]->Close();
+    }
+    result = device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&completion_fence));
+    if (FAILED(result)) {
+      set_error("CreateFence failed: 0x" + HResultString(result));
+      return false;
+    }
+    result = device->CreateFence(
+        0, D3D12_FENCE_FLAG_SHARED, IID_PPV_ARGS(&vulkan_to_d3d12_fence));
+    if (FAILED(result)) {
+      set_error("Create Vulkan-to-D3D12 fence failed: 0x" + HResultString(result));
+      return false;
+    }
+    result = device->CreateFence(
+        0, D3D12_FENCE_FLAG_SHARED, IID_PPV_ARGS(&d3d12_to_vulkan_fence));
+    if (FAILED(result)) {
+      set_error("Create D3D12-to-Vulkan fence failed: 0x" + HResultString(result));
+      return false;
+    }
+    initialize_timestamps();
+    completion_event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (completion_event == nullptr) {
+      set_error("CreateEventW failed");
       return false;
     }
     return true;
   }
 
-  bool create_feature(int2 extent)
+  void initialize_timestamps()
   {
-    SetI(parameters, "Width", extent.x);
-    SetI(parameters, "Height", extent.y);
-    SetI(parameters, "OutWidth", extent.x);
-    SetI(parameters, "OutHeight", extent.y);
-    SetI(parameters, "DLSSNR.Width", extent.x);
-    SetI(parameters, "DLSSNR.Height", extent.y);
-    SetI(parameters, "DLSSNR.InputWidth", extent.x);
-    SetI(parameters, "DLSSNR.InputHeight", extent.y);
-    SetI(parameters, "DLSSNR.OutputWidth", extent.x);
-    SetI(parameters, "DLSSNR.OutputHeight", extent.y);
-    SetI(parameters, "DLSSNR.Output.Width", extent.x);
-    SetI(parameters, "DLSSNR.Output.Height", extent.y);
-    SetI(parameters, "DLSSNR.Hint.Render.Preset", 0);
+    if (FAILED(queue->GetTimestampFrequency(&timestamp_frequency))) { return; }
+    D3D12_QUERY_HEAP_DESC desc = {};
+    desc.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
+    desc.Count = kCommandListCount * 2;
+    if (FAILED(device->CreateQueryHeap(&desc, IID_PPV_ARGS(&timestamp_heap)))) { return; }
+    D3D12_HEAP_PROPERTIES heap = {};
+    heap.Type = D3D12_HEAP_TYPE_READBACK;
+    D3D12_RESOURCE_DESC buffer = {};
+    buffer.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+    buffer.Width = desc.Count * sizeof(uint64_t);
+    buffer.Height = 1;
+    buffer.DepthOrArraySize = buffer.MipLevels = 1;
+    buffer.SampleDesc.Count = 1;
+    buffer.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    if (FAILED(device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &buffer,
+                                               D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+                                               IID_PPV_ARGS(&timestamp_readback))))
+    {
+      timestamp_heap.Reset();
+    }
+  }
+
+  void read_timestamp(const int slot)
+  {
+    if (!timestamp_valid[slot] || timestamp_readback == nullptr || timestamp_frequency == 0) { return; }
+    if (completion_fence->GetCompletedValue() < command_list_completion_values[slot]) { return; }
+    const SIZE_T offset = SIZE_T(slot) * 2 * sizeof(uint64_t);
+    D3D12_RANGE range = {offset, offset + 2 * sizeof(uint64_t)};
+    void *mapped = nullptr;
+    if (SUCCEEDED(timestamp_readback->Map(0, &range, &mapped))) {
+      const uint64_t *ticks = static_cast<const uint64_t *>(mapped) + slot * 2;
+      if (ticks[1] >= ticks[0]) {
+        last_gpu_time_ms = double(ticks[1] - ticks[0]) * 1000.0 / double(timestamp_frequency);
+        if (_wgetenv(L"BLENDER_DLSS5_PROFILE") != nullptr) {
+          CLOG_INFO(&LOG, "DLSS5_PROFILE sample=%llu nr_gpu_ms=%.6f creates=%llu size=%dx%d",
+                    static_cast<unsigned long long>(timestamp_serial[slot]), last_gpu_time_ms,
+                    static_cast<unsigned long long>(feature_create_count), output.extent.x,
+                    output.extent.y);
+        }
+      }
+      D3D12_RANGE written = {0, 0};
+      timestamp_readback->Unmap(0, &written);
+    }
+    timestamp_valid[slot] = false;
+  }
+
+  bool initialize_ngx()
+  {
+    std::lock_guard lock(runtime->mutex);
+    const NgxResult result = runtime->ngx_allocate_parameters(&parameters);
+    if (!NgxSucceeded(result) || parameters == nullptr) {
+      set_error("NVSDK_NGX_D3D12_AllocateParameters failed");
+      return false;
+    }
+    return true;
+  }
+
+  bool create_feature(const int2 input_extent,
+                      const int2 output_extent,
+                      const int2 guide_extent,
+                      const Dlss5NRSettings &settings,
+                      const bool color_is_scene_linear,
+                      const bool depth_is_reverse_z)
+  {
+    const unsigned int create_flags =
+        (color_is_scene_linear ? 0x01u : 0u) | (depth_is_reverse_z ? 0x08u : 0u) |
+        (guide_extent != input_extent ? 0x02u : 0u);
+    SetResource(parameters, "DLSSNR.Color", color.d3d12.Get());
+    SetResource(parameters, "DLSSNR.Output", output.d3d12.Get());
+    SetResource(parameters, "DLSSNR.Depth", depth.d3d12.Get());
+    SetResource(parameters, "DLSSNR.MVec", velocity.d3d12.Get());
+    SetUi(parameters, "DLSSNR.Enabled", 1);
+    SetI(parameters, "Width", input_extent.x);
+    SetI(parameters, "Height", input_extent.y);
+    SetI(parameters, "OutWidth", output_extent.x);
+    SetI(parameters, "OutHeight", output_extent.y);
+    SetUi(parameters, "DLSSNR.Width", input_extent.x);
+    SetUi(parameters, "DLSSNR.Height", input_extent.y);
+    SetUi(parameters, "DLSSNR.DepthInverted", depth_is_reverse_z ? 1u : 0u);
+    SetUi(parameters, "DLSSNR.Reset", 1);
+    SetUi(parameters, "DLSSNR.ColorSubrectBaseX", 0);
+    SetUi(parameters, "DLSSNR.ColorSubrectBaseY", 0);
+    SetUi(parameters, "DLSSNR.ColorSubrectWidth", input_extent.x);
+    SetUi(parameters, "DLSSNR.ColorSubrectHeight", input_extent.y);
+    SetUi(parameters, "DLSSNR.OutputSubrectBaseX", 0);
+    SetUi(parameters, "DLSSNR.OutputSubrectBaseY", 0);
+    SetUi(parameters, "DLSSNR.OutputSubrectWidth", output_extent.x);
+    SetUi(parameters, "DLSSNR.OutputSubrectHeight", output_extent.y);
+    SetUi(parameters, "DLSSNR.DepthSubrectBaseX", 0);
+    SetUi(parameters, "DLSSNR.DepthSubrectBaseY", 0);
+    SetUi(parameters, "DLSSNR.DepthSubrectWidth", guide_extent.x);
+    SetUi(parameters, "DLSSNR.DepthSubrectHeight", guide_extent.y);
+    SetUi(parameters, "DLSSNR.MVecSubrectBaseX", 0);
+    SetUi(parameters, "DLSSNR.MVecSubrectBaseY", 0);
+    SetUi(parameters, "DLSSNR.MVecSubrectWidth", guide_extent.x);
+    SetUi(parameters, "DLSSNR.MVecSubrectHeight", guide_extent.y);
+    SetF(parameters, "DLSSNR.MVecScaleX", -float(guide_extent.x));
+    SetF(parameters, "DLSSNR.MVecScaleY", -float(guide_extent.y));
+    SetUi(parameters, "DLSS.Feature.Create.Flags", create_flags);
+    SetF(parameters, "DLSSNR.Intensity", settings.intensity);
+    SetUi(parameters, "DLSSNR.Style", unsigned(std::max(0, std::min(2, settings.style))));
+    SetF(parameters, "DLSSNR.LocalStructureStrength", settings.local_structure_strength);
+    SetF(parameters, "DLSSNR.LocalToneStrength", settings.local_tone_strength);
+    SetF(parameters, "DLSSNR.SkinStructureStrength", settings.skin_structure_strength);
+    SetUi(parameters, "DLSSNR.UseAutoMask", settings.use_auto_mask ? 1u : 0u);
+    SetUi(parameters, "DLSSNR.UICorrection", settings.ui_correction ? 1u : 0u);
     SetI(parameters, "CreationNodeMask", 1);
     SetI(parameters, "VisibilityNodeMask", 1);
-    SetUi(parameters, "DLSS.Output.Subrect.Base.X", 0);
-    SetUi(parameters, "DLSS.Output.Subrect.Base.Y", 0);
-    SetUi(parameters, "DLSSNR.Upscaling", 0);
-    SetF(parameters, "DLSSNR.Scale", 1.0f);
-    SetF(parameters, "DLSSNR.ScalingRatio", 1.0f);
-    SetUll(parameters,
-           "DLSSNRComputeScalingRatioCallback",
-           reinterpret_cast<unsigned long long>(&ComputeScalingRatio));
 
     /* NGX requires an open (Reset) command list to record CreateFeature into,
      * and the recorded commands must be closed, executed and waited on before
@@ -828,12 +976,8 @@ struct Dlss5D3D12Session::Impl {
      * EvaluateFeature to operate on garbage. */
     command_list_index = (command_list_index + 1) % kCommandListCount;
     const uint64_t slot_completion = command_list_completion_values[command_list_index];
-    if (slot_completion != 0 && completion_fence->GetCompletedValue() < slot_completion) {
-      if (FAILED(completion_fence->SetEventOnCompletion(slot_completion, completion_event))) {
-        set_error("D3D12 command allocator completion event failed (create_feature)");
-        return false;
-      }
-      WaitForSingleObject(completion_event, INFINITE);
+    if (slot_completion != 0 && !wait_for_fence_value(slot_completion, 8000)) {
+      return false;
     }
 
     ID3D12CommandAllocator *allocator = allocators[command_list_index].Get();
@@ -851,8 +995,11 @@ struct Dlss5D3D12Session::Impl {
       return false;
     }
 
-    const NgxResult ngx_result =
-        ngx_create_feature(command_list, kFeatureId, parameters, &feature);
+    NgxResult ngx_result;
+    {
+      std::lock_guard lock(runtime->mutex);
+      ngx_result = runtime->ngx_create_feature(command_list, kFeatureId, parameters, &feature);
+    }
     if (!NgxSucceeded(ngx_result) || feature == nullptr) {
       command_list->Close();
       set_error("NVSDK_NGX_D3D12_CreateFeature failed: 0x" +
@@ -877,14 +1024,6 @@ struct Dlss5D3D12Session::Impl {
     }
     command_list_completion_values[command_list_index] = completion_value;
 
-    /* CreateFeature must retire on the GPU before the handle is usable. */
-    if (completion_fence->GetCompletedValue() < completion_value) {
-      if (FAILED(completion_fence->SetEventOnCompletion(completion_value, completion_event))) {
-        set_error("D3D12 create_feature completion event failed");
-        return false;
-      }
-      WaitForSingleObject(completion_event, INFINITE);
-    }
     return true;
   }
 
@@ -941,59 +1080,118 @@ struct Dlss5D3D12Session::Impl {
       set_error(std::string("Vulkan import failed for ") + name);
       return false;
     }
+    CloseHandle(texture.shared_handle);
     texture.shared_handle = nullptr;
     texture.extent = extent;
     texture.format = format;
     return true;
   }
 
-  bool ensure_resources(int2 input_extent, int2 output_extent)
+  void release_feature()
   {
-    if (input_extent.x < 32 || input_extent.y < 32 || input_extent != output_extent) {
-      set_error("realtime DLSSNR currently requires matching extents >= 32px");
+    if (feature != nullptr && runtime != nullptr) {
+      std::lock_guard lock(runtime->mutex);
+      runtime->ngx_release_feature(feature);
+      feature = nullptr;
+    }
+    feature_settings_valid = false;
+  }
+
+  bool ensure_resources(const int2 input_extent,
+                        const int2 output_extent,
+                        const int2 guide_extent,
+                        const Dlss5NRSettings &settings,
+                        const bool color_is_scene_linear,
+                        const bool depth_is_reverse_z)
+  {
+    if (input_extent.x < 32 || input_extent.y < 32 || output_extent.x < 32 ||
+        output_extent.y < 32 || guide_extent.x < 32 || guide_extent.y < 32 ||
+        input_extent != output_extent)
+    {
+      set_error("DLSSNR requires matching color/output extents >= 32px");
       return false;
     }
-    if (initialized && color.extent == input_extent && output.extent == output_extent) {
+    const bool same_size = initialized && color.extent == input_extent &&
+                           output.extent == output_extent && depth.extent == guide_extent &&
+                           velocity.extent == guide_extent;
+    const bool same_settings = initialized && feature_settings_valid &&
+                               feature_color_is_scene_linear == color_is_scene_linear &&
+                               feature_depth_is_reverse_z == depth_is_reverse_z;
+    if (same_size && same_settings) {
       return true;
     }
-
-    reset();
     if (GPU_backend_get_type() != GPU_BACKEND_VULKAN) {
       set_error("realtime DLSSNR requires the Vulkan GPU backend");
       return false;
     }
-    if (!initialize_device()) {
-      reset();
+
+    /* OptiScaler keeps NGX/device loaded and only ReleaseFeature + CreateFeature
+     * when size or tuning changes. Reloading nvngx_dlssnr.dll (165MB) on every
+     * slider tick is what made enable feel like a hang. */
+    if (device == nullptr) {
+      if (!initialize_device()) {
+        reset();
+        return false;
+      }
+      external_sync = initialize_external_sync();
+      if (!external_sync) { return false; }
+      if (external_sync) {
+        CLOG_INFO(&LOG, "DLSS5 synchronization: external semaphore");
+      }
+      else {
+        CLOG_WARN(&LOG, "DLSS5 synchronization: CPU fallback (%s)", status.c_str());
+      }
+    }
+    if (parameters == nullptr) {
+      if (!initialize_ngx()) {
+        reset();
+        return false;
+      }
+    }
+
+    /* Pending Vulkan reads of the previous output must retire before resize. */
+    if (!same_size && initialized) { GPU_finish(); }
+    if (!wait_for_fence_value(completion_value, 30000)) {
+      set_error("DLSS5 resize deferred: GPU work has not completed");
       return false;
     }
-    external_sync = initialize_external_sync();
-    if (external_sync) {
-      CLOG_INFO(&LOG, "DLSS5 synchronization: external semaphore");
+    release_feature();
+
+    if (!same_size) {
+      color.reset();
+      depth.reset();
+      velocity.reset();
+      output.reset();
+      if (!create_shared_texture(
+              color, "DLSS5.Color", input_extent, gpu::TextureFormat::SFLOAT_16_16_16_16) ||
+          !create_shared_texture(depth, "DLSS5.Depth", guide_extent, gpu::TextureFormat::SFLOAT_32) ||
+          !create_shared_texture(
+              velocity, "DLSS5.Velocity", guide_extent, gpu::TextureFormat::SFLOAT_16_16) ||
+          !create_shared_texture(
+              output, "DLSS5.Output", output_extent, gpu::TextureFormat::SFLOAT_16_16_16_16))
+      {
+        reset();
+        return false;
+      }
     }
-    else {
-      CLOG_WARN(&LOG,
-                "DLSS5 synchronization: CPU fallback (%s)",
-                status.c_str());
-    }
-    if (!initialize_ngx()) {
-      reset();
-      return false;
-    }
-    if (!create_shared_texture(
-            color, "DLSS5.Color", input_extent, gpu::TextureFormat::SFLOAT_16_16_16_16) ||
-        !create_shared_texture(depth, "DLSS5.Depth", input_extent, gpu::TextureFormat::SFLOAT_32) ||
-        !create_shared_texture(velocity, "DLSS5.Velocity", input_extent, gpu::TextureFormat::SFLOAT_16_16) ||
-        !create_shared_texture(
-            output, "DLSS5.Output", output_extent, gpu::TextureFormat::SFLOAT_16_16_16_16))
+
+    if (!create_feature(input_extent,
+                        output_extent,
+                        guide_extent,
+                        settings,
+                        color_is_scene_linear,
+                        depth_is_reverse_z))
     {
-      reset();
-      return false;
-    }
-    if (!create_feature(input_extent)) {
-      reset();
+      initialized = false;
       return false;
     }
     initialized = true;
+    ++feature_create_count;
+    CLOG_INFO(&LOG, "DLSS5 feature created: count=%llu size=%dx%d",
+              static_cast<unsigned long long>(feature_create_count), output_extent.x, output_extent.y);
+    feature_settings_valid = true;
+    feature_color_is_scene_linear = color_is_scene_linear;
+    feature_depth_is_reverse_z = depth_is_reverse_z;
     status = external_sync ? "ready (external sync)" : "ready (CPU synchronization)";
     return true;
   }
@@ -1028,23 +1226,25 @@ struct Dlss5D3D12Session::Impl {
     SetI(parameters, "Height", frame.input_extent.y);
     SetI(parameters, "OutWidth", frame.output_extent.x);
     SetI(parameters, "OutHeight", frame.output_extent.y);
+    SetUi(parameters, "DLSSNR.Enabled", 1);
+    SetUi(parameters, "DLSSNR.Width", frame.input_extent.x);
+    SetUi(parameters, "DLSSNR.Height", frame.input_extent.y);
+    SetUi(parameters, "DLSSNR.DepthInverted", frame.depth_is_reverse_z ? 1u : 0u);
+    SetUi(parameters, "DLSSNR.Reset", frame.reset_history ? 1u : 0u);
     SetRect(parameters, "DLSSNR.Color", frame.input_extent.x, frame.input_extent.y);
-    SetRect(parameters, "DLSSNR.MVec", frame.input_extent.x, frame.input_extent.y);
-    SetRect(parameters, "DLSSNR.Depth", frame.input_extent.x, frame.input_extent.y);
+    SetRect(parameters, "DLSSNR.MVec", frame.guide_extent.x, frame.guide_extent.y);
+    SetRect(parameters, "DLSSNR.Depth", frame.guide_extent.x, frame.guide_extent.y);
     SetRect(parameters, "DLSSNR.Output", frame.output_extent.x, frame.output_extent.y);
     SetF(parameters, "DLSSNR.MVecScaleX", frame.velocity_is_pixel_space ? 1.0f :
-                                                         -float(frame.input_extent.x));
+                                                         -float(frame.guide_extent.x));
     SetF(parameters, "DLSSNR.MVecScaleY", frame.velocity_is_pixel_space ? 1.0f :
-                                                         -float(frame.input_extent.y));
-    SetUi(parameters, "DLSSNR.DepthInverted", frame.depth_is_reverse_z ? 1u : 0u);
-    SetUi(parameters, "DLSSNR.Enabled", 1);
-    SetUi(parameters, "DLSSNR.Reset", frame.reset_history ? 1u : 0u);
+                                                         -float(frame.guide_extent.y));
     SetF(parameters, "DLSSNR.Intensity", frame.settings.intensity);
     SetF(parameters, "DLSSNR.LocalToneStrength", frame.settings.local_tone_strength);
     SetF(parameters, "DLSSNR.LocalStructureStrength", frame.settings.local_structure_strength);
     SetF(parameters, "DLSSNR.SkinStructureStrength", frame.settings.skin_structure_strength);
     SetUi(parameters, "DLSSNR.UseAutoMask", frame.settings.use_auto_mask ? 1u : 0u);
-    SetI(parameters, "DLSSNR.Style", 0);
+    SetI(parameters, "DLSSNR.Style", std::max(0, std::min(2, frame.settings.style)));
     SetUi(parameters, "DLSSNR.UICorrection", frame.settings.ui_correction ? 1u : 0u);
     if (!parameters_reported) {
       CLOG_INFO(&LOG,
@@ -1062,14 +1262,17 @@ struct Dlss5D3D12Session::Impl {
 
     command_list_index = (command_list_index + 1) % kCommandListCount;
     const uint64_t slot_completion = command_list_completion_values[command_list_index];
-    if (slot_completion != 0 && completion_fence->GetCompletedValue() < slot_completion) {
-      if (FAILED(completion_fence->SetEventOnCompletion(slot_completion, completion_event))) {
-        set_error("D3D12 command allocator completion event failed");
-        return false;
-      }
-      WaitForSingleObject(completion_event, INFINITE);
+    /* Do not CPU-stall the viewport if the previous NR is still on the GPU.
+     * OptiScaler/dlss5-bridge keep Evaluate on the queue and never WaitForSingleObject. */
+    if (slot_completion != 0 &&
+        completion_fence != nullptr &&
+        completion_fence->GetCompletedValue() < slot_completion)
+    {
+      set_error("DLSSNR GPU busy");
+      return false;
     }
 
+    read_timestamp(command_list_index);
     ID3D12CommandAllocator *allocator = allocators[command_list_index].Get();
     ID3D12GraphicsCommandList *command_list = command_lists[command_list_index].Get();
     HRESULT result = allocator->Reset();
@@ -1108,8 +1311,14 @@ struct Dlss5D3D12Session::Impl {
                D3D12_RESOURCE_STATE_COMMON,
                D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
-    const NgxResult evaluate_result =
-        ngx_evaluate_feature(command_list, feature, parameters, nullptr);
+    if (timestamp_heap != nullptr) {
+      command_list->EndQuery(timestamp_heap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, command_list_index * 2);
+    }
+    NgxResult evaluate_result;
+    {
+      std::lock_guard lock(runtime->mutex);
+      evaluate_result = runtime->ngx_evaluate_feature(command_list, feature, parameters, nullptr);
+    }
     if (!NgxSucceeded(evaluate_result)) {
       command_list->Close();
       set_error("NVSDK_NGX_D3D12_EvaluateFeature failed: 0x" +
@@ -1117,6 +1326,14 @@ struct Dlss5D3D12Session::Impl {
       return false;
     }
 
+    if (timestamp_heap != nullptr) {
+      const UINT index = command_list_index * 2;
+      command_list->EndQuery(timestamp_heap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, index + 1);
+      command_list->ResolveQueryData(timestamp_heap.Get(), D3D12_QUERY_TYPE_TIMESTAMP,
+                                    index, 2, timestamp_readback.Get(), index * sizeof(uint64_t));
+      timestamp_valid[command_list_index] = true;
+      timestamp_serial[command_list_index] = evaluate_count + 1;
+    }
     transition(command_list,
                color.d3d12.Get(),
                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
@@ -1147,6 +1364,7 @@ struct Dlss5D3D12Session::Impl {
       return false;
     }
     command_list_completion_values[command_list_index] = completion_value;
+    ++evaluate_count;
 
     if (external_sync) {
       ++d3d12_to_vulkan_value;
@@ -1156,14 +1374,18 @@ struct Dlss5D3D12Session::Impl {
         return false;
       }
     }
-    else if (completion_fence->GetCompletedValue() < completion_value) {
-      result = completion_fence->SetEventOnCompletion(completion_value, completion_event);
-      if (FAILED(result)) {
-        set_error("D3D12 completion event failed: 0x" + HResultString(result));
-        return false;
-      }
-      WaitForSingleObject(completion_event, INFINITE);
+    else if (!wait_for_fence_value(completion_value, 3000)) {
+      return false;
     }
+    return true;
+  }
+
+  bool acquire_textures()
+  {
+    if (!textures_released) { return true; }
+    gpu::Texture *textures[] = {color.vulkan, depth.vulkan, velocity.vulkan, output.vulkan};
+    if (!GPU_vulkan_external_textures_transfer(textures, 4, true)) { return false; }
+    textures_released = false;
     return true;
   }
 
@@ -1172,8 +1394,41 @@ struct Dlss5D3D12Session::Impl {
     if (!external_sync || d3d12_to_vulkan_value == 0) {
       return true;
     }
-    return GPU_vulkan_external_semaphore_wait(
-        d3d12_to_vulkan_semaphore, d3d12_to_vulkan_value);
+    if (!GPU_vulkan_external_semaphore_wait(
+            d3d12_to_vulkan_semaphore, d3d12_to_vulkan_value))
+    {
+      set_error("Vulkan wait for DLSS5 output failed");
+      return false;
+    }
+    return acquire_textures();
+  }
+
+  bool warmup()
+  {
+    if (GPU_backend_get_type() != GPU_BACKEND_VULKAN) {
+      set_error("realtime DLSSNR requires the Vulkan GPU backend");
+      return false;
+    }
+    if (device == nullptr) {
+      if (!initialize_device()) {
+        return false;
+      }
+      external_sync = initialize_external_sync();
+      if (!external_sync) { return false; }
+      if (external_sync) {
+        CLOG_INFO(&LOG, "DLSS5 synchronization: external semaphore");
+      }
+      else {
+        CLOG_WARN(&LOG, "DLSS5 synchronization: CPU fallback (%s)", status.c_str());
+      }
+    }
+    if (parameters == nullptr) {
+      if (!initialize_ngx()) {
+        return false;
+      }
+      CLOG_INFO(&LOG, "DLSS5 NGX warmed up (dll kept loaded)");
+    }
+    return true;
   }
 };
 
@@ -1184,9 +1439,15 @@ Dlss5D3D12Session::~Dlss5D3D12Session()
   delete impl_;
 }
 
-bool Dlss5D3D12Session::ensure_resources(const int2 input_extent, const int2 output_extent)
+bool Dlss5D3D12Session::ensure_resources(const int2 input_extent,
+                                          const int2 output_extent,
+                                          const int2 guide_extent,
+                                          const Dlss5NRSettings &settings,
+                                          const bool color_is_scene_linear,
+                                          const bool depth_is_reverse_z)
 {
-  return impl_->ensure_resources(input_extent, output_extent);
+  return impl_->ensure_resources(
+      input_extent, output_extent, guide_extent, settings, color_is_scene_linear, depth_is_reverse_z);
 }
 
 void Dlss5D3D12Session::reset()
@@ -1205,8 +1466,10 @@ bool Dlss5D3D12Session::copy_inputs_and_evaluate(const Dlss5D3D12Frame &frame,
   }
   if (GPU_texture_width(frame.color) != frame.input_extent.x ||
       GPU_texture_height(frame.color) != frame.input_extent.y ||
-      GPU_texture_width(frame.velocity) != frame.input_extent.x ||
-      GPU_texture_height(frame.velocity) != frame.input_extent.y)
+      GPU_texture_width(frame.depth) != frame.guide_extent.x ||
+      GPU_texture_height(frame.depth) != frame.guide_extent.y ||
+      GPU_texture_width(frame.velocity) != frame.guide_extent.x ||
+      GPU_texture_height(frame.velocity) != frame.guide_extent.y)
   {
     impl_->set_error("DLSS5 input texture extent mismatch");
     return false;
@@ -1219,6 +1482,13 @@ bool Dlss5D3D12Session::copy_inputs_and_evaluate(const Dlss5D3D12Frame &frame,
     GPU_texture_copy(impl_->velocity.vulkan, frame.velocity);
   }
   if (impl_->external_sync) {
+    gpu::Texture *textures[] = {impl_->color.vulkan, impl_->depth.vulkan,
+                               impl_->velocity.vulkan, impl_->output.vulkan};
+    if (!GPU_vulkan_external_textures_transfer(textures, 4, false)) {
+      impl_->set_error("Vulkan shared texture release failed");
+      return false;
+    }
+    impl_->textures_released = true;
     ++impl_->vulkan_to_d3d12_value;
     if (!GPU_vulkan_external_semaphore_signal(impl_->vulkan_to_d3d12_semaphore,
                                               impl_->vulkan_to_d3d12_value))
@@ -1230,12 +1500,24 @@ bool Dlss5D3D12Session::copy_inputs_and_evaluate(const Dlss5D3D12Frame &frame,
   else {
     GPU_finish();
   }
-  return impl_->evaluate(frame);
+  if (!impl_->evaluate(frame)) {
+    /* Failed recording does not submit writes, but the input release was already
+     * queued. Reclaim ownership before any later conversion can reuse textures. */
+    impl_->wait_for_output();
+    impl_->acquire_textures();
+    return false;
+  }
+  return true;
 }
 
 bool Dlss5D3D12Session::wait_for_output()
 {
   return impl_->wait_for_output();
+}
+
+bool Dlss5D3D12Session::warmup()
+{
+  return impl_->warmup();
 }
 
 gpu::Texture *Dlss5D3D12Session::color_texture() const
@@ -1256,6 +1538,12 @@ gpu::Texture *Dlss5D3D12Session::velocity_texture() const
 gpu::Texture *Dlss5D3D12Session::output_texture() const
 {
   return impl_->output.vulkan;
+}
+
+double Dlss5D3D12Session::gpu_time_ms() const
+{
+  if (impl_->command_list_index >= 0) { impl_->read_timestamp(impl_->command_list_index); }
+  return impl_->last_gpu_time_ms;
 }
 
 bool Dlss5D3D12Session::available() const
@@ -1281,11 +1569,20 @@ Dlss5D3D12Session::~Dlss5D3D12Session()
 {
   delete impl_;
 }
-bool Dlss5D3D12Session::ensure_resources(int2, int2)
+bool Dlss5D3D12Session::ensure_resources(int2,
+                                          int2,
+                                          int2,
+                                          const Dlss5NRSettings &,
+                                          bool,
+                                          bool)
 {
   return false;
 }
 void Dlss5D3D12Session::reset() {}
+bool Dlss5D3D12Session::warmup()
+{
+  return false;
+}
 bool Dlss5D3D12Session::copy_inputs_and_evaluate(const Dlss5D3D12Frame &, bool, bool)
 {
   return false;
@@ -1310,6 +1607,8 @@ gpu::Texture *Dlss5D3D12Session::output_texture() const
 {
   return nullptr;
 }
+double Dlss5D3D12Session::gpu_time_ms() const { return -1.0; }
+
 bool Dlss5D3D12Session::available() const
 {
   return false;

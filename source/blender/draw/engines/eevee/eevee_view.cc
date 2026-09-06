@@ -337,9 +337,8 @@ namespace blender::eevee
     {
       ScopedTelemetrySample telemetry_sample(inst_.telemetry,
         TelemetryStageId::MainFilmAccumulate);
-      /* DLSS5 is now invoked inside Film::accumulate after TAA convergence,
-       * avoiding the double-accumulation that occurred when DLSS output was
-       * fed back into Film's temporal history. */
+      /* Invoke DLSS5 after the current Film sample is accumulated, while keeping
+       * the reconstructed display result out of Film's temporal history. */
       inst_.film.accumulate(jitter_view_, combined_final_tx, outline_raw_tx, outline_combined_tx);
     }
     inst_.outline.release_result();

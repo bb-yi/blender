@@ -246,7 +246,6 @@ float *Film::read_native_postfx_output(ViewLayerNativePostFXOutput *output)
   GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE);
 
   float *result = static_cast<float *>(GPU_texture_read(pass_tx, GPU_DATA_FLOAT, 0));
-
   int channels = 4;
   const char *chan_id = "RGBA";
   eNodeSocketDatatype socket_type = SOCK_RGBA;
@@ -1119,46 +1118,57 @@ void Film::accumulate(View &view,
   has_outline_input_ = outline_input_tx != nullptr;
   use_outline_in_combined_ = outline_combined_tx != nullptr;
   display_only_ = false;
-  /* DLSS-NR must see the current post-FX sample. combined_output_tx_ is Film's
-   * accumulated history target and is already temporally resolved by this point. */
   gpu::Texture *dlss_display_tx = nullptr;
   inst_.manager->submit(accumulate_ps_, view);
-  if (inst_.is_viewport() || inst_.is_image_render) {
-    dlss_display_tx = inst_.dlss5.process({
-        combined_final_tx,
-        combined_output_tx_.gpu_texture(),
-        inst_.render_buffers.depth_tx,
-        inst_.render_buffers.vector_tx,
-        data_.extent,
-        data_.extent,
-        inst_.film.pixel_jitter_get(),
-        inst_.dlss5_reset(),
-        inst_.is_viewport(),
-        true,
-        true,
-        true,
-        false,
-        exp2f(inst_.scene->view_settings.exposure),
-    });
+  /* Viewport NR uses the Film/combined texture size (the pixels on screen), never
+   * Scene render resolution. Offline F12 runs NR once on the last accumulated
+   * sample — not 64 times at print resolution. */
+  const bool dlss_live_viewport = inst_.is_viewport() && !inst_.is_image_render;
+  const bool dlss_final_render = inst_.is_image_render && inst_.sampling.finished();
+  if (dlss_live_viewport || dlss_final_render) {
+    gpu::Texture *color_tx = combined_output_tx_.gpu_texture();
+    gpu::Texture *depth_tx = inst_.render_buffers.depth_tx;
+    gpu::Texture *velocity_tx = inst_.render_buffers.vector_tx;
+    if (color_tx != nullptr && depth_tx != nullptr && velocity_tx != nullptr) {
+      const int2 color_extent(GPU_texture_width(color_tx), GPU_texture_height(color_tx));
+      const int2 guide_extent(GPU_texture_width(depth_tx), GPU_texture_height(depth_tx));
+      dlss_display_tx = inst_.dlss5.process({
+          color_tx,
+          color_tx,
+          depth_tx,
+          velocity_tx,
+          color_extent,
+          color_extent,
+          guide_extent,
+          data_.overscan,
+          data_.scaling_factor,
+          inst_.film.pixel_jitter_get(),
+          dlss_live_viewport ? inst_.dlss5_reset() : true,
+          dlss_live_viewport,
+          true,
+          true,
+          true,
+          false,
+          exp2f(inst_.scene->view_settings.exposure),
+      }, view);
+    }
   }
   const bool dlss_active = dlss_display_tx != nullptr &&
                            inst_.dlss5.display_texture() == dlss_display_tx;
-  if (dlss_active) {
+  if (inst_.is_image_render && dlss_active) {
     GPU_texture_copy(combined_output_tx_.gpu_texture(), dlss_display_tx);
     GPU_memory_barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_TEXTURE_UPDATE);
-    if (inst_.is_viewport()) {
-      DefaultTextureList *dtxl = inst_.draw_ctx->viewport_texture_list_get();
-      if (dtxl->color != nullptr &&
-          GPU_texture_width(dtxl->color) == GPU_texture_width(dlss_display_tx) &&
-          GPU_texture_height(dtxl->color) == GPU_texture_height(dlss_display_tx))
-      {
-        GPU_texture_copy(dtxl->color, dlss_display_tx);
-        GPU_memory_barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_SHADER_IMAGE_ACCESS);
-      }
-    }
   }
-  if (!dlss_active) {
-    inst_.manager->submit(copy_ps_, view);
+  if (inst_.is_viewport()) {
+    /* Conversion passes bind their own framebuffer. Present through the same Film
+     * shader for active sampling and cached display, including borders and passes.
+     * Keep native Combined intact so disabling NR never exposes a stale result. */
+    DefaultFramebufferList *dfbl = inst_.draw_ctx->viewport_framebuffer_list_get();
+    GPU_framebuffer_bind(dfbl->default_fb);
+    GPU_framebuffer_viewport_set(dfbl->default_fb, UNPACK2(data_.offset), UNPACK2(data_.extent));
+    history_display_tx_ = dlss_active ? dlss_display_tx : combined_output_tx_.gpu_texture();
+    display_only_ = true;
+    inst_.manager->submit(use_compute_ ? copy_ps_ : accumulate_ps_, view);
   }
 
   combined_tx_.swap();
@@ -1182,7 +1192,8 @@ void Film::display()
   GPU_framebuffer_viewport_set(dfbl->default_fb, UNPACK2(data_.offset), UNPACK2(data_.extent));
 
   combined_final_tx_ = inst_.render_buffers.combined_tx;
-  history_display_tx_ = combined_output_tx_;
+  gpu::Texture *dlss_display_tx = inst_.dlss5.display_texture();
+  history_display_tx_ = dlss_display_tx ? dlss_display_tx : combined_output_tx_.gpu_texture();
   /* The outline result is transient and may have been released when viewport sampling
    * converged or the material graph stopped producing outline output. Refresh the optional
    * binding here as well, otherwise the display-only pass can keep a dangling texture pointer. */
@@ -1194,19 +1205,6 @@ void Film::display()
 
   display_only_ = true;
   DRW_manager_get()->submit(accumulate_ps_, drw_view);
-
-  /* DLSS5 display path: if DLSS was active in the last accumulate call, blit its
-   * scene-linear output directly to the viewport color texture, overriding the
-   * display-only accumulate_ps_ output. */
-  gpu::Texture *dlss_display_tx = inst_.dlss5.display_texture();
-  DefaultTextureList *dtxl = inst_.draw_ctx->viewport_texture_list_get();
-  if (dlss_display_tx != nullptr && dtxl->color != nullptr &&
-      GPU_texture_width(dtxl->color) == GPU_texture_width(dlss_display_tx) &&
-      GPU_texture_height(dtxl->color) == GPU_texture_height(dlss_display_tx))
-  {
-    GPU_texture_copy(dtxl->color, dlss_display_tx);
-    GPU_memory_barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_SHADER_IMAGE_ACCESS);
-  }
 
   inst_.render_buffers.release();
 
@@ -1220,22 +1218,18 @@ void Film::cryptomatte_sort()
 
 float *Film::read_pass(eViewLayerEEVEEPassType pass_type, int layer_offset)
 {
-  gpu::Texture *pass_tx = nullptr;
-  if (!inst_.is_viewport() && pass_type == EEVEE_RENDER_PASS_COMBINED) {
-    gpu::Texture *dlss_tx = inst_.dlss5.display_texture();
-    if (dlss_tx != nullptr && GPU_texture_width(dlss_tx) == data_.extent.x &&
-        GPU_texture_height(dlss_tx) == data_.extent.y)
-    {
-      pass_tx = dlss_tx;
-    }
-  }
-  if (pass_tx == nullptr) {
-    pass_tx = this->get_pass_texture(pass_type, layer_offset);
-  }
+  /* DLSS writes its reconstructed result back into combined_output_tx_. Keep the
+   * normal pass lookup here so render readback and viewport display share one
+   * authoritative Combined texture. */
+  gpu::Texture *pass_tx = this->get_pass_texture(pass_type, layer_offset);
 
   GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE);
 
   float *result = static_cast<float *>(GPU_texture_read(pass_tx, GPU_DATA_FLOAT, 0));
+
+  if (inst_.is_image_render && pass_type == EEVEE_RENDER_PASS_COMBINED) {
+    inst_.dlss5.render_readback_complete();
+  }
 
   if (pass_is_float3(pass_type)) {
     /* Convert result in place as we cannot do this conversion on GPU. */
@@ -1250,6 +1244,11 @@ float *Film::read_pass(eViewLayerEEVEEPassType pass_type, int layer_offset)
 
 gpu::Texture *Film::get_pass_texture(eViewLayerEEVEEPassType pass_type, int layer_offset)
 {
+  if (inst_.is_viewport() && pass_type == EEVEE_RENDER_PASS_COMBINED && layer_offset == 0) {
+    if (gpu::Texture *output = inst_.dlss5.display_texture()) {
+      return output;
+    }
+  }
   ePassStorageType storage_type = pass_storage_type(pass_type);
   const bool is_value = storage_type == PASS_STORAGE_VALUE;
   const bool is_cryptomatte = storage_type == PASS_STORAGE_CRYPTOMATTE;

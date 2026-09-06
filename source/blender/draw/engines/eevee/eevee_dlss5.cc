@@ -5,6 +5,9 @@
 #include "eevee_dlss5.hh"
 
 #include "CLG_log.h"
+#include "BKE_scene_runtime.hh"
+#include "DEG_depsgraph_query.hh"
+#include "BLI_string.h"
 
 #include "GPU_context.hh"
 #include "GPU_texture.hh"
@@ -44,7 +47,8 @@ bool Dlss5Module::prepare_display_color(gpu::Texture *source, gpu::Texture *dest
 bool Dlss5Module::reconstruct_scene_linear(gpu::Texture *source,
                                            gpu::Texture *input,
                                            gpu::Texture *original,
-                                           gpu::Texture *destination)
+                                           gpu::Texture *destination,
+                                           const float intensity)
 {
   gpu::Shader *shader = inst_.shaders.static_shader_get(DLSS5_HDR_RECONSTRUCT);
   if (shader == nullptr || source == nullptr || input == nullptr || original == nullptr ||
@@ -61,16 +65,18 @@ bool Dlss5Module::reconstruct_scene_linear(gpu::Texture *source,
   hdr_reconstruct_ps_.bind_texture("color_tx", &source);
   hdr_reconstruct_ps_.bind_texture("source_tx", &input);
   hdr_reconstruct_ps_.bind_texture("original_tx", &original);
+  hdr_reconstruct_ps_.push_constant("resolve_intensity", intensity);
   hdr_reconstruct_ps_.draw_procedural(GPU_PRIM_TRIS, 1, 3);
   inst_.manager->submit(hdr_reconstruct_ps_);
   GPU_memory_barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_FRAMEBUFFER);
   return true;
 }
 
-bool Dlss5Module::prepare_velocity(gpu::Texture *source,
-                                   gpu::Texture *destination,
-                                   const int2 extent)
+bool Dlss5Module::prepare_velocity(const Dlss5FrameInputs &inputs,
+                                   gpu::Texture *destination, draw::View &view)
 {
+  gpu::Texture *source = inputs.velocity;
+  gpu::Texture *depth = inputs.depth;
   gpu::Shader *shader = inst_.shaders.static_shader_get(DLSS5_VELOCITY_CONVERT);
   if (shader == nullptr || source == nullptr || destination == nullptr) {
     return false;
@@ -83,16 +89,34 @@ bool Dlss5Module::prepare_velocity(gpu::Texture *source,
   velocity_convert_ps_.shader_set(shader);
   const GPUSamplerState no_filter = GPUSamplerState::default_sampler();
   velocity_convert_ps_.bind_texture("velocity_tx", &source, no_filter);
-  velocity_convert_ps_.push_constant("scale", float2(extent));
+  velocity_convert_ps_.bind_texture("depth_tx", &depth, no_filter);
+  inst_.velocity.bind_resources(velocity_convert_ps_);
+  velocity_convert_ps_.push_constant("guide_overscan", inputs.guide_overscan);
+  velocity_convert_ps_.push_constant("guide_scale", inputs.guide_scale);
   velocity_convert_ps_.draw_procedural(GPU_PRIM_TRIS, 1, 3);
-  inst_.manager->submit(velocity_convert_ps_);
+  inst_.manager->submit(velocity_convert_ps_, view);
   GPU_memory_barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_FRAMEBUFFER);
   return true;
 }
 
-gpu::Texture *Dlss5Module::process(const Dlss5FrameInputs &inputs)
+void Dlss5Module::publish_status(const bool viewport, const char *status)
+{
+  Scene *scene = DEG_get_original(inst_.scene);
+  if (scene != nullptr && scene->runtime != nullptr) {
+    scene->runtime->eevee_performance.dlss5_status_publish(viewport, status);
+  }
+}
+
+gpu::Texture *Dlss5Module::process(const Dlss5FrameInputs &inputs, draw::View &view)
 {
   last_display_texture_ = nullptr;
+  if (inst_.scene == nullptr || inst_.scene->eevee.dlss5_mode != SCE_EEVEE_DLSSNR ||
+      inst_.scene->eevee.dlss5_intensity == 0.0f)
+  {
+    retry_blocked_ = false;
+    force_history_reset_ = true;
+    return inputs.color;
+  }
 
   if (!reported_) {
     CLOG_INFO(&Instance::log,
@@ -118,12 +142,17 @@ gpu::Texture *Dlss5Module::process(const Dlss5FrameInputs &inputs)
   }
 
   if (GPU_backend_get_type() != GPU_BACKEND_VULKAN) {
+    publish_status(inputs.is_viewport, "Unavailable: Vulkan backend required");
+    static bool logged_backend_skip = false;
+    if (!logged_backend_skip) {
+      logged_backend_skip = true;
+      CLOG_WARN(&Instance::log,
+                "DLSS5 skipped: backend=%s (need Vulkan and restart)",
+                GPU_backend_get_name());
+    }
     return inputs.color;
   }
   if (inst_.scene == nullptr || inst_.scene->eevee.dlss5_mode != SCE_EEVEE_DLSSNR) {
-    if (d3d12_session_->available()) {
-      d3d12_session_->reset();
-    }
     retry_blocked_ = false;
     active_reported_ = false;
     failure_reported_ = false;
@@ -131,10 +160,27 @@ gpu::Texture *Dlss5Module::process(const Dlss5FrameInputs &inputs)
   }
   if (inputs.color == nullptr || inputs.base_color == nullptr || inputs.depth == nullptr ||
       inputs.velocity == nullptr ||
+      inputs.input_extent.x < 32 || inputs.input_extent.y < 32 ||
+      inputs.output_extent.x < 32 || inputs.output_extent.y < 32 ||
       inputs.input_extent != inputs.output_extent)
   {
     return inputs.color;
   }
+  const int2 guide_extent = inputs.guide_extent.x > 0 && inputs.guide_extent.y > 0 ?
+                                inputs.guide_extent :
+                                int2(GPU_texture_width(inputs.depth), GPU_texture_height(inputs.depth));
+  if (guide_extent.x < 32 || guide_extent.y < 32) {
+    return inputs.color;
+  }
+  const Dlss5NRSettings settings = {
+      inst_.scene->eevee.dlss5_intensity,
+      inst_.scene->eevee.dlss5_local_tone_strength,
+      inst_.scene->eevee.dlss5_local_structure_strength,
+      inst_.scene->eevee.dlss5_skin_structure_strength,
+      inst_.scene->eevee.dlss5_use_auto_mask != 0,
+      inst_.scene->eevee.dlss5_ui_correction != 0,
+      int(inst_.scene->eevee.dlss5_style),
+  };
 
   if (inst_.dlss5_settings_changed() ||
       (retry_blocked_ &&
@@ -147,10 +193,17 @@ gpu::Texture *Dlss5Module::process(const Dlss5FrameInputs &inputs)
     return inputs.color;
   }
 
-  if (!d3d12_session_->ensure_resources(inputs.input_extent, inputs.output_extent)) {
+  if (!d3d12_session_->ensure_resources(inputs.input_extent,
+                                        inputs.output_extent,
+                                        inputs.output_extent,
+                                        settings,
+                                        false,
+                                        inputs.depth_is_reverse_z))
+  {
     retry_blocked_ = true;
     retry_input_extent_ = inputs.input_extent;
     retry_output_extent_ = inputs.output_extent;
+    publish_status(inputs.is_viewport, d3d12_session_->status());
     if (!failure_reported_) {
       CLOG_WARN(&Instance::log, "DLSS5 disabled until settings change: %s",
                 d3d12_session_->status());
@@ -170,7 +223,8 @@ gpu::Texture *Dlss5Module::process(const Dlss5FrameInputs &inputs)
 
   if (inputs.color_is_scene_linear) {
     color_convert_inverse_ = false;
-    if (!prepare_display_color(inputs.color, d3d12_session_->color_texture())) {
+    if (!prepare_display_color(inputs.color, d3d12_session_->color_texture()))
+    {
       CLOG_WARN(&Instance::log, "DLSS5 scene-linear to display color conversion is unavailable");
       return inputs.color;
     }
@@ -178,6 +232,7 @@ gpu::Texture *Dlss5Module::process(const Dlss5FrameInputs &inputs)
 
   gpu::Shader *depth_shader = inst_.shaders.static_shader_get(DLSS5_DEPTH_CONVERT);
   if (depth_shader == nullptr) {
+    publish_status(inputs.is_viewport, "Unavailable: depth conversion shader failed");
     CLOG_WARN(&Instance::log, "DLSS5 depth conversion shader is unavailable");
     return inputs.color;
   }
@@ -190,11 +245,15 @@ gpu::Texture *Dlss5Module::process(const Dlss5FrameInputs &inputs)
   depth_convert_ps_.framebuffer_set(&depth_convert_fb_);
   depth_convert_ps_.shader_set(depth_shader);
   depth_convert_ps_.bind_texture("depth_tx", &depth_input);
+  depth_convert_ps_.push_constant("guide_overscan", inputs.guide_overscan);
+  depth_convert_ps_.push_constant("guide_scale", inputs.guide_scale);
   depth_convert_ps_.draw_procedural(GPU_PRIM_TRIS, 1, 3);
   inst_.manager->submit(depth_convert_ps_);
   GPU_memory_barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_FRAMEBUFFER);
 
-  if (!prepare_velocity(inputs.velocity, d3d12_session_->velocity_texture(), inputs.input_extent)) {
+  if (!prepare_velocity(inputs, d3d12_session_->velocity_texture(), view))
+  {
+    publish_status(inputs.is_viewport, "Unavailable: motion conversion shader failed");
     CLOG_WARN(&Instance::log, "DLSS5 velocity conversion is unavailable");
     return inputs.color;
   }
@@ -205,33 +264,25 @@ gpu::Texture *Dlss5Module::process(const Dlss5FrameInputs &inputs)
       d3d12_session_->velocity_texture(),
       inputs.input_extent,
       inputs.output_extent,
+      inputs.output_extent,
       inputs.jitter,
-      inputs.reset_history,
+      inputs.reset_history || force_history_reset_,
       false,
       inputs.depth_is_reverse_z,
       true,
       inputs.exposure_scale,
-      {
-          inst_.scene->eevee.dlss5_intensity,
-          inst_.scene->eevee.dlss5_local_tone_strength,
-          inst_.scene->eevee.dlss5_local_structure_strength,
-          inst_.scene->eevee.dlss5_skin_structure_strength,
-          inst_.scene->eevee.dlss5_use_auto_mask != 0,
-          inst_.scene->eevee.dlss5_ui_correction != 0,
-      },
+      settings,
   };
   if (!d3d12_session_->copy_inputs_and_evaluate(
           frame, !inputs.color_is_scene_linear, false))
   {
-    retry_blocked_ = true;
-    retry_input_extent_ = inputs.input_extent;
-    retry_output_extent_ = inputs.output_extent;
+    publish_status(inputs.is_viewport, d3d12_session_->status());
     if (!failure_reported_) {
-      CLOG_WARN(&Instance::log, "DLSS5 disabled until settings change: %s",
-                d3d12_session_->status());
+      CLOG_WARN(&Instance::log, "DLSS5 evaluate skipped: %s", d3d12_session_->status());
       failure_reported_ = true;
     }
-    d3d12_session_->reset();
+    /* Never FreeLibrary here. OptiScaler keeps NGX loaded; unloading 165MB per
+     * failed viewport sample is what made enable feel like a hang. */
     return inputs.color;
   }
 
@@ -247,20 +298,64 @@ gpu::Texture *Dlss5Module::process(const Dlss5FrameInputs &inputs)
   }
   retry_blocked_ = false;
   failure_reported_ = false;
+  /* Order the shared output on the Vulkan queue without a host fence wait. */
   if (!d3d12_session_->wait_for_output()) {
-    CLOG_WARN(&Instance::log, "DLSS5 Vulkan output wait failed");
     return inputs.color;
   }
   GPU_memory_barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_SHADER_IMAGE_ACCESS);
   if (!reconstruct_scene_linear(d3d12_session_->output_texture(),
                                 d3d12_session_->color_texture(),
                                 inputs.base_color,
-                                scene_linear_output_tx_.gpu_texture()))
+                                scene_linear_output_tx_.gpu_texture(),
+                                1.0f))
   {
     CLOG_WARN(&Instance::log, "DLSS5 HDR-preserving output reconstruction is unavailable");
     return inputs.color;
   }
   last_display_texture_ = scene_linear_output_tx_.gpu_texture();
+  force_history_reset_ = false;
+  const double gpu_ms = d3d12_session_->gpu_time_ms();
+  char status[160];
+  if (gpu_ms >= 0.0) {
+    SNPRINTF(status, "Active %dx%d | recent NR GPU %.2f ms", inputs.output_extent.x,
+             inputs.output_extent.y, gpu_ms);
+  }
+  else {
+    SNPRINTF(status, "Active %dx%d | GPU timing pending", inputs.output_extent.x,
+             inputs.output_extent.y);
+  }
+  publish_status(inputs.is_viewport, status);
+  return last_display_texture_;
+}
+
+void Dlss5Module::warmup()
+{
+  d3d12_session_->warmup();
+}
+
+void Dlss5Module::render_readback_complete()
+{
+  if (display_texture() == nullptr) {
+    return;
+  }
+  char status[160];
+  const double gpu_ms = d3d12_session_->gpu_time_ms();
+  if (gpu_ms >= 0.0) {
+    SNPRINTF(status, "Completed | NR GPU %.2f ms", gpu_ms);
+  }
+  else {
+    SNPRINTF(status, "%s", "Completed | GPU timing unavailable");
+  }
+  publish_status(false, status);
+}
+
+gpu::Texture *Dlss5Module::display_texture() const
+{
+  if (inst_.scene == nullptr || inst_.scene->eevee.dlss5_mode != SCE_EEVEE_DLSSNR ||
+      inst_.scene->eevee.dlss5_intensity == 0.0f)
+  {
+    return nullptr;
+  }
   return last_display_texture_;
 }
 

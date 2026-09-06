@@ -742,6 +742,40 @@ void VKCommandBuilder::add_image_barriers(VKRenderGraph &render_graph,
                                           bool within_rendering)
 {
   r_barrier.image_memory_barriers = IndexRange(vk_image_memory_barriers_.size(), 0);
+  const VKRenderGraphNode &node = render_graph.nodes_[node_handle];
+  if (node.type == VKNodeType::SYNCHRONIZATION &&
+      node.synchronization.src_queue_family != VK_QUEUE_FAMILY_IGNORED)
+  {
+    /* Imported D3D12 resources cross the API boundary in GENERAL layout. The
+     * external fence orders execution; this barrier transfers memory ownership.
+     * Keep the tracker in GENERAL so the first sample cannot discard NR output
+     * with an UNDEFINED transition. Imported images have one mip and one layer. */
+    const bool acquire = node.synchronization.src_queue_family == VK_QUEUE_FAMILY_EXTERNAL;
+    for (const VKRenderGraphImage &link : render_graph.linked_images(node_handle)) {
+      VKResourceStateTracker::Resource &resource = render_graph.resources_.get_image_resource(
+          link.resource.handle);
+      VKResourceBarrierState &state = resource.barrier_state;
+      vk_image_memory_barriers_.append({VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                                        nullptr,
+                                        acquire ? VkAccessFlags(0) : state.vk_access,
+                                        acquire ? VkAccessFlags(VK_ACCESS_MEMORY_READ_BIT |
+                                                                VK_ACCESS_MEMORY_WRITE_BIT) : 0,
+                                        acquire ? VK_IMAGE_LAYOUT_GENERAL : state.image_layout,
+                                        VK_IMAGE_LAYOUT_GENERAL,
+                                        node.synchronization.src_queue_family,
+                                        node.synchronization.dst_queue_family,
+                                        resource.image.vk_image,
+                                        {link.vk_image_aspect, 0, 1, 0, 1}});
+      state.image_layout = VK_IMAGE_LAYOUT_GENERAL;
+      state.vk_access = acquire ? VK_ACCESS_MEMORY_WRITE_BIT : VK_ACCESS_NONE;
+      state.vk_pipeline_stages = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+    }
+    r_barrier.src_stage_mask |= VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+    r_barrier.dst_stage_mask |= VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+    r_barrier.image_memory_barriers = r_barrier.image_memory_barriers.with_new_end(
+        vk_image_memory_barriers_.size());
+    return;
+  }
   add_image_read_barriers(
       render_graph, node_handle, node_stages, image_tracker, r_barrier, within_rendering);
   add_image_write_barriers(

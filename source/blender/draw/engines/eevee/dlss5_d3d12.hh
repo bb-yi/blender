@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <cstdint>
+
 #include "BLI_math_vector_types.hh"
 
 namespace blender::gpu {
@@ -19,6 +21,17 @@ struct Dlss5NRSettings {
   float skin_structure_strength = -1.0f;
   bool use_auto_mask = false;
   bool ui_correction = false;
+  int style = 2;
+
+  bool operator==(const Dlss5NRSettings &other) const
+  {
+    return intensity == other.intensity &&
+           local_tone_strength == other.local_tone_strength &&
+           local_structure_strength == other.local_structure_strength &&
+           skin_structure_strength == other.skin_structure_strength &&
+           use_auto_mask == other.use_auto_mask && ui_correction == other.ui_correction &&
+           style == other.style;
+  }
 };
 
 struct Dlss5D3D12Frame {
@@ -27,6 +40,7 @@ struct Dlss5D3D12Frame {
   gpu::Texture *velocity = nullptr;
   int2 input_extent = int2(0);
   int2 output_extent = int2(0);
+  int2 guide_extent = int2(0);
   float2 jitter = float2(0.0f);
   bool reset_history = false;
   bool color_is_scene_linear = true;
@@ -55,10 +69,17 @@ class Dlss5D3D12Session {
   Dlss5D3D12Session(const Dlss5D3D12Session &) = delete;
   Dlss5D3D12Session &operator=(const Dlss5D3D12Session &) = delete;
 
-  bool ensure_resources(int2 input_extent, int2 output_extent);
+  bool ensure_resources(int2 input_extent,
+                        int2 output_extent,
+                        int2 guide_extent,
+                        const Dlss5NRSettings &settings,
+                        bool color_is_scene_linear,
+                        bool depth_is_reverse_z);
+  bool warmup();
   bool copy_inputs_and_evaluate(const Dlss5D3D12Frame &frame,
                                 bool copy_color = true,
                                 bool copy_velocity = true);
+  /* Queue the external fence dependency and reacquire shared textures on Vulkan. */
   bool wait_for_output();
   void reset();
 
@@ -67,6 +88,8 @@ class Dlss5D3D12Session {
   gpu::Texture *velocity_texture() const;
   gpu::Texture *output_texture() const;
 
+  /** Most recent completed NGX GPU timestamp interval; excludes EEVEE and copies. */
+  double gpu_time_ms() const;
   bool available() const;
   const char *status() const;
 };

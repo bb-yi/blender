@@ -107,6 +107,7 @@ class VKContext : public Context, NonCopyable {
       uint64_t wait_semaphore_value = 0,
       uint64_t signal_semaphore_value = 0);
   void finish() override;
+  bool external_textures_transfer(Texture *const *textures, int count, bool acquire);
 
   void memory_statistics_get(int *r_total_mem_kb, int *r_free_mem_kb) override;
 

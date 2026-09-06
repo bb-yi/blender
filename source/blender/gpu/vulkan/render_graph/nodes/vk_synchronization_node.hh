@@ -15,7 +15,10 @@ namespace blender::gpu::render_graph {
 /**
  * Information stored inside the render graph node. See `VKRenderGraphNode`.
  */
-struct VKSynchronizationData {};
+struct VKSynchronizationData {
+  uint32_t src_queue_family = VK_QUEUE_FAMILY_IGNORED;
+  uint32_t dst_queue_family = VK_QUEUE_FAMILY_IGNORED;
+};
 
 /**
  * Information needed to add a node to the render graph.
@@ -24,6 +27,8 @@ struct VKSynchronizationCreateInfo {
   VkImage vk_image;
   VkImageLayout vk_image_layout;
   VkImageAspectFlags vk_image_aspect;
+  uint32_t src_queue_family = VK_QUEUE_FAMILY_IGNORED;
+  uint32_t dst_queue_family = VK_QUEUE_FAMILY_IGNORED;
 };
 
 class VKSynchronizationNode : public VKNodeInfo<VKNodeType::SYNCHRONIZATION,
@@ -42,8 +47,7 @@ class VKSynchronizationNode : public VKNodeInfo<VKNodeType::SYNCHRONIZATION,
   template<typename Node, typename Storage>
   static void set_node_data(Node &node, Storage & /* storage */, const CreateInfo &create_info)
   {
-    UNUSED_VARS(create_info);
-    node.synchronization = {};
+    node.synchronization = {create_info.src_queue_family, create_info.dst_queue_family};
   }
 
   /**

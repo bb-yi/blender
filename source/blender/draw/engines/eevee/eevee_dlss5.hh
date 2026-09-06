@@ -7,9 +7,8 @@
  *
  * Optional DLSS5 integration boundary for EEVEE.
  *
- * The first implementation deliberately remains pass-through. It records the
- * exact EEVEE resources and frame metadata that a future D3D12 executor needs,
- * without adding an NGX dependency to Blender's default build.
+ * Windows Vulkan/D3D12 interop for Neural Rendering of the resolved Film image.
+ * Unsupported backends preserve native EEVEE output.
  */
 
 #pragma once
@@ -38,6 +37,9 @@ struct Dlss5FrameInputs {
   gpu::Texture *velocity = nullptr;
   int2 input_extent = int2(0);
   int2 output_extent = int2(0);
+  int2 guide_extent = int2(0);
+  int guide_overscan = 0;
+  int guide_scale = 1;
   float2 jitter = float2(0.0f);
   bool reset_history = false;
   bool is_viewport = false;
@@ -51,9 +53,8 @@ struct Dlss5FrameInputs {
 /**
  * EEVEE-side contract for an optional DLSS5 executor.
  *
- * The executor must return a texture with output_extent. Until a backend is
- * implemented, process() returns color unchanged. Keeping the boundary here
- * lets us validate ordering and input metadata without changing rendering.
+ * The executor returns a scene-linear texture with output_extent, or the input
+ * on failure. Native Film history remains separate from the processed output.
  */
 class Dlss5Module {
  private:
@@ -62,6 +63,7 @@ class Dlss5Module {
   bool active_reported_ = false;
   bool failure_reported_ = false;
   bool retry_blocked_ = false;
+  bool force_history_reset_ = true;
   int2 retry_input_extent_ = int2(-1);
   int2 retry_output_extent_ = int2(-1);
   std::unique_ptr<Dlss5D3D12Session> d3d12_session_;
@@ -77,25 +79,33 @@ class Dlss5Module {
   draw::PassSimple velocity_convert_ps_ = {"DLSS5.VelocityConvert"};
   bool color_convert_inverse_ = false;
 
+  void publish_status(bool viewport, const char *status);
   bool prepare_display_color(gpu::Texture *source, gpu::Texture *destination);
   bool reconstruct_scene_linear(gpu::Texture *source,
                                 gpu::Texture *input,
                                 gpu::Texture *original,
-                                gpu::Texture *destination);
-  bool prepare_velocity(gpu::Texture *source, gpu::Texture *destination, int2 extent);
+                                gpu::Texture *destination,
+                                float intensity);
+  bool prepare_velocity(const Dlss5FrameInputs &inputs, gpu::Texture *destination, draw::View &view);
 
  public:
   explicit Dlss5Module(Instance &inst);
   ~Dlss5Module();
 
-  gpu::Texture *process(const Dlss5FrameInputs &inputs);
+  gpu::Texture *process(const Dlss5FrameInputs &inputs, draw::View &view);
+  /* Load D3D12 + nvngx_dlssnr.dll once. Games do this at startup, not on toggle. */
+  void warmup();
+  void render_readback_complete();
 
+  void invalidate()
+  {
+    last_display_texture_ = nullptr;
+    retry_blocked_ = false;
+    force_history_reset_ = true;
+  }
   bool available() const;
   const char *status() const;
-  gpu::Texture *display_texture() const
-  {
-    return last_display_texture_;
-  }
+  gpu::Texture *display_texture() const;
 };
 
 }  // namespace blender::eevee

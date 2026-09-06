@@ -666,6 +666,7 @@ void do_versions_after_linking_520(FileData *fd, Main *bmain)
       scene.eevee.dlss5_mode = SCE_EEVEE_DLSS5_OFF;
       scene.eevee.dlss5_use_auto_mask = false;
       scene.eevee.dlss5_ui_correction = false;
+      scene.eevee.dlss5_render_scale = 1;
     }
   }
 
@@ -1091,6 +1092,7 @@ void blo_do_versions_520(FileData * /*fd*/, Library * /*lib*/, Main *bmain)
       scene.eevee.dlss5_mode = SCE_EEVEE_DLSS5_OFF;
       scene.eevee.dlss5_use_auto_mask = false;
       scene.eevee.dlss5_ui_correction = false;
+      scene.eevee.dlss5_render_scale = 1;
     }
   }
 

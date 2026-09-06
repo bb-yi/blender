@@ -122,6 +122,7 @@ namespace blender::eevee
     float dlss5_skin_structure_strength_ = -1.0f;
     bool dlss5_use_auto_mask_ = false;
     bool dlss5_ui_correction_ = false;
+    char dlss5_style_ = 2;
     int2 render_extent_override_ = int2(-1);
 
     /** Info string displayed at the top of the render / viewport, or the console when baking. */

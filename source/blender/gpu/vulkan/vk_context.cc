@@ -211,6 +211,24 @@ TimelineValue VKContext::flush_render_graph(RenderGraphFlushFlags flags,
   return timeline;
 }
 
+bool VKContext::external_textures_transfer(Texture *const *textures, const int count, const bool acquire)
+{
+  VKContext &context = *this;
+  const uint32_t queue_family = gpu::VKBackend::get().device.queue_family_get();
+  for (int i = 0; i < count; ++i) {
+    if (textures[i] == nullptr) { return false; }
+    auto &texture = *static_cast<gpu::VKTexture *>(textures[i]);
+    gpu::render_graph::VKSynchronizationNode::CreateInfo info = {};
+    info.vk_image = texture.vk_image_handle();
+    info.vk_image_layout = VK_IMAGE_LAYOUT_GENERAL;
+    info.vk_image_aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+    info.src_queue_family = acquire ? VK_QUEUE_FAMILY_EXTERNAL : queue_family;
+    info.dst_queue_family = acquire ? queue_family : VK_QUEUE_FAMILY_EXTERNAL;
+    context.render_graph().add_node(info);
+  }
+  return true;
+}
+
 void VKContext::finish()
 {
   flush_render_graph(RenderGraphFlushFlags::SUBMIT | RenderGraphFlushFlags::WAIT_FOR_COMPLETION |

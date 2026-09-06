@@ -104,6 +104,29 @@ bool VKTexture::init_internal_external_2D(const GPUExternalTextureHandle &extern
   image_info.usage = to_vk_image_usage(gpu_image_usage_flags_, format_flag_, false);
   image_info.samples = VK_SAMPLE_COUNT_1_BIT;
 
+  VkPhysicalDeviceExternalImageFormatInfo external_format = {
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO};
+  external_format.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D12_RESOURCE_BIT;
+  VkPhysicalDeviceImageFormatInfo2 format_info = {
+      VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2};
+  format_info.pNext = &external_format;
+  format_info.format = image_info.format;
+  format_info.type = image_info.imageType;
+  format_info.tiling = image_info.tiling;
+  format_info.usage = image_info.usage;
+  format_info.flags = image_info.flags;
+  VkExternalImageFormatProperties external_properties = {
+      VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES};
+  VkImageFormatProperties2 format_properties = {VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2};
+  format_properties.pNext = &external_properties;
+  if (vkGetPhysicalDeviceImageFormatProperties2(
+          device.physical_device_get(), &format_info, &format_properties) != VK_SUCCESS ||
+      !(external_properties.externalMemoryProperties.externalMemoryFeatures &
+        VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT))
+  {
+    return false;
+  }
+
   VkResult result = vkCreateImage(device.vk_handle(), &image_info, nullptr, &vk_image_);
   if (result != VK_SUCCESS) {
     return false;

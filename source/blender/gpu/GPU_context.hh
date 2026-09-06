@@ -25,6 +25,11 @@ namespace blender {
 
 struct GPUContext;
 struct GPUVulkanExternalSemaphore;
+namespace gpu { class Texture; }
+
+/** Transfer single-mip D3D12 shared textures around external semaphore signal/wait. */
+bool GPU_vulkan_external_textures_transfer(gpu::Texture *const *textures, int count, bool acquire);
+
 
 /* GPU back-ends abstract the differences between different APIs. #GPU_context_create
  * automatically initializes the back-end, and #GPU_context_discard frees it when there

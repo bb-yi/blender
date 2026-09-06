@@ -2813,7 +2813,10 @@ struct SceneEEVEE {
   SceneEEVEEDLSS5Mode dlss5_mode = SCE_EEVEE_DLSS5_OFF;
   char dlss5_use_auto_mask = false;
   char dlss5_ui_correction = false;
-  char _pad_dlss5[5] = {};
+  char dlss5_render_scale = 1;
+  /* 0 Default, 1 Natural, 2 Cinematic — OptiScaler / Unity DLSSNR. */
+  char dlss5_style = 2;
+  char _pad_dlss5[3] = {};
   char use_outline = true;
   char _pad2[3] = {};
 };

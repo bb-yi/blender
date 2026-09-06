@@ -331,6 +331,21 @@ GPUVulkanExternalSemaphore *GPU_vulkan_external_semaphore_create_from_d3d12_fenc
 #endif
 }
 
+bool GPU_vulkan_external_textures_transfer(gpu::Texture *const *textures,
+                                            const int count,
+                                            const bool acquire)
+{
+#ifdef WITH_VULKAN_BACKEND
+  if (GPU_backend_get_type() != GPU_BACKEND_VULKAN || GPU_context_active_get() == nullptr) {
+    return false;
+  }
+  return gpu::VKContext::get()->external_textures_transfer(textures, count, acquire);
+#else
+  UNUSED_VARS(textures, count, acquire);
+  return false;
+#endif
+}
+
 bool GPU_vulkan_external_semaphore_signal(GPUVulkanExternalSemaphore *semaphore,
                                           const uint64_t value)
 {
