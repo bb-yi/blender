@@ -603,6 +603,18 @@
 - 稳定 Render Texture 资源生命周期。
 - 文档：更新 NPR changelog / GLSL guide，补充投影矩阵相关待办。
 
+## 2026-09-11  680997dc4ccb
+
+#### 新增功能
+- 打通 Filter Graph 的 AOV 到合成器：新增 `AOV Output` 节点，可在 Filter Graph 内指定 AOV 名称与执行阶段，把 Filter Pass 的输出图像写入 AOV，再经合成器 `Render Layers` 读取；该节点只在 Filter Graph 中提供，Filter Material 内不可用。
+- `AOV Output` 加入 Filter Graph 的 Add 菜单。
+
+#### 修复与改进
+- 修复 Filter 材质降分辨率时 AOV 只写入左下角的问题，按 pass extent 到 rp 全尺寸缩放 `gl_FragCoord`。
+- 修复 `Filter Pass` 材质树 evaluated copy 中释放 `NodeFilterMaskItem.object` 的崩溃，user-count 维护移至 `node_remove_node`。
+- 修复 `NodeTree.type` 缺少 `FILTER_GRAPH` 枚举项导致的控制台持续报错 `current value '4' matches no enum in 'EeveeFilterGraphNodeTree', 'Eevee Filter Graph', 'type'`，`tree.type` 现在正确返回 `FILTER_GRAPH`。
+- Windows 发布包已完成带 Cycles 的全量清理构建，完整 Release 测试 `116/116` 通过；该结果不代表 Linux 或 macOS 测试覆盖。
+
 ## 暂存
 
 #### 新增功能
