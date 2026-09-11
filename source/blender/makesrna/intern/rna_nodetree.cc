@@ -12834,6 +12834,11 @@ static void rna_def_nodetree(BlenderRNA *brna)
       {NTREE_TEXTURE, "TEXTURE", ICON_TEXTURE, "Texture", "Texture nodes"},
       {NTREE_COMPOSIT, "COMPOSITING", ICON_RENDERLAYERS, "Compositing", "Compositing nodes"},
       {NTREE_GEOMETRY, "GEOMETRY", ICON_GEOMETRY_NODES, "Geometry", "Geometry nodes"},
+      {NTREE_EEVEE_FILTER_GRAPH,
+       "FILTER_GRAPH",
+       ICON_NODE_COMPOSITING,
+       "Filter Graph",
+       "Eevee filter graph nodes"},
       {0, nullptr, 0, nullptr, nullptr},
   };
 
