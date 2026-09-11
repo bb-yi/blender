@@ -380,6 +380,7 @@ class NODE_MT_filter_graph_node_output(node_add_menu.AddNodeMenu):
     def draw(self, _context):
         layout = self.layout
         self.node_operator(layout, "EeveeFilterGraphNodeStageOutput")
+        self.node_operator(layout, "EeveeFilterGraphNodeAOVOutput", label="AOV Output")
 
 
 class NODE_MT_filter_graph_node_add_all(Menu):
