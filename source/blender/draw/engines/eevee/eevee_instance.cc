@@ -370,10 +370,14 @@ namespace blender::eevee
     /* Needed bits to be able to display something to the screen. */
     needed_shaders = shader_request | DEFAULT_MATERIALS;
 
+    if (is_image_render && shaders.static_shaders_has_failed(shader_request))
+    {
+      info_append_i18n("Error: Failed to compile EEVEE engine shaders");
+    }
     skip_render_ = !is_loaded(needed_shaders) || !film.is_valid_render_extent();
   }
 
-  void Instance::init_light_bake(Depsgraph* depsgraph, draw::Manager* manager)
+  bool Instance::init_light_bake(Depsgraph* depsgraph, draw::Manager* manager)
   {
     telemetry.reset_epoch();
     this->depsgraph = depsgraph;
@@ -414,9 +418,16 @@ namespace blender::eevee
     volume.init();
     lookdev.init(&empty_rect);
 
-    needed_shaders = IRRADIANCE_BAKE_SHADERS | SHADOW_SHADERS | SURFEL_SHADERS;
+    needed_shaders = IRRADIANCE_BAKE_SHADERS | LIGHT_CULLING_SHADERS | SHADOW_SHADERS |
+                     SURFEL_SHADERS;
     shaders.static_shaders_load_async(needed_shaders);
-    shaders.static_shaders_wait_ready(needed_shaders);
+    loaded_shaders = shaders.static_shaders_wait_ready(needed_shaders);
+    if (shaders.static_shaders_has_failed(needed_shaders))
+    {
+      info_append_i18n("Error: Failed to compile EEVEE light bake shaders");
+      return false;
+    }
+    return is_loaded(needed_shaders);
   }
 
   void Instance::set_time(float time)
@@ -1050,8 +1061,15 @@ namespace blender::eevee
       GPU_framebuffer_clear_color_depth(dfbl->default_fb, double4(0.0), 1.0f);
       if (!is_loaded(needed_shaders & ~WORLD_SHADERS))
       {
-        info_append_i18n("Compiling EEVEE engine shaders");
-        DRW_viewport_request_redraw();
+        if (shaders.static_shaders_has_failed(needed_shaders & ~WORLD_SHADERS))
+        {
+          info_append_i18n("Error: Failed to compile EEVEE engine shaders");
+        }
+        else
+        {
+          info_append_i18n("Compiling EEVEE engine shaders");
+          DRW_viewport_request_redraw();
+        }
       }
       /* Do not swap if the velocity module didn't go through a full sync cycle. */
       if (!is_loaded(needed_shaders))

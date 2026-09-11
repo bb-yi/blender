@@ -156,6 +156,7 @@ void register_shader_nodes()
   register_node_type_eevee_filter_graph_aov_input();
   register_node_type_eevee_filter_graph_filter_material();
   register_node_type_eevee_filter_graph_stage_output();
+  register_node_type_eevee_filter_graph_aov_output();
 }
 
 }  // namespace blender

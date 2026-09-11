@@ -950,6 +950,8 @@ static void rna_EeveeFilterGraphNode_material_update(Main *bmain,
   bNodeTree &ntree = *reinterpret_cast<bNodeTree *>(ptr->owner_id);
   bNode &node = *ptr->data_as<bNode>();
   nodes::filter_graph_filter_pass_material_changed(*bmain, ntree, node);
+  /* A new filter material may introduce image animation and other ID dependencies. */
+  DEG_relations_tag_update(bmain);
 }
 
 static int rna_EeveeFilterGraphNode_execution_resolution_get(PointerRNA *ptr)
@@ -8498,6 +8500,51 @@ static void def_eevee_filter_graph_aov_input(BlenderRNA * /*brna*/, StructRNA *s
   RNA_def_struct_sdna_from(srna, "bNode", nullptr);
 }
 
+static void def_eevee_filter_graph_aov_output(BlenderRNA * /*brna*/, StructRNA *srna)
+{
+  static const EnumPropertyItem filter_execution_stage_items[] = {
+      {SCE_EEVEE_FILTER_STAGE_BEFORE_VOLUME_FOG,
+       "BEFORE_VOLUME_FOG",
+       0,
+       "Before Volume Fog",
+       "Run after deferred/background rendering and before Eevee volume fog is resolved"},
+      {SCE_EEVEE_FILTER_STAGE_BEFORE_POSTFX,
+       "BEFORE_POSTFX",
+       0,
+       "Before PostFX",
+       "Run after forward rendering and before Eevee post-processing"},
+      {SCE_EEVEE_FILTER_STAGE_BEFORE_DEPTH_OF_FIELD,
+       "BEFORE_DEPTH_OF_FIELD",
+       0,
+       "Before Depth of Field",
+       "Run after motion blur and before depth of field"},
+      {SCE_EEVEE_FILTER_STAGE_BEFORE_COMPOSITE,
+       "BEFORE_COMPOSITE",
+       0,
+       "Before Composite",
+       "Run after Eevee depth of field and before final film compositing"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  PropertyRNA *prop;
+
+  prop = RNA_def_property(srna, "execution_stage", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "custom1");
+  RNA_def_property_enum_items(prop, filter_execution_stage_items);
+  RNA_def_property_ui_text(
+      prop, "Execution Stage", "Where this AOV output runs in Eevee. The image it reads is the "
+                               "stage input at that point in the render pipeline");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  RNA_def_struct_sdna_from(srna, "NodeEeveeFilterGraphAOVInput", "storage");
+
+  prop = RNA_def_property(srna, "aov_name", PROP_STRING, PROP_NONE);
+  RNA_def_property_string_sdna(prop, nullptr, "name");
+  RNA_def_property_ui_text(prop, "Name", "Name of the AOV that this graph output writes to");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  RNA_def_struct_sdna_from(srna, "bNode", nullptr);
+}
+
 static void def_eevee_filter_graph_filter_material(BlenderRNA *brna, StructRNA *srna)
 {
   static const EnumPropertyItem filter_graph_execution_resolution_items[] = {
@@ -13244,6 +13291,7 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("NodeInternal", "NodeStoreBundleItem");
 
   define("NodeInternal", "EeveeFilterGraphNodeAOVInput", def_eevee_filter_graph_aov_input);
+  define("NodeInternal", "EeveeFilterGraphNodeAOVOutput", def_eevee_filter_graph_aov_output);
   define("NodeInternal", "EeveeFilterGraphNodeFilterMaterial", def_eevee_filter_graph_filter_material);
   define("NodeInternal", "EeveeFilterGraphNodeSceneColor");
   define("NodeInternal", "EeveeFilterGraphNodeStageOutput", def_eevee_filter_graph_stage_output);

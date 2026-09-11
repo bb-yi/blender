@@ -116,6 +116,7 @@ void register_node_type_eevee_filter_graph_scene_color();
 void register_node_type_eevee_filter_graph_aov_input();
 void register_node_type_eevee_filter_graph_filter_material();
 void register_node_type_eevee_filter_graph_stage_output();
+void register_node_type_eevee_filter_graph_aov_output();
 
 void filter_graph_stage_output_activate(bNodeTree &ntree, bNode &node);
 void filter_graph_stage_outputs_ensure(bNodeTree &ntree);

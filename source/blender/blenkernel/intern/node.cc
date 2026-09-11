@@ -5118,6 +5118,21 @@ void node_remove_node(
       id_us_min(node.id);
     }
 
+    /* Socket items with ID user references declared in #node_node_foreach_id must be
+     * decremented here: the per-node storage destruction path (#node_free_storage via
+     * #destruct_item) must never touch user counts, because it also runs for evaluated
+     * copies whose ID pointers may already be released. */
+    if (node.type_legacy == SH_NODE_FILTER_OBJECT_MASK && node.storage != nullptr) {
+      NodeFilterMask *mask_storage = static_cast<NodeFilterMask *>(node.storage);
+      for (NodeFilterMaskItem &item : MutableSpan(mask_storage->items, mask_storage->items_num)) {
+        if (item.object != nullptr &&
+            BKE_id_is_in_global_main(reinterpret_cast<ID *>(item.object)))
+        {
+          id_us_min(reinterpret_cast<ID *>(item.object));
+        }
+      }
+    }
+
     for (bNodeSocket &sock : node.inputs) {
       socket_id_user_decrement(&sock);
     }

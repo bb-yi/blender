@@ -157,8 +157,14 @@ class LightBake {
     context_enable();
     manager_ = new draw::Manager();
     instance_ = new eevee::Instance();
-    instance_->init_light_bake(depsgraph_, manager_);
+    const bool initialized = instance_->init_light_bake(depsgraph_, manager_);
     context_disable();
+
+    if (!initialized) {
+      report_ = instance_->info_get();
+      delete_resources();
+      return;
+    }
 
     for (auto i : original_probes_.index_range()) {
       Object *eval_ob = DEG_get_evaluated(depsgraph_, original_probes_[i]);

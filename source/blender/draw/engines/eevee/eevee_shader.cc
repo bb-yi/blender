@@ -404,17 +404,27 @@ ShaderGroups ShaderModule::static_shaders_load(const ShaderGroups request_bits,
   auto request = [&](ShaderGroups bit, Span<eShaderType> shader_types) {
     if (request_bits & bit) {
       bool all_loaded = true;
+      bool any_failed = false;
       for (eShaderType shader : shader_types) {
         if (shaders_[shader].is_ready()) {
-          /* Noop. */
+          if (shaders_[shader].get() == nullptr) {
+            all_loaded = false;
+            any_failed = true;
+          }
         }
         else if (block_until_ready) {
-          shaders_[shader].get();
+          if (shaders_[shader].get() == nullptr) {
+            all_loaded = false;
+            any_failed = true;
+          }
         }
         else {
           shaders_[shader].ensure_compile_async();
           all_loaded = false;
         }
+      }
+      if (any_failed) {
+        failed_shader_groups_ |= bit;
       }
       if (all_loaded) {
         ready |= bit;
@@ -603,6 +613,12 @@ ShaderGroups ShaderModule::static_shaders_load(const ShaderGroups request_bits,
   return ready;
 }
 
+bool ShaderModule::static_shaders_has_failed(const ShaderGroups request_bits)
+{
+  std::lock_guard lock(mutex_);
+  return bool(failed_shader_groups_ & request_bits);
+}
+
 bool ShaderModule::request_specializations(bool block_until_ready,
                                            int render_buffers_shadow_id,
                                            int shadow_ray_count,
@@ -622,6 +638,9 @@ bool ShaderModule::request_specializations(bool block_until_ready,
         Vector<AsyncSpecializationHandle> handles;
         for (int i : IndexRange(3)) {
           gpu::Shader *shader = static_shader_get(eShaderType(DEFERRED_LIGHT_SINGLE + i));
+          if (shader == nullptr) {
+            return handles;
+          }
 
           ShaderSpecialization specialization;
           specialization.shader = shader;
@@ -646,6 +665,10 @@ bool ShaderModule::request_specializations(bool block_until_ready,
 
         return handles;
       });
+
+  if (handles.is_empty()) {
+    return false;
+  }
 
   bool is_ready = true;
   for (AsyncSpecializationHandle &handle : handles) {

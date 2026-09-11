@@ -66,9 +66,9 @@ struct FilterMaskItemsAccessor : public socket_items::SocketItemsAccessorDefault
   }
   static void destruct_item(NodeFilterMaskItem *item)
   {
-    if (item->object != nullptr && BKE_id_is_in_global_main(reinterpret_cast<ID *>(item->object))) {
-      id_us_min(reinterpret_cast<ID *>(item->object));
-    }
+    /* Node storage destruction runs during COW copy teardown and database free, where the
+     * pointed-to IDs may already be released. User counting is handled by the node removal
+     * path instead, matching upstream socket items. */
     item->object = nullptr;
   }
   static void blend_write_item(BlendWriter * /*writer*/, const ItemT & /*item*/) {}
