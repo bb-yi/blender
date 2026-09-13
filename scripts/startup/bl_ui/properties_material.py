@@ -321,9 +321,10 @@ def draw_material_stencil_settings(layout, mat):
     draw_stencil_mask_bits(sub, mat, "Read Mask", "stencil_read_mask_bits")
     draw_stencil_mask_bits(sub, mat, "Write Mask", "stencil_write_mask_bits")
     sub.prop(mat, "stencil_test", text="Test")
-    sub.prop(mat, "stencil_pass_op", text="Pass")
-    sub.prop(mat, "stencil_fail_op", text="Fail")
-    sub.prop(mat, "stencil_zfail_op", text="ZFail")
+    # Avoid generic "Pass" (official zh maps it to 通道 / render pass).
+    sub.prop(mat, "stencil_pass_op", text="On Pass")
+    sub.prop(mat, "stencil_fail_op", text="On Fail")
+    sub.prop(mat, "stencil_zfail_op", text="On ZFail")
 
 
 def draw_material_volume_settings(layout, mat, is_eevee=True):
@@ -382,6 +383,9 @@ def material_shader_compile_time_text(compile_time):
 
 
 def draw_material_shader_compilation_status(layout, mat):
+    # Keep label and value as separate UI strings so gettext can translate each
+    # piece. Runtime concatenation (e.g. "Status: " + name) produces dynamic
+    # msgids that never match the catalog.
     status_names = {
         'NOT_COMPILED': "Not Compiled",
         'QUEUED': "Queued",
@@ -390,10 +394,18 @@ def draw_material_shader_compilation_status(layout, mat):
     }
     status = getattr(mat, "shader_compile_status", 'NOT_COMPILED')
     compile_time = getattr(mat, "shader_compile_time", 0.0)
+    status_text = status_names.get(status, status)
 
     col = layout.column(align=True)
-    col.label(text="Status: " + status_names.get(status, status))
-    col.label(text="Compile Time: " + material_shader_compile_time_text(compile_time))
+
+    row = col.row(align=True)
+    row.label(text="Status")
+    row.label(text=status_text)
+
+    row = col.row(align=True)
+    row.label(text="Compile Time")
+    # Numeric timing string; do not run through translations.
+    row.label(text=material_shader_compile_time_text(compile_time), translate=False)
 
 
 def draw_material_settings(self, context):

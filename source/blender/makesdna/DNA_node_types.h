@@ -875,6 +875,51 @@ enum NodeShaderInfoShadowMode {
   SHD_SHADER_INFO_SHADOW_SOFT_FILTERED = 2,
 };
 
+enum NodePrincipledNPRDiffuseMapping {
+  SHD_PRINCIPLED_NPR_DIFFUSE_SIMPLE = 0,
+  SHD_PRINCIPLED_NPR_DIFFUSE_RAMP = 1,
+  SHD_PRINCIPLED_NPR_DIFFUSE_DRIVEN_RAMP = 2,
+};
+
+enum NodePrincipledNPRSpecularMapping {
+  SHD_PRINCIPLED_NPR_SPECULAR_SIMPLE = 0,
+  SHD_PRINCIPLED_NPR_SPECULAR_RAMP = 1,
+};
+
+enum NodePrincipledNPRCoordinateRange {
+  SHD_PRINCIPLED_NPR_RANGE_FRONT = 0,
+  SHD_PRINCIPLED_NPR_RANGE_FULL = 1,
+};
+
+enum NodePrincipledNPRColorApplication {
+  SHD_PRINCIPLED_NPR_COLOR_MULTIPLY = 0,
+  SHD_PRINCIPLED_NPR_COLOR_REPLACE = 1,
+};
+
+enum NodePrincipledNPRMappingStage {
+  SHD_PRINCIPLED_NPR_MAPPING_PER_LIGHT = 0,
+  SHD_PRINCIPLED_NPR_MAPPING_COMBINED = 1,
+};
+
+enum NodePrincipledNPRDrivenInterpolation {
+  SHD_PRINCIPLED_NPR_INTERP_CONSTANT = 0,
+  SHD_PRINCIPLED_NPR_INTERP_LINEAR = 1,
+  SHD_PRINCIPLED_NPR_INTERP_EASE = 2,
+};
+
+enum NodePrincipledNPRShadowMode {
+  SHD_PRINCIPLED_NPR_SHADOW_NONE = 0,
+  SHD_PRINCIPLED_NPR_SHADOW_CAST_ONLY = 1,
+  SHD_PRINCIPLED_NPR_SHADOW_ALL = 2,
+};
+
+enum NodePrincipledNPRLightCombine {
+  SHD_PRINCIPLED_NPR_LIGHT_ADD = 0,
+  SHD_PRINCIPLED_NPR_LIGHT_STRONGEST = 1,
+};
+
+#define SHD_PRINCIPLED_NPR_LIGHTGROUP_MAX 9999
+
 enum NodeParallaxMode {
   SHD_PARALLAX_PLANE_OFFSET = 0,
   SHD_PARALLAX_STEEP = 1,
@@ -3021,6 +3066,25 @@ struct NodeShaderPrincipled {
   DNA_DEFINE_CXX_METHODS(NodeShaderPrincipled)
 
   char use_subsurface_auto_radius = 0;
+  char _pad[3] = {};
+};
+
+struct NodeShaderPrincipledNPR {
+  DNA_DEFINE_CXX_METHODS(NodeShaderPrincipledNPR)
+
+  ColorBand diffuse_ramp;
+  ColorBand specular_ramp;
+
+  int lightgroup_id = 0;
+  int8_t diffuse_mapping = SHD_PRINCIPLED_NPR_DIFFUSE_SIMPLE;
+  int8_t specular_mapping = SHD_PRINCIPLED_NPR_SPECULAR_SIMPLE;
+  int8_t coordinate_range = SHD_PRINCIPLED_NPR_RANGE_FRONT;
+  int8_t color_application = SHD_PRINCIPLED_NPR_COLOR_MULTIPLY;
+  int8_t mapping_stage = SHD_PRINCIPLED_NPR_MAPPING_PER_LIGHT;
+  int8_t light_combine = SHD_PRINCIPLED_NPR_LIGHT_STRONGEST;
+  int8_t shadow_mode = SHD_PRINCIPLED_NPR_SHADOW_ALL;
+  int8_t driven_interpolation = SHD_PRINCIPLED_NPR_INTERP_LINEAR;
+  int8_t driven_stop_count = 2;
   char _pad[3] = {};
 };
 

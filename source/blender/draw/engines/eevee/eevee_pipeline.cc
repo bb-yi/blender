@@ -143,7 +143,8 @@ static bool material_uses_hybrid_pipeline(const GPUMaterial *gpumat)
   return GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_TO_RGBA) ||
          GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
          GPU_material_flag_get(gpumat, GPU_MATFLAG_SCREENSPACE_INFO) ||
-         GPU_material_has_glsl_light_shader_eval(gpumat);
+         GPU_material_has_glsl_light_shader_eval(gpumat) ||
+         GPU_material_flag_get(gpumat, GPU_MATFLAG_GLSL_LIGHT_ACCESS);
 }
 
 static bool material_needs_lightprobe_resources(const GPUMaterial *gpumat)
@@ -1886,6 +1887,12 @@ PassMain::Sub *DeferredLayer::material_add(blender::Material *blender_mat, GPUMa
   if (material_needs_lightprobe_resources(gpumat)) {
     material_pass->bind_resources(inst_.sphere_probes);
     material_pass->bind_resources(inst_.volume_probes);
+    if (inst_.planar_probes.enabled()) {
+      material_pass->bind_resources(inst_.planar_probes);
+    }
+    else {
+      material_pass->bind_resources(inst_.planar_probes.dummy_resources);
+    }
   }
   /* Set stencil for some deferred specialized shaders. */
   uint8_t material_stencil_bits = 0u;
@@ -2724,6 +2731,7 @@ PassMain::Sub *DeferredProbePipeline::material_add(blender::Material *blender_ma
   if (material_needs_lightprobe_resources(gpumat)) {
     material_pass->bind_resources(inst_.sphere_probes);
     material_pass->bind_resources(inst_.volume_probes);
+    material_pass->bind_resources(inst_.planar_probes.dummy_resources);
   }
   return material_pass;
 }
@@ -2926,6 +2934,7 @@ PassMain::Sub *PlanarProbePipeline::material_add(blender::Material *blender_mat,
   if (material_needs_lightprobe_resources(gpumat)) {
     material_pass->bind_resources(inst_.sphere_probes);
     material_pass->bind_resources(inst_.volume_probes);
+    material_pass->bind_resources(inst_.planar_probes.dummy_resources);
   }
   return material_pass;
 }

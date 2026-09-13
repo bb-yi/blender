@@ -1659,7 +1659,8 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       material_depth_offset_graph_uses_supported_light_access(gpumat, codegen_->depth_offset);
   const bool surface_graph_uses_glsl_light_access =
       ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD, MAT_PIPE_BAKE_COLOR) &&
-      material_graph_uses_glsl_light_access(gpumat, codegen.surface);
+      (material_graph_uses_glsl_light_access(gpumat, codegen.surface) ||
+       GPU_material_flag_get(gpumat, GPU_MATFLAG_GLSL_LIGHT_ACCESS));
   const bool npr_graph_uses_glsl_light_access =
       ELEM(pipeline_type, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_BAKE_COLOR) &&
       material_graph_uses_glsl_light_access(gpumat, codegen.npr);
@@ -1855,6 +1856,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
            MAT_PIPE_BAKE_COLOR);
   if (has_shader_info_light_resources) {
     if (!has_bsl_light_eval_resources) {
+      /* Bind legacy globals; CREATE_INFO_* names are BSL resource-table bridges only. */
       add_create_info_and_reserve(info, slots, "eevee_light_data");
     }
     if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO)) {
@@ -1869,11 +1871,13 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
         info.define("CREATE_INFO_UtilityTexture");
       }
     }
-    if (use_shader_info_shadow_classification) {
-      info.define("SHADOW_CASTER_CLASSIFY");
-      if (!has_bsl_light_eval_resources) {
-        add_create_info_and_reserve(info, slots, "eevee_shadow_caster_data");
-      }
+  }
+  /* Classification is requested by Shader Info Self/Cast outputs and by native nodes such as
+   * Principled NPR Cast Only. It must not require GPU_MATFLAG_SHADER_INFO. */
+  if (use_shader_info_shadow_classification) {
+    info.define("SHADOW_CASTER_CLASSIFY");
+    if (!has_bsl_light_eval_resources) {
+      add_create_info_and_reserve(info, slots, "eevee_shadow_caster_data");
     }
   }
   if (pipeline_type == MAT_PIPE_BAKE_COLOR) {
@@ -1884,6 +1888,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     if (depth_offset_uses_light_access && pipeline_type != MAT_PIPE_BAKE_COLOR) {
       info.define("LIGHT_ITER_FORCE_NO_CULLING");
     }
+
     if (!has_shader_info_light_resources && !has_bsl_light_eval_resources) {
       add_create_info_and_reserve(info, slots, "eevee_light_data");
     }
@@ -2308,11 +2313,11 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       dependencies_set.add("eevee_light_eval.bsl.hh");
       dependencies_set.add("eevee_light_iter.bsl.hh");
       dependencies_set.add("eevee_light_lib.bsl.hh");
-      dependencies_set.add("eevee_shadow_tracing.bsl.hh");
     }
     if (uses_glsl_light_access) {
       dependencies_set.add("eevee_light_iter.bsl.hh");
       dependencies_set.add("eevee_light_lib.bsl.hh");
+      dependencies_set.add("eevee_shadow_tracing.bsl.hh");
     }
     if (material_pass_uses_glsl_light_access) {
       dependencies_set.add("eevee_shadow_tracing.bsl.hh");

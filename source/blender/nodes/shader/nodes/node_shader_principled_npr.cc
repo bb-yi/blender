@@ -1,0 +1,758 @@
+/* SPDX-FileCopyrightText: 2026 Blender Authors
+ *
+ * SPDX-License-Identifier: GPL-2.0-or-later */
+
+#include "DNA_scene_types.h"
+
+#include "BKE_colorband.hh"
+#include "BKE_context.hh"
+#include "BKE_node_runtime.hh"
+
+#include "NOD_node_extra_info.hh"
+
+#include "RE_engine.h"
+
+#include "RNA_access.hh"
+
+#include "UI_interface_c.hh"
+#include "UI_interface_layout.hh"
+#include "UI_resources.hh"
+
+#include "BLI_string.h"
+
+#include "GPU_material.hh"
+
+#include "MEM_guardedalloc.h"
+
+#include "node_shader_util.hh"
+
+#include <cmath>
+
+namespace blender {
+
+namespace nodes::node_shader_principled_npr_cc {
+
+constexpr int PRINCIPLED_NPR_MAX_STOPS = 8;
+
+enum InputSocket {
+  SOCK_BASE_COLOR = 0,
+  SOCK_METALLIC,
+  SOCK_ROUGHNESS,
+  SOCK_ALPHA,
+  SOCK_NORMAL,
+  SOCK_WEIGHT,
+
+  SOCK_SHADOW_COLOR,
+  SOCK_LIT_COLOR,
+  SOCK_BOUNDARY,
+  SOCK_SOFTNESS,
+  SOCK_COORDINATE_SCALE,
+  SOCK_COORDINATE_OFFSET,
+
+  SOCK_SHADOW_STRENGTH,
+  SOCK_DIRECT_STRENGTH,
+  SOCK_INTENSITY_INFLUENCE,
+  SOCK_LIGHT_COLOR_INFLUENCE,
+
+  SOCK_HIGHLIGHT_COLOR,
+  SOCK_HIGHLIGHT_STRENGTH,
+  SOCK_HIGHLIGHT_ROUGHNESS,
+  SOCK_HIGHLIGHT_SIZE,
+  SOCK_HIGHLIGHT_SOFTNESS,
+  SOCK_HIGHLIGHT_OFFSET,
+  SOCK_HIGHLIGHT_LIGHT_COLOR_INFLUENCE,
+  SOCK_ANISOTROPY,
+  SOCK_ANISOTROPY_ROTATION,
+  SOCK_TANGENT,
+
+  SOCK_REFLECTION_STRENGTH,
+  SOCK_AMBIENT_STRENGTH,
+  SOCK_AMBIENT_DIRECTIONALITY,
+
+  SOCK_RIM_COLOR,
+  SOCK_RIM_STRENGTH,
+  SOCK_RIM_ANGLE,
+  SOCK_RIM_LENGTH,
+  SOCK_RIM_LENGTH_FALLOFF,
+  SOCK_RIM_THICKNESS,
+  SOCK_RIM_THICKNESS_FALLOFF,
+  SOCK_RIM_LIGHT_BIAS,
+  SOCK_RIM_MASK,
+
+  SOCK_EMISSION_COLOR,
+  SOCK_EMISSION_STRENGTH,
+
+  SOCK_DRIVEN_STOP_0,
+};
+
+static const NodeShaderPrincipledNPR &node_storage(const bNode &node)
+{
+  return *static_cast<const NodeShaderPrincipledNPR *>(node.storage);
+}
+
+static NodeShaderPrincipledNPR &node_storage(bNode &node)
+{
+  return *static_cast<NodeShaderPrincipledNPR *>(node.storage);
+}
+
+static int driven_stop_count(const bNode *node)
+{
+  if (node == nullptr || node->storage == nullptr) {
+    return 2;
+  }
+  return clamp_i(node_storage(*node).driven_stop_count, 2, PRINCIPLED_NPR_MAX_STOPS);
+}
+
+static float driven_stop_default_position(const int index, const int stop_count)
+{
+  return (stop_count <= 1) ? 0.0f : float(index) / float(stop_count - 1);
+}
+
+static bool driven_stop_positions_match_default(const bNode &node, const int stop_count)
+{
+  for (int i = 0; i < PRINCIPLED_NPR_MAX_STOPS; i++) {
+    char position_id[32];
+    SNPRINTF(position_id, "stop_position_%d", i);
+    const bNodeSocket *socket = bke::node_find_socket(node, SOCK_IN, UString(position_id));
+    if (socket == nullptr || socket->link != nullptr) {
+      return false;
+    }
+  }
+
+  for (int i = 0; i < stop_count; i++) {
+    char position_id[32];
+    SNPRINTF(position_id, "stop_position_%d", i);
+    const bNodeSocket *socket = bke::node_find_socket(node, SOCK_IN, UString(position_id));
+    if (socket == nullptr) {
+      return false;
+    }
+    const float value = socket->default_value_typed<bNodeSocketValueFloat>()->value;
+    if (std::abs(value - driven_stop_default_position(i, stop_count)) > 1e-5f) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static void update_driven_stop_default_positions(bNode &node)
+{
+  NodeShaderPrincipledNPR &storage = node_storage(node);
+  if (storage.diffuse_mapping != SHD_PRINCIPLED_NPR_DIFFUSE_DRIVEN_RAMP) {
+    return;
+  }
+
+  const int stop_count = driven_stop_count(&node);
+  int previous_stop_count = 0;
+  for (int candidate = 2; candidate <= PRINCIPLED_NPR_MAX_STOPS; candidate++) {
+    if (driven_stop_positions_match_default(node, candidate)) {
+      previous_stop_count = candidate;
+      break;
+    }
+  }
+  if (previous_stop_count == 0 || previous_stop_count == stop_count) {
+    return;
+  }
+
+  for (int i = 0; i < stop_count; i++) {
+    char position_id[32];
+    SNPRINTF(position_id, "stop_position_%d", i);
+    if (bNodeSocket *socket = bke::node_find_socket(node, SOCK_IN, UString(position_id))) {
+      socket->default_value_typed<bNodeSocketValueFloat>()->value =
+          driven_stop_default_position(i, stop_count);
+    }
+  }
+}
+
+static GPUNodeLink *npr_input_link(GPUNodeStack &socket)
+{
+  if (socket.link != nullptr) {
+    return socket.link;
+  }
+  if (socket.type == GPU_FLOAT) {
+    return GPU_uniform(&socket.vec[0]);
+  }
+  return GPU_uniform(socket.vec);
+}
+
+static GPUNodeLink *npr_socket(const bNode &node,
+                               GPUNodeStack *in,
+                               const StringRef identifier)
+{
+  return npr_input_link(GPU_node_get_input(node, in, identifier));
+}
+
+static void node_declare(NodeDeclarationBuilder &b)
+{
+  const bNodeTree *ntree = b.tree_or_null();
+  const bNode *node = b.node_or_null();
+  const bool is_gpu_internal = ntree && (ntree->flag & NTREE_IS_GPU_SHADER_INTERNAL);
+  const NodeShaderPrincipledNPR *storage = node && node->storage ?
+                                                &node_storage(*node) :
+                                                nullptr;
+  const int diffuse_mapping = storage ? storage->diffuse_mapping :
+                                        SHD_PRINCIPLED_NPR_DIFFUSE_SIMPLE;
+  const int stop_count = driven_stop_count(node);
+
+  b.use_custom_socket_order();
+  b.add_output<decl::Shader>("Shader"_ustr, "shader"_ustr);
+  b.add_output<decl::Color>("Color"_ustr, "color"_ustr)
+      .description("Final scene-linear HDR NPR color before it is wrapped into a Shader");
+  b.add_output<decl::Float>("Alpha"_ustr, "alpha"_ustr);
+
+  b.add_input<decl::Color>("Base Color"_ustr, "base_color"_ustr)
+      .default_value({0.8f, 0.8f, 0.8f, 1.0f});
+  b.add_input<decl::Float>("Metallic"_ustr, "metallic"_ustr)
+      .default_value(0.0f)
+      .min(0.0f)
+      .max(1.0f)
+      .subtype(PROP_FACTOR)
+      .description("Blend dielectric diffuse into tinted metallic reflection and suppress diffuse");
+  b.add_input<decl::Float>("Roughness"_ustr, "roughness"_ustr)
+      .default_value(0.4f)
+      .min(0.0f)
+      .max(1.0f)
+      .subtype(PROP_FACTOR)
+      .description("Control the base direct highlight width and peak, and probe reflection blur");
+  b.add_input<decl::Float>("Alpha"_ustr, "alpha"_ustr)
+      .default_value(1.0f)
+      .min(0.0f)
+      .max(1.0f)
+      .subtype(PROP_FACTOR);
+  b.add_input<decl::Vector>("Normal"_ustr, "normal"_ustr).hide_value();
+  b.add_input<decl::Float>("Weight"_ustr).available(is_gpu_internal);
+
+  PanelDeclarationBuilder &shading = b.add_panel("Shading"_ustr).default_closed(false);
+  shading.add_layout([](ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr) {
+    layout.prop(ptr, "diffuse_mapping", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+    layout.prop(ptr, "coordinate_range", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+    layout.prop(ptr, "color_application", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+    const int mapping = RNA_enum_get(ptr, "diffuse_mapping");
+    if (mapping == SHD_PRINCIPLED_NPR_DIFFUSE_RAMP) {
+      template_color_ramp(&layout, ptr, "diffuse_ramp", true);
+    }
+    else if (mapping == SHD_PRINCIPLED_NPR_DIFFUSE_DRIVEN_RAMP) {
+      layout.prop(ptr, "driven_stop_count", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+      layout.prop(
+          ptr, "driven_interpolation", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+    }
+  });
+  shading.add_input<decl::Color>("Shadow Color"_ustr, "shadow_color"_ustr)
+      .default_value({0.45f, 0.45f, 0.45f, 1.0f})
+      .description("Multiplier or replacement color on the shadow side")
+      .available(diffuse_mapping == SHD_PRINCIPLED_NPR_DIFFUSE_SIMPLE);
+  shading.add_input<decl::Color>("Lit Color"_ustr, "lit_color"_ustr)
+      .default_value({1.0f, 1.0f, 1.0f, 1.0f})
+      .description("Multiplier or replacement color on the lit side")
+      .available(diffuse_mapping == SHD_PRINCIPLED_NPR_DIFFUSE_SIMPLE);
+  shading.add_input<decl::Float>("Boundary"_ustr, "boundary"_ustr)
+      .default_value(0.5f)
+      .min(0.0f)
+      .max(1.0f)
+      .subtype(PROP_FACTOR)
+      .description("Lighting coordinate at the center of the simple color transition")
+      .available(diffuse_mapping == SHD_PRINCIPLED_NPR_DIFFUSE_SIMPLE);
+  shading.add_input<decl::Float>("Softness"_ustr, "softness"_ustr)
+      .default_value(0.05f)
+      .min(0.0f)
+      .max(1.0f)
+      .subtype(PROP_FACTOR)
+      .description("Width of the simple color transition")
+      .available(diffuse_mapping == SHD_PRINCIPLED_NPR_DIFFUSE_SIMPLE);
+  shading.add_input<decl::Float>("Coordinate Scale"_ustr, "coordinate_scale"_ustr)
+      .default_value(1.0f)
+      .min(-1000.0f)
+      .max(1000.0f)
+      .description("Scale the unclamped lighting coordinate; negative values invert it");
+  shading.add_input<decl::Float>("Coordinate Offset"_ustr, "coordinate_offset"_ustr)
+      .default_value(0.0f)
+      .min(-1000.0f)
+      .max(1000.0f)
+      .description("Offset the unclamped lighting coordinate before its final 0..1 mapping clamp");
+
+  PanelDeclarationBuilder &lighting = b.add_panel("Lighting"_ustr).default_closed(true);
+  lighting.add_layout([](ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr) {
+    layout.prop(ptr, "mapping_stage", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+    layout.prop(ptr, "light_combine", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+    layout.prop(ptr, "shadow_mode", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+    layout.prop(ptr, "lightgroup_id", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+  });
+  lighting.add_input<decl::Float>("Shadow Strength"_ustr, "shadow_strength"_ustr)
+      .default_value(1.0f)
+      .min(0.0f)
+      .max(1.0f)
+      .subtype(PROP_FACTOR);
+  lighting.add_input<decl::Float>("Direct Strength"_ustr, "direct_strength"_ustr)
+      .default_value(1.0f)
+      .min(0.0f)
+      .max(8.0f);
+  lighting.add_input<decl::Float>("Intensity Influence"_ustr, "intensity_influence"_ustr)
+      .default_value(1.0f)
+      .min(0.0f)
+      .max(1.0f)
+      .subtype(PROP_FACTOR)
+      .description("How strongly light energy pushes the diffuse mapping boundary");
+  lighting.add_input<decl::Float>("Light Color Influence"_ustr, "light_color_influence"_ustr)
+      .default_value(1.0f)
+      .min(0.0f)
+      .max(1.0f)
+      .subtype(PROP_FACTOR);
+
+  PanelDeclarationBuilder &specular = b.add_panel("Specular"_ustr).default_closed(true);
+  specular.add_layout([](ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr) {
+    layout.prop(ptr, "specular_mapping", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+    if (RNA_enum_get(ptr, "specular_mapping") == SHD_PRINCIPLED_NPR_SPECULAR_RAMP) {
+      template_color_ramp(&layout, ptr, "specular_ramp", true);
+    }
+  });
+  specular.add_input<decl::Color>("Highlight Color"_ustr, "highlight_color"_ustr)
+      .default_value({1.0f, 1.0f, 1.0f, 1.0f});
+  specular.add_input<decl::Float>("Highlight Strength"_ustr, "highlight_strength"_ustr)
+      .default_value(1.0f)
+      .min(0.0f)
+      .max(8.0f)
+      .description("Enable and scale the NPR highlight lobe");
+  specular.add_input<decl::Float>("Highlight Roughness"_ustr, "highlight_roughness"_ustr)
+      .default_value(0.4f)
+      .min(0.0f)
+      .max(1.0f)
+      .subtype(PROP_FACTOR)
+      .available(false)
+      .description("Legacy socket retained for file compatibility; use Roughness");
+  specular.add_input<decl::Float>("Highlight Size"_ustr, "highlight_size"_ustr)
+      .default_value(0.5f)
+      .min(0.0f)
+      .max(1.0f)
+      .subtype(PROP_FACTOR)
+      .description("NPR highlight coverage from a point to the full lobe");
+  specular.add_input<decl::Float>("Highlight Softness"_ustr, "highlight_softness"_ustr)
+      .default_value(0.08f)
+      .min(0.0f)
+      .max(1.0f)
+      .subtype(PROP_FACTOR)
+      .description("NPR highlight edge transition width");
+  specular.add_input<decl::Float>("Highlight Offset"_ustr, "highlight_offset"_ustr)
+      .default_value(0.0f)
+      .min(-1000.0f)
+      .max(1000.0f)
+      .description("Shift the highlight coordinate before size and softness mapping");
+  specular.add_input<decl::Float>("Light Color Influence"_ustr,
+                                  "highlight_light_color_influence"_ustr)
+      .default_value(0.0f)
+      .min(0.0f)
+      .max(1.0f)
+      .subtype(PROP_FACTOR);
+  specular.add_input<decl::Float>("Anisotropy"_ustr, "anisotropy"_ustr)
+      .default_value(0.0f)
+      .min(0.0f)
+      .max(1.0f)
+      .subtype(PROP_FACTOR);
+  specular.add_input<decl::Float>("Anisotropy Rotation"_ustr, "anisotropy_rotation"_ustr)
+      .default_value(0.0f)
+      .min(-1.0f)
+      .max(1.0f)
+      .subtype(PROP_FACTOR);
+  specular.add_input<decl::Vector>("Tangent"_ustr, "tangent"_ustr).hide_value();
+
+  PanelDeclarationBuilder &environment = b.add_panel("Environment"_ustr).default_closed(true);
+  environment.add_input<decl::Float>("Reflection Strength"_ustr, "reflection_strength"_ustr)
+      .default_value(0.0f)
+      .min(0.0f)
+      .max(8.0f)
+      .description("Reflection probes only; V1 does not add a screen-space reflection closure");
+  environment.add_input<decl::Float>("Ambient Strength"_ustr, "ambient_strength"_ustr)
+      .default_value(0.0f)
+      .min(0.0f)
+      .max(8.0f);
+  environment.add_input<decl::Float>("Ambient Directionality"_ustr,
+                                     "ambient_directionality"_ustr)
+      .default_value(0.1f)
+      .min(0.0f)
+      .max(1.0f)
+      .subtype(PROP_FACTOR)
+      .description("0 uses equalized ambient light; 1 follows the surface normal");
+
+  PanelDeclarationBuilder &rim = b.add_panel("Rim"_ustr).default_closed(true);
+  rim.add_input<decl::Color>("Rim Color"_ustr, "rim_color"_ustr)
+      .default_value({1.0f, 1.0f, 1.0f, 1.0f});
+  rim.add_input<decl::Float>("Rim Strength"_ustr, "rim_strength"_ustr)
+      .default_value(0.0f)
+      .min(0.0f)
+      .max(8.0f);
+  rim.add_input<decl::Float>("Angle"_ustr, "rim_angle"_ustr)
+      .default_value(0.0f)
+      .min(-360.0f)
+      .max(360.0f);
+  rim.add_input<decl::Float>("Length"_ustr, "rim_length"_ustr)
+      .default_value(1.0f)
+      .min(0.0f)
+      .max(1.0f)
+      .subtype(PROP_FACTOR);
+  rim.add_input<decl::Float>("Length Falloff"_ustr, "rim_length_falloff"_ustr)
+      .default_value(0.1f)
+      .min(0.0f)
+      .max(1.0f)
+      .subtype(PROP_FACTOR);
+  rim.add_input<decl::Float>("Thickness"_ustr, "rim_thickness"_ustr)
+      .default_value(0.1f)
+      .min(0.0f)
+      .max(1.0f)
+      .subtype(PROP_FACTOR);
+  rim.add_input<decl::Float>("Thickness Falloff"_ustr, "rim_thickness_falloff"_ustr)
+      .default_value(0.05f)
+      .min(0.0f)
+      .max(1.0f)
+      .subtype(PROP_FACTOR);
+  rim.add_input<decl::Float>("Light Bias"_ustr, "rim_light_bias"_ustr)
+      .default_value(0.0f)
+      .min(-1.0f)
+      .max(1.0f);
+  rim.add_input<decl::Float>("Mask"_ustr, "rim_mask"_ustr)
+      .default_value(1.0f)
+      .min(0.0f)
+      .max(1.0f)
+      .subtype(PROP_FACTOR);
+
+  PanelDeclarationBuilder &emission = b.add_panel("Emission"_ustr).default_closed(true);
+  emission.add_input<decl::Color>("Emission Color"_ustr, "emission_color"_ustr)
+      .default_value({0.0f, 0.0f, 0.0f, 1.0f});
+  emission.add_input<decl::Float>("Emission Strength"_ustr, "emission_strength"_ustr)
+      .default_value(0.0f)
+      .min(0.0f)
+      .max(1000000.0f);
+
+  for (int i = 0; i < PRINCIPLED_NPR_MAX_STOPS; i++) {
+    char color_id[32];
+    char position_id[32];
+    char color_name[32];
+    char position_name[32];
+    SNPRINTF(color_id, "stop_color_%d", i);
+    SNPRINTF(position_id, "stop_position_%d", i);
+    SNPRINTF(color_name, "Stop %d Color", i + 1);
+    SNPRINTF(position_name, "Stop %d Position", i + 1);
+    const bool available = diffuse_mapping == SHD_PRINCIPLED_NPR_DIFFUSE_DRIVEN_RAMP &&
+                           i < stop_count;
+    const float position = driven_stop_default_position(i, stop_count);
+    const float value = (i == 0) ? 0.45f : 1.0f;
+    shading.add_input<decl::Color>(UString(color_name), UString(color_id))
+        .default_value({value, value, value, 1.0f})
+        .available(available);
+    shading.add_input<decl::Float>(UString(position_name), UString(position_id))
+        .default_value(position)
+        .min(0.0f)
+        .max(1.0f)
+        .subtype(PROP_FACTOR)
+        .available(available);
+  }
+}
+
+static void node_init(bNodeTree * /*ntree*/, bNode *node)
+{
+  NodeShaderPrincipledNPR *storage = MEM_new<NodeShaderPrincipledNPR>(__func__);
+  BKE_colorband_init(&storage->diffuse_ramp, true);
+  storage->diffuse_ramp.data[0].pos = 0.45f;
+  storage->diffuse_ramp.data[0].r = 0.45f;
+  storage->diffuse_ramp.data[0].g = 0.45f;
+  storage->diffuse_ramp.data[0].b = 0.45f;
+  storage->diffuse_ramp.data[0].a = 1.0f;
+  storage->diffuse_ramp.data[1].pos = 0.55f;
+  storage->diffuse_ramp.data[1].r = 1.0f;
+  storage->diffuse_ramp.data[1].g = 1.0f;
+  storage->diffuse_ramp.data[1].b = 1.0f;
+  storage->diffuse_ramp.data[1].a = 1.0f;
+
+  BKE_colorband_init(&storage->specular_ramp, true);
+  storage->specular_ramp.data[0].pos = 0.0f;
+  storage->specular_ramp.data[0].r = 0.0f;
+  storage->specular_ramp.data[0].g = 0.0f;
+  storage->specular_ramp.data[0].b = 0.0f;
+  storage->specular_ramp.data[0].a = 0.0f;
+  storage->specular_ramp.data[1].pos = 1.0f;
+  storage->specular_ramp.data[1].r = 1.0f;
+  storage->specular_ramp.data[1].g = 1.0f;
+  storage->specular_ramp.data[1].b = 1.0f;
+  storage->specular_ramp.data[1].a = 1.0f;
+  node->storage = storage;
+
+  if (bNodeSocket *socket = bke::node_find_socket(*node, SOCK_IN, "highlight_strength"_ustr)) {
+    socket->default_value_typed<bNodeSocketValueFloat>()->value = 1.0f;
+  }
+  if (bNodeSocket *socket = bke::node_find_socket(*node, SOCK_IN, "highlight_roughness"_ustr)) {
+    socket->default_value_typed<bNodeSocketValueFloat>()->value = 0.4f;
+  }
+  if (bNodeSocket *socket = bke::node_find_socket(*node, SOCK_IN, "highlight_size"_ustr)) {
+    socket->default_value_typed<bNodeSocketValueFloat>()->value = 0.5f;
+  }
+  if (bNodeSocket *socket = bke::node_find_socket(*node, SOCK_IN, "highlight_softness"_ustr)) {
+    socket->default_value_typed<bNodeSocketValueFloat>()->value = 0.08f;
+  }
+  if (bNodeSocket *socket = bke::node_find_socket(*node, SOCK_IN, "intensity_influence"_ustr)) {
+    socket->default_value_typed<bNodeSocketValueFloat>()->value = 1.0f;
+  }
+}
+
+static void node_update(bNodeTree *ntree, bNode *node)
+{
+  if (node->storage == nullptr) {
+    return;
+  }
+  const NodeShaderPrincipledNPR &storage = node_storage(*node);
+  const bool simple = storage.diffuse_mapping == SHD_PRINCIPLED_NPR_DIFFUSE_SIMPLE;
+  const bool driven = storage.diffuse_mapping == SHD_PRINCIPLED_NPR_DIFFUSE_DRIVEN_RAMP;
+  for (const UString identifier :
+       {"shadow_color"_ustr, "lit_color"_ustr, "boundary"_ustr, "softness"_ustr})
+  {
+    if (bNodeSocket *socket = bke::node_find_socket(*node, SOCK_IN, identifier)) {
+      bke::node_set_socket_availability(*ntree, *socket, simple);
+    }
+  }
+
+  for (const UString identifier : {"highlight_size"_ustr, "highlight_softness"_ustr}) {
+    if (bNodeSocket *socket = bke::node_find_socket(*node, SOCK_IN, identifier)) {
+      bke::node_set_socket_availability(*ntree, *socket, true);
+    }
+  }
+
+  const int stop_count = driven_stop_count(node);
+  for (int i = 0; i < PRINCIPLED_NPR_MAX_STOPS; i++) {
+    char color_id[32];
+    char position_id[32];
+    SNPRINTF(color_id, "stop_color_%d", i);
+    SNPRINTF(position_id, "stop_position_%d", i);
+    const bool available = driven && i < stop_count;
+    if (bNodeSocket *socket = bke::node_find_socket(*node, SOCK_IN, UString(color_id))) {
+      bke::node_set_socket_availability(*ntree, *socket, available);
+    }
+    if (bNodeSocket *socket = bke::node_find_socket(*node, SOCK_IN, UString(position_id))) {
+      bke::node_set_socket_availability(*ntree, *socket, available);
+    }
+  }
+  update_driven_stop_default_positions(*node);
+}
+
+static void node_extra_info(NodeExtraInfoParams &params)
+{
+  const Scene *scene = CTX_data_scene(&params.C);
+  if (scene != nullptr && StringRef(scene->r.engine) == RE_engine_id_BLENDER_EEVEE) {
+    return;
+  }
+  NodeExtraInfoRow row;
+  row.text = RPT_("Eevee Only");
+  row.tooltip = TIP_("Principled NPR is evaluated only by the Eevee render engine");
+  row.icon = ICON_ERROR;
+  params.rows.append(std::move(row));
+}
+
+static int node_gpu(GPUMaterial *mat,
+                    bNode *node,
+                    bNodeExecData * /*execdata*/,
+                    GPUNodeStack *in,
+                    GPUNodeStack *out)
+{
+  if (node->storage == nullptr) {
+    return 0;
+  }
+  const NodeShaderPrincipledNPR &storage = node_storage(*node);
+  if (!in[SOCK_NORMAL].link) {
+    GPU_link(mat, "world_normals_get", &in[SOCK_NORMAL].link);
+  }
+  GPU_material_flag_set(mat, GPU_MATFLAG_GLSL_LIGHT_ACCESS);
+
+  const bool any_output = out[0].hasoutput || out[1].hasoutput || out[2].hasoutput;
+  if (storage.shadow_mode == SHD_PRINCIPLED_NPR_SHADOW_CAST_ONLY && any_output) {
+    GPU_material_shader_info_shadow_classification_set(mat);
+  }
+  if (any_output &&
+      (in[SOCK_REFLECTION_STRENGTH].link ||
+       in[SOCK_REFLECTION_STRENGTH].socket_not_zero() || in[SOCK_AMBIENT_STRENGTH].link ||
+       in[SOCK_AMBIENT_STRENGTH].socket_not_zero()))
+  {
+    GPU_material_flag_set(mat, GPU_MATFLAG_LIGHTPROBE_ACCESS);
+  }
+  if (out[0].hasoutput) {
+    GPU_material_flag_set(mat, GPU_MATFLAG_EMISSION);
+    if (in[SOCK_ALPHA].link || in[SOCK_ALPHA].socket_not_one()) {
+      GPU_material_flag_set(mat, GPU_MATFLAG_TRANSPARENT);
+    }
+  }
+
+  float *diffuse_data;
+  float diffuse_layer;
+  int diffuse_size;
+  BKE_colorband_evaluate_table_rgba(
+      &storage.diffuse_ramp, &diffuse_data, &diffuse_size);
+  GPUNodeLink *diffuse_ramp = GPU_color_band(
+      mat, diffuse_size, diffuse_data, &diffuse_layer);
+
+  float *specular_data;
+  float specular_layer;
+  int specular_size;
+  BKE_colorband_evaluate_table_rgba(
+      &storage.specular_ramp, &specular_data, &specular_size);
+  GPUNodeLink *specular_ramp = GPU_color_band(
+      mat, specular_size, specular_data, &specular_layer);
+
+  const float mode0 = float(storage.diffuse_mapping + storage.specular_mapping * 10 +
+                            storage.coordinate_range * 100 + storage.color_application * 1000 +
+                            storage.mapping_stage * 10000 + storage.light_combine * 100000 +
+                            storage.shadow_mode * 1000000);
+  const float mode1 = float(storage.driven_interpolation + driven_stop_count(node) * 10 +
+                            clamp_i(storage.lightgroup_id, 0, SHD_PRINCIPLED_NPR_LIGHTGROUP_MAX) *
+                                100);
+  const float unused_control = 0.0f;
+
+  GPUNodeLink *diffuse_controls = nullptr;
+  GPU_link(mat,
+           "principled_npr_pack4",
+           npr_socket(*node, in, "boundary"),
+           npr_socket(*node, in, "softness"),
+           npr_socket(*node, in, "coordinate_scale"),
+           npr_socket(*node, in, "coordinate_offset"),
+           &diffuse_controls);
+  GPUNodeLink *lighting_controls = nullptr;
+  GPU_link(mat,
+           "principled_npr_pack4",
+           npr_socket(*node, in, "shadow_strength"),
+           npr_socket(*node, in, "direct_strength"),
+           npr_socket(*node, in, "intensity_influence"),
+           npr_socket(*node, in, "light_color_influence"),
+           &lighting_controls);
+  GPUNodeLink *highlight_controls = nullptr;
+  GPU_link(mat,
+           "principled_npr_pack4",
+           npr_socket(*node, in, "highlight_strength"),
+           npr_socket(*node, in, "highlight_size"),
+           npr_socket(*node, in, "highlight_softness"),
+           GPU_constant(&unused_control),
+           &highlight_controls);
+  GPUNodeLink *highlight_details = nullptr;
+  GPU_link(mat,
+           "principled_npr_pack4",
+           npr_socket(*node, in, "highlight_offset"),
+           npr_socket(*node, in, "highlight_light_color_influence"),
+           npr_socket(*node, in, "anisotropy"),
+           npr_socket(*node, in, "anisotropy_rotation"),
+           &highlight_details);
+  GPUNodeLink *environment_controls = nullptr;
+  GPU_link(mat,
+           "principled_npr_pack4",
+           npr_socket(*node, in, "reflection_strength"),
+           npr_socket(*node, in, "ambient_strength"),
+           npr_socket(*node, in, "ambient_directionality"),
+           GPU_constant(&unused_control),
+           &environment_controls);
+  GPUNodeLink *rim_controls = nullptr;
+  GPU_link(mat,
+           "principled_npr_pack4",
+           npr_socket(*node, in, "rim_strength"),
+           npr_socket(*node, in, "rim_angle"),
+           npr_socket(*node, in, "rim_length"),
+           npr_socket(*node, in, "rim_length_falloff"),
+           &rim_controls);
+  GPUNodeLink *rim_details = nullptr;
+  GPU_link(mat,
+           "principled_npr_pack4",
+           npr_socket(*node, in, "rim_thickness"),
+           npr_socket(*node, in, "rim_thickness_falloff"),
+           npr_socket(*node, in, "rim_light_bias"),
+           npr_socket(*node, in, "rim_mask"),
+           &rim_details);
+  GPUNodeLink *stop_positions_0_3 = nullptr;
+  GPU_link(mat,
+           "principled_npr_pack4",
+           npr_socket(*node, in, "stop_position_0"),
+           npr_socket(*node, in, "stop_position_1"),
+           npr_socket(*node, in, "stop_position_2"),
+           npr_socket(*node, in, "stop_position_3"),
+           &stop_positions_0_3);
+  GPUNodeLink *stop_positions_4_7 = nullptr;
+  GPU_link(mat,
+           "principled_npr_pack4",
+           npr_socket(*node, in, "stop_position_4"),
+           npr_socket(*node, in, "stop_position_5"),
+           npr_socket(*node, in, "stop_position_6"),
+           npr_socket(*node, in, "stop_position_7"),
+           &stop_positions_4_7);
+  GPUNodeLink *mode_controls = nullptr;
+  GPU_link(mat,
+           "principled_npr_pack4",
+           GPU_constant(&diffuse_layer),
+           GPU_constant(&specular_layer),
+           GPU_constant(&mode0),
+           GPU_constant(&mode1),
+           &mode_controls);
+
+  GPUNodeLink *shader_link = nullptr;
+  GPUNodeLink *color_link = nullptr;
+  GPUNodeLink *alpha_link = nullptr;
+  const bool ok = GPU_link(mat,
+                           "node_principled_npr_v1",
+                           npr_socket(*node, in, "base_color"),
+                           npr_socket(*node, in, "metallic"),
+                           npr_socket(*node, in, "roughness"),
+                           npr_socket(*node, in, "alpha"),
+                           npr_socket(*node, in, "normal"),
+                           npr_socket(*node, in, "Weight"),
+                           npr_socket(*node, in, "shadow_color"),
+                           npr_socket(*node, in, "lit_color"),
+                           diffuse_controls,
+                           lighting_controls,
+                           npr_socket(*node, in, "highlight_color"),
+                           highlight_controls,
+                           highlight_details,
+                           npr_socket(*node, in, "tangent"),
+                           environment_controls,
+                           npr_socket(*node, in, "rim_color"),
+                           rim_controls,
+                           rim_details,
+                           npr_socket(*node, in, "emission_color"),
+                           npr_socket(*node, in, "emission_strength"),
+                           npr_socket(*node, in, "stop_color_0"),
+                           npr_socket(*node, in, "stop_color_1"),
+                           npr_socket(*node, in, "stop_color_2"),
+                           npr_socket(*node, in, "stop_color_3"),
+                           npr_socket(*node, in, "stop_color_4"),
+                           npr_socket(*node, in, "stop_color_5"),
+                           npr_socket(*node, in, "stop_color_6"),
+                           npr_socket(*node, in, "stop_color_7"),
+                           stop_positions_0_3,
+                           stop_positions_4_7,
+                           diffuse_ramp,
+                           specular_ramp,
+                           mode_controls,
+                           &shader_link,
+                           &color_link,
+                           &alpha_link);
+  out[0].link = shader_link;
+  out[1].link = color_link;
+  out[2].link = alpha_link;
+  return int(ok);
+}
+
+}  // namespace nodes::node_shader_principled_npr_cc
+
+void register_node_type_sh_principled_npr()
+{
+  namespace file_ns = nodes::node_shader_principled_npr_cc;
+
+  static bke::bNodeType ntype;
+  sh_node_type_base(&ntype, "ShaderNodePrincipledNPR"_ustr, SH_NODE_PRINCIPLED_NPR);
+  ntype.ui_name = "Principled NPR";
+  ntype.ui_description =
+      "Eevee-native stylized material with programmable diffuse mapping, artistic highlights, "
+      "probe lighting, and rim control";
+  ntype.enum_name_legacy = "PRINCIPLED_NPR";
+  ntype.nclass = NODE_CLASS_SHADER;
+  ntype.declare = file_ns::node_declare;
+  ntype.initfunc = file_ns::node_init;
+  ntype.updatefunc = file_ns::node_update;
+  ntype.gpu_fn = file_ns::node_gpu;
+  ntype.add_ui_poll = object_eevee_shader_nodes_poll;
+  ntype.gather_link_search_ops = search_link_ops_for_shader_bsdf_node;
+  ntype.get_extra_info = file_ns::node_extra_info;
+  ntype.default_width = bke::NodeWidth::_240;
+  bke::node_type_storage(
+      ntype, "NodeShaderPrincipledNPR", node_free_standard_storage, node_copy_standard_storage);
+  bke::node_register_type(ntype);
+}
+
+}  // namespace blender

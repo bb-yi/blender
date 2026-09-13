@@ -384,7 +384,8 @@ static void rna_ColorRamp_update(Main *bmain, Scene * /*scene*/, PointerRNA *ptr
           if (ELEM(node->type_legacy,
                    SH_NODE_VALTORGB,
                    TEX_NODE_VALTORGB,
-                   SH_NODE_OKLAB_COLOR_RAMP))
+                   SH_NODE_OKLAB_COLOR_RAMP,
+                   SH_NODE_PRINCIPLED_NPR))
           {
             BKE_ntree_update_tag_node_property(ntree, node);
             BKE_main_ensure_invariants(*bmain, ntree->id);

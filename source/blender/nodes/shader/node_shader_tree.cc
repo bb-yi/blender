@@ -725,13 +725,14 @@ static void ntree_shader_weight_tree_invert(bNodeTree *ntree, bNode *output_node
             case SH_NODE_EEVEE_SPECULAR:
             case SH_NODE_EMISSION:
             case SH_NODE_HOLDOUT:
+            case SH_NODE_PRINCIPLED_NPR:
             case SH_NODE_SUBSURFACE_SCATTERING:
             case SH_NODE_VOLUME_ABSORPTION:
             case SH_NODE_VOLUME_PRINCIPLED:
             case SH_NODE_VOLUME_SCATTER:
             case SH_NODE_VOLUME_COEFFICIENTS:
               fromsock = ntree_shader_node_find_input(fromnode, "Weight");
-              if (fromsock->link) {
+              if (fromsock != nullptr && fromsock->link) {
                 ntree_weight_tree_merge_weight(ntree, fromnode, fromsock, &tonode, &tosock);
               }
               break;
@@ -779,6 +780,7 @@ static bool closure_node_filter(const bNode *node)
     case SH_NODE_EEVEE_SPECULAR:
     case SH_NODE_EMISSION:
     case SH_NODE_HOLDOUT:
+    case SH_NODE_PRINCIPLED_NPR:
     case SH_NODE_SUBSURFACE_SCATTERING:
     case SH_NODE_VOLUME_ABSORPTION:
     case SH_NODE_VOLUME_PRINCIPLED:

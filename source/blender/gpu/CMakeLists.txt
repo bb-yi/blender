@@ -707,6 +707,7 @@ set(GLSL_SRC
   shaders/material/gpu_shader_material_particle_info.glsl
   shaders/material/gpu_shader_material_point_info.glsl
   shaders/material/gpu_shader_material_principled.glsl
+  shaders/material/gpu_shader_material_principled_npr.glsl
   shaders/material/gpu_shader_material_quaternion_to_rotation.glsl
   shaders/material/gpu_shader_material_raycast.glsl
   shaders/material/gpu_shader_material_ray_portal.glsl
