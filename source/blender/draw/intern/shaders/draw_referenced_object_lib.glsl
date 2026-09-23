@@ -6,6 +6,44 @@
 
 /* Runtime lookup for Object data packed into the existing ObjectAttribute SSBO. */
 
+bool light_shader_parameter_read(uint object_uid, uint key_lo, uint key_hi, uint type, float4 &value)
+{
+  value = float4(0.0f);
+  if (object_uid == 0u) {
+    return false;
+  }
+  /* Limit the generated resource guard to this block. Resource-less legacy shaders must keep
+   * the explicit false fallback instead of the shader tool's unsupported bool() default. */
+  {
+    const auto &attrs_buf = buffer_get(draw_object_attributes, drw_attrs);
+    ObjectAttribute header = attrs_buf[DRW_LIGHT_SHADER_PARAMETER_HEADER];
+    uint offset = floatBitsToUint(header.data_x);
+    uint size = floatBitsToUint(header.data_y);
+    if (header.hash_code != DRW_LIGHT_SHADER_PARAMETER_MAGIC || size == 0u) {
+      return false;
+    }
+    uint slot = ((object_uid * 1664525u) ^ key_lo ^ key_hi) & (size - 1u);
+    for (uint probe = 0u; probe < size; probe++) {
+      ObjectAttribute entry = attrs_buf[offset + slot * 2u];
+      if (entry.hash_code == 0u) {
+        return false;
+      }
+      if (entry.hash_code == object_uid && floatBitsToUint(entry.data_x) == key_lo &&
+          floatBitsToUint(entry.data_y) == key_hi)
+      {
+        if (floatBitsToUint(entry.data_z) != type) {
+          return false;
+        }
+        ObjectAttribute payload = attrs_buf[offset + slot * 2u + 1u];
+        value = float4(payload.data_x, payload.data_y, payload.data_z, payload.data_w);
+        return true;
+      }
+      slot = (slot + 1u) & (size - 1u);
+    }
+  }
+  return false;
+}
+
 uint referenced_object_data_find(uint session_uid)
 {
   const uint invalid_record = 0xFFFFFFFFu;

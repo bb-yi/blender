@@ -366,6 +366,7 @@ namespace blender
 
       Vector<std::string> function_names;
       Vector<std::string> global_names;
+      Vector<std::string> light_parameter_names;
       Vector<GLSLDefineMeta> defines;
       Vector<GLSLClosureCallback> closure_callbacks;
       GLSLFunctionDefinition function;
@@ -495,7 +496,8 @@ namespace blender
     static constexpr const char* glsl_light_probe_color_helper_filename =
       "gpu_shader_material_light_probe_color.glsl";
 
-    static Vector<GLSLToken> tokenize_glsl_source(const StringRef source);
+    static Vector<GLSLToken> tokenize_glsl_source(const StringRef source,
+                                                bool include_preprocessor = false);
     static const bNodeSocket* find_node_input_socket_by_identifier(const bNode& node,
       const StringRef identifier);
     static bNodeSocket* find_node_input_socket_by_identifier(bNode& node, const StringRef identifier);
@@ -4843,7 +4845,8 @@ namespace blender
       return true;
     }
 
-    static Vector<GLSLToken> tokenize_glsl_source(const StringRef source)
+    static Vector<GLSLToken> tokenize_glsl_source(const StringRef source,
+                                                const bool include_preprocessor)
     {
       Vector<GLSLToken> tokens;
       bool beginning_of_line = true;
@@ -4863,7 +4866,7 @@ namespace blender
           i++;
           continue;
         }
-        if (beginning_of_line && c == '#')
+        if (beginning_of_line && c == '#' && !include_preprocessor)
         {
           while (i < source.size() && source[i] != '\n')
           {
@@ -5830,7 +5833,8 @@ namespace blender
     static bool is_glsl_light_access_identifier(const StringRef identifier)
     {
       return identifier == "GLSLLight" || identifier == "glsl_light_count" ||
-        identifier == "glsl_light_get" || identifier == "glsl_light_shadow";
+        identifier == "glsl_light_get" || identifier == "glsl_light_shadow" ||
+        identifier.startswith("glsl_light_parameter_");
     }
 
     static bool is_glsl_light_access_deprecated_identifier(const StringRef identifier)
@@ -8818,12 +8822,117 @@ vec3 glsl_ambient_lighting()
       return true;
     }
 
+    static bool rewrite_light_parameter_names(std::string &source,
+                                               Vector<std::string> &names,
+                                               std::string &error)
+    {
+      /* Splice physical lines before comment handling, as the GLSL preprocessor does. Keep the
+       * logical source for later parsing and GPU compilation too, so a continued macro body is
+       * not mistaken for top-level code or split by the shader backend's preprocessing. */
+      for (size_t i = 0; (i = source.find('\\', i)) != std::string::npos;) {
+        if (i + 1 < source.size() && source[i + 1] == '\n') {
+          source.erase(i, 2);
+        }
+        else if (i + 2 < source.size() && source[i + 1] == '\r' && source[i + 2] == '\n') {
+          source.erase(i, 3);
+        }
+        else {
+          i++;
+        }
+      }
+      const std::string stripped = strip_glsl_comments(source);
+      const Vector<GLSLToken> tokens = tokenize_glsl_source(stripped, true);
+      struct Edit { int64_t start, length; std::string text; };
+      Vector<Edit> edits;
+      for (int i = 0; i + 1 < tokens.size(); i++) {
+        const auto &token = tokens[i];
+        if (token.kind != GLSLToken::Kind::Identifier ||
+            !StringRef(token.text).startswith("glsl_light_parameter_")) {
+          continue;
+        }
+        if (!ELEM(token.text, "glsl_light_parameter_float", "glsl_light_parameter_int",
+                   "glsl_light_parameter_bool", "glsl_light_parameter_vec2",
+                   "glsl_light_parameter_vec3", "glsl_light_parameter_vec4",
+                   "glsl_light_parameter_color")) {
+          error = "Unknown light parameter accessor: " + token.text;
+          return false;
+        }
+        if (tokens[i + 1].punctuation != '(') {
+          error = "Light parameter accessors must be called directly";
+          return false;
+        }
+        int depth = 1;
+        Vector<int> commas;
+        for (int j = i + 2; j < tokens.size(); j++) {
+          const char punctuation = tokens[j].punctuation;
+          if (punctuation == '(') { depth++; }
+          else if (punctuation == ')') {
+            if (--depth == 0) { break; }
+          }
+          else if (punctuation == ',' && depth == 1) { commas.append(j); }
+        }
+        if (depth != 0 || commas.size() != 3) {
+          error = token.text + " expects (light, \"parameter name\", fallback, is_valid)";
+          return false;
+        }
+        const int64_t start = tokens[commas[0]].source_end;
+        const int64_t end = tokens[commas[1]].source_start;
+        const std::string literal = trim_copy(StringRef(stripped).substr(start, end - start));
+        if (literal.size() < 3 || literal.front() != '"' || literal.back() != '"') {
+          error = "Light parameter names must be non-empty string literals";
+          return false;
+        }
+        std::string name;
+        for (int64_t c = 1; c < int64_t(literal.size()) - 1; c++) {
+          char ch = literal[c];
+          if (ch == '\\') {
+            if (++c >= int64_t(literal.size()) - 1) {
+              error = "Incomplete escape in light parameter name";
+              return false;
+            }
+            ch = literal[c];
+            if (ch == 'n') { ch = '\n'; }
+            else if (ch == 'r') { ch = '\r'; }
+            else if (ch == 't') { ch = '\t'; }
+            else if (ch != '\\' && ch != '"') {
+              error = "Unsupported escape in light parameter name";
+              return false;
+            }
+          }
+          else if (ch == '"' || ch == '\n' || ch == '\r') {
+            error = "Invalid light parameter string literal";
+            return false;
+          }
+          name += ch;
+        }
+        if (name.empty() || name.size() >= 64 || name.find('\0') != std::string::npos) {
+          error = "Light parameter names must contain 1 to 63 UTF-8 bytes";
+          return false;
+        }
+        if (!names.contains(name)) { names.append(name); }
+        const uint64_t key = GPU_light_shader_parameter_key(name.c_str());
+        const int64_t literal_start = stripped.find('"', start);
+        edits.append({literal_start, int64_t(literal.size()),
+                      std::to_string(uint32_t(key)) + "u, " +
+                      std::to_string(uint32_t(key >> 32)) + "u"});
+      }
+      std::sort(edits.begin(), edits.end(), [](const Edit &a, const Edit &b) { return a.start < b.start; });
+      for (int i = edits.size() - 1; i >= 0; i--) {
+        source.replace(edits[i].start, edits[i].length, edits[i].text);
+      }
+      return true;
+    }
+
     static GLSLParseResult parse_glsl_source_for_node(const bNode& node,
-                                                      const std::string& source,
+                                                      const std::string& original_source,
                                                       const StringRef function_name)
     {
       GLSLParseResult result;
       result.keep_existing_sockets = true;
+      std::string source = original_source;
+      if (!rewrite_light_parameter_names(source, result.light_parameter_names, result.error)) {
+        return result;
+      }
 
       if (trim_copy(source).empty())
       {
@@ -8867,7 +8976,10 @@ vec3 glsl_ambient_lighting()
       }
       result.uses_geometry_access = glsl_source_uses_geometry_access(tokens);
       result.uses_lightprobe_access = glsl_source_uses_lightprobe_access(tokens);
-      result.uses_eevee_light_access = glsl_source_uses_eevee_light_access(tokens);
+      /* Ordinary token discovery excludes #define lines. A parameter accessor may live
+       * entirely inside a macro, but still needs the light helpers and pipeline resources. */
+      result.uses_eevee_light_access = !result.light_parameter_names.is_empty() ||
+                                     glsl_source_uses_eevee_light_access(tokens);
       result.uses_matrix_access = glsl_source_uses_matrix_access(tokens);
       if (!validate_no_top_level_conditional_glsl_code(stripped_source, tokens, result.error))
       {
@@ -9039,6 +9151,7 @@ vec3 glsl_ambient_lighting()
 struct GLSLLight {
   bool valid;
   uint index;
+  uint shader_parameter_uid;
   int type;
   int lightgroup_id;
   vec3 vector;
@@ -9055,6 +9168,7 @@ GLSLLight glsl_light_default()
   GLSLLight light;
   light.valid = false;
   light.index = 0u;
+  light.shader_parameter_uid = 0u;
   light.type = GLSL_LIGHT_TYPE_INVALID;
   light.lightgroup_id = 0;
   light.vector = vec3(0.0, 0.0, 1.0);
@@ -9069,6 +9183,20 @@ GLSLLight glsl_light_default()
 
 int glsl_light_count() { return 0; }
 GLSLLight glsl_light_get(int light_ordinal) { return glsl_light_default(); }
+float glsl_light_parameter_float(GLSLLight l, uint lo, uint hi, float fallback, out bool valid)
+{ valid = false; return fallback; }
+int glsl_light_parameter_int(GLSLLight l, uint lo, uint hi, int fallback, out bool valid)
+{ valid = false; return fallback; }
+bool glsl_light_parameter_bool(GLSLLight l, uint lo, uint hi, bool fallback, out bool valid)
+{ valid = false; return fallback; }
+vec2 glsl_light_parameter_vec2(GLSLLight l, uint lo, uint hi, vec2 fallback, out bool valid)
+{ valid = false; return fallback; }
+vec3 glsl_light_parameter_vec3(GLSLLight l, uint lo, uint hi, vec3 fallback, out bool valid)
+{ valid = false; return fallback; }
+vec4 glsl_light_parameter_vec4(GLSLLight l, uint lo, uint hi, vec4 fallback, out bool valid)
+{ valid = false; return fallback; }
+vec4 glsl_light_parameter_color(GLSLLight l, uint lo, uint hi, vec4 fallback, out bool valid)
+{ valid = false; return fallback; }
 float glsl_light_shadow(int light_ordinal, vec3 shading_normal) { return 0.0; }
 vec3 glsl_position() { return vec3(0.0); }
 vec3 glsl_normal() { return vec3(0.0); }
@@ -10392,6 +10520,9 @@ vec3 glsl_ambient_lighting() { return vec3(0.0); }
       if (parse_result.uses_eevee_light_access)
       {
         GPU_material_flag_set(mat, GPU_MATFLAG_GLSL_LIGHT_ACCESS);
+      }
+      for (const std::string &name : parse_result.light_parameter_names) {
+        GPU_material_light_shader_parameter_ensure(mat, name.c_str());
       }
       if (parse_result.uses_lightprobe_access)
       {

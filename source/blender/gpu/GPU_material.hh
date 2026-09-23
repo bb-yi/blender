@@ -80,6 +80,19 @@ struct GPUReferencedObject {
   eGPUReferencedObjectDataFlag flags = GPU_REFERENCED_OBJECT_DATA_NONE;
 };
 
+struct GPULightShaderParameterRequest {
+  char name[64] = "";
+  uint64_t key = 0;
+  /* Zero requests the parameter for all lights (GLSL light iteration). */
+  uint32_t object_uid = 0;
+};
+
+uint64_t GPU_light_shader_parameter_key(const char *name);
+uint64_t GPU_material_light_shader_parameter_ensure(GPUMaterial *material,
+                                                  const char *name,
+                                                  Object *object = nullptr);
+Span<GPULightShaderParameterRequest> GPU_material_light_shader_parameters(const GPUMaterial *material);
+
 /* GPU_MAT_OPTIMIZATION_SKIP for cases where we do not
  * plan to perform optimization on a given material. */
 enum eGPUMaterialOptimizationStatus {

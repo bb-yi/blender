@@ -399,6 +399,24 @@ void node_node_foreach_id(bNode *node, LibraryForeachIDData *data)
 {
   BKE_LIB_FOREACHID_PROCESS_ID(data, node->id, IDWALK_CB_USER);
 
+  if (node->type_legacy == SH_NODE_LIGHT_INFO && node->storage != nullptr) {
+    auto *storage = static_cast<NodeShaderLightInfo *>(node->storage);
+    const Light *source_light = storage->source_light;
+    BKE_LIB_FOREACHID_PROCESS_ID(data, reinterpret_cast<ID *&>(storage->source_light), IDWALK_CB_NOP);
+    const auto flags = BKE_lib_query_foreachid_process_flags_get(data);
+    if (source_light != storage->source_light &&
+        (flags & IDWALK_NO_ORIG_POINTERS_ACCESS) == 0)
+    {
+      /* Parameter identifiers are only unique within one Light. A remapped pointer no longer
+       * proves that the stored bindings belong to the selected Light. File linking only resolves
+       * serialized addresses, so preserve the source identity in that case. */
+      storage->source_light = nullptr;
+      if (node->runtime && node->runtime->owner_tree) {
+        BKE_ntree_update_tag_node_property(node->runtime->owner_tree, node);
+      }
+    }
+  }
+
   if (node->type_legacy == SH_NODE_FILTER_OBJECT_MASK && node->storage != nullptr) {
     NodeFilterMask *storage = static_cast<NodeFilterMask *>(node->storage);
     for (NodeFilterMaskItem &item : MutableSpan(storage->items, storage->items_num)) {

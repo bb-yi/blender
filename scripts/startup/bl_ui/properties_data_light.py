@@ -290,6 +290,100 @@ class DATA_PT_light_animation(DataButtonsPanel, PropertiesAnimationMixin, Proper
             self.draw_action_and_slot_selector(context, col, node_tree)
 
 
+_shader_parameter_values = {
+    'FLOAT': 'value_float',
+    'INT': 'value_int',
+    'BOOLEAN': 'value_bool',
+    'VECTOR2': 'value_vector2',
+    'VECTOR3': 'value_vector3',
+    'VECTOR4': 'value_vector4',
+    'COLOR': 'value_color',
+}
+
+
+class DATA_UL_light_shader_parameters(bpy.types.UIList):
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
+        row = layout.row(align=True)
+        row.prop(item, "name", text="", emboss=False)
+        row.prop(item, "type", text="")
+
+
+class LIGHT_OT_shader_parameter_edit(bpy.types.Operator):
+    bl_idname = "light.shader_parameter_edit"
+    bl_label = "Edit Light Shader Parameters"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    action: bpy.props.EnumProperty(items=(
+        ('ADD', "Add", "Add a float parameter"),
+        ('REMOVE', "Remove", "Remove the parameter and its local drivers; preserve shared Actions"),
+        ('DUPLICATE', "Duplicate", "Duplicate values without copying animation"),
+        ('UP', "Move Up", "Move the selected parameter up"),
+        ('DOWN', "Move Down", "Move the selected parameter down"),
+    ))
+
+    @classmethod
+    def poll(cls, context):
+        # Operator search also polls from editors without the Properties context members.
+        light = getattr(context, "light", None)
+        return light is not None and light.is_editable and light.override_library is None
+
+    def execute(self, context):
+        light = getattr(context, "light", None)
+        if light is None:
+            return {'CANCELLED'}
+        parameters = light.shader_parameters
+        index = light.active_shader_parameter_index
+        if self.action == 'ADD':
+            parameters.new("Parameter")
+        elif 0 <= index < len(parameters):
+            parameter = parameters[index]
+            if self.action == 'REMOVE':
+                parameters.remove(parameter)
+            elif self.action == 'DUPLICATE':
+                parameters.duplicate(parameter)
+            else:
+                target = index + (-1 if self.action == 'UP' else 1)
+                if 0 <= target < len(parameters):
+                    parameters.move(index, target)
+        return {'FINISHED'}
+
+
+class DATA_PT_EEVEE_shader_parameters(DataButtonsPanel, Panel):
+    bl_label = "Shader Parameters"
+    COMPAT_ENGINES = {'BLENDER_EEVEE'}
+
+    def draw(self, context):
+        layout = self.layout
+        light = context.light
+        row = layout.row()
+        row.template_list("DATA_UL_light_shader_parameters", "", light, "shader_parameters",
+                          light, "active_shader_parameter_index", rows=4)
+        col = row.column(align=True)
+        for action, icon in (('ADD', 'ADD'), ('REMOVE', 'REMOVE'),
+                             ('DUPLICATE', 'DUPLICATE'), ('UP', 'TRIA_UP'), ('DOWN', 'TRIA_DOWN')):
+            col.operator("light.shader_parameter_edit", text="", icon=icon).action = action
+        index = light.active_shader_parameter_index
+        if 0 <= index < len(light.shader_parameters):
+            parameter = light.shader_parameters[index]
+            col = layout.column()
+            col.use_property_split = True
+            col.use_property_decorate = True
+            col.prop(parameter, _shader_parameter_values[parameter.type], text="Value",
+                     slider=parameter.subtype == 'FACTOR')
+            header, settings = layout.panel("light_shader_parameter_settings", default_closed=True)
+            header.label(text="Parameter Settings")
+            if settings:
+                settings.use_property_split = True
+                settings.use_property_decorate = False
+                settings.prop(parameter, "description")
+                if parameter.type not in {'BOOLEAN', 'COLOR'}:
+                    settings.prop(parameter, "subtype")
+                if parameter.type != 'BOOLEAN':
+                    settings.prop(parameter, "range_min")
+                    settings.prop(parameter, "range_max")
+                    settings.prop(parameter, "use_hard_limits")
+
+
 class DATA_PT_custom_props_light(DataButtonsPanel, PropertyPanel, Panel):
     COMPAT_ENGINES = {
         'BLENDER_RENDER',
@@ -301,6 +395,8 @@ class DATA_PT_custom_props_light(DataButtonsPanel, PropertyPanel, Panel):
 
 
 classes = (
+    DATA_UL_light_shader_parameters,
+    LIGHT_OT_shader_parameter_edit,
     DATA_PT_context_light,
     DATA_PT_preview,
     DATA_PT_light,
@@ -310,6 +406,7 @@ classes = (
     DATA_PT_EEVEE_light_influence,
     DATA_PT_EEVEE_light_distance,
     DATA_PT_light_animation,
+    DATA_PT_EEVEE_shader_parameters,
     DATA_PT_custom_props_light,
 )
 

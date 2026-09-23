@@ -503,6 +503,7 @@ void Light::sync(ShadowModule &shadows,
   this->filter_radius = la->shadow_filter_radius;
   this->shadow_jitter = (la->mode & LA_SHADOW_JITTER) != 0;
   this->lightgroup_id = max_ii(lightgroup_id, 0);
+  this->shader_parameter_uid = 0;
   this->shadow_map_scale = max_ff(la->shadow_map_scale, 0.0001f);
   this->visible_camera = (visibility_flag & OB_HIDE_CAMERA) == 0;
 
@@ -901,6 +902,9 @@ void LightModule::sync_light(const ObjectRef &ob_ref)
     light.sun().direction = light.z_axis();
   }
   light.light_shader_index = -1;
+  light.shader_parameter_uid = ob_ref.object->id.orig_id ?
+                                   ob_ref.object->id.orig_id->session_uid :
+                                   ob_ref.object->id.session_uid;
   light.front_light_shader_index = -1;
   light.volume_light_shader_index = -1;
   light.surfel_light_shader_index = -1;

@@ -113,6 +113,7 @@ class Manager {
 
   /** Unique referenced objects requested by all materials in this manager. */
   Map<uint32_t, GPUReferencedObject> referenced_objects_;
+  Vector<GPULightShaderParameterRequest> light_shader_parameter_requests_;
   uint referenced_object_table_offset_ = 0;
   uint referenced_object_table_size_ = 0;
 
@@ -311,6 +312,7 @@ class Manager {
  private:
   void sync_layer_attributes();
   void sync_referenced_objects();
+  void sync_light_shader_parameters();
 
   /* Fingerprint of the manager in a certain state. Assured to not be 0.
    * Not reliable enough for general update detection. Only to be used for debugging assertion. */
@@ -492,6 +494,18 @@ inline void Manager::extract_object_attributes(ResourceHandleRange handle,
 
 inline void Manager::register_material_resources(GPUMaterial *material)
 {
+  for (const auto &request : GPU_material_light_shader_parameters(material)) {
+    bool found = false;
+    for (const auto &existing : light_shader_parameter_requests_) {
+      if (existing.object_uid == request.object_uid && STREQ(existing.name, request.name)) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      light_shader_parameter_requests_.append(request);
+    }
+  }
   const ListBaseT<GPULayerAttr> *attr_list = GPU_material_layer_attributes(material);
 
   if (attr_list != nullptr) {

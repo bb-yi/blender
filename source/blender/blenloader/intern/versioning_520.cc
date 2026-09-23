@@ -7,11 +7,14 @@
  */
 
 #define DNA_DEPRECATED_ALLOW
+#define DNA_GENFILE_VERSIONING_MACROS
 
 #include "NOD_geometry_nodes_srna.hh"
 #include "NOD_socket.hh"
 
 #include "DNA_ID.h"
+#include "DNA_genfile.h"
+#include "DNA_light_types.h"
 #include "DNA_brush_types.h"
 #include "DNA_camera_types.h"
 #include "DNA_curve_types.h"
@@ -642,6 +645,42 @@ void do_versions_after_linking_520(FileData *fd, Main *bmain)
     version_scene_time_shader_nodes(bmain);
   }
 
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 50) ||
+      !DNA_struct_member_exists(fd->filesdna, "LightShaderParameter", "float", "range_max"))
+  {
+    for (Light &light : bmain->lights) {
+      for (LightShaderParameter &parameter : light.shader_parameters) {
+        parameter.range_min = 0.0f;
+        parameter.range_max = 1.0f;
+        parameter.use_hard_limits = 0;
+        parameter.subtype = 0;
+        parameter.description[0] = '\0';
+      }
+    }
+    FOREACH_NODETREE_BEGIN (bmain, node_tree, id) {
+      for (bNode &node : node_tree->nodes) {
+        if (node.type_legacy != SH_NODE_LIGHT_INFO || !node.storage) {
+          continue;
+        }
+        auto &storage = *static_cast<NodeShaderLightInfo *>(node.storage);
+        storage.has_legacy_layout = 1;
+        /* Basic sockets were unavailable in legacy Parameter mode. Keep their dormant wires,
+         * but do not unexpectedly activate them when both groups become visible. */
+        if (node.custom1 == 1) {
+          for (bNodeLink &link : node_tree->links) {
+            if (link.fromnode == &node && link.fromsock &&
+                ELEM(StringRef(link.fromsock->identifier), "Color", "Power", "Type", "Position",
+                     "Direction", "Radius", "Spot Size", "Sun Angle", "Visible"))
+            {
+              link.flag |= NODE_LINK_MUTED;
+            }
+          }
+        }
+      }
+    }
+    FOREACH_NODETREE_END;
+  }
+
   /**
    * Always bump subversion in BKE_blender_version.h when adding versioning
    * code here, and wrap it inside a MAIN_VERSION_FILE_ATLEAST check.
@@ -668,7 +707,7 @@ static void version_solid_color_width_height_defaults(Main &bmain)
   }
 }
 
-void blo_do_versions_520(FileData * /*fd*/, Library * /*lib*/, Main *bmain)
+void blo_do_versions_520(FileData *fd, Library * /*lib*/, Main *bmain)
 {
   if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 1)) {
     for (Scene &scene : bmain->scenes) {
@@ -1039,6 +1078,20 @@ void blo_do_versions_520(FileData * /*fd*/, Library * /*lib*/, Main *bmain)
     }
     FOREACH_NODETREE_END;
     version_npr_image_sample_offset_socket_identifier(bmain);
+  }
+
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 48) ||
+      !DNA_struct_exists(fd->filesdna, "NodeShaderLightInfo"))
+  {
+    FOREACH_NODETREE_BEGIN (bmain, node_tree, id) {
+      for (bNode &node : node_tree->nodes) {
+        if (STREQ(node.idname, "ShaderNodeLightInfo") && !node.storage) {
+          node.storage = MEM_new<NodeShaderLightInfo>(__func__);
+          node.custom1 = 0;
+        }
+      }
+    }
+    FOREACH_NODETREE_END;
   }
 
   /**

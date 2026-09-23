@@ -129,6 +129,7 @@ struct GPUMaterial {
   GPUNodeGraph graph = {};
   bool uses_referenced_object_data = false;
   Vector<GPUReferencedObject> referenced_objects;
+  Vector<GPULightShaderParameterRequest> light_shader_parameters;
   Vector<Object *> filter_object_infos;
   Vector<Object *> filter_mask_objects;
   Vector<GPUMaterialGeneratedSource> generated_sources;
@@ -632,6 +633,48 @@ uint32_t GPU_material_referenced_object_ensure(GPUMaterial *material,
 bool GPU_material_uses_referenced_object_data(const GPUMaterial *material)
 {
   return material != nullptr && material->uses_referenced_object_data;
+}
+
+uint64_t GPU_light_shader_parameter_key(const char *name)
+{
+  /* Stable FNV-1a key. Draw Manager checks full names for collisions before upload. */
+  uint64_t key = 14695981039346656037ull;
+  for (const unsigned char *p = reinterpret_cast<const unsigned char *>(name); *p; p++) {
+    key = (key ^ *p) * 1099511628211ull;
+  }
+  return key;
+}
+
+uint64_t GPU_material_light_shader_parameter_ensure(GPUMaterial *material,
+                                                   const char *name,
+                                                   Object *object)
+{
+  GPULightShaderParameterRequest request;
+  STRNCPY(request.name, name);
+  request.key = GPU_light_shader_parameter_key(request.name);
+  if (!material) {
+    return request.key;
+  }
+  material->uses_referenced_object_data = true;
+  if (object) {
+    request.object_uid = GPU_material_referenced_object_ensure(
+        material, object, GPU_REFERENCED_OBJECT_DATA_LIGHT);
+    if (request.object_uid == 0) {
+      return request.key;
+    }
+  }
+  for (const auto &existing : material->light_shader_parameters) {
+    if (existing.object_uid == request.object_uid && STREQ(existing.name, request.name)) {
+      return request.key;
+    }
+  }
+  material->light_shader_parameters.append(request);
+  return request.key;
+}
+
+Span<GPULightShaderParameterRequest> GPU_material_light_shader_parameters(const GPUMaterial *material)
+{
+  return material ? material->light_shader_parameters.as_span() : Span<GPULightShaderParameterRequest>();
 }
 
 int GPU_material_referenced_object_count(const GPUMaterial *material)

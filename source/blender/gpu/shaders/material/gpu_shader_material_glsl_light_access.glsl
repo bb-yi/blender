@@ -100,6 +100,7 @@ float3 glsl_light_resolve_normal(float3 normal_value)
 struct GLSLLight {
   bool valid;
   uint index;
+  uint shader_parameter_uid;
   int type;
   int lightgroup_id;
   float3 vector;
@@ -116,6 +117,7 @@ GLSLLight glsl_light_default()
   GLSLLight light;
   light.valid = false;
   light.index = 0u;
+  light.shader_parameter_uid = 0u;
   light.type = GLSL_LIGHT_TYPE_INVALID;
   light.lightgroup_id = 0;
   light.vector = float3(0.0f, 0.0f, 1.0f);
@@ -126,6 +128,55 @@ GLSLLight glsl_light_default()
   light.specular_color = float3(0.0f);
   light.attenuation = 0.0f;
   return light;
+}
+
+float glsl_light_parameter_float(GLSLLight light, uint lo, uint hi, float fallback, out bool valid)
+{
+  float4 value;
+  valid = light_shader_parameter_read(light.shader_parameter_uid, lo, hi, 1u, value);
+  return valid ? value.x : fallback;
+}
+
+int glsl_light_parameter_int(GLSLLight light, uint lo, uint hi, int fallback, out bool valid)
+{
+  float4 value;
+  valid = light_shader_parameter_read(light.shader_parameter_uid, lo, hi, 2u, value);
+  return valid ? int(value.x) : fallback;
+}
+
+bool glsl_light_parameter_bool(GLSLLight light, uint lo, uint hi, bool fallback, out bool valid)
+{
+  float4 value;
+  valid = light_shader_parameter_read(light.shader_parameter_uid, lo, hi, 3u, value);
+  return valid ? value.x != 0.0f : fallback;
+}
+
+float2 glsl_light_parameter_vec2(GLSLLight light, uint lo, uint hi, float2 fallback, out bool valid)
+{
+  float4 value;
+  valid = light_shader_parameter_read(light.shader_parameter_uid, lo, hi, 4u, value);
+  return valid ? value.xy : fallback;
+}
+
+float3 glsl_light_parameter_vec3(GLSLLight light, uint lo, uint hi, float3 fallback, out bool valid)
+{
+  float4 value;
+  valid = light_shader_parameter_read(light.shader_parameter_uid, lo, hi, 5u, value);
+  return valid ? value.xyz : fallback;
+}
+
+float4 glsl_light_parameter_vec4(GLSLLight light, uint lo, uint hi, float4 fallback, out bool valid)
+{
+  float4 value;
+  valid = light_shader_parameter_read(light.shader_parameter_uid, lo, hi, 6u, value);
+  return valid ? value : fallback;
+}
+
+float4 glsl_light_parameter_color(GLSLLight light, uint lo, uint hi, float4 fallback, out bool valid)
+{
+  float4 value;
+  valid = light_shader_parameter_read(light.shader_parameter_uid, lo, hi, 7u, value);
+  return valid ? value : fallback;
 }
 
 #if defined(GPU_FRAGMENT_SHADER) && defined(MAT_GLSL_LIGHT_ACCESS)
@@ -284,6 +335,7 @@ GLSLLight glsl_light_build(uint light_index, bool is_local, uint public_index)
 
   result.valid = true;
   result.index = public_index;
+  result.shader_parameter_uid = light.shader_parameter_uid;
   result.type = glsl_light_public_type(light);
   result.lightgroup_id = light.lightgroup_id;
   result.vector = light_vector.L;

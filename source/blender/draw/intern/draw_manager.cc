@@ -7,10 +7,12 @@
  */
 
 #include "DNA_light_types.h"
+#include <climits>
 #include "DNA_object_types.h"
 #include "DNA_userdef_types.h"
 
 #include "BKE_main.hh"
+#include "BKE_light.h"
 #include "DEG_depsgraph_query.hh"
 
 #include "BLI_hash.h"
@@ -22,6 +24,8 @@
 #include "BLI_math_matrix.hh"
 #include "GPU_capabilities.hh"
 #include "GPU_compute.hh"
+#include "WM_api.hh"
+#include "WM_types.hh"
 
 #include "draw_context_private.hh"
 #include "draw_debug.hh"
@@ -146,6 +150,7 @@ void Manager::begin_sync(Object *object_active)
   acquired_textures.clear();
   layer_attributes.clear();
   referenced_objects_.clear();
+  light_shader_parameter_requests_.clear();
   referenced_object_table_offset_ = 0;
   referenced_object_table_size_ = 0;
 
@@ -164,9 +169,10 @@ void Manager::begin_sync(Object *object_active)
          matrix_buf.current().size() * sizeof(*infos_buf.current().data()));
 #endif
   resource_len_ = 0;
-  /* Lane zero is reserved for the referenced-object channel header. */
-  attribute_len_ = 1;
+  /* Reserve headers for referenced objects and typed light shader parameters. */
+  attribute_len_ = 2;
   attributes_buf.get_or_resize(0) = ObjectAttribute{};
+  attributes_buf.get_or_resize(DRW_LIGHT_SHADER_PARAMETER_HEADER) = ObjectAttribute{};
   /* TODO(fclem): Resize buffers if too big, but with an hysteresis threshold. */
 
   this->object_active = object_active;
@@ -358,12 +364,105 @@ void Manager::sync_referenced_objects()
   }
 }
 
+void Manager::sync_light_shader_parameters()
+{
+  if (light_shader_parameter_requests_.is_empty()) {
+    return;
+  }
+  Map<uint64_t, std::string> names;
+  Set<std::pair<uint32_t, uint64_t>> requests;
+  for (const auto &request : light_shader_parameter_requests_) {
+    std::string &name = names.lookup_or_add(request.key, request.name);
+    if (name != request.name) {
+      WM_global_report(RPT_ERROR, "Light shader parameter name hash collision; rename one parameter");
+      return;
+    }
+    requests.add({request.object_uid, request.key});
+  }
+  struct Record {
+    uint32_t uid;
+    uint64_t key;
+    int type;
+    float4 value;
+  };
+  Vector<Record> records;
+  const auto &ctx = drw_get();
+  Main *bmain = DEG_get_bmain(ctx.depsgraph);
+  if (!bmain) {
+    return;
+  }
+  for (Object &object : bmain->objects) {
+    if (object.type != OB_LAMP || object.id.session_uid == 0) {
+      continue;
+    }
+    Object *evaluated = referenced_object_evaluated(ctx.depsgraph, &object);
+    if (!evaluated || !evaluated->data || evaluated->type != OB_LAMP) {
+      continue;
+    }
+    const Light &light = *id_cast<Light *>(evaluated->data);
+    for (const LightShaderParameter &parameter : light.shader_parameters) {
+      const uint64_t key = GPU_light_shader_parameter_key(parameter.name);
+      if (!requests.contains({0u, key}) && !requests.contains({object.id.session_uid, key})) {
+        continue;
+      }
+      /* Comparing full CPU-side names also rejects collisions with unrequested parameters. */
+      if (names.lookup(key) != parameter.name) {
+        WM_global_report(RPT_ERROR, "Light shader parameter name hash collision; rename one parameter");
+        return;
+      }
+      float4 value;
+      if (BKE_light_shader_parameter_value(parameter, value)) {
+        records.append({object.id.session_uid, key, int(parameter.type), value});
+      }
+    }
+  }
+  if (records.is_empty()) {
+    return;
+  }
+  /* Two lanes per hash slot, load factor <= 1/2. Check the actual rounded allocation size. */
+  uint64_t table_size = 1;
+  while (table_size < uint64_t(records.size()) * 2) {
+    table_size <<= 1;
+  }
+  const uint64_t table_end = uint64_t(attribute_len_) + 2 * table_size;
+  uint64_t allocated_lanes = 1;
+  while (allocated_lanes < table_end) {
+    allocated_lanes <<= 1;
+  }
+  if (table_end > uint64_t(INT_MAX) ||
+      allocated_lanes > GPU_max_storage_buffer_size() / sizeof(ObjectAttribute))
+  {
+    WM_global_report(RPT_ERROR, "Light shader parameter table exceeds GPU storage buffer capacity");
+    return;
+  }
+  const uint offset = attribute_len_;
+  for (uint i = offset; i < uint(table_end); i++) {
+    attributes_buf.get_or_resize(i) = ObjectAttribute{};
+  }
+  attribute_len_ = uint(table_end);
+  for (const Record &record : records) {
+    const uint lo = uint(record.key);
+    const uint hi = uint(record.key >> 32);
+    uint slot = ((record.uid * 1664525u) ^ lo ^ hi) & uint(table_size - 1);
+    while (attributes_buf[offset + slot * 2].hash_code != 0u) {
+      slot = (slot + 1u) & uint(table_size - 1);
+    }
+    attributes_buf[offset + slot * 2] = referenced_object_attribute(
+        float4(uint_as_float(lo), uint_as_float(hi), uint_as_float(record.type), 0.0f), record.uid);
+    attributes_buf[offset + slot * 2 + 1] = referenced_object_attribute(record.value);
+  }
+  attributes_buf[DRW_LIGHT_SHADER_PARAMETER_HEADER] = referenced_object_attribute(
+      float4(uint_as_float(offset), uint_as_float(uint(table_size)), 0.0f, 0.0f),
+      DRW_LIGHT_SHADER_PARAMETER_MAGIC);
+}
+
 void Manager::end_sync()
 {
   GPU_debug_group_begin("Manager.end_sync");
 
   sync_layer_attributes();
   sync_referenced_objects();
+  sync_light_shader_parameters();
 
   matrix_buf.current().push_update();
   bounds_buf.current().push_update();

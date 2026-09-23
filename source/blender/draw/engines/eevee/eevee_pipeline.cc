@@ -143,7 +143,8 @@ static bool material_uses_hybrid_pipeline(const GPUMaterial *gpumat)
   return GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_TO_RGBA) ||
          GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO) ||
          GPU_material_flag_get(gpumat, GPU_MATFLAG_SCREENSPACE_INFO) ||
-         GPU_material_has_glsl_light_shader_eval(gpumat);
+         GPU_material_has_glsl_light_shader_eval(gpumat) ||
+         GPU_material_flag_get(gpumat, GPU_MATFLAG_GLSL_LIGHT_ACCESS);
 }
 
 static bool material_needs_lightprobe_resources(const GPUMaterial *gpumat)
