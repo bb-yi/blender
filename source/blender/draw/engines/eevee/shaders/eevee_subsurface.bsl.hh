@@ -27,6 +27,7 @@ namespace eevee::subsurface {
 
 struct Setup {
   [[specialization_constant(false)]] const bool use_split_radiance;
+  [[specialization_constant(false)]] const bool use_npr_radiance;
 
   [[shared]] uint &has_visible_sss;
 
@@ -77,6 +78,9 @@ void setup_main([[resource_table]] Setup &srt,
     }
     else {
       imageStoreFast(srt.radiance_img, int3(texel, 0), float4(direct + indirect, 0.0f));
+    }
+    if (srt.use_npr_radiance) {
+      imageStoreFast(srt.radiance_img, int3(texel, 2), float4(cl.npr.additive, 0.0f));
     }
     imageStoreFast(srt.object_id_img, texel, uint4(object_id));
 
@@ -132,6 +136,7 @@ struct SubSurfaceSample {
 
 struct Convolve {
   [[specialization_constant(false)]] const bool use_split_radiance;
+  [[specialization_constant(false)]] const bool use_npr_radiance;
 
   [[sampler(2)]] sampler2DArray radiance_tx;
   [[sampler(3)]] sampler2DDepth depth_tx;
@@ -139,6 +144,7 @@ struct Convolve {
 
   [[image(0, write, DEFERRED_RADIANCE_FORMAT)]] uimage2D out_direct_light_img;
   [[image(1, write, RAYTRACE_RADIANCE_FORMAT)]] image2D out_indirect_light_img;
+  [[image(2, write, UINT_32)]] uimage2DArray npr_header_img;
 
   [[uniform(SUBSURFACE_BUF_SLOT)]] const SubsurfaceData &subsurface_buf;
 
@@ -241,6 +247,7 @@ void convolve_main([[resource_table]] Convolve &srt,
   float3 accum_weight = float3(0.0f);
   float3 accum_radiance = float3(0.0f);
   float3 accum_radiance_indirect = float3(0.0f);
+  float3 accum_radiance_additive = float3(0.0f);
 
   for (int i = 0; i < srt.subsurface_buf.sample_len; i++) {
     float2 sample_uv = center_uv + sample_space * srt.subsurface_buf.samples[i].xy;
@@ -263,17 +270,32 @@ void convolve_main([[resource_table]] Convolve &srt,
       accum_radiance_indirect += textureLod(srt.radiance_tx, float3(sample_uv, 1.0f), 0.0f).rgb *
                                  weight;
     }
+    if (srt.use_npr_radiance) {
+      accum_radiance_additive += textureLod(srt.radiance_tx, float3(sample_uv, 2.0f), 0.0f).rgb *
+                                 weight;
+    }
   }
   /* Normalize the sum (slide 34). */
   float3 accum_weight_inv = safe_rcp(accum_weight);
   accum_radiance *= accum_weight_inv;
   accum_radiance_indirect *= accum_weight_inv;
+  accum_radiance_additive *= accum_weight_inv;
 
   /* Put result in direct diffuse. */
   imageStoreFast(srt.out_direct_light_img, texel, uint4(rgb9e5_encode(accum_radiance)));
   /* Note that if we don't use split radiance, this clears the indirect pass since its content has
    * been merged and convolved with direct light.*/
   imageStoreFast(srt.out_indirect_light_img, texel, float4(accum_radiance_indirect, 0.0f));
+  if (srt.use_npr_radiance) {
+    /* Read only this pixel's GBuffer; neighborhood input was copied by setup to radiance_tx.
+     * The separate additive flag also supports ordinary SSS receiving colored light from NPR. */
+    gbuffer::Header header = gbuf.header;
+    header.npr_sss_additive_set(true);
+    imageStoreFast(srt.npr_header_img, int3(texel, 0), uint4(header.raw()));
+    imageStoreFast(srt.npr_header_img,
+                   int3(texel, GBUF_NPR_ADDITIVE_LAYER),
+                   uint4(rgb9e5_encode(accum_radiance_additive)));
+  }
 }
 
 /** \} */

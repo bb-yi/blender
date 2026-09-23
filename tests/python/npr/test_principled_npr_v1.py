@@ -1,5 +1,6 @@
 import argparse
 import math
+import os
 from pathlib import Path
 import sys
 
@@ -11,6 +12,7 @@ RENDER_SIZE = 64
 SUCCESS_MARKER = "PRINCIPLED_NPR_V1_OK"
 BACKEND_MARKER = "PRINCIPLED_NPR_V1_BACKEND="
 OUTPUT_DIR = None
+LEGACY_TEMPLATE = None
 
 
 def require(condition, message):
@@ -28,6 +30,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--expected-backend", required=True, choices=("OPENGL", "VULKAN"))
     parser.add_argument("--output-dir", required=True, type=Path)
+    parser.add_argument("--legacy-template", type=Path)
     return parser.parse_args(argv)
 
 
@@ -80,6 +83,28 @@ def make_material(name="PrincipledNPRV1Material"):
     tree = material.node_tree
     tree.nodes.clear()
     node = tree.nodes.new("ShaderNodePrincipledNPR")
+    if getattr(node, "model_version", 1) >= 2:
+        # A V1 test must use a serialized V1 node, not mutate a newly-created V2
+        # node's read-only version or apply the old contract to new defaults.
+        bpy.data.materials.remove(material)
+        template_path = LEGACY_TEMPLATE
+        if template_path is None:
+            value = os.environ.get("BLENDER_NPR_V1_BASELINE")
+            template_path = Path(value) if value else None
+        require(template_path is not None and template_path.is_file(),
+                "A captured V1 template is required to test legacy compatibility")
+        with bpy.data.libraries.load(str(template_path), link=False) as (source, target):
+            require("PrincipledNPR_V1_Baseline" in source.materials, "V1 template material missing")
+            target.materials = ["PrincipledNPR_V1_Baseline"]
+        material = target.materials[0]
+        material.name = name
+        material.surface_render_method = "BLENDED"
+        tree = material.node_tree
+        node = tree.nodes.get("PrincipledNPR_V1_Baseline")
+        require(node is not None and node.model_version == 1, "V1 file was silently upgraded")
+        node.name = "Principled NPR V1"
+        output = next(item for item in tree.nodes if item.bl_idname == "ShaderNodeOutputMaterial")
+        return material, node, output
     node.name = "Principled NPR V1"
     output = tree.nodes.new("ShaderNodeOutputMaterial")
     tree.links.new(node.outputs["Shader"], output.inputs["Surface"])
@@ -649,7 +674,9 @@ def test_thirty_two_lights(node):
 
 def main():
     global OUTPUT_DIR
+    global LEGACY_TEMPLATE
     args = parse_args()
+    LEGACY_TEMPLATE = args.legacy_template
     OUTPUT_DIR = args.output_dir.resolve()
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     assert_storage_and_sockets()

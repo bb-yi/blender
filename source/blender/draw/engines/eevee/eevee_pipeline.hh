@@ -401,6 +401,8 @@ struct DeferredLayerBase {
   int closure_count_ = 0;
   /* True if any material needs the original, un-offset surface depth for lighting. */
   bool use_depth_offset_lighting_data_ = false;
+  /* Only NPR V2 surface shaders write the optional HDR direct-light payload. */
+  bool has_principled_npr_v2_ = false;
   /* True if this is a planar probe deferred layer. To be set before sync. */
   bool is_probe_ = false;
 
@@ -423,6 +425,9 @@ struct DeferredLayerBase {
   /* Return the amount of gbuffer layer needed. */
   int header_layer_count() const
   {
+    if (has_principled_npr_v2_) {
+      return GBUF_NPR_HEADER_LAYER_COUNT;
+    }
     /* Default header. */
     int count = 1;
     /* SSS, light linking, shadow offset all require an additional layer to store the object ID.
@@ -457,6 +462,11 @@ struct DeferredLayerBase {
   eClosureBits closure_bits_get() const
   {
     return closure_bits_;
+  }
+
+  bool has_principled_npr_v2() const
+  {
+    return has_principled_npr_v2_;
   }
 
   void gbuffer_pass_sync(Instance &inst);

@@ -144,6 +144,7 @@ void combine_frag([[resource_table]] Combine &srt,
         if (world_environment_disabled) {
           closure_indirect_light = float3(0.0f);
         }
+        closure_indirect_light *= cl.npr.indirect_weight;
 
         average_normal += cl.N * reduce_add(cl.color);
 
@@ -152,14 +153,14 @@ void combine_frag([[resource_table]] Combine &srt,
           case CLOSURE_BSSRDF_BURLEY_ID:
           case CLOSURE_BSDF_DIFFUSE_ID:
             diffuse_color += cl.color;
-            diffuse_direct += closure_direct_light * cl.color;
+            diffuse_direct += closure_direct_light * cl.color + cl.npr.additive;
             diffuse_indirect += closure_indirect_light * cl.color;
             break;
           case CLOSURE_BSDF_MICROFACET_GGX_REFLECTION_ID:
           case CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID:
           case CLOSURE_BSDF_THIN_GLASS_TRANSMISSION_ID:
             specular_color += cl.color;
-            specular_direct += closure_direct_light * cl.color;
+            specular_direct += closure_direct_light * cl.color + cl.npr.additive;
             specular_indirect += closure_indirect_light * cl.color;
             break;
           case CLOSURE_NONE_ID:
@@ -175,11 +176,14 @@ void combine_frag([[resource_table]] Combine &srt,
           cl.color *= cl.color;
         }
 
-        out_direct += closure_direct_light * cl.color;
+        out_direct += closure_direct_light * cl.color + cl.npr.additive;
         out_indirect += closure_indirect_light * cl.color;
       }
     }
   }
+
+  /* Rim is an art-directed surface contribution, neither emission nor scattered illumination. */
+  out_direct += reader.read_npr_rim(gbuf.header, texel);
 
   if (srt.use_radiance_feedback) {
     /* Output unmodified radiance for indirect lighting. */

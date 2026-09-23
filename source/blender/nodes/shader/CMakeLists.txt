@@ -36,6 +36,8 @@ set(SRC
   nodes/node_shader_bsdf_metallic.cc
   nodes/node_shader_bsdf_principled.cc
   nodes/node_shader_principled_npr.cc
+  nodes/node_shader_principled_npr_v2.cc
+  nodes/node_shader_principled_npr_v2.hh
   nodes/node_shader_bsdf_ray_portal.cc
   nodes/node_shader_bsdf_refraction.cc
   nodes/node_shader_bsdf_sheen.cc

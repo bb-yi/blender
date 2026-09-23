@@ -58,6 +58,8 @@ struct SubsurfaceModule {
 
   /* Process direct and indirect radiance separately. */
   bool use_split_radiance_ = false;
+  /* A third channel scatters precolored NPR light without dividing by the physical albedo. */
+  bool use_npr_radiance_ = false;
 
  public:
   SubsurfaceModule(Instance &inst) : inst_(inst)

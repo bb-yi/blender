@@ -30,6 +30,69 @@ float bxdf_ggx_smith_G1(float NX, float a2)
   return 2.0f / (1.0f + sqrt(1.0f + a2 * (1.0f / square(NX) - 1.0f)));
 }
 
+/* Same perceptual-roughness and anisotropy convention as Principled NPR direct lighting. */
+float2 bxdf_ggx_anisotropic_axes(float roughness, float anisotropy)
+{
+  float alpha = max(square(saturate(roughness)), 1e-3f);
+  float aspect = sqrt(1.0f - 0.9f * saturate(anisotropy));
+  return float2(alpha / aspect, alpha * aspect);
+}
+
+float bxdf_ggx_anisotropic_G1(float3 X, float2 alpha)
+{
+  if (X.z <= 0.0f) {
+    return 0.0f;
+  }
+  float2 projected = alpha * X.xy;
+  return 2.0f * X.z / (X.z + sqrt(square(X.z) + dot(projected, projected)));
+}
+
+BsdfEval bxdf_ggx_anisotropic_eval(float3 Lt, float3 Vt, float2 alpha)
+{
+  BsdfEval eval = {};
+  if (Lt.z <= 0.0f || Vt.z <= 0.0f) {
+    return eval;
+  }
+  float3 Ht = safe_normalize(Lt + Vt);
+  if (Ht.z <= 0.0f || dot(Vt, Ht) <= 0.0f) {
+    return eval;
+  }
+  float3 ellipsoid = float3(Ht.xy / alpha, Ht.z);
+  float D = 1.0f / (M_PI * alpha.x * alpha.y * square(dot(ellipsoid, ellipsoid)));
+  float G_V = bxdf_ggx_anisotropic_G1(Vt, alpha);
+  float G_L = bxdf_ggx_anisotropic_G1(Lt, alpha);
+  /* Visible-normal density times the reflection Jacobian. Keep this matched to the Heitz
+   * sampler below; in particular, do not apply the isotropic cylinder bias to its random input. */
+  eval.pdf = D * G_V / (4.0f * Vt.z);
+  eval.throughput = eval.pdf * G_L;
+  eval.weight = G_L;
+  return eval;
+}
+
+/* Eric Heitz, Sampling the GGX Distribution of Visible Normals, JCGT 7(4), 2018.
+ * Adapted from Cycles' microfacet_ggx_sample_vndf, without a dependency on Cycles headers. */
+BsdfSample bxdf_ggx_anisotropic_sample(float2 random, float3 Vt, float2 alpha)
+{
+  BsdfSample result = {};
+  if (Vt.z <= 0.0f) {
+    return result;
+  }
+  float3 Vh = normalize(float3(alpha * Vt.xy, Vt.z));
+  float lensq = dot(Vh.xy, Vh.xy);
+  float3 T1 = lensq > 1e-7f ? float3(-Vh.y, Vh.x, 0.0f) * inversesqrt(lensq) :
+                             float3(1.0f, 0.0f, 0.0f);
+  float3 T2 = cross(Vh, T1);
+  float radius = sqrt(saturate(random.x));
+  float phi = (2.0f * M_PI) * random.y;
+  float2 t = radius * float2(cos(phi), sin(phi));
+  t.y = mix(sqrt(saturate(1.0f - square(t.x))), t.y, 0.5f * (1.0f + Vh.z));
+  float3 Hh = t.x * T1 + t.y * T2 + sqrt(saturate(1.0f - dot(t, t))) * Vh;
+  float3 Ht = normalize(float3(alpha * Hh.xy, max(0.0f, Hh.z)));
+  result.direction = reflect(-Vt, Ht);
+  result.pdf = bxdf_ggx_anisotropic_eval(result.direction, Vt, alpha).pdf;
+  return result;
+}
+
 /** \} */
 
 /* -------------------------------------------------------------------- */

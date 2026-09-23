@@ -239,7 +239,8 @@ float3 lightprobe_world_sample(float3 L, float lod)
   cl.weight = in_cl.weight; \
   cl.color = in_cl.color; \
   cl.N = in_cl.N; \
-  cl.type = closure_type_get(in_cl);
+  cl.type = closure_type_get(in_cl); \
+  cl.npr = closure_npr_direct_default();
 
 #ifdef MAT_BAKE_COLOR
 packed_float3 g_bake_color;
@@ -277,6 +278,17 @@ float3 bake_color_resolve()
 }
 #endif
 
+void closure_select_diffuse(ClosureUndetermined cl)
+{
+#if (CLOSURE_BIN_COUNT > 1) && defined(MAT_TRANSLUCENT) && !defined(MAT_CLEARCOAT)
+  /* Use second slot so we can have diffuse + translucent without noise. */
+  closure_select(g_closure_bins[1], g_closure_rand[1], cl);
+#else
+  /* Either is single closure or use same bin as transmission bin. */
+  closure_select(g_closure_bins[0], g_closure_rand[0], cl);
+#endif
+}
+
 /* Single BSDFs. */
 Closure closure_eval(ClosureDiffuse diffuse)
 {
@@ -287,13 +299,7 @@ Closure closure_eval(ClosureDiffuse diffuse)
 #endif
   ClosureUndetermined cl;
   closure_base_copy(cl, diffuse);
-#if (CLOSURE_BIN_COUNT > 1) && defined(MAT_TRANSLUCENT) && !defined(MAT_CLEARCOAT)
-  /* Use second slot so we can have diffuse + translucent without noise. */
-  closure_select(g_closure_bins[1], g_closure_rand[1], cl);
-#else
-  /* Either is single closure or use same bin as transmission bin. */
-  closure_select(g_closure_bins[0], g_closure_rand[0], cl);
-#endif
+  closure_select_diffuse(cl);
   return Closure(0);
 }
 
@@ -333,7 +339,6 @@ Closure closure_eval(ClosureTranslucent translucent)
  * produce issue with ray-tracing denoiser.
  * Always start with the second bin, this one doesn't
  * overlap with other closure. */
-bool g_closure_reflection_bin = true;
 #define CHOOSE_MIN_WEIGHT_CLOSURE_BIN(a, b) \
   if (g_closure_reflection_bin) { \
     closure_select(g_closure_bins[b], g_closure_rand[b], cl); \
@@ -343,17 +348,8 @@ bool g_closure_reflection_bin = true;
   } \
   g_closure_reflection_bin = !g_closure_reflection_bin;
 
-Closure closure_eval(ClosureReflection reflection)
+void closure_select_reflection(ClosureUndetermined cl)
 {
-#ifdef MAT_BAKE_COLOR
-  if (bake_color_use_closure_accumulator()) {
-    bake_color_accumulate(reflection.color, reflection.weight);
-  }
-#endif
-  ClosureUndetermined cl;
-  closure_base_copy(cl, reflection);
-  cl.data.r = reflection.roughness;
-
 #ifdef MAT_CLEARCOAT
 #  if CLOSURE_BIN_COUNT == 2
   /* Multiple reflection closures. */
@@ -378,7 +374,244 @@ Closure closure_eval(ClosureReflection reflection)
 #endif
 
 #undef CHOOSE_MIN_WEIGHT_CLOSURE_BIN
+}
 
+Closure closure_eval(ClosureReflection reflection)
+{
+#ifdef MAT_BAKE_COLOR
+  if (bake_color_use_closure_accumulator()) {
+    bake_color_accumulate(reflection.color, reflection.weight);
+  }
+#endif
+  ClosureUndetermined cl;
+  closure_base_copy(cl, reflection);
+  cl.data = float4(reflection.roughness, 0.0f, 0.0f, 0.0f);
+  closure_select_reflection(cl);
+  return Closure(0);
+}
+
+/* All payload terms are unweighted on entry. The reservoir resolves albedo and additive radiance
+ * together; the multiplier is illumination, not another independently weighted closure. */
+Closure closure_eval_npr(ClosureDiffuse diffuse,
+                         float3 multiplier,
+                         float3 additive,
+                         float indirect_weight,
+                         ClosureNPRLightPolicy policy)
+{
+#ifdef MAT_BAKE_COLOR
+  if (bake_color_use_closure_accumulator()) {
+    bake_color_accumulate(diffuse.color, diffuse.weight);
+  }
+#endif
+  ClosureUndetermined cl;
+  closure_base_copy(cl, diffuse);
+  cl.npr.multiplier = multiplier;
+  cl.npr.additive = additive;
+  cl.npr.indirect_weight = max(indirect_weight, 0.0f);
+  cl.npr.light_policy = policy;
+  cl.npr.enabled = true;
+  closure_select_diffuse(cl);
+  return Closure(0);
+}
+
+Closure closure_eval_npr(ClosureDiffuse diffuse,
+                         float3 multiplier,
+                         float3 additive,
+                         float indirect_weight)
+{
+  return closure_eval_npr(diffuse, multiplier, additive, indirect_weight,
+                          closure_npr_light_policy_default());
+}
+
+Closure closure_eval_npr(ClosureDiffuse diffuse, float3 multiplier, float3 additive)
+{
+  return closure_eval_npr(diffuse, multiplier, additive, 1.0f);
+}
+
+Closure closure_eval_npr(ClosureSubsurface subsurface,
+                         float3 multiplier,
+                         float3 additive,
+                         float indirect_weight,
+                         ClosureNPRLightPolicy policy)
+{
+#ifdef MAT_BAKE_COLOR
+  if (bake_color_use_closure_accumulator()) {
+    bake_color_accumulate(subsurface.color, subsurface.weight);
+  }
+#endif
+  ClosureUndetermined cl;
+  closure_base_copy(cl, subsurface);
+  cl.data.rgb = subsurface.sss_radius;
+  cl.npr.multiplier = multiplier;
+  cl.npr.additive = additive;
+  cl.npr.indirect_weight = max(indirect_weight, 0.0f);
+  cl.npr.light_policy = policy;
+  cl.npr.enabled = true;
+  closure_select(g_closure_bins[0], g_closure_rand[0], cl);
+  return Closure(0);
+}
+
+Closure closure_eval_npr(ClosureSubsurface subsurface,
+                         float3 multiplier,
+                         float3 additive,
+                         float indirect_weight)
+{
+  return closure_eval_npr(subsurface, multiplier, additive, indirect_weight,
+                          closure_npr_light_policy_default());
+}
+
+Closure closure_eval_npr(ClosureSubsurface subsurface, float3 multiplier, float3 additive)
+{
+  return closure_eval_npr(subsurface, multiplier, additive, 1.0f);
+}
+
+Closure closure_eval_npr(ClosureReflection reflection,
+                         float3 multiplier,
+                         float3 additive,
+                         float anisotropy,
+                         float3 tangent,
+                         float indirect_weight,
+                         ClosureNPRLightPolicy policy)
+{
+#ifdef MAT_BAKE_COLOR
+  if (bake_color_use_closure_accumulator()) {
+    bake_color_accumulate(reflection.color, reflection.weight);
+  }
+#endif
+  ClosureUndetermined cl;
+  closure_base_copy(cl, reflection);
+  tangent = closure_tangent_orthogonalize(reflection.N, tangent);
+  cl.data = float4(reflection.roughness, clamp(anisotropy, 0.0f, 1.0f), closure_tangent_pack(tangent));
+  cl.npr.multiplier = multiplier;
+  cl.npr.additive = additive;
+  cl.npr.indirect_weight = max(indirect_weight, 0.0f);
+  cl.npr.light_policy = policy;
+  cl.npr.enabled = true;
+  closure_select_reflection(cl);
+  return Closure(0);
+}
+
+Closure closure_eval_npr(ClosureReflection reflection,
+                         float3 multiplier,
+                         float3 additive,
+                         float anisotropy,
+                         float3 tangent,
+                         float indirect_weight)
+{
+  return closure_eval_npr(reflection, multiplier, additive, anisotropy, tangent, indirect_weight,
+                          closure_npr_light_policy_default());
+}
+
+Closure closure_eval_npr(ClosureReflection reflection, float3 multiplier, float3 additive)
+{
+  return closure_eval_npr(reflection, multiplier, additive, 0.0f, float3(0.0f), 1.0f);
+}
+
+Closure closure_eval_npr(ClosureReflection reflection,
+                         float3 multiplier,
+                         float3 additive,
+                         float anisotropy,
+                         float3 tangent)
+{
+  return closure_eval_npr(reflection, multiplier, additive, anisotropy, tangent, 1.0f);
+}
+
+void closure_npr_rim_add(float3 radiance, float weight)
+{
+  g_npr_rim += radiance * weight;
+}
+
+/* Native layers inside the NPR node retain native direct-light evaluation. Their independent
+ * indirect gain is metadata, not albedo and not a request to replace direct lighting. */
+Closure closure_eval_npr_native(ClosureDiffuse diffuse,
+                                float indirect_weight,
+                                ClosureNPRLightPolicy policy)
+{
+#ifdef MAT_BAKE_COLOR
+  if (bake_color_use_closure_accumulator()) {
+    bake_color_accumulate(diffuse.color, diffuse.weight);
+  }
+#endif
+  ClosureUndetermined cl;
+  closure_base_copy(cl, diffuse);
+  cl.npr.indirect_weight = max(indirect_weight, 0.0f);
+  cl.npr.light_policy = policy;
+  closure_select_diffuse(cl);
+  return Closure(0);
+}
+
+Closure closure_eval_npr_native(ClosureDiffuse diffuse, float indirect_weight)
+{
+  return closure_eval_npr_native(diffuse, indirect_weight, closure_npr_light_policy_default());
+}
+
+Closure closure_eval_npr_native(ClosureReflection reflection,
+                                float indirect_weight,
+                                ClosureNPRLightPolicy policy)
+{
+#ifdef MAT_BAKE_COLOR
+  if (bake_color_use_closure_accumulator()) {
+    bake_color_accumulate(reflection.color, reflection.weight);
+  }
+#endif
+  ClosureUndetermined cl;
+  closure_base_copy(cl, reflection);
+  cl.data = float4(reflection.roughness, 0.0f, 0.0f, 0.0f);
+  cl.npr.indirect_weight = max(indirect_weight, 0.0f);
+  cl.npr.light_policy = policy;
+  closure_select_reflection(cl);
+  return Closure(0);
+}
+
+Closure closure_eval_npr_native(ClosureReflection reflection, float indirect_weight)
+{
+  return closure_eval_npr_native(reflection, indirect_weight, closure_npr_light_policy_default());
+}
+
+Closure closure_eval_npr_native(ClosureTranslucent translucent,
+                                float indirect_weight,
+                                ClosureNPRLightPolicy policy)
+{
+#ifdef MAT_BAKE_COLOR
+  if (bake_color_use_closure_accumulator()) {
+    bake_color_accumulate(translucent.color, translucent.weight);
+  }
+#endif
+  ClosureUndetermined cl;
+  closure_base_copy(cl, translucent);
+  cl.npr.indirect_weight = max(indirect_weight, 0.0f);
+  cl.npr.light_policy = policy;
+  closure_select(g_closure_bins[0], g_closure_rand[0], cl);
+  return Closure(0);
+}
+
+Closure closure_eval_npr_native(ClosureTranslucent translucent, float indirect_weight)
+{
+  return closure_eval_npr_native(translucent, indirect_weight, closure_npr_light_policy_default());
+}
+
+Closure closure_eval_npr_native(ClosureRefraction refraction, ClosureNPRLightPolicy policy)
+{
+#ifdef MAT_BAKE_COLOR
+  if (bake_color_use_closure_accumulator()) {
+    bake_color_accumulate(refraction.color, refraction.weight);
+  }
+#endif
+  ClosureUndetermined cl;
+  closure_base_copy(cl, refraction);
+  cl.data = float4(refraction.roughness, refraction.ior, 0.0f, 0.0f);
+  cl.npr.light_policy = policy;
+  closure_select(g_closure_bins[0], g_closure_rand[0], cl);
+  return Closure(0);
+}
+
+Closure closure_eval_npr_native(ClosureThinRefraction refraction, ClosureNPRLightPolicy policy)
+{
+  ClosureUndetermined cl;
+  closure_base_copy(cl, refraction);
+  cl.data = float4(refraction.roughness, 0.0f, 0.0f, 0.0f);
+  cl.npr.light_policy = policy;
+  closure_select(g_closure_bins[0], g_closure_rand[0], cl);
   return Closure(0);
 }
 

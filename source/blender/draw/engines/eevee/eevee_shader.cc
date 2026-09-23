@@ -1759,8 +1759,12 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   else if (pipeline_type == MAT_PIPE_BAKE_COLOR) {
     slots.reserve_sampler(LIGHT_SHADER_TEX_SLOT);
   }
-  if (use_shader_info_shadow_classification) {
+  if (use_shader_info_shadow_classification || GPU_material_principled_npr_v2_has(gpumat)) {
     slots.reserve_sampler(SHADOW_CASTER_ATLAS_TEX_SLOT);
+  }
+  if (GPU_material_principled_npr_v2_has(gpumat)) {
+    slots.reserve_sampler(NPR_SHADOW_OBJECT_ID_TEX_SLOT);
+    slots.reserve_sampler(NPR_SHADOW_NORMAL_TEX_SLOT);
   }
   if (has_depth_offset) {
     info.define("MAT_DEPTH_OFFSET");
@@ -1933,6 +1937,9 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_DIFFUSE)) {
     info.define("MAT_DIFFUSE");
   }
+  if (GPU_material_principled_npr_v2_has(gpumat)) {
+    info.define("MAT_PRINCIPLED_NPR_V2");
+  }
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SUBSURFACE)) {
     info.define("MAT_SUBSURFACE");
   }
@@ -2075,6 +2082,9 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
 
     info.compilation_constant(
         gpu::shader::Type::bool_t, "use_light_shader_texture_eval", use_light_shader_texture_eval);
+    info.compilation_constant(gpu::shader::Type::bool_t,
+                              "use_npr_light_policy",
+                              GPU_material_principled_npr_v2_has(gpumat));
     info.compilation_constant(
         gpu::shader::Type::int_t, "light_closure_eval_count_reflect", closure_bin_count);
     info.compilation_constant(

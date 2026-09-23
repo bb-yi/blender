@@ -146,6 +146,7 @@ struct GPUMaterial {
   bool has_light_shader_output = false;
   bool has_glsl_light_shader_eval = false;
   bool has_shader_info_shadow_classification = false;
+  bool has_principled_npr_v2 = false;
   bool uses_hiz_data = false;
 
   std::string name;
@@ -554,6 +555,11 @@ bool GPU_material_has_glsl_light_shader_eval(const GPUMaterial *mat)
 bool GPU_material_has_shader_info_shadow_classification(const GPUMaterial *mat)
 {
   return mat != nullptr && mat->has_shader_info_shadow_classification;
+}
+
+bool GPU_material_principled_npr_v2_has(const GPUMaterial *mat)
+{
+  return mat != nullptr && mat->has_principled_npr_v2;
 }
 
 bool GPU_material_uses_hiz_data(const GPUMaterial *mat)
@@ -1160,6 +1166,13 @@ void GPU_material_shader_info_shadow_classification_set(GPUMaterial *material)
 {
   if (material != nullptr) {
     material->has_shader_info_shadow_classification = true;
+  }
+}
+
+void GPU_material_principled_npr_v2_set(GPUMaterial *material)
+{
+  if (material != nullptr) {
+    material->has_principled_npr_v2 = true;
   }
 }
 

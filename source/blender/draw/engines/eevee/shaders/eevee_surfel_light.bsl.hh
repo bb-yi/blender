@@ -48,12 +48,13 @@ void eval_light([[resource_table]] EvalLight & /*srt*/,
   ctx.texel = float2(0.0);
   ctx.thickness = Thickness::zero();
   ctx.receiver_light_set = surfel.receiver_light_set;
+  ctx.receiver_id = 0u;
   ctx.terminator_normal_offset = 0.0f;
   ctx.terminator_geometry_offset = 0.0f;
   ctx.light_shader_surfel_index = index;
   ctx.light_shader_surfel_len = int(surfels.capture_info_buf.surfel_len);
 
-  ClosureUndetermined cl_reflect;
+  ClosureUndetermined cl_reflect = {};
   cl_reflect.N = surfel.normal;
   cl_reflect.type = CLOSURE_BSDF_DIFFUSE_ID;
   ctx.stack.cl[0] = closure_light_new(util_tx, cl_reflect, V);
@@ -64,7 +65,7 @@ void eval_light([[resource_table]] EvalLight & /*srt*/,
                                                            surfel.albedo_front;
   }
 
-  ClosureUndetermined cl_transmit;
+  ClosureUndetermined cl_transmit = {};
   cl_transmit.N = -surfel.normal;
   cl_transmit.type = CLOSURE_BSDF_DIFFUSE_ID;
   ctx.stack.cl[0] = closure_light_new(util_tx, cl_transmit, -V);

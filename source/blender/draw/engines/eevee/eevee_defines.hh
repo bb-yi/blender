@@ -129,6 +129,17 @@
 /* Gbuffer. */
 /** IMPORTANT: Make sure all Gbuffer frame-buffer setup matches this. */
 #define GBUF_HEADER_FB_LAYER_COUNT 1
+/* Optional Principled NPR data uses the existing UINT32 header image binding. Bin order is kept
+ * even when the regular GBuffer compacts its closures into layer order. */
+#define GBUF_NPR_COLOR_LAYER 2
+#define GBUF_NPR_MULTIPLIER_LAYER 5
+#define GBUF_NPR_ADDITIVE_LAYER 8
+#define GBUF_NPR_RIM_LAYER 11
+#define GBUF_NPR_INDIRECT_WEIGHT_LAYER 12
+#define GBUF_NPR_LIGHT_POLICY_LAYER 13
+#define GBUF_NPR_SHADOW_STRENGTH_LAYER 16
+#define GBUF_NPR_DIRECT_GAIN_LAYER 17
+#define GBUF_NPR_HEADER_LAYER_COUNT 18
 #define GBUF_CLOSURE_FB_LAYER_COUNT 2
 #define GBUF_NORMAL_FB_LAYER_COUNT 1
 
@@ -275,6 +286,10 @@
 #define OUTLINE_VECTOR_TEX_SLOT 25
 #define OUTLINE_OCCLUSION_DEPTH_TEX_SLOT 26
 #define SHADOW_CASTER_ATLAS_TEX_SLOT 44
+/* Separate aliases are needed when NPR's BSL policy and legacy Shader Info/Raycast are both
+ * present. The textures are shared; only sampler declarations and binding slots are distinct. */
+#define NPR_SHADOW_OBJECT_ID_TEX_SLOT 45
+#define NPR_SHADOW_NORMAL_TEX_SLOT 46
 
 /* Images. */
 #define RBUFS_COLOR_SLOT 0

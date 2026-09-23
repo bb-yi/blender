@@ -165,6 +165,7 @@ float4 world_combined_color_from_direction(float3 direction)
 
   GlobalData current_data = g_data;
   float3 current_emission = g_emission;
+  float3 current_npr_rim = g_npr_rim;
   float3 current_transmittance = g_transmittance;
   float current_holdout = g_holdout;
   float3 current_volume_scattering = g_volume_scattering;
@@ -194,6 +195,7 @@ float4 world_combined_color_from_direction(float3 direction)
 
   g_data = current_data;
   g_emission = current_emission;
+  g_npr_rim = current_npr_rim;
   g_transmittance = current_transmittance;
   g_holdout = current_holdout;
   g_volume_scattering = current_volume_scattering;

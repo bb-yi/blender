@@ -81,7 +81,7 @@ struct DenoiseSpatial {
   float sample_weight_get([[resource_table]] const gbuffer::Reader &reader,
                           [[resource_table]] const Uniform &uni,
                           ViewMatrices view,
-                          float3 center_N,
+                          ClosureUndetermined center_cl,
                           float3 center_P,
                           int2 sample_texel) const
   {
@@ -91,18 +91,19 @@ struct DenoiseSpatial {
     float sample_depth = texelFetch(depth_tx, sample_texel_fullres, 0).r;
 
     float2 sample_uv = float2(sample_texel_fullres) * uni.raytrace_buf.full_resolution_inv;
-    float3 sample_N = reader.read_bin(sample_texel_fullres, closure_index).N;
+    ClosureUndetermined sample_cl = reader.read_bin(sample_texel_fullres, closure_index);
     float3 sample_P = view.point_screen_to_world(float3(sample_uv, sample_depth));
 
     /* TODO(fclem): Scene parameter. 10000.0f is dependent on scene scale. */
-    float depth_weight = filters::planar_weight(center_N, center_P, sample_P, 10000.0f);
-    float normal_weight = filters::angle_weight(center_N, sample_N);
+    float depth_weight = filters::planar_weight(center_cl.N, center_P, sample_P, 10000.0f);
+    float normal_weight = filters::angle_weight(center_cl.N, sample_cl.N);
+    float anisotropy_weight = closure_anisotropic_similarity(center_cl, sample_cl);
     /* Some pixels might have no correct weight (depth & normal weights being very small).
      * To avoid them have invalid energy (because of float precision),
      * we weight all valid samples by a very small amount. */
     float epsilon_weight = 1e-4f;
 
-    return max(epsilon_weight, depth_weight * normal_weight);
+    return max(epsilon_weight, depth_weight * normal_weight) * anisotropy_weight;
   }
 };
 
@@ -167,16 +168,16 @@ void spatial_main([[resource_table]] DenoiseSpatial &srt,
     /* Simple bilateral upsampling without any denoising. */
     float center_depth = texelFetch(srt.depth_tx, texel_fullres, 0).r;
     float2 center_uv = float2(texel_fullres) * uni.raytrace_buf.full_resolution_inv;
-    float3 center_N = reader.read_bin(texel_fullres, srt.closure_index).N;
+    ClosureUndetermined center_cl = reader.read_bin(texel_fullres, srt.closure_index);
     float3 center_P = view.point_screen_to_world(float3(center_uv, center_depth));
 
     float4 bilinear_weights = bilinear_weights_from_subpixel_coord(bilinear_co);
 
     float4 bilateral_weights = float4(
-        srt.sample_weight_get(reader, uni, view, center_N, center_P, texel_nearest + int2(0, 1)),
-        srt.sample_weight_get(reader, uni, view, center_N, center_P, texel_nearest + int2(1, 1)),
-        srt.sample_weight_get(reader, uni, view, center_N, center_P, texel_nearest + int2(1, 0)),
-        srt.sample_weight_get(reader, uni, view, center_N, center_P, texel_nearest + int2(0, 0)));
+        srt.sample_weight_get(reader, uni, view, center_cl, center_P, texel_nearest + int2(0, 1)),
+        srt.sample_weight_get(reader, uni, view, center_cl, center_P, texel_nearest + int2(1, 1)),
+        srt.sample_weight_get(reader, uni, view, center_cl, center_P, texel_nearest + int2(1, 0)),
+        srt.sample_weight_get(reader, uni, view, center_cl, center_P, texel_nearest + int2(0, 0)));
 
     float4 ray_pdf_inv = float4(imageLoad(srt.ray_data_img, texel_nearest + int2(0, 1)).w,
                                 imageLoad(srt.ray_data_img, texel_nearest + int2(1, 1)).w,
@@ -192,12 +193,21 @@ void spatial_main([[resource_table]] DenoiseSpatial &srt,
     float4 weights = ray_validity * bilinear_weights * bilateral_weights;
 
     float4 radiance;
-    radiance = colorspace::log_from_scene_linear(ray_radiance0) * weights.x;
-    radiance += colorspace::log_from_scene_linear(ray_radiance1) * weights.y;
-    radiance += colorspace::log_from_scene_linear(ray_radiance2) * weights.z;
-    radiance += colorspace::log_from_scene_linear(ray_radiance3) * weights.w;
+    bool linear_filter = closure_uses_linear_reflection_filter(center_cl);
+    if (linear_filter) {
+      radiance = ray_radiance0 * weights.x + ray_radiance1 * weights.y +
+                 ray_radiance2 * weights.z + ray_radiance3 * weights.w;
+    }
+    else {
+      radiance = colorspace::log_from_scene_linear(ray_radiance0) * weights.x;
+      radiance += colorspace::log_from_scene_linear(ray_radiance1) * weights.y;
+      radiance += colorspace::log_from_scene_linear(ray_radiance2) * weights.z;
+      radiance += colorspace::log_from_scene_linear(ray_radiance3) * weights.w;
+    }
     radiance *= safe_rcp(radiance.w);
-    radiance = colorspace::scene_linear_from_log(radiance);
+    if (!linear_filter) {
+      radiance = colorspace::scene_linear_from_log(radiance);
+    }
 
     imageStore(srt.out_radiance_img, texel_fullres, radiance);
     return;
@@ -267,7 +277,8 @@ void spatial_main([[resource_table]] DenoiseSpatial &srt,
   }
 
   /* Compute filter size and needed sample count */
-  float apparent_roughness = closure_apparent_roughness_get(closure);
+  float apparent_roughness = closure_filter_roughness_get(closure);
+  bool linear_filter = closure_uses_linear_reflection_filter(closure);
   /* Max filter size at 0.25 roughness. */
   float filter_size_factor = saturate(apparent_roughness * 8.0f);
   uint sample_count = 1u + uint(floor(15.0f * filter_size_factor + 0.5f));
@@ -306,17 +317,26 @@ void spatial_main([[resource_table]] DenoiseSpatial &srt,
   dPdxy[1] *= bias;
 
   /* Orient filter in reflection direction. */
-  /* Note: Anisotropic BSDFs will likely need to align rotation with their tangent instead and
-   * override the aspect ratio computation. */
   float2 filter_up = safe_normalize(float2(vs_N.xy));
+  if (closure_is_npr_reflection(closure)) {
+    filter_up = safe_normalize(
+        float2(view.normal_world_to_view(closure_reflection_tangent(closure)).xy));
+  }
   float2x2 filter_rotation = float2x2(filter_up, orthogonal(filter_up));
   /* Small roughness GGX lobe is quite stretched. Stretch the filter kernel in that direction.
    * Modulate by quality since this increases variance. */
   float aspect = 1.0f - 0.5f * saturate(min(apparent_roughness * 12.0f,
                                             2.0f - apparent_roughness * 5.0f));
+  if (closure_is_npr_reflection(closure)) {
+    float2 alpha = bxdf_ggx_anisotropic_axes(closure.data.x, closure.data.y);
+    aspect = alpha.y / alpha.x;
+  }
 
   filter_rotation[0] *= clamp(filter_radius, min_filter_radius, max_filter_radius);
-  filter_rotation[1] *= clamp(filter_radius * aspect, min_filter_radius, max_filter_radius);
+  filter_rotation[1] *= clamp(filter_radius * aspect,
+                              closure_is_npr_reflection(closure) ? min_filter_radius * aspect :
+                                                               min_filter_radius,
+                              max_filter_radius);
 
   for (uint i = 0u; i < sample_count; i++) {
     float2 Xi = hammersley_2d(i, sample_count);
@@ -353,14 +373,21 @@ void spatial_main([[resource_table]] DenoiseSpatial &srt,
     float pdf = closure_evaluate_pdf(closure, ray_direction, V, thickness);
     /* Avoid the weight exploding and summing to infinity. */
     float weight = min(1e30f, pdf * ray_pdf_inv);
+  if (closure_is_npr_reflection(closure)) {
+      int2 sample_texel_fullres = sample_texel * uni.raytrace_buf.trace_pixel_scale +
+                                  uni.raytrace_buf.trace_pixel_offset;
+      ClosureUndetermined sample_cl = reader.read_bin(sample_texel_fullres, srt.closure_index);
+      weight *= closure_anisotropic_similarity(closure, sample_cl);
+    }
 
-    float3 log_radiance = colorspace::log_from_scene_linear(ray_radiance.rgb);
+    float3 filter_radiance = linear_filter ? float3(ray_radiance.rgb) :
+                                            colorspace::log_from_scene_linear(ray_radiance.rgb);
 
-    radiance_accum += log_radiance * weight;
+    radiance_accum += filter_radiance * weight;
     weight_accum += weight;
 
     /* Use scene linear radiance to better estimate noise. */
-    rgb_moment += square(log_radiance) * weight;
+    rgb_moment += square(filter_radiance) * weight;
   }
   float inv_weight = safe_rcp(weight_accum);
   radiance_accum *= inv_weight;
@@ -374,7 +401,9 @@ void spatial_main([[resource_table]] DenoiseSpatial &srt,
 
   float hit_depth = view.depth_view_to_screen(scene_z - closest_hit_time);
 
-  radiance_accum = colorspace::scene_linear_from_log(radiance_accum);
+  if (!linear_filter) {
+    radiance_accum = colorspace::scene_linear_from_log(radiance_accum);
+  }
   imageStoreFast(srt.out_radiance_img, texel_fullres, float4(radiance_accum, 0.0f));
   imageStoreFast(srt.out_variance_img, texel_fullres, float4(hit_variance));
   imageStoreFast(srt.out_hit_depth_img, texel_fullres, float4(hit_depth));
@@ -391,6 +420,7 @@ struct LocalStatistics {
 
 struct DenoiseTemporal {
   [[specialization_constant(0)]] int closure_index;
+  [[specialization_constant(false)]] bool use_npr_history;
 
   [[sampler(0)]] sampler2D radiance_history_tx;
   [[sampler(1)]] sampler2D variance_history_tx;
@@ -398,6 +428,7 @@ struct DenoiseTemporal {
   [[sampler(2)]] usampler2DArray tilemask_history_tx;
 
   [[sampler(3)]] sampler2DDepth depth_tx;
+  [[sampler(4)]] usampler2D signature_history_tx;
 
   [[image(0, read, SFLOAT_32)]] image2D hit_depth_img;
 
@@ -408,10 +439,11 @@ struct DenoiseTemporal {
   [[image(4, write, RAYTRACE_VARIANCE_FORMAT)]] image2D out_variance_img;
 
   [[image(6, read, RAYTRACE_TILEMASK_FORMAT)]] uimage2DArray tile_mask_img;
+  [[image(7, write, UINT_32)]] uimage2D out_signature_img;
 
   [[resource_table]] srt_t<TileBuffer> tiles;
 
-  LocalStatistics local_statistics_get(int2 texel, float3 center_radiance)
+  LocalStatistics local_statistics_get(int2 texel, float3 center_radiance, bool linear_history)
   {
     float3 center_radiance_YCoCg = colorspace::YCoCg_from_scene_linear(center_radiance);
 
@@ -419,6 +451,8 @@ struct DenoiseTemporal {
     LocalStatistics result;
     result.mean = center_radiance_YCoCg;
     result.moment = square(center_radiance_YCoCg);
+    float3 neighborhood_min = center_radiance_YCoCg;
+    float3 neighborhood_max = center_radiance_YCoCg;
     float weight_accum = 1.0f;
 
     for (int x = -1; x <= 1; x++) {
@@ -444,6 +478,8 @@ struct DenoiseTemporal {
         // float weight = (abs(x) == abs(y)) ? 0.25f : 1.0f;
         /* Use YCoCg for clamping and accumulation to avoid color shift artifacts. */
         float3 radiance_YCoCg = colorspace::YCoCg_from_scene_linear(radiance.rgb);
+        neighborhood_min = min(neighborhood_min, radiance_YCoCg);
+        neighborhood_max = max(neighborhood_max, radiance_YCoCg);
         result.mean += radiance_YCoCg;
         result.moment += square(radiance_YCoCg);
         weight_accum += 1.0f;
@@ -454,12 +490,13 @@ struct DenoiseTemporal {
     result.moment *= inv_weight;
     result.variance = abs(result.moment - square(result.mean));
     result.deviation = max(float3(1e-4f), sqrt(result.variance));
-    result.clamp_min = result.mean - result.deviation;
-    result.clamp_max = result.mean + result.deviation;
+    result.clamp_min = linear_history ? neighborhood_min : result.mean - result.deviation;
+    result.clamp_max = linear_history ? neighborhood_max : result.mean + result.deviation;
     return result;
   }
 
-  float4 history_validate(int2 texel, float bilinear_weight, float3 history_radiance)
+  float4 history_validate(
+      int2 texel, float bilinear_weight, float3 history_radiance, uint current_signature)
   {
     /* Out of history view. Return sample without weight. */
     if (!in_texture_range(texel, radiance_history_tx)) {
@@ -477,12 +514,20 @@ struct DenoiseTemporal {
     if (all(equal(history_radiance, FLT_11_11_10_MAX))) {
       return float4(0.0f);
     }
+    if (use_npr_history &&
+        !closure_anisotropic_history_matches(
+            current_signature, texelFetch(signature_history_tx, texel, 0).r))
+    {
+      return float4(0.0f);
+    }
     return float4(history_radiance * bilinear_weight, bilinear_weight);
   }
 
   float4 radiance_history_sample([[resource_table]] const Uniform &uni,
                                  float3 P,
-                                 LocalStatistics local)
+                                 LocalStatistics local,
+                                 uint current_signature,
+                                 bool linear_history)
   {
     float2 uv = project_point(uni.raytrace_buf.denoise_history_persmat, P).xy * 0.5f + 0.5f;
 
@@ -502,10 +547,14 @@ struct DenoiseTemporal {
     float4x3 gather4 = transpose(float3x4(r_samples, g_samples, b_samples));
 
     float4 history_radiance;
-    history_radiance = history_validate(texel + int2(0, 1), bilinear_weights.x, gather4[0]);
-    history_radiance += history_validate(texel + int2(1, 1), bilinear_weights.y, gather4[1]);
-    history_radiance += history_validate(texel + int2(1, 0), bilinear_weights.z, gather4[2]);
-    history_radiance += history_validate(texel + int2(0, 0), bilinear_weights.w, gather4[3]);
+    history_radiance = history_validate(
+        texel + int2(0, 1), bilinear_weights.x, gather4[0], current_signature);
+    history_radiance += history_validate(
+        texel + int2(1, 1), bilinear_weights.y, gather4[1], current_signature);
+    history_radiance += history_validate(
+        texel + int2(1, 0), bilinear_weights.z, gather4[2], current_signature);
+    history_radiance += history_validate(
+        texel + int2(0, 0), bilinear_weights.w, gather4[3], current_signature);
 
     /* Use YCoCg for clamping and accumulation to avoid color shift artifacts. */
     float4 history_radiance_YCoCg;
@@ -513,13 +562,18 @@ struct DenoiseTemporal {
     history_radiance_YCoCg.a = history_radiance.a;
 
     /* Weighted contribution (slide 46). */
-    float3 dist = abs(history_radiance_YCoCg.rgb - local.mean) / local.deviation;
-    float weight = exp2(-4.0f * dot(dist, float3(1.0f)));
+    float weight = 1.0f;
+    if (!linear_history) {
+      float3 dist = abs(history_radiance_YCoCg.rgb - local.mean) / local.deviation;
+      weight = exp2(-4.0f * dot(dist, float3(1.0f)));
+    }
 
     return history_radiance_YCoCg * weight;
   }
 
-  float2 variance_history_sample([[resource_table]] const Uniform &uni, float3 P)
+  float2 variance_history_sample([[resource_table]] const Uniform &uni,
+                                 float3 P,
+                                 uint current_signature)
   {
     float2 uv = project_point(uni.raytrace_buf.denoise_history_persmat, P).xy * 0.5f + 0.5f;
 
@@ -539,6 +593,16 @@ struct DenoiseTemporal {
     int3 history_tile = int3(history_texel / RAYTRACE_GROUP_SIZE, closure_index);
     /* Fetch previous tilemask to avoid loading invalid data. */
     bool is_valid_history = texelFetch(tilemask_history_tx, history_tile, 0).r != 0;
+
+    if (use_npr_history &&
+        !closure_anisotropic_history_matches(
+            current_signature,
+            texelFetch(signature_history_tx,
+                       int2(uv * float2(textureSize(signature_history_tx, 0))),
+                       0).r))
+    {
+      return float2(0.0f);
+    }
 
     if (is_valid_history) {
       return float2(history_variance, 1.0f);
@@ -562,6 +626,7 @@ struct DenoiseTemporal {
 void temporal_main([[resource_table]] DenoiseTemporal &srt,
                    [[resource_table]] const draw::View &views,
                    [[resource_table]] const Uniform &uni,
+                   [[resource_table]] const gbuffer::Reader &reader,
                    [[work_group_id]] const uint3 work_group,
                    [[local_invocation_id]] const uint3 local_id)
 {
@@ -611,10 +676,20 @@ void temporal_main([[resource_table]] DenoiseTemporal &srt,
     /* Early out on pixels that were marked unprocessed by the previous pass. */
     imageStoreFast(srt.out_radiance_img, texel_fullres, float4(FLT_11_11_10_MAX, 0.0f));
     imageStoreFast(srt.out_variance_img, texel_fullres, float4(0.0f));
+    if (srt.use_npr_history) {
+      imageStoreFast(srt.out_signature_img, texel_fullres, uint4(0u));
+    }
     return;
   }
 
-  LocalStatistics local = srt.local_statistics_get(texel_fullres, in_radiance);
+  uint current_signature = 0u;
+  bool linear_history = false;
+  if (srt.use_npr_history) {
+    ClosureUndetermined closure = reader.read_bin(texel_fullres, srt.closure_index);
+    current_signature = closure_anisotropic_history_signature(closure);
+    linear_history = closure_uses_linear_reflection_filter(closure);
+  }
+  LocalStatistics local = srt.local_statistics_get(texel_fullres, in_radiance, linear_history);
 
   /* Radiance. */
 
@@ -622,30 +697,63 @@ void temporal_main([[resource_table]] DenoiseTemporal &srt,
   /* TODO(fclem): Use per pixel velocity. Is this worth it? */
   float scene_depth = reverse_z::read(texelFetch(srt.depth_tx, texel_fullres, 0).r);
   float3 P = view.point_screen_to_world(float3(uv, scene_depth));
-  float4 history_radiance = srt.radiance_history_sample(uni, P, local);
+  float4 history_radiance = srt.radiance_history_sample(
+      uni, P, local, current_signature, linear_history);
   /* Reflection reprojection. */
   float hit_depth = imageLoadFast(srt.hit_depth_img, texel_fullres).r;
   float3 P_hit = view.point_screen_to_world(float3(uv, hit_depth));
-  history_radiance += srt.radiance_history_sample(uni, P_hit, local);
+  if (current_signature == 0u) {
+    /* Reflection-hit reprojection points at another surface, not at the anisotropic material
+     * whose tangent owns this history. Retain surface reprojection for directional lobes. */
+    history_radiance += srt.radiance_history_sample(
+        uni, P_hit, local, current_signature, linear_history);
+  }
   /* Finalize accumulation. */
   history_radiance *= safe_rcp(history_radiance.w);
-  /* Clamp resulting history radiance (slide 47). */
-  history_radiance.rgb = clamp(history_radiance.rgb, local.clamp_min, local.clamp_max);
+  /* A radiance bound estimated from the current random rays is not a bound on their expected
+   * value. Repeatedly clamping an NPR reflection to that bound removes infrequent HDR samples
+   * from its history, even on a static surface. Keep its accepted history in scene-linear space;
+   * native closures retain the original radiance-clamping policy. */
+  if (!linear_history) {
+    history_radiance.rgb = clamp(history_radiance.rgb, local.clamp_min, local.clamp_max);
+  }
   /* Go back from YCoCg for final blend. */
   history_radiance.rgb = colorspace::scene_linear_from_YCoCg(history_radiance.rgb);
   /* Blend history with new radiance. */
-  float mix_fac = (history_radiance.w > 1e-3f) ? 0.97f : 0.0f;
+  /* A long recursively bilinear-reprojected history broadens a narrow NPR reflection
+   * even in a static TAA-jittered view. A fixed four-sample EMA remains scene-linear
+   * and preserves constant radiance without color-dependent rejection. */
+  float mix_fac = (history_radiance.w > 1e-3f) ? (linear_history ? 0.75f : 0.97f) : 0.0f;
   /* Reduce blend factor to improve low roughness reflections. Use variance instead for speed. */
-  mix_fac *= mix(0.75f, 1.0f, saturate(in_variance * 20.0f));
+  if (!linear_history) {
+    mix_fac *= mix(0.75f, 1.0f, saturate(in_variance * 20.0f));
+  }
   float3 out_radiance = mix(
       colorspace::safe_color(in_radiance), colorspace::safe_color(history_radiance.rgb), mix_fac);
   /* This is feedback next frame as radiance_history_tx. */
   imageStoreFast(srt.out_radiance_img, texel_fullres, float4(out_radiance, 0.0f));
+  if (srt.use_npr_history) {
+    uint signature = current_signature;
+    float2 history_uv = project_point(uni.raytrace_buf.denoise_history_persmat, P).xy * 0.5f + 0.5f;
+    int2 history_texel = int2(history_uv * float2(textureSize(srt.signature_history_tx, 0)));
+    if (mix_fac > 0.0f && current_signature != 0u &&
+        in_texture_range(history_texel, srt.signature_history_tx))
+    {
+      uint anchor = texelFetch(srt.signature_history_tx, history_texel, 0).r;
+      if (closure_anisotropic_history_matches(current_signature, anchor)) {
+        /* Keep the accepted history's direction anchor, so slow rotation cannot perpetually
+         * accept yesterday's direction and drag many frames of obsolete lighting behind it. */
+        signature = anchor;
+      }
+    }
+    imageStoreFast(srt.out_signature_img, texel_fullres, uint4(signature));
+  }
 
   /* Variance. */
 
   /* Reflection reprojection. */
-  float2 history_variance = srt.variance_history_sample(uni, P_hit);
+  float2 history_variance = srt.variance_history_sample(
+      uni, current_signature != 0u ? P : P_hit, current_signature);
   /* Blend history with new variance. */
   float mix_variance_fac = (history_variance.y == 0.0f) ? 0.0f : 0.85f;
   /* Avoid variance exploding. */
@@ -708,7 +816,7 @@ void bilateral_main([[resource_table]] DenoiseBilateral &srt,
     return;
   }
 
-  float roughness = closure_apparent_roughness_get(center_closure);
+  float roughness = closure_filter_roughness_get(center_closure);
   float variance = imageLoadFast(srt.in_variance_img, texel_fullres).r;
   float3 in_radiance = imageLoadFast(srt.in_radiance_img, texel_fullres).rgb;
 
@@ -732,13 +840,23 @@ void bilateral_main([[resource_table]] DenoiseBilateral &srt,
   noise += sampling.rng_2D_get(SAMPLING_RAYTRACE_W);
 
   /* In order to remove more fireflies, "tone-map" the color samples during the accumulation. */
-  float3 accum_radiance = colorspace::log_from_scene_linear(in_radiance);
+  bool linear_filter = closure_uses_linear_reflection_filter(center_closure);
+  float3 accum_radiance = linear_filter ? in_radiance :
+                                         colorspace::log_from_scene_linear(in_radiance);
   float accum_weight = 1.0f;
+  float2x2 filter_frame = float2x2(1.0f);
+  if (closure_is_npr_reflection(center_closure)) {
+    float2 axis = safe_normalize(
+        float2(view.normal_world_to_view(closure_reflection_tangent(center_closure)).xy));
+    float2 alpha = bxdf_ggx_anisotropic_axes(center_closure.data.x, center_closure.data.y);
+    filter_frame = float2x2(axis, orthogonal(axis) * (alpha.y / alpha.x));
+  }
   /* We want to resize the blur depending on the roughness and keep the amount of sample low.
    * So we do a random sampling around the center point. */
   for (uint i = 0u; i < sample_count; i++) {
     /* Essentially a box radius overtime. */
     float2 offset_f = (fract(hammersley_2d(i, sample_count) + noise) - 0.5f) * filter_size;
+    offset_f = filter_frame * offset_f;
     int2 offset = int2(floor(offset_f + 0.5f));
 
     int2 sample_texel = texel_fullres + offset;
@@ -777,13 +895,17 @@ void bilateral_main([[resource_table]] DenoiseBilateral &srt,
     float spatial_weight = filters::gaussian_weight(gauss, length_squared(float2(offset)));
     float normal_weight = filters::angle_weight(center_closure.N, sample_closure.N);
     float weight = depth_weight * spatial_weight * normal_weight;
+    weight *= closure_anisotropic_similarity(center_closure, sample_closure);
 
-    accum_radiance += colorspace::log_from_scene_linear(radiance) * weight;
+    accum_radiance += (linear_filter ? radiance : colorspace::log_from_scene_linear(radiance)) *
+                      weight;
     accum_weight += weight;
   }
 
   float3 out_radiance = accum_radiance * safe_rcp(accum_weight);
-  out_radiance = colorspace::scene_linear_from_log(out_radiance);
+  if (!linear_filter) {
+    out_radiance = colorspace::scene_linear_from_log(out_radiance);
+  }
 
   imageStoreFast(srt.out_radiance_img, texel_fullres, float4(out_radiance, 0.0f));
 }

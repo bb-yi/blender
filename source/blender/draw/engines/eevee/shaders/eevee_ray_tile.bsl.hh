@@ -71,6 +71,10 @@ void tile_classify([[resource_table]] TileClassify &srt,
       }
       float roughness = closure_apparent_roughness_get(cl);
       float ray_roughness_fac = ray_roughness_factor(uni.raytrace_buf, roughness);
+      if (closure_is_npr_reflection(cl)) {
+        /* Fast GI stores SH and cannot preserve this lobe's tangent direction. */
+        ray_roughness_fac = 0.0f;
+      }
 
       /* We don't care about race condition here. */
       if (ray_roughness_fac > 0.0f) {

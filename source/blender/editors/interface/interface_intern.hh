@@ -529,6 +529,7 @@ struct ButtonHSVCube : public Button {
 struct ButtonColorBand : public Button {
   ColorBand *edit_coba = nullptr;
   bool use_oklab = false;
+  std::shared_ptr<CustomColorRampData> custom;
 };
 
 /** Derived struct for #ButtonType::CurveProfile. */

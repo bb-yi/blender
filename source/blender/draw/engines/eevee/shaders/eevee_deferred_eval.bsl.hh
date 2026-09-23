@@ -167,6 +167,7 @@ void light_eval_frag([[resource_table]] LightEval &srt,
   ctx.texel = frag_co.xy;
   ctx.thickness = thickness;
   ctx.receiver_light_set = 0;
+  ctx.receiver_id = gbuf.header.use_object_id() ? reader.read_object_id(texel) : 0u;
   ctx.terminator_normal_offset = 0.0f;
   ctx.terminator_geometry_offset = 0.0f;
   /* NPR: World environment exclusion. When the receiving object is in the world's
@@ -186,6 +187,7 @@ void light_eval_frag([[resource_table]] LightEval &srt,
    * by 1 for this evaluation and skip evaluating the transmission closure twice. */
   lights.eval_reflection(ctx, vPz);
 
+  float3 npr_sss_backlight = float3(0.0f);
   if (srt.use_transmission) {
     light::EvalCtx<true> ctx_tr = light::init_from_reflect_ctx(ctx);
 
@@ -199,6 +201,7 @@ void light_eval_frag([[resource_table]] LightEval &srt,
       /* Apply transmission profile onto transmitted light and sum with reflected light. */
       float3 sss_profile = subsurface_transmission(
           util_tx, to_closure_subsurface(cl_transmit).sss_radius, thickness.value());
+      npr_sss_backlight = ctx_tr.stack.cl[0].light_shadowed * sss_profile;
       ctx.stack.cl[0].light_shadowed += ctx_tr.stack.cl[0].light_shadowed * sss_profile;
       ctx.stack.cl[0].light_unshadowed += ctx_tr.stack.cl[0].light_unshadowed * sss_profile;
     }
@@ -236,7 +239,11 @@ void light_eval_frag([[resource_table]] LightEval &srt,
       if (lrt.light_closure_eval_count_reflect > i) [[static_branch]] {
         if (i < closure_count) {
           float3 indirect_light = lightprobes.eval(samp, gbuf.layer[i], P, V, thickness);
-          float3 direct_light = ctx.stack.cl[i].light_shadowed;
+          float3 direct_light = gbuf.layer[i].npr.enabled ? gbuf.layer[i].npr.multiplier :
+                                                          ctx.stack.cl[i].light_shadowed;
+          if (gbuf.layer[i].npr.enabled && gbuf.layer[i].type == CLOSURE_BSSRDF_BURLEY_ID) {
+            direct_light += npr_sss_backlight;
+          }
           if (srt.use_split_indirect) {
             srt.write_radiance_indirect(bin_indices[i], texel, indirect_light);
             srt.write_radiance_direct(bin_indices[i], texel, direct_light);
@@ -254,8 +261,16 @@ void light_eval_frag([[resource_table]] LightEval &srt,
     for (uint i = 0u; i < 3; i++) [[unroll]] {
       if (lrt.light_closure_eval_count_reflect > i) [[static_branch]] {
         if (i < closure_count) {
-          float3 direct_light = ctx.stack.cl[i].light_shadowed;
+          float3 direct_light = gbuf.layer[i].npr.enabled ? gbuf.layer[i].npr.multiplier :
+                                                          ctx.stack.cl[i].light_shadowed;
+          if (gbuf.layer[i].npr.enabled && gbuf.layer[i].type == CLOSURE_BSSRDF_BURLEY_ID) {
+            direct_light += npr_sss_backlight;
+          }
           srt.write_radiance_direct(bin_indices[i], texel, direct_light);
+          if (srt.use_lightprobe_eval && srt.use_split_indirect) {
+            /* The excluded-environment path must initialize the split target before SSS. */
+            srt.write_radiance_indirect(bin_indices[i], texel, float3(0.0f));
+          }
         }
       }
     }
@@ -270,12 +285,58 @@ void light_eval_frag([[resource_table]] LightEval &srt,
 
 /* Sphere probe evaluate everything as diffuse since they can only rely on volume light-probes
  * being available. */
+float3 npr_probe_direct_closure([[resource_table]] LightEvalIterator &lights,
+                                [[resource_table]] const UtilityTexture &util_tx,
+                                light::EvalCtx<false> base_ctx,
+                                ClosureUndetermined cl,
+                                float vPz)
+{
+  if (cl.type == CLOSURE_NONE_ID) {
+    return float3(0.0f);
+  }
+  [[resource_table]] LightEvalData &lrt = lights.inner;
+  light::EvalCtx<false> ctx = base_ctx;
+  float3 direct = cl.npr.enabled ? cl.npr.multiplier : float3(0.0f);
+  if (!cl.npr.enabled && !closure_has_transmission(cl.type)) {
+    for (uint i = 0u; i < 3u; i++) [[unroll]] {
+      if (lrt.light_closure_eval_count_reflect > i) [[static_branch]] {
+        ctx.stack.cl[i] = closure_light_new(util_tx, cl, ctx.V);
+      }
+    }
+    lights.eval_reflection(ctx, vPz);
+    direct = ctx.stack.cl[0].light_shadowed;
+  }
+  float3 color = cl.color;
+  if (closure_has_transmission(cl.type) || cl.type == CLOSURE_BSSRDF_BURLEY_ID) {
+    light::EvalCtx<true> ctx_tr = light::init_from_reflect_ctx(ctx);
+    for (uint i = 0u; i < 3u; i++) [[unroll]] {
+      if (lrt.light_closure_eval_count_transmit > i) [[static_branch]] {
+        ctx_tr.stack.cl[i] = closure_light_new(util_tx, cl, ctx.V, ctx.thickness);
+      }
+    }
+    lights.eval_transmission(ctx_tr, vPz);
+    if (cl.type == CLOSURE_BSSRDF_BURLEY_ID) {
+      direct += ctx_tr.stack.cl[0].light_shadowed *
+                subsurface_transmission(util_tx, to_closure_subsurface(cl).sss_radius,
+                                         ctx.thickness.value());
+    }
+    else {
+      direct = ctx_tr.stack.cl[0].light_shadowed;
+      if (cl.type != CLOSURE_BSDF_THIN_GLASS_TRANSMISSION_ID && ctx.thickness.value() != 0.0f) {
+        color *= color;
+      }
+    }
+  }
+  return direct * color + cl.npr.additive;
+}
+
 [[fragment, early_fragment_tests]]
 void sphere_eval_frag([[resource_table]] LightEvalIterator &lights,
                       [[resource_table]] const draw::View &views,
                       [[resource_table]] const draw::Infos &infos,
                       [[resource_table]] const Sampling &sampling,
                       [[resource_table]] const LightprobeVolumeRenderData &lightprobes,
+                      [[resource_table]] const LightprobeRenderData &probe_render,
                       [[resource_table]] const HiZ &hiz,
                       [[resource_table]] const UtilityTexture &util_tx,
                       [[resource_table]] const gbuffer::Reader &reader,
@@ -290,7 +351,7 @@ void sphere_eval_frag([[resource_table]] LightEvalIterator &lights,
   const gbuffer::Layers gbuf = reader.read_layers(texel);
 
   if (gbuf.has_no_closure()) {
-    frag_out.radiance = float4(0.0f);
+    frag_out.radiance = float4(reader.read_npr_rim(gbuf.header, texel), 0.0f);
     return;
   }
 
@@ -300,27 +361,33 @@ void sphere_eval_frag([[resource_table]] LightEvalIterator &lights,
 
   float3 albedo_front = float3(0.0f);
   float3 albedo_back = float3(0.0f);
+  float3 npr_direct = reader.read_npr_rim(gbuf.header, texel);
 
   /* Unroll needed for gbuf.layer access. */
   for (int i = 0; i < 3 /* GBUFFER_LAYER_MAX */; i++) [[unroll]] {
-    if (i < closure_count) {
+    if (i < closure_count && !gbuf.header.has_npr_payload()) {
       ClosureUndetermined cl = gbuf.layer[i];
-      switch (cl.type) {
-        case CLOSURE_BSSRDF_BURLEY_ID:
-        case CLOSURE_BSDF_DIFFUSE_ID:
-        case CLOSURE_BSDF_MICROFACET_GGX_REFLECTION_ID:
-          albedo_front += cl.color;
-          break;
-        case CLOSURE_BSDF_TRANSLUCENT_ID:
-        case CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID:
-          albedo_back += (thickness.value() != 0.0f) ? square(cl.color) : cl.color;
-          break;
-        case CLOSURE_BSDF_THIN_GLASS_TRANSMISSION_ID:
-          albedo_back += cl.color;
-          break;
-        case CLOSURE_NONE_ID:
-          /* TODO(fclem): Assert. */
-          break;
+      if (cl.npr.enabled) {
+        npr_direct += cl.color * cl.npr.multiplier + cl.npr.additive;
+      }
+      else {
+        switch (cl.type) {
+          case CLOSURE_BSSRDF_BURLEY_ID:
+          case CLOSURE_BSDF_DIFFUSE_ID:
+          case CLOSURE_BSDF_MICROFACET_GGX_REFLECTION_ID:
+            albedo_front += cl.color;
+            break;
+          case CLOSURE_BSDF_TRANSLUCENT_ID:
+          case CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID:
+            albedo_back += (thickness.value() != 0.0f) ? square(cl.color) : cl.color;
+            break;
+          case CLOSURE_BSDF_THIN_GLASS_TRANSMISSION_ID:
+            albedo_back += cl.color;
+            break;
+          case CLOSURE_NONE_ID:
+            /* TODO(fclem): Assert. */
+            break;
+        }
       }
     }
   }
@@ -332,11 +399,11 @@ void sphere_eval_frag([[resource_table]] LightEvalIterator &lights,
   float3 V = view.world_incident_vector(P);
   float vPz = dot(view.forward(), P) - dot(view.forward(), view.position());
 
-  ClosureUndetermined cl;
+  ClosureUndetermined cl = {};
   cl.N = gbuf.surface_N();
   cl.type = CLOSURE_BSDF_DIFFUSE_ID;
 
-  ClosureUndetermined cl_transmit;
+  ClosureUndetermined cl_transmit = {};
   cl_transmit.N = gbuf.surface_N();
   cl_transmit.type = CLOSURE_BSDF_TRANSLUCENT_ID;
 
@@ -348,6 +415,7 @@ void sphere_eval_frag([[resource_table]] LightEvalIterator &lights,
   ctx.thickness = thickness;
   ctx.receiver_light_set = 0;
   ctx.terminator_normal_offset = 0.0f;
+  ctx.receiver_id = gbuf.header.use_object_id() ? reader.read_object_id(texel) : 0u;
   ctx.terminator_geometry_offset = 0.0f;
   if (gbuf.header.use_object_id()) {
     uint object_id = reader.read_object_id(texel);
@@ -359,14 +427,18 @@ void sphere_eval_frag([[resource_table]] LightEvalIterator &lights,
 
   /* Direct light. */
   ctx.stack.cl[0] = closure_light_new(util_tx, cl, V);
-  lights.eval_reflection(ctx, vPz);
+  if (!gbuf.header.has_npr_payload()) {
+    lights.eval_reflection(ctx, vPz);
+  }
 
   float3 radiance_front = ctx.stack.cl[0].light_shadowed;
 
   light::EvalCtx<true> ctx_tr = light::init_from_reflect_ctx(ctx);
 
   ctx_tr.stack.cl[0] = closure_light_new(util_tx, cl_transmit, V, thickness);
-  lights.eval_transmission(ctx_tr, vPz);
+  if (!gbuf.header.has_npr_payload()) {
+    lights.eval_transmission(ctx_tr, vPz);
+  }
 
   float3 radiance_back = ctx_tr.stack.cl[0].light_shadowed;
 
@@ -374,11 +446,45 @@ void sphere_eval_frag([[resource_table]] LightEvalIterator &lights,
   /* Can only load irradiance to avoid dependency loop with the reflection probe. */
   SphericalHarmonicL1<float4> sh = lightprobes.sample_probe(sampling, P, V, Ng);
 
-  radiance_front += sh.evaluate_lambert(Ng).rgb;
-  /* TODO(fclem): Correct transmission eval. */
-  radiance_back += sh.evaluate_lambert(-Ng).rgb;
+  if (!gbuf.header.has_npr_payload()) {
+    radiance_front += sh.evaluate_lambert(Ng).rgb;
+    /* TODO(fclem): Correct transmission eval. */
+    radiance_back += sh.evaluate_lambert(-Ng).rgb;
+  }
 
-  frag_out.radiance = float4(radiance_front * albedo_front + radiance_back * albedo_back, 0.0f);
+  frag_out.radiance = float4(radiance_front * albedo_front + radiance_back * albedo_back +
+                                npr_direct,
+                            0.0f);
+  /* Reflection-probe capture must not feed a directional reflection into volume SH. Sample only
+   * the world atlas entry to avoid a dependency on the probe currently being captured. */
+  [[resource_table]] const LightprobeSphereRenderData &spheres = probe_render.spheres;
+  LightProbeSample world_samp;
+  world_samp.volume_irradiance = sh;
+  world_samp.spherical_id = spheres.select_probe(P, 1.0f);
+  /* Keep the expensive light/shadow evaluator in one runtime loop. UnrollArray only
+   * requires constant indexing while reading the GBuffer, not three copies of every
+   * nested light, shadow-filter and probe-integration function. */
+  ClosureUndetermined probe_closures[3];
+  probe_closures[0] = gbuf.layer[0];
+  probe_closures[1] = gbuf.layer[1];
+  probe_closures[2] = gbuf.layer[2];
+  for (int i = 0; i < min(int(closure_count), 3); i++) {
+    if (gbuf.header.has_npr_payload()) {
+      ClosureUndetermined indirect_cl = probe_closures[i];
+      frag_out.radiance.xyz += npr_probe_direct_closure(lights, util_tx, ctx, indirect_cl, vPz);
+      float3 color = indirect_cl.color;
+      if ((indirect_cl.type == CLOSURE_BSDF_TRANSLUCENT_ID ||
+           indirect_cl.type == CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID) &&
+          thickness.value() != 0.0f)
+      {
+        color *= color;
+      }
+      if (indirect_cl.type != CLOSURE_NONE_ID) {
+        frag_out.radiance.xyz += probe_render.eval(world_samp, indirect_cl, P, V, thickness) *
+                                 color * indirect_cl.npr.indirect_weight;
+      }
+    }
+  }
 }
 
 struct PlanarProbeEval {
@@ -411,15 +517,16 @@ void planar_eval_frag([[resource_table]] PlanarProbeEval & /*srt*/,
 
   float3 albedo_front = float3(0.0f);
   float3 albedo_back = float3(0.0f);
+  float3 npr_direct = reader.read_npr_rim(gbuf.header, texel);
 
-  ClosureUndetermined cl_reflect;
+  ClosureUndetermined cl_reflect = {};
   cl_reflect.type = CLOSURE_BSDF_MICROFACET_GGX_REFLECTION_ID;
   cl_reflect.color = float3(0.0);
   cl_reflect.N = float3(0.0);
   cl_reflect.data = float4(0.0);
   float reflect_weight = 0.0;
 
-  ClosureUndetermined cl_refract;
+  ClosureUndetermined cl_refract = {};
   cl_refract.type = CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID;
   cl_refract.color = float3(0.0);
   cl_refract.N = float3(0.0);
@@ -428,46 +535,51 @@ void planar_eval_frag([[resource_table]] PlanarProbeEval & /*srt*/,
 
   /* Unroll needed for gbuf.layer access. */
   for (int i = 0; i < 3; i++) [[unroll]] {
-    if (i < closure_count) {
+    if (i < closure_count && !gbuf.header.has_npr_payload()) {
       ClosureUndetermined cl = gbuf.layer[i];
-      switch (cl.type) {
-        case CLOSURE_BSDF_MICROFACET_GGX_REFLECTION_ID: {
-          cl_reflect.color += cl.color;
-          /* Average roughness and normals. */
-          float weight = reduce_add(cl.color);
-          cl_reflect.N += cl.N * weight;
-          cl_reflect.data += cl.data * weight;
-          reflect_weight += weight;
-          break;
+      if (cl.npr.enabled) {
+        npr_direct += cl.color * cl.npr.multiplier + cl.npr.additive;
+      }
+      else {
+        switch (cl.type) {
+          case CLOSURE_BSDF_MICROFACET_GGX_REFLECTION_ID: {
+            cl_reflect.color += cl.color;
+            /* Average roughness and normals. */
+            float weight = reduce_add(cl.color);
+            cl_reflect.N += cl.N * weight;
+            cl_reflect.data += cl.data * weight;
+            reflect_weight += weight;
+            break;
+          }
+          case CLOSURE_BSSRDF_BURLEY_ID:
+          case CLOSURE_BSDF_DIFFUSE_ID:
+            albedo_front += cl.color;
+            break;
+          case CLOSURE_BSDF_TRANSLUCENT_ID:
+            albedo_back += (thickness.value() != 0.0f) ? square(cl.color) : cl.color;
+            break;
+          case CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID: {
+            cl_refract.color += (thickness.value() != 0.0f) ? square(cl.color) : cl.color;
+            /* Average roughness and normals. */
+            float weight = reduce_add(cl.color);
+            cl_refract.N += cl.N * weight;
+            cl_refract.data += cl.data * weight;
+            refract_weight += weight;
+            break;
+          }
+          case CLOSURE_BSDF_THIN_GLASS_TRANSMISSION_ID: {
+            cl_refract.color += cl.color;
+            /* Average roughness and normals. */
+            float weight = reduce_add(cl.color);
+            cl_refract.N += cl.N * weight;
+            cl_refract.data += cl.data * weight;
+            refract_weight += weight;
+            break;
+          }
+          case CLOSURE_NONE_ID:
+            /* TODO(fclem): Assert. */
+            break;
         }
-        case CLOSURE_BSSRDF_BURLEY_ID:
-        case CLOSURE_BSDF_DIFFUSE_ID:
-          albedo_front += cl.color;
-          break;
-        case CLOSURE_BSDF_TRANSLUCENT_ID:
-          albedo_back += (thickness.value() != 0.0f) ? square(cl.color) : cl.color;
-          break;
-        case CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID: {
-          cl_refract.color += (thickness.value() != 0.0f) ? square(cl.color) : cl.color;
-          /* Average roughness and normals. */
-          float weight = reduce_add(cl.color);
-          cl_refract.N += cl.N * weight;
-          cl_refract.data += cl.data * weight;
-          refract_weight += weight;
-          break;
-        }
-        case CLOSURE_BSDF_THIN_GLASS_TRANSMISSION_ID: {
-          cl_refract.color += cl.color;
-          /* Average roughness and normals. */
-          float weight = reduce_add(cl.color);
-          cl_refract.N += cl.N * weight;
-          cl_refract.data += cl.data * weight;
-          refract_weight += weight;
-          break;
-        }
-        case CLOSURE_NONE_ID:
-          /* TODO(fclem): Assert. */
-          break;
       }
     }
   }
@@ -504,11 +616,11 @@ void planar_eval_frag([[resource_table]] PlanarProbeEval & /*srt*/,
   float3 V = view.world_incident_vector(P);
   float vPz = dot(view.forward(), P) - dot(view.forward(), view.position());
 
-  ClosureUndetermined cl;
+  ClosureUndetermined cl = {};
   cl.N = gbuf.surface_N();
   cl.type = CLOSURE_BSDF_DIFFUSE_ID;
 
-  ClosureUndetermined cl_transmit;
+  ClosureUndetermined cl_transmit = {};
   cl_transmit.N = gbuf.surface_N();
   cl_transmit.type = CLOSURE_BSDF_TRANSLUCENT_ID;
 
@@ -520,6 +632,7 @@ void planar_eval_frag([[resource_table]] PlanarProbeEval & /*srt*/,
   ctx.thickness = thickness;
   ctx.receiver_light_set = 0;
   ctx.terminator_normal_offset = 0.0f;
+  ctx.receiver_id = gbuf.header.use_object_id() ? reader.read_object_id(texel) : 0u;
   ctx.terminator_geometry_offset = 0.0f;
   if (gbuf.header.use_object_id()) {
     uint object_id = reader.read_object_id(texel);
@@ -532,7 +645,9 @@ void planar_eval_frag([[resource_table]] PlanarProbeEval & /*srt*/,
   /* Direct light. */
   ctx.stack.cl[0] = closure_light_new(util_tx, cl, V);
   ctx.stack.cl[1] = closure_light_new(util_tx, cl_reflect, V);
-  lights.eval_reflection(ctx, vPz);
+  if (!gbuf.header.has_npr_payload()) {
+    lights.eval_reflection(ctx, vPz);
+  }
 
   float3 radiance_front = ctx.stack.cl[0].light_shadowed;
   float3 radiance_reflect = ctx.stack.cl[1].light_shadowed;
@@ -540,7 +655,9 @@ void planar_eval_frag([[resource_table]] PlanarProbeEval & /*srt*/,
   light::EvalCtx<true> ctx_tr = light::init_from_reflect_ctx(ctx);
   ctx_tr.stack.cl[0] = closure_light_new(util_tx, cl_transmit, V, thickness);
   ctx_tr.stack.cl[1] = closure_light_new(util_tx, cl_refract, V, thickness);
-  lights.eval_transmission(ctx_tr, vPz);
+  if (!gbuf.header.has_npr_payload()) {
+    lights.eval_transmission(ctx_tr, vPz);
+  }
 
   float3 radiance_back = ctx_tr.stack.cl[0].light_shadowed;
   float3 radiance_refract = ctx_tr.stack.cl[1].light_shadowed;
@@ -550,10 +667,12 @@ void planar_eval_frag([[resource_table]] PlanarProbeEval & /*srt*/,
   SphericalHarmonicL1<float4> sh = lp_volumes.sample_probe(sampling, P, V, Ng);
   LightProbeSample samp = lightprobes.load(frag_co.xy, P, Ng, V);
 
-  radiance_front += sh.evaluate_lambert(Ng).rgb;
-  radiance_back += sh.evaluate_lambert(-Ng).rgb;
-  radiance_reflect += lightprobes.eval(samp, cl_reflect, P, V, thickness);
-  radiance_refract += lightprobes.eval(samp, cl_refract, P, V, thickness);
+  if (!gbuf.header.has_npr_payload()) {
+    radiance_front += sh.evaluate_lambert(Ng).rgb;
+    radiance_back += sh.evaluate_lambert(-Ng).rgb;
+    radiance_reflect += lightprobes.eval(samp, cl_reflect, P, V, thickness);
+    radiance_refract += lightprobes.eval(samp, cl_refract, P, V, thickness);
+  }
 
   /* Note: planar probes use transmittance and not alpha for transparency. */
   frag_out.radiance = float4(0.0f);
@@ -561,6 +680,28 @@ void planar_eval_frag([[resource_table]] PlanarProbeEval & /*srt*/,
   frag_out.radiance.xyz += radiance_refract * cl_refract.color;
   frag_out.radiance.xyz += radiance_front * albedo_front;
   frag_out.radiance.xyz += radiance_back * albedo_back;
+  frag_out.radiance.xyz += npr_direct;
+  ClosureUndetermined probe_closures[3];
+  probe_closures[0] = gbuf.layer[0];
+  probe_closures[1] = gbuf.layer[1];
+  probe_closures[2] = gbuf.layer[2];
+  for (int i = 0; i < min(int(closure_count), 3); i++) {
+    if (gbuf.header.has_npr_payload()) {
+      ClosureUndetermined npr_cl = probe_closures[i];
+      frag_out.radiance.xyz += npr_probe_direct_closure(lights, util_tx, ctx, npr_cl, vPz);
+      float3 color = npr_cl.color;
+      if ((npr_cl.type == CLOSURE_BSDF_TRANSLUCENT_ID ||
+           npr_cl.type == CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID) &&
+          thickness.value() != 0.0f)
+      {
+        color *= color;
+      }
+      if (npr_cl.type != CLOSURE_NONE_ID) {
+        frag_out.radiance.xyz += lightprobes.eval(samp, npr_cl, P, V, thickness) * color *
+                                 npr_cl.npr.indirect_weight;
+      }
+    }
+  }
 }
 
 /** \} */
@@ -569,6 +710,7 @@ PipelineGraphic light_single(fullscreen_vert,
                              light_eval_frag,
                              LightEvalData{
                                  .use_light_shader_texture_eval = true,
+                                 .use_npr_light_policy = true,
                                  .light_closure_eval_count_reflect = 1,
                                  .light_closure_eval_count_transmit = 1,
                              },
@@ -579,6 +721,7 @@ PipelineGraphic light_double(fullscreen_vert,
                              light_eval_frag,
                              LightEvalData{
                                  .use_light_shader_texture_eval = true,
+                                 .use_npr_light_policy = true,
                                  .light_closure_eval_count_reflect = 2,
                                  .light_closure_eval_count_transmit = 1,
                              },
@@ -589,6 +732,7 @@ PipelineGraphic light_triple(fullscreen_vert,
                              light_eval_frag,
                              LightEvalData{
                                  .use_light_shader_texture_eval = true,
+                                 .use_npr_light_policy = true,
                                  .light_closure_eval_count_reflect = 3,
                                  .light_closure_eval_count_transmit = 1,
                              },
@@ -599,6 +743,7 @@ PipelineGraphic sphere_eval(fullscreen_vert,
                             sphere_eval_frag,
                             LightEvalData{
                                 .use_light_shader_texture_eval = true,
+                                .use_npr_light_policy = true,
                                 .light_closure_eval_count_reflect = 1,
                                 .light_closure_eval_count_transmit = 1,
                             },
@@ -612,6 +757,7 @@ PipelineGraphic planar_eval(fullscreen_vert,
                             },
                             LightEvalData{
                                 .use_light_shader_texture_eval = true,
+                                .use_npr_light_policy = true,
                                 .light_closure_eval_count_reflect = 2,
                                 .light_closure_eval_count_transmit = 2,
                             },

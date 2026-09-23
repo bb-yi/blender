@@ -96,6 +96,7 @@ gbuffer::Layers npr_gbuffer_read_layers(int2 texel)
   layers.header = gbuffer::Header::from_data(texelFetch(gbuf_header_tx, int3(texel, 0), 0).r);
   uint3 layer_types = layers.header.bin_types_per_layer();
   uchar closure_count = layers.header.closure_len();
+  uint3 bin_indices = layers.header.bin_index_per_layer();
 
   for (int i = 0; i < 3 /* GBUFFER_LAYER_MAX */; i++) [[unroll]] {
     layers.layer[i] = npr_gbuffer_read_layer(layers.header.tangent_space_id(i),
@@ -103,6 +104,32 @@ gbuffer::Layers npr_gbuffer_read_layers(int2 texel)
                                              uchar(layer_types[i]),
                                              texel,
                                              uchar(i));
+    if (layers.header.has_npr_payload() && layers.layer[i].type != CLOSURE_NONE_ID) {
+      uint bin = bin_indices[i];
+      layers.layer[i].color = rgb9e5_decode(
+          texelFetch(gbuf_header_tx, int3(texel, GBUF_NPR_COLOR_LAYER + bin), 0).r);
+      layers.layer[i].npr.enabled = layers.header.npr_direct_enabled(bin);
+      layers.layer[i].npr.indirect_weight = rgb9e5_decode(
+          texelFetch(gbuf_header_tx, int3(texel, GBUF_NPR_INDIRECT_WEIGHT_LAYER), 0).r)[bin];
+      layers.layer[i].npr.light_policy.code = texelFetch(
+          gbuf_header_tx, int3(texel, GBUF_NPR_LIGHT_POLICY_LAYER + bin), 0).r;
+      layers.layer[i].npr.light_policy.strength = rgb9e5_decode(
+          texelFetch(gbuf_header_tx, int3(texel, GBUF_NPR_SHADOW_STRENGTH_LAYER), 0).r)[bin];
+      layers.layer[i].npr.light_policy.direct_gain = rgb9e5_decode(
+          texelFetch(gbuf_header_tx, int3(texel, GBUF_NPR_DIRECT_GAIN_LAYER), 0).r)[bin];
+      layers.layer[i].npr.additive = rgb9e5_decode(
+          texelFetch(gbuf_header_tx, int3(texel, GBUF_NPR_ADDITIVE_LAYER + bin), 0).r);
+      if (layers.layer[i].npr.enabled) {
+        layers.layer[i].npr.multiplier = rgb9e5_decode(
+            texelFetch(gbuf_header_tx, int3(texel, GBUF_NPR_MULTIPLIER_LAYER + bin), 0).r);
+      }
+    }
+    if (layers.header.has_npr_sss_additive() &&
+        layers.layer[i].type == CLOSURE_BSSRDF_BURLEY_ID)
+    {
+      layers.layer[i].npr.additive = rgb9e5_decode(
+          texelFetch(gbuf_header_tx, int3(texel, GBUF_NPR_ADDITIVE_LAYER), 0).r);
+    }
   }
   return layers;
 }
@@ -141,6 +168,8 @@ DeferredCombine deferred_combine(int2 texel)
   const gbuffer::Layers gbuf = npr_gbuffer_read_layers(texel);
   const uchar closure_count = gbuf.header.closure_len();
   const uint3 bin_indices = gbuf.header.bin_index_per_layer();
+  const bool npr_radiance_outputs = gbuf.header.has_npr_payload() ||
+                                    gbuf.header.has_npr_sss_additive();
 
   DeferredCombine dc;
   dc.diffuse_color = float3(0.0f);
@@ -165,6 +194,7 @@ DeferredCombine deferred_combine(int2 texel)
         float3 closure_indirect_light = use_split_radiance ?
                                             load_radiance_indirect(texel, layer_index) :
                                             float3(0.0f);
+        closure_indirect_light *= cl.npr.indirect_weight;
 
         dc.average_normal += cl.N * reduce_add(cl.color);
 
@@ -173,15 +203,25 @@ DeferredCombine deferred_combine(int2 texel)
           case CLOSURE_BSSRDF_BURLEY_ID:
           case CLOSURE_BSDF_DIFFUSE_ID:
             dc.diffuse_color += cl.color;
-            dc.diffuse_direct += closure_direct_light;
-            dc.diffuse_indirect += closure_indirect_light;
+            /* A precolored replacement cannot be expressed as illumination divided by albedo
+             * (black albedo is valid). NPR direct outputs therefore carry final radiance. */
+            dc.diffuse_direct += npr_radiance_outputs ?
+                                     closure_direct_light * cl.color + cl.npr.additive :
+                                     closure_direct_light;
+            dc.diffuse_indirect += npr_radiance_outputs ?
+                                       closure_indirect_light * cl.color :
+                                       closure_indirect_light;
             break;
           case CLOSURE_BSDF_MICROFACET_GGX_REFLECTION_ID:
           case CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID:
           case CLOSURE_BSDF_THIN_GLASS_TRANSMISSION_ID:
             dc.specular_color += cl.color;
-            dc.specular_direct += closure_direct_light;
-            dc.specular_indirect += closure_indirect_light;
+            dc.specular_direct += npr_radiance_outputs ?
+                                      closure_direct_light * cl.color + cl.npr.additive :
+                                      closure_direct_light;
+            dc.specular_indirect += npr_radiance_outputs ?
+                                        closure_indirect_light * cl.color :
+                                        closure_indirect_light;
             break;
           case CLOSURE_NONE_ID:
             break;
@@ -195,10 +235,15 @@ DeferredCombine deferred_combine(int2 texel)
           cl.color *= cl.color;
         }
 
-        dc.out_direct += closure_direct_light * cl.color;
+        dc.out_direct += closure_direct_light * cl.color + cl.npr.additive;
         dc.out_indirect += closure_indirect_light * cl.color;
       }
     }
+  }
+
+  if (gbuf.header.has_npr_payload()) {
+    dc.out_direct += rgb9e5_decode(
+        texelFetch(gbuf_header_tx, int3(texel, GBUF_NPR_RIM_LAYER), 0).r);
   }
 
   float normal_len = length(dc.average_normal);

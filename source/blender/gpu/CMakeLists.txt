@@ -693,6 +693,7 @@ set(GLSL_SRC
   shaders/material/gpu_shader_material_sdf_op.glsl
   shaders/material/gpu_shader_material_sdf_vector_op.glsl
   shaders/material/gpu_shader_material_shader_info.glsl
+  shaders/material/gpu_shader_material_shader_info_shared.glsl
   shaders/material/gpu_shader_material_screenspace_info.glsl
   shaders/material/gpu_shader_material_scene_color.glsl
   shaders/material/gpu_shader_material_filter_object_mask.glsl
@@ -707,7 +708,11 @@ set(GLSL_SRC
   shaders/material/gpu_shader_material_particle_info.glsl
   shaders/material/gpu_shader_material_point_info.glsl
   shaders/material/gpu_shader_material_principled.glsl
+  shaders/material/gpu_shader_material_principled_shared.glsl
   shaders/material/gpu_shader_material_principled_npr.glsl
+  shaders/material/gpu_shader_material_principled_npr_v2.glsl
+  shaders/material/gpu_shader_material_principled_npr_v2_light.glsl
+  shaders/material/gpu_shader_material_principled_npr_v2_math.glsl
   shaders/material/gpu_shader_material_quaternion_to_rotation.glsl
   shaders/material/gpu_shader_material_raycast.glsl
   shaders/material/gpu_shader_material_ray_portal.glsl

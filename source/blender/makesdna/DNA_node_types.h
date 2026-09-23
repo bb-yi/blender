@@ -911,6 +911,7 @@ enum NodePrincipledNPRShadowMode {
   SHD_PRINCIPLED_NPR_SHADOW_NONE = 0,
   SHD_PRINCIPLED_NPR_SHADOW_CAST_ONLY = 1,
   SHD_PRINCIPLED_NPR_SHADOW_ALL = 2,
+  SHD_PRINCIPLED_NPR_SHADOW_SELF_ONLY = 3,
 };
 
 enum NodePrincipledNPRLightCombine {
@@ -919,6 +920,7 @@ enum NodePrincipledNPRLightCombine {
 };
 
 #define SHD_PRINCIPLED_NPR_LIGHTGROUP_MAX 9999
+#define SHD_PRINCIPLED_NPR_MAX_RAMP_POINTS 32
 
 enum NodeParallaxMode {
   SHD_PARALLAX_PLANE_OFFSET = 0,
@@ -3069,6 +3071,20 @@ struct NodeShaderPrincipled {
   char _pad[3] = {};
 };
 
+/** V2 slots never move. RNA animation paths use the persistent identifier, never a sorted index.
+ */
+struct NodePrincipledNPRRampPoint {
+  DNA_DEFINE_CXX_METHODS(NodePrincipledNPRRampPoint)
+
+  float color[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+  float position = 0.0f;
+  float offset = 0.0f;
+  float softness = 1.0f;
+  int identifier = -1;
+  int enabled = 0;
+  int initialized = 0;
+};
+
 struct NodeShaderPrincipledNPR {
   DNA_DEFINE_CXX_METHODS(NodeShaderPrincipledNPR)
 
@@ -3086,6 +3102,22 @@ struct NodeShaderPrincipledNPR {
   int8_t driven_interpolation = SHD_PRINCIPLED_NPR_INTERP_LINEAR;
   int8_t driven_stop_count = 2;
   char _pad[3] = {};
+
+  /** Zero only occurs in files written before the explicit model version existed. */
+  int model_version = 0;
+  int shadow_quality = SHD_SHADER_INFO_SHADOW_TEMPORAL;
+  int shadow_samples = 8;
+  int use_all_lights = 1;
+  int mapping_interpolation = SHD_PRINCIPLED_NPR_INTERP_EASE;
+  int ramp_point_count = 2;
+  int ramp_initialized_count = 2;
+  int next_point_identifier = 0;
+  int active_point_identifier = -1;
+  int driven_initialized_count = 2;
+  /* Keep a literal array size for makesdna. Matches SHD_PRINCIPLED_NPR_MAX_RAMP_POINTS. */
+  NodePrincipledNPRRampPoint ramp_points[32];
+  /** 0 preserves the original V2 light bias; 1 uses the appended energy response input. */
+  int energy_response_version = 0;
 };
 
 struct NodeShaderHairPrincipled {

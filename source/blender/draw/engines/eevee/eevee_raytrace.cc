@@ -242,10 +242,12 @@ void RayTraceModule::sync()
     gpu::Shader *sh = inst_.shaders.static_shader_get(RAY_DENOISE_TEMPORAL);
     pass.init();
     pass.specialize_constant(sh, "closure_index", &data_.closure_index);
+    pass.specialize_constant(sh, "use_npr_history", &use_npr_history_);
     pass.shader_set(sh);
     pass.bind_resources(inst_.uniform_data);
     pass.bind_texture("radiance_history_tx", &radiance_history_tx_);
     pass.bind_texture("variance_history_tx", &variance_history_tx_);
+    pass.bind_texture("signature_history_tx", &signature_history_tx_);
     pass.bind_texture("tilemask_history_tx", &tilemask_history_tx_);
     pass.bind_texture("depth_tx", &depth_tx);
     pass.bind_image("hit_depth_img", &hit_depth_tx_);
@@ -253,9 +255,11 @@ void RayTraceModule::sync()
     pass.bind_image("out_radiance_img", &denoised_temporal_tx_);
     pass.bind_image("in_variance_img", &hit_variance_tx_);
     pass.bind_image("out_variance_img", &denoise_variance_tx_);
+    pass.bind_image("out_signature_img", &denoised_signature_tx_);
     pass.bind_image("tile_mask_img", &tile_raytrace_denoise_tx_);
     pass.bind_ssbo("tiles_coord_buf", &raytrace_denoise_tiles_buf_);
     pass.bind_resources(inst_.sampling);
+    pass.bind_resources(inst_.gbuffer);
     pass.dispatch(raytrace_denoise_dispatch_buf_);
     /* Can either be loaded by next denoise pass as image or by combined pass as texture if this is
      * the lass stage. */
@@ -480,6 +484,15 @@ RayTraceResult RayTraceModule::render(RayTraceBuffer &rt_buffer,
   using namespace blender::math;
   BLI_assert(use_raytracing_);
 
+  if (rt_buffer.npr_history_reset_generation != npr_history_reset_generation_) {
+    for (RayTraceBuffer::DenoiseBuffer &buffer : rt_buffer.closures) {
+      if (buffer.signature_history_tx.is_valid()) {
+        buffer.signature_history_tx.clear(uint4(0u));
+      }
+    }
+    rt_buffer.npr_history_reset_generation = npr_history_reset_generation_;
+  }
+
   screen_radiance_front_tx_ = rt_buffer.radiance_feedback_tx.is_valid() ?
                                   rt_buffer.radiance_feedback_tx :
                                   radiance_dummy_black_tx_;
@@ -645,6 +658,8 @@ RayTraceResultTexture RayTraceModule::trace(int closure_index,
                                                 gpu::TextureFormat::RAYTRACE_RADIANCE_FORMAT);
     denoise_buf->radiance_history_tx.release();
     denoise_buf->variance_history_tx.release();
+    denoise_buf->signature_history_tx.release();
+    denoise_buf->denoised_signature_tx.release();
     denoise_buf->tilemask_history_tx.free();
     return {denoise_buf->denoised_spatial_tx};
   }
@@ -663,6 +678,11 @@ RayTraceResultTexture RayTraceModule::trace(int closure_index,
                                     use_spatial_denoise;
   const bool use_bilateral_denoise = (options.denoise_stages & RAYTRACE_EEVEE_DENOISE_BILATERAL) &&
                                      use_temporal_denoise;
+  use_npr_history_ = inst_.pipelines.deferred.header_layer_count() >= GBUF_NPR_HEADER_LAYER_COUNT;
+  if (!use_temporal_denoise || !use_npr_history_) {
+    denoise_buf->signature_history_tx.release();
+    denoise_buf->denoised_signature_tx.release();
+  }
 
   eGPUTextureUsage usage_rw = GPU_TEXTURE_USAGE_SHADER_READ | GPU_TEXTURE_USAGE_SHADER_WRITE;
 
@@ -733,6 +753,24 @@ RayTraceResultTexture RayTraceModule::trace(int closure_index,
     denoise_buf->denoised_temporal_tx.acquire_2d(
         extent, gpu::TextureFormat::RAYTRACE_RADIANCE_FORMAT, usage_rw);
 
+    if (use_npr_history_) {
+      denoise_buf->denoised_signature_tx.acquire_2d(extent, gpu::TextureFormat::UINT_32, usage_rw);
+      if (denoise_buf->signature_history_tx.acquire_2d(
+              extent, gpu::TextureFormat::UINT_32, usage_rw) ||
+          !denoise_buf->valid_history)
+      {
+        denoise_buf->signature_history_tx.clear(uint4(0u));
+      }
+      signature_history_tx_ = denoise_buf->signature_history_tx;
+      denoised_signature_tx_ = denoise_buf->denoised_signature_tx;
+    }
+    else {
+      /* Valid descriptors without allocating history for scenes without NPR. Both accesses are
+       * disabled by use_npr_history; the existing header layer is never modified by this pass. */
+      signature_history_tx_ = inst_.gbuffer.header_tx.layer_view(0);
+      denoised_signature_tx_ = inst_.gbuffer.header_tx.layer_view(0);
+    }
+
     int2 variance_size = use_bilateral_denoise ? extent : int2(1);
     gpu::TextureFormat variance_format = gpu::TextureFormat::RAYTRACE_VARIANCE_FORMAT;
 
@@ -758,6 +796,12 @@ RayTraceResultTexture RayTraceModule::trace(int closure_index,
     denoised_temporal_tx_ = denoise_buf->denoised_temporal_tx;
 
     inst_.manager->submit(denoise_temporal_ps_, render_view);
+
+    if (use_npr_history_) {
+      TextureFromPool::swap(denoise_buf->denoised_signature_tx, denoise_buf->signature_history_tx);
+      denoise_buf->signature_history_tx.retain();
+      denoise_buf->denoised_signature_tx.release();
+    }
 
     /* Save view-projection matrix for next reprojection. */
     denoise_buf->history_persmat = render_view.persmat();
@@ -814,6 +858,8 @@ RayTraceResult RayTraceModule::alloc_only(RayTraceBuffer &rt_buffer)
   RayTraceResult result;
   for (int i = 0; i < 3; i++) {
     RayTraceBuffer::DenoiseBuffer *denoise_buf = &rt_buffer.closures[i];
+    denoise_buf->signature_history_tx.release();
+    denoise_buf->denoised_signature_tx.release();
     denoise_buf->denoised_bilateral_tx.acquire_2d(
         extent, gpu::TextureFormat::RAYTRACE_RADIANCE_FORMAT, usage_rw);
     result.closures[i] = {denoise_buf->denoised_bilateral_tx};
@@ -828,6 +874,8 @@ RayTraceResult RayTraceModule::alloc_dummy(RayTraceBuffer &rt_buffer)
   RayTraceResult result;
   for (int i = 0; i < 3; i++) {
     RayTraceBuffer::DenoiseBuffer *denoise_buf = &rt_buffer.closures[i];
+    denoise_buf->signature_history_tx.release();
+    denoise_buf->denoised_signature_tx.release();
     denoise_buf->denoised_bilateral_tx.acquire_2d(
         int2(1), gpu::TextureFormat::RAYTRACE_RADIANCE_FORMAT, usage_rw);
     result.closures[i] = {denoise_buf->denoised_bilateral_tx};

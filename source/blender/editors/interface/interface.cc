@@ -998,6 +998,14 @@ static void but_update_old_active_from_new(Button *oldbut, Button *but)
   }
 
   switch (oldbut->type) {
+    case ButtonType::ColorBand: {
+      ButtonColorBand *ramp_oldbut = static_cast<ButtonColorBand *>(oldbut);
+      ButtonColorBand *ramp_newbut = static_cast<ButtonColorBand *>(but);
+      if (ramp_oldbut->custom || ramp_newbut->custom) {
+        std::swap(ramp_oldbut->custom, ramp_newbut->custom);
+      }
+      break;
+    }
     case ButtonType::Progress: {
       ButtonProgress *progress_oldbut = static_cast<ButtonProgress *>(oldbut);
       ButtonProgress *progress_but = static_cast<ButtonProgress *>(but);

@@ -111,7 +111,9 @@ void trace([[resource_table]] Resources &srt,
   float rand_trace = interleaved_gradient_noise(float2(texel), 5.0f, noise_offset);
 
   ClosureUndetermined cl = reader.read_bin(texel_fullres, srt.closure_index);
-  float roughness = closure_apparent_roughness_get(cl);
+  /* The anisotropic ray distribution already accounts for both widths. A scalar roughness
+   * convolution here would blur the narrow axis again, including on the probe-miss path. */
+  float roughness = closure_is_npr_reflection(cl) ? 0.0f : closure_apparent_roughness_get(cl);
 
   /* Transform the ray into view-space. */
   Ray ray_view;
@@ -267,7 +269,9 @@ void trace([[resource_table]] Resources &srt,
   const ViewMatrices view = views.get(0);
 
   ClosureUndetermined cl = reader.read_bin(texel_fullres, srt.closure_index);
-  float roughness = closure_apparent_roughness_get(cl);
+  /* The anisotropic ray distribution already accounts for both widths. A scalar roughness
+   * convolution here would blur the narrow axis again, including on the probe-miss path. */
+  float roughness = closure_is_npr_reflection(cl) ? 0.0f : closure_apparent_roughness_get(cl);
 
   float depth = reverse_z::read(texelFetch(srt.depth_tx, texel_fullres, 0).r);
   float2 uv = (float2(texel_fullres) + 0.5f) * uni.raytrace_buf.full_resolution_inv;
@@ -377,7 +381,9 @@ void trace([[resource_table]] Resources &srt,
   }
 
   ClosureUndetermined cl = reader.read_bin(texel_fullres, srt.closure_index);
-  float roughness = closure_apparent_roughness_get(cl);
+  /* The anisotropic ray distribution already accounts for both widths. A scalar roughness
+   * convolution here would blur the narrow axis again, including on the probe-miss path. */
+  float roughness = closure_is_npr_reflection(cl) ? 0.0f : closure_apparent_roughness_get(cl);
 
   float depth = reverse_z::read(texelFetch(srt.depth_tx, texel_fullres, 0).r);
   float2 uv = (float2(texel_fullres) + 0.5f) * uni.raytrace_buf.full_resolution_inv;
