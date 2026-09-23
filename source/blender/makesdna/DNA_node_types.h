@@ -919,6 +919,16 @@ enum NodePrincipledNPRLightCombine {
   SHD_PRINCIPLED_NPR_LIGHT_STRONGEST = 1,
 };
 
+enum NodePrincipledNPRRimMode {
+  SHD_PRINCIPLED_NPR_RIM_FRESNEL = 0,
+  SHD_PRINCIPLED_NPR_RIM_SCREEN_DEPTH = 1,
+};
+
+enum NodePrincipledNPRHighlightLightShape {
+  SHD_PRINCIPLED_NPR_HIGHLIGHT_INTEGRATED = 0,
+  SHD_PRINCIPLED_NPR_HIGHLIGHT_DIRECTION = 1,
+};
+
 #define SHD_PRINCIPLED_NPR_LIGHTGROUP_MAX 9999
 #define SHD_PRINCIPLED_NPR_MAX_RAMP_POINTS 32
 
@@ -3118,6 +3128,9 @@ struct NodeShaderPrincipledNPR {
   NodePrincipledNPRRampPoint ramp_points[32];
   /** 0 preserves the original V2 light bias; 1 uses the appended energy response input. */
   int energy_response_version = 0;
+  int rim_mode = 0;
+  /** Missing in saved V2 files: retain their integrated emitter response. */
+  int highlight_light_shape = SHD_PRINCIPLED_NPR_HIGHLIGHT_INTEGRATED;
 };
 
 struct NodeShaderHairPrincipled {

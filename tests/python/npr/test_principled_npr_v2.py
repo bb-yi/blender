@@ -46,7 +46,7 @@ def new_material():
 
 def check_storage(node, output_dir):
     require(node.model_version == 2, "A new Principled NPR node must use V2")
-    require(len(node.inputs) == 91, f"Unexpected V2 socket count {len(node.inputs)}")
+    require(len(node.inputs) == 94, f"Unexpected V2 socket count {len(node.inputs)}")
     require([s.identifier for s in node.outputs] == ["shader", "color", "alpha"], "Output IDs changed")
     require(node.outputs[1].name == "Local Color", "Color must be labeled as a local result")
     require(node.coordinate_range == "FULL", "V2 must default to the full Lambert range")
@@ -56,6 +56,11 @@ def check_storage(node, output_dir):
     require(node.energy_response_version == 1, "New nodes must use versioned energy response")
     require(inp(node, "energy_influence").default_value == 0.5, "Energy response must default to 0.5")
     require(node.inputs[90].identifier == "energy_influence", "New input must be append-only")
+    require(node.rim_mode == "FRESNEL", "The existing rim must remain the default")
+    require(node.highlight_light_shape == "DIRECTION", "New highlights must default to analytic GGX")
+    require([s.identifier for s in node.inputs[91:]] ==
+            ["rim_pixel_width", "rim_depth_threshold", "rim_depth_softness"],
+            "Depth rim controls must be append-only")
     require(inp(node, "ambient_strength").default_value == 1, "Indirect diffuse must default on")
     require(inp(node, "reflection_strength").default_value == 1, "Indirect reflection must default on")
     require({"NONE", "ALL", "CAST_ONLY", "SELF_ONLY"}.issubset(
@@ -191,7 +196,7 @@ def main():
     bpy.ops.wm.open_mainfile(filepath=str(saved))
     loaded = bpy.data.materials[material_name].node_tree.nodes[node_name]
     require(loaded.model_version == 2, "V2 model version was lost on readback")
-    require(len(loaded.inputs) == 91 and loaded.energy_response_version == 1,
+    require(len(loaded.inputs) == 94 and loaded.energy_response_version == 1,
             "V2 energy response or inputs changed on readback")
     report = {"backend": active, "build_hash": bpy.app.build_hash.decode(),
               "build_branch": bpy.app.build_branch.decode(), "linear_energy_ratio": ratio,

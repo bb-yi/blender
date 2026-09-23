@@ -7,6 +7,7 @@
 #include "gpu_shader_material_shader_info_shared.glsl"
 #include "gpu_shader_material_principled_npr_v2_math.glsl"
 #include "gpu_shader_material_principled_npr_v2_light.glsl"
+#include "gpu_shader_material_principled_npr_depth_rim.glsl"
 
 [[node]]
 void npr_v2_pack4(float x, float y, float z, float w, float4 &value)
@@ -120,6 +121,7 @@ float npr_v2_rim_shape(float3 N, float3 V, float4 shape, float falloff)
 
 float3 npr_v2_highlight_filtered(float3 response, float3 reference, float softness, float beta)
 {
+#if defined(MAT_NPR_REFERENCE_HIGHLIGHT)
   float3 result = npr_v2_highlight_rgb(response, reference, softness, beta);
 #if defined(GPU_FRAGMENT_SHADER)
   if (softness <= 0.0f) {
@@ -132,6 +134,9 @@ float3 npr_v2_highlight_filtered(float3 response, float3 reference, float softne
   }
 #endif
   return result;
+#else
+  return response;
+#endif
 }
 
 float3 npr_v2_reflection_transport_gain(float3 base,
@@ -320,7 +325,11 @@ void node_principled_npr_v2(float4 base_color,
     points[i+24] = points6[i]; points[i+28] = points7[i];
   }
   int point_count = clamp(int(table_info.z), 2, NPR_V2_MAX_POINTS);
-  npr_v2_sort_points(colors, points, point_count);
+  if (execution.z < 0.5f) {
+    /* Only connected point positions need GPU sorting. CPU/RNA ramp points are
+     * uploaded in evaluation order without changing their animation identities. */
+    npr_v2_sort_points(colors, points, point_count);
+  }
   float4 map_parameters = float4(shading[0].xyz, table_info.w);
   bool full_range = int(shading[2].x) == 1;
   bool strongest = int(shading[2].w) == 1;
@@ -330,12 +339,18 @@ void node_principled_npr_v2(float4 base_color,
   float shadow_strength = saturate(shading[1].w);
   float softness = saturate(highlight[1].y);
   float size_scale = exp2(4.0f * clamp(highlight[1].z, -1.0f, 1.0f));
-  float beta = npr_v2_sample_beta(tables, table_info.x, softness);
+  float beta = 0.0f;
+#ifdef MAT_NPR_REFERENCE_HIGHLIGHT
+  beta = npr_v2_sample_beta(tables, table_info.x, softness);
+#endif
   float4 spec_shape = float4(roughness, highlight[2].x, highlight[2].y, size_scale);
   float3 direct_reflection_gain = npr_v2_reflection_transport_gain(
       base, metallic, transmission, thin_wall, ior, roughness, NV);
-  float3 reference_reflection_gain = npr_v2_reflection_transport_gain(
+  float3 reference_reflection_gain = float3(0.0f);
+#ifdef MAT_NPR_REFERENCE_HIGHLIGHT
+  reference_reflection_gain = npr_v2_reflection_transport_gain(
       base, metallic, transmission, thin_wall, ior, roughness, 1.0f);
+#endif
   float3 diffuse_mul = float3(0.0f);
   float3 diffuse_add = float3(0.0f);
   float3 direct_specular = float3(0.0f);
@@ -471,6 +486,7 @@ void node_principled_npr_v2(float4 base_color,
                                          saturate(highlight[1].w));
       npr_v2_light_response(light_index, is_local, specular_lamp, N, V, tangent, spec_shape,
                             base, metallic, ior,
+                            int(highlight[2].w) == 0,
                             softness < 1.0f || size_scale != 1.0f || int(highlight[2].z) == 1,
                             raw_response, reference_response);
       raw_response *= direct_reflection_gain;
@@ -522,8 +538,22 @@ void node_principled_npr_v2(float4 base_color,
   float diffuse_weight = layer * (1.0f - metallic) * (1.0f - transmission) * diffuse_remaining;
   float3 reflection_color = metallic * metal_reflectance +
       (1.0f - metallic) * mix(dielectric_reflectance, transmission_reflectance, transmission);
+  float rim_shape = 0.0f;
+  if (rim[0].w > 0.0f && rim[2].z > 0.0f) {
+    if (int(rim[2].w) == 1) {
+      /* Fractional stochastic coverage is not a solid silhouette. Never
+       * substitute unrelated opaque depth for a Blended surface. */
+      if (rim[3].w > 0.5f && alpha >= 1.0f) {
+        rim_shape = npr_v2_depth_rim(rim[3].x, rim[3].z, rim[3].y,
+                                     rim[1].x, rim[1].y, rim[1].z);
+      }
+    }
+    else {
+      rim_shape = npr_v2_rim_shape(N, V, rim[1], rim[2].x);
+    }
+  }
   float3 rim_radiance = max(rim[0].rgb, float3(0.0f)) * max(rim[0].w, 0.0f) *
-      npr_v2_rim_shape(N, V, rim[1], rim[2].x) * saturate(rim[2].z);
+                       rim_shape * saturate(rim[2].z);
   float light_bias = clamp(rim[2].y, -1.0f, 1.0f);
   rim_radiance *= light_bias >= 0.0f ? mix(1.0f, lighting_reference, light_bias) :
                                       mix(1.0f, 1.0f - lighting_reference, -light_bias);

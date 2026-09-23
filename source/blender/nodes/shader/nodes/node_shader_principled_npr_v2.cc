@@ -6,6 +6,7 @@
 
 #include "BKE_colorband.hh"
 #include "DNA_color_types.h"
+#include "DNA_material_types.h"
 #include "GPU_material.hh"
 #include "MEM_guardedalloc.h"
 #include "node_shader_util.hh"
@@ -109,7 +110,31 @@ int node_gpu_v2(GPUMaterial *mat, bNode *node, GPUNodeStack *in, GPUNodeStack *o
     constant_storage.push_back(value);
     return GPU_constant(&constant_storage.back());
   };
-  auto socket = [&](const char *id) { return input_link(*node, in, id); };
+  auto socket = [&](const char *id) {
+    const GPUNodeStack &input = GPU_node_get_input(*node, in, id);
+    if (!input.link && input.type == GPU_FLOAT) {
+      /* Match native Principled's disabled-lobe pruning. Keep ordinary values
+       * uniform, so dragging within an enabled range reuses the same shader. */
+      if (input.vec[0] == 0.0f) {
+        for (const char *disabled : {"metallic", "transmission_weight", "subsurface_weight",
+                                    "coat_weight", "sheen_weight", "thin_wall",
+                                    "metallic_body_preservation", "emission_strength",
+                                    "rim_strength", "highlight_strength", "profile_offset"})
+        {
+          if (std::strcmp(id, disabled) == 0) {
+            return constant(0.0f);
+          }
+        }
+      }
+      if (input.vec[0] == 1.0f &&
+          (std::strcmp(id, "profile_softness") == 0 || std::strcmp(id, "alpha") == 0 ||
+           std::strcmp(id, "metallic") == 0))
+      {
+        return constant(1.0f);
+      }
+    }
+    return input_link(*node, in, id);
+  };
   auto control = [&](const char *a, const char *b, const char *c, const char *d) {
     return pack4(mat, socket(a), socket(b), socket(c), socket(d));
   };
@@ -117,6 +142,35 @@ int node_gpu_v2(GPUMaterial *mat, bNode *node, GPUNodeStack *in, GPUNodeStack *o
     const GPUNodeStack &s = GPU_node_get_input(*node, in, id);
     return s.link || s.socket_not_zero();
   };
+  eGPUMaterialNPRHighlightFeature highlight_features = GPU_MAT_NPR_HIGHLIGHT_NONE;
+  const GPUNodeStack &highlight_strength = GPU_node_get_input(*node, in, "highlight_strength");
+  /* The shader uses an exact positive test, not socket_not_zero's near-zero threshold. */
+  if (highlight_strength.link || highlight_strength.vec[0] > 0.0f) {
+    if (storage.highlight_light_shape == SHD_PRINCIPLED_NPR_HIGHLIGHT_INTEGRATED) {
+      highlight_features |= GPU_MAT_NPR_FINITE_HIGHLIGHT;
+    }
+    const GPUNodeStack &softness = GPU_node_get_input(*node, in, "profile_softness");
+    const GPUNodeStack &offset = GPU_node_get_input(*node, in, "profile_offset");
+    if (softness.link || softness.vec[0] != 1.0f || offset.link || offset.vec[0] != 0.0f ||
+        storage.specular_mapping == SHD_PRINCIPLED_NPR_SPECULAR_RAMP)
+    {
+      highlight_features |= GPU_MAT_NPR_REFERENCE_HIGHLIGHT;
+    }
+  }
+  /* OR across nodes; Local Color needs this code too, but Alpha-only returned above. */
+  GPU_material_npr_highlight_features_add(mat, highlight_features);
+  const Material *blender_material = GPU_material_get_material(mat);
+  const bool depth_rim_supported = blender_material == nullptr ||
+      blender_material->surface_render_method != MA_SURFACE_METHOD_FORWARD;
+  /* Resource lifetime follows the mode, not a changing uniform threshold.
+   * Width/Mask 0 -> nonzero must not reuse a pass compiled without HiZ. */
+  if (storage.rim_mode == SHD_PRINCIPLED_NPR_RIM_SCREEN_DEPTH && depth_rim_supported)
+  {
+    GPU_material_hiz_data_set(mat);
+    /* Reuse the existing prepass IDs to distinguish a real silhouette from
+     * a smooth curved surface's deviation from its tangent plane. */
+    GPU_material_flag_set(mat, GPU_MATFLAG_RAYCAST);
+  }
 
   GPUNodeStack &normal = GPU_node_get_input(*node, in, "normal");
   if (!normal.link) {
@@ -182,8 +236,8 @@ int node_gpu_v2(GPUMaterial *mat, bNode *node, GPUNodeStack *in, GPUNodeStack *o
     colors[1] = socket("lit_color");
     point_data[0] = {0, 0, 1, 0};
     point_data[1] = {1, 0, 1, 1};
-    points[0] = GPU_uniform(point_data[0].data());
-    points[1] = GPU_uniform(point_data[1].data());
+    points[0] = GPU_constant(point_data[0].data());
+    points[1] = GPU_constant(point_data[1].data());
   }
   else if (storage.diffuse_mapping == SHD_PRINCIPLED_NPR_DIFFUSE_DRIVEN_RAMP) {
     count = std::clamp(int(storage.driven_stop_count), 2, 8);
@@ -205,7 +259,9 @@ int node_gpu_v2(GPUMaterial *mat, bNode *node, GPUNodeStack *in, GPUNodeStack *o
       }
     }
     std::sort(active.begin(), active.begin() + count, [](const auto *a, const auto *b) {
-      return a->identifier < b->identifier;
+      const float pa = std::clamp(a->position, 0.0f, 1.0f);
+      const float pb = std::clamp(b->position, 0.0f, 1.0f);
+      return pa != pb ? pa < pb : a->identifier < b->identifier;
     });
     for (int i = 0; i < count; i++) {
       const auto &point = *active[i];
@@ -217,10 +273,10 @@ int node_gpu_v2(GPUMaterial *mat, bNode *node, GPUNodeStack *in, GPUNodeStack *o
   }
   for (int i = 0; i < 32; i++) {
     if (colors[i] == nullptr) {
-      colors[i] = GPU_uniform(white);
+      colors[i] = GPU_constant(white);
     }
     if (points[i] == nullptr) {
-      points[i] = GPU_uniform(inactive);
+      points[i] = GPU_constant(inactive);
     }
   }
   std::array<GPUNodeLink *, 8> color_matrices;
@@ -285,7 +341,7 @@ int node_gpu_v2(GPUMaterial *mat, bNode *node, GPUNodeStack *in, GPUNodeStack *o
                                               socket("anisotropy"),
                                               socket("anisotropy_rotation"),
                                               constant(storage.specular_mapping),
-                                              constant(0)),
+                                              constant(storage.highlight_light_shape)),
                                         GPU_uniform(inactive)});
   GPUNodeLink *rim_color = nullptr;
   GPU_link(mat, "npr_v2_pack_color", socket("rim_color"), socket("rim_strength"), &rim_color);
@@ -297,8 +353,9 @@ int node_gpu_v2(GPUMaterial *mat, bNode *node, GPUNodeStack *in, GPUNodeStack *o
              socket("rim_thickness_falloff"),
              socket("rim_light_bias"),
              socket("rim_mask"),
-             constant(0)),
-       GPU_uniform(inactive)});
+             constant(storage.rim_mode)),
+       pack4(mat, socket("rim_pixel_width"), socket("rim_depth_threshold"),
+             socket("rim_depth_softness"), constant(depth_rim_supported ? 1 : 0))});
 
   float beta_layer;
   GPUNodeLink *table = calibration_table(mat, beta_layer);
@@ -313,7 +370,10 @@ int node_gpu_v2(GPUMaterial *mat, bNode *node, GPUNodeStack *in, GPUNodeStack *o
       float(count),
       storage.mapping_interpolation == SHD_PRINCIPLED_NPR_INTERP_LINEAR ? 1.0f : 0.0f};
   GPUNodeLink *execution = pack4(
-      mat, socket("Weight"), constant(has_shader ? 1 : 0), constant(0), constant(0));
+      mat, socket("Weight"), constant(has_shader ? 1 : 0),
+      constant(storage.diffuse_mapping != SHD_PRINCIPLED_NPR_DIFFUSE_DRIVEN_RAMP ? 1 : 0),
+      /* Keep the feature defines in the GPUPass graph hash, including Local Color-only graphs. */
+      constant(float(highlight_features)));
   return GPU_link(mat,
                   "node_principled_npr_v2",
                   socket("base_color"),

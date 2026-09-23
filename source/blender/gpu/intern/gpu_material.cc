@@ -147,6 +147,7 @@ struct GPUMaterial {
   bool has_glsl_light_shader_eval = false;
   bool has_shader_info_shadow_classification = false;
   bool has_principled_npr_v2 = false;
+  eGPUMaterialNPRHighlightFeature npr_highlight_features = GPU_MAT_NPR_HIGHLIGHT_NONE;
   bool uses_hiz_data = false;
 
   std::string name;
@@ -560,6 +561,11 @@ bool GPU_material_has_shader_info_shadow_classification(const GPUMaterial *mat)
 bool GPU_material_principled_npr_v2_has(const GPUMaterial *mat)
 {
   return mat != nullptr && mat->has_principled_npr_v2;
+}
+
+eGPUMaterialNPRHighlightFeature GPU_material_npr_highlight_features_get(const GPUMaterial *mat)
+{
+  return mat != nullptr ? mat->npr_highlight_features : GPU_MAT_NPR_HIGHLIGHT_NONE;
 }
 
 bool GPU_material_uses_hiz_data(const GPUMaterial *mat)
@@ -1173,6 +1179,14 @@ void GPU_material_principled_npr_v2_set(GPUMaterial *material)
 {
   if (material != nullptr) {
     material->has_principled_npr_v2 = true;
+  }
+}
+
+void GPU_material_npr_highlight_features_add(GPUMaterial *material,
+                                            eGPUMaterialNPRHighlightFeature features)
+{
+  if (material != nullptr) {
+    material->npr_highlight_features |= features;
   }
 }
 

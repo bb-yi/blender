@@ -1779,6 +1779,9 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     }
   }
 
+  if (use_hiz_data) {
+    info.define("MAT_HIZ_DATA");
+  }
   if (use_hiz_data && !has_bsl_hiz_resource) {
     add_create_info_and_reserve(info, slots, "eevee_hiz_data");
   }
@@ -1939,6 +1942,15 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   }
   if (GPU_material_principled_npr_v2_has(gpumat)) {
     info.define("MAT_PRINCIPLED_NPR_V2");
+  }
+  /* Local Color also evaluates direct highlights without emitting an NPR closure. */
+  const eGPUMaterialNPRHighlightFeature npr_highlight_features =
+      GPU_material_npr_highlight_features_get(gpumat);
+  if (npr_highlight_features & GPU_MAT_NPR_FINITE_HIGHLIGHT) {
+    info.define("MAT_NPR_FINITE_HIGHLIGHT");
+  }
+  if (npr_highlight_features & GPU_MAT_NPR_REFERENCE_HIGHLIGHT) {
+    info.define("MAT_NPR_REFERENCE_HIGHLIGHT");
   }
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SUBSURFACE)) {
     info.define("MAT_SUBSURFACE");

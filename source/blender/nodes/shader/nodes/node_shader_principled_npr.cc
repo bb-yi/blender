@@ -284,6 +284,8 @@ static void node_declare(NodeDeclarationBuilder &b)
   const bool v2 = storage == nullptr || storage->model_version >= 2;
   const bool energy_response = v2 &&
                                (storage == nullptr || storage->energy_response_version >= 1);
+  const bool depth_rim = v2 && storage &&
+                         storage->rim_mode == SHD_PRINCIPLED_NPR_RIM_SCREEN_DEPTH;
   PanelDeclarationBuilder *stop_panels[PRINCIPLED_NPR_MAX_STOPS] = {};
 
   b.use_custom_socket_order();
@@ -491,6 +493,11 @@ static void node_declare(NodeDeclarationBuilder &b)
       b.add_panel(v2 ? "Highlights"_ustr : "Specular"_ustr).default_closed(true);
   specular.add_layout([](ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr) {
     if (RNA_int_get(ptr, "model_version") >= 2) {
+      layout.prop(ptr, "highlight_light_shape", ui::ITEM_R_SPLIT_EMPTY_NAME,
+                  std::nullopt, ICON_NONE);
+      if (RNA_enum_get(ptr, "highlight_light_shape") == SHD_PRINCIPLED_NPR_HIGHLIGHT_INTEGRATED) {
+        layout.label(IFACE_("Finite integration: higher cost"), ICON_INFO);
+      }
       return;
     }
     layout.prop(ptr, "specular_mapping", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
@@ -577,6 +584,14 @@ static void node_declare(NodeDeclarationBuilder &b)
       .available(!v2);
 
   PanelDeclarationBuilder &rim = b.add_panel("Rim"_ustr).default_closed(true);
+  if (v2) {
+    rim.add_layout([](ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr) {
+      layout.prop(ptr, "rim_mode", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+      if (RNA_enum_get(ptr, "rim_mode") == SHD_PRINCIPLED_NPR_RIM_SCREEN_DEPTH) {
+        layout.label(IFACE_("Opaque / binary cutout only"), ICON_INFO);
+      }
+    });
+  }
   rim.add_input<decl::Color>("Rim Color"_ustr, "rim_color"_ustr)
       .default_value({1.0f, 1.0f, 1.0f, 1.0f});
   rim.add_input<decl::Float>("Rim Strength"_ustr, "rim_strength"_ustr)
@@ -601,12 +616,14 @@ static void node_declare(NodeDeclarationBuilder &b)
       .default_value(0.1f)
       .min(0.0f)
       .max(1.0f)
-      .subtype(PROP_FACTOR);
+      .subtype(PROP_FACTOR)
+      .available(!depth_rim);
   rim.add_input<decl::Float>("Thickness Falloff"_ustr, "rim_thickness_falloff"_ustr)
       .default_value(0.05f)
       .min(0.0f)
       .max(1.0f)
-      .subtype(PROP_FACTOR);
+      .subtype(PROP_FACTOR)
+      .available(!depth_rim);
   rim.add_input<decl::Float>("Light Bias"_ustr, "rim_light_bias"_ustr)
       .default_value(0.0f)
       .min(-1.0f)
@@ -792,6 +809,26 @@ static void node_declare(NodeDeclarationBuilder &b)
           "How strongly received diffuse light energy moves the color bands: 0 keeps their "
           "shape fixed, 1 follows energy fully. Coordinate Scale calibrates the fixed reference; "
           "Base Color and camera exposure do not drive the bands");
+  rim.add_input<decl::Float>("Width (Pixels)"_ustr, "rim_pixel_width"_ustr)
+      .default_value(4.0f)
+      .min(0.0f)
+      .max(128.0f)
+      .description("Rim width in actual render pixels, independent of camera distance")
+      .available(depth_rim);
+  rim.add_input<decl::Float>("Depth Threshold"_ustr, "rim_depth_threshold"_ustr)
+      .default_value(0.01f)
+      .min(0.0f)
+      .max(1000.0f)
+      .subtype(PROP_DISTANCE)
+      .description("Minimum linear depth discontinuity after geometric plane compensation")
+      .available(depth_rim);
+  rim.add_input<decl::Float>("Softness"_ustr, "rim_depth_softness"_ustr)
+      .default_value(0.1f)
+      .min(0.0f)
+      .max(1.0f)
+      .subtype(PROP_FACTOR)
+      .description("Transition as a fraction of pixel width; hard edges retain coverage AA")
+      .available(depth_rim);
 }
 
 static void node_init(bNodeTree * /*ntree*/, bNode *node)
@@ -799,6 +836,7 @@ static void node_init(bNodeTree * /*ntree*/, bNode *node)
   NodeShaderPrincipledNPR *storage = MEM_new<NodeShaderPrincipledNPR>(__func__);
   storage->model_version = 2;
   storage->energy_response_version = 1;
+  storage->highlight_light_shape = SHD_PRINCIPLED_NPR_HIGHLIGHT_DIRECTION;
   storage->coordinate_range = SHD_PRINCIPLED_NPR_RANGE_FULL;
   storage->light_combine = SHD_PRINCIPLED_NPR_LIGHT_ADD;
   storage->driven_initialized_count = PRINCIPLED_NPR_MAX_STOPS;
@@ -865,6 +903,16 @@ static void node_update(bNodeTree *ntree, bNode *node)
   const NodeShaderPrincipledNPR &storage = node_storage(*node);
   const bool v2 = storage.model_version >= 2;
   const bool energy_response = v2 && storage.energy_response_version >= 1;
+  const bool depth_rim = v2 && storage.rim_mode == SHD_PRINCIPLED_NPR_RIM_SCREEN_DEPTH;
+  for (const UString id : {"rim_pixel_width"_ustr, "rim_depth_threshold"_ustr,
+                           "rim_depth_softness"_ustr, "rim_thickness"_ustr,
+                           "rim_thickness_falloff"_ustr})
+  {
+    if (bNodeSocket *socket = bke::node_find_socket(*node, SOCK_IN, id)) {
+      const bool fresnel_input = ELEM(id, "rim_thickness"_ustr, "rim_thickness_falloff"_ustr);
+      bke::node_set_socket_availability(*ntree, *socket, fresnel_input ? !depth_rim : depth_rim);
+    }
+  }
   if (bNodeSocket *socket = bke::node_find_socket(*node, SOCK_IN, "intensity_influence"_ustr)) {
     bke::node_set_socket_availability(*ntree, *socket, !energy_response);
   }

@@ -711,6 +711,7 @@ set(GLSL_SRC
   shaders/material/gpu_shader_material_principled_shared.glsl
   shaders/material/gpu_shader_material_principled_npr.glsl
   shaders/material/gpu_shader_material_principled_npr_v2.glsl
+  shaders/material/gpu_shader_material_principled_npr_depth_rim.glsl
   shaders/material/gpu_shader_material_principled_npr_v2_light.glsl
   shaders/material/gpu_shader_material_principled_npr_v2_math.glsl
   shaders/material/gpu_shader_material_quaternion_to_rotation.glsl

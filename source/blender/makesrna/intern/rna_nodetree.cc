@@ -10228,6 +10228,36 @@ static void def_sh_principled_npr(BlenderRNA * /*brna*/, StructRNA *srna)
                            "0 preserves legacy light bias; 1 lets received light energy move the "
                            "diffuse bands. Upgrade by creating an explicit copy");
 
+  static const EnumPropertyItem rim_mode_items[] = {
+      {SHD_PRINCIPLED_NPR_RIM_FRESNEL, "FRESNEL", 0, "Fresnel",
+       "View-normal rim using the existing thickness controls"},
+      {SHD_PRINCIPLED_NPR_RIM_SCREEN_DEPTH, "SCREEN_DEPTH", 0, "Screen Depth",
+       "Approximately constant pixel-width object silhouette from visible depth and IDs; opaque and binary "
+       "cutout surfaces only, not Blended, fractional Alpha or probe capture"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  prop = RNA_def_property(srna, "rim_mode", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, rim_mode_items);
+  RNA_def_property_enum_default(prop, SHD_PRINCIPLED_NPR_RIM_FRESNEL);
+  RNA_def_property_ui_text(prop, "Rim Mode", "Rim construction method (V2)");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
+  static const EnumPropertyItem highlight_light_shape_items[] = {
+      {SHD_PRINCIPLED_NPR_HIGHLIGHT_DIRECTION, "DIRECTION", 0, "Direction (Fast)",
+       "Evaluate complete GGX once per light direction; roughness controls the lobe, without "
+       "integrating emitter radius or shape"},
+      {SHD_PRINCIPLED_NPR_HIGHLIGHT_INTEGRATED, "INTEGRATED", 0, "Emitter Shape (Advanced)",
+       "Progressively integrate GGX over the finite emitter. More expensive and needs render "
+       "samples to converge; hard remapping is applied to each sample"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  prop = RNA_def_property(srna, "highlight_light_shape", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_items(prop, highlight_light_shape_items);
+  RNA_def_property_ui_text(prop, "Light Shape", "Finite emitter treatment for direct highlights only");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
   prop = RNA_def_property(srna, "shadow_quality", PROP_ENUM, PROP_NONE);
   RNA_def_property_enum_items(prop, shadow_quality_items);
   RNA_def_property_enum_default(prop, SHD_SHADER_INFO_SHADOW_TEMPORAL);

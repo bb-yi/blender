@@ -7,13 +7,18 @@
 
 #include "gpu_shader_material_principled_npr_v2_math.glsl"
 
-/* Deterministic balance-heuristic MIS: emitter sampling + anisotropic GGX VNDF.
+/* Balance-heuristic MIS: emitter sampling + anisotropic GGX VNDF.
  * Unlike an emitter-only grid, VNDF samples retain a narrow highlight inside a large emitter.
  * Both complete single-light integrals are evaluated BEFORE the caller reshapes the highlight.
+ * Pure wrappers retain the deterministic zero-offset oracle. Production finite lights shift
+ * both strategies per EEVEE accumulation sample, avoiding a permanently repeated quadrature.
+ * Nonlinear NPR reshaping remains per sample: averaging reshaped samples is not equivalent
+ * to reshaping their mean, especially for the hard-edge endpoint.
  * This budget is an internal integration setting, not another material control.
  * The reference includes normal incidence and a fixed 45-degree pure-F90 contribution.
  * At 64 samples per strategy these plus the actual response require 384 GGX evaluations;
  * non-unit size adds 256 original-reference evaluations. This is not a performance claim. */
+#if defined(NPR_V2_LIGHT_MATH_ONLY) || defined(MAT_NPR_FINITE_HIGHLIGHT)
 #define NPR_V2_LIGHT_SAMPLE_COUNT 64
 #define NPR_V2_EMITTER_CONE 0
 #define NPR_V2_EMITTER_RECT 1
@@ -147,7 +152,7 @@ float npr_v2_ggx_vndf_pdf(float3 N, float3 V, float3 L, float3 T, float3 B, floa
   return distribution * npr_v2_smith_g1(V, N, T, B, axes) / (4.0f * NoV);
 }
 
-float3 npr_v2_integrate_emitter(NPRV2Emitter emitter,
+float3 npr_v2_integrate_emitter_shifted(NPRV2Emitter emitter,
                                float3 N,
                                float3 V,
                                float3 tangent,
@@ -155,7 +160,8 @@ float3 npr_v2_integrate_emitter(NPRV2Emitter emitter,
                                float3 base,
                                float metallic,
                                float ior,
-                               int sample_count)
+                               int sample_count,
+                               float2 sample_offset)
 {
   N = npr_v2_safe_normalize(N, float3(0.0f, 0.0f, 1.0f));
   V = npr_v2_safe_normalize(V, N);
@@ -172,6 +178,10 @@ float3 npr_v2_integrate_emitter(NPRV2Emitter emitter,
   int count = max(sample_count, 1);
   for (int i = 0; i < count; i++) {
     float2 random_value = npr_v2_light_sequence(i, count);
+    /* Keep the zero-offset path bit-for-bit equivalent to the deterministic oracle. */
+    if (any(notEqual(sample_offset, float2(0.0f)))) {
+      random_value = fract(random_value + sample_offset);
+    }
     float4 emitter_direction = npr_v2_emitter_sample(emitter, random_value);
     if (emitter_direction.w > 0.0f) {
       float bsdf_pdf = npr_v2_ggx_vndf_pdf(N, V, emitter_direction.xyz, T, B, axes);
@@ -182,7 +192,7 @@ float3 npr_v2_integrate_emitter(NPRV2Emitter emitter,
 
     /* A golden-angle azimuth avoids synchronizing the VNDF's few grazing-tail samples
      * with the emitter grid. Keep the radial coordinate stratified. */
-    random_value.y = fract((float(i) + 0.5f) * 0.6180339887498949f);
+    random_value.y = fract((float(i) + 0.5f) * 0.6180339887498949f + sample_offset.y);
     float3 direction = npr_v2_ggx_vndf_direction(N, V, T, B, axes, random_value);
     float emitter_pdf = npr_v2_emitter_pdf(emitter, direction);
     if (emitter_pdf > 0.0f) {
@@ -192,6 +202,20 @@ float3 npr_v2_integrate_emitter(NPRV2Emitter emitter,
     }
   }
   return integrated / float(count);
+}
+
+float3 npr_v2_integrate_emitter(NPRV2Emitter emitter,
+                               float3 N,
+                               float3 V,
+                               float3 tangent,
+                               float4 shape,
+                               float3 base,
+                               float metallic,
+                               float ior,
+                               int sample_count)
+{
+  return npr_v2_integrate_emitter_shifted(
+      emitter, N, V, tangent, shape, base, metallic, ior, sample_count, float2(0.0f));
 }
 
 /* GLSLLight is expressed using point-friendly power. Undo this conversion exactly once.
@@ -210,6 +234,9 @@ float3 npr_v2_finite_radiance(float3 specular_color,
   return specular_color * (attenuation / denominator);
 }
 
+#endif /* Finite-emitter implementation. */
+
+#if defined(NPR_V2_LIGHT_MATH_ONLY) || defined(MAT_NPR_REFERENCE_HIGHLIGHT)
 float3 npr_v2_preserve_light_reference(float3 response,
                                        float3 resized_reference,
                                        float3 original_reference)
@@ -265,6 +292,34 @@ void npr_v2_punctual_response(float3 direction,
   }
 }
 
+#endif /* Reference and range compensation. */
+
+#if defined(NPR_V2_LIGHT_MATH_ONLY) || \
+    (defined(MAT_NPR_FINITE_HIGHLIGHT) && defined(MAT_NPR_REFERENCE_HIGHLIGHT))
+float3 npr_v2_emitter_reference_shifted(NPRV2Emitter emitter,
+                                float3 tangent,
+                                float4 shape,
+                                float3 base,
+                                float metallic,
+                                float ior,
+                                int sample_count,
+                                float2 sample_offset)
+{
+  float3 center = npr_v2_safe_normalize(emitter.center, float3(0.0f, 0.0f, 1.0f));
+  float3 normal = npr_v2_integrate_emitter_shifted(
+      emitter, center, center, tangent, shape, base, metallic, ior, sample_count, sample_offset);
+  float f90 = npr_v2_material_f90(metallic, ior);
+  if (f90 <= 0.0f) {
+    return normal;
+  }
+  float3 grazing_N, grazing_V;
+  npr_v2_grazing_reference_frame(center, tangent, grazing_N, grazing_V);
+  float3 grazing = npr_v2_integrate_emitter_shifted(
+      emitter, grazing_N, grazing_V, tangent, shape, float3(0.0f), 1.0f, ior,
+      sample_count, sample_offset) * f90;
+  return npr_v2_complete_reference(normal, grazing);
+}
+
 float3 npr_v2_emitter_reference(NPRV2Emitter emitter,
                                 float3 tangent,
                                 float4 shape,
@@ -273,18 +328,35 @@ float3 npr_v2_emitter_reference(NPRV2Emitter emitter,
                                 float ior,
                                 int sample_count)
 {
-  float3 center = npr_v2_safe_normalize(emitter.center, float3(0.0f, 0.0f, 1.0f));
-  float3 normal = npr_v2_integrate_emitter(
-      emitter, center, center, tangent, shape, base, metallic, ior, sample_count);
-  float f90 = npr_v2_material_f90(metallic, ior);
-  if (f90 <= 0.0f) {
-    return normal;
+  return npr_v2_emitter_reference_shifted(
+      emitter, tangent, shape, base, metallic, ior, sample_count, float2(0.0f));
+}
+
+void npr_v2_emitter_response_shifted(NPRV2Emitter emitter,
+                             float3 N,
+                             float3 V,
+                             float3 tangent,
+                             float4 shape,
+                             float3 base,
+                             float metallic,
+                             float ior,
+                             int sample_count,
+                             float3 &response,
+                             float3 &reference,
+                             float2 sample_offset)
+{
+  response = npr_v2_integrate_emitter_shifted(
+      emitter, N, V, tangent, shape, base, metallic, ior, sample_count, sample_offset);
+  reference = npr_v2_emitter_reference_shifted(
+      emitter, tangent, shape, base, metallic, ior, sample_count, sample_offset);
+  if (shape.w != 1.0f) {
+    float4 original_shape = shape;
+    original_shape.w = 1.0f;
+    float3 original_reference = npr_v2_emitter_reference_shifted(
+        emitter, tangent, original_shape, base, metallic, ior, sample_count, sample_offset);
+    response = npr_v2_preserve_light_reference(response, reference, original_reference);
+    reference = original_reference;
   }
-  float3 grazing_N, grazing_V;
-  npr_v2_grazing_reference_frame(center, tangent, grazing_N, grazing_V);
-  float3 grazing = npr_v2_integrate_emitter(
-      emitter, grazing_N, grazing_V, tangent, shape, float3(0.0f), 1.0f, ior, sample_count) * f90;
-  return npr_v2_complete_reference(normal, grazing);
 }
 
 void npr_v2_emitter_response(NPRV2Emitter emitter,
@@ -299,17 +371,12 @@ void npr_v2_emitter_response(NPRV2Emitter emitter,
                              float3 &response,
                              float3 &reference)
 {
-  response = npr_v2_integrate_emitter(emitter, N, V, tangent, shape, base, metallic, ior, sample_count);
-  reference = npr_v2_emitter_reference(emitter, tangent, shape, base, metallic, ior, sample_count);
-  if (shape.w != 1.0f) {
-    float4 original_shape = shape;
-    original_shape.w = 1.0f;
-    float3 original_reference = npr_v2_emitter_reference(
-        emitter, tangent, original_shape, base, metallic, ior, sample_count);
-    response = npr_v2_preserve_light_reference(response, reference, original_reference);
-    reference = original_reference;
-  }
+  npr_v2_emitter_response_shifted(
+      emitter, N, V, tangent, shape, base, metallic, ior, sample_count,
+      response, reference, float2(0.0f));
 }
+
+#endif /* Finite-emitter reference. */
 
 #ifndef NPR_V2_LIGHT_MATH_ONLY
 #  include "gpu_shader_material_glsl_light_access.glsl"
@@ -324,6 +391,7 @@ void npr_v2_light_response(uint light_index,
                            float3 base,
                            float metallic,
                            float ior,
+                           bool use_light_shape,
                            bool need_reference,
                            float3 &response,
                            float3 &reference)
@@ -336,6 +404,24 @@ void npr_v2_light_response(uint light_index,
   {
     return;
   }
+  if (!use_light_shape) {
+    /* Analytic GGX is the default. Emitter integration is an explicit optional
+     * model, not the mechanism that makes roughness or NPR edges soft. */
+    float3 L = npr_v2_safe_normalize(lamp.vector, N);
+    float3 intensity = lamp.specular_color * lamp.attenuation;
+#    if defined(MAT_NPR_REFERENCE_HIGHLIGHT)
+    if (need_reference) {
+      npr_v2_punctual_response(L, N, V, tangent, shape, base, metallic, ior, response, reference);
+      response *= intensity;
+      reference *= intensity;
+      return;
+    }
+#    endif
+    response = npr_v2_ggx_response(N, V, L, tangent, shape, base, metallic, ior);
+    response *= intensity;
+    return;
+  }
+#    if defined(MAT_NPR_FINITE_HIGHLIGHT)
   LightData light;
   LightVector lv;
   bool is_directional;
@@ -351,13 +437,15 @@ void npr_v2_light_response(uint light_index,
                                               false;
   if (punctual) {
     float3 intensity = lamp.specular_color * lamp.attenuation;
+#      if defined(MAT_NPR_REFERENCE_HIGHLIGHT)
     if (need_reference) {
       npr_v2_punctual_response(lv.L, N, V, tangent, shape, base, metallic, ior, response, reference);
+      response *= intensity;
       reference *= intensity;
+      return;
     }
-    else {
-      response = npr_v2_ggx_response(N, V, lv.L, tangent, shape, base, metallic, ior);
-    }
+#      endif
+    response = npr_v2_ggx_response(N, V, lv.L, tangent, shape, base, metallic, ior);
     response *= intensity;
     return;
   }
@@ -402,10 +490,16 @@ void npr_v2_light_response(uint light_index,
                                           light_point_light(light, is_directional, lv),
                                           glsl_light_shape_radiance(light),
                                           glsl_light_point_radiance(light));
+  /* One phase per lamp, not per pixel. Actual, normal-incidence, F90 and resized
+   * references share this offset. Direction mode and true punctual lights have
+   * already returned without reading the accumulation sampler. */
+  float2 light_phase = fract(float(light_index + 1u) * float2(0.754877666f, 0.569840291f));
+  float2 sample_offset = fract(sampling_rng_2D_get(SAMPLING_RAYTRACE_U) + light_phase);
   /* The caller needs no reference for the unresized GGX identity with a constant tint.
    * Keep the actual response's complete MIS integral, only omitting unused reference integrals. */
+#      if defined(MAT_NPR_REFERENCE_HIGHLIGHT)
   if (need_reference) {
-    npr_v2_emitter_response(emitter,
+    npr_v2_emitter_response_shifted(emitter,
                            N,
                            V,
                            tangent,
@@ -415,14 +509,18 @@ void npr_v2_light_response(uint light_index,
                            ior,
                            NPR_V2_LIGHT_SAMPLE_COUNT,
                            response,
-                           reference);
+                           reference,
+                           sample_offset);
+    response *= radiance;
     reference *= radiance;
+    return;
   }
-  else {
-    response = npr_v2_integrate_emitter(
-        emitter, N, V, tangent, shape, base, metallic, ior, NPR_V2_LIGHT_SAMPLE_COUNT);
-  }
+#      endif
+  response = npr_v2_integrate_emitter_shifted(
+      emitter, N, V, tangent, shape, base, metallic, ior,
+      NPR_V2_LIGHT_SAMPLE_COUNT, sample_offset);
   response *= radiance;
+#    endif /* MAT_NPR_FINITE_HIGHLIGHT */
 #  endif
 }
 #endif
