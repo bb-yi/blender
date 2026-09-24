@@ -1162,14 +1162,13 @@ struct Dlss5D3D12Session::Impl {
                         const bool color_is_scene_linear,
                         const bool depth_is_reverse_z)
   {
-    if (execution_failed || !warmup()) {
-      return false;
-    }
-    if (input_extent.x < 32 || input_extent.y < 32 || output_extent.x < 32 ||
-        output_extent.y < 32 || guide_extent.x < 32 || guide_extent.y < 32 ||
+    if (!dlss5_extent_supported(input_extent) || guide_extent.x < 32 || guide_extent.y < 32 ||
         input_extent != output_extent)
     {
-      set_error("DLSSNR requires matching color/output extents >= 32px");
+      set_error("DLSSNR requires matching extents, edges >= 32px and at least one edge > 64px");
+      return false;
+    }
+    if (execution_failed || !warmup()) {
       return false;
     }
     const bool same_size = initialized && color.extent == input_extent &&

@@ -7,11 +7,13 @@
  */
 
 #define DNA_DEPRECATED_ALLOW
+#define DNA_GENFILE_VERSIONING_MACROS
 
 #include "NOD_geometry_nodes_srna.hh"
 #include "NOD_socket.hh"
 
 #include "DNA_ID.h"
+#include "DNA_genfile.h"
 #include "DNA_brush_types.h"
 #include "DNA_camera_types.h"
 #include "DNA_curve_types.h"
@@ -23,7 +25,6 @@
 #include "DNA_screen_types.h"
 #include "DNA_windowmanager_types.h"
 #include "DNA_xr_types.h"
-#include "DNA_view3d_types.h"
 
 #include "BLI_listbase_iterator.hh"
 #include "BLI_string.h"
@@ -643,33 +644,6 @@ void do_versions_after_linking_520(FileData *fd, Main *bmain)
     version_scene_time_shader_nodes(bmain);
   }
 
-
-  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 49)) {
-    for (bScreen &screen : bmain->screens) {
-      for (ScrArea &area : screen.areabase) {
-        for (SpaceLink &sl : area.spacedata) {
-          if (sl.spacetype == SPACE_VIEW3D) {
-            View3D *v3d = reinterpret_cast<View3D *>(&sl);
-            /* New overlay field is zero in old files; 0 is invalid for signed mapping. */
-            if (!(v3d->overlay.value_info_range > 0.0f)) {
-              v3d->overlay.value_info_range = 1.0f;
-            }
-          }
-        }
-      }
-    }
-    for (Scene &scene : bmain->scenes) {
-      scene.eevee.dlss5_intensity = 1.0f;
-      scene.eevee.dlss5_local_tone_strength = 1.0f;
-      scene.eevee.dlss5_local_structure_strength = 1.0f;
-      scene.eevee.dlss5_skin_structure_strength = -1.0f;
-      scene.eevee.dlss5_mode = SCE_EEVEE_DLSS5_OFF;
-      scene.eevee.dlss5_use_auto_mask = false;
-      scene.eevee.dlss5_ui_correction = false;
-      scene.eevee.dlss5_render_scale = 1;
-    }
-  }
-
   /**
    * Always bump subversion in BKE_blender_version.h when adding versioning
    * code here, and wrap it inside a MAIN_VERSION_FILE_ATLEAST check.
@@ -696,7 +670,7 @@ static void version_solid_color_width_height_defaults(Main &bmain)
   }
 }
 
-void blo_do_versions_520(FileData * /*fd*/, Library * /*lib*/, Main *bmain)
+void blo_do_versions_520(FileData *fd, Library * /*lib*/, Main *bmain)
 {
   if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 1)) {
     for (Scene &scene : bmain->scenes) {
@@ -1070,20 +1044,10 @@ void blo_do_versions_520(FileData * /*fd*/, Library * /*lib*/, Main *bmain)
   }
 
 
-  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 49)) {
-    for (bScreen &screen : bmain->screens) {
-      for (ScrArea &area : screen.areabase) {
-        for (SpaceLink &sl : area.spacedata) {
-          if (sl.spacetype == SPACE_VIEW3D) {
-            View3D *v3d = reinterpret_cast<View3D *>(&sl);
-            /* New overlay field is zero in old files; 0 is invalid for signed mapping. */
-            if (!(v3d->overlay.value_info_range > 0.0f)) {
-              v3d->overlay.value_info_range = 1.0f;
-            }
-          }
-        }
-      }
-    }
+  /* DLSS first shipped on a branch: main's 502.50 files do not contain these
+   * fields, while DLSS 502.49 files already contain user settings. File version
+   * alone cannot distinguish them. Initialize only absent data, once before linking. */
+  if (!DNA_struct_member_exists(fd->filesdna, "SceneEEVEE", "float", "dlss5_intensity")) {
     for (Scene &scene : bmain->scenes) {
       scene.eevee.dlss5_intensity = 1.0f;
       scene.eevee.dlss5_local_tone_strength = 1.0f;
@@ -1093,6 +1057,11 @@ void blo_do_versions_520(FileData * /*fd*/, Library * /*lib*/, Main *bmain)
       scene.eevee.dlss5_use_auto_mask = false;
       scene.eevee.dlss5_ui_correction = false;
       scene.eevee.dlss5_render_scale = 1;
+    }
+  }
+  if (!DNA_struct_member_exists(fd->filesdna, "SceneEEVEE", "char", "dlss5_style")) {
+    for (Scene &scene : bmain->scenes) {
+      scene.eevee.dlss5_style = 2;
     }
   }
 

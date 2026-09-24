@@ -14,6 +14,14 @@ class Texture;
 
 namespace blender::eevee {
 
+/* The bundled feature-18 runtime accepts Create/Evaluate but never completes
+ * GPU work when both edges are <= 64 pixels, including in the standalone D3D12
+ * host. Reject those extents before submission, not by waiting on the GPU. */
+inline bool dlss5_extent_supported(const int2 extent)
+{
+  return extent.x >= 32 && extent.y >= 32 && (extent.x > 64 || extent.y > 64);
+}
+
 struct Dlss5NRSettings {
   float intensity = 1.0f;
   float local_tone_strength = 1.0f;

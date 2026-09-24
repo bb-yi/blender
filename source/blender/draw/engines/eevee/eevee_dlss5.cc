@@ -160,10 +160,14 @@ gpu::Texture *Dlss5Module::process(const Dlss5FrameInputs &inputs, draw::View &v
   }
   if (inputs.color == nullptr || inputs.base_color == nullptr || inputs.depth == nullptr ||
       inputs.velocity == nullptr ||
-      inputs.input_extent.x < 32 || inputs.input_extent.y < 32 ||
-      inputs.output_extent.x < 32 || inputs.output_extent.y < 32 ||
       inputs.input_extent != inputs.output_extent)
   {
+    return inputs.color;
+  }
+  if (!dlss5_extent_supported(inputs.input_extent)) {
+    force_history_reset_ = true;
+    publish_status(inputs.is_viewport,
+                   "Bypassed: DLSSNR needs edges >= 32px and at least one edge > 64px");
     return inputs.color;
   }
   const int2 guide_extent = inputs.guide_extent.x > 0 && inputs.guide_extent.y > 0 ?

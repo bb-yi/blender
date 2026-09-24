@@ -173,68 +173,6 @@ gpu::Texture *Film::get_aov_texture(ViewLayerAOV *aov)
   return accum_tx.layer_view(index);
 }
 
-bool Film::sample_aov_pixel(const char *aov_name, int2 display_texel, float4 &r_color)
-{
-  if (aov_name == nullptr || aov_name[0] == 0 || inst_.view_layer == nullptr) {
-    return false;
-  }
-
-  ViewLayerAOV *aov = static_cast<ViewLayerAOV *>(
-      BLI_findstring(&inst_.view_layer->aovs, aov_name, offsetof(ViewLayerAOV, name)));
-  if (aov == nullptr || (aov->flag & AOV_CONFLICT) != 0) {
-    return false;
-  }
-
-  gpu::Texture *pass_tx = this->get_aov_texture(aov);
-  if (pass_tx == nullptr) {
-    return false;
-  }
-
-  const int2 film_texel = display_texel - data_.offset;
-  const int w = GPU_texture_width(pass_tx);
-  const int h = GPU_texture_height(pass_tx);
-  if (film_texel.x < 0 || film_texel.y < 0 || film_texel.x >= w || film_texel.y >= h) {
-    return false;
-  }
-
-  /* Never attach the live AOV texture to a temporary framebuffer: that can detach it from
-   * engine resources. Copy into a HOST_READ texture, then read back. */
-  const bool is_value = (aov->type == AOV_TYPE_VALUE);
-  const gpu::TextureFormat format = is_value ? gpu::TextureFormat::SFLOAT_16 :
-                                               gpu::TextureFormat::SFLOAT_16_16_16_16;
-  gpu::Texture *copy_tx = GPU_texture_create_2d(
-      "value_info_aov_copy", w, h, 1, format, GPU_TEXTURE_USAGE_HOST_READ, nullptr);
-  if (copy_tx == nullptr) {
-    return false;
-  }
-
-  GPU_texture_copy(copy_tx, pass_tx);
-  GPU_memory_barrier(GPU_BARRIER_TEXTURE_UPDATE);
-
-  bool ok = false;
-  if (is_value) {
-    float *data = static_cast<float *>(GPU_texture_read(copy_tx, GPU_DATA_FLOAT, 0));
-    if (data != nullptr) {
-      const float v = data[film_texel.y * w + film_texel.x];
-      r_color = float4(v, v, v, 1.0f);
-      MEM_delete(data);
-      ok = true;
-    }
-  }
-  else {
-    float *data = static_cast<float *>(GPU_texture_read(copy_tx, GPU_DATA_FLOAT, 0));
-    if (data != nullptr) {
-      const float *px = data + (film_texel.y * w + film_texel.x) * 4;
-      r_color = float4(px[0], px[1], px[2], px[3]);
-      MEM_delete(data);
-      ok = true;
-    }
-  }
-
-  GPU_texture_free(copy_tx);
-  return ok;
-}
-
 float *Film::read_native_postfx_output(ViewLayerNativePostFXOutput *output)
 {
   gpu::Texture *pass_tx = this->get_native_postfx_output_texture(output);
