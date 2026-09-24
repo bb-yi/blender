@@ -348,6 +348,19 @@ static eViewLayerEEVEEPassType get_viewport_compositor_enabled_passes(
   return viewport_compositor_enabled_passes;
 }
 
+/* Light passes are stored pre-divided by their matching Color pass, so Color must be enabled
+ * whenever Light is (#161352). */
+static eViewLayerEEVEEPassType with_light_pass_color_dependencies(eViewLayerEEVEEPassType passes)
+{
+  if (passes & EEVEE_RENDER_PASS_DIFFUSE_LIGHT) {
+    passes |= EEVEE_RENDER_PASS_DIFFUSE_COLOR;
+  }
+  if (passes & EEVEE_RENDER_PASS_SPECULAR_LIGHT) {
+    passes |= EEVEE_RENDER_PASS_SPECULAR_COLOR;
+  }
+  return passes;
+}
+
 void Film::init(const int2 &extent, const rcti *output_rect)
 {
   using namespace math;
@@ -432,14 +445,7 @@ void Film::init(const int2 &extent, const rcti *output_rect)
       needed_passes |= EEVEE_RENDER_PASS_CRYPTOMATTE_OBJECT;
     }
 
-    /* Force enable color passes if light passes are enabled.
-     * This is needed since we need to pre-divide by them. */
-    if (enabled_passes_ & EEVEE_RENDER_PASS_DIFFUSE_LIGHT) {
-      enabled_passes_ |= EEVEE_RENDER_PASS_DIFFUSE_COLOR;
-    }
-    if (enabled_passes_ & EEVEE_RENDER_PASS_SPECULAR_LIGHT) {
-      enabled_passes_ |= EEVEE_RENDER_PASS_SPECULAR_COLOR;
-    }
+    needed_passes = with_light_pass_color_dependencies(needed_passes);
 
     /* Filter obsolete passes. */
     needed_passes &= ~(EEVEE_RENDER_PASS_UNUSED_8 | EEVEE_RENDER_PASS_UNUSED_14);

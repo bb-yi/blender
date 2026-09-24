@@ -4033,7 +4033,6 @@ static void smooth_brush_toggle_on(Main *bmain,
 
   toggle_settings.original_brush_size = BKE_brush_size_get(paint, smooth_brush);
   BKE_brush_size_set(paint, smooth_brush, cur_brush_size);
-  bke::brush::common_pressure_curves_init(*smooth_brush);
 }
 
 static void smooth_brush_toggle_off(Paint *paint, StrokeCache *cache)
@@ -4090,14 +4089,6 @@ static void mask_brush_toggle_on(Main *bmain, Paint *paint, StrokeToggleSettings
   const int cur_brush_size = BKE_brush_size_get(paint, cur_brush);
   toggle_settings.original_brush_size = BKE_brush_size_get(paint, mask_brush);
   BKE_brush_size_set(paint, mask_brush, cur_brush_size);
-
-  if (mask_brush->curve_distance_falloff) {
-    BKE_curvemapping_init(mask_brush->curve_distance_falloff);
-  }
-
-  if (mask_brush->curve_strength) {
-    BKE_curvemapping_init(mask_brush->curve_strength);
-  }
 }
 
 static void mask_brush_toggle_off(Paint *paint, StrokeCache *cache)
@@ -5063,8 +5054,7 @@ struct SculptPaintStroke final : public PaintStroke {
   /* Needed to tag other viewports */
   wmWindowManager *wm_;
 
-  SculptPaintStroke(bContext *C, wmOperator *op, const int event_type)
-      : PaintStroke(C, op, event_type)
+  SculptPaintStroke(bContext *C, wmOperator *op, const wmEvent *event) : PaintStroke(C, op, event)
   {
     bmain_ = CTX_data_main(C);
 
@@ -5138,7 +5128,6 @@ static void brush_stroke_init(bContext *C, const wmOperator *op)
   ToolSettings *tool_settings = CTX_data_tool_settings(C);
   Sculpt &sd = *tool_settings->sculpt;
   SculptSession &ss = *CTX_data_active_object(C)->runtime->sculpt_session;
-  const Brush *brush = BKE_paint_brush_for_read(&sd.paint);
 
   if (!G.background) {
     view3d_operator_needs_gpu(C);
@@ -5149,6 +5138,8 @@ static void brush_stroke_init(bContext *C, const wmOperator *op)
     ss.cache->toggle_settings = create_toggle_settings(*op, *CTX_data_main(C), sd.paint);
   }
 
+  Brush *brush = BKE_paint_brush(&sd.paint);
+  bke::brush::common_pressure_curves_init(*brush);
   brush_init_tex(sd, ss);
 
   const bool needs_colors = brush_type_is_paint(brush->sculpt_brush_type) &&
@@ -6074,7 +6065,10 @@ static wmOperatorStatus sculpt_brush_stroke_invoke(bContext *C,
     return OPERATOR_CANCELLED;
   }
 
-  stroke = MEM_new<SculptPaintStroke>(__func__, C, op, event->type);
+  bool pen_flip;
+  WM_event_tablet_data(event, &pen_flip, nullptr);
+
+  stroke = MEM_new<SculptPaintStroke>(__func__, C, op, event);
   brush_stroke_init(C, op);
 
   Sculpt &sd = *CTX_data_tool_settings(C)->sculpt;
@@ -6155,7 +6149,7 @@ static wmOperatorStatus sculpt_brush_stroke_exec(bContext *C, wmOperator *op)
 {
   brush_stroke_init(C, op);
 
-  SculptPaintStroke *stroke = MEM_new<SculptPaintStroke>(__func__, C, op, 0);
+  SculptPaintStroke *stroke = MEM_new<SculptPaintStroke>(__func__, C, op, nullptr);
   op->customdata = stroke;
 
   stroke->exec(C, op);
