@@ -1788,6 +1788,17 @@ GHOST_TSuccess GHOST_ContextVK::initializeDrawingContext()
     optional_device_extensions.append(VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME);
 #endif
 
+    /* External semaphore extensions for D3D12/Vulkan interop (DLSS5).
+     * The base + win32 handle extensions must be enabled on the logical
+     * device, otherwise vkGetDeviceProcAddr("vkImportSemaphoreWin32HandleKHR")
+     * returns null and DLSS5 falls back to CPU WaitForSingleObject per frame
+     * (the root cause of viewport stutter). Physical-device support is checked
+     * separately in gpu_context.cc::create_from_d3d12_fence. */
+#ifdef _WIN32
+    optional_device_extensions.append(VK_KHR_EXTERNAL_SEMAPHORE_EXTENSION_NAME);
+    optional_device_extensions.append(VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME);
+#endif
+
 #ifndef __APPLE__
     required_device_extensions.append(VK_EXT_PROVOKING_VERTEX_EXTENSION_NAME);
 #endif

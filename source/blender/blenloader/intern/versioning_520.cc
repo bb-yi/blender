@@ -1094,6 +1094,27 @@ void blo_do_versions_520(FileData *fd, Library * /*lib*/, Main *bmain)
     FOREACH_NODETREE_END;
   }
 
+  /* DLSS first shipped on a branch: main's 502.50 files do not contain these
+   * fields, while DLSS 502.49 files already contain user settings. File version
+   * alone cannot distinguish them. Initialize only absent data, once before linking. */
+  if (!DNA_struct_member_exists(fd->filesdna, "SceneEEVEE", "float", "dlss5_intensity")) {
+    for (Scene &scene : bmain->scenes) {
+      scene.eevee.dlss5_intensity = 1.0f;
+      scene.eevee.dlss5_local_tone_strength = 1.0f;
+      scene.eevee.dlss5_local_structure_strength = 1.0f;
+      scene.eevee.dlss5_skin_structure_strength = -1.0f;
+      scene.eevee.dlss5_mode = SCE_EEVEE_DLSS5_OFF;
+      scene.eevee.dlss5_use_auto_mask = false;
+      scene.eevee.dlss5_ui_correction = false;
+      scene.eevee.dlss5_render_scale = 1;
+    }
+  }
+  if (!DNA_struct_member_exists(fd->filesdna, "SceneEEVEE", "char", "dlss5_style")) {
+    for (Scene &scene : bmain->scenes) {
+      scene.eevee.dlss5_style = 2;
+    }
+  }
+
   /**
    * Always bump subversion in BKE_blender_version.h when adding versioning
    * code here, and wrap it inside a MAIN_VERSION_FILE_ATLEAST check.

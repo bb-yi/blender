@@ -32,6 +32,7 @@
 #include "ED_view3d.hh"
 #include "GPU_context.hh"
 #include "GPU_pass.hh"
+#include "GPU_platform.hh"
 #include "IMB_imbuf_types.hh"
 
 #include "RE_engine.h"
@@ -327,6 +328,12 @@ namespace blender::eevee
     volume.init();
     lookdev.init(&lookdev_rect);
 
+    if (GPU_backend_get_type() == GPU_BACKEND_VULKAN &&
+        scene->eevee.dlss5_mode == SCE_EEVEE_DLSSNR && scene->eevee.dlss5_intensity != 0.0f)
+    {
+      dlss5.warmup();
+    }
+
     /* Request static shaders */
     ShaderGroups shader_request = DEFERRED_LIGHTING_SHADERS | SHADOW_SHADERS | FILM_SHADERS |
       HIZ_SHADERS | SPHERE_PROBE_SHADERS | VOLUME_PROBE_SHADERS |
@@ -502,6 +509,27 @@ namespace blender::eevee
     update_eval_members();
     telemetry.maybe_begin_viewport_frame();
     ScopedTelemetrySample telemetry_sample(telemetry, TelemetryStageId::SyncBegin);
+    dlss5_settings_changed_ = false;
+    if (scene != nullptr) {
+      const SceneEEVEE &dlss5 = scene->eevee;
+      bool changed = false;
+      changed |= assign_if_different(dlss5_mode_, dlss5.dlss5_mode);
+      changed |= assign_if_different(dlss5_intensity_, dlss5.dlss5_intensity);
+      changed |= assign_if_different(dlss5_local_tone_strength_,
+                                     dlss5.dlss5_local_tone_strength);
+      changed |= assign_if_different(dlss5_local_structure_strength_,
+                                     dlss5.dlss5_local_structure_strength);
+      changed |= assign_if_different(dlss5_skin_structure_strength_,
+                                     dlss5.dlss5_skin_structure_strength);
+      changed |= assign_if_different(dlss5_use_auto_mask_, dlss5.dlss5_use_auto_mask != 0);
+      changed |= assign_if_different(dlss5_ui_correction_, dlss5.dlss5_ui_correction != 0);
+      changed |= assign_if_different(dlss5_style_, dlss5.dlss5_style);
+      dlss5_settings_changed_ = changed;
+      if (changed && is_viewport()) {
+        this->dlss5.invalidate();
+        sampling.reset();
+      }
+    }
     /* Needs to be first for sun light parameters.
      * Also not skipped to be able to request world shader.
      * If engine shaders are not ready, will skip the pipeline sync. */
@@ -811,6 +839,9 @@ namespace blender::eevee
       /* Critical section. Potential gpu::Shader concurrent usage. */
       DRW_submission_start();
 
+      dlss5_reset_ = discard_viewport_history_ ||
+                     (is_viewport() && (dlss5_settings_changed_ || velocity.camera_changed_projection())) ||
+                     (is_image_render && sampling.sample_index() == 0);
       sampling.step();
       film.update_sample_table();
       uniform_data.push_update();

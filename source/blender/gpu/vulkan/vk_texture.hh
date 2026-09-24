@@ -58,6 +58,7 @@ class VKTexture : public Texture {
   VkImage vk_image_ = VK_NULL_HANDLE;
   VmaAllocation allocation_ = VK_NULL_HANDLE;
   VmaAllocationInfo allocation_info_ = {};
+  VkDeviceMemory external_memory_ = VK_NULL_HANDLE;
 
   /**
    * Image views are owned by VKTexture. When a specific image view is needed it will be created
@@ -166,6 +167,7 @@ class VKTexture : public Texture {
                      int mip_offset,
                      int layer_offset,
                      bool use_stencil) override;
+  bool init_internal_external_2D(const GPUExternalTextureHandle &external) override;
   /* Initialize VKTexture with a swapchain image. */
   void init_swapchain(VkImage vk_image, TextureFormat gpu_format);
 

@@ -17,6 +17,8 @@
 
 #include "DRW_render.hh"
 
+#include "BLI_math_base.hh"
+
 #include "GPU_debug.hh"
 
 #include "eevee_instance.hh"
@@ -335,6 +337,8 @@ namespace blender::eevee
     {
       ScopedTelemetrySample telemetry_sample(inst_.telemetry,
         TelemetryStageId::MainFilmAccumulate);
+      /* Invoke DLSS5 after the current Film sample is accumulated, while keeping
+       * the reconstructed display result out of Film's temporal history. */
       inst_.film.accumulate(jitter_view_, combined_final_tx, outline_raw_tx, outline_combined_tx);
     }
     inst_.outline.release_result();

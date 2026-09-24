@@ -729,6 +729,59 @@ class RENDER_PT_eevee_sampling_viewport(RenderButtonsPanel, Panel):
         # Add SSS sample count here.
 
 
+class RENDER_PT_eevee_dlss5(RenderButtonsPanel, Panel):
+    bl_label = "DLSS5"
+    COMPAT_ENGINES = {'BLENDER_EEVEE'}
+
+    @classmethod
+    def poll(cls, context):
+        return (context.engine in cls.COMPAT_ENGINES)
+
+    def draw(self, context):
+        import gpu
+
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+
+        props = context.scene.eevee
+        runtime_backend = gpu.platform.backend_type_get()
+        pref_backend = context.preferences.system.gpu_backend
+        is_vulkan = runtime_backend == 'VULKAN'
+
+        row = layout.row()
+        row.label(
+            text="GPU Backend: %s" % runtime_backend,
+            icon='INFO' if is_vulkan else 'ERROR',
+        )
+
+        if not is_vulkan:
+            warn = layout.column(align=True)
+            warn.label(text="DLSSNR 未运行，需要 Vulkan 并重启", icon='ERROR')
+            if pref_backend != 'VULKAN':
+                warn.label(text="偏好设置 → 系统 → GPU Backend 设为 Vulkan 后重启")
+            else:
+                warn.label(text="偏好已是 Vulkan，请完全退出后重启当前进程")
+
+        layout.prop(props, "dlss5_mode")
+        layout.label(text="Viewport: " + props.dlss5_viewport_status)
+        layout.label(text="Render: " + props.dlss5_render_status)
+
+        enabled = (props.dlss5_mode == 'DLSSNR') and is_vulkan
+        col = layout.column(align=True)
+        col.active = enabled
+        col.enabled = is_vulkan
+        col.prop(props, "dlss5_intensity")
+        col.prop(props, "dlss5_style")
+        col.prop(props, "dlss5_local_tone_strength")
+        col.prop(props, "dlss5_local_structure_strength")
+        col.prop(props, "dlss5_skin_structure_strength")
+        col.prop(props, "dlss5_use_auto_mask")
+        col.prop(props, "dlss5_ui_correction")
+        if enabled:
+            layout.label(text="DLSSNR 后处理：视口与渲染均保持原始分辨率")
+
+
 class RENDER_PT_eevee_sampling_render(RenderButtonsPanel, Panel):
     bl_label = "Render"
     bl_parent_id = "RENDER_PT_eevee_sampling"
@@ -1227,6 +1280,7 @@ classes = (
     RENDER_PT_context,
     RENDER_PT_eevee_sampling,
     RENDER_PT_eevee_sampling_viewport,
+    RENDER_PT_eevee_dlss5,
     RENDER_PT_eevee_sampling_render,
     RENDER_PT_eevee_sampling_shadows,
     RENDER_PT_eevee_sampling_advanced,
