@@ -13379,6 +13379,7 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("ShaderNode", "ShaderNodeNPR_Output", def_group_output);
   define("ShaderNode", "ShaderNodeNPR_Refraction");
   define("ShaderNode", "ShaderNodeOutlineControl");
+  define("ShaderNode", "ShaderNodeOutputOutlineShell");
   define("ShaderNode", "ShaderNodeEeveeLightShaderInfo");
   define("ShaderNode", "ShaderNodeEeveeLightShaderOutput", def_sh_eevee_light_shader_output);
   define("ShaderNode", "ShaderNodePortalIn", def_sh_portal_in);

@@ -964,7 +964,9 @@ static bool ntree_branch_node_tag(bNode *fromnode, bNode *tonode, void * /*userd
 /* Avoid adding more node execution when multiple outputs are present. */
 /* NOTE(@fclem): This is also a workaround for the old EEVEE SSS implementation where only the
  * first executed SSS node gets a SSS profile. */
-static void ntree_shader_pruned_unused(bNodeTree *ntree, bNode *output_node)
+static void ntree_shader_pruned_unused(bNodeTree *ntree,
+                                       bNode *output_node,
+                                       bool keep_side_outputs = true)
 {
   ntree_shader_disconnect_inactive_mix_branches(ntree);
 
@@ -980,10 +982,12 @@ static void ntree_shader_pruned_unused(bNodeTree *ntree, bNode *output_node)
     bke::node_chain_iterator_backwards(ntree, output_node, ntree_branch_node_tag, nullptr, 0);
   }
 
-  for (bNode &node : ntree->nodes) {
-    if (ELEM(node.type_legacy, SH_NODE_OUTPUT_AOV, SH_NODE_OUTLINE_CONTROL)) {
-      node.runtime->tmp_flag = 1;
-      bke::node_chain_iterator_backwards(ntree, &node, ntree_branch_node_tag, nullptr, 0);
+  if (keep_side_outputs) {
+    for (bNode &node : ntree->nodes) {
+      if (ELEM(node.type_legacy, SH_NODE_OUTPUT_AOV, SH_NODE_OUTLINE_CONTROL)) {
+        node.runtime->tmp_flag = 1;
+        bke::node_chain_iterator_backwards(ntree, &node, ntree_branch_node_tag, nullptr, 0);
+      }
     }
   }
 
@@ -1035,6 +1039,23 @@ static bNode *ntreeShaderFilterOutputNode(bNodeTree *localtree)
   bNode *output = nullptr;
   for (bNode &node : localtree->nodes) {
     if (node.type_legacy != SH_NODE_OUTPUT_FILTER) {
+      continue;
+    }
+    if (output == nullptr) {
+      output = &node;
+    }
+    else if ((node.flag & NODE_DO_OUTPUT) && !(output->flag & NODE_DO_OUTPUT)) {
+      output = &node;
+    }
+  }
+  return output;
+}
+
+static bNode *ntreeShaderOutlineShellOutputNode(bNodeTree *localtree)
+{
+  bNode *output = nullptr;
+  for (bNode &node : localtree->nodes) {
+    if (node.type_legacy != SH_NODE_OUTPUT_OUTLINE_SHELL || node.is_muted()) {
       continue;
     }
     if (output == nullptr) {
@@ -1137,20 +1158,24 @@ void ntreeGPUMaterialNodes(bNodeTree *localtree, GPUMaterial *mat)
 {
   bNodeTreeExec *exec;
   const bool is_filter_material = gpu_material_uses_filter_domain(mat);
+  const bool is_outline_shell = GPU_material_is_outline_shell(mat);
 
   ntree_shader_unlink_script_nodes(localtree);
   bke::node_tree_runtime::materialize_shader_portals(*localtree);
-  bNode *output = is_filter_material ? ntreeShaderFilterOutputNode(localtree) :
+  bNode *output = is_outline_shell ? ntreeShaderOutlineShellOutputNode(localtree) :
+                  is_filter_material ? ntreeShaderFilterOutputNode(localtree) :
                                        ntreeShaderOutputNode(localtree, SHD_OUTPUT_EEVEE);
 
   /* Tree is valid if it contains no undefined implicit socket type cast. */
   bool valid_tree = is_filter_material ? true : ntree_shader_implicit_closure_cast(localtree);
 
   if (valid_tree) {
-    ntree_shader_pruned_unused(localtree, output);
+    ntree_shader_pruned_unused(localtree, output, !is_outline_shell);
     if (!is_filter_material && output != nullptr) {
       ntree_shader_shader_to_rgba_branches(localtree);
-      ntree_shader_weight_tree_invert(localtree, output);
+      if (!is_outline_shell) {
+        ntree_shader_weight_tree_invert(localtree, output);
+      }
     }
   }
 
@@ -1172,12 +1197,18 @@ void ntreeGPUMaterialNodes(bNodeTree *localtree, GPUMaterial *mat)
   if (output != nullptr) {
     iter_shader_to_rgba_depth_count(localtree, output, max_depth);
   }
-  ntree_shader_to_rgba_depth_count_of_type(localtree, SH_NODE_OUTPUT_AOV, max_depth);
+  if (!is_outline_shell) {
+    ntree_shader_to_rgba_depth_count_of_type(localtree, SH_NODE_OUTPUT_AOV, max_depth);
+  }
   for (int depth = max_depth; depth >= 0; depth--) {
     ntreeExecGPUNodes(exec, mat, output, &depth);
-    ntree_exec_gpu_nodes_of_type(exec, mat, localtree, SH_NODE_OUTPUT_AOV, &depth);
+    if (!is_outline_shell) {
+      ntree_exec_gpu_nodes_of_type(exec, mat, localtree, SH_NODE_OUTPUT_AOV, &depth);
+    }
   }
-  ntree_exec_gpu_nodes_of_type(exec, mat, localtree, SH_NODE_OUTLINE_CONTROL);
+  if (!is_outline_shell) {
+    ntree_exec_gpu_nodes_of_type(exec, mat, localtree, SH_NODE_OUTLINE_CONTROL);
+  }
   ntreeShaderEndExecTree(exec);
 }
 

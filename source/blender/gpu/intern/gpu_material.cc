@@ -117,6 +117,9 @@ struct GPUMaterial {
   /* Source material, might be null for worlds and lights. */
   Material *source_material = nullptr;
   bool is_world = false;
+  /* The node graph is rooted at an Outline Shell Output node instead of the
+   * regular material output. */
+  bool is_outline_shell = false;
   /* 1D Texture array containing all color bands. */
   gpu::Texture *coba_tex = nullptr;
   /* Builder for coba_tex. */
@@ -220,7 +223,8 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
     bool deferred_compilation,
     GPUCodegenCallbackFn callback,
     void *thunk,
-    GPUMaterialPassReplacementCallbackFn pass_replacement_cb)
+    GPUMaterialPassReplacementCallbackFn pass_replacement_cb,
+    bool outline_shell_root)
 {
   /* Search if this material is not already compiled. */
   for (LinkData &link : *gpumaterials) {
@@ -238,6 +242,7 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
   GPUMaterial *mat = MEM_new<GPUMaterial>(__func__, engine);
   mat->source_material = ma;
   mat->is_world = (ma == nullptr) && compile_surface_graph && !compile_light_shader_graph;
+  mat->is_outline_shell = outline_shell_root;
   mat->uuid = shader_uuid;
   mat->name = name;
   result.material = mat;
@@ -428,6 +433,11 @@ Material *GPU_material_get_material(GPUMaterial *material)
 bool GPU_material_is_world(const GPUMaterial *material)
 {
   return material->is_world;
+}
+
+bool GPU_material_is_outline_shell(const GPUMaterial *material)
+{
+  return material->is_outline_shell;
 }
 
 GPUPass *GPU_material_get_pass(GPUMaterial *material)

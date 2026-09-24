@@ -198,7 +198,8 @@ GPUMaterialFromNodeTreeResult GPU_material_from_nodetree(
     bool deferred_compilation,
     GPUCodegenCallbackFn callback,
     void *thunk,
-    GPUMaterialPassReplacementCallbackFn pass_replacement_cb = nullptr);
+    GPUMaterialPassReplacementCallbackFn pass_replacement_cb = nullptr,
+    bool outline_shell_root = false);
 
 /* A callback passed to GPU_material_from_callbacks to construct the material graph by adding and
  * linking the necessary GPU material nodes. */
@@ -227,6 +228,7 @@ const char *GPU_material_get_name(GPUMaterial *material);
  */
 Material *GPU_material_get_material(GPUMaterial *material);
 bool GPU_material_is_world(const GPUMaterial *material);
+bool GPU_material_is_outline_shell(const GPUMaterial *material);
 /**
  * Return true if the material compilation has not yet begin or begin.
  */

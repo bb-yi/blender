@@ -1546,6 +1546,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   bool transparent_shadows;
   bool use_outline;
   bool uuid_depth_offset_affect_lighting;
+  bool outline_shell;
   material_type_from_shader_uuid(shader_uuid,
                                  pipeline_type,
                                  geometry_type,
@@ -1554,7 +1555,8 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
                                  probe_capture,
                                  transparent_shadows,
                                  use_outline,
-                                 uuid_depth_offset_affect_lighting);
+                                 uuid_depth_offset_affect_lighting,
+                                 outline_shell);
   UNUSED_VARS(uuid_depth_offset_affect_lighting);
 
   GPUCodegenOutput &codegen = *codegen_;
@@ -2382,7 +2384,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       frag_gen << graph.serialized;
     }
 
-    if (!codegen.displacement.empty()) {
+    if (!codegen.displacement.empty() && !outline_shell) {
       /* Bump displacement. Needed to recompute normals after displacement. */
       info.define("MAT_DISPLACEMENT_BUMP");
 
@@ -2713,6 +2715,7 @@ static GPUPass *pass_replacement_cb(void *void_thunk, GPUMaterial *mat)
   bool transparent_shadows;
   bool use_outline;
   bool depth_offset_affect_lighting;
+  bool outline_shell;
   material_type_from_shader_uuid(shader_uuid,
                                  pipeline_type,
                                  geometry_type,
@@ -2721,8 +2724,9 @@ static GPUPass *pass_replacement_cb(void *void_thunk, GPUMaterial *mat)
                                  probe_capture,
                                  transparent_shadows,
                                  use_outline,
-                                 depth_offset_affect_lighting);
-  UNUSED_VARS(depth_offset_affect_lighting);
+                                 depth_offset_affect_lighting,
+                                 outline_shell);
+  UNUSED_VARS(depth_offset_affect_lighting, outline_shell);
 
   bool is_shadow_pass = pipeline_type == eMaterialPipeline::MAT_PIPE_SHADOW;
   bool is_prepass = ELEM(pipeline_type,
@@ -2787,14 +2791,19 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
                                                eMaterialProbe probe_capture,
                                                bool deferred_compilation,
                                                blender::Material *default_mat,
-                                               bool use_outline)
+                                               bool use_outline,
+                                               bool outline_shell)
 {
-  eMaterialDisplacement displacement_type = to_displacement_type(blender_mat->displacement_method);
+  eMaterialDisplacement displacement_type = outline_shell ?
+                                                MAT_DISPLACEMENT_VERTEX_WITH_BUMP :
+                                                to_displacement_type(
+                                                    blender_mat->displacement_method);
   eMaterialThickness thickness_type = to_thickness_type(blender_mat->thickness_mode);
-  const bool has_depth_offset_output = material_output_has_depth_offset(nodetree) &&
+  const bool has_depth_offset_output = !outline_shell &&
+                                       material_output_has_depth_offset(nodetree) &&
                                        material_pipeline_supports_depth_offset(pipeline_type,
                                                                                geometry_type);
-  bNodeTree *npr_tree = npr_tree_get(nodetree);
+  bNodeTree *npr_tree = outline_shell ? nullptr : npr_tree_get(nodetree);
   const bool compile_npr_graph = (pipeline_type == MAT_PIPE_DEFERRED_NPR) ||
                                  (pipeline_type == MAT_PIPE_BAKE_COLOR && npr_tree != nullptr);
   const uint64_t npr_tree_key = (compile_npr_graph && npr_tree != nullptr) ?
@@ -2806,7 +2815,8 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
   /* NPR passes normally only need the attached NPR tree, but true displacement lives on the
    * primary material output. Depth Offset is also a material output and must use the same custom
    * depth for DEPTH_EQUAL and screen-space position reads. */
-  const bool compile_surface_graph = (pipeline_type != MAT_PIPE_DEFERRED_NPR) ||
+  const bool compile_surface_graph = outline_shell ||
+                                     (pipeline_type != MAT_PIPE_DEFERRED_NPR) ||
                                      needs_npr_vertex_displacement || needs_npr_depth_offset;
 
   uint64_t shader_uuid = shader_uuid_from_material_type(
@@ -2816,9 +2826,10 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
       thickness_type,
       probe_capture,
       blender_mat->blend_flag,
-      use_outline,
-      material_depth_offset_affects_lighting(blender_mat),
-      npr_tree_key);
+      outline_shell ? false : use_outline,
+      outline_shell ? false : material_depth_offset_affects_lighting(blender_mat),
+      npr_tree_key,
+      outline_shell);
 
   bool is_default_material = default_mat == nullptr;
   BLI_assert(blender_mat != default_mat);
@@ -2839,7 +2850,8 @@ GPUMaterial *ShaderModule::material_shader_get(blender::Material *blender_mat,
       deferred_compilation,
       codegen_callback,
       &thunk,
-      is_default_material ? nullptr : pass_replacement_cb);
+      is_default_material ? nullptr : pass_replacement_cb,
+      outline_shell);
   store_node_tree_errors(material_from_tree);
   return material_from_tree.material;
 }

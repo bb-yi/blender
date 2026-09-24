@@ -16,6 +16,7 @@
 #include "DNA_genfile.h"
 #include "DNA_light_types.h"
 #include "DNA_brush_types.h"
+#include "DNA_material_types.h"
 #include "DNA_camera_types.h"
 #include "DNA_curve_types.h"
 #include "DNA_mesh_types.h"
@@ -1112,6 +1113,19 @@ void blo_do_versions_520(FileData *fd, Library * /*lib*/, Main *bmain)
   if (!DNA_struct_member_exists(fd->filesdna, "SceneEEVEE", "char", "dlss5_style")) {
     for (Scene &scene : bmain->scenes) {
       scene.eevee.dlss5_style = 2;
+    }
+  }
+
+  if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 52) ||
+      !DNA_struct_member_exists(
+          fd->filesdna, "Material", "char", "outline_shell_cull_method"))
+  {
+    for (Material &material : bmain->materials) {
+      material.outline_shell_render_method = MA_OUTLINE_SHELL_DEFERRED;
+      material.outline_shell_cull_method = MA_SURFACE_CULL_FRONT;
+      material.outline_shell_ztest_mode = MA_ZTEST_LESS_EQUAL;
+      material.outline_shell_depth_write = true;
+      material.outline_shell_flag = 0;
     }
   }
 

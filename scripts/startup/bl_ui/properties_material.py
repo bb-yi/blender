@@ -449,6 +449,43 @@ class EEVEE_MATERIAL_PT_settings_surface(MaterialButtonsPanel, Panel):
         draw_material_surface_settings(layout, mat)
 
 
+class EEVEE_MATERIAL_PT_settings_outline_shell(MaterialButtonsPanel, Panel):
+    bl_label = "Outline Shell"
+    bl_context = "material"
+    bl_parent_id = "EEVEE_MATERIAL_PT_settings"
+    COMPAT_ENGINES = {'BLENDER_EEVEE'}
+
+    def draw(self, context):
+        layout = self.layout
+        layout.use_property_split = True
+        layout.use_property_decorate = False
+
+        mat = context.material
+
+        has_node = mat.node_tree and any(
+            node.type == 'OUTPUT_OUTLINE_SHELL' and not node.mute
+            for node in mat.node_tree.nodes)
+        if not has_node:
+            layout.label(
+                text="Add an Outline Shell Output node to enable",
+                icon='INFO')
+        layout.active = has_node
+
+        col = layout.column()
+        col.prop(mat, "outline_shell_render_method", text="Render Method")
+
+        col = layout.column(heading="Culling")
+        col.prop(mat, "outline_shell_cull_method", text="Faces")
+
+        col = layout.column()
+        col.prop(mat, "outline_shell_ztest_mode", text="ZTest")
+        col.prop(mat, "use_outline_shell_depth_write", text="Depth Write")
+        col.prop(mat, "use_outline_shell_shadow", text="Cast Shadow")
+
+        col = layout.column()
+        col.prop(mat, "max_vertex_displacement", text="Max Distance")
+
+
 class EEVEE_MATERIAL_PT_settings_volume(MaterialButtonsPanel, Panel):
     bl_label = "Volume"
     bl_context = "material"
@@ -586,6 +623,7 @@ classes = (
     EEVEE_MATERIAL_PT_thickness,
     EEVEE_MATERIAL_PT_settings,
     EEVEE_MATERIAL_PT_settings_surface,
+    EEVEE_MATERIAL_PT_settings_outline_shell,
     EEVEE_MATERIAL_PT_settings_volume,
     EEVEE_MATERIAL_PT_settings_shader_compilation,
     MATERIAL_PT_lineart,

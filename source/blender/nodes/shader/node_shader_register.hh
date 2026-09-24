@@ -94,6 +94,7 @@ void register_node_type_sh_shader_info();
 void register_node_type_sh_screenspace_info();
 void register_node_type_sh_scene_color();
 void register_node_type_sh_object_info();
+void register_node_type_sh_output_outline_shell();
 void register_node_type_sh_output_aov();
 void register_node_type_sh_output_eevee_material();
 void register_node_type_sh_output_light();

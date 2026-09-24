@@ -15,6 +15,7 @@
 #include "BKE_material.hh"
 #include "BKE_node.hh"
 #include "BKE_node_legacy_types.hh"
+#include "BKE_node_runtime.hh"
 #include "BKE_scene.hh"
 
 #include "NOD_shader.h"
@@ -80,6 +81,39 @@ static void material_surface_stencil_state_set(PassMain::Sub &pass,
     pass.state_stencil(0x0u, stencil.reference, stencil.read_mask);
     pass.state_stencil_test(stencil.test);
   }
+}
+
+static bNode *material_outline_shell_node_get(const blender::Material *blender_mat)
+{
+  if (blender_mat == nullptr || blender_mat->nodetree == nullptr) {
+    return nullptr;
+  }
+  bNode *output = nullptr;
+  for (bNode &node : blender_mat->nodetree->nodes) {
+    if (node.type_legacy != SH_NODE_OUTPUT_OUTLINE_SHELL || node.is_muted()) {
+      continue;
+    }
+    if (output == nullptr) {
+      output = &node;
+    }
+    else if ((node.flag & NODE_DO_OUTPUT) && !(output->flag & NODE_DO_OUTPUT)) {
+      output = &node;
+    }
+  }
+  return output;
+}
+
+static float material_outline_shell_bounds_inflation(const bNode *node)
+{
+  if (node == nullptr) {
+    return 0.0f;
+  }
+  const bNodeSocket *strength_socket = node->input_by_identifier("Strength"_ustr);
+  if (strength_socket == nullptr || strength_socket->is_directly_linked()) {
+    return 0.0f;
+  }
+  return math::abs(
+      static_cast<const bNodeSocketValueFloat *>(strength_socket->default_value)->value);
 }
 
 static bool material_has_flag(const MaterialPass &pass, eGPUMaterialFlag flag)
@@ -427,12 +461,17 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
                                                eMaterialPipeline pipeline_type,
                                                eMaterialGeometry geometry_type,
                                                eMaterialProbe probe_capture,
-                                               const bool register_pass)
+                                               const bool register_pass,
+                                               const SurfaceDrawState *state_override,
+                                               const bool outline_shell)
 {
   if (blender_mat->eevee_domain == MA_EEVEE_DOMAIN_FILTER) {
     /* Filter materials are evaluated as a dedicated fullscreen post pass. */
     return MaterialPass();
   }
+
+  const SurfaceDrawState body_state = surface_draw_state_body(*blender_mat);
+  const SurfaceDrawState &state = (state_override != nullptr) ? *state_override : body_state;
 
   bNodeTree *ntree = (blender_mat->nodetree != nullptr) ? blender_mat->nodetree :
                                                           default_surface->nodetree;
@@ -452,7 +491,8 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
       probe_capture,
       use_deferred_compilation,
       default_mat,
-      inst_.scene->eevee.use_outline != 0);
+      inst_.scene->eevee.use_outline != 0,
+      outline_shell);
 
   has_time_dependent_materials_ |= GPU_material_is_time_dependent(matpass.gpumat);
 
@@ -483,7 +523,7 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
     case GPU_MAT_QUEUED:
       queued_shaders_count++;
       shader_queued = true;
-      if (pipeline_type == MAT_PIPE_DEFERRED_NPR) {
+      if (pipeline_type == MAT_PIPE_DEFERRED_NPR || outline_shell) {
         inst_.telemetry.material_sync_add(shader_queued,
                                           optimize_queued,
                                           false,
@@ -505,7 +545,7 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
     case GPU_MAT_FAILED:
     default:
       material_failed = true;
-      if (pipeline_type == MAT_PIPE_DEFERRED_NPR) {
+      if (pipeline_type == MAT_PIPE_DEFERRED_NPR || outline_shell) {
         inst_.telemetry.material_sync_add(shader_queued,
                                           optimize_queued,
                                           false,
@@ -542,8 +582,9 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
   if (inst_.is_viewport() && use_deferred_compilation && pass_updated) {
     inst_.sampling.reset();
 
-    const bool has_displacement = GPU_material_has_displacement_output(matpass.gpumat) &&
-                                  (blender_mat->displacement_method != MA_DISPLACEMENT_BUMP);
+    const bool has_displacement = outline_shell ||
+                                  (GPU_material_has_displacement_output(matpass.gpumat) &&
+                                   (blender_mat->displacement_method != MA_DISPLACEMENT_BUMP));
     const bool has_volume = GPU_material_has_volume_output(matpass.gpumat);
 
     if (((pipeline_type == MAT_PIPE_SHADOW) && (is_transparent || has_displacement)) ||
@@ -570,12 +611,13 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
                          pipeline_type,
                          probe_capture,
                          ob->refraction_layer_index,
-                         hide_from_raycast);
+                         hide_from_raycast,
+                         state);
 
     PassMain::Sub *shader_sub = shader_map_.lookup_or_add_cb(shader_key, [&]() {
       /* First time encountering this shader. Create a sub that will contain materials using it. */
       return inst_.pipelines.material_add(
-          ob, blender_mat, matpass.gpumat, pipeline_type, probe_capture);
+          ob, blender_mat, matpass.gpumat, pipeline_type, probe_capture, state);
     });
 
     if (shader_sub != nullptr) {
@@ -605,11 +647,12 @@ MaterialPass MaterialModule::material_pass_get(Object *ob,
                MAT_PIPE_FORWARD,
                MAT_PIPE_CAPTURE))
       {
-        matpass.sub_pass->push_constant(
-            "surface_cull_mode", int(material_surface_cull_method_get(*blender_mat)));
+        matpass.sub_pass->push_constant("surface_cull_mode", int(state.cull_method));
       }
-      material_surface_stencil_state_set(
-          *matpass.sub_pass, blender_mat, pipeline_type, probe_capture);
+      if (!state.is_outline_shell) {
+        material_surface_stencil_state_set(
+            *matpass.sub_pass, blender_mat, pipeline_type, probe_capture);
+      }
       if (pipeline_type == MAT_PIPE_DEFERRED_NPR) {
         matpass.sub_pass->bind_resources(inst_.gbuffer);
         matpass.sub_pass->bind_resources(inst_.uniform_data);
@@ -754,6 +797,7 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
       if (material_has_flag(mat.npr, GPU_MATFLAG_RAYCAST) && mat.prepass.gpumat != nullptr) {
         mat.prepass.sub_pass = inst_.pipelines.deferred.prepass_add(
             blender_mat,
+            surface_draw_state_body(*blender_mat),
             mat.prepass.gpumat,
             has_motion,
             ob->refraction_layer_index,
@@ -891,6 +935,67 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
       }
     }
 
+    if (!inst_.is_baking() && !is_filter_material && !hide_on_camera &&
+        geometry_type == MAT_GEOM_MESH)
+    {
+      bNode *shell_node = material_outline_shell_node_get(blender_mat);
+      if (shell_node != nullptr) {
+        mat.outline_shell_bounds_inflation = material_outline_shell_bounds_inflation(
+            shell_node);
+        const SurfaceDrawState shell_state = surface_draw_state_outline_shell(*blender_mat);
+        const bool use_deferred = shell_state.depth_write &&
+                                  shell_state.ztest_mode == MA_ZTEST_LESS_EQUAL &&
+                                  blender_mat->outline_shell_render_method ==
+                                      MA_OUTLINE_SHELL_DEFERRED;
+        const bool use_prepass = shell_state.depth_write;
+        const eMaterialPipeline shell_prepass_pipe =
+            use_deferred ? (has_motion ? MAT_PIPE_PREPASS_DEFERRED_VELOCITY :
+                                        MAT_PIPE_PREPASS_DEFERRED) :
+                           (has_motion ? MAT_PIPE_PREPASS_FORWARD_VELOCITY :
+                                         MAT_PIPE_PREPASS_FORWARD);
+        const eMaterialPipeline shell_shading_pipe = use_deferred ? MAT_PIPE_DEFERRED :
+                                                                         MAT_PIPE_FORWARD;
+        if (use_prepass) {
+          mat.outline_shell_prepass = material_pass_get(ob,
+                                                     blender_mat,
+                                                     shell_prepass_pipe,
+                                                     geometry_type,
+                                                     MAT_PROBE_NONE,
+                                                     true,
+                                                     &shell_state,
+                                                     true);
+        }
+        mat.outline_shell_shading = material_pass_get(ob,
+                                                   blender_mat,
+                                                   shell_shading_pipe,
+                                                   geometry_type,
+                                                   MAT_PROBE_NONE,
+                                                   true,
+                                                   &shell_state,
+                                                   true);
+        /* Draw only when every pass required by the chosen route is available, otherwise the
+         * surface would punch holes or depth-test against a missing prepass while compiling. */
+        if (mat.outline_shell_shading.gpumat == nullptr ||
+            (use_prepass && mat.outline_shell_prepass.gpumat == nullptr))
+        {
+          mat.outline_shell_prepass = MaterialPass();
+          mat.outline_shell_shading = MaterialPass();
+        }
+        if (is_shadow_caster &&
+            (blender_mat->outline_shell_flag & MA_OUTLINE_SHELL_CAST_SHADOW))
+        {
+          mat.outline_shell_shadow = material_pass_get(ob,
+                                                    blender_mat,
+                                                    MAT_PIPE_SHADOW,
+                                                    geometry_type,
+                                                    MAT_PROBE_NONE,
+                                                    true,
+                                                    &shell_state,
+                                                    true);
+        }
+      }
+    }
+
     material_telemetry_features_update(mat);
     return mat;
   });
@@ -917,6 +1022,7 @@ MaterialArray &MaterialModule::material_array_get(const ObjectHandle &ob_handle,
   material_array_.materials.clear();
   material_array_.gpu_materials.clear();
   material_array_.gpu_materials_npr.clear();
+  material_array_.gpu_materials_outline_shell.clear();
 
   const int materials_len = BKE_object_material_used_with_fallback_eval(*ob);
 
@@ -930,6 +1036,9 @@ MaterialArray &MaterialModule::material_array_get(const ObjectHandle &ob_handle,
     material_array_.materials.append(mat);
     material_array_.gpu_materials.append(mat.shading.gpumat);
     material_array_.gpu_materials_npr.append(mat.npr.gpumat);
+    material_array_.gpu_materials_outline_shell.append(mat.outline_shell_shading.gpumat != nullptr ?
+                                                        mat.outline_shell_shading.gpumat :
+                                                        mat.outline_shell_prepass.gpumat);
   }
   return material_array_;
 }
