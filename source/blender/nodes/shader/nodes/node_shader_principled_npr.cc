@@ -284,8 +284,13 @@ static void node_declare(NodeDeclarationBuilder &b)
   const bool v2 = storage == nullptr || storage->model_version >= 2;
   const bool energy_response = v2 &&
                                (storage == nullptr || storage->energy_response_version >= 1);
+  const bool total_lighting = v2 && storage &&
+                             ELEM(storage->mapping_stage, SHD_PRINCIPLED_NPR_MAPPING_TOTAL_LIGHTING,
+                                  SHD_PRINCIPLED_NPR_MAPPING_MAX_LIGHTING);
+  const bool unified_lighting = v2 && (!storage || storage->energy_response_version >= 2);
   const bool depth_rim = v2 && storage &&
                          storage->rim_mode == SHD_PRINCIPLED_NPR_RIM_SCREEN_DEPTH;
+  const bool goo_rim = v2 && storage && storage->rim_mode == SHD_PRINCIPLED_NPR_RIM_GOO_DEPTH;
   PanelDeclarationBuilder *stop_panels[PRINCIPLED_NPR_MAX_STOPS] = {};
 
   b.use_custom_socket_order();
@@ -435,7 +440,7 @@ static void node_declare(NodeDeclarationBuilder &b)
   shading
       .add_input<decl::Float>(v2 ? "Overall Offset"_ustr : "Coordinate Offset"_ustr,
                               "coordinate_offset"_ustr)
-      .default_value(0.0f)
+      .default_value(unified_lighting ? 0.45f : 0.0f)
       .min(-1000.0f)
       .max(1000.0f)
       .description("Offset the unclamped lighting coordinate before its final 0..1 mapping clamp");
@@ -443,19 +448,23 @@ static void node_declare(NodeDeclarationBuilder &b)
   PanelDeclarationBuilder &lighting =
       b.add_panel(v2 ? "Lights and Shadows"_ustr : "Lighting"_ustr).default_closed(true);
   lighting.add_layout([](ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr) {
-    layout.prop(ptr, "mapping_stage", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
-    layout.prop(ptr, "light_combine", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+    layout.prop(ptr, "mapping_stage", ui::ITEM_R_SPLIT_EMPTY_NAME,
+                IFACE_("Diffuse Light Combine"), ICON_NONE);
+    const bool total_lighting = RNA_int_get(ptr, "model_version") >= 2 &&
+                               ELEM(RNA_enum_get(ptr, "mapping_stage"),
+                                    SHD_PRINCIPLED_NPR_MAPPING_TOTAL_LIGHTING,
+                                    SHD_PRINCIPLED_NPR_MAPPING_MAX_LIGHTING);
+    if (!total_lighting) {
+      layout.prop(ptr, "light_combine", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
+    }
     layout.prop(ptr, "shadow_mode", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
     const bool is_v2 = RNA_int_get(ptr, "model_version") >= 2;
     if (is_v2) {
-      if (RNA_int_get(ptr, "energy_response_version") == 0) {
-        layout.label(IFACE_("Legacy Energy Response"), ICON_INFO);
+      if (RNA_int_get(ptr, "energy_response_version") < 2) {
+        layout.label(IFACE_("Legacy Lighting (Preserved)"), ICON_INFO);
         PointerRNA op = layout.op("node.principled_npr_upgrade_copy",
-                                  IFACE_("Create Updated Copy"), ICON_DUPLICATE);
+                                  IFACE_("Create Simplified Copy"), ICON_DUPLICATE);
         RNA_int_set(&op, "node_identifier", ptr->data_as<bNode>()->identifier);
-      }
-      else if (RNA_enum_get(ptr, "mapping_stage") == SHD_PRINCIPLED_NPR_MAPPING_COMBINED) {
-        layout.label(IFACE_("Shared energy, per-light shadows"), ICON_INFO);
       }
       layout.prop(ptr, "shadow_quality", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
       if (RNA_enum_get(ptr, "shadow_quality") == SHD_SHADER_INFO_SHADOW_SOFT_FILTERED) {
@@ -482,7 +491,7 @@ static void node_declare(NodeDeclarationBuilder &b)
       .max(1.0f)
       .subtype(PROP_FACTOR)
       .description("How strongly light energy pushes the diffuse mapping boundary")
-      .available(!energy_response);
+      .available(!energy_response && !total_lighting);
   lighting.add_input<decl::Float>("Light Color Influence"_ustr, "light_color_influence"_ustr)
       .default_value(1.0f)
       .min(0.0f)
@@ -587,8 +596,11 @@ static void node_declare(NodeDeclarationBuilder &b)
   if (v2) {
     rim.add_layout([](ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr) {
       layout.prop(ptr, "rim_mode", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
-      if (RNA_enum_get(ptr, "rim_mode") == SHD_PRINCIPLED_NPR_RIM_SCREEN_DEPTH) {
+      if (RNA_enum_get(ptr, "rim_mode") != SHD_PRINCIPLED_NPR_RIM_FRESNEL) {
         layout.label(IFACE_("Opaque / binary cutout only"), ICON_INFO);
+      }
+      if (RNA_enum_get(ptr, "rim_mode") == SHD_PRINCIPLED_NPR_RIM_GOO_DEPTH) {
+        layout.label(IFACE_("Goo reference scale: 1920 x 1080"), ICON_INFO);
       }
     });
   }
@@ -601,29 +613,32 @@ static void node_declare(NodeDeclarationBuilder &b)
   rim.add_input<decl::Float>("Angle"_ustr, "rim_angle"_ustr)
       .default_value(0.0f)
       .min(-360.0f)
-      .max(360.0f);
+      .max(360.0f)
+      .available(!goo_rim);
   rim.add_input<decl::Float>("Length"_ustr, "rim_length"_ustr)
       .default_value(1.0f)
       .min(0.0f)
       .max(1.0f)
-      .subtype(PROP_FACTOR);
+      .subtype(PROP_FACTOR)
+      .available(!goo_rim);
   rim.add_input<decl::Float>("Length Falloff"_ustr, "rim_length_falloff"_ustr)
       .default_value(0.1f)
       .min(0.0f)
       .max(1.0f)
-      .subtype(PROP_FACTOR);
+      .subtype(PROP_FACTOR)
+      .available(!goo_rim);
   rim.add_input<decl::Float>("Thickness"_ustr, "rim_thickness"_ustr)
       .default_value(0.1f)
       .min(0.0f)
       .max(1.0f)
       .subtype(PROP_FACTOR)
-      .available(!depth_rim);
+      .available(!depth_rim && !goo_rim);
   rim.add_input<decl::Float>("Thickness Falloff"_ustr, "rim_thickness_falloff"_ustr)
       .default_value(0.05f)
       .min(0.0f)
       .max(1.0f)
       .subtype(PROP_FACTOR)
-      .available(!depth_rim);
+      .available(!depth_rim && !goo_rim);
   rim.add_input<decl::Float>("Light Bias"_ustr, "rim_light_bias"_ustr)
       .default_value(0.0f)
       .min(-1.0f)
@@ -679,12 +694,12 @@ static void node_declare(NodeDeclarationBuilder &b)
   }
   /* Append to the flat input array after the 56 legacy inputs, regardless of panel placement. */
   shading.add_input<decl::Float>("Global Softness"_ustr, "mapping_softness"_ustr)
-      .default_value(0.1f)
+      .default_value(0.0f)
       .min(0.0f)
       .max(1.0f)
       .subtype(PROP_FACTOR);
   specular.add_input<decl::Float>("Softness"_ustr, "profile_softness"_ustr)
-      .default_value(1.0f)
+      .default_value(0.0f)
       .min(0.0f)
       .max(1.0f)
       .subtype(PROP_FACTOR)
@@ -804,7 +819,7 @@ static void node_declare(NodeDeclarationBuilder &b)
       .min(0.0f)
       .max(1.0f)
       .subtype(PROP_FACTOR)
-      .available(energy_response)
+      .available(energy_response && !total_lighting)
       .description(
           "How strongly received diffuse light energy moves the color bands: 0 keeps their "
           "shape fixed, 1 follows energy fully. Coordinate Scale calibrates the fixed reference; "
@@ -829,15 +844,54 @@ static void node_declare(NodeDeclarationBuilder &b)
       .subtype(PROP_FACTOR)
       .description("Transition as a fraction of pixel width; hard edges retain coverage AA")
       .available(depth_rim);
+  /* Keep the Goo controls append-only: their units differ from the older silhouette rim. */
+  rim.add_input<decl::Float>("Samples"_ustr, "goo_rim_samples"_ustr)
+      .default_value(8.0f)
+      .min(1.0f)
+      .max(64.0f)
+      .description("Goo depth samples on each side of each of eight rotating directions")
+      .available(goo_rim);
+  rim.add_input<decl::Float>("Sample Radius"_ustr, "goo_rim_radius"_ustr)
+      .default_value(1.0f)
+      .min(0.0f)
+      .description("Original Goo radius, using a fixed 1920 by 1080 sampling reference")
+      .available(goo_rim);
+  rim.add_input<decl::Float>("Thickness"_ustr, "goo_rim_thickness"_ustr)
+      .default_value(1.0f)
+      .min(0.0f)
+      .description("Original Goo upper limit for the sampled view-space depth difference")
+      .available(goo_rim);
+  rim.add_input<decl::Vector>("Scale"_ustr, "goo_rim_scale"_ustr)
+      .default_value({1.0f, 1.0f, 0.0f})
+      .description("Original Goo screen sampling scale; the Z component is unused")
+      .available(goo_rim);
+  /* Append only: old input-index animation paths and links must not move. */
+  lighting.add_input<decl::Float>("Flatten Strength"_ustr, "flatten_strength"_ustr)
+      .default_value(0.0f)
+      .min(0.0f)
+      .max(1.0f)
+      .subtype(PROP_FACTOR)
+      .description("Flatten diffuse normals using each light's influence radius automatically; "
+                   "0 keeps Lambert shading, 1 uses the distance-driven target; sun lights, "
+                   "shadows and highlights stay unchanged")
+      .available(unified_lighting);
+  lighting.add_input<decl::Float>("Flatten Range"_ustr, "flatten_range"_ustr)
+      .default_value(1.6f)
+      .min(0.0001f)
+      .max(10000.0f)
+      .subtype(PROP_DISTANCE)
+      .description("Retired distance control, retained only to preserve saved links and animation")
+      .available(false);
 }
 
 static void node_init(bNodeTree * /*ntree*/, bNode *node)
 {
   NodeShaderPrincipledNPR *storage = MEM_new<NodeShaderPrincipledNPR>(__func__);
   storage->model_version = 2;
-  storage->energy_response_version = 1;
+  storage->energy_response_version = 2;
+  storage->mapping_stage = SHD_PRINCIPLED_NPR_MAPPING_TOTAL_LIGHTING;
   storage->highlight_light_shape = SHD_PRINCIPLED_NPR_HIGHLIGHT_DIRECTION;
-  storage->coordinate_range = SHD_PRINCIPLED_NPR_RANGE_FULL;
+  storage->coordinate_range = SHD_PRINCIPLED_NPR_RANGE_FRONT;
   storage->light_combine = SHD_PRINCIPLED_NPR_LIGHT_ADD;
   storage->driven_initialized_count = PRINCIPLED_NPR_MAX_STOPS;
   principled_npr::initialize_ramp(*storage);
@@ -903,21 +957,42 @@ static void node_update(bNodeTree *ntree, bNode *node)
   const NodeShaderPrincipledNPR &storage = node_storage(*node);
   const bool v2 = storage.model_version >= 2;
   const bool energy_response = v2 && storage.energy_response_version >= 1;
+  const bool total_lighting = v2 &&
+                             ELEM(storage.mapping_stage, SHD_PRINCIPLED_NPR_MAPPING_TOTAL_LIGHTING,
+                                  SHD_PRINCIPLED_NPR_MAPPING_MAX_LIGHTING);
+  for (const UString id : {"flatten_strength"_ustr, "flatten_range"_ustr}) {
+    if (bNodeSocket *socket = bke::node_find_socket(*node, SOCK_IN, id)) {
+      bke::node_set_socket_availability(*ntree, *socket,
+          id == "flatten_strength"_ustr && v2 && storage.energy_response_version >= 2);
+    }
+  }
   const bool depth_rim = v2 && storage.rim_mode == SHD_PRINCIPLED_NPR_RIM_SCREEN_DEPTH;
+  const bool goo_rim = v2 && storage.rim_mode == SHD_PRINCIPLED_NPR_RIM_GOO_DEPTH;
   for (const UString id : {"rim_pixel_width"_ustr, "rim_depth_threshold"_ustr,
                            "rim_depth_softness"_ustr, "rim_thickness"_ustr,
                            "rim_thickness_falloff"_ustr})
   {
     if (bNodeSocket *socket = bke::node_find_socket(*node, SOCK_IN, id)) {
       const bool fresnel_input = ELEM(id, "rim_thickness"_ustr, "rim_thickness_falloff"_ustr);
-      bke::node_set_socket_availability(*ntree, *socket, fresnel_input ? !depth_rim : depth_rim);
+      bke::node_set_socket_availability(
+          *ntree, *socket, fresnel_input ? !depth_rim && !goo_rim : depth_rim);
+    }
+  }
+  for (const UString id : {"goo_rim_samples"_ustr, "goo_rim_radius"_ustr,
+                           "goo_rim_thickness"_ustr, "goo_rim_scale"_ustr,
+                           "rim_angle"_ustr, "rim_length"_ustr, "rim_length_falloff"_ustr})
+  {
+    if (bNodeSocket *socket = bke::node_find_socket(*node, SOCK_IN, id)) {
+      const bool legacy_arc = ELEM(id, "rim_angle"_ustr, "rim_length"_ustr,
+                                  "rim_length_falloff"_ustr);
+      bke::node_set_socket_availability(*ntree, *socket, legacy_arc ? !goo_rim : goo_rim);
     }
   }
   if (bNodeSocket *socket = bke::node_find_socket(*node, SOCK_IN, "intensity_influence"_ustr)) {
-    bke::node_set_socket_availability(*ntree, *socket, !energy_response);
+    bke::node_set_socket_availability(*ntree, *socket, !energy_response && !total_lighting);
   }
   if (bNodeSocket *socket = bke::node_find_socket(*node, SOCK_IN, "energy_influence"_ustr)) {
-    bke::node_set_socket_availability(*ntree, *socket, energy_response);
+    bke::node_set_socket_availability(*ntree, *socket, energy_response && !total_lighting);
   }
   const bool simple = storage.diffuse_mapping == SHD_PRINCIPLED_NPR_DIFFUSE_SIMPLE;
   const bool driven = storage.diffuse_mapping == SHD_PRINCIPLED_NPR_DIFFUSE_DRIVEN_RAMP;
@@ -1026,7 +1101,7 @@ static wmOperatorStatus upgrade_copy_exec(bContext *C, wmOperator *op)
   bNode &source = *ptr.data_as<bNode>();
   bNodeTree &tree = *reinterpret_cast<bNodeTree *>(ptr.owner_id);
   const bool legacy_v1 = node_storage(source).model_version < 2;
-  if (!legacy_v1 && node_storage(source).energy_response_version >= 1) {
+  if (!legacy_v1 && node_storage(source).energy_response_version >= 2) {
     BKE_report(op->reports, RPT_INFO, "This node already uses the current NPR V2 model");
     return OPERATOR_CANCELLED;
   }
@@ -1036,7 +1111,8 @@ static wmOperatorStatus upgrade_copy_exec(bContext *C, wmOperator *op)
       &tree, source, LIB_ID_COPY_DEFAULT, std::nullopt, std::nullopt, socket_map);
   NodeShaderPrincipledNPR &storage = node_storage(*copy);
   storage.model_version = 2;
-  storage.energy_response_version = 1;
+  storage.energy_response_version = 2;
+  storage.mapping_stage = SHD_PRINCIPLED_NPR_MAPPING_TOTAL_LIGHTING;
   if (legacy_v1) {
     storage.shadow_quality = SHD_SHADER_INFO_SHADOW_TEMPORAL;
     storage.shadow_samples = 8;
@@ -1080,7 +1156,7 @@ static wmOperatorStatus upgrade_copy_exec(bContext *C, wmOperator *op)
   BKE_report(
       op->reports,
       RPT_WARNING,
-      "Created an unconnected V2 copy. Legacy boundary, highlight, color ramp and light energy "
+      "Created an unconnected Energy Sum copy. Legacy boundary, highlight, color ramp and lighting "
       "are not appearance-equivalent. Animation and drivers remain on the unchanged source node; "
       "review and migrate them explicitly before connecting the V2 output");
   return OPERATOR_FINISHED;

@@ -109,6 +109,8 @@ struct GLSLLight {
   float3 diffuse_color;
   float3 specular_color;
   float attenuation;
+  /* Surface influence cutoff radius in world units. Sun/invalid lights return zero. */
+  float influence_radius;
 };
 
 struct GLSLLightIterator {
@@ -137,6 +139,7 @@ GLSLLight glsl_light_default()
   light.diffuse_color = float3(0.0f);
   light.specular_color = float3(0.0f);
   light.attenuation = 0.0f;
+  light.influence_radius = 0.0f;
   return light;
 }
 
@@ -310,6 +313,11 @@ GLSLLight glsl_light_build(uint light_index, bool is_local, uint public_index)
     result.direction = float3(0.0f);
   }
   result.distance = light_vector.dist;
+  if (!is_directional) {
+    float inverse_radius_squared = light.local().local.influence_radius_invsqr_surface;
+    result.influence_radius = inverse_radius_squared > 0.0f ?
+                                  inversesqrt(inverse_radius_squared) : 0.0f;
+  }
   result.diffuse_color = light.color * glsl_light_friendly_power(light, LIGHT_DIFFUSE);
   result.specular_color = light.color * glsl_light_friendly_power(light, LIGHT_SPECULAR);
   result.attenuation = light_point_light(light, is_directional, light_vector) *

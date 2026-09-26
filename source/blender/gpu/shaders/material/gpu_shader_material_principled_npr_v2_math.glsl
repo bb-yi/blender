@@ -45,6 +45,27 @@ float3 npr_v2_safe_normalize(float3 value, float3 fallback)
   return length_squared > 1e-20f ? value * inversesqrt(length_squared) : fallback;
 }
 
+/* Distance-driven flattening normalized by the lamp's actual surface influence
+ * radius, not a material-side scene-unit scale. Sun/zero-radius lights bypass. */
+float3 npr_v2_flatten_normal(float3 N, float3 L, float distance, float strength, float radius)
+{
+  strength = clamp(strength, 0.0f, 1.0f);
+  if (strength <= 1e-4f || radius <= 0.0f) {
+    return N;
+  }
+  float3 tangent = N - L * dot(N, L);
+  if (dot(tangent, tangent) <= 1e-8f) {
+    float3 axis = abs(L.y) < 0.999f ? float3(0, 1, 0) : float3(1, 0, 0);
+    tangent = axis - L * dot(axis, L);
+  }
+  tangent = npr_v2_safe_normalize(tangent, N);
+  float t = clamp(distance / radius, 0.0f, 1.0f);
+  float3 target = npr_v2_safe_normalize(mix(L, tangent, t), N);
+  float3 blended = mix(N, target, strength);
+  float length_squared = dot(blended, blended);
+  return length_squared > 1e-8f ? blended * inversesqrt(length_squared) : N;
+}
+
 float npr_v2_smoothstep01(float x)
 {
   x = clamp(x, 0.0f, 1.0f);
@@ -169,6 +190,54 @@ void npr_v2_color_decompose(float4 mapped,
   float3 color = max(mapped.rgb, float3(0.0f));
   multiplier = replace ? float3(1.0f - alpha) : float3(1.0f - alpha) + color * alpha;
   additive = replace ? color * alpha : float3(0.0f);
+}
+
+float3 npr_v2_light_tint(float3 lighting)
+{
+  lighting = max(lighting, float3(0.0f));
+  float peak = max(lighting.x, max(lighting.y, lighting.z));
+  float3 tint = peak > 0.0f ? lighting / peak : float3(1.0f);
+  return tint / npr_v2_luminance(tint);
+}
+
+/* Tint the lit anchors BEFORE interpolation. The first sorted anchor is the dark
+ * palette color and remains independent of lamp hue. For two points this is exactly
+ * mix(dark, lit * tint, mask), including soft boundaries. All editing modes share it. */
+void npr_v2_tint_lit_points(float4 (&colors)[NPR_V2_MAX_POINTS],
+                            int point_count,
+                            float3 lighting)
+{
+  float3 tint = npr_v2_light_tint(lighting);
+  for (int i = 1; i < point_count; i++) {
+    colors[i].rgb *= tint;
+  }
+}
+
+void npr_v2_total_mapped_decompose(float4 mapped,
+                                   float3 lighting,
+                                   bool replace,
+                                   float3 &multiplier,
+                                   float3 &additive)
+{
+  float alpha = clamp(mapped.a, 0.0f, 1.0f);
+  float3 color = max(mapped.rgb, float3(0.0f)) * alpha;
+  multiplier = max(lighting, float3(0.0f)) * (1.0f - alpha) +
+               (replace ? float3(0.0f) : color);
+  additive = replace ? color : float3(0.0f);
+}
+
+/* Legacy Total Lighting maps incident irradiance once. Preserve its hue, not its amplitude:
+ * multiplying the mapped color by irradiance again would reintroduce bright overlap
+ * bands. Mapping Alpha blends back to raw lighting, independently of surface Alpha.
+ * Peak normalization avoids a division by tiny luminance without an energy floor. */
+void npr_v2_total_color_decompose(float4 mapped,
+                                  float3 lighting,
+                                  bool replace,
+                                  float3 &multiplier,
+                                  float3 &additive)
+{
+  mapped.rgb *= npr_v2_light_tint(lighting);
+  npr_v2_total_mapped_decompose(mapped, lighting, replace, multiplier, additive);
 }
 
 /* mode: NONE=0, CAST=1, ALL=2, SELF=3 (preserves the V1 enum identities).

@@ -5515,6 +5515,46 @@ static int rna_ShaderNodePrincipledNPR_model_version_get(PointerRNA *ptr)
   return data ? max_ii(data->model_version, 1) : 1;
 }
 
+static const EnumPropertyItem *rna_ShaderNodePrincipledNPR_mapping_stage_itemf(
+    bContext * /*C*/, PointerRNA *ptr, PropertyRNA * /*prop*/, bool *r_free)
+{
+  static const EnumPropertyItem items[] = {
+      {SHD_PRINCIPLED_NPR_MAPPING_PER_LIGHT, "PER_LIGHT", 0, "Per Light",
+       "Map each light independently before combining its color"},
+      {SHD_PRINCIPLED_NPR_MAPPING_COMBINED, "COMBINED", 0, "Combined (Legacy)",
+       "Map the energy-weighted average coordinate, then multiply by total light color"},
+      {SHD_PRINCIPLED_NPR_MAPPING_TOTAL_LIGHTING, "TOTAL_LIGHTING", 0, "Total Lighting",
+       "Sum unquantized diffuse lighting before one color map; sum GGX before highlight shaping"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  static const EnumPropertyItem legacy_items[] = {
+      items[0], items[1], {0, nullptr, 0, nullptr, nullptr}};
+  static const EnumPropertyItem energy_items[] = {
+      items[0],
+      {SHD_PRINCIPLED_NPR_MAPPING_COMBINED, "COMBINED", 0, "Shared Energy",
+       "Use shared available energy to drive each light's bands, then add the mapped colors"},
+      items[2], {0, nullptr, 0, nullptr, nullptr},
+  };
+  *r_free = false;
+  if (ptr->data && rna_ShaderNodePrincipledNPR_model_version_get(ptr) < 2) {
+    return legacy_items;
+  }
+  const auto *data = ptr->data ?
+      static_cast<const NodeShaderPrincipledNPR *>(ptr->data_as<bNode>()->storage) : nullptr;
+  static const EnumPropertyItem unified_items[] = {
+      {SHD_PRINCIPLED_NPR_MAPPING_TOTAL_LIGHTING, "TOTAL_LIGHTING", 0, "Energy Sum",
+       "Sum diffuse light energy before one color mapping; fill lights can expand lit regions"},
+      {SHD_PRINCIPLED_NPR_MAPPING_MAX_LIGHTING, "MAX_LIGHTING", 0, "Maximum Contribution",
+       "Map the strongest diffuse intensity once, with smoothly blended light colors; "
+       "highlights still sum GGX responses"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  if (data && data->energy_response_version >= 2) {
+    return unified_items;
+  }
+  return data && data->energy_response_version >= 1 ? energy_items : items;
+}
+
 static const EnumPropertyItem *rna_ShaderNodePrincipledNPR_shadow_mode_itemf(
     bContext * /*C*/, PointerRNA *ptr, PropertyRNA * /*prop*/, bool *r_free)
 {
@@ -10122,7 +10162,13 @@ static void def_sh_principled_npr(BlenderRNA * /*brna*/, StructRNA *srna)
        "COMBINED",
        0,
        "Combined",
-       "Combine light coordinates first and map the aggregate once"},
+       "Legacy coordinate or shared-energy aggregation, depending on the saved model"},
+      {SHD_PRINCIPLED_NPR_MAPPING_TOTAL_LIGHTING,
+       "TOTAL_LIGHTING", 0, "Total Lighting",
+      "Sum diffuse lighting before one color map and GGX before highlight shaping (V2)"},
+      {SHD_PRINCIPLED_NPR_MAPPING_MAX_LIGHTING,
+       "MAX_LIGHTING", 0, "Maximum Contribution",
+       "Map maximum diffuse intensity once; smoothly blend light colors and sum GGX highlights"},
       {0, nullptr, 0, nullptr, nullptr},
   };
   static const EnumPropertyItem shadow_mode_items[] = {
@@ -10221,12 +10267,12 @@ static void def_sh_principled_npr(BlenderRNA * /*brna*/, StructRNA *srna)
 
   prop = RNA_def_property(srna, "energy_response_version", PROP_INT, PROP_NONE);
   RNA_def_property_int_sdna(prop, nullptr, "energy_response_version");
-  RNA_def_property_range(prop, 0, 1);
+  RNA_def_property_range(prop, 0, 2);
   RNA_def_property_clear_flag(prop, PROP_EDITABLE);
   RNA_def_property_ui_text(prop,
                            "Energy Response Version",
-                           "0 preserves legacy light bias; 1 lets received light energy move the "
-                           "diffuse bands. Upgrade by creating an explicit copy");
+                           "0 preserves legacy bias; 1 preserves per-light energy response; "
+                           "2 uses unified sum/max lighting. Upgrade by creating an explicit copy");
 
   static const EnumPropertyItem rim_mode_items[] = {
       {SHD_PRINCIPLED_NPR_RIM_FRESNEL, "FRESNEL", 0, "Fresnel",
@@ -10234,6 +10280,9 @@ static void def_sh_principled_npr(BlenderRNA * /*brna*/, StructRNA *srna)
       {SHD_PRINCIPLED_NPR_RIM_SCREEN_DEPTH, "SCREEN_DEPTH", 0, "Screen Depth",
        "Approximately constant pixel-width object silhouette from visible depth and IDs; opaque and binary "
        "cutout surfaces only, not Blended, fractional Alpha or probe capture"},
+      {SHD_PRINCIPLED_NPR_RIM_GOO_DEPTH, "GOO_DEPTH", 0, "Goo Depth",
+       "Goo Engine's original depth-difference rim, with fixed 1920 by 1080 reference sampling; "
+       "opaque and binary cutout surfaces only"},
       {0, nullptr, 0, nullptr, nullptr},
   };
   prop = RNA_def_property(srna, "rim_mode", PROP_ENUM, PROP_NONE);
@@ -10342,7 +10391,7 @@ static void def_sh_principled_npr(BlenderRNA * /*brna*/, StructRNA *srna)
 
   prop = RNA_def_property(srna, "coordinate_range", PROP_ENUM, PROP_NONE);
   RNA_def_property_enum_items(prop, coordinate_range_items);
-  RNA_def_property_enum_default(prop, SHD_PRINCIPLED_NPR_RANGE_FULL);
+  RNA_def_property_enum_default(prop, SHD_PRINCIPLED_NPR_RANGE_FRONT);
   RNA_def_property_ui_text(prop, "Coordinate Range", "Initial N dot L coordinate mapping");
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
 
@@ -10354,6 +10403,8 @@ static void def_sh_principled_npr(BlenderRNA * /*brna*/, StructRNA *srna)
 
   prop = RNA_def_property(srna, "mapping_stage", PROP_ENUM, PROP_NONE);
   RNA_def_property_enum_items(prop, mapping_stage_items);
+  RNA_def_property_enum_funcs(
+      prop, nullptr, nullptr, "rna_ShaderNodePrincipledNPR_mapping_stage_itemf");
   RNA_def_property_enum_default(prop, SHD_PRINCIPLED_NPR_MAPPING_PER_LIGHT);
   RNA_def_property_ui_text(prop, "Mapping Stage", "Whether color mapping runs per light or once");
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");

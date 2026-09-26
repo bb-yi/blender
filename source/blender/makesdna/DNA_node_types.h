@@ -899,6 +899,8 @@ enum NodePrincipledNPRColorApplication {
 enum NodePrincipledNPRMappingStage {
   SHD_PRINCIPLED_NPR_MAPPING_PER_LIGHT = 0,
   SHD_PRINCIPLED_NPR_MAPPING_COMBINED = 1,
+  SHD_PRINCIPLED_NPR_MAPPING_TOTAL_LIGHTING = 2,
+  SHD_PRINCIPLED_NPR_MAPPING_MAX_LIGHTING = 3,
 };
 
 enum NodePrincipledNPRDrivenInterpolation {
@@ -922,6 +924,7 @@ enum NodePrincipledNPRLightCombine {
 enum NodePrincipledNPRRimMode {
   SHD_PRINCIPLED_NPR_RIM_FRESNEL = 0,
   SHD_PRINCIPLED_NPR_RIM_SCREEN_DEPTH = 1,
+  SHD_PRINCIPLED_NPR_RIM_GOO_DEPTH = 2,
 };
 
 enum NodePrincipledNPRHighlightLightShape {
@@ -3126,7 +3129,7 @@ struct NodeShaderPrincipledNPR {
   int driven_initialized_count = 2;
   /* Keep a literal array size for makesdna. Matches SHD_PRINCIPLED_NPR_MAX_RAMP_POINTS. */
   NodePrincipledNPRRampPoint ramp_points[32];
-  /** 0 preserves the original V2 light bias; 1 uses the appended energy response input. */
+  /** 0: original V2 bias; 1: per-light energy response; 2: unified sum/max lighting. */
   int energy_response_version = 0;
   int rim_mode = 0;
   /** Missing in saved V2 files: retain their integrated emitter response. */

@@ -46,21 +46,46 @@ def new_material():
 
 def check_storage(node, output_dir):
     require(node.model_version == 2, "A new Principled NPR node must use V2")
-    require(len(node.inputs) == 94, f"Unexpected V2 socket count {len(node.inputs)}")
+    require(len(node.inputs) == 100, f"Unexpected V2 socket count {len(node.inputs)}")
     require([s.identifier for s in node.outputs] == ["shader", "color", "alpha"], "Output IDs changed")
     require(node.outputs[1].name == "Local Color", "Color must be labeled as a local result")
-    require(node.coordinate_range == "FULL", "V2 must default to the full Lambert range")
+    require(node.coordinate_range == "FRONT", "V2 must default to the positive Lambert range")
+    require(node.bl_rna.properties["coordinate_range"].default == "FRONT",
+            "RNA must advertise the same positive Lambert default")
+    require(abs(inp(node, "coordinate_offset").default_value - 0.45) < 1e-6,
+            "New nodes must default to the Malt-like 0..0.1 transition")
+    require(inp(node, "mapping_softness").default_value == 0,
+            "New nodes must default to the user-selected hard color boundary")
     require(node.light_combine == "ADD" and node.use_all_lights, "V2 light defaults incorrect")
-    require(inp(node, "profile_softness").default_value == 1, "Softest GGX must be default")
+    require(inp(node, "profile_softness").default_value == 0, "Hard highlights must be default")
     require(inp(node, "intensity_influence").default_value == 0, "Energy bias must default off")
-    require(node.energy_response_version == 1, "New nodes must use versioned energy response")
+    require(node.energy_response_version == 2, "New nodes must use unified lighting")
     require(inp(node, "energy_influence").default_value == 0.5, "Energy response must default to 0.5")
     require(node.inputs[90].identifier == "energy_influence", "New input must be append-only")
     require(node.rim_mode == "FRESNEL", "The existing rim must remain the default")
     require(node.highlight_light_shape == "DIRECTION", "New highlights must default to analytic GGX")
-    require([s.identifier for s in node.inputs[91:]] ==
+    require([s.identifier for s in node.inputs[91:94]] ==
             ["rim_pixel_width", "rim_depth_threshold", "rim_depth_softness"],
             "Depth rim controls must be append-only")
+    require([s.identifier for s in node.inputs[94:98]] ==
+            ["goo_rim_samples", "goo_rim_radius", "goo_rim_thickness", "goo_rim_scale"],
+            "Goo rim controls must be append-only")
+    require([s.identifier for s in node.inputs[98:]] == ["flatten_strength", "flatten_range"],
+            "Flatten inputs must be append-only")
+    require(inp(node, "flatten_strength").default_value == 0, "Flattening must default off")
+    require(node.mapping_stage == "TOTAL_LIGHTING", "Energy Sum must be the default")
+    for stage in ("MAX_LIGHTING", "TOTAL_LIGHTING"):
+        node.mapping_stage = stage
+        require(node.mapping_stage == stage, "Mapping stage unavailable")
+        require(inp(node, "energy_influence").is_unavailable,
+                "Unified lighting must hide unused per-light energy controls")
+    for stage in ("PER_LIGHT", "COMBINED"):
+        try:
+            node.mapping_stage = stage
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("New nodes must expose exactly two lighting modes")
     require(inp(node, "ambient_strength").default_value == 1, "Indirect diffuse must default on")
     require(inp(node, "reflection_strength").default_value == 1, "Indirect reflection must default on")
     require({"NONE", "ALL", "CAST_ONLY", "SELF_ONLY"}.issubset(
@@ -191,12 +216,26 @@ def main():
 
     # Serialize the new data without touching user scenes or the immutable V1 fixture.
     node_name, material_name = node.name, material.name
+    full_range_node = material.node_tree.nodes.new("ShaderNodePrincipledNPR")
+    full_range_node.coordinate_range = "FULL"
+    inp(full_range_node, "coordinate_offset").default_value = 0
+    inp(full_range_node, "mapping_softness").default_value = 0.6
+    full_range_name = full_range_node.name
     saved = args.output_dir / "v2_roundtrip.blend"
     bpy.ops.wm.save_as_mainfile(filepath=str(saved))
     bpy.ops.wm.open_mainfile(filepath=str(saved))
     loaded = bpy.data.materials[material_name].node_tree.nodes[node_name]
     require(loaded.model_version == 2, "V2 model version was lost on readback")
-    require(len(loaded.inputs) == 94 and loaded.energy_response_version == 1,
+    require(loaded.coordinate_range == "FRONT", "Positive range changed on readback")
+    require(loaded.id_data.nodes[full_range_name].coordinate_range == "FULL",
+            "The new default must not overwrite an explicitly saved full range")
+    require(abs(inp(loaded, "coordinate_offset").default_value - 0.45) < 1e-6,
+            "Default boundary changed on readback")
+    saved_settings = loaded.id_data.nodes[full_range_name]
+    require(inp(saved_settings, "coordinate_offset").default_value == 0 and
+            abs(inp(saved_settings, "mapping_softness").default_value - 0.6) < 1e-6,
+            "New defaults overwrote explicitly saved mapping settings")
+    require(len(loaded.inputs) == 100 and loaded.energy_response_version == 2,
             "V2 energy response or inputs changed on readback")
     report = {"backend": active, "build_hash": bpy.app.build_hash.decode(),
               "build_branch": bpy.app.build_branch.decode(), "linear_energy_ratio": ratio,

@@ -332,7 +332,9 @@ void node_principled_npr_v2(float4 base_color,
   }
   float4 map_parameters = float4(shading[0].xyz, table_info.w);
   bool full_range = int(shading[2].x) == 1;
-  bool strongest = int(shading[2].w) == 1;
+  bool maximum_lighting = int(shading[2].z) == 3;
+  bool total_lighting = int(shading[2].z) == 2 || maximum_lighting;
+  bool strongest = !total_lighting && int(shading[2].w) == 1;
   bool combined = int(shading[2].z) == 1;
   bool energy_response = shading[0].w >= 1.0f;
   float global_strength = max(shading[1].x, 0.0f);
@@ -354,6 +356,10 @@ void node_principled_npr_v2(float4 base_color,
   float3 diffuse_mul = float3(0.0f);
   float3 diffuse_add = float3(0.0f);
   float3 direct_specular = float3(0.0f);
+  float3 total_diffuse = float3(0.0f);
+  float maximum_diffuse = 0.0f;
+  float3 total_specular = float3(0.0f);
+  float3 total_specular_reference = float3(0.0f);
   float strongest_diffuse_score = -1.0f;
   float strongest_specular_score = -1.0f;
   float strongest_rim_score = -1.0f;
@@ -425,9 +431,14 @@ void node_principled_npr_v2(float4 base_color,
                            float(M_1_PI);
     float energy = max(npr_v2_luminance(diffuse_light), 0.0f);
     diffuse_light = mix(float3(energy), diffuse_light, saturate(shading[1].z));
-    float NoL = dot(N, L);
+    float3 diffuse_N = N;
+    if (total_lighting && surface[1].z > 0.0f && lamp.influence_radius > 0.0f) {
+      diffuse_N = npr_v2_flatten_normal(N, L, lamp.distance,
+                                        surface[1].z, lamp.influence_radius);
+    }
+    float NoL = dot(diffuse_N, L);
     /* Preserve saved V2 nodes, including their animated/linked legacy energy bias. */
-    float coordinate_bias = energy_response ? 0.0f :
+    float coordinate_bias = energy_response || total_lighting ? 0.0f :
         log2(1.0f + energy) * 0.03125f * saturate(shading[1].y);
     float raw = NoL + coordinate_bias * (full_range ? 2.0f : 1.0f);
     float coordinate = full_range ? raw * 0.5f + 0.5f : raw;
@@ -436,7 +447,15 @@ void node_principled_npr_v2(float4 base_color,
     }
     /* The new control shapes diffuse bands only, not the independent Rim light bias. */
     float lighting_coordinate = coordinate;
-    if (energy_response) {
+    float rim_coordinate = full_range ? dot(N, L) * 0.5f + 0.5f : dot(N, L);
+    if (casts_shadow && int(shading[3].x) != 0) {
+      rim_coordinate = mix(rim_coordinate, min(rim_coordinate, visibility), shadow_strength);
+    }
+    /* Preserve the legacy bias as well as the original normal in old rim shading. */
+    if (shading[0].w < 2.0f) {
+      rim_coordinate = lighting_coordinate;
+    }
+    if (energy_response && !total_lighting) {
       float visible_fraction = casts_shadow && int(shading[3].x) != 0 ?
                                    mix(1.0f, visibility, shadow_strength) : 1.0f;
       float drive_energy = share_energy ?
@@ -444,32 +463,40 @@ void node_principled_npr_v2(float4 base_color,
       coordinate = npr_v2_energy_coordinate(coordinate, drive_energy, shading[1].y);
     }
     if (energy > 0.0f) {
-      float4 mapped = npr_v2_map_sorted(coordinate, colors, points, point_count, map_parameters);
-      float3 mul;
-      float3 add;
-      npr_v2_color_decompose(mapped, int(shading[2].y) == 1, mul, add);
-      float3 current_mul = mul * diffuse_light;
-      float3 current_add = add * diffuse_light;
-      float score = max(coordinate, 0.0f) * energy;
-      float rim_score = max(lighting_coordinate, 0.0f) * energy;
+      float rim_score = max(rim_coordinate, 0.0f) * energy;
       if (rim_score > strongest_rim_score) {
         strongest_rim_score = rim_score;
-        rim_winner_coordinate = lighting_coordinate;
+        rim_winner_coordinate = rim_coordinate;
       }
-      aggregate_coordinate += lighting_coordinate * energy;
+      aggregate_coordinate += rim_coordinate * energy;
       aggregate_energy += energy;
       aggregate_light += diffuse_light;
-      if (!strongest) {
-        diffuse_mul += current_mul;
-        diffuse_add += current_add;
+      if (total_lighting) {
+        /* Full Range is an energy-weighted wrap, not one unweighted 0.5 pedestal
+         * per lamp. Splitting a lamp into two half-power lamps is invariant. */
+        total_diffuse += diffuse_light * max(lighting_coordinate, 0.0f);
+        maximum_diffuse = max(maximum_diffuse, energy * max(lighting_coordinate, 0.0f));
       }
-      if (score > strongest_diffuse_score) {
-        strongest_diffuse_score = score;
-        winner_coordinate = lighting_coordinate;
-        winner_light = diffuse_light;
-        if (strongest) {
-          diffuse_mul = current_mul;
-          diffuse_add = current_add;
+      else {
+        float4 mapped = npr_v2_map_sorted(coordinate, colors, points, point_count, map_parameters);
+        float3 mul;
+        float3 add;
+        npr_v2_color_decompose(mapped, int(shading[2].y) == 1, mul, add);
+        float3 current_mul = mul * diffuse_light;
+        float3 current_add = add * diffuse_light;
+        float score = max(coordinate, 0.0f) * energy;
+        if (!strongest) {
+          diffuse_mul += current_mul;
+          diffuse_add += current_add;
+        }
+        if (score > strongest_diffuse_score) {
+          strongest_diffuse_score = score;
+          winner_coordinate = lighting_coordinate;
+          winner_light = diffuse_light;
+          if (strongest) {
+            diffuse_mul = current_mul;
+            diffuse_add = current_add;
+          }
         }
       }
     }
@@ -491,6 +518,14 @@ void node_principled_npr_v2(float4 base_color,
                             raw_response, reference_response);
       raw_response *= direct_reflection_gain;
       reference_response *= reference_reflection_gain;
+      if (total_lighting) {
+        /* Shadow each lamp before aggregation, including its reference amplitude.
+         * Shape the sum once; soft=1 still returns the complete raw GGX sum. */
+        float visible_fraction = mix(1.0f, visibility, shadow_strength);
+        total_specular += raw_response * visible_fraction;
+        total_specular_reference += reference_response * visible_fraction;
+        continue;
+      }
       /* The emitter can cross the tangent plane even when its center is below it. Its
        * individual sampled directions, not the center NoL, decide the GGX contribution. */
       float3 profile = npr_v2_highlight_filtered(raw_response, reference_response, softness, beta);
@@ -516,6 +551,34 @@ void node_principled_npr_v2(float4 base_color,
   }
 #endif
 
+  if (total_lighting) {
+    float coordinate = maximum_lighting ? maximum_diffuse : npr_v2_luminance(total_diffuse);
+    if (shading[0].w >= 2.0f) {
+      npr_v2_tint_lit_points(colors, point_count, total_diffuse);
+    }
+    float4 mapped = npr_v2_map_sorted(coordinate, colors, points,
+                                      point_count, map_parameters);
+    if (shading[0].w >= 2.0f) {
+      npr_v2_total_mapped_decompose(mapped, total_diffuse, int(shading[2].y) == 1,
+                                   diffuse_mul, diffuse_add);
+    }
+    else {
+      npr_v2_total_color_decompose(mapped, total_diffuse, int(shading[2].y) == 1,
+                                  diffuse_mul, diffuse_add);
+    }
+    if (highlight[1].x > 0.0f) {
+      direct_specular = npr_v2_highlight_filtered(total_specular, total_specular_reference,
+                                                   softness, beta);
+      if (int(highlight[2].z) == 1) {
+        float reference_luminance = npr_v2_luminance(total_specular_reference);
+        float ratio = reference_luminance > 0.0f ?
+                          npr_v2_luminance(direct_specular) / reference_luminance : 0.0f;
+        float4 tint = texture(specular_table, float2(saturate(ratio), table_info.y));
+        direct_specular *= max(tint.rgb, float3(0.0f)) * saturate(tint.a);
+      }
+      direct_specular *= max(highlight[0].rgb, float3(0.0f)) * max(highlight[1].x, 0.0f);
+    }
+  }
   if (combined && !energy_response && aggregate_energy > 0.0f) {
     float coordinate = strongest ? winner_coordinate : aggregate_coordinate / aggregate_energy;
     float4 mapped = npr_v2_map_sorted(coordinate, colors, points, point_count, map_parameters);
@@ -540,7 +603,12 @@ void node_principled_npr_v2(float4 base_color,
       (1.0f - metallic) * mix(dielectric_reflectance, transmission_reflectance, transmission);
   float rim_shape = 0.0f;
   if (rim[0].w > 0.0f && rim[2].z > 0.0f) {
-    if (int(rim[2].w) == 1) {
+    if (int(rim[2].w) == 2) {
+      if (rim[3].w > 0.5f && alpha >= 1.0f) {
+        rim_shape = npr_v2_goo_depth_rim(rim[1].w, rim[3].x, rim[3].y, rim[1].xyz);
+      }
+    }
+    else if (int(rim[2].w) == 1) {
       /* Fractional stochastic coverage is not a solid silhouette. Never
        * substitute unrelated opaque depth for a Blended surface. */
       if (rim[3].w > 0.5f && alpha >= 1.0f) {

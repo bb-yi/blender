@@ -66,6 +66,62 @@ bool npr_v2_depth_rim_sample(float2 pixel,
 
 #endif
 
+/* Rim output of Goo Engine's screenspace_curvature (GPL-2.0-or-later).
+ * Keep its fixed reference texel size, signed accumulation and sample weights.
+ * This is a depth response, not the object-silhouette search above. */
+float npr_v2_goo_depth_rim(float samples, float sample_radius, float thickness, float3 scale)
+{
+#if defined(GPU_FRAGMENT_SHADER) && defined(MAT_HIZ_DATA) && \
+    (defined(MAT_DEFERRED) || defined(MAT_FORWARD) || defined(NPR_SHADER)) && \
+    !defined(MAT_PROBE_CAPTURE) && !defined(MAT_CAPTURE) && !defined(MAT_BAKE_COLOR)
+  int n_samples = int(samples);
+  if (n_samples < 1 || !(sample_radius > 0.0f)) {
+    return 0.0f;
+  }
+  int2 depth_extent = textureSize(hiz_tx, 0);
+  float2 view_extent = float2(uniform_buf.film.render_extent);
+  if (any(lessThan(view_extent, float2(1.0f))) ||
+      any(greaterThan(view_extent, float2(depth_extent))) ||
+      any(lessThan(gl_FragCoord.xy, float2(0.0f))) ||
+      any(greaterThanEqual(gl_FragCoord.xy, view_extent)))
+  {
+    return 0.0f;
+  }
+  /* Equivalent to Goo's projected viewPosition * hizUvScale.xy, including the
+   * current HiZ allocation's padding. The fixed offset is intentionally not
+   * changed into a render-pixel radius. */
+  float2 uvs = gl_FragCoord.xy / float2(depth_extent);
+  float center_depth = textureLod(hiz_tx, uvs, 0.0f).r;
+  if (!(center_depth >= 0.0f && center_depth < 1.0f)) {
+    return 0.0f;
+  }
+  float mid_depth = drw_depth_screen_to_view(center_depth);
+  float2 texel_size = float2(1.0f / 1920.0f, 1.0f / 1080.0f);
+  float i_samples = 64.0f / float(n_samples);
+  /* Goo used the TAA sample's alphaHashOffset. This is EEVEE's corresponding
+   * per-accumulation transparency random dimension, not a per-pixel hash. */
+  float angle_offset = sampling_rng_1D_get(SAMPLING_TRANSPARENCY);
+  float rim_accum = 0.0f;
+
+  for (int r = 0; r < 8; r++) {
+    float angle = (float(r) + angle_offset) * 3.1415f * 0.25f * 0.5f;
+    /* Goo's mat2(c, -s, s, c) is column-major: rotate clockwise. */
+    float2 offset = float2(cos(angle), -sin(angle)) * texel_size * sample_radius * scale.xy;
+    for (int i = 1; i <= n_samples; i++) {
+      float left = drw_depth_screen_to_view(
+          textureLod(hiz_tx, uvs + offset * float(i) * i_samples, 0.0f).r);
+      float right = drw_depth_screen_to_view(
+          textureLod(hiz_tx, uvs - offset * float(i) * i_samples, 0.0f).r);
+      float afac = 1.0f - float(i - 1) / float(n_samples);
+      rim_accum += min(mid_depth - min(left, right), thickness) * afac;
+    }
+  }
+  return rim_accum / sample_radius * 0.001f;
+#else
+  return 0.0f;
+#endif
+}
+
 float npr_v2_depth_rim(float width_px,
                        float softness,
                        float depth_threshold,
