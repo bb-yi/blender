@@ -875,6 +875,65 @@ enum NodeShaderInfoShadowMode {
   SHD_SHADER_INFO_SHADOW_SOFT_FILTERED = 2,
 };
 
+enum NodePrincipledNPRDiffuseMapping {
+  SHD_PRINCIPLED_NPR_DIFFUSE_SIMPLE = 0,
+  SHD_PRINCIPLED_NPR_DIFFUSE_RAMP = 1,
+  SHD_PRINCIPLED_NPR_DIFFUSE_DRIVEN_RAMP = 2,
+};
+
+enum NodePrincipledNPRSpecularMapping {
+  SHD_PRINCIPLED_NPR_SPECULAR_SIMPLE = 0,
+  SHD_PRINCIPLED_NPR_SPECULAR_RAMP = 1,
+};
+
+enum NodePrincipledNPRCoordinateRange {
+  SHD_PRINCIPLED_NPR_RANGE_FRONT = 0,
+  SHD_PRINCIPLED_NPR_RANGE_FULL = 1,
+};
+
+enum NodePrincipledNPRColorApplication {
+  SHD_PRINCIPLED_NPR_COLOR_MULTIPLY = 0,
+  SHD_PRINCIPLED_NPR_COLOR_REPLACE = 1,
+};
+
+enum NodePrincipledNPRMappingStage {
+  SHD_PRINCIPLED_NPR_MAPPING_PER_LIGHT = 0,
+  SHD_PRINCIPLED_NPR_MAPPING_COMBINED = 1,
+  SHD_PRINCIPLED_NPR_MAPPING_TOTAL_LIGHTING = 2,
+  SHD_PRINCIPLED_NPR_MAPPING_MAX_LIGHTING = 3,
+};
+
+enum NodePrincipledNPRDrivenInterpolation {
+  SHD_PRINCIPLED_NPR_INTERP_CONSTANT = 0,
+  SHD_PRINCIPLED_NPR_INTERP_LINEAR = 1,
+  SHD_PRINCIPLED_NPR_INTERP_EASE = 2,
+};
+
+enum NodePrincipledNPRShadowMode {
+  SHD_PRINCIPLED_NPR_SHADOW_NONE = 0,
+  SHD_PRINCIPLED_NPR_SHADOW_CAST_ONLY = 1,
+  SHD_PRINCIPLED_NPR_SHADOW_ALL = 2,
+  SHD_PRINCIPLED_NPR_SHADOW_SELF_ONLY = 3,
+};
+
+enum NodePrincipledNPRLightCombine {
+  SHD_PRINCIPLED_NPR_LIGHT_ADD = 0,
+  SHD_PRINCIPLED_NPR_LIGHT_STRONGEST = 1,
+};
+
+enum NodePrincipledNPRRimMode {
+  SHD_PRINCIPLED_NPR_RIM_FRESNEL = 0,
+  SHD_PRINCIPLED_NPR_RIM_DEPTH = 1,
+};
+
+enum NodePrincipledNPRHighlightLightShape {
+  SHD_PRINCIPLED_NPR_HIGHLIGHT_INTEGRATED = 0,
+  SHD_PRINCIPLED_NPR_HIGHLIGHT_DIRECTION = 1,
+};
+
+#define SHD_PRINCIPLED_NPR_LIGHTGROUP_MAX 9999
+#define SHD_PRINCIPLED_NPR_MAX_RAMP_POINTS 32
+
 enum NodeParallaxMode {
   SHD_PARALLAX_PLANE_OFFSET = 0,
   SHD_PARALLAX_STEEP = 1,
@@ -3043,6 +3102,60 @@ struct NodeShaderPrincipled {
 
   char use_subsurface_auto_radius = 0;
   char _pad[3] = {};
+};
+
+/** V2 slots never move. RNA animation paths use the persistent identifier, never a sorted index.
+ */
+struct NodePrincipledNPRRampPoint {
+  DNA_DEFINE_CXX_METHODS(NodePrincipledNPRRampPoint)
+
+  float color[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+  float position = 0.0f;
+  float offset = 0.0f;
+  float softness = 1.0f;
+  int identifier = -1;
+  int enabled = 0;
+  int initialized = 0;
+};
+
+struct NodeShaderPrincipledNPR {
+  DNA_DEFINE_CXX_METHODS(NodeShaderPrincipledNPR)
+
+  ColorBand diffuse_ramp;
+  ColorBand specular_ramp;
+
+  int lightgroup_id = 0;
+  int8_t diffuse_mapping = SHD_PRINCIPLED_NPR_DIFFUSE_SIMPLE;
+  int8_t specular_mapping = SHD_PRINCIPLED_NPR_SPECULAR_SIMPLE;
+  int8_t coordinate_range = SHD_PRINCIPLED_NPR_RANGE_FRONT;
+  int8_t color_application = SHD_PRINCIPLED_NPR_COLOR_MULTIPLY;
+  int8_t mapping_stage = SHD_PRINCIPLED_NPR_MAPPING_PER_LIGHT;
+  int8_t light_combine = SHD_PRINCIPLED_NPR_LIGHT_STRONGEST;
+  int8_t shadow_mode = SHD_PRINCIPLED_NPR_SHADOW_ALL;
+  int8_t driven_interpolation = SHD_PRINCIPLED_NPR_INTERP_LINEAR;
+  int8_t driven_stop_count = 2;
+  char _pad[3] = {};
+
+  /** Zero only occurs in files written before the explicit model version existed. */
+  int model_version = 0;
+  int shadow_quality = SHD_SHADER_INFO_SHADOW_TEMPORAL;
+  int shadow_samples = 8;
+  int use_all_lights = 1;
+  int mapping_interpolation = SHD_PRINCIPLED_NPR_INTERP_EASE;
+  int ramp_point_count = 2;
+  int ramp_initialized_count = 2;
+  int next_point_identifier = 0;
+  int active_point_identifier = -1;
+  int driven_initialized_count = 2;
+  /* Keep a literal array size for makesdna. Matches SHD_PRINCIPLED_NPR_MAX_RAMP_POINTS. */
+  NodePrincipledNPRRampPoint ramp_points[32];
+  /** 0: original V2 bias; 1: per-light energy response; 2: unified sum/max lighting. */
+  int energy_response_version = 0;
+  int rim_mode = 0;
+  /** Missing in saved V2 files: retain their integrated emitter response. */
+  int highlight_light_shape = SHD_PRINCIPLED_NPR_HIGHLIGHT_INTEGRATED;
+  /** Zero preserves shadowed highlights in existing files. */
+  int highlight_ignore_shadow = 0;
 };
 
 struct NodeShaderHairPrincipled {

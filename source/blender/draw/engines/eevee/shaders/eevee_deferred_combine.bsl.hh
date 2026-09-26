@@ -144,6 +144,16 @@ void combine_frag([[resource_table]] Combine &srt,
         if (world_environment_disabled) {
           closure_indirect_light = float3(0.0f);
         }
+        closure_indirect_light *= cl.npr.indirect_weight;
+        float3 shaded_direct = closure_direct_light * cl.color + cl.npr.additive;
+        float3 shaded_indirect = closure_indirect_light * cl.color;
+        if (cl.npr.diffusion.w > 0.0f && reduce_max(cl.npr.diffusion.xyz) > 0.0f) {
+          shaded_direct = reader.read_npr_radiance(texel, GBUF_DIFFUSION_DIRECT_LAYER + layer_index);
+          shaded_indirect = reader.read_npr_radiance(texel, GBUF_DIFFUSION_INDIRECT_LAYER + layer_index);
+          if (world_environment_disabled) {
+            shaded_indirect = float3(0.0f);
+          }
+        }
 
         average_normal += cl.N * reduce_add(cl.color);
 
@@ -152,15 +162,15 @@ void combine_frag([[resource_table]] Combine &srt,
           case CLOSURE_BSSRDF_BURLEY_ID:
           case CLOSURE_BSDF_DIFFUSE_ID:
             diffuse_color += cl.color;
-            diffuse_direct += closure_direct_light * cl.color;
-            diffuse_indirect += closure_indirect_light * cl.color;
+            diffuse_direct += shaded_direct;
+            diffuse_indirect += shaded_indirect;
             break;
           case CLOSURE_BSDF_MICROFACET_GGX_REFLECTION_ID:
           case CLOSURE_BSDF_MICROFACET_GGX_REFRACTION_ID:
           case CLOSURE_BSDF_THIN_GLASS_TRANSMISSION_ID:
             specular_color += cl.color;
-            specular_direct += closure_direct_light * cl.color;
-            specular_indirect += closure_indirect_light * cl.color;
+            specular_direct += shaded_direct;
+            specular_indirect += shaded_indirect;
             break;
           case CLOSURE_NONE_ID:
             assert(false);
@@ -175,11 +185,20 @@ void combine_frag([[resource_table]] Combine &srt,
           cl.color *= cl.color;
         }
 
-        out_direct += closure_direct_light * cl.color;
-        out_indirect += closure_indirect_light * cl.color;
+        if (cl.npr.diffusion.w > 0.0f && reduce_max(cl.npr.diffusion.xyz) > 0.0f) {
+          out_direct += shaded_direct;
+          out_indirect += shaded_indirect;
+        }
+        else {
+          out_direct += closure_direct_light * cl.color + cl.npr.additive;
+          out_indirect += closure_indirect_light * cl.color;
+        }
       }
     }
   }
+
+  /* Rim is an art-directed surface contribution, neither emission nor scattered illumination. */
+  out_direct += reader.read_npr_rim(gbuf.header, texel);
 
   if (srt.use_radiance_feedback) {
     /* Output unmodified radiance for indirect lighting. */

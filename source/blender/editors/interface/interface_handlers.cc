@@ -443,6 +443,9 @@ struct HandleButtonData {
   double startvalue = 0.0f;
   float vec[3], origvec[3];
   ColorBand *coba = nullptr;
+  /** Custom ramp drag state survives numedit_end and never borrows a display-band pointer. */
+  int custom_ramp_identifier = -1;
+  float custom_ramp_start_position = 0.0f;
 
   /* True when alt is held and the preference for displaying tooltips should be ignored. */
   bool tooltip_force = false;
@@ -2329,6 +2332,17 @@ static void apply_but(
 
   data->retval = 0;
 
+  if (data->cancel && but_type == ButtonType::ColorBand && data->custom_ramp_identifier >= 0) {
+    if (const auto &custom = static_cast<ButtonColorBand *>(but)->custom) {
+      const bool restored = custom->edit(CustomColorRampAction::Move,
+                                         data->custom_ramp_identifier,
+                                         data->custom_ramp_start_position);
+      if (restored && !data->applied) {
+        custom->update(*C);
+      }
+    }
+  }
+
   /* if we cancel and have not applied yet, there is nothing to do,
    * otherwise we have to restore the original value again */
   if (data->cancel) {
@@ -2770,6 +2784,9 @@ static void but_paste_text(bContext *C, Button *but, HandleButtonData *data, cha
 
 static void but_copy_colorband(Button *but)
 {
+  if (static_cast<ButtonColorBand *>(but)->custom) {
+    return; /* A generic ColorBand clipboard cannot preserve custom anchor identities. */
+  }
   if (but->poin != nullptr) {
     memcpy(&but_copypaste_coba, but->poin, sizeof(ColorBand));
   }
@@ -2777,6 +2794,9 @@ static void but_copy_colorband(Button *but)
 
 static void but_paste_colorband(bContext *C, Button *but, HandleButtonData *data)
 {
+  if (static_cast<ButtonColorBand *>(but)->custom) {
+    return;
+  }
   if (but_copypaste_coba.tot != 0 && but->poin != nullptr) {
     button_activate_state(C, but, BUTTON_STATE_NUM_EDITING);
     memcpy(data->coba, &but_copypaste_coba, sizeof(ColorBand));
@@ -4628,8 +4648,10 @@ static void numedit_begin(Button *but, HandleButtonData *data)
   }
   else if (but->type == ButtonType::ColorBand) {
     ButtonColorBand *but_coba = static_cast<ButtonColorBand *>(but);
-    data->coba = reinterpret_cast<ColorBand *>(but->poin);
-    but_coba->edit_coba = data->coba;
+    if (!but_coba->custom) {
+      data->coba = reinterpret_cast<ColorBand *>(but->poin);
+      but_coba->edit_coba = data->coba;
+    }
   }
   else if (ELEM(but->type,
                 ButtonType::Unitvec,
@@ -8034,9 +8056,81 @@ static bool numedit_but_COLORBAND(Button *but, HandleButtonData *data, int mx)
   return changed;
 }
 
+static int do_but_custom_colorband(
+    bContext *C, Block *block, ButtonColorBand *but, HandleButtonData *data, const wmEvent *event)
+{
+  const std::shared_ptr<CustomColorRampData> custom = but->custom;
+  custom->refresh(custom->display);
+  ColorBand &display = custom->display;
+  if (display.tot == 0) {
+    return WM_UI_HANDLER_CONTINUE;
+  }
+  int mx = event->xy[0], my = event->xy[1];
+  window_to_block(data->region, block, &mx, &my);
+  const float width = max_ff(BLI_rctf_size_x(&but->rect), 1.0f);
+
+  if (data->state == BUTTON_STATE_HIGHLIGHT) {
+    if (event->type == EVT_DELKEY && event->val == KM_PRESS) {
+      custom->edit(CustomColorRampAction::Remove, display.data[display.cur].cur, 0.0f);
+      button_activate_state(C, but, BUTTON_STATE_EXIT);
+      return WM_UI_HANDLER_BREAK;
+    }
+    if (event->type == LEFTMOUSE && event->val == KM_PRESS) {
+      if (event->modifier & KM_CTRL) {
+        custom->edit(CustomColorRampAction::Add, -1, (mx - but->rect.xmin) / width);
+        button_activate_state(C, but, BUTTON_STATE_EXIT);
+      }
+      else {
+        float distance = FLT_MAX;
+        int closest = display.cur;
+        for (int i = 0; i < display.tot; i++) {
+          const float dx = fabsf(but->rect.xmin + display.data[i].pos * width - mx) +
+                           (i == display.cur ? 5.0f : 0.0f);
+          if (dx < distance) {
+            closest = i;
+            distance = dx;
+          }
+        }
+        data->custom_ramp_identifier = display.data[closest].cur;
+        data->custom_ramp_start_position = display.data[closest].pos;
+        data->dragstartx = data->draglastx = mx;
+        data->dragstarty = data->draglasty = my;
+        custom->edit(CustomColorRampAction::Select, data->custom_ramp_identifier, 0.0f);
+        button_activate_state(C, but, BUTTON_STATE_NUM_EDITING);
+        ED_region_tag_redraw(data->region);
+      }
+      return WM_UI_HANDLER_BREAK;
+    }
+  }
+  else if (data->state == BUTTON_STATE_NUM_EDITING) {
+    if (event->type == MOUSEMOVE && mx != data->draglastx) {
+      const float position = clamp_f(
+          data->custom_ramp_start_position + (mx - data->dragstartx) / width, 0.0f, 1.0f);
+      if (custom->edit(CustomColorRampAction::Move, data->custom_ramp_identifier, position)) {
+        numedit_apply(C, block, but, data);
+      }
+      data->draglastx = mx;
+    }
+    else if (event->type == LEFTMOUSE && event->val == KM_RELEASE) {
+      button_activate_state(C, but, BUTTON_STATE_EXIT);
+    }
+    else if (ELEM(event->type, EVT_ESCKEY, RIGHTMOUSE) && event->val == KM_PRESS) {
+      /* apply_but restores by persistent ID, including non-keyboard cancellation. */
+      data->cancel = true;
+      data->escapecancel = true;
+      button_activate_state(C, but, BUTTON_STATE_EXIT);
+    }
+    return WM_UI_HANDLER_BREAK;
+  }
+  return WM_UI_HANDLER_CONTINUE;
+}
+
 static int do_but_COLORBAND(
     bContext *C, Block *block, Button *but, HandleButtonData *data, const wmEvent *event)
 {
+  if (static_cast<ButtonColorBand *>(but)->custom) {
+    return do_but_custom_colorband(C, block, static_cast<ButtonColorBand *>(but), data, event);
+  }
   int mx = event->xy[0];
   int my = event->xy[1];
   window_to_block(data->region, block, &mx, &my);

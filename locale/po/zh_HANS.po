@@ -163240,3 +163240,2320 @@ msgstr "均匀缩放每条曲线到特定长度"
 msgid "Distance from the ground plane"
 msgstr "距地平面距离"
 
+
+#
+# NPR Port UI translations (local fork)
+# Added 2026-08-14 00:39 UTC
+#
+
+msgid "1 Input SDF Ops"
+msgstr "单输入 SDF 运算"
+
+msgid "2 Input SDF Ops"
+msgstr "双输入 SDF 运算"
+
+msgid "2D SDF 3 point triangle"
+msgstr "2D SDF 三点三角形"
+
+msgid "2D SDF arc"
+msgstr "2D SDF 圆弧"
+
+msgid "2D SDF bezier"
+msgstr "2D SDF Bezier"
+
+msgid "2D SDF capsule"
+msgstr "2D SDF 胶囊"
+
+msgid "2D SDF circle"
+msgstr "2D SDF 圆"
+
+msgid "2D SDF corner"
+msgstr "2D SDF 转角"
+
+msgid "2D SDF cross"
+msgstr "2D SDF 十字"
+
+msgid "2D SDF ellipse"
+msgstr "2D SDF 椭圆"
+
+msgid "2D SDF flat joint"
+msgstr "2D SDF 平接合"
+
+msgid "2D SDF heart"
+msgstr "2D SDF 心形"
+
+msgid "2D SDF hexagon"
+msgstr "2D SDF 六边形"
+
+msgid "2D SDF horseshoe"
+msgstr "2D SDF 马蹄"
+
+msgid "2D SDF isosceles"
+msgstr "2D SDF 等腰三角形"
+
+msgid "2D SDF line"
+msgstr "2D SDF 线段"
+
+msgid "2D SDF moon"
+msgstr "2D SDF 月牙"
+
+msgid "2D SDF parabola"
+msgstr "2D SDF 抛物线"
+
+msgid "2D SDF parabola segment"
+msgstr "2D SDF 抛物线段"
+
+msgid "2D SDF pentagon"
+msgstr "2D SDF 五边形"
+
+msgid "2D SDF pie"
+msgstr "2D SDF 扇形"
+
+msgid "2D SDF quad"
+msgstr "2D SDF 四边形"
+
+msgid "2D SDF rectangle"
+msgstr "2D SDF 矩形"
+
+msgid "2D SDF rhombus"
+msgstr "2D SDF 菱形"
+
+msgid "2D SDF round joint"
+msgstr "2D SDF 圆接合"
+
+msgid "2D SDF rounded X"
+msgstr "2D SDF 圆角 X"
+
+msgid "2D SDF star"
+msgstr "2D SDF 星形"
+
+msgid "2D SDF trapezoid"
+msgstr "2D SDF 梯形"
+
+msgid "2D SDF triangle"
+msgstr "2D SDF 三角形"
+
+msgid "2D SDF vesica"
+msgstr "2D SDF Vesica（透镜形）"
+
+msgid "3D SDF box"
+msgstr "3D SDF 盒"
+
+msgid "3D SDF capsule"
+msgstr "3D SDF 胶囊"
+
+msgid "3D SDF circle"
+msgstr "3D SDF 圆"
+
+msgid "3D SDF cone"
+msgstr "3D SDF 圆锥"
+
+msgid "3D SDF cylinder"
+msgstr "3D SDF 圆柱"
+
+msgid "3D SDF disc"
+msgstr "3D SDF 圆盘"
+
+msgid "3D SDF hex prism"
+msgstr "3D SDF 六棱柱"
+
+msgid "3D SDF hex prism incircle"
+msgstr "3D SDF 内切六棱柱"
+
+msgid "3D SDF octahedron"
+msgstr "3D SDF 八面体"
+
+msgid "3D SDF plane"
+msgstr "3D SDF 平面"
+
+msgid "3D SDF point cone"
+msgstr "3D SDF 两点圆锥"
+
+msgid "3D SDF point cylinder"
+msgstr "3D SDF 两点圆柱"
+
+msgid "3D SDF pyramid"
+msgstr "3D SDF 棱锥"
+
+msgid "3D SDF solid angle"
+msgstr "3D SDF 立体角"
+
+msgid "3D SDF sphere"
+msgstr "3D SDF 球"
+
+msgid "3D SDF torus"
+msgstr "3D SDF 圆环"
+
+msgid "Active filter graph input item"
+msgstr "活动 Filter Graph 输入项"
+
+msgid "Active Filter Material Index"
+msgstr "活动滤镜材质索引"
+
+msgid "Active filter material input item"
+msgstr "活动滤镜材质输入项"
+
+msgid "Active filter output item"
+msgstr "活动滤镜输出项"
+
+msgid "Active native camera FX output"
+msgstr "活动原生相机特效输出"
+
+msgid "Active Native Camera FX Output Index"
+msgstr "活动原生相机特效输出索引"
+
+msgid "Active Render Texture Index"
+msgstr "活动 Render Texture 索引"
+
+msgid "Adapt an image into a closure-backed sample source"
+msgstr "将图像转换为以 Closure 承载的采样源"
+
+msgid "Ambient Lighting"
+msgstr "环境光照"
+
+msgid "AOV Input"
+msgstr "AOV 输入"
+
+msgid "Append Selection"
+msgstr "追加所选"
+
+msgid "Average Window"
+msgstr "平均统计窗口"
+
+msgid "Axis Y"
+msgstr "Y 轴"
+
+msgid "Axis Z"
+msgstr "Z 轴"
+
+msgid "Basis Transform"
+msgstr "基变换"
+
+msgid "Before Composite"
+msgstr "合成之前"
+
+msgid "Before Depth of Field"
+msgstr "景深之前"
+
+msgid "Before Volume Fog"
+msgstr "体积雾之前"
+
+msgid "Blend between SDF values"
+msgstr "在 SDF 值之间混合"
+
+msgid "Blinn-Phong Factor"
+msgstr "Blinn-Phong 因子"
+
+msgid "Build non-linear Eevee fullscreen filter material graphs"
+msgstr "构建非线性 Eevee 全屏滤镜材质图"
+
+msgid "Cached hash for the parsed GLSL function signature"
+msgstr "已解析 GLSL 函数签名的缓存哈希"
+
+msgid "Cached state of the GLSL function metadata"
+msgstr "GLSL 函数元数据的缓存状态"
+
+msgid "Camera Position"
+msgstr "摄像机位置"
+
+msgid "Camera used to render this render texture"
+msgstr "用于渲染此 Render Texture 的摄像机"
+
+msgid "Choose a function"
+msgstr "选择函数"
+
+msgid "Clear Filter Material"
+msgstr "清除滤镜材质"
+
+msgid "Collection of Eevee filter materials"
+msgstr "Eevee 滤镜材质集合"
+
+msgid "Collection of Eevee native camera FX outputs"
+msgstr "Eevee 原生相机特效输出集合"
+
+msgid "Collection of Eevee render textures"
+msgstr "Eevee Render Texture 集合"
+
+msgid "Color Image"
+msgstr "颜色图像"
+
+msgid "Color Write"
+msgstr "颜色写入"
+
+msgid "Combine or reshape signed distance fields"
+msgstr "合并或重塑有符号距离场"
+
+msgid "Combined Color"
+msgstr "合并颜色"
+
+msgid "Count1"
+msgstr "计数1"
+
+msgid "Count2"
+msgstr "计数2"
+
+msgid "Create clamped 0-1 mask from negative SDF values"
+msgstr "由负 SDF 值创建钳制到 0-1 的遮罩"
+
+msgid "Current Sample"
+msgstr "当前采样"
+
+msgid "Current stage input image handles"
+msgstr "当前阶段输入图像句柄"
+
+msgid "Data type expected from the portal input"
+msgstr "Portal 输入期望的数据类型"
+
+msgid "Default Attenuation"
+msgstr "默认衰减"
+
+msgid "Default Intensity"
+msgstr "默认强度"
+
+msgid "Defines"
+msgstr "宏定义"
+
+msgid "Depth Edge Width"
+msgstr "深度边缘宽度"
+
+msgid "Depth Image"
+msgstr "深度图像"
+
+msgid "Depth Threshold"
+msgstr "深度阈值"
+
+msgid "Depth Threshold Range"
+msgstr "深度阈值范围"
+
+msgid "Depth Write"
+msgstr "深度写入"
+
+msgid "Diffuse Shading"
+msgstr "漫反射着色"
+
+msgid "Display name of this filter material entry"
+msgstr "此滤镜材质条目的显示名称"
+
+msgid "Display name of this render texture entry"
+msgstr "此 Render Texture 条目的显示名称"
+
+msgid "Distorted Vector"
+msgstr "扭曲矢量"
+
+msgid "Eevee Filter Graph"
+msgstr "Eevee Filter Graph"
+
+msgid "Eevee Filter Graph Node Tree"
+msgstr "Eevee Filter Graph 节点树"
+
+msgid "Eevee Performance"
+msgstr "Eevee 性能"
+
+msgid "Evaluate a signed distance field primitive"
+msgstr "计算有符号距离场图元"
+
+msgid "Every Frame"
+msgstr "每帧"
+
+msgid "Every Sample"
+msgstr "每次采样"
+
+msgid "Execute this filter pass at full stage resolution"
+msgstr "以完整阶段分辨率执行此 Filter Pass"
+
+msgid "Execute this filter pass at half stage resolution"
+msgstr "以一半阶段分辨率执行此 Filter Pass"
+
+msgid "Execute this filter pass at one eighth stage resolution"
+msgstr "以八分之一阶段分辨率执行此 Filter Pass"
+
+msgid "Execute this filter pass at one sixteenth stage resolution"
+msgstr "以十六分之一阶段分辨率执行此 Filter Pass"
+
+msgid "Execute this filter pass at quarter stage resolution"
+msgstr "以四分之一阶段分辨率执行此 Filter Pass"
+
+msgid "Execution Stage"
+msgstr "执行阶段"
+
+msgid "Face Culling"
+msgstr "面剔除"
+
+msgid "Filter Graph"
+msgstr "Filter Graph"
+
+msgid "Filter Graph Input Items"
+msgstr "Filter Graph 输入项"
+
+msgid "Filter Graph Material Inputs"
+msgstr "Filter Graph 材质输入"
+
+msgid "Filter Graph Socket Item"
+msgstr "Filter Graph 插槽项"
+
+msgid "Filter Mask"
+msgstr "滤镜遮罩"
+
+msgid "Filter Material"
+msgstr "滤镜材质"
+
+msgid "Filter material being edited"
+msgstr "正在编辑的滤镜材质"
+
+msgid "Filter Materials"
+msgstr "滤镜材质"
+
+msgid "Filter Object Info"
+msgstr "滤镜物体信息"
+
+msgid "Filter Output"
+msgstr "滤镜输出"
+
+msgid "Filter Output Items"
+msgstr "滤镜输出项"
+
+msgid "Filter Pass"
+msgstr "Filter Pass"
+
+msgid "Filter-domain material to run for this stack entry"
+msgstr "此栈条目要运行的滤镜域材质"
+
+msgid "For Each Light"
+msgstr "逐灯光"
+
+msgid "For Each Light Input"
+msgstr "逐灯光输入"
+
+msgid "For Each Light Item"
+msgstr "逐灯光项"
+
+msgid "For Each Light Items"
+msgstr "逐灯光项"
+
+msgid "For Each Light Output"
+msgstr "逐灯光输出"
+
+msgid "Frag Coord"
+msgstr "片元坐标"
+
+msgid "Freestyle Edge"
+msgstr "Freestyle 边"
+
+msgid "Generate procedural water ripple distortion and masks"
+msgstr "生成程序化水波纹扭曲与遮罩"
+
+msgid "Generate this native camera FX output"
+msgstr "生成此原生相机特效输出"
+
+msgid "GLSL Function"
+msgstr "GLSL 函数"
+
+msgid "GLSL Function Define Value"
+msgstr "GLSL 函数宏定义值"
+
+msgid "GLSL Script Expression"
+msgstr "GLSL 脚本表达式"
+
+msgid "Grow or shrink SDF boundary"
+msgstr "扩张或收缩 SDF 边界"
+
+msgid "Half-Lambert Factor"
+msgstr "Half-Lambert 系数"
+
+msgid "Height of the render texture"
+msgstr "Render Texture 高度"
+
+msgid "Hermite pulse between min and max SDF values"
+msgstr "在最小与最大 SDF 值之间的 Hermite 脉冲"
+
+msgid "Hex Grid Texture"
+msgstr "六边形网格纹理"
+
+msgid "Hidden PoseBones"
+msgstr "隐藏的姿态骨骼"
+
+msgid "Hide in Outliner"
+msgstr "在大纲中隐藏"
+
+msgid "How objects are gathered for the filter mask"
+msgstr "滤镜遮罩收集物体的方式"
+
+msgid "How often this render texture is updated"
+msgstr "此 Render Texture 的更新频率"
+
+msgid "ID Edge"
+msgstr "ID 边缘"
+
+msgid "ID Edge Width"
+msgstr "ID 边缘宽度"
+
+msgid "Image inputs requested from the filter graph"
+msgstr "Filter Graph 请求的图像输入"
+
+msgid "Image Sample"
+msgstr "图像采样"
+
+msgid "Image to Closure"
+msgstr "图像转 Closure"
+
+msgid "Index of active native camera FX output"
+msgstr "活动原生相机特效输出的索引"
+
+msgid "Index of the active filter mask list item"
+msgstr "活动滤镜遮罩列表项的索引"
+
+msgid "Index of the active filter material"
+msgstr "活动滤镜材质的索引"
+
+msgid "Index of the active render texture"
+msgstr "活动 Render Texture 的索引"
+
+msgid "Internal execution resolution scale for this filter pass"
+msgstr "此 Filter Pass 的内部执行分辨率比例"
+
+msgid "Internal text data-block that defines GLSL functions"
+msgstr "定义 GLSL 函数的内部文本数据块"
+
+msgid "Invert SDF values"
+msgstr "反转 SDF 值"
+
+msgid "Invoke an Eevee filter material with image-handle inputs"
+msgstr "使用图像句柄输入调用 Eevee 滤镜材质"
+
+msgid "Irradiance"
+msgstr "辐照度"
+
+msgid "Light Info"
+msgstr "灯光信息"
+
+msgid "Light Probe Color"
+msgstr "光照探针颜色"
+
+msgid "Light Shader Info"
+msgstr "灯光着色器信息"
+
+msgid "Light Shader Output"
+msgstr "灯光着色器输出"
+
+msgid "Light Space"
+msgstr "灯光空间"
+
+msgid "Lightgroup ID"
+msgstr "灯光组 ID"
+
+msgid "Line Alpha"
+msgstr "线条 Alpha"
+
+msgid "Linewidth"
+msgstr "线条宽度"
+
+msgid "Map values to colors using an OKLab color gradient"
+msgstr "使用 OKLab 颜色渐变将数值映射为颜色"
+
+msgid "Mask a single object"
+msgstr "遮罩单个物体"
+
+msgid "Material Selector Previews"
+msgstr "材质选择器预览"
+
+msgid "Native Camera FX Output"
+msgstr "原生相机特效输出"
+
+msgid "Native Camera FX Outputs"
+msgstr "原生相机特效输出"
+
+msgid "New Filter Graph"
+msgstr "新建 Filter Graph"
+
+msgid "New Filter Material"
+msgstr "新建滤镜材质"
+
+msgid "No Filter Material"
+msgstr "无滤镜材质"
+
+msgid "Node tree for non-linear Eevee fullscreen filter material graphs"
+msgstr "非线性 Eevee 全屏滤镜材质图的节点树"
+
+msgid "Normal Edge Width"
+msgstr "法线边缘宽度"
+
+msgid "Normal Image"
+msgstr "法线图像"
+
+msgid "Normal Threshold"
+msgstr "法线阈值"
+
+msgid "Normal Threshold Range"
+msgstr "法线阈值范围"
+
+msgid "NPR Input"
+msgstr "NPR 输入"
+
+msgid "NPR Output"
+msgstr "NPR 输出"
+
+msgid "NPR Refraction"
+msgstr "NPR 折射"
+
+msgid "NPR Tree"
+msgstr "NPR 节点树"
+
+msgid "NPR Tree Action"
+msgstr "NPR 节点树操作"
+
+msgid "Object included in the filter mask list"
+msgstr "滤镜遮罩列表中包含的物体"
+
+msgid "Object List"
+msgstr "物体列表"
+
+msgid "Object to isolate as a mask inside Eevee filter materials"
+msgstr "在 Eevee 滤镜材质中作为遮罩隔离的物体"
+
+msgid "Object to read the world-space location from for filter materials"
+msgstr "滤镜材质要读取世界空间位置的物体"
+
+msgid "Objects included in the filter mask list"
+msgstr "滤镜遮罩列表中包含的物体"
+
+msgid "OKLab"
+msgstr "OKLab"
+
+msgid "OKLab Color Ramp"
+msgstr "OKLab 色带"
+
+msgid "Only consider the object itself when sampling curvature"
+msgstr "采样曲率时仅考虑物体自身"
+
+msgid "Only update this render texture when requested"
+msgstr "仅在请求时更新此 Render Texture"
+
+msgid "Outline Control"
+msgstr "轮廓控制"
+
+msgid "Outline ID"
+msgstr "轮廓 ID"
+
+msgid "Output color for an Eevee fullscreen filter material"
+msgstr "Eevee 全屏滤镜材质的输出颜色"
+
+msgid "Output color from the NPR shader tree"
+msgstr "来自 NPR 着色器树的输出颜色"
+
+msgid "Output custom Eevee direct-light color and attenuation for a light"
+msgstr "输出灯光的自定义 Eevee 直接光颜色与衰减"
+
+msgid "Output the filter graph result for a render stage"
+msgstr "输出渲染阶段的 Filter Graph 结果"
+
+msgid "Pass Input"
+msgstr "Pass 输入"
+
+msgid "Portal identifier used to match portal outputs"
+msgstr "用于匹配 Portal 输出的标识符"
+
+msgid "Portal In"
+msgstr "Portal 输入"
+
+msgid "Portal Out"
+msgstr "Portal 输出"
+
+msgid "Position Image"
+msgstr "位置图像"
+
+msgid "Procedural water ripples mode"
+msgstr "程序化水波纹模式"
+
+msgid "Profiler"
+msgstr "性能分析器"
+
+msgid "Ray-cast View Operator"
+msgstr "视图射线投射操作器"
+
+msgid "Read a named typed value from a portal input in the same shader tree"
+msgstr "从同一着色器树的 Portal 输入读取具有指定名称和数据类型的值"
+
+msgid "Read a view-layer AOV as image handles"
+msgstr "将视图层 AOV 读为图像句柄"
+
+msgid "Read a view-layer AOV inside the NPR or Filter shader tree"
+msgstr "在 NPR 或滤镜着色器树中读取视图层 AOV"
+
+msgid "Read image handles provided by the scene filter graph invocation"
+msgstr "读取场景 Filter Graph 调用提供的图像句柄"
+
+msgid "Read NPR render buffers inside the NPR shader tree"
+msgstr "在 NPR 着色器树中读取 NPR 渲染缓冲"
+
+msgid "Read refraction buffers inside the NPR shader tree"
+msgstr "在 NPR 着色器树中读取折射缓冲"
+
+msgid "Read the current Eevee light shader evaluation inputs"
+msgstr "读取当前 Eevee 灯光着色器求值输入"
+
+msgid "Render Info"
+msgstr "渲染信息"
+
+msgid "Render Info Node"
+msgstr "渲染信息节点"
+
+msgid "Render pass to process with native camera effects"
+msgstr "要用原生相机特效处理的渲染通道"
+
+msgid "Render Performance Report"
+msgstr "渲染性能报告"
+
+msgid "Render Texture"
+msgstr "Render Texture"
+
+msgid "Render Textures"
+msgstr "Render Texture"
+
+msgid "Render this render texture"
+msgstr "渲染此 Render Texture"
+
+msgid "Res"
+msgstr "分辨率"
+
+msgid "Resolution used to execute this filter pass"
+msgstr "执行此 Filter Pass 使用的分辨率"
+
+msgid "RGBA16F"
+msgstr "RGBA16F"
+
+msgid "RGBA32F"
+msgstr "RGBA32F"
+
+msgid "Run after motion blur and before depth of field"
+msgstr "在运动模糊之后、景深之前运行"
+
+msgid "Run this filter material in the stack"
+msgstr "在栈中运行此滤镜材质"
+
+msgid "Sample an Eevee render texture generated from a scene camera"
+msgstr "采样由场景摄像机生成的 Eevee Render Texture"
+
+msgid "Sample an NPR or Filter image handle with an optional offset"
+msgstr "对 NPR 或滤镜图像句柄采样，可选偏移"
+
+msgid "Sample Goo-style screen-space curvature and rim information"
+msgstr "采样 Goo 风格的屏幕空间曲率与边缘信息"
+
+msgid "Sample the Eevee scene color and depth behind the current layer"
+msgstr "采样当前层后方的 Eevee 场景颜色与深度"
+
+msgid "Sample the resolved Eevee scene color"
+msgstr "采样经 Resolve 的 Eevee 场景颜色"
+
+msgid "Scaled Frame"
+msgstr "缩放后的帧数"
+
+msgid "Scene Color"
+msgstr "场景颜色"
+
+msgid "Scene Curvature"
+msgstr "场景曲率"
+
+msgid "Scene Depth"
+msgstr "场景深度"
+
+msgid "Scene Filter Material"
+msgstr "场景滤镜材质"
+
+msgid "Scene Filter Materials"
+msgstr "场景滤镜材质"
+
+msgid "Scene Render Texture"
+msgstr "场景 Render Texture"
+
+msgid "Scene render texture to sample"
+msgstr "要采样的场景 Render Texture"
+
+msgid "Scene Render Textures"
+msgstr "场景 Render Texture"
+
+msgid "Scene Rim"
+msgstr "场景边缘光"
+
+msgid "Scene-level Eevee filter material entry"
+msgstr "场景级 Eevee 滤镜材质条目"
+
+msgid "Scene-level Eevee filter material graph"
+msgstr "场景级 Eevee 滤镜材质图"
+
+msgid "Scene-level Eevee filter material stack"
+msgstr "场景级 Eevee 滤镜材质栈"
+
+msgid "Scene-level Eevee render texture entry"
+msgstr "场景级 Eevee Render Texture 条目"
+
+msgid "Scene-level Eevee render textures"
+msgstr "场景级 Eevee Render Texture"
+
+msgid "Screen Derivative"
+msgstr "屏幕空间导数"
+
+msgid "Screenspace Info"
+msgstr "屏幕空间信息"
+
+msgid "SDF Hexagons"
+msgstr "SDF 六边形"
+
+msgid "SDF operation to apply"
+msgstr "要应用的 SDF 运算"
+
+msgid "SDF Operator"
+msgstr "SDF 运算"
+
+msgid "SDF Primitive"
+msgstr "SDF 图元"
+
+msgid "SDF primitive to evaluate"
+msgstr "要计算的 SDF 图元"
+
+msgid "SDF Vector Operator"
+msgstr "SDF 向量运算"
+
+msgid "Secondary NPR node tree attached to this shader output"
+msgstr "附加到此着色器输出的次级 NPR 节点树"
+
+msgid "Selected exported GLSL function name"
+msgstr "所选导出的 GLSL 函数名"
+
+msgid "Self Shadow"
+msgstr "自身阴影"
+
+msgid "Shader Info"
+msgstr "着色器信息"
+
+msgid "Shadow Map Scale"
+msgstr "阴影贴图缩放"
+
+msgid "Shadow Mask"
+msgstr "阴影遮罩"
+
+msgid "Show the detailed per-stage timing list in the viewport overlay and profiler panels"
+msgstr "在视口叠加层与性能分析面板中显示各阶段耗时明细"
+
+msgid "Show the GLSL Function node controls"
+msgstr "显示 GLSL 函数节点控件"
+
+msgid "Single Object"
+msgstr "单个物体"
+
+msgid "Sort by Time"
+msgstr "按时间排序"
+
+msgid "Specular Direct"
+msgstr "Specular Direct"
+
+msgid "Specular Indirect"
+msgstr "Specular Indirect"
+
+msgid "Spot Size"
+msgstr "聚光角度"
+
+msgid "Stage Output"
+msgstr "阶段输出"
+
+msgid "Stencil Read Mask Bits"
+msgstr "Stencil 读掩码位"
+
+msgid "Stencil Reference"
+msgstr "Stencil 参考值"
+
+msgid "Stencil Test"
+msgstr "Stencil 测试"
+
+msgid "Stencil Value"
+msgstr "Stencil 值"
+
+msgid "Stencil Write Mask Bits"
+msgstr "Stencil 写掩码位"
+
+msgid "Storage format used by this render texture"
+msgstr "此 Render Texture 使用的存储格式"
+
+msgid "Store the render texture using 16-bit float RGBA"
+msgstr "以 16 位浮点 RGBA 存储 Render Texture"
+
+msgid "Store the render texture using 32-bit float RGBA"
+msgstr "以 32 位浮点 RGBA 存储 Render Texture"
+
+msgid "The GLSL function metadata failed to parse"
+msgstr "GLSL 函数元数据解析失败"
+
+msgid "The GLSL function metadata needs to be reparsed"
+msgstr "GLSL 函数元数据需要重新解析"
+
+msgid "The GLSL function metadata was parsed successfully"
+msgstr "GLSL 函数元数据已成功解析"
+
+msgid "Total Samples"
+msgstr "总采样数"
+
+msgid "Transform a world-space vector into the local tangent-space basis"
+msgstr "将世界空间矢量变换到局部切线空间基底"
+
+msgid "Transform or remap vector domains used by SDF workflows"
+msgstr "变换或重映射 SDF 工作流使用的矢量域"
+
+msgid "Twirl"
+msgstr "扭转"
+
+msgid "Twirl the input vector around a center point"
+msgstr "围绕中心点扭转输入矢量"
+
+msgid "Update Mode"
+msgstr "更新模式"
+
+msgid "Update this render texture for every render sample"
+msgstr "每个渲染采样都更新此 Render Texture"
+
+msgid "Update this render texture once per frame"
+msgstr "每帧更新一次此 Render Texture"
+
+msgid "Use the material as an Eevee fullscreen filter material"
+msgstr "将材质用作 Eevee 全屏滤镜材质"
+
+msgid "Use this output node for its selected execution stage"
+msgstr "对所选执行阶段使用此输出节点"
+
+msgid "User stencil reference value in the range 0 to 15"
+msgstr "用户 Stencil 参考值，范围 0 到 15"
+
+msgid "Value based on sdf hexagon distance function"
+msgstr "基于 SDF 六边形距离函数的值"
+
+msgid "Value1"
+msgstr "值1"
+
+msgid "Value2"
+msgstr "值2"
+
+msgid "Value3"
+msgstr "值3"
+
+msgid "Value4"
+msgstr "值4"
+
+msgid "Vector1"
+msgstr "矢量1"
+
+msgid "Vector2"
+msgstr "矢量2"
+
+msgid "Vector3"
+msgstr "矢量3"
+
+msgid "View Position"
+msgstr "视图空间位置"
+
+msgid "Water Ripples"
+msgstr "水波纹"
+
+msgid "What data this render texture captures"
+msgstr "此 Render Texture 捕获的数据"
+
+msgid "Where the GLSL function source is loaded from"
+msgstr "GLSL 函数源的加载位置"
+
+msgid "Where this filter material runs in Eevee post-processing"
+msgstr "此滤镜材质在 Eevee 后期中的运行位置"
+
+msgid "Width of the render texture"
+msgstr "Render Texture 宽度"
+
+msgid "World Environment"
+msgstr "世界环境"
+
+msgid "World Position"
+msgstr "世界空间位置"
+
+msgid "World To Tangent"
+msgstr "世界空间转切线空间"
+
+msgid "ZFail"
+msgstr "深度测试失败"
+
+msgid "ZTest"
+msgstr "深度测试"
+
+msgid "ZTest Mode"
+msgstr "深度测试模式"
+
+#
+# NPR Port UI tip translations (batch 2)
+#
+
+msgid "Call a user-authored GLSL function from a Text datablock or external GLSL file"
+msgstr "从文本数据块或外部 GLSL 文件调用用户编写的 GLSL 函数"
+
+msgid "Collect Eevee CPU stage timings and show summaries for viewport and final render"
+msgstr "收集 Eevee CPU 阶段耗时，并显示视口与最终渲染摘要"
+
+msgid "Collection whose objects are isolated as a mask inside Eevee filter materials"
+msgstr "其物体在 Eevee 滤镜材质中被隔离为遮罩的集合"
+
+msgid "Create fast Eevee filter masks from a single object, an object list, or a collection using Cryptomatte data"
+msgstr "使用 Cryptomatte 数据，从单个物体、物体列表或集合快速创建 Eevee 滤镜遮罩"
+
+msgid "Enable Eevee screen-space outlines from Outline Control nodes and the Outline render pass"
+msgstr "通过轮廓控制节点与轮廓渲染通道启用 Eevee 屏幕空间轮廓"
+
+msgid "Evaluate a single GLSL expression with manually defined inputs"
+msgstr "使用手动定义的输入计算单个 GLSL 表达式"
+
+
+msgid "Expose Eevee direct light, shadow mask, ambient probe, half-lambert, and Blinn-Phong information for the surface"
+msgstr "为表面提供 Eevee 直接光、阴影遮罩、环境探针、Half-Lambert 与 Blinn-Phong 信息"
+
+msgid "Numeric lightgroup used by Shader Info node filtering; lights default to group 0"
+msgstr "供着色器信息节点过滤使用的数字灯光组；灯光默认为组 0"
+
+
+msgid "Only lights assigned to the same numeric lightgroup contribute to Shader Info; a value of 0 matches only lights in group 0"
+msgstr "仅分配到相同编号灯光组的灯光参与 Shader Info 计算；0 只匹配组 0 中的灯光"
+
+msgid "Output Eevee reflection probe and irradiance probe colors for the surface"
+msgstr "输出表面的 Eevee 反射探针与辐照度探针颜色"
+
+msgid "Partial derivative of the input with respect to screen-space X, Y, or both"
+msgstr "输入相对屏幕空间 X、Y 或两者的偏导数"
+
+msgid "Read Eevee scene color, depth, normal, or position for filter materials"
+msgstr "为滤镜材质读取 Eevee 场景颜色、深度、法线或位置"
+
+msgid "Read flat color, power, transform, visibility, and size values from a chosen light"
+msgstr "从所选灯光读取纯色、功率、变换、可见性与尺寸数值"
+
+msgid "Read transform and display color data from a chosen object inside Eevee filter materials"
+msgstr "在 Eevee 滤镜材质中读取所选物体的变换与显示颜色数据"
+
+msgid "Retrieve Eevee render dimensions, sample information, and normalized fragment coordinates"
+msgstr "获取 Eevee 渲染尺寸、采样信息与归一化片元坐标"
+
+msgid "Retrieve the current scene time in frames, seconds, normalized timeline, or scaled frames"
+msgstr "获取当前场景时间（帧、秒、归一化时间轴或缩放帧）"
+
+
+msgid "Sample Eevee world environment color from a custom direction, ignoring occluding geometry"
+msgstr "从自定义方向采样 Eevee 世界环境颜色，忽略遮挡几何"
+
+msgid "Store a named typed value that can be reused by portal outputs in the same shader tree"
+msgstr "存储具有指定名称和数据类型的值，供同一着色器树中的 Portal 输出复用"
+
+msgid "Transform a point, vector, or normal to or from a custom basis defined by axis inputs"
+msgstr "将点、矢量或法线变换到由轴向输入定义的自定义基底，或从其变换出来"
+
+msgid "Write Eevee outline parameters for the built-in screen-space outline pass"
+msgstr "为内置屏幕空间轮廓通道写入 Eevee 轮廓参数"
+
+#
+# NPR Port UI translations (fix batch)
+# 2026-08-14 11:10 UTC
+#
+
+msgid "2D Curve Primitives"
+msgstr "2D 曲线图元"
+
+msgid "2D Primitives"
+msgstr "2D 图元"
+
+msgid "3D Circle"
+msgstr "3D 圆"
+
+msgid "3D Primitives"
+msgstr "3D 图元"
+
+msgid "Add a render texture entry"
+msgstr "添加 Render Texture 条目"
+
+msgid "Add a render texture entry to configure it."
+msgstr "添加 Render Texture 条目以进行配置。"
+
+msgid "Always pass the depth test"
+msgstr "总是通过深度测试"
+
+msgid "Always pass the stencil test"
+msgstr "总是通过 Stencil 测试"
+
+msgid "Annular"
+msgstr "环形"
+
+msgid "Bezier"
+msgstr "Bezier"
+
+msgid "Capsule/Line"
+msgstr "胶囊/线段"
+
+msgid "Comparison used by the material stencil test"
+msgstr "材质 Stencil 测试使用的比较方式"
+
+msgid "Compile Time"
+msgstr "编译时间"
+
+msgid "Compiled"
+msgstr "已编译"
+
+msgid "Create a new Eevee filter graph and assign it to the scene"
+msgstr "新建 Eevee Filter Graph 并指定给场景"
+
+msgid "Create edge on boundary of zero values"
+msgstr "在零值边界上创建边"
+
+msgid "Create N edges"
+msgstr "创建 N 条边"
+
+msgid "Current GPU shader compilation status"
+msgstr "当前 GPU 着色器编译状态"
+
+msgid "Dilate"
+msgstr "膨胀"
+
+msgid "Disc"
+msgstr "圆盘"
+
+msgid "Do not sample a render texture"
+msgstr "不采样 Render Texture"
+
+msgid "Enable Eevee material stencil test and write state"
+msgstr "启用 Eevee 材质 Stencil 测试与写入状态"
+
+msgid "Error: Filter Graph contains a cycle, invalid material, unsupported node, or too many inputs"
+msgstr "错误：Filter Graph 包含循环、无效材质、不支持的节点或输入过多"
+
+msgid "Error: Filter Graph material node did not compile"
+msgstr "错误：Filter Graph 材质节点未编译"
+
+msgid "Error: Filter Graph material node has no Filter Output"
+msgstr "错误：Filter Graph 材质节点没有滤镜输出"
+
+msgid "Error: Filter Graph material node has too many inputs"
+msgstr "错误：Filter Graph 材质节点输入过多"
+
+msgid "Error: Filter Graph material node has too many outputs"
+msgstr "错误：Filter Graph 材质节点输出过多"
+
+msgid "Error: Filter Material '{}' did not compile"
+msgstr "错误：滤镜材质“{}”未编译"
+
+msgid "Error: Filter Material '{}' failed to compile"
+msgstr "错误：滤镜材质“{}”编译失败"
+
+msgid "Error: Filter Material '{}' has no Filter Output"
+msgstr "错误：滤镜材质“{}”没有滤镜输出"
+
+msgid "Failed"
+msgstr "失败"
+
+msgid "Flat Joint"
+msgstr "平接合"
+
+msgid "Force this material GPU shader to be regenerated and recompiled"
+msgstr "强制重新生成并编译此材质的 GPU 着色器"
+
+msgid "GPU shader compilation wall time in seconds"
+msgstr "GPU 着色器编译耗时（秒）"
+
+msgid "Greater Equal"
+msgstr "大于等于"
+
+msgid "Heart"
+msgstr "心形"
+
+msgid "Hex Prism"
+msgstr "六棱柱"
+
+msgid "Hex Prism Incircle"
+msgstr "内切六棱柱"
+
+msgid "Hexagon"
+msgstr "六边形"
+
+msgid "Horseshoe"
+msgstr "马蹄"
+
+msgid "Isosceles"
+msgstr "等腰三角形"
+
+msgid "Isosceles Triangle"
+msgstr "等腰三角形"
+
+msgid "Latest GPU shader compilation count"
+msgstr "最近一次 GPU 着色器编译计数"
+
+msgid "Less Equal"
+msgstr "小于等于"
+
+msgid "Maximum of 4 render textures reached."
+msgstr "已达到最多 4 个 Render Texture 的上限。"
+
+msgid "Moon"
+msgstr "月牙"
+
+msgid "Move a render texture entry"
+msgstr "移动 Render Texture 条目"
+
+msgid "Never pass the depth test"
+msgstr "从不通过深度测试"
+
+msgid "Never pass the stencil test"
+msgstr "从不通过 Stencil 测试"
+
+msgid "New NPR Tree"
+msgstr "新建 NPR 节点树"
+
+msgid "No filter graph assigned."
+msgstr "未指定 Filter Graph。"
+
+msgid "Not Compiled"
+msgstr "未编译"
+
+msgid "Octahedron"
+msgstr "八面体"
+
+msgid "Onion"
+msgstr "Onion（壳层）"
+
+msgid "Parabola"
+msgstr "抛物线"
+
+msgid "Parabola Segment"
+msgstr "抛物线段"
+
+msgid "Pentagon"
+msgstr "五边形"
+
+msgid "Performance Average Window"
+msgstr "性能统计平均窗口"
+
+msgid "Performance Profiler"
+msgstr "性能分析器"
+
+msgid "Pie"
+msgstr "扇形"
+
+msgid "Point Cone"
+msgstr "两点圆锥"
+
+msgid "Point Cylinder"
+msgstr "两点圆柱"
+
+msgid "Point Triangle"
+msgstr "三点三角形"
+
+msgid "Pyramid"
+msgstr "棱锥"
+
+msgid "Quadratic Bezier"
+msgstr "二次 Bezier"
+
+msgid "Queued"
+msgstr "排队中"
+
+msgid "Recompile Shader"
+msgstr "重新编译着色器"
+
+msgid "Remove a render texture entry"
+msgstr "移除 Render Texture 条目"
+
+msgid "Return from a filter material node tree to the scene Eevee Filter Graph"
+msgstr "从滤镜材质节点树返回场景的 Eevee Filter Graph"
+
+msgid "Return to Eevee Filter Graph"
+msgstr "返回 Eevee Filter Graph"
+
+msgid "Rhombus"
+msgstr "菱形"
+
+msgid "Round Joint"
+msgstr "圆接合"
+
+msgid "Rounded X"
+msgstr "圆角 X"
+
+msgid "Shader Compilation"
+msgstr "着色器编译"
+
+msgid "Shader Compile Time"
+msgstr "着色器编译时间"
+
+msgid "Shader Compile Timestamp"
+msgstr "着色器编译时间戳"
+
+msgid "Show bones with \"Hide in Outliner\" enabled"
+msgstr "显示已启用「在大纲中隐藏」的骨骼"
+
+msgid "Solid Angle"
+msgstr "立体角"
+
+msgid "Stylized 2D Primitives"
+msgstr "风格化 2D 图元"
+
+msgid "Uneven Capsule"
+msgstr "不等半径胶囊"
+
+msgid "Vesica"
+msgstr "Vesica（透镜形）"
+
+#
+# NPR Port UI translations (batch 3 residual)
+# 2026-08-14 11:19 UTC
+#
+
+msgid "Add a new NPR shader tree to the active shader output"
+msgstr "为活动着色器输出添加新的 NPR 着色器树"
+
+msgid "Copy the material Pass Input interface to this graph node"
+msgstr "将材质 Pass 输入接口复制到此图节点"
+
+msgid "Decrement Clamp"
+msgstr "递减并钳制"
+
+msgid "Decrement the masked stencil value and clamp to zero"
+msgstr "递减应用位掩码后的 Stencil 值并钳制到零"
+
+msgid "Decrement the masked stencil value and wrap at zero"
+msgstr "递减应用位掩码后的 Stencil 值并在零处回绕"
+
+msgid "Decrement Wrap"
+msgstr "递减并回绕"
+
+msgid "Edit Filter Pass Material"
+msgstr "编辑 Filter Pass 材质"
+
+msgid "Edit GLSL source code in the node"
+msgstr "在节点中编辑 GLSL 源代码"
+
+msgid "Edit the filter material used by the active Filter Pass node"
+msgstr "编辑活动 Filter Pass 节点使用的滤镜材质"
+
+msgid "Fail"
+msgstr "失败"
+
+msgid "Increment Clamp"
+msgstr "递增并钳制"
+
+msgid "Increment the masked stencil value and clamp to its maximum"
+msgstr "递增应用位掩码后的 Stencil 值并钳制到最大值"
+
+msgid "Increment the masked stencil value and wrap at its maximum"
+msgstr "递增应用位掩码后的 Stencil 值并在最大值处回绕"
+
+msgid "Increment Wrap"
+msgstr "递增并回绕"
+
+msgid "Invert the masked stencil bits"
+msgstr "反转掩码选中的 Stencil 位"
+
+msgid "Keep the current stencil value"
+msgstr "保持当前 Stencil 值"
+
+msgid "On Fail"
+msgstr "失败时"
+
+msgid "On Pass"
+msgstr "通过时"
+
+msgid "On ZFail"
+msgstr "深度测试失败时"
+
+msgid "Operation applied to user stencil bits when the draw passes"
+msgstr "Stencil 与深度测试通过时，对用户 Stencil 位执行的操作"
+
+msgid "Operation applied to user stencil bits when the stencil test fails"
+msgstr "Stencil 测试失败时，对用户 Stencil 位执行的操作"
+
+msgid "Pass when the masked stencil value differs from the masked reference value"
+msgstr "当应用位掩码后的 Stencil 值不同于应用位掩码后的参考值时通过"
+
+msgid "Pass when the masked stencil value equals the masked reference value"
+msgstr "当应用位掩码后的 Stencil 值等于应用位掩码后的参考值时通过"
+
+msgid "Pass when the masked stencil value is greater than or equal to the masked reference value"
+msgstr "当应用位掩码后的 Stencil 值大于等于应用位掩码后的参考值时通过"
+
+msgid "Pass when the masked stencil value is greater than the masked reference value"
+msgstr "当应用位掩码后的 Stencil 值大于应用位掩码后的参考值时通过"
+
+msgid "Pass when the masked stencil value is less than or equal to the masked reference value"
+msgstr "当应用位掩码后的 Stencil 值小于等于应用位掩码后的参考值时通过"
+
+msgid "Pass when the masked stencil value is less than the masked reference value"
+msgstr "当应用位掩码后的 Stencil 值小于应用位掩码后的参考值时通过"
+
+msgid "Pass when the material depth does not equal the stored depth"
+msgstr "当材质深度不等于已存储深度时通过"
+
+msgid "Pass when the material depth equals the stored depth"
+msgstr "当材质深度等于已存储深度时通过"
+
+msgid "Pass when the material depth is greater than or equal to the stored depth"
+msgstr "当材质深度大于等于已存储深度时通过"
+
+msgid "Pass when the material depth is greater than the stored depth"
+msgstr "当材质深度大于已存储深度时通过"
+
+msgid "Pass when the material depth is less than or equal to the stored depth"
+msgstr "当材质深度小于等于已存储深度时通过"
+
+msgid "Pass when the material depth is less than the stored depth"
+msgstr "当材质深度小于已存储深度时通过"
+
+msgid "Populate Filter Mask Objects"
+msgstr "填充滤镜遮罩物体"
+
+msgid "Populate the object list from the current object selection"
+msgstr "用当前所选物体填充物体列表"
+
+msgid "Read Mask"
+msgstr "读掩码"
+
+msgid "Replace the masked stencil bits with the reference value"
+msgstr "用参考值替换掩码选中的 Stencil 位"
+
+msgid "Stencil Fail"
+msgstr "Stencil 测试失败操作"
+
+msgid "Stencil Order"
+msgstr "Stencil 执行顺序"
+
+msgid "Stencil Pass"
+msgstr "Stencil 测试通过操作"
+
+msgid "Stencil Read Mask"
+msgstr "Stencil 读掩码"
+
+msgid "Stencil Write Mask"
+msgstr "Stencil 写掩码"
+
+msgid "Stencil ZFail"
+msgstr "Stencil 深度测试失败操作"
+
+msgid "Sync Pass Input Interface"
+msgstr "同步 Pass 输入接口"
+
+msgid "Test"
+msgstr "测试"
+
+msgid "Use an external GLSL file path as the source"
+msgstr "使用外部 GLSL 文件路径作为源"
+
+msgid "Use an internal text data-block as the GLSL source"
+msgstr "使用内部文本数据块作为 GLSL 源"
+
+msgid "Uses Outline Control nodes and the Outline render pass."
+msgstr "使用轮廓控制节点与轮廓渲染通道。"
+
+msgid "Write Mask"
+msgstr "写掩码"
+
+msgid "Write zero to the masked stencil bits"
+msgstr "将掩码选中的 Stencil 位写为零"
+
+msgid "Zero"
+msgstr "清零"
+
+#
+# Principled NPR UI translations
+# Added 2026-08-18
+#
+
+msgid "Principled NPR"
+msgstr "原理化 NPR"
+
+msgid "NPR Surface Diffusion"
+msgstr "NPR 表面扩散"
+
+msgid "Diffuse the shaded input surface in screen space without relighting it. EEVEE deferred surfaces only; coverage is preserved"
+msgstr "在屏幕空间扩散输入表面的着色结果，不重新计算光照。仅支持 EEVEE 延迟表面；保持覆盖率不变"
+
+msgid "Eevee-native stylized material with toon shading, classified shadows, reflections, and advanced color output"
+msgstr "Eevee 原生风格化材质：卡通着色、分类阴影、反射与高级颜色输出"
+
+msgid "Color Bands"
+msgstr "色带"
+
+msgid "Two-tone map: Shadow Color and Lit Color across the half-Lambert terminator"
+msgstr "用暗部色和亮部色在 Half-Lambert 明暗交界两侧做两色映射"
+
+msgid "Sample an embedded color ramp along the half-Lambert lighting coordinate"
+msgstr "沿 Half-Lambert 光照坐标采样内嵌颜色渐变"
+
+msgid "Expose ramp stops as Color and Position sockets for graph-driven control points"
+msgstr "把色标暴露为颜色和位置插槽，便于节点图驱动"
+
+msgid "Cast Only"
+msgstr "仅接收其他物体阴影"
+
+msgid "Ignore self shadows and shadows cast by other objects"
+msgstr "忽略自身阴影和其他物体投下的阴影"
+
+msgid "Receive shadows cast by other objects while ignoring self shadows"
+msgstr "接收其他物体的阴影，忽略自身阴影"
+
+msgid "Receive both self shadows and shadows cast by other objects"
+msgstr "同时接收自身阴影和其他物体投下的阴影"
+
+msgid "Add Clamped"
+msgstr "相加并钳制"
+
+msgid "Strongest"
+msgstr "最强光"
+
+msgid "Add scalar light contributions and clamp the combined lighting to one"
+msgstr "累加各灯的标量贡献，并将合成光照钳制至 1"
+
+msgid "Use the single light with the strongest scalar contribution"
+msgstr "只用贡献最强的一盏灯"
+
+msgid "Shading Mode"
+msgstr "着色方式"
+
+msgid "How diffuse toon colors are controlled"
+msgstr "漫反射卡通颜色的控制方式"
+
+msgid "Shadow Mode"
+msgstr "阴影模式"
+
+msgid "Which classified Eevee shadows are received"
+msgstr "接收哪些分类后的 Eevee 阴影"
+
+msgid "Light Combine"
+msgstr "灯光合成"
+
+msgid "How multiple direct lights are combined"
+msgstr "多盏直接光如何合成"
+
+msgid "Only lights with the same Lightgroup ID affect this material; 0 matches only lights in group 0 (the default)"
+msgstr "仅相同灯光组 ID 的灯光影响此材质；0 只匹配组 0（默认）"
+
+msgid "Band Count"
+msgstr "色带数量"
+
+msgid "Lit Color"
+msgstr "亮部色"
+
+msgid "Shade Softness"
+msgstr "明暗柔和度"
+
+msgid "Shade Offset"
+msgstr "明暗偏移"
+
+msgid "Neutral multiplier applied to Base Color in shadow"
+msgstr "乘在暗部基础色上的中性倍率"
+
+msgid "Multiplier applied to Base Color in light"
+msgstr "乘在亮部基础色上的倍率"
+
+msgid "0 is a hard cut between shade bands; higher values blend the transition"
+msgstr "0 为硬切，增大则过渡更软"
+
+msgid "Added to the shade coordinate before mapping. Positive expands the lit region"
+msgstr "加在映射坐标上。正值扩大亮部"
+
+msgid "Shadow Strength"
+msgstr "阴影强度"
+
+msgid "Light Receive"
+msgstr "受光"
+
+msgid "Scales how strongly this material receives scene lights"
+msgstr "此材质接收场景灯光的强度"
+
+msgid "Light Color Influence"
+msgstr "灯光颜色影响"
+
+msgid "0 keeps painted shade colors; 1 lets lights tint chroma only"
+msgstr "0 保持设定的明暗颜色；1 仅让灯光影响色度"
+
+msgid "Specular Size"
+msgstr "高光大小"
+
+msgid "Specular Softness"
+msgstr "高光柔和度"
+
+msgid "Specular Light Influence"
+msgstr "高光灯光影响"
+
+msgid "Highlight color before optional light tinting"
+msgstr "可选灯光染色前的高光颜色"
+
+msgid "0 keeps Specular Color; 1 lets lights dye the highlight"
+msgstr "0 保持高光色，1 让灯光给高光染色"
+
+msgid "Reflection Strength"
+msgstr "反射强度"
+
+msgid "Reflection Roughness"
+msgstr "反射粗糙度"
+
+msgid "Blur of probe and screen-space reflections; independent of highlight roughness"
+msgstr "探针与屏幕空间反射的模糊，与高光粗糙度无关"
+
+msgid "Ambient Strength"
+msgstr "环境光强度"
+
+msgid "Ambient Equalization"
+msgstr "环境光均匀化"
+
+msgid "World/probe irradiance only; not screen-space GI"
+msgstr "仅使用世界环境或探针的辐照度，不含屏幕空间 GI"
+
+msgid "0 keeps directional probe lighting; 1 flattens it"
+msgstr "0 保留探针光照的方向性；1 将其均匀化"
+
+msgid "Rim Strength"
+msgstr "边缘光强度"
+
+msgid "Rim Width"
+msgstr "边缘光宽度"
+
+msgid "Rim Softness"
+msgstr "边缘光柔和度"
+
+msgid "Rim Facing"
+msgstr "边缘光朝向"
+
+msgid "Rim Rotation"
+msgstr "边缘光旋转"
+
+msgid "Rim Arc Length"
+msgstr "边缘光弧长"
+
+msgid "Rim Arc Falloff"
+msgstr "边缘光弧衰减"
+
+msgid "How far the Fresnel rim extends from the silhouette"
+msgstr "Fresnel 边缘光从轮廓延伸的范围"
+
+msgid "Hard cel rim versus a soft falloff"
+msgstr "硬边卡通边缘光或柔软衰减"
+
+msgid "0 is even around the view; positive favors the lit side, negative the shadow side"
+msgstr "0 沿视野均匀；正值偏亮部，负值偏暗部"
+
+msgid "Screen-space rotation of the rim arc in degrees"
+msgstr "边缘光弧的屏幕空间旋转（度）"
+
+msgid "How much of the silhouette circumference keeps the rim"
+msgstr "轮廓上保留边缘光的弧长比例"
+
+msgid "Taper the rim thinner toward the ends of the arc, without dimming"
+msgstr "让边缘光向弧段两端逐渐变细，不降低亮度"
+
+msgid "Eevee Only"
+msgstr "仅限 Eevee"
+
+msgid "Principled NPR is evaluated only by the Eevee render engine"
+msgstr "原理化 NPR 仅由 Eevee 渲染引擎计算"
+
+msgid "Final linear HDR NPR color before it is wrapped into a Shader"
+msgstr "封装进 Shader 之前的线性 HDR NPR 颜色"
+
+msgid "Band 1 Color"
+msgstr "色带 1 颜色"
+
+msgid "Band 1 Position"
+msgstr "色带 1 位置"
+
+msgid "Band 2 Color"
+msgstr "色带 2 颜色"
+
+msgid "Band 2 Position"
+msgstr "色带 2 位置"
+
+msgid "Band 3 Color"
+msgstr "色带 3 颜色"
+
+msgid "Band 3 Position"
+msgstr "色带 3 位置"
+
+msgid "Band 4 Color"
+msgstr "色带 4 颜色"
+
+msgid "Band 4 Position"
+msgstr "色带 4 位置"
+
+msgid "Band 5 Color"
+msgstr "色带 5 颜色"
+
+msgid "Band 5 Position"
+msgstr "色带 5 位置"
+
+msgid "Band 6 Color"
+msgstr "色带 6 颜色"
+
+msgid "Band 6 Position"
+msgstr "色带 6 位置"
+
+msgid "Band 7 Color"
+msgstr "色带 7 颜色"
+
+msgid "Band 7 Position"
+msgstr "色带 7 位置"
+
+msgid "Band 8 Color"
+msgstr "色带 8 颜色"
+
+msgid "Band 8 Position"
+msgstr "色带 8 位置"
+
+# Principled NPR V2 and standalone rim controls.
+
+msgid "0 creates a flat hard highlight; 1 restores the original GGX response"
+msgstr "0 生成平坦硬边高光；1 恢复原始 GGX 响应"
+
+msgid "0 preserves legacy bias; 1 preserves per-light energy response; 2 uses unified sum/max lighting. Upgrade by creating an explicit copy"
+msgstr "0 保留旧版偏移；1 保留逐灯能量响应；2 使用统一的求和或最大值光照。创建副本以升级"
+
+msgid "0 uses equalized ambient light; 1 follows the surface normal"
+msgstr "0 使用均匀环境光；1 遵循表面法线"
+
+msgid "1 is legacy V1; 2 is native NPR V2; upgrade by creating an explicit copy"
+msgstr "1 为旧版 V1；2 为原生 NPR V2；创建副本以升级"
+
+msgid "Accumulated NPR highlight only"
+msgstr "仅包含累积的 NPR 高光"
+
+msgid "Active points; persistent ID keys also address suspended points"
+msgstr "活动控制点；持久 ID 也可定位暂时停用的控制点"
+
+msgid "Add light coordinates or mapped HDR colors without clamping the final color"
+msgstr "累加光照坐标或映射后的 HDR 颜色，不钳制最终颜色"
+
+msgid "All Lights"
+msgstr "所有灯光"
+
+msgid "Ambient Directionality"
+msgstr "环境光方向性"
+
+msgid "Anisotropy Rotation"
+msgstr "各向异性旋转"
+
+msgid "Appearance is not equivalent. Animation and drivers remain on the original node."
+msgstr "外观不保证一致。动画和驱动器保留在原节点上。"
+
+msgid "Apply shadow visibility to direct highlights without changing diffuse shadows"
+msgstr "让直接高光受阴影影响，不改变漫反射阴影"
+
+msgid "Blend dielectric diffuse into tinted metallic reflection and suppress diffuse"
+msgstr "将非金属漫反射过渡为带色金属反射，同时抑制漫反射"
+
+msgid "Boundary Offset"
+msgstr "边界偏移"
+
+msgid "Coat Tint"
+msgstr "涂层染色"
+
+msgid "Color Application"
+msgstr "颜色应用方式"
+
+msgid "Control the base direct highlight width and peak, and probe reflection blur"
+msgstr "控制基础直接高光的宽度与峰值，以及探针反射的模糊程度"
+
+msgid "Coordinate Offset"
+msgstr "坐标偏移"
+
+msgid "Coordinate Range"
+msgstr "坐标范围"
+
+msgid "Coordinate Scale"
+msgstr "坐标缩放"
+
+msgid "Create Copy"
+msgstr "创建副本"
+
+msgid "Create Simplified Copy"
+msgstr "创建简化版副本"
+
+msgid "Create V2 Copy"
+msgstr "创建 V2 副本"
+
+msgid "Create V2 Copy?"
+msgstr "创建 V2 副本？"
+
+msgid "Depth samples along each of eight rotating directions"
+msgstr "沿八个旋转方向分别进行深度采样"
+
+msgid "Depth sampling reach in actual render pixels, independent of camera distance"
+msgstr "以实际渲染像素计量的深度采样范围，不受相机距离影响"
+
+msgid "Depth-difference rim sampled from the HiZ buffer; opaque and binary cutout surfaces only, not Blended, fractional Alpha or probe capture"
+msgstr "从 HiZ 缓冲区采样深度差生成边缘光；仅支持不透明或二值裁切表面，不支持 Blended、部分透明 Alpha 或探针捕获"
+
+msgid "Diffuse Light Combine"
+msgstr "漫反射光照合成"
+
+msgid "Diffuse Mapping"
+msgstr "漫反射映射"
+
+msgid "Diffuse Ramp"
+msgstr "漫反射渐变"
+
+msgid "Direct NPR diffuse lighting only; Local Color = Diffuse + Highlight + Rim + Emission"
+msgstr "仅包含直接 NPR 漫反射；局部颜色 = 漫反射 + 高光 + 边缘光 + 自发光"
+
+msgid "Direct Strength"
+msgstr "直接光强度"
+
+msgid "Direction (Fast)"
+msgstr "灯光方向（快速）"
+
+msgid "Driven Ramp"
+msgstr "插槽驱动渐变"
+
+msgid "Emission color after strength and coat layering"
+msgstr "应用强度和涂层分层后的自发光颜色"
+
+msgid "Emitter Shape (Advanced)"
+msgstr "发光体形状（高级）"
+
+msgid "Enable and scale the NPR highlight lobe"
+msgstr "启用并缩放 NPR 高光波瓣"
+
+msgid "Energy Influence"
+msgstr "能量影响"
+
+msgid "Energy Response Version"
+msgstr "能量响应版本"
+
+msgid "Evaluate complete GGX once per light direction; roughness controls the lobe, without integrating emitter radius or shape"
+msgstr "每个灯光方向计算一次完整 GGX；粗糙度控制波瓣，不对发光体半径或形状积分"
+
+msgid "Expand or shrink both highlight axes without changing reference brightness"
+msgstr "同时扩大或缩小高光的两个轴向范围，不改变参考亮度"
+
+msgid "Finite emitter treatment for direct highlights only"
+msgstr "仅针对直接高光的有限尺寸发光体处理方式"
+
+msgid "Finite integration: higher cost"
+msgstr "有限尺寸积分：计算开销较高"
+
+msgid "Flatten Range"
+msgstr "平坦化范围"
+
+msgid "Flatten Strength"
+msgstr "平坦化强度"
+
+msgid "Flatten diffuse normals using each light's influence radius automatically; 0 keeps Lambert shading, 1 uses the distance-driven target; sun lights, shadows and highlights stay unchanged"
+msgstr "根据各灯光的影响半径自动平坦化漫反射法线；0 保持 Lambert 着色，1 使用距离驱动的目标；太阳光、阴影和高光保持不变"
+
+msgid "Full Range"
+msgstr "完整范围"
+
+msgid "Global Softness"
+msgstr "全局柔和度"
+
+msgid "Highlight Color"
+msgstr "高光颜色"
+
+msgid "Highlight Offset"
+msgstr "高光偏移"
+
+msgid "Highlight Roughness"
+msgstr "高光粗糙度"
+
+msgid "Highlight Size"
+msgstr "高光大小"
+
+msgid "Highlight Softness"
+msgstr "高光柔和度"
+
+msgid "Highlight Strength"
+msgstr "高光强度"
+
+msgid "Highlight-coordinate color mapping ramp"
+msgstr "沿高光坐标进行颜色映射的渐变"
+
+msgid "How mapped colors affect Base Color"
+msgstr "映射颜色影响基础色的方式"
+
+msgid "How strongly light energy pushes the diffuse mapping boundary"
+msgstr "灯光能量推动漫反射映射边界的程度"
+
+msgid "Include all light groups; disable to use the selected Lightgroup ID"
+msgstr "包含所有灯光组；关闭后仅使用指定灯光组 ID"
+
+msgid "Indirect Diffuse"
+msgstr "Indirect Diffuse"
+
+msgid "Indirect Specular"
+msgstr "Indirect Specular"
+
+msgid "Initial N dot L coordinate mapping"
+msgstr "初始 N dot L 坐标映射"
+
+msgid "Intensity Influence"
+msgstr "强度影响"
+
+msgid "Interpolate linearly between adjacent stops"
+msgstr "在相邻色标之间线性插值"
+
+msgid "Interpolation between Driven Ramp stops"
+msgstr "插槽驱动渐变的色标插值方式"
+
+msgid "Keep each stop color until the next stop"
+msgstr "保持当前色标颜色，直到下一个色标"
+
+msgid "Legacy Lighting (Preserved)"
+msgstr "旧版光照（已保留）"
+
+msgid "Legacy V1"
+msgstr "旧版 V1"
+
+msgid "Legacy coordinate or shared-energy aggregation, depending on the saved model"
+msgstr "根据保存的模型使用旧版坐标合成或共享能量合成"
+
+msgid "Legacy socket retained for file compatibility; use Roughness"
+msgstr "为文件兼容保留的旧插槽；请使用粗糙度"
+
+msgid "Length Falloff"
+msgstr "弧长衰减"
+
+msgid "Light Bias"
+msgstr "受光偏向"
+
+msgid "Light Factor"
+msgstr "受光系数"
+
+msgid "Light Shape"
+msgstr "灯光形状"
+
+msgid "Lighting coordinate at the center of the simple color transition"
+msgstr "简单双色过渡中心的光照坐标"
+
+msgid "Lighting coordinate used by Light Bias; connect a lighting factor to modulate the rim"
+msgstr "受光偏向使用的光照坐标；连接受光系数以调节边缘光"
+
+msgid "Lighting-coordinate color mapping ramp"
+msgstr "沿光照坐标进行颜色映射的渐变"
+
+msgid "Lights and Shadows"
+msgstr "灯光与阴影"
+
+msgid "Linear transition inside the softness interval"
+msgstr "在柔和区间内线性过渡"
+
+msgid "Local Color"
+msgstr "局部颜色"
+
+msgid "Map every light coordinate independently before combining colors"
+msgstr "独立映射每盏灯的光照坐标，再合成颜色"
+
+msgid "Map maximum diffuse intensity once; smoothly blend light colors and sum GGX highlights"
+msgstr "对最大漫反射强度映射一次；平滑混合灯光颜色并累加 GGX 高光"
+
+msgid "Map the anisotropic highlight coordinate through an embedded color ramp"
+msgstr "使用内嵌颜色渐变映射各向异性高光坐标"
+
+msgid "Map the lighting coordinate between Shadow Color and Lit Color"
+msgstr "根据光照坐标在暗部色和亮部色之间映射"
+
+msgid "Map the lighting coordinate through an embedded color ramp"
+msgstr "使用内嵌颜色渐变映射光照坐标"
+
+msgid "Map through stable Color and Position sockets that can be driven by the node graph"
+msgstr "通过可由节点图驱动的稳定颜色和位置插槽进行映射"
+
+msgid "Mapping Settings"
+msgstr "映射设置"
+
+msgid "Mapping Stage"
+msgstr "映射阶段"
+
+msgid "Match the surface opacity; fractional alpha disables depth rim"
+msgstr "匹配表面不透明度；部分透明 Alpha 会禁用深度边缘光"
+
+msgid "Material Details"
+msgstr "材质细节"
+
+msgid "Maximum Contribution"
+msgstr "最大贡献"
+
+msgid "Metallic Body Preservation"
+msgstr "金属固有色保留"
+
+msgid "Minimum view-space depth discontinuity after surface-slope compensation; larger values reject more edges without changing background silhouettes"
+msgstr "表面斜率补偿后的最小视图空间深度突变；增大可排除更多边缘，不改变背景轮廓"
+
+msgid "Model Version"
+msgstr "模型版本"
+
+msgid "Multiplier or replacement color on the lit side"
+msgstr "亮部的乘色或替换色"
+
+msgid "Multiplier or replacement color on the shadow side"
+msgstr "暗部的乘色或替换色"
+
+msgid "Multiply Base Color by the mapped color, blended by mapped alpha"
+msgstr "将基础色乘以映射颜色，按映射 Alpha 混合"
+
+msgid "NPR Rim Light"
+msgstr "NPR 边缘光"
+
+msgid "NPR highlight coverage from a point to the full lobe"
+msgstr "NPR 高光覆盖范围，从单点到完整波瓣"
+
+msgid "NPR highlight edge transition width"
+msgstr "NPR 高光边缘过渡宽度"
+
+msgid "Number of visible Driven Ramp stops"
+msgstr "插槽驱动渐变中可见色标的数量"
+
+msgid "Offset the unclamped lighting coordinate before its final 0..1 mapping clamp"
+msgstr "在光照坐标最终钳制到 0..1 之前施加偏移"
+
+msgid "Overall Offset"
+msgstr "整体偏移"
+
+msgid "Per Light"
+msgstr "逐灯"
+
+msgid "Preview uses socket defaults"
+msgstr "预览使用插槽默认值"
+
+msgid "Progressively integrate GGX over the finite emitter. More expensive and needs render samples to converge; hard remapping is applied to each sample"
+msgstr "在有限尺寸发光体上逐步积分 GGX。开销较高，需要渲染采样收敛；对每个样本分别进行硬边映射"
+
+msgid "Ramp Points"
+msgstr "渐变控制点"
+
+msgid "Range Offset"
+msgstr "范围偏移"
+
+msgid "Receive Shadows"
+msgstr "接收阴影"
+
+msgid "Receive only shadows cast by this object's own geometry (V2)"
+msgstr "仅接收此物体自身几何体投下的阴影（V2）"
+
+msgid "Remap N dot L from -1..1 to 0..1 before subsequent operations"
+msgstr "在后续操作前，将 N dot L 从 -1..1 映射到 0..1"
+
+msgid "Replace Base Color with the mapped color, blended by mapped alpha"
+msgstr "用映射颜色替换基础色，按映射 Alpha 混合"
+
+msgid "Retired distance control, retained only to preserve saved links and animation"
+msgstr "已停用的距离控制，仅保留已有连接和动画"
+
+msgid "Rim Mode"
+msgstr "边缘光模式"
+
+msgid "Rim construction method (V2)"
+msgstr "边缘光生成方式（V2）"
+
+msgid "Rim light radiance only"
+msgstr "仅包含边缘光辐射亮度"
+
+msgid "Sampling quality, independent of the received shadow type"
+msgstr "采样质量，与接收的阴影类型无关"
+
+msgid "Scale the unclamped lighting coordinate; negative values invert it"
+msgstr "缩放未钳制的光照坐标；负值将其反转"
+
+msgid "Screen-space rotation in degrees"
+msgstr "屏幕空间旋转角度（度）"
+
+msgid "Select a point without changing its persistent identity"
+msgstr "选择控制点，不改变其持久标识"
+
+msgid "Selected Point Transition"
+msgstr "所选控制点过渡"
+
+msgid "Self Only"
+msgstr "仅自身"
+
+msgid "Shadow Quality"
+msgstr "阴影质量"
+
+msgid "Shadow Samples"
+msgstr "阴影采样数"
+
+msgid "Shared by all three V2 color mapping editors"
+msgstr "三种 V2 颜色映射编辑方式共用"
+
+msgid "Sheen Tint"
+msgstr "光泽染色"
+
+msgid "Shift the highlight coordinate before size and softness mapping"
+msgstr "在大小和柔和度映射前偏移高光坐标"
+
+msgid "Smooth transition inside the softness interval"
+msgstr "在柔和区间内平滑过渡"
+
+msgid "Softness Multiplier"
+msgstr "柔和度倍率"
+
+msgid "Source used to map highlight shape"
+msgstr "用于映射高光形状的数据来源"
+
+msgid "Source used to map lighting into color"
+msgstr "用于将光照映射为颜色的数据来源"
+
+msgid "Spatial rim falloff: 0 is a hard band, 1 fades across the sampling radius"
+msgstr "边缘光的空间衰减：0 为硬边带，1 在采样半径内渐隐"
+
+msgid "Spatial samples for Soft Filtered shadows"
+msgstr "柔化过滤阴影的空间采样数"
+
+msgid "Specular Mapping"
+msgstr "高光映射"
+
+msgid "Specular Ramp"
+msgstr "高光渐变"
+
+msgid "Standalone Fresnel or screen-depth rim color. Depth requires an opaque Eevee deferred surface"
+msgstr "独立的 Fresnel 或屏幕深度边缘光颜色。深度模式需要不透明的 Eevee 延迟渲染表面"
+
+msgid "Stop Count"
+msgstr "色标数量"
+
+msgid "Sum diffuse lighting before one color map and GGX before highlight shaping (V2)"
+msgstr "先累加漫反射光照再统一映射颜色；先累加 GGX 再塑造高光（V2）"
+
+msgid "Suspend or restore points without deleting their animation or colors"
+msgstr "停用或恢复控制点，不删除其动画或颜色"
+
+msgid "Thickness Falloff"
+msgstr "厚度衰减"
+
+msgid "Total Lighting"
+msgstr "光照总和"
+
+msgid "Transition Curve"
+msgstr "过渡曲线"
+
+msgid "Use Highlight Size and Softness to shape the artistic highlight"
+msgstr "使用高光大小和柔和度塑造风格化高光"
+
+msgid "Use a smooth eased transition between adjacent stops"
+msgstr "在相邻色标之间使用平滑缓动过渡"
+
+msgid "Use the unclamped N dot L coordinate directly"
+msgstr "直接使用未钳制的 N dot L 坐标"
+
+msgid "View-normal rim using the existing thickness controls"
+msgstr "使用现有厚度控制，基于视线与法线生成边缘光"
+
+msgid "Whether color mapping runs per light or once"
+msgstr "逐灯映射颜色或合成后统一映射"
+
+msgid "Width (Pixels)"
+msgstr "宽度（像素）"
+
+msgid "Width of the simple color transition"
+msgstr "简单双色过渡的宽度"
+
+msgid "Scale indirect reflection from the engine's tracing and probe paths"
+msgstr "缩放引擎光线追踪与探针提供的间接反射"
+
+msgid "Local NPR base lighting, rim and emission; excludes native coat/sheen/transmission lighting and later SSS, SSR or refraction"
+msgstr "局部 NPR 基础光照、边缘光和自发光；不含原生涂层、光泽、透射光照，以及后续 SSS、SSR 或折射"
+
+msgid "Artistic recovery of mapped diffuse color on metals; does not restore SSS or transmission"
+msgstr "在金属上艺术性地恢复映射后的漫反射颜色；不恢复 SSS 或透射"
+
+msgid "Treat the surface as a thin sheet; thickness remains a Material Output setting"
+msgstr "将表面视为薄片；厚度仍由材质输出设置"
+
+msgid "How strongly received diffuse light energy moves the color bands: 0 keeps their shape fixed, 1 follows energy fully. Coordinate Scale calibrates the fixed reference; Base Color and camera exposure do not drive the bands"
+msgstr "接收的漫反射光能推动色带的程度：0 保持形状，1 完全跟随能量。坐标缩放校准固定参考值；基础色和相机曝光不驱动色带"
+
+msgid "Soft Filtered"
+msgstr "柔化过滤"
+
+msgid "Use Shader Info's spatially filtered shadow classification"
+msgstr "使用 Shader Info 的空间过滤阴影分类"
+
+msgid "Use Eevee's built-in shadow sampling"
+msgstr "使用 Eevee 内置阴影采样"
+
+msgid "Control Point 1"
+msgstr "控制点 1"
+
+msgid "Stop 1 Color"
+msgstr "色标 1 颜色"
+
+msgid "Stop 1 Position"
+msgstr "色标 1 位置"
+
+msgid "Control Point 2"
+msgstr "控制点 2"
+
+msgid "Stop 2 Color"
+msgstr "色标 2 颜色"
+
+msgid "Stop 2 Position"
+msgstr "色标 2 位置"
+
+msgid "Control Point 3"
+msgstr "控制点 3"
+
+msgid "Stop 3 Color"
+msgstr "色标 3 颜色"
+
+msgid "Stop 3 Position"
+msgstr "色标 3 位置"
+
+msgid "Control Point 4"
+msgstr "控制点 4"
+
+msgid "Stop 4 Color"
+msgstr "色标 4 颜色"
+
+msgid "Stop 4 Position"
+msgstr "色标 4 位置"
+
+msgid "Control Point 5"
+msgstr "控制点 5"
+
+msgid "Stop 5 Color"
+msgstr "色标 5 颜色"
+
+msgid "Stop 5 Position"
+msgstr "色标 5 位置"
+
+msgid "Control Point 6"
+msgstr "控制点 6"
+
+msgid "Stop 6 Color"
+msgstr "色标 6 颜色"
+
+msgid "Stop 6 Position"
+msgstr "色标 6 位置"
+
+msgid "Control Point 7"
+msgstr "控制点 7"
+
+msgid "Stop 7 Color"
+msgstr "色标 7 颜色"
+
+msgid "Stop 7 Position"
+msgstr "色标 7 位置"
+
+msgid "Control Point 8"
+msgstr "控制点 8"
+
+msgid "Stop 8 Color"
+msgstr "色标 8 颜色"
+
+msgid "Stop 8 Position"
+msgstr "色标 8 位置"
+
+# Keep named models and acronyms in English, scoped to NPR controls.
+msgctxt "NPR"
+msgid "Fresnel"
+msgstr "Fresnel"
+
+msgctxt "NPR"
+msgid "IOR"
+msgstr "IOR"
+
+msgctxt "NPR"
+msgid "Coat IOR"
+msgstr "涂层 IOR"
+
+msgid "Normal and view-angle rim"
+msgstr "基于法线与视角的边缘光"
+
+msgid "Screen-space depth discontinuity rim"
+msgstr "基于屏幕空间深度突变的边缘光"
+
+msgid "Rim calculation method"
+msgstr "边缘光计算方式"
+
+msgid "Eevee-native stylized material with programmable diffuse mapping, artistic highlights, probe lighting, and rim control"
+msgstr "Eevee 原生风格化材质，支持可编程漫反射映射、艺术化高光、探针光照和边缘光控制"
+
+msgid "Final scene-linear HDR NPR color before it is wrapped into a Shader"
+msgstr "封装为 Shader 前的最终场景线性 HDR NPR 颜色"
+
+msgid "Reflection probes only; V1 does not add a screen-space reflection closure"
+msgstr "仅使用反射探针；V1 不添加屏幕空间反射闭包"
+
+msgid "NPR Ramp Point"
+msgstr "NPR 渐变控制点"
+
+msgid "Stable-identity NPR color mapping anchor"
+msgstr "具有稳定标识的 NPR 颜色映射控制点"
+
+msgid "Persistent point identity, independent of position"
+msgstr "控制点的持久标识，与位置无关"
+
+msgid "Persistent point identity; never reused after deletion"
+msgstr "控制点的持久标识；删除后不重复使用"
+
+msgid "Whether this point participates in mapping"
+msgstr "此控制点是否参与映射"
+
+msgid "Scene-linear color; alpha controls mapping influence"
+msgstr "场景线性颜色；Alpha 控制映射影响"
+
+msgid "Color anchor; 0.5 is the Lambert terminator in Full Range"
+msgstr "颜色控制点；完整范围模式下，0.5 为 Lambert 明暗交界"
+
+msgid "Offset the transition from the previous sorted color"
+msgstr "偏移从排序后前一颜色到此颜色的过渡"
+
+msgid "Multiply global softness for the incoming transition"
+msgstr "对进入此控制点的过渡应用全局柔和度倍率"
+
+msgctxt "NPR"
+msgid "Stencil"
+msgstr "Stencil"
+
+msgid "User stencil bit mask used when comparing, in the range 0 to 15"
+msgstr "用于比较的用户 Stencil 位掩码，范围为 0 到 15"
+
+msgid "User stencil bits used when comparing"
+msgstr "比较时使用的用户 Stencil 位"
+
+msgid "User stencil bit mask used when replacing, in the range 0 to 15"
+msgstr "替换时使用的用户 Stencil 位掩码，范围为 0 到 15"
+
+msgid "User stencil bits used when writing"
+msgstr "写入时使用的用户 Stencil 位"
+
+msgid "Operation applied to user stencil bits when the stencil test passes but the depth test fails"
+msgstr "Stencil 测试通过但深度测试失败时，对用户 Stencil 位执行的操作"
+
+msgid "Receive all shadows"
+msgstr "接收所有阴影"
+
+msgid "Ignore all received shadows"
+msgstr "忽略所有接收的阴影"
+
+msgid "Receive shadows from other objects"
+msgstr "仅接收其他物体投下的阴影"
+
+msgid "Receive only this object's own shadows"
+msgstr "仅接收此物体自身的阴影"
+
+msgid "Combined (Legacy)"
+msgstr "合成（旧版）"
+
+msgid "Shared Energy"
+msgstr "共享能量"
+
+msgid "Energy Sum"
+msgstr "能量总和"
+
+msgid "Map each light independently before combining its color"
+msgstr "逐灯独立映射，再合成颜色"
+
+msgid "Map the energy-weighted average coordinate, then multiply by total light color"
+msgstr "映射按能量加权的平均坐标，再乘以合计灯光颜色"
+
+msgid "Sum unquantized diffuse lighting before one color map; sum GGX before highlight shaping"
+msgstr "先累加未量化的漫反射光照再统一映射颜色；先累加 GGX 再塑造高光"
+
+msgid "Use shared available energy to drive each light's bands, then add the mapped colors"
+msgstr "使用共享的可用能量驱动各灯光的色带，再累加映射后的颜色"
+
+msgid "Sum diffuse light energy before one color mapping; fill lights can expand lit regions"
+msgstr "先累加漫反射光能再统一映射颜色；补光可以扩大亮部"
+
+msgid "Map the strongest diffuse intensity once, with smoothly blended light colors; highlights still sum GGX responses"
+msgstr "对最强漫反射强度统一映射，并平滑混合灯光颜色；高光仍累加 GGX 响应"

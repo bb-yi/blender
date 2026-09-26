@@ -39,6 +39,8 @@ struct RayTraceBuffer {
     /* Persistent history buffers. */
     TextureFromPool radiance_history_tx = {"radiance_tx"};
     TextureFromPool variance_history_tx = {"variance_tx"};
+    TextureFromPool signature_history_tx = {"anisotropy_history_tx"};
+    TextureFromPool denoised_signature_tx = {"anisotropy_signature_tx"};
     /* Map of tiles that were processed inside the history buffer. */
     Texture tilemask_history_tx = {"tilemask_tx"};
     /** Perspective matrix for which the history buffers were recorded. */
@@ -57,6 +59,8 @@ struct RayTraceBuffer {
    * One for each closure. Not to be mistaken with deferred layer type.
    */
   DenoiseBuffer closures[3];
+  /** Last viewport sampling reset applied to this deferred layer's NPR history. */
+  uint64_t npr_history_reset_generation = 0;
 
   /**
    * Radiance feedback of the deferred layer for next sample's reflection or next layer's
@@ -218,6 +222,10 @@ class RayTraceModule {
   /** Persistent texture reference for temporal denoising input. */
   gpu::Texture *radiance_history_tx_ = nullptr;
   gpu::Texture *variance_history_tx_ = nullptr;
+  gpu::Texture *signature_history_tx_ = nullptr;
+  gpu::Texture *denoised_signature_tx_ = nullptr;
+  bool use_npr_history_ = false;
+  uint64_t npr_history_reset_generation_ = 0;
   gpu::Texture *tilemask_history_tx_ = nullptr;
   /** Radiance input for screen space tracing. */
   gpu::Texture *screen_radiance_front_tx_ = nullptr;
@@ -247,6 +255,12 @@ class RayTraceModule {
   void init();
 
   void sync();
+
+  /** Invalidate only NPR history after all scene/view updates, before sampling.step(). */
+  void reset_npr_history()
+  {
+    npr_history_reset_generation_++;
+  }
 
   /**
    * RayTrace the scene and resolve radiance buffer for the corresponding `closure_bit`.

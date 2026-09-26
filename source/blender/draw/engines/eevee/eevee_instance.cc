@@ -833,6 +833,13 @@ namespace blender::eevee
       }
     }
 
+    /* Camera/object changes can request a reset after RayTraceModule::sync(). Observe
+     * the final reset state before sampling.step() consumes it. This only advances the NPR
+     * generation counter; native and DLSS history invalidation remain independent. */
+    if (is_viewport() && sampling.is_reset()) {
+      raytracing.reset_npr_history();
+    }
+
     DebugScope debug_scope(debug_scope_render_sample, "EEVEE.render_sample");
 
     {

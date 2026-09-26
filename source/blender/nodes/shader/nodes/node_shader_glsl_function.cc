@@ -9161,6 +9161,7 @@ struct GLSLLight {
   vec3 diffuse_color;
   vec3 specular_color;
   float attenuation;
+  float influence_radius;
 };
 
 GLSLLight glsl_light_default()
@@ -9178,6 +9179,7 @@ GLSLLight glsl_light_default()
   light.diffuse_color = vec3(0.0);
   light.specular_color = vec3(0.0);
   light.attenuation = 0.0;
+  light.influence_radius = 0.0;
   return light;
 }
 

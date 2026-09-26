@@ -20,6 +20,13 @@ BsdfSample ray_generate_direction(float2 noise,
                                   float3 V,
                                   Thickness thickness)
 {
+  if (closure_is_npr_reflection(cl)) {
+    float3x3 frame = closure_reflection_frame(cl);
+    BsdfSample samp = bxdf_ggx_anisotropic_sample(
+        noise, V * frame, bxdf_ggx_anisotropic_axes(cl.data.x, cl.data.y));
+    samp.direction = frame * float3(samp.direction);
+    return samp;
+  }
   float3 random_point_on_cylinder = sample_cylinder(noise);
   /* Bias the rays so we never get really high energy rays almost parallel to the surface. */
   constexpr float rng_bias = 0.08f;

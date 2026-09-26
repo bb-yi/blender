@@ -58,6 +58,10 @@ struct SubsurfaceModule {
 
   /* Process direct and indirect radiance separately. */
   bool use_split_radiance_ = false;
+  /* A third channel scatters precolored NPR light without dividing by the physical albedo. */
+  bool use_npr_radiance_ = false;
+  /* -1 is native SSS; other values diffuse the selected shaded closure bin. */
+  int diffusion_bin_ = -1;
 
  public:
   SubsurfaceModule(Instance &inst) : inst_(inst)
@@ -75,7 +79,8 @@ struct SubsurfaceModule {
   void render(gpu::Texture *direct_diffuse_light_tx,
               gpu::Texture *indirect_diffuse_light_tx,
               eClosureBits active_closures,
-              View &view);
+              View &view,
+              int diffusion_bin = -1);
 
  private:
   void precompute_samples_location();

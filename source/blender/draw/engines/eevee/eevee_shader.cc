@@ -1559,8 +1559,15 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
 
   GPUCodegenOutput &codegen = *codegen_;
   ShaderCreateInfo &info = *reinterpret_cast<ShaderCreateInfo *>(codegen.create_info);
-  const bool use_shader_to_rgba = material_graph_serialized_contains(codegen.surface,
-                                                                     "node_shader_to_rgba(");
+  bool use_shader_to_rgba = material_graph_serialized_contains(codegen.surface,
+                                                               "node_shader_to_rgba(");
+  if (GPU_material_surface_diffusion_has(gpumat)) {
+    /* The diffusion input is serialized as a scoped function, not in the root surface graph.
+     * Its Shader to RGB still needs hybrid lighting rather than the deferred dummy evaluator. */
+    for (const GPUGraphOutput &graph : codegen.material_functions) {
+      use_shader_to_rgba |= material_graph_serialized_contains(graph, "node_shader_to_rgba(");
+    }
+  }
 
   /* Material generated sources can use arbitrary per-material names, while the GPU dependency
    * resolver only knows startup-registered files. Inline the referenced generated blocks here and
@@ -1671,7 +1678,8 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       material_depth_offset_graph_uses_supported_light_access(gpumat, codegen_->depth_offset);
   const bool surface_graph_uses_glsl_light_access =
       ELEM(pipeline_type, MAT_PIPE_DEFERRED, MAT_PIPE_FORWARD, MAT_PIPE_BAKE_COLOR) &&
-      material_graph_uses_glsl_light_access(gpumat, codegen.surface);
+      (material_graph_uses_glsl_light_access(gpumat, codegen.surface) ||
+       GPU_material_flag_get(gpumat, GPU_MATFLAG_GLSL_LIGHT_ACCESS));
   const bool npr_graph_uses_glsl_light_access =
       ELEM(pipeline_type, MAT_PIPE_DEFERRED_NPR, MAT_PIPE_BAKE_COLOR) &&
       material_graph_uses_glsl_light_access(gpumat, codegen.npr);
@@ -1770,8 +1778,12 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   else if (pipeline_type == MAT_PIPE_BAKE_COLOR) {
     slots.reserve_sampler(LIGHT_SHADER_TEX_SLOT);
   }
-  if (use_shader_info_shadow_classification) {
+  if (use_shader_info_shadow_classification || GPU_material_principled_npr_v2_has(gpumat)) {
     slots.reserve_sampler(SHADOW_CASTER_ATLAS_TEX_SLOT);
+  }
+  if (GPU_material_principled_npr_v2_has(gpumat)) {
+    slots.reserve_sampler(NPR_SHADOW_OBJECT_ID_TEX_SLOT);
+    slots.reserve_sampler(NPR_SHADOW_NORMAL_TEX_SLOT);
   }
   if (has_depth_offset) {
     info.define("MAT_DEPTH_OFFSET");
@@ -1786,6 +1798,9 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     }
   }
 
+  if (use_hiz_data) {
+    info.define("MAT_HIZ_DATA");
+  }
   if (use_hiz_data && !has_bsl_hiz_resource) {
     add_create_info_and_reserve(info, slots, "eevee_hiz_data");
   }
@@ -1867,6 +1882,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
            MAT_PIPE_BAKE_COLOR);
   if (has_shader_info_light_resources) {
     if (!has_bsl_light_eval_resources) {
+      /* Bind legacy globals; CREATE_INFO_* names are BSL resource-table bridges only. */
       add_create_info_and_reserve(info, slots, "eevee_light_data");
     }
     if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SHADER_INFO)) {
@@ -1881,11 +1897,13 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
         info.define("CREATE_INFO_UtilityTexture");
       }
     }
-    if (use_shader_info_shadow_classification) {
-      info.define("SHADOW_CASTER_CLASSIFY");
-      if (!has_bsl_light_eval_resources) {
-        add_create_info_and_reserve(info, slots, "eevee_shadow_caster_data");
-      }
+  }
+  /* Classification is requested by Shader Info Self/Cast outputs and by native nodes such as
+   * Principled NPR Cast Only. It must not require GPU_MATFLAG_SHADER_INFO. */
+  if (use_shader_info_shadow_classification) {
+    info.define("SHADOW_CASTER_CLASSIFY");
+    if (!has_bsl_light_eval_resources) {
+      add_create_info_and_reserve(info, slots, "eevee_shadow_caster_data");
     }
   }
   if (pipeline_type == MAT_PIPE_BAKE_COLOR) {
@@ -1896,6 +1914,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     if (depth_offset_uses_light_access && pipeline_type != MAT_PIPE_BAKE_COLOR) {
       info.define("LIGHT_ITER_FORCE_NO_CULLING");
     }
+
     if (!has_shader_info_light_resources && !has_bsl_light_eval_resources) {
       add_create_info_and_reserve(info, slots, "eevee_light_data");
     }
@@ -1939,6 +1958,54 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
 
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_DIFFUSE)) {
     info.define("MAT_DIFFUSE");
+  }
+  if (GPU_material_principled_npr_v2_has(gpumat)) {
+    info.define("MAT_PRINCIPLED_NPR_V2");
+  }
+  if (GPU_material_surface_diffusion_has(gpumat) && pipeline_type == MAT_PIPE_DEFERRED &&
+      probe_capture == MAT_PROBE_NONE)
+  {
+    /* Diffusion requires the main-view screen-space pass. Probe and forward pipelines preserve
+     * the input material without writing a payload their GBuffer does not allocate. */
+    info.define("MAT_NPR_SURFACE_DIFFUSION");
+  }
+  /* Local Color also evaluates direct highlights without emitting an NPR closure. */
+  const eGPUMaterialNPRFeature npr_features = GPU_material_npr_features_get(gpumat);
+  if (npr_features & GPU_MAT_NPR_FINITE_HIGHLIGHT) {
+    info.define("MAT_NPR_FINITE_HIGHLIGHT");
+  }
+  if (npr_features & GPU_MAT_NPR_REFERENCE_HIGHLIGHT) {
+    info.define("MAT_NPR_REFERENCE_HIGHLIGHT");
+  }
+  if (npr_features & GPU_MAT_NPR_SHARED_ENERGY) {
+    info.define("MAT_NPR_SHARED_ENERGY");
+  }
+  if (npr_features & GPU_MAT_NPR_RIM_DEPTH) {
+    info.define("MAT_NPR_DEPTH_RIM");
+  }
+  if (npr_features & GPU_MAT_NPR_MAP_PER_LIGHT) {
+    info.define("MAT_NPR_MAP_PER_LIGHT");
+  }
+  if (npr_features & GPU_MAT_NPR_MAP_COMBINED) {
+    info.define("MAT_NPR_MAP_COMBINED");
+  }
+  if (npr_features & GPU_MAT_NPR_MAP_TOTAL) {
+    info.define("MAT_NPR_MAP_TOTAL");
+  }
+  if (npr_features & GPU_MAT_NPR_DRIVEN_RAMP) {
+    info.define("MAT_NPR_DRIVEN_RAMP");
+  }
+  const eGPUMaterialNPRFeature npr_shadow =
+      npr_features & (GPU_MAT_NPR_SHADOW_STABLE | GPU_MAT_NPR_SHADOW_TEMPORAL |
+                      GPU_MAT_NPR_SHADOW_SOFT);
+  if (npr_shadow == GPU_MAT_NPR_FEATURE_NONE) {
+    info.define("MAT_NPR_SHADOW_NONE");
+  }
+  else if (npr_shadow == GPU_MAT_NPR_SHADOW_STABLE) {
+    info.define("MAT_NPR_SHADOW_ONLY_STABLE");
+  }
+  else if (npr_shadow == GPU_MAT_NPR_SHADOW_TEMPORAL) {
+    info.define("MAT_NPR_SHADOW_ONLY_TEMPORAL");
   }
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SUBSURFACE)) {
     info.define("MAT_SUBSURFACE");
@@ -2082,6 +2149,9 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
 
     info.compilation_constant(
         gpu::shader::Type::bool_t, "use_light_shader_texture_eval", use_light_shader_texture_eval);
+    info.compilation_constant(gpu::shader::Type::bool_t,
+                              "use_npr_light_policy",
+                              GPU_material_principled_npr_v2_has(gpumat));
     info.compilation_constant(
         gpu::shader::Type::int_t, "light_closure_eval_count_reflect", closure_bin_count);
     info.compilation_constant(
@@ -2320,11 +2390,11 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       dependencies_set.add("eevee_light_eval.bsl.hh");
       dependencies_set.add("eevee_light_iter.bsl.hh");
       dependencies_set.add("eevee_light_lib.bsl.hh");
-      dependencies_set.add("eevee_shadow_tracing.bsl.hh");
     }
     if (uses_glsl_light_access) {
       dependencies_set.add("eevee_light_iter.bsl.hh");
       dependencies_set.add("eevee_light_lib.bsl.hh");
+      dependencies_set.add("eevee_shadow_tracing.bsl.hh");
     }
     if (material_pass_uses_glsl_light_access) {
       dependencies_set.add("eevee_shadow_tracing.bsl.hh");

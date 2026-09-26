@@ -105,6 +105,12 @@ SAMPLER(OBJECT_ID_TEX_SLOT, usampler2D, object_id_tx)
 SAMPLER(PREPASS_NORMAL_TEX_SLOT, sampler2D, prepass_normal_tx)
 GPU_SHADER_CREATE_END()
 
+/* Reuse the prepass textures without defining MAT_RAYCAST for unrelated native materials. */
+GPU_SHADER_CREATE_INFO(eevee_npr_shadow_surface_data)
+SAMPLER(NPR_SHADOW_OBJECT_ID_TEX_SLOT, usampler2D, npr_shadow_object_id_tx)
+SAMPLER(NPR_SHADOW_NORMAL_TEX_SLOT, sampler2D, npr_shadow_normal_tx)
+GPU_SHADER_CREATE_END()
+
 /** \} */
 
 /* -------------------------------------------------------------------- */

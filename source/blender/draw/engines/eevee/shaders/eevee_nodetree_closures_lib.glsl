@@ -10,6 +10,12 @@
 #include "gpu_shader_math_vector_reduce_lib.glsl"
 
 packed_float3 g_emission;
+/* Scoped by the generated input-branch function, not shared with sibling shaders. */
+float4 g_npr_diffusion = float4(0.0f);
+float g_npr_diffusion_weight = 1.0f;
+bool g_npr_diffusion_scope = false;
+/* Art-directed radiance is not emission and must not enter the surfel emission capture. */
+packed_float3 g_npr_rim;
 packed_float3 g_transmittance;
 float g_holdout;
 
@@ -33,6 +39,8 @@ packed_float3 g_volume_absorption;
 ClosureUndetermined g_closure_bins[CLOSURE_BIN_COUNT];
 /* Random number per sampled closure type. */
 float g_closure_rand[CLOSURE_BIN_COUNT];
+/* Reset along with the reservoirs, including between Shader to RGB subtrees. */
+bool g_closure_reflection_bin = true;
 
 ClosureUndetermined g_closure_get(uchar i)
 {
@@ -57,6 +65,7 @@ ClosureUndetermined g_closure_get_resolved(uchar i, float weight_fac)
 {
   ClosureUndetermined cl = g_closure_get(i);
   cl.color *= cl.weight * weight_fac;
+  cl.npr.additive *= cl.weight * weight_fac;
   return cl;
 }
 
@@ -112,29 +121,52 @@ bool closure_select_check(float weight, float &total_weight, float &r)
  */
 void closure_select(ClosureUndetermined &destination, float &random, ClosureUndetermined candidate)
 {
+  candidate.weight *= g_npr_diffusion_weight;
+#if defined(MAT_NPR_SURFACE_DIFFUSION) && !defined(MAT_CAPTURE) && !defined(MAT_BAKE_COLOR)
+  candidate.npr.diffusion = g_npr_diffusion;
+#endif
   float candidate_color_weight = average(abs(candidate.color));
+#if defined(MAT_NPR_SURFACE_DIFFUSION) && !defined(MAT_CAPTURE) && !defined(MAT_BAKE_COLOR)
+  /* Black source pixels must still receive neighboring radiance. Do not discard their
+   * diffusion metadata based only on this pixel's pre-diffusion energy. */
+  if (candidate.npr.diffusion.w > 0.0f && reduce_max(candidate.npr.diffusion.xyz) > 0.0f) {
+    candidate_color_weight = max(candidate_color_weight, 1.0f);
+  }
+#endif
+#ifndef MAT_CAPTURE
+  /* Surfel capture stores physical albedo, not view-dependent surface radiance. */
+  if (candidate.npr.enabled) {
+    candidate_color_weight = max(
+        candidate_color_weight,
+        average(abs(candidate.color * candidate.npr.multiplier + candidate.npr.additive)));
+  }
+#endif
   if (closure_select_check(candidate.weight * candidate_color_weight, destination.weight, random))
   {
     float total_weight = destination.weight;
     destination = candidate;
     destination.color /= candidate_color_weight;
+    destination.npr.additive /= candidate_color_weight;
     destination.weight = total_weight;
   }
 }
 
 void closure_weights_reset(float closure_rand)
 {
+  g_closure_reflection_bin = true;
   g_closure_rand[0] = closure_rand;
   g_closure_bins[0].color = float3(0.0f);
   g_closure_bins[0].weight = 0.0f;
   g_closure_bins[0].N = float3(0.0f);
   g_closure_bins[0].type = CLOSURE_NONE_ID;
+  g_closure_bins[0].npr = closure_npr_direct_default();
 #if CLOSURE_BIN_COUNT > 1
   g_closure_rand[1] = closure_rand;
   g_closure_bins[1].color = float3(0.0f);
   g_closure_bins[1].weight = 0.0f;
   g_closure_bins[1].N = float3(0.0f);
   g_closure_bins[1].type = CLOSURE_NONE_ID;
+  g_closure_bins[1].npr = closure_npr_direct_default();
 #endif
 #if CLOSURE_BIN_COUNT > 2
   g_closure_rand[2] = closure_rand;
@@ -142,6 +174,7 @@ void closure_weights_reset(float closure_rand)
   g_closure_bins[2].weight = 0.0f;
   g_closure_bins[2].N = float3(0.0f);
   g_closure_bins[2].type = CLOSURE_NONE_ID;
+  g_closure_bins[2].npr = closure_npr_direct_default();
 #endif
 
   g_volume_scattering = float3(0.0f);
@@ -149,6 +182,7 @@ void closure_weights_reset(float closure_rand)
   g_volume_absorption = float3(0.0f);
 
   g_emission = float3(0.0f);
+  g_npr_rim = float3(0.0f);
   g_transmittance = float3(0.0f);
   g_volume_scattering = float3(0.0f);
   g_volume_absorption = float3(0.0f);

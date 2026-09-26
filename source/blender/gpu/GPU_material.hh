@@ -149,6 +149,23 @@ enum eGPUMaterialFlag {
 };
 ENUM_OPERATORS(eGPUMaterialFlag);
 
+/** Principled NPR code needed by the consumed nodes in one material. */
+enum eGPUMaterialNPRFeature : uint32_t {
+  GPU_MAT_NPR_FEATURE_NONE = 0,
+  GPU_MAT_NPR_FINITE_HIGHLIGHT = (1 << 0),
+  GPU_MAT_NPR_REFERENCE_HIGHLIGHT = (1 << 1),
+  GPU_MAT_NPR_SHADOW_STABLE = (1 << 2),
+  GPU_MAT_NPR_SHADOW_TEMPORAL = (1 << 3),
+  GPU_MAT_NPR_SHADOW_SOFT = (1 << 4),
+  GPU_MAT_NPR_SHARED_ENERGY = (1 << 5),
+  GPU_MAT_NPR_RIM_DEPTH = (1 << 6),
+  GPU_MAT_NPR_MAP_PER_LIGHT = (1 << 8),
+  GPU_MAT_NPR_MAP_COMBINED = (1 << 9),
+  GPU_MAT_NPR_MAP_TOTAL = (1 << 10),
+  GPU_MAT_NPR_DRIVEN_RAMP = (1 << 11),
+};
+ENUM_OPERATORS(eGPUMaterialNPRFeature);
+
 enum eGPUCustomNodeDependencyFlag {
   GPU_CUSTOM_NODE_DEPENDENCY_NONE = 0,
   GPU_CUSTOM_NODE_DEPENDENCY_GLSL_GEOMETRY_HELPERS = (1 << 0),
@@ -259,6 +276,10 @@ bool GPU_material_has_filter_output(GPUMaterial *mat);
 bool GPU_material_has_light_shader_output(GPUMaterial *mat);
 bool GPU_material_has_glsl_light_shader_eval(const GPUMaterial *mat);
 bool GPU_material_has_shader_info_shadow_classification(const GPUMaterial *mat);
+bool GPU_material_principled_npr_v2_has(const GPUMaterial *mat);
+bool GPU_material_surface_diffusion_has(const GPUMaterial *mat);
+void GPU_material_surface_diffusion_set(GPUMaterial *mat);
+eGPUMaterialNPRFeature GPU_material_npr_features_get(const GPUMaterial *mat);
 bool GPU_material_uses_hiz_data(const GPUMaterial *mat);
 
 int GPU_material_filter_object_info_ensure(GPUMaterial *material, Object *object);
@@ -625,6 +646,8 @@ void GPU_material_output_filter_item(GPUMaterial *material, int identifier, GPUN
 void GPU_material_output_light_shader(GPUMaterial *material, GPUNodeLink *link);
 void GPU_material_glsl_light_shader_eval_set(GPUMaterial *material);
 void GPU_material_shader_info_shadow_classification_set(GPUMaterial *material);
+void GPU_material_principled_npr_v2_set(GPUMaterial *material);
+void GPU_material_npr_features_add(GPUMaterial *material, eGPUMaterialNPRFeature features);
 void GPU_material_hiz_data_set(GPUMaterial *material);
 
 void GPU_material_add_output_link_aov(GPUMaterial *material, GPUNodeLink *link, int hash);

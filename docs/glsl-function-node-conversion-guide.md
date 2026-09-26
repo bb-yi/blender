@@ -457,6 +457,7 @@ Closure Output.Closure -> GLSL Function 的 sampler3D 输入
   - `GLSL_LIGHT_TYPE_AREA_RECT`
   - `GLSL_LIGHT_TYPE_AREA_ELLIPSE`
 - `GLSLLight.lightgroup_id` 表示这盏灯的整数 `Lightgroup ID`，可直接用于自定义逐灯过滤
+- `GLSLLight.influence_radius` 是世界空间的表面光照有效影响半径，复用 EEVEE 的自动范围或自定义截止距离（含灯光着色器范围缩放），不是光源形状半径。太阳灯和无效灯返回 0；按范围归一化距离前须判断大于 0。需要包含此新增字段的构建。
 - `GLSLLight.position` 表示**灯中心世界坐标**；日光没有有限位置，因此返回 `vec3(0.0)`
 - `GLSLLight.direction` 表示**灯的世界空间朝向轴**：
   - 日光：`sun().direction`

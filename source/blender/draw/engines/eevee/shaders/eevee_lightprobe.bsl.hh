@@ -72,6 +72,32 @@ struct LightprobeRenderData {
   {
     [[resource_table]] const LightprobeSphereRenderData &lp_spheres = spheres;
 
+    if (closure_is_npr_reflection(cl)) {
+      [[resource_table]] const Sampling &rng = sampling;
+      float3x3 frame = closure_reflection_frame(cl);
+      float3 Vt = V * frame;
+      float2 alpha = bxdf_ggx_anisotropic_axes(cl.data.x, cl.data.y);
+      float2 noise = fract(rng.rng_2D_get(SAMPLING_RAYTRACE_U) +
+                           float2(interleaved_gradient_noise(P.xy, 0.0f, P.z),
+                                  interleaved_gradient_noise(P.yz, 1.0f, P.x)));
+      float3 radiance = float3(0.0f);
+      float weight_sum = 0.0f;
+      for (int i = 0; i < 8; i++) {
+        float2 random = fract(float2((float(i) + 0.5f) / 8.0f, float(i) * 0.61803398875f) +
+                               noise);
+        BsdfSample ray = bxdf_ggx_anisotropic_sample(random, Vt, alpha);
+        if (ray.pdf > 0.0f) {
+          float weight = bxdf_ggx_anisotropic_eval(ray.direction, Vt, alpha).weight;
+          /* The distribution is integrated by the directions. Do not blur it a second time or
+           * replace a rough anisotropic lobe by directionless volume-probe SH. */
+          radiance += lp_spheres.spherical_sample_normalized_with_parallax(
+                          samp, P, frame * float3(ray.direction), 0.0f) * weight;
+          weight_sum += weight;
+        }
+      }
+      return radiance * safe_rcp(weight_sum);
+    }
+
     LightProbeRay ray = bxdf_lightprobe_ray(cl, P, V, thickness);
 
     float lod = lightprobe::sphere::roughness_to_lod(ray.perceptual_roughness);
