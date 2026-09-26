@@ -935,8 +935,7 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
       }
     }
 
-    if (!inst_.is_baking() && !is_filter_material && !hide_on_camera &&
-        geometry_type == MAT_GEOM_MESH)
+    if (!inst_.is_baking() && !is_filter_material && geometry_type == MAT_GEOM_MESH)
     {
       bNode *shell_node = material_outline_shell_node_get(blender_mat);
       if (shell_node != nullptr) {
@@ -947,7 +946,7 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
                                   shell_state.ztest_mode == MA_ZTEST_LESS_EQUAL &&
                                   blender_mat->outline_shell_render_method ==
                                       MA_OUTLINE_SHELL_DEFERRED;
-        const bool use_prepass = shell_state.depth_write;
+        const bool use_prepass = !hide_on_camera && shell_state.depth_write;
         const eMaterialPipeline shell_prepass_pipe =
             use_deferred ? (has_motion ? MAT_PIPE_PREPASS_DEFERRED_VELOCITY :
                                         MAT_PIPE_PREPASS_DEFERRED) :
@@ -965,14 +964,16 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
                                                      &shell_state,
                                                      true);
         }
-        mat.outline_shell_shading = material_pass_get(ob,
-                                                   blender_mat,
-                                                   shell_shading_pipe,
-                                                   geometry_type,
-                                                   MAT_PROBE_NONE,
-                                                   true,
-                                                   &shell_state,
-                                                   true);
+        if (!hide_on_camera) {
+          mat.outline_shell_shading = material_pass_get(ob,
+                                                     blender_mat,
+                                                     shell_shading_pipe,
+                                                     geometry_type,
+                                                     MAT_PROBE_NONE,
+                                                     true,
+                                                     &shell_state,
+                                                     true);
+        }
         /* Draw only when every pass required by the chosen route is available, otherwise the
          * surface would punch holes or depth-test against a missing prepass while compiling. */
         if (mat.outline_shell_shading.gpumat == nullptr ||
@@ -981,6 +982,7 @@ Material &MaterialModule::material_sync(const ObjectHandle &ob_handle,
           mat.outline_shell_prepass = MaterialPass();
           mat.outline_shell_shading = MaterialPass();
         }
+        /* Camera visibility must not disable independently enabled shadow casting. */
         if (is_shadow_caster &&
             (blender_mat->outline_shell_flag & MA_OUTLINE_SHELL_CAST_SHADOW))
         {
@@ -1036,9 +1038,15 @@ MaterialArray &MaterialModule::material_array_get(const ObjectHandle &ob_handle,
     material_array_.materials.append(mat);
     material_array_.gpu_materials.append(mat.shading.gpumat);
     material_array_.gpu_materials_npr.append(mat.npr.gpumat);
-    material_array_.gpu_materials_outline_shell.append(mat.outline_shell_shading.gpumat != nullptr ?
-                                                        mat.outline_shell_shading.gpumat :
-                                                        mat.outline_shell_prepass.gpumat);
+    GPUMaterial *shell_gpumat = mat.outline_shell_shading.gpumat;
+    if (shell_gpumat == nullptr) {
+      shell_gpumat = mat.outline_shell_prepass.gpumat;
+    }
+    if (shell_gpumat == nullptr) {
+      /* Shadow-only shells still need a mesh batch with their displacement attributes. */
+      shell_gpumat = mat.outline_shell_shadow.gpumat;
+    }
+    material_array_.gpu_materials_outline_shell.append(shell_gpumat);
   }
   return material_array_;
 }
