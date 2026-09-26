@@ -186,6 +186,8 @@ uint closure_npr_policy_group(ClosureNPRLightPolicy policy)
 }
 
 struct ClosureNPRDirect {
+  /* Surface diffusion metadata follows the same reservoir candidate as the BSDF. */
+  packed_float4 diffusion;
   packed_float3 multiplier;
   packed_float3 additive;
   float indirect_weight;

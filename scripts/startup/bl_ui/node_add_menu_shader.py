@@ -529,11 +529,6 @@ class NODE_MT_shader_node_shader_base(node_add_menu.NodeMenu):
         )
         self.node_operator(
             layout,
-            "ShaderNodePrincipledNPR",
-            poll=object_eevee_shader_nodes_poll(context),
-        )
-        self.node_operator(
-            layout,
             "ShaderNodeBsdfHairPrincipled",
             poll=object_material_shader_nodes_poll(context) and not eevee_shader_nodes_poll(context),
         )
@@ -906,6 +901,17 @@ class NODE_MT_shader_node_layout_base(node_add_menu.NodeMenu):
         self.draw_assets_for_catalog(layout, self.menu_path)
 
 
+class NODE_MT_shader_node_npr_base(node_add_menu.NodeMenu):
+    bl_label = "NPR"
+
+    def draw(self, context):
+        layout = self.layout
+        enabled = object_material_shader_nodes_poll(context) and eevee_shader_nodes_poll(context)
+        self.node_operator(layout, "ShaderNodePrincipledNPR", poll=enabled)
+        self.node_operator(layout, "ShaderNodeNPRSurfaceDiffusion", poll=enabled)
+        self.draw_assets_for_catalog(layout, self.menu_path)
+
+
 class NODE_MT_shader_node_all_base(node_add_menu.NodeMenu):
     bl_label = ""
     menu_path = "Root"
@@ -932,6 +938,8 @@ class NODE_MT_shader_node_all_base(node_add_menu.NodeMenu):
         layout.separator()
         # Do not order this alphabetically, we are matching the order in the output node.
         self.draw_menu(layout, "Shader")
+        if object_material_shader_nodes_poll(context) and eevee_shader_nodes_poll(context):
+            self.draw_menu(layout, "NPR")
         self.draw_menu(layout, "Displacement")
         layout.separator()
         self.draw_menu(layout, "Color")
@@ -951,6 +959,7 @@ add_menus = {
     "NODE_MT_category_shader_output": NODE_MT_shader_node_output_base,
     "NODE_MT_category_shader_color": NODE_MT_shader_node_color_base,
     "NODE_MT_category_shader_shader": NODE_MT_shader_node_shader_base,
+    "NODE_MT_category_shader_npr": NODE_MT_shader_node_npr_base,
     "NODE_MT_category_shader_texture": NODE_MT_shader_node_texture_base,
     "NODE_MT_category_shader_displacement": NODE_MT_shader_node_displacement_base,
     "NODE_MT_category_shader_vector": NODE_MT_shader_node_vector_base,
@@ -973,6 +982,7 @@ swap_menus = {
     "NODE_MT_shader_node_output_swap": NODE_MT_shader_node_output_base,
     "NODE_MT_shader_node_color_swap": NODE_MT_shader_node_color_base,
     "NODE_MT_shader_node_shader_swap": NODE_MT_shader_node_shader_base,
+    "NODE_MT_shader_node_npr_swap": NODE_MT_shader_node_npr_base,
     "NODE_MT_shader_node_texture_swap": NODE_MT_shader_node_texture_base,
     "NODE_MT_shader_node_displacement_swap": NODE_MT_shader_node_displacement_base,
     "NODE_MT_shader_node_vector_swap": NODE_MT_shader_node_vector_base,

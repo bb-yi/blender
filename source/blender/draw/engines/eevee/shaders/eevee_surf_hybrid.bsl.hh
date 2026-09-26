@@ -261,12 +261,21 @@ HybridFragOut surf_hybrid_impl([[resource_table]] PipelineConstants &pipe,
    * reservoir with NPR. The compact UNORM closure color cannot hold this compensation. */
   gbuffer::Header npr_header = gbuffer::Header::from_data(gbuf.header);
   npr_header.npr_payload_set(true);
+#ifdef MAT_NPR_SURFACE_DIFFUSION
+  npr_header.surface_diffusion_set(true);
+#endif
   float3 npr_indirect_weights = float3(1.0f);
   float3 npr_shadow_strengths = float3(1.0f);
   float3 npr_direct_gains = float3(1.0f);
   for (uint i = 0u; i < 3u; i++) [[unroll]] {
     if (pipe.closure_bin_count > i) [[static_branch]] {
       ClosureUndetermined cl = gbuf_data.closure[i];
+#ifdef MAT_NPR_SURFACE_DIFFUSION
+      srt.write_header_data(out_texel, GBUF_DIFFUSION_RADIUS_LAYER + i,
+                            rgb9e5_encode(cl.npr.diffusion.xyz));
+      srt.write_header_data(out_texel, GBUF_DIFFUSION_STRENGTH_LAYER + i,
+                            floatBitsToUint(cl.npr.diffusion.w));
+#endif
       npr_indirect_weights[i] = cl.npr.indirect_weight;
       npr_shadow_strengths[i] = cl.npr.light_policy.strength;
       npr_direct_gains[i] = cl.npr.light_policy.direct_gain;

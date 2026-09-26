@@ -219,6 +219,12 @@ struct Reader {
     if (header.has_npr_sss_additive() && cl.type == CLOSURE_BSSRDF_BURLEY_ID) {
       cl.npr.additive = read_npr_radiance(texel, GBUF_NPR_ADDITIVE_LAYER);
     }
+    if (header.has_surface_diffusion() && cl.type != CLOSURE_NONE_ID) {
+      cl.npr.diffusion = float4(
+          read_npr_radiance(texel, GBUF_DIFFUSION_RADIUS_LAYER + bin),
+          uintBitsToFloat(texelFetch(
+              gbuf_header_tx, int3(texel, GBUF_DIFFUSION_STRENGTH_LAYER + bin), 0).r));
+    }
     return cl;
   }
 

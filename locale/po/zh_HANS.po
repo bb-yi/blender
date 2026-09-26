@@ -164675,6 +164675,12 @@ msgstr "清零"
 msgid "Principled NPR"
 msgstr "原理化 NPR"
 
+msgid "NPR Surface Diffusion"
+msgstr "NPR 表面扩散"
+
+msgid "Diffuse the shaded input surface in screen space without relighting it. EEVEE deferred surfaces only; coverage is preserved"
+msgstr "在屏幕空间扩散输入表面的着色结果，不重新计算光照。仅支持 EEVEE 延迟表面；保持覆盖率不变"
+
 msgid "Eevee-native stylized material with toon shading, classified shadows, reflections, and advanced color output"
 msgstr "Eevee 原生风格化材质：卡通着色、分类阴影、反射与高级颜色输出"
 

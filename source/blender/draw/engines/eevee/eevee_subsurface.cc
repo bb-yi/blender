@@ -48,6 +48,8 @@ void SubsurfaceModule::end_sync()
     pass.bind_image("indirect_light_img", &indirect_light_tx_);
     pass.bind_image("object_id_img", &object_id_tx_);
     pass.bind_image("radiance_img", &radiance_tx_);
+    pass.bind_image("diffusion_header_img", &inst_.gbuffer.header_tx);
+    pass.push_constant("diffusion_bin", &diffusion_bin_);
     pass.bind_ssbo("convolve_tile_buf", &convolve_tile_buf_);
     pass.bind_ssbo("convolve_dispatch_buf", &convolve_dispatch_buf_);
     pass.barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_SHADER_IMAGE_ACCESS);
@@ -82,6 +84,7 @@ void SubsurfaceModule::end_sync()
     /* Keep the descriptor valid even on drivers which retain resources behind a specialization
      * constant. The disabled path never writes and does not allocate additional header layers. */
     pass.bind_image("npr_header_img", &inst_.gbuffer.header_tx);
+    pass.push_constant("diffusion_bin", &diffusion_bin_);
     pass.bind_ssbo("tiles_coord_buf", &convolve_tile_buf_);
     pass.barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_SHADER_STORAGE);
     pass.dispatch(convolve_dispatch_buf_);
@@ -91,11 +94,13 @@ void SubsurfaceModule::end_sync()
 void SubsurfaceModule::render(gpu::Texture *direct_diffuse_light_tx,
                               gpu::Texture *indirect_diffuse_light_tx,
                               eClosureBits active_closures,
-                              View &view)
+                              View &view,
+                              int diffusion_bin)
 {
   if (!(active_closures & CLOSURE_SSS)) {
     return;
   }
+  diffusion_bin_ = diffusion_bin;
 
   /* TODO: This only needs to be update once per render sample. */
   precompute_samples_location();

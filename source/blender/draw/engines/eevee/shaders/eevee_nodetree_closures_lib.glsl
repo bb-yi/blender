@@ -10,6 +10,10 @@
 #include "gpu_shader_math_vector_reduce_lib.glsl"
 
 packed_float3 g_emission;
+/* Scoped by the generated input-branch function, not shared with sibling shaders. */
+float4 g_npr_diffusion = float4(0.0f);
+float g_npr_diffusion_weight = 1.0f;
+bool g_npr_diffusion_scope = false;
 /* Art-directed radiance is not emission and must not enter the surfel emission capture. */
 packed_float3 g_npr_rim;
 packed_float3 g_transmittance;
@@ -117,7 +121,18 @@ bool closure_select_check(float weight, float &total_weight, float &r)
  */
 void closure_select(ClosureUndetermined &destination, float &random, ClosureUndetermined candidate)
 {
+  candidate.weight *= g_npr_diffusion_weight;
+#if defined(MAT_NPR_SURFACE_DIFFUSION) && !defined(MAT_CAPTURE) && !defined(MAT_BAKE_COLOR)
+  candidate.npr.diffusion = g_npr_diffusion;
+#endif
   float candidate_color_weight = average(abs(candidate.color));
+#if defined(MAT_NPR_SURFACE_DIFFUSION) && !defined(MAT_CAPTURE) && !defined(MAT_BAKE_COLOR)
+  /* Black source pixels must still receive neighboring radiance. Do not discard their
+   * diffusion metadata based only on this pixel's pre-diffusion energy. */
+  if (candidate.npr.diffusion.w > 0.0f && reduce_max(candidate.npr.diffusion.xyz) > 0.0f) {
+    candidate_color_weight = max(candidate_color_weight, 1.0f);
+  }
+#endif
 #ifndef MAT_CAPTURE
   /* Surfel capture stores physical albedo, not view-dependent surface radiance. */
   if (candidate.npr.enabled) {

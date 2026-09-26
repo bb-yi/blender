@@ -36,6 +36,7 @@ set(SRC
   nodes/node_shader_bsdf_metallic.cc
   nodes/node_shader_bsdf_principled.cc
   nodes/node_shader_principled_npr.cc
+  nodes/node_shader_npr_surface_diffusion.cc
   nodes/node_shader_principled_npr_v2.cc
   nodes/node_shader_principled_npr_v2.hh
   nodes/node_shader_bsdf_ray_portal.cc
@@ -223,6 +224,8 @@ endif()
 blender_add_lib(bf_nodes_shader "${SRC}" "${INC}" "${INC_SYS}" "${LIB}")
 add_library(bf::nodes::shader ALIAS bf_nodes_shader)
 
+set_source_files_properties(nodes/node_shader_npr_surface_diffusion.cc
+  PROPERTIES SKIP_UNITY_BUILD_INCLUSION ON)
 blender_set_target_unity_build(bf_nodes_shader 10)
 
 # RNA_prototypes.hh

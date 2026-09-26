@@ -255,6 +255,8 @@ bool GPU_material_has_light_shader_output(GPUMaterial *mat);
 bool GPU_material_has_glsl_light_shader_eval(const GPUMaterial *mat);
 bool GPU_material_has_shader_info_shadow_classification(const GPUMaterial *mat);
 bool GPU_material_principled_npr_v2_has(const GPUMaterial *mat);
+bool GPU_material_surface_diffusion_has(const GPUMaterial *mat);
+void GPU_material_surface_diffusion_set(GPUMaterial *mat);
 eGPUMaterialNPRHighlightFeature GPU_material_npr_highlight_features_get(const GPUMaterial *mat);
 bool GPU_material_uses_hiz_data(const GPUMaterial *mat);
 

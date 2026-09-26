@@ -710,6 +710,7 @@ set(GLSL_SRC
   shaders/material/gpu_shader_material_principled.glsl
   shaders/material/gpu_shader_material_principled_shared.glsl
   shaders/material/gpu_shader_material_principled_npr.glsl
+  shaders/material/gpu_shader_material_npr_surface_diffusion.glsl
   shaders/material/gpu_shader_material_principled_npr_v2.glsl
   shaders/material/gpu_shader_material_principled_npr_depth_rim.glsl
   shaders/material/gpu_shader_material_principled_npr_v2_light.glsl

@@ -518,7 +518,19 @@ Closure closure_eval_npr(ClosureReflection reflection,
 
 void closure_npr_rim_add(float3 radiance, float weight)
 {
-  g_npr_rim += radiance * weight;
+#if defined(MAT_NPR_SURFACE_DIFFUSION) && !defined(MAT_CAPTURE) && !defined(MAT_BAKE_COLOR)
+  if (g_npr_diffusion.w > 0.0f && reduce_max(g_npr_diffusion.xyz) > 0.0f) {
+    ClosureUndetermined cl = closure_new(CLOSURE_BSDF_DIFFUSE_ID);
+    cl.N = g_data.N;
+    cl.weight = weight;
+    cl.npr.enabled = true;
+    cl.npr.indirect_weight = 0.0f;
+    cl.npr.additive = radiance;
+    closure_select_diffuse(cl);
+    return;
+  }
+#endif
+  g_npr_rim += radiance * weight * g_npr_diffusion_weight;
 }
 
 /* Native layers inside the NPR node retain native direct-light evaluation. Their independent
@@ -643,14 +655,26 @@ Closure closure_eval(ClosureThinRefraction refraction)
 
 Closure closure_eval(ClosureEmission emission)
 {
-  g_emission += emission.emission * emission.weight;
+#if defined(MAT_NPR_SURFACE_DIFFUSION) && !defined(MAT_CAPTURE) && !defined(MAT_BAKE_COLOR)
+  if (g_npr_diffusion.w > 0.0f && reduce_max(g_npr_diffusion.xyz) > 0.0f) {
+    ClosureUndetermined cl = closure_new(CLOSURE_BSDF_DIFFUSE_ID);
+    cl.N = g_data.N;
+    cl.weight = emission.weight;
+    cl.npr.enabled = true;
+    cl.npr.indirect_weight = 0.0f;
+    cl.npr.additive = emission.emission;
+    closure_select_diffuse(cl);
+    return Closure(0);
+  }
+#endif
+  g_emission += emission.emission * emission.weight * g_npr_diffusion_weight;
   return Closure(0);
 }
 
 Closure closure_eval(ClosureTransparency transparency)
 {
-  g_transmittance += transparency.transmittance * transparency.weight;
-  g_holdout += transparency.holdout * transparency.weight;
+  g_transmittance += transparency.transmittance * transparency.weight * g_npr_diffusion_weight;
+  g_holdout += transparency.holdout * transparency.weight * g_npr_diffusion_weight;
   return Closure(0);
 }
 

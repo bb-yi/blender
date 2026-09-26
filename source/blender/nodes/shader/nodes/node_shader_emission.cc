@@ -30,6 +30,9 @@ static int node_shader_gpu_emission(GPUMaterial *mat,
                                     GPUNodeStack *out)
 {
   GPU_material_flag_set(mat, GPU_MATFLAG_EMISSION);
+  if (node->custom1 == 1) {
+    return GPU_stack_link(mat, node, "node_npr_surface_color", in, out);
+  }
   return GPU_stack_link(mat, node, "node_emission", in, out);
 }
 

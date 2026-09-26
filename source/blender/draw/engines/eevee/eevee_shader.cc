@@ -1547,8 +1547,15 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
 
   GPUCodegenOutput &codegen = *codegen_;
   ShaderCreateInfo &info = *reinterpret_cast<ShaderCreateInfo *>(codegen.create_info);
-  const bool use_shader_to_rgba = material_graph_serialized_contains(codegen.surface,
-                                                                     "node_shader_to_rgba(");
+  bool use_shader_to_rgba = material_graph_serialized_contains(codegen.surface,
+                                                               "node_shader_to_rgba(");
+  if (GPU_material_surface_diffusion_has(gpumat)) {
+    /* The diffusion input is serialized as a scoped function, not in the root surface graph.
+     * Its Shader to RGB still needs hybrid lighting rather than the deferred dummy evaluator. */
+    for (const GPUGraphOutput &graph : codegen.material_functions) {
+      use_shader_to_rgba |= material_graph_serialized_contains(graph, "node_shader_to_rgba(");
+    }
+  }
 
   /* Material generated sources can use arbitrary per-material names, while the GPU dependency
    * resolver only knows startup-registered files. Inline the referenced generated blocks here and
@@ -1942,6 +1949,13 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   }
   if (GPU_material_principled_npr_v2_has(gpumat)) {
     info.define("MAT_PRINCIPLED_NPR_V2");
+  }
+  if (GPU_material_surface_diffusion_has(gpumat) && pipeline_type == MAT_PIPE_DEFERRED &&
+      probe_capture == MAT_PROBE_NONE)
+  {
+    /* Diffusion requires the main-view screen-space pass. Probe and forward pipelines preserve
+     * the input material without writing a payload their GBuffer does not allocate. */
+    info.define("MAT_NPR_SURFACE_DIFFUSION");
   }
   /* Local Color also evaluates direct highlights without emitting an NPR closure. */
   const eGPUMaterialNPRHighlightFeature npr_highlight_features =

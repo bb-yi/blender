@@ -1475,6 +1475,7 @@ void DeferredLayerBase::gbuffer_pass_sync(Instance &inst)
   closure_count_ = 0;
   use_depth_offset_lighting_data_ = false;
   has_principled_npr_v2_ = false;
+  has_surface_diffusion_ = false;
   radiance_behind_tx_ = nullptr;
 }
 
@@ -1884,6 +1885,7 @@ PassMain::Sub *DeferredLayer::material_add(blender::Material *blender_mat, GPUMa
   closure_bits_ |= closure_bits;
   closure_count_ = max_ii(closure_count_, count_bits_i(closure_bits));
   has_principled_npr_v2_ |= GPU_material_principled_npr_v2_has(gpumat);
+  has_surface_diffusion_ |= GPU_material_surface_diffusion_has(gpumat);
   use_depth_offset_lighting_data_ |= material_uses_depth_offset_lighting_data(blender_mat, gpumat);
   has_outline_ = has_outline_ || inst_.materials.material_uses_outline_control(blender_mat);
 
@@ -2090,6 +2092,12 @@ gpu::Texture *DeferredLayer::render(View &main_view,
     ScopedTelemetrySample telemetry_sample(inst_.telemetry, TelemetryStageId::MainDeferredSubsurface);
     inst_.subsurface.render(
         direct_radiance_txs_[0], indirect_result_.closures[0], closure_bits_, render_view);
+    if (has_surface_diffusion_) {
+      for (int bin = 0; bin < to_gbuffer_bin_count(closure_bits_); bin++) {
+        inst_.subsurface.render(direct_radiance_txs_[bin], indirect_result_.closures[bin],
+                                closure_bits_, render_view, bin);
+      }
+    }
   }
 
   radiance_feedback_tx_ = rt_buffer.feedback_ensure(!use_feedback_output_, extent);

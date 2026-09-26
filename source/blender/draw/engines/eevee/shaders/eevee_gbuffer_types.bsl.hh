@@ -401,6 +401,14 @@ struct Header {
   {
     return flag_test(this->header_, 1u << 19u);
   }
+  bool has_surface_diffusion() const
+  {
+    return flag_test(this->header_, 1u << 27u);
+  }
+  void surface_diffusion_set(bool value)
+  {
+    set_flag_from_test(this->header_, value, 1u << 27u);
+  }
   void npr_payload_set(bool value)
   {
     set_flag_from_test(this->header_, value, 1u << 19u);
