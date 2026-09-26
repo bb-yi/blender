@@ -143,23 +143,21 @@ int node_gpu_v2(GPUMaterial *mat, bNode *node, GPUNodeStack *in, GPUNodeStack *o
     const GPUNodeStack &s = GPU_node_get_input(*node, in, id);
     return s.link || s.socket_not_zero();
   };
-  eGPUMaterialNPRHighlightFeature highlight_features = GPU_MAT_NPR_HIGHLIGHT_NONE;
+  eGPUMaterialNPRFeature features = GPU_MAT_NPR_FEATURE_NONE;
   const GPUNodeStack &highlight_strength = GPU_node_get_input(*node, in, "highlight_strength");
   /* The shader uses an exact positive test, not socket_not_zero's near-zero threshold. */
   if (highlight_strength.link || highlight_strength.vec[0] > 0.0f) {
     if (storage.highlight_light_shape == SHD_PRINCIPLED_NPR_HIGHLIGHT_INTEGRATED) {
-      highlight_features |= GPU_MAT_NPR_FINITE_HIGHLIGHT;
+      features |= GPU_MAT_NPR_FINITE_HIGHLIGHT;
     }
     const GPUNodeStack &softness = GPU_node_get_input(*node, in, "profile_softness");
     const GPUNodeStack &offset = GPU_node_get_input(*node, in, "profile_offset");
     if (softness.link || softness.vec[0] != 1.0f || offset.link || offset.vec[0] != 0.0f ||
         storage.specular_mapping == SHD_PRINCIPLED_NPR_SPECULAR_RAMP)
     {
-      highlight_features |= GPU_MAT_NPR_REFERENCE_HIGHLIGHT;
+      features |= GPU_MAT_NPR_REFERENCE_HIGHLIGHT;
     }
   }
-  /* OR across nodes; Local Color needs this code too, but Alpha-only returned above. */
-  GPU_material_npr_highlight_features_add(mat, highlight_features);
   const Material *blender_material = GPU_material_get_material(mat);
   const bool depth_rim_supported = blender_material == nullptr ||
       blender_material->surface_render_method != MA_SURFACE_METHOD_FORWARD;
@@ -174,6 +172,51 @@ int node_gpu_v2(GPUMaterial *mat, bNode *node, GPUNodeStack *in, GPUNodeStack *o
       GPU_material_flag_set(mat, GPU_MATFLAG_RAYCAST);
     }
   }
+
+  if (storage.shadow_mode != SHD_PRINCIPLED_NPR_SHADOW_NONE) {
+    switch (storage.shadow_quality) {
+      case SHD_SHADER_INFO_SHADOW_STABLE:
+        features |= GPU_MAT_NPR_SHADOW_STABLE;
+        break;
+      case SHD_SHADER_INFO_SHADOW_TEMPORAL:
+        features |= GPU_MAT_NPR_SHADOW_TEMPORAL;
+        break;
+      case SHD_SHADER_INFO_SHADOW_SOFT_FILTERED:
+        features |= GPU_MAT_NPR_SHADOW_SOFT;
+        break;
+    }
+  }
+  /* Version >= 2 feeds constant(0) into shading[1].y, so it can never share energy. */
+  if (storage.energy_response_version == 1 &&
+      storage.mapping_stage == SHD_PRINCIPLED_NPR_MAPPING_COMBINED &&
+      storage.light_combine != SHD_PRINCIPLED_NPR_LIGHT_STRONGEST)
+  {
+    features |= GPU_MAT_NPR_SHARED_ENERGY;
+  }
+  if (depth_rim_supported) {
+    if (storage.rim_mode == SHD_PRINCIPLED_NPR_RIM_SCREEN_DEPTH) {
+      features |= GPU_MAT_NPR_RIM_SCREEN_DEPTH;
+    }
+    else if (storage.rim_mode == SHD_PRINCIPLED_NPR_RIM_GOO_DEPTH) {
+      features |= GPU_MAT_NPR_RIM_GOO_DEPTH;
+    }
+  }
+  switch (storage.mapping_stage) {
+    case SHD_PRINCIPLED_NPR_MAPPING_PER_LIGHT:
+      features |= GPU_MAT_NPR_MAP_PER_LIGHT;
+      break;
+    case SHD_PRINCIPLED_NPR_MAPPING_COMBINED:
+      features |= GPU_MAT_NPR_MAP_COMBINED;
+      break;
+    default:
+      features |= GPU_MAT_NPR_MAP_TOTAL;
+      break;
+  }
+  if (storage.diffuse_mapping == SHD_PRINCIPLED_NPR_DIFFUSE_DRIVEN_RAMP) {
+    features |= GPU_MAT_NPR_DRIVEN_RAMP;
+  }
+  /* OR across nodes; Local Color needs this code too, but Alpha-only returned above. */
+  GPU_material_npr_features_add(mat, features);
 
   GPUNodeStack &normal = GPU_node_get_input(*node, in, "normal");
   if (!normal.link) {
@@ -391,7 +434,7 @@ int node_gpu_v2(GPUMaterial *mat, bNode *node, GPUNodeStack *in, GPUNodeStack *o
       mat, socket("Weight"), constant(has_shader ? 1 : 0),
       constant(storage.diffuse_mapping != SHD_PRINCIPLED_NPR_DIFFUSE_DRIVEN_RAMP ? 1 : 0),
       /* Keep the feature defines in the GPUPass graph hash, including Local Color-only graphs. */
-      constant(float(highlight_features)));
+      constant(float(features)));
   return GPU_link(mat,
                   "node_principled_npr_v2",
                   socket("base_color"),

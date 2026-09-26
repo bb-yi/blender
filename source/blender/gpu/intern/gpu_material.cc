@@ -148,7 +148,7 @@ struct GPUMaterial {
   bool has_shader_info_shadow_classification = false;
   bool has_principled_npr_v2 = false;
   bool has_surface_diffusion = false;
-  eGPUMaterialNPRHighlightFeature npr_highlight_features = GPU_MAT_NPR_HIGHLIGHT_NONE;
+  eGPUMaterialNPRFeature npr_features = GPU_MAT_NPR_FEATURE_NONE;
   bool uses_hiz_data = false;
 
   std::string name;
@@ -574,9 +574,9 @@ void GPU_material_surface_diffusion_set(GPUMaterial *mat)
   mat->has_surface_diffusion = true;
 }
 
-eGPUMaterialNPRHighlightFeature GPU_material_npr_highlight_features_get(const GPUMaterial *mat)
+eGPUMaterialNPRFeature GPU_material_npr_features_get(const GPUMaterial *mat)
 {
-  return mat != nullptr ? mat->npr_highlight_features : GPU_MAT_NPR_HIGHLIGHT_NONE;
+  return mat != nullptr ? mat->npr_features : GPU_MAT_NPR_FEATURE_NONE;
 }
 
 bool GPU_material_uses_hiz_data(const GPUMaterial *mat)
@@ -1193,11 +1193,10 @@ void GPU_material_principled_npr_v2_set(GPUMaterial *material)
   }
 }
 
-void GPU_material_npr_highlight_features_add(GPUMaterial *material,
-                                            eGPUMaterialNPRHighlightFeature features)
+void GPU_material_npr_features_add(GPUMaterial *material, eGPUMaterialNPRFeature features)
 {
   if (material != nullptr) {
-    material->npr_highlight_features |= features;
+    material->npr_features |= features;
   }
 }
 

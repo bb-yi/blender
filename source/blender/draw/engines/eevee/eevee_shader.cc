@@ -1958,13 +1958,45 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
     info.define("MAT_NPR_SURFACE_DIFFUSION");
   }
   /* Local Color also evaluates direct highlights without emitting an NPR closure. */
-  const eGPUMaterialNPRHighlightFeature npr_highlight_features =
-      GPU_material_npr_highlight_features_get(gpumat);
-  if (npr_highlight_features & GPU_MAT_NPR_FINITE_HIGHLIGHT) {
+  const eGPUMaterialNPRFeature npr_features = GPU_material_npr_features_get(gpumat);
+  if (npr_features & GPU_MAT_NPR_FINITE_HIGHLIGHT) {
     info.define("MAT_NPR_FINITE_HIGHLIGHT");
   }
-  if (npr_highlight_features & GPU_MAT_NPR_REFERENCE_HIGHLIGHT) {
+  if (npr_features & GPU_MAT_NPR_REFERENCE_HIGHLIGHT) {
     info.define("MAT_NPR_REFERENCE_HIGHLIGHT");
+  }
+  if (npr_features & GPU_MAT_NPR_SHARED_ENERGY) {
+    info.define("MAT_NPR_SHARED_ENERGY");
+  }
+  if (npr_features & GPU_MAT_NPR_RIM_SCREEN_DEPTH) {
+    info.define("MAT_NPR_RIM_SCREEN_DEPTH");
+  }
+  if (npr_features & GPU_MAT_NPR_RIM_GOO_DEPTH) {
+    info.define("MAT_NPR_RIM_GOO_DEPTH");
+  }
+  if (npr_features & GPU_MAT_NPR_MAP_PER_LIGHT) {
+    info.define("MAT_NPR_MAP_PER_LIGHT");
+  }
+  if (npr_features & GPU_MAT_NPR_MAP_COMBINED) {
+    info.define("MAT_NPR_MAP_COMBINED");
+  }
+  if (npr_features & GPU_MAT_NPR_MAP_TOTAL) {
+    info.define("MAT_NPR_MAP_TOTAL");
+  }
+  if (npr_features & GPU_MAT_NPR_DRIVEN_RAMP) {
+    info.define("MAT_NPR_DRIVEN_RAMP");
+  }
+  const eGPUMaterialNPRFeature npr_shadow =
+      npr_features & (GPU_MAT_NPR_SHADOW_STABLE | GPU_MAT_NPR_SHADOW_TEMPORAL |
+                      GPU_MAT_NPR_SHADOW_SOFT);
+  if (npr_shadow == GPU_MAT_NPR_FEATURE_NONE) {
+    info.define("MAT_NPR_SHADOW_NONE");
+  }
+  else if (npr_shadow == GPU_MAT_NPR_SHADOW_STABLE) {
+    info.define("MAT_NPR_SHADOW_ONLY_STABLE");
+  }
+  else if (npr_shadow == GPU_MAT_NPR_SHADOW_TEMPORAL) {
+    info.define("MAT_NPR_SHADOW_ONLY_TEMPORAL");
   }
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_SUBSURFACE)) {
     info.define("MAT_SUBSURFACE");

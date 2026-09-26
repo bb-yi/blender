@@ -289,6 +289,53 @@ bool shader_info_shadow_fetch_surface_sample(float2 uv,
 }
 #endif
 
+float shader_info_shadow_visibility_builtin(LightData light,
+                                            bool is_directional,
+                                            float3 position,
+                                            float3 geometry_normal,
+                                            float3 shading_normal,
+                                            float normal_offset,
+                                            float geometry_offset)
+{
+  return eevee_shadow_eval(light,
+                           is_directional,
+                           false,
+                           false,
+                           0.0f,
+                           position,
+                           geometry_normal,
+                           shading_normal,
+                           normal_offset,
+                           geometry_offset,
+                           uniform_buf.shadow.ray_count,
+                           uniform_buf.shadow.step_count);
+}
+
+float shader_info_shadow_visibility_stable(LightData light,
+                                           bool is_directional,
+                                           float3 position,
+                                           float3 geometry_normal,
+                                           float3 shading_normal,
+                                           float normal_offset,
+                                           float geometry_offset,
+                                           float stable_shadow_samples)
+{
+  int ray_step_count = max(uniform_buf.shadow.step_count, SHADER_INFO_STABLE_SHADOW_MIN_STEP_COUNT);
+  int stable_ray_count = shader_info_shadow_stable_ray_count(stable_shadow_samples);
+  return eevee_shadow_eval_stable(light,
+                                  is_directional,
+                                  false,
+                                  false,
+                                  0.0f,
+                                  position,
+                                  geometry_normal,
+                                  shading_normal,
+                                  normal_offset,
+                                  geometry_offset,
+                                  stable_ray_count,
+                                  ray_step_count);
+}
+
 float shader_info_shadow_visibility_single(LightData light,
                                            bool is_directional,
                                            float3 position,
@@ -304,34 +351,23 @@ float shader_info_shadow_visibility_single(LightData light,
   }
 
   if (shader_info_shadow_is_builtin(shadow_mode)) {
-    return eevee_shadow_eval(light,
-                             is_directional,
-                             false,
-                             false,
-                             0.0f,
-                             position,
-                             geometry_normal,
-                             shading_normal,
-                             normal_offset,
-                             geometry_offset,
-                             uniform_buf.shadow.ray_count,
-                             uniform_buf.shadow.step_count);
+    return shader_info_shadow_visibility_builtin(light,
+                                                 is_directional,
+                                                 position,
+                                                 geometry_normal,
+                                                 shading_normal,
+                                                 normal_offset,
+                                                 geometry_offset);
   }
 
-  int ray_step_count = max(uniform_buf.shadow.step_count, SHADER_INFO_STABLE_SHADOW_MIN_STEP_COUNT);
-  int stable_ray_count = shader_info_shadow_stable_ray_count(stable_shadow_samples);
-  return eevee_shadow_eval_stable(light,
-                                  is_directional,
-                                  false,
-                                  false,
-                                  0.0f,
-                                  position,
-                                  geometry_normal,
-                                  shading_normal,
-                                  normal_offset,
-                                  geometry_offset,
-                                  stable_ray_count,
-                                  ray_step_count);
+  return shader_info_shadow_visibility_stable(light,
+                                              is_directional,
+                                              position,
+                                              geometry_normal,
+                                              shading_normal,
+                                              normal_offset,
+                                              geometry_offset,
+                                              stable_shadow_samples);
 }
 
 #if defined(SHADOW_CASTER_CLASSIFY)
