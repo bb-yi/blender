@@ -99,6 +99,7 @@ void register_shader_nodes()
   register_node_type_sh_screenspace_info();
   register_node_type_sh_scene_color();
   register_node_type_sh_object_info();
+  register_node_type_sh_output_outline_shell();
   register_node_type_sh_output_aov();
   register_node_type_sh_output_light();
   register_node_type_sh_output_linestyle();

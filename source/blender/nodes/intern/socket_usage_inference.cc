@@ -290,6 +290,7 @@ class SocketUsageInferencerImpl {
       case SH_NODE_OUTPUT_WORLD:
       case SH_NODE_OUTPUT_LINESTYLE:
       case SH_NODE_OUTPUT_MATERIAL:
+      case SH_NODE_OUTPUT_OUTLINE_SHELL:
       case CMP_NODE_OUTPUT_FILE:
       case TEX_NODE_OUTPUT: {
         this->usage_task__input__output_node(socket);

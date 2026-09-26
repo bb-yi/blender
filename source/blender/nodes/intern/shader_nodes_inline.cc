@@ -371,6 +371,10 @@ class ShaderNodesInliner {
           if (!ELEM(get_engine_target(node), SHD_OUTPUT_ALL, params_.target_engine_)) {
             continue;
           }
+          /* A muted node may have dangling input values that can't be assigned to a socket. */
+          if (output_type == "ShaderNodeOutputOutlineShell"_ustr && node->is_muted()) {
+            continue;
+          }
           const bke::bNodeTreeZone *zone = zones.get_zone_by_node(node->identifier);
           if (zone) {
             params_.r_error_messages.append({node, TIP_("Output node must not be in zone")});
@@ -406,6 +410,7 @@ class ShaderNodesInliner {
           add_output_type("ShaderNodeOutputLight"_ustr);
           add_output_type("ShaderNodeOutputAOV"_ustr);
           add_output_type("ShaderNodeOutlineControl"_ustr);
+          add_output_type("ShaderNodeOutputOutlineShell"_ustr);
         }
         break;
       case ID_WO:

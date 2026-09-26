@@ -179,6 +179,17 @@ enum {
   MA_EEVEE_DOMAIN_FILTER = 1,
 };
 
+/** #Material::outline_shell_render_method */
+enum eMaterial_OutlineShellRenderMethod : char {
+  MA_OUTLINE_SHELL_DEFERRED = 0,
+  MA_OUTLINE_SHELL_FORWARD = 1,
+};
+
+/** #Material::outline_shell_flag */
+enum eMaterial_OutlineShellFlag : char {
+  MA_OUTLINE_SHELL_CAST_SHADOW = 1 << 0,
+};
+
 /** #Material::volume_intersection_method */
 enum eMaterial_VolumeIntersectionMethod : char {
   MA_VOLUME_ISECT_FAST = 0,
@@ -522,7 +533,16 @@ struct Material {
   short stencil_order = 0;
   char color_write = true;
   char depth_write = true;
-  char _pad4[4] = {};
+
+  /* Outline shell surface. */
+  eMaterial_OutlineShellRenderMethod outline_shell_render_method =
+      MA_OUTLINE_SHELL_DEFERRED;
+  char outline_shell_cull_method = MA_SURFACE_CULL_FRONT;
+  char outline_shell_ztest_mode = MA_ZTEST_LESS_EQUAL;
+  char outline_shell_depth_write = true;
+  char outline_shell_flag = 0;
+
+  char _pad4[7] = {};
 };
 
 #ifdef __cplusplus
@@ -564,6 +584,35 @@ inline bool material_color_write_get(const Material &material)
 inline bool material_depth_write_get(const Material &material)
 {
   return material.depth_write != 0;
+}
+
+inline eMaterialCullMethod material_outline_shell_cull_method_get(const Material &material)
+{
+  switch (eMaterialCullMethod(material.outline_shell_cull_method)) {
+    case MA_SURFACE_CULL_NONE:
+    case MA_SURFACE_CULL_BACK:
+    case MA_SURFACE_CULL_FRONT:
+      return eMaterialCullMethod(material.outline_shell_cull_method);
+    default:
+      return MA_SURFACE_CULL_FRONT;
+  }
+}
+
+inline eMaterialZTestMode material_outline_shell_ztest_mode_get(const Material &material)
+{
+  switch (eMaterialZTestMode(material.outline_shell_ztest_mode)) {
+    case MA_ZTEST_LESS:
+    case MA_ZTEST_GREATER:
+    case MA_ZTEST_LESS_EQUAL:
+    case MA_ZTEST_GREATER_EQUAL:
+    case MA_ZTEST_EQUAL:
+    case MA_ZTEST_NOT_EQUAL:
+    case MA_ZTEST_ALWAYS:
+    case MA_ZTEST_NEVER:
+      return eMaterialZTestMode(material.outline_shell_ztest_mode);
+    default:
+      return MA_ZTEST_LESS_EQUAL;
+  }
 }
 #endif
 

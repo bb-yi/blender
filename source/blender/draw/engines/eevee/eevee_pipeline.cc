@@ -67,6 +67,20 @@ static DRWState material_write_state(const blender::Material *material,
   return state;
 }
 
+static DRWState surface_write_state(const SurfaceDrawState &draw_state,
+                                    const bool color_default,
+                                    const bool depth_default)
+{
+  DRWState state = DRW_STATE_NO_DRAW;
+  if (color_default && draw_state.color_write) {
+    state |= DRW_STATE_WRITE_COLOR;
+  }
+  if (depth_default && draw_state.depth_write) {
+    state |= DRW_STATE_WRITE_DEPTH;
+  }
+  return state;
+}
+
 static DRWState material_surface_cull_state(const eMaterialCullMethod cull_method)
 {
   switch (cull_method) {
@@ -583,9 +597,11 @@ void ShadowPipeline::sync()
 }
 
 PassMain::Sub *ShadowPipeline::surface_material_add(blender::Material *material,
-                                                    GPUMaterial *gpumat)
+                                                    GPUMaterial *gpumat,
+                                                    bool force_double_sided)
 {
-  PassMain::Sub *pass = (material->blend_flag & MA_BL_CULL_BACKFACE_SHADOW) ?
+  PassMain::Sub *pass = (!force_double_sided &&
+                         (material->blend_flag & MA_BL_CULL_BACKFACE_SHADOW)) ?
                             surface_single_sided_ps_ :
                             surface_double_sided_ps_;
   PassMain::Sub *material_pass = &pass->sub(GPU_material_get_name(gpumat));
@@ -772,14 +788,14 @@ void Prepass::init(DRWState extra_state,
   dummy_raycast_normal_tx_.ensure_2d(RenderBuffers::prepass_normal_format, int2(1));
 }
 
-PassMain::Sub *Prepass::add(blender::Material *blender_mat,
+PassMain::Sub *Prepass::add(const SurfaceDrawState &draw_state,
                             GPUMaterial *gpumat,
                             bool has_motion,
                             bool hide_from_raycast,
                             bool force_write_id)
 {
-  const int cull_method = material_surface_cull_subpass_index(blender_mat);
-  const int ztest_mode = material_ztest_mode(blender_mat);
+  const int cull_method = int(draw_state.cull_method);
+  const int ztest_mode = int(draw_state.ztest_mode);
   const bool has_raycast = GPU_material_flag_get(gpumat, GPU_MATFLAG_RAYCAST);
   const bool write_id = (force_write_id || has_raycast) && !hide_from_raycast;
 
@@ -1034,7 +1050,7 @@ void ForwardPipeline::end_sync()
   prepass_.end_sync();
 }
 
-PassMain::Sub *ForwardPipeline::prepass_opaque_add(blender::Material *blender_mat,
+PassMain::Sub *ForwardPipeline::prepass_opaque_add(const SurfaceDrawState &draw_state,
                                                    GPUMaterial *gpumat,
                                                    bool has_motion)
 {
@@ -1048,8 +1064,10 @@ PassMain::Sub *ForwardPipeline::prepass_opaque_add(blender::Material *blender_ma
 
   has_opaque_ = true;
   inst_.lights.tag_front_light_shader_needed();
-  PassMain::Sub *pass = prepass_.add(blender_mat, gpumat, has_motion, true);
-  if (inst_.scene->eevee.use_outline && GPU_material_has_outline_output(gpumat)) {
+  PassMain::Sub *pass = prepass_.add(draw_state, gpumat, has_motion, true);
+  if (!draw_state.is_outline_shell && inst_.scene->eevee.use_outline &&
+      GPU_material_has_outline_output(gpumat))
+  {
     pass->bind_image(OUTLINE_COLOR_SLOT, &inst_.render_buffers.outline_color_tx);
     pass->bind_image(OUTLINE_INFO_SLOT, &inst_.render_buffers.outline_info_tx);
   }
@@ -1068,7 +1086,7 @@ PassMain::Sub *ForwardPipeline::stencil_opaque_add(blender::Material *blender_ma
 }
 
 PassMain::Sub *ForwardPipeline::material_opaque_add(const Object *ob,
-                                                    blender::Material *blender_mat,
+                                                    const SurfaceDrawState &draw_state,
                                                     GPUMaterial *gpumat)
 {
   BLI_assert_msg(GPU_material_flag_get(gpumat, GPU_MATFLAG_TRANSPARENT) == false,
@@ -1076,7 +1094,7 @@ PassMain::Sub *ForwardPipeline::material_opaque_add(const Object *ob,
                  "PipelineModule::material_add()");
   has_holdout_ |= GPU_material_flag_get(gpumat, GPU_MATFLAG_HOLDOUT) ||
                   (ob->base_flag & BASE_HOLDOUT) || (ob->visibility_flag & OB_HOLDOUT);
-  PassMain::Sub *pass = get_opaque_subpass(blender_mat, gpumat);
+  PassMain::Sub *pass = get_opaque_subpass(draw_state, gpumat);
   has_opaque_ = true;
   inst_.lights.tag_front_light_shader_needed();
   PassMain::Sub *sub_pass = &pass->sub(GPU_material_get_name(gpumat));
@@ -1086,15 +1104,16 @@ PassMain::Sub *ForwardPipeline::material_opaque_add(const Object *ob,
 
 PassMain::Sub *ForwardPipeline::material_no_depth_add(const Object *ob,
                                                       blender::Material *blender_mat,
+                                                      const SurfaceDrawState &draw_state,
                                                       GPUMaterial *gpumat)
 {
-  BLI_assert_msg(material_color_write_enabled(blender_mat),
+  BLI_assert_msg(draw_state.color_write,
                  "No-depth visible pass is only used by materials that write color.");
-  DRWState state = material_write_state(blender_mat, true, false) |
+  DRWState state = surface_write_state(draw_state, true, false) |
                    DRW_STATE_CLIP_CONTROL_UNIT_RANGE | inst_.film.depth.test_state |
-                   material_surface_cull_state(material_surface_cull_method(blender_mat));
+                   material_surface_cull_state(draw_state.cull_method);
   state = material_ztest_state_replace(
-      state, material_ztest_mode(blender_mat), inst_.film.depth.test_state);
+      state, draw_state.ztest_mode, inst_.film.depth.test_state);
 
   has_opaque_ = true;
   has_no_depth_ = true;
@@ -1106,8 +1125,10 @@ PassMain::Sub *ForwardPipeline::material_no_depth_add(const Object *ob,
   bind_npr_shadow_surface(*pass, inst_, GPU_material_principled_npr_v2_has(gpumat));
   pass->state_set(state);
   pass->material_set(*inst_.manager, gpumat, true, inst_.anisotropic_filtering);
-  pass->push_constant("surface_cull_mode", int(material_surface_cull_method(blender_mat)));
-  material_stencil_test_only_state_set(*pass, blender_mat);
+  pass->push_constant("surface_cull_mode", int(draw_state.cull_method));
+  if (!draw_state.is_outline_shell) {
+    material_stencil_test_only_state_set(*pass, blender_mat);
+  }
   pass->bind_resources(inst_.lights);
   inst_.lights.bind_front_light_shader_resources(*pass);
   return pass;
@@ -1834,14 +1855,14 @@ void DeferredLayer::end_sync(bool is_first_pass,
   }
 }
 
-PassMain::Sub *DeferredLayer::prepass_add(blender::Material *blender_mat,
+PassMain::Sub *DeferredLayer::prepass_add(const SurfaceDrawState &draw_state,
                                           GPUMaterial *gpumat,
                                           bool has_motion,
                                           bool hide_from_raycast,
                                           bool force_write_id)
 {
   has_prepass_ = true;
-  return prepass_.add(blender_mat, gpumat, has_motion, hide_from_raycast, force_write_id);
+  return prepass_.add(draw_state, gpumat, has_motion, hide_from_raycast, force_write_id);
 }
 
 PassMain::Sub *DeferredLayerBase::stencil_add(blender::Material *blender_mat,
@@ -1867,12 +1888,12 @@ PassMain::Sub *DeferredLayer::stencil_add(blender::Material *blender_mat,
   return pass;
 }
 
-PassMain::Sub *DeferredLayer::material_add(blender::Material *blender_mat, GPUMaterial *gpumat)
+PassMain::Sub *DeferredLayer::material_add(blender::Material *blender_mat,
+                                           const SurfaceDrawState &draw_state,
+                                           GPUMaterial *gpumat)
 {
   eClosureBits closure_bits = shader_closure_bits_from_flag(gpumat);
-  const bool color_write = material_color_write_enabled(blender_mat);
-  const bool depth_write = material_depth_write_enabled(blender_mat);
-  const bool depth_only = !color_write && depth_write;
+  const bool depth_only = !draw_state.color_write && draw_state.depth_write;
   if (depth_only) {
     return nullptr;
   }
@@ -1886,8 +1907,11 @@ PassMain::Sub *DeferredLayer::material_add(blender::Material *blender_mat, GPUMa
   closure_count_ = max_ii(closure_count_, count_bits_i(closure_bits));
   has_principled_npr_v2_ |= GPU_material_principled_npr_v2_has(gpumat);
   has_surface_diffusion_ |= GPU_material_surface_diffusion_has(gpumat);
-  use_depth_offset_lighting_data_ |= material_uses_depth_offset_lighting_data(blender_mat, gpumat);
-  has_outline_ = has_outline_ || inst_.materials.material_uses_outline_control(blender_mat);
+  if (!draw_state.is_outline_shell) {
+    use_depth_offset_lighting_data_ |= material_uses_depth_offset_lighting_data(blender_mat,
+                                                                              gpumat);
+    has_outline_ = has_outline_ || inst_.materials.material_uses_outline_control(blender_mat);
+  }
 
   const bool needs_front_light_shader = material_needs_front_light_shader_resources(gpumat,
                                                                                    closure_bits);
@@ -1895,10 +1919,12 @@ PassMain::Sub *DeferredLayer::material_add(blender::Material *blender_mat, GPUMa
   if (needs_front_light_shader) {
     inst_.lights.tag_front_light_shader_needed();
   }
-  PassMain::Sub *pass = get_gbuffer_subpass(blender_mat, gpumat, uses_hybrid_pipeline);
+  PassMain::Sub *pass = get_gbuffer_subpass(draw_state, gpumat, uses_hybrid_pipeline);
   PassMain::Sub *material_pass = &pass->sub(GPU_material_get_name(gpumat));
   bind_npr_shadow_surface(*material_pass, inst_, GPU_material_principled_npr_v2_has(gpumat));
-  if (inst_.scene->eevee.use_outline && GPU_material_has_outline_output(gpumat)) {
+  if (!draw_state.is_outline_shell && inst_.scene->eevee.use_outline &&
+      GPU_material_has_outline_output(gpumat))
+  {
     material_pass->bind_image(OUTLINE_COLOR_SLOT, &inst_.render_buffers.outline_color_tx);
     material_pass->bind_image(OUTLINE_INFO_SLOT, &inst_.render_buffers.outline_info_tx);
   }
@@ -1919,7 +1945,7 @@ PassMain::Sub *DeferredLayer::material_add(blender::Material *blender_mat, GPUMa
   }
   /* Set stencil for some deferred specialized shaders. */
   uint8_t material_stencil_bits = 0u;
-  if (blender_mat->blend_flag & MA_BL_THICKNESS_FROM_SHADOW) {
+  if (!draw_state.is_outline_shell && (blender_mat->blend_flag & MA_BL_THICKNESS_FROM_SHADOW)) {
     material_stencil_bits |= uint8_t(StencilBits::THICKNESS_FROM_SHADOW);
   }
   /* This pass is shared by ShaderKey, so it must not carry per-material user stencil state.
@@ -2239,7 +2265,8 @@ PassMain::Sub *PipelineModule::material_add(Object *ob,
                                             blender::Material *blender_mat,
                                             GPUMaterial *gpumat,
                                             eMaterialPipeline pipeline_type,
-                                            eMaterialProbe probe_capture)
+                                            eMaterialProbe probe_capture,
+                                            const SurfaceDrawState &draw_state)
 {
   if (GPU_material_flag_get(gpumat, GPU_MATFLAG_RAYCAST)) {
     has_raycast = true;
@@ -2282,32 +2309,34 @@ PassMain::Sub *PipelineModule::material_add(Object *ob,
   switch (pipeline_type) {
     case MAT_PIPE_PREPASS_DEFERRED:
       return deferred.prepass_add(
-          blender_mat, gpumat, false, ob->refraction_layer_index, hide_from_raycast);
+          blender_mat, draw_state, gpumat, false, ob->refraction_layer_index, hide_from_raycast);
     case MAT_PIPE_PREPASS_FORWARD:
-      return forward.prepass_opaque_add(blender_mat, gpumat, false);
+      return forward.prepass_opaque_add(draw_state, gpumat, false);
     case MAT_PIPE_PREPASS_OVERLAP:
       return forward.outline_occlusion_add(blender_mat, gpumat);
 
     case MAT_PIPE_PREPASS_DEFERRED_VELOCITY:
       return deferred.prepass_add(
-          blender_mat, gpumat, true, ob->refraction_layer_index, hide_from_raycast);
+          blender_mat, draw_state, gpumat, true, ob->refraction_layer_index, hide_from_raycast);
     case MAT_PIPE_PREPASS_FORWARD_VELOCITY:
-      return forward.prepass_opaque_add(blender_mat, gpumat, true);
+      return forward.prepass_opaque_add(draw_state, gpumat, true);
 
     case MAT_PIPE_DEFERRED:
-      return deferred.material_add(blender_mat, gpumat, ob->refraction_layer_index);
+      return deferred.material_add(
+          blender_mat, draw_state, gpumat, ob->refraction_layer_index);
     case MAT_PIPE_DEFERRED_NPR:
       return deferred.npr_add(blender_mat, gpumat, ob->refraction_layer_index);
     case MAT_PIPE_FORWARD:
-      if (!material_color_write_get(*blender_mat)) {
+      if (!draw_state.color_write) {
         return nullptr;
       }
-      if (!material_depth_write_get(*blender_mat)) {
-        return forward.material_no_depth_add(ob, blender_mat, gpumat);
+      if (!draw_state.depth_write) {
+        return forward.material_no_depth_add(ob, blender_mat, draw_state, gpumat);
       }
-      return forward.material_opaque_add(ob, blender_mat, gpumat);
+      return forward.material_opaque_add(ob, draw_state, gpumat);
     case MAT_PIPE_SHADOW:
-      return shadow.surface_material_add(blender_mat, gpumat);
+      return shadow.surface_material_add(
+          blender_mat, gpumat, draw_state.is_outline_shell);
     case MAT_PIPE_CAPTURE:
       return capture.surface_material_add(blender_mat, gpumat);
     case MAT_PIPE_FILTER:
@@ -2331,28 +2360,34 @@ PassMain::Sub *PipelineModule::material_add(Object *ob,
 }
 
 PassMain::Sub *DeferredPipeline::prepass_add(blender::Material *blender_mat,
+                                             const SurfaceDrawState &draw_state,
                                              GPUMaterial *gpumat,
                                              bool has_motion,
                                              short refraction_layer,
                                              bool hide_from_raycast,
                                              bool force_write_id)
 {
-  if (!use_combined_lightprobe_eval && (blender_mat->blend_flag & MA_BL_SS_REFRACTION)) {
+  if (!draw_state.is_outline_shell && !use_combined_lightprobe_eval &&
+      (blender_mat->blend_flag & MA_BL_SS_REFRACTION))
+  {
     return get_refraction_layer(refraction_layer)
-        .prepass_add(blender_mat, gpumat, has_motion, hide_from_raycast, force_write_id);
+        .prepass_add(draw_state, gpumat, has_motion, hide_from_raycast, force_write_id);
   }
   return opaque_layer_.prepass_add(
-      blender_mat, gpumat, has_motion, hide_from_raycast, force_write_id);
+      draw_state, gpumat, has_motion, hide_from_raycast, force_write_id);
 }
 
 PassMain::Sub *DeferredPipeline::material_add(blender::Material *blender_mat,
+                                              const SurfaceDrawState &draw_state,
                                               GPUMaterial *gpumat,
                                               short refraction_layer)
 {
-  if (!use_combined_lightprobe_eval && (blender_mat->blend_flag & MA_BL_SS_REFRACTION)) {
-    return get_refraction_layer(refraction_layer).material_add(blender_mat, gpumat);
+  if (!draw_state.is_outline_shell && !use_combined_lightprobe_eval &&
+      (blender_mat->blend_flag & MA_BL_SS_REFRACTION))
+  {
+    return get_refraction_layer(refraction_layer).material_add(blender_mat, draw_state, gpumat);
   }
-  return opaque_layer_.material_add(blender_mat, gpumat);
+  return opaque_layer_.material_add(blender_mat, draw_state, gpumat);
 }
 
 PassMain::Sub *DeferredPipeline::stencil_add(blender::Material *blender_mat,
@@ -2726,7 +2761,7 @@ PassMain::Sub *DeferredProbePipeline::prepass_add(blender::Material *blender_mat
                                                   bool force_write_id)
 {
   return opaque_layer_.prepass_.add(
-      blender_mat, gpumat, false, hide_from_raycast, force_write_id);
+      surface_draw_state_body(*blender_mat), gpumat, false, hide_from_raycast, force_write_id);
 }
 
 PassMain::Sub *DeferredProbePipeline::material_add(blender::Material *blender_mat,
@@ -2753,7 +2788,7 @@ PassMain::Sub *DeferredProbePipeline::material_add(blender::Material *blender_ma
   }
 
   PassMain::Sub *pass = opaque_layer_.get_gbuffer_subpass(
-      blender_mat, gpumat, uses_hybrid_pipeline);
+      surface_draw_state_body(*blender_mat), gpumat, uses_hybrid_pipeline);
   PassMain::Sub *material_pass = &pass->sub(GPU_material_get_name(gpumat));
   bind_npr_shadow_surface(*material_pass, inst_, GPU_material_principled_npr_v2_has(gpumat));
   if (needs_front_light_shader) {
@@ -2935,7 +2970,8 @@ PassMain::Sub *PlanarProbePipeline::prepass_add(blender::Material *blender_mat,
                                                 bool hide_from_raycast,
                                                 bool force_write_id)
 {
-  return prepass_.add(blender_mat, gpumat, false, hide_from_raycast, force_write_id);
+  return prepass_.add(
+      surface_draw_state_body(*blender_mat), gpumat, false, hide_from_raycast, force_write_id);
 }
 
 PassMain::Sub *PlanarProbePipeline::material_add(blender::Material *blender_mat,
@@ -2960,7 +2996,8 @@ PassMain::Sub *PlanarProbePipeline::material_add(blender::Material *blender_mat,
     inst_.lights.tag_front_light_shader_needed();
   }
 
-  PassMain::Sub *pass = get_gbuffer_subpass(blender_mat, gpumat, uses_hybrid_pipeline);
+  PassMain::Sub *pass = get_gbuffer_subpass(
+      surface_draw_state_body(*blender_mat), gpumat, uses_hybrid_pipeline);
   PassMain::Sub *material_pass = &pass->sub(GPU_material_get_name(gpumat));
   bind_npr_shadow_surface(*material_pass, inst_, GPU_material_principled_npr_v2_has(gpumat));
   if (needs_front_light_shader) {

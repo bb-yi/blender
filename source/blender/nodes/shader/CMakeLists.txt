@@ -107,6 +107,7 @@ set(SRC
   nodes/node_shader_screenspace_info.cc
   nodes/node_shader_scene_color.cc
   nodes/node_shader_object_info.cc
+  nodes/node_shader_output_outline_shell.cc
   nodes/node_shader_output_aov.cc
   nodes/node_shader_output_light.cc
   nodes/node_shader_output_linestyle.cc

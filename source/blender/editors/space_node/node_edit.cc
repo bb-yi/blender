@@ -274,7 +274,8 @@ void ED_node_set_active(
              SH_NODE_OUTPUT_WORLD,
              SH_NODE_OUTPUT_LIGHT,
              SH_NODE_EEVEE_LIGHT_SHADER_OUTPUT,
-             SH_NODE_OUTPUT_LINESTYLE))
+             SH_NODE_OUTPUT_LINESTYLE,
+             SH_NODE_OUTPUT_OUTLINE_SHELL))
     {
       for (bNode *node_iter : ntree->all_nodes()) {
         if (node_iter->type_legacy == node->type_legacy) {

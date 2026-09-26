@@ -87,7 +87,8 @@ static inline void material_type_from_shader_uuid(uint64_t shader_uuid,
                                                   eMaterialProbe &probe_capture,
                                                   bool &transparent_shadows,
                                                   bool &use_outline,
-                                                  bool &depth_offset_affect_lighting)
+                                                  bool &depth_offset_affect_lighting,
+                                                  bool &outline_shell)
 {
   const uint64_t geometry_mask = ((1u << 4u) - 1u);
   const uint64_t pipeline_mask = ((1u << 4u) - 1u);
@@ -102,6 +103,7 @@ static inline void material_type_from_shader_uuid(uint64_t shader_uuid,
   transparent_shadows = (shader_uuid >> 12u) & 1u;
   use_outline = (shader_uuid >> 13u) & 1u;
   depth_offset_affect_lighting = (shader_uuid >> 14u) & 1u;
+  outline_shell = (shader_uuid >> 15u) & 1u;
 }
 
 static inline uint64_t shader_uuid_from_material_type(
@@ -113,7 +115,8 @@ static inline uint64_t shader_uuid_from_material_type(
     char blend_flags = 0,
     bool use_outline = true,
     bool depth_offset_affect_lighting = false,
-    uint64_t extra_key = 0)
+    uint64_t extra_key = 0,
+    bool outline_shell = false)
 {
   BLI_assert(int64_t(displacement_type) < (1 << 1));
   BLI_assert(int64_t(thickness_type) < (1 << 1));
@@ -132,12 +135,13 @@ static inline uint64_t shader_uuid_from_material_type(
   uuid |= transparent_shadows << 12;
   uuid |= uint64_t(use_outline) << 13;
   uuid |= uint64_t(depth_offset_affect_lighting) << 14;
+  uuid |= uint64_t(outline_shell) << 15;
   /* Keep the full blend flag in the shader key. Beyond transparent shadows, flags such as
    * raytraced transmission affect prepass replacement and auxiliary passes. */
-  uuid |= blend_flag_bits << 15;
+  uuid |= blend_flag_bits << 16;
   /* Higher bits are intentionally ignored by material_type_from_shader_uuid(). They separate
    * graph-dependent variants such as different NPR trees attached to the same material/world. */
-  uuid |= extra_key << 23;
+  uuid |= extra_key << 24;
   return uuid;
 }
 
@@ -272,6 +276,37 @@ static inline bool pipeline_uses_material_write_state(eMaterialPipeline pipeline
 }
 
 /**
+ * Explicit render state used to configure a surface pass, decoupled from which
+ * Material DNA fields it originates from (regular surface or outline shell).
+ */
+struct SurfaceDrawState {
+  eMaterialCullMethod cull_method;
+  eMaterialZTestMode ztest_mode;
+  bool color_write;
+  bool depth_write;
+  /* Skips stencil state, the refraction layer and outline-specific behavior. */
+  bool is_outline_shell;
+};
+
+static inline SurfaceDrawState surface_draw_state_body(const blender::Material &mat)
+{
+  return {material_surface_cull_method_get(mat),
+          material_ztest_mode_get(mat),
+          material_color_write_get(mat),
+          material_depth_write_get(mat),
+          false};
+}
+
+static inline SurfaceDrawState surface_draw_state_outline_shell(const blender::Material &mat)
+{
+  return {material_outline_shell_cull_method_get(mat),
+          material_outline_shell_ztest_mode_get(mat),
+          true,
+          mat.outline_shell_depth_write != 0,
+          true};
+}
+
+/**
  * Unique key to identify each material in the hash-map.
  * This is above the shader binning.
  */
@@ -359,25 +394,24 @@ struct ShaderKey {
             eMaterialPipeline pipeline_type,
             eMaterialProbe probe_capture,
             short refraction_layer,
-            bool hide_from_raycast)
+            bool hide_from_raycast,
+            const SurfaceDrawState &state)
   {
     shader = GPU_material_get_shader(gpumat);
     options = uint64_t(shader_closure_bits_from_flag(gpumat));
     options = (options << 8) | blender_mat->blend_flag;
-    options = (options << 2) | uint64_t(material_surface_cull_method_get(*blender_mat));
+    options = (options << 2) | uint64_t(state.cull_method);
     options = (options << 3) |
-              uint64_t(pipeline_uses_material_ztest(pipeline_type) ?
-                           material_ztest_mode_get(*blender_mat) :
-                           MA_ZTEST_LESS_EQUAL);
+              uint64_t(pipeline_uses_material_ztest(pipeline_type) ? state.ztest_mode :
+                                                                     MA_ZTEST_LESS_EQUAL);
     const bool use_material_write_state = (probe_capture == MAT_PROBE_NONE) &&
                                           pipeline_uses_material_write_state(pipeline_type);
-    options = (options << 1) |
-              uint64_t(use_material_write_state ? material_color_write_get(*blender_mat) : true);
-    options = (options << 1) |
-              uint64_t(use_material_write_state ? material_depth_write_get(*blender_mat) : true);
+    options = (options << 1) | uint64_t(use_material_write_state ? state.color_write : true);
+    options = (options << 1) | uint64_t(use_material_write_state ? state.depth_write : true);
     options = (options << 2) | uint64_t(probe_capture);
     options = (options << 16) | uint16_t(refraction_layer);
     options = (options << 1) | (hide_from_raycast ? 1 : 0);
+    options = (options << 1) | (state.is_outline_shell ? 1 : 0);
   }
 
   uint64_t hash() const
@@ -418,6 +452,12 @@ struct Material {
   MaterialPass npr;
   MaterialPass prepass;
   MaterialPass stencil;
+  MaterialPass outline_shell_prepass;
+  MaterialPass outline_shell_shading;
+  MaterialPass outline_shell_shadow;
+  /* Absolute unlinked Strength value of the Outline Shell Output node.
+   * Used to inflate the object bounds for vertex offsets. */
+  float outline_shell_bounds_inflation;
   /* These pipelines need a sub-pass per object/instance, so the returned sub_pass for these are
    * always null and the sub-pass creation is handled directly by the SyncModule.
    * Note that this also applies to the shading MaterialPass in the case of alpha-blended
@@ -439,6 +479,8 @@ struct MaterialArray {
   Vector<Material> materials;
   Vector<GPUMaterial *> gpu_materials;
   Vector<GPUMaterial *> gpu_materials_npr;
+  /* Aligned with gpu_materials; nullptr for slots without an Outline Shell Output node. */
+  Vector<GPUMaterial *> gpu_materials_outline_shell;
 };
 
 class MaterialModule {
@@ -531,7 +573,9 @@ class MaterialModule {
                                  eMaterialPipeline pipeline_type,
                                  eMaterialGeometry geometry_type,
                                  eMaterialProbe probe_capture = MAT_PROBE_NONE,
-                                 bool register_pass = true);
+                                 bool register_pass = true,
+                                 const SurfaceDrawState *state = nullptr,
+                                 bool outline_shell = false);
 
   ShaderGroups default_materials_load(bool block_until_ready = false);
 };
