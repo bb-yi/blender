@@ -98,7 +98,8 @@ int node_gpu_v2(GPUMaterial *mat, bNode *node, GPUNodeStack *in, GPUNodeStack *o
 {
   const auto &storage = *static_cast<const NodeShaderPrincipledNPR *>(node->storage);
   const bool has_shader = out[0].hasoutput;
-  const bool has_color = out[1].hasoutput;
+  const bool has_color = out[1].hasoutput || out[3].hasoutput || out[4].hasoutput ||
+                         out[5].hasoutput || out[6].hasoutput;
   if (!has_shader && !has_color) {
     return GPU_link(mat, "npr_v2_alpha", input_link(*node, in, "alpha"), &out[2].link);
   }
@@ -163,14 +164,9 @@ int node_gpu_v2(GPUMaterial *mat, bNode *node, GPUNodeStack *in, GPUNodeStack *o
       blender_material->surface_render_method != MA_SURFACE_METHOD_FORWARD;
   /* Resource lifetime follows the mode, not a changing uniform threshold.
    * Width/Mask 0 -> nonzero must not reuse a pass compiled without HiZ. */
-  if (ELEM(storage.rim_mode, SHD_PRINCIPLED_NPR_RIM_SCREEN_DEPTH,
-           SHD_PRINCIPLED_NPR_RIM_GOO_DEPTH) && depth_rim_supported)
-  {
+  const bool depth_rim = storage.rim_mode != SHD_PRINCIPLED_NPR_RIM_FRESNEL;
+  if (depth_rim && depth_rim_supported) {
     GPU_material_hiz_data_set(mat);
-    if (storage.rim_mode == SHD_PRINCIPLED_NPR_RIM_SCREEN_DEPTH) {
-      /* The legacy contour search needs object IDs. Goo only reads depth. */
-      GPU_material_flag_set(mat, GPU_MATFLAG_RAYCAST);
-    }
   }
 
   if (storage.shadow_mode != SHD_PRINCIPLED_NPR_SHADOW_NONE) {
@@ -193,13 +189,8 @@ int node_gpu_v2(GPUMaterial *mat, bNode *node, GPUNodeStack *in, GPUNodeStack *o
   {
     features |= GPU_MAT_NPR_SHARED_ENERGY;
   }
-  if (depth_rim_supported) {
-    if (storage.rim_mode == SHD_PRINCIPLED_NPR_RIM_SCREEN_DEPTH) {
-      features |= GPU_MAT_NPR_RIM_SCREEN_DEPTH;
-    }
-    else if (storage.rim_mode == SHD_PRINCIPLED_NPR_RIM_GOO_DEPTH) {
-      features |= GPU_MAT_NPR_RIM_GOO_DEPTH;
-    }
+  if (depth_rim && depth_rim_supported) {
+    features |= GPU_MAT_NPR_RIM_DEPTH;
   }
   switch (storage.mapping_stage) {
     case SHD_PRINCIPLED_NPR_MAPPING_PER_LIGHT:
@@ -391,32 +382,24 @@ int node_gpu_v2(GPUMaterial *mat, bNode *node, GPUNodeStack *in, GPUNodeStack *o
                                               socket("anisotropy_rotation"),
                                               constant(storage.specular_mapping),
                                               constant(storage.highlight_light_shape)),
-                                        GPU_uniform(inactive)});
+                                        pack4(mat, constant(storage.highlight_ignore_shadow),
+                                              constant(0.0f), constant(0.0f), constant(0.0f))});
   GPUNodeLink *rim_color = nullptr;
   GPU_link(mat, "npr_v2_pack_color", socket("rim_color"), socket("rim_strength"), &rim_color);
-  GPUNodeLink *rim_shape = nullptr;
-  GPUNodeLink *rim_depth = nullptr;
-  if (storage.rim_mode == SHD_PRINCIPLED_NPR_RIM_GOO_DEPTH) {
-    GPU_link(mat, "npr_v2_pack_vector", socket("goo_rim_scale"),
-             socket("goo_rim_samples"), &rim_shape);
-    rim_depth = pack4(mat, socket("goo_rim_radius"), socket("goo_rim_thickness"),
-                      constant(0), constant(depth_rim_supported ? 1 : 0));
-  }
-  else {
-    rim_shape = control("rim_angle", "rim_length", "rim_length_falloff", "rim_thickness");
-    rim_depth = pack4(mat, socket("rim_pixel_width"), socket("rim_depth_threshold"),
-                      socket("rim_depth_softness"), constant(depth_rim_supported ? 1 : 0));
-  }
+  /* Depth rim borrows the Thickness Falloff slot for its Samples control. */
+  GPUNodeLink *rim_shape = control("rim_angle", "rim_length", "rim_length_falloff",
+                                   "rim_thickness");
   GPUNodeLink *rim = pack_matrix(
       mat,
       {rim_color,
        rim_shape,
        pack4(mat,
-             socket("rim_thickness_falloff"),
+             depth_rim ? socket("rim_samples") : socket("rim_thickness_falloff"),
              socket("rim_light_bias"),
              socket("rim_mask"),
-             constant(storage.rim_mode)),
-       rim_depth});
+             constant(depth_rim ? 1 : 0)),
+       pack4(mat, socket("rim_pixel_width"), socket("rim_depth_threshold"),
+             socket("rim_depth_softness"), constant(depth_rim_supported ? 1 : 0))});
 
   float beta_layer;
   GPUNodeLink *table = calibration_table(mat, beta_layer);
@@ -470,7 +453,11 @@ int node_gpu_v2(GPUMaterial *mat, bNode *node, GPUNodeStack *in, GPUNodeStack *o
                   execution,
                   &out[0].link,
                   &out[1].link,
-                  &out[2].link);
+                  &out[2].link,
+                  &out[3].link,
+                  &out[4].link,
+                  &out[5].link,
+                  &out[6].link);
 }
 
 }  // namespace blender::nodes::node_shader_principled_npr_cc

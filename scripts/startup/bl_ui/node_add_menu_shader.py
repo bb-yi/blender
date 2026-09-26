@@ -909,6 +909,7 @@ class NODE_MT_shader_node_npr_base(node_add_menu.NodeMenu):
         enabled = object_material_shader_nodes_poll(context) and eevee_shader_nodes_poll(context)
         self.node_operator(layout, "ShaderNodePrincipledNPR", poll=enabled)
         self.node_operator(layout, "ShaderNodeNPRSurfaceDiffusion", poll=enabled)
+        self.node_operator(layout, "ShaderNodeNPRRim", poll=enabled)
         self.draw_assets_for_catalog(layout, self.menu_path)
 
 

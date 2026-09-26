@@ -923,8 +923,7 @@ enum NodePrincipledNPRLightCombine {
 
 enum NodePrincipledNPRRimMode {
   SHD_PRINCIPLED_NPR_RIM_FRESNEL = 0,
-  SHD_PRINCIPLED_NPR_RIM_SCREEN_DEPTH = 1,
-  SHD_PRINCIPLED_NPR_RIM_GOO_DEPTH = 2,
+  SHD_PRINCIPLED_NPR_RIM_DEPTH = 1,
 };
 
 enum NodePrincipledNPRHighlightLightShape {
@@ -3134,6 +3133,8 @@ struct NodeShaderPrincipledNPR {
   int rim_mode = 0;
   /** Missing in saved V2 files: retain their integrated emitter response. */
   int highlight_light_shape = SHD_PRINCIPLED_NPR_HIGHLIGHT_INTEGRATED;
+  /** Zero preserves shadowed highlights in existing files. */
+  int highlight_ignore_shadow = 0;
 };
 
 struct NodeShaderHairPrincipled {

@@ -1968,11 +1968,8 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
   if (npr_features & GPU_MAT_NPR_SHARED_ENERGY) {
     info.define("MAT_NPR_SHARED_ENERGY");
   }
-  if (npr_features & GPU_MAT_NPR_RIM_SCREEN_DEPTH) {
-    info.define("MAT_NPR_RIM_SCREEN_DEPTH");
-  }
-  if (npr_features & GPU_MAT_NPR_RIM_GOO_DEPTH) {
-    info.define("MAT_NPR_RIM_GOO_DEPTH");
+  if (npr_features & GPU_MAT_NPR_RIM_DEPTH) {
+    info.define("MAT_NPR_DEPTH_RIM");
   }
   if (npr_features & GPU_MAT_NPR_MAP_PER_LIGHT) {
     info.define("MAT_NPR_MAP_PER_LIGHT");

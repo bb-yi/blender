@@ -7,7 +7,7 @@
 #include "gpu_shader_material_shader_info_shared.glsl"
 #include "gpu_shader_material_principled_npr_v2_math.glsl"
 #include "gpu_shader_material_principled_npr_v2_light.glsl"
-#include "gpu_shader_material_principled_npr_depth_rim.glsl"
+#include "gpu_shader_material_npr_rim_lib.glsl"
 
 [[node]]
 void npr_v2_pack4(float x, float y, float z, float w, float4 &value)
@@ -104,32 +104,6 @@ float npr_v2_visibility(uint index,
 #endif
 }
 
-float npr_v2_rim_shape(float3 N, float3 V, float4 shape, float falloff)
-{
-  float3 camera_x = float3(1.0f, 0.0f, 0.0f);
-  float3 camera_y = float3(0.0f, 1.0f, 0.0f);
-#if defined(GPU_FRAGMENT_SHADER)
-  camera_x = npr_v2_safe_normalize(drw_view().viewinv[0].xyz, camera_x);
-  camera_y = npr_v2_safe_normalize(drw_view().viewinv[1].xyz, camera_y);
-#endif
-  float2 projected = float2(dot(N, camera_x), dot(N, camera_y));
-  float len = length(projected);
-  if (len <= 1e-6f || shape.y <= 1e-6f || shape.w <= 1e-6f) {
-    return 0.0f;
-  }
-  projected /= len;
-  float turns = atan(projected.y, projected.x) / (2.0f * M_PI);
-  float centered = abs(fract(turns - shape.x / 360.0f + 0.5f) - 0.5f);
-  float half_length = saturate(shape.y) * 0.5f;
-  float arc_width = max(shape.z, 0.0f) * 0.5f;
-  float arc = arc_width <= 1e-6f ? 1.0f - step(half_length, centered) :
-      1.0f - smoothstep(max(half_length - arc_width, 0.0f), half_length, centered);
-  float facing = saturate(1.0f - dot(N, V));
-  float edge = 1.0f - saturate(shape.w);
-  float width = max(falloff, 0.0f);
-  return arc * (width <= 1e-6f ? step(edge, facing) :
-                 smoothstep(edge - 0.5f * width, edge + 0.5f * width, facing));
-}
 
 float3 npr_v2_highlight_filtered(float3 response, float3 reference, float softness, float beta)
 {
@@ -139,8 +113,14 @@ float3 npr_v2_highlight_filtered(float3 response, float3 reference, float softne
   if (softness <= 0.0f) {
     /* Pixel coverage, not an artificial minimum artistic softness. Interior pixels keep the
      * constant reference color, and the footprint shrinks with increasing image resolution. */
-    float signed_distance = npr_v2_luminance(response) -
-                            beta * npr_v2_luminance(reference);
+    /* Differentiate the lobe shape, not its radiance. In total-lighting mode the
+     * reference also contains shadow visibility: its discontinuities must not
+     * manufacture coverage far outside a narrow highlight. The bounded ratio
+     * keeps the same half-maximum boundary without amplifying a GGX peak. */
+    float response_luminance = max(npr_v2_luminance(response), 0.0f);
+    float threshold = beta * max(npr_v2_luminance(reference), 0.0f);
+    float sum = response_luminance + threshold;
+    float signed_distance = (sum > 0.0f ? response_luminance / sum : 0.0f) - 0.5f;
     float coverage = npr_v2_hard_edge_coverage(signed_distance, fwidth(signed_distance));
     result = reference * coverage;
   }
@@ -213,7 +193,11 @@ void node_principled_npr_v2(float4 base_color,
                           float4 execution,
                           Closure &shader,
                           float4 &local_color,
-                          float &alpha_out)
+                          float &alpha_out,
+                          float4 &diffuse_out,
+                          float4 &highlight_out,
+                          float4 &rim_out,
+                          float4 &emission_out)
 {
   shader = Closure(0);
   const bool emit_shader = execution.y > 0.5f;
@@ -542,13 +526,14 @@ void node_principled_npr_v2(float4 base_color,
                             raw_response, reference_response);
       raw_response *= direct_reflection_gain;
       reference_response *= reference_reflection_gain;
+      float highlight_visibility = highlight[3].x > 0.5f ? 1.0f :
+                                      mix(1.0f, visibility, shadow_strength);
 #ifdef MAT_NPR_MAP_TOTAL
       if (total_lighting) {
         /* Shadow each lamp before aggregation, including its reference amplitude.
          * Shape the sum once; soft=1 still returns the complete raw GGX sum. */
-        float visible_fraction = mix(1.0f, visibility, shadow_strength);
-        total_specular += raw_response * visible_fraction;
-        total_specular_reference += reference_response * visible_fraction;
+        total_specular += raw_response * highlight_visibility;
+        total_specular_reference += reference_response * highlight_visibility;
         continue;
       }
 #endif
@@ -563,9 +548,9 @@ void node_principled_npr_v2(float4 base_color,
         profile *= max(tint.rgb, float3(0.0f)) * saturate(tint.a);
       }
       profile *= max(highlight[0].rgb, float3(0.0f)) * max(highlight[1].x, 0.0f) *
-                 mix(1.0f, visibility, shadow_strength);
+                 highlight_visibility;
       float score = npr_v2_luminance(max(raw_response, float3(0.0f))) *
-                    mix(1.0f, visibility, shadow_strength);
+                    highlight_visibility;
       if (!strongest) {
         direct_specular += profile;
       }
@@ -626,9 +611,10 @@ void node_principled_npr_v2(float4 base_color,
         shading[0].x + shading[0].y);
   }
 
-  float diffuse_remaining = max(1.0f - max(dielectric_reflectance.x,
-      max(dielectric_reflectance.y, dielectric_reflectance.z)), 0.0f);
-  float diffuse_weight = layer * (1.0f - metallic) * (1.0f - transmission) * diffuse_remaining;
+  /* Keep NPR body shading independent of the base specular lobe. Its view- and
+   * roughness-dependent Fresnel budget must not darken the diffuse silhouette.
+   * Explicit coat/sheen layers, metallic and transmission still affect the body. */
+  float diffuse_weight = layer * (1.0f - metallic) * (1.0f - transmission);
   float3 reflection_color = metallic * metal_reflectance +
       (1.0f - metallic) * mix(dielectric_reflectance, transmission_reflectance, transmission);
   float rim_shape = 0.0f;
@@ -636,20 +622,13 @@ void node_principled_npr_v2(float4 base_color,
     if (int(rim[2].w) == 0) {
       rim_shape = npr_v2_rim_shape(N, V, rim[1], rim[2].x);
     }
-#ifdef MAT_NPR_RIM_GOO_DEPTH
-    else if (int(rim[2].w) == 2) {
-      if (rim[3].w > 0.5f && alpha >= 1.0f) {
-        rim_shape = npr_v2_goo_depth_rim(rim[1].w, rim[3].x, rim[3].y, rim[1].xyz);
-      }
-    }
-#endif
-#ifdef MAT_NPR_RIM_SCREEN_DEPTH
-    else if (int(rim[2].w) == 1) {
+#ifdef MAT_NPR_DEPTH_RIM
+    if (int(rim[2].w) == 1) {
       /* Fractional stochastic coverage is not a solid silhouette. Never
        * substitute unrelated opaque depth for a Blended surface. */
       if (rim[3].w > 0.5f && alpha >= 1.0f) {
-        rim_shape = npr_v2_depth_rim(rim[3].x, rim[3].z, rim[3].y,
-                                     rim[1].x, rim[1].y, rim[1].z);
+        rim_shape = npr_v2_depth_rim(rim[3].x, rim[3].y, rim[3].z,
+                                     rim[1].x, rim[1].y, rim[1].z, rim[2].x);
       }
     }
 #endif
@@ -663,9 +642,14 @@ void node_principled_npr_v2(float4 base_color,
   float body_weight = layer * metallic * body_preservation;
   float3 local_diffuse = (base * diffuse_mul + diffuse_add) * coat_tint *
                         (diffuse_weight + body_weight);
-  local_color = float4(max(local_diffuse + direct_specular * layer * coat_tint +
+  float3 highlight_term = direct_specular * layer * coat_tint;
+  local_color = float4(max(local_diffuse + highlight_term +
                            rim_radiance + emission, float3(0.0f)), alpha);
   alpha_out = alpha;
+  diffuse_out = float4(local_diffuse, alpha);
+  highlight_out = float4(highlight_term, alpha);
+  rim_out = float4(rim_radiance, alpha);
+  emission_out = float4(emission, alpha);
   if (!emit_shader) {
     return;
   }

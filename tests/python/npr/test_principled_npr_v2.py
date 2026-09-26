@@ -4,10 +4,12 @@ import argparse
 import importlib.util
 import json
 import math
+import re
 from pathlib import Path
 import sys
 
 import bpy
+from mathutils import Matrix
 
 
 def require(condition, message):
@@ -44,10 +46,247 @@ def new_material():
     return material, node, output
 
 
+def check_shared_principled_math(h):
+    # Exercise the actual shared source on the GPU, including the degenerate inputs from
+    # upstream #162728. A render alone can hide NaNs when radiance is packed/clamped.
+    shaders = Path(__file__).resolve().parents[3] / "source/blender/gpu/shaders"
+    shared = (shaders / "material/gpu_shader_material_principled_shared.glsl").read_text()
+    fast = (shaders / "common/gpu_shader_math_fast_lib.glsl").read_text()
+    slab = re.search(r"float3 slab_transmittance_at_angle\([^}]+\}", shared).group()
+    sqrt = re.search(r"float sqrt_fast\([^}]+\}", fast).group()
+    code = (sqrt + "\n" + slab).replace("float3", "vec3")
+    code = code.replace("sqrt_fast", "test_sqrt_fast")
+    code = code.replace("slab_transmittance_at_angle", "test_slab_transmittance")
+    code = code.replace("square(", "test_square(")
+    code = "float test_square(float v) { return v * v; }\n" + code
+    code += """
+vec3 shared_math_probe(float ior_value, float cosine) {
+  vec3 result = test_slab_transmittance(vec3(0.25, 0.5, 0.75), cosine, ior_value);
+  return any(isnan(result)) || any(isinf(result)) ? vec3(1.0, 0.0, 0.0) : result;
+}
+"""
+    h.clear_scene()
+    h.configure_scene()
+    h.make_camera()
+    material, node, output = new_material()
+    tree = material.node_tree
+    tree.nodes.remove(node)
+    probe = tree.nodes.new("ShaderNodeGLSLFunction")
+    script = bpy.data.texts.new("principled_shared_math_probe.glsl")
+    script.write(code)
+    probe.script = script
+    probe.function_name = "shared_math_probe"
+    require(probe.parse_status == "READY", "Shared math probe did not parse")
+    emission = tree.nodes.new("ShaderNodeEmission")
+    tree.links.new(probe.outputs["Result"], emission.inputs["Color"])
+    tree.links.new(emission.outputs[0], output.inputs["Surface"])
+    h.make_sphere(material)
+    for label, ior_value, cosine, expected in (
+        ("zero_ior", 0.0, 1.0, (1.0, 1.0, 1.0)),
+        ("grazing", 1.0, 0.0, (0.0, 0.0, 0.0)),
+        ("normal", 1.5, 1.0, (0.25, 0.5, 0.75)),
+    ):
+        inp(probe, "In_ior_value").default_value = ior_value
+        inp(probe, "In_cosine").default_value = cosine
+        rgb = h.center_pixel(h.render_image("shared_principled_" + label))[:3]
+        require(max(abs(a - b) for a, b in zip(rgb, expected)) < 0.025,
+                f"Shared Principled math {label}: {rgb}, expected {expected}")
+
+
+def check_standalone_rim(h):
+    h.clear_scene()
+    h.configure_scene()
+    bpy.context.scene.eevee.taa_render_samples = 16
+    configure_world((0, 0, 0))
+    h.make_camera()
+    material, principal, output = new_material()
+    h.make_sphere(material)
+    tree = material.node_tree
+    rim = tree.nodes.new("ShaderNodeNPRRim")
+    require(rim.rim_mode == "FRESNEL", "Standalone rim default mode changed")
+    require([s.name for s in rim.outputs] == ["Color", "Factor"], "Standalone rim outputs missing")
+    assign(principal, rim_strength=1, rim_pixel_width=4, rim_depth_threshold=.05,
+           rim_depth_softness=.5, rim_samples=8)
+    emission = tree.nodes.new("ShaderNodeEmission")
+    tree.links.new(emission.outputs[0], output.inputs["Surface"])
+    difference = tree.nodes.new("ShaderNodeVectorMath")
+    difference.operation = "DISTANCE"
+    tree.links.new(principal.outputs["Rim"], difference.inputs[0])
+    tree.links.new(rim.outputs["Color"], difference.inputs[1])
+    for mode in ("FRESNEL", "DEPTH"):
+        rim.rim_mode = principal.rim_mode = mode
+        require(inp(rim, "Thickness").is_unavailable == (mode == "DEPTH"), "Wrong Fresnel controls")
+        require(inp(rim, "Width (Pixels)").is_unavailable == (mode != "DEPTH"), "Wrong Depth controls")
+        tree.links.new(rim.outputs["Color"], emission.inputs["Color"])
+        require(h.max_rgb(h.render_image(f"v2_standalone_rim_{mode}")) > .01, "Standalone rim is black")
+        tree.links.new(difference.outputs["Value"], emission.inputs["Color"])
+        require(h.max_rgb(h.render_image(f"v2_standalone_rim_parity_{mode}")) < .001,
+                "Standalone and built-in rim algorithms disagree")
+    tree.links.new(rim.outputs["Color"], emission.inputs["Color"])
+    material.surface_render_method = "BLENDED"
+    require(h.max_rgb(h.render_image("v2_standalone_rim_forward_disabled")) < .0001,
+            "Standalone depth rim must be disabled on forward surfaces")
+    material.surface_render_method = "DITHERED"
+    tree.links.new(rim.outputs["Factor"], emission.inputs["Color"])
+    factor = h.render_image("v2_standalone_rim_factor")
+    require(.01 < h.max_rgb(factor) <= 1.001, "Invalid standalone rim factor")
+    tree.links.new(rim.outputs["Color"], emission.inputs["Color"])
+    for control, value in (("Mask", 0), ("Alpha", .5), ("Width (Pixels)", 0)):
+        previous = inp(rim, control).default_value
+        inp(rim, control).default_value = value
+        require(h.max_rgb(h.render_image(f"v2_standalone_rim_disabled_{control}")) < .0001,
+                f"Standalone depth rim ignores {control}")
+        inp(rim, control).default_value = previous
+    inp(rim, "Light Bias").default_value = 1
+    inp(rim, "Light Factor").default_value = 0
+    require(h.max_rgb(h.render_image("v2_standalone_rim_light_factor")) < .0001,
+            "Standalone rim ignores Light Factor")
+    inp(rim, "Light Bias").default_value = 0
+    inp(rim, "Light Factor").default_value = 1
+    material_name, node_name = material.name, rim.name
+    bpy.ops.wm.save_as_mainfile(filepath=str(h.OUTPUT_DIR / "standalone_rim_roundtrip.blend"))
+    bpy.ops.wm.open_mainfile(filepath=str(h.OUTPUT_DIR / "standalone_rim_roundtrip.blend"))
+    restored = bpy.data.materials[material_name].node_tree.nodes[node_name]
+    require(restored.rim_mode == "DEPTH" and restored.outputs["Color"].is_linked,
+            "Standalone rim mode or links lost on readback")
+    require(h.max_rgb(h.render_image("v2_standalone_rim_readback")) > .01,
+            "Standalone rim stopped rendering after readback")
+
+
+def check_diffuse_roughness_independence(h):
+    h.clear_scene()
+    h.configure_scene()
+    configure_world((0, 0, 0))
+    h.make_camera()
+    material, node, output = new_material()
+    h.make_sphere(material)
+    h.add_point_light("Diffuse independence", (1, 1, 1), 80, (-2, -4, 2))
+    node.shadow_mode = "NONE"
+    assign(node, base_color=(.8, .8, .8, 1), highlight_strength=0,
+           reflection_strength=0, ambient_strength=0, rim_strength=0)
+    tree = material.node_tree
+    emission = tree.nodes.new("ShaderNodeEmission")
+    tree.links.new(node.outputs["Diffuse"], emission.inputs["Color"])
+    for name, socket in (("diffuse", emission.outputs[0]), ("shader", node.outputs["Shader"])):
+        tree.links.new(socket, output.inputs["Surface"])
+        baseline = None
+        for roughness in (0, .2, .5, 1):
+            assign(node, roughness=roughness)
+            pixels = h.render_image(f"v2_{name}_roughness_independent_{roughness}")
+            require(all(math.isfinite(v) for v in pixels), "Non-finite diffuse output")
+            require(h.max_rgb(pixels) > .01, "Diffuse independence fixture is black")
+            if baseline is None:
+                baseline = pixels
+            else:
+                error = max(abs(a - b) for a, b in zip(baseline, pixels))
+                require(error < .001, f"{name} changed with roughness: {error}")
+    tree.links.new(emission.outputs[0], output.inputs["Surface"])
+    for control in ("metallic", "transmission_weight"):
+        assign(node, **{control: 1})
+        require(h.max_rgb(h.render_image(f"v2_diffuse_{control}_suppressed")) < .0001,
+                f"Diffuse no longer respects {control}")
+        assign(node, **{control: 0})
+
+
+def check_zero_roughness_highlight(h):
+    """Shadow/reference variation must not become hard-highlight coverage."""
+    h.clear_scene()
+    h.configure_scene()
+    bpy.context.scene.eevee.taa_render_samples = 16
+    configure_world((0, 0, 0))
+    camera = h.make_camera()
+    camera.data.type = "PERSP"
+    camera.data.lens = 50
+    camera.matrix_world = Matrix([
+        (.761538, .648120, 0, -.124411),
+        (-.324060, .380769, .866025, -.200145),
+        (.561288, -.659512, .5, -2.337060), (0, 0, 0, 1)]).inverted()
+    material, node, output = new_material()
+    assign(node, base_color=(0, 0, 0, 1), roughness=0, profile_softness=0,
+           ambient_strength=0, reflection_strength=0, rim_strength=0)
+    node.shadow_mode = "ALL"
+    node.mapping_stage = "TOTAL_LIGHTING"
+    bpy.ops.mesh.primitive_monkey_add()
+    monkey = bpy.context.object
+    monkey.matrix_world = Matrix([
+        (.409391, 0, 0, 0), (0, .327083, .246207, 0),
+        (0, -.246207, .327083, .268133), (0, 0, 0, 1)])
+    monkey.data.materials.append(material)
+    subdivision = monkey.modifiers.new("Regression subdivision", "SUBSURF")
+    subdivision.levels = subdivision.render_levels = 2
+    for polygon in monkey.data.polygons:
+        polygon.use_smooth = True
+    for index, (energy, matrix) in enumerate([
+        (54.97787, [( .805528, -1.229286, 1.816732, 1.120336),
+                    (.498274, 1.987308, 1.123773, 1.280069),
+                    (-2.136208, 0, .947181, 1.417600), (0, 0, 0, 1)]),
+        (35.34292, [(-.107620, 1.137235, -1.275165, -1.779818),
+                    (-.476459, -1.246984, -1.071891, -.980052),
+                    (-1.640834, .287505, .394888, 1.417600), (0, 0, 0, 1)])]):
+        light = h.add_point_light(f"Hard highlight {index}", (1, 1, 1), energy, (0, 0, 0))
+        light.data.type = "AREA"
+        light.matrix_world = Matrix(matrix)
+        light.data.use_nodes = True
+        tree = light.data.node_tree
+        info = tree.nodes.new("ShaderNodeEeveeLightShaderInfo")
+        light_output = tree.nodes.new("ShaderNodeEeveeLightShaderOutput")
+        for source, target in [("Default Color", "Color"), ("Default Intensity", "Intensity"),
+                               ("Default Attenuation", "Attenuation")]:
+            tree.links.new(info.outputs[source], light_output.inputs[target])
+    for roughness in (0, .05):
+        assign(node, roughness=roughness)
+        pixels = h.render_image(f"v2_hard_highlight_roughness_{roughness}")
+        require(all(math.isfinite(v) for v in pixels), "Non-finite zero-roughness radiance")
+        bright = sum(max(pixels[i:i + 3]) > 1 for i in range(0, len(pixels), 4))
+        require(bright / (len(pixels) / 4) < .01,
+                "Reference/shadow gradients created broad false hard highlights")
+    assign(node, roughness=.2, profile_softness=1)
+    require(h.max_rgb(h.render_image("v2_zero_roughness_highlight_control")) > .1,
+            "Regression fixture lost its actual light response")
+    # Reuse the occluding geometry and two finite lights to isolate the new switch.
+    require(node.highlight_receive_shadows, "Highlights must receive shadows by default")
+    assign(node, roughness=.59545457, profile_softness=0)
+    tree = material.node_tree
+    emission = tree.nodes.new("ShaderNodeEmission")
+    tree.links.new(node.outputs["Highlight"], emission.inputs["Color"])
+    tree.links.new(emission.outputs[0], output.inputs["Surface"])
+    for model in ("DIRECTION", "INTEGRATED"):
+        node.highlight_light_shape = model
+        for stage in ("TOTAL_LIGHTING", "MAX_LIGHTING"):
+            node.mapping_stage = stage
+            node.shadow_mode = "NONE"
+            node.highlight_receive_shadows = True
+            reference = h.render_image(f"v2_highlight_no_shadow_{model}_{stage}")
+            node.shadow_mode = "ALL"
+            node.highlight_receive_shadows = False
+            disabled = h.render_image(f"v2_highlight_shadow_disabled_{model}_{stage}")
+            require(max(abs(a-b) for a,b in zip(reference, disabled)) < .001,
+                    "Highlight shadow switch disagrees with unshadowed reference")
+            node.highlight_receive_shadows = True
+            enabled = h.render_image(f"v2_highlight_shadow_enabled_{model}_{stage}")
+            require(h.rms_difference(enabled, disabled) > .0001,
+                    "Highlight shadow switch has no visible effect")
+    assign(node, base_color=(.8, .8, .8, 1))
+    tree.links.new(node.outputs["Diffuse"], emission.inputs["Color"])
+    diffuse_on = h.render_image("v2_highlight_switch_diffuse_on")
+    node.highlight_receive_shadows = False
+    diffuse_off = h.render_image("v2_highlight_switch_diffuse_off")
+    require(max(abs(a-b) for a,b in zip(diffuse_on, diffuse_off)) < .001,
+            "Highlight shadow switch changed diffuse shading")
+    material_name, node_name = material.name, node.name
+    path = h.OUTPUT_DIR / "highlight_shadow_switch.blend"
+    bpy.ops.wm.save_as_mainfile(filepath=str(path))
+    bpy.ops.wm.open_mainfile(filepath=str(path))
+    require(not bpy.data.materials[material_name].node_tree.nodes[node_name].highlight_receive_shadows,
+            "Highlight shadow switch was lost on readback")
+
+
 def check_storage(node, output_dir):
     require(node.model_version == 2, "A new Principled NPR node must use V2")
-    require(len(node.inputs) == 100, f"Unexpected V2 socket count {len(node.inputs)}")
-    require([s.identifier for s in node.outputs] == ["shader", "color", "alpha"], "Output IDs changed")
+    require(len(node.inputs) == 97, f"Unexpected V2 socket count {len(node.inputs)}")
+    require([s.identifier for s in node.outputs] ==
+            ["shader", "color", "alpha", "diffuse", "highlight", "rim", "emission"],
+            "Output IDs changed")
     require(node.outputs[1].name == "Local Color", "Color must be labeled as a local result")
     require(node.coordinate_range == "FRONT", "V2 must default to the positive Lambert range")
     require(node.bl_rna.properties["coordinate_range"].default == "FRONT",
@@ -63,14 +302,13 @@ def check_storage(node, output_dir):
     require(inp(node, "energy_influence").default_value == 0.5, "Energy response must default to 0.5")
     require(node.inputs[90].identifier == "energy_influence", "New input must be append-only")
     require(node.rim_mode == "FRESNEL", "The existing rim must remain the default")
+    require({e.identifier for e in node.bl_rna.properties["rim_mode"].enum_items} ==
+            {"FRESNEL", "DEPTH"}, "Rim must expose exactly Fresnel and Depth")
     require(node.highlight_light_shape == "DIRECTION", "New highlights must default to analytic GGX")
-    require([s.identifier for s in node.inputs[91:94]] ==
-            ["rim_pixel_width", "rim_depth_threshold", "rim_depth_softness"],
+    require([s.identifier for s in node.inputs[91:95]] ==
+            ["rim_pixel_width", "rim_depth_threshold", "rim_depth_softness", "rim_samples"],
             "Depth rim controls must be append-only")
-    require([s.identifier for s in node.inputs[94:98]] ==
-            ["goo_rim_samples", "goo_rim_radius", "goo_rim_thickness", "goo_rim_scale"],
-            "Goo rim controls must be append-only")
-    require([s.identifier for s in node.inputs[98:]] == ["flatten_strength", "flatten_range"],
+    require([s.identifier for s in node.inputs[95:]] == ["flatten_strength", "flatten_range"],
             "Flatten inputs must be append-only")
     require(inp(node, "flatten_strength").default_value == 0, "Flattening must default off")
     require(node.mapping_stage == "TOTAL_LIGHTING", "Energy Sum must be the default")
@@ -86,8 +324,8 @@ def check_storage(node, output_dir):
             pass
         else:
             raise AssertionError("New nodes must expose exactly two lighting modes")
-    require(inp(node, "ambient_strength").default_value == 1, "Indirect diffuse must default on")
-    require(inp(node, "reflection_strength").default_value == 1, "Indirect reflection must default on")
+    require(inp(node, "ambient_strength").default_value == 0, "Indirect diffuse must default off")
+    require(inp(node, "reflection_strength").default_value == 0, "Indirect reflection must default off")
     require({"NONE", "ALL", "CAST_ONLY", "SELF_ONLY"}.issubset(
         {e.identifier for e in node.bl_rna.properties["shadow_mode"].enum_items}),
         "Four shadow types are required")
@@ -202,6 +440,26 @@ def main():
     local_pixels = h.render_image("v2_local_color_direct")
     require(h.rms_difference(shader_pixels, local_pixels) < 0.01,
             "Local Color added hidden closures or disagrees with isolated direct Shader")
+    # Exercise every output argument together (the GPU function signature used
+    # to exceed MAX_PARAMETER), and compare RGB within the same light sample.
+    component_nodes = []
+    total = node.outputs["Diffuse"]
+    for name in ("Highlight", "Rim", "Emission"):
+        add = tree.nodes.new("ShaderNodeVectorMath")
+        add.operation = "ADD"
+        tree.links.new(total, add.inputs[0])
+        tree.links.new(node.outputs[name], add.inputs[1])
+        total = add.outputs[0]
+        component_nodes.append(add)
+    error = tree.nodes.new("ShaderNodeVectorMath")
+    error.operation = "DISTANCE"
+    tree.links.new(total, error.inputs[0])
+    tree.links.new(node.outputs["Local Color"], error.inputs[1])
+    tree.links.new(error.outputs["Value"], emission.inputs["Color"])
+    difference = h.render_image("v2_component_sum_error")
+    require(h.max_rgb(difference) < 0.0001, "Component RGB sum differs from Local Color")
+    for item in component_nodes + [error]:
+        tree.nodes.remove(item)
     tree.nodes.remove(emission)
     tree.links.new(node.outputs["Shader"], output.inputs["Surface"])
 
@@ -235,8 +493,12 @@ def main():
     require(inp(saved_settings, "coordinate_offset").default_value == 0 and
             abs(inp(saved_settings, "mapping_softness").default_value - 0.6) < 1e-6,
             "New defaults overwrote explicitly saved mapping settings")
-    require(len(loaded.inputs) == 100 and loaded.energy_response_version == 2,
+    require(len(loaded.inputs) == 97 and loaded.energy_response_version == 2,
             "V2 energy response or inputs changed on readback")
+    check_diffuse_roughness_independence(h)
+    check_zero_roughness_highlight(h)
+    check_standalone_rim(h)
+    check_shared_principled_math(h)
     report = {"backend": active, "build_hash": bpy.app.build_hash.decode(),
               "build_branch": bpy.app.build_branch.decode(), "linear_energy_ratio": ratio,
               "direct_local_rms": h.rms_difference(shader_pixels, local_pixels)}

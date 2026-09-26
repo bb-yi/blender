@@ -289,8 +289,7 @@ static void node_declare(NodeDeclarationBuilder &b)
                                   SHD_PRINCIPLED_NPR_MAPPING_MAX_LIGHTING);
   const bool unified_lighting = v2 && (!storage || storage->energy_response_version >= 2);
   const bool depth_rim = v2 && storage &&
-                         storage->rim_mode == SHD_PRINCIPLED_NPR_RIM_SCREEN_DEPTH;
-  const bool goo_rim = v2 && storage && storage->rim_mode == SHD_PRINCIPLED_NPR_RIM_GOO_DEPTH;
+                         storage->rim_mode != SHD_PRINCIPLED_NPR_RIM_FRESNEL;
   PanelDeclarationBuilder *stop_panels[PRINCIPLED_NPR_MAX_STOPS] = {};
 
   b.use_custom_socket_order();
@@ -301,6 +300,19 @@ static void node_declare(NodeDeclarationBuilder &b)
                "lighting and later SSS, SSR or refraction" :
                "Final scene-linear HDR NPR color before it is wrapped into a Shader");
   b.add_output<decl::Float>("Alpha"_ustr, "alpha"_ustr);
+  b.add_output<decl::Color>("Diffuse"_ustr, "diffuse"_ustr)
+      .description("Direct NPR diffuse lighting only; Local Color = Diffuse + Highlight + Rim + "
+                   "Emission")
+      .available(v2);
+  b.add_output<decl::Color>("Highlight"_ustr, "highlight"_ustr)
+      .description("Accumulated NPR highlight only")
+      .available(v2);
+  b.add_output<decl::Color>("Rim"_ustr, "rim"_ustr)
+      .description("Rim light radiance only")
+      .available(v2);
+  b.add_output<decl::Color>("Emission"_ustr, "emission"_ustr)
+      .description("Emission color after strength and coat layering")
+      .available(v2);
 
   b.add_input<decl::Color>("Base Color"_ustr, "base_color"_ustr)
       .default_value({0.8f, 0.8f, 0.8f, 1.0f});
@@ -504,6 +516,8 @@ static void node_declare(NodeDeclarationBuilder &b)
     if (RNA_int_get(ptr, "model_version") >= 2) {
       layout.prop(ptr, "highlight_light_shape", ui::ITEM_R_SPLIT_EMPTY_NAME,
                   std::nullopt, ICON_NONE);
+      layout.prop(ptr, "highlight_receive_shadows", ui::ITEM_R_SPLIT_EMPTY_NAME,
+                  std::nullopt, ICON_NONE);
       if (RNA_enum_get(ptr, "highlight_light_shape") == SHD_PRINCIPLED_NPR_HIGHLIGHT_INTEGRATED) {
         layout.label(IFACE_("Finite integration: higher cost"), ICON_INFO);
       }
@@ -572,7 +586,7 @@ static void node_declare(NodeDeclarationBuilder &b)
   environment
       .add_input<decl::Float>(v2 ? "Indirect Specular"_ustr : "Reflection Strength"_ustr,
                               "reflection_strength"_ustr)
-      .default_value(v2 ? 1.0f : 0.0f)
+      .default_value(0.0f)
       .min(0.0f)
       .max(8.0f)
       .description(
@@ -581,7 +595,7 @@ static void node_declare(NodeDeclarationBuilder &b)
   environment
       .add_input<decl::Float>(v2 ? "Indirect Diffuse"_ustr : "Ambient Strength"_ustr,
                               "ambient_strength"_ustr)
-      .default_value(v2 ? 1.0f : 0.0f)
+      .default_value(0.0f)
       .min(0.0f)
       .max(8.0f);
   environment.add_input<decl::Float>("Ambient Directionality"_ustr, "ambient_directionality"_ustr)
@@ -596,12 +610,6 @@ static void node_declare(NodeDeclarationBuilder &b)
   if (v2) {
     rim.add_layout([](ui::Layout &layout, bContext * /*C*/, PointerRNA *ptr) {
       layout.prop(ptr, "rim_mode", ui::ITEM_R_SPLIT_EMPTY_NAME, std::nullopt, ICON_NONE);
-      if (RNA_enum_get(ptr, "rim_mode") != SHD_PRINCIPLED_NPR_RIM_FRESNEL) {
-        layout.label(IFACE_("Opaque / binary cutout only"), ICON_INFO);
-      }
-      if (RNA_enum_get(ptr, "rim_mode") == SHD_PRINCIPLED_NPR_RIM_GOO_DEPTH) {
-        layout.label(IFACE_("Goo reference scale: 1920 x 1080"), ICON_INFO);
-      }
     });
   }
   rim.add_input<decl::Color>("Rim Color"_ustr, "rim_color"_ustr)
@@ -613,32 +621,29 @@ static void node_declare(NodeDeclarationBuilder &b)
   rim.add_input<decl::Float>("Angle"_ustr, "rim_angle"_ustr)
       .default_value(0.0f)
       .min(-360.0f)
-      .max(360.0f)
-      .available(!goo_rim);
+      .max(360.0f);
   rim.add_input<decl::Float>("Length"_ustr, "rim_length"_ustr)
       .default_value(1.0f)
       .min(0.0f)
       .max(1.0f)
-      .subtype(PROP_FACTOR)
-      .available(!goo_rim);
+      .subtype(PROP_FACTOR);
   rim.add_input<decl::Float>("Length Falloff"_ustr, "rim_length_falloff"_ustr)
       .default_value(0.1f)
       .min(0.0f)
       .max(1.0f)
-      .subtype(PROP_FACTOR)
-      .available(!goo_rim);
+      .subtype(PROP_FACTOR);
   rim.add_input<decl::Float>("Thickness"_ustr, "rim_thickness"_ustr)
       .default_value(0.1f)
       .min(0.0f)
       .max(1.0f)
       .subtype(PROP_FACTOR)
-      .available(!depth_rim && !goo_rim);
+      .available(!depth_rim);
   rim.add_input<decl::Float>("Thickness Falloff"_ustr, "rim_thickness_falloff"_ustr)
       .default_value(0.05f)
       .min(0.0f)
       .max(1.0f)
       .subtype(PROP_FACTOR)
-      .available(!depth_rim && !goo_rim);
+      .available(!depth_rim);
   rim.add_input<decl::Float>("Light Bias"_ustr, "rim_light_bias"_ustr)
       .default_value(0.0f)
       .min(-1.0f)
@@ -713,7 +718,8 @@ static void node_declare(NodeDeclarationBuilder &b)
   material.add_input<decl::Float>("IOR"_ustr, "ior"_ustr)
       .default_value(1.5f)
       .min(1.0f)
-      .max(1000.0f);
+      .max(1000.0f)
+      .translation_context("NPR");
   material
       .add_input<decl::Float>("Metallic Body Preservation"_ustr, "metallic_body_preservation"_ustr)
       .default_value(0.0f)
@@ -765,7 +771,8 @@ static void node_declare(NodeDeclarationBuilder &b)
       .default_value(1.5f)
       .min(1.0f)
       .max(1000.0f)
-      .short_label("IOR");
+      .short_label("IOR")
+      .translation_context("NPR");
   coat.add_input<decl::Color>("Coat Tint"_ustr, "coat_tint"_ustr)
       .default_value({1.0f, 1.0f, 1.0f, 1.0f})
       .short_label("Tint");
@@ -828,43 +835,29 @@ static void node_declare(NodeDeclarationBuilder &b)
       .default_value(4.0f)
       .min(0.0f)
       .max(128.0f)
-      .description("Rim width in actual render pixels, independent of camera distance")
+      .description("Depth sampling reach in actual render pixels, independent of camera distance")
       .available(depth_rim);
   rim.add_input<decl::Float>("Depth Threshold"_ustr, "rim_depth_threshold"_ustr)
       .default_value(0.01f)
       .min(0.0f)
       .max(1000.0f)
       .subtype(PROP_DISTANCE)
-      .description("Minimum linear depth discontinuity after geometric plane compensation")
+      .description("Minimum view-space depth discontinuity after surface-slope compensation; "
+                   "larger values reject more edges without changing background silhouettes")
       .available(depth_rim);
   rim.add_input<decl::Float>("Softness"_ustr, "rim_depth_softness"_ustr)
-      .default_value(0.1f)
+      .default_value(0.5f)
       .min(0.0f)
       .max(1.0f)
       .subtype(PROP_FACTOR)
-      .description("Transition as a fraction of pixel width; hard edges retain coverage AA")
+      .description("Spatial rim falloff: 0 is a hard band, 1 fades across the sampling radius")
       .available(depth_rim);
-  /* Keep the Goo controls append-only: their units differ from the older silhouette rim. */
-  rim.add_input<decl::Float>("Samples"_ustr, "goo_rim_samples"_ustr)
+  rim.add_input<decl::Float>("Samples"_ustr, "rim_samples"_ustr)
       .default_value(8.0f)
       .min(1.0f)
       .max(64.0f)
-      .description("Goo depth samples on each side of each of eight rotating directions")
-      .available(goo_rim);
-  rim.add_input<decl::Float>("Sample Radius"_ustr, "goo_rim_radius"_ustr)
-      .default_value(1.0f)
-      .min(0.0f)
-      .description("Original Goo radius, using a fixed 1920 by 1080 sampling reference")
-      .available(goo_rim);
-  rim.add_input<decl::Float>("Thickness"_ustr, "goo_rim_thickness"_ustr)
-      .default_value(1.0f)
-      .min(0.0f)
-      .description("Original Goo upper limit for the sampled view-space depth difference")
-      .available(goo_rim);
-  rim.add_input<decl::Vector>("Scale"_ustr, "goo_rim_scale"_ustr)
-      .default_value({1.0f, 1.0f, 0.0f})
-      .description("Original Goo screen sampling scale; the Z component is unused")
-      .available(goo_rim);
+      .description("Depth samples along each of eight rotating directions")
+      .available(depth_rim);
   /* Append only: old input-index animation paths and links must not move. */
   lighting.add_input<decl::Float>("Flatten Strength"_ustr, "flatten_strength"_ustr)
       .default_value(0.0f)
@@ -966,26 +959,30 @@ static void node_update(bNodeTree *ntree, bNode *node)
           id == "flatten_strength"_ustr && v2 && storage.energy_response_version >= 2);
     }
   }
-  const bool depth_rim = v2 && storage.rim_mode == SHD_PRINCIPLED_NPR_RIM_SCREEN_DEPTH;
-  const bool goo_rim = v2 && storage.rim_mode == SHD_PRINCIPLED_NPR_RIM_GOO_DEPTH;
+  const bool depth_rim = v2 && storage.rim_mode != SHD_PRINCIPLED_NPR_RIM_FRESNEL;
   for (const UString id : {"rim_pixel_width"_ustr, "rim_depth_threshold"_ustr,
-                           "rim_depth_softness"_ustr, "rim_thickness"_ustr,
-                           "rim_thickness_falloff"_ustr})
+                           "rim_depth_softness"_ustr, "rim_samples"_ustr})
   {
     if (bNodeSocket *socket = bke::node_find_socket(*node, SOCK_IN, id)) {
-      const bool fresnel_input = ELEM(id, "rim_thickness"_ustr, "rim_thickness_falloff"_ustr);
-      bke::node_set_socket_availability(
-          *ntree, *socket, fresnel_input ? !depth_rim && !goo_rim : depth_rim);
+      bke::node_set_socket_availability(*ntree, *socket, depth_rim);
     }
   }
+  for (const UString id : {"rim_thickness"_ustr, "rim_thickness_falloff"_ustr}) {
+    if (bNodeSocket *socket = bke::node_find_socket(*node, SOCK_IN, id)) {
+      bke::node_set_socket_availability(*ntree, *socket, !depth_rim);
+    }
+  }
+  for (const UString id : {"rim_angle"_ustr, "rim_length"_ustr, "rim_length_falloff"_ustr}) {
+    if (bNodeSocket *socket = bke::node_find_socket(*node, SOCK_IN, id)) {
+      bke::node_set_socket_availability(*ntree, *socket, true);
+    }
+  }
+  /* Goo sockets were removed with the Goo rim mode; keep stale sockets hidden. */
   for (const UString id : {"goo_rim_samples"_ustr, "goo_rim_radius"_ustr,
-                           "goo_rim_thickness"_ustr, "goo_rim_scale"_ustr,
-                           "rim_angle"_ustr, "rim_length"_ustr, "rim_length_falloff"_ustr})
+                           "goo_rim_thickness"_ustr, "goo_rim_scale"_ustr})
   {
     if (bNodeSocket *socket = bke::node_find_socket(*node, SOCK_IN, id)) {
-      const bool legacy_arc = ELEM(id, "rim_angle"_ustr, "rim_length"_ustr,
-                                  "rim_length_falloff"_ustr);
-      bke::node_set_socket_availability(*ntree, *socket, legacy_arc ? !goo_rim : goo_rim);
+      bke::node_set_socket_availability(*ntree, *socket, false);
     }
   }
   if (bNodeSocket *socket = bke::node_find_socket(*node, SOCK_IN, "intensity_influence"_ustr)) {
@@ -1210,6 +1207,13 @@ static void node_operators()
 
 static void node_extra_info(NodeExtraInfoParams &params)
 {
+  {
+    NodeExtraInfoRow row;
+    row.text = RPT_("Experimental");
+    row.tooltip = TIP_("This node is experimental and may change in future versions");
+    row.icon = ICON_EXPERIMENTAL;
+    params.rows.append(std::move(row));
+  }
   const Scene *scene = CTX_data_scene(&params.C);
   if (scene != nullptr && StringRef(scene->r.engine) == RE_engine_id_BLENDER_EEVEE) {
     return;

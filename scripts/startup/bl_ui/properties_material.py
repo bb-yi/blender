@@ -272,7 +272,7 @@ def draw_material_surface_settings(layout, mat, is_eevee=True):
         col.prop(mat, "ztest_mode", text="ZTest")
 
         header, panel = layout.panel("material_surface_stencil_settings", default_closed=True)
-        header.label(text="Stencil")
+        header.label(text="Stencil", text_ctxt="NPR")
         if panel:
             panel.use_property_split = True
             panel.use_property_decorate = False

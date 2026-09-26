@@ -805,17 +805,19 @@ namespace blender::eevee
       }
     }
 
+    /* Camera/object changes can request a reset after RayTraceModule::sync(). Observe
+     * the final reset state before sampling.step() consumes it. This only advances the NPR
+     * generation counter; native and DLSS history invalidation remain independent. */
+    if (is_viewport() && sampling.is_reset()) {
+      raytracing.reset_npr_history();
+    }
+
     DebugScope debug_scope(debug_scope_render_sample, "EEVEE.render_sample");
 
     {
       /* Critical section. Potential gpu::Shader concurrent usage. */
       DRW_submission_start();
 
-      /* Camera/object changes can request a reset after RayTraceModule::sync(). Observe
-       * the final reset state here; sampling.step() consumes it. Native history stays intact. */
-      if (is_viewport() && sampling.is_reset()) {
-        raytracing.reset_npr_history();
-      }
       sampling.step();
       film.update_sample_table();
       uniform_data.push_update();

@@ -35,6 +35,13 @@ static void node_declare(NodeDeclarationBuilder &b)
 
 static void node_extra_info(NodeExtraInfoParams &params)
 {
+  {
+    NodeExtraInfoRow row;
+    row.text = RPT_("Experimental");
+    row.tooltip = TIP_("This node is experimental and may change in future versions");
+    row.icon = ICON_EXPERIMENTAL;
+    params.rows.append(std::move(row));
+  }
   const Scene *scene = CTX_data_scene(&params.C);
   if (scene != nullptr && StringRef(scene->r.engine) == RE_engine_id_BLENDER_EEVEE) {
     return;

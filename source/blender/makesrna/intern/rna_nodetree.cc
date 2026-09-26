@@ -10093,6 +10093,21 @@ static void rna_def_principled_npr_ramp_point(BlenderRNA *brna)
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_PrincipledNPRRampPoint_update");
 }
 
+static void def_sh_npr_rim(BlenderRNA * /*brna*/, StructRNA *srna)
+{
+  static const EnumPropertyItem modes[] = {
+      {0, "FRESNEL", 0, "Fresnel", "Normal and view-angle rim"},
+      {1, "DEPTH", 0, "Depth", "Screen-space depth discontinuity rim"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  PropertyRNA *prop = RNA_def_property(srna, "rim_mode", PROP_ENUM, PROP_NONE);
+  RNA_def_property_enum_sdna(prop, nullptr, "custom1");
+  RNA_def_property_enum_items(prop, modes);
+  RNA_def_property_ui_text(prop, "Mode", "Rim calculation method");
+  RNA_def_property_translation_context(prop, "NPR");
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_ShaderNode_socket_update");
+}
+
 static void def_sh_principled_npr(BlenderRNA * /*brna*/, StructRNA *srna)
 {
   static const EnumPropertyItem diffuse_mapping_items[] = {
@@ -10277,18 +10292,16 @@ static void def_sh_principled_npr(BlenderRNA * /*brna*/, StructRNA *srna)
   static const EnumPropertyItem rim_mode_items[] = {
       {SHD_PRINCIPLED_NPR_RIM_FRESNEL, "FRESNEL", 0, "Fresnel",
        "View-normal rim using the existing thickness controls"},
-      {SHD_PRINCIPLED_NPR_RIM_SCREEN_DEPTH, "SCREEN_DEPTH", 0, "Screen Depth",
-       "Approximately constant pixel-width object silhouette from visible depth and IDs; opaque and binary "
-       "cutout surfaces only, not Blended, fractional Alpha or probe capture"},
-      {SHD_PRINCIPLED_NPR_RIM_GOO_DEPTH, "GOO_DEPTH", 0, "Goo Depth",
-       "Goo Engine's original depth-difference rim, with fixed 1920 by 1080 reference sampling; "
-       "opaque and binary cutout surfaces only"},
+      {SHD_PRINCIPLED_NPR_RIM_DEPTH, "DEPTH", 0, "Depth",
+       "Depth-difference rim sampled from the HiZ buffer; opaque and binary cutout surfaces only, "
+       "not Blended, fractional Alpha or probe capture"},
       {0, nullptr, 0, nullptr, nullptr},
   };
   prop = RNA_def_property(srna, "rim_mode", PROP_ENUM, PROP_NONE);
   RNA_def_property_enum_items(prop, rim_mode_items);
   RNA_def_property_enum_default(prop, SHD_PRINCIPLED_NPR_RIM_FRESNEL);
   RNA_def_property_ui_text(prop, "Rim Mode", "Rim construction method (V2)");
+  RNA_def_property_translation_context(prop, "NPR");
   RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
   RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
 
@@ -10301,6 +10314,13 @@ static void def_sh_principled_npr(BlenderRNA * /*brna*/, StructRNA *srna)
        "samples to converge; hard remapping is applied to each sample"},
       {0, nullptr, 0, nullptr, nullptr},
   };
+  prop = RNA_def_property(srna, "highlight_receive_shadows", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_negative_sdna(prop, nullptr, "highlight_ignore_shadow", 1);
+  RNA_def_property_boolean_default(prop, true);
+  RNA_def_property_ui_text(prop, "Receive Shadows", "Apply shadow visibility to direct highlights without changing diffuse shadows");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(prop, NC_NODE | NA_EDITED, "rna_Node_update");
+
   prop = RNA_def_property(srna, "highlight_light_shape", PROP_ENUM, PROP_NONE);
   RNA_def_property_enum_items(prop, highlight_light_shape_items);
   RNA_def_property_ui_text(prop, "Light Shape", "Finite emitter treatment for direct highlights only");
@@ -14124,6 +14144,7 @@ static void rna_def_nodes(BlenderRNA *brna)
   define("ShaderNode", "ShaderNodeBsdfPrincipled", def_principled);
   define("ShaderNode", "ShaderNodePrincipledNPR", def_sh_principled_npr);
   define("ShaderNode", "ShaderNodeNPRSurfaceDiffusion", nullptr);
+  define("ShaderNode", "ShaderNodeNPRRim", def_sh_npr_rim);
   define("ShaderNode", "ShaderNodeBsdfRayPortal");
   define("ShaderNode", "ShaderNodeBsdfRefraction", def_refraction);
   define("ShaderNode", "ShaderNodeBsdfSheen", def_sheen);

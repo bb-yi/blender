@@ -204,7 +204,8 @@ def assert_storage_and_sockets():
     material, node, _output = make_material("PrincipledNPRStorageProbe")
     material.use_fake_user = True
     require(len(node.inputs) == 56, f"Expected 56 inputs, got {len(node.inputs)}")
-    require([socket.identifier for socket in node.outputs] == ["shader", "color", "alpha"],
+    require([socket.identifier for socket in list(node.outputs)[:3]] == ["shader", "color", "alpha"]
+            and all(socket.is_unavailable for socket in list(node.outputs)[3:]),
             "Unexpected output contract")
     require(node.diffuse_mapping == "SIMPLE", "Unexpected diffuse default")
     require(node.specular_mapping == "SIMPLE", "Unexpected specular default")

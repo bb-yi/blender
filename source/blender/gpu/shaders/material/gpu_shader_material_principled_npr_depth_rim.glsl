@@ -5,254 +5,125 @@
 #ifndef GPU_SHADER_MATERIAL_PRINCIPLED_NPR_DEPTH_RIM_GLSL
 #define GPU_SHADER_MATERIAL_PRINCIPLED_NPR_DEPTH_RIM_GLSL
 
-/* The caller disables this effect for Blended materials and partial alpha. In particular,
- * MAT_TRANSPARENT is not a Blended flag: binary Dithered materials also define it.
- * Probe captures must not sample depth from a different surface or view.
- * Codegen defines MAT_HIZ_DATA/MAT_RAYCAST when depth and object IDs are available. */
-#if defined(GPU_FRAGMENT_SHADER) && defined(MAT_HIZ_DATA) && defined(MAT_RAYCAST) && \
-    (defined(MAT_DEFERRED) || defined(MAT_FORWARD) || defined(NPR_SHADER)) && \
-    !defined(MAT_PROBE_CAPTURE) && !defined(MAT_CAPTURE) && \
-    !defined(MAT_BAKE_COLOR)
-
-bool npr_v2_depth_rim_sample(float2 pixel,
-                           float2 view_extent,
-                           float3 plane_depth,
-                           float center_z,
-                           float depth_tolerance,
-                           float depth_threshold,
-                           uint center_id)
-{
-  if (any(lessThan(pixel, float2(0.0f))) || any(greaterThanEqual(pixel, view_extent))) {
-    return false;
-  }
-  int2 texel = int2(pixel);
-  float screen_depth = texelFetch(hiz_tx, texel, 0).r;
-  if (!(screen_depth >= 0.0f && screen_depth <= 1.0f)) {
-    return false;
-  }
-  if (screen_depth == 1.0f) {
-    return true;
-  }
-  float sample_z = drw_depth_screen_to_view(screen_depth);
-  /* View Z is negative in front of the camera. A nearer occluder is not a rim on
-   * the hidden surface, even when the current tangent plane slopes towards it. */
-  if (sample_z >= center_z - depth_tolerance) {
-    return false;
-  }
-  /* This mode follows visible object silhouettes, not Goo-style curvature.
-   * Even a large tangent-plane residual on the same object is not an edge:
-   * accepting it makes smooth spheres develop wide rings inside their outline.
-   * Background was handled independently before reading its possibly stale ID. */
-  uint sample_id = texelFetch(object_id_tx, texel, 0).r;
-  if (sample_id == center_id) {
-    return false;
-  }
-
-  /* Compare at the sampled texel center, not the continuous search position.
-   * Screen depth is affine over a plane, including perspective projection. */
-  float2 screen_uv = (float2(texel) + 0.5f) / view_extent;
-  float expected_depth = dot(plane_depth.xy, screen_uv) + plane_depth.z;
-  float expected_z = center_z;
-  if (expected_depth > 0.0f && expected_depth < 1.0f) {
-    expected_z = drw_depth_screen_to_view(expected_depth);
-  }
-  /* Near a tangent-plane horizon the extrapolated point is behind the camera
-   * or outside its clip range. Fall back to the visible center depth, not NaN. */
-  /* The external surface can lie in front of the extrapolated plane while still
-   * behind the current visible point. The actual-depth check above already
-   * rejects foreground, so either sign of the non-coplanar residual is valid. */
-  return abs(expected_z - sample_z) > max(depth_threshold, depth_tolerance);
-}
-
-#endif
-
-/* Rim output of Goo Engine's screenspace_curvature (GPL-2.0-or-later).
- * Keep its fixed reference texel size, signed accumulation and sample weights.
- * This is a depth response, not the object-silhouette search above. */
-float npr_v2_goo_depth_rim(float samples, float sample_radius, float thickness, float3 scale)
+/* Independent rotating depth taps. Threshold is a minimum view-space gap,
+ * never a normalization gain. Foreground taps cannot cancel other directions. */
+float npr_v2_depth_rim(float width_px,
+                       float depth_threshold,
+                       float softness,
+                       float angle_degrees,
+                       float arc_length,
+                       float arc_softness,
+                       float samples)
 {
 #if defined(GPU_FRAGMENT_SHADER) && defined(MAT_HIZ_DATA) && \
     (defined(MAT_DEFERRED) || defined(MAT_FORWARD) || defined(NPR_SHADER)) && \
-    !defined(MAT_PROBE_CAPTURE) && !defined(MAT_CAPTURE) && !defined(MAT_BAKE_COLOR)
-  int n_samples = int(samples);
-  if (n_samples < 1 || !(sample_radius > 0.0f)) {
-    return 0.0f;
-  }
-  int2 depth_extent = textureSize(hiz_tx, 0);
-  float2 view_extent = float2(uniform_buf.film.render_extent);
-  if (any(lessThan(view_extent, float2(1.0f))) ||
-      any(greaterThan(view_extent, float2(depth_extent))) ||
-      any(lessThan(gl_FragCoord.xy, float2(0.0f))) ||
-      any(greaterThanEqual(gl_FragCoord.xy, view_extent)))
-  {
-    return 0.0f;
-  }
-  /* Equivalent to Goo's projected viewPosition * hizUvScale.xy, including the
-   * current HiZ allocation's padding. The fixed offset is intentionally not
-   * changed into a render-pixel radius. */
-  float2 uvs = gl_FragCoord.xy / float2(depth_extent);
-  float center_depth = textureLod(hiz_tx, uvs, 0.0f).r;
-  if (!(center_depth >= 0.0f && center_depth < 1.0f)) {
-    return 0.0f;
-  }
-  float mid_depth = drw_depth_screen_to_view(center_depth);
-  float2 texel_size = float2(1.0f / 1920.0f, 1.0f / 1080.0f);
-  float i_samples = 64.0f / float(n_samples);
-  /* Goo used the TAA sample's alphaHashOffset. This is EEVEE's corresponding
-   * per-accumulation transparency random dimension, not a per-pixel hash. */
-  float angle_offset = sampling_rng_1D_get(SAMPLING_TRANSPARENCY);
-  float rim_accum = 0.0f;
-
-  for (int r = 0; r < 8; r++) {
-    float angle = (float(r) + angle_offset) * 3.1415f * 0.25f * 0.5f;
-    /* Goo's mat2(c, -s, s, c) is column-major: rotate clockwise. */
-    float2 offset = float2(cos(angle), -sin(angle)) * texel_size * sample_radius * scale.xy;
-    for (int i = 1; i <= n_samples; i++) {
-      float left = drw_depth_screen_to_view(
-          textureLod(hiz_tx, uvs + offset * float(i) * i_samples, 0.0f).r);
-      float right = drw_depth_screen_to_view(
-          textureLod(hiz_tx, uvs - offset * float(i) * i_samples, 0.0f).r);
-      float afac = 1.0f - float(i - 1) / float(n_samples);
-      rim_accum += min(mid_depth - min(left, right), thickness) * afac;
-    }
-  }
-  return rim_accum / sample_radius * 0.001f;
-#else
-  return 0.0f;
-#endif
-}
-
-float npr_v2_depth_rim(float width_px,
-                       float softness,
-                       float depth_threshold,
-                       float angle_degrees,
-                       float arc_length,
-                       float arc_softness)
-{
-#if defined(GPU_FRAGMENT_SHADER) && defined(MAT_HIZ_DATA) && defined(MAT_RAYCAST) && \
-    (defined(MAT_DEFERRED) || defined(MAT_FORWARD) || defined(NPR_SHADER)) && \
     !defined(MAT_PROBE_CAPTURE) && !defined(MAT_CAPTURE) && \
     !defined(MAT_BAKE_COLOR)
+  /* Hardware depth is affine across a projected triangle, including perspective.
+   * Use the receiver's slope, not depth derivatives from neighboring objects. */
+  /* EEVEE raster depth is reverse-Z, while HiZ is already converted back. */
+  float receiver_depth = 1.0f - gl_FragCoord.z;
+  float2 depth_gradient = float2(dFdx(receiver_depth), dFdy(receiver_depth));
   if (!(width_px > 0.0f) || !(arc_length > 0.0f)) {
     return 0.0f;
   }
-  float2 view_extent = float2(uniform_buf.film.render_extent);
   int2 depth_extent = textureSize(hiz_tx, 0);
-  int2 object_extent = textureSize(object_id_tx, 0);
-  if (any(lessThan(view_extent, float2(1.0f))) ||
-      any(greaterThan(view_extent, float2(depth_extent))) ||
-      any(greaterThan(view_extent, float2(object_extent))))
+  int2 view_extent = int2(uniform_buf.film.render_extent);
+  int2 center_pixel = int2(gl_FragCoord.xy);
+  if (any(lessThan(center_pixel, int2(0))) ||
+      any(greaterThanEqual(center_pixel, view_extent)) ||
+      any(greaterThan(view_extent, depth_extent)))
   {
     return 0.0f;
   }
-  float2 center_pixel = gl_FragCoord.xy;
-  if (any(lessThan(center_pixel, float2(0.0f))) ||
-      any(greaterThanEqual(center_pixel, view_extent)))
-  {
-    return 0.0f;
-  }
-  float center_depth = texelFetch(hiz_tx, int2(center_pixel), 0).r;
+  float center_depth = texelFetch(hiz_tx, center_pixel, 0).r;
   if (!(center_depth >= 0.0f && center_depth < 1.0f)) {
     return 0.0f;
   }
-  uint center_id = texelFetch(object_id_tx, int2(center_pixel), 0).r;
-  float center_z = drw_depth_screen_to_view(center_depth);
-  float3 view_position = drw_point_world_to_view(g_data.P);
-  float depth_tolerance = max(abs(center_z) * 1e-4f, 1e-5f);
-  if (abs(view_position.z - center_z) > depth_tolerance) {
-    return 0.0f;
-  }
 
-  float3 view_normal = to_float3x3(drw_view().viewmat) * g_data.Ng;
-  float4 view_plane = float4(view_normal, -dot(view_normal, view_position));
-  float4 clip_plane = transpose(drw_view().wininv) * view_plane;
-  float2 slope = float2(0.0f);
-  if (abs(clip_plane.z) > 1e-20f) {
-    slope = -clip_plane.xy / clip_plane.z;
-  }
-  float2 center_uv = (float2(int2(center_pixel)) + 0.5f) / view_extent;
-  float3 plane_depth = float3(slope, center_depth - dot(slope, center_uv));
-
-  /* Width is the half-coverage boundary in actual render pixels. The one-pixel
-   * minimum transition is coverage AA, not a change to the artistic softness.
-   * A screen-space effect cannot search further than the image diagonal. */
-  float width = min(width_px, length(view_extent));
-  float transition = max(width * saturate(softness), 1.0f);
-  float search_radius = width + 0.5f * transition;
-  bool full_arc = arc_length >= 1.0f;
-  float nearest_distance = search_radius;
-  float nearest_turns = 0.0f;
-  bool found_edge = false;
-
-  /* Sixteen directions bound straight-edge width variation to about 1.9%.
-   * Keep this loop bounded and do not unroll the depth-search body. Unlike the
-   * Curvature node, no unrelated curvature response is evaluated here. */
-  for (int direction_index = 0; direction_index < 16; direction_index++) {
-    /* Rotate the whole circle, but do not discard directions outside the arc:
-     * a diagonal ray in the right arc can hit a nearer top edge. Angular gating
-     * must describe the nearest visible contour, not any ray that crosses it. */
-    float turns = float(direction_index) * (1.0f / 16.0f) +
-                  (full_arc ? 0.0f : angle_degrees / 360.0f);
-    float angle = turns * (2.0f * M_PI);
-    float2 direction = float2(cos(angle), sin(angle));
-
-    /* Clip the search to real pixels. Reading HiZ padding or treating a screen
-     * border as background would draw a bright frame around cropped objects. */
-    float far_distance = search_radius;
-    for (int axis = 0; axis < 2; axis++) {
-      if (direction[axis] > 1e-6f) {
-        far_distance = min(far_distance,
-                           (view_extent[axis] - 0.5f - center_pixel[axis]) / direction[axis]);
-      }
-      else if (direction[axis] < -1e-6f) {
-        far_distance = min(far_distance, (0.5f - center_pixel[axis]) / direction[axis]);
-      }
+  int n_samples = clamp(int(samples), 1, 64);
+  float half_arc = saturate(arc_length) * 0.5f;
+  float arc_transition = min(saturate(arc_softness) * 0.5f, half_arc);
+  float angle_turns = angle_degrees / 360.0f;
+  float rotation = sampling_rng_1D_get(SAMPLING_TRANSPARENCY);
+  float rim = 0.0f;
+  for (int axis = 0; axis < 8; axis++) {
+    float turns = (float(axis) + rotation) * 0.125f;
+    float arc_weight = 1.0f;
+    if (arc_length < 1.0f) {
+      float distance = abs(fract(turns - angle_turns + 0.5f) - 0.5f);
+      arc_weight = arc_transition > 0.0f ?
+                       1.0f - smoothstep(half_arc - arc_transition, half_arc, distance) :
+                       1.0f - step(half_arc, distance);
     }
-    if (far_distance <= 0.0f ||
-        !npr_v2_depth_rim_sample(center_pixel + direction * far_distance,
-                                 view_extent, plane_depth, center_z,
-                                 depth_tolerance, depth_threshold, center_id))
-    {
+    if (arc_weight <= 0.0f) {
       continue;
     }
-    float near_distance = 0.0f;
-    for (int search_index = 0; search_index < 4; search_index++) {
-      float middle = 0.5f * (near_distance + far_distance);
-      if (npr_v2_depth_rim_sample(center_pixel + direction * middle,
-                                  view_extent, plane_depth, center_z,
-                                  depth_tolerance, depth_threshold, center_id))
-      {
-        far_distance = middle;
+    float radians = turns * (2.0f * M_PI);
+    float2 direction = float2(cos(radians), sin(radians));
+    int2 tap_step = int2(round(direction * max(1.0f, width_px / float(n_samples))));
+    for (int i = 1; i <= n_samples; i++) {
+      float reach = float(i) / float(n_samples);
+      int2 pixel = int2(floor(gl_FragCoord.xy + direction * (width_px * reach)));
+      /* Off-screen and padded HiZ texels are not background geometry. */
+      if (any(lessThan(pixel, int2(0))) || any(greaterThanEqual(pixel, view_extent))) {
+        continue;
       }
-      else {
-        near_distance = middle;
+      float sample_depth = texelFetch(hiz_tx, pixel, 0).r;
+      bool background = sample_depth >= 1.0f;
+      float predicted_depth = center_depth + dot(depth_gradient, float2(pixel - center_pixel));
+      bool edge = background;
+      if (!background && predicted_depth >= 0.0f && predicted_depth < 1.0f) {
+        float predicted_z = drw_depth_screen_to_view(predicted_depth);
+        float sample_z = drw_depth_screen_to_view(sample_depth);
+        float tolerance = max(1e-5f, abs(predicted_z) * 1e-5f);
+        float gap = predicted_z - sample_z;
+        /* A tangent prediction over the whole radius also responds to smooth
+         * curvature. Require a local break in the depth slope at the tap,
+         * using two equally spaced preceding texels along this direction. */
+        int2 prior = pixel - tap_step;
+        int2 prior2 = prior - tap_step;
+        if (all(greaterThanEqual(prior2, int2(0))) &&
+            all(lessThan(prior2, view_extent)) &&
+            all(greaterThanEqual(prior, int2(0))) && all(lessThan(prior, view_extent)))
+        {
+          float d1 = texelFetch(hiz_tx, prior, 0).r;
+          float d2 = texelFetch(hiz_tx, prior2, 0).r;
+          float local_prediction = 2.0f * d1 - d2;
+          if (d1 < 1.0f && d2 < 1.0f && local_prediction >= 0.0f &&
+              local_prediction < 1.0f)
+          {
+            gap = min(gap, drw_depth_screen_to_view(local_prediction) - sample_z);
+            /* A smooth curved surface changes slope gradually. A finite
+             * discontinuity must exceed that local depth trend as well. */
+            float trend = abs(drw_depth_screen_to_view(d1) - drw_depth_screen_to_view(d2));
+            if (gap <= 2.0f * trend) {
+              gap = 0.0f;
+            }
+          }
+          else {
+            gap = 0.0f;
+          }
+        }
+        else {
+          gap = 0.0f;
+        }
+        edge = gap > max(depth_threshold, 0.0f) + tolerance;
+      }
+      if (edge) {
+        /* Softness tapers the spatial band. Raising the depth threshold can
+         * only remove candidates, never introduce a different bright edge. */
+        /* Estimate the crossing halfway through the tap interval, so Samples=1
+         * still has a nonzero soft response instead of only sampling its zero. */
+        float crossing = max(0.0f, reach - 0.5f / float(n_samples));
+        float band = softness > 0.0f ?
+                         1.0f - smoothstep(1.0f - saturate(softness), 1.0f, crossing) :
+                         1.0f;
+        rim = max(rim, arc_weight * band);
       }
     }
-    float distance = 0.5f * (near_distance + far_distance);
-    if (!found_edge || distance < nearest_distance) {
-      nearest_distance = distance;
-      nearest_turns = turns;
-      found_edge = true;
-    }
-    if (full_arc && distance <= width - 0.5f * transition) {
-      return 1.0f;
-    }
   }
-  if (!found_edge) {
-    return 0.0f;
-  }
-  float arc = 1.0f;
-  if (!full_arc) {
-    float half_arc = saturate(arc_length) * 0.5f;
-    float arc_transition = min(saturate(arc_softness) * 0.5f, half_arc);
-    float centered = abs(fract(nearest_turns - angle_degrees / 360.0f + 0.5f) - 0.5f);
-    arc = arc_transition > 0.0f ?
-              1.0f - smoothstep(half_arc - arc_transition, half_arc, centered) :
-              1.0f - step(half_arc, centered);
-  }
-  float coverage = 1.0f - smoothstep(width - 0.5f * transition,
-                                    width + 0.5f * transition, nearest_distance);
-  return saturate(arc * coverage);
+  return rim;
 #else
   return 0.0f;
 #endif
