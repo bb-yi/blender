@@ -61,13 +61,19 @@ void DlssSrModule::init(const int2 output_extent)
   const Scene &scene = *inst_.scene;
   const int quality = inst_.is_viewport() ? scene.eevee.dlss_sr_viewport_quality :
                                             scene.eevee.dlss_sr_render_quality;
-  const bool query_settings = !was_active || quality_ != quality ||
-                              output_extent_ != output_extent;
-  if (quality_ != quality || output_extent_ != output_extent) {
+  const float percentage = quality == SCE_EEVEE_DLSS_SR_CUSTOM ?
+                               (inst_.is_viewport() ? scene.eevee.dlss_sr_viewport_percentage :
+                                                      scene.eevee.dlss_sr_render_percentage) :
+                               0.0f;
+  const bool settings_changed = quality_ != quality || percentage_ != percentage ||
+                                output_extent_ != output_extent;
+  const bool query_settings = !was_active || settings_changed;
+  if (settings_changed) {
     failed_ = false;
     reset_ = true;
   }
   quality_ = quality;
+  percentage_ = percentage;
   output_extent_ = output_extent;
   if (!quality) {
     failed_ = false;
@@ -99,7 +105,8 @@ void DlssSrModule::init(const int2 output_extent)
   if (!inst_.is_viewport()) {
     session_.reuse_for_offline_render();
   }
-  if ((query_settings && !session_.sr_optimal_settings(output_extent, quality, input_extent_)) ||
+  if ((query_settings &&
+       !session_.sr_optimal_settings(output_extent, quality, percentage, input_extent_)) ||
       !session_.ensure_resources(input_extent_, output_extent, input_extent_, {}, true, true))
   {
     publish_status(session_.status());
@@ -149,11 +156,13 @@ gpu::Texture *DlssSrModule::process(gpu::Texture *color, gpu::Texture *outline, 
   frame.input_extent = input_extent_;
   frame.output_extent = output_extent_;
   frame.guide_extent = input_extent_;
-  /* EEVEE projection jitter moves geometry; NGX specifies sample-position jitter. */
-  frame.jitter = -inst_.film.pixel_jitter_get();
+  /* NGX expects the applied projection offset in input-pixel coordinates. The shared
+   * textures retain EEVEE's coordinate orientation, including Y; do not negate the jitter. */
+  frame.jitter = inst_.film.pixel_jitter_get();
+  /* MotionBlurModule invalidates history only when shutter time changes. Lens jitter still
+   * changes the view each sample and cannot use the offline zero-motion history. */
   frame.reset_history = reset_ || inst_.dlss5_reset() ||
-                        (!inst_.is_viewport() && ((inst_.scene->r.mode & R_MBLUR) ||
-                                                  inst_.depth_of_field.jitter_enabled()));
+                        (!inst_.is_viewport() && inst_.depth_of_field.jitter_enabled());
   frame.exposure_scale = 1.0f;
   if (!session_.copy_inputs_and_evaluate(frame, false, false) || !session_.wait_for_output()) {
     failed_ = true;

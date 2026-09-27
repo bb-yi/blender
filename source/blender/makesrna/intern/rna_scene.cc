@@ -9661,6 +9661,11 @@ static void rna_def_scene_eevee(BlenderRNA *brna)
        0,
        "Performance",
        "DLSS Super Resolution: performance"},
+      {SCE_EEVEE_DLSS_SR_CUSTOM,
+       "CUSTOM",
+       0,
+       "Custom",
+       "DLSS Super Resolution: custom input resolution using the Quality preset"},
       {0, nullptr, 0, nullptr, nullptr},
   };
   for (const char *name : {"dlss_sr_viewport_quality", "dlss_sr_render_quality"}) {
@@ -9672,6 +9677,19 @@ static void rna_def_scene_eevee(BlenderRNA *brna)
                              STREQ(name, "dlss_sr_viewport_quality") ? "Viewport SR" : "Render SR",
                              "Super resolution with resampled auxiliary passes; "
                              "explicit precise mask output uses native rendering");
+    RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+    RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_dlss_pass_update");
+  }
+  for (const char *name : {"dlss_sr_viewport_percentage", "dlss_sr_render_percentage"}) {
+    prop = RNA_def_property(srna, name, PROP_FLOAT, PROP_PERCENTAGE);
+    RNA_def_property_float_sdna(prop, nullptr, name);
+    RNA_def_property_range(prop, 50.0f, 100.0f);
+    RNA_def_property_float_default(prop, 80.0f);
+    RNA_def_property_ui_range(prop, 50.0f, 100.0f, 100, 1);
+    RNA_def_property_ui_text(prop,
+                             "Input Resolution",
+                             "Input width and height as a percentage of output, rounded to pixels "
+                             "and limited to the runtime-supported range. 100% does not upscale");
     RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
     RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_dlss_pass_update");
   }

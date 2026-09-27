@@ -25,12 +25,29 @@ warning. No DLL signature or executable bytes were repaired by this change.
 
 ## Output contract
 
+- Viewport and render offer independent Custom input percentages (50-100%, default 80%).
+  Percentages apply to width and height, not pixel count; input sizes round to whole pixels.
+  Custom uses the Quality model preset. Creation always uses NGX's optimal dimensions,
+  while evaluation uses the selected input subrect. Actual inputs are bounded by the
+  runtime-reported dynamic min/max (older runtimes without ranges use optimal dimensions).
+  Status reports the effective input/output sizes. 100% is not a separate DLAA mode.
+  The DLSS panel is collapsed by default; existing saved UI expansion may override this.
+  `sr_custom_resolution.py` and Release case `013-dlss-sr-custom-resolution` verify real
+  custom renders, preset transitions, output scaling and setting persistence. Optional
+  `--legacy-blend` accepts a pre-change fixture with Render SR Balanced to test migration.
 - SR accepts cropped low-resolution scene-linear HDR, reverse-Z depth,
   current-to-previous pixel motion and matching sample jitter. NR has its own
   motion conversion sign and executes after Film accumulation.
 - Viewport Combined bypasses native TAA when SR is active. Offline SR evaluates
   each sample and Film averages full-resolution results; this can cost more than
   native rendering at high sample counts.
+- Projection jitter is passed with EEVEE's input-pixel sign on both axes. Shared
+  Vulkan/D3D12 textures do not require negating it. Material texture gradients
+  shrink with the render/output ratio to preserve native mip detail.
+- Offline samples at the same shutter time retain SR history. A new shutter step
+  invalidates it, rather than resetting every sample merely because scene motion
+  blur is enabled. Actual lens jitter still resets history because the offline
+  zero-motion input cannot reproject different aperture views.
 - A selected Value AOV mixes the HDR-recovered NR result against the base image.
   Black keeps the base exactly; non-finite values protect the base, including
   when inverted. Alpha belongs to the base image.
@@ -59,6 +76,12 @@ mask selection transitions and native retry with multi-step motion blur. Run in
 an isolated user directory with Vulkan and `-- --output-dir <outside-source-path>`.
 It checks all shutter positions, nonzero subframes, disabled scene/layer motion
 blur, and per-frame animation output against independent native renders.
+
+`tests/dlss5/scripts/sr_image_quality.py` uses the same isolated invocation and
+checks both jitter axes, convergence, mip detail, shutter-step history and lens
+jitter against native pixels. Release case `012-dlss-sr-image-quality` wraps it.
+Performance has explicit wider subpixel-line tolerances than Quality/Balanced;
+passing does not imply pixel-equivalent native reconstruction in all scenes.
 
 ## Offline lifetime and performance
 

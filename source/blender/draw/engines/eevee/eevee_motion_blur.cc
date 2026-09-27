@@ -109,6 +109,9 @@ void MotionBlurModule::step()
       inst_.velocity.step_sync(eVelocityStep::STEP_NEXT, time_steps_[step_id_ + 1]);
     }
     inst_.set_time(time_steps_[step_id_]);
+    /* Offline SR has no inter-step motion vectors. Reuse history within one shutter time,
+     * but never reproject samples from a different time with zero motion. */
+    inst_.dlss_sr.invalidate();
   }
 }
 

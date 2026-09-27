@@ -165585,5 +165585,14 @@ msgstr "其他软件可能不支持混合色彩空间"
 msgid "Use File Layer Color Spaces"
 msgstr "使用文件各层色彩空间"
 
+msgid "Input Resolution"
+msgstr "输入分辨率"
+
+msgid "DLSS Super Resolution: custom input resolution using the Quality preset"
+msgstr "DLSS 超分辨率：使用质量预设，自定义输入分辨率"
+
+msgid "Input width and height as a percentage of output, rounded to pixels and limited to the runtime-supported range. 100% does not upscale"
+msgstr "输入宽高占输出宽高的百分比，四舍五入到整数像素，并限制在运行库支持的范围内。100% 不放大分辨率"
+
 msgid "Interpret multi-layer EXR using each part's color space metadata; fall back to the file or image color space for untagged parts"
 msgstr "使用各部分的色彩空间元数据解释多层 EXR；没有标记的部分回退到文件或图像色彩空间"

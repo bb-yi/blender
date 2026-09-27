@@ -530,7 +530,9 @@ void Film::init(const int2 &extent, const rcti *output_rect)
         sampling.init(&scene, 1);
       }
       data_.scaling_factor = 1;
-      data_.texture_lod_bias = 1.0f / (1.5f * math::reduce_min(data_.sr_render_ratio));
+      /* This scales texture gradients, not mip levels. The lower render resolution already
+       * increases derivatives; shrink them to retain the native-resolution texture detail. */
+      data_.texture_lod_bias = math::reduce_min(data_.sr_render_ratio) / 1.5f;
     }
     data_.render_extent = divide_ceil(data_.extent, int2(data_.scaling_factor));
     if (data_.sr_active) {

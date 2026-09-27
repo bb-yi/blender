@@ -731,6 +731,7 @@ class RENDER_PT_eevee_sampling_viewport(RenderButtonsPanel, Panel):
 
 class RENDER_PT_eevee_dlss5(RenderButtonsPanel, Panel):
     bl_label = "DLSS5"
+    bl_options = {'DEFAULT_CLOSED'}
     COMPAT_ENGINES = {'BLENDER_EEVEE'}
 
     @classmethod
@@ -766,7 +767,11 @@ class RENDER_PT_eevee_dlss5(RenderButtonsPanel, Panel):
         sr = layout.column(align=True)
         sr.enabled = is_vulkan
         sr.prop(props, "dlss_sr_viewport_quality")
+        if props.dlss_sr_viewport_quality == 'CUSTOM':
+            sr.prop(props, "dlss_sr_viewport_percentage", slider=True)
         sr.prop(props, "dlss_sr_render_quality")
+        if props.dlss_sr_render_quality == 'CUSTOM':
+            sr.prop(props, "dlss_sr_render_percentage", slider=True)
         layout.label(text="Viewport SR: " + props.dlss_sr_viewport_status)
         layout.label(text="Render SR: " + props.dlss_sr_render_status)
         layout.separator()

@@ -1116,6 +1116,13 @@ void blo_do_versions_520(FileData *fd, Library * /*lib*/, Main *bmain)
     }
   }
 
+  if (!DNA_struct_member_exists(fd->filesdna, "SceneEEVEE", "float", "dlss_sr_render_percentage")) {
+    for (Scene &scene : bmain->scenes) {
+      scene.eevee.dlss_sr_viewport_percentage = 80.0f;
+      scene.eevee.dlss_sr_render_percentage = 80.0f;
+    }
+  }
+
   if (!DNA_struct_member_exists(fd->filesdna, "SceneEEVEE", "char", "dlss5_mask_aov[64]")) {
     for (Scene &scene : bmain->scenes) {
       scene.eevee.dlss_sr_viewport_quality = SCE_EEVEE_DLSS_SR_OFF;

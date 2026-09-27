@@ -2657,6 +2657,7 @@ enum SceneEEVEEDLSSSRQuality : char {
   SCE_EEVEE_DLSS_SR_QUALITY = 1,
   SCE_EEVEE_DLSS_SR_BALANCED = 2,
   SCE_EEVEE_DLSS_SR_PERFORMANCE = 3,
+  SCE_EEVEE_DLSS_SR_CUSTOM = 4,
 };
 
 enum FastGI_Method : char {
@@ -2832,6 +2833,8 @@ struct SceneEEVEE {
   char _pad_dlss_sr[4] = {};
   char use_outline = true;
   char _pad2[3] = {};
+  float dlss_sr_viewport_percentage = 80.0f;
+  float dlss_sr_render_percentage = 80.0f;
 };
 
 struct SceneGpencil {

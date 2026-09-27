@@ -86,7 +86,7 @@ class Dlss5D3D12Session {
   bool warmup();
   /** Lease a context-owned offline session. Never share viewport temporal history. */
   void reuse_for_offline_render();
-  bool sr_optimal_settings(int2 output_extent, int quality, int2 &input_extent);
+  bool sr_optimal_settings(int2 output_extent, int quality, float percentage, int2 &input_extent);
   /** Release process-wide NGX while Blender's GPU and allocator are still alive. */
   static void free_runtime();
   void retry_initialization();

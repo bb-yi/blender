@@ -21,6 +21,7 @@ class DlssSrModule {
   bool failed_ = false;
   bool reset_ = true;
   int quality_ = 0;
+  float percentage_ = 0.0f;
   int evaluated_samples_ = 0;
   int2 input_extent_ = int2(0);
   int2 output_extent_ = int2(0);

@@ -6,6 +6,7 @@
 
 #include "CLG_log.h"
 #include "BKE_appdir.hh"
+#include "DNA_scene_types.h"
 
 #include "GPU_context.hh"
 #include "GPU_platform.hh"
@@ -21,6 +22,7 @@
 
 #  include <array>
 #  include <chrono>
+#  include <cmath>
 #  include <map>
 #  include <memory>
 #  include <mutex>
@@ -721,6 +723,7 @@ struct Dlss5D3D12Session::Impl {
     }
   }
   int sr_quality = 2;
+  int2 sr_optimal_extent = int2(0);
   int feature_sr_quality = -1;
   explicit Impl(bool sr) : super_resolution(sr) {}
   struct SharedTexture {
@@ -1101,12 +1104,15 @@ struct Dlss5D3D12Session::Impl {
     return true;
   }
 
-  bool sr_optimal_settings(int2 output_extent, int quality, int2 &input_extent)
+  bool sr_optimal_settings(int2 output_extent, int quality, float percentage, int2 &input_extent)
   {
     if (!super_resolution || !warmup()) {
       return false;
     }
-    sr_quality = quality == 1 ? 2 : quality == 2 ? 1 : 0;
+    const bool custom = quality == SCE_EEVEE_DLSS_SR_CUSTOM;
+    sr_quality = (quality == SCE_EEVEE_DLSS_SR_QUALITY || custom) ? 2 :
+                 quality == SCE_EEVEE_DLSS_SR_BALANCED            ? 1 :
+                                                                    0;
     std::lock_guard lock(runtime->mutex);
     int supported = 0;
     GetI(parameters, "SuperSampling.Available", &supported);
@@ -1135,6 +1141,28 @@ struct Dlss5D3D12Session::Impl {
       set_error("DLSS SR optimal settings returned invalid dimensions");
       return false;
     }
+    /* CreateFeature requires the optimal extent even when Evaluate uses a custom subrect. */
+    sr_optimal_extent = input_extent;
+    if (custom) {
+      unsigned min_width = width, min_height = height;
+      unsigned max_width = width, max_height = height;
+      GetUi(parameters, "DLSS.Get.Dynamic.Min.Render.Width", &min_width);
+      GetUi(parameters, "DLSS.Get.Dynamic.Min.Render.Height", &min_height);
+      GetUi(parameters, "DLSS.Get.Dynamic.Max.Render.Width", &max_width);
+      GetUi(parameters, "DLSS.Get.Dynamic.Max.Render.Height", &max_height);
+      if (!min_width || !min_height || min_width > max_width || min_height > max_height ||
+          max_width > unsigned(output_extent.x) || max_height > unsigned(output_extent.y))
+      {
+        set_error("DLSS SR dynamic settings returned invalid dimensions");
+        return false;
+      }
+      const float scale = std::isfinite(percentage) ?
+                              std::clamp(percentage, 50.0f, 100.0f) / 100.0f :
+                              0.8f;
+      input_extent = int2(
+          std::clamp(int(std::lround(output_extent.x * scale)), int(min_width), int(max_width)),
+          std::clamp(int(std::lround(output_extent.y * scale)), int(min_height), int(max_height)));
+    }
     return true;
   }
 
@@ -1145,9 +1173,9 @@ struct Dlss5D3D12Session::Impl {
                       const bool color_is_scene_linear,
                       const bool depth_is_reverse_z)
   {
-    const unsigned int create_flags =
-        (color_is_scene_linear ? 0x01u : 0u) | (depth_is_reverse_z ? 0x08u : 0u) |
-        (guide_extent != input_extent ? 0x02u : 0u);
+    const unsigned int create_flags = (color_is_scene_linear ? 0x01u : 0u) |
+                                      (depth_is_reverse_z ? 0x08u : 0u) |
+                                      (guide_extent != input_extent ? 0x02u : 0u);
     SetResource(parameters, "DLSSNR.Color", color.d3d12.Get());
     SetResource(parameters, "DLSSNR.Output", output.d3d12.Get());
     SetResource(parameters, "DLSSNR.Depth", depth.d3d12.Get());
@@ -1190,8 +1218,8 @@ struct Dlss5D3D12Session::Impl {
     SetI(parameters, "CreationNodeMask", 1);
     SetI(parameters, "VisibilityNodeMask", 1);
     if (super_resolution) {
-      SetUi(parameters, "Width", input_extent.x);
-      SetUi(parameters, "Height", input_extent.y);
+      SetUi(parameters, "Width", sr_optimal_extent.x);
+      SetUi(parameters, "Height", sr_optimal_extent.y);
       SetUi(parameters, "OutWidth", output_extent.x);
       SetUi(parameters, "OutHeight", output_extent.y);
       SetI(parameters, "PerfQualityValue", sr_quality);
@@ -1694,9 +1722,9 @@ void Dlss5D3D12Session::free_runtime()
 
 Dlss5D3D12Session::Dlss5D3D12Session(bool super_resolution) : impl_(new Impl(super_resolution)) {}
 
-bool Dlss5D3D12Session::sr_optimal_settings(int2 output, int quality, int2 &input)
+bool Dlss5D3D12Session::sr_optimal_settings(int2 output, int quality, float percentage, int2 &input)
 {
-  return impl_->sr_optimal_settings(output, quality, input);
+  return impl_->sr_optimal_settings(output, quality, percentage, input);
 }
 
 Dlss5D3D12Session::~Dlss5D3D12Session()
@@ -1892,7 +1920,7 @@ namespace blender::eevee {
 struct Dlss5D3D12Session::Impl {};
 
 Dlss5D3D12Session::Dlss5D3D12Session(bool) : impl_(new Impl()) {}
-bool Dlss5D3D12Session::sr_optimal_settings(int2, int, int2 &)
+bool Dlss5D3D12Session::sr_optimal_settings(int2, int, float, int2 &)
 {
   return false;
 }
