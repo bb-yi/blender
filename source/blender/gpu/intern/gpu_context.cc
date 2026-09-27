@@ -222,6 +222,11 @@ void GPU_context_discard(GPUContext *ctx_)
   Context *ctx = unwrap(ctx_);
   BLI_assert(active_ctx == ctx);
 
+  for (const Context::FreeCallback &item : ctx->free_callbacks) {
+    item.callback(item.user_data);
+  }
+  ctx->free_callbacks.clear();
+
   draw::DebugDraw::get().release();
 
   GPUBackend *backend = GPUBackend::get();
@@ -398,26 +403,45 @@ bool GPU_vulkan_external_semaphore_wait(GPUVulkanExternalSemaphore *semaphore,
 #endif
 }
 
+void GPU_context_free_callback_add(void (*callback)(void *), void *user_data)
+{
+  BLI_assert(active_ctx != nullptr);
+  active_ctx->free_callbacks.append({callback, user_data});
+}
+
 void GPU_vulkan_external_semaphore_free(GPUVulkanExternalSemaphore *semaphore)
 {
+  GPU_vulkan_external_semaphores_free(&semaphore, 1);
+}
+
+void GPU_vulkan_external_semaphores_free(GPUVulkanExternalSemaphore **semaphores, const int count)
+{
 #ifdef WITH_VULKAN_BACKEND
-  if (semaphore == nullptr) {
+  bool any = false;
+  for (int i = 0; i < count; i++) {
+    any |= semaphores[i] != nullptr;
+  }
+  if (!any) {
     return;
   }
   if (GPU_backend_get_type() == GPU_BACKEND_VULKAN && GPU_context_active_get() != nullptr) {
     gpu::VKContext::get()->finish();
-    gpu::VKBackend::get().device.wait_queue_idle();
-    vkDestroySemaphore(
-        gpu::VKBackend::get().device.vk_handle(), semaphore->vk_semaphore, nullptr);
   }
-  else if (GPU_backend_get_type() == GPU_BACKEND_VULKAN) {
+  if (GPU_backend_get_type() == GPU_BACKEND_VULKAN) {
     gpu::VKBackend::get().device.wait_queue_idle();
-    vkDestroySemaphore(
-        gpu::VKBackend::get().device.vk_handle(), semaphore->vk_semaphore, nullptr);
+    for (int i = 0; i < count; i++) {
+      if (semaphores[i]) {
+        vkDestroySemaphore(
+            gpu::VKBackend::get().device.vk_handle(), semaphores[i]->vk_semaphore, nullptr);
+      }
+    }
   }
-  MEM_delete(semaphore);
+  for (int i = 0; i < count; i++) {
+    MEM_delete(semaphores[i]);
+    semaphores[i] = nullptr;
+  }
 #else
-  UNUSED_VARS(semaphore);
+  UNUSED_VARS(semaphores, count);
 #endif
 }
 

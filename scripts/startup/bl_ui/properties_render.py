@@ -763,9 +763,16 @@ class RENDER_PT_eevee_dlss5(RenderButtonsPanel, Panel):
             else:
                 warn.label(text="偏好已是 Vulkan，请完全退出后重启当前进程")
 
+        sr = layout.column(align=True)
+        sr.enabled = is_vulkan
+        sr.prop(props, "dlss_sr_viewport_quality")
+        sr.prop(props, "dlss_sr_render_quality")
+        layout.label(text="Viewport SR: " + props.dlss_sr_viewport_status)
+        layout.label(text="Render SR: " + props.dlss_sr_render_status)
+        layout.separator()
         layout.prop(props, "dlss5_mode")
-        layout.label(text="Viewport: " + props.dlss5_viewport_status)
-        layout.label(text="Render: " + props.dlss5_render_status)
+        layout.label(text="Viewport NR: " + props.dlss5_viewport_status)
+        layout.label(text="Render NR: " + props.dlss5_render_status)
 
         enabled = (props.dlss5_mode == 'DLSSNR') and is_vulkan
         col = layout.column(align=True)
@@ -778,8 +785,19 @@ class RENDER_PT_eevee_dlss5(RenderButtonsPanel, Panel):
         col.prop(props, "dlss5_skin_structure_strength")
         col.prop(props, "dlss5_use_auto_mask")
         col.prop(props, "dlss5_ui_correction")
+        col = layout.column(align=True)
+        col.active = is_vulkan
+        col.prop(props, "dlss5_mask_aov")
+        if props.dlss5_mask_aov:
+            col.prop(props, "dlss5_mask_invert")
+            col.prop(props, "dlss5_mask_aov_output")
+            aov = context.view_layer.aovs.get(props.dlss5_mask_aov)
+            if aov is None or aov.type != 'VALUE' or not aov.is_valid:
+                col.label(text="遮罩 AOV 缺失或无效：NR 将旁路", icon='ERROR')
+            elif not props.dlss5_mask_aov_output:
+                col.label(text="SR 时遮罩重采样输出；启用精确输出将使用原生渲染")
         if enabled:
-            layout.label(text="DLSSNR 后处理：视口与渲染均保持原始分辨率")
+            layout.label(text="NR 在 SR／Film 之后增强；遮罩不关闭 SR")
 
 
 class RENDER_PT_eevee_sampling_render(RenderButtonsPanel, Panel):

@@ -48,6 +48,9 @@ struct Dlss5FrameInputs {
   bool velocity_is_packed = true;
   bool velocity_is_pixel_space = false;
   float exposure_scale = 1.0f;
+  gpu::Texture *mask = nullptr;
+  bool mask_valid = true;
+  float2 guide_ratio = float2(0.0f);
 };
 
 /**
@@ -85,7 +88,8 @@ class Dlss5Module {
                                 gpu::Texture *input,
                                 gpu::Texture *original,
                                 gpu::Texture *destination,
-                                float intensity);
+                                float intensity,
+                                gpu::Texture *mask);
   bool prepare_velocity(const Dlss5FrameInputs &inputs, gpu::Texture *destination, draw::View &view);
 
  public:

@@ -23,6 +23,8 @@ struct [[host_shared]] AOVsInfoData {
   /* Pack 4 hashes per uint4, using std140 packing rules.
    * Color AOV hashes are placed before value AOV hashes. */
   uint4 hash[AOV_MAX / 4];
+  /** One bit per AOV in the same color-then-value order as hash. */
+  uint4 sr_nearest;
   /* Number of AOVs stored. */
   int color_len;
   int value_len;

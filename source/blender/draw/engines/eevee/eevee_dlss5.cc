@@ -48,7 +48,8 @@ bool Dlss5Module::reconstruct_scene_linear(gpu::Texture *source,
                                            gpu::Texture *input,
                                            gpu::Texture *original,
                                            gpu::Texture *destination,
-                                           const float intensity)
+                                           const float intensity,
+                                           gpu::Texture *mask)
 {
   gpu::Shader *shader = inst_.shaders.static_shader_get(DLSS5_HDR_RECONSTRUCT);
   if (shader == nullptr || source == nullptr || input == nullptr || original == nullptr ||
@@ -66,6 +67,9 @@ bool Dlss5Module::reconstruct_scene_linear(gpu::Texture *source,
   hdr_reconstruct_ps_.bind_texture("source_tx", &input);
   hdr_reconstruct_ps_.bind_texture("original_tx", &original);
   hdr_reconstruct_ps_.push_constant("resolve_intensity", intensity);
+  hdr_reconstruct_ps_.bind_texture("mask_tx", mask ? mask : original);
+  hdr_reconstruct_ps_.push_constant("use_mask", mask != nullptr);
+  hdr_reconstruct_ps_.push_constant("invert_mask", inst_.scene->eevee.dlss5_mask_invert != 0);
   hdr_reconstruct_ps_.draw_procedural(GPU_PRIM_TRIS, 1, 3);
   inst_.manager->submit(hdr_reconstruct_ps_);
   GPU_memory_barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_FRAMEBUFFER);
@@ -93,6 +97,8 @@ bool Dlss5Module::prepare_velocity(const Dlss5FrameInputs &inputs,
   inst_.velocity.bind_resources(velocity_convert_ps_);
   velocity_convert_ps_.push_constant("guide_overscan", inputs.guide_overscan);
   velocity_convert_ps_.push_constant("guide_scale", inputs.guide_scale);
+  velocity_convert_ps_.push_constant("guide_ratio", inputs.guide_ratio);
+  velocity_convert_ps_.push_constant("motion_sign", -1.0f);
   velocity_convert_ps_.draw_procedural(GPU_PRIM_TRIS, 1, 3);
   inst_.manager->submit(velocity_convert_ps_, view);
   GPU_memory_barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_FRAMEBUFFER);
@@ -139,6 +145,12 @@ gpu::Texture *Dlss5Module::process(const Dlss5FrameInputs &inputs, draw::View &v
               inputs.velocity_is_pixel_space,
               inputs.exposure_scale);
     reported_ = true;
+  }
+
+  if (!inputs.mask_valid) {
+    force_history_reset_ = true;
+    publish_status(inputs.is_viewport, "Bypassed: mask AOV missing, invalid or not Value");
+    return inputs.color;
   }
 
   if (GPU_backend_get_type() != GPU_BACKEND_VULKAN) {
@@ -252,6 +264,7 @@ gpu::Texture *Dlss5Module::process(const Dlss5FrameInputs &inputs, draw::View &v
   depth_convert_ps_.bind_texture("depth_tx", &depth_input);
   depth_convert_ps_.push_constant("guide_overscan", inputs.guide_overscan);
   depth_convert_ps_.push_constant("guide_scale", inputs.guide_scale);
+  depth_convert_ps_.push_constant("guide_ratio", inputs.guide_ratio);
   depth_convert_ps_.draw_procedural(GPU_PRIM_TRIS, 1, 3);
   inst_.manager->submit(depth_convert_ps_);
   GPU_memory_barrier(GPU_BARRIER_TEXTURE_FETCH | GPU_BARRIER_FRAMEBUFFER);
@@ -312,7 +325,8 @@ gpu::Texture *Dlss5Module::process(const Dlss5FrameInputs &inputs, draw::View &v
                                 d3d12_session_->color_texture(),
                                 inputs.base_color,
                                 scene_linear_output_tx_.gpu_texture(),
-                                1.0f))
+                                1.0f,
+                                inputs.mask))
   {
     CLOG_WARN(&Instance::log, "DLSS5 HDR-preserving output reconstruction is unavailable");
     return inputs.color;
@@ -322,8 +336,13 @@ gpu::Texture *Dlss5Module::process(const Dlss5FrameInputs &inputs, draw::View &v
   const double gpu_ms = d3d12_session_->gpu_time_ms();
   char status[160];
   if (gpu_ms >= 0.0) {
-    SNPRINTF(status, "Active %dx%d | recent NR GPU %.2f ms", inputs.output_extent.x,
-             inputs.output_extent.y, gpu_ms);
+    SNPRINTF(status,
+             "Active %dx%d -> %dx%d | recent NR GPU %.2f ms",
+             inputs.input_extent.x,
+             inputs.input_extent.y,
+             inputs.output_extent.x,
+             inputs.output_extent.y,
+             gpu_ms);
   }
   else {
     SNPRINTF(status, "Active %dx%d | GPU timing pending", inputs.output_extent.x,
@@ -335,6 +354,9 @@ gpu::Texture *Dlss5Module::process(const Dlss5FrameInputs &inputs, draw::View &v
 
 void Dlss5Module::warmup()
 {
+  if (!inst_.is_viewport()) {
+    d3d12_session_->reuse_for_offline_render();
+  }
   d3d12_session_->warmup();
 }
 
@@ -345,8 +367,11 @@ void Dlss5Module::render_readback_complete()
   }
   char status[160];
   const double gpu_ms = d3d12_session_->gpu_time_ms();
+  const int width = GPU_texture_width(last_display_texture_);
+  const int height = GPU_texture_height(last_display_texture_);
   if (gpu_ms >= 0.0) {
-    SNPRINTF(status, "Completed | NR GPU %.2f ms", gpu_ms);
+    SNPRINTF(
+        status, "Completed %dx%d -> %dx%d | NR GPU %.2f ms", width, height, width, height, gpu_ms);
   }
   else {
     SNPRINTF(status, "%s", "Completed | GPU timing unavailable");

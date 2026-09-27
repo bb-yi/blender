@@ -1116,6 +1116,16 @@ void blo_do_versions_520(FileData *fd, Library * /*lib*/, Main *bmain)
     }
   }
 
+  if (!DNA_struct_member_exists(fd->filesdna, "SceneEEVEE", "char", "dlss5_mask_aov[64]")) {
+    for (Scene &scene : bmain->scenes) {
+      scene.eevee.dlss_sr_viewport_quality = SCE_EEVEE_DLSS_SR_OFF;
+      scene.eevee.dlss_sr_render_quality = SCE_EEVEE_DLSS_SR_OFF;
+      scene.eevee.dlss5_mask_aov[0] = '\0';
+      scene.eevee.dlss5_mask_invert = false;
+      scene.eevee.dlss5_mask_aov_output = false;
+    }
+  }
+
   if (!MAIN_VERSION_FILE_ATLEAST(bmain, 502, 52) ||
       !DNA_struct_member_exists(
           fd->filesdna, "Material", "char", "outline_shell_cull_method"))

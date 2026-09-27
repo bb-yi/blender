@@ -145,6 +145,20 @@ struct SceneEeveePerformanceRuntime {
   std::string render_report;
   std::string dlss5_viewport_status;
   std::string dlss5_render_status;
+  std::string dlss_sr_viewport_status;
+  std::string dlss_sr_render_status;
+
+  void dlss_sr_status_publish(bool viewport, std::string status)
+  {
+    std::lock_guard<Mutex> lock(snapshot_mutex);
+    (viewport ? dlss_sr_viewport_status : dlss_sr_render_status) = std::move(status);
+  }
+
+  std::string dlss_sr_status_get(bool viewport) const
+  {
+    std::lock_guard<Mutex> lock(snapshot_mutex);
+    return viewport ? dlss_sr_viewport_status : dlss_sr_render_status;
+  }
 
   void dlss5_status_publish(bool viewport, std::string status)
   {

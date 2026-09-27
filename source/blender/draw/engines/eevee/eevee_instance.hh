@@ -33,8 +33,9 @@
 #include "eevee_debug_shared.hh"
 #include "eevee_depth_of_field.hh"
 #include "eevee_dlss5.hh"
-#include "eevee_filter_material.hh"
+#include "eevee_dlss_sr.hh"
 #include "eevee_film.hh"
+#include "eevee_filter_material.hh"
 #include "eevee_gbuffer.hh"
 #include "eevee_hizbuffer.hh"
 #include "eevee_light.hh"
@@ -55,8 +56,8 @@
 #include "eevee_shader.hh"
 #include "eevee_shadow.hh"
 #include "eevee_subsurface.hh"
-#include "eevee_telemetry.hh"
 #include "eevee_sync.hh"
+#include "eevee_telemetry.hh"
 #include "eevee_view.hh"
 #include "eevee_volume.hh"
 #include "eevee_world.hh"
@@ -150,6 +151,7 @@ namespace blender::eevee
     FilterMaterialModule filter_materials;
     OutlineModule outline;
     Dlss5Module dlss5;
+    DlssSrModule dlss_sr;
     NativePostFXOutputModule native_postfx_outputs;
     Camera camera;
     Film film;
@@ -242,6 +244,7 @@ namespace blender::eevee
       filter_materials(*this),
       outline(*this),
       dlss5(*this),
+      dlss_sr(*this),
       native_postfx_outputs(*this),
       camera(*this, uniform_data.data.camera),
       film(*this, uniform_data.data.film),

@@ -82,6 +82,13 @@ void MotionBlurModule::init()
   inst_.set_time(time_steps_[1]);
 }
 
+void MotionBlurModule::restore_time()
+{
+  if (enabled_) {
+    RE_engine_frame_set(inst_.render, initial_frame_, initial_subframe_);
+  }
+}
+
 void MotionBlurModule::step()
 {
   if (!enabled_) {
@@ -90,7 +97,7 @@ void MotionBlurModule::step()
 
   if (inst_.sampling.finished()) {
     /* Restore original frame number. This is because the render pipeline expects it. */
-    RE_engine_frame_set(inst_.render, initial_frame_, initial_subframe_);
+    restore_time();
   }
   else if (inst_.sampling.do_render_sync()) {
     /* Time to change motion step. */

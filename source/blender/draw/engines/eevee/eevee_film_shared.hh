@@ -130,6 +130,10 @@ struct [[host_shared]] FilmData {
   /** Sum of the weights of all samples in the sample table. */
   float samples_weight_total;
   int _pad0, _pad1;
+  /** Fractional SR input/output mapping, excluding overscan. Zero when SR is inactive. */
+  float2 sr_render_ratio;
+  bool32_t sr_active;
+  int _pad_sr;
   struct FilmSample samples[FILM_PRECOMP_SAMPLE_MAX];
 };
 

@@ -1812,6 +1812,8 @@ enum class SceneEEVEEPerformanceString {
   RenderReport,
   Dlss5ViewportStatus,
   Dlss5RenderStatus,
+  DlssSrViewportStatus,
+  DlssSrRenderStatus,
 };
 
 static std::string rna_SceneEEVEE_performance_string(
@@ -1823,6 +1825,17 @@ static std::string rna_SceneEEVEE_performance_string(
   }
 
   switch (which) {
+    case SceneEEVEEPerformanceString::DlssSrViewportStatus:
+    case SceneEEVEEPerformanceString::DlssSrRenderStatus: {
+      const bool viewport = which == SceneEEVEEPerformanceString::DlssSrViewportStatus;
+      if ((viewport ? scene->eevee.dlss_sr_viewport_quality :
+                      scene->eevee.dlss_sr_render_quality) == SCE_EEVEE_DLSS_SR_OFF)
+      {
+        return "Disabled";
+      }
+      const std::string status = scene->runtime->eevee_performance.dlss_sr_status_get(viewport);
+      return status.empty() ? "Waiting for EEVEE output" : status;
+    }
     case SceneEEVEEPerformanceString::ViewportSummary:
       return scene->runtime->eevee_performance.viewport_summary_get();
     case SceneEEVEEPerformanceString::ViewportReport:
@@ -1849,7 +1862,7 @@ struct RnaEeveePerformanceStringPin {
   bool valid = false;
 };
 
-static thread_local std::array<RnaEeveePerformanceStringPin, 5> rna_eevee_performance_pins;
+static thread_local std::array<RnaEeveePerformanceStringPin, 7> rna_eevee_performance_pins;
 
 static std::string rna_SceneEEVEE_performance_string_pinned(
     const PointerRNA *ptr, const SceneEEVEEPerformanceString which)
@@ -1948,6 +1961,32 @@ static void rna_SceneEEVEE_dlss5_render_status_get(PointerRNA *ptr, char *value)
 static int rna_SceneEEVEE_dlss5_render_status_length(PointerRNA *ptr)
 {
   return rna_SceneEEVEE_performance_string_length(ptr, SceneEEVEEPerformanceString::Dlss5RenderStatus);
+}
+
+static void rna_SceneEEVEE_dlss_sr_viewport_status_get(PointerRNA *ptr, char *value)
+{
+  const std::string text = rna_SceneEEVEE_performance_string_pinned(
+      ptr, SceneEEVEEPerformanceString::DlssSrViewportStatus);
+  memcpy(value, text.c_str(), text.size() + 1);
+}
+
+static int rna_SceneEEVEE_dlss_sr_viewport_status_length(PointerRNA *ptr)
+{
+  return rna_SceneEEVEE_performance_string_length(
+      ptr, SceneEEVEEPerformanceString::DlssSrViewportStatus);
+}
+
+static void rna_SceneEEVEE_dlss_sr_render_status_get(PointerRNA *ptr, char *value)
+{
+  const std::string text = rna_SceneEEVEE_performance_string_pinned(
+      ptr, SceneEEVEEPerformanceString::DlssSrRenderStatus);
+  memcpy(value, text.c_str(), text.size() + 1);
+}
+
+static int rna_SceneEEVEE_dlss_sr_render_status_length(PointerRNA *ptr)
+{
+  return rna_SceneEEVEE_performance_string_length(ptr,
+                                                  SceneEEVEEPerformanceString::DlssSrRenderStatus);
 }
 
 static int rna_SceneEEVEE_performance_profiler_average_window_get(PointerRNA *ptr)
@@ -2145,6 +2184,39 @@ static void rna_SceneEEVEE_dlss5_update(Main *bmain, Scene *scene, PointerRNA *p
 {
   rna_Scene_render_update(bmain, scene, ptr);
   WM_main_add_notifier(NC_SCENE | ND_RENDER_OPTIONS, scene);
+}
+
+static void rna_SceneEEVEE_dlss_pass_update(Main *bmain, Scene *scene, PointerRNA *ptr)
+{
+  Scene *owner = id_cast<Scene *>(ptr->owner_id);
+  BKE_ntree_update_tag_id_changed(bmain, &owner->id);
+  BKE_main_ensure_invariants(*bmain);
+  rna_SceneEEVEE_dlss5_update(bmain, scene, ptr);
+}
+
+static void rna_SceneEEVEE_mask_aov_search(
+    const bContext *C,
+    PointerRNA *ptr,
+    PropertyRNA * /*prop*/,
+    const char * /*edit_text*/,
+    FunctionRef<void(StringPropertySearchVisitParams)> visit_fn)
+{
+  if (C == nullptr) {
+    return;
+  }
+  const ViewLayer *view_layer = CTX_data_view_layer(C);
+  if (view_layer == nullptr || CTX_data_scene(C) == nullptr ||
+      &CTX_data_scene(C)->id != ptr->owner_id)
+  {
+    return;
+  }
+  for (const ViewLayerAOV &aov : view_layer->aovs) {
+    if (aov.type == AOV_TYPE_VALUE && !(aov.flag & AOV_CONFLICT)) {
+      StringPropertySearchVisitParams item{};
+      item.text = aov.name;
+      visit_fn(item);
+    }
+  }
 }
 
 static void rna_Scene_world_update(Main *bmain, Scene *scene, PointerRNA *ptr)
@@ -5590,6 +5662,15 @@ static void rna_def_view_layer_aov(BlenderRNA *brna)
   prop = RNA_def_property(srna, "is_valid", PROP_BOOLEAN, PROP_NONE);
   RNA_def_property_boolean_negative_sdna(prop, nullptr, "flag", AOV_CONFLICT);
   RNA_def_property_ui_text(prop, "Valid", "Is the name of the AOV conflicting");
+
+  prop = RNA_def_property(srna, "use_sr_nearest", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "flag", AOV_SR_NEAREST);
+  RNA_def_property_clear_flag(prop, PROP_ANIMATABLE);
+  RNA_def_property_ui_text(prop,
+                           "SR Nearest Sample",
+                           "Preserve discrete AOV values during super resolution instead of "
+                           "interpolating or averaging them; does not increase AOV storage precision");
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_ViewLayer_pass_update");
 
   prop = RNA_def_property(srna, "type", PROP_ENUM, PROP_NONE);
   RNA_def_property_enum_sdna(prop, nullptr, "type");
@@ -9571,6 +9652,67 @@ static void rna_def_scene_eevee(BlenderRNA *brna)
   RNA_def_property_flag(prop, PROP_ANIMATABLE);
 
   /* DLSS5 / DLSSNR viewport reconstruction. */
+  static const EnumPropertyItem sr_quality_items[] = {
+      {SCE_EEVEE_DLSS_SR_OFF, "OFF", 0, "Off", "Render at native resolution"},
+      {SCE_EEVEE_DLSS_SR_QUALITY, "QUALITY", 0, "Quality", "DLSS Super Resolution: quality"},
+      {SCE_EEVEE_DLSS_SR_BALANCED, "BALANCED", 0, "Balanced", "DLSS Super Resolution: balanced"},
+      {SCE_EEVEE_DLSS_SR_PERFORMANCE,
+       "PERFORMANCE",
+       0,
+       "Performance",
+       "DLSS Super Resolution: performance"},
+      {0, nullptr, 0, nullptr, nullptr},
+  };
+  for (const char *name : {"dlss_sr_viewport_quality", "dlss_sr_render_quality"}) {
+    prop = RNA_def_property(srna, name, PROP_ENUM, PROP_NONE);
+    RNA_def_property_enum_sdna(prop, nullptr, name);
+    RNA_def_property_enum_items(prop, sr_quality_items);
+    RNA_def_property_enum_default(prop, SCE_EEVEE_DLSS_SR_OFF);
+    RNA_def_property_ui_text(prop,
+                             STREQ(name, "dlss_sr_viewport_quality") ? "Viewport SR" : "Render SR",
+                             "Super resolution with resampled auxiliary passes; "
+                             "explicit precise mask output uses native rendering");
+    RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+    RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_dlss_pass_update");
+  }
+  prop = RNA_def_property(srna, "dlss_sr_viewport_status", PROP_STRING, PROP_NONE);
+  RNA_def_property_string_funcs(prop,
+                                "rna_SceneEEVEE_dlss_sr_viewport_status_get",
+                                "rna_SceneEEVEE_dlss_sr_viewport_status_length",
+                                nullptr);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_ui_text(prop, "Viewport SR Status", "Latest Super Resolution status");
+  prop = RNA_def_property(srna, "dlss_sr_render_status", PROP_STRING, PROP_NONE);
+  RNA_def_property_string_funcs(prop,
+                                "rna_SceneEEVEE_dlss_sr_render_status_get",
+                                "rna_SceneEEVEE_dlss_sr_render_status_length",
+                                nullptr);
+  RNA_def_property_clear_flag(prop, PROP_EDITABLE);
+  RNA_def_property_ui_text(prop, "Render SR Status", "Latest Super Resolution status");
+  prop = RNA_def_property(srna, "dlss5_mask_aov", PROP_STRING, PROP_NONE);
+  RNA_def_property_string_sdna(prop, nullptr, "dlss5_mask_aov");
+  RNA_def_property_ui_text(
+      prop,
+      "Mask AOV",
+      "Value AOV: black preserves the pre-NR image, white uses NR. Empty means full image");
+  RNA_def_property_string_search_func(
+      prop, "rna_SceneEEVEE_mask_aov_search", PROP_STRING_SEARCH_SUGGESTION);
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_dlss_pass_update");
+  prop = RNA_def_property(srna, "dlss5_mask_invert", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "dlss5_mask_invert", 1);
+  RNA_def_property_ui_text(
+      prop, "Invert Mask", "Invert finite mask values after clamping to zero through one");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_dlss5_update");
+  prop = RNA_def_property(srna, "dlss5_mask_aov_output", PROP_BOOLEAN, PROP_NONE);
+  RNA_def_property_boolean_sdna(prop, nullptr, "dlss5_mask_aov_output", 1);
+  RNA_def_property_ui_text(
+      prop,
+      "Output Precise Mask AOV",
+      "Use native rendering for an exact mask pass instead of a resampled SR pass");
+  RNA_def_property_override_flag(prop, PROPOVERRIDE_OVERRIDABLE_LIBRARY);
+  RNA_def_property_update(prop, NC_SCENE | ND_RENDER_OPTIONS, "rna_SceneEEVEE_dlss_pass_update");
   prop = RNA_def_property(srna, "dlss5_viewport_status", PROP_STRING, PROP_NONE);
   RNA_def_property_string_funcs(prop, "rna_SceneEEVEE_dlss5_viewport_status_get",
                                 "rna_SceneEEVEE_dlss5_viewport_status_length", nullptr);

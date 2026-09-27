@@ -71,7 +71,7 @@ class Dlss5D3D12Session {
   Impl *impl_ = nullptr;
 
  public:
-  Dlss5D3D12Session();
+  explicit Dlss5D3D12Session(bool super_resolution = false);
   ~Dlss5D3D12Session();
 
   Dlss5D3D12Session(const Dlss5D3D12Session &) = delete;
@@ -84,6 +84,11 @@ class Dlss5D3D12Session {
                         bool color_is_scene_linear,
                         bool depth_is_reverse_z);
   bool warmup();
+  /** Lease a context-owned offline session. Never share viewport temporal history. */
+  void reuse_for_offline_render();
+  bool sr_optimal_settings(int2 output_extent, int quality, int2 &input_extent);
+  /** Release process-wide NGX while Blender's GPU and allocator are still alive. */
+  static void free_runtime();
   void retry_initialization();
   bool copy_inputs_and_evaluate(const Dlss5D3D12Frame &frame,
                                 bool copy_color = true,

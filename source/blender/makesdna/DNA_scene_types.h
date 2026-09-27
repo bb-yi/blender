@@ -2652,6 +2652,13 @@ enum SceneEEVEEDLSS5Mode : char {
   SCE_EEVEE_DLSSNR = 1,
 };
 
+enum SceneEEVEEDLSSSRQuality : char {
+  SCE_EEVEE_DLSS_SR_OFF = 0,
+  SCE_EEVEE_DLSS_SR_QUALITY = 1,
+  SCE_EEVEE_DLSS_SR_BALANCED = 2,
+  SCE_EEVEE_DLSS_SR_PERFORMANCE = 3,
+};
+
 enum FastGI_Method : char {
   FAST_GI_FULL = 0,
   FAST_GI_AO_ONLY = 1,
@@ -2817,6 +2824,12 @@ struct SceneEEVEE {
   /* 0 Default, 1 Natural, 2 Cinematic — OptiScaler / Unity DLSSNR. */
   char dlss5_style = 2;
   char _pad_dlss5[3] = {};
+  SceneEEVEEDLSSSRQuality dlss_sr_viewport_quality = SCE_EEVEE_DLSS_SR_OFF;
+  SceneEEVEEDLSSSRQuality dlss_sr_render_quality = SCE_EEVEE_DLSS_SR_OFF;
+  char dlss5_mask_invert = false;
+  char dlss5_mask_aov_output = false;
+  char dlss5_mask_aov[64] = "";
+  char _pad_dlss_sr[4] = {};
   char use_outline = true;
   char _pad2[3] = {};
 };

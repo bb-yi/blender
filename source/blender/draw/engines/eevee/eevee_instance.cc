@@ -873,7 +873,7 @@ namespace blender::eevee
   void Instance::render_read_result(RenderLayer* render_layer, const char* view_name)
   {
     ScopedTelemetrySample telemetry_sample(telemetry, TelemetryStageId::ReadResult);
-    eViewLayerEEVEEPassType pass_bits = film.render_buffer_passes_get();
+    eViewLayerEEVEEPassType pass_bits = film.output_passes_get();
     const bool record_readbacks = telemetry.enabled() && telemetry.frame_active();
 
     const auto record_readback = [&](const TelemetryPassReadbackType type,
@@ -1027,10 +1027,40 @@ namespace blender::eevee
 
     DebugScope debug_scope(debug_scope_render_frame, "EEVEE.render_frame");
 
+    bool native_retry = false;
+
     /* TODO: Break on RE_engine_test_break(engine) */
     while (!sampling.finished())
     {
       this->render_sample();
+
+      if (dlss_sr.active() && dlss_sr.failed() && !native_retry) {
+        native_retry = true;
+        GPU_finish();
+        dlss_sr.use_native_after_failure();
+        dlss5.invalidate();
+        sampling.restart_render();
+        film.discard_history();
+        const int2 full_extent = film.display_extent_get();
+        const int2 offset = film.film_offset_get();
+        const int2 extent = film.film_extent_get();
+        rcti rect{offset.x, offset.x + extent.x, offset.y, offset.y + extent.y};
+        /* init() already moved the scene into the shutter interval. Restore the
+         * request time saved by motion blur, not the current evaluated subframe. */
+        motion_blur.restore_time();
+        this->init(full_extent,
+                   &rect,
+                   &rect,
+                   render,
+                   depsgraph,
+                   camera_orig_object,
+                   this->render_layer,
+                   const_cast<View *>(drw_view),
+                   v3d,
+                   rv3d);
+        render_sync();
+        continue;
+      }
 
       if ((sampling.sample_index() == 1) || ((sampling.sample_index() % 25) == 0) ||
         sampling.finished())

@@ -77,7 +77,7 @@ class Sampling {
   Sampling(Instance &inst, ClampData &clamp_data) : inst_(inst), clamp_data_(clamp_data) {};
   ~Sampling() {};
 
-  void init(const Scene *scene);
+  void init(const Scene *scene, int viewport_pixel_size = 0);
   void init(const Object &probe_object);
   void end_sync();
   void step();
@@ -85,6 +85,14 @@ class Sampling {
   /* Viewport Only: Function to call to notify something in the scene changed.
    * This will reset accumulation. Do not call after end_sync() or during sample rendering. */
   void reset();
+
+  /** Discard all samples of a failed offline SR frame before a native retry. */
+  void restart_render()
+  {
+    sample_ = 0;
+    viewport_sample_ = 0;
+    reset_ = true;
+  }
 
   /* Viewport Only: true if an update happened in the scene and accumulation needs reset. */
   bool is_reset() const;

@@ -33,6 +33,7 @@ DrawEngine *Engine::create_instance()
 
 void Engine::free_static()
 {
+  Dlss5D3D12Session::free_runtime();
   ShaderModule::module_free();
 }
 

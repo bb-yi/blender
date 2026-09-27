@@ -27,6 +27,7 @@ struct Resources {
   [[sampler(0)]] sampler2DDepth depth_tx;
   [[push_constant]] int guide_overscan;
   [[push_constant]] int guide_scale;
+  [[push_constant]] float2 guide_ratio;
 };
 
 struct FragOut {
@@ -39,6 +40,8 @@ struct VelocityResources {
   [[resource_table]] srt_t<CameraVelocity> camera;
   [[push_constant]] int guide_overscan;
   [[push_constant]] int guide_scale;
+  [[push_constant]] float2 guide_ratio;
+  [[push_constant]] float motion_sign;
 };
 
 struct VelocityFragOut {
@@ -50,11 +53,58 @@ struct ColorResources {
   [[push_constant]] bool inverse;
 };
 
+struct SrPrepareResources {
+  [[sampler(0)]] sampler2D color_tx;
+  [[sampler(1)]] sampler2D outline_tx;
+  [[sampler(2)]] sampler2DDepth depth_tx;
+  [[sampler(3)]] sampler2D velocity_tx;
+  [[resource_table]] srt_t<CameraVelocity> camera;
+  [[push_constant]] bool has_outline;
+  [[push_constant]] bool use_motion;
+  [[push_constant]] int guide_overscan;
+};
+
+struct SrPrepareOut {
+  [[frag_color(0)]] float4 color;
+  [[frag_color(1)]] float depth;
+  [[frag_color(2)]] float2 velocity;
+};
+
+[[fragment]]
+void sr_prepare_frag([[resource_table]] const SrPrepareResources &resources,
+                     [[resource_table]] const draw::View &views,
+                     [[frag_coord]] const float4 frag_co,
+                     [[out]] SrPrepareOut &frag_out)
+{
+  const int2 texel = int2(frag_co.xy) + resources.guide_overscan;
+  float4 color = texelFetch(resources.color_tx, texel, 0);
+  color.a = clamp(1.0f - color.a, 0.0f, 1.0f);
+  if (resources.has_outline) {
+    const float4 outline = texelFetch(resources.outline_tx, texel, 0);
+    color = outline + color * (1.0f - outline.a);
+  }
+  frag_out.color = color;
+  const float depth = texelFetch(resources.depth_tx, texel, 0).r;
+  frag_out.depth = depth;
+  /* Offline samples belong to the same output frame. Avoid reading/resolving motion
+   * only to multiply it by zero, while preserving viewport motion and overscan. */
+  frag_out.velocity = float2(0.0f);
+  if (resources.use_motion) {
+    [[resource_table]] const CameraVelocity &camera = resources.camera;
+    frag_out.velocity = camera.resolve(views, resources.velocity_tx, texel,
+                                       reverse_z::read(depth)).xy *
+                        float2(textureSize(resources.velocity_tx, 0));
+  }
+}
+
 struct HdrReconstructResources {
   [[push_constant]] float resolve_intensity;
   [[sampler(0)]] sampler2D color_tx;
   [[sampler(1)]] sampler2D source_tx;
   [[sampler(2)]] sampler2D original_tx;
+  [[sampler(3)]] sampler2D mask_tx;
+  [[push_constant]] bool use_mask;
+  [[push_constant]] bool invert_mask;
 };
 
 float srgb_from_linear(float value)
@@ -170,6 +220,18 @@ void hdr_reconstruct_frag([[resource_table]] const HdrReconstructResources &reso
   const float4 color = textureLod(resources.color_tx, uv, 0.0f);
   const float4 input_color = textureLod(resources.source_tx, uv, 0.0f);
   const float4 original = textureLod(resources.original_tx, uv, 0.0f);
+  float mask = 1.0f;
+  if (resources.use_mask) {
+    const float value = texelFetch(resources.mask_tx, texel, 0).r;
+    mask = (isnan(value) || isinf(value)) ?
+               0.0f :
+               (resources.invert_mask ? 1.0f - clamp(value, 0.0f, 1.0f) :
+                                        clamp(value, 0.0f, 1.0f));
+    if (mask == 0.0f) {
+      frag_out.color = texelFetch(resources.original_tx, texel, 0);
+      return;
+    }
+  }
   /* The referenced feature-18 implementation uses paper white 1.0 and a soft
    * knee. Keep the original HDR frame as the authoritative luminance source. */
   const float norm_scale = 1.0f;
@@ -197,6 +259,9 @@ void hdr_reconstruct_frag([[resource_table]] const HdrReconstructResources &reso
   const float3 reconstructed = max(
       mix(original_normalized * luma_ratio, upgraded, 1.0f) * norm_scale, float3(0.0f));
   frag_out.color = float4(reconstructed + negative, original.a);
+  if (mask < 1.0f) {
+    frag_out.color.rgb = mix(original.rgb, frag_out.color.rgb, mask);
+  }
 }
 
 [[fragment]]
@@ -205,7 +270,10 @@ void depth_convert_frag([[resource_table]] const Resources &resources,
                         [[out]] FragOut &frag_out)
 {
   const int2 texel = int2(frag_co.xy);
-  const int2 guide_texel = texel / resources.guide_scale + resources.guide_overscan;
+  const int2 guide_texel = (resources.guide_ratio.x > 0.0f ?
+                                int2((float2(texel) + 0.5f) * resources.guide_ratio) :
+                                texel / resources.guide_scale) +
+                           resources.guide_overscan;
   frag_out.color = float4(texelFetch(resources.depth_tx, guide_texel, 0).x);
 }
 
@@ -216,20 +284,25 @@ void velocity_convert_frag([[resource_table]] const VelocityResources &resources
                            [[out]] VelocityFragOut &frag_out)
 {
   const int2 texel = int2(frag_co.xy);
-  const int2 guide_texel = texel / resources.guide_scale + resources.guide_overscan;
+  const float2 ratio = resources.guide_ratio.x > 0.0f ?
+                           resources.guide_ratio :
+                           float2(1.0f / float(resources.guide_scale));
+  const int2 guide_texel = int2((float2(texel) + 0.5f) * ratio) + resources.guide_overscan;
   const float depth = reverse_z::read(texelFetch(resources.depth_tx, guide_texel, 0).r);
   [[resource_table]] const CameraVelocity &camera = resources.camera;
   const float2 motion = camera.resolve(views, resources.velocity_tx, guide_texel, depth).xy;
   /* EEVEE resolves previous-current UV motion. NR uses current-previous pixels.
    * Include overscan in the UV-to-pixel scale, then undo the EEVEE render scale. */
-  frag_out.velocity = -motion * float2(textureSize(resources.velocity_tx, 0)) *
-                      float(resources.guide_scale);
+  frag_out.velocity = resources.motion_sign * motion *
+                      float2(textureSize(resources.velocity_tx, 0)) / ratio;
 }
 
 }  // namespace eevee::dlss5
 
 PipelineGraphic eevee_dlss5_color_convert(eevee::dlss5::fullscreen_vert,
                                            eevee::dlss5::color_convert_frag);
+PipelineGraphic eevee_dlss_sr_prepare(eevee::dlss5::fullscreen_vert,
+                                      eevee::dlss5::sr_prepare_frag);
 PipelineGraphic eevee_dlss5_hdr_reconstruct(eevee::dlss5::fullscreen_vert,
                                              eevee::dlss5::hdr_reconstruct_frag);
 PipelineGraphic eevee_dlss5_depth_convert(eevee::dlss5::fullscreen_vert,

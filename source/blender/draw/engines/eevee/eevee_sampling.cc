@@ -27,7 +27,7 @@ namespace blender::eevee {
 /** \name Sampling
  * \{ */
 
-void Sampling::init(const Scene *scene)
+void Sampling::init(const Scene *scene, const int viewport_pixel_size)
 {
   const Scene *scene_ref = (scene != nullptr) ? scene : inst_.scene;
   const ViewLayer *view_layer = inst_.view_layer;
@@ -51,10 +51,12 @@ void Sampling::init(const Scene *scene)
   }
 
   if (inst_.is_viewport()) {
-    /* We can't rely on the film module as it is initialized later. */
-    int pixel_size = BKE_render_preview_pixel_size(&inst_.scene->r);
+    /* Film can override this after SR is actually available. Keep native pixel coverage before
+     * DOF ring rounding, including when a requested SR mode falls back to native rendering. */
+    const int pixel_size = viewport_pixel_size > 0 ?
+                               viewport_pixel_size :
+                               BKE_render_preview_pixel_size(&inst_.scene->r);
     if (pixel_size > 1) {
-      /* Enforce to render at least all the film pixel once. */
       sample_count_ = max_ii(sample_count_, square_i(pixel_size));
     }
   }
@@ -140,7 +142,6 @@ void Sampling::end_sync()
   }
 
   if (inst_.is_viewport()) {
-
     interactive_mode_ = viewport_sample_ < interactive_mode_threshold;
 
     bool interactive_mode_disabled = (inst_.scene->eevee.flag & SCE_EEVEE_TAA_REPROJECTION) == 0 ||

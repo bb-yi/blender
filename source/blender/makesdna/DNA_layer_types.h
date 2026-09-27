@@ -78,6 +78,8 @@ enum eViewLayerAOVType : int {
 /* #ViewLayerAOV.flag */
 enum eViewLayerAOVFlag : int {
   AOV_CONFLICT = (1 << 0),
+  /** Preserve discrete sample values when reconstructing SR render passes. */
+  AOV_SR_NEAREST = (1 << 1),
 };
 ENUM_OPERATORS(eViewLayerAOVFlag)
 

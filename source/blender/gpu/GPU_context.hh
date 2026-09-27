@@ -114,6 +114,9 @@ void GPU_context_discard(GPUContext *);
 void GPU_context_active_set(GPUContext *);
 GPUContext *GPU_context_active_get();
 
+/** Run with the owning context active, before its GPU resources are destroyed. */
+void GPU_context_free_callback_add(void (*callback)(void *), void *user_data);
+
 /**
  * Import a D3D12 fence as a Vulkan timeline semaphore.
  *
@@ -136,6 +139,8 @@ bool GPU_vulkan_external_semaphore_wait(GPUVulkanExternalSemaphore *semaphore, u
  * Destroy an imported external semaphore after all submissions using it have completed.
  */
 void GPU_vulkan_external_semaphore_free(GPUVulkanExternalSemaphore *semaphore);
+/** Retire a group of imported semaphores with a single queue-idle wait. */
+void GPU_vulkan_external_semaphores_free(GPUVulkanExternalSemaphore **semaphores, int count);
 
 /**
  * Begin and end frame are used to mark the singular boundary representing the lifetime of a whole

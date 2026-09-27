@@ -20,6 +20,8 @@
 #  include <wrl/client.h>
 
 #  include <array>
+#  include <chrono>
+#  include <map>
 #  include <memory>
 #  include <mutex>
 #  include <algorithm>
@@ -39,6 +41,31 @@ namespace fs = std::filesystem;
 namespace {
 
 static CLG_LogRef LOG = {"eevee"};
+
+/* CPU wall time, including nested work/waits; never sum parent and child scopes. */
+class DlssLifecycleTimer {
+  const char *stage_;
+  bool sr_;
+  bool enabled_ = _wgetenv(L"BLENDER_DLSS5_PROFILE") != nullptr;
+  std::chrono::steady_clock::time_point start_;
+
+ public:
+  DlssLifecycleTimer(const char *stage, bool sr) : stage_(stage), sr_(sr)
+  {
+    if (enabled_) {
+      start_ = std::chrono::steady_clock::now();
+    }
+  }
+  ~DlssLifecycleTimer()
+  {
+    if (enabled_) {
+      const double ms = std::chrono::duration<double, std::milli>(
+                            std::chrono::steady_clock::now() - start_).count();
+      CLOG_INFO(&LOG, "DLSS_LIFECYCLE feature=%s stage=%s cpu_ms=%.6f",
+                sr_ ? "SR" : "NR", stage_, ms);
+    }
+  }
+};
 
 constexpr unsigned long long kApplicationId = 0x0876232Cull;
 constexpr int kSdkVersion = 0x15;
@@ -279,6 +306,13 @@ NgxResult GetI(NVSDK_NGX_Parameter *parameters, const char *name, int *value)
   return reinterpret_cast<Fn>((*reinterpret_cast<void ***>(parameters))[12])(parameters, name, value);
 }
 
+NgxResult GetPointer(NVSDK_NGX_Parameter *parameters, const char *name, void **value)
+{
+  using Fn = NgxResult(__cdecl *)(NVSDK_NGX_Parameter *, const char *, void **);
+  return reinterpret_cast<Fn>((*reinterpret_cast<void ***>(parameters))[8])(
+      parameters, name, value);
+}
+
 NgxResult ComputeScalingRatio(NVSDK_NGX_Parameter *parameters)
 {
   unsigned int upscaling = 0;
@@ -322,11 +356,14 @@ fs::path RuntimeDirectory()
       executable,
   };
   for (const fs::path &candidate : candidates) {
-    if (fs::is_regular_file(candidate / "nvngx_dlssnr.dll")) {
+    if (fs::is_regular_file(candidate / "nvngx_dlssnr.dll") ||
+        fs::is_regular_file(candidate / "nvngx_dlss.dll"))
+    {
       return fs::absolute(candidate);
     }
   }
-  return {};
+  const wchar_t *sr_directory = _wgetenv(L"DLSS_SR_RUNTIME_DIR");
+  return sr_directory && *sr_directory ? fs::absolute(sr_directory) : fs::path();
 }
 
 fs::path NgxDataDirectory()
@@ -423,6 +460,9 @@ struct Dlss5NgxRuntime {
   NgxEvaluateFeatureFn ngx_evaluate_feature = nullptr;
   NgxReleaseFeatureFn ngx_release_feature = nullptr;
   NgxGetCapabilityParametersFn ngx_get_capability_parameters = nullptr;
+  NgxCreateFeatureFn sr_create_feature = nullptr;
+  NgxEvaluateFeatureFn sr_evaluate_feature = nullptr;
+  NgxReleaseFeatureFn sr_release_feature = nullptr;
   fs::path runtime_directory;
   bool core_initialized = false;
   bool snippet_initialized = false;
@@ -507,17 +547,6 @@ struct Dlss5NgxRuntime {
       return false;
     }
     CLOG_INFO(&LOG, "DLSS5 NGX Core loaded from %ls", core_path.c_str());
-    const fs::path snippet_path = runtime_directory / "nvngx_dlssnr.dll";
-    snippet_module = LoadLibraryExW(snippet_path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
-    if (snippet_module == nullptr) {
-      set_error("LoadLibraryExW nvngx_dlssnr.dll failed: " + std::to_string(GetLastError()));
-      return false;
-    }
-    if (!HookSnippetGetModuleFileNameW(snippet_module, core_module, &snippet_iat_slot)) {
-      set_error("DLSS5 GetModuleFileNameW compatibility hook failed");
-      return false;
-    }
-
     ngx_init_project = Resolve<NgxInitProjectFn>(core_module,
                                                  "NVSDK_NGX_D3D12_Init_with_ProjectID");
     if (ngx_init_project == nullptr) {
@@ -529,21 +558,16 @@ struct Dlss5NgxRuntime {
         core_module, "NVSDK_NGX_D3D12_AllocateParameters");
     ngx_destroy_parameters = Resolve<NgxDestroyParametersFn>(
         core_module, "NVSDK_NGX_D3D12_DestroyParameters");
-    ngx_init_ext = Resolve<NgxInitExtFn>(snippet_module, "NVSDK_NGX_D3D12_Init_Ext");
-    ngx_shutdown = Resolve<NgxShutdownFn>(snippet_module, "NVSDK_NGX_D3D12_Shutdown1");
-    ngx_create_feature = Resolve<NgxCreateFeatureFn>(
-        snippet_module, "NVSDK_NGX_D3D12_CreateFeature");
-    ngx_evaluate_feature = Resolve<NgxEvaluateFeatureFn>(
-        snippet_module, "NVSDK_NGX_D3D12_EvaluateFeature");
-    ngx_release_feature = Resolve<NgxReleaseFeatureFn>(
-        snippet_module, "NVSDK_NGX_D3D12_ReleaseFeature");
+    sr_create_feature = Resolve<NgxCreateFeatureFn>(core_module, "NVSDK_NGX_D3D12_CreateFeature");
+    sr_evaluate_feature = Resolve<NgxEvaluateFeatureFn>(core_module,
+                                                        "NVSDK_NGX_D3D12_EvaluateFeature");
+    sr_release_feature = Resolve<NgxReleaseFeatureFn>(core_module,
+                                                      "NVSDK_NGX_D3D12_ReleaseFeature");
     ngx_get_capability_parameters = Resolve<NgxGetCapabilityParametersFn>(
         core_module, "NVSDK_NGX_D3D12_GetCapabilityParameters");
     if ((ngx_init_project == nullptr && ngx_init_project_legacy == nullptr) ||
-        ngx_shutdown_core == nullptr ||
-        ngx_allocate_parameters == nullptr || ngx_destroy_parameters == nullptr ||
-        ngx_init_ext == nullptr || ngx_shutdown == nullptr || ngx_create_feature == nullptr ||
-        ngx_evaluate_feature == nullptr || ngx_release_feature == nullptr)
+        ngx_shutdown_core == nullptr || ngx_allocate_parameters == nullptr ||
+        ngx_destroy_parameters == nullptr)
     {
       set_error("DLSS5 NGX exports are incomplete");
       return false;
@@ -551,10 +575,15 @@ struct Dlss5NgxRuntime {
 
     const fs::path data_directory = NgxDataDirectory();
     fs::create_directories(data_directory);
-    const wchar_t *feature_paths[] = {runtime_directory.c_str()};
+    const wchar_t *sr_directory = _wgetenv(L"DLSS_SR_RUNTIME_DIR");
+    wchar_t executable_path[32768] = {};
+    GetModuleFileNameW(nullptr, executable_path, ARRAYSIZE(executable_path));
+    const fs::path installed_directory = fs::path(executable_path).parent_path() / "dlss5";
+    const wchar_t *feature_paths[] = {
+        runtime_directory.c_str(), installed_directory.c_str(), sr_directory};
     NgxFeatureCommonInfo common_info = {};
     common_info.path_list.path = feature_paths;
-    common_info.path_list.length = 1;
+    common_info.path_list.length = sr_directory && *sr_directory ? 3 : 2;
     common_info.logging.callback = &NgxLogCallback;
     common_info.logging.minimum = 2;
     common_info.logging.disable_other_sinks = false;
@@ -584,7 +613,48 @@ struct Dlss5NgxRuntime {
     }
     core_initialized = true;
 
-    result = ngx_init_ext(kApplicationId, data_directory.c_str(), device.Get(), kSdkVersion, nullptr);
+    return true;
+  }
+
+  bool initialize_nr()
+  {
+    std::lock_guard lock(mutex);
+    if (snippet_initialized) {
+      return true;
+    }
+    const fs::path snippet_path = runtime_directory / "nvngx_dlssnr.dll";
+    if (!snippet_module) {
+      snippet_module = LoadLibraryExW(
+          snippet_path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+    }
+    if (!snippet_module) {
+      set_error("LoadLibraryExW nvngx_dlssnr.dll failed: " + std::to_string(GetLastError()));
+      return false;
+    }
+    if (!snippet_iat_slot &&
+        !HookSnippetGetModuleFileNameW(snippet_module, core_module, &snippet_iat_slot))
+    {
+      set_error("DLSSNR GetModuleFileNameW compatibility hook failed");
+      return false;
+    }
+    ngx_init_ext = Resolve<NgxInitExtFn>(snippet_module, "NVSDK_NGX_D3D12_Init_Ext");
+    ngx_shutdown = Resolve<NgxShutdownFn>(snippet_module, "NVSDK_NGX_D3D12_Shutdown1");
+    ngx_create_feature = Resolve<NgxCreateFeatureFn>(snippet_module,
+                                                     "NVSDK_NGX_D3D12_CreateFeature");
+    ngx_evaluate_feature = Resolve<NgxEvaluateFeatureFn>(snippet_module,
+                                                         "NVSDK_NGX_D3D12_EvaluateFeature");
+    ngx_release_feature = Resolve<NgxReleaseFeatureFn>(snippet_module,
+                                                       "NVSDK_NGX_D3D12_ReleaseFeature");
+    if (!ngx_init_ext || !ngx_shutdown || !ngx_create_feature || !ngx_evaluate_feature ||
+        !ngx_release_feature)
+    {
+      set_error("DLSSNR exports are incomplete");
+      return false;
+    }
+    const fs::path data_directory = NgxDataDirectory();
+
+    const NgxResult result = ngx_init_ext(
+        kApplicationId, data_directory.c_str(), device.Get(), kSdkVersion, nullptr);
     if (!NgxSucceeded(result)) {
       set_error("NVSDK_NGX_D3D12_Init_Ext failed: 0x" +
                 HResultString(static_cast<HRESULT>(result)));
@@ -596,12 +666,15 @@ struct Dlss5NgxRuntime {
   }
 };
 
+static std::mutex ngx_runtime_mutex;
+static std::shared_ptr<Dlss5NgxRuntime> ngx_runtime_cached;
+
 static std::shared_ptr<Dlss5NgxRuntime> acquire_ngx_runtime(std::string &error)
 {
-  static std::mutex mutex;
-  static std::shared_ptr<Dlss5NgxRuntime> cached;
-  std::lock_guard lock(mutex);
-  if (cached) { return cached; }
+  std::lock_guard lock(ngx_runtime_mutex);
+  if (ngx_runtime_cached) {
+    return ngx_runtime_cached;
+  }
   auto runtime = std::make_shared<Dlss5NgxRuntime>();
   try {
     if (!runtime->initialize_device() || !runtime->initialize_ngx()) {
@@ -613,11 +686,43 @@ static std::shared_ptr<Dlss5NgxRuntime> acquire_ngx_runtime(std::string &error)
     error = std::string("DLSS5 runtime/cache path error: ") + exception.what();
     return nullptr;
   }
-  cached = runtime;
+  ngx_runtime_cached = runtime;
   return runtime;
 }
 
 struct Dlss5D3D12Session::Impl {
+  bool super_resolution = false;
+  GPUContext *offline_context = nullptr;
+  bool force_history_reset = true;
+  /* One idle entry per feature per context, not an unbounded cache of scenes/sizes.
+   * Checked-out sessions remain exclusively owned by their EEVEE module. */
+  struct OfflineCache {
+    Impl *idle[2] = {};
+  };
+  static inline std::mutex offline_cache_mutex;
+  static inline std::map<GPUContext *, OfflineCache> offline_caches;
+
+  static void free_offline_cache(void *user_data)
+  {
+    auto *context = static_cast<GPUContext *>(user_data);
+    BLI_assert(context == GPU_context_active_get());
+    OfflineCache cache;
+    {
+      std::lock_guard lock(offline_cache_mutex);
+      const auto found = offline_caches.find(context);
+      if (found == offline_caches.end()) {
+        return; /* Already drained by Engine::free_static(), before GPU_exit(). */
+      }
+      cache = found->second;
+      offline_caches.erase(found);
+    }
+    for (Impl *session : cache.idle) {
+      delete session;
+    }
+  }
+  int sr_quality = 2;
+  int feature_sr_quality = -1;
+  explicit Impl(bool sr) : super_resolution(sr) {}
   struct SharedTexture {
     ComPtr<ID3D12Resource> d3d12;
     HANDLE shared_handle = nullptr;
@@ -702,6 +807,7 @@ struct Dlss5D3D12Session::Impl {
     if (!can_destroy()) {
       return;
     }
+    DlssLifecycleTimer timer("release_session", super_resolution);
     if (!wait_for_fence_value(completion_value, INFINITE)) {
       return;
     }
@@ -710,20 +816,23 @@ struct Dlss5D3D12Session::Impl {
      * freezes heavy scenes when the user just ticks DLSSNR. */
     const bool has_shared_textures = color.vulkan != nullptr || depth.vulkan != nullptr ||
                                      velocity.vulkan != nullptr || output.vulkan != nullptr;
-    if (has_shared_textures && GPU_context_active_get() != nullptr) {
+    const bool has_semaphores = d3d12_to_vulkan_semaphore || vulkan_to_d3d12_semaphore;
+    if (has_shared_textures && !has_semaphores && GPU_context_active_get() != nullptr) {
       GPU_finish();
     }
 
-    GPU_vulkan_external_semaphore_free(d3d12_to_vulkan_semaphore);
+    GPUVulkanExternalSemaphore *semaphores[] = {d3d12_to_vulkan_semaphore,
+                                               vulkan_to_d3d12_semaphore};
+    /* Includes the Vulkan finish/queue wait once for the entire shared bundle. */
+    GPU_vulkan_external_semaphores_free(semaphores, 2);
     d3d12_to_vulkan_semaphore = nullptr;
-    GPU_vulkan_external_semaphore_free(vulkan_to_d3d12_semaphore);
     vulkan_to_d3d12_semaphore = nullptr;
     external_sync = false;
     textures_released = false;
 
     if (feature != nullptr && runtime != nullptr) {
       std::lock_guard lock(runtime->mutex);
-      runtime->ngx_release_feature(feature);
+      (super_resolution ? runtime->sr_release_feature : runtime->ngx_release_feature)(feature);
       feature = nullptr;
     }
     if (parameters != nullptr && runtime != nullptr) {
@@ -799,6 +908,7 @@ struct Dlss5D3D12Session::Impl {
   bool wait_for_fence_value(const uint64_t value, const DWORD timeout_ms)
   {
     if (completion_fence == nullptr || value == 0) { return true; }
+    DlssLifecycleTimer timer("completion_wait", super_resolution);
     const ULONGLONG start = GetTickCount64();
     for (;;) {
       const uint64_t completed = completion_fence->GetCompletedValue();
@@ -823,6 +933,7 @@ struct Dlss5D3D12Session::Impl {
 
   bool initialize_external_sync()
   {
+    DlssLifecycleTimer timer("import_sync", super_resolution);
     if (inject_test_failure(L"sync_init")) {
       set_error("DLSS5 external sync initialization failed (test injection)");
       return false;
@@ -862,8 +973,13 @@ struct Dlss5D3D12Session::Impl {
 
   bool initialize_device()
   {
+    DlssLifecycleTimer timer("initialize_session", super_resolution);
     runtime = acquire_ngx_runtime(status);
     if (!runtime) { return false; }
+    if (!super_resolution && !runtime->initialize_nr()) {
+      set_error(runtime->status);
+      return false;
+    }
     device = runtime->device;
     HRESULT result;
     D3D12_COMMAND_QUEUE_DESC queue_desc = {};
@@ -968,9 +1084,55 @@ struct Dlss5D3D12Session::Impl {
   bool initialize_ngx()
   {
     std::lock_guard lock(runtime->mutex);
-    const NgxResult result = runtime->ngx_allocate_parameters(&parameters);
+    if (super_resolution &&
+        (!runtime->ngx_get_capability_parameters || !runtime->sr_create_feature ||
+         !runtime->sr_evaluate_feature || !runtime->sr_release_feature))
+    {
+      set_error("DLSS SR NGX exports unavailable");
+      return false;
+    }
+    const NgxResult result = super_resolution ?
+                                 runtime->ngx_get_capability_parameters(&parameters) :
+                                 runtime->ngx_allocate_parameters(&parameters);
     if (!NgxSucceeded(result) || parameters == nullptr) {
       set_error("NVSDK_NGX_D3D12_AllocateParameters failed");
+      return false;
+    }
+    return true;
+  }
+
+  bool sr_optimal_settings(int2 output_extent, int quality, int2 &input_extent)
+  {
+    if (!super_resolution || !warmup()) {
+      return false;
+    }
+    sr_quality = quality == 1 ? 2 : quality == 2 ? 1 : 0;
+    std::lock_guard lock(runtime->mutex);
+    int supported = 0;
+    GetI(parameters, "SuperSampling.Available", &supported);
+    void *callback = nullptr;
+    GetPointer(parameters, "DLSSOptimalSettingsCallback", &callback);
+    if (!supported || !callback) {
+      set_error("DLSS SR unavailable: runtime, GPU or driver unsupported");
+      return false;
+    }
+    SetUi(parameters, "Width", output_extent.x);
+    SetUi(parameters, "Height", output_extent.y);
+    SetI(parameters, "PerfQualityValue", sr_quality);
+    SetI(parameters, "RTXValue", 0);
+    using OptimalFn = NgxResult(__cdecl *)(NVSDK_NGX_Parameter *);
+    if (!NgxSucceeded(reinterpret_cast<OptimalFn>(callback)(parameters))) {
+      set_error("DLSS SR optimal settings query failed");
+      return false;
+    }
+    unsigned width = 0, height = 0;
+    GetUi(parameters, "OutWidth", &width);
+    GetUi(parameters, "OutHeight", &height);
+    input_extent = int2(width, height);
+    if (width == 0 || height == 0 || width > unsigned(output_extent.x) ||
+        height > unsigned(output_extent.y))
+    {
+      set_error("DLSS SR optimal settings returned invalid dimensions");
       return false;
     }
     return true;
@@ -1027,6 +1189,17 @@ struct Dlss5D3D12Session::Impl {
     SetUi(parameters, "DLSSNR.UICorrection", settings.ui_correction ? 1u : 0u);
     SetI(parameters, "CreationNodeMask", 1);
     SetI(parameters, "VisibilityNodeMask", 1);
+    if (super_resolution) {
+      SetUi(parameters, "Width", input_extent.x);
+      SetUi(parameters, "Height", input_extent.y);
+      SetUi(parameters, "OutWidth", output_extent.x);
+      SetUi(parameters, "OutHeight", output_extent.y);
+      SetI(parameters, "PerfQualityValue", sr_quality);
+      /* HDR, low-resolution unjittered motion, reverse Z, auto exposure. */
+      SetI(parameters, "DLSS.Feature.Create.Flags", 1 | 2 | (depth_is_reverse_z ? 8 : 0) | 64);
+      SetUi(parameters, "CreationNodeMask", 1);
+      SetUi(parameters, "VisibilityNodeMask", 1);
+    }
 
     /* NGX requires an open (Reset) command list to record CreateFeature into,
      * and the recorded commands must be closed, executed and waited on before
@@ -1060,7 +1233,8 @@ struct Dlss5D3D12Session::Impl {
     NgxResult ngx_result;
     {
       std::lock_guard lock(runtime->mutex);
-      ngx_result = runtime->ngx_create_feature(command_list, kFeatureId, parameters, &feature);
+      ngx_result = (super_resolution ? runtime->sr_create_feature : runtime->ngx_create_feature)(
+          command_list, super_resolution ? 1 : kFeatureId, parameters, &feature);
     }
     if (!NgxSucceeded(ngx_result) || feature == nullptr) {
       command_list->Close();
@@ -1090,6 +1264,7 @@ struct Dlss5D3D12Session::Impl {
                              int2 extent,
                              gpu::TextureFormat format)
   {
+    DlssLifecycleTimer timer("shared_texture", super_resolution);
     D3D12_RESOURCE_DESC description = {};
     description.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
     description.Width = extent.x;
@@ -1149,7 +1324,7 @@ struct Dlss5D3D12Session::Impl {
   {
     if (feature != nullptr && runtime != nullptr) {
       std::lock_guard lock(runtime->mutex);
-      runtime->ngx_release_feature(feature);
+      (super_resolution ? runtime->sr_release_feature : runtime->ngx_release_feature)(feature);
       feature = nullptr;
     }
     feature_settings_valid = false;
@@ -1162,10 +1337,15 @@ struct Dlss5D3D12Session::Impl {
                         const bool color_is_scene_linear,
                         const bool depth_is_reverse_z)
   {
-    if (!dlss5_extent_supported(input_extent) || guide_extent.x < 32 || guide_extent.y < 32 ||
-        input_extent != output_extent)
+    if (super_resolution ? (input_extent.x < 1 || input_extent.y < 1 ||
+                            output_extent.x < input_extent.x || output_extent.y < input_extent.y) :
+                           (!dlss5_extent_supported(input_extent) || guide_extent.x < 32 ||
+                            guide_extent.y < 32 || input_extent != output_extent))
     {
-      set_error("DLSSNR requires matching extents, edges >= 32px and at least one edge > 64px");
+      set_error(
+          super_resolution ?
+              "Native: invalid SR extent" :
+              "DLSSNR requires matching extents, edges >= 32px and at least one edge > 64px");
       return false;
     }
     if (execution_failed || !warmup()) {
@@ -1176,10 +1356,12 @@ struct Dlss5D3D12Session::Impl {
                            velocity.extent == guide_extent;
     const bool same_settings = initialized && feature_settings_valid &&
                                feature_color_is_scene_linear == color_is_scene_linear &&
-                               feature_depth_is_reverse_z == depth_is_reverse_z;
+                               feature_depth_is_reverse_z == depth_is_reverse_z &&
+                               (!super_resolution || feature_sr_quality == sr_quality);
     if (same_size && same_settings) {
       return true;
     }
+    DlssLifecycleTimer timer("ensure_resources", super_resolution);
     if (GPU_backend_get_type() != GPU_BACKEND_VULKAN) {
       set_error("realtime DLSSNR requires the Vulkan GPU backend");
       return false;
@@ -1211,6 +1393,7 @@ struct Dlss5D3D12Session::Impl {
       }
     }
 
+    DlssLifecycleTimer feature_timer("create_feature", super_resolution);
     if (!create_feature(input_extent,
                         output_extent,
                         guide_extent,
@@ -1228,6 +1411,7 @@ struct Dlss5D3D12Session::Impl {
     feature_settings_valid = true;
     feature_color_is_scene_linear = color_is_scene_linear;
     feature_depth_is_reverse_z = depth_is_reverse_z;
+    feature_sr_quality = sr_quality;
     status = "ready (external sync)";
     return true;
   }
@@ -1267,7 +1451,7 @@ struct Dlss5D3D12Session::Impl {
     SetUi(parameters, "DLSSNR.Width", frame.input_extent.x);
     SetUi(parameters, "DLSSNR.Height", frame.input_extent.y);
     SetUi(parameters, "DLSSNR.DepthInverted", frame.depth_is_reverse_z ? 1u : 0u);
-    SetUi(parameters, "DLSSNR.Reset", frame.reset_history ? 1u : 0u);
+    SetUi(parameters, "DLSSNR.Reset", (frame.reset_history || force_history_reset) ? 1u : 0u);
     SetRect(parameters, "DLSSNR.Color", frame.input_extent.x, frame.input_extent.y);
     SetRect(parameters, "DLSSNR.MVec", frame.guide_extent.x, frame.guide_extent.y);
     SetRect(parameters, "DLSSNR.Depth", frame.guide_extent.x, frame.guide_extent.y);
@@ -1282,6 +1466,21 @@ struct Dlss5D3D12Session::Impl {
     SetF(parameters, "DLSSNR.SkinStructureStrength", frame.settings.skin_structure_strength);
     SetUi(parameters, "DLSSNR.UseAutoMask", frame.settings.use_auto_mask ? 1u : 0u);
     SetI(parameters, "DLSSNR.Style", std::max(0, std::min(2, frame.settings.style)));
+    if (super_resolution) {
+      SetResource(parameters, "Color", color.d3d12.Get());
+      SetResource(parameters, "Output", output.d3d12.Get());
+      SetResource(parameters, "Depth", depth.d3d12.Get());
+      SetResource(parameters, "MotionVectors", velocity.d3d12.Get());
+      SetF(parameters, "Jitter.Offset.X", frame.jitter.x);
+      SetF(parameters, "Jitter.Offset.Y", frame.jitter.y);
+      SetI(parameters, "Reset", (frame.reset_history || force_history_reset) ? 1 : 0);
+      SetF(parameters, "MV.Scale.X", 1.0f);
+      SetF(parameters, "MV.Scale.Y", 1.0f);
+      SetUi(parameters, "DLSS.Render.Subrect.Dimensions.Width", frame.input_extent.x);
+      SetUi(parameters, "DLSS.Render.Subrect.Dimensions.Height", frame.input_extent.y);
+      SetF(parameters, "DLSS.Pre.Exposure", 1.0f);
+      SetF(parameters, "DLSS.Exposure.Scale", frame.exposure_scale);
+    }
     SetUi(parameters, "DLSSNR.UICorrection", frame.settings.ui_correction ? 1u : 0u);
     if (!parameters_reported) {
       CLOG_INFO(&LOG,
@@ -1305,8 +1504,10 @@ struct Dlss5D3D12Session::Impl {
         completion_fence != nullptr &&
         completion_fence->GetCompletedValue() < slot_completion)
     {
-      set_error("DLSSNR GPU busy");
-      return false;
+      if (!super_resolution || !wait_for_fence_value(slot_completion, 8000)) {
+        set_error("DLSS GPU busy");
+        return false;
+      }
     }
 
     read_timestamp(command_list_index);
@@ -1354,7 +1555,9 @@ struct Dlss5D3D12Session::Impl {
     NgxResult evaluate_result;
     {
       std::lock_guard lock(runtime->mutex);
-      evaluate_result = runtime->ngx_evaluate_feature(command_list, feature, parameters, nullptr);
+      evaluate_result = (super_resolution ? runtime->sr_evaluate_feature :
+                                            runtime->ngx_evaluate_feature)(
+          command_list, feature, parameters, nullptr);
     }
     if (!NgxSucceeded(evaluate_result)) {
       command_list->Close();
@@ -1411,6 +1614,7 @@ struct Dlss5D3D12Session::Impl {
       return false;
     }
     d3d12_to_vulkan_value = next_value;
+    force_history_reset = false;
     return true;
   }
 
@@ -1461,7 +1665,39 @@ struct Dlss5D3D12Session::Impl {
   }
 };
 
-Dlss5D3D12Session::Dlss5D3D12Session() : impl_(new Impl()) {}
+void Dlss5D3D12Session::free_runtime()
+{
+  /* Called after render jobs have stopped. Drain the Vulkan-only offline cache
+   * while its contexts and NGX's logging/allocator dependencies are still alive.
+   * Merely dropping ngx_runtime_cached would leave the last reference until
+   * GPU_context_discard(), which runs after GPU_exit()/Python shutdown. */
+  std::vector<GPUContext *> contexts;
+  {
+    std::lock_guard lock(Impl::offline_cache_mutex);
+    for (const auto &entry : Impl::offline_caches) {
+      contexts.push_back(entry.first);
+    }
+  }
+  GPUContext *previous = GPU_context_active_get();
+  for (GPUContext *context : contexts) {
+    if (GPU_context_active_get() != context) {
+      GPU_context_active_set(context);
+    }
+    Impl::free_offline_cache(context);
+  }
+  if (GPU_context_active_get() != previous) {
+    GPU_context_active_set(previous);
+  }
+  std::lock_guard lock(ngx_runtime_mutex);
+  ngx_runtime_cached.reset();
+}
+
+Dlss5D3D12Session::Dlss5D3D12Session(bool super_resolution) : impl_(new Impl(super_resolution)) {}
+
+bool Dlss5D3D12Session::sr_optimal_settings(int2 output, int quality, int2 &input)
+{
+  return impl_->sr_optimal_settings(output, quality, input);
+}
 
 Dlss5D3D12Session::~Dlss5D3D12Session()
 {
@@ -1469,7 +1705,55 @@ Dlss5D3D12Session::~Dlss5D3D12Session()
     CLOG_ERROR(&LOG, "Retaining untracked DLSS5 GPU resources until process exit");
     return;
   }
+  if (impl_->offline_context && impl_->offline_context == GPU_context_active_get() &&
+      available() && !impl_->textures_released)
+  {
+    std::lock_guard lock(Impl::offline_cache_mutex);
+    auto found = Impl::offline_caches.find(impl_->offline_context);
+    if (found != Impl::offline_caches.end()) {
+      Impl *&idle = found->second.idle[impl_->super_resolution];
+      if (!idle) {
+        CLOG_INFO(&LOG, "DLSS_CACHE return feature=%s creates=%llu evaluates=%llu",
+                  impl_->super_resolution ? "SR" : "NR",
+                  static_cast<unsigned long long>(impl_->feature_create_count),
+                  static_cast<unsigned long long>(impl_->evaluate_count));
+        idle = impl_;
+        return;
+      }
+    }
+  }
   delete impl_;
+}
+
+void Dlss5D3D12Session::reuse_for_offline_render()
+{
+  /* The opt-out is for same-binary regression/performance comparisons, not a saved setting. */
+  if (impl_->offline_context || GPU_context_active_get() == nullptr ||
+      GPU_backend_get_type() != GPU_BACKEND_VULKAN ||
+      _wgetenv(L"BLENDER_DLSS_DISABLE_SESSION_CACHE") != nullptr)
+  {
+    return;
+  }
+  BLI_assert(!impl_->initialized);
+  GPUContext *context = GPU_context_active_get();
+  Impl *cached = nullptr;
+  {
+    std::lock_guard lock(Impl::offline_cache_mutex);
+    auto [entry, inserted] = Impl::offline_caches.try_emplace(context);
+    if (inserted) {
+      GPU_context_free_callback_add(Impl::free_offline_cache, context);
+    }
+    std::swap(cached, entry->second.idle[impl_->super_resolution]);
+  }
+  if (cached) {
+    delete impl_;
+    impl_ = cached;
+  }
+  impl_->offline_context = context;
+  impl_->force_history_reset = true;
+  impl_->parameters_reported = false;
+  CLOG_INFO(&LOG, "DLSS_CACHE acquire feature=%s hit=%d",
+            impl_->super_resolution ? "SR" : "NR", cached != nullptr);
 }
 
 void Dlss5D3D12Session::retry_initialization()
@@ -1607,7 +1891,12 @@ namespace blender::eevee {
 
 struct Dlss5D3D12Session::Impl {};
 
-Dlss5D3D12Session::Dlss5D3D12Session() : impl_(new Impl()) {}
+Dlss5D3D12Session::Dlss5D3D12Session(bool) : impl_(new Impl()) {}
+bool Dlss5D3D12Session::sr_optimal_settings(int2, int, int2 &)
+{
+  return false;
+}
+void Dlss5D3D12Session::free_runtime() {}
 Dlss5D3D12Session::~Dlss5D3D12Session()
 {
   delete impl_;
@@ -1622,6 +1911,7 @@ bool Dlss5D3D12Session::ensure_resources(int2,
   return false;
 }
 void Dlss5D3D12Session::reset() {}
+void Dlss5D3D12Session::reuse_for_offline_render() {}
 void Dlss5D3D12Session::retry_initialization() {}
 bool Dlss5D3D12Session::warmup()
 {
