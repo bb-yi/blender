@@ -60,6 +60,7 @@ ADDITIONAL_INFO(eevee_global_ubo)
 ADDITIONAL_INFO(eevee_utility_texture)
 ADDITIONAL_INFO(eevee_light_data)
 ADDITIONAL_INFO(eevee_shadow_data)
+ADDITIONAL_INFO(eevee_shadow_caster_data)
 FRAGMENT_SOURCE("eevee_surf_bake_color_frag.glsl")
 GPU_SHADER_CREATE_END()
 

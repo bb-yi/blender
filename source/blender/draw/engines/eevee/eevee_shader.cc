@@ -1898,6 +1898,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
       if (use_npr_foreach_shadow) {
         /* The legacy material create-info above binds the same resources used by the generated BSL
          * table. Enable its bridge for the NPR shadow output without changing Shader Info paths. */
+        add_create_info_and_reserve(info, slots, "eevee_shadow_caster_data");
         info.define("CREATE_INFO_eevee_ShadowRenderData");
         info.define("CREATE_INFO_UtilityTexture");
       }
@@ -1907,7 +1908,7 @@ void ShaderModule::material_create_info_amend(GPUMaterial *gpumat, GPUCodegenOut
    * Principled NPR Cast Only. It must not require GPU_MATFLAG_SHADER_INFO. */
   if (use_shader_info_shadow_classification) {
     info.define("SHADOW_CASTER_CLASSIFY");
-    if (!has_bsl_light_eval_resources) {
+    if (!has_bsl_light_eval_resources && !use_npr_foreach_shadow) {
       add_create_info_and_reserve(info, slots, "eevee_shadow_caster_data");
     }
   }
